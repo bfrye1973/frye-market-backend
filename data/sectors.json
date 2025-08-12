@@ -1,0 +1,26 @@
+{
+  "Technology": [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AVGO",
+    "META",
+    "GOOGL",
+    "CRM",
+    "ADBE"
+  ],
+  "Healthcare": [
+    "UNH",
+    "LLY",
+    "JNJ",
+    "PFE",
+    "ABBV"
+  ],
+  "Financials": [
+    "JPM",
+    "BAC",
+    "WFC",
+    "GS",
+    "MS"
+  ]
+}
