@@ -1,90 +1,40 @@
-// server.js — production-ready Express server with strict CORS + health route
-
+// server.js (backend entry)
 const express = require('express');
 const cors = require('cors');
 
 const app = express();
 
-// --------------------
-// Port
-// --------------------
-const PORT = process.env.PORT || 5055;
-
-// --------------------
-// Allowed frontends (CORS allowlist)
-//   - Keep ONLY the domains that should be allowed to call your backend.
-//   - localhost is for your local dev frontend.
-//   - The Render URL is your live frontend.
-// --------------------
+// Exact frontend origins you use
 const ALLOWED_ORIGINS = [
-  'http://localhost:3001',
-  'https://frye-dashboard.onrender.com',
+  'http://localhost:5173',
+  'https://frye-market-frontend.onrender.com'
 ];
 
-// --------------------
-// CORS configuration
-// --------------------
-const corsOptions = {
-  origin(origin, cb) {
-    // Allow server-to-server/curl/health checks (no Origin header).
-    if (!origin) return cb(null, true);
-
-    // Allow only our frontends.
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-
-    // Everything else is blocked.
+// CORS before routes
+app.use(cors({
+  origin: (origin, cb) => {
+    // allow tools/no-origin (curl/health checks) and allowed web origins
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
     return cb(new Error(`Not allowed by CORS: ${origin}`));
   },
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204,
-};
+  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
+  credentials: true,
+}));
 
-// Apply CORS and handle preflight
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
-
-// --------------------
-// Body parsing
-// --------------------
 app.use(express.json());
 
-// --------------------
-// Health check
-// --------------------
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true });
+// Canary endpoint (must never fail)
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({ ok: true });
 });
 
-// --------------------
-// (Add your API routes here)
-// Example:
-// app.get('/api/example', (req, res) => {
-//   res.json({ message: 'It works!' });
-// });
+// …your other routes go here…
 
-// --------------------
-// 404 for unknown /api/* routes
-// --------------------
-app.all('/api/*', (req, res) => {
-  res.status(404).json({ error: 'Not found' });
+// Error handler LAST
+app.use((err, _req, res, _next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Server error' });
 });
 
-// --------------------
-// Basic error handler (keeps responses JSON)
-// --------------------
-app.use((err, req, res, next) => {
-  console.error(err && err.stack ? err.stack : err);
-  const status = err.status || 500;
-  res.status(status).json({
-    error: err.message || 'Internal Server Error',
-  });
-});
-
-// --------------------
-// Start server
-// --------------------
-app.listen(PORT, () => {
-  console.log(`Market backend up on http://localhost:${PORT}`);
-});
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => console.log(`API listening on ${PORT}`));
