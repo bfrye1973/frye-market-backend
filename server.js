@@ -18,13 +18,12 @@ const ALLOW_LIST = [
 
 const corsOptions = {
   origin(origin, callback) {
-    // allow SSR, curl, health checks with no Origin
     if (!origin) return callback(null, true);
     if (ALLOW_LIST.includes(origin)) return callback(null, true);
     return callback(new Error(`Not allowed by CORS: ${origin}`));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
@@ -34,30 +33,39 @@ app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(morgan('tiny'));
 
-// ---------- Routes (concrete first) ----------
+// ---------- Base API Routes ----------
 app.get('/api/health', (req, res) => {
   res.status(200).json({ ok: true });
 });
 
-// Accept any method for ping so it can't 404 due to verb mismatch
-app.all('/api/ping', (req, res) => {
-  res.status(200).json({ ok: true, ping: 'pong' });
+app.get('/api/ping', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    ping: 'pong',
+    ts: Date.now()
+  });
 });
 
 // ---------- v1 API (stable namespace) ----------
-const v1 = require('express').Router();
+const v1 = express.Router();
 
-function ok(res, data) { return res.status(200).json({ ok: true, data }); }
+function ok(res, data) {
+  return res.status(200).json({ ok: true, data });
+}
+
 function bad(res, status = 400, msg = 'Bad request') {
   return res.status(status).json({ ok: false, error: msg });
 }
 
 v1.get('/health', (req, res) => ok(res, { uptime: process.uptime(), ts: Date.now() }));
-v1.get('/ping',   (req, res) => ok(res, { ping: 'pong', ts: Date.now() }));
-v1.get('/time',   (req, res) => ok(res, { now: new Date().toISOString() }));
+
+v1.get('/ping', (req, res) => ok(res, { ping: 'pong', ts: Date.now() }));
+
+v1.get('/time', (req, res) => ok(res, { now: new Date().toISOString() }));
+
 v1.get('/config', (req, res) => ok(res, {
   env: process.env.NODE_ENV || 'production',
-  allowedOrigins: (process.env.ALLOWED_ORIGIN || '').split(',').filter(Boolean),
+  allowedOrigins: ALLOW_LIST
 }));
 
 v1.get('/quotes', (req, res) => {
@@ -74,12 +82,12 @@ v1.get('/signal', (req, res) => {
 
 app.use('/api/v1', v1);
 
-// 404 for unknown API routes — keep AFTER routes above
+// ---------- 404 Handler for /api ----------
 app.use('/api', (req, res) => {
   res.status(404).json({ ok: false, error: 'Not found' });
 });
 
-// Error handler
+// ---------- Global Error Handler ----------
 app.use((err, req, res, next) => {
   const status = err.status || 500;
   res.status(status).json({ ok: false, error: err.message || 'Server error' });
