@@ -1,6 +1,4 @@
 // server.js — Frye Market Backend
-// Express REST + WebSocket fan-out (Polygon proxy with safe fallbacks)
-
 const express = require("express");
 const compression = require("compression");
 const helmet = require("helmet");
@@ -16,7 +14,7 @@ const wss = new WebSocketServer({ server });
 // ---------- Config ----------
 const PORT = process.env.PORT || 5055;
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY || "";
-const TIMEFRAME_SEC = Number(process.env.TIMEFRAME_SEC || 60); // WS bar cadence
+const TIMEFRAME_SEC = Number(process.env.TIMEFRAME_SEC || 60);
 const LOOKBACK_DAYS = Number(process.env.LOOKBACK_DAYS || 7);
 const DEFAULT_TICKER = process.env.DEFAULT_TICKER || "AAPL";
 const CORS_ORIGINS = (process.env.CORS_ORIGINS ||
@@ -51,8 +49,7 @@ function sanitizeTf(tf) {
 function synthCandles(fromISO, toISO, tf = "minute", base = 100) {
   const start = toISODate(fromISO);
   const end = toISODate(toISO);
-  const step =
-    tf === "day" ? 86400 : tf === "hour" ? 3600 : 60; // seconds per bar
+  const step = tf === "day" ? 86400 : tf === "hour" ? 3600 : 60;
   let t = Math.floor(start.getTime() / 1000);
   const tEnd = Math.floor(end.getTime() / 1000);
   const out = [];
@@ -61,7 +58,7 @@ function synthCandles(fromISO, toISO, tf = "minute", base = 100) {
     const drift = (Math.sin(t / 1800) + Math.cos(t / 900)) * 0.25;
     const noise = (Math.random() - 0.5) * 0.6;
     const o = px;
-    px = Math.max(1, px + drift + noise);
+    px = Math.max(1, o + drift + noise);
     const c = px;
     const h = Math.max(o, c) + Math.random() * 0.6;
     const l = Math.min(o, c) - Math.random() * 0.6;
@@ -73,74 +70,63 @@ function synthCandles(fromISO, toISO, tf = "minute", base = 100) {
 }
 async function polygonAggHistory(ticker, tf, from, to) {
   if (!POLYGON_API_KEY) return null;
-  const timespan = sanitizeTf(tf); // minute | hour | day
+  const timespan = sanitizeTf(tf);
   const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(
     ticker
   )}/range/1/${timespan}/${from}/${to}?adjusted=true&sort=asc&limit=50000&apiKey=${POLYGON_API_KEY}`;
-
   const r = await fetch(url);
   if (!r.ok) return null;
   const j = await r.json();
   if (!j || !j.results || !Array.isArray(j.results)) return null;
-
   return j.results.map(b => ({
-    time: Math.round((b.t || 0) / 1000), // seconds
-    open: b.o,
-    high: b.h,
-    low: b.l,
-    close: b.c,
-    volume: b.v,
+    time: Math.round((b.t || 0) / 1000),
+    open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v,
   }));
 }
 function broadcast(obj) {
   const msg = JSON.stringify(obj);
   for (const client of wss.clients) {
-    if (client.readyState === 1) {
-      try { client.send(msg); } catch {}
-    }
+    if (client.readyState === 1) { try { client.send(msg); } catch {} }
   }
 }
 
-// ---------- REST ----------
-app.get("/api/healthz", (req, res) => {
-  res.json({ ok: true, ts: sec(), path: "/api/healthz" });
+// ---------- REST (health first, for Render) ----------
+app.get("/health", (req, res) => {              // <- Render checks this
+  res.json({ ok: true, ts: sec(), path: "/health" });
 });
-// optional alias some frontends use
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, ts: sec(), path: "/api/health" });
+});
+app.get("/api/healthz", (req, res) => {
+  res.json({ ok: true, ts: sec(), path: "/api/healthz" });
 });
 app.get("/api/ping", (req, res) => {
   res.json({ ok: true, message: "pong", ts: sec(), path: "/api/ping" });
 });
 
-// Returns sector metrics (mock for now so UI lights up)
+// Metrics (mock)
 app.get("/api/market-metrics", async (req, res) => {
-  const payload = {
+  res.json({
     timestamp: sec(),
     sectors: [
-      { sector: "Tech", newHighs: 12, newLows: 3, adrAvg: 1.82 },
-      { sector: "Energy", newHighs: 4, newLows: 6, adrAvg: 1.24 },
-      { sector: "Financials", newHighs: 7, newLows: 2, adrAvg: 1.05 },
-      { sector: "Healthcare", newHighs: 5, newLows: 5, adrAvg: 0.98 },
+      { sector: "Tech",        newHighs: 12, newLows: 3, adrAvg: 1.82 },
+      { sector: "Energy",      newHighs: 4,  newLows: 6, adrAvg: 1.24 },
+      { sector: "Financials",  newHighs: 7,  newLows: 2, adrAvg: 1.05 },
+      { sector: "Healthcare",  newHighs: 5,  newLows: 5, adrAvg: 0.98 },
     ],
-  };
-  res.json(payload);
+  });
 });
 
-// Returns OHLCV history (Polygon if available; else synthetic)
+// History (Polygon with fallback)
 app.get("/api/history", async (req, res) => {
   try {
     const ticker = (req.query.ticker || DEFAULT_TICKER).toUpperCase();
-    const tf = sanitizeTf(String(req.query.tf || "minute"));
-    const from = String(req.query.from || new Date(Date.now() - LOOKBACK_DAYS * 864e5).toISOString().slice(0, 10));
-    const to = String(req.query.to || new Date().toISOString().slice(0, 10));
+    const tf     = sanitizeTf(String(req.query.tf || "minute"));
+    const from   = String(req.query.from || new Date(Date.now() - LOOKBACK_DAYS * 864e5).toISOString().slice(0,10));
+    const to     = String(req.query.to   || new Date().toISOString().slice(0,10));
 
     let candles = null;
-    try {
-      candles = await polygonAggHistory(ticker, tf, from, to);
-    } catch (e) {
-      console.error("polygonAggHistory error:", e);
-    }
+    try { candles = await polygonAggHistory(ticker, tf, from, to); } catch (e) { console.error("polygonAggHistory error:", e); }
     if (!candles || candles.length === 0) {
       candles = synthCandles(from, to, tf, 100 + Math.random() * 50);
     }
@@ -153,7 +139,6 @@ app.get("/api/history", async (req, res) => {
 
 // ---------- WebSocket ----------
 wss.on("connection", (ws) => {
-  // Send an immediate metrics snapshot
   ws.send(JSON.stringify({
     type: "metrics",
     payload: {
@@ -167,7 +152,6 @@ wss.on("connection", (ws) => {
     },
   }));
 
-  // Start a simple synthetic bar stream for DEFAULT_TICKER
   let lastTime = sec() - TIMEFRAME_SEC;
   let price = 100 + Math.random() * 50;
   const id = setInterval(() => {
@@ -178,19 +162,7 @@ wss.on("connection", (ws) => {
     const h = Math.max(o, c) + Math.random() * 0.4;
     const l = Math.min(o, c) - Math.random() * 0.4;
     const v = Math.floor(80_000 + Math.random() * 120_000);
-
-    const bar = {
-      type: "bar",
-      payload: {
-        ticker: DEFAULT_TICKER,
-        time: lastTime,
-        open: +o.toFixed(2),
-        high: +h.toFixed(2),
-        low: +l.toFixed(2),
-        close: +c.toFixed(2),
-        volume: v,
-      },
-    };
+    const bar = { type: "bar", payload: { ticker: DEFAULT_TICKER, time: lastTime, open:+o.toFixed(2), high:+h.toFixed(2), low:+l.toFixed(2), close:+c.toFixed(2), volume:v } };
     try { ws.send(JSON.stringify(bar)); } catch {}
   }, TIMEFRAME_SEC * 1000);
 
