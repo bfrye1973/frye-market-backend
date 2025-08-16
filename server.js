@@ -1,176 +1,261 @@
-// server.js — Frye Market Backend
+// server.js — single-file Express backend (CommonJS)
+// Env vars used:
+//   - CORS_ORIGIN                (comma-separated origins; default https://frye-dashboard.onrender.com)
+//   - POLYGON_API_KEY            (for live quotes; if missing we serve a stub)
+//   - MARKET_MONITOR_CSV_URL     (Google Sheet “Publish to web” CSV link)
+
 const express = require("express");
-const compression = require("compression");
-const helmet = require("helmet");
 const cors = require("cors");
-const http = require("http");
-const { WebSocketServer } = require("ws");
-const { fetch } = require("undici");
+const morgan = require("morgan");
+
+// Node 18+ has global fetch. If you use an older Node locally, upgrade Node
+// or polyfill with:  const fetch = (...args) => import('node-fetch').then(m => m.default(...args))
+
+const PORT = process.env.PORT || 3000;
+
+// CORS allow list (comma-separated). Example:
+// CORS_ORIGIN="https://frye-dashboard.onrender.com,http://localhost:5173"
+const DEFAULT_ORIGINS = "https://frye-dashboard.onrender.com";
+const ALLOW_LIST = String(process.env.CORS_ORIGIN || DEFAULT_ORIGINS)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 const app = express();
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
-
-// ---------- Config ----------
-const PORT = process.env.PORT || 5055;
-const POLYGON_API_KEY = process.env.POLYGON_API_KEY || "";
-const TIMEFRAME_SEC = Number(process.env.TIMEFRAME_SEC || 60);
-const LOOKBACK_DAYS = Number(process.env.LOOKBACK_DAYS || 7);
-const DEFAULT_TICKER = process.env.DEFAULT_TICKER || "AAPL";
-const CORS_ORIGINS = (process.env.CORS_ORIGINS ||
-  "https://frye-dashboard.onrender.com,http://localhost:3001,http://localhost:5173")
-  .split(",")
-  .map(s => s.trim());
+app.set("trust proxy", 1);
 
 // ---------- Middleware ----------
-app.use(helmet());
-app.use(compression());
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: false }));
+app.use(morgan("combined"));
+
 app.use(
   cors({
     origin(origin, cb) {
-      if (!origin) return cb(null, true);
-      return cb(null, CORS_ORIGINS.includes(origin));
+      // allow server-to-server (no Origin) and explicit origins
+      if (!origin || ALLOW_LIST.includes(origin)) return cb(null, true);
+      return cb(new Error("Not allowed by CORS"));
     },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: false,
   })
 );
+app.options("*", cors()); // Preflight
 
-// ---------- Helpers ----------
-const sec = () => Math.floor(Date.now() / 1000);
-function toISODate(d) {
-  const dt = new Date(d);
-  if (Number.isNaN(dt.getTime())) return new Date();
-  return dt;
-}
-function sanitizeTf(tf) {
-  if (tf === "hour" || tf === "day") return tf;
-  return "minute";
-}
-function synthCandles(fromISO, toISO, tf = "minute", base = 100) {
-  const start = toISODate(fromISO);
-  const end = toISODate(toISO);
-  const step = tf === "day" ? 86400 : tf === "hour" ? 3600 : 60;
-  let t = Math.floor(start.getTime() / 1000);
-  const tEnd = Math.floor(end.getTime() / 1000);
-  const out = [];
-  let px = base;
-  while (t <= tEnd) {
-    const drift = (Math.sin(t / 1800) + Math.cos(t / 900)) * 0.25;
-    const noise = (Math.random() - 0.5) * 0.6;
-    const o = px;
-    px = Math.max(1, o + drift + noise);
-    const c = px;
-    const h = Math.max(o, c) + Math.random() * 0.6;
-    const l = Math.min(o, c) - Math.random() * 0.6;
-    const v = Math.floor(100000 + Math.random() * 200000);
-    out.push({ time: t, open: +o.toFixed(2), high: +h.toFixed(2), low: +l.toFixed(2), close: +c.toFixed(2), volume: v });
-    t += step;
+// ---------- Health ----------
+app.get("/health", (_req, res) => {
+  res.status(200).json({ ok: true, service: "backend", time: new Date().toISOString() });
+});
+app.get("/api/healthz", (_req, res) => {
+  res.status(200).json({ ok: true, service: "backend", alias: "/api/healthz", time: new Date().toISOString() });
+});
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ ok: true, service: "backend", alias: "/api/health", time: new Date().toISOString() });
+});
+
+// ---------- Ping / Echo ----------
+app.get("/api/ping", (_req, res) => res.json({ ok: true, message: "pong", ts: Date.now(), path: "/api/ping" }));
+app.get("/api/v1/ping", (_req, res) => res.json({ ok: true, message: "pong", ts: Date.now(), path: "/api/v1/ping" }));
+app.post("/api/v1/echo", (req, res) => res.json({ ok: true, received: req.body ?? null, ts: Date.now() }));
+
+// ---------- Quotes (Polygon live with change/pct; stub otherwise) ----------
+app.get("/api/v1/quotes", async (req, res) => {
+  const symbol = String(req.query.symbol || "SPY").toUpperCase();
+  const key = process.env.POLYGON_API_KEY;
+
+  // Stub: consistent shape with change/pct
+  if (!key) {
+    const prevClose = 443.21;
+    const price = 444.44;
+    const change = +(price - prevClose).toFixed(2);
+    const pct = +((change / prevClose) * 100).toFixed(2);
+    return res.json({
+      ok: true,
+      symbol,
+      price,
+      prevClose,
+      change,
+      pct,
+      time: new Date().toISOString(),
+      source: "stub",
+      note: "Set POLYGON_API_KEY to use live data",
+    });
   }
-  return out;
-}
-async function polygonAggHistory(ticker, tf, from, to) {
-  if (!POLYGON_API_KEY) return null;
-  const timespan = sanitizeTf(tf);
-  const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(
-    ticker
-  )}/range/1/${timespan}/${from}/${to}?adjusted=true&sort=asc&limit=50000&apiKey=${POLYGON_API_KEY}`;
-  const r = await fetch(url);
-  if (!r.ok) return null;
-  const j = await r.json();
-  if (!j || !j.results || !Array.isArray(j.results)) return null;
-  return j.results.map(b => ({
-    time: Math.round((b.t || 0) / 1000),
-    open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v,
-  }));
-}
-function broadcast(obj) {
-  const msg = JSON.stringify(obj);
-  for (const client of wss.clients) {
-    if (client.readyState === 1) { try { client.send(msg); } catch {} }
-  }
-}
 
-// ---------- REST (health first, for Render) ----------
-app.get("/health", (req, res) => {              // <- Render checks this
-  res.json({ ok: true, ts: sec(), path: "/health" });
-});
-app.get("/api/health", (req, res) => {
-  res.json({ ok: true, ts: sec(), path: "/api/health" });
-});
-app.get("/api/healthz", (req, res) => {
-  res.json({ ok: true, ts: sec(), path: "/api/healthz" });
-});
-app.get("/api/ping", (req, res) => {
-  res.json({ ok: true, message: "pong", ts: sec(), path: "/api/ping" });
-});
-
-// Metrics (mock)
-app.get("/api/market-metrics", async (req, res) => {
-  res.json({
-    timestamp: sec(),
-    sectors: [
-      { sector: "Tech",        newHighs: 12, newLows: 3, adrAvg: 1.82 },
-      { sector: "Energy",      newHighs: 4,  newLows: 6, adrAvg: 1.24 },
-      { sector: "Financials",  newHighs: 7,  newLows: 2, adrAvg: 1.05 },
-      { sector: "Healthcare",  newHighs: 5,  newLows: 5, adrAvg: 0.98 },
-    ],
-  });
-});
-
-// History (Polygon with fallback)
-app.get("/api/history", async (req, res) => {
   try {
-    const ticker = (req.query.ticker || DEFAULT_TICKER).toUpperCase();
-    const tf     = sanitizeTf(String(req.query.tf || "minute"));
-    const from   = String(req.query.from || new Date(Date.now() - LOOKBACK_DAYS * 864e5).toISOString().slice(0,10));
-    const to     = String(req.query.to   || new Date().toISOString().slice(0,10));
+    // Fetch last trade and previous close in parallel
+    const encoded = encodeURIComponent(symbol);
+    const [lastResp, prevResp] = await Promise.all([
+      fetch(`https://api.polygon.io/v2/last/trade/${encoded}?apiKey=${key}`),
+      fetch(`https://api.polygon.io/v2/aggs/ticker/${encoded}/prev?adjusted=true&apiKey=${key}`),
+    ]);
 
-    let candles = null;
-    try { candles = await polygonAggHistory(ticker, tf, from, to); } catch (e) { console.error("polygonAggHistory error:", e); }
-    if (!candles || candles.length === 0) {
-      candles = synthCandles(from, to, tf, 100 + Math.random() * 50);
+    const lastJson = await lastResp.json();
+    const prevJson = await prevResp.json();
+
+    if (!lastResp.ok) {
+      return res
+        .status(lastResp.status)
+        .json({ ok: false, error: lastJson?.error || "Polygon error (last trade)", data: lastJson });
     }
-    res.json(candles);
-  } catch (e) {
-    console.error("GET /api/history error", e);
-    res.status(500).json({ ok: false, error: "Internal error", path: "/api/history" });
+
+    // Polygon last-trade: { results: { p: price, t: ns_timestamp, ... } }
+    const results = lastJson?.results || {};
+    const rawTs = results.t ?? Date.now(); // ns or ms
+    const tsMs = typeof rawTs === "number" && rawTs > 1e12 ? Math.round(rawTs / 1e6) : rawTs; // ns -> ms
+    const price = results.p ?? results.price ?? null;
+
+    // Polygon prev close: { results: [{ c: close, ... }] }
+    const prevClose =
+      Array.isArray(prevJson?.results) && prevJson.results[0]
+        ? prevJson.results[0].c ?? null
+        : null;
+
+    let change = null,
+      pct = null;
+    if (typeof price === "number" && typeof prevClose === "number" && prevClose) {
+      change = +(price - prevClose).toFixed(2);
+      pct = +((change / prevClose) * 100).toFixed(2);
+    }
+
+    return res.json({
+      ok: true,
+      symbol,
+      price,
+      prevClose,
+      change,
+      pct,
+      time: new Date(tsMs).toISOString(),
+      source: "polygon",
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
   }
 });
 
-// ---------- WebSocket ----------
-wss.on("connection", (ws) => {
-  ws.send(JSON.stringify({
-    type: "metrics",
-    payload: {
-      timestamp: sec(),
-      sectors: [
-        { sector: "Tech", newHighs: 12, newLows: 3, adrAvg: 1.82 },
-        { sector: "Energy", newHighs: 4, newLows: 6, adrAvg: 1.24 },
-        { sector: "Financials", newHighs: 7, newLows: 2, adrAvg: 1.05 },
-        { sector: "Healthcare", newHighs: 5, newLows: 5, adrAvg: 0.98 },
-      ],
-    },
-  }));
+// ---------- Market Monitor (Google Sheet CSV) ----------
+const MARKET_MONITOR_CSV_URL = process.env.MARKET_MONITOR_CSV_URL || "";
 
-  let lastTime = sec() - TIMEFRAME_SEC;
-  let price = 100 + Math.random() * 50;
-  const id = setInterval(() => {
-    lastTime += TIMEFRAME_SEC;
-    const o = price;
-    price = Math.max(1, o + (Math.random() - 0.5) * 0.8);
-    const c = price;
-    const h = Math.max(o, c) + Math.random() * 0.4;
-    const l = Math.min(o, c) - Math.random() * 0.4;
-    const v = Math.floor(80_000 + Math.random() * 120_000);
-    const bar = { type: "bar", payload: { ticker: DEFAULT_TICKER, time: lastTime, open:+o.toFixed(2), high:+h.toFixed(2), low:+l.toFixed(2), close:+c.toFixed(2), volume:v } };
-    try { ws.send(JSON.stringify(bar)); } catch {}
-  }, TIMEFRAME_SEC * 1000);
+// Order taken from your sheet header row (after Date, QQQ, SPY, MDY, IWM):
+const MM_GROUPS = [
+  "Small+Large Cap",
+  "Mid Cap",
+  "Small Cap",
+  "Tech",
+  "Consumer",
+  "Healthcare",
+  "Financials",
+  "Energy",
+  "Industrials",
+  "Materials",
+  "Defensive",
+  "Real Estate",
+  "Comms Svcs",
+  "Utilities",
+];
 
-  ws.on("close", () => { try { clearInterval(id); } catch {} });
+// 60s in-memory cache
+let _mmCache = { at: 0, rows: null };
+
+function parseCsvSimple(text) {
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  const rows = [];
+  const nowYear = new Date().getFullYear();
+
+  for (const line of lines) {
+    const cols = line.split(",").map((s) => s.trim());
+    const rawDate = cols[0];
+    if (!rawDate || rawDate.toLowerCase().includes("date")) continue;
+
+    let iso;
+    if (rawDate.includes("/")) {
+      // handle M/D (no year) → assume current year
+      const [m, d] = rawDate.split("/").map((v) => parseInt(v, 10));
+      if (!m || !d) continue;
+      const month = String(m).padStart(2, "0");
+      const day = String(d).padStart(2, "0");
+      iso = `${nowYear}-${month}-${day}`;
+    } else {
+      // already YYYY-MM-DD-ish
+      iso = rawDate.slice(0, 10);
+    }
+
+    const num = (v) => Number(String(v).replace(/[^0-9.\-]/g, "")) || 0;
+
+    const indices = {
+      QQQ: num(cols[1]),
+      SPY: num(cols[2]),
+      MDY: num(cols[3]),
+      IWM: num(cols[4]),
+    };
+
+    const groups = {};
+    let base = 5;
+    for (let i = 0; i < MM_GROUPS.length; i++) {
+      const name = MM_GROUPS[i];
+      const g = {
+        "10NH": num(cols[base + 0]),
+        "10NL": num(cols[base + 1]),
+        "3U": num(cols[base + 2]),
+        "3D": num(cols[base + 3]),
+      };
+      g.net = g["10NH"] - g["10NL"];
+      groups[name] = g;
+      base += 4;
+    }
+
+    rows.push({ date: iso, indices, groups });
+  }
+
+  return rows.filter((r) => r.date && r.indices);
+}
+
+app.get("/api/v1/market-monitor", async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(365, Number(req.query.limit || 30)));
+    const latest = String(req.query.latest || "false").toLowerCase() === "true";
+
+    if (!MARKET_MONITOR_CSV_URL) {
+      return res.status(200).json({ ok: true, source: "stub", rows: [] });
+    }
+
+    const now = Date.now();
+    if (_mmCache.rows && now - _mmCache.at < 60_000) {
+      const rows = _mmCache.rows.slice(-limit);
+      return res.json({
+        ok: true,
+        source: "cache",
+        rows: latest ? [rows[rows.length - 1]] : rows,
+      });
+    }
+
+    const r = await fetch(MARKET_MONITOR_CSV_URL);
+    if (!r.ok) return res.status(r.status).json({ ok: false, error: "CSV fetch failed" });
+    const csv = await r.text();
+    const rows = parseCsvSimple(csv);
+
+    _mmCache = { at: now, rows };
+    const out = rows.slice(-limit);
+    res.json({ ok: true, source: "sheet", rows: latest ? [out[out.length - 1]] : out });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// ---------- 404 ----------
+app.use((req, res) => {
+  res.status(404).json({ ok: false, error: "Not Found", path: req.path });
+});
+
+// ---------- Error handler ----------
+app.use((err, _req, res, _next) => {
+  const status = err?.status || 500;
+  res.status(status).json({ ok: false, error: err?.message || "Server error" });
 });
 
 // ---------- Start ----------
-server.listen(PORT, () => {
-  console.log(`Backend listening on :${PORT}`);
-  console.log("CORS allow-list:", CORS_ORIGINS);
+app.listen(PORT, () => {
+  console.log(`API listening on port ${PORT}`);
+  console.log("Allowed origins:", ALLOW_LIST.join(", ") || "(none)");
 });
