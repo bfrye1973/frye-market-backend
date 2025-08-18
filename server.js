@@ -134,6 +134,71 @@ app.get("/api/v1/quotes", async (req, res) => {
   }
 });
 
+// ---------- OHLC History (Polygon; stub if no key) ----------
+app.get("/api/v1/ohlc", async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || "SPY").toUpperCase();
+    const tf = String(req.query.timeframe || "1m").toLowerCase(); // e.g., 1m,5m,15m,1h,1d
+    const now = new Date();
+    const toISO = now.toISOString().slice(0, 10);
+
+    // map timeframe -> polygon range
+    const tfMap = {
+      "1m": { mult: 1, span: "minute", lookbackDays: 2 },
+      "5m": { mult: 5, span: "minute", lookbackDays: 7 },
+      "15m": { mult: 15, span: "minute", lookbackDays: 14 },
+      "30m": { mult: 30, span: "minute", lookbackDays: 30 },
+      "1h": { mult: 60, span: "minute", lookbackDays: 30 },
+      "1d": { mult: 1, span: "day", lookbackDays: 365 },
+    };
+    const cfg = tfMap[tf] || tfMap["1m"];
+
+    const from = new Date(now.getTime() - cfg.lookbackDays * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+
+    const key = process.env.POLYGON_API_KEY;
+
+    // Stub if no key
+    if (!key) {
+      const n = 200;
+      let price = 400;
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const o = price;
+        const h = o + Math.random() * 2;
+        const l = o - Math.random() * 2;
+        const c = l + Math.random() * (h - l);
+        const v = Math.floor(1000000 * (0.6 + Math.random()));
+        price = c;
+        const t = Date.now() - (n - i) * cfg.mult * 60 * 1000; // minute spacing
+        out.push({ t, o: +o.toFixed(2), h: +h.toFixed(2), l: +l.toFixed(2), c: +c.toFixed(2), v });
+      }
+      return res.json({ ok: true, symbol, timeframe: tf, source: "stub", bars: out });
+    }
+
+    // Polygon aggregates
+    const encoded = encodeURIComponent(symbol);
+    const url = `https://api.polygon.io/v2/aggs/ticker/${encoded}/range/${cfg.mult}/${cfg.span}/${from}/${toISO}?adjusted=true&sort=asc&limit=50000&apiKey=${key}`;
+    const r = await fetch(url);
+    const j = await r.json();
+    if (!r.ok) {
+      return res.status(r.status).json({ ok: false, error: j?.error || "Polygon error", data: j });
+    }
+
+    const bars = Array.isArray(j?.results)
+      ? j.results.map((b) => ({
+          t: typeof b.t === "number" && b.t > 1e12 ? Math.round(b.t / 1e6) : b.t, // ns->ms
+          o: b.o, h: b.h, l: b.l, c: b.c, v: b.v,
+        }))
+      : [];
+
+    return res.json({ ok: true, symbol, timeframe: tf, source: "polygon", bars });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
 // ---------- Market Monitor (Google Sheet CSV) ----------
 const MARKET_MONITOR_CSV_URL = process.env.MARKET_MONITOR_CSV_URL || "";
 
