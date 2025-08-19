@@ -103,7 +103,8 @@ app.get("/api/v1/quotes", async (req, res) => {
     // Polygon last-trade: { results: { p: price, t: ns_timestamp, ... } }
     const results = lastJson?.results || {};
     const rawTs = results.t ?? Date.now(); // ns or ms
-    const tsMs = typeof rawTs === "number" && rawTs > 1e12 ? Math.round(rawTs / 1e6) : rawTs; // ns -> ms
+    // If ns (very large), convert to ms; if already ms, keep
+    const tsMs = typeof rawTs === "number" && rawTs > 1e12 ? Math.round(rawTs / 1e6) : rawTs;
     const price = results.p ?? results.price ?? null;
 
     // Polygon prev close: { results: [{ c: close, ... }] }
@@ -171,7 +172,7 @@ app.get("/api/v1/ohlc", async (req, res) => {
         const c = l + Math.random() * (h - l);
         const v = Math.floor(1000000 * (0.6 + Math.random()));
         price = c;
-        const t = Date.now() - (n - i) * cfg.mult * 60 * 1000; // minute spacing
+        const t = Date.now() - (n - i) * cfg.mult * 60 * 1000; // minute spacing — t in ms
         out.push({ t, o: +o.toFixed(2), h: +h.toFixed(2), l: +l.toFixed(2), c: +c.toFixed(2), v });
       }
       return res.json({ ok: true, symbol, timeframe: tf, source: "stub", bars: out });
@@ -186,10 +187,16 @@ app.get("/api/v1/ohlc", async (req, res) => {
       return res.status(r.status).json({ ok: false, error: j?.error || "Polygon error", data: j });
     }
 
+    // IMPORTANT: Polygon aggregates already return `t` in **milliseconds**.
+    // Do NOT divide by 1e6 here. Forward as ms.
     const bars = Array.isArray(j?.results)
       ? j.results.map((b) => ({
-          t: typeof b.t === "number" && b.t > 1e12 ? Math.round(b.t / 1e6) : b.t, // ns->ms
-          o: b.o, h: b.h, l: b.l, c: b.c, v: b.v,
+          t: b.t, // ms as-is
+          o: b.o,
+          h: b.h,
+          l: b.l,
+          c: b.c,
+          v: b.v,
         }))
       : [];
 
@@ -235,92 +242,4 @@ function parseCsvSimple(text) {
 
     let iso;
     if (rawDate.includes("/")) {
-      // handle M/D (no year) → assume current year
-      const [m, d] = rawDate.split("/").map((v) => parseInt(v, 10));
-      if (!m || !d) continue;
-      const month = String(m).padStart(2, "0");
-      const day = String(d).padStart(2, "0");
-      iso = `${nowYear}-${month}-${day}`;
-    } else {
-      // already YYYY-MM-DD-ish
-      iso = rawDate.slice(0, 10);
-    }
-
-    const num = (v) => Number(String(v).replace(/[^0-9.\-]/g, "")) || 0;
-
-    const indices = {
-      QQQ: num(cols[1]),
-      SPY: num(cols[2]),
-      MDY: num(cols[3]),
-      IWM: num(cols[4]),
-    };
-
-    const groups = {};
-    let base = 5;
-    for (let i = 0; i < MM_GROUPS.length; i++) {
-      const name = MM_GROUPS[i];
-      const g = {
-        "10NH": num(cols[base + 0]),
-        "10NL": num(cols[base + 1]),
-        "3U": num(cols[base + 2]),
-        "3D": num(cols[base + 3]),
-      };
-      g.net = g["10NH"] - g["10NL"];
-      groups[name] = g;
-      base += 4;
-    }
-
-    rows.push({ date: iso, indices, groups });
-  }
-
-  return rows.filter((r) => r.date && r.indices);
-}
-
-app.get("/api/v1/market-monitor", async (req, res) => {
-  try {
-    const limit = Math.max(1, Math.min(365, Number(req.query.limit || 30)));
-    const latest = String(req.query.latest || "false").toLowerCase() === "true";
-
-    if (!MARKET_MONITOR_CSV_URL) {
-      return res.status(200).json({ ok: true, source: "stub", rows: [] });
-    }
-
-    const now = Date.now();
-    if (_mmCache.rows && now - _mmCache.at < 60_000) {
-      const rows = _mmCache.rows.slice(-limit);
-      return res.json({
-        ok: true,
-        source: "cache",
-        rows: latest ? [rows[rows.length - 1]] : rows,
-      });
-    }
-
-    const r = await fetch(MARKET_MONITOR_CSV_URL);
-    if (!r.ok) return res.status(r.status).json({ ok: false, error: "CSV fetch failed" });
-    const csv = await r.text();
-    const rows = parseCsvSimple(csv);
-
-    _mmCache = { at: now, rows };
-    const out = rows.slice(-limit);
-    res.json({ ok: true, source: "sheet", rows: latest ? [out[out.length - 1]] : out });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err?.message || String(err) });
-  }
-});
-
-// ---------- 404 ----------
-app.use((req, res) => {
-  res.status(404).json({ ok: false, error: "Not Found", path: req.path });
-});
-
-// ---------- Error handler ----------
-app.use((err, _req, res, _next) => {
-  const status = err?.status || 500;
-  res.status(status).json({ ok: false, error: err?.message || "Server error" });
-});
-
-// ---------- Start ----------
-app.listen(PORT, () => {
-  console.log(`API listening on port ${PORT}`);
-  console.log("Allowed origins:", ALLOW_LIST.join(", ") || "(none)");
-});
+      // handle
