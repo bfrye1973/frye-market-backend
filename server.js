@@ -37,7 +37,7 @@ app.use(
       return cb(new Error("Not allowed by CORS"));
     },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
     credentials: false,
   })
 );
@@ -112,7 +112,8 @@ app.get("/api/v1/quotes", async (req, res) => {
         ? prevJson.results[0].c ?? null
         : null;
 
-    let change = null, pct = null;
+    let change = null,
+      pct = null;
     if (typeof price === "number" && typeof prevClose === "number" && prevClose) {
       change = +(price - prevClose).toFixed(2);
       pct = +((change / prevClose) * 100).toFixed(2);
