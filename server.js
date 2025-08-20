@@ -103,8 +103,7 @@ app.get("/api/v1/quotes", async (req, res) => {
     // Polygon last-trade: { results: { p: price, t: ns_timestamp, ... } }
     const results = lastJson?.results || {};
     const rawTs = results.t ?? Date.now(); // ns or ms
-    // If ns (very large), convert to ms; if already ms, keep
-    const tsMs = typeof rawTs === "number" && rawTs > 1e12 ? Math.round(rawTs / 1e6) : rawTs;
+    const tsMs = typeof rawTs === "number" && rawTs > 1e12 ? Math.round(rawTs / 1e6) : rawTs; // ns->ms if needed
     const price = results.p ?? results.price ?? null;
 
     // Polygon prev close: { results: [{ c: close, ... }] }
@@ -113,8 +112,7 @@ app.get("/api/v1/quotes", async (req, res) => {
         ? prevJson.results[0].c ?? null
         : null;
 
-    let change = null,
-      pct = null;
+    let change = null, pct = null;
     if (typeof price === "number" && typeof prevClose === "number" && prevClose) {
       change = +(price - prevClose).toFixed(2);
       pct = +((change / prevClose) * 100).toFixed(2);
@@ -139,11 +137,10 @@ app.get("/api/v1/quotes", async (req, res) => {
 app.get("/api/v1/ohlc", async (req, res) => {
   try {
     const symbol = String(req.query.symbol || "SPY").toUpperCase();
-    const tf = String(req.query.timeframe || "1m").toLowerCase(); // e.g., 1m,5m,15m,1h,1d
+    const tf = String(req.query.timeframe || "1m").toLowerCase(); // 1m,5m,15m,30m,1h,1d
     const now = new Date();
     const toISO = now.toISOString().slice(0, 10);
 
-    // map timeframe -> polygon range
     const tfMap = {
       "1m": { mult: 1, span: "minute", lookbackDays: 2 },
       "5m": { mult: 5, span: "minute", lookbackDays: 7 },
@@ -172,7 +169,7 @@ app.get("/api/v1/ohlc", async (req, res) => {
         const c = l + Math.random() * (h - l);
         const v = Math.floor(1000000 * (0.6 + Math.random()));
         price = c;
-        const t = Date.now() - (n - i) * cfg.mult * 60 * 1000; // minute spacing — t in ms
+        const t = Date.now() - (n - i) * cfg.mult * 60 * 1000; // spacing in ms
         out.push({ t, o: +o.toFixed(2), h: +h.toFixed(2), l: +l.toFixed(2), c: +c.toFixed(2), v });
       }
       return res.json({ ok: true, symbol, timeframe: tf, source: "stub", bars: out });
@@ -187,17 +184,9 @@ app.get("/api/v1/ohlc", async (req, res) => {
       return res.status(r.status).json({ ok: false, error: j?.error || "Polygon error", data: j });
     }
 
-    // IMPORTANT: Polygon aggregates already return `t` in **milliseconds**.
-    // Do NOT divide by 1e6 here. Forward as ms.
+    // Polygon aggregates return t in ms
     const bars = Array.isArray(j?.results)
-      ? j.results.map((b) => ({
-          t: b.t, // ms as-is
-          o: b.o,
-          h: b.h,
-          l: b.l,
-          c: b.c,
-          v: b.v,
-        }))
+      ? j.results.map((b) => ({ t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }))
       : [];
 
     return res.json({ ok: true, symbol, timeframe: tf, source: "polygon", bars });
@@ -211,7 +200,7 @@ const MARKET_MONITOR_CSV_URL = process.env.MARKET_MONITOR_CSV_URL || "";
 
 // Order taken from your sheet header row (after Date, QQQ, SPY, MDY, IWM):
 const MM_GROUPS = [
-  "Small+Large Cap",
+  "Large Cap",
   "Mid Cap",
   "Small Cap",
   "Tech",
@@ -223,7 +212,7 @@ const MM_GROUPS = [
   "Materials",
   "Defensive",
   "Real Estate",
-  "Comms Svcs",
+  "Communication Services",
   "Utilities",
 ];
 
@@ -249,7 +238,7 @@ function parseCsvSimple(text) {
       const day = String(d).padStart(2, "0");
       iso = `${nowYear}-${month}-${day}`;
     } else {
-      // already YYYY-MM-DD-ish
+      // YYYY-MM-DD-ish
       iso = rawDate.slice(0, 10);
     }
 
@@ -283,6 +272,21 @@ function parseCsvSimple(text) {
   return rows.filter((r) => r.date && r.indices);
 }
 
+// small helper so other routes can reuse the parsed/cache rows
+async function fetchMarketRows(limit = 30) {
+  if (!MARKET_MONITOR_CSV_URL) return [];
+  const now = Date.now();
+  if (_mmCache.rows && now - _mmCache.at < 60_000) {
+    return _mmCache.rows.slice(-limit);
+  }
+  const r = await fetch(MARKET_MONITOR_CSV_URL);
+  if (!r.ok) throw new Error(`CSV fetch failed`);
+  const csv = await r.text();
+  const rows = parseCsvSimple(csv);
+  _mmCache = { at: now, rows };
+  return rows.slice(-limit);
+}
+
 app.get("/api/v1/market-monitor", async (req, res) => {
   try {
     const limit = Math.max(1, Math.min(365, Number(req.query.limit || 30)));
@@ -292,26 +296,63 @@ app.get("/api/v1/market-monitor", async (req, res) => {
       return res.status(200).json({ ok: true, source: "stub", rows: [] });
     }
 
-    const now = Date.now();
-    if (_mmCache.rows && now - _mmCache.at < 60_000) {
-      const rows = _mmCache.rows.slice(-limit);
-      return res.json({
-        ok: true,
-        source: "cache",
-        rows: latest ? [rows[rows.length - 1]] : rows,
-      });
-    }
-
-    const r = await fetch(MARKET_MONITOR_CSV_URL);
-    if (!r.ok) return res.status(r.status).json({ ok: false, error: "CSV fetch failed" });
-    const csv = await r.text();
-    const rows = parseCsvSimple(csv);
-
-    _mmCache = { at: now, rows };
+    const rows = await fetchMarketRows(limit);
     const out = rows.slice(-limit);
     res.json({ ok: true, source: "sheet", rows: latest ? [out[out.length - 1]] : out });
   } catch (err) {
     res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// ---------- Gauges (minimal; no key required) ----------
+const GAUGE_GROUPS_ENV = (process.env.GAUGE_GROUPS || "")
+  .split(",").map(s => s.trim()).filter(Boolean);
+
+const GAUGE_GROUPS_FALLBACK = [
+  "Large Cap","Mid Cap","Small Cap",
+  "Tech","Consumer","Healthcare","Financials","Energy","Industrials",
+  "Materials","Defensive","Real Estate","Communication Services","Utilities",
+];
+
+const GAUGE_ORDER = GAUGE_GROUPS_ENV.length ? GAUGE_GROUPS_ENV : GAUGE_GROUPS_FALLBACK;
+
+app.get("/api/v1/gauges", async (req, res) => {
+  try {
+    const rows = await fetchMarketRows(2); // latest + previous
+    if (!rows.length) return res.json({ ok: true, asOf: null, indices: {}, breadth: {} });
+
+    const latest = rows[rows.length - 1];
+    const prev   = rows.length > 1 ? rows[rows.length - 2] : null;
+
+    const indices = latest.indices || {};
+
+    const sum = (row, field) =>
+      Object.values(row.groups || {}).reduce((a, g) => a + Number(g?.[field] || 0), 0);
+
+    const totalNH = sum(latest, "10NH");
+    const totalNL = sum(latest, "10NL");
+    const totalNet = totalNH - totalNL;
+    const prevTotalNet = prev ? (sum(prev, "10NH") - sum(prev, "10NL")) : null;
+
+    const breadth = {
+      total: { nh: totalNH, nl: totalNL, net: totalNet, deltaNet: prev ? (totalNet - prevTotalNet) : null },
+    };
+
+    for (const name of GAUGE_ORDER) {
+      const g  = (latest.groups || {})[name] || {};
+      const gp = prev ? ((prev.groups || {})[name] || {}) : null;
+
+      const nh = Number(g["10NH"] || 0);
+      const nl = Number(g["10NL"] || 0);
+      const net = nh - nl;
+      const prevNet = gp ? (Number(gp["10NH"] || 0) - Number(gp["10NL"] || 0)) : 0;
+
+      breadth[name] = { nh, nl, net, deltaNet: prev ? (net - prevNet) : null };
+    }
+
+    return res.json({ ok: true, asOf: latest.date, indices, breadth });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
   }
 });
 
