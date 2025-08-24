@@ -1,16 +1,5 @@
 // server.js — single-file Express backend (CommonJS)
 // Node 18+ recommended (global fetch available).
-//
-// Env vars:
-//   PORT
-//   CORS_ORIGIN                  e.g. "https://frye-dashboard.onrender.com,http://localhost:5173"
-//   POLYGON_API_KEY              (optional; if missing, quotes/ohlc serve stub data)
-//   MARKET_MONITOR_CSV_URL       (optional; Google Sheet "Publish to web" CSV URL)
-//   GAUGE_GROUPS                 (optional; comma-separated, overrides default group order)
-//   SCHWAB_APP_KEY               (required for OAuth)
-//   SCHWAB_APP_SECRET            (recommended; some tenants require Basic auth)
-//   SCHWAB_REDIRECT_URI          e.g. "https://<your-backend>/api/auth/schwab/callback"
-//   SCHWAB_TOKEN_PATH            (optional; default "/data/schwab_tokens.json")
 
 const express = require("express");
 const cors = require("cors");
@@ -19,7 +8,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-/* ----------------------- Config ----------------------- */
+/* ===================== Config ===================== */
 const PORT = process.env.PORT || 3000;
 
 const DEFAULT_ORIGINS = "https://frye-dashboard.onrender.com";
@@ -28,7 +17,7 @@ const ALLOW_LIST = String(process.env.CORS_ORIGIN || DEFAULT_ORIGINS)
 
 const TOKEN_PATH = process.env.SCHWAB_TOKEN_PATH || "/data/schwab_tokens.json";
 
-/* ----------------------- App ------------------------- */
+/* ===================== App ===================== */
 const app = express();
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
@@ -41,22 +30,22 @@ app.use(cors({
   },
   methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
   allowedHeaders: ["Content-Type","Authorization","x-api-key"],
-  credentials: false,
+  credentials: false
 }));
 app.options("*", cors());
 
-/* ----------------------- Root / Health ---------------- */
+/* ===================== Health ===================== */
 app.get("/", (_req,res)=>res.send("Frye API up"));
 app.get("/health", (_req,res)=>res.status(200).json({ ok:true, service:"backend", time:new Date().toISOString() }));
 app.get("/api/health", (_req,res)=>res.status(200).json({ ok:true, service:"backend", alias:"/api/health", time:new Date().toISOString() }));
 app.get("/api/healthz", (_req,res)=>res.status(200).json({ ok:true, service:"backend", alias:"/api/healthz", time:new Date().toISOString() }));
 
-/* ----------------------- Ping / Echo ------------------ */
+/* ===================== Ping / Echo ===================== */
 app.get("/api/ping", (_req,res)=>res.json({ ok:true, message:"pong", ts:Date.now(), path:"/api/ping" }));
 app.get("/api/v1/ping", (_req,res)=>res.json({ ok:true, message:"pong", ts:Date.now(), path:"/api/v1/ping" }));
 app.post("/api/v1/echo", (req,res)=>res.json({ ok:true, received:req.body ?? null, ts:Date.now() }));
 
-/* ----------------------- Quotes (Polygon or stub) ----- */
+/* ===================== Polygon: quotes ===================== */
 app.get("/api/v1/quotes", async (req, res) => {
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
   const key = process.env.POLYGON_API_KEY;
@@ -72,18 +61,18 @@ app.get("/api/v1/quotes", async (req, res) => {
     const encoded = encodeURIComponent(symbol);
     const [lastResp, prevResp] = await Promise.all([
       fetch(`https://api.polygon.io/v2/last/trade/${encoded}?apiKey=${key}`),
-      fetch(`https://api.polygon.io/v2/aggs/ticker/${encoded}/prev?adjusted=true&apiKey=${key}`),
+      fetch(`https://api.polygon.io/v2/aggs/ticker/${encoded}/prev?adjusted=true&apiKey=${key}`)
     ]);
     const lastJson = await lastResp.json();
     const prevJson = await prevResp.json();
     if (!lastResp.ok) return res.status(lastResp.status).json({ ok:false, error:lastJson?.error || "Polygon error", data:lastJson });
 
-    const results = lastJson?.results || {};
-    const rawTs = results.t ?? Date.now();
+    const r = lastJson?.results || {};
+    const rawTs = r.t ?? Date.now();
     const tsMs = (typeof rawTs === "number" && rawTs > 1e12) ? Math.round(rawTs / 1e6) : rawTs; // ns->ms
-    const price = results.p ?? results.price ?? null;
-
+    const price = r.p ?? r.price ?? null;
     const prevClose = Array.isArray(prevJson?.results) && prevJson.results[0] ? (prevJson.results[0].c ?? null) : null;
+
     let change = null, pct = null;
     if (typeof price === "number" && typeof prevClose === "number" && prevClose) {
       change = +(price - prevClose).toFixed(2);
@@ -95,19 +84,20 @@ app.get("/api/v1/quotes", async (req, res) => {
   }
 });
 
-/* ----------------------- OHLC (Polygon or stub) ------ */
+/* ===================== Polygon: OHLC ===================== */
 app.get("/api/v1/ohlc", async (req, res) => {
   try {
     const symbol = String(req.query.symbol || "SPY").toUpperCase();
     const tf = String(req.query.timeframe || "1m").toLowerCase(); // 1m,5m,15m,30m,1h,1d
     const now = new Date(), toISO = now.toISOString().slice(0,10);
+
     const tfMap = {
       "1m": { mult:1,  span:"minute", lookbackDays: 2 },
       "5m": { mult:5,  span:"minute", lookbackDays: 7 },
       "15m":{ mult:15, span:"minute", lookbackDays:14 },
       "30m":{ mult:30, span:"minute", lookbackDays:30 },
       "1h": { mult:60, span:"minute", lookbackDays:30 },
-      "1d": { mult:1,  span:"day",    lookbackDays:365 },
+      "1d": { mult:1,  span:"day",    lookbackDays:365 }
     };
     const cfg = tfMap[tf] || tfMap["1m"];
     const from = new Date(now.getTime() - cfg.lookbackDays*24*60*60*1000).toISOString().slice(0,10);
@@ -136,11 +126,11 @@ app.get("/api/v1/ohlc", async (req, res) => {
   }
 });
 
-/* --------------- Market Monitor CSV + Gauges --------- */
+/* ========== Market Monitor CSV + Gauges ========== */
 const MARKET_MONITOR_CSV_URL = process.env.MARKET_MONITOR_CSV_URL || "";
 const DEFAULT_GROUPS = [
   "Large Cap","Mid Cap","Small Cap","Tech","Consumer","Healthcare","Financials",
-  "Energy","Industrials","Materials","Defensive","Real Estate","Communication Services","Utilities",
+  "Energy","Industrials","Materials","Defensive","Real Estate","Communication Services","Utilities"
 ];
 const GAUGE_GROUPS = (process.env.GAUGE_GROUPS || "").split(",").map(s=>s.trim()).filter(Boolean);
 const GROUPS_ORDER = GAUGE_GROUPS.length ? GAUGE_GROUPS : DEFAULT_GROUPS;
@@ -154,7 +144,8 @@ function parseCsvSimple(text){
   for (const line of lines){
     const cols = line.split(",").map(s=>s.trim());
     const rawDate = cols[0]; if (!rawDate || rawDate.toLowerCase().includes("date")) continue;
-    // Try flexible date parsing: YYYY-MM-DD or M/D(/Y)
+
+    // Accept YYYY-MM-DD or M/D or M/D/Y
     let iso;
     if (rawDate.includes("/")) {
       const parts = rawDate.split("/").map(x=>parseInt(x,10));
@@ -167,6 +158,7 @@ function parseCsvSimple(text){
     }
 
     const indices = { QQQ:num(cols[1]), SPY:num(cols[2]), MDY:num(cols[3]), IWM:num(cols[4]) };
+
     const groups = {}; let base = 5;
     for (const name of DEFAULT_GROUPS){
       const g = { "10NH":num(cols[base]), "10NL":num(cols[base+1]), "3U":num(cols[base+2]), "3D":num(cols[base+3]) };
@@ -225,22 +217,18 @@ app.get("/api/v1/gauges", async (req,res)=>{
   } catch(err){ res.status(500).json({ ok:false, error: err?.message || String(err) }); }
 });
 
-/* ----------------------- Schwab OAuth + API ---------- */
+/* ========== Schwab OAuth + API ========== */
 const SCHWAB_AUTHORIZE = "https://api.schwabapi.com/v1/oauth/authorize";
 const SCHWAB_TOKEN     = "https://api.schwabapi.com/v1/oauth/token";
 const SCHWAB_BASE      = "https://api.schwabapi.com/trader/v1";
 
-let schwabTokens = null;           // { access_token, refresh_token, expires_at }
-const pkceMap = new Map();         // state -> { verifier, t }
+let schwabTokens = null;                // { access_token, refresh_token, expires_at }
+const pkceMap = new Map();              // state -> { verifier, t }
 
-/* token persistence (optional) */
+/* persistence (requires /data disk mounted) */
 function readTokensFromDisk(){
-  try {
-    if (fs.existsSync(TOKEN_PATH)) {
-      const j = JSON.parse(fs.readFileSync(TOKEN_PATH, "utf8"));
-      if (j && j.access_token && j.expires_at) schwabTokens = j;
-    }
-  } catch { /* ignore */ }
+  try { if (fs.existsSync(TOKEN_PATH)) schwabTokens = JSON.parse(fs.readFileSync(TOKEN_PATH,"utf8")); }
+  catch { /* ignore */ }
 }
 function writeTokensToDisk(){
   try {
@@ -257,8 +245,7 @@ function makePkce(){ const v=b64url(crypto.randomBytes(32)); const c=b64url(cryp
 function makeState(){ return b64url(crypto.randomBytes(16)); }
 function tokenExpiringSoon(){
   if (!schwabTokens || !schwabTokens.expires_at) return true;
-  const skewMs = 60_000; // refresh 1 minute early
-  return Date.now() > (schwabTokens.expires_at - skewMs);
+  return Date.now() > (schwabTokens.expires_at - 60_000); // refresh 1m early
 }
 async function refreshIfNeeded(){
   if (!schwabTokens) throw new Error("Not connected to Schwab");
@@ -293,6 +280,22 @@ async function schwabGet(path, qs){
   const url = new URL(SCHWAB_BASE + path);
   if (qs) for (const [k,v] of Object.entries(qs)) if (v!==undefined) url.searchParams.set(k,String(v));
   const r = await fetch(url.toString(), { method:"GET", headers:{ "Authorization":`Bearer ${schwabTokens.access_token}`, "Accept":"application/json" } });
+  let j; try{ j = await r.json(); } catch { j = {}; }
+  return { status:r.status, json:j };
+}
+async function schwabPost(path, payload){
+  if (!schwabTokens) return { status:401, json:{ ok:false, error:"Not connected. Visit /api/auth/schwab/login" } };
+  await refreshIfNeeded();
+  const url = new URL(SCHWAB_BASE + path);
+  const r = await fetch(url.toString(), {
+    method:"POST",
+    headers:{
+      "Authorization":`Bearer ${schwabTokens.access_token}`,
+      "Accept":"application/json",
+      "Content-Type":"application/json"
+    },
+    body: JSON.stringify(payload)
+  });
   let j; try{ j = await r.json(); } catch { j = {}; }
   return { status:r.status, json:j };
 }
@@ -359,7 +362,7 @@ app.get("/api/auth/schwab/status", (_req,res)=>{
   res.json({ ok, expires_at: schwabTokens?.expires_at || null });
 });
 
-/* READ endpoints */
+/* Schwab READ endpoints */
 app.get("/api/schwab/accountNumbers", async (_req,res)=>{
   try{ const { status, json } = await schwabGet("/accounts/accountNumbers"); res.status(status).json(json); }
   catch(err){ res.status(500).json({ ok:false, error: err.message || String(err) }); }
@@ -369,70 +372,137 @@ app.get("/api/schwab/accounts", async (req,res)=>{
   catch(err){ res.status(500).json({ ok:false, error: err.message || String(err) }); }
 });
 
-/* Positions — robust: map hash -> accountNumber, then filter accounts?fields=positions */
+/* Positions — robust: map hash -> accountNumber, then filter /accounts?fields=positions */
 app.get("/api/schwab/positions", async (req, res) => {
   try {
     const hash = String(req.query.hash || "").trim();
     if (!hash) return res.status(400).json({ ok: false, error: "Missing ?hash=<accountHash>" });
 
-    // 1) map hash -> accountNumber
+    // map hash -> accountNumber
     const map = await schwabGet("/accounts/accountNumbers");
-    if (map.status !== 200 || !Array.isArray(map.json)) {
-      return res.status(map.status || 500).json(map.json || { ok: false, error: "Unable to resolve accountNumbers" });
-    }
+    if (map.status !== 200 || !Array.isArray(map.json))
+      return res.status(map.status || 500).json(map.json || { ok:false, error:"Unable to resolve accountNumbers" });
+
     const row = map.json.find(x => String(x.hashValue).toUpperCase() === hash.toUpperCase());
     const acctNum = row?.accountNumber;
-    if (!acctNum) return res.status(404).json({ ok: false, error: "Hash not found in accountNumbers map" });
+    if (!acctNum) return res.status(404).json({ ok:false, error:"Hash not found in accountNumbers map" });
 
-    // 2) pull all accounts with positions, then filter by accountNumber
+    // get all positions and filter to this account
     const all = await schwabGet("/accounts", { fields: "positions" });
     if (all.status !== 200) return res.status(all.status).json(all.json);
 
     const list = Array.isArray(all.json) ? all.json : [];
     const match = list.find(a => String(a?.securitiesAccount?.accountNumber) === String(acctNum));
 
-    // 3) return just that account's positions (array) if present; else [] if no positions
     if (match?.securitiesAccount?.positions) return res.status(200).json(match.securitiesAccount.positions);
-    if (match) return res.status(200).json([]); // no positions right now
-
-    // fallback: nothing matched — return everything to inspect
-    return res.status(200).json(list);
+    if (match) return res.status(200).json([]); // no open positions
+    return res.status(200).json(list);          // fallback inspection
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message || String(err) });
+    return res.status(500).json({ ok:false, error: err.message || String(err) });
   }
 });
 
-/* --------------- Order PREVIEW (no live submit) ------ */
-app.post("/api/sim/orders/preview", (req,res)=>{
+/* ========== ORDER PREVIEW + GUARDED LIVE ========== */
+const LIVE_TRADING_ENABLED =
+  String(process.env.LIVE_TRADING_ENABLED || "false").toLowerCase() === "true";
+const MAX_ORDER_QTY      = Number(process.env.MAX_ORDER_QTY || 1000);
+const MAX_ORDER_NOTIONAL = Number(process.env.MAX_ORDER_NOTIONAL || 50000);
+const ALLOWED_SYMBOLS    = (process.env.ALLOWED_SYMBOLS || "")
+  .split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
+
+// optional notional check via Polygon
+async function getLastPrice(symbol){
+  const key = process.env.POLYGON_API_KEY;
+  if (!key) return null;
+  try {
+    const encoded = encodeURIComponent(symbol);
+    const r = await fetch(`https://api.polygon.io/v2/last/trade/${encoded}?apiKey=${key}`);
+    const j = await r.json();
+    const p = j?.results?.p ?? j?.results?.price ?? null;
+    return (typeof p === "number" && p > 0) ? p : null;
+  } catch { return null; }
+}
+async function preTradeRisk({ symbol, qty }){
+  const sym = String(symbol).toUpperCase();
+  const q   = Number(qty);
+  if (!Number.isFinite(q) || q <= 0)      return "qty must be > 0";
+  if (q > MAX_ORDER_QTY)                  return `qty exceeds max (${MAX_ORDER_QTY})`;
+  if (ALLOWED_SYMBOLS.length && !ALLOWED_SYMBOLS.includes(sym))
+                                          return `symbol ${sym} not in ALLOWED_SYMBOLS`;
+  const px = await getLastPrice(sym);
+  if (px && (px*q) > MAX_ORDER_NOTIONAL)  return `notional exceeds max (${MAX_ORDER_NOTIONAL})`;
+  return null;
+}
+function buildEquityOrder({ symbol, side, qty, type, limitPrice, tif="DAY" }){
+  const instruction = String(side).toLowerCase() === "sell" ? "SELL" : "BUY";
+  const orderType   = String(type).toLowerCase() === "limit" ? "LIMIT" : "MARKET";
+  const order = {
+    orderType,
+    session: "NORMAL",
+    duration: tif.toUpperCase(),
+    orderStrategyType: "SINGLE",
+    orderLegCollection: [
+      {
+        instruction,
+        quantity: Number(qty),
+        instrument: { symbol: String(symbol).toUpperCase(), assetType: "EQUITY" }
+      }
+    ]
+  };
+  if (orderType === "LIMIT") order.price = Number(limitPrice);
+  return order;
+}
+
+// Preview (local checks only)
+app.post("/api/schwab/orders/preview", async (req,res)=>{
   try{
-    const { accountHash, symbol, side, qty, type, limitPrice } = req.body || {};
+    const { accountHash, symbol, side, qty, type, limitPrice, tif } = req.body || {};
     if (!accountHash) return res.status(400).json({ ok:false, error:"accountHash required" });
     if (!symbol)      return res.status(400).json({ ok:false, error:"symbol required" });
-    const s = String(side||"").toLowerCase();
-    if (!["buy","sell"].includes(s)) return res.status(400).json({ ok:false, error:"side must be buy|sell" });
-    const q = Number(qty); if (!Number.isFinite(q) || q<=0) return res.status(400).json({ ok:false, error:"qty must be > 0" });
-    const t = String(type||"market").toLowerCase();
-    if (!["market","limit"].includes(t)) return res.status(400).json({ ok:false, error:"type must be market|limit" });
-    if (t==="limit" && !Number.isFinite(Number(limitPrice))) return res.status(400).json({ ok:false, error:"limitPrice required for limit" });
-    // simple risk guard (tune later)
-    if (q > 10000) return res.status(400).json({ ok:false, error:"qty exceeds max (10k)" });
 
-    const order = {
-      accountHash,
-      instrument: { symbol:String(symbol).toUpperCase(), assetType:"EQUITY" },
-      side:s, quantity:q, orderType:t.toUpperCase(),
-      price: t==="limit" ? Number(limitPrice) : undefined,
-      timeInForce:"DAY", createdAt:new Date().toISOString()
-    };
-    res.json({ ok:true, order });
+    const riskError = await preTradeRisk({ symbol, qty });
+    if (riskError) return res.status(400).json({ ok:false, error:`risk: ${riskError}` });
+
+    const order = buildEquityOrder({ symbol, side, qty, type, limitPrice, tif });
+    res.json({ ok:true, liveTradingEnabled: LIVE_TRADING_ENABLED, order });
   } catch(err){ res.status(500).json({ ok:false, error: err.message || String(err) }); }
 });
 
-/* ----------------------- 404 + Error ----------------- */
+// Live submit (guarded)
+app.post("/api/schwab/orders", async (req,res)=>{
+  try{
+    if (!LIVE_TRADING_ENABLED)
+      return res.status(403).json({ ok:false, error:"live trading disabled (set LIVE_TRADING_ENABLED=true to enable)" });
+
+    const { accountHash, symbol, side, qty, type, limitPrice, tif } = req.body || {};
+    if (!accountHash) return res.status(400).json({ ok:false, error:"accountHash required" });
+    if (!symbol)      return res.status(400).json({ ok:false, error:"symbol required" });
+
+    const riskError = await preTradeRisk({ symbol, qty });
+    if (riskError) return res.status(400).json({ ok:false, error:`risk: ${riskError}` });
+
+    const payload = buildEquityOrder({ symbol, side, qty, type, limitPrice, tif });
+    const { status, json } = await schwabPost(`/accounts/${encodeURIComponent(accountHash)}/orders`, payload);
+    res.status(status).json(json);
+  } catch(err){ res.status(500).json({ ok:false, error: err.message || String(err) }); }
+});
+
+// Live/paper toggle status
+app.get("/api/trading/live/status", (_req,res)=>{
+  res.json({
+    ok: true,
+    liveTradingEnabled: LIVE_TRADING_ENABLED,
+    maxQty: MAX_ORDER_QTY,
+    maxNotional: MAX_ORDER_NOTIONAL,
+    allowlist: ALLOWED_SYMBOLS
+  });
+});
+
+/* ===================== 404 + Error ===================== */
 app.use((req,res)=>res.status(404).json({ ok:false, error:"Not Found", path:req.path }));
 app.use((err,_req,res,_next)=>res.status(err?.status || 500).json({ ok:false, error: err?.message || "Server error" }));
 
-/* ----------------------- Start ----------------------- */
+/* ===================== Start ===================== */
 app.listen(PORT, () => {
   console.log(`API listening on port ${PORT}`);
   console.log("Allowed origins:", ALLOW_LIST.join(", ") || "(none)");
