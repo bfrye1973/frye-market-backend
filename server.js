@@ -1,5 +1,5 @@
 // server.js — single-file Express backend (CommonJS)
-// Node 18+ recommended (has global fetch).
+// Node 18+ recommended (global fetch available).
 //
 // Env vars:
 //   PORT
@@ -233,12 +233,11 @@ const SCHWAB_BASE      = "https://api.schwabapi.com/trader/v1";
 let schwabTokens = null;           // { access_token, refresh_token, expires_at }
 const pkceMap = new Map();         // state -> { verifier, t }
 
-/* token persistence (optional, safe to ignore if no disk) */
+/* token persistence (optional) */
 function readTokensFromDisk(){
   try {
-    const p = TOKEN_PATH;
-    if (fs.existsSync(p)) {
-      const j = JSON.parse(fs.readFileSync(p, "utf8"));
+    if (fs.existsSync(TOKEN_PATH)) {
+      const j = JSON.parse(fs.readFileSync(TOKEN_PATH, "utf8"));
       if (j && j.access_token && j.expires_at) schwabTokens = j;
     }
   } catch { /* ignore */ }
@@ -369,13 +368,38 @@ app.get("/api/schwab/accounts", async (req,res)=>{
   try{ const { status, json } = await schwabGet("/accounts", req.query); res.status(status).json(json); }
   catch(err){ res.status(500).json({ ok:false, error: err.message || String(err) }); }
 });
-app.get("/api/schwab/positions", async (req,res)=>{
-  try{
+
+/* Positions — robust: map hash -> accountNumber, then filter accounts?fields=positions */
+app.get("/api/schwab/positions", async (req, res) => {
+  try {
     const hash = String(req.query.hash || "").trim();
-    if (!hash) return res.status(400).json({ ok:false, error:"Missing ?hash=<accountHash>" });
-    const { status, json } = await schwabGet(`/accounts/${encodeURIComponent(hash)}/positions`);
-    res.status(status).json(json);
-  } catch(err){ res.status(500).json({ ok:false, error: err.message || String(err) }); }
+    if (!hash) return res.status(400).json({ ok: false, error: "Missing ?hash=<accountHash>" });
+
+    // 1) map hash -> accountNumber
+    const map = await schwabGet("/accounts/accountNumbers");
+    if (map.status !== 200 || !Array.isArray(map.json)) {
+      return res.status(map.status || 500).json(map.json || { ok: false, error: "Unable to resolve accountNumbers" });
+    }
+    const row = map.json.find(x => String(x.hashValue).toUpperCase() === hash.toUpperCase());
+    const acctNum = row?.accountNumber;
+    if (!acctNum) return res.status(404).json({ ok: false, error: "Hash not found in accountNumbers map" });
+
+    // 2) pull all accounts with positions, then filter by accountNumber
+    const all = await schwabGet("/accounts", { fields: "positions" });
+    if (all.status !== 200) return res.status(all.status).json(all.json);
+
+    const list = Array.isArray(all.json) ? all.json : [];
+    const match = list.find(a => String(a?.securitiesAccount?.accountNumber) === String(acctNum));
+
+    // 3) return just that account's positions (array) if present; else [] if no positions
+    if (match?.securitiesAccount?.positions) return res.status(200).json(match.securitiesAccount.positions);
+    if (match) return res.status(200).json([]); // no positions right now
+
+    // fallback: nothing matched — return everything to inspect
+    return res.status(200).json(list);
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message || String(err) });
+  }
 });
 
 /* --------------- Order PREVIEW (no live submit) ------ */
