@@ -1,4 +1,4 @@
-// server.js — Ferrari Cluster Live Feed (Sheets by Metric + WS)
+// server.js — Ferrari Cluster Live Feed (Sheets by Metric + WS, with redirect follow + debug)
 // Node 18+, npm i express cors morgan ws
 
 /* ========================= Imports & Setup ========================= */
@@ -8,6 +8,7 @@ const morgan = require("morgan");
 const http = require("http");
 const { WebSocketServer } = require("ws");
 const https = require("https");
+const { URL } = require("url");
 
 /* ========================= Config ========================= */
 const PORT = process.env.PORT || 8080;
@@ -43,7 +44,19 @@ function authMiddleware(req, res, next) {
   return res.status(401).json({ ok: false, error: "Unauthorized" });
 }
 
-app.get("/health", (_req, res) => res.json({ ok: true, service: "tos-backend", time: new Date().toISOString() }));
+app.get("/health", (_req, res) =>
+  res.json({
+    ok: true,
+    service: "tos-backend",
+    time: new Date().toISOString(),
+    sheets: {
+      momentum: !!MOMENTUM_SHEET_CSV_URL,
+      breadth:  !!BREADTH_SHEET_CSV_URL,
+      health:   !!HEALTH_SHEET_CSV_URL,
+      ohlc:     !!OHLC_CSV_URL
+    }
+  })
+);
 
 /* ========================= State ========================= */
 const state = {
@@ -61,21 +74,47 @@ function clamp(n, lo, hi, fallback = 0) {
   if (!Number.isFinite(x)) return fallback;
   return Math.max(lo, Math.min(hi, x));
 }
-function fetchText(url) {
-  return new Promise(resolve => {
-    if (!url) return resolve(null);
-    https.get(url, (res) => {
+
+// Follow redirects (301/302/303/307/308) up to 5 hops
+function fetchTextFollow(urlStr, hops = 0) {
+  return new Promise((resolve) => {
+    if (!urlStr) return resolve(null);
+    const u = new URL(urlStr);
+
+    const opts = {
+      method: "GET",
+      headers: {
+        "User-Agent": "Ferrari-Dashboard/1.0 (+node)",
+        "Accept": "text/csv, text/plain, */*"
+      }
+    };
+
+    const handler = (res) => {
+      const code = res.statusCode || 0;
+      const loc = res.headers.location;
+      if ([301,302,303,307,308].includes(code) && loc && hops < 5) {
+        const next = new URL(loc, u).toString();
+        res.resume(); // drain
+        return resolve(fetchTextFollow(next, hops + 1));
+      }
       let data = "";
-      res.on("data", (d) => data += d);
+      res.on("data", (d) => data += d.toString("utf8"));
       res.on("end", () => resolve(data));
-    }).on("error", () => resolve(null));
+    };
+
+    const req = (u.protocol === "http:" ? http : https).request(u, opts, handler);
+    req.on("error", () => resolve(null));
+    req.end();
   });
 }
+
 // CSV parser
 function parseCSV(text) {
   if (!text) return { headers: [], rows: [] };
   const lines = text.replace(/\r/g, "").trim().split("\n");
   if (!lines.length) return { headers: [], rows: [] };
+  // Strip potential BOM
+  if (lines[0].charCodeAt(0) === 0xFEFF) lines[0] = lines[0].slice(1);
   const headers = lines[0].split(",").map(h => h.trim());
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
@@ -93,14 +132,16 @@ function parseCSV(text) {
     headers.forEach((h, k) => obj[h] = (cols[k] ?? "").trim());
     rows.push(obj);
   }
-  return { headers, rows };
+  return { headers, rows, raw: text.slice(0, 300) };
 }
+
 // Get numeric Value by Metric name from Exports CSV
 function getMetricValue(csvText, metricName, fieldName = "Value") {
   const { headers, rows } = parseCSV(csvText || "");
+  if (!headers.length || !rows.length) return null;
   const metricKey = headers.find(h => h.toLowerCase() === "metric");
   const valueKey  = headers.find(h => h.toLowerCase() === fieldName.toLowerCase()) || fieldName;
-  if (!metricKey || !valueKey || !rows.length) return null;
+  if (!metricKey || !valueKey) return null;
   const row = rows.find(r => String(r[metricKey]).toUpperCase() === String(metricName).toUpperCase());
   if (!row) return null;
   const n = Number(String(row[valueKey]).replace(/[^0-9.\-]+/g, ""));
@@ -114,7 +155,7 @@ async function updateFromSheets() {
     const urls = [MOMENTUM_SHEET_CSV_URL, BREADTH_SHEET_CSV_URL, HEALTH_SHEET_CSV_URL].filter(Boolean);
     const uniq = [...new Set(urls)];
     const cache = {};
-    await Promise.all(uniq.map(async (u) => { cache[u] = await fetchText(u); }));
+    await Promise.all(uniq.map(async (u) => { cache[u] = await fetchTextFollow(u); }));
 
     // SPEED (SPEED row)
     if (MOMENTUM_SHEET_CSV_URL) {
@@ -173,7 +214,7 @@ function parseOHLC(csvText) {
 async function updateRPMFromOHLC() {
   if (!OHLC_CSV_URL) return;
   try {
-    const text = await fetchText(OHLC_CSV_URL);
+    const text = await fetchTextFollow(OHLC_CSV_URL);
     const ohlc = parseOHLC(text);
     const N = 20, kKC = 1.5;
     const closes = ohlc.map(x => x.c);
@@ -186,7 +227,7 @@ async function updateRPMFromOHLC() {
     state.rpm = Math.round(clamp(pressure, 0, 1) * 9000);
   } catch {}
 }
-setInterval(updateRPMFromOHLC, 600);
+setInterval(updateRPMFromOHLC, 800);
 
 /* ========================= HTTP Endpoints ========================= */
 function gaugeHandler(key, max){
@@ -207,6 +248,26 @@ app.get("/gauges", authMiddleware, (_req, res) => {
 });
 
 app.get("/signals", authMiddleware, (_req, res) => res.json({ ...state.lights, ts: Date.now() }));
+
+// === Debug endpoint to see what CSV returns and what we parsed ===
+app.get("/debug/exports", async (_req, res) => {
+  const url = MOMENTUM_SHEET_CSV_URL || BREADTH_SHEET_CSV_URL || HEALTH_SHEET_CSV_URL || "";
+  const text = await fetchTextFollow(url);
+  const parsed = parseCSV(text || "");
+  res.json({
+    ok: !!text,
+    urlUsed: url,
+    preview: (text || "").slice(0, 300),
+    headers: parsed.headers,
+    firstRows: parsed.rows.slice(0, 5),
+    metrics: {
+      SPEED:  getMetricValue(text, "SPEED"),
+      FUEL:   getMetricValue(text, "FUEL"),
+      HEALTH: getMetricValue(text, "HEALTH")
+    },
+    state: { speed: state.speed, fuel: state.fuel, water: state.water }
+  });
+});
 
 app.use((req,res)=>res.status(404).json({ ok:false, error:"Not Found", path:req.path }));
 
