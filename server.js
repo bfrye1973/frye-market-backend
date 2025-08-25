@@ -17,10 +17,10 @@ const ALLOW = String(process.env.CORS_ORIGIN || "https://frye-dashboard.onrender
 const REQUIRE_TOKEN = String(process.env.REQUIRE_TOKEN || "0") === "1";
 const AUTH_TOKEN = process.env.AUTH_TOKEN || "";
 
-// Sheet CSVs (you can point all three to the same published Exports CSV)
-const MOMENTUM_SHEET_CSV_URL = process.env.MOMENTUM_SHEET_CSV_URL || ""; // → /gauges/speed (0..220)  Metric=SPEED
-const BREADTH_SHEET_CSV_URL  = process.env.BREADTH_SHEET_CSV_URL  || ""; // → /gauges/fuel  (0..100)  Metric=FUEL
-const HEALTH_SHEET_CSV_URL   = process.env.HEALTH_SHEET_CSV_URL   || ""; // → /gauges/water (0..100)  Metric=HEALTH
+// You can point all three to the same published Exports CSV link
+const MOMENTUM_SHEET_CSV_URL = process.env.MOMENTUM_SHEET_CSV_URL || ""; // Metric=SPEED (0..220)
+const BREADTH_SHEET_CSV_URL  = process.env.BREADTH_SHEET_CSV_URL  || ""; // Metric=FUEL  (0..100)
+const HEALTH_SHEET_CSV_URL   = process.env.HEALTH_SHEET_CSV_URL   || ""; // Metric=HEALTH(0..100)
 const OHLC_CSV_URL           = process.env.OHLC_CSV_URL           || ""; // optional → /gauges/rpm (0..9000)
 
 /* ========================= App ========================= */
@@ -50,7 +50,7 @@ const state = {
   rpm: 5200, // 0..9000
   speed: 0,  // 0..220
   water: 0,  // 0..100
-  oil: 55,   // 0..100 (placeholder)
+  oil: 55,   // placeholder (future)
   fuel: 0,   // 0..100
   lights: { breakout:false, buy:false, sell:false, emaCross:false, stop:false, trail:false, pad1:false, pad2:false, pad3:false, pad4:false },
 };
@@ -75,7 +75,7 @@ function fetchText(url) {
 function parseCSV(text) {
   if (!text) return { headers: [], rows: [] };
   const lines = text.replace(/\r/g, "").trim().split("\n");
-  if (lines.length === 0) return { headers: [], rows: [] };
+  if (!lines.length) return { headers: [], rows: [] };
   const headers = lines[0].split(",").map(h => h.trim());
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
@@ -84,7 +84,7 @@ function parseCSV(text) {
     let cur = "", inQ = false;
     for (let j=0;j<s.length;j++){
       const ch = s[j];
-      if (ch === '"'){ if(inQ && s[j+1] === '"'){ cur+='"'; j++; } else { inQ=!inQ; } }
+      if (ch === '"'){ if (inQ && s[j+1] === '"'){ cur+='"'; j++; } else { inQ=!inQ; } }
       else if (ch === ',' && !inQ){ cols.push(cur); cur=""; }
       else { cur += ch; }
     }
@@ -98,10 +98,10 @@ function parseCSV(text) {
 // Get numeric Value by Metric name from Exports CSV
 function getMetricValue(csvText, metricName, fieldName = "Value") {
   const { headers, rows } = parseCSV(csvText || "");
-  const hasMetric = headers.some(h => h.toLowerCase() === "metric");
-  const valueKey = headers.find(h => h.toLowerCase() === fieldName.toLowerCase()) || fieldName;
-  if (!hasMetric || rows.length === 0) return null;
-  const row = rows.find(r => String(r.Metric || r.metric).toUpperCase() === String(metricName).toUpperCase());
+  const metricKey = headers.find(h => h.toLowerCase() === "metric");
+  const valueKey  = headers.find(h => h.toLowerCase() === fieldName.toLowerCase()) || fieldName;
+  if (!metricKey || !valueKey || !rows.length) return null;
+  const row = rows.find(r => String(r[metricKey]).toUpperCase() === String(metricName).toUpperCase());
   if (!row) return null;
   const n = Number(String(row[valueKey]).replace(/[^0-9.\-]+/g, ""));
   return Number.isFinite(n) ? n : null;
@@ -110,26 +110,25 @@ function getMetricValue(csvText, metricName, fieldName = "Value") {
 /* ========================= Sheets → Gauges ========================= */
 async function updateFromSheets() {
   try {
-    // We allow all three URLs to be the same (one Exports CSV)
+    // fetch each unique URL once
     const urls = [MOMENTUM_SHEET_CSV_URL, BREADTH_SHEET_CSV_URL, HEALTH_SHEET_CSV_URL].filter(Boolean);
     const uniq = [...new Set(urls)];
     const cache = {};
-    // fetch each unique url once
     await Promise.all(uniq.map(async (u) => { cache[u] = await fetchText(u); }));
 
-    // SPEED
+    // SPEED (SPEED row)
     if (MOMENTUM_SHEET_CSV_URL) {
       const t = cache[MOMENTUM_SHEET_CSV_URL];
       const n = getMetricValue(t, "SPEED");
       if (n != null) state.speed = clamp(n, 0, 220, state.speed);
     }
-    // FUEL
+    // FUEL (FUEL row)
     if (BREADTH_SHEET_CSV_URL) {
       const t = cache[BREADTH_SHEET_CSV_URL];
       const n = getMetricValue(t, "FUEL");
       if (n != null) state.fuel = clamp(n, 0, 100, state.fuel);
     }
-    // HEALTH → water
+    // HEALTH → water (HEALTH row)
     if (HEALTH_SHEET_CSV_URL) {
       const t = cache[HEALTH_SHEET_CSV_URL];
       const n = getMetricValue(t, "HEALTH");
