@@ -1,4 +1,4 @@
-// server.js — Ferrari Cluster Live Feed (HTTP + WS, Sheets + OHLC)
+// server.js — Ferrari Cluster Live Feed (Sheets by Metric + WS)
 // Node 18+, npm i express cors morgan ws
 
 /* ========================= Imports & Setup ========================= */
@@ -17,10 +17,10 @@ const ALLOW = String(process.env.CORS_ORIGIN || "https://frye-dashboard.onrender
 const REQUIRE_TOKEN = String(process.env.REQUIRE_TOKEN || "0") === "1";
 const AUTH_TOKEN = process.env.AUTH_TOKEN || "";
 
-// Sheet CSVs
-const MOMENTUM_SHEET_CSV_URL = process.env.MOMENTUM_SHEET_CSV_URL || ""; // → /gauges/speed (0..220)
-const BREADTH_SHEET_CSV_URL  = process.env.BREADTH_SHEET_CSV_URL  || ""; // → /gauges/fuel  (0..100)
-const HEALTH_SHEET_CSV_URL   = process.env.HEALTH_SHEET_CSV_URL   || ""; // → /gauges/water (0..100)
+// Sheet CSVs (you can point all three to the same published Exports CSV)
+const MOMENTUM_SHEET_CSV_URL = process.env.MOMENTUM_SHEET_CSV_URL || ""; // → /gauges/speed (0..220)  Metric=SPEED
+const BREADTH_SHEET_CSV_URL  = process.env.BREADTH_SHEET_CSV_URL  || ""; // → /gauges/fuel  (0..100)  Metric=FUEL
+const HEALTH_SHEET_CSV_URL   = process.env.HEALTH_SHEET_CSV_URL   || ""; // → /gauges/water (0..100)  Metric=HEALTH
 const OHLC_CSV_URL           = process.env.OHLC_CSV_URL           || ""; // optional → /gauges/rpm (0..9000)
 
 /* ========================= App ========================= */
@@ -30,10 +30,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(morgan("tiny"));
 app.use(cors({
-  origin(origin, cb) {
-    if (!origin || ALLOW.includes(origin)) return cb(null, true);
-    return cb(new Error("CORS blocked"));
-  },
+  origin(origin, cb) { if (!origin || ALLOW.includes(origin)) return cb(null, true); return cb(new Error("CORS blocked")); },
   credentials: false,
 }));
 app.options("*", cors());
@@ -46,21 +43,16 @@ function authMiddleware(req, res, next) {
   return res.status(401).json({ ok: false, error: "Unauthorized" });
 }
 
-app.get("/health", (_req, res) =>
-  res.json({ ok: true, service: "tos-backend", time: new Date().toISOString() })
-);
+app.get("/health", (_req, res) => res.json({ ok: true, service: "tos-backend", time: new Date().toISOString() }));
 
 /* ========================= State ========================= */
 const state = {
-  rpm: 5200, // 0..9000 (optional OHLC squeeze)
-  speed: 0,  // 0..220  (Momentum sheet)
-  water: 0,  // 0..100  (Market Health sheet)
-  oil: 55,   // 0..100  (placeholder / future)
-  fuel: 0,   // 0..100  (Breadth sheet)
-  lights: {
-    breakout:false, buy:false, sell:false, emaCross:false, stop:false, trail:false,
-    pad1:false, pad2:false, pad3:false, pad4:false
-  },
+  rpm: 5200, // 0..9000
+  speed: 0,  // 0..220
+  water: 0,  // 0..100
+  oil: 55,   // 0..100 (placeholder)
+  fuel: 0,   // 0..100
+  lights: { breakout:false, buy:false, sell:false, emaCross:false, stop:false, trail:false, pad1:false, pad2:false, pad3:false, pad4:false },
 };
 
 /* ========================= Helpers ========================= */
@@ -69,7 +61,6 @@ function clamp(n, lo, hi, fallback = 0) {
   if (!Number.isFinite(x)) return fallback;
   return Math.max(lo, Math.min(hi, x));
 }
-
 function fetchText(url) {
   return new Promise(resolve => {
     if (!url) return resolve(null);
@@ -80,78 +71,68 @@ function fetchText(url) {
     }).on("error", () => resolve(null));
   });
 }
-
-// Small CSV parser that returns { headers:[], rows:[{col:value,...}], rawLines:[] }
+// CSV parser
 function parseCSV(text) {
-  if (!text) return { headers: [], rows: [], rawLines: [] };
+  if (!text) return { headers: [], rows: [] };
   const lines = text.replace(/\r/g, "").trim().split("\n");
-  if (lines.length === 0) return { headers: [], rows: [], rawLines: [] };
+  if (lines.length === 0) return { headers: [], rows: [] };
   const headers = lines[0].split(",").map(h => h.trim());
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
-    if (!lines[i]) continue;
+    const s = lines[i]; if (!s) continue;
     const cols = [];
     let cur = "", inQ = false;
-    const s = lines[i];
-    for (let j=0; j<s.length; j++) {
+    for (let j=0;j<s.length;j++){
       const ch = s[j];
-      if (ch === '"') {
-        if (inQ && s[j+1] === '"') { cur += '"'; j++; }
-        else { inQ = !inQ; }
-      } else if (ch === ',' && !inQ) {
-        cols.push(cur); cur = "";
-      } else { cur += ch; }
+      if (ch === '"'){ if(inQ && s[j+1] === '"'){ cur+='"'; j++; } else { inQ=!inQ; } }
+      else if (ch === ',' && !inQ){ cols.push(cur); cur=""; }
+      else { cur += ch; }
     }
     cols.push(cur);
     const obj = {};
-    headers.forEach((h, idx) => { obj[h] = (cols[idx] ?? "").trim(); });
+    headers.forEach((h, k) => obj[h] = (cols[k] ?? "").trim());
     rows.push(obj);
   }
-  return { headers, rows, rawLines: lines };
+  return { headers, rows };
 }
-
-// Utility: read first numeric from either a named column or second column
-function firstNumberFromCSV(csvText, opts = {}) {
-  const { field } = opts || {};
-  const parsed = parseCSV(csvText);
-  if (parsed.rows.length === 0) return null;
-  const row = parsed.rows[0];
-  if (field && row.hasOwnProperty(field)) {
-    const n = Number(String(row[field]).replace(/[^0-9.\-]+/g, ""));
-    return Number.isFinite(n) ? n : null;
-  }
-  // fallback: second column of first row
-  const headers = parsed.headers;
-  if (headers.length >= 2) {
-    const h = headers[1];
-    const n = Number(String(row[h]).replace(/[^0-9.\-]+/g, ""));
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
+// Get numeric Value by Metric name from Exports CSV
+function getMetricValue(csvText, metricName, fieldName = "Value") {
+  const { headers, rows } = parseCSV(csvText || "");
+  const hasMetric = headers.some(h => h.toLowerCase() === "metric");
+  const valueKey = headers.find(h => h.toLowerCase() === fieldName.toLowerCase()) || fieldName;
+  if (!hasMetric || rows.length === 0) return null;
+  const row = rows.find(r => String(r.Metric || r.metric).toUpperCase() === String(metricName).toUpperCase());
+  if (!row) return null;
+  const n = Number(String(row[valueKey]).replace(/[^0-9.\-]+/g, ""));
+  return Number.isFinite(n) ? n : null;
 }
 
 /* ========================= Sheets → Gauges ========================= */
-// Poll sheets every 2s and update speed/fuel/water.
 async function updateFromSheets() {
   try {
-    // Momentum → Speed (0..220)
+    // We allow all three URLs to be the same (one Exports CSV)
+    const urls = [MOMENTUM_SHEET_CSV_URL, BREADTH_SHEET_CSV_URL, HEALTH_SHEET_CSV_URL].filter(Boolean);
+    const uniq = [...new Set(urls)];
+    const cache = {};
+    // fetch each unique url once
+    await Promise.all(uniq.map(async (u) => { cache[u] = await fetchText(u); }));
+
+    // SPEED
     if (MOMENTUM_SHEET_CSV_URL) {
-      const t = await fetchText(MOMENTUM_SHEET_CSV_URL);
-      const n = firstNumberFromCSV(t); // set MOMENTUM_FIELD env later if needed
+      const t = cache[MOMENTUM_SHEET_CSV_URL];
+      const n = getMetricValue(t, "SPEED");
       if (n != null) state.speed = clamp(n, 0, 220, state.speed);
     }
-
-    // Breadth → Fuel (0..100)
+    // FUEL
     if (BREADTH_SHEET_CSV_URL) {
-      const t = await fetchText(BREADTH_SHEET_CSV_URL);
-      const n = firstNumberFromCSV(t);
+      const t = cache[BREADTH_SHEET_CSV_URL];
+      const n = getMetricValue(t, "FUEL");
       if (n != null) state.fuel = clamp(n, 0, 100, state.fuel);
     }
-
-    // Market Health → Water (0..100)
+    // HEALTH → water
     if (HEALTH_SHEET_CSV_URL) {
-      const t = await fetchText(HEALTH_SHEET_CSV_URL);
-      const n = firstNumberFromCSV(t);
+      const t = cache[HEALTH_SHEET_CSV_URL];
+      const n = getMetricValue(t, "HEALTH");
       if (n != null) state.water = clamp(n, 0, 100, state.water);
     }
   } catch (e) {
@@ -160,82 +141,51 @@ async function updateFromSheets() {
 }
 setInterval(updateFromSheets, 2000);
 
-/* ========================= Optional OHLC → RPM =========================
-   If OHLC_CSV_URL exists, we compute a "squeeze" → map to 0..9000.
-   Very lightweight BB/KC approximation:
-   - Period N=20
-   - BB width  = 2 * 2σ (std dev)
-   - KC width  = 2 * EMA(ATR, 20) * k  (k ~ 1.5)
-   - Pressure  = max(0, KC - BB) / (KC + 1e-6)
-   - RPM       = round( pressure * 9000 )
-*/
+/* ========================= Optional OHLC → RPM ========================= */
 function ema(prev, value, alpha) { return prev == null ? value : prev + alpha * (value - prev); }
 function rollingStd(values, period) {
-  const n = values.length;
-  if (n < period) return null;
+  const n = values.length; if (n < period) return null;
   const slice = values.slice(n - period);
   const avg = slice.reduce((a,b)=>a+b,0) / period;
   const v = slice.reduce((a,b)=>a+(b-avg)*(b-avg),0) / period;
   return Math.sqrt(v);
 }
-function computeATR(ohlc, i, period) {
-  // TR = max(H-L, |H-Cprev|, |L-Cprev|)
+function computeATR(ohlc, period) {
   let atr = null, alpha = 2 / (period + 1);
-  for (let k = 0; k <= i; k++) {
+  for (let k = 0; k < ohlc.length; k++) {
     const cPrev = k > 0 ? ohlc[k-1].c : ohlc[k].c;
-    const tr = Math.max(
-      ohlc[k].h - ohlc[k].l,
-      Math.abs(ohlc[k].h - cPrev),
-      Math.abs(ohlc[k].l - cPrev)
-    );
+    const tr = Math.max(ohlc[k].h - ohlc[k].l, Math.abs(ohlc[k].h - cPrev), Math.abs(ohlc[k].l - cPrev));
     atr = ema(atr, tr, alpha);
   }
   return atr;
 }
 function parseOHLC(csvText) {
-  const { headers, rows } = parseCSV(csvText);
-  // Attempt to autodetect columns: time, open, high, low, close
-  const map = { t:null, o:null, h:null, l:null, c:null };
+  const { headers, rows } = parseCSV(csvText || "");
+  if (!rows.length) return [];
   const pick = (name) => headers.find(h => h.toLowerCase().includes(name));
-  map.t = pick("time") || pick("date") || headers[0];
-  map.o = pick("open") || "open";
-  map.h = pick("high") || "high";
-  map.l = pick("low")  || "low";
-  map.c = pick("close")|| "close";
+  const map = { o: pick("open") || "open", h: pick("high") || "high", l: pick("low") || "low", c: pick("close") || "close" };
   const out = [];
-  rows.forEach(r => {
-    const o = Number(r[map.o]); const h = Number(r[map.h]);
-    const l = Number(r[map.l]); const c = Number(r[map.c]);
+  for (const r of rows) {
+    const o = Number(r[map.o]); const h = Number(r[map.h]); const l = Number(r[map.l]); const c = Number(r[map.c]);
     if ([o,h,l,c].every(Number.isFinite)) out.push({ o,h,l,c });
-  });
+  }
   return out;
 }
 async function updateRPMFromOHLC() {
-  if (!OHLC_CSV_URL) return; // not configured yet
+  if (!OHLC_CSV_URL) return;
   try {
     const text = await fetchText(OHLC_CSV_URL);
-    if (!text) return;
     const ohlc = parseOHLC(text);
     const N = 20, kKC = 1.5;
     const closes = ohlc.map(x => x.c);
     if (closes.length < N + 1) return;
-
-    const std = rollingStd(closes, N);
-    if (std == null) return;
-
-    // BB width ~ 4σ
+    const std = rollingStd(closes, N); if (std == null) return;
     const bbWidth = 4 * std;
-
-    // KC width ~ 2 * EMA(ATR, N) * kKC
-    const atrN = computeATR(ohlc, ohlc.length - 1, N);
+    const atrN = computeATR(ohlc, N);
     const kcWidth = 2 * atrN * kKC;
-
-    const pressure = Math.max(0, kcWidth - bbWidth) / (kcWidth + 1e-9); // 0..1
-    const rpm = Math.round(clamp(pressure, 0, 1) * 9000);
-    state.rpm = clamp(rpm, 0, 9000, state.rpm);
-  } catch (e) {
-    // Keep last RPM if fetch/parse fails
-  }
+    const pressure = Math.max(0, kcWidth - bbWidth) / (kcWidth + 1e-9);
+    state.rpm = Math.round(clamp(pressure, 0, 1) * 9000);
+  } catch {}
 }
 setInterval(updateRPMFromOHLC, 600);
 
@@ -254,9 +204,7 @@ app.get("/gauges/oil",   ...gaugeHandler("oil",    100));
 app.get("/gauges/fuel",  ...gaugeHandler("fuel",   100));
 
 app.get("/gauges", authMiddleware, (_req, res) => {
-  res.json({
-    rpm:state.rpm, speed:state.speed, water:state.water, oil:state.oil, fuel:state.fuel, ts:Date.now()
-  });
+  res.json({ rpm:state.rpm, speed:state.speed, water:state.water, oil:state.oil, fuel:state.fuel, ts:Date.now() });
 });
 
 app.get("/signals", authMiddleware, (_req, res) => res.json({ ...state.lights, ts: Date.now() }));
