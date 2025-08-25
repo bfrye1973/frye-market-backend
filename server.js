@@ -1,509 +1,128 @@
-// server.js — single-file Express backend (CommonJS)
-// Node 18+ recommended (global fetch available).
+// server.js — Ferrari Cluster Live Feed (HTTP + WS)
+// Node 18+, npm i express cors morgan ws
 
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
-const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
+const http = require("http");
+const { WebSocketServer } = require("ws");
 
-/* ===================== Config ===================== */
-const PORT = process.env.PORT || 3000;
-
-const DEFAULT_ORIGINS = "https://frye-dashboard.onrender.com";
-const ALLOW_LIST = String(process.env.CORS_ORIGIN || DEFAULT_ORIGINS)
+const PORT = process.env.PORT || 8080;
+const ALLOW = String(process.env.CORS_ORIGIN || "https://frye-dashboard.onrender.com")
   .split(",").map(s => s.trim()).filter(Boolean);
 
-const TOKEN_PATH = process.env.SCHWAB_TOKEN_PATH || "/data/schwab_tokens.json";
+const REQUIRE_TOKEN = String(process.env.REQUIRE_TOKEN || "0") === "1";
+const AUTH_TOKEN = process.env.AUTH_TOKEN || "";
+const DEMO = String(process.env.DEMO || "1") === "1";
 
-/* ===================== App ===================== */
 const app = express();
 app.set("trust proxy", 1);
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.use(morgan("combined"));
+app.use(morgan("tiny"));
 app.use(cors({
-  origin(origin, cb) {
-    if (!origin || ALLOW_LIST.includes(origin)) return cb(null, true);
-    return cb(new Error("Not allowed by CORS"));
-  },
-  methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization","x-api-key"],
-  credentials: false
+  origin(origin, cb) { if (!origin || ALLOW.includes(origin)) return cb(null, true); return cb(new Error("CORS blocked")); },
+  credentials: false,
 }));
 app.options("*", cors());
 
-/* ===================== Health ===================== */
-app.get("/", (_req,res)=>res.send("Frye API up"));
-app.get("/health", (_req,res)=>res.status(200).json({ ok:true, service:"backend", time:new Date().toISOString() }));
-app.get("/api/health", (_req,res)=>res.status(200).json({ ok:true, service:"backend", alias:"/api/health", time:new Date().toISOString() }));
-app.get("/api/healthz", (_req,res)=>res.status(200).json({ ok:true, service:"backend", alias:"/api/healthz", time:new Date().toISOString() }));
-
-/* ===================== Ping / Echo ===================== */
-app.get("/api/ping", (_req,res)=>res.json({ ok:true, message:"pong", ts:Date.now(), path:"/api/ping" }));
-app.get("/api/v1/ping", (_req,res)=>res.json({ ok:true, message:"pong", ts:Date.now(), path:"/api/v1/ping" }));
-app.post("/api/v1/echo", (req,res)=>res.json({ ok:true, received:req.body ?? null, ts:Date.now() }));
-
-/* ===================== Polygon: quotes ===================== */
-app.get("/api/v1/quotes", async (req, res) => {
-  const symbol = String(req.query.symbol || "SPY").toUpperCase();
-  const key = process.env.POLYGON_API_KEY;
-
-  if (!key) {
-    const prevClose = 443.21, price = 444.44;
-    const change = +(price - prevClose).toFixed(2);
-    const pct = +((change / prevClose) * 100).toFixed(2);
-    return res.json({ ok:true, symbol, price, prevClose, change, pct, time:new Date().toISOString(), source:"stub" });
-  }
-
-  try {
-    const encoded = encodeURIComponent(symbol);
-    const [lastResp, prevResp] = await Promise.all([
-      fetch(`https://api.polygon.io/v2/last/trade/${encoded}?apiKey=${key}`),
-      fetch(`https://api.polygon.io/v2/aggs/ticker/${encoded}/prev?adjusted=true&apiKey=${key}`)
-    ]);
-    const lastJson = await lastResp.json();
-    const prevJson = await prevResp.json();
-    if (!lastResp.ok) return res.status(lastResp.status).json({ ok:false, error:lastJson?.error || "Polygon error", data:lastJson });
-
-    const r = lastJson?.results || {};
-    const rawTs = r.t ?? Date.now();
-    const tsMs = (typeof rawTs === "number" && rawTs > 1e12) ? Math.round(rawTs / 1e6) : rawTs; // ns->ms
-    const price = r.p ?? r.price ?? null;
-    const prevClose = Array.isArray(prevJson?.results) && prevJson.results[0] ? (prevJson.results[0].c ?? null) : null;
-
-    let change = null, pct = null;
-    if (typeof price === "number" && typeof prevClose === "number" && prevClose) {
-      change = +(price - prevClose).toFixed(2);
-      pct = +((change / prevClose) * 100).toFixed(2);
-    }
-    res.json({ ok:true, symbol, price, prevClose, change, pct, time:new Date(tsMs).toISOString(), source:"polygon" });
-  } catch (err) {
-    res.status(500).json({ ok:false, error: err?.message || String(err) });
-  }
-});
-
-/* ===================== Polygon: OHLC ===================== */
-app.get("/api/v1/ohlc", async (req, res) => {
-  try {
-    const symbol = String(req.query.symbol || "SPY").toUpperCase();
-    const tf = String(req.query.timeframe || "1m").toLowerCase(); // 1m,5m,15m,30m,1h,1d
-    const now = new Date(), toISO = now.toISOString().slice(0,10);
-
-    const tfMap = {
-      "1m": { mult:1,  span:"minute", lookbackDays: 2 },
-      "5m": { mult:5,  span:"minute", lookbackDays: 7 },
-      "15m":{ mult:15, span:"minute", lookbackDays:14 },
-      "30m":{ mult:30, span:"minute", lookbackDays:30 },
-      "1h": { mult:60, span:"minute", lookbackDays:30 },
-      "1d": { mult:1,  span:"day",    lookbackDays:365 }
-    };
-    const cfg = tfMap[tf] || tfMap["1m"];
-    const from = new Date(now.getTime() - cfg.lookbackDays*24*60*60*1000).toISOString().slice(0,10);
-    const key = process.env.POLYGON_API_KEY;
-
-    if (!key) {
-      const n = 200; let price = 400; const out = [];
-      for (let i=0;i<n;i++){
-        const o = price, h = o + Math.random()*2, l = o - Math.random()*2, c = l + Math.random()*(h-l);
-        const v = Math.floor(1_000_000*(0.6+Math.random())); price = c;
-        const t = Date.now() - (n-i)*cfg.mult*60*1000;
-        out.push({ t, o:+o.toFixed(2), h:+h.toFixed(2), l:+l.toFixed(2), c:+c.toFixed(2), v });
-      }
-      return res.json({ ok:true, symbol, timeframe:tf, source:"stub", bars:out });
-    }
-
-    const encoded = encodeURIComponent(symbol);
-    const url = `https://api.polygon.io/v2/aggs/ticker/${encoded}/range/${cfg.mult}/${cfg.span}/${from}/${toISO}?adjusted=true&sort=asc&limit=50000&apiKey=${key}`;
-    const r = await fetch(url); const j = await r.json();
-    if (!r.ok) return res.status(r.status).json({ ok:false, error:j?.error || "Polygon error", data:j });
-
-    const bars = Array.isArray(j?.results) ? j.results.map(b=>({ t:b.t, o:b.o, h:b.h, l:b.l, c:b.c, v:b.v })) : [];
-    res.json({ ok:true, symbol, timeframe:tf, source:"polygon", bars });
-  } catch (err) {
-    res.status(500).json({ ok:false, error: err?.message || String(err) });
-  }
-});
-
-/* ========== Market Monitor CSV + Gauges ========== */
-const MARKET_MONITOR_CSV_URL = process.env.MARKET_MONITOR_CSV_URL || "";
-const DEFAULT_GROUPS = [
-  "Large Cap","Mid Cap","Small Cap","Tech","Consumer","Healthcare","Financials",
-  "Energy","Industrials","Materials","Defensive","Real Estate","Communication Services","Utilities"
-];
-const GAUGE_GROUPS = (process.env.GAUGE_GROUPS || "").split(",").map(s=>s.trim()).filter(Boolean);
-const GROUPS_ORDER = GAUGE_GROUPS.length ? GAUGE_GROUPS : DEFAULT_GROUPS;
-
-let _mmCache = { at:0, rows:null };
-
-function parseCsvSimple(text){
-  const lines = text.trim().split(/\r?\n/).filter(Boolean);
-  const rows = []; const num = v => Number(String(v).replace(/[^0-9.\-]/g,"")) || 0;
-
-  for (const line of lines){
-    const cols = line.split(",").map(s=>s.trim());
-    const rawDate = cols[0]; if (!rawDate || rawDate.toLowerCase().includes("date")) continue;
-
-    // Accept YYYY-MM-DD or M/D or M/D/Y
-    let iso;
-    if (rawDate.includes("/")) {
-      const parts = rawDate.split("/").map(x=>parseInt(x,10));
-      const y = parts.length===3 ? parts[2] : new Date().getFullYear();
-      const m = parts[0], d = parts[1];
-      if (!m || !d) continue;
-      iso = `${String(y).padStart(4,"0")}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-    } else {
-      iso = rawDate.slice(0,10);
-    }
-
-    const indices = { QQQ:num(cols[1]), SPY:num(cols[2]), MDY:num(cols[3]), IWM:num(cols[4]) };
-
-    const groups = {}; let base = 5;
-    for (const name of DEFAULT_GROUPS){
-      const g = { "10NH":num(cols[base]), "10NL":num(cols[base+1]), "3U":num(cols[base+2]), "3D":num(cols[base+3]) };
-      g.net = g["10NH"] - g["10NL"];
-      groups[name] = g; base += 4;
-    }
-    rows.push({ date: iso, indices, groups });
-  }
-  return rows.filter(r=>r.date);
-}
-async function fetchMarketRows(limit=30){
-  if (!MARKET_MONITOR_CSV_URL) return [];
-  const now = Date.now();
-  if (_mmCache.rows && now - _mmCache.at < 60_000) return _mmCache.rows.slice(-limit);
-  const r = await fetch(MARKET_MONITOR_CSV_URL); if (!r.ok) throw new Error("CSV fetch failed");
-  const csv = await r.text(); const rows = parseCsvSimple(csv);
-  _mmCache = { at: now, rows }; return rows.slice(-limit);
+function authMiddleware(req, res, next) {
+  if (!REQUIRE_TOKEN) return next();
+  const hdr = req.headers["authorization"] || "";
+  const token = hdr.startsWith("Bearer ") ? hdr.slice(7) : "";
+  if (token && token === AUTH_TOKEN) return next();
+  return res.status(401).json({ ok: false, error: "Unauthorized" });
 }
 
-app.get("/api/v1/market-monitor", async (req,res)=>{
-  try{
-    const limit = Math.max(1, Math.min(365, Number(req.query.limit || 30)));
-    const latest = String(req.query.latest || "false").toLowerCase() === "true";
-    if (!MARKET_MONITOR_CSV_URL) return res.json({ ok:true, source:"stub", rows:[] });
-    const rows = await fetchMarketRows(limit); const out = rows.slice(-limit);
-    res.json({ ok:true, source:"sheet", rows: latest ? [out[out.length-1]] : out });
-  } catch(err){ res.status(500).json({ ok:false, error: err?.message || String(err) }); }
-});
-app.get("/api/v1/gauges", async (req,res)=>{
-  try{
-    const rows = await fetchMarketRows(2);
-    if (!rows.length) return res.json({ ok:true, asOf:null, indices:{}, breadth:{} });
+app.get("/health", (_req, res) => res.json({ ok: true, service: "tos-backend", time: new Date().toISOString() }));
 
-    const latest = rows[rows.length-1];
-    const prev   = rows.length>1 ? rows[rows.length-2] : null;
+const state = {
+  rpm: 5200, speed: 68, water: 62, oil: 55, fuel: 73,
+  lights: { breakout:false, buy:false, sell:false, emaCross:false, stop:false, trail:false, pad1:false, pad2:false, pad3:false, pad4:false },
+};
 
-    const indices = latest.indices || {};
-    const sum = (row, field) => Object.values(row.groups||{}).reduce((a,g)=>a + Number(g?.[field]||0), 0);
-
-    const totalNH = sum(latest,"10NH");
-    const totalNL = sum(latest,"10NL");
-    const totalNet = totalNH - totalNL;
-    const prevTotalNet = prev ? (sum(prev,"10NH") - sum(prev,"10NL")) : null;
-
-    const breadth = { total:{ nh:totalNH, nl:totalNL, net:totalNet, deltaNet: prev ? (totalNet - prevTotalNet) : null } };
-
-    for (const name of GROUPS_ORDER){
-      const g  = (latest.groups||{})[name] || {};
-      const gp = prev ? ((prev.groups||{})[name] || {}) : null;
-      const nh = Number(g["10NH"]||0), nl = Number(g["10NL"]||0);
-      const net = nh - nl;
-      const prevNet = gp ? (Number(gp["10NH"]||0) - Number(gp["10NL"]||0)) : 0;
-      breadth[name] = { nh, nl, net, deltaNet: prev ? (net - prevNet) : null };
-    }
-    res.json({ ok:true, asOf:latest.date, indices, breadth });
-  } catch(err){ res.status(500).json({ ok:false, error: err?.message || String(err) }); }
-});
-
-/* ========== Schwab OAuth + API ========== */
-const SCHWAB_AUTHORIZE = "https://api.schwabapi.com/v1/oauth/authorize";
-const SCHWAB_TOKEN     = "https://api.schwabapi.com/v1/oauth/token";
-const SCHWAB_BASE      = "https://api.schwabapi.com/trader/v1";
-
-let schwabTokens = null;                // { access_token, refresh_token, expires_at }
-const pkceMap = new Map();              // state -> { verifier, t }
-
-/* persistence (requires /data disk mounted) */
-function readTokensFromDisk(){
-  try { if (fs.existsSync(TOKEN_PATH)) schwabTokens = JSON.parse(fs.readFileSync(TOKEN_PATH,"utf8")); }
-  catch { /* ignore */ }
-}
-function writeTokensToDisk(){
-  try {
-    const dir = path.dirname(TOKEN_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify(schwabTokens || {}, null, 2));
-  } catch { /* ignore */ }
-}
-readTokensFromDisk();
-
-/* helpers */
-function b64url(buf){ return buf.toString("base64").replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
-function makePkce(){ const v=b64url(crypto.randomBytes(32)); const c=b64url(crypto.createHash("sha256").update(v).digest()); return { verifier:v, challenge:c }; }
-function makeState(){ return b64url(crypto.randomBytes(16)); }
-function tokenExpiringSoon(){
-  if (!schwabTokens || !schwabTokens.expires_at) return true;
-  return Date.now() > (schwabTokens.expires_at - 60_000); // refresh 1m early
-}
-async function refreshIfNeeded(){
-  if (!schwabTokens) throw new Error("Not connected to Schwab");
-  if (!tokenExpiringSoon()) return;
-
-  const form = new URLSearchParams();
-  form.set("grant_type", "refresh_token");
-  form.set("refresh_token", schwabTokens.refresh_token);
-  form.set("client_id", process.env.SCHWAB_APP_KEY);
-
-  const basic = "Basic " + Buffer.from(
-    (process.env.SCHWAB_APP_KEY || "") + ":" + (process.env.SCHWAB_APP_SECRET || "")
-  ).toString("base64");
-
-  const r = await fetch(SCHWAB_TOKEN, {
-    method:"POST",
-    headers:{ "Content-Type":"application/x-www-form-urlencoded", "Authorization": basic },
-    body: form
-  });
-  const j = await r.json();
-  if (!r.ok) { console.error("Schwab refresh error:", j); throw new Error("Token refresh failed"); }
-  schwabTokens = {
-    access_token:  j.access_token,
-    refresh_token: j.refresh_token || schwabTokens.refresh_token,
-    expires_at:    Date.now() + (Number(j.expires_in || 0) * 1000)
+function rand(lo, hi){ return Math.floor(Math.random()*(hi-lo+1))+lo; }
+function tickDemo(){
+  if(!DEMO) return;
+  state.rpm   = (state.rpm + rand(120,240)) % 9000;
+  state.speed = (state.speed + rand(1,3)) % 220;
+  state.water = Math.max(30, Math.min(80, state.water + rand(-2,2)));
+  state.oil   = Math.max(40, Math.min(80, state.oil   + rand(-2,2)));
+  state.fuel  = Math.max(20, Math.min(95, state.fuel  + (Math.random()<0.05 ? -1 : 0)));
+  const r = Math.random();
+  state.lights = {
+    breakout: r < 0.10,
+    buy:      r > 0.60 && r < 0.68,
+    sell:     r > 0.68 && r < 0.76,
+    emaCross: r > 0.76 && r < 0.84,
+    stop:     r > 0.84 && r < 0.92,
+    trail:    r > 0.92,
+    pad1:false, pad2:false, pad3:false, pad4:false,
   };
-  writeTokensToDisk();
 }
-async function schwabGet(path, qs){
-  if (!schwabTokens) return { status:401, json:{ ok:false, error:"Not connected. Visit /api/auth/schwab/login" } };
-  await refreshIfNeeded();
-  const url = new URL(SCHWAB_BASE + path);
-  if (qs) for (const [k,v] of Object.entries(qs)) if (v!==undefined) url.searchParams.set(k,String(v));
-  const r = await fetch(url.toString(), { method:"GET", headers:{ "Authorization":`Bearer ${schwabTokens.access_token}`, "Accept":"application/json" } });
-  let j; try{ j = await r.json(); } catch { j = {}; }
-  return { status:r.status, json:j };
+setInterval(tickDemo, 400);
+
+function gaugeHandler(key, max){
+  return [authMiddleware, (_req, res)=>{
+    let value = state[key]; if(!Number.isFinite(value)) value = 0;
+    value = Math.max(0, Math.min(max, value));
+    res.json({ value, ts: Date.now() });
+  }];
 }
-async function schwabPost(path, payload){
-  if (!schwabTokens) return { status:401, json:{ ok:false, error:"Not connected. Visit /api/auth/schwab/login" } };
-  await refreshIfNeeded();
-  const url = new URL(SCHWAB_BASE + path);
-  const r = await fetch(url.toString(), {
-    method:"POST",
-    headers:{
-      "Authorization":`Bearer ${schwabTokens.access_token}`,
-      "Accept":"application/json",
-      "Content-Type":"application/json"
-    },
-    body: JSON.stringify(payload)
-  });
-  let j; try{ j = await r.json(); } catch { j = {}; }
-  return { status:r.status, json:j };
-}
+app.get("/gauges/rpm",   ...gaugeHandler("rpm",   9000));
+app.get("/gauges/speed", ...gaugeHandler("speed",  220));
+app.get("/gauges/water", ...gaugeHandler("water",  100));
+app.get("/gauges/oil",   ...gaugeHandler("oil",    100));
+app.get("/gauges/fuel",  ...gaugeHandler("fuel",   100));
 
-/* OAuth start */
-app.get("/api/auth/schwab/login", (_req,res)=>{
-  const clientId = process.env.SCHWAB_APP_KEY;
-  const redirect = process.env.SCHWAB_REDIRECT_URI;
-  if (!clientId || !redirect) return res.status(500).send("Missing SCHWAB_APP_KEY or SCHWAB_REDIRECT_URI");
-
-  const { verifier, challenge } = makePkce();
-  const state = makeState();
-  pkceMap.set(state, { verifier, t:Date.now() });
-
-  const url = new URL(SCHWAB_AUTHORIZE);
-  url.searchParams.set("response_type","code");
-  url.searchParams.set("client_id", clientId);
-  url.searchParams.set("redirect_uri", redirect);
-  url.searchParams.set("code_challenge", challenge);
-  url.searchParams.set("code_challenge_method","S256");
-  url.searchParams.set("state", state);
-  res.redirect(url.toString());
+app.get("/gauges", authMiddleware, (_req, res) => {
+  res.json({ rpm:state.rpm, speed:state.speed, water:state.water, oil:state.oil, fuel:state.fuel, ts:Date.now() });
 });
 
-/* OAuth callback */
-app.get("/api/auth/schwab/callback", async (req,res)=>{
-  try{
-    const code = req.query.code, state = req.query.state;
-    const saved = pkceMap.get(state); if (!code || !saved) return res.status(400).send("Invalid/missing state or code");
-    pkceMap.delete(state);
+app.get("/signals", authMiddleware, (_req, res) => res.json({ ...state.lights, ts: Date.now() }));
 
-    const form = new URLSearchParams();
-    form.set("grant_type","authorization_code");
-    form.set("code", String(code));
-    form.set("redirect_uri", process.env.SCHWAB_REDIRECT_URI);
-    form.set("client_id", process.env.SCHWAB_APP_KEY);
-    form.set("code_verifier", saved.verifier);
-
-    const basic = "Basic " + Buffer.from(
-      (process.env.SCHWAB_APP_KEY || "") + ":" + (process.env.SCHWAB_APP_SECRET || "")
-    ).toString("base64");
-
-    const r = await fetch(SCHWAB_TOKEN, {
-      method:"POST",
-      headers:{ "Content-Type":"application/x-www-form-urlencoded", "Authorization": basic },
-      body: form
-    });
-    const j = await r.json();
-    if (!r.ok) { console.error("Schwab token error:", j); return res.status(500).send("Token exchange failed — see logs."); }
-
-    schwabTokens = {
-      access_token:  j.access_token,
-      refresh_token: j.refresh_token,
-      expires_at:    Date.now() + (Number(j.expires_in || 0) * 1000)
-    };
-    writeTokensToDisk();
-    res.send("Schwab connected ✅ — tokens received.");
-  } catch(err){ console.error(err); res.status(500).send("Auth callback error."); }
-});
-
-/* OAuth status */
-app.get("/api/auth/schwab/status", (_req,res)=>{
-  const ok = !!(schwabTokens && schwabTokens.access_token);
-  res.json({ ok, expires_at: schwabTokens?.expires_at || null });
-});
-
-/* Schwab READ endpoints */
-app.get("/api/schwab/accountNumbers", async (_req,res)=>{
-  try{ const { status, json } = await schwabGet("/accounts/accountNumbers"); res.status(status).json(json); }
-  catch(err){ res.status(500).json({ ok:false, error: err.message || String(err) }); }
-});
-app.get("/api/schwab/accounts", async (req,res)=>{
-  try{ const { status, json } = await schwabGet("/accounts", req.query); res.status(status).json(json); }
-  catch(err){ res.status(500).json({ ok:false, error: err.message || String(err) }); }
-});
-
-/* Positions — robust: map hash -> accountNumber, then filter /accounts?fields=positions */
-app.get("/api/schwab/positions", async (req, res) => {
-  try {
-    const hash = String(req.query.hash || "").trim();
-    if (!hash) return res.status(400).json({ ok: false, error: "Missing ?hash=<accountHash>" });
-
-    // map hash -> accountNumber
-    const map = await schwabGet("/accounts/accountNumbers");
-    if (map.status !== 200 || !Array.isArray(map.json))
-      return res.status(map.status || 500).json(map.json || { ok:false, error:"Unable to resolve accountNumbers" });
-
-    const row = map.json.find(x => String(x.hashValue).toUpperCase() === hash.toUpperCase());
-    const acctNum = row?.accountNumber;
-    if (!acctNum) return res.status(404).json({ ok:false, error:"Hash not found in accountNumbers map" });
-
-    // get all positions and filter to this account
-    const all = await schwabGet("/accounts", { fields: "positions" });
-    if (all.status !== 200) return res.status(all.status).json(all.json);
-
-    const list = Array.isArray(all.json) ? all.json : [];
-    const match = list.find(a => String(a?.securitiesAccount?.accountNumber) === String(acctNum));
-
-    if (match?.securitiesAccount?.positions) return res.status(200).json(match.securitiesAccount.positions);
-    if (match) return res.status(200).json([]); // no open positions
-    return res.status(200).json(list);          // fallback inspection
-  } catch (err) {
-    return res.status(500).json({ ok:false, error: err.message || String(err) });
-  }
-});
-
-/* ========== ORDER PREVIEW + GUARDED LIVE ========== */
-const LIVE_TRADING_ENABLED =
-  String(process.env.LIVE_TRADING_ENABLED || "false").toLowerCase() === "true";
-const MAX_ORDER_QTY      = Number(process.env.MAX_ORDER_QTY || 1000);
-const MAX_ORDER_NOTIONAL = Number(process.env.MAX_ORDER_NOTIONAL || 50000);
-const ALLOWED_SYMBOLS    = (process.env.ALLOWED_SYMBOLS || "")
-  .split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
-
-// optional notional check via Polygon
-async function getLastPrice(symbol){
-  const key = process.env.POLYGON_API_KEY;
-  if (!key) return null;
-  try {
-    const encoded = encodeURIComponent(symbol);
-    const r = await fetch(`https://api.polygon.io/v2/last/trade/${encoded}?apiKey=${key}`);
-    const j = await r.json();
-    const p = j?.results?.p ?? j?.results?.price ?? null;
-    return (typeof p === "number" && p > 0) ? p : null;
-  } catch { return null; }
-}
-async function preTradeRisk({ symbol, qty }){
-  const sym = String(symbol).toUpperCase();
-  const q   = Number(qty);
-  if (!Number.isFinite(q) || q <= 0)      return "qty must be > 0";
-  if (q > MAX_ORDER_QTY)                  return `qty exceeds max (${MAX_ORDER_QTY})`;
-  if (ALLOWED_SYMBOLS.length && !ALLOWED_SYMBOLS.includes(sym))
-                                          return `symbol ${sym} not in ALLOWED_SYMBOLS`;
-  const px = await getLastPrice(sym);
-  if (px && (px*q) > MAX_ORDER_NOTIONAL)  return `notional exceeds max (${MAX_ORDER_NOTIONAL})`;
-  return null;
-}
-function buildEquityOrder({ symbol, side, qty, type, limitPrice, tif="DAY" }){
-  const instruction = String(side).toLowerCase() === "sell" ? "SELL" : "BUY";
-  const orderType   = String(type).toLowerCase() === "limit" ? "LIMIT" : "MARKET";
-  const order = {
-    orderType,
-    session: "NORMAL",
-    duration: tif.toUpperCase(),
-    orderStrategyType: "SINGLE",
-    orderLegCollection: [
-      {
-        instruction,
-        quantity: Number(qty),
-        instrument: { symbol: String(symbol).toUpperCase(), assetType: "EQUITY" }
-      }
-    ]
-  };
-  if (orderType === "LIMIT") order.price = Number(limitPrice);
-  return order;
-}
-
-// Preview (local checks only)
-app.post("/api/schwab/orders/preview", async (req,res)=>{
-  try{
-    const { accountHash, symbol, side, qty, type, limitPrice, tif } = req.body || {};
-    if (!accountHash) return res.status(400).json({ ok:false, error:"accountHash required" });
-    if (!symbol)      return res.status(400).json({ ok:false, error:"symbol required" });
-
-    const riskError = await preTradeRisk({ symbol, qty });
-    if (riskError) return res.status(400).json({ ok:false, error:`risk: ${riskError}` });
-
-    const order = buildEquityOrder({ symbol, side, qty, type, limitPrice, tif });
-    res.json({ ok:true, liveTradingEnabled: LIVE_TRADING_ENABLED, order });
-  } catch(err){ res.status(500).json({ ok:false, error: err.message || String(err) }); }
-});
-
-// Live submit (guarded)
-app.post("/api/schwab/orders", async (req,res)=>{
-  try{
-    if (!LIVE_TRADING_ENABLED)
-      return res.status(403).json({ ok:false, error:"live trading disabled (set LIVE_TRADING_ENABLED=true to enable)" });
-
-    const { accountHash, symbol, side, qty, type, limitPrice, tif } = req.body || {};
-    if (!accountHash) return res.status(400).json({ ok:false, error:"accountHash required" });
-    if (!symbol)      return res.status(400).json({ ok:false, error:"symbol required" });
-
-    const riskError = await preTradeRisk({ symbol, qty });
-    if (riskError) return res.status(400).json({ ok:false, error:`risk: ${riskError}` });
-
-    const payload = buildEquityOrder({ symbol, side, qty, type, limitPrice, tif });
-    const { status, json } = await schwabPost(`/accounts/${encodeURIComponent(accountHash)}/orders`, payload);
-    res.status(status).json(json);
-  } catch(err){ res.status(500).json({ ok:false, error: err.message || String(err) }); }
-});
-
-// Live/paper toggle status
-app.get("/api/trading/live/status", (_req,res)=>{
-  res.json({
-    ok: true,
-    liveTradingEnabled: LIVE_TRADING_ENABLED,
-    maxQty: MAX_ORDER_QTY,
-    maxNotional: MAX_ORDER_NOTIONAL,
-    allowlist: ALLOWED_SYMBOLS
-  });
-});
-
-/* ===================== 404 + Error ===================== */
 app.use((req,res)=>res.status(404).json({ ok:false, error:"Not Found", path:req.path }));
-app.use((err,_req,res,_next)=>res.status(err?.status || 500).json({ ok:false, error: err?.message || "Server error" }));
 
-/* ===================== Start ===================== */
-app.listen(PORT, () => {
-  console.log(`API listening on port ${PORT}`);
-  console.log("Allowed origins:", ALLOW_LIST.join(", ") || "(none)");
+const server = http.createServer(app);
+const wss = new WebSocketServer({ noServer: true });
+
+function wsAuthOk(req){
+  if(!REQUIRE_TOKEN) return true;
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const qToken = url.searchParams.get("token");
+  const hdr = req.headers["sec-websocket-protocol"] || "";
+  const token = qToken || hdr;
+  return token && token === AUTH_TOKEN;
+}
+function wsGaugeFeed(ws, key, max, ms){
+  const send = ()=>{ let v = state[key]; if(!Number.isFinite(v)) v=0; v=Math.max(0,Math.min(max,v));
+    try { ws.readyState===1 && ws.send(JSON.stringify({ value:v, ts: Date.now() })); } catch {}
+  };
+  const timer = setInterval(send, ms); send(); ws.on("close",()=>clearInterval(timer));
+}
+function wsSignals(ws, ms){
+  const send = ()=>{ try { ws.readyState===1 && ws.send(JSON.stringify({ ...state.lights, ts: Date.now() })); } catch {} };
+  const timer=setInterval(send, ms); send(); ws.on("close",()=>clearInterval(timer));
+}
+server.on("upgrade", (req, socket, head)=>{
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  if(!wsAuthOk(req)){ socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n"); socket.destroy(); return; }
+  wss.handleUpgrade(req, socket, head, (ws)=>{
+    switch(url.pathname){
+      case "/gauges/rpm":   wsGaugeFeed(ws,"rpm",   9000, 400); break;
+      case "/gauges/speed": wsGaugeFeed(ws,"speed",  220, 600); break;
+      case "/gauges/water": wsGaugeFeed(ws,"water",  100,1200); break;
+      case "/gauges/oil":   wsGaugeFeed(ws,"oil",    100,1200); break;
+      case "/gauges/fuel":  wsGaugeFeed(ws,"fuel",   100,1200); break;
+      case "/signals":      wsSignals(ws,1500); break;
+      default: ws.close(1008,"Unknown path");
+    }
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`TOS backend listening on :${PORT}`);
+  console.log(`CORS allow: ${ALLOW.join(", ") || "(none)"}`);
+  console.log(`Auth required: ${REQUIRE_TOKEN ? "YES" : "NO"}`);
+  console.log(`Demo mode: ${DEMO ? "ON" : "OFF"}`);
 });
