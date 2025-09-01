@@ -1,35 +1,23 @@
 {
-  "gauges": {
-    "rpm": 420,
-    "speed": 180,
-    "fuelPct": 75,
-    "waterTemp": 210,
-    "oilPsi": 70
-  },
-  "odometers": {
-    "breadthOdometer": 68,
-    "momentumOdometer": 72,
-    "squeeze": "on"
-  },
+  "gauges": { "rpm": 420, "speed": 180, "fuelPct": 75, "waterTemp": 210, "oilPsi": 70 },
+  "odometers": { "breadthOdometer": 68, "momentumOdometer": 72, "squeeze": "on" },
   "signals": {
-    "sigBreakout": true,
-    "sigDistribution": false,
-    "sigTurbo": false,
-    "sigCompression": true,
-    "sigExpansion": false,
-    "sigDivergence": false,
-    "sigOverheat": false,
-    "sigLowLiquidity": false
+    "sigBreakout": { "active": true,  "severity": "warn" },
+    "sigDistribution": { "active": false, "severity": "warn" },
+    "sigTurbo": { "active": false, "severity": "info" },
+    "sigCompression": { "active": true, "severity": "info" },
+    "sigExpansion": { "active": false, "severity": "info" },
+    "sigDivergence": { "active": false, "severity": "info" },
+    "sigOverheat": { "active": false, "severity": "danger" },
+    "sigLowLiquidity": { "active": false, "severity": "warn" }
   },
   "outlook": {
     "dailyOutlook": 64,
     "sectorCards": [
-      { "sector": "Tech", "outlook": "Bullish", "spark": [120, 125, 128, 132] },
-      { "sector": "Energy", "outlook": "Bearish", "spark": [85, 82, 80, 78] },
-      { "sector": "Financials", "outlook": "Neutral", "spark": [100, 101, 100, 99] }
+      { "sector": "Tech", "outlook": "Bullish", "spark": [120,125,128,132] },
+      { "sector": "Energy", "outlook": "Bearish", "spark": [85,82,80,78] },
+      { "sector": "Financials", "outlook": "Neutral", "spark": [100,101,100,99] }
     ]
   },
-  "meta": {
-    "ts": "2025-08-23T12:00:00Z"
-  }
+  "meta": { "ts": "2025-09-01T00:00:00Z" }
 }
