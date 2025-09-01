@@ -316,3 +316,14 @@ server.listen(PORT, () => {
   console.log(`Auth required: ${REQUIRE_TOKEN ? "YES" : "NO"}`);
   console.log(`Sheets: momentum=${!!MOMENTUM_SHEET_CSV_URL}, breadth=${!!BREADTH_SHEET_CSV_URL}, health=${!!HEALTH_SHEET_CSV_URL}, ohlc=${!!OHLC_CSV_URL}`);
 });
+const express = require("express");
+const fs = require("fs");
+const app = express();
+
+app.get("/api/dashboard", (req, res) => {
+  const data = fs.readFileSync("./data/outlook.json");
+  res.json(JSON.parse(data));
+});
+
+// existing code …
+
