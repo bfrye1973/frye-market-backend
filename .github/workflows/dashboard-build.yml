@@ -1,0 +1,31 @@
+name: Build Dashboard JSON
+
+on:
+  workflow_dispatch:     # lets you run manually from GitHub Actions tab
+  schedule:
+    - cron: "20 21 * * 1-5"   # every weekday at 21:20 UTC (adjust if needed)
+
+permissions:
+  contents: write        # allow committing the generated file
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run converter
+        run: |
+          python scripts/make_dashboard.py
+
+      - name: Commit changes (if any)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci: update data/outlook.json (dashboard)"
+          file_pattern: data/outlook.json
