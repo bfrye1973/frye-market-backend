@@ -1,0 +1,31 @@
+{
+  "groups": {
+    "Tech": {
+      "nh": 120,
+      "nl": 40,
+      "u": 180,
+      "d": 60,
+      "vol_state": "Contracting",
+      "breadth_state": "Bullish",
+      "history": { "nh": [100, 110, 118, 122, 120] }
+    },
+    "Energy": {
+      "nh": 35,
+      "nl": 70,
+      "u": 60,
+      "d": 100,
+      "vol_state": "Expanding",
+      "breadth_state": "Bearish",
+      "history": { "nh": [60, 55, 50, 45, 35] }
+    },
+    "Financials": {
+      "nh": 80,
+      "nl": 78,
+      "u": 95,
+      "d": 90,
+      "vol_state": "Mixed",
+      "breadth_state": "Neutral",
+      "history": { "nh": [90, 92, 88, 84, 80] }
+    }
+  }
+}
