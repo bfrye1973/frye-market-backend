@@ -1,12 +1,22 @@
 name: Build Dashboard JSON
 
 on:
-  workflow_dispatch:     # lets you run manually from GitHub Actions tab
-  schedule:
-    - cron: "20 21 * * 1-5"   # every weekday at 21:20 UTC (adjust if needed)
+  # You can still trigger it manually from the Actions tab
+  workflow_dispatch:
 
+  # Auto-run near US market close year-round (covers EST/EDT via two UTC times)
+  schedule:
+    - cron: "15 20 * * 1-5"   # 20:15 UTC (≈ 3:15pm ET during Standard Time)
+    - cron: "15 21 * * 1-5"   # 21:15 UTC (≈ 5:15pm ET during Daylight Time)
+
+# Prevent overlapping runs if you click manual while a scheduled run is in flight
+concurrency:
+  group: dashboard-build
+  cancel-in-progress: true
+
+# Needed so the workflow can commit the generated JSON back to the repo
 permissions:
-  contents: write        # allow committing the generated file
+  contents: write
 
 jobs:
   build:
@@ -21,8 +31,7 @@ jobs:
           python-version: "3.11"
 
       - name: Run converter
-        run: |
-          python scripts/make_dashboard.py
+        run: python scripts/make_dashboard.py
 
       - name: Commit changes (if any)
         uses: stefanzweifel/git-auto-commit-action@v5
