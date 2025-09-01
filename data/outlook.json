@@ -2,9 +2,9 @@
   "gauges": {
     "rpm": 60,
     "speed": 100,
-    "fuelPct": 45,
-    "waterTemp": 213,
-    "oilPsi": 70
+    "fuelPct": 62,
+    "waterTemp": 209,
+    "oilPsi": 68
   },
   "odometers": {
     "breadthOdometer": 53,
@@ -13,11 +13,7 @@
   },
   "signals": {
     "sigBreakout": {
-      "active": false,
-      "severity": "warn"
-    },
-    "sigDistribution": {
-      "active": false,
+      "active": true,
       "severity": "warn"
     },
     "sigTurbo": {
@@ -25,16 +21,20 @@
       "severity": "info"
     },
     "sigCompression": {
-      "active": false,
+      "active": true,
       "severity": "info"
     },
     "sigExpansion": {
       "active": false,
       "severity": "info"
     },
+    "sigDistribution": {
+      "active": false,
+      "severity": "warn"
+    },
     "sigDivergence": {
       "active": false,
-      "severity": "info"
+      "severity": "warn"
     },
     "sigOverheat": {
       "active": false,
@@ -84,6 +84,6 @@
     ]
   },
   "meta": {
-    "ts": "2025-09-01T18:50:44Z"
+    "ts": "2025-09-01T19:21:37Z"
   }
 }
