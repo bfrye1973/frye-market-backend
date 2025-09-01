@@ -1,31 +1,22 @@
 {
   "groups": {
-    "Tech": {
-      "nh": 120,
-      "nl": 40,
-      "u": 180,
-      "d": 60,
-      "vol_state": "Contracting",
-      "breadth_state": "Bullish",
-      "history": { "nh": [100, 110, 118, 122, 120] }
-    },
-    "Energy": {
-      "nh": 35,
-      "nl": 70,
-      "u": 60,
-      "d": 100,
-      "vol_state": "Expanding",
-      "breadth_state": "Bearish",
-      "history": { "nh": [60, 55, 50, 45, 35] }
-    },
-    "Financials": {
-      "nh": 80,
-      "nl": 78,
-      "u": 95,
-      "d": 90,
-      "vol_state": "Mixed",
-      "breadth_state": "Neutral",
-      "history": { "nh": [90, 92, 88, 84, 80] }
-    }
+    "Tech":        { "nh":120, "nl":40, "u":180, "d":60,  "vol_state":"Contracting", "breadth_state":"Bullish",  "history":{"nh":[100,110,118,122,120]} },
+    "Energy":      { "nh":35,  "nl":70, "u":60,  "d":100, "vol_state":"Expanding",   "breadth_state":"Bearish",  "history":{"nh":[60,55,50,45,35]} },
+    "Financials":  { "nh":80,  "nl":78, "u":95,  "d":90,  "vol_state":"Mixed",       "breadth_state":"Neutral",  "history":{"nh":[90,92,88,84,80]} }
+  },
+  "global": {
+    "squeeze_state": "on",              // "none" | "on" | "firingUp" | "firingDown"
+    "squeeze_pressure_pct": 62,         // 0..100 → fuelPct
+    "volatility_pct": 48,               // 0..100 → maps to ~180–240°F waterTemp
+    "liquidity_pct": 68,                // 0..100 → oilPsi
+
+    "breakout_confirmed": true,         // EMA cross + volume surge
+    "overdrive": false,                 // RSI/SMI extreme
+    "squeeze_on": true,                 // convenience flag
+    "squeeze_firing": false,            // expansion/release
+    "distribution": false,              // selling pressure
+    "breadth_momo_divergence": false,   // slopes disagree
+    "overheat": false,                  // momentum overextended
+    "low_liquidity": false              // volume too light
   }
 }
