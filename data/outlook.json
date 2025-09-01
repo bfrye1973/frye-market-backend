@@ -1,0 +1,35 @@
+{
+  "gauges": {
+    "rpm": 420,
+    "speed": 180,
+    "fuelPct": 75,
+    "waterTemp": 210,
+    "oilPsi": 70
+  },
+  "odometers": {
+    "breadthOdometer": 68,
+    "momentumOdometer": 72,
+    "squeeze": "on"
+  },
+  "signals": {
+    "sigBreakout": true,
+    "sigDistribution": false,
+    "sigTurbo": false,
+    "sigCompression": true,
+    "sigExpansion": false,
+    "sigDivergence": false,
+    "sigOverheat": false,
+    "sigLowLiquidity": false
+  },
+  "outlook": {
+    "dailyOutlook": 64,
+    "sectorCards": [
+      { "sector": "Tech", "outlook": "Bullish", "spark": [120, 125, 128, 132] },
+      { "sector": "Energy", "outlook": "Bearish", "spark": [85, 82, 80, 78] },
+      { "sector": "Financials", "outlook": "Neutral", "spark": [100, 101, 100, 99] }
+    ]
+  },
+  "meta": {
+    "ts": "2025-08-23T12:00:00Z"
+  }
+}
