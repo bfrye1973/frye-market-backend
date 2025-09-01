@@ -29,18 +29,17 @@
     }
   },
   "global": {
-    "squeeze_state": "on",              // "none" | "on" | "firingUp" | "firingDown"
-    "squeeze_pressure_pct": 62,         // drives Fuel %
-    "volatility_pct": 48,               // drives Water Temp (≈ 180 + 60 * 0.48 = 209°F)
-    "liquidity_pct": 68,                // drives Oil PSI
-
-    "breakout_confirmed": true,         // 💡 Breakout
-    "overdrive": false,                 // 💡 Turbo/Overdrive
-    "squeeze_on": true,                 // 💡 Compression
-    "squeeze_firing": false,            // 💡 Expansion
-    "distribution": false,              // 💡 Distribution
-    "breadth_momo_divergence": false,   // 💡 Divergence
-    "overheat": false,                  // 💡 Overheat
-    "low_liquidity": false              // 💡 Low Liquidity
+    "squeeze_state": "on",
+    "squeeze_pressure_pct": 62,
+    "volatility_pct": 48,
+    "liquidity_pct": 68,
+    "breakout_confirmed": true,
+    "overdrive": false,
+    "squeeze_on": true,
+    "squeeze_firing": false,
+    "distribution": false,
+    "breadth_momo_divergence": false,
+    "overheat": false,
+    "low_liquidity": false
   }
 }
