@@ -1,19 +1,19 @@
 {
   "gauges": {
-    "rpm": 60,
-    "speed": 100,
-    "fuelPct": 62,
-    "waterTemp": 209,
-    "oilPsi": 68
+    "rpm": -220,
+    "speed": -500,
+    "fuelPct": 75,
+    "waterTemp": 195,
+    "oilPsi": 70
   },
   "odometers": {
-    "breadthOdometer": 53,
-    "momentumOdometer": 55,
-    "squeeze": "on"
+    "breadthOdometer": 39,
+    "momentumOdometer": 25,
+    "squeeze": "none"
   },
   "signals": {
     "sigBreakout": {
-      "active": true,
+      "active": false,
       "severity": "warn"
     },
     "sigTurbo": {
@@ -29,7 +29,7 @@
       "severity": "info"
     },
     "sigDistribution": {
-      "active": false,
+      "active": true,
       "severity": "warn"
     },
     "sigDivergence": {
@@ -46,44 +46,66 @@
     }
   },
   "outlook": {
-    "dailyOutlook": 54,
+    "dailyOutlook": 32,
     "sectorCards": [
       {
+        "sector": "Communication Services",
+        "outlook": "Neutral",
+        "spark": []
+      },
+      {
+        "sector": "Consumer Discretionary",
+        "outlook": "Neutral",
+        "spark": []
+      },
+      {
+        "sector": "Consumer Staples",
+        "outlook": "Neutral",
+        "spark": []
+      },
+      {
         "sector": "Energy",
-        "outlook": "Bearish",
-        "spark": [
-          60,
-          55,
-          50,
-          45,
-          35
-        ]
+        "outlook": "Neutral",
+        "spark": []
       },
       {
         "sector": "Financials",
         "outlook": "Neutral",
-        "spark": [
-          90,
-          92,
-          88,
-          84,
-          80
-        ]
+        "spark": []
       },
       {
-        "sector": "Tech",
-        "outlook": "Bullish",
-        "spark": [
-          100,
-          110,
-          118,
-          122,
-          120
-        ]
+        "sector": "Healthcare",
+        "outlook": "Neutral",
+        "spark": []
+      },
+      {
+        "sector": "Industrials",
+        "outlook": "Neutral",
+        "spark": []
+      },
+      {
+        "sector": "Materials",
+        "outlook": "Neutral",
+        "spark": []
+      },
+      {
+        "sector": "Real Estate",
+        "outlook": "Neutral",
+        "spark": []
+      },
+      {
+        "sector": "Utilities",
+        "outlook": "Neutral",
+        "spark": []
+      },
+      {
+        "sector": "tech",
+        "outlook": "Neutral",
+        "spark": []
       }
     ]
   },
   "meta": {
-    "ts": "2025-09-01T21:29:04Z"
+    "ts": "2025-09-02T17:28:27Z"
   }
 }
