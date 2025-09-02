@@ -1,14 +1,14 @@
 {
   "gauges": {
     "rpm": -220,
-    "speed": -500,
-    "fuelPct": 75,
-    "waterTemp": 195,
+    "speed": -460,
+    "fuelPct": 73,
+    "waterTemp": 196,
     "oilPsi": 70
   },
   "odometers": {
     "breadthOdometer": 39,
-    "momentumOdometer": 25,
+    "momentumOdometer": 27,
     "squeeze": "none"
   },
   "signals": {
@@ -46,7 +46,7 @@
     }
   },
   "outlook": {
-    "dailyOutlook": 32,
+    "dailyOutlook": 33,
     "sectorCards": [
       {
         "sector": "Communication Services",
@@ -106,6 +106,6 @@
     ]
   },
   "meta": {
-    "ts": "2025-09-02T17:28:27Z"
+    "ts": "2025-09-02T18:18:01Z"
   }
 }
