@@ -9,12 +9,10 @@ on:
     - cron: "15 20 * * 1-5"   # 20:15 UTC (≈ 3:15pm ET during Standard Time)
     - cron: "15 21 * * 1-5"   # 21:15 UTC (≈ 5:15pm ET during Daylight Time)
 
-# Prevent overlapping runs if you click manual while a scheduled run is in flight
 concurrency:
   group: dashboard-build
   cancel-in-progress: true
 
-# Needed so the workflow can commit the generated JSON back to the repo
 permissions:
   contents: write
 
@@ -30,9 +28,19 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run converter
-        run: python scripts/make_dashboard.py
+      # NEW: build outlook_source.json from Polygon using your secret key
+      - name: Build outlook_source.json from Polygon
+        env:
+          POLY_KEY: ${{ secrets.POLY_KEY }}
+        run: |
+          python scripts/build_outlook_source_from_polygon.py
 
+      # Convert outlook_source.json -> outlook.json (frontend-ready)
+      - name: Run converter
+        run: |
+          python scripts/make_dashboard.py
+
+      # Commit the generated outlook.json so Render redeploys backend
       - name: Commit changes (if any)
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
