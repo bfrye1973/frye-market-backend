@@ -1,14 +1,9 @@
 name: Build Dashboard JSON
 
 on:
-  # Allow manual runs from the Actions tab
   workflow_dispatch:
 
-  # Autoschedule (Mon–Fri) — entries for both EDT (UTC-4) and EST (UTC-5)
-  # 09:45 AM ET  -> 13:45 UTC (EDT), 14:45 UTC (EST)
-  # 12:00 PM ET  -> 16:00 UTC (EDT), 17:00 UTC (EST)
-  # 03:00 PM ET  -> 19:00 UTC (EDT), 20:00 UTC (EST)
-  # 04:05 PM ET  -> 20:05 UTC (EDT), 21:05 UTC (EST)
+  # Mon–Fri: 9:45a, 12:00p, 3:00p, 4:05p Eastern (EDT + EST)
   schedule:
     - cron: "45 13 * * 1-5"   # 09:45 AM EDT
     - cron: "45 14 * * 1-5"   # 09:45 AM EST
@@ -16,8 +11,8 @@ on:
     - cron: "0 17 * * 1-5"    # 12:00 PM EST
     - cron: "0 19 * * 1-5"    # 03:00 PM EDT
     - cron: "0 20 * * 1-5"    # 03:00 PM EST
-    - cron: "5 20 * * 1-5"    # 04:05 PM EDT (after close)
-    - cron: "5 21 * * 1-5"    # 04:05 PM EST (after close)
+    - cron: "5 20 * * 1-5"    # 04:05 PM EDT
+    - cron: "5 21 * * 1-5"    # 04:05 PM EST
 
 concurrency:
   group: dashboard-build
@@ -33,25 +28,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # we need history to rebase/push cleanly
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 1) Build raw sector counts from Polygon -> data/outlook_source.json
+      # 1) Build raw counts -> data/outlook_source.json and append to data/history.json
       - name: Build outlook_source.json from Polygon
         env:
           POLY_KEY: ${{ secrets.POLY_KEY }}
         run: |
           python scripts/build_outlook_source_from_polygon.py
 
-      # 2) Convert to frontend payload -> data/outlook.json
+      # 2) Convert -> data/outlook.json
       - name: Run converter
         run: |
           python scripts/make_dashboard.py
 
-      # 3) Upload both JSONs as an artifact (handy for quick download)
+      # 3) Upload both JSONs as artifact (optional convenience)
       - name: Upload artifacts (outlook_jsons)
         uses: actions/upload-artifact@v4
         with:
@@ -60,15 +57,25 @@ jobs:
             data/outlook.json
             data/outlook_source.json
 
-      # 4) Commit BOTH files so the repo always shows latest raw counts + payload
-      - name: Commit dashboard files
+      # 4) Rebase-safe commit of source, payload, and history
+      - name: Commit dashboard files (rebase-safe)
+        shell: bash
         run: |
+          set -e
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/outlook.json data/outlook_source.json
+
+          # Rebase onto the latest main to avoid "tip is behind" errors
+          git fetch origin main
+          git checkout main
+          git pull --rebase origin main
+
+          git add data/outlook.json data/outlook_source.json data/history.json || true
+
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "ci: update dashboard jsons (outlook + source)"
-            git push
+            git commit -m "ci: update dashboard jsons (outlook + source + history)"
+            # push with rebase already applied
+            git push origin HEAD:main
           fi
