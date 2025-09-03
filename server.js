@@ -1,83 +1,62 @@
-// server.js — minimal CommonJS (only 'express')
+// server.js — minimal Express backend for Ferrari Dashboard
+// - /api/health
+// - /api/dashboard (serves data/outlook.json) with Cache-Control: no-store
+// - /api/source   (optional raw counts)      with Cache-Control: no-store
+// - static public/ (optional)
+// NOTE: Ensure "express" is in package.json dependencies.
+
 const path = require("path");
 const fs = require("fs");
 const express = require("express");
 
 const app = express();
-
-// ---- config ----
 const PORT = process.env.PORT || 10000;
-const DATA_DIR = path.join(__dirname, "data");
-const DASHBOARD_PATH = path.join(DATA_DIR, "outlook.json");
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "*";
 
-// ---- built-in CORS (no cors pkg) ----
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", FRONTEND_ORIGIN);
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.sendStatus(204);
-  next();
-});
-
-// ---- body parsing ----
-app.use(express.json({ limit: "1mb" }));
-
-// ---- health ----
+// --- health ---
 app.get("/api/health", (req, res) => {
+  res.set("Cache-Control", "no-store");
   res.json({ ok: true, service: "frye-market-backend", ts: new Date().toISOString() });
 });
 
-// ---- test echo ----
-app.post("/api/v1/echo", (req, res) => {
-  res.json({ ok: true, youSent: req.body ?? null });
-});
-
-// ---- dashboard feed ----
+// --- dashboard payload (frontend-ready JSON) ---
 app.get("/api/dashboard", (req, res) => {
-  fs.readFile(DASHBOARD_PATH, "utf8", (err, txt) => {
-    if (err) {
-      return res.status(200).json({
-        gauges: { rpm: 0, speed: 0, fuelPct: 50, waterTemp: 200, oilPsi: 70 },
-        odometers: { breadthOdometer: 50, momentumOdometer: 50, squeeze: "none" },
-        signals: {
-          sigBreakout: { active: false, severity: "info" },
-          sigDistribution: { active: false, severity: "warn" },
-          sigTurbo: { active: false, severity: "info" },
-          sigCompression: { active: false, severity: "info" },
-          sigExpansion: { active: false, severity: "info" },
-          sigDivergence: { active: false, severity: "info" },
-          sigOverheat: { active: false, severity: "danger" },
-          sigLowLiquidity: { active: false, severity: "warn" }
-        },
-        outlook: { dailyOutlook: 50, sectorCards: [] },
-        meta: { ts: new Date().toISOString(), note: "fallback (outlook.json not found)" }
-      });
-    }
-    try {
-      res.json(JSON.parse(txt));
-    } catch {
-      res.status(500).json({ error: "invalid JSON in data/outlook.json" });
-    }
-  });
+  try {
+    res.set("Cache-Control", "no-store"); // <- important
+    const p = path.join(__dirname, "data", "outlook.json");
+    const txt = fs.readFileSync(p, "utf8");
+    res.json(JSON.parse(txt));
+  } catch (e) {
+    console.error("dashboard error:", e);
+    res.status(500).json({ ok: false, error: "cannot read data/outlook.json" });
+  }
 });
 
-// ---- optional static ----
-const PUBLIC_DIR = path.join(__dirname, "public");
-if (fs.existsSync(PUBLIC_DIR)) app.use(express.static(PUBLIC_DIR));
+// --- raw counts (optional debug/verification) ---
+app.get("/api/source", (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store"); // <- important
+    const p = path.join(__dirname, "data", "outlook_source.json");
+    const txt = fs.readFileSync(p, "utf8");
+    res.json(JSON.parse(txt));
+  } catch (e) {
+    console.error("source error:", e);
+    res.status(500).json({ ok: false, error: "cannot read data/outlook_source.json" });
+  }
+});
 
-// ---- 404 + error ----
-app.use((req, res) => res.status(404).json({ error: "Not Found" }));
-// eslint-disable-next-line no-unused-vars
+// --- serve /public if present (optional) ---
+const PUBLIC_DIR = path.join(__dirname, "public");
+if (fs.existsSync(PUBLIC_DIR)) {
+  app.use(express.static(PUBLIC_DIR));
+}
+
+// 404 + error handler
+app.use((req, res) => res.status(404).json({ ok: false, error: "Not Found" }));
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
-  res.status(500).json({ error: "Internal Server Error" });
+  res.status(500).json({ ok: false, error: "Internal Server Error" });
 });
 
-// ---- boot ----
-app.listen(PORT, () => {
-  console.log(`[OK] frye-market-backend listening on :${PORT}`);
-  console.log(`- GET /api/health`);
-  console.log(`- GET /api/dashboard   (reads ${DASHBOARD_PATH})`);
-  console.log(`- POST /api/v1/echo`);
-});
+app.listen(PORT, () =>
+  console.log(`[OK] frye-market-backend listening on :${PORT}\n- GET /api/health\n- GET /api/dashboard\n- GET /api/source`)
+);
