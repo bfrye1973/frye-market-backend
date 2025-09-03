@@ -2,32 +2,20 @@
 """
 Builds data/outlook_source.json from Polygon REST.
 
-Inputs:
-- Sector CSVs at data/sectors/{Sector}.csv with a header "Symbol"
-  Example rows:
-    Symbol
-    AAPL
-    MSFT
-    NVDA
-
-What it computes per sector:
-- nh: 10-day NEW HIGHS count   (today's HIGH > max HIGH of prior 10 sessions)
-- nl: 10-day NEW LOWS count    (today's LOW  < min LOW  of prior 10 sessions)
-- u : 3U count                 (close up 3 days in a row)
-- d : 3D count                 (close down 3 days in a row)
-
-Output:
-- data/outlook_source.json  (consumed by scripts/make_dashboard.py)
-
-Notes:
-- Requires POLY_KEY in env (Polygon API key)
-- Conservative rate limiting + retries
+- Reads sector CSVs under data/sectors/{Sector}.csv
+- Each CSV must have a header 'Symbol' and tickers below it
+- For each ticker, fetch ~15 daily bars from Polygon
+- Compute:
+  - nh = 10-day NEW HIGHS count (today's HIGH > max HIGH of prior 10 sessions)
+  - nl = 10-day NEW LOWS count (today's LOW  < min LOW  of prior 10 sessions)
+  - u  = 3U (close up 3 days in a row)
+  - d  = 3D (close down 3 days in a row)
+- Writes results to data/outlook_source.json
 """
 
 import csv, json, os, time
 from datetime import datetime, timedelta
-import urllib.request
-import urllib.error
+import urllib.request, urllib.error
 
 POLY_KEY = os.environ.get("POLY_KEY") or os.environ.get("POLYGON_API_KEY")
 SECTORS_DIR = os.path.join("data", "sectors")
@@ -41,7 +29,6 @@ def http_get(url, timeout=20):
         return resp.read().decode("utf-8")
 
 def poly_json(url):
-    # add apiKey if missing
     sep = "&" if "?" in url else "?"
     if "apiKey=" not in url:
         if not POLY_KEY:
@@ -79,7 +66,6 @@ def read_symbols(path):
 def date_str(dt): return dt.strftime("%Y-%m-%d")
 
 def bars_last_n_days(ticker, n_days):
-    # Polygon daily bars range API (1 day bars)
     end = datetime.utcnow().date()
     start = end - timedelta(days=max(20, n_days + 5))  # buffer for weekends/holidays
     url = (
@@ -92,7 +78,7 @@ def bars_last_n_days(ticker, n_days):
     res = []
     for r in js.get("results", []) or []:
         res.append({
-            "t": int(r.get("t", 0)),  # ms since epoch
+            "t": int(r.get("t", 0)),
             "o": float(r.get("o", 0)),
             "h": float(r.get("h", 0)),
             "l": float(r.get("l", 0)),
@@ -100,18 +86,14 @@ def bars_last_n_days(ticker, n_days):
             "v": float(r.get("v", 0)),
         })
     res.sort(key=lambda x: x["t"])
-    return res[-15:]  # enough for 10-day window + last 3 closes
+    return res[-15:]
 
 def compute_flags_from_bars(bars):
-    """
-    bars: list ordered oldest→newest, length ~<=15
-    Returns tuple (is_10NH, is_10NL, is_3U, is_3D)
-    """
     if len(bars) < 11:
         return (False, False, False, False)
 
     today = bars[-1]
-    prior10 = bars[-11:-1]  # previous 10 sessions
+    prior10 = bars[-11:-1]
 
     max_high_10 = max(b["h"] for b in prior10)
     min_low_10  = min(b["l"] for b in prior10)
@@ -149,7 +131,7 @@ def discover_sectors():
         )
     sectors = {}
     for name in os.listdir(SECTORS_DIR):
-        if not name.lower().endswith(".csv"): 
+        if not name.lower().endswith(".csv"):
             continue
         sector = os.path.splitext(name)[0]
         path = os.path.join(SECTORS_DIR, name)
@@ -165,15 +147,17 @@ def main():
         raise SystemExit("Set POLY_KEY environment variable with your Polygon API key")
 
     sectors = discover_sectors()
-    groups = {}
+    total_symbols = sum(len(v) for v in sectors.values())
+    print(f"[discovered] {total_symbols} symbols across {len(sectors)} sectors")
 
+    groups = {}
     for sector, symbols in sectors.items():
         print(f"[{sector}] tickers={len(symbols)} ...")
         c = build_sector_counts(symbols)
         groups[sector] = {
             "nh": c["nh"], "nl": c["nl"], "u": c["u"], "d": c["d"],
-            "vol_state": "Mixed",          # placeholder; wire later
-            "breadth_state": "Neutral",    # placeholder; wire later
+            "vol_state": "Mixed",
+            "breadth_state": "Neutral",
             "history": { "nh": [] }
         }
 
