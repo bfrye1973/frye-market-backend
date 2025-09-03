@@ -1,3 +1,75 @@
 {
-  "days": []
+  "days": [
+    {
+      "date": "2025-09-03",
+      "groups": {
+        "Financials": {
+          "nh": 78,
+          "nl": 69,
+          "u": 71,
+          "d": 402
+        },
+        "Consumer Staples": {
+          "nh": 31,
+          "nl": 43,
+          "u": 37,
+          "d": 84
+        },
+        "Real Estate": {
+          "nh": 28,
+          "nl": 31,
+          "u": 11,
+          "d": 71
+        },
+        "Communication Services": {
+          "nh": 44,
+          "nl": 38,
+          "u": 39,
+          "d": 85
+        },
+        "Utilities": {
+          "nh": 2,
+          "nl": 37,
+          "u": 5,
+          "d": 66
+        },
+        "tech": {
+          "nh": 59,
+          "nl": 86,
+          "u": 73,
+          "d": 341
+        },
+        "Industrials": {
+          "nh": 61,
+          "nl": 103,
+          "u": 59,
+          "d": 323
+        },
+        "Energy": {
+          "nh": 55,
+          "nl": 9,
+          "u": 21,
+          "d": 93
+        },
+        "Healthcare": {
+          "nh": 171,
+          "nl": 163,
+          "u": 204,
+          "d": 347
+        },
+        "Materials": {
+          "nh": 78,
+          "nl": 25,
+          "u": 63,
+          "d": 111
+        },
+        "Consumer Discretionary": {
+          "nh": 76,
+          "nl": 85,
+          "u": 86,
+          "d": 224
+        }
+      }
+    }
+  ]
 }

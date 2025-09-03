@@ -1,15 +1,19 @@
 {
   "gauges": {
-    "rpm": -200,
-    "speed": -400,
-    "fuelPct": 70,
-    "waterTemp": 198,
+    "rpm": -20,
+    "speed": -540,
+    "fuelPct": 77,
+    "waterTemp": 194,
     "oilPsi": 70
   },
   "odometers": {
-    "breadthOdometer": 40,
-    "momentumOdometer": 30,
+    "breadthOdometer": 49,
+    "momentumOdometer": 23,
     "squeeze": "none"
+  },
+  "lights": {
+    "breadth": "neutral",
+    "momentum": "weak"
   },
   "signals": {
     "sigBreakout": {
@@ -17,7 +21,7 @@
       "severity": "warn"
     },
     "sigDistribution": {
-      "active": true,
+      "active": false,
       "severity": "warn"
     },
     "sigTurbo": {
@@ -46,133 +50,155 @@
     }
   },
   "outlook": {
-    "dailyOutlook": 35,
+    "dailyOutlook": 36,
     "sectorCards": [
       {
         "sector": "Communication Services",
         "outlook": "Neutral",
-        "spark": [],
+        "spark": [
+          6
+        ],
         "counts": {
-          "nh": 33,
-          "nl": 54,
-          "u": 43,
-          "d": 78
+          "nh": 44,
+          "nl": 38,
+          "u": 39,
+          "d": 85
         }
       },
       {
         "sector": "Consumer Discretionary",
         "outlook": "Neutral",
-        "spark": [],
+        "spark": [
+          -9
+        ],
         "counts": {
-          "nh": 56,
-          "nl": 110,
-          "u": 76,
-          "d": 228
+          "nh": 76,
+          "nl": 85,
+          "u": 86,
+          "d": 224
         }
       },
       {
         "sector": "Consumer Staples",
         "outlook": "Neutral",
-        "spark": [],
+        "spark": [
+          -12
+        ],
         "counts": {
-          "nh": 23,
-          "nl": 44,
-          "u": 40,
-          "d": 65
+          "nh": 31,
+          "nl": 43,
+          "u": 37,
+          "d": 84
         }
       },
       {
         "sector": "Energy",
         "outlook": "Neutral",
-        "spark": [],
+        "spark": [
+          46
+        ],
         "counts": {
-          "nh": 74,
-          "nl": 10,
-          "u": 60,
-          "d": 57
+          "nh": 55,
+          "nl": 9,
+          "u": 21,
+          "d": 93
         }
       },
       {
         "sector": "Financials",
         "outlook": "Neutral",
-        "spark": [],
+        "spark": [
+          9
+        ],
         "counts": {
-          "nh": 69,
-          "nl": 121,
-          "u": 84,
-          "d": 291
+          "nh": 78,
+          "nl": 69,
+          "u": 71,
+          "d": 402
         }
       },
       {
         "sector": "Healthcare",
         "outlook": "Neutral",
-        "spark": [],
+        "spark": [
+          8
+        ],
         "counts": {
-          "nh": 176,
-          "nl": 204,
-          "u": 199,
-          "d": 309
+          "nh": 171,
+          "nl": 163,
+          "u": 204,
+          "d": 347
         }
       },
       {
         "sector": "Industrials",
         "outlook": "Neutral",
-        "spark": [],
+        "spark": [
+          -42
+        ],
         "counts": {
-          "nh": 53,
-          "nl": 156,
-          "u": 58,
-          "d": 327
+          "nh": 61,
+          "nl": 103,
+          "u": 59,
+          "d": 323
         }
       },
       {
         "sector": "Materials",
         "outlook": "Neutral",
-        "spark": [],
+        "spark": [
+          53
+        ],
         "counts": {
-          "nh": 85,
-          "nl": 36,
-          "u": 83,
-          "d": 83
+          "nh": 78,
+          "nl": 25,
+          "u": 63,
+          "d": 111
         }
       },
       {
         "sector": "Real Estate",
         "outlook": "Neutral",
-        "spark": [],
+        "spark": [
+          -3
+        ],
         "counts": {
-          "nh": 24,
-          "nl": 37,
-          "u": 16,
-          "d": 62
+          "nh": 28,
+          "nl": 31,
+          "u": 11,
+          "d": 71
         }
       },
       {
         "sector": "tech",
         "outlook": "Neutral",
-        "spark": [],
+        "spark": [
+          -27
+        ],
         "counts": {
-          "nh": 52,
-          "nl": 160,
-          "u": 68,
-          "d": 375
+          "nh": 59,
+          "nl": 86,
+          "u": 73,
+          "d": 341
         }
       },
       {
         "sector": "Utilities",
         "outlook": "Neutral",
-        "spark": [],
+        "spark": [
+          -35
+        ],
         "counts": {
-          "nh": 3,
-          "nl": 49,
-          "u": 7,
-          "d": 40
+          "nh": 2,
+          "nl": 37,
+          "u": 5,
+          "d": 66
         }
       }
     ]
   },
   "meta": {
-    "ts": "2025-09-02T21:58:43Z",
-    "version": "1.0"
+    "ts": "2025-09-03T17:57:57Z",
+    "version": "1.1"
   }
 }
