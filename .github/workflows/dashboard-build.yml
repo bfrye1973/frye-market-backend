@@ -1,12 +1,23 @@
 name: Build Dashboard JSON
 
 on:
-  # Manual trigger from the Actions tab
+  # Allow manual runs from the Actions tab
   workflow_dispatch:
-  # Auto-run near US market close year-round (covers EST & EDT)
+
+  # Autoschedule (Mon–Fri) — entries for both EDT (UTC-4) and EST (UTC-5)
+  # 09:45 AM ET  -> 13:45 UTC (EDT), 14:45 UTC (EST)
+  # 12:00 PM ET  -> 16:00 UTC (EDT), 17:00 UTC (EST)
+  # 03:00 PM ET  -> 19:00 UTC (EDT), 20:00 UTC (EST)
+  # 04:05 PM ET  -> 20:05 UTC (EDT), 21:05 UTC (EST)
   schedule:
-    - cron: "15 20 * * 1-5"   # ~3:15pm ET during Standard Time
-    - cron: "15 21 * * 1-5"   # ~5:15pm ET during Daylight Time
+    - cron: "45 13 * * 1-5"   # 09:45 AM EDT
+    - cron: "45 14 * * 1-5"   # 09:45 AM EST
+    - cron: "0 16 * * 1-5"    # 12:00 PM EDT
+    - cron: "0 17 * * 1-5"    # 12:00 PM EST
+    - cron: "0 19 * * 1-5"    # 03:00 PM EDT
+    - cron: "0 20 * * 1-5"    # 03:00 PM EST
+    - cron: "5 20 * * 1-5"    # 04:05 PM EDT (after close)
+    - cron: "5 21 * * 1-5"    # 04:05 PM EST (after close)
 
 concurrency:
   group: dashboard-build
@@ -35,13 +46,13 @@ jobs:
         run: |
           python scripts/build_outlook_source_from_polygon.py
 
-      # 2) Convert to frontend-ready payload -> data/outlook.json
+      # 2) Convert to frontend payload -> data/outlook.json
       - name: Run converter
         run: |
           python scripts/make_dashboard.py
 
-      # 3) (Optional) attach both files as workflow artifacts for quick download
-      - name: Upload artifacts (outlook jsons)
+      # 3) Upload both JSONs as an artifact (handy for quick download)
+      - name: Upload artifacts (outlook_jsons)
         uses: actions/upload-artifact@v4
         with:
           name: dashboard-jsons
@@ -50,10 +61,14 @@ jobs:
             data/outlook_source.json
 
       # 4) Commit BOTH files so the repo always shows latest raw counts + payload
-      - name: Commit changes (if any)
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "ci: update dashboard jsons (outlook + source)"
-          file_pattern: |
-            data/outlook.json
-            data/outlook_source.json
+      - name: Commit dashboard files
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/outlook.json data/outlook_source.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "ci: update dashboard jsons (outlook + source)"
+            git push
+          fi
