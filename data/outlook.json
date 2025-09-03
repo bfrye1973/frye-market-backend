@@ -1,14 +1,14 @@
 {
   "gauges": {
-    "rpm": -60,
-    "speed": -560,
-    "fuelPct": 78,
-    "waterTemp": 193,
+    "rpm": -40,
+    "speed": -460,
+    "fuelPct": 73,
+    "waterTemp": 196,
     "oilPsi": 70
   },
   "odometers": {
-    "breadthOdometer": 47,
-    "momentumOdometer": 22,
+    "breadthOdometer": 48,
+    "momentumOdometer": 27,
     "squeeze": "none"
   },
   "lights": {
@@ -50,97 +50,97 @@
     }
   },
   "outlook": {
-    "dailyOutlook": 34,
+    "dailyOutlook": 38,
     "sectorCards": [
       {
         "sector": "Communication Services",
         "outlook": "Neutral",
         "spark": [
-          2
+          1
         ],
         "counts": {
-          "nh": 46,
-          "nl": 44,
-          "u": 38,
-          "d": 93
+          "nh": 47,
+          "nl": 46,
+          "u": 46,
+          "d": 86
         }
       },
       {
         "sector": "Consumer Discretionary",
         "outlook": "Neutral",
         "spark": [
-          -15
+          -12
         ],
         "counts": {
-          "nh": 78,
-          "nl": 93,
-          "u": 80,
-          "d": 225
+          "nh": 82,
+          "nl": 94,
+          "u": 85,
+          "d": 198
         }
       },
       {
         "sector": "Consumer Staples",
         "outlook": "Neutral",
         "spark": [
-          -14
+          -15
         ],
         "counts": {
-          "nh": 33,
-          "nl": 47,
-          "u": 34,
-          "d": 86
+          "nh": 34,
+          "nl": 49,
+          "u": 45,
+          "d": 81
         }
       },
       {
         "sector": "Energy",
         "outlook": "Neutral",
         "spark": [
-          43
+          44
         ],
         "counts": {
-          "nh": 57,
-          "nl": 14,
-          "u": 19,
-          "d": 95
+          "nh": 59,
+          "nl": 15,
+          "u": 20,
+          "d": 93
         }
       },
       {
         "sector": "Financials",
         "outlook": "Neutral",
         "spark": [
-          2
+          9
         ],
         "counts": {
-          "nh": 85,
-          "nl": 83,
-          "u": 68,
-          "d": 407
+          "nh": 93,
+          "nl": 84,
+          "u": 90,
+          "d": 341
         }
       },
       {
         "sector": "Healthcare",
         "outlook": "Neutral",
         "spark": [
-          -5
+          1
         ],
         "counts": {
-          "nh": 180,
-          "nl": 185,
-          "u": 216,
-          "d": 345
+          "nh": 191,
+          "nl": 190,
+          "u": 236,
+          "d": 291
         }
       },
       {
         "sector": "Industrials",
         "outlook": "Neutral",
         "spark": [
-          -48
+          -49
         ],
         "counts": {
-          "nh": 65,
-          "nl": 113,
-          "u": 60,
-          "d": 338
+          "nh": 71,
+          "nl": 120,
+          "u": 70,
+          "d": 303
         }
       },
       {
@@ -152,53 +152,53 @@
         "counts": {
           "nh": 78,
           "nl": 31,
-          "u": 52,
-          "d": 108
+          "u": 60,
+          "d": 104
         }
       },
       {
         "sector": "Real Estate",
         "outlook": "Neutral",
         "spark": [
-          1
+          10
         ],
         "counts": {
-          "nh": 35,
+          "nh": 44,
           "nl": 34,
-          "u": 14,
-          "d": 71
+          "u": 15,
+          "d": 68
         }
       },
       {
         "sector": "tech",
         "outlook": "Neutral",
         "spark": [
-          -43
+          -38
         ],
         "counts": {
-          "nh": 59,
-          "nl": 102,
-          "u": 69,
-          "d": 364
+          "nh": 66,
+          "nl": 104,
+          "u": 84,
+          "d": 304
         }
       },
       {
         "sector": "Utilities",
         "outlook": "Neutral",
         "spark": [
-          -38
+          -39
         ],
         "counts": {
           "nh": 2,
-          "nl": 40,
-          "u": 6,
-          "d": 66
+          "nl": 41,
+          "u": 8,
+          "d": 56
         }
       }
     ]
   },
   "meta": {
-    "ts": "2025-09-03T19:35:56Z",
+    "ts": "2025-09-03T20:46:04Z",
     "version": "1.1"
   }
 }
