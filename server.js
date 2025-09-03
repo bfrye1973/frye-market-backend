@@ -57,7 +57,7 @@ app.get("/api/source", (req, res) => {
   }
 });
 
-// --------- /api/v1/gauges?index=SYMBOL (the one your FE is calling) ----------
+// --------- /api/v1/gauges?index=SYMBOL (the one your FE calls) ----------
 app.get("/api/v1/gauges", (req, res) => {
   res.set("Cache-Control", "no-store");
   try {
@@ -65,7 +65,6 @@ app.get("/api/v1/gauges", (req, res) => {
     const p = path.join(__dirname, "data", "outlook.json");
     const txt = fs.readFileSync(p, "utf8");
     const dash = JSON.parse(txt);
-
     res.json({
       ok: true,
       symbol,
@@ -79,16 +78,14 @@ app.get("/api/v1/gauges", (req, res) => {
   }
 });
 
-// --------- /api/v1/gauges/index?SPY (alias kept for compatibility) ----------
+// --------- /api/v1/gauges/index?SPY (alias) ----------
 app.get("/api/v1/gauges/index", (req, res) => {
   res.set("Cache-Control", "no-store");
   try {
-    // Parse symbol from query string shaped like ?SPY
     const symbol = Object.keys(req.query)[0] || "SPY";
     const p = path.join(__dirname, "data", "outlook.json");
     const txt = fs.readFileSync(p, "utf8");
     const dash = JSON.parse(txt);
-
     res.json({
       ok: true,
       symbol,
