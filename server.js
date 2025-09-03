@@ -60,6 +60,30 @@ app.get("/api/source", (req, res) => {
 // --------- NEW: /api/v1/gauges/index?SYMBOL  ----------
 // Your frontend is calling this route. We'll serve dashboard gauges here too.
 app.get("/api/v1/gauges/index", (req, res) => {
+  // --------- ALSO SUPPORT: /api/v1/gauges?index=SYMBOL ----------
+app.get("/api/v1/gauges", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    // accept ?index=SPY or ?symbol=SPY; default SPY
+    const symbol = req.query.index || req.query.symbol || "SPY";
+
+    const p = path.join(__dirname, "data", "outlook.json");
+    const txt = fs.readFileSync(p, "utf8");
+    const dash = JSON.parse(txt);
+
+    res.json({
+      ok: true,
+      symbol,
+      gauges: dash.gauges || {},
+      odometers: dash.odometers || {},
+      meta: dash.meta || {}
+    });
+  } catch (e) {
+    console.error("gauges (query) error:", e);
+    res.status(500).json({ ok: false, error: "cannot build gauges payload" });
+  }
+});
+
   res.set("Cache-Control", "no-store");
   try {
     // Parse symbol from query string shaped like ?SPY
