@@ -1,4 +1,4 @@
-// server.js — Express backend with no-store caching + CORS + /api/v1/gauges/index
+// server.js — Express backend with no-store caching + CORS + gauges routes
 
 const path = require("path");
 const fs = require("fs");
@@ -57,16 +57,11 @@ app.get("/api/source", (req, res) => {
   }
 });
 
-// --------- NEW: /api/v1/gauges/index?SYMBOL  ----------
-// Your frontend is calling this route. We'll serve dashboard gauges here too.
-app.get("/api/v1/gauges/index", (req, res) => {
-  // --------- ALSO SUPPORT: /api/v1/gauges?index=SYMBOL ----------
+// --------- /api/v1/gauges?index=SYMBOL (the one your FE is calling) ----------
 app.get("/api/v1/gauges", (req, res) => {
   res.set("Cache-Control", "no-store");
   try {
-    // accept ?index=SPY or ?symbol=SPY; default SPY
     const symbol = req.query.index || req.query.symbol || "SPY";
-
     const p = path.join(__dirname, "data", "outlook.json");
     const txt = fs.readFileSync(p, "utf8");
     const dash = JSON.parse(txt);
@@ -84,16 +79,16 @@ app.get("/api/v1/gauges", (req, res) => {
   }
 });
 
+// --------- /api/v1/gauges/index?SPY (alias kept for compatibility) ----------
+app.get("/api/v1/gauges/index", (req, res) => {
   res.set("Cache-Control", "no-store");
   try {
     // Parse symbol from query string shaped like ?SPY
     const symbol = Object.keys(req.query)[0] || "SPY";
-
     const p = path.join(__dirname, "data", "outlook.json");
     const txt = fs.readFileSync(p, "utf8");
     const dash = JSON.parse(txt);
 
-    // Return a compact object that the frontend can consume
     res.json({
       ok: true,
       symbol,
@@ -125,5 +120,6 @@ app.listen(PORT, () => {
 - GET /api/health
 - GET /api/dashboard
 - GET /api/source
+- GET /api/v1/gauges?index=SPY
 - GET /api/v1/gauges/index?SPY`);
 });
