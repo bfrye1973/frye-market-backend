@@ -5,11 +5,11 @@ Builds data/outlook_source.json from Polygon REST.
 - Reads sector CSVs under data/sectors/{Sector}.csv
 - Each CSV must have a header 'Symbol' and tickers below it
 - For each ticker, fetch ~15 daily bars from Polygon
-- Compute:
-  - nh = 10-day NEW HIGHS count (today's HIGH > max HIGH of prior 10 sessions)
-  - nl = 10-day NEW LOWS count (today's LOW  < min LOW  of prior 10 sessions)
-  - u  = 3U (close up 3 days in a row)
-  - d  = 3D (close down 3 days in a row)
+- Compute per-sector totals:
+  nh = 10-day NEW HIGHS (today's HIGH > max HIGH of prior 10 sessions)
+  nl = 10-day NEW LOWS  (today's LOW  < min LOW  of prior 10 sessions)
+  u  = 3U (close up 3 days in a row)
+  d  = 3D (close down 3 days in a row)
 - Writes results to data/outlook_source.json
 """
 
@@ -120,7 +120,7 @@ def build_sector_counts(symbols):
         counts["u"]  += int(u)
         counts["d"]  += int(d)
         if (i + 1) % 10 == 0:
-            time.sleep(0.25)  # polite pause
+            time.sleep(0.25)  # polite pause to avoid 429s
     return counts
 
 def discover_sectors():
@@ -151,7 +151,9 @@ def main():
     print(f"[discovered] {total_symbols} symbols across {len(sectors)} sectors")
 
     groups = {}
+    sizes = {}  # keep per-sector symbol counts for summary
     for sector, symbols in sectors.items():
+        sizes[sector] = len(symbols)
         print(f"[{sector}] tickers={len(symbols)} ...")
         c = build_sector_counts(symbols)
         groups[sector] = {
@@ -168,6 +170,11 @@ def main():
     print(f"[OK] wrote {OUT_PATH}")
     for s, g in groups.items():
         print(f"  {s}: nh={g['nh']} nl={g['nl']}  u={g['u']} d={g['d']}")
+
+    # one-line sector size summary
+    summary = ", ".join(f"{k}={v}" for k, v in sorted(sizes.items()))
+    print(f"[summary] {summary}")
+    print(f"[total] symbols={total_symbols}")
 
 if __name__ == "__main__":
     main()
