@@ -2,7 +2,7 @@ name: dashboard-hourly
 
 on:
   schedule:
-    - cron: "0 * * * 1-5"     # every hour on weekdays (GitHub runs in UTC)
+    - cron: "0 * * * 1-5"   # every hour on weekdays (UTC)
   workflow_dispatch: {}
 
 jobs:
@@ -28,7 +28,7 @@ jobs:
         run: |
           hour=$(date +%H)     # ET due to TZ above
           dow=$(date +%u)      # 1=Mon .. 7=Sun
-          if [ "$dow " -ge 6 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
+          if [ "$dow" -ge 6 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
           if [ "$hour" -lt 9 ] || [ "$hour" -gt 16 ]; then echo "skip=true" >> $GITHUB_OUTPUT; fi
 
       - name: Build outlook source (intraday)
@@ -43,15 +43,28 @@ jobs:
         run: |
           python scripts/make_dashboard.py --source data/outlook_source.json --out data/outlook.json
 
-      - name: Commit only if changed
+      - name: Archive last snapshot (15-day rolling)
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -e
+          TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
+          mkdir -p data/archive/source data/archive/dashboard
+          cp data/outlook_source.json "data/archive/source/outlook_source_${TS}.json"
+          cp data/outlook.json        "data/archive/dashboard/outlook_${TS}.json"
+          # prune local files older than 15 days
+          find data/archive/source    -type f -name 'outlook_source_*.json' -mtime +15 -delete || true
+          find data/archive/dashboard -type f -name 'outlook_*.json'        -mtime +15 -delete || true
+
+      - name: Commit latest + archive (if changed)
         if: steps.gate.outputs.skip != 'true'
         run: |
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          git add data/outlook.json data/outlook_source.json || true
-          git diff --staged --quiet && echo "No changes" || git commit -m "Hourly refresh: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git add data/outlook.json data/outlook_source.json data/archive || true
+          git diff --staged --quiet && echo "No changes" || git commit -m "Hourly refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           git push || true
 
+      # Optional: if you still want the container to redeploy on each run.
       - name: Trigger Render backend deploy
         if: steps.gate.outputs.skip != 'true'
         env:
