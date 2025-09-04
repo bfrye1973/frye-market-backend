@@ -24,13 +24,13 @@ yarn-error.log
 Thumbs.db
 desktop.ini
 
-# Ignore generic data dumps
+# Ignore generic data dumps by default
 data/*
 
 # ----------------------------
 # 🚨 Important exceptions
 # ----------------------------
-# Always keep these files + archives
+# Always keep these dashboard files + archives
 !data/outlook.json
 !data/outlook_source.json
 !data/history.json
