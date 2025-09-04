@@ -1,10 +1,10 @@
 {
   "groups": {
     "Financials": {
-      "nh": 93,
-      "nl": 84,
-      "u": 90,
-      "d": 341,
+      "nh": 91,
+      "nl": 83,
+      "u": 89,
+      "d": 339,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -37,7 +37,7 @@
       "nh": 47,
       "nl": 46,
       "u": 46,
-      "d": 86,
+      "d": 85,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -67,9 +67,9 @@
       }
     },
     "Industrials": {
-      "nh": 71,
+      "nh": 69,
       "nl": 120,
-      "u": 70,
+      "u": 68,
       "d": 303,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
