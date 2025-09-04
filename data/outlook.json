@@ -1,230 +1,82 @@
 {
+  "schema_version": "r1.2",
+  "updated_at": "2025-09-04T22:44:14.057956+00:00",
+  "meta": {
+    "ts": "2025-09-04T22:44:14.057956+00:00",
+    "version": "1.2-hourly",
+    "pipeline": "eod"
+  },
   "gauges": {
-    "rpm": -40,
-    "speed": -480,
-    "fuelPct": 39,
-    "waterTemp": 195,
-    "oilPsi": 104
+    "rpm": {
+      "pct": 50.0,
+      "label": "Breadth",
+      "raw": {
+        "netNHNL": 0,
+        "totalNHNL": 1
+      }
+    },
+    "speed": {
+      "pct": 50.0,
+      "label": "Momentum",
+      "raw": {
+        "net3U3D": 0,
+        "total3U3D": 1
+      }
+    },
+    "fuel": {
+      "pct": 47.0,
+      "psi": 47.0,
+      "state": "on",
+      "label": "Squeeze"
+    },
+    "water": {
+      "pct": 23.0,
+      "degF": 190,
+      "label": "Volatility"
+    },
+    "oil": {
+      "pct": 100,
+      "psi": 80,
+      "label": "Liquidity"
+    },
+    "waterTemp": 190,
+    "oilPsi": 80,
+    "fuelPct": 47.0
   },
   "odometers": {
-    "breadthOdometer": 48,
-    "momentumOdometer": 26,
-    "squeeze": "on"
+    "breadth_net": 0,
+    "momentum_net": 0,
+    "squeeze_psi": 47.0,
+    "breadthOdometer": 0,
+    "momentumOdometer": 0,
+    "squeeze": 47.0
   },
   "lights": {
+    "risk_off": false,
+    "low_fuel": false,
+    "low_oil": false,
+    "overheat": false,
+    "stale_data": false,
     "breadth": "neutral",
-    "momentum": "weak"
+    "momentum": "neutral"
   },
-  "signals": {
-    "sigBreakout": {
-      "active": false,
-      "severity": "warn"
-    },
-    "sigDistribution": {
-      "active": false,
-      "severity": "warn"
-    },
-    "sigTurbo": {
-      "active": false,
-      "severity": "info"
-    },
-    "sigCompression": {
-      "active": true,
-      "severity": "info"
-    },
-    "sigExpansion": {
-      "active": false,
-      "severity": "info"
-    },
-    "sigDivergence": {
-      "active": false,
-      "severity": "warn"
-    },
-    "sigOverheat": {
-      "active": false,
-      "severity": "danger"
-    },
-    "sigLowLiquidity": {
-      "active": false,
-      "severity": "warn"
+  "summary": {
+    "score": 55,
+    "verdict": "Constructive",
+    "bullets": [
+      "Breadth 50/100; Momentum 50/100.",
+      "Squeeze: on; Fuel PSI 47 (~47/100).",
+      "Volatility ~23/100; Liquidity ~100/100."
+    ],
+    "breadthIdx": 50.0,
+    "momentumIdx": 50.0,
+    "breadthState": "Neutral",
+    "momentumState": "Neutral",
+    "sectors": {
+      "total": 11
     }
   },
   "outlook": {
-    "dailyOutlook": 37,
-    "sectorCards": [
-      {
-        "sector": "Communication Services",
-        "outlook": "Neutral",
-        "spark": [
-          1,
-          1
-        ],
-        "counts": {
-          "nh": 47,
-          "nl": 46,
-          "u": 46,
-          "d": 85
-        }
-      },
-      {
-        "sector": "Consumer Discretionary",
-        "outlook": "Neutral",
-        "spark": [
-          -12,
-          -12
-        ],
-        "counts": {
-          "nh": 82,
-          "nl": 94,
-          "u": 85,
-          "d": 198
-        }
-      },
-      {
-        "sector": "Consumer Staples",
-        "outlook": "Neutral",
-        "spark": [
-          -15,
-          -15
-        ],
-        "counts": {
-          "nh": 34,
-          "nl": 49,
-          "u": 45,
-          "d": 81
-        }
-      },
-      {
-        "sector": "Energy",
-        "outlook": "Neutral",
-        "spark": [
-          44,
-          44
-        ],
-        "counts": {
-          "nh": 59,
-          "nl": 15,
-          "u": 20,
-          "d": 93
-        }
-      },
-      {
-        "sector": "Financials",
-        "outlook": "Neutral",
-        "spark": [
-          9,
-          8
-        ],
-        "counts": {
-          "nh": 91,
-          "nl": 83,
-          "u": 89,
-          "d": 339
-        }
-      },
-      {
-        "sector": "Healthcare",
-        "outlook": "Neutral",
-        "spark": [
-          1,
-          1
-        ],
-        "counts": {
-          "nh": 191,
-          "nl": 190,
-          "u": 236,
-          "d": 291
-        }
-      },
-      {
-        "sector": "Industrials",
-        "outlook": "Neutral",
-        "spark": [
-          -49,
-          -51
-        ],
-        "counts": {
-          "nh": 69,
-          "nl": 120,
-          "u": 68,
-          "d": 303
-        }
-      },
-      {
-        "sector": "Materials",
-        "outlook": "Neutral",
-        "spark": [
-          47,
-          47
-        ],
-        "counts": {
-          "nh": 78,
-          "nl": 31,
-          "u": 60,
-          "d": 104
-        }
-      },
-      {
-        "sector": "Real Estate",
-        "outlook": "Neutral",
-        "spark": [
-          10,
-          10
-        ],
-        "counts": {
-          "nh": 44,
-          "nl": 34,
-          "u": 15,
-          "d": 68
-        }
-      },
-      {
-        "sector": "tech",
-        "outlook": "Neutral",
-        "spark": [
-          -38,
-          -38
-        ],
-        "counts": {
-          "nh": 66,
-          "nl": 104,
-          "u": 84,
-          "d": 304
-        }
-      },
-      {
-        "sector": "Utilities",
-        "outlook": "Neutral",
-        "spark": [
-          -39,
-          -39
-        ],
-        "counts": {
-          "nh": 2,
-          "nl": 41,
-          "u": 8,
-          "d": 56
-        }
-      }
-    ]
-  },
-  "summary": {
-    "score": 37,
-    "verdict": "Neutral",
-    "breadthIdx": 48,
-    "momentumIdx": 26,
-    "breadthState": "neutral",
-    "momentumState": "weak",
-    "sectors": {
-      "total": 11,
-      "upBreadth": 6,
-      "downBreadth": 5,
-      "upMomentum": 0,
-      "downMomentum": 11
-    }
-  },
-  "meta": {
-    "ts": "2025-09-04T03:26:04Z",
-    "version": "1.2"
+    "sectorCards": []
   }
 }
