@@ -9,7 +9,7 @@ jobs:
   hourly:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # allow pushing commits
+      contents: write
     env:
       TZ: America/New_York
 
@@ -17,7 +17,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # allow commits/pushes back to main
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -29,42 +29,43 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Skip if outside market hours
+      # Apply market-hours gate ONLY for scheduled runs
+      - name: Skip if outside market hours (scheduled runs only)
         id: gate
+        if: github.event_name == 'schedule'
         run: |
-          hour=$(date +%H)   # ET due to TZ above
+          hour=$(date +%H)   # ET (TZ set above)
           dow=$(date +%u)    # 1=Mon..7=Sun
           if [ "$dow" -ge 6 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
           if [ "$hour" -lt 9 ] || [ "$hour" -gt 16 ]; then echo "skip=true" >> $GITHUB_OUTPUT; fi
 
       - name: Build outlook source (intraday)
-        if: steps.gate.outputs.skip != 'true'
+        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
       - name: Make dashboard payload
-        if: steps.gate.outputs.skip != 'true'
+        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
         env:
           PIPELINE_TAG: "hourly"
         run: |
           python scripts/make_dashboard.py --source data/outlook_source.json --out data/outlook.json
 
       - name: Archive (15-day rolling) — HOURLY
-        if: steps.gate.outputs.skip != 'true'
+        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
         run: |
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
           mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
           cp data/outlook_source.json "data/archive/hourly/source/outlook_source_${TS}.json"
           cp data/outlook.json        "data/archive/hourly/dashboard/outlook_${TS}.json"
-          # prune >15 days
           find data/archive/hourly/source    -type f -name 'outlook_source_*.json' -mtime +15 -delete || true
           find data/archive/hourly/dashboard -type f -name 'outlook_*.json'        -mtime +15 -delete || true
 
-      - name: Commit latest + hourly archive (if changed)
-        if: steps.gate.outputs.skip != 'true'
+      - name: Commit latest + hourly archive (rebase-safe)
+        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
         run: |
           set -e
           git config user.name  "github-actions"
@@ -81,7 +82,7 @@ jobs:
             exit 0
           fi
 
-          git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
 
           if ! git push origin HEAD:main; then
             echo "Push rejected; rebasing once more..."
