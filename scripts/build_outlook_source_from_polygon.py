@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Ferrari Dashboard — build_outlook_source_from_polygon.py (R2, intraday support)
+Ferrari Dashboard — build_outlook_source_from_polygon.py (R2)
 
 Generates data/outlook_source.json from Polygon:
 
@@ -27,7 +27,6 @@ Outputs (unchanged schema)
   }
 }
 """
-
 from __future__ import annotations
 import argparse, csv, json, math, os, time, urllib.parse, urllib.request
 from datetime import datetime, timedelta, timezone
@@ -41,7 +40,6 @@ SECTORS_DIR= os.path.join("data", "sectors")
 OUT_PATH   = os.path.join("data", "outlook_source.json")
 HIST_PATH  = os.path.join("data", "history.json")
 
-# ---------- HTTP ----------
 def http_get(url: str, timeout: int = 20) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "ferrari-dashboard/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -66,7 +64,6 @@ def poly_json(url: str, params: Dict[str, Any] | None = None, retries: int = 3, 
                 time.sleep(backoff * tries); continue
             raise
 
-# ---------- Polygon ----------
 def fetch_range_daily(ticker: str, start: str, end: str) -> List[Dict[str, Any]]:
     url = f"{POLY_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}"
     js = poly_json(url, {"adjusted":"true","sort":"asc","limit":50000})
@@ -87,18 +84,15 @@ def bulk_snapshots(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
         for row in js.get("tickers", []) or []:
             sym = row.get("ticker")
             if sym: out[sym] = row
-        time.sleep(0.35)  # polite
+        time.sleep(0.35)
     return out
 
-# ---------- utils ----------
 def date_str(d): return d.strftime("%Y-%m-%d")
-
 def bars_last_n_days(ticker: str, n_days: int) -> List[Dict[str, Any]]:
     end = datetime.utcnow().date()
     start = end - timedelta(days=max(20, n_days + 5))
     return fetch_range_daily(ticker, date_str(start), date_str(end))[-15:]
 
-# ---------- sectors ----------
 def read_symbols(path: str) -> List[str]:
     syms = []
     with open(path, newline="", encoding="utf-8-sig") as f:
@@ -120,7 +114,6 @@ def discover_sectors() -> Dict[str, List[str]]:
     if not sectors: raise SystemExit(f"No sector CSVs found in {SECTORS_DIR}")
     return sectors
 
-# ---------- flags ----------
 def compute_flags_from_bars(bars: List[Dict[str, Any]]) -> tuple[bool,bool,bool,bool]:
     if len(bars) < 11: return False, False, False, False
     today   = bars[-1]
@@ -180,7 +173,6 @@ def build_sector_counts_intraday(symbols: List[str], wm_cache: Dict[str, tuple],
         counts["nh"] += nh; counts["nl"] += nl; counts["u"] += u3; counts["d"] += d3
     return counts
 
-# ---------- history ----------
 def load_history():
     if not os.path.exists(HIST_PATH): return {"days":[]}
     with open(HIST_PATH, "r", encoding="utf-8") as f: return json.load(f)
@@ -189,7 +181,6 @@ def save_history(hist):
     os.makedirs(os.path.dirname(HIST_PATH), exist_ok=True)
     with open(HIST_PATH, "w", encoding="utf-8") as f: json.dump(hist, f, ensure_ascii=False, indent=2)
 
-# ---------- fuel / water / oil ----------
 def compute_psi_from_closes(closes, conv=50, length=20):
     if len(closes) < max(5, length + 2): return None
     mx = mn = None; diffs = []
@@ -259,7 +250,6 @@ def compute_liquidity_pct(ticker="SPY"):
     ratio = (avgv5/avgv20)*100.0
     return int(round(max(0, min(120, ratio))))
 
-# ---------- main ----------
 def main():
     ap = argparse.ArgumentParser(description="Build outlook_source.json (daily or intraday)")
     ap.add_argument("--mode", choices=["daily","intraday"], default="daily")
@@ -316,7 +306,6 @@ def main():
     print("[volatility]", payload["global"]["volatility_pct"])
     print("[liquidity]", payload["global"]["liquidity_pct"])
 
-    # Append to rolling history (last 60 days)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     snap  = { s: {"nh": g["nh"], "nl": g["nl"], "u": g["u"], "d": g["d"]} for s,g in groups.items() }
     hist  = load_history()
