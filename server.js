@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 10000;
 // --------- CORS (allow your dashboard & localhost) ----------
 const ALLOW = new Set([
   "https://frye-dashboard.onrender.com",
-  "http://localhost:3000"
+  "http://localhost:3000",
 ]);
 
 app.use((req, res, next) => {
