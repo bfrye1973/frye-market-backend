@@ -4,15 +4,15 @@ on:
   workflow_dispatch:   # allow manual runs
   schedule:
     # Autoschedule (Mon–Fri): 9:45a, 12:00p, 3:00p, 4:05p Eastern
-    # We include both EDT (UTC-4) and EST (UTC-5) so it works year-round.
+    # Includes both EDT (UTC-4) and EST (UTC-5)
     - cron: "45 13 * * 1-5"   # 09:45 AM EDT
     - cron: "45 14 * * 1-5"   # 09:45 AM EST
     - cron: "0 16 * * 1-5"    # 12:00 PM EDT
     - cron: "0 17 * * 1-5"    # 12:00 PM EST
     - cron: "0 19 * * 1-5"    # 03:00 PM EDT
     - cron: "0 20 * * 1-5"    # 03:00 PM EST
-    - cron: "5 20 * * 1-5"    # 04:05 PM EDT (after close)
-    - cron: "5 21 * * 1-5"    # 04:05 PM EST (after close)
+    - cron: "5 20 * * 1-5"    # 04:05 PM EDT (close)
+    - cron: "5 21 * * 1-5"    # 04:05 PM EST (close)
 
 jobs:
   eod:
@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # allow commits/pushes back to main
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -53,19 +55,36 @@ jobs:
           mkdir -p data/archive/eod/source data/archive/eod/dashboard
           cp data/outlook_source.json "data/archive/eod/source/outlook_source_${TS}.json"
           cp data/outlook.json        "data/archive/eod/dashboard/outlook_${TS}.json"
-          # prune >15 days old
+          # prune >15 days
           find data/archive/eod/source    -type f -name 'outlook_source_*.json' -mtime +15 -delete || true
           find data/archive/eod/dashboard -type f -name 'outlook_*.json'        -mtime +15 -delete || true
 
       - name: Commit latest + EOD archive (if changed)
         run: |
+          set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          git add data/outlook.json data/outlook_source.json data/archive/eod || true
-          git diff --staged --quiet && echo "No changes" || git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          git push || true
 
-      # Optional: auto-redeploy backend
+          git fetch origin main
+          git checkout main
+          git pull --rebase --autostash origin main
+
+          git add data/outlook.json data/outlook_source.json data/archive/eod || true
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          if ! git push origin HEAD:main; then
+            echo "Push rejected; rebasing once more..."
+            git pull --rebase --autostash origin main
+            git push origin HEAD:main
+          fi
+
+      # Optional: redeploy backend
       - name: Trigger Render backend deploy
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
