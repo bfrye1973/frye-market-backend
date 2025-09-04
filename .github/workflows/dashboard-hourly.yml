@@ -8,6 +8,8 @@ on:
 jobs:
   hourly:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # allow pushing commits
     env:
       TZ: America/New_York
 
@@ -85,17 +87,4 @@ jobs:
             echo "Push rejected; rebasing once more..."
             git pull --rebase --autostash origin main
             git push origin HEAD:main
-          fi
-
-      # Optional: redeploy backend (safe no-op if secret not set)
-      - name: Trigger Render backend deploy
-        if: steps.gate.outputs.skip != 'true'
-        env:
-          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-        run: |
-          if [ -n "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "Triggering Render deploy..."
-            curl -s -X POST "$RENDER_DEPLOY_HOOK_URL" >/dev/null || true
-          else
-            echo "No RENDER_DEPLOY_HOOK_URL configured; skipping."
           fi
