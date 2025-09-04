@@ -2,19 +2,21 @@ name: dashboard-hourly
 
 on:
   schedule:
-    - cron: "0 * * * 1-5"     # every hour on weekdays (UTC)
+    - cron: "0 * * * 1-5"   # top of every hour Mon–Fri (UTC)
   workflow_dispatch: {}
 
 jobs:
-  build:
+  hourly:
     runs-on: ubuntu-latest
     env:
       TZ: America/New_York
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -26,8 +28,8 @@ jobs:
       - name: Skip if outside market hours
         id: gate
         run: |
-          hour=$(date +%H)     # ET
-          dow=$(date +%u)      # 1=Mon..7=Sun
+          hour=$(date +%H)   # ET due to TZ above
+          dow=$(date +%u)    # 1=Mon..7=Sun
           if [ "$dow" -ge 6 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
           if [ "$hour" -lt 9 ] || [ "$hour" -gt 16 ]; then echo "skip=true" >> $GITHUB_OUTPUT; fi
 
@@ -53,6 +55,7 @@ jobs:
           mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
           cp data/outlook_source.json "data/archive/hourly/source/outlook_source_${TS}.json"
           cp data/outlook.json        "data/archive/hourly/dashboard/outlook_${TS}.json"
+          # prune >15 days
           find data/archive/hourly/source    -type f -name 'outlook_source_*.json' -mtime +15 -delete || true
           find data/archive/hourly/dashboard -type f -name 'outlook_*.json'        -mtime +15 -delete || true
 
@@ -65,10 +68,15 @@ jobs:
           git diff --staged --quiet && echo "No changes" || git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           git push || true
 
-      # Optional: redeploy Render (not needed if your server fetches GitHub Raw)
+      # Optional: redeploy backend (safe no-op if secret not set)
       - name: Trigger Render backend deploy
         if: steps.gate.outputs.skip != 'true'
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
-          [ -n "$RENDER_DEPLOY_HOOK_URL" ] && curl -s -X POST "$RENDER_DEPLOY_HOOK_URL" >/dev/null || echo "No deploy hook set"
+          if [ -n "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "Triggering Render deploy..."
+            curl -s -X POST "$RENDER_DEPLOY_HOOK_URL" >/dev/null || true
+          else
+            echo "No RENDER_DEPLOY_HOOK_URL configured; skipping."
+          fi
