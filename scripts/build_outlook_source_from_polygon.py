@@ -11,7 +11,7 @@ Modes
 Inputs
 - CSVs under data/sectors/{Sector}.csv  (header must be 'Symbol')
 
-Outputs (unchanged schema for downstream make_dashboard.py)
+Outputs (unchanged schema)
 {
   "timestamp": "...Z",
   "mode": "intraday" | "daily",
@@ -41,9 +41,9 @@ SECTORS_DIR= os.path.join("data", "sectors")
 OUT_PATH   = os.path.join("data", "outlook_source.json")
 HIST_PATH  = os.path.join("data", "history.json")
 
-# ------------- HTTP helpers -------------
+# ---------- HTTP ----------
 def http_get(url: str, timeout: int = 20) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "frye-dashboard/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "ferrari-dashboard/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8")
 
@@ -66,10 +66,10 @@ def poly_json(url: str, params: Dict[str, Any] | None = None, retries: int = 3, 
                 time.sleep(backoff * tries); continue
             raise
 
-# ------------- Polygon fetches -------------
-def fetch_range_daily(ticker: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
-    url = f"{POLY_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start_date}/{end_date}"
-    js = poly_json(url, {"adjusted":"true", "sort":"asc", "limit":50000})
+# ---------- Polygon ----------
+def fetch_range_daily(ticker: str, start: str, end: str) -> List[Dict[str, Any]]:
+    url = f"{POLY_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}"
+    js = poly_json(url, {"adjusted":"true","sort":"asc","limit":50000})
     if js.get("status") != "OK": return []
     out = []
     for r in js.get("results", []) or []:
@@ -79,7 +79,6 @@ def fetch_range_daily(ticker: str, start_date: str, end_date: str) -> List[Dict[
     return out
 
 def bulk_snapshots(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
-    """ /v2/snapshot/locale/us/markets/stocks/tickers?tickers=AAPL,MSFT,... """
     out: Dict[str, Dict[str, Any]] = {}
     for i in range(0, len(tickers), 50):
         batch = tickers[i:i+50]
@@ -91,7 +90,7 @@ def bulk_snapshots(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
         time.sleep(0.35)  # polite
     return out
 
-# ------------- utils -------------
+# ---------- utils ----------
 def date_str(d): return d.strftime("%Y-%m-%d")
 
 def bars_last_n_days(ticker: str, n_days: int) -> List[Dict[str, Any]]:
@@ -99,7 +98,7 @@ def bars_last_n_days(ticker: str, n_days: int) -> List[Dict[str, Any]]:
     start = end - timedelta(days=max(20, n_days + 5))
     return fetch_range_daily(ticker, date_str(start), date_str(end))[-15:]
 
-# ------------- sectors -------------
+# ---------- sectors ----------
 def read_symbols(path: str) -> List[str]:
     syms = []
     with open(path, newline="", encoding="utf-8-sig") as f:
@@ -121,7 +120,7 @@ def discover_sectors() -> Dict[str, List[str]]:
     if not sectors: raise SystemExit(f"No sector CSVs found in {SECTORS_DIR}")
     return sectors
 
-# ------------- flag logic -------------
+# ---------- flags ----------
 def compute_flags_from_bars(bars: List[Dict[str, Any]]) -> tuple[bool,bool,bool,bool]:
     if len(bars) < 11: return False, False, False, False
     today   = bars[-1]
@@ -181,16 +180,16 @@ def build_sector_counts_intraday(symbols: List[str], wm_cache: Dict[str, tuple],
         counts["nh"] += nh; counts["nl"] += nl; counts["u"] += u3; counts["d"] += d3
     return counts
 
-# ------------- history -------------
-def load_history(): 
+# ---------- history ----------
+def load_history():
     if not os.path.exists(HIST_PATH): return {"days":[]}
     with open(HIST_PATH, "r", encoding="utf-8") as f: return json.load(f)
 
-def save_history(hist): 
+def save_history(hist):
     os.makedirs(os.path.dirname(HIST_PATH), exist_ok=True)
     with open(HIST_PATH, "w", encoding="utf-8") as f: json.dump(hist, f, ensure_ascii=False, indent=2)
 
-# ------------- fuel / water / oil (same as your originals) -------------
+# ---------- fuel / water / oil ----------
 def compute_psi_from_closes(closes, conv=50, length=20):
     if len(closes) < max(5, length + 2): return None
     mx = mn = None; diffs = []
@@ -218,23 +217,23 @@ def compute_squeeze_fields(ticker="SPY", conv=50, length=20):
     return {"squeeze_pressure_pct": int(round(psi)), "squeeze_state": state}
 
 def compute_atr14_percent(closes, highs, lows):
-    n = len(closes); 
+    n = len(closes)
     if n < 20: return None
-    trs=[]; 
+    trs=[]
     for i in range(1,n):
         trs.append(max(highs[i]-lows[i], abs(highs[i]-closes[i-1]), abs(lows[i]-closes[i-1])))
-    period=14; 
-    if len(trs) < period: return None
+    period=14
+    if len(trs)<period: return None
     atr = sum(trs[:period])/period
-    for x in trs[period:]: atr = (atr*(period-1)+x)/period
-    c = closes[-1]; 
-    if c <= 0: return None
+    for x in trs[period:]: atr=(atr*(period-1)+x)/period
+    c = closes[-1]
+    if c<=0: return None
     return (atr/c)*100.0
 
 def percentile_rank(values, value):
     if not values: return 50
     less = sum(1 for v in values if v <= value)
-    return round(100*less/len(values))
+    return round(100 * less / len(values))
 
 def compute_volatility_pct(ticker="SPY"):
     end = datetime.utcnow().date(); start = end - timedelta(days=140)
@@ -246,7 +245,8 @@ def compute_volatility_pct(ticker="SPY"):
         atrp = compute_atr14_percent(closes[:i], highs[:i], lows[:i])
         if atrp is not None: atrp_series.append(atrp)
     if not atrp_series: return 50
-    current = atrp_series[-1]; return int(max(0, min(100, percentile_rank(atrp_series, current))))
+    current = atrp_series[-1]
+    return int(max(0, min(100, percentile_rank(atrp_series, current))))
 
 def compute_liquidity_pct(ticker="SPY"):
     end = datetime.utcnow().date(); start = end - timedelta(days=60)
@@ -259,7 +259,7 @@ def compute_liquidity_pct(ticker="SPY"):
     ratio = (avgv5/avgv20)*100.0
     return int(round(max(0, min(120, ratio))))
 
-# ------------- main -------------
+# ---------- main ----------
 def main():
     ap = argparse.ArgumentParser(description="Build outlook_source.json (daily or intraday)")
     ap.add_argument("--mode", choices=["daily","intraday"], default="daily")
@@ -282,7 +282,6 @@ def main():
             groups[sector] = {"nh":c["nh"], "nl":c["nl"], "u":c["u"], "d":c["d"],
                               "vol_state":"Mixed","breadth_state":"Neutral","history":{"nh":[]}}
     else:
-        # intraday
         all_syms = sorted({s for arr in sectors.values() for s in arr})
         print(f"[intraday] precomputing watermarks for {len(all_syms)} symbols…")
         wm = precompute_watermarks(all_syms)
@@ -307,6 +306,7 @@ def main():
         "groups": groups,
         "global": { **squeeze, "volatility_pct": vol_pct, "liquidity_pct": liq_psi }
     }
+
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f: json.dump(payload, f, ensure_ascii=False, indent=2)
     print(f"[OK] wrote {OUT_PATH}")
@@ -316,7 +316,7 @@ def main():
     print("[volatility]", payload["global"]["volatility_pct"])
     print("[liquidity]", payload["global"]["liquidity_pct"])
 
-    # history append (same behavior as before)
+    # Append to rolling history (last 60 days)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     snap  = { s: {"nh": g["nh"], "nl": g["nl"], "u": g["u"], "d": g["d"]} for s,g in groups.items() }
     hist  = load_history()
