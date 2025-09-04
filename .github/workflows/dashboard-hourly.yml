@@ -1,0 +1,63 @@
+name: dashboard-hourly
+
+on:
+  schedule:
+    - cron: "0 * * 1-5"   # every hour, Mon–Fri (GitHub = UTC)
+  workflow_dispatch: {}     # allow manual run
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      TZ: America/New_York
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # Optional: skip outside RTH (09:30–16:00 ET)
+      - name: Skip if outside market hours
+        id: gate
+        run: |
+          hour=$(date +%H)     # ET, thanks to TZ above
+          dow=$(date +%u)      # 1=Mon .. 7=Sun
+          if [ "$dow" -ge 6 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
+          # run hours 9..16 inclusive (top of hour; close enough for hourly)
+          if [ "$hour" -lt 9 ] || [ "$hour" -gt 16 ]; then echo "skip=true" >> $GITHUB_OUTPUT; fi
+
+      - name: Build outlook source (intraday)
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          python scripts/build_outlook_source_from_polygon.py --mode intraday || \
+          python scripts/build_outlook_source_from_polygon.py
+
+      - name: Make dashboard payload
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          python make_dashboard.py --source data/outlook_source.json --out data/outlook.json
+
+      - name: Commit only if changed
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git add data/outlook.json data/outlook_source.json || true
+          git diff --staged --quiet && echo "No changes" || git commit -m "Hourly refresh: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" 
+          git push || true
+
+      - name: Trigger Render backend deploy
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          [ -n "$RENDER_DEPLOY_HOOK_URL" ] && curl -s -X POST "$RENDER_DEPLOY_HOOK_URL" >/dev/null || echo "No deploy hook set"
