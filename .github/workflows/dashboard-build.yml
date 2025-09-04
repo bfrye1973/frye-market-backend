@@ -4,7 +4,6 @@ on:
   workflow_dispatch:   # allow manual runs
   schedule:
     # Autoschedule (Mon–Fri): 9:45a, 12:00p, 3:00p, 4:05p Eastern
-    # Includes both EDT (UTC-4) and EST (UTC-5)
     - cron: "45 13 * * 1-5"   # 09:45 AM EDT
     - cron: "45 14 * * 1-5"   # 09:45 AM EST
     - cron: "0 16 * * 1-5"    # 12:00 PM EDT
@@ -17,6 +16,8 @@ on:
 jobs:
   eod:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # allow pushing commits
     env:
       TZ: America/New_York
 
@@ -82,16 +83,4 @@ jobs:
             echo "Push rejected; rebasing once more..."
             git pull --rebase --autostash origin main
             git push origin HEAD:main
-          fi
-
-      # Optional: redeploy backend
-      - name: Trigger Render backend deploy
-        env:
-          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-        run: |
-          if [ -n "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "Triggering Render deploy..."
-            curl -s -X POST "$RENDER_DEPLOY_HOOK_URL" >/dev/null || true
-          else
-            echo "No RENDER_DEPLOY_HOOK_URL configured; skipping."
           fi
