@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-# scripts/make_dashboard.py
+# scripts/make_dashboard.py  —  clean v1.3
 #
-# Convert outlook_source + history -> final /api/dashboard payload:
-#   data/outlook_source.json :  { "groups": { sector -> {nh,nl,u,d,...}}, "global": {...} }
-#   data/history.json         :  optional, used to build 5-day sparks (NH-NL)
+# INPUTS:
+#   data/outlook_source.json  (per-sector NH/NL/3U/3D + "global" fields: squeeze_pressure_pct, squeeze_state, volatility_pct, liquidity_pct)
+#   data/history.json         (optional: appended daily by the builder)
 #
-# Output:
-#   data/outlook.json         :  gauges, odometers, lights, signals, outlook.sectorCards, summary, meta
+# OUTPUT:
+#   data/outlook.json         (frontend payload for /api/dashboard)
 #
-# Notes:
-# - Mini gauges expect:
-#       global.squeeze_pressure_pct  -> fuelPct (0..100)
-#       global.volatility_pct        -> waterTemp via 180 + 60*(vol/100)
-#       global.liquidity_pct         -> oilPsi (0..120 clamp)
-# - Big gauges:
-#       breadthIdx/momentumIdx -> rpm/speed needles (fallback on raw gauges if summary missing)
+# Adds:
+#   - sectorCards[].counts = { nh, nl, u, d }
+#   - sectorCards[].spark  = last 5 values of (NH - NL)
+#   - gauges: rpm/speed (−1000..+1000), fuelPct (0..100), waterTemp (180–240°F), oilPsi (0..120)
+#   - odometers: breadth/momentum (0..100), squeeze state
+#   - lights tokens: strong|improving|neutral|deteriorating|weak
+#   - signals (starter set)
+#   - summary { score, verdict, breadthIdx, momentumIdx, breadthState, momentumState, sector participation }
+#   - meta { ts, version }
 
 import json, os
 from datetime import datetime, timezone
@@ -43,6 +45,7 @@ def squeeze_enum(s: str) -> str:
 def last_n(lst, n): return lst[-n:] if lst else []
 
 def linear_slope(vals):
+    """Least-squares slope on 0..n-1; positive => rising trend."""
     if len(vals) < 3: return 0.0
     n = len(vals); xs = list(range(n))
     xbar = sum(xs)/n; ybar = sum(vals)/n
@@ -51,7 +54,7 @@ def linear_slope(vals):
     return num / den
 
 def classify(index):
-    """Map 0..100 index to a state token used by ring colors."""
+    """Map 0..100 index to a state token."""
     if index >= 70: return "strong"
     if index >= 55: return "improving"
     if index >  45: return "neutral"
@@ -61,16 +64,16 @@ def classify(index):
 def build_sector_cards(groups, history):
     """
     Returns:
-      cards:         list of { sector, outlook, spark[], counts{nh,nl,u,d} }
-      breadth_idx:   0..100 market breadth
-      momentum_idx:  0..100 market momentum
-      comp_avg:      avg of d/(u+d) across sectors (fallback for fuel)
-      trend:         { breadthSlope, momentumSlope }
+      cards          — list of {sector, outlook, counts, spark}
+      breadth_idx    — 0..100 (mean of per-sector breadth)
+      momentum_idx   — 0..100 (mean of per-sector momentum)
+      comp_avg       — avg compression proxy (for fuel fallback)
+      trend          — {'breadthSlope','momentumSlope'}
     """
     Bs, Ms, comp_fracs, cards = [], [], [], []
     hist_days = history.get("days", [])
 
-    # market-wide history series (net breadth/momentum per day)
+    # market-wide history series (net breadth / net momentum per day)
     series_netB, series_netM = [], []
     for day in hist_days:
         gmap = day.get("groups", {})
@@ -85,15 +88,14 @@ def build_sector_cards(groups, history):
         nh = int(g.get("nh", 0)); nl = int(g.get("nl", 0))
         u  = int(g.get("u",  0)); d  = int(g.get("d",  0))
 
-        # sector breadth/momentum ([-1..+1])
-        B_s = (nh - nl) / max(1, nh + nl)
-        M_s = (u  - d ) / max(1, u  + d )
-        Bs.append(B_s)
-        Ms.append(M_s)
+        # sector breadth/momentum point estimates
+        B_s = (nh - nl) / max(1, nh + nl)  # [-1..+1]
+        M_s = (u  - d ) / max(1, u  + d )  # [-1..+1]
+        Bs.append(B_s); Ms.append(M_s)
 
         comp_fracs.append(d / max(1, u + d))
 
-        # spark: last 5 (NH-NL) for this sector from history
+        # spark: last 5 days of (NH-NL) for this sector
         spark_vals = []
         for day in hist_days[-5:]:
             gmap = day.get("groups", {})
@@ -105,3 +107,9 @@ def build_sector_cards(groups, history):
 
         cards.append({
             "sector":  sector,
+            "outlook": g.get("breadth_state", "Neutral"),
+            "spark":   spark,
+            "counts": {"nh": nh, "nl": nl, "u": u, "d": d}
+        })
+
+    mean_B = sum(Bs)/len(Bs) if Bs else 0.0
