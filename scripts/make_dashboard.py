@@ -2,7 +2,7 @@
 # scripts/make_dashboard.py
 #
 # INPUTS:
-#   data/outlook_source.json  (per-sector NH/NL/3U/3D + optional "global")
+#   data/outlook_source.json  (per-sector NH/NL/3U/3D + "global" squeeze/vol/liquidity)
 #   data/history.json         (optional: appended daily snapshots by the builder)
 #
 # OUTPUT:
@@ -12,8 +12,8 @@
 #   - sectorCards[].counts = { nh, nl, u, d }
 #   - sectorCards[].spark  = last 5 values of (NH - NL)
 #   - gauges, odometers (breadth/momentum/squeeze)
-#   - lights tokens for ring coloring: strong|improving|neutral|deteriorating|weak
-#   - signals (conservative starters)
+#   - lights tokens: strong|improving|neutral|deteriorating|weak
+#   - signals (starter set)
 #   - summary { score, verdict, indices, states, sector participation }
 #   - meta { ts, version }
 
@@ -44,7 +44,6 @@ def squeeze_enum(s: str) -> str:
 def last_n(lst, n): return lst[-n:] if lst else []
 
 def linear_slope(vals):
-  """Least-squares slope on 0..n-1; positive => rising trend."""
   if len(vals) < 3: return 0.0
   n = len(vals); xs = list(range(n))
   xbar = sum(xs)/n; ybar = sum(vals)/n
@@ -53,7 +52,6 @@ def linear_slope(vals):
   return num / den
 
 def classify(index):
-  """Map 0..100 index to a state token."""
   if index >= 70: return "strong"
   if index >= 55: return "improving"
   if index >  45: return "neutral"
@@ -61,12 +59,9 @@ def classify(index):
   return "weak"
 
 def build_sector_cards(groups, history):
-  """Return (cards, breadth_idx, momentum_idx, comp_avg, trend)"""
-
   Bs, Ms, comp_fracs, cards = [], [], [], []
   hist_days = history.get("days", [])
 
-  # market-wide history series (net breadth / net momentum per day)
   series_netB, series_netM = [], []
   for day in hist_days:
     gmap = day.get("groups", {})
@@ -81,14 +76,12 @@ def build_sector_cards(groups, history):
     nh = int(g.get("nh", 0)); nl = int(g.get("nl", 0))
     u  = int(g.get("u",  0)); d  = int(g.get("d",  0))
 
-    # sector breadth/momentum point estimates
-    B_s = (nh - nl) / max(1, nh + nl)  # [-1..+1]
-    M_s = (u  - d ) / max(1, u  + d )  # [-1..+1]
+    B_s = (nh - nl) / max(1, nh + nl)
+    M_s = (u  - d ) / max(1, u  + d )
     Bs.append(B_s); Ms.append(M_s)
 
     comp_fracs.append(d / max(1, u + d))
 
-    # spark: last 5 days of (NH-NL) for this sector
     spark_vals = []
     for day in hist_days[-5:]:
       gmap = day.get("groups", {})
@@ -118,7 +111,6 @@ def build_sector_cards(groups, history):
   return cards, breadth_idx, momentum_idx, comp_avg, trend
 
 def main():
-  # ---------- load ----------
   src  = load_json(SRC,  {"groups": {}, "global": {}})
   hist = load_json(HIST, {"days": []})
   groups    = src.get("groups", {})
@@ -127,24 +119,21 @@ def main():
   if not groups:
     raise SystemExit("No groups found in data/outlook_source.json")
 
-  # ---------- rollup ----------
   sector_cards, breadth_idx, momentum_idx, comp_avg, trend = build_sector_cards(groups, hist)
 
-  # big gauges (−1000..+1000 needle span)
+  # big gauges (−1000..+1000)
   rpm   = clamp(round(1000 * (breadth_idx/50 - 1)),  -1000, 1000)
   speed = clamp(round(1000 * (momentum_idx/50 - 1)), -1000, 1000)
 
-  # mini gauges
+  # mini gauges (Fuel/Temp/Oil)
   fuelPct   = clamp(int(round(global_in.get("squeeze_pressure_pct", 100 * comp_avg))), 0, 100)
   vol_pct   = clamp(int(global_in.get("volatility_pct", momentum_idx)), 0, 100)
-  waterTemp = int(round(180 + 60 * (vol_pct / 100)))  # 180–240°F (tune if desired)
-  liq_pct   = int(global_in.get("liquidity_pct", 70))
+  waterTemp = int(round(180 + 60 * (vol_pct / 100)))
+  liq_pct   = int(global_in.get("liquidity_pct", 70))     # from builder (0..120)
   oilPsi    = clamp(liq_pct, 0, 120)
 
-  # squeeze
   squeeze_state = squeeze_enum(global_in.get("squeeze_state") or (groups.get("Tech") or groups.get("tech") or {}).get("vol_state", ""))
 
-  # totals for signals
   NH_total = sum(int(g.get("nh",0)) for g in groups.values())
   NL_total = sum(int(g.get("nl",0)) for g in groups.values())
   U_total  = sum(int(g.get("u",0))  for g in groups.values())
@@ -152,12 +141,8 @@ def main():
   NHpct = pct(NH_total, NL_total)
   Upct  = pct(U_total,  D_total)
 
-  # lights (ring tokens)
-  breadth_state  = classify(breadth_idx)
-  momentum_state = classify(momentum_idx)
-  lights = {"breadth": breadth_state, "momentum": momentum_state}
+  lights = {"breadth": classify(breadth_idx), "momentum": classify(momentum_idx)}
 
-  # signals (starter rules)
   sigBreakout     = (momentum_idx >= 60 and NHpct >= 0.66)
   sigDistribution = (NL_total > NH_total*1.5 or breadth_idx <= 45)
   sigTurbo        = (momentum_idx >= 70)
@@ -169,7 +154,7 @@ def main():
 
   def sev(active, base="info"): return {"active": bool(active), "severity": base}
 
-  # ---------- SUMMARY ----------
+  # ---- summary ----
   tot = len(groups)
   up_breadth = sum(1 for g in groups.values() if int(g.get("nh",0)) > int(g.get("nl",0)))
   dn_breadth = tot - up_breadth
@@ -177,8 +162,7 @@ def main():
   dn_momo    = tot - up_momo
 
   score   = int(round((breadth_idx + momentum_idx)/2))
-  b_state = lights["breadth"]
-  m_state = lights["momentum"]
+  b_state = lights["breadth"]; m_state = lights["momentum"]
 
   verdict = "Neutral"
   if score >= 65 and up_breadth > dn_breadth and up_momo > dn_momo:
@@ -191,8 +175,8 @@ def main():
     verdict = "Risk-On"
 
   summary = {
-    "score": score,                         # 0..100
-    "verdict": verdict,                     # short sentence
+    "score": score,
+    "verdict": verdict,
     "breadthIdx":  breadth_idx,
     "momentumIdx": momentum_idx,
     "breadthState":  b_state,
