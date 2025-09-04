@@ -2,14 +2,14 @@
   "gauges": {
     "rpm": -40,
     "speed": -480,
-    "fuelPct": 74,
-    "waterTemp": 196,
-    "oilPsi": 70
+    "fuelPct": 39,
+    "waterTemp": 195,
+    "oilPsi": 104
   },
   "odometers": {
     "breadthOdometer": 48,
     "momentumOdometer": 26,
-    "squeeze": "none"
+    "squeeze": "on"
   },
   "lights": {
     "breadth": "neutral",
@@ -224,7 +224,7 @@
     }
   },
   "meta": {
-    "ts": "2025-09-04T02:18:43Z",
+    "ts": "2025-09-04T03:26:04Z",
     "version": "1.2"
   }
 }

@@ -121,5 +121,11 @@
         "nh": []
       }
     }
+  },
+  "global": {
+    "squeeze_pressure_pct": 39,
+    "squeeze_state": "on",
+    "volatility_pct": 25,
+    "liquidity_pct": 104
   }
 }
