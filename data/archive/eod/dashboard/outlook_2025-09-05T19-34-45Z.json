@@ -1,31 +1,11 @@
 {
   "schema_version": "r1.2",
-<<<<<<< Updated upstream
-  "updated_at": "2025-09-05T19:28:53+00:00",
-  "ts": "2025-09-05T19:28:53+00:00",
-=======
   "updated_at": "2025-09-05T19:34:45+00:00",
   "ts": "2025-09-05T19:34:45+00:00",
->>>>>>> Stashed changes
   "version": "1.2-hourly",
   "pipeline": "eod",
   "gauges": {
     "rpm": {
-<<<<<<< Updated upstream
-      "pct": 67.33567486201706,
-      "label": "Breadth",
-      "raw": {
-        "netNHNL": 691,
-        "totalNHNL": 1993
-      }
-    },
-    "speed": {
-      "pct": 55.390452102434395,
-      "label": "Momentum",
-      "raw": {
-        "net3U3D": 341,
-        "total3U3D": 3163
-=======
       "pct": 69.81723237597912,
       "label": "Breadth",
       "raw": {
@@ -39,7 +19,6 @@
       "raw": {
         "net3U3D": 732,
         "total3U3D": 2304
->>>>>>> Stashed changes
       }
     },
     "fuel": {
@@ -63,19 +42,11 @@
     "fuelPct": 59.0
   },
   "odometers": {
-<<<<<<< Updated upstream
-    "breadth_net": 691,
-    "momentum_net": 341,
-    "squeeze_psi": 59.0,
-    "breadthOdometer": 691,
-    "momentumOdometer": 341,
-=======
     "breadth_net": 759,
     "momentum_net": 732,
     "squeeze_psi": 59.0,
     "breadthOdometer": 759,
     "momentumOdometer": 732,
->>>>>>> Stashed changes
     "squeeze": 59.0
   },
   "lights": {
@@ -88,17 +59,6 @@
     "momentum": "bullish"
   },
   "summary": {
-<<<<<<< Updated upstream
-    "score": 64,
-    "verdict": "Constructive",
-    "bullets": [
-      "Breadth 67/100; Momentum 55/100.",
-      "Squeeze: none; Fuel PSI 59 (~59/100).",
-      "Volatility ~38/100; Liquidity ~100/100."
-    ],
-    "breadthIdx": 67.34,
-    "momentumIdx": 55.39,
-=======
     "score": 68,
     "verdict": "Constructive",
     "bullets": [
@@ -108,7 +68,6 @@
     ],
     "breadthIdx": 69.82,
     "momentumIdx": 65.89,
->>>>>>> Stashed changes
     "breadthState": "Strong",
     "momentumState": "Strong",
     "sectors": {
@@ -118,59 +77,6 @@
   "sectorCards": [
     {
       "sector": "Financials",
-<<<<<<< Updated upstream
-      "nh": 281,
-      "nl": 146,
-      "u": 147,
-      "d": 339,
-      "netNH": 135,
-      "netUD": -192
-    },
-    {
-      "sector": "Real Estate",
-      "nh": 139,
-      "nl": 10,
-      "u": 112,
-      "d": 43,
-      "netNH": 129,
-      "netUD": 69
-    },
-    {
-      "sector": "Healthcare",
-      "nh": 228,
-      "nl": 120,
-      "u": 420,
-      "d": 250,
-      "netNH": 108,
-      "netUD": 170
-    },
-    {
-      "sector": "Consumer Discretionary",
-      "nh": 157,
-      "nl": 56,
-      "u": 166,
-      "d": 160,
-      "netNH": 101,
-      "netUD": 6
-    },
-    {
-      "sector": "tech",
-      "nh": 171,
-      "nl": 82,
-      "u": 319,
-      "d": 165,
-      "netNH": 89,
-      "netUD": 154
-    },
-    {
-      "sector": "Materials",
-      "nh": 86,
-      "nl": 12,
-      "u": 137,
-      "d": 33,
-      "netNH": 74,
-      "netUD": 104
-=======
       "nh": 277,
       "nl": 90,
       "u": 104,
@@ -222,91 +128,51 @@
       "d": 22,
       "netNH": 75,
       "netUD": 73
->>>>>>> Stashed changes
     },
     {
       "sector": "Industrials",
       "nh": 132,
-<<<<<<< Updated upstream
-      "nl": 96,
-      "u": 222,
-      "d": 156,
-      "netNH": 36,
-      "netUD": 66
-=======
       "nl": 93,
       "u": 219,
       "d": 103,
       "netNH": 39,
       "netUD": 116
->>>>>>> Stashed changes
     },
     {
       "sector": "Communication Services",
       "nh": 58,
-<<<<<<< Updated upstream
-      "nl": 29,
-      "u": 95,
-      "d": 60,
-      "netNH": 29,
-      "netUD": 35
-=======
       "nl": 25,
       "u": 77,
       "d": 54,
       "netNH": 33,
       "netUD": 23
->>>>>>> Stashed changes
     },
     {
       "sector": "Consumer Staples",
       "nh": 47,
-<<<<<<< Updated upstream
-      "nl": 40,
-      "u": 71,
-      "d": 71,
-      "netNH": 7,
-      "netUD": 0
-=======
       "nl": 37,
       "u": 65,
       "d": 51,
       "netNH": 10,
       "netUD": 14
->>>>>>> Stashed changes
     },
     {
       "sector": "Utilities",
       "nh": 9,
-<<<<<<< Updated upstream
-      "nl": 13,
-      "u": 19,
-      "d": 35,
-      "netNH": -4,
-      "netUD": -16
-=======
       "nl": 12,
       "u": 36,
       "d": 17,
       "netNH": -3,
       "netUD": 19
->>>>>>> Stashed changes
     },
     {
       "sector": "Energy",
       "nh": 34,
       "nl": 47,
-<<<<<<< Updated upstream
-      "u": 44,
-      "d": 99,
-      "netNH": -13,
-      "netUD": -55
-=======
       "u": 37,
       "d": 49,
       "netNH": -13,
       "netUD": -12
->>>>>>> Stashed changes
     }
   ]
 }
