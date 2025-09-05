@@ -2,7 +2,10 @@ name: dashboard-hourly
 
 on:
   schedule:
-    - cron: "0 * * * 1-5"   # top of every hour Mon–Fri (UTC)
+    # Run every 30 minutes Mon–Fri covering 12:30–22:00 UTC
+    - cron: "30 12-21 * * 1-5"  # :30 past the hour
+    - cron: "0 13-21 * * 1-5"   # top of the hour
+    - cron: "0 22 * * 1-5"      # include 22:00 UTC (for EST close)
   workflow_dispatch: {}
 
 jobs:
@@ -29,15 +32,17 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # Apply market-hours gate ONLY for scheduled runs
+      # Market-hours gate (ET)
       - name: Skip if outside market hours (scheduled runs only)
         id: gate
         if: github.event_name == 'schedule'
         run: |
-          hour=$(date +%H)   # ET (TZ set above)
+          hour=$(date +%H)   # local ET (TZ is set above)
+          min=$(date +%M)
           dow=$(date +%u)    # 1=Mon..7=Sun
           if [ "$dow" -ge 6 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
-          if [ "$hour" -lt 9 ] || [ "$hour" -gt 16 ]; then echo "skip=true" >> $GITHUB_OUTPUT; fi
+          if [ "$hour" -lt 9 ] || [ "$hour" -gt 16 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
+          if [ "$hour" -eq 9 ] && [ "$min" -lt 30 ]; then echo "skip=true" >> $GITHUB_OUTPUT; fi
 
       - name: Build outlook source (intraday)
         if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
