@@ -141,6 +141,77 @@
           "d": 124
         }
       }
+    },
+    {
+      "date": "2025-09-05",
+      "groups": {
+        "Financials": {
+          "nh": 0,
+          "nl": 903,
+          "u": 57,
+          "d": 174
+        },
+        "Consumer Staples": {
+          "nh": 0,
+          "nl": 246,
+          "u": 24,
+          "d": 95
+        },
+        "Real Estate": {
+          "nh": 0,
+          "nl": 261,
+          "u": 17,
+          "d": 41
+        },
+        "Communication Services": {
+          "nh": 0,
+          "nl": 270,
+          "u": 27,
+          "d": 98
+        },
+        "Utilities": {
+          "nh": 0,
+          "nl": 107,
+          "u": 9,
+          "d": 27
+        },
+        "tech": {
+          "nh": 0,
+          "nl": 764,
+          "u": 123,
+          "d": 234
+        },
+        "Industrials": {
+          "nh": 0,
+          "nl": 677,
+          "u": 54,
+          "d": 170
+        },
+        "Energy": {
+          "nh": 0,
+          "nl": 248,
+          "u": 25,
+          "d": 61
+        },
+        "Healthcare": {
+          "nh": 0,
+          "nl": 1107,
+          "u": 106,
+          "d": 495
+        },
+        "Materials": {
+          "nh": 0,
+          "nl": 271,
+          "u": 28,
+          "d": 83
+        },
+        "Consumer Discretionary": {
+          "nh": 0,
+          "nl": 562,
+          "u": 63,
+          "d": 124
+        }
+      }
     }
   ]
 }

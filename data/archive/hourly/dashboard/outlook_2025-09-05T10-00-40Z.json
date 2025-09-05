@@ -1,16 +1,10 @@
 {
   "schema_version": "r1.2",
-<<<<<<< Updated upstream
-  "updated_at": "2025-09-05T09:54:03.346490+00:00",
-  "meta": {
-    "ts": "2025-09-05T09:54:03.346490+00:00",
-=======
   "updated_at": "2025-09-05T10:00:40.379231+00:00",
   "meta": {
     "ts": "2025-09-05T10:00:40.379231+00:00",
->>>>>>> Stashed changes
     "version": "1.2-hourly",
-    "pipeline": "eod"
+    "pipeline": "hourly"
   },
   "gauges": {
     "rpm": {
