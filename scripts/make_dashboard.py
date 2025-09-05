@@ -89,4 +89,174 @@ def extract_from_source(src: Dict[str,Any]) -> Dict[str,Any]:
         "oil": oil,
         "psi": psi_value,
         "sq": squeeze_state,
-        "groups": src
+        "groups": src.get("groups"),
+    }
+
+def lights_and_bullets(b,m,f,w,o,verdict,stale,sq,psi):
+    def ring(p):
+        if p>=55: return "bullish"
+        if p<=45: return "bearish"
+        return "neutral"
+    lights={"risk_off": verdict in ("Caution","Risk-Off"),
+            "low_fuel": f<=FUEL_LOW_PCT, "low_oil": o<=OIL_LOW_PCT,
+            "overheat": w>=WATER_OVERHEAT_PCT, "stale_data": bool(stale),
+            "breadth": ring(b), "momentum": ring(m)}
+    bullets=[f"Breadth {int(round(b))}/100; Momentum {int(round(m))}/100."]
+    if psi is not None:
+        psi_str = f"{psi:.2f}" if 0.0<=psi<=1.0 else str(int(round(psi)))
+        bullets.append(f"Squeeze: {sq}; Fuel PSI {psi_str} (~{int(round(f))}/100).")
+    else:
+        bullets.append(f"Squeeze: {sq}; Fuel ~{int(round(f))}/100.")
+    bullets.append(f"Volatility ~{int(round(w))}/100; Liquidity ~{int(round(o))}/100.")
+    if lights["overheat"]: bullets.append("Volatility running hot — expect chop/risk.")
+    if lights["low_fuel"]: bullets.append("Fuel low — fewer squeezes powering trends.")
+    if lights["low_oil"]:  bullets.append("Liquidity thin — size down / wider slips possible.")
+    if stale: bullets.append("Data looks stale — check backend fetch.")
+    return lights, bullets
+
+def _groups_to_sector_list(groups: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Convert legacy source['groups'] into a sectors list for breadth/momentum derivation."""
+    sectors: List[Dict[str, Any]] = []
+    if isinstance(groups, dict):
+        for sec, cnt in groups.items():
+            try:
+                nh=int(cnt.get("nh",0)); nl=int(cnt.get("nl",0)); u=int(cnt.get("u",0)); d=int(cnt.get("d",0))
+            except Exception:
+                nh=nl=u=d=0
+            sectors.append({"sector": sec, "10NH": nh, "10NL": nl, "3U": u, "3D": d})
+    return sectors
+
+def _build_sector_cards_from_groups(source: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Build flat, frontend-ready sector cards at TOP LEVEL:
+    { sector, nh, nl, u, d, netNH, netUD }
+    """
+    cards: List[Dict[str, Any]] = []
+    groups = source.get("groups") or {}
+    if isinstance(groups, dict):
+        for sector, cnt in groups.items():
+            try:
+                nh = int(cnt.get("nh", 0))
+                nl = int(cnt.get("nl", 0))
+                u  = int(cnt.get("u", 0))
+                d  = int(cnt.get("d", 0))
+            except Exception:
+                nh = nl = u = d = 0
+            cards.append({
+                "sector": sector,
+                "nh": nh,
+                "nl": nl,
+                "u":  u,
+                "d":  d,
+                "netNH": nh - nl,
+                "netUD": u  - d,
+            })
+    cards.sort(key=lambda c: (c["netNH"], c["netUD"], c["nh"]), reverse=True)
+    return cards
+
+def jread(p):
+    try:
+        with open(p,"r",encoding="utf-8") as f: return json.load(f)
+    except: return None
+
+def jwrite(p,obj):
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p,"w",encoding="utf-8") as f: json.dump(obj,f,ensure_ascii=False,indent=2)
+
+# ----------------- main build -----------------
+def main():
+    ap=argparse.ArgumentParser(description="Build Ferrari Dashboard outlook.json (with top-level sectorCards)")
+    ap.add_argument("--source",default="data/outlook_source.json")
+    ap.add_argument("--out",default="data/outlook.json")
+    args=ap.parse_args()
+
+    source = jread(args.source) or {}
+    prev   = jread(args.out) or {}
+    s = extract_from_source(source)
+
+    # Derive sectors for breadth/momentum:
+    if s["sectors"]:
+        sectors_for_calc = s["sectors"]
+    elif s.get("groups"):
+        sectors_for_calc = _groups_to_sector_list(s["groups"])
+    else:
+        sectors_for_calc = []
+
+    if not sectors_for_calc and prev:
+        # fallback to previous dial values so UI doesn’t blank
+        b_pct = float(prev.get("gauges",{}).get("rpm",{}).get("pct",50))
+        m_pct = float(prev.get("gauges",{}).get("speed",{}).get("pct",50))
+        breadth  = {"pct": b_pct,"label":"Breadth","raw":{"netNHNL":0,"totalNHNL":1}}
+        momentum = {"pct": m_pct,"label":"Momentum","raw":{"net3U3D":0,"total3U3D":1}}
+    else:
+        breadth, momentum = derive_breadth_momentum(sectors_for_calc)
+
+    fuel=s["fuel"]; water=s["water"]; oil=s["oil"]
+    waterF=int(round(map_linear(water,WATER_MIN_F,WATER_MAX_F)))
+    oilPSI=int(round(map_linear(oil,OIL_MIN_PSI,OIL_MAX_PSI)))
+    score, verdict = score_and_verdict(breadth["pct"], momentum["pct"], fuel, water, oil)
+
+    # stale calc
+    stale=False
+    ts=source.get("timestamp")
+    if isinstance(ts,str):
+        try:
+            dt=datetime.fromisoformat(ts.replace("Z","+00:00"))
+            stale=(datetime.now(timezone.utc)-dt.astimezone(timezone.utc)).total_seconds()/60.0 > 240
+        except: pass
+
+    lights, bullets = lights_and_bullets(breadth["pct"], momentum["pct"], fuel, water, oil, verdict, stale, s["sq"], s["psi"])
+    now=datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    gauges={
+        "rpm": breadth,
+        "speed": momentum,
+        "fuel": {"pct": fuel, "psi": s["psi"], "state": s["sq"], "label": "Squeeze"},
+        "water": {"pct": water, "degF": waterF, "label": "Volatility"},
+        "oil": {"pct": oil, "psi": oilPSI, "label": "Liquidity"},
+        "waterTemp": waterF,
+        "oilPsi": oilPSI,
+        "fuelPct": float(round(fuel,2))
+    }
+    odos={
+        "breadth_net": breadth["raw"]["netNHNL"],
+        "momentum_net": momentum["raw"]["net3U3D"],
+        "squeeze_psi": s["psi"] if s["psi"] is not None else round(fuel,2),
+        "breadthOdometer": breadth["raw"]["netNHNL"],
+        "momentumOdometer": momentum["raw"]["net3U3D"],
+        "squeeze": s["psi"] if s["psi"] is not None else round(fuel,2)
+    }
+    summary={
+        "score": score,
+        "verdict": verdict,
+        "bullets": bullets,
+        "breadthIdx": float(round(breadth["pct"],2)),
+        "momentumIdx": float(round(momentum["pct"],2)),
+        "breadthState": "Strong" if breadth["pct"]>=55 else ("Weak" if breadth["pct"]<=45 else "Neutral"),
+        "momentumState": "Strong" if momentum["pct"]>=55 else ("Weak" if momentum["pct"]<=45 else "Neutral"),
+        "sectors": {"total": len(sectors_for_calc)}
+    }
+
+    # Build sector cards for the UI (top-level)
+    sector_cards = source.get("sectorCards")
+    if not sector_cards:
+        sector_cards = _build_sector_cards_from_groups(source)
+
+    out = {
+        "schema_version": SCHEMA_VERSION,
+        "updated_at": now,
+        "ts": now,
+        "version": "1.2-hourly",
+        "pipeline": os.environ.get("PIPELINE_TAG","hourly"),
+        "gauges": gauges,
+        "odometers": odos,
+        "lights": lights,
+        "summary": summary,
+        "sectorCards": sector_cards,   # <-- top-level for frontend grid
+    }
+
+    jwrite(args.out,out)
+    print(f"Wrote {args.out} | sectors={len(sector_cards)} | score={score} verdict={verdict}")
+
+if __name__=="__main__":
+    main()
