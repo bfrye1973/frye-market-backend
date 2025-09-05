@@ -2,7 +2,7 @@
 """
 Ferrari Dashboard — make_dashboard.py (R1.3, fixed sectorCards)
 - Preserves your working gauges/lights/summary shape
-- Builds TOP-LEVEL outlook.sectorCards from outlook_source["groups"]
+- Builds TOP-LEVEL sectorCards from outlook_source["groups"]
 - Keeps version/pipeline at the root (as your frontend expects)
 """
 
@@ -13,23 +13,19 @@ from typing import Any, Dict, List, Tuple
 
 SCHEMA_VERSION = "r1.2"
 
-# Visual mappings
 WATER_MIN_F, WATER_MAX_F = 170, 255
 OIL_MIN_PSI, OIL_MAX_PSI = 25, 80
 
-# Score weights
 WEIGHT_BREADTH  = 0.35
 WEIGHT_MOMENTUM = 0.35
 WEIGHT_FUEL     = 0.15
 WEIGHT_LIQ      = 0.075
-WEIGHT_WATER    = 0.075  # inverse
+WEIGHT_WATER    = 0.075
 
-# Lights thresholds
 FUEL_LOW_PCT = 25
 OIL_LOW_PCT  = 25
 WATER_OVERHEAT_PCT = 80
 
-# ----------------- helpers -----------------
 def clamp(x, lo, hi): return max(lo, min(hi, x))
 
 def to_pct(v, assume_0_to_1=False):
@@ -115,7 +111,6 @@ def lights_and_bullets(b,m,f,w,o,verdict,stale,sq,psi):
     return lights, bullets
 
 def _groups_to_sector_list(groups: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Convert legacy source['groups'] into a sectors list for breadth/momentum derivation."""
     sectors: List[Dict[str, Any]] = []
     if isinstance(groups, dict):
         for sec, cnt in groups.items():
@@ -127,10 +122,6 @@ def _groups_to_sector_list(groups: Dict[str, Any]) -> List[Dict[str, Any]]:
     return sectors
 
 def _build_sector_cards_from_groups(source: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Build flat, frontend-ready sector cards at TOP LEVEL:
-    { sector, nh, nl, u, d, netNH, netUD }
-    """
     cards: List[Dict[str, Any]] = []
     groups = source.get("groups") or {}
     if isinstance(groups, dict):
@@ -163,7 +154,6 @@ def jwrite(p,obj):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p,"w",encoding="utf-8") as f: json.dump(obj,f,ensure_ascii=False,indent=2)
 
-# ----------------- main build -----------------
 def main():
     ap=argparse.ArgumentParser(description="Build Ferrari Dashboard outlook.json (with top-level sectorCards)")
     ap.add_argument("--source",default="data/outlook_source.json")
@@ -174,7 +164,6 @@ def main():
     prev   = jread(args.out) or {}
     s = extract_from_source(source)
 
-    # Derive sectors for breadth/momentum:
     if s["sectors"]:
         sectors_for_calc = s["sectors"]
     elif s.get("groups"):
@@ -183,7 +172,6 @@ def main():
         sectors_for_calc = []
 
     if not sectors_for_calc and prev:
-        # fallback to previous dial values so UI doesn’t blank
         b_pct = float(prev.get("gauges",{}).get("rpm",{}).get("pct",50))
         m_pct = float(prev.get("gauges",{}).get("speed",{}).get("pct",50))
         breadth  = {"pct": b_pct,"label":"Breadth","raw":{"netNHNL":0,"totalNHNL":1}}
@@ -196,7 +184,6 @@ def main():
     oilPSI=int(round(map_linear(oil,OIL_MIN_PSI,OIL_MAX_PSI)))
     score, verdict = score_and_verdict(breadth["pct"], momentum["pct"], fuel, water, oil)
 
-    # stale calc
     stale=False
     ts=source.get("timestamp")
     if isinstance(ts,str):
@@ -209,8 +196,8 @@ def main():
     now=datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
     gauges={
-        "rpm": breadth,
-        "speed": momentum,
+        "rpm": {"pct": breadth["pct"], "label": "Breadth", "raw": breadth["raw"]},
+        "speed": {"pct": momentum["pct"], "label": "Momentum", "raw": momentum["raw"]},
         "fuel": {"pct": fuel, "psi": s["psi"], "state": s["sq"], "label": "Squeeze"},
         "water": {"pct": water, "degF": waterF, "label": "Volatility"},
         "oil": {"pct": oil, "psi": oilPSI, "label": "Liquidity"},
@@ -237,7 +224,6 @@ def main():
         "sectors": {"total": len(sectors_for_calc)}
     }
 
-    # Build sector cards for the UI (top-level)
     sector_cards = source.get("sectorCards")
     if not sector_cards:
         sector_cards = _build_sector_cards_from_groups(source)
@@ -252,7 +238,7 @@ def main():
         "odometers": odos,
         "lights": lights,
         "summary": summary,
-        "sectorCards": sector_cards,   # <-- top-level for frontend grid
+        "sectorCards": sector_cards,
     }
 
     jwrite(args.out,out)
