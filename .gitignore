@@ -18,7 +18,7 @@ env/
 
 # ----------------------------
 # 🚨 Important exceptions
-
+# ----------------------------
 # Always keep latest dashboard outputs
 !data/outlook.json
 !data/outlook_source.json
@@ -26,4 +26,3 @@ env/
 
 # Always keep all archive snapshots (hourly + eod)
 !data/archive/**
-
