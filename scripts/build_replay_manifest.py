@@ -2,23 +2,13 @@
 """
 Build a replay manifest of yesterday's hourly snapshots.
 
-- Lists files in:
-    data/archive/hourly/dashboard/
-    data/archive/hourly/source/
-  via the GitHub Contents API
-
-- Filters by a given date (default: yesterday, UTC or pass --date YYYY-MM-DD)
-- Writes:
-    data/archive/hourly/manifest_YYYY-MM-DD.json
-  with entries:
-    [{ "ts": "2025-09-04T13:45:00Z",
-       "dashboard_raw_url": "...",
-       "source_raw_url": "..." }, ...]
+Creates: data/archive/hourly/manifest_YYYY-MM-DD.json
+for easy Replay Mode dropdown in the frontend.
 
 Env (optional):
   GITHUB_REPO   (default: "bfrye1973/frye-market-backend")
   BRANCH        (default: "main")
-  GITHUB_TOKEN  (optional; to raise API rate limit)
+  GITHUB_TOKEN  (optional; increases API rate limit)
 
 Usage:
   python scripts/build_replay_manifest.py
@@ -39,7 +29,6 @@ RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}"
 DASH_DIR = "data/archive/hourly/dashboard"
 SRC_DIR  = "data/archive/hourly/source"
 
-# outlook_YYYY-MM-DDTHH-MM-SSZ.json
 FNAME_RE = re.compile(r"^outlook_(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)\.json$")
 
 def _http_json(url: str):
@@ -62,8 +51,7 @@ def list_dir(path: str):
         return []
 
 def to_iso(ts_from_name: str) -> str:
-    # convert YYYY-MM-DDTHH-MM-SSZ -> YYYY-MM-DDTHH:MM:SSZ
-    return ts_from_name.replace("-", ":", 2)
+    return ts_from_name.replace("-", ":", 2)  # YYYY-MM-DDTHH-MM-SSZ -> YYYY-MM-DDTHH:MM:SSZ
 
 def main():
     ap = argparse.ArgumentParser()
@@ -85,12 +73,11 @@ def main():
     dash_files = list_dir(DASH_DIR)
     src_files  = list_dir(SRC_DIR)
 
-    # Map timestamp -> raw URL for each side
     dash_map = {}
     for f in dash_files:
         m = FNAME_RE.match(f.get("name",""))
         if not m: continue
-        ts_name = m.group(1)  # YYYY-MM-DDTHH-MM-SSZ
+        ts_name = m.group(1)
         if not ts_name.startswith(date_str): continue
         dash_map[ts_name] = f"{RAW_BASE}/{DASH_DIR}/{f['name']}"
 
@@ -102,15 +89,10 @@ def main():
         if not ts_name.startswith(date_str): continue
         src_map[ts_name] = f"{RAW_BASE}/{SRC_DIR}/{f['name']}"
 
-    # Join snapshots present in dashboard (primary)
     entries = []
     for ts_name, dash_url in sorted(dash_map.items()):
         src_url = src_map.get(ts_name)
-        entries.append({
-            "ts": to_iso(ts_name),                   # ISO with colons
-            "dashboard_raw_url": dash_url,
-            "source_raw_url": src_url
-        })
+        entries.append({"ts": to_iso(ts_name), "dashboard_raw_url": dash_url, "source_raw_url": src_url})
 
     manifest = {
         "date": date_str,
@@ -120,14 +102,12 @@ def main():
         "hourly": entries
     }
 
-    # Write to repo path
     out_dir = os.path.join("data", "archive", "hourly")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"manifest_{date_str}.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
     print(f"[ok] wrote {out_path} (count={len(entries)})")
-    # Also echo sample for quick copy/paste
     if entries:
         print("[sample]", entries[0]["ts"], "->", entries[0]["dashboard_raw_url"])
 
