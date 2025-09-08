@@ -1,5 +1,6 @@
 {
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   "timestamp": "2025-09-08T20:45:55Z",
   "mode": "intraday",
   "groups": {
@@ -13,10 +14,19 @@
   "mode": "daily",
   "groups": {
     "Financials": {
+=======
+  "timestamp": "2025-09-08T20:56:24Z",
+  "mode": "daily",
+  "groups": {
+    "Financials": {
+>>>>>>> Stashed changes
       "nh": 90,
       "nl": 105,
       "u": 117,
       "d": 229,
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
@@ -27,9 +37,15 @@
     "Consumer Staples": {
       "nh": 31,
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
       "nl": 55,
       "u": 97,
       "d": 110,
+=======
+      "nl": 54,
+      "u": 54,
+      "d": 48,
+>>>>>>> Stashed changes
 =======
       "nl": 54,
       "u": 54,
@@ -44,9 +60,15 @@
     "Real Estate": {
       "nh": 49,
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
       "nl": 21,
       "u": 83,
       "d": 142,
+=======
+      "nl": 19,
+      "u": 62,
+      "d": 36,
+>>>>>>> Stashed changes
 =======
       "nl": 19,
       "u": 62,
@@ -61,9 +83,15 @@
     "Communication Services": {
       "nh": 58,
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
       "nl": 50,
       "u": 128,
       "d": 93,
+=======
+      "nl": 48,
+      "u": 91,
+      "d": 40,
+>>>>>>> Stashed changes
 =======
       "nl": 48,
       "u": 91,
@@ -79,8 +107,13 @@
       "nh": 5,
       "nl": 40,
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
       "u": 17,
       "d": 76,
+=======
+      "u": 12,
+      "d": 29,
+>>>>>>> Stashed changes
 =======
       "u": 12,
       "d": 29,
@@ -93,15 +126,21 @@
     },
     "tech": {
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
       "nh": 158,
       "nl": 73,
       "u": 373,
       "d": 223,
 =======
+=======
+>>>>>>> Stashed changes
       "nh": 157,
       "nl": 72,
       "u": 294,
       "d": 87,
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
@@ -111,15 +150,21 @@
     },
     "Industrials": {
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
       "nh": 82,
       "nl": 93,
       "u": 258,
       "d": 314,
 =======
+=======
+>>>>>>> Stashed changes
       "nh": 83,
       "nl": 91,
       "u": 153,
       "d": 167,
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
@@ -131,8 +176,13 @@
       "nh": 34,
       "nl": 61,
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
       "u": 74,
       "d": 126,
+=======
+      "u": 39,
+      "d": 120,
+>>>>>>> Stashed changes
 =======
       "u": 39,
       "d": 120,
@@ -145,15 +195,21 @@
     },
     "Healthcare": {
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
       "nh": 200,
       "nl": 148,
       "u": 392,
       "d": 482,
 =======
+=======
+>>>>>>> Stashed changes
       "nh": 198,
       "nl": 147,
       "u": 279,
       "d": 178,
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
@@ -165,8 +221,13 @@
       "nh": 82,
       "nl": 20,
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
       "u": 131,
       "d": 95,
+=======
+      "u": 115,
+      "d": 27,
+>>>>>>> Stashed changes
 =======
       "u": 115,
       "d": 27,
@@ -181,8 +242,13 @@
       "nh": 102,
       "nl": 74,
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
       "u": 237,
       "d": 225,
+=======
+      "u": 142,
+      "d": 120,
+>>>>>>> Stashed changes
 =======
       "u": 142,
       "d": 120,
