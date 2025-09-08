@@ -1,14 +1,4 @@
 {
-<<<<<<< Updated upstream
-  "timestamp": "2025-09-08T17:12:14Z",
-  "mode": "intraday",
-  "groups": {
-    "Financials": {
-      "nh": 71,
-      "nl": 165,
-      "u": 223,
-      "d": 372,
-=======
   "timestamp": "2025-09-08T17:21:09Z",
   "mode": "daily",
   "groups": {
@@ -17,7 +7,6 @@
       "nl": 93,
       "u": 96,
       "d": 349,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -26,15 +15,9 @@
     },
     "Consumer Staples": {
       "nh": 26,
-<<<<<<< Updated upstream
-      "nl": 50,
-      "u": 60,
-      "d": 114,
-=======
       "nl": 48,
       "u": 46,
       "d": 59,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -42,17 +25,10 @@
       }
     },
     "Real Estate": {
-<<<<<<< Updated upstream
-      "nh": 38,
-      "nl": 22,
-      "u": 47,
-      "d": 140,
-=======
       "nh": 39,
       "nl": 17,
       "u": 45,
       "d": 40,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -61,15 +37,9 @@
     },
     "Communication Services": {
       "nh": 48,
-<<<<<<< Updated upstream
-      "nl": 44,
-      "u": 90,
-      "d": 88,
-=======
       "nl": 41,
       "u": 84,
       "d": 47,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -79,13 +49,8 @@
     "Utilities": {
       "nh": 5,
       "nl": 26,
-<<<<<<< Updated upstream
-      "u": 9,
-      "d": 66,
-=======
       "u": 10,
       "d": 33,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -93,17 +58,10 @@
       }
     },
     "tech": {
-<<<<<<< Updated upstream
-      "nh": 126,
-      "nl": 64,
-      "u": 274,
-      "d": 207,
-=======
       "nh": 125,
       "nl": 63,
       "u": 267,
       "d": 102,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -111,17 +69,10 @@
       }
     },
     "Industrials": {
-<<<<<<< Updated upstream
-      "nh": 64,
-      "nl": 86,
-      "u": 163,
-      "d": 306,
-=======
       "nh": 65,
       "nl": 82,
       "u": 121,
       "d": 186,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -131,13 +82,8 @@
     "Energy": {
       "nh": 30,
       "nl": 58,
-<<<<<<< Updated upstream
-      "u": 43,
-      "d": 137,
-=======
       "u": 30,
       "d": 135,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -145,17 +91,10 @@
       }
     },
     "Healthcare": {
-<<<<<<< Updated upstream
-      "nh": 176,
-      "nl": 122,
-      "u": 272,
-      "d": 425,
-=======
       "nh": 177,
       "nl": 119,
       "u": 259,
       "d": 192,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -163,17 +102,10 @@
       }
     },
     "Materials": {
-<<<<<<< Updated upstream
-      "nh": 73,
-      "nl": 20,
-      "u": 74,
-      "d": 101,
-=======
       "nh": 74,
       "nl": 20,
       "u": 97,
       "d": 31,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -182,15 +114,9 @@
     },
     "Consumer Discretionary": {
       "nh": 83,
-<<<<<<< Updated upstream
-      "nl": 73,
-      "u": 141,
-      "d": 219,
-=======
       "nl": 71,
       "u": 118,
       "d": 130,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
