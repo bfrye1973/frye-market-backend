@@ -1,31 +1,11 @@
 {
   "schema_version": "r1.2",
-<<<<<<< Updated upstream
-  "updated_at": "2025-09-09T15:12:17+00:00",
-  "ts": "2025-09-09T15:12:17+00:00",
-=======
   "updated_at": "2025-09-09T15:18:25+00:00",
   "ts": "2025-09-09T15:18:25+00:00",
->>>>>>> Stashed changes
   "version": "1.2-hourly",
   "pipeline": "eod",
   "gauges": {
     "rpm": {
-<<<<<<< Updated upstream
-      "pct": 45.1295799821269,
-      "label": "Breadth",
-      "raw": {
-        "netNHNL": -109,
-        "totalNHNL": 1119
-      }
-    },
-    "speed": {
-      "pct": 35.039133052378084,
-      "label": "Momentum",
-      "raw": {
-        "net3U3D": -994,
-        "total3U3D": 3322
-=======
       "pct": 50.880829015544045,
       "label": "Breadth",
       "raw": {
@@ -39,7 +19,6 @@
       "raw": {
         "net3U3D": -737,
         "total3U3D": 2411
->>>>>>> Stashed changes
       }
     },
     "fuel": {
@@ -63,19 +42,11 @@
     "fuelPct": 92.0
   },
   "odometers": {
-<<<<<<< Updated upstream
-    "breadth_net": -109,
-    "momentum_net": -994,
-    "squeeze_psi": 92.0,
-    "breadthOdometer": -109,
-    "momentumOdometer": -994,
-=======
     "breadth_net": 17,
     "momentum_net": -737,
     "squeeze_psi": 92.0,
     "breadthOdometer": 17,
     "momentumOdometer": -737,
->>>>>>> Stashed changes
     "squeeze": 92.0
   },
   "lights": {
@@ -91,21 +62,12 @@
     "score": 57,
     "verdict": "Constructive",
     "bullets": [
-<<<<<<< Updated upstream
-      "Breadth 45/100; Momentum 35/100.",
-      "Squeeze: firingdown; Fuel PSI 92 (~92/100).",
-      "Volatility ~17/100; Liquidity ~96/100."
-    ],
-    "breadthIdx": 45.13,
-    "momentumIdx": 35.04,
-=======
       "Breadth 51/100; Momentum 35/100.",
       "Squeeze: firingdown; Fuel PSI 92 (~92/100).",
       "Volatility ~17/100; Liquidity ~96/100."
     ],
     "breadthIdx": 50.88,
     "momentumIdx": 34.72,
->>>>>>> Stashed changes
     "breadthState": "Neutral",
     "momentumState": "Weak",
     "sectors": {
@@ -115,84 +77,25 @@
   "sectorCards": [
     {
       "sector": "tech",
-<<<<<<< Updated upstream
-      "nh": 90,
-      "nl": 43,
-      "u": 187,
-      "d": 264,
-      "netNH": 47,
-      "netUD": -77
-=======
       "nh": 89,
       "nl": 38,
       "u": 181,
       "d": 172,
       "netNH": 51,
       "netUD": 9
->>>>>>> Stashed changes
     },
     {
       "sector": "Materials",
       "nh": 52,
       "nl": 23,
-<<<<<<< Updated upstream
-      "u": 44,
-      "d": 141,
-      "netNH": 29,
-      "netUD": -97
-=======
       "u": 30,
       "d": 84,
       "netNH": 29,
       "netUD": -54
->>>>>>> Stashed changes
     },
     {
       "sector": "Energy",
       "nh": 29,
-<<<<<<< Updated upstream
-      "nl": 11,
-      "u": 74,
-      "d": 46,
-      "netNH": 18,
-      "netUD": 28
-    },
-    {
-      "sector": "Communication Services",
-      "nh": 39,
-      "nl": 34,
-      "u": 67,
-      "d": 97,
-      "netNH": 5,
-      "netUD": -30
-    },
-    {
-      "sector": "Real Estate",
-      "nh": 16,
-      "nl": 23,
-      "u": 38,
-      "d": 149,
-      "netNH": -7,
-      "netUD": -111
-    },
-    {
-      "sector": "Consumer Staples",
-      "nh": 21,
-      "nl": 34,
-      "u": 61,
-      "d": 101,
-      "netNH": -13,
-      "netUD": -40
-    },
-    {
-      "sector": "Healthcare",
-      "nh": 101,
-      "nl": 121,
-      "u": 264,
-      "d": 435,
-      "netNH": -20,
-      "netUD": -171
-=======
       "nl": 9,
       "u": 53,
       "d": 24,
@@ -243,27 +146,10 @@
       "d": 353,
       "netNH": -15,
       "netUD": -193
->>>>>>> Stashed changes
     },
     {
       "sector": "Utilities",
       "nh": 6,
-<<<<<<< Updated upstream
-      "nl": 27,
-      "u": 27,
-      "d": 30,
-      "netNH": -21,
-      "netUD": -3
-    },
-    {
-      "sector": "Consumer Discretionary",
-      "nh": 41,
-      "nl": 69,
-      "u": 80,
-      "d": 244,
-      "netNH": -28,
-      "netUD": -164
-=======
       "nl": 23,
       "u": 13,
       "d": 45,
@@ -278,33 +164,15 @@
       "d": 184,
       "netNH": -20,
       "netUD": -110
->>>>>>> Stashed changes
     },
     {
       "sector": "Industrials",
       "nh": 39,
-<<<<<<< Updated upstream
-      "nl": 94,
-      "u": 100,
-      "d": 329,
-      "netNH": -55,
-      "netUD": -229
-    },
-    {
-      "sector": "Financials",
-      "nh": 71,
-      "nl": 135,
-      "u": 222,
-      "d": 322,
-      "netNH": -64,
-      "netUD": -100
-=======
       "nl": 88,
       "u": 62,
       "d": 264,
       "netNH": -49,
       "netUD": -202
->>>>>>> Stashed changes
     }
   ]
 }
