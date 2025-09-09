@@ -1,14 +1,10 @@
 {
   "name": "frye-market-backend",
   "version": "1.0.0",
-  {
-  "type": "module"
-}
-
+  "type": "module",
   "private": true,
   "description": "Ferrari Cluster Live Feed (HTTP)",
   "main": "server.js",
-  "type": "commonjs",
   "engines": {
     "node": ">=18"
   },
