@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-Ferrari Dashboard — make_dashboard.py (R1.3, fixed sectorCards)
-- Preserves your working gauges/lights/summary shape
-- Builds TOP-LEVEL sectorCards from outlook_source["groups"]
-- Keeps version/pipeline at the root (as your frontend expects)
+Ferrari Dashboard — make_dashboard.py (R1.3, robust sectorCards)
+- Keeps your existing gauges/odometers/lights/summary logic
+- Builds sectorCards from source['sectors'] when available (11 sectors)
+  and falls back to groups if needed
+- Writes BOTH:
+    • top-level "sectorCards" (for backward compat)
+    • "outlook": {"sectorCards": [...]} (for new frontend row)
 """
 
 from __future__ import annotations
@@ -26,6 +29,11 @@ FUEL_LOW_PCT = 25
 OIL_LOW_PCT  = 25
 WATER_OVERHEAT_PCT = 80
 
+PREFERRED_ORDER = [
+    "tech","materials","healthcare","communication services","real estate",
+    "energy","consumer staples","consumer discretionary","financials","utilities","industrials",
+]
+
 def clamp(x, lo, hi): return max(lo, min(hi, x))
 
 def to_pct(v, assume_0_to_1=False):
@@ -43,8 +51,9 @@ def derive_breadth_momentum(sectors: List[Dict[str, Any]]) -> Tuple[Dict[str, An
     NH={"10NH","nh10","ten_day_new_highs","newhighs10","nh"}; NL={"10NL","nl10","ten_day_new_lows","newlows10","nl"}
     U ={"3U","three_up","threedayup","three_up_count","u"};  D ={"3D","three_down","threedaydown","three_down_count","d"}
     def get(d,keys):
+        lk = {s.lower() for s in keys}
         for k in d.keys():
-            if k.lower() in {s.lower() for s in keys}:
+            if k.lower() in lk:
                 try: return int(d[k])
                 except: pass
         return 0
@@ -121,7 +130,47 @@ def _groups_to_sector_list(groups: Dict[str, Any]) -> List[Dict[str, Any]]:
             sectors.append({"sector": sec, "10NH": nh, "10NL": nl, "3U": u, "3D": d})
     return sectors
 
+# -------- helpers for sectorCards normalization --------
+def _title_case(name: str) -> str:
+    return " ".join(w.capitalize() for w in (name or "").split())
+
+def _norm(s: str) -> str:
+    return (s or "").strip().lower()
+
+def _order_key(sector_name: str) -> int:
+    n = _norm(sector_name)
+    return PREFERRED_ORDER.index(n) if n in PREFERRED_ORDER else 999
+
+def _classify_outlook(net_nh: float) -> str:
+    if net_nh > 0: return "Bullish"
+    if net_nh < 0: return "Bearish"
+    return "Neutral"
+
+def _build_sector_cards_from_sectors_obj(sectors_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Convert source['sectors'] (object of 11 sectors) -> list of cards with spark + outlook
+    expected per-sector fields: nh, nl, u, d, netNH, netUD, spark (optional)
+    """
+    cards: List[Dict[str, Any]] = []
+    for name, vals in (sectors_obj or {}).items():
+        nh  = int(vals.get("nh", 0))
+        nl  = int(vals.get("nl", 0))
+        u   = int(vals.get("u", 0))
+        d   = int(vals.get("d", 0))
+        net_nh = int(vals.get("netNH", nh - nl))
+        net_ud = int(vals.get("netUD", u - d))
+        spark  = vals.get("spark", [])
+        cards.append({
+            "sector":  _title_case(name),
+            "outlook": _classify_outlook(net_nh),
+            "spark":   spark if isinstance(spark, list) else [],
+            "nh": nh, "nl": nl, "netNH": net_nh, "netUD": net_ud
+        })
+    cards.sort(key=lambda c: _order_key(c["sector"]))
+    return cards
+
 def _build_sector_cards_from_groups(source: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Existing fallback using groups (kept from your script, now augmented)."""
     cards: List[Dict[str, Any]] = []
     groups = source.get("groups") or {}
     if isinstance(groups, dict):
@@ -134,16 +183,14 @@ def _build_sector_cards_from_groups(source: Dict[str, Any]) -> List[Dict[str, An
             except Exception:
                 nh = nl = u = d = 0
             cards.append({
-                "sector": sector,
-                "nh": nh,
-                "nl": nl,
-                "u":  u,
-                "d":  d,
-                "netNH": nh - nl,
-                "netUD": u  - d,
+                "sector": _title_case(sector),
+                "nh": nh, "nl": nl, "u": u, "d": d,
+                "netNH": nh - nl, "netUD": u - d,
+                "spark": cnt.get("spark", [])
             })
-    cards.sort(key=lambda c: (c["netNH"], c["netUD"], c["nh"]), reverse=True)
+    cards.sort(key=lambda c: _order_key(c["sector"]))
     return cards
+# ------------------------------------------------------
 
 def jread(p):
     try:
@@ -153,9 +200,11 @@ def jread(p):
 def jwrite(p,obj):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p,"w",encoding="utf-8") as f: json.dump(obj,f,ensure_ascii=False,indent=2)
+        # ensure newline
+        f.write("\n")
 
 def main():
-    ap=argparse.ArgumentParser(description="Build Ferrari Dashboard outlook.json (with top-level sectorCards)")
+    ap=argparse.ArgumentParser(description="Build Ferrari Dashboard outlook.json (with top-level sectorCards + outlook.sectorCards)")
     ap.add_argument("--source",default="data/outlook_source.json")
     ap.add_argument("--out",default="data/outlook.json")
     args=ap.parse_args()
@@ -164,6 +213,7 @@ def main():
     prev   = jread(args.out) or {}
     s = extract_from_source(source)
 
+    # Build a flat list for breadth/momentum calc (from sectors or groups)
     if s["sectors"]:
         sectors_for_calc = s["sectors"]
     elif s.get("groups"):
@@ -171,6 +221,7 @@ def main():
     else:
         sectors_for_calc = []
 
+    # Breadth / Momentum
     if not sectors_for_calc and prev:
         b_pct = float(prev.get("gauges",{}).get("rpm",{}).get("pct",50))
         m_pct = float(prev.get("gauges",{}).get("speed",{}).get("pct",50))
@@ -179,6 +230,7 @@ def main():
     else:
         breadth, momentum = derive_breadth_momentum(sectors_for_calc)
 
+    # Gauges (your mappings preserved)
     fuel=s["fuel"]; water=s["water"]; oil=s["oil"]
     waterF=int(round(map_linear(water,WATER_MIN_F,WATER_MAX_F)))
     oilPSI=int(round(map_linear(oil,OIL_MIN_PSI,OIL_MAX_PSI)))
@@ -224,8 +276,13 @@ def main():
         "sectors": {"total": len(sectors_for_calc)}
     }
 
-    sector_cards = source.get("sectorCards")
-    if not sector_cards:
+    # -------- NEW: build sectorCards from source['sectors'] or groups --------
+    # Prefer a canonical sectors object (11) if present; fallback to groups
+    sector_cards: List[Dict[str, Any]] = []
+    src_sectors = source.get("sectors")
+    if isinstance(src_sectors, dict) and len(src_sectors) > 0:
+        sector_cards = _build_sector_cards_from_sectors_obj(src_sectors)
+    else:
         sector_cards = _build_sector_cards_from_groups(source)
 
     out = {
@@ -238,7 +295,12 @@ def main():
         "odometers": odos,
         "lights": lights,
         "summary": summary,
+        # Backward compat — your original top-level sectorCards:
         "sectorCards": sector_cards,
+        # New, explicit frontier: embed also under outlook
+        "outlook": {
+            "sectorCards": sector_cards
+        }
     }
 
     jwrite(args.out,out)
