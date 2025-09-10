@@ -2,9 +2,8 @@ name: dashboard-build
 
 on:
   schedule:
-    # Market open snapshot (9:30 ET = 13:30 UTC)
+    # Market open (13:30 UTC) and close (20:30 UTC), Mon–Fri
     - cron: "30 13 * * 1-5"
-    # Market close snapshot (4:30 ET = 20:30 UTC)
     - cron: "30 20 * * 1-5"
   workflow_dispatch:
 
@@ -18,7 +17,7 @@ permissions:
 jobs:
   eod:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -31,33 +30,64 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps if requirements.txt exists
+      - name: Install minimal deps if requirements.txt missing
         run: |
           if [ -f requirements.txt ]; then
-            echo "requirements.txt found; installing…"
             pip install -r requirements.txt
           else
-            echo "No requirements.txt - skipping pip install"
+            python -m pip install --upgrade pip
+            pip install -q requests pandas || true
           fi
 
+      # ---------------- FETCH ----------------
+      - name: Fetch raw data (Polygon, EOD)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          if [ -f scripts/build_outlook_source_from_polygon.py ]; then
+            python -u scripts/build_outlook_source_from_polygon.py --mode eod
+          else
+            echo "❌ scripts/build_outlook_source_from_polygon.py missing"; exit 1
+          fi
+
+      - name: Log outlook_source summary (EOD)
+        run: |
+          if [ -f data/outlook_source.json ]; then
+            echo "timestamp: $(jq -r '.timestamp // "missing"' data/outlook_source.json)"
+            echo "groups count: $(jq -r '[.groups | keys[]] | length' data/outlook_source.json 2>/dev/null || echo 0)"
+            echo "group keys:"; jq -r '.groups | keys[]' data/outlook_source.json 2>/dev/null || true
+            echo "file size:"; ls -lh data/outlook_source.json
+          else
+            echo "❌ data/outlook_source.json missing"; exit 1
+          fi
+
+      - name: Guard: require fresh outlook_source.json (≥5 groups)
+        run: |
+          test -f data/outlook_source.json || (echo "❌ missing outlook_source.json"; exit 1)
+          n=$(jq -r '[.groups | keys[]] | length' data/outlook_source.json 2>/dev/null || echo 0)
+          if [ "$n" -lt 5 ]; then
+            echo "❌ Too few groups ($n). Aborting build."; exit 1
+          fi
+
+      # ---------------- BUILD ----------------
       - name: Make dashboard (EOD)
         run: |
           if [ -f scripts/make_dashboard.py ]; then
-            python scripts/make_dashboard.py --mode eod
-          elif [ -f scripts/make_dashboard.js ]; then
-            node scripts/make_dashboard.js --mode eod
+            python -u scripts/make_dashboard.py --mode eod --source data/outlook_source.json --out data/outlook.json
           else
-            echo "❌ No builder found (scripts/make_dashboard.py or .js)"; exit 1
+            echo "❌ scripts/make_dashboard.py missing"; exit 1
           fi
 
-      - name: Normalize sectors -> sectorCards (11) if script exists
+      # ---------------- NORMALIZE ----------------
+      - name: Normalize sectors -> sectorCards (11)
         run: |
           if [ -f scripts/normalize_sectors.py ]; then
-            python scripts/normalize_sectors.py --in data/outlook.json --out data/outlook.json
+            python -u scripts/normalize_sectors.py --in data/outlook.json --out data/outlook.json
           else
             echo "normalize_sectors.py not found; skipping"
           fi
 
+      # ---------------- VALIDATE ----------------
       - name: Ensure outlook.json exists
         run: test -f data/outlook.json
 
@@ -68,6 +98,7 @@ jobs:
           fi
           jq . data/outlook.json > /dev/null
 
+      # ---------------- ARCHIVE + COMMIT ----------------
       - name: Archive (rolling) — EOD
         run: |
           mkdir -p archive/eod
@@ -76,7 +107,6 @@ jobs:
           if [ -f data/outlook_source.json ]; then
             cp data/outlook_source.json archive/eod/outlook_source_${ts}.json || true
           fi
-          # Keep last 180 snapshots (~90 trading days x 2 runs/day)
           ls -1t archive/eod/outlook_*.json 2>/dev/null | tail -n +181 | xargs -r rm -f
           ls -1t archive/eod/outlook_source_*.json 2>/dev/null | tail -n +181 | xargs -r rm -f
 
@@ -84,9 +114,7 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-
           git add -A || true
           git diff --staged --quiet || git commit -m "EOD: refresh outlook.json [skip ci]" || true
-
           git pull --rebase origin main || true
           git push origin HEAD:main || true
