@@ -2,42 +2,91 @@ name: dashboard-build
 
 on:
   schedule:
-    # Run twice per day — 13:30 UTC (market open) and 20:30 UTC (market close), Mon–Fri
+    # Market open snapshot (9:30 ET = 13:30 UTC)
     - cron: "30 13 * * 1-5"
+    # Market close snapshot (4:30 ET = 20:30 UTC)
     - cron: "30 20 * * 1-5"
   workflow_dispatch:
+
+concurrency:
+  group: dashboard-build
+  cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
   eod:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
-        run: pip install -r requirements.txt
+      - name: Install deps if requirements.txt exists
+        run: |
+          if [ -f requirements.txt ]; then
+            echo "requirements.txt found; installing…"
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt - skipping pip install"
+          fi
 
       - name: Make dashboard (EOD)
-        run: python scripts/make_dashboard.py --mode eod
+        run: |
+          if [ -f scripts/make_dashboard.py ]; then
+            python scripts/make_dashboard.py --mode eod
+          elif [ -f scripts/make_dashboard.js ]; then
+            node scripts/make_dashboard.js --mode eod
+          else
+            echo "❌ No builder found (scripts/make_dashboard.py or .js)"; exit 1
+          fi
+
+      - name: Normalize sectors -> sectorCards (11) if script exists
+        run: |
+          if [ -f scripts/normalize_sectors.py ]; then
+            python scripts/normalize_sectors.py --in data/outlook.json --out data/outlook.json
+          else
+            echo "normalize_sectors.py not found; skipping"
+          fi
+
+      - name: Ensure outlook.json exists
+        run: test -f data/outlook.json
+
+      - name: Validate outlook.json (no conflict markers; valid JSON)
+        run: |
+          if grep -E '<<<<<<<|=======|>>>>>>>' -n data/outlook.json; then
+            echo "❌ Conflict markers found in data/outlook.json"; exit 1
+          fi
+          jq . data/outlook.json > /dev/null
 
       - name: Archive (rolling) — EOD
         run: |
           mkdir -p archive/eod
-          cp data/outlook.json archive/eod/outlook_$(date -u +%Y-%m-%dT%H-%M-%SZ).json
-          cp data/outlook_source.json archive/eod/outlook_source_$(date -u +%Y-%m-%dT%H-%M-%SZ).json
+          ts=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+          cp data/outlook.json archive/eod/outlook_${ts}.json || true
+          if [ -f data/outlook_source.json ]; then
+            cp data/outlook_source.json archive/eod/outlook_source_${ts}.json || true
+          fi
+          # Keep last 180 snapshots (~90 trading days x 2 runs/day)
+          ls -1t archive/eod/outlook_*.json 2>/dev/null | tail -n +181 | xargs -r rm -f
+          ls -1t archive/eod/outlook_source_*.json 2>/dev/null | tail -n +181 | xargs -r rm -f
 
       - name: Commit latest → eod archive (rebase-safe)
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
+
           git add -A || true
-          git diff --staged --quiet || git commit -m "EOD update [skip ci]" || true
+          git diff --staged --quiet || git commit -m "EOD: refresh outlook.json [skip ci]" || true
+
           git pull --rebase origin main || true
-          git push origin main || true
+          git push origin HEAD:main || true
