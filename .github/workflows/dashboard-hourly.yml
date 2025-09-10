@@ -2,7 +2,7 @@ name: dashboard-hourly
 
 on:
   schedule:
-    # 09:30–16:30 Eastern (13:30–20:30 UTC), Mon–Fri
+    # 09:30–16:30 ET (13:30–20:30 UTC), Mon–Fri
     - cron: "30 13-20 * * 1-5"
   workflow_dispatch:
 
@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install minimal deps if requirements.txt missing
+      - name: Install minimal deps (safe if requirements.txt is missing)
         run: |
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
@@ -38,7 +38,7 @@ jobs:
             pip install -q requests pandas || true
           fi
 
-      # ---------------- FETCH ----------------
+      # -------- FETCH --------
       - name: Fetch raw data (Polygon → outlook_source.json)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -49,16 +49,25 @@ jobs:
             echo "❌ scripts/build_outlook_source_from_polygon.py missing"; exit 1
           fi
 
-    
+      - name: Log outlook_source summary
+        run: |
+          if [ -f data/outlook_source.json ]; then
+            echo "timestamp: $(jq -r '.timestamp // "missing"' data/outlook_source.json)"
+            echo "groups count: $(jq -r '[.groups | keys[]] | length' data/outlook_source.json 2>/dev/null || echo 0)"
+            echo "file size:"; ls -lh data/outlook_source.json
+          else
+            echo "❌ data/outlook_source.json missing"; exit 1
+          fi
+
       - name: Guard: require fresh outlook_source.json (≥5 groups)
         run: |
           test -f data/outlook_source.json || (echo "❌ missing outlook_source.json"; exit 1)
           n=$(jq -r '[.groups | keys[]] | length' data/outlook_source.json 2>/dev/null || echo 0)
           if [ "$n" -lt 5 ]; then
-            echo "❌ Too few groups ($n). Aborting build to avoid stale output."; exit 1
+            echo "❌ Too few groups ($n). Aborting build."; exit 1
           fi
 
-      # ---------------- BUILD ----------------
+      # -------- BUILD --------
       - name: Make dashboard (intraday)
         run: |
           if [ -f scripts/make_dashboard.py ]; then
@@ -67,16 +76,7 @@ jobs:
             echo "❌ scripts/make_dashboard.py missing"; exit 1
           fi
 
-      # ---------------- NORMALIZE ----------------
-      - name: Normalize sectors -> sectorCards (11)
-        run: |
-          if [ -f scripts/normalize_sectors.py ]; then
-            python -u scripts/normalize_sectors.py --in data/outlook.json --out data/outlook.json
-          else
-            echo "normalize_sectors.py not found; skipping"
-          fi
-
-      # ---------------- VALIDATE ----------------
+      # -------- VALIDATE --------
       - name: Ensure outlook.json exists
         run: test -f data/outlook.json
 
@@ -92,7 +92,7 @@ jobs:
           echo "sectorCards length: $(jq -r '.outlook.sectorCards | length' data/outlook.json 2>/dev/null || echo 0)"
           echo "updated_at: $(jq -r '.updated_at // "missing"' data/outlook.json)"
 
-      # ---------------- ARCHIVE + COMMIT ----------------
+      # -------- ARCHIVE + COMMIT --------
       - name: Archive (15-day rolling) — HOURLY
         run: |
           mkdir -p archive/hourly
