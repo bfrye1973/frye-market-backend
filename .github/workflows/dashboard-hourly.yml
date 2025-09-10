@@ -2,95 +2,68 @@ name: dashboard-hourly
 
 on:
   schedule:
-    # Run every 30 minutes Mon–Fri covering 12:30–22:00 UTC
-    - cron: "30 12-21 * * 1-5"  # :30 past the hour
-    - cron: "0 13-21 * * 1-5"   # top of the hour
-    - cron: "0 22 * * 1-5"      # include 22:00 UTC (for EST close)
-  workflow_dispatch: {}
+    # Run at 30 minutes past each hour between 13:30 and 20:30 UTC (9:30am–4:30pm ET)
+    - cron: '30 13-20 * * 1-5'
+
+  workflow_dispatch:
+
+concurrency:
+  group: dashboard-hourly
+  cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
-  hourly:
+  refresh:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      TZ: America/New_York
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout
+      - name: Checkout clean main
         uses: actions/checkout@v4
         with:
+          # full history not needed, but safest is to ensure clean base
           fetch-depth: 0
 
+      - name: Reset working tree to origin/main
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
+
+      # If your builder uses Python, keep this. If Node, swap to setup-node.
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install deps
+      - name: Install deps (if needed)
         run: |
-          python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # Market-hours gate (ET)
-      - name: Skip if outside market hours (scheduled runs only)
-        id: gate
-        if: github.event_name == 'schedule'
+      - name: Build outlook.json
         run: |
-          hour=$(date +%H)   # local ET (TZ is set above)
-          min=$(date +%M)
-          dow=$(date +%u)    # 1=Mon..7=Sun
-          if [ "$dow" -ge 6 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
-          if [ "$hour" -lt 9 ] || [ "$hour" -gt 16 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
-          if [ "$hour" -eq 9 ] && [ "$min" -lt 30 ]; then echo "skip=true" >> $GITHUB_OUTPUT; fi
+          # Replace with your real builder command
+          # Example:
+          python scripts/make_dashboard.py
 
-      - name: Build outlook source (intraday)
-        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      - name: Ensure outlook.json exists
+        run: test -f data/outlook.json
+
+      - name: Validate outlook.json (no conflict markers, valid JSON)
         run: |
-          python scripts/build_outlook_source_from_polygon.py --mode intraday
-
-      - name: Make dashboard payload
-        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
-        env:
-          PIPELINE_TAG: "hourly"
-        run: |
-          python scripts/make_dashboard.py --source data/outlook_source.json --out data/outlook.json
-
-      - name: Archive (15-day rolling) — HOURLY
-        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
-        run: |
-          set -e
-          TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
-          mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
-          cp data/outlook_source.json "data/archive/hourly/source/outlook_source_${TS}.json"
-          cp data/outlook.json        "data/archive/hourly/dashboard/outlook_${TS}.json"
-          find data/archive/hourly/source    -type f -name 'outlook_source_*.json' -mtime +15 -delete || true
-          find data/archive/hourly/dashboard -type f -name 'outlook_*.json'        -mtime +15 -delete || true
-
-      - name: Commit latest + hourly archive (rebase-safe)
-        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
-        run: |
-          set -e
-          git config user.name  "github-actions"
-          git config user.email "actions@github.com"
-
-          git fetch origin main
-          git checkout main
-          git pull --rebase --autostash origin main
-
-          git add data/outlook.json data/outlook_source.json data/archive/hourly || true
-
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-            exit 0
+          if grep -E '<<<<<<<|=======|>>>>>>>' -n data/outlook.json; then
+            echo "❌ conflict markers found in data/outlook.json"; exit 1;
           fi
+          # requires jq; preinstalled on ubuntu-latest
+          jq . data/outlook.json > /dev/null
 
-          git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
-
-          if ! git push origin HEAD:main; then
-            echo "Push rejected; rebasing once more..."
-            git pull --rebase --autostash origin main
+      - name: Commit if changed
+        run: |
+          git add data/outlook.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git -c user.email="actions@github.com" -c user.name="GitHub Actions" commit -m "hourly: refresh outlook.json"
             git push origin HEAD:main
           fi
