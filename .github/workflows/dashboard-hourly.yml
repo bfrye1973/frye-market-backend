@@ -1,10 +1,10 @@
 name: dashboard-hourly
 
 on:
+  workflow_dispatch:
   schedule:
     # 09:30–16:30 ET (13:30–20:30 UTC), Mon–Fri
     - cron: "30 13-20 * * 1-5"
-  workflow_dispatch:
 
 concurrency:
   group: dashboard-hourly
@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install minimal deps (safe if requirements.txt is missing)
+      - name: Install minimal deps (safe if requirements.txt missing)
         run: |
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
@@ -38,7 +38,7 @@ jobs:
             pip install -q requests pandas || true
           fi
 
-      # -------- FETCH --------
+      # ---------------- FETCH ----------------
       - name: Fetch raw data (Polygon → outlook_source.json)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -46,7 +46,7 @@ jobs:
           if [ -f scripts/build_outlook_source_from_polygon.py ]; then
             python -u scripts/build_outlook_source_from_polygon.py --mode intraday
           else
-            echo "❌ scripts/build_outlook_source_from_polygon.py missing"; exit 1
+            echo "FAIL: scripts/build_outlook_source_from_polygon.py missing"; exit 1
           fi
 
       - name: Log outlook_source summary
@@ -56,34 +56,34 @@ jobs:
             echo "groups count: $(jq -r '[.groups | keys[]] | length' data/outlook_source.json 2>/dev/null || echo 0)"
             echo "file size:"; ls -lh data/outlook_source.json
           else
-            echo "❌ data/outlook_source.json missing"; exit 1
+            echo "FAIL: data/outlook_source.json missing"; exit 1
           fi
 
       - name: Guard: require fresh outlook_source.json (≥5 groups)
         run: |
-          test -f data/outlook_source.json || (echo "❌ missing outlook_source.json"; exit 1)
+          test -f data/outlook_source.json || (echo "FAIL: missing outlook_source.json"; exit 1)
           n=$(jq -r '[.groups | keys[]] | length' data/outlook_source.json 2>/dev/null || echo 0)
           if [ "$n" -lt 5 ]; then
-            echo "❌ Too few groups ($n). Aborting build."; exit 1
+            echo "FAIL: too few groups ($n). Aborting build."; exit 1
           fi
 
-      # -------- BUILD --------
+      # ---------------- BUILD ----------------
       - name: Make dashboard (intraday)
         run: |
           if [ -f scripts/make_dashboard.py ]; then
             python -u scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
           else
-            echo "❌ scripts/make_dashboard.py missing"; exit 1
+            echo "FAIL: scripts/make_dashboard.py missing"; exit 1
           fi
 
-      # -------- VALIDATE --------
+      # ---------------- VALIDATE ----------------
       - name: Ensure outlook.json exists
         run: test -f data/outlook.json
 
       - name: Validate outlook.json (no conflict markers; valid JSON)
         run: |
           if grep -E '<<<<<<<|=======|>>>>>>>' -n data/outlook.json; then
-            echo "❌ Conflict markers found in data/outlook.json"; exit 1
+            echo "FAIL: conflict markers found in data/outlook.json"; exit 1
           fi
           jq . data/outlook.json > /dev/null
 
@@ -92,7 +92,7 @@ jobs:
           echo "sectorCards length: $(jq -r '.outlook.sectorCards | length' data/outlook.json 2>/dev/null || echo 0)"
           echo "updated_at: $(jq -r '.updated_at // "missing"' data/outlook.json)"
 
-      # -------- ARCHIVE + COMMIT --------
+      # ---------------- ARCHIVE + COMMIT ----------------
       - name: Archive (15-day rolling) — HOURLY
         run: |
           mkdir -p archive/hourly
