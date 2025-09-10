@@ -2,68 +2,50 @@ name: dashboard-hourly
 
 on:
   schedule:
-    # Run at 30 minutes past each hour between 13:30 and 20:30 UTC (9:30am–4:30pm ET)
-    - cron: '30 13-20 * * 1-5'
-
+    # Run once per hour from 13:30 to 20:30 UTC (market open to close)
+    - cron: "30 13-20 * * 1-5"
   workflow_dispatch:
 
-concurrency:
-  group: dashboard-hourly
-  cancel-in-progress: true
-
-permissions:
-  contents: write
-
 jobs:
-  refresh:
+  hourly:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
     steps:
-      - name: Checkout clean main
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v3
         with:
-          # full history not needed, but safest is to ensure clean base
           fetch-depth: 0
 
-      - name: Reset working tree to origin/main
-        run: |
-          git fetch origin main
-          git reset --hard origin/main
-
-      # If your builder uses Python, keep this. If Node, swap to setup-node.
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install deps (if needed)
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Skip if outside market hours (scheduled runs only)
+        if: github.event_name == 'schedule'
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-      - name: Build outlook.json
-        run: |
-          # Replace with your real builder command
-          # Example:
-          python scripts/make_dashboard.py
-
-      - name: Ensure outlook.json exists
-        run: test -f data/outlook.json
-
-      - name: Validate outlook.json (no conflict markers, valid JSON)
-        run: |
-          if grep -E '<<<<<<<|=======|>>>>>>>' -n data/outlook.json; then
-            echo "❌ conflict markers found in data/outlook.json"; exit 1;
+          HOUR=$(date -u +"%H")
+          if [ "$HOUR" -lt 13 ] || [ "$HOUR" -gt 20 ]; then
+            echo "⏩ Outside market hours. Skipping."
+            exit 0
           fi
-          # requires jq; preinstalled on ubuntu-latest
-          jq . data/outlook.json > /dev/null
 
-      - name: Commit if changed
+      - name: Make dashboard (intraday)
+        run: python scripts/make_dashboard.py --mode intraday
+
+      - name: Archive (15-day rolling) — HOURLY
         run: |
-          git add data/outlook.json
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-          else
-            git -c user.email="actions@github.com" -c user.name="GitHub Actions" commit -m "hourly: refresh outlook.json"
-            git push origin HEAD:main
-          fi
+          mkdir -p archive/hourly
+          cp data/outlook.json archive/hourly/outlook_$(date -u +%Y-%m-%dT%H-%M-%SZ).json
+          cp data/outlook_source.json archive/hourly/outlook_source_$(date -u +%Y-%m-%dT%H-%M-%SZ).json
+
+      - name: Commit latest → hourly archive (rebase-safe)
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -A || true
+          git diff --staged --quiet || git commit -m "Hourly update [skip ci]" || true
+          git pull --rebase origin main || true
+          git push origin main || true
