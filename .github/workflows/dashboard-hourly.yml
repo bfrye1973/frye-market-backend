@@ -95,16 +95,3 @@ jobs:
 
           git pull --rebase origin main || true
           git push origin HEAD:main || true
-- name: Log outlook_source summary
-  run: |
-    if [ -f data/outlook_source.json ]; then
-      echo "timestamp: $(jq -r '.timestamp // "missing"' data/outlook_source.json)"
-      echo "groups count: $(jq -r '[.groups | keys[]] | length' data/outlook_source.json 2>/dev/null || echo 0)"
-      echo "group keys:"
-      jq -r '.groups | keys[]' data/outlook_source.json 2>/dev/null || true
-      echo "file size:"
-      ls -lh data/outlook_source.json
-    else
-      echo "❌ data/outlook_source.json missing"
-      exit 1
-    fi
