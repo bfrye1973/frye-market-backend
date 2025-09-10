@@ -2,32 +2,42 @@ name: dashboard-build
 
 on:
   schedule:
-    # Market open snapshot (9:30am ET = 13:30 UTC)
-    - cron: '30 13 * * 1-5'
-    # Market close snapshot (4:00pm ET = 20:00 UTC)
-    - cron: '0 20 * * 1-5'
-
-  push:
-    branches: [ main ]
-    paths:
-      - 'api/**'
-      - 'server.js'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/dashboard-build.yml'
+    # Run twice per day — 13:30 UTC (market open) and 20:30 UTC (market close), Mon–Fri
+    - cron: "30 13 * * 1-5"
+    - cron: "30 20 * * 1-5"
   workflow_dispatch:
 
-concurrency:
-  group: dashboard-build
-  cancel-in-progress: true
-
-permissions:
-  contents: read
-
 jobs:
-  build:
+  eod:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      # add any backend build/test steps you need
-      - run: echo "Build OK"
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Make dashboard (EOD)
+        run: python scripts/make_dashboard.py --mode eod
+
+      - name: Archive (rolling) — EOD
+        run: |
+          mkdir -p archive/eod
+          cp data/outlook.json archive/eod/outlook_$(date -u +%Y-%m-%dT%H-%M-%SZ).json
+          cp data/outlook_source.json archive/eod/outlook_source_$(date -u +%Y-%m-%dT%H-%M-%SZ).json
+
+      - name: Commit latest → eod archive (rebase-safe)
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -A || true
+          git diff --staged --quiet || git commit -m "EOD update [skip ci]" || true
+          git pull --rebase origin main || true
+          git push origin main || true
