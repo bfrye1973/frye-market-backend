@@ -1,23 +1,18 @@
 {
   "schema_version": "r1.2",
-<<<<<<< Updated upstream
   "updated_at": "2025-09-10T14:04:15+00:00",
   "ts": "2025-09-10T14:04:15+00:00",
   "updated_at": "2025-09-10T14:09:43+00:00",
   "ts": "2025-09-10T14:09:43+00:00",
-=======
+
   "updated_at": "2025-09-10T15:05:01+00:00",
   "ts": "2025-09-10T15:05:01+00:00",
->>>>>>> Stashed changes
   "version": "1.2-hourly",
   "pipeline": "hourly",
   "gauges": {
     "rpm": {
-<<<<<<< Updated upstream
       "pct": 56.402116402116405,
-=======
       "pct": 48.683220466516175,
->>>>>>> Stashed changes
       "label": "Breadth",
       "raw": {
         "netNHNL": -35,
@@ -39,7 +34,6 @@
       "label": "Squeeze"
     },
     "water": {
-<<<<<<< Updated upstream
       "pct": 13.0,
       "degF": 181,
       "pct": 47.69488683989941,
@@ -64,8 +58,6 @@
       "label": "Squeeze"
     },
     "water": {
-=======
->>>>>>> Stashed changes
       "pct": 17.0,
       "degF": 184,
       "label": "Volatility"
@@ -75,7 +67,6 @@
       "psi": 77,
       "label": "Liquidity"
     },
-<<<<<<< Updated upstream
     "waterTemp": 181,
     "oilPsi": 76,
     "fuelPct": 81.0
@@ -87,28 +78,23 @@
     "breadthOdometer": 121,
     "momentumOdometer": -87,
     "squeeze": 81.0
-=======
->>>>>>> Stashed changes
     "waterTemp": 184,
     "oilPsi": 77,
     "fuelPct": 84.0
   },
   "odometers": {
-<<<<<<< Updated upstream
     "breadth_net": -55,
     "momentum_net": 456,
     "squeeze_psi": 80.0,
     "breadthOdometer": -55,
     "momentumOdometer": 456,
     "squeeze": 80.0
-=======
     "breadth_net": -35,
     "momentum_net": -547,
     "squeeze_psi": 84.0,
     "breadthOdometer": -35,
     "momentumOdometer": -547,
     "squeeze": 84.0
->>>>>>> Stashed changes
   },
   "lights": {
     "risk_off": false,
@@ -116,21 +102,17 @@
     "low_oil": false,
     "overheat": false,
     "stale_data": false,
-<<<<<<< Updated upstream
     "breadth": "bullish",
     "momentum": "neutral"
     "breadth": "neutral",
     "momentum": "bullish"
-=======
     "breadth": "neutral",
     "momentum": "bearish"
->>>>>>> Stashed changes
   },
   "summary": {
     "score": 57,
     "verdict": "Constructive",
     "bullets": [
-<<<<<<< Updated upstream
       "Breadth 56/100; Momentum 48/100.",
       "Squeeze: firingup; Fuel PSI 81 (~81/100).",
       "Volatility ~13/100; Liquidity ~93/100."
@@ -147,7 +129,6 @@
     "momentumIdx": 57.76,
     "breadthState": "Neutral",
     "momentumState": "Strong",
-=======
       "Breadth 49/100; Momentum 41/100.",
       "Squeeze: firingup; Fuel PSI 84 (~84/100).",
       "Volatility ~17/100; Liquidity ~95/100."
@@ -156,7 +137,6 @@
     "momentumIdx": 41.04,
     "breadthState": "Neutral",
     "momentumState": "Weak",
->>>>>>> Stashed changes
     "sectors": {
       "total": 11
     }
@@ -164,21 +144,18 @@
   "sectorCards": [
     {
       "sector": "tech",
-<<<<<<< Updated upstream
       "nh": 132,
       "nl": 33,
       "u": 196,
       "d": 123,
       "netNH": 99,
       "netUD": 73
-=======
       "nh": 154,
       "nl": 66,
       "u": 182,
       "d": 280,
       "netNH": 88,
       "netUD": -98
->>>>>>> Stashed changes
     },
     {
       "sector": "Healthcare",
@@ -191,7 +168,6 @@
     },
     {
       "sector": "Materials",
-<<<<<<< Updated upstream
       "nh": 33,
       "nl": 14,
       "u": 45,
@@ -222,14 +198,12 @@
       "d": 27,
       "netNH": 19,
       "netUD": 108
-=======
       "nh": 41,
       "nl": 18,
       "u": 71,
       "d": 69,
       "netNH": 23,
       "netUD": 2
->>>>>>> Stashed changes
     },
     {
       "sector": "Energy",
@@ -244,7 +218,6 @@
       "sector": "Utilities",
       "nh": 16,
       "nl": 10,
-<<<<<<< Updated upstream
       "u": 51,
       "d": 10,
       "netNH": 5,
@@ -294,7 +267,6 @@
       "d": 164,
       "netNH": -5,
       "netUD": -20
-=======
       "u": 31,
       "d": 28,
       "netNH": 6,
@@ -308,7 +280,6 @@
       "d": 77,
       "netNH": 4,
       "netUD": -1
->>>>>>> Stashed changes
     },
     {
       "sector": "Industrials",
@@ -339,7 +310,6 @@
     },
     {
       "sector": "Consumer Staples",
-<<<<<<< Updated upstream
       "nh": 13,
       "nl": 37,
       "u": 35,
@@ -396,7 +366,6 @@
       "d": 169,
       "netNH": -138,
       "netUD": 146
-=======
       "nh": 14,
       "nl": 54,
       "u": 36,
@@ -412,7 +381,6 @@
       "d": 252,
       "netNH": -102,
       "netUD": -13
->>>>>>> Stashed changes
     }
   ]
 }
