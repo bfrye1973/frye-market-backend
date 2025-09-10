@@ -1,14 +1,4 @@
 {
-<<<<<<< Updated upstream
-  "timestamp": "2025-09-10T14:04:15Z",
-  "mode": "daily",
-  "groups": {
-    "Financials": {
-      "nh": 73,
-      "nl": 78,
-      "u": 144,
-      "d": 164,
-=======
   "timestamp": "2025-09-10T14:09:43Z",
   "mode": "intraday",
   "groups": {
@@ -17,7 +7,6 @@
       "nl": 213,
       "u": 315,
       "d": 169,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -25,17 +14,10 @@
       }
     },
     "Consumer Staples": {
-<<<<<<< Updated upstream
-      "nh": 13,
-      "nl": 37,
-      "u": 35,
-      "d": 85,
-=======
       "nh": 12,
       "nl": 46,
       "u": 41,
       "d": 109,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -44,15 +26,9 @@
     },
     "Real Estate": {
       "nh": 25,
-<<<<<<< Updated upstream
-      "nl": 11,
-      "u": 43,
-      "d": 70,
-=======
       "nl": 21,
       "u": 76,
       "d": 55,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -60,17 +36,10 @@
       }
     },
     "Communication Services": {
-<<<<<<< Updated upstream
-      "nh": 21,
-      "nl": 25,
-      "u": 58,
-      "d": 89,
-=======
       "nh": 25,
       "nl": 32,
       "u": 49,
       "d": 80,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -78,17 +47,10 @@
       }
     },
     "Utilities": {
-<<<<<<< Updated upstream
-      "nh": 13,
-      "nl": 6,
-      "u": 58,
-      "d": 4,
-=======
       "nh": 15,
       "nl": 10,
       "u": 51,
       "d": 10,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -96,17 +58,10 @@
       }
     },
     "tech": {
-<<<<<<< Updated upstream
-      "nh": 132,
-      "nl": 33,
-      "u": 196,
-      "d": 123,
-=======
       "nh": 143,
       "nl": 42,
       "u": 218,
       "d": 180,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -114,17 +69,10 @@
       }
     },
     "Industrials": {
-<<<<<<< Updated upstream
-      "nh": 49,
-      "nl": 56,
-      "u": 125,
-      "d": 102,
-=======
       "nh": 59,
       "nl": 66,
       "u": 303,
       "d": 94,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -132,17 +80,10 @@
       }
     },
     "Energy": {
-<<<<<<< Updated upstream
-      "nh": 22,
-      "nl": 17,
-      "u": 100,
-      "d": 19,
-=======
       "nh": 26,
       "nl": 19,
       "u": 150,
       "d": 12,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -150,17 +91,10 @@
       }
     },
     "Healthcare": {
-<<<<<<< Updated upstream
-      "nh": 111,
-      "nl": 74,
-      "u": 199,
-      "d": 256,
-=======
       "nh": 116,
       "nl": 89,
       "u": 236,
       "d": 332,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -168,17 +102,10 @@
       }
     },
     "Materials": {
-<<<<<<< Updated upstream
-      "nh": 33,
-      "nl": 14,
-      "u": 45,
-      "d": 37,
-=======
       "nh": 34,
       "nl": 15,
       "u": 135,
       "d": 27,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -186,17 +113,10 @@
       }
     },
     "Consumer Discretionary": {
-<<<<<<< Updated upstream
-      "nh": 41,
-      "nl": 61,
-      "u": 74,
-      "d": 215,
-=======
       "nh": 39,
       "nl": 71,
       "u": 123,
       "d": 173,
->>>>>>> Stashed changes
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -205,15 +125,9 @@
     }
   },
   "global": {
-<<<<<<< Updated upstream
-    "squeeze_pressure_pct": 81,
-    "squeeze_state": "firingUp",
-    "volatility_pct": 13,
-=======
     "squeeze_pressure_pct": 80,
     "squeeze_state": "none",
     "volatility_pct": 17,
->>>>>>> Stashed changes
     "liquidity_pct": 93
   }
 }
