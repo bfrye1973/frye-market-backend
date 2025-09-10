@@ -1,4 +1,4 @@
-// api/routes.js — ESM router with normalized /dashboard and safe fallbacks
+// api/routes.js — ESM router with normalized /dashboard, stub signals, and volatility placeholder
 
 import express from "express";
 import path from "path";
@@ -9,7 +9,7 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-/* ---------- helpers ---------- */
+/* ---------- small utils ---------- */
 function noStore(res) {
   res.set("Cache-Control", "no-store");
   return res;
@@ -19,57 +19,93 @@ function readJsonSafe(absPath) {
   catch { return null; }
 }
 function loadLocal(relPathFromProjectRoot) {
-  // Routes live in /api. Project root is one level up from /api
+  // routes.js is in /api; project root is one level up
   const abs = path.resolve(__dirname, "..", relPathFromProjectRoot);
   return readJsonSafe(abs);
 }
 
-/* ---------- normalization ---------- */
-function normalizeDashboard(json) {
-  json.gauges  = json.gauges  || {};
+/* ---------- sectorCards normalization ---------- */
+const PREFERRED_ORDER = [
+  "tech","materials","healthcare","communication services","real estate",
+  "energy","consumer staples","consumer discretionary","financials","utilities","industrials",
+];
+const norm = s => String(s || "").trim().toLowerCase();
+const orderKey = s => {
+  const i = PREFERRED_ORDER.indexOf(norm(s));
+  return i === -1 ? 999 : i;
+};
+
+function normalizeSectorCards(json) {
   json.outlook = json.outlook || {};
-  json.meta    = json.meta    || {};
+  const sectors = json.outlook.sectors;
 
-  // 1) squeezeDaily (compression %) — derive if missing
-  const squeezeDaily =
-    Number(json?.gauges?.squeezeDaily?.pct) ||
-    Number(json?.gauges?.squeeze?.pct)      ||
-    Number(json?.gauges?.fuel?.pct)         ||
-    Number(json?.summary?.squeeze_pct);
+  let cards = [];
+  if (sectors && typeof sectors === "object") {
+    cards = Object.keys(sectors).map(name => {
+      const vals  = sectors[name] || {};
+      const nh    = Number(vals.nh ?? 0);
+      const nl    = Number(vals.nl ?? 0);
+      const netNH = Number(vals.netNH ?? (nh - nl)); // breadth proxy
+      const netUD = Number(vals.netUD ?? 0);
+      const spark = Array.isArray(vals.spark) ? vals.spark : [];
 
-  json.gauges.squeezeDaily = {
-    pct: Number.isFinite(squeezeDaily) ? squeezeDaily : null,
-    label: "Squeeze (Daily Compression)"
-  };
+      const outlook =
+        netNH > 0 ? "Bullish" :
+        netNH < 0 ? "Bearish" : "Neutral";
 
-  // 2) sectorCards — prefer outlook.sectorCards; convert legacy outlook.sectors; seed if empty
-  let sectorCards = Array.isArray(json.outlook.sectorCards) ? json.outlook.sectorCards : [];
+      // Title-case sector label
+      const title = name.split(" ")
+        .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+        .join(" ");
 
-  if ((!sectorCards || sectorCards.length === 0) && json.outlook.sectors && typeof json.outlook.sectors === "object") {
-    sectorCards = Object.keys(json.outlook.sectors).map(k => ({
-      sector:  k,
-      outlook: json.outlook.sectors[k]?.outlook ?? "Neutral",
-      spark:   Array.isArray(json.outlook.sectors[k]?.spark) ? json.outlook.sectors[k].spark : []
-    }));
+      return { sector: title, outlook, spark, nh, nl, netNH, netUD };
+    });
+
+    cards.sort((a,b) => orderKey(a.sector) - orderKey(b.sector));
   }
 
-  if (!Array.isArray(sectorCards) || sectorCards.length === 0) {
-    // TEMP SEED — remove when your real sectorCards are populated
-    sectorCards = [
-      { sector: "Technology", outlook: "Bullish",  spark: [120,125,130,128,132,137] },
-      { sector: "Energy",     outlook: "Bearish",  spark: [ 85, 82, 79, 81, 78, 76] },
-      { sector: "Financials", outlook: "Neutral",  spark: [100,101, 99,100,101,100] }
+  // If none built, keep existing sectorCards (or seed a small set)
+  if (!cards.length && Array.isArray(json.outlook.sectorCards)) {
+    return json;
+  }
+  if (!cards.length) {
+    cards = [
+      { sector:"Technology", outlook:"Neutral", spark:[] },
+      { sector:"Energy",     outlook:"Neutral", spark:[] },
+      { sector:"Financials", outlook:"Neutral", spark:[] },
     ];
   }
 
-  json.outlook.sectorCards = sectorCards;
-
-  // timestamp
-  json.meta.ts = json.meta.ts || json.updated_at || new Date().toISOString();
+  json.outlook.sectorCards = cards;
   return json;
 }
 
-/* ---------- /api/gauges builder ---------- */
+/* ---------- volatility placeholder (0..100) ---------- */
+function addVolatilityPlaceholder(json) {
+  json.gauges = json.gauges || {};
+  if (!Number.isFinite(json?.gauges?.volatilityPct)) {
+    json.gauges.volatilityPct = 50; // neutral placeholder; replace when real metric ready
+  }
+  return json;
+}
+
+/* ---------- stub signals so Engine Lights light up ---------- */
+function addStubSignals(json) {
+  // If you already compute real signals in your pipeline, remove/replace this.
+  json.signals = json.signals || {
+    sigBreakout:     { active: true,  severity: "warn"   },
+    sigCompression:  { active: true,  severity: "danger" },
+    sigExpansion:    { active: false },
+    sigTurbo:        { active: false },
+    sigDistribution: { active: false },
+    sigDivergence:   { active: false },
+    sigOverheat:     { active: false },
+    sigLowLiquidity: { active: false },
+  };
+  return json;
+}
+
+/* ---------- gauges table rows ---------- */
 function buildGaugeRowsFromDashboard(dash, index) {
   const g = dash?.gauges || {};
   const rows = [];
@@ -80,16 +116,15 @@ function buildGaugeRowsFromDashboard(dash, index) {
   if (breadthIdx !== null)  rows.push({ label: "Breadth",  value: Number(breadthIdx),  unit: "%",  index });
   if (momentumIdx !== null) rows.push({ label: "Momentum", value: Number(momentumIdx), unit: "%",  index });
 
-  const oilPsi  = g?.oil?.psi  ?? null;
+  const oilPsi  = g?.oil?.psi ?? g?.oilPsi ?? null;
   const fuelPct = g?.fuel?.pct ?? g?.squeeze?.pct ?? null;
-
   if (oilPsi  !== null) rows.push({ label: "Liquidity (PSI)", value: Number(oilPsi),   unit: "psi", index });
   if (fuelPct !== null) rows.push({ label: "Squeeze (Fuel)",  value: Number(fuelPct), unit: "%",   index });
 
   return rows;
 }
 
-/* ---------- Router factory ---------- */
+/* ---------- Router ---------- */
 export default function buildRouter() {
   const router = express.Router();
 
@@ -98,30 +133,37 @@ export default function buildRouter() {
     noStore(res).json({ ok: true, ts: new Date().toISOString(), service: "frye-market-backend" });
   });
 
-  // DASHBOARD: normalize & seed
+  // Dashboard
   router.get("/dashboard", async (req, res) => {
     try {
-      // Load from local data file; adjust path if your JSON lives elsewhere
+      // Load your base dashboard JSON (adjust path if needed)
+      // If you use a builder pipeline, replace this with your builder call.
       let json = loadLocal("data/outlook.json");
       if (!json) throw new Error("outlook.json not found");
 
-      json = normalizeDashboard(json);
+      // Normalize + placeholders + stub signals
+      json = normalizeSectorCards(json);
+      json = addVolatilityPlaceholder(json);
+      json = addStubSignals(json);
+
+      json.meta = json.meta || {};
+      json.meta.ts = json.meta.ts || json.updated_at || new Date().toISOString();
+
       return noStore(res).json(json);
     } catch (e) {
       console.error("dashboard error:", e.message);
       return noStore(res).json({
         ok: false,
-        gauges: { squeezeDaily: { pct: null, label: "Squeeze (Daily Compression)" } },
-        odometers: null,
-        signals: null,
         outlook: { sectorCards: [] },
+        gauges: { volatilityPct: 50 },
+        signals: {},
         meta: { ts: new Date().toISOString() },
-        error: e.message
+        error: e.message,
       });
     }
   });
 
-  // GAUGES: array response for tables; never 500s
+  // Gauges rows (array), never 500s
   router.get("/gauges", (req, res) => {
     try {
       const index = (req.query.index || req.query.symbol || Object.keys(req.query)[0] || "SPY").toString();
@@ -135,7 +177,7 @@ export default function buildRouter() {
     }
   });
 
-  // OHLC: dummy data for chart testing
+  // Dummy OHLC (chart testing)
   router.get("/v1/ohlc", (req, res) => {
     const symbol = req.query.symbol || "SPY";
     const timeframe = req.query.timeframe || "1d";
