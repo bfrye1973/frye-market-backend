@@ -2,50 +2,96 @@ name: dashboard-hourly
 
 on:
   schedule:
-    # Run once per hour from 13:30 to 20:30 UTC (market open to close)
+    # Run at :30 past the hour from 13:30–20:30 UTC (09:30–16:30 ET, Mon–Fri)
     - cron: "30 13-20 * * 1-5"
   workflow_dispatch:
+
+concurrency:
+  group: dashboard-hourly
+  cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
   hourly:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
-        run: pip install -r requirements.txt
+      - name: Install deps if requirements.txt exists
+        run: |
+          if [ -f requirements.txt ]; then
+            echo "requirements.txt found; installing…"
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt - skipping pip install"
+          fi
 
       - name: Skip if outside market hours (scheduled runs only)
         if: github.event_name == 'schedule'
         run: |
-          HOUR=$(date -u +"%H")
-          if [ "$HOUR" -lt 13 ] || [ "$HOUR" -gt 20 ]; then
-            echo "⏩ Outside market hours. Skipping."
+          H=$(date -u +"%H")
+          if [ "$H" -lt 13 ] || [ "$H" -gt 20 ]; then
+            echo "⏭ Outside market hours (UTC). Skipping."
             exit 0
           fi
 
       - name: Make dashboard (intraday)
-        run: python scripts/make_dashboard.py --mode intraday
+        run: |
+          if [ -f scripts/make_dashboard.py ]; then
+            python scripts/make_dashboard.py --mode intraday
+          elif [ -f scripts/make_dashboard.js ]; then
+            node scripts/make_dashboard.js --mode intraday
+          else
+            echo "❌ No builder found (scripts/make_dashboard.py or .js)"; exit 1
+          fi
+
+      - name: Normalize sectors -> sectorCards (11) if script exists
+        run: |
+          if [ -f scripts/normalize_sectors.py ]; then
+            python scripts/normalize_sectors.py --in data/outlook.json --out data/outlook.json
+          fi
+
+      - name: Ensure outlook.json exists
+        run: test -f data/outlook.json
+
+      - name: Validate outlook.json (no conflict markers; valid JSON)
+        run: |
+          if grep -E '<<<<<<<|=======|>>>>>>>' -n data/outlook.json; then
+            echo "❌ Conflict markers found in data/outlook.json"; exit 1
+          fi
+          jq . data/outlook.json > /dev/null
 
       - name: Archive (15-day rolling) — HOURLY
         run: |
           mkdir -p archive/hourly
-          cp data/outlook.json archive/hourly/outlook_$(date -u +%Y-%m-%dT%H-%M-%SZ).json
-          cp data/outlook_source.json archive/hourly/outlook_source_$(date -u +%Y-%m-%dT%H-%M-%SZ).json
+          ts=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+          cp data/outlook.json archive/hourly/outlook_${ts}.json || true
+          if [ -f data/outlook_source.json ]; then
+            cp data/outlook_source.json archive/hourly/outlook_source_${ts}.json || true
+          fi
+          # keep last ~15 days of hourly snapshots (360 files)
+          ls -1t archive/hourly/outlook_*.json 2>/dev/null | tail -n +361 | xargs -r rm -f
+          ls -1t archive/hourly/outlook_source_*.json 2>/dev/null | tail -n +361 | xargs -r rm -f
 
       - name: Commit latest → hourly archive (rebase-safe)
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
+
           git add -A || true
-          git diff --staged --quiet || git commit -m "Hourly update [skip ci]" || true
+          git diff --staged --quiet || git commit -m "Hourly: refresh outlook.json [skip ci]" || true
+
           git pull --rebase origin main || true
-          git push origin main || true
+          git push origin HEAD:main || true
