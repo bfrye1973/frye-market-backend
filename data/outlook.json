@@ -1,17 +1,13 @@
 {
   "schema_version": "r1.2",
-<<<<<<< Updated upstream
   "updated_at": "2025-09-10T14:04:15+00:00",
   "ts": "2025-09-10T14:04:15+00:00",
-=======
   "updated_at": "2025-09-10T14:09:43+00:00",
   "ts": "2025-09-10T14:09:43+00:00",
->>>>>>> Stashed changes
   "version": "1.2-hourly",
   "pipeline": "hourly",
   "gauges": {
     "rpm": {
-<<<<<<< Updated upstream
       "pct": 56.402116402116405,
       "label": "Breadth",
       "raw": {
@@ -36,7 +32,6 @@
     "water": {
       "pct": 13.0,
       "degF": 181,
-=======
       "pct": 47.69488683989941,
       "label": "Breadth",
       "raw": {
@@ -61,7 +56,6 @@
     "water": {
       "pct": 17.0,
       "degF": 184,
->>>>>>> Stashed changes
       "label": "Volatility"
     },
     "oil": {
@@ -69,7 +63,6 @@
       "psi": 76,
       "label": "Liquidity"
     },
-<<<<<<< Updated upstream
     "waterTemp": 181,
     "oilPsi": 76,
     "fuelPct": 81.0
@@ -81,7 +74,6 @@
     "breadthOdometer": 121,
     "momentumOdometer": -87,
     "squeeze": 81.0
-=======
     "waterTemp": 184,
     "oilPsi": 76,
     "fuelPct": 80.0
@@ -93,7 +85,6 @@
     "breadthOdometer": -55,
     "momentumOdometer": 456,
     "squeeze": 80.0
->>>>>>> Stashed changes
   },
   "lights": {
     "risk_off": false,
@@ -101,19 +92,15 @@
     "low_oil": false,
     "overheat": false,
     "stale_data": false,
-<<<<<<< Updated upstream
     "breadth": "bullish",
     "momentum": "neutral"
-=======
     "breadth": "neutral",
     "momentum": "bullish"
->>>>>>> Stashed changes
   },
   "summary": {
     "score": 62,
     "verdict": "Constructive",
     "bullets": [
-<<<<<<< Updated upstream
       "Breadth 56/100; Momentum 48/100.",
       "Squeeze: firingup; Fuel PSI 81 (~81/100).",
       "Volatility ~13/100; Liquidity ~93/100."
@@ -122,7 +109,6 @@
     "momentumIdx": 48.06,
     "breadthState": "Strong",
     "momentumState": "Neutral",
-=======
       "Breadth 48/100; Momentum 58/100.",
       "Squeeze: none; Fuel PSI 80 (~80/100).",
       "Volatility ~17/100; Liquidity ~93/100."
@@ -131,7 +117,6 @@
     "momentumIdx": 57.76,
     "breadthState": "Neutral",
     "momentumState": "Strong",
->>>>>>> Stashed changes
     "sectors": {
       "total": 11
     }
@@ -139,7 +124,6 @@
   "sectorCards": [
     {
       "sector": "tech",
-<<<<<<< Updated upstream
       "nh": 132,
       "nl": 33,
       "u": 196,
@@ -164,7 +148,6 @@
       "d": 37,
       "netNH": 19,
       "netUD": 8
-=======
       "nh": 143,
       "nl": 42,
       "u": 218,
@@ -207,12 +190,10 @@
       "d": 10,
       "netNH": 5,
       "netUD": 41
->>>>>>> Stashed changes
     },
     {
       "sector": "Real Estate",
       "nh": 25,
-<<<<<<< Updated upstream
       "nl": 11,
       "u": 43,
       "d": 70,
@@ -281,7 +262,6 @@
       "d": 85,
       "netNH": -24,
       "netUD": -50
-=======
       "nl": 21,
       "u": 76,
       "d": 55,
@@ -332,7 +312,6 @@
       "d": 169,
       "netNH": -138,
       "netUD": 146
->>>>>>> Stashed changes
     }
   ]
 }
