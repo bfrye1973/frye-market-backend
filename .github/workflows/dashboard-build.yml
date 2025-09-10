@@ -56,7 +56,6 @@ jobs:
           else
             echo "FAIL: scripts/build_outlook_source_from_polygon.py missing"; exit 1
           fi
-          echo "Fetch step exit code: $?"
 
       - name: Log outlook_source summary (raw)
         run: |
@@ -64,7 +63,7 @@ jobs:
             echo "== outlook_source.json HEAD =="
             head -c 2000 data/outlook_source.json || true
             echo
-            echo "== jq keys =="
+            echo "== top-level keys =="
             jq 'keys' data/outlook_source.json || true
           else
             echo "FAIL: data/outlook_source.json missing"; exit 1
@@ -74,7 +73,6 @@ jobs:
         run: |
           test -f data/outlook_source.json || (echo "FAIL: missing outlook_source.json"; exit 1)
 
-          # Prefer .groups if present, else .sectors, else 0
           COUNT=$(
             jq -r '
               if has("groups") and (.groups | type == "object") then
@@ -125,23 +123,4 @@ jobs:
       - name: Archive (15-day rolling) — HOURLY
         run: |
           mkdir -p archive/hourly
-          ts=$(date -u +%Y-%m-%dT%H-%M-%SZ)
-          cp data/outlook.json archive/hourly/outlook_${ts}.json || true
-          if [ -f data/outlook_source.json ]; then
-            cp data/outlook_source.json archive/hourly/outlook_source_${ts}.json || true
-          fi
-          ls -1t archive/hourly/outlook_*.json 2>/dev/null | tail -n +361 | xargs -r rm -f
-          ls -1t archive/hourly/outlook_source_*.json 2>/dev/null | tail -n +361 | xargs -r rm -f
-
-      - name: Commit latest → hourly archive (rebase-safe)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add -A || true
-          git diff --staged --quiet || git commit -m "Hourly: refresh outlook.json [skip ci]" || true
-          # pull rebase against the repo's default branch (assumed main)
-          git pull --rebase origin main || true
-          git push origin HEAD:main || true
+          ts=$(date
