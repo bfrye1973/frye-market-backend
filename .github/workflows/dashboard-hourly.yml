@@ -53,6 +53,30 @@ jobs:
         run: |
           python scripts/make_dashboard.py --source data/outlook_source.json --out data/outlook.json
 
+           # 👀 Lightweight peek step (logs sector info + computed numbers, never fails)
+      - name: Peek sector snapshot
+        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
+        run: |
+          echo "===== SNAPSHOT ====="
+          date -u +"UTC time: %Y-%m-%dT%H:%M:%SZ"
+
+          echo "--- Sector count ---"
+          jq '[.outlook.sectors | keys[]] | length' data/outlook.json 2>/dev/null || echo "no sectors"
+
+          echo "--- Sector details (first 10) ---"
+          jq -r '
+            .outlook.sectors
+            | to_entries[0:10]
+            | .[]
+            | "\(.key): outlook=\(.value.outlook // "N/A"), netNH=\(.value.netNH // "N/A")"
+          ' data/outlook.json 2>/dev/null || echo "no details"
+
+          echo "--- All sector names ---"
+          jq -r '.outlook.sectors | keys[]' data/outlook.json 2>/dev/null || echo "no sector names"
+
+          echo "===================="
+
+
       - name: Archive (15-day rolling) — HOURLY
         if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
         run: |
