@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """
 make_dashboard.py — carry real sector counts + Daily/Intraday Squeeze into outlook.json
+Adds Breadth/Momentum indexes computed from sector totals.
 
 - Reads data/outlook_source.json
 - Writes data/outlook.json with:
-  * gauges: rpm/speed/fuel/water/oil + squeezeDaily.pct
+  * gauges:
+      - rpm.pct  (Breadth 0..100)
+      - speed.pct (Momentum 0..100)
+      - fuel.pct (Intraday squeeze/pressure)
+      - squeezeDaily.pct (Daily squeeze)
+      - water.pct (Volatility)
+      - oil.psi (Liquidity PSI)
   * odometers: squeezeCompressionPct (intraday = fuel)
   * outlook.sectors: { nh, nl, up, down, netNH, netUD, spark }
   * sectorCards (top-level + nested)
+  * summary: { breadthIdx, momentumIdx }
 """
 
 from __future__ import annotations
@@ -103,18 +111,33 @@ def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
 
 # -------- gauges / squeeze --------
 
-def build_gauges_and_odometers(src: Dict[str, Any], mode: str) -> Dict[str, Any]:
+def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mode: str) -> Dict[str, Any]:
     g = src.get("global", {}) or {}
-    breadth   = num(src.get("breadthIdx", 50))
-    momentum  = num(src.get("momentumIdx", 50))
-    fuel      = num(g.get("squeeze_pressure_pct", 50))   # intraday/fuel
+
+    # Daily squeeze & intraday fuel
+    fuel      = num(g.get("squeeze_pressure_pct", 50))   # intraday/pressure
+    daily_sq  = num(g.get("daily_squeeze_pct", None), None)
     vol_pct   = num(g.get("volatility_pct", 50))
     liq_pct   = num(g.get("liquidity_pct", 100))
-    daily_sq  = num(g.get("daily_squeeze_pct", None), None)  # NEW
+
+    # ---- Breadth/Momentum from sector totals ----
+    tot_nh = sum(int(num(v.get("nh",0)))   for v in sectors.values())
+    tot_nl = sum(int(num(v.get("nl",0)))   for v in sectors.values())
+    tot_up = sum(int(num(v.get("up",0)))   for v in sectors.values())
+    tot_dn = sum(int(num(v.get("down",0))) for v in sectors.values())
+
+    def ratio_idx(pos, neg):
+        pos = float(pos); neg = float(neg)
+        s = pos + neg
+        if s <= 0: return 50.0
+        return 50.0 + 50.0 * ((pos - neg) / s)
+
+    breadthIdx  = ratio_idx(tot_nh, tot_nl)      # 0..100
+    momentumIdx = ratio_idx(tot_up, tot_dn)      # 0..100
 
     gauges = {
-        "rpm":   {"pct": float(breadth),  "label":"Breadth"},
-        "speed": {"pct": float(momentum), "label":"Momentum"},
+        "rpm":   {"pct": float(breadthIdx),  "label":"Breadth"},
+        "speed": {"pct": float(momentumIdx), "label":"Momentum"},
         "fuel":  { "pct": float(fuel), "state": "firingUp" if float(fuel) >= 70 else "idle", "label":"Squeeze" },
         "water": { "pct": float(vol_pct), "label":"Volatility" },
         "oil":   { "psi": float(liq_pct), "label":"Liquidity" },
@@ -124,7 +147,12 @@ def build_gauges_and_odometers(src: Dict[str, Any], mode: str) -> Dict[str, Any]
 
     odometers = { "squeezeCompressionPct": float(fuel) }  # intraday
 
-    return { "gauges": gauges, "odometers": odometers }
+    summary = {
+        "breadthIdx":  float(breadthIdx),
+        "momentumIdx": float(momentumIdx),
+    }
+
+    return { "gauges": gauges, "odometers": odometers, "summary": summary }
 
 # -------- cards --------
 
@@ -158,7 +186,7 @@ def main():
     ts  = now_iso()
 
     sectors = sectors_from_source(src)
-    gz_od   = build_gauges_and_odometers(src, args.mode)
+    gz_od   = build_gauges_and_odometers(src, sectors, args.mode)
     cards   = cards_from_sectors(sectors)
 
     out = {
@@ -167,7 +195,7 @@ def main():
         "ts": ts,
         "version": VERSION_TAG,
         "pipeline": args.mode,
-        **gz_od,                      # adds gauges + odometers
+        **gz_od,                      # adds gauges + odometers + summary(breadth/momentum)
         "sectorCards": cards,         # legacy
         "outlook": {
             "sectors": sectors,
@@ -178,6 +206,7 @@ def main():
 
     jwrite(args.out, out)
     print(f"Wrote {args.out} | sectors={len(sectors)} | cards={len(cards)}")
+    print(f"[summary] breadthIdx={out['summary']['breadthIdx']:.1f} momentumIdx={out['summary']['momentumIdx']:.1f}")
 
 if __name__ == "__main__":
     main()
