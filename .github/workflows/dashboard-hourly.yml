@@ -9,7 +9,6 @@ permissions:
 jobs:
   hourly:
     runs-on: ubuntu-latest
-    timeout-minutes: 60   # allow up to 1 hour, fetch needs ~17–25 mins
 
     steps:
       - name: Checkout
