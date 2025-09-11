@@ -1,4 +1,4 @@
-// api/routes.js — ESM router (normalized /dashboard, stub signals, volatility placeholder)
+// api/routes.js — ESM router (normalized /dashboard, stub signals, volatility placeholder, sector card numbers)
 
 import express from "express";
 import path from "path";
@@ -47,6 +47,27 @@ const orderKey = (label) => {
   return i === -1 ? 999 : i;
 };
 
+/** Compute the numeric pair the UI shows inside the card */
+function computeCardNumbers(name, vals) {
+  // prefer sparkline if present: last & percent change vs first
+  const spark = Array.isArray(vals?.spark) ? vals.spark : [];
+  if (spark.length >= 2) {
+    const first = Number(spark[0]) || 0;
+    const last  = Number(spark[spark.length - 1]) || 0;
+    const base  = Math.abs(first) > 1e-9 ? Math.abs(first) : 1; // avoid /0
+    const deltaPct = ((last - first) / base) * 100;
+    return { last, deltaPct };
+  }
+
+  // fallback: use breadth proxy if no spark
+  const nh = Number(vals?.nh ?? 0);
+  const nl = Number(vals?.nl ?? 0);
+  const netNH = Number(vals?.netNH ?? (nh - nl));
+  const denom = (nh + nl) > 0 ? (nh + nl) : 1;
+  const deltaPct = (netNH / denom) * 100; // relative breadth tilt today
+  return { last: netNH, deltaPct };
+}
+
 function normalizeSectorCards(json) {
   json.outlook = json.outlook || {};
   const sectors =
@@ -57,25 +78,27 @@ function normalizeSectorCards(json) {
   let cards = [];
   if (sectors) {
     cards = Object.keys(sectors).map((name) => {
-      const vals  = sectors[name] || {};
-      const nh    = Number(vals.nh ?? 0);
-      const nl    = Number(vals.nl ?? 0);
-      const netNH = Number(vals.netNH ?? (nh - nl)); // breadth proxy
-      const netUD = Number(vals.netUD ?? 0);
-      const spark = Array.isArray(vals.spark) ? vals.spark : [];
+      const v = sectors[name] || {};
+      const nh    = Number(v.nh ?? 0);
+      const nl    = Number(v.nl ?? 0);
+      const netNH = Number(v.netNH ?? (nh - nl));
+      const netUD = Number(v.netUD ?? 0);
+      const spark = Array.isArray(v.spark) ? v.spark : [];
 
       const outlook =
         netNH > 0 ? "Bullish" :
         netNH < 0 ? "Bearish" : "Neutral";
 
+      const { last, deltaPct } = computeCardNumbers(name, v);
+
       return {
         sector: toTitle(name),
         outlook,
         spark,
-        nh,
-        nl,
-        netNH,
-        netUD,
+        nh, nl, netNH, netUD,
+        // 👇 numbers the frontend expects to display
+        last,
+        deltaPct
       };
     });
   }
@@ -90,6 +113,7 @@ function normalizeSectorCards(json) {
         outlook: "Neutral",
         spark: [],
         nh: 0, nl: 0, netNH: 0, netUD: 0,
+        last: 0, deltaPct: 0
       });
     }
   }
@@ -185,38 +209,3 @@ export default function buildRouter() {
   router.get("/gauges", async (req, res) => {
     try {
       const index = (req.query.index || req.query.symbol || Object.keys(req.query)[0] || "SPY").toString();
-      const dash = await readJsonFromProject("data/outlook.json");
-      if (!dash) return noStore(res).json([]);
-      const rows = buildGaugeRowsFromDashboard(dash, index);
-      return noStore(res).json(Array.isArray(rows) ? rows : []);
-    } catch (e) {
-      console.error("gauges error:", e?.message || e);
-      return noStore(res).json([]);
-    }
-  });
-
-  // Dummy OHLC (chart testing)
-  router.get("/v1/ohlc", (req, res) => {
-    const symbol = req.query.symbol || "SPY";
-    const timeframe = req.query.timeframe || "1d";
-    const tfSec = ({ "1m":60, "5m":300, "15m":900, "30m":1800, "1h":3600, "1d":86400 })[timeframe] || 3600;
-
-    const now = Math.floor(Date.now() / 1000);
-    const bars = [];
-    let px = 640;
-
-    for (let i = 60; i > 0; i--) {
-      const t = now - i * tfSec;
-      const o = px;
-      const c = px + (Math.random() - 0.5) * 2;
-      const h = Math.max(o, c) + Math.random();
-      const l = Math.min(o, c) - Math.random();
-      const v = Math.floor(1_000_000 + Math.random() * 500_000);
-      bars.push({ time: t, open: o, high: h, low: l, close: c, volume: v });
-      px = c;
-    }
-    return noStore(res).json({ bars, symbol, timeframe });
-  });
-
-  return router;
-}
