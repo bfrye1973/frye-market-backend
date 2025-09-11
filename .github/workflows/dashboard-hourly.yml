@@ -30,7 +30,7 @@ jobs:
             pip install -q requests pandas || true
           fi
 
-            - name: Fetch raw data (Polygon → outlook_source.json)
+      - name: Fetch raw data (Polygon → outlook_source.json)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -44,7 +44,6 @@ jobs:
           fi
           test -f data/outlook_source.json || (echo "FAIL: data/outlook_source.json not created"; exit 1)
           echo "✅ wrote data/outlook_source.json"
-
 
       - name: Quick peek (first 1KB)
         run: |
