@@ -2,7 +2,7 @@ name: dashboard-eod
 
 on:
   workflow_dispatch:
-  # Market OPEN and CLOSE: 09:30 ET (13:30 UTC) and 16:00 ET (20:00 UTC), Mon–Fri
+  # Market OPEN & CLOSE: 09:30 ET (13:30 UTC) and 16:00 ET (20:00 UTC)
   schedule:
     - cron: "30 13 * * 1-5"
     - cron: "0 20 * * 1-5"
@@ -18,20 +18,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
 
       - name: Setup Python
         uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+        with: { python-version: "3.11" }
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # Source builder only supports 'daily' and 'intraday'
       - name: Build outlook source (EOD)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -39,12 +36,10 @@ jobs:
           python scripts/build_outlook_source_from_polygon.py --mode daily
 
       - name: Make dashboard payload (EOD)
-        env:
-          PIPELINE_TAG: "eod"
         run: |
           python scripts/make_dashboard.py --mode eod --source data/outlook_source.json --out data/outlook.json
 
-      - name: Archive (30-day rolling) — EOD
+      - name: Archive (30-day rolling)
         run: |
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
@@ -59,31 +54,12 @@ jobs:
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-
-          # Reset to remote main to avoid conflicts
           git fetch origin main
           git checkout main
           git reset --hard origin/main
-
-          # Stage everything we generated
           git add -A
-
           if git diff --staged --quiet; then
-            echo "No changes to commit"
-            exit 0
+            echo "No changes to commit"; exit 0
           fi
-
           git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
           git push origin HEAD:main
-
-      - name: Trigger backend redeploy on Render
-        if: always()
-        env:
-          RENDER_DEPLOY_HOOK_BACKEND: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}
-        run: |
-          if [ -n "$RENDER_DEPLOY_HOOK_BACKEND" ]; then
-            echo "Triggering backend redeploy..."
-            curl -sSf -X POST "$RENDER_DEPLOY_HOOK_BACKEND"
-          else
-            echo "Render deploy hook not set (RENDER_DEPLOY_HOOK_BACKEND)."
-          fi
