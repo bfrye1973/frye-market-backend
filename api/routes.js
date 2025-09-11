@@ -1,29 +1,36 @@
-// api/routes.js — ESM router (sector cards + numeric aliases, real Engine Lights,
-// ensure squeezeDaily.pct + rpm/speed indexes + volatilityPct)
+// api/routes.js — ESM router (sector cards + numeric aliases, engine lights,
+// ensure squeezeDaily, rpm/speed, volatility; with /debug and /outlook5d)
 
 import express from "express";
 import path from "path";
 import fs from "fs/promises";
 import { fileURLToPath } from "url";
 
+/* -------- Resolve __dirname in ESM -------- */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
+/* -------- small utils -------- */
 function noStore(res) { res.set("Cache-Control","no-store"); return res; }
-async function readJsonFromProject(relPath) {
-  const abs = path.resolve(__dirname, "..", relPath);
-  try { const raw = await fs.readFile(abs, "utf8"); return JSON.parse(raw); }
-  catch { return null; }
+async function readJsonFromProject(relPathFromProjectRoot) {
+  const abs = path.resolve(__dirname, "..", relPathFromProjectRoot);
+  try {
+    const raw = await fs.readFile(abs, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
-/* ---- sector cards ---- */
+/* -------- sectorCards normalization (guarantee 11) -------- */
 const PREFERRED_ORDER = [
   "information technology","materials","healthcare","communication services","real estate",
   "energy","consumer staples","consumer discretionary","financials","utilities","industrials",
 ];
-const toTitle = s => String(s||"").trim().split(" ").map(w => w ? w[0].toUpperCase()+w.slice(1) : w).join(" ");
-const orderKey = label => {
-  const n = String(label||"").trim().toLowerCase();
+const toTitle = (s) =>
+  String(s || "").trim().split(" ").map(w => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
+const orderKey = (label) => {
+  const n = String(label || "").trim().toLowerCase();
   const syn = n === "tech" ? "information technology" : n;
   const i = PREFERRED_ORDER.indexOf(syn);
   return i === -1 ? 999 : i;
@@ -47,6 +54,7 @@ function computeCardNumbers(v){
 function normalizeSectorCards(json){
   json.outlook = json.outlook || {};
   const sectors = (json.outlook.sectors && typeof json.outlook.sectors === "object") ? json.outlook.sectors : null;
+
   let cards = [];
   if (sectors){
     cards = Object.keys(sectors).map(name => {
@@ -60,6 +68,8 @@ function normalizeSectorCards(json){
         last, value:last, deltaPct, pct:deltaPct, changePct:deltaPct, delta };
     });
   }
+
+  // ensure all 11 exist
   const have = new Set(cards.map(c => c.sector.toLowerCase()));
   for (const s of PREFERRED_ORDER){
     const label = toTitle(s);
@@ -68,30 +78,42 @@ function normalizeSectorCards(json){
         last:0, value:0, delta:0, deltaPct:0, pct:0, changePct:0 });
     }
   }
+
   cards.sort((a,b)=>orderKey(a.sector)-orderKey(b.sector));
   json.outlook.sectorCards = cards;
-  json.sectorCards = cards;
+  json.sectorCards = cards; // legacy mirror
   return json;
 }
 
-/* ---- ensure squeeze (daily + intraday) ---- */
+/* -------- ensure squeeze (Daily + Intraday) -------- */
 function ensureSqueeze(json){
   json.gauges = json.gauges || {};
   json.odometers = json.odometers || {};
+
+  // daily squeeze
   if (!json.gauges.squeezeDaily || !Number.isFinite(json.gauges.squeezeDaily?.pct)) {
     const fromGlobal = Number(json?.global?.daily_squeeze_pct ?? NaN);
     const fromAlt    = Number(json?.squeezeDailyPct ?? NaN);
     const maybe = Number.isFinite(fromGlobal) ? fromGlobal : (Number.isFinite(fromAlt) ? fromAlt : NaN);
     if (Number.isFinite(maybe)) json.gauges.squeezeDaily = { pct: maybe };
   }
+
+  // intraday squeeze odometer from fuel if missing
   if (!Number.isFinite(json.odometers.squeezeCompressionPct)) {
     const fuel = Number(json?.gauges?.fuel?.pct ?? NaN);
     if (Number.isFinite(fuel)) json.odometers.squeezeCompressionPct = fuel;
   }
+
+  // optional manual override (for exact Lux value)
+  const override = Number(process.env.DAILY_SQUEEZE_OVERRIDE ?? NaN);
+  if (Number.isFinite(override)) {
+    json.gauges.squeezeDaily = { pct: override };
+  }
+
   return json;
 }
 
-/* ---- ensure indexes (rpm/speed) ---- */
+/* -------- ensure indexes (rpm/speed) -------- */
 function ensureIndexes(json){
   json.gauges = json.gauges || {};
   const b = Number(json?.summary?.breadthIdx ?? json?.breadthIdx ?? NaN);
@@ -101,7 +123,7 @@ function ensureIndexes(json){
   return json;
 }
 
-/* ---- ensure volatilityPct (mirror water.pct if missing) ---- */
+/* -------- ensure volatility (mirror water.pct if missing) -------- */
 function ensureVolatility(json){
   json.gauges = json.gauges || {};
   const water = Number(json?.gauges?.water?.pct ?? NaN);
@@ -111,7 +133,7 @@ function ensureVolatility(json){
   return json;
 }
 
-/* ---- Engine Lights (real thresholds) ---- */
+/* -------- Engine Lights -------- */
 function computeSignals(json){
   const g = json?.gauges || {};
   const rpmPct   = Number(g?.rpm?.pct   ?? json?.breadthIdx ?? 0);
@@ -144,7 +166,7 @@ function computeSignals(json){
   return signals;
 }
 
-/* ---- rows helper ---- */
+/* -------- rows helper (for /api/gauges) -------- */
 function buildGaugeRowsFromDashboard(dash, index){
   const g = dash?.gauges || {};
   const rows = [];
@@ -159,24 +181,25 @@ function buildGaugeRowsFromDashboard(dash, index){
   return rows;
 }
 
-/* ---- Router ---- */
+/* -------- Router -------- */
 export default function buildRouter(){
   const router = express.Router();
 
-  router.get("/health", (req,res) => {
-    noStore(res).json({ ok:true, ts:new Date().toISOString(), service:"frye-market-backend" });
-  });
+  // Health
+  router.get("/health", (req, res) =>
+    noStore(res).json({ ok:true, ts:new Date().toISOString(), service:"frye-market-backend" })
+  );
 
-  router.get("/dashboard", async (req,res) => {
+  // Dashboard (main payload)
+  router.get("/dashboard", async (req, res) => {
     try{
       let json = await readJsonFromProject("data/outlook.json");
       if (!json) throw new Error("outlook.json not found");
 
       json = normalizeSectorCards(json);
-      json = addVolatilityPlaceholder(json); // keep placeholder
       json = ensureSqueeze(json);
       json = ensureIndexes(json);
-      json = ensureVolatility(json);         // <-- map water.pct → volatilityPct if needed
+      json = ensureVolatility(json);
       json.signals = computeSignals(json);
 
       json.meta = json.meta || {};
@@ -196,6 +219,7 @@ export default function buildRouter(){
     }
   });
 
+  // Gauges (rows) — optional helper
   router.get("/gauges", async (req,res) => {
     try{
       const index = (req.query.index || req.query.symbol || Object.keys(req.query)[0] || "SPY").toString();
@@ -209,77 +233,55 @@ export default function buildRouter(){
     }
   });
 
-  // simple dummy OHLC (unchanged)
-  router.get("/v1/ohlc", (req,res) => {
-    const symbol    = req.query.symbol || "SPY";
-    const timeframe = req.query.timeframe || "1d";
-    const tfSec = ({ "1m":60,"5m":300,"15m":900,"30m":1800,"1h":3600,"1d":86400 })[timeframe] || 3600;
+  // quick debug snapshot
+  router.get("/debug", async (req, res) => {
+    try {
+      const dash = await readJsonFromProject("data/outlook.json");
+      if (!dash) return noStore(res).status(404).json({ ok:false, error:"outlook.json not found" });
 
-    const now = Math.floor(Date.now()/1000);
-    const bars = [];
-    let px = 640;
-    for (let i=60; i>0; i--){
-      const t = now - i*tfSec;
-      const o = px;
-      const c = px + (Math.random()-0.5)*2;
-      const h = Math.max(o,c) + Math.random();
-      const l = Math.min(o,c) - Math.random();
-      const v = Math.floor(1_000_000 + Math.random()*500_000);
-      bars.push({ time:t, open:o, high:h, low:l, close:c, volume:v });
-      px = c;
+      const gg = dash.gauges || {};
+      const od = dash.odometers || {};
+      const summary = dash.summary || {};
+      const sectors = (dash.outlook && dash.outlook.sectors) || {};
+      const totals = Object.values(sectors).reduce((acc, v) => {
+        acc.nh  += Number(v?.nh ?? 0);
+        acc.nl  += Number(v?.nl ?? 0);
+        acc.u   += Number(v?.up ?? v?.u ?? 0);
+        acc.d   += Number(v?.down ?? v?.d ?? 0);
+        return acc;
+      }, { nh:0, nl:0, u:0, d:0 });
+
+      return noStore(res).json({
+        ok: true,
+        ts: dash.updated_at || dash.ts || new Date().toISOString(),
+        dailySqueezePct: Number(gg?.squeezeDaily?.pct ?? NaN),
+        intradaySqueezePct: Number(od?.squeezeCompressionPct ?? gg?.fuel?.pct ?? NaN),
+        breadthIdx:  Number(summary?.breadthIdx  ?? gg?.rpm?.pct   ?? NaN),
+        momentumIdx: Number(summary?.momentumIdx ?? gg?.speed?.pct ?? NaN),
+        totals
+      });
+    } catch (e) {
+      return noStore(res).status(500).json({ ok:false, error:String(e) });
     }
-    return noStore(res).json({ bars, symbol, timeframe });
   });
-// ---- quick debug snapshot (indicators + totals) ----
-router.get("/debug", async (req, res) => {
-  try {
-    const dash = await readJsonFromProject("data/outlook.json");
-    if (!dash) return noStore(res).status(404).json({ ok:false, error:"outlook.json not found" });
 
-    const gg = dash.gauges || {};
-    const od = dash.odometers || {};
-    const summary = dash.summary || {};
-    const sectors = (dash.outlook && dash.outlook.sectors) || {};
-
-    const totals = Object.values(sectors).reduce((acc, v) => {
-      acc.nh  += Number(v?.nh   ?? 0);
-      acc.nl  += Number(v?.nl   ?? 0);
-      acc.u   += Number(v?.up   ?? v?.u   ?? 0);
-      acc.d   += Number(v?.down ?? v?.d   ?? 0);
-      return acc;
-    }, { nh:0, nl:0, u:0, d:0 });
-
-    return noStore(res).json({
-      ok: true,
-      ts: dash.updated_at || dash.ts || new Date().toISOString(),
-      dailySqueezePct: Number(gg?.squeezeDaily?.pct ?? NaN),
-      intradaySqueezePct: Number(od?.squeezeCompressionPct ?? gg?.fuel?.pct ?? NaN),
-      breadthIdx:  Number(summary?.breadthIdx  ?? gg?.rpm?.pct   ?? NaN),
-      momentumIdx: Number(summary?.momentumIdx ?? gg?.speed?.pct ?? NaN),
-      totals
-    });
-  } catch (e) {
-    return noStore(res).status(500).json({ ok:false, error:String(e) });
-  }
-});
-
-// ---- last 5 days outlook for narrator (nh/nl/u/d) ----
-router.get("/outlook5d", async (req, res) => {
-  try {
-    const hist = await readJsonFromProject("data/history.json");
-    const days = Array.isArray(hist?.days) ? hist.days.slice(-5) : [];
-    const rows = days.map(d => ({
-      date: d.date,
-      nh: Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.nh||0),0) || 0),
-      nl: Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.nl||0),0) || 0),
-      u:  Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.u ||0),0) || 0),
-      d:  Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.d ||0),0) || 0)
-    }));
-    return noStore(res).json({ ok:true, rows });
-  } catch (e) {
-    return noStore(res).status(500).json({ ok:false, error:String(e) });
-  }
-});
+  // last 5 days (for narrator or checks)
+  router.get("/outlook5d", async (req, res) => {
+    try {
+      const hist = await readJsonFromProject("data/history.json");
+      const days = Array.isArray(hist?.days) ? hist.days.slice(-5) : [];
+      const rows = days.map(d => ({
+        date: d.date,
+        nh: Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.nh||0),0) || 0),
+        nl: Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.nl||0),0) || 0),
+        u:  Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.u ||0),0) || 0),
+        d:  Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.d ||0),0) || 0)
+      }));
+      return noStore(res).json({ ok:true, rows });
+    } catch (e) {
+      return noStore(res).status(500).json({ ok:false, error:String(e) });
+    }
+  });
 
   return router;
 }
