@@ -46,6 +46,28 @@ jobs:
         run: |
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
+      # 👀 Peek 1: show source shape (non-blocking)
+      - name: Peek outlook_source.json
+        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
+        run: |
+          echo "===== SOURCE SNAPSHOT ====="
+          test -f data/outlook_source.json || { echo "missing outlook_source.json"; exit 0; }
+          python - << 'PY'
+import json,sys
+d=json.load(open("data/outlook_source.json","r"))
+def count(obj,k): 
+    try:
+        v=obj[k]; 
+        return len(v.keys()) if isinstance(v,dict) else 0
+    except: 
+        return 0
+n = count(d,"groups") or count(d,"sectors") or (count(d.get("outlook",{}),"sectors") if isinstance(d.get("outlook"),dict) else 0)
+print("sector/group count:", n)
+keys = list((d.get("sectors") or d.get("groups") or d.get("outlook",{}).get("sectors") or {}).keys())
+print("first keys:", keys[:5])
+PY
+          echo "==========================="
+
       - name: Make dashboard payload
         if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
         env:
@@ -53,29 +75,24 @@ jobs:
         run: |
           python scripts/make_dashboard.py --source data/outlook_source.json --out data/outlook.json
 
-           # 👀 Lightweight peek step (logs sector info + computed numbers, never fails)
-      - name: Peek sector snapshot
+      # 👀 Peek 2: show computed numbers (non-blocking)
+      - name: Peek outlook.json (sectors + one sample)
         if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
         run: |
-          echo "===== SNAPSHOT ====="
-          date -u +"UTC time: %Y-%m-%dT%H:%M:%SZ"
-
-          echo "--- Sector count ---"
-          jq '[.outlook.sectors | keys[]] | length' data/outlook.json 2>/dev/null || echo "no sectors"
-
-          echo "--- Sector details (first 10) ---"
-          jq -r '
-            .outlook.sectors
-            | to_entries[0:10]
-            | .[]
-            | "\(.key): outlook=\(.value.outlook // "N/A"), netNH=\(.value.netNH // "N/A")"
-          ' data/outlook.json 2>/dev/null || echo "no details"
-
-          echo "--- All sector names ---"
-          jq -r '.outlook.sectors | keys[]' data/outlook.json 2>/dev/null || echo "no sector names"
-
-          echo "===================="
-
+          echo "===== DASHBOARD SNAPSHOT ====="
+          test -f data/outlook.json || { echo "missing outlook.json"; exit 0; }
+          python - << 'PY'
+import json,sys
+d=json.load(open("data/outlook.json","r"))
+sectors = (d.get("outlook") or {}).get("sectors") or {}
+cards   = (d.get("outlook") or {}).get("sectorCards") or []
+print("sectors dict count:", len(sectors))
+print("sectorCards array length:", len(cards))
+if cards:
+    s = cards[0]
+    print("sample card:", {"sector": s.get("sector"), "outlook": s.get("outlook"), "netNH": s.get("netNH")})
+PY
+          echo "=============================="
 
       - name: Archive (15-day rolling) — HOURLY
         if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
