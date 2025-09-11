@@ -1,47 +1,62 @@
-// api/routes.js — ESM router with normalized /dashboard, stub signals, and volatility placeholder
+// api/routes.js — ESM router (normalized /dashboard, stub signals, volatility placeholder)
 
 import express from "express";
 import path from "path";
-import fs from "fs";
+import fs from "fs/promises";
 import { fileURLToPath } from "url";
 
-/* Resolve __dirname in ESM */
+/* -------- Resolve __dirname in ESM -------- */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-/* ---------- small utils ---------- */
+/* -------- small utils -------- */
 function noStore(res) {
   res.set("Cache-Control", "no-store");
   return res;
 }
-function readJsonSafe(absPath) {
-  try { return JSON.parse(fs.readFileSync(absPath, "utf8")); }
-  catch { return null; }
-}
-function loadLocal(relPathFromProjectRoot) {
+
+async function readJsonFromProject(relPathFromProjectRoot) {
   // routes.js is in /api; project root is one level up
   const abs = path.resolve(__dirname, "..", relPathFromProjectRoot);
-  return readJsonSafe(abs);
+  try {
+    const raw = await fs.readFile(abs, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
-/* ---------- sectorCards normalization ---------- */
+/* -------- sectorCards normalization (guarantee 11) -------- */
 const PREFERRED_ORDER = [
-  "tech","materials","healthcare","communication services","real estate",
+  "information technology","materials","healthcare","communication services","real estate",
   "energy","consumer staples","consumer discretionary","financials","utilities","industrials",
 ];
-const norm = s => String(s || "").trim().toLowerCase();
-const orderKey = s => {
-  const i = PREFERRED_ORDER.indexOf(norm(s));
+
+const toTitle = (s) =>
+  String(s || "")
+    .trim()
+    .split(" ")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+
+const orderKey = (label) => {
+  const n = String(label || "").trim().toLowerCase();
+  // accept common synonym
+  const syn = n === "tech" ? "information technology" : n;
+  const i = PREFERRED_ORDER.indexOf(syn);
   return i === -1 ? 999 : i;
 };
 
 function normalizeSectorCards(json) {
   json.outlook = json.outlook || {};
-  const sectors = json.outlook.sectors;
+  const sectors =
+    json.outlook.sectors && typeof json.outlook.sectors === "object"
+      ? json.outlook.sectors
+      : null;
 
   let cards = [];
-  if (sectors && typeof sectors === "object") {
-    cards = Object.keys(sectors).map(name => {
+  if (sectors) {
+    cards = Object.keys(sectors).map((name) => {
       const vals  = sectors[name] || {};
       const nh    = Number(vals.nh ?? 0);
       const nl    = Number(vals.nl ?? 0);
@@ -53,46 +68,51 @@ function normalizeSectorCards(json) {
         netNH > 0 ? "Bullish" :
         netNH < 0 ? "Bearish" : "Neutral";
 
-      // Title-case sector label
-      const title = name.split(" ")
-        .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
-        .join(" ");
-
-      return { sector: title, outlook, spark, nh, nl, netNH, netUD };
+      return {
+        sector: toTitle(name),
+        outlook,
+        spark,
+        nh,
+        nl,
+        netNH,
+        netUD,
+      };
     });
-
-    cards.sort((a,b) => orderKey(a.sector) - orderKey(b.sector));
   }
 
-  // If none built, keep existing sectorCards (or seed a small set)
-  if (!cards.length && Array.isArray(json.outlook.sectorCards)) {
-    return json;
-  }
-  if (!cards.length) {
-    cards = [
-      { sector:"Technology", outlook:"Neutral", spark:[] },
-      { sector:"Energy",     outlook:"Neutral", spark:[] },
-      { sector:"Financials", outlook:"Neutral", spark:[] },
-    ];
+  // ensure all 11 exist (fill any missing with Neutral placeholders)
+  const have = new Set(cards.map((c) => c.sector.toLowerCase()));
+  for (const s of PREFERRED_ORDER) {
+    const label = toTitle(s);
+    if (!have.has(label.toLowerCase())) {
+      cards.push({
+        sector: label,
+        outlook: "Neutral",
+        spark: [],
+        nh: 0, nl: 0, netNH: 0, netUD: 0,
+      });
+    }
   }
 
+  cards.sort((a, b) => orderKey(a.sector) - orderKey(b.sector));
   json.outlook.sectorCards = cards;
   return json;
 }
 
-/* ---------- volatility placeholder (0..100) ---------- */
+/* -------- volatility placeholder (0..100) -------- */
 function addVolatilityPlaceholder(json) {
   json.gauges = json.gauges || {};
   if (!Number.isFinite(json?.gauges?.volatilityPct)) {
-    json.gauges.volatilityPct = 50; // neutral placeholder; replace when real metric ready
+    json.gauges.volatilityPct = 50; // neutral placeholder; swap when real metric ready
   }
   return json;
 }
 
-/* ---------- stub signals so Engine Lights light up ---------- */
+/* -------- stub signals so Engine Lights light up -------- */
 function addStubSignals(json) {
-  // If you already compute real signals in your pipeline, remove/replace this.
-  json.signals = json.signals || {
+  // If you later compute real signals, remove this stub.
+  if (json.signals) return json; // don't clobber real signals
+  json.signals = {
     sigBreakout:     { active: true,  severity: "warn"   },
     sigCompression:  { active: true,  severity: "danger" },
     sigExpansion:    { active: false },
@@ -105,7 +125,7 @@ function addStubSignals(json) {
   return json;
 }
 
-/* ---------- gauges table rows ---------- */
+/* -------- gauges table rows (simple passthrough) -------- */
 function buildGaugeRowsFromDashboard(dash, index) {
   const g = dash?.gauges || {};
   const rows = [];
@@ -124,7 +144,7 @@ function buildGaugeRowsFromDashboard(dash, index) {
   return rows;
 }
 
-/* ---------- Router ---------- */
+/* -------- Router -------- */
 export default function buildRouter() {
   const router = express.Router();
 
@@ -136,9 +156,7 @@ export default function buildRouter() {
   // Dashboard
   router.get("/dashboard", async (req, res) => {
     try {
-      // Load your base dashboard JSON (adjust path if needed)
-      // If you use a builder pipeline, replace this with your builder call.
-      let json = loadLocal("data/outlook.json");
+      let json = await readJsonFromProject("data/outlook.json");
       if (!json) throw new Error("outlook.json not found");
 
       // Normalize + placeholders + stub signals
@@ -151,28 +169,28 @@ export default function buildRouter() {
 
       return noStore(res).json(json);
     } catch (e) {
-      console.error("dashboard error:", e.message);
-      return noStore(res).json({
+      console.error("dashboard error:", e?.message || e);
+      return noStore(res).status(500).json({
         ok: false,
         outlook: { sectorCards: [] },
         gauges: { volatilityPct: 50 },
         signals: {},
         meta: { ts: new Date().toISOString() },
-        error: e.message,
+        error: String(e?.message || e),
       });
     }
   });
 
   // Gauges rows (array), never 500s
-  router.get("/gauges", (req, res) => {
+  router.get("/gauges", async (req, res) => {
     try {
       const index = (req.query.index || req.query.symbol || Object.keys(req.query)[0] || "SPY").toString();
-      const dash = loadLocal("data/outlook.json");
+      const dash = await readJsonFromProject("data/outlook.json");
       if (!dash) return noStore(res).json([]);
       const rows = buildGaugeRowsFromDashboard(dash, index);
       return noStore(res).json(Array.isArray(rows) ? rows : []);
     } catch (e) {
-      console.error("gauges error:", e.message);
+      console.error("gauges error:", e?.message || e);
       return noStore(res).json([]);
     }
   });
