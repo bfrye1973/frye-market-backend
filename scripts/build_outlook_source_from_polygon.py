@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Ferrari Dashboard — build_outlook_source_from_polygon.py (R2)
+Ferrari Dashboard — build_outlook_source_from_polygon.py (R3)
 
-Generates data/outlook_source.json from Polygon:
+Generates data/outlook_source.json from Polygon.
 
 Modes
 - daily     : EOD-style counts from completed daily bars
@@ -11,17 +11,17 @@ Modes
 Inputs
 - CSVs under data/sectors/{Sector}.csv  (header must be 'Symbol')
 
-Outputs (unchanged schema)
+Outputs (schema)
 {
   "timestamp": "...Z",
   "mode": "intraday" | "daily",
   "groups": {
-    "<Sector>": { "nh":int, "nl":int, "u":int, "d":int, "vol_state":"Mixed", "breadth_state":"Neutral", "history":{"nh":[]} },
-    ...
+    "<Sector>": { "nh":int, "nl":int, "u":int, "d":int, "vol_state":"Mixed", "breadth_state":"Neutral", "history":{"nh":[]} }
   },
   "global": {
-    "squeeze_pressure_pct": int(0..100),
+    "squeeze_pressure_pct": int(0..100),     # legacy/fuel-style intraday PSI (kept for compatibility)
     "squeeze_state": "none"|"on"|"firingUp"|"firingDown",
+    "daily_squeeze_pct": float(0..100),      # NEW: Lux daily PSI on SPY (2 decimals)
     "volatility_pct": int(0..100),
     "liquidity_pct": int(0..120)
   }
@@ -39,6 +39,8 @@ POLY_BASE  = "https://api.polygon.io"
 SECTORS_DIR= os.path.join("data", "sectors")
 OUT_PATH   = os.path.join("data", "outlook_source.json")
 HIST_PATH  = os.path.join("data", "history.json")
+
+# ---------------- HTTP / Polygon helpers ----------------
 
 def http_get(url: str, timeout: int = 20) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "ferrari-dashboard/1.0"})
@@ -88,10 +90,13 @@ def bulk_snapshots(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
     return out
 
 def date_str(d): return d.strftime("%Y-%m-%d")
+
 def bars_last_n_days(ticker: str, n_days: int) -> List[Dict[str, Any]]:
     end = datetime.utcnow().date()
     start = end - timedelta(days=max(20, n_days + 5))
     return fetch_range_daily(ticker, date_str(start), date_str(end))[-15:]
+
+# ---------------- CSV / sectors ----------------
 
 def read_symbols(path: str) -> List[str]:
     syms = []
@@ -113,6 +118,8 @@ def discover_sectors() -> Dict[str, List[str]]:
         if symbols: sectors[sector] = symbols
     if not sectors: raise SystemExit(f"No sector CSVs found in {SECTORS_DIR}")
     return sectors
+
+# ---------------- flag logic ----------------
 
 def compute_flags_from_bars(bars: List[Dict[str, Any]]) -> tuple[bool,bool,bool,bool]:
     if len(bars) < 11: return False, False, False, False
@@ -173,6 +180,8 @@ def build_sector_counts_intraday(symbols: List[str], wm_cache: Dict[str, tuple],
         counts["nh"] += nh; counts["nl"] += nl; counts["u"] += u3; counts["d"] += d3
     return counts
 
+# ---------------- history file ----------------
+
 def load_history():
     if not os.path.exists(HIST_PATH): return {"days":[]}
     with open(HIST_PATH, "r", encoding="utf-8") as f: return json.load(f)
@@ -180,6 +189,8 @@ def load_history():
 def save_history(hist):
     os.makedirs(os.path.dirname(HIST_PATH), exist_ok=True)
     with open(HIST_PATH, "w", encoding="utf-8") as f: json.dump(hist, f, ensure_ascii=False, indent=2)
+
+# ---------------- Lux Squeeze (Pine -> Python) ----------------
 
 def compute_psi_from_closes(closes, conv=50, length=20):
     if len(closes) < max(5, length + 2): return None
@@ -193,19 +204,41 @@ def compute_psi_from_closes(closes, conv=50, length=20):
     window = diffs[-n:]; xbar = sum(xs)/n; ybar = sum(window)/n
     num = sum((x-xbar)*(y-ybar) for x,y in zip(xs, window))
     den = (sum((x-xbar)**2 for x in xs) * sum((y-ybar)**2 for y in window)) or 1.0
-    r = num / math.sqrt(den); psi = -50.0*r + 50.0
+    r = num / math.sqrt(den)
+    psi = -50.0*r + 50.0
     return float(max(0.0, min(100.0, psi)))
 
 def compute_squeeze_fields(ticker="SPY", conv=50, length=20):
+    """
+    Returns BOTH:
+      - squeeze_pressure_pct (legacy intraday/fuel semantics; kept for compatibility)
+      - daily_squeeze_pct (NEW) — Lux PSI on DAILY bars (0..100, 2 decimals)
+      - squeeze_state — simple state; daily squeeze itself is direction-agnostic
+    """
     end = datetime.utcnow().date(); start = end - timedelta(days=90)
     bars = fetch_range_daily(ticker, date_str(start), date_str(end))
-    closes = [b["c"] for b in bars]; psi = compute_psi_from_closes(closes, conv=conv, length=length)
-    if psi is None: return {"squeeze_pressure_pct": 50, "squeeze_state": "none"}
+    closes = [b["c"] for b in bars]
+    psi = compute_psi_from_closes(closes, conv=conv, length=length)
+
+    if psi is None:
+        return {
+            "squeeze_pressure_pct": 50,
+            "squeeze_state": "none",
+            "daily_squeeze_pct": 50.00
+        }
+
     last_up = len(closes) >= 2 and (closes[-1] > closes[-2])
     if psi >= 80: state = "firingUp" if last_up else "firingDown"
     elif psi < 50: state = "on"
     else: state = "none"
-    return {"squeeze_pressure_pct": int(round(psi)), "squeeze_state": state}
+
+    return {
+        "squeeze_pressure_pct": int(round(psi)),
+        "squeeze_state": state,
+        "daily_squeeze_pct": round(float(psi), 2)
+    }
+
+# ---------------- vol/liquidity ----------------
 
 def compute_atr14_percent(closes, highs, lows):
     n = len(closes)
@@ -249,6 +282,8 @@ def compute_liquidity_pct(ticker="SPY"):
     if avgv20 <= 0: return 70
     ratio = (avgv5/avgv20)*100.0
     return int(round(max(0, min(120, ratio))))
+
+# ---------------- main ----------------
 
 def main():
     ap = argparse.ArgumentParser(description="Build outlook_source.json (daily or intraday)")
@@ -302,7 +337,7 @@ def main():
     print(f"[OK] wrote {OUT_PATH}")
 
     for s,g in groups.items(): print(f"  {s}: nh={g['nh']} nl={g['nl']} u={g['u']} d={g['d']}")
-    print("[squeeze]", payload["global"]["squeeze_pressure_pct"], payload["global"]["squeeze_state"])
+    print("[squeeze] daily PSI:", payload["global"]["daily_squeeze_pct"])
     print("[volatility]", payload["global"]["volatility_pct"])
     print("[liquidity]", payload["global"]["liquidity_pct"])
 
