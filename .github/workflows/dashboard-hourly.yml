@@ -2,13 +2,16 @@ name: dashboard-hourly
 
 on:
   workflow_dispatch:
-
-permissions:
-  contents: read
+  schedule:
+    - cron: "0 * * * 1-5"   # top of every hour Mon–Fri (UTC)
 
 jobs:
   hourly:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TZ: America/New_York
 
     steps:
       - name: Checkout
@@ -21,60 +24,68 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install minimal deps
+      - name: Install deps
         run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            python -m pip install --upgrade pip
-            pip install -q requests pandas || true
-          fi
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Fetch raw data (Polygon → outlook_source.json)
+      # Market-hours gate (skips scheduled runs outside 9–16 ET)
+      - name: Skip if outside market hours (scheduled runs only)
+        id: gate
+        if: github.event_name == 'schedule'
+        run: |
+          hour=$(date +%H)   # ET (TZ set above)
+          dow=$(date +%u)    # 1=Mon..7=Sun
+          if [ "$dow" -ge 6 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
+          if [ "$hour" -lt 9 ] || [ "$hour" -gt 16 ]; then echo "skip=true" >> $GITHUB_OUTPUT; fi
+
+      - name: Build outlook source (intraday)
+        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
+          python scripts/build_outlook_source_from_polygon.py --mode intraday
+
+      - name: Make dashboard payload
+        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
+        env:
+          PIPELINE_TAG: "hourly"
+        run: |
+          python scripts/make_dashboard.py --source data/outlook_source.json --out data/outlook.json
+
+      - name: Archive (15-day rolling) — HOURLY
+        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
+        run: |
           set -e
-          mkdir -p data
-          if [ -f scripts/build_outlook_source_from_polygon.py ]; then
-            echo "Running scripts/build_outlook_source_from_polygon.py --mode intraday"
-            python -u scripts/build_outlook_source_from_polygon.py --mode intraday
-          else
-            echo "FAIL: scripts/build_outlook_source_from_polygon.py missing"; exit 1
+          TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
+          mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
+          cp data/outlook_source.json "data/archive/hourly/source/outlook_source_${TS}.json"
+          cp data/outlook.json        "data/archive/hourly/dashboard/outlook_${TS}.json"
+          find data/archive/hourly/source    -type f -name 'outlook_source_*.json' -mtime +15 -delete || true
+          find data/archive/hourly/dashboard -type f -name 'outlook_*.json'        -mtime +15 -delete || true
+
+      - name: Commit latest + hourly archive (rebase-safe)
+        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
+        run: |
+          set -e
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+
+          git fetch origin main
+          git checkout main
+          git pull --rebase --autostash origin main
+
+          git add data/outlook.json data/outlook_source.json data/archive/hourly || true
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
           fi
-          test -f data/outlook_source.json || (echo "FAIL: data/outlook_source.json not created"; exit 1)
-          echo "✅ wrote data/outlook_source.json"
 
-      - name: Ensure jq present
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq
+          git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
 
-      - name: Guard: require fresh outlook_source.json (≥5 groups OR ≥5 sectors)
-        run: |
-          test -f data/outlook_source.json || (echo "FAIL: missing outlook_source.json"; exit 1)
-
-          COUNT=$(
-            jq -r '
-              if has("groups") and (.groups | type == "object") then
-                (.groups | keys | length)
-              elif has("sectors") and (.sectors | type == "object") then
-                (.sectors | keys | length)
-              elif has("outlook") and (.outlook.sectors | type == "object") then
-                (.outlook.sectors | keys | length)
-              else
-                0
-              end
-            ' data/outlook_source.json
-          )
-          echo "Detected sector/group count: $COUNT"
-          if [ "$COUNT" -lt 5 ]; then
-            echo "FAIL: too few groups/sectors ($COUNT). Aborting build."; exit 1
+          if ! git push origin HEAD:main; then
+            echo "Push rejected; rebasing once more..."
+            git pull --rebase --autostash origin main
+            git push origin HEAD:main
           fi
-          echo "✅ outlook_source.json looks good"
-
-      - name: Quick peek (first 1KB)
-        run: |
-          head -c 1024 data/outlook_source.json || true
-          echo
-          echo "✅ fetch + guard step completed"
