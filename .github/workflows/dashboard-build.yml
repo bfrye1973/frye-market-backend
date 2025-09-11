@@ -1,25 +1,20 @@
-name: dashboard-hourly
+name: dashboard-eod
 
 on:
+  # Manual trigger
   workflow_dispatch:
+  # Market OPEN and CLOSE: 09:30 ET (13:30 UTC) and 16:00 ET (20:00 UTC), Mon–Fri
   schedule:
-    # 09:30–16:30 ET (13:30–20:30 UTC), Mon–Fri
-    - cron: "30 13-20 * * 1-5"
-
-concurrency:
-  group: dashboard-hourly
-  cancel-in-progress: true
-
-permissions:
-  contents: write
+    - cron: "30 13 * * 1-5"
+    - cron: "0 20 * * 1-5"
 
 jobs:
-  build:
-    if: github.event_name == 'workflow_dispatch'
+  eod:
     runs-on: ubuntu-latest
-    steps:
-      # ...
-
+    permissions:
+      contents: write
+    env:
+      TZ: America/New_York
 
     steps:
       - name: Checkout
@@ -32,98 +27,48 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Ensure jq present
+      - name: Install deps
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Install minimal deps (safe if requirements.txt missing)
-        run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            python -m pip install --upgrade pip
-            pip install -q requests pandas || true
-          fi
-
-      # ---------------- FETCH ----------------
-      - name: Fetch raw data (Polygon → outlook_source.json)
+      - name: Build outlook source (EOD)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
+          python scripts/build_outlook_source_from_polygon.py --mode eod
+
+      - name: Make dashboard payload (EOD)
+        env:
+          PIPELINE_TAG: "eod"
+        run: |
+          python scripts/make_dashboard.py --mode eod --source data/outlook_source.json --out data/outlook.json
+
+      - name: Archive (30-day rolling) — EOD
+        run: |
           set -e
-          mkdir -p data
-          if [ -f scripts/build_outlook_source_from_polygon.py ]; then
-            echo "Running scripts/build_outlook_source_from_polygon.py --mode intraday"
-            python -u scripts/build_outlook_source_from_polygon.py --mode intraday --out data/outlook_source.json
-          else
-            echo "FAIL: scripts/build_outlook_source_from_polygon.py missing"; exit 1
+          TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
+          mkdir -p data/archive/eod/source data/archive/eod/dashboard
+          cp data/outlook_source.json "data/archive/eod/source/outlook_source_${TS}.json"
+          cp data/outlook.json        "data/archive/eod/dashboard/outlook_${TS}.json"
+          find data/archive/eod/source    -type f -name 'outlook_source_*.json' -mtime +30 -delete || true
+          find data/archive/eod/dashboard -type f -name 'outlook_*.json'        -mtime +30 -delete || true
+
+      - name: Commit latest + archive (rebase-safe)
+        run: |
+          set -e
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git fetch origin main
+          git checkout main
+          git pull --rebase --autostash origin main
+          git add data/outlook.json data/outlook_source.json data/archive/eod || true
+          if git diff --staged --quiet; then
+            echo "No changes to commit"; exit 0
           fi
-
-      - name: Log outlook_source summary (raw)
-        run: |
-          if [ -f data/outlook_source.json ]; then
-            echo "== outlook_source.json HEAD =="
-            head -c 2000 data/outlook_source.json || true
-            echo
-            echo "== top-level keys =="
-            jq 'keys' data/outlook_source.json || true
-          else
-            echo "FAIL: data/outlook_source.json missing"; exit 1
+          git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+          if ! git push origin HEAD:main; then
+            echo "Push rejected; rebasing once more..."
+            git pull --rebase --autostash origin main
+            git push origin HEAD:main
           fi
-
-      - name: Guard: require fresh outlook_source.json (≥5 groups OR ≥5 sectors)
-        run: |
-          test -f data/outlook_source.json || (echo "FAIL: missing outlook_source.json"; exit 1)
-
-          COUNT=$(
-            jq -r '
-              if has("groups") and (.groups | type == "object") then
-                (.groups | keys | length)
-              elif has("sectors") and (.sectors | type == "object") then
-                (.sectors | keys | length)
-              elif has("outlook") and (.outlook.sectors | type == "object") then
-                (.outlook.sectors | keys | length)
-              else
-                0
-              end
-            ' data/outlook_source.json
-          )
-          echo "Detected sector/group count: $COUNT"
-          if [ "$COUNT" -lt 5 ]; then
-            echo "FAIL: too few groups/sectors ($COUNT). Aborting build."; exit 1
-          fi
-
-      # ---------------- BUILD ----------------
-      - name: Make dashboard (intraday)
-        run: |
-          if [ -f scripts/make_dashboard.py ]; then
-            echo "Building data/outlook.json from data/outlook_source.json"
-            python -u scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
-          else
-            echo "FAIL: scripts/make_dashboard.py missing"; exit 1
-          fi
-
-      # ---------------- VALIDATE ----------------
-      - name: Ensure outlook.json exists
-        run: test -f data/outlook.json
-
-      - name: Validate outlook.json (no conflict markers; valid JSON)
-        run: |
-          if grep -E '<<<<<<<|=======|>>>>>>>' -n data/outlook.json; then
-            echo "FAIL: conflict markers found in data/outlook.json"; exit 1
-          fi
-          jq . data/outlook.json > /dev/null
-
-      - name: Summarize outlook.json
-        run: |
-          echo "updated_at: $(jq -r '.updated_at // .timestamp // "missing"' data/outlook.json)"
-          echo "sectorCards length: $(jq -r '.outlook.sectorCards | length' data/outlook.json 2>/dev/null || echo 0)"
-          echo "has signals: $(jq -r 'has("signals")' data/outlook.json 2>/dev/null || echo false)"
-          echo "volatilityPct: $(jq -r '.gauges.volatilityPct // "missing"' data/outlook.json 2>/dev/null || echo missing)"
-
-      # ---------------- ARCHIVE + COMMIT ----------------
-      - name: Archive (15-day rolling) — HOURLY
-        run: |
-          mkdir -p archive/hourly
-          ts=$(date
