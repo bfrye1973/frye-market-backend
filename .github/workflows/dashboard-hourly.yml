@@ -17,13 +17,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
 
       - name: Setup Python
         uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+        with: { python-version: "3.11" }
 
       - name: Install deps
         run: |
@@ -37,12 +35,10 @@ jobs:
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
       - name: Make dashboard payload (intraday)
-        env:
-          PIPELINE_TAG: "hourly"
         run: |
           python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
 
-      - name: Archive (15-day rolling) — HOURLY
+      - name: Archive (15-day rolling)
         run: |
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
@@ -57,31 +53,12 @@ jobs:
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-
-          # Reset to remote main to avoid conflicts
           git fetch origin main
           git checkout main
           git reset --hard origin/main
-
-          # Stage everything we generated
           git add -A
-
           if git diff --staged --quiet; then
-            echo "No changes to commit"
-            exit 0
+            echo "No changes to commit"; exit 0
           fi
-
           git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
           git push origin HEAD:main
-
-      - name: Trigger backend redeploy on Render
-        if: always()
-        env:
-          RENDER_DEPLOY_HOOK_BACKEND: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}
-        run: |
-          if [ -n "$RENDER_DEPLOY_HOOK_BACKEND" ]; then
-            echo "Triggering backend redeploy..."
-            curl -sSf -X POST "$RENDER_DEPLOY_HOOK_BACKEND"
-          else
-            echo "Render deploy hook not set (RENDER_DEPLOY_HOOK_BACKEND)."
-          fi
