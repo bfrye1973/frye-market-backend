@@ -1,9 +1,7 @@
 name: dashboard-hourly
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 * * * 1-5"   # top of every hour Mon–Fri (UTC)
+  workflow_dispatch:  # manual runs only
 
 jobs:
   hourly:
@@ -29,73 +27,19 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # Market-hours gate (skips scheduled runs outside 9–16 ET)
-      - name: Skip if outside market hours (scheduled runs only)
-        id: gate
-        if: github.event_name == 'schedule'
-        run: |
-          hour=$(date +%H)   # ET (TZ set above)
-          dow=$(date +%u)    # 1=Mon..7=Sun
-          if [ "$dow" -ge 6 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
-          if [ "$hour" -lt 9 ] || [ "$hour" -gt 16 ]; then echo "skip=true" >> $GITHUB_OUTPUT; fi
-
       - name: Build outlook source (intraday)
-        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
-      # 👀 Peek 1: show source shape (non-blocking)
-      - name: Peek outlook_source.json
-        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
-        run: |
-          echo "===== SOURCE SNAPSHOT ====="
-          test -f data/outlook_source.json || { echo "missing outlook_source.json"; exit 0; }
-          python - << 'PY'
-import json,sys
-d=json.load(open("data/outlook_source.json","r"))
-def count(obj,k): 
-    try:
-        v=obj[k]; 
-        return len(v.keys()) if isinstance(v,dict) else 0
-    except: 
-        return 0
-n = count(d,"groups") or count(d,"sectors") or (count(d.get("outlook",{}),"sectors") if isinstance(d.get("outlook"),dict) else 0)
-print("sector/group count:", n)
-keys = list((d.get("sectors") or d.get("groups") or d.get("outlook",{}).get("sectors") or {}).keys())
-print("first keys:", keys[:5])
-PY
-          echo "==========================="
-
       - name: Make dashboard payload
-        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
         env:
           PIPELINE_TAG: "hourly"
         run: |
           python scripts/make_dashboard.py --source data/outlook_source.json --out data/outlook.json
 
-      # 👀 Peek 2: show computed numbers (non-blocking)
-      - name: Peek outlook.json (sectors + one sample)
-        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
-        run: |
-          echo "===== DASHBOARD SNAPSHOT ====="
-          test -f data/outlook.json || { echo "missing outlook.json"; exit 0; }
-          python - << 'PY'
-import json,sys
-d=json.load(open("data/outlook.json","r"))
-sectors = (d.get("outlook") or {}).get("sectors") or {}
-cards   = (d.get("outlook") or {}).get("sectorCards") or []
-print("sectors dict count:", len(sectors))
-print("sectorCards array length:", len(cards))
-if cards:
-    s = cards[0]
-    print("sample card:", {"sector": s.get("sector"), "outlook": s.get("outlook"), "netNH": s.get("netNH")})
-PY
-          echo "=============================="
-
-      - name: Archive (15-day rolling) — HOURLY
-        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
+      - name: Archive (15-day rolling)
         run: |
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
@@ -105,26 +49,19 @@ PY
           find data/archive/hourly/source    -type f -name 'outlook_source_*.json' -mtime +15 -delete || true
           find data/archive/hourly/dashboard -type f -name 'outlook_*.json'        -mtime +15 -delete || true
 
-      - name: Commit latest + hourly archive (rebase-safe)
-        if: ${{ github.event_name != 'schedule' || steps.gate.outputs.skip != 'true' }}
+      - name: Commit latest + archive (rebase-safe)
         run: |
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-
           git fetch origin main
           git checkout main
           git pull --rebase --autostash origin main
-
           git add data/outlook.json data/outlook_source.json data/archive/hourly || true
-
           if git diff --staged --quiet; then
-            echo "No changes to commit"
-            exit 0
+            echo "No changes to commit"; exit 0
           fi
-
           git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
-
           if ! git push origin HEAD:main; then
             echo "Push rejected; rebasing once more..."
             git pull --rebase --autostash origin main
