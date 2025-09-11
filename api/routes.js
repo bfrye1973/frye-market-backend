@@ -266,6 +266,26 @@ export default function buildRouter(){
     }
     return noStore(res).json({ bars, symbol, timeframe });
   });
+  // quick debug squeeze/breadth/momentum snapshot
+  router.get("/debug", async (req, res) => {
+    try {
+      const dash = await readJsonFromProject("data/outlook.json");
+      if (!dash) return noStore(res).status(404).json({ ok:false, error:"outlook.json not found" });
+      const gg = dash.gauges || {};
+      const od = dash.odometers || {};
+      const summary = dash.summary || {};
+      return noStore(res).json({
+        ok: true,
+        ts: dash.updated_at || dash.ts,
+        dailySqueezePct: gg?.squeezeDaily?.pct ?? null,
+        intradaySqueezePct: od?.squeezeCompressionPct ?? gg?.fuel?.pct ?? null,
+        breadthIdx: summary?.breadthIdx ?? gg?.rpm?.pct ?? null,
+        momentumIdx: summary?.momentumIdx ?? gg?.speed?.pct ?? null
+      });
+    } catch (e) {
+      return noStore(res).status(500).json({ ok:false, error:String(e) });
+    }
+  });
 
   return router;
 }
