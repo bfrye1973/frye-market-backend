@@ -3,9 +3,16 @@ name: dashboard-hourly
 on:
   workflow_dispatch:
 
-jobs:
-  sanity:
-    runs-on: ubuntu-latest
     steps:
-      - name: Echo test
-        run: echo "✅ Workflow YAML is valid and Actions are running"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Echo
+        run: echo "✅ Checkout + Python ready"
