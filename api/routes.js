@@ -1,4 +1,4 @@
-// api/routes.js — ESM router (sector cards + numeric aliases, real Engine Lights, ensure squeeze)
+// api/routes.js — ESM router (sector cards + numeric aliases, real Engine Lights, ensure squeezeDaily.pct)
 
 import express from "express";
 import path from "path";
@@ -96,19 +96,27 @@ function normalizeSectorCards(json){
   return json;
 }
 
-/* -------- ensure squeeze fields (daily + intraday) -------- */
+/* -------- ensure squeeze fields (Daily + Intraday) -------- */
 function ensureSqueeze(json){
   json.gauges = json.gauges || {};
   json.odometers = json.odometers || {};
 
+  // Mirror source daily squeeze into gauges.squeezeDaily.pct so frontend finds it
   if (!json.gauges.squeezeDaily || !Number.isFinite(json.gauges.squeezeDaily?.pct)) {
-    const maybe = Number(json?.global?.daily_squeeze_pct ?? json?.squeezeDailyPct ?? NaN);
-    if (Number.isFinite(maybe)) json.gauges.squeezeDaily = { pct: maybe };
+    const fromGlobal = Number(json?.global?.daily_squeeze_pct ?? NaN);
+    const fromAlt    = Number(json?.squeezeDailyPct ?? NaN);
+    const maybe = Number.isFinite(fromGlobal) ? fromGlobal : (Number.isFinite(fromAlt) ? fromAlt : NaN);
+    if (Number.isFinite(maybe)) {
+      json.gauges.squeezeDaily = { pct: maybe };
+    }
   }
+
+  // Intraday squeeze odometer from fuel if missing
   if (!Number.isFinite(json.odometers.squeezeCompressionPct)) {
     const fuel = Number(json?.gauges?.fuel?.pct ?? NaN);
     if (Number.isFinite(fuel)) json.odometers.squeezeCompressionPct = fuel;
   }
+
   return json;
 }
 
@@ -180,8 +188,9 @@ export default function buildRouter(){
 
       json = normalizeSectorCards(json);
       json = addVolatilityPlaceholder(json);
-      json = ensureSqueeze(json);
+      json = ensureSqueeze(json);        // <- ensure gauges.squeezeDaily.pct + odometers.squeezeCompressionPct
       json.signals = computeSignals(json);
+
       json.meta = json.meta || {};
       json.meta.ts = json.meta.ts || json.updated_at || new Date().toISOString();
 
@@ -215,7 +224,7 @@ export default function buildRouter(){
   // simple dummy OHLC
   router.get("/v1/ohlc", (req,res) => {
     const symbol    = req.query.symbol || "SPY";
-    const timeframe = req.query.timeframe || "1d";
+       const timeframe = req.query.timeframe || "1d";
     const tfSec = ({ "1m":60,"5m":300,"15m":900,"30m":1800,"1h":3600,"1d":86400 })[timeframe] || 3600;
 
     const now = Math.floor(Date.now()/1000);
