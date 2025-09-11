@@ -1,7 +1,6 @@
 name: dashboard-hourly
 
 on:
-  # Manual trigger
   workflow_dispatch:
   # 08:30–17:30 ET => 12:30–21:30 UTC, every hour Mon–Fri
   schedule:
@@ -70,4 +69,16 @@ jobs:
             echo "Push rejected; rebasing once more..."
             git pull --rebase --autostash origin main
             git push origin HEAD:main
+          fi
+
+      - name: Trigger backend redeploy on Render
+        if: always()
+        env:
+          RENDER_DEPLOY_HOOK_BACKEND: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}
+        run: |
+          if [ -n "$RENDER_DEPLOY_HOOK_BACKEND" ]; then
+            echo "Triggering backend redeploy..."
+            curl -sSf -X POST "$RENDER_DEPLOY_HOOK_BACKEND"
+          else
+            echo "Render deploy hook not set (RENDER_DEPLOY_HOOK_BACKEND)."
           fi
