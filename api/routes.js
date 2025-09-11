@@ -1,4 +1,4 @@
-// api/routes.js — ESM router (sector cards + numbers/aliases, real Engine Lights, volatility placeholder)
+// api/routes.js — ESM router (sector cards + numeric aliases, real Engine Lights, ensure squeeze)
 
 import express from "express";
 import path from "path";
@@ -70,46 +70,45 @@ function normalizeSectorCards(json){
       const netUD = Number(v.netUD ?? 0);
       const spark = Array.isArray(v.spark) ? v.spark : [];
       const outlook = netNH > 0 ? "Bullish" : netNH < 0 ? "Bearish" : "Neutral";
-
       const { last, delta, deltaPct } = computeCardNumbers(v);
-
-      // include multiple aliases so any UI binding will find what it needs
       return {
         sector: toTitle(name),
         outlook,
         spark,
         nh, nl, netNH, netUD,
-        last,                 // primary value
-        value: last,          // alias
-        deltaPct,             // primary percent change
-        pct: deltaPct,        // alias
-        changePct: deltaPct,  // alias
-        delta                 // points change (fallback)
+        last, value:last, deltaPct, pct:deltaPct, changePct:deltaPct, delta
       };
     });
   }
 
-  // ensure all 11 exist
   const have = new Set(cards.map(c => c.sector.toLowerCase()));
   for (const s of PREFERRED_ORDER){
     const label = toTitle(s);
     if (!have.has(label.toLowerCase())){
-      cards.push({
-        sector: label,
-        outlook: "Neutral",
-        spark: [],
-        nh:0, nl:0, netNH:0, netUD:0,
-        last:0, value:0, delta:0, deltaPct:0, pct:0, changePct:0
-      });
+      cards.push({ sector:label, outlook:"Neutral", spark:[], nh:0, nl:0, netNH:0, netUD:0,
+        last:0, value:0, delta:0, deltaPct:0, pct:0, changePct:0 });
     }
   }
 
   cards.sort((a,b) => orderKey(a.sector) - orderKey(b.sector));
   json.outlook.sectorCards = cards;
+  json.sectorCards = cards; // legacy mirror
+  return json;
+}
 
-  // ✅ mirror to top-level for legacy UIs
-  json.sectorCards = cards;
+/* -------- ensure squeeze fields (daily + intraday) -------- */
+function ensureSqueeze(json){
+  json.gauges = json.gauges || {};
+  json.odometers = json.odometers || {};
 
+  if (!json.gauges.squeezeDaily || !Number.isFinite(json.gauges.squeezeDaily?.pct)) {
+    const maybe = Number(json?.global?.daily_squeeze_pct ?? json?.squeezeDailyPct ?? NaN);
+    if (Number.isFinite(maybe)) json.gauges.squeezeDaily = { pct: maybe };
+  }
+  if (!Number.isFinite(json.odometers.squeezeCompressionPct)) {
+    const fuel = Number(json?.gauges?.fuel?.pct ?? NaN);
+    if (Number.isFinite(fuel)) json.odometers.squeezeCompressionPct = fuel;
+  }
   return json;
 }
 
@@ -120,12 +119,12 @@ function addVolatilityPlaceholder(json){
   return json;
 }
 
-/* -------- real Engine Lights (signals) -------- */
+/* -------- Engine Lights (real thresholds) -------- */
 function computeSignals(json){
   const g = json?.gauges || {};
   const rpmPct   = Number(g?.rpm?.pct   ?? json?.breadthIdx ?? 0);
   const speedPct = Number(g?.speed?.pct ?? json?.momentumIdx ?? 0);
-  const fuelPct  = Number(g?.fuel?.pct  ?? json?.squeeze ?? 0);
+  const fuelPct  = Number(json?.odometers?.squeezeCompressionPct ?? g?.fuel?.pct ?? 0);
   const oilPsi   = Number(g?.oil?.psi   ?? g?.oilPsi ?? 60);
 
   const sectors = (json?.outlook?.sectors && typeof json.outlook.sectors === "object") ? json.outlook.sectors : {};
@@ -136,7 +135,7 @@ function computeSignals(json){
 
   const signals = {
     sigBreakout:     { active: netMarketNH > 0,  severity: netMarketNH > 50 ? "warn"   : "info" },
-    sigDistribution: { active: netMarketNH < 0,  severity: netMarketNH < -50 ? "danger" : "warn" },
+    sigDistribution:{ active: netMarketNH < 0,  severity: netMarketNH < -50 ? "danger" : "warn" },
     sigCompression:  { active: fuelPct >= 70,    severity: fuelPct >= 90 ? "danger" : "warn" },
     sigExpansion:    { active: fuelPct > 0 && fuelPct < 40, severity: "info" },
     sigOverheat:     { active: speedPct > 85,    severity: speedPct > 92 ? "danger" : "warn" },
@@ -145,14 +144,13 @@ function computeSignals(json){
     sigLowLiquidity: { active: oilPsi < 40,      severity: oilPsi < 30 ? "danger" : "warn" }
   };
 
-  // keep off-signals clean
   for (const k of Object.keys(signals)){
     if (!signals[k].active) signals[k] = { active:false };
   }
   return signals;
 }
 
-/* -------- gauges table rows (simple passthrough) -------- */
+/* -------- rows helper -------- */
 function buildGaugeRowsFromDashboard(dash, index){
   const g = dash?.gauges || {};
   const rows = [];
@@ -161,7 +159,7 @@ function buildGaugeRowsFromDashboard(dash, index){
   if (breadthIdx !== null)  rows.push({ label:"Breadth",  value:Number(breadthIdx),  unit:"%", index });
   if (momentumIdx !== null) rows.push({ label:"Momentum", value:Number(momentumIdx), unit:"%", index });
   const oilPsi  = g?.oil?.psi ?? g?.oilPsi ?? null;
-  const fuelPct = g?.fuel?.pct ?? g?.squeeze?.pct ?? null;
+  const fuelPct = dash?.odometers?.squeezeCompressionPct ?? g?.fuel?.pct ?? null;
   if (oilPsi  !== null) rows.push({ label:"Liquidity (PSI)", value:Number(oilPsi),  unit:"psi", index });
   if (fuelPct !== null) rows.push({ label:"Squeeze (Fuel)",  value:Number(fuelPct), unit:"%",   index });
   return rows;
@@ -182,6 +180,7 @@ export default function buildRouter(){
 
       json = normalizeSectorCards(json);
       json = addVolatilityPlaceholder(json);
+      json = ensureSqueeze(json);
       json.signals = computeSignals(json);
       json.meta = json.meta || {};
       json.meta.ts = json.meta.ts || json.updated_at || new Date().toISOString();
@@ -213,6 +212,7 @@ export default function buildRouter(){
     }
   });
 
+  // simple dummy OHLC
   router.get("/v1/ohlc", (req,res) => {
     const symbol    = req.query.symbol || "SPY";
     const timeframe = req.query.timeframe || "1d";
