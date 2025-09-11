@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-make_dashboard.py — carry real sector counts into outlook.json
+make_dashboard.py — carry real sector counts + Daily/Intraday Squeeze into outlook.json
 
 - Reads data/outlook_source.json
 - Writes data/outlook.json with:
-  * gauges: rpm/speed/fuel/water/oil (oil.psi for liquidity)
+  * gauges: rpm/speed/fuel/water/oil + squeezeDaily.pct
+  * odometers: squeezeCompressionPct (intraday = fuel)
   * outlook.sectors: { nh, nl, up, down, netNH, netUD, spark }
-  * sectorCards: built from sectors (kept at top-level + nested for compatibility)
+  * sectorCards (top-level + nested)
 """
 
 from __future__ import annotations
@@ -23,8 +24,6 @@ PREFERRED_ORDER = [
     "consumer staples","consumer discretionary",
     "financials","utilities","industrials",
 ]
-
-# ----------------- helpers -----------------
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -57,24 +56,16 @@ def canonical_sector(name: str) -> str:
 def num(v, default=0):
     try:
         if v is None: return default
-        if isinstance(v, (int, float)): return int(v)
+        if isinstance(v, (int, float)): return float(v)
         s = str(v).strip()
         if s == "": return default
-        return int(float(s))
+        return float(s)
     except:
         return default
 
-# ----------------- sector extraction -----------------
+# -------- sectors --------
 
 def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Return dict keyed by canonical sector names with:
-      { nh, nl, up, down, netNH, netUD, spark }
-    Accepts any of:
-      - src["outlook"]["sectors"] (preferred)
-      - src["sectors"]
-      - src["groups"] (with nh/nl/u/d)
-    """
     raw = None
     if isinstance(src.get("outlook"), dict) and isinstance(src["outlook"].get("sectors"), dict):
         raw = src["outlook"]["sectors"]
@@ -87,10 +78,10 @@ def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(raw, dict):
         for name, vals in raw.items():
             key = canonical_sector(name)
-            nh   = num(vals.get("nh", vals.get("nH", 0)))
-            nl   = num(vals.get("nl", vals.get("nL", 0)))
-            up   = num(vals.get("u",  vals.get("up", 0)))
-            down = num(vals.get("d",  vals.get("down", 0)))
+            nh   = int(num(vals.get("nh", vals.get("nH", 0))))
+            nl   = int(num(vals.get("nl", vals.get("nL", 0))))
+            up   = int(num(vals.get("u",  vals.get("up", 0))))
+            down = int(num(vals.get("d",  vals.get("down", 0))))
             spark = vals.get("spark", [])
             if not isinstance(spark, list):
                 spark = []
@@ -104,52 +95,44 @@ def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
                 "spark": spark,
             }
 
-    # Ensure all 11 sectors exist (fill neutrals)
     for k in PREFERRED_ORDER:
         if k not in out:
             out[k] = {"nh":0,"nl":0,"up":0,"down":0,"netNH":0,"netUD":0,"spark":[]}
 
     return out
 
-# ----------------- gauges passthrough/mapping -----------------
+# -------- gauges / squeeze --------
 
-def build_gauges(src: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Map common fields to gauges:
-      - rpm.pct   ← breadthIdx (fallback 50)
-      - speed.pct ← momentumIdx (fallback 50)
-      - fuel.pct  ← global.squeeze_pressure_pct (fallback 50); state "firingUp" if ≥70
-      - water.pct ← global.volatility_pct (fallback 50)
-      - oil.psi   ← global.liquidity_pct (so Liquidity pill/row shows)
-    """
+def build_gauges_and_odometers(src: Dict[str, Any], mode: str) -> Dict[str, Any]:
     g = src.get("global", {}) or {}
-    breadth   = src.get("breadthIdx", 50)
-    momentum  = src.get("momentumIdx", 50)
-    squeeze   = g.get("squeeze_pressure_pct", 50)
-    vol_pct   = g.get("volatility_pct", 50)
-    liq_pct   = g.get("liquidity_pct", 100)  # treat as PSI-style value for UI
+    breadth   = num(src.get("breadthIdx", 50))
+    momentum  = num(src.get("momentumIdx", 50))
+    fuel      = num(g.get("squeeze_pressure_pct", 50))   # intraday/fuel
+    vol_pct   = num(g.get("volatility_pct", 50))
+    liq_pct   = num(g.get("liquidity_pct", 100))
+    daily_sq  = num(g.get("daily_squeeze_pct", None), None)  # NEW
 
     gauges = {
         "rpm":   {"pct": float(breadth),  "label":"Breadth"},
         "speed": {"pct": float(momentum), "label":"Momentum"},
-        "fuel":  {
-            "pct": float(squeeze),
-            "state": "firingUp" if float(squeeze) >= 70 else "idle",
-            "label":"Squeeze"
-        },
-        "water": {"pct": float(vol_pct), "label":"Volatility"},
-        # IMPORTANT: use psi so your Liquidity gauge/row renders
-        "oil":   {"psi": float(liq_pct), "label":"Liquidity"},
+        "fuel":  { "pct": float(fuel), "state": "firingUp" if float(fuel) >= 70 else "idle", "label":"Squeeze" },
+        "water": { "pct": float(vol_pct), "label":"Volatility" },
+        "oil":   { "psi": float(liq_pct), "label":"Liquidity" },
     }
-    return gauges
+    if daily_sq is not None:
+        gauges["squeezeDaily"] = { "pct": float(daily_sq) }
 
-# ----------------- cards -----------------
+    odometers = { "squeezeCompressionPct": float(fuel) }  # intraday
+
+    return { "gauges": gauges, "odometers": odometers }
+
+# -------- cards --------
 
 def cards_from_sectors(sectors: Dict[str, Any]) -> list[Dict[str, Any]]:
     cards = []
     for key in PREFERRED_ORDER:
         vals = sectors.get(key, {})
-        net = num(vals.get("netNH", 0))
+        net = int(num(vals.get("netNH", 0)))
         outlook = "Neutral"
         if net > 0: outlook = "Bullish"
         if net < 0: outlook = "Bearish"
@@ -162,7 +145,7 @@ def cards_from_sectors(sectors: Dict[str, Any]) -> list[Dict[str, Any]]:
         })
     return cards
 
-# ----------------- main build -----------------
+# -------- main --------
 
 def main():
     ap = argparse.ArgumentParser()
@@ -175,7 +158,7 @@ def main():
     ts  = now_iso()
 
     sectors = sectors_from_source(src)
-    gauges  = build_gauges(src)
+    gz_od   = build_gauges_and_odometers(src, args.mode)
     cards   = cards_from_sectors(sectors)
 
     out = {
@@ -184,15 +167,13 @@ def main():
         "ts": ts,
         "version": VERSION_TAG,
         "pipeline": args.mode,
-        "gauges": gauges,
-        # keep top-level sectorCards (legacy UI)
-        "sectorCards": cards,
-        # new UI expects outlook.sectors; routes.js will normalize to 11 cards anyway
+        **gz_od,                      # adds gauges + odometers
+        "sectorCards": cards,         # legacy
         "outlook": {
             "sectors": sectors,
             "sectorCards": cards
         },
-        "signals": {}  # your routes.js currently adds stubs; leave empty here
+        "signals": {}                 # routes.js computes real signals
     }
 
     jwrite(args.out, out)
