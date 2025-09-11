@@ -9,7 +9,7 @@ permissions:
 jobs:
   hourly:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60   # allow up to 1 hour, fetch needs ~17–25 mins
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,8 +45,31 @@ jobs:
           test -f data/outlook_source.json || (echo "FAIL: data/outlook_source.json not created"; exit 1)
           echo "✅ wrote data/outlook_source.json"
 
+      - name: Guard: require fresh outlook_source.json (≥5 groups OR ≥5 sectors)
+        run: |
+          test -f data/outlook_source.json || (echo "FAIL: missing outlook_source.json"; exit 1)
+
+          COUNT=$(
+            jq -r '
+              if has("groups") and (.groups | type == "object") then
+                (.groups | keys | length)
+              elif has("sectors") and (.sectors | type == "object") then
+                (.sectors | keys | length)
+              elif has("outlook") and (.outlook.sectors | type == "object") then
+                (.outlook.sectors | keys | length)
+              else
+                0
+              end
+            ' data/outlook_source.json
+          )
+          echo "Detected sector/group count: $COUNT"
+          if [ "$COUNT" -lt 5 ]; then
+            echo "FAIL: too few groups/sectors ($COUNT). Aborting build."; exit 1
+          fi
+          echo "✅ outlook_source.json looks good"
+
       - name: Quick peek (first 1KB)
         run: |
           head -c 1024 data/outlook_source.json || true
           echo
-          echo "✅ fetch step completed"
+          echo "✅ fetch + guard step completed"
