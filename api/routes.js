@@ -1,4 +1,5 @@
-// api/routes.js — ESM router (sector cards + numeric aliases, real Engine Lights, ensure squeezeDaily.pct)
+// api/routes.js — ESM router (sector cards + numeric aliases, real Engine Lights,
+// ensure squeezeDaily.pct + rpm/speed indexes)
 
 import express from "express";
 import path from "path";
@@ -120,6 +121,28 @@ function ensureSqueeze(json){
   return json;
 }
 
+/* -------- ensure breadth/momentum indexes (rpm/speed) -------- */
+function ensureIndexes(json){
+  json.gauges = json.gauges || {};
+  // Try summary first, then top-level fallback, then leave as-is
+  const b =
+    Number(json?.summary?.breadthIdx) ??
+    Number(json?.breadthIdx) ??
+    NaN;
+  const m =
+    Number(json?.summary?.momentumIdx) ??
+    Number(json?.momentumIdx) ??
+    NaN;
+
+  if (!Number.isFinite(json?.gauges?.rpm?.pct) && Number.isFinite(b)) {
+    json.gauges.rpm = { ...(json.gauges.rpm || {}), pct: Number(b) };
+  }
+  if (!Number.isFinite(json?.gauges?.speed?.pct) && Number.isFinite(m)) {
+    json.gauges.speed = { ...(json.gauges.speed || {}), pct: Number(m) };
+  }
+  return json;
+}
+
 /* -------- volatility placeholder (0..100) -------- */
 function addVolatilityPlaceholder(json){
   json.gauges = json.gauges || {};
@@ -188,7 +211,8 @@ export default function buildRouter(){
 
       json = normalizeSectorCards(json);
       json = addVolatilityPlaceholder(json);
-      json = ensureSqueeze(json);        // <- ensure gauges.squeezeDaily.pct + odometers.squeezeCompressionPct
+      json = ensureSqueeze(json);   // ensure gauges.squeezeDaily.pct + odometers.squeezeCompressionPct
+      json = ensureIndexes(json);   // ensure gauges.rpm.pct / gauges.speed.pct from summary/* if present
       json.signals = computeSignals(json);
 
       json.meta = json.meta || {};
@@ -224,7 +248,7 @@ export default function buildRouter(){
   // simple dummy OHLC
   router.get("/v1/ohlc", (req,res) => {
     const symbol    = req.query.symbol || "SPY";
-       const timeframe = req.query.timeframe || "1d";
+    const timeframe = req.query.timeframe || "1d";
     const tfSec = ({ "1m":60,"5m":300,"15m":900,"30m":1800,"1h":3600,"1d":86400 })[timeframe] || 3600;
 
     const now = Math.floor(Date.now()/1000);
