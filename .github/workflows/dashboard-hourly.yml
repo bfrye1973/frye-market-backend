@@ -30,7 +30,7 @@ jobs:
             pip install -q requests pandas || true
           fi
 
-      - name: Fetch raw data (Polygon → outlook_source.json)
+            - name: Fetch raw data (Polygon → outlook_source.json)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -38,12 +38,13 @@ jobs:
           mkdir -p data
           if [ -f scripts/build_outlook_source_from_polygon.py ]; then
             echo "Running scripts/build_outlook_source_from_polygon.py --mode intraday"
-            python -u scripts/build_outlook_source_from_polygon.py --mode intraday --out data/outlook_source.json
+            python -u scripts/build_outlook_source_from_polygon.py --mode intraday
           else
             echo "FAIL: scripts/build_outlook_source_from_polygon.py missing"; exit 1
           fi
           test -f data/outlook_source.json || (echo "FAIL: data/outlook_source.json not created"; exit 1)
           echo "✅ wrote data/outlook_source.json"
+
 
       - name: Quick peek (first 1KB)
         run: |
