@@ -209,3 +209,38 @@ export default function buildRouter() {
   router.get("/gauges", async (req, res) => {
     try {
       const index = (req.query.index || req.query.symbol || Object.keys(req.query)[0] || "SPY").toString();
+      const dash = await readJsonFromProject("data/outlook.json");
+      if (!dash) return noStore(res).json([]);
+      const rows = buildGaugeRowsFromDashboard(dash, index);
+      return noStore(res).json(Array.isArray(rows) ? rows : []);
+    } catch (e) {
+      console.error("gauges error:", e?.message || e);
+      return noStore(res).json([]);
+    }
+  });
+
+  // Dummy OHLC (chart testing)
+  router.get("/v1/ohlc", (req, res) => {
+    const symbol = req.query.symbol || "SPY";
+    const timeframe = req.query.timeframe || "1d";
+    const tfSec = ({ "1m":60, "5m":300, "15m":900, "30m":1800, "1h":3600, "1d":86400 })[timeframe] || 3600;
+
+    const now = Math.floor(Date.now() / 1000);
+    const bars = [];
+    let px = 640;
+
+    for (let i = 60; i > 0; i--) {
+      const t = now - i * tfSec;
+      const o = px;
+      const c = px + (Math.random() - 0.5) * 2;
+      const h = Math.max(o, c) + Math.random();
+      const l = Math.min(o, c) - Math.random();
+      const v = Math.floor(1_000_000 + Math.random() * 500_000);
+      bars.push({ time: t, open: o, high: h, low: l, close: c, volume: v });
+      px = c;
+    }
+    return noStore(res).json({ bars, symbol, timeframe });
+  });
+
+  return router;
+}
