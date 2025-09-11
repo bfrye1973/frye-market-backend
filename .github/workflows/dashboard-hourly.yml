@@ -45,6 +45,11 @@ jobs:
           test -f data/outlook_source.json || (echo "FAIL: data/outlook_source.json not created"; exit 1)
           echo "✅ wrote data/outlook_source.json"
 
+      - name: Ensure jq present
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
       - name: Guard: require fresh outlook_source.json (≥5 groups OR ≥5 sectors)
         run: |
           test -f data/outlook_source.json || (echo "FAIL: missing outlook_source.json"; exit 1)
