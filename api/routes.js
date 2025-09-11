@@ -1,4 +1,4 @@
-// api/routes.js — ESM router (normalized /dashboard, stub signals, volatility placeholder, sector card numbers)
+// api/routes.js — ESM router (sector cards + numbers, real Engine Lights, volatility placeholder)
 
 import express from "express";
 import path from "path";
@@ -41,7 +41,6 @@ const toTitle = (s) =>
 
 const orderKey = (label) => {
   const n = String(label || "").trim().toLowerCase();
-  // accept common synonym
   const syn = n === "tech" ? "information technology" : n;
   const i = PREFERRED_ORDER.indexOf(syn);
   return i === -1 ? 999 : i;
@@ -49,22 +48,19 @@ const orderKey = (label) => {
 
 /** Compute the numeric pair the UI shows inside the card */
 function computeCardNumbers(name, vals) {
-  // prefer sparkline if present: last & percent change vs first
   const spark = Array.isArray(vals?.spark) ? vals.spark : [];
   if (spark.length >= 2) {
     const first = Number(spark[0]) || 0;
     const last  = Number(spark[spark.length - 1]) || 0;
-    const base  = Math.abs(first) > 1e-9 ? Math.abs(first) : 1; // avoid /0
+    const base  = Math.abs(first) > 1e-9 ? Math.abs(first) : 1;
     const deltaPct = ((last - first) / base) * 100;
     return { last, deltaPct };
   }
-
-  // fallback: use breadth proxy if no spark
   const nh = Number(vals?.nh ?? 0);
   const nl = Number(vals?.nl ?? 0);
   const netNH = Number(vals?.netNH ?? (nh - nl));
   const denom = (nh + nl) > 0 ? (nh + nl) : 1;
-  const deltaPct = (netNH / denom) * 100; // relative breadth tilt today
+  const deltaPct = (netNH / denom) * 100;
   return { last: netNH, deltaPct };
 }
 
@@ -96,14 +92,13 @@ function normalizeSectorCards(json) {
         outlook,
         spark,
         nh, nl, netNH, netUD,
-        // 👇 numbers the frontend expects to display
         last,
         deltaPct
       };
     });
   }
 
-  // ensure all 11 exist (fill any missing with Neutral placeholders)
+  // ensure all 11 exist
   const have = new Set(cards.map((c) => c.sector.toLowerCase()));
   for (const s of PREFERRED_ORDER) {
     const label = toTitle(s);
@@ -132,21 +127,76 @@ function addVolatilityPlaceholder(json) {
   return json;
 }
 
-/* -------- stub signals so Engine Lights light up -------- */
-function addStubSignals(json) {
-  // If you later compute real signals, remove this stub.
-  if (json.signals) return json; // don't clobber real signals
-  json.signals = {
-    sigBreakout:     { active: true,  severity: "warn"   },
-    sigCompression:  { active: true,  severity: "danger" },
-    sigExpansion:    { active: false },
-    sigTurbo:        { active: false },
-    sigDistribution: { active: false },
-    sigDivergence:   { active: false },
-    sigOverheat:     { active: false },
-    sigLowLiquidity: { active: false },
+/* -------- real Engine Lights (signals) -------- */
+function computeSignals(json) {
+  const gauges = json?.gauges || {};
+  const rpmPct    = Number(gauges?.rpm?.pct   ?? json?.breadthIdx   ?? 0);   // Breadth
+  const speedPct  = Number(gauges?.speed?.pct ?? json?.momentumIdx  ?? 0);   // Momentum
+  const fuelPct   = Number(gauges?.fuel?.pct  ?? json?.squeeze      ?? 0);   // Intraday squeeze/pressure
+  const waterPct  = Number(gauges?.water?.pct ?? json?.volatility   ?? 0);   // Volatility (optional)
+  const oilPsi    = Number(gauges?.oil?.psi   ?? gauges?.oilPsi     ?? 60);  // Liquidity PSI
+
+  const sectors   = (json?.outlook?.sectors && typeof json.outlook.sectors === "object")
+    ? json.outlook.sectors : {};
+  const netMarketNH = Object.values(sectors).reduce((sum, v) => {
+    const nh  = Number(v?.nh ?? 0);
+    const nl  = Number(v?.nl ?? 0);
+    const net = Number(v?.netNH ?? (nh - nl));
+    return sum + net;
+  }, 0);
+
+  const signals = {
+    // Breadth positive/negative
+    sigBreakout: {
+      active: netMarketNH > 0,
+      severity: netMarketNH > 50 ? "warn" : netMarketNH > 0 ? "info" : undefined
+    },
+    sigDistribution: {
+      active: netMarketNH < 0,
+      severity: netMarketNH < -50 ? "danger" : netMarketNH < 0 ? "warn" : undefined
+    },
+
+    // Compression / Expansion from intraday squeeze pressure (fuel)
+    sigCompression: {
+      active: fuelPct >= 70,
+      severity: fuelPct >= 90 ? "danger" : "warn"
+    },
+    sigExpansion: {
+      active: fuelPct > 0 && fuelPct < 40,
+      severity: "info"
+    },
+
+    // Momentum / Overheat / Turbo
+    sigOverheat: {
+      active: speedPct > 85,
+      severity: speedPct > 92 ? "danger" : "warn"
+    },
+    sigTurbo: {
+      active: speedPct > 92 && fuelPct < 40, // fast tape + expansion
+      severity: "warn"
+    },
+
+    // Divergence: strong momentum but weak breadth
+    sigDivergence: {
+      active: speedPct > 60 && rpmPct < 40,
+      severity: "warn"
+    },
+
+    // Liquidity risk
+    sigLowLiquidity: {
+      active: oilPsi < 40,
+      severity: oilPsi < 30 ? "danger" : "warn"
+    }
   };
-  return json;
+
+  // prune undefined severities to keep payload tidy
+  for (const k of Object.keys(signals)) {
+    if (signals[k] && !signals[k].active) {
+      // keep shape but mark false
+      signals[k] = { active: false };
+    }
+  }
+  return signals;
 }
 
 /* -------- gauges table rows (simple passthrough) -------- */
@@ -183,11 +233,14 @@ export default function buildRouter() {
       let json = await readJsonFromProject("data/outlook.json");
       if (!json) throw new Error("outlook.json not found");
 
-      // Normalize + placeholders + stub signals
+      // Normalize cards (adds last/deltaPct), ensure 11
       json = normalizeSectorCards(json);
+      // Placeholder volatility if not set
       json = addVolatilityPlaceholder(json);
-      json = addStubSignals(json);
+      // ✅ Real engine lights
+      json.signals = computeSignals(json);
 
+      // meta timestamp
       json.meta = json.meta || {};
       json.meta.ts = json.meta.ts || json.updated_at || new Date().toISOString();
 
