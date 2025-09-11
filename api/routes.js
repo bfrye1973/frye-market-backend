@@ -230,6 +230,56 @@ export default function buildRouter(){
     }
     return noStore(res).json({ bars, symbol, timeframe });
   });
+// ---- quick debug snapshot (indicators + totals) ----
+router.get("/debug", async (req, res) => {
+  try {
+    const dash = await readJsonFromProject("data/outlook.json");
+    if (!dash) return noStore(res).status(404).json({ ok:false, error:"outlook.json not found" });
+
+    const gg = dash.gauges || {};
+    const od = dash.odometers || {};
+    const summary = dash.summary || {};
+    const sectors = (dash.outlook && dash.outlook.sectors) || {};
+
+    const totals = Object.values(sectors).reduce((acc, v) => {
+      acc.nh  += Number(v?.nh   ?? 0);
+      acc.nl  += Number(v?.nl   ?? 0);
+      acc.u   += Number(v?.up   ?? v?.u   ?? 0);
+      acc.d   += Number(v?.down ?? v?.d   ?? 0);
+      return acc;
+    }, { nh:0, nl:0, u:0, d:0 });
+
+    return noStore(res).json({
+      ok: true,
+      ts: dash.updated_at || dash.ts || new Date().toISOString(),
+      dailySqueezePct: Number(gg?.squeezeDaily?.pct ?? NaN),
+      intradaySqueezePct: Number(od?.squeezeCompressionPct ?? gg?.fuel?.pct ?? NaN),
+      breadthIdx:  Number(summary?.breadthIdx  ?? gg?.rpm?.pct   ?? NaN),
+      momentumIdx: Number(summary?.momentumIdx ?? gg?.speed?.pct ?? NaN),
+      totals
+    });
+  } catch (e) {
+    return noStore(res).status(500).json({ ok:false, error:String(e) });
+  }
+});
+
+// ---- last 5 days outlook for narrator (nh/nl/u/d) ----
+router.get("/outlook5d", async (req, res) => {
+  try {
+    const hist = await readJsonFromProject("data/history.json");
+    const days = Array.isArray(hist?.days) ? hist.days.slice(-5) : [];
+    const rows = days.map(d => ({
+      date: d.date,
+      nh: Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.nh||0),0) || 0),
+      nl: Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.nl||0),0) || 0),
+      u:  Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.u ||0),0) || 0),
+      d:  Number(d?.groups && Object.values(d.groups).reduce((a,g)=>a+Number(g?.d ||0),0) || 0)
+    }));
+    return noStore(res).json({ ok:true, rows });
+  } catch (e) {
+    return noStore(res).status(500).json({ ok:false, error:String(e) });
+  }
+});
 
   return router;
 }
