@@ -1,7 +1,11 @@
 name: dashboard-hourly
 
 on:
-  workflow_dispatch:  # manual runs only
+  # Manual trigger
+  workflow_dispatch:
+  # 08:30–17:30 ET => 12:30–21:30 UTC, every hour Mon–Fri
+  schedule:
+    - cron: "30 12-21 * * 1-5"
 
 jobs:
   hourly:
@@ -33,13 +37,13 @@ jobs:
         run: |
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
-      - name: Make dashboard payload
+      - name: Make dashboard payload (intraday)
         env:
           PIPELINE_TAG: "hourly"
         run: |
-          python scripts/make_dashboard.py --source data/outlook_source.json --out data/outlook.json
+          python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
 
-      - name: Archive (15-day rolling)
+      - name: Archive (15-day rolling) — HOURLY
         run: |
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
