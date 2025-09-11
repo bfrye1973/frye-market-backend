@@ -1,7 +1,6 @@
 name: dashboard-eod
 
 on:
-  # Manual trigger
   workflow_dispatch:
   # Market OPEN and CLOSE: 09:30 ET (13:30 UTC) and 16:00 ET (20:00 UTC), Mon–Fri
   schedule:
@@ -32,14 +31,13 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # Option A: build source with --mode daily (script only accepts daily/intraday)
+      # The source builder accepts 'daily' (not 'eod').
       - name: Build outlook source (EOD)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           python scripts/build_outlook_source_from_polygon.py --mode daily
 
-      # Keep final payload labeled as eod for downstream/UI if desired
       - name: Make dashboard payload (EOD)
         env:
           PIPELINE_TAG: "eod"
@@ -73,4 +71,16 @@ jobs:
             echo "Push rejected; rebasing once more..."
             git pull --rebase --autostash origin main
             git push origin HEAD:main
+          fi
+
+      - name: Trigger backend redeploy on Render
+        if: always()
+        env:
+          RENDER_DEPLOY_HOOK_BACKEND: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}
+        run: |
+          if [ -n "$RENDER_DEPLOY_HOOK_BACKEND" ]; then
+            echo "Triggering backend redeploy..."
+            curl -sSf -X POST "$RENDER_DEPLOY_HOOK_BACKEND"
+          else
+            echo "Render deploy hook not set (RENDER_DEPLOY_HOOK_BACKEND)."
           fi
