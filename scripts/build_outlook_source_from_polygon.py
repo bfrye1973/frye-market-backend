@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Ferrari Dashboard — build_outlook_source_from_polygon.py (R3)
+Ferrari Dashboard — build_outlook_source_from_polygon.py (R3+retries)
 
 Generates data/outlook_source.json from Polygon.
 
@@ -21,14 +21,15 @@ Outputs (schema)
   "global": {
     "squeeze_pressure_pct": int(0..100),     # legacy/fuel-style intraday PSI (kept for compatibility)
     "squeeze_state": "none"|"on"|"firingUp"|"firingDown",
-    "daily_squeeze_pct": float(0..100),      # NEW: Lux daily PSI on SPY (2 decimals)
+    "daily_squeeze_pct": float(0..100),      # Lux daily PSI on SPY (2 decimals)
     "volatility_pct": int(0..100),
     "liquidity_pct": int(0..120)
   }
 }
 """
 from __future__ import annotations
-import argparse, csv, json, math, os, time, urllib.parse, urllib.request
+import argparse, csv, json, math, os, time, random
+import urllib.parse, urllib.request, urllib.error
 from datetime import datetime, timedelta, timezone
 from math import log
 from typing import Any, Dict, List, Tuple
@@ -42,28 +43,45 @@ HIST_PATH  = os.path.join("data", "history.json")
 
 # ---------------- HTTP / Polygon helpers ----------------
 
-def http_get(url: str, timeout: int = 20) -> str:
+def http_get(url: str, timeout: int = 30) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "ferrari-dashboard/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8")
 
-def poly_json(url: str, params: Dict[str, Any] | None = None, retries: int = 3, backoff: float = 1.0) -> Dict[str, Any]:
-    if params is None: params = {}
-    if POLY_KEY: params["apiKey"] = POLY_KEY
+def poly_json(url: str,
+              params: Dict[str, Any] | None = None,
+              retries: int = 6,
+              backoff: float = 0.8) -> Dict[str, Any]:
+    """
+    Robust fetch with retries for 429/5xx/network hiccups.
+    Exponential backoff with small jitter.
+    """
+    if params is None:
+        params = {}
+    if POLY_KEY:
+        params["apiKey"] = POLY_KEY
     qs = urllib.parse.urlencode(params)
     full = f"{url}?{qs}" if qs else url
-    tries = 0
+
+    attempt = 0
     while True:
-        tries += 1
+        attempt += 1
         try:
-            return json.loads(http_get(full))
+            raw = http_get(full, timeout=30)
+            return json.loads(raw)
         except urllib.error.HTTPError as e:
-            if e.code == 429 and tries <= retries:
-                time.sleep(backoff * tries); continue
+            # Retry on rate limit and server-side errors
+            if e.code in (429, 500, 502, 503, 504) and attempt <= retries:
+                sleep_s = backoff * (2 ** (attempt - 1)) * (1 + random.random() * 0.25)
+                time.sleep(sleep_s)
+                continue
             raise
-        except Exception:
-            if tries <= retries:
-                time.sleep(backoff * tries); continue
+        except (urllib.error.URLError, TimeoutError) as e:
+            # Transient network issues
+            if attempt <= retries:
+                sleep_s = backoff * (2 ** (attempt - 1)) * (1 + random.random() * 0.25)
+                time.sleep(sleep_s)
+                continue
             raise
 
 def fetch_range_daily(ticker: str, start: str, end: str) -> List[Dict[str, Any]]:
@@ -157,13 +175,20 @@ def compute_intraday_flags(h10, l10, c2, c1, day_high, day_low, last_price) -> t
     return nh, nl, u3, d3
 
 def build_sector_counts_daily(symbols: List[str]) -> Dict[str, int]:
+    """Daily mode: robust per-symbol fetch, skip on persistent failure."""
     counts = {"nh":0,"nl":0,"u":0,"d":0}
     for i, sym in enumerate(symbols):
-        bars = bars_last_n_days(sym, 11)
+        try:
+            bars = bars_last_n_days(sym, 11)
+        except Exception as e:
+            print(f"[warn] daily bars fetch failed for {sym}: {e}")
+            bars = []
         if bars:
             nh,nl,u,d = compute_flags_from_bars(bars)
-            counts["nh"] += int(nh); counts["nl"] += int(nl); counts["u"] += int(u); counts["d"] += int(d)
-        if (i+1) % 10 == 0: time.sleep(0.25)
+            counts["nh"] += int(nh); counts["nl"] += int(nl)
+            counts["u"]  += int(u);  counts["d"]  += int(d)
+        if (i+1) % 10 == 0:
+            time.sleep(0.25)
     return counts
 
 def build_sector_counts_intraday(symbols: List[str], wm_cache: Dict[str, tuple], snapshots: Dict[str, Dict[str, Any]]) -> Dict[str, int]:
@@ -212,7 +237,7 @@ def compute_squeeze_fields(ticker="SPY", conv=50, length=20):
     """
     Returns BOTH:
       - squeeze_pressure_pct (legacy intraday/fuel semantics; kept for compatibility)
-      - daily_squeeze_pct (NEW) — Lux PSI on DAILY bars (0..100, 2 decimals)
+      - daily_squeeze_pct (Lux PSI on DAILY bars, 0..100)
       - squeeze_state — simple state; daily squeeze itself is direction-agnostic
     """
     end = datetime.utcnow().date(); start = end - timedelta(days=90)
