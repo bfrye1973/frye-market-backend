@@ -282,6 +282,42 @@ export default function buildRouter(){
       return noStore(res).status(500).json({ ok:false, error:String(e) });
     }
   });
+// ---- OHLC stub for chart row (SPY etc.) ----
+// shape: { bars:[{time,open,high,low,close,volume}], symbol, timeframe }
+router.get("/v1/ohlc", (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || "SPY").toUpperCase();
+    const timeframe = String(req.query.timeframe || "1h");
+
+    // interval seconds for synthetic bars
+    const tfSec = ({
+      "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+      "1h": 3600, "4h": 14400, "1d": 86400
+    })[timeframe] || 3600;
+
+    // generate 120 bars ending "now"
+    const now = Math.floor(Date.now() / 1000);
+    const n = 120;
+    const bars = [];
+    let px = 650; // base price around current SPY
+    for (let i = n; i > 0; i--) {
+      const t = now - i * tfSec;
+      // small random walk
+      const drift = (Math.random() - 0.5) * 2.0;
+      const open = px;
+      const close = px + drift;
+      const high = Math.max(open, close) + Math.random() * 0.8;
+      const low  = Math.min(open, close) - Math.random() * 0.8;
+      const volume = Math.floor(800000 + Math.random() * 600000);
+      bars.push({ time: t, open, high, low, close, volume });
+      px = close;
+    }
+
+    return noStore(res).json({ bars, symbol, timeframe });
+  } catch (e) {
+    return noStore(res).status(500).json({ ok:false, error:String(e) });
+  }
+});
 
   return router;
 }
