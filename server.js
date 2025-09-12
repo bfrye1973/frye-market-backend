@@ -1,4 +1,4 @@
-// server.js — ESM Express host with wide-open CORS (for testing), static, and API routes
+// server.js — ESM Express host with restricted CORS, static, and API routes
 
 import express from "express";
 import path from "path";
@@ -12,29 +12,34 @@ const PORT = process.env.PORT || 10000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-/* CORS (TEMP: wide-open + preflight headers allowed) */
+/* CORS (Restricted: dashboard + localhost) */
+const ALLOW = new Set([
+  "https://frye-dashboard.onrender.com",
+  "http://localhost:3000",
+]);
+
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin);   // echo origin
-  } else {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
+  // Allow only approved origins
+  if (origin && ALLOW.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
   }
   res.setHeader("Vary", "Origin");
 
-  // Methods your app uses
+  // Methods you use
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
 
-  // IMPORTANT: allow headers that triggered the block (Cache-Control) + common ones
+  // Needed for our fetch() calls (preflight passes)
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Cache-Control, Authorization, X-Requested-With"
   );
 
-  // If you ever send cookies, uncomment:
+  // If you later send cookies, also set:
   // res.setHeader("Access-Control-Allow-Credentials", "true");
 
-  if (req.method === "OPTIONS") return res.sendStatus(204); // preflight OK
+  if (req.method === "OPTIONS") return res.sendStatus(204); // preflight
   next();
 });
 
