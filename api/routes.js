@@ -10,6 +10,9 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
+/* -------- env / providers -------- */
+const POLY_KEY = process.env.POLYGON_API_KEY || ""; // if set, we use Polygon for OHLC
+
 /* -------- small utils -------- */
 function noStore(res) { res.set("Cache-Control","no-store"); return res; }
 async function readJsonFromProject(relPathFromProjectRoot) {
@@ -20,6 +23,80 @@ async function readJsonFromProject(relPathFromProjectRoot) {
   } catch {
     return null;
   }
+}
+
+/* -------- timestamp utils (normalize to unix SECONDS) -------- */
+function toUnixSeconds(t) {
+  if (t == null) return null;
+
+  if (typeof t === "string") {
+    const ms = Date.parse(t); // NaN if invalid
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  }
+  const n = Number(t);
+  if (!Number.isFinite(n)) return null;
+
+  if (n > 1e18) return Math.floor(n / 1e9); // ns -> s
+  if (n > 1e15) return Math.floor(n / 1e6); // µs -> s
+  if (n > 1e12) return Math.floor(n / 1e3); // ms -> s
+  return Math.floor(n);                      // already seconds
+}
+
+function normalizeBars(rawBars) {
+  const now = Math.floor(Date.now() / 1000);
+  const FUTURE_PAD = 60 * 60; // allow +1h window
+  const out = [];
+
+  for (const b of rawBars || []) {
+    const ts = toUnixSeconds(b.time ?? b.t ?? b.timestamp ?? b.startTimestamp);
+    if (!ts) continue;
+    if (ts > now + FUTURE_PAD) continue; // drop far-future bars
+    out.push({
+      time: ts,
+      open: Number(b.open ?? b.o),
+      high: Number(b.high ?? b.h),
+      low:  Number(b.low  ?? b.l),
+      close:Number(b.close?? b.c),
+      volume:Number(b.volume ?? b.v ?? 0),
+    });
+  }
+  out.sort((a,b) => a.time - b.time);
+  return out;
+}
+
+/* -------- Polygon provider (optional) -------- */
+const TF_MAP = {
+  "1m": { mult: 1, unit: "minute" },
+  "5m": { mult: 5, unit: "minute" },
+  "15m": { mult: 15, unit: "minute" },
+  "30m": { mult: 30, unit: "minute" },
+  "1h": { mult: 1, unit: "hour" },
+  "4h": { mult: 4, unit: "hour" },
+  "1d": { mult: 1, unit: "day" },
+};
+
+async function getBarsFromPolygon(symbol, timeframe) {
+  if (!POLY_KEY) throw new Error("POLYGON_API_KEY missing");
+  const tf = TF_MAP[timeframe];
+  if (!tf) throw new Error(`Unsupported timeframe: ${timeframe}`);
+
+  const end = new Date();
+  const start = new Date(end.getTime() - 60 * 24 * 60 * 60 * 1000); // ~60 days back
+  const fmt = (d) => d.toISOString().slice(0,10);
+
+  const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}` +
+              `/range/${tf.mult}/${tf.unit}/${fmt(start)}/${fmt(end)}` +
+              `?adjusted=true&sort=asc&limit=50000&apiKey=${POLY_KEY}`;
+
+  const r = await fetch(url);
+  if (!r.ok) {
+    const txt = await r.text().catch(()=>"");
+    throw new Error(`Polygon ${r.status}: ${txt.slice(0,180)}`);
+  }
+  const j = await r.json();
+  const rows = Array.isArray(j?.results) ? j.results : [];
+  // return in generic shape so normalizer can map
+  return rows.map(x => ({ t:x.t, o:x.o, h:x.h, l:x.l, c:x.c, v:x.v }));
 }
 
 /* -------- sectorCards normalization (guarantee 11) -------- */
@@ -281,33 +358,46 @@ export default function buildRouter(){
     }
   });
 
-  // ---- OHLC stub for chart row (SPY etc.) ----
-  router.get("/v1/ohlc", (req, res) => {
+  // ---- OHLC (normalized) ----
+  router.get("/v1/ohlc", async (req, res) => {
     try {
       const symbol = String(req.query.symbol || "SPY").toUpperCase();
       const timeframe = String(req.query.timeframe || "1h");
-      const tfSec = ({
-        "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
-        "1h": 3600, "4h": 14400, "1d": 86400
-      })[timeframe] || 3600;
 
-      const now = Math.floor(Date.now() / 1000);
-      const n = 120;
-      const bars = [];
-      let px = 650;
-      for (let i = n; i > 0; i--) {
-        const t = now - i * tfSec;
-        const drift = (Math.random() - 0.5) * 2.0;
-        const open = px;
-        const close = px + drift;
-        const high = Math.max(open, close) + Math.random() * 0.8;
-        const low  = Math.min(open, close) - Math.random() * 0.8;
-        const volume = Math.floor(800000 + Math.random() * 600000);
-        bars.push({ time: t, open, high, low, close, volume });
-        px = close;
+      let bars = [];
+
+      if (POLY_KEY) {
+        // Use Polygon if configured
+        const raw = await getBarsFromPolygon(symbol, timeframe);
+        bars = normalizeBars(raw);
+      } else {
+        // Fallback to the existing stub generator if no provider configured
+        const tfSec = ({
+          "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+          "1h": 3600, "4h": 14400, "1d": 86400
+        })[timeframe] || 3600;
+
+        const now = Math.floor(Date.now() / 1000);
+        const n = 120;
+        let px = 650;
+        const gen = [];
+        for (let i = n; i > 0; i--) {
+          const t = now - i * tfSec;
+          const drift = (Math.random() - 0.5) * 2.0;
+          const open = px;
+          const close = px + drift;
+          const high = Math.max(open, close) + Math.random() * 0.8;
+          const low  = Math.min(open, close) - Math.random() * 0.8;
+          const volume = Math.floor(800000 + Math.random() * 600000);
+          gen.push({ time: t, open, high, low, close, volume });
+          px = close;
+        }
+        bars = normalizeBars(gen);
       }
+
       return noStore(res).json({ bars, symbol, timeframe });
     } catch (e) {
+      console.error("ohlc error:", e?.message || e);
       return noStore(res).status(500).json({ ok:false, error:String(e) });
     }
   });
@@ -319,11 +409,9 @@ export default function buildRouter(){
       const days = Array.isArray(hist?.days) ? hist.days : [];
       if (days.length < 1) return noStore(res).json({ ok:true, sectors:{} });
 
-      // We record one snapshot per workflow run. Take the last two (curr, prev).
       const curr = days[days.length - 1]?.groups || {};
       const prev = days.length >= 2 ? days[days.length - 2]?.groups || {} : {};
 
-      // canonicalize keys
       const norm = (s="") => s.trim().toLowerCase();
       const canon = (s) => (norm(s) === "tech" ? "information technology" : norm(s));
 
