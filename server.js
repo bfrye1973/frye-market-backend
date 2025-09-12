@@ -1,4 +1,4 @@
-// server.js — ESM Express host with CORS, static, and API routes
+// server.js — ESM Express host with wide-open CORS (for testing), static, and API routes
 
 import express from "express";
 import path from "path";
@@ -12,14 +12,14 @@ const PORT = process.env.PORT || 10000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-/* CORS */
-const ALLOW = new Set([
-  "https://frye-dashboard.onrender.com",
-  "http://localhost:3000",
-]);
+/* CORS (TEMPORARY: allow all origins) */
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && ALLOW.has(origin)) res.setHeader("Access-Control-Allow-Origin", origin);
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin); // echo back any origin
+  } else {
+    res.setHeader("Access-Control-Allow-Origin", "*"); // fallback
+  }
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
