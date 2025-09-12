@@ -12,18 +12,29 @@ const PORT = process.env.PORT || 10000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-/* CORS (TEMPORARY: allow all origins) */
+/* CORS (TEMP: wide-open + preflight headers allowed) */
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin); // echo back any origin
+    res.setHeader("Access-Control-Allow-Origin", origin);   // echo origin
   } else {
-    res.setHeader("Access-Control-Allow-Origin", "*"); // fallback
+    res.setHeader("Access-Control-Allow-Origin", "*");
   }
   res.setHeader("Vary", "Origin");
+
+  // Methods your app uses
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.sendStatus(204);
+
+  // IMPORTANT: allow headers that triggered the block (Cache-Control) + common ones
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Cache-Control, Authorization, X-Requested-With"
+  );
+
+  // If you ever send cookies, uncomment:
+  // res.setHeader("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") return res.sendStatus(204); // preflight OK
   next();
 });
 
