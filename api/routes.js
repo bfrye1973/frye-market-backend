@@ -1,5 +1,5 @@
 // api/routes.js — ESM router (sector cards + numeric aliases, engine lights,
-// ensure squeezeDaily, rpm/speed, volatility; with /debug and /outlook5d)
+// ensure squeezeDaily, rpm/speed, volatility; with /debug, /outlook5d, /v1/ohlc, /sectorTrend)
 
 import express from "express";
 import path from "path";
@@ -90,24 +90,22 @@ function ensureSqueeze(json){
   json.gauges = json.gauges || {};
   json.odometers = json.odometers || {};
 
-  // daily squeeze
-  if (!json.gauges.squeezeDaily || !Number.isFinite(json.gauges.squeezeDaily?.pct)) {
-    const fromGlobal = Number(json?.global?.daily_squeeze_pct ?? NaN);
-    const fromAlt    = Number(json?.squeezeDailyPct ?? NaN);
-    const maybe = Number.isFinite(fromGlobal) ? fromGlobal : (Number.isFinite(fromAlt) ? fromAlt : NaN);
-    if (Number.isFinite(maybe)) json.gauges.squeezeDaily = { pct: maybe };
+  // DAILY SQUEEZE only from builder/override (no fuel fallback)
+  const fromGlobal = Number(json?.global?.daily_squeeze_pct ?? NaN);
+  if (Number.isFinite(fromGlobal)) {
+    json.gauges.squeezeDaily = { pct: fromGlobal };
+  }
+
+  // optional manual override (exact Lux number if you want to match TradingView)
+  const override = Number(process.env.DAILY_SQUEEZE_OVERRIDE ?? NaN);
+  if (Number.isFinite(override)) {
+    json.gauges.squeezeDaily = { pct: override };
   }
 
   // intraday squeeze odometer from fuel if missing
   if (!Number.isFinite(json.odometers.squeezeCompressionPct)) {
     const fuel = Number(json?.gauges?.fuel?.pct ?? NaN);
     if (Number.isFinite(fuel)) json.odometers.squeezeCompressionPct = fuel;
-  }
-
-  // optional manual override (for exact Lux value)
-  const override = Number(process.env.DAILY_SQUEEZE_OVERRIDE ?? NaN);
-  if (Number.isFinite(override)) {
-    json.gauges.squeezeDaily = { pct: override };
   }
 
   return json;
@@ -282,42 +280,86 @@ export default function buildRouter(){
       return noStore(res).status(500).json({ ok:false, error:String(e) });
     }
   });
-// ---- OHLC stub for chart row (SPY etc.) ----
-// shape: { bars:[{time,open,high,low,close,volume}], symbol, timeframe }
-router.get("/v1/ohlc", (req, res) => {
-  try {
-    const symbol = String(req.query.symbol || "SPY").toUpperCase();
-    const timeframe = String(req.query.timeframe || "1h");
 
-    // interval seconds for synthetic bars
-    const tfSec = ({
-      "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
-      "1h": 3600, "4h": 14400, "1d": 86400
-    })[timeframe] || 3600;
+  // ---- OHLC stub for chart row (SPY etc.) ----
+  router.get("/v1/ohlc", (req, res) => {
+    try {
+      const symbol = String(req.query.symbol || "SPY").toUpperCase();
+      const timeframe = String(req.query.timeframe || "1h");
+      const tfSec = ({
+        "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+        "1h": 3600, "4h": 14400, "1d": 86400
+      })[timeframe] || 3600;
 
-    // generate 120 bars ending "now"
-    const now = Math.floor(Date.now() / 1000);
-    const n = 120;
-    const bars = [];
-    let px = 650; // base price around current SPY
-    for (let i = n; i > 0; i--) {
-      const t = now - i * tfSec;
-      // small random walk
-      const drift = (Math.random() - 0.5) * 2.0;
-      const open = px;
-      const close = px + drift;
-      const high = Math.max(open, close) + Math.random() * 0.8;
-      const low  = Math.min(open, close) - Math.random() * 0.8;
-      const volume = Math.floor(800000 + Math.random() * 600000);
-      bars.push({ time: t, open, high, low, close, volume });
-      px = close;
+      const now = Math.floor(Date.now() / 1000);
+      const n = 120;
+      const bars = [];
+      let px = 650;
+      for (let i = n; i > 0; i--) {
+        const t = now - i * tfSec;
+        const drift = (Math.random() - 0.5) * 2.0;
+        const open = px;
+        const close = px + drift;
+        const high = Math.max(open, close) + Math.random() * 0.8;
+        const low  = Math.min(open, close) - Math.random() * 0.8;
+        const volume = Math.floor(800000 + Math.random() * 600000);
+        bars.push({ time: t, open, high, low, close, volume });
+        px = close;
+      }
+      return noStore(res).json({ bars, symbol, timeframe });
+    } catch (e) {
+      return noStore(res).status(500).json({ ok:false, error:String(e) });
     }
+  });
 
-    return noStore(res).json({ bars, symbol, timeframe });
-  } catch (e) {
-    return noStore(res).status(500).json({ ok:false, error:String(e) });
-  }
-});
+  // ---- Sector hour-over-hour trend for cards (new) ----
+  router.get("/sectorTrend", async (req, res) => {
+    try {
+      const hist = await readJsonFromProject("data/history.json");
+      const days = Array.isArray(hist?.days) ? hist.days : [];
+      if (days.length < 1) return noStore(res).json({ ok:true, sectors:{} });
+
+      // We record one snapshot per workflow run. Take the last two (curr, prev).
+      const curr = days[days.length - 1]?.groups || {};
+      const prev = days.length >= 2 ? days[days.length - 2]?.groups || {} : {};
+
+      // canonicalize keys
+      const norm = (s="") => s.trim().toLowerCase();
+      const canon = (s) => (norm(s) === "tech" ? "information technology" : norm(s));
+
+      const sectors = {};
+      const allKeys = new Set([...Object.keys(curr), ...Object.keys(prev)]);
+      for (const k of allKeys) {
+        const key = canon(k);
+        const c = curr[k] || {};
+        const p = prev[k] || {};
+        const cn = {
+          nh: Number(c?.nh ?? 0),
+          nl: Number(c?.nl ?? 0),
+          up: Number(c?.u  ?? c?.up   ?? 0),
+          down: Number(c?.d ?? c?.down ?? 0),
+        };
+        const pn = {
+          nh: Number(p?.nh ?? 0),
+          nl: Number(p?.nl ?? 0),
+          up: Number(p?.u  ?? p?.up   ?? 0),
+          down: Number(p?.d ?? p?.down ?? 0),
+        };
+        cn.netNH = cn.nh - cn.nl;
+        pn.netNH = pn.nh - pn.nl;
+        sectors[key] = { curr: cn, prev: pn };
+      }
+
+      return noStore(res).json({
+        ok: true,
+        asOf: days[days.length - 1]?.date || null,
+        prev: days.length >= 2 ? days[days.length - 2]?.date : null,
+        sectors
+      });
+    } catch (e) {
+      return noStore(res).status(500).json({ ok:false, error:String(e) });
+    }
+  });
 
   return router;
 }
