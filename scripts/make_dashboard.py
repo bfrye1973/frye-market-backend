@@ -21,15 +21,14 @@ Adds Breadth/Momentum indexes computed from sector totals.
 from __future__ import annotations
 import argparse, json, os
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 SCHEMA_VERSION = "r1.2"
 VERSION_TAG    = "1.2-hourly"
 
 PREFERRED_ORDER = [
-    "information technology","materials","healthcare",
-    "communication services","real estate","energy",
-    "consumer staples","consumer discretionary",
+    "information technology","materials","health care","communication services",
+    "real estate","energy","consumer staples","consumer discretionary",
     "financials","utilities","industrials",
 ]
 
@@ -46,6 +45,7 @@ def jread(p: str) -> Dict[str, Any]:
 def jwrite(p: str, obj: Dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
+        # compact, single-line JSON (router/UI don’t need pretty)
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"), indent=None)
         f.write("\n")
 
@@ -57,11 +57,11 @@ def title_case(x: str) -> str:
 
 def canonical_sector(name: str) -> str:
     n = norm(name)
-    if n in ("tech", "information technology"):
-        return "information technology"
+    if n in ("tech", "information technology"): return "information technology"
+    if n in ("healthcare",): return "health care"
     return n
 
-def num(v, default=0):
+def num(v, default=0.0):
     try:
         if v is None: return default
         if isinstance(v, (int, float)): return float(v)
@@ -74,6 +74,7 @@ def num(v, default=0):
 # -------- sectors --------
 
 def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
+    # accept any of: outlook.sectors, sectors, groups
     raw = None
     if isinstance(src.get("outlook"), dict) and isinstance(src["outlook"].get("sectors"), dict):
         raw = src["outlook"]["sectors"]
@@ -86,39 +87,41 @@ def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(raw, dict):
         for name, vals in raw.items():
             key = canonical_sector(name)
-            nh   = int(num(vals.get("nh", vals.get("nH", 0))))
-            nl   = int(num(vals.get("nl", vals.get("nL", 0))))
-            up   = int(num(vals.get("u",  vals.get("up", 0))))
-            down = int(num(vals.get("d",  vals.get("down", 0))))
-            spark = vals.get("spark", [])
-            if not isinstance(spark, list):
-                spark = []
+            nh   = int(num((vals or {}).get("nh", (vals or {}).get("nH", 0))))
+            nl   = int(num((vals or {}).get("nl", (vals or {}).get("nL", 0))))
+            up   = int(num((vals or {}).get("u",  (vals or {}).get("up", 0))))
+            down = int(num((vals or {}).get("d",  (vals or {}).get("down", 0))))
+            spark = (vals or {}).get("spark", [])
+            if not isinstance(spark, list): spark = []
             out[key] = {
-                "nh": nh,
-                "nl": nl,
-                "up": up,
-                "down": down,
-                "netNH": nh - nl,
-                "netUD": up - down,
-                "spark": spark,
+                "nh": nh, "nl": nl, "up": up, "down": down,
+                "netNH": nh - nl, "netUD": up - down, "spark": spark
             }
 
+    # normalize to 11 canonical sectors
     for k in PREFERRED_ORDER:
         if k not in out:
             out[k] = {"nh":0,"nl":0,"up":0,"down":0,"netNH":0,"netUD":0,"spark":[]}
-
     return out
 
 # -------- gauges / squeeze --------
 
+def pick(d: Dict[str, Any], *keys, default=None):
+    for k in keys:
+        if d.get(k) is not None:
+            return d[k]
+    return default
+
 def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mode: str) -> Dict[str, Any]:
     g = src.get("global", {}) or {}
 
-    # Daily squeeze & intraday fuel
-    fuel      = num(g.get("squeeze_pressure_pct", 50))   # intraday/pressure
-    daily_sq  = num(g.get("daily_squeeze_pct", None), None)
-    vol_pct   = num(g.get("volatility_pct", 50))
-    liq_pct   = num(g.get("liquidity_pct", 100))
+    # Read BOTH snake_case and camelCase keys (builder variants)
+    fuel      = num(pick(g, "squeeze_pressure_pct", "squeezePressurePct", default=50))
+    daily_sq  = pick(g, "daily_squeeze_pct", "squeeze_daily_pct", "squeezeDailyPct", default=None)
+    if daily_sq is not None:
+        daily_sq = num(daily_sq, None)
+    vol_pct   = num(pick(g, "volatility_pct", "volatilityPct", default=50))
+    liq_pct   = num(pick(g, "liquidity_pct", "liquidityPct", default=70))
 
     # ---- Breadth/Momentum from sector totals ----
     tot_nh = sum(int(num(v.get("nh",0)))   for v in sectors.values())
@@ -127,37 +130,31 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
     tot_dn = sum(int(num(v.get("down",0))) for v in sectors.values())
 
     def ratio_idx(pos, neg):
-        pos = float(pos); neg = float(neg)
-        s = pos + neg
-        if s <= 0: return 50.0
-        return 50.0 + 50.0 * ((pos - neg) / s)
+        s = float(pos) + float(neg)
+        return 50.0 if s <= 0 else 50.0 + 50.0 * ((float(pos) - float(neg)) / s)
 
-    breadthIdx  = ratio_idx(tot_nh, tot_nl)      # 0..100
-    momentumIdx = ratio_idx(tot_up, tot_dn)      # 0..100
+    breadthIdx  = ratio_idx(tot_up, tot_dn)   # breadth as Up/(Up+Down)
+    momentumIdx = ratio_idx(tot_nh, tot_nl)   # momentum as NH/(NH+NL)
 
     gauges = {
         "rpm":   {"pct": float(breadthIdx),  "label":"Breadth"},
         "speed": {"pct": float(momentumIdx), "label":"Momentum"},
-        "fuel":  { "pct": float(fuel), "state": "firingUp" if float(fuel) >= 70 else "idle", "label":"Squeeze" },
-        "water": { "pct": float(vol_pct), "label":"Volatility" },
-        "oil":   { "psi": float(liq_pct), "label":"Liquidity" },
+        "fuel":  {"pct": float(fuel), "state": ("firingUp" if float(fuel) >= 70 else "idle"), "label":"Squeeze"},
+        "water": {"pct": float(vol_pct), "label":"Volatility"},
+        "oil":   {"psi": float(liq_pct), "label":"Liquidity"},
     }
     if daily_sq is not None:
-        gauges["squeezeDaily"] = { "pct": float(daily_sq) }
+        gauges["squeezeDaily"] = {"pct": float(daily_sq)}
 
-    odometers = { "squeezeCompressionPct": float(fuel) }  # intraday
+    odometers = {"squeezeCompressionPct": float(fuel)}  # intraday
 
-    summary = {
-        "breadthIdx":  float(breadthIdx),
-        "momentumIdx": float(momentumIdx),
-    }
-
-    return { "gauges": gauges, "odometers": odometers, "summary": summary }
+    summary = {"breadthIdx": float(breadthIdx), "momentumIdx": float(momentumIdx)}
+    return {"gauges": gauges, "odometers": odometers, "summary": summary}
 
 # -------- cards --------
 
-def cards_from_sectors(sectors: Dict[str, Any]) -> list[Dict[str, Any]]:
-    cards = []
+def cards_from_sectors(sectors: Dict[str, Any]) -> List[Dict[str, Any]]:
+    cards: List[Dict[str, Any]] = []
     for key in PREFERRED_ORDER:
         vals = sectors.get(key, {})
         net = int(num(vals.get("netNH", 0)))
@@ -183,7 +180,7 @@ def main():
     args = ap.parse_args()
 
     src = jread(args.source)
-    ts  = now_iso()
+    ts  = now_iso()  # always fresh
 
     sectors = sectors_from_source(src)
     gz_od   = build_gauges_and_odometers(src, sectors, args.mode)
@@ -195,13 +192,13 @@ def main():
         "ts": ts,
         "version": VERSION_TAG,
         "pipeline": args.mode,
-        **gz_od,                      # adds gauges + odometers + summary(breadth/momentum)
+        **gz_od,                      # gauges + odometers + summary
         "sectorCards": cards,         # legacy
         "outlook": {
             "sectors": sectors,
             "sectorCards": cards
         },
-        "signals": {}                 # routes.js computes real signals
+        "signals": {}                 # router computes real signals
     }
 
     jwrite(args.out, out)
