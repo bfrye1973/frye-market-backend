@@ -30,6 +30,11 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
+      - name: Clean previous payloads
+        run: |
+          rm -f data/outlook_source.json data/outlook.json || true
+          mkdir -p data
+
       - name: Build outlook source (daily)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -41,24 +46,23 @@ jobs:
       - name: Make dashboard payload (daily)
         run: |
           set -euo pipefail
-          # Use --mode daily to avoid confusion; --source/--out paths as before
           python scripts/make_dashboard.py --mode daily --source data/outlook_source.json --out data/outlook.json
 
-      # Always create a diff so a commit happens and Render redeploys
+      - name: Verify freshness (hard guard)
+        run: |
+          set -euo pipefail
+          echo "UTC now: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          test -f data/outlook_source.json && test -f data/outlook.json
+          echo "source.ts:" && jq -r '.timestamp // .ts // .updated_at // "MISSING"' data/outlook_source.json
+          echo "out.ts:"    && jq -r '.ts // .updated_at // "MISSING"' data/outlook.json
+          if jq -e '(.timestamp // .ts // .updated_at // "") | startswith("2025-09-11")' data/outlook_source.json >/dev/null; then
+            echo "::error ::Builder wrote stale timestamp (still 2025-09-11). Failing run."; exit 1
+          fi
+
       - name: Write heartbeat (force diff)
         run: |
           mkdir -p data
           echo "eod $(date -u +'%Y-%m-%dT%H:%M:%SZ')" > data/heartbeat.txt
-
-      # Helpful: print the heads into logs for quick sanity checks
-      - name: Verify generated files
-        run: |
-          echo "--- outlook_source.json ---"
-          jq '{timestamp, mode, global: .global|{squeeze_daily_pct, volatilityPct, liquidityPct}}' data/outlook_source.json || true
-          echo "--- outlook.json ---"
-          jq '{ts, updated_at, gauges: {rpm, speed, fuel, squeezeDaily, volatilityPct, oil}}' data/outlook.json || true
-          echo "--- heartbeat.txt ---"
-          cat data/heartbeat.txt
 
       - name: Archive (30-day rolling)
         run: |
@@ -79,6 +83,6 @@ jobs:
           git checkout main
           git reset --hard origin/main
           git add -A
-          # Heartbeat guarantees a diff; fall back to allow-empty just in case
           git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')" || git commit --allow-empty -m "EOD keepalive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
           git push origin HEAD:main
+          git rev-parse HEAD
