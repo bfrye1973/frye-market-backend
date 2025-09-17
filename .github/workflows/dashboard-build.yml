@@ -28,16 +28,37 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install jq
 
-      - name: Build outlook source (EOD)
+      - name: Build outlook source (daily)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          DAILY_SQUEEZE_OVERRIDE: ${{ secrets.DAILY_SQUEEZE_OVERRIDE }}
         run: |
+          set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode daily
 
-      - name: Make dashboard payload (EOD)
+      - name: Make dashboard payload (daily)
         run: |
-          python scripts/make_dashboard.py --mode eod --source data/outlook_source.json --out data/outlook.json
+          set -euo pipefail
+          # Use --mode daily to avoid confusion; --source/--out paths as before
+          python scripts/make_dashboard.py --mode daily --source data/outlook_source.json --out data/outlook.json
+
+      # Always create a diff so a commit happens and Render redeploys
+      - name: Write heartbeat (force diff)
+        run: |
+          mkdir -p data
+          echo "eod $(date -u +'%Y-%m-%dT%H:%M:%SZ')" > data/heartbeat.txt
+
+      # Helpful: print the heads into logs for quick sanity checks
+      - name: Verify generated files
+        run: |
+          echo "--- outlook_source.json ---"
+          jq '{timestamp, mode, global: .global|{squeeze_daily_pct, volatilityPct, liquidityPct}}' data/outlook_source.json || true
+          echo "--- outlook.json ---"
+          jq '{ts, updated_at, gauges: {rpm, speed, fuel, squeezeDaily, volatilityPct, oil}}' data/outlook.json || true
+          echo "--- heartbeat.txt ---"
+          cat data/heartbeat.txt
 
       - name: Archive (30-day rolling)
         run: |
@@ -58,8 +79,6 @@ jobs:
           git checkout main
           git reset --hard origin/main
           git add -A
-          if git diff --staged --quiet; then
-            echo "No changes to commit"; exit 0
-          fi
-          git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+          # Heartbeat guarantees a diff; fall back to allow-empty just in case
+          git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')" || git commit --allow-empty -m "EOD keepalive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
           git push origin HEAD:main
