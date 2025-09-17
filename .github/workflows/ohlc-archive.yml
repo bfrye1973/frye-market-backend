@@ -2,9 +2,10 @@ name: ohlc-archive
 
 on:
   workflow_dispatch:
-  # every 10m during market hours to pair with dashboard-10min
+  # Align with 10-min schedule so chart DVR matches meter DVR
   schedule:
-    - cron: "*/10 13-20 * * 1-5"
+    - cron: "*/10 13-19 * * 1-5"
+    - cron: "0 20 * * 1-5"
 
 concurrency:
   group: data-writes-main
@@ -48,11 +49,21 @@ jobs:
           echo "--- tree data/archive/ohlc ---"
           ls -R data/archive/ohlc || true
 
-      - name: Commit OHLC archive
+      - name: Commit & push (retry-safe)
         run: |
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
           git add -A
           git commit -m "OHLC replay snapshot: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "OHLC keepalive"
-          git push origin HEAD:main
+
+          # Retry-safe push: if rejected, rebase onto latest main and push again
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              echo "Push succeeded on attempt $attempt"
+              break
+            fi
+            echo "Push rejected; syncing with origin/main (attempt $attempt)..."
+            git fetch origin main
+            git rebase origin/main
+          done
