@@ -72,22 +72,21 @@ jobs:
           echo "--- outlook.json ---"; head -n 1 data/outlook.json || true
           echo "--- outlook_source.json ---"; head -n 1 data/outlook_source.json || true
 
-     - name: Commit & push (retry-safe)
-       run: |
-         set -e
-         git config user.name  "github-actions"
-         git config user.email "actions@github.com"
-         git add -A
-         git commit -m "Auto snapshot: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "keepalive"
+      - name: Commit & push (retry-safe)
+        run: |
+          set -e
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')" || git commit --allow-empty -m "HOURLY keepalive"
 
-         # Retry-safe push: if rejected, rebase onto latest main and push again
-         for attempt in 1 2 3; do
-           if git push origin HEAD:main; then
-             echo "Push succeeded on attempt $attempt"
-             break
-         fi
-         echo "Push rejected; syncing with origin/main (attempt $attempt)..."
-         git fetch origin main
-         # re-apply our single snapshot commit on top of the latest main
-         git rebase origin/main
-       done
+          # Retry-safe push: if rejected, rebase onto latest main and push again
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              echo "Push succeeded on attempt $attempt"
+              break
+            fi
+            echo "Push rejected; syncing with origin/main (attempt $attempt)..."
+            git fetch origin main
+            git rebase origin/main
+          done
