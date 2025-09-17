@@ -1,0 +1,45 @@
+name: ohlc-archive
+
+on:
+  workflow_dispatch:
+  schedule:
+    # every 10m during market hours to pair with dashboard-10min
+    - cron: "*/10 13-20 * * 1-5"
+
+jobs:
+  ohlc:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Archive OHLC
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          ARCHIVE_SYMBOLS: ${{ vars.ARCHIVE_SYMBOLS || 'SPY,QQQ' }}
+          ARCHIVE_TIMEFRAMES: "10m,1h,1d"
+          LOOKBACK_BARS: "500"
+        run: |
+          python scripts/archive_ohlc.py
+
+      - name: Commit OHLC archive
+        run: |
+          set -e
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+          git add -A
+          git commit -m "OHLC replay snapshot" || git commit --allow-empty -m "OHLC keepalive"
+          git push origin HEAD:main
