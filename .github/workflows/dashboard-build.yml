@@ -61,6 +61,15 @@ jobs:
           find data/archive/eod/source    -type f -name 'outlook_source_*.json' -mtime +30 -delete || true
           find data/archive/eod/dashboard -type f -name 'outlook_*.json'        -mtime +30 -delete || true
 
+      - name: Show files before commit
+        run: |
+          echo "--- listing data/ ---"
+          ls -l data/
+          echo "--- outlook.json (first line) ---"
+          head -n 1 data/outlook.json || true
+          echo "--- outlook_source.json (first line) ---"
+          head -n 1 data/outlook_source.json || true
+
       - name: Commit latest + archive
         run: |
           set -e
