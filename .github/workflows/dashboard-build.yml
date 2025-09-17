@@ -7,6 +7,10 @@ on:
     - cron: "30 13 * * 1-5"
     - cron: "0 20 * * 1-5"
 
+concurrency:
+  group: data-writes-main
+  cancel-in-progress: false
+
 jobs:
   eod:
     runs-on: ubuntu-latest
@@ -34,16 +38,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install jq
 
       - name: Build outlook source (daily)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           DAILY_SQUEEZE_OVERRIDE: ${{ secrets.DAILY_SQUEEZE_OVERRIDE }}
         run: |
+          set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode daily
 
       - name: Make dashboard payload (daily)
         run: |
+          set -euo pipefail
           python scripts/make_dashboard.py --mode daily --source data/outlook_source.json --out data/outlook.json
 
       - name: Write heartbeat (force diff)
@@ -63,12 +70,9 @@ jobs:
 
       - name: Show files before commit
         run: |
-          echo "--- listing data/ ---"
-          ls -l data/
-          echo "--- outlook.json (first line) ---"
-          head -n 1 data/outlook.json || true
-          echo "--- outlook_source.json (first line) ---"
-          head -n 1 data/outlook_source.json || true
+          echo "--- data/ ---"; ls -l data/ || true
+          echo "--- outlook.json ---"; head -n 1 data/outlook.json || true
+          echo "--- outlook_source.json ---"; head -n 1 data/outlook_source.json || true
 
       - name: Commit latest + archive
         run: |
