@@ -6,6 +6,10 @@ on:
   schedule:
     - cron: "30 12-21 * * 1-5"
 
+concurrency:
+  group: data-writes-main
+  cancel-in-progress: false
+
 jobs:
   hourly:
     runs-on: ubuntu-latest
@@ -33,15 +37,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install jq
 
       - name: Build outlook source (intraday)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
+          set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
       - name: Make dashboard payload (intraday)
         run: |
+          set -euo pipefail
           python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
 
       - name: Write heartbeat (force diff)
@@ -61,12 +68,9 @@ jobs:
 
       - name: Show files before commit
         run: |
-          echo "--- listing data/ ---"
-          ls -l data/
-          echo "--- outlook.json (first line) ---"
-          head -n 1 data/outlook.json || true
-          echo "--- outlook_source.json (first line) ---"
-          head -n 1 data/outlook_source.json || true
+          echo "--- data/ ---"; ls -l data/ || true
+          echo "--- outlook.json ---"; head -n 1 data/outlook.json || true
+          echo "--- outlook_source.json ---"; head -n 1 data/outlook_source.json || true
 
       - name: Commit latest + archive
         run: |
