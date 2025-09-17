@@ -1,0 +1,66 @@
+name: dashboard-10min
+
+on:
+  workflow_dispatch:
+  # 09:30–16:00 ET => 13:30–20:00 UTC, every 10 minutes Mon–Fri
+  schedule:
+    - cron: "*/10 13-20 * * 1-5"
+
+jobs:
+  tenmin:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    env:
+      TZ: America/New_York
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install jq
+
+      # build, but DO NOT touch root files; archive-only snapshot for replay
+      - name: Build outlook source (intraday)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          python scripts/build_outlook_source_from_polygon.py --mode intraday
+
+      - name: Make dashboard payload (intraday)
+        run: |
+          set -euo pipefail
+          python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
+
+      - name: Archive (10-minute snapshots)
+        run: |
+          set -e
+          TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
+          mkdir -p data/archive/10min/source data/archive/10min/dashboard
+          cp data/outlook_source.json "data/archive/10min/source/outlook_source_${TS}.json"
+          cp data/outlook.json        "data/archive/10min/dashboard/outlook_${TS}.json"
+
+      # optional: heartbeat so a commit always occurs for auditability
+      - name: Heartbeat
+        run: |
+          mkdir -p data
+          echo "10min $(date -u +'%Y-%m-%dT%H:%M:%SZ')" > data/heartbeat.txt
+
+      - name: Commit archive (force-safe)
+        run: |
+          set -e
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+          git add -A
+          git commit -m "10MIN replay snapshot: $(date -u +'%Y-%m-%dT%H-%M-%SZ')" || git commit --allow-empty -m "10MIN keepalive"
+          git push origin HEAD:main
