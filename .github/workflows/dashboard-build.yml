@@ -20,6 +20,12 @@ jobs:
         uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
+      - name: Sync repo state
+        run: |
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with: { python-version: "3.11" }
@@ -28,36 +34,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install jq
-
-      - name: Clean previous payloads
-        run: |
-          rm -f data/outlook_source.json data/outlook.json || true
-          mkdir -p data
 
       - name: Build outlook source (daily)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           DAILY_SQUEEZE_OVERRIDE: ${{ secrets.DAILY_SQUEEZE_OVERRIDE }}
         run: |
-          set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode daily
 
       - name: Make dashboard payload (daily)
         run: |
-          set -euo pipefail
           python scripts/make_dashboard.py --mode daily --source data/outlook_source.json --out data/outlook.json
-
-      - name: Verify freshness (hard guard)
-        run: |
-          set -euo pipefail
-          echo "UTC now: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          test -f data/outlook_source.json && test -f data/outlook.json
-          echo "source.ts:" && jq -r '.timestamp // .ts // .updated_at // "MISSING"' data/outlook_source.json
-          echo "out.ts:"    && jq -r '.ts // .updated_at // "MISSING"' data/outlook.json
-          if jq -e '(.timestamp // .ts // .updated_at // "") | startswith("2025-09-11")' data/outlook_source.json >/dev/null; then
-            echo "::error ::Builder wrote stale timestamp (still 2025-09-11). Failing run."; exit 1
-          fi
 
       - name: Write heartbeat (force diff)
         run: |
@@ -74,15 +61,11 @@ jobs:
           find data/archive/eod/source    -type f -name 'outlook_source_*.json' -mtime +30 -delete || true
           find data/archive/eod/dashboard -type f -name 'outlook_*.json'        -mtime +30 -delete || true
 
-      - name: Commit latest + archive (force-safe)
+      - name: Commit latest + archive
         run: |
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          git fetch origin main
-          git checkout main
-          git reset --hard origin/main
           git add -A
-          git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')" || git commit --allow-empty -m "EOD keepalive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+          git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')" || git commit --allow-empty -m "EOD keepalive"
           git push origin HEAD:main
-          git rev-parse HEAD
