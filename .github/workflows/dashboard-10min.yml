@@ -2,9 +2,12 @@ name: dashboard-10min
 
 on:
   workflow_dispatch:
-  # 09:30–16:00 ET => 13:30–20:00 UTC, every 10 minutes Mon–Fri
+  # 30 min before open through close:
+  # 09:00–15:59 ET every 10m  => 13:00–19:59 UTC
+  # exactly 16:00 ET once     => 20:00 UTC
   schedule:
-    - cron: "*/10 13-20 * * 1-5"
+    - cron: "*/10 13-19 * * 1-5"   # every 10 minutes 09:00–15:59 ET (Mon–Fri)
+    - cron: "0 20 * * 1-5"         # one run at 16:00 ET (Mon–Fri)
 
 jobs:
   tenmin:
@@ -17,6 +20,13 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
+      # Keep workspace in sync at start (avoid conflicts), not after we generate files
+      - name: Sync repo state
+        run: |
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
 
@@ -26,7 +36,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
-      # build, but DO NOT touch root files; archive-only snapshot for replay
+      # Build, but DO NOT touch root files; archive-only snapshot for replay
       - name: Build outlook source (intraday)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -47,20 +57,27 @@ jobs:
           cp data/outlook_source.json "data/archive/10min/source/outlook_source_${TS}.json"
           cp data/outlook.json        "data/archive/10min/dashboard/outlook_${TS}.json"
 
-      # optional: heartbeat so a commit always occurs for auditability
+      # Optional: heartbeat so a commit always occurs for auditability
       - name: Heartbeat
         run: |
           mkdir -p data
           echo "10min $(date -u +'%Y-%m-%dT%H:%M:%SZ')" > data/heartbeat.txt
 
-      - name: Commit archive (force-safe)
+      # (Optional) show what we’re about to commit
+      - name: Show files before commit
+        run: |
+          echo "--- data/archive/10min/dashboard (tail) ---"
+          ls -lt data/archive/10min/dashboard | head || true
+          echo "--- outlook.json (first line) ---"
+          head -n 1 data/outlook.json || true
+          echo "--- outlook_source.json (first line) ---"
+          head -n 1 data/outlook_source.json || true
+
+      - name: Commit archive (safe)
         run: |
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          git fetch origin main
-          git checkout main
-          git reset --hard origin/main
           git add -A
-          git commit -m "10MIN replay snapshot: $(date -u +'%Y-%m-%dT%H-%M-%SZ')" || git commit --allow-empty -m "10MIN keepalive"
+          git commit -m "10MIN replay snapshot: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "10MIN keepalive"
           git push origin HEAD:main
