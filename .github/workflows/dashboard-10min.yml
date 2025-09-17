@@ -8,7 +8,7 @@ on:
     - cron: "0 20 * * 1-5"
 
 concurrency:
-  group: data-writes-main
+  group: data-writes-main-${{ github.workflow }}
   cancel-in-progress: false
 
 jobs:
