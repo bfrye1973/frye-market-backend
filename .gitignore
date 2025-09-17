@@ -1,4 +1,8 @@
-# Ignore secrets and build artifacts
+# ----------------------------
+# General ignores
+# ----------------------------
+
+# Secrets and build artifacts
 .env
 node_modules/
 npm-debug.log*
@@ -17,12 +21,20 @@ env/
 *.log
 
 # ----------------------------
-# 🚨 Important exceptions
+# 🚨 Important exceptions (data artifacts we ALWAYS keep)
 # ----------------------------
-# Always keep latest dashboard outputs
+
+# Keep the whole data tree
+!data/
+!data/**
+
+# Explicitly keep the key JSONs
 !data/outlook.json
 !data/outlook_source.json
 !data/history.json
 
-# Always keep all archive snapshots (hourly + eod)
+# Keep heartbeat file so every run commits
+!data/heartbeat.txt
+
+# Always keep archive snapshots (hourly + eod)
 !data/archive/**
