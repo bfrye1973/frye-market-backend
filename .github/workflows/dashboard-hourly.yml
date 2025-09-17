@@ -27,16 +27,35 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install jq
 
       - name: Build outlook source (intraday)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
+          set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
       - name: Make dashboard payload (intraday)
         run: |
+          set -euo pipefail
           python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
+
+      # 👇 NEW: write a heartbeat so there is ALWAYS a changed file to commit
+      - name: Write heartbeat (force diff)
+        run: |
+          mkdir -p data
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat.txt
+
+      # 👇 Optional but super helpful: echo heads into the logs
+      - name: Verify generated files
+        run: |
+          echo "--- outlook_source.json ---"
+          jq '{timestamp, mode, global: .global|{squeeze_daily_pct, volatilityPct, liquidityPct}}' data/outlook_source.json || true
+          echo "--- outlook.json ---"
+          jq '{ts, updated_at, gauges: {rpm, speed, fuel, squeezeDaily, volatilityPct, oil}}' data/outlook.json || true
+          echo "--- heartbeat.txt ---"
+          cat data/heartbeat.txt
 
       - name: Archive (15-day rolling)
         run: |
@@ -57,8 +76,6 @@ jobs:
           git checkout main
           git reset --hard origin/main
           git add -A
-          if git diff --staged --quiet; then
-            echo "No changes to commit"; exit 0
-          fi
-          git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+          # Always commit (heartbeat guarantees a diff), but keep allow-empty as last resort
+          git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')" || git commit --allow-empty -m "HOURLY keepalive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')"
           git push origin HEAD:main
