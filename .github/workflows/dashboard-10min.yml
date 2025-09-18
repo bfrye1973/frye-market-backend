@@ -2,13 +2,13 @@ name: dashboard-10min
 
 on:
   workflow_dispatch:
-  # 09:00–15:59 ET every 10m (13:00–19:59 UTC) + 16:00 ET once (20:00 UTC)
   schedule:
+    # Every 10 minutes during market hours (13:00–19:59 UTC), plus one run at 20:00 UTC (close)
     - cron: "*/10 13-19 * * 1-5"
     - cron: "0 20 * * 1-5"
 
-# Concurrency ONLY for this workflow (prevents backlogs of itself, but
-# does NOT block hourly/eod since they use different groups)
+# Concurrency ONLY for this workflow (prevents backlogs of itself),
+# but does NOT block hourly/eod since they use different groups
 concurrency:
   group: data-writes-10min
   cancel-in-progress: true
@@ -20,7 +20,7 @@ jobs:
       contents: write
     env:
       TZ: America/New_York
-    steps:    
+    steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -41,6 +41,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
+      # -------------------- Build intraday data --------------------
       - name: Build outlook source (intraday)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -48,37 +49,47 @@ jobs:
           set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
-      # Write INTRADAY file (no more outlook.json overlap)
       - name: Make dashboard payload (intraday)
         run: |
           set -euo pipefail
           python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_intraday.json
 
-      # Per-cadence heartbeat (10m)
       - name: Write heartbeat_10min (per-cadence freshness)
         run: |
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
-       - name: Install AWS CLI
-          run: |
-            pip install awscli
 
-       - name: Upload to R2 (live)
-         env:
-           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-         run: |
-           aws s3 cp data/outlook_intraday.json s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_intraday.json --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
-           aws s3 cp data/heartbeat_10min.txt s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_10min.txt --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
-         
+      # -------------------- Upload LIVE objects to R2 --------------------
+      - name: Install AWS CLI
+        run: |
+          pip install awscli
+
+      - name: Upload to R2 (live)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          aws s3 cp data/outlook_intraday.json s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_intraday.json --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+          aws s3 cp data/heartbeat_10min.txt s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_10min.txt --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+
+      # -------------------- Archive snapshots (local + R2) --------------------
       - name: Archive (10-minute snapshots)
         run: |
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
           mkdir -p data/archive/10min/source data/archive/10min/dashboard
-          cp data/outlook_source.json     "data/archive/10min/source/outlook_source_${TS}.json"
-          cp data/outlook_intraday.json   "data/archive/10min/dashboard/outlook_intraday_${TS}.json"
+          cp data/outlook_source.json  "data/archive/10min/source/outlook_source_${TS}.json"
+          cp data/outlook_intraday.json "data/archive/10min/dashboard/outlook_intraday_${TS}.json"
 
+      - name: Upload to R2 (archive)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          aws s3 sync data/archive/10min/source/    s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/source/    --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+          aws s3 sync data/archive/10min/dashboard/ s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/dashboard/ --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+
+      # -------------------- Visibility + push (keep current design) --------------------
       - name: Show files before commit
         run: |
           echo "--- data/archive/10min/dashboard (tail) ---"
@@ -90,18 +101,17 @@ jobs:
       - name: Commit & push (retry-safe)
         run: |
           set -e
-          git config user.name  "github-actions"
+          git config user.name  "actions-user"
           git config user.email "actions@github.com"
-          git add data/heartbeat_10min.txt || true
-          git add data/outlook_intraday.json data/outlook_source.json || true
-          git add data/archive/10min || true
-          git commit -m "10MIN intraday refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "10MIN keepalive"
-
+          git add -A
+          git commit -m "10MIN intraday refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "Nothing to commit"
+          # Try push; if remote moved, rebase and push
           for attempt in 1 2 3; do
-            if git push origin HEAD:main; then
-              echo "Push succeeded on attempt $attempt"; break
+            if git push origin main; then
+              echo "Push succeeded on attempt $attempt"
+              break
             fi
-            echo "Push rejected; syncing with origin/main (attempt $attempt)..."
+            echo "Push failed (attempt $attempt) — rebasing…"
             git fetch origin main
-            git rebase origin/main || true
+            git rebase origin/main || git rebase --abort || true
           done
