@@ -6,10 +6,10 @@ on:
   schedule:
     - cron: "5 13-21 * * 1-5"
 
-# One global queue shared by ALL writers
+# Concurrency ONLY for hourly (doesn't block 10-min)
 concurrency:
-  group: data-writes-main
-  cancel-in-progress: false
+  group: data-writes-hourly
+  cancel-in-progress: true
 
 jobs:
   hourly:
@@ -49,13 +49,14 @@ jobs:
           set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
-      - name: Make dashboard payload (intraday)
+      # Write HOURLY file (no more outlook.json overlap)
+      - name: Make dashboard payload (intraday → hourly view)
         run: |
           set -euo pipefail
-          python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
+          python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_hourly.json
 
-      # Hourly per-cadence heartbeat + legacy global heartbeat for backward compatibility
-      - name: Write heartbeat_hourly (per-cadence) + legacy heartbeat.txt
+      # Hourly heartbeats
+      - name: Write heartbeat_hourly (+ legacy heartbeat.txt)
         run: |
           mkdir -p data
           TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
@@ -67,15 +68,15 @@ jobs:
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
           mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
-          cp data/outlook_source.json "data/archive/hourly/source/outlook_source_${TS}.json"
-          cp data/outlook.json        "data/archive/hourly/dashboard/outlook_${TS}.json"
+          cp data/outlook_source.json   "data/archive/hourly/source/outlook_source_${TS}.json"
+          cp data/outlook_hourly.json   "data/archive/hourly/dashboard/outlook_hourly_${TS}.json"
           find data/archive/hourly/source    -type f -name 'outlook_source_*.json' -mtime +15 -delete || true
-          find data/archive/hourly/dashboard -type f -name 'outlook_*.json'        -mtime +15 -delete || true
+          find data/archive/hourly/dashboard -type f -name 'outlook_hourly_*.json'  -mtime +15 -delete || true
 
       - name: Show files before commit
         run: |
           echo "--- data/ ---"; ls -l data/ || true
-          echo "--- outlook.json (head) ---"; head -n 1 data/outlook.json || true
+          echo "--- outlook_hourly.json (head) ---"; head -n 1 data/outlook_hourly.json || true
           echo "--- outlook_source.json (head) ---"; head -n 1 data/outlook_source.json || true
           echo "--- heartbeat_hourly.txt ---"; cat data/heartbeat_hourly.txt || true
           echo "--- heartbeat.txt (legacy) ---"; cat data/heartbeat.txt || true
@@ -85,12 +86,16 @@ jobs:
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          # Hourly is allowed to write legacy heartbeat.txt and any unified history.json (if used)
           git add data/heartbeat_hourly.txt data/heartbeat.txt || true
-          git add data/history.json  || true
+          git add data/outlook_hourly.json data/outlook_source.json || true
           git add data/archive/hourly || true
-          git add data/outlook.json data/outlook_source.json || true
           git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "HOURLY keepalive"
 
-          # Retry-safe push
-          for attempt in
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              echo "Push succeeded on attempt $attempt"; break
+            fi
+            echo "Push rejected; syncing with origin/main (attempt $attempt)..."
+            git fetch origin main
+            git rebase origin/main || true
+          done
