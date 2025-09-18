@@ -1,6 +1,7 @@
 // api/routes.js — ESM router (sector cards + numeric aliases, engine lights,
 // ensure squeezeDaily, rpm/speed, volatility; with /debug, /outlook5d, /v1/ohlc, /sectorTrend,
 // and NEW: /replay/index + /replay/at + replay-aware OHLC &at=)
+// UPDATED: per-cadence heartbeats wired into /dashboard (10m for Meter/Lights/Sectors; EOD for Daily)
 
 import express from "express";
 import path from "path";
@@ -35,6 +36,16 @@ async function readJsonAbs(absPath) {
   try {
     const raw = await fs.readFile(absPath, "utf8");
     return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/* -------- NEW: safe text stamp reader (returns trimmed ISO or null) -------- */
+async function readStamp(absPath) {
+  try {
+    const t = await fs.readFile(absPath, "utf8");
+    return (t || "").trim() || null;
   } catch {
     return null;
   }
@@ -152,8 +163,8 @@ function normalizeSectorCards(json){
   if (sectors){
     cards = Object.keys(sectors).map(name => {
       const v = sectors[name] || {};
-      const nh = Number(v.nh ?? 0), nl = Number(v.nl ?? 0);
-      const netNH = Number(v.netNH ?? (nh - nl)), netUD = Number(v.netUD ?? 0);
+      const nh = Number(v?.nh ?? 0), nl = Number(v?.nl ?? 0);
+      const netNH = Number(v?.netNH ?? (nh - nl)), netUD = Number(v?.netUD ?? 0);
       const spark = Array.isArray(v.spark) ? v.spark : [];
       const outlook = netNH > 0 ? "Bullish" : netNH < 0 ? "Bearish" : "Neutral";
       const { last, delta, deltaPct } = computeCardNumbers(v);
@@ -196,9 +207,9 @@ function ensureSqueeze(json){
   }
 
   // intraday squeeze odometer from fuel if missing
-  if (!Number.isFinite(json.odometers.squeezeCompressionPct)) {
+  if (!Number.isFinite(json.odometers?.squeezeCompressionPct)) {
     const fuel = Number(json?.gauges?.fuel?.pct ?? NaN);
-    if (Number.isFinite(fuel)) json.odometers.squeezeCompressionPct = fuel;
+    if (Number.isFinite(fuel)) json.odometers = { ...(json.odometers||{}), squeezeCompressionPct: fuel };
   }
 
   return json;
@@ -290,7 +301,7 @@ function tfDir(tf) {
 function isoFromArchName(s) {
   // outlook_YYYY-MM-DDTHH-MM-SSZ.json  →  YYYY-MM-DDTHH:MM:SSZ
   const core = s.replace(/^outlook_/, "").replace(/\.json$/, "");
-  return core.replace(/-/g, (m, i) => (i===13||i===16?":":"-")); // cheap, but we also sort safer below
+  return core.replace(/T(\d{2})-(\d{2})-(\d{2})Z$/, (m,h,mn,s) => `T${h}:${mn}:${s}Z`);
 }
 
 /* -------- Router -------- */
@@ -302,20 +313,40 @@ export default function buildRouter(){
     noStore(res).json({ ok:true, ts:new Date().toISOString(), service:"frye-market-backend" })
   );
 
-  // Dashboard (main payload)
+  // Dashboard (main payload) — UPDATED with per-cadence updatedAt stamps
   router.get("/dashboard", async (req, res) => {
     try{
       let json = await readJsonFromProject("data/outlook.json");
       if (!json) throw new Error("outlook.json not found");
 
+      // Normalize + fill derived fields
       json = normalizeSectorCards(json);
       json = ensureSqueeze(json);
       json = ensureIndexes(json);
       json = ensureVolatility(json);
       json.signals = computeSignals(json);
 
+      // Per-cadence heartbeats (files written by workflows)
+      const hb10   = await readStamp(path.join(DATA_ROOT, "heartbeat_10min.txt"));
+      const hb1h   = await readStamp(path.join(DATA_ROOT, "heartbeat_hourly.txt"));
+      const hbEod  = await readStamp(path.join(DATA_ROOT, "heartbeat_eod.txt"));
+      const hbLegacy = await readStamp(path.join(DATA_ROOT, "heartbeat.txt")); // hourly writes this
+
+      // Attach explicit freshness to sections (Index Sectors uses 10-min per request)
+      json.marketMeter = { ...(json.marketMeter || {}), updatedAt: hb10 || hbLegacy || hb1h || null };
+      json.engineLights = { ...(json.engineLights || {}), updatedAt: hb10 || hbLegacy || hb1h || null };
+      json.sectors = { ...(json.sectors || {}), updatedAt: hb10 || hb1h || hbLegacy || null }; // 10-min
+      json.daily = { ...(json.daily || {}), updatedAt: hbEod || hb1h || hbLegacy || null };
+
+      // Meta
       json.meta = json.meta || {};
       json.meta.ts = json.meta.ts || json.updated_at || new Date().toISOString();
+      json.meta.stamps = {
+        tenMin: hb10 || null,
+        hourly: hb1h || null,
+        eod: hbEod || null,
+        legacy: hbLegacy || null
+      };
 
       return noStore(res).json(json);
     }catch(e){
@@ -345,7 +376,7 @@ export default function buildRouter(){
     }
   });
 
-  // quick debug snapshot
+  // quick debug snapshot — UPDATED to show heartbeat stamps
   router.get("/debug", async (req, res) => {
     try {
       const dash = await readJsonFromProject("data/outlook.json");
@@ -358,11 +389,17 @@ export default function buildRouter(){
       const totals = (Array.isArray(sectors) ? sectors : Object.values(sectors)).reduce((acc, v) => {
         const nh  = Number(v?.nh ?? 0);
         const nl  = Number(v?.nl ?? 0);
-        const u   = Number(v?.up ?? v?.u ?? 0);
-        const d   = Number(v?.down ?? v?.d ?? 0);
+        const u   = Number(v?.u  ?? v?.up   ?? 0);
+        const d   = Number(v?.d  ?? v?.down ?? 0);
         acc.nh += nh; acc.nl += nl; acc.u += u; acc.d += d;
         return acc;
       }, { nh:0, nl:0, u:0, d:0 });
+
+      // stamps (for quick verification)
+      const hb10   = await readStamp(path.join(DATA_ROOT, "heartbeat_10min.txt"));
+      const hb1h   = await readStamp(path.join(DATA_ROOT, "heartbeat_hourly.txt"));
+      const hbEod  = await readStamp(path.join(DATA_ROOT, "heartbeat_eod.txt"));
+      const hbLegacy = await readStamp(path.join(DATA_ROOT, "heartbeat.txt"));
 
       return noStore(res).json({
         ok: true,
@@ -371,7 +408,8 @@ export default function buildRouter(){
         intradaySqueezePct: Number(od?.squeezeCompressionPct ?? gg?.fuel?.pct ?? NaN),
         breadthIdx:  Number(summary?.breadthIdx  ?? gg?.rpm?.pct   ?? NaN),
         momentumIdx: Number(summary?.momentumIdx ?? gg?.speed?.pct ?? NaN),
-        totals
+        totals,
+        stamps: { tenMin: hb10, hourly: hb1h, eod: hbEod, legacy: hbLegacy }
       });
     } catch (e) {
       return noStore(res).status(500).json({ ok:false, error:String(e) });
