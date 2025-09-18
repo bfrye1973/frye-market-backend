@@ -1,7 +1,8 @@
 // api/routes.js — ESM router (sector cards + numeric aliases, engine lights,
 // ensure squeezeDaily, rpm/speed, volatility; with /debug, /outlook5d, /v1/ohlc, /sectorTrend,
-// and NEW: /replay/index + /replay/at + replay-aware OHLC &at=)
-// UPDATED: per-cadence heartbeats wired into /dashboard (10m for Meter/Lights/Sectors; EOD for Daily)
+// and /replay/index + /replay/at + replay-aware OHLC &at=)
+// UPDATED: /dashboard prefers intraday→hourly→eod→legacy & attaches per-cadence heartbeats.
+// Index Sectors uses 10-min heartbeat (your request).
 
 import express from "express";
 import path from "path";
@@ -313,11 +314,17 @@ export default function buildRouter(){
     noStore(res).json({ ok:true, ts:new Date().toISOString(), service:"frye-market-backend" })
   );
 
-  // Dashboard (main payload) — UPDATED with per-cadence updatedAt stamps
+  // Dashboard (main payload) — UPDATED with file preference + per-cadence stamps
   router.get("/dashboard", async (req, res) => {
     try{
-      let json = await readJsonFromProject("data/outlook.json");
-      if (!json) throw new Error("outlook.json not found");
+      // Prefer intraday → hourly → eod → legacy outlook.json
+      let json =
+        (await readJsonFromProject("data/outlook_intraday.json")) ||
+        (await readJsonFromProject("data/outlook_hourly.json")) ||
+        (await readJsonFromProject("data/outlook_eod.json")) ||
+        (await readJsonFromProject("data/outlook.json")); // legacy fallback
+
+      if (!json) throw new Error("no outlook payload found");
 
       // Normalize + fill derived fields
       json = normalizeSectorCards(json);
@@ -327,16 +334,16 @@ export default function buildRouter(){
       json.signals = computeSignals(json);
 
       // Per-cadence heartbeats (files written by workflows)
-      const hb10   = await readStamp(path.join(DATA_ROOT, "heartbeat_10min.txt"));
-      const hb1h   = await readStamp(path.join(DATA_ROOT, "heartbeat_hourly.txt"));
-      const hbEod  = await readStamp(path.join(DATA_ROOT, "heartbeat_eod.txt"));
+      const hb10     = await readStamp(path.join(DATA_ROOT, "heartbeat_10min.txt"));
+      const hb1h     = await readStamp(path.join(DATA_ROOT, "heartbeat_hourly.txt"));
+      const hbEod    = await readStamp(path.join(DATA_ROOT, "heartbeat_eod.txt"));
       const hbLegacy = await readStamp(path.join(DATA_ROOT, "heartbeat.txt")); // hourly writes this
 
-      // Attach explicit freshness to sections (Index Sectors uses 10-min per request)
-      json.marketMeter = { ...(json.marketMeter || {}), updatedAt: hb10 || hbLegacy || hb1h || null };
+      // Attach explicit freshness to sections (Index Sectors uses 10-min by your request)
+      json.marketMeter  = { ...(json.marketMeter  || {}), updatedAt: hb10 || hbLegacy || hb1h || null };
       json.engineLights = { ...(json.engineLights || {}), updatedAt: hb10 || hbLegacy || hb1h || null };
-      json.sectors = { ...(json.sectors || {}), updatedAt: hb10 || hb1h || hbLegacy || null }; // 10-min
-      json.daily = { ...(json.daily || {}), updatedAt: hbEod || hb1h || hbLegacy || null };
+      json.sectors      = { ...(json.sectors      || {}), updatedAt: hb10 || hb1h || hbLegacy || null };
+      json.daily        = { ...(json.daily        || {}), updatedAt: hbEod || hb1h || hbLegacy || null };
 
       // Meta
       json.meta = json.meta || {};
@@ -347,6 +354,14 @@ export default function buildRouter(){
         eod: hbEod || null,
         legacy: hbLegacy || null
       };
+
+      // For quick troubleshooting, tell which source file was used
+      if (!json.meta.sourceFile) {
+        if (await readJsonFromProject("data/outlook_intraday.json")) json.meta.sourceFile = "outlook_intraday.json";
+        else if (await readJsonFromProject("data/outlook_hourly.json")) json.meta.sourceFile = "outlook_hourly.json";
+        else if (await readJsonFromProject("data/outlook_eod.json")) json.meta.sourceFile = "outlook_eod.json";
+        else json.meta.sourceFile = "outlook.json";
+      }
 
       return noStore(res).json(json);
     }catch(e){
@@ -366,7 +381,10 @@ export default function buildRouter(){
   router.get("/gauges", async (req,res) => {
     try{
       const index = (req.query.index || req.query.symbol || Object.keys(req.query)[0] || "SPY").toString();
-      const dash = await readJsonFromProject("data/outlook.json");
+      const dash = await readJsonFromProject("data/outlook_intraday.json")
+               ||  await readJsonFromProject("data/outlook_hourly.json")
+               ||  await readJsonFromProject("data/outlook_eod.json")
+               ||  await readJsonFromProject("data/outlook.json");
       if (!dash) return noStore(res).json([]);
       const rows = buildGaugeRowsFromDashboard(dash, index);
       return noStore(res).json(Array.isArray(rows)? rows : []);
@@ -376,11 +394,16 @@ export default function buildRouter(){
     }
   });
 
-  // quick debug snapshot — UPDATED to show heartbeat stamps
+  // quick debug snapshot — UPDATED to show heartbeat stamps + source choice
   router.get("/debug", async (req, res) => {
     try {
-      const dash = await readJsonFromProject("data/outlook.json");
-      if (!dash) return noStore(res).status(404).json({ ok:false, error:"outlook.json not found" });
+      let src = "outlook_intraday.json";
+      let dash = await readJsonFromProject("data/outlook_intraday.json");
+      if (!dash) { src = "outlook_hourly.json"; dash = await readJsonFromProject("data/outlook_hourly.json"); }
+      if (!dash) { src = "outlook_eod.json";    dash = await readJsonFromProject("data/outlook_eod.json"); }
+      if (!dash) { src = "outlook.json";        dash = await readJsonFromProject("data/outlook.json"); }
+
+      if (!dash) return noStore(res).status(404).json({ ok:false, error:"no outlook payload found" });
 
       const gg = dash.gauges || {};
       const od = dash.odometers || {};
@@ -403,6 +426,7 @@ export default function buildRouter(){
 
       return noStore(res).json({
         ok: true,
+        source: src,
         ts: dash.updated_at || dash.ts || new Date().toISOString(),
         dailySqueezePct: Number(gg?.squeezeDaily?.pct ?? NaN),
         intradaySqueezePct: Number(od?.squeezeCompressionPct ?? gg?.fuel?.pct ?? NaN),
@@ -435,7 +459,7 @@ export default function buildRouter(){
   });
 
   /* ======================
-     REPLAY ENDPOINTS (NEW)
+     REPLAY ENDPOINTS
      ====================== */
 
   // List snapshots for a granularity
