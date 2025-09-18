@@ -54,11 +54,13 @@ jobs:
           set -euo pipefail
           python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
 
-      # Hourly is the single writer of heartbeat.txt (human-readable freshness)
-      - name: Write heartbeat (force diff)
+      # Hourly per-cadence heartbeat + legacy global heartbeat for backward compatibility
+      - name: Write heartbeat_hourly (per-cadence) + legacy heartbeat.txt
         run: |
           mkdir -p data
-          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat.txt
+          TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          echo "$TS" > data/heartbeat_hourly.txt
+          echo "$TS" > data/heartbeat.txt   # legacy global stamp (only hourly writes this)
 
       - name: Archive (15-day rolling)
         run: |
@@ -75,26 +77,20 @@ jobs:
           echo "--- data/ ---"; ls -l data/ || true
           echo "--- outlook.json (head) ---"; head -n 1 data/outlook.json || true
           echo "--- outlook_source.json (head) ---"; head -n 1 data/outlook_source.json || true
+          echo "--- heartbeat_hourly.txt ---"; cat data/heartbeat_hourly.txt || true
+          echo "--- heartbeat.txt (legacy) ---"; cat data/heartbeat.txt || true
 
       - name: Commit & push (retry-safe)
         run: |
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          # Hourly is allowed to write heartbeat.txt and (if applicable) unified history.json
-          git add data/heartbeat.txt || true
+          # Hourly is allowed to write legacy heartbeat.txt and any unified history.json (if used)
+          git add data/heartbeat_hourly.txt data/heartbeat.txt || true
           git add data/history.json  || true
           git add data/archive/hourly || true
           git add data/outlook.json data/outlook_source.json || true
           git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "HOURLY keepalive"
 
           # Retry-safe push
-          for attempt in 1 2 3; do
-            if git push origin HEAD:main; then
-              echo "Push succeeded on attempt $attempt"
-              break
-            fi
-            echo "Push rejected; syncing with origin/main (attempt $attempt)..."
-            git fetch origin main
-            git rebase origin/main || true
-          done
+          for attempt in
