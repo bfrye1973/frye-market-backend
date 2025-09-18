@@ -20,8 +20,8 @@ jobs:
       contents: write
     env:
       TZ: America/New_York
-
     steps:
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -61,9 +61,17 @@ jobs:
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
        - name: Install AWS CLI
-         run: |
-           pip install awscli
+          run: |
+            pip install awscli
 
+       - name: Upload to R2 (live)
+         env:
+           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+         run: |
+           aws s3 cp data/outlook_intraday.json s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_intraday.json --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+           aws s3 cp data/heartbeat_10min.txt s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_10min.txt --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+         
       - name: Archive (10-minute snapshots)
         run: |
           set -e
