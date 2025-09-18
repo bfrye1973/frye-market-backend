@@ -60,6 +60,9 @@ jobs:
         run: |
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
+       - name: Install AWS CLI
+         run: |
+           pip install awscli
 
       - name: Archive (10-minute snapshots)
         run: |
