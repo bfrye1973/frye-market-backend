@@ -18,7 +18,6 @@ jobs:
       contents: write
     env:
       TZ: America/New_York
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,6 +41,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
+      # -------------------- Build intraday -> hourly payload --------------------
       - name: Build outlook source (intraday)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -49,13 +49,12 @@ jobs:
           set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
-      # Write HOURLY file (no more outlook.json overlap)
       - name: Make dashboard payload (intraday → hourly view)
         run: |
           set -euo pipefail
           python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_hourly.json
 
-      # Hourly heartbeats
+      # -------------------- Heartbeats --------------------
       - name: Write heartbeat_hourly (+ legacy heartbeat.txt)
         run: |
           mkdir -p data
@@ -63,16 +62,40 @@ jobs:
           echo "$TS" > data/heartbeat_hourly.txt
           echo "$TS" > data/heartbeat.txt   # legacy global stamp (only hourly writes this)
 
+      # -------------------- Upload LIVE objects to R2 --------------------
+      - name: Install AWS CLI
+        run: |
+          pip install awscli
+
+      - name: Upload to R2 (live)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          aws s3 cp data/outlook_hourly.json  s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_hourly.json  --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+          aws s3 cp data/heartbeat_hourly.txt s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_hourly.txt --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+          aws s3 cp data/heartbeat.txt        s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat.txt        --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+
+      # -------------------- Archive snapshots (local + R2) --------------------
       - name: Archive (15-day rolling)
         run: |
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
           mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
-          cp data/outlook_source.json   "data/archive/hourly/source/outlook_source_${TS}.json"
-          cp data/outlook_hourly.json   "data/archive/hourly/dashboard/outlook_hourly_${TS}.json"
+          cp data/outlook_source.json "data/archive/hourly/source/outlook_source_${TS}.json"
+          cp data/outlook_hourly.json "data/archive/hourly/dashboard/outlook_hourly_${TS}.json"
           find data/archive/hourly/source    -type f -name 'outlook_source_*.json' -mtime +15 -delete || true
           find data/archive/hourly/dashboard -type f -name 'outlook_hourly_*.json'  -mtime +15 -delete || true
 
+      - name: Upload to R2 (archive)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          aws s3 sync data/archive/hourly/source/    s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/hourly/source/    --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+          aws s3 sync data/archive/hourly/dashboard/ s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/hourly/dashboard/ --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+
+      # -------------------- Visibility + push --------------------
       - name: Show files before commit
         run: |
           echo "--- data/ ---"; ls -l data/ || true
@@ -90,7 +113,6 @@ jobs:
           git add data/outlook_hourly.json data/outlook_source.json || true
           git add data/archive/hourly || true
           git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "HOURLY keepalive"
-
           for attempt in 1 2 3; do
             if git push origin HEAD:main; then
               echo "Push succeeded on attempt $attempt"; break
