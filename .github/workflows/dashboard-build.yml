@@ -54,7 +54,11 @@ jobs:
           set -euo pipefail
           python scripts/make_dashboard.py --mode daily --source data/outlook_source.json --out data/outlook.json
 
-      # hourly owns heartbeat.txt; no heartbeat here
+      # Per-cadence heartbeat (EOD)
+      - name: Write heartbeat_eod (per-cadence freshness)
+        run: |
+          mkdir -p data
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_eod.txt
 
       - name: Archive (30-day rolling)
         run: |
@@ -71,13 +75,15 @@ jobs:
           echo "--- data/ ---"; ls -l data/ || true
           echo "--- outlook.json (head) ---"; head -n 1 data/outlook.json || true
           echo "--- outlook_source.json (head) ---"; head -n 1 data/outlook_source.json || true
+          echo "--- heartbeat_eod.txt ---"; cat data/heartbeat_eod.txt || true
 
       - name: Commit & push (retry-safe)
         run: |
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          # only this job's files (avoid heartbeat.txt / history.json)
+          # only this job's files
+          git add data/heartbeat_eod.txt || true
           git add data/archive/eod || true
           git add data/outlook.json data/outlook_source.json || true
           git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "EOD keepalive"
