@@ -2,13 +2,13 @@ name: dashboard-hourly
 
 on:
   workflow_dispatch:
-  # 08:30–17:30 ET => 12:30–21:30 UTC, every hour Mon–Fri
+  # 08:30–17:30 ET => 12:30–21:30 UTC, every hour Mon–Fri (run at :05 past)
   schedule:
-    - cron: "30 12-21 * * 1-5"
+    - cron: "5 13-21 * * 1-5"
 
-
+# One global queue shared by ALL writers
 concurrency:
-  group: data-writes-main-${{ github.workflow }}
+  group: data-writes-main
   cancel-in-progress: false
 
 jobs:
@@ -22,7 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
 
       - name: Sync repo state
         run: |
@@ -32,7 +33,8 @@ jobs:
 
       - name: Setup Python
         uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
 
       - name: Install deps
         run: |
@@ -52,6 +54,7 @@ jobs:
           set -euo pipefail
           python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
 
+      # Hourly is the single writer of heartbeat.txt (human-readable freshness)
       - name: Write heartbeat (force diff)
         run: |
           mkdir -p data
@@ -70,18 +73,22 @@ jobs:
       - name: Show files before commit
         run: |
           echo "--- data/ ---"; ls -l data/ || true
-          echo "--- outlook.json ---"; head -n 1 data/outlook.json || true
-          echo "--- outlook_source.json ---"; head -n 1 data/outlook_source.json || true
+          echo "--- outlook.json (head) ---"; head -n 1 data/outlook.json || true
+          echo "--- outlook_source.json (head) ---"; head -n 1 data/outlook_source.json || true
 
       - name: Commit & push (retry-safe)
         run: |
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          git add -A
-          git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H-%M-%SZ')" || git commit --allow-empty -m "HOURLY keepalive"
+          # Hourly is allowed to write heartbeat.txt and (if applicable) unified history.json
+          git add data/heartbeat.txt || true
+          git add data/history.json  || true
+          git add data/archive/hourly || true
+          git add data/outlook.json data/outlook_source.json || true
+          git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "HOURLY keepalive"
 
-          # Retry-safe push: if rejected, rebase onto latest main and push again
+          # Retry-safe push
           for attempt in 1 2 3; do
             if git push origin HEAD:main; then
               echo "Push succeeded on attempt $attempt"
@@ -89,5 +96,5 @@ jobs:
             fi
             echo "Push rejected; syncing with origin/main (attempt $attempt)..."
             git fetch origin main
-            git rebase origin/main
+            git rebase origin/main || true
           done
