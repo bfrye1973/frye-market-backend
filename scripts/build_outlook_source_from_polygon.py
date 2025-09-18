@@ -30,6 +30,7 @@ Outputs (schema)
 from __future__ import annotations
 import argparse, csv, json, math, os, time, random
 import urllib.parse, urllib.request, urllib.error
+import statistics
 from datetime import datetime, timedelta, timezone
 from math import log
 from typing import Any, Dict, List, Tuple
@@ -40,6 +41,103 @@ POLY_BASE  = "https://api.polygon.io"
 SECTORS_DIR= os.path.join("data", "sectors")
 OUT_PATH   = os.path.join("data", "outlook_source.json")
 HIST_PATH  = os.path.join("data", "history.json")
+
+# -------- Lux-style BB/KC Daily Squeeze helpers --------
+
+def percent_rank(series, value):
+    """Percentile rank in [0,1]; ties get 0.5 credit (PR used for scaling)."""
+    if not series:
+        return 0.5
+    n = len(series)
+    lt = sum(1 for x in series if x < value)
+    eq = sum(1 for x in series if x == value)
+    return (lt + 0.5 * eq) / n
+
+def ema(vals, length):
+    if not vals:
+        return []
+    k = 2.0 / (length + 1.0)
+    out = [vals[0]]
+    for v in vals[1:]:
+        out.append(out[-1] + k * (v - out[-1]))
+    return out
+
+def true_range(h, l, c_prev):
+    return max(h - l, abs(h - c_prev), abs(l - c_prev))
+
+def atr(highs, lows, closes, length=20):
+    """EMA ATR to mirror Lux-style KC base."""
+    if len(closes) < 2:
+        return []
+    trs = []
+    for i in range(1, len(closes)):
+        trs.append(true_range(highs[i], lows[i], closes[i-1]))
+    return ema(trs, length)
+
+def rolling_stdev(vals, length=20):
+    """Population stdev over a rolling window."""
+    out = []
+    q = []
+    for v in vals:
+        q.append(v)
+        if len(q) > length:
+            q.pop(0)
+        if len(q) >= length:
+            out.append(statistics.pstdev(q))
+        else:
+            out.append(None)
+    return out
+
+def compute_daily_squeeze_pct_lux(symbol="SPY", lookback_days=250, length=20, bb_mult=2.0, kc_mult=1.5):
+    """
+    Lux-style Daily Squeeze Index on SPY daily bars, scaled to 0..100.
+
+    Steps:
+      1) Fetch ~250 daily bars of SPY
+      2) Compute BB width: 2 * bb_mult * stdev(close, length)
+      3) Compute KC width: 2 * kc_mult * ATR(length) using EMA-based ATR
+      4) Ratio R = BB_width / KC_width  (BB inside KC -> R < 1 => higher compression)
+      5) Daily Squeeze % = 100 * (1 - PercentRank(R, rolling window))
+
+    Returns: float 0..100 (higher = more compressed).
+    """
+    # pull daily bars (older -> newer)
+    js = poly_json(f"{POLY_BASE}/v2/aggs/ticker/{symbol}/range/1/day/now/prev",
+                   {"limit": lookback_days, "adjusted": "true", "sort": "asc"})
+    bars = js.get("results", []) or []
+    if len(bars) < length + 2:
+        return 50.0  # neutral if insufficient data
+
+    closes = [float(b["c"]) for b in bars]
+    highs  = [float(b["h"]) for b in bars]
+    lows   = [float(b["l"]) for b in bars]
+
+    sd = rolling_stdev(closes, length=length)
+    atr_vals = atr(highs, lows, closes, length=length)
+
+    ratios = []
+    for i in range(len(closes)):
+        if sd[i] is None or i == 0 or i-1 >= len(atr_vals) or atr_vals[i-1] is None:
+            ratios.append(None)
+            continue
+        bb_width = 2.0 * bb_mult * sd[i]
+        kc_width = 2.0 * kc_mult * atr_vals[i-1]  # ATR one shorter than closes
+        if kc_width <= 0:
+            ratios.append(None)
+            continue
+        ratios.append(bb_width / kc_width)
+
+    series = [r for r in ratios if r is not None]
+    if len(series) < length + 2:
+        return 50.0
+
+    # Use the last ~120 ratios for percentile scaling (Lux-like feel)
+    window = series[-120:] if len(series) >= 120 else series
+    current = window[-1]
+    pr = percent_rank(window, current)  # 0..1  (high = wide BB vs KC => low compression)
+    squeeze_pct = max(0.0, min(100.0, round((1.0 - pr) * 100.0, 2)))
+    return squeeze_pct
+
 
 # ---------------- HTTP / Polygon helpers ----------------
 
