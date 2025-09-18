@@ -19,7 +19,6 @@ jobs:
       contents: write
     env:
       TZ: America/New_York
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,6 +40,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
+      # -------------------- Build daily payload --------------------
       - name: Build outlook source (daily)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -54,12 +54,26 @@ jobs:
           set -euo pipefail
           python scripts/make_dashboard.py --mode daily --source data/outlook_source.json --out data/outlook.json
 
-      # Per-cadence heartbeat (EOD)
+      # -------------------- Heartbeat --------------------
       - name: Write heartbeat_eod (per-cadence freshness)
         run: |
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_eod.txt
 
+      # -------------------- Upload LIVE objects to R2 --------------------
+      - name: Install AWS CLI
+        run: |
+          pip install awscli
+
+      - name: Upload to R2 (live)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          aws s3 cp data/outlook.json       s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_eod.json  --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+          aws s3 cp data/heartbeat_eod.txt s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_eod.txt --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+
+      # -------------------- Archive snapshots (local + R2) --------------------
       - name: Archive (30-day rolling)
         run: |
           set -e
@@ -70,6 +84,15 @@ jobs:
           find data/archive/eod/source    -type f -name 'outlook_source_*.json' -mtime +30 -delete || true
           find data/archive/eod/dashboard -type f -name 'outlook_*.json'        -mtime +30 -delete || true
 
+      - name: Upload to R2 (archive)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          aws s3 sync data/archive/eod/source/    s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/eod/source/    --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+          aws s3 sync data/archive/eod/dashboard/ s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/eod/dashboard/ --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+
+      # -------------------- Visibility + push --------------------
       - name: Show files before commit
         run: |
           echo "--- data/ ---"; ls -l data/ || true
@@ -82,13 +105,10 @@ jobs:
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          # only this job's files
           git add data/heartbeat_eod.txt || true
           git add data/archive/eod || true
           git add data/outlook.json data/outlook_source.json || true
           git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "EOD keepalive"
-
-          # Retry-safe push
           for attempt in 1 2 3; do
             if git push origin HEAD:main; then
               echo "Push succeeded on attempt $attempt"
