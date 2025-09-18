@@ -572,70 +572,70 @@
       "date": "2025-09-18",
       "groups": {
         "Financials": {
-          "nh": 86,
-          "nl": 159,
-          "u": 481,
-          "d": 117
+          "nh": 110,
+          "nl": 153,
+          "u": 449,
+          "d": 134
         },
         "Consumer Staples": {
-          "nh": 13,
-          "nl": 33,
-          "u": 86,
-          "d": 55
-        },
-        "Real Estate": {
-          "nh": 9,
-          "nl": 39,
-          "u": 123,
-          "d": 39
-        },
-        "Communication Services": {
-          "nh": 28,
-          "nl": 21,
-          "u": 77,
-          "d": 60
-        },
-        "Utilities": {
-          "nh": 6,
-          "nl": 24,
-          "u": 38,
-          "d": 18
-        },
-        "tech": {
-          "nh": 202,
-          "nl": 22,
-          "u": 337,
-          "d": 81
-        },
-        "Industrials": {
-          "nh": 81,
-          "nl": 35,
-          "u": 365,
-          "d": 79
-        },
-        "Energy": {
-          "nh": 23,
-          "nl": 12,
+          "nh": 15,
+          "nl": 32,
           "u": 88,
           "d": 60
         },
+        "Real Estate": {
+          "nh": 10,
+          "nl": 38,
+          "u": 120,
+          "d": 38
+        },
+        "Communication Services": {
+          "nh": 29,
+          "nl": 19,
+          "u": 92,
+          "d": 65
+        },
+        "Utilities": {
+          "nh": 7,
+          "nl": 24,
+          "u": 30,
+          "d": 37
+        },
+        "tech": {
+          "nh": 214,
+          "nl": 22,
+          "u": 345,
+          "d": 83
+        },
+        "Industrials": {
+          "nh": 88,
+          "nl": 34,
+          "u": 306,
+          "d": 81
+        },
+        "Energy": {
+          "nh": 25,
+          "nl": 13,
+          "u": 73,
+          "d": 71
+        },
         "Healthcare": {
-          "nh": 98,
+          "nh": 101,
           "nl": 70,
-          "u": 432,
-          "d": 121
+          "u": 543,
+          "d": 145
         },
         "Materials": {
-          "nh": 16,
+          "nh": 19,
           "nl": 27,
-          "u": 100,
-          "d": 78
+          "u": 85,
+          "d": 45
         },
         "Consumer Discretionary": {
-          "nh": 42,
-          "nl": 47,
-          "u": 275,
-          "d": 77
+          "nh": 51,
+          "nl": 44,
+          "u": 240,
+          "d": 92
         }
       }
     }
