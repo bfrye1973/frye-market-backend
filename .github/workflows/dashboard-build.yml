@@ -5,12 +5,12 @@ on:
   # Market OPEN & CLOSE: 09:30 ET (13:30 UTC) and 16:00 ET (20:00 UTC)
   schedule:
     - cron: "30 13 * * 1-5"
-    - cron: "0 20 * * 1-5"
+    - cron: "1 20 * * 1-5"   # nudge 1 minute after :00 to avoid crowding
 
+# One global queue shared by ALL writers
 concurrency:
-  group: data-writes-main-${{ github.workflow }}
+  group: data-writes-main
   cancel-in-progress: false
-
 
 jobs:
   eod:
@@ -22,7 +22,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
 
       - name: Sync repo state
         run: |
@@ -31,7 +32,8 @@ jobs:
           git reset --hard origin/main
 
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
 
       - name: Install deps
         run: |
@@ -52,10 +54,7 @@ jobs:
           set -euo pipefail
           python scripts/make_dashboard.py --mode daily --source data/outlook_source.json --out data/outlook.json
 
-      - name: Write heartbeat (force diff)
-        run: |
-          mkdir -p data
-          echo "eod $(date -u +'%Y-%m-%dT%H:%M:%SZ')" > data/heartbeat.txt
+      # hourly owns heartbeat.txt; no heartbeat here
 
       - name: Archive (30-day rolling)
         run: |
@@ -70,18 +69,20 @@ jobs:
       - name: Show files before commit
         run: |
           echo "--- data/ ---"; ls -l data/ || true
-          echo "--- outlook.json ---"; head -n 1 data/outlook.json || true
-          echo "--- outlook_source.json ---"; head -n 1 data/outlook_source.json || true
+          echo "--- outlook.json (head) ---"; head -n 1 data/outlook.json || true
+          echo "--- outlook_source.json (head) ---"; head -n 1 data/outlook_source.json || true
 
       - name: Commit & push (retry-safe)
         run: |
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          git add -A
+          # only this job's files (avoid heartbeat.txt / history.json)
+          git add data/archive/eod || true
+          git add data/outlook.json data/outlook_source.json || true
           git commit -m "EOD refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "EOD keepalive"
 
-          # Retry-safe push: if rejected, rebase onto latest main and push again
+          # Retry-safe push
           for attempt in 1 2 3; do
             if git push origin HEAD:main; then
               echo "Push succeeded on attempt $attempt"
@@ -89,5 +90,5 @@ jobs:
             fi
             echo "Push rejected; syncing with origin/main (attempt $attempt)..."
             git fetch origin main
-            git rebase origin/main
+            git rebase origin/main || true
           done
