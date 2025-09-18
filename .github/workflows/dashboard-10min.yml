@@ -7,10 +7,11 @@ on:
     - cron: "*/10 13-19 * * 1-5"
     - cron: "0 20 * * 1-5"
 
-# One global queue shared by ALL writers (prevents collisions)
+# Concurrency ONLY for this workflow (prevents backlogs of itself, but
+# does NOT block hourly/eod since they use different groups)
 concurrency:
-  group: data-writes-main
-  cancel-in-progress: false
+  group: data-writes-10min
+  cancel-in-progress: true
 
 jobs:
   tenmin:
@@ -41,7 +42,6 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
-      # Build intraday view for meter/lights/sectors
       - name: Build outlook source (intraday)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -49,10 +49,11 @@ jobs:
           set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
+      # Write INTRADAY file (no more outlook.json overlap)
       - name: Make dashboard payload (intraday)
         run: |
           set -euo pipefail
-          python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
+          python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_intraday.json
 
       # Per-cadence heartbeat (10m)
       - name: Write heartbeat_10min (per-cadence freshness)
@@ -65,14 +66,14 @@ jobs:
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
           mkdir -p data/archive/10min/source data/archive/10min/dashboard
-          cp data/outlook_source.json "data/archive/10min/source/outlook_source_${TS}.json"
-          cp data/outlook.json        "data/archive/10min/dashboard/outlook_${TS}.json"
+          cp data/outlook_source.json     "data/archive/10min/source/outlook_source_${TS}.json"
+          cp data/outlook_intraday.json   "data/archive/10min/dashboard/outlook_intraday_${TS}.json"
 
       - name: Show files before commit
         run: |
           echo "--- data/archive/10min/dashboard (tail) ---"
           ls -lt data/archive/10min/dashboard | head || true
-          echo "--- outlook.json (head) ---"; head -n 1 data/outlook.json || true
+          echo "--- outlook_intraday.json (head) ---"; head -n 1 data/outlook_intraday.json || true
           echo "--- outlook_source.json (head) ---"; head -n 1 data/outlook_source.json || true
           echo "--- heartbeat_10min.txt ---"; cat data/heartbeat_10min.txt || true
 
@@ -81,17 +82,14 @@ jobs:
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          # only this job's files (avoid legacy heartbeat/history collisions)
           git add data/heartbeat_10min.txt || true
+          git add data/outlook_intraday.json data/outlook_source.json || true
           git add data/archive/10min || true
-          git add data/outlook.json data/outlook_source.json || true
-          git commit -m "10MIN refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "10MIN keepalive"
+          git commit -m "10MIN intraday refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "10MIN keepalive"
 
-          # Retry-safe push
           for attempt in 1 2 3; do
             if git push origin HEAD:main; then
-              echo "Push succeeded on attempt $attempt"
-              break
+              echo "Push succeeded on attempt $attempt"; break
             fi
             echo "Push rejected; syncing with origin/main (attempt $attempt)..."
             git fetch origin main
