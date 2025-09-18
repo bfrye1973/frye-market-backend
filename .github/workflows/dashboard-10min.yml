@@ -41,7 +41,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
-      # Build, but DO NOT touch heartbeat/history; this job archives snapshots
+      # Build intraday view for meter/lights/sectors
       - name: Build outlook source (intraday)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -54,6 +54,12 @@ jobs:
           set -euo pipefail
           python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook.json
 
+      # Per-cadence heartbeat (10m)
+      - name: Write heartbeat_10min (per-cadence freshness)
+        run: |
+          mkdir -p data
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
+
       - name: Archive (10-minute snapshots)
         run: |
           set -e
@@ -62,24 +68,24 @@ jobs:
           cp data/outlook_source.json "data/archive/10min/source/outlook_source_${TS}.json"
           cp data/outlook.json        "data/archive/10min/dashboard/outlook_${TS}.json"
 
-      # hourly is the ONLY writer of heartbeat.txt; no heartbeat here
-
       - name: Show files before commit
         run: |
           echo "--- data/archive/10min/dashboard (tail) ---"
           ls -lt data/archive/10min/dashboard | head || true
           echo "--- outlook.json (head) ---"; head -n 1 data/outlook.json || true
           echo "--- outlook_source.json (head) ---"; head -n 1 data/outlook_source.json || true
+          echo "--- heartbeat_10min.txt ---"; cat data/heartbeat_10min.txt || true
 
       - name: Commit & push (retry-safe)
         run: |
           set -e
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          # only this job's files (avoid heartbeat.txt / history.json collisions)
+          # only this job's files (avoid legacy heartbeat/history collisions)
+          git add data/heartbeat_10min.txt || true
           git add data/archive/10min || true
           git add data/outlook.json data/outlook_source.json || true
-          git commit -m "10MIN replay snapshot: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "10MIN keepalive"
+          git commit -m "10MIN refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "10MIN keepalive"
 
           # Retry-safe push
           for attempt in 1 2 3; do
