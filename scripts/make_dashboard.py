@@ -3,19 +3,20 @@
 make_dashboard.py — carry real sector counts + Daily/Intraday Squeeze into outlook.json
 Adds Breadth/Momentum indexes computed from sector totals.
 
-- Reads data/outlook_source.json
+- Reads  data/outlook_source.json
 - Writes data/outlook.json with:
   * gauges:
-      - rpm.pct  (Breadth 0..100)
-      - speed.pct (Momentum 0..100)
-      - fuel.pct (Intraday squeeze/pressure)
-      - squeezeDaily.pct (Daily squeeze)
-      - water.pct (Volatility)
-      - oil.psi (Liquidity PSI)
+      - rpm.pct            (Breadth 0..100)
+      - speed.pct          (Momentum 0..100)
+      - fuel.pct           (Intraday squeeze/pressure)
+      - squeezeDaily.pct   (Daily squeeze)
+      - water.pct          (Volatility)
+      - oil.psi            (Liquidity PSI)
   * odometers: squeezeCompressionPct (intraday = fuel)
   * outlook.sectors: { nh, nl, up, down, netNH, netUD, spark }
   * sectorCards (top-level + nested)
   * summary: { breadthIdx, momentumIdx }
+  * engineLights: { updatedAt, mode, live, signals{...} }  # defaults present; upstream can override
 """
 
 from __future__ import annotations
@@ -45,7 +46,6 @@ def jread(p: str) -> Dict[str, Any]:
 def jwrite(p: str, obj: Dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
-        # compact, single-line JSON (router/UI don’t need pretty)
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"), indent=None)
         f.write("\n")
 
@@ -115,7 +115,6 @@ def pick(d: Dict[str, Any], *keys, default=None):
 def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mode: str) -> Dict[str, Any]:
     g = src.get("global", {}) or {}
 
-    # Read BOTH snake_case and camelCase keys (builder variants)
     fuel      = num(pick(g, "squeeze_pressure_pct", "squeezePressurePct", default=50))
     daily_sq  = pick(g, "daily_squeeze_pct", "squeeze_daily_pct", "squeezeDailyPct", default=None)
     if daily_sq is not None:
@@ -133,8 +132,9 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
         s = float(pos) + float(neg)
         return 50.0 if s <= 0 else 50.0 + 50.0 * ((float(pos) - float(neg)) / s)
 
-    breadthIdx  = ratio_idx(tot_up, tot_dn)   # breadth as Up/(Up+Down)
-    momentumIdx = ratio_idx(tot_nh, tot_nl)   # momentum as NH/(NH+NL)
+    # Keep mapping consistent with your UI labels:
+    breadthIdx  = ratio_idx(tot_up, tot_dn)   # % advancers (Breadth)
+    momentumIdx = ratio_idx(tot_nh, tot_nl)   # % new highs (Momentum)
 
     gauges = {
         "rpm":   {"pct": float(breadthIdx),  "label":"Breadth"},
@@ -146,8 +146,7 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
     if daily_sq is not None:
         gauges["squeezeDaily"] = {"pct": float(daily_sq)}
 
-    odometers = {"squeezeCompressionPct": float(fuel)}  # intraday
-
+    odometers = {"squeezeCompressionPct": float(fuel)}  # intraday compression
     summary = {"breadthIdx": float(breadthIdx), "momentumIdx": float(momentumIdx)}
     return {"gauges": gauges, "odometers": odometers, "summary": summary}
 
@@ -170,6 +169,15 @@ def cards_from_sectors(sectors: Dict[str, Any]) -> List[Dict[str, Any]]:
         })
     return cards
 
+# -------- engine lights defaults --------
+
+def default_signals() -> Dict[str, Any]:
+    keys = [
+        "sigBreakout", "sigDistribution", "sigCompression", "sigExpansion",
+        "sigOverheat", "sigTurbo", "sigDivergence", "sigLowLiquidity", "sigVolatilityHigh"
+    ]
+    return { k: {"active": False, "severity": "info"} for k in keys }
+
 # -------- main --------
 
 def main():
@@ -180,11 +188,23 @@ def main():
     args = ap.parse_args()
 
     src = jread(args.source)
-    ts  = now_iso()  # always fresh
+    ts  = now_iso()
 
     sectors = sectors_from_source(src)
     gz_od   = build_gauges_and_odometers(src, sectors, args.mode)
     cards   = cards_from_sectors(sectors)
+
+    # Build engine lights: defaults + any upstream overrides
+    upstream_signals = {}
+    if isinstance(src.get("signals"), dict):
+        upstream_signals = src["signals"]
+    elif isinstance(src.get("engineLights"), dict) and isinstance(src["engineLights"].get("signals"), dict):
+        upstream_signals = src["engineLights"]["signals"]
+
+    signals = default_signals()
+    for k, v in (upstream_signals or {}).items():
+        if isinstance(v, dict):
+            signals[k] = {**signals.get(k, {"active": False, "severity": "info"}), **v}
 
     out = {
         "schema_version": SCHEMA_VERSION,
@@ -192,13 +212,19 @@ def main():
         "ts": ts,
         "version": VERSION_TAG,
         "pipeline": args.mode,
-        **gz_od,                      # gauges + odometers + summary
+        **gz_od,
         "sectorCards": cards,         # legacy
         "outlook": {
             "sectors": sectors,
             "sectorCards": cards
         },
-        "signals": {}                 # router computes real signals
+        # Engine Lights: fresh stamp + mode/live flags + predictable signals block
+        "engineLights": {
+            "updatedAt": ts,
+            "mode": args.mode,                 # "intraday", "daily", or "eod"
+            "live": (args.mode == "intraday"), # true only for 10-min/intraday runs
+            "signals": signals
+        }
     }
 
     jwrite(args.out, out)
