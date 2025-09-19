@@ -1,33 +1,33 @@
 name: ohlc-archive
 
 on:
-  workflow_dispatch:
-  # Align with 10-min schedule so chart DVR matches meter DVR
-  schedule:
-    - cron: "*/10 13-19 * * 1-5"
-    - cron: "3 20 * * 1-5"   # a few minutes after EOD to avoid crowding
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: "*/10 13-19 * * 1-5"   # (paused)
+  #   - cron: "3 20 * * 1-5"         # (paused)
 
-# One global queue shared by ALL writers
+# Keep its own lane; we append to data-archive only
 concurrency:
-  group: data-writes-main
-  cancel-in-progress: false
+  group: data-writes-ohlc
+  cancel-in-progress: true
 
 jobs:
   ohlc:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TZ: America/New_York
+      ARCHIVE_BRANCH: data-archive
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Sync repo state
+      - name: Sync refs
         run: |
-          git fetch origin main
-          git checkout main
-          git reset --hard origin/main
+          git fetch origin +refs/heads/*:refs/remotes/origin/*
 
       - uses: actions/setup-python@v5
         with:
@@ -38,36 +38,46 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Archive OHLC
+      - name: Archive OHLC (build locally)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           ARCHIVE_SYMBOLS: ${{ vars.ARCHIVE_SYMBOLS || 'SPY,QQQ' }}
           ARCHIVE_TIMEFRAMES: "10m,1h,1d"
           LOOKBACK_BARS: "500"
         run: |
+          set -euo pipefail
           python scripts/archive_ohlc.py
 
-      - name: Show saved files
+      - name: Show saved files (local)
         run: |
           echo "--- tree data/archive/ohlc ---"
           ls -R data/archive/ohlc || true
 
-      - name: Commit & push (retry-safe)
+      # ---- Append snapshots to data-archive branch (no changes to main) ----
+      - name: Push ARCHIVE branch (append)
         run: |
           set -e
-          git config user.name  "github-actions"
+          git config user.name  "actions-user"
           git config user.email "actions@github.com"
-          # only this job's files
-          git add data/archive/ohlc || true
-          git commit -m "OHLC replay snapshot: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "OHLC keepalive"
 
-          # Retry-safe push
-          for attempt in 1 2 3; do
-            if git push origin HEAD:main; then
-              echo "Push succeeded on attempt $attempt"
-              break
-            fi
-            echo "Push rejected; syncing with origin/main (attempt $attempt)..."
-            git fetch origin main
-            git rebase origin/main || true
-          done
+          # Create/switch to archive branch without disturbing current worktree
+          if git show-ref --verify --quiet refs/heads/"$ARCHIVE_BRANCH"; then
+            git checkout "$ARCHIVE_BRANCH"
+          else
+            git checkout --orphan "$ARCHIVE_BRANCH"
+          fi
+
+          # Pull existing history if branch already exists on origin
+          git pull --rebase origin "$ARCHIVE_BRANCH" || true
+
+          # Stage new OHLC snapshots (keep directory layout)
+          git add data/archive/ohlc || true
+          TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
+          git commit -m "OHLC replay snapshot: $TS" || echo "nothing to commit"
+
+          # Push append-only
+          git push origin HEAD:"$ARCHIVE_BRANCH"
+
+      - name: Return to main (optional)
+        run: |
+          git checkout -f main || true
