@@ -2,8 +2,8 @@ name: dashboard-hourly
 
 on:
   workflow_dispatch: {}
-  # schedule:
-  #   - cron: "5 13-21 * * 1-5"   # paused while we stabilize
+  schedule:
+    - cron: "5 13-21 * * 1-5"      # :05 past each hour during market day
 
 concurrency:
   group: data-writes-hourly
@@ -12,25 +12,21 @@ concurrency:
 jobs:
   hourly:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    permissions: { contents: write }
     env:
-      TZ: America/Phoenix            # Arizona time
+      TZ: America/Phoenix
       LIVE_BRANCH: data-live-hourly
-      ARCHIVE_BRANCH: data-archive
+      ARCHIVE_BRANCH: data-archive-hourly
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
 
       - name: Sync refs
-        run: |
-          git fetch origin +refs/heads/*:refs/remotes/origin/*
+        run: git fetch origin +refs/heads/*:refs/remotes/origin/*
 
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+        with: { python-version: "3.11" }
 
       - name: Install deps
         run: |
@@ -38,10 +34,8 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
-      # ---- Build hourly (source intraday -> hourly payload) ----
       - name: Build outlook source (intraday)
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        env: { POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }} }
         run: |
           set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode intraday
@@ -53,91 +47,53 @@ jobs:
 
       - name: Write heartbeat_hourly (+ legacy heartbeat.txt)
         run: |
-          set -euo pipefail
           mkdir -p data
-          TS_NOW=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-          echo "$TS_NOW" > data/heartbeat_hourly.txt
-          echo "$TS_NOW" > data/heartbeat.txt
+          TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          echo "$TS" > data/heartbeat_hourly.txt
+          echo "$TS" > data/heartbeat.txt
 
-      # ---- Stage using JSON's own timestamp (keeps live & archive in lockstep) ----
-      - name: Stage files for publish
+      - name: Stage files for publish (use JSON timestamp)
         id: prep
         run: |
-          set -euo pipefail
-          # Extract timestamp the builder wrote into the hourly JSON
+          set -e
           RAW_TS=$(jq -r '.updated_at // .ts' data/outlook_hourly.json)
           TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/:/-/g')
-          echo "RAW_TS=$RAW_TS"
-          echo "TS_SAFE=$TS_SAFE"
-
-          # temp staging that survives branch switches
           mkdir -p /tmp/livehr /tmp/archive_hr/source /tmp/archive_hr/dashboard
-
-          # LIVE "latest"
           cp data/outlook_hourly.json  /tmp/livehr/
           cp data/outlook_source.json  /tmp/livehr/
           cp data/heartbeat_hourly.txt /tmp/livehr/
           cp data/heartbeat.txt        /tmp/livehr/
-
-          # ARCHIVE snapshots (use the same timestamp as live JSON)
           cp data/outlook_source.json  "/tmp/archive_hr/source/outlook_source_${TS_SAFE}.json"
           cp data/outlook_hourly.json  "/tmp/archive_hr/dashboard/outlook_hourly_${TS_SAFE}.json"
-
           echo "ts=${TS_SAFE}" >> "$GITHUB_OUTPUT"
 
-      # ---- Publish LIVE (force-push a tiny branch this job owns) ----
       - name: Push LIVE branch (hourly)
         run: |
-          set -euo pipefail
+          set -e
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
-
-          if git show-ref --verify --quiet refs/heads/"$LIVE_BRANCH"; then
-            git checkout "$LIVE_BRANCH"
-          else
-            git checkout --orphan "$LIVE_BRANCH"
-          fi
-
+          if git show-ref --verify --quiet refs/heads/"$LIVE_BRANCH"; then git checkout "$LIVE_BRANCH"; else git checkout --orphan "$LIVE_BRANCH"; fi
           git rm -rf . || true
-          mkdir -p data
-          cp /tmp/livehr/* data/
+          mkdir -p data && cp /tmp/livehr/* data/
           git add data
           git commit -m "HOURLY live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit (live)"
           git push origin +HEAD:"$LIVE_BRANCH"
 
-      # ---- Append to ARCHIVE (shared branch) with pull-rebase + retry ----
-      - name: Push ARCHIVE branch (append)
+      - name: Push ARCHIVE branch (append, hourly-only branch)
         run: |
-          set -euo pipefail
+          set -e
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
-
+          git fetch origin "$ARCHIVE_BRANCH" || true
           if git show-ref --verify --quiet refs/heads/"$ARCHIVE_BRANCH"; then
             git checkout "$ARCHIVE_BRANCH"
           else
-            git checkout --orphan "$ARCHIVE_BRANCH"
+            git checkout -b "$ARCHIVE_BRANCH" "origin/$ARCHIVE_BRANCH" 2>/dev/null || git checkout --orphan "$ARCHIVE_BRANCH"
           fi
-
           mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
           cp /tmp/archive_hr/source/*    data/archive/hourly/source/    || true
           cp /tmp/archive_hr/dashboard/* data/archive/hourly/dashboard/ || true
           git add data/archive/hourly || true
           git commit -m "HOURLY archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit (archive)"
-
-          # robust push: pull --rebase then push; retry a couple times if someone else appended meanwhile
-          n=0
-          until [ $n -ge 3 ]
-          do
-            git pull --rebase origin "$ARCHIVE_BRANCH" || true
-            if git push origin HEAD:"$ARCHIVE_BRANCH"; then
-              echo "archive push ok"; break
-            fi
-            n=$((n+1))
-            echo "archive push failed, retry $n/3…"
-            sleep 3
-          done
-          test $n -lt 3
-
-      - name: Return to main (optional)
-        run: |
-          git checkout -f main || true
+          git pull --rebase origin "$ARCHIVE_BRANCH" || true
+          git push origin HEAD:"$ARCHIVE_BRANCH"
