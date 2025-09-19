@@ -7,7 +7,7 @@ on:
     - cron: "*/10 13-19 * * 1-5"
     - cron: "0 20 * * 1-5"
 
-# 10m lane only (hourly/EOD use their own)
+# 10m lane only (hourly/EOD use their own lanes)
 concurrency:
   group: data-writes-10min
   cancel-in-progress: true
@@ -78,21 +78,18 @@ jobs:
           AWS_EC2_METADATA_DISABLED: 'true'
           AWS_S3_FORCE_PATH_STYLE: 'true'
         run: |
-          # HARD OVERRIDE: known-good endpoint (we'll revert to secret after this works)
-          ENDPOINT="https://52e09875aea849ab8156ff6149c967f4.r2.cloudflarestorage.com"
+          # Use the corrected account host from secret (no bucket suffix)
+          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT }}" | tr -d '\r\n ' )"
 
           echo "ENDPOINT(base64) = $(printf '%s' "$ENDPOINT" | base64)"
           echo "ENDPOINT(length) = $(printf '%s' "$ENDPOINT" | wc -c)"
 
-          # TLS preflight (should return headers; if not, runner’s network is the issue)
+          # TLS preflight (should return headers)
           curl -sS -I "$ENDPOINT"
 
-          # Optional: list bucket (auth may or may not allow; doesn't fail job)
-          aws s3 ls "s3://${{ secrets.R2_BUCKET_LIVE }}" --endpoint-url "$ENDPOINT" || true
-
-          # Uploads
-          aws s3 cp data/outlook_intraday.json "s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_intraday.json" --endpoint-url "$ENDPOINT" --acl private --no-progress
-          aws s3 cp data/heartbeat_10min.txt  "s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_10min.txt"  --endpoint-url "$ENDPOINT" --acl private --no-progress
+          # Uploads (bucket stays in s3:// URL; endpoint is account host)
+          aws s3 cp data/outlook_intraday.json "s3://frye-data-live/outlook_intraday.json" --endpoint-url "$ENDPOINT" --acl private --no-progress
+          aws s3 cp data/heartbeat_10min.txt  "s3://frye-data-live/heartbeat_10min.txt"  --endpoint-url "$ENDPOINT" --acl private --no-progress
 
       # -------------------- Archive snapshots (local + R2) --------------------
       - name: Archive (10-minute snapshots)
@@ -111,9 +108,9 @@ jobs:
           AWS_EC2_METADATA_DISABLED: 'true'
           AWS_S3_FORCE_PATH_STYLE: 'true'
         run: |
-          ENDPOINT="https://52e09875aea849ab8156ff6149c967f4.r2.cloudflarestorage.com"
-          aws s3 sync data/archive/10min/source/    "s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/source/"    --endpoint-url "$ENDPOINT" --acl private --no-progress
-          aws s3 sync data/archive/10min/dashboard/ "s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/dashboard/" --endpoint-url "$ENDPOINT" --acl private --no-progress
+          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT }}" | tr -d '\r\n ' )"
+          aws s3 sync data/archive/10min/source/    "s3://frye-data-archive/archive/10min/source/"    --endpoint-url "$ENDPOINT" --acl private --no-progress
+          aws s3 sync data/archive/10min/dashboard/ "s3://frye-data-archive/archive/10min/dashboard/" --endpoint-url "$ENDPOINT" --acl private --no-progress
 
       # -------------------- Visibility + push --------------------
       - name: Show files before commit
