@@ -57,34 +57,45 @@ jobs:
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
+      # ---- Stage files using the JSON's own timestamp (keeps live & archive in lockstep) ----
       - name: Stage files for publish
         id: prep
         run: |
           set -e
-          TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
+          # Extract the exact timestamp written by the builder
+          RAW_TS=$(jq -r '.updated_at // .ts' data/outlook_intraday.json)
+          # Normalize for filenames: 2025-09-18T18:12:47Z -> 2025-09-18T18-12-47Z
+          TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/:/-/g')
+          echo "RAW_TS=$RAW_TS"
+          echo "TS_SAFE=$TS_SAFE"
+
           # temp staging (survives branch switches)
           mkdir -p /tmp/live10 /tmp/archive/source /tmp/archive/dashboard
+
           # live "latest"
           cp data/outlook_intraday.json /tmp/live10/
           cp data/outlook_source.json   /tmp/live10/
           cp data/heartbeat_10min.txt   /tmp/live10/
-          # archive snapshots
-          cp data/outlook_source.json   "/tmp/archive/source/outlook_source_${TS}.json"
-          cp data/outlook_intraday.json "/tmp/archive/dashboard/outlook_intraday_${TS}.json"
-          echo "ts=$TS" >> "$GITHUB_OUTPUT"
 
-      # ---- Publish LIVE (force-push) ----
+          # archive snapshots (use the same timestamp as live JSON)
+          cp data/outlook_source.json   "/tmp/archive/source/outlook_source_${TS_SAFE}.json"
+          cp data/outlook_intraday.json "/tmp/archive/dashboard/outlook_intraday_${TS_SAFE}.json"
+
+          echo "ts=${TS_SAFE}" >> "$GITHUB_OUTPUT"
+
+      # ---- Publish LIVE (force-push a tiny branch) ----
       - name: Push LIVE branch (10min)
         run: |
           set -e
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
-          # switch/create live branch with a clean tree
+
           if git show-ref --verify --quiet refs/heads/"$LIVE_BRANCH"; then
             git checkout "$LIVE_BRANCH"
           else
             git checkout --orphan "$LIVE_BRANCH"
           fi
+
           git rm -rf . || true
           mkdir -p data
           cp /tmp/live10/* data/
@@ -92,7 +103,7 @@ jobs:
           git commit -m "10MIN live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           git push origin +HEAD:"$LIVE_BRANCH"
 
-      # ---- Append to ARCHIVE (shared) ----
+      # ---- Append to ARCHIVE (shared branch) ----
       - name: Push ARCHIVE branch (append)
         run: |
           set -e
@@ -101,10 +112,13 @@ jobs:
           else
             git checkout --orphan "$ARCHIVE_BRANCH"
           fi
+
           git pull --rebase origin "$ARCHIVE_BRANCH" || true
+
           mkdir -p data/archive/10min/source data/archive/10min/dashboard
           cp /tmp/archive/source/*    data/archive/10min/source/    || true
           cp /tmp/archive/dashboard/* data/archive/10min/dashboard/ || true
+
           git add data/archive/10min || true
           git commit -m "10MIN archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit"
           git push origin HEAD:"$ARCHIVE_BRANCH"
