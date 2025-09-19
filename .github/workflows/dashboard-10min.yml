@@ -1,5 +1,4 @@
 name: dashboard-10min
-
 on:
   workflow_dispatch:
   schedule:
@@ -19,7 +18,8 @@ jobs:
       TZ: America/New_York
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
 
       - name: Sync repo state
         run: |
@@ -28,7 +28,8 @@ jobs:
           git reset --hard origin/main
 
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
 
       - name: Install deps
         run: |
@@ -37,7 +38,8 @@ jobs:
           pip install jq
 
       - name: Build outlook source (intraday)
-        env: { POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }} }
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode intraday
@@ -61,7 +63,7 @@ jobs:
           sudo ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
           aws --version
 
-      # ---- LIVE upload (bucket is in endpoint secret) ----
+      # LIVE upload (bucket is already in endpoint secret)
       - name: Upload to R2 (live)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -72,7 +74,6 @@ jobs:
           ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT_LIVE }}" | tr -d '\r\n ')"
           echo "LIVE ENDPOINT: $ENDPOINT"
           curl -sS -I "$ENDPOINT"
-          # bucket is already in endpoint (…/frye-data-live) -> use s3:///object
           aws s3 cp data/outlook_intraday.json s3:///outlook_intraday.json --endpoint-url "$ENDPOINT" --acl private --no-progress
           aws s3 cp data/heartbeat_10min.txt  s3:///heartbeat_10min.txt  --endpoint-url "$ENDPOINT" --acl private --no-progress
 
@@ -84,7 +85,7 @@ jobs:
           cp data/outlook_source.json   "data/archive/10min/source/outlook_source_${TS}.json"
           cp data/outlook_intraday.json "data/archive/10min/dashboard/outlook_intraday_${TS}.json"
 
-      # ---- ARCHIVE upload (bucket is in endpoint secret) ----
+      # ARCHIVE upload (bucket is already in endpoint secret)
       - name: Upload to R2 (archive)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -117,4 +118,3 @@ jobs:
             if git push origin main; then echo "Push ok"; break; fi
             git fetch origin main
             git rebase origin/main || git rebase --abort || true
-          done
