@@ -3,9 +3,11 @@ name: dashboard-10min
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/10 13-19 * * 1-5"   # every 10m during market hours
-    - cron: "0 20 * * 1-5"         # one run at close
+    # Every 10 minutes during market hours (13:00–19:59 UTC), plus one run at 20:00 UTC
+    - cron: "*/10 13-19 * * 1-5"
+    - cron: "0 20 * * 1-5"
 
+# This lane is only for the 10-minute job (doesn't block hourly/EOD)
 concurrency:
   group: data-writes-10min
   cancel-in-progress: true
@@ -17,6 +19,7 @@ jobs:
       contents: write
     env:
       TZ: America/New_York
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,12 +59,17 @@ jobs:
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      # -------------------- Upload LIVE objects to R2 --------------------
-      - name: Install AWS CLI v2
-        uses: aws-actions/setup-aws-cli@v2
-        with:
-          awscliversion: '2.x'
+      # -------------------- AWS CLI v2 (manual install) --------------------
+      - name: Install AWS CLI v2 (manual)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y unzip
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
+          aws --version
 
+      # -------------------- Upload LIVE objects to R2 --------------------
       - name: Upload to R2 (live)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -70,10 +78,9 @@ jobs:
           AWS_EC2_METADATA_DISABLED: 'true'
         run: |
           echo "Endpoint: ${{ secrets.R2_ENDPOINT }}"
-          aws --version
-          # Preflight TLS to endpoint (helps spot typos)
+          # TLS preflight (helps spot endpoint typos)
           curl -sS -I ${{ secrets.R2_ENDPOINT }}
-          # Optional: list bucket to distinguish auth vs TLS
+          # Optional: list bucket to distinguish auth vs TLS (won't fail the job)
           aws s3 ls s3://${{ secrets.R2_BUCKET_LIVE }} --endpoint-url ${{ secrets.R2_ENDPOINT }} || true
           # Uploads
           aws s3 cp data/outlook_intraday.json s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_intraday.json --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
@@ -85,8 +92,8 @@ jobs:
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
           mkdir -p data/archive/10min/source data/archive/10min/dashboard
-          cp data/outlook_source.json    "data/archive/10min/source/outlook_source_${TS}.json"
-          cp data/outlook_intraday.json  "data/archive/10min/dashboard/outlook_intraday_${TS}.json"
+          cp data/outlook_source.json   "data/archive/10min/source/outlook_source_${TS}.json"
+          cp data/outlook_intraday.json "data/archive/10min/dashboard/outlook_intraday_${TS}.json"
 
       - name: Upload to R2 (archive)
         env:
