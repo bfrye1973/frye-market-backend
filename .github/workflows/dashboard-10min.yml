@@ -7,7 +7,7 @@ on:
     - cron: "*/10 13-19 * * 1-5"
     - cron: "0 20 * * 1-5"
 
-# This lane is only for the 10-minute job (doesn't block hourly/EOD)
+# Only this lane for 10-minute writes (hourly/EOD use their own lanes)
 concurrency:
   group: data-writes-10min
   cancel-in-progress: true
@@ -77,14 +77,14 @@ jobs:
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: 'true'
         run: |
-          echo "Endpoint: ${{ secrets.R2_ENDPOINT }}"
-          # TLS preflight (helps spot endpoint typos)
-          curl -sS -I ${{ secrets.R2_ENDPOINT }}
-          # Optional: list bucket to distinguish auth vs TLS (won't fail the job)
-          aws s3 ls s3://${{ secrets.R2_BUCKET_LIVE }} --endpoint-url ${{ secrets.R2_ENDPOINT }} || true
+          echo "R2_ENDPOINT='${{ secrets.R2_ENDPOINT }}'"
+          # TLS preflight (this must return headers; if it fails, the endpoint secret is wrong/blank)
+          curl -sS -I "${{ secrets.R2_ENDPOINT }}"
+          # Optional: list bucket (helps distinguish auth vs TLS; won't fail the job)
+          aws s3 ls "s3://${{ secrets.R2_BUCKET_LIVE }}" --endpoint-url "${{ secrets.R2_ENDPOINT }}" || true
           # Uploads
-          aws s3 cp data/outlook_intraday.json s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_intraday.json --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
-          aws s3 cp data/heartbeat_10min.txt s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_10min.txt --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+          aws s3 cp data/outlook_intraday.json "s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_intraday.json" --endpoint-url "${{ secrets.R2_ENDPOINT }}" --acl private --no-progress
+          aws s3 cp data/heartbeat_10min.txt "s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_10min.txt" --endpoint-url "${{ secrets.R2_ENDPOINT }}" --acl private --no-progress
 
       # -------------------- Archive snapshots (local + R2) --------------------
       - name: Archive (10-minute snapshots)
@@ -102,8 +102,8 @@ jobs:
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: 'true'
         run: |
-          aws s3 sync data/archive/10min/source/    s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/source/    --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
-          aws s3 sync data/archive/10min/dashboard/ s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/dashboard/ --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
+          aws s3 sync data/archive/10min/source/    "s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/source/"    --endpoint-url "${{ secrets.R2_ENDPOINT }}" --acl private --no-progress
+          aws s3 sync data/archive/10min/dashboard/ "s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/dashboard/" --endpoint-url "${{ secrets.R2_ENDPOINT }}" --acl private --no-progress
 
       # -------------------- Visibility + push --------------------
       - name: Show files before commit
