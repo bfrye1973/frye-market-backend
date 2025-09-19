@@ -1,10 +1,10 @@
 name: dashboard-10min
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "*/10 13-19 * * 1-5"   # every 10m during market hours
-    - cron: "0 20 * * 1-5"         # one run at close
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: "*/10 13-19 * * 1-5"
+  #   - cron: "0 20 * * 1-5"
 
 concurrency:
   group: data-writes-10min
@@ -62,7 +62,7 @@ jobs:
         run: |
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
-          # temp staging areas (survive branch switches)
+          # temp staging (survives branch switches)
           mkdir -p /tmp/live10 /tmp/archive/source /tmp/archive/dashboard
           # live "latest"
           cp data/outlook_intraday.json /tmp/live10/
@@ -80,7 +80,11 @@ jobs:
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
           # switch/create live branch with a clean tree
-          git checkout --orphan "$LIVE_BRANCH" || git checkout "$LIVE_BRANCH"
+          if git show-ref --verify --quiet refs/heads/"$LIVE_BRANCH"; then
+            git checkout "$LIVE_BRANCH"
+          else
+            git checkout --orphan "$LIVE_BRANCH"
+          fi
           git rm -rf . || true
           mkdir -p data
           cp /tmp/live10/* data/
@@ -92,7 +96,11 @@ jobs:
       - name: Push ARCHIVE branch (append)
         run: |
           set -e
-          git checkout --orphan "$ARCHIVE_BRANCH" || git checkout "$ARCHIVE_BRANCH"
+          if git show-ref --verify --quiet refs/heads/"$ARCHIVE_BRANCH"; then
+            git checkout "$ARCHIVE_BRANCH"
+          else
+            git checkout --orphan "$ARCHIVE_BRANCH"
+          fi
           git pull --rebase origin "$ARCHIVE_BRANCH" || true
           mkdir -p data/archive/10min/source data/archive/10min/dashboard
           cp /tmp/archive/source/*    data/archive/10min/source/    || true
