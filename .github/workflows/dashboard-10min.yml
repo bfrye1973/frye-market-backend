@@ -7,7 +7,7 @@ on:
     - cron: "*/10 13-19 * * 1-5"
     - cron: "0 20 * * 1-5"
 
-# Only this lane for 10-minute writes (hourly/EOD use their own lanes)
+# 10m lane only (hourly/EOD use their own)
 concurrency:
   group: data-writes-10min
   cancel-in-progress: true
@@ -76,15 +76,24 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: 'true'
+          AWS_S3_FORCE_PATH_STYLE: 'true'
         run: |
-          echo "R2_ENDPOINT='${{ secrets.R2_ENDPOINT }}'"
-          # TLS preflight (this must return headers; if it fails, the endpoint secret is wrong/blank)
-          curl -sS -I "${{ secrets.R2_ENDPOINT }}"
-          # Optional: list bucket (helps distinguish auth vs TLS; won't fail the job)
-          aws s3 ls "s3://${{ secrets.R2_BUCKET_LIVE }}" --endpoint-url "${{ secrets.R2_ENDPOINT }}" || true
-          # Uploads
-          aws s3 cp data/outlook_intraday.json "s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_intraday.json" --endpoint-url "${{ secrets.R2_ENDPOINT }}" --acl private --no-progress
-          aws s3 cp data/heartbeat_10min.txt "s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_10min.txt" --endpoint-url "${{ secrets.R2_ENDPOINT }}" --acl private --no-progress
+          # 1) Sanitize endpoint (strip CR/LF/spaces)
+          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT }}" | tr -d '\r\n ' )"
+
+          # 2) Non-sensitive diagnostics
+          echo "ENDPOINT(base64) = $(printf '%s' "$ENDPOINT" | base64)"
+          echo "ENDPOINT(length) = $(printf '%s' "$ENDPOINT" | wc -c)"
+
+          # 3) TLS preflight (must return headers; otherwise the secret is wrong/blank)
+          curl -sS -I "$ENDPOINT"
+
+          # 4) Optional: bucket list to distinguish auth vs TLS
+          aws s3 ls "s3://${{ secrets.R2_BUCKET_LIVE }}" --endpoint-url "$ENDPOINT" || true
+
+          # 5) Uploads
+          aws s3 cp data/outlook_intraday.json "s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_intraday.json" --endpoint-url "$ENDPOINT" --acl private --no-progress
+          aws s3 cp data/heartbeat_10min.txt  "s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_10min.txt"  --endpoint-url "$ENDPOINT" --acl private --no-progress
 
       # -------------------- Archive snapshots (local + R2) --------------------
       - name: Archive (10-minute snapshots)
@@ -101,9 +110,11 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: 'true'
+          AWS_S3_FORCE_PATH_STYLE: 'true'
         run: |
-          aws s3 sync data/archive/10min/source/    "s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/source/"    --endpoint-url "${{ secrets.R2_ENDPOINT }}" --acl private --no-progress
-          aws s3 sync data/archive/10min/dashboard/ "s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/dashboard/" --endpoint-url "${{ secrets.R2_ENDPOINT }}" --acl private --no-progress
+          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT }}" | tr -d '\r\n ' )"
+          aws s3 sync data/archive/10min/source/    "s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/source/"    --endpoint-url "$ENDPOINT" --acl private --no-progress
+          aws s3 sync data/archive/10min/dashboard/ "s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/dashboard/" --endpoint-url "$ENDPOINT" --acl private --no-progress
 
       # -------------------- Visibility + push --------------------
       - name: Show files before commit
