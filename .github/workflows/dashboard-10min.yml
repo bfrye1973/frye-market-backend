@@ -13,21 +13,25 @@ concurrency:
 jobs:
   tenmin:
     runs-on: ubuntu-latest
-    permissions: { contents: write }
+    permissions:
+      contents: write
     env:
-      TZ: America/Phoenix
+      TZ: America/Phoenix            # Arizona time
       LIVE_BRANCH: data-live-10min
       ARCHIVE_BRANCH: data-archive-10min
 
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
 
       - name: Sync refs
-        run: git fetch origin +refs/heads/*:refs/remotes/origin/*
+        run: |
+          git fetch origin +refs/heads/*:refs/remotes/origin/*
 
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
 
       - name: Install deps
         run: |
@@ -35,8 +39,10 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
+      # ---- Build (intraday) ----
       - name: Build outlook source (intraday)
-        env: { POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }} }
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode intraday
@@ -51,47 +57,70 @@ jobs:
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      - name: Stage files for publish (use JSON timestamp)
+      # ---- Stage files using JSON's timestamp (keeps LIVE & ARCHIVE in lockstep) ----
+      - name: Stage files for publish
         id: prep
         run: |
           set -e
           RAW_TS=$(jq -r '.updated_at // .ts' data/outlook_intraday.json)
           TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/:/-/g')
+          echo "RAW_TS=$RAW_TS"
+          echo "TS_SAFE=$TS_SAFE"
+
           mkdir -p /tmp/live10 /tmp/archive/source /tmp/archive/dashboard
+
+          # LIVE "latest"
           cp data/outlook_intraday.json /tmp/live10/
           cp data/outlook_source.json   /tmp/live10/
           cp data/heartbeat_10min.txt   /tmp/live10/
+
+          # ARCHIVE snapshots (use the same timestamp as LIVE JSON)
           cp data/outlook_source.json   "/tmp/archive/source/outlook_source_${TS_SAFE}.json"
           cp data/outlook_intraday.json "/tmp/archive/dashboard/outlook_intraday_${TS_SAFE}.json"
+
           echo "ts=${TS_SAFE}" >> "$GITHUB_OUTPUT"
 
+      # ---- Publish LIVE (force-push tiny branch this job owns) ----
       - name: Push LIVE branch (10min)
         run: |
           set -e
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
-          if git show-ref --verify --quiet refs/heads/"$LIVE_BRANCH"; then git checkout "$LIVE_BRANCH"; else git checkout --orphan "$LIVE_BRANCH"; fi
+
+          if git show-ref --verify --quiet refs/heads/"$LIVE_BRANCH"; then
+            git checkout "$LIVE_BRANCH"
+          else
+            git checkout --orphan "$LIVE_BRANCH"
+          fi
+
           git rm -rf . || true
-          mkdir -p data && cp /tmp/live10/* data/
+          mkdir -p data
+          cp /tmp/live10/* data/
           git add data
           git commit -m "10MIN live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit (live)"
           git push origin +HEAD:"$LIVE_BRANCH"
 
-      - name: Push ARCHIVE branch (append, 10min-only branch)
+      # ---- Append to ARCHIVE (own branch -> no contention) ----
+      - name: Push ARCHIVE branch (append)
         run: |
           set -e
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
+
+          # Base on remote tip if present; else create
           git fetch origin "$ARCHIVE_BRANCH" || true
           if git show-ref --verify --quiet refs/heads/"$ARCHIVE_BRANCH"; then
             git checkout "$ARCHIVE_BRANCH"
           else
             git checkout -b "$ARCHIVE_BRANCH" "origin/$ARCHIVE_BRANCH" 2>/dev/null || git checkout --orphan "$ARCHIVE_BRANCH"
           fi
+
           mkdir -p data/archive/10min/source data/archive/10min/dashboard
           cp /tmp/archive/source/*    data/archive/10min/source/    || true
           cp /tmp/archive/dashboard/* data/archive/10min/dashboard/ || true
           git add data/archive/10min || true
           git commit -m "10MIN archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit (archive)"
+
+          # Rebase on remote & push (trivial now that this branch is 10min-only)
           git pull --rebase origin "$ARCHIVE_BRANCH" || true
           git push origin HEAD:"$ARCHIVE_BRANCH"
