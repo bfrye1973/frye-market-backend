@@ -1,9 +1,10 @@
 name: dashboard-10min
+
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/10 13-19 * * 1-5"
-    - cron: "0 20 * * 1-5"
+    - cron: "*/10 13-19 * * 1-5"   # every 10m during market hours
+    - cron: "0 20 * * 1-5"         # one run at close
 
 concurrency:
   group: data-writes-10min
@@ -16,16 +17,17 @@ jobs:
       contents: write
     env:
       TZ: America/New_York
+      LIVE_BRANCH: data-live-10min
+      ARCHIVE_BRANCH: data-archive
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Sync repo state
+      - name: Sync refs
         run: |
-          git fetch origin main
-          git checkout main
-          git reset --hard origin/main
+          git fetch origin +refs/heads/*:refs/remotes/origin/*
 
       - uses: actions/setup-python@v5
         with:
@@ -37,6 +39,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
+      # ---- Build (intraday) ----
       - name: Build outlook source (intraday)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -49,72 +52,55 @@ jobs:
           set -euo pipefail
           python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_intraday.json
 
-      - name: Write heartbeat_10min (per-cadence freshness)
+      - name: Write heartbeat_10min
         run: |
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      - name: Install AWS CLI v2 (manual)
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y unzip
-          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-          unzip -q awscliv2.zip
-          sudo ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
-          aws --version
-
-      # LIVE upload (bucket is already in endpoint secret)
-      - name: Upload to R2 (live)
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          AWS_EC2_METADATA_DISABLED: 'true'
-        run: |
-          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT_LIVE }}" | tr -d '\r\n ')"
-          echo "LIVE ENDPOINT: $ENDPOINT"
-          curl -sS -I "$ENDPOINT"
-          aws s3 cp data/outlook_intraday.json s3:///outlook_intraday.json --endpoint-url "$ENDPOINT" --acl private --no-progress
-          aws s3 cp data/heartbeat_10min.txt  s3:///heartbeat_10min.txt  --endpoint-url "$ENDPOINT" --acl private --no-progress
-
-      - name: Archive (10-minute snapshots)
+      - name: Stage files for publish
+        id: prep
         run: |
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
-          mkdir -p data/archive/10min/source data/archive/10min/dashboard
-          cp data/outlook_source.json   "data/archive/10min/source/outlook_source_${TS}.json"
-          cp data/outlook_intraday.json "data/archive/10min/dashboard/outlook_intraday_${TS}.json"
+          # temp staging areas (survive branch switches)
+          mkdir -p /tmp/live10 /tmp/archive/source /tmp/archive/dashboard
+          # live "latest"
+          cp data/outlook_intraday.json /tmp/live10/
+          cp data/outlook_source.json   /tmp/live10/
+          cp data/heartbeat_10min.txt   /tmp/live10/
+          # archive snapshots
+          cp data/outlook_source.json   "/tmp/archive/source/outlook_source_${TS}.json"
+          cp data/outlook_intraday.json "/tmp/archive/dashboard/outlook_intraday_${TS}.json"
+          echo "ts=$TS" >> "$GITHUB_OUTPUT"
 
-      # ARCHIVE upload (bucket is already in endpoint secret)
-      - name: Upload to R2 (archive)
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          AWS_EC2_METADATA_DISABLED: 'true'
-        run: |
-          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT_ARCHIVE }}" | tr -d '\r\n ')"
-          echo "ARCHIVE ENDPOINT: $ENDPOINT"
-          curl -sS -I "$ENDPOINT"
-          aws s3 sync data/archive/10min/source/    s3:///archive/10min/source/    --endpoint-url "$ENDPOINT" --acl private --no-progress
-          aws s3 sync data/archive/10min/dashboard/ s3:///archive/10min/dashboard/ --endpoint-url "$ENDPOINT" --acl private --no-progress
-
-      - name: Show files before commit
-        run: |
-          echo "--- data/archive/10min/dashboard (tail) ---"
-          ls -lt data/archive/10min/dashboard | head || true
-          echo "--- outlook_intraday.json (head) ---"; head -n 1 data/outlook_intraday.json || true
-          echo "--- outlook_source.json (head) ---"; head -n 1 data/outlook_source.json || true
-          echo "--- heartbeat_10min.txt ---"; cat data/heartbeat_10min.txt || true
-
-      - name: Commit & push (retry-safe)
+      # ---- Publish LIVE (force-push) ----
+      - name: Push LIVE branch (10min)
         run: |
           set -e
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
-          git add -A
-          git commit -m "10MIN intraday refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "Nothing to commit"
-          for attempt in 1 2 3; do
-            if git push origin main; then echo "Push ok"; break; fi
-            git fetch origin main
-            git rebase origin/main || git rebase --abort || true
+          # switch/create live branch with a clean tree
+          git checkout --orphan "$LIVE_BRANCH" || git checkout "$LIVE_BRANCH"
+          git rm -rf . || true
+          mkdir -p data
+          cp /tmp/live10/* data/
+          git add data
+          git commit -m "10MIN live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push origin +HEAD:"$LIVE_BRANCH"
+
+      # ---- Append to ARCHIVE (shared) ----
+      - name: Push ARCHIVE branch (append)
+        run: |
+          set -e
+          git checkout --orphan "$ARCHIVE_BRANCH" || git checkout "$ARCHIVE_BRANCH"
+          git pull --rebase origin "$ARCHIVE_BRANCH" || true
+          mkdir -p data/archive/10min/source data/archive/10min/dashboard
+          cp /tmp/archive/source/*    data/archive/10min/source/    || true
+          cp /tmp/archive/dashboard/* data/archive/10min/dashboard/ || true
+          git add data/archive/10min || true
+          git commit -m "10MIN archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit"
+          git push origin HEAD:"$ARCHIVE_BRANCH"
+
+      - name: Return to main (optional)
+        run: |
+          git checkout -f main || true
