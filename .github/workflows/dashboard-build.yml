@@ -1,0 +1,120 @@
+name: dashboard-eod
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "1 20 * * 1-5"   # 20:01 UTC ~ 4:01pm ET (close), weekdays
+
+concurrency:
+  group: data-writes-eod
+  cancel-in-progress: true
+
+jobs:
+  eod:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TZ: America/Phoenix                # Arizona time
+      LIVE_BRANCH: data-live-eod
+      ARCHIVE_BRANCH: data-archive-eod
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync refs
+        run: |
+          git fetch origin +refs/heads/*:refs/remotes/origin/*
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install jq
+
+      # ---- Build daily (EOD) ----
+      - name: Build outlook source (daily)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          python scripts/build_outlook_source_from_polygon.py --mode daily
+
+      - name: Make dashboard payload (daily)
+        run: |
+          set -euo pipefail
+          python scripts/make_dashboard.py --mode daily --source data/outlook_source.json --out data/outlook.json
+
+      - name: Write heartbeat_eod
+        run: |
+          mkdir -p data
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_eod.txt
+
+      # ---- Stage using JSON's timestamp (keeps LIVE & ARCHIVE aligned) ----
+      - name: Stage files for publish
+        id: prep
+        run: |
+          set -e
+          RAW_TS=$(jq -r '.updated_at // .ts' data/outlook.json)
+          TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/:/-/g')
+          echo "RAW_TS=$RAW_TS"
+          echo "TS_SAFE=$TS_SAFE"
+
+          mkdir -p /tmp/liveeod /tmp/archive_eod/source /tmp/archive_eod/dashboard
+
+          # LIVE "latest"
+          cp data/outlook.json        /tmp/liveeod/
+          cp data/outlook_source.json /tmp/liveeod/
+          cp data/heartbeat_eod.txt   /tmp/liveeod/
+
+          # ARCHIVE snapshots
+          cp data/outlook_source.json "/tmp/archive_eod/source/outlook_source_${TS_SAFE}.json"
+          cp data/outlook.json        "/tmp/archive_eod/dashboard/outlook_${TS_SAFE}.json"
+
+          echo "ts=${TS_SAFE}" >> "$GITHUB_OUTPUT"
+
+      # ---- Publish LIVE (force-push tiny branch this job owns) ----
+      - name: Push LIVE branch (EOD)
+        run: |
+          set -e
+          git config user.name  "actions-user"
+          git config user.email "actions@github.com"
+          if git show-ref --verify --quiet refs/heads/"$LIVE_BRANCH"; then
+            git checkout "$LIVE_BRANCH"
+          else
+            git checkout --orphan "$LIVE_BRANCH"
+          fi
+          git rm -rf . || true
+          mkdir -p data && cp /tmp/liveeod/* data/
+          git add data
+          git commit -m "EOD live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit (live)"
+          git push origin +HEAD:"$LIVE_BRANCH"
+
+      # ---- Append to ARCHIVE (own branch -> no contention) ----
+      - name: Push ARCHIVE branch (append)
+        run: |
+          set -e
+          git config user.name  "actions-user"
+          git config user.email "actions@github.com"
+
+          git fetch origin "$ARCHIVE_BRANCH" || true
+          if git show-ref --verify --quiet refs/heads/"$ARCHIVE_BRANCH"; then
+            git checkout "$ARCHIVE_BRANCH"
+          else
+            git checkout -b "$ARCHIVE_BRANCH" "origin/$ARCHIVE_BRANCH" 2>/dev/null || git checkout --orphan "$ARCHIVE_BRANCH"
+          fi
+
+          mkdir -p data/archive/eod/source data/archive/eod/dashboard
+          cp /tmp/archive_eod/source/*    data/archive/eod/source/    || true
+          cp /tmp/archive_eod/dashboard/* data/archive/eod/dashboard/ || true
+          git add data/archive/eod || true
+          git commit -m "EOD archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit (archive)"
+
+          git pull --rebase origin "$ARCHIVE_BRANCH" || true
+          git push origin HEAD:"$ARCHIVE_BRANCH"

@@ -1,0 +1,178 @@
+{
+  "schema_version": "r1.2",
+  "updated_at": "2025-09-08T15:48:37+00:00",
+  "ts": "2025-09-08T15:48:37+00:00",
+  "version": "1.2-hourly",
+  "pipeline": "hourly",
+  "gauges": {
+    "rpm": {
+      "pct": 49.25160370634355,
+      "label": "Breadth",
+      "raw": {
+        "netNHNL": -21,
+        "totalNHNL": 1403
+      }
+    },
+    "speed": {
+      "pct": 37.119856887298745,
+      "label": "Momentum",
+      "raw": {
+        "net3U3D": -864,
+        "total3U3D": 3354
+      }
+    },
+    "fuel": {
+      "pct": 73.0,
+      "psi": 73.0,
+      "state": "none",
+      "label": "Squeeze"
+    },
+    "water": {
+      "pct": 28.0,
+      "degF": 194,
+      "label": "Volatility"
+    },
+    "oil": {
+      "pct": 100,
+      "psi": 80,
+      "label": "Liquidity"
+    },
+    "waterTemp": 194,
+    "oilPsi": 80,
+    "fuelPct": 73.0
+  },
+  "odometers": {
+    "breadth_net": -21,
+    "momentum_net": -864,
+    "squeeze_psi": 73.0,
+    "breadthOdometer": -21,
+    "momentumOdometer": -864,
+    "squeeze": 73.0
+  },
+  "lights": {
+    "risk_off": false,
+    "low_fuel": false,
+    "low_oil": false,
+    "overheat": false,
+    "stale_data": false,
+    "breadth": "neutral",
+    "momentum": "bearish"
+  },
+  "summary": {
+    "score": 54,
+    "verdict": "Neutral",
+    "bullets": [
+      "Breadth 49/100; Momentum 37/100.",
+      "Squeeze: none; Fuel PSI 73 (~73/100).",
+      "Volatility ~28/100; Liquidity ~100/100."
+    ],
+    "breadthIdx": 49.25,
+    "momentumIdx": 37.12,
+    "breadthState": "Neutral",
+    "momentumState": "Weak",
+    "sectors": {
+      "total": 11
+    }
+  },
+  "sectorCards": [
+    {
+      "sector": "tech",
+      "nh": 116,
+      "nl": 59,
+      "u": 200,
+      "d": 219,
+      "netNH": 57,
+      "netUD": -19
+    },
+    {
+      "sector": "Healthcare",
+      "nh": 167,
+      "nl": 110,
+      "u": 285,
+      "d": 398,
+      "netNH": 57,
+      "netUD": -113
+    },
+    {
+      "sector": "Materials",
+      "nh": 71,
+      "nl": 19,
+      "u": 80,
+      "d": 99,
+      "netNH": 52,
+      "netUD": -19
+    },
+    {
+      "sector": "Real Estate",
+      "nh": 38,
+      "nl": 20,
+      "u": 44,
+      "d": 119,
+      "netNH": 18,
+      "netUD": -75
+    },
+    {
+      "sector": "Communication Services",
+      "nh": 47,
+      "nl": 41,
+      "u": 73,
+      "d": 90,
+      "netNH": 6,
+      "netUD": -17
+    },
+    {
+      "sector": "Consumer Discretionary",
+      "nh": 72,
+      "nl": 72,
+      "u": 129,
+      "d": 226,
+      "netNH": 0,
+      "netUD": -97
+    },
+    {
+      "sector": "Utilities",
+      "nh": 4,
+      "nl": 25,
+      "u": 11,
+      "d": 73,
+      "netNH": -21,
+      "netUD": -62
+    },
+    {
+      "sector": "Consumer Staples",
+      "nh": 24,
+      "nl": 48,
+      "u": 59,
+      "d": 80,
+      "netNH": -24,
+      "netUD": -21
+    },
+    {
+      "sector": "Industrials",
+      "nh": 58,
+      "nl": 84,
+      "u": 141,
+      "d": 276,
+      "netNH": -26,
+      "netUD": -135
+    },
+    {
+      "sector": "Energy",
+      "nh": 29,
+      "nl": 56,
+      "u": 40,
+      "d": 143,
+      "netNH": -27,
+      "netUD": -103
+    },
+    {
+      "sector": "Financials",
+      "nh": 65,
+      "nl": 178,
+      "u": 183,
+      "d": 386,
+      "netNH": -113,
+      "netUD": -203
+    }
+  ]
+}
