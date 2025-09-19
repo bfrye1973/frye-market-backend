@@ -3,8 +3,8 @@ name: dashboard-10min
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/10 13-19 * * 1-5"   # every 10m during market hours
-    - cron: "0 20 * * 1-5"         # one run at close
+    - cron: "*/10 13-19 * * 1-5"
+    - cron: "0 20 * * 1-5"
 
 concurrency:
   group: data-writes-10min
@@ -17,11 +17,9 @@ jobs:
       contents: write
     env:
       TZ: America/New_York
-
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
 
       - name: Sync repo state
         run: |
@@ -30,8 +28,7 @@ jobs:
           git reset --hard origin/main
 
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+        with: { python-version: "3.11" }
 
       - name: Install deps
         run: |
@@ -39,10 +36,8 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
-      # -------------------- Build intraday data --------------------
       - name: Build outlook source (intraday)
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        env: { POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }} }
         run: |
           set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode intraday
@@ -57,17 +52,16 @@ jobs:
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      # -------------------- AWS CLI v2 (manual install) --------------------
       - name: Install AWS CLI v2 (manual)
         run: |
           sudo apt-get update -y
           sudo apt-get install -y unzip
-          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
           unzip -q awscliv2.zip
           sudo ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
           aws --version
 
-      # -------------------- Upload LIVE objects to R2 (bucket in endpoint) --------------------
+      # ---- LIVE upload (bucket is in endpoint) ----
       - name: Upload to R2 (live)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -75,15 +69,12 @@ jobs:
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: 'true'
         run: |
-          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT_LIVE }}" | tr -d '\r\n ' )"
+          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT_LIVE }}" | tr -d '\r\n ')"
           echo "LIVE ENDPOINT: $ENDPOINT"
-          curl -sS -I "$ENDPOINT"   # should return headers
-
-          # Bucket is already in the endpoint → use s3:///object (no bucket name)
+          curl -sS -I "$ENDPOINT"
           aws s3 cp data/outlook_intraday.json s3:///outlook_intraday.json --endpoint-url "$ENDPOINT" --acl private --no-progress
           aws s3 cp data/heartbeat_10min.txt  s3:///heartbeat_10min.txt  --endpoint-url "$ENDPOINT" --acl private --no-progress
 
-      # -------------------- Archive snapshots locally --------------------
       - name: Archive (10-minute snapshots)
         run: |
           set -e
@@ -92,7 +83,7 @@ jobs:
           cp data/outlook_source.json   "data/archive/10min/source/outlook_source_${TS}.json"
           cp data/outlook_intraday.json "data/archive/10min/dashboard/outlook_intraday_${TS}.json"
 
-      # -------------------- Upload ARCHIVE objects to R2 (bucket in endpoint) --------------------
+      # ---- ARCHIVE upload (bucket is in endpoint) ----
       - name: Upload to R2 (archive)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -100,14 +91,12 @@ jobs:
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: 'true'
         run: |
-          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT_ARCHIVE }}" | tr -d '\r\n ' )"
+          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT_ARCHIVE }}" | tr -d '\r\n ')"
           echo "ARCHIVE ENDPOINT: $ENDPOINT"
           curl -sS -I "$ENDPOINT"
-
           aws s3 sync data/archive/10min/source/    s3:///archive/10min/source/    --endpoint-url "$ENDPOINT" --acl private --no-progress
           aws s3 sync data/archive/10min/dashboard/ s3:///archive/10min/dashboard/ --endpoint-url "$ENDPOINT" --acl private --no-progress
 
-      # -------------------- Visibility + push --------------------
       - name: Show files before commit
         run: |
           echo "--- data/archive/10min/dashboard (tail) ---"
@@ -124,11 +113,7 @@ jobs:
           git add -A
           git commit -m "10MIN intraday refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "Nothing to commit"
           for attempt in 1 2 3; do
-            if git push origin main; then
-              echo "Push succeeded on attempt $attempt"
-              break
-            fi
-            echo "Push failed (attempt $attempt) — rebasing…"
+            if git push origin main; then echo "Push ok"; break; fi
             git fetch origin main
             git rebase origin/main || git rebase --abort || true
           done
