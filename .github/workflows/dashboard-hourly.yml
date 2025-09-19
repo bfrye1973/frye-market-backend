@@ -1,12 +1,10 @@
 name: dashboard-hourly
 
 on:
-  workflow_dispatch:
-  # 08:30–17:30 ET => 12:30–21:30 UTC, every hour Mon–Fri (run at :05 past)
-  schedule:
-    - cron: "5 13-21 * * 1-5"
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: "5 13-21 * * 1-5"
 
-# Concurrency ONLY for hourly (doesn't block 10-min)
 concurrency:
   group: data-writes-hourly
   cancel-in-progress: true
@@ -18,20 +16,19 @@ jobs:
       contents: write
     env:
       TZ: America/New_York
+      LIVE_BRANCH: data-live-hourly
+      ARCHIVE_BRANCH: data-archive
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Sync repo state
+      - name: Sync refs
         run: |
-          git fetch origin main
-          git checkout main
-          git reset --hard origin/main
+          git fetch origin +refs/heads/*:refs/remotes/origin/*
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -41,7 +38,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
-      # -------------------- Build intraday -> hourly payload --------------------
+      # ---- Build hourly (source intraday -> hourly payload) ----
       - name: Build outlook source (intraday)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -49,75 +46,70 @@ jobs:
           set -euo pipefail
           python scripts/build_outlook_source_from_polygon.py --mode intraday
 
-      - name: Make dashboard payload (intraday → hourly view)
+      - name: Make dashboard payload (hourly view)
         run: |
           set -euo pipefail
           python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_hourly.json
 
-      # -------------------- Heartbeats --------------------
       - name: Write heartbeat_hourly (+ legacy heartbeat.txt)
         run: |
           mkdir -p data
           TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
           echo "$TS" > data/heartbeat_hourly.txt
-          echo "$TS" > data/heartbeat.txt   # legacy global stamp (only hourly writes this)
+          echo "$TS" > data/heartbeat.txt
 
-      # -------------------- Upload LIVE objects to R2 --------------------
-      - name: Install AWS CLI
-        run: |
-          pip install awscli
-
-      - name: Upload to R2 (live)
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: |
-          aws s3 cp data/outlook_hourly.json  s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_hourly.json  --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
-          aws s3 cp data/heartbeat_hourly.txt s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_hourly.txt --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
-          aws s3 cp data/heartbeat.txt        s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat.txt        --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
-
-      # -------------------- Archive snapshots (local + R2) --------------------
-      - name: Archive (15-day rolling)
+      - name: Stage files for publish
+        id: prep
         run: |
           set -e
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
-          mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
-          cp data/outlook_source.json "data/archive/hourly/source/outlook_source_${TS}.json"
-          cp data/outlook_hourly.json "data/archive/hourly/dashboard/outlook_hourly_${TS}.json"
-          find data/archive/hourly/source    -type f -name 'outlook_source_*.json' -mtime +15 -delete || true
-          find data/archive/hourly/dashboard -type f -name 'outlook_hourly_*.json'  -mtime +15 -delete || true
+          # temp staging (survives branch switches)
+          mkdir -p /tmp/livehr /tmp/archive_hr/source /tmp/archive_hr/dashboard
+          # live "latest"
+          cp data/outlook_hourly.json  /tmp/livehr/
+          cp data/outlook_source.json  /tmp/livehr/
+          cp data/heartbeat_hourly.txt /tmp/livehr/
+          cp data/heartbeat.txt        /tmp/livehr/
+          # archive snapshots
+          cp data/outlook_source.json  "/tmp/archive_hr/source/outlook_source_${TS}.json"
+          cp data/outlook_hourly.json  "/tmp/archive_hr/dashboard/outlook_hourly_${TS}.json"
+          echo "ts=$TS" >> "$GITHUB_OUTPUT"
 
-      - name: Upload to R2 (archive)
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: |
-          aws s3 sync data/archive/hourly/source/    s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/hourly/source/    --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
-          aws s3 sync data/archive/hourly/dashboard/ s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/hourly/dashboard/ --endpoint-url ${{ secrets.R2_ENDPOINT }} --acl private --no-progress
-
-      # -------------------- Visibility + push --------------------
-      - name: Show files before commit
-        run: |
-          echo "--- data/ ---"; ls -l data/ || true
-          echo "--- outlook_hourly.json (head) ---"; head -n 1 data/outlook_hourly.json || true
-          echo "--- outlook_source.json (head) ---"; head -n 1 data/outlook_source.json || true
-          echo "--- heartbeat_hourly.txt ---"; cat data/heartbeat_hourly.txt || true
-          echo "--- heartbeat.txt (legacy) ---"; cat data/heartbeat.txt || true
-
-      - name: Commit & push (retry-safe)
+      # ---- Publish LIVE (force-push) ----
+      - name: Push LIVE branch (hourly)
         run: |
           set -e
-          git config user.name  "github-actions"
+          git config user.name  "actions-user"
           git config user.email "actions@github.com"
-          git add data/heartbeat_hourly.txt data/heartbeat.txt || true
-          git add data/outlook_hourly.json data/outlook_source.json || true
+          if git show-ref --verify --quiet refs/heads/"$LIVE_BRANCH"; then
+            git checkout "$LIVE_BRANCH"
+          else
+            git checkout --orphan "$LIVE_BRANCH"
+          fi
+          git rm -rf . || true
+          mkdir -p data
+          cp /tmp/livehr/* data/
+          git add data
+          git commit -m "HOURLY live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push origin +HEAD:"$LIVE_BRANCH"
+
+      # ---- Append to ARCHIVE (shared) ----
+      - name: Push ARCHIVE branch (append)
+        run: |
+          set -e
+          if git show-ref --verify --quiet refs/heads/"$ARCHIVE_BRANCH"; then
+            git checkout "$ARCHIVE_BRANCH"
+          else
+            git checkout --orphan "$ARCHIVE_BRANCH"
+          fi
+          git pull --rebase origin "$ARCHIVE_BRANCH" || true
+          mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
+          cp /tmp/archive_hr/source/*    data/archive/hourly/source/    || true
+          cp /tmp/archive_hr/dashboard/* data/archive/hourly/dashboard/ || true
           git add data/archive/hourly || true
-          git commit -m "HOURLY refresh & archive: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || git commit --allow-empty -m "HOURLY keepalive"
-          for attempt in 1 2 3; do
-            if git push origin HEAD:main; then
-              echo "Push succeeded on attempt $attempt"; break
-            fi
-            echo "Push rejected; syncing with origin/main (attempt $attempt)..."
-            git fetch origin main
-            git rebase origin/main || true
-          done
+          git commit -m "HOURLY archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit"
+          git push origin HEAD:"$ARCHIVE_BRANCH"
+
+      - name: Return to main (optional)
+        run: |
+          git checkout -f main || true
