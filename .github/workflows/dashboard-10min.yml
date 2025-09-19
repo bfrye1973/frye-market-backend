@@ -78,20 +78,19 @@ jobs:
           AWS_EC2_METADATA_DISABLED: 'true'
           AWS_S3_FORCE_PATH_STYLE: 'true'
         run: |
-          # 1) Sanitize endpoint (strip CR/LF/spaces)
-          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT }}" | tr -d '\r\n ' )"
+          # HARD OVERRIDE: known-good endpoint (we'll revert to secret after this works)
+          ENDPOINT="https://52e09875aea849ab8156ff6149c967f4.r2.cloudflarestorage.com"
 
-          # 2) Non-sensitive diagnostics
           echo "ENDPOINT(base64) = $(printf '%s' "$ENDPOINT" | base64)"
           echo "ENDPOINT(length) = $(printf '%s' "$ENDPOINT" | wc -c)"
 
-          # 3) TLS preflight (must return headers; otherwise the secret is wrong/blank)
+          # TLS preflight (should return headers; if not, runner’s network is the issue)
           curl -sS -I "$ENDPOINT"
 
-          # 4) Optional: bucket list to distinguish auth vs TLS
+          # Optional: list bucket (auth may or may not allow; doesn't fail job)
           aws s3 ls "s3://${{ secrets.R2_BUCKET_LIVE }}" --endpoint-url "$ENDPOINT" || true
 
-          # 5) Uploads
+          # Uploads
           aws s3 cp data/outlook_intraday.json "s3://${{ secrets.R2_BUCKET_LIVE }}/outlook_intraday.json" --endpoint-url "$ENDPOINT" --acl private --no-progress
           aws s3 cp data/heartbeat_10min.txt  "s3://${{ secrets.R2_BUCKET_LIVE }}/heartbeat_10min.txt"  --endpoint-url "$ENDPOINT" --acl private --no-progress
 
@@ -112,7 +111,7 @@ jobs:
           AWS_EC2_METADATA_DISABLED: 'true'
           AWS_S3_FORCE_PATH_STYLE: 'true'
         run: |
-          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT }}" | tr -d '\r\n ' )"
+          ENDPOINT="https://52e09875aea849ab8156ff6149c967f4.r2.cloudflarestorage.com"
           aws s3 sync data/archive/10min/source/    "s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/source/"    --endpoint-url "$ENDPOINT" --acl private --no-progress
           aws s3 sync data/archive/10min/dashboard/ "s3://${{ secrets.R2_BUCKET_ARCHIVE }}/archive/10min/dashboard/" --endpoint-url "$ENDPOINT" --acl private --no-progress
 
