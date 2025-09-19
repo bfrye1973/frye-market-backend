@@ -2,11 +2,10 @@ name: ohlc-archive
 
 on:
   workflow_dispatch: {}
-  # schedule:
-  #   - cron: "*/10 13-19 * * 1-5"   # (paused)
-  #   - cron: "3 20 * * 1-5"         # (paused)
+  schedule:
+    - cron: "*/10 13-19 * * 1-5"   # every 10m during market hours (UTC)
+    - cron: "3 20 * * 1-5"         # a few minutes after close
 
-# Keep its own lane; we append to data-archive only
 concurrency:
   group: data-writes-ohlc
   cancel-in-progress: true
@@ -17,8 +16,8 @@ jobs:
     permissions:
       contents: write
     env:
-      TZ: America/New_York
-      ARCHIVE_BRANCH: data-archive
+      TZ: America/Phoenix
+      ARCHIVE_BRANCH: data-archive-ohlc
 
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +37,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Archive OHLC (build locally)
+      # ---- Build OHLC snapshots locally (writes under data/archive/ohlc/...) ----
+      - name: Archive OHLC
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           ARCHIVE_SYMBOLS: ${{ vars.ARCHIVE_SYMBOLS || 'SPY,QQQ' }}
@@ -47,37 +47,27 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/archive_ohlc.py
-
-      - name: Show saved files (local)
-        run: |
-          echo "--- tree data/archive/ohlc ---"
+          echo "---- tree data/archive/ohlc ----"
           ls -R data/archive/ohlc || true
 
-      # ---- Append snapshots to data-archive branch (no changes to main) ----
+      # ---- Append to dedicated OHLC archive branch (no contention) ----
       - name: Push ARCHIVE branch (append)
         run: |
           set -e
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
 
-          # Create/switch to archive branch without disturbing current worktree
+          git fetch origin "$ARCHIVE_BRANCH" || true
           if git show-ref --verify --quiet refs/heads/"$ARCHIVE_BRANCH"; then
             git checkout "$ARCHIVE_BRANCH"
           else
-            git checkout --orphan "$ARCHIVE_BRANCH"
+            git checkout -b "$ARCHIVE_BRANCH" "origin/$ARCHIVE_BRANCH" 2>/dev/null || git checkout --orphan "$ARCHIVE_BRANCH"
           fi
 
-          # Pull existing history if branch already exists on origin
-          git pull --rebase origin "$ARCHIVE_BRANCH" || true
-
-          # Stage new OHLC snapshots (keep directory layout)
           git add data/archive/ohlc || true
           TS=$(date -u +'%Y-%m-%dT%H-%M-%SZ')
-          git commit -m "OHLC replay snapshot: $TS" || echo "nothing to commit"
+          git commit -m "OHLC DVR snapshot: $TS" || echo "nothing to commit (ohlc)"
 
-          # Push append-only
+          # integrate tip (if any) and push
+          git pull --rebase origin "$ARCHIVE_BRANCH" || true
           git push origin HEAD:"$ARCHIVE_BRANCH"
-
-      - name: Return to main (optional)
-        run: |
-          git checkout -f main || true
