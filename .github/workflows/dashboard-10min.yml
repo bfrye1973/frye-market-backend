@@ -3,11 +3,9 @@ name: dashboard-10min
 on:
   workflow_dispatch:
   schedule:
-    # Every 10 minutes during market hours (13:00–19:59 UTC), plus one run at 20:00 UTC
-    - cron: "*/10 13-19 * * 1-5"
-    - cron: "0 20 * * 1-5"
+    - cron: "*/10 13-19 * * 1-5"   # every 10m during market hours
+    - cron: "0 20 * * 1-5"         # one run at close
 
-# 10m lane only (hourly/EOD use their own lanes)
 concurrency:
   group: data-writes-10min
   cancel-in-progress: true
@@ -69,29 +67,23 @@ jobs:
           sudo ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
           aws --version
 
-      # -------------------- Upload LIVE objects to R2 --------------------
+      # -------------------- Upload LIVE objects to R2 (bucket in endpoint) --------------------
       - name: Upload to R2 (live)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: 'true'
-          AWS_S3_FORCE_PATH_STYLE: 'true'
         run: |
-          # Use the corrected account host from secret (no bucket suffix)
-          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT }}" | tr -d '\r\n ' )"
+          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT_LIVE }}" | tr -d '\r\n ' )"
+          echo "LIVE ENDPOINT: $ENDPOINT"
+          curl -sS -I "$ENDPOINT"   # should return headers
 
-          echo "ENDPOINT(base64) = $(printf '%s' "$ENDPOINT" | base64)"
-          echo "ENDPOINT(length) = $(printf '%s' "$ENDPOINT" | wc -c)"
+          # Bucket is already in the endpoint → use s3:///object (no bucket name)
+          aws s3 cp data/outlook_intraday.json s3:///outlook_intraday.json --endpoint-url "$ENDPOINT" --acl private --no-progress
+          aws s3 cp data/heartbeat_10min.txt  s3:///heartbeat_10min.txt  --endpoint-url "$ENDPOINT" --acl private --no-progress
 
-          # TLS preflight (should return headers)
-          curl -sS -I "$ENDPOINT"
-
-          # Uploads (bucket stays in s3:// URL; endpoint is account host)
-          aws s3 cp data/outlook_intraday.json "s3://frye-data-live/outlook_intraday.json" --endpoint-url "$ENDPOINT" --acl private --no-progress
-          aws s3 cp data/heartbeat_10min.txt  "s3://frye-data-live/heartbeat_10min.txt"  --endpoint-url "$ENDPOINT" --acl private --no-progress
-
-      # -------------------- Archive snapshots (local + R2) --------------------
+      # -------------------- Archive snapshots locally --------------------
       - name: Archive (10-minute snapshots)
         run: |
           set -e
@@ -100,17 +92,20 @@ jobs:
           cp data/outlook_source.json   "data/archive/10min/source/outlook_source_${TS}.json"
           cp data/outlook_intraday.json "data/archive/10min/dashboard/outlook_intraday_${TS}.json"
 
+      # -------------------- Upload ARCHIVE objects to R2 (bucket in endpoint) --------------------
       - name: Upload to R2 (archive)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: 'true'
-          AWS_S3_FORCE_PATH_STYLE: 'true'
         run: |
-          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT }}" | tr -d '\r\n ' )"
-          aws s3 sync data/archive/10min/source/    "s3://frye-data-archive/archive/10min/source/"    --endpoint-url "$ENDPOINT" --acl private --no-progress
-          aws s3 sync data/archive/10min/dashboard/ "s3://frye-data-archive/archive/10min/dashboard/" --endpoint-url "$ENDPOINT" --acl private --no-progress
+          ENDPOINT="$(printf '%s' "${{ secrets.R2_ENDPOINT_ARCHIVE }}" | tr -d '\r\n ' )"
+          echo "ARCHIVE ENDPOINT: $ENDPOINT"
+          curl -sS -I "$ENDPOINT"
+
+          aws s3 sync data/archive/10min/source/    s3:///archive/10min/source/    --endpoint-url "$ENDPOINT" --acl private --no-progress
+          aws s3 sync data/archive/10min/dashboard/ s3:///archive/10min/dashboard/ --endpoint-url "$ENDPOINT" --acl private --no-progress
 
       # -------------------- Visibility + push --------------------
       - name: Show files before commit
