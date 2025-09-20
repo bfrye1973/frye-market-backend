@@ -1,31 +1,27 @@
 #!/usr/bin/env python3
 """
-make_dashboard.py — carry real sector counts + Daily/Intraday Squeeze into outlook.json
-Adds Breadth/Momentum indexes computed from sector totals.
+make_dashboard.py — build outlook.json for the dashboard
 
-- Reads  data/outlook_source.json
-- Writes data/outlook.json with:
-  * gauges:
-      - rpm.pct            (Breadth 0..100)
-      - speed.pct          (Momentum 0..100)
-      - fuel.pct           (Intraday squeeze/pressure)
-      - squeezeDaily.pct   (Daily squeeze)
-      - water.pct          (Volatility)
-      - oil.psi            (Liquidity PSI)
-  * odometers: squeezeCompressionPct (intraday = fuel)
-  * outlook.sectors: { nh, nl, up, down, netNH, netUD, spark }
-  * sectorCards (top-level + nested)
-  * summary: { breadthIdx, momentumIdx }
-  * engineLights: { updatedAt, mode, live, signals{...} }
-  * intraday.sectorDirection10m: { risingCount, risingPct, updatedAt }       (intraday)
-  * intraday.riskOn10m:         { riskOnPct, updatedAt }                      (intraday)
-  * trendDaily: {..., updatedAt, mode, live:false }                            (daily/eod)
+- Reads:  data/outlook_source.json
+- Writes: data/outlook.json
+
+Emits:
+  gauges: rpm (Breadth), speed (Momentum), fuel (Intraday Squeeze), water (Vol), oil (Liq), squeezeDaily
+  odometers: squeezeCompressionPct
+  outlook.sectors + sectorCards
+  summary: breadthIdx, momentumIdx
+  engineLights: updatedAt, mode, live, signals (defaults; upstream can override)
+  intraday.sectorDirection10m: risingCount, risingPct, updatedAt  (intraday)
+  intraday.riskOn10m: riskOnPct, updatedAt                        (intraday)
+  trendDaily: trend/participation/squeezeDaily/volatilityRegime/liquidityRegime/rotation, updatedAt (daily/eod)
 """
 
 from __future__ import annotations
-import argparse, json, os
-from datetime import datetime, timezone
+import argparse, json, os, math, datetime, time
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
+import urllib.request
+import urllib.error
 
 SCHEMA_VERSION = "r1.2"
 VERSION_TAG    = "1.2-hourly"
@@ -38,6 +34,8 @@ PREFERRED_ORDER = [
 
 OFFENSIVE = {"information technology","consumer discretionary","communication services"}
 DEFENSIVE = {"consumer staples","utilities","health care"}
+
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -77,7 +75,82 @@ def num(v, default=0.0):
     except:
         return default
 
-# -------- sectors --------
+# ---------------- HTTP util (Polygon) ----------------
+def http_get_json(url: str, hdrs: Dict[str,str] | None = None) -> Dict[str,Any]:
+    req = urllib.request.Request(url, headers=hdrs or {})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+def fetch_polygon_spy_daily(limit: int = 120) -> List[float]:
+    """
+    Fetch SPY daily closes from Polygon. Returns closes in ascending date order.
+    """
+    if not POLYGON_API_KEY:
+        return []
+    end = datetime.utcnow().date()
+    start = end - timedelta(days=limit*2)  # buffer for non-trading days
+    url = (
+        f"https://api.polygon.io/v2/aggs/ticker/SPY/range/1/day/"
+        f"{start.isoformat()}/{end.isoformat()}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
+    )
+    try:
+        data = http_get_json(url)
+        res = data.get("results") or []
+        closes = [float(r.get("c", 0.0)) for r in res if r.get("c") is not None]
+        return closes[-limit:] if len(closes) > limit else closes
+    except Exception:
+        return []
+
+# ---------------- Lux Squeeze PSI (daily) ----------------
+def lux_squeeze_psi(closes: List[float], conv: int = 50, length: int = 20) -> float | None:
+    """
+    Python port of the LuxAlgo Squeeze Index:
+      max = max(prev_max - (prev_max - src)/conv, src)
+      min = min(prev_min + (src - prev_min)/conv, src)
+      diff = log(max - min)
+      psi = -50 * corr(diff, bar_index, length) + 50
+    Returns last psi value in 0..100 (not clamped by design here).
+    """
+    if not closes or len(closes) < length + 2:
+        return None
+
+    # Rolling max/min smoothing
+    mx = None
+    mn = None
+    diffs: List[float] = []
+    for src in closes:
+        src = float(src)
+        mx = src if mx is None else max(mx - (mx - src) / conv, src)
+        mn = src if mn is None else min(mn + (src - mn) / conv, src)
+        span = max(mx - mn, 1e-9)
+        diffs.append(math.log(span))
+
+    # rolling correlation with bar_index over 'length'
+    def pearson_corr(a: List[float], b: List[float]) -> float:
+        n = len(a)
+        if n <= 1: return 0.0
+        ma = sum(a)/n
+        mb = sum(b)/n
+        cov = sum((x-ma)*(y-mb) for x,y in zip(a,b))
+        va  = sum((x-ma)*(x-ma) for x in a)
+        vb  = sum((y-mb)*(y-mb) for y in b)
+        if va <= 0 or vb <= 0: return 0.0
+        return cov / math.sqrt(va*vb)
+
+    bar_idx = list(range(len(diffs)))
+    corr_vals: List[float] = []
+    for i in range(length-1, len(diffs)):
+        window_diff = diffs[i-length+1:i+1]
+        window_idx  = bar_idx[i-length+1:i+1]
+        corr_vals.append(pearson_corr(window_diff, window_idx))
+
+    if not corr_vals:
+        return None
+    corr_last = corr_vals[-1]
+    psi = -50.0 * corr_last + 50.0
+    return float(psi)
+
+# ---------------- sectors from source ----------------
 def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
     raw = None
     if isinstance(src.get("outlook"), dict) and isinstance(src["outlook"].get("sectors"), dict):
@@ -107,7 +180,7 @@ def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
             out[k] = {"nh":0,"nl":0,"up":0,"down":0,"netNH":0,"netUD":0,"spark":[]}
     return out
 
-# -------- gauges / squeeze --------
+# -------- gauges / squeeze (intraday) --------
 def pick(d: Dict[str, Any], *keys, default=None):
     for k in keys:
         if d.get(k) is not None:
@@ -133,8 +206,8 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
         s = float(pos) + float(neg)
         return 50.0 if s <= 0 else 50.0 + 50.0 * ((float(pos) - float(neg)) / s)
 
-    breadthIdx  = ratio_idx(tot_up, tot_dn)   # % advancers (Breadth)
-    momentumIdx = ratio_idx(tot_nh, tot_nl)   # % new highs (Momentum)
+    breadthIdx  = ratio_idx(tot_up, tot_dn)
+    momentumIdx = ratio_idx(tot_nh, tot_nl)
 
     gauges = {
         "rpm":   {"pct": float(breadthIdx),  "label":"Breadth"},
@@ -177,22 +250,17 @@ def default_signals() -> Dict[str, Any]:
     return { k: {"active": False, "severity": "info"} for k in keys }
 
 # -------- trendDaily (daily/eod) --------
-def build_trend_daily(src: Dict[str, Any], sectors: Dict[str, Any], gauges: Dict[str, Any], ts: str) -> Dict[str, Any]:
-    # Participation: % sectors with netNH > 0 (proxy)
+def build_trend_daily_with_lux(sectors: Dict[str, Any], gauges: Dict[str, Any], ts: str) -> Dict[str, Any]:
+    # 1) Participation: % sectors with netNH > 0 (proxy)
     pos_sectors = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k, {}).get("netNH", 0))) > 0)
     participation_pct = (pos_sectors / float(len(PREFERRED_ORDER))) * 100.0
 
-    # Trend proxy from breadth & momentum (no price series here)
-    b = float(num(gauges.get("rpm", {}).get("pct", 50)))
-    m = float(num(gauges.get("speed", {}).get("pct", 50)))
-    trend_score = 0.5 * b + 0.5 * m
-    if trend_score > 55: trend_state = "up"
-    elif trend_score < 45: trend_state = "down"
-    else: trend_state = "flat"
+    # 2) Lux PSI from SPY daily bars
+    closes = fetch_polygon_spy_daily(limit=120)
+    psi = lux_squeeze_psi(closes, conv=50, length=20)
+    psi_pct = round(float(psi), 2) if psi is not None else None
 
-    sdy = gauges.get("squeezeDaily", {})
-    sdy_pct = float(num(sdy.get("pct", None), None)) if sdy else None
-
+    # 3) Vol/liq regimes from gauges
     vol_pct = float(num(gauges.get("water", {}).get("pct", 0)))
     if vol_pct < 30: vol_band = "calm"
     elif vol_pct <= 60: vol_band = "elevated"
@@ -204,16 +272,24 @@ def build_trend_daily(src: Dict[str, Any], sectors: Dict[str, Any], gauges: Dict
     elif liq_psi >= 40: liq_band = "light"
     else: liq_band = "thin"
 
-    # Rotation: % of offensive outperforming defensives (proxy: netNH>0)
+    # 4) Trend proxy from breadth & momentum
+    b = float(num(gauges.get("rpm", {}).get("pct", 50)))
+    m = float(num(gauges.get("speed", {}).get("pct", 50)))
+    trend_score = 0.5 * b + 0.5 * m
+    if trend_score > 55: trend_state = "up"
+    elif trend_score < 45: trend_state = "down"
+    else: trend_state = "flat"
+
+    # 5) Rotation: % of offensive outperforming defensives (proxy: netNH>0)
     off_pos = sum(1 for s in OFFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
     def_pos = sum(1 for s in DEFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
     denom = off_pos + def_pos
     risk_on_pct = (off_pos / denom) * 100.0 if denom > 0 else 50.0
 
-    td = {
+    return {
         "trend":            { "emaSlope": round(trend_score - 50, 1), "state": trend_state },
         "participation":    { "pctAboveMA": round(participation_pct, 1) },
-        "squeezeDaily":     { "pct": round(sdy_pct, 2) if sdy_pct is not None else None },
+        "squeezeDaily":     { "pct": psi_pct },  # Lux PSI
         "volatilityRegime": { "atrPct": round(vol_pct, 1), "band": vol_band },
         "liquidityRegime":  { "psi": round(liq_psi, 1), "band": liq_band },
         "rotation":         { "riskOnPct": round(risk_on_pct, 1) },
@@ -221,7 +297,6 @@ def build_trend_daily(src: Dict[str, Any], sectors: Dict[str, Any], gauges: Dict
         "mode":             "daily",
         "live":             False
     }
-    return td
 
 # -------- main --------
 def main():
@@ -245,12 +320,10 @@ def main():
         total_sectors = len(PREFERRED_ORDER)
         for k in PREFERRED_ORDER:
             vals = sectors.get(k, {})
-            net_nh = int(num(vals.get("netNH", 0)))
-            if net_nh > 0:
+            if int(num(vals.get("netNH", 0))) > 0:
                 rising_count += 1
         rising_pct = (rising_count / total_sectors) * 100.0
 
-        # Risk-On 10m (proxy): % of OFFENSIVE sectors with netNH > 0 vs OFFENSIVE+DEFENSIVE
         off_pos = sum(1 for s in OFFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
         def_pos = sum(1 for s in DEFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
         denom = off_pos + def_pos
@@ -288,10 +361,7 @@ def main():
         "pipeline": args.mode,
         **gz_od,
         "sectorCards": cards,
-        "outlook": {
-            "sectors": sectors,
-            "sectorCards": cards
-        },
+        "outlook": { "sectors": sectors, "sectorCards": cards },
         "engineLights": {
             "updatedAt": ts,
             "mode": args.mode,
@@ -304,7 +374,7 @@ def main():
         out["intraday"] = intraday_block
 
     if args.mode in ("daily", "eod"):
-        out["trendDaily"] = build_trend_daily(src, sectors, gz_od["gauges"], ts)
+        out["trendDaily"] = build_trend_daily_with_lux(sectors, gz_od["gauges"], ts)
 
     jwrite(args.out, out)
     print(f"Wrote {args.out} | sectors={len(sectors)} | cards={len(cards)} | mode={args.mode}")
