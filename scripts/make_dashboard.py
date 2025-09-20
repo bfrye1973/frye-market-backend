@@ -17,8 +17,9 @@ Adds Breadth/Momentum indexes computed from sector totals.
   * sectorCards (top-level + nested)
   * summary: { breadthIdx, momentumIdx }
   * engineLights: { updatedAt, mode, live, signals{...} }
-  * intraday.sectorDirection10m: { risingCount, risingPct, updatedAt }  (intraday runs)
-  * trendDaily: {..., updatedAt}  (daily/eod runs)
+  * intraday.sectorDirection10m: { risingCount, risingPct, updatedAt }       (intraday)
+  * intraday.riskOn10m:         { riskOnPct, updatedAt }                      (intraday)
+  * trendDaily: {..., updatedAt, mode, live:false }                            (daily/eod)
 """
 
 from __future__ import annotations
@@ -189,11 +190,9 @@ def build_trend_daily(src: Dict[str, Any], sectors: Dict[str, Any], gauges: Dict
     elif trend_score < 45: trend_state = "down"
     else: trend_state = "flat"
 
-    # Daily squeeze from gauges if present
     sdy = gauges.get("squeezeDaily", {})
     sdy_pct = float(num(sdy.get("pct", None), None)) if sdy else None
 
-    # Volatility & Liquidity regimes from gauges
     vol_pct = float(num(gauges.get("water", {}).get("pct", 0)))
     if vol_pct < 30: vol_band = "calm"
     elif vol_pct <= 60: vol_band = "elevated"
@@ -239,7 +238,7 @@ def main():
     gz_od   = build_gauges_and_odometers(src, sectors, args.mode)
     cards   = cards_from_sectors(sectors)
 
-    # --- Sector Direction (10m) (intraday only) ---
+    # --- Sector Direction (10m) + RiskOn10m (intraday only) ---
     intraday_block = None
     if args.mode == "intraday":
         rising_count = 0
@@ -250,10 +249,21 @@ def main():
             if net_nh > 0:
                 rising_count += 1
         rising_pct = (rising_count / total_sectors) * 100.0
+
+        # Risk-On 10m (proxy): % of OFFENSIVE sectors with netNH > 0 vs OFFENSIVE+DEFENSIVE
+        off_pos = sum(1 for s in OFFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
+        def_pos = sum(1 for s in DEFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
+        denom = off_pos + def_pos
+        risk_on_10m = (off_pos / denom) * 100.0 if denom > 0 else 50.0
+
         intraday_block = {
             "sectorDirection10m": {
                 "risingCount": int(rising_count),
                 "risingPct": round(rising_pct, 1),
+                "updatedAt": ts
+            },
+            "riskOn10m": {
+                "riskOnPct": round(risk_on_10m, 1),
                 "updatedAt": ts
             }
         }
@@ -290,11 +300,9 @@ def main():
         }
     }
 
-    # Attach intraday block if present
     if intraday_block:
         out["intraday"] = intraday_block
 
-    # Attach trendDaily on daily/eod runs
     if args.mode in ("daily", "eod"):
         out["trendDaily"] = build_trend_daily(src, sectors, gz_od["gauges"], ts)
 
