@@ -17,7 +17,8 @@ Adds Breadth/Momentum indexes computed from sector totals.
   * sectorCards (top-level + nested)
   * summary: { breadthIdx, momentumIdx }
   * engineLights: { updatedAt, mode, live, signals{...} }
-  * intraday.sectorDirection10m: { risingCount, risingPct, updatedAt }
+  * intraday.sectorDirection10m: { risingCount, risingPct, updatedAt }  (intraday runs)
+  * trendDaily: {..., updatedAt}  (daily/eod runs)
 """
 
 from __future__ import annotations
@@ -33,6 +34,9 @@ PREFERRED_ORDER = [
     "real estate","energy","consumer staples","consumer discretionary",
     "financials","utilities","industrials",
 ]
+
+OFFENSIVE = {"information technology","consumer discretionary","communication services"}
+DEFENSIVE = {"consumer staples","utilities","health care"}
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -128,8 +132,8 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
         s = float(pos) + float(neg)
         return 50.0 if s <= 0 else 50.0 + 50.0 * ((float(pos) - float(neg)) / s)
 
-    breadthIdx  = ratio_idx(tot_up, tot_dn)
-    momentumIdx = ratio_idx(tot_nh, tot_nl)
+    breadthIdx  = ratio_idx(tot_up, tot_dn)   # % advancers (Breadth)
+    momentumIdx = ratio_idx(tot_nh, tot_nl)   # % new highs (Momentum)
 
     gauges = {
         "rpm":   {"pct": float(breadthIdx),  "label":"Breadth"},
@@ -171,6 +175,55 @@ def default_signals() -> Dict[str, Any]:
     ]
     return { k: {"active": False, "severity": "info"} for k in keys }
 
+# -------- trendDaily (daily/eod) --------
+def build_trend_daily(src: Dict[str, Any], sectors: Dict[str, Any], gauges: Dict[str, Any], ts: str) -> Dict[str, Any]:
+    # Participation: % sectors with netNH > 0 (proxy)
+    pos_sectors = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k, {}).get("netNH", 0))) > 0)
+    participation_pct = (pos_sectors / float(len(PREFERRED_ORDER))) * 100.0
+
+    # Trend proxy from breadth & momentum (no price series here)
+    b = float(num(gauges.get("rpm", {}).get("pct", 50)))
+    m = float(num(gauges.get("speed", {}).get("pct", 50)))
+    trend_score = 0.5 * b + 0.5 * m
+    if trend_score > 55: trend_state = "up"
+    elif trend_score < 45: trend_state = "down"
+    else: trend_state = "flat"
+
+    # Daily squeeze from gauges if present
+    sdy = gauges.get("squeezeDaily", {})
+    sdy_pct = float(num(sdy.get("pct", None), None)) if sdy else None
+
+    # Volatility & Liquidity regimes from gauges
+    vol_pct = float(num(gauges.get("water", {}).get("pct", 0)))
+    if vol_pct < 30: vol_band = "calm"
+    elif vol_pct <= 60: vol_band = "elevated"
+    else: vol_band = "high"
+
+    liq_psi = float(num(gauges.get("oil", {}).get("psi", 0)))
+    if liq_psi >= 60: liq_band = "good"
+    elif liq_psi >= 50: liq_band = "normal"
+    elif liq_psi >= 40: liq_band = "light"
+    else: liq_band = "thin"
+
+    # Rotation: % of offensive outperforming defensives (proxy: netNH>0)
+    off_pos = sum(1 for s in OFFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
+    def_pos = sum(1 for s in DEFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
+    denom = off_pos + def_pos
+    risk_on_pct = (off_pos / denom) * 100.0 if denom > 0 else 50.0
+
+    td = {
+        "trend":            { "emaSlope": round(trend_score - 50, 1), "state": trend_state },
+        "participation":    { "pctAboveMA": round(participation_pct, 1) },
+        "squeezeDaily":     { "pct": round(sdy_pct, 2) if sdy_pct is not None else None },
+        "volatilityRegime": { "atrPct": round(vol_pct, 1), "band": vol_band },
+        "liquidityRegime":  { "psi": round(liq_psi, 1), "band": liq_band },
+        "rotation":         { "riskOnPct": round(risk_on_pct, 1) },
+        "updatedAt":        ts,
+        "mode":             "daily",
+        "live":             False
+    }
+    return td
+
 # -------- main --------
 def main():
     ap = argparse.ArgumentParser()
@@ -186,22 +239,24 @@ def main():
     gz_od   = build_gauges_and_odometers(src, sectors, args.mode)
     cards   = cards_from_sectors(sectors)
 
-    # --- Sector Direction (10m) ---
-    rising_count = 0
-    total_sectors = len(PREFERRED_ORDER)
-    for k in PREFERRED_ORDER:
-        vals = sectors.get(k, {})
-        net_nh = int(num(vals.get("netNH", 0)))
-        if net_nh > 0:
-            rising_count += 1
-    rising_pct = (rising_count / total_sectors) * 100.0
-    intraday_block = {
-        "sectorDirection10m": {
-            "risingCount": int(rising_count),
-            "risingPct": round(rising_pct, 1),
-            "updatedAt": ts
+    # --- Sector Direction (10m) (intraday only) ---
+    intraday_block = None
+    if args.mode == "intraday":
+        rising_count = 0
+        total_sectors = len(PREFERRED_ORDER)
+        for k in PREFERRED_ORDER:
+            vals = sectors.get(k, {})
+            net_nh = int(num(vals.get("netNH", 0)))
+            if net_nh > 0:
+                rising_count += 1
+        rising_pct = (rising_count / total_sectors) * 100.0
+        intraday_block = {
+            "sectorDirection10m": {
+                "risingCount": int(rising_count),
+                "risingPct": round(rising_pct, 1),
+                "updatedAt": ts
+            }
         }
-    }
 
     # Engine Lights: defaults + upstream overrides
     upstream_signals = {}
@@ -232,12 +287,19 @@ def main():
             "mode": args.mode,
             "live": (args.mode == "intraday"),
             "signals": signals
-        },
-        "intraday": intraday_block
+        }
     }
 
+    # Attach intraday block if present
+    if intraday_block:
+        out["intraday"] = intraday_block
+
+    # Attach trendDaily on daily/eod runs
+    if args.mode in ("daily", "eod"):
+        out["trendDaily"] = build_trend_daily(src, sectors, gz_od["gauges"], ts)
+
     jwrite(args.out, out)
-    print(f"Wrote {args.out} | sectors={len(sectors)} | cards={len(cards)} | rising={rising_count}/{total_sectors}")
+    print(f"Wrote {args.out} | sectors={len(sectors)} | cards={len(cards)} | mode={args.mode}")
     print(f"[summary] breadthIdx={out['summary']['breadthIdx']:.1f} momentumIdx={out['summary']['momentumIdx']:.1f}")
 
 if __name__ == "__main__":
