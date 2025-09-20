@@ -16,7 +16,8 @@ Adds Breadth/Momentum indexes computed from sector totals.
   * outlook.sectors: { nh, nl, up, down, netNH, netUD, spark }
   * sectorCards (top-level + nested)
   * summary: { breadthIdx, momentumIdx }
-  * engineLights: { updatedAt, mode, live, signals{...} }  # defaults present; upstream can override
+  * engineLights: { updatedAt, mode, live, signals{...} }
+  * intraday.sectorDirection10m: { risingCount, risingPct, updatedAt }
 """
 
 from __future__ import annotations
@@ -72,9 +73,7 @@ def num(v, default=0.0):
         return default
 
 # -------- sectors --------
-
 def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
-    # accept any of: outlook.sectors, sectors, groups
     raw = None
     if isinstance(src.get("outlook"), dict) and isinstance(src["outlook"].get("sectors"), dict):
         raw = src["outlook"]["sectors"]
@@ -98,14 +97,12 @@ def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
                 "netNH": nh - nl, "netUD": up - down, "spark": spark
             }
 
-    # normalize to 11 canonical sectors
     for k in PREFERRED_ORDER:
         if k not in out:
             out[k] = {"nh":0,"nl":0,"up":0,"down":0,"netNH":0,"netUD":0,"spark":[]}
     return out
 
 # -------- gauges / squeeze --------
-
 def pick(d: Dict[str, Any], *keys, default=None):
     for k in keys:
         if d.get(k) is not None:
@@ -122,7 +119,6 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
     vol_pct   = num(pick(g, "volatility_pct", "volatilityPct", default=50))
     liq_pct   = num(pick(g, "liquidity_pct", "liquidityPct", default=70))
 
-    # ---- Breadth/Momentum from sector totals ----
     tot_nh = sum(int(num(v.get("nh",0)))   for v in sectors.values())
     tot_nl = sum(int(num(v.get("nl",0)))   for v in sectors.values())
     tot_up = sum(int(num(v.get("up",0)))   for v in sectors.values())
@@ -132,9 +128,8 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
         s = float(pos) + float(neg)
         return 50.0 if s <= 0 else 50.0 + 50.0 * ((float(pos) - float(neg)) / s)
 
-    # Keep mapping consistent with your UI labels:
-    breadthIdx  = ratio_idx(tot_up, tot_dn)   # % advancers (Breadth)
-    momentumIdx = ratio_idx(tot_nh, tot_nl)   # % new highs (Momentum)
+    breadthIdx  = ratio_idx(tot_up, tot_dn)
+    momentumIdx = ratio_idx(tot_nh, tot_nl)
 
     gauges = {
         "rpm":   {"pct": float(breadthIdx),  "label":"Breadth"},
@@ -146,12 +141,11 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
     if daily_sq is not None:
         gauges["squeezeDaily"] = {"pct": float(daily_sq)}
 
-    odometers = {"squeezeCompressionPct": float(fuel)}  # intraday compression
+    odometers = {"squeezeCompressionPct": float(fuel)}
     summary = {"breadthIdx": float(breadthIdx), "momentumIdx": float(momentumIdx)}
     return {"gauges": gauges, "odometers": odometers, "summary": summary}
 
 # -------- cards --------
-
 def cards_from_sectors(sectors: Dict[str, Any]) -> List[Dict[str, Any]]:
     cards: List[Dict[str, Any]] = []
     for key in PREFERRED_ORDER:
@@ -170,7 +164,6 @@ def cards_from_sectors(sectors: Dict[str, Any]) -> List[Dict[str, Any]]:
     return cards
 
 # -------- engine lights defaults --------
-
 def default_signals() -> Dict[str, Any]:
     keys = [
         "sigBreakout", "sigDistribution", "sigCompression", "sigExpansion",
@@ -179,7 +172,6 @@ def default_signals() -> Dict[str, Any]:
     return { k: {"active": False, "severity": "info"} for k in keys }
 
 # -------- main --------
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="data/outlook_source.json")
@@ -194,7 +186,24 @@ def main():
     gz_od   = build_gauges_and_odometers(src, sectors, args.mode)
     cards   = cards_from_sectors(sectors)
 
-    # Build engine lights: defaults + any upstream overrides
+    # --- Sector Direction (10m) ---
+    rising_count = 0
+    total_sectors = len(PREFERRED_ORDER)
+    for k in PREFERRED_ORDER:
+        vals = sectors.get(k, {})
+        net_nh = int(num(vals.get("netNH", 0)))
+        if net_nh > 0:
+            rising_count += 1
+    rising_pct = (rising_count / total_sectors) * 100.0
+    intraday_block = {
+        "sectorDirection10m": {
+            "risingCount": int(rising_count),
+            "risingPct": round(rising_pct, 1),
+            "updatedAt": ts
+        }
+    }
+
+    # Engine Lights: defaults + upstream overrides
     upstream_signals = {}
     if isinstance(src.get("signals"), dict):
         upstream_signals = src["signals"]
@@ -213,22 +222,22 @@ def main():
         "version": VERSION_TAG,
         "pipeline": args.mode,
         **gz_od,
-        "sectorCards": cards,         # legacy
+        "sectorCards": cards,
         "outlook": {
             "sectors": sectors,
             "sectorCards": cards
         },
-        # Engine Lights: fresh stamp + mode/live flags + predictable signals block
         "engineLights": {
             "updatedAt": ts,
-            "mode": args.mode,                 # "intraday", "daily", or "eod"
-            "live": (args.mode == "intraday"), # true only for 10-min/intraday runs
+            "mode": args.mode,
+            "live": (args.mode == "intraday"),
             "signals": signals
-        }
+        },
+        "intraday": intraday_block
     }
 
     jwrite(args.out, out)
-    print(f"Wrote {args.out} | sectors={len(sectors)} | cards={len(cards)}")
+    print(f"Wrote {args.out} | sectors={len(sectors)} | cards={len(cards)} | rising={rising_count}/{total_sectors}")
     print(f"[summary] breadthIdx={out['summary']['breadthIdx']:.1f} momentumIdx={out['summary']['momentumIdx']:.1f}")
 
 if __name__ == "__main__":
