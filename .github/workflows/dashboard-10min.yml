@@ -9,8 +9,11 @@ on:
     - cron: "0 20 * * 1-5"
 
 concurrency:
-  group: data-writes-10min
-  cancel-in-progress: true
+-  group: data-writes-10min
+-  cancel-in-progress: true
++  group: ${{ github.workflow }}-${{ github.ref }}   # one runner per workflow+branch
++  cancel-in-progress: false                         # let the current run finish
+
 
 jobs:
   tenmin:
