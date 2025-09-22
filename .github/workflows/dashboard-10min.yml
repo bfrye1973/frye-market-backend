@@ -3,17 +3,14 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # every 10m during market hours (UTC) — 13:00–19:59Z = 6:00–12:59 Phoenix (DST-aware enough for our use)
-    - cron: "*/10 13-19 * * 1-5"
-    # one pass at close for a fresh snapshot
+    # run every 15 minutes during U.S. market hours (UTC 13–19)
+    - cron: "*/15 13-19 * * 1-5"
+    # one extra run at close (~20:00 UTC)
     - cron: "0 20 * * 1-5"
 
 concurrency:
--  group: data-writes-10min
--  cancel-in-progress: true
-+  group: ${{ github.workflow }}-${{ github.ref }}   # one runner per workflow+branch
-+  cancel-in-progress: false                         # let the current run finish
-
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false   # let a run finish, don’t auto-cancel
 
 jobs:
   tenmin:
@@ -44,7 +41,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
-      # ---- Build (intraday10) ----
+      # ---- Build intraday10 ----
       - name: Build outlook source (intraday10)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -62,30 +59,23 @@ jobs:
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      # ---- Stage files using JSON's timestamp (keeps LIVE & ARCHIVE in lockstep) ----
       - name: Stage files for publish
         id: prep
         run: |
           set -e
           RAW_TS=$(jq -r '.updated_at // .ts' data/outlook_intraday.json)
           TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/:/-/g')
-          echo "RAW_TS=$RAW_TS"
-          echo "TS_SAFE=$TS_SAFE"
 
           mkdir -p /tmp/live10 /tmp/archive/source /tmp/archive/dashboard
-
-          # LIVE "latest"
           cp data/outlook_intraday.json /tmp/live10/
           cp data/outlook_source.json   /tmp/live10/
           cp data/heartbeat_10min.txt   /tmp/live10/
 
-          # ARCHIVE snapshots (use the same timestamp as LIVE JSON)
           cp data/outlook_source.json   "/tmp/archive/source/outlook_source_${TS_SAFE}.json"
           cp data/outlook_intraday.json "/tmp/archive/dashboard/outlook_intraday_${TS_SAFE}.json"
 
           echo "ts=${TS_SAFE}" >> "$GITHUB_OUTPUT"
 
-      # ---- Publish LIVE (force-push tiny branch this job owns) ----
       - name: Push LIVE branch (10min)
         run: |
           set -e
@@ -102,17 +92,15 @@ jobs:
           mkdir -p data
           cp /tmp/live10/* data/
           git add data
-          git commit -m "10MIN live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit (live)"
+          git commit -m "10MIN live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
           git push origin +HEAD:"$LIVE_BRANCH"
 
-      # ---- Append to ARCHIVE (own branch -> no contention) ----
       - name: Push ARCHIVE branch (append)
         run: |
           set -e
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
 
-          # Base on remote tip if present; else create
           git fetch origin "$ARCHIVE_BRANCH" || true
           if git show-ref --verify --quiet refs/heads/"$ARCHIVE_BRANCH"; then
             git checkout "$ARCHIVE_BRANCH"
@@ -124,9 +112,7 @@ jobs:
           cp /tmp/archive/source/*    data/archive/10min/source/    || true
           cp /tmp/archive/dashboard/* data/archive/10min/dashboard/ || true
           git add data/archive/10min || true
-          git commit -m "10MIN archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit (archive)"
+          git commit -m "10MIN archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit"
 
-          # Rebase on remote & push
           git pull --rebase origin "$ARCHIVE_BRANCH" || true
           git push origin HEAD:"$ARCHIVE_BRANCH"
- 
