@@ -214,27 +214,42 @@ def build_counts_hourly(symbols: List[str]) -> Dict[str,int]:
     return c
 
 def build_counts_intraday10(symbols: List[str]) -> Dict[str,int]:
-    c={"nh":0,"nl":0,"u":0,"d":0,"adrUp":0,"adrDown":0}
+    """
+    Intraday10: compare today's snapshot H/L/last vs prior 10-day watermarks.
+    FAST PATH: no per-symbol daily ADR fetch (keeps 10m runtime <~15m).
+    """
+    # Keep adrUp/adrDown keys for schema stability, but we do NOT compute them here.
+    c = {"nh": 0, "nl": 0, "u": 0, "d": 0, "adrUp": 0, "adrDown": 0}
+
     wm = watermarks_last_10d(symbols)
-    # snapshots in batches
-    snaps={}
-    for i in range(0, len(symbols), 50):
-        batch = symbols[i:i+50]
-        js = poly_json(f"{POLY_BASE}/v2/snapshot/locale/us/markets/stocks/tickers", {"tickers": ",".join(batch)})
+
+    # Bulk snapshots (larger batches + mild throttle are okay here)
+    snaps: Dict[str, Dict[str, Any]] = {}
+    for i in range(0, len(symbols), 100):  # bigger batch → fewer API calls
+        batch = symbols[i:i+100]
+        js = poly_json(f"{POLY_BASE}/v2/snapshot/locale/us/markets/stocks/tickers",
+                       {"tickers": ",".join(batch)})
         for row in js.get("tickers", []) or []:
-            t=row.get("ticker");  snaps[t]=row
-        time.sleep(0.30)
+            t = row.get("ticker")
+            if t:
+                snaps[t] = row
+        time.sleep(0.15)
+
     for sym in symbols:
-        H10,L10,c2,c1 = wm.get(sym, (None,None,None,None))
+        H10, L10, c2, c1 = wm.get(sym, (None, None, None, None))
         s = snaps.get(sym, {}) or {}
-        day=s.get("day") or {}; last_trade=s.get("lastTrade") or {}; last_quote=s.get("lastQuote") or {}
-        day_high=day.get("h"); day_low=day.get("l"); last_price = last_trade.get("p") or last_quote.get("p")
-        nh,nl,u3,d3 = compute_intraday_from_snap(H10,L10,c2,c1,day_high,day_low,last_price)
-        # ADR momentum for intraday cadence: use daily bars
-        bars_d = fetch_daily(sym, ADR_LOOKBACK_DAYS)[-ADR_LOOKBACK_DAYS:]
-        au,ad = adr_momentum_up_down(bars_d, ADR_MOMENTUM_LAG)
-        c["nh"]+=nh; c["nl"]+=nl; c["u"]+=u3; c["d"]+=d3; c["adrUp"]+=au; c["adrDown"]+=ad
+        day = s.get("day") or {}
+        last_trade = s.get("lastTrade") or {}
+        last_quote = s.get("lastQuote") or {}
+        day_high = day.get("h")
+        day_low  = day.get("l")
+        last_px  = last_trade.get("p") or last_quote.get("p")
+
+        nh, nl, u3, d3 = compute_intraday_from_snap(H10, L10, c2, c1, day_high, day_low, last_px)
+        c["nh"] += nh; c["nl"] += nl; c["u"] += u3; c["d"] += d3
+
     return c
+
 
 # ---------------- Global gauges ----------------
 def compute_global_fields(universe_symbols: List[str]) -> Dict[str, Any]:
