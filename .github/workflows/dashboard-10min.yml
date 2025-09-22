@@ -67,7 +67,7 @@ jobs:
           TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/:/-/g')
           echo "RAW_TS=$RAW_TS"
           echo "TS_SAFE=$TS_SAFE"
-          echo "ts=${TS_SAFE}" >> "$GITHUB_OUTPUT"
+          echo "ts=$TS_SAFE" >> "$GITHUB_OUTPUT"
 
           mkdir -p /tmp/live10
           cp data/outlook_intraday.json /tmp/live10/
@@ -93,20 +93,31 @@ jobs:
           git commit -m "10MIN live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit (live)"
           git push origin +HEAD:"$LIVE_BRANCH"
 
-      # ------------------ Stage ARCHIVE files (only every 3rd run) ------------------
-      - name: Stage ARCHIVE artifacts (every 3rd run)
-        if: ${{ (github.run_number % 3) == 0 }}
+      # ------------------ GATE: every 3rd run? ------------------
+      - name: Compute archive gate (every 3rd run)
+        id: gate
+        shell: bash
+        run: |
+          n="${GITHUB_RUN_NUMBER:-0}"
+          if [ $(( n % 3 )) -eq 0 ]; then
+            echo "archive=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "archive=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ------------------ Stage ARCHIVE files (only if gate=true) ------------------
+      - name: Stage ARCHIVE artifacts
+        if: ${{ steps.gate.outputs.archive == 'true' }}
         id: archprep
         run: |
           set -e
           TS_SAFE="${{ steps.liveprep.outputs.ts }}"
           mkdir -p /tmp/archive/source /tmp/archive/dashboard
-
           cp data/outlook_source.json   "/tmp/archive/source/outlook_source_${TS_SAFE}.json"
           cp data/outlook_intraday.json "/tmp/archive/dashboard/outlook_intraday_${TS_SAFE}.json"
 
-      - name: Push ARCHIVE branch (append)  # every 3rd run
-        if: ${{ (github.run_number % 3) == 0 }}
+      - name: Push ARCHIVE branch (append)
+        if: ${{ steps.gate.outputs.archive == 'true' }}
         run: |
           set -e
           git config user.name  "actions-user"
@@ -124,6 +135,5 @@ jobs:
           cp /tmp/archive/dashboard/* data/archive/10min/dashboard/ || true
           git add data/archive/10min || true
           git commit -m "10MIN archive: ${{ steps.liveprep.outputs.ts }}" || echo "nothing to commit (archive)"
-
           git pull --rebase origin "$ARCHIVE_BRANCH" || true
           git push origin HEAD:"$ARCHIVE_BRANCH"
