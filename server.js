@@ -1,4 +1,4 @@
-// server.js — Express ESM with CORS, static, API, and GitHub branch proxies
+// server.js — Express ESM with CORS, static, API, and GitHub-branch proxies
 
 import express from "express";
 import path from "path";
@@ -61,8 +61,8 @@ app.use(
 app.use("/api", buildRouter());
 
 /* ---------- GitHub raw proxies ---------- */
-// NOTE: branch files actually live in GitHub, not on Render disk.
-// These endpoints always pull the freshest JSON from GitHub branches.
+// These routes always pull the freshest JSON from GitHub branches
+// so your frontend can call /live/intraday, /live/eod, /live/hourly.
 
 const GH_RAW_BASE =
   "https://raw.githubusercontent.com/bfrye1973/frye-market-backend";
@@ -70,10 +70,11 @@ const GH_RAW_BASE =
 async function proxyRaw(res, url) {
   try {
     const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok)
+    if (!r.ok) {
       return res
         .status(r.status)
         .json({ ok: false, error: `Upstream ${r.status}` });
+    }
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     const text = await r.text();
@@ -86,7 +87,10 @@ async function proxyRaw(res, url) {
 
 // Intraday (10-min) → branch: data-live-10min, path: data/outlook_intraday.json
 app.get("/live/intraday", (req, res) =>
-  proxyRaw(res, `${GH_RAW_BASE}/data-live-10min/main/data/outlook_intraday.json`)
+  proxyRaw(
+    res,
+    `${GH_RAW_BASE}/data-live-10min/main/data/outlook_intraday.json`
+  )
 );
 
 // EOD (daily) → branch: data-live-eod, path: data/outlook.json
@@ -96,7 +100,10 @@ app.get("/live/eod", (req, res) =>
 
 // Hourly → branch: data-live-hourly, path: data/outlook_hourly.json
 app.get("/live/hourly", (req, res) =>
-  proxyRaw(res, `${GH_RAW_BASE}/data-live-hourly/main/data/outlook_hourly.json`)
+  proxyRaw(
+    res,
+    `${GH_RAW_BASE}/data-live-hourly/main/data/outlook_hourly.json`
+  )
 );
 
 /* ---------- Health ---------- */
