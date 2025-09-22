@@ -1,4 +1,4 @@
-// server.js — Express ESM with CORS, static, API, and GitHub-branch proxies
+// server.js — Express ESM with CORS, static, API, and GitHub branch proxies
 
 import express from "express";
 import path from "path";
@@ -36,7 +36,7 @@ app.use((req, res, next) => {
 const PUBLIC_DIR = path.join(__dirname, "public");
 app.use(express.static(PUBLIC_DIR));
 
-/* ---------- Local static mounts (if files are copied on disk) ---------- */
+/* ---------- Local static mounts (optional if files exist on disk) ---------- */
 function noStore(_, res, next) {
   res.setHeader("Cache-Control", "no-store");
   next();
@@ -61,8 +61,7 @@ app.use(
 app.use("/api", buildRouter());
 
 /* ---------- GitHub raw proxies ---------- */
-// These routes always pull the freshest JSON from GitHub branches
-// so your frontend can call /live/intraday, /live/eod, /live/hourly.
+// Pull fresh JSON directly from GitHub branches
 
 const GH_RAW_BASE =
   "https://raw.githubusercontent.com/bfrye1973/frye-market-backend";
@@ -85,24 +84,24 @@ async function proxyRaw(res, url) {
   }
 }
 
-// Intraday (10-min) → branch: data-live-10min, path: data/outlook_intraday.json
+// Intraday (10-min) → branch: data-live-10min, file: data/outlook_intraday.json
 app.get("/live/intraday", (req, res) =>
   proxyRaw(
     res,
-    `${GH_RAW_BASE}/data-live-10min/main/data/outlook_intraday.json`
+    `${GH_RAW_BASE}/data-live-10min/data/outlook_intraday.json`
   )
 );
 
-// EOD (daily) → branch: data-live-eod, path: data/outlook.json
+// EOD (daily) → branch: data-live-eod, file: data/outlook.json
 app.get("/live/eod", (req, res) =>
-  proxyRaw(res, `${GH_RAW_BASE}/data-live-eod/main/data/outlook.json`)
+  proxyRaw(res, `${GH_RAW_BASE}/data-live-eod/data/outlook.json`)
 );
 
-// Hourly → branch: data-live-hourly, path: data/outlook_hourly.json
+// Hourly → branch: data-live-hourly, file: data/outlook_hourly.json
 app.get("/live/hourly", (req, res) =>
   proxyRaw(
     res,
-    `${GH_RAW_BASE}/data-live-hourly/main/data/outlook_hourly.json`
+    `${GH_RAW_BASE}/data-live-hourly/data/outlook_hourly.json`
   )
 );
 
