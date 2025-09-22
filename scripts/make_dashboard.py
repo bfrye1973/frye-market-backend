@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
 """
-make_dashboard.py — build outlook.json for the dashboard (R1.4)
+make_dashboard.py (R1.5)
 
-- Reads:  data/outlook_source.json
-- Writes: data/outlook.json
+- Reads:  data/outlook_source.json (from R7 builder)
+- Writes: data/outlook_intraday.json (intraday mode), data/outlook_hourly.json (hourly), data/outlook.json (daily/eod)
 
-Emits:
-  gauges: rpm (Breadth), speed (Momentum), fuel (Intraday Squeeze), water (Vol), oil (Liq)
-          squeezeDaily.pct ONLY in daily/eod mode (from source; Lux fallback supported)
-  odometers: squeezeCompressionPct (intraday = fuel)
-  outlook.sectors + sectorCards
-  summary: breadthIdx, momentumIdx
-  engineLights: updatedAt, mode, live, signals
-  intraday.* blocks (intraday mode)
-  trendDaily.* (daily/eod mode)
+Adds:
+- summary.adrMomentumIdx (global ADR momentum % from source)
+- gauges.speedAdr (optional ADR momentum gauge) when available
 """
 from __future__ import annotations
 import argparse, json, os, math
@@ -51,88 +45,31 @@ def jwrite(p: str, obj: Dict[str, Any]) -> None:
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"), indent=None)
         f.write("\n")
 
-def norm(s: str) -> str:
-    return (s or "").strip().lower()
-
-def title_case(x: str) -> str:
-    return " ".join(w.capitalize() for w in (x or "").split())
+def norm(s: str) -> str: return (s or "").strip().lower()
+def title_case(x: str) -> str: return " ".join(w.capitalize() for w in (x or "").split())
 
 def canonical_sector(name: str) -> str:
     n = norm(name)
-    if n in ("tech", "information technology"): return "information technology"
+    if n in ("tech","information technology"): return "information technology"
     if n in ("healthcare",): return "health care"
     return n
 
 def num(v, default=0.0):
     try:
         if v is None: return default
-        if isinstance(v, (int, float)): return float(v)
-        s = str(v).strip()
-        if s == "": return default
-        return float(s)
-    except:
-        return default
+        if isinstance(v,(int,float)): return float(v)
+        s=str(v).strip();  return default if s=="" else float(s)
+    except: return default
 
-# ---------------- HTTP util (Polygon) ----------------
-def http_get_json(url: str) -> Dict[str,Any]:
-    req = urllib.request.Request(url, headers={})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def pick(d: Dict[str,Any], *keys, default=None):
+    for k in keys:
+        if isinstance(d, dict) and d.get(k) is not None:
+            return d[k]
+    return default
 
-def fetch_polygon_spy_daily(limit: int = 120) -> List[float]:
-    """Fetch SPY daily closes from Polygon. Returns closes in ascending date order."""
-    if not POLYGON_API_KEY:
-        return []
-    end = datetime.utcnow().date()
-    start = end - timedelta(days=limit*2)  # buffer for non-trading days
-    url = (
-        f"https://api.polygon.io/v2/aggs/ticker/SPY/range/1/day/"
-        f"{start.isoformat()}/{end.isoformat()}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
-    )
-    try:
-        data = http_get_json(url)
-        res = data.get("results") or []
-        closes = [float(r.get("c", 0.0)) for r in res if r.get("c") is not None]
-        return closes[-limit:] if len(closes) > limit else closes
-    except Exception:
-        return []
-
-# ---------------- Lux Squeeze PSI (daily, optional) ----------------
-def lux_squeeze_psi(closes: List[float], conv: int = 50, length: int = 20) -> float | None:
-    if not closes or len(closes) < length + 2:
-        return None
-    mx = mn = None
-    diffs: List[float] = []
-    for src in closes:
-        src = float(src)
-        mx = src if mx is None else max(mx - (mx - src) / conv, src)
-        mn = src if mn is None else min(mn + (src - mn) / conv, src)
-        span = max(mx - mn, 1e-9)
-        diffs.append(math.log(span))
-    def pearson_corr(a: List[float], b: List[float]) -> float:
-        n = len(a)
-        if n <= 1: return 0.0
-        ma = sum(a)/n; mb = sum(b)/n
-        cov = sum((x-ma)*(y-mb) for x,y in zip(a,b))
-        va  = sum((x-ma)*(x-ma) for x in a)
-        vb  = sum((y-mb)*(y-mb) for y in b)
-        if va <= 0 or vb <= 0: return 0.0
-        return cov / math.sqrt(va*vb)
-    bar_idx = list(range(len(diffs)))
-    corr_vals: List[float] = []
-    L = length
-    for i in range(L-1, len(diffs)):
-        window_diff = diffs[i-L+1:i+1]
-        window_idx  = bar_idx[i-L+1:i+1]
-        corr_vals.append(pearson_corr(window_diff, window_idx))
-    if not corr_vals: return None
-    corr_last = corr_vals[-1]
-    psi = -50.0 * corr_last + 50.0
-    return float(psi)
-
-# ---------------- sectors from source ----------------
+# ---------- sectors ----------
 def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
-    raw = None
+    raw=None
     if isinstance(src.get("outlook"), dict) and isinstance(src["outlook"].get("sectors"), dict):
         raw = src["outlook"]["sectors"]
     elif isinstance(src.get("sectors"), dict):
@@ -144,207 +81,166 @@ def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(raw, dict):
         for name, vals in raw.items():
             key = canonical_sector(name)
-            nh   = int(num((vals or {}).get("nh", (vals or {}).get("nH", 0))))
-            nl   = int(num((vals or {}).get("nl", (vals or {}).get("nL", 0))))
-            up   = int(num((vals or {}).get("u",  (vals or {}).get("up", 0))))
-            down = int(num((vals or {}).get("d",  (vals or {}).get("down", 0))))
-            spark = (vals or {}).get("spark", [])
-            if not isinstance(spark, list): spark = []
+            nh=int(num((vals or {}).get("nh",0))); nl=int(num((vals or {}).get("nl",0)))
+            up=int(num((vals or {}).get("u",0)));  dn=int(num((vals or {}).get("d",0)))
+            adrUp=int(num((vals or {}).get("adrUp",0))); adrDown=int(num((vals or {}).get("adrDown",0)))
+            spark = (vals or {}).get("spark", []);  spark = spark if isinstance(spark, list) else []
             out[key] = {
-                "nh": nh, "nl": nl, "up": up, "down": down,
-                "netNH": nh - nl, "netUD": up - down, "spark": spark
+                "nh":nh,"nl":nl,"up":up,"down":dn,"adrUp":adrUp,"adrDown":adrDown,
+                "netNH":nh-nl,"netUD":up-dn,"spark":spark
             }
-
     for k in PREFERRED_ORDER:
-        if k not in out:
-            out[k] = {"nh":0,"nl":0,"up":0,"down":0,"netNH":0,"netUD":0,"spark":[]}
+        out.setdefault(k, {"nh":0,"nl":0,"up":0,"down":0,"adrUp":0,"adrDown":0,"netNH":0,"netUD":0,"spark":[]})
     return out
 
-# -------- gauges / squeeze (intraday) --------
-def pick(d: Dict[str, Any], *keys, default=None):
-    for k in keys:
-        if isinstance(d, dict) and d.get(k) is not None:
-            return d[k]
-    return default
-
+# ---------- gauges & odometers ----------
 def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mode: str) -> Dict[str, Any]:
     g = src.get("global", {}) or {}
+    fuel    = num(pick(g,"squeeze_pressure_pct","squeezePressurePct", default=50))
+    vol_pct = num(pick(g,"volatility_pct","volatilityPct", default=50))
+    liq_pct = num(pick(g,"liquidity_pct","liquidityPct", default=70))
+    daily_sq = pick(g,"daily_squeeze_pct","squeeze_daily_pct","squeezeDailyPct", default=None)
+    adr_momo = pick(g,"adr_momentum_pct","adrMomentumPct", default=None)
 
-    fuel      = num(pick(g, "squeeze_pressure_pct", "squeezePressurePct", default=50))
-    vol_pct   = num(pick(g, "volatility_pct", "volatilityPct", default=50))
-    liq_pct   = num(pick(g, "liquidity_pct", "liquidityPct", default=70))
-    daily_sq  = pick(g, "daily_squeeze_pct", "squeeze_daily_pct", "squeezeDailyPct", default=None)
+    tot_nh=sum(int(num(v.get("nh",0))) for v in sectors.values())
+    tot_nl=sum(int(num(v.get("nl",0))) for v in sectors.values())
+    tot_up=sum(int(num(v.get("up",0))) for v in sectors.values())
+    tot_dn=sum(int(num(v.get("down",0))) for v in sectors.values())
 
-    tot_nh = sum(int(num(v.get("nh",0)))   for v in sectors.values())
-    tot_nl = sum(int(num(v.get("nl",0)))   for v in sectors.values())
-    tot_up = sum(int(num(v.get("up",0)))   for v in sectors.values())
-    tot_dn = sum(int(num(v.get("down",0))) for v in sectors.values())
+    def ratio_idx(pos,neg):
+        s=float(pos)+float(neg)
+        return 50.0 if s<=0 else 50.0 + 50.0*((float(pos)-float(neg))/s)
 
-    def ratio_idx(pos, neg):
-        s = float(pos) + float(neg)
-        return 50.0 if s <= 0 else 50.0 + 50.0 * ((float(pos) - float(neg)) / s)
-
-    breadthIdx  = ratio_idx(tot_up, tot_dn)
-    momentumIdx = ratio_idx(tot_nh, tot_nl)
+    breadthIdx  = ratio_idx(tot_up, tot_dn)    # (Adv vs Dec) — classic “breadth”
+    momentumIdx = ratio_idx(tot_nh, tot_nl)    # (NH vs NL)   — classic “momentum”
 
     gauges = {
         "rpm":   {"pct": float(breadthIdx),  "label":"Breadth"},
         "speed": {"pct": float(momentumIdx), "label":"Momentum"},
-        "fuel":  {"pct": float(fuel), "state": ("firingUp" if float(fuel) >= 70 else "idle"), "label":"Squeeze"},
+        "fuel":  {"pct": float(fuel), "state": ("firingUp" if float(fuel)>=70 else "idle"), "label":"Squeeze"},
         "water": {"pct": float(vol_pct), "label":"Volatility"},
         "oil":   {"psi": float(liq_pct), "label":"Liquidity"},
     }
-    # Attach squeezeDaily to gauges in DAILY/EOD mode — from source (preferred)
+    # ADR momentum gauge (optional, FE can ignore if unused)
+    if adr_momo is not None:
+        gauges["speedAdr"] = {"pct": float(num(adr_momo, 50.0)), "label":"ADR Momentum"}
+
     if mode in ("daily","eod") and daily_sq is not None:
         gauges["squeezeDaily"] = {"pct": float(num(daily_sq, None))}
 
-    odometers = {"squeezeCompressionPct": float(fuel)}  # intraday compression
+    odometers = {"squeezeCompressionPct": float(fuel)}
     summary = {"breadthIdx": float(breadthIdx), "momentumIdx": float(momentumIdx)}
+    if adr_momo is not None:
+        summary["adrMomentumIdx"] = float(num(adr_momo, 50.0))
     return {"gauges": gauges, "odometers": odometers, "summary": summary}
 
-# -------- cards --------
+# ---------- cards ----------
 def cards_from_sectors(sectors: Dict[str, Any]) -> List[Dict[str, Any]]:
-    cards: List[Dict[str, Any]] = []
+    cards=[]
     for key in PREFERRED_ORDER:
-        vals = sectors.get(key, {})
-        net = int(num(vals.get("netNH", 0)))
-        outlook = "Neutral"
-        if net > 0: outlook = "Bullish"
-        if net < 0: outlook = "Bearish"
-        spark = vals.get("spark", [])
-        if not isinstance(spark, list): spark = []
-        cards.append({
-            "sector": title_case(key),
-            "outlook": outlook,
-            "spark": spark
-        })
+        vals=sectors.get(key, {})
+        net=int(num(vals.get("netNH",0)))
+        outlook="Neutral"
+        if net>0: outlook="Bullish"
+        if net<0: outlook="Bearish"
+        spark = vals.get("spark", []); spark = spark if isinstance(spark,list) else []
+        cards.append({"sector": title_case(key), "outlook": outlook, "spark": spark})
     return cards
 
-# -------- engine lights defaults --------
+# ---------- engine lights defaults ----------
 def default_signals() -> Dict[str, Any]:
-    keys = [
-        "sigBreakout", "sigDistribution", "sigCompression", "sigExpansion",
-        "sigOverheat", "sigTurbo", "sigDivergence", "sigLowLiquidity", "sigVolatilityHigh"
-    ]
-    return { k: {"active": False, "severity": "info"} for k in keys }
+    keys=["sigBreakout","sigDistribution","sigCompression","sigExpansion","sigOverheat",
+          "sigTurbo","sigDivergence","sigLowLiquidity","sigVolatilityHigh"]
+    return {k: {"active": False, "severity": "info"} for k in keys}
 
-# -------- trendDaily (daily/eod) --------
+# ---------- daily trend block (unchanged semantics; uses gauges that may include squeezeDaily) ----------
 def lux_trend_daily(sectors: Dict[str, Any], gauges: Dict[str, Any], ts: str) -> Dict[str, Any]:
-    # Participation proxy: % sectors with netNH > 0
-    pos_sectors = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k, {}).get("netNH", 0))) > 0)
-    participation_pct = (pos_sectors / float(len(PREFERRED_ORDER))) * 100.0
+    pos_sectors = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k, {}).get("netNH",0)))>0)
+    participation_pct = (pos_sectors/float(len(PREFERRED_ORDER)))*100.0
+    # optional PSI recompute removed; trust source/gauges
+    psi = gauges.get("squeezeDaily", {}).get("pct")
 
-    # Lux PSI (optional) — fallback to source-provided daily squeeze if no key / fetch fail
-    psi = None
-    if POLYGON_API_KEY:
-        closes = fetch_polygon_spy_daily(limit=120)
-        if closes:
-            psi = lux_squeeze_psi(closes, conv=50, length=20)
-    if psi is None:
-        try:
-            psi = float(gauges.get("squeezeDaily", {}).get("pct"))
-        except Exception:
-            psi = None
-
-    # Vol/Liq bands
-    vol_pct = float(num(gauges.get("water", {}).get("pct", 0)))
+    vol_pct = float(num(gauges.get("water", {}).get("pct",0)))
     vol_band = "calm" if vol_pct < 30 else ("elevated" if vol_pct <= 60 else "high")
 
-    liq_psi = float(num(gauges.get("oil", {}).get("psi", 0)))
+    liq_psi = float(num(gauges.get("oil", {}).get("psi",0)))
     liq_band = "good" if liq_psi >= 60 else ("normal" if liq_psi >= 50 else ("light" if liq_psi >= 40 else "thin"))
 
-    # Trend proxy from breadth & momentum
-    b = float(num(gauges.get("rpm", {}).get("pct", 50)))
-    m = float(num(gauges.get("speed", {}).get("pct", 50)))
-    score = 0.5*b + 0.5*m
-    trend_state = "up" if score > 55 else ("down" if score < 45 else "flat")
+    b=float(num(gauges.get("rpm",{}).get("pct",50))); m=float(num(gauges.get("speed",{}).get("pct",50)))
+    score=0.5*b + 0.5*m
+    trend_state = "up" if score>55 else ("down" if score<45 else "flat")
 
-    # Rotation
-    off_pos = sum(1 for s in OFFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
-    def_pos = sum(1 for s in DEFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
-    denom = off_pos + def_pos
-    risk_on_pct = (off_pos / denom) * 100.0 if denom > 0 else 50.0
+    # crude rotation proxy
+    off = sum(1 for s in OFFENSIVE if int(num(sectors.get(s,{}).get("netNH",0)))>0)
+    deff = sum(1 for s in DEFENSIVE if int(num(sectors.get(s,{}).get("netNH",0)))>0)
+    denom = off+deff
+    risk_on = (off/denom)*100.0 if denom>0 else 50.0
 
-    td = {
-        "trend":            { "emaSlope": round(score - 50, 1), "state": trend_state },
-        "participation":    { "pctAboveMA": round(participation_pct, 1) },
-        "squeezeDaily":     { "pct": (round(float(psi), 2) if psi is not None else None) },
-        "volatilityRegime": { "atrPct": round(vol_pct, 1), "band": vol_band },
-        "liquidityRegime":  { "psi": round(liq_psi, 1), "band": liq_band },
-        "rotation":         { "riskOnPct": round(risk_on_pct, 1) },
-        "updatedAt":        ts,
-        "mode":             "daily",
-        "live":             False
+    return {
+        "trend":            {"emaSlope": round(score-50,1), "state": trend_state},
+        "participation":    {"pctAboveMA": round(participation_pct,1)},
+        "squeezeDaily":     {"pct": (round(float(psi),2) if psi is not None else None)},
+        "volatilityRegime": {"atrPct": round(vol_pct,1), "band": vol_band},
+        "liquidityRegime":  {"psi": round(liq_psi,1), "band": liq_band},
+        "rotation":         {"riskOnPct": round(risk_on,1)},
+        "updatedAt": ts, "mode": "daily", "live": False
     }
-    return td
 
-# -------- main --------
+# ---------- main ----------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="data/outlook_source.json")
     ap.add_argument("--out",    default="data/outlook.json")
-    ap.add_argument("--mode",   default="intraday", choices=["intraday","daily","eod"])
+    ap.add_argument("--mode",   default="intraday", choices=["intraday","daily","eod","hourly"])
     args = ap.parse_args()
 
-    src = jread(args.source)
-    ts  = now_iso()
-
+    src = jread(args.source); ts=now_iso()
     sectors = sectors_from_source(src)
-    gz_od   = build_gauges_and_odometers(src, sectors, args.mode)
+    gz_od   = build_gauges_and_odometers(src, sectors, args.mode if args.mode!="eod" else "daily")
     cards   = cards_from_sectors(sectors)
 
-    # Intraday-only metrics
-    intraday_block = None
+    intraday_block=None
     if args.mode == "intraday":
-        rising_count = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k, {}).get("netNH", 0))) > 0)
-        rising_pct = (rising_count / float(len(PREFERRED_ORDER))) * 100.0
-
-        off_pos = sum(1 for s in OFFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
-        def_pos = sum(1 for s in DEFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
-        denom = off_pos + def_pos
-        risk_on_10m = (off_pos / denom) * 100.0 if denom > 0 else 50.0
-
+        rising = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k,{}).get("netNH",0)))>0)
+        rising_pct = (rising/float(len(PREFERRED_ORDER)))*100.0
+        off_pos = sum(1 for s in OFFENSIVE if int(num(sectors.get(s,{}).get("netNH",0)))>0)
+        def_pos = sum(1 for s in DEFENSIVE if int(num(sectors.get(s,{}).get("netNH",0)))>0)
+        denom=off_pos+def_pos
+        risk_on_10m=(off_pos/denom)*100.0 if denom>0 else 50.0
         intraday_block = {
-            "sectorDirection10m": { "risingCount": int(rising_count), "risingPct": round(rising_pct, 1), "updatedAt": ts },
-            "riskOn10m": { "riskOnPct": round(risk_on_10m, 1), "updatedAt": ts }
+            "sectorDirection10m": {"risingCount": int(rising), "risingPct": round(rising_pct,1), "updatedAt": ts},
+            "riskOn10m": {"riskOnPct": round(risk_on_10m,1), "updatedAt": ts}
         }
 
-    # Upstream engine lights passthrough (if any)
-    upstream_signals = {}
-    if isinstance(src.get("signals"), dict): upstream_signals = src["signals"]
+    upstream_signals={}
+    if isinstance(src.get("signals"), dict): upstream_signals=src["signals"]
     elif isinstance(src.get("engineLights"), dict) and isinstance(src["engineLights"].get("signals"), dict):
-        upstream_signals = src["engineLights"]["signals"]
+        upstream_signals=src["engineLights"]["signals"]
 
-    signals = default_signals()
+    signals=default_signals()
     for k,v in (upstream_signals or {}).items():
         if isinstance(v, dict):
-            signals[k] = {**signals.get(k, {"active": False, "severity": "info"}), **v}
+            signals[k] = {**signals.get(k, {"active":False,"severity":"info"}), **v}
 
     out = {
         "schema_version": SCHEMA_VERSION,
-        "updated_at": ts,
-        "ts": ts,
-        "version": VERSION_TAG,
-        "pipeline": args.mode,
+        "updated_at": ts, "ts": ts, "version": VERSION_TAG,
+        "pipeline": args.mode if args.mode!="eod" else "daily",
         **gz_od,
         "sectorCards": cards,
-        "outlook": { "sectors": sectors, "sectorCards": cards },
-        "engineLights": { "updatedAt": ts, "mode": args.mode, "live": (args.mode == "intraday"), "signals": signals }
+        "outlook": {"sectors": sectors, "sectorCards": cards},
+        "engineLights": {"updatedAt": ts, "mode": (args.mode if args.mode!="eod" else "daily"), "live": (args.mode=="intraday"), "signals": signals}
     }
+    if intraday_block: out["intraday"]=intraday_block
 
-    if intraday_block:
-        out["intraday"] = intraday_block
-
-    if args.mode in ("daily", "eod"):
-        # Build trend block and ensure gauges.squeezeDaily is present
+    if args.mode in ("daily","eod","hourly"):
         td = lux_trend_daily(sectors, gz_od["gauges"], ts)
-        out["trendDaily"] = td
+        out["trendDaily"]=td
         if td.get("squeezeDaily", {}).get("pct") is not None:
-            out["gauges"]["squeezeDaily"] = {"pct": td["squeezeDaily"]["pct"]}
+            out["gauges"]["squeezeDaily"]={"pct": td["squeezeDaily"]["pct"]}
 
     jwrite(args.out, out)
     print(f"Wrote {args.out} | sectors={len(sectors)} | mode={args.mode}")
-    print(f"[summary] breadthIdx={out['summary']['breadthIdx']:.1f} momentumIdx={out['summary']['momentumIdx']:.1f}")
-
+    print(f"[summary] breadth={out['summary']['breadthIdx']:.1f} momentum={out['summary']['momentumIdx']:.1f} adr={out['summary'].get('adrMomentumIdx','-')}")
 if __name__ == "__main__":
     main()
