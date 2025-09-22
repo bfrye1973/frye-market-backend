@@ -33,18 +33,15 @@ app.use((req, res, next) => {
   next();
 });
 
-/* ---------- Helpful middlewares ---------- */
-// If you later POST JSON, uncomment:
-// app.use(express.json());
-
 /* ---------- /public (optional) ---------- */
 const PUBLIC_DIR = path.join(__dirname, "public");
 app.use(express.static(PUBLIC_DIR));
 
 /* ---------- Static JSON mounts (live + hourly + EOD) ---------- */
-const LIVE10_DIR  = path.join(__dirname, "data-live-10min");
-const HOURLY_DIR  = path.join(__dirname, "data-live-hourly");
-const EOD_DIR     = path.join(__dirname, "data-live-eod");
+// Note: JSONs are inside the extra /data subfolder in each branch
+const LIVE10_DIR  = path.join(__dirname, "data-live-10min", "data");
+const HOURLY_DIR  = path.join(__dirname, "data-live-hourly", "data");
+const EOD_DIR     = path.join(__dirname, "data-live-eod", "data");
 
 // Avoid stale caching on these JSONs
 function noStore(req, res, next) {
@@ -59,7 +56,7 @@ app.use("/data-live-eod",    noStore, express.static(EOD_DIR));
 /* ---------- API ---------- */
 app.use("/api", buildRouter());
 
-/* ---------- Health probe (optional, simple) ---------- */
+/* ---------- Health probe ---------- */
 app.get("/healthz", (req, res) => res.json({ ok: true }));
 
 /* ---------- 404 + errors ---------- */
