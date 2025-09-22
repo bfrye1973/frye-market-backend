@@ -3,7 +3,8 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "5 13-21 * * 1-5"   # :05 past each hour, market hours (UTC)
+    # Top of each hour during U.S. market window (UTC 13–20)
+    - cron: "0 13-20 * * 1-5"
 
 concurrency:
   group: data-writes-hourly
@@ -38,52 +39,48 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
-      # Build hourly from intraday source
-      - name: Build outlook source (intraday)
+      # ---- Build (HOUR) ----
+      - name: Build outlook source (hourly)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
-          python scripts/build_outlook_source_from_polygon.py --mode intraday
+          python scripts/build_outlook_source_from_polygon.py --mode hourly
 
-      - name: Make dashboard payload (hourly view)
+      - name: Make dashboard payload (hourly)
         run: |
           set -euo pipefail
-          python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_hourly.json
+          python scripts/make_dashboard.py --mode hourly --source data/outlook_source.json --out data/outlook_hourly.json
 
-      - name: Write heartbeat_hourly (+ legacy heartbeat.txt)
+      - name: Write heartbeat_hourly
         run: |
-          set -euo pipefail
           mkdir -p data
-          TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-          echo "$TS" > data/heartbeat_hourly.txt
-          echo "$TS" > data/heartbeat.txt
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_hourly.txt
 
-      # Stage using the JSON's timestamp (keeps LIVE and ARCHIVE aligned)
+      # ---- Stage files using JSON timestamp (keeps LIVE & ARCHIVE in lockstep) ----
       - name: Stage files for publish
         id: prep
         run: |
-          set -euo pipefail
+          set -e
           RAW_TS=$(jq -r '.updated_at // .ts' data/outlook_hourly.json)
           TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/:/-/g')
           echo "RAW_TS=$RAW_TS"
           echo "TS_SAFE=$TS_SAFE"
 
-          mkdir -p /tmp/livehr /tmp/archive_hr/source /tmp/archive_hr/dashboard
+          mkdir -p /tmp/live /tmp/archive/source /tmp/archive/dashboard
 
-          # LIVE
-          cp data/outlook_hourly.json  /tmp/livehr/
-          cp data/outlook_source.json  /tmp/livehr/
-          cp data/heartbeat_hourly.txt /tmp/livehr/
-          cp data/heartbeat.txt        /tmp/livehr/
+          # LIVE "latest"
+          cp data/outlook_hourly.json /tmp/live/
+          cp data/outlook_source.json  /tmp/live/
+          cp data/heartbeat_hourly.txt /tmp/live/
 
-          # ARCHIVE snapshots
-          cp data/outlook_source.json  "/tmp/archive_hr/source/outlook_source_${TS_SAFE}.json"
-          cp data/outlook_hourly.json  "/tmp/archive_hr/dashboard/outlook_hourly_${TS_SAFE}.json"
+          # ARCHIVE snapshots (use the same timestamp)
+          cp data/outlook_source.json "/tmp/archive/source/outlook_source_${TS_SAFE}.json"
+          cp data/outlook_hourly.json "/tmp/archive/dashboard/outlook_hourly_${TS_SAFE}.json"
 
           echo "ts=${TS_SAFE}" >> "$GITHUB_OUTPUT"
 
-      # Publish LIVE (force-push tiny branch this job owns)
+      # ---- Publish LIVE (hourly) ----
       - name: Push LIVE branch (hourly)
         run: |
           set -e
@@ -98,12 +95,12 @@ jobs:
 
           git rm -rf . || true
           mkdir -p data
-          cp /tmp/livehr/* data/
+          cp /tmp/live/* data/
           git add data
           git commit -m "HOURLY live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit (live)"
           git push origin +HEAD:"$LIVE_BRANCH"
 
-      # Append to ARCHIVE (hourly-only branch) with fetch/rebase, then push
+      # ---- Append to ARCHIVE (hourly) ----
       - name: Push ARCHIVE branch (append)
         run: |
           set -e
@@ -118,11 +115,10 @@ jobs:
           fi
 
           mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
-          cp /tmp/archive_hr/source/*    data/archive/hourly/source/    || true
-          cp /tmp/archive_hr/dashboard/* data/archive/hourly/dashboard/ || true
+          cp /tmp/archive/source/*    data/archive/hourly/source/    || true
+          cp /tmp/archive/dashboard/* data/archive/hourly/dashboard/ || true
           git add data/archive/hourly || true
           git commit -m "HOURLY archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit (archive)"
 
-          # Integrate tip & push
           git pull --rebase origin "$ARCHIVE_BRANCH" || true
           git push origin HEAD:"$ARCHIVE_BRANCH"
