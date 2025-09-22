@@ -3,8 +3,10 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "*/10 13-19 * * 1-5"   # every 10m during market hours (UTC)
-    - cron: "0 20 * * 1-5"         # one run at close
+    # every 10m during market hours (UTC) — 13:00–19:59Z = 6:00–12:59 Phoenix (DST-aware enough for our use)
+    - cron: "*/10 13-19 * * 1-5"
+    # one pass at close for a fresh snapshot
+    - cron: "0 20 * * 1-5"
 
 concurrency:
   group: data-writes-10min
@@ -16,7 +18,7 @@ jobs:
     permissions:
       contents: write
     env:
-      TZ: America/Phoenix            # Arizona time
+      TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       ARCHIVE_BRANCH: data-archive-10min
 
@@ -39,13 +41,13 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
-      # ---- Build (intraday) ----
-      - name: Build outlook source (intraday)
+      # ---- Build (intraday10) ----
+      - name: Build outlook source (intraday10)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
-          python scripts/build_outlook_source_from_polygon.py --mode intraday
+          python scripts/build_outlook_source_from_polygon.py --mode intraday10
 
       - name: Make dashboard payload (intraday)
         run: |
@@ -121,6 +123,7 @@ jobs:
           git add data/archive/10min || true
           git commit -m "10MIN archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit (archive)"
 
-          # Rebase on remote & push (trivial now that this branch is 10min-only)
+          # Rebase on remote & push
           git pull --rebase origin "$ARCHIVE_BRANCH" || true
           git push origin HEAD:"$ARCHIVE_BRANCH"
+ 
