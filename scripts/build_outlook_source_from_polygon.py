@@ -242,33 +242,55 @@ def rolling_stdev(vals, length=20):
         else: out.append(None)
     return out
 
-def compute_daily_squeeze_pct_lux(symbol="SPY", lookback_days=250, length=20, bb_mult=2.0, kc_mult=1.5):
-    """Lux-like Daily Squeeze % via BB/KC width ratio percent-rank (0..100, higher = tighter)."""
-    end = datetime.utcnow().date()
-    start = end - timedelta(days=lookback_days*2)  # buffer for weekends
-    bars = fetch_range_daily(symbol, date_str(start), date_str(end))
+from datetime import datetime, timedelta  # (already imported above)
 
-    if len(bars) < length + 2: return 50.0
+def compute_daily_squeeze_pct_lux(symbol="SPY", lookback_days=250, length=20, bb_mult=2.0, kc_mult=1.5):
+    """
+    Lux-like Daily Squeeze % via BB/KC width ratio percent-rank (0..100, higher = tighter).
+    Uses the SAME date-range fetch pattern as the rest of the script (no 'now/prev').
+    """
+    # fetch daily bars with explicit start/end (works on Polygon)
+    end = datetime.utcnow().date()
+    start = end - timedelta(days=lookback_days * 2)  # buffer for weekends/holidays
+    bars = fetch_range_daily(symbol, date_str(start), date_str(end))
+    if len(bars) < length + 2:
+        return 50.0
+
     closes = [float(b["c"]) for b in bars]
     highs  = [float(b["h"]) for b in bars]
     lows   = [float(b["l"]) for b in bars]
+
     sd = rolling_stdev(closes, length=length)
     atr_vals = atr(highs, lows, closes, length=length)
 
     ratios = []
     for i in range(len(closes)):
-        if sd[i] is None or i == 0 or i-1 >= len(atr_vals) or atr_vals[i-1] is None:
-            ratios.append(None); continue
+        if sd[i] is None or i == 0 or i - 1 >= len(atr_vals) or atr_vals[i - 1] is None:
+            ratios.append(None)
+            continue
         bb_width = 2.0 * bb_mult * sd[i]
-        kc_width = 2.0 * kc_mult * atr_vals[i-1]
-        if kc_width <= 0: ratios.append(None); continue
+        kc_width = 2.0 * kc_mult * atr_vals[i - 1]  # ATR series is one shorter
+        if kc_width <= 0:
+            ratios.append(None)
+            continue
         ratios.append(bb_width / kc_width)
 
     series = [r for r in ratios if r is not None]
-    if len(series) < length + 2: return 50.0
+    if len(series) < length + 2:
+        return 50.0
+
     window = series[-120:] if len(series) >= 120 else series
-    pr = percent_rank(window, window[-1])  # 0..1 (high = wide BB vs KC => low compression)
+    # Percent-rank of current ratio (higher rank = wider BB vs KC = LOWER compression)
+    # Squeeze % is the inverse
+    def percent_rank(seq, val):
+        n = len(seq)
+        lt = sum(1 for x in seq if x < val)
+        eq = sum(1 for x in seq if x == val)
+        return (lt + 0.5 * eq) / n if n else 0.5
+
+    pr = percent_rank(window, window[-1])   # 0..1
     return max(0.0, min(100.0, round((1.0 - pr) * 100.0, 2)))
+
 
 def compute_psi_from_closes(closes, conv=50, length=20):
     """Legacy PSI (log-span vs time, 0..100) used by intraday 'fuel' semantics."""
