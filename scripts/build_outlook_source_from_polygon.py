@@ -108,20 +108,26 @@ def discover_sectors() -> Dict[str, List[str]]:
     return sectors
 
 # ---------------- FLAGS ----------------
-def compute_flags_from_bars(bars: List[Dict[str, Any]]) -> Tuple[int,int,int,int]:
+def compute_flags_from_bars(bars: List[Dict[str, Any]]) -> Tuple[int, int, int, int]:
     """
     NH/NL vs prior 10 bars; 3U/3D = last 3 closes trending.
     Works for DAILY and HOURLY series.
     """
-    if len(bars) < 11: return 0,0,0,0
+    if len(bars) < 11:
+        return 0, 0, 0, 0
+
     today   = bars[-1]
     prior10 = bars[-11:-1]
+
     is_10NH = int(today["h"] > max(b["h"] for b in prior10))
-    is_10NL = int(today "l" < min(b["l"] for b in prior10))
+    is_10NL = int(today["l"] < min(b["l"] for b in prior10))
+
     last3 = bars[-3:]
-    is_3U = int(len(last3)==3 and (last3[0]["c"] < last3[1]["c"] < last3[2]["c"]))
-    is_3D = int(len(last3)==3 and (last3[0]["c"] > last3[1]["c"] > last3[2]["c"]))
+    is_3U = int(len(last3) == 3 and (last3[0]["c"] < last3[1]["c"] < last3[2]["c"]))
+    is_3D = int(len(last3) == 3 and (last3[0]["c"] > last3[1]["c"] > last3[2]["c"]))
+
     return is_10NH, is_10NL, is_3U, is_3D
+
 def watermarks_last_10d(symbols: List[str]) -> Dict[str, Tuple[float|None,float|None,float|None,float|None]]:
     """
     For intraday10: prior 10-day H/L (excluding today) + last two closes.
