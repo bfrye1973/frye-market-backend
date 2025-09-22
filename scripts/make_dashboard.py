@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 """
-make_dashboard.py — build outlook.json for the dashboard
+make_dashboard.py — build outlook.json for the dashboard (R1.4)
 
 - Reads:  data/outlook_source.json
 - Writes: data/outlook.json
 
 Emits:
   gauges: rpm (Breadth), speed (Momentum), fuel (Intraday Squeeze), water (Vol), oil (Liq)
-          squeezeDaily.pct ONLY in daily/eod mode (Lux PSI)
+          squeezeDaily.pct ONLY in daily/eod mode (from source; Lux fallback supported)
   odometers: squeezeCompressionPct (intraday = fuel)
   outlook.sectors + sectorCards
   summary: breadthIdx, momentumIdx
-  engineLights: updatedAt, mode, live, signals (defaults; upstream can override)
-  intraday.sectorDirection10m: risingCount, risingPct, updatedAt  (intraday)
-  intraday.riskOn10m: riskOnPct, updatedAt                        (intraday)
-  trendDaily: trend/participation/squeezeDaily/volatilityRegime/liquidityRegime/rotation, updatedAt (daily/eod)
+  engineLights: updatedAt, mode, live, signals
+  intraday.* blocks (intraday mode)
+  trendDaily.* (daily/eod mode)
 """
-
 from __future__ import annotations
 import argparse, json, os, math
 from datetime import datetime, timezone, timedelta
@@ -99,20 +97,11 @@ def fetch_polygon_spy_daily(limit: int = 120) -> List[float]:
     except Exception:
         return []
 
-# ---------------- Lux Squeeze PSI (daily) ----------------
+# ---------------- Lux Squeeze PSI (daily, optional) ----------------
 def lux_squeeze_psi(closes: List[float], conv: int = 50, length: int = 20) -> float | None:
-    """
-    Python port of LuxAlgo Squeeze Index:
-      max = max(prev_max - (prev_max - src)/conv, src)
-      min = min(prev_min + (src - prev_min)/conv, src)
-      diff = log(max - min)
-      psi = -50 * corr(diff, bar_index, length) + 50
-    """
     if not closes or len(closes) < length + 2:
         return None
-
-    mx = None
-    mn = None
+    mx = mn = None
     diffs: List[float] = []
     for src in closes:
         src = float(src)
@@ -120,18 +109,15 @@ def lux_squeeze_psi(closes: List[float], conv: int = 50, length: int = 20) -> fl
         mn = src if mn is None else min(mn + (src - mn) / conv, src)
         span = max(mx - mn, 1e-9)
         diffs.append(math.log(span))
-
     def pearson_corr(a: List[float], b: List[float]) -> float:
         n = len(a)
         if n <= 1: return 0.0
-        ma = sum(a)/n
-        mb = sum(b)/n
+        ma = sum(a)/n; mb = sum(b)/n
         cov = sum((x-ma)*(y-mb) for x,y in zip(a,b))
         va  = sum((x-ma)*(x-ma) for x in a)
         vb  = sum((y-mb)*(y-mb) for y in b)
         if va <= 0 or vb <= 0: return 0.0
         return cov / math.sqrt(va*vb)
-
     bar_idx = list(range(len(diffs)))
     corr_vals: List[float] = []
     L = length
@@ -139,7 +125,6 @@ def lux_squeeze_psi(closes: List[float], conv: int = 50, length: int = 20) -> fl
         window_diff = diffs[i-L+1:i+1]
         window_idx  = bar_idx[i-L+1:i+1]
         corr_vals.append(pearson_corr(window_diff, window_idx))
-
     if not corr_vals: return None
     corr_last = corr_vals[-1]
     psi = -50.0 * corr_last + 50.0
@@ -178,7 +163,7 @@ def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
 # -------- gauges / squeeze (intraday) --------
 def pick(d: Dict[str, Any], *keys, default=None):
     for k in keys:
-        if d.get(k) is not None:
+        if isinstance(d, dict) and d.get(k) is not None:
             return d[k]
     return default
 
@@ -188,6 +173,7 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
     fuel      = num(pick(g, "squeeze_pressure_pct", "squeezePressurePct", default=50))
     vol_pct   = num(pick(g, "volatility_pct", "volatilityPct", default=50))
     liq_pct   = num(pick(g, "liquidity_pct", "liquidityPct", default=70))
+    daily_sq  = pick(g, "daily_squeeze_pct", "squeeze_daily_pct", "squeezeDailyPct", default=None)
 
     tot_nh = sum(int(num(v.get("nh",0)))   for v in sectors.values())
     tot_nl = sum(int(num(v.get("nl",0)))   for v in sectors.values())
@@ -208,11 +194,9 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
         "water": {"pct": float(vol_pct), "label":"Volatility"},
         "oil":   {"psi": float(liq_pct), "label":"Liquidity"},
     }
-    # only attach squeezeDaily to gauges in DAILY/EOD mode — never in intraday
-    if mode in ("daily","eod"):
-        daily_sq_raw = pick(g, "daily_squeeze_pct", "squeeze_daily_pct", "squeezeDailyPct", default=None)
-        if daily_sq_raw is not None:
-            gauges["squeezeDaily"] = {"pct": float(num(daily_sq_raw, None))}
+    # Attach squeezeDaily to gauges in DAILY/EOD mode — from source (preferred)
+    if mode in ("daily","eod") and daily_sq is not None:
+        gauges["squeezeDaily"] = {"pct": float(num(daily_sq, None))}
 
     odometers = {"squeezeCompressionPct": float(fuel)}  # intraday compression
     summary = {"breadthIdx": float(breadthIdx), "momentumIdx": float(momentumIdx)}
@@ -250,12 +234,17 @@ def lux_trend_daily(sectors: Dict[str, Any], gauges: Dict[str, Any], ts: str) ->
     pos_sectors = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k, {}).get("netNH", 0))) > 0)
     participation_pct = (pos_sectors / float(len(PREFERRED_ORDER))) * 100.0
 
-    # Lux PSI from SPY daily – if fetch fails, leave None (no intraday fallback)
+    # Lux PSI (optional) — fallback to source-provided daily squeeze if no key / fetch fail
     psi = None
     if POLYGON_API_KEY:
         closes = fetch_polygon_spy_daily(limit=120)
         if closes:
             psi = lux_squeeze_psi(closes, conv=50, length=20)
+    if psi is None:
+        try:
+            psi = float(gauges.get("squeezeDaily", {}).get("pct"))
+        except Exception:
+            psi = None
 
     # Vol/Liq bands
     vol_pct = float(num(gauges.get("water", {}).get("pct", 0)))
@@ -279,7 +268,7 @@ def lux_trend_daily(sectors: Dict[str, Any], gauges: Dict[str, Any], ts: str) ->
     td = {
         "trend":            { "emaSlope": round(score - 50, 1), "state": trend_state },
         "participation":    { "pctAboveMA": round(participation_pct, 1) },
-        "squeezeDaily":     { "pct": (round(float(psi), 2) if psi is not None else None) },  # Lux-only
+        "squeezeDaily":     { "pct": (round(float(psi), 2) if psi is not None else None) },
         "volatilityRegime": { "atrPct": round(vol_pct, 1), "band": vol_band },
         "liquidityRegime":  { "psi": round(liq_psi, 1), "band": liq_band },
         "rotation":         { "riskOnPct": round(risk_on_pct, 1) },
@@ -304,7 +293,7 @@ def main():
     gz_od   = build_gauges_and_odometers(src, sectors, args.mode)
     cards   = cards_from_sectors(sectors)
 
-    # --- Intraday-only metrics ---
+    # Intraday-only metrics
     intraday_block = None
     if args.mode == "intraday":
         rising_count = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k, {}).get("netNH", 0))) > 0)
@@ -320,15 +309,11 @@ def main():
             "riskOn10m": { "riskOnPct": round(risk_on_10m, 1), "updatedAt": ts }
         }
 
-    # Engine Lights
+    # Upstream engine lights passthrough (if any)
     upstream_signals = {}
     if isinstance(src.get("signals"), dict): upstream_signals = src["signals"]
     elif isinstance(src.get("engineLights"), dict) and isinstance(src["engineLights"].get("signals"), dict):
         upstream_signals = src["engineLights"]["signals"]
-
-    def default_signals() -> Dict[str,Any]:
-        keys = ["sigBreakout","sigDistribution","sigCompression","sigExpansion","sigOverheat","sigTurbo","sigDivergence","sigLowLiquidity","sigVolatilityHigh"]
-        return { k: {"active": False, "severity": "info"} for k in keys }
 
     signals = default_signals()
     for k,v in (upstream_signals or {}).items():
@@ -351,10 +336,9 @@ def main():
         out["intraday"] = intraday_block
 
     if args.mode in ("daily", "eod"):
-        # Build Lux-only daily squeeze + trend
+        # Build trend block and ensure gauges.squeezeDaily is present
         td = lux_trend_daily(sectors, gz_od["gauges"], ts)
         out["trendDaily"] = td
-        # Mirror Lux to gauges.squeezeDaily for FE convenience (daily mode only)
         if td.get("squeezeDaily", {}).get("pct") is not None:
             out["gauges"]["squeezeDaily"] = {"pct": td["squeezeDaily"]["pct"]}
 
