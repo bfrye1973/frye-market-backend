@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-make_dashboard.py (R2)
+make_dashboard.py (R2.1)
 
 - Reads:  data/outlook_source.json (from R8 builder)
-- Writes: data/outlook_intraday.json (intraday mode),
-          data/outlook_hourly.json   (hourly mode),
-          data/outlook.json          (daily/eod mode)
+- Writes: data/outlook_intraday.json (intraday),
+          data/outlook_hourly.json   (hourly),
+          data/outlook.json          (daily/eod)
 
-Key changes:
-- Breadth  = NH / (NH + NL)
-- Momentum = 3U / (3U + 3D)
-- summary.breadth_pct + summary.momentum_pct exposed (0..100) for spreadsheet compare
+Confirmed rules:
+- Breadth  = NH / (NH + NL)    (0..100)
+- Momentum = 3U / (3U + 3D)    (0..100)
+- summary.breadth_pct + summary.momentum_pct exposed
 - sectorCards include per-sector breadth_pct (NH/NL) and momentum_pct (3U/3D)
-- Keeps existing gauges/* so FE continues to render without change today
+- Risk-On (10m) computed from sector tilt with robust canonicalization
+- Engine Lights: rules added (Breakout, Compression, Expansion, Distribution, Low Liquidity, Volatility High, Turbo, Overheat)
 """
 
 from __future__ import annotations
@@ -24,17 +25,20 @@ import urllib.request
 SCHEMA_VERSION = "r1.2"
 VERSION_TAG    = "1.2-hourly"
 
+# Preferred sector order (canonical, lower-case)
 PREFERRED_ORDER = [
     "information technology","materials","health care","communication services",
     "real estate","energy","consumer staples","consumer discretionary",
     "financials","utilities","industrials",
 ]
 
-OFFENSIVE = {"information technology","consumer discretionary","communication services"}
+# Tilt sets (canonical, lower-case)
+OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
 DEFENSIVE = {"consumer staples","utilities","health care"}
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
 
+# ---------------- utils ----------------
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -51,14 +55,54 @@ def jwrite(p: str, obj: Dict[str, Any]) -> None:
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"), indent=None)
         f.write("\n")
 
-def norm(s: str) -> str: return (s or "").strip().lower()
-def title_case(x: str) -> str: return " ".join(w.capitalize() for w in (x or "").split())
+def norm(s: str) -> str:
+    return (s or "").strip().lower()
+
+def title_case(x: str) -> str:
+    return " ".join(w.capitalize() for w in (x or "").split())
 
 def canonical_sector(name: str) -> str:
+    """Map common display names to our canonical keys."""
     n = norm(name)
-    if n in ("tech","information technology"): return "information technology"
-    if n in ("healthcare",): return "health care"
-    return n
+    # full dictionary mapping for safety
+    MAP = {
+        "tech": "information technology",
+        "information technology": "information technology",
+        "infotech": "information technology",
+        "it": "information technology",
+
+        "healthcare": "health care",
+        "health care": "health care",
+
+        "communication services": "communication services",
+        "communications": "communication services",
+        "comm services": "communication services",
+        "telecom": "communication services",
+
+        "consumer discretionary": "consumer discretionary",
+        "discretionary": "consumer discretionary",
+
+        "consumer staples": "consumer staples",
+        "staples": "consumer staples",
+
+        "utilities": "utilities",
+        "utility": "utilities",
+
+        "industrials": "industrials",
+        "industrial": "industrials",
+
+        "materials": "materials",
+        "material": "materials",
+
+        "energy": "energy",
+
+        "financials": "financials",
+        "financial": "financials",
+
+        "real estate": "real estate",
+        "reits": "real estate",
+    }
+    return MAP.get(n, n)
 
 def num(v, default=0.0):
     try:
@@ -79,7 +123,7 @@ def ratio_pct(pos, neg):
     s = float(pos) + float(neg)
     return 50.0 if s <= 0 else round(100.0 * (float(pos) / s), 2)
 
-# ---------- sectors from source ----------
+# ---------------- sectors from source ----------------
 def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
     raw=None
     if isinstance(src.get("outlook"), dict) and isinstance(src["outlook"].get("sectors"), dict):
@@ -100,15 +144,17 @@ def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
                 "nh":nh,"nl":nl,"up":up,"down":dn,
                 "netNH":nh-nl,"netUD":up-dn,"spark":spark
             }
+
+    # Ensure all preferred sectors exist, even if zeros
     for k in PREFERRED_ORDER:
         out.setdefault(k, {"nh":0,"nl":0,"up":0,"down":0,"netNH":0,"netUD":0,"spark":[]})
     return out
 
-# ---------- gauges & summary ----------
+# ---------------- gauges & summary ----------------
 def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mode: str) -> Dict[str, Any]:
     g = src.get("global", {}) or {}
 
-    fuel      = num(pick(g,"squeeze_pressure_pct","squeezePressurePct", default=50))
+    fuel      = num(pick(g,"squeeze_pressure_pct","squeezePressurePct", default=50))  # intraday compression
     vol_pct   = num(pick(g,"volatility_pct","volatilityPct", default=50))
     liq_psi   = num(pick(g,"liquidity_pct","liquidityPct", default=70))
     daily_sq  = pick(g,"daily_squeeze_pct","squeeze_daily_pct","squeezeDailyPct", default=None)
@@ -119,7 +165,7 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
     tot_u  = sum(int(num(v.get("up", 0)))   for v in sectors.values())
     tot_d  = sum(int(num(v.get("down", 0))) for v in sectors.values())
 
-    # === YOUR SPEC (Row 1): Breadth = NH/NL, Momentum = 3U/3D ===
+    # Your spec (Row 1): Breadth = NH/NL, Momentum = 3U/3D
     breadth_pct  = ratio_pct(tot_nh, tot_nl)
     momentum_pct = ratio_pct(tot_u,  tot_d)
 
@@ -141,7 +187,7 @@ def build_gauges_and_odometers(src: Dict[str, Any], sectors: Dict[str, Any], mod
     odometers = {"squeezeCompressionPct": float(fuel)}
     return {"gauges": gauges, "odometers": odometers, "summary": summary}
 
-# ---------- cards ----------
+# ---------------- cards ----------------
 def cards_from_sectors(sectors: Dict[str, Any]) -> List[Dict[str, Any]]:
     cards: List[Dict[str, Any]] = []
     for key in PREFERRED_ORDER:
@@ -170,13 +216,53 @@ def cards_from_sectors(sectors: Dict[str, Any]) -> List[Dict[str, Any]]:
         })
     return cards
 
-# ---------- engine lights defaults ----------
+# ---------------- engine lights defaults + rules ----------------
 def default_signals() -> Dict[str, Any]:
     keys = ["sigBreakout","sigDistribution","sigCompression","sigExpansion",
             "sigOverheat","sigTurbo","sigDivergence","sigLowLiquidity","sigVolatilityHigh"]
     return { k: {"active": False, "severity": "info"} for k in keys }
 
-# ---------- Daily Trend (uses current gauges; swing formula lives here) ----------
+def apply_engine_lights(signals: Dict[str, Any], summary: Dict[str, Any], gauges: Dict[str, Any]) -> Dict[str, Any]:
+    b = float(num(summary.get("breadth_pct", 50)))
+    m = float(num(summary.get("momentum_pct", 50)))
+    squeeze = float(num(gauges.get("fuel", {}).get("pct", 50)))          # 0..100 (higher = tighter)
+    vol     = float(num(gauges.get("water", {}).get("pct", 50)))         # 0..100
+    liq     = float(num(gauges.get("oil",   {}).get("psi", 70)))         # ~0..120
+
+    # Simple, transparent rules
+    # Breakout: broad confirmation
+    if (b >= 55.0 and m >= 55.0 and squeeze <= 60.0):
+        signals["sigBreakout"]["active"] = True
+
+    # Distribution: broad weakness
+    if (b <= 45.0 and m <= 45.0):
+        signals["sigDistribution"]["active"] = True
+
+    # Compression: coil
+    if (squeeze >= 70.0):
+        signals["sigCompression"]["active"] = True
+
+    # Expansion: release + thrust
+    if (squeeze <= 30.0 and m >= 55.0):
+        signals["sigExpansion"]["active"] = True
+
+    # Volatility High / Low Liquidity
+    if (vol >= 70.0):
+        signals["sigVolatilityHigh"]["active"] = True
+    if (liq <= 45.0):
+        signals["sigLowLiquidity"]["active"] = True
+
+    # Turbo: very strong thrust + expansion
+    if (m >= 70.0 and b >= 60.0 and squeeze <= 30.0):
+        signals["sigTurbo"]["active"] = True
+
+    # Overheat: thrust with very high volatility
+    if (m >= 60.0 and vol >= 80.0):
+        signals["sigOverheat"]["active"] = True
+
+    return signals
+
+# ---------------- Daily Trend (swing) ----------------
 def http_get_json(url: str) -> Dict[str,Any]:
     req = urllib.request.Request(url, headers={})
     with urllib.request.urlopen(req, timeout=20) as resp:
@@ -206,16 +292,13 @@ def ema(series: List[float], length: int) -> List[float]:
     return out
 
 def lux_trend_daily(sectors: Dict[str, Any], gauges: Dict[str, Any], ts: str) -> Dict[str, Any]:
-    # Inputs from gauges
     breadth  = float(num(gauges.get("rpm",   {}).get("pct", 50)))   # NH/NL %
     momentum = float(num(gauges.get("speed", {}).get("pct", 50)))   # 3U/3D %
     daily_sq = gauges.get("squeezeDaily", {}).get("pct")
     S = float(num(daily_sq, 50.0)) / 100.0
 
-    # ADR momentum optional (not required for today)
-    adr_momo = 50.0  # neutral for now (you can wire later if needed)
+    adr_momo = 50.0  # neutral placeholder (optional future wiring)
 
-    # EMA 10/20 position on SPY daily (requires POLYGON_API_KEY; else neutral 50)
     ema_pos_score = 50.0
     closes = fetch_polygon_spy_daily(limit=120)
     if closes and len(closes) >= 21:
@@ -233,20 +316,13 @@ def lux_trend_daily(sectors: Dict[str, Any], gauges: Dict[str, Any], ts: str) ->
         else:
             ema_pos_score = 0.0
 
-    # Base score (0..100)
     base = (0.35 * breadth) + (0.35 * momentum) + (0.20 * ema_pos_score) + (0.10 * adr_momo)
-
-    # Squeeze damping: pull toward neutral if compression high
     trendScore = (1.0 - 0.5 * S) * base + (0.5 * S) * 50.0
-
-    # State thresholds
     state = "up" if trendScore > 55 else ("down" if trendScore < 45 else "flat")
 
-    # Participation proxy: % sectors with netNH > 0
     pos_sectors = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k, {}).get("netNH", 0))) > 0)
     participation_pct = (pos_sectors / float(len(PREFERRED_ORDER))) * 100.0
 
-    # Vol/Liq from gauges
     vol_pct = float(num(gauges.get("water", {}).get("pct", 0)))
     vol_band = "calm" if vol_pct < 30 else ("elevated" if vol_pct <= 60 else "high")
     liq_psi = float(num(gauges.get("oil",   {}).get("psi", 0)))
@@ -258,13 +334,13 @@ def lux_trend_daily(sectors: Dict[str, Any], gauges: Dict[str, Any], ts: str) ->
         "squeezeDaily":     { "pct": (round(float(num(daily_sq, None)), 2) if daily_sq is not None else None) },
         "volatilityRegime": { "atrPct": round(vol_pct, 1), "band": vol_band },
         "liquidityRegime":  { "psi": round(liq_psi, 1), "band": liq_band },
-        "rotation":         { "riskOnPct": 50.0 },  # can wire later
+        "rotation":         { "riskOnPct": 50.0 },  # optional daily tilt later
         "updatedAt":        ts,
         "mode":             "daily",
         "live":             False
     }
 
-# ---------- main ----------
+# ---------------- main ----------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="data/outlook_source.json")
@@ -277,20 +353,24 @@ def main():
     gz_od   = build_gauges_and_odometers(src, sectors, args.mode if args.mode!="eod" else "daily")
     cards   = cards_from_sectors(sectors)
 
+    # ---------- Intraday-only: sector direction + risk-on tilt ----------
     intraday_block=None
     if args.mode == "intraday":
-        # lightweight intraday extras (same as before)
         rising = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k,{}).get("netNH",0)))>0)
         rising_pct = (rising/float(len(PREFERRED_ORDER)))*100.0
-        off_pos = sum(1 for s in OFFENSIVE if int(num(sectors.get(s,{}).get("netNH",0)))>0)
-        def_pos = sum(1 for s in DEFENSIVE if int(num(sectors.get(s,{}).get("netNH",0)))>0)
-        denom=off_pos+def_pos
-        risk_on_10m=(off_pos/denom)*100.0 if denom>0 else 50.0
+
+        # robust tilt (uses canonical keys)
+        off_pos = sum(1 for s in OFFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
+        def_pos = sum(1 for s in DEFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
+        denom = off_pos + def_pos
+        risk_on_10m = (off_pos/denom)*100.0 if denom>0 else 50.0
+
         intraday_block = {
             "sectorDirection10m": {"risingCount": int(rising), "risingPct": round(rising_pct,1), "updatedAt": ts},
             "riskOn10m": {"riskOnPct": round(risk_on_10m,1), "updatedAt": ts}
         }
 
+    # ---------- Engine Lights ----------
     upstream_signals={}
     if isinstance(src.get("signals"), dict): upstream_signals=src["signals"]
     elif isinstance(src.get("engineLights"), dict) and isinstance(src["engineLights"].get("signals"), dict):
@@ -301,11 +381,16 @@ def main():
         if isinstance(v, dict):
             signals[k] = {**signals.get(k, {"active":False,"severity":"info"}), **v}
 
+    # Apply data-driven rules
+    signals = apply_engine_lights(signals, gz_od["summary"], gz_od["gauges"])
+
+    # ---------- Output assembly ----------
     out = {
         "schema_version": SCHEMA_VERSION,
         "updated_at": ts, "ts": ts, "version": VERSION_TAG,
         "pipeline": args.mode if args.mode!="eod" else "daily",
         **gz_od,
+        "sectorsUpdatedAt": ts,                           # helpful for UI timestamps
         "sectorCards": cards,
         "outlook": {"sectors": sectors, "sectorCards": cards},
         "engineLights": {"updatedAt": ts, "mode": (args.mode if args.mode!="eod" else "daily"), "live": (args.mode=="intraday"), "signals": signals}
