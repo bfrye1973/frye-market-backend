@@ -244,9 +244,10 @@ def rolling_stdev(vals, length=20):
 
 def compute_daily_squeeze_pct_lux(symbol="SPY", lookback_days=250, length=20, bb_mult=2.0, kc_mult=1.5):
     """Lux-like Daily Squeeze % via BB/KC width ratio percent-rank (0..100, higher = tighter)."""
-    js = poly_json(f"{POLY_BASE}/v2/aggs/ticker/{symbol}/range/1/day/now/prev",
-                   {"limit": lookback_days, "adjusted": "true", "sort": "asc"})
-    bars = js.get("results", []) or []
+    end = datetime.utcnow().date()
+    start = end - timedelta(days=lookback_days*2)  # buffer for weekends
+    bars = fetch_range_daily(symbol, date_str(start), date_str(end))
+
     if len(bars) < length + 2: return 50.0
     closes = [float(b["c"]) for b in bars]
     highs  = [float(b["h"]) for b in bars]
