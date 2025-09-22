@@ -155,36 +155,77 @@ def default_signals() -> Dict[str, Any]:
 
 # ---------- daily trend block (unchanged semantics; uses gauges that may include squeezeDaily) ----------
 def lux_trend_daily(sectors: Dict[str, Any], gauges: Dict[str, Any], ts: str) -> Dict[str, Any]:
-    pos_sectors = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k, {}).get("netNH",0)))>0)
-    participation_pct = (pos_sectors/float(len(PREFERRED_ORDER)))*100.0
-    # optional PSI recompute removed; trust source/gauges
-    psi = gauges.get("squeezeDaily", {}).get("pct")
+    """
+    Daily Trend (swing): blends Breadth, Momentum, EMA alignment (SPY), ADR momentum (if present),
+    and damps by Daily Squeeze (Lux PSI).
+    """
+    # Inputs from current gauges
+    breadth  = float(num(gauges.get("rpm",   {}).get("pct", 50)))   # Adv/Dec %
+    momentum = float(num(gauges.get("speed", {}).get("pct", 50)))   # NH/NL %
+    daily_sq = gauges.get("squeezeDaily", {}).get("pct")            # Lux PSI daily (0..100) or None
+    S = float(num(daily_sq, 50.0)) / 100.0
 
-    vol_pct = float(num(gauges.get("water", {}).get("pct",0)))
+    # Optional ADR momentum if present (else neutral)
+    adr_momo = gauges.get("speedAdr", {}).get("pct")
+    adr_momo = float(num(adr_momo, 50.0))
+
+    # EMA 10/20 position on SPY daily (requires POLYGON_API_KEY; else neutral 50)
+    ema_pos_score = 50.0
+    closes = fetch_polygon_spy_daily(limit=120) if 'fetch_polygon_spy_daily' in globals() else []
+    if closes and len(closes) >= 21:
+        ema10 = ema(closes, 10)[-1]
+        ema20 = ema(closes, 20)[-1]
+        c = float(closes[-1])
+        above10 = c > ema10
+        above20 = c > ema20
+        if above10 and above20:
+            ema_pos_score = 100.0
+        elif above10 and not above20:
+            ema_pos_score = 65.0
+        elif (not above10) and above20:
+            ema_pos_score = 35.0
+        else:
+            ema_pos_score = 0.0
+
+    # Base score (0..100)
+    base = (
+        0.35 * breadth +
+        0.35 * momentum +
+        0.20 * ema_pos_score +
+        0.10 * adr_momo
+    )
+
+    # Squeeze damping: high compression pulls toward neutral
+    trendScore = (1.0 - 0.5 * S) * base + (0.5 * S) * 50.0
+
+    # State thresholds
+    state = "up" if trendScore > 55 else ("down" if trendScore < 45 else "flat")
+
+    # Participation proxy: % sectors with netNH > 0
+    pos_sectors = sum(
+        1 for k in PREFERRED_ORDER
+        if int(num(sectors.get(k, {}).get("netNH", 0))) > 0
+    )
+    participation_pct = (pos_sectors / float(len(PREFERRED_ORDER))) * 100.0
+
+    # Vol/Liq from existing gauges
+    vol_pct = float(num(gauges.get("water", {}).get("pct", 0)))
     vol_band = "calm" if vol_pct < 30 else ("elevated" if vol_pct <= 60 else "high")
-
-    liq_psi = float(num(gauges.get("oil", {}).get("psi",0)))
+    liq_psi = float(num(gauges.get("oil",   {}).get("psi", 0)))
     liq_band = "good" if liq_psi >= 60 else ("normal" if liq_psi >= 50 else ("light" if liq_psi >= 40 else "thin"))
 
-    b=float(num(gauges.get("rpm",{}).get("pct",50))); m=float(num(gauges.get("speed",{}).get("pct",50)))
-    score=0.5*b + 0.5*m
-    trend_state = "up" if score>55 else ("down" if score<45 else "flat")
-
-    # crude rotation proxy
-    off = sum(1 for s in OFFENSIVE if int(num(sectors.get(s,{}).get("netNH",0)))>0)
-    deff = sum(1 for s in DEFENSIVE if int(num(sectors.get(s,{}).get("netNH",0)))>0)
-    denom = off+deff
-    risk_on = (off/denom)*100.0 if denom>0 else 50.0
-
     return {
-        "trend":            {"emaSlope": round(score-50,1), "state": trend_state},
-        "participation":    {"pctAboveMA": round(participation_pct,1)},
-        "squeezeDaily":     {"pct": (round(float(psi),2) if psi is not None else None)},
-        "volatilityRegime": {"atrPct": round(vol_pct,1), "band": vol_band},
-        "liquidityRegime":  {"psi": round(liq_psi,1), "band": liq_band},
-        "rotation":         {"riskOnPct": round(risk_on,1)},
-        "updatedAt": ts, "mode": "daily", "live": False
+        "trend":            { "emaSlope": round(trendScore - 50.0, 1), "state": state },
+        "participation":    { "pctAboveMA": round(participation_pct, 1) },
+        "squeezeDaily":     { "pct": (round(float(num(daily_sq, None)), 2) if daily_sq is not None else None) },
+        "volatilityRegime": { "atrPct": round(vol_pct, 1), "band": vol_band },
+        "liquidityRegime":  { "psi": round(liq_psi, 1), "band": liq_band },
+        "rotation":         { "riskOnPct": 50.0 },
+        "updatedAt":        ts,
+        "mode":             "daily",
+        "live":             False
     }
+
 
 # ---------- main ----------
 def main():
