@@ -26,6 +26,18 @@ from __future__ import annotations
 import argparse, csv, json, os, time, math, urllib.request, urllib.error, urllib.parse
 from datetime import datetime, timedelta, timezone, date
 from typing import Any, Dict, List, Tuple
+from zoneinfo import ZoneInfo  # stdlib (Python 3.9+)
+# ----- timezone helpers (Arizona) -----
+PHX_TZ = ZoneInfo("America/Phoenix")
+
+def now_utc_iso() -> str:
+    """UTC ISO (machine time)"""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+def now_phx_iso() -> str:
+    """Arizona ISO (display time)"""
+    return datetime.now(PHX_TZ).replace(microsecond=0).isoformat()
+
 
 # ---------------- ENV / CONFIG ----------------
 POLY_KEY  = os.environ.get("POLY_KEY") or os.environ.get("POLYGON_API_KEY")
