@@ -332,30 +332,26 @@ def main():
     sectors = discover_sectors()
     groups  = build_groups(args.mode, sectors)
     global_fields = compute_global_fields()
-    
-   ts_utc   = now_utc_iso()
-   ts_local = now_phx_iso()
 
-   payload = {
-    # NEW: display + machine times
-    "updated_at": ts_local,        # Arizona time for UI
-    "updated_at_utc": ts_utc,      # UTC for logs/replay
+    # ---- timestamps (consistent 4-space indent) ----
+    ts_utc   = now_utc_iso()
+    ts_local = now_phx_iso()
 
-    # keep legacy key so nothing else breaks
-    "timestamp": ts_utc,
-
-    "mode": args.mode,
-    "groups": groups,
-    "global": global_fields,
-}
+    payload = {
+        "updated_at": ts_local,       # AZ time for UI
+        "updated_at_utc": ts_utc,     # UTC for logs/replay
+        "timestamp": ts_utc,          # legacy
+        "mode": args.mode,
+        "groups": groups,
+        "global": global_fields,
+    }
 
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     print(f"[OK] wrote {OUT_PATH}")
-    print(f"[mode={args.mode}] global: fuel={payload['global']['squeeze_pressure_pct']} daily={payload['global']['daily_squeeze_pct']}")
     for s,g in groups.items():
-        print(f"  {s}: nh={g['nh']} nl={g['nl']} up={g['u']} down={g['d']}")
+        print(f"  {s}: nh={g['nh']} nl={g['nl']} u={g['u']} d={g['d']}")
 
 if __name__ == "__main__":
     main()
