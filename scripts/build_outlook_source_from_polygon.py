@@ -332,13 +332,22 @@ def main():
     sectors = discover_sectors()
     groups  = build_groups(args.mode, sectors)
     global_fields = compute_global_fields()
+    
+   ts_utc   = now_utc_iso()
+   ts_local = now_phx_iso()
 
-    payload = {
-        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "mode": args.mode,
-        "groups": groups,
-        "global": global_fields
-    }
+   payload = {
+    # NEW: display + machine times
+    "updated_at": ts_local,        # Arizona time for UI
+    "updated_at_utc": ts_utc,      # UTC for logs/replay
+
+    # keep legacy key so nothing else breaks
+    "timestamp": ts_utc,
+
+    "mode": args.mode,
+    "groups": groups,
+    "global": global_fields,
+}
 
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
