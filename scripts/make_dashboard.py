@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-make_dashboard.py (R2.1)
+make_dashboard.py (R3 — Scalper-Sensitive Engine Lights)
 
 - Reads:  data/outlook_source.json (from R8 builder)
 - Writes: data/outlook_intraday.json (intraday),
@@ -13,7 +13,11 @@ Confirmed rules / design:
 - summary.breadth_pct + summary.momentum_pct exposed (for spreadsheet compare)
 - sectorCards include per-sector breadth_pct (NH/NL) and momentum_pct (3U/3D)
 - Risk-On (10m) computed from sector tilt with robust canonicalization
-- Engine Lights: rules added (Breakout, Compression, Expansion, Distribution, Low Liquidity, Volatility High, Turbo, Overheat)
+- Engine Lights (SCALPER MODE):
+    - 9 fixed keys always emitted
+    - Early vs Confirmed ladders (warn → info/danger)
+    - lastChanged persisted between runs (data/engine_lights_state.json)
+    - Optional gates from Index Scalper (alignment + VIX confirm)
 - Output timestamps:
     updated_at       -> America/Phoenix (display)
     updated_at_utc   -> UTC (logs/replay)
@@ -23,23 +27,20 @@ Confirmed rules / design:
 from __future__ import annotations
 import argparse, json, os, math
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import urllib.request
 from zoneinfo import ZoneInfo  # stdlib (Python 3.9+)
 
-# ----- timezone helpers (Arizona) -----
+# ====== CONFIG ======
+SCHEMA_VERSION = "r1.3"
+VERSION_TAG    = "1.3-intraday-scalper"
+
 PHX_TZ = ZoneInfo("America/Phoenix")
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
 
-def now_utc_iso() -> str:
-    """UTC ISO (machine time)"""
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-def now_phx_iso() -> str:
-    """Arizona ISO (display time)"""
-    return datetime.now(PHX_TZ).replace(microsecond=0).isoformat()
-
-SCHEMA_VERSION = "r1.2"
-VERSION_TAG    = "1.2-hourly"
+# Engine Lights state (lastChanged)
+ENGINE_LIGHTS_STATE_PATH = os.getenv("ENGINE_LIGHTS_STATE_PATH", "data/engine_lights_state.json")
+ENGINE_LIGHTS_STRICT     = os.getenv("ENGINE_LIGHTS_STRICT", "true").lower() == "true"
 
 # Preferred sector order (canonical, lower-case)
 PREFERRED_ORDER = [
@@ -52,7 +53,12 @@ PREFERRED_ORDER = [
 OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
 DEFENSIVE = {"consumer staples","utilities","health care"}
 
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
+# ---------------- timezone helpers ----------------
+def now_utc_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+def now_phx_iso() -> str:
+    return datetime.now(PHX_TZ).replace(microsecond=0).isoformat()
 
 # ---------------- utils ----------------
 def jread(p: str) -> Dict[str, Any]:
@@ -75,37 +81,28 @@ def title_case(x: str) -> str:
     return " ".join(w.capitalize() for w in (x or "").split())
 
 def canonical_sector(name: str) -> str:
-    """Map common display names to our canonical keys (lower-case)."""
     n = norm(name)
     MAP = {
         "tech": "information technology",
         "information technology": "information technology",
         "infotech": "information technology",
         "it": "information technology",
-
         "healthcare": "health care",
         "health care": "health care",
-
         "communication services": "communication services",
         "communications": "communication services",
         "comm services": "communication services",
         "telecom": "communication services",
-
         "consumer discretionary": "consumer discretionary",
         "discretionary": "consumer discretionary",
-
         "consumer staples": "consumer staples",
         "staples": "consumer staples",
-
         "utilities": "utilities",
         "utility": "utilities",
-
         "industrials": "industrials",
         "industrial": "industrials",
-
         "materials": "materials",
         "material": "materials",
-
         "energy": "energy",
         "financials": "financials",
         "financial": "financials",
@@ -155,28 +152,24 @@ def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
                 "netNH":nh-nl,"netUD":up-dn,"spark":spark
             }
 
-    # Ensure all preferred sectors exist, even if zeros
     for k in PREFERRED_ORDER:
         out.setdefault(k, {"nh":0,"nl":0,"up":0,"down":0,"netNH":0,"netUD":0,"spark":[]})
     return out
 
-# ---------------- metrics + summary (no gauge lingo) ----------------
+# ---------------- metrics + summary ----------------
 def build_metrics_summary(src: Dict[str, Any], sectors: Dict[str, Any], mode: str) -> Dict[str, Any]:
     g = src.get("global", {}) or {}
 
-    # Core inputs
-    squeeze_intraday = num(pick(g,"squeeze_pressure_pct","squeezePressurePct", default=50))  # 0..100 (higher = tighter)
+    squeeze_intraday = num(pick(g,"squeeze_pressure_pct","squeezePressurePct", default=50))
     volatility_pct   = num(pick(g,"volatility_pct","volatilityPct", default=50))
     liquidity_psi    = num(pick(g,"liquidity_pct","liquidityPct", default=70))
     squeeze_daily    = pick(g,"daily_squeeze_pct","squeeze_daily_pct","squeezeDailyPct", default=None)
 
-    # Totals across sectors
     tot_nh = sum(int(num(v.get("nh", 0)))   for v in sectors.values())
     tot_nl = sum(int(num(v.get("nl", 0)))   for v in sectors.values())
     tot_u  = sum(int(num(v.get("up", 0)))   for v in sectors.values())
     tot_d  = sum(int(num(v.get("down", 0))) for v in sectors.values())
 
-    # Your spec: Breadth = NH/NL, Momentum = 3U/3D
     breadth_pct  = ratio_pct(tot_nh, tot_nl)
     momentum_pct = ratio_pct(tot_u,  tot_d)
 
@@ -195,7 +188,6 @@ def build_metrics_summary(src: Dict[str, Any], sectors: Dict[str, Any], mode: st
         "momentum_pct": float(momentum_pct),
     }
 
-    # Temporary mirror to keep current UI working (remove in a later release)
     gauges = {
         "rpm":   {"pct": metrics["breadth_pct"],            "label":"Breadth"},
         "speed": {"pct": metrics["momentum_pct"],           "label":"Momentum"},
@@ -217,10 +209,9 @@ def cards_from_sectors(sectors: Dict[str, Any]) -> List[Dict[str, Any]]:
         nh = int(num(vals.get("nh", 0))); nl = int(num(vals.get("nl", 0)))
         u  = int(num(vals.get("up", 0)));  d  = int(num(vals.get("down", 0)))
 
-        breadth_pct  = ratio_pct(nh, nl)  # NH/NL
-        momentum_pct = ratio_pct(u,  d)   # 3U/3D
+        breadth_pct  = ratio_pct(nh, nl)
+        momentum_pct = ratio_pct(u,  d)
 
-        # Outlook remains netNH-based
         netNH = nh - nl
         outlook = "Neutral"
         if netNH > 0: outlook = "Bullish"
@@ -238,40 +229,143 @@ def cards_from_sectors(sectors: Dict[str, Any]) -> List[Dict[str, Any]]:
         })
     return cards
 
-# ---------------- engine lights ----------------
-def default_signals() -> Dict[str, Any]:
-    keys = ["sigBreakout","sigDistribution","sigCompression","sigExpansion",
-            "sigOverheat","sigTurbo","sigDivergence","sigLowLiquidity","sigVolatilityHigh"]
-    return { k: {"active": False, "severity": "info"} for k in keys }
+# ================== Engine Lights (Scalper) ==================
+ALL_LIGHT_KEYS = [
+    "sigBreakout","sigDistribution","sigCompression","sigExpansion",
+    "sigOverheat","sigTurbo","sigDivergence","sigLowLiquidity","sigVolatilityHigh"
+]
 
-def apply_engine_lights(signals: Dict[str, Any], summary: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
-    b   = float(num(summary.get("breadth_pct", 50)))
-    m   = float(num(summary.get("momentum_pct", 50)))
-    sq  = float(num(metrics.get("squeeze_intraday_pct", 50)))
-    vol = float(num(metrics.get("volatility_pct", 50)))
-    liq = float(num(metrics.get("liquidity_psi", 70)))
+def _el_load_state(path: str) -> Dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"signals": {k: {"active": False, "lastChanged": None} for k in ALL_LIGHT_KEYS}}
 
-    # Gates tuned to be responsive but not noisy
-    if (b >= 53.0 and m >= 53.0 and sq <= 60.0):
-        signals["sigBreakout"]["active"] = True
-    if (b <= 45.0 and m <= 45.0):
-        signals["sigDistribution"]["active"] = True
-    if (sq >= 70.0):
-        signals["sigCompression"]["active"] = True
-    if (sq <= 30.0 and m >= 52.0):
-        signals["sigExpansion"]["active"] = True
-    if (vol >= 70.0):
-        signals["sigVolatilityHigh"]["active"] = True
-    if (liq <= 45.0):
-        signals["sigLowLiquidity"]["active"] = True
-    if (m >= 70.0 and b >= 60.0 and sq <= 30.0):
-        signals["sigTurbo"]["active"] = True
-    if (m >= 60.0 and vol >= 80.0):
-        signals["sigOverheat"]["active"] = True
+def _el_save_state(path: str, state: Dict[str, Any]) -> None:
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except Exception:
+        pass
 
-    return signals
+def _mk_sig(active: bool, severity: str, reason: str, last_changed: Optional[str]) -> Dict[str, Any]:
+    sev = severity if severity in ("info","warn","danger") else "info"
+    return {"active": bool(active), "severity": sev, "reason": reason, "lastChanged": last_changed}
 
-# ---------------- Daily Trend (swing) ----------------
+def compute_engine_lights_scalper(
+    *,
+    summary: Dict[str, Any],
+    metrics: Dict[str, Any],
+    prev_metrics: Optional[Dict[str, Any]],
+    index_scalper_direction: str = "none",   # "long"|"short"|"none"
+    index_scalper_streak: int = 0,
+    vix_below_ema10: bool = False,
+    ts_local_iso: str,
+    strict: bool = True
+) -> Dict[str, Any]:
+    """
+    Sensitive (scalper) lights:
+      - Early (warn) triggers quickly; Confirmed upgrades to info/danger.
+      - Always emit all 9 keys.
+      - Persist lastChanged across runs.
+    """
+    # Load state for lastChanged
+    st = _el_load_state(ENGINE_LIGHTS_STATE_PATH)
+    last = st.get("signals", {})
+
+    b  = float(num(summary.get("breadth_pct", 50)))
+    m  = float(num(summary.get("momentum_pct", 50)))
+    q  = float(num(metrics.get("squeeze_intraday_pct", 50)))
+    lq = float(num(metrics.get("liquidity_psi", 70)))
+    vol= float(num(metrics.get("volatility_pct", 50)))
+
+    m_prev = None if not prev_metrics else float(num(prev_metrics.get("momentum_pct", None), None))
+    q_prev = None if not prev_metrics else float(num(prev_metrics.get("squeeze_intraday_pct", None), None))
+    m_up   = (m_prev is not None and m > m_prev)
+    q_fall = (q_prev is not None and q < q_prev)
+
+    align = index_scalper_direction or "none"
+    streak= int(index_scalper_streak or 0)
+    vixOK = bool(vix_below_ema10)
+
+    sig: Dict[str, Dict[str, Any]] = {}
+
+    # ---- Compression ----
+    if q >= 65:
+        sev = "danger" if q >= 85 else "warn"
+        sig["sigCompression"] = _mk_sig(True, sev, f"q={q:.1f}", None)
+    else:
+        sig["sigCompression"] = _mk_sig(False, "info", "", None)
+
+    # ---- Expansion (needs squeeze relief) ----
+    if q < 55 and q_fall:
+        early = True
+        confirmed = (q < 45) and (align in ("long","short")) and vixOK
+        sev = "info" if confirmed else "warn"
+        sig["sigExpansion"] = _mk_sig(early, sev, f"q={q:.1f} falling={q_fall} align={align} vix={vixOK}", None)
+    else:
+        sig["sigExpansion"] = _mk_sig(False, "info", "", None)
+
+    # ---- Breakout / Distribution ----
+    breakout_early = (b > 55) and (q < 75) and (align == "long") and (streak >= 1)
+    breakout_conf  = breakout_early and (vixOK or m >= 58) and (streak >= 2)
+    if breakout_early:
+        sig["sigBreakout"] = _mk_sig(True, "info" if breakout_conf else "warn",
+                                     f"b={b:.1f} q={q:.1f} align={align} vix={vixOK} m={m:.1f}", None)
+    else:
+        sig["sigBreakout"] = _mk_sig(False, "info", "", None)
+
+    if b < 45:
+        sig["sigDistribution"] = _mk_sig(True, "danger" if b < 30 else "info", f"b={b:.1f}", None)
+    else:
+        sig["sigDistribution"] = _mk_sig(False, "info", "", None)
+
+    # ---- Overheat / Turbo ----
+    if m > 80:
+        sig["sigOverheat"] = _mk_sig(True, "danger" if m >= 92 else "warn", f"m={m:.1f}", None)
+        turbo = (m >= 88) and (q < 75) and (align == "long")
+        sig["sigTurbo"] = _mk_sig(turbo, "info", f"m={m:.1f} q={q:.1f} align={align}", None)
+    else:
+        sig["sigOverheat"] = _mk_sig(False, "info", "", None)
+        sig["sigTurbo"]    = _mk_sig(False, "info", "", None)
+
+    # ---- Divergence ----
+    if (m > 68) and (b < 52):
+        sig["sigDivergence"] = _mk_sig(True, "warn", f"m={m:.1f} b={b:.1f}", None)
+    else:
+        sig["sigDivergence"] = _mk_sig(False, "info", "", None)
+
+    # ---- Liquidity / Volatility ----
+    if lq < 45:
+        sig["sigLowLiquidity"] = _mk_sig(True, "danger" if lq < 30 else "warn", f"psi={lq:.1f}", None)
+    else:
+        sig["sigLowLiquidity"] = _mk_sig(False, "info", "", None)
+
+    if vol > 65:
+        sig["sigVolatilityHigh"] = _mk_sig(True, "danger" if vol >= 85 else "warn", f"vol={vol:.1f}", None)
+    else:
+        sig["sigVolatilityHigh"] = _mk_sig(False, "info", "", None)
+
+    # Ensure all 9 keys exist
+    for k in ALL_LIGHT_KEYS:
+        sig.setdefault(k, _mk_sig(False, "info", "", None))
+
+    # lastChanged stamping
+    for k in ALL_LIGHT_KEYS:
+        prev_active = bool(last.get(k, {}).get("active", False))
+        now_active  = bool(sig[k]["active"])
+        prev_ts     = last.get(k, {}).get("lastChanged")
+        sig[k]["lastChanged"] = ts_local_iso if (now_active != prev_active) else prev_ts
+
+    # Persist snapshot
+    st["signals"] = {k: {"active": sig[k]["active"], "lastChanged": sig[k]["lastChanged"]} for k in ALL_LIGHT_KEYS}
+    _el_save_state(ENGINE_LIGHTS_STATE_PATH, st)
+
+    return sig
+
+# ---------------- polygon helpers (daily) ----------------
 def http_get_json(url: str) -> Dict[str,Any]:
     req = urllib.request.Request(url, headers={})
     with urllib.request.urlopen(req, timeout=20) as resp:
@@ -301,15 +395,13 @@ def ema(series: List[float], length: int) -> List[float]:
     return out
 
 def lux_trend_daily(sectors: Dict[str, Any], metrics: Dict[str, Any], ts_local: str) -> Dict[str, Any]:
-    breadth  = float(num(metrics.get("breadth_pct", 50)))     # NH/NL %
-    momentum = float(num(metrics.get("momentum_pct", 50)))    # 3U/3D %
+    breadth  = float(num(metrics.get("breadth_pct", 50)))
+    momentum = float(num(metrics.get("momentum_pct", 50)))
     daily_sq = float(num(metrics.get("squeeze_daily_pct", 50)))
     S = daily_sq / 100.0
 
-    # Placeholder ADR momentum (optional future wiring)
     adr_momo = 50.0
 
-    # EMA 10/20 position on SPY daily (requires POLYGON_API_KEY; else neutral)
     ema_pos_score = 50.0
     closes = fetch_polygon_spy_daily(limit=120)
     if closes and len(closes) >= 21:
@@ -331,7 +423,6 @@ def lux_trend_daily(sectors: Dict[str, Any], metrics: Dict[str, Any], ts_local: 
     trendScore = (1.0 - 0.5 * S) * base + (0.5 * S) * 50.0
     state = "up" if trendScore > 55 else ("down" if trendScore < 45 else "flat")
 
-    # Participation proxy: % sectors with netNH > 0
     pos_sectors = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k, {}).get("netNH", 0))) > 0)
     participation_pct = (pos_sectors / float(len(PREFERRED_ORDER))) * 100.0
 
@@ -346,7 +437,7 @@ def lux_trend_daily(sectors: Dict[str, Any], metrics: Dict[str, Any], ts_local: 
         "squeezeDaily":     { "pct": round(daily_sq, 2) },
         "volatilityRegime": { "atrPct": round(vol_pct, 1), "band": vol_band },
         "liquidityRegime":  { "psi": round(liq_psi, 1), "band": liq_band },
-        "rotation":         { "riskOnPct": 50.0 },  # optional daily tilt later
+        "rotation":         { "riskOnPct": 50.0 },
         "updatedAt":        ts_local,
         "mode":             "daily",
         "live":             False
@@ -365,8 +456,7 @@ def main():
     # Build sector map
     sectors = sectors_from_source(src)
 
-    # Build analytics (metrics/summary) + legacy gauges mirror
-    # (mode value normalized: 'daily' for eod to keep daily_squeeze wiring consistent)
+    # Build analytics + legacy mirror
     normalized_mode = args.mode if args.mode != "eod" else "daily"
     ms_od = build_metrics_summary(src, sectors, normalized_mode)
 
@@ -391,41 +481,50 @@ def main():
             "riskOn10m":          {"riskOnPct": round(risk_on_10m,1), "updatedAt": ts_local}
         }
 
-    # Engine Lights: merge upstream (if any) then apply rules
-    upstream_signals={}
-    if isinstance(src.get("signals"), dict): upstream_signals=src["signals"]
-    elif isinstance(src.get("engineLights"), dict) and isinstance(src["engineLights"].get("signals"), dict):
-        upstream_signals=src["engineLights"]["signals"]
+    # ---------- SCALPER ENGINE LIGHTS ----------
+    # Read previous OUT to get slope inputs (momentum/squeeze deltas)
+    prev_out = jread(args.out)
+    prev_metrics = prev_out.get("metrics") if isinstance(prev_out, dict) else None
 
-    signals=default_signals()
-    for k,v in (upstream_signals or {}).items():
-        if isinstance(v, dict):
-            signals[k] = {**signals.get(k, {"active":False,"severity":"info"}), **v}
-    signals = apply_engine_lights(signals, ms_od["summary"], ms_od["metrics"])
+    # Optional Index Scalper meta if builder placed it in the source (use your real keys if present)
+    scalper = src.get("index_scalper") or src.get("scalper") or {}
+    index_scalper_direction = (scalper.get("direction") or "none").lower()
+    index_scalper_streak    = int(num(scalper.get("streak"), 0))
+    vix_below_ema10         = bool(scalper.get("vix_below_ema10", False))
+
+    # Build scalper-sensitive signals (always 9 keys)
+    signals = compute_engine_lights_scalper(
+        summary = ms_od["summary"],
+        metrics = ms_od["metrics"],
+        prev_metrics = prev_metrics,
+        index_scalper_direction = index_scalper_direction,
+        index_scalper_streak    = index_scalper_streak,
+        vix_below_ema10         = vix_below_ema10,
+        ts_local_iso = ts_local,
+        strict = ENGINE_LIGHTS_STRICT
+    )
 
     # Compose output
     out = {
         "schema_version": SCHEMA_VERSION,
-        "updated_at": ts_local,        # AZ display
-        "updated_at_utc": ts_utc,      # UTC machine
-        "ts": ts_utc,                  # legacy UTC key
+        "updated_at": ts_local,
+        "updated_at_utc": ts_utc,
+        "ts": ts_utc,
         "version": VERSION_TAG,
         "pipeline": normalized_mode,
 
-        # New analytics (preferred binding)
         "metrics": ms_od["metrics"],
         "summary": ms_od["summary"],
         "odometers": ms_od["odometers"],
-
-        # Temporary mirror to keep current UI until you rebind to metrics/*
         "gauges": ms_od["gauges"],
 
-        "sectorsUpdatedAt": ts_local,  # use this for the Index Sectors timestamp
+        "sectorsUpdatedAt": ts_local,
         "sectorCards": cards,
         "outlook": {"sectors": sectors, "sectorCards": cards},
 
         "engineLights": {
-            "updatedAt": ts_local, "mode": normalized_mode,
+            "updatedAt": ts_local,
+            "mode": normalized_mode,
             "live": (args.mode=="intraday"),
             "signals": signals
         }
@@ -434,7 +533,6 @@ def main():
     if intraday_block:
         out["intraday"] = intraday_block
 
-    # Daily/EOD: build daily trend using metrics (not gauges)
     if args.mode in ("daily","eod","hourly"):
         td = lux_trend_daily(sectors, ms_od["metrics"], ts_local)
         out["trendDaily"]=td
@@ -445,6 +543,7 @@ def main():
     jwrite(args.out, out)
     print(f"Wrote {args.out} | sectors={len(sectors)} | mode={args.mode}")
     print(f"[summary] breadth={out['summary']['breadth_pct']:.1f} momentum={out['summary']['momentum_pct']:.1f}")
+    print(f"[engine] lights keys={list(out['engineLights']['signals'].keys())}")
 
 if __name__ == "__main__":
     main()
