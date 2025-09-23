@@ -21,6 +21,18 @@ import argparse, json, os, math
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 import urllib.request
+from zoneinfo import ZoneInfo  # stdlib (Python 3.9+)
+# ----- timezone helpers (Arizona) -----
+PHX_TZ = ZoneInfo("America/Phoenix")
+
+def now_utc_iso() -> str:
+    """UTC ISO (machine time)"""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+def now_phx_iso() -> str:
+    """Arizona ISO (display time)"""
+    return datetime.now(PHX_TZ).replace(microsecond=0).isoformat()
+
 
 SCHEMA_VERSION = "r1.2"
 VERSION_TAG    = "1.2-hourly"
