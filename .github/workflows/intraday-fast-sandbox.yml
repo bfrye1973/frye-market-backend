@@ -2,8 +2,9 @@ name: Intraday FAST SANDBOX (5-minute)
 
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "*/5 13-20 * * 1-5"   # optional market hours UTC
+  # Optional schedule (market hours UTC). Uncomment if you want auto-runs.
+  # schedule:
+  #   - cron: "*/5 13-20 * * 1-5"
 
 jobs:
   build-and-publish:
@@ -23,17 +24,21 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Set BUILD_DIR env (portable)
+      - name: Set BUILD_DIR and MIRROR_URL env
         run: |
           echo "BUILD_DIR=${RUNNER_TEMP}/intraday-fast" >> "$GITHUB_ENV"
           mkdir -p "${RUNNER_TEMP}/intraday-fast"
+          # This READS your live intraday JSON (does not write to prod)
+          echo "MIRROR_URL=https://frye-market-backend-1.onrender.com/live/intraday" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Generate intraday payload (SANDBOX → temp)
+      - name: Generate intraday payload (SANDBOX -> temp; mirror if available)
+        env:
+          MIRROR_URL: ${{ env.MIRROR_URL }}
         run: |
           set -e
           python scripts/make_intraday_fast.py \
