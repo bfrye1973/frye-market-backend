@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-make_intraday_fast.py - sandbox-only, sub-second runtime.
+make_intraday_fast.py - sandbox publisher.
 
-- Emits a payload matching the intraday schema your UI expects.
-- Writes to paths provided via --out/--heartbeat (the workflow points to a temp dir).
-- Adds "version" so you can spot 'sandbox-10m' in logs.
+Behavior:
+- If env MIRROR_URL is set and fetch succeeds, mirror that JSON to the sandbox branch
+  and inject "version": "sandbox-10m-mirror".
+- Otherwise, emit a small synthetic payload (safe fallback) with "version" from --version.
+
+This lets you prove the 5-minute cadence *with real data* without touching prod branches.
 """
 
 import argparse
@@ -12,6 +15,8 @@ import json
 import os
 import random
 import sys
+import urllib.request
+from urllib.error import URLError, HTTPError
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -40,13 +45,23 @@ def rnd(base: float, lo: float = -6, hi: float = 6,
     return round(clamp(base + random.uniform(lo, hi), lo_lim, hi_lim), nd)
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--out", required=True)
-    ap.add_argument("--heartbeat", required=True)
-    ap.add_argument("--version", default="sandbox-10m")
-    args = ap.parse_args()
+def try_mirror(url: str):
+    """Fetch JSON from URL, return parsed dict or None on failure."""
+    if not url:
+        return None
+    try:
+        req = urllib.request.Request(url, headers={"Cache-Control": "no-store", "User-Agent": "sandbox-mirror/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.status != 200:
+                return None
+            data = resp.read()
+            obj = json.loads(data.decode("utf-8"))
+            return obj
+    except (URLError, HTTPError, TimeoutError, json.JSONDecodeError):
+        return None
 
+
+def build_synthetic(version: str) -> dict:
     # Deterministic per 5-minute bucket so values wiggle each tick
     seed = int(datetime.now(timezone.utc).timestamp() // 300)
     random.seed(seed)
@@ -58,7 +73,12 @@ def main() -> int:
     volatility_pct = rnd(14, lo=-6, hi=6)       # lower=better (inverted dial)
     liquidity_psi = round(clamp(102 + random.uniform(-15, 12), 0, 120), 1)
 
-    sector_names = ["Information Technology", "Health Care", "Financials"]
+    # Use all 11 GICS sectors so UI cards look full
+    sector_names = [
+        "Information Technology", "Health Care", "Financials", "Consumer Discretionary",
+        "Communication Services", "Industrials", "Consumer Staples", "Energy",
+        "Utilities", "Real Estate", "Materials"
+    ]
     sectorCards = []
     for name in sector_names:
         b = rnd(breadth, lo=-6, hi=6)
@@ -81,12 +101,11 @@ def main() -> int:
         })
 
     updated_az = az_iso()
-    updated_utc = utc_iso()
 
-    payload = {
-        "version": args.version,
+    return {
+        "version": version,
         "updated_at": updated_az,
-        "updated_at_utc": updated_utc,
+        "updated_at_utc": utc_iso(),
         "metrics": {
             "breadth_pct": breadth,
             "momentum_pct": momentum,
@@ -122,15 +141,37 @@ def main() -> int:
         }
     }
 
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--heartbeat", required=True)
+    ap.add_argument("--version", default="sandbox-10m")
+    args = ap.parse_args()
+
+    mirror_url = os.environ.get("MIRROR_URL", "").strip()
+
+    payload = None
+    if mirror_url:
+        mirrored = try_mirror(mirror_url)
+        if mirrored and isinstance(mirrored, dict):
+            # inject a sandbox version tag without mutating required fields
+            mirrored["version"] = "sandbox-10m-mirror"
+            payload = mirrored
+
+    if payload is None:
+        payload = build_synthetic(args.version)
+
+    # Write outputs
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
     os.makedirs(os.path.dirname(args.heartbeat), exist_ok=True)
     with open(args.heartbeat, "w", encoding="utf-8") as f:
-        f.write(updated_az + "\n")
+        f.write(az_iso() + "\n")
 
-    print(f"Wrote {args.out} and {args.heartbeat} ({args.version})")
+    print(f"Wrote {args.out} and {args.heartbeat} ({payload.get('version','n/a')})")
     return 0
 
 
