@@ -3,15 +3,13 @@ name: Intraday FAST SANDBOX (5-minute)
 on:
   workflow_dispatch: {}
   schedule:
-    # Optional: market hours UTC (Mon–Fri 13–20)
-    - cron: "*/5 13-20 * * 1-5"
+    - cron: "*/5 13-20 * * 1-5"   # optional market hours UTC
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
-    # Guardrails
     concurrency:
       group: intraday-fast-sandbox
       cancel-in-progress: false
@@ -19,14 +17,16 @@ jobs:
     permissions:
       contents: write
 
-    env:
-      BUILD_DIR: ${{ runner.temp }}/intraday-fast   # temp dir survives between steps of this job
-
     steps:
       - name: Checkout (shallow, faster)
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Set BUILD_DIR env (portable)
+        run: |
+          echo "BUILD_DIR=${RUNNER_TEMP}/intraday-fast" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/intraday-fast"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -36,12 +36,10 @@ jobs:
       - name: Generate intraday payload (SANDBOX → temp)
         run: |
           set -e
-          mkdir -p "$BUILD_DIR"
           python scripts/make_intraday_fast.py \
             --out "$BUILD_DIR/outlook_intraday.json" \
             --heartbeat "$BUILD_DIR/heartbeat_10min.txt" \
             --version sandbox-10m
-          echo "Generated files in $BUILD_DIR:"
           ls -l "$BUILD_DIR"
 
       - name: Sanity check outputs exist
@@ -56,7 +54,6 @@ jobs:
           if git ls-remote --exit-code --heads origin data-live-10min-sandbox >/dev/null 2>&1; then
             git fetch origin data-live-10min-sandbox:data-live-10min-sandbox
             git checkout data-live-10min-sandbox
-            # keep branch tiny
             find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
           else
             git checkout --orphan data-live-10min-sandbox
@@ -69,7 +66,6 @@ jobs:
           set -e
           cp -f "$BUILD_DIR/outlook_intraday.json" ./data/outlook_intraday.json
           cp -f "$BUILD_DIR/heartbeat_10min.txt"   ./data/heartbeat_10min.txt
-          echo "Branch contents:"
           ls -l ./data
 
       - name: Commit & push (force-update branch)
