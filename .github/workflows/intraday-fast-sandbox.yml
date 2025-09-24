@@ -1,0 +1,74 @@
+name: Intraday FAST SANDBOX (5-minute)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Optional: restrict to market hours UTC (Mon–Fri 13–20)
+    - cron: "*/5 13-20 * * 1-5"
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # Guardrails
+    concurrency:
+      group: intraday-fast-sandbox
+      cancel-in-progress: false
+
+    permissions:
+      contents: write  # only need to push files
+
+    steps:
+      - name: Checkout (shallow, faster)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Generate intraday payload (SANDBOX)
+        env:
+          # Optional; script fails soft if missing
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          python scripts/make_intraday_fast.py \
+            --out data/outlook_intraday.json \
+            --heartbeat data/heartbeat_10min.txt \
+            --version sandbox-10m
+
+      - name: Prepare data-live-10min-sandbox branch
+        run: |
+          set -e
+          if git ls-remote --exit-code --heads origin data-live-10min-sandbox >/dev/null 2>&1; then
+            git fetch origin data-live-10min-sandbox:data-live-10min-sandbox
+            git checkout data-live-10min-sandbox
+            # keep branch small & fast
+            git rm -r --quiet . || true
+            mkdir -p data
+          else
+            git checkout --orphan data-live-10min-sandbox
+            rm -rf *
+            mkdir -p data
+          fi
+          cp -f data/outlook_intraday.json data/heartbeat_10min.txt ./data/
+
+      - name: Commit & push (force-update branch)
+        env:
+          GIT_AUTHOR_NAME: "frye-bot"
+          GIT_AUTHOR_EMAIL: "bot@users.noreply.github.com"
+          GIT_COMMITTER_NAME: "frye-bot"
+          GIT_COMMITTER_EMAIL: "bot@users.noreply.github.com"
+        run: |
+          set -e
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            git commit -m "SANDBOX intraday payload @ ${NOW}"
+          fi
+          git push -f origin data-live-10min-sandbox
