@@ -491,19 +491,54 @@ def main():
     ts_local = now_phx_iso()
 
     # Intraday-only extras
-    intraday_block=None
+    intraday_block = None
     if args.mode == "intraday":
-        rising = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k,{}).get("netNH",0)))>0)
-        rising_pct = (rising/float(len(PREFERRED_ORDER)))*100.0
-        off_pos = sum(1 for s in OFFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
-        def_pos = sum(1 for s in DEFENSIVE if int(num(sectors.get(s, {}).get("netNH", 0))) > 0)
-        denom = off_pos + def_pos
-        risk_on_10m = (off_pos/denom)*100.0 if denom>0 else 50.0
-        intraday_block = {
-            "sectorDirection10m": {"risingCount": int(rising), "risingPct": round(rising_pct,1), "updatedAt": ts_local},
-            "riskOn10m":          {"riskOnPct": round(risk_on_10m,1), "updatedAt": ts_local}
-        }
+        # Current snapshot (already computed above)
+        cur_sectors = sectors  # dict of canonical sector -> {..., netNH, ...}
 
+        # Previous snapshot from last payload (to compute deltas)
+        prev_out = jread(args.out)
+        prev_sectors = {}
+        if isinstance(prev_out, dict):
+            # prefer the canonical map inside outlook.sectors (matches "sectors" keys we build)
+            prev_sectors = (((prev_out.get("outlook") or {}).get("sectors")) or {})
+
+        # ΔnetNH per sector (current minus previous run)
+        deltas = {}
+        rising_count = 0
+        for key in PREFERRED_ORDER:
+            cur_net = int(num(cur_sectors.get(key, {}).get("netNH", 0)))
+            prv_net = int(num((prev_sectors.get(key, {}) or {}).get("netNH", 0)))
+            d = cur_net - prv_net
+            deltas[key] = d
+            if d > 0:
+                rising_count += 1
+
+        rising_pct = (rising_count / float(len(PREFERRED_ORDER))) * 100.0
+
+        # Risk-on from deltas: offensive sectors improving vs defensive
+        off_delta = sum(int(deltas.get(s, 0)) for s in OFFENSIVE)
+        def_delta = sum(int(deltas.get(s, 0)) for s in DEFENSIVE)
+        denom = abs(off_delta) + abs(def_delta)
+        if denom > 0:
+            # map [-1..+1] to [0..100]
+            ro = 50.0 + 50.0 * ((off_delta - def_delta) / float(denom))
+        else:
+            ro = 50.0
+
+        intraday_block = {
+            "sectorDirection10m": {
+                "risingCount": int(rising_count),
+                "risingPct": round(rising_pct, 1),
+                "updatedAt": ts_local,
+                # add the per-sector deltas for QA (frontend can ignore)
+                "deltas": { title_case(k): int(v) for k, v in deltas.items() }
+            },
+            "riskOn10m": {
+                "riskOnPct": round(ro, 1),
+                "updatedAt": ts_local
+            }
+        }
     # ---------- SCALPER ENGINE LIGHTS ----------
     # Read previous OUT to get slope inputs (momentum/squeeze deltas)
     prev_out = jread(args.out)
