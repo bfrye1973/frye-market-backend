@@ -3,7 +3,7 @@ name: Intraday FAST SANDBOX (5-minute)
 on:
   workflow_dispatch: {}
   schedule:
-    # Optional: restrict to market hours UTC (Mon–Fri 13–20)
+    # Optional: market hours UTC (Mon–Fri 13–20)
     - cron: "*/5 13-20 * * 1-5"
 
 jobs:
@@ -17,7 +17,10 @@ jobs:
       cancel-in-progress: false
 
     permissions:
-      contents: write  # only need to push files
+      contents: write
+
+    env:
+      BUILD_DIR: ${{ runner.temp }}/intraday-fast   # temp dir survives between steps of this job
 
     steps:
       - name: Checkout (shallow, faster)
@@ -30,31 +33,44 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Generate intraday payload (SANDBOX)
-        env:
-          # Optional; script fails soft if missing
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      - name: Generate intraday payload (SANDBOX → temp)
         run: |
+          set -e
+          mkdir -p "$BUILD_DIR"
           python scripts/make_intraday_fast.py \
-            --out data/outlook_intraday.json \
-            --heartbeat data/heartbeat_10min.txt \
+            --out "$BUILD_DIR/outlook_intraday.json" \
+            --heartbeat "$BUILD_DIR/heartbeat_10min.txt" \
             --version sandbox-10m
+          echo "Generated files in $BUILD_DIR:"
+          ls -l "$BUILD_DIR"
 
-      - name: Prepare data-live-10min-sandbox branch
+      - name: Sanity check outputs exist
+        run: |
+          set -e
+          test -f "$BUILD_DIR/outlook_intraday.json"
+          test -f "$BUILD_DIR/heartbeat_10min.txt"
+
+      - name: Prepare data-live-10min-sandbox branch (clean working tree)
         run: |
           set -e
           if git ls-remote --exit-code --heads origin data-live-10min-sandbox >/dev/null 2>&1; then
             git fetch origin data-live-10min-sandbox:data-live-10min-sandbox
             git checkout data-live-10min-sandbox
-            # keep branch small & fast
-            git rm -r --quiet . || true
-            mkdir -p data
+            # keep branch tiny
+            find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
           else
             git checkout --orphan data-live-10min-sandbox
-            rm -rf *
-            mkdir -p data
+            find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
           fi
-          cp -f data/outlook_intraday.json data/heartbeat_10min.txt ./data/
+          mkdir -p data
+
+      - name: Copy from temp into branch
+        run: |
+          set -e
+          cp -f "$BUILD_DIR/outlook_intraday.json" ./data/outlook_intraday.json
+          cp -f "$BUILD_DIR/heartbeat_10min.txt"   ./data/heartbeat_10min.txt
+          echo "Branch contents:"
+          ls -l ./data
 
       - name: Commit & push (force-update branch)
         env:
