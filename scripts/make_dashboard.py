@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-make_dashboard.py (R3 — Scalper-Sensitive Engine Lights)
+make_dashboard.py (R3.1 — Scalper-Sensitive Engine Lights, micro-tweaks)
 
 - Reads:  data/outlook_source.json (from R8 builder)
 - Writes: data/outlook_intraday.json (intraday),
@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfo  # stdlib (Python 3.9+)
 
 # ====== CONFIG ======
 SCHEMA_VERSION = "r1.3"
-VERSION_TAG    = "1.3-intraday-scalper"
+VERSION_TAG    = "1.3.1-intraday-scalper"  # bumped so you can verify deployment
 
 PHX_TZ = ZoneInfo("America/Phoenix")
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
@@ -300,20 +300,30 @@ def compute_engine_lights_scalper(
         sig["sigCompression"] = _mk_sig(False, "info", "", None)
 
     # ---- Expansion (needs squeeze relief) ----
-    if q < 55 and q_fall:
+    # NEW: treat super-low squeeze as early expansion even without slope
+    super_low_q = (q <= 20)
+    q_fall_or_super_low = (q_fall or super_low_q)
+
+    if q < 58 and q_fall_or_super_low:   # was: q < 55 and q_fall
         early = True
         confirmed = (q < 45) and (align in ("long","short")) and vixOK
         sev = "info" if confirmed else "warn"
-        sig["sigExpansion"] = _mk_sig(early, sev, f"q={q:.1f} falling={q_fall} align={align} vix={vixOK}", None)
+        sig["sigExpansion"] = _mk_sig(
+            early, sev,
+            f"q={q:.1f} falling={q_fall} superLow={super_low_q} align={align} vix={vixOK}", None
+        )
     else:
         sig["sigExpansion"] = _mk_sig(False, "info", "", None)
 
     # ---- Breakout / Distribution ----
-    breakout_early = (b > 55) and (q < 75) and (align == "long") and (streak >= 1)
+    # NEW: loosen early gate slightly; confirm still strict
+    breakout_early = (b > 53) and (q < 78) and (align == "long") and (streak >= 1)   # was b>55, q<75
     breakout_conf  = breakout_early and (vixOK or m >= 58) and (streak >= 2)
     if breakout_early:
-        sig["sigBreakout"] = _mk_sig(True, "info" if breakout_conf else "warn",
-                                     f"b={b:.1f} q={q:.1f} align={align} vix={vixOK} m={m:.1f}", None)
+        sig["sigBreakout"] = _mk_sig(
+            True, "info" if breakout_conf else "warn",
+            f"b={b:.1f} q={q:.1f} align={align} vix={vixOK} m={m:.1f}", None
+        )
     else:
         sig["sigBreakout"] = _mk_sig(False, "info", "", None)
 
@@ -332,7 +342,8 @@ def compute_engine_lights_scalper(
         sig["sigTurbo"]    = _mk_sig(False, "info", "", None)
 
     # ---- Divergence ----
-    if (m > 68) and (b < 52):
+    # NEW: pop earlier for scalping
+    if (m > 66) and (b < 50):  # was: m > 68 and b < 52
         sig["sigDivergence"] = _mk_sig(True, "warn", f"m={m:.1f} b={b:.1f}", None)
     else:
         sig["sigDivergence"] = _mk_sig(False, "info", "", None)
