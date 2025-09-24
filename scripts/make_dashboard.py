@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-make_dashboard.py (R3.1 — Scalper-Sensitive Engine Lights, micro-tweaks)
+make_dashboard.py (R3.2 — Scalper-Sensitive Engine Lights, short-side upgrades)
 
 - Reads:  data/outlook_source.json (from R8 builder)
 - Writes: data/outlook_intraday.json (intraday),
@@ -25,7 +25,7 @@ Confirmed rules / design:
 """
 
 from __future__ import annotations
-import argparse, json, os, math
+import argparse, json, os
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 import urllib.request
@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfo  # stdlib (Python 3.9+)
 
 # ====== CONFIG ======
 SCHEMA_VERSION = "r1.3"
-VERSION_TAG    = "1.3.1-intraday-scalper"  # bumped so you can verify deployment
+VERSION_TAG    = "1.3.2-intraday-scalper"  # bump to confirm deployment
 
 PHX_TZ = ZoneInfo("America/Phoenix")
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
@@ -300,11 +300,11 @@ def compute_engine_lights_scalper(
         sig["sigCompression"] = _mk_sig(False, "info", "", None)
 
     # ---- Expansion (needs squeeze relief) ----
-    # NEW: treat super-low squeeze as early expansion even without slope
+    # treat super-low squeeze as early expansion even without slope
     super_low_q = (q <= 20)
     q_fall_or_super_low = (q_fall or super_low_q)
 
-    if q < 58 and q_fall_or_super_low:   # was: q < 55 and q_fall
+    if q < 58 and q_fall_or_super_low:   # early
         early = True
         confirmed = (q < 45) and (align in ("long","short")) and vixOK
         sev = "info" if confirmed else "warn"
@@ -316,19 +316,28 @@ def compute_engine_lights_scalper(
         sig["sigExpansion"] = _mk_sig(False, "info", "", None)
 
     # ---- Breakout / Distribution ----
-    # NEW: loosen early gate slightly; confirm still strict
-    breakout_early = (b > 53) and (q < 78) and (align == "long") and (streak >= 1)   # was b>55, q<75
-    breakout_conf  = breakout_early and (vixOK or m >= 58) and (streak >= 2)
-    if breakout_early:
-        sig["sigBreakout"] = _mk_sig(
-            True, "info" if breakout_conf else "warn",
-            f"b={b:.1f} q={q:.1f} align={align} vix={vixOK} m={m:.1f}", None
-        )
+    # Long-side early breakout a bit looser; short-side supported (red on confirm)
+    breakout_long_early = (b > 53) and (q < 78) and (align == "long")  and (streak >= 1)
+    breakout_long_conf  = breakout_long_early and (vixOK or m >= 58) and (streak >= 2)
+
+    breakout_short_early = (b < 47) and (q < 78) and (align == "short") and (streak >= 1)
+    breakout_short_conf  = breakout_short_early and ((not vixOK) or m <= 55) and (streak >= 2)
+
+    if breakout_long_early:
+        sig["sigBreakout"] = _mk_sig(True, "info" if breakout_long_conf else "warn",
+                                     f"LONG b={b:.1f} q={q:.1f} streak={streak} vixOK={vixOK} m={m:.1f}", None)
+    elif breakout_short_early:
+        # use 'danger' on confirm so pill shows red for short breakout
+        sev = "danger" if breakout_short_conf else "warn"
+        sig["sigBreakout"] = _mk_sig(True, sev,
+                                     f"SHORT b={b:.1f} q={q:.1f} streak={streak} vixOK={vixOK} m={m:.1f}", None)
     else:
         sig["sigBreakout"] = _mk_sig(False, "info", "", None)
 
-    if b < 45:
-        sig["sigDistribution"] = _mk_sig(True, "danger" if b < 30 else "info", f"b={b:.1f}", None)
+    # Distribution more sensitive
+    if b < 50:
+        sev = "danger" if b < 40 else "warn"
+        sig["sigDistribution"] = _mk_sig(True, sev, f"b={b:.1f}", None)
     else:
         sig["sigDistribution"] = _mk_sig(False, "info", "", None)
 
@@ -341,10 +350,11 @@ def compute_engine_lights_scalper(
         sig["sigOverheat"] = _mk_sig(False, "info", "", None)
         sig["sigTurbo"]    = _mk_sig(False, "info", "", None)
 
-    # ---- Divergence ----
-    # NEW: pop earlier for scalping
-    if (m > 66) and (b < 50):  # was: m > 68 and b < 52
-        sig["sigDivergence"] = _mk_sig(True, "warn", f"m={m:.1f} b={b:.1f}", None)
+    # ---- Divergence (long + short flavors) ----
+    if (m > 66 and b < 50):
+        sig["sigDivergence"] = _mk_sig(True, "warn", f"UP m={m:.1f} b={b:.1f}", None)
+    elif (m_prev is not None and m < m_prev and b < 50):
+        sig["sigDivergence"] = _mk_sig(True, "warn", f"DOWN m={m_prev:.1f}->{m:.1f} b={b:.1f}", None)
     else:
         sig["sigDivergence"] = _mk_sig(False, "info", "", None)
 
@@ -354,8 +364,10 @@ def compute_engine_lights_scalper(
     else:
         sig["sigLowLiquidity"] = _mk_sig(False, "info", "", None)
 
-    if vol > 65:
-        sig["sigVolatilityHigh"] = _mk_sig(True, "danger" if vol >= 85 else "warn", f"vol={vol:.1f}", None)
+    # Vol ladder for earlier heads-up
+    if vol > 50:
+        sev = "danger" if vol >= 85 else ("info" if vol >= 65 else "warn")
+        sig["sigVolatilityHigh"] = _mk_sig(True, sev, f"vol={vol:.1f}", None)
     else:
         sig["sigVolatilityHigh"] = _mk_sig(False, "info", "", None)
 
@@ -497,7 +509,7 @@ def main():
     prev_out = jread(args.out)
     prev_metrics = prev_out.get("metrics") if isinstance(prev_out, dict) else None
 
-    # Optional Index Scalper meta if builder placed it in the source (use your real keys if present)
+    # Optional Index Scalper meta if builder placed it in the source
     scalper = src.get("index_scalper") or src.get("scalper") or {}
     index_scalper_direction = (scalper.get("direction") or "none").lower()
     index_scalper_streak    = int(num(scalper.get("streak"), 0))
