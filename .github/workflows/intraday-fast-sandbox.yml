@@ -1,8 +1,8 @@
-name: Intraday FAST SANDBOX (5-minute)
+name: Intraday DELTAS SANDBOX (5-minute)
 
 on:
   workflow_dispatch: {}
-  # Optional schedule (market hours UTC). Uncomment if you want auto-runs.
+  # Optional auto cadence (market hours UTC). Uncomment if desired.
   # schedule:
   #   - cron: "*/5 13-20 * * 1-5"
 
@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 5
 
     concurrency:
-      group: intraday-fast-sandbox
+      group: intraday-deltas-sandbox
       cancel-in-progress: false
 
     permissions:
@@ -24,11 +24,11 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Set BUILD_DIR and MIRROR_URL env
+      - name: Set env (temp dirs and mirror url)
         run: |
-          echo "BUILD_DIR=${RUNNER_TEMP}/intraday-fast" >> "$GITHUB_ENV"
-          mkdir -p "${RUNNER_TEMP}/intraday-fast"
-          # This READS your live intraday JSON (does not write to prod)
+          echo "BUILD_DIR=${RUNNER_TEMP}/intraday-deltas" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/intraday-deltas"
+          # READS your live intraday JSON (already built from full 5700 universe)
           echo "MIRROR_URL=https://frye-market-backend-1.onrender.com/live/intraday" >> "$GITHUB_ENV"
 
       - name: Set up Python
@@ -36,15 +36,26 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Generate intraday payload (SANDBOX -> temp; mirror if available)
+      - name: Fetch previous sandbox payload if exists
+        run: |
+          set -e
+          # Try to fetch the previous JSON from the sandbox branch
+          if git ls-remote --exit-code --heads origin data-live-10min-sandbox >/dev/null 2>&1; then
+            git fetch origin data-live-10min-sandbox:data-live-10min-sandbox
+            # Dump previous JSON to temp, ignore if file missing
+            git show origin/data-live-10min-sandbox:data/outlook_intraday.json > "$BUILD_DIR/prev.json" || true
+          fi
+
+      - name: Generate NEW sandbox payload with DELTAS (mirror + diff)
         env:
           MIRROR_URL: ${{ env.MIRROR_URL }}
         run: |
           set -e
-          python scripts/make_intraday_fast.py \
+          python scripts/make_intraday_deltas.py \
+            --mirror-url "$MIRROR_URL" \
+            --prev "$BUILD_DIR/prev.json" \
             --out "$BUILD_DIR/outlook_intraday.json" \
-            --heartbeat "$BUILD_DIR/heartbeat_10min.txt" \
-            --version sandbox-10m
+            --heartbeat "$BUILD_DIR/heartbeat_10min.txt"
           ls -l "$BUILD_DIR"
 
       - name: Sanity check outputs exist
@@ -53,7 +64,7 @@ jobs:
           test -f "$BUILD_DIR/outlook_intraday.json"
           test -f "$BUILD_DIR/heartbeat_10min.txt"
 
-      - name: Prepare data-live-10min-sandbox branch (clean working tree)
+      - name: Prepare data-live-10min-sandbox branch (clean)
         run: |
           set -e
           if git ls-remote --exit-code --heads origin data-live-10min-sandbox >/dev/null 2>&1; then
@@ -66,14 +77,14 @@ jobs:
           fi
           mkdir -p data
 
-      - name: Copy from temp into branch
+      - name: Copy into branch
         run: |
           set -e
           cp -f "$BUILD_DIR/outlook_intraday.json" ./data/outlook_intraday.json
           cp -f "$BUILD_DIR/heartbeat_10min.txt"   ./data/heartbeat_10min.txt
           ls -l ./data
 
-      - name: Commit & push (force-update branch)
+      - name: Commit & push (force-update)
         env:
           GIT_AUTHOR_NAME: "frye-bot"
           GIT_AUTHOR_EMAIL: "bot@users.noreply.github.com"
@@ -86,6 +97,6 @@ jobs:
             echo "No changes to commit."
           else
             NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-            git commit -m "SANDBOX intraday payload @ ${NOW}"
+            git commit -m "SANDBOX intraday DELTAS payload @ ${NOW}"
           fi
           git push -f origin data-live-10min-sandbox
