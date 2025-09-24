@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-make_intraday_fast.py — sandbox-only, <1s runtime.
+make_intraday_fast.py — sandbox-only, sub-second runtime.
 - Emits a payload matching the intraday schema your UI expects.
-- Adds "version" so you can spot sandbox in logs.
-- Optional POLYGON_API_KEY env: if present, you can later add light fetches;
-  for now it runs fully synthetic (fastest, safest).
+- Writes to paths provided via --out/--heartbeat (we'll point to a temp dir).
+- Adds "version" so you can spot 'sandbox-10m' in logs.
 """
 
 import argparse, json, os, random, sys
@@ -31,18 +30,17 @@ def main():
     ap.add_argument("--version", default="sandbox-10m")
     args = ap.parse_args()
 
-    # 5-min deterministic wiggle (so values change per tick, not per rerun)
+    # Deterministic per 5-minute bucket so values wiggle each tick
     seed = int(datetime.now(timezone.utc).timestamp() // 300)
     random.seed(seed)
 
-    # Baseline levels; quick, plausible ranges
+    # Lightweight plausible ranges
     breadth = rnd(58, lo=-10, hi=10)
     momentum = rnd(60, lo=-12, hi=12)
-    squeeze_intraday = rnd(22, lo=-8, hi=8)     # lower=better
-    volatility_pct = rnd(14, lo=-6, hi=6)       # lower=better
+    squeeze_intraday = rnd(22, lo=-8, hi=8)     # lower=better (inverted dial)
+    volatility_pct = rnd(14, lo=-6, hi=6)       # lower=better (inverted dial)
     liquidity_psi = round(clamp(102 + random.uniform(-15, 12), 0, 120), 1)
 
-    # Example sectors (3 for speed; schema proven). Add the rest later if desired.
     sector_names = ["Information Technology", "Health Care", "Financials"]
     sectorCards = []
     for name in sector_names:
@@ -76,7 +74,6 @@ def main():
             "volatility_pct": volatility_pct,
             "liquidity_psi": liquidity_psi
         },
-        # Keep summary for spreadsheet compare (non-blocking)
         "summary": {
             "breadth_pct": breadth,
             "momentum_pct": momentum
