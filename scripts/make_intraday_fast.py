@@ -93,7 +93,9 @@ def sector_map(cards):
 def compute_deltas(curr_json, prev_json):
     # Market totals
     curr_tot, curr_b, curr_m = summarize(curr_json.get("sectorCards"))
-    prev_tot, prev_b, prev_m = summarize(prev_json.get("sectorCards")) if prev_json else ({"nh":0,"nl":0,"up":0,"down":0}, 0.0, 0.0)
+    prev_tot, prev_b, prev_m = (
+        summarize(prev_json.get("sectorCards")) if prev_json else ({"nh": 0, "nl": 0, "up": 0, "down": 0}, 0.0, 0.0)
+    )
 
     d_market = {
         "dBreadthPct": round(curr_b - prev_b, 2),
@@ -115,13 +117,10 @@ def compute_deltas(curr_json, prev_json):
         d_sectors[name] = {
             "dBreadthPct": dB,
             "dMomentumPct": dM,
-            "netTilt": round((dB + dM) / 2.0, 2)
+            "netTilt": round((dB + dM) / 2.0, 2),
         }
 
-    return {
-        "market": d_market,
-        "sectors": d_sectors
-    }
+    return {"market": d_market, "sectors": d_sectors}
 
 
 def main() -> int:
