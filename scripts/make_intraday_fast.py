@@ -7,7 +7,7 @@ Behavior:
   and inject "version": "sandbox-10m-mirror".
 - Otherwise, emit a small synthetic payload (safe fallback) with "version" from --version.
 
-This lets you prove the 5-minute cadence *with real data* without touching prod branches.
+This lets you prove the 5-minute cadence with real data without touching prod branches.
 """
 
 import argparse
@@ -50,7 +50,10 @@ def try_mirror(url: str):
     if not url:
         return None
     try:
-        req = urllib.request.Request(url, headers={"Cache-Control": "no-store", "User-Agent": "sandbox-mirror/1.0"})
+        req = urllib.request.Request(
+            url,
+            headers={"Cache-Control": "no-store", "User-Agent": "sandbox-mirror/1.0"},
+        )
         with urllib.request.urlopen(req, timeout=15) as resp:
             if resp.status != 200:
                 return None
@@ -73,7 +76,7 @@ def build_synthetic(version: str) -> dict:
     volatility_pct = rnd(14, lo=-6, hi=6)       # lower=better (inverted dial)
     liquidity_psi = round(clamp(102 + random.uniform(-15, 12), 0, 120), 1)
 
-    # Use all 11 GICS sectors so UI cards look full
+    # Full 11 sectors so UI looks complete
     sector_names = [
         "Information Technology", "Health Care", "Financials", "Consumer Discretionary",
         "Communication Services", "Industrials", "Consumer Staples", "Energy",
@@ -155,7 +158,6 @@ def main() -> int:
     if mirror_url:
         mirrored = try_mirror(mirror_url)
         if mirrored and isinstance(mirrored, dict):
-            # inject a sandbox version tag without mutating required fields
             mirrored["version"] = "sandbox-10m-mirror"
             payload = mirrored
 
