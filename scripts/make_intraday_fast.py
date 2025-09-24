@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """
-make_intraday_fast.py - sandbox publisher.
+make_intraday_deltas.py
 
-Behavior:
-- If env MIRROR_URL is set and fetch succeeds, mirror that JSON to the sandbox branch
-  and inject "version": "sandbox-10m-mirror".
-- Otherwise, emit a small synthetic payload (safe fallback) with "version" from --version.
+Reads the current live intraday JSON (built from full universe) from MIRROR_URL,
+compares it to the previous sandbox JSON (if available), and writes a new payload
+to the sandbox branch with a 'deltas' block:
 
-This lets you prove the 5-minute cadence with real data without touching prod branches.
+- deltas.market: dBreadthPct, dMomentumPct, netTilt, riskOnPct
+- deltas.sectors[<sector>]: dBreadthPct, dMomentumPct, netTilt
+
+Notes:
+- We compute market totals by summing NH/NL/UP/DOWN across sectorCards.
+- If previous is missing, deltas are 0.0.
+- We leave index-level deltas for a later step unless your source JSON contains
+  explicit index breakdowns; this version focuses on market + sector deltas.
 """
 
 import argparse
 import json
+import math
 import os
-import random
 import sys
 import urllib.request
 from urllib.error import URLError, HTTPError
@@ -27,153 +33,133 @@ def az_iso() -> str:
     return datetime.now(AZ).replace(microsecond=0).isoformat()
 
 
-def utc_iso() -> str:
-    return (
-        datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
-
-
-def clamp(v: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, v))
-
-
-def rnd(base: float, lo: float = -6, hi: float = 6,
-        lo_lim: float = 0, hi_lim: float = 100, nd: int = 2) -> float:
-    return round(clamp(base + random.uniform(lo, hi), lo_lim, hi_lim), nd)
-
-
-def try_mirror(url: str):
-    """Fetch JSON from URL, return parsed dict or None on failure."""
+def fetch_json(url: str):
     if not url:
         return None
     try:
         req = urllib.request.Request(
             url,
-            headers={"Cache-Control": "no-store", "User-Agent": "sandbox-mirror/1.0"},
+            headers={"Cache-Control": "no-store", "User-Agent": "sandbox-deltas/1.0"},
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=20) as resp:
             if resp.status != 200:
                 return None
-            data = resp.read()
-            obj = json.loads(data.decode("utf-8"))
-            return obj
+            return json.loads(resp.read().decode("utf-8"))
     except (URLError, HTTPError, TimeoutError, json.JSONDecodeError):
         return None
 
 
-def build_synthetic(version: str) -> dict:
-    # Deterministic per 5-minute bucket so values wiggle each tick
-    seed = int(datetime.now(timezone.utc).timestamp() // 300)
-    random.seed(seed)
+def load_json_file(path: str):
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
-    # Lightweight plausible ranges
-    breadth = rnd(58, lo=-10, hi=10)
-    momentum = rnd(60, lo=-12, hi=12)
-    squeeze_intraday = rnd(22, lo=-8, hi=8)     # lower=better (inverted dial)
-    volatility_pct = rnd(14, lo=-6, hi=6)       # lower=better (inverted dial)
-    liquidity_psi = round(clamp(102 + random.uniform(-15, 12), 0, 120), 1)
 
-    # Full 11 sectors so UI looks complete
-    sector_names = [
-        "Information Technology", "Health Care", "Financials", "Consumer Discretionary",
-        "Communication Services", "Industrials", "Consumer Staples", "Energy",
-        "Utilities", "Real Estate", "Materials"
-    ]
-    sectorCards = []
-    for name in sector_names:
-        b = rnd(breadth, lo=-6, hi=6)
-        m = rnd(momentum, lo=-6, hi=6)
-        nh = int(210 + random.uniform(-70, 70))
-        nl = int(90 + random.uniform(-45, 45))
-        up = int(270 + random.uniform(-90, 90))
-        down = int(230 + random.uniform(-90, 90))
-        outlook = "Bullish" if (b + m) / 2 >= 50 else "Neutral"
-        sectorCards.append({
-            "sector": name,
-            "outlook": outlook,
-            "breadth_pct": b,
-            "momentum_pct": m,
-            "nh": nh,
-            "nl": nl,
-            "up": up,
-            "down": down,
-            "spark": []
-        })
+def safe_pct(num: float, den: float) -> float:
+    return 0.0 if den == 0 else 100.0 * num / den
 
-    updated_az = az_iso()
+
+def summarize(cards):
+    """Sum NH, NL, UP, DOWN over sectorCards."""
+    totals = {"nh": 0, "nl": 0, "up": 0, "down": 0}
+    for c in cards or []:
+        totals["nh"] += int(c.get("nh", 0))
+        totals["nl"] += int(c.get("nl", 0))
+        totals["up"] += int(c.get("up", 0))
+        totals["down"] += int(c.get("down", 0))
+    breadth = safe_pct(totals["nh"], totals["nh"] + totals["nl"])
+    momentum = safe_pct(totals["up"], totals["up"] + totals["down"])
+    return totals, breadth, momentum
+
+
+def sector_map(cards):
+    """Map sector -> (nh,nl,up,down,breadthPct,momentumPct) from cards."""
+    m = {}
+    for c in cards or []:
+        nh = int(c.get("nh", 0))
+        nl = int(c.get("nl", 0))
+        up = int(c.get("up", 0))
+        down = int(c.get("down", 0))
+        b = safe_pct(nh, nh + nl)
+        mo = safe_pct(up, up + down)
+        m[str(c.get("sector", "Unknown"))] = (nh, nl, up, down, b, mo)
+    return m
+
+
+def compute_deltas(curr_json, prev_json):
+    # Market totals
+    curr_tot, curr_b, curr_m = summarize(curr_json.get("sectorCards"))
+    prev_tot, prev_b, prev_m = summarize(prev_json.get("sectorCards")) if prev_json else ({"nh":0,"nl":0,"up":0,"down":0}, 0.0, 0.0)
+
+    d_market = {
+        "dBreadthPct": round(curr_b - prev_b, 2),
+        "dMomentumPct": round(curr_m - prev_m, 2),
+        "netTilt": round(((curr_b - prev_b) + (curr_m - prev_m)) / 2.0, 2),
+        # simple risk-on proxy from current (not delta): blend breadth & momentum
+        "riskOnPct": round((curr_b + curr_m) / 2.0, 2),
+    }
+
+    # Sector deltas
+    curr_map = sector_map(curr_json.get("sectorCards"))
+    prev_map = sector_map(prev_json.get("sectorCards")) if prev_json else {}
+    d_sectors = {}
+    for name, (_, _, _, _, b_now, m_now) in curr_map.items():
+        b_prev = prev_map.get(name, (0, 0, 0, 0, 0.0, 0.0))[4]
+        m_prev = prev_map.get(name, (0, 0, 0, 0, 0.0, 0.0))[5]
+        dB = round(b_now - b_prev, 2)
+        dM = round(m_now - m_prev, 2)
+        d_sectors[name] = {
+            "dBreadthPct": dB,
+            "dMomentumPct": dM,
+            "netTilt": round((dB + dM) / 2.0, 2)
+        }
 
     return {
-        "version": version,
-        "updated_at": updated_az,
-        "updated_at_utc": utc_iso(),
-        "metrics": {
-            "breadth_pct": breadth,
-            "momentum_pct": momentum,
-            "squeeze_intraday_pct": squeeze_intraday,
-            "volatility_pct": volatility_pct,
-            "liquidity_psi": liquidity_psi
-        },
-        "summary": {
-            "breadth_pct": breadth,
-            "momentum_pct": momentum
-        },
-        "sectorCards": sectorCards,
-        "sectorsUpdatedAt": updated_az,
-        "engineLights": {
-            "updatedAt": updated_az,
-            "mode": "intraday",
-            "live": True,
-            "signals": {
-                "sigBreakout": {"active": momentum > 55, "severity": "info"},
-                "sigCompression": {"active": squeeze_intraday > 70, "severity": "warn"}
-            }
-        },
-        "intraday": {
-            "sectorDirection10m": {
-                "risingCount": 7,
-                "risingPct": round(clamp(48 + random.uniform(-18, 25), 0, 100), 1),
-                "updatedAt": updated_az
-            },
-            "riskOn10m": {
-                "riskOnPct": round(clamp((breadth + momentum) / 2, 0, 100), 1),
-                "updatedAt": updated_az
-            }
-        }
+        "market": d_market,
+        "sectors": d_sectors
     }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--mirror-url", required=True, help="Live intraday JSON (read-only)")
+    ap.add_argument("--prev", default="", help="Path to previous sandbox JSON (optional)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--heartbeat", required=True)
-    ap.add_argument("--version", default="sandbox-10m")
     args = ap.parse_args()
 
-    mirror_url = os.environ.get("MIRROR_URL", "").strip()
+    current = fetch_json(args.mirror_url)
+    if not current or not isinstance(current, dict):
+        print("ERROR: could not fetch current live intraday JSON", file=sys.stderr)
+        return 2
 
-    payload = None
-    if mirror_url:
-        mirrored = try_mirror(mirror_url)
-        if mirrored and isinstance(mirrored, dict):
-            mirrored["version"] = "sandbox-10m-mirror"
-            payload = mirrored
+    previous = load_json_file(args.prev)
 
-    if payload is None:
-        payload = build_synthetic(args.version)
+    # Compute deltas and inject
+    current = dict(current)  # shallow copy to avoid mutating original structure
+    current["version"] = "sandbox-10m-deltas"
+    current.setdefault("meta", {})
+    current["meta"]["source"] = "mirror"
+    current["meta"]["sandbox"] = True
+
+    deltas = compute_deltas(current, previous)
+    current["deltas"] = deltas
+    current["deltasUpdatedAt"] = az_iso()
 
     # Write outputs
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+        json.dump(current, f, ensure_ascii=False, indent=2)
 
     os.makedirs(os.path.dirname(args.heartbeat), exist_ok=True)
     with open(args.heartbeat, "w", encoding="utf-8") as f:
         f.write(az_iso() + "\n")
 
-    print(f"Wrote {args.out} and {args.heartbeat} ({payload.get('version','n/a')})")
+    print(f"Wrote {args.out} and {args.heartbeat} (version={current['version']})")
     return 0
 
 
