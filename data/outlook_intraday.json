@@ -1,0 +1,78 @@
+{
+  "version": "sandbox-10m",
+  "updated_at": "2025-09-23T20:25:18-07:00",
+  "updated_at_utc": "2025-09-24T03:25:18Z",
+  "metrics": {
+    "breadth_pct": 64.62,
+    "momentum_pct": 70.49,
+    "squeeze_intraday_pct": 25.42,
+    "volatility_pct": 9.94,
+    "liquidity_psi": 87.6
+  },
+  "summary": {
+    "breadth_pct": 64.62,
+    "momentum_pct": 70.49
+  },
+  "sectorCards": [
+    {
+      "sector": "Information Technology",
+      "outlook": "Bullish",
+      "breadth_pct": 65.3,
+      "momentum_pct": 66.81,
+      "nh": 196,
+      "nl": 62,
+      "up": 208,
+      "down": 163,
+      "spark": []
+    },
+    {
+      "sector": "Health Care",
+      "outlook": "Bullish",
+      "breadth_pct": 63.29,
+      "momentum_pct": 74.62,
+      "nh": 157,
+      "nl": 87,
+      "up": 183,
+      "down": 291,
+      "spark": []
+    },
+    {
+      "sector": "Financials",
+      "outlook": "Bullish",
+      "breadth_pct": 62.95,
+      "momentum_pct": 73.3,
+      "nh": 266,
+      "nl": 74,
+      "up": 214,
+      "down": 221,
+      "spark": []
+    }
+  ],
+  "sectorsUpdatedAt": "2025-09-23T20:25:18-07:00",
+  "engineLights": {
+    "updatedAt": "2025-09-23T20:25:18-07:00",
+    "mode": "intraday",
+    "live": true,
+    "signals": {
+      "sigBreakout": {
+        "active": true,
+        "severity": "info"
+      },
+      "sigCompression": {
+        "active": false,
+        "severity": "warn"
+      }
+    }
+  },
+  "intraday": {
+    "sectorDirection10m": {
+      "risingCount": 7,
+      "risingPct": 64.9,
+      "updatedAt": "2025-09-23T20:25:18-07:00"
+    },
+    "riskOn10m": {
+      "riskOnPct": 67.6,
+      "updatedAt": "2025-09-23T20:25:18-07:00"
+    }
+  }
+}
