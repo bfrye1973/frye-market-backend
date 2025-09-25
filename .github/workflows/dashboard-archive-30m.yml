@@ -1,0 +1,57 @@
+name: dashboard-archive-30m
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Every 30 minutes during RTH (13:30–20:00 UTC)
+    - cron: "30 13-20 * * 1-5"
+    - cron: "0 14-20 * * 1-5"
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: dashboard-archive-30m
+      cancel-in-progress: false
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout (shallow)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Fetch latest 10m payload (live branch)
+        run: |
+          mkdir -p data
+          curl -sSL "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min/data/outlook_intraday.json" \
+            -o data/outlook_intraday.json
+
+      - name: Prepare archive branch
+        run: |
+          set -e
+          if git ls-remote --exit-code --heads origin data-archive-10min >/dev/null 2>&1; then
+            git fetch origin data-archive-10min:data-archive-10min
+            git checkout data-archive-10min
+          else
+            git checkout --orphan data-archive-10min
+            rm -rf *
+          fi
+          mkdir -p data/archive/10min/dashboard
+
+      - name: Stamp snapshot and commit
+        env:
+          TS: ${{ github.run_id }}-${{ github.run_number }}-$(date -u +%Y%m%dT%H%M%SZ)
+          GIT_AUTHOR_NAME: "frye-bot"
+          GIT_AUTHOR_EMAIL: "bot@users.noreply.github.com"
+          GIT_COMMITTER_NAME: "frye-bot"
+          GIT_COMMITTER_EMAIL: "bot@users.noreply.github.com"
+        run: |
+          set -e
+          cp -f data/outlook_intraday.json "data/archive/10min/dashboard/outlook_${TS}.json"
+          git add "data/archive/10min/dashboard/outlook_${TS}.json"
+          git commit -m "Archive snapshot 10m @ ${TS}" || true
+          git push origin data-archive-10min
