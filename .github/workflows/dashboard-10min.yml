@@ -3,45 +3,44 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # every 10 minutes during U.S. market hours (UTC 13–19)
-    - cron: "*/10 13-19 * * 1-5"
-    # one extra run at close
-    - cron: "0 20 * * 1-5"
+    # === Pre-open warmup: EXACTLY 1 hour before open (13:30 UTC open → start 12:30) ===
+    # 12:30, 12:40, 12:50 UTC (Mon–Fri)
+    - cron: "30-59/10 12 * * 1-5"
+    # === Regular Trading Hours: every 10 minutes 13:00–20:59 UTC (Mon–Fri) ===
+    - cron: "*/10 13-20 * * 1-5"
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
+# Keep this job snappy and non-overlapping
 jobs:
   tenmin:
     runs-on: ubuntu-latest
+    timeout-minutes: 6               # hard cap to prevent long runners
+    concurrency:
+      group: dashboard-10min
+      cancel-in-progress: true       # never queue a slow run ahead of next tick
     permissions:
       contents: write
     env:
       TZ: America/Phoenix
-      LIVE_BRANCH: data-live-10min
-      ARCHIVE_BRANCH: data-archive-10min
+      LIVE_BRANCH: data-live-10min   # live branch only; NO archive in this workflow
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (shallow)
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Sync refs
-        run: git fetch origin +refs/heads/*:refs/remotes/origin/*
-
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install deps (if any)
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install jq
 
-      # ------------------ Build (intraday 10m) ------------------
-      - name: Build outlook source (intraday10)
+      # ====================== FAST BUILD (NO ARCHIVES) ======================
+      - name: Build outlook source (intraday10 FAST)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -55,24 +54,19 @@ jobs:
 
       - name: Write heartbeat_10min
         run: |
+          set -e
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      # ------------------ Stage LIVE files ------------------
+      # ====================== PUBLISH LIVE (ONLY) ======================
       - name: Stage LIVE artifacts
-        id: liveprep
         run: |
           set -e
-          RAW_TS=$(jq -r '.updated_at // .ts' data/outlook_intraday.json)
-          TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/:/-/g')
-          echo "RAW_TS=$RAW_TS"
-          echo "TS_SAFE=$TS_SAFE"
-          echo "ts=$TS_SAFE" >> "$GITHUB_OUTPUT"
-
           mkdir -p /tmp/live10
-          cp data/outlook_intraday.json /tmp/live10/
-          cp data/outlook_source.json   /tmp/live10/
-          cp data/heartbeat_10min.txt   /tmp/live10/
+          cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
+          cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
+          # (optional) include source for debugging; safe but not required by FE
+          if [ -f data/outlook_source.json ]; then cp -f data/outlook_source.json /tmp/live10/outlook_source.json; fi
 
       - name: Push LIVE branch (10min)
         run: |
@@ -80,60 +74,20 @@ jobs:
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
 
-          if git show-ref --verify --quiet refs/heads/"$LIVE_BRANCH"; then
+          # Create or switch to LIVE branch cleanly
+          if git ls-remote --exit-code --heads origin "$LIVE_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$LIVE_BRANCH":"$LIVE_BRANCH"
             git checkout "$LIVE_BRANCH"
           else
             git checkout --orphan "$LIVE_BRANCH"
+            rm -rf *
           fi
 
-          git rm -rf . || true
+          # Replace data/ with fresh artifacts
+          rm -rf data
           mkdir -p data
-          cp /tmp/live10/* data/
+          cp -f /tmp/live10/* data/
+
           git add data
-          git commit -m "10MIN live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit (live)"
-          git push origin +HEAD:"$LIVE_BRANCH"
-
-      # ------------------ GATE: every 3rd run? ------------------
-      - name: Compute archive gate (every 3rd run)
-        id: gate
-        shell: bash
-        run: |
-          n="${GITHUB_RUN_NUMBER:-0}"
-          if [ $(( n % 3 )) -eq 0 ]; then
-            echo "archive=true"  >> "$GITHUB_OUTPUT"
-          else
-            echo "archive=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      # ------------------ Stage ARCHIVE files (only if gate=true) ------------------
-      - name: Stage ARCHIVE artifacts
-        if: ${{ steps.gate.outputs.archive == 'true' }}
-        id: archprep
-        run: |
-          set -e
-          TS_SAFE="${{ steps.liveprep.outputs.ts }}"
-          mkdir -p /tmp/archive/source /tmp/archive/dashboard
-          cp data/outlook_source.json   "/tmp/archive/source/outlook_source_${TS_SAFE}.json"
-          cp data/outlook_intraday.json "/tmp/archive/dashboard/outlook_intraday_${TS_SAFE}.json"
-
-      - name: Push ARCHIVE branch (append)
-        if: ${{ steps.gate.outputs.archive == 'true' }}
-        run: |
-          set -e
-          git config user.name  "actions-user"
-          git config user.email "actions@github.com"
-
-          git fetch origin "$ARCHIVE_BRANCH" || true
-          if git show-ref --verify --quiet refs/heads/"$ARCHIVE_BRANCH"; then
-            git checkout "$ARCHIVE_BRANCH"
-          else
-            git checkout -b "$ARCHIVE_BRANCH" "origin/$ARCHIVE_BRANCH" 2>/dev/null || git checkout --orphan "$ARCHIVE_BRANCH"
-          fi
-
-          mkdir -p data/archive/10min/source data/archive/10min/dashboard
-          cp /tmp/archive/source/*    data/archive/10min/source/    || true
-          cp /tmp/archive/dashboard/* data/archive/10min/dashboard/ || true
-          git add data/archive/10min || true
-          git commit -m "10MIN archive: ${{ steps.liveprep.outputs.ts }}" || echo "nothing to commit (archive)"
-          git pull --rebase origin "$ARCHIVE_BRANCH" || true
-          git push origin HEAD:"$ARCHIVE_BRANCH"
+          git commit -m "10m live @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git push origin "$LIVE_BRANCH"
