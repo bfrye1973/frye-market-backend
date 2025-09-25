@@ -482,68 +482,68 @@
   },
   "deltas": {
     "market": {
-      "dBreadthPct": 11.23,
-      "dMomentumPct": 3.99,
-      "netTilt": 7.61,
+      "dBreadthPct": 0.0,
+      "dMomentumPct": 0.0,
+      "netTilt": 0.0,
       "riskOnPct": 15.73
     },
     "sectors": {
       "Information Technology": {
-        "dBreadthPct": 3.7,
-        "dMomentumPct": -0.65,
-        "netTilt": 1.53
+        "dBreadthPct": 0.0,
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Materials": {
-        "dBreadthPct": 17.33,
-        "dMomentumPct": 16.61,
-        "netTilt": 16.97
+        "dBreadthPct": 0.0,
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Health Care": {
-        "dBreadthPct": 16.98,
-        "dMomentumPct": -12.71,
-        "netTilt": 2.13
+        "dBreadthPct": 0.0,
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Communication Services": {
-        "dBreadthPct": 3.92,
-        "dMomentumPct": -1.54,
-        "netTilt": 1.19
+        "dBreadthPct": 0.0,
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Real Estate": {
-        "dBreadthPct": 5.06,
-        "dMomentumPct": 37.26,
-        "netTilt": 21.16
+        "dBreadthPct": 0.0,
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Energy": {
-        "dBreadthPct": 57.14,
-        "dMomentumPct": -28.98,
-        "netTilt": 14.08
+        "dBreadthPct": 0.0,
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Consumer Staples": {
-        "dBreadthPct": 17.39,
-        "dMomentumPct": 7.33,
-        "netTilt": 12.36
+        "dBreadthPct": 0.0,
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Consumer Discretionary": {
-        "dBreadthPct": 3.95,
-        "dMomentumPct": 1.65,
-        "netTilt": 2.8
+        "dBreadthPct": 0.0,
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Financials": {
-        "dBreadthPct": 6.74,
-        "dMomentumPct": 14.58,
-        "netTilt": 10.66
+        "dBreadthPct": 0.0,
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Utilities": {
-        "dBreadthPct": 78.95,
-        "dMomentumPct": 13.65,
-        "netTilt": 46.3
+        "dBreadthPct": 0.0,
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Industrials": {
-        "dBreadthPct": 5.85,
-        "dMomentumPct": 8.55,
-        "netTilt": 7.2
+        "dBreadthPct": 0.0,
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       }
     }
   },
-  "deltasUpdatedAt": "2025-09-25T06:51:27-07:00"
+  "deltasUpdatedAt": "2025-09-25T06:52:41-07:00"
 }
