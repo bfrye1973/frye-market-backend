@@ -11,15 +11,20 @@ on:
 jobs:
   tenmin:
     runs-on: ubuntu-latest
-    timeout-minutes: 20                    # allow slow runs to finish
+    timeout-minutes: 30                 # headroom; step-level timeout guards the heavy part
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false            # NEVER cancel an in-flight run
+      cancel-in-progress: false         # NEVER cancel in-flight runs
     permissions:
       contents: write
     env:
       TZ: America/Phoenix
-      LIVE_BRANCH: data-live-10min         # live-only branch (NO archive in this workflow)
+      LIVE_BRANCH: data-live-10min      # live-only branch; NO archive here
+      PYTHONUNBUFFERED: "1"             # live logs
+      # --- R9 builder tuning (safe defaults; adjust if needed) ---
+      FD_MAX_WORKERS: "16"              # concurrency for watermarks
+      FD_SNAPSHOT_BATCH: "250"          # snapshot batch size
+      # ------------------------------------------------------------
 
     steps:
       # --------------------- Repo & Python setup ---------------------
@@ -38,19 +43,26 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      - name: Mark start time
+        run: echo "START_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       # --------------------- FAST BUILD (no archives) ---------------------
-      - name: Build outlook source (intraday10 FAST)
+      - name: Build outlook source (intraday10 FAST, step timeout 18m)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
-          # Write to repo 'data/' as your scripts expect; we'll move artifacts to /tmp before any checkout.
-          python scripts/build_outlook_source_from_polygon.py --mode intraday10
+          echo "[timing] build_outlook_source START $(date -u +%T)"
+          # R9 builder (faster): universe once + concurrent watermarks + batched snapshots
+          timeout 1080s python -u scripts/build_outlook_source_from_polygon.py --mode intraday10
+          echo "[timing] build_outlook_source END   $(date -u +%T)"
 
       - name: Make dashboard payload (intraday)
         run: |
           set -euo pipefail
-          python scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_intraday.json
+          echo "[timing] make_dashboard START $(date -u +%T)"
+          python -u scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_intraday.json
+          echo "[timing] make_dashboard END   $(date -u +%T)"
 
       - name: Write heartbeat_10min
         run: |
@@ -65,7 +77,7 @@ jobs:
           mkdir -p /tmp/live10
           cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
           cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
-          # optional, helpful for debugging
+          # optional (debug): keep the source used for the payload
           if [ -f data/outlook_source.json ]; then cp -f data/outlook_source.json /tmp/live10/outlook_source.json; fi
 
       # --------------------- Publish LIVE branch safely ---------------------
@@ -77,7 +89,7 @@ jobs:
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
 
-          # (A) Ensure CURRENT worktree is clean BEFORE switching branches
+          # (A) Clean current worktree BEFORE switching branches
           git reset --hard
           git clean -fdx
 
@@ -89,7 +101,7 @@ jobs:
             git checkout --orphan "${LIVE_BRANCH}"
           fi
 
-          # (C) Ensure CLEAN tree ON the LIVE branch (remove everything except .git)
+          # (C) Ensure CLEAN tree ON LIVE branch (remove everything except .git)
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 
           # (D) Copy fresh artifacts from /tmp and commit
