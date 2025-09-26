@@ -3,66 +3,74 @@ name: Intraday DELTAS SANDBOX (5-minute)
 on:
   workflow_dispatch: {}
   schedule:
-    # Pre-open warmup: 12:30, 12:40, 12:50 UTC (exactly 1h before 13:30 open)
-    - cron: "30-59/10 12 * * 1-5"
-    # RTH: every 10 minutes from 13:00–20:59 UTC
-    - cron: "*/10 13-20 * * 1-5"
-
-
+    # Trading hours only (Mon–Fri). Start 1h before open and run every 5 minutes.
+    # We keep a +2 minute offset from the 10m job so diffs are non-zero.
+    - cron: "32-59/5 12 * * 1-5"   # 12:32, 12:37, 12:42, 12:47, 12:52, 12:57 UTC
+    - cron: "2-59/5 13-20 * * 1-5" # 13:02 .. 20:57 UTC
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-
+    timeout-minutes: 6                  # short and safe; this job is lightweight
     concurrency:
       group: intraday-deltas-sandbox
-      cancel-in-progress: false
-
+      cancel-in-progress: false         # never cancel; let each diff finish
     permissions:
       contents: write
 
+    env:
+      BUILD_DIR: ${{ runner.temp }}/intraday-deltas
+      LIVE_URL:  https://frye-market-backend-1.onrender.com/live/intraday
+      BRANCH:    data-live-10min-sandbox
+
     steps:
-      - name: Checkout
+      - name: Checkout (shallow)
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Set ENV
+      - name: Ensure build dir
         run: |
-          echo "BUILD_DIR=${RUNNER_TEMP}/intraday-deltas" >> "$GITHUB_ENV"
-          mkdir -p "${RUNNER_TEMP}/intraday-deltas"
-          echo "MIRROR_URL=https://frye-market-backend-1.onrender.com/live/intraday" >> "$GITHUB_ENV"
+          mkdir -p "$BUILD_DIR"
 
       - name: Fetch previous sandbox payload (if exists)
         run: |
           set -e
-          if git ls-remote --exit-code --heads origin data-live-10min-sandbox >/dev/null 2>&1; then
-            git fetch origin data-live-10min-sandbox:data-live-10min-sandbox
-            git show origin/data-live-10min-sandbox:data/outlook_intraday.json > "$BUILD_DIR/prev.json" || true
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$BRANCH:$BRANCH"
+            git show "origin/$BRANCH:data/outlook_intraday.json" > "$BUILD_DIR/prev.json" || true
           fi
 
       - name: Generate NEW sandbox payload with DELTAS (mirror + diff)
+        env:
+          LIVE_URL:  ${{ env.LIVE_URL }}
+          BUILD_DIR: ${{ env.BUILD_DIR }}
         run: |
           python - <<'PY'
           import json, os, sys, urllib.request
           from urllib.error import URLError, HTTPError
-          from datetime import datetime, timezone
+          from datetime import datetime
           try:
               from zoneinfo import ZoneInfo
               AZ = ZoneInfo("America/Phoenix")
           except Exception:
               AZ = None
 
+          LIVE_URL  = os.environ["LIVE_URL"]
+          BUILD_DIR = os.environ["BUILD_DIR"]
+          OUT = os.path.join(BUILD_DIR, "outlook_intraday.json")
+          HB  = os.path.join(BUILD_DIR, "heartbeat_10min.txt")
+          PREV = os.path.join(BUILD_DIR, "prev.json")
+
           def az_iso():
               if AZ:
                   return datetime.now(AZ).replace(microsecond=0).isoformat()
-              # Fallback: local time without TZ
               return datetime.now().replace(microsecond=0).isoformat()
 
           def fetch_json(url: str):
               try:
-                  req = urllib.request.Request(url, headers={"Cache-Control":"no-store","User-Agent":"sandbox-deltas/1.0"})
+                  u = url + ("&t=" if "?" in url else "?t=") + str(int(datetime.utcnow().timestamp()))
+                  req = urllib.request.Request(u, headers={"Cache-Control":"no-store","User-Agent":"sandbox-deltas/1.0"})
                   with urllib.request.urlopen(req, timeout=20) as resp:
                       if resp.status != 200: return None
                       return json.loads(resp.read().decode("utf-8"))
@@ -70,14 +78,14 @@ jobs:
                   return None
 
           def load_json_file(path: str):
-              if not path or not os.path.isfile(path): return None
               try:
-                  with open(path,"r",encoding="utf-8") as f: return json.load(f)
+                  if os.path.isfile(path):
+                      with open(path,"r",encoding="utf-8") as f: return json.load(f)
               except Exception:
-                  return None
+                  pass
+              return None
 
-          def pct(num, den):
-              return 0.0 if den == 0 else 100.0 * num / den
+          def pct(num, den): return 0.0 if den == 0 else 100.0 * num / den
 
           def summarize(cards):
               nh = nl = up = dn = 0
@@ -86,20 +94,6 @@ jobs:
                   up += int(c.get("up",0)); dn += int(c.get("down",0))
               return pct(nh, nh+nl), pct(up, up+dn)
 
-          MIRROR_URL = os.environ.get("MIRROR_URL","").strip()
-          BUILD_DIR  = os.environ.get("BUILD_DIR","").strip()
-          OUT = os.path.join(BUILD_DIR, "outlook_intraday.json")
-          HB  = os.path.join(BUILD_DIR, "heartbeat_10min.txt")
-          PREV = os.path.join(BUILD_DIR, "prev.json")
-
-          curr = fetch_json(MIRROR_URL)
-          if not curr or not isinstance(curr, dict):
-              print("ERROR: could not fetch live intraday JSON", file=sys.stderr)
-              sys.exit(2)
-
-          prev = load_json_file(PREV)
-
-          # Compute deltas (market + sectors derived from sectorCards)
           def sector_map(cards):
               m = {}
               for c in cards or []:
@@ -109,19 +103,24 @@ jobs:
                   m[str(c.get("sector","Unknown"))] = (b, mo)
               return m
 
-          cb, cm = summarize(curr.get("sectorCards"))
-          if prev:
-              pb, pm = summarize(prev.get("sectorCards"))
-          else:
-              pb = pm = 0.0
+          curr = fetch_json(LIVE_URL)
+          if not curr or not isinstance(curr, dict):
+              print("ERROR: could not fetch live intraday JSON", file=sys.stderr)
+              sys.exit(2)
 
+          prev = load_json_file(PREV)
+
+          # Compute market deltas
+          cb, cm = summarize(curr.get("sectorCards"))
+          pb, pm = summarize(prev.get("sectorCards")) if prev else (0.0, 0.0)
           d_market = {
               "dBreadthPct": round(cb - pb, 2),
               "dMomentumPct": round(cm - pm, 2),
               "netTilt": round(((cb - pb) + (cm - pm)) / 2.0, 2),
-              "riskOnPct": round((cb + cm) / 2.0, 2)
+              "riskOnPct": round((cb + cm) / 2.0, 2),
           }
 
+          # Compute sector deltas
           curr_map = sector_map(curr.get("sectorCards"))
           prev_map = sector_map(prev.get("sectorCards")) if prev else {}
           d_sectors = {}
@@ -131,6 +130,8 @@ jobs:
               dM = round(m_now - m_prev, 2)
               d_sectors[name] = {"dBreadthPct": dB, "dMomentumPct": dM, "netTilt": round((dB + dM)/2.0, 2)}
 
+          # If updated_at didn't change vs prev, we still publish (UI handles small deltas),
+          # but we won't error — this keeps cadence predictable.
           out = dict(curr)
           out["version"] = "sandbox-10m-deltas"
           out.setdefault("meta", {})
@@ -139,42 +140,41 @@ jobs:
           out["deltas"] = {"market": d_market, "sectors": d_sectors}
           out["deltasUpdatedAt"] = az_iso()
 
-          os.makedirs(os.path.dirname(OUT), exist_ok=True)
+          os.makedirs(BUILD_DIR, exist_ok=True)
           with open(OUT, "w", encoding="utf-8") as f:
               json.dump(out, f, ensure_ascii=False, indent=2)
-
-          os.makedirs(os.path.dirname(HB), exist_ok=True)
           with open(HB, "w", encoding="utf-8") as f:
               f.write(az_iso() + "\n")
 
-          print(f"Wrote {OUT} and {HB}")
+          print(f"[deltas] market={d_market}  wrote {OUT}")
           PY
 
-      - name: Prepare sandbox branch
+      - name: Prepare sandbox branch (clean)
         run: |
           set -e
-          if git ls-remote --exit-code --heads origin data-live-10min-sandbox >/dev/null 2>&1; then
-            git fetch origin data-live-10min-sandbox:data-live-10min-sandbox
-            git checkout data-live-10min-sandbox
-            find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+          BRANCH="${{ env.BRANCH }}"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$BRANCH:$BRANCH"
+            git checkout "$BRANCH"
           else
-            git checkout --orphan data-live-10min-sandbox
-            find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+            git checkout --orphan "$BRANCH"
           fi
+          # wipe tree (except .git)
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
           mkdir -p data
 
       - name: Copy outputs
         run: |
           set -e
-          cp "$BUILD_DIR/outlook_intraday.json" data/outlook_intraday.json
-          cp "$BUILD_DIR/heartbeat_10min.txt" data/heartbeat_10min.txt
+          cp -f "$BUILD_DIR/outlook_intraday.json" data/outlook_intraday.json
+          cp -f "$BUILD_DIR/heartbeat_10min.txt"   data/heartbeat_10min.txt
           ls -l data
 
       - name: Commit & push
         run: |
           set -e
-          git config user.name "frye-bot"
+          git config user.name  "frye-bot"
           git config user.email "bot@users.noreply.github.com"
           git add data/*
-          git commit -m "Sandbox deltas update" || true
-          git push -f origin data-live-10min-sandbox
+          git commit -m "Sandbox deltas update @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git push -f origin "${BRANCH}"
