@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Ferrari Dashboard — build_outlook_source_from_polygon.py (R8 — FAST & CLEAN)
+Ferrari Dashboard — build_outlook_source_from_polygon.py (R9 — FAST & CLEAN)
 
 Cadences
 - intraday10 : 10-minute workflow (snapshots vs prior 10-day watermarks)
@@ -8,7 +8,7 @@ Cadences
 - daily      : completed daily bars (EOD)
 
 Global (unchanged schema so FE keeps working)
-- squeeze_pressure_pct : int 0..100   (intraday PSI "fuel" from daily closes; unchanged)
+- squeeze_pressure_pct : int 0..100   (intraday PSI "fuel" from daily closes)
 - squeeze_state        : str           ("none"|"on"|"firingUp"|"firingDown")
 - daily_squeeze_pct    : float 0..100  (Lux PSI on DAILY SPY, conv=50 len=20, 2 decimals)
 - volatility_pct       : int 0..100    (ATR% percentile on DAILY SPY)
@@ -17,27 +17,27 @@ Global (unchanged schema so FE keeps working)
 Per-sector counts (each cadence)
 - nh, nl     : 10-day new highs / new lows
 - u,  d      : 3-day up / 3-day down streaks
-- vol_state, breadth_state, history scaffolding (unchanged)
 
-NOTE: No ADR momentum in intraday10 to keep runtime <~15–20 min.
+NOTE: intraday10 is optimized to fetch the *universe once*:
+  1) parallel daily bars (to compute 10-day watermarks & last two closes)
+  2) batched snapshot calls (250 tickers per request)
+Then sum per sector. No per-sector refetches.
 """
 
 from __future__ import annotations
 import argparse, csv, json, os, time, math, urllib.request, urllib.error, urllib.parse
 from datetime import datetime, timedelta, timezone, date
 from typing import Any, Dict, List, Tuple
-from zoneinfo import ZoneInfo  # stdlib (Python 3.9+)
-# ----- timezone helpers (Arizona) -----
+from zoneinfo import ZoneInfo
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 PHX_TZ = ZoneInfo("America/Phoenix")
 
 def now_utc_iso() -> str:
-    """UTC ISO (machine time)"""
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 def now_phx_iso() -> str:
-    """Arizona ISO (display time)"""
     return datetime.now(PHX_TZ).replace(microsecond=0).isoformat()
-
 
 # ---------------- ENV / CONFIG ----------------
 POLY_KEY  = os.environ.get("POLY_KEY") or os.environ.get("POLYGON_API_KEY")
@@ -46,28 +46,39 @@ POLY_BASE = "https://api.polygon.io"
 SECTORS_DIR = os.path.join("data", "sectors")
 OUT_PATH    = os.path.join("data", "outlook_source.json")
 
+# reasonable defaults for speed
+MAX_WORKERS = int(os.environ.get("FD_MAX_WORKERS", "16"))
+SNAP_BATCH  = int(os.environ.get("FD_SNAPSHOT_BATCH", "250"))  # Polygon supports 250 tickers per call
+
 # ---------------- HTTP (tight retry) ----------------
 def http_get(url: str, timeout: int = 25) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "ferrari-dashboard/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "ferrari-dashboard/1.0", "Accept-Encoding": "gzip"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8")
+        data = resp.read()
+        try:
+            import gzip, io
+            if resp.getheader("Content-Encoding") == "gzip":
+                data = gzip.decompress(data)
+        except Exception:
+            pass
+        return data.decode("utf-8")
 
 def poly_json(url: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
     if params is None: params = {}
     if POLY_KEY: params["apiKey"] = POLY_KEY
     qs   = urllib.parse.urlencode(params)
     full = f"{url}?{qs}" if qs else url
-    for attempt in range(1, 4):  # max 3 tries
+    for attempt in range(1, 4):
         try:
             raw = http_get(full, timeout=25)
             return json.loads(raw)
         except urllib.error.HTTPError as e:
             if e.code in (429, 500, 502, 503, 504) and attempt < 3:
-                time.sleep(0.5); continue
+                time.sleep(0.4); continue
             raise
         except (urllib.error.URLError, TimeoutError):
             if attempt < 3:
-                time.sleep(0.5); continue
+                time.sleep(0.4); continue
             raise
 
 # ---------------- DATE / FETCH ----------------
@@ -94,7 +105,7 @@ def fetch_daily(ticker: str, days: int) -> List[Dict[str, Any]]:
 
 def fetch_hourly(ticker: str, hours_back: int = 72) -> List[Dict[str, Any]]:
     end = datetime.utcnow().date()
-    start = end - timedelta(days=max(7, hours_back // 6 + 2))  # buffer
+    start = end - timedelta(days=max(7, hours_back // 6 + 2))
     return fetch_range(ticker, "hour", 1, start, end, sort="asc")
 
 # ---------------- SECTORS CSV ----------------
@@ -121,42 +132,16 @@ def discover_sectors() -> Dict[str, List[str]]:
 
 # ---------------- FLAGS ----------------
 def compute_flags_from_bars(bars: List[Dict[str, Any]]) -> Tuple[int, int, int, int]:
-    """
-    NH/NL vs prior 10 bars; 3U/3D = last 3 closes trending.
-    Works for DAILY and HOURLY series.
-    """
     if len(bars) < 11:
         return 0, 0, 0, 0
-
     today   = bars[-1]
     prior10 = bars[-11:-1]
-
     is_10NH = int(today["h"] > max(b["h"] for b in prior10))
     is_10NL = int(today["l"] < min(b["l"] for b in prior10))
-
     last3 = bars[-3:]
     is_3U = int(len(last3) == 3 and (last3[0]["c"] < last3[1]["c"] < last3[2]["c"]))
     is_3D = int(len(last3) == 3 and (last3[0]["c"] > last3[1]["c"] > last3[2]["c"]))
-
     return is_10NH, is_10NL, is_3U, is_3D
-
-def watermarks_last_10d(symbols: List[str]) -> Dict[str, Tuple[float|None,float|None,float|None,float|None]]:
-    """
-    For intraday10: prior 10-day H/L (excluding today) + last two closes.
-    Returns sym -> (H10, L10, c2, c1).
-    """
-    out={}
-    for i,sym in enumerate(symbols):
-        bars = fetch_daily(sym, 22)[-12:]  # enough for prior-10 + last 2 closes
-        if len(bars) >= 3:
-            highs=[b["h"] for b in bars]; lows=[b["l"] for b in bars]; closes=[b["c"] for b in bars]
-            highs_ex = highs[:-1] if len(highs)>1 else highs
-            lows_ex  = lows[:-1]  if len(lows) >1 else lows
-            H10 = max(highs_ex[-10:]) if len(highs_ex)>=10 else (max(highs_ex) if highs_ex else None)
-            L10 = min(lows_ex[-10:])  if len(lows_ex) >=10 else (min(lows_ex)  if lows_ex  else None)
-            out[sym] = (H10, L10, closes[-2], closes[-1])
-        if (i+1)%20==0: time.sleep(0.08)  # tiny breath
-    return out
 
 def compute_intraday_from_snap(H10,L10,c2,c1,day_high,day_low,last_px) -> Tuple[int,int,int,int]:
     nh = int(H10 is not None and day_high is not None and day_high > H10)
@@ -183,14 +168,12 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
     psi = -50.0*r + 50.0
     return float(max(0.0, min(100.0, psi)))
 
-# ---------------- VOL / LIQ (SPY DAILY) ----------------
+# ---------------- VOL / LIQ from a single SPY fetch ----------------
 def true_range(h,l,c_prev): return max(h-l, abs(h-c_prev), abs(l-c_prev))
 
 def atr14_percent(closes, highs, lows):
     if len(closes) < 20: return None
-    trs=[]
-    for i in range(1, len(closes)):
-        trs.append(true_range(highs[i], lows[i], closes[i-1]))
+    trs=[true_range(highs[i], lows[i], closes[i-1]) for i in range(1, len(closes))]
     period=14
     if len(trs) < period: return None
     atr = sum(trs[-period:]) / period
@@ -198,12 +181,10 @@ def atr14_percent(closes, highs, lows):
     if c <= 0: return None
     return (atr / c) * 100.0
 
-def volatility_pct_spy() -> int:
-    bars = fetch_daily("SPY", 160)
-    if len(bars) < 40: return 50
-    closes=[b["c"] for b in bars]; highs=[b["h"] for b in bars]; lows=[b["l"] for b in bars]
+def volatility_pct_from_series(closes, highs, lows) -> int:
+    if len(closes) < 40: return 50
     history=[]
-    for i in range(30, len(bars)+1):
+    for i in range(30, len(closes)+1):
         sub_c = closes[:i]; sub_h = highs[:i]; sub_l = lows[:i]
         v = atr14_percent(sub_c, sub_h, sub_l)
         if v is not None: history.append(v)
@@ -212,24 +193,79 @@ def volatility_pct_spy() -> int:
     less_equal = sum(1 for x in history if x <= cur)
     return max(0, min(100, int(round(100*less_equal/len(history)))))
 
-def liquidity_pct_spy() -> int:
-    bars = fetch_daily("SPY", 70)
-    if len(bars) < 21: return 70
-    vols=[b["v"] for b in bars]
+def liquidity_pct_from_series(vols) -> int:
+    if len(vols) < 21: return 70
     avgv5  = sum(vols[-5:])  / 5.0
     avgv20 = sum(vols[-20:]) / 20.0
     if avgv20 <= 0: return 70
     ratio = (avgv5/avgv20)*100.0
     return int(round(max(0, min(120, ratio))))
 
-# ---------------- PER-SECTOR BUILDERS (FAST) ----------------
+# ---------------- PER-SECTOR BUILDERS ----------------
+def fetch_daily_12(sym: str) -> Tuple[str, List[Dict[str, Any]]]:
+    # fetch enough for 10d watermarks & last two closes
+    bars = fetch_daily(sym, 22)[-12:]
+    return sym, bars
+
+def watermarks_last_10d_concurrent(symbols: List[str]) -> Dict[str, Tuple[float|None,float|None,float|None,float|None]]:
+    """
+    Precompute prior 10-day H/L (excluding today) + last two closes for the entire universe.
+    Returns sym -> (H10, L10, c2, c1).
+    """
+    out: Dict[str, Tuple[float|None,float|None,float|None,float|None]] = {}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+        futs = [ex.submit(fetch_daily_12, s) for s in symbols]
+        for fut in as_completed(futs):
+            sym, bars = fut.result()
+            if len(bars) >= 3:
+                highs=[b["h"] for b in bars]; lows=[b["l"] for b in bars]; closes=[b["c"] for b in bars]
+                highs_ex = highs[:-1] if len(highs)>1 else highs
+                lows_ex  = lows[:-1]  if len(lows) >1 else lows
+                H10 = max(highs_ex[-10:]) if len(highs_ex)>=10 else (max(highs_ex) if highs_ex else None)
+                L10 = min(lows_ex[-10:])  if len(lows_ex) >=10 else (min(lows_ex)  if lows_ex  else None)
+                out[sym] = (H10, L10, closes[-2], closes[-1])
+    return out
+
+def batch_snapshots(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    snaps: Dict[str, Dict[str, Any]] = {}
+    for i in range(0, len(symbols), SNAP_BATCH):
+        batch = symbols[i:i+SNAP_BATCH]
+        js = poly_json(f"{POLY_BASE}/v2/snapshot/locale/us/markets/stocks/tickers",
+                       {"tickers": ",".join(batch)})
+        for row in js.get("tickers", []) or []:
+            t = row.get("ticker")
+            if t: snaps[t] = row
+        time.sleep(0.05)  # light throttle
+    return snaps
+
+def build_counts_intraday10_from_universe(
+    sector_map: Dict[str, List[str]],
+    wm: Dict[str, Tuple[float|None,float|None,float|None,float|None]],
+    snaps: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str,int]]:
+    results: Dict[str, Dict[str,int]] = {}
+    for sector, symbols in sector_map.items():
+        c={"nh":0,"nl":0,"u":0,"d":0}
+        for sym in symbols:
+            H10,L10,c2,c1 = wm.get(sym, (None,None,None,None))
+            s = snaps.get(sym, {}) or {}
+            day  = s.get("day") or {}
+            last_trade = s.get("lastTrade") or {}
+            last_quote = s.get("lastQuote") or {}
+            day_high   = day.get("h"); day_low = day.get("l")
+            last_px    = last_trade.get("p") or last_quote.get("p")
+            nh,nl,u3,d3 = compute_intraday_from_snap(H10,L10,c2,c1,day_high,day_low,last_px)
+            c["nh"]+=nh; c["nl"]+=nl; c["u"]+=u3; c["d"]+=d3
+        results[sector] = c
+    return results
+
 def build_counts_daily(symbols: List[str]) -> Dict[str,int]:
     c={"nh":0,"nl":0,"u":0,"d":0}
     for i,sym in enumerate(symbols):
-        bars = fetch_daily(sym, 22)[-12:]  # flags only
+        bars = fetch_daily(sym, 22)[-12:]
         nh,nl,u3,d3 = compute_flags_from_bars(bars)
         c["nh"]+=nh; c["nl"]+=nl; c["u"]+=u3; c["d"]+=d3
-        if (i+1)%12==0: time.sleep(0.05)
+        if (i+1)%25==0: time.sleep(0.03)
     return c
 
 def build_counts_hourly(symbols: List[str]) -> Dict[str,int]:
@@ -238,46 +274,23 @@ def build_counts_hourly(symbols: List[str]) -> Dict[str,int]:
         bars_h = fetch_hourly(sym, hours_back=120)[-12:]
         nh,nl,u3,d3 = compute_flags_from_bars(bars_h)
         c["nh"]+=nh; c["nl"]+=nl; c["u"]+=u3; c["d"]+=d3
-        if (i+1)%15==0: time.sleep(0.05)
+        if (i+1)%25==0: time.sleep(0.03)
     return c
 
-def build_counts_intraday10(symbols: List[str]) -> Dict[str,int]:
-    """
-    Intraday10 FAST PATH:
-    - Prior 10-day watermarks (H/L) from daily bars
-    - Intraday snapshots in batches of 100
-    - NO per-symbol ADR work
-    """
-    c={"nh":0,"nl":0,"u":0,"d":0}
-    wm = watermarks_last_10d(symbols)
-
-    snaps: Dict[str, Dict[str, Any]] = {}
-    for i in range(0, len(symbols), 100):  # big batch → fewer calls
-        batch = symbols[i:i+100]
-        js = poly_json(f"{POLY_BASE}/v2/snapshot/locale/us/markets/stocks/tickers",
-                       {"tickers": ",".join(batch)})
-        for row in js.get("tickers", []) or []:
-            t = row.get("ticker")
-            if t: snaps[t] = row
-        time.sleep(0.10)  # light throttle
-
-    for sym in symbols:
-        H10,L10,c2,c1 = wm.get(sym, (None,None,None,None))
-        s = snaps.get(sym, {}) or {}
-        day  = s.get("day") or {}
-        last_trade = s.get("lastTrade") or {}
-        last_quote = s.get("lastQuote") or {}
-        day_high   = day.get("h"); day_low = day.get("l")
-        last_px    = last_trade.get("p") or last_quote.get("p")
-        nh,nl,u3,d3 = compute_intraday_from_snap(H10,L10,c2,c1,day_high,day_low,last_px)
-        c["nh"]+=nh; c["nl"]+=nl; c["u"]+=u3; c["d"]+=d3
-    return c
-
-# ---------------- GLOBAL FIELDS ----------------
+# ---------------- GLOBAL FIELDS (single SPY fetch) ----------------
 def compute_global_fields() -> Dict[str, Any]:
-    # Intraday squeeze ("fuel") — PSI on recent DAILY closes (unchanged behavior)
-    bars = fetch_daily("SPY", 120)
-    closes = [b["c"] for b in bars]
+    bars = fetch_daily("SPY", 260)   # single call reused for all globals
+    if len(bars) < 40:
+        closes = [b["c"] for b in bars]
+        highs  = [b["h"] for b in bars]
+        lows   = [b["l"] for b in bars]
+        vols   = [b["v"] for b in bars]
+    else:
+        closes = [b["c"] for b in bars]
+        highs  = [b["h"] for b in bars]
+        lows   = [b["l"] for b in bars]
+        vols   = [b["v"] for b in bars]
+
     psi = lux_psi_from_closes(closes, conv=50, length=20)
     if psi is None: psi = 50.0
 
@@ -286,14 +299,11 @@ def compute_global_fields() -> Dict[str, Any]:
     elif psi < 50: state = "on"
     else: state = "none"
 
-    # Daily Squeeze — Lux PSI on DAILY closes (conv=50, length=20)
-    bars_d = fetch_daily("SPY", 260)
-    closes_d = [b["c"] for b in bars_d]
-    psi_daily = lux_psi_from_closes(closes_d, conv=50, length=20)
+    psi_daily = lux_psi_from_closes(closes, conv=50, length=20)
     if psi_daily is None: psi_daily = 50.0
 
-    vol_pct = volatility_pct_spy()
-    liq_pct = liquidity_pct_spy()
+    vol_pct = volatility_pct_from_series(closes, highs, lows)
+    liq_pct = liquidity_pct_from_series(vols)
 
     return {
         "squeeze_pressure_pct": int(round(float(psi))),
@@ -305,7 +315,23 @@ def compute_global_fields() -> Dict[str, Any]:
 
 # ---------------- GROUPS ORCHESTRATOR ----------------
 def build_groups(mode: str, sectors: Dict[str, List[str]]) -> Dict[str, Dict[str, Any]]:
-    groups={}
+    groups: Dict[str, Dict[str, Any]] = {}
+
+    if mode == "intraday10":
+        # Universe pass (one-time)
+        universe = sorted(set(sym for lst in sectors.values() for sym in lst))
+        wm = watermarks_last_10d_concurrent(universe)
+        snaps = batch_snapshots(universe)
+
+        counts_by_sector = build_counts_intraday10_from_universe(sectors, wm, snaps)
+        for sector, cnt in counts_by_sector.items():
+            groups[sector] = {
+                "nh": cnt["nh"], "nl": cnt["nl"], "u": cnt["u"], "d": cnt["d"],
+                "vol_state": "Mixed", "breadth_state": "Neutral", "history": {"nh": []}
+            }
+        return groups
+
+    # hourly / daily fallbacks (sector-by-sector)
     for sector, symbols in sectors.items():
         uniq = list(sorted(set(symbols)))
         if mode == "daily":
@@ -313,7 +339,7 @@ def build_groups(mode: str, sectors: Dict[str, List[str]]) -> Dict[str, Dict[str
         elif mode == "hourly":
             cnt = build_counts_hourly(uniq)
         else:
-            cnt = build_counts_intraday10(uniq)
+            raise SystemExit(f"Unsupported mode: {mode}")
         groups[sector] = {
             "nh": cnt["nh"], "nl": cnt["nl"], "u": cnt["u"], "d": cnt["d"],
             "vol_state": "Mixed", "breadth_state": "Neutral", "history": {"nh": []}
@@ -329,11 +355,12 @@ def main():
     if not POLY_KEY:
         raise SystemExit("Set POLY_KEY (or POLYGON_API_KEY)")
 
+    t0 = time.time()
+
     sectors = discover_sectors()
     groups  = build_groups(args.mode, sectors)
     global_fields = compute_global_fields()
 
-    # ---- timestamps (consistent 4-space indent) ----
     ts_utc   = now_utc_iso()
     ts_local = now_phx_iso()
 
@@ -344,6 +371,10 @@ def main():
         "mode": args.mode,
         "groups": groups,
         "global": global_fields,
+        "meta": {
+            "build_secs": round(time.time() - t0, 2),
+            "universe": sum(len(v) for v in sectors.values())
+        }
     }
 
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
@@ -352,6 +383,7 @@ def main():
     print(f"[OK] wrote {OUT_PATH}")
     for s,g in groups.items():
         print(f"  {s}: nh={g['nh']} nl={g['nl']} u={g['u']} d={g['d']}")
+    print(f"[timing] total build {payload['meta']['build_secs']}s")
 
 if __name__ == "__main__":
     main()
