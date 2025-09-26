@@ -18,9 +18,8 @@ jobs:
       contents: write
 
     env:
-      BUILD_DIR: ${{ runner.temp }}/intraday-deltas
-      LIVE_URL:  https://frye-market-backend-1.onrender.com/live/intraday
-      BRANCH:    data-live-10min-sandbox
+      LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
+      BRANCH:   data-live-10min-sandbox
 
     steps:
       - name: Checkout (shallow)
@@ -28,8 +27,11 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Ensure build dir
-        run: mkdir -p "$BUILD_DIR"
+      # Set BUILD_DIR using the runner's temp dir (portable + expression-safe)
+      - name: Set BUILD_DIR env
+        run: |
+          echo "BUILD_DIR=${RUNNER_TEMP}/intraday-deltas" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/intraday-deltas"
 
       - name: Fetch previous sandbox payload (if exists)
         run: |
@@ -61,8 +63,7 @@ jobs:
           PREV = os.path.join(BUILD_DIR, "prev.json")
 
           def az_iso():
-              if AZ: return datetime.now(AZ).replace(microsecond=0).isoformat()
-              return datetime.now().replace(microsecond=0).isoformat()
+              return (datetime.now(AZ) if AZ else datetime.now()).replace(microsecond=0).isoformat()
 
           def fetch_json(url: str):
               try:
@@ -169,4 +170,4 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           git add data/*
           git commit -m "Sandbox deltas update @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-          git push -f origin "${BRANCH}"
+          git push -f origin "${{ env.BRANCH }}"
