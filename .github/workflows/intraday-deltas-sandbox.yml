@@ -3,18 +3,17 @@ name: Intraday DELTAS SANDBOX (5-minute)
 on:
   workflow_dispatch: {}
   schedule:
-    # Trading hours only (Mon–Fri). Start 1h before open and run every 5 minutes.
-    # We keep a +2 minute offset from the 10m job so diffs are non-zero.
+    # Trading hours only, every 5 minutes, with a +2 minute offset after 10m job
     - cron: "32-59/5 12 * * 1-5"   # 12:32, 12:37, 12:42, 12:47, 12:52, 12:57 UTC
     - cron: "2-59/5 13-20 * * 1-5" # 13:02 .. 20:57 UTC
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 6                  # short and safe; this job is lightweight
+    timeout-minutes: 6
     concurrency:
       group: intraday-deltas-sandbox
-      cancel-in-progress: false         # never cancel; let each diff finish
+      cancel-in-progress: false
     permissions:
       contents: write
 
@@ -30,8 +29,7 @@ jobs:
           fetch-depth: 1
 
       - name: Ensure build dir
-        run: |
-          mkdir -p "$BUILD_DIR"
+        run: mkdir -p "$BUILD_DIR"
 
       - name: Fetch previous sandbox payload (if exists)
         run: |
@@ -63,8 +61,7 @@ jobs:
           PREV = os.path.join(BUILD_DIR, "prev.json")
 
           def az_iso():
-              if AZ:
-                  return datetime.now(AZ).replace(microsecond=0).isoformat()
+              if AZ: return datetime.now(AZ).replace(microsecond=0).isoformat()
               return datetime.now().replace(microsecond=0).isoformat()
 
           def fetch_json(url: str):
@@ -110,7 +107,6 @@ jobs:
 
           prev = load_json_file(PREV)
 
-          # Compute market deltas
           cb, cm = summarize(curr.get("sectorCards"))
           pb, pm = summarize(prev.get("sectorCards")) if prev else (0.0, 0.0)
           d_market = {
@@ -120,7 +116,6 @@ jobs:
               "riskOnPct": round((cb + cm) / 2.0, 2),
           }
 
-          # Compute sector deltas
           curr_map = sector_map(curr.get("sectorCards"))
           prev_map = sector_map(prev.get("sectorCards")) if prev else {}
           d_sectors = {}
@@ -130,8 +125,6 @@ jobs:
               dM = round(m_now - m_prev, 2)
               d_sectors[name] = {"dBreadthPct": dB, "dMomentumPct": dM, "netTilt": round((dB + dM)/2.0, 2)}
 
-          # If updated_at didn't change vs prev, we still publish (UI handles small deltas),
-          # but we won't error — this keeps cadence predictable.
           out = dict(curr)
           out["version"] = "sandbox-10m-deltas"
           out.setdefault("meta", {})
@@ -159,7 +152,6 @@ jobs:
           else
             git checkout --orphan "$BRANCH"
           fi
-          # wipe tree (except .git)
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
           mkdir -p data
 
