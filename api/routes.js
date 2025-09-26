@@ -314,38 +314,33 @@ export default function buildRouter(){
     noStore(res).json({ ok:true, ts:new Date().toISOString(), service:"frye-market-backend" })
   );
 
-  // Dashboard (main payload) — UPDATED with file preference + per-cadence stamps
+  // Dashboard (main payload)
   router.get("/dashboard", async (req, res) => {
     try{
-      // Prefer intraday → hourly → eod → legacy outlook.json
       let json =
         (await readJsonFromProject("data/outlook_intraday.json")) ||
         (await readJsonFromProject("data/outlook_hourly.json")) ||
         (await readJsonFromProject("data/outlook_eod.json")) ||
-        (await readJsonFromProject("data/outlook.json")); // legacy fallback
+        (await readJsonFromProject("data/outlook.json"));
 
       if (!json) throw new Error("no outlook payload found");
 
-      // Normalize + fill derived fields
       json = normalizeSectorCards(json);
       json = ensureSqueeze(json);
       json = ensureIndexes(json);
       json = ensureVolatility(json);
       json.signals = computeSignals(json);
 
-      // Per-cadence heartbeats (files written by workflows)
       const hb10     = await readStamp(path.join(DATA_ROOT, "heartbeat_10min.txt"));
       const hb1h     = await readStamp(path.join(DATA_ROOT, "heartbeat_hourly.txt"));
       const hbEod    = await readStamp(path.join(DATA_ROOT, "heartbeat_eod.txt"));
-      const hbLegacy = await readStamp(path.join(DATA_ROOT, "heartbeat.txt")); // hourly writes this
+      const hbLegacy = await readStamp(path.join(DATA_ROOT, "heartbeat.txt"));
 
-      // Attach explicit freshness to sections (Index Sectors uses 10-min by your request)
       json.marketMeter  = { ...(json.marketMeter  || {}), updatedAt: hb10 || hbLegacy || hb1h || null };
       json.engineLights = { ...(json.engineLights || {}), updatedAt: hb10 || hbLegacy || hb1h || null };
       json.sectors      = { ...(json.sectors      || {}), updatedAt: hb10 || hb1h || hbLegacy || null };
       json.daily        = { ...(json.daily        || {}), updatedAt: hbEod || hb1h || hbLegacy || null };
 
-      // Meta
       json.meta = json.meta || {};
       json.meta.ts = json.meta.ts || json.updated_at || new Date().toISOString();
       json.meta.stamps = {
@@ -355,7 +350,6 @@ export default function buildRouter(){
         legacy: hbLegacy || null
       };
 
-      // For quick troubleshooting, tell which source file was used
       if (!json.meta.sourceFile) {
         if (await readJsonFromProject("data/outlook_intraday.json")) json.meta.sourceFile = "outlook_intraday.json";
         else if (await readJsonFromProject("data/outlook_hourly.json")) json.meta.sourceFile = "outlook_hourly.json";
@@ -377,7 +371,7 @@ export default function buildRouter(){
     }
   });
 
-  // Gauges (rows) — optional helper
+  // Gauges (rows)
   router.get("/gauges", async (req,res) => {
     try{
       const index = (req.query.index || req.query.symbol || Object.keys(req.query)[0] || "SPY").toString();
@@ -394,7 +388,7 @@ export default function buildRouter(){
     }
   });
 
-  // quick debug snapshot — UPDATED to show heartbeat stamps + source choice
+  // Quick debug snapshot
   router.get("/debug", async (req, res) => {
     try {
       let src = "outlook_intraday.json";
@@ -413,12 +407,11 @@ export default function buildRouter(){
         const nh  = Number(v?.nh ?? 0);
         const nl  = Number(v?.nl ?? 0);
         const u   = Number(v?.u  ?? v?.up   ?? 0);
-        const d   = Number(v?.d  ?? v?.down ?? 0);
+        const d   = Number(v?.d ?? v?.down ?? 0);
         acc.nh += nh; acc.nl += nl; acc.u += u; acc.d += d;
         return acc;
       }, { nh:0, nl:0, u:0, d:0 });
 
-      // stamps (for quick verification)
       const hb10   = await readStamp(path.join(DATA_ROOT, "heartbeat_10min.txt"));
       const hb1h   = await readStamp(path.join(DATA_ROOT, "heartbeat_hourly.txt"));
       const hbEod  = await readStamp(path.join(DATA_ROOT, "heartbeat_eod.txt"));
@@ -440,7 +433,7 @@ export default function buildRouter(){
     }
   });
 
-  // last 5 days (for narrator or checks)
+  // last 5 days
   router.get("/outlook5d", async (req, res) => {
     try {
       const hist = await readJsonFromProject("data/history.json");
@@ -473,9 +466,7 @@ export default function buildRouter(){
       const items = files
         .filter(f => f.startsWith("outlook_") && f.endsWith(".json"))
         .map(f => {
-          // filenames are outlook_YYYY-MM-DDTHH-MM-SSZ.json; derive ISO-ish
           const core = f.replace(/^outlook_/, "").replace(/\.json$/, "");
-          // convert ...THH-MM-SSZ to ...THH:MM:SSZ for readability
           const ts = core.replace(/T(\d{2})-(\d{2})-(\d{2})Z$/, (m,h,mn,s) => `T${h}:${mn}:${s}Z`);
           return { ts, file: f };
         })
@@ -511,7 +502,6 @@ export default function buildRouter(){
       let json = await readJsonAbs(abs);
       if (!json) return noStore(res).status(404).json({ ok:false, error:"snapshot unreadable" });
 
-      // Normalize like live /dashboard
       json = normalizeSectorCards(json);
       json = ensureSqueeze(json);
       json = ensureIndexes(json);
@@ -533,9 +523,8 @@ export default function buildRouter(){
     try {
       const symbol = String(req.query.symbol || "SPY").toUpperCase();
       const timeframe = String(req.query.timeframe || "1h");
-      const at = (req.query.at ? String(req.query.at) : "").trim(); // ISO timestamp for replay
+      const at = (req.query.at ? String(req.query.at) : "").trim();
 
-      // If replay timestamp provided, try archived OHLC first
       if (at) {
         try {
           const tfFolder = tfDir(timeframe);
@@ -552,18 +541,14 @@ export default function buildRouter(){
             const bars = normalizeBars((snap?.bars)||[]).filter(b => b.time <= cutoff);
             if (bars.length) return noStore(res).json({ bars, symbol, timeframe, at, archived:true });
           }
-        } catch {
-          // fall through to live fetch + truncate
-        }
+        } catch { /* fall through */ }
       }
 
-      // Live fetch (Polygon if available; else stub), and truncate if `at` is set
       let bars = [];
       if (POLY_KEY) {
         const raw = await getBarsFromPolygon(symbol, timeframe);
         bars = normalizeBars(raw);
       } else {
-        // Fallback stub
         const tfSec = ({
           "1m":60, "5m":300, "10m":600, "15m":900, "30m":1800,
           "1h":3600, "4h":14400, "1d":86400
@@ -599,7 +584,7 @@ export default function buildRouter(){
     }
   });
 
-  // ---- Sector hour-over-hour trend for cards (existing) ----
+  // ---- Sector hour-over-hour trend
   router.get("/sectorTrend", async (req, res) => {
     try {
       const hist = await readJsonFromProject("data/history.json");
@@ -642,6 +627,44 @@ export default function buildRouter(){
         sectors
       });
     } catch (e) {
+      return noStore(res).status(500).json({ ok:false, error:String(e) });
+    }
+  });
+
+  /* ======================
+     NEW: Alignment signals (stub for UI)
+     ====================== */
+  router.get("/signals", async (req, res) => {
+    try {
+      const strategy = String(req.query.strategy || "").toLowerCase();
+      // For now we only service ?strategy=alignment
+      if (strategy !== "alignment") {
+        return noStore(res).status(404).json({ ok:false, error:"Unknown strategy" });
+      }
+
+      // TEMP: simple live payload so the UI refreshes while you wire real logic
+      const ts = new Date().toISOString();
+      return noStore(res).json({
+        status: "live",
+        signal: {
+          timestamp: ts,
+          strategy: "alignment",
+          timeframe: "10m",
+          direction: "none",       // "long" | "short" | "none" when real logic is added
+          confirm_count: 4,        // 0..6 across {SPY,QQQ,IWM,MDY,DIA,I:VIX}
+          streak_bars: 1,
+          confidence: 65,
+          members: {
+            SPY: { ok: true }, QQQ: { ok: true },
+            IWM: { ok: false }, MDY: { ok: true },
+            DIA: { ok: false }, "I:VIX": { ok: true }
+          },
+          failing: ["IWM","DIA"],
+          cooldown_active: false
+        }
+      });
+    } catch (e) {
+      console.error("signals error:", e?.message || e);
       return noStore(res).status(500).json({ ok:false, error:String(e) });
     }
   });
