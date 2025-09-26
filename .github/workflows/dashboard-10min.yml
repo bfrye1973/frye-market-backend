@@ -13,7 +13,7 @@ on:
 jobs:
   tenmin:
     runs-on: ubuntu-latest
-    timeout-minutes: 6               # hard cap to prevent long runners
+    timeout-minutes: 12              # hard cap to prevent long runners
     concurrency:
       group: dashboard-10min
       cancel-in-progress: true       # never queue a slow run ahead of next tick
