@@ -3,25 +3,23 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # === Pre-open warmup: EXACTLY 1 hour before open (13:30 UTC open → start 12:30) ===
-    # 12:30, 12:40, 12:50 UTC (Mon–Fri)
+    # === Pre-open warmup (exactly 1 hour before 13:30 UTC open): 12:30, 12:40, 12:50 UTC (Mon–Fri) ===
     - cron: "30-59/10 12 * * 1-5"
     # === Regular Trading Hours: every 10 minutes 13:00–20:59 UTC (Mon–Fri) ===
     - cron: "*/10 13-20 * * 1-5"
 
-# Keep this job snappy and non-overlapping
 jobs:
   tenmin:
     runs-on: ubuntu-latest
-    timeout-minutes: 12              # hard cap to prevent long runners
+    timeout-minutes: 20                # <<< allow up to 20m; never cancel early
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: true       # never queue a slow run ahead of next tick
+      cancel-in-progress: false        # <<< DO NOT cancel in-flight runs
     permissions:
       contents: write
     env:
       TZ: America/Phoenix
-      LIVE_BRANCH: data-live-10min   # live branch only; NO archive in this workflow
+      LIVE_BRANCH: data-live-10min     # live branch only; NO archive in this workflow
 
     steps:
       - name: Checkout (shallow)
@@ -39,7 +37,7 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # ====================== FAST BUILD (NO ARCHIVES) ======================
+      # ====================== FAST BUILD (NO ARCHIVES HERE) ======================
       - name: Build outlook source (intraday10 FAST)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
