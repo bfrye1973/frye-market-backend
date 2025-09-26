@@ -3,7 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # === Pre-open warmup (exactly 1 hour before 13:30 UTC open): 12:30, 12:40, 12:50 UTC (Mon–Fri) ===
+    # === Pre-open warmup (exactly 1h before 13:30 UTC open): 12:30, 12:40, 12:50 UTC (Mon–Fri) ===
     - cron: "30-59/10 12 * * 1-5"
     # === Regular Trading Hours: every 10 minutes 13:00–20:59 UTC (Mon–Fri) ===
     - cron: "*/10 13-20 * * 1-5"
@@ -11,17 +11,18 @@ on:
 jobs:
   tenmin:
     runs-on: ubuntu-latest
-    timeout-minutes: 20                # <<< allow up to 20m; never cancel early
+    timeout-minutes: 20                    # allow slow runs to finish
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false        # <<< DO NOT cancel in-flight runs
+      cancel-in-progress: false            # NEVER cancel an in-flight run
     permissions:
       contents: write
     env:
       TZ: America/Phoenix
-      LIVE_BRANCH: data-live-10min     # live branch only; NO archive in this workflow
+      LIVE_BRANCH: data-live-10min         # live-only branch (NO archive in this workflow)
 
     steps:
+      # --------------------- Repo & Python setup ---------------------
       - name: Checkout (shallow)
         uses: actions/checkout@v4
         with:
@@ -37,12 +38,13 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # ====================== FAST BUILD (NO ARCHIVES HERE) ======================
+      # --------------------- FAST BUILD (no archives) ---------------------
       - name: Build outlook source (intraday10 FAST)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
+          # Write to repo 'data/' as your scripts expect; we'll move artifacts to /tmp before any checkout.
           python scripts/build_outlook_source_from_polygon.py --mode intraday10
 
       - name: Make dashboard payload (intraday)
@@ -56,36 +58,44 @@ jobs:
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      # ====================== PUBLISH LIVE (ONLY) ======================
+      # --------------------- Stage LIVE artifacts (to /tmp) ---------------------
       - name: Stage LIVE artifacts
         run: |
           set -e
           mkdir -p /tmp/live10
           cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
           cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
-          # (optional) include source for debugging; safe but not required by FE
+          # optional, helpful for debugging
           if [ -f data/outlook_source.json ]; then cp -f data/outlook_source.json /tmp/live10/outlook_source.json; fi
 
+      # --------------------- Publish LIVE branch safely ---------------------
       - name: Push LIVE branch (10min)
         run: |
           set -e
+
+          # Git identity
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
 
-          # Create or switch to LIVE branch cleanly
-          if git ls-remote --exit-code --heads origin "$LIVE_BRANCH" >/dev/null 2>&1; then
-            git fetch origin "$LIVE_BRANCH":"$LIVE_BRANCH"
-            git checkout "$LIVE_BRANCH"
+          # (A) Ensure CURRENT worktree is clean BEFORE switching branches
+          git reset --hard
+          git clean -fdx
+
+          # (B) Switch/create LIVE branch
+          git fetch origin "${LIVE_BRANCH}" || true
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
           else
-            git checkout --orphan "$LIVE_BRANCH"
-            rm -rf *
+            git checkout --orphan "${LIVE_BRANCH}"
           fi
 
-          # Replace data/ with fresh artifacts
-          rm -rf data
+          # (C) Ensure CLEAN tree ON the LIVE branch (remove everything except .git)
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
+          # (D) Copy fresh artifacts from /tmp and commit
           mkdir -p data
           cp -f /tmp/live10/* data/
 
           git add data
           git commit -m "10m live @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-          git push origin "$LIVE_BRANCH"
+          git push origin "${LIVE_BRANCH}"
