@@ -1,73 +1,70 @@
-// api/routes.js (ESM)
-// Drop-in router for Render/Express backends.
-// Provides working mock endpoints so your frontend is alive immediately.
-// Later, replace the MOCK_* functions with real Thinkorswim/Schwab calls.
+// ./api/routes.js — Express router that returns mock options + paper trading endpoints.
+// Keeps everything in-memory so your frontend works immediately.
 
 import express from "express";
 
 const router = express.Router();
 
-/* ----------------------------- simple in-memory ---------------------------- */
-let ORDERS = [];          // [{ id, status, ... }]
-let EXECUTIONS = [];      // [{ id, orderId, symbol, qty, price, time }]
-let POSITIONS = new Map(); // symbol -> { symbol, qty, avgPrice, pnl:0, realizedPnl:0 }
-let KILL_SWITCH = false;
+/* ------------------------------ in-memory state ------------------------------ */
+let ORDERS = [];            // [{ id, status, ...payload }]
+let EXECUTIONS = [];        // [{ id, orderId, symbol, qty, price, time }]
+let POSITIONS = new Map();  // symbol -> { symbol, qty, avgPrice, pnl, realizedPnl }
+let KILL = false;
 
-// Generate a simple id
 const nid = (p = "ORD") => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
-/* --------------------------------- health --------------------------------- */
+/* ---------------------------------- health ---------------------------------- */
 router.get("/health", (req, res) => {
   res.json({ ok: true, ts: new Date().toISOString(), service: "frye-market-backend" });
 });
 
-/* ------------------------------- trading status --------------------------- */
+/* ---------------------------------- status ---------------------------------- */
 router.get("/trading/status", (req, res) => {
-  // Mode PAPER by default; LIVE remains read-only until you enable it.
-  res.json({ broker: "tos", mode: "PAPER", connected: true, liveEnabled: false, lastHeartbeat: new Date().toISOString() });
-});
-
-/* ----------------------------------- risk --------------------------------- */
-router.get("/risk/status", (req, res) => {
   res.json({
-    killSwitch: KILL_SWITCH,
-    caps: { maxOrderQty: 1000, maxDailyLoss: 2000 },
+    broker: "tos",
+    mode: "PAPER",
+    connected: true,
+    liveEnabled: false,
+    lastHeartbeat: new Date().toISOString(),
   });
 });
 
+/* ----------------------------------- risk ----------------------------------- */
+router.get("/risk/status", (req, res) => {
+  res.json({ killSwitch: KILL, caps: { maxOrderQty: 1000, maxDailyLoss: 2000 } });
+});
 router.post("/risk/kill", (req, res) => {
-  KILL_SWITCH = true;
+  KILL = true;
   res.json({ killSwitch: true });
 });
 
-/* --------------------------------- options -------------------------------- */
-// MOCK: expirations (next 8 Saturdays)
-function MOCK_expirations(symbol = "SPY") {
+/* --------------------------------- options ---------------------------------- */
+// generate the next 8 Saturday expirations
+function mockExpirations() {
   const out = [];
   const now = new Date();
   for (let i = 0; i < 8; i++) {
     const d = new Date(now);
-    d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7) + i * 7); // next Sat + i weeks
-    const iso = d.toISOString().slice(0, 10);
-    out.push(iso);
+    // next Saturday + i weeks
+    const add = ((6 - d.getDay() + 7) % 7) + i * 7;
+    d.setDate(d.getDate() + add);
+    out.push(d.toISOString().slice(0, 10));
   }
   return out;
 }
 
-// MOCK: simple chain generator around a center strike
-function MOCK_chain({ symbol = "SPY", expiration, side = "call" }) {
-  // Pick a notional underlying price (you can swap to real quote later)
-  const last = 500; // pretend SPY @ 500
+function mockChain({ side = "call" }) {
+  const last = 500; // pretend underlying is 500
   const steps = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
   return steps.map((k) => {
     const strike = Math.round((last + k * 5) * 100) / 100;
-    const m = Math.max(0.2, 5 - Math.abs(k)) / 2; // mark ~ premium
-    const bid = Math.max(0, m - 0.05);
-    const ask = m + 0.05;
+    const mark = Math.max(0.15, 5 - Math.abs(k)) / 2;
+    const bid = Math.max(0, mark - 0.05);
+    const ask = mark + 0.05;
     const delta = side === "call" ? 0.5 - Math.abs(k) * 0.05 : -0.5 + Math.abs(k) * 0.05;
     return {
       strike,
-      mark: Number(m.toFixed(2)),
+      mark: Number(mark.toFixed(2)),
       bid: Number(bid.toFixed(2)),
       ask: Number(ask.toFixed(2)),
       delta: Number(delta.toFixed(2)),
@@ -83,44 +80,43 @@ function MOCK_chain({ symbol = "SPY", expiration, side = "call" }) {
 // GET /api/options/meta?symbol=SPY
 router.get("/options/meta", (req, res) => {
   const { symbol = "SPY" } = req.query;
-  res.json({ symbol: String(symbol).toUpperCase(), expirations: MOCK_expirations(symbol) });
+  res.json({ symbol: String(symbol).toUpperCase(), expirations: mockExpirations() });
 });
 
 // GET /api/options/chain?symbol=SPY&expiration=YYYY-MM-DD&side=call|put
 router.get("/options/chain", (req, res) => {
   const { symbol = "SPY", expiration, side = "call" } = req.query;
   if (!expiration) return res.status(400).json({ ok: false, error: "Missing 'expiration' (YYYY-MM-DD)" });
-  const rows = MOCK_chain({ symbol, expiration, side: String(side).toLowerCase() });
-  res.json(rows);
+  res.json(mockChain({ side: String(side).toLowerCase() }));
 });
 
-/* --------------------------------- orders --------------------------------- */
-// Lists
+/* ---------------------------------- orders ---------------------------------- */
+// lists
 router.get("/trading/orders", (req, res) => res.json(ORDERS));
 router.get("/trading/executions", (req, res) => res.json(EXECUTIONS));
 router.get("/trading/positions", (req, res) => res.json(Array.from(POSITIONS.values())));
 
-// Place (PAPER)
-router.post("/trading/orders", express.json(), (req, res) => {
-  if (KILL_SWITCH) return res.status(403).json({ ok: false, error: "Kill switch engaged" });
+// place (PAPER)
+router.post("/trading/orders", (req, res) => {
+  if (KILL) return res.status(403).json({ ok: false, error: "Kill switch engaged" });
 
   const idem = req.header("X-Idempotency-Key") || "";
-  const body = req.body || {};
+  const b = req.body || {};
 
-  // Basic validation
-  if (body.assetType === "EQUITY") {
-    const { symbol, side, qty, orderType } = body;
+  // validate
+  if (b.assetType === "EQUITY") {
+    const { symbol, side, qty, orderType } = b;
     if (!symbol || !side || !qty || !orderType) return res.status(400).json({ ok: false, error: "Missing equity fields" });
-  } else if (body.assetType === "OPTION") {
-    const { underlying, right, expiration, strike, qty, orderType } = body;
+  } else if (b.assetType === "OPTION") {
+    const { underlying, right, expiration, strike, qty, orderType } = b;
     if (!underlying || !right || !expiration || !strike || !qty || !orderType)
       return res.status(400).json({ ok: false, error: "Missing option fields" });
   } else {
     return res.status(400).json({ ok: false, error: "assetType must be EQUITY or OPTION" });
   }
 
-  const id = nid("ORD");
   const now = new Date().toISOString();
+  const id = nid("ORD");
 
   const order = {
     id,
@@ -128,27 +124,35 @@ router.post("/trading/orders", express.json(), (req, res) => {
     status: "NEW",
     createdAt: now,
     updatedAt: now,
-    ...body,
-    symbol: body.symbol || body.underlying || "SPY",
+    ...b,
+    symbol: b.symbol || b.underlying || "SPY",
   };
   ORDERS.unshift(order);
 
-  // PAPER fill logic: immediately fill MARKET orders, leave others as WORKING
-  if (String(body.orderType).toUpperCase() === "MKT" || String(body.orderType).toUpperCase() === "MARKET") {
+  // instant PAPER fill for MARKET; otherwise leave WORKING
+  const typ = String(b.orderType).toUpperCase();
+  if (typ === "MKT" || typ === "MARKET") {
     order.status = "FILLED";
     order.updatedAt = new Date().toISOString();
     const px = mockFillPrice(order);
-    const ex = { id: nid("EXE"), orderId: order.id, symbol: order.symbol, qty: Number(body.qty), price: px, time: new Date().toISOString() };
-    EXECUTIONS.unshift(ex);
-    applyPosition(ex, body.assetType);
+    const exe = {
+      id: nid("EXE"),
+      orderId: order.id,
+      symbol: order.symbol,
+      qty: Number(b.qty),
+      price: px,
+      time: new Date().toISOString(),
+    };
+    EXECUTIONS.unshift(exe);
+    applyPosition(exe, b.assetType);
   } else {
     order.status = "WORKING";
   }
 
-  res.status(201).json({ id: order.id, status: order.status });
+  return res.status(201).json({ id: order.id, status: order.status });
 });
 
-// Cancel
+// cancel
 router.delete("/trading/orders/:id", (req, res) => {
   const { id } = req.params;
   const i = ORDERS.findIndex((o) => o.id === id);
@@ -161,27 +165,23 @@ router.delete("/trading/orders/:id", (req, res) => {
   return res.json({ id, status: "CANCELLED" });
 });
 
-/* ------------------------------- helpers ---------------------------------- */
+/* --------------------------------- helpers --------------------------------- */
 function mockFillPrice(order) {
-  // fake fill price based on assetType
   if (order.assetType === "OPTION") {
-    // per-contract price (premium)
-    return Number((order.limitPrice ?? order.stopPrice ?? 2.45).toFixed(2));
+    return Number((order.limitPrice ?? order.stopPrice ?? 2.45).toFixed(2)); // premium
   }
-  // equity
-  return Number((order.limitPrice ?? order.stopPrice ?? 500.0).toFixed(2));
+  return Number((order.limitPrice ?? order.stopPrice ?? 500.0).toFixed(2));   // equity
 }
-
-function applyPosition(exe, assetType) {
-  // Track positions by 'symbol' only (simple).
+function applyPosition(exe /*, assetType */) {
   const key = exe.symbol;
   const cur = POSITIONS.get(key) || { symbol: key, qty: 0, avgPrice: 0, pnl: 0, realizedPnl: 0 };
-  const side = +exe.qty >= 0 ? 1 : -1;
+  const side = exe.qty >= 0 ? 1 : -1;
   const qty = Math.abs(Number(exe.qty));
-  // P&L math simplified for demo
   const newQty = cur.qty + side * qty;
   const newAvg = newQty === 0 ? 0 : (cur.avgPrice * cur.qty + exe.price * qty * side) / newQty;
   POSITIONS.set(key, { ...cur, qty: newQty, avgPrice: Number(newAvg.toFixed(2)) });
 }
 
-export default router;
+export default function buildRouter() {
+  return router;
+}
