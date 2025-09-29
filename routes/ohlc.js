@@ -12,7 +12,11 @@ ohlcRouter.get("/", async (req, res) => {
   try {
     const symbol    = String(req.query.symbol || "SPY").toUpperCase();
     const timeframe = String(req.query.timeframe || "10m").toLowerCase();
-    const limit     = Math.min(Number(req.query.limit || 1500), 5000);
+
+    // Safe parse + clamp for limit
+    let limit = Number.parseInt(String(req.query.limit ?? ""), 10);
+    if (!Number.isFinite(limit) || limit <= 0) limit = 1500;
+    limit = Math.min(limit, 5000);
 
     // timeframe → Polygon params + lookback
     const tfMap = {
@@ -39,7 +43,7 @@ ohlcRouter.get("/", async (req, res) => {
       tf.backDays = Math.min(backDaysOverride, 2000);
     }
 
-    // Window (ISO YYYY-MM-DD)
+    // Window (ISO YYYY-MM-DD, UTC)
     const now   = new Date();
     const toISO = now.toISOString().slice(0, 10);
     const from  = new Date(now);
