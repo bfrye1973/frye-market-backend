@@ -10,9 +10,8 @@ export const ohlcRouter = express.Router();
 
 /**
  * GET /api/v1/ohlc?symbol=SPY&timeframe=10m&limit=1500
- * timeframes supported: 1m,3m,5m,10m,15m,30m,1h,4h,1d (d,day also map to 1d)
- * Returns JSON array: [{ time, open, high, low, close, volume }, ...]
- * NOTE: time is EPOCH SECONDS (10-digit).
+ * Supported: 1m,3m,5m,10m,15m,30m,1h,4h,1d (d,day map to 1d)
+ * Returns: [{ time, open, high, low, close, volume }, ...] with time in SECONDS
  */
 ohlcRouter.get("/", async (req, res) => {
   try {
@@ -22,23 +21,24 @@ ohlcRouter.get("/", async (req, res) => {
     const limitReq  = Number(req.query.limit || 1500);
     const limit     = Number.isFinite(limitReq) ? Math.min(Math.max(limitReq, 1), 5000) : 1500;
 
-    /* -------- TF map: multiplier/timespan + how far back to pull --------
-       Intraday minute windows: ~45–60 days is usually plenty
-       Hourly windows: widen substantially (2–3 years)
-       Daily: 1+ year (can extend if you want more)
-    --------------------------------------------------------------------- */
+    /* -------- TF map (use minute aggregates for 1h/4h) --------
+       Minute TFs: 1–30m → span: 'minute' with appropriate multiplier
+       Hourly TFs: use minute aggregates to avoid Polygon hourly depth issues
+       Daily TFs: span: 'day'
+    ---------------------------------------------------------------- */
     const TF = {
-      "1m":  { mult:  1, span: "minute", backDays:  7  },
-      "3m":  { mult:  3, span: "minute", backDays: 14  },
-      "5m":  { mult:  5, span: "minute", backDays: 30  },
-      "10m": { mult: 10, span: "minute", backDays: 60  },
-      "15m": { mult: 15, span: "minute", backDays: 90  },
-      "30m": { mult: 30, span: "minute", backDays: 120 },
-      "1h":  { mult:  1, span: "hour",   backDays: 730 }, // ~2 years
-      "4h":  { mult:  4, span: "hour",   backDays: 1095 },// ~3 years
-      "1d":  { mult:  1, span: "day",    backDays: 365 },
-      "d":   { mult:  1, span: "day",    backDays: 365 },
-      "day": { mult:  1, span: "day",    backDays: 365 },
+      "1m":  { mult:   1, span: "minute", backDays:  7   },
+      "3m":  { mult:   3, span: "minute", backDays: 14   },
+      "5m":  { mult:   5, span: "minute", backDays: 30   },
+      "10m": { mult:  10, span: "minute", backDays: 60   },
+      "15m": { mult:  15, span: "minute", backDays: 90   },
+      "30m": { mult:  30, span: "minute", backDays: 120  },
+      // Use minute-aggregates for reliability on intraday hours:
+      "1h":  { mult:  60, span: "minute", backDays: 730  }, // ~2 years
+      "4h":  { mult: 240, span: "minute", backDays: 1095 }, // ~3 years
+      "1d":  { mult:   1, span: "day",    backDays: 365  },
+      "d":   { mult:   1, span: "day",    backDays: 365  },
+      "day": { mult:   1, span: "day",    backDays: 365  },
     };
     const tf = TF[timeframe] || TF["10m"];
 
@@ -73,7 +73,6 @@ ohlcRouter.get("/", async (req, res) => {
     const json = await upstream.json().catch(() => ({}));
     const results = Array.isArray(json?.results) ? json.results : [];
 
-    // Convert Polygon result to LWC format (time in EPOCH SECONDS)
     const bars = results
       .map((b) => ({
         time:   Math.floor(Number(b.t) / 1000), // ms -> s
@@ -93,8 +92,8 @@ ohlcRouter.get("/", async (req, res) => {
       );
 
     res.setHeader("Cache-Control", "no-store");
-    // Optional fingerprint for debugging; comment out after verifying
-    // res.setHeader("X-OHLC-Route", "routes/ohlc.js@canonical");
+    // Optional: fingerprint for verification; remove after confirming
+    // res.setHeader("X-OHLC-Route", "routes/ohlc.js@minute-hours");
 
     return res.json(bars);
   } catch (e) {
