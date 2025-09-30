@@ -1,6 +1,6 @@
 // routes/ohlc.js
 import express from "express";
-// import fetch from "node-fetch"; // Uncomment if not Node 18+
+// import fetch from "node-fetch"; // Uncomment if not on Node 18+
 export const ohlcRouter = express.Router();
 
 /**
@@ -12,31 +12,36 @@ ohlcRouter.get("/", async (req, res) => {
   try {
     const symbol    = String(req.query.symbol || "SPY").toUpperCase();
     const timeframe = String(req.query.timeframe || "10m").toLowerCase();
-    let limit       = Math.min(Number(req.query.limit || 1500), 5000);
 
-    // timeframe → Polygon params + backDays lookback
+    // Clamp at 5000 so FE/BE are consistent
+    let limit = Number.parseInt(String(req.query.limit ?? "1500"), 10);
+    if (!Number.isFinite(limit) || limit <= 0) limit = 1500;
+    limit = Math.min(limit, 5000);
+
+    // timeframe → Polygon params + lookback (minute aggs for intraday/hourly)
+    // tuned so 5m covers ~3 months with limit=5000; coarser TFs cover longer
     const tfMap = {
       "1m":  { mult: 1,   span: "minute", backDays: 5   },
       "3m":  { mult: 3,   span: "minute", backDays: 10  },
       "5m":  { mult: 5,   span: "minute", backDays: 90  },   // ~3 months
       "10m": { mult: 10,  span: "minute", backDays: 120 },   // ~4 months
-      "15m": { mult: 15,  span: "minute", backDays: 180 },
-      "30m": { mult: 30,  span: "minute", backDays: 365 },
-      "1h":  { mult: 60,  span: "minute", backDays: 730 },   // 2 years
-      "4h":  { mult: 240, span: "minute", backDays: 1095 },  // 3 years
+      "15m": { mult: 15,  span: "minute", backDays: 120 },   // ~4 months
+      "30m": { mult: 30,  span: "minute", backDays: 180 },   // ~6 months
+      "1h":  { mult: 60,  span: "minute", backDays: 180 },   // ~6 months
+      "4h":  { mult: 240, span: "minute", backDays: 270 },   // ~9 months
       "1d":  { mult: 1,   span: "day",    backDays: 365 },
       "d":   { mult: 1,   span: "day",    backDays: 365 },
       "day": { mult: 1,   span: "day",    backDays: 365 },
     };
     const tf = { ...(tfMap[timeframe] || tfMap["10m"]) };
 
-    // Optional override for testing: &backDays=N
+    // Optional: allow ?backDays=N (capped) for quick testing
     const backDaysOverride = Number(req.query.backDays);
     if (Number.isFinite(backDaysOverride) && backDaysOverride > 0) {
       tf.backDays = Math.min(backDaysOverride, 2000);
     }
 
-    // Window (ISO dates)
+    // Window (ISO YYYY-MM-DD)
     const now   = new Date();
     const toISO = now.toISOString().slice(0, 10);
     const from  = new Date(now);
