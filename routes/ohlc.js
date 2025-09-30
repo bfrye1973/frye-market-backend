@@ -1,6 +1,6 @@
 // routes/ohlc.js
 import express from "express";
-// import fetch from "node-fetch"; // Only if not on Node 18+
+// import fetch from "node-fetch"; // Uncomment if not Node 18+
 export const ohlcRouter = express.Router();
 
 /**
@@ -12,45 +12,39 @@ ohlcRouter.get("/", async (req, res) => {
   try {
     const symbol    = String(req.query.symbol || "SPY").toUpperCase();
     const timeframe = String(req.query.timeframe || "10m").toLowerCase();
-
-    // Safe parse + clamp for limit
-    let limit = Number.parseInt(String(req.query.limit ?? ""), 10);
-    if (!Number.isFinite(limit) || limit <= 0) limit = 1500;
-    limit = Math.min(limit, 5000);
+    let limit       = Math.min(Number(req.query.limit || 1500), 5000);
 
     // timeframe → Polygon params + lookback
     const tfMap = {
       "1m":  { mult: 1,   span: "minute", backDays: 5   },
       "3m":  { mult: 3,   span: "minute", backDays: 10  },
       "5m":  { mult: 5,   span: "minute", backDays: 20  },
-      "10m": { mult: 10,  span: "minute", backDays: 60  },  // widened
+      "10m": { mult: 10,  span: "minute", backDays: 60  },
       "15m": { mult: 15,  span: "minute", backDays: 60  },
       "30m": { mult: 30,  span: "minute", backDays: 90  },
-      "1h":  { mult: 60,  span: "minute", backDays: 730 },  // use minute aggs
-      "4h":  { mult: 240, span: "minute", backDays: 1095 }, // use minute aggs
+      // ✅ Use minute aggregates for deep hourly / 4h
+      "1h":  { mult: 60,  span: "minute", backDays: 730 },   // 2 years
+      "4h":  { mult: 240, span: "minute", backDays: 1095 },  // 3 years
       "1d":  { mult: 1,   span: "day",    backDays: 365 },
       "d":   { mult: 1,   span: "day",    backDays: 365 },
       "day": { mult: 1,   span: "day",    backDays: 365 },
     };
+    const tf = { ...(tfMap[timeframe] || tfMap["10m"]) };
 
-    // Clone per request to allow safe overrides
-    const tfBase = tfMap[timeframe] || tfMap["10m"];
-    const tf = { ...tfBase };
-
-    // Optional: backDays override for quick verification (capped)
+    // Optional: backDays override for quick testing
     const backDaysOverride = Number(req.query.backDays);
     if (Number.isFinite(backDaysOverride) && backDaysOverride > 0) {
       tf.backDays = Math.min(backDaysOverride, 2000);
     }
 
-    // Window (ISO YYYY-MM-DD, UTC)
+    // Window (ISO YYYY-MM-DD)
     const now   = new Date();
     const toISO = now.toISOString().slice(0, 10);
     const from  = new Date(now);
     from.setDate(from.getDate() - tf.backDays);
     const fromISO = from.toISOString().slice(0, 10);
 
-    // Polygon key (env)
+    // Polygon key (from env)
     const API = process.env.POLYGON_API
              || process.env.POLYGON_API_KEY
              || process.env.POLY_API_KEY
@@ -62,15 +56,13 @@ ohlcRouter.get("/", async (req, res) => {
     const url =
       `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}` +
       `/range/${tf.mult}/${tf.span}/${fromISO}/${toISO}` +
-      `?adjusted=true&sort=desc&limit=${limit}&apiKey=${API}`;
+      `?adjusted=true&sort=asc&limit=${limit}&apiKey=${API}`;
 
     const r = await fetch(url);
     if (!r.ok) return res.status(r.status).json({ ok: false, error: `upstream ${r.status}` });
     const j = await r.json();
 
     const results = Array.isArray(j?.results) ? j.results : [];
-    // Fetch newest-first from Polygon, then give LWC ascending
-    results.reverse();
 
     // Normalize → seconds for Lightweight-Charts
     const bars = results.map(b => ({
@@ -81,8 +73,11 @@ ohlcRouter.get("/", async (req, res) => {
       close:  Number(b.c),
       volume: Number(b.v ?? 0),
     })).filter(b =>
-      Number.isFinite(b.time) && Number.isFinite(b.open) &&
-      Number.isFinite(b.high) && Number.isFinite(b.low) && Number.isFinite(b.close)
+      Number.isFinite(b.time) &&
+      Number.isFinite(b.open) &&
+      Number.isFinite(b.high) &&
+      Number.isFinite(b.low) &&
+      Number.isFinite(b.close)
     );
 
     res.setHeader("Cache-Control", "no-store");
