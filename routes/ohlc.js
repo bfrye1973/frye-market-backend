@@ -4,7 +4,7 @@ import express from "express";
 export const ohlcRouter = express.Router();
 
 /**
- * GET /api/v1/ohlc?symbol=SPY&timeframe=10m&limit=1500
+ * GET /api/v1/ohlc?symbol=SPY&timeframe=5m&limit=5000
  * Returns: [{ time, open, high, low, close, volume }, ...]
  * NOTE: time is EPOCH SECONDS (10-digit), not ms.
  */
@@ -14,15 +14,14 @@ ohlcRouter.get("/", async (req, res) => {
     const timeframe = String(req.query.timeframe || "10m").toLowerCase();
     let limit       = Math.min(Number(req.query.limit || 1500), 5000);
 
-    // timeframe → Polygon params + lookback
+    // timeframe → Polygon params + backDays lookback
     const tfMap = {
       "1m":  { mult: 1,   span: "minute", backDays: 5   },
       "3m":  { mult: 3,   span: "minute", backDays: 10  },
-      "5m":  { mult: 5,   span: "minute", backDays: 20  },
-      "10m": { mult: 10,  span: "minute", backDays: 60  },
-      "15m": { mult: 15,  span: "minute", backDays: 60  },
-      "30m": { mult: 30,  span: "minute", backDays: 90  },
-      // ✅ Use minute aggregates for deep hourly / 4h
+      "5m":  { mult: 5,   span: "minute", backDays: 90  },   // ~3 months
+      "10m": { mult: 10,  span: "minute", backDays: 120 },   // ~4 months
+      "15m": { mult: 15,  span: "minute", backDays: 180 },
+      "30m": { mult: 30,  span: "minute", backDays: 365 },
       "1h":  { mult: 60,  span: "minute", backDays: 730 },   // 2 years
       "4h":  { mult: 240, span: "minute", backDays: 1095 },  // 3 years
       "1d":  { mult: 1,   span: "day",    backDays: 365 },
@@ -31,20 +30,20 @@ ohlcRouter.get("/", async (req, res) => {
     };
     const tf = { ...(tfMap[timeframe] || tfMap["10m"]) };
 
-    // Optional: backDays override for quick testing
+    // Optional override for testing: &backDays=N
     const backDaysOverride = Number(req.query.backDays);
     if (Number.isFinite(backDaysOverride) && backDaysOverride > 0) {
       tf.backDays = Math.min(backDaysOverride, 2000);
     }
 
-    // Window (ISO YYYY-MM-DD)
+    // Window (ISO dates)
     const now   = new Date();
     const toISO = now.toISOString().slice(0, 10);
     const from  = new Date(now);
     from.setDate(from.getDate() - tf.backDays);
     const fromISO = from.toISOString().slice(0, 10);
 
-    // Polygon key (from env)
+    // Polygon key
     const API = process.env.POLYGON_API
              || process.env.POLYGON_API_KEY
              || process.env.POLY_API_KEY
