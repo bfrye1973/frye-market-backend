@@ -1,5 +1,5 @@
 // /routes/stream.js — Polygon WS -> SSE (minute aggregates bucketized to selected TF)
-// Plan B: if AM message has no usable start time, fallback to NOW (epoch seconds)
+// Uses AM.s (start time) as the canonical bar start; ms → seconds.
 
 import express from "express";
 import { WebSocket } from "ws";
@@ -16,7 +16,6 @@ function polyKey() {
     ""
   );
 }
-
 function tfMinutes(tf = "1m") {
   const t = String(tf || "").toLowerCase();
   if (t === "1d" || t === "d" || t === "day") return 1440;
@@ -24,12 +23,10 @@ function tfMinutes(tf = "1m") {
   if (t.endsWith("m")) return Number(t);
   return 1;
 }
-
 function bucketStartSec(sec, tfMin) {
   const size = tfMin * 60;
   return Math.floor(sec / size) * size;
 }
-
 function sseHeaders(res) {
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-store, no-transform");
@@ -56,12 +53,8 @@ streamRouter.get("/agg", (req, res) => {
   let current = null; // { time, open, high, low, close, volume }
 
   function connect() {
-    try {
-      ws = new WebSocket("wss://socket.polygon.io/stocks");
-    } catch {
-      scheduleReconnect();
-      return;
-    }
+    try { ws = new WebSocket("wss://socket.polygon.io/stocks"); }
+    catch { scheduleReconnect(); return; }
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ action: "auth", params: key }));
@@ -71,36 +64,37 @@ streamRouter.get("/agg", (req, res) => {
     ws.onmessage = (ev) => {
       if (!alive) return;
 
-      let list;
-      try { list = JSON.parse(ev.data); } catch { return; }
-      if (!Array.isArray(list)) list = [list];
+      let arr;
+      try { arr = JSON.parse(ev.data); } catch { return; }
+      if (!Array.isArray(arr)) arr = [arr];
 
-      for (const msg of list) {
+      for (const msg of arr) {
+        // Expect AM aggregate payload with 's' = start time (ms)
         if (msg?.ev !== "AM" || msg?.sym !== symbol) continue;
 
-        // Try all known fields; fallback to NOW (Plan B)
-        let tRaw =
-          (msg && (msg.s ?? msg.t ?? msg.start ?? msg.Start ?? msg.S ?? msg.T)) ??
-          Math.floor(Date.now() / 1000) * 1000; // ms version of NOW just in case
+        // s is ALWAYS present per Polygon; if not numeric, skip packet.
+        const startMs = Number(msg.s);
+        if (!Number.isFinite(startMs) || startMs <= 0) continue;
 
-        let sec = Number(tRaw);
-        if (!Number.isFinite(sec)) sec = Math.floor(Date.now() / 1000); // NOW (s)
-        else sec = sec > 1e12 ? Math.floor(sec / 1000) : Math.floor(sec); // ms->s or keep s
+        const startSec = Math.floor(startMs / 1000); // ms → s
+        const open  = Number(msg.o);
+        const high  = Number(msg.h);
+        const low   = Number(msg.l);
+        const close = Number(msg.c);
+        const vol   = Number(msg.v || 0);
 
-        if (!(sec > 1e9)) sec = Math.floor(Date.now() / 1000); // final guard: NOW (s)
+        // Basic validation
+        if (![open, high, low, close].every(Number.isFinite)) continue;
 
-        const bStart = bucketStartSec(sec, tfMin);
-
-        const o = Number(msg.o), h = Number(msg.h), l = Number(msg.l), c = Number(msg.c);
-        const v = Number(msg.v || 0);
+        const bStart = bucketStartSec(startSec, tfMin);
 
         if (!current || current.time < bStart) {
-          current = { time: bStart, open: o, high: h, low: l, close: c, volume: v };
+          current = { time: bStart, open, high, low, close, volume: vol };
         } else {
-          current.high   = Math.max(current.high, h);
-          current.low    = Math.min(current.low,  l);
-          current.close  = c;
-          current.volume = (current.volume || 0) + v;
+          current.high   = Math.max(current.high, high);
+          current.low    = Math.min(current.low,  low);
+          current.close  = close;
+          current.volume = (current.volume || 0) + vol;
         }
 
         // Emit SSE with a VALID epoch-seconds time
@@ -112,17 +106,14 @@ streamRouter.get("/agg", (req, res) => {
     ws.onclose  = () => { cleanup(); scheduleReconnect(); };
   }
 
-  function cleanup() {
-    try { ws?.close(); } catch {}
-    ws = null;
-  }
+  function cleanup() { try { ws?.close(); } catch {} ws = null; }
   function scheduleReconnect() {
     if (!alive) return;
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(connect, 1500);
   }
 
-  // keep-alive
+  // keep-alive pings
   const ping = setInterval(() => alive && res.write(":ping\n\n"), 15000);
 
   connect();
