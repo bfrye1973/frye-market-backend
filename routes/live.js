@@ -36,6 +36,7 @@ liveRouter.get("/nowbar", async (req, res) => {
 
     // Ask Polygon for the latest completed bar across a wide window
     const url =
+      console.log("[nowbar] url:", url);
       `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}` +
       `/range/${tf.mult}/${tf.span}/${fromISO}/${toISO}` +
       `?adjusted=true&sort=desc&limit=1&apiKey=${API}`;
