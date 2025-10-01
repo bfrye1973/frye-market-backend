@@ -1,10 +1,12 @@
 // server.js — Express ESM (complete)
 import express from "express";
+import streamRouter from "./routes/stream.js";
+app.use("/stream", streamRouter);
 import path from "path";
 import { fileURLToPath } from "url";
-
 import apiRouter from "./api/routes.js";
 import { ohlcRouter } from "./routes/ohlc.js";
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
