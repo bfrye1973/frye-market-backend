@@ -1,4 +1,4 @@
-{
+{ 
   "name": "frye-market-backend",
   "version": "1.0.0",
   "type": "module",
@@ -13,6 +13,7 @@
     "dev": "NODE_ENV=development node server.js"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "ws": "^8.17.0"
   }
 }
