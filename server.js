@@ -1,29 +1,28 @@
-// server.js — full Express server (ESM)
-// - CORS
+// server.js — Express ESM
+// - CORS + JSON
 // - Static
 // - OHLC history (/api/v1/ohlc)
-// - LIVE now bar (/api/v1/live/nowbar, /api/v1/live/diag)
-// - GitHub raw proxies for dashboard tiles (/live/intraday, /live/hourly, /live/eod)
+// - LIVE nowbar (/api/v1/live/nowbar, /api/v1/live/diag)
+// - GitHub raw proxies for tiles (/live/intraday, /live/hourly, /live/eod)
+// - Polygon WS → SSE mount (/stream/agg)  [needs routes/stream.js + "ws" dep]
 // - Health, 404, error
 
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
+
 import apiRouter from "./api/routes.js";
 import { ohlcRouter } from "./routes/ohlc.js";
-import { streamRouter } from "./routes/stream.js";
+import { streamRouter } from "./routes/stream.js"; // <-- SSE relay
 
-// ...after other app.use(...)
-app.use("/stream", streamRouter);
-
-
+/* --------------------------- app + basics (ORDER) --------------------------- */
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-/* ------------------------------- CORS ------------------------------------ */
+/* --------------------------------- CORS ------------------------------------ */
 const ALLOW = new Set([
   "https://frye-dashboard.onrender.com",
   "http://localhost:3000",
@@ -46,24 +45,16 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: "1mb" }));
 
-/* --------------------------- Static: /public ----------------------------- */
+/* ------------------------------- Static ------------------------------------ */
 app.use(express.static(path.join(__dirname, "public")));
 
-/* ===================== API ROUTE MOUNT ORDER (CRITICAL) ================== */
-/** Mount deep-history OHLC first so it can't be shadowed by /api. */
+/* ------------------------- Mount main API routes --------------------------- */
+// History first (so it can't be shadowed)
 app.use("/api/v1/ohlc", ohlcRouter);
-
-/** Mount the rest of your API (generic router). */
+// Generic API router (yours)
 app.use("/api", apiRouter);
 
-/* ------------------------------ LIVE NOW-BAR ----------------------------- */
-/**
- * GET /api/v1/live/nowbar?symbol=SPY&tf=10m
- * -> { ok:true, tf, symbol, bar:{ time, open, high, low, close, volume } }
- *
- * GET /api/v1/live/diag?symbol=SPY&tf=10m
- * -> { ok:true, upstreamStatus, url, polygon }
- */
+/* ------------------------------ LIVE nowbar -------------------------------- */
 function getPolyKey() {
   return (
     process.env.POLYGON_API ||
@@ -87,6 +78,7 @@ function tfParams(tf = "10m") {
   return map[t] || map["10m"];
 }
 
+// GET /api/v1/live/nowbar?symbol=SPY&tf=10m
 app.get("/api/v1/live/nowbar", async (req, res) => {
   try {
     const symbol = String(req.query.symbol || "SPY").toUpperCase();
@@ -94,9 +86,9 @@ app.get("/api/v1/live/nowbar", async (req, res) => {
     const tf     = tfParams(tfIn);
 
     const now    = new Date();
-    const toISO  = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const toISO  = now.toISOString().slice(0, 10);   // YYYY-MM-DD
     const from   = new Date(now); from.setDate(from.getDate() - tf.backDays);
-    const fromISO= from.toISOString().slice(0, 10); // YYYY-MM-DD
+    const fromISO= from.toISOString().slice(0, 10);  // YYYY-MM-DD
 
     const API = getPolyKey();
     if (!API) return res.status(500).json({ ok:false, error:"Missing POLYGON_API env" });
@@ -115,7 +107,7 @@ app.get("/api/v1/live/nowbar", async (req, res) => {
     if (results.length > 0) {
       const b = results[0];
       bar = {
-        time:   Math.floor(Number(b.t) / 1000),
+        time:   Math.floor(Number(b.t) / 1000), // ms -> s
         open:   Number(b.o),
         high:   Number(b.h),
         low:    Number(b.l),
@@ -123,13 +115,15 @@ app.get("/api/v1/live/nowbar", async (req, res) => {
         volume: Number(b.v ?? 0),
       };
     } else {
-      // Fallback: last trade as synthetic bar (keeps UI moving)
-      const tradeUrl = `https://api.polygon.io/v2/last/trade/${symbol}?apiKey=${API}`;
-      const tr = await fetch(tradeUrl, { cache: "no-store" });
+      // fallback to last trade (ns -> s conversion)
+      const tUrl = `https://api.polygon.io/v2/last/trade/${symbol}?apiKey=${API}`;
+      const tr = await fetch(tUrl, { cache: "no-store" });
       const tj = await tr.json();
       const p = Number(tj?.results?.p ?? 0);
-      const t = Math.floor(Number(tj?.results?.t ?? Date.now()) / 1000);
-      bar = { time: t, open: p, high: p, low: p, close: p, volume: 0 };
+      const tRaw = Number(tj?.results?.t ?? 0);             // ns
+      const tSec = tRaw > 1e12 ? Math.floor(tRaw / 1e9)     // ns -> s
+                               : Math.floor(tRaw / 1000);
+      bar = { time: tSec, open: p, high: p, low: p, close: p, volume: 0 };
     }
 
     res.setHeader("Cache-Control", "no-store");
@@ -140,6 +134,7 @@ app.get("/api/v1/live/nowbar", async (req, res) => {
   }
 });
 
+// GET /api/v1/live/diag?symbol=SPY&tf=10m
 app.get("/api/v1/live/diag", async (req, res) => {
   try {
     const symbol = String(req.query.symbol || "SPY").toUpperCase();
@@ -163,14 +158,14 @@ app.get("/api/v1/live/diag", async (req, res) => {
     const j = await r.json();
 
     res.setHeader("Cache-Control", "no-store");
-    return res.json({ ok:true, upstreamStatus:r.status, url, polygon: j });
+    return res.json({ ok:true, upstreamStatus:r.status, url, polygon:j });
   } catch (e) {
     return res.status(500).json({ ok:false, error:e?.message || "diag error" });
   }
 });
 
 /* --------------------------- GitHub raw proxies -------------------------- */
-/** These power Market Meter / Engine Lights / Index Sectors tiles. */
+// Power Market Meter / Engine Lights / Index Sectors tiles
 const GH_RAW_BASE =
   "https://raw.githubusercontent.com/bfrye1973/frye-market-backend";
 
@@ -178,7 +173,7 @@ async function proxyRaw(res, url) {
   try {
     const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) {
-      return res.status(r.status).json({ ok: false, error: `Upstream ${r.status}` });
+      return res.status(r.status).json({ ok:false, error:`Upstream ${r.status}` });
     }
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -190,7 +185,7 @@ async function proxyRaw(res, url) {
   }
 }
 
-// NOTE: these use **branch names** as part of the path.
+// NOTE: these reference **branches** in your repo
 app.get("/live/intraday", (_req, res) =>
   proxyRaw(res, `${GH_RAW_BASE}/data-live-10min/data/outlook_intraday.json`)
 );
@@ -201,16 +196,18 @@ app.get("/live/eod", (_req, res) =>
   proxyRaw(res, `${GH_RAW_BASE}/data-live-eod/data/outlook.json`)
 );
 
+/* ------------------------- Mount the WS→SSE relay ------------------------- */
+// IMPORTANT: mount AFTER app is created (fixes "Cannot access 'app' before initialization")
+app.use("/stream", streamRouter);
+
 /* -------------------------------- Health --------------------------------- */
-app.get("/healthz", (req, res) =>
-  res.json({ ok: true, service: "backend", ts: new Date().toISOString() })
+app.get("/healthz", (_req, res) =>
+  res.json({ ok:true, service:"backend", ts:new Date().toISOString() })
 );
 
 /* ------------------------ 404 + Error Handlers --------------------------- */
-app.use((req, res) => res.status(404).json({ ok: false, error: "Not Found" }));
-
-// eslint-disable-next-line no-unused-vars
-app.use((err, req, res, next) => {
+app.use((req, res) => res.status(404).json({ ok:false, error:"Not Found" }));
+app.use((err, req, res, _next) => {
   console.error("Unhandled error:", err);
   res.status(500).json({ ok:false, error:"Internal Server Error" });
 });
@@ -218,10 +215,10 @@ app.use((err, req, res, next) => {
 /* --------------------------------- Start --------------------------------- */
 app.listen(PORT, () => {
   console.log(`[OK] backend listening on :${PORT}
-- GET /api/v1/ohlc?symbol=SPY&timeframe=10m|1h|1d
-- GET /api/v1/live/nowbar?symbol=SPY&tf=10m
-- GET /api/v1/live/diag?symbol=SPY&tf=10m
-- GET /live/intraday | /live/hourly | /live/eod
-- GET /healthz
+- /api/v1/ohlc
+- /api/v1/live/nowbar, /api/v1/live/diag
+- /live/intraday, /live/hourly, /live/eod
+- /stream/agg  (SSE relay)
+- /healthz
 `);
 });
