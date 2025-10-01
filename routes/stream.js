@@ -1,13 +1,11 @@
-// /src/routes/stream.js
-// Polygon WS -> SSE relay (minute aggregates bucketized to selected TF)
+// /src/routes/stream.js — Polygon WS -> SSE (minute aggs bucketized)
 import express from "express";
 import { WebSocket } from "ws";
 
 const streamRouter = express.Router();
 export default streamRouter;
 
-/* ---------------- helpers ---------------- */
-function getPolyKey() {
+function key() {
   return (
     process.env.POLYGON_API ||
     process.env.POLYGON_API_KEY ||
@@ -15,19 +13,14 @@ function getPolyKey() {
     ""
   );
 }
-
-function tfMinutes(tf = "1m") {
-  const t = String(tf || "").toLowerCase();
+const tfMinutes = (tf="1m") => {
+  const t = String(tf).toLowerCase();
   if (t === "1d" || t === "d" || t === "day") return 1440;
   if (t.endsWith("h")) return Number(t) * 60;
   if (t.endsWith("m")) return Number(t);
   return 1;
-}
-
-function bucketStartSec(sec, tfMin) {
-  const size = tfMin * 60;             // seconds per bucket
-  return Math.floor(sec / size) * size; // floor to bucket start
-}
+};
+const bucketStart = (sec, tfMin) => Math.floor(sec / (tfMin*60)) * (tfMin*60);
 
 function sseHeaders(res) {
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -35,59 +28,44 @@ function sseHeaders(res) {
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders?.();
 }
+const send = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
-function sseSend(res, obj) {
-  res.write(`data: ${JSON.stringify(obj)}\n\n`);
-}
-
-/* --------------- GET /stream/agg?symbol=SPY&tf=10m ---------------- */
 streamRouter.get("/agg", (req, res) => {
-  const key = getPolyKey();
-  if (!key) return res.status(500).end("Missing POLYGON_API key");
+  const apiKey = key();
+  if (!apiKey) return res.status(500).end("Missing POLYGON_API key");
 
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
-  const tfStr = String(req.query.tf || "1m");
-  const tfMin = tfMinutes(tfStr);
-
-  // don't stream daily
-  if (tfMin >= 1440) return res.status(400).end("Daily not supported over stream");
+  const tfStr  = String(req.query.tf || "1m");
+  const tfMin  = tfMinutes(tfStr);
+  if (tfMin >= 1440) return res.status(400).end("Daily not supported");
 
   sseHeaders(res);
 
-  let ws;
-  let alive = true;
-  let reconnectTimer;
-  let current = null; // current bucket { time, open, high, low, close, volume }
+  let ws, alive = true, reconnect;
+  let current = null; // { time, open, high, low, close, volume }
 
-  function connect() {
-    try {
-      ws = new WebSocket("wss://socket.polygon.io/stocks");
-    } catch {
-      scheduleReconnect();
-      return;
-    }
+  const connect = () => {
+    try { ws = new WebSocket("wss://socket.polygon.io/stocks"); }
+    catch { schedule(); return; }
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ action: "auth", params: key }));
-      ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol}` })); // 1-min aggregates
+      ws.send(JSON.stringify({ action: "auth", params: apiKey }));
+      ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol}` }));
     };
 
     ws.onmessage = (ev) => {
       if (!alive) return;
-      let arr;
-      try { arr = JSON.parse(ev.data); } catch { return; }
+      let arr; try { arr = JSON.parse(ev.data); } catch { return; }
       if (!Array.isArray(arr)) arr = [arr];
 
-      for (const msg of arr) {
-        // AM payload: { ev:"AM", sym:"SPY", o,h,l,c,v, s(start ms), e(end ms) }
-        if (msg?.ev !== "AM" || msg?.sym !== symbol) continue;
+      for (const m of arr) {
+        if (m?.ev !== "AM" || m?.sym !== symbol) continue;
+        const sec = Math.floor(Number(m.s || 0)/1000); // start ms -> s
+        if (!sec) continue;
 
-        const startSec = Math.floor(Number(msg.s || 0) / 1000); // ms -> s
-        if (!startSec) continue;
-
-        const o = Number(msg.o), h = Number(msg.h), l = Number(msg.l), c = Number(msg.c);
-        const v = Number(msg.v || 0);
-        const bStart = bucketStartSec(startSec, tfMin);
+        const bStart = bucketStart(sec, tfMin);
+        const o = Number(m.o), h = Number(m.h), l = Number(m.l), c = Number(m.c);
+        const v = Number(m.v || 0);
 
         if (!current || current.time < bStart) {
           current = { time: bStart, open: o, high: h, low: l, close: c, volume: v };
@@ -97,35 +75,23 @@ streamRouter.get("/agg", (req, res) => {
           current.close  = c;
           current.volume = (current.volume || 0) + v;
         }
-
-        // emit bar with valid seconds timestamp
-        sseSend(res, { ok: true, type: "bar", symbol, tf: tfStr, bar: current });
+        send(res, { ok: true, type: "bar", symbol, tf: tfStr, bar: current });
       }
     };
 
-    ws.onerror = () => { cleanup(); scheduleReconnect(); };
-    ws.onclose  = () => { cleanup(); scheduleReconnect(); };
-  }
+    ws.onerror = () => { cleanup(); schedule(); };
+    ws.onclose  = () => { cleanup(); schedule(); };
+  };
 
-  function cleanup() {
-    try { ws?.close(); } catch {}
-    ws = null;
-  }
+  const cleanup = () => { try { ws?.close(); } catch {} ws = null; };
+  const schedule = () => { if (!alive) return; clearTimeout(reconnect); reconnect = setTimeout(connect, 1500); };
 
-  function scheduleReconnect() {
-    if (!alive) return;
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connect, 1500);
-  }
-
-  // keep-alive pings so proxies don’t close us
   const ping = setInterval(() => alive && res.write(":ping\n\n"), 15000);
-
   connect();
 
   req.on("close", () => {
     alive = false;
-    clearTimeout(reconnectTimer);
+    clearTimeout(reconnect);
     clearInterval(ping);
     cleanup();
     try { res.end(); } catch {}
