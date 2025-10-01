@@ -4,6 +4,7 @@ import { WebSocket } from "ws";
 
 export const streamRouter = express.Router();
 
+/* ---------------- helpers ---------------- */
 function getKey() {
   return (
     process.env.POLYGON_API ||
@@ -22,8 +23,8 @@ function tfMinutes(tf = "1m") {
 }
 
 function bucketStartSec(sec, tfMin) {
-  const size = tfMin * 60;
-  return Math.floor(sec / size) * size;
+  const size = tfMin * 60;                     // bucket length (seconds)
+  return Math.floor(sec / size) * size;        // floor to start-of-bucket
 }
 
 function sseHeaders(res) {
@@ -37,6 +38,7 @@ function sseSend(res, obj) {
   res.write(`data: ${JSON.stringify(obj)}\n\n`);
 }
 
+/* --------------- GET /stream/agg?symbol=SPY&tf=10m ---------------- */
 streamRouter.get("/agg", (req, res) => {
   const key = getKey();
   if (!key) return res.status(500).end("Missing POLYGON_API key");
@@ -51,7 +53,9 @@ streamRouter.get("/agg", (req, res) => {
   let ws;
   let alive = true;
   let reconnectTimer;
-  let current = null; // last bucket
+
+  // current bucket we’re building
+  let current = null; // { time, open, high, low, close, volume }
 
   function connect() {
     try {
@@ -63,7 +67,7 @@ streamRouter.get("/agg", (req, res) => {
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ action: "auth", params: key }));
-      ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol}` })); // 1m aggs
+      ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol}` })); // 1-minute aggs
     };
 
     ws.onmessage = (ev) => {
@@ -73,16 +77,17 @@ streamRouter.get("/agg", (req, res) => {
       if (!Array.isArray(list)) list = [list];
 
       for (const msg of list) {
-        // AM payload: ev, sym, o,h,l,c,v, s(start ms), e(end ms)
+        // expect: { ev:"AM", sym:"SPY", o,h,l,c,v, s(start ms), e(end ms) }
         if (msg?.ev !== "AM" || msg?.sym !== symbol) continue;
 
-        const startSec = Math.floor(Number(msg.s || 0) / 1000);
+        const startSec = Math.floor(Number(msg.s || 0) / 1000); // ms -> s
         if (!startSec) continue;
 
         const bStart = bucketStartSec(startSec, tfMin);
         const o = Number(msg.o), h = Number(msg.h), l = Number(msg.l), c = Number(msg.c);
         const v = Number(msg.v || 0);
 
+        // NEW bucket or update existing one
         if (!current || current.time < bStart) {
           current = { time: bStart, open: o, high: h, low: l, close: c, volume: v };
         } else {
@@ -92,6 +97,7 @@ streamRouter.get("/agg", (req, res) => {
           current.volume = (current.volume || 0) + v;
         }
 
+        // Emit SSE with a VALID seconds timestamp
         sseSend(res, { ok: true, type: "bar", symbol, tf: tfStr, bar: current });
       }
     };
@@ -111,10 +117,8 @@ streamRouter.get("/agg", (req, res) => {
     reconnectTimer = setTimeout(connect, 1500);
   }
 
-  // keep-alive
-  const ping = setInterval(() => {
-    if (alive) res.write(":ping\n\n");
-  }, 15000);
+  // keep-alive pings so proxies don’t close us
+  const ping = setInterval(() => alive && res.write(":ping\n\n"), 15000);
 
   connect();
 
