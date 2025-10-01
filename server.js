@@ -5,7 +5,6 @@ import { fileURLToPath } from "url";
 
 import apiRouter from "./api/routes.js";
 import { ohlcRouter } from "./routes/ohlc.js";
-import { streamRouter } from "./routes/stream.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -173,9 +172,6 @@ app.get("/live/hourly", (_req, res) =>
 app.get("/live/eod", (_req, res) =>
   proxyRaw(res, `${GH_RAW_BASE}/data-live-eod/data/outlook.json`)
 );
-
-/* --------------------------- SSE stream mount ---------------------------- */
-app.use("/stream", streamRouter);
 
 /* -------------------------------- Health --------------------------------- */
 app.get("/healthz", (_req, res) =>
