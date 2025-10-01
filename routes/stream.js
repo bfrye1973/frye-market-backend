@@ -67,6 +67,12 @@ streamRouter.get("/agg", (req, res) => {
       let arr;
       try { arr = JSON.parse(ev.data); } catch { return; }
       if (!Array.isArray(arr)) arr = [arr];
+      // right after: if (!Array.isArray(arr)) arr = [arr];
+      for (const msg of arr) {
+        if (msg?.ev !== "AM") continue;
+        console.log("AM sample:", { keys: Object.keys(msg), s: msg.s, sym: msg.sym });
+        // ... keep your existing code ...
+
 
       for (const msg of arr) {
         // Expect AM aggregate payload with 's' = start time (ms)
