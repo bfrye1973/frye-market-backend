@@ -11,6 +11,11 @@ import path from "path";
 import { fileURLToPath } from "url";
 import apiRouter from "./api/routes.js";
 import { ohlcRouter } from "./routes/ohlc.js";
+import { streamRouter } from "./routes/stream.js";
+
+// ...after other app.use(...)
+app.use("/stream", streamRouter);
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
