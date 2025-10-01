@@ -1,4 +1,4 @@
-// routes/live.js — clean replacement
+// routes/live.js — corrected version
 import express from "express";
 export const liveRouter = express.Router();
 
@@ -36,10 +36,10 @@ liveRouter.get("/nowbar", async (req, res) => {
     const tf = tfParams(tfIn);
 
     const now = new Date();
-    const toISO = now.toISOString(); // FULL ISO timestamp
+    const toISO = now.toISOString().slice(0, 10); // YYYY-MM-DD only
     const from = new Date(now);
     from.setDate(from.getDate() - tf.backDays);
-    const fromISO = from.toISOString(); // FULL ISO timestamp
+    const fromISO = from.toISOString().slice(0, 10); // YYYY-MM-DD only
 
     const API = getPolyKey();
     if (!API) {
@@ -112,10 +112,10 @@ liveRouter.get("/diag", async (req, res) => {
     const tf = tfParams(tfIn);
 
     const now = new Date();
-    const toISO = now.toISOString();
+    const toISO = now.toISOString().slice(0, 10); // YYYY-MM-DD
     const from = new Date(now);
     from.setDate(from.getDate() - tf.backDays);
-    const fromISO = from.toISOString();
+    const fromISO = from.toISOString().slice(0, 10); // YYYY-MM-DD
 
     const API = getPolyKey();
     if (!API) {
@@ -140,3 +140,4 @@ liveRouter.get("/diag", async (req, res) => {
       .json({ ok: false, error: e?.message || "diag error" });
   }
 });
+
