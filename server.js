@@ -1,173 +1,80 @@
-// /routes/stream.js — DIAG BUILD
-// Shows Polygon status/auth/subscription and AM handling over SSE.
-// After we find the issue, we’ll swap back to the clean version.
-
+// /server.js — backend only (no stream). Safe start, clear logging, correct healthz.
 import express from "express";
-import { WebSocket } from "ws";
+import path from "path";
+import { fileURLToPath } from "url";
 
-const streamRouter = express.Router();
-export default streamRouter;
+import apiRouter from "./api/routes.js";
+import { ohlcRouter } from "./routes/ohlc.js";
+// IMPORTANT: no stream import/mount here
+// import streamRouter from "./routes/stream.js";
 
-/* ---------- helpers ---------- */
-function polyKey() {
-  return (
-    process.env.POLYGON_API ||
-    process.env.POLYGON_API_KEY ||
-    process.env.POLY_API_KEY ||
-    ""
-  );
-}
+const app = express();
 
-function tfMinutes(tf = "1m") {
-  const t = String(tf || "").toLowerCase();
-  if (t === "1d" || t === "d" || t === "day") return 1440; // daily not streamed
-  if (t.endsWith("h")) return Number(t.slice(0, -1)) * 60;
-  if (t.endsWith("m")) return Number(t.slice(0, -1));
-  const n = Number(t);
-  return Number.isFinite(n) && n > 0 ? n : 1;
-}
+/* ---------------- CORS ---------------- */
+const ALLOW = new Set([
+  "https://frye-dashboard.onrender.com",
+  "http://localhost:3000"
+]);
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOW.has(origin)) res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Cache-Control, Authorization, X-Requested-With, X-Idempotency-Key");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 
-function bucketStartSec(sec, tfMin) {
-  const size = tfMin * 60;
-  return Math.floor(sec / size) * size;
-}
+app.use(express.json({ limit: "1mb" }));
 
-function sseHeaders(res) {
-  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-  res.setHeader("Cache-Control", "no-store, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders?.();
-}
+/* --------------- static --------------- */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+app.use(express.static(path.join(__dirname, "public")));
 
-const send = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
-const diag = (res, msg, extra = {}) => send(res, { ok: true, type: "diag", msg, ...extra });
+/* --------------- routes --------------- */
+app.use("/api/v1/ohlc", ohlcRouter);
+app.use("/api", apiRouter);
+// DO NOT mount /stream on this service
+// app.use("/stream", streamRouter);
 
-/* ---------- GET /stream/agg?symbol=SPY&tf=10m ---------- */
-streamRouter.get("/agg", (req, res) => {
-  const key = polyKey();
-  if (!key) return res.status(500).end("Missing POLYGON_API key");
-
-  const symbol = String(req.query.symbol || "SPY").toUpperCase();
-  const tfStr  = String(req.query.tf || "1m");
-  const tfMin  = tfMinutes(tfStr);
-  if (tfMin >= 1440) return res.status(400).end("Daily not supported over stream");
-
-  sseHeaders(res);
-  diag(res, "route-mounted", { symbol, tf: tfStr });
-
-  let ws;
-  let alive = true;
-  let reconnectTimer;
-
-  // Current TF bucket
-  let currentBucket = null;
-
-  // Track last cumulative volume per minute for delta calc
-  const minuteVol = new Map(); // minuteStartSec -> last cumulative v
-
-  function connect() {
-    try {
-      ws = new WebSocket("wss://socket.polygon.io/stocks");
-      diag(res, "ws-connecting");
-    } catch (e) {
-      diag(res, "ws-connect-throw", { error: String(e) });
-      scheduleReconnect();
-      return;
-    }
-
-    ws.onopen = () => {
-      diag(res, "ws-open");
-      ws.send(JSON.stringify({ action: "auth", params: key }));
-      ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol}` }));
-      diag(res, "ws-sent-auth-sub", { subscribe: `AM.${symbol}` });
-    };
-
-    ws.onmessage = (ev) => {
-      if (!alive) return;
-
-      let arr;
-      try { arr = JSON.parse(ev.data); } catch (e) {
-        diag(res, "ws-json-parse-fail", { error: String(e) });
-        return;
-      }
-      if (!Array.isArray(arr)) arr = [arr];
-
-      // Surface Polygon status frames so we can see auth/sub results
-      for (const msg of arr) {
-        if (msg?.ev === "status") {
-          diag(res, "status", { status: msg.status || null, message: msg.message || null });
-        }
-      }
-
-      for (const msg of arr) {
-        if (msg?.ev !== "AM") continue;
-
-        if (msg?.sym !== symbol) {
-          // helps detect casing/path issues
-          diag(res, "am-other-symbol", { got: msg.sym, want: symbol });
-          continue;
-        }
-
-        const startMs = Number(msg.s);
-        if (!Number.isFinite(startMs) || startMs <= 0) {
-          diag(res, "am-missing-s", { s: msg.s });
-          continue;
-        }
-
-        const startSec = Math.floor(startMs / 1000);
-        const o = Number(msg.o), h = Number(msg.h), l = Number(msg.l), c = Number(msg.c);
-        if (![o, h, l, c].every(Number.isFinite)) {
-          diag(res, "am-bad-ohlc", { o: msg.o, h: msg.h, l: msg.l, c: msg.c });
-          continue;
-        }
-
-        const vCum = Number(msg.v || 0);
-        if (!Number.isFinite(vCum) || vCum < 0) {
-          diag(res, "am-bad-volume", { v: msg.v });
-          continue;
-        }
-
-        const minuteStart = bucketStartSec(startSec, 1);
-        const bucketStart = bucketStartSec(startSec, tfMin);
-
-        const prevCum = minuteVol.get(minuteStart) ?? 0;
-        const deltaV = Math.max(0, vCum - prevCum);
-        minuteVol.set(minuteStart, vCum);
-
-        if (!currentBucket || currentBucket.time < bucketStart) {
-          currentBucket = { time: bucketStart, open: o, high: h, low: l, close: c, volume: deltaV };
-        } else {
-          currentBucket.high  = Math.max(currentBucket.high, h);
-          currentBucket.low   = Math.min(currentBucket.low,  l);
-          currentBucket.close = c;
-          currentBucket.volume = (currentBucket.volume || 0) + deltaV;
-        }
-
-        send(res, { ok: true, type: "bar", symbol, tf: tfStr, bar: currentBucket });
-      }
-    };
-
-    ws.onerror = (e) => { diag(res, "ws-error", { error: String(e?.message || e) }); cleanup(); scheduleReconnect(); };
-    ws.onclose  = (e) => { diag(res, "ws-close", { code: e?.code, reason: e?.reason }); cleanup(); scheduleReconnect(); };
+/* ------------- GitHub proxies (JSON for tiles) ------------- */
+const GH_RAW_BASE = "https://raw.githubusercontent.com/bfrye1973/frye-market-backend";
+async function proxyRaw(res, url){
+  try{
+    const r = await fetch(url, { cache: "no-store" });
+    if(!r.ok) return res.status(r.status).json({ ok:false, error:`Upstream ${r.status}`});
+    res.setHeader("Cache-Control","no-store");
+    res.setHeader("Content-Type","application/json; charset=utf-8");
+    const text = await r.text();
+    return res.send(text);
+  }catch(e){
+    return res.status(502).json({ ok:false, error:"Bad Gateway" });
   }
+}
+app.get("/live/intraday", (_req,res)=> proxyRaw(res, `${GH_RAW_BASE}/data-live-10min/data/outlook_intraday.json`) );
+app.get("/live/hourly",   (_req,res)=> proxyRaw(res, `${GH_RAW_BASE}/data-live-hourly/data/outlook_hourly.json`) );
+app.get("/live/eod",      (_req,res)=> proxyRaw(res, `${GH_RAW_BASE}/data-live-eod/data/outlook.json`) );
 
-  function cleanup() { try { ws?.close(); } catch {} ws = null; }
-  function scheduleReconnect() {
-    if (!alive) return;
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connect, 1500);
-  }
+/* ---------------- health ---------------- */
+app.get("/healthz", (_req,res)=> res.json({ ok:true, service:"backend", ts:new Date().toISOString() }) );
 
-  // keep-alive pings
-  const ping = setInterval(() => alive && res.write(":ping\n\n"), 15000);
+/* -------------- 404 / error -------------- */
+app.use((req,res)=> res.status(404).json({ ok:false, error:"Not Found" }));
+app.use((err,req,res,_next)=>{
+  console.error("Unhandled error:", err?.stack || err);
+  res.status(500).json({ ok:false, error:"Internal Server Error" });
+});
 
-  connect();
+/* ---------------- start ---------------- */
+const PORT = Number(process.env.PORT) || 10000;
+const HOST = "0.0.0.0";
+process.on("unhandledRejection", e => console.error("unhandledRejection:", e?.stack || e));
+process.on("uncaughtException", e => { console.error("uncaughtException:", e?.stack || e); process.exit(1); });
 
-  req.on("close", () => {
-    alive = false;
-    clearTimeout(reconnectTimer);
-    clearInterval(ping);
-    cleanup();
-    try { res.end(); } catch {}
-  });
+app.listen(PORT, HOST, () => {
+  console.log(`[OK] backend listening on :${PORT}`);
+  console.log("- /api/v1/ohlc");
+  console.log("- /live/intraday | /live/hourly | /live/eod");
+  console.log("- /healthz");
 });
