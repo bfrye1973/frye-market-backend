@@ -9,7 +9,7 @@ export default streamRouter;
 
 /* ---------- helpers ---------- */
 function polyKey() {
-  // FIX: skip empty values so we don’t pick up POLYGON_API = '' 
+  // FIX: skip empty values so we don’t pick up POLYGON_API = ''
   const keys = [
     process.env.POLYGON_API,
     process.env.POLYGON_API_KEY,
@@ -20,7 +20,7 @@ function polyKey() {
 
 function tfMinutes(tf = "1m") {
   const t = String(tf || "").toLowerCase();
-  if (t === "1d" || t === "d" || t === "day") return 1440; // daily not streamed
+  if (t === "1d" || t === "d" || t === "day") return 1440;
   if (t.endsWith("h")) return Number(t.slice(0, -1)) * 60;
   if (t.endsWith("m")) return Number(t.slice(0, -1));
   const n = Number(t);
@@ -41,24 +41,14 @@ function sseHeaders(res) {
 
 const sseSend = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
-/**
- * Aggregation model
- * - We receive AM.<SYMBOL> minute aggregates (many updates per minute).
- * - msg.v is CUMULATIVE volume for that minute. We must add only the DELTA since the last update for that same minute.
- * - For TF > 1m, we combine multiple minutes into a bucket:
- *   open  = first minute’s open of the bucket
- *   high  = max of minute highs seen
- *   low   = min of minute lows seen
- *   close = last minute’s close seen
- *   volume= sum of minute volumes (via per-minute delta)
- */
+/* ---------- GET /stream/agg?symbol=SPY&tf=10m ---------- */
 streamRouter.get("/agg", (req, res) => {
   const key = polyKey();
   if (!key) return res.status(500).end("Missing POLYGON_API key");
 
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
-  const tfStr  = String(req.query.tf || "1m");
-  const tfMin  = tfMinutes(tfStr);
+  const tfStr = String(req.query.tf || "1m");
+  const tfMin = tfMinutes(tfStr);
   if (tfMin >= 1440) return res.status(400).end("Daily not supported over stream");
 
   sseHeaders(res);
@@ -67,10 +57,7 @@ streamRouter.get("/agg", (req, res) => {
   let alive = true;
   let reconnectTimer;
 
-  // Current TF bucket we're building: { time, open, high, low, close, volume }
   let currentBucket = null;
-
-  // Track last seen cumulative volume for each minute so we can compute deltas safely
   const minuteVol = new Map();
 
   function connect() {
@@ -82,7 +69,6 @@ streamRouter.get("/agg", (req, res) => {
     }
 
     ws.onopen = () => {
-      // Auth then subscribe to minute aggregates for the symbol
       ws.send(JSON.stringify({ action: "auth", params: key }));
       ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol}` }));
     };
@@ -97,29 +83,23 @@ streamRouter.get("/agg", (req, res) => {
       for (const msg of arr) {
         if (msg?.ev !== "AM" || msg?.sym !== symbol) continue;
 
-        // Canonical start time (ms -> s)
         const startMs = Number(msg.s);
         if (!Number.isFinite(startMs) || startMs <= 0) continue;
         const startSec = Math.floor(startMs / 1000);
 
-        // Polygon OHLC for THIS MINUTE
         const o = Number(msg.o), h = Number(msg.h), l = Number(msg.l), c = Number(msg.c);
         if (![o, h, l, c].every(Number.isFinite)) continue;
 
-        // Minute cumulative volume so far
         const vCum = Number(msg.v || 0);
         if (!Number.isFinite(vCum) || vCum < 0) continue;
 
-        // Compute minute's bucket start (always 1m) and TF bucket start
         const minuteStart = bucketStartSec(startSec, 1);
         const bucketStart = bucketStartSec(startSec, tfMin);
 
-        // Compute delta volume for this minute since we last saw it
         const prevCum = minuteVol.get(minuteStart) ?? 0;
         const deltaV = Math.max(0, vCum - prevCum);
         minuteVol.set(minuteStart, vCum);
 
-        // If the TF bucket rolled over, start a new bucket
         if (!currentBucket || currentBucket.time < bucketStart) {
           currentBucket = {
             time: bucketStart,
@@ -130,20 +110,18 @@ streamRouter.get("/agg", (req, res) => {
             volume: deltaV
           };
         } else {
-          // Same bucket → update OHLC
-          currentBucket.high  = Math.max(currentBucket.high, h);
-          currentBucket.low   = Math.min(currentBucket.low,  l);
+          currentBucket.high = Math.max(currentBucket.high, h);
+          currentBucket.low = Math.min(currentBucket.low, l);
           currentBucket.close = c;
           currentBucket.volume = (currentBucket.volume || 0) + deltaV;
         }
 
-        // Emit valid SSE payload
         sseSend(res, { ok: true, type: "bar", symbol, tf: tfStr, bar: currentBucket });
       }
     };
 
     ws.onerror = () => { cleanup(); scheduleReconnect(); };
-    ws.onclose  = () => { cleanup(); scheduleReconnect(); };
+    ws.onclose = () => { cleanup(); scheduleReconnect(); };
   }
 
   function cleanup() { try { ws?.close(); } catch {} ws = null; }
@@ -153,9 +131,7 @@ streamRouter.get("/agg", (req, res) => {
     reconnectTimer = setTimeout(connect, 1500);
   }
 
-  // keep-alive pings for proxies
   const ping = setInterval(() => alive && res.write(":ping\n\n"), 15000);
-
   connect();
 
   req.on("close", () => {
