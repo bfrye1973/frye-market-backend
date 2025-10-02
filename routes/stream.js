@@ -1,6 +1,4 @@
-// /routes/stream.js — Polygon WS -> SSE (minute aggregates bucketized to selected TF)
-// Canonical time: AM.s (ms) -> seconds -> bucket-aligned. Per-minute volume handled as delta.
-
+// /routes/stream.js — DIAG + robust timestamp handling
 import express from "express";
 import { WebSocket } from "ws";
 
@@ -16,7 +14,6 @@ function polyKey() {
   ];
   return keys.find(k => k && k.trim().length > 0) || "";
 }
-
 
 function tfMinutes(tf = "1m") {
   const t = String(tf || "").toLowerCase();
@@ -38,8 +35,8 @@ function sseHeaders(res) {
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders?.();
 }
-
-const sseSend = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+const send = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+const diag = (res, msg, extra = {}) => send(res, { ok: true, type: "diag", msg, ...extra });
 
 /* ---------- GET /stream/agg?symbol=SPY&tf=10m ---------- */
 streamRouter.get("/agg", (req, res) => {
@@ -47,81 +44,126 @@ streamRouter.get("/agg", (req, res) => {
   if (!key) return res.status(500).end("Missing POLYGON_API key");
 
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
-  const tfStr = String(req.query.tf || "1m");
-  const tfMin = tfMinutes(tfStr);
+  const tfStr  = String(req.query.tf || "1m");
+  const tfMin  = tfMinutes(tfStr);
   if (tfMin >= 1440) return res.status(400).end("Daily not supported over stream");
 
   sseHeaders(res);
+  diag(res, "route-mounted", { symbol, tf: tfStr });
 
   let ws;
   let alive = true;
   let reconnectTimer;
 
-  let currentBucket = null;
-  const minuteVol = new Map();
+  let currentBucket = null;          // { time, open, high, low, close, volume }
+  const minuteVol = new Map();       // minuteStartSec -> last cumulative v
+  let sampled = false;               // send one-time snapshot of raw AM fields
 
   function connect() {
     try {
       ws = new WebSocket("wss://socket.polygon.io/stocks");
-    } catch {
+      diag(res, "ws-connecting");
+    } catch (e) {
+      diag(res, "ws-connect-throw", { error: String(e) });
       scheduleReconnect();
       return;
     }
 
     ws.onopen = () => {
+      diag(res, "ws-open");
       ws.send(JSON.stringify({ action: "auth", params: key }));
       ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol}` }));
+      diag(res, "ws-sent-auth-sub", { subscribe: `AM.${symbol}` });
     };
 
     ws.onmessage = (ev) => {
       if (!alive) return;
 
       let arr;
-      try { arr = JSON.parse(ev.data); } catch { return; }
+      try { arr = JSON.parse(ev.data); } catch (e) {
+        diag(res, "ws-json-parse-fail", { error: String(e) });
+        return;
+      }
       if (!Array.isArray(arr)) arr = [arr];
 
+      // Surface Polygon status frames (auth/sub results)
       for (const msg of arr) {
-        if (msg?.ev !== "AM" || msg?.sym !== symbol) continue;
+        if (msg?.ev === "status") {
+          diag(res, "status", { status: msg.status || null, message: msg.message || null });
+        }
+      }
 
-        const startMs = Number(msg.s);
-        if (!Number.isFinite(startMs) || startMs <= 0) continue;
+      // Process AM aggregates
+      for (const msg of arr) {
+        if (msg?.ev !== "AM") continue;
+        if (msg?.sym !== symbol) { diag(res, "am-other-symbol", { got: msg.sym, want: symbol }); continue; }
+
+        // ------- Robust timestamp extraction -------
+        // Prefer msg.s; fallback to msg.t if present. Normalize to milliseconds.
+        let raw = (msg.s ?? msg.t ?? null);
+        let startMs = Number(raw);
+        if (Number.isFinite(startMs) && startMs < 1e12) {
+          // looks like seconds → convert to ms
+          startMs *= 1000;
+        }
+        if (!Number.isFinite(startMs) || startMs <= 0) {
+          if (!sampled) {
+            sampled = true;
+            diag(res, "am-snapshot-bad-time", {
+              keys: Object.keys(msg || {}),
+              s: msg?.s ?? null,
+              t: msg?.t ?? null,
+              typeof_s: typeof msg?.s,
+              typeof_t: typeof msg?.t
+            });
+          }
+          continue; // never emit a bar with bad time (prevents time:null)
+        }
+
         const startSec = Math.floor(startMs / 1000);
+        if (!Number.isFinite(startSec)) {
+          if (!sampled) {
+            sampled = true;
+            diag(res, "am-bad-startSec", { startMs });
+          }
+          continue;
+        }
 
+        // ------- OHLC + volume (delta) -------
         const o = Number(msg.o), h = Number(msg.h), l = Number(msg.l), c = Number(msg.c);
-        if (![o, h, l, c].every(Number.isFinite)) continue;
+        if (![o, h, l, c].every(Number.isFinite)) {
+          if (!sampled) { sampled = true; diag(res, "am-bad-ohlc", { o: msg.o, h: msg.h, l: msg.l, c: msg.c }); }
+          continue;
+        }
 
         const vCum = Number(msg.v || 0);
-        if (!Number.isFinite(vCum) || vCum < 0) continue;
+        if (!Number.isFinite(vCum) || vCum < 0) {
+          if (!sampled) { sampled = true; diag(res, "am-bad-volume", { v: msg.v }); }
+          continue;
+        }
 
         const minuteStart = bucketStartSec(startSec, 1);
         const bucketStart = bucketStartSec(startSec, tfMin);
 
         const prevCum = minuteVol.get(minuteStart) ?? 0;
-        const deltaV = Math.max(0, vCum - prevCum);
+        const deltaV  = Math.max(0, vCum - prevCum);
         minuteVol.set(minuteStart, vCum);
 
         if (!currentBucket || currentBucket.time < bucketStart) {
-          currentBucket = {
-            time: bucketStart,
-            open: o,
-            high: h,
-            low: l,
-            close: c,
-            volume: deltaV
-          };
+          currentBucket = { time: bucketStart, open: o, high: h, low: l, close: c, volume: deltaV };
         } else {
-          currentBucket.high = Math.max(currentBucket.high, h);
-          currentBucket.low = Math.min(currentBucket.low, l);
-          currentBucket.close = c;
+          currentBucket.high   = Math.max(currentBucket.high, h);
+          currentBucket.low    = Math.min(currentBucket.low,  l);
+          currentBucket.close  = c;
           currentBucket.volume = (currentBucket.volume || 0) + deltaV;
         }
 
-        sseSend(res, { ok: true, type: "bar", symbol, tf: tfStr, bar: currentBucket });
+        send(res, { ok: true, type: "bar", symbol, tf: tfStr, bar: currentBucket });
       }
     };
 
-    ws.onerror = () => { cleanup(); scheduleReconnect(); };
-    ws.onclose = () => { cleanup(); scheduleReconnect(); };
+    ws.onerror = (e) => { diag(res, "ws-error", { error: String(e?.message || e) }); cleanup(); scheduleReconnect(); };
+    ws.onclose  = (e) => { diag(res, "ws-close", { code: e?.code, reason: e?.reason }); cleanup(); scheduleReconnect(); };
   }
 
   function cleanup() { try { ws?.close(); } catch {} ws = null; }
