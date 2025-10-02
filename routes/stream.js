@@ -1,24 +1,20 @@
-// /routes/stream.js — DIAG + robust timestamp handling + safe volume delta
+// /routes/stream.js — Polygon AM stream → SSE (s-only, final 1m bars, TF aggregation)
 import express from "express";
 import { WebSocket } from "ws";
 
 const streamRouter = express.Router();
 export default streamRouter;
 
-/* ---------- helpers ---------- */
+/* ----------------------- helpers ----------------------- */
 function polyKey() {
-  // Skip empty envs and pick the first non-empty
-  const keys = [
-    process.env.POLYGON_API,
-    process.env.POLYGON_API_KEY,
-    process.env.POLY_API_KEY,
-  ];
+  // pick first non-empty key
+  const keys = [process.env.POLYGON_API, process.env.POLYGON_API_KEY, process.env.POLY_API_KEY];
   return keys.find(k => k && k.trim().length > 0) || "";
 }
 
 function tfMinutes(tf = "1m") {
   const t = String(tf || "").toLowerCase();
-  if (t === "1d" || t === "d" || t === "day") return 1440;
+  if (t === "1d" || t === "d" || t === "day") return 1440;        // daily not streamed
   if (t.endsWith("h")) return Number(t.slice(0, -1)) * 60;
   if (t.endsWith("m")) return Number(t.slice(0, -1));
   const n = Number(t);
@@ -37,13 +33,23 @@ function sseHeaders(res) {
   res.flushHeaders?.();
 }
 
-const send = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
-const diag = (res, msg, extra = {}) => send(res, { ok: true, type: "diag", msg, ...extra });
+const sseSend = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
-/* ---------- GET /stream/agg?symbol=SPY&tf=10m ---------- */
+/* ----------------------- GET /stream/agg ----------------------- */
+/**
+ * Query:
+ *   symbol: SPY (default)
+ *   tf:     1m | 5m | 10m | 15m | 30m | 60m ...
+ *
+ * Protocol (per Polygon support):
+ * - Use AM.<SYMBOL>
+ * - Field `s` = bar-start timestamp in **milliseconds**, always present
+ * - 1-minute AM bars are final (no partial intra-minute updates)
+ * - For TF > 1m, aggregate consecutive 1m closes into the TF bucket
+ */
 streamRouter.get("/agg", (req, res) => {
-  const key = polyKey();
-  if (!key) return res.status(500).end("Missing POLYGON_API key");
+  const apiKey = polyKey();
+  if (!apiKey) return res.status(500).end("Missing POLYGON_API key");
 
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
   const tfStr  = String(req.query.tf || "1m");
@@ -51,119 +57,88 @@ streamRouter.get("/agg", (req, res) => {
   if (tfMin >= 1440) return res.status(400).end("Daily not supported over stream");
 
   sseHeaders(res);
-  diag(res, "route-mounted", { symbol, tf: tfStr });
 
   let ws;
   let alive = true;
   let reconnectTimer;
 
-  let currentBucket = null;    // { time, open, high, low, close, volume }
-  const minuteVol = new Map(); // minuteStartSec -> last cumulative v
-  let sampled = false;         // send one-time snapshot if time fields look odd
+  // Current TF bucket we’re building from 1m closed bars
+  // { time, open, high, low, close, volume }
+  let current = null;
 
   function connect() {
     try {
       ws = new WebSocket("wss://socket.polygon.io/stocks");
-      diag(res, "ws-connecting");
-    } catch (e) {
-      diag(res, "ws-connect-throw", { error: String(e) });
+    } catch {
       scheduleReconnect();
       return;
     }
 
     ws.onopen = () => {
-      diag(res, "ws-open");
-      ws.send(JSON.stringify({ action: "auth", params: key }));
+      // auth + subscribe AM.<SYMBOL>
+      ws.send(JSON.stringify({ action: "auth", params: apiKey }));
       ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol}` }));
-      diag(res, "ws-sent-auth-sub", { subscribe: `AM.${symbol}` });
     };
 
     ws.onmessage = (ev) => {
       if (!alive) return;
 
       let arr;
-      try { arr = JSON.parse(ev.data); } catch (e) {
-        diag(res, "ws-json-parse-fail", { error: String(e) });
-        return;
-      }
+      try { arr = JSON.parse(ev.data); } catch { return; }
       if (!Array.isArray(arr)) arr = [arr];
 
-      // status frames show auth/sub results
       for (const msg of arr) {
-        if (msg?.ev === "status") {
-          diag(res, "status", { status: msg.status || null, message: msg.message || null });
-        }
-      }
+        // We only care about final 1m aggregates (AM) for our symbol
+        if (msg?.ev !== "AM" || msg?.sym !== symbol) continue;
 
-      // AM frames → build bars
-      for (const msg of arr) {
-        if (msg?.ev !== "AM") continue;
-        if (msg?.sym !== symbol) { diag(res, "am-other-symbol", { got: msg.sym, want: symbol }); continue; }
-
-        // ------- robust timestamp extraction -------
-        // Prefer msg.s (bar start ms). If missing, fallback to msg.t.
-        // Normalize seconds→ms when value looks like seconds (< 1e12).
-        let raw = (msg?.s ?? msg?.t ?? null);
-        let startMs = Number(raw);
-        if (Number.isFinite(startMs) && startMs > 0 && startMs < 1e12) startMs *= 1000;
-        if (!Number.isFinite(startMs) || startMs <= 0) {
-          if (!sampled) {
-            sampled = true;
-            diag(res, "am-snapshot-bad-time", {
-              keys: Object.keys(msg || {}),
-              s: msg?.s ?? null, t: msg?.t ?? null,
-              typeof_s: typeof msg?.s, typeof_t: typeof msg?.t
-            });
-          }
-          continue; // never emit a bar with bad time (prevents time:null)
-        }
+        // --- TIME (required): `s` in milliseconds → seconds
+        const startMs = Number(msg.s);
+        if (!Number.isFinite(startMs) || startMs <= 0) continue; // never emit without s
         const startSec = Math.floor(startMs / 1000);
 
-        // ------- OHLC & volume (delta) -------
+        // --- OHLC + V (final 1m bar)
         const o = Number(msg.o), h = Number(msg.h), l = Number(msg.l), c = Number(msg.c);
-        if (![o,h,l,c].every(Number.isFinite)) {
-          if (!sampled) { sampled = true; diag(res, "am-bad-ohlc", { o: msg.o, h: msg.h, l: msg.l, c: msg.c }); }
-          continue;
-        }
-        const vCum = Number(msg.v || 0);
-        if (!Number.isFinite(vCum) || vCum < 0) {
-          if (!sampled) { sampled = true; diag(res, "am-bad-volume", { v: msg.v }); }
-          continue;
-        }
+        if (![o, h, l, c].every(Number.isFinite)) continue;
+        const v = Number(msg.v || 0);
+        if (!Number.isFinite(v) || v < 0) continue;
 
-        const minuteStart = bucketStartSec(startSec, 1);
-        const bucketStart = bucketStartSec(startSec, tfMin);
+        // --- Bucket alignment
+        // 1m close aligns to minute boundary. We aggregate into selected TF bucket.
+        const bucket = bucketStartSec(startSec, tfMin);
 
-        // per-minute delta: msg.v is cumulative within that minute
-        const prevCum = minuteVol.get(minuteStart) ?? 0;
-        const deltaV  = Math.max(0, vCum - prevCum);
-        minuteVol.set(minuteStart, vCum);
-
-        if (!currentBucket || currentBucket.time < bucketStart) {
-          currentBucket = { time: bucketStart, open: o, high: h, low: l, close: c, volume: deltaV };
+        if (!current || current.time < bucket) {
+          // start a new TF bucket with this closed 1m bar
+          current = { time: bucket, open: o, high: h, low: l, close: c, volume: v };
         } else {
-          currentBucket.high   = Math.max(currentBucket.high, h);
-          currentBucket.low    = Math.min(currentBucket.low,  l);
-          currentBucket.close  = c;
-          currentBucket.volume = (currentBucket.volume || 0) + deltaV;
+          // same TF bucket: extend with the new 1m close
+          current.high   = Math.max(current.high, h);
+          current.low    = Math.min(current.low,  l);
+          current.close  = c;
+          current.volume = (current.volume || 0) + v;
         }
 
-        send(res, { ok: true, type: "bar", symbol, tf: tfStr, bar: currentBucket });
+        sseSend(res, { ok: true, type: "bar", symbol, tf: tfStr, bar: current });
       }
     };
 
-    ws.onerror = (e) => { diag(res, "ws-error", { error: String(e?.message || e) }); cleanup(); scheduleReconnect(); };
-    ws.onclose  = (e) => { diag(res, "ws-close", { code: e?.code, reason: e?.reason }); cleanup(); scheduleReconnect(); };
+    ws.onerror = () => { cleanup(); scheduleReconnect(); };
+    ws.onclose  = () => { cleanup(); scheduleReconnect(); };
   }
 
-  function cleanup() { try { ws?.close(); } catch {} ws = null; }
+  function cleanup() {
+    try { ws?.close(); } catch {}
+    ws = null;
+  }
+
   function scheduleReconnect() {
     if (!alive) return;
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(connect, 1500);
   }
 
+  // keep-alive for proxies
   const ping = setInterval(() => alive && res.write(":ping\n\n"), 15000);
+
   connect();
 
   req.on("close", () => {
@@ -174,3 +149,4 @@ streamRouter.get("/agg", (req, res) => {
     try { res.end(); } catch {}
   });
 });
+
