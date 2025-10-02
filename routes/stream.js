@@ -9,7 +9,6 @@ export default streamRouter;
 
 /* ---------- helpers ---------- */
 function polyKey() {
-  // FIX: skip empty values so we don’t pick up POLYGON_API = ''
   const keys = [
     process.env.POLYGON_API,
     process.env.POLYGON_API_KEY,
@@ -17,6 +16,7 @@ function polyKey() {
   ];
   return keys.find(k => k && k.trim().length > 0) || "";
 }
+
 
 function tfMinutes(tf = "1m") {
   const t = String(tf || "").toLowerCase();
