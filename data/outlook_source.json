@@ -1,14 +1,14 @@
 {
-  "updated_at": "2025-10-03T12:22:44-07:00",
-  "updated_at_utc": "2025-10-03T19:22:44+00:00",
-  "timestamp": "2025-10-03T19:22:44+00:00",
+  "updated_at": "2025-10-03T12:35:18-07:00",
+  "updated_at_utc": "2025-10-03T19:35:18+00:00",
+  "timestamp": "2025-10-03T19:35:18+00:00",
   "mode": "intraday10",
   "groups": {
     "Communication Services": {
       "nh": 30,
-      "nl": 26,
-      "u": 121,
-      "d": 82,
+      "nl": 27,
+      "u": 116,
+      "d": 85,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -16,10 +16,10 @@
       }
     },
     "Real Estate": {
-      "nh": 45,
+      "nh": 46,
       "nl": 25,
-      "u": 132,
-      "d": 64,
+      "u": 152,
+      "d": 57,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -27,10 +27,10 @@
       }
     },
     "Industrials": {
-      "nh": 153,
-      "nl": 47,
-      "u": 344,
-      "d": 160,
+      "nh": 155,
+      "nl": 48,
+      "u": 311,
+      "d": 206,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -38,10 +38,10 @@
       }
     },
     "Healthcare": {
-      "nh": 344,
+      "nh": 345,
       "nl": 55,
-      "u": 564,
-      "d": 306,
+      "u": 503,
+      "d": 317,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -51,8 +51,8 @@
     "Energy": {
       "nh": 28,
       "nl": 14,
-      "u": 158,
-      "d": 42,
+      "u": 126,
+      "d": 39,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -62,8 +62,8 @@
     "Utilities": {
       "nh": 29,
       "nl": 4,
-      "u": 70,
-      "d": 13,
+      "u": 65,
+      "d": 16,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -71,10 +71,10 @@
       }
     },
     "Financials": {
-      "nh": 116,
-      "nl": 106,
-      "u": 563,
-      "d": 161,
+      "nh": 120,
+      "nl": 104,
+      "u": 493,
+      "d": 177,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -84,8 +84,8 @@
     "Consumer Staples": {
       "nh": 32,
       "nl": 24,
-      "u": 119,
-      "d": 67,
+      "u": 121,
+      "d": 73,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -94,9 +94,9 @@
     },
     "tech": {
       "nh": 168,
-      "nl": 49,
-      "u": 339,
-      "d": 213,
+      "nl": 50,
+      "u": 308,
+      "d": 236,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -106,8 +106,8 @@
     "Materials": {
       "nh": 69,
       "nl": 9,
-      "u": 139,
-      "d": 56,
+      "u": 129,
+      "d": 65,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -115,10 +115,10 @@
       }
     },
     "Consumer Discretionary": {
-      "nh": 117,
-      "nl": 50,
-      "u": 262,
-      "d": 154,
+      "nh": 119,
+      "nl": 51,
+      "u": 235,
+      "d": 178,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -129,12 +129,12 @@
   "global": {
     "squeeze_pressure_pct": 45,
     "squeeze_state": "on",
-    "daily_squeeze_pct": 45.0,
+    "daily_squeeze_pct": 44.58,
     "volatility_pct": 19,
     "liquidity_pct": 93
   },
   "meta": {
-    "build_secs": 81.13,
+    "build_secs": 83.34,
     "universe": 5470
   }
 }
