@@ -1,80 +1,95 @@
-// /server.js — backend only (no stream). Safe start, clear logging, correct healthz.
+// services/core/server.js
+// Backend-1 (Core API) — Express entry
+// ESM module (Node 18+)
+
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-
-import apiRouter from "./api/routes.js";
 import { ohlcRouter } from "./routes/ohlc.js";
-// IMPORTANT: no stream import/mount here
-// import streamRouter from "./routes/stream.js";
 
+// ------------------------- Setup -------------------------
 const app = express();
 
-/* ---------------- CORS ---------------- */
+// Trust Render/Proxy IPs (needed for correct req.ip, etc.)
+app.set("trust proxy", true);
+
+// Hide framework header
+app.disable("x-powered-by");
+
+// Keep responses fresh (no stale caching at the proxy)
+app.set("etag", false);
+
+// Parse JSON bodies if you add POST routes later (safe default)
+app.use(express.json({ limit: "1mb" }));
+
+// ------------------------- CORS --------------------------
+/**
+ * Allow your dashboard and local dev.
+ * Add more origins if you expose to other hosts.
+ */
 const ALLOW = new Set([
   "https://frye-dashboard.onrender.com",
-  "http://localhost:3000"
+  "http://localhost:3000",
 ]);
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && ALLOW.has(origin)) res.setHeader("Access-Control-Allow-Origin", origin);
+  if (origin && ALLOW.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
   res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Cache-Control, Authorization, X-Requested-With, X-Idempotency-Key");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 
-app.use(express.json({ limit: "1mb" }));
-
-/* --------------- static --------------- */
+// ---------------------- Static (optional) ----------------
 const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+const __dirname = path.dirname(__filename);
+
+// If you serve docs or a tiny status page, drop files in ./public
 app.use(express.static(path.join(__dirname, "public")));
 
-/* --------------- routes --------------- */
+// ------------------------ Routes -------------------------
+/**
+ * Health/metadata
+ * - /healthz      -> { ok:true }
+ * - /             -> tiny index so Render shows something at root
+ */
+app.get("/healthz", (_req, res) => {
+  res.json({ ok: true, service: "core", ts: new Date().toISOString() });
+});
+app.get("/", (_req, res) => {
+  res.type("text/plain").send("Frye Core API — see /api/v1/ohlc");
+});
+
+/**
+ * OHLC API (mounted)
+ * Implements 1m backfill (~30d) + server TF bucketing.
+ * File: services/core/routes/ohlc.js
+ */
 app.use("/api/v1/ohlc", ohlcRouter);
-app.use("/api", apiRouter);
-// DO NOT mount /stream on this service
-// app.use("/stream", streamRouter);
 
-/* ------------- GitHub proxies (JSON for tiles) ------------- */
-const GH_RAW_BASE = "https://raw.githubusercontent.com/bfrye1973/frye-market-backend";
-async function proxyRaw(res, url){
-  try{
-    const r = await fetch(url, { cache: "no-store" });
-    if(!r.ok) return res.status(r.status).json({ ok:false, error:`Upstream ${r.status}`});
-    res.setHeader("Cache-Control","no-store");
-    res.setHeader("Content-Type","application/json; charset=utf-8");
-    const text = await r.text();
-    return res.send(text);
-  }catch(e){
-    return res.status(502).json({ ok:false, error:"Bad Gateway" });
-  }
-}
-app.get("/live/intraday", (_req,res)=> proxyRaw(res, `${GH_RAW_BASE}/data-live-10min/data/outlook_intraday.json`) );
-app.get("/live/hourly",   (_req,res)=> proxyRaw(res, `${GH_RAW_BASE}/data-live-hourly/data/outlook_hourly.json`) );
-app.get("/live/eod",      (_req,res)=> proxyRaw(res, `${GH_RAW_BASE}/data-live-eod/data/outlook.json`) );
-
-/* ---------------- health ---------------- */
-app.get("/healthz", (_req,res)=> res.json({ ok:true, service:"backend", ts:new Date().toISOString() }) );
-
-/* -------------- 404 / error -------------- */
-app.use((req,res)=> res.status(404).json({ ok:false, error:"Not Found" }));
-app.use((err,req,res,_next)=>{
-  console.error("Unhandled error:", err?.stack || err);
-  res.status(500).json({ ok:false, error:"Internal Server Error" });
+// ------------------------ 404/Errors ---------------------
+app.use((req, res) => {
+  res.status(404).json({ ok: false, error: "Not Found", path: req.path });
 });
 
-/* ---------------- start ---------------- */
-const PORT = Number(process.env.PORT) || 10000;
+// Basic error boundary (keeps JSON shape consistent)
+app.use((err, _req, res, _next) => {
+  console.error("[server] unhandled:", err?.stack || err);
+  res
+    .status(500)
+    .json({ ok: false, error: "internal_error", detail: String(err?.message || err) });
+});
+
+// ------------------------- Start -------------------------
+const PORT = Number(process.env.PORT) || 8080;
 const HOST = "0.0.0.0";
-process.on("unhandledRejection", e => console.error("unhandledRejection:", e?.stack || e));
-process.on("uncaughtException", e => { console.error("uncaughtException:", e?.stack || e); process.exit(1); });
-
 app.listen(PORT, HOST, () => {
-  console.log(`[OK] backend listening on :${PORT}`);
-  console.log("- /api/v1/ohlc");
-  console.log("- /live/intraday | /live/hourly | /live/eod");
+  console.log(`[OK] core listening on :${PORT}`);
   console.log("- /healthz");
+  console.log("- /api/v1/ohlc");
 });
+
+export default app;
