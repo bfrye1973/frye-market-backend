@@ -1,11 +1,12 @@
-// /routes/ohlc.js — OHLC endpoint with Polygon 1m backfill (+ server TF bucketing)
+// /services/core/routes/ohlc.js
+// OHLC endpoint with Polygon 1m backfill (+ server TF bucketing)
 // GET /api/v1/ohlc?symbol=SPY&timeframe=1m|5m|10m|15m|30m|1h|4h|1d&limit=1500
 
 import express from "express";
 
 export const ohlcRouter = express.Router();
 
-/* ----------------------- helpers ----------------------- */
+/* ----------------------- constants ----------------------- */
 const MIN = 60;
 const TF_SEC = {
   "1m": 60,
@@ -18,17 +19,35 @@ const TF_SEC = {
   "1d": 24 * 60 * MIN,
 };
 
+// ENV: Polygon key (any of these)
 const POLY_KEY =
   process.env.POLYGON_API ||
   process.env.POLYGON_API_KEY ||
   process.env.POLY_API_KEY ||
   "";
 
-// epoch ms? -> seconds
+// Dynamic backfill targets (days) per TF
+// (your request: 1m=30, 10m=120, 1h=180, 4h=180, 1d=365; sensible values for the others)
+const DAYS_BY_TF = {
+  "1m": 30,
+  "5m": 90,
+  "10m": 120,
+  "15m": 150,
+  "30m": 180,
+  "1h": 180,
+  "4h": 180,
+  "1d": 365,
+};
+
+// We always pull **1-minute** from Polygon then bucketize.
+// Keep 1m under ~50k bars/request (Polygon cap).
+const MIN_PER_DAY = 390;        // RTH minutes (approx)
+const MAX_MIN_BARS = 50000;     // Polygon cap
+
+/* ----------------------- time helpers ----------------------- */
 const isMs = (t) => typeof t === "number" && t > 1e12;
 const toSec = (t) => (isMs(t) ? Math.floor(t / 1000) : t);
 
-// YYYY-MM-DD (UTC)
 function yyyyMmDd(d) {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
@@ -42,7 +61,7 @@ function daysAgoUTC(n) {
   return d;
 }
 
-// normalize Polygon aggregate -> bar in seconds
+/* ---------------- Polygon normalize & fetch ---------------- */
 function norm(b) {
   return {
     time: toSec(b.t ?? b.timestamp ?? b.time ?? 0),
@@ -54,8 +73,8 @@ function norm(b) {
   };
 }
 
-/* ---------------- Polygon pulls (date-range + pagination) ---------------- */
-async function fetchPolygon1mRange(symbol, fromISO, toISO, maxBars = 50000, adjusted = true) {
+// Pull ~N minutes via Polygon date-range endpoint with pagination.
+async function fetchPolygon1mRange(symbol, fromISO, toISO, maxBars = MAX_MIN_BARS, adjusted = true) {
   if (!POLY_KEY) throw new Error("Missing Polygon API key");
 
   let url =
@@ -67,7 +86,7 @@ async function fetchPolygon1mRange(symbol, fromISO, toISO, maxBars = 50000, adju
   let hops = 0;
 
   while (url && out.length < maxBars) {
-    if (++hops > 60) break; // safety
+    if (++hops > 60) break; // safety guard
     const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) {
       const text = await r.text().catch(() => "");
@@ -91,14 +110,14 @@ async function fetchPolygon1mRange(symbol, fromISO, toISO, maxBars = 50000, adju
     url = data?.next_url ? `${data.next_url}&apiKey=${encodeURIComponent(POLY_KEY)}` : null;
   }
 
-  // ensure ascending & de-dup
+  // ascending & de-dup by time
   out.sort((a, b) => a.time - b.time);
   const dedup = [];
-  let last = -1;
+  let lastT = -1;
   for (const b of out) {
-    if (b.time !== last) {
+    if (b.time !== lastT) {
       dedup.push(b);
-      last = b.time;
+      lastT = b.time;
     }
   }
   return dedup;
@@ -142,27 +161,38 @@ function bucketize(bars1mAsc, tfSec) {
 ohlcRouter.get("/", async (req, res) => {
   try {
     const symbol = String(req.query.symbol || "SPY").toUpperCase();
-    const tfStr = String(req.query.timeframe || "1h").toLowerCase();
+    const tfStr = String(req.query.timeframe || "10m").toLowerCase();
     const limit = Math.max(1, Math.min(50000, Number(req.query.limit || 1500)));
     const tfSec = TF_SEC[tfStr] || TF_SEC["10m"];
 
-    // time window: default last 30 days for 1m; enough coverage for higher TF too
+    // ---- dynamic backfill window by TF ----
+    // Target days for the request
+    let targetDays = DAYS_BY_TF[tfStr] ?? 120;
+
+    // Cap so our 1m pull stays under Polygon's ~50k limit
+    const capDays = Math.max(7, Math.floor(MAX_MIN_BARS / MIN_PER_DAY) - 1); // ≈128 days
+    targetDays = Math.min(targetDays, capDays);
+
     const toISO = yyyyMmDd(new Date());
-    const fromISO = yyyyMmDd(daysAgoUTC(30));
+    const fromISO = yyyyMmDd(daysAgoUTC(targetDays));
 
-    // 1) pull raw 1m minutes for the window (paginated)
-    const minutes = await fetchPolygon1mRange(symbol, fromISO, toISO, 50000, true);
+    // 1) Pull raw **1-minute** window (paginated)
+    const minutes = await fetchPolygon1mRange(symbol, fromISO, toISO, MAX_MIN_BARS, true);
 
-    // 2) bucket if needed
+    // 2) Bucket to selected TF (server-side). 1m -> TF; 1m stays 1m
     const bars = tfSec === 60 ? minutes : bucketize(minutes, tfSec);
 
-    // 3) trim to 'limit' most recent (but keep ascending order)
+    // 3) Trim to 'limit' most recent (keep ascending)
     const trimmed = bars.length > limit ? bars.slice(-limit) : bars;
 
     res.setHeader("Cache-Control", "no-store");
     return res.json(trimmed);
   } catch (e) {
     console.error("[/api/v1/ohlc] error:", e?.stack || e);
-    return res.status(502).json({ ok: false, error: "upstream_error", detail: String(e?.message || e) });
+    return res.status(502).json({
+      ok: false,
+      error: "upstream_error",
+      detail: String(e?.message || e),
+    });
   }
 });
