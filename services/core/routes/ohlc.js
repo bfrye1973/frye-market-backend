@@ -148,7 +148,7 @@ ohlcRouter.get("/", async (req, res) => {
 
     // time window: default last 30 days for 1m; enough coverage for higher TF too
     const toISO = yyyyMmDd(new Date());
-    const fromISO = yyyyMmDd(daysAgoUTC(120));
+    const fromISO = yyyyMmDd(daysAgoUTC(30));
 
     // 1) pull raw 1m minutes for the window (paginated)
     const minutes = await fetchPolygon1mRange(symbol, fromISO, toISO, 50000, true);
