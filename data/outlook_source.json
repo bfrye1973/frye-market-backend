@@ -1,14 +1,14 @@
 {
-  "updated_at": "2025-10-07T06:45:24-07:00",
-  "updated_at_utc": "2025-10-07T13:45:24+00:00",
-  "timestamp": "2025-10-07T13:45:24+00:00",
+  "updated_at": "2025-10-07T06:54:40-07:00",
+  "updated_at_utc": "2025-10-07T13:54:40+00:00",
+  "timestamp": "2025-10-07T13:54:40+00:00",
   "mode": "intraday10",
   "groups": {
     "Communication Services": {
       "nh": 11,
-      "nl": 30,
-      "u": 62,
-      "d": 108,
+      "nl": 32,
+      "u": 60,
+      "d": 127,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -17,9 +17,9 @@
     },
     "Real Estate": {
       "nh": 5,
-      "nl": 63,
-      "u": 65,
-      "d": 100,
+      "nl": 67,
+      "u": 55,
+      "d": 132,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -27,53 +27,9 @@
       }
     },
     "Industrials": {
-      "nh": 84,
-      "nl": 67,
-      "u": 264,
-      "d": 195,
-      "vol_state": "Mixed",
-      "breadth_state": "Neutral",
-      "history": {
-        "nh": []
-      }
-    },
-    "Healthcare": {
-      "nh": 121,
-      "nl": 60,
-      "u": 390,
-      "d": 319,
-      "vol_state": "Mixed",
-      "breadth_state": "Neutral",
-      "history": {
-        "nh": []
-      }
-    },
-    "Energy": {
-      "nh": 16,
-      "nl": 32,
-      "u": 65,
-      "d": 92,
-      "vol_state": "Mixed",
-      "breadth_state": "Neutral",
-      "history": {
-        "nh": []
-      }
-    },
-    "Utilities": {
-      "nh": 29,
-      "nl": 10,
-      "u": 44,
-      "d": 25,
-      "vol_state": "Mixed",
-      "breadth_state": "Neutral",
-      "history": {
-        "nh": []
-      }
-    },
-    "Financials": {
-      "nh": 82,
-      "nl": 205,
-      "u": 362,
+      "nh": 92,
+      "nl": 65,
+      "u": 259,
       "d": 237,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
@@ -81,11 +37,55 @@
         "nh": []
       }
     },
+    "Healthcare": {
+      "nh": 130,
+      "nl": 58,
+      "u": 409,
+      "d": 364,
+      "vol_state": "Mixed",
+      "breadth_state": "Neutral",
+      "history": {
+        "nh": []
+      }
+    },
+    "Energy": {
+      "nh": 18,
+      "nl": 36,
+      "u": 89,
+      "d": 87,
+      "vol_state": "Mixed",
+      "breadth_state": "Neutral",
+      "history": {
+        "nh": []
+      }
+    },
+    "Utilities": {
+      "nh": 32,
+      "nl": 11,
+      "u": 57,
+      "d": 20,
+      "vol_state": "Mixed",
+      "breadth_state": "Neutral",
+      "history": {
+        "nh": []
+      }
+    },
+    "Financials": {
+      "nh": 85,
+      "nl": 204,
+      "u": 397,
+      "d": 239,
+      "vol_state": "Mixed",
+      "breadth_state": "Neutral",
+      "history": {
+        "nh": []
+      }
+    },
     "Consumer Staples": {
-      "nh": 8,
-      "nl": 55,
-      "u": 63,
-      "d": 85,
+      "nh": 13,
+      "nl": 57,
+      "u": 65,
+      "d": 107,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -93,10 +93,10 @@
       }
     },
     "tech": {
-      "nh": 88,
+      "nh": 97,
       "nl": 54,
-      "u": 261,
-      "d": 212,
+      "u": 281,
+      "d": 251,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -104,10 +104,10 @@
       }
     },
     "Materials": {
-      "nh": 40,
+      "nh": 47,
       "nl": 16,
-      "u": 94,
-      "d": 77,
+      "u": 112,
+      "d": 72,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -115,10 +115,10 @@
       }
     },
     "Consumer Discretionary": {
-      "nh": 19,
-      "nl": 107,
-      "u": 148,
-      "d": 227,
+      "nh": 23,
+      "nl": 118,
+      "u": 131,
+      "d": 259,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -129,12 +129,12 @@
   "global": {
     "squeeze_pressure_pct": 71,
     "squeeze_state": "none",
-    "daily_squeeze_pct": 70.56,
+    "daily_squeeze_pct": 71.0,
     "volatility_pct": 3,
-    "liquidity_pct": 72
+    "liquidity_pct": 73
   },
   "meta": {
-    "build_secs": 87.81,
+    "build_secs": 81.47,
     "universe": 5470
   }
 }
