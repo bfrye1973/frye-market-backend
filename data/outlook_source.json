@@ -1,14 +1,14 @@
 {
-  "updated_at": "2025-10-09T13:46:33-07:00",
-  "updated_at_utc": "2025-10-09T20:46:33+00:00",
-  "timestamp": "2025-10-09T20:46:33+00:00",
+  "updated_at": "2025-10-09T13:54:29-07:00",
+  "updated_at_utc": "2025-10-09T20:54:29+00:00",
+  "timestamp": "2025-10-09T20:54:29+00:00",
   "mode": "intraday10",
   "groups": {
     "Communication Services": {
       "nh": 19,
       "nl": 75,
-      "u": 61,
-      "d": 134,
+      "u": 60,
+      "d": 135,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -29,8 +29,8 @@
     "Industrials": {
       "nh": 102,
       "nl": 134,
-      "u": 125,
-      "d": 430,
+      "u": 123,
+      "d": 423,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -40,8 +40,8 @@
     "Healthcare": {
       "nh": 273,
       "nl": 80,
-      "u": 386,
-      "d": 439,
+      "u": 384,
+      "d": 429,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -51,8 +51,8 @@
     "Energy": {
       "nh": 28,
       "nl": 62,
-      "u": 44,
-      "d": 153,
+      "u": 46,
+      "d": 150,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -73,8 +73,8 @@
     "Financials": {
       "nh": 98,
       "nl": 282,
-      "u": 227,
-      "d": 530,
+      "u": 229,
+      "d": 523,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -84,8 +84,8 @@
     "Consumer Staples": {
       "nh": 27,
       "nl": 62,
-      "u": 68,
-      "d": 127,
+      "u": 71,
+      "d": 128,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -95,8 +95,8 @@
     "tech": {
       "nh": 129,
       "nl": 93,
-      "u": 209,
-      "d": 378,
+      "u": 205,
+      "d": 373,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -106,8 +106,8 @@
     "Materials": {
       "nh": 84,
       "nl": 49,
-      "u": 40,
-      "d": 154,
+      "u": 41,
+      "d": 151,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -117,8 +117,8 @@
     "Consumer Discretionary": {
       "nh": 38,
       "nl": 199,
-      "u": 115,
-      "d": 336,
+      "u": 114,
+      "d": 334,
       "vol_state": "Mixed",
       "breadth_state": "Neutral",
       "history": {
@@ -134,7 +134,7 @@
     "liquidity_pct": 88
   },
   "meta": {
-    "build_secs": 88.59,
+    "build_secs": 91.02,
     "universe": 5470
   }
 }
