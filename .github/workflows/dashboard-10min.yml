@@ -3,28 +3,26 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # === Pre-open warmup (exactly 1h before 13:30 UTC open): 12:30, 12:40, 12:50 UTC (Mon–Fri) ===
+    # Pre-open warmup (exactly 1h before 13:30 UTC open): 12:30, 12:40, 12:50 UTC (Mon–Fri)
     - cron: "30-59/10 12 * * 1-5"
-    # === Regular Trading Hours: every 10 minutes 13:00–20:59 UTC (Mon–Fri) ===
+    # Regular Trading Hours: every 10 minutes 13:00–20:59 UTC (Mon–Fri)
     - cron: "*/10 13-20 * * 1-5"
 
 jobs:
   tenmin:
     runs-on: ubuntu-latest
-    timeout-minutes: 30                 # headroom; step-level timeout guards the heavy part
+    timeout-minutes: 30
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false         # NEVER cancel in-flight runs
+      cancel-in-progress: true          # <<< ALWAYS prefer the newest run
     permissions:
       contents: write
     env:
       TZ: America/Phoenix
-      LIVE_BRANCH: data-live-10min      # live-only branch; NO archive here
-      PYTHONUNBUFFERED: "1"             # live logs
-      # --- R9 builder tuning (safe defaults; adjust if needed) ---
-      FD_MAX_WORKERS: "16"              # concurrency for watermarks
-      FD_SNAPSHOT_BATCH: "250"          # snapshot batch size
-      # ------------------------------------------------------------
+      LIVE_BRANCH: data-live-10min
+      PYTHONUNBUFFERED: "1"
+      FD_MAX_WORKERS: "16"
+      FD_SNAPSHOT_BATCH: "250"
 
     steps:
       # --------------------- Repo & Python setup ---------------------
@@ -44,7 +42,9 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Mark start time
-        run: echo "START_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+        run: |
+          echo "START_TS_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          echo "START_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
 
       # --------------------- FAST BUILD (no archives) ---------------------
       - name: Build outlook source (intraday10 FAST, step timeout 18m)
@@ -53,7 +53,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "[timing] build_outlook_source START $(date -u +%T)"
-          # R9 builder (faster): universe once + concurrent watermarks + batched snapshots
           timeout 1080s python -u scripts/build_outlook_source_from_polygon.py --mode intraday10
           echo "[timing] build_outlook_source END   $(date -u +%T)"
 
@@ -77,23 +76,51 @@ jobs:
           mkdir -p /tmp/live10
           cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
           cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
-          # optional (debug): keep the source used for the payload
           if [ -f data/outlook_source.json ]; then cp -f data/outlook_source.json /tmp/live10/outlook_source.json; fi
+
+      # --------------------- Freshness gate ---------------------
+      - name: Skip publish if a newer LIVE exists
+        env:
+          LIVE_RAW_URL: https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min/data/outlook_intraday.json
+        run: |
+          set -e
+          # Extract our build's updated_at (AZ) and utc (fallback)
+          OUR_TS=$(jq -r '.updated_at // .updated_at_utc // .timestamp // empty' /tmp/live10/outlook_intraday.json || true)
+          if [ -z "$OUR_TS" ]; then
+            echo "Could not read OUR_TS from payload; continuing publish"
+            exit 0
+          fi
+          # Fetch current LIVE and read its updated_at
+          curl -sfL "${LIVE_RAW_URL}?t=$(date +%s)" -o /tmp/live10/current_live.json || true
+          CUR_TS=$(jq -r '.updated_at // .updated_at_utc // .timestamp // empty' /tmp/live10/current_live.json 2>/dev/null || true)
+
+          echo "our payload updated_at:  $OUR_TS"
+          echo "live branch updated_at: $CUR_TS"
+
+          # If live is newer or equal, skip publish (newer run already landed)
+          if [ -n "$CUR_TS" ]; then
+            A=$(date -u -d "$OUR_TS" +%s 2>/dev/null || date -u -d "${OUR_TS/Z/+00:00}" +%s 2>/dev/null || echo 0)
+            B=$(date -u -d "$CUR_TS" +%s 2>/dev/null || date -u -d "${CUR_TS/Z/+00:00}" +%s 2>/dev/null || echo 0)
+            echo "epoch ours=$A live=$B"
+            if [ "$B" -ge "$A" ]; then
+              echo "[gate] Newer or equal LIVE already present; skipping publish."
+              echo "SKIP_PUBLISH=1" >> "$GITHUB_ENV"
+            fi
+          fi
 
       # --------------------- Publish LIVE branch safely ---------------------
       - name: Push LIVE branch (10min)
+        if: env.SKIP_PUBLISH != '1'
         run: |
           set -e
-
-          # Git identity
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
 
-          # (A) Clean current worktree BEFORE switching branches
+          # Clean current worktree BEFORE switching branches
           git reset --hard
           git clean -fdx
 
-          # (B) Switch/create LIVE branch
+          # Switch/create LIVE branch
           git fetch origin "${LIVE_BRANCH}" || true
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
@@ -101,10 +128,10 @@ jobs:
             git checkout --orphan "${LIVE_BRANCH}"
           fi
 
-          # (C) Ensure CLEAN tree ON LIVE branch (remove everything except .git)
+          # Ensure CLEAN tree ON LIVE branch (remove everything except .git)
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 
-          # (D) Copy fresh artifacts from /tmp and commit
+          # Copy fresh artifacts from /tmp and commit
           mkdir -p data
           cp -f /tmp/live10/* data/
 
