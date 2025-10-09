@@ -490,60 +490,60 @@
     "sectors": {
       "Information Technology": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": -0.03,
-        "netTilt": -0.01
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Materials": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 1.28,
-        "netTilt": 0.64
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Health Care": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 0.16,
-        "netTilt": 0.08
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Communication Services": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": -0.06,
-        "netTilt": -0.03
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Real Estate": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 0.57,
-        "netTilt": 0.28
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Energy": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 0.03,
-        "netTilt": 0.01
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Consumer Staples": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 0.29,
-        "netTilt": 0.14
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Consumer Discretionary": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 0.04,
-        "netTilt": 0.02
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Financials": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 0.51,
-        "netTilt": 0.26
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Utilities": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": -0.02,
-        "netTilt": -0.01
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Industrials": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": -1.37,
-        "netTilt": -0.69
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-09T13:34:40-07:00"
+  "deltasUpdatedAt": "2025-10-09T13:39:16-07:00"
 }
