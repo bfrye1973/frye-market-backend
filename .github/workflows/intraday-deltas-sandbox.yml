@@ -2,18 +2,25 @@ name: Intraday DELTAS SANDBOX (5-minute)
 
 on:
   workflow_dispatch: {}
+  # 5-minute cadence during trading hours, with +2 min offset
   schedule:
-    # Trading hours only, every 5 minutes, with a +2 minute offset after 10m job
     - cron: "32-59/5 12 * * 1-5"   # 12:32, 12:37, 12:42, 12:47, 12:52, 12:57 UTC
     - cron: "2-59/5 13-20 * * 1-5" # 13:02 .. 20:57 UTC
+  # Also fire as soon as the 10-minute canonical finishes (zero queue drift)
+  workflow_run:
+    workflows: ["dashboard-10min"]
+    types: [completed]
 
 jobs:
   build-and-publish:
+    if: >
+      github.event_name != 'workflow_run'
+      || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 3                 # the diff job should finish in ~10–15s
     concurrency:
-      group: intraday-deltas-sandbox
-      cancel-in-progress: false
+      group: intraday-deltas-sandbox   # always keep the freshest
+      cancel-in-progress: true         # cancel any in-flight older run
     permissions:
       contents: write
 
@@ -27,7 +34,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Set BUILD_DIR using the runner's temp dir (portable + expression-safe)
       - name: Set BUILD_DIR env
         run: |
           echo "BUILD_DIR=${RUNNER_TEMP}/intraday-deltas" >> "$GITHUB_ENV"
@@ -75,7 +81,7 @@ jobs:
               except (URLError, HTTPError, TimeoutError, json.JSONDecodeError):
                   return None
 
-          def load_json_file(path: str):
+          def load_json(path: str):
               try:
                   if os.path.isfile(path):
                       with open(path,"r",encoding="utf-8") as f: return json.load(f)
@@ -106,7 +112,7 @@ jobs:
               print("ERROR: could not fetch live intraday JSON", file=sys.stderr)
               sys.exit(2)
 
-          prev = load_json_file(PREV)
+          prev = load_json(PREV)
 
           cb, cm = summarize(curr.get("sectorCards"))
           pb, pm = summarize(prev.get("sectorCards")) if prev else (0.0, 0.0)
