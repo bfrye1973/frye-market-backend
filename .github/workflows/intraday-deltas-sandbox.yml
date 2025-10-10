@@ -1,80 +1,38 @@
-name: Intraday DELTAS SANDBOX (5-minute)
-
-on:
-  workflow_dispatch: {}
-  # 5-minute cadence during trading hours, with +2 min offset
-  schedule:
-    - cron: "32-59/5 12 * * 1-5"   # 12:32, 12:37, 12:42, 12:47, 12:52, 12:57 UTC
-    - cron: "2-59/5 13-20 * * 1-5" # 13:02 .. 20:57 UTC
-  # Also fire as soon as the 10-minute canonical finishes (zero queue drift)
-  workflow_run:
-    workflows: ["dashboard-10min"]
-    types: [completed]
-
-jobs:
-  build-and-publish:
-    if: >
-      github.event_name != 'workflow_run'
-      || github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 3                 # the diff job should finish in ~10–15s
-    concurrency:
-      group: intraday-deltas-sandbox   # always keep the freshest
-      cancel-in-progress: true         # cancel any in-flight older run
-    permissions:
-      contents: write
-
-    env:
-      LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
-      BRANCH:   data-live-10min-sandbox
-
-    steps:
-      - name: Checkout (shallow)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Set BUILD_DIR env
-        run: |
-          echo "BUILD_DIR=${RUNNER_TEMP}/intraday-deltas" >> "$GITHUB_ENV"
-          mkdir -p "${RUNNER_TEMP}/intraday-deltas"
-
-      - name: Fetch previous sandbox payload (if exists)
-        run: |
-          set -e
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            git fetch origin "$BRANCH:$BRANCH"
-            git show "origin/$BRANCH:data/outlook_intraday.json" > "$BUILD_DIR/prev.json" || true
-          fi
-
-      - name: Generate NEW sandbox payload with DELTAS (mirror + diff)
+      - name: Generate NEW sandbox payload with DELTAS (lean + aligned + skip-if-same)
         env:
           LIVE_URL:  ${{ env.LIVE_URL }}
           BUILD_DIR: ${{ env.BUILD_DIR }}
         run: |
           python - <<'PY'
-          import json, os, sys, urllib.request
+          import os, json, sys, urllib.request, time
           from urllib.error import URLError, HTTPError
-          from datetime import datetime
+          from datetime import datetime, timezone, timedelta
+
+          # ---------- TZ helpers ----------
           try:
               from zoneinfo import ZoneInfo
               AZ = ZoneInfo("America/Phoenix")
           except Exception:
-              AZ = None
+              AZ = timezone(timedelta(hours=-7))  # fallback
 
+          def now_az(): return datetime.now(tz=AZ)
+          def az_iso(dt=None): return (dt or now_az()).replace(microsecond=0).isoformat()
+          def floor_to_interval(dt, minutes):
+              if dt.tzinfo is None: dt = dt.replace(tzinfo=AZ)
+              m = (dt.minute // minutes) * minutes
+              return dt.replace(minute=m, second=0, microsecond=0)
+
+          # ---------- IO ----------
           LIVE_URL  = os.environ["LIVE_URL"]
           BUILD_DIR = os.environ["BUILD_DIR"]
           OUT = os.path.join(BUILD_DIR, "outlook_intraday.json")
           HB  = os.path.join(BUILD_DIR, "heartbeat_10min.txt")
           PREV = os.path.join(BUILD_DIR, "prev.json")
 
-          def az_iso():
-              return (datetime.now(AZ) if AZ else datetime.now()).replace(microsecond=0).isoformat()
-
           def fetch_json(url: str):
               try:
-                  u = url + ("&t=" if "?" in url else "?t=") + str(int(datetime.utcnow().timestamp()))
-                  req = urllib.request.Request(u, headers={"Cache-Control":"no-store","User-Agent":"sandbox-deltas/1.0"})
+                  u = url + ("&t=" if "?" in url else "?t=") + str(int(time.time()))
+                  req = urllib.request.Request(u, headers={"Cache-Control":"no-store","User-Agent":"sandbox-deltas/1.1"})
                   with urllib.request.urlopen(req, timeout=20) as resp:
                       if resp.status != 200: return None
                       return json.loads(resp.read().decode("utf-8"))
@@ -89,91 +47,117 @@ jobs:
                   pass
               return None
 
+          # ---------- math ----------
           def pct(num, den): return 0.0 if den == 0 else 100.0 * num / den
+          def clip2(x, eps=0.05): return 0.0 if abs(x) < eps else round(x, 2)
+
+          CANON = [
+              "information technology","materials","health care","communication services",
+              "real estate","energy","consumer staples","consumer discretionary",
+              "financials","utilities","industrials",
+          ]
+          ALIASES = {
+              "healthcare":"health care","health-care":"health care","health care":"health care",
+              "info tech":"information technology","technology":"information technology","tech":"information technology",
+              "communications":"communication services","comm services":"communication services","telecom":"communication services",
+              "staples":"consumer staples","discretionary":"consumer discretionary",
+              "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
+          }
+          def canon_name(n:str) -> str:
+              n = (n or "").strip().lower()
+              return ALIASES.get(n, n)
+
+          def sector_map(cards):
+              m = {}
+              for c in cards or []:
+                  s = canon_name(c.get("sector",""))
+                  if not s: continue
+                  nh = int(c.get("nh",0)); nl = int(c.get("nl",0))
+                  up = int(c.get("up",0)); dn = int(c.get("down",0))
+                  m[s] = {"breadth_pct": pct(nh, nh+nl), "momentum_pct": pct(up, up+dn), "nh": nh, "nl": nl}
+              return m
 
           def summarize(cards):
-              nh = nl = up = dn = 0
+              nh=nl=up=dn=0
               for c in cards or []:
                   nh += int(c.get("nh",0)); nl += int(c.get("nl",0))
                   up += int(c.get("up",0)); dn += int(c.get("down",0))
               return pct(nh, nh+nl), pct(up, up+dn)
 
-          def sector_map(cards):
-              m = {}
-              for c in cards or []:
-                  nh = int(c.get("nh",0)); nl = int(c.get("nl",0))
-                  up = int(c.get("up",0)); dn = int(c.get("down",0))
-                  b  = pct(nh, nh+nl); mo = pct(up, up+dn)
-                  m[str(c.get("sector","Unknown"))] = (b, mo)
-              return m
-
+          # ---------- fetch current + prev ----------
           curr = fetch_json(LIVE_URL)
-          if not curr or not isinstance(curr, dict):
-              print("ERROR: could not fetch live intraday JSON", file=sys.stderr)
+          if not curr:
+              print("ERROR: could not fetch /live/intraday", file=sys.stderr)
               sys.exit(2)
-
           prev = load_json(PREV)
 
-          cb, cm = summarize(curr.get("sectorCards"))
-          pb, pm = summarize(prev.get("sectorCards")) if prev else (0.0, 0.0)
+          source_ts = curr.get("sectorsUpdatedAt") or curr.get("updated_at")  # prefer AZ string if present
+          bar_ts    = az_iso(floor_to_interval(now_az(), 5))                  # aligned 5m boundary
+
+          prev_src = prev.get("sourceTs") if isinstance(prev, dict) else None
+          prev_bar = prev.get("barTs")    if isinstance(prev, dict) else None
+
+          # ---------- skip-if-same ----------
+          if prev and source_ts and prev_src == source_ts and prev_bar == bar_ts:
+              os.makedirs(BUILD_DIR, exist_ok=True)
+              with open(HB,"w",encoding="utf-8") as f: f.write(az_iso()+"\n")
+              # keep previous out.json so we don't churn zeros
+              # also copy prev forward so later steps push it
+              with open(OUT,"w",encoding="utf-8") as f: json.dump(prev, f, ensure_ascii=False, separators=(",",":"))
+              print(f"[SKIP] same src={source_ts} bar={bar_ts} → kept last deltas")
+              sys.exit(0)
+
+          # ---------- build deltas (canonical 11 keys) ----------
+          cards_now  = curr.get("sectorCards") or []
+          cards_prev = prev.get("sectorCards") if isinstance(prev, dict) else []
+          now_map    = sector_map(cards_now)
+          prev_map   = sector_map(cards_prev)
+
+          d_sectors = {}
+          for s in CANON:
+              a = now_map.get(s,  {"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0})
+              b = prev_map.get(s, {"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0})
+              dB = clip2(a["breadth_pct"]  - b["breadth_pct"])
+              dM = clip2(a["momentum_pct"] - b["momentum_pct"])
+              d_sectors[s] = {
+                  "dBreadthPct": dB,
+                  "dMomentumPct": dM,
+                  "netTilt":     clip2((dB + dM)/2.0),
+                  "dNetNH":      (a["nh"] - a["nl"]) - (b["nh"] - b["nl"]),
+              }
+
+          cb, cm = summarize(cards_now)
+          pb, pm = summarize(cards_prev) if cards_prev else (0.0, 0.0)
           d_market = {
-              "dBreadthPct": round(cb - pb, 2),
-              "dMomentumPct": round(cm - pm, 2),
-              "netTilt": round(((cb - pb) + (cm - pm)) / 2.0, 2),
-              "riskOnPct": round((cb + cm) / 2.0, 2),
+              "dBreadthPct": clip2(cb - pb),
+              "dMomentumPct": clip2(cm - pm),
+              "netTilt":     clip2(((cb - pb) + (cm - pm))/2.0),
           }
 
-          curr_map = sector_map(curr.get("sectorCards"))
-          prev_map = sector_map(prev.get("sectorCards")) if prev else {}
-          d_sectors = {}
-          for name, (b_now, m_now) in curr_map.items():
-              b_prev, m_prev = prev_map.get(name, (0.0, 0.0))
-              dB = round(b_now - b_prev, 2)
-              dM = round(m_now - m_prev, 2)
-              d_sectors[name] = {"dBreadthPct": dB, "dMomentumPct": dM, "netTilt": round((dB + dM)/2.0, 2)}
-
-          out = dict(curr)
-          out["version"] = "sandbox-10m-deltas"
-          out.setdefault("meta", {})
-          out["meta"]["source"] = "mirror"
-          out["meta"]["sandbox"] = True
-          out["deltas"] = {"market": d_market, "sectors": d_sectors}
-          out["deltasUpdatedAt"] = az_iso()
+          # ---------- LEAN payload ----------
+          out = {
+              "version": "sandbox-10m-deltas",
+              "deltasUpdatedAt": az_iso(),
+              "barTs": bar_ts,
+              "sourceTs": source_ts,
+              "metrics": {
+                  "breadth_pct":  curr.get("metrics",{}).get("breadth_pct"),
+                  "momentum_pct": curr.get("metrics",{}).get("momentum_pct"),
+              },
+              "deltas": {
+                  "market": d_market,
+                  "sectors": d_sectors,
+              },
+              # If some consumer still needs cards, uncomment:
+              # "sectorCards": cards_now,
+              "deltaSpec": "breadth_pct,momentum_pct;round=2;clip=0.05;canon=11",
+          }
 
           os.makedirs(BUILD_DIR, exist_ok=True)
           with open(OUT, "w", encoding="utf-8") as f:
-              json.dump(out, f, ensure_ascii=False, indent=2)
+              json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
           with open(HB, "w", encoding="utf-8") as f:
               f.write(az_iso() + "\n")
 
-          print(f"[deltas] market={d_market}  wrote {OUT}")
+          print(f"[OK] deltas: market={d_market}  barTs={bar_ts}  sourceTs={source_ts}")
           PY
-
-      - name: Prepare sandbox branch (clean)
-        run: |
-          set -e
-          BRANCH="${{ env.BRANCH }}"
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            git fetch origin "$BRANCH:$BRANCH"
-            git checkout "$BRANCH"
-          else
-            git checkout --orphan "$BRANCH"
-          fi
-          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-          mkdir -p data
-
-      - name: Copy outputs
-        run: |
-          set -e
-          cp -f "$BUILD_DIR/outlook_intraday.json" data/outlook_intraday.json
-          cp -f "$BUILD_DIR/heartbeat_10min.txt"   data/heartbeat_10min.txt
-          ls -l data
-
-      - name: Commit & push
-        run: |
-          set -e
-          git config user.name  "frye-bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add data/*
-          git commit -m "Sandbox deltas update @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-          git push -f origin "${{ env.BRANCH }}"
