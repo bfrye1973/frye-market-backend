@@ -1,0 +1,47 @@
+name: QA - Freshness Check (10m + 5m)
+
+on:
+  schedule:
+    # 30 min before open, and once mid-session
+    - cron: "0 12 * * 1-5"     # 05:00 AZ / 12 UTC
+    - cron: "0 17 * * 1-5"     # mid-day
+  workflow_dispatch: {}
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check live + sandbox feeds
+        run: |
+          set -euo pipefail
+          echo "🔍 Checking /live/intraday (10m canonical)…"
+          curl -sfL "https://frye-market-backend-1.onrender.com/live/intraday?t=$(date +%s)" \
+            -o /tmp/live.json
+
+          echo "🔍 Checking sandbox (5m deltas)…"
+          curl -sfL "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min-sandbox/data/outlook_intraday.json?t=$(date +%s)" \
+            -o /tmp/sandbox.json
+
+          echo "---- Canonical ----"
+          jq -r '{updated_at, sectorsUpdatedAt, n_sectors:(.sectorCards|length)}' /tmp/live.json
+
+          echo "---- Sandbox ----"
+          jq -r '{deltasUpdatedAt, barTs, sourceTs, n_sectors:(.deltas.sectors|keys|length)}' /tmp/sandbox.json
+
+          echo "---- Validating ----"
+          # 1. sector count = 11
+          N1=$(jq '.sectorCards|length' /tmp/live.json)
+          N2=$(jq '.deltas.sectors|keys|length' /tmp/sandbox.json)
+          [ "$N1" -eq 11 ] && [ "$N2" -eq 11 ] || { echo "❌ Sector count mismatch ($N1,$N2)"; exit 1; }
+
+          # 2. freshness within 15 min
+          LIVE_TS=$(jq -r '.sectorsUpdatedAt // .updated_at' /tmp/live.json)
+          SBOX_TS=$(jq -r '.deltasUpdatedAt // .barTs' /tmp/sandbox.json)
+          live_age=$(( $(date +%s) - $(date -d "${LIVE_TS/Z/+00:00}" +%s) ))
+          box_age=$(( $(date +%s) - $(date -d "${SBOX_TS/Z/+00:00}" +%s) ))
+          echo "Live age: ${live_age}s   Sandbox age: ${box_age}s"
+          if [ "$live_age" -gt 900 ]; then echo "❌ Live older than 15 min"; exit 1; fi
+          if [ "$box_age" -gt 900 ]; then echo "❌ Sandbox older than 15 min"; exit 1; fi
+
+          echo "✅ Feeds healthy: live≤${live_age}s, sandbox≤${box_age}s, 11 sectors each."
