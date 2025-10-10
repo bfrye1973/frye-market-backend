@@ -1,57 +1,60 @@
 #!/usr/bin/env python3
 """
-5-minute Delta Sandbox Job (pure diff, no Polygon)
-- Mirrors /live/intraday → computes 5m deltas → writes sandbox JSON
-- Bar-aligned to America/Phoenix 5-minute boundaries
-- Skip-if-same canonical source + barTs (prevents zero churn)
-- Canonical 11-sector keys with aliasing + imputation
-- Rounds to 2 decimals, clips tiny deltas (|Δ| < 0.05 → 0.00)
-- Atomic write (tmp → mv), heartbeat update
+5-minute Delta Sandbox Job (pure diff, stdlib only)
+- Mirrors /live/intraday → computes 5m deltas → writes lean sandbox JSON
+- Aligned to America/Phoenix 5-minute bars
+- Skip-if-same canonical source + barTs
+- Canonical 11-sector keys (aliases + imputation)
+- Round(2) + clip |Δ|<0.05 → 0.00
+- Atomic write + heartbeat
 """
 
 import os, json, subprocess, tempfile, shutil, urllib.request, time
 from datetime import datetime, timezone, timedelta
 
-# --- Timezone (stdlib only) ---
+# ---------- Timezone ----------
 try:
     from zoneinfo import ZoneInfo
     AZ = ZoneInfo("America/Phoenix")
 except Exception:
-    AZ = timezone(timedelta(hours=-7))  # fallback (no DST)
+    AZ = timezone(timedelta(hours=-7))  # fallback
 
-# --- ENV ---
-REPO_URL   = os.environ["REPO_URL"]                      # e.g. https://github.com/bfrye1973/frye-market-backend.git
-BRANCH     = os.environ.get("BRANCH","data-live-10min-sandbox")
-LIVE_URL   = os.environ["LIVE_URL"]                      # e.g. https://frye-market-backend-1.onrender.com/live/intraday
-GIT_NAME   = os.environ.get("GIT_NAME","frye-bot")
-GIT_EMAIL  = os.environ.get("GIT_EMAIL","bot@users.noreply.github.com")
-TOKEN      = os.environ["GITHUB_TOKEN"]                  # repo-scoped PAT
-REPO_AUTH  = REPO_URL.replace("https://","https://"+TOKEN+"@")
+# ---------- ENV ----------
+REPO_URL  = os.environ["REPO_URL"]                      # e.g. https://github.com/bfrye1973/frye-market-backend.git
+BRANCH    = os.environ.get("BRANCH", "data-live-10min-sandbox")
+LIVE_URL  = os.environ["LIVE_URL"]                      # e.g. https://frye-market-backend-1.onrender.com/live/intraday
+GIT_NAME  = os.environ.get("GIT_NAME", "frye-bot")
+GIT_EMAIL = os.environ.get("GIT_EMAIL", "bot@users.noreply.github.com")
+TOKEN     = os.environ["GITHUB_TOKEN"]                  # repo-scoped PAT
+REPO_AUTH = REPO_URL.replace("https://", "https://" + TOKEN + "@")
 
-OUT_PATH   = "data/outlook_intraday.json"                # sandbox output
-HEARTBEAT  = "data/heartbeat_5min.txt"                   # simple freshness probe
+OUT_PATH  = "data/outlook_intraday.json"                # sandbox output (lean)
+HEARTBEAT = "data/heartbeat_5min.txt"                   # freshness probe
 
-# --- Canonical sector order (11) + aliases ---
+# ---------- Canonical sectors (11) + aliases ----------
 CANON = [
-    "information technology","materials","health care","communication services",
-    "real estate","energy","consumer staples","consumer discretionary",
-    "financials","utilities","industrials",
+    "information technology", "materials", "health care", "communication services",
+    "real estate", "energy", "consumer staples", "consumer discretionary",
+    "financials", "utilities", "industrials",
 ]
 ALIASES = {
     "healthcare":"health care","health-care":"health care","health care":"health care",
     "info tech":"information technology","technology":"information technology","tech":"information technology",
     "communications":"communication services","comm services":"communication services","telecom":"communication services",
     "staples":"consumer staples","discretionary":"consumer discretionary",
-    "finance":"financials","industry":"industrials",
-    "reit":"real estate","reits":"real estate",
+    "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
 }
 
-# ---------------- Utilities ----------------
-def now_az(): return datetime.now(tz=AZ)
-def az_iso(dt=None): return (dt or now_az()).replace(microsecond=0).isoformat()
+# ---------- Utils ----------
+def now_az():
+    return datetime.now(tz=AZ)
+
+def az_iso(dt=None):
+    return (dt or now_az()).replace(microsecond=0).isoformat()
 
 def floor_to_interval(dt, minutes):
-    if dt.tzinfo is None: dt = dt.replace(tzinfo=AZ)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=AZ)
     m = (dt.minute // minutes) * minutes
     return dt.replace(minute=m, second=0, microsecond=0)
 
@@ -73,13 +76,14 @@ def sector_map(cards):
     m = {}
     for c in cards or []:
         s  = canon_name(c.get("sector",""))
-        if not s: continue
+        if not s: 
+            continue
         nh = int(c.get("nh",0)); nl = int(c.get("nl",0))
         up = int(c.get("up",0)); dn = int(c.get("down",0))
         m[s] = {
             "breadth_pct": pct(nh, nh+nl),
             "momentum_pct": pct(up, up+dn),
-            "nh": nh, "nl": nl, "up": up, "down": dn
+            "nh": nh, "nl": nl, "up": up, "down": dn,
         }
     return m
 
@@ -96,16 +100,16 @@ def atomic_write(path, obj):
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
     os.replace(tmp, path)
 
-# ---------------- Main ----------------
+# ---------- Main ----------
 def main():
     # 1) Pull canonical intraday
     curr = fetch_json(LIVE_URL)
-    source_ts = curr.get("sectorsUpdatedAt") or curr.get("updated_at")  # AZ if present
+    source_ts = curr.get("sectorsUpdatedAt") or curr.get("updated_at")  # prefer AZ stamp
 
     # 2) Aligned 5-minute bar (AZ)
     bar_ts = az_iso(floor_to_interval(now_az(), 5))
 
-    # 3) Previous sandbox (if exists)
+    # 3) Load previous sandbox (if exists)
     prev = None
     try:
         prev_raw = urllib.request.urlopen(
@@ -119,7 +123,7 @@ def main():
     prev_src = prev.get("sourceTs") if prev else None
     prev_bar = prev.get("barTs")    if prev else None
 
-    # 4) Skip-if-same: same canonical AND same bar boundary → keep last deltas
+    # 4) Skip-if-same (no churn if nothing advanced)
     if prev and source_ts and prev_src == source_ts and prev_bar == bar_ts:
         tmp = tempfile.mkdtemp(prefix="delta-")
         try:
@@ -138,13 +142,12 @@ def main():
             shutil.rmtree(tmp, ignore_errors=True)
         return
 
-    # 5) Build maps (always produce 11 sectors)
+    # 5) Build current/previous maps (always produce 11 sectors)
     cards_now  = curr.get("sectorCards") or []
     cards_prev = prev.get("sectorCards") if prev else []
     now_map    = sector_map(cards_now)
     prev_map   = sector_map(cards_prev)
 
-    # Sector deltas (breadth/momentum + dNetNH), canonical order
     deltas_sectors = {}
     for s in CANON:
         a = now_map.get(s,  {"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0})
@@ -156,34 +159,34 @@ def main():
         deltas_sectors[s] = {
             "dBreadthPct": dB,
             "dMomentumPct": dM,
-            "netTilt": clip2((dB + dM)/2.0),
-            "dNetNH": net_now - net_prev,
+            "netTilt":     clip2((dB + dM) / 2.0),
+            "dNetNH":      net_now - net_prev,
         }
 
-    # Market-level deltas (clip/round)
+    # Market-level deltas (clip & round)
     cb, cm = summarize(cards_now)
     pb, pm = summarize(cards_prev) if cards_prev else (0.0, 0.0)
     d_market = {
         "dBreadthPct": clip2(cb - pb),
         "dMomentumPct": clip2(cm - pm),
-        "netTilt":     clip2(((cb - pb) + (cm - pm))/2.0),
+        "netTilt":     clip2(((cb - pb) + (cm - pm)) / 2.0),
     }
 
-    # 6) Lean sandbox payload (just what FE needs)  ——  keep this minimal
+    # 6) LEAN sandbox payload (only what FE needs)
     out = {
         "version": "sandbox-10m-deltas",
         "deltasUpdatedAt": az_iso(),
         "barTs": bar_ts,                 # aligned 5m boundary (AZ)
         "sourceTs": source_ts,           # canonical ts used for diff
         "metrics": {
-            "breadth_pct": curr.get("metrics",{}).get("breadth_pct"),
+            "breadth_pct":  curr.get("metrics",{}).get("breadth_pct"),
             "momentum_pct": curr.get("metrics",{}).get("momentum_pct"),
         },
         "deltas": {
             "market": d_market,
-            "sectors": deltas_sectors     # 11 keys, canonical order if you iterate CANON
+            "sectors": deltas_sectors    # 11 canonical keys
         },
-        # If you need sectorCards for other consumers, uncomment the next line:
+        # If some consumer still needs canonical cards from sandbox, uncomment:
         # "sectorCards": cards_now,
         "deltaSpec": "breadth_pct,momentum_pct;round=2;clip=0.05;canon=11",
     }
