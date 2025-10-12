@@ -5,8 +5,17 @@
 - Aligned to America/Phoenix 5-minute bars
 - Skip-if-same canonical source + barTs
 - Canonical 11-sector keys (aliases + imputation)
-- Round(2) + clip |Δ|<0.05 → 0.00
+- Round(2) + (gentle) clip |Δ|<0.01 → 0.00  (less aggressive than 0.05)
 - Atomic write + heartbeat
+
+Env (required):
+  REPO_URL    = https://github.com/<owner>/<repo>.git
+  BRANCH      = data-live-10min-sandbox            (default if unset)
+  LIVE_URL    = https://frye-market-backend-1.onrender.com/live/intraday
+  GITHUB_TOKEN (repo-scoped PAT)
+Optional:
+  GIT_NAME    = frye-bot
+  GIT_EMAIL   = bot@users.noreply.github.com
 """
 
 import os, json, subprocess, tempfile, shutil, urllib.request, time
@@ -20,16 +29,16 @@ except Exception:
     AZ = timezone(timedelta(hours=-7))  # fallback
 
 # ---------- ENV ----------
-REPO_URL  = os.environ["REPO_URL"]                      # e.g. https://github.com/bfrye1973/frye-market-backend.git
+REPO_URL  = os.environ["REPO_URL"]                          # e.g. https://github.com/bfrye1973/frye-market-backend.git
 BRANCH    = os.environ.get("BRANCH", "data-live-10min-sandbox")
-LIVE_URL  = os.environ["LIVE_URL"]                      # e.g. https://frye-market-backend-1.onrender.com/live/intraday
+LIVE_URL  = os.environ["LIVE_URL"]                          # e.g. https://frye-market-backend-1.onrender.com/live/intraday
 GIT_NAME  = os.environ.get("GIT_NAME", "frye-bot")
 GIT_EMAIL = os.environ.get("GIT_EMAIL", "bot@users.noreply.github.com")
-TOKEN     = os.environ["GITHUB_TOKEN"]                  # repo-scoped PAT
+TOKEN     = os.environ["GITHUB_TOKEN"]                      # repo-scoped PAT
 REPO_AUTH = REPO_URL.replace("https://", "https://" + TOKEN + "@")
 
-OUT_PATH  = "data/outlook_intraday.json"                # sandbox output (lean)
-HEARTBEAT = "data/heartbeat_5min.txt"                   # freshness probe
+OUT_PATH  = "data/outlook_intraday.json"                    # sandbox output
+HEARTBEAT = "data/heartbeat_5min.txt"                       # freshness probe
 
 # ---------- Canonical sectors (11) + aliases ----------
 CANON = [
@@ -65,25 +74,54 @@ def fetch_json(url: str):
         return json.loads(resp.read().decode("utf-8"))
 
 def pct(num, den): return 0.0 if den == 0 else 100.0 * num / den
-def clip2(x, eps=0.05): return 0.0 if abs(x) < eps else round(x, 2)
+
+def clip2(x, eps=0.01):  # gentler clip than 0.05
+    try:
+        v = float(x)
+    except Exception:
+        return 0.0
+    return 0.0 if abs(v) < eps else round(v, 2)
 
 def canon_name(name: str) -> str:
     n = (name or "").strip().lower()
     return ALIASES.get(n, n)
 
 def sector_map(cards):
-    """dict: sector -> {breadth_pct, momentum_pct, nh, nl, up, down}"""
+    """
+    dict: sector -> {breadth_pct, momentum_pct, nh, nl, up, down}
+    Prefer provided % fields from canonical; fall back to counts only if needed.
+    """
     m = {}
     for c in cards or []:
-        s  = canon_name(c.get("sector",""))
-        if not s: 
+        s = canon_name(c.get("sector",""))
+        if not s:
             continue
-        nh = int(c.get("nh",0)); nl = int(c.get("nl",0))
-        up = int(c.get("up",0)); dn = int(c.get("down",0))
+
+        # Prefer % already computed by canonical payload
+        bp = c.get("breadth_pct")
+        mp = c.get("momentum_pct")
+        try:
+            bp = float(bp) if bp is not None else None
+        except Exception:
+            bp = None
+        try:
+            mp = float(mp) if mp is not None else None
+        except Exception:
+            mp = None
+
+        # Counts (fallback)
+        nh = c.get("nh"); nl = c.get("nl"); up = c.get("up"); dn = c.get("down")
+        nh_i = int(nh or 0); nl_i = int(nl or 0); up_i = int(up or 0); dn_i = int(dn or 0)
+
+        if bp is None:
+            bp = pct(nh_i, nh_i + nl_i)
+        if mp is None:
+            mp = pct(up_i, up_i + dn_i)
+
         m[s] = {
-            "breadth_pct": pct(nh, nh+nl),
-            "momentum_pct": pct(up, up+dn),
-            "nh": nh, "nl": nl, "up": up, "down": dn,
+            "breadth_pct": bp,
+            "momentum_pct": mp,
+            "nh": nh_i, "nl": nl_i, "up": up_i, "down": dn_i,
         }
     return m
 
@@ -144,7 +182,7 @@ def main():
 
     # 5) Build current/previous maps (always produce 11 sectors)
     cards_now  = curr.get("sectorCards") or []
-    cards_prev = prev.get("sectorCards") if prev else []
+    cards_prev = prev.get("sectorCards") if prev else []  # <<< keep previous cards for real diffs
     now_map    = sector_map(cards_now)
     prev_map   = sector_map(cards_prev)
 
@@ -172,7 +210,7 @@ def main():
         "netTilt":     clip2(((cb - pb) + (cm - pm)) / 2.0),
     }
 
-    # 6) LEAN sandbox payload (only what FE needs)
+    # 6) Sandbox payload
     out = {
         "version": "sandbox-10m-deltas",
         "deltasUpdatedAt": az_iso(),
@@ -186,9 +224,8 @@ def main():
             "market": d_market,
             "sectors": deltas_sectors    # 11 canonical keys
         },
-        # If some consumer still needs canonical cards from sandbox, uncomment:
-        # "sectorCards": cards_now,
-        "deltaSpec": "breadth_pct,momentum_pct;round=2;clip=0.05;canon=11",
+        "sectorCards": cards_now,        # <<< keep previous canonical cards for next diff run
+        "deltaSpec": "breadth_pct,momentum_pct;round=2;clip=0.01;canon=11",
     }
 
     # 7) Clone → atomic write → commit/push
