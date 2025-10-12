@@ -1,7 +1,7 @@
 {
-  "updated_at": "2025-10-11T16:08:23-07:00",
-  "updated_at_utc": "2025-10-11T23:08:23+00:00",
-  "timestamp": "2025-10-11T23:08:23+00:00",
+  "updated_at": "2025-10-12T09:43:11-07:00",
+  "updated_at_utc": "2025-10-12T16:43:11+00:00",
+  "timestamp": "2025-10-12T16:43:11+00:00",
   "mode": "intraday10",
   "groups": {
     "Communication Services": {
@@ -17,7 +17,7 @@
     },
     "Real Estate": {
       "nh": 14,
-      "nl": 168,
+      "nl": 167,
       "u": 14,
       "d": 201,
       "vol_state": "Mixed",
@@ -71,7 +71,7 @@
       }
     },
     "Financials": {
-      "nh": 80,
+      "nh": 82,
       "nl": 496,
       "u": 93,
       "d": 681,
@@ -134,7 +134,7 @@
     "liquidity_pct": 106
   },
   "meta": {
-    "build_secs": 88.44,
+    "build_secs": 120.04,
     "universe": 5470
   }
 }
