@@ -1,8 +1,8 @@
 {
   "schema_version": "r1.3",
-  "updated_at": "2025-10-12T09:43:11-07:00",
-  "updated_at_utc": "2025-10-12T16:43:11+00:00",
-  "ts": "2025-10-12T16:43:11+00:00",
+  "updated_at": "2025-10-12T11:02:54-07:00",
+  "updated_at_utc": "2025-10-12T18:02:54+00:00",
+  "ts": "2025-10-12T18:02:54+00:00",
   "version": "sandbox-10m-deltas",
   "pipeline": "intraday",
   "metrics": {
@@ -41,7 +41,7 @@
       "label": "Liquidity"
     }
   },
-  "sectorsUpdatedAt": "2025-10-12T09:43:11-07:00",
+  "sectorsUpdatedAt": "2025-10-12T11:02:54-07:00",
   "sectorCards": [
     {
       "sector": "Information Technology",
@@ -392,7 +392,7 @@
     ]
   },
   "engineLights": {
-    "updatedAt": "2025-10-12T09:43:11-07:00",
+    "updatedAt": "2025-10-12T11:02:54-07:00",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -400,7 +400,7 @@
         "active": true,
         "severity": "danger",
         "reason": "q=92.0",
-        "lastChanged": "2025-10-12T09:43:11-07:00"
+        "lastChanged": "2025-10-12T11:02:54-07:00"
       },
       "sigExpansion": {
         "active": false,
@@ -418,7 +418,7 @@
         "active": true,
         "severity": "danger",
         "reason": "b=18.4",
-        "lastChanged": "2025-10-12T09:43:11-07:00"
+        "lastChanged": "2025-10-12T11:02:54-07:00"
       },
       "sigOverheat": {
         "active": false,
@@ -456,7 +456,7 @@
     "sectorDirection10m": {
       "risingCount": 1,
       "risingPct": 9.1,
-      "updatedAt": "2025-10-12T09:43:11-07:00",
+      "updatedAt": "2025-10-12T11:02:54-07:00",
       "deltas": {
         "Information Technology": -445,
         "Materials": -57,
@@ -473,7 +473,7 @@
     },
     "riskOn10m": {
       "riskOnPct": 15.8,
-      "updatedAt": "2025-10-12T09:43:11-07:00"
+      "updatedAt": "2025-10-12T11:02:54-07:00"
     }
   },
   "meta": {
@@ -545,5 +545,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-12T11:03:07-07:00"
+  "deltasUpdatedAt": "2025-10-13T06:07:45-07:00"
 }
