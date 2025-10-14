@@ -1,414 +1,284 @@
 #!/usr/bin/env python3
-"""
-make_dashboard.py (R3.3 — Scalper-Sensitive Engine Lights, short breakout hybrid)
-
-- Reads:  data/outlook_source.json (from R8 builder)
-- Writes: data/outlook_intraday.json (intraday),
-          data/outlook_hourly.json   (hourly),
-          data/outlook.json          (daily/eod)
-"""
+# Ferrari Dashboard — make_dashboard.py (R10)
+# Canonical 10-minute payload composer (no schema changes).
+# - Reads data/outlook_source.json (built by build_outlook_source_from_polygon.py)
+# - Builds sectorCards + metrics + intraday blocks
+# - Adds "intraday.overall10m" (EMA10-based composite)    <<< NEW
+#
+# NOTE: This script does NOT change routes, files or workflows.
+# It writes data/outlook_intraday.json with the same keys the FE already uses.
 
 from __future__ import annotations
-import argparse, json, os
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
-import urllib.request
-from zoneinfo import ZoneInfo
+import os, json, math, time, urllib.request
+from datetime import datetime, timedelta, timezone, date
+from typing import Any, Dict, List
 
-# ====== CONFIG ======
-SCHEMA_VERSION = "r1.3"
-VERSION_TAG    = "1.3.3-intraday-scalper"  # bump to confirm deployment
+# ---- paths ----
+SRC_PATH = os.path.join("data", "outlook_source.json")
+OUT_PATH = os.path.join("data", "outlook_intraday.json")
+STATE_PATH = os.path.join("data", "nowcast_state.json")
 
-PHX_TZ = ZoneInfo("America/Phoenix")
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
+# ---- env (Polygon for SPY 10m only) ----
+POLY_KEY  = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_API_KEY") or os.environ.get("POLYGON_API") or ""
+POLY_BASE = "https://api.polygon.io"
 
-ENGINE_LIGHTS_STATE_PATH = os.getenv("ENGINE_LIGHTS_STATE_PATH", "data/engine_lights_state.json")
-ENGINE_LIGHTS_STRICT     = os.getenv("ENGINE_LIGHTS_STRICT", "true").lower() == "true"
+# ======================================================================================
+# utils
+# ======================================================================================
 
-PREFERRED_ORDER = [
-    "information technology","materials","health care","communication services",
-    "real estate","energy","consumer staples","consumer discretionary",
-    "financials","utilities","industrials",
-]
-OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
-DEFENSIVE = {"consumer staples","utilities","health care"}
+def clamp(x: float, lo: float, hi: float) -> float:
+    return lo if x < lo else hi if x > hi else x
 
-# ---------- time ----------
-def now_utc_iso() -> str:  return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-def now_phx_iso() -> str:  return datetime.now(PHX_TZ).replace(microsecond=0).isoformat()
+def pct(a: float, b: float) -> float:
+    if b == 0: return 0.0
+    return 100.0 * (a - b) / b
 
-# ---------- utils ----------
-def jread(p: str) -> Dict[str, Any]:
+def ema_hl(prev: float|None, x: float, hl_bars: float = 2.0) -> float:
+    """EMA by half-life in bars."""
+    if prev is None or not math.isfinite(prev): return float(x)
+    alpha = 1.0 - math.pow(0.5, 1.0 / max(hl_bars, 0.5))
+    return float(prev + alpha * (x - prev))
+
+def load_json(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_json(path: str, obj: Dict[str, Any]):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
+
+def load_state() -> Dict[str, Any]:
     try:
-        with open(p, "r", encoding="utf-8") as f: return json.load(f)
-    except: return {}
-def jwrite(p: str, obj: Dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, separators=(",", ":"), indent=None); f.write("\n")
-def norm(s: str) -> str: return (s or "").strip().lower()
-def title_case(x: str) -> str: return " ".join(w.capitalize() for w in (x or "").split())
-def canonical_sector(name: str) -> str:
-    n = norm(name)
-    M = {
-        "tech":"information technology","information technology":"information technology","infotech":"information technology","it":"information technology",
-        "healthcare":"health care","health care":"health care",
-        "communication services":"communication services","communications":"communication services","comm services":"communication services","telecom":"communication services",
-        "consumer discretionary":"consumer discretionary","discretionary":"consumer discretionary",
-        "consumer staples":"consumer staples","staples":"consumer staples",
-        "utilities":"utilities","utility":"utilities",
-        "industrials":"industrials","industrial":"industrials",
-        "materials":"materials","material":"materials",
-        "energy":"energy","financials":"financials","financial":"financials",
-        "real estate":"real estate","reits":"real estate",
-    }
-    return M.get(n, n)
-def num(v, default=0.0):
-    try:
-        if v is None: return default
-        if isinstance(v,(int,float)): return float(v)
-        s=str(v).strip(); return default if s=="" else float(s)
-    except: return default
-def pick(d: Dict[str,Any], *keys, default=None):
-    for k in keys:
-        if isinstance(d, dict) and d.get(k) is not None: return d[k]
-    return default
-def ratio_pct(pos, neg):
-    s = float(pos) + float(neg)
-    return 50.0 if s <= 0 else round(100.0 * (float(pos) / s), 2)
-
-# ---------- sectors ----------
-def sectors_from_source(src: Dict[str, Any]) -> Dict[str, Any]:
-    raw=None
-    if isinstance(src.get("outlook"), dict) and isinstance(src["outlook"].get("sectors"), dict): raw = src["outlook"]["sectors"]
-    elif isinstance(src.get("sectors"), dict): raw = src["sectors"]
-    elif isinstance(src.get("groups"), dict): raw = src["groups"]
-
-    out: Dict[str, Any] = {}
-    if isinstance(raw, dict):
-        for name, vals in raw.items():
-            key = canonical_sector(name)
-            nh=int(num((vals or {}).get("nh",0))); nl=int(num((vals or {}).get("nl",0)))
-            up=int(num((vals or {}).get("u",0)));  dn=int(num((vals or {}).get("d",0)))
-            spark = (vals or {}).get("spark", []);  spark = spark if isinstance(spark, list) else []
-            out[key] = {"nh":nh,"nl":nl,"up":up,"down":dn,"netNH":nh-nl,"netUD":up-dn,"spark":spark}
-    for k in PREFERRED_ORDER:
-        out.setdefault(k, {"nh":0,"nl":0,"up":0,"down":0,"netNH":0,"netUD":0,"spark":[]})
-    return out
-
-# ---------- metrics/summary ----------
-def build_metrics_summary(src: Dict[str, Any], sectors: Dict[str, Any], mode: str) -> Dict[str, Any]:
-    g = src.get("global", {}) or {}
-    squeeze_intraday = num(pick(g,"squeeze_pressure_pct","squeezePressurePct", default=50))
-    volatility_pct   = num(pick(g,"volatility_pct","volatilityPct", default=50))
-    liquidity_psi    = num(pick(g,"liquidity_pct","liquidityPct", default=70))
-    squeeze_daily    = pick(g,"daily_squeeze_pct","squeeze_daily_pct","squeezeDailyPct", default=None)
-
-    tot_nh = sum(int(num(v.get("nh", 0)))   for v in sectors.values())
-    tot_nl = sum(int(num(v.get("nl", 0)))   for v in sectors.values())
-    tot_u  = sum(int(num(v.get("up", 0)))   for v in sectors.values())
-    tot_d  = sum(int(num(v.get("down", 0))) for v in sectors.values())
-
-    breadth_pct  = ratio_pct(tot_nh, tot_nl)
-    momentum_pct = ratio_pct(tot_u,  tot_d)
-
-    metrics = {
-        "breadth_pct":            float(breadth_pct),
-        "momentum_pct":           float(momentum_pct),
-        "squeeze_intraday_pct":   float(squeeze_intraday),
-        "volatility_pct":         float(volatility_pct),
-        "liquidity_psi":          float(liquidity_psi),
-    }
-    if mode in ("daily","eod") and squeeze_daily is not None:
-        metrics["squeeze_daily_pct"] = float(num(squeeze_daily, None))
-
-    summary = {"breadth_pct": float(breadth_pct), "momentum_pct": float(momentum_pct)}
-
-    gauges = {
-        "rpm":   {"pct": metrics["breadth_pct"],            "label":"Breadth"},
-        "speed": {"pct": metrics["momentum_pct"],           "label":"Momentum"},
-        "fuel":  {"pct": metrics["squeeze_intraday_pct"],   "label":"Squeeze"},
-        "water": {"pct": metrics["volatility_pct"],         "label":"Volatility"},
-        "oil":   {"psi": metrics["liquidity_psi"],          "label":"Liquidity"},
-    }
-    if "squeeze_daily_pct" in metrics: gauges["squeezeDaily"] = {"pct": metrics["squeeze_daily_pct"]}
-    odometers = {"squeezeCompressionPct": metrics["squeeze_intraday_pct"]}
-    return {"metrics": metrics, "gauges": gauges, "summary": summary, "odometers": odometers}
-
-# ---------- cards ----------
-def cards_from_sectors(sectors: Dict[str, Any]) -> List[Dict[str, Any]]:
-    cards: List[Dict[str, Any]] = []
-    for key in PREFERRED_ORDER:
-        vals = sectors.get(key, {})
-        nh = int(num(vals.get("nh", 0))); nl = int(num(vals.get("nl", 0)))
-        u  = int(num(vals.get("up", 0)));  d  = int(num(vals.get("down", 0)))
-        breadth_pct  = ratio_pct(nh, nl)
-        momentum_pct = ratio_pct(u,  d)
-        netNH = nh - nl
-        outlook = "Neutral"
-        if netNH > 0: outlook = "Bullish"
-        if netNH < 0: outlook = "Bearish"
-        spark = vals.get("spark", []); spark = spark if isinstance(spark, list) else []
-        cards.append({
-            "sector": title_case(key), "outlook": outlook,
-            "breadth_pct": breadth_pct, "momentum_pct": momentum_pct,
-            "nh": nh, "nl": nl, "up": u, "down": d, "spark": spark
-        })
-    return cards
-
-# ================== Engine Lights (Scalper) ==================
-ALL_LIGHT_KEYS = [
-    "sigBreakout","sigDistribution","sigCompression","sigExpansion",
-    "sigOverheat","sigTurbo","sigDivergence","sigLowLiquidity","sigVolatilityHigh"
-]
-def _el_load_state(path: str) -> Dict[str, Any]:
-    try:
-        with open(path, "r", encoding="utf-8") as f: return json.load(f)
+        with open(STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception:
-        return {"signals": {k: {"active": False, "lastChanged": None} for k in ALL_LIGHT_KEYS}}
-def _el_save_state(path: str, state: Dict[str, Any]) -> None:
+        return {}
+
+def save_state(st: Dict[str, Any]):
+    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+    with open(STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump(st, f, ensure_ascii=False, indent=2)
+
+def now_iso() -> str:
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f: json.dump(state, f)
-    except Exception: pass
-def _mk_sig(active: bool, severity: str, reason: str, last_changed: Optional[str]) -> Dict[str, Any]:
-    sev = severity if severity in ("info","warn","danger") else "info"
-    return {"active": bool(active), "severity": sev, "reason": reason, "lastChanged": last_changed}
+        from zoneinfo import ZoneInfo
+        PHX = ZoneInfo("America/Phoenix")
+        return datetime.now(PHX).replace(microsecond=0).isoformat()
+    except Exception:
+        return datetime.now().replace(microsecond=0).isoformat()
 
-def compute_engine_lights_scalper(
-    *, summary: Dict[str, Any], metrics: Dict[str, Any], prev_metrics: Optional[Dict[str, Any]],
-    index_scalper_direction: str = "none", index_scalper_streak: int = 0, vix_below_ema10: bool = False,
-    ts_local_iso: str, strict: bool = True
-) -> Dict[str, Any]:
-    st = _el_load_state(ENGINE_LIGHTS_STATE_PATH)
-    last = st.get("signals", {})
+# ======================================================================================
+# SPY 10-minute fetch (small, fast, only used for EMA10 cross)
+# ======================================================================================
 
-    b  = float(num(summary.get("breadth_pct", 50)))
-    m  = float(num(summary.get("momentum_pct", 50)))
-    q  = float(num(metrics.get("squeeze_intraday_pct", 50)))
-    lq = float(num(metrics.get("liquidity_psi", 70)))
-    vol= float(num(metrics.get("volatility_pct", 50)))
-
-    m_prev = None if not prev_metrics else float(num(prev_metrics.get("momentum_pct", None), None))
-    q_prev = None if not prev_metrics else float(num(prev_metrics.get("squeeze_intraday_pct", None), None))
-    q_fall = (q_prev is not None and q < q_prev)
-
-    align = index_scalper_direction or "none"
-    streak= int(index_scalper_streak or 0)
-    vixOK = bool(vix_below_ema10)
-
-    sig: Dict[str, Dict[str, Any]] = {}
-
-    # Compression
-    if q >= 65: sig["sigCompression"] = _mk_sig(True, "danger" if q >= 85 else "warn", f"q={q:.1f}", None)
-    else:       sig["sigCompression"] = _mk_sig(False, "info", "", None)
-
-    # Expansion (super-low q or falling)
-    super_low_q = (q <= 20)
-    if (q < 58 and (q_fall or super_low_q)):
-        confirmed = (q < 45) and (align in ("long","short")) and vixOK
-        sig["sigExpansion"] = _mk_sig(True, "info" if confirmed else "warn",
-                                      f"q={q:.1f} falling={q_fall} superLow={super_low_q} align={align} vix={vixOK}", None)
-    else:
-        sig["sigExpansion"] = _mk_sig(False, "info", "", None)
-
-    # Breakout — Long (unchanged from R3.2, early a bit looser)
-    breakout_long_early = (b > 53) and (q < 78) and (align == "long") and (streak >= 1)
-    breakout_long_conf  = breakout_long_early and (vixOK or m >= 58) and (streak >= 2)
-
-    # Breakout — Short (HYBRID): early on breadth+squeeze, confirm needs align short + streak + (!vixOK or low momo)
-    breakout_short_early = (b < 47) and (q < 78) and (streak >= 1)
-    breakout_short_conf  = breakout_short_early and (align == "short") and ((not vixOK) or m <= 55) and (streak >= 2)
-
-    if breakout_long_early:
-        sig["sigBreakout"] = _mk_sig(True, "info" if breakout_long_conf else "warn",
-                                     f"LONG b={b:.1f} q={q:.1f} streak={streak} vixOK={vixOK} m={m:.1f}", None)
-    elif breakout_short_early:
-        sig["sigBreakout"] = _mk_sig(True, "danger" if breakout_short_conf else "warn",
-                                     f"SHORT b={b:.1f} q={q:.1f} streak={streak} align={align} vixOK={vixOK} m={m:.1f}", None)
-    else:
-        sig["sigBreakout"] = _mk_sig(False, "info", "", None)
-
-    # Distribution — more sensitive
-    if b < 50: sig["sigDistribution"] = _mk_sig(True, "danger" if b < 40 else "warn", f"b={b:.1f}", None)
-    else:      sig["sigDistribution"] = _mk_sig(False, "info", "", None)
-
-    # Overheat / Turbo
-    if m > 80:
-        sig["sigOverheat"] = _mk_sig(True, "danger" if m >= 92 else "warn", f"m={m:.1f}", None)
-        turbo = (m >= 88) and (q < 75) and (align == "long")
-        sig["sigTurbo"]    = _mk_sig(turbo, "info", f"m={m:.1f} q={q:.1f} align={align}", None)
-    else:
-        sig["sigOverheat"] = _mk_sig(False, "info", "", None); sig["sigTurbo"] = _mk_sig(False, "info", "", None)
-
-    # Divergence (long + short flavors)
-    if (m > 66 and b < 50): sig["sigDivergence"] = _mk_sig(True, "warn", f"UP m={m:.1f} b={b:.1f}", None)
-    elif (m_prev is not None and m < m_prev and b < 50):
-        sig["sigDivergence"] = _mk_sig(True, "warn", f"DOWN mΔ={m_prev:.1f}->{m:.1f} b={b:.1f}", None)
-    else:
-        sig["sigDivergence"] = _mk_sig(False, "info", "", None)
-
-    # Liquidity / Volatility
-    if float(num(metrics.get("liquidity_psi", 70))) < 45:
-        lqv=float(num(metrics.get("liquidity_psi", 70)))
-        sig["sigLowLiquidity"] = _mk_sig(True, "danger" if lqv < 30 else "warn", f"psi={lqv:.1f}", None)
-    else:
-        sig["sigLowLiquidity"] = _mk_sig(False, "info", "", None)
-
-    if vol > 50:
-        sev = "danger" if vol >= 85 else ("info" if vol >= 65 else "warn")
-        sig["sigVolatilityHigh"] = _mk_sig(True, sev, f"vol={vol:.1f}", None)
-    else:
-        sig["sigVolatilityHigh"] = _mk_sig(False, "info", "", None)
-
-    # ensure all keys + lastChanged stamp
-    for k in ALL_LIGHT_KEYS: sig.setdefault(k, _mk_sig(False, "info", "", None))
-    for k in ALL_LIGHT_KEYS:
-        prev_active = bool(last.get(k, {}).get("active", False))
-        now_active  = bool(sig[k]["active"])
-        prev_ts     = last.get(k, {}).get("lastChanged")
-        sig[k]["lastChanged"] = ts_local_iso if (now_active != prev_active) else prev_ts
-    st["signals"] = {k: {"active": sig[k]["active"], "lastChanged": sig[k]["lastChanged"]} for k in ALL_LIGHT_KEYS}
-    _el_save_state(ENGINE_LIGHTS_STATE_PATH, st)
-    return sig
-
-# ---------- polygon helpers (daily) ----------
-def http_get_json(url: str) -> Dict[str,Any]:
-    req = urllib.request.Request(url, headers={})
+def poly_json(url: str, params: Dict[str, Any]|None = None) -> Dict[str, Any]:
+    if params is None: params = {}
+    if POLY_KEY: params["apiKey"] = POLY_KEY
+    from urllib.parse import urlencode
+    full = f"{url}?{urlencode(params)}"
+    req = urllib.request.Request(full, headers={"User-Agent":"ferrari-dashboard/1.0","Cache-Control":"no-store"})
     with urllib.request.urlopen(req, timeout=20) as resp:
         return json.loads(resp.read().decode("utf-8"))
-def fetch_polygon_spy_daily(limit: int = 120) -> List[float]:
-    if not POLYGON_API_KEY: return []
-    end = datetime.utcnow().date(); start = end - timedelta(days=limit*2)
-    url = (f"https://api.polygon.io/v2/aggs/ticker/SPY/range/1/day/{start.isoformat()}/{end.isoformat()}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}")
+
+def fetch_spy_10m_last_n(n: int = 50) -> List[Dict[str, float]]:
+    """Return up to n SPY 10-minute bars (c, h, l, v). If Polygon unavailable, return empty list."""
+    if not POLY_KEY:
+        return []
+    end = datetime.utcnow().date()
+    start = end - timedelta(days=2)  # 2 days is enough to get 50x 10m bars
+    url = f"{POLY_BASE}/v2/aggs/ticker/SPY/range/10/minute/{start}/{end}"
     try:
-        data = http_get_json(url); res = data.get("results") or []
-        closes = [float(r.get("c", 0.0)) for r in res if r.get("c") is not None]
-        return closes[-limit:] if len(closes) > limit else closes
-    except Exception: return []
-def ema(series: List[float], length: int) -> List[float]:
-    if not series: return []
-    k = 2.0 / (length + 1.0); out = [series[0]]
-    for v in series[1:]: out.append(out[-1] + k * (v - out[-1]))
-    return out
-def lux_trend_daily(sectors: Dict[str, Any], metrics: Dict[str, Any], ts_local: str) -> Dict[str, Any]:
-    breadth  = float(num(metrics.get("breadth_pct", 50)))
-    momentum = float(num(metrics.get("momentum_pct", 50)))
-    daily_sq = float(num(metrics.get("squeeze_daily_pct", 50)))
-    S = daily_sq / 100.0
-    adr_momo = 50.0
-    ema_pos_score = 50.0
-    closes = fetch_polygon_spy_daily(limit=120)
-    if closes and len(closes) >= 21:
-        ema10 = ema(closes, 10)[-1]; ema20 = ema(closes, 20)[-1]; c = float(closes[-1])
-        if c>ema10 and c>ema20: ema_pos_score=100.0
-        elif c>ema10 and not c>ema20: ema_pos_score=65.0
-        elif not c>ema10 and c>ema20: ema_pos_score=35.0
-        else: ema_pos_score=0.0
-    base = (0.35 * breadth) + (0.35 * momentum) + (0.20 * ema_pos_score) + (0.10 * adr_momo)
-    trendScore = (1.0 - 0.5 * S) * base + (0.5 * S) * 50.0
-    state = "up" if trendScore > 55 else ("down" if trendScore < 45 else "flat")
-    pos_sectors = sum(1 for k in PREFERRED_ORDER if int(num(sectors.get(k, {}).get("netNH", 0))) > 0)
-    participation_pct = (pos_sectors / float(len(PREFERRED_ORDER))) * 100.0
-    vol_pct = float(num(metrics.get("volatility_pct", 0))); vol_band = "calm" if vol_pct < 30 else ("elevated" if vol_pct <= 60 else "high")
-    liq_psi = float(num(metrics.get("liquidity_psi", 0))); liq_band = "good" if liq_psi >= 60 else ("normal" if liq_psi >= 50 else ("light" if liq_psi >= 40 else "thin"))
-    return {
-        "trend": {"emaSlope": round(trendScore - 50.0, 1), "state": state},
-        "participation": {"pctAboveMA": round(participation_pct, 1)},
-        "squeezeDaily": {"pct": round(daily_sq, 2)},
-        "volatilityRegime": {"atrPct": round(vol_pct, 1), "band": vol_band},
-        "liquidityRegime": {"psi": round(liq_psi, 1), "band": liq_band},
-        "rotation": {"riskOnPct": 50.0},
-        "updatedAt": ts_local, "mode": "daily", "live": False
-    }
+        js = poly_json(url, {"adjusted": "true", "sort": "desc", "limit": n})
+        results = js.get("results", []) or []
+        results = list(reversed(results))
+        out=[]
+        for r in results[-n:]:
+            out.append({"c": float(r["c"]), "h": float(r["h"]), "l": float(r["l"]), "v": float(r.get("v",0.0))})
+        return out
+    except Exception:
+        return []
 
-# ---------------- main ----------------
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default="data/outlook_source.json")
-    ap.add_argument("--out",    default="data/outlook.json")
-    ap.add_argument("--mode",   default="intraday", choices=["intraday","daily","eod","hourly"])
-    args = ap.parse_args()
+# ======================================================================================
+# composer
+# ======================================================================================
 
-    src = jread(args.source)
+OFFENSIVE = {"Information Technology","Communication Services","Consumer Discretionary"}
+DEFENSIVE = {"Consumer Staples","Utilities","Health Care","Real Estate"}
 
-    sectors = sectors_from_source(src)
-    normalized_mode = args.mode if args.mode != "eod" else "daily"
-    ms_od = build_metrics_summary(src, sectors, normalized_mode)
-    cards = cards_from_sectors(sectors)
+def compose_intraday() -> Dict[str, Any]:
+    src = load_json(SRC_PATH)
 
-    ts_utc   = now_utc_iso()
-    ts_local = now_phx_iso()
+    # Timestamps from source (already set in builder)
+    updated_at     = src.get("updated_at") or now_iso()
+    updated_at_utc = src.get("updated_at_utc") or datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
-    # ---------- TRUE 10m deltas for sectors & riskOn ----------
-    intraday_block = None
-    if args.mode == "intraday":
-        prev_out = jread(args.out)
-        prev_sectors_raw = ((prev_out.get("outlook") or {}).get("sectors")) or {}
-        prev_sectors = { canonical_sector(k): v for k, v in prev_sectors_raw.items() }
+    groups = src.get("groups") or {}
+    global_fields = src.get("global") or {}
 
-        deltas = {}
-        rising_count = 0
-        for key in PREFERRED_ORDER:
-            cur_net = int(num(sectors.get(key, {}).get("netNH", 0)))
-            prv_net = int(num(prev_sectors.get(key, {}).get("netNH", 0)))
-            d = cur_net - prv_net
-            deltas[key] = d
-            if d > 0: rising_count += 1
+    # Build sector cards & instant breadth/momentum per sector
+    sector_cards: List[Dict[str, Any]] = []
+    NH_sum = NL_sum = UP_sum = DN_sum = 0
 
-        rising_pct = (rising_count / float(len(PREFERRED_ORDER))) * 100.0
-        off_delta = sum(int(deltas.get(s, 0)) for s in OFFENSIVE)
-        def_delta = sum(int(deltas.get(s, 0)) for s in DEFENSIVE)
-        denom = abs(off_delta) + abs(def_delta)
-        ro = 50.0 + 50.0 * ((off_delta - def_delta) / float(denom)) if denom else 50.0
+    for sector, g in groups.items():
+        nh = int(g.get("nh",0)); nl = int(g.get("nl",0)); up = int(g.get("u",0)); dn = int(g.get("d",0))
+        NH_sum += nh; NL_sum += nl; UP_sum += up; DN_sum += dn
 
-        intraday_block = {
+        b = 100.0 * nh / max(1, nh + nl)
+        m = 100.0 * up / max(1, up + dn)
+        sector_cards.append({
+            "sector": sector,
+            "outlook": "Bullish" if b >= 60 else ("Bearish" if b < 45 else "Neutral"),
+            "breadth_pct": round(b,1),
+            "momentum_pct": round(m,1),
+            "nh": nh, "nl": nl, "up": up, "down": dn,
+            "spark": []
+        })
+
+    # Instant market breadth/momentum for this tick
+    breadth_t  = 100.0 * NH_sum / max(1, NH_sum + NL_sum)
+    momentum_t = 100.0 * UP_sum / max(1, UP_sum + DN_sum)
+
+    # Reactive smoothing with short half-lives (stateful)
+    st = load_state()
+    breadth_fast  = ema_hl(st.get("breadth_fast"),  breadth_t,  hl_bars=2.0)
+    momentum_fast = ema_hl(st.get("momentum_fast"), momentum_t, hl_bars=2.0)
+
+    # Sector Direction bar-on-bar
+    rising = 0
+    for c in sector_cards:
+        if c["breadth_pct"] > 50.0: rising += 1
+    risingPct_t   = 100.0 * rising / 11.0
+    risingPct_fast= ema_hl(st.get("risingPct_fast"), risingPct_t, hl_bars=1.5)
+
+    # Risk-On bar-on-bar (offensives above 50, defensives below 50)
+    off_up = sum(1 for c in sector_cards if c["sector"] in OFFENSIVE and c["breadth_pct"] > 50)
+    def_dn = sum(1 for c in sector_cards if c["sector"] in DEFENSIVE and c["breadth_pct"] < 50)
+    buckets = len(OFFENSIVE) + len(DEFENSIVE)
+    riskOn_t = 100.0 * (off_up + def_dn) / max(1, buckets)
+    riskOn_fast = ema_hl(st.get("riskOn_fast"), riskOn_t, hl_bars=2.0)
+
+    # Squeeze/Vol/Liquidity from builder global fields (already computed daily context)
+    # If you prefer, you can replace these with faster 10m-derived versions later.
+    squeeze_intraday_pct = float(global_fields.get("squeeze_pressure_pct", 50))
+    volatility_pct       = int(global_fields.get("volatility_pct", 50))
+    liquidity_psi        = int(global_fields.get("liquidity_pct", 100))
+
+    # ========== SPY 10m EMA10 (for Overall Market base) ==========
+    spy_10m = fetch_spy_10m_last_n(50)
+    cl = [b["c"] for b in spy_10m][-50:] if spy_10m else []
+    ema10 = []
+    if cl:
+        y=None; a = 2.0/(10.0+1.0)
+        for c in cl:
+            y = c if y is None else (y + a*(c - y))
+            ema10.append(y)
+        c_now, e_now = cl[-1], ema10[-1]
+        c_prev, e_prev = (cl[-2], ema10[-2]) if len(cl)>1 else (c_now, e_now)
+    else:
+        # fallback: treat as neutral if we couldn't fetch intraday bars
+        c_now=c_prev=e_now=e_prev=0.0
+
+    side_now  = 1 if (c_now >= e_now) else -1
+    side_prev = 1 if (c_prev >= e_prev) else -1
+    just_crossed = (side_now != side_prev)
+    dist = abs(pct(c_now, e_now)) if e_now else 0.0
+    dist_weight = clamp(1.0 - (dist / 1.5), 0.0, 1.0)
+
+    # Components
+    accel_component = clamp((breadth_fast - st.get("breadth_fast_prev", breadth_fast)) +
+                            (momentum_fast - st.get("momentum_fast_prev", momentum_fast)),
+                            -25.0, 25.0)
+    ema_component = 25.0 * (1 if side_now > 0 else -1)
+    if just_crossed:
+        ema_component += 10.0 * (1 if side_now > 0 else -1)
+    ema_component *= dist_weight
+    risk_component = clamp((riskOn_fast - 50.0) * 0.4, -20.0, 20.0)
+    sect_component = clamp((risingPct_fast - 50.0) * 0.4, -20.0, 20.0)
+
+    score = clamp(ema_component + accel_component + risk_component + sect_component, -100.0, 100.0)
+
+    agree = 0
+    agree += 1 if (ema_component * accel_component) > 0 else 0
+    agree += 1 if (ema_component * risk_component)  > 0 else 0
+    agree += 1 if (ema_component * sect_component)  > 0 else 0
+    confidence = clamp((abs(score)/100.0) * (0.4 + 0.2*agree), 0.0, 1.0)
+
+    prev_state = st.get("overall10m_state", "neutral")
+    enter_bull, exit_bull = +15, +5
+    enter_bear, exit_bear = -15, -5
+    if prev_state == "bull":
+        state = "bull" if score >= exit_bull else ("bear" if score <= enter_bear else "neutral" if score < enter_bull else "bull")
+    elif prev_state == "bear":
+        state = "bear" if score <= exit_bear else ("bull" if score >= enter_bull else "neutral" if score > enter_bear else "bear")
+    else:
+        state = "bull" if score >= enter_bull else ("bear" if score <= enter_bear else "neutral")
+
+    reason = []
+    if cl:
+        reason.append("EMA10 " + ("↑" if side_now>0 else "↓") + (" (cross)" if just_crossed else ""))
+    reason.append(f"ΔBreadth {(breadth_fast - st.get('breadth_fast_prev', breadth_fast)):+.1f}, "
+                  f"ΔMomentum {(momentum_fast - st.get('momentum_fast_prev', momentum_fast)):+.1f}")
+    reason.append(f"Risk-On {riskOn_fast:.0f}%")
+
+    # Build payload (unchanged keys)
+    payload: Dict[str, Any] = {
+        "updated_at": updated_at,
+        "updated_at_utc": updated_at_utc,
+        "metrics": {
+            "breadth_pct": round(breadth_fast, 1),
+            "momentum_pct": round(momentum_fast, 1),
+            "squeeze_intraday_pct": round(float(squeeze_intraday_pct), 1),
+            "volatility_pct": int(volatility_pct),
+            "liquidity_psi": int(liquidity_psi)
+        },
+        "sectorCards": sector_cards,
+        "sectorsUpdatedAt": updated_at,
+        "intraday": {
             "sectorDirection10m": {
-                "risingCount": int(rising_count),
-                "risingPct": round(rising_pct,1),
-                "updatedAt": ts_local,
-                "deltas": { title_case(k): int(v) for k,v in deltas.items() }
+                "risingCount": int(round(risingPct_fast/100.0*11.0)),
+                "risingPct": round(risingPct_fast, 1),
+                "updatedAt": updated_at
             },
-            "riskOn10m": { "riskOnPct": round(ro,1), "updatedAt": ts_local }
+            "riskOn10m": {
+                "riskOnPct": round(riskOn_fast, 1),
+                "updatedAt": updated_at
+            },
+            "overall10m": {
+                "score": int(round(score)),
+                "state": state,
+                "confidence": round(confidence, 2),
+                "components": {
+                    "ema10":  int(round(ema_component)),
+                    "accel":  int(round(accel_component)),
+                    "riskOn": int(round(risk_component)),
+                    "sectors":int(round(sect_component)),
+                },
+                "reason": "; ".join(reason),
+                "updatedAt": updated_at
+            }
         }
-
-    # ---------- Engine Lights ----------
-    prev_out = jread(args.out)
-    prev_metrics = prev_out.get("metrics") if isinstance(prev_out, dict) else None
-
-    scalper = src.get("index_scalper") or src.get("scalper") or {}
-    index_scalper_direction = (scalper.get("direction") or "none").lower()
-    index_scalper_streak    = int(num(scalper.get("streak"), 0))
-    vix_below_ema10         = bool(scalper.get("vix_below_ema10", False))
-
-    signals = compute_engine_lights_scalper(
-        summary = ms_od["summary"], metrics = ms_od["metrics"], prev_metrics = prev_metrics,
-        index_scalper_direction = index_scalper_direction, index_scalper_streak = index_scalper_streak,
-        vix_below_ema10 = vix_below_ema10, ts_local_iso = ts_local, strict = ENGINE_LIGHTS_STRICT
-    )
-
-    out = {
-        "schema_version": SCHEMA_VERSION,
-        "updated_at": ts_local, "updated_at_utc": ts_utc, "ts": ts_utc,
-        "version": VERSION_TAG, "pipeline": normalized_mode,
-        "metrics": ms_od["metrics"], "summary": ms_od["summary"],
-        "odometers": ms_od["odometers"], "gauges": ms_od["gauges"],
-        "sectorsUpdatedAt": ts_local, "sectorCards": cards,
-        "outlook": {"sectors": sectors, "sectorCards": cards},
-        "engineLights": { "updatedAt": ts_local, "mode": normalized_mode, "live": (args.mode=="intraday"), "signals": signals }
     }
-    if intraday_block: out["intraday"] = intraday_block
 
-    if args.mode in ("daily","eod","hourly"):
-        td = lux_trend_daily(sectors, ms_od["metrics"], ts_local)
-        out["trendDaily"]=td
-        if "squeeze_daily_pct" in ms_od["metrics"]:
-            out["gauges"]["squeezeDaily"] = {"pct": ms_od["metrics"]["squeeze_daily_pct"]}
+    # Persist state for next tick
+    st["breadth_fast"] = breadth_fast
+    st["momentum_fast"] = momentum_fast
+    st["breadth_fast_prev"]  = breadth_fast
+    st["momentum_fast_prev"] = momentum_fast
+    st["risingPct_fast"]     = risingPct_fast
+    st["riskOn_fast"]        = riskOn_fast
+    st["overall10m_state"]   = state
+    save_state(st)
 
-    jwrite(args.out, out)
-    print(f"Wrote {args.out} | sectors={len(sectors)} | mode={args.mode}")
-    print(f"[summary] breadth={out['summary']['breadth_pct']:.1f} momentum={out['summary']['momentum_pct']:.1f}")
-    print(f"[engine] lights keys={list(out['engineLights']['signals'].keys())}")
+    return payload
+
+
+def main():
+    payload = compose_intraday()
+    save_json(OUT_PATH, payload)
+    print(f"Wrote {OUT_PATH} with {len(payload.get('sectorCards',[]))} sector cards.")
+    print(f"Overall10m: state={payload['intraday']['overall10m']['state']} "
+          f"score={payload['intraday']['overall10m']['score']}")
 
 if __name__ == "__main__":
     main()
