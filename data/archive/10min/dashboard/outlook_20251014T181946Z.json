@@ -1,0 +1,226 @@
+{
+  "updated_at": "2025-10-14T10:56:22-07:00",
+  "updated_at_utc": "2025-10-14T17:56:22+00:00",
+  "metrics": {
+    "breadth_pct": 29.8,
+    "momentum_pct": 71.3,
+    "squeeze_intraday_pct": 93.0,
+    "volatility_pct": 55,
+    "liquidity_psi": 107
+  },
+  "sectorCards": [
+    {
+      "sector": "Communication Services",
+      "outlook": "Bearish",
+      "breadth_pct": 7.5,
+      "momentum_pct": 61.0,
+      "nh": 6,
+      "nl": 74,
+      "up": 136,
+      "down": 87,
+      "spark": []
+    },
+    {
+      "sector": "Real Estate",
+      "outlook": "Bearish",
+      "breadth_pct": 23.4,
+      "momentum_pct": 78.1,
+      "nh": 15,
+      "nl": 49,
+      "up": 143,
+      "down": 40,
+      "spark": []
+    },
+    {
+      "sector": "Industrials",
+      "outlook": "Bearish",
+      "breadth_pct": 35.8,
+      "momentum_pct": 75.7,
+      "nh": 81,
+      "nl": 145,
+      "up": 406,
+      "down": 130,
+      "spark": []
+    },
+    {
+      "sector": "Healthcare",
+      "outlook": "Bearish",
+      "breadth_pct": 25.6,
+      "momentum_pct": 64.6,
+      "nh": 71,
+      "nl": 206,
+      "up": 535,
+      "down": 293,
+      "spark": []
+    },
+    {
+      "sector": "Energy",
+      "outlook": "Bearish",
+      "breadth_pct": 15.9,
+      "momentum_pct": 51.4,
+      "nh": 18,
+      "nl": 95,
+      "up": 95,
+      "down": 90,
+      "spark": []
+    },
+    {
+      "sector": "Utilities",
+      "outlook": "Bullish",
+      "breadth_pct": 77.4,
+      "momentum_pct": 75.0,
+      "nh": 24,
+      "nl": 7,
+      "up": 54,
+      "down": 18,
+      "spark": []
+    },
+    {
+      "sector": "Financials",
+      "outlook": "Bearish",
+      "breadth_pct": 37.2,
+      "momentum_pct": 82.2,
+      "nh": 92,
+      "nl": 155,
+      "up": 560,
+      "down": 121,
+      "spark": []
+    },
+    {
+      "sector": "Consumer Staples",
+      "outlook": "Bearish",
+      "breadth_pct": 24.4,
+      "momentum_pct": 70.7,
+      "nh": 19,
+      "nl": 59,
+      "up": 133,
+      "down": 55,
+      "spark": []
+    },
+    {
+      "sector": "tech",
+      "outlook": "Bearish",
+      "breadth_pct": 28.6,
+      "momentum_pct": 64.7,
+      "nh": 70,
+      "nl": 175,
+      "up": 367,
+      "down": 200,
+      "spark": []
+    },
+    {
+      "sector": "Materials",
+      "outlook": "Bullish",
+      "breadth_pct": 64.7,
+      "momentum_pct": 78.6,
+      "nh": 55,
+      "nl": 30,
+      "up": 158,
+      "down": 43,
+      "spark": []
+    },
+    {
+      "sector": "Consumer Discretionary",
+      "outlook": "Bearish",
+      "breadth_pct": 18.8,
+      "momentum_pct": 77.5,
+      "nh": 33,
+      "nl": 143,
+      "up": 337,
+      "down": 98,
+      "spark": []
+    }
+  ],
+  "sectorsUpdatedAt": "2025-10-14T10:56:22-07:00",
+  "intraday": {
+    "sectorDirection10m": {
+      "risingCount": 2,
+      "risingPct": 18.2,
+      "updatedAt": "2025-10-14T10:56:22-07:00"
+    },
+    "riskOn10m": {
+      "riskOnPct": 28.6,
+      "updatedAt": "2025-10-14T10:56:22-07:00"
+    },
+    "overall10m": {
+      "score": -2,
+      "state": "neutral",
+      "confidence": 0.01,
+      "components": {
+        "ema10": 30,
+        "accel": 0,
+        "riskOn": -13,
+        "sectors": -19
+      },
+      "reason": "ΔBreadth +0.0, ΔMomentum +0.0; Risk-On 29%",
+      "updatedAt": "2025-10-14T10:56:22-07:00"
+    }
+  },
+  "engineLights": {
+    "updatedAt": "2025-10-14T10:56:22-07:00",
+    "mode": "intraday",
+    "live": true,
+    "signals": {
+      "sigOverallBull": {
+        "active": false,
+        "lastChanged": "2025-10-14T10:56:22-07:00",
+        "severity": "info",
+        "reason": "Overall10m bull, score -2"
+      },
+      "sigOverallBear": {
+        "active": false,
+        "lastChanged": "2025-10-14T10:56:22-07:00",
+        "severity": "warn",
+        "reason": "Overall10m bear, score -2"
+      },
+      "sigEMA10BullCross": {
+        "active": false,
+        "lastChanged": "2025-10-14T10:56:22-07:00",
+        "severity": "info",
+        "reason": "SPY 10m crossed ▲ EMA10"
+      },
+      "sigEMA10BearCross": {
+        "active": false,
+        "lastChanged": "2025-10-14T10:56:22-07:00",
+        "severity": "warn",
+        "reason": "SPY 10m crossed ▼ EMA10"
+      },
+      "sigAccelUp": {
+        "active": false,
+        "lastChanged": "2025-10-14T10:56:22-07:00",
+        "severity": "info",
+        "reason": "ΔBreadth +0.0, ΔMomentum +0.0"
+      },
+      "sigAccelDown": {
+        "active": false,
+        "lastChanged": "2025-10-14T10:56:22-07:00",
+        "severity": "warn",
+        "reason": "ΔBreadth +0.0, ΔMomentum +0.0"
+      },
+      "sigRiskOn": {
+        "active": false,
+        "lastChanged": "2025-10-14T10:56:22-07:00",
+        "severity": "info",
+        "reason": "Risk-On 29%"
+      },
+      "sigRiskOff": {
+        "active": true,
+        "lastChanged": "2025-10-14T10:56:22-07:00",
+        "severity": "warn",
+        "reason": "Risk-On 29%"
+      },
+      "sigSectorThrust": {
+        "active": false,
+        "lastChanged": "2025-10-14T10:56:22-07:00",
+        "severity": "info",
+        "reason": "2/11 rising"
+      },
+      "sigSectorWeak": {
+        "active": true,
+        "lastChanged": "2025-10-14T10:56:22-07:00",
+        "severity": "warn",
+        "reason": "2/11 rising"
+      }
+    }
+  }
+}
