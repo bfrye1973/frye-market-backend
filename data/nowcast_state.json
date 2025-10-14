@@ -1,0 +1,71 @@
+{
+  "lights": {
+    "sigOverallBull": {
+      "active": true,
+      "lastChanged": "2025-10-14T14:46:30-07:00",
+      "severity": "info",
+      "reason": "Overall10m bull, score 20"
+    },
+    "sigOverallBear": {
+      "active": true,
+      "lastChanged": "2025-10-14T14:46:30-07:00",
+      "severity": "warn",
+      "reason": "FORCE bear: distATR 0.00, accel +0.0, ROn 29%, Thrust 27%"
+    },
+    "sigEMA10BullCross": {
+      "active": false,
+      "lastChanged": "2025-10-14T14:46:30-07:00",
+      "severity": "info",
+      "reason": "SPY 10m EMA10 crossed above EMA20"
+    },
+    "sigEMA10BearCross": {
+      "active": false,
+      "lastChanged": "2025-10-14T14:46:30-07:00",
+      "severity": "warn",
+      "reason": "SPY 10m EMA10 crossed below EMA20"
+    },
+    "sigAccelUp": {
+      "active": false,
+      "lastChanged": "2025-10-14T14:46:30-07:00",
+      "severity": "info",
+      "reason": "ΔBreadth +0.0, ΔMomentum +0.0"
+    },
+    "sigAccelDown": {
+      "active": false,
+      "lastChanged": "2025-10-14T14:46:30-07:00",
+      "severity": "warn",
+      "reason": "ΔBreadth +0.0, ΔMomentum +0.0"
+    },
+    "sigRiskOn": {
+      "active": false,
+      "lastChanged": "2025-10-14T14:46:30-07:00",
+      "severity": "info",
+      "reason": "Risk-On 29%"
+    },
+    "sigRiskOff": {
+      "active": true,
+      "lastChanged": "2025-10-14T14:46:30-07:00",
+      "severity": "warn",
+      "reason": "Risk-On 29%"
+    },
+    "sigSectorThrust": {
+      "active": false,
+      "lastChanged": "2025-10-14T14:46:30-07:00",
+      "severity": "info",
+      "reason": "3/11 rising"
+    },
+    "sigSectorWeak": {
+      "active": true,
+      "lastChanged": "2025-10-14T14:46:30-07:00",
+      "severity": "warn",
+      "reason": "3/11 rising"
+    }
+  },
+  "breadth_fast": 35.96746077861708,
+  "momentum_fast": 85.62158469945355,
+  "breadth_fast_prev": 35.96746077861708,
+  "momentum_fast_prev": 85.62158469945355,
+  "risingPct_fast": 27.272727272727273,
+  "riskOn_fast": 28.571428571428573,
+  "overall10m_state": "bull"
+}
