@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# 5-minute sandbox deltas (pure diff, stdlib only) + nowcast engine lights
+# 5m sandbox deltas + Overall10mNow + NOW lights (pure diff, stdlib only)
 
 import os, json, subprocess, tempfile, shutil, urllib.request, time
 from datetime import datetime
@@ -10,7 +10,7 @@ except Exception:
     AZ = None
 
 REPO_URL  = os.environ["REPO_URL"]
-BRANCH    = os.environ.get("BRANCH", "data-live-10min-sandbox")
+BRANCH    = os.environ.get("BRANCH","data-live-10min-sandbox")
 LIVE_URL  = os.environ["LIVE_URL"]
 GIT_NAME  = os.environ.get("GIT_NAME","frye-bot")
 GIT_EMAIL = os.environ.get("GIT_EMAIL","bot@users.noreply.github.com")
@@ -90,11 +90,10 @@ def main():
         out["deltas"] = {"market": d_market, "sectors": d_sectors}
         out["deltasUpdatedAt"] = az_iso()
 
-        # 5m Overall "nowcast" (pure diff)
+        # 5m Overall "nowcast"
         dB = d_market["dBreadthPct"]; dM = d_market["dMomentumPct"]
-        accel = clamp(dB + dM, -20, 20)   # ±20 from acceleration
-        emaKick = 0                        # keep 0 (Polygon-free)
-        nowScore = clamp(accel + emaKick, -40, 40)
+        accel = clamp(dB + dM, -20, 20)         # ±20
+        nowScore = clamp(accel, -40, 40)        # simple & reactive
         state = "bull" if nowScore >= 8 else ("bear" if nowScore <= -8 else "neutral")
         confidence = round(abs(nowScore) / 40.0, 2)
 
@@ -108,8 +107,10 @@ def main():
 
         # NOW engine lights (5m)
         nowLights = {"updatedAt": out["deltasUpdatedAt"], "mode":"intraday", "live": False, "signals": {}}
-        put_light(nowLights, "sigNowAccelUp",   accel >= +1.5, "info",  f"Δ5m accel {accel:+.2f} (dB {dB:+.2f}, dM {dM:+.2f})", out["deltasUpdatedAt"])
-        put_light(nowLights, "sigNowAccelDown", accel <= -1.5, "warn", f"Δ5m accel {accel:+.2f} (dB {dB:+.2f}, dM {dM:+.2f})", out["deltasUpdatedAt"])
+        put_light(nowLights, "sigNowAccelUp",   accel >= +1.5, "info",
+                  f"Δ5m accel {accel:+.2f} (dB {dB:+.2f}, dM {dM:+.2f})", out["deltasUpdatedAt"])
+        put_light(nowLights, "sigNowAccelDown", accel <= -1.5, "warn",
+                  f"Δ5m accel {accel:+.2f} (dB {dB:+.2f}, dM {dM:+.2f})", out["deltasUpdatedAt"])
         put_light(nowLights, "sigNowBull", state == "bull" and nowScore >= 8,  "info",  f"Nowcast bull {nowScore}", out["deltasUpdatedAt"])
         put_light(nowLights, "sigNowBear", state == "bear" and nowScore <= -8, "warn", f"Nowcast bear {nowScore}", out["deltasUpdatedAt"])
         out["engineLights"] = nowLights
