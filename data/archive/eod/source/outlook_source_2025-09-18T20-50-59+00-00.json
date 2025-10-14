@@ -1,7 +1,7 @@
 {
-  "updated_at": "2025-10-14T13:32:47-07:00",
-  "updated_at_utc": "2025-10-14T20:32:47+00:00",
-  "timestamp": "2025-10-14T20:32:47+00:00",
+  "updated_at": "2025-10-14T14:46:30-07:00",
+  "updated_at_utc": "2025-10-14T21:46:30+00:00",
+  "timestamp": "2025-10-14T21:46:30+00:00",
   "mode": "daily",
   "groups": {
     "Communication Services": {
@@ -134,7 +134,7 @@
     "liquidity_pct": 113
   },
   "meta": {
-    "build_secs": 459.5,
+    "build_secs": 1454.15,
     "universe": 5470
   }
 }
