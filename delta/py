@@ -1,23 +1,8 @@
 #!/usr/bin/env python3
-"""
-delta_job.py — 5-minute sandbox deltas (pure diff, no Polygon)
-- Pulls canonical /live/intraday JSON (10-minute publisher)
-- Loads previous sandbox JSON (if any)
-- Computes market/sector deltas and a 5-minute Overall Market "nowcast"
-- Writes to data-live-10min-sandbox:
-    data/outlook_intraday.json
-    data/heartbeat_10min.txt
-Env needed:
-  REPO_URL=https://github.com/bfrye1973/frye-market-backend.git
-  BRANCH=data-live-10min-sandbox
-  LIVE_URL=https://frye-market-backend-1.onrender.com/live/intraday
-  GITHUB_TOKEN=<repo PAT>   (for push)
-  GIT_NAME=frye-bot
-  GIT_EMAIL=bot@users.noreply.github.com
-"""
+# 5-minute sandbox deltas (pure diff, stdlib only) + nowcast engine lights
 
 import os, json, subprocess, tempfile, shutil, urllib.request, time
-from datetime import datetime, timezone
+from datetime import datetime
 try:
     from zoneinfo import ZoneInfo
     AZ = ZoneInfo("America/Phoenix")
@@ -42,6 +27,7 @@ def fetch_json(url: str):
         return json.loads(resp.read().decode("utf-8"))
 
 def pct(num, den): return 0.0 if den == 0 else 100.0 * num / den
+def clamp(x, lo, hi): return lo if x < lo else hi if x > hi else x
 
 def summarize(cards):
     nh = nl = up = dn = 0
@@ -59,15 +45,15 @@ def sector_map(cards):
         m[str(c.get("sector","Unknown"))] = (b, mo)
     return m
 
-def clamp(x, lo, hi): return lo if x < lo else hi if x > hi else x
+def put_light(pool: dict, name: str, active: bool, severity: str, reason: str, ts: str):
+    pool[name] = {"active": bool(active), "severity": severity, "reason": reason, "lastChanged": ts}
 
 def main():
     tmp = tempfile.mkdtemp(prefix="delta-")
     try:
-        # 1) Pull current live intraday (canonical 10m)
         curr = fetch_json(LIVE_URL)
 
-        # 2) Load previous sandbox JSON (if exists)
+        # previous sandbox (if exists)
         prev = None
         try:
             raw_prev = urllib.request.urlopen(
@@ -78,7 +64,6 @@ def main():
         except Exception:
             prev = None
 
-        # 3) Compute deltas (market + sectors) from sectorCards
         cb, cm = summarize(curr.get("sectorCards"))
         pb, pm = summarize(prev.get("sectorCards")) if prev else (0.0, 0.0)
         d_market = {
@@ -105,12 +90,12 @@ def main():
         out["deltas"] = {"market": d_market, "sectors": d_sectors}
         out["deltasUpdatedAt"] = az_iso()
 
-        # 4) 5-minute Overall Market "nowcast" (pure diff, flips inside 5 min)
+        # 5m Overall "nowcast" (pure diff)
         dB = d_market["dBreadthPct"]; dM = d_market["dMomentumPct"]
-        accel = clamp(dB + dM, -20, 20)        # ±20 from acceleration
-        emaKick = 0                             # keep zero to remain Polygon-free
+        accel = clamp(dB + dM, -20, 20)   # ±20 from acceleration
+        emaKick = 0                        # keep 0 (Polygon-free)
         nowScore = clamp(accel + emaKick, -40, 40)
-        state = "bull" if nowScore >= 10 else ("bear" if nowScore <= -10 else "neutral")
+        state = "bull" if nowScore >= 8 else ("bear" if nowScore <= -8 else "neutral")
         confidence = round(abs(nowScore) / 40.0, 2)
 
         out.setdefault("intraday", {})
@@ -121,10 +106,17 @@ def main():
             "updatedAt": out["deltasUpdatedAt"]
         }
 
-        # 5) Clone sandbox branch, write, commit, push
+        # NOW engine lights (5m)
+        nowLights = {"updatedAt": out["deltasUpdatedAt"], "mode":"intraday", "live": False, "signals": {}}
+        put_light(nowLights, "sigNowAccelUp",   accel >= +1.5, "info",  f"Δ5m accel {accel:+.2f} (dB {dB:+.2f}, dM {dM:+.2f})", out["deltasUpdatedAt"])
+        put_light(nowLights, "sigNowAccelDown", accel <= -1.5, "warn", f"Δ5m accel {accel:+.2f} (dB {dB:+.2f}, dM {dM:+.2f})", out["deltasUpdatedAt"])
+        put_light(nowLights, "sigNowBull", state == "bull" and nowScore >= 8,  "info",  f"Nowcast bull {nowScore}", out["deltasUpdatedAt"])
+        put_light(nowLights, "sigNowBear", state == "bear" and nowScore <= -8, "warn", f"Nowcast bear {nowScore}", out["deltasUpdatedAt"])
+        out["engineLights"] = nowLights
+
+        # write, commit, push
         subprocess.check_call(["git","config","--global","user.name",GIT_NAME])
         subprocess.check_call(["git","config","--global","user.email",GIT_EMAIL])
-
         os.chdir(tmp)
         subprocess.check_call(["git","clone","--depth","1","--branch",BRANCH,REPO_AUTH,"repo"])
         os.chdir(os.path.join(tmp,"repo"))
@@ -132,13 +124,11 @@ def main():
         with open("data/outlook_intraday.json","w",encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
         with open("data/heartbeat_10min.txt","w",encoding="utf-8") as f:
-            f.write(az_iso()+"\n")
-
+            f.write(out["deltasUpdatedAt"] + "\n")
         subprocess.check_call(["git","add","data"])
         subprocess.call(["git","commit","-m",f"Sandbox deltas @ {datetime.utcnow().isoformat()}Z"])
         subprocess.check_call(["git","push","origin",BRANCH])
-
-        print("[OK] deltas updated:", d_market, " nowcast:", out["intraday"]["overall10mNow"])
+        print("[OK] updated sandbox deltas and nowcast", out["intraday"]["overall10mNow"])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
