@@ -1,9 +1,9 @@
 {
-  "updated_at": "2025-10-14T10:13:34-07:00",
-  "updated_at_utc": "2025-10-14T17:13:34+00:00",
+  "updated_at": "2025-10-14T10:16:35-07:00",
+  "updated_at_utc": "2025-10-14T17:16:35+00:00",
   "metrics": {
     "breadth_pct": 27.2,
-    "momentum_pct": 66.9,
+    "momentum_pct": 64.4,
     "squeeze_intraday_pct": 93.0,
     "volatility_pct": 55,
     "liquidity_psi": 106
@@ -13,87 +13,87 @@
       "sector": "Communication Services",
       "outlook": "Bearish",
       "breadth_pct": 5.2,
-      "momentum_pct": 54.9,
+      "momentum_pct": 52.5,
       "nh": 4,
       "nl": 73,
-      "up": 112,
-      "down": 92,
+      "up": 105,
+      "down": 95,
       "spark": []
     },
     {
       "sector": "Real Estate",
       "outlook": "Bearish",
       "breadth_pct": 21.9,
-      "momentum_pct": 80.7,
+      "momentum_pct": 71.1,
       "nh": 14,
       "nl": 50,
-      "up": 167,
-      "down": 40,
+      "up": 113,
+      "down": 46,
       "spark": []
     },
     {
       "sector": "Industrials",
       "outlook": "Bearish",
       "breadth_pct": 32.1,
-      "momentum_pct": 73.4,
+      "momentum_pct": 72.1,
       "nh": 68,
       "nl": 144,
-      "up": 402,
-      "down": 146,
+      "up": 364,
+      "down": 141,
       "spark": []
     },
     {
       "sector": "Healthcare",
       "outlook": "Bearish",
       "breadth_pct": 24.1,
-      "momentum_pct": 53.1,
+      "momentum_pct": 54.2,
       "nh": 65,
       "nl": 205,
-      "up": 457,
-      "down": 403,
+      "up": 447,
+      "down": 378,
       "spark": []
     },
     {
       "sector": "Energy",
       "outlook": "Bearish",
       "breadth_pct": 15.2,
-      "momentum_pct": 41.8,
+      "momentum_pct": 42.6,
       "nh": 17,
       "nl": 95,
-      "up": 79,
-      "down": 110,
+      "up": 81,
+      "down": 109,
       "spark": []
     },
     {
       "sector": "Utilities",
       "outlook": "Bullish",
       "breadth_pct": 75.9,
-      "momentum_pct": 65.9,
+      "momentum_pct": 67.5,
       "nh": 22,
       "nl": 7,
       "up": 56,
-      "down": 29,
+      "down": 27,
       "spark": []
     },
     {
       "sector": "Financials",
       "outlook": "Bearish",
       "breadth_pct": 31.4,
-      "momentum_pct": 82.1,
+      "momentum_pct": 78.1,
       "nh": 74,
       "nl": 162,
-      "up": 602,
-      "down": 131,
+      "up": 523,
+      "down": 147,
       "spark": []
     },
     {
       "sector": "Consumer Staples",
       "outlook": "Bearish",
       "breadth_pct": 22.7,
-      "momentum_pct": 61.7,
+      "momentum_pct": 62.6,
       "nh": 17,
       "nl": 58,
-      "up": 113,
+      "up": 117,
       "down": 70,
       "spark": []
     },
@@ -101,21 +101,21 @@
       "sector": "tech",
       "outlook": "Bearish",
       "breadth_pct": 26.6,
-      "momentum_pct": 65.1,
+      "momentum_pct": 61.0,
       "nh": 63,
       "nl": 174,
-      "up": 384,
-      "down": 206,
+      "up": 346,
+      "down": 221,
       "spark": []
     },
     {
       "sector": "Materials",
       "outlook": "Bullish",
-      "breadth_pct": 63.8,
-      "momentum_pct": 62.2,
-      "nh": 51,
+      "breadth_pct": 64.2,
+      "momentum_pct": 63.4,
+      "nh": 52,
       "nl": 29,
-      "up": 122,
+      "up": 128,
       "down": 74,
       "spark": []
     },
@@ -123,24 +123,24 @@
       "sector": "Consumer Discretionary",
       "outlook": "Bearish",
       "breadth_pct": 17.4,
-      "momentum_pct": 76.6,
+      "momentum_pct": 72.4,
       "nh": 30,
       "nl": 142,
-      "up": 341,
-      "down": 104,
+      "up": 296,
+      "down": 113,
       "spark": []
     }
   ],
-  "sectorsUpdatedAt": "2025-10-14T10:13:34-07:00",
+  "sectorsUpdatedAt": "2025-10-14T10:16:35-07:00",
   "intraday": {
     "sectorDirection10m": {
       "risingCount": 2,
       "risingPct": 18.2,
-      "updatedAt": "2025-10-14T10:13:34-07:00"
+      "updatedAt": "2025-10-14T10:16:35-07:00"
     },
     "riskOn10m": {
       "riskOnPct": 28.6,
-      "updatedAt": "2025-10-14T10:13:34-07:00"
+      "updatedAt": "2025-10-14T10:16:35-07:00"
     },
     "overall10m": {
       "score": -2,
@@ -153,71 +153,71 @@
         "sectors": -19
       },
       "reason": "ΔBreadth +0.0, ΔMomentum +0.0; Risk-On 29%",
-      "updatedAt": "2025-10-14T10:13:34-07:00"
+      "updatedAt": "2025-10-14T10:16:35-07:00"
     }
   },
   "engineLights": {
-    "updatedAt": "2025-10-14T10:13:34-07:00",
+    "updatedAt": "2025-10-14T10:16:35-07:00",
     "mode": "intraday",
     "live": true,
     "signals": {
       "sigOverallBull": {
         "active": false,
-        "lastChanged": "2025-10-14T10:13:34-07:00",
+        "lastChanged": "2025-10-14T10:16:35-07:00",
         "severity": "info",
         "reason": "Overall10m bull, score -2"
       },
       "sigOverallBear": {
         "active": false,
-        "lastChanged": "2025-10-14T10:13:34-07:00",
+        "lastChanged": "2025-10-14T10:16:35-07:00",
         "severity": "warn",
         "reason": "Overall10m bear, score -2"
       },
       "sigEMA10BullCross": {
         "active": false,
-        "lastChanged": "2025-10-14T10:13:34-07:00",
+        "lastChanged": "2025-10-14T10:16:35-07:00",
         "severity": "info",
         "reason": "SPY 10m crossed ▲ EMA10"
       },
       "sigEMA10BearCross": {
         "active": false,
-        "lastChanged": "2025-10-14T10:13:34-07:00",
+        "lastChanged": "2025-10-14T10:16:35-07:00",
         "severity": "warn",
         "reason": "SPY 10m crossed ▼ EMA10"
       },
       "sigAccelUp": {
         "active": false,
-        "lastChanged": "2025-10-14T10:13:34-07:00",
+        "lastChanged": "2025-10-14T10:16:35-07:00",
         "severity": "info",
         "reason": "ΔBreadth +0.0, ΔMomentum +0.0"
       },
       "sigAccelDown": {
         "active": false,
-        "lastChanged": "2025-10-14T10:13:34-07:00",
+        "lastChanged": "2025-10-14T10:16:35-07:00",
         "severity": "warn",
         "reason": "ΔBreadth +0.0, ΔMomentum +0.0"
       },
       "sigRiskOn": {
         "active": false,
-        "lastChanged": "2025-10-14T10:13:34-07:00",
+        "lastChanged": "2025-10-14T10:16:35-07:00",
         "severity": "info",
         "reason": "Risk-On 29%"
       },
       "sigRiskOff": {
         "active": true,
-        "lastChanged": "2025-10-14T10:13:34-07:00",
+        "lastChanged": "2025-10-14T10:16:35-07:00",
         "severity": "warn",
         "reason": "Risk-On 29%"
       },
       "sigSectorThrust": {
         "active": false,
-        "lastChanged": "2025-10-14T10:13:34-07:00",
+        "lastChanged": "2025-10-14T10:16:35-07:00",
         "severity": "info",
         "reason": "2/11 rising"
       },
       "sigSectorWeak": {
         "active": true,
-        "lastChanged": "2025-10-14T10:13:34-07:00",
+        "lastChanged": "2025-10-14T10:16:35-07:00",
         "severity": "warn",
         "reason": "2/11 rising"
       }
