@@ -296,6 +296,45 @@ def compose_intraday() -> Dict[str, Any]:
             "volatility_pct": int(volatility_pct),
             "liquidity_psi": int(liquidity_psi)
         },
+        # --- EMA 10/20 crossover + EMA10 distance for SPY (added by Brian) ---
+try:
+    spy_10m = fetch_spy_10m_last_n(60)
+    closes = [b["c"] for b in spy_10m][-60:]
+    if len(closes) > 25:
+        # simple EMA loop (no numpy needed)
+        def ema(vals, n):
+            a = 2.0 / (n + 1)
+            e = None
+            out = []
+            for v in vals:
+                e = v if e is None else (e + a * (v - e))
+                out.append(e)
+            return out
+
+        ema10 = ema(closes, 10)
+        ema20 = ema(closes, 20)
+        ema10_now, ema20_now = ema10[-1], ema20[-1]
+        ema10_prev, ema20_prev = ema10[-2], ema20[-2]
+
+        if ema10_prev < ema20_prev and ema10_now > ema20_now:
+            ema_cross = "bull"
+        elif ema10_prev > ema20_prev and ema10_now < ema20_now:
+            ema_cross = "bear"
+        else:
+            ema_cross = "none"
+
+        close_now = closes[-1]
+        ema10_dist_pct = round(100 * (close_now - ema10_now) / ema10_now, 2)
+    else:
+        ema_cross = "none"
+        ema10_dist_pct = 0.0
+except Exception as e:
+    ema_cross = "none"
+    ema10_dist_pct = 0.0
+
+metrics["ema_cross"] = ema_cross
+metrics["ema10_dist_pct"] = ema10_dist_pct
+
         "sectorCards": sector_cards,
         "sectorsUpdatedAt": updated_at,
         "intraday": {
