@@ -1,395 +1,288 @@
 #!/usr/bin/env python3
-# Ferrari Dashboard — make_dashboard.py (R12-EMA-CROSS)
-# 10-minute canonical composer with:
-# - reactive breadth/momentum (short half-life)
-# - scoring weights: EMA backbone 40 + momentum 25 + breadth 10 + squeeze 10 + liquidity 10 + riskOn 5
-# - SPY 10m EMA10/EMA20 crossover + ema10 distance (%)
-# - engine lights (10m) + force-on safety
-# - no schema changes; writes data/outlook_intraday.json
+"""
+make_dashboard.py — Ferrari Dashboard builder (intraday)
+Usage:
+  python -u scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_intraday.json
+Notes:
+- No external deps; stdlib only.
+- Fixes Overall light to use *current* EMA10 vs EMA20 sign + distance (not only cross events).
+- Tolerant to slightly different source shapes; searches for SPY 10m bars and sector cards.
+"""
 
-from __future__ import annotations
-import os, json, math, time, urllib.request
-from datetime import datetime, timedelta
-from typing import Any, Dict, List
+import argparse, json, math, os, sys, time
+from datetime import datetime, timezone
 
-# ---------- paths ----------
-SRC_PATH   = os.path.join("data", "outlook_source.json")
-OUT_PATH   = os.path.join("data", "outlook_intraday.json")
-STATE_PATH = os.path.join("data", "nowcast_state.json")
+# -------------------------- Helpers --------------------------
+def now_iso():
+    # America/Phoenix stamp is often stored too, but we keep UTC for consistency
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00","Z")
 
-# ---------- env (Polygon only for SPY 10m) ----------
-POLY_KEY  = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_API_KEY") or os.environ.get("POLYGON_API") or ""
-POLY_BASE = "https://api.polygon.io"
+def pct(a, b):
+    return 0.0 if not b else 100.0 * a / b
 
-# (optional) nowcast url for 5m visual nudge; safe if unreachable
-SANDBOX_URL = os.environ.get(
-    "SANDBOX_URL",
-    "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min-sandbox/data/outlook_intraday.json"
-)
-
-# sector buckets
-OFFENSIVE = {"Information Technology","Communication Services","Consumer Discretionary"}
-DEFENSIVE = {"Consumer Staples","Utilities","Health Care","Real Estate"}
-
-# ======================================================================================
-# utils
-# ======================================================================================
-
-def clamp(x: float, lo: float, hi: float) -> float:
+def clamp(x, lo, hi):
     return lo if x < lo else hi if x > hi else x
 
-def pct(a: float, b: float) -> float:
-    if b == 0: return 0.0
-    return 100.0 * (a - b) / b
-
-def ema_hl(prev: float|None, x: float, hl_bars: float = 2.0) -> float:
-    """EMA by half-life (bars)."""
-    if prev is None or not math.isfinite(prev): return float(x)
-    alpha = 1.0 - math.pow(0.5, 1.0 / max(hl_bars, 0.5))
-    return float(prev + alpha * (x - prev))
-
-def load_json(path: str) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f: return json.load(f)
-
-def save_json(path: str, obj: Dict[str, Any]):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f: json.dump(obj, f, ensure_ascii=False, indent=2)
-
-def load_state() -> Dict[str, Any]:
-    try:
-        with open(STATE_PATH, "r", encoding="utf-8") as f: return json.load(f)
-    except Exception:
-        return {"lights": {}}
-
-def save_state(st: Dict[str, Any]):
-    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
-    with open(STATE_PATH, "w", encoding="utf-8") as f: json.dump(st, f, ensure_ascii=False, indent=2)
-
-def now_iso() -> str:
-    try:
-        from zoneinfo import ZoneInfo
-        PHX = ZoneInfo("America/Phoenix")
-        return datetime.now(PHX).replace(microsecond=0).isoformat()
-    except Exception:
-        return datetime.now().replace(microsecond=0).isoformat()
-
-# ---------- sandbox 5m fetch (optional nudge for dials) ----------
-def try_fetch_sandbox():
-    try:
-        u = SANDBOX_URL + ("&t=" if "?" in SANDBOX_URL else "?t=") + str(int(time.time()))
-        r = urllib.request.urlopen(urllib.request.Request(u, headers={"Cache-Control":"no-store"}), timeout=6)
-        j = json.loads(r.read().decode("utf-8"))
-        dm = (j.get("deltas") or {}).get("market", {})
-        dB5 = float(dm.get("dBreadthPct", 0.0))
-        dM5 = float(dm.get("dMomentumPct", 0.0))
-        ts  = j.get("deltasUpdatedAt")
-        fresh = True
-        if ts:
-            dt = datetime.fromisoformat(ts.replace("Z","+00:00"))
-            fresh = (datetime.utcnow() - dt.replace(tzinfo=None)) < timedelta(minutes=7)
-        return (dB5, dM5, fresh)
-    except Exception:
-        return (0.0, 0.0, False)
-
-# ---------- Polygon helpers: SPY 10m closes/TR ----------
-def poly_json(url: str, params: Dict[str, Any]|None = None) -> Dict[str, Any]:
-    if params is None: params = {}
-    if POLY_KEY: params["apiKey"] = POLY_KEY
-    from urllib.parse import urlencode
-    full = f"{url}?{urlencode(params)}"
-    req = urllib.request.Request(full, headers={"User-Agent":"ferrari-dashboard/1.0","Cache-Control":"no-store"})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-def fetch_spy_10m_last_n(n: int = 60) -> List[Dict[str, float]]:
-    if not POLY_KEY: return []
-    end = datetime.utcnow().date()
-    start = end - timedelta(days=3)
-    url = f"{POLY_BASE}/v2/aggs/ticker/SPY/range/10/minute/{start}/{end}"
-    try:
-        js = poly_json(url, {"adjusted":"true","sort":"desc","limit":n})
-        res = list(reversed(js.get("results", []) or []))
-        out=[]
-        for r in res[-n:]:
-            out.append({"c": float(r["c"]), "h": float(r["h"]), "l": float(r["l"]), "v": float(r.get("v",0.0))})
-        return out
-    except Exception:
-        return []
-
-def tr(h, l, c_prev): return max(h-l, abs(h-c_prev), abs(l-c_prev))
-
-def ema_seq(vals: List[float], hl: float) -> List[float]:
-    y=None; out=[]
+def ema_series(vals, n):
+    """Return entire EMA series (no warmup removal)."""
+    a = 2.0 / (n + 1.0)
+    e = None
+    out = []
     for v in vals:
-        y = v if y is None else ema_hl(y, v, hl_bars=hl)
-        out.append(y)
+        e = v if e is None else (e + a*(v - e))
+        out.append(e)
     return out
 
-# ---------- engine-light util ----------
-def set_light(lights: dict, name: str, active: bool, severity: str, reason: str, now_iso_str: str, st: dict):
-    pool = lights.setdefault("signals", {})
-    prev = st.setdefault("lights", {}).get(name, {"active": False, "lastChanged": now_iso_str})
-    if active != prev["active"]:
-        prev["lastChanged"] = now_iso_str
-    prev["active"]   = bool(active)
-    prev["severity"] = severity
-    prev["reason"]   = reason
-    pool[name]       = prev
-    st["lights"][name] = prev
-
-# ======================================================================================
-# composer
-# ======================================================================================
-
-def compose_intraday() -> Dict[str, Any]:
-    src = load_json(SRC_PATH)
-
-    updated_at     = src.get("updated_at") or now_iso()
-    updated_at_utc = src.get("updated_at_utc") or datetime.utcnow().replace(microsecond=0).isoformat()+"Z"
-    groups = src.get("groups") or {}
-    global_fields = src.get("global") or {}
-
-    # ---- sector cards + market totals ----
-    NH_sum = NL_sum = UP_sum = DN_sum = 0
-    sector_cards: List[Dict[str, Any]] = []
-    for sector, g in groups.items():
-        nh = int(g.get("nh",0)); nl = int(g.get("nl",0)); up = int(g.get("u",0)); dn = int(g.get("d",0))
-        NH_sum += nh; NL_sum += nl; UP_sum += up; DN_sum += dn
-        b = 100.0 * nh / max(1, nh + nl)
-        m = 100.0 * up / max(1, up + dn)
-        sector_cards.append({
-            "sector": sector,
-            "outlook": "Bullish" if b >= 60 else ("Bearish" if b < 45 else "Neutral"),
-            "breadth_pct": round(b,1),
-            "momentum_pct": round(m,1),
-            "nh": nh, "nl": nl, "up": up, "down": dn,
-            "spark": []
-        })
-
-    # ---- tick values (market) ----
-    breadth_t  = 100.0 * NH_sum / max(1, NH_sum + NL_sum)
-    momentum_t = 100.0 * UP_sum / max(1, UP_sum + DN_sum)
-
-    st = load_state()
-    breadth_fast  = ema_hl(st.get("breadth_fast"),  breadth_t,  hl_bars=2.0)
-    momentum_fast = ema_hl(st.get("momentum_fast"), momentum_t, hl_bars=2.0)
-
-    rising = sum(1 for c in sector_cards if c["breadth_pct"] > 50.0)
-    risingPct_t    = 100.0 * rising / 11.0
-    risingPct_fast = ema_hl(st.get("risingPct_fast"), risingPct_t, hl_bars=1.5)
-
-    off_up = sum(1 for c in sector_cards if c["sector"] in OFFENSIVE and c["breadth_pct"] > 50)
-    def_dn = sum(1 for c in sector_cards if c["sector"] in DEFENSIVE and c["breadth_pct"] < 50)
-    riskOn_t    = 100.0 * (off_up + def_dn) / max(1, len(OFFENSIVE)+len(DEFENSIVE))
-    riskOn_fast = ema_hl(st.get("riskOn_fast"), riskOn_t, hl_bars=2.0)
-
-    # ---- 5m blend for visual dials (optional) ----
-    dB5, dM5, fresh5 = try_fetch_sandbox()
-    BLEND = 0.15 if fresh5 else 0.0
-    breadth_pub  = round(breadth_fast  + BLEND * dB5, 1)
-    momentum_pub = round(momentum_fast + BLEND * dM5, 1)
-
-    # ---- squeeze / vol / liq from source (daily context) ----
-    squeeze_intraday_pct = float(global_fields.get("squeeze_pressure_pct", 50.0))
-    volatility_pct       = int(global_fields.get("volatility_pct", 50))
-    liquidity_psi        = int(global_fields.get("liquidity_pct", 100))
-
-    # ---- SPY 10m EMA10/EMA20 + ATR for scoring & cross/ dist ----
-    spy_10m = fetch_spy_10m_last_n(60)
-    cl = [b["c"] for b in spy_10m][-60:] if spy_10m else []
-    ema10_now = ema20_now = ema10_prev = ema20_prev = 0.0
-    c_now = 0.0
-    atr_fast_10m = 0.0
-    ema_cross = "none"
-    ema10_dist_pct = 0.0
-
-    if cl:
-        # EMA10/EMA20 (simple loop)
-        def ema_seq_period(vals, n):
-            a = 2.0 / (n + 1.0)
-            e = None; out=[]
-            for v in vals:
-                e = v if e is None else (e + a*(v - e))
-                out.append(e)
-            return out
-
-        ema10  = ema_seq_period(cl, 10)
-        ema20  = ema_seq_period(cl, 20)
-        ema10_now, ema20_now = ema10[-1], ema20[-1]
-        ema10_prev, ema20_prev = (ema10[-2], ema20[-2]) if len(ema10)>1 else (ema10_now, ema20_now)
-
-        # ATR(10m) reactive for distance in ATR units
-        trs=[]
-        seq = spy_10m[-len(cl):]
-        for i,b in enumerate(seq):
-            trs.append((b["h"]-b["l"]) if i==0 else tr(b["h"],b["l"],seq[i-1]["c"]))
-        atr_fast_10m = ema_seq(trs, hl=3.0)[-1]
-
-        c_now = cl[-1]
-        # cross event
-        if ema10_prev < ema20_prev and ema10_now > ema20_now:
-            ema_cross = "bull"
-        elif ema10_prev > ema20_prev and ema10_now < ema20_now:
-            ema_cross = "bear"
+def get(obj, path, default=None):
+    """Small JSON getter with dotted path."""
+    cur = obj
+    for k in path.split("."):
+        if isinstance(cur, dict) and k in cur:
+            cur = cur[k]
         else:
-            ema_cross = "none"
+            return default
+    return cur
 
-        # distance from ema10 (signed %)
-        if ema10_now != 0:
-            ema10_dist_pct = round(100.0 * (c_now - ema10_now) / ema10_now, 2)
+def deep_find_bars_spy(obj):
+    """
+    Walk the JSON and return a list of OHLC bars for SPY 10m if possible.
+    Accepts dicts like {t/o/h/l/c} or {time/open/high/low/close}.
+    """
+    stack = [obj]
+    best = None
+    while stack:
+        x = stack.pop()
+        if isinstance(x, dict):
+            # If key hints exist, prefer SPY
+            sym = str(x.get("symbol") or x.get("sym") or "").upper()
+            tf  = str(x.get("timeframe") or x.get("tf") or "").lower()
+            bars = x.get("bars")
+            if isinstance(bars, list) and len(bars) >= 25:
+                # Prefer SPY 10m if present
+                if (sym == "SPY") and ("10" in tf or "10m" in tf or "10-min" in tf):
+                    return bars
+                # Otherwise, remember first viable list and keep searching for SPY
+                if best is None:
+                    best = bars
+            # keep walking
+            for v in x.values():
+                stack.append(v)
+        elif isinstance(x, list):
+            stack.extend(x)
+    return best
 
-    # ---- write base metrics (add cross + dist) ----
-    metrics: Dict[str, Any] = {
-        "breadth_pct": breadth_pub,
-        "momentum_pct": momentum_pub,
-        "squeeze_intraday_pct": round(squeeze_intraday_pct, 1),
-        "volatility_pct": int(volatility_pct),
-        "liquidity_psi": int(liquidity_psi),
+def close_from_bar(b):
+    if "c" in b: return float(b["c"])
+    if "close" in b: return float(b["close"])
+    # Some shapes embed last price under 'p'—fallback
+    if "p" in b: return float(b["p"])
+    raise ValueError("Bar missing close price")
+
+def ts_from_bar(b):
+    # seconds or ms; tolerate both
+    t = b.get("t", b.get("time"))
+    if t is None: return None
+    t = int(t)
+    return t // 1000 if t > 2_000_000_000 else t
+
+def drop_inflight_last_bar_if_any(bars, bucket_sec=600):
+    """
+    Extra guard (your workflow already sanitizes). If last bar starts in
+    the *current* 10-minute bucket, drop it so we only use CLOSED bars.
+    """
+    if not bars:
+        return bars
+    now = int(time.time())
+    curr_bucket = (now // bucket_sec) * bucket_sec
+    t = ts_from_bar(bars[-1])
+    if t is not None and ((t // bucket_sec) * bucket_sec) == curr_bucket:
+        return bars[:-1]
+    return bars
+
+def summarize_sector_cards(cards):
+    """Return NH/NL/UP/DN plus breadth/momentum/rising/risk-on from sectorCards array."""
+    OFF = {"Information Technology","Communication Services","Consumer Discretionary"}
+    DEF = {"Consumer Staples","Utilities","Health Care","Real Estate"}
+
+    NH=NL=UP=DN=rising=offUp=defDn=0
+    for c in cards or []:
+        nh = int(c.get("nh",0)); nl = int(c.get("nl",0))
+        up = int(c.get("up",0)); dn = int(c.get("down",0))
+        NH += nh; NL += nl; UP += up; DN += dn
+        b = pct(nh, nh+nl)
+        if b > 50.0: rising += 1
+        sec = str(c.get("sector",""))
+        if sec in OFF and b > 50.0: offUp += 1
+        if sec in DEF and b < 50.0: defDn += 1
+
+    return {
+        "NH": NH, "NL": NL, "UP": UP, "DN": DN,
+        "breadth_pct": pct(NH, NH+NL),
+        "momentum_pct": pct(UP, UP+DN),
+        "risingPct": pct(rising, 11.0),
+        "riskOnPct": pct(offUp + defDn, len(OFF) + len(DEF)),
+    }
+
+# -------------------------- Core build --------------------------
+def build_intraday(source):
+    """
+    Build the final intraday outlook JSON from a source object.
+    Returns a new dict with metrics + intraday.overall10m and a few helpful fields.
+    """
+    out = {}
+    # Start by copying over core useful bits if present
+    for k in ("indices","sectorCards","updated_at","updated_at_utc","timestamp","intraday","metrics"):
+        if k in source: out[k] = source[k]
+
+    # sectorCards are the backbone for breadth/momentum
+    cards = out.get("sectorCards") or get(source,"sectorCards",[]) or []
+
+    # Summarize sector internals
+    sums = summarize_sector_cards(cards)
+
+    # Try to get SPY 10m bars
+    bars = deep_find_bars_spy(source)
+    if not bars or len(bars) < 25:
+        raise ValueError("Could not find sufficient SPY 10m bars in source JSON")
+
+    # Guard: drop any in-flight (open) bar to ensure CLOSED-only series
+    bars = drop_inflight_last_bar_if_any(bars, bucket_sec=600)
+    if len(bars) < 25:
+        raise ValueError("Not enough CLOSED bars after sanitizer")
+
+    closes = [close_from_bar(b) for b in bars]
+    ema10 = ema_series(closes, 10)
+    ema20 = ema_series(closes, 20)
+
+    e10_prev, e20_prev = ema10[-2], ema20[-2]
+    e10_now,  e20_now  = ema10[-1], ema20[-1]
+    px_now              = closes[-1]
+
+    # Event-style cross (for info)
+    if e10_prev < e20_prev and e10_now > e20_now:
+        ema_cross = "bull"
+    elif e10_prev > e20_prev and e10_now < e20_now:
+        ema_cross = "bear"
+    else:
+        ema_cross = "none"
+
+    # Continuous EMA state (+1 above, -1 below, 0 equal)
+    ema_sign = 1 if e10_now > e20_now else (-1 if e10_now < e20_now else 0)
+    ema10_dist_pct = 0.0 if e10_now == 0 else 100.0 * (px_now - e10_now) / e10_now
+
+    # ------------------ Component scoring (0–100) ------------------
+    # Weights (as agreed)
+    W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 10, 10, 10, 5
+
+    # EMA component: sign * scaled distance (±0.60% → full weight)
+    dist_unit = clamp(ema10_dist_pct / 0.60, -1.0, 1.0) if ema10_dist_pct is not None else 0.0
+    ema_pts   = int(round(W_EMA * (1.0 * (1 if ema_sign > 0 else -1) * abs(dist_unit)))) if ema_sign != 0 else 0
+
+    # Momentum/Breadth/Squeeze/Liquidity/RiskOn from live or recompute
+    # Pull live if present, otherwise use recomputed (sums)
+    live_mom = get(source,"metrics.momentum_pct", sums["momentum_pct"])
+    live_br  = get(source,"metrics.breadth_pct",  sums["breadth_pct"])
+    # Squeeze/Liquidity may exist; otherwise lightly neutral (5/10 pts)
+    live_sq  = get(source,"metrics.squeeze_pct",  50.0)
+    live_liq = get(source,"metrics.liquidity_pct",50.0)
+    # Risk-On: prefer source intraday, else recompute
+    live_risk = get(source,"intraday.riskOn10m.riskOnPct", sums["riskOnPct"])
+
+    # Map % (0..100) → points by simple linear scaling around 50 (neutral)
+    def pts_lin(percent, weight):
+        # 50% => 0; 100% => +weight; 0% => -weight
+        return int(round(weight * ((percent - 50.0) / 50.0)))
+
+    momentum_pts = pts_lin(float(live_mom or 0.0), W_MOM)
+    breadth_pts  = pts_lin(float(live_br  or 0.0), W_BR)
+    squeeze_pts  = pts_lin(float(live_sq  or 50.0), W_SQ)
+    liq_pts      = pts_lin(float(live_liq or 50.0), W_LIQ)
+    riskon_pts   = pts_lin(float(live_risk or 50.0), W_RISK)
+
+    components = {
+        "ema10":     ema_pts,
+        "momentum":  momentum_pts,
+        "breadth":   breadth_pts,
+        "squeeze":   squeeze_pts,
+        "liquidity": liq_pts,
+        "riskOn":    riskon_pts,
+    }
+    overall_score = int(sum(components.values()))
+
+    # State: prioritize EMA sign, with score thresholds
+    # If trend is down and score is not strongly positive → bear
+    # If trend is up and score is positive enough → bull
+    # Else neutral.
+    if ema_sign < 0 and overall_score < 60:
+        overall_state = "bear"
+    elif ema_sign > 0 and overall_score >= 60:
+        overall_state = "bull"
+    else:
+        overall_state = "neutral"
+
+    # Build output
+    metrics = {
+        "breadth_pct": round(float(sums["breadth_pct"]), 2),
+        "momentum_pct": round(float(sums["momentum_pct"]), 2),
         "ema_cross": ema_cross,
-        "ema10_dist_pct": ema10_dist_pct
+        "ema10_dist_pct": round(float(ema10_dist_pct), 2),
+        "ema_sign": int(ema_sign),
     }
 
-    # ============ OVERALL scoring (weights you approved) ============
-    # A) EMA backbone (40 pts): cross bias ±20 + ATR-normalized distance ±20 (curved)
-    if atr_fast_10m and ema10_now:
-        dist_abs_atr = abs((c_now - ema10_now) / atr_fast_10m)
-    else:
-        dist_abs_atr = 0.0
-    k = 0.8
-    dist_pts   = 20.0 * (1.0 - math.exp(-k * dist_abs_atr))
-    dist_signed= (1 if c_now >= ema10_now else -1) * dist_pts
-    cross_bias = 20.0 * (1 if c_now >= ema10_now else -1)
-    EMA_comp   = clamp(cross_bias + dist_signed, -40.0, 40.0)
+    # Prefer to keep existing intraday dict and merge
+    intraday = out.get("intraday") or {}
+    # keep rising% / risk-on if present; else populate from recompute
+    if "sectorDirection10m" not in intraday:
+        intraday["sectorDirection10m"] = {}
+    intraday["sectorDirection10m"]["risingPct"] = float(get(intraday,"sectorDirection10m.risingPct", sums["risingPct"]))
 
-    # B) Momentum (25) = ΔBreadth + ΔMomentum
-    dB = breadth_fast  - st.get("breadth_fast_prev", breadth_fast)
-    dM = momentum_fast - st.get("momentum_fast_prev", momentum_fast)
-    accel = dB + dM
-    Mom_comp = clamp(accel, -25.0, 25.0)
+    if "riskOn10m" not in intraday:
+        intraday["riskOn10m"] = {}
+    intraday["riskOn10m"]["riskOnPct"] = float(get(intraday,"riskOn10m.riskOnPct", sums["riskOnPct"]))
 
-    # C) Breadth (10)
-    Breadth_comp = clamp((breadth_fast - 50.0) * 0.2, -10.0, 10.0)
-
-    # D) Squeeze (10) (inverted tightness)
-    squeeze_rel = 50.0 - (squeeze_intraday_pct - 50.0)  # higher = looser
-    Squeeze_comp = clamp(squeeze_rel * 0.2, -10.0, 10.0)
-
-    # E) Liquidity (10)
-    Flow = liquidity_psi - 100.0
-    Liq_comp = clamp(Flow * 0.25, -10.0, 10.0)
-
-    # F) Risk-On (5)
-    Risk_comp = clamp((riskOn_fast - 50.0) * 0.1, -5.0, 5.0)
-
-    Score = clamp(EMA_comp + Mom_comp + Breadth_comp + Squeeze_comp + Liq_comp + Risk_comp, -100.0, 100.0)
-
-    # ---- state + confidence (hysteresis) ----
-    prev_state = st.get("overall10m_state", "neutral")
-    enter_bull, exit_bull = +10, +2
-    enter_bear, exit_bear = -10, -2
-    if prev_state == "bull":
-        state = "bull" if Score >= exit_bull else ("bear" if Score <= enter_bear else "neutral" if Score < enter_bull else "bull")
-    elif prev_state == "bear":
-        state = "bear" if Score <= exit_bear else ("bull" if Score >= enter_bull else "neutral" if Score > enter_bear else "bear")
-    else:
-        state = "bull" if Score >= enter_bull else ("bear" if Score <= enter_bear else "neutral")
-
-    agree = 0
-    agree += 1 if (math.copysign(1, EMA_comp) == math.copysign(1, Mom_comp)) else 0
-    agree += 1 if (math.copysign(1, EMA_comp) == math.copysign(1, Breadth_comp)) else 0
-    agree += 1 if (math.copysign(1, EMA_comp) == math.copysign(1, Risk_comp)) else 0
-    Confidence = clamp((abs(Score)/100.0) * (0.4 + 0.2*agree), 0.0, 1.0)
-
-    # ---- payload (unchanged keys) ----
-    payload: Dict[str, Any] = {
-        "updated_at": updated_at,
-        "updated_at_utc": updated_at_utc,
-        "metrics": metrics,
-        "sectorCards": sector_cards,
-        "sectorsUpdatedAt": updated_at,
-        "intraday": {
-            "sectorDirection10m": {
-                "risingCount": int(round(risingPct_fast/100.0*11.0)),
-                "risingPct": round(risingPct_fast, 1),
-                "updatedAt": updated_at
-            },
-            "riskOn10m": {
-                "riskOnPct": round(riskOn_fast, 1),
-                "updatedAt": updated_at
-            },
-            "overall10m": {
-                "score": int(round(Score)),
-                "state": state,
-                "confidence": round(Confidence, 2),
-                "components": {
-                    "ema10":  int(round(EMA_comp)),
-                    "momentum": int(round(Mom_comp)),
-                    "breadth": int(round(Breadth_comp)),
-                    "squeeze": int(round(Squeeze_comp)),
-                    "liquidity": int(round(Liq_comp)),
-                    "riskOn": int(round(Risk_comp)),
-                },
-                "reason": f"EMA10 {'↑' if c_now>=ema10_now else '↓'} | ema10_dist {metrics['ema10_dist_pct']:.2f}% | ΔB {dB:+.1f} ΔM {dM:+.1f} | ROn {riskOn_fast:.0f}% | Thrust {risingPct_fast:.0f}%",
-                "updatedAt": updated_at
-            }
-        }
+    intraday["overall10m"] = {
+        "state": overall_state,
+        "score": int(overall_score),
+        "components": components
     }
 
-    # ---- Engine Lights (10m) ----
-    lights = {"updatedAt": updated_at, "mode": "intraday", "live": True, "signals": {}}
-    print(f"[lights] score={Score:.1f} state={state} EMA={EMA_comp:.1f} Mom={Mom_comp:.1f} Br={Breadth_comp:.1f} Sq={Squeeze_comp:.1f} Lq={Liq_comp:.1f} Rk={Risk_comp:.1f} cross={metrics['ema_cross']} dist%={metrics['ema10_dist_pct']}")
+    out["metrics"] = (out.get("metrics") or {}) | metrics
+    out["intraday"] = intraday
+    out["updated_at_utc"] = now_iso()
 
-    set_light(lights, "sigOverallBull", state == "bull" and Score >= 10, "info",
-              f"Overall10m bull, score {int(round(Score))}", updated_at, st)
-    set_light(lights, "sigOverallBear", state == "bear" and Score <= -10, "warn",
-              f"Overall10m bear, score {int(round(Score))}", updated_at, st)
+    # Ensure sectorCards exist (even empty list)
+    out["sectorCards"] = cards
 
-    # pulse crosses
-    set_light(lights, "sigEMA10BullCross", (metrics["ema_cross"] == "bull"), "info", "SPY 10m EMA10 crossed above EMA20", updated_at, st)
-    set_light(lights, "sigEMA10BearCross", (metrics["ema_cross"] == "bear"), "warn", "SPY 10m EMA10 crossed below EMA20", updated_at, st)
+    return out
 
-    # acceleration / risk / thrust
-    set_light(lights, "sigAccelUp",   accel >= +3.0, "info",  f"ΔBreadth {dB:+.1f}, ΔMomentum {dM:+.1f}", updated_at, st)
-    set_light(lights, "sigAccelDown", accel <= -3.0, "warn", f"ΔBreadth {dB:+.1f}, ΔMomentum {dM:+.1f}", updated_at, st)
-    set_light(lights, "sigRiskOn",  riskOn_fast >= 57.0, "info",  f"Risk-On {riskOn_fast:.0f}%", updated_at, st)
-    set_light(lights, "sigRiskOff", riskOn_fast <= 43.0, "warn", f"Risk-On {riskOn_fast:.0f}%", updated_at, st)
-    set_light(lights, "sigSectorThrust", risingPct_fast >= 57.0, "info",
-              f"{int(round(risingPct_fast/100*11))}/11 rising", updated_at, st)
-    set_light(lights, "sigSectorWeak",   risingPct_fast <= 43.0, "warn",
-              f"{int(round(risingPct_fast/100*11))}/11 rising", updated_at, st)
-
-    # force-on safety if tape is obviously ripping/fading
-    dist_abs_atr = abs((c_now - ema10_now) / atr_fast_10m) if (atr_fast_10m and ema10_now) else 0.0
-    force_bull = ((c_now >= ema10_now and dist_abs_atr <= 0.9 and accel >= +3.0) or
-                  (riskOn_fast >= 62.0 and risingPct_fast >= 60.0))
-    force_bear = ((c_now <  ema10_now and dist_abs_atr <= 0.9 and accel <= -3.0) or
-                  (riskOn_fast <= 38.0 and risingPct_fast <= 40.0))
-    if force_bull:
-        set_light(lights, "sigOverallBull", True, "info",
-                  f"FORCE bull: distATR {dist_abs_atr:.2f}, accel {accel:+.1f}, ROn {riskOn_fast:.0f}%, Thrust {risingPct_fast:.0f}%", updated_at, st)
-    if force_bear:
-        set_light(lights, "sigOverallBear", True, "warn",
-                  f"FORCE bear: distATR {dist_abs_atr:.2f}, accel {accel:+.1f}, ROn {riskOn_fast:.0f}%, Thrust {risingPct_fast:.0f}%", updated_at, st)
-
-    payload["engineLights"] = lights
-
-    # persist state for next bar
-    st["breadth_fast"]       = breadth_fast
-    st["momentum_fast"]      = momentum_fast
-    st["breadth_fast_prev"]  = breadth_fast
-    st["momentum_fast_prev"] = momentum_fast
-    st["risingPct_fast"]     = risingPct_fast
-    st["riskOn_fast"]        = riskOn_fast
-    st["overall10m_state"]   = state
-    save_state(st)
-
-    return payload
-
-
+# -------------------------- CLI --------------------------
 def main():
-    payload = compose_intraday()
-    save_json(OUT_PATH, payload)
-    print(f"Wrote {OUT_PATH} | cards={len(payload.get('sectorCards',[]))} | Overall10m={payload['intraday']['overall10m']['state']} {payload['intraday']['overall10m']['score']}")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mode", default="intraday", help="intraday (default)")
+    ap.add_argument("--source", required=True, help="path to outlook_source.json")
+    ap.add_argument("--out", required=True, help="path to write outlook_intraday.json")
+    args = ap.parse_args()
+
+    with open(args.source, "r", encoding="utf-8") as f:
+        src = json.load(f)
+
+    if (args.mode or "intraday").lower() != "intraday":
+        print("[warn] only 'intraday' supported in this builder; continuing...", file=sys.stderr)
+
+    out = build_intraday(src)
+
+    # Make sure output folder exists
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, separators=(",",":"))
+
+    print("[ok] wrote", args.out)
+    print("overall10m.state=", out["intraday"]["overall10m"]["state"], "score=", out["intraday"]["overall10m"]["score"])
+    print("ema_cross=", out["metrics"]["ema_cross"], "ema_sign=", out["metrics"]["ema_sign"], "ema10_dist_pct=", out["metrics"]["ema10_dist_pct"])
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("[error]", str(e), file=sys.stderr)
+        sys.exit(1)
