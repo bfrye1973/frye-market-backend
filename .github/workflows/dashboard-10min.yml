@@ -3,9 +3,9 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Pre-open warmup (exactly 1h before 13:30 UTC open): 12:30, 12:40, 12:50 UTC (Mon–Fri)
+    # Pre-open warmup (1h before 13:30 UTC open): 12:30, 12:40, 12:50 UTC (Mon–Fri)
     - cron: "30-59/10 12 * * 1-5"
-    # Regular Trading Hours: every 10 minutes 13:00–20:59 UTC (Mon–Fri)
+    # RTH: every 10 minutes 13:00–20:59 UTC (Mon–Fri)
     - cron: "*/10 13-20 * * 1-5"
 
 jobs:
@@ -59,55 +59,50 @@ jobs:
           test -s data/outlook_source.json
 
       # --------------------- SANITIZE: drop any in-flight 10m bar ---------------------
-      # Why: EMA cross must use CLOSED bars only (fixes false 'bull' reads mid-bar).
-      # This is schema-tolerant: it removes the last element of any "bars" array that
-      # looks like OHLCV bars if its timestamp aligns with the current (still-open) bucket.
+      # Fix: EMA cross must use last TWO CLOSED bars only (prevents false 'bull' mid-bar).
       - name: Ensure CLOSED bars only (no in-flight)
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, sys, time, math, pathlib
+          import json, time, pathlib
           p = pathlib.Path("data/outlook_source.json")
           js = json.loads(p.read_text())
+
           now = int(time.time())
-          # 10-minute bucket length
           BUCKET = 600
-          # the *current* bucket start (still open until it closes)
           current_bucket_start = (now // BUCKET) * BUCKET
-          removed = 0
 
           def looks_like_bar(o):
             if not isinstance(o, dict): return False
-            keys = set(o.keys())
-            # tolerate t or time, o/h/l/c or open/high/low/close
-            has_t = ("t" in keys) or ("time" in keys)
-            has_prices = any(k in keys for k in ("o","open")) and any(k in keys for k in ("h","high")) \
-                         and any(k in keys for k in ("l","low")) and any(k in keys for k in ("c","close"))
+            has_t = ('t' in o) or ('time' in o)
+            has_prices = any(k in o for k in ('o','open')) and any(k in o for k in ('h','high')) \
+                         and any(k in o for k in ('l','low')) and any(k in o for k in ('c','close'))
             return has_t and has_prices
 
           def bar_ts(o):
-            if "t" in o: return int(o["t"] // 1000) if o["t"] > 2_000_000_000 else int(o["t"])
-            if "time" in o: return int(o["time"] // 1000) if o["time"] > 2_000_000_000 else int(o["time"])
-            return None
+            t = o.get('t', o.get('time'))
+            if t is None: return None
+            t = int(t)
+            return t//1000 if t > 2_000_000_000 else t
 
-          def maybe_drop_last_bars(container):
-            nonlocal removed
-            if not isinstance(container, list) or len(container) < 1: return
-            last = container[-1]
+          removed = [0]  # mutable counter
+
+          def maybe_drop_last_bars(arr):
+            if not isinstance(arr, list) or not arr: return
+            last = arr[-1]
             if not looks_like_bar(last): return
             ts = bar_ts(last)
             if ts is None: return
-            # if the last bar belongs to the *current* (still-open) bucket, drop it
+            # If last bar sits in the currently open bucket, drop it.
             if (ts // BUCKET) * BUCKET == current_bucket_start:
-              container.pop()
-              removed += 1
+              arr.pop()
+              removed[0] += 1
 
-          # Walk all arrays named "bars" anywhere in the tree
           def walk(x):
             if isinstance(x, dict):
-              for k,v in list(x.items()):
-                if k.lower() == "bars" and isinstance(v, list):
+              for k, v in list(x.items()):
+                if k.lower() == 'bars' and isinstance(v, list):
                   maybe_drop_last_bars(v)
                 else:
                   walk(v)
@@ -115,8 +110,8 @@ jobs:
               for v in x: walk(v)
 
           walk(js)
-          p.write_text(json.dumps(js, separators=(",",":")))
-          print(f"[sanitize] removed_inflight_arrays={removed}")
+          p.write_text(json.dumps(js, separators=(',',':')))
+          print(f"[sanitize] removed_inflight_arrays={removed[0]}")
           PY
 
       - name: Make dashboard payload (intraday)
