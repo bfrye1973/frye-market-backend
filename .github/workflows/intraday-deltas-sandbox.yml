@@ -2,36 +2,19 @@ name: Intraday DELTAS SANDBOX (5-minute)
 
 on:
   workflow_dispatch:
-
   schedule:
-  # Start a little before open; every 3 minutes
-  - cron: "*/3 12-20 * * 1-5"
- 
+    # Pre-open + RTH, every 3 minutes (Mon–Fri)
+    - cron: "*/3 12-20 * * 1-5"
   workflow_run:
     workflows: ["dashboard-10min"]
     types: [completed]
-- name: Gate – require fresh 10m live (< 2 min old)
-  run: |
-    set -e
-    LIVE_URL="https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min/data/outlook_intraday.json"
-    curl -sfL "${LIVE_URL}?t=$(date +%s)" -o /tmp/live10.json
-    TS=$(jq -r '.updated_at // .updated_at_utc // empty' /tmp/live10.json)
-    [ -z "$TS" ] && { echo "no timestamp on live10; skipping"; exit 0; }
-    AGE=$(( $(date -u +%s) - $(date -u -d "${TS/Z/+00:00}" +%s) ))
-    echo "live10 age: ${AGE}s"
-    # require <= 120s (2 min) to proceed
-    if [ "$AGE" -gt 120 ]; then
-      echo "live10 too old; skipping this 3m run"
-      exit 0
-    fi
 
 jobs:
   build-and-publish:
-    if: >
-      github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success'
+    # If triggered by workflow_run, only proceed when the 10m job succeeded
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     concurrency:
       group: intraday-deltas-sandbox
       cancel-in-progress: true
@@ -52,6 +35,21 @@ jobs:
           echo "BUILD_DIR=${RUNNER_TEMP}/intraday-deltas" >> "$GITHUB_ENV"
           mkdir -p "${RUNNER_TEMP}/intraday-deltas"
 
+      # ---------------- Debounce: require fresh 10m live (<= 120s old) ----------------
+      - name: Gate – require fresh 10m live (<= 2 min old)
+        run: |
+          set -e
+          LIVE_RAW="https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min/data/outlook_intraday.json"
+          curl -sfL "${LIVE_RAW}?t=$(date +%s)" -o /tmp/live10.json || { echo "no live10"; exit 0; }
+          TS=$(jq -r '.updated_at // .updated_at_utc // empty' /tmp/live10.json)
+          if [ -z "$TS" ]; then echo "no timestamp on live10; skipping"; exit 0; fi
+          AGE=$(( $(date -u +%s) - $(date -u -d "${TS/Z/+00:00}" +%s) ))
+          echo "live10 age: ${AGE}s"
+          if [ "$AGE" -gt 120 ]; then
+            echo "live10 too old; skipping this 3m run"
+            exit 0
+          fi
+
       - name: Fetch previous sandbox payload
         run: |
           set -e
@@ -67,7 +65,6 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, sys, urllib.request
-          from urllib.error import URLError, HTTPError
           from datetime import datetime
           try:
               from zoneinfo import ZoneInfo
@@ -85,14 +82,11 @@ jobs:
               return (datetime.now(AZ) if AZ else datetime.now()).replace(microsecond=0).isoformat()
 
           def fetch_json(url: str):
-              try:
-                  u = url + ("&t=" if "?" in url else "?t=") + str(int(datetime.utcnow().timestamp()))
-                  req = urllib.request.Request(u, headers={"Cache-Control":"no-store","User-Agent":"sandbox-deltas/1.0"})
-                  with urllib.request.urlopen(req, timeout=20) as resp:
-                      if resp.status != 200: return None
-                      return json.loads(resp.read().decode("utf-8"))
-              except Exception:
-                  return None
+              u = url + ("&t=" if "?" in url else "?t=") + str(int(datetime.utcnow().timestamp()))
+              req = urllib.request.Request(u, headers={"Cache-Control":"no-store","User-Agent":"sandbox-deltas/1.0"})
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  if resp.status != 200: return None
+                  return json.loads(resp.read().decode("utf-8"))
 
           def load_json(path: str):
               try:
@@ -102,32 +96,31 @@ jobs:
                   pass
               return None
 
-          def pct(num, den): return 0.0 if den == 0 else 100.0 * num / den
+          def pct(a,b): return 0.0 if b == 0 else 100.0*a/b
 
           def summarize(cards):
-              nh = nl = up = dn = 0
+              nh=nl=up=dn=0
               for c in cards or []:
-                  nh += int(c.get("nh",0)); nl += int(c.get("nl",0))
-                  up += int(c.get("up",0)); dn += int(c.get("down",0))
-              return pct(nh, nh+nl), pct(up, up+dn)
+                  nh+=int(c.get("nh",0)); nl+=int(c.get("nl",0))
+                  up+=int(c.get("up",0)); dn+=int(c.get("down",0))
+              return pct(nh,nh+nl), pct(up,up+dn)
 
           def sector_map(cards):
-              m = {}
+              m={}
               for c in cards or []:
-                  nh = int(c.get("nh",0)); nl = int(c.get("nl",0))
-                  up = int(c.get("up",0)); dn = int(c.get("down",0))
-                  b  = pct(nh, nh+nl); mo = pct(up, up+dn)
-                  m[str(c.get("sector","Unknown"))] = (b, mo)
+                  nh=int(c.get("nh",0)); nl=int(c.get("nl",0))
+                  up=int(c.get("up",0)); dn=int(c.get("down",0))
+                  b=pct(nh,nh+nl); mo=pct(up,up+dn)
+                  m[str(c.get("sector","Unknown"))]=(b,mo)
               return m
 
           curr = fetch_json(LIVE_URL)
           if not curr:
-              print("❌ Could not fetch /live/intraday")
-              sys.exit(2)
+              print("❌ Could not fetch /live/intraday"); sys.exit(2)
 
           prev = load_json(PREV)
           cb, cm = summarize(curr.get("sectorCards"))
-          pb, pm = summarize(prev.get("sectorCards")) if prev else (0.0, 0.0)
+          pb, pm = summarize(prev.get("sectorCards")) if prev else (0.0,0.0)
 
           d_market = {
               "dBreadthPct": round(cb - pb, 2),
