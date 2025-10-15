@@ -37,12 +37,12 @@
   },
   "deltas": {
     "market": {
-      "dBreadthPct": -69.75,
-      "dMomentumPct": -43.14,
-      "netTilt": -56.44,
+      "dBreadthPct": 0.0,
+      "dMomentumPct": 0.0,
+      "netTilt": 0.0,
       "riskOnPct": 0.0
     },
     "sectors": {}
   },
-  "deltasUpdatedAt": "2025-10-15T10:58:45-07:00"
+  "deltasUpdatedAt": "2025-10-15T11:21:01-07:00"
 }
