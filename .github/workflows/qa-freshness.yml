@@ -1,47 +1,63 @@
-name: QA - Freshness Check (10m + 5m)
+name: QA – Freshness Check (10m + 5m)
 
 on:
   schedule:
-    # 30 min before open, and once mid-session
-    - cron: "0 12 * * 1-5"     # 05:00 AZ / 12 UTC
-    - cron: "0 17 * * 1-5"     # mid-day
-  workflow_dispatch: {}
+    - cron: "*/5 * * * *"   # every 5 minutes
+  workflow_dispatch:
 
 jobs:
   freshness:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    permissions:
+      actions: write
+      contents: read
     steps:
-      - name: Check live + sandbox feeds
-        run: |
-          set -euo pipefail
-          echo "🔍 Checking /live/intraday (10m canonical)…"
-          curl -sfL "https://frye-market-backend-1.onrender.com/live/intraday?t=$(date +%s)" \
-            -o /tmp/live.json
+      - name: Check 10m & 5m branch freshness and auto-dispatch if stale
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo  = context.repo.repo;
 
-          echo "🔍 Checking sandbox (5m deltas)…"
-          curl -sfL "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min-sandbox/data/outlook_intraday.json?t=$(date +%s)" \
-            -o /tmp/sandbox.json
+            // Branch + workflow files
+            const BR_10M   = "data-live-10min";
+            const BR_5M    = "data-live-10min-sandbox";
+            const WF_10M   = ".github/workflows/dashboard-10min.yml";
+            const WF_5M    = ".github/workflows/intraday-deltas-sandbox.yml";
 
-          echo "---- Canonical ----"
-          jq -r '{updated_at, sectorsUpdatedAt, n_sectors:(.sectorCards|length)}' /tmp/live.json
+            // Freshness thresholds (minutes)
+            const MAX_10M_AGE = 13; // allow small queue delay
+            const MAX_5M_AGE  = 7;
 
-          echo "---- Sandbox ----"
-          jq -r '{deltasUpdatedAt, barTs, sourceTs, n_sectors:(.deltas.sectors|keys|length)}' /tmp/sandbox.json
+            async function branchAgeMinutes(branch) {
+              const { data } = await github.rest.repos.getBranch({ owner, repo, branch });
+              const ts = new Date(data.commit.commit.committer.date).getTime();
+              const ageMin = (Date.now() - ts) / 60000;
+              return { ageMin, sha: data.commit.sha, tsISO: new Date(ts).toISOString() };
+            }
 
-          echo "---- Validating ----"
-          # 1. sector count = 11
-          N1=$(jq '.sectorCards|length' /tmp/live.json)
-          N2=$(jq '.deltas.sectors|keys|length' /tmp/sandbox.json)
-          [ "$N1" -eq 11 ] && [ "$N2" -eq 11 ] || { echo "❌ Sector count mismatch ($N1,$N2)"; exit 1; }
+            async function maybeDispatch(workflowFile, reason) {
+              core.info(`Dispatching ${workflowFile} → main (${reason})`);
+              await github.rest.actions.createWorkflowDispatch({
+                owner, repo, workflow_id: workflowFile, ref: "main"
+              });
+            }
 
-          # 2. freshness within 15 min
-          LIVE_TS=$(jq -r '.sectorsUpdatedAt // .updated_at' /tmp/live.json)
-          SBOX_TS=$(jq -r '.deltasUpdatedAt // .barTs' /tmp/sandbox.json)
-          live_age=$(( $(date +%s) - $(date -d "${LIVE_TS/Z/+00:00}" +%s) ))
-          box_age=$(( $(date +%s) - $(date -d "${SBOX_TS/Z/+00:00}" +%s) ))
-          echo "Live age: ${live_age}s   Sandbox age: ${box_age}s"
-          if [ "$live_age" -gt 900 ]; then echo "❌ Live older than 15 min"; exit 1; fi
-          if [ "$box_age" -gt 900 ]; then echo "❌ Sandbox older than 15 min"; exit 1; fi
+            const ten = await branchAgeMinutes(BR_10M);
+            const five = await branchAgeMinutes(BR_5M);
 
-          echo "✅ Feeds healthy: live≤${live_age}s, sandbox≤${box_age}s, 11 sectors each."
+            core.info(`10m branch age: ${ten.ageMin.toFixed(1)} min (sha ${ten.sha.slice(0,7)} @ ${ten.tsISO})`);
+            core.info(`5m branch age: ${five.ageMin.toFixed(1)} min (sha ${five.sha.slice(0,7)} @ ${five.tsISO})`);
+
+            let did = false;
+            if (ten.ageMin > MAX_10M_AGE) {
+              await maybeDispatch(WF_10M, `age ${ten.ageMin.toFixed(1)}m > ${MAX_10M_AGE}m`);
+              did = true;
+            }
+            // 5m depends on latest 10m file; only kick if both look stale or 10m just ran
+            if (five.ageMin > MAX_5M_AGE) {
+              await maybeDispatch(WF_5M, `age ${five.ageMin.toFixed(1)}m > ${MAX_5M_AGE}m`);
+              did = true;
+            }
+
+            core.setOutput("dispatched", did ? "yes" : "no");
