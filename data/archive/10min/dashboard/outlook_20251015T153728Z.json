@@ -1,0 +1,230 @@
+{
+  "updated_at": "2025-10-15T08:32:35-07:00",
+  "updated_at_utc": "2025-10-15T15:32:35+00:00",
+  "metrics": {
+    "breadth_pct": 74.8,
+    "momentum_pct": 64.8,
+    "squeeze_intraday_pct": 95.0,
+    "volatility_pct": 56,
+    "liquidity_psi": 109,
+    "ema_cross": "none",
+    "ema10_dist_pct": 0.0
+  },
+  "sectorCards": [
+    {
+      "sector": "Communication Services",
+      "outlook": "Bullish",
+      "breadth_pct": 66.7,
+      "momentum_pct": 72.2,
+      "nh": 26,
+      "nl": 13,
+      "up": 143,
+      "down": 55,
+      "spark": []
+    },
+    {
+      "sector": "Real Estate",
+      "outlook": "Bullish",
+      "breadth_pct": 72.5,
+      "momentum_pct": 83.3,
+      "nh": 37,
+      "nl": 14,
+      "up": 169,
+      "down": 34,
+      "spark": []
+    },
+    {
+      "sector": "Industrials",
+      "outlook": "Bullish",
+      "breadth_pct": 82.8,
+      "momentum_pct": 62.0,
+      "nh": 120,
+      "nl": 25,
+      "up": 311,
+      "down": 191,
+      "spark": []
+    },
+    {
+      "sector": "Healthcare",
+      "outlook": "Bullish",
+      "breadth_pct": 78.0,
+      "momentum_pct": 68.5,
+      "nh": 142,
+      "nl": 40,
+      "up": 546,
+      "down": 251,
+      "spark": []
+    },
+    {
+      "sector": "Energy",
+      "outlook": "Bullish",
+      "breadth_pct": 78.6,
+      "momentum_pct": 76.4,
+      "nh": 22,
+      "nl": 6,
+      "up": 146,
+      "down": 45,
+      "spark": []
+    },
+    {
+      "sector": "Utilities",
+      "outlook": "Bullish",
+      "breadth_pct": 94.0,
+      "momentum_pct": 87.0,
+      "nh": 47,
+      "nl": 3,
+      "up": 67,
+      "down": 10,
+      "spark": []
+    },
+    {
+      "sector": "Financials",
+      "outlook": "Neutral",
+      "breadth_pct": 52.3,
+      "momentum_pct": 43.7,
+      "nh": 114,
+      "nl": 104,
+      "up": 276,
+      "down": 355,
+      "spark": []
+    },
+    {
+      "sector": "Consumer Staples",
+      "outlook": "Bullish",
+      "breadth_pct": 74.0,
+      "momentum_pct": 54.3,
+      "nh": 37,
+      "nl": 13,
+      "up": 89,
+      "down": 75,
+      "spark": []
+    },
+    {
+      "sector": "tech",
+      "outlook": "Bullish",
+      "breadth_pct": 81.2,
+      "momentum_pct": 68.2,
+      "nh": 121,
+      "nl": 28,
+      "up": 347,
+      "down": 162,
+      "spark": []
+    },
+    {
+      "sector": "Materials",
+      "outlook": "Bullish",
+      "breadth_pct": 91.9,
+      "momentum_pct": 65.1,
+      "nh": 79,
+      "nl": 7,
+      "up": 123,
+      "down": 66,
+      "spark": []
+    },
+    {
+      "sector": "Consumer Discretionary",
+      "outlook": "Bullish",
+      "breadth_pct": 76.3,
+      "momentum_pct": 71.2,
+      "nh": 71,
+      "nl": 22,
+      "up": 299,
+      "down": 121,
+      "spark": []
+    }
+  ],
+  "sectorsUpdatedAt": "2025-10-15T08:32:35-07:00",
+  "intraday": {
+    "sectorDirection10m": {
+      "risingCount": 11,
+      "risingPct": 100.0,
+      "updatedAt": "2025-10-15T08:32:35-07:00"
+    },
+    "riskOn10m": {
+      "riskOnPct": 28.6,
+      "updatedAt": "2025-10-15T08:32:35-07:00"
+    },
+    "overall10m": {
+      "score": 26,
+      "state": "bull",
+      "confidence": 0.21,
+      "components": {
+        "ema10": 20,
+        "momentum": 0,
+        "breadth": 5,
+        "squeeze": 1,
+        "liquidity": 2,
+        "riskOn": -2
+      },
+      "reason": "EMA10 ↑ | ema10_dist 0.00% | ΔB +0.0 ΔM +0.0 | ROn 29% | Thrust 100%",
+      "updatedAt": "2025-10-15T08:32:35-07:00"
+    }
+  },
+  "engineLights": {
+    "updatedAt": "2025-10-15T08:32:35-07:00",
+    "mode": "intraday",
+    "live": true,
+    "signals": {
+      "sigOverallBull": {
+        "active": true,
+        "lastChanged": "2025-10-15T08:32:35-07:00",
+        "severity": "info",
+        "reason": "Overall10m bull, score 26"
+      },
+      "sigOverallBear": {
+        "active": false,
+        "lastChanged": "2025-10-15T08:32:35-07:00",
+        "severity": "warn",
+        "reason": "Overall10m bear, score 26"
+      },
+      "sigEMA10BullCross": {
+        "active": false,
+        "lastChanged": "2025-10-15T08:32:35-07:00",
+        "severity": "info",
+        "reason": "SPY 10m EMA10 crossed above EMA20"
+      },
+      "sigEMA10BearCross": {
+        "active": false,
+        "lastChanged": "2025-10-15T08:32:35-07:00",
+        "severity": "warn",
+        "reason": "SPY 10m EMA10 crossed below EMA20"
+      },
+      "sigAccelUp": {
+        "active": false,
+        "lastChanged": "2025-10-15T08:32:35-07:00",
+        "severity": "info",
+        "reason": "ΔBreadth +0.0, ΔMomentum +0.0"
+      },
+      "sigAccelDown": {
+        "active": false,
+        "lastChanged": "2025-10-15T08:32:35-07:00",
+        "severity": "warn",
+        "reason": "ΔBreadth +0.0, ΔMomentum +0.0"
+      },
+      "sigRiskOn": {
+        "active": false,
+        "lastChanged": "2025-10-15T08:32:35-07:00",
+        "severity": "info",
+        "reason": "Risk-On 29%"
+      },
+      "sigRiskOff": {
+        "active": true,
+        "lastChanged": "2025-10-15T08:32:35-07:00",
+        "severity": "warn",
+        "reason": "Risk-On 29%"
+      },
+      "sigSectorThrust": {
+        "active": true,
+        "lastChanged": "2025-10-15T08:32:35-07:00",
+        "severity": "info",
+        "reason": "11/11 rising"
+      },
+      "sigSectorWeak": {
+        "active": false,
+        "lastChanged": "2025-10-15T08:32:35-07:00",
+        "severity": "warn",
+        "reason": "11/11 rising"
+      }
+    }
+  }
+}
