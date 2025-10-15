@@ -2,10 +2,11 @@ name: Intraday DELTAS SANDBOX (5-minute)
 
 on:
   workflow_dispatch:
+
   schedule:
-    # 5-minute cadence during trading hours, with +2 min offset
-    - cron: "32-59/5 12 * * 1-5"   # 12:32, 12:37, 12:42, 12:47, 12:52, 12:57 UTC
-    - cron: "2-59/5 13-20 * * 1-5" # 13:02 .. 20:57 UTC
+  # Start a little before open; every 3 minutes
+  - cron: "*/3 12-20 * * 1-5"
+ 
   workflow_run:
     workflows: ["dashboard-10min"]
     types: [completed]
