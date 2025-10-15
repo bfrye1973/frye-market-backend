@@ -3,10 +3,11 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Pre-open warmup (1h before 13:30 UTC open): 12:30, 12:40, 12:50 UTC (Mon–Fri)
-    - cron: "30-59/10 12 * * 1-5"
-    # RTH: every 10 minutes 13:00–20:59 UTC (Mon–Fri)
-    - cron: "*/10 13-20 * * 1-5"
+  # Pre-open warmup (still useful): 12:30–12:59 UTC, every 7 min
+  - cron: "*/7 12 * * 1-5"
+  # RTH: every 7 minutes 13:00–20:59 UTC (Mon–Fri)
+  - cron: "*/7 13-20 * * 1-5"
+
 
 jobs:
   tenmin:
