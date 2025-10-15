@@ -3,11 +3,10 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-  # Pre-open warmup (still useful): 12:30–12:59 UTC, every 7 min
-  - cron: "*/7 12 * * 1-5"
-  # RTH: every 7 minutes 13:00–20:59 UTC (Mon–Fri)
-  - cron: "*/7 13-20 * * 1-5"
-
+    # Pre-open warmup (12:00–12:59 UTC) every 7 min, Mon–Fri
+    - cron: "*/7 12 * * 1-5"
+    # RTH (13:00–20:59 UTC) every 7 min, Mon–Fri
+    - cron: "*/7 13-20 * * 1-5"
 
 jobs:
   tenmin:
@@ -59,8 +58,82 @@ jobs:
           echo "[timing] build_outlook_source END   $(date -u +%T)"
           test -s data/outlook_source.json
 
+      # --------------------- Fallback: ensure SPY 10m bars exist ---------------------
+      # If the source JSON doesn't contain a SPY 10m bar array (>= 25 bars),
+      # fetch them from Polygon and inject under series.SPY_10m.bars
+      - name: Ensure SPY 10m bars present (fallback inject)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, sys, time, urllib.request
+          from datetime import datetime, timedelta, timezone
+
+          SRC = "data/outlook_source.json"
+          with open(SRC, "r", encoding="utf-8") as f:
+            js = json.load(f)
+
+          # probe for any plausible SPY 10m bars list (>=25)
+          def looks_bar(o):
+            if not isinstance(o, dict): return False
+            k = set(o.keys())
+            return (("t" in k or "time" in k) and
+                    (("o" in k or "open" in k) and ("h" in k or "high" in k) and
+                     ("l" in k or "low"  in k) and ("c" in k or "close" in k)))
+
+          def find_bars(obj):
+            stack=[obj]; best=None
+            while stack:
+              x=stack.pop()
+              if isinstance(x, dict):
+                sym=str(x.get("symbol","")).upper()
+                tf=str(x.get("timeframe","")).lower()
+                bars=x.get("bars")
+                if isinstance(bars,list) and len(bars)>=25:
+                  if sym=="SPY" and ("10" in tf or "10m" in tf or "10-min" in tf):
+                    return bars
+                  if best is None: best=bars
+                stack.extend(x.values())
+              elif isinstance(x,list):
+                stack.extend(x)
+            return best
+
+          bars = find_bars(js)
+          if bars and len(bars) >= 25:
+            print(f"[probe] found existing bars: {len(bars)}"); 
+          else:
+            print("[probe] no SPY 10m bars found; injecting from Polygon…")
+            key = os.environ.get("POLYGON_API_KEY")
+            if not key: 
+              print("No POLYGON_API_KEY; cannot inject.", file=sys.stderr)
+              sys.exit(1)
+
+            # fetch last ~3 days to be safe
+            end = datetime.utcnow().date()
+            start = end - timedelta(days=3)
+            url  = f"https://api.polygon.io/v2/aggs/ticker/SPY/range/10/minute/{start}/{end}?adjusted=true&sort=asc&limit=50000&apiKey={key}"
+            req  = urllib.request.Request(url, headers={"User-Agent":"inject-bars/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+              if resp.status != 200: 
+                raise SystemExit(f"polygon {resp.status}")
+              data = json.loads(resp.read().decode("utf-8"))
+
+            rs = data.get("results") or []
+            def mkbar(r):
+              return {"t": int(r["t"]), "o": float(r["o"]), "h": float(r["h"]),
+                      "l": float(r["l"]), "c": float(r["c"])}
+            bars = [mkbar(r) for r in rs][-120:]  # last ~120 10m bars
+
+            js.setdefault("series", {})
+            js["series"]["SPY_10m"] = {"symbol":"SPY","timeframe":"10m","bars": bars}
+            with open(SRC, "w", encoding="utf-8") as f:
+              json.dump(js, f, ensure_ascii=False, separators=(",",":"))
+            print(f"[inject] wrote SPY_10m bars: {len(bars)}")
+
+          PY
+
       # --------------------- SANITIZE: drop any in-flight 10m bar ---------------------
-      # Fix: EMA cross must use last TWO CLOSED bars only (prevents false 'bull' mid-bar).
       - name: Ensure CLOSED bars only (no in-flight)
         shell: bash
         run: |
@@ -87,31 +160,29 @@ jobs:
             t = int(t)
             return t//1000 if t > 2_000_000_000 else t
 
-          removed = [0]  # mutable counter
+          removed = [0]
 
-          def maybe_drop_last_bars(arr):
+          def maybe_drop_last(arr):
             if not isinstance(arr, list) or not arr: return
             last = arr[-1]
             if not looks_like_bar(last): return
             ts = bar_ts(last)
             if ts is None: return
-            # If last bar sits in the currently open bucket, drop it.
             if (ts // BUCKET) * BUCKET == current_bucket_start:
-              arr.pop()
-              removed[0] += 1
+              arr.pop(); removed[0]+=1
 
           def walk(x):
             if isinstance(x, dict):
-              for k, v in list(x.items()):
-                if k.lower() == 'bars' and isinstance(v, list):
-                  maybe_drop_last_bars(v)
+              for k,v in list(x.items()):
+                if k.lower()=="bars" and isinstance(v,list):
+                  maybe_drop_last(v)
                 else:
                   walk(v)
-            elif isinstance(x, list):
+            elif isinstance(x,list):
               for v in x: walk(v)
 
           walk(js)
-          p.write_text(json.dumps(js, separators=(',',':')))
+          p.write_text(json.dumps(js, separators=(",",":")))
           print(f"[sanitize] removed_inflight_arrays={removed[0]}")
           PY
 
