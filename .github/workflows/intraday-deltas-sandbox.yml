@@ -10,6 +10,20 @@ on:
   workflow_run:
     workflows: ["dashboard-10min"]
     types: [completed]
+- name: Gate – require fresh 10m live (< 2 min old)
+  run: |
+    set -e
+    LIVE_URL="https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min/data/outlook_intraday.json"
+    curl -sfL "${LIVE_URL}?t=$(date +%s)" -o /tmp/live10.json
+    TS=$(jq -r '.updated_at // .updated_at_utc // empty' /tmp/live10.json)
+    [ -z "$TS" ] && { echo "no timestamp on live10; skipping"; exit 0; }
+    AGE=$(( $(date -u +%s) - $(date -u -d "${TS/Z/+00:00}" +%s) ))
+    echo "live10 age: ${AGE}s"
+    # require <= 120s (2 min) to proceed
+    if [ "$AGE" -gt 120 ]; then
+      echo "live10 too old; skipping this 3m run"
+      exit 0
+    fi
 
 jobs:
   build-and-publish:
