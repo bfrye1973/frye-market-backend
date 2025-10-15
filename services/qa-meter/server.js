@@ -194,6 +194,57 @@ app.get("/qa/hourly", async (_req, res) => {
   }
 });
 
+// GET /qa/ema10  -> SPY 10m EMA10/EMA20 using Polygon (last 2 CLOSED bars)
+app.get("/qa/ema10", async (_req, res) => {
+  try {
+    const key = process.env.POLYGON_API_KEY || process.env.POLY_API_KEY;
+    if (!key) return res.status(400).type("text").send("Missing POLYGON_API_KEY");
+    const base = "https://api.polygon.io/v2/aggs/ticker/SPY/range/10/minute";
+    const end  = new Date().toISOString().slice(0,10);           // today (UTC)
+    const start= new Date(Date.now()-3*864e5).toISOString().slice(0,10); // 3 days
+    const url  = `${base}/${start}/${end}?adjusted=true&sort=asc&limit=50000&apiKey=${key}`;
+
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) return res.status(r.status).json({ ok:false, error:`polygon ${r.status}` });
+    const js = await r.json();
+    const rs = (js.results || []).map(o => ({ t:o.t, c:o.c }));
+
+    // last two CLOSED bars are the last two elements
+    if (rs.length < 25) return res.status(500).type("text").send("Not enough bars");
+    const closes = rs.map(b => b.c);
+
+    const ema = (arr, n) => {
+      const a = 2/(n+1); let e = arr[0];
+      for (let i=1;i<arr.length;i++) e = e + a*(arr[i]-e);
+      return e;
+    };
+
+    // prev = up to bar[-2], now = up to bar[-1] (both CLOSED)
+    const prevCloses = closes.slice(0, closes.length-1);
+    const ema10_prev = ema(prevCloses, 10);
+    const ema20_prev = ema(prevCloses, 20);
+    const ema10_now  = ema(closes, 10);
+    const ema20_now  = ema(closes, 20);
+
+    let cross = "none";
+    if (ema10_prev >= ema20_prev && ema10_now < ema20_now) cross = "bear";
+    if (ema10_prev <= ema20_prev && ema10_now > ema20_now) cross = "bull";
+
+    const distPct = ema10_now ? (100*(closes.at(-1)-ema10_now)/ema10_now) : 0;
+
+    res.type("text").send([
+      "QA EMA10/20 (SPY 10m from Polygon)",
+      `bars=${rs.length}`,
+      `prev: ema10=${ema10_prev.toFixed(2)}  ema20=${ema20_prev.toFixed(2)}`,
+      `now : ema10=${ema10_now.toFixed(2)}  ema20=${ema20_now.toFixed(2)}`,
+      `close=${closes.at(-1).toFixed(2)}  ema10_dist_pct=${distPct.toFixed(2)}%`,
+      `cross=${cross}`
+    ].join("\n"));
+  } catch (e) {
+    res.status(500).json({ ok:false, error:String(e?.message||e) });
+  }
+});
+
 /* -------------------------- 404 (keep last) ------------------------------ */
 app.use((req, res) =>
   res.status(404).json({ ok:false, error:"Not Found", path:req.path })
