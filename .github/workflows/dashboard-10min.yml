@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 30
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: true          # <<< ALWAYS prefer the newest run
+      cancel-in-progress: true
     permissions:
       contents: write
     env:
@@ -45,6 +45,7 @@ jobs:
         run: |
           echo "START_TS_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
           echo "START_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
+          echo "[start] UTC=$(date -u +%T)  local=$(date +%T)"
 
       # --------------------- FAST BUILD (no archives) ---------------------
       - name: Build outlook source (intraday10 FAST, step timeout 18m)
@@ -55,6 +56,68 @@ jobs:
           echo "[timing] build_outlook_source START $(date -u +%T)"
           timeout 1080s python -u scripts/build_outlook_source_from_polygon.py --mode intraday10
           echo "[timing] build_outlook_source END   $(date -u +%T)"
+          test -s data/outlook_source.json
+
+      # --------------------- SANITIZE: drop any in-flight 10m bar ---------------------
+      # Why: EMA cross must use CLOSED bars only (fixes false 'bull' reads mid-bar).
+      # This is schema-tolerant: it removes the last element of any "bars" array that
+      # looks like OHLCV bars if its timestamp aligns with the current (still-open) bucket.
+      - name: Ensure CLOSED bars only (no in-flight)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, sys, time, math, pathlib
+          p = pathlib.Path("data/outlook_source.json")
+          js = json.loads(p.read_text())
+          now = int(time.time())
+          # 10-minute bucket length
+          BUCKET = 600
+          # the *current* bucket start (still open until it closes)
+          current_bucket_start = (now // BUCKET) * BUCKET
+          removed = 0
+
+          def looks_like_bar(o):
+            if not isinstance(o, dict): return False
+            keys = set(o.keys())
+            # tolerate t or time, o/h/l/c or open/high/low/close
+            has_t = ("t" in keys) or ("time" in keys)
+            has_prices = any(k in keys for k in ("o","open")) and any(k in keys for k in ("h","high")) \
+                         and any(k in keys for k in ("l","low")) and any(k in keys for k in ("c","close"))
+            return has_t and has_prices
+
+          def bar_ts(o):
+            if "t" in o: return int(o["t"] // 1000) if o["t"] > 2_000_000_000 else int(o["t"])
+            if "time" in o: return int(o["time"] // 1000) if o["time"] > 2_000_000_000 else int(o["time"])
+            return None
+
+          def maybe_drop_last_bars(container):
+            nonlocal removed
+            if not isinstance(container, list) or len(container) < 1: return
+            last = container[-1]
+            if not looks_like_bar(last): return
+            ts = bar_ts(last)
+            if ts is None: return
+            # if the last bar belongs to the *current* (still-open) bucket, drop it
+            if (ts // BUCKET) * BUCKET == current_bucket_start:
+              container.pop()
+              removed += 1
+
+          # Walk all arrays named "bars" anywhere in the tree
+          def walk(x):
+            if isinstance(x, dict):
+              for k,v in list(x.items()):
+                if k.lower() == "bars" and isinstance(v, list):
+                  maybe_drop_last_bars(v)
+                else:
+                  walk(v)
+            elif isinstance(x, list):
+              for v in x: walk(v)
+
+          walk(js)
+          p.write_text(json.dumps(js, separators=(",",":")))
+          print(f"[sanitize] removed_inflight_arrays={removed}")
+          PY
 
       - name: Make dashboard payload (intraday)
         run: |
@@ -62,6 +125,7 @@ jobs:
           echo "[timing] make_dashboard START $(date -u +%T)"
           python -u scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_intraday.json
           echo "[timing] make_dashboard END   $(date -u +%T)"
+          jq -r '.metrics.ema_cross as $x | "ema_cross=" + ($x//"n/a") + "  ema10_dist_pct=" + ((.metrics.ema10_dist_pct//0|tonumber)|tostring) + "  updated_at=" + ((.updated_at//.updated_at_utc//"n/a")|tostring)' data/outlook_intraday.json || true
 
       - name: Write heartbeat_10min
         run: |
@@ -84,20 +148,15 @@ jobs:
           LIVE_RAW_URL: https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min/data/outlook_intraday.json
         run: |
           set -e
-          # Extract our build's updated_at (AZ) and utc (fallback)
           OUR_TS=$(jq -r '.updated_at // .updated_at_utc // .timestamp // empty' /tmp/live10/outlook_intraday.json || true)
           if [ -z "$OUR_TS" ]; then
             echo "Could not read OUR_TS from payload; continuing publish"
             exit 0
           fi
-          # Fetch current LIVE and read its updated_at
           curl -sfL "${LIVE_RAW_URL}?t=$(date +%s)" -o /tmp/live10/current_live.json || true
           CUR_TS=$(jq -r '.updated_at // .updated_at_utc // .timestamp // empty' /tmp/live10/current_live.json 2>/dev/null || true)
-
           echo "our payload updated_at:  $OUR_TS"
           echo "live branch updated_at: $CUR_TS"
-
-          # If live is newer or equal, skip publish (newer run already landed)
           if [ -n "$CUR_TS" ]; then
             A=$(date -u -d "$OUR_TS" +%s 2>/dev/null || date -u -d "${OUR_TS/Z/+00:00}" +%s 2>/dev/null || echo 0)
             B=$(date -u -d "$CUR_TS" +%s 2>/dev/null || date -u -d "${CUR_TS/Z/+00:00}" +%s 2>/dev/null || echo 0)
@@ -116,11 +175,9 @@ jobs:
           git config user.name  "actions-user"
           git config user.email "actions@github.com"
 
-          # Clean current worktree BEFORE switching branches
           git reset --hard
           git clean -fdx
 
-          # Switch/create LIVE branch
           git fetch origin "${LIVE_BRANCH}" || true
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
@@ -128,10 +185,8 @@ jobs:
             git checkout --orphan "${LIVE_BRANCH}"
           fi
 
-          # Ensure CLEAN tree ON LIVE branch (remove everything except .git)
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 
-          # Copy fresh artifacts from /tmp and commit
           mkdir -p data
           cp -f /tmp/live10/* data/
 
