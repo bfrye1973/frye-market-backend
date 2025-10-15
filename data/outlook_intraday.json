@@ -1,12 +1,12 @@
 {
-  "updated_at": "2025-10-15T16:20:46-07:00",
-  "updated_at_utc": "2025-10-15T23:20:47Z",
-  "timestamp": "2025-10-15T23:20:46+00:00",
+  "updated_at": "2025-10-15T16:42:04-07:00",
+  "updated_at_utc": "2025-10-15T23:42:05Z",
+  "timestamp": "2025-10-15T23:42:04+00:00",
   "metrics": {
     "breadth_pct": 0.0,
     "momentum_pct": 0.0,
     "ema_cross": "none",
-    "ema10_dist_pct": -0.03,
+    "ema10_dist_pct": -0.04,
     "ema_sign": 1
   },
   "intraday": {
@@ -18,9 +18,9 @@
     },
     "overall10m": {
       "state": "neutral",
-      "score": -33,
+      "score": -32,
       "components": {
-        "ema10": 2,
+        "ema10": 3,
         "momentum": -25,
         "breadth": -10,
         "squeeze": 0,
@@ -44,5 +44,5 @@
     },
     "sectors": {}
   },
-  "deltasUpdatedAt": "2025-10-15T16:40:37-07:00"
+  "deltasUpdatedAt": "2025-10-15T16:50:50-07:00"
 }
