@@ -3,7 +3,7 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Top of hour, RTH-leaning cadence (adjust as desired)
+    # Run shortly after the top of each hour (adjust if you want)
     - cron: "5 * * * *"
 
 env:
@@ -40,26 +40,29 @@ jobs:
           URL="https://api.polygon.io/v2/aggs/ticker/SPY/prev?adjusted=true&apiKey=${POLYGON_API_KEY}"
           code=$(curl -s -o /tmp/probe.json -w "%{http_code}" "$URL")
           echo "HTTP=$code"
-          tail -c +1 /tmp/probe.json | head -c 400 || true
+          head -c 400 /tmp/probe.json || true
           [ "$code" = "200" ] || (echo "Polygon probe failed" && exit 2)
 
       - name: Prepare work dir
         run: |
           mkdir -p data
-          mkdir -p /tmp/hourly
-          echo "Starting hourly build at $(date)"
+          echo "Starting hourly build at $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
+      # >>> BUILD SOURCE (matches the new R10 script) <<<
       - name: Build outlook source (hourly)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -e
           python scripts/build_outlook_source_from_polygon.py \
-            --symbols "SPY,QQQ,XLF,XLK,XLI,XLE,XLY,XLP,XLV,XLB,XLU,XLRE" \
-            --lookback-days 3 \
-            --dest data/outlook_source.json \
-            --log /tmp/hourly_build.log
+            --mode hourly \
+            --out data/outlook_source.json \
+            --sectors-dir data/sectors \
+            --workers 16 \
+            --snap-batch 250 \
+            --snap-sleep 0.05
 
+      # >>> SHAPE INTO FRONTEND PAYLOAD (same schema UI expects) <<<
       - name: Make dashboard payload (hourly)
         run: |
           set -e
@@ -75,13 +78,14 @@ jobs:
           echo "----- HOURLY LOG TAIL -----"
           tail -n 200 /tmp/hourly_build.log || true
 
+      # >>> PUBLISH LIVE <<<
       - name: Publish LIVE (data-live-hourly)
         run: |
           set -e
           git config user.name "gh-hourly-bot"
           git config user.email "actions@users.noreply.github.com"
 
-          # ensure branch exists locally
+          # ensure branch exists
           if git ls-remote --exit-code --heads origin data-live-hourly >/dev/null 2>&1; then
             git fetch origin data-live-hourly:data-live-hourly
           else
@@ -91,7 +95,7 @@ jobs:
             git push origin data-live-hourly
           fi
 
-          # switch and replace data/*
+          # switch, copy artifacts, commit
           git checkout data-live-hourly
           mkdir -p data
           cp -f data/outlook_hourly.json data/
@@ -100,10 +104,12 @@ jobs:
           git commit -m "hourly: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "No changes"
           git push origin data-live-hourly
 
+      # >>> PUBLISH ARCHIVE SNAPSHOT <<<
       - name: Publish ARCHIVE (data-archive-hourly)
         run: |
           set -e
           ts=$(date -u +'%Y%m%dT%H%M%SZ')
+
           if git ls-remote --exit-code --heads origin data-archive-hourly >/dev/null 2>&1; then
             git fetch origin data-archive-hourly:data-archive-hourly
           else
@@ -112,6 +118,7 @@ jobs:
             git commit --allow-empty -m "init data-archive-hourly"
             git push origin data-archive-hourly
           fi
+
           git checkout data-archive-hourly
           mkdir -p "archive/${ts}"
           cp -f data/outlook_source.json "archive/${ts}/outlook_source.json"
