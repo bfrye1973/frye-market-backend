@@ -1,7 +1,7 @@
 {
-  "updated_at": "2025-10-15T22:10:44-07:00",
-  "updated_at_utc": "2025-10-16T05:10:45Z",
-  "timestamp": "2025-10-16T05:10:44+00:00",
+  "updated_at": "2025-10-15T22:32:53-07:00",
+  "updated_at_utc": "2025-10-16T05:32:53Z",
+  "timestamp": "2025-10-16T05:32:53+00:00",
   "metrics": {
     "breadth_pct": 0.0,
     "momentum_pct": 0.0,
@@ -44,5 +44,5 @@
     },
     "sectors": {}
   },
-  "deltasUpdatedAt": "2025-10-15T22:30:56-07:00"
+  "deltasUpdatedAt": "2025-10-15T22:43:41-07:00"
 }
