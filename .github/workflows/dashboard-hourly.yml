@@ -44,6 +44,54 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq || true
 
+      # ---------------------- Verify Polygon Key ----------------------
+      - name: Verify POLYGON_API_KEY is present
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          echo "::group::Verify POLYGON_API_KEY"
+          if [ -z "${POLYGON_API_KEY:-}" ]; then
+            echo "[error] POLYGON_API_KEY is empty or not set in GitHub Actions secrets."
+            echo "Go to: GitHub → repo Settings → Secrets and variables → Actions → New secret → name=POLYGON_API_KEY, value=<your key>"
+            exit 1
+          fi
+          # Mask the key and show its length only
+          echo "::add-mask::${POLYGON_API_KEY}"
+          echo "[ok] POLYGON_API_KEY length: ${#POLYGON_API_KEY}"
+          echo "::endgroup::"
+
+      # ---------------------- Probe Polygon (fast fail) ----------------------
+      - name: Probe Polygon API (auth + plan)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          echo "::group::Polygon probe"
+          PROBE_URL="https://api.polygon.io/v2/aggs/ticker/SPY/prev?adjusted=true&apiKey=${POLYGON_API_KEY}"
+          HTTP=$(curl -sS -w "%{http_code}" -o /tmp/probe.json "${PROBE_URL}" || true)
+          echo "[probe] HTTP=${HTTP}"
+          echo "[probe] body:"
+          tail -c 800 /tmp/probe.json || true
+          echo "::endgroup::"
+
+          case "${HTTP}" in
+            200) echo "[ok] Polygon probe passed (200)";;
+            401|403)
+              echo "[error] Polygon authentication failed (HTTP ${HTTP}). Check that POLYGON_API_KEY is correct and active."
+              exit 1
+              ;;
+            429)
+              echo "[warn] Rate limited (429). The build may still work with retries, but consider reducing hourly lookback/symbols."
+              ;;
+            5*)
+              echo "[warn] Polygon server error (HTTP ${HTTP}). Will continue with retry safeguards."
+              ;;
+            *)
+              echo "[info] Unexpected HTTP ${HTTP} — continuing."
+              ;;
+          esac
+
       # ---------------------- Build (Hourly) ----------------------
       # Full logging + 2-try retry to expose the real error cause (no hard timeout).
       - name: Build outlook source (hourly)
