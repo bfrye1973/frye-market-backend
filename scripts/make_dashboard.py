@@ -4,6 +4,7 @@ Ferrari Dashboard — make_dashboard.py (10m + Engine Light compatible)
 - Computes EMA10/EMA20 crossover (SPY) from Polygon
 - Blends breadth/momentum/squeeze/liquidity/riskOn from intraday or hourly
 - Feeds both the new 10m "Overall" block and old metric fields
+- (R11 add-back) Publishes engineLights.signals (R11 core family)
 """
 
 import argparse, json, math, os, sys, time, urllib.request
@@ -80,6 +81,14 @@ def summarize_sector_cards(cards):
 def lin_points(percent, weight):
     return int(round(weight * ((float(percent or 0.0) - 50.0) / 50.0)))
 
+# --- ADD: small file reader so we can compute deltas vs previous run ---
+def jread(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
 # ------------------------- Core Builder -------------------------
 def build_intraday(source_js=None, hourly_url=HOURLY_URL_DEFAULT):
     out = {}
@@ -118,10 +127,13 @@ def build_intraday(source_js=None, hourly_url=HOURLY_URL_DEFAULT):
     # Cross (bull/bear/none)
     if e10_prev < e20_prev and e10_now > e20_now:
         ema_cross = "bull"
+        just_crossed = True
     elif e10_prev > e20_prev and e10_now < e20_now:
         ema_cross = "bear"
+        just_crossed = True
     else:
         ema_cross = "none"
+        just_crossed = False
 
     ema_sign = 1 if e10_now > e20_now else (-1 if e10_now < e20_now else 0)
     ema10_dist_pct = 0.0 if e10_now == 0 else 100.0 * (px_now - e10_now) / e10_now
@@ -186,7 +198,9 @@ def build_intraday(source_js=None, hourly_url=HOURLY_URL_DEFAULT):
     intraday["overall10m"] = {
         "state": overall_state,
         "score": int(overall_score),
-        "components": components
+        "components": components,
+        # convenience for downstream rules
+        "just_crossed": just_crossed
     }
 
     out = {
@@ -198,6 +212,66 @@ def build_intraday(source_js=None, hourly_url=HOURLY_URL_DEFAULT):
         "sectorCards": sector_cards
     }
     return out
+
+# --- ADD: Build R11 Engine Lights from current + previous snapshot ---
+def build_engine_lights_signals(curr: dict, prev: dict | None, ts_local: str) -> dict:
+    m  = curr.get("metrics", {})
+    it = curr.get("intraday", {})
+    ov = it.get("overall10m", {}) if isinstance(it, dict) else {}
+
+    # deltas vs last published file (for accel)
+    pm = (prev or {}).get("metrics", {}) if isinstance(prev, dict) else {}
+    db = (m.get("breadth_pct")  or 0) - (pm.get("breadth_pct")  or 0)
+    dm = (m.get("momentum_pct") or 0) - (pm.get("momentum_pct") or 0)
+    accel = (db or 0) + (dm or 0)
+
+    risk_fast   = float(it.get("riskOn10m", {}).get("riskOnPct", 50.0))
+    rising_fast = float(it.get("sectorDirection10m", {}).get("risingPct", 50.0))
+
+    # thresholds (with natural hysteresis coming from 10m cadence)
+    ACCEL_INFO = 4.0   # confirmed accel up/down
+    RISK_INFO  = 58.0  # risk on
+    RISK_WARN  = 42.0  # risk off
+    THRUST_ON  = 58.0
+    THRUST_OFF = 42.0
+
+    # core lights
+    sig = {}
+
+    # Overall bias
+    state = str(ov.get("state") or "neutral").lower()
+    score = int(ov.get("score") or 0)
+    if state == "bull" and score >= 10:
+        sig["sigOverallBull"] = {"active": True,  "severity":"info",   "reason":f"state=bull score={score}", "lastChanged": ts_local}
+        sig["sigOverallBear"] = {"active": False, "severity":"info",   "reason":"", "lastChanged": None}
+    elif state == "bear" and score <= -10:
+        sig["sigOverallBull"] = {"active": False, "severity":"info",   "reason":"", "lastChanged": None}
+        sig["sigOverallBear"] = {"active": True,  "severity":"warn",   "reason":f"state=bear score={score}", "lastChanged": ts_local}
+    else:
+        sig["sigOverallBull"] = {"active": False, "severity":"info", "reason":"", "lastChanged": None}
+        sig["sigOverallBear"] = {"active": False, "severity":"info", "reason":"", "lastChanged": None}
+
+    # EMA10 crosses (use just_crossed if provided; fall back to ema_cross)
+    just_crossed = bool(ov.get("just_crossed"))
+    ema_cross = str(m.get("ema_cross") or "none")
+    ema_bull = just_crossed and ema_cross == "bull"
+    ema_bear = just_crossed and ema_cross == "bear"
+    sig["sigEMA10BullCross"] = {"active": bool(ema_bull), "severity":"info",  "reason": f"ema_cross={ema_cross}", "lastChanged": ts_local if ema_bull else None}
+    sig["sigEMA10BearCross"] = {"active": bool(ema_bear), "severity":"warn",  "reason": f"ema_cross={ema_cross}", "lastChanged": ts_local if ema_bear else None}
+
+    # Accel up/down from deltas
+    sig["sigAccelUp"]   = {"active": accel >=  ACCEL_INFO, "severity":"info",  "reason": f"Δb+Δm={accel:.1f}", "lastChanged": ts_local if accel >=  ACCEL_INFO else None}
+    sig["sigAccelDown"] = {"active": accel <= -ACCEL_INFO, "severity":"warn",  "reason": f"Δb+Δm={accel:.1f}", "lastChanged": ts_local if accel <= -ACCEL_INFO else None}
+
+    # Risk-On / Risk-Off fast
+    sig["sigRiskOn"]  = {"active": risk_fast >= RISK_INFO, "severity":"info",  "reason": f"riskOn={risk_fast:.1f}", "lastChanged": ts_local if risk_fast >= RISK_INFO else None}
+    sig["sigRiskOff"] = {"active": risk_fast <= RISK_WARN, "severity":"warn",  "reason": f"riskOn={risk_fast:.1f}", "lastChanged": ts_local if risk_fast <= RISK_WARN else None}
+
+    # Sector thrust / weak
+    sig["sigSectorThrust"] = {"active": rising_fast >= THRUST_ON,  "severity":"info",  "reason": f"rising%={rising_fast:.1f}", "lastChanged": ts_local if rising_fast >= THRUST_ON else None}
+    sig["sigSectorWeak"]   = {"active": rising_fast <= THRUST_OFF, "severity":"warn",  "reason": f"rising%={rising_fast:.1f}", "lastChanged": ts_local if rising_fast <= THRUST_OFF else None}
+
+    return sig
 
 # ------------------------------ CLI -------------------------------
 def main():
@@ -211,6 +285,9 @@ def main():
     if (args.mode or "intraday").lower() != "intraday":
         print("[warn] only 'intraday' supported; continuing", file=sys.stderr)
 
+    # --- read previous output ONCE so we can compute deltas for accel (safe if file missing) ---
+    prev_out = jread(args.out)
+
     source_js = None
     if args.source and os.path.isfile(args.source):
         try:
@@ -220,6 +297,20 @@ def main():
             source_js = None
 
     out = build_intraday(source_js=source_js, hourly_url=args.hourly_url)
+
+    # --- ADD: publish Engine Lights (R11 core) ---
+    ts_local = out.get("updated_at") or datetime.now().astimezone().isoformat(timespec="seconds")
+    try:
+        signals = build_engine_lights_signals(curr=out, prev=prev_out, ts_local=ts_local)
+        out["engineLights"] = {
+            "updatedAt": ts_local,
+            "mode": "intraday",
+            "live": True,
+            "signals": signals
+        }
+    except Exception as e:
+        print("[warn] engineLights build failed:", e, file=sys.stderr)
+
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",",":"))
