@@ -3,214 +3,119 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Top of each hour during US market hours (13:00–20:00 UTC), Mon–Fri
-    - cron: "0 13-20 * * 1-5"
+    # Top of hour, RTH-leaning cadence (adjust as desired)
+    - cron: "5 * * * *"
 
-concurrency:
-  group: data-writes-hourly
-  cancel-in-progress: true
+env:
+  TZ: America/Chicago
+  PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
-  hourly:
-    name: Build & Publish (Hourly)
+  build-hourly:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: write
-    env:
-      TZ: America/Phoenix
-      LIVE_BRANCH: data-live-hourly
-      ARCHIVE_BRANCH: data-archive-hourly
-
-      # Expose ALL likely key names from Secrets and Variables (Actions):
-      # (We will resolve the first non-empty at runtime.)
-      GH_POLYGON_API_KEY:         ${{ secrets.POLYGON_API_KEY }}
-      GH_REACT_APP_POLYGON_KEY:   ${{ secrets.REACT_APP_POLYGON_KEY }}
-      GH_POLY_KEY:                ${{ secrets.POLY_KEY }}
-      VAR_POLYGON_API_KEY:        ${{ vars.POLYGON_API_KEY }}
-      VAR_REACT_APP_POLYGON_KEY:  ${{ vars.REACT_APP_POLYGON_KEY }}
+    timeout-minutes: 12
 
     steps:
-      # ---------------------- Repo Setup ----------------------
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Sync refs
-        run: |
-          git fetch origin +refs/heads/*:refs/remotes/origin/*
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install jq || true
+          pip install requests python-dateutil
 
-      # ---------------------- Resolve Polygon Key ----------------------
-      - name: Resolve Polygon API Key (handle React-style names)
-        id: key
+      - name: Probe Polygon
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
-          set -euo pipefail
-          # Try all candidates in order and pick the first non-empty
-          KEY="${GH_POLYGON_API_KEY:-}"
-          [ -z "$KEY" ] && KEY="${GH_REACT_APP_POLYGON_KEY:-}"
-          [ -z "$KEY" ] && KEY="${GH_POLY_KEY:-}"
-          [ -z "$KEY" ] && KEY="${VAR_POLYGON_API_KEY:-}"
-          [ -z "$KEY" ] && KEY="${VAR_REACT_APP_POLYGON_KEY:-}"
+          set -e
+          test -n "$POLYGON_API_KEY" || (echo "Missing POLYGON_API_KEY secret" && exit 1)
+          URL="https://api.polygon.io/v2/aggs/ticker/SPY/prev?adjusted=true&apiKey=${POLYGON_API_KEY}"
+          code=$(curl -s -o /tmp/probe.json -w "%{http_code}" "$URL")
+          echo "HTTP=$code"
+          tail -c +1 /tmp/probe.json | head -c 400 || true
+          [ "$code" = "200" ] || (echo "Polygon probe failed" && exit 2)
 
-          if [ -z "$KEY" ]; then
-            echo "::error::No Polygon key found. Set one of: POLYGON_API_KEY, REACT_APP_POLYGON_KEY, or POLY_KEY in Actions secrets/vars."
-            exit 1
-          fi
-
-          # Mask it and export for later steps
-          echo "::add-mask::$KEY"
-          echo "POLY_RESOLVED=$KEY" >> "$GITHUB_ENV"
-
-          # Show which name hit (length only)
-          echo "Resolved Polygon key length: ${#KEY}"
-
-      # ---------------------- Probe Polygon (fast, explicit) ----------------------
-      - name: Probe Polygon API (auth/plan check)
+      - name: Prepare work dir
         run: |
-          set -euo pipefail
-          PROBE_URL="https://api.polygon.io/v2/aggs/ticker/SPY/prev?adjusted=true&apiKey=${POLY_RESOLVED}"
-          HTTP=$(curl -sS -w "%{http_code}" -o /tmp/probe.json "${PROBE_URL}" || true)
-          echo "[probe] HTTP=${HTTP}"
-          echo "[probe] body (tail):"
-          tail -c 800 /tmp/probe.json || true
+          mkdir -p data
+          mkdir -p /tmp/hourly
+          echo "Starting hourly build at $(date)"
 
-          if [ "$HTTP" = "401" ] || [ "$HTTP" = "403" ]; then
-            echo "::error::Polygon authentication failed (HTTP ${HTTP}). Your React-app key name is fine, but the VALUE is not authorized."
-            exit 1
-          fi
-
-      # ---------------------- Build (Hourly) ----------------------
-      # Full logging + 2-try retry to expose real error, using the resolved key.
       - name: Build outlook source (hourly)
         env:
-          POLYGON_API_KEY: ${{ env.POLY_RESOLVED }}
-          PYTHONUNBUFFERED: "1"
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
-          set -euo pipefail
-          echo "[timing] build_outlook_source START $(date -u +%T)"
-          tries=0
-          while : ; do
-            set +e
-            python -u scripts/build_outlook_source_from_polygon.py --mode hourly 2>&1 | tee /tmp/hourly_build.log
-            rc=${PIPESTATUS[0]}
-            set -e
-            if [ "$rc" -eq 0 ]; then
-              echo "[timing] build_outlook_source END   $(date -u +%T)"
-              break
-            fi
+          set -e
+          python scripts/build_outlook_source_from_polygon.py \
+            --symbols "SPY,QQQ,XLF,XLK,XLI,XLE,XLY,XLP,XLV,XLB,XLU,XLRE" \
+            --lookback-days 3 \
+            --dest data/outlook_source.json \
+            --log /tmp/hourly_build.log
 
-            tries=$((tries+1))
-            echo "[warn] build_outlook_source failed rc=$rc (try $tries/2)"
-            echo "----- LOG (tail) -----"
-            tail -n 200 /tmp/hourly_build.log || true
-            echo "----------------------"
-
-            if [ "$tries" -ge 2 ]; then
-              echo "[error] giving up after $tries tries"
-              exit "$rc"
-            fi
-
-            sleep 30
-          done
-
-          test -s data/outlook_source.json
-          echo "[info] outlook_source.json size: $(wc -c < data/outlook_source.json) bytes"
-
-      # ---------------------- Make Dashboard Payload ----------------------
       - name: Make dashboard payload (hourly)
         run: |
-          set -euo pipefail
-          echo "[timing] make_dashboard START $(date -u +%T)"
-          python -u scripts/make_dashboard.py --mode hourly --source data/outlook_source.json --out data/outlook_hourly.json
-          echo "[timing] make_dashboard END   $(date -u +%T)"
-          test -s data/outlook_hourly.json
-          jq -r '.metrics.ema_cross as $x
-            | "ema_cross=" + ($x//"n/a")
-            + "  ema10_dist_pct=" + ((.metrics.ema10_dist_pct//0|tonumber)|tostring)
-            + "  updated_at=" + ((.updated_at//.updated_at_utc//"n/a")|tostring)' \
-            data/outlook_hourly.json || true
+          set -e
+          python scripts/make_dashboard_hourly.py \
+            --source data/outlook_source.json \
+            --dest data/outlook_hourly.json \
+            --heartbeat data/heartbeat_1h.txt \
+            --log /tmp/hourly_build.log
 
-      # ---------------------- Heartbeat ----------------------
-      - name: Write heartbeat_hourly
+      - name: LOG (tail)
+        if: always()
+        run: |
+          echo "----- HOURLY LOG TAIL -----"
+          tail -n 200 /tmp/hourly_build.log || true
+
+      - name: Publish LIVE (data-live-hourly)
         run: |
           set -e
-          mkdir -p data
-          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_hourly.txt
+          git config user.name "gh-hourly-bot"
+          git config user.email "actions@users.noreply.github.com"
 
-      # ---------------------- Stage Files ----------------------
-      - name: Stage files for publish
-        id: prep
-        run: |
-          set -e
-          RAW_TS=$(jq -r '.updated_at // .ts // .updated_at_utc' data/outlook_hourly.json)
-          TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/[: ]/-/g')
-          echo "RAW_TS=$RAW_TS"
-          echo "TS_SAFE=$TS_SAFE"
-
-          mkdir -p /tmp/live /tmp/archive/source /tmp/archive/dashboard
-
-          # LIVE "latest"
-          cp -f data/outlook_hourly.json /tmp/live/
-          cp -f data/outlook_source.json  /tmp/live/
-          cp -f data/heartbeat_hourly.txt /tmp/live/
-
-          # ARCHIVE snapshots
-          cp -f data/outlook_source.json  "/tmp/archive/source/outlook_source_${TS_SAFE}.json"
-          cp -f data/outlook_hourly.json  "/tmp/archive/dashboard/outlook_hourly_${TS_SAFE}.json"
-
-          echo "ts=${TS_SAFE}" >> "$GITHUB_OUTPUT"
-
-      # ---------------------- Publish LIVE ----------------------
-      - name: Push LIVE branch (hourly)
-        run: |
-          set -e
-          git config user.name  "actions-user"
-          git config user.email "actions@github.com"
-
-          if git show-ref --verify --quiet refs/heads/"$LIVE_BRANCH"; then
-            git checkout "$LIVE_BRANCH"
+          # ensure branch exists locally
+          if git ls-remote --exit-code --heads origin data-live-hourly >/dev/null 2>&1; then
+            git fetch origin data-live-hourly:data-live-hourly
           else
-            git checkout --orphan "$LIVE_BRANCH"
+            git checkout --orphan data-live-hourly
+            git rm -r --cached . || true
+            git commit --allow-empty -m "init data-live-hourly"
+            git push origin data-live-hourly
           fi
 
-          git rm -rf . || true
+          # switch and replace data/*
+          git checkout data-live-hourly
           mkdir -p data
-          cp -f /tmp/live/* data/
-          git add data
-          git commit -m "HOURLY live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit (live)"
-          git push origin +HEAD:"$LIVE_BRANCH"
+          cp -f data/outlook_hourly.json data/
+          cp -f data/heartbeat_1h.txt data/
+          git add data/outlook_hourly.json data/heartbeat_1h.txt
+          git commit -m "hourly: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "No changes"
+          git push origin data-live-hourly
 
-      # ---------------------- Publish ARCHIVE ----------------------
-      - name: Push ARCHIVE branch (append)
+      - name: Publish ARCHIVE (data-archive-hourly)
         run: |
           set -e
-          git config user.name  "actions-user"
-          git config user.email "actions@github.com"
-
-          git fetch origin "$ARCHIVE_BRANCH" || true
-          if git show-ref --verify --quiet refs/heads/"$ARCHIVE_BRANCH"; then
-            git checkout "$ARCHIVE_BRANCH"
+          ts=$(date -u +'%Y%m%dT%H%M%SZ')
+          if git ls-remote --exit-code --heads origin data-archive-hourly >/dev/null 2>&1; then
+            git fetch origin data-archive-hourly:data-archive-hourly
           else
-            git checkout -b "$ARCHIVE_BRANCH" "origin/$ARCHIVE_BRANCH" 2>/dev/null || git checkout --orphan "$ARCHIVE_BRANCH"
+            git checkout --orphan data-archive-hourly
+            git rm -r --cached . || true
+            git commit --allow-empty -m "init data-archive-hourly"
+            git push origin data-archive-hourly
           fi
-
-          mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
-          cp -f /tmp/archive/source/*    data/archive/hourly/source/    || true
-          cp -f /tmp/archive/dashboard/* data/archive/hourly/dashboard/ || true
-          git add data/archive/hourly || true
-          git commit -m "HOURLY archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit (archive)"
-
-          git pull --rebase origin "$ARCHIVE_BRANCH" || true
-          git push origin HEAD:"$ARCHIVE_BRANCH"
+          git checkout data-archive-hourly
+          mkdir -p "archive/${ts}"
+          cp -f data/outlook_source.json "archive/${ts}/outlook_source.json"
+          cp -f data/outlook_hourly.json "archive/${ts}/outlook_hourly.json"
+          git add "archive/${ts}"
+          git commit -m "archive hourly ${ts}" || echo "No changes"
+          git push origin data-archive-hourly
