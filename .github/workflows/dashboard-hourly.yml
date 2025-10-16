@@ -3,7 +3,7 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Run top of every hour during US market hours (13:00–20:00 UTC, Mon–Fri)
+    # Top of each hour during US market hours (13:00–20:00 UTC), Mon–Fri
     - cron: "0 13-20 * * 1-5"
 
 concurrency:
@@ -12,8 +12,9 @@ concurrency:
 
 jobs:
   hourly:
+    name: Build & Publish (Hourly)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60            # give the job enough wall-clock time
     permissions:
       contents: write
     env:
@@ -23,7 +24,8 @@ jobs:
 
     steps:
       # ---------------------- Repo Setup ----------------------
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -31,7 +33,8 @@ jobs:
         run: |
           git fetch origin +refs/heads/*:refs/remotes/origin/*
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -42,16 +45,27 @@ jobs:
           pip install jq
 
       # ---------------------- Build (Hourly) ----------------------
+      # Removed the hard timeout that caused code 124; added a simple 2-try retry for resilience
       - name: Build outlook source (hourly)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           echo "[timing] build_outlook_source START $(date -u +%T)"
-          # Limit runtime to 15 minutes (900s)
-          timeout 900s python -u scripts/build_outlook_source_from_polygon.py --mode hourly
-          echo "[timing] build_outlook_source END $(date -u +%T)"
+          tries=0
+          until python -u scripts/build_outlook_source_from_polygon.py --mode hourly ; do
+            rc=$?
+            tries=$((tries+1))
+            echo "[warn] build_outlook_source failed with rc=$rc (try $tries of 2)"
+            if [ "$tries" -ge 2 ]; then
+              echo "[error] giving up after $tries tries"
+              exit $rc
+            fi
+            sleep 20
+          done
+          echo "[timing] build_outlook_source END   $(date -u +%T)"
           test -s data/outlook_source.json
+          echo "[info] outlook_source.json size: $(wc -c < data/outlook_source.json) bytes"
 
       # ---------------------- Make Dashboard Payload ----------------------
       - name: Make dashboard payload (hourly)
@@ -59,10 +73,15 @@ jobs:
           set -euo pipefail
           echo "[timing] make_dashboard START $(date -u +%T)"
           python -u scripts/make_dashboard.py --mode hourly --source data/outlook_source.json --out data/outlook_hourly.json
-          echo "[timing] make_dashboard END $(date -u +%T)"
-          jq -r '.metrics.ema_cross as $x | "ema_cross=" + ($x//"n/a") + "  ema10_dist_pct=" + ((.metrics.ema10_dist_pct//0|tonumber)|tostring) + "  updated_at=" + ((.updated_at//.updated_at_utc//"n/a")|tostring)' data/outlook_hourly.json || true
+          echo "[timing] make_dashboard END   $(date -u +%T)"
+          test -s data/outlook_hourly.json
+          jq -r '.metrics.ema_cross as $x
+            | "ema_cross=" + ($x//"n/a")
+            + "  ema10_dist_pct=" + ((.metrics.ema10_dist_pct//0|tonumber)|tostring)
+            + "  updated_at=" + ((.updated_at//.updated_at_utc//"n/a")|tostring)' \
+            data/outlook_hourly.json || true
 
-      # ---------------------- Write Heartbeat ----------------------
+      # ---------------------- Heartbeat ----------------------
       - name: Write heartbeat_hourly
         run: |
           set -e
@@ -74,25 +93,25 @@ jobs:
         id: prep
         run: |
           set -e
-          RAW_TS=$(jq -r '.updated_at // .ts' data/outlook_hourly.json)
-          TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/:/-/g')
+          RAW_TS=$(jq -r '.updated_at // .ts // .updated_at_utc' data/outlook_hourly.json)
+          TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/[: ]/-/g')
           echo "RAW_TS=$RAW_TS"
           echo "TS_SAFE=$TS_SAFE"
 
           mkdir -p /tmp/live /tmp/archive/source /tmp/archive/dashboard
 
           # LIVE "latest"
-          cp data/outlook_hourly.json /tmp/live/
-          cp data/outlook_source.json  /tmp/live/
-          cp data/heartbeat_hourly.txt /tmp/live/
+          cp -f data/outlook_hourly.json /tmp/live/
+          cp -f data/outlook_source.json  /tmp/live/
+          cp -f data/heartbeat_hourly.txt /tmp/live/
 
           # ARCHIVE snapshots
-          cp data/outlook_source.json "/tmp/archive/source/outlook_source_${TS_SAFE}.json"
-          cp data/outlook_hourly.json "/tmp/archive/dashboard/outlook_hourly_${TS_SAFE}.json"
+          cp -f data/outlook_source.json  "/tmp/archive/source/outlook_source_${TS_SAFE}.json"
+          cp -f data/outlook_hourly.json  "/tmp/archive/dashboard/outlook_hourly_${TS_SAFE}.json"
 
           echo "ts=${TS_SAFE}" >> "$GITHUB_OUTPUT"
 
-      # ---------------------- Push LIVE branch ----------------------
+      # ---------------------- Publish LIVE ----------------------
       - name: Push LIVE branch (hourly)
         run: |
           set -e
@@ -107,12 +126,12 @@ jobs:
 
           git rm -rf . || true
           mkdir -p data
-          cp /tmp/live/* data/
+          cp -f /tmp/live/* data/
           git add data
           git commit -m "HOURLY live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit (live)"
           git push origin +HEAD:"$LIVE_BRANCH"
 
-      # ---------------------- Push ARCHIVE branch ----------------------
+      # ---------------------- Publish ARCHIVE ----------------------
       - name: Push ARCHIVE branch (append)
         run: |
           set -e
@@ -127,8 +146,8 @@ jobs:
           fi
 
           mkdir -p data/archive/hourly/source data/archive/hourly/dashboard
-          cp /tmp/archive/source/*    data/archive/hourly/source/    || true
-          cp /tmp/archive/dashboard/* data/archive/hourly/dashboard/ || true
+          cp -f /tmp/archive/source/*    data/archive/hourly/source/    || true
+          cp -f /tmp/archive/dashboard/* data/archive/hourly/dashboard/ || true
           git add data/archive/hourly || true
           git commit -m "HOURLY archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit (archive)"
 
