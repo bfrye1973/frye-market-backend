@@ -1,20 +1,20 @@
-name: Dashboard 10-Minute (Production)
+name: dashboard-10min
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
-    # RTH (13:00–20:59 UTC) every 10 min, Mon–Fri
-    - cron: "*/10 13-20 * * 1-5"
-    # Pre-open warm-ups at 12:30, 12:40, 12:50 UTC
-    - cron: "30,40,50 12 * * 1-5"
+    # Pre-open warmup (12:00–12:59 UTC) every 7 min, Mon–Fri
+    - cron: "*/7 12 * * 1-5"
+    # RTH (13:00–20:59 UTC) every 7 min, Mon–Fri
+    - cron: "*/7 13-20 * * 1-5"
 
 jobs:
-  build-10m:
+  tenmin:
     name: Build & Publish Intraday Dashboard
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
-      group: dashboard-10m
+      group: dashboard-10min
       cancel-in-progress: true
     permissions:
       contents: write
@@ -24,6 +24,7 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
+      # --------------------- Repo & Python setup ---------------------
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
@@ -34,45 +35,76 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install dependencies (if any)
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      # --------------------- Build payload ---------------------
       - name: Build dashboard payload (10-minute)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
-          set -e
-          echo "[build] make_dashboard start @ $(date -u)"
+          set -euo pipefail
+          echo "[build] make_dashboard START @ $(date -u +%T)"
           python -u scripts/make_dashboard.py \
             --mode intraday \
             --out data/outlook_intraday.json
-          echo "[build] make_dashboard end   @ $(date -u)"
-          jq -r '.metrics.ema_cross as $x
-            | "ema_cross=" + ($x//"n/a")
-            + "  ema10_dist_pct=" + ((.metrics.ema10_dist_pct//0|tonumber)|tostring)
-            + "  ema_sign=" + ((.metrics.ema_sign//0|tonumber)|tostring)
-            + "  updated_at=" + ((.updated_at//.updated_at_utc//"n/a")|tostring)' \
-            data/outlook_intraday.json || true
+          echo "[build] make_dashboard END   @ $(date -u +%T)"
 
       - name: Write heartbeat_10min
         run: |
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
+      # --------------------- Stage artifacts (BEFORE switching branches) ---------------------
+      - name: Stage artifacts to /tmp (preserve across branch switch)
+        run: |
+          set -e
+          mkdir -p /tmp/live10
+          cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
+          cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
+          ls -l /tmp/live10
+
+      # --------------------- Prepare live branch (safe switch) ---------------------
       - name: Prepare live branch
         run: |
+          set -e
           git config user.name  "actions-bot"
           git config user.email "bot@users.noreply.github.com"
+
+          # Clean any workspace state so branch switch can't be blocked
+          git reset --hard
+          git clean -fdx
+
           git fetch origin ${LIVE_BRANCH} || true
-          git checkout -B ${LIVE_BRANCH} origin/${LIVE_BRANCH} || git checkout --orphan ${LIVE_BRANCH}
+          if git ls-remote --exit-code --heads origin ${LIVE_BRANCH} >/dev/null 2>&1; then
+            git checkout -B ${LIVE_BRANCH} origin/${LIVE_BRANCH}
+          else
+            git checkout --orphan ${LIVE_BRANCH}
+          fi
+
+          # Make the live branch contain ONLY the data/ folder contents
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
           mkdir -p data
-          cp -f data/outlook_intraday.json data/heartbeat_10min.txt data/
+          cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
+          cp -f /tmp/live10/heartbeat_10min.txt data/heartbeat_10min.txt
+          ls -l data
 
+      # --------------------- Publish ---------------------
       - name: Commit & Push live branch
         run: |
+          set -e
           git add data
           git commit -m "10m live @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
           git push origin ${LIVE_BRANCH} --force
+
+      # (Optional) log a quick summary line to the build output
+      - name: Print summary
+        run: |
+          jq -r '.metrics.ema_cross as $x
+            | "ema_cross=" + ($x//"n/a")
+            + "  ema_sign=" + ((.metrics.ema_sign//0|tonumber)|tostring)
+            + "  ema10_dist_pct=" + ((.metrics.ema10_dist_pct//0|tonumber)|tostring)
+            + "  updated_at=" + ((.updated_at//.updated_at_utc//"n/a")|tostring)' \
+            data/outlook_intraday.json || true
