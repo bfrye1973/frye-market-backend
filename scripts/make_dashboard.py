@@ -1,26 +1,19 @@
 #!/usr/bin/env python3
 """
 Ferrari Dashboard — make_dashboard.py (clean build)
-
-What this does
-- Pulls SPY & QQQ 10-minute bars from Polygon (closed bars only; drops in-flight bar)
-- Computes EMA10/EMA20, ema_cross, ema_sign, ema10_dist_pct
-- Builds Overall Market Light from EMA sign + distance:
-    Green  if EMA10 > EMA20 and score ≥ 60
-    Red    if EMA10 < EMA20 and score <  60
-    Neutral otherwise
-- Blends breadth/momentum/squeeze/liquidity from a source JSON (if provided)
-  or falls back to your hourly endpoint
+- Computes the 10m Overall Market Light (EMA10/EMA20 on SPY) from Polygon bars
+- Blends breadth/momentum/squeeze/liquidity from a source JSON or hourly fallback
 - Writes canonical outlook_intraday.json for the dashboard
 
 Usage:
-  python -u scripts/make_dashboard.py --mode intraday --out data/outlook_intraday.json
-Optional:
-  --source <path-to-json>   # if you want to blend sectorCards/metrics from a file
+  python -u scripts/make_dashboard.py --mode intraday \
+    --out data/outlook_intraday.json \
+    [--source data/outlook_source.json]
 
 Env:
   POLYGON_API_KEY  (required)
-  HOURLY_URL       (optional; default uses backend-1 hourly)
+  HOURLY_URL       (optional; fallback)
+    default: https://frye-market-backend-1.onrender.com/live/hourly
 """
 
 import argparse, json, math, os, sys, time, urllib.request
@@ -30,15 +23,18 @@ from datetime import datetime, timedelta, timezone
 HOURLY_URL_DEFAULT = "https://frye-market-backend-1.onrender.com/live/hourly"
 POLY_10M_URL = "https://api.polygon.io/v2/aggs/ticker/{sym}/range/10/minute/{start}/{end}?adjusted=true&sort=asc&limit=50000&apiKey={key}"
 
-SYMS = ["SPY", "QQQ"]  # SPY drives the overall light; QQQ kept for parity/debug
+SYMS = ["SPY", "QQQ"]  # compute EMAs for both; SPY drives the overall light
+
+# EMA weighting & scoring
 W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 10, 10, 10, 5
-FULL_EMA_DIST = 0.60  # % distance for full ±40 EMA points
+FULL_EMA_DIST = 0.60  # % distance to reach full +/-40pts
 
 # ------------------------- Small helpers ------------------------
 def now_iso_utc():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00","Z")
 
 def clamp(x, lo, hi): return lo if x < lo else hi if x > hi else x
+
 def pct(a, b): return 0.0 if not b else 100.0 * a / b
 
 def ema_series(vals, n):
@@ -65,7 +61,8 @@ def fetch_polygon_10m(key, sym, lookback_days=4):
     rows = js.get("results") or []
     bars = []
     for r in rows:
-        t = int(r["t"]) // 1000  # ms -> s
+        # Polygon times are ms; we store seconds
+        t = int(r["t"]) // 1000
         bars.append({
             "time": t,
             "open": float(r["o"]),
@@ -84,6 +81,7 @@ def fetch_polygon_10m(key, sym, lookback_days=4):
     return bars
 
 def summarize_sector_cards(cards):
+    # Accepts hourly-like sector cards if provided from source/hourly
     NH=NL=UP=DN=0
     for c in cards or []:
         NH += int(c.get("nh",0)); NL += int(c.get("nl",0))
@@ -99,18 +97,24 @@ def lin_points(percent, weight):
 
 # ------------------------- Core builder -------------------------
 def build_intraday(source_js=None, hourly_url=HOURLY_URL_DEFAULT):
+    """
+    Returns a dict to write to outlook_intraday.json
+    """
     out = {}
-
-    # Try bring-in of sector cards from source, else hourly fallback
+    # Try source sectorCards first
     sector_cards = []
     if isinstance(source_js, dict):
         sector_cards = source_js.get("sectorCards") or source_js.get("outlook",{}).get("sectorCards") or []
+
     if not sector_cards:
+        # Fallback: read hourly endpoint (has richer sector data)
         try:
             hourly = fetch_json(hourly_url)
+            # Hourly payloads often embed sectors across 'sectors' or a list — be defensive
             sector_cards = hourly.get("sectorCards") or hourly.get("sectors") or []
         except Exception:
             sector_cards = []
+
     sums = summarize_sector_cards(sector_cards)
 
     # ---- Polygon EMAs (SPY drives the overall light) ----
@@ -126,10 +130,12 @@ def build_intraday(source_js=None, hourly_url=HOURLY_URL_DEFAULT):
     closes = [b["close"] for b in spy_bars]
     ema10 = ema_series(closes, 10)
     ema20 = ema_series(closes, 20)
+
     e10_prev, e20_prev = ema10[-2], ema20[-2]
     e10_now,  e20_now  = ema10[-1], ema20[-1]
     px_now              = closes[-1]
 
+    # Cross (info)
     if e10_prev < e20_prev and e10_now > e20_now:
         ema_cross = "bull"
     elif e10_prev > e20_prev and e10_now < e20_now:
@@ -137,20 +143,23 @@ def build_intraday(source_js=None, hourly_url=HOURLY_URL_DEFAULT):
     else:
         ema_cross = "none"
 
+    # Continuous sign & distance
     ema_sign = 1 if e10_now > e20_now else (-1 if e10_now < e20_now else 0)
     ema10_dist_pct = 0.0 if e10_now == 0 else 100.0 * (px_now - e10_now) / e10_now
     dist_unit = clamp(ema10_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
     ema_pts = int(round(W_EMA * (1 if ema_sign > 0 else -1) * abs(dist_unit))) if ema_sign != 0 else 0
 
-    # ---- Other components (from source or fallback) ----
+    # ---- Other components (from source or hourly fallback) ----
     live_mom = (source_js or {}).get("metrics",{}).get("momentum_pct", None)
     live_br  = (source_js or {}).get("metrics",{}).get("breadth_pct",  None)
     if live_mom is None or live_br is None:
+        # fallback to sums (from sector cards)
         live_br  = sums["breadth_pct"]  if live_br  is None else live_br
         live_mom = sums["momentum_pct"] if live_mom is None else live_mom
 
-    live_sq   = (source_js or {}).get("metrics",{}).get("squeeze_pct",   50.0)
-    live_liq  = (source_js or {}).get("metrics",{}).get("liquidity_pct", 50.0)
+    # For squeeze/liquidity we default neutral 50 if missing
+    live_sq  = (source_js or {}).get("metrics",{}).get("squeeze_pct",   50.0)
+    live_liq = (source_js or {}).get("metrics",{}).get("liquidity_pct", 50.0)
     live_risk = (source_js or {}).get("intraday",{}).get("riskOn10m",{}).get("riskOnPct", 50.0)
 
     momentum_pts = lin_points(live_mom, W_MOM)
@@ -169,6 +178,10 @@ def build_intraday(source_js=None, hourly_url=HOURLY_URL_DEFAULT):
     }
     overall_score = int(sum(components.values()))
 
+    # Color/state rule
+    # Green if EMA10>EMA20 and score >= 60
+    # Red   if EMA10<EMA20 and score < 60
+    # Neutral otherwise (including near-flat)
     if ema_sign > 0 and overall_score >= 60:
         overall_state = "bull"
     elif ema_sign < 0 and overall_score < 60:
@@ -176,6 +189,7 @@ def build_intraday(source_js=None, hourly_url=HOURLY_URL_DEFAULT):
     else:
         overall_state = "neutral"
 
+    # Build output
     metrics = {
         "breadth_pct": round(float(live_br or 0.0), 2),
         "momentum_pct": round(float(live_mom or 0.0), 2),
@@ -184,12 +198,17 @@ def build_intraday(source_js=None, hourly_url=HOURLY_URL_DEFAULT):
         "ema_sign": int(ema_sign),
     }
 
-    intraday = (source_js or {}).get("intraday", {})
+    intraday = (source_js or {}).get("intraday", {})  # preserve any existing intraday blocks
     if "riskOn10m" not in intraday:
         intraday["riskOn10m"] = {"riskOnPct": float(live_risk or 50.0)}
     if "sectorDirection10m" not in intraday:
         intraday["sectorDirection10m"] = {"risingPct": 0.0}
-    intraday["overall10m"] = {"state": overall_state, "score": int(overall_score), "components": components}
+
+    intraday["overall10m"] = {
+        "state": overall_state,
+        "score": int(overall_score),
+        "components": components
+    }
 
     out = {
         "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -205,7 +224,7 @@ def build_intraday(source_js=None, hourly_url=HOURLY_URL_DEFAULT):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="intraday")
-    ap.add_argument("--source")  # optional
+    ap.add_argument("--source", help="optional source json to blend metrics/sectorCards")
     ap.add_argument("--out", required=True)
     ap.add_argument("--hourly_url", default=os.environ.get("HOURLY_URL", HOURLY_URL_DEFAULT))
     args = ap.parse_args()
