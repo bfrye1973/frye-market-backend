@@ -3,8 +3,13 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Run shortly after the top of each hour (adjust if you want)
+    # a few minutes after the top of the hour
     - cron: "5 * * * *"
+
+# prevent “operation was canceled” when a new run starts
+concurrency:
+  group: dashboard-hourly-live
+  cancel-in-progress: false
 
 env:
   TZ: America/Chicago
@@ -13,7 +18,7 @@ env:
 jobs:
   build-hourly:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -46,31 +51,35 @@ jobs:
       - name: Prepare work dir
         run: |
           mkdir -p data
-          echo "Starting hourly build at $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          : > /tmp/hourly_build.log
+          echo "Starting hourly build at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee -a /tmp/hourly_build.log
 
-      # >>> BUILD SOURCE (matches the new R10 script) <<<
+      # Build the hourly "source" from Polygon (R10 script interface)
       - name: Build outlook source (hourly)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -e
-          python scripts/build_outlook_source_from_polygon.py \
+          # Use -u for unbuffered output; tee to log so the next step can tail.
+          python -u scripts/build_outlook_source_from_polygon.py \
             --mode hourly \
             --out data/outlook_source.json \
             --sectors-dir data/sectors \
             --workers 16 \
             --snap-batch 250 \
-            --snap-sleep 0.05
+            --snap-sleep 0.05 \
+            2>&1 | tee -a /tmp/hourly_build.log
 
-      # >>> SHAPE INTO FRONTEND PAYLOAD (same schema UI expects) <<<
+      # Shape into the exact frontend payload (unchanged schema)
       - name: Make dashboard payload (hourly)
         run: |
           set -e
-          python scripts/make_dashboard_hourly.py \
+          python -u scripts/make_dashboard_hourly.py \
             --source data/outlook_source.json \
             --dest data/outlook_hourly.json \
             --heartbeat data/heartbeat_1h.txt \
-            --log /tmp/hourly_build.log
+            --log /tmp/hourly_build.log \
+            2>&1 | tee -a /tmp/hourly_build.log
 
       - name: LOG (tail)
         if: always()
@@ -78,14 +87,12 @@ jobs:
           echo "----- HOURLY LOG TAIL -----"
           tail -n 200 /tmp/hourly_build.log || true
 
-      # >>> PUBLISH LIVE <<<
       - name: Publish LIVE (data-live-hourly)
         run: |
           set -e
           git config user.name "gh-hourly-bot"
           git config user.email "actions@users.noreply.github.com"
 
-          # ensure branch exists
           if git ls-remote --exit-code --heads origin data-live-hourly >/dev/null 2>&1; then
             git fetch origin data-live-hourly:data-live-hourly
           else
@@ -95,7 +102,6 @@ jobs:
             git push origin data-live-hourly
           fi
 
-          # switch, copy artifacts, commit
           git checkout data-live-hourly
           mkdir -p data
           cp -f data/outlook_hourly.json data/
@@ -104,7 +110,6 @@ jobs:
           git commit -m "hourly: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "No changes"
           git push origin data-live-hourly
 
-      # >>> PUBLISH ARCHIVE SNAPSHOT <<<
       - name: Publish ARCHIVE (data-archive-hourly)
         run: |
           set -e
