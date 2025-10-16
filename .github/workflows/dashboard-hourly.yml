@@ -22,6 +22,14 @@ jobs:
       LIVE_BRANCH: data-live-hourly
       ARCHIVE_BRANCH: data-archive-hourly
 
+      # Expose ALL likely key names from Secrets and Variables (Actions):
+      # (We will resolve the first non-empty at runtime.)
+      GH_POLYGON_API_KEY:         ${{ secrets.POLYGON_API_KEY }}
+      GH_REACT_APP_POLYGON_KEY:   ${{ secrets.REACT_APP_POLYGON_KEY }}
+      GH_POLY_KEY:                ${{ secrets.POLY_KEY }}
+      VAR_POLYGON_API_KEY:        ${{ vars.POLYGON_API_KEY }}
+      VAR_REACT_APP_POLYGON_KEY:  ${{ vars.REACT_APP_POLYGON_KEY }}
+
     steps:
       # ---------------------- Repo Setup ----------------------
       - name: Checkout repo
@@ -44,59 +52,50 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq || true
 
-      # ---------------------- Verify Polygon Key ----------------------
-      - name: Verify POLYGON_API_KEY is present
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      # ---------------------- Resolve Polygon Key ----------------------
+      - name: Resolve Polygon API Key (handle React-style names)
+        id: key
         run: |
           set -euo pipefail
-          echo "::group::Verify POLYGON_API_KEY"
-          if [ -z "${POLYGON_API_KEY:-}" ]; then
-            echo "[error] POLYGON_API_KEY is empty or not set in GitHub Actions secrets."
-            echo "Go to: GitHub → repo Settings → Secrets and variables → Actions → New secret → name=POLYGON_API_KEY, value=<your key>"
+          # Try all candidates in order and pick the first non-empty
+          KEY="${GH_POLYGON_API_KEY:-}"
+          [ -z "$KEY" ] && KEY="${GH_REACT_APP_POLYGON_KEY:-}"
+          [ -z "$KEY" ] && KEY="${GH_POLY_KEY:-}"
+          [ -z "$KEY" ] && KEY="${VAR_POLYGON_API_KEY:-}"
+          [ -z "$KEY" ] && KEY="${VAR_REACT_APP_POLYGON_KEY:-}"
+
+          if [ -z "$KEY" ]; then
+            echo "::error::No Polygon key found. Set one of: POLYGON_API_KEY, REACT_APP_POLYGON_KEY, or POLY_KEY in Actions secrets/vars."
             exit 1
           fi
-          # Mask the key and show its length only
-          echo "::add-mask::${POLYGON_API_KEY}"
-          echo "[ok] POLYGON_API_KEY length: ${#POLYGON_API_KEY}"
-          echo "::endgroup::"
 
-      # ---------------------- Probe Polygon (fast fail) ----------------------
-      - name: Probe Polygon API (auth + plan)
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          # Mask it and export for later steps
+          echo "::add-mask::$KEY"
+          echo "POLY_RESOLVED=$KEY" >> "$GITHUB_ENV"
+
+          # Show which name hit (length only)
+          echo "Resolved Polygon key length: ${#KEY}"
+
+      # ---------------------- Probe Polygon (fast, explicit) ----------------------
+      - name: Probe Polygon API (auth/plan check)
         run: |
           set -euo pipefail
-          echo "::group::Polygon probe"
-          PROBE_URL="https://api.polygon.io/v2/aggs/ticker/SPY/prev?adjusted=true&apiKey=${POLYGON_API_KEY}"
+          PROBE_URL="https://api.polygon.io/v2/aggs/ticker/SPY/prev?adjusted=true&apiKey=${POLY_RESOLVED}"
           HTTP=$(curl -sS -w "%{http_code}" -o /tmp/probe.json "${PROBE_URL}" || true)
           echo "[probe] HTTP=${HTTP}"
-          echo "[probe] body:"
+          echo "[probe] body (tail):"
           tail -c 800 /tmp/probe.json || true
-          echo "::endgroup::"
 
-          case "${HTTP}" in
-            200) echo "[ok] Polygon probe passed (200)";;
-            401|403)
-              echo "[error] Polygon authentication failed (HTTP ${HTTP}). Check that POLYGON_API_KEY is correct and active."
-              exit 1
-              ;;
-            429)
-              echo "[warn] Rate limited (429). The build may still work with retries, but consider reducing hourly lookback/symbols."
-              ;;
-            5*)
-              echo "[warn] Polygon server error (HTTP ${HTTP}). Will continue with retry safeguards."
-              ;;
-            *)
-              echo "[info] Unexpected HTTP ${HTTP} — continuing."
-              ;;
-          esac
+          if [ "$HTTP" = "401" ] || [ "$HTTP" = "403" ]; then
+            echo "::error::Polygon authentication failed (HTTP ${HTTP}). Your React-app key name is fine, but the VALUE is not authorized."
+            exit 1
+          fi
 
       # ---------------------- Build (Hourly) ----------------------
-      # Full logging + 2-try retry to expose the real error cause (no hard timeout).
+      # Full logging + 2-try retry to expose real error, using the resolved key.
       - name: Build outlook source (hourly)
         env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API_KEY: ${{ env.POLY_RESOLVED }}
           PYTHONUNBUFFERED: "1"
         run: |
           set -euo pipefail
