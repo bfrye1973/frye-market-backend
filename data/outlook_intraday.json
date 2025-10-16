@@ -1,12 +1,12 @@
 {
-  "updated_at": "2025-10-16T04:13:11-07:00",
-  "updated_at_utc": "2025-10-16T11:13:12Z",
-  "timestamp": "2025-10-16T11:13:11+00:00",
+  "updated_at": "2025-10-16T04:31:15-07:00",
+  "updated_at_utc": "2025-10-16T11:31:16Z",
+  "timestamp": "2025-10-16T11:31:15+00:00",
   "metrics": {
     "breadth_pct": 0.0,
     "momentum_pct": 0.0,
     "ema_cross": "none",
-    "ema10_dist_pct": 0.05,
+    "ema10_dist_pct": 0.06,
     "ema_sign": 1
   },
   "intraday": {
@@ -44,5 +44,5 @@
     },
     "sectors": {}
   },
-  "deltasUpdatedAt": "2025-10-16T04:27:00-07:00"
+  "deltasUpdatedAt": "2025-10-16T04:38:49-07:00"
 }
