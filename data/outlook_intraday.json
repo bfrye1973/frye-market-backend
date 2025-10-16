@@ -1,12 +1,15 @@
 {
-  "updated_at": "2025-10-16T09:00:14-07:00",
-  "updated_at_utc": "2025-10-16T16:00:14Z",
-  "timestamp": "2025-10-16T16:00:14Z",
+  "updated_at": "2025-10-16T09:22:23-07:00",
+  "updated_at_utc": "2025-10-16T16:22:23Z",
+  "timestamp": "2025-10-16T16:22:23Z",
   "metrics": {
     "breadth_pct": 81.98,
     "momentum_pct": 66.76,
+    "squeeze_pct": 50.0,
+    "liquidity_pct": 50.0,
+    "volatility_pct": 55.0,
     "ema_cross": "none",
-    "ema10_dist_pct": -0.25,
+    "ema10_dist_pct": -0.32,
     "ema_sign": -1
   },
   "intraday": {
@@ -18,9 +21,9 @@
     },
     "overall10m": {
       "state": "bear",
-      "score": -2,
+      "score": -8,
       "components": {
-        "ema10": -16,
+        "ema10": -22,
         "momentum": 8,
         "breadth": 6,
         "squeeze": 0,
@@ -222,5 +225,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-16T09:10:26-07:00"
+  "deltasUpdatedAt": "2025-10-16T09:22:37-07:00"
 }
