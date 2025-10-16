@@ -442,20 +442,33 @@ def build_groups(mode: str, sectors: Dict[str, List[str]]) -> Dict[str, Dict[str
 
 # ---------------- MAIN ----------------
 def main():
+    # Declare globals up-front so we can override them safely based on CLI args
+    global MAX_WORKERS, SNAP_BATCH, SNAP_SLEEP
+
     ap = argparse.ArgumentParser(description="Build outlook_source.json (intraday10/hourly/daily)")
     ap.add_argument("--mode", choices=["intraday10", "hourly", "daily"], default="daily")
-    ap.add_argument("--sectors-dir", default=DEFAULT_SECTORS_DIR, help="Folder with sector CSVs (default: data/sectors)")
-    ap.add_argument("--out", default=DEFAULT_OUT_PATH, help="Destination JSON (default: data/outlook_source.json)")
-    ap.add_argument("--workers", type=int, default=MAX_WORKERS, help=f"Thread pool size (default: {MAX_WORKERS})")
-    ap.add_argument("--snap-batch", type=int, default=SNAP_BATCH, help=f"Snapshot batch size (default: {SNAP_BATCH})")
-    ap.add_argument("--snap-sleep", type=float, default=SNAP_SLEEP, help=f"Snapshot sleep seconds (default: {SNAP_SLEEP})")
+    ap.add_argument("--sectors-dir", default=DEFAULT_SECTORS_DIR,
+                    help="Folder with sector CSVs (default: data/sectors)")
+    ap.add_argument("--out", default=DEFAULT_OUT_PATH,
+                    help="Destination JSON (default: data/outlook_source.json)")
+
+    # IMPORTANT: accept None and apply overrides AFTER parsing (avoids 'used prior to global declaration')
+    ap.add_argument("--workers", type=int, default=None,
+                    help="Thread pool size (override env FD_MAX_WORKERS)")
+    ap.add_argument("--snap-batch", type=int, default=None,
+                    help="Snapshot batch size (override env FD_SNAPSHOT_BATCH)")
+    ap.add_argument("--snap-sleep", type=float, default=None,
+                    help="Snapshot sleep seconds (override env FD_SNAPSHOT_PAUSE)")
+
     args = ap.parse_args()
 
-    # Allow runtime tuning without changing env defaults
-    global MAX_WORKERS, SNAP_BATCH, SNAP_SLEEP
-    MAX_WORKERS = max(1, int(args.workers))
-    SNAP_BATCH  = max(1, int(args.snap_batch))
-    SNAP_SLEEP  = max(0.0, float(args.snap_sleep))
+    # Optional overrides (keep existing env/defaults if not provided)
+    if args.workers is not None:
+        MAX_WORKERS = max(1, int(args.workers))
+    if args.snap_batch is not None:
+        SNAP_BATCH = max(1, int(args.snap_batch))
+    if args.snap_sleep is not None:
+        SNAP_SLEEP = max(0.0, float(args.snap_sleep))
 
     if not POLY_KEY:
         raise SystemExit("Set POLY_KEY or POLYGON_API_KEY or REACT_APP_POLYGON_KEY")
