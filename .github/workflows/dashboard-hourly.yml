@@ -3,7 +3,7 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Top of each hour during U.S. market window (UTC 13–20)
+    # Run top of every hour during US market hours (13:00–20:00 UTC, Mon–Fri)
     - cron: "0 13-20 * * 1-5"
 
 concurrency:
@@ -13,6 +13,7 @@ concurrency:
 jobs:
   hourly:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     env:
@@ -21,6 +22,7 @@ jobs:
       ARCHIVE_BRANCH: data-archive-hourly
 
     steps:
+      # ---------------------- Repo Setup ----------------------
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -33,31 +35,41 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install jq
 
-      # ---- Build (HOUR) ----
+      # ---------------------- Build (Hourly) ----------------------
       - name: Build outlook source (hourly)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
-          python scripts/build_outlook_source_from_polygon.py --mode hourly
+          echo "[timing] build_outlook_source START $(date -u +%T)"
+          # Limit runtime to 15 minutes (900s)
+          timeout 900s python -u scripts/build_outlook_source_from_polygon.py --mode hourly
+          echo "[timing] build_outlook_source END $(date -u +%T)"
+          test -s data/outlook_source.json
 
+      # ---------------------- Make Dashboard Payload ----------------------
       - name: Make dashboard payload (hourly)
         run: |
           set -euo pipefail
-          python scripts/make_dashboard.py --mode hourly --source data/outlook_source.json --out data/outlook_hourly.json
+          echo "[timing] make_dashboard START $(date -u +%T)"
+          python -u scripts/make_dashboard.py --mode hourly --source data/outlook_source.json --out data/outlook_hourly.json
+          echo "[timing] make_dashboard END $(date -u +%T)"
+          jq -r '.metrics.ema_cross as $x | "ema_cross=" + ($x//"n/a") + "  ema10_dist_pct=" + ((.metrics.ema10_dist_pct//0|tonumber)|tostring) + "  updated_at=" + ((.updated_at//.updated_at_utc//"n/a")|tostring)' data/outlook_hourly.json || true
 
+      # ---------------------- Write Heartbeat ----------------------
       - name: Write heartbeat_hourly
         run: |
+          set -e
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_hourly.txt
 
-      # ---- Stage files using JSON timestamp (keeps LIVE & ARCHIVE in lockstep) ----
+      # ---------------------- Stage Files ----------------------
       - name: Stage files for publish
         id: prep
         run: |
@@ -74,13 +86,13 @@ jobs:
           cp data/outlook_source.json  /tmp/live/
           cp data/heartbeat_hourly.txt /tmp/live/
 
-          # ARCHIVE snapshots (use the same timestamp)
+          # ARCHIVE snapshots
           cp data/outlook_source.json "/tmp/archive/source/outlook_source_${TS_SAFE}.json"
           cp data/outlook_hourly.json "/tmp/archive/dashboard/outlook_hourly_${TS_SAFE}.json"
 
           echo "ts=${TS_SAFE}" >> "$GITHUB_OUTPUT"
 
-      # ---- Publish LIVE (hourly) ----
+      # ---------------------- Push LIVE branch ----------------------
       - name: Push LIVE branch (hourly)
         run: |
           set -e
@@ -100,7 +112,7 @@ jobs:
           git commit -m "HOURLY live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit (live)"
           git push origin +HEAD:"$LIVE_BRANCH"
 
-      # ---- Append to ARCHIVE (hourly) ----
+      # ---------------------- Push ARCHIVE branch ----------------------
       - name: Push ARCHIVE branch (append)
         run: |
           set -e
