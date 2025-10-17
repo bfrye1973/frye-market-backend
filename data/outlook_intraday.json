@@ -1,18 +1,18 @@
 {
-  "updated_at": "2025-10-17T10:28:59-07:00",
-  "updated_at_utc": "2025-10-17T17:28:59Z",
-  "timestamp": "2025-10-17T17:28:59Z",
+  "updated_at": "2025-10-17T10:38:58-07:00",
+  "updated_at_utc": "2025-10-17T17:38:58Z",
+  "timestamp": "2025-10-17T17:38:58Z",
   "metrics": {
     "breadth_pct": 81.98,
     "momentum_pct": 66.76,
     "ema_cross": "none",
-    "ema10_dist_pct": -0.14,
+    "ema10_dist_pct": -0.07,
     "ema_sign": 1,
     "squeeze_pct": 100.0,
-    "liquidity_pct": 66.3393590934443,
-    "volatility_pct": 0.19047662576481986,
+    "liquidity_pct": 76.25328816523547,
+    "volatility_pct": 0.20835508444795056,
     "squeeze_intraday_pct": 100.0,
-    "liquidity_psi": 66.3393590934443
+    "liquidity_psi": 76.25328816523547
   },
   "intraday": {
     "riskOn10m": {
@@ -23,9 +23,9 @@
     },
     "overall10m": {
       "state": "neutral",
-      "score": 23,
+      "score": 18,
       "components": {
-        "ema10": 9,
+        "ema10": 4,
         "momentum": 8,
         "breadth": 6,
         "squeeze": 0,
@@ -159,7 +159,7 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-17T10:28:59-07:00",
+    "updatedAt": "2025-10-17T10:38:58-07:00",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -191,7 +191,7 @@
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=148.7",
-        "lastChanged": "2025-10-17T10:28:59-07:00"
+        "lastChanged": "2025-10-17T10:38:58-07:00"
       },
       "sigAccelDown": {
         "active": false,
@@ -221,13 +221,13 @@
         "active": true,
         "severity": "warn",
         "reason": "rising%=0.0",
-        "lastChanged": "2025-10-17T10:28:59-07:00"
+        "lastChanged": "2025-10-17T10:38:58-07:00"
       }
     }
   },
   "meta": {
-    "aliased_at_utc": "2025-10-17T17:28:59Z",
-    "repaired_at_utc": "2025-10-17T17:29:00Z",
+    "aliased_at_utc": "2025-10-17T17:38:58Z",
+    "repaired_at_utc": "2025-10-17T17:38:59Z",
     "source": "mirror",
     "sandbox": true
   },
@@ -297,5 +297,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-17T10:39:19-07:00"
+  "deltasUpdatedAt": "2025-10-17T10:46:21-07:00"
 }
