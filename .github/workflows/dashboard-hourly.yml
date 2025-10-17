@@ -1,19 +1,4 @@
-name: dashboard-hourly
-
-on:
-  workflow_dispatch: {}
-  schedule:
-    # a few minutes after the top of the hour
-    - cron: "5 * * * *"
-
-# prevent “operation was canceled” when a new run starts
-concurrency:
-  group: dashboard-hourly-live
-  cancel-in-progress: false
-
-env:
-  TZ: America/Chicago
-  PYTHONDONTWRITEBYTECODE: "1"
+# ... keep your existing on:, concurrency:, env:, etc.
 
 jobs:
   build-hourly:
@@ -52,25 +37,34 @@ jobs:
         run: |
           mkdir -p data
           : > /tmp/hourly_build.log
-          echo "Starting hourly build at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee -a /tmp/hourly_build.log
+          echo "Start hourly at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee -a /tmp/hourly_build.log
 
-      # Build the hourly "source" from Polygon (R10 script interface)
+      # NEW: create a lean sectors dir with the first N tickers per sector (no script changes needed)
+      - name: Prepare lean sectors (cap per sector)
+        env:
+          CAP: "60"      # ← raise to 90/120 later once it’s green
+        run: |
+          set -e
+          mkdir -p /tmp/sectors
+          for f in data/sectors/*.csv; do
+            bn=$(basename "$f")
+            # keep header, then first $CAP tickers
+            { head -n 1 "$f"; tail -n +2 "$f" | head -n "$CAP"; } > "/tmp/sectors/$bn"
+          done
+          echo "Lean sectors prepared (cap=$CAP)"; ls -l /tmp/sectors | tee -a /tmp/hourly_build.log
+
+      # Build using the LEAN sectors folder so the step finishes fast
       - name: Build outlook source (hourly)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -e
-          # Use -u for unbuffered output; tee to log so the next step can tail.
           python -u scripts/build_outlook_source_from_polygon.py \
             --mode hourly \
             --out data/outlook_source.json \
-            --sectors-dir data/sectors \
-            --workers 16 \
-            --snap-batch 250 \
-            --snap-sleep 0.05 \
+            --sectors-dir /tmp/sectors \
             2>&1 | tee -a /tmp/hourly_build.log
 
-      # Shape into the exact frontend payload (unchanged schema)
       - name: Make dashboard payload (hourly)
         run: |
           set -e
@@ -92,7 +86,6 @@ jobs:
           set -e
           git config user.name "gh-hourly-bot"
           git config user.email "actions@users.noreply.github.com"
-
           if git ls-remote --exit-code --heads origin data-live-hourly >/dev/null 2>&1; then
             git fetch origin data-live-hourly:data-live-hourly
           else
@@ -101,7 +94,6 @@ jobs:
             git commit --allow-empty -m "init data-live-hourly"
             git push origin data-live-hourly
           fi
-
           git checkout data-live-hourly
           mkdir -p data
           cp -f data/outlook_hourly.json data/
@@ -114,7 +106,6 @@ jobs:
         run: |
           set -e
           ts=$(date -u +'%Y%m%dT%H%M%SZ')
-
           if git ls-remote --exit-code --heads origin data-archive-hourly >/dev/null 2>&1; then
             git fetch origin data-archive-hourly:data-archive-hourly
           else
@@ -123,7 +114,6 @@ jobs:
             git commit --allow-empty -m "init data-archive-hourly"
             git push origin data-archive-hourly
           fi
-
           git checkout data-archive-hourly
           mkdir -p "archive/${ts}"
           cp -f data/outlook_source.json "archive/${ts}/outlook_source.json"
