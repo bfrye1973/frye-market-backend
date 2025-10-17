@@ -77,6 +77,27 @@ jobs:
             --in  data/outlook_intraday.json \
             --out data/outlook_intraday.json
 
+      # ---- Repair breadth/momentum from sectorCards (keeps them fresh) ----
+      - name: Repair breadth/momentum from sectorCards (safe)
+        run: |
+          set -euo pipefail
+          python -u scripts/repair_breadth_momentum_from_cards.py \
+            --in  data/outlook_intraday.json \
+            --out data/outlook_intraday.json
+
+      # ---- QA: compare metrics to sectorCards averages ----
+      - name: QA: cards vs metrics agreement
+        run: |
+          echo "[qa] compare metrics to sectorCards averages"
+          jq -r '
+            ( [.sectorCards[].breadth_pct] | add/length )    as $b_avg
+          | ( [.sectorCards[].momentum_pct] | add/length )   as $m_avg
+          | ( .metrics.breadth_pct // null )                 as $b
+          | ( .metrics.momentum_pct // null )                as $m
+          | "breadth: metric=\($b)  cards_avg=\($b_avg)",
+            "momentum: metric=\($m)  cards_avg=\($m_avg)"
+          ' data/outlook_intraday.json || true
+
       # ---- Debug snapshot in logs (helps confirm values) ----
       - name: Debug print (verify intraday metrics)
         run: |
