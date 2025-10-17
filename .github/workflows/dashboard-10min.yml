@@ -13,11 +13,11 @@ jobs:
     name: Build & Publish Intraday Dashboard
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: write
     concurrency:
       group: dashboard-10min
       cancel-in-progress: true
-    permissions:
-      contents: write
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
@@ -35,10 +35,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies (if any)
+      - name: Install dependencies
         run: |
+          set -e
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # lightweight deps used by your scripts + repair step
+          python - << 'PY'
+          import sys, subprocess
+          pkgs = ["requests", "python-dateutil", "numpy"]
+          subprocess.check_call([sys.executable, "-m", "pip", "install", *pkgs])
+          PY
 
       # --------------------- Build payload ---------------------
       - name: Build dashboard payload (10-minute)
@@ -47,6 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "[build] make_dashboard START @ $(date -u +%T)"
+          mkdir -p data
           python -u scripts/make_dashboard.py \
             --mode intraday \
             --out data/outlook_intraday.json
@@ -60,21 +67,27 @@ jobs:
             --in  data/outlook_intraday.json \
             --out data/outlook_intraday.json
 
+      # ---- Repair neutral 50.0 metrics from SPY 10m bars (only if needed) ----
+      - name: Repair intraday metrics if neutral (50.0)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          python -u scripts/repair_intraday_metrics_10m.py \
+            --in  data/outlook_intraday.json \
+            --out data/outlook_intraday.json
+
+      # ---- Debug snapshot in logs (helps confirm values) ----
+      - name: Debug print (verify intraday metrics)
+        run: |
+          echo "[debug] metrics snapshot:"
+          jq '.metrics | {squeeze_pct, squeeze_intraday_pct, liquidity_pct, liquidity_psi, volatility_pct, breadth_pct, momentum_pct}' data/outlook_intraday.json || true
+          echo "[debug] overall10m:"
+          jq '.intraday.overall10m' data/outlook_intraday.json || true
+
       - name: Write heartbeat_10min
         run: |
-          mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
-
-# (after Build dashboard payload and alias step)
-- name: Repair intraday metrics if neutral (50.0)
-  env:
-    POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-  run: |
-    set -euo pipefail
-    python -u scripts/repair_intraday_metrics_10m.py \
-      --in  data/outlook_intraday.json \
-      --out data/outlook_intraday.json
-
 
       # --------------------- Stage artifacts (BEFORE switching branches) ---------------------
       - name: Stage artifacts to /tmp (preserve across branch switch)
@@ -96,11 +109,12 @@ jobs:
           git reset --hard
           git clean -fdx
 
-          git fetch origin ${LIVE_BRANCH} || true
-          if git ls-remote --exit-code --heads origin ${LIVE_BRANCH} >/dev/null 2>&1; then
-            git checkout -B ${LIVE_BRANCH} origin/${LIVE_BRANCH}
+          # Check out or create the LIVE branch
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${LIVE_BRANCH}"
+            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
           else
-            git checkout --orphan ${LIVE_BRANCH}
+            git checkout --orphan "${LIVE_BRANCH}"
           fi
 
           # Make the live branch contain ONLY the data/ folder contents
@@ -116,9 +130,9 @@ jobs:
           set -e
           git add data
           git commit -m "10m live @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-          git push origin ${LIVE_BRANCH} --force
+          git push origin "${LIVE_BRANCH}" --force
 
-      # (Optional) log a quick summary line to the build output
+      # (Optional) quick summary line to the build output
       - name: Print summary
         run: |
           jq -r '.metrics.ema_cross as $x
