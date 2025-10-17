@@ -11,7 +11,8 @@ jobs:
     name: Build & Publish Intraday Dashboard
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    permissions: { contents: write }
+    permissions:
+      contents: write
     concurrency:
       group: dashboard-10min
       cancel-in-progress: true
@@ -21,13 +22,16 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
+      # -------- Repo & Python --------
       - name: Checkout repo
         uses: actions/checkout@v4
-        with: { fetch-depth: 1 }
+        with:
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
 
       - name: Install deps
         run: |
@@ -35,6 +39,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil numpy
 
+      # -------- Build payload --------
       - name: Build dashboard payload (10-minute)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -43,19 +48,37 @@ jobs:
           mkdir -p data
           python -u scripts/make_dashboard.py --mode intraday --out data/outlook_intraday.json
 
-      # OPTIONAL: uncomment these two only if the scripts exist in /scripts
-      # - name: Add intraday metric aliases
-      #   run: python -u scripts/alias_intraday_metrics.py --in data/outlook_intraday.json --out data/outlook_intraday.json
-      # - name: Repair neutrals + breadth/momentum
-      #   env:
-      #     POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-      #   run: |
-      #     python -u scripts/repair_intraday_metrics_10m.py --in data/outlook_intraday.json --out data/outlook_intraday.json
-      #     python -u scripts/repair_breadth_momentum_from_cards.py --in data/outlook_intraday.json --out data/outlook_intraday.json
+      # -------- Make the FE happy (aliases) --------
+      - name: Add intraday metric aliases
+        run: |
+          set -euo pipefail
+          python -u scripts/alias_intraday_metrics.py \
+            --in  data/outlook_intraday.json \
+            --out data/outlook_intraday.json
 
+      # -------- Fix 50/50/50 neutrals (only if needed) --------
+      - name: Repair intraday metrics if neutral (50.0)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          python -u scripts/repair_intraday_metrics_10m.py \
+            --in  data/outlook_intraday.json \
+            --out data/outlook_intraday.json
+
+      # -------- Unstick Breadth & Momentum (from sectorCards) --------
+      - name: Repair breadth/momentum from sectorCards
+        run: |
+          set -euo pipefail
+          python -u scripts/repair_breadth_momentum_from_cards.py \
+            --in  data/outlook_intraday.json \
+            --out data/outlook_intraday.json
+
+      # -------- Heartbeat --------
       - name: Write heartbeat_10min
         run: date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
+      # -------- Stage artifacts --------
       - name: Stage artifacts to /tmp
         run: |
           set -e
@@ -63,6 +86,7 @@ jobs:
           cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
           cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
 
+      # -------- Publish to LIVE branch --------
       - name: Prepare live branch
         run: |
           set -e
