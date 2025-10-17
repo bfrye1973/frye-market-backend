@@ -1,7 +1,7 @@
 {
-  "updated_at": "2025-10-16T23:24:04-07:00",
-  "updated_at_utc": "2025-10-17T06:24:04Z",
-  "timestamp": "2025-10-17T06:24:04Z",
+  "updated_at": "2025-10-16T23:47:16-07:00",
+  "updated_at_utc": "2025-10-17T06:47:16Z",
+  "timestamp": "2025-10-17T06:47:16Z",
   "metrics": {
     "breadth_pct": 81.98,
     "momentum_pct": 66.76,
@@ -157,7 +157,7 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-16T23:24:04-07:00",
+    "updatedAt": "2025-10-16T23:47:16-07:00",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -189,7 +189,7 @@
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=148.7",
-        "lastChanged": "2025-10-16T23:24:04-07:00"
+        "lastChanged": "2025-10-16T23:47:16-07:00"
       },
       "sigAccelDown": {
         "active": false,
@@ -219,7 +219,7 @@
         "active": true,
         "severity": "warn",
         "reason": "rising%=0.0",
-        "lastChanged": "2025-10-16T23:24:04-07:00"
+        "lastChanged": "2025-10-16T23:47:16-07:00"
       }
     }
   },
@@ -293,5 +293,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-16T23:47:03-07:00"
+  "deltasUpdatedAt": "2025-10-16T23:57:11-07:00"
 }
