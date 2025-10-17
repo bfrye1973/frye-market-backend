@@ -1,16 +1,18 @@
 {
-  "updated_at": "2025-10-17T11:15:32-07:00",
-  "updated_at_utc": "2025-10-17T18:15:32Z",
-  "timestamp": "2025-10-17T18:15:32Z",
+  "updated_at": "2025-10-17T11:28:38-07:00",
+  "updated_at_utc": "2025-10-17T18:28:38Z",
+  "timestamp": "2025-10-17T18:28:38Z",
   "metrics": {
-    "breadth_pct": 81.98,
-    "momentum_pct": 66.76,
+    "breadth_pct": 79.77,
+    "momentum_pct": 61.22,
     "ema_cross": "none",
-    "ema10_dist_pct": 0.22,
+    "ema10_dist_pct": 0.29,
     "ema_sign": 1,
-    "squeeze_pct": 50.0,
-    "liquidity_pct": 50.0,
-    "volatility_pct": 50.0
+    "squeeze_pct": 100.0,
+    "liquidity_pct": 108.06922044263558,
+    "volatility_pct": 0.15159688619300318,
+    "squeeze_intraday_pct": 100.0,
+    "liquidity_psi": 108.06922044263558
   },
   "intraday": {
     "riskOn10m": {
@@ -21,9 +23,9 @@
     },
     "overall10m": {
       "state": "neutral",
-      "score": 29,
+      "score": 33,
       "components": {
-        "ema10": 15,
+        "ema10": 19,
         "momentum": 8,
         "breadth": 6,
         "squeeze": 0,
@@ -157,7 +159,7 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-17T11:15:32-07:00",
+    "updatedAt": "2025-10-17T11:28:38-07:00",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -189,7 +191,7 @@
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=148.7",
-        "lastChanged": "2025-10-17T11:15:32-07:00"
+        "lastChanged": "2025-10-17T11:28:38-07:00"
       },
       "sigAccelDown": {
         "active": false,
@@ -219,15 +221,17 @@
         "active": true,
         "severity": "warn",
         "reason": "rising%=0.0",
-        "lastChanged": "2025-10-17T11:15:32-07:00"
+        "lastChanged": "2025-10-17T11:28:38-07:00"
       }
     }
   },
-  "version": "sandbox-10m-deltas",
   "meta": {
+    "aliased_at_utc": "2025-10-17T18:28:38Z",
+    "repaired_at_utc": "2025-10-17T18:28:39Z",
     "source": "mirror",
     "sandbox": true
   },
+  "version": "sandbox-10m-deltas",
   "deltas": {
     "market": {
       "dBreadthPct": 0.0,
@@ -293,5 +297,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-17T11:29:00-07:00"
+  "deltasUpdatedAt": "2025-10-17T11:38:01-07:00"
 }
