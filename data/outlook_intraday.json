@@ -1,13 +1,13 @@
 {
-  "updated_at": "2025-10-17T04:01:45-07:00",
-  "updated_at_utc": "2025-10-17T11:01:45Z",
-  "timestamp": "2025-10-17T11:01:45Z",
+  "updated_at": "2025-10-17T04:22:25-07:00",
+  "updated_at_utc": "2025-10-17T11:22:25Z",
+  "timestamp": "2025-10-17T11:22:25Z",
   "metrics": {
     "breadth_pct": 81.98,
     "momentum_pct": 66.76,
-    "ema_cross": "none",
-    "ema10_dist_pct": 0.19,
-    "ema_sign": -1,
+    "ema_cross": "bull",
+    "ema10_dist_pct": 0.44,
+    "ema_sign": 1,
     "squeeze_pct": 50.0,
     "liquidity_pct": 50.0,
     "volatility_pct": 50.0
@@ -20,17 +20,17 @@
       "risingPct": 0.0
     },
     "overall10m": {
-      "state": "bear",
-      "score": 1,
+      "state": "neutral",
+      "score": 43,
       "components": {
-        "ema10": -13,
+        "ema10": 29,
         "momentum": 8,
         "breadth": 6,
         "squeeze": 0,
         "liquidity": 0,
         "riskOn": 0
       },
-      "just_crossed": false
+      "just_crossed": true
     }
   },
   "sectorCards": [
@@ -157,7 +157,7 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-17T04:01:45-07:00",
+    "updatedAt": "2025-10-17T04:22:25-07:00",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -174,22 +174,22 @@
         "lastChanged": null
       },
       "sigEMA10BullCross": {
-        "active": false,
+        "active": true,
         "severity": "info",
-        "reason": "ema_cross=none",
-        "lastChanged": null
+        "reason": "ema_cross=bull",
+        "lastChanged": "2025-10-17T04:22:25-07:00"
       },
       "sigEMA10BearCross": {
         "active": false,
         "severity": "warn",
-        "reason": "ema_cross=none",
+        "reason": "ema_cross=bull",
         "lastChanged": null
       },
       "sigAccelUp": {
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=148.7",
-        "lastChanged": "2025-10-17T04:01:45-07:00"
+        "lastChanged": "2025-10-17T04:22:25-07:00"
       },
       "sigAccelDown": {
         "active": false,
@@ -219,7 +219,7 @@
         "active": true,
         "severity": "warn",
         "reason": "rising%=0.0",
-        "lastChanged": "2025-10-17T04:01:45-07:00"
+        "lastChanged": "2025-10-17T04:22:25-07:00"
       }
     }
   },
@@ -293,5 +293,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-17T04:22:26-07:00"
+  "deltasUpdatedAt": "2025-10-17T04:33:28-07:00"
 }
