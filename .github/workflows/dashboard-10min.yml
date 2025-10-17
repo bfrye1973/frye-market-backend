@@ -85,6 +85,16 @@ jobs:
           mkdir -p /tmp/live10
           cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
           cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
+      - name: Add intraday metric aliases
+        run: python -u scripts/alias_intraday_metrics.py --in data/outlook_intraday.json --out data/outlook_intraday.json
+
+      - name: Repair intraday metrics if neutral (50.0)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: python -u scripts/repair_intraday_metrics_10m.py --in data/outlook_intraday.json --out data/outlook_intraday.json
+
+        - name: Repair breadth/momentum from sectorCards (safe)
+        run: python -u scripts/repair_breadth_momentum_from_cards.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
       # -------- Publish to LIVE branch --------
       - name: Prepare live branch
