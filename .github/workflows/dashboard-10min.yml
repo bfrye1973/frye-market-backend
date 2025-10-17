@@ -37,7 +37,7 @@ jobs:
         run: |
           set -e
           python -m pip install --upgrade pip
-          pip install requests python-dateutil numpy
+          pip install requests python-dateutil
 
       # -------- Build payload --------
       - name: Build dashboard payload (10-minute)
@@ -58,8 +58,8 @@ jobs:
             --in  data/outlook_intraday.json \
             --out data/outlook_intraday.json
 
-      # -------- Fix 50/50/50 neutrals (only if needed) --------
-      - name: Repair intraday metrics if neutral (50.0)
+      # -------- Fix 50/50/50 neutrals + add scaled vol & clamp squeeze --------
+      - name: Repair intraday metrics if neutral (50.0) + display fields
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -68,11 +68,11 @@ jobs:
             --in  data/outlook_intraday.json \
             --out data/outlook_intraday.json
 
-      # -------- Unstick Breadth & Momentum (from sectorCards) --------
-      - name: Repair breadth/momentum from sectorCards
+      # -------- Count-based repair: Breadth/Momentum/Rising/Risk-On --------
+      - name: Repair meter (counts: breadth/momentum/rising/riskOn)
         run: |
           set -euo pipefail
-          python -u scripts/repair_breadth_momentum_from_cards.py \
+          python -u scripts/repair_meter_from_counts.py \
             --in  data/outlook_intraday.json \
             --out data/outlook_intraday.json
 
