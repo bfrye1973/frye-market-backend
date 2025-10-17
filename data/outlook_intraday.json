@@ -1,12 +1,12 @@
 {
-  "updated_at": "2025-10-17T04:22:25-07:00",
-  "updated_at_utc": "2025-10-17T11:22:25Z",
-  "timestamp": "2025-10-17T11:22:25Z",
+  "updated_at": "2025-10-17T04:43:00-07:00",
+  "updated_at_utc": "2025-10-17T11:43:00Z",
+  "timestamp": "2025-10-17T11:43:00Z",
   "metrics": {
     "breadth_pct": 81.98,
     "momentum_pct": 66.76,
-    "ema_cross": "bull",
-    "ema10_dist_pct": 0.44,
+    "ema_cross": "none",
+    "ema10_dist_pct": 0.34,
     "ema_sign": 1,
     "squeeze_pct": 50.0,
     "liquidity_pct": 50.0,
@@ -21,16 +21,16 @@
     },
     "overall10m": {
       "state": "neutral",
-      "score": 43,
+      "score": 36,
       "components": {
-        "ema10": 29,
+        "ema10": 22,
         "momentum": 8,
         "breadth": 6,
         "squeeze": 0,
         "liquidity": 0,
         "riskOn": 0
       },
-      "just_crossed": true
+      "just_crossed": false
     }
   },
   "sectorCards": [
@@ -157,7 +157,7 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-17T04:22:25-07:00",
+    "updatedAt": "2025-10-17T04:43:00-07:00",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -174,22 +174,22 @@
         "lastChanged": null
       },
       "sigEMA10BullCross": {
-        "active": true,
+        "active": false,
         "severity": "info",
-        "reason": "ema_cross=bull",
-        "lastChanged": "2025-10-17T04:22:25-07:00"
+        "reason": "ema_cross=none",
+        "lastChanged": null
       },
       "sigEMA10BearCross": {
         "active": false,
         "severity": "warn",
-        "reason": "ema_cross=bull",
+        "reason": "ema_cross=none",
         "lastChanged": null
       },
       "sigAccelUp": {
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=148.7",
-        "lastChanged": "2025-10-17T04:22:25-07:00"
+        "lastChanged": "2025-10-17T04:43:00-07:00"
       },
       "sigAccelDown": {
         "active": false,
@@ -219,7 +219,7 @@
         "active": true,
         "severity": "warn",
         "reason": "rising%=0.0",
-        "lastChanged": "2025-10-17T04:22:25-07:00"
+        "lastChanged": "2025-10-17T04:43:00-07:00"
       }
     }
   },
@@ -293,5 +293,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-17T04:42:52-07:00"
+  "deltasUpdatedAt": "2025-10-17T04:53:11-07:00"
 }
