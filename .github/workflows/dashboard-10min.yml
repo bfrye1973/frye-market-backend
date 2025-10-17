@@ -65,6 +65,17 @@ jobs:
           mkdir -p data
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
+# (after Build dashboard payload and alias step)
+- name: Repair intraday metrics if neutral (50.0)
+  env:
+    POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+  run: |
+    set -euo pipefail
+    python -u scripts/repair_intraday_metrics_10m.py \
+      --in  data/outlook_intraday.json \
+      --out data/outlook_intraday.json
+
+
       # --------------------- Stage artifacts (BEFORE switching branches) ---------------------
       - name: Stage artifacts to /tmp (preserve across branch switch)
         run: |
