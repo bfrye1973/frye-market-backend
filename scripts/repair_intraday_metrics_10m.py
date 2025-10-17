@@ -1,132 +1,79 @@
 #!/usr/bin/env python3
 """
-repair_intraday_metrics_10m.py  —  Safe repair pass for /live/intraday metrics.
+repair_intraday_metrics_10m.py — SAFE REPAIR (only fixes 50.0 fallbacks)
 
-Purpose
-- Some runs write neutral 50.0 for squeeze/liquidity/volatility due to warmup/NaN guards.
-- This post-process fixes ONLY those set to exactly 50.0 by recomputing them from
-  current SPY 10-minute bars via Polygon. If values are already != 50.0, we leave them.
-
-Inputs / Outputs
-- --in  data/outlook_intraday.json
-- --out data/outlook_intraday.json  (same file OK)
-
-Env
-- POLYGON_API_KEY must be set (same as other jobs).
-
-Formulas (10m)
-- volatility_pct  = 100 * EMA(TR, span=3) / close
-- liquidity_pct   = 100 * EMA(vol,3) / EMA(vol,12)   (clipped 0..200)
-- squeeze_pct     = 100 * (BBwidth / KCwidth) over last ~6 bars (clipped 0..100)
+If metrics.squeeze_pct / liquidity_pct / volatility_pct == 50.0 (neutral),
+recompute from SPY 10-minute bars via Polygon and patch the JSON.
+Requires env POLYGON_API_KEY (same key you use on Render).
 """
 
-import argparse, json, math, os, sys, time
+import argparse, json, os, sys
 from datetime import datetime, timedelta, timezone
 from urllib.request import Request, urlopen
 from urllib.parse import urlencode
-
 API = "https://api.polygon.io"
 UTC = timezone.utc
 
 def http_json(path, params):
-    qs = urlencode(params)
-    url = f"{API}{path}?{qs}"
+    url = f"{API}{path}?{urlencode(params)}"
     req = Request(url, headers={"User-Agent":"frye-dashboard/repair/1.0"})
     with urlopen(req, timeout=20) as r:
         import json as _json
         return _json.loads(r.read().decode("utf-8"))
 
-def fetch_spy_10m_bars(days=2, limit=50000, key=None):
-    if not key:
-        raise SystemExit("POLYGON_API_KEY not set")
-    end = datetime.now(UTC).date()
-    start = end - timedelta(days=max(2, days))
-    path = f"/v2/aggs/ticker/SPY/range/10/minute/{start}/{end}"
-    js = http_json(path, {"adjusted":"true","sort":"asc","limit":limit,"apiKey":key})
-    results = js.get("results") or []
-    bars = []
-    for r in results:
+def fetch_spy_10m(days, key):
+    from_dt = (datetime.now(UTC).date() - timedelta(days=max(2, days)))
+    to_dt   = datetime.now(UTC).date()
+    js = http_json(f"/v2/aggs/ticker/SPY/range/10/minute/{from_dt}/{to_dt}",
+                   {"adjusted":"true","sort":"asc","limit":50000,"apiKey":key})
+    bars=[]
+    for r in js.get("results") or []:
         try:
-            t = int(r["t"]) // 1000
-            bars.append({
-                "t": t,
-                "o": float(r["o"]),
-                "h": float(r["h"]),
-                "l": float(r["l"]),
-                "c": float(r["c"]),
-                "v": float(r.get("v", 0.0)),
-            })
+            bars.append({"o":float(r["o"]), "h":float(r["h"]), "l":float(r["l"]),
+                         "c":float(r["c"]), "v":float(r.get("v",0.0))})
         except Exception:
-            continue
+            pass
     return bars
 
 def ema_last(values, span):
     if not values: return None
-    k = 2.0/(span+1.0)
-    out = None
-    for x in values:
-        out = x if out is None else out + k*(x - out)
+    k=2.0/(span+1.0); out=None
+    for x in values: out = x if out is None else out + k*(x-out)
     return out
 
-def clamp(x, lo, hi):
-    return max(lo, min(hi, x))
+def clamp(x, lo, hi): return max(lo, min(hi, x))
 
-def compute_from_bars(bars):
-    if len(bars) < 15:
-        return None, None, None
-
-    # take recent window (last ~18 bars)
+def compute_three_from(bars):
+    if len(bars) < 15: return None, None, None
     win = bars[-18:]
-    H = [b["h"] for b in win]
-    L = [b["l"] for b in win]
-    C = [b["c"] for b in win]
-    V = [b["v"] for b in win]
+    H=[b["h"] for b in win]; L=[b["l"] for b in win]; C=[b["c"] for b in win]; V=[b["v"] for b in win]
 
-    # volatility: %ATR (EMA of TR span=3) / last close
-    trs = []
+    # volatility: 100 * EMA(TR,3) / close
+    TR=[]
     for i in range(1, len(C)):
-        h, l, cp = H[i], L[i], C[i-1]
-        trs.append(max(h-l, abs(h-cp), abs(l-cp)))
-    atr_fast = ema_last(trs, span=3) if trs else None
-    vol_pct = 100.0 * atr_fast / C[-1] if (atr_fast and C[-1] > 0) else None
-    if vol_pct is not None: vol_pct = float(max(0.0, vol_pct))
+        TR.append(max(H[i]-L[i], abs(H[i]-C[i-1]), abs(L[i]-C[i-1])))
+    atr_fast = ema_last(TR, 3)
+    vol = 100.0 * atr_fast / C[-1] if (atr_fast and C[-1] > 0) else None
+    if vol is not None: vol = float(max(0.0, vol))
 
-    # liquidity: 100 * EMA(vol,3) / EMA(vol,12), clipped 0..200
-    v3  = ema_last(V, span=3)
-    v12 = ema_last(V, span=12)
-    liq_pct = None
-    if v12 and v12 > 0:
-        liq_pct = float(clamp(100.0 * (v3 / v12), 0.0, 200.0))
+    # liquidity: 100 * EMA(V,3)/EMA(V,12), clip 0..200
+    v3 = ema_last(V, 3); v12 = ema_last(V, 12)
+    liq = float(clamp(100.0*(v3/v12), 0.0, 200.0)) if (v3 and v12 and v12>0) else None
 
-    # squeeze: BB/KC width ratio over last ~6 bars
-    n = 6
-    if len(C) >= n and len(H) >= n and len(L) >= n:
-        cn = C[-n:]
-        hn = H[-n:]
-        ln = L[-n:]
-        mean = sum(cn)/n
-        sd   = (sum((x-mean)**2 for x in cn)/n) ** 0.5
-        bb_w = (mean + 2*sd) - (mean - 2*sd)
-        # TR approx for kc
-        trs6 = []
+    # squeeze: BB/KC ratio over last ~6 bars, clip 0..100
+    n=6
+    if len(C) >= n:
+        cn=C[-n:]; hn=H[-n:]; ln=L[-n:]
+        mean=sum(cn)/n; sd=(sum((x-mean)**2 for x in cn)/n) ** 0.5
+        bb_w=(mean+2*sd) - (mean-2*sd)
         prevs = cn[:-1] + [cn[-1]]
-        for h,l,p in zip(hn, ln, prevs):
-            trs6.append(max(h-l, abs(h-p), abs(l-p)))
-        kc_w = 2.0 * (sum(trs6)/len(trs6)) if trs6 else 0.0
-        sq = 100.0 * (bb_w / kc_w) if kc_w > 0 else None
-        if sq is not None: sq = float(clamp(sq, 0.0, 100.0))
+        trs6=[max(h-l, abs(h-p), abs(l-p)) for h,l,p in zip(hn,ln,prevs)]
+        kc_w=2.0 * (sum(trs6)/len(trs6)) if trs6 else 0.0
+        sq = float(clamp(100.0*(bb_w/kc_w), 0.0, 100.0)) if kc_w>0 else None
     else:
-        sq = None
+        sq=None
 
-    return sq, liq_pct, vol_pct
-
-def load_json(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_json(path, obj):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
+    return sq, liq, vol
 
 def main():
     ap = argparse.ArgumentParser()
@@ -136,49 +83,48 @@ def main():
 
     key = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_KEY")
     if not key:
-        print("WARN: no POLYGON_API_KEY — skipping repair", file=sys.stderr)
+        print("[repair] no POLYGON_API_KEY — skipping", file=sys.stderr)
         sys.exit(0)
 
-    data = load_json(args.src)
-    metrics = data.get("metrics") or {}
-
-    need_sq  = float(metrics.get("squeeze_pct", 50.0))   == 50.0
-    need_liq = float(metrics.get("liquidity_pct", 50.0)) == 50.0
-    need_vol = float(metrics.get("volatility_pct", 50.0))== 50.0
+    data = json.load(open(args.src, "r", encoding="utf-8"))
+    m = data.get("metrics") or {}
+    need_sq  = float(m.get("squeeze_pct",   50.0)) == 50.0
+    need_liq = float(m.get("liquidity_pct", 50.0)) == 50.0
+    need_vol = float(m.get("volatility_pct",50.0)) == 50.0
 
     if not (need_sq or need_liq or need_vol):
-        print("[repair] nothing to fix — metrics already set")
-        sys.exit(0)
+        print("[repair] nothing to fix"); sys.exit(0)
 
-    bars = fetch_spy_10m_bars(days=2, key=key)
-    sq, liq, vol = compute_from_bars(bars)
+    bars = fetch_spy_10m(2, key)
+    sq, liq, vol = compute_three_from(bars)
 
-    changed = False
+    changed=False
     if need_sq and sq is not None:
-        metrics["squeeze_pct"] = sq
-        metrics["squeeze_intraday_pct"] = sq
-        changed = True
+        m["squeeze_pct"] = sq
+        m["squeeze_intraday_pct"] = sq
+        changed=True
     if need_liq and liq is not None:
-        metrics["liquidity_pct"] = liq
-        metrics["liquidity_psi"] = liq
-        changed = True
+        m["liquidity_pct"] = liq
+        m["liquidity_psi"] = liq
+        changed=True
     if need_vol and vol is not None:
-        metrics["volatility_pct"] = vol
-        changed = True
+        m["volatility_pct"] = vol
+        changed=True
 
-    data["metrics"] = metrics
     if changed:
-        # optional stamp
+        data["metrics"] = m
         meta = data.get("meta") or {}
         meta["repaired_at_utc"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         data["meta"] = meta
-        save_json(args.dst, data)
-        print("[repair] updated metrics:",
-              "squeeze=", metrics.get("squeeze_pct"),
-              "liquidity=", metrics.get("liquidity_pct"),
-              "volatility=", metrics.get("volatility_pct"))
+        json.dump(data, open(args.dst, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        print("[repair] sq=", m.get("squeeze_pct"),
+              " liq=", m.get("liquidity_pct"),
+              " vol=", m.get("volatility_pct"))
     else:
         print("[repair] unable to improve metrics; leaving as-is")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("ERROR:", e, file=sys.stderr); sys.exit(2)
