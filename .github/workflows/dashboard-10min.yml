@@ -38,6 +38,8 @@ jobs:
           pip install requests python-dateutil
 
       - name: Build intraday payload
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           mkdir -p data
           python -u scripts/make_dashboard.py --mode intraday --out data/outlook_intraday.json
@@ -68,7 +70,7 @@ jobs:
         run: |
           mkdir -p /tmp/live10
           cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
-          cp -f data/heartbeat_10min.txt /tmp/live10/heartbeat_10min.txt
+          cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
 
       - name: Prepare live branch
         run: |
@@ -93,14 +95,12 @@ jobs:
           git commit -m "10m live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
           git push origin "${LIVE_BRANCH}" --force
 
-      # --- Render auto-deploy ---
       - name: Trigger Render deploy
         if: ${{ success() }}
         env:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
         run: |
           if [ -n "${RENDER_DEPLOY_HOOK:-}" ]; then
-            echo "Triggering Render deploy..."
             curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
           else
             echo "No Render deploy hook secret found. Skipping deploy."
