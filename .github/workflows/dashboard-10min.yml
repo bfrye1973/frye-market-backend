@@ -93,7 +93,15 @@ jobs:
           git commit -m "10m live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
           git push origin "${LIVE_BRANCH}" --force
 
+      # --- Render auto-deploy ---
       - name: Trigger Render deploy
-        if: ${{ success() && secrets.RENDER_DEPLOY_HOOK_BACKEND1 != '' }}
+        if: ${{ success() }}
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
         run: |
-          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}"
+          if [ -n "${RENDER_DEPLOY_HOOK:-}" ]; then
+            echo "Triggering Render deploy..."
+            curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
+          else
+            echo "No Render deploy hook secret found. Skipping deploy."
+          fi
