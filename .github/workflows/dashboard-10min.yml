@@ -20,9 +20,9 @@ jobs:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
+      HAVE_POLY: ${{ secrets.POLYGON_API_KEY != '' }}
 
     steps:
-      # -------- Repo & Python --------
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
@@ -35,62 +35,43 @@ jobs:
 
       - name: Install deps
         run: |
-          set -e
           python -m pip install --upgrade pip
-          pip install requests python-dateutil numpy
+          pip install requests python-dateutil
 
-      # -------- Build payload --------
       - name: Build dashboard payload (10-minute)
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
-          set -euo pipefail
           mkdir -p data
           python -u scripts/make_dashboard.py --mode intraday --out data/outlook_intraday.json
 
-      # -------- Make the FE happy (aliases) --------
       - name: Add intraday metric aliases
         run: |
-          set -euo pipefail
           python -u scripts/alias_intraday_metrics.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
-      # -------- Fix 50/50/50 neutrals + add scaled vol & clamp squeeze --------
-      # Safe even if Polygon key missing; will just skip
+      # Only runs if a Polygon key exists; otherwise it is skipped cleanly
       - name: Repair intraday metrics if neutral (50.0) + display fields
-        continue-on-error: true
+        if: ${{ env.HAVE_POLY == 'true' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        continue-on-error: true
         run: |
-          set -euo pipefail
-          if [ -z "${POLYGON_API_KEY:-}" ]; then
-            echo "[warn] POLYGON_API_KEY not set — skipping neutral repair"
-          else
-            python -u scripts/repair_intraday_metrics_10m.py --in data/outlook_intraday.json --out data/outlook_intraday.json
-          fi
+          python -u scripts/repair_intraday_metrics_10m.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
-      # -------- Count-based repair: Breadth/Momentum/Rising/Risk-On --------
       - name: Repair meter (counts: breadth/momentum/rising/riskOn)
         run: |
-          set -euo pipefail
           python -u scripts/repair_meter_from_counts.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
-      # -------- Heartbeat --------
       - name: Write heartbeat_10min
         run: |
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      # -------- Stage artifacts --------
       - name: Stage artifacts to /tmp
         run: |
-          set -e
           mkdir -p /tmp/live10
           cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
-          cp -f data/heartbeat_10min.txt /tmp/live10/heartbeat_10min.txt
+          cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
 
-      # -------- Publish to LIVE branch --------
       - name: Prepare live branch
         run: |
-          set -e
           git config user.name  "actions-bot"
           git config user.email "bot@users.noreply.github.com"
           git reset --hard
@@ -108,7 +89,12 @@ jobs:
 
       - name: Commit & Push live branch
         run: |
-          set -e
           git add data
           git commit -m "10m live @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
           git push origin "${LIVE_BRANCH}" --force
+
+      # Auto-deploy Render backend-1 after a successful run (uses Deploy Hook secret)
+      - name: Trigger Render deploy (backend-1)
+        if: ${{ success() && secrets.RENDER_DEPLOY_HOOK_BACKEND1 != '' }}
+        run: |
+          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}"
