@@ -1,36 +1,37 @@
 {
-  "updated_at": "2025-10-19T15:48:48-07:00",
-  "updated_at_utc": "2025-10-19T22:48:48Z",
-  "timestamp": "2025-10-19T22:48:48Z",
+  "updated_at": "2025-10-19T16:02:57",
+  "updated_at_utc": "2025-10-19T23:02:57Z",
+  "timestamp": "2025-10-19T23:02:57Z",
   "metrics": {
     "breadth_pct": 81.98,
     "momentum_pct": 66.76,
     "ema_cross": "none",
     "ema10_dist_pct": 0.06,
     "ema_sign": 1,
-    "squeeze_pct": 50.0,
-    "liquidity_pct": 50.0,
-    "volatility_pct": 50.0,
-    "squeeze_intraday_pct": 50.0,
-    "liquidity_psi": 50.0
+    "squeeze_pct": 100.0,
+    "liquidity_pct": 8.39,
+    "volatility_pct": 0.059,
+    "volatility_scaled": 0.37,
+    "squeeze_intraday_pct": 100.0,
+    "liquidity_psi": 8.39
   },
   "intraday": {
-    "riskOn10m": {
-      "riskOnPct": 42.86
-    },
     "sectorDirection10m": {
       "risingPct": 100.0
     },
+    "riskOn10m": {
+      "riskOnPct": 42.86
+    },
     "overall10m": {
-      "state": "neutral",
-      "score": 18,
+      "state": "bull",
+      "score": 69,
       "components": {
         "ema10": 4,
         "momentum": 8,
         "breadth": 6,
-        "squeeze": 0,
-        "liquidity": 0,
-        "riskOn": 0
+        "squeeze": 10,
+        "liquidity": -8,
+        "riskOn": -1
       },
       "just_crossed": false
     }
@@ -159,20 +160,20 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-19T15:48:48-07:00",
+    "updatedAt": "2025-10-19T16:02:57",
     "mode": "intraday",
     "live": true,
     "signals": {
       "sigOverallBull": {
-        "active": false,
+        "active": true,
         "severity": "info",
-        "reason": "",
-        "lastChanged": null
+        "reason": "state=bull score=69",
+        "lastChanged": "2025-10-19T16:02:57"
       },
       "sigOverallBear": {
         "active": false,
-        "severity": "info",
-        "reason": "",
+        "severity": "warn",
+        "reason": "state=bull score=69",
         "lastChanged": null
       },
       "sigEMA10BullCross": {
@@ -191,7 +192,7 @@
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=148.7",
-        "lastChanged": "2025-10-19T15:48:48-07:00"
+        "lastChanged": "2025-10-19T16:02:57"
       },
       "sigAccelDown": {
         "active": false,
@@ -202,31 +203,31 @@
       "sigRiskOn": {
         "active": false,
         "severity": "info",
-        "reason": "riskOn=50.0",
+        "reason": "riskOn=42.9",
         "lastChanged": null
       },
       "sigRiskOff": {
         "active": false,
         "severity": "warn",
-        "reason": "riskOn=50.0",
+        "reason": "riskOn=42.9",
         "lastChanged": null
       },
       "sigSectorThrust": {
-        "active": false,
+        "active": true,
         "severity": "info",
-        "reason": "rising%=0.0",
-        "lastChanged": null
+        "reason": "rising%=100.0",
+        "lastChanged": "2025-10-19T16:02:57"
       },
       "sigSectorWeak": {
-        "active": true,
+        "active": false,
         "severity": "warn",
-        "reason": "rising%=0.0",
-        "lastChanged": "2025-10-19T15:48:48-07:00"
+        "reason": "rising%=100.0",
+        "lastChanged": null
       }
     }
   },
   "meta": {
-    "aliased_at_utc": "2025-10-19T22:48:48Z",
+    "aliased_at_utc": "2025-10-19T23:02:57Z",
     "source": "mirror",
     "sandbox": true
   },
@@ -296,5 +297,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-19T16:03:15-07:00"
+  "deltasUpdatedAt": "2025-10-19T16:20:57-07:00"
 }
