@@ -1,19 +1,18 @@
 {
-  "updated_at": "2025-10-19T15:32:46-07:00",
-  "updated_at_utc": "2025-10-19T22:32:46Z",
-  "timestamp": "2025-10-19T22:32:46Z",
+  "updated_at": "2025-10-19T15:48:48-07:00",
+  "updated_at_utc": "2025-10-19T22:48:48Z",
+  "timestamp": "2025-10-19T22:48:48Z",
   "metrics": {
     "breadth_pct": 81.98,
     "momentum_pct": 66.76,
     "ema_cross": "none",
     "ema10_dist_pct": 0.06,
     "ema_sign": 1,
-    "squeeze_pct": 100.0,
-    "liquidity_pct": 64.44665102159746,
-    "volatility_pct": 0.05867270588473025,
-    "squeeze_intraday_pct": 100.0,
-    "liquidity_psi": 64.44665102159746,
-    "volatility_scaled": 0.37
+    "squeeze_pct": 50.0,
+    "liquidity_pct": 50.0,
+    "volatility_pct": 50.0,
+    "squeeze_intraday_pct": 50.0,
+    "liquidity_psi": 50.0
   },
   "intraday": {
     "riskOn10m": {
@@ -160,7 +159,7 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-19T15:32:46-07:00",
+    "updatedAt": "2025-10-19T15:48:48-07:00",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -192,7 +191,7 @@
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=148.7",
-        "lastChanged": "2025-10-19T15:32:46-07:00"
+        "lastChanged": "2025-10-19T15:48:48-07:00"
       },
       "sigAccelDown": {
         "active": false,
@@ -222,13 +221,12 @@
         "active": true,
         "severity": "warn",
         "reason": "rising%=0.0",
-        "lastChanged": "2025-10-19T15:32:46-07:00"
+        "lastChanged": "2025-10-19T15:48:48-07:00"
       }
     }
   },
   "meta": {
-    "aliased_at_utc": "2025-10-19T22:32:46Z",
-    "repaired_at_utc": "2025-10-19T22:32:47Z",
+    "aliased_at_utc": "2025-10-19T22:48:48Z",
     "source": "mirror",
     "sandbox": true
   },
@@ -298,5 +296,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-19T15:48:44-07:00"
+  "deltasUpdatedAt": "2025-10-19T15:58:07-07:00"
 }
