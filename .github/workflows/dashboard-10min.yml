@@ -3,8 +3,8 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "*/7 12 * * 1-5"     # pre-open
-    - cron: "*/7 13-20 * * 1-5"  # RTH
+    - cron: "*/7 12 * * 1-5"      # pre-open
+    - cron: "*/7 13-20 * * 1-5"   # RTH
 
 jobs:
   tenmin:
@@ -59,14 +59,20 @@ jobs:
             --out data/outlook_intraday.json
 
       # -------- Fix 50/50/50 neutrals + add scaled vol & clamp squeeze --------
+      # Non-fatal so Polygon hiccups don’t break the run
       - name: Repair intraday metrics if neutral (50.0) + display fields
+        continue-on-error: true
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
-          python -u scripts/repair_intraday_metrics_10m.py \
-            --in  data/outlook_intraday.json \
-            --out data/outlook_intraday.json
+          if [ -n "${POLYGON_API_KEY:-}" ]; then
+            python -u scripts/repair_intraday_metrics_10m.py \
+              --in  data/outlook_intraday.json \
+              --out data/outlook_intraday.json
+          else
+            echo "[warn] POLYGON_API_KEY not set — skipping neutral repair"
+          fi
 
       # -------- Count-based repair: Breadth/Momentum/Rising/Risk-On --------
       - name: Repair meter (counts: breadth/momentum/rising/riskOn)
