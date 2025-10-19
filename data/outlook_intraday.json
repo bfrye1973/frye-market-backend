@@ -1,31 +1,32 @@
 {
-  "updated_at": "2025-10-17T15:00:31-07:00",
-  "updated_at_utc": "2025-10-17T22:00:31Z",
-  "timestamp": "2025-10-17T22:00:31Z",
+  "updated_at": "2025-10-19T15:31:30-07:00",
+  "updated_at_utc": "2025-10-19T22:31:30Z",
+  "timestamp": "2025-10-19T22:31:30Z",
   "metrics": {
-    "breadth_pct": 79.77,
-    "momentum_pct": 61.22,
+    "breadth_pct": 81.98,
+    "momentum_pct": 66.76,
     "ema_cross": "none",
-    "ema10_dist_pct": 0.02,
+    "ema10_dist_pct": 0.06,
     "ema_sign": 1,
     "squeeze_pct": 100.0,
-    "liquidity_pct": 3.8445052590251985,
-    "volatility_pct": 0.02303537790606611,
+    "liquidity_pct": 64.44665102159746,
+    "volatility_pct": 0.05867270588473025,
     "squeeze_intraday_pct": 100.0,
-    "liquidity_psi": 3.8445052590251985
+    "liquidity_psi": 64.44665102159746,
+    "volatility_scaled": 0.37
   },
   "intraday": {
     "riskOn10m": {
-      "riskOnPct": 50.0
+      "riskOnPct": 42.86
     },
     "sectorDirection10m": {
-      "risingPct": 0.0
+      "risingPct": 100.0
     },
     "overall10m": {
       "state": "neutral",
-      "score": 15,
+      "score": 18,
       "components": {
-        "ema10": 1,
+        "ema10": 4,
         "momentum": 8,
         "breadth": 6,
         "squeeze": 0,
@@ -159,7 +160,7 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-17T15:00:31-07:00",
+    "updatedAt": "2025-10-19T15:31:30-07:00",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -191,7 +192,7 @@
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=148.7",
-        "lastChanged": "2025-10-17T15:00:31-07:00"
+        "lastChanged": "2025-10-19T15:31:30-07:00"
       },
       "sigAccelDown": {
         "active": false,
@@ -221,13 +222,13 @@
         "active": true,
         "severity": "warn",
         "reason": "rising%=0.0",
-        "lastChanged": "2025-10-17T15:00:31-07:00"
+        "lastChanged": "2025-10-19T15:31:30-07:00"
       }
     }
   },
   "meta": {
-    "aliased_at_utc": "2025-10-17T22:00:31Z",
-    "repaired_at_utc": "2025-10-17T22:00:32Z",
+    "aliased_at_utc": "2025-10-19T22:31:30Z",
+    "repaired_at_utc": "2025-10-19T22:31:31Z",
     "source": "mirror",
     "sandbox": true
   },
@@ -297,5 +298,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-19T15:31:51-07:00"
+  "deltasUpdatedAt": "2025-10-19T15:32:14-07:00"
 }
