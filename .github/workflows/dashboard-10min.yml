@@ -47,7 +47,7 @@ jobs:
         run: |
           python -u scripts/alias_intraday_metrics.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
-      # Only runs if a Polygon key exists; otherwise it is skipped cleanly
+      # Only runs when POLYGON_API_KEY exists
       - name: Repair intraday metrics if neutral (50.0) + display fields
         if: ${{ env.HAVE_POLY == 'true' }}
         env:
@@ -93,7 +93,6 @@ jobs:
           git commit -m "10m live @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
           git push origin "${LIVE_BRANCH}" --force
 
-      # Auto-deploy Render backend-1 after a successful run (uses Deploy Hook secret)
       - name: Trigger Render deploy (backend-1)
         if: ${{ success() && secrets.RENDER_DEPLOY_HOOK_BACKEND1 != '' }}
         run: |
