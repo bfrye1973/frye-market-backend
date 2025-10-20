@@ -1,19 +1,19 @@
 {
-  "updated_at": "2025-10-20T00:54:24",
-  "updated_at_utc": "2025-10-20T07:54:24Z",
-  "timestamp": "2025-10-20T07:54:24Z",
+  "updated_at": "2025-10-20T01:21:30",
+  "updated_at_utc": "2025-10-20T08:21:30Z",
+  "timestamp": "2025-10-20T08:21:30Z",
   "metrics": {
     "breadth_pct": 81.98,
     "momentum_pct": 66.76,
     "ema_cross": "none",
-    "ema10_dist_pct": 0.06,
+    "ema10_dist_pct": 0.15,
     "ema_sign": 1,
     "squeeze_pct": 100.0,
-    "liquidity_pct": 8.39,
-    "volatility_pct": 0.059,
-    "volatility_scaled": 0.37,
+    "liquidity_pct": 11.53,
+    "volatility_pct": 0.125,
+    "volatility_scaled": 0.78,
     "squeeze_intraday_pct": 100.0,
-    "liquidity_psi": 8.39
+    "liquidity_psi": 11.53
   },
   "intraday": {
     "sectorDirection10m": {
@@ -24,9 +24,9 @@
     },
     "overall10m": {
       "state": "bull",
-      "score": 69,
+      "score": 75,
       "components": {
-        "ema10": 4,
+        "ema10": 10,
         "momentum": 8,
         "breadth": 6,
         "squeeze": 10,
@@ -160,20 +160,20 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-20T00:54:24",
+    "updatedAt": "2025-10-20T01:21:30",
     "mode": "intraday",
     "live": true,
     "signals": {
       "sigOverallBull": {
         "active": true,
         "severity": "info",
-        "reason": "state=bull score=69",
-        "lastChanged": "2025-10-20T00:54:24"
+        "reason": "state=bull score=75",
+        "lastChanged": "2025-10-20T01:21:30"
       },
       "sigOverallBear": {
         "active": false,
         "severity": "warn",
-        "reason": "state=bull score=69",
+        "reason": "state=bull score=75",
         "lastChanged": null
       },
       "sigEMA10BullCross": {
@@ -192,7 +192,7 @@
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=148.7",
-        "lastChanged": "2025-10-20T00:54:24"
+        "lastChanged": "2025-10-20T01:21:30"
       },
       "sigAccelDown": {
         "active": false,
@@ -216,7 +216,7 @@
         "active": true,
         "severity": "info",
         "reason": "rising%=100.0",
-        "lastChanged": "2025-10-20T00:54:24"
+        "lastChanged": "2025-10-20T01:21:30"
       },
       "sigSectorWeak": {
         "active": false,
@@ -227,7 +227,7 @@
     }
   },
   "meta": {
-    "aliased_at_utc": "2025-10-20T07:54:24Z",
+    "aliased_at_utc": "2025-10-20T08:21:30Z",
     "source": "mirror",
     "sandbox": true
   },
@@ -297,5 +297,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-20T01:21:28-07:00"
+  "deltasUpdatedAt": "2025-10-20T01:43:50-07:00"
 }
