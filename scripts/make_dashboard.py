@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 """
-Ferrari Dashboard — make_dashboard.py (10m + Engine Lights, R11 clean)
+Ferrari Dashboard — make_dashboard.py (Intraday 10m, R11 clean)
 
 What this builds (intraday only):
 - metrics:
-    breadth_pct, momentum_pct      ← from sectorCards counts (ΣNH/(NH+NL), ΣUp/(Up+Down))
-    squeeze_pct (0..100)           ← SPY 10m BB/KC over last ~6 bars (clamped)
-    liquidity_pct (0..200)         ← 100 * EMA(vol,3)/EMA(vol,12), floor 0
-    volatility_pct (small %)       ← 100 * EMA(TR,3)/close (last closed 10m bar)
-    volatility_scaled              ← volatility_pct * 6.25 (display only)
+    breadth_pct                 ← ΣNH / (ΣNH + ΣNL)
+    momentum_pct                ← ΣUp / (ΣUp + ΣDown)
+    squeeze_pct                 ← (100 - BB/KC over last ~6 × 10m bars)  # higher = EXPANSION (inverted)
+    liquidity_pct               ← 100 × EMA(Vol,3)/EMA(Vol,12), clamped [0..200]
+    volatility_pct              ← 100 × EMA(TR,3)/Close  (small % for 10m)
+    volatility_scaled           ← volatility_pct × 6.25   (daily feel — display only)
     ema_cross, ema10_dist_pct, ema_sign
 - intraday:
     overall10m { state, score, components, just_crossed }
-    sectorDirection10m.risingPct   ← % sectors breadth>50
-    riskOn10m.riskOnPct            ← (#offensive>50 + #defensive<50)/considered * 100
-- engineLights.signals             ← R11 lights (overall, EMA crosses, accel, risk, thrust)
+    sectorDirection10m.risingPct
+    riskOn10m.riskOnPct
+- engineLights.signals          ← Overall, EMA crosses, Accel, RiskOn/Off, Sector Thrust/Weak
 
 Safe behavior:
 - If Polygon key is missing or bars are short, we still publish (fill what we can).
-- Hourly URL is used only as a fallback to get sectorCards if source isn’t provided.
+- Hourly URL is used only as a fallback to get sectorCards if --source isn’t provided.
 """
 
 from __future__ import annotations
@@ -163,7 +164,8 @@ def summarize_sector_cards_count_metrics(cards: List[dict]) -> Tuple[float, floa
     return (round(breadth, 2), round(momentum, 2), round(rising, 2), round(risk_on, 2))
 
 # ------------------------- Bars → intraday metrics -------------------------
-def squeeze_pct_10m(H: List[float], L: List[float], C: List[float], lookback: int = 6) -> Optional[float]:
+def squeeze_raw_bbkc(H: List[float], L: List[float], C: List[float], lookback: int = 6) -> Optional[float]:
+    """BB/KC compression % (0..100; higher = tighter)."""
     n = lookback
     if min(len(H), len(L), len(C)) < n:
         return None
@@ -224,7 +226,7 @@ def compute_overall10m(
 
     momentum_pts = lin_points(momentum_pct, W_MOM)
     breadth_pts  = lin_points(breadth_pct,  W_BR)
-    squeeze_pts  = lin_points(squeeze_pct,  W_SQ)
+    squeeze_pts  = lin_points(squeeze_pct,  W_SQ)  # now higher = EXPANSION
     liq_pts      = lin_points(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
     riskon_pts   = lin_points(riskon_pct,   W_RISK)
 
@@ -328,7 +330,10 @@ def build_intraday(source_js: Optional[dict] = None, hourly_url: str = HOURLY_UR
     V = [b["volume"] for b in spy_bars]
 
     # squeeze/liquidity/volatility (safe if missing bars)
-    sq = squeeze_pct_10m(H, L, C) if spy_bars else None
+    sq_raw = squeeze_raw_bbkc(H, L, C) if spy_bars else None
+    # Invert squeeze so HIGH = EXPANSION (matches user intuition and LuxAlgo feel)
+    sq = (100.0 - sq_raw) if sq_raw is not None else None
+
     liq = liquidity_pct_10m(V) if spy_bars else None
     vol = volatility_pct_10m(H, L, C) if spy_bars else None
     vol_scaled = volatility_scaled(vol)
@@ -366,7 +371,7 @@ def build_intraday(source_js: Optional[dict] = None, hourly_url: str = HOURLY_UR
         "ema_cross": ema_cross,
         "ema10_dist_pct": round(ema10_dist, 2),
         "ema_sign": int(ema_sign),
-        "squeeze_pct": round((sq if sq is not None else 50.0), 2),
+        "squeeze_pct": round((sq if sq is not None else 50.0), 2),         # HIGH = EXPANSION
         "liquidity_pct": round((liq if liq is not None else 50.0), 2),
         "volatility_pct": round((vol if vol is not None else 0.0), 3),
         "volatility_scaled": vol_scaled,
@@ -396,6 +401,62 @@ def build_intraday(source_js: Optional[dict] = None, hourly_url: str = HOURLY_UR
     return out
 
 # ------------------------------ CLI -------------------------------
+def build_engine_lights_signals(curr: dict, prev: Optional[dict], ts_local: str) -> dict:
+    # kept identical to the prior version you approved
+    m  = curr.get("metrics", {})
+    it = curr.get("intraday", {})
+    ov = it.get("overall10m", {}) if isinstance(it, dict) else {}
+
+    pm = (prev or {}).get("metrics", {}) if isinstance(prev, dict) else {}
+    db = (m.get("breadth_pct") or 0) - (pm.get("breadth_pct") or 0)
+    dm = (m.get("momentum_pct") or 0) - (pm.get("momentum_pct") or 0)
+    accel = (db or 0) + (dm or 0)
+
+    risk_fast   = float(it.get("riskOn10m", {}).get("riskOnPct", 50.0))
+    rising_fast = float(it.get("sectorDirection10m", {}).get("risingPct", 0.0))
+
+    ACCEL_INFO = 4.0
+    RISK_INFO  = 58.0
+    RISK_WARN  = 42.0
+    THRUST_ON  = 58.0
+    THRUST_OFF = 42.0
+
+    sig = {}
+    state = str(ov.get("state") or "neutral").lower()
+    score = int(ov.get("score") or 0)
+
+    sig["sigOverallBull"] = {"active": state == "bull" and score >= 10, "severity": "info",
+                             "reason": f"state={state} score={score}",
+                             "lastChanged": ts_local if state == "bull" and score >= 10 else None}
+    sig["sigOverallBear"] = {"active": state == "bear" and score <= -10, "severity": "warn",
+                             "reason": f"state={state} score={score}",
+                             "lastChanged": ts_local if state == "bear" and score <= -10 else None}
+
+    ema_cross = str(m.get("ema_cross") or "none")
+    just_crossed = bool(ov.get("just_crossed"))
+    bull_cross = just_crossed and ema_cross == "bull"
+    bear_cross = just_crossed and ema_cross == "bear"
+    sig["sigEMA10BullCross"] = {"active": bull_cross, "severity": "info",
+                                "reason": f"ema_cross={ema_cross}", "lastChanged": ts_local if bull_cross else None}
+    sig["sigEMA10BearCross"] = {"active": bear_cross, "severity": "warn",
+                                "reason": f"ema_cross={ema_cross}", "lastChanged": ts_local if bear_cross else None}
+
+    sig["sigAccelUp"]   = {"active": accel >=  ACCEL_INFO, "severity": "info",
+                           "reason": f"Δb+Δm={accel:.1f}", "lastChanged": ts_local if accel >=  ACCEL_INFO else None}
+    sig["sigAccelDown"] = {"active": accel <= -ACCEL_INFO, "severity": "warn",
+                           "reason": f"Δb+Δm={accel:.1f}", "lastChanged": ts_local if accel <= -ACCEL_INFO else None}
+
+    sig["sigRiskOn"]  = {"active": risk_fast >= RISK_INFO, "severity": "info",
+                         "reason": f"riskOn={risk_fast:.1f}", "lastChanged": ts_local if risk_fast >= RISK_INFO else None}
+    sig["sigRiskOff"] = {"active": risk_fast <= RISK_WARN, "severity": "warn",
+                         "reason": f"riskOn={risk_fast:.1f}", "lastChanged": ts_local if risk_fast <= RISK_WARN else None}
+
+    sig["sigSectorThrust"] = {"active": rising_fast >= THRUST_ON,  "severity": "info",
+                              "reason": f"rising%={rising_fast:.1f}", "lastChanged": ts_local if rising_fast >= THRUST_ON else None}
+    sig["sigSectorWeak"]   = {"active": rising_fast <= THRUST_OFF, "severity": "warn",
+                              "reason": f"rising%={rising_fast:.1f}", "lastChanged": ts_local if rising_fast <= THRUST_OFF else None}
+    return sig
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="intraday")
@@ -419,7 +480,6 @@ def main():
 
     out = build_intraday(source_js=source_js, hourly_url=args.hourly_url)
 
-    # Engine lights (safe)
     ts_local = out.get("updated_at") or datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S")
     try:
         signals = build_engine_lights_signals(curr=out, prev=prev_out, ts_local=ts_local)
@@ -431,10 +491,10 @@ def main():
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
-    print("[ok] wrote", args.out)
     ov = out["intraday"]["overall10m"]
-    print("overall10m.state=", ov["state"], "score=", ov["score"],
-          "ema_sign=", out["metrics"]["ema_sign"], "ema10_dist_pct=", out["metrics"]["ema10_dist_pct"])
+    print("[ok] wrote", args.out,
+          "| overall10m.state=", ov["state"], "score=", ov["score"],
+          "| ema_sign=", out["metrics"]["ema_sign"], "ema10_dist_pct=", out["metrics"]["ema10_dist_pct"])
 
 if __name__ == "__main__":
     try:
