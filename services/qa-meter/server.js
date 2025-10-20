@@ -1,256 +1,172 @@
-// services/qa-meter/server.js
-// QA Meter microservice (ESM) — independent of Core
-// Routes:
-//   GET /__up            -> "UP"
-//   GET /__routes        -> list all mounted routes
-//   GET /healthz         -> { ok, service, ts }
-//   GET /qa/meter        -> verify intraday (10m) snapshot math
-//   GET /qa/hourly       -> verify hourly (1h) snapshot math
-
+#!/usr/bin/env node
+/* eslint-disable no-console */
 import express from "express";
 
-/* -------------------------- Ensure global fetch --------------------------- */
-if (typeof globalThis.fetch !== "function") {
-  const { default: nodeFetch } = await import("node-fetch");
-  globalThis.fetch = nodeFetch;
-}
-
-/* --------------------------------- App ----------------------------------- */
-const app = express();
+/* =========================
+   Config (via env)
+   ========================= */
 const PORT = process.env.PORT || 3000;
 
-/* --------------------------------- CORS ---------------------------------- */
-const ALLOW = new Set([
-  "https://frye-dashboard.onrender.com",
-  "http://localhost:3000",
-]);
-app.use((req, res, next) => {
-  const o = req.headers.origin;
-  if (o && ALLOW.has(o)) res.setHeader("Access-Control-Allow-Origin", o);
-  res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.sendStatus(204);
-  next();
-});
-
-/* --------------------------- Repo/branch config -------------------------- */
+// Where to read your live intraday JSON (for reference links in output)
 const RAW_OWNER  = process.env.RAW_OWNER  || "bfrye1973";
 const RAW_REPO   = process.env.RAW_REPO   || "frye-market-backend";
+const RAW_BRANCH = process.env.RAW_BRANCH || "data-live-10min";
+const RAW_PATH_INTRADAY = process.env.RAW_PATH_INTRADAY || "data/outlook_intraday.json";
 
-/* Intraday (10m) */
-const RAW_BRANCH          = process.env.RAW_BRANCH          || "data-live-10min";
-const RAW_PATH_INTRADAY   = process.env.RAW_PATH_INTRADAY   || "data/outlook_intraday.json";
+// Polygon
+const POLY_KEY  = process.env.POLYGON_API_KEY || process.env.POLY_KEY || "";
 
-/* Hourly (1h) */
-const RAW_BRANCH_HOURLY   = process.env.RAW_BRANCH_HOURLY   || "data-live-hourly";
-const RAW_PATH_HOURLY     = process.env.RAW_PATH_HOURLY     || "data/outlook_hourly.json";
+/* =========================
+   Helpers
+   ========================= */
+const app = express();
 
-/* URL builders */
-const rawUrl = (branch, pathStr) =>
-  `https://raw.githubusercontent.com/${RAW_OWNER}/${RAW_REPO}/${branch}/${pathStr}?t=${Date.now()}`;
-
-/* ------------------------------- Helpers --------------------------------- */
-const pct = (a, b) => (b === 0 ? 0 : 100 * a / b);
-const OFF = new Set(["Information Technology","Communication Services","Consumer Discretionary"]);
-const DEF = new Set(["Consumer Staples","Utilities","Health Care","Real Estate"]);
-
-function summarizeFromCards(cards = []) {
-  let NH=0, NL=0, UP=0, DN=0, rising=0, offUp=0, defDn=0;
-  for (const c of cards) {
-    const nh=+c.nh||0, nl=+c.nl||0, up=+c.up||0, dn=+c.down||0;
-    NH+=nh; NL+=nl; UP+=up; DN+=dn;
-    const b = pct(nh, nh+nl);
-    if (b > 50) rising++;
-    const sec = String(c.sector || "");
-    if (OFF.has(sec) && b > 50) offUp++;
-    if (DEF.has(sec) && b < 50) defDn++;
-  }
-  return {
-    NH, NL, UP, DN, rising, offUp, defDn,
-    breadth_pct:  pct(NH, NH+NL),
-    momentum_pct: pct(UP, UP+DN),
-    risingPct:    pct(rising, 11),
-    riskOnPct:    pct(offUp + defDn, OFF.size + DEF.size),
-  };
-}
-
-function line(label, live, calc, tol) {
-  const d  = +((live - calc)).toFixed(2);
-  const ok = Math.abs(d) <= tol;
-  return `${ok ? "✅" : "❌"} ${label.padEnd(12)} live=${live.toFixed(2).padStart(6)}  calc=${calc.toFixed(2).padStart(6)}  Δ=${d>=0?"+":""}${d.toFixed(2)} (tol ±${tol})`;
-}
-
-/* ------------------------------ Diagnostics ------------------------------ */
 app.get("/__up", (_req, res) => res.type("text").send("UP"));
-
 app.get("/__routes", (_req, res) => {
-  const out = [];
-  const stack = app._router?.stack || [];
-  for (const layer of stack) {
-    if (layer.route?.path) {
-      const m = Object.keys(layer.route.methods).join(",").toUpperCase();
-      out.push(`${m.padEnd(6)} ${layer.route.path}`);
+  res.json({
+    routes: ["/__up", "/__routes", "/qa/meter (existing)", "/qa/ema10 (existing)", "/qa/bars"],
+  });
+});
+
+// small util
+const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+const emaLast = (arr, span) => {
+  if (!arr || !arr.length) return null;
+  const k = 2 / (span + 1);
+  let e = null;
+  for (const v of arr) e = e === null ? v : e + k * (v - e);
+  return e;
+};
+
+function trSeries(H, L, C) {
+  const trs = [];
+  for (let i = 1; i < C.length; i++) {
+    trs.push(Math.max(H[i] - L[i], Math.abs(H[i] - C[i - 1]), Math.abs(L[i] - C[i - 1])));
+  }
+  return trs;
+}
+
+async function fetchJson(url, opts) {
+  const r = await fetch(url, { ...opts, headers: { "User-Agent": "qa-meter/1.0" } });
+  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+  return await r.json();
+}
+
+function dropInflight10m(bars) {
+  if (!bars || !bars.length) return bars;
+  const BUCKET = 600;
+  const now = Math.floor(Date.now() / 1000);
+  const currBucket = Math.floor(now / BUCKET) * BUCKET;
+  const lastBucket = Math.floor(bars[bars.length - 1].t / 1000 / BUCKET) * BUCKET;
+  if (lastBucket === currBucket) return bars.slice(0, -1);
+  return bars;
+}
+
+function computeSqueeze(H, L, C, lookback = 6) {
+  if (!C || C.length < lookback) return null;
+  const n = lookback;
+  const cn = C.slice(-n);
+  const hn = H.slice(-n);
+  const ln = L.slice(-n);
+
+  const mean = cn.reduce((a, b) => a + b, 0) / n;
+  const sd = Math.sqrt(cn.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n);
+  const bbWidth = (mean + 2 * sd) - (mean - 2 * sd); // 4*sd
+
+  const prevs = cn.slice(0, -1).concat(cn[cn.length - 1]);
+  const trs6 = hn.map((h, i) => Math.max(h - ln[i], Math.abs(h - prevs[i]), Math.abs(ln[i] - prevs[i])));
+  const kcWidth = 2.0 * (trs6.reduce((a, b) => a + b, 0) / trs6.length);
+  if (kcWidth <= 0) return null;
+
+  return clamp(100 * (bbWidth / kcWidth), 0, 100);
+}
+
+function computeLiquidityPSI(V) {
+  if (!V || !V.length) return null;
+  const v3 = emaLast(V, 3);
+  const v12 = emaLast(V, 12);
+  if (!v12 || v12 <= 0) return 0;
+  return clamp(100 * (v3 / v12), 0, 200);
+}
+
+function computeVolatilityPct(H, L, C) {
+  if (!C || !C.length) return null;
+  if (C.length >= 2) {
+    const trs = trSeries(H, L, C);
+    const atrFast = emaLast(trs, 3);
+    if (atrFast && C[C.length - 1] > 0) return Math.max(0, 100 * (atrFast / C[C.length - 1]));
+    return null;
+  } else {
+    const tr = Math.max(H[0] - L[0], Math.abs(H[0] - C[0]), Math.abs(L[0] - C[0]));
+    return C[0] > 0 ? Math.max(0, 100 * (tr / C[0])) : 0;
+  }
+}
+
+/* =========================
+   /qa/bars
+   =========================
+   Params:
+     symbol=SPY
+     from=YYYY-MM-DD (UTC)
+     to=YYYY-MM-DD   (UTC)
+   Defaults: last 2 calendar days
+   Output: plain text with Squeeze, Liquidity PSI, Volatility %, Volatility Scaled
+*/
+app.get("/qa/bars", async (req, res) => {
+  res.type("text");
+  try {
+    const symbol = (req.query.symbol || "SPY").toUpperCase();
+    const to = req.query.to || new Date().toISOString().slice(0, 10);
+    const from = req.query.from || new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
+
+    if (!POLY_KEY) {
+      res.status(200).send("ERROR: POLYGON_API_KEY not set in env.\n");
+      return;
     }
-  }
-  res.type("text").send(out.sort().join("\n"));
-});
 
-app.get("/healthz", (_req, res) =>
-  res.json({ ok: true, service: "qa-meter", ts: new Date().toISOString() })
-);
+    const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/10/minute/${from}/${to}?adjusted=true&sort=asc&limit=50000&apiKey=${POLY_KEY}`;
+    const js = await fetchJson(url);
+    let rows = Array.isArray(js.results) ? js.results : [];
+    if (!rows.length) {
+      res.status(200).send(`No bars returned for ${symbol} ${from}→${to}\n`);
+      return;
+    }
 
-/* --------------------------- /qa/meter (10m) ----------------------------- */
-app.get("/qa/meter", async (_req, res) => {
-  try {
-    const url = rawUrl(RAW_BRANCH, RAW_PATH_INTRADAY);
-    const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) return res.status(r.status).json({ ok:false, error:`raw ${r.status}` });
-    const j = await r.json();
+    // drop in-flight
+    rows = dropInflight10m(rows);
 
-    const cards = Array.isArray(j?.sectorCards) ? j.sectorCards : [];
-    const s = summarizeFromCards(cards);
+    const H = rows.map(r => +r.h);
+    const L = rows.map(r => +r.l);
+    const C = rows.map(r => +r.c);
+    const V = rows.map(r => +r.v);
 
-    const live = {
-      breadth_pct: +(j?.metrics?.breadth_pct ?? 0),
-      momentum_pct: +(j?.metrics?.momentum_pct ?? 0),
-      risingPct:    +((j?.intraday?.sectorDirection10m)?.risingPct ?? 0),
-      riskOnPct:    +((j?.intraday?.riskOn10m)?.riskOnPct ?? 0),
-    };
+    const squeeze = computeSqueeze(H, L, C, 6);
+    const psi = computeLiquidityPSI(V);
+    const vol = computeVolatilityPct(H, L, C);
+    const volScaled = vol != null ? +(vol * 6.25).toFixed(2) : null;
 
-    const tol = { breadth_pct: 0.25, momentum_pct: 0.25, risingPct: 0.5, riskOnPct: 0.5 };
-    const rows = [
-      line("Breadth %",  live.breadth_pct,  s.breadth_pct,  tol.breadth_pct),
-      line("Momentum %", live.momentum_pct, s.momentum_pct, tol.momentum_pct),
-      line("Rising %",   live.risingPct,    s.risingPct,    tol.risingPct),
-      line("Risk-On %",  live.riskOnPct,    s.riskOnPct,    tol.riskOnPct),
-    ];
-    const pass   = rows.every(r => r.startsWith("✅"));
-    const stamp  = (j?.updated_at || j?.updated_at_utc || "").toString();
-    const overall= j?.intraday?.overall10m || {};
-    const comps  = overall.components || {};
-    const emaX   = String(j?.metrics?.ema_cross ?? "n/a");
-    const emaD   = Number(j?.metrics?.ema10_dist_pct ?? NaN);
+    const lastTs = new Date((rows.at(-1).t)).toISOString();
 
-    res.setHeader("Cache-Control", "no-store");
-    res.type("text").send([
-      `QA Meter Check  (${stamp})`,
-      `Source: ${url.replace(/\?.*$/,"")}`,
-      "",
-      ...rows, "",
-      `Overall10m: state=${String(overall.state ?? "n/a")}  score=${Number.isFinite(+overall.score)?overall.score:"n/a"}`,
-      `  ema_cross=${emaX}  ema10_dist_pct=${Number.isFinite(emaD)?emaD.toFixed(2)+"%":"n/a"}`,
-      `  components:`,
-      `    ema10=${comps.ema10??"n/a"}  momentum=${comps.momentum??"n/a"}  breadth=${comps.breadth??"n/a"}`,
-      `    squeeze=${comps.squeeze??"n/a"}  liquidity=${comps.liquidity??"n/a"}  riskOn=${comps.riskOn??"n/a"}`,
-      "",
-      `Summary: ${pass ? "PASS ✅" : "FAIL ❌"}`,
-      ""
-    ].join("\n"));
+    const src = `https://raw.githubusercontent.com/${RAW_OWNER}/${RAW_REPO}/${RAW_BRANCH}/${RAW_PATH_INTRADAY}`;
+    let out = "";
+    out += `QA Bars Check  (${new Date().toISOString()})\n`;
+    out += `Source: ${src}\n`;
+    out += `Symbol: ${symbol}  Bars used: ${rows.length}  last_ts: ${lastTs}\n\n`;
+
+    out += `Squeeze %        : ${squeeze != null ? squeeze.toFixed(2) : "N/A"}\n`;
+    out += `Liquidity PSI    : ${psi != null ? psi.toFixed(2) : "N/A"}\n`;
+    out += `Volatility %     : ${vol != null ? vol.toFixed(3) : "N/A"}\n`;
+    out += `Volatility scaled: ${volScaled != null ? volScaled.toFixed(2) : "N/A"}\n`;
+
+    res.send(out);
   } catch (e) {
-    res.status(500).json({ ok:false, error:String(e?.message||e) });
+    res.status(200).send(`ERROR: ${e.message || String(e)}\n`);
   }
 });
 
-/* -------------------------- /qa/hourly (1h) ------------------------------ */
-app.get("/qa/hourly", async (_req, res) => {
-  try {
-    const url = rawUrl(RAW_BRANCH_HOURLY, RAW_PATH_HOURLY);
-    const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) return res.status(r.status).json({ ok:false, error:`raw ${r.status}` });
-    const j = await r.json();
-
-    const cards = Array.isArray(j?.sectorCards) ? j.sectorCards : [];
-    const s = summarizeFromCards(cards);
-
-    const live = {
-      breadth_pct: +(j?.metrics?.breadth_pct ?? 0),
-      momentum_pct: +(j?.metrics?.momentum_pct ?? 0),
-      risingPct:    +((j?.hourly?.sectorDirection1h)?.risingPct ?? 0),
-      riskOnPct:    +((j?.hourly?.riskOn1h)?.riskOnPct ?? 0),
-    };
-
-    const tol = { breadth_pct: 0.25, momentum_pct: 0.25, risingPct: 0.5, riskOnPct: 0.5 };
-    const rows = [
-      line("Breadth %",  live.breadth_pct,  s.breadth_pct,  tol.breadth_pct),
-      line("Momentum %", live.momentum_pct, s.momentum_pct, tol.momentum_pct),
-      line("Rising %",   live.risingPct,    s.risingPct,    tol.risingPct),
-      line("Risk-On %",  live.riskOnPct,    s.riskOnPct,    tol.riskOnPct),
-    ];
-    const pass  = rows.every(r => r.startsWith("✅"));
-    const stamp = (j?.updated_at || j?.updated_at_utc || "").toString();
-
-    res.setHeader("Cache-Control", "no-store");
-    res.type("text").send([
-      `QA Hourly Check  (${stamp})`,
-      `Source: ${url.replace(/\?.*$/,"")}`,
-      "",
-      ...rows, "",
-      `Summary: ${pass ? "PASS ✅" : "FAIL ❌"}`,
-      ""
-    ].join("\n"));
-  } catch (e) {
-    res.status(500).json({ ok:false, error:String(e?.message||e) });
-  }
-});
-
-// GET /qa/ema10  -> SPY 10m EMA10/EMA20 using Polygon (last 2 CLOSED bars)
-app.get("/qa/ema10", async (_req, res) => {
-  try {
-    const key = process.env.POLYGON_API_KEY || process.env.POLY_API_KEY;
-    if (!key) return res.status(400).type("text").send("Missing POLYGON_API_KEY");
-    const base = "https://api.polygon.io/v2/aggs/ticker/SPY/range/10/minute";
-    const end  = new Date().toISOString().slice(0,10);           // today (UTC)
-    const start= new Date(Date.now()-3*864e5).toISOString().slice(0,10); // 3 days
-    const url  = `${base}/${start}/${end}?adjusted=true&sort=asc&limit=50000&apiKey=${key}`;
-
-    const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) return res.status(r.status).json({ ok:false, error:`polygon ${r.status}` });
-    const js = await r.json();
-    const rs = (js.results || []).map(o => ({ t:o.t, c:o.c }));
-
-    // last two CLOSED bars are the last two elements
-    if (rs.length < 25) return res.status(500).type("text").send("Not enough bars");
-    const closes = rs.map(b => b.c);
-
-    const ema = (arr, n) => {
-      const a = 2/(n+1); let e = arr[0];
-      for (let i=1;i<arr.length;i++) e = e + a*(arr[i]-e);
-      return e;
-    };
-
-    // prev = up to bar[-2], now = up to bar[-1] (both CLOSED)
-    const prevCloses = closes.slice(0, closes.length-1);
-    const ema10_prev = ema(prevCloses, 10);
-    const ema20_prev = ema(prevCloses, 20);
-    const ema10_now  = ema(closes, 10);
-    const ema20_now  = ema(closes, 20);
-
-    let cross = "none";
-    if (ema10_prev >= ema20_prev && ema10_now < ema20_now) cross = "bear";
-    if (ema10_prev <= ema20_prev && ema10_now > ema20_now) cross = "bull";
-
-    const distPct = ema10_now ? (100*(closes.at(-1)-ema10_now)/ema10_now) : 0;
-
-    res.type("text").send([
-      "QA EMA10/20 (SPY 10m from Polygon)",
-      `bars=${rs.length}`,
-      `prev: ema10=${ema10_prev.toFixed(2)}  ema20=${ema20_prev.toFixed(2)}`,
-      `now : ema10=${ema10_now.toFixed(2)}  ema20=${ema20_now.toFixed(2)}`,
-      `close=${closes.at(-1).toFixed(2)}  ema10_dist_pct=${distPct.toFixed(2)}%`,
-      `cross=${cross}`
-    ].join("\n"));
-  } catch (e) {
-    res.status(500).json({ ok:false, error:String(e?.message||e) });
-  }
-});
-
-/* -------------------------- 404 (keep last) ------------------------------ */
-app.use((req, res) =>
-  res.status(404).json({ ok:false, error:"Not Found", path:req.path })
-);
-
-/* -------------------------------- Start ---------------------------------- */
+/* =========================
+   Start
+   ========================= */
 app.listen(PORT, () => {
-  console.log(`[qa-meter] listening on :${PORT}`);
+  console.log(`qa-meter listening on :${PORT}`);
 });
