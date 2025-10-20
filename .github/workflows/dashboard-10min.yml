@@ -62,6 +62,64 @@ jobs:
         run: |
           python -u scripts/repair_meter_from_counts.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
+      # NEW — sanity check the keys we expect (fail early if missing)
+      - name: Validate payload keys (breadth/momentum/smi)
+        run: |
+          python - <<'PY'
+          import json, sys
+          p = "data/outlook_intraday.json"
+          with open(p,"r",encoding="utf-8") as f:
+              j = json.load(f)
+          m = j.get("metrics", {})
+          it = j.get("intraday", {})
+          required = [
+              ("metrics.breadth_pct",          m.get("breadth_pct")),
+              ("metrics.breadth_align_pct",    m.get("breadth_align_pct")),
+              ("metrics.breadth_bar_pct",      m.get("breadth_bar_pct")),
+              ("metrics.momentum_combo_pct",   m.get("momentum_combo_pct")),
+              ("metrics.momentum_pct",         m.get("momentum_pct")),
+              ("metrics.smi1h_live",           m.get("smi1h_live")),
+              ("metrics.smi10m",               m.get("smi10m")),
+              ("intraday.overall10m.state",    (it.get("overall10m") or {}).get("state")),
+              ("intraday.overall10m.score",    (it.get("overall10m") or {}).get("score")),
+          ]
+          missing = [k for k,v in required if v is None]
+          if missing:
+              print("❌ Missing keys:", ", ".join(missing))
+              # dump a tiny excerpt to help debugging
+              print(json.dumps({"metrics": {k.split(".")[-1]: m.get(k.split(".")[-1]) for k,_ in required if k.startswith("metrics.")},
+                                "intraday.overall10m": it.get("overall10m")}, indent=2))
+              sys.exit(1)
+          print("✅ Intraday payload validated.")
+          PY
+
+      # NEW — log a concise snapshot (helps QA in Actions log)
+      - name: Print meter snapshot
+        run: |
+          python - <<'PY'
+          import json
+          with open("data/outlook_intraday.json","r",encoding="utf-8") as f:
+              j = json.load(f)
+          m  = j.get("metrics",{})
+          it = j.get("intraday",{})
+          ov = (it.get("overall10m") or {})
+          snap = {
+              "updated_at": j.get("updated_at"),
+              "breadth_pct": m.get("breadth_pct"),
+              "breadth_align_pct": m.get("breadth_align_pct"),
+              "breadth_bar_pct": m.get("breadth_bar_pct"),
+              "momentum_combo_pct": m.get("momentum_combo_pct"),
+              "momentum_pct_raw": m.get("momentum_pct"),
+              "smi10m": m.get("smi10m"),
+              "smi1h_live": m.get("smi1h_live"),
+              "squeeze_pct": m.get("squeeze_pct"),
+              "liquidity_pct": m.get("liquidity_pct"),
+              "volatility_pct": m.get("volatility_pct"),
+              "overall10m": {"state": ov.get("state"), "score": ov.get("score")}
+          }
+          print("🔎 Snapshot:", json.dumps(snap, ensure_ascii=False))
+          PY
+
       - name: Write heartbeat
         run: |
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
