@@ -62,6 +62,11 @@ jobs:
         run: |
           python -u scripts/repair_meter_from_counts.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
+       - name: Finalize breadth (restore 60/40 blend)
+         run: |
+           python -u scripts/finalize_intraday_breadth.py --in data/outlook_intraday.json --out data/outlook_intraday.json
+
+
       # NEW — sanity check the keys we expect (fail early if missing)
       - name: Validate payload keys (breadth/momentum/smi)
         run: |
