@@ -5,12 +5,12 @@ Frye / Ferrari Dashboard — make_dashboard.py
 Intraday 10-minute builder with:
   • Breadth (10m) = 60% Alignment (EMA10>EMA20) + 40% Bar Breadth (close>open) across 11 sector ETFs,
     smoothed L=2 and persisted across runs
-  • Momentum (SPY-only) = 0.60 EMA posture (gap + fresh-cross bonus) + 0.15 SMI(10m) + 0.25 SMI(1h live)
-  • Squeeze (10m) = Lux-style Compression % (100=tight, 0=expanded) using BB/KC over last 6×10m bars
-  • Liquidity PSI, Volatility %ATR
-  • Overall(10m) using EMA40 / Momentum25 / Breadth10 / Squeeze10 / Liquidity10 / Risk-On5
+  • Momentum (SPY-only) = 0.60 EMA posture (gap + fresh-cross bonus) + 0.15 SMI(10m) + 0.25 SMI(1h live rolling 60m)
+  • Squeeze (10m) = Compression % on SPY 10m bars (lookback=6 bars): **100 = tight**, **0 = expanded**
+  • Liquidity PSI, Volatility %ATR (plus scaled)
+  • Overall(10m) uses EMA40 / Momentum25 / Breadth10 / **Squeeze10 (via Expansion = 100−Compression)** / Liquidity10 / Risk-On5
 
-Never blank the tiles; print small debug lines for Breadth inputs.
+Never blank tiles; print small debug lines for Breadth inputs.
 """
 
 from __future__ import annotations
@@ -28,6 +28,9 @@ POLY_10M_URL = (
 
 # 11 sector ETFs for Breadth 10m universe
 SECTOR_ETFS = ["XLK","XLY","XLC","XLP","XLU","XLV","XLRE","XLE","XLF","XLB","XLI"]
+
+# Squeeze parameters (10-minute candles only)
+SQUEEZE_LOOKBACK_10M = 6   # 6×10m bars ≈ 1h window on 10m timeframe
 
 # Overall weights
 W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 10, 10, 10, 5
@@ -159,9 +162,9 @@ def summarize_counts(cards: List[dict]) -> Tuple[float,float,float,float]:
     return breadth_slow, momentum_slow, rising, risk_on
 
 # ------------------------- SPY intraday computations -------------------------
-def squeeze_raw_bbkc(H: List[float], L: List[float], C: List[float], lookback: int = 6) -> Optional[float]:
+def squeeze_raw_bbkc(H: List[float], L: List[float], C: List[float], lookback: int) -> Optional[float]:
     """
-    Return BB/KC * 100 (0..100). Lower = tighter (narrow BB vs KC).
+    Return BB/KC * 100 (0..100) on the last `lookback` 10m bars. **Lower = tighter**.
     """
     if min(len(H),len(L),len(C)) < lookback: return None
     n = lookback
@@ -304,12 +307,15 @@ def lin_points(percent: float, weight: int) -> int:
 
 def compute_overall10m(ema_sign: int, ema10_dist_pct: float,
                        momentum_pct: float, breadth_pct: float,
-                       squeeze_pct: float, liquidity_pct: float, riskon_pct: float):
+                       squeeze_compression_pct: float, liquidity_pct: float, riskon_pct: float):
+    # Use **Expansion %** for scoring (100 = expanded, 0 = tight)
+    squeeze_expansion_pct = clamp(100.0 - squeeze_compression_pct, 0.0, 100.0)
+
     dist_unit = clamp(ema10_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
     ema_pts = round(abs(dist_unit) * W_EMA) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
     momentum_pts = lin_points(momentum_pct, W_MOM)
     breadth_pts  = lin_points(breadth_pct,  W_BR)
-    squeeze_pts  = lin_points(squeeze_pct,  W_SQ)  # here squeeze_pct is compression% (high = tight)
+    squeeze_pts  = lin_points(squeeze_expansion_pct,  W_SQ)  # expansion boosts, tight reduces
     liq_pts      = lin_points(min(100.0, clamp(liquidity_pct, 0.0, 200.0)), W_LIQ)
     riskon_pts   = lin_points(riskon_pct,   W_RISK)
 
@@ -397,7 +403,8 @@ def build_intraday(source_js: Optional[dict] = None,
 
     # 3) SPY intraday metrics
     H=L=C=V=[]
-    squeeze_pct = None; liquidity_pct = None; volatility_pct = None; vol_scaled = 0.0
+    squeeze_comp_pct = None  # Compression % (100=tight, 0=expanded)
+    liquidity_pct = None; volatility_pct = None; vol_scaled = 0.0
     ema_cross="none"; just_crossed=False; ema_sign=0; ema10_dist_pct=0.0
 
     spy_bars = bars_main.get("SPY", [])
@@ -407,20 +414,10 @@ def build_intraday(source_js: Optional[dict] = None,
         C = [b["close"] for b in spy_bars]
         V = [b["volume"] for b in spy_bars]
 
-        # --- Lux-style Squeeze (Compression %) — 100=tight, 0=expanded ---
-        sq_raw = squeeze_raw_bbkc(H, L, C)  # BB/KC * 100, 0..100; low = tight
-        if sq_raw is None:
-            squeeze_pct = None
-        else:
-            # invert to compression
-            comp = 100.0 - sq_raw           # 0..100
-            # nonlinear Lux curve
-            gamma = 1.35
-            comp_nl = 100.0 * ((comp / 100.0) ** (1.0 / gamma))
-            # small boost in ultra-tight coils
-            if comp_nl >= 92.0:
-                comp_nl = min(100.0, comp_nl + 3.0)
-            squeeze_pct = clamp(comp_nl, 0.0, 100.0)
+        # --- Squeeze (Compression %) on 10m bars (lookback=6) ---
+        sq_raw = squeeze_raw_bbkc(H, L, C, lookback=SQUEEZE_LOOKBACK_10M)  # BB/KC * 100, low = tight
+        if sq_raw is not None:
+            squeeze_comp_pct = clamp(100.0 - sq_raw, 0.0, 100.0)  # 100 = tight, 0 = expanded
 
         liquidity_pct  = liquidity_pct_spy(V)
         volatility_pct = volatility_pct_spy(H, L, C)
@@ -469,10 +466,10 @@ def build_intraday(source_js: Optional[dict] = None,
         bars_by_sym = {s: bars_main.get(s, []) for s in SECTOR_ETFS}
         alignment_raw, bar_raw, momentum_10m, cross_up_pct, cross_down_pct = fast_breadth_momentum_10m(bars_by_sym)
 
-    if squeeze_pct   is None: squeeze_pct   = 50.0
-    if liquidity_pct is None: liquidity_pct = 50.0
-    if volatility_pct is None: volatility_pct = 0.0
-    if momentum_10m  is None: momentum_10m  = momentum_slow
+    if squeeze_comp_pct is None: squeeze_comp_pct = 50.0  # safe mid
+    if liquidity_pct    is None: liquidity_pct    = 50.0
+    if volatility_pct   is None: volatility_pct   = 0.0
+    if momentum_10m     is None: momentum_10m     = momentum_slow
 
     # --- Breadth smoothing + 60/40 blend (persist L=2 via prev_out) ---
     prev_metrics = (prev_out or {}).get("metrics") or {}
@@ -497,13 +494,13 @@ def build_intraday(source_js: Optional[dict] = None,
     etf_ready = sum(1 for s in SECTOR_ETFS if bars_main.get(s))
     print(f"[breadth] ETFs ready={etf_ready}/11 | align_raw={alignment_raw} | bar_raw={bar_raw} | final={breadth_final}")
 
-    # 5) Overall (use Momentum combo)
+    # 5) Overall (use Momentum combo; Squeeze as Expansion = 100 - Compression)
     state, score, components = compute_overall10m(
         ema_sign=ema_sign,
         ema10_dist_pct=ema10_dist_pct,
         momentum_pct=momentum_combo,
         breadth_pct=breadth_final,
-        squeeze_pct=squeeze_pct,
+        squeeze_compression_pct=squeeze_comp_pct,
         liquidity_pct=liquidity_pct,
         riskon_pct=risk_on_pct,
     )
@@ -539,12 +536,14 @@ def build_intraday(source_js: Optional[dict] = None,
         "ema10_dist_pct": round(ema10_dist_pct, 2),
         "ema_sign": int(ema_sign),
 
-        # SPY gauges
-        "squeeze_pct": round(squeeze_pct, 2) if isinstance(squeeze_pct,(int,float)) else None,
-        "squeeze_intraday_pct": round(squeeze_pct, 2) if isinstance(squeeze_pct,(int,float)) else None,
+        # Gauges
+        # Squeeze: Compression % (100=tight, 0=expanded) + alias for compat
+        "squeeze_pct": round(squeeze_comp_pct, 2),
+        "squeeze_intraday_pct": round(squeeze_comp_pct, 2),
         "liquidity_pct": round(liquidity_pct, 2),
+        "liquidity_psi": round(liquidity_pct, 2),   # PSI preferred; mirror for compat if needed
         "volatility_pct": round(volatility_pct, 3),
-        "volatility_scaled": vol_scaled,
+        "volatility_scaled": 0.0 if volatility_pct is None else round(volatility_pct * 6.25, 2),
     }
 
     # Optional mirror: some tools expect breadth_10m_pct to be "alignment"
@@ -613,7 +612,7 @@ def main():
           "| overall10m.state=", ov["state"], "score=", ov["score"],
           "| breadth_pct=", out["metrics"]["breadth_pct"],
           "| momentum_combo_pct=", out["metrics"]["momentum_combo_pct"],
-          "| squeeze_pct(Lux)=", out["metrics"]["squeeze_pct"])
+          "| squeeze_compression_pct=", out["metrics"]["squeeze_pct"])
 
 if __name__ == "__main__":
     try:
