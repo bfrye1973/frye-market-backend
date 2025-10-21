@@ -1,7 +1,7 @@
 {
-  "updated_at": "2025-10-21T13:47:47",
-  "updated_at_utc": "2025-10-21T20:47:47Z",
-  "timestamp": "2025-10-21T20:47:47Z",
+  "updated_at": "2025-10-21T13:53:51",
+  "updated_at_utc": "2025-10-21T20:53:51Z",
+  "timestamp": "2025-10-21T20:53:51Z",
   "metrics": {
     "breadth_10m_pct": 45.45,
     "momentum_10m_pct": 18.18,
@@ -10,15 +10,15 @@
     "breadth_slow_pct": 81.98,
     "momentum_slow_pct": 66.76,
     "ema_cross": "none",
-    "ema10_dist_pct": -0.02,
+    "ema10_dist_pct": -0.03,
     "ema_sign": -1,
-    "squeeze_pct": 100.0,
-    "squeeze_intraday_pct": 100.0,
-    "squeeze_expansion_pct": 0.0,
-    "liquidity_psi": 54.34,
-    "liquidity_pct": 54.34,
-    "volatility_pct": 0.094,
-    "volatility_scaled": 0.59,
+    "squeeze_pct": 50.82,
+    "squeeze_intraday_pct": 50.82,
+    "squeeze_expansion_pct": 49.18,
+    "liquidity_psi": 37.18,
+    "liquidity_pct": 37.18,
+    "volatility_pct": 0.065,
+    "volatility_scaled": 0.41,
     "breadth_pct": 81.98,
     "momentum_pct": 66.76
   },
@@ -31,13 +31,13 @@
     },
     "overall10m": {
       "state": "bear",
-      "score": 22,
+      "score": 27,
       "components": {
-        "ema10": -1,
+        "ema10": -2,
         "momentum": -16,
         "breadth": -1,
-        "squeeze": -10,
-        "liquidity": 1,
+        "squeeze": 0,
+        "liquidity": -3,
         "riskOn": -1
       },
       "just_crossed": false
@@ -167,20 +167,20 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-21T13:47:47",
+    "updatedAt": "2025-10-21T13:53:51",
     "mode": "intraday",
     "live": true,
     "signals": {
       "sigOverallBull": {
         "active": false,
         "severity": "info",
-        "reason": "state=bear score=22",
+        "reason": "state=bear score=27",
         "lastChanged": null
       },
       "sigOverallBear": {
         "active": false,
         "severity": "warn",
-        "reason": "state=bear score=22",
+        "reason": "state=bear score=27",
         "lastChanged": null
       },
       "sigEMA10BullCross": {
@@ -199,7 +199,7 @@
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=63.6",
-        "lastChanged": "2025-10-21T13:47:47"
+        "lastChanged": "2025-10-21T13:53:51"
       },
       "sigAccelDown": {
         "active": false,
@@ -223,7 +223,7 @@
         "active": true,
         "severity": "info",
         "reason": "rising%=100.0",
-        "lastChanged": "2025-10-21T13:47:47"
+        "lastChanged": "2025-10-21T13:53:51"
       },
       "sigSectorWeak": {
         "active": false,
@@ -234,7 +234,7 @@
     }
   },
   "meta": {
-    "aliased_at_utc": "2025-10-21T20:47:47Z",
+    "aliased_at_utc": "2025-10-21T20:53:51Z",
     "source": "mirror",
     "sandbox": true
   },
@@ -304,5 +304,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-21T13:55:07-07:00"
+  "deltasUpdatedAt": "2025-10-21T13:59:53-07:00"
 }
