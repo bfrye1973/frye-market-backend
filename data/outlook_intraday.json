@@ -1,7 +1,7 @@
 {
-  "updated_at": "2025-10-21T10:42:20",
-  "updated_at_utc": "2025-10-21T17:42:20Z",
-  "timestamp": "2025-10-21T17:42:20Z",
+  "updated_at": "2025-10-21T10:48:27",
+  "updated_at_utc": "2025-10-21T17:48:27Z",
+  "timestamp": "2025-10-21T17:48:27Z",
   "metrics": {
     "breadth_pct": 38.18,
     "breadth_align_pct": 45.45,
@@ -179,7 +179,7 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-21T10:42:20",
+    "updatedAt": "2025-10-21T10:48:27",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -205,13 +205,13 @@
         "active": true,
         "severity": "warn",
         "reason": "ema_cross=bear",
-        "lastChanged": "2025-10-21T10:42:20"
+        "lastChanged": "2025-10-21T10:48:27"
       },
       "sigAccelUp": {
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=86.4",
-        "lastChanged": "2025-10-21T10:42:20"
+        "lastChanged": "2025-10-21T10:48:27"
       },
       "sigAccelDown": {
         "active": false,
@@ -235,7 +235,7 @@
         "active": true,
         "severity": "info",
         "reason": "rising%=100.0",
-        "lastChanged": "2025-10-21T10:42:20"
+        "lastChanged": "2025-10-21T10:48:27"
       },
       "sigSectorWeak": {
         "active": false,
@@ -246,7 +246,7 @@
     }
   },
   "meta": {
-    "aliased_at_utc": "2025-10-21T17:42:20Z",
+    "aliased_at_utc": "2025-10-21T17:48:27Z",
     "source": "mirror",
     "sandbox": true
   },
@@ -316,5 +316,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-21T10:51:54-07:00"
+  "deltasUpdatedAt": "2025-10-21T10:54:47-07:00"
 }
