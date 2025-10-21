@@ -1,38 +1,38 @@
 {
-  "updated_at": "2025-10-21T13:00:14",
-  "updated_at_utc": "2025-10-21T20:00:14Z",
-  "timestamp": "2025-10-21T20:00:14Z",
+  "updated_at": "2025-10-21T13:23:04",
+  "updated_at_utc": "2025-10-21T20:23:04Z",
+  "timestamp": "2025-10-21T20:23:04Z",
   "metrics": {
-    "breadth_pct": 14.54,
-    "breadth_align_pct": 18.18,
-    "breadth_align_pct_fast": 18.18,
-    "breadth_bar_pct": 9.09,
-    "breadth_bar_pct_fast": 9.09,
+    "breadth_pct": 12.73,
+    "breadth_align_pct": 9.09,
+    "breadth_align_pct_fast": 9.09,
+    "breadth_bar_pct": 18.18,
+    "breadth_bar_pct_fast": 18.18,
     "momentum_pct": 66.76,
-    "momentum_combo_pct": 43.78,
+    "momentum_combo_pct": 46.48,
     "smi10m": {
-      "k": 12.42,
-      "d": 18.09
+      "k": -5.08,
+      "d": 9.56
     },
     "smi1h_live": {
       "k": null,
       "d": null
     },
     "momentum_10m_pct": 4.55,
-    "cross_up_10m_pct": 0.0,
-    "cross_down_10m_pct": 27.27,
+    "cross_up_10m_pct": 9.09,
+    "cross_down_10m_pct": 18.18,
     "breadth_slow_pct": 81.98,
     "momentum_slow_pct": 66.76,
-    "ema_cross": "bear",
-    "ema10_dist_pct": -0.09,
+    "ema_cross": "none",
+    "ema10_dist_pct": -0.08,
     "ema_sign": -1,
     "squeeze_pct": 0.0,
     "squeeze_intraday_pct": 0.0,
-    "liquidity_pct": 182.42,
-    "liquidity_psi": 182.42,
-    "volatility_pct": 0.119,
+    "liquidity_pct": 120.55,
+    "liquidity_psi": 120.55,
+    "volatility_pct": 0.12,
     "volatility_scaled": 0.75,
-    "breadth_10m_pct": 18.18
+    "breadth_10m_pct": 9.09
   },
   "intraday": {
     "sectorDirection10m": {
@@ -43,16 +43,16 @@
     },
     "overall10m": {
       "state": "bear",
-      "score": 53,
+      "score": 55,
       "components": {
-        "ema10": -6,
-        "momentum": -3,
+        "ema10": -5,
+        "momentum": -2,
         "breadth": -7,
         "squeeze": 10,
         "liquidity": 10,
         "riskOn": -1
       },
-      "just_crossed": true
+      "just_crossed": false
     }
   },
   "sectorCards": [
@@ -179,44 +179,44 @@
     }
   ],
   "engineLights": {
-    "updatedAt": "2025-10-21T13:00:14",
+    "updatedAt": "2025-10-21T13:23:04",
     "mode": "intraday",
     "live": true,
     "signals": {
       "sigOverallBull": {
         "active": false,
         "severity": "info",
-        "reason": "state=bear score=53",
+        "reason": "state=bear score=55",
         "lastChanged": null
       },
       "sigOverallBear": {
         "active": false,
         "severity": "warn",
-        "reason": "state=bear score=53",
+        "reason": "state=bear score=55",
         "lastChanged": null
       },
       "sigEMA10BullCross": {
         "active": false,
         "severity": "info",
-        "reason": "ema_cross=bear",
+        "reason": "ema_cross=none",
         "lastChanged": null
       },
       "sigEMA10BearCross": {
-        "active": true,
+        "active": false,
         "severity": "warn",
-        "reason": "ema_cross=bear",
-        "lastChanged": "2025-10-21T13:00:14"
+        "reason": "ema_cross=none",
+        "lastChanged": null
       },
       "sigAccelUp": {
         "active": true,
         "severity": "info",
-        "reason": "Δb+Δm=22.7",
-        "lastChanged": "2025-10-21T13:00:14"
+        "reason": "Δb+Δm=13.6",
+        "lastChanged": "2025-10-21T13:23:04"
       },
       "sigAccelDown": {
         "active": false,
         "severity": "warn",
-        "reason": "Δb+Δm=22.7",
+        "reason": "Δb+Δm=13.6",
         "lastChanged": null
       },
       "sigRiskOn": {
@@ -235,7 +235,7 @@
         "active": true,
         "severity": "info",
         "reason": "rising%=100.0",
-        "lastChanged": "2025-10-21T13:00:14"
+        "lastChanged": "2025-10-21T13:23:04"
       },
       "sigSectorWeak": {
         "active": false,
@@ -246,7 +246,7 @@
     }
   },
   "meta": {
-    "aliased_at_utc": "2025-10-21T20:00:14Z",
+    "aliased_at_utc": "2025-10-21T20:23:04Z",
     "source": "mirror",
     "sandbox": true
   },
@@ -316,5 +316,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-21T13:17:37-07:00"
+  "deltasUpdatedAt": "2025-10-21T13:23:27-07:00"
 }
