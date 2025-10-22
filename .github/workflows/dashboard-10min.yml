@@ -3,6 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
+    # 7-minute cadence you already use (12:00 UTC hour window + RTH)
     - cron: "*/7 12 * * 1-5"
     - cron: "*/7 13-20 * * 1-5"
 
@@ -22,6 +23,7 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
+      # -------------------- setup --------------------
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -37,12 +39,45 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
+      # -------------------- NEW: sectorCards source (must come BEFORE make_dashboard.py) --------------------
+      - name: Build sectorCards source (10m)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          # Produces data/outlook_source.json with sectorCards[11]
+          python -u scripts/build_outlook_source_from_polygon.py --mode intraday10 --out data/outlook_source.json
+
+      - name: Validate sectorCards source
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, sys
+          try:
+              j = json.load(open("data/outlook_source.json","r",encoding="utf-8"))
+          except Exception as e:
+              print("[sectors] FAILED to read source:", e); sys.exit(2)
+          cards = j.get("sectorCards") or []
+          need  = ("sector","breadth_pct","momentum_pct","nh","nl","up","down")
+          if len(cards) != 11 or any(k not in cards[0] for k in need):
+              print(f"[sectors] INVALID source: cards={len(cards)} need={need}")
+              sys.exit(2)
+          print(f"[sectors] OK cards=11 | IT b={cards[0]['breadth_pct']} m={cards[0]['momentum_pct']}")
+          PY
+
+      # -------------------- dashboard build (uses the fresh source) --------------------
       - name: Build intraday payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
+          set -euo pipefail
           mkdir -p data
-          python -u scripts/make_dashboard.py --mode intraday --out data/outlook_intraday.json
+          # IMPORTANT: use --source data/outlook_source.json
+          python -u scripts/make_dashboard.py \
+            --mode intraday \
+            --source data/outlook_source.json \
+            --out data/outlook_intraday.json
 
       - name: Alias intraday metrics
         run: |
@@ -62,34 +97,25 @@ jobs:
         run: |
           python -u scripts/repair_meter_from_counts.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
-      # ---- NEW: restore 60/40 breadth blend after all repairs ----
       - name: Finalize breadth (restore 60/40 blend)
         run: |
           python -u scripts/finalize_intraday_breadth.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
-      # ---- NEW: log a concise snapshot for QA ----
       - name: Print meter snapshot
         run: |
           python - <<'PY'
           import json
-          with open("data/outlook_intraday.json","r",encoding="utf-8") as f:
-              j = json.load(f)
-          m  = j.get("metrics",{}) or {}
-          it = j.get("intraday",{}) or {}
-          ov = (it.get("overall10m") or {})
-          snap = {
-              "updated_at": j.get("updated_at"),
-              "breadth_final": m.get("breadth_pct"),
-              "align_raw": m.get("breadth_align_pct"), "align_fast": m.get("breadth_align_pct_fast"),
-              "bar_raw": m.get("breadth_bar_pct"),     "bar_fast":   m.get("breadth_bar_pct_fast"),
-              "breadth_slow": m.get("breadth_slow_pct"),
-              "momentum_combo": m.get("momentum_combo_pct"),
-              "volatility_pct": m.get("volatility_pct"),
-              "overall": {"state": ov.get("state"), "score": ov.get("score")}
-          }
+          j=json.load(open("data/outlook_intraday.json","r",encoding="utf-8"))
+          m=j.get("metrics",{}) or {}; it=j.get("intraday",{}) or {}; ov=(it.get("overall10m") or {})
+          snap={"updated_at":j.get("updated_at"),"breadth_final":m.get("breadth_pct"),
+                "align_raw":m.get("breadth_align_pct"),"align_fast":m.get("breadth_align_pct_fast"),
+                "bar_raw":m.get("breadth_bar_pct"),"bar_fast":m.get("breadth_bar_pct_fast"),
+                "breadth_slow":m.get("breadth_slow_pct"),"momentum_combo":m.get("momentum_combo_pct"),
+                "volatility_pct":m.get("volatility_pct"),"overall":{"state":ov.get("state"),"score":ov.get("score")}}
           print("🔎 snapshot:", snap)
           PY
 
+      # -------------------- publish --------------------
       - name: Write heartbeat
         run: |
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
