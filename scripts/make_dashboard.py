@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard.py (Intraday 10m, R12 v1)
+Ferrari Dashboard — make_dashboard.py (Intraday 10m, R12 v1 w/ Lux Squeeze)
 
-Builds /live/intraday with the v1 contract:
+Builds /live/intraday with v1 fields:
 
 metrics (intraday 10m, RTH+AH)
-- breadth_10m_pct           : 60% Alignment (EMA10>EMA20 across 11 sector ETFs) + 40% Bar (close>open), smoothed L=2
+- breadth_10m_pct           : 60% Alignment (EMA10>EMA20 across 11 ETFs) + 40% Bar (close>open), smoothed L=2 (persisted)
   components (QA): breadth_align_pct(_fast), breadth_bar_pct(_fast)
 - momentum_10m_pct          : sector ETF fast momentum (legacy)
 - momentum_combo_pct        : SPY blended momentum = 0.60 EMA posture + 0.15 SMI(10m) + 0.25 SMI(1h live)
-- squeeze_pct               : Compression % on SPY 10m (100=tight, 0=expanded)
-- squeeze_expansion_pct     : 100 - squeeze_pct (used for Overall scoring only)
+- squeeze_pct               : **Lux-style Expansion %** on SPY 10m (0=tight, 100=expanded)  ← TILE + Overall
+  squeeze_compression_pct   : 100 - squeeze_pct  (QA only)
 - liquidity_psi             : 100*EMA(Vol,3)/EMA(Vol,12), 0..200 (UI cap 120)
-- volatility_pct            : 100*EMA(TR,3)/Close (small raw, ~0.1–1.0)
-- volatility_scaled         : volatility_pct * 6.25  (for dial)
+- volatility_pct            : 100*EMA(TR,3)/Close (raw 10m)
+- volatility_scaled         : volatility_pct * 6.25
 - breadth_slow_pct          : ΣNH/(ΣNH+ΣNL) from sectorCards (daily/right)
-- momentum_slow_pct         : ΣUp/(ΣUp+ΣDown)          (daily/right)
+- momentum_slow_pct         : ΣUp/(ΣUp+ΣDown) (daily/right)
 
 intraday
 - sectorDirection10m.risingPct
@@ -24,9 +24,8 @@ intraday
 - overall10m.{state, score, components, just_crossed}
 
 Notes
-- Squeeze (tile) shows compression%; Overall uses expansion% (100 - compression).
-- RTH+AH for SMI and Squeeze, as requested.
-- If inputs missing, safe mid/fallbacks are used (never crash).
+- Squeeze tile uses **Expansion %** (0=tight, 100=expanded) to match Lux number.
+- Overall uses the same Expansion % for scoring (tight reduces overall).
 """
 
 from __future__ import annotations
@@ -259,7 +258,7 @@ def spy_ema_posture_score(C: List[float], max_gap_pct: float = 0.50,
 
     return float(clamp(posture + bonus, 0.0, 100.0))
 
-# ------------------------- FAST Breadth/Momentum via sector ETFs -------------------------
+# ------------------------- FAST Breadth components + sector momentum -------------------------
 def fast_components_etfs(bars_by_sym: Dict[str, List[dict]]) -> Tuple[
     Optional[float],  # alignment_raw_pct (EMA10>EMA20)
     Optional[float],  # bar_raw_pct       (close>open)
@@ -317,7 +316,7 @@ def compute_overall10m(ema_sign: int, ema10_dist_pct: float,
     ema_pts = round(abs(dist_unit) * W_EMA) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
     momentum_pts = lin_points(momentum_pct, W_MOM)
     breadth_pts  = lin_points(breadth_pct,  W_BR)
-    squeeze_pts  = lin_points(squeeze_expansion_pct,  W_SQ)  # EXPANSION for overall
+    squeeze_pts  = lin_points(squeeze_expansion_pct,  W_SQ)  # EXPANSION (wide=good, tight=bad)
     liq_pts      = lin_points(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
     riskon_pts   = lin_points(riskon_pct,   W_RISK)
 
@@ -381,10 +380,11 @@ def build_engine_lights_signals(curr: dict, prev: Optional[dict], ts_local: str)
 def build_intraday(source_js: Optional[dict] = None,
                    hourly_url: str = HOURLY_URL_DEFAULT,
                    prev_out: Optional[dict] = None) -> dict:
-    # 1) sectorCards (source or hourly fallback) → slow counts (for daily/right + risk/rising)
+    # 1) sectorCards (source or hourly fallback) → slow counts (daily/right)
     sector_cards: List[dict] = []
     if isinstance(source_js, dict):
         sector_cards = source_js.get("sectorCards") or source_js.get("outlook", {}).get("sectorCards") or []
+    cards_fresh = True if sector_cards else False
     if not sector_cards:
         try:
             hourly = fetch_json(hourly_url)
@@ -393,8 +393,6 @@ def build_intraday(source_js: Optional[dict] = None,
         except Exception:
             sector_cards = []
             cards_fresh = False
-    else:
-        cards_fresh = True
 
     breadth_slow, momentum_slow, rising_pct, risk_on_pct = summarize_counts(sector_cards)
 
@@ -407,8 +405,8 @@ def build_intraday(source_js: Optional[dict] = None,
             bars_by_sym[s] = fetch_polygon_10m(key, s)
 
     # 3) SPY intraday gauges + EMA posture
-    squeeze_comp_pct = None
-    squeeze_exp_pct  = None
+    squeeze_exp_pct  = None   # TILE + Overall (0=tight, 100=expanded)
+    squeeze_comp_pct = None   # QA
     liquidity_pct = None
     volatility_pct = None
     vol_scaled = 0.0
@@ -421,10 +419,11 @@ def build_intraday(source_js: Optional[dict] = None,
         C = [b["close"] for b in spy_bars]
         V = [b["volume"] for b in spy_bars]
 
-        sq_raw = squeeze_raw_bbkc(H, L, C, lookback=SQUEEZE_LOOKBACK_10M)  # Compression raw, HIGH = tight
+        # Lux-style Expansion: sq_raw = BB/KC*100 (HIGH=TIGHT) → Expansion = 100 - sq_raw
+        sq_raw = squeeze_raw_bbkc(H, L, C, lookback=SQUEEZE_LOOKBACK_10M)
         if sq_raw is not None:
-            squeeze_comp_pct = clamp(sq_raw, 0.0, 100.0)                  # TILE (compression)
-            squeeze_exp_pct  = clamp(100.0 - sq_raw, 0.0, 100.0)          # OVERALL (expansion)
+            squeeze_exp_pct  = clamp(100.0 - sq_raw, 0.0, 100.0)   # 0=tight, 100=expanded
+            squeeze_comp_pct = clamp(sq_raw, 0.0, 100.0)           # QA only
 
         liquidity_pct  = liquidity_pct_spy(V)
         volatility_pct = volatility_pct_spy(H, L, C)
@@ -436,12 +435,13 @@ def build_intraday(source_js: Optional[dict] = None,
         close_now = C[-1]
         if e10_prev <= e20_prev and e10_now > e20_now: ema_cross, just_crossed = "bull", True
         elif e10_prev >= e20_prev and e10_now < e20_now: ema_cross, just_crossed = "bear", True
-        ema_sign = 1 if e10_now > e20_now else (-1 if e10_now < e20_now else 0)
+        ema_sign = 1 if e10_now > e20_now else (-1 if e10_now < 0 else 0)
         ema10_dist_pct = 0.0 if e10_now == 0 else 100.0 * (close_now - e10_now) / e10_now
 
     # 4) FAST Breadth components + sector momentum
-    breadth_10m = momentum_10m = cross_up_pct = cross_down_pct = None
     alignment_raw = bar_raw = None
+    breadth_10m = None
+    momentum_10m = cross_up_pct = cross_down_pct = None
     if key:
         alignment_raw, bar_raw = fast_components_etfs({s: bars_by_sym.get(s, []) for s in SECTOR_ETFS})
         momentum_10m, cross_up_pct, cross_down_pct = fast_momentum_sector({s: bars_by_sym.get(s, []) for s in SECTOR_ETFS})
@@ -489,10 +489,9 @@ def build_intraday(source_js: Optional[dict] = None,
 
     # Fallbacks
     if momentum_10m is None: momentum_10m = momentum_slow
-    if squeeze_comp_pct is None: squeeze_comp_pct = 50.0
-    if squeeze_exp_pct  is None: squeeze_exp_pct  = 50.0
-    if liquidity_pct    is None: liquidity_pct    = 50.0
-    if volatility_pct   is None: volatility_pct   = 0.0
+    if squeeze_exp_pct is None: squeeze_exp_pct = 50.0
+    if liquidity_pct   is None: liquidity_pct   = 50.0
+    if volatility_pct  is None: volatility_pct  = 0.0
 
     # 6) Overall (uses FAST breadth + SPY momentum combo + Expansion squeeze)
     state, score, components = compute_overall10m(
@@ -500,7 +499,7 @@ def build_intraday(source_js: Optional[dict] = None,
         ema10_dist_pct=ema10_dist_pct,
         momentum_pct=momentum_combo,
         breadth_pct=breadth_10m,
-        squeeze_expansion_pct=squeeze_exp_pct,
+        squeeze_expansion_pct=squeeze_exp_pct,   # EXPANSION directly
         liquidity_pct=liquidity_pct,
         riskon_pct=risk_on_pct,
     )
@@ -517,8 +516,6 @@ def build_intraday(source_js: Optional[dict] = None,
         # Momentum (v1 combo + legacy)
         "momentum_combo_pct": momentum_combo,
         "momentum_10m_pct": momentum_10m,
-        "cross_up_10m_pct": cross_up_pct,
-        "cross_down_10m_pct": cross_down_pct,
 
         # SLOW (daily/right)
         "breadth_slow_pct": breadth_slow,
@@ -530,12 +527,13 @@ def build_intraday(source_js: Optional[dict] = None,
         "ema_sign": int(ema_sign),
 
         # Gauges
-        "squeeze_pct": round(squeeze_comp_pct, 2),            # TILE (compression 100=tight)
-        "squeeze_expansion_pct": round(squeeze_exp_pct, 2),   # OVERALL scoring only
+        # Squeeze tile & overall = Expansion %
+        "squeeze_pct": round(squeeze_exp_pct, 2),               # 0=tight, 100=expanded (Lux number)
+        "squeeze_compression_pct": round(100.0 - squeeze_exp_pct, 2) if squeeze_exp_pct is not None else None,  # QA
         "liquidity_psi": round(liquidity_pct, 2),
-        "liquidity_pct": round(liquidity_pct, 2),             # compat mirror
+        "liquidity_pct": round(liquidity_pct, 2),               # compat mirror
         "volatility_pct": round(volatility_pct, 3),
-        "volatility_scaled": vol_scaled,
+        "volatility_scaled": 0.0 if volatility_pct is None else round(volatility_pct * 6.25, 2),
     }
 
     # 8) Intraday block
@@ -561,7 +559,7 @@ def build_intraday(source_js: Optional[dict] = None,
         "meta": {
             "cards_fresh": bool(cards_fresh),
             "smi1h_fresh": bool(smi1h_k is not None and smi1h_d is not None),
-            "after_hours": False  # (optionally set via schedule/time if you want)
+            "after_hours": False  # set via schedule if desired
         }
     }
     # Debug line in Actions log
@@ -581,7 +579,7 @@ def main():
     if (args.mode or "intraday").lower() != "intraday":
         print("[warn] only 'intraday' supported; continuing", file=sys.stderr)
 
-    prev_out = jread(args.out)
+    prev_out = jread(args.out)  # for smoothing persistence
 
     source_js = None
     if args.source and os.path.isfile(args.source):
@@ -609,7 +607,7 @@ def main():
           "| overall10m.state=", ov["state"], "score=", ov["score"],
           "| breadth_10m_pct=", out["metrics"]["breadth_10m_pct"],
           "| momentum_combo_pct=", out["metrics"]["momentum_combo_pct"],
-          "| squeeze_pct=", out["metrics"]["squeeze_pct"])
+          "| squeeze_pct(Expansion)=", out["metrics"]["squeeze_pct"])
 
 if __name__ == "__main__":
     try:
