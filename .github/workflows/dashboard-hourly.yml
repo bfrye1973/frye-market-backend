@@ -1,24 +1,26 @@
-name: dashboard-10min
+name: dashboard-hourly
 
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "*/7 12 * * 1-5"
-    - cron: "*/7 13-20 * * 1-5"
+    # RTH hourly ticks (AZ ≈ UTC-7 when no DST; adjust if you want different mins)
+    - cron: "5 13-21 * * 1-5"   # 13:05,14:05,...,21:05 UTC Mon–Fri
+    # Optional pre-open warmup
+    - cron: "35 12 * * 1-5"     # 12:35 UTC Mon–Fri
 
 jobs:
-  tenmin:
-    name: Build and Publish Intraday
+  hourly:
+    name: Build and Publish Hourly
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
     concurrency:
-      group: dashboard-10min
+      group: dashboard-hourly
       cancel-in-progress: true
     env:
       TZ: America/Phoenix
-      LIVE_BRANCH: data-live-10min
+      LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -37,14 +39,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # 1) Build sectors (may output different shapes)
-      - name: Build sectorCards source (10m)
+      # 1) Build sectorCards source (hourly mode)
+      - name: Build sectorCards source (1h)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py --mode intraday10 --out data/outlook_source.json || true
+          # If your script expects another flag, change --mode accordingly
+          python -u scripts/build_outlook_source_from_polygon.py --mode hourly --out data/outlook_source.json || true
           echo "----- RAW SOURCE (first 80 lines) -----" || true
           head -n 80 data/outlook_source.json || true
 
@@ -62,12 +65,14 @@ jobs:
           def num(x):
             try: return float(x)
             except: return None
+
           candidates = []
           if isinstance(j, dict):
             if isinstance(j.get("sectorCards"), list): candidates = j["sectorCards"]
             elif isinstance(j.get("data",{}).get("sectorCards"), list): candidates = j["data"]["sectorCards"]
             elif isinstance(j.get("sectors"), list): candidates = j["sectors"]
             elif isinstance(j.get("cards"), list): candidates = j["cards"]
+
           def to_card(c):
             sector = c.get("sector") or c.get("name") or c.get("label")
             if not sector: return None
@@ -82,13 +87,16 @@ jobs:
               den = nh+nl; bp = (100.0*nh/den) if den else 0.0
             if mp is None:
               den = up+dn; mp = (100.0*up/den) if den else 0.0
-            return {"sector": str(sector), "breadth_pct": bp, "momentum_pct": mp, "nh": nh, "nl": nl, "up": up, "down": dn}
+            return {"sector": str(sector), "breadth_pct": bp, "momentum_pct": mp,
+                    "nh": nh, "nl": nl, "up": up, "down": dn}
+
           normalized=[]
           for c in (candidates or []):
             try:
               nc = to_card(c)
               if nc: normalized.append(nc)
             except: pass
+
           ORDER = [
             "information technology","materials","health care","communication services",
             "real estate","energy","consumer staples","consumer discretionary",
@@ -102,42 +110,47 @@ jobs:
             "staples":"consumer staples","discretionary":"consumer discretionary",
             "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
           }
+
           bykey={}
           for c in normalized:
             k = alias.get(norm(c["sector"]), norm(c["sector"]))
             if k not in bykey:
-              c2 = c.copy(); c2["sector"] = k.title(); bykey[k]=c2
+              c2 = c.copy(); c2["sector"] = k.title(); bykey[k] = c2
             else:
               a,b = bykey[k], c
-              a["nh"]+=b["nh"]; a["nl"]+=b["nl"]; a["up"]+=b["up"]; a["down"]+=b["down"]
-              den=a["nh"]+a["nl"]; a["breadth_pct"]=(100.0*a["nh"]/den) if den else 0.0
-              den=a["up"]+a["down"]; a["momentum_pct"]=(100.0*a["up"]/den) if den else 0.0
+              a["nh"] += b["nh"]; a["nl"] += b["nl"]; a["up"] += b["up"]; a["down"] += b["down"]
+              den = a["nh"] + a["nl"]; a["breadth_pct"] = (100.0*a["nh"]/den) if den else 0.0
+              den = a["up"] + a["down"]; a["momentum_pct"] = (100.0*a["up"]/den) if den else 0.0
+
           sectorCards=[]
           for name in ORDER:
-            if name in bykey: sectorCards.append(bykey[name])
-            else: sectorCards.append({"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0})
-          with open(PATH,"w",encoding="utf-8") as f:
-            json.dump({"sectorCards":sectorCards}, f, ensure_ascii=False, separators=(",",":"))
+            if name in bykey:
+              sectorCards.append(bykey[name])
+            else:
+              sectorCards.append({"sector": name.title(), "breadth_pct": 0.0, "momentum_pct": 0.0, "nh": 0, "nl": 0, "up": 0, "down": 0})
+
+          with open(PATH, "w", encoding="utf-8") as f:
+            json.dump({"sectorCards": sectorCards}, f, ensure_ascii=False, separators=(",",":"))
           print(f"[normalize] sectorCards={len(sectorCards)} IT_b={sectorCards[0]['breadth_pct']:.2f} IT_m={sectorCards[0]['momentum_pct']:.2f}")
           PY
 
-      # 3) Validate schema (must be 11 with required fields)
+      # 3) Validate schema
       - name: Validate sectorCards source
         run: |
           set -euo pipefail
           python - <<'PY'
           import json, sys
-          j=json.load(open("data/outlook_source.json","r",encoding="utf-8"))
-          cards=j.get("sectorCards") or []
-          need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
-          ok=(len(cards)==11 and all(k in cards[0] for k in need))
+          j = json.load(open("data/outlook_source.json","r",encoding="utf-8"))
+          cards = j.get("sectorCards") or []
+          need  = ("sector","breadth_pct","momentum_pct","nh","nl","up","down")
+          ok = (len(cards)==11 and all(k in cards[0] for k in need))
           if not ok:
             print(f"[sectors] INVALID source: cards={len(cards)} need={need}")
             sys.exit(2)
           print(f"[sectors] OK cards=11 | IT b={cards[0]['breadth_pct']} m={cards[0]['momentum_pct']}")
           PY
 
-      # 4) Assert not-all-zero -> write ALL_ZERO=true/false to env
+      # 4) Assert not-all-zero → export env flag ALL_ZERO
       - name: Assert sectorCards not-all-zero (env flag)
         run: |
           set -euo pipefail
@@ -152,19 +165,19 @@ jobs:
           echo "[sectors] ALL_ZERO=${ALL_ZERO}"
           echo "ALL_ZERO=${ALL_ZERO}" >> "$GITHUB_ENV"
 
-      # 5) Fallback to hourly only when ALL_ZERO=true
-      - name: Fallback hydrate source from hourly
+      # 5) Fallback to LAST KNOWN 10m intraday (optional) if hourly is all-zero
+      - name: Fallback hydrate from intraday when zeros
         if: env.ALL_ZERO == 'true'
         run: |
           set -euo pipefail
-          echo "[sectors] Hydrating from hourly…"
-          curl -fsSL "https://frye-market-backend-1.onrender.com/live/hourly?t=$(date +%s)" -o /tmp/hourly.json
+          echo "[sectors] Hydrating from /live/intraday because hourly source sums to zero…"
+          curl -fsSL "https://frye-market-backend-1.onrender.com/live/intraday?t=$(date +%s)" -o /tmp/intraday.json
           python - <<'PY'
           import json, sys
-          h=json.load(open("/tmp/hourly.json","r",encoding="utf-8"))
+          h=json.load(open("/tmp/intraday.json","r",encoding="utf-8"))
           cards=h.get("sectorCards") or []
           if len(cards)!=11:
-            print("[fallback] hourly invalid; keeping zeros")
+            print("[fallback] intraday invalid; keeping zeros")
             sys.exit(0)
           out={"sectorCards":[]}
           for c in cards:
@@ -178,97 +191,59 @@ jobs:
               "down": int(c.get("down",0) or 0),
             })
           json.dump(out, open("data/outlook_source.json","w",encoding="utf-8"), separators=(",",":"))
-          print("[fallback] wrote data/outlook_source.json from hourly")
+          print("[fallback] wrote data/outlook_source.json from intraday")
           PY
 
-      # 6) Build intraday payload using the normalized source
-      - name: Build intraday payload
+      # 6) Build hourly payload using the normalized source
+      - name: Build hourly payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
           python -u scripts/make_dashboard.py \
-            --mode intraday \
+            --mode hourly \
             --source data/outlook_source.json \
-            --out data/outlook_intraday.json
+            --out data/outlook_hourly.json
 
-      - name: Alias intraday metrics
-        run: |
-          python -u scripts/alias_intraday_metrics.py --in data/outlook_intraday.json --out data/outlook_intraday.json
+      # (Optional) any hourly-specific post-processing would go here
 
-      - name: Repair intraday neutrals and add display fields
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      - name: Write heartbeat (hourly)
         run: |
-          if [ -n "${POLYGON_API_KEY:-}" ]; then
-            python -u scripts/repair_intraday_metrics_10m.py --in data/outlook_intraday.json --out data/outlook_intraday.json
-          else
-            echo "POLYGON_API_KEY missing, skipping neutral repair"
-          fi
-
-      - name: Repair meter from counts
-        run: |
-          python -u scripts/repair_meter_from_counts.py --in data/outlook_intraday.json --out data/outlook_intraday.json
-
-      - name: Finalize breadth (restore 60/40 blend)
-        run: |
-          python -u scripts/finalize_intraday_breadth.py --in data/outlook_intraday.json --out data/outlook_intraday.json
-
-      - name: Print meter snapshot
-        run: |
-          python - <<'PY'
-          import json
-          j=json.load(open("data/outlook_intraday.json","r",encoding="utf-8"))
-          m=j.get("metrics",{}) or {}; it=j.get("intraday",{}) or {}; ov=(it.get("overall10m") or {})
-          snap={"updated_at":j.get("updated_at"),"breadth_final":m.get("breadth_pct"),
-                "align_raw":m.get("breadth_align_pct"),"align_fast":m.get("breadth_align_pct_fast"),
-                "bar_raw":m.get("breadth_bar_pct"),"bar_fast":m.get("breadth_bar_pct_fast"),
-                "breadth_slow":m.get("breadth_slow_pct"),"momentum_combo":m.get("momentum_combo_pct"),
-                "volatility_pct":m.get("volatility_pct"),"overall":{"state":ov.get("state"),"score":ov.get("score")}}
-          print("snapshot:", snap)
-          PY
-
-      - name: Write heartbeat
-        run: |
-          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_hourly.txt
 
       - name: Stage artifacts
         run: |
-          mkdir -p /tmp/live10
-          cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
-          cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
+          mkdir -p /tmp/live1h
+          cp -f data/outlook_hourly.json /tmp/live1h/outlook_hourly.json
+          cp -f data/heartbeat_hourly.txt /tmp/live1h/heartbeat_hourly.txt
 
       - name: Prepare live branch
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name "actions-bot"
           git config user.email "bot@users.noreply.github.com"
           git reset --hard
           git clean -fdx
+
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git fetch origin "${LIVE_BRANCH}"
             git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
-          else:
+          else
             git checkout --orphan "${LIVE_BRANCH}"
           fi
+
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
           mkdir -p data
-          cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
-          cp -f /tmp/live10/heartbeat_10min.txt data/heartbeat_10min.txt
+          cp -f /tmp/live1h/outlook_hourly.json   data/outlook_hourly.json
+          cp -f /tmp/live1h/heartbeat_hourly.txt data/heartbeat_hourly.txt
 
       - name: Commit and push live branch
+        shell: bash
         run: |
+          set -euo pipefail
           git add data
-          git commit -m "10m live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git commit -m "1h live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
           git push origin "${LIVE_BRANCH}" --force
-
-      - name: Trigger Render deploy
-        if: ${{ success() }}
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
-        run: |
-          if [ -n "${RENDER_DEPLOY_HOOK:-}" ]; then
-            curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
-          else
-            echo "No Render deploy hook secret found. Skipping deploy."
-          fi
