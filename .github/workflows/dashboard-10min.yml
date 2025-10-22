@@ -22,7 +22,6 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
-      # -------------------- setup --------------------
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -38,7 +37,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # -------------------- SECTORS: build → normalize → validate → assert → fallback --------------------
+      # 1) Build sectorCards source (may output different shapes)
       - name: Build sectorCards source (10m)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -49,11 +48,13 @@ jobs:
           echo "----- RAW SOURCE (first 80 lines) -----" || true
           head -n 80 data/outlook_source.json || true
 
-      - name: Normalize sectorCards source → schema v1
+      # 2) Normalize the source into a guaranteed schema: {"sectorCards":[{ sector,... } x11]}
+      - name: Normalize sectorCards source
         run: |
           set -euo pipefail
           python - <<'PY'
           import json, sys
+
           PATH = "data/outlook_source.json"
           try:
             j = json.load(open(PATH, "r", encoding="utf-8"))
@@ -64,14 +65,17 @@ jobs:
             try: return float(x)
             except: return None
 
-          # find list
+          # Pull a list of raw sector items from common keys
           candidates = []
           if isinstance(j, dict):
-            for k in ("sectorCards","data","sectors","cards"):
-              v = j.get(k)
-              if k=="data" and isinstance(v,dict): v=v.get("sectorCards")
-              if isinstance(v, list):
-                candidates = v; break
+            if isinstance(j.get("sectorCards"), list):
+              candidates = j["sectorCards"]
+            elif isinstance(j.get("data", {}).get("sectorCards"), list):
+              candidates = j["data"]["sectorCards"]
+            elif isinstance(j.get("sectors"), list):
+              candidates = j["sectors"]
+            elif isinstance(j.get("cards"), list):
+              candidates = j["cards"]
 
           def to_card(c):
             sector = c.get("sector") or c.get("name") or c.get("label")
@@ -85,20 +89,19 @@ jobs:
             nh = int(nh or 0); nl = int(nl or 0); up = int(up or 0); dn = int(dn or 0)
             bp = num(bp); mp = num(mp)
             if bp is None:
-              den = nh+nl; bp = (100.0*nh/den) if den else 0.0
+              den = nh + nl; bp = (100.0 * nh / den) if den else 0.0
             if mp is None:
-              den = up+dn; mp = (100.0*up/den) if den else 0.0
-            return {"sector": str(sector), "breadth_pct": bp, "momentum_pct": mp,
-                    "nh": nh, "nl": nl, "up": up, "down": dn}
+              den = up + dn; mp = (100.0 * up / den) if den else 0.0
+            return {"sector": str(sector), "breadth_pct": bp, "momentum_pct": mp, "nh": nh, "nl": nl, "up": up, "down": dn}
 
           normalized = []
           for c in (candidates or []):
             try:
               nc = to_card(c)
               if nc: normalized.append(nc)
-            except: pass
+            except Exception:
+              pass
 
-          # canonicalize to 11 keys
           ORDER = [
             "information technology","materials","health care","communication services",
             "real estate","energy","consumer staples","consumer discretionary",
@@ -113,26 +116,32 @@ jobs:
             "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
           }
 
+          # Collapse duplicates and align to canonical keys
           bykey = {}
           for c in normalized:
             k = alias.get(norm(c["sector"]), norm(c["sector"]))
-            if k not in bykey: bykey[k] = c | {"sector": k.title()}
+            if k not in bykey:
+              c2 = c.copy(); c2["sector"] = k.title(); bykey[k] = c2
             else:
               a, b = bykey[k], c
               a["nh"] += b["nh"]; a["nl"] += b["nl"]; a["up"] += b["up"]; a["down"] += b["down"]
-              den = a["nh"]+a["nl"]; a["breadth_pct"] = (100.0*a["nh"]/den) if den else 0.0
-              den = a["up"]+a["down"]; a["momentum_pct"] = (100.0*a["up"]/den) if den else 0.0
+              den = a["nh"] + a["nl"]; a["breadth_pct"] = (100.0 * a["nh"] / den) if den else 0.0
+              den = a["up"] + a["down"]; a["momentum_pct"] = (100.0 * a["up"] / den) if den else 0.0
 
           sectorCards = []
           for name in ORDER:
-            if name in bykey: sectorCards.append(bykey[name])
-            else: sectorCards.append({"sector": name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0})
+            if name in bykey:
+              sectorCards.append(bykey[name])
+            else:
+              sectorCards.append({"sector": name.title(), "breadth_pct": 0.0, "momentum_pct": 0.0, "nh": 0, "nl": 0, "up": 0, "down": 0})
 
-          json.dump({"sectorCards": sectorCards}, open(PATH,"w",encoding="utf-8"), separators=(",",":"))
+          with open(PATH, "w", encoding="utf-8") as f:
+            json.dump({"sectorCards": sectorCards}, f, ensure_ascii=False, separators=(",", ":"))
           print(f"[normalize] sectorCards={len(sectorCards)} IT_b={sectorCards[0]['breadth_pct']:.2f} IT_m={sectorCards[0]['momentum_pct']:.2f}")
           PY
 
-      - name: Validate sectorCards source (must be 11 & schema-correct)
+      # 3) Validate schema (must be 11 cards with required fields)
+      - name: Validate sectorCards source
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -142,38 +151,42 @@ jobs:
           need  = ("sector","breadth_pct","momentum_pct","nh","nl","up","down")
           ok = (len(cards)==11 and all(k in cards[0] for k in need))
           if not ok:
-            print(f"[sectors] INVALID source: cards={len(cards)} need={need}"); sys.exit(2)
+            print(f"[sectors] INVALID source: cards={len(cards)} need={need}")
+            sys.exit(2)
           print(f"[sectors] OK cards=11 | IT b={cards[0]['breadth_pct']} m={cards[0]['momentum_pct']}")
           PY
 
-      - name: Assert sectorCards not-all-zero (no fail; sets output)
+      # 4) Assert not-all-zero, expose as step output
+      - name: Assert sectorCards not-all-zero
         id: assert_nonzero
         run: |
           set -euo pipefail
           python - <<'PY'
           import json, os
-          j=json.load(open("data/outlook_source.json","r",encoding="utf-8"))
-          cards=j.get("sectorCards") or []
+          j = json.load(open("data/outlook_source.json","r",encoding="utf-8"))
+          cards = j.get("sectorCards") or []
           total = sum((c.get("nh",0)+c.get("nl",0)+c.get("up",0)+c.get("down",0)) for c in cards)
           all_zero = (total == 0)
           print(f"[sectors] totals={total} all_zero={all_zero}")
-          with open(os.environ["GITHUB_OUTPUT"],"a") as f:
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
             f.write(f"all_zero={'true' if all_zero else 'false'}\n")
           PY
 
-      - name: Fallback: hydrate source from hourly when zeros
+      # 5) Fallback to hourly only when totals are zero
+      - name: Fallback hydrate source from hourly
         if: ${{ steps.assert_nonzero.outputs.all_zero == 'true' }}
         run: |
           set -euo pipefail
           echo "[sectors] Hydrating from hourly…"
           curl -fsSL "https://frye-market-backend-1.onrender.com/live/hourly?t=$(date +%s)" -o /tmp/hourly.json
           python - <<'PY'
-          import json,sys
-          h=json.load(open("/tmp/hourly.json","r",encoding="utf-8"))
-          cards=h.get("sectorCards") or []
-          if len(cards)!=11: 
-            print("[fallback] hourly missing/invalid cards; keeping zeros"); sys.exit(0)
-          out={"sectorCards":[]}
+          import json, sys
+          h = json.load(open("/tmp/hourly.json","r",encoding="utf-8"))
+          cards = h.get("sectorCards") or []
+          if len(cards) != 11:
+            print("[fallback] hourly invalid; keeping zeros")
+            sys.exit(0)
+          out = {"sectorCards":[]}
           for c in cards:
             out["sectorCards"].append({
               "sector": c.get("sector"),
@@ -188,7 +201,7 @@ jobs:
           print("[fallback] wrote data/outlook_source.json from hourly")
           PY
 
-      # -------------------- DASHBOARD (uses the fresh source) --------------------
+      # 6) Build intraday payload using the (normalized) source
       - name: Build intraday payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -233,10 +246,9 @@ jobs:
                 "bar_raw":m.get("breadth_bar_pct"),"bar_fast":m.get("breadth_bar_pct_fast"),
                 "breadth_slow":m.get("breadth_slow_pct"),"momentum_combo":m.get("momentum_combo_pct"),
                 "volatility_pct":m.get("volatility_pct"),"overall":{"state":ov.get("state"),"score":ov.get("score")}}
-          print("🔎 snapshot:", snap)
+          print("snapshot:", snap)
           PY
 
-      # -------------------- publish --------------------
       - name: Write heartbeat
         run: |
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
@@ -256,7 +268,7 @@ jobs:
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git fetch origin "${LIVE_BRANCH}"
             git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
-          else
+          else:
             git checkout --orphan "${LIVE_BRANCH}"
           fi
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
@@ -277,6 +289,6 @@ jobs:
         run: |
           if [ -n "${RENDER_DEPLOY_HOOK:-}" ]; then
             curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
-          else
+          else:
             echo "No Render deploy hook secret found. Skipping deploy."
           fi
