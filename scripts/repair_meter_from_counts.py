@@ -10,8 +10,8 @@ Recompute the 4 meter inputs from sectorCards *counts*, matching QA:
 - Risk-On%  = (offensive breadth>50 + defensive breadth<50) / total considered * 100
 
 Writes back:
-- metrics.breadth_pct
-- metrics.momentum_pct
+- metrics.breadth_from_counts     (QA/diagnostic only; DOES NOT overwrite v1 breadth_10m_pct)
+- metrics.momentum_from_counts    (QA/diagnostic only)
 - intraday.sectorDirection10m.risingPct
 - intraday.riskOn10m.riskOnPct
 """
@@ -21,17 +21,14 @@ import json, sys, argparse
 OFFENSIVE = {"information technology", "consumer discretionary", "communication services"}
 DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
 
-
 def safe_sum(vals):
     return float(sum(x for x in vals if isinstance(x, (int, float))))
-
 
 def pct(num, den):
     den = float(den)
     if den <= 0:
         return None
     return 100.0 * float(num) / den
-
 
 def main():
     ap = argparse.ArgumentParser()
@@ -70,28 +67,28 @@ def main():
     risk_on = None
     if cards:
         by = {(c.get("sector") or "").strip().lower(): c for c in cards}
-        score = total = 0
+        score = total2 = 0
         for s in OFFENSIVE:
             bp = by.get(s, {}).get("breadth_pct")
             if isinstance(bp, (int, float)):
-                total += 1
+                total2 += 1
                 if bp > 50.0:
                     score += 1
         for s in DEFENSIVE:
             bp = by.get(s, {}).get("breadth_pct")
             if isinstance(bp, (int, float)):
-                total += 1
+                total2 += 1
                 if bp < 50.0:
                     score += 1
-        if total > 0:
-            risk_on = 100.0 * score / total
+        if total2 > 0:
+            risk_on = 100.0 * score / total2
 
-    # Write back
+    # Write back (diagnostics + intraday)
     j.setdefault("metrics", {})
     if breadth is not None:
-        j["metrics"]["breadth_pct"] = round(breadth, 2)
+        j["metrics"]["breadth_from_counts"] = round(breadth, 2)
     if momentum is not None:
-        j["metrics"]["momentum_pct"] = round(momentum, 2)
+        j["metrics"]["momentum_from_counts"] = round(momentum, 2)
 
     j.setdefault("intraday", {})
     j["intraday"].setdefault("sectorDirection10m", {})
@@ -103,19 +100,16 @@ def main():
         j["intraday"]["riskOn10m"]["riskOnPct"] = round(risk_on, 2)
 
     with open(args.dst, "w", encoding="utf-8") as f:
-        json.dump(j, f, ensure_ascii=False, indent=2)
+        json.dump(j, f, ensure_ascii=False, separators=(",",":"))
 
-    print(
-        "[repair-meter] breadth=",
-        j["metrics"].get("breadth_pct"),
-        " momentum=",
-        j["metrics"].get("momentum_pct"),
-        " rising%=",
-        j["intraday"]["sectorDirection10m"].get("risingPct"),
-        " riskOn%=",
-        j["intraday"]["riskOn10m"].get("riskOnPct"),
-    )
-
+    print("[repair-meter] breadth_from_counts=",
+          j["metrics"].get("breadth_from_counts"),
+          " momentum_from_counts=",
+          j["metrics"].get("momentum_from_counts"),
+          " rising%=",
+          j["intraday"]["sectorDirection10m"].get("risingPct"),
+          " riskOn%=",
+          j["intraday"]["riskOn10m"].get("riskOnPct"))
 
 if __name__ == "__main__":
     try:
