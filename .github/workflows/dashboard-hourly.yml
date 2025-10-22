@@ -1,12 +1,133 @@
 name: dashboard-hourly
+
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "5 * * * *"   # placeholder; won't run due to job guard
+    # a few minutes after the top of the hour
+    - cron: "5 * * * *"
+
+# prevent “operation was canceled” when a new run starts
+concurrency:
+  group: dashboard-hourly-live
+  cancel-in-progress: false
+
+env:
+  TZ: America/Chicago
+  PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
   build-hourly:
-    if: ${{ false }}       # DISABLED (keeps file valid, never runs)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     steps:
-      - run: echo "Hourly workflow temporarily disabled."
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests python-dateutil
+
+      - name: Probe Polygon
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -e
+          test -n "$POLYGON_API_KEY" || (echo "Missing POLYGON_API_KEY secret" && exit 1)
+          URL="https://api.polygon.io/v2/aggs/ticker/SPY/prev?adjusted=true&apiKey=${POLYGON_API_KEY}"
+          code=$(curl -s -o /tmp/probe.json -w "%{http_code}" "$URL")
+          echo "HTTP=$code"
+          head -c 400 /tmp/probe.json || true
+          [ "$code" = "200" ] || (echo "Polygon probe failed" && exit 2)
+
+      - name: Prepare work dir
+        run: |
+          mkdir -p data
+          : > /tmp/hourly_build.log
+          echo "Starting hourly build at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee -a /tmp/hourly_build.log
+
+      # Build the hourly "source" from Polygon (R10 script interface)
+      - name: Build outlook source (hourly)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -e
+          # Use -u for unbuffered output; tee to log so the next step can tail.
+          python -u scripts/build_outlook_source_from_polygon.py \
+            --mode hourly \
+            --out data/outlook_source.json \
+            --sectors-dir data/sectors \
+            --workers 16 \
+            --snap-batch 250 \
+            --snap-sleep 0.05 \
+            2>&1 | tee -a /tmp/hourly_build.log
+
+      # Shape into the exact frontend payload (unchanged schema)
+      - name: Make dashboard payload (hourly)
+        run: |
+          set -e
+          python -u scripts/make_dashboard_hourly.py \
+            --source data/outlook_source.json \
+            --dest data/outlook_hourly.json \
+            --heartbeat data/heartbeat_1h.txt \
+            --log /tmp/hourly_build.log \
+            2>&1 | tee -a /tmp/hourly_build.log
+
+      - name: LOG (tail)
+        if: always()
+        run: |
+          echo "----- HOURLY LOG TAIL -----"
+          tail -n 200 /tmp/hourly_build.log || true
+
+      - name: Publish LIVE (data-live-hourly)
+        run: |
+          set -e
+          git config user.name "gh-hourly-bot"
+          git config user.email "actions@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin data-live-hourly >/dev/null 2>&1; then
+            git fetch origin data-live-hourly:data-live-hourly
+          else
+            git checkout --orphan data-live-hourly
+            git rm -r --cached . || true
+            git commit --allow-empty -m "init data-live-hourly"
+            git push origin data-live-hourly
+          fi
+
+          git checkout data-live-hourly
+          mkdir -p data
+          cp -f data/outlook_hourly.json data/
+          cp -f data/heartbeat_1h.txt data/
+          git add data/outlook_hourly.json data/heartbeat_1h.txt
+          git commit -m "hourly: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "No changes"
+          git push origin data-live-hourly
+
+      - name: Publish ARCHIVE (data-archive-hourly)
+        run: |
+          set -e
+          ts=$(date -u +'%Y%m%dT%H%M%SZ')
+
+          if git ls-remote --exit-code --heads origin data-archive-hourly >/dev/null 2>&1; then
+            git fetch origin data-archive-hourly:data-archive-hourly
+          else
+            git checkout --orphan data-archive-hourly
+            git rm -r --cached . || true
+            git commit --allow-empty -m "init data-archive-hourly"
+            git push origin data-archive-hourly
+          fi
+
+          git checkout data-archive-hourly
+          mkdir -p "archive/${ts}"
+          cp -f data/outlook_source.json "archive/${ts}/outlook_source.json"
+          cp -f data/outlook_hourly.json "archive/${ts}/outlook_hourly.json"
+          git add "archive/${ts}"
+          git commit -m "archive hourly ${ts}" || echo "No changes"
+          git push origin data-archive-hourly
