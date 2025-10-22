@@ -1,31 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard.py (Intraday 10m, R12 v1 w/ Lux Squeeze)
+Ferrari Dashboard — make_dashboard.py (Intraday 10m, R12 v2: groups→sectorCards bridge + Lux Squeeze)
 
-Builds /live/intraday with v1 fields:
+Builds /live/intraday with v1 fields.
 
-metrics (intraday 10m, RTH+AH)
-- breadth_10m_pct           : 60% Alignment (EMA10>EMA20 across 11 ETFs) + 40% Bar (close>open), smoothed L=2 (persisted)
-  components (QA): breadth_align_pct(_fast), breadth_bar_pct(_fast)
-- momentum_10m_pct          : sector ETF fast momentum (legacy)
-- momentum_combo_pct        : SPY blended momentum = 0.60 EMA posture + 0.15 SMI(10m) + 0.25 SMI(1h live)
-- squeeze_pct               : **Lux-style Expansion %** on SPY 10m (0=tight, 100=expanded)  ← TILE + Overall
-  squeeze_compression_pct   : 100 - squeeze_pct  (QA only)
-- liquidity_psi             : 100*EMA(Vol,3)/EMA(Vol,12), 0..200 (UI cap 120)
-- volatility_pct            : 100*EMA(TR,3)/Close (raw 10m)
-- volatility_scaled         : volatility_pct * 6.25
-- breadth_slow_pct          : ΣNH/(ΣNH+ΣNL) from sectorCards (daily/right)
-- momentum_slow_pct         : ΣUp/(ΣUp+ΣDown) (daily/right)
-
-intraday
-- sectorDirection10m.risingPct
-- riskOn10m.riskOnPct
-- overall10m.{state, score, components, just_crossed}
-
-Notes
-- Squeeze tile uses **Expansion %** (0=tight, 100=expanded) to match Lux number.
-- Overall uses the same Expansion % for scoring (tight reduces overall).
+Changes in this version:
+- If the source contains `groups` (sector -> {nh,nl,u,d}) but no `sectorCards`,
+  we synthesize `sectorCards` (breadth_pct, momentum_pct, nh/nl/up/down) from groups.
+- Canonical ordering + aliasing so card labels are stable.
+- Everything else (Lux squeeze, EMA posture, momentum blend, engine lights) unchanged.
 """
 
 from __future__ import annotations
@@ -43,6 +27,20 @@ POLY_10M_URL = (
 
 # 11 sector ETFs for Breadth universe
 SECTOR_ETFS = ["XLK","XLY","XLC","XLP","XLU","XLV","XLRE","XLE","XLF","XLB","XLI"]
+
+# Canonical order + alias map for sector card names
+CANON_ORDER = [
+    "information technology","materials","health care","communication services",
+    "real estate","energy","consumer staples","consumer discretionary",
+    "financials","utilities","industrials",
+]
+ALIASES = {
+    "healthcare":"health care","health-care":"health care",
+    "info tech":"information technology","technology":"information technology","tech":"information technology",
+    "communications":"communication services","comm services":"communication services","telecom":"communication services",
+    "staples":"consumer staples","discretionary":"consumer discretionary",
+    "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
+}
 
 # Squeeze lookback (10-minute bars)
 SQUEEZE_LOOKBACK_10M = 6  # last ~1 hour (6 × 10m bars)
@@ -248,7 +246,6 @@ def spy_ema_posture_score(C: List[float], max_gap_pct: float = 0.50,
     mag  = min(1.0, abs(diff_pct) / max_gap_pct)  # 0..1
     posture = 50.0 + 50.0 * sign * mag            # 0..100
 
-    # fresh cross bonus decays over fade_bars
     bonus = 0.0
     age = min(max(cross_age_10m, 0), fade_bars)
     if e10_prev <= e20_prev and e10_now > e20_now:
@@ -316,10 +313,9 @@ def compute_overall10m(ema_sign: int, ema10_dist_pct: float,
     ema_pts = round(abs(dist_unit) * W_EMA) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
     momentum_pts = lin_points(momentum_pct, W_MOM)
     breadth_pts  = lin_points(breadth_pct,  W_BR)
-    squeeze_pts  = lin_points(squeeze_expansion_pct,  W_SQ)  # EXPANSION (wide=good, tight=bad)
+    squeeze_pts  = lin_points(squeeze_expansion_pct,  W_SQ)
     liq_pts      = lin_points(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
     riskon_pts   = lin_points(riskon_pct,   W_RISK)
-
     total = ema_pts + momentum_pts + breadth_pts + squeeze_pts + liq_pts + riskon_pts
     score = int(clamp(50 + total, 0, 100))
     state = "bull" if (ema_sign > 0 and score >= 60) else ("bear" if (ema_sign < 0 and score < 60) else "neutral")
@@ -360,21 +356,51 @@ def build_engine_lights_signals(curr: dict, prev: Optional[dict], ts_local: str)
     sig["sigEMA10BearCross"] = {"active": just_crossed and ema_cross=="bear", "severity":"warn",
                                 "reason": f"ema_cross={ema_cross}", "lastChanged": ts_local if (just_crossed and ema_cross=='bear') else None}
 
-    sig["sigAccelUp"]   = {"active": accel >=  ACCEL_INFO, "severity":"info",
-                           "reason": f"Δb+Δm={accel:.1f}", "lastChanged": ts_local if accel >=  ACCEL_INFO else None}
-    sig["sigAccelDown"] = {"active": accel <= -ACCEL_INFO, "severity":"warn",
-                           "reason": f"Δb+Δm={accel:.1f}", "lastChanged": ts_local if accel <= -ACCEL_INFO else None}
+    sig["sigAccelUp"]   = {"active": accel >=  4.0, "severity":"info",
+                           "reason": f"Δb+Δm={accel:.1f}", "lastChanged": ts_local if accel >=  4.0 else None}
+    sig["sigAccelDown"] = {"active": accel <= -4.0, "severity":"warn",
+                           "reason": f"Δb+Δm={accel:.1f}", "lastChanged": ts_local if accel <= -4.0 else None}
 
-    sig["sigRiskOn"]  = {"active": risk_fast >= RISK_INFO, "severity":"info",
-                         "reason": f"riskOn={risk_fast:.1f}", "lastChanged": ts_local if risk_fast >= RISK_INFO else None}
-    sig["sigRiskOff"] = {"active": risk_fast <= RISK_WARN, "severity":"warn",
-                         "reason": f"riskOn={risk_fast:.1f}", "lastChanged": ts_local if risk_fast <= RISK_WARN else None}
+    sig["sigRiskOn"]  = {"active": risk_fast >= 58.0, "severity":"info",
+                         "reason": f"riskOn={risk_fast:.1f}", "lastChanged": ts_local if risk_fast >= 58.0 else None}
+    sig["sigRiskOff"] = {"active": risk_fast <= 42.0, "severity":"warn",
+                         "reason": f"riskOn={risk_fast:.1f}", "lastChanged": ts_local if risk_fast <= 42.0 else None}
 
-    sig["sigSectorThrust"] = {"active": rising_fast >= THRUST_ON,  "severity":"info",
-                              "reason": f"rising%={rising_fast:.1f}", "lastChanged": ts_local if rising_fast >= THRUST_ON else None}
-    sig["sigSectorWeak"]   = {"active": rising_fast <= THRUST_OFF, "severity":"warn",
-                              "reason": f"rising%={rising_fast:.1f}", "lastChanged": ts_local if rising_fast <= THRUST_OFF else None}
+    sig["sigSectorThrust"] = {"active": rising_fast >= 58.0,  "severity":"info",
+                              "reason": f"rising%={rising_fast:.1f}", "lastChanged": ts_local if rising_fast >= 58.0 else None}
+    sig["sigSectorWeak"]   = {"active": rising_fast <= 42.0, "severity":"warn",
+                              "reason": f"rising%={rising_fast:.1f}", "lastChanged": ts_local if rising_fast <= 42.0 else None}
     return sig
+
+# ------------------------- groups → sectorCards -------------------------
+def norm(s: str) -> str:
+    return (s or "").strip().lower()
+
+def canon_name(name: str) -> str:
+    n = norm(name)
+    return ALIASES.get(n, n)
+
+def groups_to_cards(groups: Dict[str, Dict[str, int]]) -> List[dict]:
+    """Convert groups[sector] = {nh,nl,u,d} → sectorCards with pcts + counts, in canonical order."""
+    bykey: Dict[str, dict] = {}
+    for raw_name, g in (groups or {}).items():
+        k = canon_name(raw_name)
+        nh, nl, u, d = int(g.get("nh",0)), int(g.get("nl",0)), int(g.get("u",0)), int(g.get("d",0))
+        b = pct(nh, nh+nl); m = pct(u, u+d)
+        bykey[k] = {
+            "sector": k.title(),
+            "breadth_pct": round(b, 2),
+            "momentum_pct": round(m, 2),
+            "nh": nh, "nl": nl, "up": u, "down": d,
+        }
+    cards: List[dict] = []
+    for name in CANON_ORDER:
+        cards.append(bykey.get(name, {
+            "sector": name.title(),
+            "breadth_pct": 0.0, "momentum_pct": 0.0,
+            "nh": 0, "nl": 0, "up": 0, "down": 0
+        }))
+    return cards
 
 # ------------------------- Core builder -------------------------
 def build_intraday(source_js: Optional[dict] = None,
@@ -382,9 +408,22 @@ def build_intraday(source_js: Optional[dict] = None,
                    prev_out: Optional[dict] = None) -> dict:
     # 1) sectorCards (source or hourly fallback) → slow counts (daily/right)
     sector_cards: List[dict] = []
+
+    # A) try native sectorCards first
     if isinstance(source_js, dict):
-        sector_cards = source_js.get("sectorCards") or source_js.get("outlook", {}).get("sectorCards") or []
+        sector_cards = (source_js.get("sectorCards")
+                        or source_js.get("outlook", {}).get("sectorCards")
+                        or [])
+    # B) if missing, but groups present, synthesize sectorCards
+    if (not sector_cards) and isinstance(source_js, dict) and "groups" in source_js:
+        try:
+            sector_cards = groups_to_cards(source_js.get("groups") or {})
+        except Exception:
+            sector_cards = []
+
     cards_fresh = True if sector_cards else False
+
+    # C) final fallback: hourly live file (keeps UI populated if intraday source absent)
     if not sector_cards:
         try:
             hourly = fetch_json(hourly_url)
@@ -394,6 +433,7 @@ def build_intraday(source_js: Optional[dict] = None,
             sector_cards = []
             cards_fresh = False
 
+    # --- compute slow/right stats from cards ---
     breadth_slow, momentum_slow, rising_pct, risk_on_pct = summarize_counts(sector_cards)
 
     # 2) Polygon bars (RTH+AH)
@@ -406,10 +446,8 @@ def build_intraday(source_js: Optional[dict] = None,
 
     # 3) SPY intraday gauges + EMA posture
     squeeze_exp_pct  = None   # TILE + Overall (0=tight, 100=expanded)
-    squeeze_comp_pct = None   # QA
     liquidity_pct = None
     volatility_pct = None
-    vol_scaled = 0.0
     ema_cross="none"; just_crossed=False; ema_sign=0; ema10_dist_pct=0.0
 
     spy_bars = bars_by_sym.get("SPY", [])
@@ -422,13 +460,15 @@ def build_intraday(source_js: Optional[dict] = None,
         # Lux-style Expansion: sq_raw = BB/KC*100 (HIGH=TIGHT) → Expansion = 100 - sq_raw
         sq_raw = squeeze_raw_bbkc(H, L, C, lookback=SQUEEZE_LOOKBACK_10M)
         if sq_raw is not None:
-            squeeze_exp_pct  = clamp(100.0 - sq_raw, 0.0, 100.0)   # 0=tight, 100=expanded
-            squeeze_comp_pct = clamp(sq_raw, 0.0, 100.0)           # QA only
+            squeeze_exp_pct  = clamp(100.0 - sq_raw, 0.0, 100.0)
 
-        liquidity_pct  = liquidity_pct_spy(V)
-        volatility_pct = volatility_pct_spy(H, L, C)
-        vol_scaled     = 0.0 if volatility_pct is None else round(volatility_pct * 6.25, 2)
+        # Liquidity/Volatility
+        liq = liquidity_pct_spy(V)
+        vol = volatility_pct_spy(H, L, C)
+        liquidity_pct  = 50.0 if liq is None else liq
+        volatility_pct = 0.0  if vol is None else vol
 
+        # EMA posture + cross
         e10 = ema_series(C,10); e20 = ema_series(C,20)
         e10_prev, e20_prev = e10[-2], e20[-2]
         e10_now,  e20_now  = e10[-1], e20[-1]
@@ -441,10 +481,11 @@ def build_intraday(source_js: Optional[dict] = None,
     # 4) FAST Breadth components + sector momentum
     alignment_raw = bar_raw = None
     breadth_10m = None
-    momentum_10m = cross_up_pct = cross_down_pct = None
+    momentum_10m = None
     if key:
         alignment_raw, bar_raw = fast_components_etfs({s: bars_by_sym.get(s, []) for s in SECTOR_ETFS})
-        momentum_10m, cross_up_pct, cross_down_pct = fast_momentum_sector({s: bars_by_sym.get(s, []) for s in SECTOR_ETFS})
+        m10, _, _ = fast_momentum_sector({s: bars_by_sym.get(s, []) for s in SECTOR_ETFS})
+        momentum_10m = m10
 
     # Persisted smoothing for breadth components (L=2) via prev_out
     prev_metrics = (prev_out or {}).get("metrics") or {}
@@ -487,51 +528,44 @@ def build_intraday(source_js: Optional[dict] = None,
                           + w_smi1h * (smi1h_score if smi1h_score is not None else ema_score))
     momentum_combo = round(clamp(momentum_combo, 0.0, 100.0), 2)
 
-    # Fallbacks
     if momentum_10m is None: momentum_10m = momentum_slow
     if squeeze_exp_pct is None: squeeze_exp_pct = 50.0
     if liquidity_pct   is None: liquidity_pct   = 50.0
     if volatility_pct  is None: volatility_pct  = 0.0
 
-    # 6) Overall (uses FAST breadth + SPY momentum combo + Expansion squeeze)
+    # 6) Overall
     state, score, components = compute_overall10m(
         ema_sign=ema_sign,
         ema10_dist_pct=ema10_dist_pct,
         momentum_pct=momentum_combo,
         breadth_pct=breadth_10m,
-        squeeze_expansion_pct=squeeze_exp_pct,   # EXPANSION directly
+        squeeze_expansion_pct=squeeze_exp_pct,
         liquidity_pct=liquidity_pct,
         riskon_pct=risk_on_pct,
     )
 
     # 7) Pack metrics
     metrics = {
-        # Breadth v1 + components + fast state
         "breadth_10m_pct": breadth_10m,
         "breadth_align_pct": round(alignment_raw, 2) if isinstance(alignment_raw,(int,float)) else None,
         "breadth_align_pct_fast": round(align_fast, 2) if isinstance(align_fast,(int,float)) else None,
         "breadth_bar_pct": round(bar_raw, 2) if isinstance(bar_raw,(int,float)) else None,
         "breadth_bar_pct_fast": round(bar_fast, 2) if isinstance(bar_fast,(int,float)) else None,
 
-        # Momentum (v1 combo + legacy)
         "momentum_combo_pct": momentum_combo,
         "momentum_10m_pct": momentum_10m,
 
-        # SLOW (daily/right)
         "breadth_slow_pct": breadth_slow,
         "momentum_slow_pct": momentum_slow,
 
-        # EMA posture
         "ema_cross": ("bull" if just_crossed and ema_sign>0 else "bear" if just_crossed and ema_sign<0 else "none"),
         "ema10_dist_pct": round(ema10_dist_pct, 2),
         "ema_sign": int(ema_sign),
 
-        # Gauges
-        # Squeeze tile & overall = Expansion %
-        "squeeze_pct": round(squeeze_exp_pct, 2),               # 0=tight, 100=expanded (Lux number)
-        "squeeze_compression_pct": round(100.0 - squeeze_exp_pct, 2) if squeeze_exp_pct is not None else None,  # QA
+        "squeeze_pct": round(squeeze_exp_pct, 2),
+        "squeeze_compression_pct": round(100.0 - squeeze_exp_pct, 2) if squeeze_exp_pct is not None else None,
         "liquidity_psi": round(liquidity_pct, 2),
-        "liquidity_pct": round(liquidity_pct, 2),               # compat mirror
+        "liquidity_pct": round(liquidity_pct, 2),
         "volatility_pct": round(volatility_pct, 3),
         "volatility_scaled": 0.0 if volatility_pct is None else round(volatility_pct * 6.25, 2),
     }
@@ -558,11 +592,10 @@ def build_intraday(source_js: Optional[dict] = None,
         "sectorCards": sector_cards,
         "meta": {
             "cards_fresh": bool(cards_fresh),
-            "smi1h_fresh": bool(smi1h_k is not None and smi1h_d is not None),
-            "after_hours": False  # set via schedule if desired
+            "smi1h_fresh": bool("SPY" in bars_by_sym and len(bars_by_sym["SPY"])>=6),
+            "after_hours": False
         }
     }
-    # Debug line in Actions log
     etf_ready = sum(1 for s in SECTOR_ETFS if bars_by_sym.get(s))
     print(f"[breadth] ETFs ready={etf_ready}/11 | A_raw={alignment_raw} | B_raw={bar_raw} | final={breadth_10m}")
     return out
