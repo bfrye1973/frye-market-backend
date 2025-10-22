@@ -15,7 +15,7 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false    # ✅ don't kill a running job mid-push
+      cancel-in-progress: true
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
@@ -26,7 +26,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          persist-credentials: false   # ✅ avoids flaky "operation was canceled" during fetch
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -45,7 +44,7 @@ jobs:
           mkdir -p data
           python -u scripts/make_dashboard.py --mode intraday --out data/outlook_intraday.json
 
-      - name: Alias intraday metrics (compat mirrors)
+      - name: Alias intraday metrics
         run: |
           python -u scripts/alias_intraday_metrics.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
@@ -59,16 +58,16 @@ jobs:
             echo "POLYGON_API_KEY missing, skipping neutral repair"
           fi
 
-      - name: Repair meter from counts (diagnostics only)
+      - name: Repair meter from counts
         run: |
           python -u scripts/repair_meter_from_counts.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
-      # ---- Finalizer: enforce v1 fields & mirrors (LAST writer) ----
-      - name: Finalize v1 (enforce & mirror)
+      # ---- NEW: restore 60/40 breadth blend after all repairs ----
+      - name: Finalize breadth (restore 60/40 blend)
         run: |
           python -u scripts/finalize_intraday_breadth.py --in data/outlook_intraday.json --out data/outlook_intraday.json
 
-      # ---- Snapshot for QA ----
+      # ---- NEW: log a concise snapshot for QA ----
       - name: Print meter snapshot
         run: |
           python - <<'PY'
@@ -80,14 +79,13 @@ jobs:
           ov = (it.get("overall10m") or {})
           snap = {
               "updated_at": j.get("updated_at"),
-              "breadth_10m": m.get("breadth_10m_pct"),
-              "A_fast": m.get("breadth_align_pct_fast"), "B_fast": m.get("breadth_bar_pct_fast"),
+              "breadth_final": m.get("breadth_pct"),
+              "align_raw": m.get("breadth_align_pct"), "align_fast": m.get("breadth_align_pct_fast"),
+              "bar_raw": m.get("breadth_bar_pct"),     "bar_fast":   m.get("breadth_bar_pct_fast"),
+              "breadth_slow": m.get("breadth_slow_pct"),
               "momentum_combo": m.get("momentum_combo_pct"),
-              "squeeze_pct": m.get("squeeze_pct"),
-              "liquidity_psi": m.get("liquidity_psi"),
-              "vol_scaled": m.get("volatility_scaled"),
-              "overall": {"state": ov.get("state"), "score": ov.get("score")},
-              "meta": j.get("meta",{})
+              "volatility_pct": m.get("volatility_pct"),
+              "overall": {"state": ov.get("state"), "score": ov.get("score")}
           }
           print("🔎 snapshot:", snap)
           PY
