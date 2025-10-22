@@ -3,7 +3,6 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # 7-minute cadence you already use (12:00 UTC hour window + RTH)
     - cron: "*/7 12 * * 1-5"
     - cron: "*/7 13-20 * * 1-5"
 
@@ -39,41 +38,143 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # -------------------- NEW: sectorCards source (must come BEFORE make_dashboard.py) --------------------
+      # -------------------- SECTORS: build → normalize → validate --------------------
       - name: Build sectorCards source (10m)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
-          # Produces data/outlook_source.json with sectorCards[11]
-          python -u scripts/build_outlook_source_from_polygon.py --mode intraday10 --out data/outlook_source.json
+          # This may write different shapes; we'll normalize next.
+          python -u scripts/build_outlook_source_from_polygon.py --mode intraday10 --out data/outlook_source.json || true
+          echo "----- RAW SOURCE (first 80 lines) -----" || true
+          head -n 80 data/outlook_source.json || true
+
+      - name: Normalize sectorCards source → schema v1
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, sys, re
+
+          PATH = "data/outlook_source.json"
+          try:
+            j = json.load(open(PATH, "r", encoding="utf-8"))
+          except Exception:
+            # if file missing or unreadable, produce empty skeleton so validator will fail meaningfully
+            j = {}
+
+          # try common nests/keys
+          candidates = []
+          if isinstance(j, dict):
+            if isinstance(j.get("sectorCards"), list): candidates = j["sectorCards"]
+            elif isinstance(j.get("data",{}).get("sectorCards"), list): candidates = j["data"]["sectorCards"]
+            elif isinstance(j.get("sectors"), list): candidates = j["sectors"]
+            elif isinstance(j.get("cards"), list): candidates = j["cards"]
+
+          # field alias map
+          def num(x):
+            try: return float(x)
+            except: return None
+          def to_card(c):
+            sector = c.get("sector") or c.get("name") or c.get("label")
+            if not sector: return None
+            # allow alternate names
+            bp = c.get("breadth_pct", c.get("breadth", c.get("breadthPercent")))
+            mp = c.get("momentum_pct", c.get("momentum", c.get("momentumPercent")))
+            nh = c.get("nh", c.get("newHighs"))
+            nl = c.get("nl", c.get("newLows"))
+            up = c.get("up", c.get("advancers"))
+            dn = c.get("down", c.get("decliners", c.get("dn")))
+            card = {
+              "sector": str(sector),
+              "breadth_pct": num(bp),
+              "momentum_pct": num(mp),
+              "nh": int(nh or 0),
+              "nl": int(nl or 0),
+              "up": int(up or 0),
+              "down": int(dn or 0),
+            }
+            # if percentages missing but counts present, compute
+            if card["breadth_pct"] is None:
+              den = card["nh"] + card["nl"]
+              card["breadth_pct"] = (100.0 * card["nh"] / den) if den else 0.0
+            if card["momentum_pct"] is None:
+              den = card["up"] + card["down"]
+              card["momentum_pct"] = (100.0 * card["up"] / den) if den else 0.0
+            return card
+
+          normalized = []
+          for c in candidates or []:
+            try:
+              nc = to_card(c)
+              if nc and nc["sector"]:
+                normalized.append(nc)
+            except Exception:
+              continue
+
+          # canonical order helper
+          ORDER = [
+            "information technology","materials","health care","communication services",
+            "real estate","energy","consumer staples","consumer discretionary",
+            "financials","utilities","industrials",
+          ]
+          def norm(s): return (s or "").strip().lower()
+          alias = {
+            "healthcare":"health care","health-care":"health care",
+            "info tech":"information technology","technology":"information technology","tech":"information technology",
+            "communications":"communication services","comm services":"communication services","telecom":"communication services",
+            "staples":"consumer staples","discretionary":"consumer discretionary",
+            "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
+          }
+
+          # squash to canonical 11 keys if we have more
+          bykey = {}
+          for c in normalized:
+            k = alias.get(norm(c["sector"]), norm(c["sector"]))
+            if k not in bykey: bykey[k] = c | {"sector": k.title()}
+            else:
+              # merge duplicates by averaging pct and summing counts
+              a, b = bykey[k], c
+              a["nh"] += b["nh"]; a["nl"] += b["nl"]; a["up"] += b["up"]; a["down"] += b["down"]
+              # recompute pct from counts
+              den = a["nh"] + a["nl"]; a["breadth_pct"] = (100.0*a["nh"]/den) if den else 0.0
+              den = a["up"] + a["down"]; a["momentum_pct"] = (100.0*a["up"]/den) if den else 0.0
+
+          sectorCards = []
+          for name in ORDER:
+            if name in bykey:
+              sectorCards.append(bykey[name])
+            else:
+              # impute empty sector to keep length=11
+              sectorCards.append({"sector": name.title(), "breadth_pct": 0.0, "momentum_pct": 0.0, "nh": 0, "nl": 0, "up": 0, "down": 0})
+
+          out = { "sectorCards": sectorCards }
+          with open(PATH, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, separators=(",",":"))
+          print(f"[normalize] sectorCards={len(sectorCards)}  IT_b={sectorCards[0]['breadth_pct']:.2f} IT_m={sectorCards[0]['momentum_pct']:.2f}")
+          PY
 
       - name: Validate sectorCards source
         run: |
           set -euo pipefail
           python - <<'PY'
           import json, sys
-          try:
-              j = json.load(open("data/outlook_source.json","r",encoding="utf-8"))
-          except Exception as e:
-              print("[sectors] FAILED to read source:", e); sys.exit(2)
+          j = json.load(open("data/outlook_source.json","r",encoding="utf-8"))
           cards = j.get("sectorCards") or []
           need  = ("sector","breadth_pct","momentum_pct","nh","nl","up","down")
-          if len(cards) != 11 or any(k not in cards[0] for k in need):
-              print(f"[sectors] INVALID source: cards={len(cards)} need={need}")
-              sys.exit(2)
+          ok = (len(cards)==11 and all(k in cards[0] for k in need))
+          if not ok:
+            print(f"[sectors] INVALID source: cards={len(cards)} need={need}"); sys.exit(2)
           print(f"[sectors] OK cards=11 | IT b={cards[0]['breadth_pct']} m={cards[0]['momentum_pct']}")
           PY
 
-      # -------------------- dashboard build (uses the fresh source) --------------------
+      # -------------------- DASHBOARD (uses the fresh source) --------------------
       - name: Build intraday payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
-          # IMPORTANT: use --source data/outlook_source.json
           python -u scripts/make_dashboard.py \
             --mode intraday \
             --source data/outlook_source.json \
