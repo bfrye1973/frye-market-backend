@@ -3,10 +3,12 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # RTH hourly ticks (AZ ≈ UTC-7 when no DST; adjust if you want different mins)
-    - cron: "5 13-21 * * 1-5"   # 13:05,14:05,...,21:05 UTC Mon–Fri
-    # Optional pre-open warmup
-    - cron: "35 12 * * 1-5"     # 12:35 UTC Mon–Fri
+    - cron: "5 13-21 * * 1-5"
+    - cron: "35 12 * * 1-5"
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   hourly:
@@ -36,27 +38,25 @@ jobs:
 
       - name: Install deps
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # 1) Build sectorCards source (hourly mode)
       - name: Build sectorCards source (1h)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
-          # If your script expects another flag, change --mode accordingly
           python -u scripts/build_outlook_source_from_polygon.py --mode hourly --out data/outlook_source.json || true
           echo "----- RAW SOURCE (first 80 lines) -----" || true
           head -n 80 data/outlook_source.json || true
 
-      # 2) Normalize to {"sectorCards":[{sector,breadth_pct,momentum_pct,nh,nl,up,down} x11]}
       - name: Normalize sectorCards source
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, sys
+          import json
           PATH = "data/outlook_source.json"
           try:
             j = json.load(open(PATH, "r", encoding="utf-8"))
@@ -65,14 +65,12 @@ jobs:
           def num(x):
             try: return float(x)
             except: return None
-
           candidates = []
           if isinstance(j, dict):
             if isinstance(j.get("sectorCards"), list): candidates = j["sectorCards"]
             elif isinstance(j.get("data",{}).get("sectorCards"), list): candidates = j["data"]["sectorCards"]
             elif isinstance(j.get("sectors"), list): candidates = j["sectors"]
             elif isinstance(j.get("cards"), list): candidates = j["cards"]
-
           def to_card(c):
             sector = c.get("sector") or c.get("name") or c.get("label")
             if not sector: return None
@@ -87,70 +85,49 @@ jobs:
               den = nh+nl; bp = (100.0*nh/den) if den else 0.0
             if mp is None:
               den = up+dn; mp = (100.0*up/den) if den else 0.0
-            return {"sector": str(sector), "breadth_pct": bp, "momentum_pct": mp,
-                    "nh": nh, "nl": nl, "up": up, "down": dn}
-
+            return {"sector": str(sector), "breadth_pct": bp, "momentum_pct": mp, "nh": nh, "nl": nl, "up": up, "down": dn}
           normalized=[]
           for c in (candidates or []):
             try:
               nc = to_card(c)
               if nc: normalized.append(nc)
             except: pass
-
-          ORDER = [
-            "information technology","materials","health care","communication services",
-            "real estate","energy","consumer staples","consumer discretionary",
-            "financials","utilities","industrials",
-          ]
+          ORDER=["information technology","materials","health care","communication services","real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
           def norm(s): return (s or "").strip().lower()
-          alias = {
-            "healthcare":"health care","health-care":"health care",
-            "info tech":"information technology","technology":"information technology","tech":"information technology",
-            "communications":"communication services","comm services":"communication services","telecom":"communication services",
-            "staples":"consumer staples","discretionary":"consumer discretionary",
-            "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
-          }
-
+          alias={"healthcare":"health care","health-care":"health care","info tech":"information technology","technology":"information technology","tech":"information technology","communications":"communication services","comm services":"communication services","telecom":"communication services","staples":"consumer staples","discretionary":"consumer discretionary","finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"}
           bykey={}
           for c in normalized:
             k = alias.get(norm(c["sector"]), norm(c["sector"]))
             if k not in bykey:
-              c2 = c.copy(); c2["sector"] = k.title(); bykey[k] = c2
+              c2=c.copy(); c2["sector"]=k.title(); bykey[k]=c2
             else:
-              a,b = bykey[k], c
-              a["nh"] += b["nh"]; a["nl"] += b["nl"]; a["up"] += b["up"]; a["down"] += b["down"]
-              den = a["nh"] + a["nl"]; a["breadth_pct"] = (100.0*a["nh"]/den) if den else 0.0
-              den = a["up"] + a["down"]; a["momentum_pct"] = (100.0*a["up"]/den) if den else 0.0
-
+              a,b=bykey[k],c
+              a["nh"]+=b["nh"]; a["nl"]+=b["nl"]; a["up"]+=b["up"]; a["down"]+=b["down"]
+              den=a["nh"]+a["nl"]; a["breadth_pct"]=(100.0*a["nh"]/den) if den else 0.0
+              den=a["up"]+a["down"]; a["momentum_pct"]=(100.0*a["up"]/den) if den else 0.0
           sectorCards=[]
           for name in ORDER:
-            if name in bykey:
-              sectorCards.append(bykey[name])
-            else:
-              sectorCards.append({"sector": name.title(), "breadth_pct": 0.0, "momentum_pct": 0.0, "nh": 0, "nl": 0, "up": 0, "down": 0})
-
-          with open(PATH, "w", encoding="utf-8") as f:
-            json.dump({"sectorCards": sectorCards}, f, ensure_ascii=False, separators=(",",":"))
+            if name in bykey: sectorCards.append(bykey[name])
+            else: sectorCards.append({"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0})
+          json.dump({"sectorCards":sectorCards}, open(PATH,"w",encoding="utf-8"), separators=(",",":"))
           print(f"[normalize] sectorCards={len(sectorCards)} IT_b={sectorCards[0]['breadth_pct']:.2f} IT_m={sectorCards[0]['momentum_pct']:.2f}")
           PY
 
-      # 3) Validate schema
       - name: Validate sectorCards source
         run: |
           set -euo pipefail
           python - <<'PY'
           import json, sys
-          j = json.load(open("data/outlook_source.json","r",encoding="utf-8"))
-          cards = j.get("sectorCards") or []
-          need  = ("sector","breadth_pct","momentum_pct","nh","nl","up","down")
-          ok = (len(cards)==11 and all(k in cards[0] for k in need))
+          j=json.load(open("data/outlook_source.json","r",encoding="utf-8"))
+          cards=j.get("sectorCards") or []
+          need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
+          ok=(len(cards)==11 and all(k in cards[0] for k in need))
           if not ok:
             print(f"[sectors] INVALID source: cards={len(cards)} need={need}")
             sys.exit(2)
           print(f"[sectors] OK cards=11 | IT b={cards[0]['breadth_pct']} m={cards[0]['momentum_pct']}")
           PY
 
-      # 4) Assert not-all-zero → export env flag ALL_ZERO
       - name: Assert sectorCards not-all-zero (env flag)
         run: |
           set -euo pipefail
@@ -165,7 +142,6 @@ jobs:
           echo "[sectors] ALL_ZERO=${ALL_ZERO}"
           echo "ALL_ZERO=${ALL_ZERO}" >> "$GITHUB_ENV"
 
-      # 5) Fallback to LAST KNOWN 10m intraday (optional) if hourly is all-zero
       - name: Fallback hydrate from intraday when zeros
         if: env.ALL_ZERO == 'true'
         run: |
@@ -194,7 +170,6 @@ jobs:
           print("[fallback] wrote data/outlook_source.json from intraday")
           PY
 
-      # 6) Build hourly payload using the normalized source
       - name: Build hourly payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -206,20 +181,19 @@ jobs:
             --source data/outlook_source.json \
             --out data/outlook_hourly.json
 
-      # (Optional) any hourly-specific post-processing would go here
-
       - name: Write heartbeat (hourly)
         run: |
+          set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_hourly.txt
 
       - name: Stage artifacts
         run: |
+          set -euo pipefail
           mkdir -p /tmp/live1h
           cp -f data/outlook_hourly.json /tmp/live1h/outlook_hourly.json
           cp -f data/heartbeat_hourly.txt /tmp/live1h/heartbeat_hourly.txt
 
       - name: Prepare live branch
-        shell: bash
         run: |
           set -euo pipefail
           git config user.name "actions-bot"
@@ -241,7 +215,6 @@ jobs:
           cp -f /tmp/live1h/heartbeat_hourly.txt data/heartbeat_hourly.txt
 
       - name: Commit and push live branch
-        shell: bash
         run: |
           set -euo pipefail
           git add data
