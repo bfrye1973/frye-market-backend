@@ -1,29 +1,29 @@
 {
-  "updated_at": "2025-10-23T04:30:33",
-  "updated_at_utc": "2025-10-23T11:30:33Z",
-  "timestamp": "2025-10-23T11:30:33Z",
+  "updated_at": "2025-10-23T04:52:44",
+  "updated_at_utc": "2025-10-23T11:52:44Z",
+  "timestamp": "2025-10-23T11:52:44Z",
   "metrics": {
     "breadth_10m_pct": 36.37,
     "breadth_align_pct": 54.55,
     "breadth_align_pct_fast": 54.55,
     "breadth_bar_pct": 9.09,
     "breadth_bar_pct_fast": 9.09,
-    "momentum_combo_pct": 48.76,
+    "momentum_combo_pct": 47.43,
     "momentum_10m_pct": 59.09,
     "breadth_slow_pct": 81.98,
     "momentum_slow_pct": 66.76,
     "ema_cross": "none",
-    "ema10_dist_pct": -0.04,
+    "ema10_dist_pct": -0.1,
     "ema_sign": 0,
     "squeeze_pct": 0.0,
     "squeeze_compression_pct": 100.0,
-    "liquidity_psi": 124.97,
-    "liquidity_pct": 124.97,
-    "volatility_pct": 0.074,
-    "volatility_scaled": 0.46,
+    "liquidity_psi": 182.16,
+    "liquidity_pct": 182.16,
+    "volatility_pct": 0.083,
+    "volatility_scaled": 0.52,
     "squeeze_intraday_pct": 0.0,
     "breadth_pct": 36.37,
-    "momentum_pct": 48.76,
+    "momentum_pct": 47.43,
     "breadth_from_counts": 81.98,
     "momentum_from_counts": 66.76
   },
@@ -153,12 +153,12 @@
     "cards_fresh": true,
     "smi1h_fresh": true,
     "after_hours": false,
-    "aliased_at_utc": "2025-10-23T11:30:33Z",
+    "aliased_at_utc": "2025-10-23T11:52:44Z",
     "source": "mirror",
     "sandbox": true
   },
   "engineLights": {
-    "updatedAt": "2025-10-23T04:30:33",
+    "updatedAt": "2025-10-23T04:52:44",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -190,7 +190,7 @@
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=95.5",
-        "lastChanged": "2025-10-23T04:30:33"
+        "lastChanged": "2025-10-23T04:52:44"
       },
       "sigAccelDown": {
         "active": false,
@@ -214,7 +214,7 @@
         "active": true,
         "severity": "info",
         "reason": "rising%=100.0",
-        "lastChanged": "2025-10-23T04:30:33"
+        "lastChanged": "2025-10-23T04:52:44"
       },
       "sigSectorWeak": {
         "active": false,
@@ -290,5 +290,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-23T04:50:48-07:00"
+  "deltasUpdatedAt": "2025-10-23T05:00:21-07:00"
 }
