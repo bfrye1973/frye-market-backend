@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard.py (Intraday 10m, R12 v2: groups→sectorCards bridge + Lux Squeeze)
+Ferrari Dashboard — make_dashboard.py (Intraday 10m, R12 v3: groups→sectorCards bridge + Outlook labels + Lux Squeeze)
 
 Builds /live/intraday with v1 fields.
 
-Changes in this version:
-- If the source contains `groups` (sector -> {nh,nl,u,d}) but no `sectorCards`,
-  we synthesize `sectorCards` (breadth_pct, momentum_pct, nh/nl/up/down) from groups.
-- Canonical ordering + aliasing so card labels are stable.
-- Everything else (Lux squeeze, EMA posture, momentum blend, engine lights) unchanged.
+Changes vs R12 v2:
+- If the source contains `groups` (sector -> {nh,nl,u,d}) but no `sectorCards`, we synthesize them.
+- Adds `outlook` label to each sector card:
+    Bullish : breadth_pct >= 55 AND momentum_pct >= 55
+    Bearish : breadth_pct <= 45 AND momentum_pct <= 45
+    Neutral : otherwise
+- Canonical ordering + aliasing kept.
 """
 
 from __future__ import annotations
@@ -301,84 +303,30 @@ def fast_momentum_sector(bars_by_sym: Dict[str, List[dict]]) -> Tuple[
     momentum_10m = round(clamp(base_mom + 0.5*up_pct - 0.5*dn_pct, 0.0, 100.0), 2)
     return momentum_10m, round(up_pct,2), round(dn_pct,2)
 
-# ------------------------- Overall score -------------------------
-def lin_points(percent: float, weight: int) -> int:
-    # 50% → 0 ; 100% → +weight ; 0% → -weight
-    return int(round(weight * ((float(percent) - 50.0) / 50.0)))
-
-def compute_overall10m(ema_sign: int, ema10_dist_pct: float,
-                       momentum_pct: float, breadth_pct: float,
-                       squeeze_expansion_pct: float, liquidity_pct: float, riskon_pct: float):
-    dist_unit = clamp(ema10_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
-    ema_pts = round(abs(dist_unit) * W_EMA) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
-    momentum_pts = lin_points(momentum_pct, W_MOM)
-    breadth_pts  = lin_points(breadth_pct,  W_BR)
-    squeeze_pts  = lin_points(squeeze_expansion_pct,  W_SQ)
-    liq_pts      = lin_points(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
-    riskon_pts   = lin_points(riskon_pct,   W_RISK)
-    total = ema_pts + momentum_pts + breadth_pts + squeeze_pts + liq_pts + riskon_pts
-    score = int(clamp(50 + total, 0, 100))
-    state = "bull" if (ema_sign > 0 and score >= 60) else ("bear" if (ema_sign < 0 and score < 60) else "neutral")
-    components = {"ema10": ema_pts, "momentum": momentum_pts, "breadth": breadth_pts,
-                  "squeeze": squeeze_pts, "liquidity": liq_pts, "riskOn": riskon_pts}
-    return state, score, components
-
-# ------------------------- Engine Lights -------------------------
-def build_engine_lights_signals(curr: dict, prev: Optional[dict], ts_local: str) -> dict:
-    m  = curr.get("metrics", {})
-    it = curr.get("intraday", {})
-    ov = it.get("overall10m", {}) if isinstance(it, dict) else {}
-
-    pm = (prev or {}).get("metrics", {}) if isinstance(prev, dict) else {}
-    db = (m.get("breadth_10m_pct") or 0) - (pm.get("breadth_10m_pct") or 0)
-    dm = (m.get("momentum_10m_pct") or 0) - (pm.get("momentum_10m_pct") or 0)
-    accel = (db or 0) + (dm or 0)
-
-    risk_fast   = float(it.get("riskOn10m", {}).get("riskOnPct", 50.0))
-    rising_fast = float(it.get("sectorDirection10m", {}).get("risingPct", 0.0))
-
-    ACCEL_INFO = 4.0; RISK_INFO = 58.0; RISK_WARN = 42.0; THRUST_ON = 58.0; THRUST_OFF = 42.0
-    sig = {}
-    state = str(ov.get("state") or "neutral").lower()
-    score = int(ov.get("score") or 0)
-
-    sig["sigOverallBull"] = {"active": state == "bull" and score >= 10, "severity":"info",
-                             "reason": f"state={state} score={score}",
-                             "lastChanged": ts_local if state == "bull" and score >= 10 else None}
-    sig["sigOverallBear"] = {"active": state == "bear" and score <= -10, "severity":"warn",
-                             "reason": f"state={state} score={score}",
-                             "lastChanged": ts_local if state == "bear" and score <= -10 else None}
-
-    ema_cross = str(m.get("ema_cross") or "none")
-    just_crossed = bool(ov.get("just_crossed"))
-    sig["sigEMA10BullCross"] = {"active": just_crossed and ema_cross=="bull", "severity":"info",
-                                "reason": f"ema_cross={ema_cross}", "lastChanged": ts_local if (just_crossed and ema_cross=='bull') else None}
-    sig["sigEMA10BearCross"] = {"active": just_crossed and ema_cross=="bear", "severity":"warn",
-                                "reason": f"ema_cross={ema_cross}", "lastChanged": ts_local if (just_crossed and ema_cross=='bear') else None}
-
-    sig["sigAccelUp"]   = {"active": accel >=  4.0, "severity":"info",
-                           "reason": f"Δb+Δm={accel:.1f}", "lastChanged": ts_local if accel >=  4.0 else None}
-    sig["sigAccelDown"] = {"active": accel <= -4.0, "severity":"warn",
-                           "reason": f"Δb+Δm={accel:.1f}", "lastChanged": ts_local if accel <= -4.0 else None}
-
-    sig["sigRiskOn"]  = {"active": risk_fast >= 58.0, "severity":"info",
-                         "reason": f"riskOn={risk_fast:.1f}", "lastChanged": ts_local if risk_fast >= 58.0 else None}
-    sig["sigRiskOff"] = {"active": risk_fast <= 42.0, "severity":"warn",
-                         "reason": f"riskOn={risk_fast:.1f}", "lastChanged": ts_local if risk_fast <= 42.0 else None}
-
-    sig["sigSectorThrust"] = {"active": rising_fast >= 58.0,  "severity":"info",
-                              "reason": f"rising%={rising_fast:.1f}", "lastChanged": ts_local if rising_fast >= 58.0 else None}
-    sig["sigSectorWeak"]   = {"active": rising_fast <= 42.0, "severity":"warn",
-                              "reason": f"rising%={rising_fast:.1f}", "lastChanged": ts_local if rising_fast <= 42.0 else None}
-    return sig
-
-# ------------------------- groups → sectorCards -------------------------
+# ------------------------- groups → sectorCards + outlook -------------------------
 def norm(s: str) -> str:
     return (s or "").strip().lower()
 
 def canon_name(name: str) -> str:
     n = norm(name)
     return ALIASES.get(n, n)
+
+def _label_outlook(card: dict) -> str:
+    b = float(card.get("breadth_pct", 0) or 0.0)
+    m = float(card.get("momentum_pct", 0) or 0.0)
+    if b >= 55.0 and m >= 55.0:
+        return "Bullish"
+    if b <= 45.0 and m <= 45.0:
+        return "Bearish"
+    return "Neutral"
+
+def _apply_outlooks(cards: List[dict]) -> List[dict]:
+    out = []
+    for c in cards or []:
+        c2 = dict(c)
+        c2["outlook"] = _label_outlook(c2)
+        out.append(c2)
+    return out
 
 def groups_to_cards(groups: Dict[str, Dict[str, int]]) -> List[dict]:
     """Convert groups[sector] = {nh,nl,u,d} → sectorCards with pcts + counts, in canonical order."""
@@ -421,13 +369,17 @@ def build_intraday(source_js: Optional[dict] = None,
         except Exception:
             sector_cards = []
 
+    # C) apply outlook labels
+    sector_cards = _apply_outlooks(sector_cards)
+
     cards_fresh = True if sector_cards else False
 
-    # C) final fallback: hourly live file (keeps UI populated if intraday source absent)
+    # D) final fallback: hourly live file (keeps UI populated if intraday source absent)
     if not sector_cards:
         try:
             hourly = fetch_json(hourly_url)
-            sector_cards = hourly.get("sectorCards") or hourly.get("sectors") or []
+            tmp_cards = hourly.get("sectorCards") or hourly.get("sectors") or []
+            sector_cards = _apply_outlooks(tmp_cards)
             cards_fresh = False
         except Exception:
             sector_cards = []
@@ -592,7 +544,7 @@ def build_intraday(source_js: Optional[dict] = None,
         "sectorCards": sector_cards,
         "meta": {
             "cards_fresh": bool(cards_fresh),
-            "smi1h_fresh": bool("SPY" in bars_by_sym and len(bars_by_sym["SPY"])>=6),
+            "smi1h_fresh": bool("SPY" in bars_by_sym and len(bars_by_sym.get("SPY",[]))>=6),
             "after_hours": False
         }
     }
