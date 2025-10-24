@@ -3,118 +3,139 @@ name: dashboard-eod
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "1 20 * * 1-5"   # 20:01 UTC ~ 4:01pm ET (close), weekdays
+    # NY close + buffer (tune if needed). 21:20–21:40 UTC Mon–Fri
+    - cron: "20 21 * * 1-5"
+    - cron: "40 21 * * 1-5"
 
-concurrency:
-  group: data-writes-eod
-  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
 
 jobs:
   eod:
+    name: Build and Publish EOD
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
+    concurrency:
+      group: dashboard-eod
+      cancel-in-progress: true
     env:
-      TZ: America/Phoenix                # Arizona time
+      TZ: America/Phoenix
       LIVE_BRANCH: data-live-eod
-      ARCHIVE_BRANCH: data-archive-eod
+      PYTHONUNBUFFERED: "1"
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Sync refs
-        run: |
-          git fetch origin +refs/heads/*:refs/remotes/origin/*
-
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install deps
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install jq
+          pip install requests python-dateutil
 
-      # ---- Build daily (EOD) ----
-      - name: Build outlook source (daily)
+      # 1) Build sector SOURCE in daily mode (groups = {nh,nl,u,d})
+      - name: Build sector source (daily)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
-          python scripts/build_outlook_source_from_polygon.py --mode daily
+          mkdir -p data
+          python -u scripts/build_outlook_source_from_polygon.py --mode daily --out data/outlook_source.json
+          echo "----- RAW SOURCE (first 80 lines) -----"
+          head -n 80 data/outlook_source.json || true
 
-      - name: Make dashboard payload (daily)
+      # 2) Normalize guard (must contain groups or sectorCards)
+      - name: Normalize source (ensure groups/sectorCards)
         run: |
           set -euo pipefail
-          python scripts/make_dashboard.py --mode daily --source data/outlook_source.json --out data/outlook.json
+          python - <<'PY'
+          import json,sys
+          p="data/outlook_source.json"
+          try: j=json.load(open(p,"r",encoding="utf-8"))
+          except: print("[normalize] missing source"); sys.exit(2)
+          ok = isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)
+          if not ok:
+            print("[normalize] INVALID: missing groups/sectorCards"); sys.exit(2)
+          print("[normalize] OK")
+          PY
 
-      - name: Write heartbeat_eod
+      # 3) Build EOD payload
+      - name: Make EOD dashboard payload
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
-          mkdir -p data
+          set -euo pipefail
+          python -u scripts/make_eod.py \
+            --source data/outlook_source.json \
+            --out data/outlook.json
+
+      # 4) Validate EOD payload (must have 11 sectorCards and daily tiles)
+      - name: Validate EOD file
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          j=json.load(open("data/outlook.json","r",encoding="utf-8"))
+          cards=j.get("sectorCards") or []
+          need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
+          ok=(len(cards)==11 and all(k in (cards[0] if cards else {}) for k in need))
+          d=j.get("daily") or {}
+          okd=all(k in d for k in ("trendPct","participationPct","squeezePct","volatilityPct","liquidityPct","riskOnPct"))
+          if not ok or not okd:
+            print("[eod] invalid:", "cards",ok, "daily",okd); sys.exit(2)
+          print("[eod] OK cards=11 daily tiles present")
+          PY
+
+      # 5) Write heartbeat
+      - name: Write heartbeat (eod)
+        run: |
+          set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_eod.txt
 
-      # ---- Stage using JSON's timestamp (keeps LIVE & ARCHIVE aligned) ----
-      - name: Stage files for publish
-        id: prep
+      # 6) Stage artifacts
+      - name: Stage artifacts
         run: |
-          set -e
-          RAW_TS=$(jq -r '.updated_at // .ts' data/outlook.json)
-          TS_SAFE=$(printf '%s' "$RAW_TS" | sed 's/:/-/g')
-          echo "RAW_TS=$RAW_TS"
-          echo "TS_SAFE=$TS_SAFE"
+          set -euo pipefail
+          mkdir -p /tmp/liveeod
+          cp -f data/outlook.json /tmp/liveeod/outlook.json
+          cp -f data/heartbeat_eod.txt /tmp/liveeod/heartbeat_eod.txt
 
-          mkdir -p /tmp/liveeod /tmp/archive_eod/source /tmp/archive_eod/dashboard
-
-          # LIVE "latest"
-          cp data/outlook.json        /tmp/liveeod/
-          cp data/outlook_source.json /tmp/liveeod/
-          cp data/heartbeat_eod.txt   /tmp/liveeod/
-
-          # ARCHIVE snapshots
-          cp data/outlook_source.json "/tmp/archive_eod/source/outlook_source_${TS_SAFE}.json"
-          cp data/outlook.json        "/tmp/archive_eod/dashboard/outlook_${TS_SAFE}.json"
-
-          echo "ts=${TS_SAFE}" >> "$GITHUB_OUTPUT"
-
-      # ---- Publish LIVE (force-push tiny branch this job owns) ----
-      - name: Push LIVE branch (EOD)
+      # 7) Prepare live branch
+      - name: Prepare live branch
         run: |
-          set -e
-          git config user.name  "actions-user"
-          git config user.email "actions@github.com"
-          if git show-ref --verify --quiet refs/heads/"$LIVE_BRANCH"; then
-            git checkout "$LIVE_BRANCH"
+          set -euo pipefail
+          git config user.name "actions-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git reset --hard
+          git clean -fdx
+
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${LIVE_BRANCH}"
+            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
           else
-            git checkout --orphan "$LIVE_BRANCH"
+            git checkout --orphan "${LIVE_BRANCH}"
           fi
-          git rm -rf . || true
-          mkdir -p data && cp /tmp/liveeod/* data/
+
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
+          mkdir -p data
+          cp -f /tmp/liveeod/outlook.json        data/outlook.json
+          cp -f /tmp/liveeod/heartbeat_eod.txt  data/heartbeat_eod.txt
+
+      # 8) Commit and push live branch
+      - name: Commit and push live branch
+        run: |
+          set -euo pipefail
           git add data
-          git commit -m "EOD live: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit (live)"
-          git push origin +HEAD:"$LIVE_BRANCH"
-
-      # ---- Append to ARCHIVE (own branch -> no contention) ----
-      - name: Push ARCHIVE branch (append)
-        run: |
-          set -e
-          git config user.name  "actions-user"
-          git config user.email "actions@github.com"
-
-          git fetch origin "$ARCHIVE_BRANCH" || true
-          if git show-ref --verify --quiet refs/heads/"$ARCHIVE_BRANCH"; then
-            git checkout "$ARCHIVE_BRANCH"
-          else
-            git checkout -b "$ARCHIVE_BRANCH" "origin/$ARCHIVE_BRANCH" 2>/dev/null || git checkout --orphan "$ARCHIVE_BRANCH"
-          fi
-
-          mkdir -p data/archive/eod/source data/archive/eod/dashboard
-          cp /tmp/archive_eod/source/*    data/archive/eod/source/    || true
-          cp /tmp/archive_eod/dashboard/* data/archive/eod/dashboard/ || true
-          git add data/archive/eod || true
-          git commit -m "EOD archive: ${{ steps.prep.outputs.ts }}" || echo "nothing to commit (archive)"
-
-          git pull --rebase origin "$ARCHIVE_BRANCH" || true
-          git push origin HEAD:"$ARCHIVE_BRANCH"
+          git commit -m "EOD live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git push origin "${LIVE_BRANCH}" --force
