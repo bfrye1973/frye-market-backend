@@ -1,27 +1,25 @@
-name: dashboard-eed
+name: dashboard-eod
 
 on:
   workflow_dispatch: {}
   schedule:
-    # Run at :05 past each UTC hour 13–21 (08:05–16:05 ET) – adjust as needed
-    - cron: "5 13-21 * * 1-5"
-    # Optional pre-open warmup
-    - cron: "35 12 * * 1-5"
+    # Run once daily at 9:10 PM UTC (≈ 4:10 PM ET / 1:10 PM PT)
+    - cron: "10 21 * * 1-5"
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  build_publish_hourly:
-    name: Build and Publish Hourly (for daily data)
+  build_and_publish_eod:
+    name: Build and Publish EOD
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
     env:
       TZ: America/Phoenix
-      LIVE_BRANCH: data-live-hourly
+      LIVE_BRANCH: data-live-eod
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -41,14 +39,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      - name: Build sectorCards source (hourly)
+      - name: Build sectorCards source (daily)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py --mode hourly --out data/outlook_source.json || true
-          echo "----- RAW SOURCE (first 80 lines) -----" || true
+          python -u scripts/build_outlook_source_from_polygon.py --mode daily --out data/outlook_source.json
+          echo "----- RAW SOURCE (first 80 lines) -----"
           head -n 80 data/outlook_source.json || true
 
       - name: Normalize sectorCards source
@@ -57,102 +55,55 @@ jobs:
           python - <<'PY'
           import json
           p="data/outlook_source.json"
-          try:
-            j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception:
-            j={}
-          # support multiple shapes: {"sectorCards":[...]} or {"data":{"sectorCards":[...]}} or {"sectors":[...]} or {"cards":[...]}
-          if not isinstance(j,dict):
-              raise SystemExit("no JSON object in source")
-          def get_candidates(obj):
-              if isinstance(obj.get("sectorCards"), list): return obj["sectorCards"]
-              if isinstance(obj.get("data",{}).get("sectorCards"), list): return obj["data"]["sectorCards"]
-              if isinstance(obj.get("sectors"), list): return obj["sectors"]
-              if isinstance(obj.get("cards"), list): return obj["cards"]
-              return []
-          cands = get_candidates(j)
-          # normalize to {"sectorCards":[{sector,breadth_pct,momentum_pct,nh,nl,up,down}]}
-          def num(x):
-              try: return float(x)
-              except: return None
-          def norm(s): return (s or "").strip().lower()
-          alias={
-            "healthcare":"health care","health-care":"health care",
-            "info tech":"information technology","technology":"information technology","tech":"information technology",
-            "communications":"communication services","comm services":"communication services","telecom":"communication services",
-            "staples":"consumer staples","discretionary":"consumer discretionary",
-            "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
-          }
-          cards=[]
-          for c in cands:
-              s = c.get("sector") or c.get("name") or c.get("label")
-              if not s: continue
-              nh = int(c.get("nh", c.get("newHighs", 0)) or 0)
-              nl = int(c.get("nl", c.get("newLows", 0)) or 0)
-              up = int(c.get("up", c.get("advancers", 0)) or 0)
-              dn = int(c.get("down", c.get("decliners", 0)) or 0)
-              bp = c.get("breadth_pct", c.get("breadth", c.get("breadthPercent")))
-              mp = c.get("momentum_pct", c.get("momentum", c.get("momentumPercent")))
-              bp = num(bp); mp = num(mp)
-              if bp is None:
-                den = nh+nl; bp = (100.0*nh/den) if den else 0.0
-              if mp is None:
-                den = up+dn; mp = (100.0*up/den) if den else 0.0
-              cards.append({"sector":str(s), "breadth_pct":bp, "momentum_pct":mp, "nh":nh,"nl":nl,"up":up,"down":dn})
-          ORDER=["information technology","materials","health care","communication services","real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
-          by={}
-          for c in cards:
-              k = alias.get(norm(c["sector"]), norm(c["sector"]))
-              if k not in by:
-                  cc=c.copy(); cc["sector"]=k.title(); by[k]=cc
-              else:
-                  a,b=by[k],c
-                  a["nh"]+=b["nh"]; a["nl"]+=b["nl"]; a["up"]+=b["up"]; a["down"]+=b["down"]
-                  den=a["nh"]+a["nl"]; a["breadth_pct"]=(100.0*a["nh"]/den) if den else 0.0
-                  den=a["up"]+a["down"]; a["momentum_pct"]=(100.0*a["up"]/den) if den else 0.0
-          normed=[]
-          for name in ORDER:
-              if name in by: normed.append(by[name])
-              else: normed.append({"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0})
-          json.dump({"sectorCards":normed}, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
-          print(f"[normalize] sectorCards={len(normed)} IT_b={normed[0]['breadth_pct']:.2f} IT_m={normed[0]['momentum_pct']:.2f}")
+          j=json.load(open(p,"r",encoding="utf-8"))
+          cards=j.get("sectorCards") or []
+          if not cards and "groups" in j:
+              # minimal fallback if groups exist
+              def pct(a,b): return 0.0 if b<=0 else 100.0*a/b
+              by={}
+              for k,g in j["groups"].items():
+                  nh,nl,u,d=[int(g.get(x,0)) for x in("nh","nl","u","d")]
+                  b=pct(nh,nh+nl); m=pct(u,u+d)
+                  by[k.lower()]={"sector":k.title(),"breadth_pct":round(b,2),"momentum_pct":round(m,2),"nh":nh,"nl":nl,"up":u,"down":d}
+              cards=list(by.values())
+          json.dump({"sectorCards":cards},open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
+          print(f"[normalize] sectorCards={len(cards)}")
           PY
 
       - name: Validate sectorCards source
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, sys
-          j=json.load(open("data/outlook_source.json","r",encoding="utf-8"))
+          import json,sys
+          j=json.load(open("data/outlook_source.json"))
           cards=j.get("sectorCards") or []
           need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
-          ok=(len(cards)==11 and all(k in cards[0] for k in need))
-          if not ok:
-            print(f"[sectors] INVALID source: cards={len(cards)} need={need}")
-            sys.exit(2)
-          print(f"[sectors] OK cards=11 | IT b={cards[0]['breadth_pct']} m={cards[0]['momentum_pct']}")
+          if len(cards)!=11 or not all(k in cards[0] for k in need):
+              print(f"[sectors] INVALID source: cards={len(cards)} need={need}")
+              sys.exit(2)
+          print(f"[sectors] OK cards=11 | {cards[0]['sector']} breadth={cards[0]['breadth_pct']} momentum={cards[0]['momentum_pct']}")
           PY
 
-      - name: Build daily payload
+      - name: Build EOD payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           python -u scripts/make_eod.py \
             --source data/outlook_source.json \
-            --out    data/outlook_hourly.json
+            --out    data/outlook.json
 
       - name: Write heartbeat
         run: |
           set -euo pipefail
-          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_hourly.txt
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_eod.txt
 
       - name: Stage artifacts
         run: |
           set -euo pipefail
-          mkdir -p /tmp/live1h
-          cp -f data/outlook_hourly.json /tmp/live1h/outlook_hourly.json
-          cp -f data/heartbeat_hourly.txt   /tmp/live1h/heartbeat_hourly.txt
+          mkdir -p /tmp/eod
+          cp -f data/outlook.json /tmp/eod/outlook.json
+          cp -f data/heartbeat_eod.txt /tmp/eod/heartbeat_eod.txt
 
       - name: Prepare live branch
         run: |
@@ -169,12 +120,12 @@ jobs:
           fi
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
           mkdir -p data
-          cp -f /tmp/live1h/outlook_hourly.json   data/outlook_hourly.json
-          cp -f /tmp/live1h/heartbeat_hourly.txt data/heartbeat_hourly.txt
+          cp -f /tmp/eod/outlook.json data/outlook.json
+          cp -f /tmp/eod/heartbeat_eod.txt data/heartbeat_eod.txt
 
       - name: Commit and push live branch
         run: |
           set -euo pipefail
           git add data
-          git commit -m "1h live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git commit -m "EOD live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
           git push origin "${LIVE_BRANCH}" --force
