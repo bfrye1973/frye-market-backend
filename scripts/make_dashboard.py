@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard.py (Intraday 10m, R12 v3)
-- Keeps Market Meter logic intact (Lux squeeze, EMA posture, momentum blend, engine lights)
-- Bridges source['groups'] -> sectorCards when cards missing
-- Adds per-card outlook labels: Bullish / Bearish / Neutral
+Ferrari Dashboard — make_dashboard.py (Intraday 10m, R12 v4 • Lux PSI + Engine Lights)
+- Uses LuxAlgo Squeeze Index (PSI) for 10m + 1h
+- Keeps R12 Market Meter logic (ETF fast breadth/momentum, SMI blend, EMA posture)
+- Bridges source['groups'] -> sectorCards when cards missing; adds outlook labels
+- Publishes R11-style engineLights (Overall, EMA10 crosses, Accel, Risk, Thrust/Weak)
+- Back-compat fields preserved (squeeze_pct / squeeze_compression_pct = Expansion/Compression)
+
+Outputs: --out (e.g., data/outlook_intraday.json) served at /live/intraday
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -46,15 +51,19 @@ ALIASES = {
     "finance": "financials", "industry": "industrials", "reit": "real estate", "reits": "real estate",
 }
 
-# Squeeze lookback (10-minute bars)
-SQUEEZE_LOOKBACK_10M = 6  # last ~1 hour (6 × 10m bars)
-
-# Overall weights
+# Overall weights (unchanged)
 W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 10, 10, 10, 5
 FULL_EMA_DIST = 0.60  # % distance to reach full ±40pts
 
 OFFENSIVE = {"information technology", "consumer discretionary", "communication services"}
 DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
+
+# LuxAlgo PSI params (from Lux script)
+LUX_CONV = 50
+LUX_LEN  = 20
+
+# SMI default
+def S(v): return 50.0 if v is None else float(v)
 
 # ============================ UTILS ============================
 
@@ -138,8 +147,81 @@ def ema_blend(prev_val: Optional[float], new_val: Optional[float], L: int = 2) -
         return prev_val
     if prev_val is None:
         return float(new_val)
-    alpha = 2.0 / (L + 1.0)  # L=2 => ~0.666...
+    alpha = 2.0 / (L + 1.0)  # L=2 ~ 0.667
     return float(prev_val + alpha * (float(new_val) - float(prev_val)))
+
+# ======================= LuxAlgo Squeeze (PSI) =======================
+
+def lux_psi_from_closes(closes: List[float], conv: int = LUX_CONV, length: int = LUX_LEN) -> float:
+    """
+    Port of LuxAlgo "Squeeze Index [LuxAlgo]" (PSI):
+      max := max(src, max - (max - src)/conv)
+      min := min(src, min + (src - min)/conv)
+      diff = log(max - min)
+      psi  = -50 * correlation(diff, bar_index, length) + 50
+    """
+    n = len(closes)
+    if n < max(length + 2, 5):
+        return 50.0  # neutral on cold start
+
+    max_arr = [0.0] * n
+    min_arr = [0.0] * n
+    max_val = closes[0]
+    min_val = closes[0]
+    for i, v in enumerate(closes):
+        max_val = max(v, max_val - (max_val - v) / float(conv))
+        min_val = min(v, min_val + (v - min_val) / float(conv))
+        max_arr[i] = max_val
+        min_arr[i] = min_val
+
+    # diff = log(span)
+    diff = [0.0] * n
+    for i in range(n):
+        span = max(max_arr[i] - min_arr[i], 1e-12)
+        diff[i] = math.log(span)
+
+    # correlation with bar index over 'length'
+    w = length
+    xs = list(range(n - w, n))
+    ys = diff[-w:]
+    mx = sum(xs)/w
+    my = sum(ys)/w
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    denx = math.sqrt(sum((x - mx) ** 2 for x in xs))
+    deny = math.sqrt(sum((y - my) ** 2 for y in ys))
+    corr = (num / (denx * deny)) if (denx > 0 and deny > 0) else 0.0
+
+    psi = -50.0 * corr + 50.0
+    return float(psi)
+
+def resample_10m_to_1h(bars_10m: List[dict]) -> List[dict]:
+    """10m → 1h OHLC resample for SPY bars (close each completed 1h)."""
+    if not bars_10m:
+        return []
+    out: List[dict] = []
+    bucket = 3600
+    cur_key = None
+    agg = None
+    for b in bars_10m:
+        t = int(b["time"])
+        k = (t // bucket) * bucket
+        if cur_key is None or k != cur_key:
+            if agg:
+                out.append(agg)
+            agg = {"time": k, **{k2: b[k2] for k2 in ("open","high","low","close")}, "volume": b.get("volume",0.0)}
+            cur_key = k
+        else:
+            agg["high"] = max(agg["high"], b["high"])
+            agg["low"]  = min(agg["low"],  b["low"])
+            agg["close"]= b["close"]
+            agg["volume"] = agg.get("volume", 0.0) + b.get("volume", 0.0)
+    if agg: out.append(agg)
+    # drop in-flight 1h
+    if out:
+        now = int(time.time()); cur = (now // bucket) * bucket
+        if (out[-1]["time"] // bucket) * bucket == cur:
+            out = out[:-1]
+    return out
 
 # ======================= DAILY/RIGHT SIDE =======================
 
@@ -163,7 +245,7 @@ def summarize_counts(cards: List[dict]) -> Tuple[float, float, float, float]:
                 good += 1
     rising = round(pct(good, total), 2)
 
-    # risk-on
+    # risk-on (offense above 50 and defense below 50)
     by = {(c.get("sector") or "").strip().lower(): c for c in cards or []}
     score = considered = 0
     for s in OFFENSIVE:
@@ -180,47 +262,6 @@ def summarize_counts(cards: List[dict]) -> Tuple[float, float, float, float]:
                 score += 1
     risk_on = round(pct(score, considered), 2)
     return breadth_slow, momentum_slow, rising, risk_on
-
-# ======================= SPY INTRADAY GAUGES =======================
-
-def squeeze_raw_bbkc(H: List[float], L: List[float], C: List[float], lookback: int) -> Optional[float]:
-    """BB/KC ratio ×100 on last lookback bars. HIGH = TIGHT compression."""
-    if min(len(H),len(L),len(C)) < lookback:
-        return None
-    n = lookback
-    cn, hn, ln = C[-n:], H[-n:], L[-n:]
-    mean = sum(cn)/n
-    sd = (sum((x-mean)**2 for x in cn)/n) ** 0.5
-    bb_w = (mean + 2*sd) - (mean - 2*sd)
-    prevs = cn[:-1] + [cn[-1]]
-    trs = [max(h-l, abs(h-p), abs(l-p)) for h,l,p in zip(hn,ln,prevs)]
-    kc_w = 2.0 * (sum(trs)/len(trs)) if trs else 0.0
-    if kc_w <= 0.0:
-        return None
-    return clamp(100.0 * (bb_w / kc_w), 0.0, 100.0)
-
-def liquidity_pct_spy(V: List[float]) -> Optional[float]:
-    if not V:
-        return None
-    v3 = ema_last(V, 3)
-    v12 = ema_last(V, 12)
-    if not v12 or v12 <= 0:
-        return 0.0
-    return clamp(100.0 * (v3 / v12), 0.0, 200.0)
-
-def volatility_pct_spy(H: List[float], L: List[float], C: List[float]) -> Optional[float]:
-    if not C:
-        return None
-    if len(C) >= 2:
-        trs = tr_series(H, L, C)
-        atr = ema_last(trs, 3) if trs else None
-        if atr and C[-1] > 0:
-            return max(0.0, 100.0 * atr / C[-1])
-    else:
-        tr = max(H[-1] - L[-1], abs(H[-1] - C[-1]), abs(L[-1] - C[-1]))
-        if C[-1] > 0:
-            return max(0.0, 100.0 * tr / C[-1])
-    return None
 
 # ======================= SMI (10m & 1h live) =======================
 
@@ -245,7 +286,7 @@ def smi_kd(H: List[float], L: List[float], C: List[float],
     for i in range(n):
         denom = (r2[i] or 0.0) / 2.0
         val = 0.0 if denom == 0 else 100.0 * (m2[i] / denom)
-        if not (val == val):  # NaN guard
+        if not (val == val):
             val = 0.0
         val = max(-100.0, min(100.0, val))
         k_vals.append(val)
@@ -253,7 +294,6 @@ def smi_kd(H: List[float], L: List[float], C: List[float],
     return float(k_vals[-1]), float(d_vals[-1])
 
 def smi_1h_live_from_10m(bars10m: List[dict]) -> Tuple[Optional[float], Optional[float]]:
-    """Rolling 60-minute SMI using last 6×10m bars (RTH+AH)."""
     if len(bars10m) < 6:
         return None, None
     win = bars10m[-6:]
@@ -275,7 +315,6 @@ def spy_ema_posture_score(C: List[float], max_gap_pct: float = 0.50,
     mag  = min(1.0, abs(diff_pct) / max_gap_pct)  # 0..1
     posture = 50.0 + 50.0 * sign * mag           # 0..100
 
-    # fresh cross bonus decays over fade_bars
     bonus = 0.0
     age = min(max(cross_age_10m, 0), fade_bars)
     if e10_prev <= e20_prev and e10_now > e20_now:
@@ -287,10 +326,7 @@ def spy_ema_posture_score(C: List[float], max_gap_pct: float = 0.50,
 
 # ======================= FAST BREADTH & MOMENTUM =======================
 
-def fast_components_etfs(bars_by_sym: Dict[str, List[dict]]) -> Tuple[
-    Optional[float],  # alignment_raw_pct (EMA10>EMA20)
-    Optional[float],  # bar_raw_pct       (close>open)
-]:
+def fast_components_etfs(bars_by_sym: Dict[str, List[dict]]) -> Tuple[Optional[float], Optional[float]]:
     syms = [s for s in SECTOR_ETFS if s in bars_by_sym and len(bars_by_sym[s]) >= 2]
     if not syms:
         return None, None
@@ -311,9 +347,7 @@ def fast_components_etfs(bars_by_sym: Dict[str, List[dict]]) -> Tuple[
     bar_raw       = round(100.0 * bar_rising / total, 2)
     return alignment_raw, bar_raw
 
-def fast_momentum_sector(bars_by_sym: Dict[str, List[dict]]) -> Tuple[
-    Optional[float], Optional[float], Optional[float]
-]:
+def fast_momentum_sector(bars_by_sym: Dict[str, List[dict]]) -> Tuple[Optional[float], Optional[float], Optional[float]]:
     syms = [s for s in SECTOR_ETFS if s in bars_by_sym and len(bars_by_sym[s]) >= 2]
     if not syms:
         return None, None, None
@@ -359,40 +393,29 @@ def _label_outlook(card: dict) -> str:
 def _apply_outlooks(cards: List[dict]) -> List[dict]:
     out: List[dict] = []
     for c in cards or []:
-        d = dict(c)
-        d["outlook"] = _label_outlook(d)
-        out.append(d)
+        d = dict(c); d["outlook"] = _label_outlook(d); out.append(d)
     return out
 
 def groups_to_cards(groups: Dict[str, Dict[str, int]]) -> List[dict]:
-    """Convert groups[sector] = {nh,nl,u,d} → sectorCards with pcts + counts, in canonical order."""
     bykey: Dict[str, dict] = {}
     for raw_name, g in (groups or {}).items():
         k = canon_name(raw_name)
         nh = int(g.get("nh", 0)); nl = int(g.get("nl", 0))
         u  = int(g.get("u", 0));  d  = int(g.get("d", 0))
         b = pct(nh, nh + nl); m = pct(u, u + d)
-        bykey[k] = {
-            "sector": k.title(),
-            "breadth_pct": round(b, 2),
-            "momentum_pct": round(m, 2),
-            "nh": nh, "nl": nl, "up": u, "down": d,
-        }
+        bykey[k] = {"sector": k.title(), "breadth_pct": round(b,2), "momentum_pct": round(m,2),
+                    "nh": nh, "nl": nl, "up": u, "down": d}
     cards: List[dict] = []
     for name in CANON_ORDER:
-        card = bykey.get(name, {
-            "sector": name.title(),
-            "breadth_pct": 0.0, "momentum_pct": 0.0,
-            "nh": 0, "nl": 0, "up": 0, "down": 0
-        })
+        card = bykey.get(name, {"sector": name.title(), "breadth_pct": 0.0, "momentum_pct": 0.0,
+                                 "nh": 0, "nl": 0, "up": 0, "down": 0})
         card["outlook"] = _label_outlook(card)
         cards.append(card)
     return cards
 
 # ======================= OVERALL SCORE =======================
 
-def lin_points(percent: float, weight: int) -> int:
-    # 50% → 0 ; 100% → +weight ; 0% → -weight
+def lin_points_sym(percent: float, weight: int) -> int:
     return int(round(weight * ((float(percent) - 50.0) / 50.0)))
 
 def compute_overall10m(ema_sign: int, ema10_dist_pct: float,
@@ -400,11 +423,11 @@ def compute_overall10m(ema_sign: int, ema10_dist_pct: float,
                        squeeze_expansion_pct: float, liquidity_pct: float, riskon_pct: float):
     dist_unit = clamp(ema10_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
     ema_pts = round(abs(dist_unit) * W_EMA) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
-    momentum_pts = lin_points(momentum_pct, W_MOM)
-    breadth_pts  = lin_points(breadth_pct,  W_BR)
-    squeeze_pts  = lin_points(squeeze_expansion_pct,  W_SQ)  # EXPANSION (wide=good, tight=bad)
-    liq_pts      = lin_points(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
-    riskon_pts   = lin_points(riskon_pct,   W_RISK)
+    momentum_pts = lin_points_sym(momentum_pct, W_MOM)
+    breadth_pts  = lin_points_sym(breadth_pct,  W_BR)
+    squeeze_pts  = lin_points_sym(squeeze_expansion_pct,  W_SQ)  # EXPANSION (0=tight…100=wide)
+    liq_pts      = lin_points_sym(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
+    riskon_pts   = lin_points_sym(riskon_pct,   W_RISK)
 
     total = ema_pts + momentum_pts + breadth_pts + squeeze_pts + liq_pts + riskon_pts
     score = int(clamp(50 + total, 0, 100))
@@ -467,7 +490,7 @@ def build_engine_lights_signals(curr: dict, prev: Optional[dict], ts_local: str)
                               "lastChanged": ts_local if rising_fast <= 42.0 else None}
     return sig
 
-# ======================= CORE BUILDER =======================
+# ============================ CORE BUILDER ============================
 
 def build_intraday(source_js: Optional[dict] = None,
                    hourly_url: str = HOURLY_URL_DEFAULT,
@@ -515,8 +538,10 @@ def build_intraday(source_js: Optional[dict] = None,
         for s in SECTOR_ETFS:
             bars_by_sym[s] = fetch_polygon_10m(key, s)
 
-    # 3) SPY gauges + EMA posture
+    # 3) SPY gauges + EMA posture + Lux PSI
     squeeze_exp_pct  = None
+    psi_10m = None
+    psi_1h  = None
     liquidity_pct = None
     volatility_pct = None
     ema_cross = "none"; just_crossed = False; ema_sign = 0; ema10_dist_pct = 0.0
@@ -528,14 +553,27 @@ def build_intraday(source_js: Optional[dict] = None,
         C = [b["close"] for b in spy_bars]
         V = [b["volume"] for b in spy_bars]
 
-        # Lux-style Expansion: use EXPANSION (0=tight, 100=expanded)
-        sq_raw = squeeze_raw_bbkc(H, L, C, lookback=SQUEEZE_LOOKBACK_10M)
-        if sq_raw is not None:
-            squeeze_exp_pct = clamp(100.0 - sq_raw, 0.0, 100.0)
+        # Lux PSI: 10m + 1h
+        psi_10m = lux_psi_from_closes(C, conv=LUX_CONV, length=LUX_LEN)
+        spy_1h  = resample_10m_to_1h(spy_bars)
+        C1h = [b["close"] for b in spy_1h]
+        psi_1h = lux_psi_from_closes(C1h, conv=LUX_CONV, length=LUX_LEN) if len(C1h) >= (LUX_LEN + 2) else 50.0
 
-        liquidity_pct  = 50.0 if liquidity_pct_spy(V) is None else float(liquidity_pct_spy(V))
-        volatility_pct = 0.0  if volatility_pct_spy(H, L, C) is None else float(volatility_pct_spy(H, L, C))
+        # Expansion proxy for R12 tile: 0=tight … 100=wide
+        squeeze_exp_pct = clamp(100.0 - psi_10m, 0.0, 100.0)
 
+        # Liquidity/Volatility (unchanged)
+        v3 = ema_last(V, 3); v12 = ema_last(V, 12)
+        liquidity_pct = 0.0 if not v12 or v12 <= 0 else clamp(100.0 * (v3 / v12), 0.0, 200.0)
+
+        if len(C) >= 2:
+            trs = tr_series(H, L, C); atr = ema_last(trs, 3) if trs else None
+            volatility_pct = 0.0 if (atr is None or C[-1] <= 0) else max(0.0, 100.0 * atr / C[-1])
+        else:
+            tr = max(H[-1]-L[-1], abs(H[-1]-C[-1]), abs(L[-1]-C[-1]))
+            volatility_pct = 0.0 if C[-1] <= 0 else max(0.0, 100.0 * tr / C[-1])
+
+        # EMA posture
         e10 = ema_series(C, 10); e20 = ema_series(C, 20)
         e10_prev, e20_prev = e10[-2], e20[-2]
         e10_now,  e20_now  = e10[-1], e20[-1]
@@ -544,7 +582,7 @@ def build_intraday(source_js: Optional[dict] = None,
             ema_cross, just_crossed = "bull", True
         elif e10_prev >= e20_prev and e10_now < e20_now:
             ema_cross, just_crossed = "bear", True
-        ema_sign = 1 if e10_now > e20_now else (-1 if e10_now < 0 else 0)
+        ema_sign = 1 if e10_now > e20_now else (-1 if e10_now < e20_now else 0)
         ema10_dist_pct = 0.0 if e10_now == 0 else 100.0 * (close_now - e10_now) / e10_now
 
     # 4) FAST Breadth & sector momentum
@@ -566,35 +604,33 @@ def build_intraday(source_js: Optional[dict] = None,
     a_val = align_fast if isinstance(align_fast, (int, float)) else alignment_raw
     b_val = bar_fast   if isinstance(bar_fast,   (int, float)) else bar_raw
     if a_val is None and b_val is None:
-        breadth_10m = breadth_slow  # last resort
+        breadth_10m = breadth_slow
     else:
         a_v = 0.0 if a_val is None else float(a_val)
         b_v = 0.0 if b_val is None else float(b_val)
         breadth_10m = round(clamp(0.60 * a_v + 0.40 * b_v, 0.0, 100.0), 2)
 
     # 5) SPY Momentum blend (EMA posture + SMI10m + SMI1h live)
-    ema_score = 50.0
-    smi10_k = smi10_d = smi1h_k = smi1h_d = None
-    smi10_score = smi1h_score = None
+    momentum_combo = None
     if len(spy_bars) >= 2:
         C = [b["close"] for b in spy_bars]
         ema_score = spy_ema_posture_score(C, max_gap_pct=0.50, cross_age_10m=0,
                                           max_bonus_pts=6.0, fade_bars=6)
         H = [b["high"] for b in spy_bars]; L = [b["low"] for b in spy_bars]
         smi10_k, smi10_d = smi_kd(H, L, C, k_len=12, d_len=7, ema_len=5)
-        if smi10_k is not None and smi10_d is not None:
-            smi10_score = clamp(50.0 + 0.5 * (smi10_k - smi10_d), 0.0, 100.0)
         smi1h_k, smi1h_d = smi_1h_live_from_10m(spy_bars)
-        if smi1h_k is not None and smi1h_d is not None:
-            smi1h_score = clamp(50.0 + 0.5 * (smi1h_k - smi1h_d), 0.0, 100.0)
+        smi10_score = None if (smi10_k is None or smi10_d is None) else clamp(50.0 + 0.5 * (smi10_k - smi10_d), 0.0, 100.0)
+        smi1h_score = None if (smi1h_k is None or smi1h_d is None) else clamp(50.0 + 0.5 * (smi1h_k - smi1h_d), 0.0, 100.0)
 
-    if smi10_score is None and smi1h_score is None:
-        momentum_combo = ema_score
-    else:
-        w_ema, w_smi10, w_smi1h = 0.60, 0.15, 0.25
-        momentum_combo = (w_ema * ema_score
-                          + w_smi10 * (smi10_score if smi10_score is not None else ema_score)
-                          + w_smi1h * (smi1h_score if smi1h_score is not None else ema_score))
+        if smi10_score is None and smi1h_score is None:
+            momentum_combo = ema_score
+        else:
+            w_ema, w_smi10, w_smi1h = 0.60, 0.15, 0.25
+            momentum_combo = (w_ema * ema_score
+                              + w_smi10 * (smi10_score if smi10_score is not None else ema_score)
+                              + w_smi1h * (smi1h_score if smi1h_score is not None else ema_score))
+    if momentum_combo is None:
+        momentum_combo = momentum_slow
     momentum_combo = round(clamp(momentum_combo, 0.0, 100.0), 2)
 
     # fallbacks
@@ -606,11 +642,13 @@ def build_intraday(source_js: Optional[dict] = None,
         liquidity_pct   = 50.0
     if volatility_pct  is None:
         volatility_pct  = 0.0
+    if breadth_10m is None:
+        breadth_10m = breadth_slow
 
-    # 6) Overall score (EXPANSION squeeze)
+    # 6) Overall score (uses EXPANSION %)
     state, score, components = compute_overall10m(
-        ema_sign=ema_sign,
-        ema10_dist_pct=ema10_dist_pct,
+        ema_sign=0 if spy_bars == [] else (1 if ema10_dist_pct > 0 and 'ema_cross' else -1 if ema10_dist_pct < 0 else 0),
+        ema10_dist_pct=0.0 if spy_bars == [] else ema10_dist_pct,
         momentum_pct=momentum_combo,
         breadth_pct=breadth_10m,
         squeeze_expansion_pct=squeeze_exp_pct,
@@ -618,47 +656,53 @@ def build_intraday(source_js: Optional[dict] = None,
         riskon_pct=risk_on_pct,
     )
 
-    # 7) Pack metrics
+    # 7) Pack metrics (includes Lux PSI + Expansion/Compression)
     metrics = {
-        "breadth_10m_pct": breadth_10m,
-        "breadth_align_pct": round(alignment_raw, 2) if isinstance(alignment_raw,(int,float)) else None,
-        "breadth_align_pct_fast": round(align_fast, 2) if isinstance(align_fast,(int,float)) else None,
-        "breadth_bar_pct": round(bar_raw, 2) if isinstance(bar_raw,(int,float)) else None,
-        "breadth_bar_pct_fast": round(bar_fast, 2) if isinstance(bar_fast,(int,float)) else None,
+        # fast / blended
+        "breadth_10m_pct": round(float(breadth_10m), 2),
+        "breadth_align_pct": round(float(alignment_raw), 2) if isinstance(alignment_raw,(int,float)) else None,
+        "breadth_align_pct_fast": round(float(align_fast), 2) if isinstance(align_fast,(int,float)) else None,
+        "breadth_bar_pct": round(float(bar_raw), 2) if isinstance(bar_raw,(int,float)) else None,
+        "breadth_bar_pct_fast": round(float(bar_fast), 2) if isinstance(bar_fast,(int,float)) else None,
 
-        "momentum_combo_pct": momentum_combo,
-        "momentum_10m_pct": momentum_10m,
+        "momentum_combo_pct": round(float(momentum_combo), 2),
+        "momentum_10m_pct": round(float(momentum_10m), 2),
 
-        "breadth_slow_pct": breadth_slow,
-        "momentum_slow_pct": momentum_slow,
+        # slow snapshot (from cards)
+        "breadth_slow_pct": round(float(breadth_slow), 2),
+        "momentum_slow_pct": round(float(momentum_slow), 2),
 
+        # EMA posture
         "ema_cross": ("bull" if just_crossed and ema_sign>0 else "bear" if just_crossed and ema_sign<0 else "none"),
-        "ema10_dist_pct": round(ema10_dist_pct, 2),
-        "ema_sign": int(ema_sign),
+        "ema10_dist_pct": round(float(ema10_dist_pct), 2),
+        "ema_sign": 0 if spy_bars==[] else int(1 if ema10_dist_pct>0 else -1 if ema10_dist_pct<0 else 0),
 
-        # Squeeze tile uses Expansion % (0=tight … 100=expanded)
-        "squeeze_pct": round(squeeze_exp_pct, 2),
-        "squeeze_compression_pct": round(100.0 - squeeze_exp_pct, 2) if squeeze_exp_pct is not None else None,
-
-        # Liquidity/Volatility
-        "liquidity_psi": round(liquidity_pct, 2),
-        "liquidity_pct": round(liquidity_pct, 2),
-        "volatility_pct": round(volatility_pct, 3),
-        "volatility_scaled": 0.0 if volatility_pct is None else round(volatility_pct * 6.25, 2),
+        # Lux PSI + Expansion/Compression
+        "squeeze_psi_10m_pct": None if psi_10m is None else round(float(psi_10m), 2),
+        "squeeze_pct": round(float(squeeze_exp_pct), 2),                     # EXPANSION  (0=tight,100=wide)
+        "squeeze_compression_pct": round(float(100.0 - squeeze_exp_pct), 2), # COMPRESSION
+        # Liquidity/Vol
+        "liquidity_psi": round(float(liquidity_pct), 2),
+        "liquidity_pct": round(float(liquidity_pct), 2),
+        "volatility_pct": round(float(volatility_pct), 3),
+        "volatility_scaled": 0.0 if volatility_pct is None else round(float(volatility_pct) * 6.25, 2),
     }
 
     # 8) Intraday block + engine fields
     intraday = (source_js or {}).get("intraday", {}) or {}
     intraday.setdefault("sectorDirection10m", {})
-    intraday["sectorDirection10m"]["risingPct"] = rising_pct
+    intraday["sectorDirection10m"]["risingPct"] = float(rising_pct)
     intraday.setdefault("riskOn10m", {})
-    intraday["riskOn10m"]["riskOnPct"] = risk_on_pct
+    intraday["riskOn10m"]["riskOnPct"] = float(risk_on_pct)
     intraday["overall10m"] = {
         "state": state,
         "score": score,
         "components": components,
         "just_crossed": bool(metrics["ema_cross"] in ("bull", "bear")),
     }
+    # publish Lux PSI 1h for teammates/UI
+    intraday["squeeze1h_pct"] = None if psi_1h is None else round(float(psi_1h), 2)
+    intraday["squeeze_meta"]  = {"conv": LUX_CONV, "length": LUX_LEN, "source": "LuxAlgo PSI"}
 
     out = {
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S"),
@@ -691,7 +735,7 @@ def main():
     if (args.mode or "intraday").lower() != "intraday":
         print("[warn] only 'intraday' supported; continuing", file=sys.stderr)
 
-    prev_out = jread(args.out)  # for smoothing persistence
+    prev_out = jread(args.out)  # for persistence/deltas
 
     source_js = None
     if args.source and os.path.isfile(args.source):
@@ -719,7 +763,8 @@ def main():
           "| overall10m.state=", ov["state"], "score=", ov["score"],
           "| breadth_10m_pct=", out["metrics"]["breadth_10m_pct"],
           "| momentum_combo_pct=", out["metrics"]["momentum_combo_pct"],
-          "| squeeze_pct(Expansion)=", out["metrics"]["squeeze_pct"])
+          "| squeeze_psi_10m_pct=", out["metrics"].get("squeeze_psi_10m_pct"),
+          "| squeeze_expansion_pct=", out["metrics"]["squeeze_pct"])
 
 if __name__ == "__main__":
     try:
