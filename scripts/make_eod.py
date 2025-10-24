@@ -16,7 +16,7 @@ Also writes 11 sectorCards with {breadth_pct, momentum_pct, nh/nl/up/down}.
 """
 
 from __future__ import annotations
-import argparse, json, os, sys
+import argparse, json, os, sys, math
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple, Optional
 import urllib.request
