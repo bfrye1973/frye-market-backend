@@ -699,10 +699,35 @@ def main():
     except Exception as e:
         print("[warn] engineLights build failed:", e, file=sys.stderr)
 
+        # --- Legacy aliases for Daily lights (safe add) ---
+    # Keep your existing daily.* plus mirror the legacy keys the UI reads today.
+    m = out.setdefault("metrics", {})
+    d = out.get("daily", {}) or {}
+
+    # Prefer values already in metrics (daily_*), then fall back to daily.* block
+    if "trend_pct" not in m:
+        if "daily_trend_pct" in m:
+            m["trend_pct"] = m["daily_trend_pct"]
+        elif "trendPct" in d:
+            m["trend_pct"] = d["trendPct"]
+
+    if "squeeze_pct" not in m:
+        if "daily_squeeze_pct" in m:
+            m["squeeze_pct"] = m["daily_squeeze_pct"]
+        elif "squeezePct" in d:
+            m["squeeze_pct"] = d["squeezePct"]
+
+    if "risk_on_pct" not in m:
+        if "risk_on_daily_pct" in m:
+            m["risk_on_pct"] = m["risk_on_daily_pct"]
+        elif "riskOnPct" in d:
+            m["risk_on_pct"] = d["riskOnPct"]
+
     # Persist
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+
 
     ov = out["intraday"]["overall10m"]
     print("[ok] wrote", args.out,
