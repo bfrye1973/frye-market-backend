@@ -222,67 +222,67 @@
   "deltas": {
     "market": {
       "dBreadthPct": 0.0,
-      "dMomentumPct": 0.21,
-      "netTilt": 0.11,
+      "dMomentumPct": 0.0,
+      "netTilt": 0.0,
       "riskOnPct": 61.99
     },
     "sectors": {
       "Information Technology": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": -0.13,
-        "netTilt": -0.07
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Materials": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 1.03,
-        "netTilt": 0.52
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Health Care": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 0.54,
-        "netTilt": 0.27
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Communication Services": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": -0.18,
-        "netTilt": -0.09
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Real Estate": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": -0.52,
-        "netTilt": -0.26
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Energy": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 1.27,
-        "netTilt": 0.64
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Consumer Staples": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 0.54,
-        "netTilt": 0.27
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Consumer Discretionary": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 0.38,
-        "netTilt": 0.19
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Financials": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": -0.27,
-        "netTilt": -0.14
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Utilities": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 1.18,
-        "netTilt": 0.59
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       },
       "Industrials": {
         "dBreadthPct": 0.0,
-        "dMomentumPct": 0.21,
-        "netTilt": 0.1
+        "dMomentumPct": 0.0,
+        "netTilt": 0.0
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-23T16:50:47-07:00"
+  "deltasUpdatedAt": "2025-10-23T17:01:00-07:00"
 }
