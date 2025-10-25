@@ -1,16 +1,21 @@
 name: Intraday DELTAS SANDBOX (5-minute)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
-    # Pre-open + RTH, every 3 minutes (Mon–Fri)
+    # Pre-open + RTH, every 3 minutes (Mon–Fri, UTC)
     - cron: "*/3 12-20 * * 1-5"
   workflow_run:
     workflows: ["dashboard-10min"]
     types: [completed]
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build-and-publish:
+    name: Build and Publish Sandbox Deltas
     # If triggered by workflow_run, only proceed when the 10m job succeeded
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
@@ -22,43 +27,81 @@ jobs:
       contents: write
     env:
       LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
+      LIVE_RAW: https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min/data/outlook_intraday.json
       BRANCH: data-live-10min-sandbox
 
     steps:
+      # ---------------------------------------------------------------
+      # 1) Market-hours guard (America/Phoenix)
+      # ---------------------------------------------------------------
+      - name: Market hours guard (AZ)
+        id: hours
+        run: |
+          TZ="America/Phoenix"
+          DOW=$(TZ=$TZ date +'%u')   # 1=Mon .. 7=Sun
+          HOUR=$(TZ=$TZ date +'%H')  # 00..23
+          echo "AZ now: $(TZ=$TZ date)  (DOW=$DOW HOUR=$HOUR)"
+
+          if [ "$DOW" -ge 6 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "⏸ Weekend — skip"; exit 0
+          fi
+
+          # Allow 06:00–13:59 AZ (pre-open + RTH)
+          if [ "$HOUR" -lt 6 ] || [ "$HOUR" -gt 13 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "⏸ Outside AZ market hours — skip"; exit 0
+          fi
+
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "✅ Within market hours — continue"
+
+      # ---------------------------------------------------------------
+      # 2) Freshness gate: require 10m live file ≤ 120s old
+      # ---------------------------------------------------------------
+      - name: Gate – require fresh 10m live (<= 120s)
+        id: fresh
+        if: ${{ steps.hours.outputs.run == 'true' }}
+        run: |
+          set -e
+          curl -sfL "${LIVE_RAW}?t=$(date +%s)" -o /tmp/live10.json || { echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "no live10"; exit 0; }
+          TS=$(jq -r '.updated_at // .updated_at_utc // empty' /tmp/live10.json)
+          if [ -z "$TS" ]; then echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "no timestamp on live10"; exit 0; fi
+          AGE=$(( $(date -u +%s) - $(date -u -d "${TS/Z/+00:00}" +%s) ))
+          echo "live10 age: ${AGE}s"
+          if [ "$AGE" -le 120 ]; then
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+            echo "⏸ live10 too old — skip this run"
+          fi
+
+      # ---------------------------------------------------------------
+      # 3) Checkout and build only when both guards pass
+      # ---------------------------------------------------------------
       - name: Checkout (shallow)
+        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Set BUILD_DIR
+        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
         run: |
           echo "BUILD_DIR=${RUNNER_TEMP}/intraday-deltas" >> "$GITHUB_ENV"
           mkdir -p "${RUNNER_TEMP}/intraday-deltas"
 
-      # ---------------- Debounce: require fresh 10m live (<= 120s old) ----------------
-      - name: Gate – require fresh 10m live (<= 2 min old)
-        run: |
-          set -e
-          LIVE_RAW="https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min/data/outlook_intraday.json"
-          curl -sfL "${LIVE_RAW}?t=$(date +%s)" -o /tmp/live10.json || { echo "no live10"; exit 0; }
-          TS=$(jq -r '.updated_at // .updated_at_utc // empty' /tmp/live10.json)
-          if [ -z "$TS" ]; then echo "no timestamp on live10; skipping"; exit 0; fi
-          AGE=$(( $(date -u +%s) - $(date -u -d "${TS/Z/+00:00}" +%s) ))
-          echo "live10 age: ${AGE}s"
-          if [ "$AGE" -gt 120 ]; then
-            echo "live10 too old; skipping this 3m run"
-            exit 0
-          fi
-
       - name: Fetch previous sandbox payload
+        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
         run: |
           set -e
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            git fetch origin "$BRANCH:$BRANCH"
-            git show "origin/$BRANCH:data/outlook_intraday.json" > "$BUILD_DIR/prev.json" || true
+          if git ls-remote --exit-code --heads origin "${BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${BRANCH}:${BRANCH}"
+            git show "origin/${BRANCH}:data/outlook_intraday.json" > "$BUILD_DIR/prev.json" || true
           fi
 
       - name: Generate NEW sandbox payload with DELTAS
+        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
         env:
           LIVE_URL:  ${{ env.LIVE_URL }}
           BUILD_DIR: ${{ env.BUILD_DIR }}
@@ -154,6 +197,7 @@ jobs:
           PY
 
       - name: Prepare sandbox branch
+        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
         run: |
           set -e
           BRANCH="${{ env.BRANCH }}"
@@ -167,12 +211,14 @@ jobs:
           mkdir -p data
 
       - name: Copy outputs
+        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
         run: |
           cp -f "$BUILD_DIR/outlook_intraday.json" data/outlook_intraday.json
           cp -f "$BUILD_DIR/heartbeat_10min.txt" data/heartbeat_10min.txt
           ls -l data
 
       - name: Commit & push
+        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
         run: |
           git config user.name  "frye-bot"
           git config user.email "bot@users.noreply.github.com"
