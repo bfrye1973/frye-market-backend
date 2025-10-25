@@ -1,8 +1,8 @@
 {
   "version": "sandbox-10m-deltas",
-  "updated_at": "2025-10-24 19:42:50",
-  "updated_at_utc": "2025-10-25T02:42:50Z",
-  "timestamp": "2025-10-25T02:42:50Z",
+  "updated_at": "2025-10-24 20:27:32",
+  "updated_at_utc": "2025-10-25T03:27:32Z",
+  "timestamp": "2025-10-25T03:27:32Z",
   "metrics": {
     "breadth_10m_pct": 9.09,
     "breadth_align_pct": 9.09,
@@ -170,7 +170,7 @@
     "sandbox": true
   },
   "engineLights": {
-    "updatedAt": "2025-10-24 19:42:50",
+    "updatedAt": "2025-10-24 20:27:32",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -202,7 +202,7 @@
         "active": true,
         "severity": "info",
         "reason": "Δb+Δm=22.7",
-        "lastChanged": "2025-10-24 19:42:50"
+        "lastChanged": "2025-10-24 20:27:32"
       },
       "sigAccelDown": {
         "active": false,
@@ -226,7 +226,7 @@
         "active": true,
         "severity": "info",
         "reason": "rising%=100.0",
-        "lastChanged": "2025-10-24 19:42:50"
+        "lastChanged": "2025-10-24 20:27:32"
       },
       "sigSectorWeak": {
         "active": false,
@@ -301,5 +301,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-10-24T20:25:56-07:00"
+  "deltasUpdatedAt": "2025-10-24T20:49:29-07:00"
 }
