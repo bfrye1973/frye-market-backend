@@ -44,7 +44,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # Build hourly sectorCards source (optional if you already produce it)
+      # 1) Build hourly sectorCards source (groups or sectorCards)
       - name: Build sectorCards source (1h)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -54,6 +54,7 @@ jobs:
           python -u scripts/build_outlook_source_from_polygon.py --mode hourly --out data/outlook_source.json || true
           head -n 60 data/outlook_source.json || true
 
+      # 2) Normalize source — accept groups OR sectorCards (no fail if empty)
       - name: Normalize sectorCards source
         run: |
           set -euo pipefail
@@ -64,30 +65,46 @@ jobs:
             j=json.load(open(p,"r",encoding="utf-8"))
           except Exception:
             j={}
-          # accept sectorCards/sectors/cards; keep as-is (hourly builder can consume any of those)
           if not isinstance(j,dict):
-            print("[normalize] invalid source dict"); sys.exit(2)
-          ok = any(isinstance(j.get(k), list) for k in ("sectorCards","sectors","cards"))
-          if not ok:
-            print("[normalize] missing sector list"); sys.exit(2)
-          print("[normalize] OK")
-          PY
-
-      - name: Validate sectorCards source
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json,sys
-          j=json.load(open("data/outlook_source.json","r",encoding="utf-8"))
-          cards=None
+            print("[normalize] source missing/invalid — continuing without cards")
+            sys.exit(0)
+          found=None; key=None
           for k in ("sectorCards","sectors","cards"):
             v=j.get(k)
-            if isinstance(v,list): cards=v; break
-          if cards is None:
-            print("[validate] no cards list"); sys.exit(2)
-          print(f"[validate] cards_found={len(cards)} (ok if 11; may be 0 before market)")
+            if isinstance(v,list):
+              found=v; key=k; break
+          if found is None and isinstance(j.get("groups"),dict):
+            # convert groups -> sectorCards on the fly
+            groups=j["groups"]
+            ORDER=["information technology","materials","health care","communication services","real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
+            alias={"healthcare":"health care","health-care":"health care","info tech":"information technology","technology":"information technology","tech":"information technology",
+                   "communications":"communication services","comm services":"communication services","telecom":"communication services",
+                   "staples":"consumer staples","discretionary":"consumer discretionary","finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"}
+            def norm(s): return (s or "").strip().lower()
+            by={}
+            for name,g in (groups or {}).items():
+              k=alias.get(norm(name), norm(name))
+              nh=int((g or {}).get("nh",0)); nl=int((g or {}).get("nl",0))
+              u =int((g or {}).get("u",0));  d =int((g or {}).get("d",0))
+              b = 0.0 if (nh+nl)==0 else round(100.0*nh/(nh+nl),2)
+              m = 0.0 if (u+d)==0  else round(100.0*u/(u+d),2)
+              by[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":u,"down":d}
+            cards=[]
+            for name in ORDER:
+              cards.append(by.get(name, {"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}))
+            j={"sectorCards":cards}
+            json.dump(j,open(p,"w",encoding="utf-8"),separators=(",",":"))
+            print(f"[normalize] converted groups→sectorCards len={len(cards)}")
+            sys.exit(0)
+
+          # We have a sector list already (any key) — leave as-is
+          if found is None:
+            print("[normalize] no sector list present — continuing (lights still build)")
+          else:
+            print(f"[normalize] found list '{key}' len={len(found)}")
           PY
 
+      # 3) Build hourly payload
       - name: Build hourly payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -98,6 +115,7 @@ jobs:
             --source data/outlook_source.json \
             --out    data/outlook_hourly.json
 
+      # 4) Finalize v1-hourly (enforce & mirror) + snapshot
       - name: Finalize v1-hourly (enforce & mirror)
         run: |
           set -euo pipefail
@@ -118,18 +136,21 @@ jobs:
           })
           PY
 
+      # 5) Write heartbeat (hourly)
       - name: Write heartbeat (hourly)
         run: |
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_hourly.txt
 
+      # 6) Stage artifacts
       - name: Stage artifacts
         run: |
           set -euo pipefail
           mkdir -p /tmp/live1h
-          cp -f data/outlook_hourly.json   /tmp/live1h/outlook_hourly.json
-          cp -f data/heartbeat_hourly.txt  /tmp/live1h/heartbeat_hourly.txt
+          cp -f data/outlook_hourly.json  /tmp/live1h/outlook_hourly.json
+          cp -f data/heartbeat_hourly.txt /tmp/live1h/heartbeat_hourly.txt
 
+      # 7) Prepare live branch
       - name: Prepare live branch
         run: |
           set -euo pipefail
@@ -148,6 +169,7 @@ jobs:
           cp -f /tmp/live1h/outlook_hourly.json   data/outlook_hourly.json
           cp -f /tmp/live1h/heartbeat_hourly.txt data/heartbeat_hourly.txt
 
+      # 8) Commit and push live branch
       - name: Commit and push live branch
         run: |
           set -euo pipefail
