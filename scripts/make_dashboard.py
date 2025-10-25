@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard.py (Intraday 10m, R12 v6 • Lux PSI on tile + Engine Lights)
+Ferrari Dashboard — make_dashboard.py (Intraday 10m, R12 v7 • Lux PSI + Engine Lights)
 
 - LuxAlgo Squeeze PSI on SPY 10m and 1h
-- metrics.squeeze_pct            = PSI 10m (tightness; HIGH = tight)  <-- Intraday Squeeze tile reads this
-- metrics.squeeze_expansion_pct  = 100 - PSI 10m (wide bands)
-- metrics.squeeze_compression_pct= PSI 10m
-- metrics.squeeze_psi_10m_pct    = PSI 10m (explicit field)
-- intraday.squeeze1h_pct         = PSI 1h (resampled from 10m bars)
-- Preserves R12: groups→cards, outlook labels, ETF fast breadth/momentum, SMI blend, EMA posture, overall10m
-- Publishes R11 engineLights
+- metrics.squeeze_pct              = PSI 10m (tightness; HIGH = tight)         <-- Intraday Squeeze tile reads this
+- metrics.squeeze_expansion_pct    = 100 - PSI 10m (wide bands)
+- metrics.squeeze_compression_pct  = PSI 10m
+- metrics.squeeze_psi_10m_pct      = PSI 10m (explicit field)
+- intraday.squeeze1h_pct           = PSI 1h
+- Preserves R12: groups→cards bridge, outlook labels, ETF fast breadth/momentum, SMI blend, EMA posture, overall10m score
+- Publishes R11 engineLights (Overall, EMA10 crosses, Accel Up/Down, RiskOn/Off, SectorThrust/Weak)
+
+NOTE: This script has **no --mode** argument (the workflow must not pass it).
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from typing import Dict, List, Optional, Tuple
 
 # ============================ CONFIG ============================
 
-VERSION_TAG = "r12.6-psi-tile"
+VERSION_TAG = "r12.7-psi-tile"
 
 HOURLY_URL_DEFAULT = "https://frye-market-backend-1.onrender.com/live/hourly"
 
@@ -51,13 +53,15 @@ ALIASES = {
     "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
 }
 
+# overall scoring weights
 W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 10, 10, 10, 5
-FULL_EMA_DIST = 0.60
+FULL_EMA_DIST = 0.60  # % distance to reach full ±W_EMA
 
 OFFENSIVE = {"information technology","consumer discretionary","communication services"}
 DEFENSIVE = {"consumer staples","utilities","health care","real estate"}
 
-LUX_CONV = 50   # Lux squeeze defaults
+# Lux PSI defaults (from the TradingView script)
+LUX_CONV = 50
 LUX_LEN  = 20
 
 # ============================ UTILS ============================
@@ -72,7 +76,10 @@ def pct(a: float, b: float) -> float:
     return 0.0 if b <= 0 else 100.0 * float(a) / float(b)
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent":"make-dashboard/1.0","Cache-Control":"no-store"})
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "make-dashboard/1.0",
+        "Cache-Control": "no-store"
+    })
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -85,28 +92,28 @@ def fetch_polygon_10m(key: str, sym: str, lookback_days: int = 4) -> List[dict]:
     except Exception:
         return []
     rows = js.get("results") or []
-    bars: List[dict] = []
+    out: List[dict] = []
     for r in rows:
         try:
             t = int(r.get("t", 0)) // 1000  # ms -> s
-            bars.append({
-                "time": t,
-                "open": float(r.get("o", 0.0)),
-                "high": float(r.get("h", 0.0)),
-                "low":  float(r.get("l", 0.0)),
-                "close":float(r.get("c", 0.0)),
+            out.append({
+                "time":   t,
+                "open":   float(r.get("o", 0.0)),
+                "high":   float(r.get("h", 0.0)),
+                "low":    float(r.get("l", 0.0)),
+                "close":  float(r.get("c", 0.0)),
                 "volume": float(r.get("v", 0.0)),
             })
         except Exception:
             continue
     # drop in-flight 10m bar
-    if bars:
+    if out:
         BUCKET = 600
         now = int(time.time())
         cur  = (now // BUCKET) * BUCKET
-        if (bars[-1]["time"] // BUCKET) * BUCKET == cur:
-            bars = bars[:-1]
-    return bars
+        if (out[-1]["time"] // BUCKET) * BUCKET == cur:
+            out = out[:-1]
+    return out
 
 def ema_series(vals: List[float], span: int) -> List[float]:
     k = 2.0 / (span + 1.0)
@@ -135,10 +142,8 @@ def jread(path: str) -> Optional[dict]:
         return None
 
 def ema_blend(prev_val: Optional[float], new_val: Optional[float], L: int = 2) -> Optional[float]:
-    if new_val is None:
-        return prev_val
-    if prev_val is None:
-        return float(new_val)
+    if new_val is None: return prev_val
+    if prev_val is None: return float(new_val)
     alpha = 2.0 / (L + 1.0)
     return float(prev_val + alpha * (float(new_val) - float(prev_val)))
 
@@ -146,7 +151,7 @@ def ema_blend(prev_val: Optional[float], new_val: Optional[float], L: int = 2) -
 
 def lux_psi_from_closes(closes: List[float], conv: int = LUX_CONV, length: int = LUX_LEN) -> float:
     """
-    LuxAlgo Squeeze Index [LuxAlgo] (PSI) port:
+    LuxAlgo Squeeze Index [LuxAlgo] (PSI):
       max := max(src, max - (max - src)/conv)
       min := min(src, min + (src - min)/conv)
       diff = log(max - min)
@@ -193,14 +198,21 @@ def resample_10m_to_1h(bars_10m: List[dict]) -> List[dict]:
     bucket = 3600
     cur_key = None
     agg = None
-    bars10m = bars_10m  # assign once; no walrus in loop
+    bars10m = bars_10m
     for b in bars10m:
         t = int(b["time"])
         k = (t // bucket) * bucket
         if cur_key is None or k != cur_key:
             if agg:
                 out.append(agg)
-            agg = {"time": k, "open": b["open"], "high": b["high"], "low": b["low"], "close": b["close"], "volume": b.get("volume", 0.0)}
+            agg = {
+                "time": k,
+                "open": b["open"],
+                "high": b["high"],
+                "low":  b["low"],
+                "close":b["close"],
+                "volume": b.get("volume", 0.0)
+            }
             cur_key = k
         else:
             agg["high"]   = max(agg["high"], b["high"])
@@ -209,7 +221,7 @@ def resample_10m_to_1h(bars_10m: List[dict]) -> List[dict]:
             agg["volume"] = agg.get("volume", 0.0) + b.get("volume", 0.0)
     if agg:
         out.append(agg)
-    # drop in-flight 1h bar
+    # drop in-flight hour
     now = int(time.time())
     cur = (now // bucket) * bucket
     if out and out[-1]["time"] == cur:
@@ -224,7 +236,7 @@ def summarize_counts(cards: List[dict]) -> Tuple[float, float, float, float]:
         NH += float(c.get("nh", 0))
         NL += float(c.get("nl", 0))
         UP += float(c.get("up", 0))
-        DN += float(c.get("down", 0))   # <-- fixed: no extra ')'
+        DN += float(c.get("down", 0))    # <-- fixed (no extra ')')
     breadth_slow  = round(pct(NH, NH + NL), 2)
     momentum_slow = round(pct(UP, UP + DN), 2)
 
@@ -233,7 +245,8 @@ def summarize_counts(cards: List[dict]) -> Tuple[float, float, float, float]:
         bp = c.get("breadth_pct")
         if isinstance(bp, (int, float)):
             total += 1
-            if bp > 50.0: good += 1
+            if bp > 50.0:
+                good += 1
     rising = round(pct(good, total), 2)
 
     by = {(c.get("sector") or "").strip().lower(): c for c in cards or []}
@@ -242,12 +255,14 @@ def summarize_counts(cards: List[dict]) -> Tuple[float, float, float, float]:
         bp = by.get(s, {}).get("breadth_pct")
         if isinstance(bp, (int, float)):
             cons += 1
-            if bp > 50.0: score += 1
+            if bp > 50.0:
+                score += 1
     for s in DEFENSIVE:
         bp = by.get(s, {}).get("breadth_pct")
         if isinstance(bp, (int, float)):
             cons += 1
-            if bp < 50.0: score += 1
+            if bp < 50.0:
+                score += 1
     risk_on = round(pct(score, cons), 2)
     return breadth_slow, momentum_slow, rising, risk_on
 
@@ -258,8 +273,8 @@ def smi_kd(H: List[float], L: List[float], C: List[float],
     n = len(C)
     if n < max(k_len, d_len) + 6:
         return None, None
-    HH = []
-    LL = []
+    HH: List[float] = []
+    LL: List[float] = []
     for i in range(n):
         i0 = max(0, i - (k_len - 1))
         HH.append(max(H[i0:i+1]))
@@ -303,6 +318,7 @@ def spy_ema_posture_score(C: List[float], max_gap_pct: float = 0.50,
     sign = 1.0 if diff_pct > 0 else (-1.0 if diff_pct < 0 else 0.0)
     mag  = min(1.0, abs(diff_pct) / max(1e-9, max_gap_pct))
     posture = 50.0 + 50.0 * sign * mag
+
     bonus = 0.0
     age = min(max(cross_age_10m, 0), max(1, fade_bars))
     if e10_prev <= e20_prev and e10_now > e20_now:
@@ -318,14 +334,12 @@ def fast_components_etfs(bars_by_sym: Dict[str, List[dict]]) -> Tuple[Optional[f
     if not syms:
         return None, None
     total = len(syms)
-    aligned_up = 0
-    bar_up = 0
+    aligned_up = 0; bar_up = 0
     for s in syms:
         bars = bars_by_sym.get(s, [])
         C = [b["close"] for b in bars]
         O = [b["open"]  for b in bars]
-        e10 = ema_series(C, 10)
-        e20 = ema_series(C, 20)
+        e10 = ema_series(C, 10); e20 = ema_series(C, 20)
         if e10 and e20 and e10[-1] > e20[-1]:
             aligned_up += 1
         if C and O and C[-1] > O[-1]:
@@ -341,8 +355,7 @@ def fast_momentum_sector(bars_by_sym: Dict[str, List[dict]]) -> Tuple[Optional[f
     for s in syms:
         bars = bars_by_sym.get(s, [])
         C = [b["close"] for b in bars]
-        e10 = ema_series(C, 10)
-        e20 = ema_series(C, 20)
+        e10 = ema_series(C, 10); e20 = ema_series(C, 20)
         if e10 and e20 and e10[-1] > e20[-1]:
             gt += 1
         if len(e10) >= 2 and len(e20) >= 2 and e10[-2] <= e20[-2] and e10[-1] > e20[-1]:
@@ -358,20 +371,15 @@ def fast_momentum_sector(bars_by_sym: Dict[str, List[dict]]) -> Tuple[Optional[f
 # ======================= OUTLOOK LABELS & GROUPS->CARDS =======================
 
 def _label_outlook(card: dict) -> str:
-    b = float(card.get("breadth_pct", 0.0))
-    m = float(card.get("momentum_pct", 0.0))
-    if b >= 55.0 and m >= 55.0:
-        return "Bullish"
-    if b <= 45.0 and m <= 45.0:
-        return "Bearish"
+    b = float(card.get("breadth_pct", 0.0)); m = float(card.get("momentum_pct", 0.0))
+    if b >= 55.0 and m >= 55.0: return "Bullish"
+    if b <= 45.0 and m <= 45.0: return "Bearish"
     return "Neutral"
 
 def _apply_outlooks(cards: List[dict]) -> List[dict]:
     out: List[dict] = []
     for c in cards or []:
-        d = dict(c)
-        d["outlook"] = _label_outlook(d)
-        out.append(d)
+        d = dict(c); d["outlook"] = _label_outlook(d); out.append(d)
     return out
 
 def canon_name(name: str) -> str:
@@ -383,18 +391,13 @@ def groups_to_cards(groups: Dict[str, Dict[str, int]]) -> List[dict]:
         k = canon_name(raw_name)
         nh = int((g or {}).get("nh", 0)); nl = int((g or {}).get("nl", 0))
         u  = int((g or {}).get("u", 0));  d  = int((g or {}).get("d", 0))
-        b = pct(nh, nh + nl)
-        m = pct(u,  u + d)
-        bykey[k] = {
-            "sector": k.title(),
-            "breadth_pct": round(b, 2),
-            "momentum_pct": round(m, 2),
-            "nh": nh, "nl": nl, "up": u, "down": d
-        }
+        b = pct(nh, nh + nl); m = pct(u,  u + d)
+        bykey[k] = {"sector": k.title(), "breadth_pct": round(b,2), "momentum_pct": round(m,2),
+                    "nh": nh, "nl": nl, "up": u, "down": d}
     out: List[dict] = []
     for name in CANON_ORDER:
         card = bykey.get(name, {"sector": name.title(), "breadth_pct": 0.0, "momentum_pct": 0.0,
-                                 "nh": 0, "nl": 0, "up": 0, "down": 0})
+                                 "nh":0,"nl":0,"up":0,"down":0})
         card["outlook"] = _label_outlook(card)
         out.append(card)
     return out
@@ -408,11 +411,10 @@ def compute_overall10m(ema_sign: int, ema10_dist_pct: float,
                        momentum_pct: float, breadth_pct: float,
                        squeeze_expansion_pct: float, liquidity_pct: float, riskon_pct: float) -> Tuple[str, int, dict]:
     dist_unit = clamp(ema10_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
-    ema_pts = round(abs(dist_unit) * W_EMA)
-    ema_pts = int(ema_pts) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
+    ema_pts = int(round(abs(dist_unit) * W_EMA)) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
     m_pts  = lin_points_sym(momentum_pct, W_MOM)
     b_pts  = lin_points_sym(breadth_pct,  W_BR)
-    sq_pts = lin_points_sym(squeeze_expansion_pct, W_SQ)  # expansion drives composite
+    sq_pts = lin_points_sym(squeeze_expansion_pct, W_SQ)   # expansion drives composite
     lq_pts = lin_points_sym(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
     ro_pts = lin_points_sym(riskon_pct,   W_RISK)
     total  = ema_pts + m_pts + b_pts + sq_pts + lq_pts + ro_pts
@@ -482,13 +484,13 @@ def build_engine_lights_signals(curr: dict, prev: Optional[dict], ts_local: str)
 
 # ============================ CORE BUILDER ============================
 
-def build_intraday(source: Optional[dict] = None, hourly_url: str = HOURLY_URL_DEFAULT, prev_out: Optional[dict]=None) -> dict:
-    # 1) sectorCards
+def build_intraday(source: Optional[dict] = None,
+                   hourly_url: str = HOURLY_URL_DEFAULT,
+                   prev_out: Optional[dict] = None) -> dict:
+    # sector cards
     cards: List[dict] = []
     if isinstance(source, dict):
-        cards = (source.get("sectorCards")
-                 or source.get("outlook", {}).get("sectors")
-                 or [])
+        cards = (source.get("sectorCards") or source.get("outlook", {}).get("sectors") or [])
     if not cards and isinstance(source, dict) and "groups" in (source or {}):
         try:
             cards = groups_to_cards(source.get("groups") or {})
@@ -508,7 +510,7 @@ def build_intraday(source: Optional[dict] = None, hourly_url: str = HOURLY_URL_D
 
     b_slow, m_slow, rising_pct, risk_on_pct = summarize_counts(cards)
 
-    # 2) SPY bars
+    # SPY bars
     key = os.getenv("POLYGON_API_KEY") or os.getenv("POLYGON_API") or os.getenv("POLYGON")
     bars_by_sym: Dict[str, List[dict]] = {}
     if key:
@@ -517,7 +519,7 @@ def build_intraday(source: Optional[dict] = None, hourly_url: str = HOURLY_URL_D
             bars_by_sym[s] = fetch_polygon_10m(key, s)
     spy_bars = bars_by_sym.get("SPY", [])
 
-    # 3) SPY metrics: PSI, EMA posture, vol/liquidity
+    # SPY: PSI, posture, vol/liquidity
     squeeze_tight_psi = None
     squeeze_exp_pct   = None
     liquidity_pct     = None
@@ -531,15 +533,14 @@ def build_intraday(source: Optional[dict] = None, hourly_url: str = HOURLY_URL_D
         C = [b["close"] for b in spy_bars]
         V = [b["volume"] for b in spy_bars]
 
-        squeeze_tight_psi = lux_psi_from_closes(C, conv=LUX_CONV, length=LUX_LEN)  # 0..100, high=tight
+        squeeze_tight_psi = lux_psi_from_closes(C, conv=LUX_CONV, length=LUX_LEN)  # high=tight
         squeeze_exp_pct   = clamp(100.0 - squeeze_tight_psi, 0.0, 100.0)
 
         v3 = ema_last(V, 3); v12 = ema_last(V, 12)
         liquidity_pct = 0.0 if not v12 or v12 <= 0 else clamp(100.0 * (v3 / v12), 0.0, 200.0)
 
         if len(C) >= 2:
-            trs = tr_series(H, L, C)
-            atr = ema_last(trs, 3) if trs else None
+            trs = tr_series(H, L, C); atr = ema_last(trs, 3) if trs else None
             volatility_pct = 0.0 if not atr or C[-1] <= 0 else max(0.0, 100.0 * atr / C[-1])
         else:
             tr = max(H[-1]-L[-1], abs(H[-1]-C[-1]), abs(L[-1]-C[-1]))
@@ -557,9 +558,9 @@ def build_intraday(source: Optional[dict] = None, hourly_url: str = HOURLY_URL_D
 
         bars_1h = resample_10m_to_1h(spy_bars)
         C1h = [b["close"] for b in bars_1h]
-        psi_1h = lux_psi_from_closes(C1h, conv=LUX_CONV, length=LUX_LEN) if len(C1h) >= (LUX_LEN+2) else 50.0
+        psi_1h = lux_psi_from_closes(C1h, conv=LUX_CONV, length=LUX_LEN) if len(C1h) >= (LUX_LEN + 2) else 50.0
 
-    # 4) fast breadth/momentum + smoothing
+    # fast breadth / momentum + smoothing
     align_raw = bar_raw = None
     momentum_10m = None
     if key:
@@ -580,7 +581,7 @@ def build_intraday(source: Optional[dict] = None, hourly_url: str = HOURLY_URL_D
         b_v = 0.0 if b_val is None else float(b_val)
         breadth_10m = round(clamp(0.60 * a_v + 0.40 * b_v, 0.0, 100.0), 2)
 
-    # 5) momentum composite
+    # momentum composite
     if len(spy_bars) >= 2:
         C = [b["close"] for b in spy_bars]
         ema_score = spy_ema_posture_score(C, max_gap_pct=0.50, cross_age_10m=0, max_bonus_pts=6.0, fade_bars=6)
@@ -608,17 +609,19 @@ def build_intraday(source: Optional[dict] = None, hourly_url: str = HOURLY_URL_D
     liquidity_pct     = float(50.0 if liquidity_pct     is None else liquidity_pct)
     volatility_pct    = float(0.0  if volatility_pct    is None else volatility_pct)
 
+    # overall score (expansion drives composite, PSI drives tile)
     state, score, comps = compute_overall10m(
         ema_sign=ema_sign,
         ema10_dist_pct=ema10_dist,
         momentum_pct=momentum_combo,
         breadth_pct=breadth_10m,
-        squeeze_expansion_pct=squeeze_exp_pct,  # expansion continues to drive composite
+        squeeze_expansion_pct=squeeze_exp_pct,
         liquidity_pct=liquidity_pct,
         riskon_pct=risk_on_pct,
     )
 
     metrics = {
+        # fast / blended breadth & momentum
         "breadth_10m_pct": round(float(breadth_10m), 2),
         "breadth_align_pct": round(float(align_raw), 2) if isinstance(align_raw,(int,float)) else None,
         "breadth_align_pct_fast": round(float(align_fast), 2) if isinstance(align_fast,(int,float)) else None,
@@ -628,19 +631,22 @@ def build_intraday(source: Optional[dict] = None, hourly_url: str = HOURLY_URL_D
         "momentum_combo_pct": round(float(momentum_combo), 2),
         "momentum_10m_pct": round(float(momentum_10m), 2),
 
+        # slow snapshot (from cards)
         "breadth_slow_pct": round(float(b_slow), 2),
         "momentum_slow_pct": round(float(m_slow), 2),
 
+        # EMA posture
         "ema_cross": ("bull" if just and ema_sign>0 else "bear" if just and ema_sign<0 else "none"),
         "ema10_dist_pct": round(float(ema10_dist), 2),
         "ema_sign": int(ema_sign),
 
-        # Lux PSI mapping (tile shows PSI tightness)
+        # Lux PSI mapping (tile reads PSI tightness)
         "squeeze_psi_10m_pct": round(float(squeeze_tight_psi), 2),
-        "squeeze_pct":           round(float(squeeze_tight_psi), 2),           # TILE reads this
+        "squeeze_pct":           round(float(squeeze_tight_psi), 2),           # TILE uses this
         "squeeze_expansion_pct": round(float(100.0 - squeeze_tight_psi), 2),   # wide bands
         "squeeze_compression_pct": round(float(squeeze_tight_psi), 2),
 
+        # Liquidity / Volatility
         "liquidity_psi": round(float(liquidity_pct), 2),
         "liquidity_pct": round(float(liquidity_pct), 2),
         "volatility_pct": round(float(volatility_pct), 3),
@@ -676,12 +682,13 @@ def build_intraday(source: Optional[dict] = None, hourly_url: str = HOURLY_URL_D
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default="")
-    ap.add_argument("--out", required=True)
+    # NOTE: no --mode here on purpose
+    ap.add_argument("--source", default="", help="Optional source json (cards/groups).")
+    ap.add_argument("--out",    required=True, help="Output JSON path (e.g., data/outlook_intraday.json)")
     ap.add_argument("--hourly_url", default=HOURLY_URL_DEFAULT)
     args = ap.parse_args()
 
-    prev_out = jread(args.out)
+    prev_out = jread(args.out)  # for smoothing + accel deltas
 
     src = None
     if args.source and os.path.exists(args.source):
@@ -693,7 +700,7 @@ def main():
 
     out = build_intraday(source=src, hourly_url=args.hourly_url, prev_out=prev_out)
 
-    # engine lights
+    # Engine lights
     ts_local = out.get("updated_at") or datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
     try:
         sig = build_engine_lights_signals(curr=out, prev=prev_out, ts_local=ts_local)
