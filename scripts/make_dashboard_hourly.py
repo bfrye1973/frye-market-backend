@@ -6,7 +6,7 @@ Ferrari Dashboard — make_dashboard_hourly.py (1-Hour Market Meter, v1)
 Builds /live/hourly with the v1-hourly contract:
 
 metrics (1h, RTH+AH)
-- breadth_1h_pct                  : 0.60*A + 0.40*B on 1h bars (A=%ETFs EMA10>EMA20, B=%ETFs close>open)
+- breadth_1h_pct                  : 0.60*A + 0.40*B on 1h bars (A=%ETFs EMA10>EMA20, B=%ETFs close>open), L=1
   components (QA): breadth_align_1h_pct(_fast), breadth_bar_1h_pct(_fast)
 - momentum_1h_pct                 : sector ETF momentum (legacy; EMA10>EMA20 + cross boost)
 - momentum_combo_1h_pct           : SPY 1h blend = 0.55*EMA_posture_1h + 0.20*SMI_1h + 0.25*SMI_4h (fallback to EMA)
@@ -14,7 +14,7 @@ metrics (1h, RTH+AH)
 - liquidity_1h                    : PSI = 100*EMA(Vol,3)/EMA(Vol,12) on 1h (cap 0..200)
 - volatility_1h_pct               : 100*EMA(TR,3)/Close on 1h
 - volatility_1h_scaled            : volatility_1h_pct * 6.25
-- breadth_slow_pct, momentum_slow_pct (carry-forward for daily panel, optional)
+- breadth_slow_pct, momentum_slow_pct (optional carry-forward)
 
 hourly
 - sectorDirection1h.risingPct     : % sectors breadth > 50
@@ -22,8 +22,8 @@ hourly
 - overall1h.{state, score, components}
 
 Notes
-- Use L=1 for A/B smoothing (fast) to meet your “2–3 bars” responsiveness.
-- Include AH for squeeze & SMI as requested.
+- Include AH for squeeze & SMI (as requested).
+- L=1 for A/B so 1h reacts within 2–3 bars (fast but stable enough).
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from typing import Dict, List, Optional, Tuple
 import math
 
 # ---------------------------- Config ----------------------------
-HOURLY_URL_DEFAULT = "https://frye-market-backend-1.onrender.com/live/hourly"  # only for fallback cards (not used to compute v1)
+HOURLY_URL_DEFAULT = "https://frye-market-backend-1.onrender.com/live/hourly"  # fallback cards only
 POLY_1H_URL = (
     "https://api.polygon.io/v2/aggs/ticker/{sym}/range/60/minute/{start}/{end}"
     "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
@@ -66,7 +66,7 @@ def fetch_json(url: str, timeout: int = 30) -> dict:
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
-def fetch_polygon_bars(url_tmpl: str, key: str, sym: str, lookback_days: int = 16) -> List[dict]:
+def fetch_polygon_bars(url_tmpl: str, key: str, sym: str, lookback_days: int = 20) -> List[dict]:
     end = datetime.utcnow().date()
     start = end - timedelta(days=lookback_days)
     url = url_tmpl.format(sym=sym, start=start, end=end, key=key)
@@ -125,7 +125,7 @@ def smi_kd(H: List[float], L: List[float], C: List[float],
     m=[C[i]-mid[i] for i in range(n)]
     m1=ema_series(m,k_len); m2=ema_series(m1,ema_len)
     r1=ema_series(rng,k_len); r2=ema_series(r1,ema_len)
-    kv=[]; 
+    kv=[]
     for i in range(n):
         denom=(r2[i] or 0.0)/2.0
         val=0.0 if denom==0 else 100.0*(m2[i]/denom)
@@ -184,7 +184,7 @@ def compute_overall1h(ema_sign: int, ema10_dist_pct: float,
     return state, score, comps
 
 # ------------------------- Builder -------------------------
-def build_hourly(source_js: Optional[dict], hourly_url: str, prev_out: Optional[dict]) -> dict:
+def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     # sectorCards (prefer provided source; fallback to hourly feed)
     cards: List[dict] = []
     if isinstance(source_js, dict):
@@ -232,25 +232,31 @@ def build_hourly(source_js: Optional[dict], hourly_url: str, prev_out: Optional[
     # fetch bars (RTH+AH)
     key = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_API_KEY") or ""
     bars_by_sym: Dict[str, List[dict]] = {}
+    spy_1h=[]; spy_4h=[]
     if key:
-        # sector ETF 1h bars
         for s in SECTOR_ETFS:
             bars_by_sym[s] = fetch_polygon_bars(POLY_1H_URL, key, s, lookback_days=20)
-        # SPY 1h + 4h bars
         spy_1h = fetch_polygon_bars(POLY_1H_URL, key, "SPY", lookback_days=20)
         spy_4h = fetch_polygon_bars(POLY_4H_URL, key, "SPY", lookback_days=40)
-    else:
-        spy_1h=[]; spy_4h=[]
 
-    # Breadth components (1h), L=1 (fast)
+    # Breadth components (1h), L=1 fast
     align_raw = bar_raw = None
     if key:
-        align_raw, bar_raw = breadth_components_1h(bars_by_sym)
+        # % ETFs EMA10>EMA20 ; % ETFs close>open (last 1h bar)
+        syms=[s for s in SECTOR_ETFS if s in bars_by_sym and len(bars_by_sym[s])>=2]
+        if syms:
+            total=len(syms); aligned=0; bar_up=0
+            for s in syms:
+                bars=bars_by_sym[s]
+                C=[b["close"] for b in bars]; O=[b["open"] for b in bars]
+                e10=ema_series(C,10); e20=ema_series(C,20)
+                if e10[-1] > e20[-1]: aligned += 1
+                if C[-1]  > O[-1]:    bar_up  += 1
+            align_raw = round(100.0*aligned/total,2)
+            bar_raw   = round(100.0*bar_up/total,2)
 
-    # L=1 fast (we still store *_fast to keep contract consistent)
-    a_fast = align_raw
-    b_fast = bar_raw
-    breadth_1h = None
+    a_fast = align_raw   # L=1 fast
+    b_fast = bar_raw     # L=1 fast
     if a_fast is None and b_fast is None:
         breadth_1h = breadth_slow
     else:
@@ -258,53 +264,69 @@ def build_hourly(source_js: Optional[dict], hourly_url: str, prev_out: Optional[
         bv = 0.0 if b_fast is None else float(b_fast)
         breadth_1h = round(clamp(0.60*av + 0.40*bv, 0.0, 100.0), 2)
 
-    # Momentum
+    # Sector legacy momentum (for accel/QC)
     momentum_1h_legacy = None
     if key:
-        momentum_1h_legacy, _, _ = momentum_sector_1h(bars_by_sym)
+        syms=[s for s in SECTOR_ETFS if s in bars_by_sym and len(bars_by_sym[s])>=2]
+        if syms:
+            total=len(syms); gt=up=dn=0
+            for s in syms:
+                bars=bars_by_sym[s]
+                C=[b["close"] for b in bars]
+                e10=ema_series(C,10); e20=ema_series(C,20)
+                if e10[-1] > e20[-1]: gt += 1
+                if e10[-2] <= e20[-2] and e10[-1] > e20[-1]: up += 1
+                if e10[-2] >= e20[-2] and e10[-1] < e20[-1]: dn += 1
+            base=100.0*gt/total; upx=100.0*up/total; dnx=100.0*dn/total
+            momentum_1h_legacy = round(clamp(base + 0.5*upx - 0.5*dnx, 0.0, 100.0), 2)
 
-    # SPY 1h Momentum combo
+    # SPY 1h Momentum combo (EMA + SMI1h + SMI4h)
     momentum_combo_1h = 50.0
-    ema_sign = 0; ema10_dist_pct = 0.0
+    ema_sign = 0; ema10_dist_pct=0.0
     if len(spy_1h) >= 3:
         H=[b["high"] for b in spy_1h]; L=[b["low"] for b in spy_1h]; C=[b["close"] for b in spy_1h]
         e10=ema_series(C,10); e20=ema_series(C,20)
         ema10_dist_pct = 0.0 if e10[-1]==0 else 100.0*(C[-1]-e10[-1])/e10[-1]
         ema_sign = 1 if e10[-1]>e20[-1] else (-1 if e10[-1]<e20[-1] else 0)
-        # EMA posture decay fast (2–3 bars)
+
+        # EMA posture fast (bonus on fresh cross, decays in ~2–3 bars)
         def ema_posture_1h(C: List[float]) -> float:
             e10=ema_series(C,10); e20=ema_series(C,20)
             d  = 0.0 if e20[-1]==0 else 100.0*(e10[-1]-e20[-1])/e20[-1]
-            sign = 1.0 if d>0 else (-1.0 if d<0 else 0.0)
-            mag  = min(1.0, abs(d)/0.50)
-            # fast fresh-cross bonus
-            e10p,e20p=e10[-2],e20[-2]
-            bonus = 5.0 if (e10p<=e20p and e10[-1]>e20[-1]) else (-5.0 if (e10p>=e20p and e10[-1]<e20[-1]) else 0.0)
+            sign= 1.0 if d>0 else (-1.0 if d<0 else 0.0)
+            mag = min(1.0, abs(d)/0.50)
+            # fast cross bonus (±5)
+            bonus = 0.0
+            if len(e10)>=2 and len(e20)>=2:
+                if e10[-2] <= e20[-2] and e10[-1] > e20[-1]: bonus = +5.0
+                if e10[-2] >= e20[-2] and e10[-1] < e20[-1]: bonus = -5.0
             return clamp(50.0 + 50.0*sign*mag + bonus, 0.0, 100.0)
 
         ema_score = ema_posture_1h(C)
+
         # SMI 1h
+        smi1h = None
         k1h=d1h=None
         if len(C) >= 20:
             k1h,d1h = smi_kd(H,L,C, k_len=12, d_len=7, ema_len=5)
-        smi1h = None if (k1h is None or d1h is None) else clamp(50.0 + 0.5*(k1h-d1h), 0.0, 100.0)
+            if k1h is not None and d1h is not None:
+                smi1h = clamp(50.0 + 0.5*(k1h-d1h), 0.0, 100.0)
 
         # SMI 4h (optional)
-        smi4h = None
+        smi4h=None
         if len(spy_4h) >= 10:
             H4=[b["high"] for b in spy_4h]; L4=[b["low"] for b in spy_4h]; C4=[b["close"] for b in spy_4h]
             k4,d4 = smi_kd(H4,L4,C4, k_len=12, d_len=7, ema_len=5)
             if k4 is not None and d4 is not None:
                 smi4h = clamp(50.0 + 0.5*(k4-d4), 0.0, 100.0)
 
-        # Blend (fallback to EMA if SMI missing)
+        # Blend (fallback to EMA when missing)
         wE, w1h, w4h = W_EMA_1H, W_SMI1H, min(W_SMI4H, 0.25)
-        if smi1h is None and smi4h is None:
-            momentum_combo_1h = ema_score
-        else:
-            momentum_combo_1h = (wE*ema_score
-                                 + w1h*(smi1h if smi1h is not None else ema_score)
-                                 + w4h*(smi4h if smi4h is not None else ema_score))
+        momentum_combo_1h = (
+            wE * ema_score
+            + w1h * (smi1h if smi1h is not None else ema_score)
+            + w4h * (smi4h if smi4h is not None else ema_score)
+        )
     momentum_combo_1h = round(clamp(momentum_combo_1h, 0.0, 100.0), 2)
     if momentum_1h_legacy is None: momentum_1h_legacy = momentum_slow
 
@@ -312,7 +334,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str, prev_out: Optional[
     squeeze_1h = 50.0
     if len(spy_1h) >= 6:
         H=[b["high"] for b in spy_1h]; L=[b["low"] for b in spy_1h]; C=[b["close"] for b in spy_1h]
-        # BB/KC ratio high = tight → Expansion = 100 - ratio
         mean=sum(C)/len(C); sd=(sum((x-mean)**2 for x in C)/len(C))**0.5
         bb_w=(mean+2*sd)-(mean-2*sd)
         prevs=C[:-1] + [C[-1]]
@@ -337,7 +358,7 @@ def build_hourly(source_js: Optional[dict], hourly_url: str, prev_out: Optional[
         ema10_dist_pct=ema10_dist_pct,
         momentum_pct=momentum_combo_1h,
         breadth_pct=breadth_1h,
-        squeeze_expansion_pct=squeeze_1h,
+        squeeze_expansion_pct=squeeze_1h,   # Expansion drives composite
         liquidity_pct=liquidity_1h,
         riskon_pct=risk_on_pct,
     )
@@ -345,16 +366,16 @@ def build_hourly(source_js: Optional[dict], hourly_url: str, prev_out: Optional[
     # Pack metrics
     metrics = {
         "breadth_1h_pct": breadth_1h,
-        "breadth_align_1h_pct": align_raw,
+        "breadth_align_1h_pct": a_fast,          # QA: fast == raw for L=1
         "breadth_align_1h_pct_fast": a_fast,
-        "breadth_bar_1h_pct": bar_raw,
+        "breadth_bar_1h_pct": b_fast,
         "breadth_bar_1h_pct_fast": b_fast,
 
-        "momentum_1h_pct": momentum_10m if momentum_10m is not None else None,  # sector legacy (name kept parallel)
+        "momentum_1h_pct": momentum_1h_legacy,   # legacy sector momentum
         "momentum_combo_1h_pct": momentum_combo_1h,
 
-        "squeeze_1h_pct": squeeze_1h,                # Expansion %
-        "liquidity_1h": liquidity_1h,                # PSI 0..200
+        "squeeze_1h_pct": squeeze_1h,            # Expansion% (0=tight, 100=expanded)
+        "liquidity_1h": liquidity_1h,            # PSI 0..200
         "volatility_1h_pct": round(volatility_1h, 3),
         "volatility_1h_scaled": round(volatility_1h * 6.25, 2),
 
@@ -378,41 +399,39 @@ def build_hourly(source_js: Optional[dict], hourly_url: str, prev_out: Optional[
         "meta": {"cards_fresh": bool(cards_fresh), "after_hours": False}
     }
     # Snapshot line for logs
-    print(f"[1h] A_fast={a_fast} B_fast={b_fast} breadth_1h={breadth_1h} mom_combo_1h={momentum_combo_1h} "
+    print(f"[1h] A={a_fast} B={b_fast} breadth_1h={breadth_1h} mom_combo_1h={momentum_combo_1h} "
           f"sq_1h={squeeze_1h} liq_1h={liquidity_1h} vol_1h_scaled={out['metrics']['volatility_1h_scaled']}")
     return out
 
 # ------------------------------ CLI -------------------------------
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--source", help="optional source json containing sectorCards", default="")
-    ap.add_argument("--out", required=True, help="Output file path (e.g., data/outlook_hourly.json)")
-    ap.add_argument("--hourly_url", default=HOURLY_URL_DEFAULT)
-    args = ap.parse_args()
+  ap = argparse.ArgumentParser()
+  ap.add_argument("--source", help="optional source json containing sectorCards", default="")
+  ap.add_argument("--out", required=True, help="Output file path (e.g., data/outlook_hourly.json)")
+  ap.add_argument("--hourly_url", default=HOURLY_URL_DEFAULT)
+  args = ap.parse_args()
 
-    prev_out = None  # hourly uses L=1 for A/B; smoothing persistence not required
+  src = None
+  if args.source and os.path.exists(args.source):
+      try:
+          with open(args.source, "r", encoding="utf-8") as f:
+              src = json.load(f)
+      except Exception:
+          src = None
 
-    src = None
-    if args.source and os.path.exists(args.source):
-        try:
-            with open(args.source, "r", encoding="utf-8") as f:
-                src = json.load(f)
-        except Exception:
-            src = None
+  out = build_hourly(source_js=src, hourly_url=args.hourly_url)
 
-    out = build_hourly(source_js=src, hourly_url=args.hourly_url, prev_out=prev_out)
+  os.makedirs(os.path.dirname(args.out), exist_ok=True)
+  with open(args.out, "w", encoding="utf-8") as f:
+      json.dump(out, f, ensure_ascii=False, separators=(",",":"))
 
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, separators=(",",":"))
-
-    ov = out.get("hourly", {}).get("overall1h", {})
-    print("[ok] wrote", args.out,
-          "| overall1h.state=", ov.get("state"), "score=", ov.get("score"))
+  ov = out.get("hourly", {}).get("overall1h", {})
+  print("[ok] wrote", args.out,
+        "| overall1h.state=", ov.get("state"), "score=", ov.get("score"))
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print("[error]", e, file=sys.stderr)
-        sys.exit(2)
+  try:
+      main()
+  except Exception as e:
+      print("[error]", e, file=sys.stderr)
+      sys.exit(2)
