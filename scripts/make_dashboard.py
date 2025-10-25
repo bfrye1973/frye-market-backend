@@ -682,7 +682,9 @@ def build_intraday(source: Optional[dict] = None,
 
 def main():
     ap = argparse.ArgumentParser()
-    # NOTE: no --mode here on purpose
+    # Back-compat with older workflows that pass "--mode intraday"
+    ap.add_argument("--mode", default="intraday",
+                    help="(ignored) kept for backward compatibility; this script always builds intraday.")
     ap.add_argument("--source", default="", help="Optional source json (cards/groups).")
     ap.add_argument("--out",    required=True, help="Output JSON path (e.g., data/outlook_intraday.json)")
     ap.add_argument("--hourly_url", default=HOURLY_URL_DEFAULT)
