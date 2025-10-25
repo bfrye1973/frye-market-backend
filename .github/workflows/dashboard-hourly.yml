@@ -76,10 +76,13 @@ jobs:
           if found is None and isinstance(j.get("groups"),dict):
             # convert groups -> sectorCards on the fly
             groups=j["groups"]
-            ORDER=["information technology","materials","health care","communication services","real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
-            alias={"healthcare":"health care","health-care":"health care","info tech":"information technology","technology":"information technology","tech":"information technology",
+            ORDER=["information technology","materials","health care","communication services","real estate",
+                   "energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
+            alias={"healthcare":"health care","health-care":"health care","info tech":"information technology",
+                   "technology":"information technology","tech":"information technology",
                    "communications":"communication services","comm services":"communication services","telecom":"communication services",
-                   "staples":"consumer staples","discretionary":"consumer discretionary","finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"}
+                   "staples":"consumer staples","discretionary":"consumer discretionary",
+                   "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"}
             def norm(s): return (s or "").strip().lower()
             by={}
             for name,g in (groups or {}).items():
@@ -97,7 +100,6 @@ jobs:
             print(f"[normalize] converted groups→sectorCards len={len(cards)}")
             sys.exit(0)
 
-          # We have a sector list already (any key) — leave as-is
           if found is None:
             print("[normalize] no sector list present — continuing (lights still build)")
           else:
@@ -161,7 +163,7 @@ jobs:
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git fetch origin "${LIVE_BRANCH}"
             git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
-          else
+          else:
             git checkout --orphan "${LIVE_BRANCH}"
           fi
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
@@ -175,16 +177,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           LIVE_BRANCH: data-live-hourly
-      run: |
-        set -euo pipefail
-
-        git add data
-        git commit -m "1h live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-
-        # Configure authenticated remote using the built-in GitHub token
-        git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
-
-        # Push to the live branch with force overwrite (safe in CI)
-        git push origin "${LIVE_BRANCH}" --force
-
-        echo "[push] ✅ Successfully pushed ${LIVE_BRANCH} to ${REPO}"
+        run: |
+          set -euo pipefail
+          git add data
+          git commit -m "1h live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin "${LIVE_BRANCH}" --force
+          echo "[push] ✅ Successfully pushed ${LIVE_BRANCH} to ${REPO}"
