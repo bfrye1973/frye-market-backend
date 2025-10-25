@@ -4,8 +4,8 @@ on:
   workflow_dispatch: {}
   schedule:
     # RTH passes (13–21 UTC) + 12:35 warmup
-    - cron: "5 13-21 * * 1-5"
-    - cryon: "35 12 * * 1-5"
+    - cron: '5 13-21 * * 1-5'
+    - cron: '35 12 * * 1-5'
 
 defaults:
   run:
@@ -23,7 +23,7 @@ jobs:
       cancel-in-progress: false
     env:
       TZ: America/Phoenix
-      LIVE_BRANCH: data-live-hourly
+      LIVE_BRAN​CH: data-live-hourly
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -55,7 +55,7 @@ jobs:
           echo "[source] -------- data/outlook_source.json (first 60 lines) --------"
           head -n 60 data/outlook_source.json || true
 
-      # 2) Normalize source — accept groups OR sectorCards (no hard fail if empty)
+      # 2) Normalize source — accept groups OR sectorCards (no fail if empty)
       - name: Normalize sectorCards source
         run: |
           set -euo pipefail
@@ -74,28 +74,30 @@ jobs:
             v=j.get(k)
             if isinstance(v,list):
               found=v; key=k; break
-          if not found and isinstance(j.get("groups"),dict):
+          if found is None and isinstance(j.get("groups"),dict):
             groups=j["groups"]
             ORDER=["information technology","materials","health care","communication services","real estate",
                    "energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
-            alias={"healthcare":"health care","health-care":"health care","info\ntech":"information technology",
+            alias={"healthcare":"health care","health-care":"health care","info tech":"information technology",
                    "technology":"information technology","tech":"information technology",
-                   "communications":"communication services","comm":"communication services","consumer\nstaples":"consumer staples"}
+                   "communications":"communication services","comm":"communication services",
+                   "staples":"consumer staples","discretionary":"consumer discretionary"}
             def norm(s): return (s or "").strip().lower()
             by={}
-            for name,g in (groups or {}).each():
+            for name,g in (groups or {}).items():
               k=alias.get(norm(name), norm(name))
               nh=int((g or {}).get("nh",0)); nl=int((g or {}).get("nl",0))
-              up=int((g or {}).get("up",0));  dn=int((g or {}).get("down",0))
-              b=0.0 if nh+nl==0 else 100.0*nh/(nh+nl)
-              m=0.0 if up+dn==0 else 100.0*up/(up+dn)
-              by[k]={"sector":k.title(),"breadth_pct":round(b,2),"momentum_pct":round(m,2),"nh":nh,"nl":nl,"up":up,"down":dn}
+              up=int((g or {}).get("up",0));  dn = int((g or {}).get("down",0))
+              b = 0.0 if (nh+nl)==0 else 100.0*nh/(nh+nl)
+              m = 0.0 if (up+dn)==0 else 100.0*up/(up+dn)
+              by[k] = {"sector": k.title(), "breadth_pct": round(b,2), "momentum_pct": round(m,2),
+                       "nh": nh, "nl": nl, "up": up, "down": dn}
             cards=[ by.get(x, {"sector":x.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for x in ORDER ]
-            j={"sectorCards":cards}
-            json.dump(j,open(p,"w",encoding="utf-8"),separators=(",",":"))
+            j={"sectorCards": cards}
+            json.dump(j, open(p,"w",encoding="utf-8"), separators=(",",":"))
             print(f"[normalize] converted groups→sectorCards len={len(cards)}")
             sys.exit(0)
-          if not found:
+          if found is None:
             print("[normalize] no sector list present — continuing (lights still build)")
           else:
             print(f"[normalize] found list '{key}' len={len(found)}")
@@ -153,15 +155,15 @@ jobs:
           LIVE_BRANCH: data-live-hourly
         run: |
           set -euo pipefail
-          git config --global user.name  "actions-bot"
-          git config --global user.email "bot@users.noreply.github.com"
+          git config user.name  "actions-bot"
+          git config user.email "bot@users.noreply.github.com"
 
           git reset --hard
           git clean -fdx
 
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             echo "[prepare] Branch ${LIVE_BRANCH} exists — fetching and checking out"
-            git fetch origin "${LIVE_BRANCH}"
+            git fetch --no-tags --prune origin "${LIVE_BRANCH}"
             git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
           else:
             echo "[prepare] Branch ${LIVE_BRANCH} not found — creating new orphan branch"
