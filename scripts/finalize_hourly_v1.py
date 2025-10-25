@@ -2,13 +2,13 @@
 """
 finalize_hourly_v1.py — v1-hourly finalizer (last writer wins)
 
-- Enforce v1-hourly fields (clamp, never overwritten by repairs):
+- Enforce & clamp v1-hourly fields:
     breadth_1h_pct, momentum_combo_1h_pct, squeeze_1h_pct,
     liquidity_1h, volatility_1h_pct, volatility_1h_scaled
-- Mirror v1-hourly -> legacy compat (only if required by old widgets):
+- Mirror v1-hourly -> legacy compat (only if an old widget needs it):
     breadth_pct <- breadth_1h_pct
     momentum_pct <- momentum_combo_1h_pct
-- Leave sectorCards as-is (only set meta.cards_fresh if needed).
+- Keep sectorCards untouched; pass-through meta.
 - Print a one-line snapshot for QA.
 """
 
@@ -52,7 +52,7 @@ def main():
     if vr is not None: m["volatility_1h_pct"] = round(clamp(vr,0.0,100.0),3)
     if vs is not None: m["volatility_1h_scaled"] = round(clamp(vs,0.0,1000.0),2)
 
-    # Mirrors (compat only; UI should read v1-hourly keys)
+    # Mirrors (compat only)
     if m.get("breadth_1h_pct") is not None:
         m["breadth_pct"] = m["breadth_1h_pct"]
     if m.get("momentum_combo_1h_pct") is not None:
