@@ -171,8 +171,20 @@ jobs:
 
       # 8) Commit and push live branch
       - name: Commit and push live branch
-        run: |
-          set -euo pipefail
-          git add data
-          git commit -m "1h live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-          git push origin "${LIVE_BRANCH}" --force
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          LIVE_BRANCH: data-live-hourly
+      run: |
+        set -euo pipefail
+
+        git add data
+        git commit -m "1h live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+
+        # Configure authenticated remote using the built-in GitHub token
+        git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+
+        # Push to the live branch with force overwrite (safe in CI)
+        git push origin "${LIVE_BRANCH}" --force
+
+        echo "[push] ✅ Successfully pushed ${LIVE_BRANCH} to ${REPO}"
