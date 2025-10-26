@@ -3,7 +3,7 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Run every 5 minutes weekdays; adjust as you like
+    # Optional schedule (keep or remove). Runs every 5 min weekdays.
     - cron: "*/5 12-23 * * 1-5"
 
 defaults:
@@ -41,37 +41,60 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # Build hourly payload: DO NOT pass --mode here (script doesn't accept it)
       - name: Build hourly payload
+      # IMPORTANT: do NOT pass --mode (hourly script doesn't take it)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
           python -u scripts/make_dashboard_hourly.py --out data/outlook_hourly.json
-          echo "Built: data/outlook_hourly.json"
+          echo "✔ Built data/outlook_hourly.json"
 
       - name: Compute Lux strategy (1h)
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json,sys,datetime
-          p="data/outlook_hourly.json"
-          try: j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception as e: print("load fail",e); sys.exit(1)
-          m=j.get("metrics",{}) or {}
-          ov=(j.get("hourly",{}).get("overall1h") or {})
-          now=j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().isoformat()+"Z"
-          squeeze_exp=m.get("squeeze_1h_pct")
-          tight=(squeeze_exp is not None and squeeze_exp<=20)
-          score=ov.get("score",50); st=ov.get("state","neutral")
-          if tight: out=("purple","PSI tight (1h)")
-          elif st=="bull" and score>=60: out=("green",f"Overall1h bull {score}")
-          elif st=="bear" and score<60:  out=("red",f"Overall1h bear {score}")
-          else: out=("purple",f"Neutral {score}")
-          j.setdefault("strategy",{})["trend1h"]={"state":out[0],"reason":out[1],"updatedAt":now}
-          json.dump(j,open(p,"w",encoding":"utf-8"),separators=(",",":"))
-          print("[strategy-1h]",j["strategy"]["trend1h"])
+          import json, datetime, sys
+          p = "data/outlook_hourly.json"
+          try:
+              with open(p, "r", encoding="utf-8") as f:
+                  j = json.load(f)
+          except Exception as e:
+              print("load fail:", e)
+              sys.exit(1)
+
+          m  = j.get("metrics", {}) or {}
+          hv = j.get("hourly", {}) or {}
+          ov = hv.get("overall1h", {}) or {}
+          now = j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().isoformat() + "Z"
+
+          squeeze = m.get("squeeze_1h_pct")
+          tight = squeeze is not None and float(squeeze) >= 80.0
+
+          ema_sign = m.get("ema_sign", 0)
+          score    = ov.get("score", 50)
+          state    = ov.get("state", "neutral")
+
+          if tight:
+              st, rs = "purple", f"PSI ≥80 ({squeeze:.0f}%)"
+          elif state == "bull" or (ema_sign > 0 and score >= 60):
+              st, rs = "green", f"Overall1h {score}"
+          elif state == "bear" or (ema_sign < 0 and score < 60):
+              st, rs = "red", f"Overall1h {score}"
+          else:
+              st, rs = "purple", f"Neutral {score}"
+
+          j.setdefault("strategy", {})
+          j["strategy"]["trend1h"] = {
+              "state": st,
+              "reason": rs,
+              "updatedAt": now
+          }
+
+          with open(p, "w", encoding="utf-8") as f:
+              json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
+          print("[strategy-1h]", j["strategy"]["trend1h"])
           PY
 
       - name: Write heartbeat
@@ -80,6 +103,7 @@ jobs:
 
       - name: Prepare live branch
         run: |
+          set -euo pipefail
           git config --global user.email "bot@ci.local"
           git config --global user.name  "CI Bot"
           git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}" || true
@@ -90,8 +114,8 @@ jobs:
           set -euo pipefail
           git add data/outlook_hourly.json data/heartbeat_1h || true
           if git diff --cached --quiet; then
-            echo "No changes"
+            echo "No changes to commit."
           else:
-            git commit -m "1h feed: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git commit -m "hourly feed: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             git push origin "${LIVE_BRANCH}" --force
-          }
+          fi
