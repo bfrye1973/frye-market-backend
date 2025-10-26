@@ -114,7 +114,7 @@ jobs:
 
           print("[post] sectorCards need repair: len=", len(cards), " nonzero=", nonzero, " schemaOK=", good_schema)
 
-          # try to rebuild from source_backup (groups→sectorCards)
+          # try to rebuild from source_backup (groups→sectorCards) — FIXED (no walrus; no 'u' typo)
           src = loadp("/tmp/source_backup.json")
           groups = src.get("groups") or {}
           order = [
@@ -130,30 +130,36 @@ jobs:
             "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
           }
           def norm(s): return (s or "").strip().lower()
-          def canon(n): n=norm(n); return alias.get(n,n)
+          def canon(n): 
+              n = norm(n)
+              return alias.get(n,n)
+
           by={}
           for name,g in (groups or {}).items():
-            k = canon(name)
-            nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
-            b = 0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
-            m = 0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
-            by[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":u,"down":dn}
+              k = canon(name)
+              nh = int((g or {}).get("nh",0)); nl = int((g or {}).get("nl",0))
+              up = int((g or {}).get("u",0));  dn = int((g or {}).get("d",0))
+              b = 0.0 if (nh+nl)==0 else round(100.0*nh/(nh+nl),2)
+              up_dn = up + dn
+              m = 0.0 if up_dn == 0 else round(100.0*up/up_dn, 2)
+              by[k] = {"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
+
           new_cards=[]
           for name in order:
-            new_cards.append(by.get(name, {"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}))
+              new_cards.append(by.get(name, {"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}))
 
           if len(new_cards)==11 and sum(c["nh"]+c["nl"]+c["up"]+c["down"] for c in new_cards)>0:
-            intraday["sectorCards"]=new_cards
-            json.dump(intraday, open("data/outlook_intraday.json","w",encoding="utf-8"), separators=(",",":"))
-            print("[post] repair applied: totals=", sum(c["nh"]+c["nl"]+c["up"]+c["down"] for c in new_cards))
-            sys.exit(0)
+              intraday["sectorCards"]=new_cards
+              json.dump(intraday, open("data/outlook_intraday.json","w",encoding="utf-8"), separators=(",",":"))
+              print("[post] repair applied: totals=", sum(c["nh"]+c["nl"]+c["up"]+c["down"] for c in new_cards))
+              sys.exit(0)
 
           # final guard: if still bad AND during RTH (AZ ~ 06:30–13:00), fail the job
-          now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-7)))
+          now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-7)))  # America/Phoenix offset
           rth = (now.weekday() < 5) and ((now.hour>6 and now.hour<13) or (now.hour==6 and now.minute>=30))
           if rth:
-            print("[post] ERROR: sectorCards invalid during RTH; refusing to publish")
-            sys.exit(2)
+              print("[post] ERROR: sectorCards invalid during RTH; refusing to publish")
+              sys.exit(2)
           print("[post] After-hours: keeping file even if cards are blank (UI shows neutral)")
           PY
 
