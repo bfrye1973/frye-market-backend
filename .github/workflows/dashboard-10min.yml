@@ -26,50 +26,17 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
-      # --------------------------------------------------------------------
-      # Market-hours guard (America/Phoenix) — skip weekends & after-hours
-      # --------------------------------------------------------------------
-      - name: Market hours guard (AZ)
-        id: market_hours
-        run: |
-          TZ="America/Phoenix"
-          DOW=$(TZ=$TZ date +'%u')   # 1=Mon .. 7=Sun
-          HOUR=$(TZ=$TZ date +'%H')  # 00..23
-
-          echo "AZ Date: $(TZ=$TZ date)"
-          echo "DOW=$DOW HOUR=$HOUR"
-
-          # Weekend?
-          if [ "$DOW" -ge 6 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ Weekend — skipping."
-            exit 0
-          fi
-
-          # Allow 06:00–13:59 AZ (pre-open + RTH)
-          if [ "$HOUR" -lt 6 ] || [ "$HOUR" -gt 13 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ Outside market hours — skipping."
-            exit 0
-          fi
-
-          echo "run=true" >> "$GITHUB_OUTPUT"
-          echo "✅ Within market hours — continuing."
-
       - name: Checkout
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Setup Python
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install deps
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
@@ -77,7 +44,6 @@ jobs:
 
       # 1) Build sector source (groups {nh,nl,u,d} by sector)
       - name: Build sectorCards source (10m)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -91,7 +57,6 @@ jobs:
 
       # 2) Normalize source to a guaranteed schema if needed
       - name: Normalize sector source (ensure groups or sectorCards exist)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -113,7 +78,6 @@ jobs:
 
       # 3) Build intraday with the source you just created
       - name: Build intraday payload (uses source)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -125,7 +89,6 @@ jobs:
 
       # 4) Post-build validator + auto-repair
       - name: Validate/Repair intraday sectorCards (fail in RTH if still bad)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           echo "[post] validating sectorCards in data/outlook_intraday.json"
@@ -142,7 +105,7 @@ jobs:
           def totals(cards):
             return sum( (c.get("nh",0)+c.get("nl",0)+c.get("up",0)+c.get("down",0)) for c in cards )
 
-          good_schema = (len(cards)==11 and all(k in (cards[0] if cards else {}) for k in ("sector","breadth_pct","momentum_pct","nh","nl","up","down")))
+          good_schema = (len(cards)==11 and all(k in (cards[0] if cards else {}) for k in ("sector","breadth_pct","momentum_pct","nh","nl","up","down")) )
           nonzero = totals(cards) > 0
 
           if good_schema and nonzero:
@@ -156,7 +119,8 @@ jobs:
           groups = src.get("groups") or {}
           order = [
             "information technology","materials","health care","communication services",
-            "real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials",
+            "real estate","energy","consumer staples","consumer discretionary",
+            "financials","utilities","industrials",
           ]
           alias = {
             "healthcare":"health care","health-care":"health care",
@@ -173,7 +137,7 @@ jobs:
             nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
             b = 0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
             m = 0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
-            by[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
+            by[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":u,"down":dn}
           new_cards=[]
           for name in order:
             new_cards.append(by.get(name, {"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}))
@@ -185,7 +149,7 @@ jobs:
             sys.exit(0)
 
           # final guard: if still bad AND during RTH (AZ ~ 06:30–13:00), fail the job
-          now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-7)))  # America/Phoenix offset
+          now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-7)))
           rth = (now.weekday() < 5) and ((now.hour>6 and now.hour<13) or (now.hour==6 and now.minute>=30))
           if rth:
             print("[post] ERROR: sectorCards invalid during RTH; refusing to publish")
@@ -194,13 +158,11 @@ jobs:
           PY
 
       - name: Write heartbeat
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
       - name: Stage artifacts
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/live10
@@ -208,7 +170,6 @@ jobs:
           cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
 
       - name: Prepare live branch
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           git config user.name "actions-bot"
@@ -231,7 +192,6 @@ jobs:
           cp -f /tmp/live10/heartbeat_10min.txt data/heartbeat_10min.txt
 
       - name: Commit and push live branch
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           git add data
