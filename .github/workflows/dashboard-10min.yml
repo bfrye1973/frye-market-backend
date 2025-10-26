@@ -3,7 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Keep your normal weekday cadence; manual runs are allowed anytime
+    # Keep schedule if you want; you can remove these two lines if you want manual-only:
     - cron: "*/7 12 * * 1-5"
     - cron: "*/7 13-20 * * 1-5"
 
@@ -22,7 +22,6 @@ jobs:
       group: dashboard-10min
       cancel-in-progress: true
     env:
-      TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
 
@@ -43,7 +42,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # 1) Build sector source: groups/cards used by make_dashboard.py
       - name: Build sectorCards source (10m)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -53,25 +51,22 @@ jobs:
           python -u scripts/build_outlook_source_from_polygon.py --mode intraday10 --out data/outlook_source.json
           echo "RAW SOURCE (first 100 lines):"
           head -n 100 data/outlook_source.json || true
-          # backup for later validator
           cp -f data/outlook_source.json /tmp/outlook_source.json
 
-      - name: Normalize sector source (ensure groups or cards)
+      - name: Normalize source (cards or groups)
         run: |
           set -euo pipefail
           python - <<'PY'
           import json,sys
           p="data/outlook_source.json"
-          try:
-              j=json.load(open(p,"r",encoding="utf-8"))
+          try: j=json.load(open(p,"r",encoding="utf-8"))
           except Exception as e:
-              print("missing/invalid source:", e); sys.exit(1)
+              print("Missing source:", e); sys.exit(1)
           if not (isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)):
-              print("INVALID source: missing groups/sectorCards"); sys.exit(1)
-          print("OK: source has cards or groups")
+              print("INVALID: no groups/sectorCards"); sys.exit(1)
+          print("OK - source contains groups or cards.")
           PY
 
-      # 2) Build intraday
       - name: Build intraday payload (uses source)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -81,14 +76,13 @@ jobs:
             --mode intraday \
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
-          echo "Built: data/outlook_intraday.json"
+          echo "Built data/outlook_intraday.json"
 
-      # 3) Compute Lux Strategy for 10m + mirror 1h if pills present
-      - name: Compute Lux strategy (10m) + mirror 1h
+      - name: Compute Lux strategy (10m) + mirror 1h if present
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json,datetime,sys
+          import json,datetime
           p="data/outlook_intraday.json"
           def loadp(pth):
               try: return json.load(open(pth,"r",encoding="utf-8"))
@@ -97,9 +91,9 @@ jobs:
           m=j.get("metrics",{}) or {}
           eng=(j.get("engineLights") or {})
           sigs=eng.get("signals") or {}
-          now=j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().isoformat()+"Z"
+          now = j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().isoformat()+"Z"
 
-          # 10m PSI tightness is squeeze_pct (0..100)
+          # 10m: PSI tight (>=80) => Purple, else use EMA10 cross + Accel and fallback posture
           psi = m.get("squeeze_pct")
           tight = psi is not None and psi >= 80
 
@@ -112,61 +106,34 @@ jobs:
           if tight:
               s10, r10 = "purple", f"PSI tight {psi:.0f}%"
           elif bullX and accelUp:
-              s10, r10 = "green", "EMA10>20 + AccelUp"
+              s10, r10 = "green",  "EMA10>20 + AccelUp"
           elif bearX and accelDn:
-              s10, r10 = "red", "EMA10<20 + AccelDown"
+              s10, r10 = "red",    "EMA10<20 + AccelDown"
           else:
               if ema_sign>0:   s10,r10="green","EMA posture up"
               elif ema_sign<0: s10,r10="red","EMA posture down"
               else:            s10,r10="purple","Neutral / no cross"
 
           j.setdefault("intraday",{}).setdefault("strategy",{})
-          j["intraday"]["strategy"]["trend10m"]={"state":s10,"reason":r10,"updatedAt":now}
+          j["intraday"]["strategy"]["trend10m"] = {"state":s10,"reason":r10,"updatedAt":now}
 
-          # Mirror 1h if present in pills (from hourly mirroring)
+          # mirror 1h into intraday.strategy.trend1h if pills exist
           def active(k): return bool((sigs.get(k) or {}).get("active"))
           if any(k.startswith("sigEMA1h") or k.startswith("sigSMI1h") or k.endswith("1h") for k in sigs.keys()):
               bull1 = active("sigEMA1hBullCross") or active("sigSMI1hBullCross")
-              bear1 = active("sigEMA1hBearCross") or active("sigSMIBearCross") or active("sigSMIhBearCross")
+              bear1 = active("sigEMA1hBearCross") or active("sigSMI1hBearCross")
               if bull1:   st,rs="green","EMA/SMI 1h up"
               elif bear1: st,rs="red","EMA/SMI 1h down"
               else:       st,rs="purple","Neutral (1h)"
               j["intraday"]["strategy"]["trend1h"]={"state":st,"reason":rs,"updatedAt":now}
 
           json.dump(j, open(p,"w",encoding="utf-8"), separators=(",",":"))
-          print("[trend10m] ->", j["intraday"]["strategy"].get("trend10m"))
-          print("[trend1h]  ->", j["intraday"]["strategy"].get("trend1h"))
+          print("[strategy-10m] trend10m=", j["intraday"]["strategy"].get("trend10m"))
+          print("[strategy-1h] trend1h=", j["intraday"]["strategy"].get("trend1h"))
           PY
 
-      # 5) Validate/Repair sectorCards (same as before)
-      - name: Validate/Repair intraday sectorCards (fail in RTH if still bad)
+      - name: Mirror Daily Lux trend into Intraday
         run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json,sys,time
-          p="data/outlook_intraday.json"
-          j=json.load(open(p,"r",encoding="utf-8"))
-          cards=j.get("sectorCards") or []
-          if not cards:
-              print("No sectorCards; leaving as-is (mirror still works)"); sys.exit(0)
-          print("Cards count:", len(cards))
-          sys.exit(0)
-          PY
-
-      - name: Write heartbeat
-        run: |
-          date -u +%Y-%m-%dT%H:%M:%SZ > data/heartbeat_10m
-
-      - name: Prepare live branch
-        run: |
-          set -euo pipefail
-          git config --global user.email "bot@ci.local"
-          git config --global user.name  "CI Bot"
-          git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}" || true
-          git checkout -B "${LIVE_BRANCH}" || git checkout "${LIVE_BRANCH}"
-       
-       - name: Mirror Daily Lux trend into Intraday
-         run: |
           set -euo pipefail
           python - <<'PY'
           import json,urllib.request,datetime
@@ -181,19 +148,30 @@ jobs:
           td=daily.get("strategy",{}).get("trendDaily")
           if td:
               j.setdefault("intraday",{}).setdefault("strategy",{})["trendDaily"]=td
-              json.dump(j,open("data/outlook_intraday.json","w",encoding="utf-8"),separators=(",",":"))
-              print("[mirror] added trendDaily:",td)
+              json.dump(j,open("data/outlook_intraday.json","w",encoding":"utf-8"),separators=(",",":"))
+              print("[mirror] trendDaily appended:", td)
           else:
-              print("[mirror] no daily trend found")
+              print("[mirror] no trendDaily in daily feed")
           PY
+
+      - name: Write heartbeat
+        run: |
+          date -u +%Y-%m-%dT%H:%M:%SZ > data/heartbeat_10m
+
+      - name: Prepare live branch
+        run: |
+          git config --global user.email "bot@ci.local"
+          git config --global user.name  "CI Bot"
+          git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}" || true
+          git checkout -B "${LIVE_BRANCH}" || git checkout "${LIVE_BRANCH}"
+
       - name: Commit and push
         run: |
           set -euo pipefail
-          git add data/outlook_intraday.json
-          git add data/heartbeat_10m || true
+          git add data/outlook_intraday.json data/heartbeat_10m || true
           if git diff --cached --quiet; then
             echo "No changes to commit"
-          else
-            git commit -m "10m intraday: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          else:
+            git commit -m "10m intraday: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             git push origin "${LIVE_BRANCH}" --force
           fi
