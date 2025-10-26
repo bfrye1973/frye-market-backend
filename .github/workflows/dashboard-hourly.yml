@@ -155,30 +155,23 @@ jobs:
           LIVE_BRANCH: data-live-hourly
         run: |
           set -euo pipefail
+
           git config user.name  "actions-bot"
           git config user.email "bot@users.noreply.github.com"
 
-          git reset --hard
-          git clean -fdx
+         git reset --hard
+         git clean -fdx
 
-          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
-            echo "[prepare] Branch ${LIVE_BRANCH} exists — fetching and checking out"
-            git fetch --no-tags --prune origin "${LIVE_BRANCH}"
-            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
-          else:
-            echo "[prepare] Branch ${LIVE_BRANCH} not found — creating new orphan branch"
-            git checkout --orphan "${LIVE_BRANCH}"
-          fi
+         # Single-line conditional avoids multi-line if/else parsing issues
+         if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then git fetch --no-tags --prune origin "${LIVE_BRANCH}"; git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"; else git checkout --orphan "${LIVE_BRANCH}"; fi
 
-          # Clean everything except .git
-          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+         # Clean everything except .git and stage artifacts
+         find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+         mkdir -p data
+         cp -f /tmp/live1h/outlook_hourly.json   data/outlook_hourly.json
+         cp -f /tmp/live1h/heartbeat_hourly.txt data/heartbeat_hourly.txt
 
-          mkdir -p data
-          cp -f /tmp/live1h/outlook_hourly.json   data/outlook_hourly.json
-          cp -f /tmp/live1h/heartbeat_hourly.txt data/heartbeat_hourly.txt
-
-          echo "[prepare] ✅ Ready for commit on branch ${LIVE_BRANCH}"
-
+         echo "[prepare] ✅ Ready for commit on branch ${LIVE_BRANCH}"
       # 8) Commit and push live branch
       - name: Commit and push live branch
         env:
