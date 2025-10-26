@@ -3,9 +3,8 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # RTH passes (13–21 UTC) + 12:35 warmup
-    - cron: '5 13-21 * * 1-5'
-    - cron: '35 12 * * 1-5'
+    # update as needed; e.g. every 5 minutes on weekdays
+    - cron: "*/5 12-23 * * 1-5"
 
 defaults:
   run:
@@ -13,14 +12,14 @@ defaults:
 
 jobs:
   hourly:
-    name: Build and Publish Hourly
+    name: Build and Publish Hourly (1h)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
     concurrency:
       group: dashboard-hourly
-      cancel-in-progress: false
+      cancel-in-progress: true
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-hourly
@@ -31,7 +30,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -44,144 +42,71 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # 1) Build hourly sectorCards source (groups or sectorCards)
-      - name: Build sectorCards source (1h)
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py --mode hourly --out data/outlook_source.json || true
-          echo "[source] -------- data/outlook_source.json (first 60 lines) --------"
-          head -n 60 data/outlook_source.json || true
-
-      # 2) Normalize source — accept groups OR sectorCards (no fail if empty)
-      - name: Normalize sectorCards source
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json,sys
-          p="data/outlook_source.json"
-          try:
-            j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception:
-            j={}
-          if not isinstance(j,dict):
-            print("[normalize] source missing/invalid — continuing without cards")
-            sys.exit(0)
-          found=None; key=None
-          for k in ("sectorCards","sectors","cards"):
-            v=j.get(k)
-            if isinstance(v,list):
-              found=v; key=k; break
-          if found is None and isinstance(j.get("groups"),dict):
-            groups=j["groups"]
-            ORDER=["information technology","materials","health care","communication services","real estate",
-                   "energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
-            alias={"healthcare":"health care","health-care":"health care","info tech":"information technology",
-                   "technology":"information technology","tech":"information technology",
-                   "communications":"communication services","comm":"communication services",
-                   "staples":"consumer staples","discretionary":"consumer discretionary"}
-            def norm(s): return (s or "").strip().lower()
-            by={}
-            for name,g in (groups or {}).items():
-              k=alias.get(norm(name), norm(name))
-              nh=int((g or {}).get("nh",0)); nl=int((g or {}).get("nl",0))
-              up=int((g or {}).get("u",0));  dn=int((g or {}).get("d",0))
-              b=0.0 if (nh+nl)==0 else 100.0*nh/(nh+nl)
-              m=0.0 if (up+dn)==0  else 100.0*up/(up+dn)
-              by[k]={"sector":k.title(),"breadth_pct":round(b,2),"momentum_pct":round(m,2),"nh":nh,"nl":nl,"up":up,"down":dn}
-            cards=[ by.get(x, {"sector":x.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for x in ORDER ]
-            j={"sectorCards":cards}
-            json.dump(j,open(p,"w",encoding="utf-8"),separators=(",",":"))
-            print(f"[normalize] converted groups→sectorCards len={len(cards)}")
-            sys.exit(0)
-          if found is None:
-            print("[normalize] no sector list present — continuing (lights still build)")
-          else:
-            print(f"[normalize] found list '{key}' len={len(found)}")
-          PY
-
-      # 3) Build hourly payload
       - name: Build hourly payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/make_dashboard_hourly.py \
-            --source data/outlook_source.json \
-            --out    data/outlook_hourly.json
+          python -u scripts/make_dashboard_hourly.py --mode intraday --out data/outlook_hourly.json
+          echo "Built: data/outlook_hourly.json"
 
-      # 4) Finalize v1-hourly (enforce & mirror) + snapshot
-      - name: Finalize v1-hourly (enforce & mirror)
+      # Compute Lux Strategy (1h)
+      - name: Compute Lux strategy (1h)
         run: |
           set -euo pipefail
-          python -u scripts/finalize_hourly_v1.py --in data/outlook_hourly.json --out data/outlook_hourly.json
           python - <<'PY'
-          import json
-          j=json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
-          m=j.get("metrics",{}); h=j.get("hourly",{})
-          print("[snapshot:1h]", {
-            "breadth_1h": m.get("breadth_1h_pct"),
-            "A_fast": m.get("breadth_align_1h_pct_fast"),
-            "B_fast": m.get("breadth_bar_1h_pct_fast"),
-            "momentum_combo_1h": m.get("momentum_combo_1h_pct"),
-            "squeeze_1h": m.get("squeeze_1h_pct"),
-            "liq_1h": m.get("liquidity_1h"),
-            "vol_1h_scaled": m.get("volatility_1h_scaled"),
-            "overall1h": h.get("overall1h")
-          })
+          import json,sys,datetime
+          p="data/outlook_hourly.json"
+          try:
+              j=json.load(open(p,"r",encoding="utf-8"))
+          except Exception as e:
+              print("cannot load:", e); sys.exit(1)
+
+          m=j.get("metrics",{}) or {}
+          ov=(j.get("hourly",{}).get("overall1h") or {})
+          now=j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().isoformat()+"Z"
+
+          squeeze_exp = m.get("squeeze_1h_pct")  # expansion %
+          tight = (squeeze_exp is not None and squeeze_exp <= 20.0)
+          score = ov.get("score",50); state = ov.get("state","neutral")
+
+          if tight:
+              st, rs = "purple", f"PSI tight (1h)"
+          elif state=="bull" and score>=60:
+              st, rs = "green",  f"Overall1h bull {score}"
+          elif state=="bear" and score<60:
+              st, rs = "red",    f"Overall1h bear {score}"
+          else:
+              st, rs = "purple", f"Neutral {score}"
+
+          j.setdefault("strategy",{})
+          j["strategy"]["trend1h"]={"state":st,"reason":rs,"updatedAt":now}
+
+          json.dump(j, open(p,"w",encoding="utf-8"), separators=(",",":"))
+          print("[strategy-1h] trend1h=", j["strategy"]["trend1h"])
           PY
 
-      # 5) Write heartbeat (hourly)
-      - name: Write heartbeat (hourly)
+      - name: Write heartbeat
         run: |
-          set -euo pipefail
-          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_hourly.txt
+          date -u +%Y-%m-%dT%H:%M:%SZ > data/heartbeat_1h
 
-      # 6) Stage artifacts
-      - name: Stage artifacts
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/live1h
-          cp -f data/outlook_hourly.json  /tmp/live1h/outlook_hourly.json
-          cp -f data/heartbeat_hourly.txt /tmp/live1h/heartbeat_hourly.txt
-
-      # 7) Prepare live branch
       - name: Prepare live branch
-        env:
-          LIVE_BRANCH: data-live-hourly
         run: |
           set -euo pipefail
-          git config user.name  "actions-bot"
-          git config user.email "bot@users.noreply.github.com"
+          git config --global user.email "bot@ci.local"
+          git config --global user.name  "CI Bot"
+          git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}" || true
+          git checkout -B "${LIVE_BRANCH}" || git checkout "${LIVE_BRANCH}"
 
-          git reset --hard
-          git clean -fdx
-
-          # Single-line conditional avoids multi-line if/else parsing issues
-          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then git fetch --no-tags --prune origin "${LIVE_BRANCH}"; git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"; else git checkout --orphan "${LIVE_BRANCH}"; fi
-
-          # Clean everything except .git
-          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-
-          mkdir -p data
-          cp -f /tmp/live1h/outlook_hourly.json   data/outlook_hourly.json
-          cp -f /tmp/live1h/heartbeat_hourly.txt data/heartbeat_hourly.txt
-
-          echo "[prepare] ✅ Ready for commit on branch ${LIVE_BRANCH}"
-
-      # 8) Commit and push live branch
-      - name: Commit and push live branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          LIVE_BRANCH: data-live-hourly
+      - name: Commit and push
         run: |
           set -euo pipefail
-          git add data
-          git commit -m "1h live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
-          git push origin "${LIVE_BRANCH}" --force
-          echo "[push] ✅ Successfully pushed ${LIVE_BRANCH} to ${REPO}"
+          git add data/outlook_hourly.json
+          git add data/heartbeat_1h || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "1h feed: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            git push origin "${LIVE_BRANCH}" --force
+          fi
