@@ -3,7 +3,7 @@ name: dashboard-daily
 on:
   workflow_dispatch: {}
   schedule:
-    # Run after market close (8PM UTC ≈ 4PM ET)
+    # Run after market close (8:00 PM UTC ≈ 4:00 PM ET)
     - cron: "0 20 * * 1-5"
 
 defaults:
@@ -14,7 +14,7 @@ jobs:
   daily:
     name: Build and Publish Daily (EOD)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: write
     concurrency:
@@ -37,7 +37,6 @@ jobs:
 
       - name: Install deps
         run: |
-          set -euo pipefail
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
@@ -45,57 +44,39 @@ jobs:
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
-          set -euo pipefail
           mkdir -p data
-          python -u scripts/make_dashboard_daily.py --out data/outlook_daily.json || true
-          echo "Built data/outlook_daily.json"
+          python -u scripts/make_dashboard_daily.py --out data/outlook_daily.json
+          echo "[ok] built data/outlook_daily.json"
 
-      # Compute Lux Strategy (Daily)
-      - name: Compute Lux strategy (Daily)
+      - name: Compute Lux Strategy (Daily)
         run: |
-          set -euo pipefail
           python - <<'PY'
           import json,sys,datetime
           p="data/outlook_daily.json"
-          try:
-              j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception as e:
-              print("cannot load:", e); sys.exit(1)
-
+          try: j=json.load(open(p,"r",encoding="utf-8"))
+          except Exception as e: print("load fail",e); sys.exit(1)
           m=j.get("metrics",{}) or {}
-          h=j.get("daily",{}) or {}
-          now=j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().isoformat()+"Z"
-
-          # Squeeze logic
-          sq = m.get("squeeze_daily_pct") or m.get("squeeze_pct") or 50
-          tight = sq >= 80
-
-          ema_sign = m.get("ema_sign",0)
-          state = h.get("state") or "neutral"
-          score = h.get("score",50)
-
-          if tight:
-              st, rs = "purple", f"Squeeze tight {sq:.0f}%"
-          elif state=="bull" or (ema_sign>0 and score>=60):
-              st, rs = "green", f"Daily bull {score}"
-          elif state=="bear" or (ema_sign<0 and score<60):
-              st, rs = "red", f"Daily bear {score}"
-          else:
-              st, rs = "purple", f"Neutral {score}"
-
-          j.setdefault("strategy",{})
-          j["strategy"]["trendDaily"]={"state":st,"reason":rs,"updatedAt":now}
-          json.dump(j, open(p,"w",encoding="utf-8"), separators=(",",":"))
-          print("[strategy-daily] trendDaily=", j["strategy"]["trendDaily"])
+          now=datetime.datetime.utcnow().isoformat()+"Z"
+          sq=m.get("squeeze_daily_pct") or m.get("squeeze_pct") or 50
+          ema_sign=m.get("ema_sign",0)
+          tight=sq>=80
+          state=j.get("daily",{}).get("state") or "neutral"
+          score=j.get("daily",{}).get("score",50)
+          if tight: st,rs="purple",f"Squeeze tight {sq:.0f}%"
+          elif state=="bull" or (ema_sign>0 and score>=60): st,rs="green",f"Daily bull {score}"
+          elif state=="bear" or (ema_sign<0 and score<60): st,rs="red",f"Daily bear {score}"
+          else: st,rs="purple",f"Neutral {score}"
+          j.setdefault("strategy",{})["trendDaily"]={"state":st,"reason":rs,"updatedAt":now}
+          json.dump(j,open(p,"w",encoding="utf-8"),separators=(",",":"))
+          print("[strategy-daily]",j["strategy"]["trendDaily"])
           PY
 
       - name: Write heartbeat
         run: |
-          date -u +%Y-%m-%dT%H:%M:%SZ > data/heartbeat_daily.txt
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_daily.txt
 
       - name: Prepare live branch
         run: |
-          set -euo pipefail
           git config --global user.email "bot@ci.local"
           git config --global user.name  "CI Bot"
           git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}" || true
@@ -103,12 +84,6 @@ jobs:
 
       - name: Commit and push
         run: |
-          set -euo pipefail
-          git add data/outlook_daily.json
-          git add data/heartbeat_daily.txt || true
-          if git diff --cached --quiet; then
-            echo "No changes"
-          else
-            git commit -m "daily feed: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            git push origin "${LIVE_BRANCH}" --force
-          fi
+          git add data/outlook_daily.json data/heartbeat_daily.txt
+          git commit -m "daily feed $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "no changes"
+          git push origin "${LIVE_BRANCH}" --force
