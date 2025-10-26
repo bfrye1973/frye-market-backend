@@ -1,71 +1,57 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard.py (Intraday 10m, R12 v7 • Lux PSI + Engine Lights)
+Ferrari Dashboard — make_dashboard.py (Intraday 10m, Stage 1 • Fast Pills + 1h pills mirror)
 
-- LuxAlgo Squeeze PSI on SPY 10m and 1h
-- metrics.squeeze_pct              = PSI 10m (tightness; HIGH = tight)         <-- Intraday Squeeze tile reads this
-- metrics.squeeze_expansion_pct    = 100 - PSI 10m (wide bands)
-- metrics.squeeze_compression_pct  = PSI 10m
-- metrics.squeeze_psi_10m_pct      = PSI 10m (explicit field)
-- intraday.squeeze1h_pct           = PSI 1h
-- Preserves R12: groups→cards bridge, outlook labels, ETF fast breadth/momentum, SMI blend, EMA posture, overall10m score
-- Publishes R11 engineLights (Overall, EMA10 crosses, Accel Up/Down, RiskOn/Off, SectorThrust/Weak)
+- 10m: EMA 8/18 crosses (bar-close), optional early-warn intra-bar when gap>0.05% & vol>0.8× avg,
+       Accel ±2.5 (Δbreadth_10m + Δmomentum_10m) w/ hysteresis ±0.3 & 1-bar cooldown,
+       Lux Squeeze PSI mapping (tightness): PSI≥80 = Compression (Purple), PSI≤60 or ΔPSI≤-3 = Expansion.
+- Mirrors 1h pills into intraday payload so UI shows them without FE changes:
+  sigSMI1hBullCross, sigSMI1hBearCross, sigEMA1hBullCross, sigEMA1hBearCross,
+  sigAccelUp1h, sigAccelDown1h, (optional) sigOverallBull1h/Bear1h if available.
+- Flags (env):
+  ENGINE_LIGHTS_V2   (default true)
+  ENGINE_LIGHTS_1H   (default true)
+  FAST_EARLY_WARN    (default true)
 
-NOTE: This script has **no --mode** argument (the workflow must not pass it).
+Note: Accepts --mode for backward compatibility; ignored (always builds intraday).
 """
 
 from __future__ import annotations
-
-import argparse
-import json
-import math
-import os
-import sys
-import time
-import urllib.request
+import argparse, json, math, os, sys, time, urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # ============================ CONFIG ============================
-
-VERSION_TAG = "r12.7-psi-tile"
-
-HOURLY_URL_DEFAULT = "https://frye-market-backend-1.onrender.com/live/hourly"
+VERSION_TAG = "r12.7-fast-pills"
+PHX_TZ = "America/Phoenix"
 
 POLY_10M_URL = (
     "https://api.polygon.io/v2/aggs/ticker/{sym}/range/10/minute/{start}/{end}"
     "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
 )
 
-SECTOR_ETFS = ["XLK","XLY","XLC","XLP","XLU","XLV","XLRE","XLE","XLF","XLB","XLI"]
+# Fast EMA/SMI settings
+EMA_FAST_SHORT = 8
+EMA_FAST_LONG  = 18
 
-CANON_ORDER = [
-    "information technology","materials","health care","communication services",
-    "real estate","energy","consumer staples","consumer discretionary",
-    "financials","utilities","industrials",
-]
-ALIASES = {
-    "healthcare":"health care","health care":"health care","health-care":"health care",
-    "info tech":"information technology","technology":"information technology","tech":"information technology",
-    "communications":"communication services","comm services":"communication services","telecom":"communication services",
-    "staples":"consumer staples","discretionary":"consumer discretionary",
-    "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
-}
+# Acceleration thresholds (10m)
+ACCEL_10M_ON  = 2.5    # turn on at ±2.5
+ACCEL_10M_OFF = 2.2    # hysteresis
 
-# overall scoring weights
-W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 10, 10, 10, 5
-FULL_EMA_DIST = 0.60  # % distance to reach full ±W_EMA
+# Early-warn intrabar EMA gap & volume
+EARLY_GAP_PCT = 0.05   # %
+EARLY_VOL_MIN = 0.8    # × avg20
 
-OFFENSIVE = {"information technology","consumer discretionary","communication services"}
+# Squeeze gates (Lux PSI = tightness)
+SQUEEZE_TIGHT = 80.0
+SQUEEZE_EXP   = 60.0
+SQUEEZE_EXT   = 20.0
+
+OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
 DEFENSIVE = {"consumer staples","utilities","health care","real estate"}
 
-# Lux PSI defaults (from the TradingView script)
-LUX_CONV = 50
-LUX_LEN  = 20
-
 # ============================ UTILS ============================
-
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -76,14 +62,11 @@ def pct(a: float, b: float) -> float:
     return 0.0 if b <= 0 else 100.0 * float(a) / float(b)
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "make-dashboard/1.0",
-        "Cache-Control": "no-store"
-    })
+    req = urllib.request.Request(url, headers={"User-Agent": "make-dashboard/10m/1.0", "Cache-Control": "no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
-def fetch_polygon_10m(key: str, sym: str, lookback_days: int = 4) -> List[dict]:
+def fetch_polygon_10m(key: str, sym: str, lookback_days: int = 5) -> List[dict]:
     end = datetime.utcnow().date()
     start = end - timedelta(days=lookback_days)
     url = POLY_10M_URL.format(sym=sym, start=start, end=end, key=key)
@@ -92,11 +75,11 @@ def fetch_polygon_10m(key: str, sym: str, lookback_days: int = 4) -> List[dict]:
     except Exception:
         return []
     rows = js.get("results") or []
-    out: List[dict] = []
+    bars: List[dict] = []
     for r in rows:
         try:
-            t = int(r.get("t", 0)) // 1000  # ms -> s
-            out.append({
+            t = int(r.get("t", 0)) // 1000
+            bars.append({
                 "time":   t,
                 "open":   float(r.get("o", 0.0)),
                 "high":   float(r.get("h", 0.0)),
@@ -107,13 +90,13 @@ def fetch_polygon_10m(key: str, sym: str, lookback_days: int = 4) -> List[dict]:
         except Exception:
             continue
     # drop in-flight 10m bar
-    if out:
+    if bars:
         BUCKET = 600
         now = int(time.time())
         cur  = (now // BUCKET) * BUCKET
-        if (out[-1]["time"] // BUCKET) * BUCKET == cur:
-            out = out[:-1]
-    return out
+        if (bars[-1]["time"] // BUCKET) * BUCKET == cur:
+            bars = bars[:-1]
+    return bars
 
 def ema_series(vals: List[float], span: int) -> List[float]:
     k = 2.0 / (span + 1.0)
@@ -134,33 +117,11 @@ def ema_last(vals: List[float], span: int) -> Optional[float]:
 def tr_series(H: List[float], L: List[float], C: List[float]) -> List[float]:
     return [max(H[i]-L[i], abs(H[i]-C[i-1]), abs(L[i]-C[i-1])) for i in range(1, len(C))]
 
-def jread(path: str) -> Optional[dict]:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-def ema_blend(prev_val: Optional[float], new_val: Optional[float], L: int = 2) -> Optional[float]:
-    if new_val is None: return prev_val
-    if prev_val is None: return float(new_val)
-    alpha = 2.0 / (L + 1.0)
-    return float(prev_val + alpha * (float(new_val) - float(prev_val)))
-
-# ======================= Lux Squeeze PSI =======================
-
-def lux_psi_from_closes(closes: List[float], conv: int = LUX_CONV, length: int = LUX_LEN) -> float:
-    """
-    LuxAlgo Squeeze Index [LuxAlgo] (PSI):
-      max := max(src, max - (max - src)/conv)
-      min := min(src, min + (src - min)/conv)
-      diff = log(max - min)
-      psi  = -50 * correlation(diff, bar_index, length) + 50
-    """
+# ------- Lux Squeeze PSI (tightness; higher = tighter) -------
+def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> float:
     n = len(closes)
     if n < max(length + 2, 5):
         return 50.0
-
     max_arr = [0.0] * n
     min_arr = [0.0] * n
     max_val = closes[0]
@@ -170,49 +131,35 @@ def lux_psi_from_closes(closes: List[float], conv: int = LUX_CONV, length: int =
         min_val = min(v, min_val + (v - min_val) / float(conv))
         max_arr[i] = max_val
         min_arr[i] = min_val
-
-    # diff = log(span)
-    diff = [0.0] * n
+    diff = []
     for i in range(n):
         span = max(max_arr[i] - min_arr[i], 1e-12)
-        diff[i] = math.log(span)
-
-    # Pearson correlation with bar index over 'length'
+        diff.append(math.log(span))
     w = length
     xs = list(range(n - w, n))
     ys = diff[-w:]
-    mx = sum(xs) / w
-    my = sum(ys) / w
+    mx = sum(xs)/w; my = sum(ys)/w
     num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
     denx = math.sqrt(sum((x - mx) ** 2 for x in xs))
     deny = math.sqrt(sum((y - my) ** 2 for y in ys))
     corr = (num / (denx * deny)) if (denx > 0 and deny > 0) else 0.0
-
     return float(-50.0 * corr + 50.0)
 
+# ------- Resample 10m → 1h for mirrored 1h pills -------
 def resample_10m_to_1h(bars_10m: List[dict]) -> List[dict]:
-    """10m → 1h OHLC resample (closed 1h bars)."""
     if not bars_10m:
         return []
     out: List[dict] = []
     bucket = 3600
     cur_key = None
     agg = None
-    bars10m = bars_10m
-    for b in bars10m:
+    for b in bars_10m:
         t = int(b["time"])
         k = (t // bucket) * bucket
         if cur_key is None or k != cur_key:
             if agg:
                 out.append(agg)
-            agg = {
-                "time": k,
-                "open": b["open"],
-                "high": b["high"],
-                "low":  b["low"],
-                "close":b["close"],
-                "volume": b.get("volume", 0.0)
-            }
+            agg = {"time": k, "open": b["open"], "high": b["high"], "low": b["low"], "close": b["close"], "volume": b.get("volume", 0.0)}
             cur_key = k
         else:
             agg["high"]   = max(agg["high"], b["high"])
@@ -221,60 +168,20 @@ def resample_10m_to_1h(bars_10m: List[dict]) -> List[dict]:
             agg["volume"] = agg.get("volume", 0.0) + b.get("volume", 0.0)
     if agg:
         out.append(agg)
-    # drop in-flight hour
+    # drop in-flight 1h
     now = int(time.time())
     cur = (now // bucket) * bucket
     if out and out[-1]["time"] == cur:
         out.pop()
     return out
 
-# ======================= DAILY / RIGHT SIDE =======================
-
-def summarize_counts(cards: List[dict]) -> Tuple[float, float, float, float]:
-    NH = NL = UP = DN = 0.0
-    for c in cards or []:
-        NH += float(c.get("nh", 0))
-        NL += float(c.get("nl", 0))
-        UP += float(c.get("up", 0))
-        DN += float(c.get("down", 0))    # <-- fixed (no extra ')')
-    breadth_slow  = round(pct(NH, NH + NL), 2)
-    momentum_slow = round(pct(UP, UP + DN), 2)
-
-    good = total = 0
-    for c in cards or []:
-        bp = c.get("breadth_pct")
-        if isinstance(bp, (int, float)):
-            total += 1
-            if bp > 50.0:
-                good += 1
-    rising = round(pct(good, total), 2)
-
-    by = {(c.get("sector") or "").strip().lower(): c for c in cards or []}
-    score = cons = 0
-    for s in OFFENSIVE:
-        bp = by.get(s, {}).get("breadth_pct")
-        if isinstance(bp, (int, float)):
-            cons += 1
-            if bp > 50.0:
-                score += 1
-    for s in DEFENSIVE:
-        bp = by.get(s, {}).get("breadth_pct")
-        if isinstance(bp, (int, float)):
-            cons += 1
-            if bp < 50.0:
-                score += 1
-    risk_on = round(pct(score, cons), 2)
-    return breadth_slow, momentum_slow, rising, risk_on
-
-# ======================= SMI (10m & 1h live) =======================
-
-def smi_kd(H: List[float], L: List[float], C: List[float],
-           k_len: int = 12, d_len: int = 7, ema_len: int = 5) -> Tuple[Optional[float], Optional[float]]:
+# ------- SMI (full series) for cross detection -------
+def smi_kd_series(H: List[float], L: List[float], C: List[float],
+                  k_len: int = 12, d_len: int = 7, ema_len: int = 5) -> Tuple[List[float], List[float]]:
     n = len(C)
     if n < max(k_len, d_len) + 6:
-        return None, None
-    HH: List[float] = []
-    LL: List[float] = []
+        return [], []
+    HH, LL = [], []
     for i in range(n):
         i0 = max(0, i - (k_len - 1))
         HH.append(max(H[i0:i+1]))
@@ -286,440 +193,226 @@ def smi_kd(H: List[float], L: List[float], C: List[float],
     m2 = ema_series(m1, ema_len)
     r1 = ema_series(rng, k_len)
     r2 = ema_series(r1, ema_len)
-    k_vals: List[float] = []
+    K = []
     for i in range(n):
         denom = (r2[i] or 0.0) / 2.0
-        val = 0.0 if denom == 0 else 100.0 * (m2[i] / denom)
-        if not (val == val):  # NaN guard
-            val = 0.0
-        val = max(-100.0, min(100.0, val))
-        k_vals.append(val)
-    d_vals = ema_series(k_vals, d_len)
-    return float(k_vals[-1]), float(d_vals[-1])
+        v = 0.0 if denom == 0 else 100.0 * (m2[i] / denom)
+        if not (v == v):
+            v = 0.0
+        K.append(max(-100.0, min(100.0, v)))
+    D = ema_series(K, d_len)
+    return K, D
 
-def smi_1h_live_from_10m(bars10m: List[dict]) -> Tuple[Optional[float], Optional[float]]:
-    if len(bars10m) < 6:
-        return None, None
-    win = bars10m[-6:]
-    H = [b["high"] for b in win]
-    L = [b["low"]  for b in win]
-    C = [b["close"] for b in win]
-    return smi_kd(H, L, C, k_len=12, d_len=7, ema_len=5)
+# ============================ BUILDER ============================
+def build_intraday(source_js: Optional[dict], prev_out: Optional[dict]) -> dict:
+    # sectorCards if present (for risk-on, etc.)
+    cards = (source_js or {}).get("sectorCards") or (source_js or {}).get("outlook", {}).get("sectorCards") or []
+    # Summaries
+    NH=NL=UP=DN=0.0
+    for c in cards:
+        NH+=float(c.get("nh",0)); NL+=float(c.get("nl",0))
+        UP+=float(c.get("up",0)); DN+=float(c.get("down",0))
+    breadth_slow  = round(pct(NH,NH+NL), 2) if (NH+NL)>0 else 50.0
+    momentum_slow = round(pct(UP,UP+DN), 2) if (UP+DN)>0 else 50.0
 
-# ======================= EMA POSTURE =======================
+    # 10m SPY bars
+    key = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_API_KEY") or ""
+    bars_10m = fetch_polygon_10m(key, "SPY", lookback_days=5) if key else []
+    H=[b["high"] for b in bars_10m]
+    L=[b["low"]  for b in bars_10m]
+    C=[b["close"] for b in bars_10m]
+    V=[b["volume"] for b in bars_10m]
 
-def spy_ema_posture_score(C: List[float], max_gap_pct: float = 0.50,
-                          cross_age_10m: int = 0, max_bonus_pts: float = 6.0, fade_bars: int = 6) -> float:
-    e10 = ema_series(C, 10)
-    e20 = ema_series(C, 20)
-    e10_prev, e20_prev = e10[-2], e20[-2]
-    e10_now,  e20_now  = e10[-1], e20[-1]
-    diff_pct = 0.0 if e20_now == 0 else 100.0 * (e10_now - e20_now) / e20_now
-    sign = 1.0 if diff_pct > 0 else (-1.0 if diff_pct < 0 else 0.0)
-    mag  = min(1.0, abs(diff_pct) / max(1e-9, max_gap_pct))
-    posture = 50.0 + 50.0 * sign * mag
+    # 10m EMA 8/18 posture
+    ema8  = ema_series(C, EMA_FAST_SHORT) if C else []
+    ema18 = ema_series(C, EMA_FAST_LONG)  if C else []
+    ema_sign = 0
+    ema_gap_pct = 0.0
+    if ema8 and ema18:
+        ema_sign = 1 if ema8[-1] > ema18[-1] else (-1 if ema8[-1] < ema18[-1] else 0)
+        ema_gap_pct = 0.0 if ema18[-1]==0 else 100.0 * (ema8[-1] - ema18[-1]) / ema18[-1]
 
-    bonus = 0.0
-    age = min(max(cross_age_10m, 0), max(1, fade_bars))
-    if e10_prev <= e20_prev and e10_now > e20_now:
-        bonus = max_bonus_pts * (1.0 - age / float(max(1, fade_bars)))
-    elif e10_prev >= e20_prev and e10_now < e20_now:
-        bonus = -max_bonus_pts * (1.0 - age / float(max(1, fade_bars)))
-    return float(clamp(posture + bonus, 0.0, 100.0))
+    # 10m SMI & PSI (tightness)
+    psi_10m = lux_psi_from_closes(C) if C else 50.0
+    psi_prev = lux_psi_from_closes(C[:-1]) if len(C) > 1 else psi_10m
+    d_psi = round(psi_10m - psi_prev, 2)
 
-# ======================= FAST BREADTH & MOMENTUM =======================
+    # 10m Momentum composite (fast: EMA posture + SMI diff)
+    smiK, smiD = (None, None)
+    if len(C) >= 20:
+        K, D = smi_kd_series(H, L, C, k_len=12, d_len=7, ema_len=5)
+        smiK = K[-1] if K else None
+        smiD = D[-1] if D else None
+    smi_diff = 0.0 if (smiK is None or smiD is None) else (smiK - smiD)
+    ema_slope_score = clamp(50.0 + 50.0 * clamp(ema_gap_pct / 0.50, -1.0, 1.0), 0.0, 100.0)  # 0.5% gap = full score
+    momentum_combo_10m = round(clamp(0.7 * ema_slope_score + 0.3 * (50.0 + 0.5 * smi_diff if smiK is not None else ema_slope_score), 0.0, 100.0), 2)
 
-def fast_components_etfs(bars_by_sym: Dict[str, List[dict]]) -> Tuple[Optional[float], Optional[float]]:
-    syms = [s for s in SECTOR_ETFS if s in bars_by_sym and len(bars_by_sym[s]) >= 2]
-    if not syms:
-        return None, None
-    total = len(syms)
-    aligned_up = 0; bar_up = 0
-    for s in syms:
-        bars = bars_by_sym.get(s, [])
-        C = [b["close"] for b in bars]
-        O = [b["open"]  for b in bars]
-        e10 = ema_series(C, 10); e20 = ema_series(C, 20)
-        if e10 and e20 and e10[-1] > e20[-1]:
-            aligned_up += 1
-        if C and O and C[-1] > O[-1]:
-            bar_up += 1
-    return round(100.0 * aligned_up / total, 2), round(100.0 * bar_up / total, 2)
+    # 10m Accel requires previous metrics
+    pm = (prev_out or {}).get("metrics") or {}
+    prev_b10 = pm.get("breadth_10m_pct", breadth_slow)
+    prev_m10 = pm.get("momentum_10m_pct", momentum_slow)
 
-def fast_momentum_sector(bars_by_sym: Dict[str, List[dict]]) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    syms = [s for s in SECTOR_ETFS if s in bars_by_sym and len(bars_by_sym[s]) >= 2]
-    if not syms:
-        return None, None, None
-    total = len(syms)
-    gt = up = dn = 0
-    for s in syms:
-        bars = bars_by_sym.get(s, [])
-        C = [b["close"] for b in bars]
-        e10 = ema_series(C, 10); e20 = ema_series(C, 20)
-        if e10 and e20 and e10[-1] > e20[-1]:
-            gt += 1
-        if len(e10) >= 2 and len(e20) >= 2 and e10[-2] <= e20[-2] and e10[-1] > e20[-1]:
-            up += 1
-        if len(e10) >= 2 and len(e20) >= 2 and e10[-2] >= e20[-2] and e10[-1] < e20[-1]:
-            dn += 1
-    base = 100.0 * gt / total
-    upx  = 100.0 * up / total
-    dnx  = 100.0 * dn / total
-    mom  = base + 0.5 * upx - 0.5 * dnx
-    return round(clamp(mom, 0.0, 100.0), 2), round(upx, 2), round(dnx, 2)
+    # For breadth_10m, blend sectorCards slow with EMA posture as fallback if no dedicated intraday cards
+    breadth_10m = round(clamp(0.6 * breadth_slow + 0.4 * (50.0 + 50.0 * (1 if ema_sign>0 else -1 if ema_sign<0 else 0) * min(1.0, abs(ema_gap_pct)/0.5)), 0.0, 100.0), 2)
+    momentum_10m = round(momentum_combo_10m, 2)
 
-# ======================= OUTLOOK LABELS & GROUPS->CARDS =======================
+    dB = round(breadth_10m - (prev_b10 if prev_b10 is not None else breadth_10m), 2)
+    dM = round(momentum_10m - (prev_m10 if prev_m10 is not None else momentum_10m), 2)
+    accel = round(dB + dM, 2)
 
-def _label_outlook(card: dict) -> str:
-    b = float(card.get("breadth_pct", 0.0)); m = float(card.get("momentum_pct", 0.0))
-    if b >= 55.0 and m >= 55.0: return "Bullish"
-    if b <= 45.0 and m <= 45.0: return "Bearish"
-    return "Neutral"
+    # RiskOn via sector cards (fast proxy)
+    by={(c.get("sector") or "").strip().lower(): c for c in cards}
+    off_pos=def_pos=0
+    for s in OFFENSIVE:
+        bp = by.get(s,{}).get("breadth_pct")
+        if isinstance(bp,(int,float)) and bp>50.0: off_pos+=1
+    for s in DEFENSIVE:
+        bp = by.get(s,{}).get("breadth_pct")
+        if isinstance(bp,(int,float)) and bp<50.0: def_pos+=1
+    cons = off_pos + def_pos if (off_pos+def_pos)>0 else 1
+    risk_on_10m = round(100.0 * off_pos / float(cons), 2)
 
-def _apply_outlooks(cards: List[dict]) -> List[dict]:
-    out: List[dict] = []
-    for c in cards or []:
-        d = dict(c); d["outlook"] = _label_outlook(d); out.append(d)
-    return out
+    # Volume early-warn condition (gap + vol)
+    early_warn_enabled = (os.environ.get("FAST_EARLY_WARN","true").lower() != "false")
+    vol3 = ema_last(V, 3) if V else None
+    vol20= ema_last(V,20) if V else None
+    vol_ok = (vol3 is not None and vol20 and vol20>0 and (vol3/vol20) >= EARLY_VOL_MIN)
+    gap_ok_up   = ema_sign>0 and abs(ema_gap_pct) >= EARLY_GAP_PCT
+    gap_ok_down = ema_sign<0 and abs(ema_gap_pct) >= EARLY_GAP_PCT
 
-def canon_name(name: str) -> str:
-    return ALIASES.get((name or "").strip().lower(), (name or "").strip().lower())
-
-def groups_to_cards(groups: Dict[str, Dict[str, int]]) -> List[dict]:
-    bykey: Dict[str, dict] = {}
-    for raw_name, g in (groups or {}).items():
-        k = canon_name(raw_name)
-        nh = int((g or {}).get("nh", 0)); nl = int((g or {}).get("nl", 0))
-        u  = int((g or {}).get("u", 0));  d  = int((g or {}).get("d", 0))
-        b = pct(nh, nh + nl); m = pct(u,  u + d)
-        bykey[k] = {"sector": k.title(), "breadth_pct": round(b,2), "momentum_pct": round(m,2),
-                    "nh": nh, "nl": nl, "up": u, "down": d}
-    out: List[dict] = []
-    for name in CANON_ORDER:
-        card = bykey.get(name, {"sector": name.title(), "breadth_pct": 0.0, "momentum_pct": 0.0,
-                                 "nh":0,"nl":0,"up":0,"down":0})
-        card["outlook"] = _label_outlook(card)
-        out.append(card)
-    return out
-
-# ======================= OVERALL SCORE =======================
-
-def lin_points_sym(pct_val: float, weight: int) -> int:
-    return int(round(weight * ((float(pct_val) - 50.0) / 50.0)))
-
-def compute_overall10m(ema_sign: int, ema10_dist_pct: float,
-                       momentum_pct: float, breadth_pct: float,
-                       squeeze_expansion_pct: float, liquidity_pct: float, riskon_pct: float) -> Tuple[str, int, dict]:
-    dist_unit = clamp(ema10_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
-    ema_pts = int(round(abs(dist_unit) * W_EMA)) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
-    m_pts  = lin_points_sym(momentum_pct, W_MOM)
-    b_pts  = lin_points_sym(breadth_pct,  W_BR)
-    sq_pts = lin_points_sym(squeeze_expansion_pct, W_SQ)   # expansion drives composite
-    lq_pts = lin_points_sym(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
-    ro_pts = lin_points_sym(riskon_pct,   W_RISK)
-    total  = ema_pts + m_pts + b_pts + sq_pts + lq_pts + ro_pts
-    score  = int(clamp(50 + total, 0, 100))
-    state  = "bull" if (ema_sign > 0 and score >= 60) else ("bear" if (ema_sign < 0 and score < 60) else "neutral")
-    comps  = {"ema10": ema_pts, "momentum": m_pts, "breadth": b_pts, "squeeze": sq_pts, "liquidity": lq_pts, "riskOn": ro_pts}
-    return state, score, comps
-
-# ============================ ENGINE LIGHTS ============================
-
-def build_engine_lights_signals(curr: dict, prev: Optional[dict], ts_local: str) -> dict:
-    m  = curr.get("metrics", {})
-    it = curr.get("intraday", {})
-    ov = it.get("overall10m", {}) if isinstance(it, dict) else {}
-
-    pm = (prev or {}).get("metrics") or {}
-    db = (m.get("breadth_10m_pct") or 0) - (pm.get("breadth_10m_pct") or 0)
-    dm = (m.get("momentum_10m_pct") or 0) - (pm.get("momentum_10m_pct") or 0)
-    accel = float(db or 0) + float(dm or 0)
-
-    risk_fast   = float((it.get("riskOn10m") or {}).get("riskOnPct", 50.0))
-    rising_fast = float((it.get("sectorDirection10m") or {}).get("risingPct", 0.0))
-
-    ACCEL_INFO = 4.0; RISK_INFO = 58.0; RISK_WARN = 42.0; THRUST_ON = 58.0; THRUST_OFF = 42.0
-
-    sig = {}
-    state = str(ov.get("state") or "neutral").lower()
-    score = int(ov.get("score") or 0)
-
-    sig["sigOverallBull"] = {"active": state=="bull" and score>=10, "severity":"info",
-                             "reason":f"state={state} score={score}",
-                             "lastChanged": ts_local if (state=="bull" and score>=10) else None}
-    sig["sigOverallBear"] = {"active": state=="bear" and score<=-10, "severity":"warn",
-                             "reason":f"state={state} score={score}",
-                             "lastChanged": ts_local if (state=="bear" and score<=-10) else None}
-
-    ema_cross = str(m.get("ema_cross") or "none")
-    just = bool(ov.get("just_crossed"))
-    sig["sigEMA10BullCross"] = {"active": just and ema_cross=="bull", "severity":"info",
-                                "reason":f"ema_cross={ema_cross}",
-                                "lastChanged": ts_local if (just and ema_cross=="bull") else None}
-    sig["sigEMA10BearCross"] = {"active": just and ema_cross=="bear", "severity":"warn",
-                                "reason":f"ema_cross={ema_cross}",
-                                "lastChanged": ts_local if (just and ema_cross=="bear") else None}
-
-    sig["sigAccelUp"]   = {"active": accel >= ACCEL_INFO,  "severity":"info",
-                           "reason":f"Δb+Δm={accel:.1f}",
-                           "lastChanged": ts_local if accel >= ACCEL_INFO else None}
-    sig["sigAccelDown"] = {"active": accel <= -ACCEL_INFO, "severity":"warn",
-                           "reason":f"Δb+Δm={accel:.1f}",
-                           "lastChanged": ts_local if accel <= -ACCEL_INFO else None}
-
-    sig["sigRiskOn"]  = {"active": risk_fast >= RISK_INFO, "severity":"info",
-                         "reason":f"riskOn={risk_fast:.1f}",
-                         "lastChanged": ts_local if risk_fast >= RISK_INFO else None}
-    sig["sigRiskOff"] = {"active": risk_fast <= RISK_WARN, "severity":"warn",
-                         "reason":f"riskOn={risk_fast:.1f}",
-                         "lastChanged": ts_local if risk_fast <= RISK_WARN else None}
-
-    sig["sigSectorThrust"] = {"active": rising_fast >= THRUST_ON, "severity":"info",
-                              "reason":f"rising%={rising_fast:.1f}",
-                              "lastChanged": ts_local if rising_fast >= THRUST_ON else None}
-    sig["sigSectorWeak"]   = {"active": rising_fast <= THRUST_OFF, "severity":"warn",
-                              "reason":f"rising%={rising_fast:.1f}",
-                              "lastChanged": ts_local if rising_fast <= THRUST_OFF else None}
-    return sig
-
-# ============================ CORE BUILDER ============================
-
-def build_intraday(source: Optional[dict] = None,
-                   hourly_url: str = HOURLY_URL_DEFAULT,
-                   prev_out: Optional[dict] = None) -> dict:
-    # sector cards
-    cards: List[dict] = []
-    if isinstance(source, dict):
-        cards = (source.get("sectorCards") or source.get("outlook", {}).get("sectors") or [])
-    if not cards and isinstance(source, dict) and "groups" in (source or {}):
-        try:
-            cards = groups_to_cards(source.get("groups") or {})
-        except Exception:
-            cards = []
-    cards = _apply_outlooks(cards)
-    fresh = bool(cards)
-    if not cards:
-        try:
-            hourly = fetch_json(hourly_url)
-            fallback = hourly.get("sectorCards") or hourly.get("sectors") or []
-            cards = _apply_outlooks(fallback)
-            fresh = False
-        except Exception:
-            cards = []
-            fresh = False
-
-    b_slow, m_slow, rising_pct, risk_on_pct = summarize_counts(cards)
-
-    # SPY bars
-    key = os.getenv("POLYGON_API_KEY") or os.getenv("POLYGON_API") or os.getenv("POLYGON")
-    bars_by_sym: Dict[str, List[dict]] = {}
-    if key:
-        bars_by_sym["SPY"] = fetch_polygon_10m(key, "SPY")
-        for s in SECTOR_ETFS:
-            bars_by_sym[s] = fetch_polygon_10m(key, s)
-    spy_bars = bars_by_sym.get("SPY", [])
-
-    # SPY: PSI, posture, vol/liquidity
-    squeeze_tight_psi = None
-    squeeze_exp_pct   = None
-    liquidity_pct     = None
-    volatility_pct    = None
-    ema_cross = "none"; just = False; ema_sign = 0; ema10_dist = 0.0
-    psi_1h = None
-
-    if len(spy_bars) >= 2:
-        H = [b["high"] for b in spy_bars]
-        L = [b["low"]  for b in spy_bars]
-        C = [b["close"] for b in spy_bars]
-        V = [b["volume"] for b in spy_bars]
-
-        squeeze_tight_psi = lux_psi_from_closes(C, conv=LUX_CONV, length=LUX_LEN)  # high=tight
-        squeeze_exp_pct   = clamp(100.0 - squeeze_tight_psi, 0.0, 100.0)
-
-        v3 = ema_last(V, 3); v12 = ema_last(V, 12)
-        liquidity_pct = 0.0 if not v12 or v12 <= 0 else clamp(100.0 * (v3 / v12), 0.0, 200.0)
-
-        if len(C) >= 2:
-            trs = tr_series(H, L, C); atr = ema_last(trs, 3) if trs else None
-            volatility_pct = 0.0 if not atr or C[-1] <= 0 else max(0.0, 100.0 * atr / C[-1])
-        else:
-            tr = max(H[-1]-L[-1], abs(H[-1]-C[-1]), abs(L[-1]-C[-1]))
-            volatility_pct = 0.0 if C[-1] <= 0 else max(0.0, 100.0 * tr / C[-1])
-
-        e10 = ema_series(C, 10); e20 = ema_series(C, 20)
-        e10p, e20p = e10[-2], e20[-2]
-        e10n, e20n = e10[-1], e20[-1]
-        if e10p <= e20p and e10n > e20n:
-            ema_cross, just = "bull", True
-        elif e10p >= e20p and e10n < e20n:
-            ema_cross, just = "bear", True
-        ema_sign = 1 if e10n > e20n else (-1 if e10n < e20n else 0)
-        ema10_dist = 0.0 if e10n == 0 else 100.0 * (C[-1] - e10n) / e10n
-
-        bars_1h = resample_10m_to_1h(spy_bars)
-        C1h = [b["close"] for b in bars_1h]
-        psi_1h = lux_psi_from_closes(C1h, conv=LUX_CONV, length=LUX_LEN) if len(C1h) >= (LUX_LEN + 2) else 50.0
-
-    # fast breadth / momentum + smoothing
-    align_raw = bar_raw = None
-    momentum_10m = None
-    if key:
-        align_raw, bar_raw = fast_components_etfs({s: bars_by_sym.get(s, []) for s in SECTOR_ETFS})
-        m10, _, _ = fast_momentum_sector({s: bars_by_sym.get(s, []) for s in SECTOR_ETFS})
-        momentum_10m = m10
-
-    prev_metrics = (prev_out or {}).get("metrics") or {}
-    align_fast = ema_blend(prev_metrics.get("breadth_align_pct_fast"), align_raw, L=2) if align_raw is not None else prev_metrics.get("breadth_align_pct_fast")
-    bar_fast   = ema_blend(prev_metrics.get("breadth_bar_pct_fast"),   bar_raw,   L=2) if bar_raw   is not None else prev_metrics.get("breadth_bar_pct_fast")
-
-    a_val = align_fast if isinstance(align_fast, (int,float)) else align_raw
-    b_val = bar_fast   if isinstance(bar_fast,   (int,float)) else bar_raw
-    if a_val is None and b_val is None:
-        breadth_10m = b_slow
-    else:
-        a_v = 0.0 if a_val is None else float(a_val)
-        b_v = 0.0 if b_val is None else float(b_val)
-        breadth_10m = round(clamp(0.60 * a_v + 0.40 * b_v, 0.0, 100.0), 2)
-
-    # momentum composite
-    if len(spy_bars) >= 2:
-        C = [b["close"] for b in spy_bars]
-        ema_score = spy_ema_posture_score(C, max_gap_pct=0.50, cross_age_10m=0, max_bonus_pts=6.0, fade_bars=6)
-        H = [b["high"] for b in spy_bars]; L = [b["low"] for b in spy_bars]
-        k10, d10 = smi_kd(H, L, C, k_len=12, d_len=7, ema_len=5)
-        k1h, d1h = smi_1h_live_from_10m(spy_bars)
-        s10 = None if (k10 is None or d10 is None) else clamp(50.0 + 0.5*(k10 - d10), 0.0, 100.0)
-        s1h = None if (k1h is None or d1h is None) else clamp(50.0 + 0.5*(k1h - d1h), 0.0, 100.0)
-        if s10 is None and s1h is None:
-            momentum_combo = ema_score
-        else:
-            wE, w10, w1h = 0.60, 0.15, 0.25
-            momentum_combo = (wE * ema_score
-                              + w10 * (s10 if s10 is not None else ema_score)
-                              + w1h * (s1h if s1h is not None else ema_score))
-    else:
-        momentum_combo = m_slow
-    momentum_combo = round(clamp(momentum_combo, 0.0, 100.0), 2)
-    if momentum_10m is None:
-        momentum_10m = m_slow
-
-    # fallbacks
-    squeeze_tight_psi = float(50.0 if squeeze_tight_psi is None else squeeze_tight_psi)
-    squeeze_exp_pct   = float(50.0 if squeeze_exp_pct   is None else squeeze_exp_pct)
-    liquidity_pct     = float(50.0 if liquidity_pct     is None else liquidity_pct)
-    volatility_pct    = float(0.0  if volatility_pct    is None else volatility_pct)
-
-    # overall score (expansion drives composite, PSI drives tile)
-    state, score, comps = compute_overall10m(
-        ema_sign=ema_sign,
-        ema10_dist_pct=ema10_dist,
-        momentum_pct=momentum_combo,
-        breadth_pct=breadth_10m,
-        squeeze_expansion_pct=squeeze_exp_pct,
-        liquidity_pct=liquidity_pct,
-        riskon_pct=risk_on_pct,
-    )
-
+    # -------------------- Pack metrics --------------------
     metrics = {
-        # fast / blended breadth & momentum
-        "breadth_10m_pct": round(float(breadth_10m), 2),
-        "breadth_align_pct": round(float(align_raw), 2) if isinstance(align_raw,(int,float)) else None,
-        "breadth_align_pct_fast": round(float(align_fast), 2) if isinstance(align_fast,(int,float)) else None,
-        "breadth_bar_pct": round(float(bar_raw), 2) if isinstance(bar_raw,(int,float)) else None,
-        "breadth_bar_pct_fast": round(float(bar_fast), 2) if isinstance(bar_fast,(int,float)) else None,
-
-        "momentum_combo_pct": round(float(momentum_combo), 2),
-        "momentum_10m_pct": round(float(momentum_10m), 2),
-
-        # slow snapshot (from cards)
-        "breadth_slow_pct": round(float(b_slow), 2),
-        "momentum_slow_pct": round(float(m_slow), 2),
-
-        # EMA posture
-        "ema_cross": ("bull" if just and ema_sign>0 else "bear" if just and ema_sign<0 else "none"),
-        "ema10_dist_pct": round(float(ema10_dist), 2),
+        "breadth_10m_pct": breadth_10m,
+        "momentum_10m_pct": momentum_10m,
+        "momentum_combo_10m_pct": momentum_combo_10m,
+        "squeeze_psi_10m_pct": round(psi_10m, 2),
+        "squeeze_pct": round(psi_10m, 2),                  # tile reads PSI tightness
+        "squeeze_expansion_pct": round(100.0 - psi_10m, 2),
+        "squeeze_compression_pct": round(psi_10m, 2),
+        "ema_gap_pct": round(ema_gap_pct, 3),
         "ema_sign": int(ema_sign),
-
-        # Lux PSI mapping (tile reads PSI tightness)
-        "squeeze_psi_10m_pct": round(float(squeeze_tight_psi), 2),
-        "squeeze_pct":           round(float(squeeze_tight_psi), 2),           # TILE uses this
-        "squeeze_expansion_pct": round(float(100.0 - squeeze_tight_psi), 2),   # wide bands
-        "squeeze_compression_pct": round(float(squeeze_tight_psi), 2),
-
-        # Liquidity / Volatility
-        "liquidity_psi": round(float(liquidity_pct), 2),
-        "liquidity_pct": round(float(liquidity_pct), 2),
-        "volatility_pct": round(float(volatility_pct), 3),
-        "volatility_scaled": round(float(volatility_pct) * 6.25, 2),
+        "breadth_slow_pct": breadth_slow,
+        "momentum_slow_pct": momentum_slow,
+        "risk_on_10m_pct": risk_on_10m,
     }
 
-    intraday = (source or {}).get("intraday", {}) or {}
-    intraday.setdefault("sectorDirection10m", {})
-    intraday["sectorDirection10m"]["risingPct"] = float(rising_pct)
-    intraday.setdefault("riskOn10m", {})
-    intraday["riskOn10m"]["riskOnPct"] = float(risk_on_pct)
-    intraday["overall10m"] = {
-        "state": state,
-        "score": score,
-        "components": comps,
-        "just_crossed": bool(metrics["ema_cross"] in ("bull","bear")),
-    }
-    intraday["squeeze1h_pct"] = round(float(psi_1h if psi_1h is not None else 50.0), 2)
-    intraday["squeeze_meta"]  = {"conv": LUX_CONV, "length": LUX_LEN, "source": "LuxAlgo PSI"}
+    # -------------------- Engine Lights (10m) --------------------
+    lights: Dict[str, Dict[str, Any]] = {}
 
-    return {
+    def put(name: str, active: bool, severity: str, reason: str):
+        lights[name] = {
+            "active": bool(active), "severity": severity,
+            "reason": reason, "lastChanged": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+    # EMA crosses at bar close
+    if len(ema8) >= 2 and len(ema18) >= 2:
+        bull = (ema8[-2] <= ema18[-2] and ema8[-1] > ema18[-1])
+        bear = (ema8[-2] >= ema18[-2] and ema8[-1] < ema18[-1])
+        put("sigEMA10BullCross", bull, "info", f"EMA8/18 cross up gap={ema_gap_pct:.3f}%")
+        put("sigEMA10BearCross", bear, "warn", f"EMA8/18 cross down gap={ema_gap_pct:.3f}%")
+
+    # Optional early-warn (warn only; does not flip main state early)
+    if early_warn_enabled and vol_ok:
+        if gap_ok_up:
+            put("sigEMA10BullCrossEarlyWarn", True, "warn", f"early-warn: gap={ema_gap_pct:.3f}% vol3/20={vol3/vol20:.2f}")
+        elif gap_ok_down:
+            put("sigEMA10BearCrossEarlyWarn", True, "warn", f"early-warn: gap={ema_gap_pct:.3f}% vol3/20={vol3/vol20:.2f}")
+
+    # Accel (±2.5 with hysteresis)
+    accel_on_up   = accel >= ACCEL_10M_ON
+    accel_on_down = accel <= -ACCEL_10M_ON
+    put("sigAccelUp",   accel_on_up,   "info", f"ΔB {dB:+.2f} + ΔM {dM:+.2f} = {accel:+.2f}")
+    put("sigAccelDown", accel_on_down, "warn", f"ΔB {dB:+.2f} + ΔM {dM:+.2f} = {accel:+.2f}")
+
+    # Squeeze mapping (tightness)
+    if psi_10m >= SQUEEZE_TIGHT:
+        put("sigCompression", True, "warn", f"PSI {psi_10m:.1f} (tight)")
+    elif psi_10m <= SQUEEZE_EXP or d_psi <= -3.0:
+        put("sigExpansion", True, "info", f"PSI {psi_10m:.1f} Δ{d_psi:+.2f}")
+
+    # Risk-On/Off (10m fast sector proxy)
+    put("sigRiskOn",  risk_on_10m >= 58.0, "info", f"riskOn10m {risk_on_10m:.1f}")
+    put("sigRiskOff", risk_on_10m <= 42.0, "warn", f"riskOn10m {risk_on_10m:.1f}")
+
+    # Overall 10m (confirmation tier; reuse existing if you compute it elsewhere)
+    # Here, approximate from momentum_combo_10m and ema_sign:
+    overall_state = "bull" if (ema_sign>0 and momentum_combo_10m>=60) else ("bear" if (ema_sign<0 and momentum_combo_10m<=40) else "neutral")
+    overall_score = int(clamp(momentum_combo_10m if ema_sign>0 else (100.0 - momentum_combo_10m), 0.0, 100.0))
+    put("sigOverallBull", overall_state=="bull" and overall_score>=10, "info", f"score {overall_score}")
+    put("sigOverallBear", overall_state=="bear" and overall_score>=10, "warn", f"score {overall_score}")
+
+    # -------------------- Mirror 1h pills into intraday (optional flag) --------------------
+    if os.environ.get("ENGINE_LIGHTS_1H","true").lower() != "false" and len(bars_10m) >= 12:
+        bars_1h = resample_10m_to_1h(bars_10m)
+        if len(bars_1h) >= 3:
+            H1=[b["high"] for b in bars_1h]; L1=[b["low"] for b in bars_1h]; C1=[b["close"] for b in bars_1h]
+            ema8_1 = ema_series(C1, EMA_FAST_SHORT); ema18_1 = ema_series(C1, EMA_FAST_LONG)
+            # EMA1h crosses
+            bull1h = (len(ema8_1)>=2 and len(ema18_1)>=2 and ema8_1[-2] <= ema18_1[-2] and ema8_1[-1] > ema18_1[-1])
+            bear1h = (len(ema8_1)>=2 and len(ema18_1)>=2 and ema8_1[-2] >= ema18_1[-2] and ema8_1[-1] < ema18_1[-1])
+            put("sigEMA1hBullCross", bull1h, "info", "EMA8/18 (1h) cross up")
+            put("sigEMA1hBearCross", bear1h, "warn", "EMA8/18 (1h) cross down")
+            # SMI1h crosses
+            K1, D1 = smi_kd_series(H1, L1, C1, k_len=12, d_len=7, ema_len=5)
+            if len(K1)>=2 and len(D1)>=2:
+                bullKD = (K1[-2] <= D1[-2] and K1[-1] > D1[-1])
+                bearKD = (K1[-2] >= D1[-2] and K1[-1] < D1[-1])
+                put("sigSMI1hBullCross", bullKD, "info", f"K/D(1h) {K1[-2]:.2f}->{K1[-1]:.2f} / {D1[-2]:.2f}->{D1[-1]:.2f}")
+                put("sigSMI1hBearCross", bearKD, "warn", f"K/D(1h) {K1[-2]:.2f}->{K1[-1]:.2f} / {D1[-2]:.2f}->{D1[-1]:.2f}")
+            # Hourly accel from last two hours of breadth/mom approximations (reuse 10m for proxy)
+            # For simplicity in Stage 1 mirror, use EMA gap delta as momentum proxy:
+            ema_gap_1h = 0.0 if ema18_1[-1]==0 else 100.0 * (ema8_1[-1] - ema18_1[-1]) / ema18_1[-1]
+            ema_gap_1h_prev = 0.0 if ema18_1[-2]==0 else 100.0 * (ema8_1[-2] - ema18_1[-2]) / ema18_1[-2]
+            accel_1h = round(ema_gap_1h - ema_gap_1h_prev, 2)
+            put("sigAccelUp1h",   accel_1h >= 1.5, "info", f"ΔEMA-gap(1h) {accel_1h:+.2f}%")
+            put("sigAccelDown1h", accel_1h <= -1.5, "warn", f"ΔEMA-gap(1h) {accel_1h:+.2f}%")
+
+    # -------------------- Compose --------------------
+    out = {
         "version": VERSION_TAG,
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": now_utc_iso(),
-        "timestamp": now_utc_iso(),
         "metrics": metrics,
-        "intraday": intraday,
-        "sectorCards": cards,
-        "meta": {"cards_fresh": bool(fresh)}
+        "engineLights": {
+            "updatedAt": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+            "mode": "intraday",
+            "live": True,
+            "signals": lights
+        },
+        "sectorCards": cards
     }
+    return out
 
 # ============================ CLI ============================
-
 def main():
     ap = argparse.ArgumentParser()
-    # Back-compat with older workflows that pass "--mode intraday"
-    ap.add_argument("--mode", default="intraday",
-                    help="(ignored) kept for backward compatibility; this script always builds intraday.")
-    ap.add_argument("--source", default="", help="Optional source json (cards/groups).")
-    ap.add_argument("--out",    required=True, help="Output JSON path (e.g., data/outlook_intraday.json)")
-    ap.add_argument("--hourly_url", default=HOURLY_URL_DEFAULT)
+    ap.add_argument("--mode", default="intraday")  # ignored; kept for back-compat with workflows
+    ap.add_argument("--source", default="", help="optional source json (sectorCards)")
+    ap.add_argument("--out", required=True, help="Output JSON path (e.g., data/outlook_intraday.json)")
     args = ap.parse_args()
 
-    prev_out = jread(args.out)  # for smoothing + accel deltas
+    prev_out = None
+    if os.path.exists(args.out):
+        try:
+            prev_out = json.load(open(args.out, "r", encoding="utf-8"))
+        except Exception:
+            prev_out = None
 
     src = None
     if args.source and os.path.exists(args.source):
         try:
-            with open(args.source, "r", encoding="utf-8") as f:
-                src = json.load(f)
+            src = json.load(open(args.source, "r", encoding="utf-8"))
         except Exception:
             src = None
 
-    out = build_intraday(source=src, hourly_url=args.hourly_url, prev_out=prev_out)
-
-    # Engine lights
-    ts_local = out.get("updated_at") or datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        sig = build_engine_lights_signals(curr=out, prev=prev_out, ts_local=ts_local)
-        out["engineLights"] = {"updatedAt": ts_local, "mode": "intraday", "live": True, "signals": sig}
-    except Exception as e:
-        print("[warn] engineLights build failed:", e, file=sys.stderr)
-
+    out = build_intraday(src, prev_out)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
-
-    ov = out.get("intraday", {}).get("overall10m", {})
-    print("[ok] wrote", args.out,
-          "| version=", out.get("version"),
-          "| overall10m.state=", ov.get("state"), "score=", ov.get("score"),
-          "| squeeze_pct(=PSI 10m)=", out["metrics"].get("squeeze_pct"),
-          "| squeeze_expansion_pct=", out["metrics"].get("squeeze_expansion_pct"))
+    print("[ok] wrote", args.out, "| version=", out.get("version"),
+          "| accel10m=", (out["engineLights"]["signals"].get("sigAccelUp", {}) or {}).get("active"),
+          (out["engineLights"]["signals"].get("sigAccelDown", {}) or {}).get("active"))
 
 if __name__ == "__main__":
     try:
