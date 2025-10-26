@@ -23,7 +23,7 @@ jobs:
       cancel-in-progress: false
     env:
       TZ: America/Phoenix
-      LIVE_BRAN​CH: data-live-hourly
+      LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -87,14 +87,13 @@ jobs:
             for name,g in (groups or {}).items():
               k=alias.get(norm(name), norm(name))
               nh=int((g or {}).get("nh",0)); nl=int((g or {}).get("nl",0))
-              up=int((g or {}).get("up",0));  dn = int((g or {}).get("down",0))
-              b = 0.0 if (nh+nl)==0 else 100.0*nh/(nh+nl)
-              m = 0.0 if (up+dn)==0 else 100.0*up/(up+dn)
-              by[k] = {"sector": k.title(), "breadth_pct": round(b,2), "momentum_pct": round(m,2),
-                       "nh": nh, "nl": nl, "up": up, "down": dn}
+              up=int((g or {}).get("u",0));  dn=int((g or {}).get("d",0))
+              b=0.0 if (nh+nl)==0 else 100.0*nh/(nh+nl)
+              m=0.0 if (up+dn)==0  else 100.0*up/(up+dn)
+              by[k]={"sector":k.title(),"breadth_pct":round(b,2),"momentum_pct":round(m,2),"nh":nh,"nl":nl,"up":up,"down":dn}
             cards=[ by.get(x, {"sector":x.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for x in ORDER ]
-            j={"sectorCards": cards}
-            json.dump(j, open(p,"w",encoding="utf-8"), separators=(",",":"))
+            j={"sectorCards":cards}
+            json.dump(j,open(p,"w",encoding="utf-8"),separators=(",",":"))
             print(f"[normalize] converted groups→sectorCards len={len(cards)}")
             sys.exit(0)
           if found is None:
@@ -155,23 +154,24 @@ jobs:
           LIVE_BRANCH: data-live-hourly
         run: |
           set -euo pipefail
-
           git config user.name  "actions-bot"
           git config user.email "bot@users.noreply.github.com"
 
-         git reset --hard
-         git clean -fdx
+          git reset --hard
+          git clean -fdx
 
-         # Single-line conditional avoids multi-line if/else parsing issues
-         if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then git fetch --no-tags --prune origin "${LIVE_BRANCH}"; git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"; else git checkout --orphan "${LIVE_BRANCH}"; fi
+          # Single-line conditional avoids multi-line if/else parsing issues
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then git fetch --no-tags --prune origin "${LIVE_BRANCH}"; git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"; else git checkout --orphan "${LIVE_BRANCH}"; fi
 
-         # Clean everything except .git and stage artifacts
-         find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-         mkdir -p data
-         cp -f /tmp/live1h/outlook_hourly.json   data/outlook_hourly.json
-         cp -f /tmp/live1h/heartbeat_hourly.txt data/heartbeat_hourly.txt
+          # Clean everything except .git
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 
-         echo "[prepare] ✅ Ready for commit on branch ${LIVE_BRANCH}"
+          mkdir -p data
+          cp -f /tmp/live1h/outlook_hourly.json   data/outlook_hourly.json
+          cp -f /tmp/live1h/heartbeat_hourly.txt data/heartbeat_hourly.txt
+
+          echo "[prepare] ✅ Ready for commit on branch ${LIVE_BRANCH}"
+
       # 8) Commit and push live branch
       - name: Commit and push live branch
         env:
