@@ -164,7 +164,28 @@ jobs:
           git config --global user.name  "CI Bot"
           git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}" || true
           git checkout -B "${LIVE_BRANCH}" || git checkout "${LIVE_BRANCH}"
-
+       
+       - name: Mirror Daily Lux trend into Intraday
+         run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,urllib.request,datetime
+          try:
+              daily=json.load(urllib.request.urlopen("https://frye-market-backend-1.onrender.com/live/daily"))
+          except Exception:
+              try:
+                  daily=json.load(urllib.request.urlopen("https://frye-market-backend-1.onrender.com/live/eod"))
+              except Exception as e:
+                  print("no daily feed",e); exit()
+          j=json.load(open("data/outlook_intraday.json","r",encoding="utf-8"))
+          td=daily.get("strategy",{}).get("trendDaily")
+          if td:
+              j.setdefault("intraday",{}).setdefault("strategy",{})["trendDaily"]=td
+              json.dump(j,open("data/outlook_intraday.json","w",encoding="utf-8"),separators=(",",":"))
+              print("[mirror] added trendDaily:",td)
+          else:
+              print("[mirror] no daily trend found")
+          PY
       - name: Commit and push
         run: |
           set -euo pipefail
