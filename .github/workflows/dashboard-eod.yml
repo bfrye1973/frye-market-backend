@@ -3,7 +3,7 @@ name: dashboard-daily
 on:
   workflow_dispatch: {}
   schedule:
-    # Run after market close (8:00 PM UTC ≈ 4:00 PM ET)
+    # Runs at 8:00 PM UTC (4 PM ET) — adjust as needed
     - cron: "0 20 * * 1-5"
 
 defaults:
@@ -37,46 +37,21 @@ jobs:
 
       - name: Install deps
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
-          pip install requests python-dateutil
+          pip install requests
 
       - name: Build daily payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
-          mkdir -p data
-          python -u scripts/make_dashboard_daily.py --out data/outlook_daily.json
-          echo "[ok] built data/outlook_daily.json"
-
-      - name: Compute Lux Strategy (Daily)
-        run: |
-          python - <<'PY'
-          import json,sys,datetime
-          p="data/outlook_daily.json"
-          try: j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception as e: print("load fail",e); sys.exit(1)
-          m=j.get("metrics",{}) or {}
-          now=datetime.datetime.utcnow().isoformat()+"Z"
-          sq=m.get("squeeze_daily_pct") or m.get("squeeze_pct") or 50
-          ema_sign=m.get("ema_sign",0)
-          tight=sq>=80
-          state=j.get("daily",{}).get("state") or "neutral"
-          score=j.get("daily",{}).get("score",50)
-          if tight: st,rs="purple",f"Squeeze tight {sq:.0f}%"
-          elif state=="bull" or (ema_sign>0 and score>=60): st,rs="green",f"Daily bull {score}"
-          elif state=="bear" or (ema_sign<0 and score<60): st,rs="red",f"Daily bear {score}"
-          else: st,rs="purple",f"Neutral {score}"
-          j.setdefault("strategy",{})["trendDaily"]={"state":st,"reason":rs,"updatedAt":now}
-          json.dump(j,open(p,"w",encoding="utf-8"),separators=(",",":"))
-          print("[strategy-daily]",j["strategy"]["trendDaily"])
-          PY
-
-      - name: Write heartbeat
-        run: |
-          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_daily.txt
+          set -euo pipefail
+          python -u scripts/make_dashboard_daily.py
+          echo "✔ Daily payload built."
 
       - name: Prepare live branch
         run: |
+          set -euo pipefail
           git config --global user.email "bot@ci.local"
           git config --global user.name  "CI Bot"
           git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}" || true
@@ -84,6 +59,11 @@ jobs:
 
       - name: Commit and push
         run: |
-          git add data/outlook_daily.json data/heartbeat_daily.txt
-          git commit -m "daily feed $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "no changes"
-          git push origin "${LIVE_BRANCH}" --force
+          set -euo pipefail
+          git add data/outlook_daily.json || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else:
+            git commit -m "daily feed: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git push origin "${LIVE_BRANCH}" --force
+          fi
