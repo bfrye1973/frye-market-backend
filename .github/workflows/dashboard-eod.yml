@@ -92,6 +92,12 @@ jobs:
           python -u scripts/make_eod.py \
             --source data/outlook_source.json \
             --out    data/outlook.json
+       - name: Mirror to legacy daily block (trendDaily.*)
+        run: |
+          set -euo pipefail
+          python -u scripts/finalize_eod_legacy_mirror.py \
+            --in  data/outlook.json \
+            --out data/outlook.json
 
       - name: Write heartbeat
         run: |
