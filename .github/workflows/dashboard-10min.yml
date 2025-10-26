@@ -3,7 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Keep schedule if you want; you can remove these two lines if you want manual-only:
+    # Optional weekday schedule (safe to keep); you can delete if you only run manually
     - cron: "*/7 12 * * 1-5"
     - cron: "*/7 13-20 * * 1-5"
 
@@ -49,22 +49,23 @@ jobs:
           set -euo pipefail
           mkdir -p data
           python -u scripts/build_outlook_source_from_polygon.py --mode intraday10 --out data/outlook_source.json
-          echo "RAW SOURCE (first 100 lines):"
-          head -n 100 data/outlook_source.json || true
+          echo "RAW SOURCE (first 80 lines):"
+          head -n 80 data/outlook_source.json || true
           cp -f data/outlook_source.json /tmp/outlook_source.json
 
-      - name: Normalize source (cards or groups)
+      - name: Normalize source (ensure groups/cards)
         run: |
           set -euo pipefail
           python - <<'PY'
           import json,sys
           p="data/outlook_source.json"
-          try: j=json.load(open(p,"r",encoding="utf-8"))
+          try:
+              j=json.load(open(p,"r",encoding="utf-8"))
           except Exception as e:
               print("Missing source:", e); sys.exit(1)
-          if not (isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)):
-              print("INVALID: no groups/sectorCards"); sys.exit(1)
-          print("OK - source contains groups or cards.")
+          if not (isinstance(j.get("groups"),dict) and j["groups"]) and not isinstance(j.get("sectorCards"),list):
+              print("INVALID: no groups or sectorCards in source"); sys.exit(1)
+          print("✔ Source looks good")
           PY
 
       - name: Build intraday payload (uses source)
@@ -76,7 +77,7 @@ jobs:
             --mode intraday \
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
-          echo "Built data/outlook_intraday.json"
+          echo "✔ Built data/outlook_intraday.json"
 
       - name: Compute Lux strategy (10m) + mirror 1h if present
         run: |
@@ -91,67 +92,75 @@ jobs:
           m=j.get("metrics",{}) or {}
           eng=(j.get("engineLights") or {})
           sigs=eng.get("signals") or {}
-          now = j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().isoformat()+"Z"
+          now=j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().isoformat()+"Z"
 
-          # 10m: PSI tight (>=80) => Purple, else use EMA10 cross + Accel and fallback posture
-          psi = m.get("squeeze_pct")
+          # 10m Lux trend
+          psi = m.get("squeeze_pct")  # 0..100 tightness
           tight = psi is not None and psi >= 80
-
           ema_sign = m.get("ema_sign",0)
+
           bullX = bool((sigs.get("sigEMA10BullCross") or {}).get("active")) or ema_sign>0
           bearX = bool((sigs.get("sigEMA10BearCross") or {}).get("active")) or ema_sign<0
           accelUp = bool((sigs.get("sigAccelUp") or {}).get("active"))
-          accelDn = bool((sigs.get("sigAccelDown") or {}).get("active"))
+          accelDn  = bool((sigs.get("sigAccelDown") or {}).get("active"))
 
           if tight:
               s10, r10 = "purple", f"PSI tight {psi:.0f}%"
           elif bullX and accelUp:
-              s10, r10 = "green",  "EMA10>20 + AccelUp"
+              s10, r10 = "green", "EMA10>20 + AccelUp"
           elif bearX and accelDn:
-              s10, r10 = "red",    "EMA10<20 + AccelDown"
+              s10, r10 = "red", "EMA10<20 + AccelDown"
           else:
-              if ema_sign>0:   s10,r10="green","EMA posture up"
-              elif ema_sign<0: s10,r10="red","EMA posture down"
-              else:            s10,r10="purple","Neutral / no cross"
+              if ema_sign > 0:   s10, r10 = "green","EMA posture up"
+              elif ema_sign < 0: s10, r10 = "red","EMA posture down"
+              else:              s10, r10 = "purple","Neutral / no cross"
 
           j.setdefault("intraday",{}).setdefault("strategy",{})
           j["intraday"]["strategy"]["trend10m"] = {"state":s10,"reason":r10,"updatedAt":now}
 
-          # mirror 1h into intraday.strategy.trend1h if pills exist
-          def active(k): return bool((sigs.get(k) or {}).get("active"))
+          # mirror 1h if pills present in intraday feed
+          def on(k): return bool((sigs.get(k) or {}).get("active"))
           if any(k.startswith("sigEMA1h") or k.startswith("sigSMI1h") or k.endswith("1h") for k in sigs.keys()):
-              bull1 = active("sigEMA1hBullCross") or active("sigSMI1hBullCross")
-              bear1 = active("sigEMA1hBearCross") or active("sigSMI1hBearCross")
-              if bull1:   st,rs="green","EMA/SMI 1h up"
-              elif bear1: st,rs="red","EMA/SMI 1h down"
-              else:       st,rs="purple","Neutral (1h)"
+              if on("sigEMA1h_BullCross") or on("sigSMI1h_BullCross") or on("sigOverallBull1h"):
+                  st,rs="green","EMA/SMI 1h up"
+              elif on("sigEMA1h_BearCross") or on("sigSMI1h_BearCross") or on("sigOverallBear1h"):
+                  st,rs="red","EMA/SMI 1h down"
+              else:
+                  st,rs="purple","Neutral (1h)"
               j["intraday"]["strategy"]["trend1h"]={"state":st,"reason":rs,"updatedAt":now}
 
           json.dump(j, open(p,"w",encoding="utf-8"), separators=(",",":"))
-          print("[strategy-10m] trend10m=", j["intraday"]["strategy"].get("trend10m"))
-          print("[strategy-1h] trend1h=", j["intraday"]["strategy"].get("trend1h"))
+          print("[strategy-10m]:", j["intraday"]["strategy"].get("trend10m"))
+          print("[trend1h-mirror]:", j["intraday"]["strategy"].get("trend1h"))
           PY
 
       - name: Mirror Daily Lux trend into Intraday
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json,urllib.request,datetime
-          try:
-              daily=json.load(urllib.request.urlopen("https://frye-market-backend-1.onrender.com/live/daily"))
-          except Exception:
+          import json, urllib.request, datetime
+          p="data/outlook_intraday.json"
+          def pull(u):
+              import urllib.request
               try:
-                  daily=json.load(urllib.request.urlopen("https://frye-market-backend-1.onrender.com/live/eod"))
-              except Exception as e:
-                  print("no daily feed",e); exit()
-          j=json.load(open("data/outlook_intraday.json","r",encoding="utf-8"))
-          td=daily.get("strategy",{}).get("trendDaily")
-          if td:
-              j.setdefault("intraday",{}).setdefault("strategy",{})["trendDaily"]=td
-              json.dump(j,open("data/outlook_intraday.json","w",encoding":"utf-8"),separators=(",",":"))
-              print("[mirror] trendDaily appended:", td)
+                  with urllib.request.urlopen(u) as r:
+                      return json.load(r)
+              except Exception:
+                  return None
+
+          j = json.load(open(p,"r",encoding="utf-8"))
+
+          daily = pull("https://frye-market-backend-1.onrender.com/live/daily")
+          if daily is None:
+              daily = pull("https://frye-market-backend-1.onrender.com/live/eod")
+
+          if daily and "strategy" in daily and "trendDaily" in daily["strategy"]:
+              td = daily["strategy"]["trendDaily"]
+              j.setdefault("intraday",{}).setdefault("strategy",{})["trendDaily"] = td
+              json.dump(j, open(p,"w",encoding="utf-8"), separators=(",",":"))
+              print("[mirror] daily trend ->", td)
           else:
-              print("[mirror] no trendDaily in daily feed")
+              print("[mirror] no daily trend found; leaving intraday as-is")
           PY
 
       - name: Write heartbeat
@@ -160,6 +169,7 @@ jobs:
 
       - name: Prepare live branch
         run: |
+          set -euo pipefail
           git config --global user.email "bot@ci.local"
           git config --global user.name  "CI Bot"
           git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}" || true
