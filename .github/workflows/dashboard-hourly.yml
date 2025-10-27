@@ -3,7 +3,7 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Optional schedule (keep or remove). Runs every 5 min weekdays.
+    # Optional: every 5 minutes, weekdays
     - cron: "*/5 12-23 * * 1-5"
 
 defaults:
@@ -42,7 +42,6 @@ jobs:
           pip install requests python-dateutil
 
       - name: Build hourly payload
-      # IMPORTANT: do NOT pass --mode (hourly script doesn't take it)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -61,23 +60,22 @@ jobs:
               with open(p, "r", encoding="utf-8") as f:
                   j = json.load(f)
           except Exception as e:
-              print("load fail:", e)
-              sys.exit(1)
+              print("load fail:", e); sys.exit(1)
 
           m  = j.get("metrics", {}) or {}
           hv = j.get("hourly", {}) or {}
           ov = hv.get("overall1h", {}) or {}
-          now = j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().isoformat() + "Z"
+          now = j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-          squeeze = m.get("squeeze_1h_pct")
-          tight = squeeze is not None and float(squeeze) >= 80.0
+          sq = m.get("squeeze_1h_pct")
+          tight = (sq is not None) and float(sq) >= 80.0
 
-          ema_sign = m.get("ema_sign", 0)
-          score    = ov.get("score", 50)
-          state    = ov.get("state", "neutral")
+          ema_sign = int(m.get("ema_sign", 0) or 0)
+          score    = int(ov.get("score", 50) or 50)
+          state    = (ov.get("state") or "neutral").lower()
 
           if tight:
-              st, rs = "purple", f"PSI ≥80 ({squeeze:.0f}%)"
+              st, rs = "purple", f"PSI ≥80 ({sq:.0f}%)"
           elif state == "bull" or (ema_sign > 0 and score >= 60):
               st, rs = "green", f"Overall1h {score}"
           elif state == "bear" or (ema_sign < 0 and score < 60):
@@ -86,11 +84,7 @@ jobs:
               st, rs = "purple", f"Neutral {score}"
 
           j.setdefault("strategy", {})
-          j["strategy"]["trend1h"] = {
-              "state": st,
-              "reason": rs,
-              "updatedAt": now
-          }
+          j["strategy"]["trend1h"] = {"state": st, "reason": rs, "updatedAt": now}
 
           with open(p, "w", encoding="utf-8") as f:
               json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
@@ -99,17 +93,21 @@ jobs:
 
       - name: Write heartbeat
         run: |
-          date -u +%Y-%m-%dT%H:%M:%SZ > data/heartbeat_1h
+          set -euo pipefail
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
+          echo "Heartbeat written."
 
-      - name: Prepare live branch
+      - name: Prepare git identity
         run: |
           set -euo pipefail
-          git config --global user.email "bot@ci.local"
-          git config --global user.name  "CI Bot"
-          git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}" || true
-          git checkout -B "${LIVE_BRANCH}" || git checkout "${LIVE_BRANCH}"
+          git config user.email "bot@ci.local"
+          git config user.name  "CI Bot"
 
+      # ✅ SAFE PUBLISH: push current HEAD to remote live branch (works in detached HEAD)
       - name: Commit and push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           git add data/outlook_hourly.json data/heartbeat_1h || true
@@ -117,5 +115,6 @@ jobs:
             echo "No changes to commit."
           else:
             git commit -m "hourly feed: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            git push origin "${LIVE_BRANCH}" --force
+            git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+            git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
           fi
