@@ -3,8 +3,8 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "*/7 12 * * 1-5"
-    - cron: "*/7 13-20 * * 1-5"
+    # Every 7 minutes on weekdays (guard below limits the actual window to 04:00–18:59 AZ)
+    - cron: "*/7 * * * 1-5"
 
 defaults:
   run:
@@ -27,7 +27,9 @@ jobs:
 
     steps:
       # --------------------------------------------------------------------
-      # Market-hours guard (America/Phoenix) — skip weekends & after-hours
+      # Market-hours guard (America/Phoenix)
+      # Allow PRE + RTH + AFTER-HOURS on weekdays: 04:00–18:59 AZ
+      # (Skips weekends automatically via cron; this guard enforces the window.)
       # --------------------------------------------------------------------
       - name: Market hours guard (AZ)
         id: market_hours
@@ -39,22 +41,22 @@ jobs:
           echo "AZ Date: $(TZ=$TZ date)"
           echo "DOW=$DOW HOUR=$HOUR"
 
-          # Weekend?
+          # Weekend? (extra safety; cron already restricts to 1-5)
           if [ "$DOW" -ge 6 ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "⏸ Weekend — skipping."
             exit 0
           fi
 
-          # Allow 06:00–13:59 AZ (pre-open + RTH)
-          if [ "$HOUR" -lt 6 ] || [ "$HOUR" -gt 13 ]; then
+          # Allow 04:00–18:59 AZ (pre + RTH + after-hours)
+          if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ Outside market hours — skipping."
+            echo "⏸ Outside extended hours — skipping."
             exit 0
           fi
 
           echo "run=true" >> "$GITHUB_OUTPUT"
-          echo "✅ Within market hours — continuing."
+          echo "✅ Within extended hours — continuing."
 
       - name: Checkout
         if: ${{ steps.market_hours.outputs.run == 'true' }}
@@ -142,7 +144,8 @@ jobs:
           def totals(cards):
             return sum( (c.get("nh",0)+c.get("nl",0)+c.get("up",0)+c.get("down",0)) for c in cards )
 
-          good_schema = (len(cards)==11 and all(k in (cards[0] if cards else {}) for k in ("sector","breadth_pct","momentum_pct","nh","nl","up","down")))
+          need = ("sector","breadth_pct","momentum_pct","nh","nl","up","down")
+          good_schema = (len(cards)==11 and all(k in (cards[0] if cards else {}) for k in need))
           nonzero = totals(cards) > 0
 
           if good_schema and nonzero:
@@ -184,7 +187,7 @@ jobs:
             print("[post] repair applied: totals=", sum(c["nh"]+c["nl"]+c["up"]+c["down"] for c in new_cards))
             sys.exit(0)
 
-          # final guard: if still bad AND during RTH (AZ ~ 06:30–13:00), fail the job
+          # final guard: during RTH (≈ 06:30–13:00 AZ), fail if still bad
           now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-7)))  # America/Phoenix offset
           rth = (now.weekday() < 5) and ((now.hour>6 and now.hour<13) or (now.hour==6 and now.minute>=30))
           if rth:
@@ -217,7 +220,7 @@ jobs:
           git reset --hard
           git clean -fdx
 
-          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/div/null 2>&1; then
             git fetch origin "${LIVE_BRANCH}"
             git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
           else
