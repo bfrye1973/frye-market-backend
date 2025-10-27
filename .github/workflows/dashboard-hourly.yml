@@ -55,8 +55,14 @@ jobs:
       - name: Normalize sectorCards source
         run: |
           set -euo pipefail
-          if [ -f data/outlook_source.json ]; then
-            python - <<'PY'
+          # If source file missing, this is fine — continue quietly.
+          if [ ! -f data/outlook_source.json ]; then
+            echo "no source built (ok)"
+            exit 0
+          fi
+
+          # Validate presence of either sectorCards[] or groups{}
+          python - <<'PY'
 import json, sys
 p = "data/outlook_source.json"
 try:
@@ -68,9 +74,6 @@ except Exception as e:
 ok = isinstance(j.get("sectorCards"), list) or isinstance(j.get("groups"), dict)
 print("source has cards/groups:", ok)
 PY
-          else
-            echo "no source built (ok)"
-          fi
 
       # ---------- main hourly payload ----------
       - name: Build hourly payload
