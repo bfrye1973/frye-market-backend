@@ -27,7 +27,6 @@ jobs:
       contents: write
     env:
       LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
-      LIVE_RAW: https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min/data/outlook_intraday.json
       BRANCH: data-live-10min-sandbox
 
     steps:
@@ -57,19 +56,33 @@ jobs:
           echo "✅ Within market hours — continue"
 
       # ---------------------------------------------------------------
-      # 2) Freshness gate: require 10m live file ≤ 120s old
+      # 2) Ensure jq is present (for freshness gate)
       # ---------------------------------------------------------------
-      - name: Gate – require fresh 10m live (<= 120s)
-        id: fresh
+      - name: Ensure jq is available
         if: ${{ steps.hours.outputs.run == 'true' }}
         run: |
           set -e
-          curl -sfL "${LIVE_RAW}?t=$(date +%s)" -o /tmp/live10.json || { echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "no live10"; exit 0; }
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+
+      # ---------------------------------------------------------------
+      # 3) Freshness gate: require 10m live file ≤ 480s old
+      # ---------------------------------------------------------------
+      - name: Gate – require fresh 10m live (<= 480s)
+        id: fresh
+        if: ${{ steps.hours.outputs.run == 'true' }}
+        env:
+          LIVE_URL: ${{ env.LIVE_URL }}
+        run: |
+          set -e
+          curl -sfL "${LIVE_URL}?t=$(date +%s)" -o /tmp/live10.json || { echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "no live10"; exit 0; }
           TS=$(jq -r '.updated_at // .updated_at_utc // empty' /tmp/live10.json)
           if [ -z "$TS" ]; then echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "no timestamp on live10"; exit 0; fi
           AGE=$(( $(date -u +%s) - $(date -u -d "${TS/Z/+00:00}" +%s) ))
           echo "live10 age: ${AGE}s"
-          if [ "$AGE" -le 120 ]; then
+          if [ "$AGE" -le 480 ]; then
             echo "fresh=true" >> "$GITHUB_OUTPUT"
           else
             echo "fresh=false" >> "$GITHUB_OUTPUT"
@@ -77,22 +90,34 @@ jobs:
           fi
 
       # ---------------------------------------------------------------
-      # 3) Checkout and build only when both guards pass
+      # 4) Checkout and build only when guards pass OR 10m workflow just succeeded
       # ---------------------------------------------------------------
       - name: Checkout (shallow)
-        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
+        if: >-
+          ${{
+            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
+          }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Set BUILD_DIR
-        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
+        if: >-
+          ${{
+            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
+          }}
         run: |
           echo "BUILD_DIR=${RUNNER_TEMP}/intraday-deltas" >> "$GITHUB_ENV"
           mkdir -p "${RUNNER_TEMP}/intraday-deltas"
 
       - name: Fetch previous sandbox payload
-        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
+        if: >-
+          ${{
+            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
+          }}
         run: |
           set -e
           if git ls-remote --exit-code --heads origin "${BRANCH}" >/dev/null 2>&1; then
@@ -101,7 +126,11 @@ jobs:
           fi
 
       - name: Generate NEW sandbox payload with DELTAS
-        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
+        if: >-
+          ${{
+            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
+          }}
         env:
           LIVE_URL:  ${{ env.LIVE_URL }}
           BUILD_DIR: ${{ env.BUILD_DIR }}
@@ -197,7 +226,11 @@ jobs:
           PY
 
       - name: Prepare sandbox branch
-        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
+        if: >-
+          ${{
+            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
+          }}
         run: |
           set -e
           BRANCH="${{ env.BRANCH }}"
@@ -211,17 +244,32 @@ jobs:
           mkdir -p data
 
       - name: Copy outputs
-        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
+        if: >-
+          ${{
+            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
+          }}
         run: |
           cp -f "$BUILD_DIR/outlook_intraday.json" data/outlook_intraday.json
           cp -f "$BUILD_DIR/heartbeat_10min.txt" data/heartbeat_10min.txt
           ls -l data
 
+      # SAFE PUBLISH (detached HEAD proof)
       - name: Commit & push
-        if: ${{ steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true' }}
+        if: >-
+          ${{
+            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
+          }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ env.BRANCH }}
         run: |
+          set -euo pipefail
           git config user.name  "frye-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add data/*
-          git commit -m "Sandbox deltas update @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-          git push -f origin "${{ env.BRANCH }}"
+          git add data/outlook_intraday.json data/heartbeat_10min.txt || true
+          git commit -m "sandbox deltas: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin HEAD:refs/heads/${BRANCH} --force
