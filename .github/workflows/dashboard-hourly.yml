@@ -3,7 +3,7 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Run every 5 minutes during the US trading day (UTC 12–23 Mon–Fri)
+    # Run every 5 minutes during US trading day (UTC 12–23, Mon–Fri)
     - cron: "*/5 12-23 * * 1-5"
 
 defaults:
@@ -19,7 +19,7 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-hourly
-      cancel-in-progress: false   # do not cancel in-flight runs
+      cancel-in-progress: false
     env:
       LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
@@ -41,7 +41,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # -------------------- source build (optional but useful for cards) --------------------
+      # ---------- optional source build for sectorCards ----------
       - name: Build sectorCards source (1h)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -49,7 +49,7 @@ jobs:
           set -euo pipefail
           mkdir -p data
           python -u scripts/build_outlook_source_from_polygon.py --mode hourly --out data/outlook_source.json || true
-          echo "-------- head of data/outlook_source.json (first 80 lines) --------"
+          echo "-------- head of data/outlook_source.json (first 80 lines) --------" || true
           head -n 80 data/outlook_source.json || true
 
       - name: Normalize sectorCards source
@@ -57,71 +57,72 @@ jobs:
           set -euo pipefail
           if [ -f data/outlook_source.json ]; then
             python - <<'PY'
-            import json, sys
-            p = "data/outlook_source.json"
-            try:
-              j = json.load(open(p,"r",encoding="utf-8"))
-            except Exception as e:
-              print("warn: cannot load source:", e); sys.exit(0)
-            ok = isinstance(j.get("sectorCards"), list) or isinstance(j.get("groups"), dict)
-            print("source has cards/groups:", ok)
-            PY
+import json, sys
+p = "data/outlook_source.json"
+try:
+    with open(p, "r", encoding="utf-8") as f:
+        j = json.load(f)
+except Exception as e:
+    print("warn: cannot load source:", e)
+    sys.exit(0)
+ok = isinstance(j.get("sectorCards"), list) or isinstance(j.get("groups"), dict)
+print("source has cards/groups:", ok)
+PY
           else
-            echo "no source built (ok)"; 
+            echo "no source built (ok)"
           fi
 
-      # -------------------- hourly payload --------------------
+      # ---------- main hourly payload ----------
       - name: Build hourly payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
-          # make_dashboard_hourly.py should not require --mode; keep call simple and stable
           python -u scripts/make_dashboard_hourly.py --out data/outlook_hourly.json
           echo "✔ Built data/outlook_hourly.json"
 
-      # Optional strategy note (kept lightweight and safe)
       - name: Finalize 1h (strategy note)
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, datetime, sys
-          p = "data/outlook_hourly.json"
-          try:
-              with open(p, "r", encoding="utf-8") as f:
-                  j = json.load(f)
-          except Exception as e:
-              print("load fail:", e); sys.exit(0)
+import json, datetime, sys
+p = "data/outlook_hourly.json"
+try:
+    with open(p, "r", encoding="utf-8") as f:
+        j = json.load(f)
+except Exception as e:
+    print("load fail:", e)
+    sys.exit(0)
 
-          m  = j.get("metrics", {}) or {}
-          hv = j.get("hourly", {}) or {}
-          ov = hv.get("overall1h", {}) or {}
-          now = j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+m  = j.get("metrics", {}) or {}
+hv = j.get("hourly", {}) or {}
+ov = hv.get("overall1h", {}) or {}
+now = j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-          sq = m.get("squeeze_1h_pct")
-          tight = (sq is not None) and float(sq) >= 80.0
+sq = m.get("squeeze_1h_pct")
+tight = (sq is not None) and float(sq) >= 80.0
 
-          ema_sign = int(m.get("ema_sign", 0) or 0)
-          score    = int(ov.get("score", 50) or 50)
-          state    = (ov.get("state") or "neutral").lower()
+ema_sign = int(m.get("ema_sign", 0) or 0)
+score    = int(ov.get("score", 50) or 50)
+state    = (ov.get("state") or "neutral").lower()
 
-          if tight:
-              st, rs = "purple", f"PSI ≥80 ({sq:.0f}%)"
-          elif state == "bull" or (ema_sign > 0 and score >= 60):
-              st, rs = "green", f"Overall1h {score}"
-          elif state == "bear" or (ema_sign < 0 and score < 60):
-              st, rs = "red", f"Overall1h {score}"
-          else:
-              st, rs = "purple", f"Neutral {score}"
+if tight:
+    st, rs = "purple", f"PSI ≥80 ({sq:.0f}%)"
+elif state == "bull" or (ema_sign > 0 and score >= 60):
+    st, rs = "green", f"Overall1h {score}"
+elif state == "bear" or (ema_sign < 0 and score < 60):
+    st, rs = "red", f"Overall1h {score}"
+else:
+    st, rs = "purple", f"Neutral {score}"
 
-          j.setdefault("strategy", {})
-          j["strategy"]["trend1h"] = {"state": st, "reason": rs, "updatedAt": now}
+j.setdefault("strategy", {})
+j["strategy"]["trend1h"] = {"state": st, "reason": rs, "updatedAt": now}
 
-          with open(p, "w", encoding="utf-8") as f:
-              json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
-          print("[strategy-1h]", j["strategy"]["trend1h"])
-          PY
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
+print("[strategy-1h]", j["strategy"]["trend1h"])
+PY
 
       - name: Write heartbeat
         run: |
@@ -135,7 +136,7 @@ jobs:
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
 
-      # -------------------- SAFE PUBLISH (detached-HEAD proof) --------------------
+      # ---------- SAFE PUBLISH (detached-HEAD proof) ----------
       - name: Commit and push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -152,7 +153,7 @@ jobs:
             git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
           fi
 
-      # -------------------- Render auto-deploy hook --------------------
+      # ---------- Render auto-deploy ----------
       - name: Trigger Render deploy (backend-1)
         if: ${{ success() }}
         env:
