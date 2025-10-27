@@ -107,12 +107,17 @@ jobs:
           git config --global user.email "deploy@ci.local"
           git config --global user.name "CI Deployer"
 
+      # ✅ FIXED PUSH SECTION
       - name: Commit and push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -e
           git add -A
-          git commit -m "Deploy 10m intraday ($(date -u))" || true
-          git push origin ${{ env.LIVE_BRANCH }}
+          git commit -m "Deploy 10m intraday ($(date -u))" || echo "nothing to commit"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
 
       - name: Done
         run: echo "10m deploy complete"
