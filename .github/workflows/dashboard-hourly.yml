@@ -41,17 +41,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # (Optional) Build a source file for cards; safe to skip on error
-      - name: Build sectorCards source (1h)  # optional
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py --mode hourly --out data/outlook_source.json || true
-          head -n 40 data/outlook_source.json || true
-
-      # ---------- main hourly payload ----------
+      # Build the hourly payload (no heredocs; single, stable call)
       - name: Build hourly payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -60,37 +50,7 @@ jobs:
           mkdir -p data
           python -u scripts/make_dashboard_hourly.py --out data/outlook_hourly.json
           echo "✔ Built data/outlook_hourly.json"
-
-      # (Optional) lightweight strategy tag; safe if file missing/partial
-      - name: Finalize 1h (strategy note)
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-import json, datetime, sys, os
-p = "data/outlook_hourly.json"
-if not os.path.isfile(p):
-    print("skip finalize: hourly json missing"); sys.exit(0)
-try:
-    j = json.load(open(p,"r",encoding="utf-8"))
-except Exception as e:
-    print("skip finalize: load error:", e); sys.exit(0)
-m  = j.get("metrics", {}) or {}
-hv = j.get("hourly", {}) or {}
-ov = hv.get("overall1h", {}) or {}
-now = j.get("updated_at") or j.get("updated_at_utc") or datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-sq = m.get("squeeze_1h_pct")
-tight = (sq is not None) and float(sq) >= 80.0
-ema_sign = int(m.get("ema_sign", 0) or 0)
-score    = int(ov.get("score", 50) or 50)
-state    = (ov.get("state") or "neutral").lower()
-if tight: st, rs = "purple", f"PSI ≥80 ({sq:.0f}%)"
-elif state == "bull" or (ema_sign > 0 and score >= 60): st, rs = "green", f"Overall1h {score}"
-elif state == "bear" or (ema_sign < 0 and score < 60):   st, rs = "red",   f"Overall1h {score}"
-else: st, rs = "purple", f"Neutral {score}"
-j.setdefault("strategy", {}); j["strategy"]["trend1h"] = {"state": st, "reason": rs, "updatedAt": now}
-json.dump(j, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
-print("[strategy-1h]", j["strategy"]["trend1h"])
-PY
+          head -n 40 data/outlook_hourly.json || true
 
       - name: Write heartbeat
         run: |
@@ -104,7 +64,7 @@ PY
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
 
-      # ---------- SAFE PUBLISH (detached-HEAD proof) ----------
+      # SAFE PUBLISH (detached-HEAD proof + token remote)
       - name: Commit and push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -121,7 +81,7 @@ PY
             git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
           fi
 
-      # ---------- Render auto-deploy ----------
+      # Trigger Render deploy so the dashboard updates
       - name: Trigger Render deploy (backend-1)
         if: ${{ success() }}
         env:
