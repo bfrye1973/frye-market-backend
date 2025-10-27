@@ -1,27 +1,25 @@
-name: dashboard-daily
+name: dashboard-eod
 
 on:
   workflow_dispatch: {}
   schedule:
-    # Runs at 8:00 PM UTC (4 PM ET) — adjust as needed
-    - cron: "0 20 * * 1-5"
+    # Run once daily at 9:10 PM UTC (≈ 4:10 PM ET / 1:10 PM PT)
+    - cron: '10 21 * * 1-5'
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  daily:
-    name: Build and Publish Daily (EOD)
+  build_and_publish_eod:
+    name: Build and Publish EOD
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     permissions:
       contents: write
-    concurrency:
-      group: dashboard-daily
-      cancel-in-progress: true
     env:
-      LIVE_BRANCH: data-live-daily
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-eod
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -29,6 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -39,31 +38,172 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          pip install requests
+          pip install requests python-dateutil
 
-      - name: Build daily payload
+      # 1) Build sectorCards source (daily)
+      - name: Build sectorCards source (daily)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
-          python -u scripts/make_dashboard_daily.py
-          echo "✔ Daily payload built."
+          mkdir -p data
+          python -u scripts/build_outlook_source_from_polygon.py --mode daily --out data/outlook_source.json
+          echo "[source] -------- data/outlook_source.json (first 60 lines) --------"
+          head -n 60 data/outlook_source.json || true
 
+      # 2) Normalize to ensure sectorCards exist
+      - name: Normalize sectorCards source
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          p="data/outlook_source.json"
+          j=json.load(open(p,"r",encoding="utf-8"))
+          cards=j.get("sectorCards") or []
+          if not cards and "groups" in j:
+            def pct(a,b): return 0.0 if b<=0 else 100.0*a/b
+            by={}
+            for k,g in j["groups"].items():
+              nh=int(g.get("nh",0)); nl=int(g.get("nl",0))
+              u=int(g.get("u",0));   d=int(g.get("d",0))
+              b=pct(nh,nh+nl); m=pct(u,u+d)
+              by[k.lower()]={"sector":k.title(),"breadth_pct":round(b,2),
+                             "momentum_pct":round(m,2),"nh":nh,"nl":nl,"up":u,"down":d}
+            cards=list(by.values())
+          json.dump({"sectorCards":cards},open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
+          print(f"[normalize] sectorCards={len(cards)}")
+          PY
+
+      - name: Validate sectorCards source
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          j=json.load(open("data/outlook_source.json"))
+          cards=j.get("sectorCards") or []
+          need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
+          if len(cards)!=11 or not all(k in cards[0] for k in need):
+            print(f"[sectors] INVALID source: cards={len(cards)} need={need}")
+            sys.exit(2)
+          print(f"[sectors] OK cards=11 | {cards[0]['sector']} breadth={cards[0]['breadth_pct']} momentum={cards[0]['momentum_pct']}")
+          PY
+
+      # 3) Build EOD payload (writes /live/eod file)
+      - name: Build EOD payload
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          python -u scripts/make_eod.py \
+            --source data/outlook_source.json \
+            --out    data/outlook.json
+
+      # 3.5) Mirror to legacy daily block (trendDaily.* and rotation.riskOnPct)
+      - name: Mirror to legacy daily block
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+
+          def band_vol(v):
+              if v is None: return None
+              return "high" if v >= 1.0 else ("elevated" if v >= 0.5 else "calm")
+
+          def band_liq(v):
+              if v is None: return None
+              return "good" if v >= 60 else ("normal" if v >= 40 else "light")
+
+          def num(x):
+              try:
+                  v=float(x)
+                  if v!=v: return None
+                  return v
+              except: return None
+
+          p="data/outlook.json"
+          j=json.load(open(p,"r",encoding="utf-8"))
+          m=j.get("metrics") or {}
+
+          t  = num(m.get("daily_trend_pct"))
+          p1 = num(m.get("participation_pct"))
+          sq = num(m.get("daily_squeeze_pct"))
+          v  = num(m.get("volatility_pct"))
+          li = num(m.get("liquidity_pct"))
+          ro = num(m.get("risk_on_daily_pct"))
+
+          trendDaily = j.get("trendDaily") or {}
+          trendDaily.setdefault("trend", {})
+          trendDaily.setdefault("participation", {})
+          trendDaily.setdefault("volatilityRegime", {})
+          trendDaily.setdefault("liquidityRegime", {})
+
+          if t is not None:  trendDaily["trend"]["emaSlope"] = t
+          if p1 is not None: trendDaily["participation"]["pctAboveMA"] = p1
+          if sq is not None:
+              j.setdefault("metrics", {})["squeeze_daily_pct"] = sq
+          if v is not None:
+              trendDaily["volatilityRegime"]["atrPct"] = v
+              b = band_vol(v)
+              if b: trendDaily["volatilityRegime"]["band"] = b
+          if li is not None:
+              trendDaily["liquidityRegime"]["psi"] = li
+              b = band_liq(li)
+              if b: trendDaily["liquidityRegime"]["band"] = b
+          if ro is not None:
+              rot=j.get("rotation") or {}
+              rot["riskOnPct"] = ro
+              j["rotation"] = rot
+
+          j["trendDaily"] = trendDaily
+          json.dump(j,open(p,"w",encoding="utf-8"),separators=(",",":"))
+          print("[eod-mirror] trendDaily keys:", list(trendDaily.keys()), " rotation:", j.get("rotation"))
+          PY
+
+      # 4) Write heartbeat
+      - name: Write heartbeat
+        run: |
+          set -euo pipefail
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_eod.txt
+
+      # 5) Stage artifacts
+      - name: Stage artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/eod
+          cp -f data/outlook.json       /tmp/eod/outlook.json
+          cp -f data/heartbeat_eod.txt  /tmp/eod/heartbeat_eod.txt
+
+      # 6) Prepare live branch
       - name: Prepare live branch
+        env:
+          LIVE_BRANCH: data-live-eod
         run: |
           set -euo pipefail
-          git config --global user.email "bot@ci.local"
-          git config --global user.name  "CI Bot"
-          git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}" || true
-          git checkout -B "${LIVE_BRANCH}" || git checkout "${LIVE_BRANCH}"
-
-      - name: Commit and push
-        run: |
-          set -euo pipefail
-          git add data/outlook_daily.json || true
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-          else:
-            git commit -m "daily feed: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            git push origin "${LIVE_BRANCH}" --force
+          git config user.name  "actions-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git reset --hard
+          git clean -fdx
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${LIVE_BRANCH}"
+            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
+          else
+            git checkout --orphan "${LIVE_BRANCH}"
           fi
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+          mkdir -p data
+          cp -f /tmp/eod/outlook.json       data/outlook.json
+          cp -f /tmp/eod/heartbeat_eod.txt  data/heartbeat_eod.txt
+
+      # 7) Commit and push live branch
+      - name: Commit and push live branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          LIVE_BRANCH: data-live-eod
+        run: |
+          set -euo pipefail
+          git add data
+          git commit -m "EOD live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin "${LIVE_BRANCH}" --force
+          echo "[push] ✅ Successfully pushed ${LIVE_BRANCH} to ${REPO}"
