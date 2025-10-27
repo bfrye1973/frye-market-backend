@@ -3,7 +3,7 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Optional: every 5 minutes, weekdays
+    # Weekdays every 5 minutes (covers AZ pre-open + RTH + a bit after)
     - cron: "*/5 12-23 * * 1-5"
 
 defaults:
@@ -41,15 +41,94 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
+      # 1) Build hourly sectorCards source (Polygon groups → outlook_source.json)
+      - name: Build sectorCards source (1h)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python -u scripts/build_outlook_source_from_polygon.py --mode hourly --out data/outlook_source.json || true
+          echo "[source:1h] -------- data/outlook_source.json (first 80 lines) --------"
+          head -n 80 data/outlook_source.json || true
+
+      # 2) Normalize source — accept groups OR sectorCards (no hard fail if empty)
+      - name: Normalize sectorCards source
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          p="data/outlook_source.json"
+          try:
+            j=json.load(open(p,"r",encoding="utf-8"))
+          except Exception:
+            j={}
+          if not isinstance(j,dict):
+            print("[normalize:1h] source missing/invalid — continuing without cards")
+            sys.exit(0)
+
+          # If a list of cards already exists, keep it
+          for key in ("sectorCards","sectors","cards"):
+            v=j.get(key)
+            if isinstance(v,list):
+              print(f"[normalize:1h] found list '{key}' len={len(v)}")
+              sys.exit(0)
+
+          # Else convert groups → sectorCards
+          groups = j.get("groups") or {}
+          ORDER=["information technology","materials","health care","communication services","real estate",
+                 "energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
+          alias={"healthcare":"health care","health-care":"health care","info tech":"information technology",
+                 "technology":"information technology","tech":"information technology",
+                 "communications":"communication services","comm":"communication services",
+                 "staples":"consumer staples","discretionary":"consumer discretionary"}
+          def norm(s): return (s or "").strip().lower()
+          by={}
+          for name,g in groups.items():
+            k=alias.get(norm(name), norm(name))
+            nh=int((g or {}).get("nh",0)); nl=int((g or {}).get("nl",0))
+            up=int((g or {}).get("up",0));  dn=int((g or {}).get("down",0))
+            b = 0.0 if (nh+nl)==0 else round(100.0*nh/(nh+nl),2)
+            m = 0.0 if (up+dn)==0 else round(100.0*up/(up+dn),2)
+            by[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
+          cards=[ by.get(x,{"sector":x.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for x in ORDER ]
+          json.dump({"sectorCards":cards}, open(p,"w",encoding="utf-8"), separators=(",",":"))
+          print(f"[normalize:1h] converted groups→sectorCards len={len(cards)}")
+          PY
+
+      # 3) Build hourly payload (reads normalized source if present)
       - name: Build hourly payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/make_dashboard_hourly.py --out data/outlook_hourly.json
+          python -u scripts/make_dashboard_hourly.py \
+            --source data/outlook_source.json \
+            --out    data/outlook_hourly.json
           echo "✔ Built data/outlook_hourly.json"
 
+      # 4) Finalize v1-hourly (enforce & mirror) + quick snapshot
+      - name: Finalize v1-hourly (enforce & mirror)
+        run: |
+          set -euo pipefail
+          python -u scripts/finalize_hourly_v1.py --in data/outlook_hourly.json --out data/outlook_hourly.json
+          python - <<'PY'
+          import json
+          j=json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
+          m=j.get("metrics",{}); h=j.get("hourly",{})
+          snap={
+            "breadth_1h": m.get("breadth_1h_pct"),
+            "momentum_combo_1h": m.get("momentum_combo_1h_pct"),
+            "squeeze_1h": m.get("squeeze_1h_pct"),
+            "liq_1h": m.get("liquidity_1h"),
+            "overall1h": h.get("overall1h"),
+            "cards_len": len((j.get("sectorCards") or []))
+          }
+          print("[snapshot:1h]", snap)
+          PY
+
+      # 5) Compute Lux strategy (1h) — keeps your latest logic
       - name: Compute Lux strategy (1h)
         run: |
           set -euo pipefail
@@ -91,30 +170,33 @@ jobs:
           print("[strategy-1h]", j["strategy"]["trend1h"])
           PY
 
+      # 6) Write heartbeat (hourly)
       - name: Write heartbeat
         run: |
           set -euo pipefail
-          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_hourly.txt
           echo "Heartbeat written."
 
+      # 7) Prepare git identity
       - name: Prepare git identity
         run: |
           set -euo pipefail
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
 
-      # ✅ SAFE PUBLISH: push current HEAD to remote live branch (works in detached HEAD)
+      # 8) Commit and push (safe for detached HEAD)
       - name: Commit and push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          git add data/outlook_hourly.json data/heartbeat_1h || true
+          git add data/outlook_hourly.json data/heartbeat_hourly.txt || true
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else:
             git commit -m "hourly feed: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
             git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
+            echo "[push] ✅ Successfully pushed ${LIVE_BRANCH} to ${REPO}"
           fi
