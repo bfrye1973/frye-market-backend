@@ -24,6 +24,11 @@ jobs:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
+      # ---------------------------------------------
+      # Enable 1h intraday sector counts (lookback L = 3 bars)
+      FD_HOURLY_INTRADAY: "true"
+      FD_HOURLY_LOOKBACK: "3"
+      # ---------------------------------------------
 
     steps:
       # ---------------- Market-hours guard (AZ) ----------------
@@ -68,7 +73,37 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # 1) Build hourly payload
+      # 1) Build hourly source (groups {nh,nl,u,d} by sector)
+      - name: Build sectorCards source (1h)
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python -u scripts/build_outlook_source_from_polygon.py --mode hourly --out data/outlook_source.json
+          echo "----- RAW SOURCE (first 80 lines) -----"
+          head -n 80 data/outlook_source.json || true
+
+      # 2) Normalize / validate source
+      - name: Normalize sector source
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          p="data/outlook_source.json"
+          try:
+            j=json.load(open(p,"r",encoding="utf-8"))
+          except Exception:
+            print("[normalize] missing outlook_source.json"); sys.exit(2)
+          ok = isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)
+          if not ok:
+            print("[normalize] INVALID source: missing groups/sectorCards"); sys.exit(2)
+          print("[normalize] OK")
+          PY
+
+      # 3) Compose /live/hourly from source
       - name: Build hourly payload
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
@@ -76,18 +111,38 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/make_dashboard_hourly.py --out data/outlook_hourly.json
+          # NOTE: pass the source; do not pass --mode
+          python -u scripts/make_dashboard_hourly.py \
+            --source data/outlook_source.json \
+            --out data/outlook_hourly.json
           echo "✔ Built data/outlook_hourly.json"
           head -n 40 data/outlook_hourly.json || true
 
-      # 2) Compute Lux strategy (1h)
+      # 3.5) Validate sectorCards presence
+      - name: Validate hourly sectorCards
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          j=json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
+          cards=j.get("sectorCards") or []
+          need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
+          ok=(len(cards)==11 and all(k in (cards[0] if cards else {}) for k in need))
+          if not ok:
+            print("[hourly] sectorCards missing or invalid. Found:", len(cards))
+            sys.exit(2)
+          print("[hourly] sectorCards OK:", len(cards))
+          PY
+
+      # 4) Compute Lux strategy (1h)
       - name: Compute Lux strategy (1h)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python -u scripts/compute_trend_hourly.py
 
-      # 2.5) NEW — Always-on state pills (1h)
+      # 4.5) NEW — Always-on state pills (1h)
       - name: Update pills (1h always-on state)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
@@ -96,7 +151,7 @@ jobs:
           set -euo pipefail
           python -u scripts/update_pills_1h_state.py
 
-      # 3) Write heartbeat
+      # 5) Write heartbeat
       - name: Write heartbeat
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
@@ -104,7 +159,7 @@ jobs:
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
           echo "Heartbeat written."
 
-      # 4) Prepare git identity
+      # 6) Prepare git identity
       - name: Prepare git identity
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
@@ -112,7 +167,7 @@ jobs:
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
 
-      # 5) Commit and push (detached-HEAD safe)
+      # 7) Commit and push (detached-HEAD safe)
       - name: Commit and push
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
@@ -130,7 +185,7 @@ jobs:
             git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
           fi
 
-      # 6) Trigger Render deploy (optional)
+      # 8) Trigger Render deploy (optional)
       - name: Trigger Render deploy (backend-1)
         if: ${{ steps.market_hours.outputs.run == 'true' && success() }}
         env:
