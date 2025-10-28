@@ -3,7 +3,7 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 5 minutes on weekdays; guard below limits work to 04:00–18:59 AZ
+    # Every 5 minutes on weekdays; guard limits to 04:00–18:59 AZ
     - cron: "*/5 * * * 1-5"
 
 defaults:
@@ -26,49 +26,25 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
-      # --------------------------------------------------------------------
-      # Market-hours guard (America/Phoenix)
-      # Allow PRE + RTH + AFTER-HOURS on weekdays: 04:00–18:59 AZ
-      # (Cron already 1-5; this enforces the window.)
-      # --------------------------------------------------------------------
       - name: Market hours guard (AZ)
         id: market_hours
         run: |
           TZ="America/Phoenix"
-          DOW=$(TZ=$TZ date +'%u')   # 1=Mon .. 7=Sun
-          HOUR=$(TZ=$TZ date +'%H')  # 00..23
-
-          echo "AZ Date: $(TZ=$TZ date)"
-          echo "DOW=$DOW HOUR=$HOUR"
-
-          # Weekend safety (cron already filters Mon–Fri)
-          if [ "$DOW" -ge 6 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ Weekend — skipping."
-            exit 0
-          fi
-
-          # Allow 04:00–18:59 AZ (pre + RTH + after-hours)
-          if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ Outside extended hours — skipping."
-            exit 0
-          fi
-
-          echo "run=true" >> "$GITHUB_OUTPUT"
-          echo "✅ Within extended hours — continuing."
+          DOW=$(TZ=$TZ date +'%u'); HOUR=$(TZ=$TZ date +'%H')
+          echo "AZ Date: $(TZ=$TZ date)"; echo "DOW=$DOW HOUR=$HOUR"
+          if [ "$DOW" -ge 6 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; echo "⏸ Weekend — skipping."; exit 0; fi
+          if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; echo "⏸ Outside extended hours — skipping."; exit 0; fi
+          echo "run=true" >> "$GITHUB_OUTPUT"; echo "✅ Within extended hours — continuing."
 
       - name: Checkout
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+        with: { fetch-depth: 1 }
 
       - name: Setup Python
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+        with: { python-version: "3.11" }
 
       - name: Install deps
         if: ${{ steps.market_hours.outputs.run == 'true' }}
@@ -77,33 +53,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # Build the hourly payload (single, stable call)
       - name: Build hourly payload
         if: ${{ steps.market_hours.outputs.run == 'true' }}
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        env: { POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }} }
         run: |
           set -euo pipefail
           mkdir -p data
           python -u scripts/make_dashboard_hourly.py --out data/outlook_hourly.json
-          echo "✔ Built data/outlook_hourly.json"
           head -n 40 data/outlook_hourly.json || true
 
-      - name: Write heartbeat
+      - name: Compute Lux strategy (1h)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
-          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
-          echo "Heartbeat written."
+          python -u scripts/compute_trend_hourly.py
+
+      - name: Write heartbeat
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
 
       - name: Prepare git identity
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
-          set -euo pipefail
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
 
-      # SAFE PUBLISH (detached-HEAD proof + token remote)
       - name: Commit and push
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
@@ -121,19 +95,12 @@ jobs:
             git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
           fi
 
-      # Trigger Render deploy so the dashboard updates
       - name: Trigger Render deploy (backend-1)
         if: ${{ steps.market_hours.outputs.run == 'true' && success() }}
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
+        env: { RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }} }
         run: |
           set -euo pipefail
-          if [ -n "${RENDER_DEPLOY_HOOK:-}" ]; then
-            echo "Triggering Render deploy..."
-            curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
-          else
-            echo "No Render deploy hook configured. Skipping."
-          fi
+          if [ -n "${RENDER_DEPLOY_HOOK:-}" ]; then curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"; else echo "No Render hook, skipping."; fi
 
       - name: Done
         if: ${{ steps.market_hours.outputs.run == 'true' }}
