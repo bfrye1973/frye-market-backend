@@ -3,7 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 7 minutes on weekdays (guard below limits the actual window to 04:00–18:59 AZ)
+    # Every 7 minutes on weekdays; guard limits to 04:00–18:59 AZ
     - cron: "*/7 * * * 1-5"
 
 defaults:
@@ -26,49 +26,30 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
-      # --------------------------------------------------------------------
-      # Market-hours guard (America/Phoenix)
+      # ---------------- Market-hours guard (AZ) ----------------
       # Allow PRE + RTH + AFTER-HOURS on weekdays: 04:00–18:59 AZ
-      # (Skips weekends automatically via cron; this guard enforces the window.)
-      # --------------------------------------------------------------------
       - name: Market hours guard (AZ)
         id: market_hours
         run: |
           TZ="America/Phoenix"
-          DOW=$(TZ=$TZ date +'%u')   # 1=Mon .. 7=Sun
+          DOW=$(TZ=$TZ date +'%u')   # 1..7
           HOUR=$(TZ=$TZ date +'%H')  # 00..23
-
-          echo "AZ Date: $(TZ=$TZ date)"
-          echo "DOW=$DOW HOUR=$HOUR"
-
-          # Weekend? (extra safety; cron already restricts to 1-5)
+          echo "AZ Date: $(TZ=$TZ date)"; echo "DOW=$DOW HOUR=$HOUR"
           if [ "$DOW" -ge 6 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ Weekend — skipping."
-            exit 0
-          fi
-
-          # Allow 04:00–18:59 AZ (pre + RTH + after-hours)
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "⏸ Weekend — skipping."; exit 0; fi
           if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ Outside extended hours — skipping."
-            exit 0
-          fi
-
-          echo "run=true" >> "$GITHUB_OUTPUT"
-          echo "✅ Within extended hours — continuing."
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "⏸ Outside extended hours — skipping."; exit 0; fi
+          echo "run=true" >> "$GITHUB_OUTPUT"; echo "✅ Within extended hours — continuing."
 
       - name: Checkout
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+        with: { fetch-depth: 1 }
 
       - name: Setup Python
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+        with: { python-version: "3.11" }
 
       - name: Install deps
         if: ${{ steps.market_hours.outputs.run == 'true' }}
@@ -80,44 +61,33 @@ jobs:
       # 1) Build sector source (groups {nh,nl,u,d} by sector)
       - name: Build sectorCards source (10m)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        env: { POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }} }
         run: |
           set -euo pipefail
           mkdir -p data
           python -u scripts/build_outlook_source_from_polygon.py --mode intraday10 --out data/outlook_source.json
-          echo "----- RAW SOURCE (first 80 lines) -----"
           head -n 80 data/outlook_source.json || true
-          # keep a backup for card repair after dashboard build
           cp -f data/outlook_source.json /tmp/source_backup.json
 
-      # 2) Normalize source to a guaranteed schema if needed
-      - name: Normalize sector source (ensure groups or sectorCards exist)
+      # 2) Normalize (ensure groups or sectorCards)
+      - name: Normalize sector source
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python - <<'PY'
           import json,sys
           p="data/outlook_source.json"
-          try:
-            j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception:
-            print("[normalize] missing source"); sys.exit(2)
-
+          try: j=json.load(open(p,"r",encoding="utf-8"))
+          except Exception: print("[normalize] missing source"); sys.exit(2)
           ok = isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)
-          if not ok:
-            print("[normalize] INVALID source: missing groups/sectorCards"); sys.exit(2)
-
-          # nothing else to do; make_dashboard.py handles groups→sectorCards now
-          print("[normalize] OK groups=", isinstance(j.get("groups"),dict),
-                " sectorCards=", isinstance(j.get("sectorCards"),list))
+          if not ok: print("[normalize] INVALID source: missing groups/sectorCards"); sys.exit(2)
+          print("[normalize] OK")
           PY
 
-      # 3) Build intraday with the source you just created
-      - name: Build intraday payload (uses source)
+      # 3) Build intraday
+      - name: Build intraday payload
         if: ${{ steps.market_hours.outputs.run == 'true' }}
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        env: { POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }} }
         run: |
           set -euo pipefail
           python -u scripts/make_dashboard.py \
@@ -125,82 +95,57 @@ jobs:
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
 
-      # 4) Post-build validator + auto-repair
-      - name: Validate/Repair intraday sectorCards (fail in RTH if still bad)
+      # 3.5) Compute Lux trend (10m)
+      - name: Compute Lux strategy (10m)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
-          echo "[post] validating sectorCards in data/outlook_intraday.json"
+          python -u scripts/compute_trend10m.py
+
+      # 4) Validate/Repair sectorCards (len=11, non-zero totals)
+      - name: Validate/Repair intraday sectorCards
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: |
+          set -euo pipefail
           python - <<'PY'
-          import json,sys,os,datetime
-
-          def loadp(p):
-            try: return json.load(open(p,"r",encoding="utf-8"))
-            except: return {}
-
+          import json,sys,datetime
+          def loadp(p): 
+              try: return json.load(open(p,"r",encoding="utf-8"))
+              except: return {}
           intraday = loadp("data/outlook_intraday.json")
           cards = intraday.get("sectorCards") or []
-
-          def totals(cards):
-            return sum( (c.get("nh",0)+c.get("nl",0)+c.get("up",0)+c.get("down",0)) for c in cards )
-
-          need = ("sector","breadth_pct","momentum_pct","nh","nl","up","down")
-          good_schema = (len(cards)==11 and all(k in (cards[0] if cards else {}) for k in need))
-          nonzero = totals(cards) > 0
-
-          if good_schema and nonzero:
-            print("[post] sectorCards OK: len=11 totals=", totals(cards))
-            sys.exit(0)
-
-          print("[post] sectorCards need repair: len=", len(cards), " nonzero=", nonzero, " schemaOK=", good_schema)
-
-          # try to rebuild from source_backup (groups→sectorCards)
-          src = loadp("/tmp/source_backup.json")
-          groups = src.get("groups") or {}
-          order = [
-            "information technology","materials","health care","communication services",
-            "real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials",
-          ]
-          alias = {
-            "healthcare":"health care","health-care":"health care",
-            "info tech":"information technology","technology":"information technology","tech":"information technology",
-            "communications":"communication services","comm services":"communication services","telecom":"communication services",
-            "staples":"consumer staples","discretionary":"consumer discretionary",
-            "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
-          }
+          need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
+          ok_schema = len(cards)==11 and all(k in (cards[0] if cards else {}) for k in need)
+          totals = sum((c.get("nh",0)+c.get("nl",0)+c.get("up",0)+c.get("down",0)) for c in cards)
+          if ok_schema and totals>0:
+              print("[post] sectorCards OK len=11 totals=",totals); sys.exit(0)
+          print("[post] invalid cards, attempting repair...")
+          src = loadp("/tmp/source_backup.json"); groups = src.get("groups") or {}
+          order = ["information technology","materials","health care","communication services","real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
+          alias = {"healthcare":"health care","health-care":"health care","info tech":"information technology","technology":"information technology","tech":"information technology","communications":"communication services","comm services":"communication services","telecom":"communication services","staples":"consumer staples","discretionary":"consumer discretionary","finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",}
           def norm(s): return (s or "").strip().lower()
-          def canon(n): n=norm(n); return alias.get(n,n)
           by={}
-          for name,g in (groups or {}).items():
-            k = canon(name)
-            nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
-            b = 0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
-            m = 0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
-            by[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
-          new_cards=[]
-          for name in order:
-            new_cards.append(by.get(name, {"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}))
-
+          for name,g in groups.items():
+              k=alias.get(norm(name),norm(name))
+              nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
+              b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
+              m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
+              by[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
+          new_cards=[by.get(n,{"sector":n.title(),"breadth_pct":0,"momentum_pct":0,"nh":0,"nl":0,"up":0,"down":0}) for n in order]
           if len(new_cards)==11 and sum(c["nh"]+c["nl"]+c["up"]+c["down"] for c in new_cards)>0:
-            intraday["sectorCards"]=new_cards
-            json.dump(intraday, open("data/outlook_intraday.json","w",encoding="utf-8"), separators=(",",":"))
-            print("[post] repair applied: totals=", sum(c["nh"]+c["nl"]+c["up"]+c["down"] for c in new_cards))
-            sys.exit(0)
-
-          # final guard: during RTH (≈ 06:30–13:00 AZ), fail if still bad
-          now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-7)))  # America/Phoenix offset
-          rth = (now.weekday() < 5) and ((now.hour>6 and now.hour<13) or (now.hour==6 and now.minute>=30))
-          if rth:
-            print("[post] ERROR: sectorCards invalid during RTH; refusing to publish")
-            sys.exit(2)
-          print("[post] After-hours: keeping file even if cards are blank (UI shows neutral)")
+              intraday["sectorCards"]=new_cards
+              json.dump(intraday,open("data/outlook_intraday.json","w",encoding="utf-8"),separators=(",",":"))
+              print("[post] repair applied"); sys.exit(0)
+          # During RTH (≈06:30–13:00 AZ), fail if still bad
+          now=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-7)))
+          rth=(now.weekday()<5) and ((now.hour>6 and now.hour<13) or (now.hour==6 and now.minute>=30))
+          if rth: print("[post] ERROR during RTH"); sys.exit(2)
+          print("[post] after-hours: keep file even if neutral")
           PY
 
       - name: Write heartbeat
         if: ${{ steps.market_hours.outputs.run == 'true' }}
-        run: |
-          set -euo pipefail
-          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
+        run: date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
       - name: Stage artifacts
         if: ${{ steps.market_hours.outputs.run == 'true' }}
@@ -216,19 +161,14 @@ jobs:
           set -euo pipefail
           git config user.name "actions-bot"
           git config user.email "bot@users.noreply.github.com"
-
-          git reset --hard
-          git clean -fdx
-
-          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/div/null 2>&1; then
+          git reset --hard && git clean -fdx
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git fetch origin "${LIVE_BRANCH}"
             git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
           else
             git checkout --orphan "${LIVE_BRANCH}"
           fi
-
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-
           mkdir -p data
           cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
           cp -f /tmp/live10/heartbeat_10min.txt data/heartbeat_10min.txt
