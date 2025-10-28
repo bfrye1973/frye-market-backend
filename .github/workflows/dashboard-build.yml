@@ -1,0 +1,54 @@
+name: validate-build-scripts
+
+on:
+  # Run manually from the Actions tab when needed
+  workflow_dispatch: {}
+  # Or run automatically when these files change
+  push:
+    paths:
+      - "scripts/make_dashboard.py"
+      - "scripts/make_eod.py"
+      - ".github/workflows/dashboard-build.yml"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint_and_compile:
+    name: Python syntax check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Upgrade pip
+        run: |
+          python -m pip install --upgrade pip
+
+      - name: Syntax check (py_compile)
+        run: |
+          set -euo pipefail
+          FILES=()
+          [[ -f scripts/make_dashboard.py ]] && FILES+=("scripts/make_dashboard.py")
+          [[ -f scripts/make_eod.py       ]] && FILES+=("scripts/make_eod.py")
+          if [[ ${#FILES[@]} -eq 0 ]]; then
+            echo "No target files found to compile."
+            exit 0
+          fi
+          python - <<'PY' "${FILES[@]}"
+          import sys, py_compile
+          for f in sys.argv[1:]:
+              print(f"Compiling {f} …")
+              py_compile.compile(f, doraise=True)
+          print("✅ All files compiled OK")
+          PY

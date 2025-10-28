@@ -1,0 +1,99 @@
+name: dashboard-hourly
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Run every 5 minutes during US trading day (UTC 12–23, Mon–Fri)
+    - cron: "*/5 12-23 * * 1-5"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  hourly:
+    name: Build and Publish Hourly (1h)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    concurrency:
+      group: dashboard-hourly
+      cancel-in-progress: false
+    env:
+      LIVE_BRANCH: data-live-hourly
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install requests python-dateutil
+
+      # Build the hourly payload (no heredocs; single, stable call)
+      - name: Build hourly payload
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python -u scripts/make_dashboard_hourly.py --out data/outlook_hourly.json
+          echo "✔ Built data/outlook_hourly.json"
+          head -n 40 data/outlook_hourly.json || true
+
+      - name: Write heartbeat
+        run: |
+          set -euo pipefail
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
+          echo "Heartbeat written."
+
+      - name: Prepare git identity
+        run: |
+          set -euo pipefail
+          git config user.email "bot@ci.local"
+          git config user.name  "CI Bot"
+
+      # SAFE PUBLISH (detached-HEAD proof + token remote)
+      - name: Commit and push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
+        run: |
+          set -euo pipefail
+          git add data/outlook_hourly.json data/heartbeat_1h || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "hourly feed: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+            git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
+          fi
+
+      # Trigger Render deploy so the dashboard updates
+      - name: Trigger Render deploy (backend-1)
+        if: ${{ success() }}
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RENDER_DEPLOY_HOOK:-}" ]; then
+            echo "Triggering Render deploy..."
+            curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
+          else
+            echo "No Render deploy hook configured. Skipping."
+          fi
+
+      - name: Done
+        run: echo "Hourly deploy complete"
