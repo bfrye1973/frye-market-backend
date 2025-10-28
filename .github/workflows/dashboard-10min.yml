@@ -119,6 +119,15 @@ jobs:
           set -euo pipefail
           python -u scripts/compute_trend10m.py
 
+      # 3.6) NEW — Always-on state pills (10m)
+      - name: Update pills (10m always-on state)
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        env:
+          INTRADAY_URL: https://frye-market-backend-1.onrender.com/live/intraday
+        run: |
+          set -euo pipefail
+          python -u scripts/update_pills_10m_state.py
+
       # 4) Post-build validator + auto-repair
       - name: Validate/Repair intraday sectorCards
         if: ${{ steps.market_hours.outputs.run == 'true' }}
