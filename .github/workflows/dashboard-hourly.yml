@@ -87,6 +87,15 @@ jobs:
           set -euo pipefail
           python -u scripts/compute_trend_hourly.py
 
+      # 2.5) NEW — Always-on state pills (1h)
+      - name: Update pills (1h always-on state)
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        env:
+          HOURLY_URL: https://frye-market-backend-1.onrender.com/live/hourly
+        run: |
+          set -euo pipefail
+          python -u scripts/update_pills_1h_state.py
+
       # 3) Write heartbeat
       - name: Write heartbeat
         if: ${{ steps.market_hours.outputs.run == 'true' }}
