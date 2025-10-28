@@ -24,6 +24,12 @@ jobs:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
+      # ---------------------------------------------
+      # Enable fast intraday sector counts for scalping
+      # NH/NL/U/D computed from today's completed 10m bars (lookback L=3)
+      FD_SCALPER_ENABLE: "true"
+      FD_SCALPER_LOOKBACK: "3"
+      # ---------------------------------------------
 
     steps:
       # ---------------- Market-hours guard (AZ) ----------------
@@ -107,8 +113,8 @@ jobs:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
+          # NOTE: do not pass --mode; v6+ make_dashboard.py ignores it
           python -u scripts/make_dashboard.py \
-            --mode intraday \
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
 
