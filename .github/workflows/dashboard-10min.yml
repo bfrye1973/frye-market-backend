@@ -19,7 +19,7 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: true
+      cancel-in-progress: false
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
