@@ -19,7 +19,7 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false
+      cancel-in-progress: true   # <-- no overlap (biggest win)
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
@@ -29,6 +29,8 @@ jobs:
       # NH/NL/U/D computed from today's completed 10m bars (lookback L=3)
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
+      # Moderate parallelism for source builder (tune 16–24)
+      FD_MAX_WORKERS: "20"
       # ---------------------------------------------
 
     steps:
@@ -211,10 +213,19 @@ jobs:
           cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
           cp -f /tmp/live10/heartbeat_10min.txt data/heartbeat_10min.txt
 
-      - name: Commit and push live branch
+      - name: Commit and push live branch (safe)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
           set -euo pipefail
           git add data
           git commit -m "10m live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-          git push origin "${LIVE_BRANCH}" --force
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
+
+      - name: Done
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: echo "10m deploy complete"
