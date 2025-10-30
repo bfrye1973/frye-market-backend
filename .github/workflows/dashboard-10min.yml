@@ -19,25 +19,46 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: true   # <-- no overlap (biggest win)
+      cancel-in-progress: false           # queue; don't cancel
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
-      # ---------------------------------------------
-      # Enable fast intraday sector counts for scalping
-      # NH/NL/U/D computed from today's completed 10m bars (lookback L=3)
+      # scalper: fast intraday counts (today-only, short lookback)
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
-      # Moderate parallelism for source builder (tune 16–24)
+      # moderate parallelism for builder (tune 16–24)
       FD_MAX_WORKERS: "20"
-      # ---------------------------------------------
 
     steps:
+      # ---------------- Freshness guard (skip if last < 8m) ----------------
+      - name: Freshness guard (skip if last < 8m)
+        id: fresh
+        run: |
+          set -e
+          LIVE="https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/heartbeat_10min.txt"
+          mkdir -p /tmp/live10
+          if curl -sL "${LIVE}?t=$(date +%s)" -o /tmp/live10/hb.txt; then
+            if [ -s /tmp/live10/hb.txt ]; then
+              LAST=$(date -u -d "$(cat /tmp/live10/hb.txt)" +%s 2>/dev/null || echo 0)
+              NOW=$(date -u +%s)
+              AGE=$((NOW-LAST))
+              echo "last heartbeat age: ${AGE}s"
+              if [ "$AGE" -lt 480 ]; then
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                echo "⏸ Last publish < 8m ago — skipping."
+                exit 0
+              fi
+            fi
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "✅ No recent publish — continue."
+
       # ---------------- Market-hours guard (AZ) ----------------
       # Allow PRE + RTH + AFTER-HOURS on weekdays: 04:00–18:59 AZ
       - name: Market hours guard (AZ)
         id: market_hours
+        if: ${{ steps.fresh.outputs.skip != 'true' }}
         run: |
           TZ="America/Phoenix"
           DOW=$(TZ=$TZ date +'%u')   # 1..7
@@ -58,19 +79,19 @@ jobs:
           echo "✅ Within extended hours — continuing."
 
       - name: Checkout
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Setup Python
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install deps
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
@@ -78,7 +99,7 @@ jobs:
 
       # 1) Build sector source (groups {nh,nl,u,d} by sector)
       - name: Build sectorCards source (10m)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -92,7 +113,7 @@ jobs:
 
       # 2) Normalize source to a guaranteed schema if needed
       - name: Normalize sector source
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -110,7 +131,7 @@ jobs:
 
       # 3) Build intraday with the source you just created
       - name: Build intraday payload
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -122,14 +143,14 @@ jobs:
 
       # 3.5) Compute Lux trend (10m)
       - name: Compute Lux strategy (10m)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python -u scripts/compute_trend10m.py
 
       # 3.6) NEW — Always-on state pills (10m)
       - name: Update pills (10m always-on state)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         env:
           INTRADAY_URL: https://frye-market-backend-1.onrender.com/live/intraday
         run: |
@@ -138,7 +159,7 @@ jobs:
 
       # 4) Post-build validator + auto-repair
       - name: Validate/Repair intraday sectorCards
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           echo "[post] validating sectorCards in data/outlook_intraday.json"
@@ -181,13 +202,13 @@ jobs:
           PY
 
       - name: Write heartbeat
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
       - name: Stage artifacts
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/live10
@@ -195,7 +216,7 @@ jobs:
           cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
 
       - name: Prepare live branch
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           git config user.name "actions-bot"
@@ -214,7 +235,7 @@ jobs:
           cp -f /tmp/live10/heartbeat_10min.txt data/heartbeat_10min.txt
 
       - name: Commit and push live branch (safe)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -227,5 +248,5 @@ jobs:
           git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
 
       - name: Done
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
         run: echo "10m deploy complete"
