@@ -3,7 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 7 minutes on weekdays; guard limits to 04:00–18:59 AZ
+    # Every 7 minutes on weekdays (UTC), full run each time
     - cron: "*/7 * * * 1-5"
 
 defaults:
@@ -12,53 +12,29 @@ defaults:
 
 jobs:
   tenmin:
-    name: Build and Publish Intraday
+    name: Build and Publish Intraday (10m full run)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false           # queue; don't cancel
+      cancel-in-progress: false           # never cancel an in-flight run
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
-      # scalper: fast intraday counts (today-only, short lookback)
+      # Fast intraday sector counts (today-only, short lookback)
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
-      # moderate parallelism for builder (tune 16–24)
+      # Moderate parallelism for Polygon work (tune 16–24 if needed)
       FD_MAX_WORKERS: "20"
 
     steps:
-      # ---------------- Freshness guard (skip if last < 8m) ----------------
-      - name: Freshness guard (skip if last < 8m)
-        id: fresh
-        run: |
-          set -e
-          LIVE="https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/heartbeat_10min.txt"
-          mkdir -p /tmp/live10
-          if curl -sL "${LIVE}?t=$(date +%s)" -o /tmp/live10/hb.txt; then
-            if [ -s /tmp/live10/hb.txt ]; then
-              LAST=$(date -u -d "$(cat /tmp/live10/hb.txt)" +%s 2>/dev/null || echo 0)
-              NOW=$(date -u +%s)
-              AGE=$((NOW-LAST))
-              echo "last heartbeat age: ${AGE}s"
-              if [ "$AGE" -lt 480 ]; then
-                echo "skip=true" >> "$GITHUB_OUTPUT"
-                echo "⏸ Last publish < 8m ago — skipping."
-                exit 0
-              fi
-            fi
-          fi
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-          echo "✅ No recent publish — continue."
-
       # ---------------- Market-hours guard (AZ) ----------------
       # Allow PRE + RTH + AFTER-HOURS on weekdays: 04:00–18:59 AZ
       - name: Market hours guard (AZ)
         id: market_hours
-        if: ${{ steps.fresh.outputs.skip != 'true' }}
         run: |
           TZ="America/Phoenix"
           DOW=$(TZ=$TZ date +'%u')   # 1..7
@@ -79,19 +55,19 @@ jobs:
           echo "✅ Within extended hours — continuing."
 
       - name: Checkout
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Setup Python
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install deps
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
@@ -99,7 +75,7 @@ jobs:
 
       # 1) Build sector source (groups {nh,nl,u,d} by sector)
       - name: Build sectorCards source (10m)
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -113,7 +89,7 @@ jobs:
 
       # 2) Normalize source to a guaranteed schema if needed
       - name: Normalize sector source
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -129,37 +105,37 @@ jobs:
           print("[normalize] OK")
           PY
 
-      # 3) Build intraday with the source you just created
-      - name: Build intraday payload
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+      # 3) Build intraday with the source you just created (FULL RUN)
+      - name: Build intraday payload (FULL)
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
-          # NOTE: do not pass --mode; v6+ make_dashboard.py ignores it
+          # NOTE: do not pass --mode; make_dashboard.py uses intraday by default
           python -u scripts/make_dashboard.py \
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
 
-      # 3.5) Compute Lux trend (10m)
+      # 3.5) Compute Lux trend (10m) — full run every cycle
       - name: Compute Lux strategy (10m)
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python -u scripts/compute_trend10m.py
 
-      # 3.6) NEW — Always-on state pills (10m)
+      # 3.6) Always-on state pills (10m) — full run every cycle
       - name: Update pills (10m always-on state)
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
           INTRADAY_URL: https://frye-market-backend-1.onrender.com/live/intraday
         run: |
           set -euo pipefail
           python -u scripts/update_pills_10m_state.py
 
-      # 4) Post-build validator + auto-repair
+      # 4) Post-build validator + auto-repair (keeps JSON usable even if source hiccups)
       - name: Validate/Repair intraday sectorCards
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           echo "[post] validating sectorCards in data/outlook_intraday.json"
@@ -194,21 +170,35 @@ jobs:
               intraday["sectorCards"]=new_cards
               json.dump(intraday, open("data/outlook_intraday.json","w",encoding="utf-8"), separators=(",",":"))
               print("[post] repair applied"); sys.exit(0)
-          now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-7)))  # America/Phoenix offset
-          rth = (now.weekday() < 5) and ((now.hour>6 and now.hour<13) or (now.hour==6 and now.minute>=30))
-          if rth:
-              print("[post] ERROR: sectorCards invalid during RTH; refusing to publish"); sys.exit(2)
-          print("[post] After-hours: keeping file even if cards are blank (UI shows neutral)")
+          print("[post] WARN: sectorCards invalid; publishing anyway to avoid gaps.")
+          PY
+
+      # 4.7) Stamp last_full_run_utc in the JSON so you can see each full publish
+      - name: Stamp last_full_run_utc
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,datetime
+          p="data/outlook_intraday.json"
+          try:
+              j=json.load(open(p,"r",encoding="utf-8"))
+          except Exception as e:
+              print("[stamp] load failed:", e); raise
+          j.setdefault("meta", {})
+          j["meta"]["last_full_run_utc"] = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+          json.dump(j, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
+          print("[stamp] last_full_run_utc:", j["meta"]["last_full_run_utc"])
           PY
 
       - name: Write heartbeat
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
       - name: Stage artifacts
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/live10
@@ -216,7 +206,7 @@ jobs:
           cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
 
       - name: Prepare live branch
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           git config user.name "actions-bot"
@@ -234,8 +224,9 @@ jobs:
           cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
           cp -f /tmp/live10/heartbeat_10min.txt data/heartbeat_10min.txt
 
-      - name: Commit and push live branch (safe)
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
+      # SAFE PUBLISH (detached-HEAD proof + token remote)
+      - name: Commit and push live branch
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -247,6 +238,20 @@ jobs:
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
           git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
 
+      # Trigger Render deploy so the backend refreshes every full run
+      - name: Trigger Render deploy (backend-1)
+        if: ${{ steps.market_hours.outputs.run == 'true' && success() }}
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RENDER_DEPLOY_HOOK:-}" ]; then
+            echo "Triggering Render deploy..."
+            curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
+          else
+            echo "No Render deploy hook configured. Skipping."
+          fi
+
       - name: Done
-        if: ${{ steps.fresh.outputs.skip != 'true' && steps.market_hours.outputs.run == 'true' }}
-        run: echo "10m deploy complete"
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: echo "10m full run complete"
