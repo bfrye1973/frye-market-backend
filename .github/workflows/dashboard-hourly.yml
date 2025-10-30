@@ -19,7 +19,7 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-hourly
-      cancel-in-progress: false
+      cancel-in-progress: true   # <- no overlap (queues instead of canceling)
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-hourly
@@ -28,6 +28,8 @@ jobs:
       # Enable 1h intraday sector counts (lookback L = 3 bars)
       FD_HOURLY_INTRADAY: "true"
       FD_HOURLY_LOOKBACK: "3"
+      # Moderate parallelism for faster builds (tune 16–24)
+      FD_MAX_WORKERS: "20"
       # ---------------------------------------------
 
     steps:
@@ -183,20 +185,6 @@ jobs:
             git commit -m "hourly feed: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
             git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
-          fi
-
-      # 8) Trigger Render deploy (optional)
-      - name: Trigger Render deploy (backend-1)
-        if: ${{ steps.market_hours.outputs.run == 'true' && success() }}
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
-        run: |
-          set -euo pipefail
-          if [ -n "${RENDER_DEPLOY_HOOK:-}" ]; then
-            echo "Triggering Render deploy..."
-            curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
-          else
-            echo "No Render deploy hook configured. Skipping."
           fi
 
       - name: Done
