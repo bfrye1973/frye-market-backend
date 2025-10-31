@@ -3,7 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 7 minutes on weekdays (UTC) — AZ guard inside step
+    # Every 7 minutes on weekdays (UTC)
     - cron: "*/7 * * * 1-5"
 
 defaults:
@@ -12,14 +12,14 @@ defaults:
 
 jobs:
   tenmin:
-    name: Build & Publish Intraday (10m – fast, overwrite-safe)
+    name: Build & Publish Intraday (10m – full run, overwrite-safe)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: true              # cancel older run if a new one starts
+      cancel-in-progress: false            # do not cancel; let runs finish for diagnostics
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
@@ -27,122 +27,153 @@ jobs:
 
       # --- Performance knobs (no algo changes) ---
       FD_SCALPER_ENABLE: "true"
-      FD_SCALPER_LOOKBACK: "3"              # short intraday lookback
-      FD_MAX_WORKERS: "8"                   # tuned to avoid 429 long tails
-      FD_RETRY_MAX: "0"                     # fail-fast; we don't block publish
-      FD_LOOKBACK_DAYS: "0"                 # today-only in source builder
+      FD_SCALPER_LOOKBACK: "3"
+      FD_MAX_WORKERS: "8"                  # safe to avoid Polygon 429 backoffs
+      FD_RETRY_MAX: "0"
+      FD_LOOKBACK_DAYS: "0"                # today-only in source builder
 
-      # Hints for engine-lights scripts (NO Polygon in 10m scripts):
+      # Hints for engine-lights scripts (NO Polygon in 10m scripts)
       INTRADAY_JSON_PATH: "data/outlook_intraday.json"
       HOURLY_URL: "https://frye-market-backend-1.onrender.com/live/hourly"
       INTRADAY_URL: "https://frye-market-backend-1.onrender.com/live/intraday"
-      # --------------------------------------------
 
     steps:
+      # ---------- capture build start for stale-guard ----------
+      - name: Capture build start time (UTC)
+        id: start
+        run: |
+          echo "START_TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+          echo "START_TS=$START_TS"
+
       # ---------- Market-hours guard (AZ) ----------
-      # Allow PRE + RTH + AFTER-HOURS on weekdays: 04:00–18:59 AZ
+      # PRE + RTH + AFTER-HOURS, weekdays: 04:00–18:59 AZ
       - name: Market hours guard (AZ)
-        id: mh
+        id: market_hours
         run: |
           TZ="America/Phoenix"
           DOW=$(TZ=$TZ date +'%u')   # 1..7
           HOUR=$(TZ=$TZ date +'%H')  # 00..23
-          echo "AZ now: $(TZ=$TZ date)  (DOW=$DOW HOUR=$HOUR)"
+          echo "AZ now: $(TZ=$TZ date) (DOW=$DOW HOUR=$HOUR)"
           if [ "$DOW" -ge 6 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           echo "run=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        if: ${{ steps.mh.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+        with: { fetch-depth: 1 }
 
-      # No pip step — scripts must use stdlib (urllib, datetime, json, etc.)
+      # (No pip install — use stdlib only)
 
-      # 1) Build sector source (today-only, moderate workers)
+      # 1) Build sector source (today-only, throttled)
       - name: Build sectorCards source (10m)
-        if: ${{ steps.mh.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API_KEY:  ${{ secrets.POLYGON_API_KEY }}
           FD_LOOKBACK_DAYS: ${{ env.FD_LOOKBACK_DAYS }}
           FD_MAX_WORKERS:   ${{ env.FD_MAX_WORKERS }}
           FD_RETRY_MAX:     ${{ env.FD_RETRY_MAX }}
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py --mode intraday10 --out data/outlook_source.json
+          python -u scripts/build_outlook_source_from_polygon.py \
+            --mode intraday10 --out data/outlook_source.json
           cp -f data/outlook_source.json /tmp/source_backup.json
 
-      # 2) Light schema check (no heavy normalize)
+      # 2) Light schema check only
       - name: Normalize sector source (light)
-        if: ${{ steps.mh.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python - <<'PY'
           import json,sys
           p="data/outlook_source.json"
-          try:
-            j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception:
-            print("[normalize] missing outlook_source.json")
-            sys.exit(2)
+          try: j=json.load(open(p,"r",encoding="utf-8"))
+          except Exception: print("[normalize] missing outlook_source.json"); sys.exit(2)
           ok = isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)
           print("[normalize]", "OK" if ok else "INVALID")
           sys.exit(0 if ok else 2)
           PY
 
-      # 3) Build intraday payload (FULL) — this is the only point we hit Polygon through the builder
+      # 3) Build intraday with the source (FULL)
       - name: Build intraday payload (FULL)
-        if: ${{ steps.mh.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
           POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
           HOURLY_URL:         ${{ env.HOURLY_URL }}
         run: |
           set -euo pipefail
-          python -u scripts/make_dashboard.py --source data/outlook_source.json --out data/outlook_intraday.json
+          python -u scripts/make_dashboard.py \
+            --source data/outlook_source.json \
+            --out data/outlook_intraday.json
 
-      # 4) Engine Lights integrations (strict: local JSON + hourly only; NO Polygon)
+      # 4) Engine Lights integrations (read local/hourly only; no Polygon)
       - name: Compute Lux strategy (10m)
-        if: ${{ steps.mh.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
           HOURLY_URL:         ${{ env.HOURLY_URL }}
         run: |
           set -euo pipefail
-          # must read local + hourly only
           python -u scripts/compute_trend10m.py || true
 
       - name: Update pills (10m always-on state)
-        if: ${{ steps.mh.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
           HOURLY_URL:         ${{ env.HOURLY_URL }}
         run: |
           set -euo pipefail
-          # must read local + hourly only
           python -u scripts/update_pills_10m_state.py || true
 
-      # 5) Ultra-light validation (no heavy repairs)
-      - name: Validate sectorCards (ultra light)
-        if: ${{ steps.mh.outputs.run == 'true' }}
+      # 5) Robust validate/repair sectorCards from saved source (FIX FOR BLANK CARDS)
+      - name: Validate & Repair sectorCards (robust)
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json
-          p="data/outlook_intraday.json"
-          try:
-            j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception as e:
-            print("[post] load fail:", e); raise SystemExit(0)
-          cards=j.get("sectorCards") or []
-          print("[post] cards len:", len(cards))
+          import json,sys
+          def loadp(p):
+              try: return json.load(open(p,"r",encoding="utf-8"))
+              except: return {}
+          intraday = loadp("data/outlook_intraday.json")
+          cards = intraday.get("sectorCards") or []
+          need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
+          def totals(cs): return sum((c.get("nh",0)+c.get("nl",0)+c.get("up",0)+c.get("down",0)) for c in cs)
+          good_schema = (len(cards)==11 and all(k in (cards[0] if cards else {}) for k in need))
+          nonzero = totals(cards) > 0
+          if good_schema and nonzero:
+              print("[repair] sectorCards OK: len=11 totals=", totals(cards)); sys.exit(0)
+
+          print("[repair] sectorCards need repair")
+          src = loadp("/tmp/source_backup.json")
+          groups = src.get("groups") or {}
+          order = ["information technology","materials","health care","communication services","real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
+          alias = {"healthcare":"health care","health-care":"health care","info tech":"information technology","technology":"information technology","tech":"information technology",
+                   "communications":"communication services","comm services":"communication services","telecom":"communication services",
+                   "staples":"consumer staples","discretionary":"consumer discretionary","finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"}
+          def norm(s): return (s or "").strip().lower()
+          by={}
+          for name,g in (groups or {}).items():
+              k = alias.get(norm(name), norm(name))
+              nh=int((g or {}).get("nh",0)); nl=int((g or {}).get("nl",0))
+              up=int((g or {}).get("u",0));  dn=int((g or {}).get("d",0))
+              b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
+              m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
+              by[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
+          new_cards=[by.get(n,{"sector":n.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for n in order]
+          if len(new_cards)==11 and totals(new_cards)>0:
+              intraday["sectorCards"]=new_cards
+              json.dump(intraday, open("data/outlook_intraday.json","w",encoding="utf-8"), separators=(",",":"))
+              print("[repair] repair applied")
+          else:
+              print("[repair] WARN: repair failed; publishing anyway (UI will show neutral)")
           PY
 
       # 6) Stamp meta
       - name: Stamp last_full_run_utc
-        if: ${{ steps.mh.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -155,50 +186,77 @@ jobs:
           PY
 
       - name: Write heartbeat
-        if: ${{ steps.mh.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      # 7) Stage artifacts BEFORE cleaning
+      # ---------- Ensure jq is available (for stale-guard) ----------
+      - name: Ensure jq is available
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: |
+          set -e
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+
+      # 7) STALE-GUARD (skip publish if newer live exists)
+      - name: Stale-guard (skip publish if newer live exists)
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        id: stale
+        env:
+          START_TS: ${{ env.START_TS }}
+        run: |
+          set -euo pipefail
+          echo "Checking if newer live file exists..."
+          START_TS="${START_TS:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
+          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/outlook_intraday.json?t=$(date +%s)" -o /tmp/live.json || true
+          LIVE_TS=$(jq -r '.meta.last_full_run_utc // .updated_at_utc // .updated_at // empty' /tmp/live.json || true)
+          echo "START_TS=$START_TS"
+          echo "LIVE_TS=${LIVE_TS:-none}"
+          if [ -n "${LIVE_TS}" ]; then
+            S=$(date -u -d "$START_TS" +%s)
+            L=$(date -u -d "$LIVE_TS"  +%s 2>/dev/null || echo 0)
+            if [ "$L" -gt "$S" ]; then
+              echo "newer=true" >> "$GITHUB_OUTPUT"
+              echo "⏸ Newer live exists — skip publish."
+              exit 0
+            fi
+          fi
+          echo "newer=false" >> "$GITHUB_OUTPUT"
+
+      # 8) Stage artifacts BEFORE cleaning (for publish)
       - name: Stage artifacts
-        if: ${{ steps.mh.outputs.run == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/live10
           cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
           cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
 
-      # 8) Detect change vs remote (publish only on change)
+      # 9) Detect change vs remote (publish only on change)
       - name: Detect change vs remote
+        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' }}
         id: diff
-        if: ${{ steps.mh.outputs.run == 'true' }}
         env:
           LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
           set -euo pipefail
-          # Try to grab remote file (may not exist on first run)
-          mkdir -p /tmp/prev
+          CHG="true"
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
-            git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/prev/outlook_intraday.json 2>/dev/null || true
-          fi
-          if [ -s /tmp/prev/outlook_intraday.json ]; then
-            if cmp -s /tmp/prev/outlook_intraday.json /tmp/live10/outlook_intraday.json; then
-              echo "changed=false" >> "$GITHUB_OUTPUT"
-              echo "[diff] No content change; skipping publish."
-            else
-              echo "changed=true" >> "$GITHUB_OUTPUT"
-              echo "[diff] Content changed; will publish."
+            git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/prev.json 2>/dev/null || true
+            if [ -s /tmp/prev.json ] && cmp -s /tmp/prev.json /tmp/live10/outlook_intraday.json; then
+              CHG="false"
             fi
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "[diff] No prior file; will publish."
           fi
+          echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
+          echo "[diff] changed=${CHG}"
 
-      # 9) Publish live branch (only if changed)
+      # 10) Publish live branch (safe) only if NOT stale AND changed
       - name: Publish live branch
-        if: ${{ steps.mh.outputs.run == 'true' && steps.diff.outputs.changed == 'true' }}
+        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -223,9 +281,9 @@ jobs:
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
           git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
 
-      # 10) Trigger Render deploy (only if changed)
+      # 11) Trigger Render deploy (only if changed)
       - name: Trigger Render deploy (backend-1)
-        if: ${{ steps.mh.outputs.run == 'true' && steps.diff.outputs.changed == 'true' && success() }}
+        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' && success() }}
         env:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
         run: |
@@ -238,5 +296,5 @@ jobs:
           fi
 
       - name: Done
-        if: ${{ steps.mh.outputs.run == 'true' }}
-        run: echo "10m fast run complete"
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: echo "10m full run complete (overwrite-safe, repaired cards)"
