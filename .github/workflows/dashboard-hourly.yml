@@ -23,6 +23,7 @@ jobs:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
+
       # long-lookback knobs for make_dashboard_hourly.py
       HOUR_LOOKBACK_DAYS: "14"   # ~10–20 trading days of 1h bars
       H4_LOOKBACK_DAYS: "30"     # for SMI 4h component
@@ -30,7 +31,8 @@ jobs:
       EMA_SLOW: "18"
       VOL_FAST: "3"
       VOL_SLOW: "12"
-      # polygon source concurrency (used by build_outlook_source_from_polygon.py)
+
+      # polygon source collector (used by build_outlook_source_from_polygon.py)
       FD_MAX_WORKERS: "8"
       FD_RETRY_MAX: "0"
 
@@ -44,8 +46,9 @@ jobs:
           fetch-depth: 1
 
       # If your Python scripts use only stdlib (urllib/json), keep these two steps commented out.
-      # If they import 'requests', uncomment the two steps below to avoid cold-start pip cost.
-      # - uses: actions/setup-python@v5
+      # If they import 'requests', uncomment both steps below to avoid cold-start pip overhead.
+      # - name: Setup Python (optional for 'requests')
+      #   uses: actions/setup-python@v5
       #   with:
       #     python-version: "3.11"
       #     cache: "pip"
@@ -54,6 +57,7 @@ jobs:
       #     python -m pip install --upgrade pip
       #     pip install requests
 
+      # 1) Build sectorCards source (hourly mode, from Polygon)
       - name: Build sectorCards source (1h)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -66,18 +70,20 @@ jobs:
             --mode hourly \
             --out data/outlook_source.json
 
+      # 2) Normalize: groups -> sectorCards (light)
       - name: Normalize sectorCards source
         run: |
           python - <<'PY'
           import json, sys
-          p="data/outlook_source.json"
+          p = "data/output.json"  # temp path to rewrite clean JSON
+          src = "data/outlook_source.json"
           try:
-              doc = json.load(open(p,"r",encoding="utf-8"))
+              doc = json.load(open(src, "r", encoding="utf-8"))
           except Exception as e:
-              print("normalize: missing/invalid source:", e); sys.exit(1)
+              print("normalize: invalid source:", e); sys.exit(1)
 
           if isinstance(doc.get("sectorCards"), list):
-              pass
+              out = {"sectorCards": doc["sectorCards"]}
           elif isinstance(doc.get("groups"), dict):
               groups = doc["groups"]
               alias = {
@@ -91,31 +97,33 @@ jobs:
                        "real estate","energy","consumer staples","consumer discretionary",
                        "financials","utilities","industrials"]
               def norm(s): return (s or "").strip().lower()
-              out=[]
+              rows = []
               for name in order:
                   k = alias.get(norm(name), norm(name))
                   g = groups.get(k, {})
                   nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
                   b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
                   m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
-                  out.append({"sector":name.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn})
-              doc={"number":len(out),"sectorCards":out}
+                  rows.append({"sector": name.title(),"breadth_pct": b,"momentum_pct": m,"nh": nh,"nl": nl,"up": up,"down": dn})
+              out = {"year": 0, "sectorCards": rows}
           else:
               print("normalize: source missing sectorCards/groups"); sys.exit(1)
 
-          json.dump(doc, open(p,"w",encoding="utf-8"))
-          print("normalize: sectorCards", len(doc.get("sectorCards", [])))
+          with open(src, "w", encoding="utf-8") as fh:
+              json.dump(out, fh, ensure_ascii=False)
+          print("normalize: sectorCards =", len(out["sectorCards"]))
           PY
 
+      # 3) Build hourly payload (1h + 4h long lookbacks, heavy compute here)
       - name: Build hourly payload (EMA/SMI/PSI/vol/squeeze/riskOn)
         env:
-          POLYGON_API_KEY:  ${{ secrets.POLYGON_API_KEY }}
-          HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
-          H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
-          EMA_FAST: ${{ env.EMA_FAST }}
-          EMA_SLOW: ${{ env.EMA_SLOW }}
-          VOL_FAST: ${{ env.VOL_FAST }}
-          VOL_SLOW: ${{ env.VOL_SLOW }}
+          POLYGON_API_KEY:       ${{ secrets.POLYGON_API_KEY }}
+          HOUR_LOOKBACK_DAYS:    ${{ env.HOUR_LOOKBACK_DAYS }}
+          H4_LOOKBACK_DAYS:      ${{ env.H4_LOOKBACK_DAYS }}
+          EMA_FAST:              ${{ env.EMA_FAST }}
+          EMA_SLOW:              ${{ env.EMA_SLOW }}
+          VOL_FAST:              ${{ env.VOL_FAST }}
+          VOL_SLOW:              ${{ env.VOL_SLOW }}
         run: |
           set -euo pipefail
           mkdir -p data
@@ -123,37 +131,39 @@ jobs:
             --source data/outlook_source.json \
             --out    data/outlook_hourly.json
 
+      # 4) Compute 1h Lux trend & always-on pill states
       - name: Compute Lux strategy (1h)
         run: |
           set -euo pipefail
-          # Must write:
-          #  - strategy.trend1h {state, reason, updatedAt}
-          #  - hourly.signals.sigOverall1h/sigEMA1h/sigSMI1h {state}
           python -u scripts/compute_trend_hourly.py
 
+      # 5) Validate required keys exist (fast, strict)
       - name: Validate hourly payload
         run: |
           python - <<'PY'
           import json, sys
-          j = json.load(open("d​ata/outlook_hourly.json","r",encoding="utf-8"))
+          j = json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
           m = j.get("metrics") or {}
           required = [
-              "breadth_1h_pct",
-              "momentum_1h_pct",
-              "momentum_combo_1h_octane" if False else "momentum_combo_1h_pct",
-              "squeeze_1h_pct",
-              "liquidity_1h",
-              "volatility_1h_pct",
-              "volatility_1h_scaled"
+            "breadth_1h_pct",
+            "momentum_1h_pct",
+            "momentum_combo_1h_pct",
+            "squeeze_1h_pct",
+            "liquidity_1h",
+            "volatility_1h_pct",
+            "volatility_1h_scaled"
           ]
-          missing = [k for k in required if k not in m]
-          if missing:
-              print("validate: missing metrics:", missing); sys.exit(2)
+          miss = [k for k in required if k not in m]
+          if miss:
+            print("validate: missing metrics:", miss); sys.exit(2)
           h = j.get("hourly") or {}
           sig = h.get("signals") or {}
           for k in ("sigOverall1h","sigEMA1h","sigSMI1h"):
-              if not isinstance(sig.get(k), dict) or "state" not in sig[k]:
-                  print("validate: missing hourly.signals", k); sys.exit(2)
+            if not isinstance(sig.get(k), dict) or "state" not in sig[k]:
+              print("validate: missing hourly.signals", k); sys.exit(2)
+          st = (j.get("strategy") or {}).get("trend1h") or {}
+          if "state" not in st or "updatedAt" not in st:
+            print("validate: missing strategy.trend1h"); sys.exit(2)
           print("validate: OK")
           PY
 
@@ -161,6 +171,7 @@ jobs:
         run: |
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
 
+      # 6) Publish only if content changed
       - name: Detect change vs remote
         id: diff
         env:
@@ -176,6 +187,7 @@ jobs:
             fi
           fi
           echo "changed=${changed}" >> "$GITHUB_OUTPUT"
+          echo "diff: changed=${changed}"
 
       - name: Publish live branch
         if: ${{ steps.diff.outputs.changed == 'true' }}
@@ -195,3 +207,6 @@ jobs:
             git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
             git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
           fi
+
+      - name: Done
+        run: echo "Hourly build complete"
