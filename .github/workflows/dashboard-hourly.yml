@@ -3,7 +3,7 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "*/5 * * * 1-5"  # every 5 minutes on weekdays (UTC)
+    - cron: "*/5 * * * 1-5"  # every 5 minutes (UTC) on weekdays
 
 defaults:
   run:
@@ -13,7 +13,7 @@ jobs:
   hourly:
     name: Build & Publish Hourly (1h context, long lookbacks)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     permissions:
       contents: write
     concurrency:
@@ -26,15 +26,15 @@ jobs:
 
       # long-lookback knobs for make_dashboard_hourly.py
       HOUR_LOOKBACK_DAYS: "14"   # ~10–20 trading days of 1h bars
-      H4_LOOKBACK_DAYS: "30"     # for SMI 4h component
-      EMA_FAST: "8"
-      EMA_SLOW: "18"
-      VOL_FAST: "3"
-      VOL_SLOW: "12"
+      H4_LOOKBACK_DAYS:  "30"    # for SMI 4h component
+      EMA_FAST:          "8"
+      EMA_SLOW:          "18"
+      VOL_FAST:          "3"
+      VOL_SLOW:          "12"
 
       # polygon source collector (used by build_outlook_source_from_polygon.py)
       FD_MAX_WORKERS: "8"
-      FD_RETRY_MAX: "0"
+      FD_RETRY_MAX:   "0"
 
     steps:
       - name: Show AZ time
@@ -45,8 +45,8 @@ jobs:
         with:
           fetch-depth: 1
 
-      # If your Python scripts use only stdlib (urllib/json), keep these commented.
-      # If they import 'requests', uncomment both to avoid cold-start pip overhead.
+      # If your Python scripts use only stdlib (urllib/json), keep pip commented out.
+      # If they import 'requests', uncomment both steps to avoid cold-start pip overhead.
       # - name: Setup Python (optional for 'requests')
       #   uses: actions/setup-python@v5
       #   with:
@@ -57,12 +57,12 @@ jobs:
       #     python -m pip install --upgrade pip
       #     pip install requests
 
-      # 1) Build sectorCards source (hourly mode, from Polygon)
+      # 1) Build sectorCards source (hourly, from Polygon)
       - name: Build sectorCards source (1h)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-          FD_MAX_WORKERS: ${{ env.FD_MAX_WORKERS }}
-          FD_RETRY_MAX:   ${{ env.FD_RETRY_MAX }}
+          FD_MAX_WORKERS:  ${{ env.FD_MAX_WORKERS }}
+          FD_RETRY_MAX:    ${{ env.FD_RETRY_MAX }}
         run: |
           set -euo pipefail
           mkdir -p data
@@ -70,59 +70,61 @@ jobs:
             --mode hourly \
             --out data/outlook_source.json
 
-      # 2) Normalize: groups -> sectorCards (light)
+      # 2) Normalize: groups -> sectorCards (light, YAML-safe)
       - name: Normalize sectorCards source
         run: |
+          set -euo pipefail
           python - <<'PY'
-          import json, sys
-          src = "data/outlook_source.json"
-          try:
-              doc = json.load(open(src, "r", encoding="utf-8"))
-          except Exception as e:
-              print("normalize: invalid source:", e); sys.exit(1)
+import json, sys
 
-          if isinstance(doc.get("sectorCards"), list):
-              out = {"sectorCards": doc["sectorCards"]}
-          elif isinstance(doc.get("groups"), dict):
-              groups = doc["groups"]
-              alias = {
-                  "healthcare":"health care","health-care":"health care",
-                  "info tech":"information technology","technology":"information technology","tech":"information technology",
-                  "communications":"communication services","comm":"communication services",
-                  "staples":"consumer staples","discretionary":"consumer discretionary",
-                  "reit":"real estate","industry":"industrials"
-              }
-              order = ["information technology","materials","health care","communication services",
-                       "real estate","energy","consumer staples","consumer discretionary",
-                       "financials","utilities","industrials"]
-              def norm(s): return (s or "").strip().lower()
-              rows = []
-              for name in order:
-                  k = alias.get(norm(name), norm(name))
-                  g = groups.get(k, {})
-                  nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
-                  b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
-                  m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
-                  rows.append({"sector": name.title(),"breadth_pct": b,"momentum_pct": m,"nh": nh,"nl": nl,"up": up,"down": dn})
-              out = {"year": 0, "sectorCards": rows}
-          else:
-              print("normalize: source missing sectorCards/groups"); sys.exit(1)
+src = "data/outlook_source.json"
+try:
+    doc = json.load(open(src, "r", encoding="utf-8"))
+except Exception as e:
+    print("normalize: invalid source:", e); sys.exit(1)
 
-          with open(src, "w", encoding="utf-8") as fh:
-              json.dump(out, fh, ensure_ascii=False)
-          print("normalize: sectorCards =", len(out["sectorCards"]))
-          PY
+if isinstance(doc.get("sectorCards"), list):
+    out = {"sectorCards": doc["sectorCards"]}
+elif isinstance(doc.get("groups"), dict):
+    groups = doc["groups"]
+    alias = {
+        "healthcare":"health care","health-care":"health care",
+        "info tech":"information technology","technology":"information technology","tech":"information technology",
+        "communications":"communication services","comm":"communication services",
+        "staples":"consumer staples","discretionary":"consumer discretionary",
+        "reit":"real estate","industry":"industrials"
+    }
+    order = ["information technology","materials","health care","communication services",
+             "real estate","energy","consumer staples","consumer discretionary",
+             "financials","utilities","industrials"]
+    def norm(s): return (s or "").strip().lower()
+    rows = []
+    for name in order:
+        k = alias.get(norm(name), norm(name))
+        g = groups.get(k, {})
+        nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
+        b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
+        m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
+        rows.append({"sector": name.title(),"breadth_pct": b,"momentum_pct": m,"nh": nh,"nl": nl,"up": up,"down": dn})
+    out = {"year": 0, "sectorCards": rows}
+else:
+    print("normalize: source missing sectorCards/groups"); sys.exit(1)
 
-      # 3) Build hourly payload (1h + 4h long lookbacks, heavy compute here)
+with open(src, "w", encoding="utf-8") as fh:
+    json.dump(out, fh, ensure_ascii=False)
+print("normalize: sectorCards =", len(out["sectorCards"]))
+PY
+
+      # 3) Build hourly payload (1h + 4h long lookbacks)
       - name: Build hourly payload (EMA/SMI/PSI/vol/squeeze/riskOn)
         env:
-          POLYGON_API_KEY:       ${{ secrets.POLYGON_API_KEY }}
-          HOUR_LOOKBACK_DAYS:    ${{ env.HOUR_LOOKBACK_DAYS }}
-          H4_LOOKBACK_DAYS:      ${{ env.H4_LOOKBACK_DAYS }}
-          EMA_FAST:              ${{ env.EMA_FAST }}
-          EMA_SLOW:              ${{ env.EMA_SLOW }}
-          VOL_FAST:              ${{ env.VOL_FAST }}
-          VOL_SLOW:              ${{ env.VOL_SLOW }}
+          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
+          HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
+          H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
+          EMA_FAST:           ${{ env.EMA_FAST }}
+          EMA_SLOW:           ${{ env.EMA_SLOW }}
+          VOL_FAST:           ${{ env.VOL_FAST }}
+          VOL_SLOW:           ${{ env.VOL_SLOW }}
         run: |
           set -euo pipefail
           mkdir -p data
@@ -139,32 +141,33 @@ jobs:
       # 5) Validate required keys exist (fast, strict)
       - name: Validate hourly payload
         run: |
+          set -euo pipefail
           python - <<'PY'
-          import json, sys
-          j = json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
-          m = j.get("metrics") or {}
-          required = [
-            "breadth_1h_pct",
-            "momentum_1h_pct",
-            "momentum_combo_1h_pct",
-            "squeeze_1h_pct",
-            "liquidity_1h",
-            "volatility_1h_pct",
-            "volatility_1h_scaled"
-          ]
-          miss = [k for k in required if k not in m]
-          if miss:
-            print("validate: missing metrics:", miss); sys.exit(2)
-          h = j.get("hourly") or {}
-          sig = h.get("signals") or {}
-          for k in ("sigOverall1h","sigEMA1h","sigSMI1h"):
-            if not isinstance(sig.get(k), dict) or "state" not in sig[k]:
-              print("validate: missing hourly.signals", k); sys.exit(2)
-          st = (j.get("strategy") or {}).get("trend1h") or {}
-          if "state" not in st or "updatedAt" not in st:
-            print("validate: missing strategy.trend1h"); sys.exit(2)
-          print("validate: OK")
-          PY
+import json, sys
+j = json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
+m = j.get("metrics") or {}
+required = [
+  "breadth_1h_pct",
+  "momentum_1h_pct",
+  "momentum_combo_1h_pct",
+  "squeeze_1h_pct",
+  "liquidity_1h",
+  "volatility_1h_pct",
+  "volatility_1h_scaled"
+]
+miss = [k for k in required if k not in m]
+if miss:
+  print("validate: missing metrics:", miss); sys.exit(2)
+h = j.get("hourly") or {}
+sig = h.get("signals") or {}
+for k in ("sigOverall1h","sigEMA1h","sigSMI1h"):
+  if not isinstance(sig.get(k), dict) or "state" not in sig[k]:
+    print("validate: missing hourly.signals", k); sys.exit(2)
+st = (j.get("strategy") or {}).get("trend1h") or {}
+if "state" not in st or "updatedAt" not in st:
+  print("validate: missing strategy.trend1h"); sys.exit(2)
+print("validate: OK")
+PY
 
       - name: Write heartbeat
         run: |
