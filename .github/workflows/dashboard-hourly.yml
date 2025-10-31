@@ -3,7 +3,8 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "*/5 * * * 1-5"   # Every 5 minutes (UTC)
+    # Every 5 minutes on weekdays; hourly does the long lookbacks
+    - cron: "*/5 * * * 1-5"
 
 defaults:
   run:
@@ -11,44 +12,177 @@ defaults:
 
 jobs:
   hourly:
-    name: Build & Publish Hourly (1h context)
+    name: Build & Publish Hourly (1h context, long lookbacks)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 8
     permissions:
       contents: write
     concurrency:
       group: dashboard-hourly
-      cancel-in-progress: true           # keep freshest 1h run
+      cancel-in-progress: true
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
-      FD_MAX_WORKERS: "16"
-      FD_RETRY_MAX: "0"
+
+      # Builder knobs (adjust as needed)
+      HOUR_LOOKBACK_DAYS: "14"           # 10–20 trading days of 1h bars
+      H4_LOOKBACK_DAYS:   "30"           # for SMI 4h component
+      EMA_FAST: "8"
+      EMA_SLOW: "18"
+      VOL_FAST: "3"
+      VOL_SLOW: "12"
+
+      # Concurrency for Polygon source collector
+      FD_MAX_WORKERS: "8"
+      FD_RETRY_MAX:   "0"
 
     steps:
+      - name: Set up job (AZ time)
+        run: echo "AZ now: $(TZ=America/Phoenix date)"
+
       - name: Checkout
         uses: actions/checkout@v4
-        with: { fetch-depth: 1 }
+        with:
+          fetch-depth: 1
 
-      # (No pip install — use stdlib only)
+      # If your scripts import `requests`, enable pip cache to avoid cold starts.
+      # If you ONLY use stdlib (urllib), you can remove this whole step.
+      - name: (Optional) Setup Python cache for requests
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: (Optional) Install deps if builder uses requests
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install requests
 
-      - name: Build hourly payload (long lookbacks live here)
+      # 1) Build hourly sectorCards source (Polygon)
+      - name: Build sectorCards source (1h)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-          FD_MAX_WORKERS:   ${{ env.FD_MAX_WORKERS }}
-          FD_RETRY_MAX:     ${{ env.FD_RETRY_MAX }}
+          FD_MAX_WORKERS: ${{ env.FD_MAX_WORKERS }}
+          FD_RETRY_MAX:   ${{ env.FD_RETRY_MAX }}
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/make_dashboard_hourly.py --out data/outlook_hourly.json
-          # optional: head -n 40 data/outlook_hourly.json || true
+          python -u scripts/build_outlook_source_from_polygon.py \
+            --mode hourly \
+            --out  data/outlook_source.json
 
+      # 2) Normalize groups -> sectorCards (light)
+      - name: Normalize sectorCards source
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          p="data/outlook_source.json"
+          try:
+            doc=json.load(open(p,"r",encoding="utf-8"))
+          except Exception as e:
+            print("[normalize] missing/invalid source:", e); sys.exit(2)
+
+          ok = isinstance(doc.get("sectorCards"), list) or isinstance(doc.get("groups"), dict)
+          if not ok:
+            print("[normalize] INVALID: no sectorCards or groups in source"); sys.exit(2)
+
+          if "sectorCards" not in doc:
+            groups = doc.get("groups") or {}
+            alias = {
+              "healthcare":"health care","health-care":"health care",
+              "info tech":"information technology","technology":"information technology","tech":"information technology",
+              "communications":"communication services","comm":"communication services",
+              "staples":"consumer staples","discretionary":"consumer discretionary",
+              "reit":"real estate","industry":"industrials"
+            }
+            order = ["information technology","materials","health care","communication services",
+                     "real estate","energy","consumer staples","consumer discretionary",
+                     "financials","utilities","industrials"]
+            def norm(s): return (s or "").strip().lower()
+            out=[]
+            for name in order:
+              k = alias.get(norm(name), norm(name))
+              g = groups.get(k, {})
+              nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
+              b = 0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
+              m = 0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
+              out.append({"sector":name.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn})
+            doc = {"sectorCards": out}
+
+          json.dump(doc, open(p,"w",encoding="utf-8"), ensure_ascii=False)
+          print("[normalize] sectorCards:", len(doc["sectorCards"]))
+          PY
+
+      # 3) Build hourly payload (long lookbacks inside)
+      - name: Build hourly payload (EMA/SMI/PSI/vol/squeeze/riskOn)
+        env:
+          POLYGON_API_KEY:  ${{ secrets.POLYGON_API_KEY }}
+          HOUR_LOOKBACK:    ${{ env.HOUR_LOOKBACK }}
+          HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
+          H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
+          EMA_FAST: ${{ env.EMA_FAST }}
+          EMA_SLOW: ${{ env.EMA_SLOW }}
+          VOL_FAST: ${{ env.VOL_FAST }}
+          VOL_SLOW: ${{ env.VOL_SLOW }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          # make_dashboard_hourly.py must:
+          #  - fetch 1h & 4h bars (HOUR_LOOKBACK_DAYS, H4_LOOKBACK_DAYS)
+          #  - compute ema_sign (8/18), momentum_combo_1h_pct (0.60*EMA_posture + 0.20*SMI1h + 0.20*SMI4h)
+          #  - compute squeeze_1h_pct (expansion%), liquidity_1h (PSI 100*EMA(vol,3)/EMA(vol,12))
+          # - compute volatility_1h_pct and volatility_28.. scaled -> metrics.volatility_1h_scaled (0..100)
+          # - compute breadth_1h_pct, momentum_1h_pct, sectorDirection1h.risingPct, riskOn1h.riskOnPct
+          python -u scripts/make_dashboard_hourly.py \
+            --source data/outlook_source.json \
+            --out    data/outlook_hourly.json
+
+      # 4) Compute Lux strategy (1h) + ALWAYS-ON pill states
+      - name: Compute Lux strategy (1h)
+        run: |
+          set -euo pipefail
+          # compute_trend_hourly.py must write:
+          #   - strategy.trendy1h: {"state","reason","updatedAt"}
+          #   - hourly.signals: sigOverall1h/sigEMA1h/sigSMI1h (state= bull|bear|neutral)
+          python -u scripts/compute_trend_hourly.py
+
+      # 5) Validate required keys exist (fail fast if missing)
+      - name: Validate hourly context (hard fail on missing keys)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          j=json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
+          m=j.get("metrics") or {}
+          h=j.get("o​utput","")  # placeholder to avoid editor collapsing lines
+          # required metric keys:
+          required = [
+            "breadth_1​h_pct","momentum_1​h_pct","momentum_combo_1​h_pct",
+            "squeeze_1​h_pct","liquidity_1​h","volatility_1​h_pct","volatility_1​h_scaled"
+          ]
+          miss=[k for k in required if k not in m]
+          if miss:
+            print("[validate] Missing metrics:", miss); sys.exit(2)
+          hourly=j.get("hourly") or {}
+          if not isinstance(hourly,dict): 
+            print("[validate] Missing 'hourly' block"); sys.exit(2)
+          sig=hourly.get("signals") or {}
+          for k in ("sigOverall1h","sigEMA1h","sigSMI1h"):
+            if k not in sig or "state" not in sig[k]:
+              print("[validate] Missing hourly signal:", k); sys.exit(2)
+          print("[validate] OK — required hourly context present.")
+          PY
+
+      # 6) Heartbeat
       - name: Write heartbeat
         run: |
           set -euo pipefail
-          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/hearted_1h || true
+          mv -f data/hearted_1h data/heartbeat_1h
 
+      # 7) Detect change vs remote; publish only if changed
       - name: Detect change vs remote
         id: changed
         env:
@@ -57,7 +191,7 @@ jobs:
           set -euo pipefail
           CHG="true"
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
-            git fetch origin "${LIVE_BRANCH}:${LIVE_BRANCH}"
+            git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
             git show "origin/${LIVE_BRANCH}:data/outlook_hourly.json" > /tmp/prev.json || true
             if [ -s /tmp/prev.json ] && diff -q data/outlook_hourly.json /tmp/prev.json >/dev/null 2>&1; then
               CHG="false"
@@ -66,6 +200,7 @@ jobs:
           echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
           echo "[diff] changed=${CHG}"
 
+      # 8) Publish live branch
       - name: Publish live branch (safe)
         if: ${{ steps.changed.outputs.changed == 'true' }}
         env:
@@ -86,4 +221,4 @@ jobs:
           fi
 
       - name: Done
-        run: echo "Hourly publish complete"
+        run: echo "Hourly build complete"
