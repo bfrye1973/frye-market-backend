@@ -3,8 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 7 minutes on weekdays (UTC)
-    - cron: "*/7 * * * 1-5"
+    - cron: "*/7 * * * 1-5"   # Every 7 minutes on weekdays (UTC)
 
 defaults:
   run:
@@ -12,78 +11,68 @@ defaults:
 
 jobs:
   tenmin:
-    name: Build & Publish Intraday (10m CORE – full run)
+    name: Build & Publish Intraday (10m – full run)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false            # never cancel; allow queue if it ever overlaps
+      cancel-in-progress: true              # keep freshest run; avoid queue pileup
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
-      # --- Performance tuning to avoid 429 backoffs and keep run <~6m ---
-      FD_SCALPER_ENABLE: "true"            # fast, today-only intraday counts
-      FD_SCALPER_LOOKBACK: "3"
-      FD_MAX_WORKERS: "12"                 # tune 10–14 as needed
-      FD_RETRY_MAX: "0"                    # fail-fast; JSON stays valid
+
+      # --- Performance knobs (no algo changes) ---
+      FD_SCALPER_ENABLE: "true"            # fast intraday counts
+      FD_SCALPER_LOOKBACK: "3"             # short intraday lookback
+      FD_MAX_WORKERS: "8"                  # safe to avoid 429 backoffs
+      FD_RETRY_MAX: "0"                    # fail fast; JSON stays valid
+      FD_LOOKBACK_DAYS: "0"                # today-only in source builder
+
+      # Hints for engine-lights scripts to avoid Polygon and use local/hourly:
+      INTRADAY_JSON_PATH: "data/outlook_intraday.json"
+      HOURLY_URL: "https://frye-market-backend-1.onrender.com/live/hourly"
+      # -------------------------------------------
 
     steps:
-      # ---------------- Market-hours guard (AZ) ----------------
-      # Allow PRE + RTH + AFTER-HOURS on weekdays: 04:00–18:59 AZ
+      # ---------- Market-hours guard (AZ) ----------
+      # PRE + RTH + AFTER-HOURS, weekdays: 04:00–18:59 AZ
       - name: Market hours guard (AZ)
         id: market_hours
         run: |
           TZ="America/Phoenix"
           DOW=$(TZ=$TZ date +'%u')   # 1..7
           HOUR=$(TZ=$TZ date +'%H')  # 00..23
-          echo "AZ now: $(TZ=$TZ date)  (DOW=$DOW HOUR=$HOUR)"
-          if [ "$DOW" -ge 6 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ Weekend — skipping."
-            exit 0
-          fi
-          if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ Outside extended hours — skipping."
-            exit 0
-          fi
+          echo "AZ now: $(TZ=$TZ date) (DOW=$DOW HOUR=$HOUR)"
+          if [ "$DOW" -ge 6 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           echo "run=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+        with: { fetch-depth: 1 }
 
-      - name: Setup Python
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      # (No pip install — use stdlib only)
 
-      - name: Install deps
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          pip install requests python-dateutil
-
-      # 1) Build sector source (groups {nh,nl,u,d} by sector)
+      # 1) Build sector source (today-only, throttled workers)
       - name: Build sectorCards source (10m)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API_KEY:  ${{ secrets.POLYGON_API_KEY }}
+          FD_LOOKBACK_DAYS: ${{ env.FD_LOOKBACK_DAYS }}
+          FD_MAX_WORKERS:   ${{ env.FD_MAX_WORKERS }}
+          FD_RETRY_MAX:     ${{ env.FD_RETRY_MAX }}
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py --mode intraday10 --out data/outlook_source.json
+          python -u scripts/build_outlook_source_from_polygon.py \
+            --mode intraday10 --out data/outlook_source.json
           cp -f data/outlook_source.json /tmp/source_backup.json
-          head -n 60 data/outlook_source.json || true
 
-      # 2) Normalize source (lightweight schema check only)
+      # 2) Light schema check only
       - name: Normalize sector source (light)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
@@ -91,44 +80,47 @@ jobs:
           python - <<'PY'
           import json,sys
           p="data/outlook_source.json"
-          try:
-            j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception:
-            print("[normalize] missing outlook_source.json"); sys.exit(2)
+          try: j=json.load(open(p,"r",encoding="utf-8"))
+          except Exception: print("[normalize] missing outlook_source.json"); sys.exit(2)
           ok = isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)
-          if not ok:
-            print("[normalize] INVALID source: missing groups/sectorCards"); sys.exit(2)
-          print("[normalize] OK (light)")
+          print("[normalize]", "OK" if ok else "INVALID")
+          sys.exit(0 if ok else 2)
           PY
 
-      # 3) Build intraday with the source you just created (CORE)
-      - name: Build intraday payload (CORE)
+      # 3) Build intraday with the source (FULL)
+      - name: Build intraday payload (FULL)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
+          INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
+          HOURLY_URL:         ${{ env.HOURLY_URL }}
         run: |
           set -euo pipefail
           python -u scripts/make_dashboard.py \
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
 
-      # 3.5) Keep Lux strategy (10m) IN CORE
+      # 4) Engine Lights integrations (Lux/SMI/Pills) should read local JSON/hourly, not Polygon
       - name: Compute Lux strategy (10m)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
+        env:
+          INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
+          HOURLY_URL:         ${{ env.HOURLY_URL }}
         run: |
           set -euo pipefail
-          python -u scripts/compute_trend10m.py
+          python -u scripts/compute_trend10m.py || true
 
-      # 3.6) Keep Pills (10m) IN CORE
       - name: Update pills (10m always-on state)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
-          INTRADAY_URL: https://frye-market-backend-1.onrender.com/live/intraday
+          INTRADAY_URL:       https://frye-market-backend-1.onrender.com/live/intraday
+          INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
+          HOURLY_URL:         ${{ env.HOURLY_URL }}
         run: |
           set -euo pipefail
-          python -u scripts/update_pills_10m_state.py
+          python -u scripts/update_pills_10m_state.py || true
 
-      # 4) Post-build validator (ULTRA LIGHT) – no heavy repair here
+      # 5) Ultra-light validation (no heavy repair here)
       - name: Validate sectorCards (ultra light)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
@@ -137,16 +129,13 @@ jobs:
           import json,sys
           p="data/outlook_intraday.json"
           try: j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception as e:
-              print("[post] load fail:", e); sys.exit(0)   # publish anyway
+          except Exception as e: print("[post] load fail:", e); sys.exit(0)
           cards=j.get("sectorCards") or []
-          if len(cards) != 11:
-              print("[post] WARN: cards len =", len(cards), "(publishing anyway)")
-          else:
-              print("[post] cards OK len=11")
+          if len(cards)!=11: print("[post] WARN: cards len =", len(cards))
+          else: print("[post] cards OK len=11")
           PY
 
-      # 4.7) Stamp last_full_run_utc (monitoring)
+      # 6) Stamp monitoring fields (visible in dashboard JSON)
       - name: Stamp last_full_run_utc
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
@@ -167,19 +156,35 @@ jobs:
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      - name: Stage artifacts
+      # 7) Detect change (skip publish if identical)
+      - name: Detect change vs remote
         if: ${{ steps.market_hours.outputs.run == 'true' }}
+        id: changed
+        env:
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/live10
-          cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
-          cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
+          CHG="true"
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${LIVE_BRANCH}:${LIVE_BRANCH}"
+            git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/prev.json || true
+            if [ -s /tmp/prev.json ] && diff -q data/outlook_intraday.json /tmp/prev.json >/dev/null 2>&1; then
+              CHG="false"
+            fi
+          fi
+          echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
+          echo "[diff] changed=${CHG}"
 
-      - name: Prepare live branch
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+      # 8) Publish (detached-HEAD safe), only if changed
+      - name: Publish live branch
+        if: ${{ steps.market_hours.outputs.run == 'true' && steps.changed.outputs.changed == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
           set -euo pipefail
-          git config user.name "actions-bot"
+          git config user.name  "actions-bot"
           git config user.email "bot@users.noreply.github.com"
           git reset --hard
           git clean -fdx
@@ -191,25 +196,16 @@ jobs:
           fi
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
           mkdir -p data
-          cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
-          cp -f /tmp/live10/heartbeat_10min.txt data/heartbeat_10min.txt
-
-      - name: Commit and push live branch (safe)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
-        run: |
-          set -euo pipefail
+          cp -f data/outlook_intraday.json data/outlook_intraday.json
+          cp -f data/heartbeat_10min.txt   data/heartbeat_10min.txt
           git add data
-          git commit -m "10m live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git commit -m "10m publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
           git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
 
-      # Keep backend fresh every cycle
+      # 9) Trigger Render deploy only when changed
       - name: Trigger Render deploy (backend-1)
-        if: ${{ steps.market_hours.outputs.run == 'true' && success() }}
+        if: ${{ steps.market_hours.outputs.run == 'true' && steps.changed.outputs.changed == 'true' && success() }}
         env:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
         run: |
@@ -223,4 +219,4 @@ jobs:
 
       - name: Done
         if: ${{ steps.market_hours.outputs.run == 'true' }}
-        run: echo "10m core publish complete"
+        run: echo "10m full run complete"
