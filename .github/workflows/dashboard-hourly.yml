@@ -45,8 +45,8 @@ jobs:
         with:
           fetch-depth: 1
 
-      # If your Python scripts use only stdlib (urllib/json), keep these two steps commented out.
-      # If they import 'requests', uncomment both steps below to avoid cold-start pip overhead.
+      # If your Python scripts use only stdlib (urllib/json), keep these commented.
+      # If they import 'requests', uncomment both to avoid cold-start pip overhead.
       # - name: Setup Python (optional for 'requests')
       #   uses: actions/setup-python@v5
       #   with:
@@ -75,7 +75,6 @@ jobs:
         run: |
           python - <<'PY'
           import json, sys
-          p = "data/output.json"  # temp path to rewrite clean JSON
           src = "data/outlook_source.json"
           try:
               doc = json.load(open(src, "r", encoding="utf-8"))
