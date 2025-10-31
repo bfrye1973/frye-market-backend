@@ -19,7 +19,7 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: true              # freshest run wins; no collisions
+      cancel-in-progress: false              # freshest run wins; no collisions
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
