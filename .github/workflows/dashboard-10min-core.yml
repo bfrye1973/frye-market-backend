@@ -1,0 +1,149 @@
+name: dashboard-10min (core)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Every 7 minutes on weekdays (UTC)
+    - cron: "*/7 * * * 1-5"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tenmin-core:
+    name: Build & Publish Intraday (CORE)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: dashboard-10min-core       # core runs never overlap
+      cancel-in-progress: true
+    env:
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-10min
+      PYTHONUNBUFFERED: "1"
+      # ---------- Performance knobs ----------
+      FD_SCALPER_ENABLE: "true"         # fast intraday counts
+      FD_SCALPER_LOOKBACK: "3"          # short lookback
+      FD_MAX_WORKERS: "16"              # tune 12–18
+      FD_RETRY_MAX: "0"                 # fail fast
+      FD_LOOKBACK_DAYS: "0"             # today-only in source builder
+      # --------------------------------------
+
+    steps:
+      # ------ Market-hours guard (AZ) ------
+      - name: Market hours guard (AZ)
+        id: hours
+        run: |
+          TZ="America/Phoenix"
+          DOW=$(TZ=$TZ date +'%u'); HOUR=$(TZ=$TZ date +'%H')
+          echo "AZ now: $(TZ=$TZ date)  (DOW=$DOW HOUR=$HOUR)"
+          if [ "$DOW" -ge 6 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: ${{ steps.hours.outputs.run == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        if: ${{ steps.hours.outputs.run == 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        if: ${{ steps.hours.outputs.run == 'true' }}
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install requests python-dateutil
+
+      # 1) Build sector source (today-only, fast)
+      - name: Build sectorCards source (10m)
+        if: ${{ steps.hours.outputs.run == 'true' }}
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          FD_LOOKBACK_DAYS: ${{ env.FD_LOOKBACK_DAYS }}
+          FD_MAX_WORKERS:   ${{ env.FD_MAX_WORKERS }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python -u scripts/build_outlook_source_from_polygon.py \
+            --mode intraday10 --out data/outlook_source.json
+          cp -f data/outlook_source.json /tmp/source_backup.json
+          head -n 40 data/outlook_source.json || true
+
+      # 2) Light schema check
+      - name: Normalize sector source (light)
+        if: ${{ steps.hours.outputs.run == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          p="data/outlook_source.json"
+          try: j=json.load(open(p,"r",encoding="utf-8"))
+          except Exception: print("[normalize] missing source"); sys.exit(2)
+          ok = isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)
+          print("[normalize] OK" if ok else "[normalize] INVALID"); sys.exit(0 if ok else 2)
+          PY
+
+      # 3) Build intraday (CORE only)
+      - name: Build intraday payload (CORE)
+        if: ${{ steps.hours.outputs.run == 'true' }}
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          python -u scripts/make_dashboard.py \
+            --source data/outlook_source.json \
+            --out data/outlook_intraday.json
+
+      # 4) Stamp runtime + last_full_run_utc for monitoring
+      - name: Stamp full-run metadata
+        if: ${{ steps.hours.outputs.run == 'true' }}
+        run: |
+          set -euo pipefail
+          START=${{ job.start_time }}
+          python - <<'PY'
+          import json,datetime,os
+          p="data/outlook_intraday.json"
+          j=json.load(open(p,"r",encoding="utf-8"))
+          j.setdefault("meta", {})
+          j["meta"]["last_full_run_utc"] = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+          json.dump(j, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
+          print("[meta] last_full_run_utc:", j["meta"]["last_full_run_utc"])
+          PY
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
+
+      # 5) Publish (detached-HEAD safe)
+      - name: Publish live branch
+        if: ${{ steps.hours.outputs.run == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
+        run: |
+          set -euo pipefail
+          git config user.name  "actions-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git reset --hard
+          git clean -fdx
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${LIVE_BRANCH}"
+            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
+          else
+            git checkout --orphan "${LIVE_BRANCH}"
+          fi
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+          mkdir -p data
+          cp -f data/outlook_intraday.json data/outlook_intraday.json
+          cp -f data/heartbeat_10min.txt   data/heartbeat_10min.txt
+          git add data
+          git commit -m "10m core publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
