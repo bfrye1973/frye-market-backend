@@ -19,24 +19,26 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: true          # fresh run wins; prevents 2 jobs from colliding
+      cancel-in-progress: true              # freshest run wins; no collisions
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
 
       # --- Performance knobs (no algo changes) ---
-      FD_SCALPER_ENABLE: "true"
-      FD_SCALPER_LOOKBACK: "3"
-      FD_MAX_WORKERS: "8"               # safe to avoid Polygon 429 backoffs
-      FD_RETRY_MAX: "0"                 # fail fast; JSON still valid via post checks
-      FD_LOOKBACK_DAYS: "0"             # today-only for source builder
-      # Hints for engine-lights scripts to avoid Polygon:
+      FD_SCALPER_ENABLE: "true"             # fast intraday counts
+      FD_SCALPER_LOOKBACK: "3"              # short intraday lookback
+      FD_MAX_WORKERS: "8"                   # safe to avoid Polygon 429 backoffs
+      FD_RETRY_MAX: "0"                     # fail fast; JSON stays valid
+      FD_LOOKBACK_DAYS: "0"                 # today-only for source builder
+
+      # Hints for engine-lights scripts to avoid Polygon and use local/hourly:
       INTRADAY_JSON_PATH: "data/outlook_intraday.json"
       HOURLY_URL: "https://frye-market-backend-1.onrender.com/live/hourly"
+      # -------------------------------------------
 
     steps:
-      # Record when THIS build started (used by stale-guard before publish)
+      # ---------- capture build start for stale-guard ----------
       - name: Capture build start time (UTC)
         id: start
         run: |
@@ -44,11 +46,13 @@ jobs:
           echo "START_TS=$START_TS"
 
       # ---------- Market-hours guard (AZ) ----------
+      # PRE + RTH + AFTER-HOURS, weekdays: 04:00–18:59 AZ
       - name: Market hours guard (AZ)
         id: market_hours
         run: |
           TZ="America/Phoenix"
-          DOW=$(TZ=$TZ date +'%u'); HOUR=$(TZ=$TZ date +'%H')
+          DOW=$(TZ=$TZ date +'%u')   # 1..7
+          HOUR=$(TZ=$TZ date +'%H')  # 00..23
           echo "AZ now: $(TZ=$TZ date) (DOW=$DOW HOUR=$HOUR)"
           if [ "$DOW" -ge 6 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
@@ -91,7 +95,7 @@ jobs:
           sys.exit(0 if ok else 2)
           PY
 
-      # 3) Build intraday payload (FULL)
+      # 3) Build intraday with the source (FULL)
       - name: Build intraday payload (FULL)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
@@ -104,7 +108,7 @@ jobs:
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
 
-      # 4) Engine Lights integrations (read local/hourly only; no Polygon)
+      # 4) Engine Lights integrations (read local/hourly only; no Polygon inside these)
       - name: Compute Lux strategy (10m)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
@@ -160,8 +164,7 @@ jobs:
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      # 7) STALE-GUARD before publish:
-      #    If a newer run already published after this job started, skip publish to avoid "bombing out".
+      # 7) STALE-GUARD before publish (YAML-safe; fixed heredoc)
       - name: Stale-guard (skip publish if newer live exists)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         id: stale
@@ -169,35 +172,31 @@ jobs:
           START_TS: ${{ env.START_TS }}
         run: |
           set -euo pipefail
-          START_TS="${START_TS:-${{ env.START_TS }}}"
-          # fetch current live (meta.last_full_run_utc OR heartbeat_10min.txt)
+          echo "Checking if newer live file exists..."
+          START_TS="${START_TS:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
           curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/outlook_intraday.json?t=$(date +%s)" -o /tmp/live.json || true
-          LIVE_TS=$(python - <<'PY'
-import json,sys,datetime
+          
+          python - <<'PY'
+import json, datetime, os
+def iso_to_sec(ts):
+    try:
+        return int(datetime.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").timestamp())
+    except Exception:
+        return 0
+live_ts = 0
 try:
-    j=json.load(open("/tmp/live.json","r",encoding="utf-8"))
-    ts=j.get("meta",{}).get("last_full_run_utc") or j.get("updated_at_utc") or j.get("updated_at")
-    if ts:
-        print(ts)
-except Exception:
-    pass
+    j = json.load(open("/tmp/live.json","r",encoding="utf-8"))
+    ts = j.get("meta",{}).get("last_full_run_utc") or j.get("updated_at_utc") or j.get("updated_at")
+    if ts: live_ts = iso_to_sec(ts)
+except Exception as e:
+    print("[stale] could not parse live:", e)
+start_ts = iso_to_sec(os.environ.get("START_TS",""))
+print(f"[stale] START_TS={start_ts}, LIVE_TS={live_ts}")
+# Set GitHub output
+print(f"::set-output name=newer::{'true' if live_ts > start_ts else 'false'}")
 PY
-)
-          echo "START_TS=${{ env.START_TS }}"
-          echo "LIVE_TS=${LIVE_TS:-none}"
-          if [ -n "${LIVE_TS}" ] && [ -n "${{ env.START_TS }}" ]; then
-            # compare using coreutils
-            S=$(date -u -d "${{ env.START_TS }}" +%s)
-            L=$(date -u -d "${LIVE_TS}" +%s 2>/dev/null || echo 0)
-            if [ "$L" -gt "$S" ]; then
-              echo "newer=true" >> "$GITHUB_OUTPUT"
-              echo "⏸ Newer live exists (published after this job started) — skip publish."
-              exit 0
-            fi
-          fi
-          echo "newer=false" >> "$GITHUB_OUTPUT"
 
-      # 8) Publish (detached-HEAD safe) only if not stale AND data changed
+      # 8) Detect change vs remote (skip publish if identical)
       - name: Detect change vs remote
         if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' }}
         id: changed
@@ -216,6 +215,7 @@ PY
           echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
           echo "[diff] changed=${CHG}"
 
+      # 9) Publish live (detached-HEAD safe) only if not stale AND changed
       - name: Publish live branch
         if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.changed.outputs.changed == 'true' }}
         env:
@@ -243,6 +243,7 @@ PY
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
           git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
 
+      # 10) Trigger Render deploy only when we actually published
       - name: Trigger Render deploy (backend-1)
         if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.changed.outputs.changed == 'true' && success() }}
         env:
