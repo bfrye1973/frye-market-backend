@@ -1,7 +1,7 @@
 name: dashboard-hourly
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
   schedule:
     - cron: "*/5 * * * 1-5"  # every 5 minutes on weekdays (UTC)
 
@@ -13,27 +13,24 @@ jobs:
   hourly:
     name: Build & Publish Hourly (1h context, long lookbacks)
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     permissions:
       contents: write
     concurrency:
       group: dashboard-hourly
-      allow-cancel-in-progress: true
       cancel-in-progress: true
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
-
-      # builder knobs
-      HOUR_LOOKBACK_DAYS: "14"         # 10–20 trading days of 1h bars
-      H4_LOOKBACK_DAYS: "30"           # for SMI 4h component
+      # long-lookback knobs for make_dashboard_hourly.py
+      HOUR_LOOKBACK_DAYS: "14"   # ~10–20 trading days of 1h bars
+      H4_LOOKBACK_DAYS: "30"     # for SMI 4h component
       EMA_FAST: "8"
       EMA_SLOW: "18"
       VOL_FAST: "3"
       VOL_SLOW: "12"
-
-      # polygon source concurrency
+      # polygon source concurrency (used by build_outlook_source_from_polygon.py)
       FD_MAX_WORKERS: "8"
       FD_RETRY_MAX: "0"
 
@@ -46,12 +43,13 @@ jobs:
         with:
           fetch-depth: 1
 
-      # --- OPTIONAL: only if your Python scripts import 'requests'.
-      # - uses: actions/setup-python@v4
+      # If your Python scripts use only stdlib (urllib/json), keep these two steps commented out.
+      # If they import 'requests', uncomment the two steps below to avoid cold-start pip cost.
+      # - uses: actions/setup-python@v5
       #   with:
       #     python-version: "3.11"
       #     cache: "pip"
-      # - name: Install Python deps (optional)
+      # - name: Install deps (optional)
       #   run: |
       #     python -m pip install --upgrade pip
       #     pip install requests
@@ -60,7 +58,7 @@ jobs:
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           FD_MAX_WORKERS: ${{ env.FD_MAX_WORKERS }}
-          FD_RETRY_MAX: ${{ env.FD_RETRY_MAX }}
+          FD_RETRY_MAX:   ${{ env.FD_RETRY_MAX }}
         run: |
           set -euo pipefail
           mkdir -p data
@@ -70,19 +68,18 @@ jobs:
 
       - name: Normalize sectorCards source
         run: |
-          set -euo pipefail
           python - <<'PY'
-          import json,sys
+          import json, sys
           p="data/outlook_source.json"
           try:
-              doc=json.load(open(p,"r",encoding="utf-8"))
+              doc = json.load(open(p,"r",encoding="utf-8"))
           except Exception as e:
-              print("normalize: missing/invalid source:", e); sys.exit(2)
-          ok = isinstance(doc.get("sectorCards"), list) or isinstance(doc.get("groups"), dict)
-          if not ok:
-              print("normalize: no sectorCards or groups in source"); sys.exit(2)
-          if "sectorCards" not in doc:
-              groups = doc.get("groups") or {}
+              print("normalize: missing/invalid source:", e); sys.exit(1)
+
+          if isinstance(doc.get("sectorCards"), list):
+              pass
+          elif isinstance(doc.get("groups"), dict):
+              groups = doc["groups"]
               alias = {
                   "healthcare":"health care","health-care":"health care",
                   "info tech":"information technology","technology":"information technology","tech":"information technology",
@@ -99,19 +96,22 @@ jobs:
                   k = alias.get(norm(name), norm(name))
                   g = groups.get(k, {})
                   nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
-                  b = 0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
-                  m = 0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
+                  b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
+                  m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
                   out.append({"sector":name.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn})
-              doc = {"sectorCards": out}
-          json.dump(doc, open(p,"w",encoding="utf-8"), ensure_ascii=False)
-          print("normalize: sectorCards:", len(doc["sectorCards"]))
+              doc={"number":len(out),"sectorCards":out}
+          else:
+              print("normalize: source missing sectorCards/groups"); sys.exit(1)
+
+          json.dump(doc, open(p,"w",encoding="utf-8"))
+          print("normalize: sectorCards", len(doc.get("sectorCards", [])))
           PY
 
       - name: Build hourly payload (EMA/SMI/PSI/vol/squeeze/riskOn)
         env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API_KEY:  ${{ secrets.POLYGON_API_KEY }}
           HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
-          H4_LOOKBACK_DAYS: ${{ env.H4_LOOKBACK_DAYS }}
+          H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
           EMA_FAST: ${{ env.EMA_FAST }}
           EMA_SLOW: ${{ env.EMA_SLOW }}
           VOL_FAST: ${{ env.VOL_FAST }}
@@ -126,59 +126,59 @@ jobs:
       - name: Compute Lux strategy (1h)
         run: |
           set -euo pipefail
+          # Must write:
+          #  - strategy.trend1h {state, reason, updatedAt}
+          #  - hourly.signals.sigOverall1h/sigEMA1h/sigSMI1h {state}
           python -u scripts/compute_trend_hourly.py
 
       - name: Validate hourly payload
         run: |
-          set -euo pipefail
           python - <<'PY'
-          import json,sys
-          j=json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
-          m=j.get("metrics") or {}
-          must = [
+          import json, sys
+          j = json.load(open("d​ata/outlook_hourly.json","r",encoding="utf-8"))
+          m = j.get("metrics") or {}
+          required = [
               "breadth_1h_pct",
-              "momentum_1h_sales_pct" if False else "momentum_1h_pct",
-              "momentum_combo_1h_pct",
+              "momentum_1h_pct",
+              "momentum_combo_1h_octane" if False else "momentum_combo_1h_pct",
               "squeeze_1h_pct",
               "liquidity_1h",
               "volatility_1h_pct",
               "volatility_1h_scaled"
           ]
-          missing=[k for k in must if k not in m]
+          missing = [k for k in required if k not in m]
           if missing:
               print("validate: missing metrics:", missing); sys.exit(2)
-          h=j.get("hourly") or {}
-          sig=h.get("signals") or {}
+          h = j.get("hourly") or {}
+          sig = h.get("signals") or {}
           for k in ("sigOverall1h","sigEMA1h","sigSMI1h"):
-              if k not in sig or "state" not in sig[k]:
-                  print("validate: missing hourly signal:", k); sys.exit(2)
+              if not isinstance(sig.get(k), dict) or "state" not in sig[k]:
+                  print("validate: missing hourly.signals", k); sys.exit(2)
           print("validate: OK")
           PY
 
       - name: Write heartbeat
         run: |
-          set -euo pipefail
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
 
       - name: Detect change vs remote
-        id: changed
+        id: diff
         env:
           LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
           set -euo pipefail
-          CHANGED="true"
+          changed=true
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
             git show "origin/${LIVE_BRANCH}:data/outlook_hourly.json" > /tmp/prev.json || true
             if [ -s /tmp/prev.json ] && cmp -s data/outlook_hourly.json /tmp/prev.json; then
-              CHANGED="false"
+              changed=false
             fi
           fi
-          echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
-          echo "diff: changed=${CHANGED}"
+          echo "changed=${changed}" >> "$GITHUB_OUTPUT"
 
       - name: Publish live branch
-        if: ${{ steps.changed.outputs.changed == 'true' }}
+        if: ${{ steps.diff.outputs.changed == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -195,6 +195,3 @@ jobs:
             git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
             git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
           fi
-
-      - name: Done
-        run: echo "Hourly build complete"
