@@ -108,7 +108,7 @@ jobs:
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
 
-      # 4) Engine Lights integrations (read local/hourly only; no Polygon inside these)
+      # 4) Engine Lights integrations (read local/hourly only; no Polygon)
       - name: Compute Lux strategy (10m)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
@@ -164,7 +164,17 @@ jobs:
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
-      # 7) STALE-GUARD before publish (YAML-safe; fixed heredoc)
+      # ---------- Ensure jq is available (for stale-guard) ----------
+      - name: Ensure jq is available
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: |
+          set -e
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+
+      # 7) STALE-GUARD before publish (Bash + jq; YAML-safe)
       - name: Stale-guard (skip publish if newer live exists)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         id: stale
@@ -175,26 +185,19 @@ jobs:
           echo "Checking if newer live file exists..."
           START_TS="${START_TS:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
           curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/outlook_intraday.json?t=$(date +%s)" -o /tmp/live.json || true
-          
-          python - <<'PY'
-import json, datetime, os
-def iso_to_sec(ts):
-    try:
-        return int(datetime.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").timestamp())
-    except Exception:
-        return 0
-live_ts = 0
-try:
-    j = json.load(open("/tmp/live.json","r",encoding="utf-8"))
-    ts = j.get("meta",{}).get("last_full_run_utc") or j.get("updated_at_utc") or j.get("updated_at")
-    if ts: live_ts = iso_to_sec(ts)
-except Exception as e:
-    print("[stale] could not parse live:", e)
-start_ts = iso_to_sec(os.environ.get("START_TS",""))
-print(f"[stale] START_TS={start_ts}, LIVE_TS={live_ts}")
-# Set GitHub output
-print(f"::set-output name=newer::{'true' if live_ts > start_ts else 'false'}")
-PY
+          LIVE_TS=$(jq -r '.meta.last_full_run_utc // .updated_at_utc // .updated_at // empty' /tmp/live.json || true)
+          echo "START_TS=$START_TS"
+          echo "LIVE_TS=${LIVE_TS:-none}"
+          if [ -n "${LIVE_TS}" ]; then
+            S=$(date -u -d "$START_TS" +%s)
+            L=$(date -u -d "$LIVE_TS"  +%s 2>/dev/null || echo 0)
+            if [ "$L" -gt "$S" ]; then
+              echo "newer=true" >> "$GITHUB_OUTPUT"
+              echo "⏸ Newer live exists — skip publish."
+              exit 0
+            fi
+          fi
+          echo "newer=false" >> "$GITHUB_OUTPUT"
 
       # 8) Detect change vs remote (skip publish if identical)
       - name: Detect change vs remote
@@ -215,7 +218,7 @@ PY
           echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
           echo "[diff] changed=${CHG}"
 
-      # 9) Publish live (detached-HEAD safe) only if not stale AND changed
+      # 9) Publish live branch (safe) only if not stale AND changed
       - name: Publish live branch
         if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.changed.outputs.changed == 'true' }}
         env:
