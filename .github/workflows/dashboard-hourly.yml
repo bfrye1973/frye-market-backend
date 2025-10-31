@@ -1,7 +1,7 @@
 name: dashboard-hourly
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
     - cron: "*/5 * * * 1-5"  # every 5 minutes on weekdays (UTC)
 
