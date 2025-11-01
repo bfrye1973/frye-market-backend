@@ -1,7 +1,7 @@
 {
   "version": "sandbox-10m-deltas",
-  "updated_at": "2025-10-31 18:23:19",
-  "updated_at_utc": "2025-11-01T01:23:19Z",
+  "updated_at": "2025-10-31 19:02:28",
+  "updated_at_utc": "2025-11-01T02:02:28Z",
   "metrics": {
     "breadth_10m_pct": 49.09,
     "momentum_10m_pct": 48.83,
@@ -32,7 +32,7 @@
     }
   },
   "engineLights": {
-    "updatedAt": "2025-10-31 18:23:19",
+    "updatedAt": "2025-10-31 19:02:28",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -40,19 +40,19 @@
         "active": false,
         "severity": "info",
         "reason": "ΔB +0.00 + ΔM +0.00 = +0.00",
-        "lastChanged": "2025-10-31 18:23:19"
+        "lastChanged": "2025-10-31 19:02:28"
       },
       "sigAccelDown": {
         "active": false,
         "severity": "warn",
         "reason": "ΔB +0.00 + ΔM +0.00 = +0.00",
-        "lastChanged": "2025-10-31 18:23:19"
+        "lastChanged": "2025-10-31 19:02:28"
       },
       "sigCompression": {
         "active": true,
         "severity": "warn",
         "reason": "PSI 100.0",
-        "lastChanged": "2025-10-31 18:23:19"
+        "lastChanged": "2025-10-31 19:02:28"
       },
       "sigOverall10m": {
         "state": "neutral",
@@ -85,22 +85,22 @@
     "trend10m": {
       "state": "yellow",
       "reason": "Neutral/transition",
-      "updatedAt": "2025-11-01T01:23:19Z"
+      "updatedAt": "2025-11-01T02:02:28Z"
     }
   },
   "meta": {
-    "last_full_run_utc": "2025-11-01T01:23:20Z",
+    "last_full_run_utc": "2025-11-01T02:02:29Z",
     "source": "mirror",
     "sandbox": true
   },
   "deltas": {
     "market": {
-      "dBreadthPct": -46.73,
-      "dMomentumPct": -43.51,
-      "netTilt": -45.12,
+      "dBreadthPct": 0.0,
+      "dMomentumPct": 0.0,
+      "netTilt": 0.0,
       "riskOnPct": 0.0
     },
     "sectors": {}
   },
-  "deltasUpdatedAt": "2025-10-31T19:02:43-07:00"
+  "deltasUpdatedAt": "2025-11-01T13:59:33-07:00"
 }
