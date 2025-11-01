@@ -4,7 +4,7 @@ on:
   workflow_dispatch: {}
   schedule:
     # Every 5 minutes, all days (UTC) — includes weekends
-    - cron: "*/5 * * * 0-6"
+    - cron: "0 * * * 0-6"   # every hour, includes weekends
 
 defaults:
   run:
