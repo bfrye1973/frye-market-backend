@@ -3,7 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 7 minutes, all days (UTC) — includes weekends for testing
+    # Every 7 minutes, ALL days (UTC) — includes weekends for testing
     - cron: "*/7 * * * 0-6"
 
 defaults:
@@ -19,18 +19,21 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false            # do not cancel; keep full logs for diagnostics
+      cancel-in-progress: false            # keep full logs for diagnostics
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
+
+      # --- Toggle this to "false" after testing ---
+      TESTING_MODE: "true"
 
       # --- Performance knobs (no algo changes) ---
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
       FD_MAX_WORKERS: "8"                  # avoid Polygon 429 long tails
       FD_RETRY_MAX: "0"
-      FD_LOOKBACK_DAYS: "0"                # today-only
+      FD_LOOKBACK_DAYS: "0"                # today-only in source builder
 
       # Hints for engine-lights scripts (NO Polygon in 10m scripts)
       INTRADAY_JSON_PATH: "data/outlook_intraday.json"
@@ -46,16 +49,32 @@ jobs:
           echo "START_TS=$START_TS"
 
       # ---------- Market-hours guard (AZ) ----------
-      # PRE + RTH + AFTER-HOURS, weekdays: 04:00–18:59 AZ
+      # In TESTING_MODE=true it always runs.
+      # Set TESTING_MODE="false" to enforce weekdays 04:00–18:59 AZ only.
       - name: Market hours guard (AZ)
         id: market_hours
         run: |
-          echo "run=true" >> "$GITHUB_OUTPUT" 
+          if [ "${TESTING_MODE}" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TZ="America/Phoenix"
+          DOW=$(TZ=$TZ date +'%u')   # 1..7
+          HOUR=$(TZ=$TZ date +'%H')  # 00..23
+          echo "AZ now: $(TZ=$TZ date) (DOW=$DOW HOUR=$HOUR)"
+          # Weekdays only; allow PRE+RTH+After-hours: 04:00–18:59 AZ
+          if [ "$DOW" -ge 6 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/checkout@v4
         with: { fetch-depth: 1 }
+
+      # (No pip install — use stdlib only)
 
       # 1) Build sector source (today-only, throttled)
       - name: Build sectorCards source (10m)
@@ -179,7 +198,9 @@ jobs:
 
       - name: Write heartbeat
         if: ${{ steps.market_hours.outputs.run == 'true' }}
-        run: date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
+        run: |
+          set -euo pipefail
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
       # ---------- Ensure jq is available (for stale-guard) ----------
       - name: Ensure jq is available
@@ -201,15 +222,96 @@ jobs:
           set -euo pipefail
           echo "Checking if newer live file exists..."
           START_TS="${START_TS:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
-          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/outlook_intraday.json?t=$(date +%s)" -o /tmp/live.json || true
+
+          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/outlook_intraday.json?t=$(date +%s)" \
+            -o /tmp/live.json || true
+
           LIVE_TS=$(jq -r '.meta.last_full_run_utc // .updated_at_utc // .updated_at // empty' /tmp/live.json || true)
+
           echo "START_TS=$START_TS"
           echo "LIVE_TS=${LIVE_TS:-none}"
-          if [ -n "${LIVE_TS}" ]; then
+
+          if [ -n "$LIVE_TS" ]; then
             S=$(date -u -d "$START_TS" +%s)
             L=$(date -u -d "$LIVE_TS"  +%s 2>/dev/null || echo 0)
             if [ "$L" -gt "$S" ]; then
               echo "newer=true" >> "$GITHUB_OUTPUT"
-              echo "⏸ Newer live exists — skip publish."
+              echo "Newer live exists — skip publish."
               exit 0
-            endif
+            fi
+          fi
+
+          echo "newer=false" >> "$GITHUB_OUTPUT"
+
+      # 8) Stage artifacts BEFORE cleaning (for publish)
+      - name: Stage artifacts
+        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/live10
+          cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
+          cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
+
+      # 9) Detect change vs remote (publish only on change)
+      - name: Detect change vs remote
+        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' }}
+        id: diff
+        env:
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
+        run: |
+          set -euo pipefail
+          CHG="true"
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
+            git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/prev.json 2>/dev/null || true
+            if [ -s /tmp/prev.json ] && cmp -s /tmp/prev.json /tmp/live10/outlook_intraday.json; then
+              CHG="false"
+            fi
+          fi
+          echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
+          echo "[diff] changed=${CHG}"
+
+      # 10) Publish live branch (safe) only if NOT stale AND changed
+      - name: Publish live branch
+        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
+        run: |
+          set -euo pipefail
+          git config user.name  "actions-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git reset --hard
+          git clean -fdx
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${LIVE_BRANCH}"
+            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
+          else
+            git checkout --orphan "${LIVE_BRANCH}"
+          fi
+          mkdir -p data
+          cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
+          cp -f /tmp/live10/heartbeat_10min.txt   data/heartbeat_10min.txt
+          git add data
+          git commit -m "10m publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
+
+      # 11) Trigger Render deploy (only if changed)
+      - name: Trigger Render deploy (backend-1)
+        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' && success() }}
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RENDER_DEPLOY_HOOK:-}" ]; then
+            echo "Triggering Render deploy..."
+            curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
+          else
+            echo "No Render deploy hook configured. Skipping."
+          fi
+
+      - name: Done
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: echo "10m full run complete (overwrite-safe, repaired cards)"
