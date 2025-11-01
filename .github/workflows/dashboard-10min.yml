@@ -3,8 +3,8 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 7 minutes on weekdays (UTC)
-    - cron: "*/7 * * * 1-5"
+    # Every 7 minutes, all days (UTC) — includes weekends for testing
+    - cron: "*/7 * * * 0-6"
 
 defaults:
   run:
@@ -19,7 +19,7 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false            # do not cancel; let runs finish for diagnostics
+      cancel-in-progress: false            # do not cancel; keep full logs for diagnostics
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
@@ -28,9 +28,9 @@ jobs:
       # --- Performance knobs (no algo changes) ---
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
-      FD_MAX_WORKERS: "8"                  # safe to avoid Polygon 429 backoffs
+      FD_MAX_WORKERS: "8"                  # avoid Polygon 429 long tails
       FD_RETRY_MAX: "0"
-      FD_LOOKBACK_DAYS: "0"                # today-only in source builder
+      FD_LOOKBACK_DAYS: "0"                # today-only
 
       # Hints for engine-lights scripts (NO Polygon in 10m scripts)
       INTRADAY_JSON_PATH: "data/outlook_intraday.json"
@@ -62,8 +62,6 @@ jobs:
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         uses: actions/checkout@v4
         with: { fetch-depth: 1 }
-
-      # (No pip install — use stdlib only)
 
       # 1) Build sector source (today-only, throttled)
       - name: Build sectorCards source (10m)
@@ -127,7 +125,7 @@ jobs:
           set -euo pipefail
           python -u scripts/update_pills_10m_state.py || true
 
-      # 5) Robust validate/repair sectorCards from saved source (FIX FOR BLANK CARDS)
+      # 5) Robust validate/repair sectorCards from saved source
       - name: Validate & Repair sectorCards (robust)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
@@ -168,7 +166,7 @@ jobs:
               json.dump(intraday, open("data/outlook_intraday.json","w",encoding="utf-8"), separators=(",",":"))
               print("[repair] repair applied")
           else:
-              print("[repair] WARN: repair failed; publishing anyway (UI will show neutral)")
+              print("[repair] WARN: repair failed; publishing anyway")
           PY
 
       # 6) Stamp meta
@@ -187,9 +185,7 @@ jobs:
 
       - name: Write heartbeat
         if: ${{ steps.market_hours.outputs.run == 'true' }}
-        run: |
-          set -euo pipefail
-          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
+        run: date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
 
       # ---------- Ensure jq is available (for stale-guard) ----------
       - name: Ensure jq is available
@@ -222,79 +218,4 @@ jobs:
               echo "newer=true" >> "$GITHUB_OUTPUT"
               echo "⏸ Newer live exists — skip publish."
               exit 0
-            fi
-          fi
-          echo "newer=false" >> "$GITHUB_OUTPUT"
-
-      # 8) Stage artifacts BEFORE cleaning (for publish)
-      - name: Stage artifacts
-        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' }}
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/live10
-          cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
-          cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
-
-      # 9) Detect change vs remote (publish only on change)
-      - name: Detect change vs remote
-        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' }}
-        id: diff
-        env:
-          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
-        run: |
-          set -euo pipefail
-          CHG="true"
-          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
-            git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
-            git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/prev.json 2>/dev/null || true
-            if [ -s /tmp/prev.json ] && cmp -s /tmp/prev.json /tmp/live10/outlook_intraday.json; then
-              CHG="false"
-            fi
-          fi
-          echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
-          echo "[diff] changed=${CHG}"
-
-      # 10) Publish live branch (safe) only if NOT stale AND changed
-      - name: Publish live branch
-        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
-        run: |
-          set -euo pipefail
-          git config user.name  "actions-bot"
-          git config user.email "bot@users.noreply.github.com"
-          git reset --hard
-          git clean -fdx
-          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
-            git fetch origin "${LIVE_BRANCH}"
-            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
-          else
-            git checkout --orphan "${LIVE_BRANCH}"
-          fi
-          mkdir -p data
-          cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
-          cp -f /tmp/live10/heartbeat_10min.txt   data/heartbeat_10min.txt
-          git add data
-          git commit -m "10m publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
-          git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
-
-      # 11) Trigger Render deploy (only if changed)
-      - name: Trigger Render deploy (backend-1)
-        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' && success() }}
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
-        run: |
-          set -euo pipefail
-          if [ -n "${RENDER_DEPLOY_HOOK:-}" ]; then
-            echo "Triggering Render deploy..."
-            curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
-          else
-            echo "No Render deploy hook configured. Skipping."
-          fi
-
-      - name: Done
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
-        run: echo "10m full run complete (overwrite-safe, repaired cards)"
+            endif
