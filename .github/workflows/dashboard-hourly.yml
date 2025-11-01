@@ -112,10 +112,54 @@ jobs:
           mkdir -p data
           python -u scripts/make_dashboard_hourly.py --source data/outlook_source.json --out data/outlook_hourly.json
 
+      # === 1-HOUR HOOK: compute Lux trend + always-on 1h pills ===
       - name: Compute Lux strategy (1h)
         run: |
           set -euo pipefail
           python -u scripts/compute_trend_hourly.py
+
+      # Safety net: ensure required 1h signals exist even if metrics are sparse
+      - name: Ensure required hourly signals exist (safe)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, datetime, sys
+          path = "data/outlook_hourly.json"
+          try:
+              j = json.load(open(path, "r", encoding="utf-8"))
+          except Exception:
+              print("[safe] hourly file missing"); sys.exit(0)
+          def now(): return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+          hourly = j.get("hourly") or {}
+          signals = hourly.get("signals") or {}
+          metrics = j.get("metrics") or {}
+          def assure(key, state="neutral"):
+              s = signals.get(key) or {}
+              if "state" not in s: s["state"] = state
+              if "lastChanged" not in s: s["lastChanged"] = now()
+              signals[key] = s
+          # sigOverall1h
+          overall = (hourly.get("overall1h") or {}).get("state") or "neutral"
+          assure("sigOverall1h", state=str(overall).lower())
+          # sigEMA1h
+          ema_sign = metrics.get("ema_sign")
+          if isinstance(ema_sign, (int,float)):
+              ema_state = "bull" if ema_sign>0 else "bear" if ema_sign<0 else "neutral"
+          else:
+              ema_state = "neutral"
+          assure("sigEMA1h", state=ema_state)
+          # sigSMI1h
+          combo = metrics.get("momentum_combo_1h_pct")
+          if isinstance(combo,(int,float)):
+              smi_state = "bull" if combo>50.0 else "bear" if combo<50.0 else "neutral"
+          else:
+              smi_state = "neutral"
+          assure("sigSMI1h", state=smi_state)
+          hourly["signals"] = signals
+          j["hourly"] = hourly
+          json.dump(j, open(path, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+          print("[safe] ensured:", list(signals.keys()))
+          PY
 
       - name: Validate required keys
         run: |
