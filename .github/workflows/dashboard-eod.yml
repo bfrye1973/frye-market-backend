@@ -3,8 +3,9 @@ name: dashboard-eod
 on:
   workflow_dispatch: {}
   schedule:
-    # Weekdays near US close (≈ 4:10 PM ET)
-    - cron: "10 21 * * 1-5"
+    # TEST cadence while calibrating: every 30 min, ALL days (edit to what you prefer)
+    # when finished, change back to: "10 21 * * 1-5"
+    - cron: "*/30 * * * 0-6"
 
 defaults:
   run:
@@ -12,15 +13,21 @@ defaults:
 
 jobs:
   build_and_publish_eod:
-    name: Build and Publish EOD
+    name: Build and Publish EOD (Lux + sectorCards)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
+    concurrency:
+      group: dashboard-eod
+      cancel-in-progress: true
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-eod
       PYTHONUNBUFFERED: "1"
+
+      # Toggle while testing (true = always run / weekends ok)
+      TESTING_MODE: "true"
 
     steps:
       - name: Checkout
@@ -29,19 +36,39 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      # If you keep using requests, uncomment the two steps below.
+      # - uses: actions/setup-python@v5
+      #   with:
+      #     python-version: "3.11"
+      #     cache: "pip"
+      # - name: Install deps (optional)
+      #   run: |
+      #     set -euo pipefail
+      #     python -m pip install --upgrade pip
+      #     pip install requests python-dateutil
 
-      - name: Install deps
+      # ---- Optional daily guard (keep enabled only if you want to limit times) ----
+      # For now we bypass to allow after-hours / weekend testing
+      - name: Daily guard (bypass during TESTING_MODE)
+        id: guard
         run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          pip install requests python-dateutil
+          if [ "${TESTING_MODE}" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Real EOD window example (~15:55–16:30 ET); customize as needed.
+          TZ="America/New_York"
+          H=$(TZ=$TZ date +'%H')
+          M=$(TZ=$TZ date +'%M')
+          # Run only from 15:50–16:35 ET (approx)
+          if [ "$H" -lt 15 ] || [ "$H" -gt 16 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
 
       # 1) Build sectorCards source (daily)
       - name: Build sectorCards source (daily)
+        if: ${{ steps.guard.outputs.run != 'false' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -52,6 +79,7 @@ jobs:
 
       # 2) Normalize to sectorCards
       - name: Normalize sectorCards source
+        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -74,6 +102,7 @@ jobs:
           PY
 
       - name: Validate sectorCards source
+        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -88,6 +117,7 @@ jobs:
 
       # 3) Build EOD payload
       - name: Build EOD payload
+        if: ${{ steps.guard.outputs.run != 'false' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -98,11 +128,12 @@ jobs:
 
       # 3.5) Mirror to legacy daily block (optional, keep if used by UI)
       - name: Mirror to legacy daily block
+        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
-          def band_vol(v):
+          def band_vol(v):  # informational only, not used by Lux
             if v is None: return None
             return "high" if v>=1 else ("elevated" if v>=0.5 else "calm")
           def band_liq(v):
@@ -133,17 +164,20 @@ jobs:
 
       # 4) Compute Lux strategy (EOD)
       - name: Compute Lux strategy (EOD)
+        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           python -u scripts/compute_trend_eod.py
 
       # 5) Heartbeat + publish live
       - name: Write heartbeat
+        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_eod.txt
 
       - name: Stage artifacts
+        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/eod
@@ -151,6 +185,7 @@ jobs:
           cp -f data/heartbeat_eod.txt  /tmp/eod/heartbeat_eod.txt
 
       - name: Prepare live branch
+        if: ${{ steps.guard.outputs.run != 'false' }}
         env:
           LIVE_BRANCH: data-live-eod
         run: |
@@ -171,6 +206,7 @@ jobs:
           cp -f /tmp/eod/heartbeat_eod.txt  data/heartbeat_eod.txt
 
       - name: Commit and push live branch
+        if: ${{ steps.guard.outputs.run != 'false' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
