@@ -3,60 +3,57 @@ name: dashboard-eod
 on:
   workflow_dispatch: {}
   schedule:
-    # 1) 30 min before market open (7:00 AM AZ)
+    # Arizona-aligned triggers (Mon–Fri)
+    # 1) 30 min before open (7:00 AM AZ = 14:00 UTC)
     - cron: "0 14 * * 1-5"
-    # 2) 10 min after market open (7:40 AM AZ)
+    # 2) 10 min after open (7:40 AM AZ = 14:40 UTC)
     - cron: "40 14 * * 1-5"
-    # 3) Midday pulse (10:45 AM AZ)
+    # 3) Midday pulse (10:45 AM AZ = 17:45 UTC)
     - cron: "45 17 * * 1-5"
-    # 4) 15 min before market close (1:45 PM AZ)
+    # 4) 15 min before close (1:45 PM AZ = 20:45 UTC)
     - cron: "45 20 * * 1-5"
-    # 5) 15 min after market close (2:15 PM AZ)
+    # 5) 15 min after close (2:15 PM AZ = 21:15 UTC)
     - cron: "15 21 * * 1-5"
-      # If you keep using requests, uncomment the two steps below.
-      # - uses: actions/setup-python@v5
-      #   with:
-      #     python-version: "3.11"
-      #     cache: "pip"
-      # - name: Install deps (optional)
-      #   run: |
-      #     set -euo pipefail
-      #     python -m pip install --upgrade pip
-      #     pip install requests python-dateutil
 
-      # ---- Optional daily guard (keep enabled only if you want to limit times) ----
-      # For now we bypass to allow after-hours / weekend testing
-      - name: Daily guard (bypass during TESTING_MODE)
-        id: guard
-        run: |
-          if [ "${TESTING_MODE}" = "true" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Real EOD window example (~15:55–16:30 ET); customize as needed.
-          TZ="America/New_York"
-          H=$(TZ=$TZ date +'%H')
-          M=$(TZ=$TZ date +'%M')
-          # Run only from 15:50–16:35 ET (approx)
-          if [ "$H" -lt 15 ] || [ "$H" -gt 16 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          echo "run=true" >> "$GITHUB_OUTPUT"
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build_and_publish_eod:
+    name: Build and Publish EOD (Lux + sectorCards)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: dashboard-eod
+      cancel-in-progress: true
+    env:
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-eod
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
 
       # 1) Build sectorCards source (daily)
       - name: Build sectorCards source (daily)
-        if: ${{ steps.guard.outputs.run != 'false' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py --mode daily --out data/outlook_source.json
+          python -u scripts/build_outlook_source_from_polygon.py \
+            --mode daily --out data/outlook_source.json
           head -n 60 data/outlook_source.json || true
 
       # 2) Normalize to sectorCards
       - name: Normalize sectorCards source
-        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -79,7 +76,6 @@ on:
           PY
 
       - name: Validate sectorCards source
-        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -89,12 +85,11 @@ on:
           need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
           if len(cards)!=11 or not all(k in cards[0] for k in need):
             print(f"[sectors] INVALID source: cards={len(cards)} need={need}"); sys.exit(2)
-          print(f"[sectors] OK cards=11 | {cards[0]['sector']}")
+          print(f"[sectors] OK cards=11 | {cards[0]['sector']}") 
           PY
 
       # 3) Build EOD payload
       - name: Build EOD payload
-        if: ${{ steps.guard.outputs.run != 'false' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
@@ -105,20 +100,22 @@ on:
 
       # 3.5) Mirror to legacy daily block (optional, keep if used by UI)
       - name: Mirror to legacy daily block
-        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
-          def band_vol(v):  # informational only, not used by Lux
+          def band_vol(v):
             if v is None: return None
             return "high" if v>=1 else ("elevated" if v>=0.5 else "calm")
           def band_liq(v):
             if v is None: return None
             return "good" if v>=60 else ("normal" if v>=40 else "light")
           def num(x):
-            try: v=float(x); return None if v!=v else v
-            except: return None
+            try:
+              v=float(x)
+              return None if v!=v else v
+            except:
+              return None
           p="data/outlook.json"
           j=json.load(open(p,"r",encoding="utf-8"))
           m=j.get("metrics") or {}
@@ -131,30 +128,36 @@ on:
           if t is not None:  trendDaily["trend"]["emaSlope"]=t
           if p1 is not None: trendDaily["participation"]["pctAboveMA"]=p1
           if sq is not None: j.setdefault("metrics",{})["squeeze_daily_pct"]=sq
-          if v  is not None: trendDaily["volatilityRegime"]["atrPct"]=v; b=band_vol(v);  trendDaily["volatilityRegime"]["band"]=b or trendDaily["volatilityRegime"].get("band")
-          if li is not None: trendDaily["liquidityRegime"]["psi"]=li; b=band_liq(li); trendDaily["liquidityRegime"]["band"]=b or trendDaily["liquidityRegime"].get("band")
-          if ro is not None: rot=j.get("rotation") or {}; rot["riskOnPct"]=ro; j["rotation"]=rot
+          if v  is not None:
+            trendDaily["volatilityRegime"]["atrPct"]=v
+            b=band_vol(v)
+            if b: trendDaily["volatilityRegime"]["band"]=b
+          if li is not None:
+            trendDaily["liquidityRegime"]["psi"]=li
+            b=band_liq(li)
+            if b: trendDaily["liquidityRegime"]["band"]=b
+          if ro is not None:
+            rot=j.get("rotation") or {}
+            rot["riskOnPct"]=ro
+            j["rotation"]=rot
           j["trendDaily"]=trendDaily
           json.dump(j,open(p,"w",encoding="utf-8"),separators=(",",":"))
           print("[eod-mirror] trendDaily keys:", list(trendDaily.keys()))
           PY
 
-      # 4) Compute Lux strategy (EOD)
+      # 4) Compute Lux strategy (EOD) — two-color fields
       - name: Compute Lux strategy (EOD)
-        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           python -u scripts/compute_trend_eod.py
 
       # 5) Heartbeat + publish live
       - name: Write heartbeat
-        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_eod.txt
 
       - name: Stage artifacts
-        if: ${{ steps.guard.outputs.run != 'false' }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/eod
@@ -162,7 +165,6 @@ on:
           cp -f data/heartbeat_eod.txt  /tmp/eod/heartbeat_eod.txt
 
       - name: Prepare live branch
-        if: ${{ steps.guard.outputs.run != 'false' }}
         env:
           LIVE_BRANCH: data-live-eod
         run: |
@@ -183,7 +185,6 @@ on:
           cp -f /tmp/eod/heartbeat_eod.txt  data/heartbeat_eod.txt
 
       - name: Commit and push live branch
-        if: ${{ steps.guard.outputs.run != 'false' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
