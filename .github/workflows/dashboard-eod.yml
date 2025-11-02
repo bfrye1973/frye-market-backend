@@ -3,39 +3,16 @@ name: dashboard-eod
 on:
   workflow_dispatch: {}
   schedule:
-    # TEST cadence while calibrating: every 30 min, ALL days (edit to what you prefer)
-    # when finished, change back to: "10 21 * * 1-5"
-    - cron: "*/30 * * * 0-6"
-
-defaults:
-  run:
-    shell: bash
-
-jobs:
-  build_and_publish_eod:
-    name: Build and Publish EOD (Lux + sectorCards)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: write
-    concurrency:
-      group: dashboard-eod
-      cancel-in-progress: true
-    env:
-      TZ: America/Phoenix
-      LIVE_BRANCH: data-live-eod
-      PYTHONUNBUFFERED: "1"
-
-      # Toggle while testing (true = always run / weekends ok)
-      TESTING_MODE: "true"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-
+    # 1) 30 min before market open (7:00 AM AZ)
+    - cron: "0 14 * * 1-5"
+    # 2) 10 min after market open (7:40 AM AZ)
+    - cron: "40 14 * * 1-5"
+    # 3) Midday pulse (10:45 AM AZ)
+    - cron: "45 17 * * 1-5"
+    # 4) 15 min before market close (1:45 PM AZ)
+    - cron: "45 20 * * 1-5"
+    # 5) 15 min after market close (2:15 PM AZ)
+    - cron: "15 21 * * 1-5"
       # If you keep using requests, uncomment the two steps below.
       # - uses: actions/setup-python@v5
       #   with:
