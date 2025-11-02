@@ -3,8 +3,8 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 5 minutes, all days (UTC) — includes weekends
-    - cron: "0 * * * 0-6"   # every hour, includes weekends
+    # Run hourly at :05 (Mon–Fri). Staggered to avoid top-of-hour pileups.
+    - cron: "5 * * * 1-5"
 
 defaults:
   run:
@@ -14,24 +14,27 @@ jobs:
   hourly:
     name: Build & Publish Hourly (1h context, long lookbacks)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 30                # ⬅️ raised from 12 → 30
     permissions:
       contents: write
     concurrency:
       group: dashboard-hourly
       cancel-in-progress: true
+
     env:
-      TZ: "America/Phoenix"
-      LIVE_BRANCH: "data-live-hourly"
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
-      HOUR_LOOKBACK_DAYS: "14"
-      H4_LOOKBACK_DAYS: "30"
+      # Lighter lookbacks to reduce runtime variance
+      HOUR_LOOKBACK_DAYS: "10"         # was 14
+      H4_LOOKBACK_DAYS: "21"           # was 30
       EMA_FAST: "8"
       EMA_SLOW: "18"
       VOL_FAST: "3"
       VOL_SLOW: "12"
-      FD_MAX_WORKERS: "8"
-      FD_RETRY_MAX: "0"
+      # So we don’t run into Polygon 429s or long backoffs
+      FD_MAX_WORKERS: "6"              # was 8
+      FD_RETRY_MAX: "1"                # was 0 or more — fail fast on bad slowness
 
     steps:
       - name: Checkout
@@ -39,67 +42,92 @@ jobs:
         with:
           fetch-depth: 1
 
+      # 1) Build sectorCards source (1h)
       - name: Build sectorCards source (1h)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          FD_MAX_WORKERS: ${{ env.FD_MAX_WORKERS }}
+          FD_RETRY_MAX:   ${{ env.FD_RETRY_MAX }}
+          HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
+          H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
+          EMA_FAST: ${{ env.EMA_FAST }}
+          EMA_SLOW: ${{ env.EMA_SLOW }}
+          VOL_FAST: ${{ env.VOL_FAST }}
+          VOL_SLOW: ${{ env.VOL_SLOW }}
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py --mode hourly --out data/outlook_source.json
+          python -u scripts/build_outlook_source_from_polygon.py \
+            --mode hourly --out data/outlook_source.json
 
+      # 2) Normalize source (groups → sectorCards)
       - name: Normalize sectorCards source
         run: |
+          set -euo pipefail
           python - <<'PY'
           import json, sys
           src = "data/outlook_source.json"
           try:
-              doc = json.load(open(src,"r",encoding="utf-8"))
+            doc = json.load(open(src,"r",encoding="utf-8"))
           except Exception as e:
-              print("invalid source:", e); sys.exit(1)
+            print("invalid source:", e); sys.exit(1)
+
           if isinstance(doc.get("sectorCards"), list):
-              out = {"sectorCards": doc["sectorCards"]}
+            out = {"sectorCards": doc["sectorCards"]}
           elif isinstance(doc.get("groups"), dict):
-              groups = doc["groups"]
-              alias = {
-                  "healthcare":"health care","health-care":"health care",
-                  "info tech":"information technology","technology":"information technology","tech":"information technology",
-                  "communications":"communication services","comm":"communication services",
-                  "staples":"consumer staples","discretionary":"consumer discretionary",
-                  "reit":"real estate","industry":"industrials"
-              }
-              order = ["information technology","materials","health care","communication services",
-                       "real estate","energy","consumer staples","consumer discretionary",
-                       "financials","utilities","industrials"]
-              def norm(s): return (s or "").strip().lower()
-              rows=[]
-              for name in order:
-                  k = alias.get(norm(name),norm(name))
-                  g = groups.get(k,{})
-                  nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
-                  b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
-                  m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
-                  rows.append({"sector":name.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn})
-              out={"sectorCards":rows}
+            groups = doc["groups"]
+            alias = {
+              "healthcare":"health care","health-care":"health care",
+              "info tech":"information technology","technology":"information technology","tech":"information technology",
+              "communications":"communication services","comm":"communication services",
+              "staples":"consumer staples","discretionary":"consumer discretionary",
+              "reit":"real estate","industry":"industrials"
+            }
+            order = ["information technology","materials","health care","communication services",
+                     "real estate","energy","consumer staples","consumer discretionary",
+                     "financials","utilities","industrials"]
+            def norm(s): return (s or "").strip().lower()
+            rows=[]
+            for name in order:
+              k = alias.get(norm(name), norm(name))
+              g = groups.get(k, {})
+              nh=int(g.get("nh",0)); nl=int(g.get("nl",0))
+              up=int(g.get("u",0));  dn=int(g.get("d",0))
+              b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
+              m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
+              rows.append({"sector":name.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn})
+            out={"sectorCards":rows}
           else:
-              print("missing sectorCards/groups"); sys.exit(1)
+            print("missing sectorCards/groups"); sys.exit(1)
+
           json.dump(out, open(src,"w",encoding="utf-8"), ensure_ascii=False)
           print("sectorCards:", len(out["sectorCards"]))
           PY
 
+      # 3) Build hourly payload (1h + 4h lookbacks)
       - name: Build hourly payload (1h + 4h long lookbacks)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
+          H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
+          EMA_FAST: ${{ env.EMA_FAST }}
+          EMA_SLOW: ${{ env.EMA_SLOW }}
+          VOL_FAST: ${{ env.VOL_FAST }}
+          VOL_SLOW: ${{ env.VOL_SLOW }}
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/make_dashboard_hourly.py --source data/outlook_source.json --out data/outlook_hourly.json
+          python -u scripts/make_dashboard_hourly.py \
+            --source data/outlook_source.json \
+            --out    data/outlook_hourly.json
 
-      # === 1H Lux Hook ===
+      # 4) Lux hook (writes strategy.trend1h + luxTrend1h + ensures pills via script)
       - name: Compute Lux strategy (1h)
         run: |
           set -euo pipefail
           python -u scripts/compute_trend_hourly.py
 
+      # 5) Safety net: always create the 1h pills if metrics were sparse
       - name: Ensure required hourly signals exist (safe)
         run: |
           set -euo pipefail
@@ -120,73 +148,80 @@ jobs:
               s.setdefault("lastChanged",now())
               signals[k]=s
           overall=(hourly.get("overall1h") or {}).get("state") or "neutral"
-          assure("sigOverall1h",overall)
+          assure("sigOverall1h", str(overall).lower())
           ema_sign=metrics.get("ema_sign")
           if isinstance(ema_sign,(int,float)):
               ema_state="bull" if ema_sign>0 else "bear" if ema_sign<0 else "neutral"
           else: ema_state="neutral"
-          assure("sigEMA1h",ema_state)
+          assure("sigEMA1h", ema_state)
           combo=metrics.get("momentum_combo_1h_pct")
           if isinstance(combo,(int,float)):
               smi_state="bull" if combo>50 else "bear" if combo<50 else "neutral"
           else: smi_state="neutral"
-          assure("sigSMI1h",smi_state)
+          assure("sigSMI1h", smi_state)
           hourly["signals"]=signals
           j["hourly"]=hourly
           json.dump(j,open(path,"w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
           print("[safe] ensured:",list(signals.keys()))
           PY
 
+      # 6) Validate structure (metrics + pills + strategy)
       - name: Validate required keys
         run: |
+          set -euo pipefail
           python - <<'PY'
           import json,sys
           j=json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
           m=j.get("metrics") or {}
           need=["breadth_1h_pct","momentum_1h_pct","squeeze_1h_pct","liquidity_1h","volatility_1h_pct"]
           for k in need:
-              if k not in m:
-                  print("missing metric:",k); sys.exit(1)
+            if k not in m:
+              print("missing metric:",k); sys.exit(1)
           sig=(j.get("hourly") or {}).get("signals") or {}
           for k in ("sigOverall1h","sigEMA1h","sigSMI1h"):
-              if k not in sig or "state" not in sig[k]:
-                  print("missing signal:",k); sys.exit(1)
+            if k not in sig or "state" not in sig[k]:
+              print("missing signal:",k); sys.exit(1)
           st=(j.get("strategy") or {}).get("trend1h") or {}
           if "state" not in st or "updatedAt" not in st:
-              print("missing strategy.trend1h"); sys.exit(1)
+            print("missing strategy.trend1h"); sys.exit(1)
           print("OK")
           PY
 
       - name: Write heartbeat
         run: date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
 
+      # 7) Detect change vs remote
       - name: Detect change
         id: diff
+        env:
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
           set -euo pipefail
-          changed=true
-          if git rev-parse --verify --quiet "origin/${{ env.LIVE_BRANCH }}" >/dev/null; then
-            git fetch --depth=1 origin "${{ env.LIVE_BRANCH }}"
-            git show "origin/${{ env.LIVE_BRANCH }}:data/outlook_hourly.json" > /tmp/prev.json || true
-            if [ -s /tmp/prev.json ] && cmp -s data/outlook_hourly.json /tmp/prev.json; then
-              changed=false
+          CHANGED="true"
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
+            git show "origin/${LIVE_BRANCH}:data/outlook_hourly.json" > /tmp/prev.json 2>/dev/null || true
+            if [ -s /tmp/prev.json ] && cmp -s /tmp/prev.json data/outlook_hourly.json; then
+              CHANGED="false"
             fi
           fi
-          echo "changed=${changed}" >> $GITHUB_OUTPUT
+          echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
 
+      # 8) Publish (safe; no self-copy)
       - name: Publish live branch
         if: ${{ steps.diff.outputs.changed == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
           set -euo pipefail
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
-          git fetch --depth=1 origin "${{ env.LIVE_BRANCH }}" || true
-          git checkout -B "${{ env.LIVE_BRANCH }}" "origin/${{ env.LIVE_BRANCH }}" || git checkout -B "${{ env.LIVE_BRANCH }}"
+          git fetch --depth=1 origin "${LIVE_BRANCH}" || true
+          git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" || git checkout -B "${LIVE_BRANCH}"
           mkdir -p /tmp/push
           cp -f data/outlook_hourly.json /tmp/push/outlook_hourly.json
-          cp -f data/heartbeat_1h /tmp/push/heartbeat_1h
+          cp -f data/heartbeat_1h      /tmp/push/heartbeat_1h
           git rm -rf data || true
           mkdir -p data
           mv /tmp/push/* data/
@@ -195,5 +230,5 @@ jobs:
             echo "no changes to commit"
           else
             git commit -m "hourly publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            git push -f origin "${{ env.LIVE_BRANCH }}"
+            git push -f origin "${LIVE_BRANCH}"
           fi
