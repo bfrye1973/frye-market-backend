@@ -1,7 +1,7 @@
 {
   "version": "sandbox-10m-deltas",
-  "updated_at": "2025-11-01 16:55:36",
-  "updated_at_utc": "2025-11-01T23:55:36Z",
+  "updated_at": "2025-11-01 17:03:50",
+  "updated_at_utc": "2025-11-02T00:03:50Z",
   "metrics": {
     "breadth_10m_pct": 49.09,
     "momentum_10m_pct": 48.83,
@@ -32,7 +32,7 @@
     }
   },
   "engineLights": {
-    "updatedAt": "2025-11-01 16:55:36",
+    "updatedAt": "2025-11-01 17:03:50",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -40,19 +40,19 @@
         "active": false,
         "severity": "info",
         "reason": "ΔB +0.00 + ΔM +0.00 = +0.00",
-        "lastChanged": "2025-11-01 16:55:36"
+        "lastChanged": "2025-11-01 17:03:50"
       },
       "sigAccelDown": {
         "active": false,
         "severity": "warn",
         "reason": "ΔB +0.00 + ΔM +0.00 = +0.00",
-        "lastChanged": "2025-11-01 16:55:36"
+        "lastChanged": "2025-11-01 17:03:50"
       },
       "sigCompression": {
         "active": true,
         "severity": "warn",
         "reason": "PSI 100.0",
-        "lastChanged": "2025-11-01 16:55:36"
+        "lastChanged": "2025-11-01 17:03:50"
       },
       "sigOverall10m": {
         "state": "neutral",
@@ -85,7 +85,7 @@
     "trend10m": {
       "state": "yellow",
       "reason": "Trend 45.0 | Vol(green) | Sq(100.0%)",
-      "updatedAt": "2025-11-01T23:55:36Z"
+      "updatedAt": "2025-11-02T00:03:50Z"
     }
   },
   "luxTrend10m": {
@@ -99,7 +99,7 @@
     "volumeSentiment_band": "yellow"
   },
   "meta": {
-    "last_full_run_utc": "2025-11-01T23:55:36Z",
+    "last_full_run_utc": "2025-11-02T00:03:51Z",
     "source": "mirror",
     "sandbox": true
   },
@@ -112,5 +112,5 @@
     },
     "sectors": {}
   },
-  "deltasUpdatedAt": "2025-11-01T17:04:02-07:00"
+  "deltasUpdatedAt": "2025-11-01T17:42:56-07:00"
 }
