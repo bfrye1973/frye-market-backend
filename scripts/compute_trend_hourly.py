@@ -1,129 +1,267 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-compute_trend_hourly.py — Lux Trend (1h) post-processor
+name: dashboard-hourly
 
-- Two-color mapping (green/red) for Trend/Vol/Sq/Flow
-- Writes Lux mini-pill text AND numeric fields used by Engine-Lights:
-  j["lux1h"] and mirrored legacy keys under engineLights.*
-- Ensures 1h pills exist: sigOverall1h, sigEMA1h, sigSMI1h
-"""
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Run hourly at :05 (Mon–Fri). Staggered to avoid top-of-hour pileups.
+    - cron: "5 * * * 1-5"
 
-import json, datetime
+defaults:
+  run:
+    shell: bash
 
-HOURLY_PATH = "data/outlook_hourly.json"
+jobs:
+  hourly:
+    name: Build & Publish Hourly (1h context, long lookbacks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: dashboard-hourly
+      cancel-in-progress: true
 
-THRESH = {
-    "trend_green_min": 60.0,
-    "vol_low_max": 40.0,
-    "squeeze_open_max": 30.0,
-    "volsent_green_gt": 0.0
-}
+    env:
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-hourly
+      PYTHONUNBUFFERED: "1"
 
-def utc_now(): return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-def clamp(x, lo, hi): return max(lo, min(hi, x))
-def load_json(p):
-    try: return json.load(open(p,"r",encoding="utf-8"))
-    except Exception: return {}
-def save_json(p,obj): json.dump(obj, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
+      # Long-lookback knobs consumed by make_dashboard_hourly.py
+      HOUR_LOOKBACK_DAYS: "10"     # ~10 trading days of 1h bars
+      H4_LOOKBACK_DAYS:  "21"      # for SMI 4h component
+      EMA_FAST:          "8"
+      EMA_SLOW:          "18"
+      VOL_FAST:          "3"
+      VOL_SLOW:          "12"
 
-def carry_last_changed(prev,new_state,stamp):
-    prev_state=(prev or {}).get("state")
-    last=(prev or {}).get("lastChanged") or stamp
-    if prev_state!=new_state: last=stamp
-    return last
+      # Polygon collector knobs (used by build_outlook_source_from_polygon.py)
+      FD_MAX_WORKERS:    "6"       # avoid 429 storms
+      FD_RETRY_MAX:      "1"       # minimal retry
 
-def color_trend(ts):      return "green" if (isinstance(ts,(int,float)) and ts>=THRESH["trend_green_min"]) else "red"
-def color_vol_scaled(vs): return "green" if (isinstance(vs,(int,float)) and vs<THRESH["vol_low_max"]) else "red"
-def color_squeeze(sq):    return "green" if (isinstance(sq,(int,float)) and sq<THRESH["squeeze_open_max"]) else "red"
-def color_volume(vs):     return "green" if (isinstance(vs,(int,float)) and vs>THRESH["volsent_green_gt"]) else "red"
+    steps:
+      - name: Show AZ time
+        run: echo "AZ now: $(TZ=America/Phoenix date)"
 
-def main():
-    j = load_json(HOURLY_PATH)
-    if not j: 
-        print("[1h] hourly file missing"); return
-    now = utc_now()
-    m = j.get("metrics") or {}
-    h = j.get("hourly") or {}
-    prev = (h.get("signals") or {})
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-    # Pull metrics
-    ts = m.get("trend_strength_1h_pct") or m.get("trend_strength_pct")
-    sq = m.get("squeeze_1h_pct")
-    vol_pct = m.get("volatility_1h_pct")
-    vol_scaled = m.get("volatility_1h_scaled")
-    if isinstance(vol_pct,(int,float)) and not isinstance(vol_scaled,(int,float)):
-        MIN_PCT, MAX_PCT = 0.30, 3.50
-        vol_scaled = 100.0 * clamp((vol_pct - MIN_PCT)/max(MAX_PCT-MIN_PCT,1e-9), 0.0, 1.0)
-    vs = m.get("volume_sentiment_1h_pct")
-    if not isinstance(vs,(int,float)): vs = 0.0
+      # -----------------------------------------------
+      # 1) Build sectorCards source (hourly, from Polygon)
+      # -----------------------------------------------
+      - name: Build sectorCards source (1h)
+        env:
+          POLYGON_API_KEY:   ${{ secrets.POLYGON_API_KEY }}
+          FD_MAX_WORKERS:    ${{ env.FD_MAX_WORKERS }}
+          FD_RETRY_MAX:      ${{ env.FD_RETRY_MAX }}
+          HOUR_LOOKBACK_DAYS:${{ env.HOUR_LOOKBACK_DAYS }}
+          H4_LOOKBACK_DAYS:  ${{ env.H4_LOOKBACK_DAYS }}
+          EMA_FAST:          ${{ env.EMA_FAST }}
+          EMA_SLOW:          ${{ env.EMA_SLOW }}
+          VOL_FAST:          ${{ env.VOL_FAST }}
+          VOL_SLOW:          ${{ env.VOL_SLOW }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python -u scripts/build_outlook_source_from_polygon.py \
+            --mode hourly \
+            --out data/outlook_source.json
 
-    # Fallback trend if missing
-    if not isinstance(ts,(int,float)):
-        ema_sign = m.get("ema_sign")
-        base = 45.0 if (isinstance(ema_sign,(int,float)) and ema_sign!=0) else 30.0
-        if isinstance(sq,(int,float)):
-            base += (100.0 - clamp(sq,0.0,100.0)) * 0.15
-        ts = clamp(base, 0.0, 100.0)
+      # ------------------------------------------------
+      # 2) Normalize: groups → sectorCards   (light)
+      # ------------------------------------------------
+      - name: Normalize sectorCards source
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+import json, sys
 
-    # Colors
-    trend_color = color_trend(ts)
-    vol_color   = color_vol_scaled(vol_scaled)
-    sq_color    = color_squeeze(sq)
-    flow_color  = color_volume(vs)
+src = "data/outlook_source.json"
+try:
+    doc = json.load(open(src, "r", encoding="utf-8"))
+except Exception as e:
+    print("normalize: invalid source:", e); sys.exit(1)
 
-    # Lux dialog summary (mini-pill)
-    j.setdefault("strategy", {})
-    j["strategy"]["trend1h"] = {
-        "state": trend_color,
-        "reason": f"Trend {ts:.1f} ({trend_color})"
-                  + (f" | Vol({vol_color})" if vol_color else "")
-                  + (f" | Sq({sq:.1f}% {sq_color})" if isinstance(sq,(int,float)) else "")
-                  + (f" | Flow({vs:+.2f}% {flow_color})" if isinstance(vs,(int,float)) else ""),
-        "updatedAt": now
+if isinstance(doc.get("sectorCards"), list):
+    out = {"sectorCards": doc["sectorCards"]}
+elif isinstance(doc.get("groups"), dict):
+    groups = doc["groups"]
+    alias = {
+        "healthcare":"health care","health-care":"health care",
+        "info tech":"information technology","technology":"information technology","tech":"information technology",
+        "communications":"communication services","comm":"communication services",
+        "staples":"consumer staples","discretionary":"consumer discretionary",
+        "reit":"real estate","industry":"industrials"
     }
+    order = ["information technology","materials","health care","communication services",
+             "real estate","energy","consumer staples","consumer discretionary",
+             "financials","utilities","industrials"]
+    def norm(s): return (s or "").strip().lower()
+    rows = []
+    for name in order:
+        k = alias.get(norm(name), norm(name))
+        g = groups.get(k, {})
+        nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
+        b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
+        m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
+        rows.append({"sector":name.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn})
+    out={"sectorCards":rows}
+else:
+    print("normalize: source missing sectorCards/groups"); sys.exit(1)
 
-    # Numeric fields for Engine-Lights row
-    j["lux1h"] = {
-        "trendStrength": float(ts),
-        "volatility": float(vol_pct) if isinstance(vol_pct,(int,float)) else None,
-        "volatilityScaled": float(vol_scaled) if isinstance(vol_scaled,(int,float)) else None,
-        "squeezePct": float(sq) if isinstance(sq,(int,float)) else None,
-        "volumeSentiment": float(vs)
-    }
+json.dump(out, open(src,"w",encoding="utf-8"), ensure_ascii=False)
+print("normalize: sectorCards =", len(out["sectorCards"]))
+PY
 
-    # Mirror for legacy FE paths
-    j.setdefault("engineLights", {})
-    j["engineLights"].setdefault("lux1h", {})
-    j["engineLights"]["lux1h"].update(j["lux1h"])
-    j["engineLights"].setdefault("metrics", {})
-    j["engineLights"]["metrics"].update({
-        "lux1h_trendStrength": j["lux1h"]["trendStrength"],
-        "lux1h_volatility": j["lux1h"]["volatility"],
-        "lux1h_volatilityScaled": j["lux1h"]["volatilityScaled"],
-        "lux1h_squeezePct": j["lux1h"]["squeezePct"],
-        "lux1h_volumeSentiment": j["lux1h"]["volumeSentiment"]
-    })
+      # ------------------------------------------------
+      # 3) Build hourly payload (1h + 4h long lookbacks)
+      # ------------------------------------------------
+      - name: Build hourly payload (1h + 4h long lookbacks)
+        env:
+          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
+          HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
+          H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
+          EMA_FAST:           ${{ env.EMA_FAST }}
+          EMA_SLOW:           ${{ env.EMA_SLOW }}
+          VOL_FAST:           ${{ env.VOL_FAST }}
+          VOL_SLOW:           ${{ env.VOL_SLOW }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python -u scripts/make_dashboard_hourly.py \
+            --source data/outlook_source.json \
+            --out    data/outlook_hourly.json
 
-    # 1h pills (always-on)
-    sigs = dict(prev) if isinstance(prev,dict) else {}
-    overall = "bull" if trend_color=="green" else "bear"
-    sigs["sigOverall1h"] = {"state": overall, "lastChanged": carry_last_changed(sigs.get("sigOverall1h",{}), overall, now)}
+      # ------------------------------------------------
+      # 3.5) Ensure sectorCards exist in hourly JSON (inject from normalized source if missing)
+      # ------------------------------------------------
+      - name: Ensure sectorCards exist in hourly JSON (inject if missing)
+        run: |
+          set -euo pipefail
+          # Count cards from normalized source
+          SRC_COUNT=$(python - <<'PY'
+import json,sys
+try:
+    print(len((json.load(open("data/outlook_source.json","r",encoding="utf-8"))).get("sectorCards",[])))
+except Exception:
+    print(0)
+PY
+)
+          # Count cards in current hourly payload
+          HOUR_COUNT=$(python - <<'PY'
+import json,sys
+try:
+    print(len((json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))).get("sectorCards",[])))
+except Exception:
+    print(0)
+PY
+)
+          echo "source cards: $SRC_COUNT, hourly cards: $HOUR_COUNT"
+          if [ "$HOUR_COUNT" -eq 0 ] && [ "$SRC_COUNT" -gt 0 ]; then
+            python - <<'PY'
+import json
+src="data/outlook_source.json"
+dst="data/outlook_hourly.json"
+j=json.load(open(dst,"r",encoding="utf-8"))
+cards=json.load(open(src,"r",encoding="utf-8")).get("sectorCards",[])
+j["sectorCards"]=cards
+json.dump(j,open(dst,"w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
+print("Injected sectorCards from normalized source into hourly JSON.")
+PY
+          else
+            echo "Hourly sectorCards OK (no injection needed)."
+          fi
 
-    ema_sign = m.get("ema_sign")
-    ema_state = "bull" if isinstance(ema_sign,(int,float)) and ema_sign>0 else ("bear" if isinstance(ema_sign,(int,float)) and ema_sign<0 else overall)
-    sigs["sigEMA1h"] = {"state": ema_state, "lastChanged": carry_last_changed(sigs.get("sigEMA1h",{}), ema_state, now)}
+      # ------------------------------------------------
+      # 4) Compute Lux strategy (1h) and pills (if any) in script
+      # ------------------------------------------------
+      - name: Compute Lux strategy (1h)
+        run: |
+          set -euo pipefail
+          python -u scripts/compute_trend_hourly.py
 
-    combo = m.get("momentum_combo_1h_pct")
-    if isinstance(combo,(int,float)): smi_state = "bull" if combo>50.0 else "bear" if combo<50.0 else overall
-    else: smi_state = overall
-    sigs["sigSMI1h"] = {"state": smi_state, "lastChanged": carry_last_changed(sigs.get("sigSMI1h",{}), smi_state, now)}
+      # ------------------------------------------------
+      # 5) Validate required keys exist (fast, strict)
+      # ------------------------------------------------
+      - name: Validate hourly payload
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+import json, sys
+j = json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
+m = j.get("metrics") or {}
+required = [
+  "breadth_1h_pct",
+  "momentum_1h_pct",
+  "momentum_combo_1h_pct",
+  "squeeze_1h_pct",
+  "liquidity_1h",
+  "volatility_1h_pct",
+  "volatility_1h_scaled"
+]
+miss = [k for k in required if k not in m]
+if miss:
+  print("validate: missing metrics:", miss); sys.exit(2)
+h = j.get("hourly") or {}
+sig = h.get("signals") or {}
+for k in ("sigOverall1h","sigEMA1h","sigSMI1h"):
+  if not isinstance(sig.get(k), dict) or "state" not in sig[k]:
+    print("validate: missing hourly.signals", k); sys.exit(2)
+st = (j.get("strategy") or {}).get("trend1h") or {}
+if "state" not in st or "updatedAt" not in st:
+  print("validate: missing strategy.trend1h"); sys.exit(2)
+print("validate: OK")
+PY
 
-    h["signals"] = sigs
-    j["hourly"] = h
+      - name: Write heartbeat
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
 
-    save_json(HOURLY_PATH, j)
-    print("[1h] Lux summary + Engine-Lights numeric fields written.")
+      # ------------------------------------------------
+      # 6) Publish only if content changed
+      # ------------------------------------------------
+      - name: Detect change vs remote
+        id: diff
+        env:
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
+        run: |
+          set -euo pipefail
+          changed=true
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
+            git show "origin/${LIVE_BRANCH}:data/outlook_hourly.json" > /tmp/prev.json || true
+            if [ -s /tmp/prev.json ] && cmp -s data/outlook_hourly.json /tmp/prev.json; then
+              changed=false
+            fi
+          fi
+          echo "changed=${changed}" >> "$GITHUB_OUTPUT"
+          echo "diff: changed=${changed}"
 
-if __name__ == "__main__":
-    main()
+      - name: Publish live branch
+        if: ${{ steps.diff.outputs.changed == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
+        run: |
+          set -euo pipefail
+          git config user.email "bot@ci.local"
+          git config user.name  "CI Bot"
+          git fetch --depth=1 origin "${LIVE_BRANCH}" || true
+          git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" || git checkout -B "${LIVE_BRANCH}"
+          mkdir -p /tmp/push
+          cp -f data/outlook_hourly.json /tmp/push/outlook_hourly.json
+          cp -f data/heartbeat_1h      /tmp/push/heartbeat_1h
+          git rm -rf data || true
+          mkdir -p data
+          mv /tmp/push/* data/
+          git add data
+          if git diff --cached --quiet; then
+            echo "no changes to commit"
+          else
+            git commit -m "hourly publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git push -f origin "${LIVE_BRANCH}"
+          fi
+
+      - name: Done
+        run: echo "Hourly build complete"
