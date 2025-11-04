@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 compute_trend_hourly.py — Lux Trend (1h) post-processor
-Two-color mapping (Green/Red only). Never leaves Volume Sentiment blank.
+Writes Lux dialog summary AND numeric fields for Engine-Lights (lux1h.*).
+Two-color mapping (green/red) for all four metrics.
 """
 
 import json, datetime
@@ -29,10 +30,10 @@ def carry_last_changed(prev,new_state,stamp):
     if prev_state!=new_state: last=stamp
     return last
 
-def color_trend(ts): return "green" if (isinstance(ts,(int,float)) and ts>=THRESH["trend_green_min"]) else "red"
-def color_volatility_scaled(vs): return "green" if (isinstance(vs,(int,float)) and vs<THRESH["vol_low_max"]) else "red"
-def color_squeeze(sq): return "green" if (isinstance(sq,(int,float)) and sq<THRESH["squeeze_open_max"]) else "red"
-def color_volume_sent(vs): return "green" if (isinstance(vs,(int,float)) and vs>THRESH["volsent_green_gt"]) else "red"
+def color_trend(ts):      return "green" if (isinstance(ts,(int,float)) and ts>=THRESH["trend_green_min"]) else "red"
+def color_vol_scaled(vs): return "green" if (isinstance(vs,(int,float)) and vs<THRESH["vol_low_max"]) else "red"
+def color_squeeze(sq):    return "green" if (isinstance(sq,(int,float)) and sq<THRESH["squeeze_open_max"]) else "red"
+def color_volume(vs):     return "green" if (isinstance(vs,(int,float)) and vs>THRESH["volsent_green_gt"]) else "red"
 
 def main():
     j = load_json(HOURLY_PATH)
@@ -43,28 +44,30 @@ def main():
     h = j.get("hourly") or {}
     prev = (h.get("signals") or {})
 
-    ts = m.get("trend_strength_1h_pct") or m.get("trend_strength_pct")  # if exported; else fallback later
+    ts = m.get("trend_strength_1h_pct") or m.get("trend_strength_pct")
     sq = m.get("squeeze_1h_pct")
     vol_pct = m.get("volatility_1h_pct")
     vol_scaled = m.get("volatility_1h_scaled")
     if isinstance(vol_pct,(int,float)) and not isinstance(vol_scaled,(int,float)):
         MIN_PCT, MAX_PCT = 0.30, 3.50
-        vol_scaled = 100.0*clamp((vol_pct-MIN_PCT)/max(MAX_PCT-MIN_PCT,1e-9), 0.0, 1.0)
-    vs = m.get("volume_sentiment_1h_pct")
-    if not isinstance(vs,(int,float)): vs = 0.0  # NEVER blank
+        vol_scaled = 100.0 * clamp((vol_pct - MIN_PCT)/max(MAX_PCT-MIN_PCT,1e-9), 0.0, 1.0)
 
-    # If trend not present, bias to EMA/sign & squeeze context
+    vs = m.get("volume_sentiment_1h_pct")
+    if not isinstance(vs,(int,float)): vs = 0.0
+
+    # If Trend Strength missing, bias from EMA posture + open context
     if not isinstance(ts,(int,float)):
         ema_sign = m.get("ema_sign")
         base = 45.0 if (isinstance(ema_sign,(int,float)) and ema_sign!=0) else 30.0
-        if isinstance(sq,(int,float)): base += (100.0 - clamp(sq,0.0,100.0))*0.15
+        if isinstance(sq,(int,float)): base += (100.0 - clamp(sq,0.0,100.0)) * 0.15
         ts = clamp(base, 0.0, 100.0)
 
     trend_color = color_trend(ts)
-    vol_color   = color_volatility_scaled(vol_scaled if isinstance(vol_scaled,(int,float)) else None)
-    sq_color    = color_squeeze(sq if isinstance(sq,(int,float)) else None)
-    flow_color  = color_volume_sent(vs)
+    vol_color   = color_vol_scaled(vol_scaled)
+    sq_color    = color_squeeze(sq)
+    flow_color  = color_volume(vs)
 
+    # === Lux dialog summary ===
     j.setdefault("strategy", {})
     j["strategy"]["trend1h"] = {
         "state": trend_color,
@@ -75,6 +78,16 @@ def main():
         "updatedAt": now
     }
 
+    # === Numeric values for Engine-Lights row ===
+    j["lux1h"] = {
+        "trendStrength": float(ts),
+        "volatility": float(vol_pct) if isinstance(vol_pct,(int,float)) else None,
+        "volatilityScaled": float(vol_scaled) if isinstance(vol_scaled,(int,float)) else None,
+        "squeezePct": float(sq) if isinstance(sq,(int,float)) else None,
+        "volumeSentiment": float(vs)
+    }
+
+    # === 1h pills (always-on) ===
     sigs = dict(prev) if isinstance(prev,dict) else {}
     overall = "bull" if trend_color=="green" else "bear"
     sigs["sigOverall1h"] = {"state": overall, "lastChanged": carry_last_changed(sigs.get("sigOverall1h",{}), overall, now)}
@@ -91,19 +104,9 @@ def main():
     h["signals"] = sigs
     j["hourly"] = h
 
-    j.setdefault("luxTrend1h", {})
-    j["luxTrend1h"]["trendStrength_pct"] = round(float(ts),2)
-    j["luxTrend1h"]["trend_color"] = trend_color
-    if isinstance(vol_pct,(int,float)): j["luxTrend1h"]["volatility_pct"] = round(vol_pct,3)
-    if isinstance(vol_scaled,(int,float)): j["luxTrend1h"]["volatility_scaled"] = round(vol_scaled,2)
-    j["luxTrend1h"]["volatility_color"] = vol_color
-    if isinstance(sq,(int,float)): j["luxTrend1h"]["squeeze_pct"] = round(sq,2)
-    j["luxTrend1h"]["squeeze_color"] = sq_color
-    j["luxTrend1h"]["volumeSentiment_pct"] = round(float(vs),2)
-    j["luxTrend1h"]["volume_color"] = flow_color
-
     save_json(HOURLY_PATH, j)
-    print("[1h] trend1h color:", trend_color, "| vol:", vol_color, "| sq:", sq_color, "| flow:", flow_color)
+    print("[1h] Lux summary done; numeric lux1h fields written.")
+    print("[1h] colors:", trend_color, vol_color, sq_color, flow_color)
 
 if __name__ == "__main__":
     main()
