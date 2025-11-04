@@ -5,8 +5,8 @@ compute_trend10m.py — Lux Trend (10m) post-processor
 
 - Two-color mapping only (green/red) for Trend, Volatility, Squeeze, Volume Flow
 - Writes BOTH:
-    1) Lux summary text in strategy.trend10m
-    2) Plain numeric fields for Engine-Lights:
+    1) Lux summary text in strategy.trend10m (for the mini-pill)
+    2) Plain numeric fields for Engine-Lights row:
        j["lux10m"] = {
          "trendStrength": float,
          "volatility": float|None,           # ATR % if present
@@ -14,19 +14,21 @@ compute_trend10m.py — Lux Trend (10m) post-processor
          "squeezePct": float|None,
          "volumeSentiment": float            # never blank (defaults to 0.0)
        }
-- Always creates 10m pills: sigOverall10m, sigEMA10m, sigAccel10m, sigCandle10m
-- No network calls; reads only data/outlook_intraday.json
+    + mirrors into engineLights.lux10m and engineLights.metrics.lux10m_*
+
+- Also ensures 10m pills exist: sigOverall10m, sigEMA10m, sigAccel10m, sigCandle10m.
+- No network; reads data/outlook_intraday.json only.
 """
 
 import json, datetime
 
 INTRADAY_PATH = "data/outlook_intraday.json"
 
-# Two-color mapping cutoffs (aligned to your dialog calibration)
+# Two-color thresholds (aligned to your Lux dialog behavior)
 THRESH = {
-    "trend_green_min": 60.0,      # Trend >= 60 → green, else red
+    "trend_green_min": 60.0,      # Trend >= 60 → green
     "vol_low_max": 40.0,          # Vol scaled < 40 → green (Low), else red
-    "squeeze_open_max": 30.0,     # Squeeze < 30 → green (open), else red (compression)
+    "squeeze_open_max": 30.0,     # Squeeze < 30 → green (Open), else red (Compression)
     "volsent_green_gt": 0.0       # Flow > 0 → green, else red
 }
 
@@ -63,20 +65,20 @@ def main():
     el = j.get("engineLights") or {}
     prev = (el.get("signals") or {})
 
-    # Pull possible fields (be tolerant)
+    # Pull numeric inputs (tolerant)
     ts = m.get("trend_strength_10m_pct")
     sq = m.get("squeeze_10m_pct") or m.get("squeeze_pct")
     vol_pct = m.get("volatility_10m_pct") or m.get("volatility_pct")
     vol_scaled = m.get("volatility_10m_scaled") or m.get("volatility_scaled")
     if isinstance(vol_pct,(int,float)) and not isinstance(vol_scaled,(int,float)):
-        # normalize ATR% for color decision; conservative bounds for 10m SPY
+        # normalize ATR% to scaled 0..100 for color
         MIN_PCT, MAX_PCT = 0.50, 4.00
-        vol_scaled = 100.0 * clamp((vol_pct - MIN_PCT)/max(MAX_PCT-MIN_PCT,1e-9), 0.0, 1.0)
+        vol_scaled = 100.0 * clamp((vol_pct - MIN_PCT)/max(MAX_PCT - MIN_PCT,1e-9), 0.0, 1.0)
 
     vs = m.get("volume_sentiment_10m_pct") or m.get("volume_sentiment_pct")
     if not isinstance(vs,(int,float)): vs = 0.0   # NEVER blank
 
-    # If Trend Strength missing, derive a modest bias from posture + open context
+    # Fallback Trend Strength (light posture bias) if missing
     if not isinstance(ts,(int,float)):
         ema_sign = m.get("ema_sign_10m") or m.get("ema_sign")
         base = 45.0 if (isinstance(ema_sign,(int,float)) and ema_sign != 0) else 30.0
@@ -90,7 +92,7 @@ def main():
     sq_color    = color_squeeze(sq)
     flow_color  = color_volume(vs)
 
-    # ========== Lux dialog summary ==========
+    # ===== Lux dialog summary (mini-pill) =====
     j.setdefault("strategy", {})
     j["strategy"]["trend10m"] = {
         "state": trend_color,
@@ -101,7 +103,7 @@ def main():
         "updatedAt": now
     }
 
-    # ========== Numeric values for Engine-Lights row ==========
+    # ===== Numeric fields for Engine-Lights row =====
     j["lux10m"] = {
         "trendStrength": float(ts),
         "volatility": float(vol_pct) if isinstance(vol_pct,(int,float)) else None,
@@ -110,16 +112,33 @@ def main():
         "volumeSentiment": float(vs)
     }
 
-    # ========== 10m pills (always-on) ==========
+    # Mirror for legacy FE paths
+    j.setdefault("engineLights", {})
+    j["engineLights"].setdefault("lux10m", {})
+    j["engineLights"]["lux10m"].update(j["lux10m"])
+    j["engineLights"].setdefault("metrics", {})
+    j["engineLights"]["metrics"].update({
+        "lux10m_trendStrength": j["lux10m"]["trendStrength"],
+        "lux10m_volatility": j["lux10m"]["volatility"],
+        "lux10m_volatilityScaled": j["lux10m"]["volatilityScaled"],
+        "lux10m_squeezePct": j["lux10m"]["squeezePct"],
+        "lux10m_volumeSentiment": j["lux10m"]["volumeSentiment"]
+    })
+
+    # ===== 10m pills (always-on) =====
     sigs = dict(prev) if isinstance(prev,dict) else {}
     overall = "bull" if trend_color=="green" else "bear"
-    sigs["sigOverall10m"] = {"state": overall, "lastChanged": carry_last_changed(sigs.get("sigOverall10m",{}), overall, now)}
-
+    sigs["sigOverall10m"] = {
+        "state": overall,
+        "lastChanged": carry_last_changed(sigs.get("sigOverall10m",{}), overall, now)
+    }
     ema_sign = m.get("ema_sign_10m") or m.get("ema_sign")
     ema_state = "bull" if isinstance(ema_sign,(int,float)) and ema_sign>0 else ("bear" if isinstance(ema_sign,(int,float)) and ema_sign<0 else overall)
-    sigs["sigEMA10m"] = {"state": ema_state, "lastChanged": carry_last_changed(sigs.get("sigEMA10m",{}), ema_state, now)}
+    sigs["sigEMA10m"] = {
+        "state": ema_state,
+        "lastChanged": carry_last_changed(sigs.get("sigEMA10m",{}), ema_state, now)
+    }
 
-    # Acceleration pill
     b_now, m_now = m.get("breadth_10m_pct"), m.get("momentum_10m_pct")
     b_prev, m_prev = m.get("breadth_10m_pct_prev"), m.get("momentum_10m_pct_prev")
     if all(isinstance(x,(int,float)) for x in (b_now,m_now,b_prev,m_prev)):
@@ -127,19 +146,21 @@ def main():
         acc_state = "bull" if accel>=0 else "bear"
     else:
         acc_state = overall
-    sigs["sigAccel10m"] = {"state": acc_state, "lastChanged": carry_last_changed(sigs.get("sigAccel10m",{}), acc_state, now)}
+    sigs["sigAccel10m"] = {
+        "state": acc_state,
+        "lastChanged": carry_last_changed(sigs.get("sigAccel10m",{}), acc_state, now)
+    }
 
-    # CandleUp pill (optional)
     candle_up = m.get("candle_up_10m")
     c_state = "bull" if candle_up is True else ("bear" if candle_up is False else overall)
-    sigs["sigCandle10m"] = {"state": c_state, "lastChanged": carry_last_changed(sigs.get("sigCandle10m",{}), c_state, now)}
+    sigs["sigCandle10m"] = {
+        "state": c_state,
+        "lastChanged": carry_last_changed(sigs.get("sigCandle10m",{}), c_state, now)
+    }
 
-    j.setdefault("engineLights", {}).setdefault("signals", {})
-    j["engineLights"]["signals"].update(sigs)
-
+    j["engineLights"]["signals"] = sigs
     save_json(INTRADAY_PATH, j)
-    print("[10m] Lux summary done; numeric lux10m fields written.")
-    print("[10m] colors:", trend_color, vol_color, sq_color, flow_color)
+    print("[10m] Lux summary + Engine-Lights numeric fields written.")
 
 if __name__ == "__main__":
     main()
