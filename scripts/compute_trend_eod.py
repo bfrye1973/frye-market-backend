@@ -2,10 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 compute_trend_eod.py — Lux Trend (Daily/EOD) post-processor
-
-- Two-color mapping for Trend/Vol/Sq/Flow
-- Writes Lux mini-pill summary AND numeric fields used by Engine-Lights row:
-  j["lux1d"] and engineLights mirrors
+- Two-color mapping (green/red)
+- Lux mini-pill + numeric fields + engineLights mirrors
+- OBV-style volume sentiment if fields exist; else 0.0 fallback
 """
 
 import json, datetime
@@ -31,6 +30,17 @@ def color_vol_scaled(vs): return "green" if (isinstance(vs,(int,float)) and vs<T
 def color_squeeze(sq):    return "green" if (isinstance(sq,(int,float)) and sq<THRESH["squeeze_open_max"]) else "red"
 def color_volume(vs):     return "green" if (isinstance(vs,(int,float)) and vs>THRESH["volsent_green_gt"]) else "red"
 
+def compute_volume_sentiment_pct(metrics: dict) -> float:
+    close_prev = metrics.get("close_prev_1d") or metrics.get("close_1d_prev")
+    close_curr = metrics.get("close_1d")
+    volume     = metrics.get("volume_1d") or metrics.get("vol_1d")
+    volSma     = metrics.get("volSma_1d") or metrics.get("vol_sma_1d")
+    if not all(isinstance(x,(int,float)) for x in (close_prev,close_curr,volume,volSma)):
+        return 0.0
+    obv_delta = volume if close_curr > close_prev else (-volume if close_curr < close_prev else 0.0)
+    vs_pct = 100.0 * (obv_delta / max(volSma, 1.0))
+    return clamp(vs_pct, -20.0, 20.0)
+
 def main():
     j = load_json(DAILY_PATH)
     if not j:
@@ -47,7 +57,8 @@ def main():
         vol_scaled = 100.0 * clamp((vol_pct - MIN_PCT)/max(MAX_PCT-MIN_PCT,1e-9), 0.0, 1.0)
 
     vs = m.get("volume_sentiment_daily_pct") or m.get("volume_sentiment_pct")
-    if not isinstance(vs,(int,float)): vs = 0.0
+    if not isinstance(vs,(int,float)):
+        vs = compute_volume_sentiment_pct(m)
 
     if not isinstance(ts,(int,float)):
         daily_trend = ((j.get("trendDaily") or {}).get("trend") or {}).get("emaSlope")
@@ -61,7 +72,6 @@ def main():
     sq_color    = color_squeeze(sq)
     flow_color  = color_volume(vs)
 
-    # Lux dialog summary (mini-pill)
     j.setdefault("strategy", {})
     j["strategy"]["trendEOD"] = {
         "state": trend_color,
@@ -72,7 +82,6 @@ def main():
         "updatedAt": now
     }
 
-    # Numeric values for Engine-Lights row (daily/EOD)
     j["lux1d"] = {
         "trendStrength": float(ts),
         "volatility": float(vol_pct) if isinstance(vol_pct,(int,float)) else None,
@@ -81,7 +90,6 @@ def main():
         "volumeSentiment": float(vs)
     }
 
-    # Mirror to engineLights namespaces for FE compatibility
     j.setdefault("engineLights", {})
     j["engineLights"].setdefault("lux1d", {})
     j["engineLights"]["lux1d"].update(j["lux1d"])
@@ -95,7 +103,7 @@ def main():
     })
 
     save_json(DAILY_PATH, j)
-    print("[EOD] Lux summary + Engine-Lights numeric fields written.")
+    print("[EOD] Lux summary + numeric fields + OBV flow written.")
 
 if __name__ == "__main__":
     main()
