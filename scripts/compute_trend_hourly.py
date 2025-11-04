@@ -1,141 +1,130 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-compute_trend_hourly.py
---------------------------------
-Derives hourly Lux/strategy posture and always-on signals from the
-already-built hourly JSON (no Polygon, no external deps).
-
-Writes back to data/outlook_hourly.json:
-
-- hourly.signals:
-    - sigOverall1h: { state: bull|bear|neutral, lastChanged: ISO }
-    - sigEMA1h:     { state: bull|bear|neutral, lastChanged: ISO }
-    - sigSMI1h:     { state: bull|bear|neutral, lastChanged: ISO }
-
-- strategy.trend1h:
-    - { state: bull|bear|neutral, reason: "...", updatedAt: ISO }
+compute_trend_hourly.py — Lux Trend (1h) post-processor
+- Two-color mapping
+- Lux mini-pill + numeric fields + legacy mirrors
+- OBV-style volume sentiment if fields exist
 """
 
-import json
-import os
-from datetime import datetime, timezone
+import json, datetime
 
-HOUR_PATH = os.environ.get("HOURLY_PATH", "data/outlook_hourly.json")
+HOURLY_PATH = "data/outlook_hourly.json"
 
-# ------------------------ helpers ------------------------ #
-def now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+THRESH = {
+    "trend_green_min": 60.0,
+    "vol_low_max": 40.0,
+    "squeeze_open_max": 30.0,
+    "volsent_green_gt": 0.0
+}
 
-def to_float(v, default=None):
-    try:
-        if v is None:
-            return default
-        return float(v)
-    except Exception:
-        return default
+def utc_now(): return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+def clamp(x, lo, hi): return max(lo, min(hi, x))
+def load_json(p):
+    try: return json.load(open(p,"r",encoding="utf-8"))
+    except Exception: return {}
+def save_json(p,obj): json.dump(obj, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
 
-def state_from_threshold(x, bull_hi=55.0, bear_lo=45.0) -> str:
-    """Return bull/bear/neutral based on >55 / <45 bands."""
-    x = to_float(x, None)
-    if x is None:
-        return "neutral"
-    if x > bull_hi:
-        return "bull"
-    if x < bear_lo:
-        return "bear"
-    return "neutral"
+def carry_last_changed(prev,new_state,stamp):
+    prev_state=(prev or {}).get("state")
+    last=(prev or {}).get("lastChanged") or stamp
+    if prev_state!=new_state: last=stamp
+    return last
 
-def ensure_dict(d, key):
-    """Ensure nested dict exists and return it."""
-    node = d.get(key)
-    if not isinstance(node, dict):
-        node = {}
-        d[key] = node
-    return node
+def color_trend(ts):      return "green" if (isinstance(ts,(int,float)) and ts>=THRESH["trend_green_min"]) else "red"
+def color_vol_scaled(vs): return "green" if (isinstance(vs,(int,float)) and vs<THRESH["vol_low_max"]) else "red"
+def color_squeeze(sq):    return "green" if (isinstance(sq,(int,float)) and sq<THRESH["squeeze_open_max"]) else "red"
+def color_volume(vs):     return "green" if (isinstance(vs,(int,float)) and vs>THRESH["volsent_green_gt"]) else "red"
 
-def set_signal(signals, key, new_state):
-    s = signals.get(key) or {}
-    last = s.get("state")
-    if new_state != last:
-        s["lastChanged"] = now_iso()
-    s["state"] = new_state
-    signals[key] = s
+def compute_volume_sentiment_pct(metrics: dict) -> float:
+    close_prev = metrics.get("close_prev_1h") or metrics.get("close_1h_prev")
+    close_curr = metrics.get("close_1h")
+    volume     = metrics.get("volume_1h") or metrics.get("vol_1h")
+    volSma     = metrics.get("volSma_1h") or metrics.get("vol_sma_1h")
+    if not all(isinstance(x,(int,float)) for x in (close_prev,close_curr,volume,volSma)):
+        return 0.0
+    obv_delta = volume if close_curr > close_prev else (-volume if close_curr < close_prev else 0.0)
+    vs_pct = 100.0 * (obv_delta / max(volSma, 1.0))
+    return clamp(vs_pct, -20.0, 20.0)
 
-# ------------------------ main ------------------------ #
 def main():
-    # Load
-    try:
-        with open(HOUR_PATH, "r", encoding="utf-8") as f:
-            j = json.load(f)
-    except Exception as e:
-        print("[hourly-trend] load failed:", e)
-        return
+    j = load_json(HOURLY_PATH)
+    if not j: 
+        print("[1h] hourly file missing"); return
+    now = utc_now()
+    m = j.get("metrics") or {}
+    h = j.get("hourly") or {}
+    prev = (h.get("signals") or {})
 
-    metrics = j.get("metrics") or {}
-    hourly = ensure_dict(j, "hourly")
-    signals = ensure_dict(hourly, "signals")
-    strategy = ensure_dict(j, "strategy")
+    ts = m.get("trend_strength_1h_pct") or m.get("trend_strength_pct")
+    sq = m.get("squeeze_1h_pct")
+    vol_pct = m.get("volatility_1h_pct")
+    vol_scaled = m.get("volatility_1h_scaled")
+    if isinstance(vol_pct,(int,float)) and not isinstance(vol_scaled,(int,float)):
+        MIN_PCT, MAX_PCT = 0.30, 3.50
+        vol_scaled = 100.0 * clamp((vol_pct - MIN_PCT)/max(MAX_PCT-MIN_PCT,1e-9), 0.0, 1.0)
 
-    # Pull metrics
-    breadth = to_float(metrics.get("breadth_1h_pct"))
-    mom     = to_float(metrics.get("momentum_1h_pct"))
-    combo   = to_float(metrics.get("momentum_combo_1h_pct"))  # SMI proxy (0..100)
-    squeeze = to_float(metrics.get("squeeze_1h_pct"))         # 0..100 compression
-    ema_sign = to_float(metrics.get("ema_sign"), 0.0)         # >0 bull, <0 bear
+    vs = m.get("volume_sentiment_1h_pct")
+    if not isinstance(vs,(int,float)):
+        vs = compute_volume_sentiment_pct(m)
 
-    # Derive component states
-    ema_state = "bull" if ema_sign > 0 else "bear" if ema_sign < 0 else "neutral"
-    smi_state = state_from_threshold(combo)   # use combo as SMI-like posture
-    br_state  = state_from_threshold(breadth)
-    mo_state  = state_from_threshold(mom)
+    if not isinstance(ts,(int,float)):
+        ema_sign = m.get("ema_sign")
+        base = 45.0 if (isinstance(ema_sign,(int,float)) and ema_sign!=0) else 30.0
+        if isinstance(sq,(int,float)):
+            base += (100.0 - clamp(sq,0.0,100.0)) * 0.15
+        ts = clamp(base, 0.0, 100.0)
 
-    # Overall (simple, robust rule)
-    bull_votes = sum(s == "bull" for s in (ema_state, smi_state, br_state, mo_state))
-    bear_votes = sum(s == "bear" for s in (ema_state, smi_state, br_state, mo_state))
+    trend_color = color_trend(ts)
+    vol_color   = color_vol_scaled(vol_scaled)
+    sq_color    = color_squeeze(sq)
+    flow_color  = color_volume(vs)
 
-    if bull_votes >= 3:
-        overall = "bull"
-    elif bear_votes >= 3:
-        overall = "bear"
-    else:
-        overall = "neutral"
-
-    # Reason string
-    parts = [
-        f"EMA={ema_state}",
-        f"SMI~={smi_state}",
-        f"BR={br_state}",
-        f"MO={mo_state}",
-    ]
-    if squeeze is not None:
-        parts.append(f"SQZ={int(round(squeeze))}")
-
-    reason = " | ".join(parts)
-
-    # Update signals (only 1h signals here)
-    set_signal(signals, "sigOverall1h", overall)
-    set_signal(signals, "sigEMA1h", ema_state)
-    set_signal(signals, "sigSMI1h", smi_state)
-    hourly["signals"] = signals  # ensure persisted
-
-    # Update strategy block
-    trend1h = {
-        "state": overall,
-        "reason": reason,
-        "updatedAt": now_iso(),
+    j.setdefault("strategy", {})
+    j["strategy"]["trend1h"] = {
+        "state": trend_color,
+        "reason": f"Trend {ts:.1f} ({trend_color})"
+                  + (f" | Vol({vol_color})" if vol_color else "")
+                  + (f" | Sq({sq:.1f}% {sq_color})" if isinstance(sq,(int,float)) else "")
+                  + (f" | Flow({vs:+.2f}% {flow_color})" if isinstance(vs,(int,float)) else ""),
+        "updatedAt": now
     }
-    strategy["trend1h"] = trend1h
-    j["strategy"] = strategy
-    j["hourly"] = hourly
 
-    # Save
-    try:
-        with open(HOUR_PATH, "w", encoding="utf-8") as f:
-            json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
-        print("[hourly-trend] updated strategy.trend1h and hourly.signals")
-        print("[hourly-trend]", trend1h)
-    except Exception as e:
-        print("[hourly-trend] save failed:", e)
+    j["lux1h"] = {
+        "trendStrength": float(ts),
+        "volatility": float(vol_pct) if isinstance(vol_pct,(int,float)) else None,
+        "volatilityScaled": float(vol_scaled) if isinstance(vol_scaled,(int,float)) else None,
+        "squeezePct": float(sq) if isinstance(sq,(int,float)) else None,
+        "volumeSentiment": float(vs)
+    }
 
-if __name__ == "__main__":
-    main()
+    j.setdefault("engineLights", {})
+    j["engineLights"].setdefault("lux1h", {})
+    j["engineLights"]["lux1h"].update(j["lux1h"])
+    j["engineLights"].setdefault("metrics", {})
+    j["engineLights"]["metrics"].update({
+        "lux1h_trendStrength": j["lux1h"]["trendStrength"],
+        "lux1h_volatility": j["lux1h"]["volatility"],
+        "lux1h_volatilityScaled": j["lux1h"]["volatilityScaled"],
+        "lux1h_squeezePct": j["lux1h"]["squeezePct"],
+        "lux1h_volumeSentiment": j["lux1h"]["volumeSentiment"]
+    })
+
+    sigs = dict(prev) if isinstance(prev,dict) else {}
+    overall = "bull" if trend_color=="green" else "bear"
+    sigs["sigOverall1h"] = {"state": overall, "lastChanged": carry_last_changed(sigs.get("sigOverall1h",{}), overall, now)}
+
+    ema_sign = m.get("ema_sign")
+    ema_state = "bull" if isinstance(ema_sign,(int,float)) and ema_sign>0 else ("bear" if isinstance(ema_sign,(int,float)) and ema_sign<0 else overall)
+    sigs["sigEMA1h"] = {"state": ema_state, "lastChanged": carry_last_changed(sigs.get("sigEMA1h",{}), ema_state, now)}
+
+    combo = m.get("momentum_combo_1h_pct")
+    if isinstance(combo,(int,float)): smi_state = "bull" if combo>50.0 else "bear" if combo<50.0 else overall
+    else: smi_state = overall
+    sigs["sigSMI1h"] = {"state": smi_state, "lastChanged": carry_last_changed(sigs.get("sigSMI1h",{}), smi_state, now)}
+
+    h["signals"] = sigs
+    j["hourly"] = h
+
+    save_json(HOURLY_PATH, j)
+    print("[1h] Lux summary + numeric fields + OBV flow written.")
