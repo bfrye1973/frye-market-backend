@@ -2,8 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 compute_trend_hourly.py — Lux Trend (1h) post-processor
-Writes Lux dialog summary AND numeric fields for Engine-Lights (lux1h.*).
-Two-color mapping (green/red) for all four metrics.
+
+- Two-color mapping (green/red) for Trend/Vol/Sq/Flow
+- Writes Lux mini-pill text AND numeric fields used by Engine-Lights:
+  j["lux1h"] and mirrored legacy keys under engineLights.*
+- Ensures 1h pills exist: sigOverall1h, sigEMA1h, sigSMI1h
 """
 
 import json, datetime
@@ -44,6 +47,7 @@ def main():
     h = j.get("hourly") or {}
     prev = (h.get("signals") or {})
 
+    # Pull metrics
     ts = m.get("trend_strength_1h_pct") or m.get("trend_strength_pct")
     sq = m.get("squeeze_1h_pct")
     vol_pct = m.get("volatility_1h_pct")
@@ -51,23 +55,24 @@ def main():
     if isinstance(vol_pct,(int,float)) and not isinstance(vol_scaled,(int,float)):
         MIN_PCT, MAX_PCT = 0.30, 3.50
         vol_scaled = 100.0 * clamp((vol_pct - MIN_PCT)/max(MAX_PCT-MIN_PCT,1e-9), 0.0, 1.0)
-
     vs = m.get("volume_sentiment_1h_pct")
     if not isinstance(vs,(int,float)): vs = 0.0
 
-    # If Trend Strength missing, bias from EMA posture + open context
+    # Fallback trend if missing
     if not isinstance(ts,(int,float)):
         ema_sign = m.get("ema_sign")
         base = 45.0 if (isinstance(ema_sign,(int,float)) and ema_sign!=0) else 30.0
-        if isinstance(sq,(int,float)): base += (100.0 - clamp(sq,0.0,100.0)) * 0.15
+        if isinstance(sq,(int,float)):
+            base += (100.0 - clamp(sq,0.0,100.0)) * 0.15
         ts = clamp(base, 0.0, 100.0)
 
+    # Colors
     trend_color = color_trend(ts)
     vol_color   = color_vol_scaled(vol_scaled)
     sq_color    = color_squeeze(sq)
     flow_color  = color_volume(vs)
 
-    # === Lux dialog summary ===
+    # Lux dialog summary (mini-pill)
     j.setdefault("strategy", {})
     j["strategy"]["trend1h"] = {
         "state": trend_color,
@@ -78,7 +83,7 @@ def main():
         "updatedAt": now
     }
 
-    # === Numeric values for Engine-Lights row ===
+    # Numeric fields for Engine-Lights row
     j["lux1h"] = {
         "trendStrength": float(ts),
         "volatility": float(vol_pct) if isinstance(vol_pct,(int,float)) else None,
@@ -87,7 +92,20 @@ def main():
         "volumeSentiment": float(vs)
     }
 
-    # === 1h pills (always-on) ===
+    # Mirror for legacy FE paths
+    j.setdefault("engineLights", {})
+    j["engineLights"].setdefault("lux1h", {})
+    j["engineLights"]["lux1h"].update(j["lux1h"])
+    j["engineLights"].setdefault("metrics", {})
+    j["engineLights"]["metrics"].update({
+        "lux1h_trendStrength": j["lux1h"]["trendStrength"],
+        "lux1h_volatility": j["lux1h"]["volatility"],
+        "lux1h_volatilityScaled": j["lux1h"]["volatilityScaled"],
+        "lux1h_squeezePct": j["lux1h"]["squeezePct"],
+        "lux1h_volumeSentiment": j["lux1h"]["volumeSentiment"]
+    })
+
+    # 1h pills (always-on)
     sigs = dict(prev) if isinstance(prev,dict) else {}
     overall = "bull" if trend_color=="green" else "bear"
     sigs["sigOverall1h"] = {"state": overall, "lastChanged": carry_last_changed(sigs.get("sigOverall1h",{}), overall, now)}
@@ -105,8 +123,7 @@ def main():
     j["hourly"] = h
 
     save_json(HOURLY_PATH, j)
-    print("[1h] Lux summary done; numeric lux1h fields written.")
-    print("[1h] colors:", trend_color, vol_color, sq_color, flow_color)
+    print("[1h] Lux summary + Engine-Lights numeric fields written.")
 
 if __name__ == "__main__":
     main()
