@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 compute_trend_eod.py — Lux Trend (Daily/EOD) post-processor
-Two-color mapping for Trend/Vol/Squeeze/Flow.
-Writes Lux summary AND numeric fields for Engine-Lights (lux1d.*).
+
+- Two-color mapping for Trend/Vol/Sq/Flow
+- Writes Lux mini-pill summary AND numeric fields used by Engine-Lights row:
+  j["lux1d"] and engineLights mirrors
 """
 
 import json, datetime
@@ -45,9 +47,8 @@ def main():
         vol_scaled = 100.0 * clamp((vol_pct - MIN_PCT)/max(MAX_PCT-MIN_PCT,1e-9), 0.0, 1.0)
 
     vs = m.get("volume_sentiment_daily_pct") or m.get("volume_sentiment_pct")
-    if not isinstance(vs,(int,float)): vs = 0.0   # never blank
+    if not isinstance(vs,(int,float)): vs = 0.0
 
-    # If Trend Strength missing, bias to daily ema slope if present
     if not isinstance(ts,(int,float)):
         daily_trend = ((j.get("trendDaily") or {}).get("trend") or {}).get("emaSlope")
         if isinstance(daily_trend,(int,float)):
@@ -60,7 +61,7 @@ def main():
     sq_color    = color_squeeze(sq)
     flow_color  = color_volume(vs)
 
-    # Lux dialog summary (EOD)
+    # Lux dialog summary (mini-pill)
     j.setdefault("strategy", {})
     j["strategy"]["trendEOD"] = {
         "state": trend_color,
@@ -80,9 +81,21 @@ def main():
         "volumeSentiment": float(vs)
     }
 
+    # Mirror to engineLights namespaces for FE compatibility
+    j.setdefault("engineLights", {})
+    j["engineLights"].setdefault("lux1d", {})
+    j["engineLights"]["lux1d"].update(j["lux1d"])
+    j["engineLights"].setdefault("metrics", {})
+    j["engineLights"]["metrics"].update({
+        "lux1d_trendStrength": j["lux1d"]["trendStrength"],
+        "lux1d_volatility": j["lux1d"]["volatility"],
+        "lux1d_volatilityScaled": j["lux1d"]["volatilityScaled"],
+        "lux1d_squeezePct": j["lux1d"]["squeezePct"],
+        "lux1d_volumeSentiment": j["lux1d"]["volumeSentiment"]
+    })
+
     save_json(DAILY_PATH, j)
-    print("[EOD] Lux summary done; numeric lux1d fields written.")
-    print("[EOD] colors:", trend_color, vol_color, sq_color, flow_color)
+    print("[EOD] Lux summary + Engine-Lights numeric fields written.")
 
 if __name__ == "__main__":
     main()
