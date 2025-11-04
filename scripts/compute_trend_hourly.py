@@ -1,267 +1,141 @@
-name: dashboard-hourly
+#!/usr/bin/env python3
+"""
+compute_trend_hourly.py
+--------------------------------
+Derives hourly Lux/strategy posture and always-on signals from the
+already-built hourly JSON (no Polygon, no external deps).
 
-on:
-  workflow_dispatch: {}
-  schedule:
-    # Run hourly at :05 (Mon–Fri). Staggered to avoid top-of-hour pileups.
-    - cron: "5 * * * 1-5"
+Writes back to data/outlook_hourly.json:
 
-defaults:
-  run:
-    shell: bash
+- hourly.signals:
+    - sigOverall1h: { state: bull|bear|neutral, lastChanged: ISO }
+    - sigEMA1h:     { state: bull|bear|neutral, lastChanged: ISO }
+    - sigSMI1h:     { state: bull|bear|neutral, lastChanged: ISO }
 
-jobs:
-  hourly:
-    name: Build & Publish Hourly (1h context, long lookbacks)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: write
-    concurrency:
-      group: dashboard-hourly
-      cancel-in-progress: true
+- strategy.trend1h:
+    - { state: bull|bear|neutral, reason: "...", updatedAt: ISO }
+"""
 
-    env:
-      TZ: America/Phoenix
-      LIVE_BRANCH: data-live-hourly
-      PYTHONUNBUFFERED: "1"
-
-      # Long-lookback knobs consumed by make_dashboard_hourly.py
-      HOUR_LOOKBACK_DAYS: "10"     # ~10 trading days of 1h bars
-      H4_LOOKBACK_DAYS:  "21"      # for SMI 4h component
-      EMA_FAST:          "8"
-      EMA_SLOW:          "18"
-      VOL_FAST:          "3"
-      VOL_SLOW:          "12"
-
-      # Polygon collector knobs (used by build_outlook_source_from_polygon.py)
-      FD_MAX_WORKERS:    "6"       # avoid 429 storms
-      FD_RETRY_MAX:      "1"       # minimal retry
-
-    steps:
-      - name: Show AZ time
-        run: echo "AZ now: $(TZ=America/Phoenix date)"
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      # -----------------------------------------------
-      # 1) Build sectorCards source (hourly, from Polygon)
-      # -----------------------------------------------
-      - name: Build sectorCards source (1h)
-        env:
-          POLYGON_API_KEY:   ${{ secrets.POLYGON_API_KEY }}
-          FD_MAX_WORKERS:    ${{ env.FD_MAX_WORKERS }}
-          FD_RETRY_MAX:      ${{ env.FD_RETRY_MAX }}
-          HOUR_LOOKBACK_DAYS:${{ env.HOUR_LOOKBACK_DAYS }}
-          H4_LOOKBACK_DAYS:  ${{ env.H4_LOOKBACK_DAYS }}
-          EMA_FAST:          ${{ env.EMA_FAST }}
-          EMA_SLOW:          ${{ env.EMA_SLOW }}
-          VOL_FAST:          ${{ env.VOL_FAST }}
-          VOL_SLOW:          ${{ env.VOL_SLOW }}
-        run: |
-          set -euo pipefail
-          mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py \
-            --mode hourly \
-            --out data/outlook_source.json
-
-      # ------------------------------------------------
-      # 2) Normalize: groups → sectorCards   (light)
-      # ------------------------------------------------
-      - name: Normalize sectorCards source
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-import json, sys
-
-src = "data/outlook_source.json"
-try:
-    doc = json.load(open(src, "r", encoding="utf-8"))
-except Exception as e:
-    print("normalize: invalid source:", e); sys.exit(1)
-
-if isinstance(doc.get("sectorCards"), list):
-    out = {"sectorCards": doc["sectorCards"]}
-elif isinstance(doc.get("groups"), dict):
-    groups = doc["groups"]
-    alias = {
-        "healthcare":"health care","health-care":"health care",
-        "info tech":"information technology","technology":"information technology","tech":"information technology",
-        "communications":"communication services","comm":"communication services",
-        "staples":"consumer staples","discretionary":"consumer discretionary",
-        "reit":"real estate","industry":"industrials"
-    }
-    order = ["information technology","materials","health care","communication services",
-             "real estate","energy","consumer staples","consumer discretionary",
-             "financials","utilities","industrials"]
-    def norm(s): return (s or "").strip().lower()
-    rows = []
-    for name in order:
-        k = alias.get(norm(name), norm(name))
-        g = groups.get(k, {})
-        nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
-        b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
-        m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
-        rows.append({"sector":name.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn})
-    out={"sectorCards":rows}
-else:
-    print("normalize: source missing sectorCards/groups"); sys.exit(1)
-
-json.dump(out, open(src,"w",encoding="utf-8"), ensure_ascii=False)
-print("normalize: sectorCards =", len(out["sectorCards"]))
-PY
-
-      # ------------------------------------------------
-      # 3) Build hourly payload (1h + 4h long lookbacks)
-      # ------------------------------------------------
-      - name: Build hourly payload (1h + 4h long lookbacks)
-        env:
-          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
-          HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
-          H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
-          EMA_FAST:           ${{ env.EMA_FAST }}
-          EMA_SLOW:           ${{ env.EMA_SLOW }}
-          VOL_FAST:           ${{ env.VOL_FAST }}
-          VOL_SLOW:           ${{ env.VOL_SLOW }}
-        run: |
-          set -euo pipefail
-          mkdir -p data
-          python -u scripts/make_dashboard_hourly.py \
-            --source data/outlook_source.json \
-            --out    data/outlook_hourly.json
-
-      # ------------------------------------------------
-      # 3.5) Ensure sectorCards exist in hourly JSON (inject from normalized source if missing)
-      # ------------------------------------------------
-      - name: Ensure sectorCards exist in hourly JSON (inject if missing)
-        run: |
-          set -euo pipefail
-          # Count cards from normalized source
-          SRC_COUNT=$(python - <<'PY'
-import json,sys
-try:
-    print(len((json.load(open("data/outlook_source.json","r",encoding="utf-8"))).get("sectorCards",[])))
-except Exception:
-    print(0)
-PY
-)
-          # Count cards in current hourly payload
-          HOUR_COUNT=$(python - <<'PY'
-import json,sys
-try:
-    print(len((json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))).get("sectorCards",[])))
-except Exception:
-    print(0)
-PY
-)
-          echo "source cards: $SRC_COUNT, hourly cards: $HOUR_COUNT"
-          if [ "$HOUR_COUNT" -eq 0 ] && [ "$SRC_COUNT" -gt 0 ]; then
-            python - <<'PY'
 import json
-src="data/outlook_source.json"
-dst="data/outlook_hourly.json"
-j=json.load(open(dst,"r",encoding="utf-8"))
-cards=json.load(open(src,"r",encoding="utf-8")).get("sectorCards",[])
-j["sectorCards"]=cards
-json.dump(j,open(dst,"w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
-print("Injected sectorCards from normalized source into hourly JSON.")
-PY
-          else
-            echo "Hourly sectorCards OK (no injection needed)."
-          fi
+import os
+from datetime import datetime, timezone
 
-      # ------------------------------------------------
-      # 4) Compute Lux strategy (1h) and pills (if any) in script
-      # ------------------------------------------------
-      - name: Compute Lux strategy (1h)
-        run: |
-          set -euo pipefail
-          python -u scripts/compute_trend_hourly.py
+HOUR_PATH = os.environ.get("HOURLY_PATH", "data/outlook_hourly.json")
 
-      # ------------------------------------------------
-      # 5) Validate required keys exist (fast, strict)
-      # ------------------------------------------------
-      - name: Validate hourly payload
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-import json, sys
-j = json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
-m = j.get("metrics") or {}
-required = [
-  "breadth_1h_pct",
-  "momentum_1h_pct",
-  "momentum_combo_1h_pct",
-  "squeeze_1h_pct",
-  "liquidity_1h",
-  "volatility_1h_pct",
-  "volatility_1h_scaled"
-]
-miss = [k for k in required if k not in m]
-if miss:
-  print("validate: missing metrics:", miss); sys.exit(2)
-h = j.get("hourly") or {}
-sig = h.get("signals") or {}
-for k in ("sigOverall1h","sigEMA1h","sigSMI1h"):
-  if not isinstance(sig.get(k), dict) or "state" not in sig[k]:
-    print("validate: missing hourly.signals", k); sys.exit(2)
-st = (j.get("strategy") or {}).get("trend1h") or {}
-if "state" not in st or "updatedAt" not in st:
-  print("validate: missing strategy.trend1h"); sys.exit(2)
-print("validate: OK")
-PY
+# ------------------------ helpers ------------------------ #
+def now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-      - name: Write heartbeat
-        run: |
-          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
+def to_float(v, default=None):
+    try:
+        if v is None:
+            return default
+        return float(v)
+    except Exception:
+        return default
 
-      # ------------------------------------------------
-      # 6) Publish only if content changed
-      # ------------------------------------------------
-      - name: Detect change vs remote
-        id: diff
-        env:
-          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
-        run: |
-          set -euo pipefail
-          changed=true
-          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
-            git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
-            git show "origin/${LIVE_BRANCH}:data/outlook_hourly.json" > /tmp/prev.json || true
-            if [ -s /tmp/prev.json ] && cmp -s data/outlook_hourly.json /tmp/prev.json; then
-              changed=false
-            fi
-          fi
-          echo "changed=${changed}" >> "$GITHUB_OUTPUT"
-          echo "diff: changed=${changed}"
+def state_from_threshold(x, bull_hi=55.0, bear_lo=45.0) -> str:
+    """Return bull/bear/neutral based on >55 / <45 bands."""
+    x = to_float(x, None)
+    if x is None:
+        return "neutral"
+    if x > bull_hi:
+        return "bull"
+    if x < bear_lo:
+        return "bear"
+    return "neutral"
 
-      - name: Publish live branch
-        if: ${{ steps.diff.outputs.changed == 'true' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
-        run: |
-          set -euo pipefail
-          git config user.email "bot@ci.local"
-          git config user.name  "CI Bot"
-          git fetch --depth=1 origin "${LIVE_BRANCH}" || true
-          git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" || git checkout -B "${LIVE_BRANCH}"
-          mkdir -p /tmp/push
-          cp -f data/outlook_hourly.json /tmp/push/outlook_hourly.json
-          cp -f data/heartbeat_1h      /tmp/push/heartbeat_1h
-          git rm -rf data || true
-          mkdir -p data
-          mv /tmp/push/* data/
-          git add data
-          if git diff --cached --quiet; then
-            echo "no changes to commit"
-          else
-            git commit -m "hourly publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            git push -f origin "${LIVE_BRANCH}"
-          fi
+def ensure_dict(d, key):
+    """Ensure nested dict exists and return it."""
+    node = d.get(key)
+    if not isinstance(node, dict):
+        node = {}
+        d[key] = node
+    return node
 
-      - name: Done
-        run: echo "Hourly build complete"
+def set_signal(signals, key, new_state):
+    s = signals.get(key) or {}
+    last = s.get("state")
+    if new_state != last:
+        s["lastChanged"] = now_iso()
+    s["state"] = new_state
+    signals[key] = s
+
+# ------------------------ main ------------------------ #
+def main():
+    # Load
+    try:
+        with open(HOUR_PATH, "r", encoding="utf-8") as f:
+            j = json.load(f)
+    except Exception as e:
+        print("[hourly-trend] load failed:", e)
+        return
+
+    metrics = j.get("metrics") or {}
+    hourly = ensure_dict(j, "hourly")
+    signals = ensure_dict(hourly, "signals")
+    strategy = ensure_dict(j, "strategy")
+
+    # Pull metrics
+    breadth = to_float(metrics.get("breadth_1h_pct"))
+    mom     = to_float(metrics.get("momentum_1h_pct"))
+    combo   = to_float(metrics.get("momentum_combo_1h_pct"))  # SMI proxy (0..100)
+    squeeze = to_float(metrics.get("squeeze_1h_pct"))         # 0..100 compression
+    ema_sign = to_float(metrics.get("ema_sign"), 0.0)         # >0 bull, <0 bear
+
+    # Derive component states
+    ema_state = "bull" if ema_sign > 0 else "bear" if ema_sign < 0 else "neutral"
+    smi_state = state_from_threshold(combo)   # use combo as SMI-like posture
+    br_state  = state_from_threshold(breadth)
+    mo_state  = state_from_threshold(mom)
+
+    # Overall (simple, robust rule)
+    bull_votes = sum(s == "bull" for s in (ema_state, smi_state, br_state, mo_state))
+    bear_votes = sum(s == "bear" for s in (ema_state, smi_state, br_state, mo_state))
+
+    if bull_votes >= 3:
+        overall = "bull"
+    elif bear_votes >= 3:
+        overall = "bear"
+    else:
+        overall = "neutral"
+
+    # Reason string
+    parts = [
+        f"EMA={ema_state}",
+        f"SMI~={smi_state}",
+        f"BR={br_state}",
+        f"MO={mo_state}",
+    ]
+    if squeeze is not None:
+        parts.append(f"SQZ={int(round(squeeze))}")
+
+    reason = " | ".join(parts)
+
+    # Update signals (only 1h signals here)
+    set_signal(signals, "sigOverall1h", overall)
+    set_signal(signals, "sigEMA1h", ema_state)
+    set_signal(signals, "sigSMI1h", smi_state)
+    hourly["signals"] = signals  # ensure persisted
+
+    # Update strategy block
+    trend1h = {
+        "state": overall,
+        "reason": reason,
+        "updatedAt": now_iso(),
+    }
+    strategy["trend1h"] = trend1h
+    j["strategy"] = strategy
+    j["hourly"] = hourly
+
+    # Save
+    try:
+        with open(HOUR_PATH, "w", encoding="utf-8") as f:
+            json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
+        print("[hourly-trend] updated strategy.trend1h and hourly.signals")
+        print("[hourly-trend]", trend1h)
+    except Exception as e:
+        print("[hourly-trend] save failed:", e)
+
+if __name__ == "__main__":
+    main()
