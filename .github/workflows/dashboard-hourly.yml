@@ -1,9 +1,9 @@
-name: dashboard-hourly
+name: dashboard-eod
 
 on:
   workflow_dispatch: {}
   schedule:
-    # Run once per hour during RTH (tune as needed)
+    # Run once per hour (tweak to your preferred cadence)
     - cron: "5 13-21 * * 1-5"
 
 defaults:
@@ -22,7 +22,7 @@ jobs:
       LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
 
-      # --- Existing metric lookback knobs (kept as-is) ---
+      # --- Metric lookbacks (unchanged) ---
       HOUR_LOOKBACK_DAYS: ${{ vars.HOUR_LOOKBACK_DAYS || '10' }}
       H4_LOOKBACK_DAYS:   ${{ vars.H4_LOOKBACK_DAYS   || '40' }}
       EMA_FAST:           ${{ vars.EMA_FAST           || '10' }}
@@ -30,7 +30,7 @@ jobs:
       VOL_FAST:           ${{ vars.VOL_FAST           || '3'  }}
       VOL_SLOW:           ${{ vars.VOL_SLOW           || '12' }}
 
-      # --- NEW: enable 1h intraday sector counts (L=3 bars by default) ---
+      # --- NEW: ✔ intraday 1h groups (L = 3 bars) ---
       FD_HOURLY_INTRADAY: "true"
       FD_HOURLY_LOOKBACK: "3"
 
@@ -51,88 +51,74 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # 1) Build hourly sector groups (intraday 1h lens)
-      - name: Build sectorCards source (1h groups)
+      # 1) Build hourly source with intraday flags (non-zero groups)
+      - name: Build sectorCards source (hourly groups)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
-          echo "[hourly] Building source with intraday 1h counts (FD_HOURLY_INTRADAY=$FD_HOURLY_INTRADAY L=$FD_HOURLY_LOOKBACK)…"
+          echo "[hourly] FD_HOURLY_INTRADAY=$FD_HOURLY_INTRADAY FD_HOURLY_LOOKBACK=$FD_HOURLY_LOOKBACK"
           python -u scripts/build_outlook_source_from_polygon.py \
             --mode hourly \
             --out data/outlook_source.json
           echo "----- RAW SOURCE (first 80 lines) -----"
           head -n 80 data/outlook_source.json || true
-          # quick groups sample for debugging
           python - <<'PY'
-          import json,sys
-          try:
-              j=json.load(open("data/outlook_source.json","r",encoding="utf-8"))
-          except Exception as e:
-              print("ERROR reading source:",e); sys.exit(1)
-          g=j.get("groups") or {}
-          sample=list(g.items())[:3]
-          print("[hourly] groups sample:", sample)
+          import json
+          j=json.load(open("data/outlook_source.json","r",encoding="utf-8"))
+          groups=j.get("groups") or {}
+          print("[hourly] groups sample (first 3):", list(groups.items())[:3])
           PY
 
-      # 2) Normalize to sectorCards (canonical names + breadth/momentum)
+      # 2) Normalize groups → sectorCards with canonical names
       - name: Normalize source (groups → sectorCards)
         run: |
           set -euo pipefail
           python - <<'PY'
           import json,sys
-
           path="data/outlook_source.json"
           j=json.load(open(path,"r",encoding="utf-8"))
           out=None
-
           def pct(a,b): 
-              return 0.0 if not b else round(100.0*float(a)/float(b),2)
-
+              return 0.0 if b==0 else round(100.0*float(a)/float(b),2)
           if "sectorCards" in j and isinstance(j["sectorCards"], list):
-              # Already normalized
               out={"sectorCards": j["sectorCards"]}
           elif "groups" in j and isinstance(j["groups"], dict):
               groups=j["groups"]
-              # canonical order and alias map
               order=[
-                "information technology","materials","health care","communication services","real estate",
-                "energy","consumer staples","consumer discretionary","financials","utilities","industrials"
+                "information technology","materials","health care","communication services",
+                "real estate","energy","consumer staples","consumer discretionary",
+                "financials","utilities","industrials",
               ]
               alias={
                 "healthcare":"health care","health-care":"health care",
                 "info tech":"information technology","technology":"information technology","tech":"information technology",
                 "communications":"communication services","comm services":"communication services","telecom":"communication services",
                 "staples":"consumer staples","discretionary":"consumer discretionary",
-                "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"
+                "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
               }
               def norm(s): return (s or "").strip().lower()
-              # project groups to canonical keys
               bucket={}
               for raw,g in groups.items():
                   k=alias.get(norm(raw), norm(raw))
-                  if not k: 
-                      continue
+                  if not k: continue
                   nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
                   b=pct(nh,nh+nl); m=pct(up,up+dn)
                   bucket[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
-              # fill in canonical order
               rows=[]
               for name in order:
                   rows.append(bucket.get(name,{"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}))
               out={"sectorCards":rows}
           else:
-              print("[normalize] missing sectorCards/groups"); sys.exit(1)
-
-          json.dump(out, open(path,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
-          print("[normalize] sectorCards:", len(out["sectorCards"]))
-          # print a quick sample
-          print("[normalize] sample:", out["sectorCards"][:3])
+              print("missing sectorCards/groups"); sys.exit(1)
+          json.dump(out, open(path,"w",encoding="utf-8"), ensure_ascii=False)
+          print("sectorCards:", len(out["sectorCards"]))
+          print("sample:", out["sectorCards"][:3])
           PY
 
-      # 3) Compose hourly payload (1h + 4h metrics)
-      - name: Build hourly payload (1h + 4h metrics)
+      # 3) Compose hourly meter (1h + 4h metrics)
+      - name: Build hourly payload (1h + 4h)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
@@ -143,42 +129,40 @@ jobs:
           VOL_SLOW: ${{ env.VOL_SLOW }}
         run: |
           set -euo pipefail
-          mkdir -p data
           python -u scripts/make_dashboard_hourly.py \
             --source data/outlook_source.json \
             --out    data/outlook_hourly.json
 
-      # 4) Lux hook (writes strategy.trend1h / pills)
+      # 4) Lux hook (your existing job)
       - name: Compute Lux strategy (1h)
         run: |
           set -euo pipefail
           python -u scripts/compute_trend_hourly.py
 
-      # 5) Safety net: ensure required signals exist
-      - name: Ensure hourly signals (safe)
+      # 5) Safety net: ensure minimum hourly signals exist
+      - name: Ensure 1h signals (safe)
         run: |
           set -euo pipefail
           python - <<'PY'
           import json, datetime, sys
           path="data/outlook_hourly.json"
-          try:
-              j=json.load(open(path,"r",encoding="utf-8"))
-          except Exception:
+          try: j=json.load(open(path,"r",encoding="utf-8"))
+          except Exception: 
               print("[safe] no hourly file"); sys.exit(0)
           def now(): return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
           hourly=j.get("hourly") or {}
           signals=hourly.get("signals") or {}
-          def assure(k, state="neutral"):
+          def assure(k,state="neutral"):
               s=signals.get(k) or {}
               s.setdefault("state",state)
-              s.setdefault("lastChanged", now())
+              s.setdefault("lastChanged",now())
               signals[k]=s
           overall=(hourly.get("overall1h") or {}).get("state") or "neutral"
           assure("sigOverall1h", str(overall).lower())
           hourly["signals"]=signals
           j["hourly"]=hourly
-          json.dump(j,open(path,"w",encoding="utf-8"),ensure_ascii=False, separators=(",",":"))
-          print("[safe] signals:", list(signals.keys()))
+          json.dump(j,open(path,"w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
+          print("[safe] ensured signals:", list(signals.keys()))
           PY
 
       # 6) Validate structure
@@ -189,22 +173,19 @@ jobs:
           import json,sys
           j=json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
           m=j.get("metrics") or {}
-          need=["breadth_1h_pct","momentum_1h_pct","squeeze_1h_pct","liquidity_1h","volatility_1h_pct"]
-          for k in need:
+          for k in ["breadth_1h_pct","momentum_1h_pct","squeeze_1h_pct","liquidity_1h","volatility_1h_pct"]:
             if k not in m:
               print("missing metric:",k); sys.exit(1)
           sc=j.get("sectorCards") or []
           if not sc or not isinstance(sc,list) or len(sc)!=11:
-            print("missing/invalid sectorCards"); sys.exit(1)
+            print("missing/invalid sectorCards:",len(sc)); sys.exit(1)
           print("OK: metrics & sectorCards present")
           PY
 
-      # 7) Write heartbeat
       - name: Write heartbeat
         run: date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
 
-      # 8) Publish if changed
-        # (no self-copy; publish only if data changed)
+      # 7) Publish if changed
       - name: Detect change
         id: diff
         env:
@@ -228,7 +209,7 @@ jobs:
           LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
           set -euo pipefail
-          git config user.email "bot@ci.local"
+          git config user.email "user@local"
           git config user.name  "CI Bot"
           git fetch --depth=1 origin "${LIVE_BRANCH}" || true
           git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" || git checkout -B "${LIVE_BRANCH}"
@@ -238,7 +219,7 @@ jobs:
           git rm -rf data || true
           mkdir -p data
           mv /tmp/push/* data/
-          git add data
+          git add -A
           if git diff --cached --quiet; then
             echo "no changes to commit"
           else
