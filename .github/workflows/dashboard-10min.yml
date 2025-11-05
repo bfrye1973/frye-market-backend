@@ -3,7 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 7 minutes, ALL days (UTC) — includes weekends for testing
+    # Every 7 minutes, ALL days (UTC) — weekend-enabled for testing
     - cron: "*/7 * * * 0-6"
 
 defaults:
@@ -12,47 +12,47 @@ defaults:
 
 jobs:
   tenmin:
-    name: Build & Publish Intraday (10m – full run, overwrite-safe)
+    name: Build & Publish Intraday (10m – consistent, overwrite-safe)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false            # keep full logs for diagnostics
+      cancel-in-progress: true          # ⬅️ prevents overlap/429 storms
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
 
-      # --- Toggle this to "false" after testing ---
+      # TESTING: set to "false" when done calibrating (then 10m respects AZ hours again)
       TESTING_MODE: "true"
 
-      # --- Performance knobs (no algo changes) ---
+      # Collector tuning for consistency
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
-      FD_MAX_WORKERS: "8"                  # avoid Polygon 429 long tails
-      FD_RETRY_MAX: "0"
-      FD_LOOKBACK_DAYS: "0"                # today-only in source builder
+      FD_MAX_WORKERS: "6"               # ⬅️ reduce parallelism to avoid 429 storms
+      FD_RETRY_MAX: "1"                 # ⬅️ fail-fast if API is unhappy
+      FD_LOOKBACK_DAYS: "0"             # ⬅️ today-only (deterministic)
 
-      # Hints for engine-lights scripts (NO Polygon in 10m scripts)
+      # Hints used by Lux scripts (NO Polygon calls in 10m)
       INTRADAY_JSON_PATH: "data/outlook_intraday.json"
       HOURLY_URL: "https://frye-market-backend-1.onrender.com/live/hourly"
       INTRADAY_URL: "https://frye-market-backend-1.onrender.com/live/intraday"
 
     steps:
-      # ---------- capture build start for stale-guard ----------
-      - name: Capture build start time (UTC)
-        id: start
+      # ---------- T0 ----------
+      - name: Start timer (UTC)
+        id: t0
         run: |
+          echo "T0=$(date +%s)" >> "$GITHUB_ENV"
           echo "START_TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
-          echo "START_TS=$START_TS"
+          echo "::notice:: 10m run started at $START_TS"
 
       # ---------- Market-hours guard (AZ) ----------
-      # In TESTING_MODE=true it always runs.
-      # Set TESTING_MODE="false" to enforce weekdays 04:00–18:59 AZ only.
+      # TESTING_MODE=true: always run. TESTING_MODE=false: run weekdays 04:00–18:59 AZ
       - name: Market hours guard (AZ)
-        id: market_hours
+        id: guard
         run: |
           if [ "${TESTING_MODE}" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
@@ -62,23 +62,18 @@ jobs:
           DOW=$(TZ=$TZ date +'%u')   # 1..7
           HOUR=$(TZ=$TZ date +'%H')  # 00..23
           echo "AZ now: $(TZ=$TZ date) (DOW=$DOW HOUR=$HOUR)"
-          # Weekdays only; allow PRE+RTH+After-hours: 04:00–18:59 AZ
           if [ "$DOW" -ge 6 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
-          fi
+          if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           echo "run=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' }}
         uses: actions/checkout@v4
         with: { fetch-depth: 1 }
 
-      # (No pip install — use stdlib only)
-
-      # 1) Build sector source (today-only, throttled)
+      # ---------- Collector: today-only, lighter and deterministic ----------
       - name: Build sectorCards source (10m)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' }}
         env:
           POLYGON_API_KEY:  ${{ secrets.POLYGON_API_KEY }}
           FD_LOOKBACK_DAYS: ${{ env.FD_LOOKBACK_DAYS }}
@@ -86,49 +81,55 @@ jobs:
           FD_RETRY_MAX:     ${{ env.FD_RETRY_MAX }}
         run: |
           set -euo pipefail
+          ST=$(date +%s)
           mkdir -p data
           python -u scripts/build_outlook_source_from_polygon.py \
             --mode intraday10 --out data/outlook_source.json
           cp -f data/outlook_source.json /tmp/source_backup.json
+          echo "::notice:: Build sectorCards elapsed: $(( $(date +%s) - $ST ))s"
 
-      # 2) Light schema check only
       - name: Normalize sector source (light)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
+          ST=$(date +%s)
           python - <<'PY'
           import json,sys
           p="data/outlook_source.json"
           try: j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception: print("[normalize] missing outlook_source.json"); sys.exit(2)
+          except Exception as e: print("[normalize] missing:", e); sys.exit(2)
           ok = isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)
           print("[normalize]", "OK" if ok else "INVALID")
           sys.exit(0 if ok else 2)
           PY
+          echo "::notice:: Normalize elapsed: $(( $(date +%s) - $ST ))s"
 
-      # 3) Build intraday with the source (FULL)
       - name: Build intraday payload (FULL)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' }}
         env:
           POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
           HOURLY_URL:         ${{ env.HOURLY_URL }}
         run: |
           set -euo pipefail
+          ST=$(date +%s)
           python -u scripts/make_dashboard.py \
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
+          echo "::notice:: Payload build elapsed: $(( $(date +%s) - $ST ))s"
 
-      # 4) Engine Lights integrations (ALWAYS run; reads local JSON only — no Polygon)
+      # ---------- Lux compute ALWAYS runs (reads local JSON only) ----------
       - name: Compute Lux strategy (10m)
         env:
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
           HOURLY_URL:         ${{ env.HOURLY_URL }}
         run: |
           set -euo pipefail
+          ST=$(date +%s)
           python -u scripts/compute_trend10m.py || true
+          echo "::notice:: Lux compute elapsed: $(( $(date +%s) - $ST ))s"
 
-      # 4.1) Ensure Lux10m numeric fields exist (safe — guarantees Engine-Lights boxes)
+      # Ensure the 4 numeric fields exist and mirror to legacy FE keys
       - name: Ensure Lux10m numeric fields exist (safe)
         run: |
           set -euo pipefail
@@ -138,40 +139,28 @@ jobs:
           j=json.load(open(p,"r",encoding="utf-8"))
           m=j.get("metrics") or {}
           lux=j.get("lux10m") or {}
-
           def num(x):
-              try:
-                  v=float(x)
-                  return None if v!=v else v
-              except:
-                  return None
+              try: v=float(x); return None if v!=v else v
+              except: return None
 
-          # fill missing numeric fields so FE never sees blanks
           if "trendStrength" not in lux:
               ts = m.get("trend_strength_10m_pct")
-              if not isinstance(ts,(int,float)): ts=0.0
-              lux["trendStrength"]=float(ts)
-
+              lux["trendStrength"]=float(ts) if isinstance(ts,(int,float)) else 0.0
           if "volatility" not in lux:
               v = m.get("volatility_10m_pct") or m.get("volatility_pct")
               lux["volatility"]=num(v)
-
           if "volatilityScaled" not in lux:
               vsc = m.get("volatility_10m_scaled") or m.get("volatility_scaled")
               lux["volatilityScaled"]=num(vsc)
-
           if "squeezePct" not in lux:
               sq = m.get("squeeze_10m_pct") or m.get("squeeze_pct")
               lux["squeezePct"]=num(sq)
-
           if "volumeSentiment" not in lux:
               vs = m.get("volume_sentiment_10m_pct") or m.get("volume_sentiment_pct") or 0.0
               try: lux["volumeSentiment"]=float(vs)
               except: lux["volumeSentiment"]=0.0
 
           j["lux10m"]=lux
-
-          # mirror to legacy FE paths
           j.setdefault("engineLights",{})
           j["engineLights"].setdefault("lux10m",{})
           j["engineLights"]["lux10m"].update(lux)
@@ -183,13 +172,12 @@ jobs:
               "lux10m_squeezePct": lux["squeezePct"],
               "lux10m_volumeSentiment": lux["volumeSentiment"]
           })
-
           json.dump(j, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
           print("[safe] lux10m numeric fields are present.")
           PY
 
       - name: Update pills (10m always-on state)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' }}
         env:
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
           HOURLY_URL:         ${{ env.HOURLY_URL }}
@@ -197,11 +185,12 @@ jobs:
           set -euo pipefail
           python -u scripts/update_pills_10m_state.py || true
 
-      # 5) Robust validate/repair sectorCards from saved source
+      # ---------- Validate/Repair sectorCards ----------
       - name: Validate & Repair sectorCards (robust)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
+          ST=$(date +%s)
           python - <<'PY'
           import json,sys
           def loadp(p):
@@ -240,10 +229,11 @@ jobs:
           else:
               print("[repair] WARN: repair failed; publishing anyway")
           PY
+          echo "::notice:: Repair elapsed: $(( $(date +%s) - $ST ))s"
 
-      # 6) Stamp meta
+      # ---------- Stamp, stale-guard, publish ----------
       - name: Stamp last_full_run_utc
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -255,15 +245,8 @@ jobs:
           print("[stamp] last_full_run_utc:", j["meta"]["last_full_run_utc"])
           PY
 
-      - name: Write heartbeat
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
-        run: |
-          set -euo pipefail
-          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
-
-      # ---------- Ensure jq is available (for stale-guard) ----------
       - name: Ensure jq is available
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -e
           if ! command -v jq >/dev/null 2>&1; then
@@ -271,49 +254,37 @@ jobs:
             sudo apt-get install -y jq
           fi
 
-      # 7) STALE-GUARD (skip publish if newer live exists)
       - name: Stale-guard (skip publish if newer live exists)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' }}
         id: stale
         env:
           START_TS: ${{ env.START_TS }}
         run: |
           set -euo pipefail
-          echo "Checking if newer live file exists..."
           START_TS="${START_TS:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
-
-          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/outlook_intraday.json?t=$(date +%s)" \
-            -o /tmp/live.json || true
-
+          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/outlook_intraday.json?t=$(date +%s)" -o /tmp/live.json || true
           LIVE_TS=$(jq -r '.meta.last_full_run_utc // .updated_at_utc // .updated_at // empty' /tmp/live.json || true)
-
-          echo "START_TS=$START_TS"
-          echo "LIVE_TS=${LIVE_TS:-none}"
-
+          echo "START_TS=$START_TS | LIVE_TS=${LIVE_TS:-none}"
           if [ -n "$LIVE_TS" ]; then
             S=$(date -u -d "$START_TS" +%s)
             L=$(date -u -d "$LIVE_TS"  +%s 2>/dev/null || echo 0)
             if [ "$L" -gt "$S" ]; then
               echo "newer=true" >> "$GITHUB_OUTPUT"
-              echo "Newer live exists — skip publish."
               exit 0
             fi
           fi
-
           echo "newer=false" >> "$GITHUB_OUTPUT"
 
-      # 8) Stage artifacts BEFORE cleaning (for publish)
       - name: Stage artifacts
-        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' && steps.stale.outputs.newer != 'true' }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/live10
           cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
           cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
 
-      # 9) Detect change vs remote (publish only on change)
       - name: Detect change vs remote
-        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' && steps.stale.outputs.newer != 'true' }}
         id: diff
         env:
           LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
@@ -329,9 +300,8 @@ jobs:
           fi
           echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
 
-      # 10) Publish live branch (safe) only if NOT stale AND changed
       - name: Publish live branch
-        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' }}
+        if: ${{ steps.guard.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -356,9 +326,8 @@ jobs:
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
           git push origin HEAD:refs/heads/${LIVE_BRANCH} --force
 
-      # 11) Trigger Render deploy (only if changed)
       - name: Trigger Render deploy (backend-1)
-        if: ${{ steps.market_hours.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' && success() }}
+        if: ${{ steps.guard.outputs.run == 'true' && steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' && success() }}
         env:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND1 }}
         run: |
@@ -371,5 +340,5 @@ jobs:
           fi
 
       - name: Done
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
-        run: echo "10m full run complete (overwrite-safe, repaired cards)"
+        run: |
+          echo "::notice:: 10m workflow complete."
