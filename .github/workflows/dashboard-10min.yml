@@ -119,9 +119,8 @@ jobs:
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
 
-      # 4) Engine Lights integrations (read local/hourly only; no Polygon)
+      # 4) Engine Lights integrations (ALWAYS run; reads local JSON only — no Polygon)
       - name: Compute Lux strategy (10m)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
           HOURLY_URL:         ${{ env.HOURLY_URL }}
@@ -129,44 +128,50 @@ jobs:
           set -euo pipefail
           python -u scripts/compute_trend10m.py || true
 
-      # --- SAFETY: Guarantee lux10m block exists for FE ---
+      # 4.1) Ensure Lux10m numeric fields exist (safe — guarantees Engine-Lights boxes)
       - name: Ensure Lux10m numeric fields exist (safe)
-        if: ${{ steps.market_hours.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, sys
+          import json
           p="data/outlook_intraday.json"
           j=json.load(open(p,"r",encoding="utf-8"))
           m=j.get("metrics") or {}
           lux=j.get("lux10m") or {}
-          # fill missing numeric fields to avoid blanks in FE
-          def num(x): 
+
+          def num(x):
               try:
                   v=float(x)
                   return None if v!=v else v
               except:
                   return None
+
+          # fill missing numeric fields so FE never sees blanks
           if "trendStrength" not in lux:
               ts = m.get("trend_strength_10m_pct")
               if not isinstance(ts,(int,float)): ts=0.0
               lux["trendStrength"]=float(ts)
+
           if "volatility" not in lux:
               v = m.get("volatility_10m_pct") or m.get("volatility_pct")
               lux["volatility"]=num(v)
+
           if "volatilityScaled" not in lux:
               vsc = m.get("volatility_10m_scaled") or m.get("volatility_scaled")
               lux["volatilityScaled"]=num(vsc)
+
           if "squeezePct" not in lux:
               sq = m.get("squeeze_10m_pct") or m.get("squeeze_pct")
               lux["squeezePct"]=num(sq)
+
           if "volumeSentiment" not in lux:
-              # if not present, set 0.0 so FE is never blank
               vs = m.get("volume_sentiment_10m_pct") or m.get("volume_sentiment_pct") or 0.0
               try: lux["volumeSentiment"]=float(vs)
               except: lux["volumeSentiment"]=0.0
+
           j["lux10m"]=lux
-          # mirror to legacy paths (engineLights.*)
+
+          # mirror to legacy FE paths
           j.setdefault("engineLights",{})
           j["engineLights"].setdefault("lux10m",{})
           j["engineLights"]["lux10m"].update(lux)
@@ -178,8 +183,9 @@ jobs:
               "lux10m_squeezePct": lux["squeezePct"],
               "lux10m_volumeSentiment": lux["volumeSentiment"]
           })
+
           json.dump(j, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
-          print("[safe] ensured lux10m numeric fields.")
+          print("[safe] lux10m numeric fields are present.")
           PY
 
       - name: Update pills (10m always-on state)
