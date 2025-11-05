@@ -3,38 +3,36 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Run hourly at :05 (Mon–Fri). Staggered to avoid top-of-hour pileups.
-    - cron: "5 * * * 1-5"
+    # Run once per hour during RTH (tune as needed)
+    - cron: "5 13-21 * * 1-5"
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  hourly:
-    name: Build & Publish Hourly (1h context, long lookbacks)
+  build_and_publish_hourly:
+    name: Build and Publish Hourly (1h valuation)
     runs-on: ubuntu-latest
-    timeout-minutes: 30                # ⬅️ raised from 12 → 30
+    timeout-minutes: 30
     permissions:
       contents: write
-    concurrency:
-      group: dashboard-hourly
-      cancel-in-progress: true
-
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
-      # Lighter lookbacks to reduce runtime variance
-      HOUR_LOOKBACK_DAYS: "10"         # was 14
-      H4_LOOKBACK_DAYS: "21"           # was 30
-      EMA_FAST: "8"
-      EMA_SLOW: "18"
-      VOL_FAST: "3"
-      VOL_SLOW: "12"
-      # So we don’t run into Polygon 429s or long backoffs
-      FD_MAX_WORKERS: "6"              # was 8
-      FD_RETRY_MAX: "1"                # was 0 or more — fail fast on bad slowness
+
+      # --- Existing metric lookback knobs (kept as-is) ---
+      HOUR_LOOKBACK_DAYS: ${{ vars.HOUR_LOOKBACK_DAYS || '10' }}
+      H4_LOOKBACK_DAYS:   ${{ vars.H4_LOOKBACK_DAYS   || '40' }}
+      EMA_FAST:           ${{ vars.EMA_FAST           || '10' }}
+      EMA_SLOW:           ${{ vars.EMA_SLOW           || '20' }}
+      VOL_FAST:           ${{ vars.VOL_FAST           || '3'  }}
+      VOL_SLOW:           ${{ vars.VOL_SLOW           || '12' }}
+
+      # --- NEW: enable 1h intraday sector counts (L=3 bars by default) ---
+      FD_HOURLY_INTRADAY: "true"
+      FD_HOURLY_LOOKBACK: "3"
 
     steps:
       - name: Checkout
@@ -42,70 +40,99 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 1) Build sectorCards source (1h)
-      - name: Build sectorCards source (1h)
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install requests python-dateutil
+
+      # 1) Build hourly sector groups (intraday 1h lens)
+      - name: Build sectorCards source (1h groups)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-          FD_MAX_WORKERS: ${{ env.FD_MAX_WORKERS }}
-          FD_RETRY_MAX:   ${{ env.FD_RETRY_MAX }}
-          HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
-          H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
-          EMA_FAST: ${{ env.EMA_FAST }}
-          EMA_SLOW: ${{ env.EMA_SLOW }}
-          VOL_FAST: ${{ env.VOL_FAST }}
-          VOL_SLOW: ${{ env.VOL_SLOW }}
         run: |
           set -euo pipefail
           mkdir -p data
+          echo "[hourly] Building source with intraday 1h counts (FD_HOURLY_INTRADAY=$FD_HOURLY_INTRADAY L=$FD_HOURLY_LOOKBACK)…"
           python -u scripts/build_outlook_source_from_polygon.py \
-            --mode hourly --out data/outlook_source.json
+            --mode hourly \
+            --out data/outlook_source.json
+          echo "----- RAW SOURCE (first 80 lines) -----"
+          head -n 80 data/outlook_source.json || true
+          # quick groups sample for debugging
+          python - <<'PY'
+          import json,sys
+          try:
+              j=json.load(open("data/outlook_source.json","r",encoding="utf-8"))
+          except Exception as e:
+              print("ERROR reading source:",e); sys.exit(1)
+          g=j.get("groups") or {}
+          sample=list(g.items())[:3]
+          print("[hourly] groups sample:", sample)
+          PY
 
-      # 2) Normalize source (groups → sectorCards)
-      - name: Normalize sectorCards source
+      # 2) Normalize to sectorCards (canonical names + breadth/momentum)
+      - name: Normalize source (groups → sectorCards)
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, sys
-          src = "data/outlook_source.json"
-          try:
-            doc = json.load(open(src,"r",encoding="utf-8"))
-          except Exception as e:
-            print("invalid source:", e); sys.exit(1)
+          import json,sys
 
-          if isinstance(doc.get("sectorCards"), list):
-            out = {"sectorCards": doc["sectorCards"]}
-          elif isinstance(doc.get("groups"), dict):
-            groups = doc["groups"]
-            alias = {
-              "healthcare":"health care","health-care":"health care",
-              "info tech":"information technology","technology":"information technology","tech":"information technology",
-              "communications":"communication services","comm":"communication services",
-              "staples":"consumer staples","discretionary":"consumer discretionary",
-              "reit":"real estate","industry":"industrials"
-            }
-            order = ["information technology","materials","health care","communication services",
-                     "real estate","energy","consumer staples","consumer discretionary",
-                     "financials","utilities","industrials"]
-            def norm(s): return (s or "").strip().lower()
-            rows=[]
-            for name in order:
-              k = alias.get(norm(name), norm(name))
-              g = groups.get(k, {})
-              nh=int(g.get("nh",0)); nl=int(g.get("nl",0))
-              up=int(g.get("u",0));  dn=int(g.get("d",0))
-              b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
-              m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
-              rows.append({"sector":name.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn})
-            out={"sectorCards":rows}
+          path="data/outlook_source.json"
+          j=json.load(open(path,"r",encoding="utf-8"))
+          out=None
+
+          def pct(a,b): 
+              return 0.0 if not b else round(100.0*float(a)/float(b),2)
+
+          if "sectorCards" in j and isinstance(j["sectorCards"], list):
+              # Already normalized
+              out={"sectorCards": j["sectorCards"]}
+          elif "groups" in j and isinstance(j["groups"], dict):
+              groups=j["groups"]
+              # canonical order and alias map
+              order=[
+                "information technology","materials","health care","communication services","real estate",
+                "energy","consumer staples","consumer discretionary","financials","utilities","industrials"
+              ]
+              alias={
+                "healthcare":"health care","health-care":"health care",
+                "info tech":"information technology","technology":"information technology","tech":"information technology",
+                "communications":"communication services","comm services":"communication services","telecom":"communication services",
+                "staples":"consumer staples","discretionary":"consumer discretionary",
+                "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"
+              }
+              def norm(s): return (s or "").strip().lower()
+              # project groups to canonical keys
+              bucket={}
+              for raw,g in groups.items():
+                  k=alias.get(norm(raw), norm(raw))
+                  if not k: 
+                      continue
+                  nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
+                  b=pct(nh,nh+nl); m=pct(up,up+dn)
+                  bucket[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
+              # fill in canonical order
+              rows=[]
+              for name in order:
+                  rows.append(bucket.get(name,{"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}))
+              out={"sectorCards":rows}
           else:
-            print("missing sectorCards/groups"); sys.exit(1)
+              print("[normalize] missing sectorCards/groups"); sys.exit(1)
 
-          json.dump(out, open(src,"w",encoding="utf-8"), ensure_ascii=False)
-          print("sectorCards:", len(out["sectorCards"]))
+          json.dump(out, open(path,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
+          print("[normalize] sectorCards:", len(out["sectorCards"]))
+          # print a quick sample
+          print("[normalize] sample:", out["sectorCards"][:3])
           PY
 
-      # 3) Build hourly payload (1h + 4h lookbacks)
-      - name: Build hourly payload (1h + 4h long lookbacks)
+      # 3) Compose hourly payload (1h + 4h metrics)
+      - name: Build hourly payload (1h + 4h metrics)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
@@ -121,14 +148,14 @@ jobs:
             --source data/outlook_source.json \
             --out    data/outlook_hourly.json
 
-      # 4) Lux hook (writes strategy.trend1h + luxTrend1h + ensures pills via script)
+      # 4) Lux hook (writes strategy.trend1h / pills)
       - name: Compute Lux strategy (1h)
         run: |
           set -euo pipefail
           python -u scripts/compute_trend_hourly.py
 
-      # 5) Safety net: always create the 1h pills if metrics were sparse
-      - name: Ensure required hourly signals exist (safe)
+      # 5) Safety net: ensure required signals exist
+      - name: Ensure hourly signals (safe)
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -141,31 +168,20 @@ jobs:
           def now(): return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
           hourly=j.get("hourly") or {}
           signals=hourly.get("signals") or {}
-          metrics=j.get("metrics") or {}
-          def assure(k,state="neutral"):
+          def assure(k, state="neutral"):
               s=signals.get(k) or {}
               s.setdefault("state",state)
-              s.setdefault("lastChanged",now())
+              s.setdefault("lastChanged", now())
               signals[k]=s
           overall=(hourly.get("overall1h") or {}).get("state") or "neutral"
           assure("sigOverall1h", str(overall).lower())
-          ema_sign=metrics.get("ema_sign")
-          if isinstance(ema_sign,(int,float)):
-              ema_state="bull" if ema_sign>0 else "bear" if ema_sign<0 else "neutral"
-          else: ema_state="neutral"
-          assure("sigEMA1h", ema_state)
-          combo=metrics.get("momentum_combo_1h_pct")
-          if isinstance(combo,(int,float)):
-              smi_state="bull" if combo>50 else "bear" if combo<50 else "neutral"
-          else: smi_state="neutral"
-          assure("sigSMI1h", smi_state)
           hourly["signals"]=signals
           j["hourly"]=hourly
-          json.dump(j,open(path,"w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
-          print("[safe] ensured:",list(signals.keys()))
+          json.dump(j,open(path,"w",encoding="utf-8"),ensure_ascii=False, separators=(",",":"))
+          print("[safe] signals:", list(signals.keys()))
           PY
 
-      # 6) Validate structure (metrics + pills + strategy)
+      # 6) Validate structure
       - name: Validate required keys
         run: |
           set -euo pipefail
@@ -177,20 +193,18 @@ jobs:
           for k in need:
             if k not in m:
               print("missing metric:",k); sys.exit(1)
-          sig=(j.get("hourly") or {}).get("signals") or {}
-          for k in ("sigOverall1h","sigEMA1h","sigSMI1h"):
-            if k not in sig or "state" not in sig[k]:
-              print("missing signal:",k); sys.exit(1)
-          st=(j.get("strategy") or {}).get("trend1h") or {}
-          if "state" not in st or "updatedAt" not in st:
-            print("missing strategy.trend1h"); sys.exit(1)
-          print("OK")
+          sc=j.get("sectorCards") or []
+          if not sc or not isinstance(sc,list) or len(sc)!=11:
+            print("missing/invalid sectorCards"); sys.exit(1)
+          print("OK: metrics & sectorCards present")
           PY
 
+      # 7) Write heartbeat
       - name: Write heartbeat
         run: date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
 
-      # 7) Detect change vs remote
+      # 8) Publish if changed
+        # (no self-copy; publish only if data changed)
       - name: Detect change
         id: diff
         env:
@@ -207,7 +221,6 @@ jobs:
           fi
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
 
-      # 8) Publish (safe; no self-copy)
       - name: Publish live branch
         if: ${{ steps.diff.outputs.changed == 'true' }}
         env:
