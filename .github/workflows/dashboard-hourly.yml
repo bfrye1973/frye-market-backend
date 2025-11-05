@@ -1,4 +1,4 @@
-name: dashboard-eod
+name: dashboard-hourly
 
 on:
   workflow_dispatch: {}
