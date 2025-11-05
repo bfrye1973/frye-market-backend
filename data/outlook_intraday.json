@@ -1,9 +1,9 @@
 {
   "version": "sandbox-10m-deltas",
-  "updated_at": "2025-11-04 22:59:32",
-  "updated_at_utc": "2025-11-05T05:59:32Z",
+  "updated_at": "2025-11-04 23:35:17",
+  "updated_at_utc": "2025-11-05T06:35:17Z",
   "metrics": {
-    "breadth_10m_pct": 45.46,
+    "breadth_10m_pct": 50.91,
     "momentum_10m_pct": 40.75,
     "momentum_combo_10m_pct": 40.75,
     "squeeze_psi_10m_pct": 7.57,
@@ -15,7 +15,7 @@
     "ema_gap_pct": -0.118,
     "breadth_slow_pct": 50.0,
     "momentum_slow_pct": 50.0,
-    "breadth_align_fast_pct": 63.64,
+    "breadth_align_fast_pct": 72.73,
     "breadth_barup_fast_pct": 18.18
   },
   "intraday": {
@@ -31,7 +31,7 @@
       "components": {
         "ema10": -8,
         "momentum": -5,
-        "breadth": -1,
+        "breadth": 0,
         "squeeze": 8,
         "liquidity": -5,
         "riskOn": 0
@@ -39,7 +39,7 @@
     }
   },
   "engineLights": {
-    "updatedAt": "2025-11-04 22:59:32",
+    "updatedAt": "2025-11-04 23:35:17",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -47,19 +47,19 @@
         "active": false,
         "severity": "info",
         "reason": "ΔB +0.00 + ΔM +0.00 = +0.00",
-        "lastChanged": "2025-11-04 22:59:32"
+        "lastChanged": "2025-11-04 23:35:17"
       },
       "sigAccelDown": {
         "active": false,
         "severity": "warn",
         "reason": "ΔB +0.00 + ΔM +0.00 = +0.00",
-        "lastChanged": "2025-11-04 22:59:32"
+        "lastChanged": "2025-11-04 23:35:17"
       },
       "sigExpansion": {
         "active": true,
         "severity": "info",
         "reason": "PSI 7.6 Δ-3.19",
-        "lastChanged": "2025-11-04 22:59:32"
+        "lastChanged": "2025-11-04 23:35:17"
       },
       "sigOverall10m": {
         "state": "neutral",
@@ -210,7 +210,7 @@
     "volumeSentiment": 0.0
   },
   "meta": {
-    "last_full_run_utc": "2025-11-05T05:59:33Z",
+    "last_full_run_utc": "2025-11-05T06:35:18Z",
     "source": "mirror",
     "sandbox": true
   },
@@ -279,5 +279,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-11-04T23:09:08-07:00"
+  "deltasUpdatedAt": "2025-11-04T23:35:32-07:00"
 }
