@@ -206,6 +206,15 @@ def compute_overall1h(ema_sign: int, ema10_dist_pct: float,
 
 # ----------------------------- Builder -----------------------------
 
+def _stddev_last(values: List[float], period: int) -> Optional[float]:
+    """Population stdev of the last 'period' closes."""
+    if len(values) < period:
+        return None
+    window = values[-period:]
+    mean = sum(window) / float(period)
+    var  = sum((x-mean)**2 for x in window) / float(period)
+    return math.sqrt(var)
+
 def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     # 0) Try to fetch previous live payload (to preserve lastChanged)
     prev_js = {}
@@ -232,7 +241,7 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         except Exception:
             cards = []; cards_fresh = False
 
-    # 2) Rising & Risk-On (proxies from cards)
+    # 2) Rising & Risk-On
     NH=NL=UP=DN=0.0
     for c in cards or []:
         NH += float(c.get("nh",0)); NL += float(c.get("nl",0))
@@ -331,20 +340,38 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     breadth_1h  = breadth_slow
     momentum_1h_legacy = momentum_slow
 
-    # 3c) Squeeze 1h (Expansion %)
+    # 3c) Squeeze 1h (TradingView-style: KC vs BB, 20 periods)
     squeeze_1h = 50.0
-    if len(spy_1h) >= 6:
+    if len(spy_1h) >= 25:
         C = [b["close"] for b in spy_1h]
         H = [b["high"]  for b in spy_1h]
         L = [b["low"]   for b in spy_1h]
-        mean = sum(C)/len(C)
-        sd = (sum((x-mean)**2 for x in C)/len(C))**0.5
-        bb_w = (mean + 2*sd) - (mean - 2*sd)
-        prevs = C[:-1] + [C[-1]]
-        trs = [max(H[i]-L[i], abs(H[i]-prevs[i]), abs(L[i]-prevs[i])) for i in range(len(C))]
-        kc_w = 2.0*(sum(trs)/len(trs)) if trs else 0.0
-        ratio = 0.0 if kc_w <= 0 else clamp(100.0 * (bb_w / kc_w), 0.0, 100.0)
-        squeeze_1h = clamp(100.0 - ratio, 0.0, 100.0)  # 0=tight, 100=expanded
+
+        period = 20
+        bb_mult = 2.0     # BB uses 2σ
+        kc_mult = 1.5     # Keltner uses 1.5×ATR (typical TV default)
+
+        # stdev of last 'period' closes
+        def stddev_last(vals, p):
+            if len(vals) < p: return None
+            w = vals[-p:]
+            mean = sum(w) / float(p)
+            var  = sum((x-mean)**2 for x in w) / float(p)
+            return math.sqrt(var)
+
+        sd20 = stddev_last(C, period)
+        trs = tr_series(H, L, C)
+        atr20 = ema_last(trs, period) if trs else None
+
+        if isinstance(sd20, (int,float)) and isinstance(atr20,(int,float)) and atr20>0:
+            bb_width = 2.0 * bb_mult * sd20         # upper-lower (BB)
+            kc_width = 2.0 * kc_mult * atr20        # upper-lower (KC)
+            # squeeze % = portion of KC width that BB is *below* KC
+            # 0% → BB >= KC (no squeeze), 100% → BB << KC (tight)
+            squeeze_1h = clamp(100.0 * max(0.0, kc_width - bb_width) / max(kc_width, 1e-9), 0.0, 100.0)
+        else:
+            # fall back gently
+            squeeze_1h = 50.0
 
     # 3d) Liquidity / Volatility
     liquidity_1h = 50.0
@@ -373,66 +400,50 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         riskon_pct=risk_on_pct,
     )
 
-    # 5) Signals (Option A: four crossovers)
-    def prev_last_changed(sig_key: str) -> Optional[str]:
-        try:
-            return ((prev_js.get("hourly") or {}).get("signals") or {}).get(sig_key, {}).get("lastChanged")
-        except Exception:
-            return None
-
-    def stamp_or_carry(sig_key: str, new_active: bool, reason: str, default_ts: str) -> dict:
-        prev_active = None
-        prev_sig = ((prev_js.get("hourly") or {}).get("signals") or {}).get(sig_key) if isinstance(prev_js, dict) else None
-        if isinstance(prev_sig, dict):
-            prev_active = bool(prev_sig.get("active", False))
-        flipped = (prev_active is None) or (prev_active != new_active)
+    # 5) Signals
+    updated_utc = now_utc_iso()
+    def stamp(prev_sig: Optional[dict], active: bool, reason: str) -> dict:
+        last = prev_sig.get("lastChanged") if isinstance(prev_sig,dict) else updated_utc
+        prev_active = prev_sig.get("active") if isinstance(prev_sig,dict) else None
+        flipped = (prev_active is None) or (bool(prev_active) != bool(active))
         return {
-            "active": bool(new_active),
-            "severity": "info" if "Bull" in reason or "crossed above" in reason else "warn",
-            "reason": reason if new_active else "",
-            "lastChanged": (default_ts if flipped else (prev_sig.get("lastChanged") if isinstance(prev_sig, dict) else default_ts))
+            "active": bool(active),
+            "severity": "info" if "above" in reason else "warn",
+            "reason": reason if active else "",
+            "lastChanged": updated_utc if flipped else (last or updated_utc),
         }
 
-    updated_utc = now_utc_iso()
-
-    # Need previous bar values; require at least 2 bars and SMI series
+    prev_sig = ((prev_js.get("hourly") or {}).get("signals") or {}) if isinstance(prev_js, dict) else {}
     has_prev_ema = len(e8) >= 2 and len(e18) >= 2
     has_prev_smi = len(k1h_series) >= 2 and len(d1h_series) >= 2
-
-    ema_bull = ema_bear = False
-    smi_bull = smi_bear = False
+    ema_bull = ema_bear = smi_bull = smi_bear = False
 
     if has_prev_ema:
         ema_bull = (e8[-2] <= e18[-2]) and (e8[-1] >  e18[-1])
         ema_bear = (e8[-2] >= e18[-2]) and (e8[-1] <  e18[-1])
-
     if has_prev_smi:
         smi_bull = (k1h_series[-2] <= d1h_series[-2]) and (k1h_series[-1] >  d1h_series[-1])
         smi_bear = (k1h_series[-2] >= d1h_series[-2]) and (k1h_series[-1] <  d1h_series[-1])
 
     signals_1h = {
-        "sigEMA1hBullCross": stamp_or_carry("sigEMA1hBullCross", bool(ema_bull), "EMA10 crossed above EMA20 (1h)", updated_utc),
-        "sigEMA1hBearCross": stamp_or_carry("sigEMA1hBearCross", bool(ema_bear), "EMA10 crossed below EMA20 (1h)", updated_utc),
-        "sigSMI1hBullCross": stamp_or_carry("sigSMI1hBullCross", bool(smi_bull), "SMI %K crossed above %D (1h)", updated_utc),
-        "sigSMI1hBearCross": stamp_or_carry("sigSMI1hBearCross", bool(smi_bear), "SMI %K crossed below %D (1h)", updated_utc),
+        "sigEMA1hBullCross": stamp(prev_sig.get("sigEMA1hBullCross"), ema_bull, "EMA10 crossed above EMA20 (1h)"),
+        "sigEMA1hBearCross": stamp(prev_sig.get("sigEMA1hBearCross"), ema_bear, "EMA10 crossed below EMA20 (1h)"),
+        "sigSMI1hBullCross": stamp(prev_sig.get("sigSMI1hBullCross"), smi_bull, "SMI %K crossed above %D (1h)"),
+        "sigSMI1hBearCross": stamp(prev_sig.get("sigSMI1hBearCross"), smi_bear, "SMI %K crossed below %D (1h)"),
     }
 
-    # 6) Pack payload (v1)
     metrics = {
         "breadth_1h_pct": breadth_1h,
         "breadth_align_1h_pct": None,
         "breadth_align_1h_pct_fast": None,
         "breadth_bar_1h_pct": None,
         "breadth_bar_1h_pct_fast": None,
-
         "momentum_1h_pct": momentum_1h_legacy,
         "momentum_combo_1h_pct": momentum_combo_1h,
-
-        "squeeze_1h_pct": squeeze_1h,
+        "squeeze_1h_pct": squeeze_1h,                      # <<<<<< CORRECTED TV-STYLE SQUEEZE
         "liquidity_1h": liquidity_1h,
         "volatility_1h_pct": round(volatility_1h, 3),
         "volatility_1h_scaled": round(volatility_1h * 6.25, 2),
-
         "breadth_slow_pct": breadth_slow,
         "momentum_slow_pct": momentum_slow,
     }
@@ -441,7 +452,7 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         "sectorDirection1h": {"risingPct": rising_pct},
         "riskOn1h": {"riskOnPct": risk_on_pct},
         "overall1h": {"state": state, "score": score, "components": comps},
-        "signals": signals_1h,  # <<< NEW
+        "signals": signals_1h,
     }
 
     out = {
@@ -454,7 +465,7 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         "meta": {"cards_fresh": bool(cards_fresh), "after_hours": False},
     }
 
-    print(f"[1h] breadth_1h={breadth_1h} mom_combo_1h={momentum_combo_1h} sq_1h(exp)={squeeze_1h} "
+    print(f"[1h] breadth_1h={breadth_1h} mom_combo_1h={momentum_combo_1h} squeeze_1h={squeeze_1h} "
           f"liq_1h={liquidity_1h} vol_1h_scaled={out['metrics']['volatility_1h_scaled']} overall={state}/{score}")
     return out
 
