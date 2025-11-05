@@ -89,8 +89,26 @@ def main():
 
     # real computation if possible, else keep 0.0
     vs = m.get("volume_sentiment_10m_pct") or m.get("volume_sentiment_pct")
+
     if not isinstance(vs,(int,float)):
-        vs = compute_volume_sentiment_pct(m)
+        # Try OBV-style compute if builder fields exist:
+        close_prev = m.get("close_prev_10m") or m.get("close_10m_prev")
+        close_curr = m.get("close_10m")
+        volume     = m.get("volume_10m") or m.get("vol_10m")
+        volSma     = m.get("volSma_10m") or m.get("vol_sma_10m")
+
+        if all(isinstance(x,(int,float)) for x in (close_prev,close_curr,volume,volSma)):
+            obv_delta = volume if close_curr > close_prev else (-volume if close_curr < close_prev else 0.0)
+            vs = clamp(100.0 * (obv_delta / max(volSma,1.0)), -20.0, 20.0)
+        else:
+            # breadth-based fallback if available
+            bbar = m.get("breadth_barup_fast_pct")
+            if isinstance(bbar,(int,float)):
+                # map [0..100] to [-100..+100], then compress
+                vs = clamp(((bbar * 2.0) - 100.0) / 5.0, -20.0, 20.0)
+        else:
+            vs = 0.0  # last resort: neutral red
+
 
     # fallback trend if missing
     if not isinstance(ts,(int,float)):
