@@ -3,8 +3,8 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Run once per hour (tweak to your preferred cadence)
-    - cron: "5 13-21 * * 1-5"
+    # Run once per hour at :05 (Mon–Fri). Staggered away from top-of-hour jobs.
+    - cron: "5 * * * 1-5"
 
 defaults:
   run:
@@ -17,24 +17,34 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+    concurrency:
+      group: dashboard-hourly
+      cancel-in-progress: true
+
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
 
-      # --- Metric lookbacks (unchanged) ---
-      HOUR_LOOKBACK_DAYS: ${{ vars.HOUR_LOOKBACK_DAYS || '10' }}
-      H4_LOOKBACK_DAYS:   ${{ vars.H4_LOOKBACK_DAYS   || '40' }}
-      EMA_FAST:           ${{ vars.EMA_FAST           || '10' }}
-      EMA_SLOW:           ${{ vars.EMA_SLOW           || '20' }}
-      VOL_FAST:           ${{ vars.VOL_FAST           || '3'  }}
-      VOL_SLOW:           ${{ vars.VOL_SLOW           || '12' }}
-
-      # --- NEW: ✔ intraday 1h groups (L = 3 bars) ---
-      FD_HOURLY_INTRADAY: "true"
-      FD_HOURLY_LOOKBACK: "3"
+      # Tuning for consistency (lighter load, fewer 429s, deterministic)
+      HOUR_LOOKBACK_DAYS: "10"   # was heavier
+      H4_LOOKBACK_DAYS:   "21"   # was heavier
+      EMA_FAST:           "8"
+      EMA_SLOW:           "18"
+      VOL_FAST:           "3"
+      VOL_SLOW:           "12"
+      FD_MAX_WORKERS:     "6"    # avoid 429 storms
+      FD_RETRY_MAX:       "1"    # fail fast on bad slowness
 
     steps:
+      # ---------- T0 ----------
+      - name: Start timer (UTC)
+        id: t0
+        run: |
+          echo "START_TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+          echo "T0=$(date +%s)" >> "$GITHUB_ENV"
+          echo "::notice:: hourly run started at $START_TS"
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -51,37 +61,37 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dateutil
 
-      # 1) Build hourly source with intraday flags (non-zero groups)
+      # 1) Build hourly groups → data/outlook_source.json
       - name: Build sectorCards source (hourly groups)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
+          ST=$(date +%s)
           mkdir -p data
-          echo "[hourly] FD_HOURLY_INTRADAY=$FD_HOURLY_INTRADAY FD_HOURLY_LOOKBACK=$FD_HOURLY_LOOKBACK"
+          echo "::notice:: FD_MAX_WORKERS=$FD_MAX_WORKERS FD_RETRY_MAX=$FD_RETRY_MAX H1D=$HOUR_LOOKBACK_DAYS H4D=$H4_LOOKBACK_DAYS"
           python -u scripts/build_outlook_source_from_polygon.py \
             --mode hourly \
             --out data/outlook_source.json
-          echo "----- RAW SOURCE (first 80 lines) -----"
           head -n 80 data/outlook_source.json || true
-          python - <<'PY'
-          import json
-          j=json.load(open("data/outlook_source.json","r",encoding="utf-8"))
-          groups=j.get("groups") or {}
-          print("[hourly] groups sample (first 3):", list(groups.items())[:3])
-          PY
+          echo "::notice:: Build hourly groups elapsed: $(( $(date +%s) - $ST ))s"
 
-      # 2) Normalize groups → sectorCards with canonical names
+      # 2) Normalize groups → sectorCards
       - name: Normalize source (groups → sectorCards)
         run: |
           set -euo pipefail
+          ST=$(date +%s)
           python - <<'PY'
           import json,sys
           path="data/outlook_source.json"
-          j=json.load(open(path,"r",encoding="utf-8"))
-          out=None
+          try:
+            j=json.load(open(path,"r",encoding="utf-8"))
+          except Exception as e:
+            print("invalid source:", e); sys.exit(1)
+
           def pct(a,b): 
               return 0.0 if b==0 else round(100.0*float(a)/float(b),2)
+
           if "sectorCards" in j and isinstance(j["sectorCards"], list):
               out={"sectorCards": j["sectorCards"]}
           elif "groups" in j and isinstance(j["groups"], dict):
@@ -94,7 +104,7 @@ jobs:
               alias={
                 "healthcare":"health care","health-care":"health care",
                 "info tech":"information technology","technology":"information technology","tech":"information technology",
-                "communications":"communication services","comm services":"communication services","telecom":"communication services",
+                "communications":"communication services","comm":"communication services","telecom":"communication services",
                 "staples":"consumer staples","discretionary":"consumer discretionary",
                 "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
               }
@@ -106,63 +116,65 @@ jobs:
                   nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
                   b=pct(nh,nh+nl); m=pct(up,up+dn)
                   bucket[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
-              rows=[]
-              for name in order:
-                  rows.append(bucket.get(name,{"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}))
-              out={"sectorCards":rows}
+              rows=[ bucket.get(name,{"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for name in order ]
+              out={"sectorCards": rows}
           else:
               print("missing sectorCards/groups"); sys.exit(1)
+
           json.dump(out, open(path,"w",encoding="utf-8"), ensure_ascii=False)
           print("sectorCards:", len(out["sectorCards"]))
           print("sample:", out["sectorCards"][:3])
           PY
+          echo "::notice:: Normalize elapsed: $(( $(date +%s) - $ST ))s"
 
-      # 3) Compose hourly meter (1h + 4h metrics)
+      # 3) Compose 1h + 4h meter → data/outlook_hourly.json
       - name: Build hourly payload (1h + 4h)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
           H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
-          EMA_FAST: ${{ env.EMA_FAST }}
-          EMA_SLOW: ${{ env.EMA_SLOW }}
-          VOL_FAST: ${{ env.VOL_FAST }}
-          VOL_SLOW: ${{ env.VOL_SLOW }}
+          EMA_FAST:           ${{ env.EMA_FAST }}
+          EMA_SLOW:           ${{ env.EMA_SLOW }}
+          VOL_FAST:           ${{ env.VOL_FAST }}
+          VOL_SLOW:           ${{ env.VOL_SLOW }}
         run: |
           set -euo pipefail
+          ST=$(date +%s)
           python -u scripts/make_dashboard_hourly.py \
             --source data/outlook_source.json \
             --out    data/outlook_hourly.json
+          echo "::notice:: Payload build elapsed: $(( $(date +%s) - $ST ))s"
 
-      # 4) Lux hook (your existing job)
+      # 4) Lux hook
       - name: Compute Lux strategy (1h)
         run: |
           set -euo pipefail
+          ST=$(date +%s)
           python -u scripts/compute_trend_hourly.py
+          echo "::notice:: Lux compute elapsed: $(( $(date +%s) - $ST ))s"
 
-      # 5) Safety net: ensure minimum hourly signals exist
+      # 5) Safety: ensure minimum 1h signals
       - name: Ensure 1h signals (safe)
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, datetime, sys
+          import json, datetime
           path="data/outlook_hourly.json"
-          try: j=json.load(open(path,"r",encoding="utf-8"))
-          except Exception: 
-              print("[safe] no hourly file"); sys.exit(0)
+          j=json.load(open(path,"r",encoding="utf-8"))
           def now(): return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
           hourly=j.get("hourly") or {}
           signals=hourly.get("signals") or {}
-          def assure(k,state="neutral"):
+          def setif(k, st="neutral"):
               s=signals.get(k) or {}
-              s.setdefault("state",state)
+              s.setdefault("state",st)
               s.setdefault("lastChanged",now())
               signals[k]=s
           overall=(hourly.get("overall1h") or {}).get("state") or "neutral"
-          assure("sigOverall1h", str(overall).lower())
+          setif("sigOverall1h", str(overall).lower())
           hourly["signals"]=signals
           j["hourly"]=hourly
           json.dump(j,open(path,"w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
-          print("[safe] ensured signals:", list(signals.keys()))
+          print("[safe] signals:", list(signals.keys()))
           PY
 
       # 6) Validate structure
@@ -185,7 +197,7 @@ jobs:
       - name: Write heartbeat
         run: date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
 
-      # 7) Publish if changed
+      # 7) Publish only when changed
       - name: Detect change
         id: diff
         env:
@@ -202,7 +214,7 @@ jobs:
           fi
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
 
-      - name: Publish live branch
+      - name: Publish live branch (safe)
         if: ${{ steps.diff.outputs.changed == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
