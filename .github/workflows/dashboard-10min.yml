@@ -129,6 +129,59 @@ jobs:
           set -euo pipefail
           python -u scripts/compute_trend10m.py || true
 
+      # --- SAFETY: Guarantee lux10m block exists for FE ---
+      - name: Ensure Lux10m numeric fields exist (safe)
+        if: ${{ steps.market_hours.outputs.run == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, sys
+          p="data/outlook_intraday.json"
+          j=json.load(open(p,"r",encoding="utf-8"))
+          m=j.get("metrics") or {}
+          lux=j.get("lux10m") or {}
+          # fill missing numeric fields to avoid blanks in FE
+          def num(x): 
+              try:
+                  v=float(x)
+                  return None if v!=v else v
+              except:
+                  return None
+          if "trendStrength" not in lux:
+              ts = m.get("trend_strength_10m_pct")
+              if not isinstance(ts,(int,float)): ts=0.0
+              lux["trendStrength"]=float(ts)
+          if "volatility" not in lux:
+              v = m.get("volatility_10m_pct") or m.get("volatility_pct")
+              lux["volatility"]=num(v)
+          if "volatilityScaled" not in lux:
+              vsc = m.get("volatility_10m_scaled") or m.get("volatility_scaled")
+              lux["volatilityScaled"]=num(vsc)
+          if "squeezePct" not in lux:
+              sq = m.get("squeeze_10m_pct") or m.get("squeeze_pct")
+              lux["squeezePct"]=num(sq)
+          if "volumeSentiment" not in lux:
+              # if not present, set 0.0 so FE is never blank
+              vs = m.get("volume_sentiment_10m_pct") or m.get("volume_sentiment_pct") or 0.0
+              try: lux["volumeSentiment"]=float(vs)
+              except: lux["volumeSentiment"]=0.0
+          j["lux10m"]=lux
+          # mirror to legacy paths (engineLights.*)
+          j.setdefault("engineLights",{})
+          j["engineLights"].setdefault("lux10m",{})
+          j["engineLights"]["lux10m"].update(lux)
+          j["engineLights"].setdefault("metrics",{})
+          j["engineLights"]["metrics"].update({
+              "lux10m_trendStrength": lux["trendStrength"],
+              "lux10m_volatility": lux["volatility"],
+              "lux10m_volatilityScaled": lux["volatilityScaled"],
+              "lux10m_squeezePct": lux["squeezePct"],
+              "lux10m_volumeSentiment": lux["volumeSentiment"]
+          })
+          json.dump(j, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
+          print("[safe] ensured lux10m numeric fields.")
+          PY
+
       - name: Update pills (10m always-on state)
         if: ${{ steps.market_hours.outputs.run == 'true' }}
         env:
@@ -269,7 +322,6 @@ jobs:
             fi
           fi
           echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
-          echo "[diff] changed=${CHG}"
 
       # 10) Publish live branch (safe) only if NOT stale AND changed
       - name: Publish live branch
