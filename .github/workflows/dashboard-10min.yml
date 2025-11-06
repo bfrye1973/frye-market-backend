@@ -4,7 +4,7 @@ on:
   workflow_dispatch: {}
   schedule:
     # Run every 10 minutes (consistent cadence). You can move back to */7 after stability.
-    - cron: "*/10 * * * *"
+    - cron: "*/12 * * * 1-5"
 
 defaults:
   run:
