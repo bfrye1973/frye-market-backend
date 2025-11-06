@@ -97,6 +97,15 @@ jobs:
             --out data/outlook_intraday.json
           echo "::notice:: Payload build elapsed: $(( $(date +%s) - $ST ))s"
 
+       - name: Compute Pulse 10m (sector rotation)
+         if: ${{ steps.market_hours.outputs.run == 'true' }}
+         env:
+           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
+         run: |
+           set -euo pipefail
+           python -u scripts/compute_pulse10m.py
+ 
+
       # ---------- JSON-only post processors (ALWAYS run) ----------
       - name: Compute Lux strategy (10m)
         env:
