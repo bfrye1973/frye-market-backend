@@ -3,8 +3,8 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Steady cadence while stabilizing (change back to */7 when consistent)
-    - cron: "*/10 * * * 0-6"
+    # Consistent cadence while stabilized (change back to */7 after a day of stability)
+    - cron: "*/10 * * * *"
 
 defaults:
   run:
@@ -19,24 +19,24 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: False          # ⬅️ no overlap; freshest run wins
+      cancel-in-progress: true     # Freshest run wins, prevents overlap & 429 storms
 
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
 
-      # Flip to "false" after you’re done weekend/after-hours testing
+      # Run collector every time (no market-hours gating for consistency)
       TESTING_MODE: "true"
 
-      # Collector tuning for polygon consistency
+      # Collector tuning for predictable runtime
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
-      FD_MAX_WORKERS: "6"               # ⬅️ avoid 429 retry storms
-      FD_RETRY_MAX: "1"                 # ⬅️ short retry trail
-      FD_LOOKBACK_DAYS: "0"             # ⬅️ today-only (deterministic)
+      FD_MAX_WORKERS: "6"           # reduce pressure on API; avoids long backoffs
+      FD_RETRY_MAX: "1"             # short retry trail; fail fast
+      FD_LOOKBACK_DAYS: "0"         # today-only (deterministic)
 
-      # 10m scripts read JSON only (no Polygon)
+      # Paths for JSON-only post processors (no Polygon)
       INTRADAY_JSON_PATH: "data/outlook_intraday.json"
       HOURLY_URL: "https://frye-market-backend-1.onrender.com/live/hourly"
       INTRADAY_URL: "https://frye-market-backend-1.onrender.com/live/intraday"
@@ -47,34 +47,14 @@ jobs:
         id: t0
         run: |
           echo "START_TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
-          echo "T0=$(date +%s)" >> "$GITHUB_ENV"
           echo "::notice:: 10m run started at $START_TS"
 
-      # ---------- AZ guard ----------
-      # TESTING_MODE=true: always run collector; Lux always runs regardless.
-      - name: Market hours guard (AZ)
-        id: guard
-        run: |
-          if [ "${TESTING_MODE}" = "true" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          TZ="America/Phoenix"
-          DOW=$(TZ=$TZ date +'%u')   # 1..7
-          HOUR=$(TZ=$TZ date +'%H')  # 00..23
-          echo "AZ now: $(TZ=$TZ date) (DOW=$DOW HOUR=$HOUR)"
-          if [ "$DOW" -ge 6 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if [ "$HOUR" -lt 4 ] || [ "$HOUR" -gt 18 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          echo "run=true" >> "$GITHUB_OUTPUT"
-
       - name: Checkout
-        if: ${{ steps.guard.outputs.run == 'true' }}
         uses: actions/checkout@v4
         with: { fetch-depth: 1 }
 
       # ---------- Collector: light & deterministic ----------
       - name: Build sectorCards source (10m)
-        if: ${{ steps.guard.outputs.run == 'true' }}
         env:
           POLYGON_API_KEY:  ${{ secrets.POLYGON_API_KEY }}
           FD_LOOKBACK_DAYS: ${{ env.FD_LOOKBACK_DAYS }}
@@ -90,7 +70,6 @@ jobs:
           echo "::notice:: Build sectorCards elapsed: $(( $(date +%s) - $ST ))s"
 
       - name: Normalize sector source (light)
-        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           ST=$(date +%s)
@@ -106,7 +85,6 @@ jobs:
           echo "::notice:: Normalize elapsed: $(( $(date +%s) - $ST ))s"
 
       - name: Build intraday payload (FULL)
-        if: ${{ steps.guard.outputs.run == 'true' }}
         env:
           POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
@@ -119,7 +97,7 @@ jobs:
             --out data/outlook_intraday.json
           echo "::notice:: Payload build elapsed: $(( $(date +%s) - $ST ))s"
 
-      # ---------- Lux compute ALWAYS runs (JSON only) ----------
+      # ---------- JSON-only post processors (ALWAYS run) ----------
       - name: Compute Lux strategy (10m)
         env:
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
@@ -130,7 +108,6 @@ jobs:
           python -u scripts/compute_trend10m.py || true
           echo "::notice:: Lux compute elapsed: $(( $(date +%s) - $ST ))s"
 
-      # Guarantee Engine-Lights numeric fields & legacy mirrors
       - name: Ensure Lux10m numeric fields exist (safe)
         run: |
           set -euo pipefail
@@ -143,7 +120,6 @@ jobs:
           def num(x):
               try: v=float(x); return None if v!=v else v
               except: return None
-          # fill missing numerics to avoid FE blanks
           if "trendStrength" not in lux:
               ts = m.get("trend_strength_10m_pct"); lux["trendStrength"]=float(ts) if isinstance(ts,(int,float)) else 0.0
           if "volatility" not in lux:
@@ -157,7 +133,7 @@ jobs:
               try: lux["volumeSentiment"]=float(vs)
               except: lux["volumeSentiment"]=0.0
           j["lux10m"]=lux
-          # legacy mirrors for FE
+          # legacy mirrors (FE ready)
           j.setdefault("engineLights",{})
           j["engineLights"].setdefault("lux10m",{}); j["engineLights"]["lux10m"].update(lux)
           j["engineLights"].setdefault("metrics",{})
@@ -166,15 +142,19 @@ jobs:
               "lux10m_volatility": lux["volatility"],
               "lux10m_volatilityScaled": lux["volatilityScaled"],
               "lux10m_squeezePct": lux["squeezePct"],
-              "lux10m_volumeSentiment": lux["volumeSentiment"],
+              "lux10m_volumeSentiment": lux["volumeSentiment"]
           })
           json.dump(j, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
-          print("[safe] lux10m numeric fields are present.")
+          print("[safe] lux10m numeric fields OK.")
           PY
 
-      # ---------- Repairs ----------
+      - name: Update pills (10m always-on state)
+        run: |
+          set -euo pipefail
+          python -u scripts/update_pills_10m_state.py || true
+
+      # ---------- Validate/Repair ----------
       - name: Validate & Repair sectorCards (robust)
-        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           ST=$(date +%s)
@@ -190,36 +170,28 @@ jobs:
           good_schema = (len(cards)==11 and all(k in (cards[0] if cards else {}) for k in need))
           nonzero = totals(cards) > 0
           if good_schema and nonzero:
-              print("[repair] sectorCards OK: len=11 totals=", totals(cards)); sys.exit(0)
-          print("[repair] sectorCards need repair")
-          src = loadp("/tmp/source_backup.json")
-          groups = src.get("groups") or {}
+              print("[repair] OK len=", len(cards)); sys.exit(0)
+          print("[repair] rebuilding from source backup…")
+          src = loadp("/tmp/source_backup.json").get("groups") or {}
           order = ["information technology","materials","health care","communication services","real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
-          alias = {"healthcare":"health care","health-care":"health care","info tech":"information technology","technology":"information technology","tech":"information technology",
-                   "communications":"communication services","comm services":"communication services","telecom":"communication services",
-                   "staples":"consumer staples","discretionary":"consumer discretionary","finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"}
-          def norm(s): return (s or "").strip().lower()
+          alias = {"healthcare":"health care","health-care":"health care","info tech":"information technology","technology":"information technology","tech":"information technology","communications":"communication services","comm services":"communication services","telecom":"communication services","staples":"consumer staples","discretionary":"consumer discretionary","finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"}
+          def norm(s): return (s or '').strip().lower()
           by={}
-          for name,g in (groups or {}).items():
-              k = alias.get(norm(name), norm(name))
-              nh=int((g or {}).get("nh",0)); nl=int((g or {}).get("nl",0))
-              up=int((g or {}).get("u",0));  dn=int((g or {}).get("d",0))
+          for name,g in src.items():
+              k=alias.get(norm(name), norm(name))
+              nh=int(g.get('nh',0)); nl=int(g.get('nl',0)); up=int(g.get('u',0)); dn=int(g.get('d',0))
               b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
               m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
               by[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
-          new_cards=[by.get(n,{"sector":n.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for n in order]
-          if len(new_cards)==11 and totals(new_cards)>0:
-              intraday["sectorCards"]=new_cards
-              json.dump(intraday, open("data/outlook_intraday.json","w",encoding="utf-8"), separators=(",",":"))
-              print("[repair] repair applied")
-          else:
-              print("[repair] WARN: repair failed; publishing anyway")
+          # write back
+          intraday["sectorCards"]=[by.get(n,{"sector":n.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for n in order]
+          json.dump(intraday, open("data/outlook_intraday.json","w",encoding="utf-8"), separators=(",",":"))
+          print("[repair] applied len=", len(intraday["sectorCards"]))
           PY
           echo "::notice:: Repair elapsed: $(( $(date +%s) - $ST ))s"
 
       # ---------- Stamp ----------
       - name: Stamp last_full_run_utc
-        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -242,8 +214,6 @@ jobs:
 
       - name: Stale-guard (skip publish if newer live exists)
         id: stale
-        env:
-          START_TS: ${{ env.START_TS }}
         run: |
           set -euo pipefail
           START_TS="${START_TS:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
