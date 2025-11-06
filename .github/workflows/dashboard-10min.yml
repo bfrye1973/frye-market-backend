@@ -19,7 +19,7 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: true          # ⬅️ no overlap; freshest run wins
+      cancel-in-progress: False          # ⬅️ no overlap; freshest run wins
 
     env:
       TZ: America/Phoenix
