@@ -1,22 +1,22 @@
 {
   "version": "sandbox-10m-deltas",
-  "updated_at": "2025-11-06 10:29:44",
-  "updated_at_utc": "2025-11-06T17:29:44Z",
+  "updated_at": "2025-11-06 11:48:13",
+  "updated_at_utc": "2025-11-06T18:48:13Z",
   "metrics": {
-    "breadth_10m_pct": 20.0,
-    "momentum_10m_pct": 34.95,
-    "momentum_combo_10m_pct": 34.95,
-    "squeeze_psi_10m_pct": 4.85,
-    "squeeze_pct": 4.85,
-    "squeeze_expansion_pct": 95.15,
-    "liquidity_psi": 89.42,
-    "volatility_pct": 0.216,
+    "breadth_10m_pct": 38.18,
+    "momentum_10m_pct": 47.21,
+    "momentum_combo_10m_pct": 47.21,
+    "squeeze_psi_10m_pct": 37.03,
+    "squeeze_pct": 37.03,
+    "squeeze_expansion_pct": 62.97,
+    "liquidity_psi": 84.01,
+    "volatility_pct": 0.193,
     "ema_sign": -1,
-    "ema_gap_pct": -0.25,
+    "ema_gap_pct": -0.085,
     "breadth_slow_pct": 50.0,
     "momentum_slow_pct": 50.0,
     "breadth_align_fast_pct": 9.09,
-    "breadth_barup_fast_pct": 36.36,
+    "breadth_barup_fast_pct": 81.82,
     "pulse10m_signal": 50.0,
     "pulse10m_offenseTilt": null,
     "pulse10m_defenseTilt": null,
@@ -33,19 +33,19 @@
     },
     "overall10m": {
       "state": "neutral",
-      "score": 42,
+      "score": 49,
       "components": {
-        "ema10": -17,
-        "momentum": -8,
-        "breadth": -6,
-        "squeeze": 9,
-        "liquidity": 5,
+        "ema10": -6,
+        "momentum": -1,
+        "breadth": -2,
+        "squeeze": 3,
+        "liquidity": 4,
         "riskOn": 0
       }
     }
   },
   "engineLights": {
-    "updatedAt": "2025-11-06 10:29:44",
+    "updatedAt": "2025-11-06 11:48:13",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -53,19 +53,19 @@
         "active": false,
         "severity": "info",
         "reason": "ΔB +0.00 + ΔM +0.00 = +0.00",
-        "lastChanged": "2025-11-06 10:29:44"
+        "lastChanged": "2025-11-06 11:48:13"
       },
       "sigAccelDown": {
         "active": false,
         "severity": "warn",
         "reason": "ΔB +0.00 + ΔM +0.00 = +0.00",
-        "lastChanged": "2025-11-06 10:29:44"
+        "lastChanged": "2025-11-06 11:48:13"
       },
       "sigExpansion": {
         "active": true,
         "severity": "info",
-        "reason": "PSI 4.9 Δ+1.10",
-        "lastChanged": "2025-11-06 10:29:44"
+        "reason": "PSI 37.0 Δ+11.50",
+        "lastChanged": "2025-11-06 11:48:13"
       },
       "sigOverall10m": {
         "state": "neutral",
@@ -94,118 +94,118 @@
     },
     "lux10m": {
       "trendStrength": 0.0,
-      "volatility": 0.216,
+      "volatility": 0.193,
       "volatilityScaled": null,
-      "squeezePct": 4.85,
+      "squeezePct": 37.03,
       "volumeSentiment": 0.0
     },
     "metrics": {
       "lux10m_trendStrength": 0.0,
-      "lux10m_volatility": 0.216,
+      "lux10m_volatility": 0.193,
       "lux10m_volatilityScaled": null,
-      "lux10m_squeezePct": 4.85,
+      "lux10m_squeezePct": 37.03,
       "lux10m_volumeSentiment": 0.0
     }
   },
   "sectorCards": [
     {
       "sector": "Information Technology",
-      "breadth_pct": 46.38,
-      "momentum_pct": 53.11,
-      "nh": 109,
-      "nl": 126,
-      "up": 145,
-      "down": 128
+      "breadth_pct": 82.74,
+      "momentum_pct": 89.5,
+      "nh": 302,
+      "nl": 63,
+      "up": 324,
+      "down": 38
     },
     {
       "sector": "Materials",
-      "breadth_pct": 37.0,
-      "momentum_pct": 40.57,
-      "nh": 37,
-      "nl": 63,
-      "up": 43,
-      "down": 63
-    },
-    {
-      "sector": "Health Care",
-      "breadth_pct": 53.25,
-      "momentum_pct": 59.72,
-      "nh": 172,
-      "nl": 151,
-      "up": 215,
-      "down": 145
-    },
-    {
-      "sector": "Communication Services",
-      "breadth_pct": 52.63,
-      "momentum_pct": 66.67,
-      "nh": 50,
-      "nl": 45,
-      "up": 66,
-      "down": 33
-    },
-    {
-      "sector": "Real Estate",
-      "breadth_pct": 49.21,
-      "momentum_pct": 59.21,
-      "nh": 31,
-      "nl": 32,
-      "up": 45,
-      "down": 31
-    },
-    {
-      "sector": "Energy",
-      "breadth_pct": 27.27,
-      "momentum_pct": 32.14,
-      "nh": 24,
-      "nl": 64,
-      "up": 27,
-      "down": 57
-    },
-    {
-      "sector": "Consumer Staples",
-      "breadth_pct": 78.35,
-      "momentum_pct": 80.21,
-      "nh": 76,
-      "nl": 21,
-      "up": 77,
-      "down": 19
-    },
-    {
-      "sector": "Consumer Discretionary",
-      "breadth_pct": 61.67,
-      "momentum_pct": 67.87,
-      "nh": 111,
-      "nl": 69,
-      "up": 150,
-      "down": 71
-    },
-    {
-      "sector": "Financials",
-      "breadth_pct": 41.64,
-      "momentum_pct": 47.04,
-      "nh": 112,
-      "nl": 157,
-      "up": 119,
-      "down": 134
-    },
-    {
-      "sector": "Utilities",
-      "breadth_pct": 72.5,
-      "momentum_pct": 65.22,
-      "nh": 29,
-      "nl": 11,
-      "up": 30,
+      "breadth_pct": 86.54,
+      "momentum_pct": 83.67,
+      "nh": 90,
+      "nl": 14,
+      "up": 82,
       "down": 16
     },
     {
+      "sector": "Health Care",
+      "breadth_pct": 74.42,
+      "momentum_pct": 77.05,
+      "nh": 323,
+      "nl": 111,
+      "up": 329,
+      "down": 98
+    },
+    {
+      "sector": "Communication Services",
+      "breadth_pct": 73.15,
+      "momentum_pct": 72.22,
+      "nh": 79,
+      "nl": 29,
+      "up": 78,
+      "down": 30
+    },
+    {
+      "sector": "Real Estate",
+      "breadth_pct": 81.97,
+      "momentum_pct": 83.85,
+      "nh": 100,
+      "nl": 22,
+      "up": 109,
+      "down": 21
+    },
+    {
+      "sector": "Energy",
+      "breadth_pct": 93.12,
+      "momentum_pct": 94.34,
+      "nh": 149,
+      "nl": 11,
+      "up": 150,
+      "down": 9
+    },
+    {
+      "sector": "Consumer Staples",
+      "breadth_pct": 49.44,
+      "momentum_pct": 45.36,
+      "nh": 44,
+      "nl": 45,
+      "up": 44,
+      "down": 53
+    },
+    {
+      "sector": "Consumer Discretionary",
+      "breadth_pct": 65.55,
+      "momentum_pct": 73.55,
+      "nh": 156,
+      "nl": 82,
+      "up": 178,
+      "down": 64
+    },
+    {
+      "sector": "Financials",
+      "breadth_pct": 80.72,
+      "momentum_pct": 82.4,
+      "nh": 335,
+      "nl": 80,
+      "up": 337,
+      "down": 72
+    },
+    {
+      "sector": "Utilities",
+      "breadth_pct": 71.74,
+      "momentum_pct": 71.19,
+      "nh": 33,
+      "nl": 13,
+      "up": 42,
+      "down": 17
+    },
+    {
       "sector": "Industrials",
-      "breadth_pct": 39.41,
-      "momentum_pct": 49.57,
-      "nh": 80,
-      "nl": 123,
-      "up": 115,
-      "down": 117
+      "breadth_pct": 80.89,
+      "momentum_pct": 83.39,
+      "nh": 254,
+      "nl": 60,
+      "up": 266,
+      "down": 53
     }
   ],
   "pulse10m": {
@@ -220,80 +220,80 @@
   },
   "lux10m": {
     "trendStrength": 0.0,
-    "volatility": 0.216,
+    "volatility": 0.193,
     "volatilityScaled": null,
-    "squeezePct": 4.85,
+    "squeezePct": 37.03,
     "volumeSentiment": 0.0
   },
   "meta": {
-    "last_full_run_utc": "2025-11-06T17:29:45Z",
+    "last_full_run_utc": "2025-11-06T18:48:14Z",
     "source": "mirror",
     "sandbox": true
   },
   "deltas": {
     "market": {
-      "dBreadthPct": 15.02,
-      "dMomentumPct": 24.87,
-      "netTilt": 19.95,
-      "riskOnPct": 52.49
+      "dBreadthPct": 28.79,
+      "dMomentumPct": 24.55,
+      "netTilt": 26.67,
+      "riskOnPct": 79.16
     },
     "sectors": {
       "Information Technology": {
-        "dBreadthPct": 22.55,
-        "dMomentumPct": 34.32,
-        "netTilt": 28.44
+        "dBreadthPct": 36.36,
+        "dMomentumPct": 36.39,
+        "netTilt": 36.38
       },
       "Materials": {
-        "dBreadthPct": 2.15,
-        "dMomentumPct": 9.32,
-        "netTilt": 5.74
+        "dBreadthPct": 49.54,
+        "dMomentumPct": 43.11,
+        "netTilt": 46.33
       },
       "Health Care": {
-        "dBreadthPct": 11.32,
-        "dMomentumPct": 20.0,
-        "netTilt": 15.66
+        "dBreadthPct": 21.17,
+        "dMomentumPct": 17.33,
+        "netTilt": 19.25
       },
       "Communication Services": {
-        "dBreadthPct": 22.02,
-        "dMomentumPct": 29.52,
-        "netTilt": 25.77
+        "dBreadthPct": 20.52,
+        "dMomentumPct": 5.56,
+        "netTilt": 13.04
       },
       "Real Estate": {
-        "dBreadthPct": 19.21,
-        "dMomentumPct": 43.83,
-        "netTilt": 31.52
+        "dBreadthPct": 32.76,
+        "dMomentumPct": 24.64,
+        "netTilt": 28.7
       },
       "Energy": {
-        "dBreadthPct": -11.94,
-        "dMomentumPct": 3.2,
-        "netTilt": -4.37
+        "dBreadthPct": 65.85,
+        "dMomentumPct": 62.2,
+        "netTilt": 64.03
       },
       "Consumer Staples": {
-        "dBreadthPct": 17.82,
-        "dMomentumPct": 34.37,
-        "netTilt": 26.09
+        "dBreadthPct": -28.91,
+        "dMomentumPct": -34.85,
+        "netTilt": -31.88
       },
       "Consumer Discretionary": {
-        "dBreadthPct": 34.64,
-        "dMomentumPct": 36.62,
-        "netTilt": 35.63
+        "dBreadthPct": 3.88,
+        "dMomentumPct": 5.68,
+        "netTilt": 4.78
       },
       "Financials": {
-        "dBreadthPct": 8.8,
-        "dMomentumPct": 13.7,
-        "netTilt": 11.25
+        "dBreadthPct": 39.09,
+        "dMomentumPct": 35.36,
+        "netTilt": 37.23
       },
       "Utilities": {
-        "dBreadthPct": 43.09,
-        "dMomentumPct": 45.22,
-        "netTilt": 44.16
+        "dBreadthPct": -0.76,
+        "dMomentumPct": 5.97,
+        "netTilt": 2.6
       },
       "Industrials": {
-        "dBreadthPct": 8.8,
-        "dMomentumPct": 18.06,
-        "netTilt": 13.43
+        "dBreadthPct": 41.48,
+        "dMomentumPct": 33.82,
+        "netTilt": 37.65
       }
     }
   },
-  "deltasUpdatedAt": "2025-11-06T10:55:36-07:00"
+  "deltasUpdatedAt": "2025-11-06T12:01:56-07:00"
 }
