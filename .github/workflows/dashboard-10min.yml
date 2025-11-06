@@ -3,7 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Consistent cadence while stabilized (change back to */7 after a day of stability)
+    # Run every 10 minutes (consistent cadence). You can move back to */7 after stability.
     - cron: "*/10 * * * *"
 
 defaults:
@@ -19,30 +19,26 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: true     # Freshest run wins, prevents overlap & 429 storms
+      cancel-in-progress: true
 
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
 
-      # Run collector every time (no market-hours gating for consistency)
-      TESTING_MODE: "true"
-
       # Collector tuning for predictable runtime
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
-      FD_MAX_WORKERS: "6"           # reduce pressure on API; avoids long backoffs
-      FD_RETRY_MAX: "1"             # short retry trail; fail fast
-      FD_LOOKBACK_DAYS: "0"         # today-only (deterministic)
+      FD_MAX_WORKERS: "6"
+      FD_RETRY_MAX: "1"
+      FD_LOOKBACK_DAYS: "0"
 
-      # Paths for JSON-only post processors (no Polygon)
+      # JSON-only processors (no Polygon)
       INTRADAY_JSON_PATH: "data/outlook_intraday.json"
       HOURLY_URL: "https://frye-market-backend-1.onrender.com/live/hourly"
       INTRADAY_URL: "https://frye-market-backend-1.onrender.com/live/intraday"
 
     steps:
-      # ---------- T0 ----------
       - name: Start timer (UTC)
         id: t0
         run: |
@@ -51,15 +47,16 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
-        with: { fetch-depth: 1 }
+        with:
+          fetch-depth: 1
 
       # ---------- Collector: light & deterministic ----------
       - name: Build sectorCards source (10m)
         env:
-          POLYGON_API_KEY:  ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           FD_LOOKBACK_DAYS: ${{ env.FD_LOOKBACK_DAYS }}
-          FD_MAX_WORKERS:   ${{ env.FD_MAX_WORKERS }}
-          FD_RETRY_MAX:     ${{ env.FD_RETRY_MAX }}
+          FD_MAX_WORKERS: ${{ env.FD_MAX_WORKERS }}
+          FD_RETRY_MAX: ${{ env.FD_RETRY_MAX }}
         run: |
           set -euo pipefail
           ST=$(date +%s)
@@ -76,8 +73,11 @@ jobs:
           python - <<'PY'
           import json,sys
           p="data/outlook_source.json"
-          try: j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception: print("[normalize] missing outlook_source.json"); sys.exit(2)
+          try:
+              j=json.load(open(p,"r",encoding="utf-8"))
+          except Exception as e:
+              print("[normalize] missing or invalid source:", e)
+              sys.exit(2)
           ok = isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)
           print("[normalize]", "OK" if ok else "INVALID")
           sys.exit(0 if ok else 2)
@@ -86,9 +86,9 @@ jobs:
 
       - name: Build intraday payload (FULL)
         env:
-          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
-          HOURLY_URL:         ${{ env.HOURLY_URL }}
+          HOURLY_URL: ${{ env.HOURLY_URL }}
         run: |
           set -euo pipefail
           ST=$(date +%s)
@@ -97,20 +97,19 @@ jobs:
             --out data/outlook_intraday.json
           echo "::notice:: Payload build elapsed: $(( $(date +%s) - $ST ))s"
 
-       - name: Compute Pulse 10m (sector rotation)
-         if: ${{ steps.market_hours.outputs.run == 'true' }}
-         env:
-           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
-         run: |
-           set -euo pipefail
-           python -u scripts/compute_pulse10m.py
- 
+      # ---------- NEW: Sector Rotation Pulse (10m) ----------
+      - name: Compute Pulse 10m (sector rotation)
+        env:
+          INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
+        run: |
+          set -euo pipefail
+          python -u scripts/compute_pulse10m.py || true
 
-      # ---------- JSON-only post processors (ALWAYS run) ----------
+      # ---------- Lux compute ALWAYS runs (JSON only) ----------
       - name: Compute Lux strategy (10m)
         env:
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
-          HOURLY_URL:         ${{ env.HOURLY_URL }}
+          HOURLY_URL: ${{ env.HOURLY_URL }}
         run: |
           set -euo pipefail
           ST=$(date +%s)
@@ -127,22 +126,24 @@ jobs:
           m=j.get("metrics") or {}
           lux=j.get("lux10m") or {}
           def num(x):
-              try: v=float(x); return None if v!=v else v
-              except: return None
+              try:
+                  v=float(x)
+                  return None if v!=v else v
+              except:
+                  return None
           if "trendStrength" not in lux:
-              ts = m.get("trend_strength_10m_pct"); lux["trendStrength"]=float(ts) if isinstance(ts,(int,float)) else 0.0
+              ts=m.get("trend_strength_10m_pct"); lux["trendStrength"]=float(ts) if isinstance(ts,(int,float)) else 0.0
           if "volatility" not in lux:
-              v = m.get("volatility_10m_pct") or m.get("volatility_pct"); lux["volatility"]=num(v)
+              v=m.get("volatility_10m_pct") or m.get("volatility_pct"); lux["volatility"]=num(v)
           if "volatilityScaled" not in lux:
-              vs = m.get("volatility_10m_scaled") or m.get("volatility_scaled"); lux["volatilityScaled"]=num(vs)
+              vs=m.get("volatility_10m_scaled") or m.get("volatility_scaled"); lux["volatilityScaled"]=num(vs)
           if "squeezePct" not in lux:
-              sq = m.get("squeeze_10m_pct") or m.get("squeeze_pct"); lux["squeezePct"]=num(sq)
+              sq=m.get("squeeze_10m_pct") or m.get("squeeze_pct"); lux["squeezePct"]=num(sq)
           if "volumeSentiment" not in lux:
-              vs = m.get("volume_sentiment_10m_pct") or m.get("volume_sentiment_pct") or 0.0
-              try: lux["volumeSentiment"]=float(vs)
+              fs=m.get("volume_sentiment_10m_pct") or m.get("volume_sentiment_pct") or 0.0
+              try: lux["volumeSentiment"]=float(fs)
               except: lux["volumeSentiment"]=0.0
           j["lux10m"]=lux
-          # legacy mirrors (FE ready)
           j.setdefault("engineLights",{})
           j["engineLights"].setdefault("lux10m",{}); j["engineLights"]["lux10m"].update(lux)
           j["engineLights"].setdefault("metrics",{})
@@ -172,34 +173,32 @@ jobs:
           def loadp(p):
               try: return json.load(open(p,"r",encoding="utf-8"))
               except: return {}
-          intraday = loadp("data/outlook_intraday.json")
-          cards = intraday.get("sectorCards") or []
+          intraday=loadp("data/outlook_intraday.json")
+          cards=intraday.get("sectorCards") or []
           need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
           def totals(cs): return sum((c.get("nh",0)+c.get("nl",0)+c.get("up",0)+c.get("down",0)) for c in cs)
-          good_schema = (len(cards)==11 and all(k in (cards[0] if cards else {}) for k in need))
-          nonzero = totals(cards) > 0
+          good_schema=(len(cards)==11 and all(k in (cards[0] if cards else {}) for k in need))
+          nonzero=totals(cards)>0
           if good_schema and nonzero:
-              print("[repair] OK len=", len(cards)); sys.exit(0)
-          print("[repair] rebuilding from source backup…")
-          src = loadp("/tmp/source_backup.json").get("groups") or {}
-          order = ["information technology","materials","health care","communication services","real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
-          alias = {"healthcare":"health care","health-care":"health care","info tech":"information technology","technology":"information technology","tech":"information technology","communications":"communication services","comm services":"communication services","telecom":"communication services","staples":"consumer staples","discretionary":"consumer discretionary","finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"}
-          def norm(s): return (s or '').strip().lower()
+              print("[repair] OK len=",len(cards)); sys.exit(0)
+          print("[repair] rebuilding from /tmp/source_backup.json")
+          src=(loadp("/tmp/source_backup.json").get("groups") or {})
+          order=["information technology","materials","health care","communication services","real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
+          alias={"healthcare":"health care","health-care":"health care","info tech":"information technology","technology":"information technology","tech":"information technology","communications":"communication services","comm services":"communication services","telecom":"communication services","staples":"consumer staples","discretionary":"consumer discretionary","finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"}
+          def norm(s): return (s or "").strip().lower()
           by={}
           for name,g in src.items():
-              k=alias.get(norm(name), norm(name))
-              nh=int(g.get('nh',0)); nl=int(g.get('nl',0)); up=int(g.get('u',0)); dn=int(g.get('d',0))
+              k=alias.get(norm(name),norm(name))
+              nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
               b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
               m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
               by[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
-          # write back
           intraday["sectorCards"]=[by.get(n,{"sector":n.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for n in order]
           json.dump(intraday, open("data/outlook_intraday.json","w",encoding="utf-8"), separators=(",",":"))
-          print("[repair] applied len=", len(intraday["sectorCards"]))
+          print("[repair] applied len=",len(intraday["sectorCards"]))
           PY
           echo "::notice:: Repair elapsed: $(( $(date +%s) - $ST ))s"
 
-      # ---------- Stamp ----------
       - name: Stamp last_full_run_utc
         run: |
           set -euo pipefail
@@ -207,12 +206,11 @@ jobs:
           import json,datetime
           p="data/outlook_intraday.json"
           j=json.load(open(p,"r",encoding="utf-8"))
-          j.setdefault("meta", {})["last_full_run_utc"] = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+          j.setdefault("meta",{})["last_full_run_utc"]=datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
           json.dump(j, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
           print("[stamp] last_full_run_utc:", j["meta"]["last_full_run_utc"])
           PY
 
-      # ---------- Publish only when changed ----------
       - name: Ensure jq is available
         run: |
           set -e
@@ -268,7 +266,6 @@ jobs:
         if: ${{ steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
           LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
           set -euo pipefail
