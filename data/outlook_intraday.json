@@ -1,7 +1,7 @@
 {
   "version": "sandbox-10m-deltas",
-  "updated_at": "2025-11-06 23:38:25",
-  "updated_at_utc": "2025-11-07T06:38:25Z",
+  "updated_at": "2025-11-07 00:38:56",
+  "updated_at_utc": "2025-11-07T07:38:56Z",
   "metrics": {
     "breadth_10m_pct": 36.37,
     "momentum_10m_pct": 51.85,
@@ -45,7 +45,7 @@
     }
   },
   "engineLights": {
-    "updatedAt": "2025-11-06 23:38:25",
+    "updatedAt": "2025-11-07 00:38:56",
     "mode": "intraday",
     "live": true,
     "signals": {
@@ -53,19 +53,19 @@
         "active": false,
         "severity": "info",
         "reason": "ΔB +0.00 + ΔM +0.00 = +0.00",
-        "lastChanged": "2025-11-06 23:38:25"
+        "lastChanged": "2025-11-07 00:38:56"
       },
       "sigAccelDown": {
         "active": false,
         "severity": "warn",
         "reason": "ΔB +0.00 + ΔM +0.00 = +0.00",
-        "lastChanged": "2025-11-06 23:38:25"
+        "lastChanged": "2025-11-07 00:38:56"
       },
       "sigCompression": {
         "active": true,
         "severity": "warn",
         "reason": "PSI 100.0",
-        "lastChanged": "2025-11-06 23:38:25"
+        "lastChanged": "2025-11-07 00:38:56"
       },
       "sigOverall10m": {
         "state": "neutral",
@@ -228,7 +228,7 @@
     "volumeSentiment": 0.0
   },
   "meta": {
-    "last_full_run_utc": "2025-11-07T06:38:26Z",
+    "last_full_run_utc": "2025-11-07T07:38:57Z",
     "source": "mirror",
     "sandbox": true
   },
@@ -297,5 +297,5 @@
       }
     }
   },
-  "deltasUpdatedAt": "2025-11-06T23:56:36-07:00"
+  "deltasUpdatedAt": "2025-11-07T00:57:26-07:00"
 }
