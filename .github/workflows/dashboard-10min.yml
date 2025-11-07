@@ -26,17 +26,17 @@ jobs:
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
 
-      # Collector knobs
+      # Collector knobs (conservative at open)
       FD_MAX_WORKERS: "5"
       FD_RETRY_MAX: "1"
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
-      FD_LOOKBACK_DAYS: "0"     # today-only for 10m collector
+      FD_LOOKBACK_DAYS: "0"  # today-only for 10m collector
 
       # JSON context
       INTRADAY_JSON_PATH: data/outlook_intraday.json
       INTRADAY_URL: https://frye-market-backend-1.onrender.com/live/intraday
-      HOURLY_URL: https://frye-market-backend-1.onrender.com/live/hourly
+      HOURLY_URL:  https://frye-market-backend-1.onrender.com/live/hourly
 
     steps:
       # 0) Timer
@@ -55,10 +55,12 @@ jobs:
           WINDOW_MINS=45
           FRESH_MINS=15
 
+          # minutes since today's 09:30 ET
           OPEN_EPOCH=$(TZ=$TZ_NY date -d "$(TZ=$TZ_NY date +%Y-%m-%d) 09:30" +%s)
           NOW_ET_EPOCH=$(TZ=$TZ_NY date +%s)
           MINS_SINCE_OPEN=$(( (NOW_ET_EPOCH - OPEN_EPOCH) / 60 ))
 
+          # fetch last live publish time
           curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/outlook_intraday.json?t=$(date +%s)" \
             -o /tmp/live10_prev.json || true
           LAST=$(jq -r '.meta.last_full_run_utc // .updated_at_utc // .updated_at // empty' /tmp/live10_prev.json 2>/dev/null || echo "")
@@ -109,18 +111,19 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 4) Skip note (only when guarding)
+      # 4) Skip note (only if the flood-guard is active)
       - name: Skip note
         if: ${{ steps.open_guard.outputs.skip == 'true' }}
-        run: echo "Open flood-guard active: skipping heavy collector/build this cycle."
+        run: |
+          echo "Open flood-guard active: skipping heavy collector/build this cycle."
 
       # 5) Heavy steps — only when NOT skipping
       - name: Build sectorCards source (10m)
         if: ${{ steps.open_guard.outputs.skip != 'true' }}
         env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-          FD_MAX_WORKERS:  ${{ env.FD_MAX_WORKERS }}
-          FD_RETRY_MAX:    ${{ env.FD_RETRY_MAX }}
+          POLYGON_API_KEY:     ${{ secrets.POLYGON_API_KEY }}
+          FD_MAX_WORKERS:      ${{ env.FD_MAX_WORKERS }}
+          FD_RETRY_MAX:        ${{ env.FD_RETRY_MAX }}
           FD_SCALPER_ENABLE:   ${{ env.FD_SCALPER_ENABLE }}
           FD_SCALPER_LOOKBACK: ${{ env.FD_SCALPER_LOOKBACK }}
           FD_LOOKBACK_DAYS:    ${{ env.FD_LOOKBACK_DAYS }}
@@ -180,7 +183,7 @@ jobs:
           cards=j.get("sectorCards") or []
           need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
           if not cards or not all(k in (cards[0] if cards else {}) for k in need):
-            print("[validate] sectorCards invalid/empty; will still stage/publish prior good live if diff says so.")
+            print("[validate] sectorCards invalid/empty; will rely on prior good live if diff deems no publish.")
           else:
             print("[validate] intraday OK")
           PY
@@ -202,21 +205,20 @@ jobs:
         run: |
           set -e
           CHG=true
+          SRC=/tmp/live10/outlook_intraday.json
+          if [ ! -s "$SRC" ] && [ -s data/outlook_intraday.json ]; then SRC="data/outlook_intraday.json"; fi
+
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
-            # prefer staged file if present; otherwise compare against previous live
-            SRC="/tmp/live10/outlook_intraday.json"
-            if [ ! -s "$SRC" ] && [ -s data/outlook_intraday.json ]; then SRC="data/outlook_intraday.json"; fi
-            if [ -s "$SRC" ]; then
-              git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/prev.json 2>/dev/null || true
-              if [ -s /tmp/prev.json ] && cmp -s /tmp/prev.json "$SRC"; then
-                CHG=false
-              fi
-            else
-              # nothing built/staged – do not publish
+            git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/prev.json 2>/dev/null || true
+            if [ -s /tmp/prev.json ] && [ -s "$SRC" ] && cmp -s /tmp/prev.json "$SRC"; then
               CHG=false
             fi
+          else
+            # live branch doesn't exist yet, treat as change
+            CHG=true
           fi
+
           echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
           echo "changed=${CHG}"
 
@@ -228,22 +230,21 @@ jobs:
         run: |
           set -e
           git config user.name  "actions-bot"
-          git config user.email "bot@users.noreply.github.com"
+          git config user.email "noreply@github.com"
           git fetch origin "${LIVE_BRANCH}" || true
 
-          # ensure LIVE exists and is current working branch
           if git show-ref --verify --quiet "refs/heads/${LIVE_BRANCH}"; then
             git checkout "${LIVE_BRANCH}"
           else
             git checkout --orphan "${LIVE_BRANCH}"
           fi
 
-          # wipe everything except .git to keep live branch minimal
+          # minimal live branch: remove everything except .git
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 
-          # source priority: staged /tmp first, else workspace JSON if any
-          SRC_JSON="/tmp/live10/outlook_intraday.json"
-          SRC_HB="/tmp/live10/heartbeat_10min.txt"
+          # choose source from /tmp if exists; fallback to workspace JSON
+          SRC_JSON=/tmp/live10/outlook_intraday.json
+          SRC_HB=/tmp/live10/heartbeat_10min.txt
           if [ ! -s "$SRC_JSON" ] && [ -s data/outlook_intraday.json ]; then
             SRC_JSON="data/outlook_intraday.json"
             date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_10min.txt
@@ -259,4 +260,5 @@ jobs:
           git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" "${LIVE_BRANCH}"
 
       - name: Done
-        run: echo "10m cycle complete"
+        run: |
+          echo "10m cycle complete"
