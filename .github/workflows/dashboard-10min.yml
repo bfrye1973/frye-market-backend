@@ -29,7 +29,7 @@ jobs:
       # Collector tuning for predictable runtime
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
-      FD_MAX_WORKERS: "6"
+      FD_MAX_WORKERS: "5"
       FD_RETRY_MAX: "1"
       FD_LOOKBACK_DAYS: "0"
 
