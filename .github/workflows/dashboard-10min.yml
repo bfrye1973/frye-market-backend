@@ -3,7 +3,7 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Stabilized cadence (no overlap). Change back to */10 later if you want.
+    # Stable cadence (no overlap). Adjust later if desired.
     - cron: "*/12 * * * 1-5"
 
 jobs:
@@ -15,7 +15,6 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      # Keep newest, cancel older in-flight to avoid overlap/429s
       cancel-in-progress: true
 
     env:
@@ -23,19 +22,19 @@ jobs:
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
 
-      # collector knobs – predictable runtime
+      # Collector knobs for stable runtime
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
       FD_MAX_WORKERS: "6"
       FD_RETRY_MAX: "1"
       FD_LOOKBACK_DAYS: "0"
 
-      # paths
+      # File paths
       INTRADAY_JSON_PATH: "data/outlook_intraday.json"
-      HOURLY_URL: "https://fr ye-market-backend-1.onrender.com/live/hourly"
-      INTRADAY_URL: "https://fr ye-market-backend-1.onrender.com/live/intraday"
 
-      # (optional) used by compute_pulse10m.py for pulseDelta
+      # URLs (used for debug & optional pulse delta)
+      INTRADAY_URL: "https://fr ye-market-backend-1.onrender.com/live/intraday"
+      HOURLY_URL:   "https://fr ye-market-backend-1.onrender.com/live/hourly"
       PREV_JSON_URL: "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min/data/outlook_intraday.json"
 
     steps:
@@ -44,7 +43,14 @@ jobs:
         with:
           fetch-depth: 1
 
-      # --- Build intraday source from Polygon (today-only) ---
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ------------------------------------------------------------------
+      # 1) Build intraday source from Polygon (today-only, throttled)
+      # ------------------------------------------------------------------
       - name: Build sectorCards source (10m)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -55,46 +61,37 @@ jobs:
           FD_LOOKBACK_DAYS: ${{ env.FD_LOOKBACK_DAYS }}
         run: |
           set -euo pipefail
-          mkdir -p data
           echo "::notice::collector starting"
           python -u scripts/build_outlook_source_from_polygon.py \
-           --mode intraday10 \
-           --out data/outlook_source.json
+            --mode intraday10 \
+            --out data/outlook_source.json
+          test -s data/outlook_source.json || (echo "::error::missing data/outlook_source.json"; exit 2)
           echo "::notice::collector done"
 
-      - name: Normalize sector source (light)
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json,sys
-          p="data/outlook_source.json"
-          try:
-            j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception as e:
-            print("[norm] ERROR reading source:", e); sys.exit(1)
-
-          ok = isinstance(j.get("sectorCards"), list) or isinstance(j.get("groups"), dict)
-          print("[norm] source ok?", ok)
-          if not ok:
-            print("[norm] INVALID source: no sectorCards/groups"); sys.exit(1)
-          # if groups only, we leave conversion to make_dashboard.py
-          PY
-
-      # --- Build the actual intraday payload ---
+      # ------------------------------------------------------------------
+      # 2) Build the actual intraday payload JSON
+      # ------------------------------------------------------------------
       - name: Build intraday payload (FULL)
         run: |
           set -euo pipefail
           python -u scripts/make_dashboard.py \
             --source data/outlook_source.json \
-            --out    $INTRADAY_JSON_PATH
+            --out    "$INTRADAY_JSON_PATH"
+          test -s "$INTRADAY_JSON_PATH" || (echo "::error::missing $INTRADAY_JSON_PATH"; exit 2)
+          echo "::notice::built $INTRADAY_JSON_PATH"
 
-      # --- Lux compute (reads & writes data/outlook_intraday.json) ---
+      # ------------------------------------------------------------------
+      # 3) Compute Lux (10m)
+      # ------------------------------------------------------------------
       - name: Compute Lux strategy (10m)
         run: |
           set -euo pipefail
           python -u scripts/compute_trend10m.py || true
+          test -s "$INTRADAY_JSON_PATH" || (echo "::error::post-lux JSON not found"; exit 2)
 
-      # --- Pulse compute (writes pulse10m + mirrors risingPct for sectorDirection10m) ---
+      # ------------------------------------------------------------------
+      # 4) Compute Pulse (10m) and mirror risingPct
+      # ------------------------------------------------------------------
       - name: Compute Pulse (10m)
         env:
           INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
@@ -102,13 +99,15 @@ jobs:
         run: |
           set -euo pipefail
           python -u scripts/compute_pulse10m.py
-          # quick check for pulse + risingPct in file
-          echo "------ pulse10m preview ------"
+          test -s "$INTRADAY_JSON_PATH" || (echo "::error::post-pulse JSON not found"; exit 2)
+          echo "------ Pulse preview ------"
           jq '.pulse10m // {} | {signal, pulseDelta, offenseTilt, defensiveTilt, greenCount, redCount, risingPct}' "$INTRADAY_JSON_PATH" || true
-          echo "------ intraday.sectorDirection10m preview ------"
+          echo "------ SectorDirection10m preview ------"
           jq '.intraday.sectorDirection10m // {}' "$INTRADAY_JSON_PATH" || true
 
-      # --- Stamp updated time for UI ---
+      # ------------------------------------------------------------------
+      # 5) Stamp last_full_run_utc
+      # ------------------------------------------------------------------
       - name: Stamp last_full_run_utc
         run: |
           set -euo pipefail
@@ -121,13 +120,18 @@ jobs:
           print("[stamp] done")
           PY
 
-      # --- Publish only if changed ---
+      # ------------------------------------------------------------------
+      # 6) Stage artifact for diff / publish
+      # ------------------------------------------------------------------
       - name: Stage artifacts
         run: |
           set -euo pipefail
           mkdir -p /tmp/live10
           cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
 
+      # ------------------------------------------------------------------
+      # 7) Detect change vs live branch
+      # ------------------------------------------------------------------
       - name: Detect change vs remote
         id: diff
         env:
@@ -143,7 +147,11 @@ jobs:
             fi
           fi
           echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
+          echo "::notice::changed=${CHG}"
 
+      # ------------------------------------------------------------------
+      # 8) Publish to data-live-10min if changed
+      # ------------------------------------------------------------------
       - name: Publish live branch
         if: ${{ steps.diff.outputs.changed == 'true' }}
         env:
@@ -153,10 +161,10 @@ jobs:
           set -euo pipefail
           git config user.name  "actions-bot"
           git config user.email "bot@users.noreply.github.com"
+          git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}" || true
+          git checkout -B "${LIVE_BRANCH}" || git checkout -b "${LIVE_BRANCH}"
           git reset --hard
           git clean -fdx
-          git checkout -B "${LIVE_BRANCH}" || true
-          git pull --rebase origin "${LIVE_BRANCH}" || true
           mkdir -p data
           cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
           git add data/outlook_intraday.json
