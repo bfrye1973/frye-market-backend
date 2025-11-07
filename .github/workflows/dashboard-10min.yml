@@ -19,7 +19,7 @@ jobs:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false
+      cancel-in-progress: true
 
     env:
       TZ: America/Phoenix
