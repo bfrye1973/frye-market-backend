@@ -3,8 +3,8 @@ name: dashboard-10min
 on:
   workflow_dispatch: {}
   schedule:
-    # Run every 10 minutes Mon–Fri
-    - cron: "*/10 * * * 1-5"
+    # Run every 10 minutes (consistent cadence). You can move back to */7 after stability.
+    - cron: "*/12 * * * 1-5"
 
 defaults:
   run:
@@ -12,14 +12,13 @@ defaults:
 
 jobs:
   tenmin:
-    name: Build and Publish Intraday (10m, minimal live branch)
+    name: Build & Publish Intraday (10m – consistent, overwrite-safe)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: write
     concurrency:
       group: dashboard-10min
-      # Freshest run wins; avoids queued collectors at the open
       cancel-in-progress: true
 
     env:
@@ -27,226 +26,267 @@ jobs:
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
 
-      # Collector knobs (keep conservative in first 45m of RTH)
-      FD_MAX_WORKERS: "5"
-      FD_RETRY_MAX: "1"
+      # Collector tuning for predictable runtime
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
-      # Always today-only for 10m source
+      FD_MAX_WORKERS: "5"
+      FD_RETRY_MAX: "1"
       FD_LOOKBACK_DAYS: "0"
 
-      # JSON context
-      INTRADAY_JSON_PATH: data/outlook_intraday.json
-      INTRADAY_URL: https://frye-market-backend-1.onrender.com/live/intraday
-      HOURLY_URL: https://frye-market-backend-1.onrender.com/live/hourly
+      # JSON-only processors (no Polygon)
+      INTRADAY_JSON_PATH: "data/outlook_intraday.json"
+      HOURLY_URL: "https://frye-market-backend-1.onrender.com/live/hourly"
+      INTRADAY_URL: "https://frye-market-backend-1.onrender.com/live/intraday"
 
     steps:
-      # ------------------------------------------------------------
-      # 0) Time/“freshness” context
-      # ------------------------------------------------------------
       - name: Start timer (UTC)
-        id: start
+        id: t0
         run: |
-          echo "started_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+          echo "START_TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+          echo "::notice:: 10m run started at $START_TS"
 
-      # ------------------------------------------------------------
-      # 1) Open-window flood guard (first 45m ET)
-      # If we already published <15m ago, skip this cycle to avoid
-      # thrashing Polygon at the bell. Keeps job durations steady.
-      # ------------------------------------------------------------
-        # You can tweak WINDOW_MINS or FRESH_MINS if needed.
-      - name: Open-window guard (first 45m ET)
-        id: open_guard
-        run: |
-          set -e
-          TZ_NY="America/New_York"
-
-          WINDOW_MINS=45
-          FRESH_MINS=15
-
-          # minutes since today's 09:30 ET
-          OPEN_EPOCH=$(TZ=$TZ_NY date -d "$(TZ=$TZ_NY date +%Y-%m-%d) 09:30" +%s)
-          NOW_ET_EPOCH=$(TZ=$TZ_NY date +%s)
-          MINS_SINCE_OPEN=$(( (NOW_ET_EPOCH - OPEN_EPOCH) / 60 ))
-
-          # fetch last live publish time
-          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/outlook_intraday.json?t=$(date +%s)" \
-            -o /tmp/live10_prev.json || true
-          LAST=$(jq -r '.meta.last_full_run_utc // .updated_at_utc // .updated_at // empty' /tmp/live10_prev.json 2>/dev/null || echo "")
-
-          FRESH=false
-          if [ -n "$LAST" ]; then
-            LAST_S=$(date -u -d "$LAST" +%s 2>/dev/null || echo 0)
-            NOW_S=$(date -u +%s)
-            AGE=$(( NOW_S - LAST_S ))
-            if [ "$AGE" -lt $((FRESH_MINS*60)) ]; then FRESH=true; fi
-          fi
-
-          SKIP=false
-          if [ "$MINS_SINCE_OPEN" -ge 0 ] && [ "$MINS_SINCE_OPEN" -lt "$WINDOW_MINS" ] && [ "$FRESH" = "true" ]; then
-            SKIP=true
-          fi
-
-          echo "mins_since_open=$MINS_SINCE_OPEN"
-          echo "fresh_last=$FRESH"
-          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
-
-      # ------------------------------------------------------------
-      # 2) Market hours guard (AZ): block weekends & very early/late
-      # ------------------------------------------------------------
-      - name: Market hours guard (AZ)
-        id: market_guard
-        run: |
-          TZ_AZ="America/Phoenix"
-          DOW=$(TZ=$TZ_AZ date +'%u')  # 1..7
-          HOUR=$(TZ=$TZ_AZ date +'%H') # 00..23
-          if [ "$DOW" -ge 6 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Weekend — skipping."
-            exit 0
-          fi
-          if [ "$HOUR" -lt 6 ] || [ "$HOUR" -gt 17 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Outside monitored hours — skipping."
-            exit 0
-          fi
-          echo "run=true" >> "$GITHUB_OUTPUT"
-
-      # ------------------------------------------------------------
-      # 3) Checkout
-      # ------------------------------------------------------------
       - name: Checkout
-        if: ${{ steps.market_guard.outputs.run == 'true' }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # ------------------------------------------------------------
-      # 4) (Optional) skip heavy work this cycle — open-window guard
-      # We still publish if there’s data changes from elsewhere,
-      # but we don’t call Polygon or rebuild.
-      # ------------------------------------------------------------
-      - name: Skip note
-        if: ${{ steps.open_guard.outputs.skip == 'true' }}
-        run: echo "Open flood-guard active: skipping heavy collector/build this cycle."
-
-      # ------------------------------------------------------------
-      # 5) Heavy steps — only when NOT skipping
-      # ------------------------------------------------------------
+      # ---------- Collector: light & deterministic ----------
       - name: Build sectorCards source (10m)
-        if: ${{ steps.open_guard.outputs.skip != 'true' }}
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          FD_LOOKBACK_DAYS: ${{ env.FD_LOOKBACK_DAYS }}
           FD_MAX_WORKERS: ${{ env.FD_MAX_WORKERS }}
           FD_RETRY_MAX: ${{ env.FD_RETRY_MAX }}
-          FD_SCALPER_ENABLE: ${{ env.FD_SCALPER_ENABLE }}
-          FD_SCALPER_LOOKBACK: ${{ env.FD_SCALPER_LOOKBACK }}
-          FD_LOOKBACK_DAYS: ${{ env.FD_LOOKBACK_DAYS }}
         run: |
-          set -e
+          set -euo pipefail
+          ST=$(date +%s)
           mkdir -p data
-          echo "[collector] starting $(date -u)"
           python -u scripts/build_outlook_source_from_polygon.py \
-            --mode intraday10 \
-            --out data/outlook_source.json
-          head -n 40 data/outlook_source.json || true
+            --mode intraday10 --out data/outlook_source.json
+          cp -f data/outlook_source.json /tmp/source_backup.json
+          echo "::notice:: Build sectorCards elapsed: $(( $(date +%s) - $ST ))s"
 
-      - name: Normalize sector source
-        if: ${{ steps.open_guard.outputs.skip != 'true' }}
+      - name: Normalize sector source (light)
         run: |
-          set -e
+          set -euo pipefail
+          ST=$(date +%s)
           python - <<'PY'
-          import json, sys
+          import json,sys
           p="data/outlook_source.json"
           try:
-            j=json.load(open(p,"r",encoding="utf-8"))
+              j=json.load(open(p,"r",encoding="utf-8"))
           except Exception as e:
-            print("[normalize] missing/invalid source:", e); sys.exit(2)
-          ok=isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)
-          if not ok:
-            print("[normalize] invalid schema"); sys.exit(2)
-          print("[normalize] OK")
+              print("[normalize] missing or invalid source:", e)
+              sys.exit(2)
+          ok = isinstance(j.get("groups"),dict) or isinstance(j.get("sectorCards"),list)
+          print("[normalize]", "OK" if ok else "INVALID")
+          sys.exit(0 if ok else 2)
           PY
+          echo "::notice:: Normalize elapsed: $(( $(date +%s) - $ST ))s"
 
-      - name: Build intraday payload (10m)
-        if: ${{ steps.open_guard.outputs.skip != 'true' }}
+      - name: Build intraday payload (FULL)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
+          HOURLY_URL: ${{ env.HOURLY_URL }}
         run: |
-          set -e
-          echo "[build10m] starting $(date -u)"
+          set -euo pipefail
+          ST=$(date +%s)
           python -u scripts/make_dashboard.py \
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
-          head -n 50 data/outlook_intraday.json || true
+          echo "::notice:: Payload build elapsed: $(( $(date +%s) - $ST ))s"
 
-      - name: Compute rotation / lux / pills (JSON-only)
-        if: ${{ steps.open_guard.outputs.skip != 'true' }}
+      # ---------- NEW: Sector Rotation Pulse (10m) ----------
+      - name: Compute Pulse 10m (sector rotation)
+        env:
+          INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
         run: |
-          set -e
-          echo "[enrich] rotation/lux/pills"
-          # These scripts must NOT call Polygon; they read local JSON only
+          set -euo pipefail
+          python -u scripts/compute_pulse10m.py || true
+
+      # ---------- Lux compute ALWAYS runs (JSON only) ----------
+      - name: Compute Lux strategy (10m)
+        env:
+          INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
+          HOURLY_URL: ${{ env.HOURLY_URL }}
+        run: |
+          set -euo pipefail
+          ST=$(date +%s)
           python -u scripts/compute_trend10m.py || true
-          python -u scripts/update_pills_10m_state.py || true
+          echo "::notice:: Lux compute elapsed: $(( $(date +%s) - $ST ))s"
 
-      - name: Validate/Repair intraday JSON
-        if: ${{ steps.open_guard.outputs.run == 'true' }}
+      - name: Ensure Lux10m numeric fields exist (safe)
         run: |
-          set -e
+          set -euo pipefail
           python - <<'PY'
-          import json, sys
+          import json
           p="data/outlook_intraday.json"
           j=json.load(open(p,"r",encoding="utf-8"))
-          cards = j.get("sectorCards") or []
-          need=["sector","breadth_pct","momentum_pct","nh","nl","up","down"]
-          if not cards or not all(k in (cards[0] if cards else {}) for k in need):
-            raise SystemExit("invalid or missing sectorCards; will rely on previous live during open-window")
-          print("[validate] intraday OK")
+          m=j.get("metrics") or {}
+          lux=j.get("lux10m") or {}
+          def num(x):
+              try:
+                  v=float(x)
+                  return None if v!=v else v
+              except:
+                  return None
+          if "trendStrength" not in lux:
+              ts=m.get("trend_strength_10m_pct"); lux["trendStrength"]=float(ts) if isinstance(ts,(int,float)) else 0.0
+          if "volatility" not in lux:
+              v=m.get("volatility_10m_pct") or m.get("volatility_pct"); lux["volatility"]=num(v)
+          if "volatilityScaled" not in lux:
+              vs=m.get("volatility_10m_scaled") or m.get("volatility_scaled"); lux["volatilityScaled"]=num(vs)
+          if "squeezePct" not in lux:
+              sq=m.get("squeeze_10m_pct") or m.get("squeeze_pct"); lux["squeezePct"]=num(sq)
+          if "volumeSentiment" not in lux:
+              fs=m.get("volume_sentiment_10m_pct") or m.get("volume_sentiment_pct") or 0.0
+              try: lux["volumeSentiment"]=float(fs)
+              except: lux["volumeSentiment"]=0.0
+          j["lux10m"]=lux
+          j.setdefault("engineLights",{})
+          j["engineLights"].setdefault("lux10m",{}); j["engineLights"]["lux10m"].update(lux)
+          j["engineLights"].setdefault("metrics",{})
+          j["engineLights"]["metrics"].update({
+              "lux10m_trendStrength": lux["trendStrength"],
+              "lux10m_volatility": lux["volatility"],
+              "lux10m_volatilityScaled": lux["volatilityScaled"],
+              "lux10m_squeezePct": lux["squeezePct"],
+              "lux10m_volumeSentiment": lux["volumeSentiment"]
+          })
+          json.dump(j, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
+          print("[safe] lux10m numeric fields OK.")
           PY
 
-      # ------------------------------------------------------------
-      # 6) Stage artifacts to minimal live branch (Option A)
-      # Always copy to /tmp, then hard reset live branch and push.
-      # ------------------------------------------------------------
-      - name: Stage artifacts
-        if: ${{ steps.market_guard.outputs.run == 'true' && (steps.open_guard.outputs.skip != 'true') }}
+      - name: Update pills (10m always-on state)
+        run: |
+          set -euo pipefail
+          python -u scripts/update_pills_10m_state.py || true
+
+      # ---------- Validate/Repair ----------
+      - name: Validate & Repair sectorCards (robust)
+        run: |
+          set -euo pipefail
+          ST=$(date +%s)
+          python - <<'PY'
+          import json,sys
+          def loadp(p):
+              try: return json.load(open(p,"r",encoding="utf-8"))
+              except: return {}
+          intraday=loadp("data/outlook_intraday.json")
+          cards=intraday.get("sectorCards") or []
+          need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
+          def totals(cs): return sum((c.get("nh",0)+c.get("nl",0)+c.get("up",0)+c.get("down",0)) for c in cs)
+          good_schema=(len(cards)==11 and all(k in (cards[0] if cards else {}) for k in need))
+          nonzero=totals(cards)>0
+          if good_schema and nonzero:
+              print("[repair] OK len=",len(cards)); sys.exit(0)
+          print("[repair] rebuilding from /tmp/source_backup.json")
+          src=(loadp("/tmp/source_backup.json").get("groups") or {})
+          order=["information technology","materials","health care","communication services","real estate","energy","consumer staples","consumer discretionary","financials","utilities","industrials"]
+          alias={"healthcare":"health care","health-care":"health care","info tech":"information technology","technology":"information technology","tech":"information technology","communications":"communication services","comm services":"communication services","telecom":"communication services","staples":"consumer staples","discretionary":"consumer discretionary","finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate"}
+          def norm(s): return (s or "").strip().lower()
+          by={}
+          for name,g in src.items():
+              k=alias.get(norm(name),norm(name))
+              nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
+              b=0.0 if nh+nl==0 else round(100.0*nh/(nh+nl),2)
+              m=0.0 if up+dn==0 else round(100.0*up/(up+dn),2)
+              by[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
+          intraday["sectorCards"]=[by.get(n,{"sector":n.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for n in order]
+          json.dump(intraday, open("data/outlook_intraday.json","w",encoding="utf-8"), separators=(",",":"))
+          print("[repair] applied len=",len(intraday["sectorCards"]))
+          PY
+          echo "::notice:: Repair elapsed: $(( $(date +%s) - $ST ))s"
+
+      - name: Stamp last_full_run_utc
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,datetime
+          p="data/outlook_intraday.json"
+          j=json.load(open(p,"r",encoding="utf-8"))
+          j.setdefault("meta",{})["last_full_run_utc"]=datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+          json.dump(j, open(p,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
+          print("[stamp] last_full_run_utc:", j["meta"]["last_full_run_utc"])
+          PY
+
+      - name: Ensure jq is available
         run: |
           set -e
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+
+      - name: Stale-guard (skip publish if newer live exists)
+        id: stale
+        run: |
+          set -euo pipefail
+          START_TS="${START_TS:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
+          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/data-live-10min/data/outlook_intraday.json?t=$(date +%s)" -o /tmp/live.json || true
+          LIVE_TS=$(jq -r '.meta.last_full_run_utc // .updated_at_utc // .updated_at // empty' /tmp/live.json || true)
+          echo "START_TS=$START_TS | LIVE_TS=${LIVE_TS:-none}"
+          if [ -n "$LIVE_TS" ]; then
+            S=$(date -u -d "$START_TS" +%s)
+            L=$(date -u -d "$LIVE_TS"  +%s 2>/dev/null || echo 0)
+            if [ "$L" -gt "$S" ]; then
+              echo "newer=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "newer=false" >> "$GITHUB_OUTPUT"
+
+      - name: Stage artifacts
+        if: ${{ steps.stale.outputs.newer != 'true' }}
+        run: |
+          set -euo pipefail
           mkdir -p /tmp/live10
           cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
-          date -u +'%Y-%m-%dT%H:%M:%SZ' > /tmp/live10/heartbeat_10min.txt
+          cp -f data/heartbeat_10min.txt   /tmp/live10/heartbeat_10min.txt
 
-      - name: Publish (minimal live branch)
-        if: ${{ steps.market_guard.outputs.run == 'true' && (steps.open_guard.outputs.skip != 'true') }}
+      - name: Detect change vs remote
+        if: ${{ steps.stale.outputs.newer != 'true' }}
+        id: diff
+        env:
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
+        run: |
+          set -euo pipefail
+          CHG="true"
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
+            git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/prev.json 2>/dev/null || true
+            if [ -s /tmp/prev.json ] && cmp -s /tmp/prev.json /tmp/live10/outlook_intraday.json; then
+              CHG="false"
+            fi
+          fi
+          echo "changed=${CHG}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish live branch
+        if: ${{ steps.stale.outputs.newer != 'true' && steps.diff.outputs.changed == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
-          set -e
-          # nothing to publish?
-          if [ ! -s /tmp/live10/outlook_intraday.json ]; then
-            echo "No staged intraday; skipping publish."
-            exit 0
-          fi
-
+          set -euo pipefail
           git config user.name  "actions-bot"
           git config user.email "bot@users.noreply.github.com"
-          git fetch origin "${LIVE_BRANCH}" || true
-
-          # detach/clean target branch contents
-          if git show-ref --verify --quiet "refs/heads/${LIVE_BRANCH}"; then
-            git checkout "${LIVE_BRANCH}"
-          else
-            git checkout --orphan "${LIVE_BRANCH}"
-          fi
-          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+          git fetch --depth=1 origin "${LIVE_BRANCH}" || true
+          git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" || git checkout -B "${LIVE_BRANCH}"
+          mkdir -p /tmp/push
+          cp -f /tmp/live10/outlook_intraday.json /tmp/push/outlook_intraday.json
+          cp -f /tmp/live10/heartbeat_10min.txt  /tmp/push/heartbeat_10min.txt
+          git rm -rf data || true
           mkdir -p data
-          cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
-          cp -f /tmp/live10/heartbeat_10min.txt   data/heartbeat_10min.txt
-
-          git add data
-          git commit -m "10m publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || { echo "no changes"; exit 0; }
-          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" "${LIVE_BRANCH}"
+          mv /tmp/push/* data/
+          git add -A
+          if git diff --cached --quiet; then
+            echo "no changes to commit"
+          else
+            git commit -m "10m publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git push -f origin "${LIVE_BRANCH}"
+          fi
 
       - name: Done
-        run: echo "10m cycle complete"
+        run: |
+          echo "::notice:: 10m workflow complete."
