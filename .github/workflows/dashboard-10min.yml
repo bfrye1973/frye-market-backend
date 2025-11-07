@@ -1,121 +1,147 @@
 name: dashboard-10min (self-hosted)
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * 1-5"
+    - cron: "*/10 * * * *"   # every 10 minutes
+  workflow_dispatch:
+
+# Make sure only one 10-minute job runs at a time
+concurrency:
+  group: dashboard-10min
+  cancel-in-progress: true
 
 jobs:
-  tenmin:
+  build_10m:
     name: Build and Publish Intraday (self-hosted)
-    runs-on:
-      - self-hosted
-      - Windows
-      - X64
-    timeout-minutes: 20
-    concurrency:
-      group: dashboard-10min
-      cancel-in-progress: true
+    runs-on: [self-hosted, Windows, tenmin]
 
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
-      # fast collector knobs
-      FD_SCALPER_ENABLE: "true"
-      FD_SCALPER_LOOKBACK: "3"
-      FD_MAX_WORKERS: "6"
+      # if your scripts use Polygon:
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
     steps:
-      - name: Checkout
+      - name: Checkout (sparse; exclude data/archive/**)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+          # Avoid Windows path issues by not checking out "data/archive/**"
+          sparse-checkout: |
+            /
+            !data/archive/**
+          sparse-checkout-cone: false
 
-      - name: Market hours guard (AZ)
-        id: guard
-        shell: pwsh
+      # Ensure Python and requests are available on the runner
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python deps
         run: |
-          $ErrorActionPreference = "Stop"
-          $env:TZ = "America/Phoenix"
-          $hour = (Get-Date -Format "HH")
-          $dow  = (Get-Date -UFormat "%u")   # 1..7
-          if ([int]$dow -ge 6) { "Weekend - skipping"; echo "run=false" >> $env:GITHUB_OUTPUT; exit 0 }
-          if ([int]$hour -lt 6 -or [int]$hour -gt 18) { "Outside market window - skipping"; echo "run=false" >> $env:GITHUB_OUTPUT; exit 0 }
-          echo "run=true" >> $env:GITHUB_OUTPUT
+          python -m pip install --upgrade pip
+          pip install --upgrade requests
 
-      - name: Build sectorCards source (today only)
-        if: ${{ steps.guard.outputs.run == 'true' }}
-        shell: pwsh
+      # OPTIONAL: quick open-window guard (remove if you don’t want it)
+      - name: Open-window guard (4:55–18:59 AZ)
+        shell: bash
         run: |
-          mkdir -Force data | Out-Null
-          python .\scripts\build_outlook_source_from_polygon.py --mode intraday10 --out data\outlook_source.json
-          Copy-Item -Force data\outlook_source.json C:\Windows\Temp\outlook_source.json
+          set -e
+          TZ="America/Phoenix"
+          now_h=$(date +"%H" -d "TZ=\"$TZ\" now")
+          now_m=$(date +"%M" -d "TZ=\"$TZ\" now")
+          # allow from 04:55 to 18:59 AZ (adjust if needed)
+          if [ "$now_h$now_m" -lt "0455" ] || [ "$now_h" -gt 18 ]; then
+            echo "🔕 Outside run window. Exiting early."
+            exit 0
+          fi
+
+      # === Your build steps ===
+      - name: Build sectorCards source (only)
+        shell: bash
+        run: |
+          set -e
+          echo "Building 10m sector source…"
+          python -u scripts/build_outlook_source_from_polygon.py --mode intraday10 --out data/outlook_source.json
 
       - name: Normalize sector source
-        if: ${{ steps.guard.outputs.run == 'true' }}
-        shell: pwsh
+        shell: bash
         run: |
-          $json = Get-Content -Raw -Path data\outlook_source.json | ConvertFrom-Json
-          if (-not $json.sectorCards -and -not $json.groups) {
-            Write-Host "No sector data. Exiting."
-            exit 0
-          }
+          set -e
+          echo "Normalizing sector source…"
+          python - <<'PY'
+          import json, sys
+          p="data/outlook_source.json"
+          with open(p, "r", encoding="utf-8") as f:
+              j = json.load(f)
+          # if you need to reshape groups -> sectorCards, keep your existing logic here
+          # (Assumes your source script already writes `sectorCards`)
+          if "sectorCards" not in j:
+              print("❌ No sectorCards in source. Aborting.")
+              sys.exit(2)
+          # Re-write to ensure consistent JSON formatting
+          with open(p, "w", encoding="utf-8") as f:
+              json.dump(j, f, ensure_ascii=False)
+          print("✅ sectorCards present, source OK")
+          PY
 
-      - name: Build intraday payload (10m)
-        if: ${{ steps.guard.outputs.run == 'true' }}
-        shell: pwsh
+      - name: Build intraday payload
+        shell: bash
         run: |
-          python .\scripts\make_intermediate.py  # if you have it; otherwise remove
-          python .\scripts\make_dashboard.py --mode intraday --source data\outlook_source.json --out data\outlook_intraday.json
+          set -e
+          echo "Building intraday payload…"
+          python -u scripts/make_dispatch.py --source data/outlook_source.json --out data/outlook_intraday.json || \
+          python -u scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_intraday.json
+          test -f data/outlook_intraday.json
 
       - name: Enrich (trend/pills) — JSON only
-        if: ${{ steps.guard.outputs.run == 'true' }}
-        shell: pwsh
+        shell: bash
         run: |
-          if (Test-Path .\scripts\compute_trend10m.py) { python .\scripts\compute_trend10m.py } 
-          if (Test-Path .\scripts\update_pills_10m_state.py) { python .\scripts\update_pills_10m_state.py }
+          set -e
+          echo "Enriching payload (trend/pills)…"
+          # These scripts must NOT call git / checkout; they should read JSON only
+          if [ -f scripts/compute_trend10m.py ]; then
+            python -u scripts/compute_trend10m.py || true
+          fi
+          if [ -f scripts/update_pills_10m_state.py ]; then
+            python -u scripts/update_pills_10m_state.py || true
+          fi
 
       - name: Write heartbeat
-        if: ${{ steps.guard.outputs.run == 'true' }}
-        shell: pwsh
+        shell: bash
         run: |
-          $now = (Get-Date).ToUniversalTime().ToString("s") + "Z"
-          Set-Content -Path data\heartbeat_10min.txt -Value $now
+          set -e
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_10min.txt
 
-      - name: Detect changes vs live branch
-        if: ${{ steps.guard.outputs.run == 'true' }}
-        id: diff
-        shell: pwsh
-        env:
-          RAW_URL: https://raw.githubusercontent.com/bfrye1973/frye-market-backend/data-live-10min/data/outlook_intraday.json
+      # Publish only if something changed
+      - name: Prepare publish (copy artifacts)
+        shell: bash
         run: |
-          $ProgressPreference = 'SilentlyContinue'
-          $tmp = "$env:temp\live10.json"
-          try { Invoke-WebRequest -Uri $env:RAW_URL -UseBasicParsing -OutFile $tmp -ErrorAction Stop } catch { "" | Out-Null }
-          if (Test-Path $tmp) {
-            $a = Get-Content -Raw -Path data\outlook_intraday.json
-            $b = Get-Content -Raw -Path $tmp
-            if ($a -eq $b) { echo "changed=false" >> $env:GITHUB_OUTPUT; exit 0 }
-          }
-          echo "changed=true" >> $env:GITHUB_OUTPUT
+          set -e
+          mkdir -p /tmp/live10
+          cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
+          cp -f data/heartbeat_10min.txt /tmp/live10/heartbeat_10min.txt
 
-      - name: Publish to live branch (minimal)
-        if: ${{ steps.guard.outputs.run == 'true' && steps.diff.outputs.changed == 'true' }}
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish to ${{ env.LIVE_BRANCH }}
+        shell: bash
         run: |
-          git config user.email "bot@ci.local"
-          git config user.name  "CI Bot"
-          git fetch origin $env:LIVE_BRANCH || echo "no remote branch yet"
-          Copy-Item -Force data\outlook_intraday.json data\outlook_intraday.json
-          Copy-Item -Force data\heartbeat_10min.txt data\heartbeat_10min.txt
-          git add data\outlook_intraday.json data\heartbeat_10min.txt
-          git commit -m "tenmin: $(Get-Date -Format o)" || echo "Nothing to commit"
-          git push origin HEAD:$env:LIVE_BRANCH --force
+          set -e
+          git config --global user.email "bot@ci.local"
+          git config --global user.name "CI Bot"
+          git fetch origin "${LIVE_BRANCH}" || true
+          git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" 2>/dev/null || git checkout --orphan "${LIVE_BRANCH}"
+          # place artifacts
+          rm -rf data || true
+          mkdir -p data
+          cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
+          cp -f /tmp/live10/heartbeat_10min.txt data/heartbeat_10min.txt
+          git add data
+          if git diff --cached --quiet; then
+            echo "No changes to publish."
+            exit 0
+          fi
+          git commit -m "10m publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push -f origin "${LIVE_BRANCH}"
 
       - name: Done
-        if: ${{ steps.guard.outputs.run == 'true' }}
-        shell: pwsh
-        run: echo "10m run finished."
+        run: echo "✅ 10m build complete"
