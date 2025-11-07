@@ -11,7 +11,7 @@ jobs:
     runs-on:
       - self-hosted
       - Windows
-      - tenmin
+      - X64
     timeout-minutes: 20
     concurrency:
       group: dashboard-10min
