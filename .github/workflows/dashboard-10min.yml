@@ -57,9 +57,9 @@ jobs:
           set -euo pipefail
           mkdir -p data
           echo "::notice::collector starting"
-          python -u scripts/build_outlook_intraday.py \
-            --mode intraday10 \
-            --out data/outlook_source.json
+          python -u scripts/build_outlook_source_from_polygon.py \
+           --mode intraday10 \
+           --out data/outlook_source.json
           echo "::notice::collector done"
 
       - name: Normalize sector source (light)
