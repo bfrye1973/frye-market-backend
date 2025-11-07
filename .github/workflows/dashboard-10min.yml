@@ -1,48 +1,38 @@
-name: dashboard-10min (self-hosted)
+name: dashboard-10min (self-hosted minimal)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 jobs:
   tenmin:
     runs-on: [ self-hosted, Windows, X64, tenmin ]
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
-      - name: Prepare workspace (clean)
+      # 1) Clean workspace in PowerShell (works on all Windows)
+      - name: Prepare workspace
         shell: powershell
         run: |
           Write-Host "Workspace: $env:GITHUB_WORKSPACE"
           if (Test-Path "$env:GITHUB_WORKSPACE\.git") {
             try {
               git -C "$env:GITHUB_WORKSPACE" rev-parse --is-inside-work-tree | Out-Null
-              if ($LASTEXITCODE -ne 0) {
-                Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-              }
             } catch {
               Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
             }
-          } else {
-            Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
           }
 
+      # 2) Do a plain checkout (NO sparse paths yet)
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
           clean: true
 
-      - name: Verify repository state
+      # 3) Prove checkout is good
+      - name: Verify repo
         shell: powershell
         run: |
           git rev-parse --abbrev-ref HEAD
           git log -1 --oneline
-
-      - name: Placeholder build step
-        shell: powershell
-        run: |
-          Write-Host "Checkout is good. Runner is working. Next: re-enable your real build steps."
-
-      - name: Done
-        shell: powershell
-        run: Write-Host "10m self-hosted pipeline finished."
+          Write-Host "OK – repo is present."
