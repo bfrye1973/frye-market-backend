@@ -3,8 +3,8 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Run once per hour at :05 (Mon–Fri). Staggered away from top-of-hour jobs.
-    - cron: "5 * * * 1-5"
+    # Run every 40 minutes on weekdays (UTC). Pattern will be :00 → :40 → :20 → :00 …
+    - cron: "*/40 * * * 1-5"
 
 defaults:
   run:
@@ -27,14 +27,14 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
       # Tuning for consistency (lighter load, fewer 429s, deterministic)
-      HOUR_LOOKBACK_DAYS: "10"   # was heavier
-      H4_LOOKBACK_DAYS:   "21"   # was heavier
+      HOUR_LOOKBACK_DAYS: "10"
+      H4_LOOKBACK_DAYS:   "21"
       EMA_FAST:           "8"
       EMA_SLOW:           "18"
       VOL_FAST:           "3"
       VOL_SLOW:           "12"
-      FD_MAX_WORKERS:     "6"    # avoid 429 storms
-      FD_RETRY_MAX:       "1"    # fail fast on bad slowness
+      FD_MAX_WORKERS:     "6"
+      FD_RETRY_MAX:       "1"
 
     steps:
       # ---------- T0 ----------
@@ -89,7 +89,7 @@ jobs:
           except Exception as e:
             print("invalid source:", e); sys.exit(1)
 
-          def pct(a,b): 
+          def pct(a,b):
               return 0.0 if b==0 else round(100.0*float(a)/float(b),2)
 
           if "sectorCards" in j and isinstance(j["sectorCards"], list):
@@ -234,7 +234,7 @@ jobs:
           git add -A
           if git diff --cached --quiet; then
             echo "no changes to commit"
-          else
+          else:
             git commit -m "hourly publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             git push -f origin "${LIVE_BRANCH}"
           fi
