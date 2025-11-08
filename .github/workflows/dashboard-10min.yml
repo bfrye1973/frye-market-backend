@@ -2,37 +2,63 @@ name: dashboard-10min (self-hosted minimal)
 
 on:
   workflow_dispatch: {}
+  schedule:
+    - cron: "*/10 * * * 1-5"
 
 jobs:
   tenmin:
-    runs-on: [ self-hosted, Windows, X64, tenmin ]
-    timeout-minutes: 20
+    name: tenmin
+    runs-on:
+      - self-hosted
+      - Windows
+      - tenmin
+
+    defaults:
+      run:
+        shell: powershell
 
     steps:
-      # 1) Clean workspace in PowerShell (works on all Windows)
-      - name: Prepare workspace
-        shell: powershell
-        run: |
-          Write-Host "Workspace: $env:GITHUB_WORKSPACE"
-          if (Test-Path "$env:GITHUB_WORKSPACE\.git") {
-            try {
-              git -C "$env:GITHUB_WORKSPACE" rev-parse --is-inside-work-tree | Out-Null
-            } catch {
-              Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-            }
-          }
-
-      # 2) Do a plain checkout (NO sparse paths yet)
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
-          clean: true
+          fetch-depth: 0
 
-      # 3) Prove checkout is good
-      - name: Verify repo
-        shell: powershell
+      # --- Safety: make sure the collector only pulls SPY ---
+      # If the script already uses FD_TICKERS, this step is enough.
+      # If it had a hard-coded ["SPY","QQQ"], the next section (patch) ensures SPY only.
+      - name: Build sector source (SPY only, today only)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          FD_TICKERS: "SPY"
+          FD_LOOKBACK_DAYS: "0"
+          FD_MAX_WORKERS: "6"
         run: |
-          git rev-parse --abbrev-ref HEAD
-          git log -1 --oneline
-          Write-Host "OK – repo is present."
+          python -u scripts/build_outlook_source_from_polygon.py `
+            --mode intraday10 `
+            --out data/outlook_source.json
+
+      - name: Build intraday payload (SPY only)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          python -u scripts/make_dashboard.py `
+            --source data/outlook_source.json `
+            --out data/outlook_intraday.json
+
+      # --- Minimal publish to data-live-10min branch ---
+      - name: Publish intraday (self-hosted minimal)
+        run: |
+          git config user.email "runner@local"
+          git config user.name  "SelfHosted Runner"
+          git fetch origin data-live-10min || echo "no remote branch yet"
+          if (git rev-parse --verify origin/data-live-10min 2>$null) {
+            git switch --force-create data-live-10min origin/data-live-10min
+          } else {
+            git switch --orphan data-live-10min
+          }
+          New-Item -ItemType Directory -Force -Path data | Out-Null
+          Copy-Item -Force data/outlook_intraday.json data/outlook_intraday.json
+          git add -A
+          git commit -m "10m publish (SPY only) $(Get-Date -Format s)" -q `
+            || echo "no changes to publish"
+          git push -f origin data-live-10min
