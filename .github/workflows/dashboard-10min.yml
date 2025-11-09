@@ -1,94 +1,93 @@
-name: dashboard-10min (self-hosted, sparse)
+name: dashboard-10min (self-hosted, minimal)
 
 on:
   workflow_dispatch: {}
-
-defaults:
-  run:
-    shell: bash
+  # add a schedule only after it's stable
+  # schedule:
+  #   - cron: '*/10 * * * *'   # every 10 minutes
 
 jobs:
   tenmin:
-    name: Build & Publish Intraday (self-hosted)
-    runs-on: [self-hosted, Windows, X64, tenmin]
-    timeout-minutes: 25
-    permissions:
-      contents: write
-    env:
-      TZ: America/Phoenix
-      LIVE_BRANCH: data-live-10min
-      PYTHONUNBUFFERED: "1"
-      FD_SCALPER_ENABLE: "true"
-      FD_SCALPER_LOOKBACK: "3"
-      FD_MAX_WORKERS: "6"
-      FD_RETRY_MAX: "1"
-      FD_LOOKBACK_DAYS: "0"
-      INTRADAY_JSON_PATH: data/outlook_intraday.json
-      HOURLY_URL: https://frye-market-backend-1.onrender.com/live/hourly
+    runs-on: [self-hosted, Windows, tenmin]
+    timeout-minutes: 30
 
     steps:
-      # Hard-clean the workspace so no previous sparse settings remain
-      - name: Force-clean workspace (Windows)
-        shell: powershell
-        run: |
-          if (Test-Path $env:GITHUB_WORKSPACE) {
-            Write-Host "Cleaning $env:GITHUB_WORKSPACE ..."
-            try { takeown /F $env:GITHUB_WORKSPACE /R /D Y } catch {}
-            try { icacls  $env:GITHUB_WORKSPACE /grant "*S-1-5-32-544:F" /T } catch {}
-            Get-ChildItem -Force $env:GITHUB_WORKSPACE | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          }
-
-      - name: Checkout (sparse, no archive)
+      # --- 1) NORMAL CHECKOUT (no sparse, no archive paths) ---
+      - name: Checkout repository (no sparse)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           clean: true
-          sparse-checkout: |
-            scripts/**
-            routes/**
-            requirements.txt
-            README.md
-            .github/**
-          sparse-checkout-cone-mode: false
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - name: Install deps (if present)
+      # --- 2) (Optional) confirm Python is available ---
+      - name: Show Python (if present)
+        shell: powershell
         run: |
-          if [ -f requirements.txt ]; then
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt
-          fi
+          if (Get-Command python -ErrorAction SilentlyContinue) {
+            python --version
+          } else {
+            Write-Host "Python not found on PATH (that's OK if your build doesn't need it)."
+          }
 
+      # --- 3) Build sectorCards source (only if your script exists) ---
       - name: Build sectorCards source (10m)
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-          FD_SCALPER_ENABLE: ${{ env.FD_SCALPER_ENABLE }}
-          FD_SCALPER_LOOKBACK: ${{ env.FD_SCALPER_LOOKBACK }}
-          FD_MAX_WORKERS: ${{ env.FD_MAX_WORKERS }}
-          FD_RETRY_MAX: ${{ env.FD_RETRY_MAX }}
-          FD_LOOKBACK_DAYS: ${{ env.FD_LOOKBACK_DAYS }}
+        shell: powershell
         run: |
-          set -e
-          mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py \
-            --mode intraday10 \
-            --out  data/outlook_source.json
+          $script = "scripts/build_outlook_source_from_polygon.py"
+          if (Test-Path $script) {
+            Write-Host "Running $script ..."
+            python $script --mode intraday10 --out data/outlook_source.json
+          } else {
+            Write-Host "SKIP: $script not found."
+          }
 
-      - name: Build intraday payload (10m)
-        env:
-          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
-          INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
-          HOURLY_URL:         ${{ env.HOURLY_URL }}
+      # --- 4) Build intraday payload (only if your script exists) ---
+      - name: Build intraday payload
+        shell: powershell
         run: |
-          set -e
-          python -u scripts/make_dashboard.py \
-            --source data/outlook_source.json \
-            --out    data/outlook_intraday.json
+          $script = "scripts/make_dashboard.py"
+          if (Test-Path $script) {
+            Write-Host "Running $script ..."
+            python $script --source data/outlook_source.json --out data/outlook_intraday.json
+          } else {
+            Write-Host "SKIP: $script not found."
+          }
 
-      # ... (the remaining steps from the previous YAML unchanged:
-      # Stage artifacts, Detect change vs remote, Publish live branch)
+      # --- 5) (Optional) publish only if the output file changed ---
+      - name: Publish to live branch (only on change)
+        shell: powershell
+        env:
+          LIVE_BRANCH: data-live-10min
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $out = "data/outlook_intraday.json"
+          if (-Not (Test-Path $out)) {
+            Write-Host "SKIP: $out does not exist — nothing to publish."
+            exit 0
+          }
+
+          git config user.name  "actions-bot"
+          git config user.email "bot@users.noreply.github.com"
+
+          # Fetch the live branch (if it exists) and compare file contents
+          git fetch --no-tags --depth=1 origin $env:LIVE_BRANCH 2>$null
+
+          $tmp = Join-Path $env:RUNNER_TEMP "prev.json"
+          if (git ls-remote --heads origin $env:LIVE_BRANCH) {
+            git show "origin/$env:LIVE_BRANCH:$out" > $tmp 2>$null
+          }
+
+          if ((Test-Path $tmp) -and (Compare-Object (Get-Content $out) (Get-Content $tmp) -SyncWindow 0 -CaseSensitive:$false | Measure-Object).Count -eq 0) {
+            Write-Host "No content change in $out — skipping publish."
+            exit 0
+          }
+
+          # Publish the new file to the live branch
+          git checkout -B $env:LIVE_BRANCH
+          git add $out
+          git commit -m "10m publish $(Get-Date -Format s)Z" 2>$null
+          git push -f "https://x-access-token:${env:GH_TOKEN}@github.com/${{ github.repository }}.git" $env:LIVE_BRANCH
+
+      - name: Done
+        shell: powershell
+        run: Write-Host "10m job complete."
