@@ -2,92 +2,88 @@ name: dashboard-10min (self-hosted, minimal)
 
 on:
   workflow_dispatch: {}
-  # add a schedule only after it's stable
-  # schedule:
-  #   - cron: '*/10 * * * *'   # every 10 minutes
+  # run every 12 minutes on weekdays (adjust if you like)
+  schedule:
+    - cron: "*/12 * * * 1-5"
 
 jobs:
   tenmin:
+    # use the labels of your self-hosted runner
     runs-on: [self-hosted, Windows, tenmin]
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
-      # --- 1) NORMAL CHECKOUT (no sparse, no archive paths) ---
       - name: Checkout repository (no sparse)
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          clean: true
 
-      # --- 2) (Optional) confirm Python is available ---
-      - name: Show Python (if present)
-        shell: powershell
-        run: |
-          if (Get-Command python -ErrorAction SilentlyContinue) {
-            python --version
-          } else {
-            Write-Host "Python not found on PATH (that's OK if your build doesn't need it)."
-          }
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      # --- 3) Build sectorCards source (only if your script exists) ---
+      # ---------- BUILD SECTORS SOURCE (10m) ----------
       - name: Build sectorCards source (10m)
-        shell: powershell
-        run: |
-          $script = "scripts/build_outlook_source_from_polygon.py"
-          if (Test-Path $script) {
-            Write-Host "Running $script ..."
-            python $script --mode intraday10 --out data/outlook_source.json
-          } else {
-            Write-Host "SKIP: $script not found."
-          }
-
-      # --- 4) Build intraday payload (only if your script exists) ---
-      - name: Build intraday payload
-        shell: powershell
-        run: |
-          $script = "scripts/make_dashboard.py"
-          if (Test-Path $script) {
-            Write-Host "Running $script ..."
-            python $script --source data/outlook_source.json --out data/outlook_intraday.json
-          } else {
-            Write-Host "SKIP: $script not found."
-          }
-
-      # --- 5) (Optional) publish only if the output file changed ---
-      - name: Publish to live branch (only on change)
-        shell: powershell
         env:
-          LIVE_BRANCH: data-live-10min
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $out = "data/outlook_intraday.json"
-          if (-Not (Test-Path $out)) {
-            Write-Host "SKIP: $out does not exist — nothing to publish."
-            exit 0
-          }
+          # IMPORTANT: pass the key so the script can authenticate with Polygon
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLY_KEY:        ${{ secrets.POLYGON_API_KEY }}   # script also checks these
+          REACT_APP_POLYGON_KEY: ${{ secrets.POLYGON_API_KEY }}
 
+          # your safe flags (unchanged behavior unless you flip them)
+          FD_SCALPER_ENABLE: "false"
+          FD_HOURLY_INTRADAY: "true"
+          FD_SCALPER_LOOKBACK: "5"
+          FD_MAX_WORKERS: "8"
+        run: |
+          python -u scripts/build_outlook_source_from_polygon.py ^
+            --mode intraday10 ^
+            --out data/outlook_source.json
+
+      # ---------- BUILD INTRADAY PAYLOAD (10m) ----------
+      # keep the script/args your repo already uses for this step
+      - name: Build intraday payload (10m)
+        run: |
+          python -u scripts/build_intraday_payload.py ^
+            --source data/outlook_source.json ^
+            --out data/outlook_intraday.json
+
+      # ---------- PUBLISH ONLY WHEN THE FILE CHANGED ----------
+      - name: Detect change vs remote
+        id: diff
+        shell: pwsh
+        run: |
+          $branch = 'data-live-10min'
+          git fetch --depth=1 origin $branch 2>$null || echo "no remote branch yet"
+          $changed = "true"
+          if (Test-Path 'data/outlook_intraday.json') {
+            $remote = ''
+            try { $remote = git show "origin/$branch:data/outlook_intraday.json" 2>$null } catch {}
+            if ($remote -ne '') {
+              $local  = Get-Content -Raw 'data/outlook_intraday.json'
+              if ($remote -eq $local) { $changed = "false" }
+            }
+          }
+          "changed=$changed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Publish to live branch (only on change)
+        if: steps.diff.outputs.changed == 'true'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $branch = 'data-live-10min'
           git config user.name  "actions-bot"
           git config user.email "bot@users.noreply.github.com"
 
-          # Fetch the live branch (if it exists) and compare file contents
-          git fetch --no-tags --depth=1 origin $env:LIVE_BRANCH 2>$null
+          git fetch --depth=1 origin 2>$null || echo "first publish"
+          git checkout -B $branch "origin/$branch" 2>$null || git checkout -B $branch
 
-          $tmp = Join-Path $env:RUNNER_TEMP "prev.json"
-          if (git ls-remote --heads origin $env:LIVE_BRANCH) {
-            git show "origin/$env:LIVE_BRANCH:$out" > $tmp 2>$null
-          }
+          mkdir -Force data
+          Copy-Item -Force 'data/outlook_intraday.json' 'data/outlook_intraday.json'
 
-          if ((Test-Path $tmp) -and (Compare-Object (Get-Content $out) (Get-Content $tmp) -SyncWindow 0 -CaseSensitive:$false | Measure-Object).Count -eq 0) {
-            Write-Host "No content change in $out — skipping publish."
-            exit 0
-          }
-
-          # Publish the new file to the live branch
-          git checkout -B $env:LIVE_BRANCH
-          git add $out
-          git commit -m "10m publish $(Get-Date -Format s)Z" 2>$null
-          git push -f "https://x-access-token:${env:GH_TOKEN}@github.com/${{ github.repository }}.git" $env:LIVE_BRANCH
-
-      - name: Done
-        shell: powershell
-        run: Write-Host "10m job complete."
+          git add data/outlook_intraday.json
+          git commit -m ("10m live {0:yyyy-MM-ddTHH:mm:ssZ}" -f (Get-Date).ToUniversalTime()) `
+            || echo "nothing to commit"
+          git push -f origin $branch
