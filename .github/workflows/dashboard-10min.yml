@@ -1,64 +1,147 @@
-name: dashboard-10min (self-hosted minimal)
+name: dashboard-10min (self-hosted)
 
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "*/10 * * * 1-5"
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   tenmin:
-    name: tenmin
-    runs-on:
-      - self-hosted
-      - Windows
-      - tenmin
+    name: Build & Publish Intraday (self-hosted)
+    # This must match the labels shown on your runner page
+    runs-on: [self-hosted, Windows, X64, tenmin]
+    timeout-minutes: 25
 
-    defaults:
-      run:
-        shell: powershell
+    permissions:
+      contents: write
+
+    env:
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-10min
+      PYTHONUNBUFFERED: "1"
+
+      # Light, predictable collector settings
+      FD_SCALPER_ENABLE: "true"
+      FD_SCALPER_LOOKBACK: "3"
+      FD_MAX_WORKERS: "6"
+      FD_RETRY_MAX: "1"
+      FD_LOOKBACK_DAYS: "0"
+
+      # JSON-only processors (no direct Polygon calls)
+      INTRADAY_JSON_PATH: data/outlook_intraday.json
+      HOURLY_URL: https://frye-market-backend-1.onrender.com/live/hourly
+      INTRADAY_URL: https://frye-market-backend-1.onrender.com/live/intraday
 
     steps:
+      # --- No sparse-checkout; do a normal clone so there are no invalid paths ---
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # --- Safety: make sure the collector only pulls SPY ---
-      # If the script already uses FD_TICKERS, this step is enough.
-      # If it had a hard-coded ["SPY","QQQ"], the next section (patch) ensures SPY only.
-      - name: Build sector source (SPY only, today only)
+      # Python (safe to keep; cached so it’s quick)
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python deps (if present)
+        run: |
+          if [ -f requirements.txt ]; then
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+          fi
+
+      # ---------- Build 10m source & payload ----------
+      - name: Build sectorCards source (10m)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-          FD_TICKERS: "SPY"
-          FD_LOOKBACK_DAYS: "0"
-          FD_MAX_WORKERS: "6"
+          FD_SCALPER_ENABLE: ${{ env.FD_SCALPER_ENABLE }}
+          FD_SCALPER_LOOKBACK: ${{ env.FD_SCALPER_LOOKBACK }}
+          FD_MAX_WORKERS: ${{ env.FD_MAX_WORKERS }}
+          FD_RETRY_MAX: ${{ env.FD_RETRY_MAX }}
+          FD_LOOKBACK_DAYS: ${{ env.FD_LOOKBACK_DAYS }}
         run: |
-          python -u scripts/build_outlook_source_from_polygon.py `
-            --mode intraday10 `
-            --out data/outlook_source.json
+          set -e
+          mkdir -p data
+          python -u scripts/build_outlook_source_from_polygon.py \
+            --mode intraday10 \
+            --out  data/outlook_source.json
 
-      - name: Build intraday payload (SPY only)
+      - name: Build intraday payload (10m)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
+          HOURLY_URL: ${{ env.HOURLY_URL }}
         run: |
-          python -u scripts/make_dashboard.py `
-            --source data/outlook_source.json `
-            --out data/outlook_intraday.json
+          set -e
+          python -u scripts/make_dashboard.py \
+            --source data/outlook_source.json \
+            --out    data/outlook_intraday.json
 
-      # --- Minimal publish to data-live-10min branch ---
-      - name: Publish intraday (self-hosted minimal)
+      # ---------- Optional JSON-only enrich steps ----------
+      - name: Enrich (tenmin rotation / lux / pills) — JSON only
+        env:
+          INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
+          HOURLY_URL: ${{ env.HOURLY_URL }}
         run: |
+          set -e
+          if [ -f scripts/compute_pulse10m.py ]; then
+            python -u scripts/compute_pulse10m.py || true
+          fi
+          if [ -f scripts/compute_trend10m.py ]; then
+            python -u scripts/compute_trend10m.py || true
+          fi
+          if [ -f scripts/update_pills_10m_state.py ]; then
+            python -u scripts/update_pills_10m_state.py || true
+          fi
+
+      # ---------- Publish only when content changed ----------
+      - name: Stage artifacts
+        run: |
+          set -e
+          mkdir -p /tmp/live10
+          cp -f data/outlook_intraday.json /tmp/live10/outlook_intraday.json
+
+      - name: Detect change vs remote
+        id: diff
+        env:
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
+        run: |
+          set -e
+          CHANGED="true"
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
+            git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/prev.json 2>/dev/null || true
+            if [ -s /tmp/prev.json ] && cmp -s /tmp/prev.json /tmp/live10/outlook_intraday.json; then
+              CHANGED="false"
+            fi
+          fi
+          echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish live branch (safe)
+        if: ${{ steps.diff.outputs.changed == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
+        run: |
+          set -e
           git config user.email "runner@local"
-          git config user.name  "SelfHosted Runner"
-          git fetch origin data-live-10min || echo "no remote branch yet"
-          if (git rev-parse --verify origin/data-live-10min 2>$null) {
-            git switch --force-create data-live-10min origin/data-live-10min
-          } else {
-            git switch --orphan data-live-10min
-          }
-          New-Item -ItemType Directory -Force -Path data | Out-Null
-          Copy-Item -Force data/outlook_intraday.json data/outlook_intraday.json
+          git config user.name  "CI Bot"
+
+          git fetch --depth=1 origin "${LIVE_BRANCH}" || true
+          git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" || git checkout -B "${LIVE_BRANCH}"
+
+          mkdir -p data
+          cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
+
           git add -A
-          git commit -m "10m publish (SPY only) $(Get-Date -Format s)" -q `
-            || echo "no changes to publish"
-          git push -f origin data-live-10min
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "10m publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git push -f origin "${LIVE_BRANCH}"
+          fi
