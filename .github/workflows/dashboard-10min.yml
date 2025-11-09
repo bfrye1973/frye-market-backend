@@ -1,19 +1,50 @@
-name: dashboard-10min (self-hosted, minimal)
+name: dashboard-10min (self-hosted)
 
 on:
   workflow_dispatch: {}
-  # run every 12 minutes on weekdays (adjust if you like)
   schedule:
+    # Run every 12 minutes on weekdays (you can change back to */7 when stable)
     - cron: "*/12 * * * 1-5"
 
 jobs:
   tenmin:
-    # use the labels of your self-hosted runner
-    runs-on: [self-hosted, Windows, tenmin]
-    timeout-minutes: 20
+    name: Build & Publish Intraday (10m – full run, overwrite-safe)
+    # use your Windows self-hosted runner
+    runs-on: self-hosted
+    timeout-minutes: 30
+    concurrency:
+      group: dashboard-10min
+      # keep long runs; do not cancel the one already running
+      cancel-in-progress: false
+
+    env:
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-10min
+      PYTHONUNBUFFERED: "1"
+      # intraday tuning – safe defaults
+      FD_SCALPER_ENABLE: "true"
+      FD_SCALPER_LOOKBACK: "3"
+      FD_LOOKBACK_DAYS: "0"
+      FD_MAX_WORKERS: "6"
+      FD_RETRY_MAX: "0"
+      # secrets for polygon
+      POLY_KEY: ${{ secrets.POLY_KEY }}
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
     steps:
-      - name: Checkout repository (no sparse)
+      # ------------------------------------------------------------------
+      # 0) mark start (helps reading logs) + make sure we are on repo root
+      # ------------------------------------------------------------------
+      - name: Start timer (UTC)
+        shell: cmd
+        run: |
+          echo START %DATE% %TIME%
+          echo ROOT: %CD%
+
+      # ------------------------------------------------------------------
+      # 1) Checkout repo (shallow); ensure Python is available on runner
+      # ------------------------------------------------------------------
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -21,69 +52,139 @@ jobs:
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      # ---------- BUILD SECTORS SOURCE (10m) ----------
+      # if your scripts need extra modules, uncomment and list them here
+      # - name: Install Python deps
+      #   shell: cmd
+      #   run: |
+      #     python -m pip install --upgrade pip
+      #     pip install -r requirements.txt
+
+      # ------------------------------------------------------------------
+      # 2) Build sectorCards source (10m) – pure cmd so flags are parsed
+      # ------------------------------------------------------------------
       - name: Build sectorCards source (10m)
-        env:
-          # IMPORTANT: pass the key so the script can authenticate with Polygon
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-          POLY_KEY:        ${{ secrets.POLYGON_API_KEY }}   # script also checks these
-          REACT_APP_POLYGON_KEY: ${{ secrets.POLYGON_API_KEY }}
-
-          # your safe flags (unchanged behavior unless you flip them)
-          FD_SCALPER_ENABLE: "false"
-          FD_HOURLY_INTRADAY: "true"
-          FD_SCALPER_LOOKBACK: "5"
-          FD_MAX_WORKERS: "8"
+        shell: cmd
         run: |
-          python -u scripts/build_outlook_source_from_polygon.py ^
+          echo Building sectorCards source...
+          python --version
+          python scripts\build_outlook_source_from_polygon.py ^
             --mode intraday10 ^
-            --out data/outlook_source.json
+            --sectors-dir data\sectors ^
+            --out data\outlook_source.json
+          if errorlevel 1 exit /b 1
 
-      # ---------- BUILD INTRADAY PAYLOAD (10m) ----------
-      # keep the script/args your repo already uses for this step
-      - name: Build intraday payload (10m)
+      # ------------------------------------------------------------------
+      # 3) Build intraday payload from source
+      # ------------------------------------------------------------------
+      - name: Build intraday payload
+        shell: cmd
         run: |
-          python -u scripts/build_intraday_payload.py ^
-            --source data/outlook_source.json ^
-            --out data/outlook_intraday.json
+          echo Building data\outlook_intraday.json...
+          python scripts\make_dashboard.py ^
+            --mode intraday ^
+            --source data\outlook_source.json ^
+            --out data\outlook_intraday.json
+          if errorlevel 1 exit /b 1
 
-      # ---------- PUBLISH ONLY WHEN THE FILE CHANGED ----------
-      - name: Detect change vs remote
+      # ------------------------------------------------------------------
+      # 4) Compute 10m Lux/Trend + Pills (optional but safe)
+      # ------------------------------------------------------------------
+      - name: Compute Lux strategy (10m)
+        shell: cmd
+        run: |
+          python scripts\compute_trend10m.py
+        continue-on-error: true
+
+      - name: Update pills (10m always-on)
+        shell: cmd
+        run: |
+          python scripts\update_pills_10m_state.py
+        continue-on-error: true
+
+      # ------------------------------------------------------------------
+      # 5) Stage files for publish and detect change vs remote
+      # ------------------------------------------------------------------
+      - name: Stage artifacts
+        shell: cmd
+        run: |
+          if not exist publish mkdir publish
+          copy /Y data\outlook_intraday.json publish\outlook_intraday.json
+          copy /Y data\outlook_source.json   publish\outlook_source.json
+          dir publish
+
+      - name: Detect change vs remote (no publish if unchanged)
         id: diff
-        shell: pwsh
+        shell: cmd
         run: |
-          $branch = 'data-live-10min'
-          git fetch --depth=1 origin $branch 2>$null || echo "no remote branch yet"
-          $changed = "true"
-          if (Test-Path 'data/outlook_intraday.json') {
-            $remote = ''
-            try { $remote = git show "origin/$branch:data/outlook_intraday.json" 2>$null } catch {}
-            if ($remote -ne '') {
-              $local  = Get-Content -Raw 'data/outlook_intraday.json'
-              if ($remote -eq $local) { $changed = "false" }
-            }
-          }
-          "changed=$changed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          echo Fetching remote branch...
+          git fetch origin %LIVE_BRANCH% --depth=1 || echo "No remote branch yet"
+          if exist _remote_tmp rd /s /q _remote_tmp
+          mkdir _remote_tmp
 
-      - name: Publish to live branch (only on change)
-        if: steps.diff.outputs.changed == 'true'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          rem checkout remote branch tree to compare (or create empty baseline)
+          set CHANGED=true
+          for /f "tokens=*" %%A in ('git ls-remote --heads origin %LIVE_BRANCH% ^| findstr refs/heads/%LIVE_BRANCH%') do set HAVE_BRANCH=1
+          if not defined HAVE_BRANCH (
+            echo No remote branch exists yet – will publish fresh files.
+          ) else (
+            echo Checking out remote branch to temp...
+            git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\outlook_intraday.json" 2>nul || echo "No remote file (new)."
+            rem compare files if both exist
+            if exist "_remote_tmp\data\outlook_intraday.json" (
+              fc /B publish\outlook_intraday.json "_remote_tmp\data\outlook_intraday.json" >nul 2>&1
+              if "%ERRORLEVEL%"=="0" (
+                echo Files are identical.
+                set CHANGED=false
+              ) else (
+                echo Files differ.
+                set CHANGED=true
+              )
+            ) else (
+              echo Remote file missing – will publish.
+              set CHANGED=true
+            )
+          )
+          echo changed=%CHANGED%>change.txt
+
+      # ------------------------------------------------------------------
+      # 6) Publish to data-live-10min only if changed or first run
+      # ------------------------------------------------------------------
+      - name: Publish live branch
+        if: ${{ contains( steps.diff.outputs || '', 'placeholder') || true }}
+        shell: cmd
         run: |
-          $branch = 'data-live-10min'
-          git config user.name  "actions-bot"
-          git config user.email "bot@users.noreply.github.com"
+          for /f "tokens=2 delims==" %%A in (change.txt) do set CHANGED=%%A
+          echo CHANGED=%CHANGED%
+          if /I "%CHANGED%"=="false" (
+             echo "No content change – skipping publish."
+             exit /b 0
+          )
 
-          git fetch --depth=1 origin 2>$null || echo "first publish"
-          git checkout -B $branch "origin/$branch" 2>$null || git checkout -B $branch
+          echo "Publishing to %LIVE_BRANCH%..."
+          git config user.email "bot@ci.local"
+          git config user.name  "CI Bot"
 
-          mkdir -Force data
-          Copy-Item -Force 'data/outlook_intraday.json' 'data/outlook_intraday.json'
+          rem switch to live branch (create if needed)
+          git fetch origin %LIVE_BRANCH% || echo creating branch
+          git checkout -B %LIVE_BRANCH%
 
-          git add data/outlook_intraday.json
-          git commit -m ("10m live {0:yyyy-MM-ddTHH:mm:ssZ}" -f (Get-Date).ToUniversalTime()) `
-            || echo "nothing to commit"
-          git push -f origin $branch
+          copy /Y publish\outlook_intraday.json data\outlook_intraday.json
+          copy /Y publish\outlook_source.json   data\outlook_source.json
+
+          git add data\outlook_intraday.json
+          git add data\outlook_source.json
+          git commit -m "10m live @ %DATE% %TIME%" || (
+            echo "Nothing to commit (no changes)."
+            exit /b 0
+          )
+          git push -f origin %LIVE_BRANCH%
+
+      # ------------------------------------------------------------------
+      # 7) Done
+      # ------------------------------------------------------------------
+      - name: Done
+        shell: cmd
+        run: |
+          echo DONE %DATE% %TIME%
