@@ -1,4 +1,4 @@
-name: dashboard-10min (self-hosted)
+name: dashboard-10min (self-hosted, sparse)
 
 on:
   workflow_dispatch: {}
@@ -10,10 +10,8 @@ defaults:
 jobs:
   tenmin:
     name: Build & Publish Intraday (self-hosted)
-    # This must match the labels shown on your runner page
     runs-on: [self-hosted, Windows, X64, tenmin]
     timeout-minutes: 25
-
     permissions:
       contents: write
 
@@ -22,40 +20,57 @@ jobs:
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
 
-      # Light, predictable collector settings
+      # collector tuning
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
       FD_MAX_WORKERS: "6"
       FD_RETRY_MAX: "1"
       FD_LOOKBACK_DAYS: "0"
 
-      # JSON-only processors (no direct Polygon calls)
       INTRADAY_JSON_PATH: data/outlook_intraday.json
       HOURLY_URL: https://frye-market-backend-1.onrender.com/live/hourly
-      INTRADAY_URL: https://frye-market-backend-1.onrender.com/live/intraday
 
     steps:
-      # --- No sparse-checkout; do a normal clone so there are no invalid paths ---
-      - name: Checkout repository
+      # Hard-clean the workspace so no previous sparse settings remain
+      - name: Force-clean workspace (Windows)
+        shell: pwsh
+        run: |
+          if (Test-Path $env:GITHUB_WORKSPACE) {
+            Write-Host "Cleaning $env:GITHUB_WORKSPACE ..."
+            # take ownership just in case
+            try { takeown /F $env:GITHUB_WORKSPACE /R /D Y 2>$null } catch {}
+            try { icacls  $env:GITHUB_WORKSPACE /grant *S-1-5-32-544:F /T 2>$null } catch {}
+            Get-ChildItem -Force $env:GITHUB_WORKSPACE | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+      # Checkout ONLY what Windows can handle (avoid data/archive/** entirely)
+      - name: Checkout (sparse, no archive)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          clean: true
+          # Include only what’s needed to build/publish the 10-minute payload.
+          sparse-checkout: |
+            scripts/**
+            routes/**
+            requirements.txt
+            README.md
+            .github/**
+          sparse-checkout-cone-mode: false
 
-      # Python (safe to keep; cached so it’s quick)
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install Python deps (if present)
+      - name: Install deps (if present)
         run: |
           if [ -f requirements.txt ]; then
             python -m pip install --upgrade pip
             pip install -r requirements.txt
           fi
 
-      # ---------- Build 10m source & payload ----------
       - name: Build sectorCards source (10m)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -82,24 +97,6 @@ jobs:
             --source data/outlook_source.json \
             --out    data/outlook_intraday.json
 
-      # ---------- Optional JSON-only enrich steps ----------
-      - name: Enrich (tenmin rotation / lux / pills) — JSON only
-        env:
-          INTRADAY_JSON_PATH: ${{ env.INTRADAY_JSON_PATH }}
-          HOURLY_URL: ${{ env.HOURLY_URL }}
-        run: |
-          set -e
-          if [ -f scripts/compute_pulse10m.py ]; then
-            python -u scripts/compute_pulse10m.py || true
-          fi
-          if [ -f scripts/compute_trend10m.py ]; then
-            python -u scripts/compute_trend10m.py || true
-          fi
-          if [ -f scripts/update_pills_10m_state.py ]; then
-            python -u scripts/update_pills_10m_state.py || true
-          fi
-
-      # ---------- Publish only when content changed ----------
       - name: Stage artifacts
         run: |
           set -e
@@ -122,7 +119,7 @@ jobs:
           fi
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
 
-      - name: Publish live branch (safe)
+      - name: Publish live branch
         if: ${{ steps.diff.outputs.changed == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -131,13 +128,10 @@ jobs:
           set -e
           git config user.email "runner@local"
           git config user.name  "CI Bot"
-
           git fetch --depth=1 origin "${LIVE_BRANCH}" || true
           git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" || git checkout -B "${LIVE_BRANCH}"
-
           mkdir -p data
           cp -f /tmp/live10/outlook_intraday.json data/outlook_intraday.json
-
           git add -A
           if git diff --cached --quiet; then
             echo "No changes to commit."
