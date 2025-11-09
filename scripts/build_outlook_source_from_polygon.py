@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Ferrari Dashboard — build_outlook_source_from_polygon.py (R11.1 — safe additions)
+Ferrari Dashboard — build_outlook_source_from_polygon.py (R11.1 — safe network+auth hardened)
 
-What changed (safely, behind flags):
-- 10m "Scalper" mode (OPTIONAL): compute NH/NL/U/D from recent **10m intraday bars**
-  instead of 10-day watermarks. Enable with FD_SCALPER_ENABLE=true
+What changed (safely, behind flags + auth fixes):
+- Polygon authentication now prefers "Authorization: Bearer <POLYGON_API_KEY>" header,
+  and transparently retries once with `?apiKey=` for legacy endpoints to avoid 401/403s.
+- 10m "Scalper" mode (OPTIONAL): compute NH/NL/U/D from recent **10m intraday bars** instead of 10-day watermarks.
+  Enable with FD_SCALPER_ENABLE=true
   • NH = C[-1] > max(H[-L:-1])  (L=FD_SCALPER_LOOKBACK, default 5)
   • NL = C[-1] < min(L[-L:-1])
   • U  = C[-3] < C[-2] < C[-1]
@@ -12,14 +14,22 @@ What changed (safely, behind flags):
 
 - Hourly intraday lookback (DEFAULT): compute 1-hour counts from recent completed hourly bars
   using the same fast logic (L=FD_HOURLY_LOOKBACK, default 6).
-  If today has fewer than `L` completed 1h bars, fall back to the **last L completed bars overall**
-  (fixes all-zero cards early in session). Disable with FD_HOURLY_INTRADAY=false.
+  If today has fewer than `L` completed hours, fall back to the last `L` completed hours overall
+  (fixes early-session all-zero hourly cards). Disable with FD_HOURLY_INTRADAY=false.
 
-Everything else remains exactly as before. If you don't set any flags, behavior is unchanged.
+Everything else remains as in your R11 logic. If you don't set any flags, behavior is unchanged.
 """
 
 from __future__ import annotations
-import argparse, csv, json, os, time, math, urllib.request, urllib.error, urllib.parse
+import argparse
+import csv
+import json
+import os
+import time
+import math
+import urllib.request
+import urllib.error
+import urllib.parse
 from datetime import datetime, timedelta, timezone, date
 from typing import Any, Dict, List, Tuple, Optional
 from zoneinfo import ZoneInfo
@@ -53,7 +63,6 @@ MAX_WORKERS = int(os.environ.get("FD_MAX_WORKERS", "16"))
 SNAP_BATCH  = int(os.environ.get("FD_SNAPSHOT_BATCH", "250"))
 SNAP_SLEEP  = float(os.environ.get("FD_SNAPSHOT_PAUSE", "0.05"))
 
-# fallback minute bars window (sane default)
 INTRA_MINUTE_LOOKBACK_MIN = int(os.environ.get("FD_MINUTE_LOOKBACK", "180"))  # last 3h
 
 # ==== NEW (Scalper/1h intraday) ====
@@ -63,12 +72,14 @@ FD_HOURLY_INTRADAY    = os.environ.get("FD_HOURLY_INTRADAY", "true").lower() in 
 FD_HOURLY_LOOKBACK    = max(2, int(os.environ.get("FD_HOURLY_LOOKBACK", "6")))
 # ===================================
 
-# ---------------- HTTP ----------------
-def http_get(url: str, timeout: int = 20) -> str:
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "ferrari-dashboard/1.0", "Accept-Encoding": "gzip"},
-    )
+# ---------------- HTTP (Header-first auth + fallback retry) ----------------
+def http_get(url: str, timeout: int = 22, headers: Optional[Dict[str, str]] = None) -> str:
+    req = urllib.request.Request(url)
+    req.add_header("User-Agent", "ferrari-dashboard/1.0")
+    req.add_header("Accept-Encoding", "gzip")
+    if headers:
+        for k, v in headers.items():
+            req.add_header(k, v)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = resp.read()
         try:
@@ -79,22 +90,43 @@ def http_get(url: str, timeout: int = 20) -> str:
             pass
         return data.decode("utf-8")
 
-def poly_json(url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def poly_json(path_or_url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Robust Polygon GET:
+    - Try Authorization: Bearer first (works for v3/v2).
+    - If 401, retry once with `?apiKey=` (legacy).
+    - Backoff/retry for 429 and 5xx. Raises on final failure.
+    """
     if params is None:
         params = {}
-    if POLY_KEY:
-        params["apiKey"] = POLY_KEY
-    qs   = urllib.parse.urlencode(params)
-    full = f"{url}?{qs}" if qs else url
+    if not POLY_KEY:
+        raise SystemExit("Set POLY_KEY or POLYGON_API_KEY or REACT_APP_POLYGON_KEY")
+
+    base_url = path_or_url if path_or_url.startswith("http") else f"{POLY_BASE}{path_or_url}"
+    qs = urllib.parse.urlencode(params) if params else ""
+
+    url_no_key = f"{base_url}?{qs}" if qs else base_url
+    hdrs = {"Authorization": f"Bearer {POLY_KEY}"}
+
     for attempt in range(1, 5):
         try:
-            raw = http_get(full, timeout=22)
+            raw = http_get(url_no_key, timeout=22, headers=hdrs)
             return json.loads(raw)
+
         except urllib.error.HTTPError as e:
+            if e.code == 401:
+                params2 = dict(params or {})
+                params2["apiKey"] = POLY_KEY
+                qs2 = urllib.parse.urlencode(params2)
+                url_key = f"{base_url}?{qs2}" if qs2 else base_url
+                raw = http_get(url_key, timeout=22, headers=None)
+                return json.loads(raw)
+
             if e.code in (429, 500, 502, 503, 504) and attempt < 4:
                 time.sleep(0.35 * (1.6 ** (attempt - 1)))
                 continue
             raise
+
         except (urllib.error.URLError, TimeoutError):
             if attempt < 4:
                 time.sleep(0.35 * (1.6 ** (attempt - 1)))
@@ -111,7 +143,7 @@ def fetch_range(ticker: str, tf_kind: str, tf_val: int, start: date, end: date, 
     for r in js.get("results", []) or []:
         try:
             out.append({
-                "t": int(r.get("t", 0)),  # may be milliseconds
+                "t": int(r.get("t", 0)),
                 "o": float(r.get("o", 0.0)),
                 "h": float(r.get("h", 0.0)),
                 "l": float(r.get("l", 0.0)),
@@ -128,57 +160,46 @@ def fetch_daily(ticker: str, days: int) -> List[Dict[str, Any]]:
     start = end - timedelta(days=days)
     return fetch_range(ticker, "day", 1, start, end, sort="asc")
 
-def fetch_hourly(ticker: str, hours_back: int = 72) -> List[Dict[str, Any]]:
+def fetch_hourly(ticker: str, hours_back: int = 72) -> List[Dict: Any]:
     end = datetime.now(UTC).date()
     lookback_days = max(7, (hours_back // 6) + 2)
     start = end - timedelta(days=lookback_days)
     return fetch_range(ticker, "hour", 1, start, end, sort="asc")
 
 def fetch_minutes_today(ticker: str, lookback_min: int = INTRA_MINUTE_LOOKBACK_MIN) -> List[Dict[str, Any]]:
-    """Fetch recent minute bars; used only as a snapshot fallback."""
     now_utc = datetime.now(UTC)
     start_utc = now_utc - timedelta(minutes=lookback_min)
     start = start_utc.date()
     end   = now_utc.date()
-    minutes = fetch_range(ticker, "minute", 1, start, end, sort="asc")
-    if not minutes:
+    bars = fetch_range(ticker, "minute", 1, start, end, sort="asc")
+    if not bars: 
         return []
     cutoff_ms = int(start_utc.timestamp() * 1000)
-    return [m for m in minutes if m["t"] >= cutoff_ms]
+    return [b for b in bars if (b.get("t") or 0) >= cutoff_ms]
 
-# ==== NEW helpers (intraday scalper / hourly) ====
+# ==== NEW helpers for intraday/h1 completed buckets ====
 def _today_only(bars: List[Dict[str,Any]], bucket_seconds: int) -> List[Dict[str,Any]]:
-    """Return today's completed bars (drop in-flight bucket)."""
     if not bars: return []
-    def tsec(b):
-        return int(b["t"]/1000.0) if b["t"] > 10**12 else int(b["t"])
+    def tsec(b): return int(b["t"]/1000.0) if b["t"] > 10**12 else int(b["t"])
     today = datetime.now(UTC).date()
-    bs = [b for b in bars if datetime.fromtimestamp(tsec(b), UTC).date()==today]
-    if not bs: return []
-    now = int(time.time()); curr=(now // bucket_seconds) * bucket_seconds
-    last = tsec(bs[-1])
+    today_bars = [b for b in bars if datetime.fromtimestamp(tsec(b), UTC).date()==today]
+    if not today_bars: return []
+    now = int(time.time()); curr = (now // bucket_seconds) * bucket_seconds
+    last = tsec(today_bars[-1])
     if (last // bucket_seconds) * bucket_seconds == curr:
-        bs = bs[:-1]
-    return bs
+        today_bars = today_bars[:-1]
+    return today_bars
 
 def _recent_completed(bars: List[Dict[str,Any]], bucket_seconds: int, need: int) -> List[Dict[str,Any]]:
-    """
-    Always return at least `need` completed bars:
-      - Prefer today's completed bars
-      - If today has < need, fall back to the last `need` completed bars overall
-    """
-    if not bars:
-        return []
-    def tsec(b):
-        return int(b["t"]/1000.0) if b["t"] > 10**12 else int(b["t"])
+    if not bars: return []
+    def tsec(b): return int(b["t"]/1000.0) if b["t"] > 10**12 else int(b["t"])
     out = list(bars)
-    now = int(time.time()); curr=(now // bucket_seconds) * bucket_seconds
+    now = int(time.time()); curr=(now // bucket_seconds)*bucket_seconds
     if out:
         last = tsec(out[-1])
         if (last // bucket_seconds) * bucket_seconds == curr:
             out = out[:-1]
-    if not out:
-        return []
+    if not out: return []
     today = datetime.now(UTC).date()
     todays = [b for b in out if datetime.fromtimestamp(tsec(b), UTC).date()==today]
     if len(todays) >= need:
@@ -186,7 +207,6 @@ def _recent_completed(bars: List[Dict[str,Any]], bucket_seconds: int, need: int)
     return out[-need:]
 
 def _fast_flags_from_bars(bars: List[Dict[str,Any]], lookback: int) -> Tuple[int,int,int,int]:
-    """NH/NL/U/D from recent bars (intraday scalper logic)."""
     if len(bars) < max(lookback, 3): return 0,0,0,0
     H = [float(b["h"]) for b in bars]
     L = [float(b["l"]) for b in bars]
@@ -198,9 +218,8 @@ def _fast_flags_from_bars(bars: List[Dict[str,Any]], lookback: int) -> Tuple[int
     u3 = int(C[-3] < C[-2] < C[-1])
     d3 = int(C[-3] > C[-2] > C[-1])
     return nh, nl, u3, d3
-# ================================================
 
-# ---------------- SECTORS CSV ----------------
+# ---------------- GROUPS CSV ----------------
 def read_symbols(path: str) -> List[str]:
     syms: List[str] = []
     with open(path, newline="", encoding="utf-8-sig") as f:
@@ -226,7 +245,7 @@ def discover_sectors(sectors_dir: str) -> Dict[str, List[str]]:
         raise SystemExit(f"No sector CSVs found in {sectors_dir}.")
     return sectors
 
-# ---------------- FLAG COMPUTATIONS (legacy daily/10-day) ----------------
+# ---------------- PER-SECTOR COMPUTATIONS (unchanged + intraday) ----------------
 def compute_flags_from_bars(bars: List[Dict[str, Any]]) -> Tuple[int, int, int, int]:
     if len(bars) < 11:
         return 0, 0, 0, 0
@@ -254,7 +273,98 @@ def compute_intraday_from_snap(H10, L10, c2, c1, day_high, day_low, last_px) -> 
     d3 = int((c1 is not None and c2 is not None and c1 < c2) and (last_px is not None and last_px <= c1))
     return nh, nl, u3, d3
 
-# ---------------- LUX PSI + VOL/LIQ (unchanged) ----------------
+def fetch_daily_wrapper(sym: str) -> Tuple[str, List[Dict[str,Any]]]:
+    return fetch_daily(sym, 22)[-12:], sym
+
+def build_counts_intraday10_from_universe(
+    sector_map: Dict[str, List[str]],
+    wm: Dict[str, Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]],
+    snaps: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, int]]:
+    results: Dict[str, Dict[str, int]] = {}
+    for sector, symbols in sector_map.items():
+        c = {"nh": 0, "nl": 0, "u": 0, "d": 0}
+        for sym in symbols:
+            H10, L10, c2, c1 = wm.get(sym, (None, None, None, None))
+            s = snaps.get(sym, {}) or {}
+            day        = s.get("day") or {}
+            last_trade = s.get("lastTrade") or {}
+            last_quote = s.get("lastQuote") or {}
+
+            day_high   = day.get("h")
+            day_low    = day.get("l")
+            last_px    = last_trade.get("p") or last_quote.get("p")
+            need_minute = False
+
+            if day_high is None or day_low is None or last_px is None:
+                need_minute = True
+
+            if need_minute:
+                mins = fetch_minutes_today(sym)
+                if mins:
+                    if day_high is None:
+                        day_high = max(m["h"] for m in mins)
+                    if day_low is None:
+                        day_low  = min(m["l"] for m in mins)
+                    last_px = mins[-1]["c"]
+
+            nh, nl, u3, d3 = compute_intraday_from_snap(H10, L10, c2, c1, day_high, day_low, last_px)
+            c["nh"] += nh; c["nl"] += nl; c["u"] += u3; c["d"] += d3
+        results[sector] = c
+    return results
+
+# ==== NEW: fast 10m scalper counts (optional) ====
+def build_counts_intraday10_scalper(sector_map: Dict[str, List[str]], lookback_bars: int) -> Dict[str, Dict[str,int]]:
+    results: Dict[str, Dict[str, int]] = {}
+    end = datetime.now(UTC).date()
+    start = end - timedelta(days=2)
+    for sector, symbols in sector_map.items():
+        c = {"nh":0,"nl":0,"u":0,"d":0}
+        uniq = sorted(set(symbols))
+        for i, sym in enumerate(uniq):
+            bars = fetch_range(sym, "minute", 10, start, end, sort="asc")
+            bars_today = _today_only(bars, bucket_seconds=600)
+            nh, nl, u3, d3 = _fast_flags_from_bars(bars_today, lookback_bars)
+            c["nh"] += nh; c["nl"] += nl; c["u"] += u3; c["d"] += d3
+            if (i+1) % 25 == 0:
+                time.sleep(0.02)
+        results[sector] = c
+    return results
+
+def build_counts_daily(symbols: List[str]) -> Dict[str, int]:
+    c = {"nh": 0, "nl": 0, "u": 0, "d": 0}
+    for i, sym in enumerate(symbols):
+        bars = fetch_daily(sym, 22)[-12:]
+        nh, nl, u3, d3 = compute_flags_from_bars(bars)
+        c["nh"] += nh; c["nl"] += nl; c["u"] += u3; c["d"] += d3
+        if (i + 1) % 25 == 0:
+            time.sleep(0.03)
+    return c
+
+def build_counts_hourly(symbols: List[str]) -> Dict[str, int]:
+    c = {"nh": 0, "nl": 0, "u": 0, "d": 0}
+    for i, sym in enumerate(symbols):
+        bars_h = fetch_hourly(sym, hours_back=120)[-12:]
+        nh, nl, u3, d3 = compute_flags_from_bars(bars_h)
+        c["nh"] += nh; c["nl"] += nl; c["u"] += u3; c["d"] += d3
+        if (i + 1) % 25 == 0:
+            time.sleep(0.03)
+    return c
+
+def build_counts_hourly_intraday(symbols: List[str], lookback_bars: int) -> Dict[str,int]:
+    c = {"nh":0,"nl":0,"u":0,"d":0}
+    end = datetime.now(UTC).date()
+    start = end - timedelta(days=7)
+    for i, sym in enumerate(symbols):
+        all_bars = fetch_range(sym, "hour", 1, start, end, sort="asc")
+        recent = _recent_completed(all_bars, bucket_seconds=3600, need=lookback_bars)
+        nh, nl, u3, d3 = _fast_flags_from_bars(recent, lookback_bars)
+        c["nh"] += nh; c["nl"] += nl; c["u"] += u3; c["d"] += d3
+        if (i+1) % 25 == 0:
+            time.sleep(0.02)
+    return c
+
+# ---------------- LUX/Vol/Global (unchanged) ----------------
 def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
     if not closes or len(closes) < max(5, length + 2):
         return None
@@ -275,7 +385,7 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
     num = sum((x - xbar) * (y - ybar) for x, y in zip(xs, win))
     den = (sum((x - xbar) ** 2 for x in xs) * sum((y - ybar) ** 2 for y in win)) or 1.0
     r = num / math.sqrt(den)
-    psi = -50.0 * r + 50.0
+    psi = -50.0 * r + 50
     return float(max(0.0, min(100.0, psi)))
 
 def true_range(h: float, l: float, c_prev: float) -> float:
@@ -284,7 +394,7 @@ def true_range(h: float, l: float, c_prev: float) -> float:
 def atr14_percent(closes: List[float], highs: List[float], lows: List[float]) -> Optional[float]:
     if len(closes) < 20:
         return None
-    trs = [true_range(highs[i], lows[i], closes[i - 1]) for i in range(1, len(closes))]
+    trs = [true_range(highs[i], lows[i], closes[i-1]) for i in range(1, len(closes))]
     period = 14
     if len(trs) < period:
         return None
@@ -320,189 +430,16 @@ def liquidity_pct_from_series(vols: List[float]) -> int:
     ratio = (avgv5 / avgv20) * 100.0
     return int(round(max(0.0, min(120.0, ratio))))
 
-# ---------------- PER-SECTOR BUILDERS ----------------
-def fetch_daily_12(sym: str) -> Tuple[str, List[Dict[str, Any]]]:
-    bars = fetch_daily(sym, 22)[-12:]
-    return sym, bars
-
-def watermarks_last_10d_concurrent(symbols: List[str]) -> Dict[str, Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]]:
-    """Precompute prior 10-day H/L (excluding today) + last two closes for the entire universe."""
-    out: Dict[str, Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]] = {}
-    if not symbols:
-        return out
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futs = [ex.submit(fetch_daily_12, s) for s in symbols]
-        for fut in as_completed(futs):
-            sym, bars = fut.result()
-            if len(bars) >= 3:
-                highs = [b["h"] for b in bars]
-                lows  = [b["l"] for b in bars]
-                closes= [b["c"] for b in bars]
-                highs_ex = highs[:-1] if len(highs) > 1 else highs
-                lows_ex  = lows[:-1]  if len(lows)  > 1 else lows
-                H10 = max(highs_ex[-10:]) if len(highs_ex) >= 10 else (max(highs_ex) if highs_ex else None)
-                L10 = min(lows_ex[-10:])  if len(lows_ex)  >= 10 else (min(lows_ex)  if lows_ex  else None)
-                out[sym] = (H10, L10, closes[-2], closes[-1])
-            else:
-                out[sym] = (None, None, None, None)
-    return out
-
-def batch_snapshots(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-    snaps: Dict[str, Dict[str, Any]] = {}
-    if not symbols:
-        return snaps
-    for i in range(0, len(symbols), SNAP_BATCH):
-        batch = symbols[i:i + SNAP_BATCH]
-        js = poly_json(
-            f"{POLY_BASE}/v2/snapshot/locale/us/markets/stocks/tickers",
-            {"tickers": ",".join(batch)}
-        )
-        for row in js.get("tickers", []) or []:
-            t = row.get("ticker")
-            if t:
-                snaps[t] = row
-        time.sleep(SNAP_SLEEP)
-    return snaps
-
-def build_counts_intraday10_from_universe(
-    sector_map: Dict[str, List[str]],
-    wm: Dict[str, Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]],
-    snaps: Dict[str, Dict[str, Any]],
-) -> Dict[str, Dict[str, int]]:
-    """DEFAULT intraday10: use snapshot + minute fallback vs prior 10-day watermarks."""
-    results: Dict[str, Dict[str, int]] = {}
-    for sector, symbols in sector_map.items():
-        c = {"nh": 0, "nl": 0, "u": 0, "d": 0}
-        for sym in symbols:
-            H10, L10, c2, c1 = wm.get(sym, (None, None, None, None))
-            s = snaps.get(sym, {}) or {}
-            day        = s.get("day") or {}
-            last_trade = s.get("lastTrade") or {}
-            last_quote = s.get("lastQuote") or {}
-
-            day_high   = day.get("h")
-            day_low    = day.get("l")
-            last_px    = last_trade.get("p") or last_quote.get("p")
-            need_minute = False
-
-            if day_high is None or day_low is None or last_px is None:
-                need_minute = True
-
-            if need_minute:
-                mins = fetch_minutes_today(sym)
-                if mins:
-                    if day_high is None:
-                        day_high = max(m["h"] for m in mins)
-                    if day_low is None:
-                        day_low  = min(m["l"] for m in mins)
-                    last_px = mins[-1]["c"]
-
-            nh, nl, u3, d3 = compute_intraday_from_snap(H10, L10, c2, c1, day_high, day_low, last_px)
-            c["nh"] += nh; c["nl"] += nl; c["u"] += u3; c["d"] += d3
-        results[sector] = c
-    return results
-
-# ==== NEW: fast 10m scalper counts (optional) ====
-def build_counts_intraday10_scalper(sector_map: Dict[str, List[str]], lookback_bars: int) -> Dict[str, Dict[str,int]]:
-    """Compute NH/NL/U/D from today's completed 10m bars with a small lookback L."""
-    results: Dict[str, Dict[str, int]] = {}
-    end = datetime.now(UTC).date()
-    start = end - timedelta(days=2)
-    for sector, symbols in sector_map.items():
-        c = {"nh":0,"nl":0,"u":0,"d":0}
-        for i, sym in enumerate(symbols):
-            bars = fetch_range(sym, "minute", 10, start, end, sort="asc")  # 10m bars via aggregates
-            bars_today = _today_only(bars, bucket_seconds=600)
-            nh, nl, u3, d3 = _fast_flags_from_bars(bars_today, lookback_bars)
-            c["nh"] += nh; c["nl"] += nl; c["u"] += u3; c["d"] += d3
-            if (i+1) % 25 == 0: time.sleep(0.02)
-        results[sector] = c
-    return results
-
-def build_counts_daily(symbols: List[str]) -> Dict[str, int]:
-    c = {"nh": 0, "nl": 0, "u": 0, "d": 0}
-    for i, sym in enumerate(symbols):
-        bars = fetch_daily(sym, 22)[-12:]
-        nh, nl, u3, d3 = compute_flags_from_bars(bars)
-        c["nh"] += nh; c["nl"] += nl; c["u"] += u3; c["d"] += d3
-        if (i + 1) % 25 == 0:
-            time.sleep(0.03)
-    return c
-
-def build_counts_hourly(symbols: List[str]) -> Dict[str, int]:
-    """Legacy hourly (10-bar H/L/D/U on 1-hour bars)."""
-    c = {"nh": 0, "nl": 0, "u": 0, "d": 0}
-    for i, sym in enumerate(symbols):
-        bars_h = fetch_hourly(sym, hours_back=120)[-12:]
-        nh, nl, u3, d3 = compute_flags_from_bars(bars_h)
-        c["nh"] += nh; c["nl"] += nl; c["u"] += u3; c["d"] += d3
-        if (i + 1) % 25 == 0:
-            time.sleep(0.03)
-    return c
-
-# ==== NEW: hourly intraday counts (default ON) ====
-def build_counts_hourly_intraday(symbols: List[str], lookback_bars: int) -> Dict[str,int]:
-    """
-    Hourly NH/NL/U/D from recent completed 1-hour bars (intraday).
-    Prefers today's completed hours; if fewer than `lookback_bars`, falls back
-    to the last `lookback_bars` completed hours overall.
-    """
-    c = {"nh":0,"nl":0,"u":0,"d":0}
-    end = datetime.now(UTC).date()
-    start = end - timedelta(days=7)
-    for i, sym in enumerate(symbols):
-        all_bars = fetch_range(sym, "hour", 1, start, end, sort="asc")
-        recent = _recent_completed(all_bars, bucket_seconds=3600, need=lookback_bars)
-        nh, nl, u3, d3 = _fast_flags_from_bars(recent, lookback_bars)
-        c["nh"] += nh; c["nl"] += nl; c["u"] += u3; c["d"] += d3
-        if (i+1) % 25 == 0: time.sleep(0.02)
-    return c
-# ================================================
-
-# ---------------- GLOBAL FIELDS (unchanged) ----------------
-def compute_global_fields() -> Dict[str, Any]:
-    bars = fetch_daily("SPY", 260)
-    closes = [b.get("c", 0.0) for b in bars]
-    highs  = [b.get("h", 0.0) for b in bars]
-    lows   = [b.get("l", 0.0) for b in bars]
-    vols   = [b.get("v", 0.0) for b in bars]
-
-    psi = lux_psi_from_closes(closes, conv=50, length=20)
-    if psi is None:
-        psi = 50.0
-
-    last_up = len(closes) >= 2 and (closes[-1] > closes[-2])
-    if psi >= 80:
-        state = "firingUp" if last_up else "firingDown"
-    elif psi < 50:
-        state = "on"
-    else:
-        state = "none"
-
-    psi_daily = lux_psi_from_closes(closes, conv=50, length=20) or 50.0
-    vol_pct   = volatility_pct_from_series(closes, highs, lows)
-    liq_pct   = liquidity_pct_from_series(vols)
-
-    return {
-        "squeeze_pressure_pct": int(round(float(psi))),
-        "squeeze_state": state,
-        "daily_squeeze_pct": float(round(psi_daily, 2)),
-        "volatility_pct": int(vol_pct),
-        "liquidity_pct": int(liq_pct),
-    }
-
-# ---------------- GROUPS ORCHESTRATOR ----------------
+# ---------------- ORCHESTRATOR ----------------
 def build_groups(mode: str, sectors: Dict[str, List[str]]) -> Dict[str, Dict[str, Any]]:
     groups: Dict[str, Dict[str, Any]] = {}
 
     if mode == "intraday10":
-        # ==== NEW: optional scalper mode ====
         if FD_SCALPER_ENABLE:
             for sector, symbols in sectors.items():
                 uniq = sorted(set(symbols))
                 groups[sector] = build_counts_intraday10_scalper({sector: uniq}, FD_SCALPER_LOOKBACK)[sector]
             return groups
-        # ==== default (existing) path ====
         universe = sorted(set(sym for lst in sectors.values() for sym in lst))
         wm    = watermarks_last_10d_concurrent(universe)
         snaps = batch_snapshots(universe)
@@ -514,13 +451,11 @@ def build_groups(mode: str, sectors: Dict[str, List[str]]) -> Dict[str, Dict[str
             }
         return groups
 
-    # hourly / daily (per-sector scans)
     for sector, symbols in sectors.items():
         uniq = list(sorted(set(symbols)))
         if mode == "daily":
             cnt = build_counts_daily(uniq)
         elif mode == "hourly":
-            # ==== NEW: default to intraday hourly fast logic (can disable) ====
             if FD_HOURLY_INTRADAY:
                 cnt = build_counts_hourly_intraday(uniq, FD_HOURLY_LOOKBACK)
             else:
@@ -573,8 +508,7 @@ def main():
         "meta": {
             "build_secs": round(time.time() - t0, 2),
             "universe": sum(len(v) for v in sectors.values()),
-            "minute_fallback": True,   # indicates R11 lineage
-            # ==== NEW: trace toggles for transparency ====
+            "minute_fallback": True,
             "scalper": bool(FD_SCALPER_ENABLE) if args.mode=="intraday10" else False,
             "scalper_lookback": FD_SCALPER_LOOKBACK if args.mode=="intraday10" else None,
             "hourly_intraday": bool(FD_HOURLY_INTRADAY) if args.mode=="hourly" else False,
