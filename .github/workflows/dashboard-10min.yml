@@ -4,10 +4,10 @@ on:
   workflow_dispatch: {}
   schedule:
     # US market window in UTC (Mon–Fri):
-    # Start 2h before open (07:30 ET = 12:30 UTC during Standard Time)
+    # Start 2h before open (07:30 ET ≈ 12:30 UTC during Standard Time)
     - cron: "30-55/5 12 * * 1-5"   # 12:30–12:55 UTC every 5m
     - cron: "*/5 13-23 * * 1-5"    # 13:00–23:55 UTC every 5m
-    # Run through 20:00 ET (01:00 UTC next day, Tue–Sat in UTC)
+    # Through 20:00 ET (01:00 UTC next day, Tue–Sat in UTC)
     - cron: "*/5 0-1 * * 2-6"      # 00:00–01:00 UTC every 5m
 
 jobs:
@@ -75,7 +75,8 @@ jobs:
             --sectors-dir data\sectors ^
             --out data\outlook_source.json
           if errorlevel 1 exit /b 1
-          for /f "tokens=*" %%A in ('powershell -NoProfile -Command "(Get-Content -Raw data\outlook_source.json).Substring(0,[Math]::Min(1200,(Get-Item data\outlook_source.json).Length))"') do @echo %%A
+          rem (optional) preview
+          for /f "tokens=*" %%A in ('powershell -NoProfile -Command "(Get-Content -Raw data\outlook_source.json).Substring(0,[Math]::Min(800,(Get-Item data\outlook_source.json).Length))"') do @echo %%A
 
       # 2) Transform groups → outlook_intraday.json
       - name: Build intraday payload (10m)
@@ -111,7 +112,7 @@ jobs:
           echo ==== VALIDATE outlook_intraday.json ====
           python -u -c "import json,sys; j=json.load(open('data/outlook_intraday.json','r',encoding='utf-8')); m=j.get('metrics') or {}; need=['breadth_10m_pct','momentum_10m_pct','squeeze_pct','liquidity_psi','volatility_pct']; miss=[k for k in need if k not in m]; sc=j.get('sectorCards') or []; sys.exit(1) if miss else None; print('OK metrics & sectors:', len(sc))"
 
-      # 6) Write heartbeat
+      # 6) Write heartbeat (ensures publish churn even on flat data)
       - name: Write heartbeat
         shell: cmd
         run: |
@@ -129,7 +130,7 @@ jobs:
           copy /Y data\heartbeat_10m        publish\heartbeat_10m
           dir publish
 
-      # 8) Detect change vs remote (no publish if identical)
+      # 8) Detect change vs remote (publish if heartbeat OR json changed)
       - name: Detect change vs remote
         id: diff
         shell: cmd
@@ -139,26 +140,37 @@ jobs:
           set CHANGED=true
           if exist _remote_tmp rd /s /q _remote_tmp
           mkdir _remote_tmp
+
           for /f "tokens=*" %%A in ('git ls-remote --heads origin %LIVE_BRANCH% ^| findstr refs/heads/%LIVE_BRANCH%') do set HAVE_BRANCH=1
           if not defined HAVE_BRANCH (
             echo (first publish)
           ) else (
-            git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\outlook_intraday.json" 2>nul || echo (remote file missing)
+            git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\outlook_intraday.json" 2>nul || echo (remote intraday missing)
+            git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\heartbeat_10m"        2>nul || echo (remote heartbeat missing)
+
+            set CHANGED=true
             if exist "_remote_tmp\data\outlook_intraday.json" (
               fc /B publish\outlook_intraday.json "_remote_tmp\data\outlook_intraday.json" >nul 2>&1
-              if "%ERRORLEVEL%"=="0" (
-                echo (no differences) & set CHANGED=false
-              ) else (
-                echo (differences detected) & set CHANGED=true
-              )
+              set JSON_SAME=%ERRORLEVEL%
             ) else (
-              echo (no prior file) & set CHANGED=true
+              set JSON_SAME=1
+            )
+            if exist "_remote_tmp\data\heartbeat_10m" (
+              fc /B publish\heartbeat_10m "_remote_tmp\data\heartbeat_10m" >nul 2>&1
+              set HB_SAME=%ERRORLEVEL%
+            ) else (
+              set HB_SAME=1
+            )
+            if "%JSON_SAME%"=="0" if "%HB_SAME%"=="0" (
+              echo (no differences in intraday or heartbeat) & set CHANGED=false
+            ) else (
+              echo (differences detected) & set CHANGED=true
             )
           )
           echo changed=%CHANGED%>> "%GITHUB_OUTPUT%"
           echo changed=%CHANGED%> change.txt
 
-      # 9) Publish (only when changed)
+      # 9) Publish (only when changed) — always writes BOTH files
       - name: Publish live branch (safe)
         if: ${{ steps.diff.outputs.changed == 'true' }}
         shell: cmd
