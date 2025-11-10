@@ -1,12 +1,12 @@
 name: dashboard-archive-10min
 
 on:
-  # Run automatically after the live 10-minute workflow completes
+  # Auto-run after the live 10-minute workflow completes
   workflow_run:
     workflows: ["dashboard-10min (self-hosted, full)"]
     types: [completed]
 
-  # Allow manual archive runs too
+  # Manual trigger if needed
   workflow_dispatch: {}
 
 jobs:
@@ -18,13 +18,12 @@ jobs:
     env:
       LIVE_BRANCH: data-live-10min
       ARCHIVE_BRANCH: data-archive-10min
-      TZ: America/Phoenix
 
     steps:
-      - name: Check live workflow result
+      - name: Skip if live job failed
         if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success' }}
         run: |
-          echo "Live job did not succeed (conclusion=${{ github.event.workflow_run.conclusion }}). Skipping archive."
+          echo "Live job conclusion=${{ github.event.workflow_run.conclusion }} — skipping archive."
           exit 0
 
       - name: Checkout (shallow)
@@ -35,51 +34,47 @@ jobs:
       - name: Resolve timestamp (Arizona)
         id: ts
         run: |
-          # Phoenix local time for folder names
-          TS_LOCAL=$(date +"%Y-%m-%d %H:%M:%S")
-          DATE_DIR=$(date +"%Y-%m-%d")
-          TIME_DIR=$(date +"%H%M")
-          echo "ts_local=${TS_LOCAL}" >> $GITHUB_OUTPUT
-          echo "date_dir=${DATE_DIR}" >> $GITHUB_OUTPUT
-          echo "time_dir=${TIME_DIR}" >> $GITHUB_OUTPUT
+          TS_LOCAL=$(TZ=America/Phoenix date +"%Y-%m-%d %H:%M:%S")
+          DATE_DIR=$(TZ=America/Phoenix date +"%Y-%m-%d")
+          TIME_DIR=$(TZ=America/Phoenix date +"%H%M")
+          echo "ts_local=${TS_LOCAL}" >> "$GITHUB_OUTPUT"
+          echo "date_dir=${DATE_DIR}" >> "$GITHUB_OUTPUT"
+          echo "time_dir=${TIME_DIR}" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch live branch (data-live-10min)
+      - name: Fetch live branch
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
 
-      - name: Extract live files into /tmp/live
+      - name: Extract latest live files
         run: |
           set -euo pipefail
           mkdir -p /tmp/live
-          # Pull latest files from the live branch tree
           git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/live/outlook_intraday.json
           git show "origin/${LIVE_BRANCH}:data/outlook_source.json"   > /tmp/live/outlook_source.json  || true
           git show "origin/${LIVE_BRANCH}:data/heartbeat_10m.txt"    > /tmp/live/heartbeat_10m.txt    || true
-
-          # Validate we have at least the intraday payload
           test -s /tmp/live/outlook_intraday.json
 
-      - name: Prepare archive workspace
+      - name: Stage archive snapshot
+        id: stage
         run: |
           set -euo pipefail
           ARCH_PATH="data/archives/10min/${{ steps.ts.outputs.date_dir }}/${{ steps.ts.outputs.time_dir }}"
           mkdir -p "${ARCH_PATH}"
           cp -f /tmp/live/outlook_intraday.json "${ARCH_PATH}/outlook_intraday.json"
-          # If optional files exist, include them
           if [ -s /tmp/live/outlook_source.json ]; then cp -f /tmp/live/outlook_source.json "${ARCH_PATH}/outlook_source.json"; fi
           if [ -s /tmp/live/heartbeat_10m.txt ];  then cp -f /tmp/live/heartbeat_10m.txt  "${ARCH_PATH}/heartbeat_10m.txt";  fi
-          echo "Archived folder: ${ARCH_PATH}"
+          echo "arch_path=${ARCH_PATH}" >> "$GITHUB_OUTPUT"
 
       - name: Commit to archive branch
         run: |
           set -euo pipefail
-          # Switch/create archive branch on top of origin if present
+          # Switch/create archive branch
           git fetch --depth=1 origin "${ARCHIVE_BRANCH}" || true
           git checkout -B "${ARCHIVE_BRANCH}" "origin/${ARCHIVE_BRANCH}" || git checkout -B "${ARCHIVE_BRANCH}"
 
           # Add only the new snapshot folder
-          git add -f "data/archives/10min/${{ steps.ts.outputs.date_dir }}/${{ steps.ts.outputs.time_dir }}"
+          git add -f "${{ steps.stage.outputs.arch_path }}"
           git status --porcelain
 
           if git diff --cached --quiet; then
@@ -93,4 +88,5 @@ jobs:
           git push -f origin "${ARCHIVE_BRANCH}"
 
       - name: Done
-        run: echo "::notice:: archived 10m snapshot to ${ARCHIVE_BRANCH}/data/archives/10min/${{ steps.ts.outputs.date_dir }}/${{ steps.ts.outputs.time_dir }}"
+        run: |
+          echo "::notice:: archived 10m snapshot to ${ARCHIVE_BRANCH}/${{ steps.stage.outputs.arch_path }}"
