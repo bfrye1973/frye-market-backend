@@ -245,4 +245,20 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
         return None
     mx = mn = None
     diffs: List[float] = []
-    for src i
+    for src in map(float, closes):
+        mx = src if mx is None else max(mx - (mx - src) / conv, src)
+        mn = src if mn is None else min(mn + (src - mn) / conv, src)
+        span = max(mx - mn, 1e-12)
+        diffs.append(math.log(span))
+    n = length
+    xs = list(range(n))
+    win = diffs[-n:]
+    if len(win) < n:
+        return None
+    xbar = sum(xs) / n
+    ybar = sum(win) / n
+    num = sum((x - xbar) * (y - ybar) for x, y in zip(xs, win))
+    den = (sum((x - xbar) ** 2 for x in xs) * sum((y - ybar) ** 2 for y in win)) or 1.0
+    r = num / math.sqrt(den)
+    psi = -50.0 * r + 50.0
+    return float(max(0.0, min(100.0, psi)))
