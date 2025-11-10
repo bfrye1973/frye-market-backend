@@ -32,7 +32,7 @@ jobs:
       FD_MAX_WORKERS:     "6"
       FD_RETRY_MAX:       "1"
 
-      # ONE-TIME reseed to break any stale branch; set to "false" after you verify
+      # ONE-TIME reseed to break stale branch; set to "false" after verifying updates
       FORCE_PUBLISH: "true"
 
     steps:
@@ -78,7 +78,7 @@ jobs:
           head -n 80 data/outlook_source.json || true
           echo "::notice:: Build hourly groups elapsed: $(( $(date +%s) - $ST ))s"
 
-      # 2) Normalize groups → sectorCards (kept from your working version)
+      # 2) Normalize groups → sectorCards
       - name: Normalize source (groups → sectorCards)
         run: |
           set -euo pipefail
@@ -195,7 +195,7 @@ jobs:
           print("OK: metrics & sectorCards present")
           PY
 
-      # 7) Write heartbeat (text) to ensure branch advances
+      # 7) Write heartbeat to ensure branch movement even when JSON identical
       - name: Write heartbeat
         run: |
           set -euo pipefail
@@ -225,11 +225,10 @@ jobs:
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
           echo "::notice:: changed=${CHANGED}"
 
-      # 9) Publish live branch (force-add tracked files; wipe old data/)
+      # 9) Publish live branch (clean data/, force-add files)
       - name: Publish live branch (safe)
         if: ${{ steps.diff.outputs.changed == 'true' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
           set -euo pipefail
