@@ -3,47 +3,39 @@ name: dashboard-10min (self-hosted)
 on:
   workflow_dispatch: {}
   schedule:
-    # Run every 12 minutes on weekdays (you can change back to */7 when stable)
+    # Run every 12 minutes on weekdays (tighten to */7 after burn-in)
     - cron: "*/12 * * * 1-5"
 
 jobs:
   tenmin:
     name: Build & Publish Intraday (10m – full run, overwrite-safe)
-    # use your Windows self-hosted runner
     runs-on: self-hosted
     timeout-minutes: 30
     concurrency:
       group: dashboard-10min
-      # keep long runs; do not cancel the one already running
       cancel-in-progress: false
 
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
-      # intraday tuning – safe defaults
+      # intraday tuning – start conservative (raise after stable)
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
       FD_LOOKBACK_DAYS: "0"
-      FD_MAX_WORKERS: "6"
-      FD_RETRY_MAX: "0"
-      # secrets for polygon
+      FD_MAX_WORKERS: "3"        # was 6 → reduce to soften 401 spikes
+      FD_RETRY_MAX: "1"
+      # polygon secrets (either one will be used by the script)
       POLY_KEY: ${{ secrets.POLY_KEY }}
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
     steps:
-      # ------------------------------------------------------------------
-      # 0) mark start (helps reading logs) + make sure we are on repo root
-      # ------------------------------------------------------------------
       - name: Start timer (UTC)
         shell: cmd
         run: |
           echo START %DATE% %TIME%
           echo ROOT: %CD%
 
-      # ------------------------------------------------------------------
-      # 1) Checkout repo (shallow); ensure Python is available on runner
-      # ------------------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -54,16 +46,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      # if your scripts need extra modules, uncomment and list them here
-      # - name: Install Python deps
-      #   shell: cmd
-      #   run: |
-      #     python -m pip install --upgrade pip
-      #     pip install -r requirements.txt
+      # NEW: ensure IANA timezones exist on Windows
+      - name: Install tzdata (IANA DB for zoneinfo on Windows)
+        shell: cmd
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade tzdata
 
-      # ------------------------------------------------------------------
-      # 2) Build sectorCards source (10m) – pure cmd so flags are parsed
-      # ------------------------------------------------------------------
       - name: Build sectorCards source (10m)
         shell: cmd
         run: |
@@ -75,9 +64,6 @@ jobs:
             --out data\outlook_source.json
           if errorlevel 1 exit /b 1
 
-      # ------------------------------------------------------------------
-      # 3) Build intraday payload from source
-      # ------------------------------------------------------------------
       - name: Build intraday payload
         shell: cmd
         run: |
@@ -88,9 +74,6 @@ jobs:
             --out data\outlook_intraday.json
           if errorlevel 1 exit /b 1
 
-      # ------------------------------------------------------------------
-      # 4) Compute 10m Lux/Trend + Pills (optional but safe)
-      # ------------------------------------------------------------------
       - name: Compute Lux strategy (10m)
         shell: cmd
         run: |
@@ -103,9 +86,6 @@ jobs:
           python scripts\update_pills_10m_state.py
         continue-on-error: true
 
-      # ------------------------------------------------------------------
-      # 5) Stage files for publish and detect change vs remote
-      # ------------------------------------------------------------------
       - name: Stage artifacts
         shell: cmd
         run: |
@@ -123,7 +103,6 @@ jobs:
           if exist _remote_tmp rd /s /q _remote_tmp
           mkdir _remote_tmp
 
-          rem checkout remote branch tree to compare (or create empty baseline)
           set CHANGED=true
           for /f "tokens=*" %%A in ('git ls-remote --heads origin %LIVE_BRANCH% ^| findstr refs/heads/%LIVE_BRANCH%') do set HAVE_BRANCH=1
           if not defined HAVE_BRANCH (
@@ -131,7 +110,6 @@ jobs:
           ) else (
             echo Checking out remote branch to temp...
             git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\outlook_intraday.json" 2>nul || echo "No remote file (new)."
-            rem compare files if both exist
             if exist "_remote_tmp\data\outlook_intraday.json" (
               fc /B publish\outlook_intraday.json "_remote_tmp\data\outlook_intraday.json" >nul 2>&1
               if "%ERRORLEVEL%"=="0" (
@@ -148,25 +126,20 @@ jobs:
           )
           echo changed=%CHANGED%>change.txt
 
-      # ------------------------------------------------------------------
-      # 6) Publish to data-live-10min only if changed or first run
-      # ------------------------------------------------------------------
       - name: Publish live branch
-        if: ${{ contains( steps.diff.outputs || '', 'placeholder') || true }}
         shell: cmd
         run: |
           for /f "tokens=2 delims==" %%A in (change.txt) do set CHANGED=%%A
           echo CHANGED=%CHANGED%
           if /I "%CHANGED%"=="false" (
-             echo "No content change – skipping publish."
+             echo No content change – skipping publish.
              exit /b 0
           )
 
-          echo "Publishing to %LIVE_BRANCH%..."
+          echo Publishing to %LIVE_BRANCH%...
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
 
-          rem switch to live branch (create if needed)
           git fetch origin %LIVE_BRANCH% || echo creating branch
           git checkout -B %LIVE_BRANCH%
 
@@ -176,14 +149,11 @@ jobs:
           git add data\outlook_intraday.json
           git add data\outlook_source.json
           git commit -m "10m live @ %DATE% %TIME%" || (
-            echo "Nothing to commit (no changes)."
+            echo Nothing to commit (no changes).
             exit /b 0
           )
           git push -f origin %LIVE_BRANCH%
 
-      # ------------------------------------------------------------------
-      # 7) Done
-      # ------------------------------------------------------------------
       - name: Done
         shell: cmd
         run: |
