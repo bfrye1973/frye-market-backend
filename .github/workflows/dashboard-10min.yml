@@ -4,12 +4,11 @@ on:
   workflow_dispatch: {}
   schedule:
     # US market window in UTC (Mon–Fri):
-    # 09:30 ET open; start 2h earlier at 07:30 ET = 12:30 UTC (Standard Time).
-    # After-hours end 20:00 ET = 01:00 UTC next day.
-    # Split into three cron entries to handle minute cadence and day rollover.
-    - cron: "30-55/5 12 * * 1-5"   # 12:30–12:55 UTC every 5m (Mon–Fri)
-    - cron: "*/5 13-23 * * 1-5"    # 13:00–23:55 UTC every 5m (Mon–Fri)
-    - cron: "*/5 0-1 * * 2-6"      # 00:00–01:00 UTC every 5m (Tue–Sat) for 20:00 ET close
+    # Start 2h before open (07:30 ET = 12:30 UTC during Standard Time)
+    - cron: "30-55/5 12 * * 1-5"   # 12:30–12:55 UTC every 5m
+    - cron: "*/5 13-23 * * 1-5"    # 13:00–23:55 UTC every 5m
+    # Run through 20:00 ET (01:00 UTC next day, Tue–Sat in UTC)
+    - cron: "*/5 0-1 * * 2-6"      # 00:00–01:00 UTC every 5m
 
 jobs:
   tenmin:
@@ -23,7 +22,6 @@ jobs:
       cancel-in-progress: false
 
     env:
-      # Timezone + branch
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
@@ -35,7 +33,7 @@ jobs:
       FD_MAX_WORKERS: "3"
       FD_RETRY_MAX: "1"
 
-      # Polygon secrets (either is fine)
+      # Polygon secrets (either works)
       POLY_KEY: ${{ secrets.POLY_KEY }}
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
@@ -59,7 +57,6 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Pure CMD (no heredocs)
       - name: Ensure tzdata (IANA DB for zoneinfo on Windows)
         shell: cmd
         run: |
@@ -78,7 +75,6 @@ jobs:
             --sectors-dir data\sectors ^
             --out data\outlook_source.json
           if errorlevel 1 exit /b 1
-          rem Optional preview of first ~1200 chars for sanity
           for /f "tokens=*" %%A in ('powershell -NoProfile -Command "(Get-Content -Raw data\outlook_source.json).Substring(0,[Math]::Min(1200,(Get-Item data\outlook_source.json).Length))"') do @echo %%A
 
       # 2) Transform groups → outlook_intraday.json
@@ -108,16 +104,12 @@ jobs:
           python -u scripts\update_pills_10m_state.py
         continue-on-error: true
 
-      # 5) Validate structure (Windows-safe, no heredoc)
+      # 5) Validate structure (CMD-safe single line)
       - name: Validate required keys
         shell: cmd
         run: |
           echo ==== VALIDATE outlook_intraday.json ====
-          python -u -c "import json,sys; j=json.load(open('data/outlook_intraday.json','r',encoding='utf-8')); \
-m=j.get('metrics') or {}; need=['breadth_10m_pct','momentum_10m_pct','squeeze_pct','liquidity_psi','volatility_pct']; \
-miss=[k for k in need if k not in m]; sc=j.get('sectorCards') or []; \
-sys.exit(1) if miss else None; \
-print('OK metrics & sectors:', len(sc));"
+          python -u -c "import json,sys; j=json.load(open('data/outlook_intraday.json','r',encoding='utf-8')); m=j.get('metrics') or {}; need=['breadth_10m_pct','momentum_10m_pct','squeeze_pct','liquidity_psi','volatility_pct']; miss=[k for k in need if k not in m]; sc=j.get('sectorCards') or []; sys.exit(1) if miss else None; print('OK metrics & sectors:', len(sc))"
 
       # 6) Write heartbeat
       - name: Write heartbeat
