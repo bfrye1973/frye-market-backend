@@ -22,7 +22,7 @@ jobs:
       LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
 
-      # Tuning for consistency (lighter load, fewer 429s, deterministic)
+      # Tuning
       HOUR_LOOKBACK_DAYS: "10"
       H4_LOOKBACK_DAYS:   "21"
       EMA_FAST:           "8"
@@ -32,7 +32,7 @@ jobs:
       FD_MAX_WORKERS:     "6"
       FD_RETRY_MAX:       "1"
 
-      # ONE-TIME reseed to break the 11/07 freeze. After you confirm updates, set to "false".
+      # ONE-TIME reseed to break any stale branch; set to "false" after you verify
       FORCE_PUBLISH: "true"
 
     steps:
@@ -78,7 +78,7 @@ jobs:
           head -n 80 data/outlook_source.json || true
           echo "::notice:: Build hourly groups elapsed: $(( $(date +%s) - $ST ))s"
 
-      # 2) Normalize groups → sectorCards
+      # 2) Normalize groups → sectorCards (kept from your working version)
       - name: Normalize source (groups → sectorCards)
         run: |
           set -euo pipefail
@@ -91,8 +91,7 @@ jobs:
           except Exception as e:
             print("invalid source:", e); sys.exit(1)
 
-          def pct(a,b):
-              return 0.0 if b==0 else round(100.0*float(a)/float(b),2)
+          def pct(a,b): return 0.0 if b==0 else round(100.0*float(a)/float(b),2)
 
           if "sectorCards" in j and isinstance(j["sectorCards"], list):
               out={"sectorCards": j["sectorCards"]}
@@ -196,9 +195,10 @@ jobs:
           print("OK: metrics & sectorCards present")
           PY
 
-      # 7) Write heartbeat (text) to ensure branch movement even if JSON is identical
+      # 7) Write heartbeat (text) to ensure branch advances
       - name: Write heartbeat
         run: |
+          set -euo pipefail
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h.txt
           cat data/heartbeat_1h.txt
 
@@ -221,7 +221,6 @@ jobs:
               fi
             fi
           fi
-          # one-time reseed to break 11/07 freeze
           if [ "${FORCE_PUBLISH}" = "true" ]; then CHANGED="true"; fi
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
           echo "::notice:: changed=${CHANGED}"
@@ -238,17 +237,22 @@ jobs:
           git config user.name  "CI Bot"
           git fetch --depth=1 origin "${LIVE_BRANCH}" || true
           git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" || git checkout -B "${LIVE_BRANCH}"
+
           rm -rf data || true
           mkdir -p data
+
+          # move files into a clean data/ and force-add (in case .gitignore blocks data/*)
           cp -f data/outlook_hourly.json data/_tmp_hourly.json
           cp -f data/heartbeat_1h.txt  data/_tmp_heartbeat.txt
           rm -rf data
           mkdir -p data
           mv data/_tmp_hourly.json   data/outlook_hourly.json
           mv data/_tmp_heartbeat.txt data/heartbeat_1h.txt
+
           git add -f data/outlook_hourly.json
           git add -f data/heartbeat_1h.txt
           git add -A
+
           if git diff --cached --quiet; then
             echo "no changes to commit"
           else
