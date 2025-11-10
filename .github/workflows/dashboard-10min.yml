@@ -1,4 +1,4 @@
-name: dashboard-10min (self-hosted, rock-solid)
+name: dashboard-10min (self-hosted, forced-fresh)
 
 on:
   workflow_dispatch: {}
@@ -72,8 +72,6 @@ jobs:
             --source data\outlook_source.json ^
             --out data\outlook_intraday.json
           if errorlevel 1 exit /b 1
-          echo ==== LOCAL TIMESTAMPS (composer) ====
-          powershell -NoProfile -Command "(Get-Content -Raw data\outlook_intraday.json)|ConvertFrom-Json|Select updated_at,updated_at_utc"
 
       - name: Compute Lux (safe)
         shell: cmd
@@ -90,14 +88,39 @@ jobs:
         run: |
           python -u -c "import json,sys; j=json.load(open('data/outlook_intraday.json','r',encoding='utf-8')); m=j.get('metrics') or {}; need=['breadth_10m_pct','momentum_10m_pct','squeeze_pct','liquidity_psi','volatility_pct']; miss=[k for k in need if k not in m]; sc=j.get('sectorCards') or []; sys.exit(1) if miss else None; print('OK metrics & sectors:', len(sc))"
 
+      # ******** THE FIX: force fresh timestamps right before publish ********
+      - name: Force fresh timestamp (AZ & UTC)
+        shell: pwsh
+        run: |
+          $path = "data/outlook_intraday.json"
+          if (!(Test-Path $path)) { Write-Error "Missing $path"; exit 1 }
+          $obj  = Get-Content -Raw $path | ConvertFrom-Json
+
+          # Compute times
+          $utcNow = [DateTime]::UtcNow
+          $azTzi  = [TimeZoneInfo]::FindSystemTimeZoneById("US Mountain Standard Time")  # Arizona
+          $azNow  = [TimeZoneInfo]::ConvertTimeFromUtc($utcNow, $azTzi)
+
+          # Overwrite fields unconditionally
+          $obj.updated_at      = $azNow.ToString("yyyy-MM-dd HH:mm:ss")
+          $obj.updated_at_utc  = $utcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $obj.timestamp       = $obj.updated_at_utc
+
+          # Write back with enough depth to keep nested objects intact
+          $json = $obj | ConvertTo-Json -Depth 100 -Compress
+          Set-Content -Path $path -Value $json -Encoding utf8
+
+          Write-Host "FORCED updated_at=" $obj.updated_at " updated_at_utc=" $obj.updated_at_utc
+
       - name: Write heartbeat
         shell: cmd
         run: |
           for /f "tokens=2 delims==" %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
           set HB=%TS:~0,4%-%TS:~4,2%-%TS:~6,2%T%TS:~8,2%:%TS:~10,2%:%TS:~12,2%Z
           echo %HB%> data\heartbeat_10m.txt
+          type data\heartbeat_10m.txt
 
-      - name: Prepare publish set (plus time-keyed copy)
+      - name: Stage artifacts
         shell: cmd
         run: |
           if exist publish rd /s /q publish
@@ -105,13 +128,9 @@ jobs:
           copy /Y data\outlook_intraday.json publish\outlook_intraday.json
           copy /Y data\outlook_source.json   publish\outlook_source.json
           copy /Y data\heartbeat_10m.txt     publish\heartbeat_10m.txt
-          rem make a fresh AZ time-keyed filename to bust caches
-          for /f "tokens=2 delims==." %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
-          set HHMM=%TS:~8,2%%TS:~10,2%
-          copy /Y data\outlook_intraday.json publish\outlook_intraday_az_%HHMM%.json
           dir publish
 
-      - name: Detect change vs remote (heartbeat OR intraday)
+      - name: Detect change vs remote
         id: diff
         shell: cmd
         run: |
@@ -137,7 +156,7 @@ jobs:
               set HB_SAME=%ERRORLEVEL%
             )
             if "%JSON_SAME%"=="0" if "%HB_SAME%"=="0" (
-              echo (no differences in intraday or heartbeat) & set CHANGED=false
+              echo (no differences) & set CHANGED=false
             ) else (
               echo (differences detected) & set CHANGED=true
             )
@@ -155,37 +174,24 @@ jobs:
           git fetch --depth=1 origin %LIVE_BRANCH% || echo (creating)
           git checkout -B %LIVE_BRANCH% "origin/%LIVE_BRANCH%" || git checkout -B %LIVE_BRANCH%
 
-          rem write data/, never publish/
           if exist data rd /s /q data
           mkdir data
           copy /Y publish\outlook_intraday.json data\outlook_intraday.json
           copy /Y publish\outlook_source.json   data\outlook_source.json
           copy /Y publish\heartbeat_10m.txt     data\heartbeat_10m.txt
-          copy /Y publish\outlook_intraday_az_*.json data\
 
-          rem version stamp for dashboards/tools
-          for /f "tokens=2 delims==." %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
-          set AZ_ISO=%TS:~0,4%-%TS:~4,2%-%TS:~6,2% %TS:~8,2%:%TS:~10,2%:%TS:~12,2%
-          git rev-parse HEAD > NUL
           git add -f data\outlook_intraday.json
           git add -f data\outlook_source.json
           git add -f data\heartbeat_10m.txt
-          git add -f data\outlook_intraday_az_*.json
-
-          rem write version file (sha printed after commit)
-          echo AZ=%AZ_ISO%> data\version_10m.txt
-          git add -f data\version_10m.txt
 
           git commit -m "10m publish %START_TS%" || (echo (nothing to commit) & exit /b 0)
           git push -f origin %LIVE_BRANCH%
-          echo ==== PUSHED ====
 
-          rem show HEAD sha and timestamps from branch (proof)
+          rem Print HEAD SHA and timestamps as proof
           git fetch origin %LIVE_BRANCH% --depth=1
           for /f "tokens=1" %%S in ('git rev-parse origin/%LIVE_BRANCH%') do set HEADSHA=%%S
           echo HEAD_SHA=%HEADSHA%
           powershell -NoProfile -Command "(git show origin/%LIVE_BRANCH%:data/outlook_intraday.json)|ConvertFrom-Json|Select updated_at,updated_at_utc"
-          type data\version_10m.txt
 
       - name: Done
         shell: cmd
