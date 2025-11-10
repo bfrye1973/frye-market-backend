@@ -3,12 +3,8 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Run every 40 minutes on weekdays (UTC). Pattern will be :00 → :40 → :20 → :00 …
+    # Run every 40 minutes on weekdays (UTC). Pattern: :00 → :40 → :20 → :00 …
     - cron: "*/40 * * * 1-5"
-
-defaults:
-  run:
-    shell: bash
 
 jobs:
   build_and_publish_hourly:
@@ -36,6 +32,9 @@ jobs:
       FD_MAX_WORKERS:     "6"
       FD_RETRY_MAX:       "1"
 
+      # ONE-TIME reseed to break the 11/07 freeze. After you confirm updates, set to "false".
+      FORCE_PUBLISH: "true"
+
     steps:
       # ---------- T0 ----------
       - name: Start timer (UTC)
@@ -59,12 +58,15 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          pip install requests python-dateutil
+          pip install requests python-dateutil tzdata
 
       # 1) Build hourly groups → data/outlook_source.json
       - name: Build sectorCards source (hourly groups)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLY_KEY:        ${{ secrets.POLY_KEY }}
+          FD_MAX_WORKERS:  ${{ env.FD_MAX_WORKERS }}
+          FD_RETRY_MAX:    ${{ env.FD_RETRY_MAX }}
         run: |
           set -euo pipefail
           ST=$(date +%s)
@@ -194,26 +196,37 @@ jobs:
           print("OK: metrics & sectorCards present")
           PY
 
+      # 7) Write heartbeat (text) to ensure branch movement even if JSON is identical
       - name: Write heartbeat
-        run: date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h.txt
+          cat data/heartbeat_1h.txt
 
-      # 7) Publish only when changed
+      # 8) Detect change (publish if JSON OR heartbeat changed)
       - name: Detect change
         id: diff
         env:
           LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
+          FORCE_PUBLISH: ${{ env.FORCE_PUBLISH }}
         run: |
           set -euo pipefail
           CHANGED="true"
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
             git show "origin/${LIVE_BRANCH}:data/outlook_hourly.json" > /tmp/prev.json 2>/dev/null || true
+            git show "origin/${LIVE_BRANCH}:data/heartbeat_1h.txt"  > /tmp/prev.hb  2>/dev/null || true
             if [ -s /tmp/prev.json ] && cmp -s /tmp/prev.json data/outlook_hourly.json; then
-              CHANGED="false"
+              if [ -s /tmp/prev.hb ] && cmp -s /tmp/prev.hb data/heartbeat_1h.txt; then
+                CHANGED="false"
+              fi
             fi
           fi
+          # one-time reseed to break 11/07 freeze
+          if [ "${FORCE_PUBLISH}" = "true" ]; then CHANGED="true"; fi
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "::notice:: changed=${CHANGED}"
 
+      # 9) Publish live branch (force-add tracked files; wipe old data/)
       - name: Publish live branch (safe)
         if: ${{ steps.diff.outputs.changed == 'true' }}
         env:
@@ -225,16 +238,23 @@ jobs:
           git config user.name  "CI Bot"
           git fetch --depth=1 origin "${LIVE_BRANCH}" || true
           git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" || git checkout -B "${LIVE_BRANCH}"
-          mkdir -p /tmp/push
-          cp -f data/outlook_hourly.json /tmp/push/outlook_hourly.json
-          cp -f data/heartbeat_1h      /tmp/push/heartbeat_1h
-          git rm -rf data || true
+          rm -rf data || true
           mkdir -p data
-          mv /tmp/push/* data/
+          cp -f data/outlook_hourly.json data/_tmp_hourly.json
+          cp -f data/heartbeat_1h.txt  data/_tmp_heartbeat.txt
+          rm -rf data
+          mkdir -p data
+          mv data/_tmp_hourly.json   data/outlook_hourly.json
+          mv data/_tmp_heartbeat.txt data/heartbeat_1h.txt
+          git add -f data/outlook_hourly.json
+          git add -f data/heartbeat_1h.txt
           git add -A
           if git diff --cached --quiet; then
             echo "no changes to commit"
-          else:
-            git commit -m "hourly publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          else
+            git commit -m "hourly publish ${START_TS}"
             git push -f origin "${LIVE_BRANCH}"
           fi
+
+      - name: Done
+        run: echo "::notice:: hourly job completed"
