@@ -4,11 +4,10 @@ on:
   workflow_dispatch: {}
   schedule:
     # US market window in UTC (Mon–Fri):
-    # Start 2h before open (07:30 ET ≈ 12:30 UTC during Standard Time)
+    # Start 2h before open (07:30 ET ≈ 12:30 UTC in Standard Time), run through 20:00 ET (01:00 UTC next day).
     - cron: "30-55/5 12 * * 1-5"   # 12:30–12:55 UTC every 5m
     - cron: "*/5 13-23 * * 1-5"    # 13:00–23:55 UTC every 5m
-    # Through 20:00 ET (01:00 UTC next day, Tue–Sat in UTC)
-    - cron: "*/5 0-1 * * 2-6"      # 00:00–01:00 UTC every 5m
+    - cron: "*/5 0-1 * * 2-6"      # 00:00–01:00 UTC every 5m (covers 20:00 ET)
 
 jobs:
   tenmin:
@@ -36,6 +35,9 @@ jobs:
       # Polygon secrets (either works)
       POLY_KEY: ${{ secrets.POLY_KEY }}
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+
+      # TEMP: force one clean publish to reseed BOTH files (set to "false" after you verify)
+      FORCE_PUBLISH: "true"
 
     steps:
       # ---------- T0 ----------
@@ -112,13 +114,14 @@ jobs:
           echo ==== VALIDATE outlook_intraday.json ====
           python -u -c "import json,sys; j=json.load(open('data/outlook_intraday.json','r',encoding='utf-8')); m=j.get('metrics') or {}; need=['breadth_10m_pct','momentum_10m_pct','squeeze_pct','liquidity_psi','volatility_pct']; miss=[k for k in need if k not in m]; sc=j.get('sectorCards') or []; sys.exit(1) if miss else None; print('OK metrics & sectors:', len(sc))"
 
-      # 6) Write heartbeat (ensures publish churn even on flat data)
+      # 6) Write heartbeat (ensures branch advances even on flat data)
       - name: Write heartbeat
         shell: cmd
         run: |
           for /f "tokens=2 delims==" %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
           set HB=%TS:~0,4%-%TS:~4,2%-%TS:~6,2%T%TS:~8,2%:%TS:~10,2%:%TS:~12,2%Z
           echo %HB%> data\heartbeat_10m
+          type data\heartbeat_10m
 
       # 7) Stage artifacts
       - name: Stage artifacts
@@ -167,10 +170,15 @@ jobs:
               echo (differences detected) & set CHANGED=true
             )
           )
+
+          rem ONE-TIME FORCE to reseed both JSON files on the live branch
+          if /I "%FORCE_PUBLISH%"=="true" set CHANGED=true
+
           echo changed=%CHANGED%>> "%GITHUB_OUTPUT%"
           echo changed=%CHANGED%> change.txt
+          echo DIFF_CHANGED=%CHANGED%
 
-      # 9) Publish (only when changed) — always writes BOTH files
+      # 9) Publish (only when changed) — always writes BOTH files; force-add source even if ignored
       - name: Publish live branch (safe)
         if: ${{ steps.diff.outputs.changed == 'true' }}
         shell: cmd
@@ -180,14 +188,20 @@ jobs:
           git config user.name  "CI Bot"
           git fetch --depth=1 origin %LIVE_BRANCH% || echo (creating)
           git checkout -B %LIVE_BRANCH% "origin/%LIVE_BRANCH%" || git checkout -B %LIVE_BRANCH%
+
           if exist data rd /s /q data
           mkdir data
           copy /Y publish\outlook_source.json   data\outlook_source.json
           copy /Y publish\outlook_intraday.json data\outlook_intraday.json
           copy /Y publish\heartbeat_10m        data\heartbeat_10m
+
+          rem If .gitignore blocks outlook_source.json, force-add it explicitly.
+          git add -f data\outlook_source.json
           git add -A
+
           git commit -m "10m publish %START_TS%" || (echo (nothing to commit) & exit /b 0)
           git push -f origin %LIVE_BRANCH%
+          echo ==== PUBLISHED ====
 
       - name: Done
         shell: cmd
