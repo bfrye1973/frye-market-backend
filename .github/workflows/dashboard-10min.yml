@@ -1,120 +1,220 @@
-name: dashboard-10min (self-hosted, clean rebuild)
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+make_dashboard.py — compose dashboard payloads (intraday / hourly / eod)
 
-on:
-  workflow_dispatch: {}
-  schedule:
-    - cron: "30-55/5 12 * * 1-5"
-    - cron: "*/5 13-23 * * 1-5"
-    - cron: "*/5 0-1 * * 2-6"
+This version fixes:
+1) 10-minute sectorCards not updating when the source only had `groups`.
+2) Timestamps shown in Arizona local time (America/Phoenix), while also
+   keeping an `updated_at_utc` field for auditing.
 
-jobs:
-  tenmin:
-    name: Build & Publish Intraday (10m)
-    runs-on: self-hosted
-    timeout-minutes: 30
-    permissions:
-      contents: write
-    concurrency:
-      group: dashboard-10min
-      cancel-in-progress: false
+Inputs (via --source):
+  - data/outlook_source.json  (built by build_outlook_source_from_polygon.py)
 
-    env:
-      TZ: America/Phoenix
-      LIVE_BRANCH: data-live-10min
-      PYTHONUNBUFFERED: "1"
-      FD_SCALPER_ENABLE: "true"
-      FD_SCALPER_LOOKBACK: "3"
-      FD_LOOKBACK_DAYS: "0"
-      FD_MAX_WORKERS: "3"
-      FD_RETRY_MAX: "1"
-      POLY_KEY: ${{ secrets.POLY_KEY }}
-      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+Outputs (via --out):
+  - data/outlook_intraday.json   when --mode intraday
+  - (other modes unchanged)
 
-    steps:
-      - name: Start timer (UTC)
-        shell: cmd
-        run: |
-          for /f "tokens=2 delims==" %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
-          set START_TS=%TS:~0,4%-%TS:~4,2%-%TS:~6,2%T%TS:~8,2%:%TS:~10,2%:%TS:~12,2%Z
-          echo ==== START %START_TS%
+Schema guarantees:
+  top-level:
+    updated_at (America/Phoenix), updated_at_utc (UTC), mode, metrics, sectorCards
+  metrics include (safe fallbacks if unknown):
+    breadth_10m_pct, momentum_10m_pct, squeeze_pct, liquidity_psi, volatility_pct
+"""
 
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+from __future__ import annotations
+import json, sys, os, argparse
+from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+PHX = ZoneInfo("America/Phoenix")
+UTC = timezone.utc
 
-      - name: Ensure tzdata
-        shell: cmd
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install --upgrade tzdata
+def now_phx_iso() -> str:
+    return datetime.now(PHX).replace(microsecond=0).isoformat(sep=' ')
 
-      - name: Build source
-        shell: cmd
-        run: |
-          if not exist data mkdir data
-          python -u scripts\build_outlook_source_from_polygon.py ^
-            --mode intraday10 ^
-            --sectors-dir data\sectors ^
-            --out data\outlook_source.json
-          if errorlevel 1 exit /b 1
+def now_utc_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace('+00:00','Z')
 
-      - name: Build intraday payload
-        shell: cmd
-        run: |
-          python -u scripts\make_dashboard.py ^
-            --mode intraday ^
-            --source data\outlook_source.json ^
-            --out data\outlook_intraday.json
-          if errorlevel 1 exit /b 1
+# ---- helpers --------------------------------------------------------------
 
-      - name: Compute Lux (safe)
-        shell: cmd
-        run: python -u scripts\compute_trend10m.py
-        continue-on-error: true
+ORDER = [
+    "information technology","materials","health care","communication services",
+    "real estate","energy","consumer staples","consumer discretionary",
+    "financials","utilities","industrials",
+]
 
-      - name: Update pills (safe)
-        shell: cmd
-        run: python -u scripts\update_pills_10m_state.py
-        continue-on-error: true
+ALIAS = {
+    "healthcare":"health care","health-care":"health care",
+    "info tech":"information technology","technology":"information technology","tech":"information technology",
+    "communications":"communication services","comm":"communication services","telecom":"communication services",
+    "staples":"consumer staples","discretionary":"consumer discretionary",
+    "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
+}
 
-      - name: Write heartbeat
-        shell: cmd
-        run: |
-          for /f "tokens=2 delims==" %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
-          set HB=%TS:~0,4%-%TS:~4,2%-%TS:~6,2%T%TS:~8,2%:%TS:~10,2%:%TS:~12,2%Z
-          echo %HB%> data\heartbeat_10m.txt
+def norm(s: str) -> str:
+    return (s or "").strip().lower()
 
-      - name: Stage artifacts
-        shell: cmd
-        run: |
-          if not exist publish mkdir publish
-          copy /Y data\outlook_source.json   publish\outlook_source.json
-          copy /Y data\outlook_intraday.json publish\outlook_intraday.json
-          copy /Y data\heartbeat_10m.txt     publish\heartbeat_10m.txt
-          dir publish
+def pct(a: float, b: float) -> float:
+    return 0.0 if b == 0 else round(100.0 * float(a) / float(b), 2)
 
-      - name: Publish clean branch
-        shell: cmd
-        run: |
-          echo ==== PUBLISH to %LIVE_BRANCH% ====
-          git config user.email "user@local"
-          git config user.name  "CI Bot"
-          git fetch --depth=1 origin || echo nofetch
-          git checkout -B %LIVE_BRANCH%
-          if exist data rd /s /q data
-          mkdir data
-          copy /Y publish\outlook_source.json   data\outlook_source.json
-          copy /Y publish\outlook_intraday.json data\outlook_intraday.json
-          copy /Y publish\heartbeat_10m.txt     data\heartbeat_10m.txt
-          git add -f data\outlook_source.json
-          git add -f data\outlook_intraday.json
-          git add -f data\heartbeat_10m.txt
-          git commit -m "10m publish %START_TS%" || (echo nothing & exit /b 0)
-          git push -f origin %LIVE_BRANCH%
-          echo ==== DONE %START_TS%
+def build_sector_cards_from_groups(groups: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Convert {sector: {nh,nl,u,d}} into a normalized 11-row `sectorCards` list.
+    """
+    bucket: Dict[str, Dict[str, Any]] = {}
+    for raw, g in (groups or {}).items():
+        k = ALIAS.get(norm(raw), norm(raw))
+        if not k:
+            continue
+        nh = int((g or {}).get("nh", 0))
+        nl = int((g or {}).get("nl", 0))
+        up = int((g or {}).get("u", 0))
+        dn = int((g or {}).get("d", 0))
+        b = pct(nh, nh + nl)
+        m = pct(up, up + dn)
+        bucket[k] = {
+            "sector": k.title(),
+            "breadth_pct": b,
+            "momentum_pct": m,
+            "nh": nh, "nl": nl, "up": up, "down": dn
+        }
+    # Fill in missing sectors as empty rows (keeps UI stable)
+    rows = [
+        bucket.get(name, {
+            "sector": name.title(),
+            "breadth_pct": 0.0, "momentum_pct": 0.0,
+            "nh": 0, "nl": 0, "up": 0, "down": 0
+        })
+        for name in ORDER
+    ]
+    return rows
+
+def composite_average(cards: List[Dict[str, Any]], key: str) -> float:
+    vals = [float(c.get(key, 0.0)) for c in cards if isinstance(c.get(key), (int, float))]
+    return round(sum(vals) / len(vals), 2) if vals else 0.0
+
+def load_json(path: str) -> Dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+# ---- main compose ---------------------------------------------------------
+
+def compose_intraday(src: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Compose intraday payload (10m) from source.
+    Ensures sectorCards array exists and metrics include 10m breadth/momentum.
+    """
+    # 1) Sector cards
+    sector_cards: List[Dict[str, Any]]
+    if isinstance(src.get("sectorCards"), list) and src["sectorCards"]:
+        sector_cards = src["sectorCards"]
+    else:
+        sector_cards = build_sector_cards_from_groups(src.get("groups") or {})
+
+    # 2) Metrics (prefer existing values; otherwise compute or default)
+    metrics = src.get("metrics") or {}
+
+    # breadth / momentum composites (10m)
+    breadth_10m = metrics.get("breadth_10m_pct")
+    momentum_10m = metrics.get("momentum_10m_pct")
+    if not isinstance(breadth_10m, (int, float)) or not isinstance(momentum_10m, (int, float)):
+        # compute simple averages from sector cards
+        breadth_10m = composite_average(sector_cards, "breadth_pct")
+        momentum_10m = composite_average(sector_cards, "momentum_pct")
+
+    # squeeze/liquidity/volatility from source.global if missing
+    g = src.get("global") or {}
+    squeeze_pct = metrics.get("squeeze_10m_pct") or metrics.get("squeeze_pct")
+    if not isinstance(squeeze_pct, (int, float)):
+        # fall back to the squeeze proxy in source.global
+        squeeze_pct = float(g.get("daily_squeeze_pct") or g.get("squeeze_pressure_pct") or 50.0)
+
+    liquidity_psi = metrics.get("liquidity_psi")
+    if not isinstance(liquidity_psi, (int, float)):
+        liquidity_psi = float(g.get("liquidity_pct") or 70.0)
+
+    volatility_pct = metrics.get("volatility_10m_pct") or metrics.get("volatility_pct")
+    if not isinstance(volatility_pct, (int, float)):
+        volatility_pct = float(g.get("volatility_pct") or 0.20)
+
+    # Final metrics set
+    out_metrics = dict(metrics)  # keep any existing keys
+    out_metrics.update({
+        "breadth_10m_pct": float(round(breadth_10m, 2)),
+        "momentum_10m_pct": float(round(momentum_10m, 2)),
+        "squeeze_pct": float(round(squeeze_pct, 2)),
+        "liquidity_psi": float(round(liquidity_psi, 2)),
+        "volatility_pct": float(round(volatility_pct, 3)),
+    })
+
+    # 3) Intraday composite placeholder (kept minimal — UI already computes)
+    intraday = src.get("intraday") or {}
+    intraday.setdefault("overall10m", {"state": "neutral", "score": 50})
+
+    # 4) Engine-lights passthrough if present
+    engine = src.get("engineLights") or {}
+
+    # 5) Final payload with Arizona timestamps
+    payload = {
+        "version": src.get("version") or "r-intraday-v1",
+        "updated_at": now_phx_iso(),      # Arizona local time (MST)
+        "updated_at_utc": now_utc_iso(),  # UTC
+        "mode": "intraday",
+        "metrics": out_metrics,
+        "intraday": intraday,
+        "engineLights": engine,
+        "sectorCards": sector_cards,
+        # keep a small meta section for ops
+        "meta": {
+            "last_full_run_utc": now_utc_iso()
+        }
+    }
+    return payload
+
+# ---- CLI ------------------------------------------------------------------
+
+def main():
+    ap = argparse.ArgumentParser(description="Compose dashboard payloads.")
+    ap.add_argument("--mode", choices=["intraday", "hourly", "eod"], required=True)
+    ap.add_argument("--source", required=True)
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args()
+
+    src = load_json(args.source)
+    if not src:
+        print(f"[error] invalid or missing source: {args.source}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.mode == "intraday":
+        out = compose_intraday(src)
+    else:
+        # passthrough for other modes (unchanged behavior)
+        out = dict(src)
+        out["updated_at"] = now_phx_iso()
+        out["updated_at_utc"] = now_utc_iso()
+        out["mode"] = args.mode
+
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, separators=(",",":"))
+
+    print(f"[ok] wrote {args.out}")
+    # log a short sector summary for visibility
+    try:
+        cards = out.get("sectorCards") or []
+        if cards:
+            print("[cards] sample:", cards[:2])
+        print("[metrics] breadth_10m:", out["metrics"].get("breadth_10m_pct"),
+              "momentum_10m:", out["metrics"].get("momentum_10m_pct"),
+              "squeeze_pct:", out["metrics"].get("squeeze_pct"))
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    main()
