@@ -33,12 +33,9 @@ jobs:
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
     steps:
-      - name: Set up job
-        run: echo ==== START %DATE% %TIME% ====
-
       - name: Start timer (UTC)
-        shell: cmd
         run: |
+          echo ==== START %DATE% %TIME% ====
           for /f "tokens=2 delims==" %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
           set START_TS=%TS:~0,4%-%TS:~4,2%-%TS:~6,2%T%TS:~8,2%:%TS:~10,2%:%TS:~12,2%Z
           echo START_TS=%START_TS%>>%GITHUB_ENV%
@@ -59,63 +56,51 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --upgrade tzdata requests python-dateutil
 
-      # 1) Build sectorCards source (intraday10)
+      # 1) Build sectorCards source (intraday10 allowed by script)
       - name: Build sectorCards source (intraday10)
-        shell: cmd
         run: |
-          echo ==== BUILD outlook_source.json (intraday10) ====
-          mkdir data
+          if not exist data mkdir data
           python scripts\build_outlook_source_from_polygon.py ^
             --mode intraday10 ^
             --out data\outlook_source.json
           if errorlevel 1 exit /b 1
-          echo DONE: outlook_source.json built successfully.
 
       # 2) Build intraday payload
       - name: Build intraday payload (10m)
-        shell: cmd
         run: |
-          echo ==== MAKE outlook_intraday.json ====
           python scripts\make_dashboard.py ^
             --mode intraday ^
             --source data\outlook_source.json ^
             --out data\outlook_intraday.json
           if errorlevel 1 exit /b 1
 
-      # 3) Lux strategy
+      # 3) Lux (safe)
       - name: Compute Lux strategy (10m)
-        shell: cmd
-        run: |
-          python scripts\compute_trend10m.py || echo (safe continue)
+        run: python scripts\compute_trend10m.py || echo (safe continue)
 
-      # 4) Update Engine Lights
+      # 4) Engine Lights (safe)
       - name: Update pills (10m always-on)
-        shell: cmd
-        run: |
-          python scripts\update_pills_10m_state.py || echo (safe continue)
+        run: python scripts\update_pills_10m_state.py || echo (safe continue)
 
-      # 5) Validate required keys (FIXED)
+      # 5) Validate required keys (cmd-safe)
       - name: Validate required keys
-        shell: cmd
         run: |
-          echo ==== VALIDATING JSON KEYS ====
-          python -c "import json,sys; j=json.load(open('data/outlook_intraday.json')); m=j.get('metrics') or {}; sc=j.get('sectorCards') or []; \
-if not m or not isinstance(m,dict): print('missing metrics'); sys.exit(1); \
-if not isinstance(sc,list) or len(sc)!=11: print('invalid sectorCards'); sys.exit(1); \
-print('OK: metrics & sectorCards valid')"
+          python -c "import json,sys; j=json.load(open('data/outlook_intraday.json','r',encoding='utf-8')); \
+m=j.get('metrics') or {}; sc=j.get('sectorCards') or []; \
+sys.exit(1) if (not isinstance(m,dict) or not m) else None; \
+sys.exit(1) if (not isinstance(sc,list) or len(sc)!=11) else None; \
+print('OK: metrics & sectorCards')"
 
-      # 6) Write heartbeat
+      # 6) Write heartbeat (AZ time marker) — cmd-safe
       - name: Write heartbeat (AZ time marker)
-        shell: cmd
         run: |
           for /f "tokens=2 delims==" %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
           set HB=%TS:~0,4%-%TS:~4,2%-%TS:~6,2%T%TS:~8,2%:%TS:~10,2%:%TS:~12,2%Z
-          echo %HB%> data\heartbeat_10m.txt
+          > data\heartbeat_10m.txt echo %HB%
           type data\heartbeat_10m.txt
 
       # 7) Stage artifacts
       - name: Stage artifacts
-        shell: cmd
         run: |
           if not exist publish mkdir publish
           copy /Y data\outlook_source.json   publish\outlook_source.json
@@ -123,32 +108,28 @@ print('OK: metrics & sectorCards valid')"
           copy /Y data\heartbeat_10m.txt     publish\heartbeat_10m.txt
           dir publish
 
-      # 8) Detect change
-      - name: Detect change vs remote (compare intraday + heartbeat)
+      # 8) Detect change vs remote (compare intraday only; heartbeat forces a change if JSON is flat)
+      - name: Detect change vs remote
         id: diff
-        shell: cmd
         run: |
-          echo ==== DIFF against %LIVE_BRANCH% ====
           git fetch origin %LIVE_BRANCH% --depth=1 || echo (no remote)
           set CHANGED=true
-          if exist "_remote_tmp" rd /s /q _remote_tmp
+          if exist _remote_tmp rd /s /q _remote_tmp
           mkdir _remote_tmp
-          git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\outlook_intraday.json" 2>nul || echo (missing remote file)
-          if exist "_remote_tmp\data\outlook_intraday.json" (
-            fc /B publish\outlook_intraday.json "_remote_tmp\data\outlook_intraday.json" >nul 2>&1
+          git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\outlook_intraday.json" 2>nul || echo (no remote file)
+          if exist _remote_tmp\data\outlook_intraday.json (
+            fc /B publish\outlook_intraday.json _remote_tmp\data\outlook_intraday.json >nul 2>&1
             if "%ERRORLEVEL%"=="0" (
-              echo (no differences) & set CHANGED=false
+              echo (no JSON diff) & set CHANGED=false
             )
           )
           echo changed=%CHANGED%>>%GITHUB_OUTPUT%
           echo ::notice:: changed=%CHANGED%
 
-      # 9) Publish (safe, force-with-lease)
+      # 9) Publish (safe; cancel-in-progress already avoids overlap; use lease push)
       - name: Publish (debug & push verbose)
         if: ${{ steps.diff.outputs.changed == 'true' }}
-        shell: cmd
         run: |
-          echo ==== PUBLISH DEBUG ====
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
           git fetch origin %LIVE_BRANCH% --depth=1 || echo (new branch)
@@ -160,9 +141,7 @@ print('OK: metrics & sectorCards valid')"
           copy /Y publish\heartbeat_10m.txt     data\heartbeat_10m.txt
           git add -A
           git commit -m "10m publish %DATE% %TIME%" || echo (nothing to commit)
-          echo ---- TRY PUSH ----
           git push --force-with-lease origin %LIVE_BRANCH%
-          echo ---- PUSH COMPLETE ----
 
       - name: Done
         run: echo ==== DONE %DATE% %TIME% ====
