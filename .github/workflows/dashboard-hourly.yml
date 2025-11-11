@@ -6,6 +6,10 @@ on:
     # Run every 40 minutes on weekdays (UTC). Pattern: :00 → :40 → :20 → :00 …
     - cron: "*/40 * * * 1-5"
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build_and_publish_hourly:
     name: Build and Publish Hourly (1h valuation)
@@ -21,7 +25,6 @@ jobs:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
-
       # Tuning
       HOUR_LOOKBACK_DAYS: "10"
       H4_LOOKBACK_DAYS:   "21"
@@ -31,8 +34,7 @@ jobs:
       VOL_SLOW:           "12"
       FD_MAX_WORKERS:     "6"
       FD_RETRY_MAX:       "1"
-
-      # One-time reseed; set to "false" after first successful publish
+      # One-time reseed; set to "false" after first good publish
       FORCE_PUBLISH: "false"
 
     steps:
@@ -53,7 +55,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python deps
+      - name: Install deps
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
@@ -73,23 +75,22 @@ jobs:
             --out data/outlook_source.json
           head -n 80 data/outlook_source.json || true
 
-      # 2) Normalize groups → sectorCards (if needed)
+      # 2) Normalize groups → sectorCards if needed
       - name: Normalize source (groups → sectorCards)
         run: |
           set -euo pipefail
           python - <<'PY'
           import json,sys
-          path="data/outlook_source.json"
+          p="data/outlook_source.json"
           try:
-              j=json.load(open(path,"r",encoding="utf-8"))
+              j=json.load(open(p,"r",encoding="utf-8"))
           except Exception as e:
               print("invalid source:", e); sys.exit(1)
 
           def pct(a,b): return 0.0 if b==0 else round(100.0*float(a)/float(b),2)
 
           if isinstance(j.get("sectorCards"), list) and j["sectorCards"]:
-              # already normalized
-              out = {"sectorCards": j["sectorCards"]}
+              out={"sectorCards": j["sectorCards"]}
           elif isinstance(j.get("groups"), dict):
               groups=j["groups"]
               order=[
@@ -118,14 +119,14 @@ jobs:
           else:
               print("missing sectorCards/groups"); sys.exit(1)
 
-          json.dump(out, open(path,"w",encoding="utf-8"), ensure_ascii=False)
+          json.dump(out, open(p,"w",encoding="utf-8"), ensure_ascii=False)
           print("sectorCards:", len(out["sectorCards"]))
           PY
 
       # 3) Compose 1h + 4h meter → data/outlook_hourly.json
       - name: Build hourly payload (1h + 4h)
         env:
-          POLYGON_API_KEY:  ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API_KEY:   ${{ secrets.POLYGON_API_KEY }}
           HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
           H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
           EMA_FAST:           ${{ env.EMA_FAST }}
@@ -149,22 +150,16 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, datetime, sys
+          import json, datetime
           p="data/outlook_hourly.json"
-          try:
-              j=json.load(open(p,"r",encoding="utf-8"))
-          except Exception as e:
-              print("open hourly payload failed:", e); sys.exit(1)
+          j=json.load(open(p,"r",encoding="utf-8"))
           def now(): return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
           hourly=j.get("hourly") or {}
           signals=hourly.get("signals") or {}
-          def ensure(k, st="neutral"):
-              s=signals.get(k) or {}
-              s.setdefault("state", st)
-              s.setdefault("lastChanged", now())
-              signals[k]=s
-          overall=(hourly.get("overall1h") or {}).get("state") or "neutral"
-          ensure("sigOverall1h", str(overall).lower())
+          s=signals.get("sigOverall1h") or {}
+          s.setdefault("state", (hourly.get("overall1h") or {}).get("state","neutral"))
+          s.setdefault("lastChanged", now())
+          signals["sigOverall1h"]=s
           hourly["signals"]=signals
           j["hourly"]=hourly
           json.dump(j,open(p,"w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
@@ -179,7 +174,7 @@ jobs:
           import json,sys
           j=json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
           m=j.get("metrics") or {}
-          for k in ["breadth_1h_pct","momentum_1h_pct","squeeze_1h_pct","liquidity_1h","volatility_1h_pct"]:
+          for k in ("breadth_1h_pct","momentum_1h_pct","squeeze_1h_pct","liquidity_1h","volatility_1h_pct"):
               if k not in m:
                   print("missing metric:", k); sys.exit(1)
           sc=j.get("sectorCards") or []
@@ -188,14 +183,14 @@ jobs:
           print("OK: metrics & sectorCards present")
           PY
 
-      # 7) Heartbeat file
+      # 7) Heartbeat (for change detection)
       - name: Write heartbeat
         run: |
           set -euo pipefail
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h.txt
           cat data/heartbeat_1h.txt
 
-      # 8) Detect change vs remote (compare hourly + heartbeat)
+      # 8) Diff against remote (hourly + heartbeat)
       - name: Detect change
         id: diff
         run: |
@@ -215,11 +210,9 @@ jobs:
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
           echo "::notice:: changed=${CHANGED}"
 
-      # 9) Publish (safe)
+      # 9) Publish (safe, no force)
       - name: Publish live branch
         if: ${{ steps.diff.outputs.changed == 'true' }}
-        env:
-          LIVE_BRANCH: ${{ env.LIVE_BRANCH }}
         run: |
           set -euo pipefail
           git config user.email "user@local"
@@ -248,4 +241,5 @@ jobs:
           fi
 
       - name: Done
-        run: echo "::notice:: hourly job completed"
+        run: |
+          echo "::notice:: hourly job completed"
