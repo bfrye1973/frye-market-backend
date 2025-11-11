@@ -3,7 +3,6 @@ name: dashboard-10min (self-hosted, debug-publish)
 on:
   workflow_dispatch: {}
   schedule:
-    # Run every 10 minutes on weekdays (UTC)
     - cron: "*/10 * * * 1-5"
 
 defaults:
@@ -95,18 +94,15 @@ jobs:
         run: |
           python scripts\update_pills_10m_state.py || echo (safe continue)
 
-      # 5) Validate required keys
+      # 5) Validate required keys (FIXED)
       - name: Validate required keys
         shell: cmd
         run: |
-          python - <<PY
-          import json,sys
-          j=json.load(open("data/outlook_intraday.json","r",encoding="utf-8"))
-          m=j.get("metrics") or {}
-          if not isinstance(m,dict) or not m:
-              print("missing metrics"); sys.exit(1)
-          print("OK metrics present")
-          PY
+          echo ==== VALIDATING JSON KEYS ====
+          python -c "import json,sys; j=json.load(open('data/outlook_intraday.json')); m=j.get('metrics') or {}; sc=j.get('sectorCards') or []; \
+if not m or not isinstance(m,dict): print('missing metrics'); sys.exit(1); \
+if not isinstance(sc,list) or len(sc)!=11: print('invalid sectorCards'); sys.exit(1); \
+print('OK: metrics & sectorCards valid')"
 
       # 6) Write heartbeat
       - name: Write heartbeat (AZ time marker)
@@ -147,7 +143,7 @@ jobs:
           echo changed=%CHANGED%>>%GITHUB_OUTPUT%
           echo ::notice:: changed=%CHANGED%
 
-      # 9) Publish (force-with-lease push)
+      # 9) Publish (safe, force-with-lease)
       - name: Publish (debug & push verbose)
         if: ${{ steps.diff.outputs.changed == 'true' }}
         shell: cmd
