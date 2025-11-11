@@ -116,6 +116,7 @@ jobs:
           if exist _remote_tmp\data\outlook_intraday.json (
             fc /B publish\outlook_intraday.json _remote_tmp\data\outlook_intraday.json >nul 2>&1
             if "%ERRORLEVEL%"=="0" set CHANGED=false
+                                       (skip publish)
           )
           echo changed=%CHANGED%>>%GITHUB_OUTPUT%
           echo ::notice:: changed=%CHANGED%
