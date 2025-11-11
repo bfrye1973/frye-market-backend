@@ -44,8 +44,9 @@ ALIAS = {
 }
 
 def now_phx_iso() -> str:
-    return datetime.now(PHX).replace(millisecond=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
-
+    # Arizona local time, zero microseconds, "YYYY-MM-DD HH:MM:SS" format
+    return datetime.now(PHX).replace(minute=datetime.now(PHX).minute, second=datetime.now(PHX).second, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+  
 def now_utc_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00","Z")
 
