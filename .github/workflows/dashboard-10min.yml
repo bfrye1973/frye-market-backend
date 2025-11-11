@@ -1,47 +1,40 @@
-name: dashboard-10min (self-hosted, debug-publish)
+name: dashboard-10min (self-hosted, stable)
 
 on:
   workflow_dispatch: {}
   schedule:
-    # US market window (Standard Time): 07:30–20:00 AZ (12:30–01:00 UTC).
-    - cron: "30-55/5 12 * * 1-5"   # 12:30–12:55 UTC
-    - cron: "*/5 13-23 * * 1-5"    # 13:00–23:55 UTC
-    - cron: "*/5 0-1 * * 2-6"      # 00:00–01:00 UTC (covers 20:00 AZ close)
+    - cron: "*/10 * * * 1-5"
+
+defaults:
+  run:
+    shell: cmd
 
 jobs:
   tenmin:
-    name: Build & Publish Intraday (10m — debug)
+    name: Build & Publish Intraday (10m)
     runs-on: self-hosted
     timeout-minutes: 30
     permissions:
       contents: write
     concurrency:
       group: dashboard-10min
-      cancel-in-progress: false
-
+      cancel-in-progress: true
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
-      # Intraday tuning
-      FD_SCALPER_ENABLE: "true"
-      FD_SCALPER_LOOKBACK: "3"
-      FD_LOOKBACK_DAYS: "0"
-      FD_MAX_WORKERS: "3"
-      FD_RETRY_MAX: "1"
-      # Auth
       POLY_KEY: ${{ secrets.POLY_KEY }}
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
     steps:
       - name: Start timer (UTC)
-        shell: cmd
         run: |
           for /f "tokens=2 delims==" %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
           set START_TS=%TS:~0,4%-%TS:~4,2%-%TS:~6,2%T%TS:~8,2%:%TS:~10,2%:%TS:~12,2%Z
-          echo START_TS=%START_TS%
+          echo START_TS=%START_TS%>>%GITHUB_ENV%
+          echo ::notice:: 10m run started at %START_TS%
 
-      - name: Checkout (shallow)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -51,24 +44,22 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Ensure tzdata (IANA DB for zoneinfo on Windows)
-        shell: cmd
+      - name: Ensure deps (Windows)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade tzdata
+          python -m pip install --upgrade tzdata requests python-dateutil
 
-      - name: Build sectorCards source (intraday10)
-        shell: cmd
+      # 1) Build intraday source (LIVE)
+      - name: Build sectorCards source (intraday)
         run: |
           if not exist data mkdir data
           python -u scripts\build_outlook_source_from_polygon.py ^
-            --mode intraday10 ^
-            --sectors-dir data\sectors ^
+            --mode intraday ^
             --out data\outlook_source.json
           if errorlevel 1 exit /b 1
 
+      # 2) Compose intraday payload
       - name: Build intraday payload (10m)
-        shell: cmd
         run: |
           python -u scripts\make_dashboard.py ^
             --mode intraday ^
@@ -76,31 +67,36 @@ jobs:
             --out data\outlook_intraday.json
           if errorlevel 1 exit /b 1
 
-      - name: Compute Lux strategy (10m)
-        shell: cmd
-        run: python -u scripts\compute_trend10m.py
-        continue-on-error: true
+      # 3) Lux / Engine Lights (safe)
+      - name: Compute trend10m (safe)
+        run: python -u scripts\compute_trend10m.py || echo safe
 
-      - name: Update pills (10m always-on)
-        shell: cmd
-        run: python -u scripts\update_pills_10m_state.py
-        continue-on-error: true
+      - name: Update 10m pills (safe)
+        run: python -u scripts\update_pills_10m_state.py || echo safe
 
+      # 4) Validate keys (cmd-safe)
       - name: Validate required keys
-        shell: cmd
         run: |
-          python -u -c "import json,sys; j=json.load(open('data/outlook_intraday.json','r',encoding='utf-8')); m=j.get('metrics') or {}; need=['breadth_10m_pct','momentum_10m_pct','squeeze_pct','liquidity_psi','volatility_pct']; miss=[k for k in need if k not in m]; sc=j.get('sectorCards') or []; sys.exit(1) if miss else None; print('OK metrics & sectors:', len(sc))"
+          echo import json> %CD%\check10m.py
+          echo import sys>> %CD%\check10m.py
+          echo j=json.load(open(r"data\outlook_intraday.json","r",encoding="utf-8"))>> %CD%\check10m.py
+          echo m=j.get("metrics") or {}>> %CD%\check10m.py
+          echo sc=j.get("sectorCards") or []>> %CD%\check10m.py
+          echo assert isinstance(m,dict) and m, "Missing metrics">> %CD%\check10m.py
+          echo assert isinstance(sc,list) and len(sc)==11, "Invalid sectorCards">> %CD%\check10m.py
+          echo print("OK: metrics and sectorCards")>> %CD%\check10m.py
+          python %CD%\check10m.py
 
-      - name: Write heartbeat (AZ time marker)
-        shell: cmd
+      # 5) Heartbeat (AZ local time)
+      - name: Write heartbeat
         run: |
           for /f "tokens=2 delims==" %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
           set HB=%TS:~0,4%-%TS:~4,2%-%TS:~6,2% %TS:~8,2%:%TS:~10,2%:%TS:~12,2%
-          echo %HB%> data\heartbeat_10m.txt
+          > data\heartbeat_10m.txt echo %HB%
           type data\heartbeat_10m.txt
 
+      # 6) Stage artifacts
       - name: Stage artifacts
-        shell: cmd
         run: |
           if not exist publish mkdir publish
           copy /Y data\outlook_source.json   publish\outlook_source.json
@@ -108,85 +104,46 @@ jobs:
           copy /Y data\heartbeat_10m.txt     publish\heartbeat_10m.txt
           dir publish
 
-      - name: Detect change vs remote (compare intraday + heartbeat)
+      # 7) Diff remote vs local (compare JSON)
+      - name: Detect change vs remote
         id: diff
-        shell: cmd
         run: |
-          echo ==== DIFF against %LIVE_BRANCH% ====
-          git fetch origin %LIVE_BRANCH% --depth=1 || echo (no remote branch yet)
+          git fetch origin %LIVE_BRANCH% --depth=1 || echo (no remote yet)
           set CHANGED=true
           if exist _remote_tmp rd /s /q _remote_tmp
           mkdir _remote_tmp
-          for /f "tokens=*" %%A in ('git ls-remote --heads origin %LIVE_BRANCH% ^| findstr /c:"refs/heads/%LIVE_BRANCH%"') do set HAVE_BRANCH=1
-          if not defined HAVE_BRANCH (
-            echo (first publish)
-          ) else (
-            git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\outlook_intraday.json" 2>nul || echo (remote intraday missing)
-            git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\heartbeat_10m.txt"     2>nul || echo (remote heartbeat missing)
-
-            set JSON_SAME=1
-            set HB_SAME=1
-            if exist "_remote_tmp\data\outlook_intraday.json" (
-              fc /B "publish\outlook_intraday.json" "_remote_tmp\data\outlook_intraday.json" >nul 2>&1
-              set JSON_SAME=%ERRORLEVEL%
-            )
-            if exist "_remote_tmp\data\heartbeat_10m.txt" (
-              fc /B "publish\heartbeat_10m.txt" "_remote_tmp\data\heartbeat_10m.txt" >nul 2>&1
-              set HB_SAME=%ERRORLEVEL%
-            )
-            if "%JSON_SAME%"=="0" if "%HB_SAME%"=="0" (
-              echo (no differences in intraday or heartbeat) & set CHANGED=false
-            ) else (
-              echo (differences detected) & set CHANGED=true
-            )
+          git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\outlook_intraday.json" 2>nul || echo (no remote JSON)
+          if exist _remote_tmp\data\outlook_intraday.json (
+            fc /B publish\outlook_intraday.json _remote_tmp\data\outlook_intraday.json >nul 2>&1
+            if "%ERRORLEVEL%"=="0" set CHANGED=false
           )
-          echo DIFF_CHANGED=%CHANGED%
-          echo changed=%CHANGED%>> "%GITHUB_OUTPUT%"
+          echo changed=%CHANGED%>>%GITHUB_OUTPUT%
+          echo ::notice:: changed=%CHANGED%
 
-      # -------------------- DEBUG PUBLISH BLOCK (as recommended) --------------------
-      - name: Publish (debug & push verbose)
+      # 8) Publish (clean checkout + lease push)
+      - name: Publish live branch
         if: ${{ steps.diff.outputs.changed == 'true' }}
-        shell: cmd
         run: |
-          echo ==== PUBLISH DEBUG START ====
-          echo CWD=%CD%
-          git rev-parse --is-inside-work-tree
-          git status -s
-          git branch -vv
-          git remote -v
-          echo -----------------------------
+          git config user.email "bot@ci.local"
+          git config user.name  "CI Bot"
 
-          rem Ensure authenticated remote (token HTTPS)
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-          git remote -v
+          rem Clean workspace before checkout
+          git rm -r --cached . 2>nul || echo (no index)
+          git reset --hard
+          git clean -fdx
 
-          rem Sync local branch with remote (safe)
-          git fetch --depth=1 origin %LIVE_BRANCH% || echo (creating branch)
+          git fetch --depth=1 origin %LIVE_BRANCH% || echo (new branch)
           git checkout -B %LIVE_BRANCH% "origin/%LIVE_BRANCH%" || git checkout -B %LIVE_BRANCH%
 
-          rem Replace files and stage
           if exist data rd /s /q data
           mkdir data
           copy /Y publish\outlook_source.json   data\outlook_source.json
           copy /Y publish\outlook_intraday.json data\outlook_intraday.json
           copy /Y publish\heartbeat_10m.txt     data\heartbeat_10m.txt
 
-          rem Always stage both JSON + heartbeat
-          git add -f data\outlook_source.json
-          git add -f data\outlook_intraday.json
-          git add -f data\heartbeat_10m.txt
-
-          rem Commit (no-op if identical; that’s OK)
-          git -c user.email="bot@ci.local" -c user.name="CI Bot" ^
-            commit -m "10m publish %DATE% %TIME%" || echo (nothing to commit)
-
-          echo ---- TRY PUSH (verbose) ----
-          git push -v origin %LIVE_BRANCH%
-          echo ---- PUSH EXITLEVEL=%ERRORLEVEL% ----
-          echo ==== PUBLISH DEBUG END ====
-          exit /b %ERRORLEVEL%
-      # -------------------- END DEBUG PUBLISH BLOCK -------------------------------
+          git add -A
+          git commit -m "10m publish %START_TS%" || (echo nothing to commit & exit /b 0)
+          git push --force-with-lease origin %LIVE_BRANCH%
 
       - name: Done
-        shell: cmd
         run: echo DONE %DATE% %TIME%
