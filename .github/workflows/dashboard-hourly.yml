@@ -3,7 +3,7 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Run every 40 minutes on weekdays (UTC). Pattern: :00 → :40 → :20 → :00 …
+    # Run every 40 minutes on weekdays (UTC): :00 → :40 → :20 → :00 …
     - cron: "*/40 * * * 1-5"
 
 defaults:
@@ -34,11 +34,11 @@ jobs:
       VOL_SLOW:           "12"
       FD_MAX_WORKERS:     "6"
       FD_RETRY_MAX:       "1"
-      # One-time reseed; set to "false" after first good publish
+      # Optional one-time reseed
       FORCE_PUBLISH: "false"
 
     steps:
-      # FIX: define START_TS locally before using it (we run with `set -u`)
+      # Define START_TS locally first (we use `set -u`)
       - name: Start timer (UTC)
         id: t0
         run: |
@@ -125,7 +125,7 @@ jobs:
           print("sectorCards:", len(out["sectorCards"]))
           PY
 
-      # 3) Compose 1h + 4h meter → data/outlook_hourly.json
+      # 3) Compose 1h + 4h → data/outlook_hourly.json
       - name: Build hourly payload (1h + 4h)
         env:
           POLYGON_API_KEY:   ${{ secrets.POLYGON_API_KEY }}
@@ -147,7 +147,7 @@ jobs:
           set -euo pipefail
           python -u scripts/compute_trend_hourly.py || true
 
-      # 5) Ensure 1h signals exist
+      # 5) Ensure at least one signal key exists
       - name: Ensure 1h signals (safe)
         run: |
           set -euo pipefail
@@ -185,14 +185,14 @@ jobs:
           print("OK: metrics & sectorCards present")
           PY
 
-      # 7) Heartbeat (for change detection)
+      # 7) Heartbeat for diff
       - name: Write heartbeat
         run: |
           set -euo pipefail
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h.txt
           cat data/heartbeat_1h.txt
 
-      # 8) Diff against remote (hourly + heartbeat)
+      # 8) Diff against remote
       - name: Detect change
         id: diff
         run: |
@@ -212,26 +212,29 @@ jobs:
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
           echo "::notice:: changed=${CHANGED}"
 
-      # 9) Publish (safe, no force)
+      # 9) Publish (safe) — FIX: stage to _push/ BEFORE removing data/
       - name: Publish live branch
         if: ${{ steps.diff.outputs.changed == 'true' }}
         run: |
           set -euo pipefail
+
+          # Stage files to a temp area first
+          mkdir -p _push
+          cp -f data/outlook_hourly.json _push/outlook_hourly.json
+          cp -f data/heartbeat_1h.txt  _push/heartbeat_1h.txt
+
           git config user.email "user@local"
           git config user.name  "CI Bot"
           git fetch --depth=1 origin "${LIVE_BRANCH}" || true
-          git checkout -b "${LIVE_BRANCH}" || git checkout "${LIVE_BRANCH}"
-          git branch --set-upstream-to="origin/${LIVE_BRANCH}" "${LIVE_BRANCH}" || true
+          git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" || git checkout -B "${LIVE_BRANCH}"
 
+          # Replace data/ with staged files
           rm -rf data || true
           mkdir -p data
-          cp -f data/outlook_hourly.json data/_tmp_hourly.json
-          cp -f data/heartbeat_1h.txt  data/_tmp_heartbeat.txt
-          rm -rf data
-          mkdir -p data
-          mv data/_tmp_hourly.json   data/outlook_hourly.json
-          mv data/_tmp_heartbeat.txt data/heartbeat_1h.txt
+          mv _push/outlook_hourly.json data/outlook_hourly.json
+          mv _push/heartbeat_1h.txt  data/heartbeat_1h.txt
 
+          # Force add even if repo has data/* in .gitignore
           git add -f data/outlook_hourly.json
           git add -f data/heartbeat_1h.txt
           git add -A
