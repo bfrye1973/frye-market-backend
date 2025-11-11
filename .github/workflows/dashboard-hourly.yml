@@ -212,46 +212,57 @@ jobs:
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
           echo "::notice:: changed=${CHANGED}"
 
-      # 9) Publish live branch (seed or switch safely; then replace files)
-      - name: Publish live branch (safe)
-        if: ${{ steps.diff.outputs.changed == 'true' }}
-        run: |
+       # 9) Publish live branch (safe, clean checkout)
+       - name: Publish live branch (safe)
+         if: ${{ steps.diff.outputs.changed == 'true' }}
+         run: |
           set -euo pipefail
 
-          # Stage content first
+          echo "Stage artifacts to temp..."
           mkdir -p _push
           cp -f data/outlook_hourly.json _push/outlook_hourly.json
-          cp -f data/heartbeat_1h.txt  _push/heartbeat_1h.txt
+          cp -f data/outlook_source.json  _push/outlook_source.json || true
+          cp -f data/heartbeat_1h.txt    _push/heartbeat_1h.txt
 
+          echo "Configure git identity..."
           git config user.email "user@local"
           git config user.name  "CI Bot"
+
+          echo "Fetch remote branch (if exists)..."
           git fetch --depth=1 origin "${LIVE_BRANCH}" || true
 
+          echo "CLEAN working tree before checkout (remove untracked/modified)..."
+          # remove tracked 'data/' from index (if any) and delete tree
+          git rm -r --cached data 2>/dev/null || true
+          rm -rf data || true
+          # remove any other untracked files/dirs that could block checkout
+          git clean -fdx
+
+          echo "Checkout or create ${LIVE_BRANCH}..."
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
-            echo "Checking out existing ${LIVE_BRANCH}..."
             git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
           else
-            echo "Creating ${LIVE_BRANCH} (first seed)..."
             git checkout -B "${LIVE_BRANCH}"
           fi
+          git branch --set-upstream-to="origin/${LIVE_BRANCH}" "${LIVE_BRANCH}" || true
 
-          # Replace live files
-          rm -rf data || true
+          echo "Restore staged files into data/..."
           mkdir -p data
-          mv -f _push/outlook_hourly.json data/outlook_hourly.json
-          mv -f _push/heartbeat_1h.txt  data/heartbeat_1h.txt
+          mv _push/outlook_hourly.json data/outlook_hourly.json
+          [ -f _push/outlook_source.json ] && mv _push/outlook_source.json  data/outlook_source.json || true
+          mv _push/heartbeat_1h.txt    data/heartbeat_1h.txt
 
-          git add -f data/outlook_hourly.json data/heartbeat_1h.txt
+          echo "Stage and commit..."
+          git add -f data/outlook_hourly.json
+          [ -f data/outlook_source.json ] && git add -f data/outlook_source.json || true
+          git add -f data/heartbeat_1h.txt
           git add -A
+
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
           fi
 
           git commit -m "hourly publish ${START_TS}"
-          echo "Pushing to origin/${LIVE_BRANCH}..."
-          git push -f origin "${LIVE_BRANCH}"
-
-      - name: Done
-        run: |
-          echo "::notice:: hourly job completed"
+          echo "Push to origin/${LIVE_BRANCH}..."
+          git push origin "${LIVE_BRANCH}"
