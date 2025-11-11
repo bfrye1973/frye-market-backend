@@ -33,7 +33,7 @@ jobs:
       VOL_SLOW:           "12"
       FD_MAX_WORKERS:     "6"
       FD_RETRY_MAX:       "1"
-      FORCE_PUBLISH: "false"
+      FORCE_PUBLISH:      "false"
 
     steps:
       # 0) Start/diagnostics
@@ -89,34 +89,36 @@ jobs:
 
           def pct(a,b): return 0.0 if b==0 else round(100.0*float(a)/float(b), 2)
 
-          if isinstance(j.get("course"), str): pass  # no-op, just to avoid lints
           if isinstance(j.get("sectorCards"), list) and j["sectorCards"]:
               out = {"sectorCards": j["sectorCards"]}
           elif isinstance(j.get("groups"), dict):
-              groups=j["groups"]; out={}
-              def norm(s): return (s or "").strip().lower()
-              def pctwrap(a,b): return 0.0 if b==0 else round(100.0*float(a)/float(b),2)
-              mapping={
-                "information technology":"information technology",
-                "materials":"materials","health care":"health care",
-                "communication services":"communication services",
-                "real estate":"real estate","energy":"energy",
-                "consumer staples":"consumer staples",
-                "consumer discretionary":"consumer discretionary",
-                "financials":"financials","utilities":"utilities",
-                "industrials":"industrials"
+              groups=j["groups"]
+              order=[
+                "information technology","materials","health care","communication services",
+                "real estate","energy","consumer staples","consumer discretionary",
+                "financials","utilities","industrials",
+              ]
+              alias={
+                "healthcare":"health care","health-care":"health care",
+                "info tech":"information technology","technology":"information technology","tech":"information technology",
+                "communications":"communication services","comm":"communication services","telecom":"communication services",
+                "staples":"consumer staples","discretionary":"consumer discretionary",
+                "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
               }
-              tmp={}
+              def norm(s): return (s or "").strip().lower()
+              bucket={}
               for raw,g in (groups or {}).items():
-                  k = mapping.get(norm(raw))
-                  if not k: continue
+                  k=alias.get(norm(raw), norm(raw))
+                  if not k: 
+                      continue
                   nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
-                  tmp[k]={"sector":k.title(),"breadth_pct":pctwrap(nh,nh+nl),"momentum_pct":pctwrap(up,up+dn),
-                          "nh":nh,"nl":nl,"up":up,"down":dn}
-              order=list(mapping.values())
-              out={"sectorCards":[ tmp.get(n,{"sector":n.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for n in order ]}
+                  b=pct(nh,nh+nl); m=pct(up,up+dn)
+                  bucket[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
+              rows=[ bucket.get(name,{"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for name in order ]
+              out={"sectorCards": rows}
           else:
               print("missing sectorCards/groups"); sys.exit(1)
+
           json.dump(out, open(p,"w",encoding="utf-8"), ensure_ascii=False)
           print("sectorCards:", len(out["sectorCards"]))
           PY
@@ -124,7 +126,7 @@ jobs:
       # 3) Compose → outlook_hourly.json
       - name: Build hourly payload (1h + 4h)
         env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API_KEY:   ${{ secrets.POLYGON_API_KEY }}
           HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
           H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
           EMA_FAST:           ${{ env.EMA_FAST }}
