@@ -3,16 +3,13 @@
 """
 make_dashboard.py — compose dashboard payloads (intraday / hourly / eod)
 
-Fixes:
-1) 10-minute sectorCards update even if source only has `groups` (nh/nl/u/d).
-2) Timestamps shown in Arizona local time (America/Phoenix) with `updated_at_utc` kept.
-
-Inputs:  --source  data/outlook_source.json
-Outputs: --out     data/outlook_intraday.json (when --mode intraday)
+- Stamps updated_at (America/Phoenix) + updated_at_utc (UTC)
+- Ensures 11 canonical sectorCards (Title-case, fixed order)
+- Normalizes intraday metrics to the UI schema
 """
 
 from __future__ import annotations
-import json, sys, os, argparse
+import argparse, json, os, sys
 from typing import Any, Dict, List
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -20,101 +17,135 @@ from zoneinfo import ZoneInfo
 PHX = ZoneInfo("America/Phoenix")
 UTC = timezone.utc
 
-def now_phx_iso() -> str:
-    return datetime.now(PHX).replace(microsecond=0).isoformat(sep=' ')
+def now_phx() -> str:
+    # "YYYY-MM-DD HH:MM:SS" in Arizona (no DST problems)
+    return datetime.now(PHX).replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
 
-def now_utc_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace('+00:00','Z')
+def now_utc() -> str:
+    # strict ISO-8601 Zulu
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00","Z")
 
+# Canonical UI order (Title-case)
 ORDER = [
-    "information technology","materials","health care","communication services",
-    "real estate","energy","consumer staples","consumer discretionary",
-    "financials","utilities","industrials",
+    "Information Technology","Materials","Health Care","Communication Services",
+    "Real Estate","Energy","Consumer Staples","Consumer Discretionary",
+    "Financials","Utilities","Industrials"
 ]
-ALIAS = {
-    "healthcare":"health care","health-care":"health care",
-    "info tech":"information technology","technology":"information technology","tech":"information technology",
-    "communications":"communication services","comm":"communication services","telecom":"communication services",
-    "staples":"consumer staples","discretionary":"consumer discretionary",
-    "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
-}
-def norm(s:str)->str: return (s or "").strip().lower()
-def pct(a: float, b: float) -> float: return 0.0 if b==0 else round(100.0*float(a)/float(b), 2)
 
-def build_sector_cards_from_groups(groups: Dict[str, Any]) -> List[Dict[str, Any]]:
-    bucket: Dict[str, Dict[str, Any]] = {}
-    for raw, g in (groups or {}).items():
-        k = ALIAS.get(norm(raw), norm(raw))
-        if not k: continue
-        nh = int((g or {}).get("nh", 0)); nl = int((g or {}).get("nl", 0))
-        up = int((g or {}).get("u", 0));  dn = int((g or {}).get("d", 0))
-        b = pct(nh, nh+nl); m = pct(up, up+dn)
-        bucket[k] = {"sector": k.title(), "breadth_pct": b, "momentum_pct": m,
-                     "nh": nh, "nl": nl, "up": up, "down": dn}
-    rows = [ bucket.get(name, {"sector": name.title(), "breadth_pct": 0.0,
-                               "momentum_pct": 0.0, "nh":0,"nl":0,"up":0,"down":0})
-             for name in ORDER ]
-    return rows
+# Helpers ---------------------------------------------------------------------
 
-def composite_average(cards: List[Dict[str, Any]], key: str) -> float:
-    vals = [float(c.get(key, 0.0)) for c in cards if isinstance(c.get(key), (int,float))]
-    return round(sum(vals)/len(vals), 2) if vals else 0.0
+def coalesce(*vals):
+    for v in vals:
+        if isinstance(v, (int, float)) and v == v:
+            return float(v)
+    return None
+
+def pct(a: float, b: float) -> float:
+    return 0.0 if b <= 0 else round(100.0 * float(a) / float(b), 2)
 
 def load_json(path: str) -> Dict[str, Any]:
-    try: return json.load(open(path,"r",encoding="utf-8"))
-    except Exception: return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[error] cannot read {path}: {e}", file=sys.stderr)
+        return {}
+
+def ensure_sector_cards(source: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Return 11 sectorCards in canonical order (Title-case names).
+    When only 'groups'={sector -> {nh,nl,u,d}} is provided, derive breadth/momentum.
+    """
+    cards = source.get("sectorCards")
+    if isinstance(cards, list) and cards:
+        # Canonicalize order and fill any missing
+        got = {c.get("sector") for c in cards if isinstance(c, dict)}
+        for name in ORDER:
+            if name not in got:
+                cards.append({"sector": name, "breadth_pct": 0.0, "momentum_pct": 0.0,
+                              "nh": 0, "nl": 0, "up": 0, "down": 0})
+        key = {n:i for i,n in enumerate(ORDER)}
+        cards.sort(key=lambda c: key.get(c.get("sector",""), 999))
+        return cards
+
+    # Derive from groups
+    groups = source.get("groups") or {}
+    derived: List[Dict[str, Any]] = []
+    for name in ORDER:
+        g = groups.get(name) or {}
+        nh = int(g.get("nh", 0)); nl = int(g.get("nl", 0))
+        up = int(g.get("u", 0));  dn = int(g.get("d", 0))
+        b  = pct(nh, nh + nl)
+        m  = pct(up, up + dn)
+        derived.append({
+            "sector": name,
+            "breadth_pct": b, "momentum_pct": m,
+            "nh": nh, "nl": nl, "up": up, "down": dn
+        })
+    return derived
 
 def compose_intraday(src: Dict[str, Any]) -> Dict[str, Any]:
-    # 1) sectorCards
-    if isinstance(src.get("sectorCards"), list) and src["sectorCards"]:
-        sector_cards = src["sectorCards"]
-    else:
-        sector_cards = build_sector_cards_from_groups(src.get("groups") or {})
+    """
+    Normalize intraday payload:
+      - metrics keys to 10m schema
+      - preserve intraday/engineLights if present
+      - inject canonical sectorCards
+    """
+    cards = ensure_sector_cards(src)
+    m_in  = dict(src.get("metrics") or {})
 
-    # 2) metrics
-    metrics = src.get("metrics") or {}
-    breadth_10m = metrics.get("breadth_10m_pct")
-    momentum_10m = metrics.get("momentum_10m_pct")
-    if not isinstance(breadth_10m,(int,float)) or not isinstance(momentum_10m,(int,float)):
-        breadth_10m  = composite_average(sector_cards,"breadth_pct")
-        momentum_10m = composite_average(sector_cards,"momentum_pct")
+    # Normalize metrics
+    breadth   = coalesce(m_in.get("breadth_10m_pct"), m_in.get("breadth_pct"))
+    if breadth is None:
+        # fallback from cards
+        breadth = round(sum(c.get("breadth_pct", 0.0) for c in cards) / len(cards), 2) if cards else 50.0
 
-    g = src.get("global") or {}
-    squeeze_pct = metrics.get("squeeze_10m_pct") or metrics.get("squeeze_pct")
-    if not isinstance(squeeze_pct,(int,float)):
-        squeeze_pct = float(g.get("daily_squeeze_pct") or g.get("squeeze_pressure_pct") or 50.0)
-    liquidity_psi = metrics.get("liquidity_psi")
-    if not isinstance(liquidity_psi,(int,float)):
-        liquidity_psi = float(g.get("liquidity_pct") or 70.0)
-    volatility_pct = metrics.get("volatility_10m_pct") or metrics.get("volatility_pct")
-    if not isinstance(volatility_pct,(int,float)):
-        volatility_pct = float(g.get("volatility_pct") or 0.20)
+    momentum  = coalesce(m_in.get("momentum_10m_pct"), m_in.get("momentum_pct"), 50.0)
+    psi       = coalesce(m_in.get("squeeze_psi_10m_pct"), m_in.get("squeeze_psi"), 50.0)
+    liq       = coalesce(m_in.get("liquidity_psi"), 70.0)
+    vol       = coalesce(m_in.get("volatility_10m_pct"), m_in.get("volatility_pct"), 0.20)
+    ema_sign  = int(m_in.get("ema_sign") or 0)
+    ema_gap   = coalesce(m_in.get("ema_gap_pct"), 0.0)
 
-    out_metrics = dict(metrics)
-    out_metrics.update({
-        "breadth_10m_pct": float(round(breadth_10m,2)),
-        "momentum_10m_pct": float(round(momentum_10m,2)),
-        "squeeze_pct": float(round(squeeze_pct,2)),
-        "liquidity_psi": float(round(liquidity_psi,2)),
-        "volatility_pct": float(round(volatility_pct,3)),
-    })
+    m_out = dict(m_in)
+    m_out["breadth_10m_pct"]       = round(breadth, 2)
+    m_out["momentum_10m_pct"]      = round(momentum, 2)
+    m_out["squeeze_psi_10m_pct"]   = round(psi, 2)
+    m_out["squeeze_expansion_pct"] = round(100.0 - psi, 2)
+    m_out["squeeze_pct"]           = m_out["squeeze_expansion_pct"]   # UI tile expects expansion naming
+    m_out["liquidity_psi"]         = round(liq, 2)
+    m_out["volatility_pct"]        = round(vol, 3)
+    m_out["ema_sign"]              = ema_sign
+    m_out["ema_gap_pct"]           = round(ema_gap, 2)
 
-    intraday = src.get("intraday") or {}
-    intraday.setdefault("overall10m", {"state":"neutral","score":50})
-
-    engine = src.get("engineLights") or {}
+    intraday  = src.get("intraday") or {}
+    engine    = src.get("engineLights") or {}
 
     return {
         "version": src.get("version") or "r-intraday-v1",
-        "updated_at": now_phx_iso(),      # Arizona local time
-        "updated_at_utc": now_utc_iso(),  # UTC
+        "updated_at": now_phx(),                # AZ local
+        "updated_at_utc": now_utc(),            # UTC
         "mode": "intraday",
-        "metrics": out_metrics,
+        "metrics": m_out,
         "intraday": intraday,
         "engineLights": engine,
-        "sectorCards": sector_cards,
-        "meta": {"last_full_run_utc": now_utc_iso()},
+        "sectorCards": cards,
+        "meta": {"last_full_run_utc": now_utc()},
     }
+
+def compose_hourly(src: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(src)
+    out["updated_at"] = now_phx()
+    out["updated_at_utc"] = now_utc()
+    out["mode"] = "hourly"
+    return out
+
+def compose_eod(src: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(src)
+    out["updated_at"] = now_phx()
+    out["updated_at_utc"] = now_utc()
+    out["mode"] = "eod"
+    return out
 
 def main():
     ap = argparse.ArgumentParser(description="Compose dashboard payloads.")
@@ -125,28 +156,28 @@ def main():
 
     src = load_json(args.source)
     if not src:
-        print(f"[error] invalid or missing source: {args.source}", file=sys.stderr); sys.exit(1)
+        print(f"[error] invalid or missing source: {args.source}", file=sys.stderr)
+        sys.exit(1)
 
     if args.mode == "intraday":
         out = compose_intraday(src)
+    elif args.mode == "hourly":
+        out = compose_hourly(src)
     else:
-        out = dict(src)
-        out["updated_at"] = now_phx_iso()
-        out["updated_at_utc"] = now_utc_iso()
-        out["mode"] = args.mode
+        out = compose_eod(src)
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    json.dump(out, open(args.out,"w",encoding="utf-8"), ensure_ascii=False, separators=(",",":"))
-    print(f"[ok] wrote {args.out}")
+    with open(args.out, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, separators=(",",":"))
+
+    # Tiny QA log
     try:
-        cards = out.get("sectorCards") or []
-        if cards: print("[cards] sample:", cards[:2])
         m = out.get("metrics") or {}
-        print("[metrics] breadth_10m:", m.get("breadth_10m_pct"),
-              "momentum_10m:", m.get("momentum_10m_pct"),
-              "squeeze_pct:", m.get("squeeze_pct"))
+        print(f"[ok] wrote {args.out} mode={args.mode}  updated_at={out.get('updated_at')}  "
+              f"breadth_10m={m.get('breadth_10m_pct')}  momentum_10m={m.get('momentum_10m_pct')}  "
+              f"squeeze_exp={m.get('squeeze_expansion_pct')}")
     except Exception:
         pass
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
