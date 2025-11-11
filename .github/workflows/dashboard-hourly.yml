@@ -3,9 +3,10 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Run every 40 minutes on weekdays (UTC). Produces :00 → :40 → :20 → :00 rotation.
+    # Run every 40 minutes on weekdays (UTC). Rotation :00 → :40 → :20 → :00 …
     - cron: "*/40 * * * 1-5"
 
+# Use bash everywhere to avoid shell mixing issues
 defaults:
   run:
     shell: bash
@@ -36,11 +37,11 @@ jobs:
       FD_MAX_WORKERS:     "6"
       FD_RETRY_MAX:       "1"
 
-      # Force the first publish if you want to reseed the live branch
+      # Force first publish if you want to reseed the live branch
       FORCE_PUBLISH: "false"
 
     steps:
-      # --- T0 and timestamp we reuse in commit messages
+      # --- T0 and timestamp reused in commit messages ---
       - name: Start timer (UTC)
         id: t0
         run: |
@@ -148,7 +149,7 @@ jobs:
           set -euo pipefail
           python -u scripts/compute_trend_hourly.py || true
 
-      # 5) Ensure minimal signals (safe carry)
+      # 5) Ensure minimal signals (safe)
       - name: Ensure 1h signals (safe)
         run: |
           set -euo pipefail
@@ -181,8 +182,7 @@ jobs:
           sc=j.get("sectorCards") or []
           if miss or not isinstance(sc,list) or len(sc)!=11:
               print("missing:", miss, "len(sectorCards)=",len(sc)); sys.exit(1)
-          echo = print  # small alias for logs in GH
-          echo("OK metrics & sectorCards")
+          print("OK metrics & sectorCards")
           PY
 
       # 7) Heartbeat file (used by diff even if JSON is flat)
@@ -212,10 +212,10 @@ jobs:
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
           echo "::notice:: changed=${CHANGED}"
 
-       # 9) Publish live branch (safe, clean checkout)
-       - name: Publish live branch (safe)
-         if: ${{ steps.diff.outputs.changed == 'true' }}
-         run: |
+      # 9) Publish live branch (safe, clean checkout)
+      - name: Publish live branch (safe)
+        if: ${{ steps.diff.outputs.changed == 'true' }}
+        run: |
           set -euo pipefail
 
           echo "Stage artifacts to temp..."
@@ -231,11 +231,9 @@ jobs:
           echo "Fetch remote branch (if exists)..."
           git fetch --depth=1 origin "${LIVE_BRANCH}" || true
 
-          echo "CLEAN working tree before checkout (remove untracked/modified)..."
-          # remove tracked 'data/' from index (if any) and delete tree
+          echo "Clean working tree before checkout..."
           git rm -r --cached data 2>/dev/null || true
           rm -rf data || true
-          # remove any other untracked files/dirs that could block checkout
           git clean -fdx
 
           echo "Checkout or create ${LIVE_BRANCH}..."
@@ -248,9 +246,9 @@ jobs:
 
           echo "Restore staged files into data/..."
           mkdir -p data
-          mv _push/outlook_hourly.json data/outlook_hourly.json
-          [ -f _push/outlook_source.json ] && mv _push/outlook_source.json  data/outlook_source.json || true
-          mv _push/heartbeat_1h.txt    data/heartbeat_1h.txt
+          mv -f _push/outlook_hourly.json data/outlook_hourly.json
+          [ -f _push/outlook_source.json ] && mv -f _push/outlook_source.json  data/outlook_source.json || true
+          mv -f _push/heartbeat_1h.txt    data/heartbeat_1h.txt
 
           echo "Stage and commit..."
           git add -f data/outlook_hourly.json
@@ -266,3 +264,7 @@ jobs:
           git commit -m "hourly publish ${START_TS}"
           echo "Push to origin/${LIVE_BRANCH}..."
           git push origin "${LIVE_BRANCH}"
+
+      - name: Done
+        run: |
+          echo "::notice:: hourly job completed"
