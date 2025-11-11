@@ -3,9 +3,10 @@ name: dashboard-hourly
 on:
   workflow_dispatch: {}
   schedule:
-    # Run every 40 minutes on weekdays (UTC): :00 → :40 → :20 → :00 …
+    # Run every 40 minutes on weekdays (UTC). Rotates :00 → :40 → :20 → :00 …
     - cron: "*/40 * * * 1-5"
 
+# Ensure every run step uses bash so quoting/variables are consistent
 defaults:
   run:
     shell: bash
@@ -25,6 +26,7 @@ jobs:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-hourly
       PYTHONUNBUFFERED: "1"
+
       # Tuning
       HOUR_LOOKBACK_DAYS: "10"
       H4_LOOKBACK_DAYS:   "21"
@@ -34,11 +36,12 @@ jobs:
       VOL_SLOW:           "12"
       FD_MAX_WORKERS:     "6"
       FD_RETRY_MAX:       "1"
-      # Optional one-time reseed
+
+      # Optional one-time reseed to force initial publish
       FORCE_PUBLISH: "false"
 
     steps:
-      # Define START_TS locally first (we use `set -u`)
+      # Define START_TS locally and export to later steps
       - name: Start timer (UTC)
         id: t0
         run: |
@@ -73,11 +76,12 @@ jobs:
           mkdir -p data
           echo "::notice:: FD_MAX_WORKERS=$FD_MAX_WORKERS FD_RETRY_MAX=$FD_RETRY_MAX H1D=$HOUR_LOOKBACK_DAYS H4D=$H4_LOOKBACK_DAYS"
           python -u scripts/build_outlook_source_from_polygon.py \
-            --mode hourly \
-            --out data/outlook_source.json
+            --mode "hourly" \
+            --out "data/outlook_source.json"
           head -n 80 data/outlook_source.json || true
 
-      # 2) Normalize groups → sectorCards if needed
+      # 2) Normalize groups → sectorCards (if needed)
+        # Keeps payload small/consistent with UI expectations
       - name: Normalize source (groups → sectorCards)
         run: |
           set -euo pipefail
@@ -111,7 +115,7 @@ jobs:
               bucket={}
               for raw,g in groups.items():
                   k=alias.get(norm(raw), norm(raw))
-                  if not k: 
+                  if not k:
                       continue
                   nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
                   b=pct(nh,nh+nl); m=pct(up,up+dn)
@@ -125,7 +129,7 @@ jobs:
           print("sectorCards:", len(out["sectorCards"]))
           PY
 
-      # 3) Compose 1h + 4h → data/outlook_hourly.json
+      # 3) Compose 1h + 4h meter → data/outlook_hourly.json
       - name: Build hourly payload (1h + 4h)
         env:
           POLYGON_API_KEY:   ${{ secrets.POLYGON_API_KEY }}
@@ -138,8 +142,8 @@ jobs:
         run: |
           set -euo pipefail
           python -u scripts/make_dashboard_hourly.py \
-            --source data/outlook_source.json \
-            --out    data/outlook_hourly.json
+            --source "data/outlook_source.json" \
+            --out    "data/outlook_hourly.json"
 
       # 4) Lux hook (safe)
       - name: Compute Lux strategy (1h)
@@ -147,7 +151,7 @@ jobs:
           set -euo pipefail
           python -u scripts/compute_trend_hourly.py || true
 
-      # 5) Ensure at least one signal key exists
+      # 5) Ensure minimal signals
       - name: Ensure 1h signals (safe)
         run: |
           set -euo pipefail
@@ -157,15 +161,15 @@ jobs:
           j=json.load(open(p,"r",encoding="utf-8"))
           def now(): return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
           hourly=j.get("hourly") or {}
-          signals=hourly.get("signals") or {}
-          s=signals.get("sigOverall1h") or {}
+          sigs=hourly.get("signals") or {}
+          s=sigs.get("sigOverall1h") or {}
           s.setdefault("state",(hourly.get("overall1h") or {}).get("state","neutral"))
           s.setdefault("lastChanged", now())
-          signals["sigOverall1h"]=s
-          hourly["signals"]=signals
+          sigs["sigOverall1h"]=s
+          hourly["signals"]=sigs
           j["hourly"]=hourly
           json.dump(j,open(p,"w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
-          print("signals:", list(signals.keys()))
+          print("signals:", list(sigs.keys()))
           PY
 
       # 6) Validate structure
@@ -192,7 +196,7 @@ jobs:
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h.txt
           cat data/heartbeat_1h.txt
 
-      # 8) Diff against remote
+      # 8) Diff against remote (hourly + heartbeat)
       - name: Detect change
         id: diff
         run: |
@@ -212,29 +216,39 @@ jobs:
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
           echo "::notice:: changed=${CHANGED}"
 
-      # 9) Publish (safe) — FIX: stage to _push/ BEFORE removing data/
-      - name: Publish live branch
+      # 9) Publish (robust: stage -> checkout/create branch -> replace -> commit -> push)
+      - name: Publish live branch (safe)
         if: ${{ steps.diff.outputs.changed == 'true' }}
         run: |
           set -euo pipefail
 
-          # Stage files to a temp area first
+          # Stage to temp BEFORE touching data/
           mkdir -p _push
           cp -f data/outlook_hourly.json _push/outlook_hourly.json
           cp -f data/heartbeat_1h.txt  _push/heartbeat_1h.txt
 
           git config user.email "user@local"
           git config user.name  "CI Bot"
-          git fetch --depth=1 origin "${LIVE_BRANCH}" || true
-          git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}" || git checkout -B "${LIVE_BRANCH}"
 
-          # Replace data/ with staged files
+          echo "Fetching remote branch (if exists)..."
+          git fetch --depth=1 origin "${LIVE_BRANCH}" || true
+
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            echo "Checking out existing ${LIVE_BRANCH}..."
+            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
+          else
+            echo "Creating new ${LIVE_BRANCH}..."
+            git checkout -B "${LIVE_BRANCH}"
+          fi
+          git branch --set-upstream-to="origin/${LIVE_BRANCH}" "${LIVE_BRANCH}" || true
+
+          echo "Replacing data/ with staged files..."
           rm -rf data || true
           mkdir -p data
           mv _push/outlook_hourly.json data/outlook_hourly.json
           mv _push/heartbeat_1h.txt  data/heartbeat_1h.txt
 
-          # Force add even if repo has data/* in .gitignore
+          echo "Staging & committing if changed..."
           git add -f data/outlook_hourly.json
           git add -f data/heartbeat_1h.txt
           git add -A
@@ -243,6 +257,7 @@ jobs:
             echo "no changes to commit"
           else
             git commit -m "hourly publish ${START_TS}"
+            echo "Pushing to origin/${LIVE_BRANCH}..."
             git push origin "${LIVE_BRANCH}"
           fi
 
