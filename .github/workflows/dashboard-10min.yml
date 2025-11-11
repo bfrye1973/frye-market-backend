@@ -1,4 +1,4 @@
-name: dashboard-10min (self-hosted, debug-publish)
+name: dashboard-10min (self-hosted, stable)
 
 on:
   workflow_dispatch: {}
@@ -10,8 +10,8 @@ defaults:
     shell: cmd
 
 jobs:
-  build_and_publish_10min:
-    name: Build & Publish Intraday (10m — debug)
+  tenmin:
+    name: Build & Publish Intraday (10m)
     runs-on: self-hosted
     timeout-minutes: 30
     permissions:
@@ -19,16 +19,15 @@ jobs:
     concurrency:
       group: dashboard-10min
       cancel-in-progress: true
-
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
+      FD_SCALPER_ENABLE: "true"
+      FD_SCALPER_LOOKBACK: "3"
       FD_LOOKBACK_DAYS: "0"
       FD_MAX_WORKERS: "5"
       FD_RETRY_MAX: "1"
-      FD_SCALPER_ENABLE: "true"
-      FD_SCALPER_LOOKBACK: "3"
       POLY_KEY: ${{ secrets.POLY_KEY }}
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
@@ -51,12 +50,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Ensure tzdata (IANA DB for zoneinfo on Windows)
+      - name: Ensure tzdata (Windows)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade tzdata requests python-dateutil
+          python -m pip install --upgrade tzdata
+          python -m pip install --upgrade requests
+          python -m pip install --upgrade python-dateutil
 
-      # 1) Build sectorCards source (intraday10 allowed by script)
+      # 1) Build intraday source (script accepts intraday10)
       - name: Build sectorCards source (intraday10)
         run: |
           if not exist data mkdir data
@@ -65,7 +66,8 @@ jobs:
             --out data\outlook_source.json
           if errorlevel 1 exit /b 1
 
-      # 2) Build intraday payload
+      # 2) Compose intraday payload
+        # note: your composer already sets updated_at and updated_at_utc
       - name: Build intraday payload (10m)
         run: |
           python scripts\make_dashboard.py ^
@@ -75,27 +77,34 @@ jobs:
           if errorlevel 1 exit /b 1
 
       # 3) Lux (safe)
-      - name: Compute Lux strategy (10m)
-        run: python scripts\compute_trend10m.py || echo (safe continue)
+      - name: Compute trend10m (safe)
+        run: python scripts\compute_trend10m.py || echo safe
 
       # 4) Engine Lights (safe)
-      - name: Update pills (10m always-on)
-        run: python scripts\update_pills_10m_state.py || echo (safe continue)
+      - name: Update 10m pills (safe)
+        run: python scripts\update_pills_10m_state.py || echo safe
 
-      # 5) Validate required keys (cmd-safe)
+      # 5) Validate required keys (write tiny .py then run)
       - name: Validate required keys
         run: |
-          python -c "import json,sys; j=json.load(open('data/outlook_intraday.json','r',encoding='utf-8')); \
-m=j.get('metrics') or {}; sc=j.get('sectorCards') or []; \
-sys.exit(1) if (not isinstance(m,dict) or not m) else None; \
-sys.exit(1) if (not isinstance(sc,list) or len(sc)!=11) else None; \
-print('OK: metrics & sectorCards')"
+          echo import json> %CD%\check10m.py
+          echo import sys>> %CD%\check10m.py
+          echo f=open(r"data\outlook_intraday.json","r",encoding="utf-8")>> %CD%\check10m.py
+          echo j=json.load(f)>> %CD%\check10m.py
+          echo m=j.get("metrics") or {}>> %CD%\check10m.py
+          echo sc=j.get("sectorCards") or []>> %CD%\check10m.py
+          echo if not isinstance(m,dict) or not m:>> %CD%\check10m.py
+          echo     print("Missing metrics"); sys.exit(1)>> %CD%\check10m.py
+          echo if not isinstance(sc,list) or len(sc) != 11:>> %CD%\check10m.py
+          echo     print("Invalid sectorCards length:", len(sc)); sys.exit(1)>> %CD%\check10m.py
+          echo print("OK: metrics and sectorCards")>> %CD%\check10m.py
+          python %CD%\check10m.py
 
-      # 6) Write heartbeat (AZ time marker) — cmd-safe
-      - name: Write heartbeat (AZ time marker)
+      # 6) Heartbeat (AZ time) — simple redirection to avoid YAML/cmd quoting issues
+      - name: Write heartbeat (AZ time)
         run: |
           for /f "tokens=2 delims==" %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
-          set HB=%TS:~0,4%-%TS:~4,2%-%TS:~6,2%T%TS:~8,2%:%TS:~10,2%:%TS:~12,2%Z
+          set HB=%TS:~0,4%-%TS:~4,2%-%TS:~6,2% %TS:~8,2%:%TS:~10,2%:%TS:~12,2%
           > data\heartbeat_10m.txt echo %HB%
           type data\heartbeat_10m.txt
 
@@ -108,31 +117,32 @@ print('OK: metrics & sectorCards')"
           copy /Y data\heartbeat_10m.txt     publish\heartbeat_10m.txt
           dir publish
 
-      # 8) Detect change vs remote (compare intraday only; heartbeat forces a change if JSON is flat)
+      # 8) Detect change vs remote (compare JSON; heartbeat forces change if content same)
       - name: Detect change vs remote
         id: diff
         run: |
-          git fetch origin %LIVE_BRANCH% --depth=1 || echo (no remote)
+          git fetch origin %LIVE_BRANCH% --depth=1 || echo (no remote yet)
           set CHANGED=true
           if exist _remote_tmp rd /s /q _remote_tmp
           mkdir _remote_tmp
-          git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\outlook_intraday.json" 2>nul || echo (no remote file)
+          git --work-tree="_remote_tmp" checkout origin/%LIVE_BRANCH% -- "data\outlook_intraday.json" 2>nul || echo (no remote JSON yet)
           if exist _remote_tmp\data\outlook_intraday.json (
             fc /B publish\outlook_intraday.json _remote_tmp\data\outlook_intraday.json >nul 2>&1
             if "%ERRORLEVEL%"=="0" (
-              echo (no JSON diff) & set CHANGED=false
+              echo JSON unchanged; CHANGED=false
+              set CHANGED=false
             )
           )
-          echo changed=%CHANGED%>>%GITHUB_OUTPUT%
+          echo changed=%CHANGED%>> %GITHUB_OUTPUT%
           echo ::notice:: changed=%CHANGED%
 
-      # 9) Publish (safe; cancel-in-progress already avoids overlap; use lease push)
-      - name: Publish (debug & push verbose)
+      # 9) Publish (safe, force-with-lease)
+      - name: Publish live branch
         if: ${{ steps.diff.outputs.changed == 'true' }}
         run: |
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
-          git fetch origin %LIVE_BRANCH% --depth=1 || echo (new branch)
+          git fetch --depth=1 origin %LIVE_BRANCH% || echo (creating)
           git checkout -B %LIVE_BRANCH% "origin/%LIVE_BRANCH%" || git checkout -B %LIVE_BRANCH%
           if exist data rd /s /q data
           mkdir data
@@ -140,8 +150,8 @@ print('OK: metrics & sectorCards')"
           copy /Y publish\outlook_intraday.json data\outlook_intraday.json
           copy /Y publish\heartbeat_10m.txt     data\heartbeat_10m.txt
           git add -A
-          git commit -m "10m publish %DATE% %TIME%" || echo (nothing to commit)
+          git commit -m "10m publish %START_TS%" || (echo nothing to commit & exit /b 0)
           git push --force-with-lease origin %LIVE_BRANCH%
 
       - name: Done
-        run: echo ==== DONE %DATE% %TIME% ====
+        run: echo DONE %DATE% %TIME%
