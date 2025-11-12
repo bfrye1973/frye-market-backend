@@ -1,89 +1,58 @@
-# algos/index-sectors/10m/formulas.py
-import json, os, math, urllib.request
-from datetime import datetime, timezone
+// formulas.js — This is the isolated 10m Sector Engine
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
-OUT_PATH = os.path.join(os.path.dirname(__file__), "outlook_sector_10m.json")
-FEED_URL = "https://frye-market-backend-1.onrender.com/live/intraday?t={}".format(int(datetime.now().timestamp()))
+import fs from "fs";
+import path from "path";
+import fetch from "node-fetch";
+import { fileURLToPath } from "url";
+import { evaluateTilt, evaluateOutlook, evaluateGrade } from "./helpers.js";
 
-def http_json(url):
-    with urllib.request.urlopen(url) as r:
-        return json.loads(r.read().decode("utf-8"))
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-def safe_eval(expr, **vals):
-    try:
-        return float(eval(expr, {"__builtins__": {}}, vals))
-    except Exception:
-        return (vals.get("breadth", 0) + vals.get("momentum", 0)) / 2
+export async function runSectorModel() {
+  const configPath = path.join(__dirname, "config.json");
+  const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
 
-def parse_rule(rule, b, m):
-    parts = [p.strip() for p in rule.split("&&")]
-    ok = True
-    for p in parts:
-        if ">=" in p:
-            left, thr = p.split(">="); thr = float(thr)
-            if left.strip() == "breadth" and not (b >= thr): ok = False
-            if left.strip() == "momentum" and not (m >= thr): ok = False
-        elif "<=" in p:
-            left, thr = p.split("<="); thr = float(thr)
-            if left.strip() == "breadth" and not (b <= thr): ok = False
-            if left.strip() == "momentum" and not (m <= thr): ok = False
-    return ok
+  const feedUrl = cfg.bindings.feed + `?t=${Date.now()}`;
+  const res = await fetch(feedUrl, { headers: { "Cache-Control": "no-cache" } });
+  const live = await res.json();
 
-def grade_token(v, gcfg):
-    ok = float(gcfg["ok"].replace(">=", "")) if ">=" in gcfg["ok"] else 60
-    warn = float(gcfg["warn"].replace(">=", "")) if ">=" in gcfg["warn"] else 50
-    if v >= ok: return "ok"
-    if v >= warn: return "warn"
-    return "danger"
+  const cards = live.sectorCards || [];
+  const fields = cfg.bindings.fields;
+  const ORDER = cfg.order;
 
-def main():
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-    feed = http_json(FEED_URL)
-    cards = feed.get("sectorCards", [])
-    if not isinstance(cards, list) or len(cards) != 11:
-        print("⚠️ invalid sectorCards feed"); return
+  // Build normalized output
+  const out = [];
 
-    rules = cfg["rules"]
-    gcfg = rules["grade"]["default"]
-    out = []
+  for (const sec of ORDER) {
+    const card = cards.find(c => c.sector === sec) || {};
 
-    for c in cards:
-        b = float(c.get("breadth_pct", 0))
-        m = float(c.get("momentum_pct", 0))
-        tilt = round(safe_eval(rules["tilt"], breadth=b, momentum=m), 2)
-        up_rule = rules["outlook"]["bullish"]
-        down_rule = rules["outlook"]["bearish"]
-        outlook = "neutral"
-        if parse_rule(up_rule, b, m): outlook = "bullish"
-        elif parse_rule(down_rule, b, m): outlook = "bearish"
-        grade = grade_token(tilt, gcfg)
-        out.append({
-            "sector": c.get("sector"),
-            "breadth": b,
-            "momentum": m,
-            "tilt": tilt,
-            "outlook": outlook,
-            "grade": grade
-        })
+    const breadth  = Number(card[fields.breadth]  || 0);
+    const momentum = Number(card[fields.momentum] || 0);
+    const nh       = Number(card[fields.nh]       || 0);
+    const nl       = Number(card[fields.nl]       || 0);
+    const up       = Number(card[fields.up]       || 0);
+    const down     = Number(card[fields.down]     || 0);
 
-    from zoneinfo import ZoneInfo
-    PHX = ZoneInfo("America/Phoenix")
+    const tilt     = evaluateTilt(cfg.rules.tiltExpr, breadth, momentum);
+    const outlook  = evaluateOutlook(cfg.rules.outlook, breadth, momentum);
+    const grade    = evaluateGrade(cfg.rules.gradeThresholds, tilt);
 
- # …
- result = {
-     "version": cfg["version"],
-     # use feed’s timestamps if present; otherwise compute (AZ + UTC)
-     "updated_at":     feed.get("updated_at") or datetime.now(PHX).strftime("%Y-%m-%d %H:%M:%S"),
-     "updated_at_utc": feed.get("updated_at_utc") or datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
-     "sectors": out
- }
+    out.push({
+      sector: sec,
+      breadth_pct: breadth,
+      momentum_pct: momentum,
+      nh, nl, up, down,
+      tilt,
+      outlook,
+      grade
+    });
+  }
 
-    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
-    with open(OUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-    print(f"✅ wrote {OUT_PATH}")
-
-if __name__ == "__main__":
-    main()
+  return {
+    version: cfg.version,
+    updated_at: live.updated_at,
+    updated_at_utc: live.updated_at_utc,
+    sectors: out
+  };
+}
