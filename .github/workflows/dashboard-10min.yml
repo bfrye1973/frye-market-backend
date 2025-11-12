@@ -149,42 +149,32 @@ jobs:
         shell: cmd
         run: |
           echo ==== PUBLISH DEBUG START ====
-          echo CWD=%CD%
-          git rev-parse --is-inside-work-tree
-          git status -s
-          git branch -vv
-          git remote -v
-          echo -----------------------------
+          git config user.email "bot@ci.local"
+          git config user.name  "CI Bot"
 
-          rem Ensure authenticated remote (token HTTPS)
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-          git remote -v
+          rem --- CLEAN working tree to avoid 'would be overwritten by checkout' ---
+          git rm -r --cached . 2>nul || echo (no index)
+          it reset --hard
+          git clean -fdx
 
-          rem Sync local branch with remote (safe)
-          git fetch --depth=1 origin %LIVE_BRANCH% || echo (creating branch)
+          rem --- FETCH + CHECKOUT live branch (create if missing) ---
+          git fetch --depth=1 origin %LIVE_BRANCH% || echo (new branch)
           git checkout -B %LIVE_BRANCH% "origin/%LIVE_BRANCH%" || git checkout -B %LIVE_BRANCH%
 
-          rem Replace files and stage
+          rem --- RESTORE staged publish files into data/ ---
           if exist data rd /s /q data
           mkdir data
           copy /Y publish\outlook_source.json   data\outlook_source.json
           copy /Y publish\outlook_intraday.json data\outlook_intraday.json
           copy /Y publish\heartbeat_10m.txt     data\heartbeat_10m.txt
 
-          rem Always stage both JSON + heartbeat
-          git add -f data\outlook_source.json
-          git add -f data\outlook_intraday.json
-          git add -f data\heartbeat_10m.txt
+          git add -A
+          git commit -m "10m publish %DATE% %TIME%" || (echo nothing to commit & exit /b 0)
 
-          rem Commit (no-op if identical; that’s OK)
-          git -c user.email="bot@ci.local" -c user.name="CI Bot" ^
-            commit -m "10m publish %DATE% %TIME%" || echo (nothing to commit)
-
-          echo ---- TRY PUSH (verbose) ----
-          git push -v origin %LIVE_BRANCH%
-          echo ---- PUSH EXITLEVEL=%ERRORLEVEL% ----
+          rem --- PUSH with lease to avoid non-fast-forward races ---
+          git push --force-with-lease origin %LIVE_BRANCH%
           echo ==== PUBLISH DEBUG END ====
-          exit /b %ERRORLEVEL%
+
       # -------------------- END DEBUG PUBLISH BLOCK -------------------------------
 
       - name: Done
