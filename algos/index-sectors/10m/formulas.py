@@ -68,11 +68,18 @@ def main():
             "grade": grade
         })
 
-    result = {
-        "version": cfg["version"],
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "sectors": out
-    }
+    from zoneinfo import ZoneInfo
+    PHX = ZoneInfo("America/Phoenix")
+
+ # …
+ result = {
+     "version": cfg["version"],
+     # use feed’s timestamps if present; otherwise compute (AZ + UTC)
+     "updated_at":     feed.get("updated_at") or datetime.now(PHX).strftime("%Y-%m-%d %H:%M:%S"),
+     "updated_at_utc": feed.get("updated_at_utc") or datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
+     "sectors": out
+ }
+
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
