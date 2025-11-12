@@ -2,6 +2,8 @@
 // Everything is in-memory so the UI lights up immediately.
 
 import express from "express";
+import sectorcards10m from "./sectorcards-10m.js";
+
 
 const router = express.Router();
 
