@@ -179,5 +179,6 @@ router.delete("/trading/orders/:id", (req, res) => {
   ORDERS[i].updatedAt = new Date().toISOString();
   res.json({ id, status: "CANCELLED" });
 });
+router.use("/live/sectorcards-10m", sectorcards10m);
 
 export default router; // <- default export: an Express Router
