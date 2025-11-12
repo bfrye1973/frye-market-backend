@@ -1,22 +1,40 @@
 {
-  "version": "r11.2-sectors-10m",
+  "version": "r12-sectors-10m",
   "bindings": {
-    "breadth": "sectorCards[*].breadth_pct",
-    "momentum": "sectorCards[*].momentum_pct",
-    "nh": "sectorCards[*].nh",
-    "nl": "sectorCards[*].nl",
-    "up": "sectorCards[*].up",
-    "down": "sectorCards[*].down"
+    "feed": "https://frye-market-backend-1.onrender.com/live/intraday",
+    "fields": {
+      "sector": "sector",
+      "breadth": "breadth_pct",
+      "momentum": "momentum_pct",
+      "nh": "nh",
+      "nl": "nl",
+      "up": "up",
+      "down": "down"
+    }
   },
+  "order": [
+    "Information Technology",
+    "Materials",
+    "Health Care",
+    "Communication Services",
+    "Real Estate",
+    "Energy",
+    "Consumer Staples",
+    "Consumer Discretionary",
+    "Financials",
+    "Utilities",
+    "Industrials"
+  ],
   "rules": {
-    "tilt": "(breadth + momentum) / 2",
-    "outlook": { 
+    "tiltExpr": "(breadth + momentum) / 2",
+    "outlook": {
       "bullish": "breadth>=55 && momentum>=55",
-      "bearish": "breadth<=45 && momentum<=45" 
+      "bearish": "breadth<=45 && momentum<=45"
     },
-    "grade": {
-      "default": { "ok": ">=60", "warn": ">=50", "danger": "<50" },
-      "overrides": {}
+    "gradeThresholds": {
+      "ok": ">=60",
+      "warn": ">=50",
+      "danger": "<50"
     }
   },
   "ui": {
