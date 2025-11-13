@@ -2,6 +2,8 @@
 // Everything is in-memory so the UI lights up immediately.
 
 import express from "express";
+import sectorcards10m from "./sectorcards-10m.js";
+
 
 const router = express.Router();
 
@@ -177,5 +179,6 @@ router.delete("/trading/orders/:id", (req, res) => {
   ORDERS[i].updatedAt = new Date().toISOString();
   res.json({ id, status: "CANCELLED" });
 });
+router.use("/live/sectorcards-10m", sectorcards10m);
 
 export default router; // <- default export: an Express Router
