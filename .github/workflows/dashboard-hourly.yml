@@ -61,21 +61,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade requests python-dateutil tzdata
 
-      # 1) Build hourly groups → outlook_source.json
+      # 1) Build hourly sectorCards source using latest 10m intraday payload
       - name: Build sectorCards source (hourly groups)
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-          POLY_KEY:        ${{ secrets.POLY_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
           echo "::notice:: FD_MAX_WORKERS=$FD_MAX_WORKERS FD_RETRY_MAX=$FD_RETRY_MAX H1D=$HOUR_LOOKBACK_DAYS H4D=$H4_LOOKBACK_DAYS"
-          python -u scripts/build_outlook_source_from_polygon.py \
-            --mode "hourly" \
-            --out  "data/outlook_source.json"
+          python -u scripts/build_outlook_hourly_source.py \
+            --out "data/outlook_source.json"
           head -n 60 data/outlook_source.json || true
 
-      # 2) Normalize groups → sectorCards
+      # 2) Normalize source (groups → sectorCards)
       - name: Normalize source (groups → sectorCards)
         run: |
           set -euo pipefail
@@ -109,7 +105,7 @@ jobs:
               bucket={}
               for raw,g in (groups or {}).items():
                   k=alias.get(norm(raw), norm(raw))
-                  if not k: 
+                  if not k:
                       continue
                   nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
                   b=pct(nh,nh+nl); m=pct(up,up+dn)
@@ -208,7 +204,7 @@ jobs:
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
           echo "::notice:: changed=${CHANGED}"
 
-      # 9) Publish live branch (safe, clean checkout + restore from temp)
+      # 9) Publish live branch (safe)
       - name: Publish live branch (safe)
         if: ${{ steps.diff.outputs.changed == 'true' }}
         run: |
