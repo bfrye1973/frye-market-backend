@@ -4,7 +4,6 @@
 import express from "express";
 import sectorcards10m from "./sectorcards-10m.js";
 
-
 const router = express.Router();
 
 /* ------------------------------ in-memory state ------------------------------ */
@@ -179,6 +178,10 @@ router.delete("/trading/orders/:id", (req, res) => {
   ORDERS[i].updatedAt = new Date().toISOString();
   res.json({ id, status: "CANCELLED" });
 });
-router.use("/live/sectorcards-10m", sectorcards10m);
+
+/* -------------------------- 10m sectorcards adapter -------------------------- */
+// NOTE: this is mounted under /api in server.js, so this becomes:
+//   GET /api/sectorcards-10m
+router.use("/sectorcards-10m", sectorcards10m);
 
 export default router; // <- default export: an Express Router
