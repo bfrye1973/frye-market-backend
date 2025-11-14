@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — build_outlook_hourly_source.py (v1)
+Ferrari Dashboard — build_outlook_hourly_source.py (v2)
 
 Goal:
   Provide a minimal, reliable source file for the hourly workflow:
   data/outlook_source.json
 
 Strategy:
-  - Read the latest 10-minute intraday payload from the data-live-10min branch
-    (or another URL if INTRADAY_SOURCE_URL is set).
+  - Read the latest 10-minute intraday payload from the LIVE backend
+    (/live/intraday), or from an override URL if INTRADAY_SOURCE_URL is set.
   - Extract / normalize sectorCards (11 canonical sectors).
   - Write them into outlook_source.json so the existing hourly workflow
     (normalize step + make_dashboard_hourly.py) can do its job.
-
-This keeps the hourly job independent of the complex multi-mode
-build_outlook_source_from_polygon.py and avoids the old archive/fallback traps.
 """
 
 from __future__ import annotations
@@ -26,11 +23,10 @@ import sys
 import urllib.request
 from typing import Any, Dict, List
 
-# Default intraday source (current 10m payload)
+# Primary intraday source: LIVE backend, not GitHub raw
 DEFAULT_INTRADAY_URL = (
     os.environ.get("INTRADAY_SOURCE_URL")
-    or "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/"
-       "data-live-10min/data/outlook_intraday.json"
+    or "https://frye-market-backend-1.onrender.com/live/intraday"
 )
 
 # Canonical sector order (title-case)
@@ -94,7 +90,6 @@ def canonical_sector_cards(src: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Case 1: already has sectorCards list with sector / breadth_pct / momentum_pct
     raw_cards = src.get("sectorCards")
     if isinstance(raw_cards, list) and raw_cards:
-        # Bucket by normalized sector name
         by: Dict[str, Dict[str, Any]] = {}
         for c in raw_cards:
             if not isinstance(c, dict):
@@ -190,12 +185,12 @@ def canonical_sector_cards(src: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Build hourly outlook_source.json from 10m intraday payload.")
+    ap = argparse.ArgumentParser(description="Build hourly outlook_source.json from intraday payload.")
     ap.add_argument("--out", required=True, help="Output path (e.g. data/outlook_source.json)")
     ap.add_argument(
         "--intraday_url",
         default=DEFAULT_INTRADAY_URL,
-        help="Raw intraday JSON URL (defaults to data-live-10min outlook_intraday.json)",
+        help="Intraday JSON URL (defaults to LIVE /live/intraday)",
     )
     args = ap.parse_args()
 
@@ -205,14 +200,12 @@ def main() -> int:
         intraday = fetch_json(url)
     except Exception as e:
         log(f"ERROR fetching intraday payload: {e!r}")
-        # Still emit a neutral file so the rest of the pipeline can run
-        cards = []
+        cards: List[Dict[str, Any]] = []
     else:
         cards = canonical_sector_cards(intraday)
         log(f"got {len(cards)} sectorCards from intraday")
 
     if not cards:
-        # Build neutral cards if fetch/parse failed
         cards = canonical_sector_cards({})
 
     out_obj: Dict[str, Any] = {
