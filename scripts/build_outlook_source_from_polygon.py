@@ -61,7 +61,7 @@ ALIAS = {
 
 
 def log(msg: str) -> None:
-    print(f"[hourly-src] {msg}", flush=True)
+    print(f"[hourly-src] {msg}", file=sys.stderr, flush=True)
 
 
 def fetch_json(url: str, timeout: int = 20) -> Dict[str, Any]:
