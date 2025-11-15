@@ -16,7 +16,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: dashboard-10min
+      group: dashboard-10min-v2
       cancel-in-progress: true
 
     env:
