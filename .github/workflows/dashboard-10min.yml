@@ -133,7 +133,7 @@ jobs:
           echo DIFF_CHANGED=%CHANGED%
           echo changed=%CHANGED%>> "%GITHUB_OUTPUT%"
 
-      # -------------------- SIMPLE, SAFE PUBLISH --------------------
+      # -------------------- SIMPLE PUBLISH (force-with-lease) --------------------
       - name: Publish (debug & push verbose)
         if: ${{ steps.diff.outputs.changed == 'true' }}
         shell: cmd
@@ -162,8 +162,8 @@ jobs:
 
           git commit -m "10m publish %DATE% %TIME%" || (echo nothing to commit & exit /b 0)
 
-          rem --- PUSH (no force, no delete) ---
-          git push origin %LIVE_BRANCH%
+          rem --- PUSH using force-with-lease to avoid non-fast-forward errors ---
+          git push --force-with-lease origin %LIVE_BRANCH%
 
           echo ==== PUBLISH DEBUG END ====
       # -------------------- END PUBLISH --------------------
