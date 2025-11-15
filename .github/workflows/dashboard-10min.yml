@@ -59,13 +59,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --upgrade tzdata
 
+      # 🔧 FIXED: no more --mode / --sectors-dir, script only needs --out now
       - name: Build sectorCards source (intraday10)
         shell: cmd
         run: |
           if not exist data mkdir data
           python -u scripts\build_outlook_source_from_polygon.py ^
-            --mode intraday10 ^
-            --sectors-dir data\sectors ^
             --out data\outlook_source.json
           if errorlevel 1 exit /b 1
 
