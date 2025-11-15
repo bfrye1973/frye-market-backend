@@ -6,6 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { ohlcRouter } from "./routes/ohlc.js";
 import liveRouter from "./routes/live.js";   // ✅ live router
+import sectorcards10mRouter from "./routes/sectorcards-10m.js"; // ✅ NEW
 
 // --- App setup ---
 const app = express();
@@ -50,7 +51,8 @@ app.get("/", (_req, res) => {
 
 // --- API routes ---
 app.use("/api/v1/ohlc", ohlcRouter);
-app.use("/live", liveRouter);  // ✅ now active
+app.use("/api/sectorcards-10m", sectorcards10mRouter); // ✅ NEW
+app.use("/live", liveRouter);  // ✅ still active
 
 // --- 404 / errors ---
 app.use((req, res) =>
@@ -73,6 +75,7 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/health  (Render healthcheck)");
   console.log("- /healthz");
   console.log("- /api/v1/ohlc");
+  console.log("- /api/sectorcards-10m"); // ✅ NEW
   console.log("- /live  (GitHub JSON proxies)");
 });
 
