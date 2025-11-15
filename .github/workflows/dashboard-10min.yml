@@ -59,7 +59,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --upgrade tzdata
 
-      # 🔧 FIXED: no more --mode / --sectors-dir, script only needs --out now
+      # Build source from Polygon (new interface: only needs --out)
       - name: Build sectorCards source (intraday10)
         shell: cmd
         run: |
@@ -143,7 +143,7 @@ jobs:
           echo DIFF_CHANGED=%CHANGED%
           echo changed=%CHANGED%>> "%GITHUB_OUTPUT%"
 
-      # -------------------- SAFE DEBUG PUBLISH --------------------
+      # -------------------- SIMPLE, SAFE PUBLISH --------------------
       - name: Publish (debug & push verbose)
         if: ${{ steps.diff.outputs.changed == 'true' }}
         shell: cmd
@@ -152,27 +152,29 @@ jobs:
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
 
-          rem --- CLEAN workspace ---
-          git rm -r --cached . 2>nul || echo (no index)
-          git reset --hard
-          git clean -fdx
+          rem --- FETCH live branch (if exists) ---
+          git fetch origin %LIVE_BRANCH% --depth=1 || echo (new branch)
 
-          rem --- FETCH + CHECKOUT live branch ---
-          git fetch --depth=1 origin %LIVE_BRANCH% || echo (new branch)
+          rem --- CHECKOUT or create live branch ---
           git checkout -B %LIVE_BRANCH% "origin/%LIVE_BRANCH%" || git checkout -B %LIVE_BRANCH%
+          git branch --set-upstream-to="origin/%LIVE_BRANCH%" %LIVE_BRANCH% || echo (no upstream yet)
 
-          rem --- RESTORE publish files into data/ ---
-          if exist data rd /s /q data
-          mkdir data
+          rem --- ENSURE data/ directory ---
+          if not exist data mkdir data
+
+          rem --- COPY artifacts from publish/ into data/ ---
           copy /Y publish\outlook_source.json   data\outlook_source.json
           copy /Y publish\outlook_intraday.json data\outlook_intraday.json
           copy /Y publish\heartbeat_10m.txt     data\heartbeat_10m.txt
 
-          git add -A
+          rem --- STAGE + COMMIT ---
+          git add data\outlook_source.json data\outlook_intraday.json data\heartbeat_10m.txt
+
           git commit -m "10m publish %DATE% %TIME%" || (echo nothing to commit & exit /b 0)
 
-          rem --- PUSH with lease (safe) ---
-          git push --force-with-lease origin %LIVE_BRANCH%
+          rem --- PUSH (no force, no delete) ---
+          git push origin %LIVE_BRANCH%
+
           echo ==== PUBLISH DEBUG END ====
       # -------------------- END PUBLISH --------------------
 
