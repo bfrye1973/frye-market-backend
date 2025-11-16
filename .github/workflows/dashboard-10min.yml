@@ -39,9 +39,11 @@ jobs:
       - name: Start timer (UTC)
         shell: cmd
         run: |
-          for /f "tokens=2 delims==" %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
-          set START_TS=%TS:~0,4%-%TS:~4,2%-%TS:~6,2%T%TS:~8,2%:%TS:~10,2%:%TS:~12,2%Z
-          echo START_TS=%START_TS%
+          if not exist data mkdir data
+          python -u scripts\build_outlook_source_from_polygon.py ^
+            --sectors-dir data\sectors ^
+            --out data\outlook_source.json
+          if errorlevel 1 exit /b 1
 
       - name: Checkout repository (shallow)
         uses: actions/checkout@v4
