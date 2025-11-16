@@ -27,7 +27,7 @@ jobs:
       # Intraday tuning
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
-      FD_LOOKBACK_DAYS: "0"
+      FD_LOOKBACK_DAYS: "20"
       FD_MAX_WORKERS: "3"
       FD_RETRY_MAX: "1"
 
@@ -36,14 +36,13 @@ jobs:
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
     steps:
+      # Just set START_TS – do NOT run Python here
       - name: Start timer (UTC)
         shell: cmd
         run: |
-          if not exist data mkdir data
-          python -u scripts\build_outlook_source_from_polygon.py ^
-            --sectors-dir data\sectors ^
-            --out data\outlook_source.json
-          if errorlevel 1 exit /b 1
+          for /f "tokens=2 delims==" %%A in ('wmic os get localdatetime /value ^| find "="') do set TS=%%A
+          set START_TS=%TS:~0,4%-%TS:~4,2%-%TS:~6,2%T%TS:~8,2%:%TS:~10,2%:%TS:~12,2%Z
+          echo START_TS=%START_TS%
 
       - name: Checkout repository (shallow)
         uses: actions/checkout@v4
@@ -61,12 +60,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --upgrade tzdata
 
-      # Build source from Polygon (new interface: only needs --out)
+      # Build 10m sector source from Polygon (new script)
       - name: Build sectorCards source (intraday10)
         shell: cmd
         run: |
           if not exist data mkdir data
           python -u scripts\build_outlook_source_from_polygon.py ^
+            --sectors-dir data\sectors ^
             --out data\outlook_source.json
           if errorlevel 1 exit /b 1
 
@@ -78,6 +78,16 @@ jobs:
             --source data\outlook_source.json ^
             --out data\outlook_intraday.json
           if errorlevel 1 exit /b 1
+
+      - name: Compute Lux strategy (10m)
+        shell: cmd
+        run: python -u scripts\compute_trend10m.py
+        continue-on-error: true
+
+      - name: Update pills (10m always-on)
+        shell: cmd
+        run: python -u scripts\update_pills_10m_state.py
+        continue-on-error: true
 
       - name: Validate required keys
         shell: cmd
@@ -135,7 +145,6 @@ jobs:
           echo DIFF_CHANGED=%CHANGED%
           echo changed=%CHANGED%>> "%GITHUB_OUTPUT%"
 
-      # -------------------- SIMPLE PUBLISH (force-with-lease) --------------------
       - name: Publish (debug & push verbose)
         if: ${{ steps.diff.outputs.changed == 'true' }}
         shell: cmd
@@ -168,7 +177,6 @@ jobs:
           git push --force-with-lease origin %LIVE_BRANCH%
 
           echo ==== PUBLISH DEBUG END ====
-      # -------------------- END PUBLISH --------------------
 
       - name: Done
         shell: cmd
