@@ -1,225 +1,194 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-compute_trend10m.py — Lux Trend (10m) post-processor
+Ferrari Dashboard — compute_trend10m.py
 
-- Two-color mapping (green/red) for Trend/Vol/Sq/Flow (dialog-style)
-- Writes Lux mini-pill summary in strategy.trend10m
-- Writes numeric fields for Engine-Lights row: j["lux10m"].*
-- Mirrors into engineLights.lux10m and engineLights.metrics.lux10m_* (legacy FE reads)
-- Volume Sentiment:
-    * if builders provide close_prev/close/volume/volSma -> compute OBV-based %
-    * else default 0.0 so FE never sees blanks
+Goal
+----
+Post-process data/outlook_intraday.json (10m snapshot) and:
+
+  1. Compute optional metrics:
+       - riskOn_10m_pct
+       - breadth_align_fast_pct  (stub V1: neutral 50)
+  2. Compute 10m Engine Lights block:
+
+     "engineLights": {
+       "10m": {
+         "state": "bull|bear|neutral",
+         "score": 0-100,
+         "components": {
+           "breadth":   int,
+           "momentum":  int,
+           "squeeze":   int,
+           "liquidity": int,
+           "volatility":int,
+           "riskOn":    int
+         },
+         "lastChanged": "YYYY-MM-DDTHH:MM:SSZ"
+       }
+     }
+
+Inputs
+------
+- Assumes outlook_intraday.json has been written by make_dashboard.py and
+  contains:
+
+    metrics.breadth_10m_pct
+    metrics.momentum_10m_pct
+    metrics.squeeze_pct
+    metrics.liquidity_psi
+    metrics.volatility_pct
+
+    sectorCards[ {sector,breadth_pct,momentum_pct,...} ]
+
+Outputs
+-------
+- Updates metrics with:
+    riskOn_10m_pct
+    breadth_align_fast_pct (stub 50.0)
+- Updates/creates engineLights["10m"] block.
+
+This script is idempotent and safe to run multiple times.
 """
 
+from __future__ import annotations
+
 import json
-import datetime
-from typing import Any, Dict, Optional
+import math
+import os
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
-INTRADAY_PATH = "data/outlook_intraday.json"
+IN_PATH  = os.path.join("data", "outlook_intraday.json")
+OUT_PATH = IN_PATH  # in-place update
 
-THRESH = {
-    "trend_green_min": 60.0,
-    "vol_low_max": 40.0,
-    "squeeze_open_max": 30.0,
-    "volsent_green_gt": 0.0,
-}
+UTC = timezone.utc
 
-def utc_now() -> str:
-    return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+def now_utc_iso() -> str:
+  return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+def to_num(x, default=0.0) -> float:
+  try:
+    v = float(x)
+    if math.isnan(v):
+      return default
+    return v
+  except Exception:
+    return default
 
 def clamp(x: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, x))
+  return max(lo, min(hi, x))
 
-def load_json(p: str) -> Dict[str, Any]:
-    try:
-        return json.load(open(p, "r", encoding="utf-8"))
-    except Exception:
-        return {}
+def lin_points(pct_val: float, weight: int) -> int:
+  """
+  Convert a 0-100 metric into +/- weight around 50.
+  e.g. pct=50 => 0 pts, pct=100 => +weight, pct=0 => -weight
+  """
+  v = clamp(pct_val, 0.0, 100.0)
+  return int(round(weight * ((v - 50.0) / 50.0)))
 
-def save_json(p: str, obj: Dict[str, Any]) -> None:
-    json.dump(obj, open(p, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+def compute_risk_on_pct(sector_cards: List[Dict[str, Any]]) -> float:
+  """
+  Approximate risk-on percentage = fraction of sectors where
+    breadth_pct >= 55 AND momentum_pct >= 55.
 
-def carry_last_changed(prev: Optional[Dict[str, Any]], new_state: str, stamp: str) -> str:
-    prev_state = (prev or {}).get("state")
-    last = (prev or {}).get("lastChanged") or stamp
-    if prev_state != new_state:
-        last = stamp
-    return last
+  Simple, transparent, and consistent with teammate's intent.
+  """
+  if not sector_cards:
+    return 50.0
+  good = 0
+  total = 0
+  for c in sector_cards:
+    b = to_num(c.get("breadth_pct"), 50.0)
+    m = to_num(c.get("momentum_pct"), 50.0)
+    total += 1
+    if b >= 55.0 and m >= 55.0:
+      good += 1
+  if total == 0:
+    return 50.0
+  return round(100.0 * good / float(total), 2)
 
-def color_trend(ts: Optional[float]) -> str:
-    return "green" if (isinstance(ts, (int, float)) and ts >= THRESH["trend_green_min"]) else "red"
+def main() -> int:
+  if not os.path.exists(IN_PATH):
+    print("[10m-trend] no outlook_intraday.json to process; skipping.")
+    return 0
 
-def color_vol_scaled(vs: Optional[float]) -> str:
-    return "green" if (isinstance(vs, (int, float)) and vs < THRESH["vol_low_max"]) else "red"
+  with open(IN_PATH, "r", encoding="utf-8") as f:
+    j = json.load(f)
 
-def color_squeeze(sq: Optional[float]) -> str:
-    return "green" if (isinstance(sq, (int, float)) and sq < THRESH["squeeze_open_max"]) else "red"
+  metrics: Dict[str, Any] = j.get("metrics") or {}
+  cards: List[Dict[str, Any]] = j.get("sectorCards") or []
 
-def color_volume(vs: Optional[float]) -> str:
-    return "green" if (isinstance(vs, (int, float)) and vs > THRESH["volsent_green_gt"]) else "red"
+  breadth = to_num(metrics.get("breadth_10m_pct"), 50.0)
+  mom     = to_num(metrics.get("momentum_10m_pct"), 50.0)
+  sq      = to_num(metrics.get("squeeze_pct"), 50.0)        # expansion %
+  liq     = to_num(metrics.get("liquidity_psi"), 70.0)      # 0-120, we cap later
+  vol     = to_num(metrics.get("volatility_pct"), 0.0)      # 0+ (% ATR-ish)
 
-def compute_volume_sentiment_pct(metrics: Dict[str, Any]) -> float:
-    """
-    OBV-style proxy if builder provides minimal fields:
-      close_prev_10m, close_10m, volume_10m, volSma_10m
-    Otherwise return 0.0 (FE won't be blank).
-    """
-    close_prev = metrics.get("close_prev_10m") or metrics.get("close_10m_prev")
-    close_curr = metrics.get("close_10m")
-    volume     = metrics.get("volume_10m") or metrics.get("vol_10m")
-    volSma     = metrics.get("volSma_10m") or metrics.get("vol_sma_10m")
+  # 1) RiskOn 10m %
+  risk_on_pct = compute_risk_on_pct(cards)
 
-    if not all(isinstance(x, (int, float)) for x in (close_prev, close_curr, volume, volSma)):
-        return 0.0
+  # 2) breadth_align_fast_pct (V1 stub: neutral baseline 50)
+  #    This can be upgraded later with EMA10>20 alignment logic.
+  align_fast_pct = 50.0
 
-    if close_curr > close_prev:
-        obv_delta = volume
-    elif close_curr < close_prev:
-        obv_delta = -volume
-    else:
-        obv_delta = 0.0
+  metrics["riskOn_10m_pct"]        = risk_on_pct
+  metrics["breadth_align_fast_pct"]= align_fast_pct
 
-    vs_pct = 100.0 * (obv_delta / max(volSma, 1.0))
-    return clamp(vs_pct, -20.0, 20.0)
+  # 3) Engine Lights components
+  #    We reuse a linear around 50 with weights. Feel free to tweak weights later.
+  comps: Dict[str, int] = {}
 
-def main() -> None:
-    j = load_json(INTRADAY_PATH)
-    if not j:
-        print("[10m] outlook_intraday.json missing; nothing to do")
-        return
+  comps["breadth"]   = lin_points(breadth, weight=20)
+  comps["momentum"]  = lin_points(mom,     weight=20)
+  comps["squeeze"]   = lin_points(sq,      weight=10)   # high expansion => + pts
+  comps["liquidity"] = lin_points(clamp(liq, 0.0, 120.0) / 1.2, weight=10)
+  # Lower vol is generally "better" for trend = invert:
+  vol_scaled = clamp(vol * 10.0, 0.0, 100.0)
+  comps["volatility"] = lin_points(100.0 - vol_scaled, weight=5)
+  comps["riskOn"]     = lin_points(risk_on_pct, weight=15)
 
-    now = utc_now()
-    m  = j.get("metrics") or {}
-    el = j.get("engineLights") or {}
-    prev = (el.get("signals") or {})
+  # Composite score around 50
+  score = int(clamp(50 + sum(comps.values()), 0, 100))
 
-    ts = m.get("trend_strength_10m_pct")
-    sq = m.get("squeeze_10m_pct") or m.get("squeeze_pct")
+  # State logic per teammate:
+  # "Use 10m metrics only for now"
+  # We treat:
+  #   - bull: breadth >= 55, mom >= 55, score >= 60
+  #   - bear: breadth <= 45, mom <= 45, score <= 40
+  #   - else: neutral
+  if breadth >= 55.0 and mom >= 55.0 and score >= 60:
+    state = "bull"
+  elif breadth <= 45.0 and mom <= 45.0 and score <= 40:
+    state = "bear"
+  else:
+    state = "neutral"
 
-    vol_pct    = m.get("volatility_10m_pct") or m.get("volatility_pct")
-    vol_scaled = m.get("volatility_10m_scaled") or m.get("volatility_scaled")
-    if isinstance(vol_pct, (int, float)) and not isinstance(vol_scaled, (int, float)):
-        # Derive a crude scaled volatility (0–100) from a pct range if only pct is present.
-        MIN_PCT, MAX_PCT = 0.50, 4.00
-        vol_scaled = 100.0 * clamp((float(vol_pct) - MIN_PCT) / max(MAX_PCT - MIN_PCT, 1e-9), 0.0, 1.0)
+  eng = j.get("engineLights") or {}
+  prev_10m = eng.get("10m") or {}
+  prev_state = prev_10m.get("state")
+  prev_changed = prev_10m.get("lastChanged")
 
-    # Volume Sentiment (%)
-    vs = m.get("volume_sentiment_10m_pct") or m.get("volume_sentiment_pct")
-    if not isinstance(vs, (int, float)):
-        # Try OBV-style compute if builder fields exist
-        close_prev = m.get("close_prev_10m") or m.get("close_10m_prev")
-        close_curr = m.get("close_10m")
-        volume     = m.get("volume_10m") or m.get("vol_10m")
-        volSma     = m.get("volSma_10m") or m.get("vol_sma_10m")
+  # lastChanged only updates when state flips
+  if prev_state == state and prev_changed:
+    last_changed = prev_changed
+  else:
+    last_changed = now_utc_iso()
 
-        if all(isinstance(x, (int, float)) for x in (close_prev, close_curr, volume, volSma)):
-            obv_delta = volume if close_curr > close_prev else (-volume if close_curr < close_prev else 0.0)
-            vs = clamp(100.0 * (obv_delta / max(volSma, 1.0)), -20.0, 20.0)
-        else:
-            # breadth-based fallback if available
-            bbar = m.get("breadth_barup_fast_pct")
-            if isinstance(bbar, (int, float)):
-                # map [0..100] to [-100..+100], then compress
-                vs = clamp(((float(bbar) * 2.0) - 100.0) / 5.0, -20.0, 20.0)
-            else:
-                vs = 0.0  # last resort: neutral red
+  eng["10m"] = {
+    "state": state,
+    "score": score,
+    "components": comps,
+    "lastChanged": last_changed,
+  }
+  j["engineLights"] = eng
+  j["metrics"] = metrics
 
-    # Fallback trend if missing
-    if not isinstance(ts, (int, float)):
-        ema_sign = m.get("ema_sign_10m") or m.get("ema_sign")
-        base = 45.0 if (isinstance(ema_sign, (int, float)) and ema_sign != 0) else 30.0
-        if isinstance(sq, (int, float)):
-            base += (100.0 - clamp(float(sq), 0.0, 100.0)) * 0.15
-        ts = clamp(base, 0.0, 100.0)
+  with open(OUT_PATH, "w", encoding="utf-8") as f:
+    json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
 
-    trend_color = color_trend(ts)
-    vol_color   = color_vol_scaled(vol_scaled)
-    sq_color    = color_squeeze(sq)
-    flow_color  = color_volume(vs)
-
-    # --- Lux mini-pill summary ---
-    j.setdefault("strategy", {})
-    j["strategy"]["trend10m"] = {
-        "state": trend_color,
-        "reason": (
-            f"Trend {float(ts):.1f} ({trend_color})"
-            + (f" | Vol({vol_color})" if isinstance(vol_color, str) else "")
-            + (f" | Sq({float(sq):.1f}% {sq_color})" if isinstance(sq, (int, float)) else "")
-            + (f" | Flow({float(vs):+.2f}% {flow_color})" if isinstance(vs, (int, float)) else "")
-        ),
-        "updatedAt": now,
-    }
-
-    # --- Numeric fields for Engine-Lights row ---
-    j["lux10m"] = {
-        "trendStrength": float(ts),
-        "volatility": float(vol_pct) if isinstance(vol_pct, (int, float)) else None,
-        "volatilityScaled": float(vol_scaled) if isinstance(vol_scaled, (int, float)) else None,
-        "squeezePct": float(sq) if isinstance(sq, (int, float)) else None,
-        "volumeSentiment": float(vs),
-    }
-
-    # Mirror to legacy FE paths
-    j.setdefault("engineLights", {})
-    j["engineLights"].setdefault("lux10m", {})
-    j["engineLights"]["lux10m"].update(j["lux10m"])
-    j["engineLights"].setdefault("metrics", {})
-    j["engineLights"]["metrics"].update({
-        "lux10m_trendStrength": j["lux10m"]["trendStrength"],
-        "lux10m_volatility": j["lux10m"]["volatility"],
-        "lux10m_volatilityScaled": j["lux10m"]["volatilityScaled"],
-        "lux10m_squeezePct": j["lux10m"]["squeezePct"],
-        "lux10m_volumeSentiment": j["lux10m"]["volumeSentiment"],
-    })
-
-    # --- 10m pills ---
-    sigs = dict(prev) if isinstance(prev, dict) else {}
-    overall = "bull" if trend_color == "green" else "bear"
-    sigs["sigOverall10m"] = {
-        "state": overall,
-        "lastChanged": carry_last_changed(sigs.get("sigOverall10m", {}), overall, now),
-    }
-
-    ema_sign = m.get("ema_sign_10m") or m.get("ema_sign")
-    if isinstance(ema_sign, (int, float)) and ema_sign > 0:
-        ema_state = "bull"
-    elif isinstance(ema_sign, (int, float)) and ema_sign < 0:
-        ema_state = "bear"
-    else:
-        ema_state = overall
-    sigs["sigEMA10m"] = {
-        "state": ema_state,
-        "lastChanged": carry_last_changed(sigs.get("sigEMA10m", {}), ema_state, now),
-    }
-
-    b_now, m_now = m.get("breadth_10m_pct"), m.get("momentum_10m_pct")
-    b_prev, m_prev = m.get("breadth_10m_pct_prev"), m.get("momentum_10m_pct_prev")
-    if all(isinstance(x, (int, float)) for x in (b_now, m_now, b_prev, m_prev)):
-        accel = (b_now + m_now) - (b_prev + m_prev)
-        acc_state = "bull" if accel >= 0 else "bear"
-    else:
-        acc_state = overall
-    sigs["sigAccel10m"] = {
-        "state": acc_state,
-        "lastChanged": carry_last_changed(sigs.get("sigAccel10m", {}), acc_state, now),
-    }
-
-    candle_up = m.get("candle_up_10m")
-    if candle_up is True:
-        c_state = "bull"
-    elif candle_up is False:
-        c_state = "bear"
-    else:
-        c_state = overall
-    sigs["sigCandle10m"] = {
-        "state": c_state,
-        "lastChanged": carry_last_changed(sigs.get("sigCandle10m", {}), c_state, now),
-    }
-
-    j["engineLights"]["signals"] = sigs
-    save_json(INTRADAY_PATH, j)
-    print("[10m] Lux summary + numeric fields + OBV flow written.")
+  print(f"[10m-trend] state={state} score={score} comps={comps} riskOn={risk_on_pct}")
+  return 0
 
 if __name__ == "__main__":
-    main()
+  raise SystemExit(main() or 0)
