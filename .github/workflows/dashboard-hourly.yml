@@ -18,7 +18,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: dashboard-hourly
+      group: dashboard-hourly-v2
       cancel-in-progress: true
 
     env:
@@ -61,17 +61,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade requests python-dateutil tzdata
 
-      # 1) Build hourly sectorCards source using latest 10m intraday payload
+      # 1) Build hourly sectorCards source using TRUE hourly engine (Polygon 1h)
       - name: Build sectorCards source (hourly groups)
         run: |
           set -euo pipefail
           mkdir -p data
-          echo "::notice:: FD_MAX_WORKERS=$FD_MAX_WORKERS FD_RETRY_MAX=$FD_RETRY_MAX H1D=$HOUR_LOOKBACK_DAYS H4D=$H4_LOOKBACK_DAYS"
+          echo "::notice:: FD_MAX_WORKERS=$FD_MAX_WORKERS FD_RETRY_MAX=$FD_RETRY_MAX HOUR_LOOKBACK_DAYS=$HOUR_LOOKBACK_DAYS H4D=$H4_LOOKBACK_DAYS"
           python -u scripts/build_outlook_hourly_source.py \
+            --sectors-dir "data/sectors" \
             --out "data/outlook_source.json"
           head -n 60 data/outlook_source.json || true
 
-      # 2) Normalize source (groups → sectorCards)
+      # 2) Normalize source (groups → sectorCards) – keep as-is
       - name: Normalize source (groups → sectorCards)
         run: |
           set -euo pipefail
@@ -184,7 +185,7 @@ jobs:
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h.txt
           cat data/heartbeat_1h.txt
 
-      # 8) Diff remote vs local (use heartbeat OR intraday)
+      # 8) Diff remote vs local
       - name: Detect change
         id: diff
         run: |
