@@ -34,7 +34,9 @@ jobs:
       FD_MAX_WORKERS:     "6"
       FD_RETRY_MAX:       "1"
       FORCE_PUBLISH:      "false"
-
+      POLY_KEY:           ${{ secrets.POLY_KEY }}
+      POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
+      
     steps:
       # 0) Start/diagnostics
       - name: Start timer (UTC)
