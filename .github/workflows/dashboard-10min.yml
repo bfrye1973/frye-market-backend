@@ -59,10 +59,9 @@ jobs:
         run: |
           set -e
           mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py \
-            --mode intraday10 \
-            --sectors-dir data/sectors \
-            --out data/outlook_source.json
+          python -u scripts/build_outlook_source_from_polygon.py ^
+            --sectors-dir data\sectors ^
+            --out data\outlook_source.json
           head -n 40 data/outlook_source.json || true
 
       # 4) Build intraday payload (10m final JSON)
