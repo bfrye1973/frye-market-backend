@@ -3,7 +3,7 @@ name: dashboard-10min (github-runner, debug-publish)
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 7 minutes
+    # Run every 7 minutes (24/7). You can tighten later if needed.
     - cron: "*/7 * * * *"
 
 jobs:
@@ -25,16 +25,18 @@ jobs:
       PYTHONUNBUFFERED: "1"
       FD_MAX_WORKERS: "3"
       FD_RETRY_MAX: "1"
+      POLY_KEY:        ${{ secrets.POLY_KEY }}
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
     steps:
-
       # 0) Start timer
       - name: Start timer (UTC)
         id: t0
         run: |
           set -e
-          echo "START_TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
-          echo "::notice::10m run started at $START_TS"
+          START_TS="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "START_TS=$START_TS" >> "$GITHUB_ENV"
+          echo "::notice:: 10m run started at $START_TS"
 
       # 1) Checkout backend repo
       - name: Checkout repository
@@ -42,7 +44,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 2) Python setup
+      # 2) Setup Python
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -54,17 +56,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade requests python-dateutil tzdata
 
-      # 3) Build sectorCards source (10m)
+      # 3) Build sectorCards source from Polygon (10m)
       - name: Build sectorCards source (intraday10)
         run: |
           set -e
           mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py ^
-            --sectors-dir data\sectors ^
-            --out data\outlook_source.json
+          python -u scripts/build_outlook_source_from_polygon.py \
+            --sectors-dir data/sectors \
+            --out data/outlook_source.json
+          echo "---- outlook_source.json (preview) ----"
           head -n 40 data/outlook_source.json || true
 
-      # 4) Build intraday payload (10m final JSON)
+      # 4) Build intraday payload (final 10m JSON)
       - name: Build intraday payload (10m)
         run: |
           set -e
@@ -72,61 +75,64 @@ jobs:
             --mode intraday \
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
-          echo "---- PREVIEW ----"
+          echo "---- outlook_intraday.json (preview) ----"
           head -n 60 data/outlook_intraday.json || true
 
-      # 5) Compute Lux (safe optional)
+      # 5) Compute Lux / Engine Lights (safe optional)
       - name: Compute Lux strategy (10m)
         run: |
+          set -e
           python -u scripts/compute_trend10m.py || true
 
-      # 6) Update pills (Δ5m/Δ10m)
+      # 6) Update 10m pills (Δ5m / Δ10m)
       - name: Update pills (10m always-on)
         run: |
+          set -e
           python -u scripts/update_pills_10m_state.py || true
 
       # 7) Validate required keys
-      - name: Validate keys
+      - name: Validate metrics & sectorCards
         run: |
-          python - <<'PY'
-          import json,sys
-          j=json.load(open("data/outlook_intraday.json"))
-          m=j.get("metrics") or {}
-          need=[
+          set -e
+          python - << 'PY'
+          import json, sys
+          p = "data/outlook_intraday.json"
+          j = json.load(open(p, "r", encoding="utf-8"))
+          m = j.get("metrics") or {}
+          sc = j.get("sectorCards") or []
+          need = [
             "breadth_10m_pct",
             "momentum_10m_pct",
             "squeeze_pct",
             "liquidity_psi",
-            "volatility_pct"
+            "volatility_pct",
           ]
-          miss=[k for k in need if k not in m]
-          sc=j.get("sectorCards") or []
-          if miss or len(sc)!=11:
-            print("missing", miss, "sectorCards", len(sc))
-            sys.exit(1)
-          print("OK metrics + 11 sectorCards")
+          missing = [k for k in need if k not in m]
+          if missing or not isinstance(sc, list) or len(sc) != 11:
+              print("missing:", missing, "sectorCards len=", len(sc))
+              sys.exit(1)
+          print("OK: metrics + 11 sectorCards present.")
           PY
 
-      # 8) Heartbeat timestamp
+      # 8) Heartbeat stamp
       - name: Write heartbeat
         run: |
+          set -e
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_10m.txt
           cat data/heartbeat_10m.txt
 
-      # 9) Detect changes vs LIVE branch
-      - name: Detect change
+      # 9) Detect change vs live branch
+      - name: Detect change vs LIVE
         id: diff
         run: |
           set -e
+          BR="$LIVE_BRANCH"
           CHANGED="true"
-          BR="${LIVE_BRANCH}"
 
           git fetch --no-tags --depth=1 origin "$BR" || true
 
-          # compare intraday JSON
           if git show "origin/$BR:data/outlook_intraday.json" > prev.json 2>/dev/null; then
             if cmp -s prev.json data/outlook_intraday.json; then
-              # Compare heartbeat
               if git show "origin/$BR:data/heartbeat_10m.txt" > prev.hb 2>/dev/null; then
                 if cmp -s prev.hb data/heartbeat_10m.txt; then
                   CHANGED="false"
@@ -135,32 +141,30 @@ jobs:
             fi
           fi
 
-          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
           echo "::notice:: changed=$CHANGED"
 
-      # 10) Publish live JSON if changed
+      # 10) Publish to data-live-10min only if changed
       - name: Publish live branch
         if: ${{ steps.diff.outputs.changed == 'true' }}
         run: |
           set -e
-          BR="${LIVE_BRANCH}"
+          BR="$LIVE_BRANCH"
 
-          echo "Staging files..."
-          TMP=$(mktemp -d)
-          cp data/outlook_intraday.json "$TMP/"
-          cp data/outlook_source.json "$TMP/" || true
-          cp data/heartbeat_10m.txt "$TMP/"
+          echo "Staging artifacts..."
+          TMP="$(mktemp -d)"
+          cp data/outlook_intraday.json "$TMP/outlook_intraday.json"
+          cp data/outlook_source.json   "$TMP/outlook_source.json"   || true
+          cp data/heartbeat_10m.txt     "$TMP/heartbeat_10m.txt"
 
-          # Reset repo clean
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
 
           git fetch --depth=1 origin "$BR" || true
-          git rm -r --cached . || true
+          git rm -r --cached . 2>/dev/null || true
           git reset --hard
           git clean -fdx
 
-          # Checkout the branch
           if git ls-remote --exit-code --heads origin "$BR" >/dev/null 2>&1; then
             git checkout -B "$BR" "origin/$BR"
           else
@@ -176,5 +180,7 @@ jobs:
           git commit -m "10m publish $START_TS" || exit 0
           git push origin "$BR"
 
+      # 11) Done
       - name: Done
-        run: echo "::notice::10m job completed"
+        run: |
+          echo "::notice:: 10m job completed"
