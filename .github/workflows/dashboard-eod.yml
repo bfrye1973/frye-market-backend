@@ -49,9 +49,11 @@ jobs:
           set -euo pipefail
           mkdir -p data
           python -u scripts/build_outlook_source_from_polygon.py \
-            --mode daily --out data/outlook_source.json
+            --sectors-dir data/sectors \
+            --days 20 \
+            --out data/outlook_source.json
           head -n 60 data/outlook_source.json || true
-
+          
       # 2) Normalize to sectorCards
       - name: Normalize sectorCards source
         run: |
