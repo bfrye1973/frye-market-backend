@@ -11,6 +11,13 @@ signals used by Engine Lights:
 - sigSMI1hBullCross / sigSMI1hBearCross
 
 All other contract fields are untouched.
+
+Updates:
+- Uses Lux-style PSI on SPY 1h closes (same as EOD) to compute:
+    * metrics["squeeze_psi_1h_pct"]  (tightness 0..100)
+    * metrics["squeeze_1h_pct"]      (expansion 0..100 = 100 - psi)
+- SectorDirection1h.risingPct uses breadth ≥55 AND momentum ≥55 (per sector).
+- RiskOn1h.riskOnPct uses OFFENSIVE breadth ≥55 and DEFENSIVE breadth ≤45.
 """
 
 from __future__ import annotations
@@ -155,6 +162,38 @@ def smi_kd_series(H: List[float], L: List[float], C: List[float],
         D.append(e)
     return K, D
 
+# --------------------------- Lux PSI (daily-style) ---------------------------
+
+def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
+    """
+    Lux Squeeze Index style PSI:
+      - running max/min envelope with convergence factor
+      - log(span) series
+      - correlation(diff vs index) → r
+      - psi = -50*r + 50 → 0..100 (higher = tighter)
+    """
+    if not closes or len(closes) < max(5, length + 2):
+        return None
+    mx = mn = None
+    diffs: List[float] = []
+    for src in map(float, closes):
+        mx = src if mx is None else max(mx - (mx - src) / conv, src)
+        mn = src if mn is None else min(mn + (src - mn) / conv, src)
+        span = max(mx - mn, 1e-12)
+        diffs.append(math.log(span))
+    n = length
+    xs = list(range(n))
+    win = diffs[-n:]
+    if len(win) < n:
+        return None
+    xbar = sum(xs) / n
+    ybar = sum(win) / n
+    num = sum((x - xbar) * (y - ybar) for x, y in zip(xs, win))
+    den = (sum((x - xbar) ** 2 for x in xs) * sum((y - ybar) ** 2 for y in win)) or 1.0
+    r = num / math.sqrt(den)
+    psi = -50.0 * r + 50.0
+    return float(clamp(psi, 0.0, 100.0))
+
 # --------------------------- Sector cards helper ---------------------------
 
 def groups_to_sector_cards(groups: Dict[str, dict]) -> List[dict]:
@@ -241,7 +280,7 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         except Exception:
             cards = []; cards_fresh = False
 
-    # 2) Rising & Risk-On
+    # 2) Rising & Risk-On (55/45 thresholds)
     NH=NL=UP=DN=0.0
     for c in cards or []:
         NH += float(c.get("nh",0)); NL += float(c.get("nl",0))
@@ -249,26 +288,32 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     breadth_slow  = round(pct(NH, NH+NL), 2) if (NH+NL)>0 else 50.0
     momentum_slow = round(pct(UP, UP+DN), 2) if (UP+DN)>0 else 50.0
 
+    # SectorDir1h: sectors where breadth>=55 AND momentum>=55
     good = total = 0
     for c in cards or []:
         bp = c.get("breadth_pct")
-        if isinstance(bp, (int, float)):
+        mp = c.get("momentum_pct")
+        if isinstance(bp, (int,float)) and isinstance(mp, (int,float)):
             total += 1
-            if bp > 50.0: good += 1
-    rising_pct = round(pct(good, total), 2)
+            if bp >= 55.0 and mp >= 55.0:
+                good += 1
+    rising_pct = round(pct(good, total), 2) if total>0 else 50.0
 
+    # RiskOn1h: OFFENSIVE >=55, DEFENSIVE <=45
     by = {(c.get("sector") or "").strip().lower(): c for c in cards or []}
     score = cons = 0
     for s in OFFENSIVE:
         bp = by.get(s, {}).get("breadth_pct")
-        if isinstance(bp, (int, float)):
+        if isinstance(bp, (int,float)):
             cons += 1
-            if bp > 50.0: score += 1
+            if bp >= 55.0:
+                score += 1
     for s in DEFENSIVE:
         bp = by.get(s, {}).get("breadth_pct")
-        if isinstance(bp, (int, float)):
+        if isinstance(bp, (int,float)):
             cons += 1
-            if bp < 50.0: score += 1
+            if bp <= 45.0:
+                score += 1
     risk_on_pct = round(pct(score, cons), 2) if cons > 0 else 50.0
 
     # 3) SPY 1h & 4h bars
@@ -326,10 +371,15 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
             if k4 and d4:
                 smi4h = clamp(50.0 + 0.5 * (k4[-1] - d4[-1]), 0.0, 100.0)
 
-        wE, w1, w4 = W_EMA_1H, W_SMI1H, min(W_SMI4H, 0.20)
+        # Composite: 0.60 EMA + 0.15 SMI(1h) + 0.25 SMI(4h), or simpler if missing
         if smi1h is None and smi4h is None:
             momentum_combo_1h = ema_score
         else:
+            wE, w1, w4 = 0.60, 0.15, 0.25
+            if smi1h is None:
+                wE, w1, w4 = 0.70, 0.00, 0.30
+            if smi4h is None:
+                wE, w1, w4 = 0.70, 0.30, 0.00
             momentum_combo_1h = (wE * ema_score
                                  + w1 * (smi1h if smi1h is not None else ema_score)
                                  + w4 * (smi4h if smi4h is not None else ema_score))
@@ -340,18 +390,25 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     breadth_1h  = breadth_slow
     momentum_1h_legacy = momentum_slow
 
-    # 3c) Squeeze 1h (TradingView-style: KC vs BB, 20 periods)
+    # 3c) Squeeze 1h — Lux PSI on SPY 1h closes (EOD-style)
     squeeze_1h = 50.0
+    squeeze_psi_1h = None
     if len(spy_1h) >= 25:
+        C = [b["close"] for b in spy_1h]
+        psi = lux_psi_from_closes(C, conv=50, length=20)
+        if isinstance(psi, (int,float)):
+            squeeze_psi_1h = psi
+            squeeze_1h = clamp(100.0 - psi, 0.0, 100.0)
+    # fallback: original KC/BB logic if PSI is None
+    if squeeze_psi_1h is None and len(spy_1h) >= 25:
         C = [b["close"] for b in spy_1h]
         H = [b["high"]  for b in spy_1h]
         L = [b["low"]   for b in spy_1h]
 
         period = 20
         bb_mult = 2.0     # BB uses 2σ
-        kc_mult = 1.5     # Keltner uses 1.5×ATR (typical TV default)
+        kc_mult = 1.5     # Keltner uses 1.5×ATR
 
-        # stdev of last 'period' closes
         def stddev_last(vals, p):
             if len(vals) < p: return None
             w = vals[-p:]
@@ -364,13 +421,10 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         atr20 = ema_last(trs, period) if trs else None
 
         if isinstance(sd20, (int,float)) and isinstance(atr20,(int,float)) and atr20>0:
-            bb_width = 2.0 * bb_mult * sd20         # upper-lower (BB)
-            kc_width = 2.0 * kc_mult * atr20        # upper-lower (KC)
-            # squeeze % = portion of KC width that BB is *below* KC
-            # 0% → BB >= KC (no squeeze), 100% → BB << KC (tight)
+            bb_width = 2.0 * bb_mult * sd20
+            kc_width = 2.0 * kc_mult * atr20
             squeeze_1h = clamp(100.0 * max(0.0, kc_width - bb_width) / max(kc_width, 1e-9), 0.0, 100.0)
         else:
-            # fall back gently
             squeeze_1h = 50.0
 
     # 3d) Liquidity / Volatility
@@ -440,7 +494,8 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         "breadth_bar_1h_pct_fast": None,
         "momentum_1h_pct": momentum_1h_legacy,
         "momentum_combo_1h_pct": momentum_combo_1h,
-        "squeeze_1h_pct": squeeze_1h,                      # <<<<<< CORRECTED TV-STYLE SQUEEZE
+        "squeeze_1h_pct": squeeze_1h,                      # expansion% 0..100
+        "squeeze_psi_1h_pct": squeeze_psi_1h,              # tightness 0..100
         "liquidity_1h": liquidity_1h,
         "volatility_1h_pct": round(volatility_1h, 3),
         "volatility_1h_scaled": round(volatility_1h * 6.25, 2),
@@ -465,8 +520,9 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         "meta": {"cards_fresh": bool(cards_fresh), "after_hours": False},
     }
 
-    print(f"[1h] breadth_1h={breadth_1h} mom_combo_1h={momentum_combo_1h} squeeze_1h={squeeze_1h} "
-          f"liq_1h={liquidity_1h} vol_1h_scaled={out['metrics']['volatility_1h_scaled']} overall={state}/{score}")
+    print(f"[1h] breadth_1h={breadth_1h} mom_combo_1h={momentum_combo_1h} squeeze_1h(expansion)={squeeze_1h} "
+          f"liq_1h={liquidity_1h} vol_1h_scaled={out['metrics']['volatility_1h_scaled']} overall={state}/{score} "
+          f"psi_1h={squeeze_psi_1h}", flush=True)
     return out
 
 # ------------------------------ CLI ------------------------------
