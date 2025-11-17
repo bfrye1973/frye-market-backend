@@ -3,174 +3,179 @@ name: dashboard-10min (github-runner, debug-publish)
 on:
   workflow_dispatch: {}
   schedule:
-    # US market window (Standard Time): 07:30–20:00 AZ (12:30–01:00 UTC)
-    - cron: "30-55/5 12 * * 1-5"   # 12:30–12:55 UTC
-    - cron: "*/5 13-23 * * 1-5"    # 13:00–23:55 UTC
-    - cron: "*/5 0-1 * * 2-6"      # 00:00–01:00 UTC (covers 20:00 AZ close)
+    # Every 7 minutes
+    - cron: "*/7 * * * *"
 
 jobs:
-  tenmin:
+  build_and_publish_intraday:
     name: Build & Publish Intraday (10m — debug)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+
     permissions:
       contents: write
+
     concurrency:
-      group: dashboard-10min-v3
+      group: dashboard-10min
       cancel-in-progress: true
 
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-10min
       PYTHONUNBUFFERED: "1"
-
-      # Intraday tuning
-      FD_SCALPER_ENABLE: "true"
-      FD_SCALPER_LOOKBACK: "3"
-      FD_LOOKBACK_DAYS: "20"
-      FD_MAX_WORKERS: "10"      # bumped up for speed
+      FD_MAX_WORKERS: "3"
       FD_RETRY_MAX: "1"
 
-      # Auth keys
-      POLY_KEY: ${{ secrets.POLY_KEY }}
-      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-
     steps:
-      - name: Checkout repository (shallow)
+
+      # 0) Start timer
+      - name: Start timer (UTC)
+        id: t0
+        run: |
+          set -e
+          echo "START_TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
+          echo "::notice::10m run started at $START_TS"
+
+      # 1) Checkout backend repo
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
+      # 2) Python setup
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Build 10m sector source from Polygon
+      - name: Install dependencies
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          pip install --upgrade requests python-dateutil tzdata
+
+      # 3) Build sectorCards source (10m)
       - name: Build sectorCards source (intraday10)
         run: |
+          set -e
           mkdir -p data
           python -u scripts/build_outlook_source_from_polygon.py \
+            --mode intraday10 \
             --sectors-dir data/sectors \
             --out data/outlook_source.json
+          head -n 40 data/outlook_source.json || true
 
-      # Build intraday dashboard payload
+      # 4) Build intraday payload (10m final JSON)
       - name: Build intraday payload (10m)
         run: |
+          set -e
           python -u scripts/make_dashboard.py \
             --mode intraday \
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
+          echo "---- PREVIEW ----"
+          head -n 60 data/outlook_intraday.json || true
 
-      # Compute 10m trend / engine-lights
+      # 5) Compute Lux (safe optional)
       - name: Compute Lux strategy (10m)
         run: |
-          python -u scripts/compute_trend10m.py
+          python -u scripts/compute_trend10m.py || true
 
-      # Update pills (Δ5m / Δ10m) – always-on
+      # 6) Update pills (Δ5m/Δ10m)
       - name: Update pills (10m always-on)
         run: |
-          python -u scripts/update_pills_10m_state.py
+          python -u scripts/update_pills_10m_state.py || true
 
-      # Validate required keys in intraday payload
-      - name: Validate required keys
+      # 7) Validate required keys
+      - name: Validate keys
         run: |
-          python - << 'PY'
-          import json, sys
-          j = json.load(open("data/outlook_intraday.json","r",encoding="utf-8"))
-          m = j.get("metrics") or {}
-          need = ["breadth_10m_pct","momentum_10m_pct","squeeze_pct","liquidity_psi","volatility_pct"]
-          miss = [k for k in need if k not in m]
-          sc = j.get("sectorCards") or []
-          if miss:
-              print("missing metrics:", miss)
-              sys.exit(1)
-          print("OK metrics & sectors:", len(sc))
+          python - <<'PY'
+          import json,sys
+          j=json.load(open("data/outlook_intraday.json"))
+          m=j.get("metrics") or {}
+          need=[
+            "breadth_10m_pct",
+            "momentum_10m_pct",
+            "squeeze_pct",
+            "liquidity_psi",
+            "volatility_pct"
+          ]
+          miss=[k for k in need if k not in m]
+          sc=j.get("sectorCards") or []
+          if miss or len(sc)!=11:
+            print("missing", miss, "sectorCards", len(sc))
+            sys.exit(1)
+          print("OK metrics + 11 sectorCards")
           PY
 
-      # Write heartbeat (AZ time)
-      - name: Write heartbeat (AZ time marker)
+      # 8) Heartbeat timestamp
+      - name: Write heartbeat
         run: |
-          python - << 'PY'
-          from datetime import datetime
-          import zoneinfo, pathlib
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_10m.txt
+          cat data/heartbeat_10m.txt
 
-          tz = zoneinfo.ZoneInfo("America/Phoenix")
-          now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
-          pathlib.Path("data").mkdir(exist_ok=True)
-          open("data/heartbeat_10m.txt","w",encoding="utf-8").write(now)
-          print("heartbeat_10m:", now)
-          PY
-
-      # Stage artifacts for publish
-      - name: Stage artifacts
-        run: |
-          mkdir -p publish
-          cp -f data/outlook_source.json   publish/outlook_source.json
-          cp -f data/outlook_intraday.json publish/outlook_intraday.json
-          cp -f data/heartbeat_10m.txt     publish/heartbeat_10m.txt
-          ls -l publish
-
-      # Detect changes vs remote (intraday + heartbeat)
-      - name: Detect change vs remote (compare intraday + heartbeat)
+      # 9) Detect changes vs LIVE branch
+      - name: Detect change
         id: diff
         run: |
-          echo "==== DIFF against $LIVE_BRANCH ===="
-          git fetch origin "$LIVE_BRANCH" --depth=1 || echo "(no remote branch yet)"
-          CHANGED=true
-          rm -rf _remote_tmp
-          mkdir -p _remote_tmp
-          if git ls-remote --exit-code --heads origin "$LIVE_BRANCH" >/dev/null 2>&1; then
-            git --work-tree="_remote_tmp" checkout "origin/$LIVE_BRANCH" -- "data/outlook_intraday.json" 2>/dev/null || echo "(remote intraday missing)"
-            git --work-tree="_remote_tmp" checkout "origin/$LIVE_BRANCH" -- "data/heartbeat_10m.txt" 2>/dev/null || echo "(remote heartbeat missing)"
+          set -e
+          CHANGED="true"
+          BR="${LIVE_BRANCH}"
 
-            JSON_SAME=1
-            HB_SAME=1
+          git fetch --no-tags --depth=1 origin "$BR" || true
 
-            if [ -f "_remote_tmp/data/outlook_intraday.json" ]; then
-              cmp -s "publish/outlook_intraday.json" "_remote_tmp/data/outlook_intraday.json" && JSON_SAME=0 || JSON_SAME=1
+          # compare intraday JSON
+          if git show "origin/$BR:data/outlook_intraday.json" > prev.json 2>/dev/null; then
+            if cmp -s prev.json data/outlook_intraday.json; then
+              # Compare heartbeat
+              if git show "origin/$BR:data/heartbeat_10m.txt" > prev.hb 2>/dev/null; then
+                if cmp -s prev.hb data/heartbeat_10m.txt; then
+                  CHANGED="false"
+                fi
+              fi
             fi
-            if [ -f "_remote_tmp/data/heartbeat_10m.txt" ]; then
-              cmp -s "publish/heartbeat_10m.txt" "_remote_tmp/data/heartbeat_10m.txt" && HB_SAME=0 || HB_SAME=1
-            fi
-
-            if [ "$JSON_SAME" = "0" ] && [ "$HB_SAME" = "0" ]; then
-              echo "(no differences in intraday or heartbeat)"
-              CHANGED=false
-            else
-              echo "(differences detected)"
-              CHANGED=true
-            fi
-          else
-            echo "(first publish for this branch)"
           fi
-          echo "changed=${CHANGED}"
-          echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
 
-      # Publish live branch (safe)
-      - name: Publish (debug & push verbose)
-        if: steps.diff.outputs.changed == 'true'
+          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+          echo "::notice:: changed=$CHANGED"
+
+      # 10) Publish live JSON if changed
+      - name: Publish live branch
+        if: ${{ steps.diff.outputs.changed == 'true' }}
         run: |
-          echo "==== PUBLISH DEBUG START ===="
+          set -e
+          BR="${LIVE_BRANCH}"
+
+          echo "Staging files..."
+          TMP=$(mktemp -d)
+          cp data/outlook_intraday.json "$TMP/"
+          cp data/outlook_source.json "$TMP/" || true
+          cp data/heartbeat_10m.txt "$TMP/"
+
+          # Reset repo clean
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot"
 
-          git fetch origin "$LIVE_BRANCH" --depth=1 || echo "(new branch)"
-          git checkout -B "$LIVE_BRANCH" "origin/$LIVE_BRANCH" || git checkout -B "$LIVE_BRANCH"
-          git branch --set-upstream-to="origin/$LIVE_BRANCH" "$LIVE_BRANCH" || echo "(no upstream yet)"
+          git fetch --depth=1 origin "$BR" || true
+          git rm -r --cached . || true
+          git reset --hard
+          git clean -fdx
+
+          # Checkout the branch
+          if git ls-remote --exit-code --heads origin "$BR" >/dev/null 2>&1; then
+            git checkout -B "$BR" "origin/$BR"
+          else
+            git checkout -B "$BR"
+          fi
 
           mkdir -p data
-          cp -f publish/outlook_source.json   data/outlook_source.json
-          cp -f publish/outlook_intraday.json data/outlook_intraday.json
-          cp -f publish/heartbeat_10m.txt     data/heartbeat_10m.txt
+          mv "$TMP/outlook_intraday.json" data/outlook_intraday.json
+          [ -f "$TMP/outlook_source.json" ] && mv "$TMP/outlook_source.json" data/outlook_source.json || true
+          mv "$TMP/heartbeat_10m.txt"      data/heartbeat_10m.txt
 
-          git add data/outlook_source.json data/outlook_intraday.json data/heartbeat_10m.txt
-
-          git commit -m "10m publish $(date -u +"%Y-%m-%dT%H:%M:%SZ")" || { echo "nothing to commit"; exit 0; }
-
-          git push --force-with-lease origin "$LIVE_BRANCH"
-          echo "==== PUBLISH DEBUG END ===="
+          git add -A
+          git commit -m "10m publish $START_TS" || exit 0
+          git push origin "$BR"
 
       - name: Done
-        run: |
-          echo "DONE $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        run: echo "::notice::10m job completed"
