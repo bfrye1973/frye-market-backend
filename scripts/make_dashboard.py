@@ -62,21 +62,67 @@ ORDER = [
 ]
 
 # -------------------------------------------------------------------
-# Helper imports (config-driven 10m outlook)
+# Config-driven 10m outlook thresholds
 # -------------------------------------------------------------------
 
-HERE = os.path.dirname(__file__)
-if HERE not in sys.path:
-    sys.path.append(HERE)
+# We expect: config/sector_outlook_10m.json at repo root.
+# Example:
+# {
+#   "bullish_breadth": 52,
+#   "bullish_momentum": 52,
+#   "bearish_breadth": 48,
+#   "bearish_momentum": 48,
+#   "default": "Neutral"
+# }
 
-try:
-    # This helper reads config/sector_outlook_10m.json and exposes label_outlook_10m(card)
-    from sector_outlook_10m import label_outlook_10m
-except Exception:
-    # Safe fallback: if the helper or config is missing, just keep existing
-    # outlook field or default to "Neutral". This prevents crashes.
-    def label_outlook_10m(card: Dict[str, Any]) -> str:
-        return card.get("outlook") or "Neutral"
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+OUTLOOK_CFG_PATH = os.path.join(ROOT, "config", "sector_outlook_10m.json")
+
+DEFAULT_OUTLOOK_CFG: Dict[str, Any] = {
+    "bullish_breadth": 55.0,
+    "bullish_momentum": 55.0,
+    "bearish_breadth": 45.0,
+    "bearish_momentum": 45.0,
+    "default": "Neutral",
+}
+
+
+def load_outlook_cfg() -> Dict[str, Any]:
+    try:
+        with open(OUTLOOK_CFG_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        # Merge onto defaults so missing keys don't crash anything
+        out = dict(DEFAULT_OUTLOOK_CFG)
+        out.update({k: v for k, v in cfg.items() if k in DEFAULT_OUTLOOK_CFG})
+        return out
+    except Exception as e:
+        print(f"[warn] sector_outlook_10m.json not found or invalid: {e}. Using defaults.", file=sys.stderr)
+        return dict(DEFAULT_OUTLOOK_CFG)
+
+
+OUTLOOK_CFG = load_outlook_cfg()
+
+
+def label_outlook_10m(card: Dict[str, Any]) -> str:
+    """
+    10m sector outlook for Index Sectors row.
+
+    Tuned via config/sector_outlook_10m.json:
+      - Bullish: breadth >= bullish_breadth AND momentum >= bullish_momentum
+      - Bearish: breadth <= bearish_breadth AND momentum <= bearish_momentum
+      - Else: default (usually "Neutral")
+    """
+    try:
+        b = float(card.get("breadth_pct", 0.0))
+        m = float(card.get("momentum_pct", 0.0))
+    except Exception:
+        return OUTLOOK_CFG["default"]
+
+    if b >= OUTLOOK_CFG["bullish_breadth"] and m >= OUTLOOK_CFG["bullish_momentum"]:
+        return "Bullish"
+    if b <= OUTLOOK_CFG["bearish_breadth"] and m <= OUTLOOK_CFG["bearish_momentum"]:
+        return "Bearish"
+    return OUTLOOK_CFG["default"]
 
 
 # -------------------------------------------------------------------
@@ -186,9 +232,9 @@ def compose_intraday(src: Dict[str, Any]) -> Dict[str, Any]:
     """
     cards = ensure_sector_cards(src)
 
-    # Attach or override outlook for 10m cards using config thresholds.
+    # Attach or override outlook for 10m cards using config thresholds,
+    # but only if upstream hasn't already set an outlook.
     for c in cards:
-        # Only overwrite if not already labeled; if upstream sets it, we honor it.
         if "outlook" not in c:
             c["outlook"] = label_outlook_10m(c)
 
@@ -271,7 +317,8 @@ def main():
     ap = argparse.ArgumentParser(description="Compose dashboard payloads.")
     ap.add_argument("--mode", choices=["intraday", "hourly", "eod"], required=True)
     ap.add_argument("--source", required=True)
-    ap.add_argument("--out", required=True)
+    ap_argument = "--out"  # to keep line short
+    ap.add_argument(ap_argument, required=True)
     args = ap.parse_args()
 
     src = load_json(args.source)
