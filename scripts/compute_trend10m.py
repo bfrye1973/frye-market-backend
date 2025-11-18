@@ -1,42 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — compute_trend10m.py (R12.7 with 55/45 thresholds)
+Ferrari Dashboard — compute_trend10m.py (R12.7 Fast Bee Engine)
 
-Goal
-----
-Post-process data/outlook_intraday.json (10m snapshot) and:
+Post-processes data/outlook_intraday.json to compute:
 
-  - Compute fast 10m metrics for Market Meter:
-      * breadth_10m_pct
-      * momentum_10m_pct / momentum_combo_10m_pct
-      * squeeze_psi_10m_pct / squeeze_expansion_pct / squeeze_pct
-      * liquidity_psi
-      * volatility_pct
-      * breadth_align_fast_pct
-      * ema_sign / ema_gap_pct
-      * riskOn_10m_pct
+- metrics.breadth_10m_pct        (fast ETF breadth)
+- metrics.momentum_10m_pct
+- metrics.momentum_combo_10m_pct
+- metrics.squeeze_psi_10m_pct    (Lux PSI tightness 0..100)
+- metrics.squeeze_pct            (expansion 0..100 = 100 - psi)
+- metrics.squeeze_expansion_pct  (same as squeeze_pct)
+- metrics.liquidity_psi          (vol EMA3/EMA12)
+- metrics.volatility_pct         (ATR3 % on 10m)
+- metrics.breadth_align_fast_pct (QA)
+- metrics.riskOn_10m_pct
 
-  - Compute 10m intraday blocks:
-      * sectorDirection10m.risingPct (breadth≥55 & momentum≥55)
-      * riskOn10m.riskOnPct        (offensive≥55, defensive≤45)
-      * overall10m { state, score, components }
-      * engineLights["10m"] mirroring overall10m (+ lastChanged)
-
-Inputs
-------
-- data/outlook_intraday.json, with at minimum:
-    metrics: {}
-    sectorCards: [ {sector,breadth_pct,momentum_pct,nh,nl,up,down}, ... ]
-- Polygon API key via:
-    POLY_KEY or POLYGON_API_KEY or POLYGON_API
-
-Outputs
--------
-- Writes updated metrics + intraday + engineLights["10m"] back to
-  data/outlook_intraday.json in-place.
-
-This script is idempotent and safe to run multiple times.
+- intraday.sectorDirection10m.risingPct  (breadth>=55 & momentum>=55)
+- intraday.riskOn10m.riskOnPct           (offense>=55, defense<=45)
+- intraday.overall10m.{state,score,components,lastChanged}
+- engineLights["10m"] mirror of overall10m
 """
 
 from __future__ import annotations
@@ -46,73 +29,43 @@ import math
 import os
 import sys
 import time
-import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-UTC = timezone.utc
+INTRADAY_PATH = "data/outlook_intraday.json"
+INTRADAY_URL_DEFAULT = "https://frye-market-backend-1.onrender.com/live/intraday"
+
+POLY_10M_URL = (
+    "https://api.polygon.io/v2/aggs/ticker/{sym}/range/10/minute/{start}/{end}"
+    "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
+)
+
+SECTOR_ETFS = {
+    "XLK": "information technology",
+    "XLB": "materials",
+    "XLV": "health care",
+    "XLC": "communication services",
+    "XLRE": "real estate",
+    "XLE": "energy",
+    "XLP": "consumer staples",
+    "XLY": "consumer discretionary",
+    "XLF": "financials",
+    "XLU": "utilities",
+    "XLI": "industrials",
+}
+
+OFFENSIVE = {"information technology", "consumer discretionary", "communication services", "industrials"}
+DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
+
+# Overall weights (same as 1h/EOD)
+W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 15, 10, 10, 5
+FULL_EMA_DIST = 0.60
+
+# ------------------------------ Helpers ------------------------------
 
 def now_utc_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-# ------------------------ Polygon helpers ------------------------
-
-def choose_poly_key() -> Optional[str]:
-    for name in ("POLY_KEY", "POLYGON_API_KEY", "POLYGON_API"):
-        v = os.environ.get(name)
-        if v:
-            print("[10m-trend] using key from", name, flush=True)
-            return v
-    print("[10m-trend] WARNING: no Polygon key in POLY_KEY/POLYGON_API_KEY/POLYGON_API", flush=True)
-    return None
-
-POLY_KEY = choose_poly_key()
-POLY_BASE = "https://api.polygon.io"
-
-def http_get(url: str, timeout: int = 20) -> str:
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "ferrari-dashboard/10m-trend", "Accept-Encoding": "gzip"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = resp.read()
-        try:
-            import gzip
-            if resp.getheader("Content-Encoding") == "gzip":
-                data = gzip.decompress(data)
-        except Exception:
-            pass
-        return data.decode("utf-8")
-
-def poly_json(url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    if params is None:
-        params = {}
-    if POLY_KEY:
-        params["apiKey"] = POLY_KEY
-    qs = urllib.parse.urlencode(params)
-    full = f"{url}?{qs}" if qs else url
-    for attempt in range(1, 5):
-        try:
-            raw = http_get(full, timeout=22)
-            return json.loads(raw)
-        except urllib.error.HTTPError as e:
-            if e.code == 401:
-                print("[10m-trend] Polygon 401 -- check key/plan.", file=sys.stderr)
-                break
-            if e.code in (429, 500, 502, 503, 504) and attempt < 4:
-                time.sleep(0.35 * (1.6 ** (attempt - 1)))
-                continue
-            break
-        except (urllib.error.URLError, TimeoutError):
-            if attempt < 4:
-                time.sleep(0.35 * (1.6 ** (attempt - 1)))
-                continue
-            break
-    return {}
-
-# ------------------------ math helpers ------------------------
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def clamp(x: float, lo: float, hi: float) -> float:
     try:
@@ -120,104 +73,102 @@ def clamp(x: float, lo: float, hi: float) -> float:
     except Exception:
         return lo
 
-def pct(num: float, den: float) -> float:
+def pct(a: float, b: float) -> float:
     try:
-        if den <= 0:
+        if b <= 0:
             return 0.0
-        return 100.0 * float(num) / float(den)
+        return 100.0 * float(a) / float(b)
     except Exception:
         return 0.0
 
-def to_num(x, default=0.0) -> float:
+def load_json(path: str) -> dict:
     try:
-        v = float(x)
-        if math.isnan(v):
-            return default
-        return v
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception:
-        return default
+        return {}
+
+def save_json(path: str, obj: dict) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
+
+def fetch_json(url: str, timeout: int = 30) -> dict:
+    req = urllib.request.Request(url, headers={"User-Agent":"compute-trend10m/1.0","Cache-Control":"no-store"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+def fetch_polygon_bars(sym: str, lookback_days: int = 5) -> List[dict]:
+    key = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_KEY") or os.environ.get("POLY_API")
+    if not key:
+        print("[10m] WARNING: no Polygon key found in env", file=sys.stderr)
+        return []
+    end = datetime.utcnow().date()
+    start = end - timedelta(days=lookback_days)
+    url = POLY_10M_URL.format(sym=sym, start=start, end=end, key=key)
+    try:
+        js = fetch_json(url, timeout=25)
+    except Exception as e:
+        print(f"[10m] Polygon fetch error for {sym}: {e}", file=sys.stderr)
+        return []
+    rows = js.get("results") or []
+    out: List[dict] = []
+    for r in rows:
+        try:
+            t = int(r.get("t", 0)) // 1000
+            out.append({
+                "time": t,
+                "open": float(r.get("o", 0)),
+                "high": float(r.get("h", 0)),
+                "low":  float(r.get("l", 0)),
+                "close":float(r.get("c", 0)),
+                "volume": float(r.get("v", 0)),
+            })
+        except Exception:
+            continue
+    # drop in-flight bar
+    if out:
+        bucket = 600
+        now = int(time.time())
+        cur  = (now // bucket) * bucket
+        if (out[-1]["time"] // bucket) * bucket == cur:
+            out = out[:-1]
+    return out
 
 def ema_series(values: List[float], span: int) -> List[float]:
     k = 2.0 / (span + 1.0)
     out: List[float] = []
     e: Optional[float] = None
     for v in values:
-        e = v if e is None else e + k * (v - e)
+        e = v if e is None else e + k*(v - e)
         out.append(e)
     return out
 
 def ema_last(values: List[float], span: int) -> Optional[float]:
-    s = ema_series(values, span)
-    return s[-1] if s else None
+    if not values:
+        return None
+    return ema_series(values, span)[-1]
 
-# ------------------------ 10m bars ------------------------
+def tr_series(H: List[float], L: List[float], C: List[float]) -> List[float]:
+    return [max(H[i]-L[i], abs(H[i]-C[i-1]), abs(L[i]-C[i-1])) for i in range(1, len(C))]
 
-def last_closed_10m(bars: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    if not bars:
-        return []
-    BUCKET = 600  # 10 min
-    out = list(bars)
-    now = int(time.time())
-    curr_bucket = (now // BUCKET) * BUCKET
-    last = int(out[-1].get("time") or out[-1].get("t") or 0)
-    # assume last["time"] is seconds; if ms, convert
-    if last > 2_000_000_000:
-        last //= 1000
-    if (last // BUCKET) * BUCKET == curr_bucket:
-        out = out[:-1]
-    return out
-
-def fetch_10m_bars(symbol: str, minutes_back: int = 600) -> List[Dict[str, Any]]:
-    """
-    Fetch ~minutes_back of 10m bars for symbol.
-    """
-    end_date = datetime.now(UTC).date()
-    # approx days = minutes_back/60/6 + pad
-    days = max(1, minutes_back // (60 * 6) + 2)
-    start_date = end_date - timedelta(days=days)
-    url = f"{POLY_BASE}/v2/aggs/ticker/{symbol}/range/10/minute/{start_date:%Y-%m-%d}/{end_date:%Y-%m-%d}"
-    js = poly_json(url, {"adjusted": "true", "sort": "asc", "limit": 50000})
-    if not js or js.get("status") != "OK":
-        return []
-    out: List[Dict[str, Any]] = []
-    for r in js.get("results", []) or []:
-        try:
-            out.append({
-                "time": int(r.get("t", 0)) // 1000,
-                "open": float(r.get("o", 0.0)),
-                "high": float(r.get("h", 0.0)),
-                "low":  float(r.get("l", 0.0)),
-                "close":float(r.get("c", 0.0)),
-                "volume":float(r.get("v", 0.0)),
-            })
-        except Exception:
-            continue
-    out.sort(key=lambda b: b["time"])
-    return last_closed_10m(out)
-
-# ------------------------ SMI helpers ------------------------
-
-def smi_kd_series(H: List[float], L: List[float], C: List[float],
-                  k_len: int = 12, d_len: int = 7, ema_len: int = 5) -> Tuple[List[float], List[float]]:
+def smi_kd(H: List[float], L: List[float], C: List[float],
+           k_len: int = 12, d_len: int = 7, ema_len: int = 5) -> Tuple[List[float], List[float]]:
     n = len(C)
     if n < max(k_len, d_len) + 6:
         return [], []
-    HH: List[float] = []
-    LL: List[float] = []
+    HH=[]; LL=[]
     for i in range(n):
         i0 = max(0, i - (k_len - 1))
-        HH.append(max(H[i0:i+1]))
-        LL.append(min(L[i0:i+1]))
-    mid = [(HH[i] + LL[i]) / 2.0 for i in range(n)]
-    rng = [(HH[i] - LL[i]) for i in range(n)]
-    m = [C[i] - mid[i] for i in range(n)]
+        HH.append(max(H[i0:i+1])); LL.append(min(L[i0:i+1]))
+    mid=[(HH[i]+LL[i])/2.0 for i in range(n)]
+    rng=[(HH[i]-LL[i]) for i in range(n)]
+    m=[C[i]-mid[i] for i in range(n)]
 
-    def ema_vals(vals: List[float], span: int) -> List[float]:
+    def ema_vals(vals, span):
         k = 2.0 / (span + 1.0)
-        e: Optional[float] = None
-        out: List[float] = []
+        e=None; out=[]
         for v in vals:
-            e = v if e is None else e + k * (v - e)
+            e = v if e is None else e + k*(v - e)
             out.append(e)
         return out
 
@@ -226,32 +177,23 @@ def smi_kd_series(H: List[float], L: List[float], C: List[float],
     r1 = ema_vals(rng, k_len)
     r2 = ema_vals(r1, ema_len)
 
-    K: List[float] = []
+    K=[]
     for i in range(n):
-        denom = (r2[i] or 0.0) / 2.0
-        v = 0.0 if denom == 0 else 100.0 * (m2[i] / denom)
-        if not (v == v):  # NaN check
-            v = 0.0
-        K.append(max(-100.0, min(100.0, v)))
+        denom = (r2[i] or 0.0)/2.0
+        v = 0.0 if denom==0 else 100.0*(m2[i]/denom)
+        if not (v==v): v = 0.0
+        K.append(max(-100.0,min(100.0,v)))
 
-    D: List[float] = []
-    k = 2.0 / (d_len + 1.0)
-    e: Optional[float] = None
+    D=[]
+    k = 2.0/(d_len+1.0)
+    e=None
     for v in K:
-        e = v if e is None else e + k * (v - e)
+        e = v if e is None else e + k*(v - e)
         D.append(e)
     return K, D
 
-# ------------------------ Lux PSI helper ------------------------
-
 def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
-    """
-    Approx Lux PSI implementation (like daily, reused for 10m):
-      - compute rolling max/min envelope
-      - log(span) series
-      - correlation slope inverted to 0..100
-    """
-    if not closes or len(closes) < max(5, length + 2):
+    if not closes or len(closes) < max(5, length+2):
         return None
     mx = mn = None
     diffs: List[float] = []
@@ -267,152 +209,71 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
         return None
     xbar = sum(xs)/n
     ybar = sum(win)/n
-    num = sum((x - xbar)*(y - ybar) for x, y in zip(xs, win))
-    den = (sum((x - xbar)**2 for x in xs) * sum((y - ybar)**2 for y in win)) or 1.0
-    r = num / math.sqrt(den)
-    psi = -50.0 * r + 50.0
-    return float(clamp(psi, 0.0, 100.0))
+    num = sum((x-xbar)*(y-ybar) for x,y in zip(xs,win))
+    den = (sum((x-xbar)**2 for x in xs)*sum((y-ybar)**2 for y in win)) or 1.0
+    r = num/math.sqrt(den)
+    psi = -50.0*r + 50.0
+    return float(clamp(psi,0.0,100.0))
 
-# ------------------------ Sector-based metrics ------------------------
+def lin_points(pct_val: float, weight: int) -> int:
+    return int(round(weight * ((float(pct_val) - 50.0) / 50.0)))
 
-OFFENSIVE = {"information technology","communication services","consumer discretionary"}
-DEFENSIVE = {"consumer staples","utilities","health care","real estate"}
+def compute_overall10m(ema_sign: int, ema10_dist_pct: float,
+                       momentum_pct: float, breadth_pct: float,
+                       squeeze_expansion_pct: float, liquidity_pct: float,
+                       riskon_pct: float) -> Tuple[str, int, dict]:
+    dist_unit = clamp(ema10_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
+    ema_pts = int(round(abs(dist_unit) * W_EMA)) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
+    m_pts  = lin_points(momentum_pct, W_MOM)
+    b_pts  = lin_points(breadth_pct,  W_BR)
+    sq_pts = lin_points(squeeze_expansion_pct, W_SQ)
+    lq_pts = lin_points(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
+    ro_pts = lin_points(riskon_pct, W_RISK)
+    score  = int(clamp(50 + ema_pts + m_pts + b_pts + sq_pts + lq_pts + ro_pts, 0, 100))
+    state  = "bull" if (ema_sign > 0 and score >= 60) else ("bear" if (ema_sign < 0 and score < 60) else "neutral")
+    comps  = {"ema10": ema_pts, "momentum": m_pts, "breadth": b_pts, "squeeze": sq_pts, "liquidity": lq_pts, "riskOn": ro_pts}
+    return state, score, comps
 
-def compute_risk_on_10m(sector_cards: List[Dict[str, Any]]) -> float:
-    """
-    Risk-on %: offensive≥55, defensive≤45 (55/45 thresholds)
-    """
-    if not sector_cards:
-        return 50.0
-    by = { (c.get("sector") or "").strip().lower(): c for c in sector_cards }
-    score = 0
-    den = 0
-    for s in OFFENSIVE:
-        c = by.get(s, {})
-        v = c.get("breadth_pct")
-        if isinstance(v, (int, float)):
-            den += 1
-            if v >= 55.0:
-                score += 1
-    for s in DEFENSIVE:
-        c = by.get(s, {})
-        v = c.get("breadth_pct")
-        if isinstance(v, (int, float)):
-            den += 1
-            if v <= 45.0:
-                score += 1
-    return round(pct(score, den) if den > 0 else 50.0, 2)
+# ------------------------------ Core logic ------------------------------
 
-def compute_sector_direction_10m(sector_cards: List[Dict[str, Any]], align_fast_pct: Optional[float]) -> float:
-    """
-    Sector Dir = % sectors where breadth≥55 AND momentum≥55 (55/45 stronger threshold).
-    Fallback to align_fast_pct or 50 if no cards.
-    """
-    if sector_cards:
-        good = 0
-        total = 0
-        for c in sector_cards:
-            b = to_num(c.get("breadth_pct"), 50.0)
-            m = to_num(c.get("momentum_pct"), 50.0)
-            total += 1
-            if b >= 55.0 and m >= 55.0:
-                good += 1
-        if total > 0:
-            return round(pct(good, total), 2)
-    if align_fast_pct is not None and align_fast_pct == align_fast_pct:  # not NaN
-        return float(align_fast_pct)
-    return 50.0
+def compute_10m():
+    j = load_json(INTRADAY_PATH)
+    if not j:
+        print("[10m] intraday JSON missing")
+        return
 
-# ------------------------ Overall composite ------------------------
+    metrics = j.get("metrics") or {}
+    intraday = j.get("intraday") or {}
+    cards = j.get("sectorCards") or []
+    prev_js = {}
+    try:
+        prev_js = fetch_json(INTRADAY_URL_DEFAULT) or {}
+    except Exception:
+        prev_js = {}
 
-def compute_overall_10m(ema_sign: int, ema_gap_pct: float,
-                        momentum_10m: float, breadth_10m: float,
-                        expansion_10m: float, liquidity_psi: float,
-                        risk_on_pct: float) -> Tuple[str, int, Dict[str, int]]:
-    """
-    Overall 10m composite:
-      score = 0.40 * ema_posture
-            + 0.25 * momentum
-            + 0.10 * breadth
-            + 0.10 * expansion
-            + 0.10 * liq_pct
-            + 0.05 * riskOn
-    """
-    ema_posture = clamp(50.0 + 50.0 * clamp(ema_gap_pct / 0.60, -1.0, 1.0), 0.0, 100.0)
-    liq_pct     = clamp(min(liquidity_psi, 120.0)/120.0 * 100.0, 0.0, 100.0)
-    momentum    = clamp(momentum_10m, 0.0, 100.0)
-    breadth     = clamp(breadth_10m,  0.0, 100.0)
-    expansion   = clamp(expansion_10m,0.0, 100.0)
-    riskon      = clamp(risk_on_pct,  0.0, 100.0)
+    # Aggregate sector NH/NL/UP/DOWN for slow breadth/momentum
+    NH = NL = UP = DN = 0.0
+    for c in cards:
+        NH += float(c.get("nh", 0))
+        NL += float(c.get("nl", 0))
+        UP += float(c.get("up", 0))
+        DN += float(c.get("down", 0))
+    breadth_slow = round(pct(NH, NH+NL), 2) if (NH+NL) > 0 else 50.0
+    momentum_slow = round(pct(UP, UP+DN), 2) if (UP+DN) > 0 else 50.0
 
-    score_f = (
-        0.40 * ema_posture +
-        0.25 * momentum +
-        0.10 * breadth +
-        0.10 * expansion +
-        0.10 * liq_pct +
-        0.05 * riskon
-    )
-    score = int(round(clamp(score_f, 0.0, 100.0)))
-
-    if score >= 60 and ema_sign > 0:
-        state = "bull"
-    elif score <= 40 and ema_sign < 0:
-        state = "bear"
-    else:
-        state = "neutral"
-
-    ema_component = int(round(40.0 * clamp(abs(ema_gap_pct)/0.60, 0, 1) * (1 if ema_sign>0 else -1 if ema_sign<0 else 0)))
-    components = {
-        "ema10":     ema_component,
-        "momentum":  int(round(25.0 * (momentum - 50.0) / 50.0)),
-        "breadth":   int(round(10.0 * (breadth  - 50.0) / 50.0)),
-        "squeeze":   int(round(10.0 * (expansion- 50.0) / 50.0)),
-        "liquidity": int(round(10.0 * (liq_pct - 50.0) / 50.0)),
-        "riskOn":    int(round( 5.0 * (riskon  - 50.0) / 50.0)),
-    }
-
-    return state, score, components
-
-# ------------------------ MAIN ----------------------------------
-
-INTRADAY_PATH = os.path.join("data", "outlook_intraday.json")
-
-def main() -> int:
-    if not os.path.exists(INTRADAY_PATH):
-        print("[10m-trend] no outlook_intraday.json; skipping", file=sys.stderr)
-        return 0
-
-    with open(INTRADAY_PATH, "r", encoding="utf-8") as f:
-        j = json.load(f)
-
-    metrics: Dict[str, Any] = j.get("metrics") or {}
-    intraday: Dict[str, Any] = j.get("intraday") or {}
-    cards: List[Dict[str, Any]] = j.get("sectorCards") or []
-
-    # --- 0) If no Polygon key, leave existing values alone ---
-    if not POLY_KEY:
-        print("[10m-trend] no Polygon key; leaving metrics as-is.", file=sys.stderr)
-        return 0
-
-    # --- 1) Fast breadth via sector ETFs (align + bar-up) ---
-    ETF_SYMBOLS = [
-        "XLK","XLY","XLC","XLP","XLU","XLV","XLRE","XLE","XLF","XLB","XLI"
-    ]
-    etf_bars: Dict[str, List[Dict[str, Any]]] = {}
-    for sym in ETF_SYMBOLS:
-        bars = fetch_10m_bars(sym, minutes_back=600)
-        if len(bars) >= 2:
-            etf_bars[sym] = bars
+    # Fast breadth via sector ETFs (EMA10>20 + bar up)
+    etf_bars: Dict[str, List[dict]] = {}
+    for sym in SECTOR_ETFS.keys():
+        etf_bars[sym] = fetch_polygon_bars(sym, lookback_days=5)
 
     aligned = barup = total = 0
     for sym, bars in etf_bars.items():
+        if len(bars) < 2:
+            continue
         C = [b["close"] for b in bars]
         O = [b["open"]  for b in bars]
         e10 = ema_series(C, 10)
         e20 = ema_series(C, 20)
-        if not e10 or not e20:
-            continue
         total += 1
         if e10[-1] > e20[-1]:
             aligned += 1
@@ -421,155 +282,161 @@ def main() -> int:
 
     align_pct = pct(aligned, total)
     barup_pct = pct(barup, total)
-    breadth_10m_pct = clamp(0.60 * align_pct + 0.40 * barup_pct, 0.0, 100.0)
-    metrics["breadth_10m_pct"]        = round(breadth_10m_pct, 2)
-    metrics["breadth_align_fast_pct"] = round(align_pct, 2)
+    breadth_fast = clamp(0.60*align_pct + 0.40*barup_pct, 0.0, 100.0)
+    metrics["breadth_align_fast_pct"] = round(align_pct,2)
+    metrics["breadth_10m_pct"] = round(breadth_fast,2)
 
-    # --- 2) Momentum (10m) from SPY 10m ---
-    spy_bars = fetch_10m_bars("SPY", minutes_back=600)
-    spy_bars = last_closed_10m(spy_bars)
-    if len(spy_bars) < 6:
-        ema_gap_pct = 0.0
-        ema_sign = 0
-        momentum_combo = 50.0
-    else:
-        C = [b["close"] for b in spy_bars]
-        H = [b["high"]  for b in spy_bars]
-        L = [b["low"]   for b in spy_bars]
+    # SPY 10m bars
+    spy_10m = fetch_polygon_bars("SPY", lookback_days=5)
+    ema_sign = 0
+    ema_gap_pct = 0.0
+    momentum_combo_10m = 50.0
+    e8 = e18 = []
+    k10 = d10 = []
+
+    if len(spy_10m) >= 6:
+        H = [b["high"] for b in spy_10m]
+        L = [b["low"]  for b in spy_10m]
+        C = [b["close"] for b in spy_10m]
 
         e8  = ema_series(C, 8)
-        e18 = ema_series(C,18)
-        if not e8 or not e18:
-            ema_gap_pct = 0.0
-            ema_sign = 0
-            momentum_combo = 50.0
+        e18 = ema_series(C, 18)
+        ema_gap_pct = 0.0 if e18[-1] == 0 else 100.0 * (e8[-1] - e18[-1]) / e18[-1]
+        ema_sign = 1 if e8[-1] > e18[-1] else (-1 if e8[-1] < e18[-1] else 0)
+
+        # EMA posture
+        ema_posture = clamp(50.0 + 50.0 * clamp(ema_gap_pct / FULL_EMA_DIST, -1.0, 1.0), 0.0, 100.0)
+
+        # SMI(10m)
+        k10, d10 = smi_kd(H, L, C, k_len=12, d_len=7, ema_len=5)
+        smi10 = None
+        if k10 and d10:
+            smi10 = clamp(50.0 + 0.5*(k10[-1] - d10[-1]), 0.0, 100.0)
+        if smi10 is None:
+            momentum_combo_10m = ema_posture
         else:
-            gap = (e8[-1] - e18[-1]) / (e18[-1] if e18[-1] != 0 else 1.0)
-            ema_gap_pct = 100.0 * gap
-            ema_sign = 1 if e8[-1] > e18[-1] else (-1 if e8[-1] < e18[-1] else 0)
-            ema_posture = clamp(50.0 + 50.0 * clamp(ema_gap_pct / 0.60, -1.0, 1.0), 0.0, 100.0)
+            momentum_combo_10m = clamp(0.70*ema_posture + 0.30*smi10, 0.0, 100.0)
 
-            K, D = smi_kd_series(H, L, C, k_len=12, d_len=7, ema_len=5)
-            if K and D:
-                smi_diff = K[-1] - D[-1]
-                smi_mapped = clamp(50.0 + 0.5 * smi_diff, 0.0, 100.0)
-            else:
-                smi_mapped = 50.0
+    metrics["momentum_10m_pct"]       = round(momentum_combo_10m,2)
+    metrics["momentum_combo_10m_pct"] = round(momentum_combo_10m,2)
+    metrics["ema_sign"]   = int(ema_sign)
+    metrics["ema_gap_pct"]= round(ema_gap_pct,3)
 
-            momentum_combo = clamp(0.70 * ema_posture + 0.30 * smi_mapped, 0.0, 100.0)
+    # Lux PSI Squeeze 10m
+    squeeze_psi_10m = None
+    squeeze_exp = 50.0
+    if len(spy_10m) >= 25:
+        C = [b["close"] for b in spy_10m]
+        psi = lux_psi_from_closes(C, conv=50, length=20)
+        if isinstance(psi,(int,float)):
+            squeeze_psi_10m = psi
+            squeeze_exp = clamp(100.0 - psi, 0.0, 100.0)
+    metrics["squeeze_psi_10m_pct"]   = round(squeeze_psi_10m,2) if isinstance(squeeze_psi_10m,(int,float)) else None
+    metrics["squeeze_expansion_pct"] = round(squeeze_exp,2)
+    metrics["squeeze_pct"]           = metrics["squeeze_expansion_pct"]
 
-    metrics["momentum_10m_pct"]       = round(momentum_combo, 2)
-    metrics["momentum_combo_10m_pct"] = round(momentum_combo, 2)
-    metrics["ema_sign"]               = int(ema_sign)
-    metrics["ema_gap_pct"]            = round(ema_gap_pct, 3)
+    # Liquidity & Volatility 10m
+    liquidity_psi = 50.0
+    volatility_pct = 0.0
+    if len(spy_10m) >= 2:
+        V = [b["volume"] for b in spy_10m]
+        v3  = ema_last(V, 3)
+        v12 = ema_last(V, 12)
+        liquidity_psi = 0.0 if not v12 or v12 <= 0 else clamp(100.0 * (v3 / v12), 0.0, 200.0)
+        C = [b["close"] for b in spy_10m]
+        H = [b["high"]  for b in spy_10m]
+        L = [b["low"]   for b in spy_10m]
+        trs = tr_series(H, L, C)
+        atr3 = ema_last(trs, 3) if trs else None
+        volatility_pct = 0.0 if not atr3 or C[-1] <= 0 else max(0.0, 100.0*atr3/C[-1])
 
-    # --- 3) Squeeze (10m) via Lux PSI on SPY 10m closes ---
-    C_spy = [b["close"] for b in spy_bars]
-    psi = lux_psi_from_closes(C_spy, conv=50, length=20)
-    if psi is None:
-        psi = 50.0
-    expansion = 100.0 - psi
-    expansion = clamp(expansion, 0.0, 100.0)
-    metrics["squeeze_psi_10m_pct"]   = round(psi, 2)
-    metrics["squeeze_expansion_pct"] = round(expansion, 2)
-    metrics["squeeze_pct"]           = round(expansion, 2)
+    metrics["liquidity_psi"]  = round(liquidity_psi,2)
+    metrics["volatility_pct"] = round(volatility_pct,3)
 
-    # --- 4) Liquidity (10m) ---
-    V_spy = [b["volume"] for b in spy_bars]
-    v3  = ema_last(V_spy, 3) or 0.0
-    v12 = ema_last(V_spy,12) or 1.0
-    liq_psi = clamp(100.0 * (v3 / v12), 0.0, 200.0)
-    metrics["liquidity_psi"] = round(liq_psi, 2)
+    # SectorDir10m & RiskOn10m from sectorCards
+    rising_good = rising_total = 0
+    for c in cards:
+        bp = c.get("breadth_pct")
+        mp = c.get("momentum_pct")
+        if isinstance(bp,(int,float)) and isinstance(mp,(int,float)):
+            rising_total += 1
+            if bp >= 55.0 and mp >= 55.0:
+                rising_good += 1
+    rising_pct = round(pct(rising_good, rising_total),2) if rising_total>0 else 50.0
 
-    # --- 5) Volatility (10m) ---
-    if len(spy_bars) >= 2:
-        C = [b["close"] for b in spy_bars]
-        H = [b["high"]  for b in spy_bars]
-        L = [b["low"]   for b in spy_bars]
-        TR = [max(H[i]-L[i], abs(H[i]-C[i-1]), abs(L[i]-C[i-1])) for i in range(1,len(C))]
-        atr3 = ema_last(TR, 3) or 0.0
-        vol_pct = 100.0 * (atr3 / (C[-1] if C[-1] else 1.0))
-        vol_pct = max(0.0, vol_pct)
-    else:
-        vol_pct = 0.0
-    metrics["volatility_pct"] = round(vol_pct, 3)
-
-    # --- 6) RiskOn + Sector Direction from sectorCards (55/45 thresholds) ---
-    risk_on_10m = compute_risk_on_10m(cards)
+    by = {(c.get("sector") or "").strip().lower(): c for c in cards}
+    ro_score = ro_den = 0
+    for s in OFFENSIVE:
+        bp = by.get(s, {}).get("breadth_pct")
+        if isinstance(bp,(int,float)):
+            ro_den += 1
+            if bp >= 55.0:
+                ro_score += 1
+    for s in DEFENSIVE:
+        bp = by.get(s, {}).get("breadth_pct")
+        if isinstance(bp,(int,float)):
+            ro_den += 1
+            if bp <= 45.0:
+                ro_score += 1
+    risk_on_10m = round(pct(ro_score, ro_den),2) if ro_den>0 else 50.0
     metrics["riskOn_10m_pct"] = risk_on_10m
 
-    align_fast = metrics.get("breadth_align_fast_pct")
-    if align_fast is not None:
-        align_fast = float(align_fast)
-    else:
-        align_fast = None
-
-    rising_pct = compute_sector_direction_10m(cards, align_fast)
-
-    sectorDir10 = intraday.get("sectorDirection10m") or {}
-    sectorDir10["risingPct"] = rising_pct
-    intraday["sectorDirection10m"] = sectorDir10
-
-    riskOn10 = intraday.get("riskOn10m") or {}
-    riskOn10["riskOnPct"] = risk_on_10m
-    intraday["riskOn10m"] = riskOn10
-
-    # --- 7) Overall 10m composite + engineLights["10m"] ---
-    state, score, comps = compute_overall_10m(
+    # Overall10m composite
+    state, score, comps = compute_overall10m(
         ema_sign=ema_sign,
-        ema_gap_pct=ema_gap_pct,
-        momentum_10m=momentum_combo,
-        breadth_10m=breadth_10m_pct,
-        expansion_10m=expansion,
-        liquidity_psi=liq_psi,
-        risk_on_pct=risk_on_10m,
+        ema10_dist_pct=ema_gap_pct,
+        momentum_pct=momentum_combo_10m,
+        breadth_pct=breadth_fast,
+        squeeze_expansion_pct=squeeze_exp,
+        liquidity_pct=liquidity_psi,
+        riskon_pct=risk_on_10m,
     )
 
-    overall10_prev = intraday.get("overall10m") or {}
-    prev_state = overall10_prev.get("state")
-    prev_changed = overall10_prev.get("lastChanged")
+    intraday.setdefault("sectorDirection10m", {})
+    intraday["sectorDirection10m"]["risingPct"] = rising_pct
 
-    if prev_state == state and prev_changed:
-        last_changed = prev_changed
-    else:
+    intraday.setdefault("riskOn10m", {})
+    intraday["riskOn10m"]["riskOnPct"] = risk_on_10m
+
+    intraday.setdefault("overall10m", {})
+    prev_overall = intraday["overall10m"]
+    last_changed = prev_overall.get("lastChanged") or now_utc_iso()
+    if prev_overall.get("state") != state:
         last_changed = now_utc_iso()
 
-    overall10 = {
+    intraday["overall10m"] = {
         "state": state,
         "score": score,
         "components": comps,
         "lastChanged": last_changed,
     }
-    intraday["overall10m"] = overall10
 
-    eng = j.get("engineLights") or {}
-    prev10 = eng.get("10m") or {}
-    prev10_state = prev10.get("state")
-    prev10_changed = prev10.get("lastChanged")
+    j["metrics"] = metrics
+    j["intraday"] = intraday
 
-    if prev10_state == state and prev10_changed:
-        eng_last_changed = prev10_changed
-    else:
-        eng_last_changed = last_changed
-
-    eng["10m"] = {
+    j.setdefault("engineLights", {})
+    j["engineLights"].setdefault("10m", {})
+    j["engineLights"]["10m"].update({
         "state": state,
         "score": score,
         "components": comps,
-        "lastChanged": eng_last_changed,
-    }
+        "lastChanged": last_changed,
+    })
 
-    j["metrics"]     = metrics
-    j["intraday"]    = intraday
-    j["engineLights"]= eng
+    save_json(INTRADAY_PATH, j)
+    print(
+        f"[10m] breadth_fast={breadth_fast:.2f} momCombo={momentum_combo_10m:.2f} "
+        f"squeezeExp={squeeze_exp:.2f} psi={squeeze_psi_10m} "
+        f"liqPsi={liquidity_psi:.2f} volPct={volatility_pct:.3f} "
+        f"riskOn={risk_on_10m:.2f} risingPct={rising_pct:.2f} overall={state}/{score}",
+        flush=True,
+    )
 
-    with open(INTRADAY_PATH, "w", encoding="utf-8") as f:
-        json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
-
-    print(f"[10m-trend] state={state} score={score} breadth={breadth_10m_pct:.2f} "
-          f"momentum={momentum_combo:.2f} squeezeExp={expansion:.2f} liq={liq_psi:.2f} "
-          f"riskOn={risk_on_10m:.2f} risingPct={rising_pct:.2f}", flush=True)
-    return 0
+# ------------------------------ Main ------------------------------
 
 if __name__ == "__main__":
-    sys.exit(main() or 0)
+    try:
+        compute_10m()
+    except Exception as e:
+        print("[10m-error]", e, file=sys.stderr)
+        sys.exit(2)
