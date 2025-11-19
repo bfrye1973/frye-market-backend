@@ -39,10 +39,15 @@ const ALLOW = new Set([
 ]);
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && ALLOW.has(origin)) res.setHeader("Access-Control-Allow-Origin", origin);
+  if (origin && ALLOW.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Cache-Control, Authorization, X-Requested-With");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Cache-Control, Authorization, X-Requested-With"
+  );
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
@@ -58,7 +63,7 @@ app.use(express.static(path.join(__dirname, "public")));
  * API ROUTE MOUNT ORDER (critical)
  * ------------------------------------------------------------------------ */
 app.use("/api/v1/ohlc", ohlcRouter);
-app.use("/api",        apiRouter);
+app.use("/api", apiRouter);
 
 /* ---------------------------------------------------------------------------
  * GitHub RAW config
@@ -99,9 +104,27 @@ async function proxyRawJSON(res, url) {
 }
 
 /* ---------------------------------------------------------------------------
- * LIVE proxies used by dashboard rows (unchanged)
+ * LIVE proxies used by dashboard rows
+ *   ✅ intraday now uses in-memory cache (fast)
+ *   ⏳ others still proxy GitHub RAW directly
  * ------------------------------------------------------------------------ */
-app.get("/live/intraday",        (_req, res) => proxyRawJSON(res, rawUrlBusted(PATH_INTRADAY)));
+
+// INTRADAY: serve from in-memory cache (latest), fallback to RAW once on cold start
+app.get("/live/intraday", (req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+
+  if (latest?.json) {
+    return res.status(200).send(JSON.stringify(latest.json));
+  }
+
+  // Cold start fallback: hit RAW once
+  return proxyRawJSON(res, rawUrlBusted(PATH_INTRADAY));
+});
+
+// HOURLY/EOD still go straight to RAW (can be migrated later if needed)
 app.get("/live/hourly",          (_req, res) => proxyRawJSON(res, rawUrlBusted(PATH_HOURLY)));
 app.get("/live/eod",             (_req, res) => proxyRawJSON(res, rawUrlBusted(PATH_EOD)));
 app.get("/live/intraday-deltas", (_req, res) => proxyRawJSON(res, rawUrlBusted(PATH_INTRADAY_DELTA)));
@@ -109,22 +132,34 @@ app.get("/live/intraday-deltas", (_req, res) => proxyRawJSON(res, rawUrlBusted(P
 /* ---------------------------------------------------------------------------
  * NEW: Intraday ETag poller + SSE broadcaster
  * ------------------------------------------------------------------------ */
-const GH_TOKEN = process.env.GITHUB_TOKEN || "";     // optional for higher rate limit
-const POLL_MS  = Number(process.env.POLL_MS || 30000); // 30s poll
-const PING_MS  = Number(process.env.SSE_PING_MS || 15000);
+const GH_TOKEN    = process.env.GITHUB_TOKEN || "";             // optional for higher rate limit
+const POLL_MS     = Number(process.env.POLL_MS || 30000);       // default: 30s poll interval
+const PING_MS     = Number(process.env.SSE_PING_MS || 15000);   // SSE heartbeat
 const BACKOFF_MIN = 5000;
 const BACKOFF_MAX = 120000;
 
 const INTRADAY_URL = rawUrlNoCache(PATH_INTRADAY);
 
-let latest = /** @type {{ json:any, etag?:string, updatedAt?:string }}|null */ (null);
+/** @type {{ json:any, etag?:string, updatedAt?:string } | null} */
+let latest = null;
 let lastFetchTs = 0;
 let backoff = 0;
-const sseClients = new Set(); // Set<express.Response>
+/** @type {Set<import("express").Response>} */
+const sseClients = new Set();
 
-function iso() { return new Date().toISOString(); }
-function safeJson(text) { try { return JSON.parse(text); } catch { return null; } }
-function log(...args){ console.log(iso(), "-", ...args); }
+function iso() {
+  return new Date().toISOString();
+}
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+function log(...args) {
+  console.log(iso(), "-", ...args);
+}
 
 async function pollOnce() {
   const headers = { "Accept": "application/json" };
@@ -142,6 +177,7 @@ async function pollOnce() {
     if (r.status !== 200) {
       throw new Error(`HTTP ${r.status}`);
     }
+
     const text = await r.text();
     const json = safeJson(text);
     if (!json) throw new Error("invalid JSON from upstream");
@@ -168,7 +204,7 @@ async function pollOnce() {
 
 function startPollLoop() {
   (async function loop() {
-    // initial fetch immediately so SSE has data quickly
+    // initial fetch immediately so SSE + cache have data quickly
     await pollOnce();
     while (true) {
       await new Promise((r) => setTimeout(r, backoff || POLL_MS));
@@ -179,7 +215,13 @@ function startPollLoop() {
 
 function broadcastUpdate() {
   if (!latest?.json) return;
-  const payload = JSON.stringify({ type: "intraday", ts: latest.updatedAt, etag: latest.etag, payload: latest.json });
+  const payload = JSON.stringify({
+    type: "intraday",
+    ts: latest.updatedAt,
+    etag: latest.etag,
+    payload: latest.json,
+  });
+
   for (const res of sseClients) {
     try {
       res.write(`event: update\n`);
@@ -197,7 +239,11 @@ app.get("/live/intraday/cache", (req, res) => {
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
   res.setHeader("Content-Type", "application/json; charset=utf-8");
-  if (!latest?.json) return proxyRawJSON(res, rawUrlBusted(PATH_INTRADAY));
+
+  if (!latest?.json) {
+    // warmup / fallback
+    return proxyRawJSON(res, rawUrlBusted(PATH_INTRADAY));
+  }
   return res.status(200).send(JSON.stringify(latest.json));
 });
 
@@ -209,7 +255,7 @@ app.get("/live/intraday/stream", (req, res) => {
     "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
     "Pragma": "no-cache",
     "Connection": "keep-alive",
-    "X-Accel-Buffering": "no"
+    "X-Accel-Buffering": "no",
   });
 
   sseClients.add(res);
@@ -217,17 +263,26 @@ app.get("/live/intraday/stream", (req, res) => {
 
   // send initial snapshot
   if (latest?.json) {
-    const hello = { type: "intraday", ts: latest.updatedAt, etag: latest.etag, payload: latest.json };
+    const hello = {
+      type: "intraday",
+      ts: latest.updatedAt,
+      etag: latest.etag,
+      payload: latest.json,
+    };
     res.write(`event: hello\n`);
     res.write(`data: ${JSON.stringify(hello)}\n\n`);
   } else {
     res.write(`event: hello\n`);
-    res.write(`data: ${JSON.stringify({ warming:true, ts: iso() })}\n\n`);
+    res.write(`data: ${JSON.stringify({ warming: true, ts: iso() })}\n\n`);
   }
 
   // heartbeat
   const ping = setInterval(() => {
-    try { res.write(`: ping ${Date.now()}\n\n`); } catch { /* ignore */ }
+    try {
+      res.write(`: ping ${Date.now()}\n\n`);
+    } catch {
+      // ignore
+    }
   }, PING_MS);
 
   req.on("close", () => {
@@ -241,128 +296,6 @@ app.get("/live/intraday/stream", (req, res) => {
 /* ---------------------------------------------------------------------------
  * Diagnostics helpers (kept)
  * ------------------------------------------------------------------------ */
-app.get("/__up",     (_req,res)=>res.type("text").send("UP"));
-app.get("/__routes", (_req,res)=>{
-  const out=[]; const stack=app._router?.stack||[];
-  for(const layer of stack){ if(layer.route?.path){ const m=Object.keys(layer.route.methods).join(",").toUpperCase(); out.push(`${m.padEnd(6)} ${layer.route.path}`); } }
-  res.type("text").send(out.sort().join("\n"));
-});
+app.get("/__up", (_req, res) => res.type("text").send("UP"));
 
-/* --------------------------- QA: Market Meter + Overall Light (kept) ------- */
-app.get("/qa/meter", async (_req, res) => {
-  try {
-    const LIVE_URL = process.env.LIVE_URL || "https://frye-market-backend-1.onrender.com/live/intraday";
-    const r = await fetch(LIVE_URL, { cache: "no-store" });
-    if (!r.ok) return res.status(r.status).json({ ok:false, error:`upstream ${r.status}` });
-    const j = await r.json();
-
-    const cards = Array.isArray(j?.sectorCards) ? j.sectorCards : [];
-    let NH=0, NL=0, UP=0, DN=0, rising=0, offUp=0, defDn=0;
-    const OFF = new Set(["Information Technology","Communication Services","Consumer Discretionary"]);
-    const DEF = new Set(["Consumer Staples","Utilities","Health Care","Real Estate"]);
-    const pct = (a,b)=> b===0?0:(100*a/b);
-
-    for(const c of cards){
-      const nh=+c.nh||0, nl=+c.nl||0, up=+c.up||0, dn=+c.down||0;
-      NH+=nh; NL+=nl; UP+=up; DN+=dn;
-      const b=pct(nh,nh+nl);
-      if (b>50) rising++;
-      const sec = String(c.sector||"");
-      if (OFF.has(sec) && b>50) offUp++;
-      if (DEF.has(sec) && b<50) defDn++;
-    }
-
-    const calc = {
-      breadth_pct:  pct(NH,NH+NL),
-      momentum_10m_pct: pct(UP,UP+DN),
-      risingPct:    pct(rising,11),
-      riskOnPct:    pct(offUp+defDn,OFF.size+DEF.size),
-    };
-
-    const live = {
-      breadth_pct:      +(j?.metrics?.breadth_pct ?? j?.metrics?.breadth_10m_pct ?? 0),
-      momentum_10m_pct: +(j?.metrics?.momentum_10m_pct ?? 0),
-      risingPct:        +((j?.intraday?.sectorDirection10m)?.risingPct ?? 0),
-      riskOnPct:        +((j?.intraday?.riskOn10m)?.riskOnPct ?? 0),
-    };
-
-    const tol = { breadth_pct:0.25, momentum_10m_pct:0.25, risingPct:0.5, riskOnPct:0.5 };
-    const line=(label,a,b,t)=>{
-      const d=+(a-b).toFixed(2); const ok=Math.abs(d)<=t;
-      return `${ok?"✅":"❌"} ${label.padEnd(14)} live=${a.toFixed(2).padStart(6)}  calc=${b.toFixed(2).padStart(6)}  Δ=${d>=0?"+":""}${d.toFixed(2)} (±${t})`;
-    };
-    const rows=[
-      line("Breadth %",       live.breadth_pct,      calc.breadth_pct,      tol.breadth_pct),
-      line("Momentum 10m %",  live.momentum_10m_pct, calc.momentum_10m_pct, tol.momentum_10m_pct),
-      line("Rising %",        live.risingPct,        calc.risingPct,        tol.risingPct),
-      line("Risk-On %",       live.riskOnPct,        calc.riskOnPct,        tol.riskOnPct),
-    ];
-    const pass = rows.every(r=>r.startsWith("✅"));
-    const stamp = (j?.updated_at || j?.updated_at_utc || "").toString();
-
-    const overall = j?.intraday?.overall10m || {};
-    const ovState = String(overall.state ?? "n/a");
-    const ovScore = Number.isFinite(+overall.score) ? +overall.score : NaN;
-    const comps   = overall.components || {};
-    const emaCross= String(j?.metrics?.ema_cross ?? "n/a");
-    const emaDist = Number.isFinite(+j?.metrics?.ema10_dist_pct) ? +j.metrics.ema10_dist_pct : NaN;
-
-    res.setHeader("Cache-Control","no-store");
-    res.setHeader("Content-Type","text/plain; charset=utf-8");
-    res.send([
-      `QA Meter Check  (${stamp})`,
-      `Source: ${LIVE_URL}`,
-      "",
-      ...rows,
-      "",
-      `Overall10m: state=${ovState}  score=${Number.isFinite(ovScore)?ovScore:"n/a"}`,
-      `  ema_cross=${emaCross}  ema10_dist_pct=${Number.isFinite(emaDist)?emaDist.toFixed(2)+"%":" n/a"}`,
-      `  components:`,
-      `    ema10=${comps.ema10??"n/a"}  momentum=${comps.momentum??" n/a"}  breadth=${comps.breadth??" n/a"}`,
-      `    squeeze=${compStr(comps.squeeze)}  liquidity=${compStr(comps.liquidity)}  riskOn=${compStr(comps.riskOn)}`,
-      "",
-      `Summary: ${pass?"PASS ✅":"FAIL ❌"}`,
-      ""
-    ].join("\n"));
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok:false, error:String(e?.message||e) });
-  }
-});
-function compStr(v){ return (v===0||v===1||v===-1)?String(v):"n/a"; }
-
-/* ---------------------------------------------------------------------------
- * Health + 404/Errors (kept)
- * ------------------------------------------------------------------------ */
-app.get("/healthz", (_req, res) =>
-  res.json({ ok: true, service: "backend", ts: new Date().toISOString(), cached: Boolean(latest?.json), lastFetchIso: lastFetchTs? new Date(lastFetchTs).toISOString(): null })
-);
-
-app.use((req, res) =>
-  res.status(404).json({ ok: false, error: "Not Found", path: req.path })
-);
-
-app.use((err, req, res, _next) => {
-  console.error("Unhandled error:", err);
-  res.status(500).json({ ok: false, error: "Internal Server Error" });
-});
-
-/* ---------------------------------------------------------------------------
- * Start
- * ------------------------------------------------------------------------ */
-app.listen(PORT, () => {
-  console.log(
-    `[OK] backend listening on :${PORT}
- - /api/v1/ohlc
- - /api/*
- - /live/intraday
- - /live/hourly
- - /live/eod
- - /live/intraday-deltas
- - /live/intraday/cache   (cached snapshot, no-store)
- - /live/intraday/stream  (SSE)
- - /qa/meter
- - /healthz`
-  );
-  startPollLoop();
-});
+app.get("/__routes", (_req, r_
