@@ -2,16 +2,18 @@ name: dashboard-10min (github-runner, debug-publish)
 
 on:
   workflow_dispatch: {}
-  schedule:
-    # AZ Premarket + Regular Session: 06:30–13:59 AZ (13:30–20:59 UTC)
-    # Every 3 minutes, Mon–Fri
-    - cron: "30-59/3 13 * * 1-5"    # 13:30–13:59 UTC  (06:30–06:59 AZ)
-    - cron: "*/3 14-20 * * 1-5"     # 14:00–20:59 UTC  (07:00–13:59 AZ)
+  schedule:  
+    # AZ time window: 06:30–19:59, Monday–Friday
+    # GitHub's real minimum is ~every 5 minutes, so we use */5.
 
-    # AZ After-hours: 14:00–19:59 AZ (21:00–02:59 UTC next day)
-    # Every 10 minutes, Mon–Fri (Tue–Sat in UTC for the post-midnight slice)
-    - cron: "0-59/10 21-23 * * 1-5" # 21:00–23:59 UTC  (14:00–16:59 AZ)
-    - cron: "0-59/10 0-2 * * 2-6"   # 00:00–02:59 UTC  (17:00–19:59 AZ)
+    # 06:30–06:59 AZ  → 13:30–13:59 UTC
+    - cron: "30-59/5 13 * * 1-5"
+
+    # 07:00–16:59 AZ → 14:00–23:59 UTC
+    - cron: "*/5 14-23 * * 1-5"
+
+    # 17:00–19:59 AZ → 00:00–02:59 UTC (next day)
+    - cron: "*/5 0-2 * * 2-6"
 
 jobs:
   tenmin:
