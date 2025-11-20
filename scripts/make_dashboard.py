@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard.py (R12.9 intraday squeeze fix)
+make_dashboard.py — compose dashboard payloads (intraday / hourly / eod)
 
-Compose dashboard payloads (intraday / hourly / eod).
-
-What this script does:
-
-- For --mode intraday:
-    * Ensures sectorCards are present, even if source only has `groups`.
-    * Normalises 10m metrics, especially Lux Squeeze:
-        - metrics.squeeze_psi_10m_pct     -> Lux PSI (tightness 0–100)
-        - metrics.squeeze_pct             -> expansion = 100 - PSI
-        - metrics.squeeze_expansion_pct   -> same expansion value
-- For --mode hourly/eod:
-    * Pass-through, only refreshing updated_at / updated_at_utc and mode.
+- Stamps updated_at (America/Phoenix) + updated_at_utc (UTC)
+- Ensures 11 canonical sectorCards (Title-case, fixed order)
+- Normalizes intraday metrics to the UI schema
+- For intraday (10m): attaches an `outlook` field to each sectorCard
+  using config-driven thresholds from config/sector_outlook_10m.json.
 """
 
 from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -26,250 +20,305 @@ from typing import Any, Dict, List
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-# ---------------- Time helpers ----------------
+# -------------------------------------------------------------------
+# Timezones
+# -------------------------------------------------------------------
 
-try:
-    PHX = ZoneInfo("America/Phoenix")
-except Exception:
-    PHX = ZoneInfo("UTC")
-
+PHX = ZoneInfo("America/Phoenix")
 UTC = timezone.utc
 
 
-def now_phx_iso() -> str:
-    return datetime.now(PHX).replace(microsecond=0).isoformat(sep=" ")
+def now_phx() -> str:
+    """Return local AZ timestamp 'YYYY-MM-DD HH:MM:SS' (no DST issues)."""
+    return datetime.now(PHX).replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def now_utc_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+def now_utc() -> str:
+    """Return strict ISO-8601 Zulu timestamp."""
+    return (
+        datetime.now(UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
-# ---------------- Sector helpers ----------------
+# -------------------------------------------------------------------
+# Canonical sector order (Title-case)
+# -------------------------------------------------------------------
 
 ORDER = [
-    "information technology",
-    "materials",
-    "health care",
-    "communication services",
-    "real estate",
-    "energy",
-    "consumer staples",
-    "consumer discretionary",
-    "financials",
-    "utilities",
-    "industrials",
+    "Information Technology",
+    "Materials",
+    "Health Care",
+    "Communication Services",
+    "Real Estate",
+    "Energy",
+    "Consumer Staples",
+    "Consumer Discretionary",
+    "Financials",
+    "Utilities",
+    "Industrials",
 ]
 
-ALIAS = {
-    "healthcare": "health care",
-    "health-care": "health care",
-    "info tech": "information technology",
-    "technology": "information technology",
-    "tech": "information technology",
-    "communications": "communication services",
-    "comm services": "communication services",
-    "comm": "communication services",
-    "telecom": "communication services",
-    "staples": "consumer staples",
-    "discretionary": "consumer discretionary",
-    "finance": "financials",
-    "industry": "industrials",
-    "reit": "real estate",
-    "reits": "real estate",
+# -------------------------------------------------------------------
+# Config-driven 10m outlook thresholds
+# -------------------------------------------------------------------
+
+# We expect: config/sector_outlook_10m.json at repo root.
+# Example:
+# {
+#   "bullish_breadth": 52,
+#   "bullish_momentum": 52,
+#   "bearish_breadth": 48,
+#   "bearish_momentum": 48,
+#   "default": "Neutral"
+# }
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+OUTLOOK_CFG_PATH = os.path.join(ROOT, "config", "sector_outlook_10m.json")
+
+DEFAULT_OUTLOOK_CFG: Dict[str, Any] = {
+    "bullish_breadth": 55.0,
+    "bullish_momentum": 55.0,
+    "bearish_breadth": 45.0,
+    "bearish_momentum": 45.0,
+    "default": "Neutral",
 }
 
 
-def norm(s: str) -> str:
-    return (s or "").strip().lower()
+def load_outlook_cfg() -> Dict[str, Any]:
+    try:
+        with open(OUTLOOK_CFG_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        # Merge onto defaults so missing keys don't crash anything
+        out = dict(DEFAULT_OUTLOOK_CFG)
+        out.update({k: v for k, v in cfg.items() if k in DEFAULT_OUTLOOK_CFG})
+        return out
+    except Exception as e:
+        print(f"[warn] sector_outlook_10m.json not found or invalid: {e}. Using defaults.", file=sys.stderr)
+        return dict(DEFAULT_OUTLOOK_CFG)
+
+
+OUTLOOK_CFG = load_outlook_cfg()
+
+
+def label_outlook_10m(card: Dict[str, Any]) -> str:
+    """
+    10m sector outlook for Index Sectors row.
+
+    Tuned via config/sector_outlook_10m.json:
+      - Bullish: breadth >= bullish_breadth AND momentum >= bullish_momentum
+      - Bearish: breadth <= bearish_breadth AND momentum <= bearish_momentum
+      - Else: default (usually "Neutral")
+    """
+    try:
+        b = float(card.get("breadth_pct", 0.0))
+        m = float(card.get("momentum_pct", 0.0))
+    except Exception:
+        return OUTLOOK_CFG["default"]
+
+    if b >= OUTLOOK_CFG["bullish_breadth"] and m >= OUTLOOK_CFG["bullish_momentum"]:
+        return "Bullish"
+    if b <= OUTLOOK_CFG["bearish_breadth"] and m <= OUTLOOK_CFG["bearish_momentum"]:
+        return "Bearish"
+    return OUTLOOK_CFG["default"]
+
+
+# -------------------------------------------------------------------
+# Generic helpers
+# -------------------------------------------------------------------
+
+
+def coalesce(*vals):
+    for v in vals:
+        if isinstance(v, (int, float)) and v == v:  # not NaN
+            return float(v)
+    return None
 
 
 def pct(a: float, b: float) -> float:
-    if not b:
-        return 0.0
-    try:
-        return round(100.0 * float(a) / float(b), 2)
-    except Exception:
-        return 0.0
-
-
-def build_sector_cards_from_groups(groups: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    groups: { "Tech": {"nh":..,"nl":..,"u":..,"d":..}, ... }
-    -> normalized 11 sectorCards with nh/nl/up/down + breadth_pct/momentum_pct.
-    """
-    bucket: Dict[str, Dict[str, Any]] = {}
-
-    for raw, g in (groups or {}).items():
-        k = ALIAS.get(norm(raw), norm(raw))
-        if not k:
-            continue
-        nh = int((g or {}).get("nh", 0))
-        nl = int((g or {}).get("nl", 0))
-        up = int((g or {}).get("u", 0))
-        dn = int((g or {}).get("d", 0))
-        b = pct(nh, nh + nl)
-        m = pct(up, up + dn)
-        bucket[k] = {
-            "sector": k.title(),
-            "breadth_pct": b,
-            "momentum_pct": m,
-            "nh": nh,
-            "nl": nl,
-            "up": up,
-            "down": dn,
-        }
-
-    rows: List[Dict[str, Any]] = []
-    for name in ORDER:
-        if name in bucket:
-            rows.append(bucket[name])
-        else:
-            rows.append(
-                {
-                    "sector": name.title(),
-                    "breadth_pct": 0.0,
-                    "momentum_pct": 0.0,
-                    "nh": 0,
-                    "nl": 0,
-                    "up": 0,
-                    "down": 0,
-                }
-            )
-    return rows
-
-
-def composite_average(cards: List[Dict[str, Any]], key: str) -> float:
-    vals = [float(c.get(key, 0.0)) for c in cards if isinstance(c.get(key), (int, float))]
-    return round(sum(vals) / len(vals), 2) if vals else 0.0
+    return 0.0 if b <= 0 else round(100.0 * float(a) / float(b), 2)
 
 
 def load_json(path: str) -> Dict[str, Any]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        print(f"[error] cannot read {path}: {e}", file=sys.stderr)
         return {}
 
 
-# ---------------- Intraday composer ----------------
+# -------------------------------------------------------------------
+# Sector card normalization
+# -------------------------------------------------------------------
+
+
+def ensure_sector_cards(source: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Return 11 sectorCards in canonical ORDER.
+
+    - If source["sectorCards"] exists, we:
+        * keep their breadth/momentum/nh/nl/up/down
+        * fill any missing sectors with zeroed cards
+        * sort into canonical ORDER
+
+    - Else if source["groups"] exists (sector -> {nh,nl,u,d}), we derive:
+        * breadth_pct  = nh / (nh+nl)
+        * momentum_pct = up / (up+down)
+        * and build cards from scratch.
+    """
+    cards = source.get("sectorCards")
+    if isinstance(cards, list) and cards:
+        # Ensure all canonical sectors exist
+        got = {c.get("sector") for c in cards if isinstance(c, dict)}
+        for name in ORDER:
+            if name not in got:
+                cards.append(
+                    {
+                        "sector": name,
+                        "breadth_pct": 0.0,
+                        "momentum_pct": 0.0,
+                        "nh": 0,
+                        "nl": 0,
+                        "up": 0,
+                        "down": 0,
+                    }
+                )
+        # Sort into canonical order
+        key = {n: i for i, n in enumerate(ORDER)}
+        cards.sort(key=lambda c: key.get(c.get("sector", ""), 999))
+        return cards
+
+    # Derive from groups if no sectorCards provided
+    groups = source.get("groups") or {}
+    derived: List[Dict[str, Any]] = []
+    for name in ORDER:
+        g = groups.get(name) or {}
+        nh = int(g.get("nh", 0))
+        nl = int(g.get("nl", 0))
+        up = int(g.get("u", 0))
+        dn = int(g.get("d", 0))
+        b = pct(nh, nh + nl)
+        m = pct(up, up + dn)
+        derived.append(
+            {
+                "sector": name,
+                "breadth_pct": b,
+                "momentum_pct": m,
+                "nh": nh,
+                "nl": nl,
+                "up": up,
+                "down": dn,
+            }
+        )
+    return derived
+
+
+# -------------------------------------------------------------------
+# Intraday composition (10m)
+# -------------------------------------------------------------------
 
 
 def compose_intraday(src: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Build the final /live/intraday payload.
+    Normalize intraday payload:
 
-    - Ensures sectorCards exist.
-    - Normalises 10m metrics.
-    - Fixes squeeze fields (PSI vs expansion).
+      - Normalize metrics to the 10m schema.
+      - Preserve intraday / engineLights from the source.
+      - Ensure we always have 11 canonical sectorCards.
+      - Attach a 10m `outlook` field to each sectorCard using config-driven rules.
     """
-    # 1) sector cards
-    if isinstance(src.get("sectorCards"), list) and src["sectorCards"]:
-        sector_cards = src["sectorCards"]
-    else:
-        sector_cards = build_sector_cards_from_groups(src.get("groups") or {})
+    cards = ensure_sector_cards(src)
 
-    # 2) metrics (start from source, then patch as needed)
-    src_metrics = src.get("metrics") or {}
-    metrics: Dict[str, Any] = dict(src_metrics)
+    # Attach or override outlook for 10m cards using config thresholds,
+    # but only if upstream hasn't already set an outlook.
+    for c in cards:
+        if "outlook" not in c:
+            c["outlook"] = label_outlook_10m(c)
 
-    # --- breadth / momentum fallback if missing ---
-    breadth_10m = metrics.get("breadth_10m_pct")
-    if not isinstance(breadth_10m, (int, float)):
-        breadth_10m = composite_average(sector_cards, "breadth_pct")
+    m_in = dict(src.get("metrics") or {})
 
-    momentum_10m = metrics.get("momentum_10m_pct")
-    if not isinstance(momentum_10m, (int, float)):
-        momentum_10m = composite_average(sector_cards, "momentum_pct")
+    # Normalize metrics
+    breadth = coalesce(m_in.get("breadth_10m_pct"), m_in.get("breadth_pct"))
+    if breadth is None:
+        breadth = (
+            round(
+                sum(c.get("breadth_pct", 0.0) for c in cards) / len(cards),
+                2,
+            )
+            if cards
+            else 50.0
+        )
 
-    metrics["breadth_10m_pct"] = float(round(breadth_10m, 2))
-    metrics["momentum_10m_pct"] = float(round(momentum_10m, 2))
+    momentum = coalesce(m_in.get("momentum_10m_pct"), m_in.get("momentum_pct"), 50.0)
+    psi = coalesce(m_in.get("squeeze_psi_10m_pct"), m_in.get("squeeze_psi"), 50.0)
+    liq = coalesce(m_in.get("liquidity_psi"), 70.0)
+    vol = coalesce(m_in.get("volatility_10m_pct"), m_in.get("volatility_pct"), 0.20)
+    ema_sign = int(m_in.get("ema_sign") or 0)
+    ema_gap = coalesce(m_in.get("ema_gap_pct"), 0.0)
 
-    # --- SQUEEZE: use Lux PSI if present; otherwise keep old behaviour ---
-    # Expectation from upstream builder:
-    #   - metrics.squeeze_psi_10m_pct = Lux PSI (tightness 0–100)
-    #   - metrics.squeeze_pct         = expansion (100 - PSI)
-    # But this has been inconsistent, so we normalise here.
+    m_out = dict(m_in)
+    m_out["breadth_10m_pct"] = round(breadth, 2)
+    m_out["momentum_10m_pct"] = round(momentum, 2)
+    m_out["squeeze_psi_10m_pct"] = round(psi, 2)
+    m_out["squeeze_expansion_pct"] = round(100.0 - psi, 2)
+    # UI "squeeze_pct" tile shows expansion
+    m_out["squeeze_pct"] = m_out["squeeze_expansion_pct"]
+    m_out["liquidity_psi"] = round(liq, 2)
+    m_out["volatility_pct"] = round(vol, 3)
+    m_out["ema_sign"] = ema_sign
+    m_out["ema_gap_pct"] = round(ema_gap, 2)
 
-    psi = None
-
-    # 1) Prefer explicit Lux PSI field if set
-    cand_psi_keys = [
-        "squeeze_psi_10m_pct",
-        "lux_squeeze_psi_10m",
-        "lux_squeeze_psi",
-        "psi_10m",
-    ]
-    for k in cand_psi_keys:
-        if isinstance(metrics.get(k), (int, float)):
-            psi = float(metrics[k])
-            break
-
-    # 2) If we don't have PSI but we have an "expansion" we can invert
-    if psi is None:
-        # some older builds wrote `squeeze_expansion_pct` as expansion
-        exp_candidate = None
-        for k in ("squeeze_expansion_pct", "squeeze_pct"):
-            if isinstance(metrics.get(k), (int, float)):
-                exp_candidate = float(metrics[k])
-                break
-        if exp_candidate is not None:
-            psi = max(0.0, min(100.0, 100.0 - exp_candidate))
-
-    # 3) If we *still* don’t have PSI, fall back to 50 (neutral)
-    if psi is None:
-        psi = 50.0
-
-    psi = float(round(max(0.0, min(100.0, psi)), 2))
-    expansion = float(round(100.0 - psi, 2))
-
-    metrics["squeeze_psi_10m_pct"] = psi
-    metrics["squeeze_pct"] = expansion              # the value the Meter tile will display
-    metrics["squeeze_expansion_pct"] = expansion    # extra alias for anyone else
-
-    # If liquidity/volatility missing, keep previous behaviour (or defaults)
-    if not isinstance(metrics.get("liquidity_psi"), (int, float)):
-        # some older sources:
-        g = src.get("global") or {}
-        liq = g.get("liquidity_pct")
-        metrics["liquidity_psi"] = float(liq) if isinstance(liq, (int, float)) else 70.0
-
-    if not isinstance(metrics.get("volatility_pct"), (int, float)):
-        g = src.get("global") or {}
-        vol = g.get("volatility_pct")
-        metrics["volatility_pct"] = float(vol) if isinstance(vol, (int, float)) else 0.20
-
-    # 3) intraday block & engineLights (pass-through)
     intraday = src.get("intraday") or {}
-    intraday.setdefault("overall10m", {"state": "neutral", "score": 50})
-
     engine = src.get("engineLights") or {}
 
     return {
         "version": src.get("version") or "r-intraday-v1",
-        "updated_at": now_phx_iso(),
-        "updated_at_utc": now_utc_iso(),
+        "updated_at": now_phx(),
+        "updated_at_utc": now_utc(),
         "mode": "intraday",
-        "metrics": metrics,
+        "metrics": m_out,
         "intraday": intraday,
         "engineLights": engine,
-        "sectorCards": sector_cards,
-        "meta": {"last_full_run_utc": now_utc_iso()},
+        "sectorCards": cards,
+        "meta": {"last_full_run_utc": now_utc()},
     }
 
 
-# ---------------- Main ----------------
+# -------------------------------------------------------------------
+# Hourly / EOD passthrough
+# -------------------------------------------------------------------
+
+
+def compose_hourly(src: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(src)
+    out["updated_at"] = now_phx()
+    out["updated_at_utc"] = now_utc()
+    out["mode"] = "hourly"
+    return out
+
+
+def compose_eod(src: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(src)
+    out["updated_at"] = now_phx()
+    out["updated_at_utc"] = now_utc()
+    out["mode"] = "eod"
+    return out
+
+
+# -------------------------------------------------------------------
+# CLI
+# -------------------------------------------------------------------
 
 
 def main():
     ap = argparse.ArgumentParser(description="Compose dashboard payloads.")
-    ap.add_argument(
-        "--mode",
-        choices=["intraday", "hourly", "eod"],
-        required=True,
-        help="Which pipeline we are composing for.",
-    )
-    ap.add_argument("--source", required=True, help="Path to source JSON from builder.")
-    ap.add_argument("--out", required=True, help="Output path for composed payload.")
+    ap.add_argument("--mode", choices=["intraday", "hourly", "eod"], required=True)
+    ap.add_argument("--source", required=True)
+    ap_argument = "--out"  # to keep line short
+    ap.add_argument(ap_argument, required=True)
     args = ap.parse_args()
 
     src = load_json(args.source)
@@ -279,33 +328,26 @@ def main():
 
     if args.mode == "intraday":
         out = compose_intraday(src)
+    elif args.mode == "hourly":
+        out = compose_hourly(src)
     else:
-        # For hourly/EOD we only refresh timestamps & mode
-        out = dict(src)
-        out["updated_at"] = now_phx_iso()
-        out["updated_at_utc"] = now_utc_iso()
-        out["mode"] = args.mode
+        out = compose_eod(src)
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
-    print(f"[ok] wrote {args.out}")
+    # Tiny QA log
     try:
         m = out.get("metrics") or {}
         print(
-            "[metrics] breadth_10m:",
-            m.get("breadth_10m_pct"),
-            "momentum_10m:",
-            m.get("momentum_10m_pct"),
-            "squeeze_psi_10m:",
-            m.get("squeeze_psi_10m_pct"),
-            "squeeze_pct(expansion):",
-            m.get("squeeze_pct"),
+            f"[ok] wrote {args.out} mode={args.mode}  updated_at={out.get('updated_at')}  "
+            f"breadth_10m={m.get('breadth_10m_pct')}  momentum_10m={m.get('momentum_10m_pct')}  "
+            f"squeeze_exp={m.get('squeeze_expansion_pct')}"
         )
     except Exception:
         pass
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
