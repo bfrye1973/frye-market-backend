@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — compute_trend10m.py (R12.7 Fast Bee Engine)
+Ferrari Dashboard — compute_trend10m.py (R12.7 Fast Bee Engine, 10m squeeze fix)
 
 Post-processes data/outlook_intraday.json to compute:
 
@@ -9,8 +9,8 @@ Post-processes data/outlook_intraday.json to compute:
 - metrics.momentum_10m_pct
 - metrics.momentum_combo_10m_pct
 - metrics.squeeze_psi_10m_pct    (Lux PSI tightness 0..100)
-- metrics.squeeze_pct            (expansion 0..100 = 100 - psi)
-- metrics.squeeze_expansion_pct  (same as squeeze_pct)
+- metrics.squeeze_pct            (PSI, matching EOD daily_squeeze_pct)
+- metrics.squeeze_expansion_pct  (expansion 0..100 = 100 - psi)
 - metrics.liquidity_psi          (vol EMA3/EMA12)
 - metrics.volatility_pct         (ATR3 % on 10m)
 - metrics.breadth_align_fast_pct (QA)
@@ -211,7 +211,7 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
     ybar = sum(win)/n
     num = sum((x-xbar)*(y-ybar) for x,y in zip(xs,win))
     den = (sum((x-xbar)**2 for x in xs)*sum((y-ybar)**2 for y in win)) or 1.0
-    r = num/math.sqrt(den)
+    r = num / math.sqrt(den)
     psi = -50.0*r + 50.0
     return float(clamp(psi,0.0,100.0))
 
@@ -323,17 +323,23 @@ def compute_10m():
     metrics["ema_gap_pct"]= round(ema_gap_pct,3)
 
     # Lux PSI Squeeze 10m
-    squeeze_psi_10m = None
+    # EOD uses PSI directly as squeezePct; here we mirror that:
+    # - squeeze_psi_10m_pct   = PSI (tightness 0..100)
+    # - squeeze_expansion_pct = 100 - PSI
+    # - squeeze_pct           = PSI   (so the tile acts like EOD)
+    squeeze_psi_10m = 50.0
     squeeze_exp = 50.0
     if len(spy_10m) >= 25:
         C = [b["close"] for b in spy_10m]
         psi = lux_psi_from_closes(C, conv=50, length=20)
         if isinstance(psi,(int,float)):
-            squeeze_psi_10m = psi
-            squeeze_exp = clamp(100.0 - psi, 0.0, 100.0)
-    metrics["squeeze_psi_10m_pct"]   = round(squeeze_psi_10m,2) if isinstance(squeeze_psi_10m,(int,float)) else None
+            squeeze_psi_10m = clamp(psi, 0.0, 100.0)
+            squeeze_exp = clamp(100.0 - squeeze_psi_10m, 0.0, 100.0)
+
+    metrics["squeeze_psi_10m_pct"]   = round(squeeze_psi_10m,2)
     metrics["squeeze_expansion_pct"] = round(squeeze_exp,2)
-    metrics["squeeze_pct"]           = metrics["squeeze_expansion_pct"]
+    # IMPORTANT: 10m tile now shows PSI like EOD; expansion still available in squeeze_expansion_pct
+    metrics["squeeze_pct"]           = metrics["squeeze_psi_10m_pct"]
 
     # Liquidity & Volatility 10m
     liquidity_psi = 50.0
@@ -381,7 +387,7 @@ def compute_10m():
     risk_on_10m = round(pct(ro_score, ro_den),2) if ro_den>0 else 50.0
     metrics["riskOn_10m_pct"] = risk_on_10m
 
-    # Overall10m composite
+    # Overall10m composite (still uses expansion for scoring)
     state, score, comps = compute_overall10m(
         ema_sign=ema_sign,
         ema10_dist_pct=ema_gap_pct,
@@ -426,7 +432,7 @@ def compute_10m():
     save_json(INTRADAY_PATH, j)
     print(
         f"[10m] breadth_fast={breadth_fast:.2f} momCombo={momentum_combo_10m:.2f} "
-        f"squeezeExp={squeeze_exp:.2f} psi={squeeze_psi_10m} "
+        f"squeezePsi={squeeze_psi_10m:.2f} squeezeExp={squeeze_exp:.2f} "
         f"liqPsi={liquidity_psi:.2f} volPct={volatility_pct:.3f} "
         f"riskOn={risk_on_10m:.2f} risingPct={rising_pct:.2f} overall={state}/{score}",
         flush=True,
