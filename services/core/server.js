@@ -10,6 +10,13 @@ import sectorcards10mRouter from "./routes/sectorcards-10m.js"; // ✅ NEW
 
 // --- App setup ---
 const app = express();
+// WHO AM I TEST ROUTE
+app.get("/__whoami", (req, res) => {
+  res.json({
+    backend: "BACKEND-CORE-R12.8",
+    ts: new Date().toISOString(),
+  });
+});
 app.set("trust proxy", true);
 app.disable("x-powered-by");
 app.set("etag", false);
