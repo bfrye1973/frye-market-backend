@@ -15,6 +15,18 @@ import apiRouter from "./api/routes.js";            // /api/*
 import { ohlcRouter } from "./routes/ohlc.js";      // /api/v1/ohlc
 
 const app = express();
+// WHO AM I TEST ROUTE
+app.get("/__whoami", (req, res) => {
+  res.json({
+    backend: "BRIAN-MARKET-METER-TEST-R12.8",
+    ts: new Date().toISOString(),
+  });
+});
+
+// (everything else continues below)
+app.use(express.json());
+app.use(express.static("public"));
+// etc...
 const PORT = process.env.PORT || 3000;
 
 /* ---------------------------------------------------------------------------
