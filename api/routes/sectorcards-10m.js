@@ -1,4 +1,4 @@
-// api/routes/sectorcards-10m.js
+// api/sectorcards-10m.js
 // 10m Sector Adapter using algos/index-sectors/10m/formulas.js
 
 import express from "express";
