@@ -1,275 +1,94 @@
-name: Intraday DELTAS SANDBOX (5-minute)
+name: Intraday DELTAS (5-minute)
 
 on:
+  # Manual/API only – your local scheduler will call this,
+  # exactly like the 10m dashboard workflow.
   workflow_dispatch: {}
-  schedule:
-    # Pre-open + RTH, every 3 minutes (Mon–Fri, UTC)
-    - cron: "*/3 12-20 * * 1-5"
-  workflow_run:
-    workflows: ["dashboard-10min"]
-    types: [completed]
 
-defaults:
-  run:
-    shell: bash
+env:
+  # Where to pull the intraday source bars from
+  LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
+
+  # Production branch holding 5m DELTAS JSON (for /live/pills)
+  BRANCH: data-live-5min-deltas
+
+  # Any keys your DELTAS script needs
+  POLY_KEY: ${{ secrets.POLY_KEY }}
+  POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
 jobs:
   build-and-publish:
-    name: Build and Publish Sandbox Deltas
-    # If triggered by workflow_run, only proceed when the 10m job succeeded
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: Build and Publish 5m DELTAS
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:
-      group: intraday-deltas-sandbox
+      group: intraday-deltas-5m
       cancel-in-progress: true
     permissions:
       contents: write
-    env:
-      LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
-      BRANCH: data-live-10min-sandbox
 
     steps:
-      # ---------------------------------------------------------------
-      # 1) Market-hours guard (America/Phoenix)
-      # ---------------------------------------------------------------
-      - name: Market hours guard (AZ)
-        id: hours
-        run: |
-          TZ="America/Phoenix"
-          DOW=$(TZ=$TZ date +'%u')   # 1=Mon .. 7=Sun
-          HOUR=$(TZ=$TZ date +'%H')  # 00..23
-          echo "AZ now: $(TZ=$TZ date)  (DOW=$DOW HOUR=$HOUR)"
-
-          if [ "$DOW" -ge 6 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ Weekend — skip"; exit 0
-          fi
-
-          # Allow 06:00–13:59 AZ (pre-open + RTH)
-          if [ "$HOUR" -lt 6 ] || [ "$HOUR" -gt 13 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ Outside AZ market hours — skip"; exit 0
-          fi
-
-          echo "run=true" >> "$GITHUB_OUTPUT"
-          echo "✅ Within market hours — continue"
-
-      # ---------------------------------------------------------------
-      # 2) Ensure jq is present (for freshness gate)
-      # ---------------------------------------------------------------
-      - name: Ensure jq is available
-        if: ${{ steps.hours.outputs.run == 'true' }}
-        run: |
-          set -e
-          if ! command -v jq >/dev/null 2>&1; then
-            sudo apt-get update -y
-            sudo apt-get install -y jq
-          fi
-
-      # ---------------------------------------------------------------
-      # 3) Freshness gate: require 10m live file ≤ 480s old
-      # ---------------------------------------------------------------
-      - name: Gate – require fresh 10m live (<= 480s)
-        id: fresh
-        if: ${{ steps.hours.outputs.run == 'true' }}
-        env:
-          LIVE_URL: ${{ env.LIVE_URL }}
-        run: |
-          set -e
-          curl -sfL "${LIVE_URL}?t=$(date +%s)" -o /tmp/live10.json || { echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "no live10"; exit 0; }
-          TS=$(jq -r '.updated_at // .updated_at_utc // empty' /tmp/live10.json)
-          if [ -z "$TS" ]; then echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "no timestamp on live10"; exit 0; fi
-          AGE=$(( $(date -u +%s) - $(date -u -d "${TS/Z/+00:00}" +%s) ))
-          echo "live10 age: ${AGE}s"
-          if [ "$AGE" -le 480 ]; then
-            echo "fresh=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "fresh=false" >> "$GITHUB_OUTPUT"
-            echo "⏸ live10 too old — skip this run"
-          fi
-
-      # ---------------------------------------------------------------
-      # 4) Checkout and build only when guards pass OR 10m workflow just succeeded
-      # ---------------------------------------------------------------
       - name: Checkout (shallow)
-        if: >-
-          ${{
-            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
-          }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Set BUILD_DIR
-        if: >-
-          ${{
-            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
-          }}
-        run: |
-          echo "BUILD_DIR=${RUNNER_TEMP}/intraday-deltas" >> "$GITHUB_ENV"
-          mkdir -p "${RUNNER_TEMP}/intraday-deltas"
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-      - name: Fetch previous sandbox payload
-        if: >-
-          ${{
-            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
-          }}
+      - name: Install Python deps
         run: |
-          set -e
-          if git ls-remote --exit-code --heads origin "${BRANCH}" >/dev/null 2>&1; then
-            git fetch origin "${BRANCH}:${BRANCH}"
-            git show "origin/${BRANCH}:data/outlook_intraday.json" > "$BUILD_DIR/prev.json" || true
-          fi
+          python -m pip install --upgrade pip
+          # If you have a requirements.txt, keep this:
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Generate NEW sandbox payload with DELTAS
-        if: >-
-          ${{
-            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
-          }}
+      # -------------------------------------------------------------------
+      # Build 5m DELTAS (pills.json)
+      # This script should:
+      #   - pull LIVE_URL
+      #   - compute 5m deltas
+      #   - write JSON to data/pills.json in the format /live/pills expects:
+      #       { "stamp5": "...", "stamp10": "...", "deltas": { ... } }
+      # -------------------------------------------------------------------
+      - name: Build 5m DELTAS (pills)
         env:
-          LIVE_URL:  ${{ env.LIVE_URL }}
-          BUILD_DIR: ${{ env.BUILD_DIR }}
+          LIVE_URL: ${{ env.LIVE_URL }}
+          BRANCH: ${{ env.BRANCH }}
+          POLY_KEY: ${{ env.POLY_KEY }}
+          POLYGON_API_KEY: ${{ env.POLYGON_API_KEY }}
         run: |
-          python - <<'PY'
-          import json, os, sys, urllib.request
-          from datetime import datetime
-          try:
-              from zoneinfo import ZoneInfo
-              AZ = ZoneInfo("America/Phoenix")
-          except Exception:
-              AZ = None
+          python -u scripts/update_pills_10m_state.py
 
-          LIVE_URL  = os.environ["LIVE_URL"]
-          BUILD_DIR = os.environ["BUILD_DIR"]
-          OUT = os.path.join(BUILD_DIR, "outlook_intraday.json")
-          HB  = os.path.join(BUILD_DIR, "heartbeat_10min.txt")
-          PREV = os.path.join(BUILD_DIR, "prev.json")
-
-          def az_iso():
-              return (datetime.now(AZ) if AZ else datetime.now()).replace(microsecond=0).isoformat()
-
-          def fetch_json(url: str):
-              u = url + ("&t=" if "?" in url else "?t=") + str(int(datetime.utcnow().timestamp()))
-              req = urllib.request.Request(u, headers={"Cache-Control":"no-store","User-Agent":"sandbox-deltas/1.0"})
-              with urllib.request.urlopen(req, timeout=20) as resp:
-                  if resp.status != 200: return None
-                  return json.loads(resp.read().decode("utf-8"))
-
-          def load_json(path: str):
-              try:
-                  if os.path.isfile(path):
-                      with open(path,"r",encoding="utf-8") as f: return json.load(f)
-              except Exception:
-                  pass
-              return None
-
-          def pct(a,b): return 0.0 if b == 0 else 100.0*a/b
-
-          def summarize(cards):
-              nh=nl=up=dn=0
-              for c in cards or []:
-                  nh+=int(c.get("nh",0)); nl+=int(c.get("nl",0))
-                  up+=int(c.get("up",0)); dn+=int(c.get("down",0))
-              return pct(nh,nh+nl), pct(up,up+dn)
-
-          def sector_map(cards):
-              m={}
-              for c in cards or []:
-                  nh=int(c.get("nh",0)); nl=int(c.get("nl",0))
-                  up=int(c.get("up",0)); dn=int(c.get("down",0))
-                  b=pct(nh,nh+nl); mo=pct(up,up+dn)
-                  m[str(c.get("sector","Unknown"))]=(b,mo)
-              return m
-
-          curr = fetch_json(LIVE_URL)
-          if not curr:
-              print("❌ Could not fetch /live/intraday"); sys.exit(2)
-
-          prev = load_json(PREV)
-          cb, cm = summarize(curr.get("sectorCards"))
-          pb, pm = summarize(prev.get("sectorCards")) if prev else (0.0,0.0)
-
-          d_market = {
-              "dBreadthPct": round(cb - pb, 2),
-              "dMomentumPct": round(cm - pm, 2),
-              "netTilt": round(((cb - pb) + (cm - pm)) / 2.0, 2),
-              "riskOnPct": round((cb + cm) / 2.0, 2),
-          }
-
-          curr_map = sector_map(curr.get("sectorCards"))
-          prev_map = sector_map(prev.get("sectorCards")) if prev else {}
-          d_sectors = {}
-          for name, (b_now, m_now) in curr_map.items():
-              b_prev, m_prev = prev_map.get(name, (0.0, 0.0))
-              dB = round(b_now - b_prev, 2)
-              dM = round(m_now - m_prev, 2)
-              d_sectors[name] = {"dBreadthPct": dB, "dMomentumPct": dM, "netTilt": round((dB + dM)/2.0, 2)}
-
-          out = dict(curr)
-          out["version"] = "sandbox-10m-deltas"
-          out.setdefault("meta", {})
-          out["meta"]["source"] = "mirror"
-          out["meta"]["sandbox"] = True
-          out["deltas"] = {"market": d_market, "sectors": d_sectors}
-          out["deltasUpdatedAt"] = az_iso()
-
-          os.makedirs(BUILD_DIR, exist_ok=True)
-          with open(OUT,"w",encoding="utf-8") as f: json.dump(out,f,ensure_ascii=False,indent=2)
-          with open(HB,"w",encoding="utf-8") as f: f.write(az_iso()+"\n")
-
-          print(f"✅ Deltas built, {len(d_sectors)} sectors, market diff: {d_market}")
-          PY
-
-      - name: Prepare sandbox branch
-        if: >-
-          ${{
-            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
-          }}
+      # -------------------------------------------------------------------
+      # Publish pills.json to the dedicated 5m DELTAS branch
+      # -------------------------------------------------------------------
+      - name: Publish DELTAS to ${{ env.BRANCH }}
+        env:
+          BRANCH: ${{ env.BRANCH }}
         run: |
           set -e
-          BRANCH="${{ env.BRANCH }}"
+
+          git config user.email "bot@ci.local"
+          git config user.name  "CI Bot (5m DELTAS)"
+
+          # Fetch/Create branch
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             git fetch origin "$BRANCH:$BRANCH"
             git checkout "$BRANCH"
           else
             git checkout --orphan "$BRANCH"
           fi
-          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
+          # Ensure data directory exists
           mkdir -p data
 
-      - name: Copy outputs
-        if: >-
-          ${{
-            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
-          }}
-        run: |
-          cp -f "$BUILD_DIR/outlook_intraday.json" data/outlook_intraday.json
-          cp -f "$BUILD_DIR/heartbeat_10min.txt" data/heartbeat_10min.txt
-          ls -l data
+          # Add pills.json
+          git add data/pills.json || true
 
-      # SAFE PUBLISH (detached HEAD proof)
-      - name: Commit & push
-        if: >-
-          ${{
-            (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-            || (steps.hours.outputs.run == 'true' && steps.fresh.outputs.fresh == 'true')
-          }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          BRANCH: ${{ env.BRANCH }}
-        run: |
-          set -euo pipefail
-          git config user.name  "frye-bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add data/outlook_intraday.json data/heartbeat_10min.txt || true
-          git commit -m "sandbox deltas: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
-          git push origin HEAD:refs/heads/${BRANCH} --force
+          git commit -m "5m DELTAS update $(date -u +"%Y-%m-%dT%H:%M:%SZ")" || {
+            echo "nothing to commit"; exit 0;
+          }
+
+          git push --force-with-lease origin "$BRANCH"
