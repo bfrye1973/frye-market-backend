@@ -80,7 +80,7 @@ const PATH_INTRADAY_DELTA = process.env.RAW_PATH_INTRADAY_DELTA || "data-live-10
 const rawUrlBusted = (p) =>
   `https://raw.githubusercontent.com/${RAW_OWNER}/${RAW_REPO}/${RAW_BRANCH}/${p}?t=${Date.now()}`;
 
-// Poller should *not* use cache-busting, so ETag/304 works:
+// Still here if we need it later (not used by intraday poller anymore)
 const rawUrlNoCache = (p) =>
   `https://raw.githubusercontent.com/${RAW_OWNER}/${RAW_REPO}/${RAW_BRANCH}/${p}`;
 
@@ -130,15 +130,16 @@ app.get("/live/eod",             (_req, res) => proxyRawJSON(res, rawUrlBusted(P
 app.get("/live/intraday-deltas", (_req, res) => proxyRawJSON(res, rawUrlBusted(PATH_INTRADAY_DELTA)));
 
 /* ---------------------------------------------------------------------------
- * NEW: Intraday ETag poller + SSE broadcaster
+ * NEW: Intraday poller + SSE broadcaster
  * ------------------------------------------------------------------------ */
 const GH_TOKEN    = process.env.GITHUB_TOKEN || "";             // optional for higher rate limit
-const POLL_MS     = Number(process.env.POLL_MS || 30000);       // default: 30s poll interval
+const POLL_MS     = Number(process.env.POLL_MS || 30000);       // poll interval; set env POLL_MS=5000 for 5s
 const PING_MS     = Number(process.env.SSE_PING_MS || 15000);   // SSE heartbeat
 const BACKOFF_MIN = 5000;
 const BACKOFF_MAX = 120000;
 
-const INTRADAY_URL = rawUrlNoCache(PATH_INTRADAY);
+// IMPORTANT: use cache-busted URL here so we see new JSON as soon as GitHub writes it
+const INTRADAY_URL = () => rawUrlBusted(PATH_INTRADAY);
 
 /** @type {{ json:any, etag?:string, updatedAt?:string } | null} */
 let latest = null;
@@ -164,16 +165,11 @@ function log(...args) {
 async function pollOnce() {
   const headers = { "Accept": "application/json" };
   if (GH_TOKEN) headers["Authorization"] = `Bearer ${GH_TOKEN}`;
-  if (latest?.etag) headers["If-None-Match"] = latest.etag;
+  // We *could* send If-None-Match, but because we bust cache, each URL is unique
+  // so 304 is unlikely. Keeping logic simple.
 
   try {
-    const r = await fetch(INTRADAY_URL, { headers, cache: "no-store" });
-    if (r.status === 304) {
-      lastFetchTs = Date.now();
-      backoff = 0;
-      log("poll 304 Not Modified");
-      return;
-    }
+    const r = await fetch(INTRADAY_URL(), { headers, cache: "no-store" });
     if (r.status !== 200) {
       throw new Error(`HTTP ${r.status}`);
     }
