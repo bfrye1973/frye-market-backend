@@ -5,12 +5,7 @@ on:
 
 env:
   LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
-
-  # ✅ Production 5m DELTAS branch
   BRANCH: data-live-5min-deltas
-
-  POLY_KEY: ${{ secrets.POLY_KEY }}
-  POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
 jobs:
   build-and-publish:
@@ -39,25 +34,17 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # ✅ Build 5m DELTAS (data/pills.json)
-      - name: Build 5m DELTAS (pills)
-        env:
-          LIVE_URL: ${{ env.LIVE_URL }}
-          BRANCH: ${{ env.BRANCH }}
-          POLY_KEY: ${{ env.POLY_KEY }}
-          POLYGON_API_KEY: ${{ env.POLYGON_API_KEY }}
-        run: |
-          python -u scripts/build_5m_deltas.py
-
-      # ✅ Publish data/pills.json to data-live-5min-deltas
+      # 🔧 Single step: checkout 5m branch, build pills.json there, commit & push
       - name: Publish DELTAS to ${{ env.BRANCH }}
         env:
           BRANCH: ${{ env.BRANCH }}
+          LIVE_URL: ${{ env.LIVE_URL }}
         run: |
           set -e
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot (5m DELTAS)"
 
+          # Fetch/Create branch
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             git fetch origin "$BRANCH:$BRANCH"
             git checkout "$BRANCH"
@@ -66,6 +53,10 @@ jobs:
           fi
 
           mkdir -p data
+
+          # ✅ Build 5m DELTAS on this branch
+          python -u scripts/build_5m_deltas.py
+
           git add data/pills.json || true
 
           git commit -m "5m DELTAS update $(date -u +"%Y-%m-%dT%H:%M:%SZ")" || {
