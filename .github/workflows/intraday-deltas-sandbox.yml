@@ -1,18 +1,14 @@
 name: Intraday DELTAS (5-minute)
 
 on:
-  # Manual/API only – your local scheduler will call this,
-  # exactly like the 10m dashboard workflow.
   workflow_dispatch: {}
 
 env:
-  # Where to pull the intraday source bars from
   LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
 
-  # Production branch holding 5m DELTAS JSON (for /live/pills)
+  # ✅ Production 5m DELTAS branch
   BRANCH: data-live-5min-deltas
 
-  # Any keys your DELTAS script needs
   POLY_KEY: ${{ secrets.POLY_KEY }}
   POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
@@ -41,17 +37,9 @@ jobs:
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          # If you have a requirements.txt, keep this:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # -------------------------------------------------------------------
-      # Build 5m DELTAS (pills.json)
-      # This script should:
-      #   - pull LIVE_URL
-      #   - compute 5m deltas
-      #   - write JSON to data/pills.json in the format /live/pills expects:
-      #       { "stamp5": "...", "stamp10": "...", "deltas": { ... } }
-      # -------------------------------------------------------------------
+      # ✅ Build 5m DELTAS (data/pills.json)
       - name: Build 5m DELTAS (pills)
         env:
           LIVE_URL: ${{ env.LIVE_URL }}
@@ -59,21 +47,17 @@ jobs:
           POLY_KEY: ${{ env.POLY_KEY }}
           POLYGON_API_KEY: ${{ env.POLYGON_API_KEY }}
         run: |
-          python -u scripts/update_pills_10m_state.py
+          python -u scripts/build_5m_deltas.py
 
-      # -------------------------------------------------------------------
-      # Publish pills.json to the dedicated 5m DELTAS branch
-      # -------------------------------------------------------------------
+      # ✅ Publish data/pills.json to data-live-5min-deltas
       - name: Publish DELTAS to ${{ env.BRANCH }}
         env:
           BRANCH: ${{ env.BRANCH }}
         run: |
           set -e
-
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot (5m DELTAS)"
 
-          # Fetch/Create branch
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             git fetch origin "$BRANCH:$BRANCH"
             git checkout "$BRANCH"
@@ -81,10 +65,7 @@ jobs:
             git checkout --orphan "$BRANCH"
           fi
 
-          # Ensure data directory exists
           mkdir -p data
-
-          # Add pills.json
           git add data/pills.json || true
 
           git commit -m "5m DELTAS update $(date -u +"%Y-%m-%dT%H:%M:%SZ")" || {
