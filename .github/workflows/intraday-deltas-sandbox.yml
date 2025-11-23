@@ -36,31 +36,31 @@ jobs:
 
       # 🔧 Single step: checkout 5m branch, build pills.json there, commit & push
       - name: Publish DELTAS to ${{ env.BRANCH }}
-        env:
-          BRANCH: ${{ env.BRANCH }}
-          LIVE_URL: ${{ env.LIVE_URL }}
-        run: |
-          set -e
-          git config user.email "bot@ci.local"
-          git config user.name  "CI Bot (5m DELTAS)"
+  env:
+    BRANCH: ${{ env.BRANCH }}
+    LIVE_URL: ${{ env.LIVE_URL }}
+  run: |
+    set -e
+    git config user.email "bot@ci.local"
+    git config user.name  "CI Bot (5m DELTAS)"
 
-          # Fetch/Create branch
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            git fetch origin "$BRANCH:$BRANCH"
-            git checkout "$BRANCH"
-          else
-            git checkout --orphan "$BRANCH"
-          fi
+    # Fetch/create branch FROM main (so scripts/ exists)
+    if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+      git fetch origin "$BRANCH:$BRANCH"
+      git checkout "$BRANCH"
+    else
+      git checkout -b "$BRANCH"
+    fi
 
-          mkdir -p data
+    mkdir -p data
 
-          # ✅ Build 5m DELTAS on this branch
-          python -u scripts/build_5m_deltas.py
+    # Build 5m DELTAS on this branch
+    python -u scripts/build_5m_deltas.py
 
-          git add data/pills.json || true
+    git add data/pills.json || true
 
-          git commit -m "5m DELTAS update $(date -u +"%Y-%m-%dT%H:%M:%SZ")" || {
-            echo "nothing to commit"; exit 0;
-          }
+    git commit -m "5m DELTAS update $(date -u +"%Y-%m-%dT%H:%M:%SZ")" || {
+      echo "nothing to commit"; exit 0;
+    }
 
-          git push --force-with-lease origin "$BRANCH"
+    git push --set-upstream origin "$BRANCH"
