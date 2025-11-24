@@ -1,15 +1,13 @@
 name: Intraday DELTAS (5-minute)
 
 on:
-  # Manual/API only – you trigger this when you want a 5m update
   workflow_dispatch: {}
 
 env:
-  # Where to pull the intraday source bars from
   LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
-
-  # 👉 Production 5m DELTAS branch used by /live/pills (LIVE_SANDBOX_BRANCH)
   BRANCH: data-live-5min-deltas
+  POLY_KEY: ${{ secrets.POLY_KEY }}
+  POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
 jobs:
   build-and-publish:
@@ -23,7 +21,7 @@ jobs:
       contents: write
 
     steps:
-      # Checkout full history so we can create/update the 5m branch from main
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -32,45 +30,32 @@ jobs:
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Build 5m DELTAS and publish to ${{ env.BRANCH }}
+      - name: Build DELTAS and publish
         env:
           LIVE_URL: ${{ env.LIVE_URL }}
           BRANCH: ${{ env.BRANCH }}
         run: |
-          set -e
+          python -u scripts/update_pills_10m_state.py
 
+      - name: Commit and push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ env.BRANCH }}
+        run: |
           git config user.email "bot@ci.local"
           git config user.name  "CI Bot (5m DELTAS)"
 
-          # Always base the 5m branch off main so scripts/ exists
-          git checkout main
-
-          if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-            git branch -f "$BRANCH" main
-          else
-            git branch "$BRANCH" main
-          fi
-
-          git checkout "$BRANCH"
-
-          mkdir -p data
-
-          echo "Running scripts/build_5m_deltas.py..."
-          python -u scripts/build_5m_deltas.py
+          git fetch origin $BRANCH --depth=1 || echo "(new branch)"
+          git checkout -B $BRANCH origin/$BRANCH || git checkout -B $BRANCH
 
           git add data/pills.json || true
-
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-            exit 0
-          fi
-
-          git commit -m "5m DELTAS update $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          git push --force-with-lease origin "$BRANCH"
+          git commit -m "5m DELTAS update $(date -u +"%Y-%m-%dT%H:%M:%SZ")" || exit 0
+          git push --force-with-lease origin $BRANCH
