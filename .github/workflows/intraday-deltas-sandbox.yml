@@ -1,12 +1,14 @@
 name: Intraday DELTAS (5-minute)
 
 on:
+  # Triggered only by Windows Task Scheduler via workflow_dispatch API
   workflow_dispatch: {}
 
 jobs:
   build-and-publish:
+    name: Build & Publish Intraday DELTAS (5m)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     concurrency:
       group: intraday-deltas-5m
@@ -16,41 +18,46 @@ jobs:
       contents: write
 
     env:
+      # Backend live endpoint + target branch for 5m deltas
       LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
       BRANCH: data-live-intraday-5m
 
     steps:
+      # 1) Checkout repo (shallow)
       - name: Checkout (shallow)
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
+      # 2) Set build directory (where make_intraday_deltas.py writes files)
       - name: Set BUILD_DIR
         run: echo "BUILD_DIR=./data/intraday" >> $GITHUB_ENV
 
+      # 3) Install Python
       - name: Install Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install requirements
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
+      # 4) Run the 5-minute intraday deltas poller
       - name: Run poller
-        run: python make_intraday_deltas.py
+        run: |
+          python -u make_intraday_deltas.py
 
+      # 5) Publish generated files to the live 5m branch
       - name: Publish to branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git fetch origin $BRANCH || true
-          git switch --quiet --force-create $BRANCH || git switch $BRANCH
+          # Fetch or create the target branch
+          git fetch origin "$BRANCH" || true
+          git switch --quiet --force-create "$BRANCH" || git switch "$BRANCH"
 
-          rsync -av --delete $BUILD_DIR/ .
+          # Sync build output into branch root
+          mkdir -p "$BUILD_DIR"
+          rsync -av --delete "$BUILD_DIR"/ .
 
           git add .
           git commit -m "5m intraday deltas update $(date -u +'%Y-%m-%d %H:%M:%S')" || echo "No changes"
-          git push origin $BRANCH
+          git push origin "$BRANCH"
