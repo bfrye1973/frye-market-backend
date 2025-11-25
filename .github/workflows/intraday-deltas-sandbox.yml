@@ -2,9 +2,6 @@ name: Intraday DELTAS (5-minute)
 
 on:
   workflow_dispatch: {}
-  schedule:
-    # Runs every 5 minutes during RTH (12:00–21:00 UTC = 5:00–14:00 AZ)
-    - cron: "*/5 12-21 * * 1-5"
 
 jobs:
   build-and-publish:
