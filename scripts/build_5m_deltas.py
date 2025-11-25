@@ -1,73 +1,55 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-build_5m_deltas.py
-- Fetches /live/intraday
-- Builds 5m "netTilt" per sector from breadth + momentum
-- Writes data/pills.json for /live/pills to consume via data-live-5min-deltas branch
-"""
+name: Intraday DELTAS (5-minute)
 
-import json
-import os
-import sys
-import urllib.request
-from datetime import datetime
+on:
+  workflow_dispatch: {}
 
-LIVE_URL = os.environ.get("LIVE_URL") or "https://frye-market-backend-1.onrender.com/live/intraday"
-OUT_PATH = "data/pills.json"
+jobs:
+  build-and-publish:
+    name: Build & Publish 5m DELTAS
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
+    concurrency:
+      group: intraday-deltas-5m
+      cancel-in-progress: true
 
-def fetch_json(url: str, timeout: int = 25) -> dict:
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "build_5m_deltas/1.0", "Cache-Control": "no-store"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    permissions:
+      contents: write
 
+    env:
+      LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
+      BRANCH: data-live-intraday-5m
+      PYTHONUNBUFFERED: "1"
 
-def main():
-    try:
-        live = fetch_json(LIVE_URL)
-    except Exception as e:
-        print("[5m] ERROR fetching LIVE_URL:", e, file=sys.stderr)
-        sys.exit(1)
+    steps:
+      - name: Checkout (shallow)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-    cards = live.get("sectorCards") or []
-    sectors = {}
-    for c in cards:
-        sec = c.get("sector")
-        if not sec:
-            continue
-        try:
-            breadth = float(c.get("breadth_pct") or 0.0)
-            momentum = float(c.get("momentum_pct") or 0.0)
-        except Exception:
-            breadth = 0.0
-            momentum = 0.0
-        # Simple netTilt = avg(breadth, momentum)
-        net_tilt = (breadth + momentum) / 2.0
-        sectors[sec] = {"netTilt": round(net_tilt, 2)}
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-    ts = (
-        live.get("sectorsUpdatedAt")
-        or live.get("updated_at")
-        or live.get("updated_at_utc")
-        or datetime.utcnow().isoformat() + "Z"
-    )
+      # RUN THE CORRECT 5-MINUTE ENGINE
+      - name: Run 5m Deltas Builder
+        run: |
+          python -u build_5m_deltas.py
 
-    out = {
-        "version": "5m-deltas-r12.8",
-        "deltasUpdatedAt": ts,
-        "deltas": {"sectors": sectors},
-    }
+      # Publish just pills.json to 5-minute branch
+      - name: Publish to branch
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
 
-    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
-    with open(OUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+          git fetch origin "$BRANCH" --depth=1 || echo "(new branch)"
+          git checkout -B "$BRANCH" "origin/$BRANCH" || git checkout -B "$BRANCH"
+          git branch --set-upstream-to="origin/$BRANCH" "$BRANCH" || echo "(no upstream)"
 
-    print(f"[5m] wrote {OUT_PATH} with {len(sectors)} sectors at {ts}", flush=True)
+          mkdir -p data
+          cp -f data/pills.json data/pills.json
 
-
-if __name__ == "__main__":
-    main()
+          git add data/pills.json
+          git commit -m "5m deltas update $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || { echo "No changes"; exit 0; }
+          git push origin "$BRANCH"
