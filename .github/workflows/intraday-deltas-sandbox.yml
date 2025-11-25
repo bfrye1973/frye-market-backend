@@ -2,60 +2,58 @@ name: Intraday DELTAS (5-minute)
 
 on:
   workflow_dispatch: {}
-
-env:
-  LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
-  BRANCH: data-live-5min-deltas
-  POLY_KEY: ${{ secrets.POLY_KEY }}
-  POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+  schedule:
+    # Runs every 5 minutes during RTH (12:00–21:00 UTC = 5:00–14:00 AZ)
+    - cron: "*/5 12-21 * * 1-5"
 
 jobs:
   build-and-publish:
-    name: Build and Publish 5m DELTAS
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
     concurrency:
       group: intraday-deltas-5m
       cancel-in-progress: true
+
     permissions:
       contents: write
 
-    steps:
+    env:
+      LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
+      BRANCH: data-live-intraday-5m
 
-      - name: Checkout repository
+    steps:
+      - name: Checkout (shallow)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Setup Python 3.11
+      - name: Set BUILD_DIR
+        run: echo "BUILD_DIR=./data/intraday" >> $GITHUB_ENV
+
+      - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install Python deps
+      - name: Install requirements
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt
 
-      - name: Build DELTAS and publish
-        env:
-          LIVE_URL: ${{ env.LIVE_URL }}
-          BRANCH: ${{ env.BRANCH }}
+      - name: Run poller
+        run: python make_intraday_deltas.py
+
+      - name: Publish to branch
         run: |
-          python -u scripts/update_pills_10m_state.py
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit and push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          BRANCH: ${{ env.BRANCH }}
-        run: |
-          git config user.email "bot@ci.local"
-          git config user.name  "CI Bot (5m DELTAS)"
+          git fetch origin $BRANCH || true
+          git switch --quiet --force-create $BRANCH || git switch $BRANCH
 
-          git fetch origin $BRANCH --depth=1 || echo "(new branch)"
-          git checkout -B $BRANCH origin/$BRANCH || git checkout -B $BRANCH
+          rsync -av --delete $BUILD_DIR/ .
 
-          git add data/pills.json || true
-          git commit -m "5m DELTAS update $(date -u +"%Y-%m-%dT%H:%M:%SZ")" || exit 0
-          git push --force-with-lease origin $BRANCH
+          git add .
+          git commit -m "5m intraday deltas update $(date -u +'%Y-%m-%d %H:%M:%S')" || echo "No changes"
+          git push origin $BRANCH
