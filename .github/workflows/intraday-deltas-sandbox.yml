@@ -20,7 +20,7 @@ jobs:
 
     env:
       LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
-      BRANCH: data-live-intraday-5m
+      BRANCH: data-live-5min-deltas
       PYTHONUNBUFFERED: "1"
 
     steps:
