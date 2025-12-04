@@ -24,6 +24,7 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
+      # Checkout the repo (main branch)
       - name: Checkout (shallow)
         uses: actions/checkout@v4
         with:
@@ -34,8 +35,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Build 5m DELTAS pills.json in main workspace and stash it in /tmp
+      # ------------------------------------------------------------------
+      # 1) Run official 5-minute DELTAS builder
+      #    This script must:
+      #      - read LIVE_URL
+      #      - generate 5-minute deltas
+      #      - write data/pills.json
+      # ------------------------------------------------------------------
       - name: Run 5m DELTAS Builder
+        env:
+          LIVE_URL: ${{ env.LIVE_URL }}
         run: |
           python -u scripts/build_5m_deltas.py
 
@@ -44,24 +53,33 @@ jobs:
             exit 1
           fi
 
+          # Stash the generated pills file in /tmp so we can switch branches
           mkdir -p /tmp
           cp data/pills.json /tmp/pills_5m.json
 
-      # Publish pills.json to 5-minute branch
+      # ------------------------------------------------------------------
+      # 2) Publish pills.json to data-live-5min-deltas branch
+      # ------------------------------------------------------------------
       - name: Publish to branch
+        env:
+          BRANCH: ${{ env.BRANCH }}
         run: |
           set -e
 
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name  "github-actions[bot]"
 
-          git fetch origin "$BRANCH" --depth=1 || echo "(new branch)"
+          # Fetch remote branch if it exists
+          git fetch origin "$BRANCH" --depth=1 || echo "(no remote branch yet)"
 
-          # Create or switch to the 5m branch
-          git checkout -B "$BRANCH" "origin/$BRANCH" || git checkout -B "$BRANCH"
-          git branch --set-upstream-to="origin/$BRANCH" "$BRANCH" || echo "(no upstream)"
+          # Check out the branch (create if needed)
+          if git rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
+            git checkout "$BRANCH"
+          else
+            git checkout -b "$BRANCH"
+          fi
 
-          # Restore the built pills.json into this branch
+          # Restore the pills file into this branch
           mkdir -p data
           cp /tmp/pills_5m.json data/pills.json
 
