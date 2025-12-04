@@ -72,6 +72,9 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          # Remove the local untracked pills file so checkout won't complain
+          rm -f data/pills.json || true
+
           # Make sure we have the remote branch info
           git fetch origin "$BRANCH" || true
 
