@@ -1,1 +1,58 @@
-{"version":"5m-deltas-r12.8","deltasUpdatedAt":"2025-11-24 08:00:48","deltas":{"sectors":{"Information Technology":{"netTilt":0.0},"Materials":{"netTilt":53.33},"Health Care":{"netTilt":0.0},"Communication Services":{"netTilt":42.46},"Real Estate":{"netTilt":54.09},"Energy":{"netTilt":5.57},"Consumer Staples":{"netTilt":18.61},"Consumer Discretionary":{"netTilt":24.34},"Financials":{"netTilt":15.02},"Utilities":{"netTilt":14.52},"Industrials":{"netTilt":34.21},"Healthcare":{"netTilt":61.1},"tech":{"netTilt":81.72}}}}
+{
+  "stamp5": "2025-12-04T14:28:39Z",
+  "stamp10": "2025-12-04T14:28:39Z",
+  "sectors": {
+    "Information Technology": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "Materials": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "Health Care": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "Communication Services": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "Real Estate": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "Energy": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "Consumer Staples": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "Consumer Discretionary": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "Financials": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "Utilities": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "Industrials": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "Healthcare": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    },
+    "tech": {
+      "d5m": 0.0,
+      "d10m": 0.0
+    }
+  }
+}
