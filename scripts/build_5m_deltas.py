@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+build_5m_deltas.py
+- Fetches /live/intraday
+- Builds 5m "netTilt" per sector from breadth + momentum
+- Writes data/pills.json for /live/pills to consume via data-live-5min-deltas branch
+"""
+
 import os
 import json
 import urllib.request
@@ -22,45 +31,61 @@ def fetch_json(url: str) -> dict:
 
 def build_pills(live: dict) -> dict:
     """
-    Build pills.json structure from /live/intraday payload.
+    Build pills.json structure for /live/pills from /live/intraday.
 
-    Expected output shape:
+    Output shape matches what live.js expects for the 5m branch:
 
     {
-      "stamp5": "...",
-      "stamp10": "...",
-      "sectors": {
-        "sector name": { "d5m": number, "d10m": number }
+      "version": "5m-deltas-r12.8",
+      "deltasUpdatedAt": "...",
+      "deltas": {
+        "sectors": {
+          "Information Technology": { "netTilt": number },
+          ...
+        }
       }
     }
 
-    For now we will just fill d5m/d10m with 0.0 so the structure is correct.
-    You and your teammate can plug in real delta math later.
+    For now we use a simple "netTilt" = average of breadth_pct and momentum_pct,
+    centered around 0.
     """
 
-    # Use updated_at_utc or updated_at as our timestamps
     ts = (
-        live.get("updated_at_utc")
+        live.get("sectorsUpdatedAt")
+        or live.get("updated_at_utc")
         or live.get("updated_at")
         or datetime.now(timezone.utc).isoformat()
     )
 
-    sectors_out = {}
+    sectors = live.get("sectorCards") or []
+    out_sectors = {}
 
-    cards = live.get("sectorCards") or []
-    for c in cards:
+    for c in sectors:
         name = str(c.get("sector") or "Unknown")
-        # Placeholder deltas — structure only
-        sectors_out[name] = {
-            "d5m": 0.0,
-            "d10m": 0.0,
-        }
+        try:
+            b = float(c.get("breadth_pct") or 50.0)
+        except Exception:
+            b = 50.0
+        try:
+            m = float(c.get("momentum_pct") or 50.0)
+        except Exception:
+            m = 50.0
 
-    return {
-        "stamp5": ts,
-        "stamp10": ts,
-        "sectors": sectors_out,
+        # Placeholder netTilt = average(breadth, momentum) - 50
+        avg = (b + m) / 2.0
+        net_tilt = avg - 50.0
+
+        out_sectors[name] = {"netTilt": round(net_tilt, 2)}
+
+    pills = {
+        "version": "5m-deltas-r12.8",
+        "deltasUpdatedAt": ts,
+        "deltas": {
+            "sectors": out_sectors,
+        },
     }
+
+    return pills
 
 
 def main():
@@ -75,9 +100,15 @@ def main():
 
     out_path = Path("data") / "pills.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(pills, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(pills, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
-    print(f"[build_5m_deltas] Wrote {out_path} with {len(pills.get('sectors', {}))} sectors.")
+    sectors_count = len(pills.get("deltas", {}).get("sectors", {}))
+    print(
+        f"[build_5m_deltas] Wrote {out_path} with {sectors_count} sectors at {pills['deltasUpdatedAt']}"
+    )
 
 
 if __name__ == "__main__":
