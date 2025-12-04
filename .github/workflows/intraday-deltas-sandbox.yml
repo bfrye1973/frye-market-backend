@@ -20,7 +20,7 @@ jobs:
 
     env:
       LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
-      BRANCH: data-live-5min-deltas
+      BRANCH: data-live-5min-deltas        # per teammate: /live/pills reads from this branch
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -37,7 +37,7 @@ jobs:
       # === THIS IS THE ONLY SCRIPT WE RUN ===
       - name: Run 5m Deltas Builder
         run: |
-          python -u build_5m_deltas.py
+          python -u scripts/build_5m_deltas.py
 
       - name: Publish to branch
         run: |
