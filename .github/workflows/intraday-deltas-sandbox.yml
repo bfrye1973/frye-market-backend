@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-and-publish:
-    name: Build & Publish Intraday DELTAS (5m)
+    name: Build & Publish 5m DELTAS
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -20,7 +20,7 @@ jobs:
 
     env:
       LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
-      BRANCH: data-live-5min-deltas        # per teammate: /live/pills reads from this branch
+      BRANCH: data-live-5min-deltas
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -29,27 +29,41 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Setup Python
+      - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # === THIS IS THE ONLY SCRIPT WE RUN ===
-      - name: Run 5m Deltas Builder
+      # Build 5m DELTAS pills.json in main workspace and stash it in /tmp
+      - name: Run 5m DELTAS Builder
         run: |
           python -u scripts/build_5m_deltas.py
 
+          if [ ! -f data/pills.json ]; then
+            echo "ERROR: data/pills.json not found after build_5m_deltas.py"
+            exit 1
+          fi
+
+          mkdir -p /tmp
+          cp data/pills.json /tmp/pills_5m.json
+
+      # Publish pills.json to 5-minute branch
       - name: Publish to branch
         run: |
+          set -e
+
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name  "github-actions[bot]"
 
           git fetch origin "$BRANCH" --depth=1 || echo "(new branch)"
+
+          # Create or switch to the 5m branch
           git checkout -B "$BRANCH" "origin/$BRANCH" || git checkout -B "$BRANCH"
           git branch --set-upstream-to="origin/$BRANCH" "$BRANCH" || echo "(no upstream)"
 
+          # Restore the built pills.json into this branch
           mkdir -p data
-          cp -f data/pills.json data/pills.json
+          cp /tmp/pills_5m.json data/pills.json
 
           git add data/pills.json
           git commit -m "5m deltas update $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || { echo "No changes"; exit 0; }
