@@ -24,7 +24,7 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
-      # Checkout the repo (main branch)
+      # Checkout the repo (default branch)
       - name: Checkout (shallow)
         uses: actions/checkout@v4
         with:
@@ -46,6 +46,7 @@ jobs:
         env:
           LIVE_URL: ${{ env.LIVE_URL }}
         run: |
+          set -e
           python -u scripts/build_5m_deltas.py
 
           if [ ! -f data/pills.json ]; then
@@ -59,6 +60,8 @@ jobs:
 
       # ------------------------------------------------------------------
       # 2) Publish pills.json to data-live-5min-deltas branch
+      #    - NEVER force-push
+      #    - Always base local branch on remote HEAD when it exists
       # ------------------------------------------------------------------
       - name: Publish to branch
         env:
@@ -66,23 +69,29 @@ jobs:
         run: |
           set -e
 
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Fetch remote branch if it exists
-          git fetch origin "$BRANCH" --depth=1 || echo "(no remote branch yet)"
+          # Make sure we have the remote branch info
+          git fetch origin "$BRANCH" || true
 
-          # Check out the branch (create if needed)
-          if git rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
-            git checkout "$BRANCH"
+          if git show-ref --quiet "refs/remotes/origin/$BRANCH"; then
+            echo "Remote branch $BRANCH exists – basing local branch on origin/$BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
           else
+            echo "Remote branch $BRANCH does not exist – creating from current HEAD"
             git checkout -b "$BRANCH"
           fi
 
-          # Restore the pills file into this branch
+          # Restore the generated pills file into this branch
           mkdir -p data
           cp /tmp/pills_5m.json data/pills.json
 
           git add data/pills.json
-          git commit -m "5m deltas update $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || { echo "No changes"; exit 0; }
-          git push origin "$BRANCH"
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit – skipping push."
+          else
+            git commit -m "5m deltas update $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git push origin "$BRANCH"
+          fi
