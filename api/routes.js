@@ -3,6 +3,8 @@
 
 import express from "express";
 import sectorcards10m from "./sectorcards-10m.js";
+import { getBarsFromPolygon } from "./providers/polygonBars.js";
+import { normalizeBars } from "./lib/ohlcNormalize.js";
 
 const router = express.Router();
 
@@ -18,6 +20,42 @@ const nid = (p = "ORD") =>
 /* ---------------------------------- health ---------------------------------- */
 router.get("/health", (req, res) => {
   res.json({ ok: true, ts: new Date().toISOString(), service: "frye-market-backend" });
+});
+
+/* --------------------------- OHLC data endpoint --------------------------- */
+// GET /api/ohlc?symbol=SPY&timeframe=30m&limit=500
+router.get("/ohlc", async (req, res) => {
+  try {
+    const { symbol = "SPY", timeframe = "30m", limit = "500" } = req.query;
+    const sym = String(symbol).toUpperCase();
+    const tf = String(timeframe);
+    const lim = Number(limit) || 500;
+
+    // Fetch raw bars from Polygon using your provider
+    const rawBars = await getBarsFromPolygon(sym, tf);
+
+    // Normalize into { time, open, high, low, close, volume }
+    let bars = normalizeBars(rawBars || []);
+
+    // Limit number of bars returned (most recent N)
+    if (bars.length > lim) {
+      bars = bars.slice(-lim);
+    }
+
+    return res.json({
+      ok: true,
+      symbol: sym,
+      timeframe: tf,
+      count: bars.length,
+      bars,
+    });
+  } catch (err) {
+    console.error("[/api/ohlc] error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || "Failed to fetch OHLC data",
+    });
+  }
 });
 
 /* ---------------------------------- status ---------------------------------- */
@@ -184,4 +222,4 @@ router.delete("/trading/orders/:id", (req, res) => {
 //   GET /api/sectorcards-10m
 router.use("/sectorcards-10m", sectorcards10m);
 
-export default router; // <- default export: an Express Router
+export default router; // <- default exp
