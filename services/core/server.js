@@ -7,6 +7,9 @@ import { fileURLToPath } from "url";
 import { ohlcRouter } from "./routes/ohlc.js";
 import liveRouter from "./routes/live.js";   // ✅ live router
 import sectorcards10mRouter from "./routes/sectorcards-10m.js"; // ✅ NEW
+import smzLevels from "./routes/smzLevels.js";
+
+app.use("/api/v1/smz-levels", smzLevels);
 
 // --- App setup ---
 const app = express();
