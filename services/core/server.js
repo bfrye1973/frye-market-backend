@@ -6,13 +6,12 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { ohlcRouter } from "./routes/ohlc.js";
 import liveRouter from "./routes/live.js";   // ✅ live router
-import sectorcards10mRouter from "./routes/sectorcards-10m.js"; // ✅ NEW
-import smzLevels from "./routes/smzLevels.js";
-
-app.use("/api/v1/smz-levels", smzLevels);
+import sectorcards10mRouter from "./routes/sectorcards-10m.js"; // ✅ sectorcards
+import smzLevels from "./routes/smzLevels.js"; // ✅ Smart Money levels API
 
 // --- App setup ---
 const app = express();
+
 // WHO AM I TEST ROUTE
 app.get("/__whoami", (req, res) => {
   res.json({
@@ -61,8 +60,9 @@ app.get("/", (_req, res) => {
 
 // --- API routes ---
 app.use("/api/v1/ohlc", ohlcRouter);
-app.use("/api/sectorcards-10m", sectorcards10mRouter); // ✅ NEW
-app.use("/live", liveRouter);  // ✅ still active
+app.use("/api/sectorcards-10m", sectorcards10mRouter); // ✅ sectorcards adapter
+app.use("/live", liveRouter);  // ✅ GitHub JSON proxies
+app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
 
 // --- 404 / errors ---
 app.use((req, res) =>
@@ -85,7 +85,8 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/health  (Render healthcheck)");
   console.log("- /healthz");
   console.log("- /api/v1/ohlc");
-  console.log("- /api/sectorcards-10m"); // ✅ NEW
+  console.log("- /api/sectorcards-10m");
+  console.log("- /api/v1/smz-levels"); // ✅ new endpoint
   console.log("- /live  (GitHub JSON proxies)");
 });
 
