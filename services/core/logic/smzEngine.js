@@ -1,5 +1,5 @@
 // services/core/logic/smzEngine.js
-// Simple Smart Money engine (single-price distribution levels only, WORKING VERSION)
+// Simple Smart Money engine (distribution levels with price + priceRange)
 
 function isFiniteBar(b) {
   return (
@@ -39,15 +39,19 @@ function detectSwingHighs(bars, lookback = 3) {
   return highs;
 }
 
-// Simple engine using 30m + 1h + 4h to find distribution shelves
+// Main engine: uses merged 30m/1h/4h bars
+// Returns distribution levels with price AND priceRange
 export function computeAccDistLevelsFromBars(bars, opts = {}) {
   if (!Array.isArray(bars) || bars.length < 20) return [];
 
-  // treat all bars as 30m+1h+4h merged, sorted
+  const bandWidth = opts.bandWidth ?? 2.0; // total width ($), >= 1
+  const half = bandWidth / 2;
+
+  // treat all bars as merged, sorted
   const sorted = [...bars].filter(isFiniteBar).sort((a, b) => a.time - b.time);
   const highsIdx = detectSwingHighs(sorted, 3);
 
-  // pick swing high anchors
+  // swing high anchors
   const anchors = highsIdx.map((idx) => ({
     idx,
     price: sorted[idx].high,
@@ -67,11 +71,18 @@ export function computeAccDistLevelsFromBars(bars, opts = {}) {
   const maxLevels = opts.maxLevels ?? 5;
   const chosen = anchors.slice(0, maxLevels);
 
-  const levels = chosen.map((a) => ({
-    type: "distribution",
-    price: a.price,
-    strength: 80,
-  }));
+  const levels = chosen.map((a) => {
+    const price = a.price;
+    const hi = price + half;
+    const lo = price - half;
+
+    return {
+      type: "distribution",
+      price,
+      priceRange: [hi, lo], // <-- band around price
+      strength: 80,
+    };
+  });
 
   return levels;
 }
