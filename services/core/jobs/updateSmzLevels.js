@@ -8,18 +8,18 @@ import fs from "fs";
 import path from "path";
 import fetch from "node-fetch";
 import { fileURLToPath } from "url";
-import { computeAccDistLevels } from "../logic/smzEngine.js";
 
+// Import your Smart Money engine (backend version)
+import { computeAccDistLevelsFromBars } from "../logic/smzEngine.js";
+
+// Resolve __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// --- Helper: fetch OHLC from your backend /api/v1/ohlc ---
 async function fetchBars(symbol, timeframe, limit = 300) {
-  const base =
-    process.env.CORE_BASE_URL ||
-    "https://frye-market-backend-1.onrender.com";
-
   const url =
-    `${base.replace(/\/+$/, "")}/api/v1/ohlc` +
+    `https://frye-market-backend-1.onrender.com/api/v1/ohlc` +
     `?symbol=${encodeURIComponent(symbol)}` +
     `&timeframe=${encodeURIComponent(timeframe)}` +
     `&limit=${encodeURIComponent(String(limit))}`;
@@ -29,7 +29,7 @@ async function fetchBars(symbol, timeframe, limit = 300) {
   const r = await fetch(url);
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
-    throw new Error(`Failed ${timeframe}: ${r.status} ${txt}`);
+    throw new Error(`Failed fetching ${timeframe}: ${r.status} ${txt}`);
   }
 
   const json = await r.json();
@@ -39,30 +39,32 @@ async function fetchBars(symbol, timeframe, limit = 300) {
   return bars;
 }
 
+// --- Main job ---
 async function updateSmzLevels() {
   try {
     const symbol = "SPY";
 
     // 1) Fetch higher timeframe bars (30m, 1h, 4h)
-    const [bars30m, bars1h, bars4h] = await Promise.all([
-      fetchBars(symbol, "30m", 500),
-      fetchBars(symbol, "1h", 500),
-      fetchBars(symbol, "4h", 500),
-    ]);
+    const bars30m = await fetchBars(symbol, "30m", 500);
+    const bars1h  = await fetchBars(symbol, "1h",  500);
+    const bars4h  = await fetchBars(symbol, "4h",  500);
 
-    console.log(
-      "[SMZ] Total bars:",
-      "30m", bars30m.length,
-      "1h", bars1h.length,
-      "4h", bars4h.length
+    // 2) Merge and sort by time
+    const merged = [...bars30m, ...bars1h, ...bars4h].sort(
+      (a, b) => (a.time || 0) - (b.time || 0)
     );
+    console.log("[SMZ] Total merged bars:", merged.length);
 
-    // 2) Run Smart Money engine
+    if (merged.length < 20) {
+      console.warn("[SMZ] Not enough bars to compute levels");
+    }
+
+    // 3) Run Smart Money engine
     console.log("[SMZ] Computing Acc/Dist levels...");
-    const levels = computeAccDistLevels(bars30m, bars1h, bars4h);
+    const levels = computeAccDistLevelsFromBars(merged);
     console.log(`[SMZ] Detected ${levels.length} Smart Money levels`);
 
-    // 3) Save to services/core/data/smz-levels.json
+    // 4) Save to services/core/data/smz-levels.json
     const outPath = path.resolve(__dirname, "../data/smz-levels.json");
     const payload = { levels };
 
@@ -75,7 +77,7 @@ async function updateSmzLevels() {
   }
 }
 
-// Run directly
+// Run directly: node services/core/jobs/updateSmzLevels.js
 if (import.meta.url === `file://${process.argv[1]}`) {
   updateSmzLevels();
 }
