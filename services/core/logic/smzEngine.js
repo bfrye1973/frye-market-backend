@@ -1,5 +1,11 @@
 // services/core/logic/smzEngine.js
-// Simple Smart Money engine (distribution levels with price + priceRange)
+// Simple Smart Money engine (distribution levels) + clustering.
+//
+// Input: merged bars (30m + 1h + 4h) in ascending time
+//   [{ time, open, high, low, close, volume }, ...]
+//
+// Output: array of levels:
+//   { type: "distribution", price, priceRange: [hi, lo], strength }
 
 function isFiniteBar(b) {
   return (
@@ -39,9 +45,9 @@ function detectSwingHighs(bars, lookback = 3) {
   return highs;
 }
 
-// Main engine: uses merged 30m/1h/4h bars
-// Returns distribution levels with price AND priceRange
-export function computeAccDistLevelsFromBars(bars, opts = {}) {
+// Build initial bands around anchors (single swing highs)
+// NOTE: This is your current working logic, with a band around each price.
+function buildBaseLevels(bars, opts = {}) {
   if (!Array.isArray(bars) || bars.length < 20) return [];
 
   const bandWidth = opts.bandWidth ?? 2.0; // total width ($), >= 1
@@ -79,10 +85,80 @@ export function computeAccDistLevelsFromBars(bars, opts = {}) {
     return {
       type: "distribution",
       price,
-      priceRange: [hi, lo], // <-- band around price
+      priceRange: [hi, lo],
       strength: 80,
     };
   });
 
   return levels;
+}
+
+// Cluster overlapping / nearby levels into single institutional zones
+function clusterLevels(levels, clusterTol = 1.0) {
+  if (!Array.isArray(levels) || levels.length === 0) return [];
+
+  // Normalize to have hi > lo and compute center for each
+  const withCenter = levels
+    .filter((lvl) => lvl && (typeof lvl.price === "number" || Array.isArray(lvl.priceRange)))
+    .map((lvl) => {
+      let hi, lo;
+      if (Array.isArray(lvl.priceRange) && lvl.priceRange.length === 2) {
+        hi = Number(lvl.priceRange[0]);
+        lo = Number(lvl.priceRange[1]);
+      } else {
+        const price = Number(lvl.price);
+        hi = price + 1;
+        lo = price - 1;
+      }
+      if (hi < lo) {
+        const tmp = hi;
+        hi = lo;
+        lo = tmp;
+      }
+      const center = (hi + lo) / 2;
+      return {
+        type: lvl.type || "distribution",
+        price: lvl.price,
+        priceRange: [hi, lo],
+        strength: Number(lvl.strength ?? 80),
+        _center: center,
+      };
+    });
+
+  // Sort by center price ascending
+  withCenter.sort((a, b) => a._center - b._center);
+
+  const clustered = [];
+  for (const z of withCenter) {
+    const last = clustered[clustered.length - 1];
+    if (
+      last &&
+      z.type === last.type &&
+      Math.abs(z._center - last._center) <= clusterTol
+    ) {
+      // Merge overlapping / nearby zones of same type
+      const hi = Math.max(last.priceRange[0], z.priceRange[0]);
+      const lo = Math.min(last.priceRange[1], z.priceRange[1]);
+      last.priceRange = [hi, lo];
+      last.strength = Math.max(last.strength, z.strength);
+      last._center = (last._center + z._center) / 2;
+    } else {
+      clustered.push({ ...z });
+    }
+  }
+
+  // Strip internal _center before returning
+  return clustered.map(({ _center, ...rest }) => rest);
+}
+
+// PUBLIC: existing API used by your job
+export function computeAccDistLevelsFromBars(bars, opts = {}) {
+  // 1) Build base levels (what you have now)
+  const baseLevels = buildBaseLevels(bars, opts);
+
+  // 2) Cluster them to remove overlapping shelves
+  const clusterTol = opts.clusterTolerance ?? 1.0; // $1 between centers
+  const merged = clusterLevels(baseLevels, clusterTol);
+
+  return merged;
 }
