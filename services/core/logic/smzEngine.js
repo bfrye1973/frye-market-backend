@@ -1,12 +1,11 @@
 // services/core/logic/smzEngine.js
-// Smart Money Accumulation / Distribution engine (simplified, permissive)
+// Smart Money Accumulation / Distribution engine (30m-only, robust)
 //
 // Usage:
 //   import { computeAccDistLevels } from "../logic/smzEngine.js";
 //   const levels = computeAccDistLevels(bars30m, bars1h, bars4h);
 //
-// barsX arrays must be ascending and have:
-//   { time (sec), open, high, low, close, volume }
+// bars30m: ascending 30m bars [{ time, open, high, low, close, volume }, ...]
 
 function isFiniteBar(b) {
   return (
@@ -19,8 +18,8 @@ function isFiniteBar(b) {
   );
 }
 
-// Find simple swing highs/lows
-function detectSwings(bars, lookback = 2) {
+// Simple swing detection on 30m
+function detectSwings(bars, lookback = 3) {
   const highs = [];
   const lows = [];
   const n = bars.length;
@@ -52,15 +51,14 @@ function detectSwings(bars, lookback = 2) {
   return { highs, lows };
 }
 
-// Build a zone around an anchor using nearby 30m bars
+// Build a band around an anchor using nearby 30m bars
 function buildZoneFrom30m(anchorPrice, anchorTimeSec, type, bars30m, opts) {
-  const windowBars = opts?.clusterWindowBars ?? 8; // ±N bars
-  const priceTol = opts?.clusterPriceTol ?? 3.0; // dollars around anchor
+  const windowBars = opts?.clusterWindowBars ?? 8;  // ±N 30m bars
+  const priceTol = opts?.clusterPriceTol ?? 4.0;    // dollars around anchor
   const minWidth = opts?.minWidth ?? 1.0;
   const maxWidth = opts?.maxWidth ?? 6.0;
 
   if (!Array.isArray(bars30m) || bars30m.length === 0) {
-    // fallback 2-pt band
     return {
       type,
       priceRange: [anchorPrice + 1, anchorPrice - 1],
@@ -87,9 +85,9 @@ function buildZoneFrom30m(anchorPrice, anchorTimeSec, type, bars30m, opts) {
   }
 
   if (!Number.isFinite(hi) || !Number.isFinite(lo)) {
-    // cluster failed -> simple band around anchor
-    hi = anchorPrice + 2;
-    lo = anchorPrice - 2;
+    // If clustering fails, just build a symmetric band around anchor
+    hi = anchorPrice + 2.0;
+    lo = anchorPrice - 2.0;
   }
 
   // enforce min/max width
@@ -118,89 +116,107 @@ function buildZoneFrom30m(anchorPrice, anchorTimeSec, type, bars30m, opts) {
   };
 }
 
-// Main engine: combine 4h + 1h swings, build bands from 30m
-export function computeAccDistLevels(bars30m, bars1h, bars4h, opts = {}) {
-  const anchors = [];
+// Main engine: swings on 30m only, always returns some zones
+export function computeAccDistLevels(bars30m, _bars1h, _bars4h, opts = {}) {
+  const bars = Array.isArray(bars30m) ? [...bars30m] : [];
+  bars.sort((a, b) => (a.time || 0) - (b.time || 0));
 
-  // 4h anchors (stronger weight)
-  if (Array.isArray(bars4h) && bars4h.length) {
-    const { highs, lows } = detectSwings(bars4h, 2);
-    for (const idx of highs) {
-      const b = bars4h[idx];
-      if (!isFiniteBar(b)) continue;
-      anchors.push({
-        type: "distribution",
-        price: b.high,
-        time: b.time,
-        weight: 2,
-      });
-    }
-    for (const idx of lows) {
-      const b = bars4h[idx];
-      if (!isFiniteBar(b)) continue;
-      anchors.push({
-        type: "accumulation",
-        price: b.low,
-        time: b.time,
-        weight: 2,
-      });
-    }
+  if (bars.length < 20) return [];
+
+  const { highs, lows } = detectSwings(bars, 3);
+
+  // Fallback anchors if swing detection fails
+  let distAnchors = highs.map((idx) => ({
+    idx,
+    price: bars[idx].high,
+    time: bars[idx].time,
+  }));
+  let accumAnchors = lows.map((idx) => ({
+    idx,
+    price: bars[idx].low,
+    time: bars[idx].time,
+  }));
+
+  if (!distAnchors.length) {
+    // take top highs as anchors
+    const sortedHighs = [...bars]
+      .filter(isFiniteBar)
+      .sort((a, b) => b.high - a.high)
+      .slice(0, 5);
+    distAnchors = sortedHighs.map((b) => ({
+      idx: -1,
+      price: b.high,
+      time: b.time,
+    }));
   }
 
-  // 1h anchors (medium weight)
-  if (Array.isArray(bars1h) && bars1h.length) {
-    const { highs, lows } = detectSwings(bars1h, 3);
-    for (const idx of highs) {
-      const b = bars1h[idx];
-      if (!isFiniteBar(b)) continue;
-      anchors.push({
-        type: "distribution",
-        price: b.high,
-        time: b.time,
-        weight: 1,
-      });
-    }
-    for (const idx of lows) {
-      const b = bars1h[idx];
-      if (!isFiniteBar(b)) continue;
-      anchors.push({
-        type: "accumulation",
-        price: b.low,
-        time: b.time,
-        weight: 1,
-      });
-    }
+  if (!accumAnchors.length) {
+    const sortedLows = [...bars]
+      .filter(isFiniteBar)
+      .sort((a, b) => a.low - b.low)
+      .slice(0, 3);
+    accumAnchors = sortedLows.map((b) => ({
+      idx: -1,
+      price: b.low,
+      time: b.time,
+    }));
   }
 
-  // If somehow no anchors, bail out
-  if (!anchors.length) return [];
+  // pick strongest anchors
+  distAnchors.sort((a, b) => b.price - a.price);
+  accumAnchors.sort((a, b) => a.price - b.price);
 
-  // Build zones from anchors using 30m structure
-  const zones = anchors.map((a) => {
-    const z = buildZoneFrom30m(a.price, a.time, a.type, bars30m, {
-      clusterWindowBars: 8,
-      clusterPriceTol: 3,
-      minWidth: 1,
-      maxWidth: 6,
-    });
+  const maxDist = opts.maxDist ?? 5;
+  const maxAccum = opts.maxAccum ?? 3;
 
-    // Simple strength: weight + how tight the band is
-    const width = z.priceRange[0] - z.priceRange[1];
-    const widthScore = Math.max(0, 20 - Math.abs(width) * 3); // tighter band = higher
-    const tfScore = a.weight * 20; // 40 for 4h anchor, 20 for 1h
-    const strength = Math.round(
-      Math.min(tfScore + widthScore, 100)
+  const chosenDist = distAnchors.slice(0, maxDist);
+  const chosenAccum = accumAnchors.slice(0, maxAccum);
+
+  const zones = [];
+
+  for (const a of chosenDist) {
+    const z = buildZoneFrom30m(
+      a.price,
+      a.time,
+      "distribution",
+      bars,
+      {
+        clusterWindowBars: 8,
+        clusterPriceTol: 4,
+        minWidth: 1,
+        maxWidth: 6,
+      }
     );
-
-    return {
-      type: z.type,
+    zones.push({
+      type: "distribution",
       priceRange: z.priceRange,
       anchor: a.price,
-      strength,
-    };
-  });
+      strength: 85,
+    });
+  }
 
-  // Cluster nearby zones of same type
+  for (const a of chosenAccum) {
+    const z = buildZoneFrom30m(
+      a.price,
+      a.time,
+      "accumulation",
+      bars,
+      {
+        clusterWindowBars: 8,
+        clusterPriceTol: 4,
+        minWidth: 1,
+        maxWidth: 6,
+      }
+    );
+    zones.push({
+      type: "accumulation",
+      priceRange: z.priceRange,
+      anchor: a.price,
+      strength: 85,
+    });
+  }
+
+  // Cluster overlapping zones of same type
   zones.sort((a, b) => {
     const ca = (a.priceRange[0] + a.priceRange[1]) / 2;
     const cb = (b.priceRange[0] + b.priceRange[1]) / 2;
@@ -219,7 +235,6 @@ export function computeAccDistLevels(bars30m, bars1h, bars4h, opts = {}) {
       z.type === last.type &&
       Math.abs(center - last._center) <= clusterTol
     ) {
-      // merge
       last.priceRange = [
         Math.max(last.priceRange[0], z.priceRange[0]),
         Math.min(last.priceRange[1], z.priceRange[1]),
