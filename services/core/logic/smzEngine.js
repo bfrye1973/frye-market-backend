@@ -1,130 +1,77 @@
 // services/core/logic/smzEngine.js
-// Smart Money Accumulation / Distribution engine
+// Simple Smart Money engine (single-price distribution levels only, WORKING VERSION)
 
+function isFiniteBar(b) {
+  return (
+    b &&
+    Number.isFinite(b.time) &&
+    Number.isFinite(b.open) &&
+    Number.isFinite(b.high) &&
+    Number.isFinite(b.low) &&
+    Number.isFinite(b.close)
+  );
+}
+
+// Simple swing high detection
+function detectSwingHighs(bars, lookback = 3) {
+  const highs = [];
+  const n = bars.length;
+  if (!Array.isArray(bars) || n < lookback * 2 + 1) return highs;
+
+  for (let i = lookback; i < n - lookback; i++) {
+    const b = bars[i];
+    if (!isFiniteBar(b)) continue;
+    let isHigh = true;
+    for (let k = 1; k <= lookback; k++) {
+      const prev = bars[i - k];
+      const next = bars[i + k];
+      if (!isFiniteBar(prev) || !isFiniteBar(next)) {
+        isHigh = false;
+        break;
+      }
+      if (prev.high >= b.high || next.high >= b.high) {
+        isHigh = false;
+        break;
+      }
+    }
+    if (isHigh) highs.push(i);
+  }
+  return highs;
+}
+
+// Simple engine using 30m + 1h + 4h to find distribution shelves
 export function computeAccDistLevelsFromBars(bars, opts = {}) {
   if (!Array.isArray(bars) || bars.length < 20) return [];
 
-  const swingLookback = opts.swingLookback ?? 3;
-  const lookaheadBars = opts.lookaheadBars ?? 15;
-  const minMovePct = opts.minMovePct ?? 0.006;
-  const clusterTolerance = opts.clusterTolerance ?? 1.0;
+  // treat all bars as 30m+1h+4h merged, sorted
+  const sorted = [...bars].filter(isFiniteBar).sort((a, b) => a.time - b.time);
+  const highsIdx = detectSwingHighs(sorted, 3);
 
-  const levels = [];
+  // pick swing high anchors
+  const anchors = highsIdx.map((idx) => ({
+    idx,
+    price: sorted[idx].high,
+    time: sorted[idx].time,
+  }));
 
-  const isSwingHigh = (i) => {
-    const h = bars[i].high;
-    for (let k = 1; k <= swingLookback; k++) {
-      if (i - k < 0 || i + k >= bars.length) return false;
-      if (bars[i - k].high >= h || bars[i + k].high >= h) return false;
-    }
-    return true;
-  };
-
-  const isSwingLow = (i) => {
-    const l = bars[i].low;
-    for (let k = 1; k <= swingLookback; k++) {
-      if (i - k < 0 || i + k >= bars.length) return false;
-      if (bars[i - k].low <= l || bars[i + k].low <= l) return false;
-    }
-    return true;
-  };
-
-  for (let i = swingLookback; i < bars.length - swingLookback; i++) {
-    const b = bars[i];
-
-    // Distribution: swing high → downside reaction
-    if (isSwingHigh(i)) {
-      const anchor = b.high;
-      let maxDropPct = 0;
-      let touchCount = 0;
-
-      for (let j = i + 1; j < Math.min(bars.length, i + 1 + lookaheadBars); j++) {
-        const bj = bars[j];
-        const dropPct = (anchor - bj.low) / anchor;
-        if (dropPct > maxDropPct) maxDropPct = dropPct;
-        const mid = (bj.high + bj.low) / 2;
-        if (Math.abs(mid - anchor) <= 0.4) touchCount++;
-      }
-
-      if (maxDropPct >= minMovePct && touchCount >= 2) {
-        const strength = Math.round(
-          40 * Math.min(maxDropPct / minMovePct, 2) +
-          10 * Math.min(touchCount, 5)
-        );
-
-        levels.push({
-          type: "distribution",
-          price: anchor,
-          strength: Math.min(strength, 100),
-        });
-      }
-    }
-
-    // Accumulation: swing low → upside reaction
-    if (isSwingLow(i)) {
-      const anchor = bars[i].low;
-      let maxRallyPct = 0;
-      let touchCount = 0;
-
-      for (let j = i + 1; j < Math.min(bars.length, i + 1 + lookaheadBars); j++) {
-        const bj = bars[j];
-        const rallyPct = (bj.high - anchor) / anchor;
-        if (rallyPct > maxRallyPct) maxRallyPct = rallyPct;
-        const mid = (bj.high + bj.low) / 2;
-        if (Math.abs(mid - anchor) <= 0.4) touchCount++;
-      }
-
-      if (maxRallyPct >= minMovePct && touchCount >= 2) {
-        const hi = anchor + 1;
-        const lo = anchor;
-
-        const strength = Math.round(
-          40 * Math.min(maxRallyPct / minMovePct, 2) +
-          10 * Math.min(touchCount, 5)
-        );
-
-        levels.push({
-          type: "accumulation",
-          priceRange: [hi, lo],
-          strength: Math.min(strength, 100),
-        });
-      }
-    }
+  // if none, pick top highs
+  if (!anchors.length) {
+    const top = [...sorted].sort((a, b) => b.high - a.high).slice(0, 5);
+    top.forEach((b) =>
+      anchors.push({ idx: -1, price: b.high, time: b.time })
+    );
   }
 
-  // Cluster zones
-  levels.sort((a, b) => {
-    const pa = a.price ?? ((a.priceRange[0] + a.priceRange[1]) / 2);
-    const pb = b.price ?? ((b.priceRange[0] + b.priceRange[1]) / 2);
-    return pa - pb;
-  });
+  // sort anchors by price desc and take top N
+  anchors.sort((a, b) => b.price - a.price);
+  const maxLevels = opts.maxLevels ?? 5;
+  const chosen = anchors.slice(0, maxLevels);
 
-  const clustered = [];
-  for (const lvl of levels) {
-    const center = lvl.price ?? (lvl.priceRange[0] + lvl.priceRange[1]) / 2;
-    const last = clustered[clustered.length - 1];
+  const levels = chosen.map((a) => ({
+    type: "distribution",
+    price: a.price,
+    strength: 80,
+  }));
 
-    if (
-      last &&
-      Math.abs(center - last._center) <= clusterTolerance &&
-      lvl.type === last.type
-    ) {
-      last.strength = Math.max(last.strength, lvl.strength);
-
-      if (lvl.priceRange && last.priceRange) {
-        last.priceRange = [
-          Math.max(last.priceRange[0], lvl.priceRange[0]),
-          Math.min(last.priceRange[1], lvl.priceRange[1]),
-        ];
-      } else if (lvl.price && last.price) {
-        last.price = (last.price + lvl.price) / 2;
-      }
-
-      last._center = (last._center + center) / 2;
-    } else {
-      clustered.push({ ...lvl, _center: center });
-    }
-  }
-
-  return clustered.map(({ _center, ...zone }) => zone);
+  return levels;
 }
