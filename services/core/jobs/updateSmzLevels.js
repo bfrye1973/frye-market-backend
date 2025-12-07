@@ -1,87 +1,60 @@
 // services/core/jobs/updateSmzLevels.js
-// Smart Money Zone updater (more history)
-//
-// Usage (from repo root):
-//   node services/core/jobs/updateSmzLevels.js
+// Rebuild Smart Money Zones using our institutional algo engine
 
 import fs from "fs";
 import path from "path";
-import fetch from "node-fetch";
 import { fileURLToPath } from "url";
-import { computeAccDistLevelsFromBars } from "../logic/smzEngine.js";
 
+import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
+import { getBars } from "../polygon/getBars.js";   // your polygon fetcher
+
+// ---------------------------------------------------------------------------
+// Resolve __dirname (ESM-safe)
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
 
-async function fetchBars(symbol, timeframe, limit) {
-  const base =
-    process.env.CORE_BASE_URL ||
-    "https://frye-market-backend-1.onrender.com";
+// Output file
+const OUTFILE = path.resolve(__dirname, "../data/smz-levels.json");
 
-  const url =
-    `${base.replace(/\/+$/, "")}/api/v1/ohlc` +
-    `?symbol=${encodeURIComponent(symbol)}` +
-    `&timeframe=${encodeURIComponent(timeframe)}` +
-    `&limit=${encodeURIComponent(String(limit))}`;
+// ---------------------------------------------------------------------------
+// Helper: fetch multiple timeframes & merge
+async function loadMergedBars(symbol = "SPY") {
+  const bars30m = await getBars(symbol, "30m", 1500);
+  const bars1h  = await getBars(symbol, "1h", 700);
+  const bars4h  = await getBars(symbol, "4h", 400);
 
-  console.log("[SMZ] Fetching", timeframe, "bars from:", url);
+  console.log("[SMZ] 30m returned", bars30m.length, "bars");
+  console.log("[SMZ] 1h  returned", bars1h.length, "bars");
+  console.log("[SMZ] 4h  returned", bars4h.length, "bars");
 
-  const r = await fetch(url);
-  if (!r.ok) {
-    const txt = await r.text().catch(() => "");
-    throw new Error(`Failed ${timeframe}: ${r.status} ${txt}`);
-  }
+  const merged = [...bars30m, ...bars1h, ...bars4h];
+  merged.sort((a, b) => a.time - b.time);
 
-  const json = await r.json();
-  const bars = Array.isArray(json) ? json : json.bars || [];
-
-  console.log(`[SMZ] ${timeframe} returned ${bars.length} bars`);
-  return bars;
+  console.log("[SMZ] Total merged bars:", merged.length);
+  return merged;
 }
 
-async function updateSmzLevels() {
+// ---------------------------------------------------------------------------
+// MAIN
+(async () => {
   try {
-    const symbol = "SPY";
+    console.log("[SMZ] Fetching raw bars...");
+    const bars = await loadMergedBars("SPY");
 
-    // Pull more history:
-    //  - 30m: ~3 months (1500 bars)
-    //  - 1h : ~3 months (700 bars)
-    //  - 4h : ~6+ months (400 bars)
-    const [bars30m, bars1h, bars4h] = await Promise.all([
-      fetchBars(symbol, "30m", 1500),
-      fetchBars(symbol, "1h", 700),
-      fetchBars(symbol, "4h", 400),
-    ]);
+    console.log("[SMZ] Computing institutional zones...");
+    const zones = computeSmartMoneyLevels(bars);
 
-    const merged = [...bars30m, ...bars1h, ...bars4h].sort(
-      (a, b) => (a.time || 0) - (b.time || 0)
+    console.log("[SMZ] Detected", zones.length, "zones");
+
+    console.log("[SMZ] Saving to:", OUTFILE);
+    fs.writeFileSync(
+      OUTFILE,
+      JSON.stringify({ ok: true, levels: zones }, null, 2)
     );
-    console.log("[SMZ] Total merged bars:", merged.length);
 
-    console.log("[SMZ] Computing Acc/Dist levels...");
-    const levels = computeAccDistLevelsFromBars(merged, {
-      bandWidth: 2.0,
-      lowLevels: 2,
-      topLevels: 3,
-      clusterTolerance: 1.0,
-    });
-    console.log(`[SMZ] Detected ${levels.length} Smart Money levels`);
-
-    const outPath = path.resolve(__dirname, "../data/smz-levels.json");
-    const payload = { levels };
-
-    fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
-    console.log("[SMZ] Wrote smz-levels.json to:", outPath);
     console.log("[SMZ] Done.");
   } catch (err) {
-    console.error("[SMZ] updateSmzLevels failed:", err);
+    console.error("[SMZ] FAILED:", err);
     process.exit(1);
   }
-}
-
-// Run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  updateSmzLevels();
-}
-
-export default updateSmzLevels;
+})();
