@@ -1,5 +1,5 @@
 // services/core/logic/smzEngine.js
-// Simple Smart Money engine (distribution levels) + clustering.
+// Simple Smart Money engine (distribution levels) with top + bottom anchors and clustering.
 //
 // Input: merged bars (30m + 1h + 4h) in ascending time
 //   [{ time, open, high, low, close, volume }, ...]
@@ -45,43 +45,60 @@ function detectSwingHighs(bars, lookback = 3) {
   return highs;
 }
 
-// Build initial bands around anchors (single swing highs)
-// NOTE: This is your current working logic, with a band around each price.
+// Build initial bands around anchors (swing highs)
 function buildBaseLevels(bars, opts = {}) {
   if (!Array.isArray(bars) || bars.length < 20) return [];
 
-  const bandWidth = opts.bandWidth ?? 2.0; // total width ($), >= 1
+  const bandWidth = opts.bandWidth ?? 2.0; // total width ($)
   const half = bandWidth / 2;
 
-  // treat all bars as merged, sorted
   const sorted = [...bars].filter(isFiniteBar).sort((a, b) => a.time - b.time);
   const highsIdx = detectSwingHighs(sorted, 3);
 
-  // swing high anchors
+  // Build anchor list
   const anchors = highsIdx.map((idx) => ({
     idx,
     price: sorted[idx].high,
     time: sorted[idx].time,
   }));
 
-  // if none, pick top highs
+  // If none, fall back to top highs
   if (!anchors.length) {
-    const top = [...sorted].sort((a, b) => b.high - a.high).slice(0, 5);
+    const top = [...sorted].sort((a, b) => b.high - a.high).slice(0, 8);
     top.forEach((b) =>
       anchors.push({ idx: -1, price: b.high, time: b.time })
     );
   }
 
-  // sort anchors by price desc and take top N
-  anchors.sort((a, b) => b.price - a.price);
-  const maxLevels = opts.maxLevels ?? 5;
-  const chosen = anchors.slice(0, maxLevels);
+  if (!anchors.length) return [];
 
+  // Sort anchors by price ASCENDING
+  anchors.sort((a, b) => a.price - b.price);
+
+  // Take a few from the bottom (deep zones) and a few from the top (upper zones)
+  const lowCount = opts.lowLevels ?? 2;   // bottom shelves
+  const highCount = opts.topLevels ?? 3;  // top shelves
+
+  const chosen = [];
+  const used = new Set();
+
+  // Bottom anchors
+  for (let i = 0; i < anchors.length && chosen.length < lowCount; i++) {
+    chosen.push(anchors[i]);
+    used.add(anchors[i].price);
+  }
+
+  // Top anchors
+  for (let i = anchors.length - 1; i >= 0 && chosen.length < lowCount + highCount; i--) {
+    if (used.has(anchors[i].price)) continue;
+    chosen.push(anchors[i]);
+  }
+
+  // Build levels around chosen anchors
   const levels = chosen.map((a) => {
     const price = a.price;
     const hi = price + half;
     const lo = price - half;
-
     return {
       type: "distribution",
       price,
@@ -97,7 +114,6 @@ function buildBaseLevels(bars, opts = {}) {
 function clusterLevels(levels, clusterTol = 1.0) {
   if (!Array.isArray(levels) || levels.length === 0) return [];
 
-  // Normalize to have hi > lo and compute center for each
   const withCenter = levels
     .filter((lvl) => lvl && (typeof lvl.price === "number" || Array.isArray(lvl.priceRange)))
     .map((lvl) => {
@@ -136,7 +152,7 @@ function clusterLevels(levels, clusterTol = 1.0) {
       z.type === last.type &&
       Math.abs(z._center - last._center) <= clusterTol
     ) {
-      // Merge overlapping / nearby zones of same type
+      // Merge
       const hi = Math.max(last.priceRange[0], z.priceRange[0]);
       const lo = Math.min(last.priceRange[1], z.priceRange[1]);
       last.priceRange = [hi, lo];
@@ -147,16 +163,16 @@ function clusterLevels(levels, clusterTol = 1.0) {
     }
   }
 
-  // Strip internal _center before returning
+  // Strip _center
   return clustered.map(({ _center, ...rest }) => rest);
 }
 
-// PUBLIC: existing API used by your job
+// PUBLIC API: used by updateSmzLevels.js
 export function computeAccDistLevelsFromBars(bars, opts = {}) {
-  // 1) Build base levels (what you have now)
+  // 1) Build base levels (top + bottom shelves)
   const baseLevels = buildBaseLevels(bars, opts);
 
-  // 2) Cluster them to remove overlapping shelves
+  // 2) Cluster to remove overlaps
   const clusterTol = opts.clusterTolerance ?? 1.0; // $1 between centers
   const merged = clusterLevels(baseLevels, clusterTol);
 
