@@ -21,9 +21,9 @@ const OUTFILE = path.resolve(__dirname, "../data/smz-levels.json");
 
 // Pull merged institutional data feed
 async function loadMergedBars(symbol = "SPY") {
-  const bars30m = await getPolygonBars(symbol, "30m", 1500);
-  const bars1h  = await getPolygonBars(symbol, "1h", 700);
-  const bars4h  = await getPolygonBars(symbol, "4h", 400);
+  const bars30m = await getPolygonBars(symbol, "30m", 120);
+  const bars1h  = await getPolygonBars(symbol, "1h", 150);
+  const bars4h  = await getPolygonBars(symbol, "4h", 180);
 
   console.log("[SMZ] 30m returned", bars30m.length, "bars");
   console.log("[SMZ] 1h  returned", bars1h.length, "bars");
