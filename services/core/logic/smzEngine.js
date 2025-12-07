@@ -1,263 +1,206 @@
-// services/core/logic/smzEngine.js
-// Smart Money institutional zone engine.
-//
-// - Generates candidate zones where wicks + consolidation cluster,
-//   followed by displacement.
-// - Scores each candidate for institutional strength.
-// - Clusters nearby candidates into one zone.
-// - Returns top N zones with price + priceRange + strength.
-//
-// Used by updateSmzLevels.js via:
-//   computeAccDistLevelsFromBars(mergedBars)
+// ============================================================================
+//  Smart Money Zone Engine  (Institutional Zones + Accum/Dist Zones)
+//  OPTION A: Combined Analysis from 30m + 1h + 4h
+// ============================================================================
 
-function isFiniteBar(b) {
-  return (
-    b &&
-    Number.isFinite(b.time) &&
-    Number.isFinite(b.open) &&
-    Number.isFinite(b.high) &&
-    Number.isFinite(b.low) &&
-    Number.isFinite(b.close)
-  );
-}
+/**
+ * A bar looks like:
+ * { time, open, high, low, close, volume }
+ */
 
-// Compute a simple ATR-like average range for normalization
-function computeATR(bars, period = 50) {
-  if (!Array.isArray(bars) || bars.length === 0) return 1;
-  const n = Math.min(period, bars.length);
-  let sum = 0;
-  for (let i = bars.length - n; i < bars.length; i++) {
-    const b = bars[i];
-    if (!isFiniteBar(b)) continue;
-    const r = b.high - b.low;
-    sum += Math.max(r, 0);
-  }
-  const atr = sum / n;
-  return atr > 0 ? atr : 1;
-}
+const MAX_ZONE_WIDTH = 5.0;      // max allowed zone size in points
+const MIN_TOUCHES = 3;           // minimum wick hits or consolidation touches
+const MAX_ZONES = 6;             // final number of zones returned
 
-// Build candidate anchors where wicks + range are meaningful
-function findCandidateAnchors(bars, atr, opts) {
-  const anchors = [];
-  const minRange = (opts.minRangeMul ?? 0.6) * atr;
-  const minWickMul = opts.minWickMul ?? 0.6; // wick must be > atr * minWickMul
+// ============================================================================
+// 1. Detect Wick Touches
+// ============================================================================
+function detectWickTouches(bars) {
+  let touches = [];
 
   for (let i = 1; i < bars.length - 1; i++) {
     const b = bars[i];
-    if (!isFiniteBar(b)) continue;
 
-    const prev = bars[i - 1];
-    const next = bars[i + 1];
-    if (!isFiniteBar(prev) || !isFiniteBar(next)) continue;
+    const wickHigh = b.high - Math.max(b.open, b.close);
+    const wickLow  = Math.min(b.open, b.close) - b.low;
 
-    const range = b.high - b.low;
-    if (range < minRange) continue;
+    const isHighTouch = wickHigh >= 0.15 && wickHigh <= 0.80;
+    const isLowTouch  = wickLow  >= 0.15 && wickLow  <= 0.80;
 
-    const body = Math.abs(b.close - b.open);
-    const upWick = b.high - Math.max(b.open, b.close);
-    const dnWick = Math.min(b.open, b.close) - b.low;
-
-    const hasLongUp = upWick > atr * minWickMul;
-    const hasLongDn = dnWick > atr * minWickMul;
-
-    // We treat both upper and lower wicks as potential institutional activity.
-    if (!hasLongUp && !hasLongDn) continue;
-
-    // Anchor price: upper for supply, lower for demand (for now treat all as distribution zones).
-    const price = hasLongUp ? b.high : b.low;
-
-    anchors.push({
-      idx: i,
-      price,
-      time: b.time,
-      range,
-      upWick,
-      dnWick,
-      body,
-    });
-  }
-
-  return anchors;
-}
-
-// For a given candidate price, compute zone features by scanning all bars
-function computeZoneFeatures(bars, price, anchorIdx, atr, opts) {
-  const halfBand = (opts.bandWidth ?? 2.0) / 2;
-  const bandHi = price + halfBand;
-  const bandLo = price - halfBand;
-
-  const smallBodyMul = opts.smallBodyMul ?? 0.4; // body < atr * smallBodyMul → consolidation-ish
-  const dispLookahead = opts.dispLookahead ?? 12; // bars to look ahead for displacement
-
-  let wickScore = 0;
-  let consCount = 0;
-  let touchCount = 0;
-  let maxDisp = 0;
-
-  // 1) Scan all bars for wicks & consolidation around this band
-  for (let i = 0; i < bars.length; i++) {
-    const b = bars[i];
-    if (!isFiniteBar(b)) continue;
-
-    const mid = (b.high + b.low) / 2;
-    if (mid < bandLo || mid > bandHi) continue;
-
-    const body = Math.abs(b.close - b.open);
-    const upWick = b.high - Math.max(b.open, b.close);
-    const dnWick = Math.min(b.open, b.close) - b.low;
-
-    // Wicks contributing to institutional "interest"
-    wickScore += Math.max(upWick, 0) + Math.max(dnWick, 0);
-
-    // Consolidation: small-bodied bars hanging around the band
-    if (body < atr * smallBodyMul) {
-      consCount++;
+    if (isHighTouch) {
+      touches.push({ price: b.high, dir: "sell", time: b.time });
     }
-
-    // Touch
-    touchCount++;
-  }
-
-  // 2) Displacement: how far price moves after leaving this band
-  if (anchorIdx >= 0) {
-    const anchorBar = bars[anchorIdx];
-    const anchorPrice = price;
-    const maxLook = Math.min(bars.length, anchorIdx + 1 + dispLookahead);
-    for (let j = anchorIdx + 1; j < maxLook; j++) {
-      const b = bars[j];
-      if (!isFiniteBar(b)) continue;
-      const mid = (b.high + b.low) / 2;
-      const dist = Math.abs(mid - anchorPrice);
-      if (dist > maxDisp) maxDisp = dist;
+    if (isLowTouch) {
+      touches.push({ price: b.low, dir: "buy", time: b.time });
     }
   }
 
-  return {
-    bandHi,
-    bandLo,
-    wickScore,
-    consCount,
-    touchCount,
-    maxDisp,
-  };
+  return touches;
 }
 
-// Score combination into a single institutional strength value
-function scoreZone(features, atr, opts) {
-  const wWick = opts.wWick ?? 0.8;
-  const wCons = opts.wCons ?? 0.6;
-  const wDisp = opts.wDisp ?? 1.0;
-  const wTouch = opts.wTouch ?? 0.3;
+// ============================================================================
+// 2. Detect Consolidation Blocks
+// ============================================================================
+function detectConsolidationZones(bars, tfLabel) {
+  let zones = [];
 
-  const normDisp = features.maxDisp / (atr || 1);
+  const WINDOW = tfLabel === "30m" ? 20 :
+                 tfLabel === "1h"  ? 30 :
+                                     40;
 
-  const rawScore =
-    wWick * (features.wickScore / (atr || 1)) +
-    wCons * features.consCount +
-    wDisp * normDisp +
-    wTouch * features.touchCount;
+  for (let i = WINDOW; i < bars.length; i++) {
+    const slice = bars.slice(i - WINDOW, i);
 
-  return rawScore;
+    const highs = slice.map(b => b.high);
+    const lows  = slice.map(b => b.low);
+
+    const zoneHigh = Math.max(...highs);
+    const zoneLow  = Math.min(...lows);
+
+    const width = zoneHigh - zoneLow;
+    if (width <= MAX_ZONE_WIDTH && width >= 1.0) {
+      zones.push({
+        low: zoneLow,
+        high: zoneHigh,
+        strength: 10,
+      });
+    }
+  }
+
+  return zones;
 }
 
-// Cluster nearby zones (by band center) to avoid overlapping noise
-function clusterZones(candidates, clusterTol = 1.5) {
-  if (!Array.isArray(candidates) || candidates.length === 0) return [];
+// ============================================================================
+// 3. Merge Wick Touches Into Price Buckets
+// ============================================================================
+function bucketTouches(touches) {
+  touches.sort((a, b) => a.price - b.price);
 
-  const withCenter = candidates
-    .map((z) => {
-      const hi = z.bandHi;
-      const lo = z.bandLo;
-      const center = (hi + lo) / 2;
-      return { ...z, center };
-    })
-    .sort((a, b) => a.center - b.center);
+  let buckets = [];
+  let bucket = [];
 
-  const clusters = [];
-  for (const z of withCenter) {
-    const last = clusters[clusters.length - 1];
-    if (last && Math.abs(z.center - last.center) <= clusterTol) {
-      // merge into last cluster
-      last.bandHi = Math.max(last.bandHi, z.bandHi);
-      last.bandLo = Math.min(last.bandLo, z.bandLo);
-      last.score = Math.max(last.score, z.score);
-      last.price = (last.price + z.price) / 2; // average anchor price
-      last.center = (last.center + z.center) / 2;
+  for (const t of touches) {
+    if (bucket.length === 0) {
+      bucket.push(t);
+      continue;
+    }
+
+    const last = bucket[bucket.length - 1];
+    if (Math.abs(t.price - last.price) <= 1.25) {
+      bucket.push(t);
     } else {
-      clusters.push({ ...z });
+      buckets.push(bucket);
+      bucket = [t];
     }
   }
+  if (bucket.length) buckets.push(bucket);
 
-  return clusters;
+  return buckets;
 }
 
-// Main engine: generate candidates, score, cluster, pick top N
-export function computeAccDistLevelsFromBars(bars, opts = {}) {
-  if (!Array.isArray(bars) || bars.length < 50) return [];
+// ============================================================================
+// 4. Build Zones From Buckets
+// ============================================================================
+function buildZonesFromBuckets(buckets) {
+  let zones = [];
 
-  // 1) Normalize & compute ATR
-  const sorted = [...bars].filter(isFiniteBar).sort((a, b) => a.time - b.time);
-  const atr = computeATR(sorted);
+  for (const bucket of buckets) {
+    if (bucket.length < MIN_TOUCHES) continue;
 
-  // 2) Find candidate anchors
-  const anchors = findCandidateAnchors(sorted, atr, opts);
-  if (!anchors.length) return [];
+    const prices = bucket.map(b => b.price);
+    const low = Math.min(...prices);
+    const high = Math.max(...prices);
+    const width = high - low;
+    if (width > MAX_ZONE_WIDTH) continue;
 
-  // 3) For each anchor, compute zone features & score
-  const candidates = [];
-  for (const a of anchors) {
-    const feats = computeZoneFeatures(sorted, a.price, a.idx, atr, opts);
-    const score = scoreZone(feats, atr, opts);
-    candidates.push({
-      price: a.price,
-      bandHi: feats.bandHi,
-      bandLo: feats.bandLo,
-      score,
+    const buys = bucket.filter(b => b.dir === "buy").length;
+    const sells = bucket.filter(b => b.dir === "sell").length;
+
+    const type = buys > sells ? "accumulation"
+                              : "distribution";
+
+    zones.push({
+      type,
+      low,
+      high,
+      strength: bucket.length,
     });
   }
 
-  // 4) Cluster nearby candidates to avoid overlap noise
-  const clusterTol = opts.clusterTolerance ?? 1.5; // $ tolerance between centers
-  const clusters = clusterZones(candidates, clusterTol);
-  if (!clusters.length) return [];
+  return zones;
+}
 
-  // 5) Sort clusters by score (institutional strength) DESC
-  clusters.sort((a, b) => b.score - a.score);
+// ============================================================================
+// 5. Merge All Zones (Consolidation + Wick Buckets) Across TFs
+// ============================================================================
+function mergeZones(allZones) {
+  allZones.sort((a, b) => a.low - b.low);
 
-  // Debug: log top candidates (optional)
-  const topForLog = clusters.slice(0, 10).map((z) => ({
-    price: z.price,
-    band: [Number(z.bandHi.toFixed(2)), Number(z.bandLo.toFixed(2))],
-    score: Number(z.score.toFixed(2)),
-  }));
-  // This will show up in the job logs when you run updateSmzLevels.js
-  console.log("[SMZ] Top zone candidates:", topForLog);
+  let merged = [];
+  let current = null;
 
-  // 6) Take top N zones
-  const maxZones = opts.maxZones ?? 6;
-  const selected = clusters.slice(0, maxZones);
-
-  // 7) Map to final levels with 0–100 strength
-  let maxScore = 0;
-  for (const z of selected) {
-    if (z.score > maxScore) maxScore = z.score;
+  for (const z of allZones) {
+    if (!current) {
+      current = { ...z };
+      continue;
+    }
+    if (z.low <= current.high + 1.25) {
+      current.low = Math.min(current.low, z.low);
+      current.high = Math.max(current.high, z.high);
+      current.strength += z.strength;
+    } else {
+      merged.push(current);
+      current = { ...z };
+    }
   }
-  const maxForNorm = maxScore || 1;
+  if (current) merged.push(current);
 
-  const levels = selected.map((z) => {
-    const hi = z.bandHi;
-    const lo = z.bandLo;
-    const center = (hi + lo) / 2;
-    const rel = z.score / maxForNorm;
-    const strength = Math.round(40 + rel * 60); // scale into [40,100]
+  for (const z of merged) {
+    if (z.high - z.low > MAX_ZONE_WIDTH) {
+      const mid = (z.high + z.low) / 2;
+      z.high = mid + MAX_ZONE_WIDTH / 2;
+      z.low  = mid - MAX_ZONE_WIDTH / 2;
+    }
+  }
 
-    return {
-      type: "distribution", // we can later derive accumulation vs distribution based on flow
-      price: center,
-      priceRange: [Number(hi.toFixed(2)), Number(lo.toFixed(2))],
-      strength,
-    };
-  });
+  return merged;
+}
 
-  return levels;
+// ============================================================================
+// 6. Rank + Return Best Final Zones
+// ============================================================================
+function finalizeZones(zones) {
+  zones.sort((a, b) => b.strength - a.strength);
+  zones = zones.slice(0, MAX_ZONES);
+
+  return zones.map(z => ({
+    type: z.type,
+    strength: z.strength,
+    priceRange: [Number(z.low.toFixed(2)), Number(z.high.toFixed(2))]
+  }));
+}
+
+// ============================================================================
+// 7. MAIN ENGINE ENTRY POINT
+// ============================================================================
+export function computeSmartMoneyZones(bars30, bars1h, bars4h) {
+
+  const touches30 = detectWickTouches(bars30);
+  const touches1h = detectWickTouches(bars1h);
+  const touches4h = detectWickTouches(bars4h);
+
+  const buckets = bucketTouches([
+    ...touches30,
+    ...touches1h,
+    ...touches4h
+  ]);
+
+  const wickZones = buildZonesFromBuckets(buckets);
+  const cons30 = detectConsolidationZones(bars30, "30m");
+  const cons1h = detectConsolidationZones(bars1h, "1h");
+  const cons4h = detectConsolidationZones(bars4h, "4h");
+
+  const merged = mergeZones([...wickZones, ...cons30, ...cons1h, ...cons4h]);
+
+  return finalizeZones(merged);
 }
