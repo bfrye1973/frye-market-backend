@@ -1,5 +1,5 @@
 // services/core/jobs/updateSmzLevels.js
-// Smart Money Zone updater (WORKING VERSION)
+// Smart Money Zone updater (more history)
 //
 // Usage (from repo root):
 //   node services/core/jobs/updateSmzLevels.js
@@ -13,7 +13,7 @@ import { computeAccDistLevelsFromBars } from "../logic/smzEngine.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-async function fetchBars(symbol, timeframe, limit = 500) {
+async function fetchBars(symbol, timeframe, limit) {
   const base =
     process.env.CORE_BASE_URL ||
     "https://frye-market-backend-1.onrender.com";
@@ -43,11 +43,14 @@ async function updateSmzLevels() {
   try {
     const symbol = "SPY";
 
-    // 30m + 1h + 4h bars (merged later)
+    // Pull more history:
+    //  - 30m: ~3 months (1500 bars)
+    //  - 1h : ~3 months (700 bars)
+    //  - 4h : ~6+ months (400 bars)
     const [bars30m, bars1h, bars4h] = await Promise.all([
-      fetchBars(symbol, "30m", 500),
-      fetchBars(symbol, "1h", 500),
-      fetchBars(symbol, "4h", 500),
+      fetchBars(symbol, "30m", 1500),
+      fetchBars(symbol, "1h", 700),
+      fetchBars(symbol, "4h", 400),
     ]);
 
     const merged = [...bars30m, ...bars1h, ...bars4h].sort(
@@ -56,7 +59,12 @@ async function updateSmzLevels() {
     console.log("[SMZ] Total merged bars:", merged.length);
 
     console.log("[SMZ] Computing Acc/Dist levels...");
-    const levels = computeAccDistLevelsFromBars(merged);
+    const levels = computeAccDistLevelsFromBars(merged, {
+      bandWidth: 2.0,
+      lowLevels: 2,
+      topLevels: 3,
+      clusterTolerance: 1.0,
+    });
     console.log(`[SMZ] Detected ${levels.length} Smart Money levels`);
 
     const outPath = path.resolve(__dirname, "../data/smz-levels.json");
