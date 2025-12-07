@@ -6,24 +6,29 @@ import fetch from "node-fetch";
 const POLY_KEY = process.env.POLYGON_API_KEY;
 
 const TF_MAP = {
-  "1m": { mult: 1, unit: "minute" },
-  "5m": { mult: 5, unit: "minute" },
+  "1m":  { mult: 1,  unit: "minute" },
+  "5m":  { mult: 5,  unit: "minute" },
   "15m": { mult: 15, unit: "minute" },
-  "1h": { mult: 1, unit: "hour" },
-  "4h": { mult: 4, unit: "hour" },
-  "1d": { mult: 1, unit: "day" },
+  "30m": { mult: 30, unit: "minute" },   // add 30m just in case
+  "1h":  { mult: 1,  unit: "hour" },
+  "4h":  { mult: 4,  unit: "hour" },
+  "1d":  { mult: 1,  unit: "day" },
 };
 
-const DEFAULT_DAYS = 60; // backfill window
+const DEFAULT_DAYS = 60; // default backfill window
 
-export async function getBarsFromPolygon(symbol, timeframe) {
+export async function getBarsFromPolygon(symbol, timeframe, daysOverride) {
   if (!POLY_KEY) throw new Error("POLYGON_API_KEY is missing");
 
   const tf = TF_MAP[timeframe];
   if (!tf) throw new Error(`Unsupported timeframe: ${timeframe}`);
 
+  const days = Number.isFinite(daysOverride) && daysOverride > 0
+    ? daysOverride
+    : DEFAULT_DAYS;
+
   const end = new Date();
-  const start = new Date(end.getTime() - DEFAULT_DAYS * 24 * 60 * 60 * 1000);
+  const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
   const fmt = (d) => d.toISOString().slice(0, 10);
 
   const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(
