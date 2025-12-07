@@ -20,7 +20,7 @@ const POLY_KEY =
 
 // Dynamic backfill targets (days)
 const DAYS_BY_TF = {
-  "1m": 30,
+  "1m": 90,
   "5m": 90,
   "10m": 120,
   "15m": 150,
