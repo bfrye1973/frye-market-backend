@@ -53,13 +53,20 @@ function daysAgoUTC(n) {
 
 /* -------------- normalize & fetch -------------- */
 function norm(b) {
+  const unixMs = b?.t;   // Polygon ALWAYS provides 't' = milliseconds UTC
+
+  // If t is missing or invalid, skip the bar entirely.
+  if (!Number.isFinite(unixMs) || unixMs <= 0) {
+    return null;
+  }
+
   return {
-    time: toSec(b.t ?? b.timestamp ?? b.time ?? 0),
-    open: Number(b.o ?? b.open),
-    high: Number(b.h ?? b.high),
-    low:  Number(b.l ?? b.low),
-    close:Number(b.c ?? b.close),
-    volume: Number(b.v ?? b.volume ?? 0),
+    time: Math.floor(unixMs / 1000),   // convert ms → seconds (correct for chart)
+    open: Number(b.o),
+    high: Number(b.h),
+    low: Number(b.l),
+    close: Number(b.c),
+    volume: Number(b.v ?? 0),
   };
 }
 
