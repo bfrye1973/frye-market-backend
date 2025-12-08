@@ -3,8 +3,12 @@
 """
 build_5m_deltas.py
 - Fetches /live/intraday
-- Builds 5m "netTilt" per sector from breadth + momentum
-- Writes data/pills.json for /live/pills to consume via data-live-5min-deltas branch
+- Builds 5m "netTilt" per sector from breadth + momentum (placeholder model)
+- Writes data/pills.json for /live/pills to consume via data-live-5min-deltas
+
+NOTE:
+- This script ONLY affects the 5-minute deltas branch.
+- It does NOT modify the 10-minute outlook or metrics used by Market Meter lights.
 """
 
 import os
@@ -19,7 +23,7 @@ def fetch_json(url: str) -> dict:
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "build_5m_deltas/1.0",
+            "User-Agent": "build_5m_deltas/1.1",
             "Cache-Control": "no-store",
         },
     )
@@ -37,7 +41,8 @@ def build_pills(live: dict) -> dict:
 
     {
       "version": "5m-deltas-r12.8",
-      "deltasUpdatedAt": "...",
+      "deltasUpdatedAt": "...",        # TRUE 5m engine timestamp (now, UTC)
+      "sourceUpdatedAt": "...",        # OPTIONAL: when /live/intraday was last updated
       "deltas": {
         "sectors": {
           "Information Technology": { "netTilt": number },
@@ -46,32 +51,40 @@ def build_pills(live: dict) -> dict:
       }
     }
 
-    For now we use a simple "netTilt" = average of breadth_pct and momentum_pct,
-    centered around 0.
+    Current model:
+      netTilt = average(breadth_pct, momentum_pct) - 50
+    (You can swap this later for a real 5m model without changing backend/UI wiring.)
     """
 
-    ts = (
+    # True 5-minute engine timestamp: when this script runs
+    ts_5m = datetime.now(timezone.utc).isoformat()
+
+    # Optional: record when /live/intraday said it was last updated
+    source_ts = (
         live.get("sectorsUpdatedAt")
         or live.get("updated_at_utc")
         or live.get("updated_at")
-        or datetime.now(timezone.utc).isoformat()
+        or None
     )
 
     sectors = live.get("sectorCards") or []
-    out_sectors = {}
+    out_sectors: dict[str, dict] = {}
 
     for c in sectors:
         name = str(c.get("sector") or "Unknown")
+
+        # Breadth & momentum in percent space (0–100). Default to 50 (neutral) if missing.
         try:
             b = float(c.get("breadth_pct") or 50.0)
         except Exception:
             b = 50.0
+
         try:
             m = float(c.get("momentum_pct") or 50.0)
         except Exception:
             m = 50.0
 
-        # Placeholder netTilt = average(breadth, momentum) - 50
+        # Placeholder netTilt = average(breadth, momentum) - 50 (centered around 0)
         avg = (b + m) / 2.0
         net_tilt = avg - 50.0
 
@@ -79,7 +92,8 @@ def build_pills(live: dict) -> dict:
 
     pills = {
         "version": "5m-deltas-r12.8",
-        "deltasUpdatedAt": ts,
+        "deltasUpdatedAt": ts_5m,   # <-- canonical 5m timestamp
+        "sourceUpdatedAt": source_ts,
         "deltas": {
             "sectors": out_sectors,
         },
@@ -88,7 +102,7 @@ def build_pills(live: dict) -> dict:
     return pills
 
 
-def main():
+def main() -> None:
     live_url = os.environ.get("LIVE_URL")
     if not live_url:
         raise RuntimeError("LIVE_URL environment variable is not set")
@@ -107,7 +121,8 @@ def main():
 
     sectors_count = len(pills.get("deltas", {}).get("sectors", {}))
     print(
-        f"[build_5m_deltas] Wrote {out_path} with {sectors_count} sectors at {pills['deltasUpdatedAt']}"
+        f"[build_5m_deltas] Wrote {out_path} with {sectors_count} sectors "
+        f"at {pills['deltasUpdatedAt']}"
     )
 
 
