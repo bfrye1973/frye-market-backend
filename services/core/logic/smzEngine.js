@@ -1,5 +1,5 @@
 // services/core/logic/smzEngine.js
-// Smart Money Zone Engine — 12-Question Institutional Model
+// Smart Money Zone Engine — 12-Question Institutional Model + Relevance Filter (Option C)
 //
 // Entry:
 //   computeSmartMoneyLevels(bars30m, bars1h, bars4h) -> SmzLevel[]
@@ -10,15 +10,6 @@
 //   priceRange: [number, number], // [high, low]
 //   strength: number              // 0–100
 // }
-//
-// This engine implements the conceptual model we agreed on:
-// - Wick-based seeds
-// - Consolidation shelves
-// - Displacement + retests
-// - TF weighting (4h > 1h > 30m)
-// - ATR-normalized scores
-// - Recency decay (~2% per week)
-// - Buckets → zones → classification → normalization
 
 // ---------- Tunable constants (structure is fixed, numbers are knobs) ----------
 
@@ -48,7 +39,7 @@ const MIN_INSTITUTIONAL_GAP = 8.0; // min vertical distance between institutiona
 // Bucket size for price aggregation
 const BUCKET_SIZE = 0.5;
 
-// Recency decay
+// Recency decay (bucket-level)
 const RECENCY_DECAY_PER_WEEK = 0.98; // ~2% per week
 
 // Wick thresholds (ATR-based)
@@ -73,6 +64,14 @@ const W_RETEST = 0.8;
 
 // Small gap for merging bands into zones
 const MERGE_GAP = 0.5;
+
+// ---------- Relevance filter (Option C: distance + recency) ----------
+
+// Only keep zones within this many SPY points of current price
+const RELEVANCE_DISTANCE_LIMIT_POINTS = 40; // e.g. 684 ± 40 = 644–724
+
+// Only keep zones whose last activity is within this many days
+const RELEVANCE_MAX_AGE_DAYS = 70; // ~10 weeks
 
 // ---------- Basic helpers ----------
 
@@ -420,7 +419,8 @@ function buildBucketsFromSeeds(seeds, barsByTF, atrByTF, latestTime) {
  *   lowerWicks: number,
  *   upMoves: number,
  *   downMoves: number,
- *   bucketCount: number
+ *   bucketCount: number,
+ *   lastTime: number
  * }
  */
 function buildZonesFromBuckets(buckets) {
@@ -437,6 +437,7 @@ function buildZonesFromBuckets(buckets) {
     lowerWicks: b.lowerWicks,
     upMoves: b.upMoves,
     downMoves: b.downMoves,
+    lastTime: b.lastTime,
   }));
 
   bands.sort((a, b) => a.price - b.price);
@@ -456,6 +457,7 @@ function buildZonesFromBuckets(buckets) {
         upMoves: band.upMoves,
         downMoves: band.downMoves,
         bucketCount: 1,
+        lastTime: band.lastTime,
       };
       continue;
     }
@@ -471,6 +473,7 @@ function buildZonesFromBuckets(buckets) {
       current.upMoves += band.upMoves;
       current.downMoves += band.downMoves;
       current.bucketCount += 1;
+      if (band.lastTime > current.lastTime) current.lastTime = band.lastTime;
     } else {
       zones.push(current);
       current = {
@@ -483,6 +486,7 @@ function buildZonesFromBuckets(buckets) {
         upMoves: band.upMoves,
         downMoves: band.downMoves,
         bucketCount: 1,
+        lastTime: band.lastTime,
       };
     }
   }
@@ -521,6 +525,7 @@ function splitWideZones(zones) {
         upMoves: z.upMoves,
         downMoves: z.downMoves,
         bucketCount: z.bucketCount,
+        lastTime: z.lastTime,
       });
     }
   }
@@ -530,12 +535,15 @@ function splitWideZones(zones) {
 // ---------- Classification & selection ----------
 
 /**
- * Classify zones into institutional / shelves / edges and select top ones.
+ * Classify zones into institutional / shelves / edges and select top ones,
+ * applying Option C relevance filter (distance + recency).
  *
  * @param {Array} zones
+ * @param {number} currentPrice
+ * @param {number} latestTime
  * @returns {Array} finalZones with { type, center, min, max, rawScore }
  */
-function classifyAndSelectZones(zones) {
+function classifyAndSelectZones(zones, currentPrice, latestTime) {
   if (!zones.length) return [];
 
   const instCandidates = [];
@@ -548,6 +556,20 @@ function classifyAndSelectZones(zones) {
 
     const center = (z.max + z.min) / 2;
     const has4h = z.tfsSeen.has("4h");
+
+    // --- Option C relevance filter: distance + recency ---
+    if (Number.isFinite(currentPrice)) {
+      const dist = Math.abs(center - currentPrice);
+      if (dist > RELEVANCE_DISTANCE_LIMIT_POINTS) {
+        continue; // too far from current price
+      }
+    }
+
+    const ageWeeks = computeAgeWeeks(latestTime, z.lastTime || latestTime);
+    const ageDays = ageWeeks * 7;
+    if (ageDays > RELEVANCE_MAX_AGE_DAYS) {
+      continue; // too old
+    }
 
     // Direction from displacement moves; fallback to wick bias
     const moveTotal = z.upMoves + z.downMoves;
@@ -568,7 +590,7 @@ function classifyAndSelectZones(zones) {
     } else if (width >= INSTITUTIONAL_MIN_WIDTH && width <= INSTITUTIONAL_MAX_WIDTH && has4h) {
       instCandidates.push({ zone: z, center, width, rawScore: z.rawScore, dirBias });
     } else if (width >= INSTITUTIONAL_MIN_WIDTH && width <= INSTITUTIONAL_MAX_WIDTH) {
-      // weaker institutional candidate (no 4h), still allow
+      // weaker institutional candidate (no 4h), still allow but slightly down-weighted
       instCandidates.push({ zone: z, center, width, rawScore: z.rawScore * 0.8, dirBias });
     } else {
       // ignore overly wide or tiny weird stuff
@@ -595,7 +617,7 @@ function classifyAndSelectZones(zones) {
   }
   for (const c of instSelected) {
     selected.push({
-      type: "institutional",
+      type: "institutional", // YELLOW in FE
       center: c.center,
       min: c.zone.min,
       max: c.zone.max,
@@ -604,14 +626,14 @@ function classifyAndSelectZones(zones) {
     });
   }
 
-  // Shelves
+  // Shelves (accumulation/distribution, BLUE/RED in FE)
   for (let i = 0; i < Math.min(MAX_SHELVES, shelfCandidates.length); i++) {
     const c = shelfCandidates[i];
     const type =
       c.dirBias > 0.05
-        ? "accumulation"
+        ? "accumulation"   // BLUE
         : c.dirBias < -0.05
-        ? "distribution"
+        ? "distribution"   // RED
         : "accumulation";
     selected.push({
       type,
@@ -623,14 +645,14 @@ function classifyAndSelectZones(zones) {
     });
   }
 
-  // Edges
+  // Edges (thin A/D lines, using same colors)
   for (let i = 0; i < Math.min(MAX_EDGES, edgeCandidates.length); i++) {
     const c = edgeCandidates[i];
     const type =
       c.dirBias > 0.05
-        ? "accumulation"
+        ? "accumulation"   // BLUE edge
         : c.dirBias < -0.05
-        ? "distribution"
+        ? "distribution"   // RED edge
         : "distribution";
     selected.push({
       type,
@@ -669,7 +691,7 @@ function normalizeAndFormat(zones) {
   zones.sort((a, b) => b.strength - a.strength);
 
   return zones.map((z) => ({
-    type: z.type,
+    type: z.type, // "institutional" | "accumulation" | "distribution"
     price: z.center,
     priceRange: [Number(z.max.toFixed(2)), Number(z.min.toFixed(2))],
     strength: z.strength,
@@ -717,6 +739,16 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
       return [];
     }
 
+    // Current price (for relevance filter)
+    let currentPrice = null;
+    if (tfBars["30m"].length) {
+      currentPrice = tfBars["30m"][tfBars["30m"].length - 1].close;
+    } else if (tfBars["1h"].length) {
+      currentPrice = tfBars["1h"][tfBars["1h"].length - 1].close;
+    } else if (tfBars["4h"].length) {
+      currentPrice = tfBars["4h"][tfBars["4h"].length - 1].close;
+    }
+
     // Build seeds for each TF
     const seeds = [
       ...makeSeedsForTF("30m", tfBars["30m"], atrByTF["30m"]),
@@ -741,7 +773,7 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
       return [];
     }
 
-    const classified = classifyAndSelectZones(zones);
+    const classified = classifyAndSelectZones(zones, currentPrice, latestTime);
     if (!classified.length) {
       console.log("[SMZ] No classified zones selected");
       return [];
