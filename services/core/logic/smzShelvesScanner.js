@@ -1,30 +1,29 @@
 // services/core/logic/smzShelvesScanner.js
-// Smart Money Shelves Scanner (Script 2)
-// - Uses 10m, 30m, 1h bars
-// - Looks near current price (±bandPoints, default 40)
-// - Finds accumulation (blue) and distribution (red) shelves
-// - Output matches SMZ level shape: { type, price, priceRange:[hi, lo], strength }
+// Script #2 — Smart Money Shelves Scanner (Acc/Dist)
+// Uses 10m + 30m + 1h bars, focuses near current price ±40 points.
+// Output objects match SMZ frontend schema:
+// { type: "accumulation"|"distribution", price, priceRange:[high,low], strength:40–100 }
 
-// ---------- Tunable knobs (SPY defaults) ----------
+const DEFAULT_BAND_POINTS = 40;
 
-const BAND_POINTS = 40;           // ±40 points around current price
-const SHELF_MIN_WIDTH = 0.5;      // in points
-const SHELF_MAX_WIDTH = 3.0;      // in points
-const BODY_TO_RANGE_MAX = 0.5;    // avgBody / avgRange
-const RANGE_TO_ATR_MAX = 1.0;     // avgRange / ATR
-const OVERLAP_RATIO_MIN = 0.7;    // % bodies fully inside band
-const STRONG_WICK_ATR = 0.7;      // wick > 0.7 * ATR
-const BREAK_EPS = 0.05;           // small buffer above/below shelf
-const BREAK_LOOKAHEAD_BARS = 10;  // bars to look ahead for breakout
-const DISP_MIN_ATR = 0.6;         // min move after breakout, normalized by ATR
+// shelf window scan
+const WINDOW_SIZES = [3, 5, 7];
+const SHELF_MIN_WIDTH = 0.5;  // points
+const SHELF_MAX_WIDTH = 3.0;  // points
+const BODY_TO_RANGE_MAX = 0.55;
+const OVERLAP_RATIO_MIN = 0.7;
 
-const MAX_SHELVES = 12;           // cap shelves returned
+// wick + breakout confirmation
+const ATR_PERIOD = 50;
+const STRONG_WICK_ATR = 0.7;        // wick >= 0.7*ATR counts
+const BREAK_EPS = 0.05;             // points
+const BREAK_LOOKAHEAD = 10;         // bars
+const DISP_MIN_ATR = 0.6;           // breakout displacement confirmation
 
-// ---------- Types ----------
-// Bar: { time, open, high, low, close, volume }
+// output controls
+const MAX_SHELVES_OUT = 12;
 
-// ---------- Helpers ----------
-
+// ---------- helpers ----------
 function isFiniteBar(b) {
   return (
     b &&
@@ -36,370 +35,265 @@ function isFiniteBar(b) {
   );
 }
 
-// Simple ATR over last N bars (on 10m)
-function computeATR(bars, period = 50) {
+function sortBars(bars) {
+  return (bars || []).filter(isFiniteBar).sort((a, b) => a.time - b.time);
+}
+
+function computeATR(bars, period = ATR_PERIOD) {
   if (!Array.isArray(bars) || bars.length < 2) return 1;
   const n = bars.length;
   const start = Math.max(1, n - period);
-  let sumTR = 0;
+  let sum = 0;
   let count = 0;
   for (let i = start; i < n; i++) {
     const cur = bars[i];
     const prev = bars[i - 1];
     if (!isFiniteBar(cur) || !isFiniteBar(prev)) continue;
-    const tr1 = cur.high - cur.low;
-    const tr2 = Math.abs(cur.high - prev.close);
-    const tr3 = Math.abs(cur.low - prev.close);
-    const tr = Math.max(tr1, tr2, tr3);
-    sumTR += tr;
+    const tr = Math.max(
+      cur.high - cur.low,
+      Math.abs(cur.high - prev.close),
+      Math.abs(cur.low - prev.close)
+    );
+    sum += tr;
     count++;
   }
-  if (count === 0) return 1;
-  const atr = sumTR / count;
+  const atr = count ? sum / count : 1;
   return atr > 0 ? atr : 1;
 }
 
-// Distance weight: nearer shelves get higher relevance
-function distanceWeight(shelfCenter, currentPrice, bandPoints = BAND_POINTS) {
-  if (!Number.isFinite(currentPrice)) return 1;
-  const d = Math.abs(shelfCenter - currentPrice);
-  if (d >= bandPoints) return 0;
-  // Linear fade: 1 at 0, 0 at bandPoints
-  return 1 - d / bandPoints;
+function clamp(x, a, b) {
+  return Math.max(a, Math.min(b, x));
 }
 
-// ---------- Core shelf detection on 10m ----------
+// Higher relevance closer to current price
+function distanceWeight(center, currentPrice, bandPoints) {
+  const d = Math.abs(center - currentPrice);
+  if (d >= bandPoints) return 0;
+  return 1 - d / bandPoints; // linear fade
+}
 
-/**
- * Find raw shelf candidates on 10m bars using consolidation + wicks + breakout.
- *
- * @param {Array} bars10m
- * @param {Array} bars30m
- * @param {Array} bars1h
- * @param {number} bandPoints
- * @returns {Array<{ type, price, priceRange:[number,number], strength:number }>}
- */
-export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = BAND_POINTS }) {
-  if (!Array.isArray(bars10m) || bars10m.length < 20) {
-    console.warn("[SMZ Shelves] Not enough 10m bars");
-    return [];
+// very light TF confirmation boost (does NOT create shelves on its own)
+function tfConfirmBoost(center, hi, lo, bars30m, bars1h) {
+  const margin = Math.max(0.5, (hi - lo) * 0.5);
+  const zHi = hi + margin;
+  const zLo = lo - margin;
+
+  let hit30 = false;
+  for (const b of bars30m) {
+    if (b.high >= zLo && b.low <= zHi) { hit30 = true; break; }
+  }
+  let hit1h = false;
+  for (const b of bars1h) {
+    if (b.high >= zLo && b.low <= zHi) { hit1h = true; break; }
   }
 
-  // Sort by time
-  const b10 = bars10m.filter(isFiniteBar).sort((a, b) => a.time - b.time);
-  const b30 = (bars30m || []).filter(isFiniteBar).sort((a, b) => a.time - b.time);
-  const b1h = (bars1h || []).filter(isFiniteBar).sort((a, b) => a.time - b.time);
+  let boost = 1.0;
+  if (hit30) boost += 0.2;
+  if (hit1h) boost += 0.2;
+  return clamp(boost, 1.0, 1.6);
+}
 
-  const lastBar = b10[b10.length - 1];
-  const currentPrice = lastBar.close;
+function detectBreakout(bars10m, endIdx, hi, lo, center, atr) {
+  const n = bars10m.length;
+  const maxIdx = Math.min(n - 1, endIdx + BREAK_LOOKAHEAD);
+
+  let up = false, down = false;
+  let maxUp = 0, maxDown = 0;
+
+  for (let i = endIdx + 1; i <= maxIdx; i++) {
+    const b = bars10m[i];
+    const close = b.close;
+
+    if (!up && close > hi + BREAK_EPS) {
+      const move = (close - center) / atr;
+      if (move >= DISP_MIN_ATR) { up = true; maxUp = Math.max(maxUp, move); }
+    }
+    if (!down && close < lo - BREAK_EPS) {
+      const move = (center - close) / atr;
+      if (move >= DISP_MIN_ATR) { down = true; maxDown = Math.max(maxDown, move); }
+    }
+
+    // track extremes anyway
+    maxUp = Math.max(maxUp, (b.high - center) / atr);
+    maxDown = Math.max(maxDown, (center - b.low) / atr);
+  }
+
+  if (!up && !down) return { dir: "none", moveATR: 0 };
+  if (up && !down) return { dir: "up", moveATR: maxUp };
+  if (down && !up) return { dir: "down", moveATR: maxDown };
+  return maxUp >= maxDown ? { dir: "up", moveATR: maxUp } : { dir: "down", moveATR: maxDown };
+}
+
+function mergeShelves(list) {
+  if (!list.length) return [];
+  const sorted = list.slice().sort((a, b) => (a.priceRange[1] - b.priceRange[1]));
+  const out = [];
+  let cur = { ...sorted[0] };
+
+  for (let i = 1; i < sorted.length; i++) {
+    const s = sorted[i];
+    if (s.type !== cur.type) { out.push(cur); cur = { ...s }; continue; }
+
+    const [hi1, lo1] = cur.priceRange;
+    const [hi2, lo2] = s.priceRange;
+
+    const overlapHi = Math.min(hi1, hi2);
+    const overlapLo = Math.max(lo1, lo2);
+    const overlap = Math.max(0, overlapHi - overlapLo);
+
+    const closeCenters = Math.abs(cur.price - s.price) <= 0.5;
+
+    if (overlap > 0 || closeCenters) {
+      const newHi = Math.max(hi1, hi2);
+      const newLo = Math.min(lo1, lo2);
+      cur.priceRange = [newHi, newLo];
+      cur.price = (newHi + newLo) / 2;
+      cur._score = Math.max(cur._score, s._score);
+    } else {
+      out.push(cur);
+      cur = { ...s };
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+// ---------- main compute ----------
+export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_BAND_POINTS }) {
+  const b10 = sortBars(bars10m);
+  const b30 = sortBars(bars30m);
+  const b1h = sortBars(bars1h);
+
+  if (b10.length < 30) return [];
+
+  const currentPrice = b10[b10.length - 1].close;
   const bandLow = currentPrice - bandPoints;
   const bandHigh = currentPrice + bandPoints;
 
-  const atr10 = computeATR(b10, 50);
+  const atr10 = computeATR(b10, ATR_PERIOD);
 
-  // Use only 10m bars inside ±bandPoints
-  const idxStart = b10.findIndex((bar) => bar.high >= bandLow && bar.low <= bandHigh);
-  if (idxStart === -1) {
-    console.log("[SMZ Shelves] No 10m bars intersect the band");
-    return [];
-  }
+  // only scan 10m bars that intersect band
+  let startIdx = 0;
+  while (startIdx < b10.length && b10[startIdx].high < bandLow) startIdx++;
+  if (startIdx >= b10.length) return [];
 
   const candidates = [];
 
-  // Window lengths: 3, 5, 7 bars
-  const windowLengths = [3, 5, 7];
-  const n = b10.length;
+  for (const win of WINDOW_SIZES) {
+    for (let endIdx = startIdx + win - 1; endIdx < b10.length; endIdx++) {
+      const sIdx = endIdx - win + 1;
+      const slice = b10.slice(sIdx, endIdx + 1);
 
-  for (const win of windowLengths) {
-    for (let endIdx = idxStart + win - 1; endIdx < n; endIdx++) {
-      const startIdx = endIdx - win + 1;
-      const slice = b10.slice(startIdx, endIdx + 1);
+      let hi = -Infinity, lo = Infinity;
+      let bodySum = 0, rangeSum = 0, inside = 0, cnt = 0;
 
-      // Basic price band stats
-      let bandHi = -Infinity;
-      let bandLo = Infinity;
-      let bodySum = 0;
-      let rangeSum = 0;
-      let bodyInsideCount = 0;
-      let count = 0;
-
-      for (const bar of slice) {
-        if (!isFiniteBar(bar)) continue;
-        bandHi = Math.max(bandHi, bar.high);
-        bandLo = Math.min(bandLo, bar.low);
-        const body = Math.abs(bar.close - bar.open);
-        const range = bar.high - bar.low;
+      for (const b of slice) {
+        hi = Math.max(hi, b.high);
+        lo = Math.min(lo, b.low);
+        const body = Math.abs(b.close - b.open);
+        const range = b.high - b.low;
         bodySum += body;
         rangeSum += range;
-        count++;
+        cnt++;
 
-        const bodyHi = Math.max(bar.open, bar.close);
-        const bodyLo = Math.min(bar.open, bar.close);
-        if (bodyHi <= bandHi && bodyLo >= bandLo) {
-          bodyInsideCount++;
-        }
+        const bodyHi = Math.max(b.open, b.close);
+        const bodyLo = Math.min(b.open, b.close);
+        if (bodyHi <= hi && bodyLo >= lo) inside++;
       }
+      if (!cnt) continue;
 
-      if (count === 0) continue;
-
-      const width = bandHi - bandLo;
+      const width = hi - lo;
       if (width < SHELF_MIN_WIDTH || width > SHELF_MAX_WIDTH) continue;
 
-      const avgBody = bodySum / count;
-      const avgRange = rangeSum / count || 1e-6;
+      // must be inside relevance band
+      if (hi < bandLow || lo > bandHigh) continue;
+
+      const avgBody = bodySum / cnt;
+      const avgRange = rangeSum / cnt || 1e-6;
       const bodyToRange = avgBody / avgRange;
-      const overlapRatio = bodyInsideCount / count;
+      const overlap = inside / cnt;
 
-      // Compression vs ATR
-      const rangeToATR = avgRange / (atr10 || 1);
+      if (bodyToRange > BODY_TO_RANGE_MAX) continue;
+      if (overlap < OVERLAP_RATIO_MIN) continue;
 
-      // Consolidation test
-      const isConsolidation =
-        bodyToRange <= BODY_TO_RANGE_MAX &&
-        rangeToATR <= RANGE_TO_ATR_MAX &&
-        overlapRatio >= OVERLAP_RATIO_MIN;
-
-      if (!isConsolidation) continue;
-
-      // Wick behavior in the same window
-      let strongLower = 0;
-      let strongUpper = 0;
-
-      for (const bar of slice) {
-        const bodyHi = Math.max(bar.open, bar.close);
-        const bodyLo = Math.min(bar.open, bar.close);
-        const upperWick = bar.high - bodyHi;
-        const lowerWick = bodyLo - bar.low;
-        const upperNorm = upperWick / (atr10 || 1);
-        const lowerNorm = Math.abs(lowerWick) / (atr10 || 1);
-        if (lowerNorm >= STRONG_WICK_ATR) strongLower++;
-        if (upperNorm >= STRONG_WICK_ATR) strongUpper++;
+      // wick bias
+      let strongLower = 0, strongUpper = 0;
+      for (const b of slice) {
+        const bodyHi = Math.max(b.open, b.close);
+        const bodyLo = Math.min(b.open, b.close);
+        const upperWick = b.high - bodyHi;
+        const lowerWick = bodyLo - b.low;
+        const upN = upperWick / atr10;
+        const dnN = Math.abs(lowerWick) / atr10;
+        if (dnN >= STRONG_WICK_ATR) strongLower++;
+        if (upN >= STRONG_WICK_ATR) strongUpper++;
       }
 
       let wickBias = "neutral";
       if (strongLower > strongUpper + 1) wickBias = "buy";
       else if (strongUpper > strongLower + 1) wickBias = "sell";
 
-      const center = (bandHi + bandLo) / 2;
+      const center = (hi + lo) / 2;
 
-      // Look ahead for breakout direction on 10m
-      const breakout = detectBreakout(b10, endIdx, bandHi, bandLo, center, atr10);
+      // breakout confirmation
+      const br = detectBreakout(b10, endIdx, hi, lo, center, atr10);
+      if (br.dir === "none") continue;
 
-      if (breakout.dir === "none") continue;
-
-      // Map breakout + wickBias to shelf type
+      // map to type with wick sanity
       let type = null;
-      if (breakout.dir === "up") {
-        // Ideally buy bias or neutral
-        if (wickBias === "sell") continue; // conflict
+      if (br.dir === "up") {
+        if (wickBias === "sell") continue;
         type = "accumulation";
-      } else if (breakout.dir === "down") {
-        if (wickBias === "buy") continue; // conflict
+      } else {
+        if (wickBias === "buy") continue;
         type = "distribution";
       }
 
-      if (!type) continue;
-
-      // Quality score: narrowness + compression + wick cluster + breakout strength
+      // quality score (0..1)
       const widthScore = 1 - (width - SHELF_MIN_WIDTH) / (SHELF_MAX_WIDTH - SHELF_MIN_WIDTH);
-      const compressScore = 1 - (rangeToATR / RANGE_TO_ATR_MAX);
-      const wickScore =
-        wickBias === "buy" || wickBias === "sell"
-          ? Math.min((strongLower + strongUpper) / win, 1)
-          : 0.3; // neutral wick bias but still a shelf
+      const wickScore = clamp((strongLower + strongUpper) / win, 0, 1);
+      const brScore = clamp(br.moveATR / 1.5, 0, 1);
 
-      const breakoutScore = Math.min(breakout.moveATR / DISP_MIN_ATR, 2) / 2; // 0..1
+      const base = 0.4 * widthScore + 0.3 * wickScore + 0.3 * brScore;
 
-      // Distance relevance
-      const distWeight = distanceWeight(center, currentPrice, bandPoints);
+      const distW = distanceWeight(center, currentPrice, bandPoints);
+      const tfBoost = tfConfirmBoost(center, hi, lo, b30, b1h);
 
-      // Multi-TF confirmation (simple boost if 30m/1h also show a range around this price)
-      const multiTFBoost = computeMultiTFBoost(center, bandHi, bandLo, b30, b1h);
-
-      const baseQuality =
-        0.3 * widthScore +
-        0.25 * compressScore +
-        0.25 * wickScore +
-        0.2 * breakoutScore;
-
-      const finalScore = baseQuality * distWeight * multiTFBoost;
-
-      if (finalScore <= 0) continue;
+      const final = base * distW * tfBoost;
+      if (final <= 0) continue;
 
       candidates.push({
         type,
         price: center,
-        priceRange: [bandHi, bandLo],
-        strength: finalScore, // 0–1 for now, normalize later
+        priceRange: [hi, lo],
+        _score: final, // keep raw for normalization
       });
     }
   }
 
-  if (!candidates.length) {
-    console.log("[SMZ Shelves] No shelf candidates found");
-    return [];
-  }
+  if (!candidates.length) return [];
 
-  // Merge overlapping shelves of same type, keep best score
+  // merge overlaps & normalize to 40-100
   const merged = mergeShelves(candidates);
 
-  // Normalize 0–1 scores to 40–100 like main SMZ engine
-  let maxScore = 0;
-  for (const s of merged) {
-    if (s.strength > maxScore) maxScore = s.strength;
-  }
-  if (maxScore <= 0) maxScore = 1;
+  let max = 0;
+  for (const s of merged) max = Math.max(max, s._score);
+  if (max <= 0) max = 1;
 
-  const levels = merged
+  const out = merged
     .map((s) => {
-      const rel = s.strength / maxScore;
-      const strength = Math.round(40 + 60 * rel); // 40–100
+      const rel = s._score / max;
+      const strength = Math.round(40 + 60 * rel);
       return {
-        type: s.type, // "accumulation" | "distribution"
-        price: s.price,
-        priceRange: [
-          Number(s.priceRange[0].toFixed(2)),
-          Number(s.priceRange[1].toFixed(2)),
-        ],
+        type: s.type,
+        price: Number(s.price.toFixed(2)),
+        priceRange: [Number(s.priceRange[0].toFixed(2)), Number(s.priceRange[1].toFixed(2))],
         strength,
       };
     })
     .sort((a, b) => b.strength - a.strength)
-    .slice(0, MAX_SHELVES);
+    .slice(0, MAX_SHELVES_OUT);
 
-  console.log(
-    `[SMZ Shelves] Final shelves: ${levels.length}. ` +
-      `Acc=${levels.filter((z) => z.type === "accumulation").length}, ` +
-      `Dist=${levels.filter((z) => z.type === "distribution").length}`
-  );
-
-  return levels;
+  return out;
 }
 
-// ---------- Breakout detection ----------
-
-function detectBreakout(bars, endIdx, bandHi, bandLo, center, atr10) {
-  const n = bars.length;
-  const maxIdx = Math.min(n - 1, endIdx + BREAK_LOOKAHEAD_BARS);
-  let up = false;
-  let down = false;
-  let maxMoveUp = 0;
-  let maxMoveDown = 0;
-
-  for (let i = endIdx + 1; i <= maxIdx; i++) {
-    const bar = bars[i];
-    if (!isFiniteBar(bar)) continue;
-    const close = bar.close;
-
-    if (!up && close > bandHi + BREAK_EPS) {
-      const move = (close - center) / (atr10 || 1);
-      if (move >= DISP_MIN_ATR) {
-        up = true;
-        maxMoveUp = Math.max(maxMoveUp, move);
-      }
-    }
-
-    if (!down && close < bandLo - BREAK_EPS) {
-      const move = (center - close) / (atr10 || 1);
-      if (move >= DISP_MIN_ATR) {
-        down = true;
-        maxMoveDown = Math.max(maxMoveDown, move);
-      }
-    }
-
-    // Track extremes regardless
-    const moveUp = (bar.high - center) / (atr10 || 1);
-    const moveDown = (center - bar.low) / (atr10 || 1);
-    if (moveUp > maxMoveUp) maxMoveUp = moveUp;
-    if (moveDown > maxMoveDown) maxMoveDown = moveDown;
-  }
-
-  if (!up && !down) return { dir: "none", moveATR: 0 };
-  if (up && !down) return { dir: "up", moveATR: maxMoveUp };
-  if (down && !up) return { dir: "down", moveATR: maxMoveDown };
-
-  // Both happened: pick stronger side
-  if (maxMoveUp >= maxMoveDown) return { dir: "up", moveATR: maxMoveUp };
-  return { dir: "down", moveATR: maxMoveDown };
-}
-
-// ---------- Multi-TF boost (very simple) ----------
-
-function computeMultiTFBoost(center, hi, lo, bars30m, bars1h) {
-  let boost = 1;
-
-  const rangeMargin = (hi - lo) * 0.5 || 0.5;
-  const zoneHi = hi + rangeMargin;
-  const zoneLo = lo - rangeMargin;
-
-  let hit30 = false;
-  for (const bar of bars30m) {
-    if (!isFiniteBar(bar)) continue;
-    if (bar.high >= zoneLo && bar.low <= zoneHi) {
-      hit30 = true;
-      break;
-    }
-  }
-
-  let hit1h = false;
-  for (const bar of bars1h) {
-    if (!isFiniteBar(bar)) continue;
-    if (bar.high >= zoneLo && bar.low <= zoneHi) {
-      hit1h = true;
-      break;
-    }
-  }
-
-  if (hit30) boost += 0.2;
-  if (hit1h) boost += 0.2;
-
-  // clamp
-  if (boost > 1.6) boost = 1.6;
-  return boost;
-}
-
-// ---------- Merge overlapping shelves ----------
-
-function mergeShelves(candidates) {
-  if (!candidates.length) return [];
-
-  const sorted = candidates
-    .slice()
-    .sort((a, b) => a.priceRange[1] - b.priceRange[1]); // sort by low
-
-  const merged = [];
-  let current = { ...sorted[0] };
-
-  for (let i = 1; i < sorted.length; i++) {
-    const s = sorted[i];
-    if (s.type !== current.type) {
-      merged.push(current);
-      current = { ...s };
-      continue;
-    }
-
-    const [hi1, lo1] = current.priceRange;
-    const [hi2, lo2] = s.priceRange;
-    const overlapHi = Math.min(hi1, hi2);
-    const overlapLo = Math.max(lo1, lo2);
-    const overlapWidth = Math.max(0, overlapHi - overlapLo);
-
-    const shouldMerge =
-      overlapWidth > 0 || Math.abs(current.price - s.price) <= 0.5;
-
-    if (shouldMerge) {
-      const newHi = Math.max(hi1, hi2);
-      const newLo = Math.min(lo1, lo2);
-      const newCenter = (newHi + newLo) / 2;
-      current.priceRange = [newHi, newLo];
-      current.price = newCenter;
-      current.strength = Math.max(current.strength, s.strength);
-    } else {
-      merged.push(current);
-      current = { ...s };
-    }
-  }
-
-  merged.push(current);
-  return merged;
-}
