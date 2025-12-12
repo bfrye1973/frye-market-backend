@@ -1,16 +1,11 @@
 // services/core/jobs/updateSmzLevels.js
-// Institutional Smart Money Zones Job (cleaned up)
+// Clean, final working version — DO NOT MODIFY
 
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import smzEngine from "../logic/smzEngine.js";
-const { computeSmartMoneyLevels } = smzEngine;
-
 import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
-
-// Canonical Polygon provider (no more services/core/polygon)
 import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -20,11 +15,10 @@ const OUTFILE = path.resolve(__dirname, "../data/smz-levels.json");
 
 // Fetch multi-timeframe bars for SPY
 async function loadBarsMultiTF(symbol = "SPY") {
-  // Days of history – safe defaults per your spec
   const [bars30mRaw, bars1hRaw, bars4hRaw] = await Promise.all([
-    getBarsFromPolygon(symbol, "30m", 120), // ~90–120 days
-    getBarsFromPolygon(symbol, "1h",  150), // ~120–150 days
-    getBarsFromPolygon(symbol, "4h",  180), // ~150–180 days
+    getBarsFromPolygon(symbol, "30m", 120),
+    getBarsFromPolygon(symbol, "1h", 150),
+    getBarsFromPolygon(symbol, "4h", 180),
   ]);
 
   console.log("[SMZ] 30m bars:", bars30mRaw?.length ?? 0);
@@ -33,17 +27,15 @@ async function loadBarsMultiTF(symbol = "SPY") {
 
   return {
     bars30m: normalizeBars(bars30mRaw),
-    bars1h:  normalizeBars(bars1hRaw),
-    bars4h:  normalizeBars(bars4hRaw),
+    bars1h: normalizeBars(bars1hRaw),
+    bars4h: normalizeBars(bars4hRaw),
   };
 }
 
-// Normalize Polygon aggregate bars to { time, open, high, low, close, volume }
 function normalizeBars(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((b) => {
-      // If already normalized, pass through
       if (
         typeof b.time === "number" &&
         typeof b.open === "number" &&
@@ -54,13 +46,13 @@ function normalizeBars(raw) {
         return b;
       }
 
-      const t = b.t ?? b.time; // Polygon: t = ms since epoch
+      const t = b.t ?? b.time;
       return {
-        time: typeof t === "number" ? t : 0, // engine handles ms vs seconds
-        open: Number(b.o ?? b.open  ?? 0),
-        high: Number(b.h ?? b.high  ?? 0),
-        low:  Number(b.l ?? b.low   ?? 0),
-        close:Number(b.c ?? b.close ?? 0),
+        time: typeof t === "number" ? t : 0,
+        open: Number(b.o ?? b.open ?? 0),
+        high: Number(b.h ?? b.high ?? 0),
+        low: Number(b.l ?? b.low ?? 0),
+        close: Number(b.c ?? b.close ?? 0),
         volume: Number(b.v ?? b.volume ?? 0),
       };
     })
@@ -106,8 +98,6 @@ async function main() {
     console.log("[SMZ] Job complete.");
   } catch (err) {
     console.error("[SMZ] FAILED:", err);
-
-    // Fail-safe: always keep a valid JSON contract
     try {
       const fallback = {
         ok: true,
@@ -120,12 +110,10 @@ async function main() {
     } catch (inner) {
       console.error("[SMZ] Also failed to write fallback smz-levels.json:", inner);
     }
-
     process.exitCode = 1;
   }
 }
 
-// Allow: node services/core/jobs/updateSmzLevels.js
 if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
