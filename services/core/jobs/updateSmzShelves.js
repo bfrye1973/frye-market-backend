@@ -16,7 +16,7 @@ const OUTFILE = path.resolve(__dirname, "../data/smz-shelves.json");
 // Fetch multi-timeframe bars for SPY
 async function loadBars(symbol = "SPY") {
   const [bars10mRaw, bars30mRaw, bars1hRaw] = await Promise.all([
-    getBarsFromPolygon(symbol, "10m", 10),  // ~2–3 days
+    getBarsFromPolygon(symbol, "15m", 10),  // ~2–3 days
     getBarsFromPolygon(symbol, "30m", 20),  // ~5–7 days
     getBarsFromPolygon(symbol, "1h",  40),  // ~10–14 days
   ]);
