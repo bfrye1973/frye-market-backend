@@ -25,9 +25,9 @@ const MAX_SHELVES = 3;
 const MAX_EDGES = 3;
 
 // Width rules (in SPY points)
-const SHELF_MIN_WIDTH = 0.5;      // was 1.0
+const SHELF_MIN_WIDTH = 1.0;
 const SHELF_MAX_WIDTH = 3.0;
-const EDGE_MAX_WIDTH = 0.75;      // was 1.0
+const EDGE_MAX_WIDTH = 1.0;
 const INSTITUTIONAL_MIN_WIDTH = 2.0;
 const INSTITUTIONAL_MAX_WIDTH = 5.5;
 const MAX_SPLIT_WIDTH = 6.0; // if wider than this, split into sub-zones
@@ -47,12 +47,8 @@ const K_WICK = 0.6; // wick > 0.6 * ATR_tf to count as tap
 const WICK_SOFT_CAP = 3.0; // max normalized wick per tap
 
 // Consolidation detection
-const BODY_THRESHOLD_ATR = 0.5;      // avg body < 0.5 * ATR_tf
+const BODY_THRESHOLD_ATR = 0.5; // avg body < 0.5 * ATR_tf
 const SHELF_MAX_WIDTH_POINTS = 3.0;
-
-// PHASE 1 UPGRADE: extra shelf filters
-const RANGE_TO_ATR_MAX = 0.9;        // avg range ≤ 0.9 * ATR (compression)
-const BODY_TO_RANGE_MAX = 0.5;       // avgBody / avgRange ≤ 0.5 (small bodies)
 
 // Displacement and retest
 const DISP_LOOKAHEAD_BARS = 30; // how far forward we look for displacement
@@ -124,6 +120,25 @@ function roundPriceToBucket(price, size) {
 
 // ---------- Seed detection per timeframe ----------
 
+/**
+ * Build wick + consolidation seeds for a single timeframe.
+ *
+ * @param {"30m"|"1h"|"4h"} tf
+ * @param {Array} bars
+ * @param {number} atr
+ * @returns {Array} seeds
+ *
+ * Seed shape:
+ * {
+ *   price: number,
+ *   dir: "buy" | "sell" | "neutral",
+ *   tf: "30m"|"1h"|"4h",
+ *   barIndex: number,
+ *   time: number,
+ *   wickLen: number, // 0 for cons-only seeds
+ *   isConsolidation: boolean
+ * }
+ */
 function makeSeedsForTF(tf, bars, atr) {
   const seeds = [];
   if (!Array.isArray(bars) || bars.length < 10 || !atr || atr <= 0) return seeds;
@@ -180,51 +195,30 @@ function makeSeedsForTF(tf, bars, atr) {
   }
 
   const n = bars.length;
-  for (
-    let win = minWin;
-    win <= maxWin;
-    win += Math.max(1, Math.floor((maxWin - minWin) / 3))
-  ) {
+  for (let win = minWin; win <= maxWin; win += Math.max(1, Math.floor((maxWin - minWin) / 3))) {
     if (n < win) continue;
     for (let i = win - 1; i < n; i++) {
       const slice = bars.slice(i - win + 1, i + 1);
       let bandHigh = -Infinity;
       let bandLow = Infinity;
       let bodySum = 0;
-      let rangeSum = 0;
-      let bodyInsideCount = 0;
       let count = 0;
-
       for (const s of slice) {
         if (!isFiniteBar(s)) continue;
         bandHigh = Math.max(bandHigh, s.high);
         bandLow = Math.min(bandLow, s.low);
-        const body = Math.abs(s.close - s.open);
-        bodySum += body;
-        rangeSum += s.high - s.low;
+        bodySum += Math.abs(s.close - s.open);
         count++;
-
-        const bodyHi = Math.max(s.open, s.close);
-        const bodyLo = Math.min(s.open, s.close);
-        if (bodyHi <= bandHigh && bodyLo >= bandLow) {
-          bodyInsideCount++;
-        }
       }
       if (count === 0) continue;
 
       const bandWidth = bandHigh - bandLow;
       const avgBody = bodySum / count;
-      const avgRange = rangeSum / count || 1e-6;
-      const bodyToRange = avgBody / avgRange;
-      const overlapRatio = bodyInsideCount / count;
 
       if (
         bandWidth > 0 &&
         bandWidth <= SHELF_MAX_WIDTH_POINTS &&
-        avgBody < BODY_THRESHOLD_ATR * atr &&
-        avgRange <= RANGE_TO_ATR_MAX * atr &&
-        bodyToRange <= BODY_TO_RANGE_MAX &&
-        overlapRatio >= 0.7
+        avgBody < BODY_THRESHOLD_ATR * atr
       ) {
         const mid = (bandHigh + bandLow) / 2;
         const lastBar = slice[slice.length - 1];
@@ -246,29 +240,23 @@ function makeSeedsForTF(tf, bars, atr) {
 
 // ---------- Seed effects: displacement + retests ----------
 
+/**
+ * Evaluate displacement and retests for a single seed in its timeframe.
+ *
+ * @param {Array} tfBars
+ * @param {Object} seed
+ * @param {number} atr
+ * @returns {{dispScore: number, retestCount: number, upMoves: number, downMoves: number}}
+ */
 function evaluateSeedEffects(tfBars, seed, atr) {
-  if (
-    !Array.isArray(tfBars) ||
-    tfBars.length === 0 ||
-    !Number.isFinite(atr) ||
-    atr <= 0
-  ) {
+  if (!Array.isArray(tfBars) || tfBars.length === 0 || !Number.isFinite(atr) || atr <= 0) {
     return { dispScore: 0, retestCount: 0, upMoves: 0, downMoves: 0 };
   }
 
-  const anchorIndex = Math.min(
-    Math.max(seed.barIndex ?? 0, 0),
-    tfBars.length - 1
-  );
+  const anchorIndex = Math.min(Math.max(seed.barIndex ?? 0, 0), tfBars.length - 1);
   const anchorPrice = seed.price;
-  const maxDispIndex = Math.min(
-    tfBars.length,
-    anchorIndex + 1 + DISP_LOOKAHEAD_BARS
-  );
-  const maxRetestIndex = Math.min(
-    tfBars.length,
-    anchorIndex + 1 + RETEST_LOOKAHEAD_BARS
-  );
+  const maxDispIndex = Math.min(tfBars.length, anchorIndex + 1 + DISP_LOOKAHEAD_BARS);
+  const maxRetestIndex = Math.min(tfBars.length, anchorIndex + 1 + RETEST_LOOKAHEAD_BARS);
 
   let maxDisp = 0;
   let upMoves = 0;
@@ -302,6 +290,15 @@ function evaluateSeedEffects(tfBars, seed, atr) {
 
 // ---------- Bucket aggregation ----------
 
+/**
+ * Aggregate seeds into price buckets and compute raw scores per bucket.
+ *
+ * @param {Array} seeds
+ * @param {Object} barsByTF
+ * @param {Object} atrByTF
+ * @param {number} latestTime
+ * @returns {Array} buckets
+ */
 function buildBucketsFromSeeds(seeds, barsByTF, atrByTF, latestTime) {
   const bucketMap = new Map();
 
@@ -334,13 +331,16 @@ function buildBucketsFromSeeds(seeds, barsByTF, atrByTF, latestTime) {
     const bucket = bucketMap.get(bucketPrice);
     bucket.tfsSeen.add(tf);
 
+    // timestamps / recency
     bucket.timestamps.push(seed.time);
     if (seed.time > bucket.lastTime) bucket.lastTime = seed.time;
 
+    // consolidation count
     if (seed.isConsolidation) {
       bucket.consCountByTF[tf] += 1;
     }
 
+    // wick contribution
     if (seed.wickLen > 0) {
       const normWick = Math.min(seed.wickLen / atr, WICK_SOFT_CAP);
       bucket.wickScoreByTF[tf] += normWick;
@@ -348,6 +348,7 @@ function buildBucketsFromSeeds(seeds, barsByTF, atrByTF, latestTime) {
       if (seed.dir === "buy") bucket.lowerWicks += 1;
     }
 
+    // displacement + retest effects
     const { dispScore, retestCount, upMoves, downMoves } = evaluateSeedEffects(
       tfBars,
       seed,
@@ -360,6 +361,7 @@ function buildBucketsFromSeeds(seeds, barsByTF, atrByTF, latestTime) {
     bucket.downMoves += downMoves;
   }
 
+  // Score each bucket
   const buckets = [];
   for (const b of bucketMap.values()) {
     const wickScore =
@@ -393,6 +395,7 @@ function buildBucketsFromSeeds(seeds, barsByTF, atrByTF, latestTime) {
     buckets.push(b);
   }
 
+  // Filter out very weak buckets
   return buckets
     .filter((b) => b.rawScore > 0)
     .sort((a, b) => a.price - b.price);
@@ -400,9 +403,30 @@ function buildBucketsFromSeeds(seeds, barsByTF, atrByTF, latestTime) {
 
 // ---------- Zones from buckets ----------
 
+/**
+ * Merge buckets into raw zones (bands).
+ *
+ * @param {Array} buckets
+ * @returns {Array} zones
+ *
+ * Zone shape:
+ * {
+ *   min: number,
+ *   max: number,
+ *   rawScore: number,
+ *   tfsSeen: Set,
+ *   upperWicks: number,
+ *   lowerWicks: number,
+ *   upMoves: number,
+ *   downMoves: number,
+ *   bucketCount: number,
+ *   lastTime: number
+ * }
+ */
 function buildZonesFromBuckets(buckets) {
   if (!buckets.length) return [];
 
+  // build initial bands per bucket
   const bands = buckets.map((b) => ({
     price: b.price,
     bandLow: b.price - INIT_BAND_HALF_WIDTH,
@@ -438,6 +462,7 @@ function buildZonesFromBuckets(buckets) {
       continue;
     }
 
+    // if overlapping or close, merge
     if (band.bandLow <= current.max + MERGE_GAP) {
       current.min = Math.min(current.min, band.bandLow);
       current.max = Math.max(current.max, band.bandHigh);
@@ -470,6 +495,12 @@ function buildZonesFromBuckets(buckets) {
   return splitWideZones(zones);
 }
 
+/**
+ * Split ultra-wide zones into sub-zones of institutional width.
+ *
+ * @param {Array} zones
+ * @returns {Array} zones
+ */
 function splitWideZones(zones) {
   const out = [];
   for (const z of zones) {
@@ -503,6 +534,15 @@ function splitWideZones(zones) {
 
 // ---------- Classification & selection ----------
 
+/**
+ * Classify zones into institutional / shelves / edges and select top ones,
+ * applying Option C relevance filter (distance + recency).
+ *
+ * @param {Array} zones
+ * @param {number} currentPrice
+ * @param {number} latestTime
+ * @returns {Array} finalZones with { type, center, min, max, rawScore }
+ */
 function classifyAndSelectZones(zones, currentPrice, latestTime) {
   if (!zones.length) return [];
 
@@ -517,27 +557,29 @@ function classifyAndSelectZones(zones, currentPrice, latestTime) {
     const center = (z.max + z.min) / 2;
     const has4h = z.tfsSeen.has("4h");
 
+    // --- Option C relevance filter: distance + recency ---
     if (Number.isFinite(currentPrice)) {
       const dist = Math.abs(center - currentPrice);
       if (dist > RELEVANCE_DISTANCE_LIMIT_POINTS) {
-        continue;
+        continue; // too far from current price
       }
     }
 
     const ageWeeks = computeAgeWeeks(latestTime, z.lastTime || latestTime);
     const ageDays = ageWeeks * 7;
     if (ageDays > RELEVANCE_MAX_AGE_DAYS) {
-      continue;
+      continue; // too old
     }
 
+    // Direction from displacement moves; fallback to wick bias
     const moveTotal = z.upMoves + z.downMoves;
     let dirBias = 0;
     if (moveTotal > 0) {
-      dirBias = (z.upMoves - z.downMoves) / moveTotal;
+      dirBias = (z.upMoves - z.downMoves) / moveTotal; // -1..+1
     } else {
       const wickTotal = z.upperWicks + z.lowerWicks;
       if (wickTotal > 0) {
-        dirBias = (z.lowerWicks - z.upperWicks) / wickTotal;
+        dirBias = (z.lowerWicks - z.upperWicks) / wickTotal; // + => buy bias
       }
     }
 
@@ -548,18 +590,22 @@ function classifyAndSelectZones(zones, currentPrice, latestTime) {
     } else if (width >= INSTITUTIONAL_MIN_WIDTH && width <= INSTITUTIONAL_MAX_WIDTH && has4h) {
       instCandidates.push({ zone: z, center, width, rawScore: z.rawScore, dirBias });
     } else if (width >= INSTITUTIONAL_MIN_WIDTH && width <= INSTITUTIONAL_MAX_WIDTH) {
+      // weaker institutional candidate (no 4h), still allow but slightly down-weighted
       instCandidates.push({ zone: z, center, width, rawScore: z.rawScore * 0.8, dirBias });
     } else {
+      // ignore overly wide or tiny weird stuff
       continue;
     }
   }
 
+  // sort by rawScore descending
   instCandidates.sort((a, b) => b.rawScore - a.rawScore);
   shelfCandidates.sort((a, b) => b.rawScore - a.rawScore);
   edgeCandidates.sort((a, b) => b.rawScore - a.rawScore);
 
   const selected = [];
 
+  // Select institutional zones with spacing constraint
   const instSelected = [];
   for (const c of instCandidates) {
     if (instSelected.length >= MAX_INSTITUTIONAL_ZONES) break;
@@ -571,7 +617,7 @@ function classifyAndSelectZones(zones, currentPrice, latestTime) {
   }
   for (const c of instSelected) {
     selected.push({
-      type: "institutional",
+      type: "institutional", // YELLOW in FE
       center: c.center,
       min: c.zone.min,
       max: c.zone.max,
@@ -580,13 +626,14 @@ function classifyAndSelectZones(zones, currentPrice, latestTime) {
     });
   }
 
+  // Shelves (accumulation/distribution, BLUE/RED in FE)
   for (let i = 0; i < Math.min(MAX_SHELVES, shelfCandidates.length); i++) {
     const c = shelfCandidates[i];
     const type =
       c.dirBias > 0.05
-        ? "accumulation"
+        ? "accumulation"   // BLUE
         : c.dirBias < -0.05
-        ? "distribution"
+        ? "distribution"   // RED
         : "accumulation";
     selected.push({
       type,
@@ -598,13 +645,14 @@ function classifyAndSelectZones(zones, currentPrice, latestTime) {
     });
   }
 
+  // Edges (thin A/D lines, using same colors)
   for (let i = 0; i < Math.min(MAX_EDGES, edgeCandidates.length); i++) {
     const c = edgeCandidates[i];
     const type =
       c.dirBias > 0.05
-        ? "accumulation"
+        ? "accumulation"   // BLUE edge
         : c.dirBias < -0.05
-        ? "distribution"
+        ? "distribution"   // RED edge
         : "distribution";
     selected.push({
       type,
@@ -619,6 +667,12 @@ function classifyAndSelectZones(zones, currentPrice, latestTime) {
   return selected;
 }
 
+/**
+ * Normalize strengths 40–100 and format final output.
+ *
+ * @param {Array} zones
+ * @returns {Array} SmzLevel[]
+ */
 function normalizeAndFormat(zones) {
   if (!zones.length) return [];
 
@@ -630,14 +684,14 @@ function normalizeAndFormat(zones) {
 
   for (const z of zones) {
     const rel = z.rawScore / maxRaw;
-    const strength = Math.round(40 + 60 * rel);
+    const strength = Math.round(40 + 60 * rel); // 40–100
     z.strength = strength;
   }
 
   zones.sort((a, b) => b.strength - a.strength);
 
   return zones.map((z) => ({
-    type: z.type,
+    type: z.type, // "institutional" | "accumulation" | "distribution"
     price: z.center,
     priceRange: [Number(z.max.toFixed(2)), Number(z.min.toFixed(2))],
     strength: z.strength,
@@ -646,6 +700,14 @@ function normalizeAndFormat(zones) {
 
 // ---------- Public entry ----------
 
+/**
+ * Main engine entry point.
+ *
+ * @param {Array} bars30m
+ * @param {Array} bars1h
+ * @param {Array} bars4h
+ * @returns {Array} SmzLevel[]
+ */
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   try {
     if (!Array.isArray(bars30m) || !Array.isArray(bars1h) || !Array.isArray(bars4h)) {
@@ -653,6 +715,7 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
       return [];
     }
 
+    // Normalize / filter / sort bars by time
     const tfBars = {
       "30m": bars30m.filter(isFiniteBar).sort((a, b) => a.time - b.time),
       "1h": bars1h.filter(isFiniteBar).sort((a, b) => a.time - b.time),
@@ -676,6 +739,7 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
       return [];
     }
 
+    // Current price (for relevance filter)
     let currentPrice = null;
     if (tfBars["30m"].length) {
       currentPrice = tfBars["30m"][tfBars["30m"].length - 1].close;
@@ -685,6 +749,7 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
       currentPrice = tfBars["4h"][tfBars["4h"].length - 1].close;
     }
 
+    // Build seeds for each TF
     const seeds = [
       ...makeSeedsForTF("30m", tfBars["30m"], atrByTF["30m"]),
       ...makeSeedsForTF("1h", tfBars["1h"], atrByTF["1h"]),
