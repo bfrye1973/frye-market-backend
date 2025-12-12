@@ -8,6 +8,8 @@ import { fileURLToPath } from "url";
 import smzEngine from "../logic/smzEngine.js";
 const { computeSmartMoneyLevels } = smzEngine;
 
+import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
+
 // Canonical Polygon provider (no more services/core/polygon)
 import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
 
