@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-compute_trend_hourly.py — Lux Trend (1h) post-processor
-- Two-color mapping
-- Lux mini-pill + numeric fields + legacy mirrors
-- OBV-style volume sentiment if fields exist
+compute_trend_hourly.py — Lux Trend (1h) post-processor (R12.8)
+- Adds 3-color mapping: green / yellow / red
+- Yellow band: 49..59
+- Writes strategy.trend1h, lux1h numeric mirrors, and legacy signals
 """
 
 import json, datetime
@@ -13,6 +13,7 @@ HOURLY_PATH = "data/outlook_hourly.json"
 
 THRESH = {
     "trend_green_min": 60.0,
+    "trend_yellow_min": 49.0,   # NEW
     "vol_low_max": 40.0,
     "squeeze_open_max": 30.0,
     "volsent_green_gt": 0.0
@@ -31,7 +32,16 @@ def carry_last_changed(prev,new_state,stamp):
     if prev_state!=new_state: last=stamp
     return last
 
-def color_trend(ts):      return "green" if (isinstance(ts,(int,float)) and ts>=THRESH["trend_green_min"]) else "red"
+def color_trend(ts):
+    # green >=60, yellow 49..59, red <=48
+    if not isinstance(ts,(int,float)):
+        return "red"
+    if ts >= THRESH["trend_green_min"]:
+        return "green"
+    if ts >= THRESH["trend_yellow_min"]:
+        return "yellow"
+    return "red"
+
 def color_vol_scaled(vs): return "green" if (isinstance(vs,(int,float)) and vs<THRESH["vol_low_max"]) else "red"
 def color_squeeze(sq):    return "green" if (isinstance(sq,(int,float)) and sq<THRESH["squeeze_open_max"]) else "red"
 def color_volume(vs):     return "green" if (isinstance(vs,(int,float)) and vs>THRESH["volsent_green_gt"]) else "red"
@@ -49,13 +59,14 @@ def compute_volume_sentiment_pct(metrics: dict) -> float:
 
 def main():
     j = load_json(HOURLY_PATH)
-    if not j: 
+    if not j:
         print("[1h] hourly file missing"); return
     now = utc_now()
     m = j.get("metrics") or {}
     h = j.get("hourly") or {}
     prev = (h.get("signals") or {})
 
+    # IMPORTANT: we now expect trend_strength_1h_pct to exist (set by make_dashboard_hourly.py)
     ts = m.get("trend_strength_1h_pct") or m.get("trend_strength_pct")
     sq = m.get("squeeze_1h_pct")
     vol_pct = m.get("volatility_1h_pct")
@@ -68,6 +79,7 @@ def main():
     if not isinstance(vs,(int,float)):
         vs = compute_volume_sentiment_pct(m)
 
+    # fallback if ts missing
     if not isinstance(ts,(int,float)):
         ema_sign = m.get("ema_sign")
         base = 45.0 if (isinstance(ema_sign,(int,float)) and ema_sign!=0) else 30.0
@@ -111,7 +123,15 @@ def main():
     })
 
     sigs = dict(prev) if isinstance(prev,dict) else {}
-    overall = "bull" if trend_color=="green" else "bear"
+
+    # NEW: overall state matches 3-color
+    if trend_color == "green":
+        overall = "bull"
+    elif trend_color == "red":
+        overall = "bear"
+    else:
+        overall = "neutral"
+
     sigs["sigOverall1h"] = {"state": overall, "lastChanged": carry_last_changed(sigs.get("sigOverall1h",{}), overall, now)}
 
     ema_sign = m.get("ema_sign")
@@ -119,12 +139,14 @@ def main():
     sigs["sigEMA1h"] = {"state": ema_state, "lastChanged": carry_last_changed(sigs.get("sigEMA1h",{}), ema_state, now)}
 
     combo = m.get("momentum_combo_1h_pct")
-    if isinstance(combo,(int,float)): smi_state = "bull" if combo>50.0 else "bear" if combo<50.0 else overall
-    else: smi_state = overall
+    if isinstance(combo,(int,float)):
+        smi_state = "bull" if combo>50.0 else "bear" if combo<50.0 else overall
+    else:
+        smi_state = overall
     sigs["sigSMI1h"] = {"state": smi_state, "lastChanged": carry_last_changed(sigs.get("sigSMI1h",{}), smi_state, now)}
 
     h["signals"] = sigs
     j["hourly"] = h
 
     save_json(HOURLY_PATH, j)
-    print("[1h] Lux summary + numeric fields + OBV flow written.")
+    print("[1h] Lux summary + 3-color trend (green/yellow/red) written.")
