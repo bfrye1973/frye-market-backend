@@ -1,98 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — compute_trend_eod.py (R12.8)
+Ferrari Dashboard — compute_trend_eod.py (R12.9 — Mirror/Color Only)
 
-EOD (Daily) Engine — 10-day Breadth & Momentum + Lux + SectorCards.
+This script no longer computes EOD scoring.
+Single source of truth is make_eod.py -> daily.overallEOD.
 
-This script post-processes data/outlook.json (built by make_eod.py) and computes:
-
-- Per-sector 10-day breadth & momentum using nh/nl/up/down from daily sector cards
-- Daily "trendDaily" object:
-    - trend.emaSlope          (proxy for trend strength, -50..+50)
-    - participation.pctAboveMA (pct of sectors with breadth >= 50)
-    - volatilityRegime.{atrPct, band}
-    - liquidityRegime.{psi, band}
-- Daily squeeze PSI (metrics["daily_squeeze_pct"]) using existing value if present
-- Composite daily score metrics["overall_eod_score"] and metrics["overall_eod_state"]
-  and daily["overallEOD"] with components:
-
-    overall_eod_score =
-        0.40 * trend_pct
-      + 0.25 * participation_pct
-      + 0.10 * squeeze_expansion_pct   (100 - PSI)
-      + 0.10 * liquidity_norm_pct
-      + 0.10 * volatility_score_pct    (100 - min(vol_pct, 100))
-      + 0.05 * riskOn_pct
-
-It writes:
-
-- j["metrics"]["daily_squeeze_pct"]
-- j["metrics"]["trend_eod_pct"]
-- j["metrics"]["participation_eod_pct"]
-- j["metrics"]["volatility_eod_pct"]
-- j["metrics"]["liquidity_eod_psi"]
-- j["metrics"]["riskOn_eod_pct"]
-- j["metrics"]["overall_eod_score"]
-- j["metrics"]["overall_eod_state"]
-- j["daily"]["overallEOD"] = { state, score, components, lastChanged }
-- j["trendDaily"] = { trend, participation, volatilityRegime, liquidityRegime }
-
-NOTE: This script assumes that `data/outlook.json` contains either:
-    - `daily["sectors"]` with fields: "sector","nh","nl","up","down"
-      (as built by make_eod.py from `outlook_source.json`), or
-    - a fallback `sectorCards` array with the same fields.
-
-Adjust key names in `compute_sector_breadth_momentum` if needed.
+Responsibilities:
+- Add/refresh strategy.trendDaily (green/yellow/red) based on daily.overallEOD.score
+- Preserve daily.overallEOD.lastChanged when state doesn't change
+- Mirror key EOD gate fields into engineLights.metrics for UI convenience
 """
 
 from __future__ import annotations
-
-import json
-import math
-import os
-import sys
+import json, sys
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
 
 EOD_PATH = "data/outlook.json"
 
-OFFENSIVE_SECTORS = {
-    "information technology",
-    "consumer discretionary",
-    "communication services",
-    "industrials",
-}
-
-DEFENSIVE_SECTORS = {
-    "consumer staples",
-    "utilities",
-    "health care",
-    "real estate",
-}
-
-# ------------------------- Helpers --------------------------
-
-
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def clamp(x: float, lo: float, hi: float) -> float:
-    try:
-        return max(lo, min(hi, float(x)))
-    except Exception:
-        return lo
-
-
-def pct(a: float, b: float) -> float:
-    try:
-        if b <= 0:
-            return 0.0
-        return 100.0 * float(a) / float(b)
-    except Exception:
-        return 0.0
-
 
 def load_json(path: str) -> dict:
     try:
@@ -101,310 +28,96 @@ def load_json(path: str) -> dict:
     except Exception:
         return {}
 
-
 def save_json(path: str, obj: dict) -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
 
-
-# ---------------- Sector-level EOD metrics ------------------
-
-
-def compute_sector_breadth_momentum(sectors: List[dict]) -> List[dict]:
-    """
-    For each sector entry, compute 10-day breadth & momentum.
-
-    Expected / tolerated keys per sector (first match wins):
-      breadth core:
-        "nh10" or "nh" or "NH"     -> 10d new highs count
-        "nl10" or "nl" or "NL"     -> 10d new lows count
-      up/down counts:
-        "up10" or "up" or "u"
-        "down10" or "down" or "d"
-    """
-    out: List[dict] = []
-    for c in sectors or []:
-        name = (c.get("sector") or "").strip()
-        if not name:
-            continue
-
-        def _get_any(k: List[str]) -> float:
-            for kk in k:
-                if kk in c:
-                    try:
-                        v = float(c.get(kk, 0) or 0)
-                        return v
-                    except Exception:
-                        return 0.0
-            return 0.0
-
-        nh = _get_any(["nh10", "nh", "NH"])
-        nl = _get_any(["nl10", "nl", "NL"])
-        up = _get_any(["up10", "up", "u"])
-        dn = _get_any(["down10", "down", "d"])
-
-        breadth_pct = pct(nh, nh + nl) if nh + nl > 0 else 50.0
-        mom_pct = pct(up, up + dn) if up + dn > 0 else 50.0
-
-        c_out = dict(c)
-        c_out["sector"] = name
-        c_out["breadth_pct"] = round(breadth_pct, 2)
-        c_out["momentum_pct"] = round(mom_pct, 2)
-        c_out["nh10"] = nh
-        c_out["nl10"] = nl
-        c_out["up10"] = up
-        c_out["down10"] = dn
-        out.append(c_out)
-
-    return out
-
-
-# --------------- Composite daily EOD metrics ----------------
-
-
-def compute_daily_composites(
-    sectors: List[dict],
-    metrics: dict,
-) -> Tuple[float, float, float, float, float, float, float, dict]:
-    """
-    Compute:
-      - trend_pct           (0-100)
-      - participation_pct   (0-100)
-      - squeeze_psi         (0-100)
-      - vol_pct             (0-100)
-      - liq_psi             (0-200)
-      - risk_on_pct         (0-100)
-      - overall_score       (0-100)
-      - trend_daily (dict for j["trendDaily"])
-    """
-
-    # --- Trend & Participation from sector breadth/momentum ---
-    breadth_vals: List[float] = []
-    mom_vals: List[float] = []
-    n_good = 0
-    total = 0
-
-    for c in sectors:
-        try:
-            b = float(c.get("breadth_pct", 50.0))
-            m = float(c.get("momentum_pct", 50.0))
-        except Exception:
-            continue
-        breadth_vals.append(b)
-        mom_vals.append(m)
-        total += 1
-        if b >= 50.0 and m >= 50.0:
-            n_good += 1
-
-    if total > 0:
-        trend_pct = sum(breadth_vals) / total
-        participation_pct = pct(n_good, total)
-    else:
-        trend_pct = 50.0
-        participation_pct = 50.0
-
-    # Trend "slope" proxy: deviation from 50, clamped to [-50, +50]
-    ema_slope = clamp(trend_pct - 50.0, -50.0, 50.0)
-
-    # --- Squeeze PSI (tightness) ---
-    squeeze_psi = metrics.get("daily_squeeze_pct")
-    if squeeze_psi is None:
-        squeeze_psi = metrics.get("squeeze_daily_pct")
+def color_from_score(score: float) -> str:
+    # green >=60, yellow 49..59, red <=48
     try:
-        squeeze_psi = float(squeeze_psi)
+        s = float(score)
     except Exception:
-        squeeze_psi = 50.0
-    squeeze_psi = clamp(squeeze_psi, 0.0, 100.0)
-    squeeze_exp = 100.0 - squeeze_psi  # expansion score
+        return "red"
+    if s >= 60.0:
+        return "green"
+    if s >= 49.0:
+        return "yellow"
+    return "red"
 
-    # --- Volatility (ATR%) ---
-    vol_pct = metrics.get("volatility_pct")
-    try:
-        vol_pct = float(vol_pct)
-    except Exception:
-        vol_pct = 20.0
-    vol_pct = max(0.0, float(vol_pct))
-    vol_score = 100.0 - clamp(vol_pct, 0.0, 100.0)
-
-    # Volatility band
-    if vol_pct < 1.0:
-        vol_band = "low"
-    elif vol_pct < 2.0:
-        vol_band = "normal"
-    elif vol_pct < 3.0:
-        vol_band = "elevated"
-    else:
-        vol_band = "high"
-
-    # --- Liquidity (volume ratio) ---
-    liq_psi = metrics.get("liquidity_pct")
-    try:
-        liq_psi = float(liq_psi)
-    except Exception:
-        liq_psi = 100.0
-    liq_psi = clamp(liq_psi, 0.0, 200.0)
-
-    if liq_psi < 80.0:
-        liq_band = "light"
-    elif liq_psi < 120.0:
-        liq_band = "normal"
-    else:
-        liq_band = "good"
-
-    liq_norm_pct = clamp(liq_psi, 0.0, 200.0) / 2.0  # 0..100
-
-    # --- Risk-On (offense vs defense) ---
-    risk_on = 50.0
-    if sectors:
-        n = 0
-        acc = 0.0
-        for c in sectors:
-            sec_name = (c.get("sector") or "").strip().lower()
-            try:
-                b = float(c.get("breadth_pct", 50.0))
-            except Exception:
-                continue
-            if sec_name in OFFENSIVE_SECTORS:
-                n += 1
-                if b >= 55.0:
-                    acc += 1.0
-            elif sec_name in DEFENSIVE_SECTORS:
-                n += 1
-                if b <= 45.0:
-                    acc += 1.0
-        risk_on = pct(acc, n) if n > 0 else 50.0
-
-    # --- Composite daily score ---
-    trend_pct_clamped = clamp(trend_pct, 0.0, 100.0)
-    participation_pct_clamped = clamp(participation_pct, 0.0, 100.0)
-    squeeze_exp_pct = clamp(squeeze_exp, 0.0, 100.0)
-    vol_score_pct = clamp(vol_score, 0.0, 100.0)
-    liq_pct = clamp(liq_norm_pct, 0.0, 100.0)
-    risk_on_pct = clamp(risk_on, 0.0, 100.0)
-
-    overall = (
-        0.40 * trend_pct_clamped
-        + 0.25 * participation_pct_clamped
-        + 0.10 * squeeze_exp_pct
-        + 0.10 * liq_pct
-        + 0.10 * vol_score_pct
-        + 0.05 * risk_on_pct
-    )
-    overall = clamp(overall, 0.0, 100.0)
-
-    if overall >= 60.0 and trend_pct_clamped >= 55.0:
-        state = "bull"
-    elif overall <= 40.0 and trend_pct_clamped <= 45.0:
-        state = "bear"
-    else:
-        state = "neutral"
-
-    trend_daily = {
-        "trend": {"emaSlope": ema_slope},
-        "participation": {"pctAboveMA": participation_pct_clamped},
-        "volatilityRegime": {"atrPct": vol_pct, "band": vol_band},
-        "liquidityRegime": {"psi": liq_psi, "band": liq_band},
-    }
-
-    return (
-        trend_pct_clamped,
-        participation_pct_clamped,
-        squeeze_psi,
-        vol_pct,
-        liq_psi,
-        risk_on_pct,
-        overall,
-        trend_daily,
-    )
-
-
-# ------------------------------ Main -------------------------
-
-
-def compute_eod():
+def main():
     j = load_json(EOD_PATH)
     if not j:
-        print(f"[eod] {EOD_PATH} missing or empty")
-        return
+        print(f"[eod] missing {EOD_PATH}", file=sys.stderr)
+        return 2
 
-    # Root blocks
-    metrics = j.get("metrics") or {}
+    now = now_utc_iso()
     daily = j.get("daily") or {}
+    overall = (daily.get("overallEOD") or {})
+    state = overall.get("state") or daily.get("state") or "neutral"
+    score = overall.get("score") if overall.get("score") is not None else daily.get("score")
 
-    # Locate sector list with NH/NL/UP/DOWN (10d)
-    sectors_raw = daily.get("sectors")
-    if not sectors_raw:
-        sectors_raw = j.get("sectorCards") or []
-
-    sectors = compute_sector_breath_momentum = compute_sector_breadth_momentum(sectors_raw)
-
-    # Write enriched sectors back into daily block
-    daily["sectors"] = sectors
-
-    (
-        trend_pct,
-        participation_pct,
-        squeeze_psi,
-        vol_pct,
-        liq_psi,
-        risk_on_pct,
-        overall_score,
-        trend_daily,
-    ) = compute_daily_composites(sectors, metrics,)
-
-    # Update metrics for EOD
-    metrics["daily_squeeze_pct"] = round(squeeze_psi, 2)
-    metrics["trend_eod_pct"] = round(trend_pct, 2)
-    metrics["participation_eod_pct"] = round(participation_pct, 2)
-    metrics["volatility_eod_pct"] = round(vol_pct, 2)
-    metrics["liquidity_eod_psi"] = round(liq_psi, 2)
-    metrics["riskOn_eod_pct"] = round(risk_on_pct, 2)
-    metrics["overall_eod_score"] = round(overall_score, 1)
-
-    if overall_score >= 60.0 and trend_pct >= 55.0:
-        overall_state = "bull"
-    elif overall_score <= 40.0 and trend_pct <= 45.0:
-        overall_state = "bear"
+    # lastChanged preservation
+    prev_last = overall.get("lastChanged") or now
+    prev_state = overall.get("state")
+    if prev_state == state and prev_last:
+        last_changed = prev_last
     else:
-        overall_state = "neutral"
+        last_changed = now
 
-    metrics["overall_eod_state"] = overall_state
+    overall["state"] = state
+    overall["score"] = score
+    overall["lastChanged"] = last_changed
+    daily["overallEOD"] = overall
 
-    # Build daily.overallEOD block with components for UI
-    prev_overall = daily.get("overallEOD") or {}
-    last_changed = prev_overall.get("lastChanged") or now_utc_iso()
-    if prev_overall.get("state") != overall_state:
-        last_changed = now_utc_iso()
-
-    daily["overallEOD"] = {
-        "state": overall_state,
-        "score": round(overall_score, 1),
-        "components": {
-            "trend": round(trend_pct, 1),
-            "participation": round(participation_pct, 1),
-            "squeeze": round(100.0 - squeeze_psi, 1),
-            "liquidity": round(liq_psi, 1),
-            "volatility": round(vol_pct, 1),
-            "riskOn": round(risk_on_pct, 1),
-        },
-        "lastChanged": last_changed,
+    # strategy.trendDaily (color capsule)
+    trend_color = color_from_score(score if score is not None else 0.0)
+    reason = f"EOD {state.upper()} {float(score):.0f}" if isinstance(score,(int,float)) else f"EOD {state.upper()}"
+    j.setdefault("strategy", {})
+    j["strategy"]["trendDaily"] = {
+        "state": trend_color,
+        "reason": reason,
+        "updatedAt": now
     }
 
-    # Attach trendDaily structure
-    j["trendDaily"] = trend_daily
-    j["metrics"] = metrics
+    # Mirror important gate fields
+    gate = daily.get("tradeGate") or {}
+    j.setdefault("engineLights", {})
+    j["engineLights"].setdefault("metrics", {})
+    j["engineLights"]["metrics"].update({
+        "eod_state": state,
+        "eod_score": score,
+        "eod_lastChanged": last_changed,
+        "eod_allowEntries": gate.get("allowEntries"),
+        "eod_allowExits": gate.get("allowExits"),
+        "eod_aPlusOnly": gate.get("aPlusOnly"),
+        "eod_danger": gate.get("danger"),
+        "eod_psi": gate.get("psi"),
+        "eod_gateMode": gate.get("mode"),
+    })
+
+    # Ensure squeeze gate light exists (already created by make_eod.py)
+    if "eodSqueezeGate" not in (j.get("engineLights") or {}):
+        # fallback create if missing
+        psi = gate.get("psi") or (daily.get("squeezePsi") or 50.0)
+        j["engineLights"]["eodSqueezeGate"] = {
+            "state": daily.get("squeezeColor") or "blue",
+            "active": True,
+            "psi": psi,
+            "regime": daily.get("squeezeRegime") or "minor",
+            "allowEntries": gate.get("allowEntries", True),
+            "allowExits": gate.get("allowExits", True),
+            "mode": gate.get("mode", "NORMAL"),
+            "lastChanged": now,
+        }
+
     j["daily"] = daily
-
     save_json(EOD_PATH, j)
-    print(
-        "[eod] trend_eod=%.2f, part=%.2f, squeeze=%.1f, vol=%.2f, liq=%.1f, riskOn=%.1f, overall=%.1f %s"
-        % (trend_pct, participation_pct, squeeze_psi, vol_pct, liq_psi, risk_on_pct, overall_score, overall_state)
-    )
-
+    print("[eod] mirrors written | trendDaily =", trend_color, "| state =", state, "| score =", score)
+    return 0
 
 if __name__ == "__main__":
     try:
-        compute_eod()
-    except Exception as exc:
-        print("[eod-error]", exc, file=sys.stderr)
-        sys.exit(1)
+        sys.exit(main() or 0)
+    except Exception as e:
+        print("[eod-error]", e, file=sys.stderr)
+        sys.exit(2)
