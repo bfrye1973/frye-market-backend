@@ -1,6 +1,7 @@
 // services/core/logic/smzShelvesScanner.js
 // Script #2 — Smart Money Shelves Scanner (Acc/Dist)
-// Uses 10m + 30m + 1h bars, focuses near current price ±40 points.
+// Uses 15m + 30m + 1h bars (we label it bars10m in job, but it's actually 15m now)
+// Focuses near current price ±40 points.
 // Output objects match SMZ frontend schema:
 // { type: "accumulation"|"distribution", price, priceRange:[high,low], strength:40–100 }
 
@@ -72,8 +73,8 @@ function distanceWeight(center, currentPrice, bandPoints) {
   return 1 - d / bandPoints; // linear fade
 }
 
-// very light TF confirmation boost (does NOT create shelves on its own)
-function tfConfirmBoost(center, hi, lo, bars30m, bars1h) {
+// TF confirmation boost (does NOT create shelves on its own)
+function tfConfirmBoost(hi, lo, bars30m, bars1h) {
   const margin = Math.max(0.5, (hi - lo) * 0.5);
   const zHi = hi + margin;
   const zLo = lo - margin;
@@ -93,15 +94,15 @@ function tfConfirmBoost(center, hi, lo, bars30m, bars1h) {
   return clamp(boost, 1.0, 1.6);
 }
 
-function detectBreakout(bars10m, endIdx, hi, lo, center, atr) {
-  const n = bars10m.length;
+function detectBreakout(bars, endIdx, hi, lo, center, atr) {
+  const n = bars.length;
   const maxIdx = Math.min(n - 1, endIdx + BREAK_LOOKAHEAD);
 
   let up = false, down = false;
   let maxUp = 0, maxDown = 0;
 
   for (let i = endIdx + 1; i <= maxIdx; i++) {
-    const b = bars10m[i];
+    const b = bars[i];
     const close = b.close;
 
     if (!up && close > hi + BREAK_EPS) {
@@ -124,15 +125,22 @@ function detectBreakout(bars10m, endIdx, hi, lo, center, atr) {
   return maxUp >= maxDown ? { dir: "up", moveATR: maxUp } : { dir: "down", moveATR: maxDown };
 }
 
+// ✅ NEW: stronger merge to eliminate duplicates
 function mergeShelves(list) {
   if (!list.length) return [];
+
+  const EPS = 0.75; // stronger merge distance to collapse duplicates
   const sorted = list.slice().sort((a, b) => (a.priceRange[1] - b.priceRange[1]));
   const out = [];
   let cur = { ...sorted[0] };
 
   for (let i = 1; i < sorted.length; i++) {
     const s = sorted[i];
-    if (s.type !== cur.type) { out.push(cur); cur = { ...s }; continue; }
+    if (s.type !== cur.type) {
+      out.push(cur);
+      cur = { ...s };
+      continue;
+    }
 
     const [hi1, lo1] = cur.priceRange;
     const [hi2, lo2] = s.priceRange;
@@ -141,9 +149,13 @@ function mergeShelves(list) {
     const overlapLo = Math.max(lo1, lo2);
     const overlap = Math.max(0, overlapHi - overlapLo);
 
-    const closeCenters = Math.abs(cur.price - s.price) <= 0.5;
+    const closeCenters = Math.abs(cur.price - s.price) <= EPS;
+    const closeHighs = Math.abs(hi1 - hi2) <= EPS;
+    const closeLows  = Math.abs(lo1 - lo2) <= EPS;
 
-    if (overlap > 0 || closeCenters) {
+    const shouldMerge = overlap > 0 || closeCenters || closeHighs || closeLows;
+
+    if (shouldMerge) {
       const newHi = Math.max(hi1, hi2);
       const newLo = Math.min(lo1, lo2);
       cur.priceRange = [newHi, newLo];
@@ -154,6 +166,7 @@ function mergeShelves(list) {
       cur = { ...s };
     }
   }
+
   out.push(cur);
   return out;
 }
@@ -170,9 +183,9 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
   const bandLow = currentPrice - bandPoints;
   const bandHigh = currentPrice + bandPoints;
 
-  const atr10 = computeATR(b10, ATR_PERIOD);
+  const atr = computeATR(b10, ATR_PERIOD);
 
-  // only scan 10m bars that intersect band
+  // only scan bars that intersect the band
   let startIdx = 0;
   while (startIdx < b10.length && b10[startIdx].high < bandLow) startIdx++;
   if (startIdx >= b10.length) return [];
@@ -223,8 +236,8 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
         const bodyLo = Math.min(b.open, b.close);
         const upperWick = b.high - bodyHi;
         const lowerWick = bodyLo - b.low;
-        const upN = upperWick / atr10;
-        const dnN = Math.abs(lowerWick) / atr10;
+        const upN = upperWick / atr;
+        const dnN = Math.abs(lowerWick) / atr;
         if (dnN >= STRONG_WICK_ATR) strongLower++;
         if (upN >= STRONG_WICK_ATR) strongUpper++;
       }
@@ -236,7 +249,7 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
       const center = (hi + lo) / 2;
 
       // breakout confirmation
-      const br = detectBreakout(b10, endIdx, hi, lo, center, atr10);
+      const br = detectBreakout(b10, endIdx, hi, lo, center, atr);
       if (br.dir === "none") continue;
 
       // map to type with wick sanity
@@ -249,15 +262,14 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
         type = "distribution";
       }
 
-      // quality score (0..1)
+      // score (0..1)
       const widthScore = 1 - (width - SHELF_MIN_WIDTH) / (SHELF_MAX_WIDTH - SHELF_MIN_WIDTH);
       const wickScore = clamp((strongLower + strongUpper) / win, 0, 1);
       const brScore = clamp(br.moveATR / 1.5, 0, 1);
 
       const base = 0.4 * widthScore + 0.3 * wickScore + 0.3 * brScore;
-
       const distW = distanceWeight(center, currentPrice, bandPoints);
-      const tfBoost = tfConfirmBoost(center, hi, lo, b30, b1h);
+      const tfBoost = tfConfirmBoost(hi, lo, b30, b1h);
 
       const final = base * distW * tfBoost;
       if (final <= 0) continue;
@@ -266,7 +278,7 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
         type,
         price: center,
         priceRange: [hi, lo],
-        _score: final, // keep raw for normalization
+        _score: final,
       });
     }
   }
@@ -287,7 +299,10 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
       return {
         type: s.type,
         price: Number(s.price.toFixed(2)),
-        priceRange: [Number(s.priceRange[0].toFixed(2)), Number(s.priceRange[1].toFixed(2))],
+        priceRange: [
+          Number(s.priceRange[0].toFixed(2)),
+          Number(s.priceRange[1].toFixed(2)),
+        ],
         strength,
       };
     })
@@ -296,4 +311,3 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
 
   return out;
 }
-
