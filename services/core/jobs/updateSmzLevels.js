@@ -8,7 +8,7 @@ import { fileURLToPath } from "url";
 import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
 
 // ✅ CORRECT PATH from: src/services/core/jobs/*  ->  src/api/providers/*
-import { getBarsFromPolygon } from "../../api/providers/polygonBars.js";
+import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
