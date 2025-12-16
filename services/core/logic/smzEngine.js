@@ -711,7 +711,6 @@ function objectRound2(obj) {
   return out;
 }
 
-export const computeSmartMoneyLevels = computeZones;
 
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const result = computeZones({
