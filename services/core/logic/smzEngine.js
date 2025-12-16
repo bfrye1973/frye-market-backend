@@ -712,3 +712,15 @@ function objectRound2(obj) {
 }
 
 export const computeSmartMoneyLevels = computeZones;
+
+export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
+  const result = computeZones({
+    candles: bars1h,              // or whichever TF you’re diagnosing
+    tf: "1h",
+    currentPrice: bars30m?.[bars30m.length - 1]?.close ?? bars1h?.[bars1h.length - 1]?.close ?? 0,
+    zones4h: [],                  // optional for now
+  });
+
+  return Array.isArray(result?.zones) ? result.zones : [];
+}
+
