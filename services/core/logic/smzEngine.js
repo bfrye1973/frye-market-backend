@@ -1,5 +1,8 @@
 // services/core/logic/smzEngine.js
-// Smart Money Zone Engine — 12-Question Institutional Model + Relevance Filter (Option C)
+// DIAGNOSTIC MODE — Return all significant zones (strength >= 70)
+// Purpose: show what the algo is grading so we can tune (esp 679–682.50)
+//
+// Output: { type, price, priceRange:[hi,lo], strength, debug:{...} }
 
 const TF_WEIGHTS = {
   "30m": 0.5,
@@ -7,30 +10,20 @@ const TF_WEIGHTS = {
   "4h": 1.2,
 };
 
-// ✅ Focus institutional on what matters now (you want 680–684, 671–673, 652–655)
-const MAX_INSTITUTIONAL_ZONES = 3; // was 4 (drop irrelevant like 639–642)
-const MAX_SHELVES = 3;
-const MAX_EDGES = 3;
-
-// Width rules (in SPY points)
+// Width rules (SPY points)
 const SHELF_MIN_WIDTH = 1.0;
 const SHELF_MAX_WIDTH = 3.0;
 const EDGE_MAX_WIDTH = 1.0;
 const INSTITUTIONAL_MIN_WIDTH = 2.0;
-const INSTITUTIONAL_MAX_WIDTH = 5.5;
-const MAX_SPLIT_WIDTH = 6.0;
+const INSTITUTIONAL_MAX_WIDTH = 6.5; // loosened for diagnostic
+
+// Initial band half width around each bucket
 const INIT_BAND_HALF_WIDTH = 1.0;
 
-// Spacing between institutional zones
-const MIN_INSTITUTIONAL_GAP = 4.0; // was 8.0 (allows 679–682.5 + 671–673 to coexist)
-
-// Bucket size for price aggregation
+// Bucket size
 const BUCKET_SIZE = 0.5;
 
-// Recency decay
-const RECENCY_DECAY_PER_WEEK = 0.98;
-
-// Wick thresholds (ATR-based)
+// Wick thresholds
 const K_WICK = 0.6;
 const WICK_SOFT_CAP = 3.0;
 
@@ -38,25 +31,32 @@ const WICK_SOFT_CAP = 3.0;
 const BODY_THRESHOLD_ATR = 0.5;
 const SHELF_MAX_WIDTH_POINTS = 3.0;
 
-// Displacement and retest
+// Displacement & retest
 const DISP_LOOKAHEAD_BARS = 30;
-const DISP_SOFT_CAP_ATR = 5.0;
+const DISP_SOFT_CAP_ATR = 6.0;
 const RETEST_BAND_WIDTH = 1.25;
 const RETEST_LOOKAHEAD_BARS = 40;
 
-// Scoring weights
+// Score weights (raw components)
 const W_WICK = 1.0;
 const W_CONS = 0.7;
 const W_DISP = 1.2;
 const W_RETEST = 0.8;
 
+// Merge gap
 const MERGE_GAP = 0.5;
 
-// Relevance filter
-const RELEVANCE_DISTANCE_LIMIT_POINTS = 40;
-const RELEVANCE_MAX_AGE_DAYS = 70;
+// Relevance filters — LOOSENED for diagnostic
+const RELEVANCE_DISTANCE_LIMIT_POINTS = 120;
+const RELEVANCE_MAX_AGE_DAYS = 200;
 
-// ---------- helpers ----------
+// Diagnostic output floor
+const MIN_STRENGTH_KEEP = 70;
+// Safety cap
+const MAX_OUTPUT_ZONES = 50;
+
+// ---------- Helpers ----------
+
 function isFiniteBar(b) {
   return (
     b &&
@@ -86,12 +86,12 @@ function computeATR(bars, length = 50) {
   return atr > 0 ? atr : 0;
 }
 
-function computeAgeWeeks(latestTime, barTime) {
+// Handle both seconds and ms timestamps
+function computeAgeDays(latestTime, barTime) {
   if (!latestTime || !barTime) return 0;
   const msMode = latestTime > 2e10 || barTime > 2e10;
   const diff = Math.max(0, latestTime - barTime);
-  const diffDays = msMode ? diff / 86400000 : diff / 86400;
-  return diffDays / 7;
+  return msMode ? diff / 86400000 : diff / 86400;
 }
 
 function roundPriceToBucket(price, size) {
@@ -99,7 +99,12 @@ function roundPriceToBucket(price, size) {
   return Math.round(price / size) * size;
 }
 
-// ---------- seeds ----------
+function clamp(x, a, b) {
+  return Math.max(a, Math.min(b, x));
+}
+
+// ---------- Seed detection per TF ----------
+
 function makeSeedsForTF(tf, bars, atr) {
   const seeds = [];
   if (!Array.isArray(bars) || bars.length < 10 || !atr || atr <= 0) return seeds;
@@ -113,8 +118,9 @@ function makeSeedsForTF(tf, bars, atr) {
     const bodyHigh = Math.max(b.open, b.close);
     const bodyLow = Math.min(b.open, b.close);
     const upperWick = b.high - bodyHigh;
-    const lowerWick = bodyLow - b.low; // positive number
+    const lowerWick = bodyLow - b.low; // positive
 
+    // upper wick seed
     if (upperWick > wickThreshold) {
       seeds.push({
         price: b.high,
@@ -127,7 +133,7 @@ function makeSeedsForTF(tf, bars, atr) {
       });
     }
 
-    // ✅ FIX: lower wick condition was wrong (was -lowerWick > threshold)
+    // ✅ FIX: lower wick seed (your old code had -lowerWick > threshold which breaks this)
     if (lowerWick > wickThreshold) {
       seeds.push({
         price: b.low,
@@ -141,7 +147,7 @@ function makeSeedsForTF(tf, bars, atr) {
     }
   }
 
-  // consolidation seeds
+  // Consolidation seeds
   let minWin, maxWin;
   if (tf === "30m") {
     minWin = 8;
@@ -163,6 +169,7 @@ function makeSeedsForTF(tf, bars, atr) {
       let bandLow = Infinity;
       let bodySum = 0;
       let count = 0;
+
       for (const s of slice) {
         if (!isFiniteBar(s)) continue;
         bandHigh = Math.max(bandHigh, s.high);
@@ -170,16 +177,12 @@ function makeSeedsForTF(tf, bars, atr) {
         bodySum += Math.abs(s.close - s.open);
         count++;
       }
-      if (count === 0) continue;
+      if (!count) continue;
 
       const bandWidth = bandHigh - bandLow;
       const avgBody = bodySum / count;
 
-      if (
-        bandWidth > 0 &&
-        bandWidth <= SHELF_MAX_WIDTH_POINTS &&
-        avgBody < BODY_THRESHOLD_ATR * atr
-      ) {
+      if (bandWidth > 0 && bandWidth <= SHELF_MAX_WIDTH_POINTS && avgBody < BODY_THRESHOLD_ATR * atr) {
         const mid = (bandHigh + bandLow) / 2;
         const lastBar = slice[slice.length - 1];
         seeds.push({
@@ -198,7 +201,8 @@ function makeSeedsForTF(tf, bars, atr) {
   return seeds;
 }
 
-// ---------- effects ----------
+// ---------- Seed effects ----------
+
 function evaluateSeedEffects(tfBars, seed, atr) {
   if (!Array.isArray(tfBars) || tfBars.length === 0 || !Number.isFinite(atr) || atr <= 0) {
     return { dispScore: 0, retestCount: 0, upMoves: 0, downMoves: 0 };
@@ -206,6 +210,7 @@ function evaluateSeedEffects(tfBars, seed, atr) {
 
   const anchorIndex = Math.min(Math.max(seed.barIndex ?? 0, 0), tfBars.length - 1);
   const anchorPrice = seed.price;
+
   const maxDispIndex = Math.min(tfBars.length, anchorIndex + 1 + DISP_LOOKAHEAD_BARS);
   const maxRetestIndex = Math.min(tfBars.length, anchorIndex + 1 + RETEST_LOOKAHEAD_BARS);
 
@@ -222,7 +227,7 @@ function evaluateSeedEffects(tfBars, seed, atr) {
     const dist = Math.abs(mid - anchorPrice);
 
     if (j < maxDispIndex) {
-      if (dist > maxDisp) maxDisp = dist;
+      maxDisp = Math.max(maxDisp, dist);
       if (mid > anchorPrice) upMoves++;
       else if (mid < anchorPrice) downMoves++;
     }
@@ -230,64 +235,88 @@ function evaluateSeedEffects(tfBars, seed, atr) {
     if (dist <= RETEST_BAND_WIDTH) retestCount++;
   }
 
-  let dispRaw = atr > 0 ? maxDisp / atr : 0;
-  if (!Number.isFinite(dispRaw)) dispRaw = 0;
-  const dispScore = Math.min(dispRaw, DISP_SOFT_CAP_ATR);
+  const dispRaw = atr > 0 ? maxDisp / atr : 0;
+  const dispScore = clamp(dispRaw, 0, DISP_SOFT_CAP_ATR);
 
   return { dispScore, retestCount, upMoves, downMoves };
 }
 
-// ---------- buckets ----------
+// ---------- Buckets ----------
+
 function buildBucketsFromSeeds(seeds, barsByTF, atrByTF, latestTime) {
   const bucketMap = new Map();
 
   for (const seed of seeds) {
     if (!Number.isFinite(seed.price)) continue;
+
     const tf = seed.tf;
     const tfBars = barsByTF[tf] || [];
     const atr = atrByTF[tf] || 0;
     if (!atr || atr <= 0) continue;
 
     const bucketPrice = roundPriceToBucket(seed.price, BUCKET_SIZE);
+
     if (!bucketMap.has(bucketPrice)) {
       bucketMap.set(bucketPrice, {
         price: bucketPrice,
+        tfsSeen: new Set(),
+
+        // component accumulation (for debug)
         wickScoreByTF: { "30m": 0, "1h": 0, "4h": 0 },
         consCountByTF: { "30m": 0, "1h": 0, "4h": 0 },
         dispScoreByTF: { "30m": 0, "1h": 0, "4h": 0 },
-        retestCount: 0,
-        lastTime: 0,
-        tfsSeen: new Set(),
-        upMoves: 0,
-        downMoves: 0,
+
+        wickAttempts: 0,
         upperWicks: 0,
         lowerWicks: 0,
+
+        retestCount: 0,
+        upMoves: 0,
+        downMoves: 0,
+
+        lastTime: 0,
         rawScore: 0,
+
+        // debug totals (computed later)
+        dbg: {
+          wickScore: 0,
+          consScore: 0,
+          dispScore: 0,
+          retestScore: 0,
+          ageDays: 0,
+        },
       });
     }
 
-    const bucket = bucketMap.get(bucketPrice);
-    bucket.tfsSeen.add(tf);
+    const b = bucketMap.get(bucketPrice);
+    b.tfsSeen.add(tf);
 
-    if (seed.time > bucket.lastTime) bucket.lastTime = seed.time;
+    if (seed.time > b.lastTime) b.lastTime = seed.time;
 
-    if (seed.isConsolidation) bucket.consCountByTF[tf] += 1;
-
-    if (seed.wickLen > 0) {
-      const normWick = Math.min(seed.wickLen / atr, WICK_SOFT_CAP);
-      bucket.wickScoreByTF[tf] += normWick;
-      if (seed.dir === "sell") bucket.upperWicks += 1;
-      if (seed.dir === "buy") bucket.lowerWicks += 1;
+    // consolidation count
+    if (seed.isConsolidation) {
+      b.consCountByTF[tf] += 1;
     }
 
-    const { dispScore, retestCount, upMoves, downMoves } = evaluateSeedEffects(tfBars, seed, atr);
-    bucket.dispScoreByTF[tf] += dispScore;
-    bucket.retestCount += retestCount;
-    bucket.upMoves += upMoves;
-    bucket.downMoves += downMoves;
+    // wick seed contribution
+    if (seed.wickLen > 0) {
+      const normWick = Math.min(seed.wickLen / atr, WICK_SOFT_CAP);
+      b.wickScoreByTF[tf] += normWick;
+      b.wickAttempts += 1;
+      if (seed.dir === "sell") b.upperWicks += 1;
+      if (seed.dir === "buy") b.lowerWicks += 1;
+    }
+
+    // displacement + retests
+    const eff = evaluateSeedEffects(tfBars, seed, atr);
+    b.dispScoreByTF[tf] += eff.dispScore;
+    b.retestCount += eff.retestCount;
+    b.upMoves += eff.upMoves;
+    b.downMoves += eff.downMoves;
   }
 
   const buckets = [];
+
   for (const b of bucketMap.values()) {
     const wickScore =
       TF_WEIGHTS["30m"] * b.wickScoreByTF["30m"] +
@@ -299,161 +328,231 @@ function buildBucketsFromSeeds(seeds, barsByTF, atrByTF, latestTime) {
       TF_WEIGHTS["1h"] * b.consCountByTF["1h"] +
       TF_WEIGHTS["4h"] * b.consCountByTF["4h"];
 
-    const dispScoreTotal =
+    const dispScore =
       TF_WEIGHTS["30m"] * b.dispScoreByTF["30m"] +
       TF_WEIGHTS["1h"] * b.dispScoreByTF["1h"] +
       TF_WEIGHTS["4h"] * b.dispScoreByTF["4h"];
 
-    const retestScore = W_RETEST * b.retestCount;
+    const retestScore = b.retestCount;
 
-    let rawScore =
+    let raw =
       W_WICK * wickScore +
       W_CONS * consScore +
-      W_DISP * dispScoreTotal +
+      W_DISP * dispScore +
       W_RETEST * retestScore;
 
-    const ageWeeks = computeAgeWeeks(latestTime, b.lastTime || latestTime);
-    rawScore *= Math.pow(RECENCY_DECAY_PER_WEEK, ageWeeks || 0);
+    const ageDays = computeAgeDays(latestTime, b.lastTime || latestTime);
+    // recency decay
+    raw *= Math.pow(RECENCY_DECAY_PER_WEEK, ageDays / 7);
 
-    b.rawScore = rawScore;
+    b.rawScore = raw;
+
+    b.dbg.wickScore = wickScore;
+    b.dbg.consScore = consScore;
+    b.dbg.dispScore = dispScore;
+    b.dbg.retestScore = retestScore;
+    b.dbg.ageDays = ageDays;
+
     buckets.push(b);
   }
 
   return buckets.filter((b) => b.rawScore > 0).sort((a, b) => a.price - b.price);
 }
 
-// ---------- zones ----------
+// ---------- Zones ----------
+
 function buildZonesFromBuckets(buckets) {
   if (!buckets.length) return [];
 
   const bands = buckets.map((b) => ({
+    low: b.price - INIT_BAND_HALF_WIDTH,
+    high: b.price + INIT_BAND_HALF_WIDTH,
     price: b.price,
-    bandLow: b.price - INIT_BAND_HALF_WIDTH,
-    bandHigh: b.price + INIT_BAND_HALF_WIDTH,
+
     rawScore: b.rawScore,
+    lastTime: b.lastTime,
     tfsSeen: b.tfsSeen,
+
+    // debug accumulators
+    wickScore: b.dbg.wickScore,
+    consScore: b.dbg.consScore,
+    dispScore: b.dbg.dispScore,
+    retestScore: b.dbg.retestScore,
+    retestCount: b.retestCount,
+    wickAttempts: b.wickAttempts,
     upperWicks: b.upperWicks,
     lowerWicks: b.lowerWicks,
-    upMoves: b.upMoves,
-    downMoves: b.downMoves,
-    lastTime: b.lastTime,
   }));
 
   bands.sort((a, b) => a.price - b.price);
 
   const zones = [];
-  let current = null;
+  let cur = null;
 
   for (const band of bands) {
-    if (!current) {
-      current = {
-        min: band.bandLow,
-        max: band.bandHigh,
+    if (!cur) {
+      cur = {
+        min: band.low,
+        max: band.high,
         rawScore: band.rawScore,
+        lastTime: band.lastTime,
         tfsSeen: new Set(band.tfsSeen),
+
+        wickScore: band.wickScore,
+        consScore: band.consScore,
+        dispScore: band.dispScore,
+        retestScore: band.retestScore,
+
+        retestCount: band.retestCount,
+        wickAttempts: band.wickAttempts,
         upperWicks: band.upperWicks,
         lowerWicks: band.lowerWicks,
-        upMoves: band.upMoves,
-        downMoves: band.downMoves,
-        lastTime: band.lastTime,
       };
       continue;
     }
 
-    if (band.bandLow <= current.max + MERGE_GAP) {
-      current.min = Math.min(current.min, band.bandLow);
-      current.max = Math.max(current.max, band.bandHigh);
-      current.rawScore += band.rawScore;
-      band.tfsSeen.forEach((tf) => current.tfsSeen.add(tf));
-      current.upperWicks += band.upperWicks;
-      current.lowerWicks += band.lowerWicks;
-      current.upMoves += band.upMoves;
-      current.downMoves += band.downMoves;
-      if (band.lastTime > current.lastTime) current.lastTime = band.lastTime;
+    if (band.low <= cur.max + MERGE_GAP) {
+      cur.min = Math.min(cur.min, band.low);
+      cur.max = Math.max(cur.max, band.high);
+      cur.rawScore += band.rawScore;
+      cur.wickScore += band.wickScore;
+      cur.consScore += band.consScore;
+      cur.dispScore += band.dispScore;
+      cur.retestScore += band.retestScore;
+
+      cur.retestCount += band.retestCount;
+      cur.wickAttempts += band.wickAttempts;
+      cur.upperWicks += band.upperWicks;
+      cur.lowerWicks += band.lowerWicks;
+
+      band.tfsSeen.forEach((tf) => cur.tfsSeen.add(tf));
+      if (band.lastTime > cur.lastTime) cur.lastTime = band.lastTime;
     } else {
-      zones.push(current);
-      current = {
-        min: band.bandLow,
-        max: band.bandHigh,
+      zones.push(cur);
+      cur = {
+        min: band.low,
+        max: band.high,
         rawScore: band.rawScore,
+        lastTime: band.lastTime,
         tfsSeen: new Set(band.tfsSeen),
+
+        wickScore: band.wickScore,
+        consScore: band.consScore,
+        dispScore: band.dispScore,
+        retestScore: band.retestScore,
+
+        retestCount: band.retestCount,
+        wickAttempts: band.wickAttempts,
         upperWicks: band.upperWicks,
         lowerWicks: band.lowerWicks,
-        upMoves: band.upMoves,
-        downMoves: band.downMoves,
-        lastTime: band.lastTime,
       };
     }
   }
-  if (current) zones.push(current);
+  if (cur) zones.push(cur);
 
   return zones;
 }
 
-// ---------- selection + normalize ----------
-function classifyAndSelectZones(zones, currentPrice, latestTime) {
-  const instCandidates = [];
+// ---------- Classification (diagnostic) ----------
+
+function classifyZones(zones, currentPrice, latestTime) {
+  const out = [];
 
   for (const z of zones) {
     const width = z.max - z.min;
-    if (width < INSTITUTIONAL_MIN_WIDTH || width > INSTITUTIONAL_MAX_WIDTH) continue;
+    if (width <= 0) continue;
 
     const center = (z.max + z.min) / 2;
+    const ageDays = computeAgeDays(latestTime, z.lastTime || latestTime);
 
-    // relevance
+    // Diagnostic relevance: if currentPrice not valid, skip distance filter
+    let distPts = null;
     if (Number.isFinite(currentPrice)) {
-      const dist = Math.abs(center - currentPrice);
-      if (dist > RELEVANCE_DISTANCE_LIMIT_POINTS) continue;
+      distPts = Math.abs(center - currentPrice);
+      if (distPts > RELEVANCE_DISTANCE_LIMIT_POINTS) continue;
+    }
+    if (ageDays > RELEVANCE_MAX_AGE_DAYS) continue;
+
+    // Determine type by width
+    let type = "institutional";
+    if (width <= EDGE_MAX_WIDTH) type = "edge";
+    else if (width >= SHELF_MIN_WIDTH && width <= SHELF_MAX_WIDTH) type = "shelf";
+    else if (width >= INSTITUTIONAL_MIN_WIDTH && width <= INSTITUTIONAL_MAX_WIDTH) type = "institutional";
+    else type = "ignore";
+
+    if (type === "ignore") continue;
+
+    // Convert shelves/edges to accumulation/distribution using wick bias / moves
+    let finalType = type;
+    if (type === "shelf" || type === "edge") {
+      // Use rejection direction proxy: lowerWicks => buy bias, upperWicks => sell bias
+      const wickTotal = z.upperWicks + z.lowerWicks;
+      let dirBias = 0;
+      if (wickTotal > 0) dirBias = (z.lowerWicks - z.upperWicks) / wickTotal;
+
+      finalType = dirBias >= 0 ? "accumulation" : "distribution";
+    } else {
+      finalType = "institutional";
     }
 
-    const ageWeeks = computeAgeWeeks(latestTime, z.lastTime || latestTime);
-    if (ageWeeks * 7 > RELEVANCE_MAX_AGE_DAYS) continue;
-
-    // Prefer 4H participation
-    const has4h = z.tfsSeen.has("4h");
-
-    // ✅ Prefer zones closer to current price
-    const distPts = Number.isFinite(currentPrice) ? Math.abs(center - currentPrice) : 9999;
-
-    const scoreForSort = z.rawScore * (has4h ? 1.0 : 0.85) - distPts * 0.05;
-
-    instCandidates.push({
-      zone: z,
+    out.push({
+      type: finalType,
       center,
-      scoreForSort,
-      distPts,
-      has4h,
+      min: z.min,
+      max: z.max,
+      rawScore: z.rawScore,
+      debug: {
+        widthPoints: Number(width.toFixed(2)),
+        ageDays: Number(ageDays.toFixed(2)),
+        distPts: distPts == null ? null : Number(distPts.toFixed(2)),
+        tfsSeen: Array.from(z.tfsSeen),
+        wickScore: Number(z.wickScore.toFixed(2)),
+        consScore: Number(z.consScore.toFixed(2)),
+        dispScore: Number(z.dispScore.toFixed(2)),
+        retestScore: Number(z.retestScore.toFixed(2)),
+        wickAttempts: z.wickAttempts,
+        retestCount: z.retestCount,
+        upperWicks: z.upperWicks,
+        lowerWicks: z.lowerWicks,
+      },
     });
   }
 
-  instCandidates.sort((a, b) => b.scoreForSort - a.scoreForSort);
+  return out;
+}
 
-  const picked = [];
-  for (const c of instCandidates) {
-    if (picked.length >= MAX_INSTITUTIONAL_ZONES) break;
-    const tooClose = picked.some((p) => Math.abs(p.center - c.center) < MIN_INSTITUTIONAL_GAP);
-    if (tooClose) continue;
-    picked.push(c);
-  }
+// ---------- Normalize + filter >=70 ----------
 
-  // Normalize to 40–100
+function normalizeAndFilter(candidates) {
+  if (!candidates.length) return [];
+
   let maxRaw = 0;
-  for (const p of picked) maxRaw = Math.max(maxRaw, p.zone.rawScore);
-  if (maxRaw <= 0) maxRaw = 1;
+  for (const c of candidates) maxRaw = Math.max(maxRaw, c.rawScore);
+  if (maxRaw <= 0) return [];
 
-  return picked.map((p) => {
-    const rel = p.zone.rawScore / maxRaw;
+  const withStrength = candidates.map((c) => {
+    const rel = c.rawScore / maxRaw;
     const strength = Math.round(40 + 60 * rel);
     return {
-      type: "institutional",
-      price: p.center,
-      priceRange: [Number(p.zone.max.toFixed(2)), Number(p.zone.min.toFixed(2))],
+      type: c.type,
+      price: Number(c.center.toFixed(2)),
+      priceRange: [Number(c.max.toFixed(2)), Number(c.min.toFixed(2))],
       strength,
+      debug: c.debug,
     };
   });
+
+  // Keep only >=70 for diagnostic calibration
+  const filtered = withStrength
+    .filter((c) => c.strength >= MIN_STRENGTH_KEEP)
+    .sort((a, b) => b.strength - a.strength)
+    .slice(0, MAX_OUTPUT_ZONES);
+
+  return filtered;
 }
 
 // ---------- Public entry ----------
+
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   try {
     const tfBars = {
@@ -490,8 +589,8 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
 
     const buckets = buildBucketsFromSeeds(seeds, tfBars, atrByTF, latestTime);
     const zones = buildZonesFromBuckets(buckets);
-
-    return classifyAndSelectZones(zones, currentPrice, latestTime);
+    const classified = classifyZones(zones, currentPrice, latestTime);
+    return normalizeAndFilter(classified);
   } catch (e) {
     console.error("[SMZ] computeSmartMoneyLevels error:", e);
     return [];
