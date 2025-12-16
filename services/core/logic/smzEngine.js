@@ -17,11 +17,13 @@ const EDGE_MAX_WIDTH = 1.0;
 const INSTITUTIONAL_MIN_WIDTH = 2.0;
 const INSTITUTIONAL_MAX_WIDTH = 6.5; // loosened for diagnostic
 
+
 // Initial band half width around each bucket
 const INIT_BAND_HALF_WIDTH = 1.0;
 
 // Bucket size
 const BUCKET_SIZE = 0.5;
+const RECENCY_DECAY_PER_WEEK = 0.98; // ~2% decay per week
 
 // Wick thresholds
 const K_WICK = 0.6;
