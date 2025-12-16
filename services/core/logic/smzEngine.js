@@ -2,13 +2,16 @@
  * Institutional Zone Engine — Score-Based (Diagnostic + Production)
  * ---------------------------------------------------------------
  * Goals:
- * 1) SCORING FIRST, classification second (fixes "we missed obvious zone" problem)
+ * 1) SCORING FIRST, classification second
  * 2) Diagnostic Mode shows everything above scoreFloor with full breakdown
  * 3) Production Mode applies strict gating AFTER scoring (4H agreement, distance, etc.)
  *
- * Inputs are intentionally generic: candles per timeframe, current price, and optional 4H zones.
+ * IMPORTANT:
+ * - This file exports TWO functions:
+ *   1) computeZones(...) -> { zones, meta }  (generic engine)
+ *   2) computeSmartMoneyLevels(bars30m,bars1h,bars4h) -> Array (job-compatible)
  *
- * Author: Frye Dashboard teammate (SMZ / Institutional Zones)
+ * The job runner expects computeSmartMoneyLevels and expects an ARRAY return.
  */
 
 // ----------------------------
@@ -16,36 +19,20 @@
 // ----------------------------
 
 const DEFAULT_CONFIG = {
-  // Mode: "diagnostic" or "production"
-  mode: "diagnostic",
+  mode: "diagnostic",                 // "diagnostic" or "production"
 
-  // Score floor for inclusion (diagnostic)
-  scoreFloor: 70,
+  diagnosticScoreFloor: 70,           // include zones >= 70 (diagnostic)
+  productionScoreFloor: 85,           // include zones >= 85 (production)
 
-  // If you want to see even more (forming shelves), set to 60
-  diagnosticScoreFloor: 70,
-
-  // Production score cutoff (strict)
-  productionScoreFloor: 85,
-
-  // Recency decay — keep your value
   RECENCY_DECAY_PER_WEEK: 0.98,
 
-  // Distance relevance filter (percent from current price)
-  // Diagnostic should usually be looser; production tighter.
-  maxDistancePctDiagnostic: 0.08, // 8%
-  maxDistancePctProduction: 0.03, // 3%
+  maxDistancePctDiagnostic: 0.08,     // 8% soft penalty; not a gate
+  maxDistancePctProduction: 0.03,     // 3% hard gate
 
-  // Candidate generation
-  lookbackBars: 420, // ~ 3 months on 1h-ish; tune per TF
-  pivotLeft: 3,
-  pivotRight: 3,
-
-  // Bucketization (building raw shelves)
-  bucketAtrMult: 0.60, // bucket height = ATR * mult
+  lookbackBars: 420,
+  bucketAtrMult: 0.60,
   minTouches: 3,
 
-  // Scoring weights (sum does NOT need to be 100; we normalize at end)
   weights: {
     touches: 0.30,
     volumeAnomaly: 0.25,
@@ -54,41 +41,26 @@ const DEFAULT_CONFIG = {
     retestStrength: 0.10,
   },
 
-  // Production-only strict institutional requirements (applied AFTER scoring)
   productionGates: {
     requireCompression: true,
     requireRejection: true,
     requireRetest: true,
-    require4hAgreement: true, // key gate that can hide zones in production
+    require4hAgreement: true,
   },
 
-  // Optional: require "compression" as a precondition to even *score* (DO NOT do this in diagnostic)
-  // Keep false to ensure discovery.
   scoreOnlyIfCompression: false,
 
-  // Merge behavior (zones that overlap get merged)
   merge: {
-    enabledDiagnostic: false, // diagnostic should NOT hide by merging
+    enabledDiagnostic: false,
     enabledProduction: true,
     overlapPct: 0.55,
   },
 };
 
 // ----------------------------
-// Public API
+// Public API (generic engine)
 // ----------------------------
 
-/**
- * computeZones
- * @param {Object} params
- * @param {Array<Object>} params.candles - Array of OHLCV candles for THIS timeframe.
- * @param {string} params.tf - timeframe label ("10m","1h","4h")
- * @param {number} params.currentPrice
- * @param {string|Date} [params.nowUtc] - ISO or Date
- * @param {Array<Object>} [params.zones4h] - Optional precomputed 4H zones for agreement gate
- * @param {Object} [params.config] - overrides
- * @returns {Object} result { zones, meta }
- */
 export function computeZones({
   candles,
   tf,
@@ -99,23 +71,23 @@ export function computeZones({
 }) {
   const cfg = deepMerge(DEFAULT_CONFIG, config);
 
-  // Defensive
   const safeCandles = Array.isArray(candles) ? candles.slice() : [];
-  if (safeCandles.length < 50) {
+  if (safeCandles.length < 50 || !Number.isFinite(currentPrice) || currentPrice <= 0) {
     return {
       zones: [],
       meta: {
         tf,
         mode: cfg.mode,
-        reason: "Not enough candles",
+        reason: "Not enough candles or invalid currentPrice",
         candleCount: safeCandles.length,
+        currentPrice,
       },
     };
   }
 
   const now = typeof nowUtc === "string" ? new Date(nowUtc) : nowUtc;
 
-  // 1) Build raw candidate zones (shelves) from price action buckets
+  // 1) Candidate buckets
   const atr = computeATR(safeCandles, 14);
   const bucketSize = Math.max(atr * cfg.bucketAtrMult, 0.01);
 
@@ -126,21 +98,13 @@ export function computeZones({
     lookbackBars: cfg.lookbackBars,
   });
 
-  // 2) Score FIRST (do NOT gate institutional here)
+  // 2) Score FIRST
   const scored = candidates
-    .map((z) => scoreZone(z, safeCandles, {
-      tf,
-      now,
-      currentPrice,
-      atr,
-      cfg,
-    }))
+    .map((z) => scoreZone(z, safeCandles, { tf, now, currentPrice, atr, cfg }))
     .filter(Boolean);
 
-  // 3) Apply recency + distance penalties (still scoring-phase, not gating)
-  const penalized = scored.map((z) =>
-    applyPenalties(z, { now, currentPrice, cfg })
-  );
+  // 3) Apply penalties (still scoring phase)
+  const penalized = scored.map((z) => applyPenalties(z, { now, currentPrice, cfg }));
 
   // 4) Sort by score descending
   penalized.sort((a, b) => b.score - a.score);
@@ -149,46 +113,35 @@ export function computeZones({
   const mode = (cfg.mode || "diagnostic").toLowerCase();
   const isDiagnostic = mode === "diagnostic";
 
-  const distanceLimitPct = isDiagnostic
-    ? cfg.maxDistancePctDiagnostic
-    : cfg.maxDistancePctProduction;
-
+  const distanceLimitPct = isDiagnostic ? cfg.maxDistancePctDiagnostic : cfg.maxDistancePctProduction;
   const scoreFloor = isDiagnostic ? cfg.diagnosticScoreFloor : cfg.productionScoreFloor;
 
-  // Include by score floor first (score-first philosophy)
   let included = penalized.filter((z) => z.score >= scoreFloor);
 
-  // Apply distance relevance as a GATE in production, but as an INFO flag in diagnostic
+  // Distance is a hard gate only in production
   if (!isDiagnostic) {
     included = included.filter((z) => z.meta.distancePct <= distanceLimitPct);
   } else {
     included = included.map((z) => ({
       ...z,
-      flags: {
-        ...(z.flags || {}),
-        distanceOutOfRange: z.meta.distancePct > distanceLimitPct,
-      },
+      flags: { ...(z.flags || {}), distanceOutOfRange: z.meta.distancePct > distanceLimitPct },
     }));
   }
 
-  // Production-only institutional gates AFTER scoring
+  // Production gates AFTER scoring
   if (!isDiagnostic) {
     included = included.filter((z) =>
-      passesProductionGates(z, safeCandles, {
-        cfg,
-        zones4h,
-        currentPrice,
-      })
+      passesProductionGates(z, safeCandles, { cfg, zones4h, currentPrice })
     );
   }
 
-  // 6) Optional merging (disabled in diagnostic by default)
+  // 6) Optional merging
   const mergeEnabled = isDiagnostic ? cfg.merge.enabledDiagnostic : cfg.merge.enabledProduction;
   const finalZones = mergeEnabled
     ? mergeOverlappingZones(included, { overlapPct: cfg.merge.overlapPct })
     : included;
 
-  // 7) Final labels (classification AFTER scoring)
+  // 7) Label AFTER scoring
   const labeled = finalZones.map((z) => ({
     ...z,
     grade: classifyZone(z.score),
@@ -214,6 +167,66 @@ export function computeZones({
 }
 
 // ----------------------------
+// Job-compatible export
+// ----------------------------
+// The job expects: computeSmartMoneyLevels(bars30m,bars1h,bars4h) -> ARRAY
+// We run computeZones on 4h (primary) and optionally 1h (support), then merge.
+
+export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
+  const b30 = normalizeBars(bars30m);
+  const b1h = normalizeBars(bars1h);
+  const b4h = normalizeBars(bars4h);
+
+  const currentPrice =
+    (b30.length ? b30[b30.length - 1].close : null) ??
+    (b1h.length ? b1h[b1h.length - 1].close : null) ??
+    (b4h.length ? b4h[b4h.length - 1].close : null) ??
+    0;
+
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) return [];
+
+  // First: compute 4H zones (diagnostic by default)
+  const res4h = computeZones({
+    candles: b4h,
+    tf: "4h",
+    currentPrice,
+    zones4h: [],
+    config: { mode: "diagnostic" }, // scoring-first diagnostic
+  });
+
+  // Optional: compute 1H zones too, then merge with 4H for more visibility
+  const res1h = computeZones({
+    candles: b1h,
+    tf: "1h",
+    currentPrice,
+    zones4h: res4h.zones || [],
+    config: { mode: "diagnostic" },
+  });
+
+  const merged = mergeZoneLists([...(res4h.zones || []), ...(res1h.zones || [])]);
+
+  // Convert to the API format expected by frontend overlay:
+  // { type:"institutional", price, priceRange:[hi,lo], strength, details:{...} }
+  // In diagnostic mode, we still return "institutional" for this endpoint,
+  // because smz-levels is the institutional overlay.
+  return merged.map((z) => ({
+    type: "institutional",
+    price: round2((z.price_low + z.price_high) / 2),
+    priceRange: [round2(z.price_high), round2(z.price_low)],
+    strength: Math.round(z.score), // keep true 0–100 score in diagnostic
+    details: {
+      scoreTotal: z.score,
+      breakdown: z.score_breakdown,
+      meta: z.meta,
+      flags: z.flags,
+      grade: z.grade,
+      tf: z.tf,
+      id: z.id,
+    },
+  }));
+}
+
+// ----------------------------
 // Candidate Building (Buckets)
 // ----------------------------
 
@@ -222,9 +235,8 @@ function buildBucketCandidates(candles, { tf, bucketSize, minTouches, lookbackBa
   const lows = slice.map((c) => c.low);
   const highs = slice.map((c) => c.high);
   const minPrice = Math.min(...lows);
-  const maxPrice = Math.max(...highs);
 
-  const buckets = new Map(); // key -> {low, high, touches, volumeSum, wickHits, bodyHits, lastTouchIndex, firstTouchIndex}
+  const buckets = new Map();
 
   const bucketKey = (price) => Math.floor((price - minPrice) / bucketSize);
 
@@ -243,20 +255,17 @@ function buildBucketCandidates(candles, { tf, bucketSize, minTouches, lookbackBa
       bodyHits: 0,
       firstTouchIndex: null,
       lastTouchIndex: null,
-      // for later scoring
       touchIndices: [],
     };
 
-    // Touch definition: candle range intersects bucket
     const intersects = c.high >= b.low && c.low <= b.high;
     if (intersects) {
       b.touches += 1;
-      b.volumeSum += (c.volume || 0);
+      b.volumeSum += c.volume || 0;
       b.firstTouchIndex = b.firstTouchIndex === null ? i : b.firstTouchIndex;
       b.lastTouchIndex = i;
       b.touchIndices.push(i);
 
-      // Wick vs body interaction (simple but useful)
       const bodyHigh = Math.max(c.open, c.close);
       const bodyLow = Math.min(c.open, c.close);
       const bodyIntersects = bodyHigh >= b.low && bodyLow <= b.high;
@@ -267,7 +276,6 @@ function buildBucketCandidates(candles, { tf, bucketSize, minTouches, lookbackBa
     buckets.set(k, b);
   }
 
-  // Convert to candidates with minTouches
   const candidates = [];
   for (const b of buckets.values()) {
     if (b.touches >= minTouches) {
@@ -291,8 +299,7 @@ function buildBucketCandidates(candles, { tf, bucketSize, minTouches, lookbackBa
 function scoreZone(zone, candles, { tf, now, currentPrice, atr, cfg }) {
   const r = zone.raw;
 
-  // Optional: DO NOT do this in diagnostic; keep it false.
-  if (cfg.scoreOnlyIfCompression && !detectCompressionNearZone(zone, candles, atr)) {
+  if (cfg.scoreOnlyIfCompression && !detectCompressionNearZone(zone, candles)) {
     return null;
   }
 
@@ -324,17 +331,14 @@ function scoreZone(zone, candles, { tf, now, currentPrice, atr, cfg }) {
     cfg.weights.holdDuration +
     cfg.weights.retestStrength;
 
-  // Normalize to 0–100
   const baseScore = clamp((weighted / weightSum) * 100, 0, 100);
 
-  // Metadata (distance, last test time, etc.)
   const mid = (zone.price_low + zone.price_high) / 2;
   const distancePct = Math.abs(mid - currentPrice) / Math.max(currentPrice, 0.0001);
 
-  // Recency proxy: lastTouchIndex mapped to candle time
   const lastIdx = r.lastTouchIndex ?? (candles.length - 1);
-  const lastCandle = candles[Math.max(0, candles.length - 1 - (candles.length - 1 - lastIdx))] || candles[candles.length - 1];
-  const lastTestUtc = lastCandle?.time || lastCandle?.t || null;
+  const lastCandle = candles[lastIdx] || candles[candles.length - 1];
+  const lastTestUtc = lastCandle?.time ?? lastCandle?.t ?? null;
 
   return {
     id: zone.id,
@@ -342,12 +346,7 @@ function scoreZone(zone, candles, { tf, now, currentPrice, atr, cfg }) {
     price_low: zone.price_low,
     price_high: zone.price_high,
     score: round2(baseScore),
-
-    // classify AFTER scoring
-    grade: null,
-
     score_breakdown: objectRound2(breakdown),
-
     meta: {
       touches: r.touches,
       wickHits: r.wickHits,
@@ -357,7 +356,6 @@ function scoreZone(zone, candles, { tf, now, currentPrice, atr, cfg }) {
       distancePct: round4(distancePct),
       last_test_utc: lastTestUtc,
     },
-
     flags: {},
   };
 }
@@ -365,16 +363,15 @@ function scoreZone(zone, candles, { tf, now, currentPrice, atr, cfg }) {
 function applyPenalties(zone, { now, currentPrice, cfg }) {
   let score = zone.score;
 
-  // Recency decay
   const weeksOld = estimateWeeksOld(zone.meta.last_test_utc, now);
   const recencyDecay = Math.pow(cfg.RECENCY_DECAY_PER_WEEK, weeksOld);
   score *= recencyDecay;
 
-  // Distance penalty is soft (never hard-gate in diagnostic)
-  // Penalize smoothly beyond half of the diagnostic distance limit.
+  // Soft distance penalty in diagnostic (never hard gate here)
   const softLimit = cfg.maxDistancePctDiagnostic * 0.5;
   const d = zone.meta.distancePct;
-  const distancePenalty = d <= softLimit ? 1 : clamp(1 - (d - softLimit) / (cfg.maxDistancePctDiagnostic - softLimit), 0.50, 1);
+  const distancePenalty =
+    d <= softLimit ? 1 : clamp(1 - (d - softLimit) / (cfg.maxDistancePctDiagnostic - softLimit), 0.50, 1);
   score *= distancePenalty;
 
   return {
@@ -393,53 +390,34 @@ function applyPenalties(zone, { now, currentPrice, cfg }) {
 // Production Gates (strict AFTER scoring)
 // ----------------------------
 
-function passesProductionGates(zone, candles, { cfg, zones4h, currentPrice }) {
+function passesProductionGates(zone, candles, { cfg, zones4h }) {
   const gates = cfg.productionGates || {};
 
-  if (gates.requireCompression) {
-    if (!detectCompressionNearZone(zone, candles, cfg)) return false;
-  }
-
-  if (gates.requireRejection) {
-    if (!detectRejection(zone, candles)) return false;
-  }
-
-  if (gates.requireRetest) {
-    if (!detectRetest(zone, candles)) return false;
-  }
-
-  if (gates.require4hAgreement) {
-    if (!has4hAgreement(zone, zones4h)) return false;
-  }
+  if (gates.requireCompression && !detectCompressionNearZone(zone, candles)) return false;
+  if (gates.requireRejection && !detectRejection(zone, candles)) return false;
+  if (gates.requireRetest && !detectRetest(zone, candles)) return false;
+  if (gates.require4hAgreement && !has4hAgreement(zone, zones4h)) return false;
 
   return true;
 }
 
 // ----------------------------
-// Simple detectors (intentionally conservative)
-// These are gates only for PRODUCTION.
-// Diagnostic DOES NOT hide zones based on these.
+// Conservative detectors (production only)
 // ----------------------------
 
-function detectCompressionNearZone(zone, candles, cfgOrAtr) {
-  // Simple compression: recent range is tight relative to historical
+function detectCompressionNearZone(_zone, candles) {
   const n = 30;
   const slice = candles.slice(-n);
   if (slice.length < n) return true;
-
   const maxH = Math.max(...slice.map((c) => c.high));
   const minL = Math.min(...slice.map((c) => c.low));
   const range = maxH - minL;
-
-  const price = (zone.price_low + zone.price_high) / 2;
+  const price = (slice[slice.length - 1]?.close ?? 0) || 1;
   const pct = range / Math.max(price, 0.0001);
-
-  // if tight < ~2.0% on intraday, consider compression
   return pct <= 0.02;
 }
 
 function detectRejection(zone, candles) {
-  // Rejection: wicks hit zone and closes away from it (basic)
   const n = 80;
   const slice = candles.slice(-n);
   let rej = 0;
@@ -450,53 +428,47 @@ function detectRejection(zone, candles) {
 
     const bodyHigh = Math.max(c.open, c.close);
     const bodyLow = Math.min(c.open, c.close);
-
-    // "rejection" if body is mostly outside zone but wick touches
     const bodyInZone = bodyHigh >= zone.price_low && bodyLow <= zone.price_high;
+
     if (!bodyInZone) rej += 1;
   }
-
   return rej >= 3;
 }
 
 function detectRetest(zone, candles) {
-  // Retest: zone touched on separate swings (gapped touch indices)
   const n = 240;
   const slice = candles.slice(-n);
+  const touchIdx = [];
 
-  let touchIndices = [];
   for (let i = 0; i < slice.length; i++) {
     const c = slice[i];
     const hit = c.high >= zone.price_low && c.low <= zone.price_high;
-    if (hit) touchIndices.push(i);
+    if (hit) touchIdx.push(i);
   }
+  if (touchIdx.length < 3) return false;
 
-  if (touchIndices.length < 3) return false;
-
-  // Count clusters separated by >= 10 bars as distinct retests
   let clusters = 1;
-  for (let i = 1; i < touchIndices.length; i++) {
-    if (touchIndices[i] - touchIndices[i - 1] >= 10) clusters += 1;
+  for (let i = 1; i < touchIdx.length; i++) {
+    if (touchIdx[i] - touchIdx[i - 1] >= 10) clusters += 1;
   }
-
   return clusters >= 2;
 }
 
 function has4hAgreement(zone, zones4h) {
   if (!Array.isArray(zones4h) || zones4h.length === 0) return false;
 
-  // Agreement = overlap with any strong 4H zone (>= 80)
   for (const z4 of zones4h) {
-    const score = typeof z4.score === "number" ? z4.score : 0;
+    const score = typeof z4.score === "number" ? z4.score : (z4?.details?.scoreTotal ?? 0);
     if (score < 80) continue;
 
-    const overlap = overlapPct(
-      { low: zone.price_low, high: zone.price_high },
-      { low: z4.price_low ?? z4.min ?? z4.low, high: z4.price_high ?? z4.max ?? z4.high }
-    );
-    if (overlap >= 0.35) return true;
+    const a = { low: zone.price_low, high: zone.price_high };
+    const b = {
+      low: z4.price_low ?? z4.min ?? z4.low ?? z4.priceRange?.[1],
+      high: z4.price_high ?? z4.max ?? z4.high ?? z4.priceRange?.[0],
+    };
+    const ov = overlapPct(a, b);
+    if (ov >= 0.35) return true;
   }
-
   return false;
 }
 
@@ -509,43 +481,37 @@ function mergeOverlappingZones(zones, { overlapPct: threshold }) {
   const out = [];
 
   for (const z of sorted) {
-    if (out.length === 0) {
+    if (!out.length) {
       out.push(z);
       continue;
     }
-
     const last = out[out.length - 1];
+
     const ov = overlapPct(
       { low: last.price_low, high: last.price_high },
       { low: z.price_low, high: z.price_high }
     );
 
     if (ov >= threshold) {
-      // Merge: widen range, keep higher score, combine diagnostics
       const mergedLow = Math.min(last.price_low, z.price_low);
       const mergedHigh = Math.max(last.price_high, z.price_high);
       const winner = last.score >= z.score ? last : z;
-
       out[out.length - 1] = {
         ...winner,
         price_low: round2(mergedLow),
         price_high: round2(mergedHigh),
-        flags: {
-          ...(winner.flags || {}),
-          merged: true,
-        },
+        flags: { ...(winner.flags || {}), merged: true },
       };
     } else {
       out.push(z);
     }
   }
 
-  // Sort by score after merge
   return out.sort((a, b) => b.score - a.score);
 }
 
 // ----------------------------
-// Classification (label AFTER scoring)
+// Classification (after scoring)
 // ----------------------------
 
 function classifyZone(score) {
@@ -561,14 +527,12 @@ function classifyZone(score) {
 // ----------------------------
 
 function scoreTouches(touches) {
-  // 3 touches is baseline, 10+ is strong
   if (touches <= 2) return 0.0;
   if (touches >= 12) return 1.0;
-  return (touches - 2) / (12 - 2);
+  return (touches - 2) / 10;
 }
 
 function scoreVolumeAnomaly(rawBucket, candles) {
-  // Compare bucket volume to avg candle volume in same lookback
   const vols = candles.map((c) => c.volume || 0).filter((v) => v > 0);
   if (vols.length < 20) return 0.5;
 
@@ -576,46 +540,35 @@ function scoreVolumeAnomaly(rawBucket, candles) {
   const perTouch = rawBucket.touches > 0 ? rawBucket.volumeSum / rawBucket.touches : 0;
   const mult = avg > 0 ? perTouch / avg : 1;
 
-  // Map: 1.0x -> 0.3, 1.5x -> 0.6, 2.5x+ -> 1.0
   if (mult <= 1.0) return 0.3;
   if (mult >= 2.5) return 1.0;
-  return 0.3 + (mult - 1.0) * (0.7 / (2.5 - 1.0));
+  return 0.3 + (mult - 1.0) * (0.7 / 1.5);
 }
 
 function scoreWickRejection(wickHits, bodyHits) {
-  // Prefer wick dominance (institutional defense)
   const total = wickHits + bodyHits;
   if (total <= 0) return 0.3;
-
-  const wickRatio = wickHits / total; // 0..1
-  // 0.3 -> 0.2, 0.6 -> 0.7, 0.8 -> 1.0
+  const wickRatio = wickHits / total;
   return clamp((wickRatio - 0.2) / 0.6, 0.0, 1.0);
 }
 
 function scoreHoldDuration(firstIdx, lastIdx) {
   if (firstIdx == null || lastIdx == null) return 0.3;
   const bars = Math.max(0, lastIdx - firstIdx);
-
-  // 0..200 bars mapping
   if (bars <= 10) return 0.2;
   if (bars >= 200) return 1.0;
-  return 0.2 + (bars - 10) * (0.8 / (200 - 10));
+  return 0.2 + (bars - 10) * (0.8 / 190);
 }
 
 function scoreRetestStrength(touchIndices) {
   if (!Array.isArray(touchIndices) || touchIndices.length < 3) return 0.2;
-
-  // Measure how "separated" touches are; more spaced touches imply multiple sessions/swings
   let gaps = 0;
   for (let i = 1; i < touchIndices.length; i++) {
-    const g = touchIndices[i] - touchIndices[i - 1];
-    if (g >= 8) gaps += 1;
+    if (touchIndices[i] - touchIndices[i - 1] >= 8) gaps += 1;
   }
-
-  // 0 gaps -> 0.3, 2+ gaps -> 1.0
   if (gaps <= 0) return 0.3;
   if (gaps >= 2) return 1.0;
-  return 0.3 + gaps * 0.35;
+  return 0.65;
 }
 
 // ----------------------------
@@ -625,7 +578,7 @@ function scoreRetestStrength(touchIndices) {
 function computeATR(candles, period = 14) {
   if (!Array.isArray(candles) || candles.length < period + 2) return 1;
 
-  let trs = [];
+  const trs = [];
   for (let i = 1; i < candles.length; i++) {
     const c = candles[i];
     const p = candles[i - 1];
@@ -660,20 +613,16 @@ function overlapPct(a, b) {
 
 function estimateWeeksOld(lastTestUtc, now) {
   if (!lastTestUtc) return 0;
-
   const t = new Date(lastTestUtc);
   if (isNaN(t.getTime())) return 0;
-
   const ms = now.getTime() - t.getTime();
   if (ms <= 0) return 0;
-
   return ms / (1000 * 60 * 60 * 24 * 7);
 }
 
 function estimateAvgVolumeMultiple(rawBucket, candles) {
   const vols = candles.map((c) => c.volume || 0).filter((v) => v > 0);
   if (vols.length < 20) return 1;
-
   const avg = vols.reduce((a, b) => a + b, 0) / vols.length;
   const perTouch = rawBucket.touches > 0 ? rawBucket.volumeSum / rawBucket.touches : 0;
   const mult = avg > 0 ? perTouch / avg : 1;
@@ -693,33 +642,66 @@ function deepMerge(base, override) {
   return out;
 }
 
+function normalizeBars(arr) {
+  const a = Array.isArray(arr) ? arr : [];
+  return a
+    .map((b) => ({
+      time: b.time > 1e12 ? Math.floor(b.time / 1000) : b.time,
+      open: Number(b.open ?? b.o ?? 0),
+      high: Number(b.high ?? b.h ?? 0),
+      low: Number(b.low ?? b.l ?? 0),
+      close: Number(b.close ?? b.c ?? 0),
+      volume: Number(b.volume ?? b.v ?? 0),
+    }))
+    .filter(isFiniteBar)
+    .sort((x, y) => x.time - y.time);
+}
+
 function clamp(x, a, b) {
   return Math.max(a, Math.min(b, x));
 }
-
 function round2(x) {
   return Math.round(x * 100) / 100;
 }
-
 function round4(x) {
   return Math.round(x * 10000) / 10000;
 }
-
 function objectRound2(obj) {
   const out = {};
   for (const k of Object.keys(obj)) out[k] = round2(obj[k]);
   return out;
 }
 
+// Merge zones from multiple TFs by overlap, keeping highest score
+function mergeZoneLists(zones) {
+  const list = (zones || []).slice().sort((a, b) => a.price_low - b.price_low);
+  const out = [];
 
-export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
-  const result = computeZones({
-    candles: bars1h,              // or whichever TF you’re diagnosing
-    tf: "1h",
-    currentPrice: bars30m?.[bars30m.length - 1]?.close ?? bars1h?.[bars1h.length - 1]?.close ?? 0,
-    zones4h: [],                  // optional for now
-  });
+  for (const z of list) {
+    if (!out.length) {
+      out.push(z);
+      continue;
+    }
+    const last = out[out.length - 1];
+    const ov = overlapPct(
+      { low: last.price_low, high: last.price_high },
+      { low: z.price_low, high: z.price_high }
+    );
+    if (ov >= 0.35) {
+      const mergedLow = Math.min(last.price_low, z.price_low);
+      const mergedHigh = Math.max(last.price_high, z.price_high);
+      const winner = last.score >= z.score ? last : z;
+      out[out.length - 1] = {
+        ...winner,
+        price_low: round2(mergedLow),
+        price_high: round2(mergedHigh),
+        score: Math.max(last.score, z.score),
+        flags: { ...(winner.flags || {}), mergedTf: true },
+      };
+    } else {
+      out.push(z);
+    }
+  }
 
-  return Array.isArray(result?.zones) ? result.zones : [];
+  return out.sort((a, b) => b.score - a.score).slice(0, 25);
 }
-
