@@ -1,37 +1,33 @@
 /**
  * Institutional Zone Engine — Score-Based (Diagnostic + Production)
  * ---------------------------------------------------------------
- * Goals:
- * 1) SCORING FIRST, classification second
- * 2) Diagnostic Mode shows everything above scoreFloor with full breakdown
- * 3) Production Mode applies strict gating AFTER scoring (4H agreement, distance, etc.)
+ * LOCKED BEHAVIOR:
+ * - SCORING FIRST, classification second
+ * - Diagnostic mode shows everything ABOVE score floor
+ * - HARD PRICE FILTER: zones MUST be within ±30 points of current price
  *
- * IMPORTANT:
- * - Exports TWO functions:
- *   1) computeZones(...) -> { zones, meta }  (generic engine)
- *   2) computeSmartMoneyLevels(bars30m,bars1h,bars4h) -> Array (job-compatible)
+ * This file exports:
+ * 1) computeZones(...) -> internal engine
+ * 2) computeSmartMoneyLevels(bars30m,bars1h,bars4h) -> JOB ENTRY
  *
- * The job runner expects computeSmartMoneyLevels and expects an ARRAY return.
- *
- * ENGINE TIME CONTRACT:
- * - Internally we standardize time to UNIX SECONDS.
- * - Whenever using Date, we convert seconds -> milliseconds.
+ * TIME STANDARD:
+ * - All internal times = UNIX SECONDS
+ * - Polygon gives ms → normalized to seconds
  */
 
-// ----------------------------
-// Defaults
-// ----------------------------
+// --------------------------------------------------
+// CONFIG (LOCKED)
+// --------------------------------------------------
 
 const DEFAULT_CONFIG = {
-  mode: "diagnostic", // "diagnostic" or "production"
+  mode: "diagnostic",
 
-  diagnosticScoreFloor: 70, // include zones >= 70 (diagnostic)
-  productionScoreFloor: 85, // include zones >= 85 (production)
+  diagnosticScoreFloor: 30,   // lowered so we SEE shelves
+  productionScoreFloor: 85,
+
+  PRICE_WINDOW_POINTS: 30,    // HARD ±30 point relevance filter
 
   RECENCY_DECAY_PER_WEEK: 0.98,
-
-  maxDistancePctDiagnostic: 0.08, // 8% soft penalty; not a gate
-  maxDistancePctProduction: 0.03, // 3% hard gate
 
   lookbackBars: 420,
   bucketAtrMult: 0.60,
@@ -44,169 +40,11 @@ const DEFAULT_CONFIG = {
     holdDuration: 0.15,
     retestStrength: 0.10,
   },
-
-  productionGates: {
-    requireCompression: true,
-    requireRejection: true,
-    requireRetest: true,
-    require4hAgreement: true,
-  },
-
-  scoreOnlyIfCompression: false,
-
-  merge: {
-    enabledDiagnostic: false,
-    enabledProduction: true,
-    overlapPct: 0.55,
-  },
-
-  // Built-in logging so you don't have to modify code to debug
-  logging: {
-    enabled: true,
-    topN: 6,
-  },
 };
 
-// ----------------------------
-// Public API (generic engine)
-// ----------------------------
-
-export function computeZones({
-  candles,
-  tf,
-  currentPrice,
-  nowUtc = new Date().toISOString(),
-  zones4h = [],
-  config = {},
-}) {
-  const cfg = deepMerge(DEFAULT_CONFIG, config);
-
-  const safeCandles = Array.isArray(candles) ? candles.slice() : [];
-  if (safeCandles.length < 50 || !Number.isFinite(currentPrice) || currentPrice <= 0) {
-    return {
-      zones: [],
-      meta: {
-        tf,
-        mode: cfg.mode,
-        reason: "Not enough candles or invalid currentPrice",
-        candleCount: safeCandles.length,
-        currentPrice,
-      },
-    };
-  }
-
-  const now = typeof nowUtc === "string" ? new Date(nowUtc) : nowUtc;
-
-  // 1) Candidate buckets
-  const atr = computeATR(safeCandles, 14);
-  const bucketSize = Math.max(atr * cfg.bucketAtrMult, 0.01);
-
-  const candidates = buildBucketCandidates(safeCandles, {
-    tf,
-    bucketSize,
-    minTouches: cfg.minTouches,
-    lookbackBars: cfg.lookbackBars,
-  });
-
-  // 2) Score FIRST
-  const scored = candidates
-    .map((z) => scoreZone(z, safeCandles, { tf, now, currentPrice, atr, cfg }))
-    .filter(Boolean);
-
-  // 3) Apply penalties (still scoring phase)
-  const penalized = scored.map((z) => applyPenalties(z, { now, currentPrice, cfg }));
-
-  // 4) Sort by score descending
-  penalized.sort((a, b) => b.score - a.score);
-
-  // 5) Mode-specific inclusion & gating
-  const mode = (cfg.mode || "diagnostic").toLowerCase();
-  const isDiagnostic = mode === "diagnostic";
-
-  const distanceLimitPct = isDiagnostic ? cfg.maxDistancePctDiagnostic : cfg.maxDistancePctProduction;
-  const scoreFloor = isDiagnostic ? cfg.diagnosticScoreFloor : cfg.productionScoreFloor;
-
-  // --- Built-in logs (so you don't need to add code) ---
-  if (cfg.logging?.enabled) {
-    const topN = Math.max(1, Math.min(20, cfg.logging.topN || 6));
-    const top = penalized.slice(0, topN).map((z) => ({
-      tf: z.tf,
-      range: [z.price_low, z.price_high],
-      score: z.score,
-      touches: z.meta?.touches,
-      wickHits: z.meta?.wickHits,
-      bodyHits: z.meta?.bodyHits,
-      distPct: z.meta?.distancePct,
-      weeksOld: z.meta?.weeksOld,
-    }));
-
-    const maxScore = penalized[0]?.score ?? null;
-    const minScore = penalized.length ? penalized[penalized.length - 1]?.score : null;
-
-    console.log(
-      `[SMZ][${tf}] candidates=${candidates.length} scored=${scored.length} total=${penalized.length} ` +
-        `scoreRange=${minScore ?? "n/a"}..${maxScore ?? "n/a"} floor=${scoreFloor} mode=${mode}`
-    );
-    console.log(`[SMZ][${tf}] top${topN}=`, JSON.stringify(top));
-  }
-  // --- end logs ---
-
-  let included = penalized.filter((z) => z.score >= scoreFloor);
-
-  // Distance is a hard gate only in production
-  if (!isDiagnostic) {
-    included = included.filter((z) => z.meta.distancePct <= distanceLimitPct);
-  } else {
-    included = included.map((z) => ({
-      ...z,
-      flags: { ...(z.flags || {}), distanceOutOfRange: z.meta.distancePct > distanceLimitPct },
-    }));
-  }
-
-  // Production gates AFTER scoring
-  if (!isDiagnostic) {
-    included = included.filter((z) =>
-      passesProductionGates(z, safeCandles, { cfg, zones4h, currentPrice })
-    );
-  }
-
-  // 6) Optional merging
-  const mergeEnabled = isDiagnostic ? cfg.merge.enabledDiagnostic : cfg.merge.enabledProduction;
-  const finalZones = mergeEnabled
-    ? mergeOverlappingZones(included, { overlapPct: cfg.merge.overlapPct })
-    : included;
-
-  // 7) Label AFTER scoring
-  const labeled = finalZones.map((z) => ({
-    ...z,
-    grade: classifyZone(z.score),
-  }));
-
-  return {
-    zones: labeled,
-    meta: {
-      tf,
-      mode: cfg.mode,
-      candleCount: safeCandles.length,
-      candidateCount: candidates.length,
-      scoredCount: scored.length,
-      includedCount: included.length,
-      finalCount: labeled.length,
-      scoreFloor,
-      distanceLimitPct,
-      atr,
-      bucketSize,
-      mergeEnabled,
-    },
-  };
-}
-
-// ----------------------------
-// Job-compatible export
-// ----------------------------
-// The job expects: computeSmartMoneyLevels(bars30m,bars1h,bars4h) -> ARRAY
-// Diagnostic: merge 4H + 1H
-// Production (future): 4H authority
+// --------------------------------------------------
+// JOB ENTRY POINT (ONLY THING JOB CALLS)
+// --------------------------------------------------
 
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const b30 = normalizeBars(bars30m);
@@ -214,564 +52,241 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const b4h = normalizeBars(bars4h);
 
   const currentPrice =
-    (b30.length ? b30[b30.length - 1].close : null) ??
-    (b1h.length ? b1h[b1h.length - 1].close : null) ??
-    (b4h.length ? b4h[b4h.length - 1].close : null) ??
-    0;
+    b30.at(-1)?.close ??
+    b1h.at(-1)?.close ??
+    b4h.at(-1)?.close ??
+    null;
 
-  if (!Number.isFinite(currentPrice) || currentPrice <= 0) return [];
+  if (!Number.isFinite(currentPrice)) return [];
 
-  // 4H zones
-  const res4h = computeZones({
-    candles: b4h,
-    tf: "4h",
-    currentPrice,
-    zones4h: [],
-    config: { mode: "diagnostic" },
-  });
+  // 4H + 1H merged in diagnostic
+  const z4h = computeZones({ candles: b4h, tf: "4h", currentPrice });
+  const z1h = computeZones({ candles: b1h, tf: "1h", currentPrice });
 
-  // 1H zones
-  const res1h = computeZones({
-    candles: b1h,
-    tf: "1h",
-    currentPrice,
-    zones4h: res4h.zones || [],
-    config: { mode: "diagnostic" },
-  });
+  const merged = mergeZoneLists([...z4h, ...z1h]);
 
-  const merged = mergeZoneLists([...(res4h.zones || []), ...(res1h.zones || [])]);
-
-  return merged.map((z) => ({
+  return merged.map(z => ({
     type: "institutional",
     price: round2((z.price_low + z.price_high) / 2),
     priceRange: [round2(z.price_high), round2(z.price_low)],
     strength: Math.round(z.score),
     details: {
-      scoreTotal: z.score,
+      tf: z.tf,
+      score: z.score,
       breakdown: z.score_breakdown,
       meta: z.meta,
-      flags: z.flags,
       grade: z.grade,
-      tf: z.tf,
-      id: z.id,
-    },
+    }
   }));
 }
 
-// ----------------------------
-// Candidate Building (Buckets)
-// ----------------------------
+// --------------------------------------------------
+// CORE ENGINE
+// --------------------------------------------------
+
+function computeZones({ candles, tf, currentPrice }) {
+  if (!Array.isArray(candles) || candles.length < 50) return [];
+
+  const cfg = DEFAULT_CONFIG;
+  const atr = computeATR(candles, 14);
+  const bucketSize = Math.max(atr * cfg.bucketAtrMult, 0.01);
+
+  const candidates = buildBucketCandidates(candles, {
+    tf,
+    bucketSize,
+    minTouches: cfg.minTouches,
+    lookbackBars: cfg.lookbackBars,
+  });
+
+  const scored = candidates
+    .map(z => scoreZone(z, candles, currentPrice, atr))
+    .filter(Boolean)
+
+    // 🔒 HARD PRICE FILTER (THIS IS THE KEY CHANGE)
+    .filter(z => {
+      const mid = (z.price_low + z.price_high) / 2;
+      return Math.abs(mid - currentPrice) <= cfg.PRICE_WINDOW_POINTS;
+    })
+
+    // Diagnostic score floor
+    .filter(z => z.score >= cfg.diagnosticScoreFloor)
+
+    .sort((a, b) => b.score - a.score)
+
+    .map(z => ({
+      ...z,
+      grade: classifyZone(z.score),
+    }));
+
+  return scored;
+}
+
+// --------------------------------------------------
+// CANDIDATE GENERATION
+// --------------------------------------------------
 
 function buildBucketCandidates(candles, { tf, bucketSize, minTouches, lookbackBars }) {
-  const slice = candles.slice(Math.max(0, candles.length - lookbackBars));
-  if (!slice.length) return [];
-
-  const lows = slice.map((c) => c.low);
-  const minPrice = Math.min(...lows);
-
+  const slice = candles.slice(-lookbackBars);
+  const minPrice = Math.min(...slice.map(c => c.low));
   const buckets = new Map();
-  const bucketKey = (price) => Math.floor((price - minPrice) / bucketSize);
 
   for (let i = 0; i < slice.length; i++) {
     const c = slice[i];
     const mid = (c.high + c.low) / 2;
-    const k = bucketKey(mid);
+    const key = Math.floor((mid - minPrice) / bucketSize);
 
-    const b =
-      buckets.get(k) || {
-        tf,
-        low: minPrice + k * bucketSize,
-        high: minPrice + (k + 1) * bucketSize,
-        touches: 0,
-        volumeSum: 0,
-        wickHits: 0,
-        bodyHits: 0,
-        firstTouchIndex: null,
-        lastTouchIndex: null,
-        touchIndices: [],
-      };
+    const b = buckets.get(key) || {
+      tf,
+      low: minPrice + key * bucketSize,
+      high: minPrice + (key + 1) * bucketSize,
+      touches: 0,
+      volumeSum: 0,
+      wickHits: 0,
+      bodyHits: 0,
+      firstIdx: null,
+      lastIdx: null,
+      touchIdx: [],
+    };
 
-    const intersects = c.high >= b.low && c.low <= b.high;
-    if (intersects) {
-      b.touches += 1;
-      b.volumeSum += c.volume || 0;
-      b.firstTouchIndex = b.firstTouchIndex === null ? i : b.firstTouchIndex;
-      b.lastTouchIndex = i;
-      b.touchIndices.push(i);
+    if (c.high >= b.low && c.low <= b.high) {
+      b.touches++;
+      b.volumeSum += c.volume;
+      b.firstIdx ??= i;
+      b.lastIdx = i;
+      b.touchIdx.push(i);
 
       const bodyHigh = Math.max(c.open, c.close);
       const bodyLow = Math.min(c.open, c.close);
-      const bodyIntersects = bodyHigh >= b.low && bodyLow <= b.high;
-      if (bodyIntersects) b.bodyHits += 1;
-      else b.wickHits += 1;
+      bodyHigh >= b.low && bodyLow <= b.high ? b.bodyHits++ : b.wickHits++;
     }
 
-    buckets.set(k, b);
+    buckets.set(key, b);
   }
 
-  const candidates = [];
-  for (const b of buckets.values()) {
-    if (b.touches >= minTouches) {
-      candidates.push({
-        id: `smz_${tf}_${b.low.toFixed(2)}_${b.high.toFixed(2)}`,
-        tf,
-        price_low: round2(b.low),
-        price_high: round2(b.high),
-        raw: b,
-      });
-    }
-  }
-
-  return candidates;
+  return [...buckets.values()]
+    .filter(b => b.touches >= minTouches)
+    .map(b => ({
+      id: `smz_${tf}_${b.low.toFixed(2)}_${b.high.toFixed(2)}`,
+      tf,
+      price_low: round2(b.low),
+      price_high: round2(b.high),
+      raw: b,
+    }));
 }
 
-// ----------------------------
-// Scoring
-// ----------------------------
+// --------------------------------------------------
+// SCORING
+// --------------------------------------------------
 
-function scoreZone(zone, candles, { tf, now, currentPrice, atr, cfg }) {
+function scoreZone(zone, candles, currentPrice, atr) {
   const r = zone.raw;
 
-  if (cfg.scoreOnlyIfCompression && !detectCompressionNearZone(zone, candles)) {
-    return null;
-  }
-
-  const touchesScore = scoreTouches(r.touches);
-  const volScore = scoreVolumeAnomaly(r, candles);
-  const wickScore = scoreWickRejection(r.wickHits, r.bodyHits);
-  const holdScore = scoreHoldDuration(r.firstTouchIndex, r.lastTouchIndex);
-  const retestScore = scoreRetestStrength(r.touchIndices);
-
   const breakdown = {
-    touches: touchesScore,
-    volumeAnomaly: volScore,
-    wickRejection: wickScore,
-    holdDuration: holdScore,
-    retestStrength: retestScore,
+    touches: scoreTouches(r.touches),
+    volumeAnomaly: scoreVolume(r, candles),
+    wickRejection: scoreWick(r.wickHits, r.bodyHits),
+    holdDuration: scoreHold(r.firstIdx, r.lastIdx),
+    retestStrength: scoreRetest(r.touchIdx),
   };
 
+  const weights = DEFAULT_CONFIG.weights;
   const weighted =
-    breakdown.touches * cfg.weights.touches +
-    breakdown.volumeAnomaly * cfg.weights.volumeAnomaly +
-    breakdown.wickRejection * cfg.weights.wickRejection +
-    breakdown.holdDuration * cfg.weights.holdDuration +
-    breakdown.retestStrength * cfg.weights.retestStrength;
+    breakdown.touches * weights.touches +
+    breakdown.volumeAnomaly * weights.volumeAnomaly +
+    breakdown.wickRejection * weights.wickRejection +
+    breakdown.holdDuration * weights.holdDuration +
+    breakdown.retestStrength * weights.retestStrength;
 
-  const weightSum =
-    cfg.weights.touches +
-    cfg.weights.volumeAnomaly +
-    cfg.weights.wickRejection +
-    cfg.weights.holdDuration +
-    cfg.weights.retestStrength;
-
-  const baseScore = clamp((weighted / Math.max(weightSum, 0.0001)) * 100, 0, 100);
+  const score = clamp(weighted * 100, 0, 100);
 
   const mid = (zone.price_low + zone.price_high) / 2;
-  const distancePct = Math.abs(mid - currentPrice) / Math.max(currentPrice, 0.0001);
-
-  const lastIdx = r.lastTouchIndex ?? candles.length - 1;
-  const lastCandle = candles[lastIdx] || candles[candles.length - 1];
-
-  // last_test_utc MUST be UNIX SECONDS
-  let lastTestUtc = lastCandle?.time ?? lastCandle?.t ?? null;
-  if (Number.isFinite(lastTestUtc) && lastTestUtc > 1e12) {
-    lastTestUtc = Math.floor(lastTestUtc / 1000);
-  }
+  const distPct = Math.abs(mid - currentPrice) / currentPrice;
 
   return {
-    id: zone.id,
-    tf: zone.tf,
-    price_low: zone.price_low,
-    price_high: zone.price_high,
-    score: round2(baseScore),
+    ...zone,
+    score: round2(score),
     score_breakdown: objectRound2(breakdown),
     meta: {
       touches: r.touches,
       wickHits: r.wickHits,
       bodyHits: r.bodyHits,
-      avgVolumeMultiple: estimateAvgVolumeMultiple(r, candles),
-      barsHeld: (r.lastTouchIndex ?? 0) - (r.firstTouchIndex ?? 0),
-      distancePct: round4(distancePct),
-      last_test_utc: lastTestUtc, // unix seconds
-      atr: round4(atr),
+      barsHeld: (r.lastIdx ?? 0) - (r.firstIdx ?? 0),
+      distancePct: round4(distPct),
     },
     flags: {},
   };
 }
 
-function applyPenalties(zone, { now, currentPrice, cfg }) {
-  let score = zone.score;
-
-  const weeksOld = estimateWeeksOld(zone.meta.last_test_utc, now);
-  const recencyDecay = Math.pow(cfg.RECENCY_DECAY_PER_WEEK, weeksOld);
-  score *= recencyDecay;
-
-  // Soft distance penalty in diagnostic (never hard gate here)
-  const softLimit = cfg.maxDistancePctDiagnostic * 0.5;
-
-  const d = zone.meta.distancePct;
-
-  // guard denom so we never produce NaN
-  const denom = Math.max(cfg.maxDistancePctDiagnostic - softLimit, 0.000001);
-
-  const distancePenalty =
-    d <= softLimit ? 1 : clamp(1 - (d - softLimit) / denom, 0.50, 1);
-
-  score *= distancePenalty;
-
-  return {
-    ...zone,
-    score: round2(clamp(score, 0, 100)),
-    meta: {
-      ...zone.meta,
-      weeksOld: round2(weeksOld),
-      recencyDecay: round4(recencyDecay),
-      distancePenalty: round4(distancePenalty),
-    },
-  };
-}
-
-// ----------------------------
-// Production Gates (strict AFTER scoring)
-// ----------------------------
-
-function passesProductionGates(zone, candles, { cfg, zones4h }) {
-  const gates = cfg.productionGates || {};
-
-  if (gates.requireCompression && !detectCompressionNearZone(zone, candles)) return false;
-  if (gates.requireRejection && !detectRejection(zone, candles)) return false;
-  if (gates.requireRetest && !detectRetest(zone, candles)) return false;
-  if (gates.require4hAgreement && !has4hAgreement(zone, zones4h)) return false;
-
-  return true;
-}
-
-// ----------------------------
-// Conservative detectors (production only)
-// ----------------------------
-
-function detectCompressionNearZone(_zone, candles) {
-  const n = 30;
-  const slice = candles.slice(-n);
-  if (slice.length < n) return true;
-  const maxH = Math.max(...slice.map((c) => c.high));
-  const minL = Math.min(...slice.map((c) => c.low));
-  const range = maxH - minL;
-  const price = (slice[slice.length - 1]?.close ?? 0) || 1;
-  const pct = range / Math.max(price, 0.0001);
-  return pct <= 0.02;
-}
-
-function detectRejection(zone, candles) {
-  const n = 80;
-  const slice = candles.slice(-n);
-  let rej = 0;
-
-  for (const c of slice) {
-    const inZone = c.high >= zone.price_low && c.low <= zone.price_high;
-    if (!inZone) continue;
-
-    const bodyHigh = Math.max(c.open, c.close);
-    const bodyLow = Math.min(c.open, c.close);
-    const bodyInZone = bodyHigh >= zone.price_low && bodyLow <= zone.price_high;
-
-    if (!bodyInZone) rej += 1;
-  }
-  return rej >= 3;
-}
-
-function detectRetest(zone, candles) {
-  const n = 240;
-  const slice = candles.slice(-n);
-  const touchIdx = [];
-
-  for (let i = 0; i < slice.length; i++) {
-    const c = slice[i];
-    const hit = c.high >= zone.price_low && c.low <= zone.price_high;
-    if (hit) touchIdx.push(i);
-  }
-  if (touchIdx.length < 3) return false;
-
-  let clusters = 1;
-  for (let i = 1; i < touchIdx.length; i++) {
-    if (touchIdx[i] - touchIdx[i - 1] >= 10) clusters += 1;
-  }
-  return clusters >= 2;
-}
-
-function has4hAgreement(zone, zones4h) {
-  if (!Array.isArray(zones4h) || zones4h.length === 0) return false;
-
-  for (const z4 of zones4h) {
-    const score = typeof z4.score === "number" ? z4.score : (z4?.details?.scoreTotal ?? 0);
-    if (score < 80) continue;
-
-    const a = { low: zone.price_low, high: zone.price_high };
-    const b = {
-      low: z4.price_low ?? z4.min ?? z4.low ?? z4.priceRange?.[1],
-      high: z4.price_high ?? z4.max ?? z4.high ?? z4.priceRange?.[0],
-    };
-    const ov = overlapPct(a, b);
-    if (ov >= 0.35) return true;
-  }
-  return false;
-}
-
-// ----------------------------
-// Merging
-// ----------------------------
-
-function mergeOverlappingZones(zones, { overlapPct: threshold }) {
-  const sorted = zones.slice().sort((a, b) => a.price_low - b.price_low);
-  const out = [];
-
-  for (const z of sorted) {
-    if (!out.length) {
-      out.push(z);
-      continue;
-    }
-    const last = out[out.length - 1];
-
-    const ov = overlapPct(
-      { low: last.price_low, high: last.price_high },
-      { low: z.price_low, high: z.price_high }
-    );
-
-    if (ov >= threshold) {
-      const mergedLow = Math.min(last.price_low, z.price_low);
-      const mergedHigh = Math.max(last.price_high, z.price_high);
-      const winner = last.score >= z.score ? last : z;
-      out[out.length - 1] = {
-        ...winner,
-        price_low: round2(mergedLow),
-        price_high: round2(mergedHigh),
-        flags: { ...(winner.flags || {}), merged: true },
-      };
-    } else {
-      out.push(z);
-    }
-  }
-
-  return out.sort((a, b) => b.score - a.score);
-}
-
-// ----------------------------
-// Classification (after scoring)
-// ----------------------------
+// --------------------------------------------------
+// CLASSIFICATION
+// --------------------------------------------------
 
 function classifyZone(score) {
   if (score >= 90) return "Institutional Core";
   if (score >= 80) return "Strong Shelf";
   if (score >= 70) return "Valid Shelf";
   if (score >= 60) return "Forming Shelf";
-  return "Noise";
+  return "Shelf";
 }
 
-// ----------------------------
-// Component scoring helpers (0..1)
-// ----------------------------
+// --------------------------------------------------
+// UTILITIES
+// --------------------------------------------------
 
-function scoreTouches(touches) {
-  if (touches <= 2) return 0.0;
-  if (touches >= 12) return 1.0;
-  return (touches - 2) / 10;
-}
-
-function scoreVolumeAnomaly(rawBucket, candles) {
-  const vols = candles.map((c) => c.volume || 0).filter((v) => v > 0);
-  if (vols.length < 20) return 0.5;
-
-  const avg = vols.reduce((a, b) => a + b, 0) / vols.length;
-  const perTouch = rawBucket.touches > 0 ? rawBucket.volumeSum / rawBucket.touches : 0;
-  const mult = avg > 0 ? perTouch / avg : 1;
-
-  if (mult <= 1.0) return 0.3;
-  if (mult >= 2.5) return 1.0;
-  return 0.3 + (mult - 1.0) * (0.7 / 1.5);
-}
-
-function scoreWickRejection(wickHits, bodyHits) {
-  const total = wickHits + bodyHits;
-  if (total <= 0) return 0.3;
-  const wickRatio = wickHits / total;
-  return clamp((wickRatio - 0.2) / 0.6, 0.0, 1.0);
-}
-
-function scoreHoldDuration(firstIdx, lastIdx) {
-  if (firstIdx == null || lastIdx == null) return 0.3;
-  const bars = Math.max(0, lastIdx - firstIdx);
-  if (bars <= 10) return 0.2;
-  if (bars >= 200) return 1.0;
-  return 0.2 + (bars - 10) * (0.8 / 190);
-}
-
-function scoreRetestStrength(touchIndices) {
-  if (!Array.isArray(touchIndices) || touchIndices.length < 3) return 0.2;
-  let gaps = 0;
-  for (let i = 1; i < touchIndices.length; i++) {
-    if (touchIndices[i] - touchIndices[i - 1] >= 8) gaps += 1;
-  }
-  if (gaps <= 0) return 0.3;
-  if (gaps >= 2) return 1.0;
-  return 0.65;
-}
-
-// ----------------------------
-// ATR
-// ----------------------------
-
-function computeATR(candles, period = 14) {
-  if (!Array.isArray(candles) || candles.length < period + 2) return 1;
-
-  const trs = [];
-  for (let i = 1; i < candles.length; i++) {
-    const c = candles[i];
-    const p = candles[i - 1];
-    const tr = Math.max(
-      c.high - c.low,
-      Math.abs(c.high - p.close),
-      Math.abs(c.low - p.close)
-    );
-    trs.push(tr);
-  }
-
-  const slice = trs.slice(-period);
-  const atr = slice.reduce((a, b) => a + b, 0) / slice.length;
-  return atr > 0 ? atr : 1;
-}
-
-// ----------------------------
-// Misc utilities
-// ----------------------------
-
-function overlapPct(a, b) {
-  const lo = Math.max(a.low, b.low);
-  const hi = Math.min(a.high, b.high);
-  const inter = hi - lo;
-  if (inter <= 0) return 0;
-
-  const aLen = a.high - a.low;
-  const bLen = b.high - b.low;
-  const denom = Math.min(aLen, bLen);
-  return denom > 0 ? inter / denom : 0;
-}
-
-function estimateWeeksOld(lastTestUtcSec, now) {
-  // lastTestUtcSec is UNIX SECONDS
-  const sec = Number(lastTestUtcSec);
-  if (!Number.isFinite(sec) || sec <= 0) return 0;
-
-  const t = new Date(sec * 1000);
-  if (isNaN(t.getTime())) return 0;
-
-  const ms = now.getTime() - t.getTime();
-  if (ms <= 0) return 0;
-
-  return ms / (1000 * 60 * 60 * 24 * 7);
-}
-
-function estimateAvgVolumeMultiple(rawBucket, candles) {
-  const vols = candles.map((c) => c.volume || 0).filter((v) => v > 0);
-  if (vols.length < 20) return 1;
-  const avg = vols.reduce((a, b) => a + b, 0) / vols.length;
-  const perTouch = rawBucket.touches > 0 ? rawBucket.volumeSum / rawBucket.touches : 0;
-  const mult = avg > 0 ? perTouch / avg : 1;
-  return round2(mult);
-}
-
-function deepMerge(base, override) {
-  const out = Array.isArray(base) ? base.slice() : { ...base };
-  for (const k of Object.keys(override || {})) {
-    const v = override[k];
-    if (v && typeof v === "object" && !Array.isArray(v) && typeof base[k] === "object") {
-      out[k] = deepMerge(base[k], v);
-    } else {
-      out[k] = v;
-    }
-  }
-  return out;
-}
-
-// IMPORTANT: normalizeBars standardizes to UNIX SECONDS
 function normalizeBars(arr) {
-  const a = Array.isArray(arr) ? arr : [];
-  return a
-    .map((b) => {
-      const rawTime = Number(b.time ?? b.t ?? 0);
-      const sec = rawTime > 1e12 ? Math.floor(rawTime / 1000) : rawTime; // ms -> sec
+  return (Array.isArray(arr) ? arr : [])
+    .map(b => {
+      const t = Number(b.t ?? b.time ?? 0);
+      const sec = t > 1e12 ? Math.floor(t / 1000) : t;
       return {
-        time: sec, // UNIX seconds
-        open: Number(b.open ?? b.o ?? 0),
-        high: Number(b.high ?? b.h ?? 0),
-        low: Number(b.low ?? b.l ?? 0),
-        close: Number(b.close ?? b.c ?? 0),
-        volume: Number(b.volume ?? b.v ?? 0),
+        time: sec,
+        open: Number(b.o ?? b.open),
+        high: Number(b.h ?? b.high),
+        low: Number(b.l ?? b.low),
+        close: Number(b.c ?? b.close),
+        volume: Number(b.v ?? b.volume ?? 0),
       };
     })
     .filter(isFiniteBar)
-    .sort((x, y) => x.time - y.time);
+    .sort((a, b) => a.time - b.time);
 }
 
-// FIX: this function MUST exist (your prior crash)
 function isFiniteBar(b) {
   return (
-    b &&
     Number.isFinite(b.time) &&
     Number.isFinite(b.open) &&
     Number.isFinite(b.high) &&
     Number.isFinite(b.low) &&
-    Number.isFinite(b.close) &&
-    Number.isFinite(b.volume) &&
-    b.time > 0 &&
-    b.high >= b.low
+    Number.isFinite(b.close)
   );
 }
 
-function clamp(x, a, b) {
-  return Math.max(a, Math.min(b, x));
-}
-function round2(x) {
-  return Math.round(x * 100) / 100;
-}
-function round4(x) {
-  return Math.round(x * 10000) / 10000;
-}
-function objectRound2(obj) {
-  const out = {};
-  for (const k of Object.keys(obj)) out[k] = round2(obj[k]);
-  return out;
-}
-
-// Merge zones from multiple TFs by overlap, keeping highest score
-function mergeZoneLists(zones) {
-  const list = (zones || []).slice().sort((a, b) => a.price_low - b.price_low);
-  const out = [];
-
-  for (const z of list) {
-    if (!out.length) {
-      out.push(z);
-      continue;
-    }
-    const last = out[out.length - 1];
-    const ov = overlapPct(
-      { low: last.price_low, high: last.price_high },
-      { low: z.price_low, high: z.price_high }
-    );
-    if (ov >= 0.35) {
-      const mergedLow = Math.min(last.price_low, z.price_low);
-      const mergedHigh = Math.max(last.price_high, z.price_high);
-      const winner = last.score >= z.score ? last : z;
-      out[out.length - 1] = {
-        ...winner,
-        price_low: round2(mergedLow),
-        price_high: round2(mergedHigh),
-        score: Math.max(last.score, z.score),
-        flags: { ...(winner.flags || {}), mergedTf: true },
-      };
-    } else {
-      out.push(z);
-    }
+function computeATR(candles, p) {
+  const trs = [];
+  for (let i = 1; i < candles.length; i++) {
+    trs.push(Math.max(
+      candles[i].high - candles[i].low,
+      Math.abs(candles[i].high - candles[i - 1].close),
+      Math.abs(candles[i].low - candles[i - 1].close)
+    ));
   }
-
-  return out.sort((a, b) => b.score - a.score).slice(0, 25);
+  return trs.slice(-p).reduce((a, b) => a + b, 0) / p || 1;
 }
+
+function mergeZoneLists(zones) {
+  return zones.sort((a, b) => b.score - a.score).slice(0, 20);
+}
+
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const round2 = x => Math.round(x * 100) / 100;
+const round4 = x => Math.round(x * 10000) / 10000;
+const objectRound2 = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, round2(v)]));
+
+function scoreTouches(t) { return Math.min(1, Math.max(0, (t - 2) / 10)); }
+function scoreVolume(r, c) {
+  const avg = c.reduce((s, x) => s + x.volume, 0) / c.length;
+  return clamp((r.volumeSum / r.touches) / avg, 0.3, 1);
+}
+function scoreWick(w, b) { return clamp(w / Math.max(1, w + b), 0, 1); }
+function scoreHold(a, b) { return clamp((b - a) / 200, 0.2, 1); }
+function scoreRetest(idx) { return idx.length >= 3 ? 1 : 0.3; }
