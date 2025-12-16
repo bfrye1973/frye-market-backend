@@ -710,3 +710,6 @@ function objectRound2(obj) {
   for (const k of Object.keys(obj)) out[k] = round2(obj[k]);
   return out;
 }
+export function computeSmartMoneyLevels(params) {
+  return computeZones(params);
+}
