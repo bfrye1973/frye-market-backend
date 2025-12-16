@@ -1,292 +1,171 @@
 /**
- * Institutional Zone Engine — Score-Based (Diagnostic + Production)
- * ---------------------------------------------------------------
- * LOCKED BEHAVIOR:
- * - SCORING FIRST, classification second
- * - Diagnostic mode shows everything ABOVE score floor
- * - HARD PRICE FILTER: zones MUST be within ±30 points of current price
- *
- * This file exports:
- * 1) computeZones(...) -> internal engine
- * 2) computeSmartMoneyLevels(bars30m,bars1h,bars4h) -> JOB ENTRY
- *
- * TIME STANDARD:
- * - All internal times = UNIX SECONDS
- * - Polygon gives ms → normalized to seconds
+ * SMZ Engine — Diagnostic First
+ * CHANGE: distance-to-current-price BOOSTS score
+ * GOAL: surface zones near 676–690
  */
 
-// --------------------------------------------------
-// CONFIG (LOCKED)
-// --------------------------------------------------
-
-const DEFAULT_CONFIG = {
-  mode: "diagnostic",
-
-  diagnosticScoreFloor: 30,   // lowered so we SEE shelves
-  productionScoreFloor: 85,
-
-  PRICE_WINDOW_POINTS: 30,    // HARD ±30 point relevance filter
-
-  RECENCY_DECAY_PER_WEEK: 0.98,
-
+const CONFIG = {
+  diagnosticScoreFloor: 20,
+  PRICE_WINDOW_POINTS: 30,
+  PROXIMITY_MAX_POINTS: 30, // full boost inside this range
+  PROXIMITY_WEIGHT: 0.35,   // how strong proximity matters
   lookbackBars: 420,
-  bucketAtrMult: 0.60,
+  bucketAtrMult: 0.6,
   minTouches: 3,
-
   weights: {
     touches: 0.30,
-    volumeAnomaly: 0.25,
-    wickRejection: 0.20,
-    holdDuration: 0.15,
-    retestStrength: 0.10,
+    volume: 0.25,
+    wick: 0.20,
+    hold: 0.15,
+    retest: 0.10,
   },
 };
 
-// --------------------------------------------------
-// JOB ENTRY POINT (ONLY THING JOB CALLS)
-// --------------------------------------------------
-
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
-  const b30 = normalizeBars(bars30m);
-  const b1h = normalizeBars(bars1h);
-  const b4h = normalizeBars(bars4h);
+  const b30 = norm(bars30m);
+  const b1h = norm(bars1h);
+  const b4h = norm(bars4h);
 
   const currentPrice =
     b30.at(-1)?.close ??
     b1h.at(-1)?.close ??
-    b4h.at(-1)?.close ??
-    null;
+    b4h.at(-1)?.close;
 
   if (!Number.isFinite(currentPrice)) return [];
 
-  // 4H + 1H merged in diagnostic
-  const z4h = computeZones({ candles: b4h, tf: "4h", currentPrice });
-  const z1h = computeZones({ candles: b1h, tf: "1h", currentPrice });
+  const z1h = computeZones(b1h, "1h", currentPrice);
+  const z4h = computeZones(b4h, "4h", currentPrice);
 
-  const merged = mergeZoneLists([...z4h, ...z1h]);
-
-  return merged.map(z => ({
-    type: "institutional",
-    price: round2((z.price_low + z.price_high) / 2),
-    priceRange: [round2(z.price_high), round2(z.price_low)],
-    strength: Math.round(z.score),
-    details: {
-      tf: z.tf,
-      score: z.score,
-      breakdown: z.score_breakdown,
-      meta: z.meta,
-      grade: z.grade,
-    }
-  }));
-}
-
-// --------------------------------------------------
-// CORE ENGINE
-// --------------------------------------------------
-
-function computeZones({ candles, tf, currentPrice }) {
-  if (!Array.isArray(candles) || candles.length < 50) return [];
-
-  const cfg = DEFAULT_CONFIG;
-  const atr = computeATR(candles, 14);
-  const bucketSize = Math.max(atr * cfg.bucketAtrMult, 0.01);
-
-  const candidates = buildBucketCandidates(candles, {
-    tf,
-    bucketSize,
-    minTouches: cfg.minTouches,
-    lookbackBars: cfg.lookbackBars,
-  });
-
-  const scored = candidates
-    .map(z => scoreZone(z, candles, currentPrice, atr))
-    .filter(Boolean)
-
-    // 🔒 HARD PRICE FILTER (THIS IS THE KEY CHANGE)
-    .filter(z => {
-      const mid = (z.price_low + z.price_high) / 2;
-      return Math.abs(mid - currentPrice) <= cfg.PRICE_WINDOW_POINTS;
-    })
-
-    // Diagnostic score floor
-    .filter(z => z.score >= cfg.diagnosticScoreFloor)
-
+  return [...z1h, ...z4h]
     .sort((a, b) => b.score - a.score)
-
+    .slice(0, 25)
     .map(z => ({
-      ...z,
-      grade: classifyZone(z.score),
+      type: "institutional",
+      price: round2((z.low + z.high) / 2),
+      priceRange: [z.high, z.low],
+      strength: Math.round(z.score),
+      details: z.details,
     }));
-
-  return scored;
 }
 
-// --------------------------------------------------
-// CANDIDATE GENERATION
-// --------------------------------------------------
+function computeZones(candles, tf, currentPrice) {
+  if (candles.length < 50) return [];
 
-function buildBucketCandidates(candles, { tf, bucketSize, minTouches, lookbackBars }) {
-  const slice = candles.slice(-lookbackBars);
-  const minPrice = Math.min(...slice.map(c => c.low));
-  const buckets = new Map();
+  const atr = ATR(candles, 14);
+  const bucketSize = Math.max(atr * CONFIG.bucketAtrMult, 0.01);
 
-  for (let i = 0; i < slice.length; i++) {
-    const c = slice[i];
+  return buckets(candles, bucketSize, tf)
+    .map(b => scoreZone(b, candles, currentPrice))
+    .filter(z =>
+      Math.abs(z.mid - currentPrice) <= CONFIG.PRICE_WINDOW_POINTS &&
+      z.score >= CONFIG.diagnosticScoreFloor
+    )
+    .sort((a, b) => b.score - a.score);
+}
+
+function scoreZone(b, candles, currentPrice) {
+  const t = scoreTouches(b.touches);
+  const v = scoreVolume(b, candles);
+  const w = scoreWick(b.wickHits, b.bodyHits);
+  const h = scoreHold(b.first, b.last);
+  const r = scoreRetest(b.idx);
+
+  const base =
+    t * CONFIG.weights.touches +
+    v * CONFIG.weights.volume +
+    w * CONFIG.weights.wick +
+    h * CONFIG.weights.hold +
+    r * CONFIG.weights.retest;
+
+  const dist = Math.abs(b.mid - currentPrice);
+  const proximity =
+    1 - Math.min(dist / CONFIG.PROXIMITY_MAX_POINTS, 1);
+
+  const score =
+    (base * (1 - CONFIG.PROXIMITY_WEIGHT) +
+      proximity * CONFIG.PROXIMITY_WEIGHT) * 100;
+
+  return {
+    tf: b.tf,
+    low: b.low,
+    high: b.high,
+    mid: b.mid,
+    score,
+    details: {
+      tf: b.tf,
+      score: round2(score),
+      breakdown: { touches: t, volume: v, wick: w, hold: h, retest: r },
+      meta: { distance: round2(dist) },
+    },
+  };
+}
+
+/* ---------- detection ---------- */
+
+function buckets(candles, size, tf) {
+  const minP = Math.min(...candles.map(c => c.low));
+  const m = new Map();
+
+  candles.forEach((c, i) => {
     const mid = (c.high + c.low) / 2;
-    const key = Math.floor((mid - minPrice) / bucketSize);
-
-    const b = buckets.get(key) || {
-      tf,
-      low: minPrice + key * bucketSize,
-      high: minPrice + (key + 1) * bucketSize,
-      touches: 0,
-      volumeSum: 0,
-      wickHits: 0,
-      bodyHits: 0,
-      firstIdx: null,
-      lastIdx: null,
-      touchIdx: [],
-    };
+    const k = Math.floor((mid - minP) / size);
+    const b =
+      m.get(k) ||
+      { tf, low: minP + k * size, high: minP + (k + 1) * size,
+        touches: 0, wickHits: 0, bodyHits: 0,
+        first: null, last: null, idx: [] };
 
     if (c.high >= b.low && c.low <= b.high) {
       b.touches++;
-      b.volumeSum += c.volume;
-      b.firstIdx ??= i;
-      b.lastIdx = i;
-      b.touchIdx.push(i);
-
-      const bodyHigh = Math.max(c.open, c.close);
-      const bodyLow = Math.min(c.open, c.close);
-      bodyHigh >= b.low && bodyLow <= b.high ? b.bodyHits++ : b.wickHits++;
+      b.first ??= i;
+      b.last = i;
+      b.idx.push(i);
+      const bh = Math.max(c.open, c.close);
+      const bl = Math.min(c.open, c.close);
+      bh >= b.low && bl <= b.high ? b.bodyHits++ : b.wickHits++;
     }
+    m.set(k, b);
+  });
 
-    buckets.set(key, b);
-  }
+  return [...m.values()]
+    .filter(b => b.touches >= CONFIG.minTouches)
+    .map(b => ({ ...b, mid: (b.low + b.high) / 2 }));
+}
 
-  return [...buckets.values()]
-    .filter(b => b.touches >= minTouches)
+/* ---------- scoring helpers ---------- */
+
+const scoreTouches = t => Math.min(1, Math.max(0, (t - 2) / 10));
+const scoreRetest = i => (i.length >= 3 ? 1 : 0.3);
+const scoreHold = (a, b) => Math.min(1, Math.max(0.2, (b - a) / 200));
+const scoreWick = (w, b) => (w + b === 0 ? 0 : w / (w + b));
+
+function scoreVolume(b, candles) {
+  const avg = candles.reduce((s, c) => s + c.volume, 0) / candles.length;
+  return Math.min(1, Math.max(0.3, (b.volumeSum || 1) / avg));
+}
+
+/* ---------- utils ---------- */
+
+function norm(arr) {
+  return (arr || [])
     .map(b => ({
-      id: `smz_${tf}_${b.low.toFixed(2)}_${b.high.toFixed(2)}`,
-      tf,
-      price_low: round2(b.low),
-      price_high: round2(b.high),
-      raw: b,
-    }));
-}
-
-// --------------------------------------------------
-// SCORING
-// --------------------------------------------------
-
-function scoreZone(zone, candles, currentPrice, atr) {
-  const r = zone.raw;
-
-  const breakdown = {
-    touches: scoreTouches(r.touches),
-    volumeAnomaly: scoreVolume(r, candles),
-    wickRejection: scoreWick(r.wickHits, r.bodyHits),
-    holdDuration: scoreHold(r.firstIdx, r.lastIdx),
-    retestStrength: scoreRetest(r.touchIdx),
-  };
-
-  const weights = DEFAULT_CONFIG.weights;
-  const weighted =
-    breakdown.touches * weights.touches +
-    breakdown.volumeAnomaly * weights.volumeAnomaly +
-    breakdown.wickRejection * weights.wickRejection +
-    breakdown.holdDuration * weights.holdDuration +
-    breakdown.retestStrength * weights.retestStrength;
-
-  const score = clamp(weighted * 100, 0, 100);
-
-  const mid = (zone.price_low + zone.price_high) / 2;
-  const distPct = Math.abs(mid - currentPrice) / currentPrice;
-
-  return {
-    ...zone,
-    score: round2(score),
-    score_breakdown: objectRound2(breakdown),
-    meta: {
-      touches: r.touches,
-      wickHits: r.wickHits,
-      bodyHits: r.bodyHits,
-      barsHeld: (r.lastIdx ?? 0) - (r.firstIdx ?? 0),
-      distancePct: round4(distPct),
-    },
-    flags: {},
-  };
-}
-
-// --------------------------------------------------
-// CLASSIFICATION
-// --------------------------------------------------
-
-function classifyZone(score) {
-  if (score >= 90) return "Institutional Core";
-  if (score >= 80) return "Strong Shelf";
-  if (score >= 70) return "Valid Shelf";
-  if (score >= 60) return "Forming Shelf";
-  return "Shelf";
-}
-
-// --------------------------------------------------
-// UTILITIES
-// --------------------------------------------------
-
-function normalizeBars(arr) {
-  return (Array.isArray(arr) ? arr : [])
-    .map(b => {
-      const t = Number(b.t ?? b.time ?? 0);
-      const sec = t > 1e12 ? Math.floor(t / 1000) : t;
-      return {
-        time: sec,
-        open: Number(b.o ?? b.open),
-        high: Number(b.h ?? b.high),
-        low: Number(b.l ?? b.low),
-        close: Number(b.c ?? b.close),
-        volume: Number(b.v ?? b.volume ?? 0),
-      };
-    })
-    .filter(isFiniteBar)
+      time: b.t > 1e12 ? Math.floor(b.t / 1000) : b.t,
+      open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v || 0,
+    }))
+    .filter(b => Number.isFinite(b.close))
     .sort((a, b) => a.time - b.time);
 }
 
-function isFiniteBar(b) {
-  return (
-    Number.isFinite(b.time) &&
-    Number.isFinite(b.open) &&
-    Number.isFinite(b.high) &&
-    Number.isFinite(b.low) &&
-    Number.isFinite(b.close)
-  );
-}
-
-function computeATR(candles, p) {
-  const trs = [];
-  for (let i = 1; i < candles.length; i++) {
-    trs.push(Math.max(
-      candles[i].high - candles[i].low,
-      Math.abs(candles[i].high - candles[i - 1].close),
-      Math.abs(candles[i].low - candles[i - 1].close)
+function ATR(c, p) {
+  const t = [];
+  for (let i = 1; i < c.length; i++) {
+    t.push(Math.max(
+      c[i].high - c[i].low,
+      Math.abs(c[i].high - c[i - 1].close),
+      Math.abs(c[i].low - c[i - 1].close)
     ));
   }
-  return trs.slice(-p).reduce((a, b) => a + b, 0) / p || 1;
+  return t.slice(-p).reduce((a, b) => a + b, 0) / p || 1;
 }
 
-function mergeZoneLists(zones) {
-  return zones.sort((a, b) => b.score - a.score).slice(0, 20);
-}
-
-const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const round2 = x => Math.round(x * 100) / 100;
-const round4 = x => Math.round(x * 10000) / 10000;
-const objectRound2 = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, round2(v)]));
-
-function scoreTouches(t) { return Math.min(1, Math.max(0, (t - 2) / 10)); }
-function scoreVolume(r, c) {
-  const avg = c.reduce((s, x) => s + x.volume, 0) / c.length;
-  return clamp((r.volumeSum / r.touches) / avg, 0.3, 1);
-}
-function scoreWick(w, b) { return clamp(w / Math.max(1, w + b), 0, 1); }
-function scoreHold(a, b) { return clamp((b - a) / 200, 0.2, 1); }
-function scoreRetest(idx) { return idx.length >= 3 ? 1 : 0.3; }
