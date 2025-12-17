@@ -1,7 +1,7 @@
 // src/services/core/logic/smzEngine.js
 // Detect zones + score via rubric modules. Diagnostic output (no caps here).
 
-import { scoreInstitutional } from "./smzInstitutionalRubric.js";
+import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
   WINDOW_POINTS: 30,
