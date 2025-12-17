@@ -1,6 +1,6 @@
 // src/services/core/logic/smzInstitutionalRubric.js
-// Diagnostic rubric scorer: computes FULL raw score (0–100) with NO caps.
-// Still reports gate status as flags (wouldCap79 / wouldCap99).
+// Diagnostic truth scorer (NO caps). Gates reported as flags.
+// CHANGE: Compression days = ANY day with ANY overlap (wick/body) with zone.
 
 function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
 function toSec(t) { const n = Number(t ?? 0); return n > 1e12 ? Math.floor(n / 1000) : n; }
@@ -12,14 +12,6 @@ function validBar(b) {
   return b && Number.isFinite(b.high) && Number.isFinite(b.low) && Number.isFinite(b.open) && Number.isFinite(b.close);
 }
 function intersectsBarZone(b, lo, hi) { return validBar(b) && b.high >= lo && b.low <= hi; }
-function anyInsideZone(b, lo, hi) {
-  if (!validBar(b)) return false;
-  const openInside = b.open >= lo && b.open <= hi;
-  const closeInside = b.close >= lo && b.close <= hi;
-  const fullyInside = b.high <= hi && b.low >= lo;
-  const overlaps = intersectsBarZone(b, lo, hi);
-  return openInside || closeInside || fullyInside || overlaps;
-}
 function zoneWidth(lo, hi) { return Math.max(0, hi - lo); }
 
 function computeATR(bars, period = 50) {
@@ -41,14 +33,14 @@ function computeATR(bars, period = 50) {
   return atr > 0 ? atr : 1;
 }
 
-// trading days “inside” zone
-function uniqueDaysInZone(bars1h, lo, hi) {
+// ✅ A: ANY overlap counts as a “compression day”
+function uniqueDaysOverlappingZone(bars1h, lo, hi) {
   const s = new Set();
-  for (const b of bars1h) if (anyInsideZone(b, lo, hi)) s.add(dayKeyUtc(b.time));
+  for (const b of bars1h) if (intersectsBarZone(b, lo, hi)) s.add(dayKeyUtc(b.time));
   return s;
 }
 
-// Wick totals (any wick inside zone, length-weighted in points)
+// Wicks: any wicks on touch bars, length-weighted (points)
 function wickTotalsInZone(bars1h, lo, hi) {
   let wickTotalPts = 0;
   let touchBars = 0;
@@ -67,7 +59,7 @@ function wickTotalsInZone(bars1h, lo, hi) {
   return { wickTotalPts, wickAvgPts, touchBars };
 }
 
-// Q4 wick clarity (0–8)
+// Q4 (0–8)
 function wickClarityPoints(bars1h, lo, hi) {
   const { wickAvgPts, touchBars } = wickTotalsInZone(bars1h, lo, hi);
   if (touchBars < 2) return 2;
@@ -76,7 +68,7 @@ function wickClarityPoints(bars1h, lo, hi) {
   return 2;
 }
 
-// failed attempts (0–12)
+// Q3 (0–12)
 function failedAttemptsCount(bars1h, lo, hi) {
   const EPS = 0.10;
   let attempts = 0;
@@ -97,16 +89,30 @@ function failedAttemptsPoints(attempts) {
   return 0;
 }
 
-// Q5 retest holds (0–12) by unique trading days in zone
+// Q1 duration (0/12/20) based on A-days
+function compressionDurationPoints(tradingDays) {
+  if (tradingDays >= 7) return 20;
+  if (tradingDays >= 4) return 12;
+  return 0;
+}
+
+// Q2 tightness (3/9/15)
+function tightnessPoints(widthPts) {
+  if (widthPts <= 2.0) return 15;
+  if (widthPts <= 4.0) return 9;
+  return 3;
+}
+
+// Q5 retest holds (0–12) by unique overlap days
 function retestHoldPoints(bars1h, lo, hi) {
-  const days = uniqueDaysInZone(bars1h, lo, hi).size;
+  const days = uniqueDaysOverlappingZone(bars1h, lo, hi).size;
   if (days <= 0) return 0;
   if (days === 1) return 8;
   if (days === 2) return 10;
   return 12;
 }
 
-// Q6 retest reaction quality (0–8)
+// Q6 reaction (0–8)
 function reactionAfterLastTouchPoints(bars1h, lo, hi) {
   const atr = computeATR(bars1h, 50);
   let lastTouch = -1;
@@ -127,19 +133,6 @@ function reactionAfterLastTouchPoints(bars1h, lo, hi) {
 
   if (best >= 1.2) return 8;
   if (best >= 0.7) return 5;
-  return 3;
-}
-
-// Q1 duration (0/12/20)
-function compressionDurationPoints(tradingDays) {
-  if (tradingDays >= 7) return 20;
-  if (tradingDays >= 4) return 12;
-  return 0;
-}
-// Q2 tightness (3/9/15)
-function tightnessPoints(widthPts) {
-  if (widthPts <= 2.0) return 15;
-  if (widthPts <= 4.0) return 9;
   return 3;
 }
 
@@ -214,9 +207,9 @@ export function scoreInstitutionalRubric({ zone, bars1h, bars4h, currentPrice })
     return { scoreTotal: 0, capApplied: "none", gate: {}, q: {}, facts: { reason: "invalid_zone_bounds" } };
   }
 
-  const days = uniqueDaysInZone(bars1h, low, high).size;
+  const compressionDays = uniqueDaysOverlappingZone(bars1h, low, high).size;
 
-  const q1 = compressionDurationPoints(days);
+  const q1 = compressionDurationPoints(compressionDays);
   const wPts = zoneWidth(low, high);
   const q2 = tightnessPoints(wPts);
 
@@ -239,7 +232,6 @@ export function scoreInstitutionalRubric({ zone, bars1h, bars4h, currentPrice })
     (q9 + q10) +
     (q11 + q12);
 
-  // Gate flags ONLY (no caps)
   const hasCompression = q1 > 0 && q2 >= 9;
   const hasRejection = (q4 >= 5) || (q3 > 0);
   const hasRetest = q5 > 0;
@@ -252,7 +244,7 @@ export function scoreInstitutionalRubric({ zone, bars1h, bars4h, currentPrice })
 
   return {
     scoreTotal: Math.round(clamp(total, 0, 100)),
-    capApplied: "none", // diagnostic truth mode
+    capApplied: "none",
     gate: {
       wouldCap79: !(hasCompression && hasRejection && hasRetest),
       wouldCap99: !hasClear4H,
@@ -279,7 +271,7 @@ export function scoreInstitutionalRubric({ zone, bars1h, bars4h, currentPrice })
       low: Number(low.toFixed(2)),
       high: Number(high.toFixed(2)),
       widthPts: Number(wPts.toFixed(2)),
-      compressionDays: days,
+      compressionDays,
       failedAttempts: attempts,
       wickTotalPts: Number(wickTotalPts.toFixed(2)),
       wickAvgPtsPerTouchBar: Number(wickAvgPts.toFixed(3)),
