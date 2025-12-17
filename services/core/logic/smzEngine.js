@@ -1,205 +1,195 @@
-/**
- * SMZ Engine — Diagnostic
- * - Only analyze zones within ±30 points of current price
- * - Use FIXED 1.0 point buckets inside that window (forces detection 676–690)
- * - Proximity boosts score
- * - Supports both bar shapes: {t,o,h,l,c,v} and {time,open,high,low,close,volume}
- */
+// src/services/core/logic/smzEngine.js
+// Detect zones + score via rubric (separate file). Diagnostic output.
+
+import { scoreInstitutionalRubric } from "./smzInstitutionalRubric.js";
 
 const CFG = {
-  diagnosticScoreFloor: 10,
   WINDOW_POINTS: 30,
-
-  // fixed bucket settings (key change)
-  FIXED_BUCKET_SIZE: 1.0,     // 1 point bins
-  MIN_TOUCHES: 2,             // easier to form shelves near current price
-
-  lookbackBars: 420,
-
-  PROXIMITY_MAX_POINTS: 30,
-  PROXIMITY_WEIGHT: 0.40,     // stronger push to “now”
-
-  weights: { touches: 0.25, volume: 0.20, wick: 0.15, hold: 0.15, retest: 0.10, proximity: 0.15 },
+  LOOKBACK_1H: 150,   // bars used for detection per TF
+  LOOKBACK_4H: 180,
+  MIN_TOUCHES: 3,
+  BUCKET_ATR_MULT: 0.60,
+  MAX_OUT: 30,
 };
 
-export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
-  const b30 = norm(bars30m);
-  const b1h = norm(bars1h);
-  const b4h = norm(bars4h);
+function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
+function round2(x) { return Math.round(x * 100) / 100; }
 
-  const currentPrice =
-    b30.at(-1)?.close ??
-    b1h.at(-1)?.close ??
-    b4h.at(-1)?.close;
-
-  if (!Number.isFinite(currentPrice)) return [];
-
-  const z1h = computeZones(b1h, "1h", currentPrice);
-  const z4h = computeZones(b4h, "4h", currentPrice);
-
-  return [...z1h, ...z4h]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 30)
-    .map((z) => ({
-      type: "institutional",
-      price: round2((z.low + z.high) / 2),
-      priceRange: [round2(z.high), round2(z.low)],
-      strength: Math.round(z.score),
-      details: z.details,
-    }));
-}
-
-function computeZones(candles, tf, currentPrice) {
-  if (!Array.isArray(candles) || candles.length < 50) return [];
-
-  const slice = candles.slice(-CFG.lookbackBars);
-
-  // HARD window: only consider candles that touch the window
-  const loWin = currentPrice - CFG.WINDOW_POINTS;
-  const hiWin = currentPrice + CFG.WINDOW_POINTS;
-
-  const windowCandles = slice.filter((c) => c.high >= loWin && c.low <= hiWin);
-  if (windowCandles.length < 30) return [];
-
-  const candidates = buildFixedBuckets(windowCandles, tf, loWin, hiWin, CFG.FIXED_BUCKET_SIZE);
-
-  const scored = candidates
-    .map((b) => scoreBucket(b, windowCandles, currentPrice))
-    .filter((z) => z.score >= CFG.diagnosticScoreFloor)
-    .sort((a, b) => b.score - a.score);
-
-  return scored;
-}
-
-/* ---------------- fixed bucket builder ---------------- */
-
-function buildFixedBuckets(candles, tf, loWin, hiWin, size) {
-  const start = Math.floor(loWin / size) * size;
-  const end = Math.ceil(hiWin / size) * size;
-
-  const buckets = [];
-  for (let low = start; low < end; low += size) {
-    buckets.push({
-      tf,
-      low,
-      high: low + size,
-      mid: low + size / 2,
-      touches: 0,
-      volumeSum: 0,
-      wickHits: 0,
-      bodyHits: 0,
-      first: null,
-      last: null,
-      idx: [],
-    });
-  }
-
-  for (let i = 0; i < candles.length; i++) {
-    const c = candles[i];
-
-    for (const b of buckets) {
-      if (c.high < b.low || c.low > b.high) continue;
-
-      b.touches++;
-      b.volumeSum += c.volume || 0;
-      b.first ??= i;
-      b.last = i;
-      b.idx.push(i);
-
-      const bh = Math.max(c.open, c.close);
-      const bl = Math.min(c.open, c.close);
-      bh >= b.low && bl <= b.high ? b.bodyHits++ : b.wickHits++;
-    }
-  }
-
-  return buckets.filter((b) => b.touches >= CFG.MIN_TOUCHES);
-}
-
-/* ---------------- scoring ---------------- */
-
-function scoreBucket(b, candles, currentPrice) {
-  const distPts = Math.abs(b.mid - currentPrice);
-  const proximity = 1 - Math.min(distPts / CFG.PROXIMITY_MAX_POINTS, 1);
-
-  const t = scoreTouches(b.touches);
-  const v = scoreVolume(b, candles);
-  const w = scoreWick(b.wickHits, b.bodyHits);
-  const h = scoreHold(b.first, b.last);
-  const r = scoreRetest(b.idx);
-
-  const base =
-    t * CFG.weights.touches +
-    v * CFG.weights.volume +
-    w * CFG.weights.wick +
-    h * CFG.weights.hold +
-    r * CFG.weights.retest +
-    proximity * CFG.weights.proximity;
-
-  const score = clamp(base, 0, 1) * 100;
-
-  return {
-    tf: b.tf,
-    low: b.low,
-    high: b.high,
-    mid: b.mid,
-    score,
-    details: {
-      tf: b.tf,
-      score: round2(score),
-      breakdown: { touches: t, volume: v, wick: w, hold: h, retest: r, proximity: round2(proximity) },
-      meta: {
-        distancePoints: round2(distPts),
-        touches: b.touches,
-        wickHits: b.wickHits,
-        bodyHits: b.bodyHits,
-        barsHeld: (b.last ?? 0) - (b.first ?? 0),
-      },
-    },
-  };
-}
-
-/* ---------------- helpers ---------------- */
-
-function norm(arr) {
+function normalizeBars(arr) {
   return (Array.isArray(arr) ? arr : [])
-    .map((b) => {
-      const rawT = Number(b.t ?? b.time ?? 0);
-      const sec = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT;
-
-      const open = Number(b.o ?? b.open);
-      const high = Number(b.h ?? b.high);
-      const low = Number(b.l ?? b.low);
-      const close = Number(b.c ?? b.close);
-      const volume = Number(b.v ?? b.volume ?? 0);
-
-      return { time: sec, open, high, low, close, volume };
-    })
+    .map((b) => ({
+      time: (Number(b.t ?? b.time ?? 0) > 1e12) ? Math.floor(Number(b.t ?? b.time) / 1000) : Number(b.t ?? b.time ?? 0),
+      open: Number(b.o ?? b.open ?? 0),
+      high: Number(b.h ?? b.high ?? 0),
+      low: Number(b.l ?? b.low ?? 0),
+      close: Number(b.c ?? b.close ?? 0),
+      volume: Number(b.v ?? b.volume ?? 0),
+    }))
     .filter((b) =>
       Number.isFinite(b.time) &&
       Number.isFinite(b.open) &&
       Number.isFinite(b.high) &&
       Number.isFinite(b.low) &&
-      Number.isFinite(b.close) &&
-      b.time > 0
+      Number.isFinite(b.close)
     )
     .sort((a, b) => a.time - b.time);
 }
 
-const scoreTouches = (t) => Math.min(1, Math.max(0, (t - 1) / 10));
-const scoreRetest = (idx) => (idx.length >= 3 ? 1 : 0.4);
-const scoreHold = (a, b) => Math.min(1, Math.max(0.2, (Number(b) - Number(a)) / 200));
-const scoreWick = (w, b) => (w + b === 0 ? 0 : w / (w + b));
-
-function scoreVolume(b, candles) {
-  const vols = candles.map((c) => c.volume || 0).filter((x) => x > 0);
-  if (vols.length < 20) return 0.5;
-  const avg = vols.reduce((s, x) => s + x, 0) / vols.length;
-  const perTouch = b.touches > 0 ? b.volumeSum / b.touches : 0;
-  const mult = avg > 0 ? perTouch / avg : 1;
-  if (mult <= 1.0) return 0.3;
-  if (mult >= 2.5) return 1.0;
-  return 0.3 + (mult - 1.0) * (0.7 / 1.5);
+function computeATR(candles, period = 14) {
+  if (!Array.isArray(candles) || candles.length < period + 2) return 1;
+  const trs = [];
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i], p = candles[i - 1];
+    const tr = Math.max(
+      c.high - c.low,
+      Math.abs(c.high - p.close),
+      Math.abs(c.low - p.close)
+    );
+    trs.push(tr);
+  }
+  const slice = trs.slice(-period);
+  const atr = slice.reduce((a, b) => a + b, 0) / slice.length;
+  return atr > 0 ? atr : 1;
 }
 
-const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
-const round2 = (x) => Math.round(x * 100) / 100;
+function buildBucketCandidates(candles, bucketSize, minTouches, tf) {
+  const lows = candles.map((c) => c.low);
+  const minPrice = Math.min(...lows);
+  const buckets = new Map();
+
+  const keyFor = (price) => Math.floor((price - minPrice) / bucketSize);
+
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const mid = (c.high + c.low) / 2;
+    const k = keyFor(mid);
+
+    const b = buckets.get(k) || {
+      tf,
+      low: minPrice + k * bucketSize,
+      high: minPrice + (k + 1) * bucketSize,
+      touches: 0,
+    };
+
+    if (c.high >= b.low && c.low <= b.high) b.touches++;
+    buckets.set(k, b);
+  }
+
+  const out = [];
+  for (const b of buckets.values()) {
+    if (b.touches >= minTouches) {
+      out.push({
+        tf,
+        price_low: round2(b.low),
+        price_high: round2(b.high),
+      });
+    }
+  }
+  return out;
+}
+
+function overlapPct(a, b) {
+  const lo = Math.max(a.low, b.low);
+  const hi = Math.min(a.high, b.high);
+  const inter = hi - lo;
+  if (inter <= 0) return 0;
+  const denom = Math.min(a.high - a.low, b.high - b.low);
+  return denom > 0 ? inter / denom : 0;
+}
+
+function mergeByOverlap(zones, threshold = 0.45) {
+  const sorted = zones.slice().sort((x, y) => x.price_low - y.price_low);
+  const out = [];
+  for (const z of sorted) {
+    if (!out.length) { out.push(z); continue; }
+    const last = out[out.length - 1];
+    const ov = overlapPct(
+      { low: last.price_low, high: last.price_high },
+      { low: z.price_low, high: z.price_high }
+    );
+    if (ov >= threshold) {
+      // keep the higher score zone, widen bounds
+      const winner = (last.strength ?? 0) >= (z.strength ?? 0) ? last : z;
+      winner.price_low = round2(Math.min(last.price_low, z.price_low));
+      winner.price_high = round2(Math.max(last.price_high, z.price_high));
+      out[out.length - 1] = winner;
+    } else {
+      out.push(z);
+    }
+  }
+  return out;
+}
+
+export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
+  const b30 = normalizeBars(bars30m);
+  const b1h = normalizeBars(bars1h);
+  const b4h = normalizeBars(bars4h);
+
+  const currentPrice =
+    b30.at(-1)?.close ??
+    b1h.at(-1)?.close ??
+    b4h.at(-1)?.close ??
+    null;
+
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) return [];
+
+  const loWin = currentPrice - CFG.WINDOW_POINTS;
+  const hiWin = currentPrice + CFG.WINDOW_POINTS;
+
+  const c1h = b1h.slice(-CFG.LOOKBACK_1H);
+  const c4h = b4h.slice(-CFG.LOOKBACK_4H);
+
+  const atr1h = computeATR(c1h, 14);
+  const atr4h = computeATR(c4h, 14);
+
+  const bucket1h = Math.max(0.25, atr1h * CFG.BUCKET_ATR_MULT);
+  const bucket4h = Math.max(0.50, atr4h * CFG.BUCKET_ATR_MULT);
+
+  const cand1h = buildBucketCandidates(c1h, bucket1h, CFG.MIN_TOUCHES, "1h");
+  const cand4h = buildBucketCandidates(c4h, bucket4h, CFG.MIN_TOUCHES, "4h");
+
+  // score EVERY zone (A), but keep analysis within price window (relevant price only)
+  const scored = [...cand1h, ...cand4h]
+    .filter((z) => {
+      const mid = (z.price_low + z.price_high) / 2;
+      return mid >= loWin && mid <= hiWin;
+    })
+    .map((z, idx) => {
+      const rubric = scoreInstitutionalRubric({
+        zone: z,
+        bars1h: c1h,
+        bars4h: c4h,
+        currentPrice,
+      });
+
+      return {
+        type: "institutional",
+        price: round2((z.price_low + z.price_high) / 2),
+        priceRange: [round2(z.price_high), round2(z.price_low)],
+        strength: rubric.scoreTotal,
+        details: {
+          id: `smz_${z.tf}_${idx}`,
+          tf: z.tf,
+          capApplied: rubric.capApplied,
+          q: rubric.q,
+          facts: rubric.facts,
+        },
+        // internal for merge
+        tf: z.tf,
+        price_low: z.price_low,
+        price_high: z.price_high,
+      };
+    });
+
+  // sort + light merge (diagnostic-friendly)
+  const sorted = scored.sort((a, b) => b.strength - a.strength);
+  const merged = mergeByOverlap(sorted, 0.55);
+
+  return merged.slice(0, CFG.MAX_OUT).map((z) => ({
+    type: z.type,
+    price: z.price,
+    priceRange: z.priceRange,
+    strength: z.strength,
+    details: z.details,
+  }));
+}
