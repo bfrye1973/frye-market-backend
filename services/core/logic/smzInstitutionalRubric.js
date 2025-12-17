@@ -198,14 +198,27 @@ function contextPoints(bars1h, lo, hi) {
   return { q11, q12, breaks };
 }
 
-export function scoreInstitutionalRubric({ zone, bars1h, bars4h, currentPrice }) {
-  const lo = zone.price_low ?? zone.low ?? zone.min ?? zone?.priceRange?.[1];
-  const hi = zone.price_high ?? zone.high ?? zone.max ?? zone?.priceRange?.[0];
+export function scoreInstitutionalRubric(input) {
+  const { bars1h, bars4h, currentPrice } = input || {};
+
+  // Support BOTH call styles:
+  // A) { lo, hi, bars1h, bars4h, currentPrice }
+  // B) { zone, bars1h, bars4h, currentPrice }
+  const lo =
+    Number(input?.lo) ??
+    Number(input?.zone?.price_low ?? input?.zone?.low ?? input?.zone?.min ?? input?.zone?.priceRange?.[1]);
+
+  const hi =
+    Number(input?.hi) ??
+    Number(input?.zone?.price_high ?? input?.zone?.high ?? input?.zone?.max ?? input?.zone?.priceRange?.[0]);
+
   const low = Number(lo), high = Number(hi);
 
   if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) {
     return { scoreTotal: 0, capApplied: "none", gate: {}, q: {}, facts: { reason: "invalid_zone_bounds" } };
   }
+
+  // ...keep the rest of your rubric exactly the same...
 
   const compressionDays = uniqueDaysOverlappingZone(bars1h, low, high).size;
 
