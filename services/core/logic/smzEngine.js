@@ -1,15 +1,16 @@
 // src/services/core/logic/smzEngine.js
-// Detect zones + score via rubric (separate file). Diagnostic output.
+// Detect zones + score via rubric modules. Diagnostic output (no caps here).
 
-import { scoreInstitutionalRubric } from "./smzInstitutionalRubric.js";
+import { scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
   WINDOW_POINTS: 30,
-  LOOKBACK_1H: 150,   // bars used for detection per TF
+  LOOKBACK_1H: 150,
   LOOKBACK_4H: 180,
   MIN_TOUCHES: 3,
   BUCKET_ATR_MULT: 0.60,
   MAX_OUT: 30,
+  MERGE_OVERLAP: 0.55,
 };
 
 function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
@@ -17,20 +18,25 @@ function round2(x) { return Math.round(x * 100) / 100; }
 
 function normalizeBars(arr) {
   return (Array.isArray(arr) ? arr : [])
-    .map((b) => ({
-      time: (Number(b.t ?? b.time ?? 0) > 1e12) ? Math.floor(Number(b.t ?? b.time) / 1000) : Number(b.t ?? b.time ?? 0),
-      open: Number(b.o ?? b.open ?? 0),
-      high: Number(b.h ?? b.high ?? 0),
-      low: Number(b.l ?? b.low ?? 0),
-      close: Number(b.c ?? b.close ?? 0),
-      volume: Number(b.v ?? b.volume ?? 0),
-    }))
-    .filter((b) =>
-      Number.isFinite(b.time) &&
-      Number.isFinite(b.open) &&
-      Number.isFinite(b.high) &&
-      Number.isFinite(b.low) &&
-      Number.isFinite(b.close)
+    .map((b) => {
+      const rawT = Number(b.t ?? b.time ?? 0);
+      const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT; // ms -> sec
+      return {
+        time,
+        open: Number(b.o ?? b.open ?? 0),
+        high: Number(b.h ?? b.high ?? 0),
+        low: Number(b.l ?? b.low ?? 0),
+        close: Number(b.c ?? b.close ?? 0),
+        volume: Number(b.v ?? b.volume ?? 0),
+      };
+    })
+    .filter(
+      (b) =>
+        Number.isFinite(b.time) &&
+        Number.isFinite(b.open) &&
+        Number.isFinite(b.high) &&
+        Number.isFinite(b.low) &&
+        Number.isFinite(b.close)
     )
     .sort((a, b) => a.time - b.time);
 }
@@ -97,26 +103,29 @@ function overlapPct(a, b) {
   return denom > 0 ? inter / denom : 0;
 }
 
-function mergeByOverlap(zones, threshold = 0.45) {
-  const sorted = zones.slice().sort((x, y) => x.price_low - y.price_low);
+function mergeByOverlap(zones, threshold = 0.55) {
+  const sorted = zones.slice().sort((x, y) => x._low - y._low);
   const out = [];
+
   for (const z of sorted) {
-    if (!out.length) { out.push(z); continue; }
+    if (!out.length) {
+      out.push(z);
+      continue;
+    }
     const last = out[out.length - 1];
-    const ov = overlapPct(
-      { low: last.price_low, high: last.price_high },
-      { low: z.price_low, high: z.price_high }
-    );
+    const ov = overlapPct({ low: last._low, high: last._high }, { low: z._low, high: z._high });
     if (ov >= threshold) {
-      // keep the higher score zone, widen bounds
       const winner = (last.strength ?? 0) >= (z.strength ?? 0) ? last : z;
-      winner.price_low = round2(Math.min(last.price_low, z.price_low));
-      winner.price_high = round2(Math.max(last.price_high, z.price_high));
+      winner._low = round2(Math.min(last._low, z._low));
+      winner._high = round2(Math.max(last._high, z._high));
+      winner.price = round2((winner._low + winner._high) / 2);
+      winner.priceRange = [round2(winner._high), round2(winner._low)];
       out[out.length - 1] = winner;
     } else {
       out.push(z);
     }
   }
+
   return out;
 }
 
@@ -148,15 +157,18 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const cand1h = buildBucketCandidates(c1h, bucket1h, CFG.MIN_TOUCHES, "1h");
   const cand4h = buildBucketCandidates(c4h, bucket4h, CFG.MIN_TOUCHES, "4h");
 
-  // score EVERY zone (A), but keep analysis within price window (relevant price only)
   const scored = [...cand1h, ...cand4h]
     .filter((z) => {
       const mid = (z.price_low + z.price_high) / 2;
       return mid >= loWin && mid <= hiWin;
     })
     .map((z, idx) => {
-      const rubric = scoreInstitutionalRubric({
-        zone: z,
+      const lo = z.price_low;
+      const hi = z.price_high;
+
+      const s = scoreInstitutional({
+        lo,
+        hi,
         bars1h: c1h,
         bars4h: c4h,
         currentPrice,
@@ -164,28 +176,27 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
 
       return {
         type: "institutional",
-        price: round2((z.price_low + z.price_high) / 2),
-        priceRange: [round2(z.price_high), round2(z.price_low)],
-        strength: rubric.scoreTotal,
+        price: round2((lo + hi) / 2),
+        priceRange: [round2(hi), round2(lo)],
+        strength: s.scoreTotal,
         details: {
           id: `smz_${z.tf}_${idx}`,
           tf: z.tf,
-          capApplied: rubric.capApplied,
-          q: rubric.q,
-          facts: rubric.facts,
+          parts: s.parts,
+          flags: s.flags,
+          facts: s.facts,
         },
-        // internal for merge
-        tf: z.tf,
-        price_low: z.price_low,
-        price_high: z.price_high,
+        _low: lo,
+        _high: hi,
       };
-    });
+    })
+    .sort((a, b) => b.strength - a.strength);
 
-  // sort + light merge (diagnostic-friendly)
-  const sorted = scored.sort((a, b) => b.strength - a.strength);
-  const merged = mergeByOverlap(sorted, 0.55);
+  const merged = mergeByOverlap(scored, CFG.MERGE_OVERLAP)
+    .sort((a, b) => b.strength - a.strength)
+    .slice(0, CFG.MAX_OUT);
 
-  return merged.slice(0, CFG.MAX_OUT).map((z) => ({
+  return merged.map((z) => ({
     type: z.type,
     price: z.price,
     priceRange: z.priceRange,
