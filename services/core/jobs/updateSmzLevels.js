@@ -1,13 +1,11 @@
 // src/services/core/jobs/updateSmzLevels.js
-// Institutional Smart Money Zones Job — FIXED (correct polygon import path)
+// Institutional Smart Money Zones Job — ETH + Synthetic 4H (from 1H)
 
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
-
-// ✅ CORRECT PATH from: src/services/core/jobs/*  ->  src/api/providers/*
 import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,44 +14,59 @@ const __dirname = path.dirname(__filename);
 const OUTFILE = path.resolve(__dirname, "../data/smz-levels.json");
 
 // Fetch multi-timeframe bars for SPY
+// ETH is already included in Polygon aggs. We ensure 4H also reflects ETH by building it from 1H.
 async function loadBarsMultiTF(symbol = "SPY") {
-  const [bars30mRaw, bars1hRaw, bars4hRaw] = await Promise.all([
+  const [bars30mRaw, bars1hRaw] = await Promise.all([
     getBarsFromPolygon(symbol, "30m", 120),
     getBarsFromPolygon(symbol, "1h", 150),
-    getBarsFromPolygon(symbol, "4h", 30), // last ~30 days is enough
   ]);
 
   console.log("[SMZ] 30m bars:", bars30mRaw?.length ?? 0);
   console.log("[SMZ] 1h  bars:", bars1hRaw?.length ?? 0);
-  console.log("[SMZ] 4h  bars:", bars4hRaw?.length ?? 0);
 
   const bars30m = normalizeBars(bars30mRaw);
   const bars1h = normalizeBars(bars1hRaw);
-  const bars4h = normalizeBars(bars4hRaw);
+
+  // ✅ Synthetic 4H from 1H (ETH-consistent)
+  const bars4h = aggregateTo4h(bars1h);
 
   console.log(
     "[SMZ] Normalized bars — 30m:",
     bars30m.length,
     "1h:",
     bars1h.length,
-    "4h:",
+    "4h(synth):",
     bars4h.length
   );
 
-  console.log("[SMZ] maxHigh 30m:", maxHigh(bars30m), "1h:", maxHigh(bars1h), "4h:", maxHigh(bars4h));
-  console.log("[SMZ] last close 30m:", bars30m.at(-1)?.close, "1h:", bars1h.at(-1)?.close, "4h:", bars4h.at(-1)?.close);
+  console.log(
+    "[SMZ] maxHigh 30m:",
+    maxHigh(bars30m),
+    "1h:",
+    maxHigh(bars1h),
+    "4h(synth):",
+    maxHigh(bars4h)
+  );
+
+  console.log(
+    "[SMZ] last close 30m:",
+    bars30m.at(-1)?.close,
+    "1h:",
+    bars1h.at(-1)?.close,
+    "4h(synth):",
+    bars4h.at(-1)?.close
+  );
 
   return { bars30m, bars1h, bars4h };
 }
 
-// Normalize Polygon aggregate bars to { time, open, high, low, close, volume }
-// Output time is seconds (ms -> sec), stable for all engines.
+// Normalize Polygon aggregate bars to { time(sec), open, high, low, close, volume }
 function normalizeBars(raw) {
   if (!Array.isArray(raw)) return [];
 
   return raw
     .map((b) => {
-      // If already normalized, pass through
+      // already normalized
       if (
         typeof b.time === "number" &&
         typeof b.open === "number" &&
@@ -86,6 +99,38 @@ function normalizeBars(raw) {
         Number.isFinite(b.close)
     )
     .sort((a, b) => a.time - b.time);
+}
+
+// Build synthetic 4H bars from 1H bars
+function aggregateTo4h(bars1h) {
+  if (!Array.isArray(bars1h) || bars1h.length < 8) return [];
+
+  const out = [];
+  let cur = null;
+
+  for (const b of bars1h) {
+    const block = Math.floor(b.time / (4 * 3600)) * (4 * 3600); // 4h start (sec)
+
+    if (!cur || cur.time !== block) {
+      if (cur) out.push(cur);
+      cur = {
+        time: block,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume ?? 0,
+      };
+    } else {
+      cur.high = Math.max(cur.high, b.high);
+      cur.low = Math.min(cur.low, b.low);
+      cur.close = b.close;
+      cur.volume += (b.volume ?? 0);
+    }
+  }
+
+  if (cur) out.push(cur);
+  return out;
 }
 
 function maxHigh(bars) {
