@@ -1,55 +1,65 @@
-// api/providers/polygonBars.js
-// Minimal Polygon OHLC fetcher (Aggregates v2)
+// src/api/providers/polygonBars.js
+// Polygon OHLC fetcher — HARD FIX for incomplete current-day bars
+// Forces end date = last fully closed trading day (prevents missing 4H data)
 
 import fetch from "node-fetch";
 
 const POLY_KEY = process.env.POLYGON_API_KEY;
 
+if (!POLY_KEY) {
+  throw new Error("POLYGON_API_KEY missing");
+}
+
 const TF_MAP = {
-  "1m":  { mult: 1,  unit: "minute" },
-  "5m":  { mult: 5,  unit: "minute" },
+  "1m":  { mult: 1, unit: "minute" },
+  "5m":  { mult: 5, unit: "minute" },
   "15m": { mult: 15, unit: "minute" },
-  "30m": { mult: 30, unit: "minute" },   // add 30m just in case
-  "1h":  { mult: 1,  unit: "hour" },
-  "4h":  { mult: 4,  unit: "hour" },
-  "1d":  { mult: 1,  unit: "day" },
+  "30m": { mult: 30, unit: "minute" },
+  "1h":  { mult: 1, unit: "hour" },
+  "4h":  { mult: 4, unit: "hour" },
+  "1d":  { mult: 1, unit: "day" },
 };
 
-const DEFAULT_DAYS = 60; // default backfill window
+// 🔒 Always end on last fully completed day
+function lastClosedDayUTC() {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - 1); // yesterday
+  return d;
+}
 
-export async function getBarsFromPolygon(symbol, timeframe, daysOverride) {
-  if (!POLY_KEY) throw new Error("POLYGON_API_KEY is missing");
+function fmt(d) {
+  return d.toISOString().slice(0, 10);
+}
 
+export async function getBarsFromPolygon(symbol, timeframe, daysBack = 60) {
   const tf = TF_MAP[timeframe];
   if (!tf) throw new Error(`Unsupported timeframe: ${timeframe}`);
 
-  const days = Number.isFinite(daysOverride) && daysOverride > 0
-    ? daysOverride
-    : DEFAULT_DAYS;
+  const end = lastClosedDayUTC();
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - daysBack);
 
-  const end = new Date();
-  const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
-  const fmt = (d) => d.toISOString().slice(0, 10);
-
-  const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(
-    symbol
-  )}/range/${tf.mult}/${tf.unit}/${fmt(start)}/${fmt(end)}?adjusted=true&sort=asc&limit=50000&apiKey=${POLY_KEY}`;
+  const url =
+    `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}` +
+    `/range/${tf.mult}/${tf.unit}/${fmt(start)}/${fmt(end)}` +
+    `?adjusted=true&sort=asc&limit=50000&apiKey=${POLY_KEY}`;
 
   const r = await fetch(url);
   if (!r.ok) {
-    const txt = await r.text().catch(() => "");
-    throw new Error(`Polygon ${r.status}: ${txt.slice(0, 180)}`);
+    const t = await r.text();
+    throw new Error(`Polygon ${r.status}: ${t.slice(0, 200)}`);
   }
+
   const j = await r.json();
   const rows = Array.isArray(j?.results) ? j.results : [];
 
-  // Return in a generic raw format; normalizer will map/clean
-  return rows.map((x) => ({
-    t: x.t, // ms timestamp from Polygon
-    o: x.o,
-    h: x.h,
-    l: x.l,
-    c: x.c,
-    v: x.v,
+  return rows.map(b => ({
+    time: b.t,   // ms (engine normalizes)
+    open: b.o,
+    high: b.h,
+    low:  b.l,
+    close: b.c,
+    volume: b.v,
   }));
 }
