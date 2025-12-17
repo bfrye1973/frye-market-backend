@@ -150,7 +150,11 @@ async function main() {
 
     console.log("[SMZ] Zones generated:", zones.length);
 
-    const payload = { ok: true, levels: zones };
+    const payload = {
+      ok: true,
+      meta: { generated_at_utc: new Date().toISOString() },
+      levels: zones,
+   };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
     fs.writeFileSync(OUTFILE, JSON.stringify(payload, null, 2), "utf8");
