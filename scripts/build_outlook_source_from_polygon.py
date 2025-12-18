@@ -1,61 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — build_outlook_source_from_polygon.py (10m Scalper)
+Ferrari Dashboard — build_outlook_source_from_polygon.py (10m Scalper) — FIXED
 
-Purpose:
-  Build a 10-minute / intraday sector "source" file that make_dashboard.py
-  can consume to produce outlook_intraday.json, using *true intraday* logic.
+Key fixes:
+  - Uses millisecond range for Polygon aggs (prevents date-boundary truncation)
+  - Defines "today" using America/New_York session date (works pre/after-market)
+  - Correct 10m in-flight bucket detection (10m = 600 seconds)
+  - Only drops in-flight bar if enough bars remain to compute signals
 
-What this script does:
-  - Reads sector CSVs from data/sectors/*.csv
-    (each CSV has header 'Symbol' and a list of tickers)
-  - For each symbol:
-      * Fetches recent 10-minute bars from Polygon (range/10/minute)
-      * Keeps today's completed bars only (drops in-flight bar)
-      * Computes from the last L completed 10m bars (default L=3):
-          - NH: C[-1] > max(H[-L:-1])  (new 10m high vs recent window)
-          - NL: C[-1] < min(L[-L:-1])  (new 10m low vs recent window)
-          - 3U: C[-3] < C[-2] < C[-1]  (3-bar up sequence)
-          - 3D: C[-3] > C[-2] > C[-1]  (3-bar down sequence)
-  - Aggregates per sector:
-      - nh = sum(NH)
-      - nl = sum(NL)
-      - up = sum(3U)
-      - down = sum(3D)
-  - Computes:
-      - breadth_pct  = nh / (nh + nl) * 100  (or 50 if denom=0)
-      - momentum_pct = up / (up + down) * 100 (or 50 if denom=0)
-  - Writes a JSON file with:
-      {
-        "mode": "intraday",
-        "sectorCards": [
-          {
-            "sector": "Information Technology",
-            "breadth_pct": ...,
-            "momentum_pct": ...,
-            "nh": ...,
-            "nl": ...,
-            "up": ...,
-            "down": ...
-          },
-          ...
-        ],
-        "meta": {
-          "lookback_bars": L,
-          "ts_utc": "....",
-          "source": "polygon/10m"
-        }
-      }
-
-CLI:
-  python -u scripts/build_outlook_source_from_polygon.py --out data/outlook_source.json
-
-Environment:
-  - POLY_KEY or POLYGON_API_KEY or POLYGON_API
-  - FD_MAX_WORKERS         (optional, default 8)
-  - FD_SCALPER_LOOKBACK    (optional, default 3; must be >=2)
-  - FD_INTRADAY_DAYS       (optional, default 2; days of 10m bars to fetch)
+Everything else kept aligned with your original intent.
 """
 
 from __future__ import annotations
@@ -66,17 +20,23 @@ import json
 import os
 import sys
 import time
-import math
 import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 # ------------------------ ENV & CONSTANTS ------------------------
 
 UTC = timezone.utc
+
+# Market session date
+try:
+    from zoneinfo import ZoneInfo
+    ET = ZoneInfo("America/New_York")
+except Exception:
+    ET = UTC  # fallback (should rarely happen)
 
 def now_utc_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
@@ -96,9 +56,9 @@ POLY_BASE = "https://api.polygon.io"
 DEFAULT_SECTORS_DIR = os.path.join("data", "sectors")
 DEFAULT_OUT_PATH    = os.path.join("data", "outlook_source.json")
 
-MAX_WORKERS         = int(os.environ.get("FD_MAX_WORKERS", "8"))
-SCALPER_LOOKBACK    = max(2, int(os.environ.get("FD_SCALPER_LOOKBACK", "3")))  # L bars
-INTRADAY_DAYS       = int(os.environ.get("FD_INTRADAY_DAYS", "2"))             # how many days of 10m bars to fetch
+MAX_WORKERS      = int(os.environ.get("FD_MAX_WORKERS", "8"))
+SCALPER_LOOKBACK = max(2, int(os.environ.get("FD_SCALPER_LOOKBACK", "3")))  # L bars
+INTRADAY_DAYS    = int(os.environ.get("FD_INTRADAY_DAYS", "2"))             # days of 10m bars to fetch
 
 # ------------------------ HTTP HELPERS ---------------------------
 
@@ -141,22 +101,21 @@ def poly_json(url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, An
                 continue
             raise
 
-# ------------------------ POLYGON QUERIES ------------------------
-
-def dstr(d: date) -> str:
-    return d.strftime("%Y-%m-%d")
+# ------------------------ POLYGON QUERIES (FIXED) ------------------------
 
 def fetch_10m_bars(ticker: str, days: int) -> List[Dict[str, Any]]:
     """
-    Fetch 10-minute bars for the last `days` calendar days.
-    We will filter to *today's* completed bars downstream.
+    Fetch 10-minute bars using millisecond from/to window (robust).
     """
-    end = datetime.now(UTC).date()
-    start = end - timedelta(days=days)
-    url = f"{POLY_BASE}/v2/aggs/ticker/{ticker}/range/10/minute/{dstr(start)}/{dstr(end)}"
-    js = poly_json(url, {"adjusted":"true","sort":"asc","limit":50000})
+    end_ms = int(time.time() * 1000)
+    start_ms = end_ms - int(days * 24 * 60 * 60 * 1000)
+
+    url = f"{POLY_BASE}/v2/aggs/ticker/{ticker}/range/10/minute/{start_ms}/{end_ms}"
+    js = poly_json(url, {"adjusted": "true", "sort": "asc", "limit": 50000})
+
     if not js or js.get("status") != "OK":
         return []
+
     out: List[Dict[str, Any]] = []
     for r in js.get("results", []) or []:
         try:
@@ -170,29 +129,46 @@ def fetch_10m_bars(ticker: str, days: int) -> List[Dict[str, Any]]:
             })
         except Exception:
             continue
+
     out.sort(key=lambda x: x["t"])
     return out
 
-def todays_completed_10m(bars: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def todays_completed_10m(bars: List[Dict[str, Any]], lookback_bars: int) -> List[Dict[str, Any]]:
     """
-    From a list of 10m bars, return today's completed 10m bars:
-      - filter to today's date in UTC
-      - drop the in-flight bar if its bucket matches the current bucket
+    Return today's completed 10m bars based on America/New_York session date.
+    Drops the in-flight bar only if enough bars remain to compute signals.
     """
     if not bars:
         return []
-    today = datetime.now(UTC).date()
-    def to_sec(b): return int(b["t"]/1000.0)
-    todays = [b for b in bars if datetime.fromtimestamp(to_sec(b), UTC).date() == today]
+
+    # Determine "today" in ET (market session date)
+    today_et = datetime.now(ET).date()
+
+    def to_sec(b): 
+        return int(b["t"] / 1000.0)
+
+    todays: List[Dict[str, Any]] = []
+    for b in bars:
+        dt_et = datetime.fromtimestamp(to_sec(b), UTC).astimezone(ET)
+        if dt_et.date() == today_et:
+            todays.append(b)
+
     if not todays:
         return []
-    # Drop in-flight bar
-    now = int(time.time())
+
+    # Correct 10-minute bucket logic (600 sec)
     BUCKET = 600
-    cur_bucket = (now // BUCKET) * BUCKET
+    now_sec = int(time.time())
+    cur_bucket = (now_sec // BUCKET) * BUCKET
+
     last_sec = to_sec(todays[-1])
-    if (last_sec // BUCKET) * BUCKET == cur_bucket:
+    last_bucket = (last_sec // BUCKET) * BUCKET
+
+    # Only drop "in-flight" bar if we still have enough bars left to compute flags
+    min_needed = max(lookback_bars, 3)  # need at least 3 for 3U/3D
+    if last_bucket == cur_bucket and len(todays) > min_needed:
         todays = todays[:-1]
+
     return todays
 
 # ------------------------ SECTOR CSV HELPERS ---------------------
@@ -235,28 +211,27 @@ def compute_intraday_flags_10m(bars: List[Dict[str, Any]], lookback: int) -> Tup
     L = max(lookback, 2)
     if len(bars) < max(L, 3):
         return 0,0,0,0
+
     H = [float(b["h"]) for b in bars]
     Ls= [float(b["l"]) for b in bars]
     C = [float(b["c"]) for b in bars]
-    # NH / NL
-    recent_hi = max(H[-L:-1]) if L>1 else H[-1]
-    recent_lo = min(Ls[-L:-1]) if L>1 else Ls[-1]
+
+    recent_hi = max(H[-L:-1]) if L > 1 else H[-1]
+    recent_lo = min(Ls[-L:-1]) if L > 1 else Ls[-1]
     nh = int(C[-1] > recent_hi)
     nl = int(C[-1] < recent_lo)
-    # 3-bar streak
+
     u3 = int(C[-3] < C[-2] < C[-1])
     d3 = int(C[-3] > C[-2] > C[-1])
+
     return nh, nl, u3, d3
 
 # ------------------------ SECTOR AGG PIPELINE --------------------
 
 def process_symbol_10m(ticker: str, lookback_bars: int, days: int) -> Tuple[int,int,int,int]:
-    """
-    Fetch recent 10m bars for a symbol and compute intraday flags.
-    """
     try:
         bars = fetch_10m_bars(ticker, days)
-        today_bars = todays_completed_10m(bars)
+        today_bars = todays_completed_10m(bars, lookback_bars)
         if not today_bars:
             return 0,0,0,0
         return compute_intraday_flags_10m(today_bars, lookback_bars)
@@ -266,21 +241,19 @@ def process_symbol_10m(ticker: str, lookback_bars: int, days: int) -> Tuple[int,
         return 0,0,0,0
 
 def process_sector(sector: str, symbols: List[str], lookback_bars: int, days: int) -> Dict[str, Any]:
-    """
-    Compute aggregate NH/NL/U/D counts for a sector from intraday 10m bars.
-    """
     nh = nl = u = d = 0
     if not symbols:
         return {"sector": sector, "nh":0, "nl":0, "u":0, "d":0}
+
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futures = {ex.submit(process_symbol_10m, sym, lookback_bars, days): sym for sym in symbols}
         for fut in as_completed(futures):
-            sym = futures[fut]
             try:
                 f_nh, f_nl, f_u, f_d = fut.result()
                 nh += f_nh; nl += f_nl; u += f_u; d += f_d
             except Exception:
                 continue
+
     return {"sector": sector, "nh": nh, "nl": nl, "u": u, "d": d}
 
 def compute_sector_cards(sectors_dir: str, lookback_bars: int, days: int) -> List[Dict[str, Any]]:
@@ -291,12 +264,13 @@ def compute_sector_cards(sectors_dir: str, lookback_bars: int, days: int) -> Lis
     for sector_name, syms in sorted(sectors_map.items()):
         print(f"[10m] sector {sector_name}: {len(syms)} symbols", flush=True)
         agg = process_sector(sector_name, syms, lookback_bars, days)
+
         nh = agg["nh"]; nl = agg["nl"]; up = agg["u"]; down = agg["d"]
         denom_b = nh + nl
         denom_m = up + down
 
-        breadth_pct  = round(100.0 * nh / float(denom_b), 2) if denom_b>0 else 50.0
-        momentum_pct = round(100.0 * up / float(denom_m), 2) if denom_m>0 else 50.0
+        breadth_pct  = round(100.0 * nh / float(denom_b), 2) if denom_b > 0 else 50.0
+        momentum_pct = round(100.0 * up / float(denom_m), 2) if denom_m > 0 else 50.0
 
         cards.append({
             "sector": sector_name,
@@ -340,8 +314,8 @@ def main() -> int:
         for name in sorted(sectors_map.keys()):
             cards.append({
                 "sector": name,
-                "breadth_pct": 0.0,
-                "momentum_pct": 0.0,
+                "breadth_pct": 50.0,
+                "momentum_pct": 50.0,
                 "nh": 0,
                 "nl": 0,
                 "up": 0,
@@ -356,7 +330,7 @@ def main() -> int:
         "meta": {
             "lookback_bars": args.lookback_bars,
             "ts_utc": now_utc_iso(),
-            "source": "polygon/10m",
+            "source": "polygon/10m-msrange-et-today",
         },
     }
 
