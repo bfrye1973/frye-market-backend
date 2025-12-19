@@ -1,4 +1,4 @@
-// api/routes.js — Express Router exporting options + paper-trading mock endpoints
+// src/api/routes.js — Express Router exporting options + paper-trading mock endpoints
 // Everything is in-memory so the UI lights up immediately.
 
 import express from "express";
@@ -31,16 +31,24 @@ router.get("/ohlc", async (req, res) => {
     const tf = String(timeframe);
     const lim = Number(limit) || 500;
 
-    // Fetch raw bars from Polygon using your provider
-    const rawBars = await getBarsFromPolygon(sym, tf);
+    // IMPORTANT:
+    // - charts/sectorcards need INTRADAY data (today included)
+    // - give enough lookback so UI can render smoothly
+    const daysBack =
+      tf === "1m"  ? 7  :
+      tf === "5m"  ? 14 :
+      tf === "10m" ? 21 :
+      tf === "15m" ? 30 :
+      tf === "30m" ? 60 :
+      tf === "1h"  ? 150 :
+      tf === "4h"  ? 200 :
+      tf === "1d"  ? 365 : 60;
 
-    // Normalize into { time, open, high, low, close, volume }
+    const rawBars = await getBarsFromPolygon(sym, tf, daysBack, { mode: "intraday" });
+
     let bars = normalizeBars(rawBars || []);
 
-    // Limit number of bars returned (most recent N)
-    if (bars.length > lim) {
-      bars = bars.slice(-lim);
-    }
+    if (bars.length > lim) bars = bars.slice(-lim);
 
     return res.json({
       ok: true,
@@ -85,7 +93,7 @@ function mockExpirations() {
   const now = new Date();
   for (let i = 0; i < 8; i++) {
     const d = new Date(now);
-    const add = ((6 - d.getDay() + 7) % 7) + i * 7; // next Sat + i weeks
+    const add = ((6 - d.getDay() + 7) % 7) + i * 7;
     d.setDate(d.getDate() + add);
     out.push(d.toISOString().slice(0, 10));
   }
@@ -93,7 +101,7 @@ function mockExpirations() {
 }
 
 function mockChain({ side = "call" }) {
-  const last = 500; // pretend underlying is 500
+  const last = 500;
   const steps = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
   return steps.map((k) => {
     const strike = Math.round((last + k * 5) * 100) / 100;
@@ -116,13 +124,11 @@ function mockChain({ side = "call" }) {
   });
 }
 
-// GET /api/options/meta?symbol=SPY
 router.get("/options/meta", (req, res) => {
   const { symbol = "SPY" } = req.query;
   res.json({ symbol: String(symbol).toUpperCase(), expirations: mockExpirations() });
 });
 
-// GET /api/options/chain?symbol=SPY&expiration=YYYY-MM-DD&side=call|put
 router.get("/options/chain", (req, res) => {
   const { expiration, side = "call" } = req.query;
   if (!expiration)
@@ -131,19 +137,16 @@ router.get("/options/chain", (req, res) => {
 });
 
 /* ---------------------------------- orders ---------------------------------- */
-// lists
 router.get("/trading/orders",     (req, res) => res.json(ORDERS));
 router.get("/trading/executions", (req, res) => res.json(EXECUTIONS));
 router.get("/trading/positions",  (req, res) => res.json(Array.from(POSITIONS.values())));
 
-// place (PAPER)
 router.post("/trading/orders", (req, res) => {
   if (KILL) return res.status(403).json({ ok: false, error: "Kill switch engaged" });
 
   const b = req.body || {};
   const idem = req.header("X-Idempotency-Key") || "";
 
-  // validate payloads
   if (b.assetType === "EQUITY") {
     const { symbol, side, qty, orderType } = b;
     if (!symbol || !side || !qty || !orderType)
@@ -170,15 +173,14 @@ router.post("/trading/orders", (req, res) => {
   };
   ORDERS.unshift(order);
 
-  // instant PAPER fill for market orders; others left WORKING
   const typ = String(b.orderType).toUpperCase();
   if (typ === "MKT" || typ === "MARKET") {
     order.status = "FILLED";
     order.updatedAt = new Date().toISOString();
     const px =
       b.assetType === "OPTION"
-        ? +(b.limitPrice ?? b.stopPrice ?? 2.45).toFixed(2) // premium per contract
-        : +(b.limitPrice ?? b.stopPrice ?? 500.0).toFixed(2); // equity price
+        ? +(b.limitPrice ?? b.stopPrice ?? 2.45).toFixed(2)
+        : +(b.limitPrice ?? b.stopPrice ?? 500.0).toFixed(2);
     const exe = {
       id: nid("EXE"),
       orderId: order.id,
@@ -189,7 +191,6 @@ router.post("/trading/orders", (req, res) => {
     };
     EXECUTIONS.unshift(exe);
 
-    // very simple position math
     const key = exe.symbol;
     const cur = POSITIONS.get(key) || { symbol: key, qty: 0, avgPrice: 0, pnl: 0, realizedPnl: 0 };
     const side = exe.qty >= 0 ? 1 : -1;
@@ -204,7 +205,6 @@ router.post("/trading/orders", (req, res) => {
   res.status(201).json({ id: order.id, status: order.status });
 });
 
-// cancel
 router.delete("/trading/orders/:id", (req, res) => {
   const { id } = req.params;
   const i = ORDERS.findIndex((o) => o.id === id);
@@ -218,8 +218,6 @@ router.delete("/trading/orders/:id", (req, res) => {
 });
 
 /* -------------------------- 10m sectorcards adapter -------------------------- */
-// NOTE: this is mounted under /api in server.js, so this becomes:
-//   GET /api/sectorcards-10m
 router.use("/sectorcards-10m", sectorcards10m);
 
-export default router; // <- default exp
+export default router;
