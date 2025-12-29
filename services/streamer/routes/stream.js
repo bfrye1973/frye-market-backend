@@ -1,56 +1,66 @@
 // services/streamer/routes/stream.js
 // ============================================================================
-// Polygon WS → In-memory cache → SSE stream + snapshot seeding
+// Polygon WebSocket → In-memory cache → SSE stream + Snapshot seeding
 //
 // Endpoints:
 //   GET /stream/agg?symbol=SPY&tf=10m
-//     - SSE stream of live bars + heartbeat
-//     - Immediately emits: type:"snapshot" with cached bars
+//     - SSE stream (type:"snapshot" first, then type:"bar")
+//     - Heartbeat ":ping <ts>" every 15s
 //
 //   GET /stream/snapshot?symbol=SPY&tf=10m&limit=1500
-//     - JSON snapshot of cached bars (no SSE)
+//     - JSON snapshot
+//     - IMPORTANT: If in-memory cache is empty (market closed / streamer restarted),
+//       it FALLS BACK to backend-1 /api/v1/ohlc (historical REST).
 //
-// Why:
-// - Polygon REST may block SAME-DAY intraday AGGs.
-// - WebSocket provides SAME-DAY data.
-// - Cache makes refresh-after-close still show today's session.
+// Why you need this:
+// - Polygon REST can block SAME-DAY intraday aggregates (NOT_AUTHORIZED).
+// - Polygon WebSocket provides SAME-DAY bars, but ONLY while connected.
+// - Cache + snapshot makes refresh-after-close still show "today" (if captured),
+//   and at minimum returns history from backend-1 when cache is empty.
 //
-// Cache Horizons (your spec):
-//   10m  → 2 weeks
-//   30m  → 3 months
-//   1h   → 6 months
-//   4h   → 6 months
-//   1d   → 6 months (note: day bars over WS are not "official", but we can bucket from AM/T)
-//
+// Your requested horizons:
+//   10m  → ~2 weeks
+//   30m  → ~3 months
+//   1h   → ~6 months
+//   4h   → ~6 months
+//   1d   → ~6 months
 // ============================================================================
 
 import express from "express";
-import WebSocket from "ws";
-
+import { WebSocket } from "ws";
 
 const streamRouter = express.Router();
 export default streamRouter;
 
-/* ------------------------------- Settings -------------------------------- */
+/* ------------------------------- Config ---------------------------------- */
 
 const POLY_WS_URL = "wss://socket.polygon.io/stocks";
 
-function resolvePolygonKey() {
-  const keys = [
-    process.env.POLYGON_API,
-    process.env.POLYGON_API_KEY,
-    process.env.POLY_API_KEY,
-  ];
-  return keys.find((k) => k && k.trim()) || "";
-}
+// backend-1 (REST historical) — used ONLY as snapshot fallback
+const HIST_BASE =
+  process.env.HIST_BASE ||
+  process.env.BACKEND1_BASE ||
+  "https://frye-market-backend-1.onrender.com";
 
-// What symbols do we keep hot? (default: SPY, QQQ)
+// Symbols to keep hot (default SPY,QQQ)
 const HOT_SYMBOLS = String(process.env.STREAM_SYMBOLS || "SPY,QQQ")
   .split(",")
   .map((s) => s.trim().toUpperCase())
   .filter(Boolean);
 
-/* ----------------------------- Timeframe utils ---------------------------- */
+// WebSocket subscriptions: minute aggregates + trade ticks as fallback
+const SUBS = HOT_SYMBOLS.flatMap((s) => [`AM.${s}`, `T.${s}`]).join(",");
+
+// Resolve API key
+function resolvePolygonKey() {
+  const keys = [process.env.POLYGON_API, process.env.POLYGON_API_KEY, process.env.POLY_API_KEY];
+  return keys.find((k) => k && k.trim()) || "";
+}
+
+/* --------------------------- Timeframe helpers --------------------------- */
+
+const TRADING_DAYS_PER_MONTH = 21;
+const RTH_MIN_PER_DAY = 390;
 
 function normalizeTf(tf = "10m") {
   const t = String(tf || "").toLowerCase().trim();
@@ -61,7 +71,7 @@ function normalizeTf(tf = "10m") {
   return Number.isFinite(n) && n > 0 ? n : 10;
 }
 
-function tfLabel(tfMin) {
+function labelTf(tfMin) {
   return tfMin >= 1440 ? "1d" : tfMin % 60 === 0 ? `${tfMin / 60}h` : `${tfMin}m`;
 }
 
@@ -70,45 +80,32 @@ function bucketStartSec(unixSec, tfMin) {
   return Math.floor(unixSec / size) * size;
 }
 
-// Convert "months horizon" to max bars using your spec.
-// We store bar buckets per TF, so this is bar-count, not minutes.
-const TRADING_DAYS_PER_MONTH = 21;
-function maxBarsForTf(tfMin) {
-  // 10m → 2 weeks
-  if (tfMin === 10) {
-    const days = 10;                 // ~2 weeks trading days
-    const barsPerDay = 39;           // 390 / 10
-    return days * barsPerDay;
-  }
-  // 30m → 3 months
-  if (tfMin === 30) {
-    const days = 3 * TRADING_DAYS_PER_MONTH; // ~63
-    const barsPerDay = 13;                   // 390 / 30
-    return days * barsPerDay;                // ~819
-  }
-  // 1h → 6 months
-  if (tfMin === 60) {
-    const days = 6 * TRADING_DAYS_PER_MONTH; // ~126
-    const barsPerDay = 7;                    // ~RTH hours
-    return days * barsPerDay;                // ~882
-  }
-  // 4h → 6 months
-  if (tfMin === 240) {
-    const days = 6 * TRADING_DAYS_PER_MONTH; // ~126
-    const barsPerDay = 2;                    // roughly
-    return days * barsPerDay;                // ~252
-  }
-  // 1d → 6 months
-  if (tfMin >= 1440) {
-    const days = 6 * TRADING_DAYS_PER_MONTH; // ~126
-    return days;
-  }
+function barsPerDay(tfMin) {
+  if (tfMin >= 1440) return 1;
+  return Math.max(1, Math.floor(RTH_MIN_PER_DAY / tfMin));
+}
 
-  // Default: keep ~2 weeks worth, scaled conservatively
+// Your horizons → max bar counts
+function maxBarsForTf(tfMin) {
+  // 10m → 2 weeks (~10 trading days)
+  if (tfMin === 10) return 10 * barsPerDay(10); // ~390
+  // 30m → 3 months (~63 trading days)
+  if (tfMin === 30) return (3 * TRADING_DAYS_PER_MONTH) * barsPerDay(30); // ~819
+  // 1h → 6 months (~126 trading days)
+  if (tfMin === 60) return (6 * TRADING_DAYS_PER_MONTH) * 7; // ~882
+  // 4h → 6 months (~126 trading days)
+  if (tfMin === 240) return (6 * TRADING_DAYS_PER_MONTH) * 2; // ~252
+  // 1d → 6 months (~126 trading days)
+  if (tfMin >= 1440) return 6 * TRADING_DAYS_PER_MONTH; // ~126
+
+  // default
   return 500;
 }
 
-/* -------------------------------- SSE utils ------------------------------- */
+// The TFs we actively maintain in cache (your spec)
+const TF_SET = [10, 30, 60, 240, 1440];
+
+/* ------------------------------ SSE helpers ------------------------------ */
 
 function sseHeaders(res) {
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -119,19 +116,21 @@ function sseHeaders(res) {
 
 const sseSend = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
-/* ------------------------- Normalize AM (official 1m) --------------------- */
+/* -------------------------- Polygon event parsers ------------------------- */
+
 // AM payload: { ev:"AM", sym:"SPY", s:<startMs>, o,h,l,c, v }
-function normalizeAM(msg) {
+function parseAM(msg) {
   const symbol = String(msg?.sym || "").toUpperCase();
   const sMs = Number(msg?.s);
   const o = Number(msg?.o), h = Number(msg?.h), l = Number(msg?.l), c = Number(msg?.c);
   const v = Number(msg?.v || 0);
+
   if (!symbol) return null;
   if (![o, h, l, c].every(Number.isFinite)) return null;
   if (!Number.isFinite(sMs) || sMs <= 0) return null;
 
-  const startSec = Math.floor(sMs / 1000);
-  const minuteSec = Math.floor(startSec / 60) * 60;
+  const tSec = Math.floor(sMs / 1000);
+  const minuteSec = Math.floor(tSec / 60) * 60;
 
   return {
     symbol,
@@ -139,20 +138,18 @@ function normalizeAM(msg) {
   };
 }
 
-/* ------------------------------ T tick → 1m ------------------------------- */
-// T payload: { ev:"T", sym, p, s, t (ms) }
-function applyTickTo1m(current1m, tick) {
+// T payload: { ev:"T", sym, p, s, t(ms) }
+function applyTickTo1m(cur1m, tick) {
   const price = Number(tick?.p);
   const size = Number(tick?.s || 0);
   const tMs = Number(tick?.t || 0);
-  const symbol = String(tick?.sym || "").toUpperCase();
-  if (!symbol) return current1m;
-  if (!Number.isFinite(price) || !Number.isFinite(tMs) || tMs <= 0) return current1m;
+
+  if (!Number.isFinite(price) || !Number.isFinite(tMs) || tMs <= 0) return cur1m;
 
   const tSec = Math.floor(tMs / 1000);
   const bucketSec = Math.floor(tSec / 60) * 60;
 
-  if (!current1m || current1m.time < bucketSec) {
+  if (!cur1m || cur1m.time < bucketSec) {
     return {
       time: bucketSec,
       open: price,
@@ -163,7 +160,7 @@ function applyTickTo1m(current1m, tick) {
     };
   }
 
-  const b = { ...current1m };
+  const b = { ...cur1m };
   b.high = Math.max(b.high, price);
   b.low = Math.min(b.low, price);
   b.close = price;
@@ -171,35 +168,30 @@ function applyTickTo1m(current1m, tick) {
   return b;
 }
 
-/* ------------------------------ In-memory cache ---------------------------- */
+/* ---------------------------- In-memory caches ---------------------------- */
 
-// cacheBars[symbol][tfMin] = array of tf bars (ascending)
-const cacheBars = new Map(); // symbol -> Map(tfMin -> bars[])
-const tickBuilt1m = new Map(); // symbol -> rolling 1m from ticks (when AM quiet)
-const lastAmAtMs = new Map();  // symbol -> last AM time seen
+// cacheBars: symbol -> Map(tfMin -> barsAsc[])
+const cacheBars = new Map();
 
-function ensureSymbol(symbol) {
+// rolling 1m from trades (if AM is quiet)
+const tick1m = new Map();         // symbol -> bar1m
+const lastAmMs = new Map();       // symbol -> ms timestamp when AM last seen
+
+function symMap(symbol) {
   if (!cacheBars.has(symbol)) cacheBars.set(symbol, new Map());
   return cacheBars.get(symbol);
 }
 
 function pushRing(arr, bar, maxLen) {
-  if (!arr) arr = [];
-  const n = arr.length;
+  if (!Array.isArray(arr)) arr = [];
 
-  if (n === 0) {
+  if (arr.length === 0) {
     arr.push(bar);
-    return arr;
-  }
-
-  const last = arr[n - 1];
-  if (bar.time > last.time) {
-    arr.push(bar);
-  } else if (bar.time === last.time) {
-    arr[n - 1] = bar;
   } else {
-    // out-of-order; ignore
-    return arr;
+    const last = arr[arr.length - 1];
+    if (bar.time > last.time) arr.push(bar);
+    else if (bar.time === last.time) arr[arr.length - 1] = bar;
+    // older out-of-order bars are ignored
   }
 
   if (arr.length > maxLen) arr.splice(0, arr.length - maxLen);
@@ -207,110 +199,106 @@ function pushRing(arr, bar, maxLen) {
 }
 
 function fold1mIntoTf(symbol, b1m, tfMin) {
-  const symMap = ensureSymbol(symbol);
-  const bars = symMap.get(tfMin) || [];
-
-  const bucket = bucketStartSec(b1m.time, tfMin);
+  const m = symMap(symbol);
+  const bars = m.get(tfMin) || [];
   const maxLen = maxBarsForTf(tfMin);
 
-  let next;
+  const bucket = bucketStartSec(b1m.time, tfMin);
+
   if (bars.length === 0) {
-    next = pushRing(bars, {
+    const first = {
       time: bucket,
       open: b1m.open,
       high: b1m.high,
-      low:  b1m.low,
-      close:b1m.close,
+      low: b1m.low,
+      close: b1m.close,
       volume: Number(b1m.volume || 0),
-    }, maxLen);
-  } else {
-    const last = bars[bars.length - 1];
-    if (last.time < bucket) {
-      next = pushRing(bars, {
-        time: bucket,
-        open: b1m.open,
-        high: b1m.high,
-        low:  b1m.low,
-        close:b1m.close,
-        volume: Number(b1m.volume || 0),
-      }, maxLen);
-    } else if (last.time === bucket) {
-      const updated = { ...last };
-      updated.high = Math.max(updated.high, b1m.high);
-      updated.low  = Math.min(updated.low,  b1m.low);
-      updated.close = b1m.close;
-      updated.volume = Number(updated.volume || 0) + Number(b1m.volume || 0);
-      bars[bars.length - 1] = updated;
-      next = pushRing(bars, updated, maxLen);
-    } else {
-      next = bars;
-    }
+    };
+    const next = pushRing(bars, first, maxLen);
+    m.set(tfMin, next);
+    return next[next.length - 1] || null;
   }
 
-  symMap.set(tfMin, next);
-  return next[next.length - 1] || null;
+  const last = bars[bars.length - 1];
+
+  if (last.time < bucket) {
+    const nb = {
+      time: bucket,
+      open: b1m.open,
+      high: b1m.high,
+      low: b1m.low,
+      close: b1m.close,
+      volume: Number(b1m.volume || 0),
+    };
+    const next = pushRing(bars, nb, maxLen);
+    m.set(tfMin, next);
+    return next[next.length - 1] || null;
+  }
+
+  if (last.time === bucket) {
+    const upd = { ...last };
+    upd.high = Math.max(upd.high, b1m.high);
+    upd.low = Math.min(upd.low, b1m.low);
+    upd.close = b1m.close;
+    upd.volume = Number(upd.volume || 0) + Number(b1m.volume || 0);
+    bars[bars.length - 1] = upd;
+    const next = pushRing(bars, upd, maxLen);
+    m.set(tfMin, next);
+    return next[next.length - 1] || null;
+  }
+
+  return last;
 }
 
-/* --------------------------- Live fanout to clients ------------------------ */
+/* ------------------------- SSE subscriber registry ------------------------ */
 
-// subscribers: {res, symbol, tfMin}
-const subscribers = new Set();
+const subscribers = new Set(); // { res, symbol, tfMin }
 
 function broadcast(symbol, tfMin, bar) {
-  const label = tfLabel(tfMin);
+  const tf = labelTf(tfMin);
   for (const sub of subscribers) {
     if (sub.symbol === symbol && sub.tfMin === tfMin) {
       try {
-        sseSend(sub.res, { ok: true, type: "bar", symbol, tf: label, bar });
+        sseSend(sub.res, { ok: true, type: "bar", symbol, tf, bar });
       } catch {}
     }
   }
 }
 
-/* -------------------------- Polygon WS (global) ---------------------------- */
+/* --------------------------- Polygon WS (global) --------------------------- */
 
 let ws = null;
-let wsStarted = false;
-let wsBackoff = 1000;
-let wsReconnectTimer = null;
+let backoffMs = 1000;
+let reconnectTimer = null;
 
-function wsCleanup() {
+function cleanupWs() {
   try { ws?.close?.(); } catch {}
   ws = null;
 }
 
-function scheduleWsReconnect() {
-  clearTimeout(wsReconnectTimer);
-  wsBackoff = Math.min(Math.floor(wsBackoff * 1.5), 15000);
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  backoffMs = Math.min(Math.floor(backoffMs * 1.5), 15000);
   const jitter = Math.floor(Math.random() * 250);
-  wsReconnectTimer = setTimeout(startWs, wsBackoff + jitter);
+  reconnectTimer = setTimeout(startWs, backoffMs + jitter);
 }
 
 function startWs() {
   const key = resolvePolygonKey();
   if (!key) {
-    console.log("[stream] Missing Polygon key — WS not started");
+    console.log("[stream] Missing Polygon API key — WS not started");
     return;
   }
-  if (wsStarted) return;
-  wsStarted = true;
 
   console.log("[stream] Starting Polygon WS…");
   ws = new WebSocket(POLY_WS_URL);
 
   ws.onopen = () => {
-    wsBackoff = 1000;
+    backoffMs = 1000;
     console.log("[stream] WS open → auth + subscribe");
-
     ws.send(JSON.stringify({ action: "auth", params: key }));
-
-    const subs = [];
-    for (const sym of HOT_SYMBOLS) {
-      subs.push(`AM.${sym}`); // minute aggregates
-      subs.push(`T.${sym}`);  // trades as fallback
-    }
-    ws.send(JSON.stringify({ action: "subscribe", params: subs.join(",") }));
-    console.log("[stream] subscribed:", subs.join(","));
+    ws.send(JSON.stringify({ action: "subscribe", params: SUBS }));
+    console.log("[stream] subscribed:", SUBS);
   };
 
   ws.onmessage = (ev) => {
@@ -319,136 +307,135 @@ function startWs() {
     if (!Array.isArray(arr)) arr = [arr];
 
     for (const msg of arr) {
-      const t = msg?.ev;
+      const type = msg?.ev;
 
-      if (t === "status") {
-        // Useful for debugging:
+      if (type === "status") {
+        // Uncomment if you want to see auth errors:
         // console.log("[stream] status:", msg?.status, msg?.message);
         continue;
       }
 
-      if (t === "AM") {
-        const am = normalizeAM(msg);
+      if (type === "AM") {
+        const am = parseAM(msg);
         if (!am) continue;
-        const symbol = am.symbol;
 
-        lastAmAtMs.set(symbol, Date.now());
-        tickBuilt1m.set(symbol, null);
+        const { symbol, bar1m } = am;
+        lastAmMs.set(symbol, Date.now());
+        tick1m.set(symbol, null);
 
-        // Update caches for the timeframes we care about
-        const b1m = am.bar1m;
-
-        // 10m, 30m, 1h, 4h, 1d
-        const last10 = fold1mIntoTf(symbol, b1m, 10);
-        if (last10) broadcast(symbol, 10, last10);
-
-        const last30 = fold1mIntoTf(symbol, b1m, 30);
-        if (last30) broadcast(symbol, 30, last30);
-
-        const last60 = fold1mIntoTf(symbol, b1m, 60);
-        if (last60) broadcast(symbol, 60, last60);
-
-        const last240 = fold1mIntoTf(symbol, b1m, 240);
-        if (last240) broadcast(symbol, 240, last240);
-
-        const last1d = fold1mIntoTf(symbol, b1m, 1440);
-        if (last1d) broadcast(symbol, 1440, last1d);
-
+        // Fold into all cached TFs
+        for (const tfMin of TF_SET) {
+          const out = fold1mIntoTf(symbol, bar1m, tfMin);
+          if (out) broadcast(symbol, tfMin, out);
+        }
         continue;
       }
 
-      if (t === "T") {
+      if (type === "T") {
         const symbol = String(msg?.sym || "").toUpperCase();
         if (!symbol) continue;
 
-        // If AM is fresh, ignore ticks to avoid double printing
-        const amFresh = Date.now() - (lastAmAtMs.get(symbol) || 0) < 120000;
+        // if AM is fresh, ignore trades to avoid double printing
+        const amFresh = Date.now() - (lastAmMs.get(symbol) || 0) < 120000;
         if (amFresh) continue;
 
-        const cur = tickBuilt1m.get(symbol) || null;
+        const cur = tick1m.get(symbol) || null;
         const next = applyTickTo1m(cur, msg);
-        tickBuilt1m.set(symbol, next);
+        tick1m.set(symbol, next);
         if (!next) continue;
 
-        // Fold tick-built 1m into caches too
-        const last10 = fold1mIntoTf(symbol, next, 10);
-        if (last10) broadcast(symbol, 10, last10);
-
-        const last30 = fold1mIntoTf(symbol, next, 30);
-        if (last30) broadcast(symbol, 30, last30);
-
-        const last60 = fold1mIntoTf(symbol, next, 60);
-        if (last60) broadcast(symbol, 60, last60);
-
-        const last240 = fold1mIntoTf(symbol, next, 240);
-        if (last240) broadcast(symbol, 240, last240);
-
-        const last1d = fold1mIntoTf(symbol, next, 1440);
-        if (last1d) broadcast(symbol, 1440, last1d);
-
-        continue;
+        for (const tfMin of TF_SET) {
+          const out = fold1mIntoTf(symbol, next, tfMin);
+          if (out) broadcast(symbol, tfMin, out);
+        }
       }
     }
   };
 
   ws.onerror = () => {
     console.log("[stream] WS error → reconnect");
-    wsCleanup();
-    wsStarted = false;
-    scheduleWsReconnect();
+    cleanupWs();
+    scheduleReconnect();
   };
 
   ws.onclose = () => {
     console.log("[stream] WS closed → reconnect");
-    wsCleanup();
-    wsStarted = false;
-    scheduleWsReconnect();
+    cleanupWs();
+    scheduleReconnect();
   };
 }
 
-// Start WS immediately when this module loads
 startWs();
 
+/* --------------------------- Snapshot fallback (REST) ---------------------- */
+
+async function fetchHistoryFromBackend1(symbol, tf, limit) {
+  const base = String(HIST_BASE || "").replace(/\/+$/, "");
+  const url =
+    `${base}/api/v1/ohlc?symbol=${encodeURIComponent(symbol)}` +
+    `&timeframe=${encodeURIComponent(tf)}` +
+    `&limit=${encodeURIComponent(limit)}`;
+
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`backend1 ${r.status}`);
+  const j = await r.json();
+
+  // backend-1 returns an array of bars
+  const arr = Array.isArray(j) ? j : (Array.isArray(j?.bars) ? j.bars : []);
+  return Array.isArray(arr) ? arr : [];
+}
+
 /* --------------------------- GET /stream/snapshot -------------------------- */
-// JSON snapshot (for chart seeding after close)
-streamRouter.get("/snapshot", (req, res) => {
-  const symbol = String(req.query.symbol || "SPY").toUpperCase();
-  const tfMin = normalizeTf(req.query.tf || "10m");
-  const limit = Math.max(1, Math.min(50000, Number(req.query.limit || 1500)));
+// Returns cached bars; if empty, falls back to backend-1 historical.
+streamRouter.get("/snapshot", async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || "SPY").toUpperCase();
+    const tfMin = normalizeTf(req.query.tf || "10m");
+    const tf = labelTf(tfMin);
+    const limit = Math.max(1, Math.min(50000, Number(req.query.limit || 1500)));
 
-  const symMap = cacheBars.get(symbol);
-  const list = symMap?.get(tfMin) || [];
-  const bars = list.length > limit ? list.slice(-limit) : list;
+    const m = cacheBars.get(symbol);
+    const list = m?.get(tfMin) || [];
+    const bars = list.length > limit ? list.slice(-limit) : list;
 
-  res.setHeader("Cache-Control", "no-store");
-  return res.json({ ok: true, type: "snapshot", symbol, tf: tfLabel(tfMin), bars });
+    // If cache empty (market closed / streamer restarted), seed from backend-1 history
+    if (!bars || bars.length === 0) {
+      const hist = await fetchHistoryFromBackend1(symbol, tf, limit).catch(() => []);
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({ ok: true, type: "snapshot", symbol, tf, bars: hist });
+    }
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({ ok: true, type: "snapshot", symbol, tf, bars });
+  } catch (e) {
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(502).json({ ok: false, error: "snapshot_error", detail: String(e?.message || e) });
+  }
 });
 
-/* ---------------------------- GET /stream/agg ----------------------------- */
-// SSE: emits snapshot first, then live bars
+/* ---------------------------- GET /stream/agg (SSE) ------------------------ */
+// Emits snapshot immediately, then live "bar" updates.
 streamRouter.get("/agg", (req, res) => {
   const apiKey = resolvePolygonKey();
   if (!apiKey) return res.status(500).end("Missing Polygon API key");
 
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
   const tfMin = normalizeTf(req.query.tf || "10m");
-  const label = tfLabel(tfMin);
+  const tf = labelTf(tfMin);
 
   sseHeaders(res);
 
-  let alive = true;
-
-  // Immediately send snapshot if we have it
+  // send snapshot first (cached only; frontend can use /stream/snapshot for REST fallback)
   try {
-    const symMap = cacheBars.get(symbol);
-    const list = symMap?.get(tfMin) || [];
-    sseSend(res, { ok: true, type: "snapshot", symbol, tf: label, bars: list });
+    const m = cacheBars.get(symbol);
+    const list = m?.get(tfMin) || [];
+    sseSend(res, { ok: true, type: "snapshot", symbol, tf, bars: list });
   } catch {}
 
   const sub = { res, symbol, tfMin };
   subscribers.add(sub);
 
-  // Keepalive ping
+  let alive = true;
   const ping = setInterval(() => alive && res.write(`:ping ${Date.now()}\n\n`), 15000);
 
   req.on("close", () => {
