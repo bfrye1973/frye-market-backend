@@ -25,7 +25,8 @@
 // ============================================================================
 
 import express from "express";
-import { WebSocket } from "ws";
+import WebSocket from "ws";
+
 
 const streamRouter = express.Router();
 export default streamRouter;
