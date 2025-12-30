@@ -1,33 +1,34 @@
 // services/streamer/routes/stream.js
 // ============================================================================
-// Polygon WebSocket → In-memory cache → SSE stream + Snapshot seeding
+// Polygon WebSocket → In-memory cache → SSE stream + Snapshot seeding (RTH default)
+//
+// ✅ Default mode: RTH (TradingView-aligned)
+//   - Session: 09:30–16:00 America/New_York
+//   - Buckets are anchored to 09:30 ET (NOT UTC math)
+//   - Display timezone (Phoenix) is handled by frontend; this file controls timestamps only.
+//
+// ✅ Supports future toggle: mode=rth|eth
+//   - mode=rth (default): session-aligned, RTH-only
+//   - mode=eth: includes extended hours (continuous buckets; no session filter)
 //
 // Endpoints:
-//   GET /stream/agg?symbol=SPY&tf=10m
+//   GET /stream/snapshot?symbol=SPY&tf=10m&limit=1500&mode=rth|eth
+//     - JSON snapshot of bars
+//     - Uses cache if present
+//     - If cache empty: pulls 1m history from backend-1, then REBUCKETS here (RTH/ETH)
+//       so candles match TradingView even after close / restart.
+//
+//   GET /stream/agg?symbol=SPY&tf=10m&mode=rth|eth
 //     - SSE stream (type:"snapshot" first, then type:"bar")
 //     - Heartbeat ":ping <ts>" every 15s
+//     - Output throttled to 1 bar/sec per (symbol, tf, mode)
 //
-//   GET /stream/snapshot?symbol=SPY&tf=10m&limit=1500
-//     - JSON snapshot
-//     - If in-memory cache is empty (market closed / streamer restarted),
-//       FALLS BACK to backend-1 /api/v1/ohlc (historical REST).
-//
-// Your requested horizons:
+// Horizons (your spec):
 //   10m  → ~2 weeks
 //   30m  → ~3 months
 //   1h   → ~6 months
 //   4h   → ~6 months
 //   1d   → ~6 months
-//
-// NEW (Throttle):
-// - SSE "bar" emits are throttled to at most 1 update / second per (symbol, tf).
-//
-// NEW (RTH alignment):
-// - Bucketing is aligned to NYSE Regular Trading Hours (RTH) boundaries:
-//   - Session open anchor: 09:30 America/New_York
-//   - Session close cutoff: 16:00 America/New_York
-// - This makes 10m/30m/1h/4h candle structure match TradingView (RTH mode).
-// - We still DISPLAY Phoenix time in the frontend; this file only controls bucket timestamps.
 // ============================================================================
 
 import express from "express";
@@ -41,7 +42,7 @@ export default streamRouter;
 
 const POLY_WS_URL = "wss://socket.polygon.io/stocks";
 
-// backend-1 (REST historical) — used ONLY as snapshot fallback
+// backend-1 (REST historical) base — used for snapshot fallback/backfill
 const HIST_BASE =
   process.env.HIST_BASE ||
   process.env.BACKEND1_BASE ||
@@ -53,19 +54,23 @@ const HOT_SYMBOLS = String(process.env.STREAM_SYMBOLS || "SPY,QQQ")
   .map((s) => s.trim().toUpperCase())
   .filter(Boolean);
 
-// WebSocket subscriptions: minute aggregates + trade ticks as fallback
+// WS subscriptions: minute aggregates + trade ticks fallback
 const SUBS = HOT_SYMBOLS.flatMap((s) => [`AM.${s}`, `T.${s}`]).join(",");
 
-// Resolve API key
+// Resolve Polygon API key
 function resolvePolygonKey() {
-  const keys = [process.env.POLYGON_API, process.env.POLYGON_API_KEY, process.env.POLY_API_KEY];
+  const keys = [
+    process.env.POLYGON_API,
+    process.env.POLYGON_API_KEY,
+    process.env.POLY_API_KEY,
+  ];
   return keys.find((k) => k && k.trim()) || "";
 }
 
 /* --------------------------- Timeframe helpers --------------------------- */
 
 const TRADING_DAYS_PER_MONTH = 21;
-const RTH_MIN_PER_DAY = 390; // 6.5h * 60
+const RTH_MIN_PER_DAY = 390;
 
 function normalizeTf(tf = "10m") {
   const t = String(tf || "").toLowerCase().trim();
@@ -85,66 +90,75 @@ function barsPerDay(tfMin) {
   return Math.max(1, Math.floor(RTH_MIN_PER_DAY / tfMin));
 }
 
-// Your horizons → max bar counts
 function maxBarsForTf(tfMin) {
-  // 10m → 2 weeks (~10 trading days)
-  if (tfMin === 10) return 10 * barsPerDay(10); // ~390
-  // 30m → 3 months (~63 trading days)
-  if (tfMin === 30) return (3 * TRADING_DAYS_PER_MONTH) * barsPerDay(30); // ~819
-  // 1h → 6 months (~126 trading days)
-  if (tfMin === 60) return (6 * TRADING_DAYS_PER_MONTH) * 7; // ~882
-  // 4h → 6 months (~126 trading days)
-  if (tfMin === 240) return (6 * TRADING_DAYS_PER_MONTH) * 2; // ~252
-  // 1d → 6 months (~126 trading days)
-  if (tfMin >= 1440) return 6 * TRADING_DAYS_PER_MONTH; // ~126
-
-  // default
+  if (tfMin === 10) return 10 * barsPerDay(10); // ~2 weeks (10 trading days)
+  if (tfMin === 30) return (3 * TRADING_DAYS_PER_MONTH) * barsPerDay(30); // ~3 months
+  if (tfMin === 60) return (6 * TRADING_DAYS_PER_MONTH) * 7; // ~6 months
+  if (tfMin === 240) return (6 * TRADING_DAYS_PER_MONTH) * 2; // ~6 months
+  if (tfMin >= 1440) return 6 * TRADING_DAYS_PER_MONTH; // ~6 months
   return 500;
 }
 
-// The TFs we actively maintain in cache (your spec)
+// We maintain these TFs in cache (your spec)
 const TF_SET = [10, 30, 60, 240, 1440];
 
+/* ----------------------------- Mode helpers ------------------------------ */
+
+function normalizeMode(mode) {
+  const m = String(mode || "rth").toLowerCase().trim();
+  return m === "eth" ? "eth" : "rth";
+}
+
 /* ------------------------------ RTH bucketing ----------------------------- */
-// Default candle mode: RTH (TradingView-like).
-// - Only accepts bars that fall within 09:30–16:00 America/New_York.
-// - Anchors buckets to 09:30 ET.
-// - Daily is bucketed at NY midnight (00:00 ET) for standard daily bar timestamps.
 
 const NY_ZONE = "America/New_York";
-const RTH_OPEN_H = 9;
-const RTH_OPEN_M = 30;
-const RTH_CLOSE_H = 16;
-const RTH_CLOSE_M = 0;
 
-function getNyDayAnchorSecs(unixSec) {
+function getNyDayAnchors(unixSec) {
   const ny = DateTime.fromSeconds(unixSec, { zone: NY_ZONE });
   const dayStart = ny.startOf("day");
-  const open = dayStart.plus({ hours: RTH_OPEN_H, minutes: RTH_OPEN_M });
-  const close = dayStart.plus({ hours: RTH_CLOSE_H, minutes: RTH_CLOSE_M });
+  const open = dayStart.plus({ hours: 9, minutes: 30 });
+  const close = dayStart.plus({ hours: 16, minutes: 0 });
+
   return {
+    dayStartSec: Math.floor(dayStart.toSeconds()),
     openSec: Math.floor(open.toSeconds()),
     closeSec: Math.floor(close.toSeconds()),
-    dayStartSec: Math.floor(dayStart.toSeconds()),
   };
 }
 
+// RTH bucket: anchored to 09:30 ET, filtered to session only.
 function bucketStartSecRth(unixSec, tfMin) {
-  const { openSec, closeSec, dayStartSec } = getNyDayAnchorSecs(unixSec);
+  const { dayStartSec, openSec, closeSec } = getNyDayAnchors(unixSec);
 
-  // Daily bars: bucket at NY midnight
+  // Daily: bucket at NY midnight
   if (tfMin >= 1440) return dayStartSec;
 
-  // RTH only: ignore anything outside session
+  // Reject bars outside session
   if (unixSec < openSec || unixSec >= closeSec) return null;
 
   const size = tfMin * 60;
   const idx = Math.floor((unixSec - openSec) / size);
   const bucket = openSec + idx * size;
 
-  // extra safety: bucket must start before close
   if (bucket >= closeSec) return null;
   return bucket;
+}
+
+// ETH bucket: continuous UTC bucket (includes all sessions). (Simple, toggle later)
+function bucketStartSecEth(unixSec, tfMin) {
+  if (tfMin >= 1440) {
+    // daily in NY time even for ETH; keeps day boundaries consistent
+    const { dayStartSec } = getNyDayAnchors(unixSec);
+    return dayStartSec;
+  }
+  const size = tfMin * 60;
+  return Math.floor(unixSec / size) * size;
+}
+
+function bucketStartSecByMode(unixSec, tfMin, mode) {
+  return mode === "eth"
+    ? bucketStartSecEth(unixSec, tfMin)
+    : bucketStartSecRth(unixSec, tfMin);
 }
 
 /* ------------------------------ SSE helpers ------------------------------ */
@@ -160,21 +174,14 @@ const sseSend = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
 /* --------------------------- Throttle (1 Hz) --------------------------- */
 
-// lastEmit[symbol] => Map(tfMin -> lastMs)
+// lastEmit key: `${symbol}|${tfMin}|${mode}`
 const lastEmit = new Map();
 
-function canEmit(symbol, tfMin, intervalMs = 1000) {
-  let m = lastEmit.get(symbol);
-  if (!m) {
-    m = new Map();
-    lastEmit.set(symbol, m);
-  }
-
+function canEmit(key, intervalMs = 1000) {
   const now = Date.now();
-  const last = m.get(tfMin) || 0;
-
+  const last = lastEmit.get(key) || 0;
   if (now - last >= intervalMs) {
-    m.set(tfMin, now);
+    lastEmit.set(key, now);
     return true;
   }
   return false;
@@ -234,16 +241,21 @@ function applyTickTo1m(cur1m, tick) {
 
 /* ---------------------------- In-memory caches ---------------------------- */
 
-// cacheBars: symbol -> Map(tfMin -> barsAsc[])
+// cacheBars: key `${symbol}|${mode}` -> Map(tfMin -> barsAsc[])
 const cacheBars = new Map();
 
 // rolling 1m from trades (if AM is quiet)
-const tick1m = new Map();         // symbol -> bar1m
-const lastAmMs = new Map();       // symbol -> ms timestamp when AM last seen
+const tick1m = new Map();   // symbol -> bar1m
+const lastAmMs = new Map(); // symbol -> ms timestamp when AM last seen
 
-function symMap(symbol) {
-  if (!cacheBars.has(symbol)) cacheBars.set(symbol, new Map());
-  return cacheBars.get(symbol);
+function cacheKey(symbol, mode) {
+  return `${symbol}|${mode}`;
+}
+
+function getCacheMap(symbol, mode) {
+  const key = cacheKey(symbol, mode);
+  if (!cacheBars.has(key)) cacheBars.set(key, new Map());
+  return cacheBars.get(key);
 }
 
 function pushRing(arr, bar, maxLen) {
@@ -255,20 +267,19 @@ function pushRing(arr, bar, maxLen) {
     const last = arr[arr.length - 1];
     if (bar.time > last.time) arr.push(bar);
     else if (bar.time === last.time) arr[arr.length - 1] = bar;
-    // older out-of-order bars are ignored
   }
 
   if (arr.length > maxLen) arr.splice(0, arr.length - maxLen);
   return arr;
 }
 
-function fold1mIntoTf(symbol, b1m, tfMin) {
-  const m = symMap(symbol);
+function fold1mIntoTf(symbol, b1m, tfMin, mode) {
+  const m = getCacheMap(symbol, mode);
   const bars = m.get(tfMin) || [];
   const maxLen = maxBarsForTf(tfMin);
 
-  const bucket = bucketStartSecRth(b1m.time, tfMin);
-  if (bucket === null) return null; // outside RTH for intraday
+  const bucket = bucketStartSecByMode(b1m.time, tfMin, mode);
+  if (bucket === null) return null; // RTH out-of-session
 
   if (bars.length === 0) {
     const first = {
@@ -317,17 +328,17 @@ function fold1mIntoTf(symbol, b1m, tfMin) {
 
 /* ------------------------- SSE subscriber registry ------------------------ */
 
-const subscribers = new Set(); // { res, symbol, tfMin }
+const subscribers = new Set(); // { res, symbol, tfMin, mode }
 
-function broadcast(symbol, tfMin, bar) {
-  // Throttle OUTPUT to 1 update / second per symbol + timeframe
-  if (!canEmit(symbol, tfMin, 1000)) return;
+function broadcast(symbol, tfMin, mode, bar) {
+  const key = `${symbol}|${tfMin}|${mode}`;
+  if (!canEmit(key, 1000)) return;
 
   const tf = labelTf(tfMin);
   for (const sub of subscribers) {
-    if (sub.symbol === symbol && sub.tfMin === tfMin) {
+    if (sub.symbol === symbol && sub.tfMin === tfMin && sub.mode === mode) {
       try {
-        sseSend(sub.res, { ok: true, type: "bar", symbol, tf, bar });
+        sseSend(sub.res, { ok: true, type: "bar", symbol, tf, mode, bar });
       } catch {}
     }
   }
@@ -377,11 +388,7 @@ function startWs() {
     for (const msg of arr) {
       const type = msg?.ev;
 
-      if (type === "status") {
-        // Uncomment for diagnostics:
-        // console.log("[stream] status:", msg?.status, msg?.message);
-        continue;
-      }
+      if (type === "status") continue;
 
       if (type === "AM") {
         const am = parseAM(msg);
@@ -391,10 +398,12 @@ function startWs() {
         lastAmMs.set(symbol, Date.now());
         tick1m.set(symbol, null);
 
-        // Fold into all cached TFs
-        for (const tfMin of TF_SET) {
-          const out = fold1mIntoTf(symbol, bar1m, tfMin);
-          if (out) broadcast(symbol, tfMin, out);
+        // Fold into BOTH modes so toggle works later without refetching:
+        for (const mode of ["rth", "eth"]) {
+          for (const tfMin of TF_SET) {
+            const out = fold1mIntoTf(symbol, bar1m, tfMin, mode);
+            if (out) broadcast(symbol, tfMin, mode, out);
+          }
         }
         continue;
       }
@@ -403,7 +412,6 @@ function startWs() {
         const symbol = String(msg?.sym || "").toUpperCase();
         if (!symbol) continue;
 
-        // If AM is fresh, ignore trades to avoid double printing
         const amFresh = Date.now() - (lastAmMs.get(symbol) || 0) < 120000;
         if (amFresh) continue;
 
@@ -412,78 +420,140 @@ function startWs() {
         tick1m.set(symbol, next);
         if (!next) continue;
 
-        // Fold into cached TFs (RTH-only bucketing will drop out-of-session)
-        for (const tfMin of TF_SET) {
-          const out = fold1mIntoTf(symbol, next, tfMin);
-          if (out) broadcast(symbol, tfMin, out);
+        for (const mode of ["rth", "eth"]) {
+          for (const tfMin of TF_SET) {
+            const out = fold1mIntoTf(symbol, next, tfMin, mode);
+            if (out) broadcast(symbol, tfMin, mode, out);
+          }
         }
       }
     }
   };
 
-  ws.onerror = () => {
-    console.log("[stream] WS error → reconnect");
-    cleanupWs();
-    scheduleReconnect();
-  };
-
-  ws.onclose = () => {
-    console.log("[stream] WS closed → reconnect");
-    cleanupWs();
-    scheduleReconnect();
-  };
+  ws.onerror = () => { cleanupWs(); scheduleReconnect(); };
+  ws.onclose = () => { cleanupWs(); scheduleReconnect(); };
 }
 
 startWs();
 
 /* --------------------------- Snapshot fallback (REST) ---------------------- */
 
-async function fetchHistoryFromBackend1(symbol, tf, limit) {
+// Fetch 1m history from backend-1 then re-bucket HERE so RTH candles match TV.
+async function fetch1mFromBackend1(symbol, limit1m) {
   const base = String(HIST_BASE || "").replace(/\/+$/, "");
   const url =
     `${base}/api/v1/ohlc?symbol=${encodeURIComponent(symbol)}` +
-    `&timeframe=${encodeURIComponent(tf)}` +
-    `&limit=${encodeURIComponent(limit)}`;
+    `&timeframe=1m&limit=${encodeURIComponent(limit1m)}`;
 
   const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) throw new Error(`backend1 ${r.status}`);
   const j = await r.json();
-
-  // backend-1 returns an array of bars
   const arr = Array.isArray(j) ? j : (Array.isArray(j?.bars) ? j.bars : []);
   return Array.isArray(arr) ? arr : [];
 }
 
+function normalizeBar1m(b) {
+  const t = Number(b?.time ?? b?.t ?? b?.ts ?? b?.timestamp);
+  const o = Number(b?.open ?? b?.o);
+  const h = Number(b?.high ?? b?.h);
+  const l = Number(b?.low ?? b?.l);
+  const c = Number(b?.close ?? b?.c);
+  const v = Number(b?.volume ?? b?.v ?? 0);
+  if (![t, o, h, l, c].every(Number.isFinite)) return null;
+  return { time: t, open: o, high: h, low: l, close: c, volume: Number.isFinite(v) ? v : 0 };
+}
+
+// Build bars for requested tfMin from 1m list, using mode bucketing.
+function buildTfFrom1m(symbol, tfMin, mode, bars1mAsc, limitOut) {
+  const out = [];
+  let cur = null;
+
+  for (const b of bars1mAsc) {
+    const bucket = bucketStartSecByMode(b.time, tfMin, mode);
+    if (bucket === null) continue;
+
+    if (!cur || cur.time < bucket) {
+      if (cur) out.push(cur);
+      cur = {
+        time: bucket,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: Number(b.volume || 0),
+      };
+    } else {
+      cur.high = Math.max(cur.high, b.high);
+      cur.low = Math.min(cur.low, b.low);
+      cur.close = b.close;
+      cur.volume = Number(cur.volume || 0) + Number(b.volume || 0);
+    }
+  }
+
+  if (cur) out.push(cur);
+  if (out.length > limitOut) return out.slice(-limitOut);
+  return out;
+}
+
+// Compute how many 1m bars we need to backfill for each tf horizon.
+function need1mCountForTf(tfMin) {
+  // cap to Polygon ~50k 1m bars
+  const CAP = 50000;
+  if (tfMin === 10) return Math.min(CAP, 390 * 10);                // ~2 weeks
+  if (tfMin === 30) return Math.min(CAP, 390 * (3 * TRADING_DAYS_PER_MONTH)); // ~3 months
+  if (tfMin === 60) return Math.min(CAP, 390 * (6 * TRADING_DAYS_PER_MONTH)); // ~6 months (~49140)
+  if (tfMin === 240) return Math.min(CAP, 390 * (6 * TRADING_DAYS_PER_MONTH)); // same 1m input
+  if (tfMin >= 1440) return Math.min(CAP, 390 * (6 * TRADING_DAYS_PER_MONTH)); // still fine
+  return Math.min(CAP, 5000);
+}
+
 /* --------------------------- GET /stream/snapshot -------------------------- */
-// Returns cached bars; if empty, falls back to backend-1 historical.
+// mode=rth|eth (default rth)
 streamRouter.get("/snapshot", async (req, res) => {
   try {
     const symbol = String(req.query.symbol || "SPY").toUpperCase();
     const tfMin = normalizeTf(req.query.tf || "10m");
     const tf = labelTf(tfMin);
     const limit = Math.max(1, Math.min(50000, Number(req.query.limit || 1500)));
+    const mode = normalizeMode(req.query.mode);
 
-    const m = cacheBars.get(symbol);
-    const list = m?.get(tfMin) || [];
-    const bars = list.length > limit ? list.slice(-limit) : list;
-
-    // If cache empty (market closed / streamer restarted), seed from backend-1 history
-    if (!bars || bars.length === 0) {
-      const hist = await fetchHistoryFromBackend1(symbol, tf, limit).catch(() => []);
+    // 1) Use cache if available
+    const m = cacheBars.get(cacheKey(symbol, mode));
+    const cached = m?.get(tfMin) || [];
+    if (cached.length > 0) {
+      const bars = cached.length > limit ? cached.slice(-limit) : cached;
       res.setHeader("Cache-Control", "no-store");
-      return res.json({ ok: true, type: "snapshot", symbol, tf, bars: hist });
+      return res.json({ ok: true, type: "snapshot", symbol, tf, mode, bars });
     }
 
+    // 2) Cache empty → backfill 1m from backend-1 then re-bucket HERE (RTH-aligned)
+    const need1m = need1mCountForTf(tfMin);
+    const raw1m = await fetch1mFromBackend1(symbol, need1m).catch(() => []);
+    const oneMin = raw1m
+      .map(normalizeBar1m)
+      .filter(Boolean)
+      .sort((a, b) => a.time - b.time);
+
+    const built = buildTfFrom1m(symbol, tfMin, mode, oneMin, limit);
+
+    // Store it into cache for this mode so next call is instant
+    const mm = getCacheMap(symbol, mode);
+    mm.set(tfMin, built);
+
     res.setHeader("Cache-Control", "no-store");
-    return res.json({ ok: true, type: "snapshot", symbol, tf, bars });
+    return res.json({ ok: true, type: "snapshot", symbol, tf, mode, bars: built });
   } catch (e) {
     res.setHeader("Cache-Control", "no-store");
-    return res.status(502).json({ ok: false, error: "snapshot_error", detail: String(e?.message || e) });
+    return res.status(502).json({
+      ok: false,
+      error: "snapshot_error",
+      detail: String(e?.message || e),
+    });
   }
 });
 
 /* ---------------------------- GET /stream/agg (SSE) ------------------------ */
-// Emits snapshot immediately, then live "bar" updates (throttled).
+// mode=rth|eth (default rth)
 streamRouter.get("/agg", (req, res) => {
   const apiKey = resolvePolygonKey();
   if (!apiKey) return res.status(500).end("Missing Polygon API key");
@@ -491,17 +561,18 @@ streamRouter.get("/agg", (req, res) => {
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
   const tfMin = normalizeTf(req.query.tf || "10m");
   const tf = labelTf(tfMin);
+  const mode = normalizeMode(req.query.mode);
 
   sseHeaders(res);
 
-  // send snapshot first (cached only; frontend uses /stream/snapshot for REST fallback)
+  // Send cached snapshot first (no REST backfill here; snapshot endpoint does that)
   try {
-    const m = cacheBars.get(symbol);
+    const m = cacheBars.get(cacheKey(symbol, mode));
     const list = m?.get(tfMin) || [];
-    sseSend(res, { ok: true, type: "snapshot", symbol, tf, bars: list });
+    sseSend(res, { ok: true, type: "snapshot", symbol, tf, mode, bars: list });
   } catch {}
 
-  const sub = { res, symbol, tfMin };
+  const sub = { res, symbol, tfMin, mode };
   subscribers.add(sub);
 
   let alive = true;
