@@ -24,6 +24,10 @@
 //   1h   → ~6 months
 //   4h   → ~6 months
 //   1d   → ~6 months
+//
+// NEW (Throttle):
+// - SSE "bar" emits are throttled to at most 1 update / second per (symbol, tf).
+//   (Internal candle building is still continuous; only output is throttled.)
 // ============================================================================
 
 import express from "express";
@@ -115,6 +119,28 @@ function sseHeaders(res) {
 }
 
 const sseSend = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+/* --------------------------- Throttle (1 Hz) --------------------------- */
+
+// lastEmit[symbol] => Map(tfMin -> lastMs)
+const lastEmit = new Map();
+
+function canEmit(symbol, tfMin, intervalMs = 1000) {
+  let m = lastEmit.get(symbol);
+  if (!m) {
+    m = new Map();
+    lastEmit.set(symbol, m);
+  }
+
+  const now = Date.now();
+  const last = m.get(tfMin) || 0;
+
+  if (now - last >= intervalMs) {
+    m.set(tfMin, now);
+    return true;
+  }
+  return false;
+}
 
 /* -------------------------- Polygon event parsers ------------------------- */
 
@@ -255,6 +281,9 @@ function fold1mIntoTf(symbol, b1m, tfMin) {
 const subscribers = new Set(); // { res, symbol, tfMin }
 
 function broadcast(symbol, tfMin, bar) {
+  // Throttle OUTPUT to 1 update / second per symbol + timeframe
+  if (!canEmit(symbol, tfMin, 1000)) return;
+
   const tf = labelTf(tfMin);
   for (const sub of subscribers) {
     if (sub.symbol === symbol && sub.tfMin === tfMin) {
@@ -414,7 +443,7 @@ streamRouter.get("/snapshot", async (req, res) => {
 });
 
 /* ---------------------------- GET /stream/agg (SSE) ------------------------ */
-// Emits snapshot immediately, then live "bar" updates.
+// Emits snapshot immediately, then live "bar" updates (throttled).
 streamRouter.get("/agg", (req, res) => {
   const apiKey = resolvePolygonKey();
   if (!apiKey) return res.status(500).end("Missing Polygon API key");
