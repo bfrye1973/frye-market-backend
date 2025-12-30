@@ -9,14 +9,8 @@
 //
 //   GET /stream/snapshot?symbol=SPY&tf=10m&limit=1500
 //     - JSON snapshot
-//     - IMPORTANT: If in-memory cache is empty (market closed / streamer restarted),
-//       it FALLS BACK to backend-1 /api/v1/ohlc (historical REST).
-//
-// Why you need this:
-// - Polygon REST can block SAME-DAY intraday aggregates (NOT_AUTHORIZED).
-// - Polygon WebSocket provides SAME-DAY bars, but ONLY while connected.
-// - Cache + snapshot makes refresh-after-close still show "today" (if captured),
-//   and at minimum returns history from backend-1 when cache is empty.
+//     - If in-memory cache is empty (market closed / streamer restarted),
+//       FALLS BACK to backend-1 /api/v1/ohlc (historical REST).
 //
 // Your requested horizons:
 //   10m  → ~2 weeks
@@ -27,11 +21,18 @@
 //
 // NEW (Throttle):
 // - SSE "bar" emits are throttled to at most 1 update / second per (symbol, tf).
-//   (Internal candle building is still continuous; only output is throttled.)
+//
+// NEW (RTH alignment):
+// - Bucketing is aligned to NYSE Regular Trading Hours (RTH) boundaries:
+//   - Session open anchor: 09:30 America/New_York
+//   - Session close cutoff: 16:00 America/New_York
+// - This makes 10m/30m/1h/4h candle structure match TradingView (RTH mode).
+// - We still DISPLAY Phoenix time in the frontend; this file only controls bucket timestamps.
 // ============================================================================
 
 import express from "express";
 import { WebSocket } from "ws";
+import { DateTime } from "luxon";
 
 const streamRouter = express.Router();
 export default streamRouter;
@@ -64,7 +65,7 @@ function resolvePolygonKey() {
 /* --------------------------- Timeframe helpers --------------------------- */
 
 const TRADING_DAYS_PER_MONTH = 21;
-const RTH_MIN_PER_DAY = 390;
+const RTH_MIN_PER_DAY = 390; // 6.5h * 60
 
 function normalizeTf(tf = "10m") {
   const t = String(tf || "").toLowerCase().trim();
@@ -77,11 +78,6 @@ function normalizeTf(tf = "10m") {
 
 function labelTf(tfMin) {
   return tfMin >= 1440 ? "1d" : tfMin % 60 === 0 ? `${tfMin / 60}h` : `${tfMin}m`;
-}
-
-function bucketStartSec(unixSec, tfMin) {
-  const size = tfMin * 60;
-  return Math.floor(unixSec / size) * size;
 }
 
 function barsPerDay(tfMin) {
@@ -108,6 +104,48 @@ function maxBarsForTf(tfMin) {
 
 // The TFs we actively maintain in cache (your spec)
 const TF_SET = [10, 30, 60, 240, 1440];
+
+/* ------------------------------ RTH bucketing ----------------------------- */
+// Default candle mode: RTH (TradingView-like).
+// - Only accepts bars that fall within 09:30–16:00 America/New_York.
+// - Anchors buckets to 09:30 ET.
+// - Daily is bucketed at NY midnight (00:00 ET) for standard daily bar timestamps.
+
+const NY_ZONE = "America/New_York";
+const RTH_OPEN_H = 9;
+const RTH_OPEN_M = 30;
+const RTH_CLOSE_H = 16;
+const RTH_CLOSE_M = 0;
+
+function getNyDayAnchorSecs(unixSec) {
+  const ny = DateTime.fromSeconds(unixSec, { zone: NY_ZONE });
+  const dayStart = ny.startOf("day");
+  const open = dayStart.plus({ hours: RTH_OPEN_H, minutes: RTH_OPEN_M });
+  const close = dayStart.plus({ hours: RTH_CLOSE_H, minutes: RTH_CLOSE_M });
+  return {
+    openSec: Math.floor(open.toSeconds()),
+    closeSec: Math.floor(close.toSeconds()),
+    dayStartSec: Math.floor(dayStart.toSeconds()),
+  };
+}
+
+function bucketStartSecRth(unixSec, tfMin) {
+  const { openSec, closeSec, dayStartSec } = getNyDayAnchorSecs(unixSec);
+
+  // Daily bars: bucket at NY midnight
+  if (tfMin >= 1440) return dayStartSec;
+
+  // RTH only: ignore anything outside session
+  if (unixSec < openSec || unixSec >= closeSec) return null;
+
+  const size = tfMin * 60;
+  const idx = Math.floor((unixSec - openSec) / size);
+  const bucket = openSec + idx * size;
+
+  // extra safety: bucket must start before close
+  if (bucket >= closeSec) return null;
+  return bucket;
+}
 
 /* ------------------------------ SSE helpers ------------------------------ */
 
@@ -229,7 +267,8 @@ function fold1mIntoTf(symbol, b1m, tfMin) {
   const bars = m.get(tfMin) || [];
   const maxLen = maxBarsForTf(tfMin);
 
-  const bucket = bucketStartSec(b1m.time, tfMin);
+  const bucket = bucketStartSecRth(b1m.time, tfMin);
+  if (bucket === null) return null; // outside RTH for intraday
 
   if (bars.length === 0) {
     const first = {
@@ -339,7 +378,7 @@ function startWs() {
       const type = msg?.ev;
 
       if (type === "status") {
-        // Uncomment if you want to see auth errors:
+        // Uncomment for diagnostics:
         // console.log("[stream] status:", msg?.status, msg?.message);
         continue;
       }
@@ -364,7 +403,7 @@ function startWs() {
         const symbol = String(msg?.sym || "").toUpperCase();
         if (!symbol) continue;
 
-        // if AM is fresh, ignore trades to avoid double printing
+        // If AM is fresh, ignore trades to avoid double printing
         const amFresh = Date.now() - (lastAmMs.get(symbol) || 0) < 120000;
         if (amFresh) continue;
 
@@ -373,6 +412,7 @@ function startWs() {
         tick1m.set(symbol, next);
         if (!next) continue;
 
+        // Fold into cached TFs (RTH-only bucketing will drop out-of-session)
         for (const tfMin of TF_SET) {
           const out = fold1mIntoTf(symbol, next, tfMin);
           if (out) broadcast(symbol, tfMin, out);
@@ -423,37 +463,19 @@ streamRouter.get("/snapshot", async (req, res) => {
     const tf = labelTf(tfMin);
     const limit = Math.max(1, Math.min(50000, Number(req.query.limit || 1500)));
 
-    // Optional date range passthrough for testing (YYYY-MM-DD)
-    const from = String(req.query.from || "").trim();
-    const to = String(req.query.to || "").trim();
-
     const m = cacheBars.get(symbol);
     const list = m?.get(tfMin) || [];
     const bars = list.length > limit ? list.slice(-limit) : list;
 
-    // If cache has bars, return them
-    if (bars && bars.length > 0) {
+    // If cache empty (market closed / streamer restarted), seed from backend-1 history
+    if (!bars || bars.length === 0) {
+      const hist = await fetchHistoryFromBackend1(symbol, tf, limit).catch(() => []);
       res.setHeader("Cache-Control", "no-store");
-      return res.json({ ok: true, type: "snapshot", symbol, tf, bars });
+      return res.json({ ok: true, type: "snapshot", symbol, tf, bars: hist });
     }
 
-    // Otherwise fall back to backend-1 history (optionally constrained by from/to)
-    const base = String(HIST_BASE || "").replace(/\/+$/, "");
-    let url =
-      `${base}/api/v1/ohlc?symbol=${encodeURIComponent(symbol)}` +
-      `&timeframe=${encodeURIComponent(tf)}` +
-      `&limit=${encodeURIComponent(limit)}`;
-
-    if (from) url += `&from=${encodeURIComponent(from)}`;
-    if (to) url += `&to=${encodeURIComponent(to)}`;
-
-    const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) throw new Error(`backend1 ${r.status}`);
-    const j = await r.json();
-
-    const arr = Array.isArray(j) ? j : (Array.isArray(j?.bars) ? j.bars : []);
     res.setHeader("Cache-Control", "no-store");
-    return res.json({ ok: true, type: "snapshot", symbol, tf, bars: Array.isArray(arr) ? arr : [] });
+    return res.json({ ok: true, type: "snapshot", symbol, tf, bars });
   } catch (e) {
     res.setHeader("Cache-Control", "no-store");
     return res.status(502).json({ ok: false, error: "snapshot_error", detail: String(e?.message || e) });
@@ -472,7 +494,7 @@ streamRouter.get("/agg", (req, res) => {
 
   sseHeaders(res);
 
-  // send snapshot first (cached only; frontend can use /stream/snapshot for REST fallback)
+  // send snapshot first (cached only; frontend uses /stream/snapshot for REST fallback)
   try {
     const m = cacheBars.get(symbol);
     const list = m?.get(tfMin) || [];
