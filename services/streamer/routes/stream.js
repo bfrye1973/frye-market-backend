@@ -423,19 +423,37 @@ streamRouter.get("/snapshot", async (req, res) => {
     const tf = labelTf(tfMin);
     const limit = Math.max(1, Math.min(50000, Number(req.query.limit || 1500)));
 
+    // Optional date range passthrough for testing (YYYY-MM-DD)
+    const from = String(req.query.from || "").trim();
+    const to = String(req.query.to || "").trim();
+
     const m = cacheBars.get(symbol);
     const list = m?.get(tfMin) || [];
     const bars = list.length > limit ? list.slice(-limit) : list;
 
-    // If cache empty (market closed / streamer restarted), seed from backend-1 history
-    if (!bars || bars.length === 0) {
-      const hist = await fetchHistoryFromBackend1(symbol, tf, limit).catch(() => []);
+    // If cache has bars, return them
+    if (bars && bars.length > 0) {
       res.setHeader("Cache-Control", "no-store");
-      return res.json({ ok: true, type: "snapshot", symbol, tf, bars: hist });
+      return res.json({ ok: true, type: "snapshot", symbol, tf, bars });
     }
 
+    // Otherwise fall back to backend-1 history (optionally constrained by from/to)
+    const base = String(HIST_BASE || "").replace(/\/+$/, "");
+    let url =
+      `${base}/api/v1/ohlc?symbol=${encodeURIComponent(symbol)}` +
+      `&timeframe=${encodeURIComponent(tf)}` +
+      `&limit=${encodeURIComponent(limit)}`;
+
+    if (from) url += `&from=${encodeURIComponent(from)}`;
+    if (to) url += `&to=${encodeURIComponent(to)}`;
+
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) throw new Error(`backend1 ${r.status}`);
+    const j = await r.json();
+
+    const arr = Array.isArray(j) ? j : (Array.isArray(j?.bars) ? j.bars : []);
     res.setHeader("Cache-Control", "no-store");
-    return res.json({ ok: true, type: "snapshot", symbol, tf, bars });
+    return res.json({ ok: true, type: "snapshot", symbol, tf, bars: Array.isArray(arr) ? arr : [] });
   } catch (e) {
     res.setHeader("Cache-Control", "no-store");
     return res.status(502).json({ ok: false, error: "snapshot_error", detail: String(e?.message || e) });
