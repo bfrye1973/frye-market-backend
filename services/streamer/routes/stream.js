@@ -5,12 +5,12 @@
 // Endpoints:
 //   GET /stream/agg?symbol=SPY&tf=10m&mode=rth|eth
 //     - SSE stream
-//     - Immediately emits: type:"snapshot" (from cache if available, else empty)
-//     - Then emits: type:"bar" updates (throttled 1/sec) as live data arrives
-//     - Emits: type:"diag" messages for Polygon status/auth issues (so you can SEE failures)
+//     - Immediately emits: type:"snapshot" (SEEDED from backend-1 if cache empty)
+//     - Then emits: type:"bar" updates (throttled 1/sec per connection) as live data arrives
+//     - Emits: type:"diag" messages (counters + status) so failures are visible
 //
 //   GET /stream/snapshot?symbol=SPY&tf=10m&limit=1500&mode=rth|eth
-//     - JSON snapshot (never empty unless backend-1 is down)
+//     - JSON snapshot
 //     - If cache empty, pulls 1m from backend-1 and REBUCKETS here (RTH/ETH)
 //       so candle structure matches TradingView RTH.
 //
@@ -18,11 +18,9 @@
 //   - RTH session: 09:30–16:00 America/New_York
 //   - Buckets anchored to 09:30 ET
 //
-// Throttle: 1 update / second per (symbol, tf, mode)
-//
 // Notes:
 // - Phoenix display is a FRONTEND concern. This file only provides correct timestamps.
-// - If you want ETH later, pass mode=eth. We keep that wired but default to rth.
+// - Node must have luxon installed in streamer service (see note below).
 // ============================================================================
 
 import express from "express";
@@ -42,12 +40,6 @@ const HIST_BASE =
   process.env.BACKEND1_BASE ||
   "https://frye-market-backend-1.onrender.com";
 
-// Symbols list (future: used for prewarming cache; SSE uses requested symbol)
-const STREAM_SYMBOLS = String(process.env.STREAM_SYMBOLS || "SPY,QQQ")
-  .split(",")
-  .map((s) => s.trim().toUpperCase())
-  .filter(Boolean);
-
 /* --------------------------- Helpers / Parsing ---------------------------- */
 
 function resolvePolygonKey() {
@@ -56,7 +48,7 @@ function resolvePolygonKey() {
     process.env.POLYGON_API_KEY,
     process.env.POLY_API_KEY,
   ];
-  return keys.find((k) => k && k.trim()) || "";
+  return keys.find((k) => k && String(k).trim()) || "";
 }
 
 function normalizeTf(tf = "10m") {
@@ -75,6 +67,18 @@ function labelTf(tfMin) {
 function normalizeMode(mode) {
   const m = String(mode || "rth").toLowerCase().trim();
   return m === "eth" ? "eth" : "rth";
+}
+
+/**
+ * Normalize an unknown timestamp to UNIX SECONDS.
+ * Polygon WS timestamps are typically milliseconds (13 digits).
+ */
+function toUnixSec(ts) {
+  const x = Number(ts);
+  if (!Number.isFinite(x) || x <= 0) return null;
+  if (x > 1e12) return Math.floor(x / 1000); // ms → sec
+  if (x > 1e10) return Math.floor(x / 1000); // guard
+  return Math.floor(x); // already sec
 }
 
 /* ------------------------------ RTH rules -------------------------------- */
@@ -98,7 +102,7 @@ function bucketStartSecRth(unixSec, tfMin) {
 
   if (tfMin >= 1440) return dayStartSec; // daily at NY midnight
 
-  // RTH only filter
+  // RTH only filter (close is exclusive)
   if (unixSec < openSec || unixSec >= closeSec) return null;
 
   const size = tfMin * 60;
@@ -133,27 +137,17 @@ function sseHeaders(res) {
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders?.();
 }
-const sseSend = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
-/* ---------------------------- Throttle 1Hz ------------------------------- */
-// lastEmit key: `${symbol}|${tfMin}|${mode}`
-const lastEmit = new Map();
-function canEmit(key, intervalMs = 1000) {
-  const now = Date.now();
-  const last = lastEmit.get(key) || 0;
-  if (now - last >= intervalMs) {
-    lastEmit.set(key, now);
-    return true;
-  }
-  return false;
-}
+const sseSend = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
 /* ---------------------------- In-memory cache ----------------------------- */
 // cache key: `${symbol}|${mode}` -> Map(tfMin -> barsAsc[])
 const cacheBars = new Map();
+
 function ckey(symbol, mode) {
   return `${symbol}|${mode}`;
 }
+
 function cmap(symbol, mode) {
   const k = ckey(symbol, mode);
   if (!cacheBars.has(k)) cacheBars.set(k, new Map());
@@ -174,6 +168,21 @@ function pushRing(arr, bar, maxLen) {
   return arr;
 }
 
+/**
+ * Ring length by TF:
+ * - 1m needs more (for smooth chart)
+ * - higher TF needs fewer
+ */
+function maxBarsForTf(tfMin) {
+  if (tfMin <= 1) return 6000;     // ~ 4-5 days of 1m+ in cache
+  if (tfMin <= 5) return 4000;
+  if (tfMin <= 10) return 3000;
+  if (tfMin <= 30) return 2500;
+  if (tfMin <= 60) return 2000;
+  if (tfMin <= 240) return 1500;
+  return 1500; // daily
+}
+
 /* --------------------------- Horizon / backfill --------------------------- */
 
 const TRADING_DAYS_PER_MONTH = 21;
@@ -189,11 +198,12 @@ function need1mCountForTf(tfMin) {
   // 30m → ~3 months
   if (tfMin === 30) return Math.min(CAP, (3 * TRADING_DAYS_PER_MONTH) * RTH_MIN_PER_DAY);
 
-  // 1h/4h/1d → ~6 months (close to cap but within)
+  // 1h/4h/1d → ~6 months
   if (tfMin === 60 || tfMin === 240 || tfMin >= 1440) {
     return Math.min(CAP, (6 * TRADING_DAYS_PER_MONTH) * RTH_MIN_PER_DAY);
   }
 
+  // default
   return Math.min(CAP, 5000);
 }
 
@@ -207,25 +217,36 @@ function parseAM(msg) {
   const v = Number(msg?.v ?? 0);
   if (!symbol) return null;
   if (![o, h, l, c].every(Number.isFinite)) return null;
-  if (!Number.isFinite(sMs) || sMs <= 0) return null;
 
-  const tSec = Math.floor(sMs / 1000);
+  const tSec = toUnixSec(sMs);
+  if (!Number.isFinite(tSec) || tSec <= 0) return null;
+
+  // snap to minute boundary
   const minuteSec = Math.floor(tSec / 60) * 60;
-  return { symbol, bar1m: { time: minuteSec, open: o, high: h, low: l, close: c, volume: v } };
+  return {
+    symbol,
+    bar1m: { time: minuteSec, open: o, high: h, low: l, close: c, volume: Number.isFinite(v) ? v : 0 }
+  };
 }
 
 // T: { ev:"T", sym, p, s, t(ms) }
 function applyTickTo1m(cur, tick) {
   const price = Number(tick?.p);
   const size = Number(tick?.s ?? 0);
-  const tMs = Number(tick?.t ?? 0);
-  if (!Number.isFinite(price) || !Number.isFinite(tMs) || tMs <= 0) return cur;
+  const tSec = toUnixSec(tick?.t);
+  if (!Number.isFinite(price) || !Number.isFinite(tSec) || tSec <= 0) return cur;
 
-  const tSec = Math.floor(tMs / 1000);
   const minuteSec = Math.floor(tSec / 60) * 60;
 
   if (!cur || cur.time < minuteSec) {
-    return { time: minuteSec, open: price, high: price, low: price, close: price, volume: Number(size || 0) };
+    return {
+      time: minuteSec,
+      open: price,
+      high: price,
+      low: price,
+      close: price,
+      volume: Number.isFinite(size) ? size : 0,
+    };
   }
 
   const b = { ...cur };
@@ -241,6 +262,7 @@ function applyTickTo1m(cur, tick) {
 function fold1mIntoTf(symbol, bar1m, tfMin, mode, maxLen) {
   const map = cmap(symbol, mode);
   const bars = map.get(tfMin) || [];
+
   const bucket = bucketStartSecByMode(bar1m.time, tfMin, mode);
   if (bucket === null) return null; // RTH filter excludes
 
@@ -336,14 +358,42 @@ async function fetch1mFromBackend1(symbol, limit1m) {
 }
 
 function norm1m(b) {
-  const t = Number(b?.time ?? b?.t ?? b?.ts ?? b?.timestamp);
+  const tRaw = Number(b?.time ?? b?.t ?? b?.ts ?? b?.timestamp);
+  const tSec = toUnixSec(tRaw);
   const o = Number(b?.open ?? b?.o);
   const h = Number(b?.high ?? b?.h);
   const l = Number(b?.low ?? b?.l);
   const c = Number(b?.close ?? b?.c);
   const v = Number(b?.volume ?? b?.v ?? 0);
-  if (![t, o, h, l, c].every(Number.isFinite)) return null;
-  return { time: t, open: o, high: h, low: l, close: c, volume: Number.isFinite(v) ? v : 0 };
+  if (![tSec, o, h, l, c].every(Number.isFinite)) return null;
+  return { time: tSec, open: o, high: h, low: l, close: c, volume: Number.isFinite(v) ? v : 0 };
+}
+
+/**
+ * Seed cache for a given (symbol, tfMin) using backend-1 1m history.
+ * Builds BOTH modes (rth + eth) so toggle is instant.
+ */
+async function seedCacheFromBackend1(symbol, tfMin, limitOut, diagPush) {
+  const need1m = need1mCountForTf(tfMin);
+  diagPush?.(`seeding: fetching 1m from backend-1 (limit=${need1m})`);
+
+  const raw = await fetch1mFromBackend1(symbol, need1m);
+  const oneMin = raw.map(norm1m).filter(Boolean).sort((a, b) => a.time - b.time);
+
+  if (oneMin.length === 0) {
+    diagPush?.(`seeding: backend-1 returned 0 bars (cannot seed)`);
+    return { rth: [], eth: [] };
+  }
+
+  const builtRth = buildTfFrom1m(tfMin, "rth", oneMin, limitOut);
+  const builtEth = buildTfFrom1m(tfMin, "eth", oneMin, limitOut);
+
+  // store into cache
+  cmap(symbol, "rth").set(tfMin, builtRth);
+  cmap(symbol, "eth").set(tfMin, builtEth);
+
+  diagPush?.(`seeding: done (1m=${oneMin.length}, rth=${builtRth.length}, eth=${builtEth.length})`);
+  return { rth: builtRth, eth: builtEth };
 }
 
 /* --------------------------- GET /stream/snapshot -------------------------- */
@@ -366,18 +416,11 @@ streamRouter.get("/snapshot", async (req, res) => {
     }
 
     // 2) Cache empty → backfill from backend-1 1m, then rebucket HERE (RTH aligned)
-    const need1m = need1mCountForTf(tfMin);
-    const raw = await fetch1mFromBackend1(symbol, need1m).catch(() => []);
-    const oneMin = raw.map(norm1m).filter(Boolean).sort((a, b) => a.time - b.time);
-
-    const built = buildTfFrom1m(tfMin, mode, oneMin, limit);
-
-    // store into cache so next call is instant
-    const mm = cmap(symbol, mode);
-    mm.set(tfMin, built);
+    const built = await seedCacheFromBackend1(symbol, tfMin, limit, null);
+    const bars = mode === "eth" ? built.eth : built.rth;
 
     res.setHeader("Cache-Control", "no-store");
-    return res.json({ ok: true, type: "snapshot", symbol, tf, mode, bars: built });
+    return res.json({ ok: true, type: "snapshot", symbol, tf, mode, bars });
   } catch (e) {
     res.setHeader("Cache-Control", "no-store");
     return res.status(502).json({
@@ -401,30 +444,108 @@ streamRouter.get("/agg", (req, res) => {
 
   sseHeaders(res);
 
-  // Send snapshot first (from cache if present)
-  try {
-    const m = cacheBars.get(ckey(symbol, mode));
-    const list = m?.get(tfMin) || [];
-    sseSend(res, { ok: true, type: "snapshot", symbol, tf, mode, bars: list });
-  } catch {}
-
   let alive = true;
+
+  // pings keep connection alive through proxies
   const ping = setInterval(() => alive && res.write(`:ping ${Date.now()}\n\n`), 15000);
 
-  // Per-connection WS (most reliable; ensures bars for THIS client)
+  // per-connection throttle
+  let lastEmitAt = 0;
+  function canEmitConn(intervalMs = 1000) {
+    const now = Date.now();
+    if (now - lastEmitAt >= intervalMs) {
+      lastEmitAt = now;
+      return true;
+    }
+    return false;
+  }
+
+  // per-connection diagnostics
+  const diag = {
+    startedAt: new Date().toISOString(),
+    symbol, tf, tfMin, mode,
+    wsOpen: 0,
+    wsClose: 0,
+    wsError: 0,
+    statusMsgs: 0,
+    amSeen: 0,
+    tSeen: 0,
+    amParsed: 0,
+    tApplied: 0,
+    rthDropped: 0,
+    ethDropped: 0,
+    barsFolded: 0,
+    barsEmitted: 0,
+    lastMsgAtMs: 0,
+    lastAmAtMs: 0,
+    lastTickAtMs: 0,
+    lastEmitAtMs: 0,
+    lastBarTimeSec: null,
+    seedAttempted: false,
+    seedOk: false,
+    seedRthBars: 0,
+    seedEthBars: 0,
+    backend1SeedErr: null,
+  };
+
+  function diagPush(message) {
+    sseSend(res, { ok: true, type: "diag", symbol, tf, mode, message, diag: { ...diag } });
+  }
+
+  // emit bar
+  function emitBar(bar) {
+    if (!bar) return;
+    if (!canEmitConn(1000)) return;
+    diag.barsEmitted += 1;
+    diag.lastEmitAtMs = Date.now();
+    diag.lastBarTimeSec = bar.time;
+    sseSend(res, { ok: true, type: "bar", symbol, tf, mode, bar });
+  }
+
+  // Always seed snapshot if cache empty (THIS IS THE KEY FIX)
+  (async () => {
+    try {
+      const m = cacheBars.get(ckey(symbol, mode));
+      const list = m?.get(tfMin) || [];
+
+      if (list.length === 0) {
+        diag.seedAttempted = true;
+
+        const built = await seedCacheFromBackend1(symbol, tfMin, 1500, (msg) => diagPush(msg));
+        diag.seedOk = true;
+        diag.seedRthBars = built.rth.length;
+        diag.seedEthBars = built.eth.length;
+
+        const seededBars = mode === "eth" ? built.eth : built.rth;
+        sseSend(res, { ok: true, type: "snapshot", symbol, tf, mode, bars: seededBars });
+
+      } else {
+        // cache already has data
+        sseSend(res, { ok: true, type: "snapshot", symbol, tf, mode, bars: list });
+      }
+    } catch (e) {
+      diag.seedAttempted = true;
+      diag.seedOk = false;
+      diag.backend1SeedErr = String(e?.message || e);
+      // snapshot may be empty, but we MUST show why
+      diagPush(`seeding FAILED: ${diag.backend1SeedErr}`);
+      sseSend(res, { ok: true, type: "snapshot", symbol, tf, mode, bars: [] });
+    }
+  })();
+
+  // emit diag heartbeat every 5 seconds
+  const diagTimer = setInterval(() => {
+    if (!alive) return;
+    sseSend(res, { ok: true, type: "diag", symbol, tf, mode, diag: { ...diag } });
+  }, 5000);
+
+  // Per-connection WS
   let ws = null;
   let reconnectTimer = null;
   let backoffMs = 1000;
 
   let lastAmAt = 0;
   let tickBar1m = null;
-
-  // throttle output per connection
-  function emitBar(bar) {
-    const key = `${symbol}|${tfMin}|${mode}`;
-    if (!canEmit(key, 1000)) return;
-    sseSend(res, { ok: true, type: "bar", symbol, tf, mode, bar });
-  }
 
   function closeWs() {
     try { ws?.close?.(); } catch {}
@@ -446,17 +567,19 @@ streamRouter.get("/agg", (req, res) => {
     ws = new WebSocket(POLY_WS_URL);
 
     ws.on("open", () => {
+      diag.wsOpen += 1;
       backoffMs = 1000;
 
-      // auth + subscribe for this symbol
       ws.send(JSON.stringify({ action: "auth", params: apiKey }));
       ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol},T.${symbol}` }));
 
-      sseSend(res, { ok: true, type: "diag", msg: `ws_open subscribed AM.${symbol},T.${symbol}` });
+      diagPush(`ws_open subscribed AM.${symbol},T.${symbol}`);
     });
 
     ws.on("message", (buf) => {
       if (!alive) return;
+
+      diag.lastMsgAtMs = Date.now();
 
       let arr;
       try { arr = JSON.parse(buf.toString("utf8")); } catch { return; }
@@ -466,68 +589,101 @@ streamRouter.get("/agg", (req, res) => {
         const ev = msg?.ev;
 
         if (ev === "status") {
-          // show status to client so failures are visible
+          diag.statusMsgs += 1;
           const st = `${msg?.status || ""} ${msg?.message || ""}`.trim();
-          sseSend(res, { ok: true, type: "diag", msg: `status ${st}` });
+          sseSend(res, { ok: true, type: "diag", symbol, tf, mode, message: `status ${st}` });
           continue;
         }
 
         if (ev === "AM" && String(msg?.sym || "").toUpperCase() === symbol) {
+          diag.amSeen += 1;
+
           const am = parseAM(msg);
           if (!am) continue;
 
+          diag.amParsed += 1;
           lastAmAt = Date.now();
+          diag.lastAmAtMs = lastAmAt;
           tickBar1m = null;
 
-          // Update caches for both modes (so toggle later is instant)
+          // update caches for both modes
           for (const m of ["rth", "eth"]) {
             const out = fold1mIntoTf(symbol, am.bar1m, tfMin, m, maxBarsForTf(tfMin));
-            if (out) {
-              // emit only for current mode
-              if (m === mode) emitBar(out);
+            if (!out) {
+              if (m === "rth") diag.rthDropped += 1;
+              if (m === "eth") diag.ethDropped += 1;
+              continue;
             }
+            diag.barsFolded += 1;
+            if (m === mode) emitBar(out);
           }
           continue;
         }
 
         if (ev === "T" && String(msg?.sym || "").toUpperCase() === symbol) {
-          // if AM is fresh, ignore trades
+          diag.tSeen += 1;
+
+          // if AM is fresh, ignore trades (AM drives aggregates)
           if (Date.now() - lastAmAt < 120000) continue;
 
           tickBar1m = applyTickTo1m(tickBar1m, msg);
           if (!tickBar1m) continue;
 
+          diag.tApplied += 1;
+          diag.lastTickAtMs = Date.now();
+
           for (const m of ["rth", "eth"]) {
             const out = fold1mIntoTf(symbol, tickBar1m, tfMin, m, maxBarsForTf(tfMin));
-            if (out) {
-              if (m === mode) emitBar(out);
+            if (!out) {
+              if (m === "rth") diag.rthDropped += 1;
+              if (m === "eth") diag.ethDropped += 1;
+              continue;
             }
+            diag.barsFolded += 1;
+            if (m === mode) emitBar(out);
           }
         }
       }
     });
 
     ws.on("error", () => {
-      sseSend(res, { ok: true, type: "diag", msg: "ws_error reconnecting" });
+      diag.wsError += 1;
+      diagPush("ws_error reconnecting");
       closeWs();
       scheduleReconnect();
     });
 
     ws.on("close", () => {
-      sseSend(res, { ok: true, type: "diag", msg: "ws_closed reconnecting" });
+      diag.wsClose += 1;
+      diagPush("ws_closed reconnecting");
       closeWs();
       scheduleReconnect();
     });
   }
 
-  // Start WS
   connectWs();
 
   req.on("close", () => {
     alive = false;
     clearInterval(ping);
+    clearInterval(diagTimer);
     clearTimeout(reconnectTimer);
     closeWs();
     try { res.end(); } catch {}
   });
 });
+
+/* =============================================================================
+IMPORTANT INSTALL NOTE (DO THIS ONCE):
+Your streamer package.json currently does NOT include luxon.
+This file imports:  import { DateTime } from "luxon";
+So you MUST add luxon to services/streamer/package.json dependencies:
+
+"dependencies": {
+  "express": "...",
+  "ws": "...",
+  "luxon": "^3.5.0"
+}
+
+Then redeploy backend-2.
+============================================================================= */
