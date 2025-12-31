@@ -1,8 +1,3 @@
-// services/streamer/routes/stream.js
-// RTH-only history expansion + live bars (AM + T fallback)
-// - Snapshot seeding pulls MORE 1m bars depending on requested tf
-// - Rebuckets using NY 9:30 anchor (TradingView-aligned RTH)
-
 import express from "express";
 import WebSocket from "ws";
 import { DateTime } from "luxon";
@@ -11,7 +6,6 @@ const router = express.Router();
 export default router;
 
 const POLY_WS_URL = "wss://socket.polygon.io/stocks";
-
 const HIST_BASE =
   process.env.HIST_BASE ||
   process.env.BACKEND1_BASE ||
@@ -35,13 +29,20 @@ function normalizeMode(m) {
   return s === "eth" ? "eth" : "rth";
 }
 
-function normalizeTf(tf) {
-  const t = String(tf || "1m").toLowerCase().trim();
+function normalizeTfStr(tf) {
+  const t = String(tf || "10m").toLowerCase().trim();
+  if (t === "1d") return "1d";
+  if (t.endsWith("m")) return t;
+  if (t.endsWith("h")) return t;
+  return "10m";
+}
+
+function normalizeTfMin(tf) {
+  const t = normalizeTfStr(tf);
   if (t === "1d") return 1440;
   if (t.endsWith("h")) return Number(t.slice(0, -1)) * 60;
   if (t.endsWith("m")) return Number(t.slice(0, -1));
-  const n = Number(t);
-  return Number.isFinite(n) && n > 0 ? n : 1;
+  return 10;
 }
 
 function labelTf(tfMin) {
@@ -51,7 +52,7 @@ function labelTf(tfMin) {
 function toUnixSec(ts) {
   const n = Number(ts);
   if (!Number.isFinite(n) || n <= 0) return null;
-  if (n > 1e12) return Math.floor(n / 1000); // Polygon WS ms -> sec
+  if (n > 1e12) return Math.floor(n / 1000);
   return Math.floor(n);
 }
 
@@ -61,12 +62,11 @@ function sseHeaders(res) {
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders?.();
 }
-
 function sseSend(res, obj) {
   res.write(`data: ${JSON.stringify(obj)}\n\n`);
 }
 
-/* -------------------- RTH bucketing (NY 9:30–16:00) -------------------- */
+/* -------------------- RTH bucketing -------------------- */
 
 function nyAnchors(unixSec) {
   const ny = DateTime.fromSeconds(unixSec, { zone: NY_ZONE });
@@ -82,10 +82,8 @@ function nyAnchors(unixSec) {
 
 function bucketStartSecRth(unixSec, tfMin) {
   const { dayStartSec, openSec, closeSec } = nyAnchors(unixSec);
-
-  if (tfMin >= 1440) return dayStartSec; // daily at NY midnight
+  if (tfMin >= 1440) return dayStartSec;
   if (unixSec < openSec || unixSec >= closeSec) return null;
-
   const size = tfMin * 60;
   const idx = Math.floor((unixSec - openSec) / size);
   const bucket = openSec + idx * size;
@@ -106,38 +104,14 @@ function bucketStartSecByMode(unixSec, tfMin, mode) {
   return mode === "eth" ? bucketStartSecEth(unixSec, tfMin) : bucketStartSecRth(unixSec, tfMin);
 }
 
-/* -------------------- dynamic 1m seed sizing (RTH only) -------------------- */
-// These are YOUR requested lookbacks. We cap at Polygon’s 50k agg limit.
-function seed1mFor(tfMin) {
-  const CAP = 50000;
-  const RTH_PER_DAY = 390;
-  const TRADING_DAYS_PER_MONTH = 21;
+/* -------------------- backend-1 fetch (native timeframe) -------------------- */
 
-  // keep 1m light (you already like it). If you ever want 1m longer, raise this.
-  if (tfMin === 1) return Math.min(CAP, 5000);
-
-  // 10m -> ~1 month
-  if (tfMin === 10) return Math.min(CAP, 1 * TRADING_DAYS_PER_MONTH * RTH_PER_DAY); // ~8,190
-
-  // 30m -> ~2 months
-  if (tfMin === 30) return Math.min(CAP, 2 * TRADING_DAYS_PER_MONTH * RTH_PER_DAY); // ~16,380
-
-  // 1h/4h -> ~6 months (near cap)
-  if (tfMin === 60 || tfMin === 240) {
-    return Math.min(CAP, 6 * TRADING_DAYS_PER_MONTH * RTH_PER_DAY); // ~49,140
-  }
-
-  // default
-  return Math.min(CAP, 5000);
-}
-
-/* -------------------- backend-1 seed (fetch 1m bars) -------------------- */
-
-async function fetch1mFromBackend1(symbol, limit1m) {
+async function fetchTfFromBackend1(symbol, tfStr, limit) {
   const base = String(HIST_BASE || "").replace(/\/+$/, "");
   const url =
     `${base}/api/v1/ohlc?symbol=${encodeURIComponent(symbol)}` +
-    `&timeframe=1m&limit=${encodeURIComponent(limit1m)}`;
+    `&timeframe=${encodeURIComponent(tfStr)}` +
+    `&limit=${encodeURIComponent(limit)}`;
 
   const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) return [];
@@ -158,30 +132,6 @@ function normBar(b) {
   return { time: t, open: o, high: h, low: l, close: c, volume: Number.isFinite(v) ? v : 0 };
 }
 
-function buildTfFrom1m(tfMin, mode, bars1mAsc, limitOut) {
-  if (tfMin === 1) return bars1mAsc.slice(-limitOut);
-
-  const out = [];
-  let cur = null;
-
-  for (const b of bars1mAsc) {
-    const bucket = bucketStartSecByMode(b.time, tfMin, mode);
-    if (bucket === null) continue;
-
-    if (!cur || cur.time < bucket) {
-      if (cur) out.push(cur);
-      cur = { time: bucket, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
-    } else {
-      cur.high = Math.max(cur.high, b.high);
-      cur.low = Math.min(cur.low, b.low);
-      cur.close = b.close;
-      cur.volume += b.volume;
-    }
-  }
-  if (cur) out.push(cur);
-  return out.slice(-limitOut);
-}
-
 /* -------------------- Tick -> 1m builder -------------------- */
 
 function applyTickTo1m(cur, tick) {
@@ -189,20 +139,11 @@ function applyTickTo1m(cur, tick) {
   const size = Number(tick?.s ?? 0);
   const tSec = toUnixSec(tick?.t);
   if (!Number.isFinite(price) || !Number.isFinite(tSec) || tSec <= 0) return cur;
-
   const minuteSec = Math.floor(tSec / 60) * 60;
 
   if (!cur || cur.time < minuteSec) {
-    return {
-      time: minuteSec,
-      open: price,
-      high: price,
-      low: price,
-      close: price,
-      volume: Number.isFinite(size) ? size : 0,
-    };
+    return { time: minuteSec, open: price, high: price, low: price, close: price, volume: Number.isFinite(size) ? size : 0 };
   }
-
   const b = { ...cur };
   b.high = Math.max(b.high, price);
   b.low = Math.min(b.low, price);
@@ -221,7 +162,7 @@ function parseAM(msg) {
   return { time: minuteSec, open: o, high: h, low: l, close: c, volume: Number.isFinite(v) ? v : 0 };
 }
 
-/* -------------------- 1m -> requested tf live aggregator -------------------- */
+/* -------------------- live aggregator: 1m -> requested tf -------------------- */
 
 function updateAggFrom1m(lastAgg, bar1m, tfMin, mode) {
   const bucket = bucketStartSecByMode(bar1m.time, tfMin, mode);
@@ -261,28 +202,38 @@ router.get("/healthz", (_req, res) => {
   res.json({ ok: true, service: "streamer" });
 });
 
-/* -------------------- SSE stream -------------------- */
+/* -------------------- /stream/agg -------------------- */
 
 router.get("/agg", async (req, res) => {
   const apiKey = resolvePolygonKey();
   if (!apiKey) return res.status(500).end("Missing Polygon API key");
 
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
-  const tfMin = normalizeTf(req.query.tf || "10m");
+  const tfStr = normalizeTfStr(req.query.tf || "10m");
+  const tfMin = normalizeTfMin(tfStr);
   const tf = labelTf(tfMin);
 
-  // RTH requested by you
+  // You want RTH
   const mode = "rth";
 
   sseHeaders(res);
 
-  // --- Snapshot seed (RTH) ---
+  // ✅ TradingView-style history: fetch native timeframe directly
+  // Limits tuned to your request
+  const limitByTf = (() => {
+    if (tfStr === "10m") return 2000; // ~1 month+
+    if (tfStr === "30m") return 2500; // ~2 months+
+    if (tfStr === "1h") return 4000;  // ~6+ months
+    if (tfStr === "4h") return 4000;  // ~1+ year
+    if (tfStr === "1d") return 5000;  // years
+    if (tfStr === "1m") return 5000;  // keep 1m reasonable
+    return 2000;
+  })();
+
   let snapshotBars = [];
   try {
-    const need1m = seed1mFor(tfMin);
-    const raw1m = await fetch1mFromBackend1(symbol, need1m);
-    const oneMin = raw1m.map(normBar).filter(Boolean).sort((a, b) => a.time - b.time);
-    snapshotBars = buildTfFrom1m(tfMin, mode, oneMin, 2000);
+    const raw = await fetchTfFromBackend1(symbol, tfStr, limitByTf);
+    snapshotBars = raw.map(normBar).filter(Boolean).sort((a, b) => a.time - b.time);
   } catch {
     snapshotBars = [];
   }
@@ -292,7 +243,6 @@ router.get("/agg", async (req, res) => {
   let alive = true;
   const ping = setInterval(() => alive && res.write(`:ping ${Date.now()}\n\n`), 15000);
 
-  // --- diagnostics ---
   const diag = {
     startedAt: new Date().toISOString(),
     symbol, tf, tfMin, mode,
@@ -302,11 +252,7 @@ router.get("/agg", async (req, res) => {
     status: [],
     amSeen: 0,
     tSeen: 0,
-    lastMsgMs: 0,
-    lastAmMs: 0,
-    lastTM: 0,
     barsEmitted: 0,
-    seed1m: seed1mFor(tfMin),
   };
 
   const diagTimer = setInterval(() => {
@@ -314,18 +260,17 @@ router.get("/agg", async (req, res) => {
     sseSend(res, { ok: true, type: "diag", diag });
   }, 5000);
 
-  // --- bar throttle (fast enough, prevents UI thrash) ---
+  // throttle a bit
   let lastEmitAt = 0;
   function emitBar(bar) {
     const now = Date.now();
-    if (now - lastEmitAt < 300) return; // ~3 updates/sec max
+    if (now - lastEmitAt < 250) return;
     lastEmitAt = now;
     diag.barsEmitted += 1;
     sseSend(res, { ok: true, type: "bar", symbol, tf, mode, bar });
   }
 
   const ws = new WebSocket(POLY_WS_URL);
-
   let tick1m = null;
   let aggBar = null;
 
@@ -333,18 +278,11 @@ router.get("/agg", async (req, res) => {
     diag.wsOpen += 1;
     ws.send(JSON.stringify({ action: "auth", params: apiKey }));
     ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol},T.${symbol}` }));
-    sseSend(res, { ok: true, type: "diag", message: `ws_open subscribed AM.${symbol},T.${symbol}` });
   });
 
   ws.on("message", (buf) => {
-    diag.lastMsgMs = Date.now();
-
     let arr;
-    try {
-      arr = JSON.parse(buf.toString("utf8"));
-    } catch {
-      return;
-    }
+    try { arr = JSON.parse(buf.toString("utf8")); } catch { return; }
     if (!Array.isArray(arr)) arr = [arr];
 
     for (const msg of arr) {
@@ -354,17 +292,15 @@ router.get("/agg", async (req, res) => {
         const line = `${msg?.status || ""} ${msg?.message || ""}`.trim();
         diag.status.push(line);
         if (diag.status.length > 10) diag.status.shift();
-        sseSend(res, { ok: true, type: "diag", message: `status ${line}` });
         continue;
       }
 
       if (ev === "AM" && String(msg?.sym || "").toUpperCase() === symbol) {
         diag.amSeen += 1;
-        diag.lastAmMs = Date.now();
-
         const bar1m = parseAM(msg);
         if (!bar1m) continue;
 
+        // If user asked 1m, emit directly; else aggregate from 1m into requested tf
         const { agg, changed } = updateAggFrom1m(aggBar, bar1m, tfMin, mode);
         aggBar = agg;
         if (changed && aggBar) emitBar(aggBar);
@@ -375,12 +311,10 @@ router.get("/agg", async (req, res) => {
 
       if (ev === "T" && String(msg?.sym || "").toUpperCase() === symbol) {
         diag.tSeen += 1;
-        diag.lastTM = Date.now();
 
-        const next1m = applyTickTo1m(tick1m, msg);
-        if (!next1m) continue;
-
-        tick1m = next1m;
+        // Fold trades into 1m
+        tick1m = applyTickTo1m(tick1m, msg);
+        if (!tick1m) continue;
 
         const { agg, changed } = updateAggFrom1m(aggBar, tick1m, tfMin, mode);
         aggBar = agg;
@@ -389,15 +323,8 @@ router.get("/agg", async (req, res) => {
     }
   });
 
-  ws.on("error", (e) => {
-    diag.wsError += 1;
-    sseSend(res, { ok: true, type: "diag", message: `ws_error ${String(e?.message || e)}` });
-  });
-
-  ws.on("close", () => {
-    diag.wsClose += 1;
-    sseSend(res, { ok: true, type: "diag", message: "ws_closed" });
-  });
+  ws.on("error", () => { diag.wsError += 1; });
+  ws.on("close", () => { diag.wsClose += 1; });
 
   req.on("close", () => {
     alive = false;
