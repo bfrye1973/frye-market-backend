@@ -100,10 +100,19 @@ async function fetch1m(symbol, limit) {
   const url =
     `${HIST_BASE}/api/v1/ohlc?symbol=${symbol}` +
     `&timeframe=1m&limit=${limit}`;
+
   const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) return [];
-  return await r.json();
+
+  const j = await r.json();
+
+  // backend-1 may return array OR { bars: [...] }
+  if (Array.isArray(j)) return j;
+  if (Array.isArray(j?.bars)) return j.bars;
+
+  return [];
 }
+
 
 function buildFrom1m(tfMin, mode, bars1m, limit) {
   const out = [];
