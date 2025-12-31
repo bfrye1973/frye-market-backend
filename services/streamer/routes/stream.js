@@ -1,9 +1,5 @@
-// services/streamer/routes/stream.js
-// Polygon WS → SSE with REQUIRED snapshot seeding + RTH/ETH bucketing
-
 import express from "express";
 import WebSocket from "ws";
-import { DateTime } from "luxon";
 
 const router = express.Router();
 export default router;
@@ -14,8 +10,6 @@ const HIST_BASE =
   process.env.BACKEND1_BASE ||
   "https://frye-market-backend-1.onrender.com";
 
-/* ---------------- helpers ---------------- */
-
 function resolvePolygonKey() {
   return (
     process.env.POLYGON_API ||
@@ -25,220 +19,202 @@ function resolvePolygonKey() {
   );
 }
 
+function normalizeMode(m) {
+  const s = String(m || "rth").toLowerCase().trim();
+  return s === "eth" ? "eth" : "rth";
+}
+
 function normalizeTf(tf) {
-  const t = String(tf || "10m").toLowerCase();
-  if (t.endsWith("m")) return Number(t.slice(0, -1));
-  if (t.endsWith("h")) return Number(t.slice(0, -1)) * 60;
+  const t = String(tf || "1m").toLowerCase().trim();
   if (t === "1d") return 1440;
-  return 10;
+  if (t.endsWith("h")) return Number(t.slice(0, -1)) * 60;
+  if (t.endsWith("m")) return Number(t.slice(0, -1));
+  return 1;
 }
 
 function labelTf(tfMin) {
   return tfMin >= 1440 ? "1d" : tfMin % 60 === 0 ? `${tfMin / 60}h` : `${tfMin}m`;
 }
 
-function normalizeMode(m) {
-  return m === "eth" ? "eth" : "rth";
+function isMs(n) {
+  return Number.isFinite(n) && n > 1e12;
 }
-
-function toUnixSec(ts) {
+function toSec(ts) {
   const n = Number(ts);
   if (!Number.isFinite(n)) return null;
-  if (n > 1e12) return Math.floor(n / 1000);
-  if (n > 1e10) return Math.floor(n / 1000);
-  return Math.floor(n);
+  return isMs(n) ? Math.floor(n / 1000) : Math.floor(n);
 }
 
-/* ---------------- RTH ---------------- */
-
-const NY = "America/New_York";
-
-function nyAnchors(sec) {
-  const d = DateTime.fromSeconds(sec, { zone: NY }).startOf("day");
-  const open = d.plus({ hours: 9, minutes: 30 });
-  const close = d.plus({ hours: 16 });
-  return {
-    open: Math.floor(open.toSeconds()),
-    close: Math.floor(close.toSeconds()),
-    day: Math.floor(d.toSeconds()),
-  };
+/* ---------------- SSE helpers ---------------- */
+function sseHeaders(res) {
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
 }
-
-function bucketStart(sec, tfMin, mode) {
-  if (tfMin >= 1440) return nyAnchors(sec).day;
-  const size = tfMin * 60;
-
-  if (mode === "eth") {
-    return Math.floor(sec / size) * size;
-  }
-
-  const { open, close } = nyAnchors(sec);
-  if (sec < open || sec >= close) return null;
-  return open + Math.floor((sec - open) / size) * size;
-}
-
-/* ---------------- cache ---------------- */
-
-const cache = new Map(); // key = symbol|mode|tfMin
-
-function ckey(sym, mode, tf) {
-  return `${sym}|${mode}|${tf}`;
-}
-
-function pushBar(arr, bar, max = 2000) {
-  if (!arr.length || bar.time > arr[arr.length - 1].time) {
-    arr.push(bar);
-  } else if (bar.time === arr[arr.length - 1].time) {
-    arr[arr.length - 1] = bar;
-  }
-  if (arr.length > max) arr.splice(0, arr.length - max);
+function sseSend(res, obj) {
+  res.write(`data: ${JSON.stringify(obj)}\n\n`);
 }
 
 /* ---------------- backend-1 seed ---------------- */
-
 async function fetch1m(symbol, limit) {
   const url =
-    `${HIST_BASE}/api/v1/ohlc?symbol=${symbol}` +
-    `&timeframe=1m&limit=${limit}`;
-
+    `${String(HIST_BASE).replace(/\/+$/, "")}/api/v1/ohlc?symbol=${encodeURIComponent(symbol)}` +
+    `&timeframe=1m&limit=${encodeURIComponent(limit)}`;
   const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) return [];
-
-  const j = await r.json();
-
-  // backend-1 may return array OR { bars: [...] }
+  const j = await r.json().catch(() => null);
   if (Array.isArray(j)) return j;
   if (Array.isArray(j?.bars)) return j.bars;
-
   return [];
 }
 
+function buildTfFrom1m(tfMin, bars1mAsc, limitOut) {
+  if (tfMin === 1) return bars1mAsc.slice(-limitOut);
 
-function buildFrom1m(tfMin, mode, bars1m, limit) {
+  const size = tfMin * 60;
   const out = [];
   let cur = null;
 
-  for (const b of bars1m) {
-    const sec = toUnixSec(b.time);
-    if (!sec) continue;
+  for (const b of bars1mAsc) {
+    const t = toSec(b.time ?? b.t ?? b.ts ?? b.timestamp);
+    if (!Number.isFinite(t)) continue;
 
-    const bucket = bucketStart(sec, tfMin, mode);
-    if (bucket === null) continue;
+    const bucket = Math.floor(t / size) * size;
+    const o = Number(b.open ?? b.o);
+    const h = Number(b.high ?? b.h);
+    const l = Number(b.low ?? b.l);
+    const c = Number(b.close ?? b.c);
+    const v = Number(b.volume ?? b.v ?? 0);
+    if (![o, h, l, c].every(Number.isFinite)) continue;
 
     if (!cur || cur.time < bucket) {
       if (cur) out.push(cur);
-      cur = { time: bucket, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
+      cur = { time: bucket, open: o, high: h, low: l, close: c, volume: v };
     } else {
-      cur.high = Math.max(cur.high, b.high);
-      cur.low = Math.min(cur.low, b.low);
-      cur.close = b.close;
-      cur.volume += b.volume;
+      cur.high = Math.max(cur.high, h);
+      cur.low = Math.min(cur.low, l);
+      cur.close = c;
+      cur.volume += v;
     }
   }
-
   if (cur) out.push(cur);
-  return out.slice(-limit);
+  return out.slice(-limitOut);
 }
 
-/* ---------------- snapshot ---------------- */
-
-router.get("/snapshot", async (req, res) => {
-  const symbol = String(req.query.symbol || "SPY").toUpperCase();
-  const tfMin = normalizeTf(req.query.tf);
-  const tf = labelTf(tfMin);
-  const mode = normalizeMode(req.query.mode);
-  const limit = Number(req.query.limit || 1500);
-
-  const key = ckey(symbol, mode, tfMin);
-  if (cache.has(key)) {
-    return res.json({ ok: true, type: "snapshot", symbol, tf, mode, bars: cache.get(key) });
-  }
-
-  const raw = await fetch1m(symbol, 5000);
-  const bars = buildFrom1m(tfMin, mode, raw, limit);
-  cache.set(key, bars);
-
-  res.json({ ok: true, type: "snapshot", symbol, tf, mode, bars });
-});
-
-/* ---------------- SSE /stream/agg ---------------- */
-
+/* ---------------- /stream/agg (diagnostic) ---------------- */
 router.get("/agg", async (req, res) => {
   const apiKey = resolvePolygonKey();
-  if (!apiKey) return res.status(500).end("No Polygon key");
+  if (!apiKey) return res.status(500).end("Missing Polygon API key");
 
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
-  const tfMin = normalizeTf(req.query.tf);
+  const tfMin = normalizeTf(req.query.tf || "1m");
   const tf = labelTf(tfMin);
   const mode = normalizeMode(req.query.mode);
-  const key = ckey(symbol, mode, tfMin);
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("Connection", "keep-alive");
+  sseHeaders(res);
 
-  // SEED SNAPSHOT ALWAYS
-  if (!cache.has(key)) {
-    const raw = await fetch1m(symbol, 5000);
-    cache.set(key, buildFrom1m(tfMin, mode, raw, 1500));
-  }
+  // Snapshot seed (always)
+  let snapshotBars = [];
+  try {
+    const raw1m = await fetch1m(symbol, 5000);
+    const norm1m = raw1m
+      .map((b) => ({
+        time: toSec(b.time ?? b.t ?? b.ts ?? b.timestamp),
+        open: Number(b.open ?? b.o),
+        high: Number(b.high ?? b.h),
+        low: Number(b.low ?? b.l),
+        close: Number(b.close ?? b.c),
+        volume: Number(b.volume ?? b.v ?? 0),
+      }))
+      .filter((b) => Number.isFinite(b.time) && Number.isFinite(b.open))
+      .sort((a, b) => a.time - b.time);
 
-  res.write(`data: ${JSON.stringify({
-    ok: true,
-    type: "snapshot",
-    symbol,
-    tf,
-    mode,
-    bars: cache.get(key),
-  })}\n\n`);
+    snapshotBars = buildTfFrom1m(tfMin, norm1m, 1500);
+  } catch {}
 
-  let lastEmit = 0;
+  sseSend(res, { ok: true, type: "snapshot", symbol, tf, mode, bars: snapshotBars });
 
-  function emit(bar) {
-    const now = Date.now();
-    if (now - lastEmit < 1000) return;
-    lastEmit = now;
-    res.write(`data: ${JSON.stringify({ ok: true, type: "bar", symbol, tf, mode, bar })}\n\n`);
-  }
+  let alive = true;
+  const ping = setInterval(() => alive && res.write(`:ping ${Date.now()}\n\n`), 15000);
 
+  // Diagnostics counters
+  const diag = {
+    startedAt: new Date().toISOString(),
+    symbol, tf, tfMin, mode,
+    wsOpen: 0,
+    wsClose: 0,
+    wsError: 0,
+    status: [],
+    amSeen: 0,
+    tSeen: 0,
+    lastMsgMs: 0,
+    lastAmMs: 0,
+    lastTM: 0,
+  };
+
+  const diagTimer = setInterval(() => {
+    if (!alive) return;
+    sseSend(res, { ok: true, type: "diag", diag });
+  }, 5000);
+
+  // Connect Polygon WS (per-connection)
   const ws = new WebSocket(POLY_WS_URL);
 
   ws.on("open", () => {
+    diag.wsOpen += 1;
     ws.send(JSON.stringify({ action: "auth", params: apiKey }));
-    ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol}` }));
+    ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol},T.${symbol}` }));
+    sseSend(res, { ok: true, type: "diag", message: `ws_open subscribed AM.${symbol},T.${symbol}` });
   });
 
   ws.on("message", (buf) => {
-    const msgs = JSON.parse(buf.toString());
-    for (const m of msgs) {
-      if (m.ev !== "AM") continue;
-      if (m.sym !== symbol) continue;
+    diag.lastMsgMs = Date.now();
 
-      const sec = toUnixSec(m.s);
-      if (!sec) continue;
+    let arr;
+    try {
+      arr = JSON.parse(buf.toString("utf8"));
+    } catch {
+      return;
+    }
+    if (!Array.isArray(arr)) arr = [arr];
 
-      const minute = Math.floor(sec / 60) * 60;
-      const bucket = bucketStart(minute, tfMin, mode);
-      if (bucket === null) continue;
-
-      const arr = cache.get(key);
-      const bar = {
-        time: bucket,
-        open: m.o,
-        high: m.h,
-        low: m.l,
-        close: m.c,
-        volume: m.v || 0,
-      };
-      pushBar(arr, bar);
-      emit(bar);
+    for (const msg of arr) {
+      if (msg?.ev === "status") {
+        const line = `${msg?.status || ""} ${msg?.message || ""}`.trim();
+        diag.status.push(line);
+        if (diag.status.length > 10) diag.status.shift();
+        sseSend(res, { ok: true, type: "diag", message: `status ${line}` });
+        continue;
+      }
+      if (msg?.ev === "AM" && String(msg?.sym || "").toUpperCase() === symbol) {
+        diag.amSeen += 1;
+        diag.lastAmMs = Date.now();
+        continue;
+      }
+      if (msg?.ev === "T" && String(msg?.sym || "").toUpperCase() === symbol) {
+        diag.tSeen += 1;
+        diag.lastTM = Date.now();
+        continue;
+      }
     }
   });
 
-  const ping = setInterval(() => res.write(`:ping ${Date.now()}\n\n`), 15000);
+  ws.on("error", (e) => {
+    diag.wsError += 1;
+    sseSend(res, { ok: true, type: "diag", message: `ws_error ${String(e?.message || e)}` });
+  });
+
+  ws.on("close", () => {
+    diag.wsClose += 1;
+    sseSend(res, { ok: true, type: "diag", message: "ws_closed" });
+  });
 
   req.on("close", () => {
+    alive = false;
     clearInterval(ping);
+    clearInterval(diagTimer);
     try { ws.close(); } catch {}
+    try { res.end(); } catch {}
   });
 });
