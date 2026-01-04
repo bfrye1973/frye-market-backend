@@ -1,0 +1,134 @@
+name: dashboard-4h
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Arizona-aligned (Mon–Fri). 4H cadence: run every 4 hours during trading day
+    - cron: "5 14 * * 1-5"
+    - cron: "5 18 * * 1-5"
+    - cron: "5 22 * * 1-5"
+    - cron: "5 2  * * 2-6"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build_and_publish_4h:
+    name: Build and Publish 4H
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: dashboard-4h
+      cancel-in-progress: true
+    env:
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-4h
+      PYTHONUNBUFFERED: "1"
+      FD_MAX_WORKERS: "6"
+      # IMPORTANT: MUST MATCH YOUR 1H BAR COUNT WINDOW
+      H4_LOOKBACK_BARS: "20"
+      H4_LOOKBACK_DAYS: "45"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          set -euo pipefail
+          python -V
+          pip -q install --upgrade pip
+
+      # 1) Build 4H sectorCards source (CSV universe)
+      - name: Build 4H sectorCards source
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python -u scripts/build_outlook_4h_source.py \
+            --sectors-dir data/sectors \
+            --lookback-bars "${H4_LOOKBACK_BARS}" \
+            --days "${H4_LOOKBACK_DAYS}" \
+            --out data/outlook_source_4h.json
+          python - <<'PY'
+          import json
+          j=json.load(open("data/outlook_source_4h.json"))
+          cards=j.get("sectorCards") or []
+          print("[validate] cards:", len(cards))
+          assert len(cards) >= 1
+          PY
+
+      # 2) Build 4H payload
+      - name: Build 4H payload
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          python -u scripts/make_dashboard_4h.py \
+            --source data/outlook_source_4h.json \
+            --out    data/outlook_4h.json
+
+      # 3) Post-process 4H (colors + mirrors)
+      - name: Compute 4H trend capsule
+        run: |
+          set -euo pipefail
+          python -u scripts/compute_trend_4h.py
+
+      # 4) Heartbeat
+      - name: Write heartbeat
+        run: |
+          set -euo pipefail
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_4h.txt
+
+      # 5) Stage artifacts
+      - name: Stage artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/h4
+          cp -f data/outlook_4h.json      /tmp/h4/outlook_4h.json
+          cp -f data/heartbeat_4h.txt     /tmp/h4/heartbeat_4h.txt
+
+      # 6) Publish to live branch
+      - name: Prepare live branch
+        env:
+          LIVE_BRANCH: data-live-4h
+        run: |
+          set -euo pipefail
+          git config user.name  "actions-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git reset --hard
+          git clean -fdx
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${LIVE_BRANCH}"
+            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
+          else
+            git checkout --orphan "${LIVE_BRANCH}"
+          fi
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+          mkdir -p data
+          cp -f /tmp/h4/outlook_4h.json  data/outlook_4h.json
+          cp -f /tmp/h4/heartbeat_4h.txt data/heartbeat_4h.txt
+
+      - name: Commit and push live branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          LIVE_BRANCH: data-live-4h
+        run: |
+          set -euo pipefail
+          git add data
+          git commit -m "4H live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin "${LIVE_BRANCH}" --
