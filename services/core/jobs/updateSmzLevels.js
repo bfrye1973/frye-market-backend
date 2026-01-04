@@ -30,14 +30,28 @@ async function loadBarsMultiTF(symbol = "SPY") {
   // ✅ Synthetic 4H from 1H (ETH-consistent)
   const bars4h = aggregateTo4h(bars1h);
 
+  function spanInfo(label, bars) {
+  if (!Array.isArray(bars) || bars.length === 0) {
+    console.log(`[SMZ] COVERAGE ${label}: none`);
+    return;
+  }
+
+  const first = bars[0].time;
+  const last = bars[bars.length - 1].time;
+  const days = (last - first) / 86400;
+
   console.log(
-    "[SMZ] Normalized bars — 30m:",
-    bars30m.length,
-    "1h:",
-    bars1h.length,
-    "4h(synth):",
-    bars4h.length
+    `[SMZ] COVERAGE ${label}:`,
+    "bars =", bars.length,
+    "| from =", new Date(first * 1000).toISOString(),
+    "| to =", new Date(last * 1000).toISOString(),
+    "| spanDays =", days.toFixed(1)
   );
+}
+
+spanInfo("30m", bars30m);
+spanInfo("1h", bars1h);
+spanInfo("4h(synth)", bars4h);
 
   console.log(
     "[SMZ] maxHigh 30m:",
