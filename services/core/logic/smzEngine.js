@@ -1,17 +1,34 @@
 // src/services/core/logic/smzEngine.js
-// Detect zones + score via rubric modules. Diagnostic output (no caps here).
+// Detect zones + score via rubric. Diagnostic output (no hard gates).
+// FIX: tighten candidate generation to avoid “yellow blanket”
+// - Smaller window around current price
+// - Higher min touches
+// - Larger bucket size
+// - Buckets anchored to a stable grid (no minPrice drifting)
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
-  WINDOW_POINTS: 30,
-  LOOKBACK_1H: 150,
-  LOOKBACK_4H: 180,
-  MIN_TOUCHES: 3,
-  BUCKET_ATR_MULT: 0.60,
-  MAX_OUT: 30,
-  MERGE_OVERLAP: 0.55,
+  // Scan band around current price (points)
+  WINDOW_POINTS: 16,          // was 30 (too wide)
+
+  // Lookbacks
+  LOOKBACK_1H: 180,           // a bit more stable
+  LOOKBACK_4H: 220,
+
+  // Candidate strictness
+  MIN_TOUCHES: 5,             // was 3 (too permissive)
+
+  // Bucket sizing from ATR
+  BUCKET_ATR_MULT: 1.0,       // was 0.60 (too many buckets)
+
+  // Output controls
+  MAX_OUT: 12,                // was 30 (too many)
+  MERGE_OVERLAP: 0.60,        // slightly stronger merge
 };
+
+// Stable grid for SPY-ish levels (prevents drifting buckets)
+const GRID_STEP = 0.25;
 
 function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
 function round2(x) { return Math.round(x * 100) / 100; }
@@ -41,11 +58,16 @@ function normalizeBars(arr) {
     .sort((a, b) => a.time - b.time);
 }
 
+function validBar(b) {
+  return b && Number.isFinite(b.high) && Number.isFinite(b.low) && Number.isFinite(b.close);
+}
+
 function computeATR(candles, period = 14) {
   if (!Array.isArray(candles) || candles.length < period + 2) return 1;
   const trs = [];
   for (let i = 1; i < candles.length; i++) {
     const c = candles[i], p = candles[i - 1];
+    if (!validBar(c) || !validBar(p)) continue;
     const tr = Math.max(
       c.high - c.low,
       Math.abs(c.high - p.close),
@@ -54,44 +76,16 @@ function computeATR(candles, period = 14) {
     trs.push(tr);
   }
   const slice = trs.slice(-period);
-  const atr = slice.reduce((a, b) => a + b, 0) / slice.length;
+  const atr = slice.reduce((a, b) => a + b, 0) / Math.max(1, slice.length);
   return atr > 0 ? atr : 1;
 }
 
-function buildBucketCandidates(candles, bucketSize, minTouches, tf) {
-  const lows = candles.map((c) => c.low);
-  const minPrice = Math.min(...lows);
-  const buckets = new Map();
-
-  const keyFor = (price) => Math.floor((price - minPrice) / bucketSize);
-
-  for (let i = 0; i < candles.length; i++) {
-    const c = candles[i];
-    const mid = (c.high + c.low) / 2;
-    const k = keyFor(mid);
-
-    const b = buckets.get(k) || {
-      tf,
-      low: minPrice + k * bucketSize,
-      high: minPrice + (k + 1) * bucketSize,
-      touches: 0,
-    };
-
-    if (c.high >= b.low && c.low <= b.high) b.touches++;
-    buckets.set(k, b);
-  }
-
-  const out = [];
-  for (const b of buckets.values()) {
-    if (b.touches >= minTouches) {
-      out.push({
-        tf,
-        price_low: round2(b.low),
-        price_high: round2(b.high),
-      });
-    }
-  }
-  return out;
+// Anchor bucket boundaries to a stable grid
+function snapDown(x, step) {
+  return Math.floor(x / step) * step;
+}
+function snapUp(x, step) {
+  return Math.ceil(x / step) * step;
 }
 
 function overlapPct(a, b) {
@@ -103,18 +97,17 @@ function overlapPct(a, b) {
   return denom > 0 ? inter / denom : 0;
 }
 
-function mergeByOverlap(zones, threshold = 0.55) {
+function mergeByOverlap(zones, threshold = 0.60) {
   const sorted = zones.slice().sort((x, y) => x._low - y._low);
   const out = [];
 
   for (const z of sorted) {
-    if (!out.length) {
-      out.push(z);
-      continue;
-    }
+    if (!out.length) { out.push(z); continue; }
     const last = out[out.length - 1];
     const ov = overlapPct({ low: last._low, high: last._high }, { low: z._low, high: z._high });
+
     if (ov >= threshold) {
+      // keep winner by strength but merge bounds
       const winner = (last.strength ?? 0) >= (z.strength ?? 0) ? last : z;
       winner._low = round2(Math.min(last._low, z._low));
       winner._high = round2(Math.max(last._high, z._high));
@@ -126,6 +119,50 @@ function mergeByOverlap(zones, threshold = 0.55) {
     }
   }
 
+  return out;
+}
+
+// Candidate generation using anchored buckets within the scan window
+function buildBucketCandidates(candles, currentPrice, bucketSize, minTouches, tf, windowPts) {
+  const loWin = currentPrice - windowPts;
+  const hiWin = currentPrice + windowPts;
+
+  const start = snapDown(loWin, GRID_STEP);
+  const end = snapUp(hiWin, GRID_STEP);
+
+  // bucket boundaries anchored to GRID_STEP
+  const step = Math.max(GRID_STEP, snapUp(bucketSize, GRID_STEP));
+  const buckets = [];
+
+  for (let lo = start; lo < end; lo += step) {
+    buckets.push({
+      tf,
+      low: lo,
+      high: lo + step,
+      touches: 0,
+    });
+  }
+
+  for (const c of candles) {
+    if (!validBar(c)) continue;
+    // only consider bars intersecting our scan window
+    if (c.high < loWin || c.low > hiWin) continue;
+
+    for (const b of buckets) {
+      if (c.high >= b.low && c.low <= b.high) b.touches++;
+    }
+  }
+
+  const out = [];
+  for (const b of buckets) {
+    if (b.touches >= minTouches) {
+      out.push({
+        tf,
+        price_low: round2(b.low),
+        price_high: round2(b.high),
+      });
+    }
+  }
   return out;
 }
 
@@ -142,26 +179,34 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
 
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) return [];
 
-  const loWin = currentPrice - CFG.WINDOW_POINTS;
-  const hiWin = currentPrice + CFG.WINDOW_POINTS;
-
   const c1h = b1h.slice(-CFG.LOOKBACK_1H);
   const c4h = b4h.slice(-CFG.LOOKBACK_4H);
 
   const atr1h = computeATR(c1h, 14);
   const atr4h = computeATR(c4h, 14);
 
-  const bucket1h = Math.max(0.25, atr1h * CFG.BUCKET_ATR_MULT);
-  const bucket4h = Math.max(0.50, atr4h * CFG.BUCKET_ATR_MULT);
+  const bucket1h = Math.max(0.50, atr1h * CFG.BUCKET_ATR_MULT);
+  const bucket4h = Math.max(0.75, atr4h * CFG.BUCKET_ATR_MULT);
 
-  const cand1h = buildBucketCandidates(c1h, bucket1h, CFG.MIN_TOUCHES, "1h");
-  const cand4h = buildBucketCandidates(c4h, bucket4h, CFG.MIN_TOUCHES, "4h");
+  const cand1h = buildBucketCandidates(
+    c1h,
+    currentPrice,
+    bucket1h,
+    CFG.MIN_TOUCHES,
+    "1h",
+    CFG.WINDOW_POINTS
+  );
+
+  const cand4h = buildBucketCandidates(
+    c4h,
+    currentPrice,
+    bucket4h,
+    Math.max(3, Math.floor(CFG.MIN_TOUCHES * 0.6)), // 4h has fewer bars
+    "4h",
+    CFG.WINDOW_POINTS
+  );
 
   const scored = [...cand1h, ...cand4h]
-    .filter((z) => {
-      const mid = (z.price_low + z.price_high) / 2;
-      return mid >= loWin && mid <= hiWin;
-    })
     .map((z, idx) => {
       const lo = z.price_low;
       const hi = z.price_high;
