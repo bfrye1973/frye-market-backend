@@ -1,45 +1,31 @@
-// services/core/jobs/updateSmzShelves.js
-// Script #2 Job — runs Smart Money Shelves Scanner (Acc/Dist)
+// src/services/core/jobs/updateSmzShelves.js
+// Smart Money Shelves Job — writes ONLY smz-shelves.json (blue/red)
 
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 import { computeShelves } from "../logic/smzShelvesScanner.js";
-import { getBarsFromPolygon } from "../../api/providers/polygonBars.js";
+import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const OUTFILE = path.resolve(__dirname, "../data/smz-shelves.json");
 
-// Fetch multi-timeframe bars for SPY
-async function loadBars(symbol = "SPY") {
-  const [bars10mRaw, bars30mRaw, bars1hRaw] = await Promise.all([
-    getBarsFromPolygon(symbol, "15m", 10),  // ~2–3 days
-    getBarsFromPolygon(symbol, "30m", 20),  // ~5–7 days
-    getBarsFromPolygon(symbol, "1h",  40),  // ~10–14 days
-  ]);
-
-  return {
-    bars10m: normalizeBars(bars10mRaw),
-    bars30m: normalizeBars(bars30mRaw),
-    bars1h:  normalizeBars(bars1hRaw),
-  };
-}
-
-// Normalize Polygon bars → engine format
+// Normalize Polygon aggregate bars to { time(sec), open, high, low, close, volume }
 function normalizeBars(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((b) => {
-      const t = b.t ?? b.time;
+      const tms = Number(b.t ?? b.time ?? 0);
+      const t = tms > 1e12 ? Math.floor(tms / 1000) : tms;
       return {
-        time: typeof t === "number" ? t : 0,
+        time: t,
         open: Number(b.o ?? b.open ?? 0),
         high: Number(b.h ?? b.high ?? 0),
-        low:  Number(b.l ?? b.low  ?? 0),
-        close:Number(b.c ?? b.close?? 0),
+        low: Number(b.l ?? b.low ?? 0),
+        close: Number(b.c ?? b.close ?? 0),
         volume: Number(b.v ?? b.volume ?? 0),
       };
     })
@@ -54,59 +40,88 @@ function normalizeBars(raw) {
     .sort((a, b) => a.time - b.time);
 }
 
+function spanInfo(label, bars) {
+  if (!Array.isArray(bars) || bars.length === 0) {
+    console.log(`[SHELVES] COVERAGE ${label}: none`);
+    return;
+  }
+  const first = bars[0].time;
+  const last = bars[bars.length - 1].time;
+  const days = (last - first) / 86400;
+
+  console.log(
+    `[SHELVES] COVERAGE ${label}:`,
+    "bars =", bars.length,
+    "| from =", new Date(first * 1000).toISOString(),
+    "| to =", new Date(last * 1000).toISOString(),
+    "| spanDays =", days.toFixed(1)
+  );
+}
+
 async function main() {
   try {
-    console.log("[SMZ Shelves] Fetching bars…");
-    const { bars10m, bars30m, bars1h } = await loadBars("SPY");
+    console.log("[SHELVES] Fetching bars…");
 
-    console.log(
-      "[SMZ Shelves] Bars:",
-      "10m =", bars10m.length,
-      "30m =", bars30m.length,
-      "1h =", bars1h.length
-    );
+    // Shelves scanner uses bars10m name but you stated it's actually 15m now.
+    const [bars15mRaw, bars30mRaw, bars1hRaw] = await Promise.all([
+      getBarsFromPolygon("SPY", "15m", 260),
+      getBarsFromPolygon("SPY", "30m", 120),
+      getBarsFromPolygon("SPY", "1h", 150),
+    ]);
 
-    console.log("[SMZ Shelves] Running shelves scanner…");
+    const bars15m = normalizeBars(bars15mRaw);
+    const bars30m = normalizeBars(bars30mRaw);
+    const bars1h = normalizeBars(bars1hRaw);
+
+    console.log("[SHELVES] 15m bars:", bars15m.length);
+    console.log("[SHELVES] 30m bars:", bars30m.length);
+    console.log("[SHELVES] 1h  bars:", bars1h.length);
+
+    spanInfo("15m", bars15m);
+    spanInfo("30m", bars30m);
+    spanInfo("1h", bars1h);
+
+    console.log("[SHELVES] Running shelves scanner (Acc/Dist)…");
     const shelves = computeShelves({
-      bars10m,
+      bars10m: bars15m, // historical naming
       bars30m,
       bars1h,
       bandPoints: 40,
     }) || [];
 
-    console.log("[SMZ Shelves] Shelves found:", shelves.length);
+    console.log("[SHELVES] Shelves generated:", shelves.length);
 
     const payload = {
       ok: true,
-      shelves,
+      meta: { generated_at_utc: new Date().toISOString() },
+      levels: shelves,
     };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
     fs.writeFileSync(OUTFILE, JSON.stringify(payload, null, 2), "utf8");
 
-    console.log("[SMZ Shelves] Saved to:", OUTFILE);
-    console.log("[SMZ Shelves] Job complete.");
+    console.log("[SHELVES] Saved shelves to:", OUTFILE);
+    console.log("[SHELVES] Job complete.");
   } catch (err) {
-    console.error("[SMZ Shelves] FAILED:", err);
+    console.error("[SHELVES] FAILED:", err);
 
     try {
       const fallback = {
         ok: true,
-        shelves: [],
-        note: "Shelves job error",
+        levels: [],
+        note: "SMZ shelves job error, no shelves generated this run",
       };
       fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
       fs.writeFileSync(OUTFILE, JSON.stringify(fallback, null, 2), "utf8");
-      console.log("[SMZ Shelves] Wrote fallback empty smz-shelves.json");
+      console.log("[SHELVES] Wrote fallback empty smz-shelves.json");
     } catch (inner) {
-      console.error("[SMZ Shelves] Also failed fallback write:", inner);
+      console.error("[SHELVES] Also failed to write fallback smz-shelves.json:", inner);
     }
 
     process.exitCode = 1;
   }
 }
 
-// Allow manual execution
 if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
