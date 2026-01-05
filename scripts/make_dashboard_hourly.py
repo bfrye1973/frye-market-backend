@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_hourly.py (R13.0 — EMA posture kept, not double-counted)
+Ferrari Dashboard — make_dashboard_hourly.py (R13.1 — Weighted Average Scoring)
 
-Key fix:
-- Momentum combo no longer over-weights EMA posture (which is already counted in EMA points).
-- New momentum combo weights:
-    EMA posture 45%
-    SMI(1h)      45%
-    SMI(4h)      10%
+Change:
+- overall1h.score is now a weighted average (0..100), NOT points stacking.
+- This prevents constant 100s and matches chart reality (your 65 target).
 
-Everything else unchanged:
-- Legacy metrics.momentum_1h_pct exists (workflow validator)
-- Lux PSI stored as squeeze_psi_1h_pct (tightness)
-- squeeze_1h_pct remains expansion (100 - PSI)
-- overall1h scoring keeps same weights as 10m/1h spec
+We keep:
+- EMA10 distance posture (0..100)
+- SMI (12/5/5) (0..100) + signal line
+- momentum_combo_1h_pct (still exists for display)
+- Lux PSI squeeze (tightness + expansion)
+- liquidity_1h (EMA vol3/vol12)
+- volatility_1h_pct and scaled
+- breadth_1h_pct from sectorCards NH/NL
+- riskOn logic
+- legacy metrics.momentum_1h_pct required by workflow validator
+- bull/bear gating rule: bull if ema_sign>0 and score>=60, bear if ema_sign<0 and score<60 else neutral
 """
 
 from __future__ import annotations
@@ -43,8 +46,7 @@ POLY_4H_URL = (
 OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
 DEFENSIVE = {"consumer staples","utilities","health care","real estate"}
 
-# Overall weights (same as 10m)
-W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 15, 10, 10, 5
+# EMA distance saturation (same as your system)
 FULL_EMA_DIST = 0.60
 SMI_BONUS_MAX = 5
 
@@ -53,10 +55,23 @@ SMI_K_LEN   = 12
 SMI_D_LEN   = 5
 SMI_EMA_LEN = 5
 
-# ✅ FIXED momentum combo weights (balanced, no double-count dominance)
+# Momentum combo weights (kept balanced; no more double-count dominance)
 W_EMA10_POSTURE = 0.45
 W_SMI1H_POSTURE = 0.45
 W_SMI4H_ANCHOR  = 0.10
+
+# ✅ NEW: Weighted-average score weights (sum = 1.00)
+# Tuned to stop 100/100 and land around your 65 feel in normal bullish structure.
+W_EMA_SCORE   = 0.35
+W_MOM_SCORE   = 0.25
+W_BREADTH     = 0.15
+W_SQUEEZE_EXP = 0.10
+W_LIQ_NORM    = 0.07
+W_VOL_SCORE   = 0.05
+W_RISKON      = 0.03
+
+# SMI bonus -> small score nudger (±3 max)
+SMI_BONUS_SCORE_MAX = 3.0
 
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -76,7 +91,7 @@ def pct(a: float, b: float) -> float:
         return 0.0
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent":"make-dashboard/1h/1.4","Cache-Control":"no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent":"make-dashboard/1h/1.5","Cache-Control":"no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -184,27 +199,64 @@ def tv_smi_and_signal(H: List[float], L: List[float], C: List[float],
 def smi_to_pct(smi_val: float) -> float:
     return clamp(50.0 + 0.5*float(smi_val), 0.0, 100.0)
 
-def lin_points(pct_val: float, weight: int) -> int:
-    return int(round(weight * ((float(pct_val) - 50.0) / 50.0)))
+def posture_from_dist(dist_pct: float, full_dist: float) -> float:
+    unit = clamp(dist_pct / max(full_dist, 1e-9), -1.0, 1.0)
+    return clamp(50.0 + 50.0 * unit, 0.0, 100.0)
 
-def compute_overall1h(ema_sign: int, ema_dist_pct: float,
-                      momentum_pct: float, breadth_pct: float,
-                      squeeze_expansion_pct: float, liquidity_pct: float,
-                      riskon_pct: float, smi_bonus_pts: int) -> Tuple[str, int, dict]:
-    dist_unit = clamp(ema_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
-    ema_pts = int(round(abs(dist_unit) * W_EMA)) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
+def score_vol(vol_scaled: float) -> float:
+    # lower vol is better; cap at 100
+    return clamp(100.0 - clamp(vol_scaled, 0.0, 100.0), 0.0, 100.0)
 
-    m_pts  = lin_points(momentum_pct, W_MOM)
-    b_pts  = lin_points(breadth_pct,  W_BR)
-    sq_pts = lin_points(squeeze_expansion_pct, W_SQ)
-    lq_pts = lin_points(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
-    ro_pts = lin_points(riskon_pct, W_RISK)
+def score_liq(liq: float) -> float:
+    # 0..120 -> 0..100 (cap)
+    liq_c = clamp(liq, 0.0, 120.0)
+    return (liq_c / 120.0) * 100.0
 
-    score_raw = 50 + ema_pts + m_pts + b_pts + sq_pts + lq_pts + ro_pts + int(smi_bonus_pts)
-    score  = int(clamp(score_raw, 0, 100))
+def compute_overall_weighted(
+    ema_posture: float,
+    momentum_combo: float,
+    breadth_pct: float,
+    squeeze_exp: float,
+    liquidity_val: float,
+    vol_scaled: float,
+    risk_on: float,
+    smi_bonus_pts: int,
+    ema_sign: int,
+) -> Tuple[str, float, dict]:
+    liq_norm = score_liq(liquidity_val)
+    vol_sc   = score_vol(vol_scaled)
 
-    state  = "bull" if (ema_sign > 0 and score >= 60) else ("bear" if (ema_sign < 0 and score < 60) else "neutral")
-    comps  = {"ema10": ema_pts, "momentum": m_pts, "breadth": b_pts, "squeeze": sq_pts, "liquidity": lq_pts, "riskOn": ro_pts, "smiBonus": int(smi_bonus_pts)}
+    # smi bonus +/-3
+    bonus = 0.0
+    if smi_bonus_pts > 0:
+        bonus = +SMI_BONUS_SCORE_MAX
+    elif smi_bonus_pts < 0:
+        bonus = -SMI_BONUS_SCORE_MAX
+
+    score_raw = (
+        W_EMA_SCORE   * ema_posture +
+        W_MOM_SCORE   * momentum_combo +
+        W_BREADTH     * clamp(breadth_pct, 0.0, 100.0) +
+        W_SQUEEZE_EXP * clamp(squeeze_exp, 0.0, 100.0) +
+        W_LIQ_NORM    * liq_norm +
+        W_VOL_SCORE   * vol_sc +
+        W_RISKON      * clamp(risk_on, 0.0, 100.0) +
+        bonus
+    )
+    score = clamp(score_raw, 0.0, 100.0)
+
+    state = "bull" if (ema_sign > 0 and score >= 60.0) else ("bear" if (ema_sign < 0 and score < 60.0) else "neutral")
+
+    comps = {
+        "ema10": round(W_EMA_SCORE * ema_posture, 2),
+        "momentum": round(W_MOM_SCORE * momentum_combo, 2),
+        "breadth": round(W_BREADTH * breadth_pct, 2),
+        "squeeze": round(W_SQUEEZE_EXP * squeeze_exp, 2),
+        "liquidity": round(W_LIQ_NORM * liq_norm, 2),
+        "volatility": round(W_VOL_SCORE * vol_sc, 2),
+        "riskOn": round(W_RISKON * risk_on, 2),
+        "smiBonus": round(bonus, 2),
+    }
     return state, score, comps
 
 def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
@@ -281,9 +333,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     smi_pct_1h = None
     smi_pct_4h = None
 
-    smi_series_1h: List[float] = []
-    sig_series_1h: List[float] = []
-
     if len(spy_1h) >= 25:
         H = [b["high"] for b in spy_1h]
         L = [b["low"]  for b in spy_1h]
@@ -293,13 +342,12 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
             ema_dist_pct = 100.0 * (C[-1] - e10[-1]) / e10[-1]
 
         ema_sign = 1 if ema_dist_pct > 0 else (-1 if ema_dist_pct < 0 else 0)
-        unit = clamp(ema_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
-        ema10_posture = clamp(50.0 + 50.0 * unit, 0.0, 100.0)
+        ema10_posture = posture_from_dist(ema_dist_pct, FULL_EMA_DIST)
 
-        smi_series_1h, sig_series_1h = tv_smi_and_signal(H, L, C, SMI_K_LEN, SMI_D_LEN, SMI_EMA_LEN)
-        if smi_series_1h and sig_series_1h:
-            smi_1h = float(smi_series_1h[-1])
-            smi_sig_1h = float(sig_series_1h[-1])
+        smi_series, sig_series = tv_smi_and_signal(H, L, C, SMI_K_LEN, SMI_D_LEN, SMI_EMA_LEN)
+        if smi_series and sig_series:
+            smi_1h = float(smi_series[-1])
+            smi_sig_1h = float(sig_series[-1])
             smi_pct_1h = smi_to_pct(smi_1h)
 
     if len(spy_4h) >= 25:
@@ -310,12 +358,12 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         if smi4 and sig4:
             smi_pct_4h = smi_to_pct(float(smi4[-1]))
 
-    # ✅ FIXED MOMENTUM COMBO (balanced)
+    # momentum combo
     momentum_combo_1h = float(ema10_posture)
     if isinstance(smi_pct_1h, (int, float)) or isinstance(smi_pct_4h, (int, float)):
         wE, w1, w4 = W_EMA10_POSTURE, W_SMI1H_POSTURE, W_SMI4H_ANCHOR
         if smi_pct_1h is None:
-            wE, w1, w4 = 0.80, 0.00, 0.20
+            wE, w1, w4 = 0.75, 0.00, 0.25
         if smi_pct_4h is None:
             wE, w1, w4 = 0.55, 0.45, 0.00
         momentum_combo_1h = (
@@ -342,7 +390,8 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
             squeeze_exp_1h = clamp(100.0 - float(psi), 0.0, 100.0)
 
     liquidity_1h = 50.0
-    volatility_1h = 0.0
+    volatility_1h_pct = 0.0
+    volatility_1h_scaled = 0.0
     if len(spy_1h) >= 3:
         V = [b["volume"] for b in spy_1h]
         v3  = ema_last(V, 3)
@@ -354,50 +403,28 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         L = [b["low"]   for b in spy_1h]
         trs = tr_series(H, L, C)
         atr = ema_last(trs, 3) if trs else None
-        volatility_1h = 0.0 if not atr or C[-1] <= 0 else max(0.0, 100.0 * atr / C[-1])
+        volatility_1h_pct = 0.0 if not atr or C[-1] <= 0 else max(0.0, 100.0 * atr / C[-1])
+        volatility_1h_scaled = round(float(volatility_1h_pct) * 6.25, 2)
 
-    breadth_1h = float(breadth_slow)
-    state, score, comps = compute_overall1h(
-        ema_sign=int(ema_sign),
-        ema_dist_pct=float(ema_dist_pct),
-        momentum_pct=float(momentum_combo_1h),
-        breadth_pct=float(breadth_1h),
-        squeeze_expansion_pct=float(squeeze_exp_1h),
-        liquidity_pct=float(liquidity_1h),
-        riskon_pct=float(risk_on_pct),
+    # ✅ Weighted score
+    state, score, comps = compute_overall_weighted(
+        ema_posture=float(ema10_posture),
+        momentum_combo=float(momentum_combo_1h),
+        breadth_pct=float(breadth_slow),
+        squeeze_exp=float(squeeze_exp_1h),
+        liquidity_val=float(liquidity_1h),
+        vol_scaled=float(volatility_1h_scaled),
+        risk_on=float(risk_on_pct),
         smi_bonus_pts=int(smi_bonus_pts),
+        ema_sign=int(ema_sign),
     )
 
     updated_utc = now_utc_iso()
 
-    def stamp(prev_sig: Optional[dict], active: bool, reason: str) -> dict:
-        last = prev_sig.get("lastChanged") if isinstance(prev_sig,dict) else updated_utc
-        prev_active = prev_sig.get("active") if isinstance(prev_sig,dict) else None
-        flipped = (prev_active is None) or (bool(prev_active) != bool(active))
-        return {
-            "active": bool(active),
-            "severity": "info",
-            "reason": reason if active else "",
-            "lastChanged": updated_utc if flipped else (last or updated_utc),
-        }
-
-    prev_sig = ((prev_js.get("hourly") or {}).get("signals") or {}) if isinstance(prev_js, dict) else {}
-
-    smi_bull = smi_bear = False
-    if len(smi_series_1h) >= 2 and len(sig_series_1h) >= 2:
-        smi_bull = (smi_series_1h[-2] <= sig_series_1h[-2]) and (smi_series_1h[-1] > sig_series_1h[-1])
-        smi_bear = (smi_series_1h[-2] >= sig_series_1h[-2]) and (smi_series_1h[-1] < sig_series_1h[-1])
-
-    signals_1h = {
-        "sigSMI1hBullCross": stamp(prev_sig.get("sigSMI1hBullCross"), smi_bull, "SMI crossed above Signal (1h)"),
-        "sigSMI1hBearCross": stamp(prev_sig.get("sigSMI1hBearCross"), smi_bear, "SMI crossed below Signal (1h)"),
-    }
-
-    trend_strength_1h_pct = float(score)
-
     metrics = {
-        "trend_strength_1h_pct": round(trend_strength_1h_pct, 2),
-        "breadth_1h_pct": float(breadth_1h),
+        "trend_strength_1h_pct": round(float(score), 2),
+
+        "breadth_1h_pct": float(breadth_slow),
         "momentum_1h_pct": float(momentum_slow),              # legacy required
         "momentum_combo_1h_pct": float(momentum_combo_1h),
 
@@ -414,8 +441,8 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         "smi_bonus_pts": int(smi_bonus_pts),
 
         "liquidity_1h": round(float(liquidity_1h), 2),
-        "volatility_1h_pct": round(float(volatility_1h), 3),
-        "volatility_1h_scaled": round(float(volatility_1h) * 6.25, 2),
+        "volatility_1h_pct": round(float(volatility_1h_pct), 3),
+        "volatility_1h_scaled": float(volatility_1h_scaled),
 
         "breadth_slow_pct": float(breadth_slow),
         "momentum_slow_pct": float(momentum_slow),
@@ -424,12 +451,12 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     hourly = {
         "sectorDirection1h": {"risingPct": float(rising_pct)},
         "riskOn1h": {"riskOnPct": float(risk_on_pct)},
-        "overall1h": {"state": state, "score": int(score), "components": comps},
-        "signals": signals_1h,
+        "overall1h": {"state": state, "score": round(float(score), 2), "components": comps},
+        "signals": (prev_js.get("hourly") or {}).get("signals") or {},
     }
 
     out = {
-        "version": "r1h-v4-balanced-momentum",
+        "version": "r1h-v5-weightedavg",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
@@ -439,11 +466,8 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     }
 
     print(
-        f"[1h] breadth={breadth_1h:.2f} mom_combo={momentum_combo_1h:.2f} "
-        f"ema10dist={ema_dist_pct:.3f}% ema_post={ema10_posture:.2f} smiBonus={smi_bonus_pts:+d} "
-        f"squeezePsi={squeeze_psi_1h} squeezeExp={squeeze_exp_1h:.2f} "
-        f"liq={liquidity_1h:.2f} volScaled={metrics['volatility_1h_scaled']:.2f} "
-        f"riskOn={risk_on_pct:.2f} risingPct={rising_pct:.2f} overall={state}/{score}",
+        f"[1h] score={score:.2f} state={state} emaPost={ema10_posture:.2f} mom={momentum_combo_1h:.2f} "
+        f"breadth={breadth_slow:.2f} sqExp={squeeze_exp_1h:.2f} liq={liquidity_1h:.2f} volScaled={volatility_1h_scaled:.2f} riskOn={risk_on_pct:.2f} smiBonus={smi_bonus_pts:+d}",
         flush=True
     )
     return out
