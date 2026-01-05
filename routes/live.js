@@ -1,4 +1,4 @@
-// routes/live.js — FULL FIXED VERSION
+// routes/live.js — FULL FIXED VERSION (adds /live/4h)
 import express from "express";
 import fetch from "node-fetch";
 
@@ -12,8 +12,8 @@ function githubRaw(url) {
   return fetch(url, {
     headers: {
       "User-Agent": "FerrariDashboard/1.0",
-      "Cache-Control": "no-store"
-    }
+      "Cache-Control": "no-store",
+    },
   });
 }
 
@@ -26,12 +26,14 @@ function jsonOr404(res, url) {
       return r.json().then((j) => res.json(j));
     })
     .catch((e) => {
-      return res.status(500).json({ ok: false, error: e?.message || "server error" });
+      return res
+        .status(500)
+        .json({ ok: false, error: e?.message || "server error" });
     });
 }
 
 /* ============================================================
-   *** LIVE FEEDS (USED BY DASHBOARD & HOURLY BUILDER) ***
+   *** LIVE FEEDS (USED BY DASHBOARD & BUILDERS) ***
    ============================================================ */
 
 // 10-minute intraday feed
@@ -47,6 +49,14 @@ liveRouter.get("/hourly", async (req, res) => {
   const url =
     "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/" +
     "data-live-hourly/data/outlook_hourly.json";
+  return jsonOr404(res, url);
+});
+
+// ✅ NEW: 4-hour feed
+liveRouter.get("/4h", async (req, res) => {
+  const url =
+    "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/" +
+    "data-live-4h/data/outlook_4h.json";
   return jsonOr404(res, url);
 });
 
@@ -101,7 +111,9 @@ liveRouter.get("/nowbar", async (req, res) => {
 
     const API = getPolyKey();
     if (!API) {
-      return res.status(500).json({ ok: false, error: "Missing POLYGON_API env" });
+      return res
+        .status(500)
+        .json({ ok: false, error: "Missing POLYGON_API env" });
     }
 
     const url =
@@ -111,7 +123,9 @@ liveRouter.get("/nowbar", async (req, res) => {
 
     const r = await fetch(url);
     if (!r.ok) {
-      return res.status(r.status).json({ ok: false, error: `upstream ${r.status}` });
+      return res
+        .status(r.status)
+        .json({ ok: false, error: `upstream ${r.status}` });
     }
 
     const j = await r.json();
