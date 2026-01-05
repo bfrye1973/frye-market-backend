@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_4h.py (R12.9 — 4H Market Meter)
+Ferrari Dashboard — make_dashboard_4h.py (R13.0 — EMA posture kept, not double-counted)
 
-Implements the approved 4H scoring spec:
-- EMA sign + distance vs EMA10
-- Momentum combo = 0.80*EMA10_posture + 0.20*SMI(4H) (0..100)
-- Breadth_4h_pct from sectorCards NH/(NH+NL)
-- Squeeze expansion = 100 - Lux PSI (tightness)
-- Liquidity = 100*EMA(vol3)/EMA(vol12)
-- RiskOn from offensive/defensive breadth rules
-- SMI bonus +/-5 based on SMI vs Signal (4H)
-- Final score mirrors 10m/1h weights and mapping
-- Writes: data/outlook_4h.json with metrics + fourHour.overall4h + sectorCards
+Key fix:
+- Momentum combo no longer over-weights EMA posture (which is already counted in EMA points).
+- New momentum combo weights:
+    EMA posture 50%
+    SMI(4h)      50%
+
+Everything else unchanged.
 """
 
 from __future__ import annotations
@@ -37,19 +34,17 @@ POLY_4H_URL = (
 OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
 DEFENSIVE = {"consumer staples","utilities","health care","real estate"}
 
-# Weights (exact match 10m/1h)
 W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 15, 10, 10, 5
 FULL_EMA_DIST = 0.60
 SMI_BONUS_MAX = 5
 
-# SMI params (same as 1H)
 SMI_K_LEN   = 12
 SMI_D_LEN   = 5
 SMI_EMA_LEN = 5
 
-# Momentum combo weights (4H approved)
-W_EMA_POSTURE = 0.80
-W_SMI_4H      = 0.20
+# ✅ FIXED momentum combo weights (balanced)
+W_EMA_POSTURE = 0.50
+W_SMI_4H      = 0.50
 
 def now_utc_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -69,11 +64,11 @@ def pct(a: float, b: float) -> float:
         return 0.0
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent":"make-dashboard/4h/1.0","Cache-Control":"no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent":"make-dashboard/4h/1.1","Cache-Control":"no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
-def fetch_polygon_4h(sym: str, key: str, lookback_days: int = 90) -> List[dict]:
+def fetch_polygon_4h(sym: str, key: str, lookback_days: int = 120) -> List[dict]:
     end = datetime.now(UTC).date()
     start = end - timedelta(days=lookback_days)
     url = POLY_4H_URL.format(sym=sym, start=start, end=end, key=key)
@@ -97,10 +92,9 @@ def fetch_polygon_4h(sym: str, key: str, lookback_days: int = 90) -> List[dict]:
         except Exception:
             continue
     out.sort(key=lambda x: x["time"])
-    # drop in-flight 4H bar
     if out:
-        last = out[-1]["time"]
         now = int(time.time())
+        last = out[-1]["time"]
         if (last // (4*3600)) == (now // (4*3600)):
             out = out[:-1]
     return out
@@ -150,14 +144,12 @@ def tv_smi_and_signal(H: List[float], L: List[float], C: List[float],
     n = len(C)
     if n < max(lengthK, lengthD, lengthEMA) + 5:
         return [], []
-
     HH: List[float] = []
     LL: List[float] = []
     for i in range(n):
         i0 = max(0, i - (lengthK - 1))
         HH.append(max(H[i0:i+1]))
         LL.append(min(L[i0:i+1]))
-
     rangeHL = [HH[i] - LL[i] for i in range(n)]
     rel = [C[i] - (HH[i] + LL[i]) / 2.0 for i in range(n)]
 
@@ -166,13 +158,13 @@ def tv_smi_and_signal(H: List[float], L: List[float], C: List[float],
         e2 = ema_series(e1, length)
         return e2
 
-    num = ema_ema(rel, lengthD)
-    den = ema_ema(rangeHL, lengthD)
+    nume = ema_ema(rel, lengthD)
+    deno = ema_ema(rangeHL, lengthD)
 
     smi: List[float] = []
     for i in range(n):
-        d = den[i]
-        smi.append(0.0 if d == 0 else 200.0 * (num[i] / d))
+        d = deno[i]
+        smi.append(0.0 if d == 0 else 200.0 * (nume[i] / d))
 
     sig = ema_series(smi, lengthEMA)
     return smi, sig
@@ -217,7 +209,7 @@ def main():
         sys.exit(2)
 
     cards = src.get("sectorCards") or []
-    # Aggregate NH/NL and UP/DOWN from cards for breadth & legacy momentum
+
     NH=NL=UP=DN=0.0
     for c in cards:
         NH += float(c.get("nh",0)); NL += float(c.get("nl",0))
@@ -225,7 +217,6 @@ def main():
     breadth_4h = round(pct(NH, NH+NL), 2) if (NH+NL)>0 else 50.0
     momentum_4h_legacy = round(pct(UP, UP+DN), 2) if (UP+DN)>0 else 50.0
 
-    # RiskOn_4h from sector breadth
     by = {(c.get("sector") or "").strip().lower(): c for c in cards}
     ro_score = ro_den = 0
     for s in OFFENSIVE:
@@ -242,7 +233,6 @@ def main():
                 ro_score += 1
     risk_on_4h = round(pct(ro_score, ro_den), 2) if ro_den>0 else 50.0
 
-    # SPY 4H bars
     spy_4h = fetch_polygon_4h("SPY", key, lookback_days=120)
     if len(spy_4h) < 25:
         print("[fatal] insufficient SPY 4H bars", file=sys.stderr)
@@ -253,25 +243,21 @@ def main():
     C = [b["close"] for b in spy_4h]
     V = [b["volume"] for b in spy_4h]
 
-    # EMA10 dist + sign
     e10 = ema_series(C, 10)[-1]
     ema_dist_pct = 0.0 if e10 == 0 else 100.0 * (C[-1] - e10) / e10
     ema_sign = 1 if ema_dist_pct > 0 else (-1 if ema_dist_pct < 0 else 0)
 
-    # EMA10 posture (0..100) from dist
     unit = clamp(ema_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
     ema10_posture = clamp(50.0 + 50.0 * unit, 0.0, 100.0)
 
-    # SMI (4H) + Signal (4H)
     smi_series, sig_series = tv_smi_and_signal(H, L, C, SMI_K_LEN, SMI_D_LEN, SMI_EMA_LEN)
     smi_val = float(smi_series[-1]) if smi_series else 0.0
     sig_val = float(sig_series[-1]) if sig_series else 0.0
     smi_pct = smi_to_pct(smi_val)
 
-    # Momentum combo 4H (approved)
+    # ✅ FIXED MOMENTUM COMBO (balanced)
     momentum_combo_4h = round(clamp(W_EMA_POSTURE*ema10_posture + W_SMI_4H*smi_pct, 0.0, 100.0), 2)
 
-    # SMI bonus (+/-5) based on SMI vs Signal
     smi_bonus = 0
     if smi_series and sig_series:
         if smi_val > sig_val:
@@ -279,23 +265,19 @@ def main():
         elif smi_val < sig_val:
             smi_bonus = -SMI_BONUS_MAX
 
-    # Lux PSI squeeze 4H (tightness + expansion)
     psi = lux_psi_from_closes(C, conv=50, length=20)
     squeeze_psi_4h = float(psi) if isinstance(psi,(int,float)) else 50.0
     squeeze_exp_4h = clamp(100.0 - squeeze_psi_4h, 0.0, 100.0)
 
-    # Liquidity 4H (EMA vol3 / vol12)
     v3  = ema_last(V, 3)
     v12 = ema_last(V, 12)
     liquidity_4h = 0.0 if not v12 or v12<=0 else clamp(100.0 * (v3 / v12), 0.0, 200.0)
 
-    # Volatility 4H (ATR3% like 1H)
     trs = tr_series(H, L, C)
     atr3 = ema_last(trs, 3) if trs else None
     vol_pct = 0.0 if not atr3 or C[-1] <= 0 else max(0.0, 100.0 * atr3 / C[-1])
     vol_scaled = round(vol_pct * 6.25, 2)
 
-    # Sector Dir 4H (breadth>=55 & momentum>=55 at sector level)
     rising_good = 0
     rising_total = 0
     for c in cards:
@@ -307,7 +289,6 @@ def main():
                 rising_good += 1
     sector_dir_4h = round(pct(rising_good, rising_total), 2) if rising_total>0 else 50.0
 
-    # Overall 4H composite (approved math)
     state, score, comps = compute_overall4h(
         ema_sign=ema_sign,
         ema_dist_pct=ema_dist_pct,
@@ -323,7 +304,6 @@ def main():
 
     metrics = {
         "trend_strength_4h_pct": float(score),
-
         "breadth_4h_pct": float(breadth_4h),
         "momentum_4h_pct": float(momentum_4h_legacy),
         "momentum_combo_4h_pct": float(momentum_combo_4h),
@@ -337,8 +317,8 @@ def main():
         "smi_4h_pct": round(float(smi_pct), 2),
         "smi_bonus_pts": int(smi_bonus),
 
-        "squeeze_psi_4h_pct": round(float(squeeze_psi_4h), 2),
-        "squeeze_4h_pct": round(float(squeeze_exp_4h), 2),  # display / expansion
+        "squeeze_psi_4h": round(float(squeeze_psi_4h), 2),
+        "squeeze_4h_pct": round(float(squeeze_exp_4h), 2),
 
         "liquidity_4h": round(float(liquidity_4h), 2),
         "volatility_4h_pct": round(float(vol_pct), 3),
@@ -359,7 +339,7 @@ def main():
     }
 
     out = {
-        "version": "r4h-v1-mirror",
+        "version": "r4h-v2-balanced-momentum",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
@@ -374,10 +354,10 @@ def main():
 
     print(
         f"[4h] breadth={breadth_4h:.2f} mom_combo={momentum_combo_4h:.2f} "
-        f"squeezeExp={squeeze_exp_4h:.2f} psi={squeeze_psi_4h:.2f} "
+        f"ema10dist={ema_dist_pct:.3f}% ema_post={ema10_posture:.2f} smiBonus={smi_bonus:+d} "
+        f"squeezePsi={squeeze_psi_4h:.2f} squeezeExp={squeeze_exp_4h:.2f} "
         f"liq={liquidity_4h:.2f} volScaled={vol_scaled:.2f} "
-        f"riskOn={risk_on_4h:.2f} sectorDir={sector_dir_4h:.2f} "
-        f"overall={state}/{score}",
+        f"riskOn={risk_on_4h:.2f} sectorDir={sector_dir_4h:.2f} overall={state}/{score}",
         flush=True
     )
 
