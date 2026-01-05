@@ -1,13 +1,19 @@
 name: dashboard-4h
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "baseline = full scan all symbols (slow). incremental = only update changed symbols (fast)."
+        required: true
+        default: "incremental"
+        type: choice
+        options:
+          - baseline
+          - incremental
   schedule:
-    # Arizona-aligned (Mon–Fri). 4H cadence: run every 4 hours during trading day
-    - cron: "5 14 * * 1-5"
-    - cron: "5 18 * * 1-5"
-    - cron: "5 22 * * 1-5"
-    - cron: "5 2  * * 2-6"
+    # Run incremental on a cadence (Mon–Fri). Adjust later if desired.
+    - cron: "10 */4 * * 1-5"
 
 defaults:
   run:
@@ -17,29 +23,36 @@ jobs:
   build_and_publish_4h:
     name: Build and Publish 4H
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # baseline needs more time; incremental stays fast
+    timeout-minutes: 180
     permissions:
       contents: write
     concurrency:
       group: dashboard-4h
       cancel-in-progress: true
+
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-4h
       PYTHONUNBUFFERED: "1"
-      FD_MAX_WORKERS: "6"
-      # IMPORTANT: MUST MATCH YOUR 1H BAR COUNT WINDOW
+      FD_MAX_WORKERS: "16"
+
+      # ✅ Your choice: 14 day cushion
+      H4_LOOKBACK_DAYS: "14"
+
+      # IMPORTANT: MUST MATCH your 1H NH/NL BAR COUNT WINDOW (do not change concept)
       H4_LOOKBACK_BARS: "20"
-      H4_LOOKBACK_DAYS: "45"
+
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      POLY_KEY: ${{ secrets.POLY_KEY }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          persist-credentials: false
 
-      - name: Setup Python
+      - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -47,38 +60,65 @@ jobs:
       - name: Install deps
         run: |
           set -euo pipefail
-          python -V
-          pip -q install --upgrade pip
+          python -m pip install --upgrade pip
+          pip install --upgrade requests python-dateutil tzdata
 
-      # 1) Build 4H sectorCards source (CSV universe)
-      - name: Build 4H sectorCards source
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      - name: Determine mode (baseline vs incremental)
+        id: mode
+        run: |
+          set -euo pipefail
+          MODE="incremental"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ inputs.mode }}"
+          fi
+          echo "MODE=$MODE" >> "$GITHUB_ENV"
+          echo "::notice:: MODE=$MODE"
+
+      # Pull prior cache from live branch if exists (for incremental)
+      - name: Restore prior cache if exists
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
+            git show "origin/${LIVE_BRANCH}:data/4h_cache.json" > data/4h_cache.json 2>/dev/null || true
+            if [ -s data/4h_cache.json ]; then
+              echo "::notice:: Restored prior 4H cache"
+            else
+              echo "::notice:: No prior 4H cache found"
+            fi
+          else
+            echo "::notice:: Live branch ${LIVE_BRANCH} does not exist yet"
+          fi
+
+      # 1) Build 4H sectorCards source (baseline or incremental)
+      - name: Build 4H sectorCards source (baseline/incremental)
         run: |
           set -euo pipefail
           mkdir -p data
           python -u scripts/build_outlook_4h_source.py \
-            --sectors-dir data/sectors \
+            --mode "${MODE}" \
+            --sectors-dir "data/sectors" \
             --lookback-bars "${H4_LOOKBACK_BARS}" \
-            --days "${H4_LOOKBACK_DAYS}" \
-            --out data/outlook_source_4h.json
+            --lookback-days "${H4_LOOKBACK_DAYS}" \
+            --cache "data/4h_cache.json" \
+            --out   "data/outlook_source_4h.json"
           python - <<'PY'
-          import json
-          j=json.load(open("data/outlook_source_4h.json"))
-          cards=j.get("sectorCards") or []
-          print("[validate] cards:", len(cards))
-          assert len(cards) >= 1
+          import json,sys
+          s=json.load(open("data/outlook_source_4h.json","r",encoding="utf-8"))
+          cards=s.get("sectorCards") or []
+          if not isinstance(cards,list) or len(cards)==0:
+            print("INVALID 4H source sectorCards"); sys.exit(2)
+          print("OK source cards=",len(cards))
           PY
 
       # 2) Build 4H payload
       - name: Build 4H payload
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           python -u scripts/make_dashboard_4h.py \
-            --source data/outlook_source_4h.json \
-            --out    data/outlook_4h.json
+            --source "data/outlook_source_4h.json" \
+            --out    "data/outlook_4h.json"
 
       # 3) Post-process 4H (colors + mirrors)
       - name: Compute 4H trend capsule
@@ -86,49 +126,64 @@ jobs:
           set -euo pipefail
           python -u scripts/compute_trend_4h.py
 
-      # 4) Heartbeat
+      # 4) Validate payload
+      - name: Validate required keys
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          j=json.load(open("data/outlook_4h.json","r",encoding="utf-8"))
+          m=j.get("metrics") or {}
+          need=("breadth_4h_pct","momentum_4h_pct","squeeze_4h_pct","liquidity_4h","volatility_4h_pct","trend_strength_4h_pct")
+          miss=[k for k in need if k not in m]
+          sc=j.get("sectorCards") or []
+          if miss or not isinstance(sc,list) or len(sc)!=11:
+              print("missing:", miss, "len(sectorCards)=",len(sc)); sys.exit(1)
+          print("OK metrics & sectorCards")
+          PY
+
+      # 5) Heartbeat
       - name: Write heartbeat
         run: |
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_4h.txt
 
-      # 5) Stage artifacts
-      - name: Stage artifacts
+      # 6) Publish live branch
+      - name: Publish live branch
         run: |
           set -euo pipefail
-          mkdir -p /tmp/h4
-          cp -f data/outlook_4h.json      /tmp/h4/outlook_4h.json
-          cp -f data/heartbeat_4h.txt     /tmp/h4/heartbeat_4h.txt
 
-      # 6) Publish to live branch
-      - name: Prepare live branch
-        env:
-          LIVE_BRANCH: data-live-4h
-        run: |
-          set -euo pipefail
-          git config user.name  "actions-bot"
-          git config user.email "bot@users.noreply.github.com"
+          TMP_DIR="$(mktemp -d)"
+          cp -f data/outlook_4h.json    "${TMP_DIR}/outlook_4h.json"
+          cp -f data/heartbeat_4h.txt   "${TMP_DIR}/heartbeat_4h.txt"
+          cp -f data/4h_cache.json      "${TMP_DIR}/4h_cache.json"
+
+          git config user.email "user@local"
+          git config user.name  "CI Bot"
+
+          git fetch --depth=1 origin "${LIVE_BRANCH}" || true
+
+          git rm -r --cached . 2>/dev/null || true
           git reset --hard
           git clean -fdx
+
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
-            git fetch origin "${LIVE_BRANCH}"
             git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
           else
-            git checkout --orphan "${LIVE_BRANCH}"
+            git checkout -B "${LIVE_BRANCH}"
           fi
-          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-          mkdir -p data
-          cp -f /tmp/h4/outlook_4h.json  data/outlook_4h.json
-          cp -f /tmp/h4/heartbeat_4h.txt data/heartbeat_4h.txt
+          git branch --set-upstream-to="origin/${LIVE_BRANCH}" "${LIVE_BRANCH}" || true
 
-      - name: Commit and push live branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          LIVE_BRANCH: data-live-4h
-        run: |
-          set -euo pipefail
-          git add data
-          git commit -m "4H live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
-          git push origin "${LIVE_BRANCH}" --
+          mkdir -p data
+          mv "${TMP_DIR}/outlook_4h.json"  data/outlook_4h.json
+          mv "${TMP_DIR}/heartbeat_4h.txt" data/heartbeat_4h.txt
+          mv "${TMP_DIR}/4h_cache.json"    data/4h_cache.json
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "4h publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push origin "${LIVE_BRANCH}"
