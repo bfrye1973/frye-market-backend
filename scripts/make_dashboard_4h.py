@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_4h.py (R13.0 — EMA posture kept, not double-counted)
+Ferrari Dashboard — make_dashboard_4h.py (R13.1 — Weighted Average Scoring)
 
-Key fix:
-- Momentum combo no longer over-weights EMA posture (which is already counted in EMA points).
-- New momentum combo weights:
-    EMA posture 50%
-    SMI(4h)      50%
+Change:
+- overall4h.score is now a weighted average (0..100), NOT points stacking.
+- Stops constant 100s and matches chart reality (your 68 target).
 
-Everything else unchanged.
+We keep:
+- EMA10 posture from dist
+- SMI(12/5/5) + signal
+- momentum_combo_4h_pct (balanced 50/50)
+- Lux PSI squeeze (tightness + expansion)
+- liquidity, volatility, breadth, riskOn
+- same bull/bear gating rule
 """
 
 from __future__ import annotations
@@ -34,7 +38,6 @@ POLY_4H_URL = (
 OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
 DEFENSIVE = {"consumer staples","utilities","health care","real estate"}
 
-W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 15, 10, 10, 5
 FULL_EMA_DIST = 0.60
 SMI_BONUS_MAX = 5
 
@@ -42,9 +45,20 @@ SMI_K_LEN   = 12
 SMI_D_LEN   = 5
 SMI_EMA_LEN = 5
 
-# ✅ FIXED momentum combo weights (balanced)
+# momentum combo (balanced)
 W_EMA_POSTURE = 0.50
 W_SMI_4H      = 0.50
+
+# ✅ weighted-average score weights (sum=1.00)
+W_EMA_SCORE   = 0.35
+W_MOM_SCORE   = 0.25
+W_BREADTH     = 0.15
+W_SQUEEZE_EXP = 0.10
+W_LIQ_NORM    = 0.07
+W_VOL_SCORE   = 0.05
+W_RISKON      = 0.03
+
+SMI_BONUS_SCORE_MAX = 3.0
 
 def now_utc_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -56,15 +70,10 @@ def clamp(x: float, lo: float, hi: float) -> float:
         return lo
 
 def pct(a: float, b: float) -> float:
-    try:
-        if b <= 0:
-            return 0.0
-        return 100.0 * float(a) / float(b)
-    except Exception:
-        return 0.0
+    return 0.0 if b <= 0 else 100.0 * float(a) / float(b)
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent":"make-dashboard/4h/1.1","Cache-Control":"no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent":"make-dashboard/4h/1.2","Cache-Control":"no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -172,23 +181,60 @@ def tv_smi_and_signal(H: List[float], L: List[float], C: List[float],
 def smi_to_pct(smi_val: float) -> float:
     return clamp(50.0 + 0.5*float(smi_val), 0.0, 100.0)
 
-def lin_points(pct_val: float, weight: int) -> int:
-    return int(round(weight * ((float(pct_val) - 50.0) / 50.0)))
+def posture_from_dist(dist_pct: float, full_dist: float) -> float:
+    unit = clamp(dist_pct / max(full_dist, 1e-9), -1.0, 1.0)
+    return clamp(50.0 + 50.0 * unit, 0.0, 100.0)
 
-def compute_overall4h(ema_sign: int, ema_dist_pct: float,
-                      momentum_pct: float, breadth_pct: float,
-                      squeeze_expansion_pct: float, liquidity_pct: float,
-                      riskon_pct: float, smi_bonus_pts: int) -> Tuple[str, int, dict]:
-    dist_unit = clamp(ema_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
-    ema_pts = int(round(abs(dist_unit) * W_EMA)) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
-    m_pts  = lin_points(momentum_pct, W_MOM)
-    b_pts  = lin_points(breadth_pct,  W_BR)
-    sq_pts = lin_points(squeeze_expansion_pct, W_SQ)
-    lq_pts = lin_points(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
-    ro_pts = lin_points(riskon_pct, W_RISK)
-    score  = int(clamp(50 + ema_pts + m_pts + b_pts + sq_pts + lq_pts + ro_pts + int(smi_bonus_pts), 0, 100))
-    state  = "bull" if (ema_sign > 0 and score >= 60) else ("bear" if (ema_sign < 0 and score < 60) else "neutral")
-    comps  = {"ema10": ema_pts, "momentum": m_pts, "breadth": b_pts, "squeeze": sq_pts, "liquidity": lq_pts, "riskOn": ro_pts, "smiBonus": int(smi_bonus_pts)}
+def score_vol(vol_scaled: float) -> float:
+    return clamp(100.0 - clamp(vol_scaled, 0.0, 100.0), 0.0, 100.0)
+
+def score_liq(liq: float) -> float:
+    liq_c = clamp(liq, 0.0, 120.0)
+    return (liq_c / 120.0) * 100.0
+
+def compute_overall_weighted(
+    ema_posture: float,
+    momentum_combo: float,
+    breadth_pct: float,
+    squeeze_exp: float,
+    liquidity_val: float,
+    vol_scaled: float,
+    risk_on: float,
+    smi_bonus_pts: int,
+    ema_sign: int,
+) -> Tuple[str, float, dict]:
+    liq_norm = score_liq(liquidity_val)
+    vol_sc   = score_vol(vol_scaled)
+
+    bonus = 0.0
+    if smi_bonus_pts > 0:
+        bonus = +SMI_BONUS_SCORE_MAX
+    elif smi_bonus_pts < 0:
+        bonus = -SMI_BONUS_SCORE_MAX
+
+    score_raw = (
+        W_EMA_SCORE   * ema_posture +
+        W_MOM_SCORE   * momentum_combo +
+        W_BREADTH     * clamp(breadth_pct, 0.0, 100.0) +
+        W_SQUEEZE_EXP * clamp(squeeze_exp, 0.0, 100.0) +
+        W_LIQ_NORM    * liq_norm +
+        W_VOL_SCORE   * vol_sc +
+        W_RISKON      * clamp(risk_on, 0.0, 100.0) +
+        bonus
+    )
+    score = clamp(score_raw, 0.0, 100.0)
+    state = "bull" if (ema_sign > 0 and score >= 60.0) else ("bear" if (ema_sign < 0 and score < 60.0) else "neutral")
+
+    comps = {
+        "ema10": round(W_EMA_SCORE * ema_posture, 2),
+        "momentum": round(W_MOM_SCORE * momentum_combo, 2),
+        "breadth": round(W_BREADTH * breadth_pct, 2),
+        "squeeze": round(W_SQUEEZE_EXP * squeeze_exp, 2),
+        "liquidity": round(W_LIQ_NORM * liq_norm, 2),
+        "volatility": round(W_VOL_SCORE * vol_sc, 2),
+        "riskOn": round(W_RISKON * risk_on, 2),
+        "smiBonus": round(bonus, 2),
+    }
     return state, score, comps
 
 def main():
@@ -246,16 +292,13 @@ def main():
     e10 = ema_series(C, 10)[-1]
     ema_dist_pct = 0.0 if e10 == 0 else 100.0 * (C[-1] - e10) / e10
     ema_sign = 1 if ema_dist_pct > 0 else (-1 if ema_dist_pct < 0 else 0)
-
-    unit = clamp(ema_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
-    ema10_posture = clamp(50.0 + 50.0 * unit, 0.0, 100.0)
+    ema10_posture = posture_from_dist(ema_dist_pct, FULL_EMA_DIST)
 
     smi_series, sig_series = tv_smi_and_signal(H, L, C, SMI_K_LEN, SMI_D_LEN, SMI_EMA_LEN)
     smi_val = float(smi_series[-1]) if smi_series else 0.0
     sig_val = float(sig_series[-1]) if sig_series else 0.0
     smi_pct = smi_to_pct(smi_val)
 
-    # ✅ FIXED MOMENTUM COMBO (balanced)
     momentum_combo_4h = round(clamp(W_EMA_POSTURE*ema10_posture + W_SMI_4H*smi_pct, 0.0, 100.0), 2)
 
     smi_bonus = 0
@@ -289,21 +332,22 @@ def main():
                 rising_good += 1
     sector_dir_4h = round(pct(rising_good, rising_total), 2) if rising_total>0 else 50.0
 
-    state, score, comps = compute_overall4h(
-        ema_sign=ema_sign,
-        ema_dist_pct=ema_dist_pct,
-        momentum_pct=momentum_combo_4h,
-        breadth_pct=breadth_4h,
-        squeeze_expansion_pct=squeeze_exp_4h,
-        liquidity_pct=liquidity_4h,
-        riskon_pct=risk_on_4h,
-        smi_bonus_pts=smi_bonus,
+    state, score, comps = compute_overall_weighted(
+        ema_posture=float(ema10_posture),
+        momentum_combo=float(momentum_combo_4h),
+        breadth_pct=float(breadth_4h),
+        squeeze_exp=float(squeeze_exp_4h),
+        liquidity_val=float(liquidity_4h),
+        vol_scaled=float(vol_scaled),
+        risk_on=float(risk_on_4h),
+        smi_bonus_pts=int(smi_bonus),
+        ema_sign=int(ema_sign),
     )
 
     updated_utc = now_utc_iso()
 
     metrics = {
-        "trend_strength_4h_pct": float(score),
+        "trend_strength_4h_pct": round(float(score), 2),
         "breadth_4h_pct": float(breadth_4h),
         "momentum_4h_pct": float(momentum_4h_legacy),
         "momentum_combo_4h_pct": float(momentum_combo_4h),
@@ -331,7 +375,7 @@ def main():
     fourHour = {
         "sectorDirection4h": {"risingPct": float(sector_dir_4h)},
         "riskOn4h": {"riskOnPct": float(risk_on_4h)},
-        "overall4h": {"state": state, "score": int(score), "components": comps, "lastChanged": updated_utc},
+        "overall4h": {"state": state, "score": round(float(score), 2), "components": comps, "lastChanged": updated_utc},
         "signals": {
             "sigSMI4hBullCross": {"active": False, "reason": "", "lastChanged": updated_utc},
             "sigSMI4hBearCross": {"active": False, "reason": "", "lastChanged": updated_utc},
@@ -339,7 +383,7 @@ def main():
     }
 
     out = {
-        "version": "r4h-v2-balanced-momentum",
+        "version": "r4h-v3-weightedavg",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
@@ -353,11 +397,8 @@ def main():
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
     print(
-        f"[4h] breadth={breadth_4h:.2f} mom_combo={momentum_combo_4h:.2f} "
-        f"ema10dist={ema_dist_pct:.3f}% ema_post={ema10_posture:.2f} smiBonus={smi_bonus:+d} "
-        f"squeezePsi={squeeze_psi_4h:.2f} squeezeExp={squeeze_exp_4h:.2f} "
-        f"liq={liquidity_4h:.2f} volScaled={vol_scaled:.2f} "
-        f"riskOn={risk_on_4h:.2f} sectorDir={sector_dir_4h:.2f} overall={state}/{score}",
+        f"[4h] score={score:.2f} state={state} emaPost={ema10_posture:.2f} mom={momentum_combo_4h:.2f} "
+        f"breadth={breadth_4h:.2f} sqExp={squeeze_exp_4h:.2f} liq={liquidity_4h:.2f} volScaled={vol_scaled:.2f} riskOn={risk_on_4h:.2f} smiBonus={smi_bonus:+d}",
         flush=True
     )
 
