@@ -1,24 +1,42 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — build_outlook_4h_source.py (4H Sector Source Builder)
+Ferrari Dashboard — build_outlook_4h_source.py (Baseline + Incremental Cache)
 
-Builds a 4H sectorCards source file from per-sector CSV universe:
-- Reads data/sectors/*.csv (header: Symbol)
-- Pulls Polygon 240-minute (4H) bars per symbol
-- Drops in-flight 4H bar
-- Computes flags per symbol:
-    NH: last high > max(high of prior N bars)
-    NL: last low  < min(low of prior N bars)
-    3U: last 3 closes strictly increasing
-    3D: last 3 closes strictly decreasing
-- Aggregates per sector:
-    nh/nl/up/down counts
-    breadth_pct  = nh / (nh+nl) * 100 (or 50)
-    momentum_pct = up / (up+down) * 100 (or 50)
+Goal:
+  1) Baseline run: scan ALL symbols (CSV universe), compute flags, build sectorCards.
+  2) Incremental run: only recompute symbols whose latest COMPLETED 4H bar changed.
+     - Cheap check: fetch last 2 4H bars (desc, limit=2) for each symbol
+     - If last_bar_time unchanged vs cache -> skip
+     - If changed -> fetch full lookback (H4_LOOKBACK_DAYS) and recompute flags
+  3) Always re-aggregate sectorCards from cache so totals reflect all symbols.
 
-Output:
-  data/outlook_source_4h.json
+Flags per symbol:
+  NH: last high > max high of prior N bars
+  NL: last low  < min low  of prior N bars
+  3U: last 3 closes strictly increasing
+  3D: last 3 closes strictly decreasing
+
+Outputs:
+  - data/outlook_source_4h.json  (sectorCards for 4H breadth)
+  - data/4h_cache.json           (persistent per-symbol state)
+
+Key settings:
+  - --lookback-bars MUST match the 1H bar-count window (do NOT change for 4H)
+  - --lookback-days = 14 (your choice, good cushion)
+
+Usage:
+  Baseline:
+    python -u scripts/build_outlook_4h_source.py --mode baseline --sectors-dir data/sectors \
+      --lookback-bars 20 --lookback-days 14 --cache data/4h_cache.json --out data/outlook_source_4h.json
+
+  Incremental:
+    python -u scripts/build_outlook_4h_source.py --mode incremental --sectors-dir data/sectors \
+      --lookback-bars 20 --lookback-days 14 --cache data/4h_cache.json --out data/outlook_source_4h.json
+
+Env:
+  POLY_KEY or POLYGON_API_KEY or POLYGON_API
+  FD_MAX_WORKERS (recommended 10–20)
 """
 
 from __future__ import annotations
@@ -37,9 +55,33 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 UTC = timezone.utc
+POLY_BASE = "https://api.polygon.io"
+
+SECTOR_ORDER = [
+    "information technology","materials","health care","communication services",
+    "real estate","energy","consumer staples","consumer discretionary",
+    "financials","utilities","industrials",
+]
+
+ALIASES = {
+    "healthcare":"health care","health-care":"health care",
+    "info tech":"information technology","technology":"information technology","tech":"information technology",
+    "communications":"communication services","comm services":"communication services","telecom":"communication services","comm":"communication services",
+    "staples":"consumer staples","discretionary":"consumer discretionary",
+    "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
+}
 
 def now_utc_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+def clamp(x: float, lo: float, hi: float) -> float:
+    try:
+        return max(lo, min(hi, float(x)))
+    except Exception:
+        return lo
+
+def pct(a: float, b: float) -> float:
+    return 0.0 if b <= 0 else 100.0 * float(a) / float(b)
 
 def choose_poly_key() -> Optional[str]:
     for name in ("POLY_KEY", "POLYGON_API_KEY", "POLYGON_API"):
@@ -50,15 +92,8 @@ def choose_poly_key() -> Optional[str]:
     print("[4h-src] WARNING: no Polygon key in POLY_KEY/POLYGON_API_KEY/POLYGON_API", flush=True)
     return None
 
-POLY_KEY  = choose_poly_key()
-POLY_BASE = "https://api.polygon.io"
-
-DEFAULT_SECTORS_DIR = os.path.join("data", "sectors")
-DEFAULT_OUT_PATH    = os.path.join("data", "outlook_source_4h.json")
-
-MAX_WORKERS     = int(os.environ.get("FD_MAX_WORKERS", "6"))
-LOOKBACK_BARS   = int(os.environ.get("H4_LOOKBACK_BARS", "20"))  # MUST match 1H bar count
-LOOKBACK_DAYS   = int(os.environ.get("H4_LOOKBACK_DAYS", "45"))  # enough to cover 4H bars
+POLY_KEY = choose_poly_key()
+MAX_WORKERS = int(os.environ.get("FD_MAX_WORKERS", "12"))
 
 def http_get(url: str, timeout: int = 22) -> str:
     req = urllib.request.Request(
@@ -80,7 +115,7 @@ def poly_json(url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, An
         params = {}
     if POLY_KEY:
         params["apiKey"] = POLY_KEY
-    qs   = urllib.parse.urlencode(params)
+    qs = urllib.parse.urlencode(params)
     full = f"{url}?{qs}" if qs else url
     for attempt in range(1, 5):
         try:
@@ -102,18 +137,24 @@ def poly_json(url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, An
 def dstr(d: date) -> str:
     return d.strftime("%Y-%m-%d")
 
-def fetch_4h_bars(ticker: str, days: int) -> List[Dict[str, Any]]:
-    end = datetime.now(UTC).date()
-    start = end - timedelta(days=days)
+def canon_sector_name(name: str) -> str:
+    k = (name or "").strip().lower()
+    return ALIASES.get(k, k)
+
+def fetch_4h_bars(ticker: str, start: date, end: date, sort: str = "asc", limit: int = 50000) -> List[Dict[str, Any]]:
+    """
+    Fetch Polygon 240-minute bars for [start, end], return list sorted by time.
+    """
     url = f"{POLY_BASE}/v2/aggs/ticker/{ticker}/range/240/minute/{dstr(start)}/{dstr(end)}"
-    js = poly_json(url, {"adjusted":"true","sort":"asc","limit":50000})
+    js = poly_json(url, {"adjusted":"true","sort":sort,"limit":limit})
     if not js or js.get("status") != "OK":
         return []
     out: List[Dict[str, Any]] = []
     for r in js.get("results", []) or []:
         try:
             out.append({
-                "t": int(r.get("t",0)),  # ms
+                "t": int(r.get("t",0)) // 1000,  # sec
+                "o": float(r.get("o",0.0)),
                 "h": float(r.get("h",0.0)),
                 "l": float(r.get("l",0.0)),
                 "c": float(r.get("c",0.0)),
@@ -121,14 +162,68 @@ def fetch_4h_bars(ticker: str, days: int) -> List[Dict[str, Any]]:
         except Exception:
             continue
     out.sort(key=lambda x: x["t"])
-
     # drop in-flight 4H bar
     if out:
-        last_sec = out[-1]["t"] // 1000
         now = int(time.time())
-        if (last_sec // (4*3600)) == (now // (4*3600)):
+        last = out[-1]["t"]
+        if (last // (4*3600)) == (now // (4*3600)):
             out = out[:-1]
     return out
+
+def latest_completed_bar_time_fast(ticker: str, quick_days: int = 7) -> Optional[int]:
+    """
+    Cheap check: fetch last 2 4H bars (desc) and return latest completed bar time (sec).
+    """
+    end = datetime.now(UTC).date()
+    start = end - timedelta(days=max(3, quick_days))
+    bars_desc = fetch_4h_bars(ticker, start, end, sort="desc", limit=2)
+    if not bars_desc:
+        return None
+    # fetch_4h_bars sorts ascending at end; if sort=desc we still sort ascending, so take last
+    return int(bars_desc[-1]["t"])
+
+def compute_flags_from_bars(bars: List[Dict[str, Any]], lookback_bars: int) -> Tuple[int,int,int,int,int]:
+    """
+    Returns:
+      (last_bar_time, NH, NL, U3, D3)
+    NH/NL compares last bar to prior lookback_bars bars.
+    """
+    n = int(max(2, lookback_bars))
+    if len(bars) < max(n+1, 3):
+        return 0, 0, 0, 0, 0
+
+    last = bars[-1]
+    last_t = int(last["t"])
+
+    prior = bars[-(n+1):-1]
+    nh = nl = 0
+    try:
+        nh = int(last["h"] > max(b["h"] for b in prior))
+        nl = int(last["l"] < min(b["l"] for b in prior))
+    except Exception:
+        nh = nl = 0
+
+    last3 = bars[-3:]
+    u3 = d3 = 0
+    try:
+        u3 = int(last3[0]["c"] < last3[1]["c"] < last3[2]["c"])
+        d3 = int(last3[0]["c"] > last3[1]["c"] > last3[2]["c"])
+    except Exception:
+        u3 = d3 = 0
+
+    return last_t, nh, nl, u3, d3
+
+def load_json(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_json(path: str, obj: dict) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
 
 def read_symbols(path: str) -> List[str]:
     syms: List[str] = []
@@ -155,104 +250,203 @@ def discover_sectors(sectors_dir: str) -> Dict[str, List[str]]:
         raise SystemExit(f"No sector CSVs found in {sectors_dir}.")
     return sectors
 
-def compute_flags_from_4h_bars(bars: List[Dict[str, Any]], lookback: int) -> Tuple[int,int,int,int]:
+def ensure_cache_shape(cache: dict) -> dict:
+    cache = cache if isinstance(cache, dict) else {}
+    cache.setdefault("meta", {})
+    cache.setdefault("symbols", {})
+    if not isinstance(cache["symbols"], dict):
+        cache["symbols"] = {}
+    return cache
+
+def process_symbol_baseline(sym: str, lookback_bars: int, lookback_days: int) -> Tuple[str, Optional[dict]]:
     """
-    NH: last high > max high of prior N bars
-    NL: last low  < min low of prior N bars
-    3U: last 3 closes strictly increasing
-    3D: last 3 closes strictly decreasing
+    Full recompute for one symbol using lookback_days.
     """
-    n = int(max(10, lookback))
-    if len(bars) < n + 1:
-        return 0,0,0,0
-
-    today = bars[-1]
-    prior = bars[-(n+1):-1]
     try:
-        is_nh = int(today["h"] > max(b["h"] for b in prior))
-        is_nl = int(today["l"] < min(b["l"] for b in prior))
-    except Exception:
-        is_nh = is_nl = 0
-
-    last3 = bars[-3:]
-    try:
-        is_3u = int(last3[0]["c"] < last3[1]["c"] < last3[2]["c"])
-        is_3d = int(last3[0]["c"] > last3[1]["c"] > last3[2]["c"])
-    except Exception:
-        is_3u = is_3d = 0
-
-    return is_nh, is_nl, is_3u, is_3d
-
-def process_symbol(sym: str, lookback: int, days: int) -> Tuple[int,int,int,int]:
-    try:
-        bars = fetch_4h_bars(sym, days)
+        end = datetime.now(UTC).date()
+        start = end - timedelta(days=lookback_days)
+        bars = fetch_4h_bars(sym, start, end, sort="asc", limit=50000)
         if not bars:
-            return 0,0,0,0
-        # adapt bars into expected dict
-        usable = [{"h":b["h"],"l":b["l"],"c":b["c"]} for b in bars]
-        return compute_flags_from_4h_bars(usable, lookback)
-    except SystemExit:
-        raise
+            return sym, None
+        last_t, nh, nl, u3, d3 = compute_flags_from_bars(bars, lookback_bars)
+        return sym, {"last_bar_time": last_t, "nh": nh, "nl": nl, "u3": u3, "d3": d3}
     except Exception:
-        return 0,0,0,0
+        return sym, None
 
-def process_sector(sector: str, symbols: List[str], lookback: int, days: int) -> Dict[str, Any]:
-    nh = nl = up = dn = 0
-    if not symbols:
-        return {"sector": sector, "nh":0, "nl":0, "up":0, "down":0}
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futures = {ex.submit(process_symbol, s, lookback, days): s for s in symbols}
-        for fut in as_completed(futures):
-            try:
-                a,b,c,d = fut.result()
-                nh += a; nl += b; up += c; dn += d
-            except Exception:
+def process_symbol_incremental(sym: str, cache_entry: Optional[dict], lookback_bars: int, lookback_days: int) -> Tuple[str, Optional[dict], bool]:
+    """
+    Incremental:
+      - Cheap check latest completed bar time
+      - If unchanged, return None update (keep cache)
+      - If changed/missing, full recompute and return updated entry
+    Returns: (sym, new_entry_or_none, did_update)
+    """
+    try:
+        cached_t = None
+        if isinstance(cache_entry, dict):
+            cached_t = cache_entry.get("last_bar_time")
+
+        latest_t = latest_completed_bar_time_fast(sym, quick_days=min(lookback_days, 14))
+        if latest_t is None:
+            return sym, None, False
+
+        if isinstance(cached_t, (int, float)) and int(cached_t) == int(latest_t):
+            return sym, None, False
+
+        # changed -> full recompute
+        end = datetime.now(UTC).date()
+        start = end - timedelta(days=lookback_days)
+        bars = fetch_4h_bars(sym, start, end, sort="asc", limit=50000)
+        if not bars:
+            return sym, None, False
+
+        last_t, nh, nl, u3, d3 = compute_flags_from_bars(bars, lookback_bars)
+        return sym, {"last_bar_time": last_t, "nh": nh, "nl": nl, "u3": u3, "d3": d3}, True
+    except Exception:
+        return sym, None, False
+
+def aggregate_sector_cards_from_cache(sectors_map: Dict[str, List[str]], cache_symbols: Dict[str, dict]) -> List[dict]:
+    """
+    Rebuild sectorCards from cached per-symbol flags.
+    """
+    cards: List[dict] = []
+    # normalize sector name ordering
+    # we keep the CSV filenames but order by canonical names if possible
+    for sector_file, syms in sorted(sectors_map.items()):
+        nh = nl = up = dn = 0
+        for s in syms:
+            e = cache_symbols.get(s)
+            if not isinstance(e, dict):
                 continue
-    return {"sector": sector, "nh": nh, "nl": nl, "up": up, "down": dn}
+            nh += int(e.get("nh", 0))
+            nl += int(e.get("nl", 0))
+            up += int(e.get("u3", 0))
+            dn += int(e.get("d3", 0))
+        breadth_pct = round(pct(nh, nh+nl), 2) if (nh+nl) > 0 else 50.0
+        mom_pct     = round(pct(up, up+dn), 2) if (up+dn) > 0 else 50.0
+        cards.append({
+            "sector": sector_file,
+            "breadth_pct": breadth_pct,
+            "momentum_pct": mom_pct,
+            "nh": int(nh),
+            "nl": int(nl),
+            "up": int(up),
+            "down": int(dn),
+        })
+    return cards
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Build 4H outlook_source_4h.json from Polygon 4H bars (CSV universe).")
-    ap.add_argument("--out", required=True, help="Output path (e.g. data/outlook_source_4h.json)")
-    ap.add_argument("--sectors-dir", default=DEFAULT_SECTORS_DIR)
-    ap.add_argument("--lookback-bars", type=int, default=LOOKBACK_BARS)
-    ap.add_argument("--days", type=int, default=LOOKBACK_DAYS)
+    ap = argparse.ArgumentParser(description="Build 4H sectorCards source with baseline + incremental cache.")
+    ap.add_argument("--mode", required=True, choices=["baseline","incremental"])
+    ap.add_argument("--sectors-dir", required=True)
+    ap.add_argument("--lookback-bars", type=int, required=True)
+    ap.add_argument("--lookback-days", type=int, required=True)
+    ap.add_argument("--cache", required=True)
+    ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
     if not POLY_KEY:
-        print("[4h-src] ERROR: no Polygon API key set; emitting neutral sectors.", file=sys.stderr, flush=True)
-        sectors_map = discover_sectors(args.sectors_dir)
-        cards = []
-        for name in sorted(sectors_map.keys()):
-            cards.append({"sector": name, "breadth_pct": 0.0, "momentum_pct": 0.0, "nh": 0, "nl": 0, "up": 0, "down": 0})
-    else:
-        sectors_map = discover_sectors(args.sectors_dir)
-        print("[4h-src] discovered sectors:", ", ".join(sorted(sectors_map.keys())), flush=True)
+        print("[4h-src] ERROR: no Polygon key available.", file=sys.stderr)
+        return 2
 
-        cards: List[Dict[str, Any]] = []
-        for sec, syms in sorted(sectors_map.items()):
-            print(f"[4h-src] sector {sec}: {len(syms)} symbols", flush=True)
-            agg = process_sector(sec, syms, args.lookback_bars, args.days)
-            nh = int(agg["nh"]); nl = int(agg["nl"]); up = int(agg["up"]); dn = int(agg["down"])
-            breadth_pct = round(100.0 * nh / float(nh+nl), 2) if (nh+nl) > 0 else 50.0
-            mom_pct     = round(100.0 * up / float(up+dn), 2) if (up+dn) > 0 else 50.0
-            cards.append({"sector": sec, "breadth_pct": breadth_pct, "momentum_pct": mom_pct, "nh": nh, "nl": nl, "up": up, "down": dn})
+    sectors_map = discover_sectors(args.sectors_dir)
+    cache = ensure_cache_shape(load_json(args.cache))
+    sym_cache: Dict[str, dict] = cache.get("symbols") or {}
+
+    # build flat list of symbols and keep mapping sector->symbols
+    all_syms: List[str] = []
+    for _, syms in sectors_map.items():
+        all_syms.extend(syms)
+    # dedupe
+    all_syms = sorted(list({s for s in all_syms if s}))
+
+    started = now_utc_iso()
+    print(f"[4h-src] mode={args.mode} symbols={len(all_syms)} lookbackBars={args.lookback_bars} lookbackDays={args.lookback_days} workers={MAX_WORKERS}", flush=True)
+
+    updated = 0
+    checked = 0
+
+    if args.mode == "baseline":
+        # full recompute for every symbol
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+            futures = {ex.submit(process_symbol_baseline, s, args.lookback_bars, args.lookback_days): s for s in all_syms}
+            for fut in as_completed(futures):
+                sym = futures[fut]
+                checked += 1
+                try:
+                    _, entry = fut.result()
+                except Exception:
+                    entry = None
+                if isinstance(entry, dict):
+                    sym_cache[sym] = entry
+                    updated += 1
+
+    else:
+        # incremental: cheap check + full recompute only if needed
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+            futures = {
+                ex.submit(process_symbol_incremental, s, sym_cache.get(s), args.lookback_bars, args.lookback_days): s
+                for s in all_syms
+            }
+            for fut in as_completed(futures):
+                sym = futures[fut]
+                checked += 1
+                try:
+                    _, new_entry, did_update = fut.result()
+                except Exception:
+                    new_entry, did_update = None, False
+                if did_update and isinstance(new_entry, dict):
+                    sym_cache[sym] = new_entry
+                    updated += 1
+
+        # ensure symbols newly added to CSVs are computed if missing
+        missing = [s for s in all_syms if s not in sym_cache]
+        if missing:
+            print(f"[4h-src] incremental: missing_in_cache={len(missing)} -> full compute", flush=True)
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+                futures = {ex.submit(process_symbol_baseline, s, args.lookback_bars, args.lookback_days): s for s in missing}
+                for fut in as_completed(futures):
+                    sym = futures[fut]
+                    try:
+                        _, entry = fut.result()
+                    except Exception:
+                        entry = None
+                    if isinstance(entry, dict):
+                        sym_cache[sym] = entry
+                        updated += 1
+
+    cache["symbols"] = sym_cache
+    cache["meta"] = {
+        "mode": args.mode,
+        "lookback_bars": int(args.lookback_bars),
+        "lookback_days": int(args.lookback_days),
+        "last_run_utc": now_utc_iso(),
+        "started_utc": started,
+        "checked": int(checked),
+        "updated": int(updated),
+    }
+
+    # Build sectorCards from cache (full universe)
+    cards = aggregate_sector_cards_from_cache(sectors_map, sym_cache)
 
     out_obj = {
         "mode": "4h",
         "sectorCards": cards,
         "meta": {
-            "lookback_bars": int(args.lookback_bars),
-            "lookback_days": int(args.days),
             "ts_utc": now_utc_iso(),
             "source": "polygon/4h",
-        },
+            "lookback_bars": int(args.lookback_bars),
+            "lookback_days": int(args.lookback_days),
+            "cache_mode": args.mode,
+            "cache_checked": int(checked),
+            "cache_updated": int(updated),
+        }
     }
 
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(out_obj, f, ensure_ascii=False, separators=(",", ":"))
+    save_json(args.cache, cache)
+    save_json(args.out, out_obj)
 
-    print(f"[4h-src] wrote {args.out} | cards={len(out_obj.get('sectorCards') or [])}", flush=True)
+    print(f"[4h-src] wrote cache={args.cache} | wrote source={args.out} | cards={len(cards)} | checked={checked} updated={updated}", flush=True)
     return 0
 
 if __name__ == "__main__":
