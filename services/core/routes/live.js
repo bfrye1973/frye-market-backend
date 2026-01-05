@@ -3,6 +3,7 @@
 // LIVE JSON proxies + computed pills endpoint
 //   /live/intraday          -> data-live-10min/data/outlook_intraday.json
 //   /live/hourly            -> data-live-hourly/data/outlook_hourly.json
+//   /live/4h                -> data-live-4h/data/outlook_4h.json          ✅ NEW
 //   /live/eod               -> data-live-eod/data/outlook.json
 //   /live/intraday-deltas   -> data-live-10min-sandbox/data/outlook_intraday.json (LEAN)
 //   /live/pills             -> { stamp5, stamp10, sectors:{ <11>:{ d5m, d10m } } }
@@ -17,11 +18,13 @@ const GH_REPO  = process.env.LIVE_GH_REPO  || "frye-market-backend";
 
 const INTRA_BRANCH   = process.env.LIVE_INTRADAY_BRANCH   || "data-live-10min";
 const HOURLY_BRANCH  = process.env.LIVE_HOURLY_BRANCH     || "data-live-hourly";
+const H4_BRANCH      = process.env.LIVE_4H_BRANCH         || "data-live-4h";          // ✅ NEW
 const EOD_BRANCH     = process.env.LIVE_EOD_BRANCH        || "data-live-eod";
 const SANDBOX_BRANCH = process.env.LIVE_SANDBOX_BRANCH    || "data-live-10min-sandbox";
 
 const INTRA_PATH   = process.env.LIVE_INTRADAY_PATH   || "data/outlook_intraday.json";
 const HOURLY_PATH  = process.env.LIVE_HOURLY_PATH     || "data/outlook_hourly.json";
+const H4_PATH      = process.env.LIVE_4H_PATH         || "data/outlook_4h.json";      // ✅ NEW
 const EOD_PATH     = process.env.LIVE_EOD_PATH        || "data/outlook.json";
 const SANDBOX_PATH = process.env.LIVE_SANDBOX_PATH    || "data/outlook_intraday.json";
 
@@ -95,6 +98,18 @@ liveRouter.get("/hourly", async (_req, res) => {
     res.status(r.status); setNoStore(res); return res.send(r.text);
   } catch (err) {
     console.error("[live] hourly error:", err);
+    return res.status(502).json({ ok:false, error:"Bad Gateway" });
+  }
+});
+
+// ✅ 4-hour
+liveRouter.get("/4h", async (_req, res) => {
+  const url = rawUrl(GH_OWNER, GH_REPO, H4_BRANCH, H4_PATH);
+  try {
+    const r = await fetchText(url);
+    res.status(r.status); setNoStore(res); return res.send(r.text);
+  } catch (err) {
+    console.error("[live] 4h error:", err);
     return res.status(502).json({ ok:false, error:"Bad Gateway" });
   }
 });
