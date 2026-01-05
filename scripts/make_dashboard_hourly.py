@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_hourly.py (R12.9 — EMA10 distance + TV SMI 12/5/5 + legacy keys)
+Ferrari Dashboard — make_dashboard_hourly.py (R13.0 — EMA posture kept, not double-counted)
 
-Builds hourly payload (data/outlook_hourly.json) with:
-- breadth_1h_pct from sectorCards aggregate NH/NL
-- momentum_1h_pct (LEGACY) from sectorCards aggregate UP/DOWN  ✅ required by workflow validator
-- momentum_combo_1h_pct from EMA10-distance posture + TradingView SMI(12,5,5) + optional 4h anchor
-- Lux PSI squeeze on SPY 1h:
-    squeeze_psi_1h_pct (tightness)
-    squeeze_1h_pct     (expansion = 100 - psi)
-- liquidity_1h (EMA(vol3)/EMA(vol12))
-- volatility_1h_pct / volatility_1h_scaled (ATR3 %)
-- sectorDirection1h.risingPct (breadth>=55 & momentum>=55 from sectorCards)
-- riskOn1h.riskOnPct (off>=55, def<=45 from sectorCards)
-- overall1h {state, score, components} (EMA sign gates bull/bear; score threshold 60)
-- crossover event signals:
-    sigSMI1hBullCross / sigSMI1hBearCross based on SMI vs Signal
+Key fix:
+- Momentum combo no longer over-weights EMA posture (which is already counted in EMA points).
+- New momentum combo weights:
+    EMA posture 45%
+    SMI(1h)      45%
+    SMI(4h)      10%
+
+Everything else unchanged:
+- Legacy metrics.momentum_1h_pct exists (workflow validator)
+- Lux PSI stored as squeeze_psi_1h_pct (tightness)
+- squeeze_1h_pct remains expansion (100 - PSI)
+- overall1h scoring keeps same weights as 10m/1h spec
 """
 
 from __future__ import annotations
@@ -30,8 +28,6 @@ import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
-
-# ------------------------------ Config ------------------------------
 
 HOURLY_URL_DEFAULT = "https://frye-market-backend-1.onrender.com/live/hourly"
 
@@ -47,18 +43,9 @@ POLY_4H_URL = (
 OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
 DEFENSIVE = {"consumer staples","utilities","health care","real estate"}
 
-# Overall weights (same style as 10m)
+# Overall weights (same as 10m)
 W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 15, 10, 10, 5
-
-# EMA distance saturation for points (±0.60% => full)
 FULL_EMA_DIST = 0.60
-
-# Momentum combo weights
-W_EMA10_POSTURE = 0.75
-W_SMI1H_POSTURE = 0.20
-W_SMI4H_ANCHOR  = 0.05
-
-# SMI bonus (±5 points max) applied to overall score
 SMI_BONUS_MAX = 5
 
 # TradingView SMI params (your spec)
@@ -66,7 +53,10 @@ SMI_K_LEN   = 12
 SMI_D_LEN   = 5
 SMI_EMA_LEN = 5
 
-# ------------------------------ Utils ------------------------------
+# ✅ FIXED momentum combo weights (balanced, no double-count dominance)
+W_EMA10_POSTURE = 0.45
+W_SMI1H_POSTURE = 0.45
+W_SMI4H_ANCHOR  = 0.10
 
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -86,7 +76,7 @@ def pct(a: float, b: float) -> float:
         return 0.0
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent":"make-dashboard/1h/1.3","Cache-Control":"no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent":"make-dashboard/1h/1.4","Cache-Control":"no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -113,7 +103,6 @@ def fetch_polygon_bars(url_tmpl: str, key: str, sym: str, lookback_days: int = 2
             })
         except Exception:
             continue
-    # drop in-flight hour
     if out:
         bucket = 3600
         now = int(time.time())
@@ -139,8 +128,6 @@ def ema_last(vals: List[float], span: int) -> Optional[float]:
 def tr_series(H: List[float], L: List[float], C: List[float]) -> List[float]:
     return [max(H[i]-L[i], abs(H[i]-C[i-1]), abs(L[i]-C[i-1])) for i in range(1, len(C))]
 
-# --------------------------- Lux PSI ---------------------------
-
 def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
     if not closes or len(closes) < max(5, length+2):
         return None
@@ -164,30 +151,17 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
     psi = -50.0*r + 50.0
     return float(clamp(psi,0.0,100.0))
 
-# --------------------------- TradingView SMI (12,5,5) ---------------------------
-
 def tv_smi_and_signal(H: List[float], L: List[float], C: List[float],
                       lengthK: int, lengthD: int, lengthEMA: int) -> Tuple[List[float], List[float]]:
-    """
-    Matches TradingView:
-      HH = highest(high, lengthK)
-      LL = lowest(low, lengthK)
-      range = HH - LL
-      rel = close - (HH + LL)/2
-      smi = 200 * EMA(EMA(rel, lengthD), lengthD) / EMA(EMA(range, lengthD), lengthD)
-      signal = EMA(smi, lengthEMA)
-    """
     n = len(C)
     if n < max(lengthK, lengthD, lengthEMA) + 5:
         return [], []
-
     HH: List[float] = []
     LL: List[float] = []
     for i in range(n):
         i0 = max(0, i - (lengthK - 1))
         HH.append(max(H[i0:i+1]))
         LL.append(min(L[i0:i+1]))
-
     rangeHL = [HH[i] - LL[i] for i in range(n)]
     rel = [C[i] - (HH[i] + LL[i]) / 2.0 for i in range(n)]
 
@@ -196,22 +170,19 @@ def tv_smi_and_signal(H: List[float], L: List[float], C: List[float],
         e2 = ema_series(e1, length)
         return e2
 
-    num = ema_ema(rel, lengthD)
-    den = ema_ema(rangeHL, lengthD)
+    nume = ema_ema(rel, lengthD)
+    deno = ema_ema(rangeHL, lengthD)
 
     smi: List[float] = []
     for i in range(n):
-        d = den[i]
-        smi.append(0.0 if d == 0 else 200.0 * (num[i] / d))
+        d = deno[i]
+        smi.append(0.0 if d == 0 else 200.0 * (nume[i] / d))
 
     sig = ema_series(smi, lengthEMA)
     return smi, sig
 
 def smi_to_pct(smi_val: float) -> float:
-    # Map -100..+100 into 0..100
     return clamp(50.0 + 0.5*float(smi_val), 0.0, 100.0)
-
-# ----------------------------- Overall Score -----------------------------
 
 def lin_points(pct_val: float, weight: int) -> int:
     return int(round(weight * ((float(pct_val) - 50.0) / 50.0)))
@@ -219,9 +190,7 @@ def lin_points(pct_val: float, weight: int) -> int:
 def compute_overall1h(ema_sign: int, ema_dist_pct: float,
                       momentum_pct: float, breadth_pct: float,
                       squeeze_expansion_pct: float, liquidity_pct: float,
-                      riskon_pct: float,
-                      smi_bonus_pts: int) -> Tuple[str, int, dict]:
-    # EMA points from EMA10 distance
+                      riskon_pct: float, smi_bonus_pts: int) -> Tuple[str, int, dict]:
     dist_unit = clamp(ema_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
     ema_pts = int(round(abs(dist_unit) * W_EMA)) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
 
@@ -235,28 +204,16 @@ def compute_overall1h(ema_sign: int, ema_dist_pct: float,
     score  = int(clamp(score_raw, 0, 100))
 
     state  = "bull" if (ema_sign > 0 and score >= 60) else ("bear" if (ema_sign < 0 and score < 60) else "neutral")
-    comps  = {
-        "ema10": ema_pts,
-        "momentum": m_pts,
-        "breadth": b_pts,
-        "squeeze": sq_pts,
-        "liquidity": lq_pts,
-        "riskOn": ro_pts,
-        "smiBonus": int(smi_bonus_pts),
-    }
+    comps  = {"ema10": ema_pts, "momentum": m_pts, "breadth": b_pts, "squeeze": sq_pts, "liquidity": lq_pts, "riskOn": ro_pts, "smiBonus": int(smi_bonus_pts)}
     return state, score, comps
 
-# ----------------------------- Builder -----------------------------
-
 def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
-    # previous (for signals timestamps)
     prev_js = {}
     try:
         prev_js = fetch_json(hourly_url) or {}
     except Exception:
         prev_js = {}
 
-    # sector cards input
     cards: List[dict] = []
     cards_fresh = False
     if isinstance(source_js, dict):
@@ -273,7 +230,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         except Exception:
             cards = []; cards_fresh = False
 
-    # Aggregate NH/NL/UP/DOWN (slow breadth/momentum)
     NH=NL=UP=DN=0.0
     for c in cards or []:
         NH += float(c.get("nh",0)); NL += float(c.get("nl",0))
@@ -282,7 +238,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     breadth_slow  = round(pct(NH, NH+NL), 2) if (NH+NL)>0 else 50.0
     momentum_slow = round(pct(UP, UP+DN), 2) if (UP+DN)>0 else 50.0
 
-    # SectorDir1h: breadth>=55 & momentum>=55 (per sectorCards)
     rising_good = 0
     rising_total = 0
     for c in cards or []:
@@ -294,7 +249,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
                 rising_good += 1
     rising_pct = round(pct(rising_good, rising_total), 2) if rising_total>0 else 50.0
 
-    # RiskOn1h: OFF >=55, DEF <=45 (per sectorCards breadth)
     by = {(c.get("sector") or "").strip().lower(): c for c in cards or []}
     ro_score = ro_den = 0
     for s in OFFENSIVE:
@@ -311,7 +265,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
                 ro_score += 1
     risk_on_pct = round(pct(ro_score, ro_den), 2) if ro_den>0 else 50.0
 
-    # SPY 1h + 4h (Polygon)
     key = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_API_KEY") or os.environ.get("POLY_KEY") or ""
     spy_1h: List[dict] = []
     spy_4h: List[dict] = []
@@ -319,7 +272,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         spy_1h = fetch_polygon_bars(POLY_1H_URL, key, "SPY", lookback_days=40)
         spy_4h = fetch_polygon_bars(POLY_4H_URL, key, "SPY", lookback_days=80)
 
-    # EMA10 distance posture + SMI
     ema_sign = 0
     ema_dist_pct = 0.0
     ema10_posture = 50.0
@@ -327,10 +279,8 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     smi_1h = None
     smi_sig_1h = None
     smi_pct_1h = None
-
     smi_pct_4h = None
 
-    # For crossover events
     smi_series_1h: List[float] = []
     sig_series_1h: List[float] = []
 
@@ -338,7 +288,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         H = [b["high"] for b in spy_1h]
         L = [b["low"]  for b in spy_1h]
         C = [b["close"] for b in spy_1h]
-
         e10 = ema_series(C, 10)
         if e10[-1] and e10[-1] != 0:
             ema_dist_pct = 100.0 * (C[-1] - e10[-1]) / e10[-1]
@@ -361,14 +310,14 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         if smi4 and sig4:
             smi_pct_4h = smi_to_pct(float(smi4[-1]))
 
-    # Momentum combo (0..100)
+    # ✅ FIXED MOMENTUM COMBO (balanced)
     momentum_combo_1h = float(ema10_posture)
     if isinstance(smi_pct_1h, (int, float)) or isinstance(smi_pct_4h, (int, float)):
         wE, w1, w4 = W_EMA10_POSTURE, W_SMI1H_POSTURE, W_SMI4H_ANCHOR
         if smi_pct_1h is None:
-            wE, w1, w4 = 0.90, 0.00, 0.10
+            wE, w1, w4 = 0.80, 0.00, 0.20
         if smi_pct_4h is None:
-            wE, w1, w4 = 0.80, 0.20, 0.00
+            wE, w1, w4 = 0.55, 0.45, 0.00
         momentum_combo_1h = (
             wE * float(ema10_posture) +
             w1 * float(smi_pct_1h if smi_pct_1h is not None else ema10_posture) +
@@ -376,7 +325,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         )
     momentum_combo_1h = round(clamp(momentum_combo_1h, 0.0, 100.0), 2)
 
-    # SMI bonus (±5) based on SMI vs Signal (1h)
     smi_bonus_pts = 0
     if isinstance(smi_1h,(int,float)) and isinstance(smi_sig_1h,(int,float)):
         if smi_1h > smi_sig_1h:
@@ -384,7 +332,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         elif smi_1h < smi_sig_1h:
             smi_bonus_pts = -SMI_BONUS_MAX
 
-    # Lux PSI squeeze 1h (tightness + expansion)
     squeeze_psi_1h = None
     squeeze_exp_1h = 50.0
     if len(spy_1h) >= 25:
@@ -394,7 +341,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
             squeeze_psi_1h = float(psi)
             squeeze_exp_1h = clamp(100.0 - float(psi), 0.0, 100.0)
 
-    # Liquidity / Volatility 1h
     liquidity_1h = 50.0
     volatility_1h = 0.0
     if len(spy_1h) >= 3:
@@ -410,7 +356,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         atr = ema_last(trs, 3) if trs else None
         volatility_1h = 0.0 if not atr or C[-1] <= 0 else max(0.0, 100.0 * atr / C[-1])
 
-    # Overall composite
     breadth_1h = float(breadth_slow)
     state, score, comps = compute_overall1h(
         ema_sign=int(ema_sign),
@@ -425,7 +370,6 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
 
     updated_utc = now_utc_iso()
 
-    # ---- Crossover EVENT signals based on SMI crosses Signal (1h) ----
     def stamp(prev_sig: Optional[dict], active: bool, reason: str) -> dict:
         last = prev_sig.get("lastChanged") if isinstance(prev_sig,dict) else updated_utc
         prev_active = prev_sig.get("active") if isinstance(prev_sig,dict) else None
@@ -449,18 +393,15 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         "sigSMI1hBearCross": stamp(prev_sig.get("sigSMI1hBearCross"), smi_bear, "SMI crossed below Signal (1h)"),
     }
 
-    # TrendStrength used by compute_trend_hourly.py for coloring
     trend_strength_1h_pct = float(score)
 
-    # ✅ Metrics — includes legacy key momentum_1h_pct required by workflow validator
     metrics = {
         "trend_strength_1h_pct": round(trend_strength_1h_pct, 2),
-
         "breadth_1h_pct": float(breadth_1h),
-        "momentum_1h_pct": float(momentum_slow),               # ✅ LEGACY REQUIRED KEY
+        "momentum_1h_pct": float(momentum_slow),              # legacy required
         "momentum_combo_1h_pct": float(momentum_combo_1h),
 
-        "squeeze_1h_pct": round(float(squeeze_exp_1h), 2),     # expansion 0..100
+        "squeeze_1h_pct": round(float(squeeze_exp_1h), 2),
         "squeeze_psi_1h_pct": round(float(squeeze_psi_1h), 2) if isinstance(squeeze_psi_1h,(int,float)) else None,
 
         "ema_sign": int(ema_sign),
@@ -488,7 +429,7 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     }
 
     out = {
-        "version": "r1h-v3-ema10dist-tvSMI-legacy",
+        "version": "r1h-v4-balanced-momentum",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
@@ -498,16 +439,14 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     }
 
     print(
-        f"[1h] breadth={breadth_1h:.2f} mom_legacy={momentum_slow:.2f} mom_combo={momentum_combo_1h:.2f} "
+        f"[1h] breadth={breadth_1h:.2f} mom_combo={momentum_combo_1h:.2f} "
         f"ema10dist={ema_dist_pct:.3f}% ema_post={ema10_posture:.2f} smiBonus={smi_bonus_pts:+d} "
-        f"squeezeExp={squeeze_exp_1h:.2f} psi={squeeze_psi_1h} "
+        f"squeezePsi={squeeze_psi_1h} squeezeExp={squeeze_exp_1h:.2f} "
         f"liq={liquidity_1h:.2f} volScaled={metrics['volatility_1h_scaled']:.2f} "
         f"riskOn={risk_on_pct:.2f} risingPct={rising_pct:.2f} overall={state}/{score}",
         flush=True
     )
     return out
-
-# ------------------------------ CLI ------------------------------
 
 def main():
     ap = argparse.ArgumentParser()
