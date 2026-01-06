@@ -9,6 +9,8 @@ import liveRouter from "./routes/live.js";   // ✅ live router
 import sectorcards10mRouter from "./routes/sectorcards-10m.js"; // ✅ sectorcards
 import smzLevels from "./routes/smzLevels.js"; // ✅ Smart Money levels API
 import smzShelves from "./routes/smzShelves.js"; // ✅ Accum/Dist shelves API
+import smzHierarchy from "./routes/smzHierarchy.js";
+
 
 
 // --- App setup ---
@@ -66,6 +68,7 @@ app.use("/api/sectorcards-10m", sectorcards10mRouter); // ✅ sectorcards adapte
 app.use("/live", liveRouter);  // ✅ GitHub JSON proxies
 app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
 app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution shelves
+app.use("/api/v1/smz-hierarchy", smzHierarchy);
 
 
 // --- 404 / errors ---
