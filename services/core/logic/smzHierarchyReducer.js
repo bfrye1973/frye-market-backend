@@ -1,304 +1,300 @@
 // src/services/core/logic/smzHierarchyReducer.js
-// Frye SMZ + Shelves Hierarchy Reducer (NO FETCH, NO IO)
-// Input: institutional levels + shelves levels
-// Output: clean render lists + debug suppression lists
+// Frye SMZ / Shelves Hierarchy Reducer — CONTRACT LOCKED (NO FETCH, NO IO)
 //
-// Goals:
-// - TradingView-clean: minimal overlaps
-// - Institutional zones are parents
-// - Shelves inherit permission from institutional zones
-// - Max 1 dominant accumulation + 1 dominant distribution per institutional zone
+// Inputs:
+// - institutional levels from /api/v1/smz-levels (levels[])
 //
-// This module does NOT change detection or scoring.
-// It only decides what to SHOW vs SUPPRESS.
+//   Each zone:
+//   - id: details.id (fallback details.zoneId)
+//   - bounds: priceRange: [high, low] (authoritative, inclusive)
+//   - strength: strength 0–100
+//   - tf: details.tf ("30m"|"1h"|"4h")
+//
+// - shelf levels from /api/v1/smz-shelves (levels[])
+//
+//   Each shelf:
+//   - type: "accumulation" | "distribution"
+//   - bounds: priceRange: [high, low] (authoritative, inclusive)
+//   - strength: strength
+//   - tf: tf OR details.tf
+//   - id may be absent (generate stable id)
+//
+// Runtime:
+// - currentPrice (required; inclusive containment)
+// - timeframe (30m|1h|4h|1D)  (1D maps -> 4h)
+//
+// Output (required contract):
+// {
+//   selectedInstitutionalZone: { zoneId, priceHigh, priceLow, strength } | null,
+//   dominantShelves: { accumulation: {...}|null, distribution: {...}|null },
+//   suppressed: { institutional: [...], shelves: [...] }
+// }
+//
+// Rules (NON-NEGOTIABLE):
+// 1) Institutional is parent authority. If no selected zone => shelves null, trading disabled.
+// 2) Select ONE dominant institutional zone in tf by:
+//    - zone contains currentPrice
+//      - if multiple: highest strength, then closest midpoint to price
+//    - if none contain: closest zone BELOW price (support bias)
+//      - if none below exist: closest above (failsafe)
+// 3) Shelves allowed ONLY if overlap selected zone (any overlap):
+//    shelf.hi >= zone.low AND shelf.lo <= zone.high
+// 4) Keep max 1 accumulation + 1 distribution shelf:
+//    - closest edge distance to price
+//    - highest strength
+//    - prefer below (accum) / above (dist)
+//    - if still tied: narrower width
+// 5) suppressed arrays must return FULL original objects
 
-function clamp(x, a, b) {
-  return Math.max(a, Math.min(b, x));
+import crypto from "crypto";
+
+function mapTf(tf) {
+  const t = String(tf || "").trim();
+  if (!t) return "";
+  if (t === "1D" || t === "1d") return "4h"; // v1 decision
+  return t;
 }
 
-function toRange(obj) {
-  // expects { priceRange:[hi,lo] } or { high, low }
-  if (Array.isArray(obj?.priceRange) && obj.priceRange.length === 2) {
-    return { hi: Number(obj.priceRange[0]), lo: Number(obj.priceRange[1]) };
-  }
-  return { hi: Number(obj?.high), lo: Number(obj?.low) };
+function getZoneTf(z) {
+  return z?.details?.tf ?? z?.tf ?? "";
 }
 
-function normRange(hi, lo) {
-  const H = Number(hi);
-  const L = Number(lo);
-  if (!Number.isFinite(H) || !Number.isFinite(L)) return null;
-  const top = Math.max(H, L);
-  const bot = Math.min(H, L);
-  if (top <= bot) return null;
-  return { hi: top, lo: bot, mid: (top + bot) / 2, width: top - bot };
+function getShelfTf(s) {
+  return s?.tf ?? s?.details?.tf ?? "";
 }
 
-function overlapPct(a, b) {
-  const lo = Math.max(a.lo, b.lo);
-  const hi = Math.min(a.hi, b.hi);
-  const inter = hi - lo;
-  if (inter <= 0) return 0;
-  const denom = Math.min(a.width, b.width);
-  return denom > 0 ? inter / denom : 0;
+function zoneId(z) {
+  return z?.details?.id ?? z?.details?.zoneId ?? null;
 }
 
-function contains(a, b) {
-  // a contains b
-  return a.lo <= b.lo && a.hi >= b.hi;
+function toBounds(obj) {
+  // authoritative: priceRange [high, low]
+  const pr = obj?.priceRange;
+  if (!Array.isArray(pr) || pr.length < 2) return null;
+
+  const hi = Number(pr[0]);
+  const lo = Number(pr[1]);
+  if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
+
+  const high = Math.max(hi, lo);
+  const low = Math.min(hi, lo);
+
+  // allow equal? (zones should have width; but don’t crash)
+  return { high, low };
 }
 
-function distanceToRange(price, r) {
-  if (price < r.lo) return r.lo - price;
-  if (price > r.hi) return price - r.hi;
-  return 0;
+function containsInclusive(low, high, price) {
+  return low <= price && price <= high;
 }
 
-function mergeSameType(list, { overlapMin = 0.6, centerTol = 0.75 } = {}) {
-  // list must all be same type
-  if (!Array.isArray(list) || list.length === 0) return [];
-  const sorted = list
-    .map((x) => ({ ...x, _r: normRange(toRange(x).hi, toRange(x).lo) }))
-    .filter((x) => x._r)
-    .sort((a, b) => a._r.lo - b._r.lo);
-
-  const out = [];
-  let cur = sorted[0];
-
-  for (let i = 1; i < sorted.length; i++) {
-    const nxt = sorted[i];
-
-    const ov = overlapPct(cur._r, nxt._r);
-    const centersClose = Math.abs(cur._r.mid - nxt._r.mid) <= centerTol;
-
-    if (ov >= overlapMin || centersClose) {
-      // merge bounds
-      const hi = Math.max(cur._r.hi, nxt._r.hi);
-      const lo = Math.min(cur._r.lo, nxt._r.lo);
-      const merged = { ...cur };
-      merged.priceRange = [Number(hi.toFixed(2)), Number(lo.toFixed(2))];
-      merged.price = Number(((hi + lo) / 2).toFixed(2));
-
-      // keep strongest
-      merged.strength = Math.max(Number(cur.strength || 0), Number(nxt.strength || 0));
-
-      // track debug
-      merged._mergedFrom = (cur._mergedFrom || [cur.details?.id || cur.details?.zoneId || "x"])
-        .concat(nxt._mergedFrom || [nxt.details?.id || nxt.details?.zoneId || "y"]);
-
-      merged._r = normRange(hi, lo);
-      cur = merged;
-    } else {
-      out.push(cur);
-      cur = nxt;
-    }
-  }
-
-  out.push(cur);
-  return out.map(({ _r, ...rest }) => rest);
+function midpoint(low, high) {
+  return (low + high) / 2;
 }
 
-function pickDominantByScore(list) {
-  if (!Array.isArray(list) || list.length === 0) return null;
-  return list.reduce((best, cur) => {
-    if (!best) return cur;
-    const bs = Number(best.strength ?? 0);
-    const cs = Number(cur.strength ?? 0);
-    if (cs !== bs) return cs > bs ? cur : best;
-
-    // tie-breaker: prefer clear 4H if present
-    const b4 = best?.details?.flags?.hasClear4H ? 1 : 0;
-    const c4 = cur?.details?.flags?.hasClear4H ? 1 : 0;
-    if (c4 !== b4) return c4 > b4 ? cur : best;
-
-    // tie-breaker: tighter width
-    const br = normRange(toRange(best).hi, toRange(best).lo);
-    const cr = normRange(toRange(cur).hi, toRange(cur).lo);
-    if (br && cr && cr.width !== br.width) return cr.width < br.width ? cur : best;
-
-    return best;
-  }, null);
+function nearestEdgeDistance(low, high, price) {
+  return Math.min(Math.abs(price - low), Math.abs(high - price));
 }
 
-/**
- * Cluster institutional zones by loose overlap, then keep one winner per cluster.
- * If a currentPrice is given, prefer clusters near price (but still keep top N).
- */
-function reduceInstitutional(instZones, {
-  clusterOverlap = 0.35,
-  maxOut = 3,
-  currentPrice = null
-} = {}) {
-  const zones = (Array.isArray(instZones) ? instZones : [])
-    .map((z) => ({ ...z, _r: normRange(toRange(z).hi, toRange(z).lo) }))
-    .filter((z) => z._r)
-    .sort((a, b) => Number(b.strength || 0) - Number(a.strength || 0));
+function width(low, high) {
+  return Math.max(0, high - low);
+}
 
-  // build overlap clusters
-  const clusters = [];
-  for (const z of zones) {
-    let placed = false;
-    for (const c of clusters) {
-      if (c.members.some((m) => overlapPct(m._r, z._r) >= clusterOverlap || contains(m._r, z._r) || contains(z._r, m._r))) {
-        c.members.push(z);
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) clusters.push({ members: [z] });
-  }
+function overlapAny(zoneLow, zoneHigh, shelfLow, shelfHigh) {
+  // any overlap: shelf.hi >= zone.low AND shelf.lo <= zone.high
+  return shelfHigh >= zoneLow && shelfLow <= zoneHigh;
+}
 
-  // pick dominant per cluster
-  const winners = clusters.map((c) => pickDominantByScore(c.members)).filter(Boolean);
+function stableShelfId(shelf, tfUsed) {
+  // stable id if missing: hash(tf|type|roundedHigh|roundedLow)
+  const b = toBounds(shelf);
+  const type = String(shelf?.type || "unknown");
+  const hiR = b ? Math.round(b.high * 100) / 100 : 0;
+  const loR = b ? Math.round(b.low * 100) / 100 : 0;
+  const key = `${tfUsed}|${type}|${hiR}|${loR}`;
+  return crypto.createHash("sha1").update(key).digest("hex").slice(0, 16);
+}
 
-  // sort winners by: distance to price (if provided) then strength
-  const scored = winners.map((w) => {
-    const dist = Number.isFinite(currentPrice) ? distanceToRange(currentPrice, normRange(toRange(w).hi, toRange(w).lo)) : null;
-    return { w, dist };
+function selectDominantZone(zonesTf, price) {
+  if (!zonesTf.length) return null;
+
+  // 1) zones containing price (inclusive)
+  const containing = zonesTf.filter((z) => {
+    const b = toBounds(z);
+    return b ? containsInclusive(b.low, b.high, price) : false;
   });
 
-  scored.sort((a, b) => {
-    // nearer clusters first (if price known)
-    if (a.dist != null && b.dist != null && a.dist !== b.dist) return a.dist - b.dist;
-    // otherwise higher strength
-    return Number(b.w.strength || 0) - Number(a.w.strength || 0);
+  if (containing.length) {
+    containing.sort((a, b) => {
+      const sa = Number(a?.strength ?? 0);
+      const sb = Number(b?.strength ?? 0);
+      if (sb !== sa) return sb - sa; // highest strength
+
+      const ab = toBounds(a);
+      const bb = toBounds(b);
+      const da = Math.abs(midpoint(ab.low, ab.high) - price);
+      const db = Math.abs(midpoint(bb.low, bb.high) - price);
+      return da - db; // closest midpoint
+    });
+    return containing[0];
+  }
+
+  // 2) none contain: closest zone BELOW price (support bias)
+  const below = [];
+  const above = [];
+
+  for (const z of zonesTf) {
+    const b = toBounds(z);
+    if (!b) continue;
+
+    if (b.high < price) below.push({ z, dist: price - b.high }); // distance to nearest edge (top)
+    else if (b.low > price) above.push({ z, dist: b.low - price }); // distance to nearest edge (bottom)
+  }
+
+  below.sort((a, b) => a.dist - b.dist);
+  if (below.length) return below[0].z;
+
+  // failsafe: closest above
+  above.sort((a, b) => a.dist - b.dist);
+  if (above.length) return above[0].z;
+
+  return null;
+}
+
+function preferBelow(shelfLow, shelfHigh, price) {
+  // “Prefer shelves below price” => shelf entirely below or touching price
+  return shelfHigh <= price;
+}
+
+function preferAbove(shelfLow, shelfHigh, price) {
+  // “Prefer shelves above price” => shelf entirely above or touching price
+  return shelfLow >= price;
+}
+
+function pickDominantShelf(shelves, price, type) {
+  const typed = shelves.filter((s) => String(s?.type).toLowerCase() === type);
+  if (!typed.length) return null;
+
+  typed.sort((a, b) => {
+    const ab = toBounds(a);
+    const bb = toBounds(b);
+    if (!ab || !bb) return 0;
+
+    // 1) closest edge distance
+    const da = nearestEdgeDistance(ab.low, ab.high, price);
+    const db = nearestEdgeDistance(bb.low, bb.high, price);
+    if (da !== db) return da - db;
+
+    // 2) highest strength
+    const sa = Number(a?.strength ?? 0);
+    const sb = Number(b?.strength ?? 0);
+    if (sb !== sa) return sb - sa;
+
+    // 3) prefer below/above
+    if (type === "accumulation") {
+      const pa = preferBelow(ab.low, ab.high, price) ? 1 : 0;
+      const pb = preferBelow(bb.low, bb.high, price) ? 1 : 0;
+      if (pb !== pa) return pb - pa;
+    } else if (type === "distribution") {
+      const pa = preferAbove(ab.low, ab.high, price) ? 1 : 0;
+      const pb = preferAbove(bb.low, bb.high, price) ? 1 : 0;
+      if (pb !== pa) return pb - pa;
+    }
+
+    // 4) narrower width
+    const wa = width(ab.low, ab.high);
+    const wb = width(bb.low, bb.high);
+    return wa - wb;
   });
 
-  const render = scored.slice(0, maxOut).map((x) => x.w);
-  const suppressed = zones
-    .map(({ _r, ...z }) => z)
-    .filter((z) => !render.some((r) => (r.details?.id || r.details?.zoneId) === (z.details?.id || z.details?.zoneId)));
-
-  return { render, suppressed };
+  return typed[0];
 }
 
-/**
- * Assign shelves to an institutional parent using overlap or tolerance.
- * Then per parent: merge same-type shelves and keep 1 dominant per type.
- */
-function reduceShelvesForInstitutional(instZone, shelves, {
-  tolerancePts = 0.75,
-  overlapMin = 0.15,
-  shelfMergeOverlap = 0.6,
-  shelfCenterTol = 0.75
-} = {}) {
-  const parentR = normRange(toRange(instZone).hi, toRange(instZone).lo);
-  if (!parentR) return { domAccum: null, domDist: null, suppressed: shelves || [] };
-
-  const inOrNearParent = (s) => {
-    const sr = normRange(toRange(s).hi, toRange(s).lo);
-    if (!sr) return false;
-
-    // rule A: overlap
-    const ov = overlapPct(parentR, sr);
-    if (ov >= overlapMin) return true;
-
-    // rule B: within tolerance of zone boundary
-    const dist = Math.min(
-      Math.abs(sr.mid - parentR.lo),
-      Math.abs(sr.mid - parentR.hi),
-      distanceToRange(sr.mid, parentR)
-    );
-    return dist <= tolerancePts;
-  };
-
-  const eligible = (Array.isArray(shelves) ? shelves : [])
-    .map((s) => ({ ...s, _r: normRange(toRange(s).hi, toRange(s).lo) }))
-    .filter((s) => s._r && inOrNearParent(s));
-
-  const ignored = (Array.isArray(shelves) ? shelves : [])
-    .filter((s) => !eligible.includes(s));
-
-  // Split by type
-  const acc = eligible.filter((s) => String(s.type).toLowerCase() === "accumulation");
-  const dist = eligible.filter((s) => String(s.type).toLowerCase() === "distribution");
-
-  // Merge per type to remove overlaps
-  const accMerged = mergeSameType(acc, { overlapMin: shelfMergeOverlap, centerTol: shelfCenterTol });
-  const distMerged = mergeSameType(dist, { overlapMin: shelfMergeOverlap, centerTol: shelfCenterTol });
-
-  // Pick dominant per type
-  const domAccum = pickDominantByScore(accMerged);
-  const domDist = pickDominantByScore(distMerged);
-
-  // Suppressed = eligible that are not dominant + ignored
-  const suppressed = []
-    .concat(accMerged.filter((x) => x !== domAccum))
-    .concat(distMerged.filter((x) => x !== domDist))
-    .concat(ignored);
-
-  return { domAccum, domDist, suppressed };
-}
-
-/**
- * Main reducer:
- * - Reduce institutional zones first
- * - For each selected institutional zone, reduce shelves inside it
- * - Output tradingview-clean render lists
- */
 export function reduceSmzAndShelves({
   institutionalLevels = [],
   shelfLevels = [],
-  currentPrice = null,
-  maxInstitutionalOut = 3,
-  tolerancePts = 0.75
+  currentPrice,
+  timeframe,
 } = {}) {
-  const inst = reduceInstitutional(institutionalLevels, {
-    clusterOverlap: 0.35,
-    maxOut: maxInstitutionalOut,
-    currentPrice
+  const tfUsed = mapTf(timeframe);
+  const price = Number(currentPrice);
+
+  if (!tfUsed) throw new Error("timeframe is required");
+  if (!Number.isFinite(price)) throw new Error("currentPrice must be a finite number");
+
+  const zonesAll = Array.isArray(institutionalLevels) ? institutionalLevels : [];
+  const shelvesAll = Array.isArray(shelfLevels) ? shelfLevels : [];
+
+  // Filter by runtime tf (endpoints return mixed TF lists)
+  const zonesTf = zonesAll.filter((z) => getZoneTf(z) === tfUsed && toBounds(z));
+  const shelvesTf = shelvesAll.filter((s) => getShelfTf(s) === tfUsed && toBounds(s));
+
+  // Step 1 — select ONE dominant institutional zone
+  const selected = selectDominantZone(zonesTf, price);
+
+  // suppressed institutional = ALL zones except selected (FULL originals)
+  const selectedId = selected ? zoneId(selected) : null;
+  const suppressedInstitutional = zonesAll.filter((z) => {
+    const zid = zoneId(z);
+    if (!selectedId) return true;
+    return zid !== selectedId;
   });
 
-  const renderInstitutional = inst.render;
-
-  // For each rendered institutional zone, compute dominant shelves
-  const renderShelves = [];
-  const suppressedShelves = [];
-
-  for (const z of renderInstitutional) {
-    const { domAccum, domDist, suppressed } = reduceShelvesForInstitutional(z, shelfLevels, {
-      tolerancePts,
-      overlapMin: 0.15,
-      shelfMergeOverlap: 0.6,
-      shelfCenterTol: 0.75
-    });
-
-    if (domAccum) {
-      renderShelves.push({ ...domAccum, _parentZoneId: z.details?.id || z.details?.zoneId || null });
-    }
-    if (domDist) {
-      renderShelves.push({ ...domDist, _parentZoneId: z.details?.id || z.details?.zoneId || null });
-    }
-
-    suppressedShelves.push(...suppressed.map((s) => ({ ...s, _parentZoneId: z.details?.id || z.details?.zoneId || null })));
+  // If no selected zone => trading disabled, no shelves active
+  if (!selected) {
+    return {
+      selectedInstitutionalZone: null,
+      dominantShelves: { accumulation: null, distribution: null },
+      suppressed: {
+        institutional: suppressedInstitutional,
+        shelves: shelvesAll, // FULL originals
+      },
+    };
   }
 
-  // Final de-dupe shelves by (type + priceRange)
-  const seen = new Set();
-  const dedupShelves = [];
-  for (const s of renderShelves) {
-    const r = normRange(toRange(s).hi, toRange(s).lo);
-    if (!r) continue;
-    const key = `${String(s.type)}|${r.hi.toFixed(2)}|${r.lo.toFixed(2)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    dedupShelves.push(s);
-  }
+  const zb = toBounds(selected);
+  const zoneLow = zb.low;
+  const zoneHigh = zb.high;
+
+  // Step 2 — filter shelves to selected zone only (any overlap)
+  const shelvesInZone = shelvesTf.filter((s) => {
+    const sb = toBounds(s);
+    return overlapAny(zoneLow, zoneHigh, sb.low, sb.high);
+  });
+
+  // suppressed shelves = everything NOT eligible (including other TFs) (FULL originals)
+  const suppressedShelves = shelvesAll.filter((s) => {
+    const sTf = getShelfTf(s);
+    if (sTf !== tfUsed) return true;
+    const sb = toBounds(s);
+    if (!sb) return true;
+    return !overlapAny(zoneLow, zoneHigh, sb.low, sb.high);
+  });
+
+  // Step 3 — keep max 1 blue + 1 red
+  const domAccumRaw = pickDominantShelf(shelvesInZone, price, "accumulation");
+  const domDistRaw = pickDominantShelf(shelvesInZone, price, "distribution");
+
+  const decorateShelf = (s) => {
+    if (!s) return null;
+    const tf = getShelfTf(s) || tfUsed;
+    const id = s?.id ?? s?.details?.id ?? stableShelfId(s, tf);
+    return { ...s, id };
+  };
 
   return {
-    ok: true,
-    meta: {
-      asOfUtc: new Date().toISOString(),
-      currentPrice: Number.isFinite(currentPrice) ? Number(currentPrice.toFixed(2)) : null,
-      tolerancePts
+    selectedInstitutionalZone: {
+      zoneId: selectedId || "unknown",
+      priceHigh: zoneHigh,
+      priceLow: zoneLow,
+      strength: Number(selected?.strength ?? 0),
     },
-    render: {
-      institutional: renderInstitutional,
-      shelves: dedupShelves
+    dominantShelves: {
+      accumulation: decorateShelf(domAccumRaw),
+      distribution: decorateShelf(domDistRaw),
     },
     suppressed: {
-      institutional: inst.suppressed,
-      shelves: suppressedShelves
-    }
+      institutional: suppressedInstitutional,
+      shelves: suppressedShelves,
+    },
   };
 }
