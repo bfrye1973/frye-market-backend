@@ -1,19 +1,22 @@
 // src/services/core/logic/smzEngine.js
-// Institutional SMZ detection + scoring + HIERARCHY reduction.
-// Produces institutional zones (yellow).
+// Institutional SMZ detection + scoring + TradingView-style overlap reduction.
 //
-// ✅ MODE (LOCKED):
-// 1) Detect + score globally across full provided history (no near-price gate)
-// 2) AFTER scoring/merge/hierarchy: FILTER output to currentPrice ± 40 points
-//    (keep score order; do NOT re-rank by distance)
+// ✅ LOCKED BEHAVIOR (per your request):
+// - Detect + score globally across the full provided history
+// - Filter output to currentPrice ± 40 (selection layer)
+// - Return ALL zones with strength 90–100 inside that band (NO max 6 cap)
+// - Fix overlap to look like TradingView: merge overlapping zones into clean bands
 //
-// Scoring delegated to smzInstitutionalRubric.js
+// Scoring remains delegated to smzInstitutionalRubric.js
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
-  // ✅ Output filter band (LOCKED)
+  // Output filter band (LOCKED)
   WINDOW_POINTS: 40,
+
+  // Institutional grade band (LOCKED)
+  MIN_STRENGTH_OUT: 90,
 
   // Candidate strictness
   MIN_TOUCHES_1H: 5,
@@ -23,12 +26,9 @@ const CFG = {
   BUCKET_ATR_MULT_1H: 1.0,
   BUCKET_ATR_MULT_4H: 1.2,
 
-  // Output controls
-  MAX_INSTITUTIONAL_OUT: 6,
-  MERGE_OVERLAP: 0.60,
-
-  // Hierarchy controls
-  CLUSTER_OVERLAP: 0.35,
+  // Merge/cluster controls (tuned for TradingView-style bands)
+  MERGE_OVERLAP: 0.55,      // slightly easier to merge neighboring slices
+  CLUSTER_OVERLAP: 0.30,    // loose cluster grouping
 };
 
 const GRID_STEP = 0.25;
@@ -141,7 +141,7 @@ function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
   return out;
 }
 
-// Merge overlaps (tight)
+// Tight merge of near-identical overlaps (keeps strongest score, unions bounds)
 function mergeByOverlap(zones, threshold = 0.60) {
   const sorted = zones.slice().sort((x, y) => x._low - y._low);
   const out = [];
@@ -153,12 +153,32 @@ function mergeByOverlap(zones, threshold = 0.60) {
     const ov = overlapPct({ low: last._low, high: last._high }, { low: z._low, high: z._high });
 
     if (ov >= threshold) {
-      const winner = (last.strength ?? 0) >= (z.strength ?? 0) ? last : z;
-      winner._low = round2(Math.min(last._low, z._low));
-      winner._high = round2(Math.max(last._high, z._high));
-      winner.price = round2((winner._low + winner._high) / 2);
-      winner.priceRange = [round2(winner._high), round2(winner._low)];
-      out[out.length - 1] = winner;
+      const mergedLow = round2(Math.min(last._low, z._low));
+      const mergedHigh = round2(Math.max(last._high, z._high));
+
+      // keep highest strength as cluster strength
+      const strength = Math.max(Number(last.strength ?? 0), Number(z.strength ?? 0));
+
+      // union details
+      const members = []
+        .concat(last.details?.members ?? [last.details?.id].filter(Boolean))
+        .concat(z.details?.members ?? [z.details?.id].filter(Boolean));
+
+      const tfs = new Set([last.details?.tf, z.details?.tf].filter(Boolean));
+
+      out[out.length - 1] = {
+        ...last,
+        _low: mergedLow,
+        _high: mergedHigh,
+        price: round2((mergedLow + mergedHigh) / 2),
+        priceRange: [mergedHigh, mergedLow],
+        strength,
+        details: {
+          ...last.details,
+          members,
+          tfs: Array.from(tfs),
+        },
+      };
     } else {
       out.push(z);
     }
@@ -166,12 +186,12 @@ function mergeByOverlap(zones, threshold = 0.60) {
   return out;
 }
 
-// HIERARCHY REDUCER: keep ONE dominant zone per overlap cluster
-function applyHierarchy(scoredZones) {
-  const zones = scoredZones.slice().sort((a, b) => b.strength - a.strength);
+// TradingView-style cluster union: merge overlapping zones into one band per cluster
+function clusterUnionBands(zones) {
+  const input = zones.slice().sort((a, b) => a._low - b._low);
   const clusters = [];
 
-  for (const z of zones) {
+  for (const z of input) {
     let placed = false;
     for (const c of clusters) {
       if (c.members.some((m) => overlapsLoose(m, z, CFG.CLUSTER_OVERLAP))) {
@@ -183,32 +203,51 @@ function applyHierarchy(scoredZones) {
     if (!placed) clusters.push({ members: [z] });
   }
 
-  const dominant = [];
-  for (const c of clusters) {
-    c.members.sort((a, b) => b.strength - a.strength);
+  const bands = clusters.map((c, idx) => {
+    let low = Infinity;
+    let high = -Infinity;
+    let strength = 0;
 
-    const pick = c.members.reduce((best, cur) => {
-      if (!best) return cur;
+    const memberIds = [];
+    const tfs = new Set();
+    let hasClear4H = false;
 
-      const b4 = best.details?.flags?.hasClear4H ? 1 : 0;
-      const c4 = cur.details?.flags?.hasClear4H ? 1 : 0;
-      if (c4 !== b4) return c4 > b4 ? cur : best;
+    for (const m of c.members) {
+      low = Math.min(low, m._low);
+      high = Math.max(high, m._high);
+      strength = Math.max(strength, Number(m.strength ?? 0));
+      if (m.details?.id) memberIds.push(m.details.id);
+      if (m.details?.tf) tfs.add(m.details.tf);
+      if (m.details?.flags?.hasClear4H) hasClear4H = true;
+      // also carry any merged members lists
+      if (Array.isArray(m.details?.members)) memberIds.push(...m.details.members);
+    }
 
-      const bw = (best._high - best._low);
-      const cw = (cur._high - cur._low);
-      if (cur.strength === best.strength && cw < bw) return cur;
+    low = round2(low);
+    high = round2(high);
 
-      return (cur.strength > best.strength) ? cur : best;
-    }, null);
+    return {
+      type: "institutional",
+      price: round2((low + high) / 2),
+      priceRange: [high, low],
+      strength,
+      details: {
+        id: `smz_band_${idx}`,
+        tf: "mixed",
+        members: Array.from(new Set(memberIds)),
+        tfs: Array.from(tfs),
+        flags: { hasClear4H },
+      },
+      _low: low,
+      _high: high,
+    };
+  });
 
-    dominant.push(pick);
-  }
-
-  dominant.sort((a, b) => b.strength - a.strength);
-  return dominant;
+  // Keep score order (A) — strongest first
+  bands.sort((a, b) => b.strength - a.strength);
+  return bands;
 }
 
-// ✅ Output filter: keep only zones overlapping currentPrice ± WINDOW_POINTS
 function filterToBand(zones, currentPrice, windowPts) {
   const loBand = currentPrice - windowPts;
   const hiBand = currentPrice + windowPts;
@@ -228,17 +267,14 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
 
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) return [];
 
-  const c1h = b1h; // full provided history
-  const c4h = b4h; // full provided history
-
-  const atr1h = computeATR(c1h, 14);
-  const atr4h = computeATR(c4h, 14);
+  const atr1h = computeATR(b1h, 14);
+  const atr4h = computeATR(b4h, 14);
 
   const bucket1h = Math.max(0.50, atr1h * CFG.BUCKET_ATR_MULT_1H);
   const bucket4h = Math.max(0.75, atr4h * CFG.BUCKET_ATR_MULT_4H);
 
-  const cand1h = buildBucketCandidatesGlobal(c1h, bucket1h, CFG.MIN_TOUCHES_1H, "1h");
-  const cand4h = buildBucketCandidatesGlobal(c4h, bucket4h, CFG.MIN_TOUCHES_4H, "4h");
+  const cand1h = buildBucketCandidatesGlobal(b1h, bucket1h, CFG.MIN_TOUCHES_1H, "1h");
+  const cand4h = buildBucketCandidatesGlobal(b4h, bucket4h, CFG.MIN_TOUCHES_4H, "4h");
 
   const scored = [...cand1h, ...cand4h]
     .map((z, idx) => {
@@ -248,8 +284,8 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
       const s = scoreInstitutional({
         lo,
         hi,
-        bars1h: c1h,
-        bars4h: c4h,
+        bars1h: b1h,
+        bars4h: b4h,
         currentPrice,
       });
 
@@ -271,16 +307,19 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     })
     .sort((a, b) => b.strength - a.strength);
 
-  // merge + hierarchy (global)
+  // Tight merge similar slices
   const merged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
-  const clustered = applyHierarchy(merged);
 
-  // ✅ FILTER OUTPUT TO ±40 (keep score order), then cap output count
-  const banded = filterToBand(clustered, currentPrice, CFG.WINDOW_POINTS)
-    .sort((a, b) => b.strength - a.strength)
-    .slice(0, CFG.MAX_INSTITUTIONAL_OUT);
+  // ✅ Selection: only keep those overlapping currentPrice ± 40
+  const banded = filterToBand(merged, currentPrice, CFG.WINDOW_POINTS);
 
-  return banded.map((z) => ({
+  // ✅ Keep ALL 90–100 (no cap), THEN cluster-union into TradingView bands
+  const topGrades = banded.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_OUT);
+
+  const bands = clusterUnionBands(topGrades);
+
+  // Final output schema (no internal fields)
+  return bands.map((z) => ({
     type: z.type,
     price: z.price,
     priceRange: z.priceRange,
