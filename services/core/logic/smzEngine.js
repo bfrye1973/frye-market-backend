@@ -2,21 +2,16 @@
 // Institutional SMZ detection + scoring + HIERARCHY reduction.
 // Produces clean institutional zones (yellow).
 //
-// IMPORTANT:
-// - Detection remains bucket-based but tightened.
-// - Hierarchy ensures ONE dominant zone per overlapping cluster.
-// - Scoring is delegated to smzInstitutionalRubric.js
+// ✅ KEY CHANGE (LOCKED FOR “DETECTION CORRECTNESS FIRST”):
+// - REMOVE near-price window gating from candidate generation.
+// - We scan the full price range in the supplied history, then score.
+// - Later we can add a separate “render near current price” filter layer.
+//
+// Scoring remains delegated to smzInstitutionalRubric.js
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
-  // Window around current price
-  WINDOW_POINTS: 16,
-
-  // Lookbacks (already handled by polygon provider; these are slice limits)
-  LOOKBACK_1H: 220,
-  LOOKBACK_4H: 260,
-
   // Candidate strictness
   MIN_TOUCHES_1H: 5,
   MIN_TOUCHES_4H: 3,
@@ -26,11 +21,11 @@ const CFG = {
   BUCKET_ATR_MULT_4H: 1.2,
 
   // Output controls
-  MAX_INSTITUTIONAL_OUT: 6,      // keep it tight: 3–6 institutional zones max
+  MAX_INSTITUTIONAL_OUT: 6,
   MERGE_OVERLAP: 0.60,
 
   // Hierarchy controls
-  CLUSTER_OVERLAP: 0.35,         // clusters overlap more loosely than merge
+  CLUSTER_OVERLAP: 0.35,
 };
 
 const GRID_STEP = 0.25;
@@ -100,26 +95,36 @@ function overlapsLoose(a, b, threshold) {
   return overlapPct({ low: a._low, high: a._high }, { low: b._low, high: b._high }) >= threshold;
 }
 
-// Anchored bucket candidates within price window
-function buildBucketCandidates(candles, currentPrice, bucketSize, minTouches, tf, windowPts) {
-  const loWin = currentPrice - windowPts;
-  const hiWin = currentPrice + windowPts;
+function minLow(candles) {
+  let m = Infinity;
+  for (const c of candles) if (validBar(c)) m = Math.min(m, c.low);
+  return m === Infinity ? null : m;
+}
 
-  const start = snapDown(loWin, GRID_STEP);
-  const end = snapUp(hiWin, GRID_STEP);
+function maxHigh(candles) {
+  let m = -Infinity;
+  for (const c of candles) if (validBar(c)) m = Math.max(m, c.high);
+  return m === -Infinity ? null : m;
+}
 
-  // bucket boundaries anchored to GRID_STEP
+// ✅ GLOBAL bucket candidates across full price range
+function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
+  const loAll = minLow(candles);
+  const hiAll = maxHigh(candles);
+  if (!Number.isFinite(loAll) || !Number.isFinite(hiAll) || hiAll <= loAll) return [];
+
+  const start = snapDown(loAll, GRID_STEP);
+  const end = snapUp(hiAll, GRID_STEP);
+
   const step = Math.max(GRID_STEP, snapUp(bucketSize, GRID_STEP));
-  const buckets = [];
 
+  const buckets = [];
   for (let lo = start; lo < end; lo += step) {
     buckets.push({ tf, low: lo, high: lo + step, touches: 0 });
   }
 
   for (const c of candles) {
     if (!validBar(c)) continue;
-    if (c.high < loWin || c.low > hiWin) continue;
-
     for (const b of buckets) {
       if (c.high >= b.low && c.low <= b.high) b.touches++;
     }
@@ -159,10 +164,7 @@ function mergeByOverlap(zones, threshold = 0.60) {
   return out;
 }
 
-/**
- * HIERARCHY REDUCER:
- * Groups zones into overlap clusters, then keeps ONE dominant institutional zone per cluster.
- */
+// HIERARCHY REDUCER: keep ONE dominant zone per overlap cluster
 function applyHierarchy(scoredZones) {
   const zones = scoredZones.slice().sort((a, b) => b.strength - a.strength);
   const clusters = [];
@@ -170,7 +172,6 @@ function applyHierarchy(scoredZones) {
   for (const z of zones) {
     let placed = false;
     for (const c of clusters) {
-      // if it overlaps any member loosely, it belongs to that cluster
       if (c.members.some((m) => overlapsLoose(m, z, CFG.CLUSTER_OVERLAP))) {
         c.members.push(z);
         placed = true;
@@ -180,15 +181,13 @@ function applyHierarchy(scoredZones) {
     if (!placed) clusters.push({ members: [z] });
   }
 
-  // pick dominant in each cluster
   const dominant = [];
   for (const c of clusters) {
-    // sort cluster members by score desc
     c.members.sort((a, b) => b.strength - a.strength);
 
-    // tie-breaker: prefer clear 4H presence, then tighter bounds
     const pick = c.members.reduce((best, cur) => {
       if (!best) return cur;
+
       const b4 = best.details?.flags?.hasClear4H ? 1 : 0;
       const c4 = cur.details?.flags?.hasClear4H ? 1 : 0;
       if (c4 !== b4) return c4 > b4 ? cur : best;
@@ -203,7 +202,6 @@ function applyHierarchy(scoredZones) {
     dominant.push(pick);
   }
 
-  // sort dominant by score and cap output
   dominant.sort((a, b) => b.strength - a.strength);
   return dominant.slice(0, CFG.MAX_INSTITUTIONAL_OUT);
 }
@@ -221,8 +219,9 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
 
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) return [];
 
-  const c1h = b1h.slice(-CFG.LOOKBACK_1H);
-  const c4h = b4h.slice(-CFG.LOOKBACK_4H);
+  // ✅ Use FULL provided history (no internal slicing)
+  const c1h = b1h;
+  const c4h = b4h;
 
   const atr1h = computeATR(c1h, 14);
   const atr4h = computeATR(c4h, 14);
@@ -230,22 +229,19 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const bucket1h = Math.max(0.50, atr1h * CFG.BUCKET_ATR_MULT_1H);
   const bucket4h = Math.max(0.75, atr4h * CFG.BUCKET_ATR_MULT_4H);
 
-  const cand1h = buildBucketCandidates(
+  // ✅ GLOBAL candidates (no window)
+  const cand1h = buildBucketCandidatesGlobal(
     c1h,
-    currentPrice,
     bucket1h,
     CFG.MIN_TOUCHES_1H,
-    "1h",
-    CFG.WINDOW_POINTS
+    "1h"
   );
 
-  const cand4h = buildBucketCandidates(
+  const cand4h = buildBucketCandidatesGlobal(
     c4h,
-    currentPrice,
     bucket4h,
     CFG.MIN_TOUCHES_4H,
-    "4h",
-    CFG.WINDOW_POINTS
+    "4h"
   );
 
   const scored = [...cand1h, ...cand4h]
@@ -279,7 +275,6 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     })
     .sort((a, b) => b.strength - a.strength);
 
-  // Tight merge first, then hierarchy cluster reduce
   const merged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
   const reduced = applyHierarchy(merged);
 
