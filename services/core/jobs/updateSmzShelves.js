@@ -1,13 +1,14 @@
 // src/services/core/jobs/updateSmzShelves.js
 // Smart Money Shelves Job — writes ONLY smz-shelves.json (blue/red)
 //
-// HARD FIXES ADDED:
+// HARD FIXES INCLUDED:
 // 1) Detect timeframe window mismatch (e.g., 15m pulling old months)
 // 2) Anchor shelves “current price” to 30m/1h (not 15m), so shelves stay near live market
 // 3) Filter output shelves to stay within ±bandPoints of currentPriceAnchor
 // 4) RE-GRADE shelves strength into 60–89 band (so 90–100 is reserved for institutional zones)
+// 5) IMPORTANT: INCREASE HISTORY DEPTH so shelves/zones can reach deeper levels (e.g., ~650)
 //
-// Output schema (expanded, backward-safe):
+// Output schema (backward-safe):
 // {
 //   ok:true,
 //   meta:{generated_at_utc, symbol, band_points, current_price_anchor, strength_band:{lo,hi,min_raw,max_raw}},
@@ -29,6 +30,13 @@ const OUTFILE = path.resolve(__dirname, "../data/smz-shelves.json");
 // Config
 const SYMBOL = "SPY";
 const BAND_POINTS = 40;
+
+// ✅ HISTORY DEPTH (increased)
+// These limits control how far back the job can see.
+// If you want shelves down near ~650, you must load enough history to include those price levels.
+const LIMIT_15M = 2000;
+const LIMIT_30M = 900;
+const LIMIT_1H = 800;
 
 // NEW (LOCKED): Shelves strength must live in 60–89 band
 const SHELF_STRENGTH_LO = 60;
@@ -127,9 +135,6 @@ function filterShelvesToBand(levels, currentPrice, bandPoints) {
 
 /**
  * RE-GRADE shelves strength into [60..89] while preserving ranking.
- * - strongest shelf becomes 89
- * - weakest shelf becomes 60
- * - intermediate shelves scale between them
  * Adds strength_raw for debug/audit.
  */
 function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_STRENGTH_HI) {
@@ -148,7 +153,6 @@ function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_S
   const minRaw = Math.min(...rawVals);
   const maxRaw = Math.max(...rawVals);
 
-  // If all equal, set all to hi
   if (maxRaw === minRaw) {
     const mapped = levels.map((x) => ({
       ...x,
@@ -163,7 +167,6 @@ function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_S
     const t = (raw - minRaw) / (maxRaw - minRaw); // 0..1
     const scaled = lo + (hi - lo) * t;
 
-    // clamp + round to integer
     const strength = Math.max(lo, Math.min(hi, Math.round(scaled)));
 
     return {
@@ -180,12 +183,10 @@ async function main() {
   try {
     console.log("[SHELVES] Fetching bars…");
 
-    // Shelves scanner expects bars10m naming, but you stated it's actually 15m now.
-    // We keep that mapping, but we DO NOT trust 15m for current price anchor.
     const [bars15mRaw, bars30mRaw, bars1hRaw] = await Promise.all([
-      getBarsFromPolygon(SYMBOL, "15m", 260),
-      getBarsFromPolygon(SYMBOL, "30m", 120),
-      getBarsFromPolygon(SYMBOL, "1h", 150),
+      getBarsFromPolygon(SYMBOL, "15m", LIMIT_15M),
+      getBarsFromPolygon(SYMBOL, "30m", LIMIT_30M),
+      getBarsFromPolygon(SYMBOL, "1h", LIMIT_1H),
     ]);
 
     const bars15m = normalizeBars(bars15mRaw);
@@ -200,12 +201,10 @@ async function main() {
     const s30 = spanInfo("30m", bars30m);
     const s1h = spanInfo("1h", bars1h);
 
-    // Last closes (proves stale windows instantly)
     console.log("[SHELVES] last close 15m:", lastClose(bars15m));
     console.log("[SHELVES] last close 30m:", lastClose(bars30m));
     console.log("[SHELVES] last close 1h :", lastClose(bars1h));
 
-    // Detect mismatch (if 15m ends far earlier than 30m/1h)
     if (s15?.last && s30?.last) {
       const lagDays = (s30.last - s15.last) / 86400;
       if (lagDays > 2) {
@@ -232,13 +231,11 @@ async function main() {
         bandPoints: BAND_POINTS,
       }) || [];
 
-    // Hard-filter shelves to the SAME band around the true current price
     const shelvesBand = filterShelvesToBand(shelvesRaw, currentPriceAnchor, BAND_POINTS);
 
     console.log("[SHELVES] Shelves generated (raw):", shelvesRaw.length);
     console.log("[SHELVES] Shelves kept (band filtered):", shelvesBand.length);
 
-    // RE-GRADE strengths into 60–89 (preserve rank)
     const { levels: shelves, minRaw, maxRaw } = remapShelvesStrengthToBand(
       shelvesBand,
       SHELF_STRENGTH_LO,
@@ -258,6 +255,16 @@ async function main() {
         symbol: SYMBOL,
         band_points: BAND_POINTS,
         current_price_anchor: Number(currentPriceAnchor.toFixed(2)),
+        fetch_limits: {
+          "15m": LIMIT_15M,
+          "30m": LIMIT_30M,
+          "1h": LIMIT_1H,
+        },
+        coverage: {
+          "15m": s15,
+          "30m": s30,
+          "1h": s1h,
+        },
         strength_band: {
           lo: SHELF_STRENGTH_LO,
           hi: SHELF_STRENGTH_HI,
