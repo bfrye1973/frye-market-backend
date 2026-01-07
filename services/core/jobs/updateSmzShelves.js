@@ -5,9 +5,14 @@
 // 1) Detect timeframe window mismatch (e.g., 15m pulling old months)
 // 2) Anchor shelves “current price” to 30m/1h (not 15m), so shelves stay near live market
 // 3) Filter output shelves to stay within ±bandPoints of currentPriceAnchor
+// 4) RE-GRADE shelves strength into 60–89 band (so 90–100 is reserved for institutional zones)
 //
-// Output schema unchanged:
-// { ok:true, meta:{generated_at_utc}, levels:[{type:"accumulation"|"distribution", price, priceRange:[hi,lo], strength}] }
+// Output schema (expanded, backward-safe):
+// {
+//   ok:true,
+//   meta:{generated_at_utc, symbol, band_points, current_price_anchor, strength_band:{lo,hi,min_raw,max_raw}},
+//   levels:[{type:"accumulation"|"distribution", price, priceRange:[hi,lo], strength, strength_raw}]
+// }
 
 import fs from "fs";
 import path from "path";
@@ -24,6 +29,10 @@ const OUTFILE = path.resolve(__dirname, "../data/smz-shelves.json");
 // Config
 const SYMBOL = "SPY";
 const BAND_POINTS = 40;
+
+// NEW (LOCKED): Shelves strength must live in 60–89 band
+const SHELF_STRENGTH_LO = 60;
+const SHELF_STRENGTH_HI = 89;
 
 // Normalize Polygon aggregate bars to { time(sec), open, high, low, close, volume }
 function normalizeBars(raw) {
@@ -116,6 +125,57 @@ function filterShelvesToBand(levels, currentPrice, bandPoints) {
   });
 }
 
+/**
+ * RE-GRADE shelves strength into [60..89] while preserving ranking.
+ * - strongest shelf becomes 89
+ * - weakest shelf becomes 60
+ * - intermediate shelves scale between them
+ * Adds strength_raw for debug/audit.
+ */
+function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_STRENGTH_HI) {
+  if (!Array.isArray(levels) || levels.length === 0) {
+    return { levels, minRaw: null, maxRaw: null };
+  }
+
+  const rawVals = levels
+    .map((x) => Number(x?.strength))
+    .filter((n) => Number.isFinite(n));
+
+  if (rawVals.length === 0) {
+    return { levels, minRaw: null, maxRaw: null };
+  }
+
+  const minRaw = Math.min(...rawVals);
+  const maxRaw = Math.max(...rawVals);
+
+  // If all equal, set all to hi
+  if (maxRaw === minRaw) {
+    const mapped = levels.map((x) => ({
+      ...x,
+      strength_raw: Number(x?.strength ?? 0),
+      strength: hi,
+    }));
+    return { levels: mapped, minRaw, maxRaw };
+  }
+
+  const mapped = levels.map((x) => {
+    const raw = Number(x?.strength ?? 0);
+    const t = (raw - minRaw) / (maxRaw - minRaw); // 0..1
+    const scaled = lo + (hi - lo) * t;
+
+    // clamp + round to integer
+    const strength = Math.max(lo, Math.min(hi, Math.round(scaled)));
+
+    return {
+      ...x,
+      strength_raw: raw,
+      strength,
+    };
+  });
+
+  return { levels: mapped, minRaw, maxRaw };
+}
+
 async function main() {
   try {
     console.log("[SHELVES] Fetching bars…");
@@ -173,10 +233,23 @@ async function main() {
       }) || [];
 
     // Hard-filter shelves to the SAME band around the true current price
-    const shelves = filterShelvesToBand(shelvesRaw, currentPriceAnchor, BAND_POINTS);
+    const shelvesBand = filterShelvesToBand(shelvesRaw, currentPriceAnchor, BAND_POINTS);
 
     console.log("[SHELVES] Shelves generated (raw):", shelvesRaw.length);
-    console.log("[SHELVES] Shelves kept (band filtered):", shelves.length);
+    console.log("[SHELVES] Shelves kept (band filtered):", shelvesBand.length);
+
+    // RE-GRADE strengths into 60–89 (preserve rank)
+    const { levels: shelves, minRaw, maxRaw } = remapShelvesStrengthToBand(
+      shelvesBand,
+      SHELF_STRENGTH_LO,
+      SHELF_STRENGTH_HI
+    );
+
+    console.log("[SHELVES] Strength remap:", {
+      band: `${SHELF_STRENGTH_LO}-${SHELF_STRENGTH_HI}`,
+      minRaw,
+      maxRaw,
+    });
 
     const payload = {
       ok: true,
@@ -185,6 +258,12 @@ async function main() {
         symbol: SYMBOL,
         band_points: BAND_POINTS,
         current_price_anchor: Number(currentPriceAnchor.toFixed(2)),
+        strength_band: {
+          lo: SHELF_STRENGTH_LO,
+          hi: SHELF_STRENGTH_HI,
+          min_raw: Number.isFinite(minRaw) ? Number(minRaw) : null,
+          max_raw: Number.isFinite(maxRaw) ? Number(maxRaw) : null,
+        },
       },
       levels: shelves,
     };
