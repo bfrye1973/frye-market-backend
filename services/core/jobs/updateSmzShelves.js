@@ -1,27 +1,24 @@
 // src/services/core/jobs/updateSmzShelves.js
 // Smart Money Shelves Job — writes ONLY smz-shelves.json (blue/red)
 //
-// HARD FIXES INCLUDED:
-// 1) Detect timeframe window mismatch (e.g., 15m pulling old months)
-// 2) Anchor shelves “current price” to 30m/1h (not 15m), so shelves stay near live market
-// 3) Filter output shelves to stay within ±bandPoints of currentPriceAnchor
-// 4) RE-GRADE shelves strength into 60–89 band (so 90–100 is reserved for institutional zones)
-// 5) LOOKBACK CONTROL (efficient):
-//    Shelves: 15m=180d, 30m=180d, 1h=180d
+// Uses DEEP provider (jobs only), chart provider remains untouched.
 //
-// Output schema (backward-safe):
-// {
-//   ok:true,
-//   meta:{generated_at_utc, symbol, band_points, current_price_anchor, strength_band:{lo,hi,min_raw,max_raw}},
-//   levels:[{type:"accumulation"|"distribution", price, priceRange:[hi,lo], strength, strength_raw}]
-// }
+// Includes your existing hard fixes:
+// 1) Anchor shelves “current price” to 30m/1h (not 15m)
+// 2) Filter shelves to ±BAND_POINTS around currentPriceAnchor
+// 3) Re-grade shelves strength into 60–89 (reserving 90–100 for institutional zones)
+//
+// Efficient lookback plan (LOCKED for shelves):
+// - 15m = 180 days
+// - 30m = 180 days
+// - 1h  = 180 days
 
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 import { computeShelves } from "../logic/smzShelvesScanner.js";
-import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
+import { getBarsFromPolygonDeep } from "../../../api/providers/polygonBarsDeep.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,7 +29,7 @@ const OUTFILE = path.resolve(__dirname, "../data/smz-shelves.json");
 const SYMBOL = "SPY";
 const BAND_POINTS = 40;
 
-// ✅ Efficient shelves lookback (LOCKED)
+// ✅ Lookback days (LOCKED for shelves)
 const DAYS_15M = 180;
 const DAYS_30M = 180;
 const DAYS_1H = 180;
@@ -96,7 +93,6 @@ function lastClose(bars) {
 }
 
 function pickCurrentPriceAnchor({ bars30m, bars1h }) {
-  // Anchor to the most trustworthy “current market” close among higher TFs.
   const c30 = lastClose(bars30m);
   const c1h = lastClose(bars1h);
 
@@ -124,16 +120,10 @@ function filterShelvesToBand(levels, currentPrice, bandPoints) {
     const zHi = Number(pr[0]);
     const zLo = Number(pr[1]);
     if (!Number.isFinite(zHi) || !Number.isFinite(zLo)) return false;
-
-    // keep if any overlap with band
     return !(zHi < lo || zLo > hi);
   });
 }
 
-/**
- * Re-grade shelves strength into [60..89] while preserving ranking.
- * Adds strength_raw for debug/audit.
- */
 function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_STRENGTH_HI) {
   if (!Array.isArray(levels) || levels.length === 0) {
     return { levels, minRaw: null, maxRaw: null };
@@ -161,7 +151,7 @@ function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_S
 
   const mapped = levels.map((x) => {
     const raw = Number(x?.strength ?? 0);
-    const t = (raw - minRaw) / (maxRaw - minRaw); // 0..1
+    const t = (raw - minRaw) / (maxRaw - minRaw);
     const scaled = lo + (hi - lo) * t;
     const strength = Math.max(lo, Math.min(hi, Math.round(scaled)));
     return { ...x, strength_raw: raw, strength };
@@ -172,12 +162,12 @@ function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_S
 
 async function main() {
   try {
-    console.log("[SHELVES] Fetching bars…");
+    console.log("[SHELVES] Fetching bars (DEEP)…");
 
     const [bars15mRaw, bars30mRaw, bars1hRaw] = await Promise.all([
-      getBarsFromPolygon(SYMBOL, "15m", DAYS_15M),
-      getBarsFromPolygon(SYMBOL, "30m", DAYS_30M),
-      getBarsFromPolygon(SYMBOL, "1h", DAYS_1H),
+      getBarsFromPolygonDeep(SYMBOL, "15m", DAYS_15M),
+      getBarsFromPolygonDeep(SYMBOL, "30m", DAYS_30M),
+      getBarsFromPolygonDeep(SYMBOL, "1h", DAYS_1H),
     ]);
 
     const bars15m = normalizeBars(bars15mRaw);
@@ -195,13 +185,6 @@ async function main() {
     console.log("[SHELVES] last close 15m:", lastClose(bars15m));
     console.log("[SHELVES] last close 30m:", lastClose(bars30m));
     console.log("[SHELVES] last close 1h :", lastClose(bars1h));
-
-    if (s15?.last && s30?.last) {
-      const lagDays = (s30.last - s15.last) / 86400;
-      if (lagDays > 2) {
-        console.warn("[SHELVES] WARNING: 15m window appears stale vs 30m by days:", lagDays.toFixed(1));
-      }
-    }
 
     const currentPriceAnchor = pickCurrentPriceAnchor({ bars30m, bars1h });
     if (!Number.isFinite(currentPriceAnchor)) {
@@ -243,16 +226,8 @@ async function main() {
         symbol: SYMBOL,
         band_points: BAND_POINTS,
         current_price_anchor: Number(currentPriceAnchor.toFixed(2)),
-        lookback_days: {
-          "15m": DAYS_15M,
-          "30m": DAYS_30M,
-          "1h": DAYS_1H,
-        },
-        coverage: {
-          "15m": s15,
-          "30m": s30,
-          "1h": s1h,
-        },
+        lookback_days: { "15m": DAYS_15M, "30m": DAYS_30M, "1h": DAYS_1H },
+        coverage: { "15m": s15, "30m": s30, "1h": s1h },
         strength_band: {
           lo: SHELF_STRENGTH_LO,
           hi: SHELF_STRENGTH_HI,
