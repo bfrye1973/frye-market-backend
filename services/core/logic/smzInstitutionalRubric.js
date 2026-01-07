@@ -1,10 +1,12 @@
 // src/services/core/logic/smzInstitutionalRubric.js
-// Institutional SMZ rubric scorer (diagnostic truth).
-// - Scoring ONLY (no detection).
-// - No hard caps/gates applied; flags report what WOULD be required.
-// - Uses modular scorers for Compression/Wicks/Retests to avoid “fake” inflation.
+// Institutional SMZ rubric scorer (STRICT MODE)
 //
-// Output contract (required by smzEngine.js):
+// ✅ GOAL (LOCKED):
+// - Make 90–100 "hard" (true institutional zones only)
+// - Penalize chop/breaks so fog zones don't score high
+// - Preserve your existing module scoring + Q structure
+//
+// Output contract:
 // { scoreTotal, parts, flags, facts }
 
 import { scoreCompression } from "./smzScoreCompression.js";
@@ -15,11 +17,6 @@ import { scoreRetests } from "./smzScoreRetests.js";
 
 function clamp(x, a, b) {
   return Math.max(a, Math.min(b, x));
-}
-
-function toSec(t) {
-  const n = Number(t ?? 0);
-  return n > 1e12 ? Math.floor(n / 1000) : n;
 }
 
 function validBar(b) {
@@ -71,14 +68,14 @@ function computeATR(bars, period = 50) {
 
 /* ---------------------- Q helpers (same rubric style) ---------------------- */
 
-// Q1 duration (0/12/20) based on compression trading days
+// Q1 duration (0/12/20)
 function compressionDurationPoints(tradingDays) {
   if (tradingDays >= 7) return 20;
   if (tradingDays >= 4) return 12;
   return 0;
 }
 
-// Q2 tightness (3/9/15) based on zone width (pts)
+// Q2 tightness (3/9/15)
 function tightnessPoints(widthPts) {
   if (widthPts <= 2.0) return 15;
   if (widthPts <= 4.0) return 9;
@@ -87,7 +84,7 @@ function tightnessPoints(widthPts) {
 
 // Q3 failed attempts count -> points (0/4/8/12)
 function failedAttemptsCount(bars1h, lo, hi) {
-  const EPS = 0.10; // points
+  const EPS = 0.10;
   let attempts = 0;
   let cooldown = 0;
 
@@ -98,13 +95,12 @@ function failedAttemptsCount(bars1h, lo, hi) {
       continue;
     }
 
-    // “Pierce then fail” attempt
     const upperPierce = b.high > hi + EPS && b.close <= hi;
     const lowerPierce = b.low < lo - EPS && b.close >= lo;
 
     if (upperPierce || lowerPierce) {
       attempts++;
-      cooldown = 3; // avoid counting clustered bars as separate attempts
+      cooldown = 3;
     }
   }
 
@@ -118,17 +114,15 @@ function failedAttemptsPoints(attempts) {
   return 0;
 }
 
-// Q4 wick clarity points (2/5/8) derived from wick module facts
+// Q4 wick clarity points (2/5/8)
 function wickClarityPointsFromModule(wickAvgPtsPerTouchBar, wickTouchBars) {
-  // Maintain same rubric thresholds you used before:
-  // - >=1.20 strong, >=0.70 mixed, else weak
   if ((wickTouchBars ?? 0) < 2) return 2;
   if ((wickAvgPtsPerTouchBar ?? 0) >= 1.2) return 8;
   if ((wickAvgPtsPerTouchBar ?? 0) >= 0.7) return 5;
   return 2;
 }
 
-// Q5 retest holds (0/8/10/12) based on retestDays
+// Q5 retest holds (0/8/10/12)
 function retestHoldPointsFromDays(days) {
   if (days <= 0) return 0;
   if (days === 1) return 8;
@@ -136,7 +130,7 @@ function retestHoldPointsFromDays(days) {
   return 12;
 }
 
-// Q6 reaction (3/5/8) using ATR-scaled displacement after last touch
+// Q6 reaction (3/5/8)
 function reactionAfterLastTouchPoints(bars1h, lo, hi) {
   const atr = computeATR(bars1h, 50);
   let lastTouch = -1;
@@ -191,7 +185,6 @@ function breakoutSpeedDistancePoints(bars1h, lo, hi) {
 
   const center = (lo + hi) / 2;
 
-  // Speed: best move within 6 bars
   let best6 = 0;
   for (let i = lastTouch + 1; i <= Math.min(bars1h.length - 1, lastTouch + 6); i++) {
     const b = bars1h[i];
@@ -200,7 +193,6 @@ function breakoutSpeedDistancePoints(bars1h, lo, hi) {
   }
   const q9 = best6 >= 1.2 ? 5 : best6 >= 0.7 ? 3 : 1;
 
-  // Distance: best excursion within 12 bars
   let best12 = 0;
   for (let i = lastTouch + 1; i <= Math.min(bars1h.length - 1, lastTouch + 12); i++) {
     const b = bars1h[i];
@@ -213,9 +205,9 @@ function breakoutSpeedDistancePoints(bars1h, lo, hi) {
   return { q9, q10 };
 }
 
-// Q11/Q12 structural context
+// Q11/Q12 structural context + breaks count
 function contextPoints(bars1h, lo, hi) {
-  const look = bars1h.slice(-120);
+  const look = bars1h.slice(-240); // wider look for integrity
   if (!look.length) return { q11: 3, q12: 1, breaks: 0 };
 
   const maxH = Math.max(...look.map((b) => b.high));
@@ -234,9 +226,21 @@ function contextPoints(bars1h, lo, hi) {
     if (b.close > hi + EPS || b.close < lo - EPS) breaks++;
   }
 
+  // Integrity points (harder now)
   const q12 = breaks <= 1 ? 5 : breaks <= 3 ? 3 : 1;
 
   return { q11, q12, breaks };
+}
+
+// ✅ NEW: break penalty (big)
+function breakPenaltyPoints(breaks) {
+  // 0 breaks => 0 penalty
+  // small chop => small penalty
+  // heavy chop => big penalty
+  if (breaks <= 1) return 0;
+  if (breaks <= 3) return 6;
+  if (breaks <= 6) return 14;
+  return 25;
 }
 
 /* ------------------------------ Main Export ------------------------------ */
@@ -246,9 +250,6 @@ export function scoreInstitutionalRubric(input) {
   const bars4h = Array.isArray(input?.bars4h) ? input.bars4h : [];
   const currentPrice = Number(input?.currentPrice);
 
-  // Support BOTH call styles:
-  // A) { lo, hi, bars1h, bars4h, currentPrice }
-  // B) { zone, bars1h, bars4h, currentPrice }
   const lo =
     Number(input?.lo) ??
     Number(
@@ -281,33 +282,31 @@ export function scoreInstitutionalRubric(input) {
 
   const widthPts = zoneWidth(low, high);
 
-  // ✅ MODULES (truth sources)
+  // Modules (truth)
   const comp = scoreCompression({ lo: low, hi: high, bars1h }); // 0..35
   const w = scoreWicks({ lo: low, hi: high, bars1h }); // 0..30
   const r = scoreRetests({ lo: low, hi: high, bars1h }); // 0..35
 
-  // Map module facts into Q-scale (keep your familiar Q1–Q12 structure)
   const compressionDays = Number(comp?.facts?.compressionDays ?? 0);
 
-  const q1 = compressionDurationPoints(compressionDays); // 0/12/20
-  const q2 = tightnessPoints(widthPts); // 3/9/15
+  const q1 = compressionDurationPoints(compressionDays);
+  const q2 = tightnessPoints(widthPts);
 
   const attempts = failedAttemptsCount(bars1h, low, high);
-  const q3 = failedAttemptsPoints(attempts); // 0/4/8/12
+  const q3 = failedAttemptsPoints(attempts);
 
   const wickAvgPts = Number(w?.facts?.wickAvgPtsPerTouchBar ?? 0);
   const wickTouchBars = Number(w?.facts?.wickTouchBars ?? 0);
-  const q4 = wickClarityPointsFromModule(wickAvgPts, wickTouchBars); // 2/5/8
+  const q4 = wickClarityPointsFromModule(wickAvgPts, wickTouchBars);
 
   const retestDays = Number(r?.facts?.retestDays ?? 0);
-  const q5 = retestHoldPointsFromDays(retestDays); // 0/8/10/12
-  const q6 = reactionAfterLastTouchPoints(bars1h, low, high); // 3/5/8
+  const q5 = retestHoldPointsFromDays(retestDays);
+  const q6 = reactionAfterLastTouchPoints(bars1h, low, high);
 
-  const { q7, q8, touches4h } = tfAgreementPoints(bars4h, low, high); // 0..10 and 1..5
-  const { q9, q10 } = breakoutSpeedDistancePoints(bars1h, low, high); // 1..5
-  const { q11, q12, breaks } = contextPoints(bars1h, low, high); // 3/5 and 1/3/5
+  const { q7, q8, touches4h } = tfAgreementPoints(bars4h, low, high);
+  const { q9, q10 } = breakoutSpeedDistancePoints(bars1h, low, high);
+  const { q11, q12, breaks } = contextPoints(bars1h, low, high);
 
-  // Total points (legacy style) — then clamped to 0–100 for UI
   const rawTotal =
     (q1 + q2) +
     (q3 + q4) +
@@ -316,18 +315,39 @@ export function scoreInstitutionalRubric(input) {
     (q9 + q10) +
     (q11 + q12);
 
-  const scoreTotal = Math.round(clamp(rawTotal, 0, 100));
+  // ✅ Apply big chop penalty
+  const penalty = breakPenaltyPoints(breaks);
+  const penalized = rawTotal - penalty;
 
-  // Flags (diagnostic gates only — no caps applied)
+  // Flags (hard gates)
   const hasCompression = q1 > 0 && q2 >= 9;
-  const hasRejection = q4 >= 5 || q3 > 0;
+  const hasRejection = (q4 >= 5) && (q3 > 0 || wickTouchBars >= 3);
   const hasRetest = q5 > 0;
+  const hasIntegrity = breaks <= 3; // critical for institutional zones
   const hasClear4H = q7 === 10;
+
+  // ✅ Hard grading:
+  // - If you don't have the 4 core requirements, you cannot be 90+.
+  // - If integrity fails (chop), you cannot be 90+.
+  let capped = penalized;
+  let capApplied = "none";
+
+  const passesCore = hasCompression && hasRejection && hasRetest && hasIntegrity;
+
+  if (!passesCore) {
+    capped = Math.min(capped, 89);
+    capApplied = "cap89_missing_core";
+  } else if (!hasClear4H) {
+    // still strong, but reserve 96–100 for clear 4H alignment
+    capped = Math.min(capped, 95);
+    capApplied = "cap95_no_clear4h";
+  }
+
+  const scoreTotal = Math.round(clamp(capped, 0, 100));
 
   const mid = (low + high) / 2;
   const distPts = Number.isFinite(currentPrice) ? Math.abs(mid - currentPrice) : null;
 
-  // Parts: preserve the “bucket” view for teammate debugging
   const parts = {
     compression: {
       points: q1 + q2,
@@ -361,17 +381,19 @@ export function scoreInstitutionalRubric(input) {
       points: q11 + q12,
       q11_location: q11,
       q12_integrity: q12,
+      breaks,
+      penalty,
     },
   };
 
   const flags = {
-    capApplied: "none",
-    wouldCap79: !(hasCompression && hasRejection && hasRetest),
-    wouldCap99: !hasClear4H,
+    capApplied,
     hasCompression,
     hasRejection,
     hasRetest,
+    hasIntegrity,
     hasClear4H,
+    passesCore,
   };
 
   const facts = {
@@ -382,20 +404,17 @@ export function scoreInstitutionalRubric(input) {
     compressionDays,
     failedAttempts: attempts,
 
-    // Wick facts (module truth)
     wickTotalPts: Number((w?.facts?.wickTotalPts ?? 0).toFixed(2)),
     wickAvgPtsPerTouchBar: Number((w?.facts?.wickAvgPtsPerTouchBar ?? 0).toFixed(3)),
     wickTouchBars: wickTouchBars,
 
-    // Retest facts (module truth)
     retestDays: retestDays,
     retestReaction0to8: Number(r?.facts?.retestReaction0to8 ?? null),
 
-    // TF + context facts
     touches4h,
     breaks,
+    penalty,
 
-    // Current distance
     distancePoints: distPts == null ? null : Number(distPts.toFixed(2)),
   };
 
