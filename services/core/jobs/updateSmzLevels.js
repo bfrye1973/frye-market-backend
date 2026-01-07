@@ -10,7 +10,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { computeSmartMoneyLevels } from "../logic/szEngine.js";
+import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
 import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
 
 const __filename = fileURLToPath(import.meta.url);
