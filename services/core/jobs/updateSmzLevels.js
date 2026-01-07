@@ -1,17 +1,26 @@
 // src/services/core/jobs/updateSmzLevels.js
 // Institutional Smart Money Zones Job — writes ONLY smz-levels.json (yellow)
+//
+// Efficient lookback plan (LOCKED):
+// - 1h = 365 days
+// - 30m = 180 days
+// - 4h is synthesized from 1h (so effectively 365 days)
 
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
+import { computeSmartMoneyLevels } from "../logic/szEngine.js";
 import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const OUTFILE = path.resolve(__dirname, "../data/smz-levels.json");
+
+// ✅ Lookback days (LOCKED)
+const DAYS_30M = 180;
+const DAYS_1H = 365;
 
 // Normalize Polygon aggregate bars to { time(sec), open, high, low, close, volume }
 function normalizeBars(raw) {
@@ -99,8 +108,8 @@ async function main() {
     console.log("[SMZ] Fetching multi-TF bars…");
 
     const [bars30mRaw, bars1hRaw] = await Promise.all([
-      getBarsFromPolygon("SPY", "30m", 120),
-      getBarsFromPolygon("SPY", "1h", 150),
+      getBarsFromPolygon("SPY", "30m", DAYS_30M),
+      getBarsFromPolygon("SPY", "1h", DAYS_1H),
     ]);
 
     const bars30m = normalizeBars(bars30mRaw);
@@ -109,6 +118,7 @@ async function main() {
 
     console.log("[SMZ] 30m bars:", bars30m.length);
     console.log("[SMZ] 1h  bars:", bars1h.length);
+    console.log("[SMZ] 4h(synth) bars:", bars4h.length);
 
     spanInfo("30m", bars30m);
     spanInfo("1h", bars1h);
@@ -129,7 +139,10 @@ async function main() {
 
     const payload = {
       ok: true,
-      meta: { generated_at_utc: new Date().toISOString() },
+      meta: {
+        generated_at_utc: new Date().toISOString(),
+        lookback_days: { "30m": DAYS_30M, "1h": DAYS_1H, "4h(synth)": DAYS_1H },
+      },
       levels: zones,
     };
 
