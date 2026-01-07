@@ -1,17 +1,20 @@
 // src/services/core/logic/smzEngine.js
 // Institutional SMZ detection + scoring + HIERARCHY reduction.
-// Produces clean institutional zones (yellow).
+// Produces institutional zones (yellow).
 //
-// ✅ KEY CHANGE (LOCKED FOR “DETECTION CORRECTNESS FIRST”):
-// - REMOVE near-price window gating from candidate generation.
-// - We scan the full price range in the supplied history, then score.
-// - Later we can add a separate “render near current price” filter layer.
+// ✅ MODE (LOCKED):
+// 1) Detect + score globally across full provided history (no near-price gate)
+// 2) AFTER scoring/merge/hierarchy: FILTER output to currentPrice ± 40 points
+//    (keep score order; do NOT re-rank by distance)
 //
-// Scoring remains delegated to smzInstitutionalRubric.js
+// Scoring delegated to smzInstitutionalRubric.js
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
+  // ✅ Output filter band (LOCKED)
+  WINDOW_POINTS: 40,
+
   // Candidate strictness
   MIN_TOUCHES_1H: 5,
   MIN_TOUCHES_4H: 3,
@@ -30,7 +33,6 @@ const CFG = {
 
 const GRID_STEP = 0.25;
 
-function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
 function round2(x) { return Math.round(x * 100) / 100; }
 
 function normalizeBars(arr) {
@@ -107,7 +109,7 @@ function maxHigh(candles) {
   return m === -Infinity ? null : m;
 }
 
-// ✅ GLOBAL bucket candidates across full price range
+// GLOBAL bucket candidates across full price range
 function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
   const loAll = minLow(candles);
   const hiAll = maxHigh(candles);
@@ -203,7 +205,14 @@ function applyHierarchy(scoredZones) {
   }
 
   dominant.sort((a, b) => b.strength - a.strength);
-  return dominant.slice(0, CFG.MAX_INSTITUTIONAL_OUT);
+  return dominant;
+}
+
+// ✅ Output filter: keep only zones overlapping currentPrice ± WINDOW_POINTS
+function filterToBand(zones, currentPrice, windowPts) {
+  const loBand = currentPrice - windowPts;
+  const hiBand = currentPrice + windowPts;
+  return zones.filter((z) => z._high >= loBand && z._low <= hiBand);
 }
 
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
@@ -219,9 +228,8 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
 
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) return [];
 
-  // ✅ Use FULL provided history (no internal slicing)
-  const c1h = b1h;
-  const c4h = b4h;
+  const c1h = b1h; // full provided history
+  const c4h = b4h; // full provided history
 
   const atr1h = computeATR(c1h, 14);
   const atr4h = computeATR(c4h, 14);
@@ -229,20 +237,8 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const bucket1h = Math.max(0.50, atr1h * CFG.BUCKET_ATR_MULT_1H);
   const bucket4h = Math.max(0.75, atr4h * CFG.BUCKET_ATR_MULT_4H);
 
-  // ✅ GLOBAL candidates (no window)
-  const cand1h = buildBucketCandidatesGlobal(
-    c1h,
-    bucket1h,
-    CFG.MIN_TOUCHES_1H,
-    "1h"
-  );
-
-  const cand4h = buildBucketCandidatesGlobal(
-    c4h,
-    bucket4h,
-    CFG.MIN_TOUCHES_4H,
-    "4h"
-  );
+  const cand1h = buildBucketCandidatesGlobal(c1h, bucket1h, CFG.MIN_TOUCHES_1H, "1h");
+  const cand4h = buildBucketCandidatesGlobal(c4h, bucket4h, CFG.MIN_TOUCHES_4H, "4h");
 
   const scored = [...cand1h, ...cand4h]
     .map((z, idx) => {
@@ -275,10 +271,16 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     })
     .sort((a, b) => b.strength - a.strength);
 
+  // merge + hierarchy (global)
   const merged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
-  const reduced = applyHierarchy(merged);
+  const clustered = applyHierarchy(merged);
 
-  return reduced.map((z) => ({
+  // ✅ FILTER OUTPUT TO ±40 (keep score order), then cap output count
+  const banded = filterToBand(clustered, currentPrice, CFG.WINDOW_POINTS)
+    .sort((a, b) => b.strength - a.strength)
+    .slice(0, CFG.MAX_INSTITUTIONAL_OUT);
+
+  return banded.map((z) => ({
     type: z.type,
     price: z.price,
     priceRange: z.priceRange,
