@@ -5,13 +5,15 @@
 // - 1h = 365 days
 // - 30m = 180 days
 // - 4h is synthesized from 1h (so effectively 365 days)
+//
+// Uses DEEP provider (jobs only), chart provider remains untouched.
 
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
-import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
+import { getBarsFromPolygonDeep } from "../../../api/providers/polygonBarsDeep.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -105,11 +107,11 @@ function spanInfo(label, bars) {
 
 async function main() {
   try {
-    console.log("[SMZ] Fetching multi-TF bars…");
+    console.log("[SMZ] Fetching multi-TF bars (DEEP)…");
 
     const [bars30mRaw, bars1hRaw] = await Promise.all([
-      getBarsFromPolygon("SPY", "30m", DAYS_30M),
-      getBarsFromPolygon("SPY", "1h", DAYS_1H),
+      getBarsFromPolygonDeep("SPY", "30m", DAYS_30M),
+      getBarsFromPolygonDeep("SPY", "1h", DAYS_1H),
     ]);
 
     const bars30m = normalizeBars(bars30mRaw);
@@ -118,7 +120,6 @@ async function main() {
 
     console.log("[SMZ] 30m bars:", bars30m.length);
     console.log("[SMZ] 1h  bars:", bars1h.length);
-    console.log("[SMZ] 4h(synth) bars:", bars4h.length);
 
     spanInfo("30m", bars30m);
     spanInfo("1h", bars1h);
