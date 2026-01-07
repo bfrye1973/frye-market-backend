@@ -11,7 +11,7 @@
 // getBarsFromPolygon(sym, tf, days)
 // getBarsFromPolygon(sym, tf, days, { mode })
 // getBarsFromPolygon(sym, tf, { mode })            (days default)
-// getBarsFromPolygon(sym, tf, { days, mode })      ✅ new explicit option
+// getBarsFromPolygon(sym, tf, { days, mode })
 //
 // mode:
 // - "intraday" (default) -> ends at Date.now()
@@ -33,8 +33,7 @@ const TF_MAP = {
   "1d": { mult: 1, unit: "day" },
 };
 
-// ✅ IMPORTANT: default lookback should be large enough for SMZ structure
-// (You can change this later, but this prevents “only 60 days” by accident.)
+// Default lookback (used only if caller does not pass days)
 const DEFAULT_DAYS = 180;
 
 function endOfYesterdayUtcMs() {
@@ -49,20 +48,16 @@ function endOfYesterdayUtcMs() {
 // getBarsFromPolygon(sym, tf, days)
 // getBarsFromPolygon(sym, tf, days, { mode })
 // getBarsFromPolygon(sym, tf, { mode })
-// getBarsFromPolygon(sym, tf, { days, mode }) ✅
+// getBarsFromPolygon(sym, tf, { days, mode })
 export async function getBarsFromPolygon(symbol, timeframe, daysOverride, opts) {
   let days = DEFAULT_DAYS;
   let options = opts && typeof opts === "object" ? opts : {};
 
-  // ✅ If caller passes an object as the 3rd arg, treat it as options
-  // and allow { days } inside it.
   if (daysOverride && typeof daysOverride === "object" && !Array.isArray(daysOverride)) {
     options = daysOverride;
-
     const d = Number(options?.days);
     if (Number.isFinite(d) && d > 0) days = Math.floor(d);
   } else if (Number.isFinite(daysOverride) && daysOverride > 0) {
-    // ✅ Caller explicitly passed days as a number
     days = Math.floor(daysOverride);
   }
 
@@ -78,21 +73,9 @@ export async function getBarsFromPolygon(symbol, timeframe, daysOverride, opts) 
   const unit = String(tfRaw.unit || "").trim();
   if (!unit) throw new Error(`Invalid TF unit for ${timeframe}`);
 
-  // End = now (intraday) or end-of-yesterday (closedDay)
   const endMs = mode === "closedday" ? endOfYesterdayUtcMs() : Date.now();
   const startMs = endMs - days * 24 * 60 * 60 * 1000;
 
-  // ✅ TEMP DEBUG (leave for now; remove after we confirm)
-  console.log("[POLY] getBarsFromPolygon", {
-    symbol,
-    timeframe,
-    days,
-    mode,
-    start: new Date(startMs).toISOString(),
-    end: new Date(endMs).toISOString(),
-  });
-
-  // ✅ Critical: request newest first so we never get stale “early window”
   const url =
     `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}` +
     `/range/${mult}/${encodeURIComponent(unit)}/${startMs}/${endMs}` +
@@ -107,10 +90,9 @@ export async function getBarsFromPolygon(symbol, timeframe, daysOverride, opts) 
   const j = await r.json();
   const rowsDesc = Array.isArray(j?.results) ? j.results : [];
 
-  // Convert to our internal shape, then sort ascending
   const rowsAsc = rowsDesc
     .map((x) => ({
-      t: x.t, // ms
+      t: x.t,
       o: x.o,
       h: x.h,
       l: x.l,
