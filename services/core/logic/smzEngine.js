@@ -1,13 +1,18 @@
 // src/services/core/logic/smzEngine.js
 // Institutional SMZ detection + scoring + TradingView-style overlap reduction.
 //
-// ✅ LOCKED BEHAVIOR (per your request):
-// - Detect + score globally across the full provided history
-// - Filter output to currentPrice ± 40 (selection layer)
-// - Return ALL zones with strength 90–100 inside that band (NO max 6 cap)
-// - Fix overlap to look like TradingView: merge overlapping zones into clean bands
+// MODE (what we’re doing now):
+// 1) Detect + score globally across full provided history
+// 2) Filter to currentPrice ± 40
+// 3) Select ALL zones >= 90 (no max cap)
+// 4) Merge overlaps into TradingView-style bands
 //
-// Scoring remains delegated to smzInstitutionalRubric.js
+// ✅ MISSING GUARDRAIL (now added):
+// If selection yields ZERO zones, we automatically relax selection:
+//   - try >= 85
+//   - else return top N by score inside the band
+//
+// Scoring delegated to smzInstitutionalRubric.js
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
@@ -15,8 +20,14 @@ const CFG = {
   // Output filter band (LOCKED)
   WINDOW_POINTS: 40,
 
-  // Institutional grade band (LOCKED)
-  MIN_STRENGTH_OUT: 90,
+  // Primary institutional band (LOCKED target)
+  MIN_STRENGTH_PRIMARY: 90,
+
+  // Guardrail fallback threshold
+  MIN_STRENGTH_FALLBACK: 85,
+
+  // If still empty, return top N in band so output is never empty
+  FALLBACK_TOP_N: 12,
 
   // Candidate strictness
   MIN_TOUCHES_1H: 5,
@@ -26,9 +37,9 @@ const CFG = {
   BUCKET_ATR_MULT_1H: 1.0,
   BUCKET_ATR_MULT_4H: 1.2,
 
-  // Merge/cluster controls (tuned for TradingView-style bands)
-  MERGE_OVERLAP: 0.55,      // slightly easier to merge neighboring slices
-  CLUSTER_OVERLAP: 0.30,    // loose cluster grouping
+  // Merge/cluster controls (TradingView-style)
+  MERGE_OVERLAP: 0.55,
+  CLUSTER_OVERLAP: 0.30,
 };
 
 const GRID_STEP = 0.25;
@@ -39,7 +50,7 @@ function normalizeBars(arr) {
   return (Array.isArray(arr) ? arr : [])
     .map((b) => {
       const rawT = Number(b.t ?? b.time ?? 0);
-      const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT; // ms -> sec
+      const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT;
       return {
         time,
         open: Number(b.o ?? b.open ?? 0),
@@ -141,8 +152,8 @@ function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
   return out;
 }
 
-// Tight merge of near-identical overlaps (keeps strongest score, unions bounds)
-function mergeByOverlap(zones, threshold = 0.60) {
+// Tight merge similar slices
+function mergeByOverlap(zones, threshold) {
   const sorted = zones.slice().sort((x, y) => x._low - y._low);
   const out = [];
 
@@ -155,11 +166,8 @@ function mergeByOverlap(zones, threshold = 0.60) {
     if (ov >= threshold) {
       const mergedLow = round2(Math.min(last._low, z._low));
       const mergedHigh = round2(Math.max(last._high, z._high));
-
-      // keep highest strength as cluster strength
       const strength = Math.max(Number(last.strength ?? 0), Number(z.strength ?? 0));
 
-      // union details
       const members = []
         .concat(last.details?.members ?? [last.details?.id].filter(Boolean))
         .concat(z.details?.members ?? [z.details?.id].filter(Boolean));
@@ -219,7 +227,6 @@ function clusterUnionBands(zones) {
       if (m.details?.id) memberIds.push(m.details.id);
       if (m.details?.tf) tfs.add(m.details.tf);
       if (m.details?.flags?.hasClear4H) hasClear4H = true;
-      // also carry any merged members lists
       if (Array.isArray(m.details?.members)) memberIds.push(...m.details.members);
     }
 
@@ -243,7 +250,7 @@ function clusterUnionBands(zones) {
     };
   });
 
-  // Keep score order (A) — strongest first
+  // Keep score order (strongest first)
   bands.sort((a, b) => b.strength - a.strength);
   return bands;
 }
@@ -307,23 +314,38 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     })
     .sort((a, b) => b.strength - a.strength);
 
-  // Tight merge similar slices
   const merged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
-
-  // ✅ Selection: only keep those overlapping currentPrice ± 40
   const banded = filterToBand(merged, currentPrice, CFG.WINDOW_POINTS);
 
-  // ✅ Keep ALL 90–100 (no cap), THEN cluster-union into TradingView bands
-  const topGrades = banded.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_OUT);
+  // --- PRIMARY selection: all >=90 ---
+  let selected = banded.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_PRIMARY);
+  let selectionMode = `>=${CFG.MIN_STRENGTH_PRIMARY}`;
 
-  const bands = clusterUnionBands(topGrades);
+  // ✅ GUARDRAIL: if empty, relax to >=85
+  if (selected.length === 0) {
+    selected = banded.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_FALLBACK);
+    selectionMode = `>=${CFG.MIN_STRENGTH_FALLBACK}`;
+  }
 
-  // Final output schema (no internal fields)
-  return bands.map((z) => ({
+  // ✅ GUARDRAIL: if still empty, return top N in-band by score
+  if (selected.length === 0) {
+    selected = banded
+      .slice()
+      .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0))
+      .slice(0, CFG.FALLBACK_TOP_N);
+    selectionMode = `top${CFG.FALLBACK_TOP_N}`;
+  }
+
+  const bands = clusterUnionBands(selected).map((z) => ({
     type: z.type,
     price: z.price,
     priceRange: z.priceRange,
     strength: z.strength,
-    details: z.details,
+    details: {
+      ...z.details,
+      selectionMode, // ✅ tells you if we used the guardrail
+    },
   }));
+
+  return bands;
 }
