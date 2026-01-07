@@ -6,7 +6,8 @@
 // 2) Anchor shelves “current price” to 30m/1h (not 15m), so shelves stay near live market
 // 3) Filter output shelves to stay within ±bandPoints of currentPriceAnchor
 // 4) RE-GRADE shelves strength into 60–89 band (so 90–100 is reserved for institutional zones)
-// 5) IMPORTANT: INCREASE HISTORY DEPTH so shelves/zones can reach deeper levels (e.g., ~650)
+// 5) LOOKBACK CONTROL (efficient):
+//    Shelves: 15m=180d, 30m=180d, 1h=180d
 //
 // Output schema (backward-safe):
 // {
@@ -31,14 +32,12 @@ const OUTFILE = path.resolve(__dirname, "../data/smz-shelves.json");
 const SYMBOL = "SPY";
 const BAND_POINTS = 40;
 
-// ✅ HISTORY DEPTH (increased)
-// These limits control how far back the job can see.
-// If you want shelves down near ~650, you must load enough history to include those price levels.
-const LIMIT_15M = 2000;
-const LIMIT_30M = 900;
-const LIMIT_1H = 800;
+// ✅ Efficient shelves lookback (LOCKED)
+const DAYS_15M = 180;
+const DAYS_30M = 180;
+const DAYS_1H = 180;
 
-// NEW (LOCKED): Shelves strength must live in 60–89 band
+// Shelves strength band (LOCKED)
 const SHELF_STRENGTH_LO = 60;
 const SHELF_STRENGTH_HI = 89;
 
@@ -98,12 +97,10 @@ function lastClose(bars) {
 
 function pickCurrentPriceAnchor({ bars30m, bars1h }) {
   // Anchor to the most trustworthy “current market” close among higher TFs.
-  // 15m can be stale if provider returns older window.
   const c30 = lastClose(bars30m);
   const c1h = lastClose(bars1h);
 
   if (Number.isFinite(c30) && Number.isFinite(c1h)) {
-    // If they disagree too much, log it but still prefer 30m (closest to “now” in this job)
     const diff = Math.abs(c30 - c1h);
     if (diff > 5) {
       console.warn("[SHELVES] WARNING: 30m vs 1h close mismatch:", { c30, c1h, diff });
@@ -134,7 +131,7 @@ function filterShelvesToBand(levels, currentPrice, bandPoints) {
 }
 
 /**
- * RE-GRADE shelves strength into [60..89] while preserving ranking.
+ * Re-grade shelves strength into [60..89] while preserving ranking.
  * Adds strength_raw for debug/audit.
  */
 function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_STRENGTH_HI) {
@@ -166,14 +163,8 @@ function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_S
     const raw = Number(x?.strength ?? 0);
     const t = (raw - minRaw) / (maxRaw - minRaw); // 0..1
     const scaled = lo + (hi - lo) * t;
-
     const strength = Math.max(lo, Math.min(hi, Math.round(scaled)));
-
-    return {
-      ...x,
-      strength_raw: raw,
-      strength,
-    };
+    return { ...x, strength_raw: raw, strength };
   });
 
   return { levels: mapped, minRaw, maxRaw };
@@ -184,9 +175,9 @@ async function main() {
     console.log("[SHELVES] Fetching bars…");
 
     const [bars15mRaw, bars30mRaw, bars1hRaw] = await Promise.all([
-      getBarsFromPolygon(SYMBOL, "15m", LIMIT_15M),
-      getBarsFromPolygon(SYMBOL, "30m", LIMIT_30M),
-      getBarsFromPolygon(SYMBOL, "1h", LIMIT_1H),
+      getBarsFromPolygon(SYMBOL, "15m", DAYS_15M),
+      getBarsFromPolygon(SYMBOL, "30m", DAYS_30M),
+      getBarsFromPolygon(SYMBOL, "1h", DAYS_1H),
     ]);
 
     const bars15m = normalizeBars(bars15mRaw);
@@ -208,10 +199,7 @@ async function main() {
     if (s15?.last && s30?.last) {
       const lagDays = (s30.last - s15.last) / 86400;
       if (lagDays > 2) {
-        console.warn(
-          "[SHELVES] WARNING: 15m window appears stale vs 30m by days:",
-          lagDays.toFixed(1)
-        );
+        console.warn("[SHELVES] WARNING: 15m window appears stale vs 30m by days:", lagDays.toFixed(1));
       }
     }
 
@@ -255,10 +243,10 @@ async function main() {
         symbol: SYMBOL,
         band_points: BAND_POINTS,
         current_price_anchor: Number(currentPriceAnchor.toFixed(2)),
-        fetch_limits: {
-          "15m": LIMIT_15M,
-          "30m": LIMIT_30M,
-          "1h": LIMIT_1H,
+        lookback_days: {
+          "15m": DAYS_15M,
+          "30m": DAYS_30M,
+          "1h": DAYS_1H,
         },
         coverage: {
           "15m": s15,
