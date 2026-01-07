@@ -68,7 +68,7 @@ app.use("/api/sectorcards-10m", sectorcards10mRouter); // ✅ sectorcards adapte
 app.use("/live", liveRouter);  // ✅ GitHub JSON proxies
 app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
 app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution shelves
-app.use("/api/v1", smzHierarchy);
+app.use("/api/v1/smz-hierarchy", smzHierarchy);
 
 
 // --- 404 / errors ---
