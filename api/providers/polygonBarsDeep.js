@@ -1,10 +1,11 @@
 // src/api/providers/polygonBarsDeep.js
 // Polygon OHLC fetcher (Aggregates v2) — DEEP HISTORY (SMZ JOBS ONLY)
 //
-// PURPOSE:
-// - Fetch deep history safely without impacting live chart performance.
-// - Uses pagination only when Polygon truncates results due to limit.
-// - Keeps your “stale window” prevention: sort=desc (newest first).
+// ✅ FIX (LOCKED):
+// - Use sort=asc for deep history so Polygon returns the full requested window.
+//   (Your browser test proved asc returns the full year; desc was collapsing to ~86 days.)
+// - No pagination needed for our target windows.
+// - Chart provider (polygonBars.js) stays untouched and fast (sort=desc).
 //
 // Supports:
 // getBarsFromPolygonDeep(sym, tf)
@@ -35,9 +36,6 @@ const TF_MAP = {
 const DEFAULT_DAYS = 180;
 const LIMIT = 50000;
 
-// Safety: prevent runaway loops
-const MAX_PAGES = 10;
-
 function endOfYesterdayUtcMs() {
   const d = new Date();
   d.setUTCHours(23, 59, 59, 999);
@@ -49,28 +47,15 @@ function buildUrl(symbol, mult, unit, startMs, endMs) {
   return (
     `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}` +
     `/range/${mult}/${encodeURIComponent(unit)}/${startMs}/${endMs}` +
-    `?adjusted=true&sort=desc&limit=${LIMIT}&apiKey=${encodeURIComponent(POLY_KEY)}`
+    `?adjusted=true&sort=asc&limit=${LIMIT}&apiKey=${encodeURIComponent(POLY_KEY)}`
   );
 }
 
-function dedupeByT(rows) {
-  const map = new Map();
-  for (const r of rows) {
-    if (!Number.isFinite(r?.t)) continue;
-    map.set(r.t, r);
-  }
-  return Array.from(map.values());
-}
-
-/**
- * Deep history fetch with safe pagination:
- * - Request window startMs..endMs, newest first (sort=desc)
- * - If results length hits LIMIT, shift endMs backward to (oldest.t - 1) and request again
- * - Stop when:
- *   - results < LIMIT, OR
- *   - endMs moves before startMs, OR
- *   - max pages reached
- */
+// Supports:
+// getBarsFromPolygonDeep(sym, tf)
+// getBarsFromPolygonDeep(sym, tf, days)
+// getBarsFromPolygonDeep(sym, tf, days, { mode })
+// getBarsFromPolygonDeep(sym, tf, { mode })
 export async function getBarsFromPolygonDeep(symbol, timeframe, daysOverride, opts) {
   let days = DEFAULT_DAYS;
   let options = opts && typeof opts === "object" ? opts : {};
@@ -93,69 +78,43 @@ export async function getBarsFromPolygonDeep(symbol, timeframe, daysOverride, op
   const unit = String(tfRaw.unit || "").trim();
   if (!unit) throw new Error(`Invalid TF unit for ${timeframe}`);
 
-  const endMs0 = mode === "closedday" ? endOfYesterdayUtcMs() : Date.now();
-  const startMs = endMs0 - days * 24 * 60 * 60 * 1000;
+  const endMs = mode === "closedday" ? endOfYesterdayUtcMs() : Date.now();
+  const startMs = endMs - days * 24 * 60 * 60 * 1000;
 
-  let endMs = endMs0;
-  let page = 0;
+  const url = buildUrl(symbol, mult, unit, startMs, endMs);
 
-  const collected = [];
-
-  while (page < MAX_PAGES && endMs > startMs) {
-    page++;
-
-    const url = buildUrl(symbol, mult, unit, startMs, endMs);
-
-    const r = await fetch(url);
-    if (!r.ok) {
-      const txt = await r.text().catch(() => "");
-      throw new Error(`Polygon ${r.status}: ${txt.slice(0, 220)}`);
-    }
-
-    const j = await r.json();
-
-    // ✅ One-line diagnostic (deep provider only)
-    console.log("[POLY-DEEP]", {
-      symbol,
-      timeframe,
-      days,
-      mode,
-      page,
-      resultsCount: j?.resultsCount ?? null,
-      count: j?.count ?? null,
-      queryCount: j?.queryCount ?? null,
-      returned: Array.isArray(j?.results) ? j.results.length : 0,
-    });
-
-    const rowsDesc = Array.isArray(j?.results) ? j.results : [];
-    if (!rowsDesc.length) break;
-
-    // Normalize to our internal shape
-    const normalized = rowsDesc
-      .map((x) => ({
-        t: x.t, // ms
-        o: x.o,
-        h: x.h,
-        l: x.l,
-        c: x.c,
-        v: x.v,
-      }))
-      .filter((x) => Number.isFinite(x.t));
-
-    collected.push(...normalized);
-
-    // If we didn’t hit the limit, we likely got the full window
-    if (rowsDesc.length < LIMIT) break;
-
-    // Move endMs backward to fetch earlier data
-    const oldest = normalized.reduce((min, x) => (x.t < min ? x.t : min), normalized[0].t);
-    endMs = Math.max(startMs, oldest - 1);
+  const r = await fetch(url);
+  if (!r.ok) {
+    const txt = await r.text().catch(() => "");
+    throw new Error(`Polygon ${r.status}: ${txt.slice(0, 220)}`);
   }
 
-  const deduped = dedupeByT(collected);
+  const j = await r.json();
 
-  // Sort ascending time (matches core provider behavior)
-  deduped.sort((a, b) => a.t - b.t);
+  // ✅ One-line diagnostic (deep provider only)
+  console.log("[POLY-DEEP-ASC]", {
+    symbol,
+    timeframe,
+    days,
+    mode,
+    resultsCount: j?.resultsCount ?? null,
+    count: j?.count ?? null,
+    queryCount: j?.queryCount ?? null,
+    returned: Array.isArray(j?.results) ? j.results.length : 0,
+  });
 
-  return deduped;
+  const rowsAsc = (Array.isArray(j?.results) ? j.results : [])
+    .map((x) => ({
+      t: x.t, // ms
+      o: x.o,
+      h: x.h,
+      l: x.l,
+      c: x.c,
+      v: x.v,
+    }))
+    .filter((x) => Number.isFinite(x.t))
+    // already asc from Polygon, but sort for safety
+    .sort((a, b) => a.t - b.t);
+
+  return rowsAsc;
 }
