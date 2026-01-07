@@ -1,7 +1,7 @@
 // src/api/providers/polygonBars.js
 // Polygon OHLC fetcher (Aggregates v2) — SINGLE SOURCE OF TRUTH
 //
-// HARD FIX:
+// HARD FIX (kept):
 // - Always request newest bars first (sort=desc) so we never get stale windows.
 // - Then reverse to ascending in code.
 // This prevents the “15m is months old” problem that broke shelves.
@@ -10,7 +10,8 @@
 // getBarsFromPolygon(sym, tf)
 // getBarsFromPolygon(sym, tf, days)
 // getBarsFromPolygon(sym, tf, days, { mode })
-// getBarsFromPolygon(sym, tf, { mode })  (days default)
+// getBarsFromPolygon(sym, tf, { mode })            (days default)
+// getBarsFromPolygon(sym, tf, { days, mode })      ✅ new explicit option
 //
 // mode:
 // - "intraday" (default) -> ends at Date.now()
@@ -22,17 +23,19 @@ const POLY_KEY = process.env.POLYGON_API_KEY;
 if (!POLY_KEY) throw new Error("POLYGON_API_KEY is missing");
 
 const TF_MAP = {
-  "1m":  { mult: 1,  unit: "minute" },
-  "5m":  { mult: 5,  unit: "minute" },
+  "1m": { mult: 1, unit: "minute" },
+  "5m": { mult: 5, unit: "minute" },
   "10m": { mult: 10, unit: "minute" },
   "15m": { mult: 15, unit: "minute" },
   "30m": { mult: 30, unit: "minute" },
-  "1h":  { mult: 1,  unit: "hour" },
-  "4h":  { mult: 4,  unit: "hour" },
-  "1d":  { mult: 1,  unit: "day" },
+  "1h": { mult: 1, unit: "hour" },
+  "4h": { mult: 4, unit: "hour" },
+  "1d": { mult: 1, unit: "day" },
 };
 
-const DEFAULT_DAYS = 60;
+// ✅ IMPORTANT: default lookback should be large enough for SMZ structure
+// (You can change this later, but this prevents “only 60 days” by accident.)
+const DEFAULT_DAYS = 180;
 
 function endOfYesterdayUtcMs() {
   const d = new Date();
@@ -41,26 +44,26 @@ function endOfYesterdayUtcMs() {
   return d.getTime();
 }
 
-function ms(x) {
-  const n = Number(x ?? 0);
-  return n > 1e12 ? n : n * 1000;
-}
-
 // Supports:
 // getBarsFromPolygon(sym, tf)
 // getBarsFromPolygon(sym, tf, days)
 // getBarsFromPolygon(sym, tf, days, { mode })
 // getBarsFromPolygon(sym, tf, { mode })
+// getBarsFromPolygon(sym, tf, { days, mode }) ✅
 export async function getBarsFromPolygon(symbol, timeframe, daysOverride, opts) {
   let days = DEFAULT_DAYS;
   let options = opts && typeof opts === "object" ? opts : {};
 
+  // ✅ If caller passes an object as the 3rd arg, treat it as options
+  // and allow { days } inside it.
   if (daysOverride && typeof daysOverride === "object" && !Array.isArray(daysOverride)) {
     options = daysOverride;
+
+    const d = Number(options?.days);
+    if (Number.isFinite(d) && d > 0) days = Math.floor(d);
   } else if (Number.isFinite(daysOverride) && daysOverride > 0) {
-    // Note: callers sometimes pass “bars” counts; we treat this as DAYS.
-    // Your jobs already work with this assumption.
-    days = daysOverride;
+    // ✅ Caller explicitly passed days as a number
+    days = Math.floor(daysOverride);
   }
 
   const mode = String(options?.mode || "intraday").toLowerCase();
@@ -79,6 +82,16 @@ export async function getBarsFromPolygon(symbol, timeframe, daysOverride, opts) 
   const endMs = mode === "closedday" ? endOfYesterdayUtcMs() : Date.now();
   const startMs = endMs - days * 24 * 60 * 60 * 1000;
 
+  // ✅ TEMP DEBUG (leave for now; remove after we confirm)
+  console.log("[POLY] getBarsFromPolygon", {
+    symbol,
+    timeframe,
+    days,
+    mode,
+    start: new Date(startMs).toISOString(),
+    end: new Date(endMs).toISOString(),
+  });
+
   // ✅ Critical: request newest first so we never get stale “early window”
   const url =
     `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}` +
@@ -94,7 +107,7 @@ export async function getBarsFromPolygon(symbol, timeframe, daysOverride, opts) 
   const j = await r.json();
   const rowsDesc = Array.isArray(j?.results) ? j.results : [];
 
-  // Convert to our internal shape, then reverse to ascending time
+  // Convert to our internal shape, then sort ascending
   const rowsAsc = rowsDesc
     .map((x) => ({
       t: x.t, // ms
