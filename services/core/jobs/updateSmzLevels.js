@@ -1,38 +1,63 @@
-// src/services/core/jobs/updateSmzLevels.js
-// Institutional Smart Money Zones Job — writes ONLY smz-levels.json (yellow)
+// src/services/core/logic/smzEngine.js
+// Institutional SMZ detection + scoring + TradingView-style overlap reduction.
 //
-// Efficient lookback plan (LOCKED):
-// - 1h = 365 days
-// - 30m = 180 days
-// - 4h is synthesized from 1h (so effectively 365 days)
+// MODE (current game plan):
+// 1) Detect + score globally across full provided history
+// 2) Consolidate globally into TradingView-style regimes:
+//    - overlap merge
+//    - gap merge (tiny gaps only; NO "touch chaining")
+//    - cluster union (loose overlap)
+// 3) Filter regimes to currentPrice ± 40
+// 4) Select ALL regimes >= 90 (no max cap)
+// 5) Guardrail if empty: >=85, else top N
 //
-// Uses DEEP provider (jobs only), chart provider remains untouched.
+// Scoring delegated to smzInstitutionalRubric.js
 
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
-import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
-import { getBarsFromPolygonDeep } from "../../../api/providers/polygonBarsDeep.js";
+const CFG = {
+  // Output filter band (LOCKED)
+  WINDOW_POINTS: 40,
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+  // Primary institutional band (LOCKED target)
+  MIN_STRENGTH_PRIMARY: 90,
 
-const OUTFILE = path.resolve(__dirname, "../data/smz-levels.json");
+  // Guardrail fallback threshold
+  MIN_STRENGTH_FALLBACK: 85,
 
-// ✅ Lookback days (LOCKED)
-const DAYS_30M = 180;
-const DAYS_1H = 365;
+  // If still empty, return top N in band so output is never empty
+  FALLBACK_TOP_N: 12,
 
-// Normalize Polygon aggregate bars to { time(sec), open, high, low, close, volume }
-function normalizeBars(raw) {
-  if (!Array.isArray(raw)) return [];
-  return raw
+  // Candidate strictness
+  MIN_TOUCHES_1H: 5,
+  MIN_TOUCHES_4H: 3,
+
+  // Bucket sizing from ATR
+  BUCKET_ATR_MULT_1H: 1.0,
+  BUCKET_ATR_MULT_4H: 1.2,
+
+  // Merge/cluster controls (TradingView-style)
+  MERGE_OVERLAP: 0.55,
+  CLUSTER_OVERLAP: 0.30,
+
+  // ✅ GAP MERGE (TradingView ladder-killer)
+  // IMPORTANT: merges ONLY small POSITIVE gaps (gap > 0), never "touching"
+  GAP_POINTS: 1.75,
+  BRIDGE_POINTS: 2.50,
+  STRONG_SCORE: 92,
+};
+
+const GRID_STEP = 0.25;
+
+function round2(x) { return Math.round(x * 100) / 100; }
+
+function normalizeBars(arr) {
+  return (Array.isArray(arr) ? arr : [])
     .map((b) => {
-      const tms = Number(b.t ?? b.time ?? 0); // Polygon often ms
-      const t = tms > 1e12 ? Math.floor(tms / 1000) : tms; // -> sec
+      const rawT = Number(b.t ?? b.time ?? 0);
+      const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT;
       return {
-        time: t,
+        time,
         open: Number(b.o ?? b.open ?? 0),
         high: Number(b.h ?? b.high ?? 0),
         low: Number(b.l ?? b.low ?? 0),
@@ -40,140 +65,372 @@ function normalizeBars(raw) {
         volume: Number(b.v ?? b.volume ?? 0),
       };
     })
-    .filter(
-      (b) =>
-        Number.isFinite(b.time) &&
-        Number.isFinite(b.open) &&
-        Number.isFinite(b.high) &&
-        Number.isFinite(b.low) &&
-        Number.isFinite(b.close)
+    .filter((b) =>
+      Number.isFinite(b.time) &&
+      Number.isFinite(b.open) &&
+      Number.isFinite(b.high) &&
+      Number.isFinite(b.low) &&
+      Number.isFinite(b.close)
     )
     .sort((a, b) => a.time - b.time);
 }
 
-// Build synthetic 4H bars from 1H bars
-function aggregateTo4h(bars1h) {
-  if (!Array.isArray(bars1h) || bars1h.length < 8) return [];
-  const out = [];
-  let cur = null;
+function validBar(b) {
+  return b && Number.isFinite(b.high) && Number.isFinite(b.low) && Number.isFinite(b.close);
+}
 
-  for (const b of bars1h) {
-    const block = Math.floor(b.time / (4 * 3600)) * (4 * 3600);
-    if (!cur || cur.time !== block) {
-      if (cur) out.push(cur);
-      cur = {
-        time: block,
-        open: b.open,
-        high: b.high,
-        low: b.low,
-        close: b.close,
-        volume: b.volume ?? 0,
-      };
-    } else {
-      cur.high = Math.max(cur.high, b.high);
-      cur.low = Math.min(cur.low, b.low);
-      cur.close = b.close;
-      cur.volume += b.volume ?? 0;
+function computeATR(candles, period = 14) {
+  if (!Array.isArray(candles) || candles.length < period + 2) return 1;
+  const trs = [];
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i], p = candles[i - 1];
+    if (!validBar(c) || !validBar(p)) continue;
+    const tr = Math.max(
+      c.high - c.low,
+      Math.abs(c.high - p.close),
+      Math.abs(c.low - p.close)
+    );
+    trs.push(tr);
+  }
+  const slice = trs.slice(-period);
+  const atr = slice.reduce((a, b) => a + b, 0) / Math.max(1, slice.length);
+  return atr > 0 ? atr : 1;
+}
+
+function snapDown(x, step) { return Math.floor(x / step) * step; }
+function snapUp(x, step) { return Math.ceil(x / step) * step; }
+
+function overlapPct(a, b) {
+  const lo = Math.max(a.low, b.low);
+  const hi = Math.min(a.high, b.high);
+  const inter = hi - lo;
+  if (inter <= 0) return 0;
+  const denom = Math.min(a.high - a.low, b.high - b.low);
+  return denom > 0 ? inter / denom : 0;
+}
+
+function overlapsLoose(a, b, threshold) {
+  return overlapPct({ low: a._low, high: a._high }, { low: b._low, high: b._high }) >= threshold;
+}
+
+function minLow(candles) {
+  let m = Infinity;
+  for (const c of candles) if (validBar(c)) m = Math.min(m, c.low);
+  return m === Infinity ? null : m;
+}
+
+function maxHigh(candles) {
+  let m = -Infinity;
+  for (const c of candles) if (validBar(c)) m = Math.max(m, c.high);
+  return m === -Infinity ? null : m;
+}
+
+// GLOBAL bucket candidates across full price range
+function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
+  const loAll = minLow(candles);
+  const hiAll = maxHigh(candles);
+  if (!Number.isFinite(loAll) || !Number.isFinite(hiAll) || hiAll <= loAll) return [];
+
+  const start = snapDown(loAll, GRID_STEP);
+  const end = snapUp(hiAll, GRID_STEP);
+
+  const step = Math.max(GRID_STEP, snapUp(bucketSize, GRID_STEP));
+
+  const buckets = [];
+  for (let lo = start; lo < end; lo += step) {
+    buckets.push({ tf, low: lo, high: lo + step, touches: 0 });
+  }
+
+  for (const c of candles) {
+    if (!validBar(c)) continue;
+    for (const b of buckets) {
+      if (c.high >= b.low && c.low <= b.high) b.touches++;
     }
   }
-  if (cur) out.push(cur);
+
+  const out = [];
+  for (const b of buckets) {
+    if (b.touches >= minTouches) {
+      out.push({ tf, price_low: round2(b.low), price_high: round2(b.high) });
+    }
+  }
   return out;
 }
 
-function maxHigh(bars) {
-  if (!Array.isArray(bars) || !bars.length) return null;
-  let m = -Infinity;
-  for (const b of bars) if (Number.isFinite(b.high)) m = Math.max(m, b.high);
-  return m === -Infinity ? null : Number(m.toFixed(2));
-}
+// Tight merge similar slices (overlap-only)
+function mergeByOverlap(zones, threshold) {
+  const sorted = zones.slice().sort((x, y) => x._low - y._low);
+  const out = [];
 
-function spanInfo(label, bars) {
-  if (!Array.isArray(bars) || bars.length === 0) {
-    console.log(`[SMZ] COVERAGE ${label}: none`);
-    return;
-  }
-  const first = bars[0].time;
-  const last = bars[bars.length - 1].time;
-  const days = (last - first) / 86400;
+  for (const z of sorted) {
+    if (!out.length) { out.push(z); continue; }
 
-  console.log(
-    `[SMZ] COVERAGE ${label}:`,
-    "bars =", bars.length,
-    "| from =", new Date(first * 1000).toISOString(),
-    "| to =", new Date(last * 1000).toISOString(),
-    "| spanDays =", days.toFixed(1)
-  );
-}
+    const last = out[out.length - 1];
+    const ov = overlapPct({ low: last._low, high: last._high }, { low: z._low, high: z._high });
 
-async function main() {
-  try {
-    console.log("[SMZ] Fetching multi-TF bars (DEEP)…");
+    if (ov >= threshold) {
+      const mergedLow = round2(Math.min(last._low, z._low));
+      const mergedHigh = round2(Math.max(last._high, z._high));
+      const strength = Math.max(Number(last.strength ?? 0), Number(z.strength ?? 0));
 
-    const [bars30mRaw, bars1hRaw] = await Promise.all([
-      getBarsFromPolygonDeep("SPY", "30m", DAYS_30M),
-      getBarsFromPolygonDeep("SPY", "1h", DAYS_1H),
-    ]);
+      const members = []
+        .concat(last.details?.members ?? [last.details?.id].filter(Boolean))
+        .concat(z.details?.members ?? [z.details?.id].filter(Boolean));
 
-    const bars30m = normalizeBars(bars30mRaw);
-    const bars1h = normalizeBars(bars1hRaw);
-    const bars4h = aggregateTo4h(bars1h);
+      const tfs = new Set([...(last.details?.tfs ?? []), last.details?.tf, ...(z.details?.tfs ?? []), z.details?.tf].filter(Boolean));
 
-    console.log("[SMZ] 30m bars:", bars30m.length);
-    console.log("[SMZ] 1h  bars:", bars1h.length);
-
-    spanInfo("30m", bars30m);
-    spanInfo("1h", bars1h);
-    spanInfo("4h(synth)", bars4h);
-
-    console.log(
-      "[SMZ] maxHigh 30m:",
-      maxHigh(bars30m),
-      "1h:",
-      maxHigh(bars1h),
-      "4h(synth):",
-      maxHigh(bars4h)
-    );
-
-    console.log("[SMZ] Running Institutional engine…");
-    const zones = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
-    console.log("[SMZ] Institutional zones generated:", zones.length);
-
-    const payload = {
-      ok: true,
-      meta: {
-        generated_at_utc: new Date().toISOString(),
-        lookback_days: { "30m": DAYS_30M, "1h": DAYS_1H, "4h(synth)": DAYS_1H },
-      },
-      levels: zones,
-    };
-
-    fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
-    fs.writeFileSync(OUTFILE, JSON.stringify(payload, null, 2), "utf8");
-
-    console.log("[SMZ] Saved institutional zones to:", OUTFILE);
-    console.log("[SMZ] Job complete.");
-  } catch (err) {
-    console.error("[SMZ] FAILED:", err);
-
-    try {
-      const fallback = {
-        ok: true,
-        levels: [],
-        note: "SMZ institutional job error, no levels generated this run",
+      out[out.length - 1] = {
+        ...last,
+        _low: mergedLow,
+        _high: mergedHigh,
+        price: round2((mergedLow + mergedHigh) / 2),
+        priceRange: [mergedHigh, mergedLow],
+        strength,
+        details: {
+          ...last.details,
+          members: Array.from(new Set(members)),
+          tfs: Array.from(tfs),
+        },
       };
-      fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
-      fs.writeFileSync(OUTFILE, JSON.stringify(fallback, null, 2), "utf8");
-      console.log("[SMZ] Wrote fallback empty smz-levels.json");
-    } catch (inner) {
-      console.error("[SMZ] Also failed to write fallback smz-levels.json:", inner);
+    } else {
+      out.push(z);
+    }
+  }
+  return out;
+}
+
+// ✅ Gap merge pass (TradingView ladder-killer)
+// IMPORTANT: we merge ONLY when there is a SMALL POSITIVE GAP (gap > 0).
+// We DO NOT merge "touching" slices (gap == 0), because that chains across the entire grid.
+function mergeByGap(zones, gapPts, bridgePts, strongScore) {
+  const sorted = zones.slice().sort((a, b) => a._low - b._low);
+  const out = [];
+
+  for (const z of sorted) {
+    if (!out.length) { out.push(z); continue; }
+
+    const last = out[out.length - 1];
+
+    const lastStrength = Number(last.strength ?? 0);
+    const zStrength = Number(z.strength ?? 0);
+
+    const gap = round2(z._low - last._high); // positive means a real empty space
+
+    const smallGap = gap > 0 && gap <= gapPts;
+
+    const strongBridge =
+      gap > 0 &&
+      gap <= bridgePts &&
+      lastStrength >= strongScore &&
+      zStrength >= strongScore;
+
+    if (smallGap || strongBridge) {
+      const mergedLow = round2(Math.min(last._low, z._low));
+      const mergedHigh = round2(Math.max(last._high, z._high));
+      const strength = Math.max(lastStrength, zStrength);
+
+      const members = []
+        .concat(last.details?.members ?? [last.details?.id].filter(Boolean))
+        .concat(z.details?.members ?? [z.details?.id].filter(Boolean));
+
+      const tfs = new Set([...(last.details?.tfs ?? []), last.details?.tf, ...(z.details?.tfs ?? []), z.details?.tf].filter(Boolean));
+
+      out[out.length - 1] = {
+        ...last,
+        _low: mergedLow,
+        _high: mergedHigh,
+        price: round2((mergedLow + mergedHigh) / 2),
+        priceRange: [mergedHigh, mergedLow],
+        strength,
+        details: {
+          ...last.details,
+          members: Array.from(new Set(members)),
+          tfs: Array.from(tfs),
+        },
+      };
+    } else {
+      out.push(z);
+    }
+  }
+
+  return out;
+}
+
+// TradingView-style cluster union: merge overlapping zones into one band per cluster
+function clusterUnionBands(zones) {
+  const input = zones.slice().sort((a, b) => a._low - b._low);
+  const clusters = [];
+
+  for (const z of input) {
+    let placed = false;
+    for (const c of clusters) {
+      if (c.members.some((m) => overlapsLoose(m, z, CFG.CLUSTER_OVERLAP))) {
+        c.members.push(z);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) clusters.push({ members: [z] });
+  }
+
+  const bands = clusters.map((c, idx) => {
+    let low = Infinity;
+    let high = -Infinity;
+    let strength = 0;
+
+    const memberIds = [];
+    const tfs = new Set();
+    let hasClear4H = false;
+
+    // best member for debugging
+    let bestMemberId = null;
+    let bestMemberTf = null;
+    let bestStrength = -Infinity;
+
+    for (const m of c.members) {
+      low = Math.min(low, m._low);
+      high = Math.max(high, m._high);
+
+      const s = Number(m.strength ?? 0);
+      strength = Math.max(strength, s);
+
+      if (s > bestStrength || (s === bestStrength && m.details?.tf === "4h")) {
+        bestStrength = s;
+        bestMemberId = m.details?.id ?? null;
+        bestMemberTf = m.details?.tf ?? null;
+      }
+
+      if (m.details?.id) memberIds.push(m.details.id);
+      if (m.details?.tf) tfs.add(m.details.tf);
+      if (Array.isArray(m.details?.tfs)) m.details.tfs.forEach((x) => tfs.add(x));
+      if (m.details?.flags?.hasClear4H) hasClear4H = true;
+      if (Array.isArray(m.details?.members)) memberIds.push(...m.details.members);
     }
 
-    process.exitCode = 1;
+    low = round2(low);
+    high = round2(high);
+
+    return {
+      type: "institutional",
+      price: round2((low + high) / 2),
+      priceRange: [high, low],
+      strength,
+      details: {
+        id: `smz_band_${idx}`,
+        tf: "mixed",
+        bestMemberId,
+        bestMemberTf,
+        members: Array.from(new Set(memberIds)),
+        tfs: Array.from(tfs),
+        flags: { hasClear4H },
+      },
+      _low: low,
+      _high: high,
+    };
+  });
+
+  bands.sort((a, b) => b.strength - a.strength);
+  return bands;
+}
+
+function filterToBand(zones, currentPrice, windowPts) {
+  const loBand = currentPrice - windowPts;
+  const hiBand = currentPrice + windowPts;
+  // keep overlap logic (best choice)
+  return zones.filter((z) => z._high >= loBand && z._low <= hiBand);
+}
+
+export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
+  const b30 = normalizeBars(bars30m);
+  const b1h = normalizeBars(bars1h);
+  const b4h = normalizeBars(bars4h);
+
+  const currentPrice =
+    b30.at(-1)?.close ??
+    b1h.at(-1)?.close ??
+    b4h.at(-1)?.close ??
+    null;
+
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) return [];
+
+  const atr1h = computeATR(b1h, 14);
+  const atr4h = computeATR(b4h, 14);
+
+  const bucket1h = Math.max(0.50, atr1h * CFG.BUCKET_ATR_MULT_1H);
+  const bucket4h = Math.max(0.75, atr4h * CFG.BUCKET_ATR_MULT_4H);
+
+  const cand1h = buildBucketCandidatesGlobal(b1h, bucket1h, CFG.MIN_TOUCHES_1H, "1h");
+  const cand4h = buildBucketCandidatesGlobal(b4h, bucket4h, CFG.MIN_TOUCHES_4H, "4h");
+
+  const scored = [...cand1h, ...cand4h]
+    .map((z, idx) => {
+      const lo = z.price_low;
+      const hi = z.price_high;
+
+      const s = scoreInstitutional({
+        lo,
+        hi,
+        bars1h: b1h,
+        bars4h: b4h,
+        currentPrice,
+      });
+
+      return {
+        type: "institutional",
+        price: round2((lo + hi) / 2),
+        priceRange: [round2(hi), round2(lo)],
+        strength: s.scoreTotal,
+        details: {
+          id: `smz_${z.tf}_${idx}`,
+          tf: z.tf,
+          parts: s.parts,
+          flags: s.flags,
+          facts: s.facts,
+        },
+        _low: lo,
+        _high: hi,
+      };
+    })
+    .sort((a, b) => b.strength - a.strength);
+
+  // ✅ Global consolidation (NO proximity filtering here)
+  const overlapMerged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
+  const gapMerged = mergeByGap(overlapMerged, CFG.GAP_POINTS, CFG.BRIDGE_POINTS, CFG.STRONG_SCORE);
+  const regimesGlobal = clusterUnionBands(gapMerged);
+
+  // ✅ Proximity filter ONLY AFTER regimes exist (locked rule)
+  const regimesInBand = filterToBand(regimesGlobal, currentPrice, CFG.WINDOW_POINTS);
+
+  // --- PRIMARY selection: all >=90 regimes ---
+  let selected = regimesInBand.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_PRIMARY);
+  let selectionMode = `>=${CFG.MIN_STRENGTH_PRIMARY}`;
+
+  // ✅ GUARDRAIL: if empty, relax to >=85
+  if (selected.length === 0) {
+    selected = regimesInBand.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_FALLBACK);
+    selectionMode = `>=${CFG.MIN_STRENGTH_FALLBACK}`;
   }
-}
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main();
-}
+  // ✅ GUARDRAIL: if still empty, return top N in-band by score
+  if (selected.length === 0) {
+    selected = regimesInBand
+      .slice()
+      .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0))
+      .slice(0, CFG.FALLBACK_TOP_N);
+    selectionMode = `top${CFG.FALLBACK_TOP_N}`;
+  }
 
-export default main;
+  selected.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
+
+  // Contract-safe output
+  return selected.map((z) => ({
+    type: z.type,
+    price: z.price,
+    priceRange: z.priceRange,
+    strength: z.strength,
+    details: {
+      ...z.details,
+      selectionMode,
+    },
+  }));
+}
