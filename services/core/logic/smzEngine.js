@@ -4,13 +4,15 @@
 // LOCKED GAME PLAN:
 // 1) Detect + score globally across full provided history (no proximity in discovery)
 // 2) Create preliminary regimes (bands) from scored candidates (overlap + clustering)
-// 3) Apply proximity filter AFTER regimes exist: currentPrice ± 40
-// 4) Select regimes: >=90 (fallback >=85, else top N)
+// 3) (Keep WINDOW_POINTS=40 in config for later UI use, but DO NOT filter by price right now)
+// 4) Select regimes by score threshold (currently >=75)
 // 5) RE-ANCHOR each selected regime using:
 //    - 1H truth: strong exit = 2 consecutive 1H bars fully outside zone on same side
 //    - last consolidation block BEFORE exit (start at 10 bars, auto-adjust 6–24)
 //    - refine edges using 30m bars within the same time window
-// 6) Enforce DISJOINT output (no overlaps) to prevent “one yellow blob”
+//    - IMPORTANT: exclude the impulse/exit candle from defining consolidation bounds
+// 6) Keep multiple zones (B) and LABEL them: structure / pocket / micro
+//    Also compute negotiationMid (median close) for pocket zones.
 //
 // STOP CONDITION (LOCKED):
 // - Timeframe of truth: 1H
@@ -21,12 +23,14 @@
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
-  // Output band around current price (LOCKED)
+  // Keep for later UI (not used for selection right now)
   WINDOW_POINTS: 40,
 
-  // Selection thresholds (LOCKED)
+  // Legacy thresholds kept for later (not used for selection right now)
   MIN_STRENGTH_PRIMARY: 90,
   MIN_STRENGTH_FALLBACK: 85,
+
+  // Guardrail
   FALLBACK_TOP_N: 12,
 
   // Candidate strictness
@@ -44,26 +48,30 @@ const CFG = {
   // Stop condition (LOCKED)
   EXIT_CONSEC_BARS_1H: 2,
 
-  // Anchor-window (your decision: start 10, allow 6–24)
+  // Anchor-window (start 10, allow 6–24)
   ANCHOR_START_BARS_1H: 10,
   ANCHOR_MIN_BARS_1H: 6,
   ANCHOR_MAX_BARS_1H: 24,
 
-  // Consolidation quality guardrails (behavior proxy, not “indicator trading”)
-  // These only help the engine decide how far back to include bars.
-  AVG_RANGE_ATR_MAX: 1.25,  // average bar range vs ATR
-  WIDTH_ATR_MAX: 3.25,      // total consolidation height vs ATR
+  // Consolidation quality guardrails (behavior proxy)
+  AVG_RANGE_ATR_MAX: 1.25,
+  WIDTH_ATR_MAX: 3.25,
+
+  // Current selection rule (locked for now): find the right zones first
+  MIN_SCORE_GLOBAL: 75,
 };
 
 const GRID_STEP = 0.25;
 
-function round2(x) { return Math.round(x * 100) / 100; }
+function round2(x) {
+  return Math.round(x * 100) / 100;
+}
 
 function normalizeBars(arr) {
   return (Array.isArray(arr) ? arr : [])
     .map((b) => {
       const rawT = Number(b.t ?? b.time ?? 0);
-      const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT; // ms->sec if needed
+      const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT; // ms->sec
       return {
         time,
         open: Number(b.o ?? b.open ?? 0),
@@ -73,12 +81,13 @@ function normalizeBars(arr) {
         volume: Number(b.v ?? b.volume ?? 0),
       };
     })
-    .filter((b) =>
-      Number.isFinite(b.time) &&
-      Number.isFinite(b.open) &&
-      Number.isFinite(b.high) &&
-      Number.isFinite(b.low) &&
-      Number.isFinite(b.close)
+    .filter(
+      (b) =>
+        Number.isFinite(b.time) &&
+        Number.isFinite(b.open) &&
+        Number.isFinite(b.high) &&
+        Number.isFinite(b.low) &&
+        Number.isFinite(b.close)
     )
     .sort((a, b) => a.time - b.time);
 }
@@ -91,13 +100,10 @@ function computeATR(candles, period = 14) {
   if (!Array.isArray(candles) || candles.length < period + 2) return 1;
   const trs = [];
   for (let i = 1; i < candles.length; i++) {
-    const c = candles[i], p = candles[i - 1];
+    const c = candles[i],
+      p = candles[i - 1];
     if (!validBar(c) || !validBar(p)) continue;
-    const tr = Math.max(
-      c.high - c.low,
-      Math.abs(c.high - p.close),
-      Math.abs(c.low - p.close)
-    );
+    const tr = Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
     trs.push(tr);
   }
   const slice = trs.slice(-period);
@@ -105,14 +111,19 @@ function computeATR(candles, period = 14) {
   return atr > 0 ? atr : 1;
 }
 
-function snapDown(x, step) { return Math.floor(x / step) * step; }
-function snapUp(x, step) { return Math.ceil(x / step) * step; }
+function snapDown(x, step) {
+  return Math.floor(x / step) * step;
+}
+function snapUp(x, step) {
+  return Math.ceil(x / step) * step;
+}
 
 function minLow(candles) {
   let m = Infinity;
   for (const c of candles) if (validBar(c)) m = Math.min(m, c.low);
   return m === Infinity ? null : m;
 }
+
 function maxHigh(candles) {
   let m = -Infinity;
   for (const c of candles) if (validBar(c)) m = Math.max(m, c.high);
@@ -129,11 +140,19 @@ function overlapPct(a, b) {
 }
 
 function overlapsLoose(a, b, threshold) {
-  return overlapPct({ low: a._low, high: a._high }, { low: b._low, high: b._high }) >= threshold;
+  return (
+    overlapPct({ low: a._low, high: a._high }, { low: b._low, high: b._high }) >= threshold
+  );
 }
 
 function barOverlapsZone(bar, lo, hi) {
-  return bar && Number.isFinite(bar.high) && Number.isFinite(bar.low) && (bar.high >= lo && bar.low <= hi);
+  return (
+    bar &&
+    Number.isFinite(bar.high) &&
+    Number.isFinite(bar.low) &&
+    bar.high >= lo &&
+    bar.low <= hi
+  );
 }
 
 function barOutsideSide(bar, lo, hi) {
@@ -163,18 +182,13 @@ function exitConfirmed1h(bars1h, lo, hi, consec = 2) {
 
   for (let j = idx + 1; j < bars1h.length && exitBars < consec; j++) {
     const s = barOutsideSide(bars1h[j], lo, hi);
-    if (!s) break; // overlap/re-entry: negotiation continues
+    if (!s) break; // overlap/re-entry
     if (!side) side = s;
     if (s !== side) break; // must continue same direction
     exitBars++;
   }
 
-  return {
-    lastTouchIndex: idx,
-    confirmed: exitBars >= consec,
-    side,
-    exitBars,
-  };
+  return { lastTouchIndex: idx, confirmed: exitBars >= consec, side, exitBars };
 }
 
 // GLOBAL bucket candidates across full price range
@@ -216,7 +230,9 @@ function mergeTwoZones(a, b) {
     .concat(a.details?.members ?? [a.details?.id].filter(Boolean))
     .concat(b.details?.members ?? [b.details?.id].filter(Boolean));
 
-  const tfs = new Set([...(a.details?.tfs ?? []), a.details?.tf, ...(b.details?.tfs ?? []), b.details?.tf].filter(Boolean));
+  const tfs = new Set(
+    [ ...(a.details?.tfs ?? []), a.details?.tf, ...(b.details?.tfs ?? []), b.details?.tf ].filter(Boolean)
+  );
 
   return {
     ...a,
@@ -302,18 +318,11 @@ function clusterUnionBands(zones) {
     };
   });
 
-  // strongest first
   bands.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
   return bands;
 }
 
-function filterToBand(zones, currentPrice, windowPts) {
-  const loBand = currentPrice - windowPts;
-  const hiBand = currentPrice + windowPts;
-  return zones.filter((z) => z._high >= loBand && z._low <= hiBand);
-}
-
-// ---------- Anchor-window extraction (THE KEY CHANGE) ----------
+/* ---------------- Anchor-window extraction ---------------- */
 
 function sliceBarsByIndex(bars, startIdx, endIdx) {
   if (!Array.isArray(bars) || bars.length === 0) return [];
@@ -345,10 +354,6 @@ function rangeHighLow(bars) {
   return { lo: round2(lo), hi: round2(hi), width: round2(hi - lo) };
 }
 
-// Decide best consolidation window length (6–24), starting at 10.
-// We pick the tightest (smallest width) window that still looks like consolidation:
-// - avg bar range <= AVG_RANGE_ATR_MAX * ATR
-// - total width <= WIDTH_ATR_MAX * ATR
 function chooseConsolidationWindow(bars1h, endIdx, atr1h) {
   const minL = CFG.ANCHOR_MIN_BARS_1H;
   const maxL = CFG.ANCHOR_MAX_BARS_1H;
@@ -370,7 +375,6 @@ function chooseConsolidationWindow(bars1h, endIdx, atr1h) {
 
     if (!avgOk || !widthOk) continue;
 
-    // Prefer the tightest width; tie-breaker: closer to start-at-10
     const score = rh.width;
     const bias = Math.abs(L - CFG.ANCHOR_START_BARS_1H) * 0.01;
     const total = score + bias;
@@ -380,7 +384,6 @@ function chooseConsolidationWindow(bars1h, endIdx, atr1h) {
     }
   }
 
-  // If nothing passes guardrails, fall back to exactly 10 bars (clamped)
   if (!best) {
     const L = Math.min(Math.max(CFG.ANCHOR_START_BARS_1H, minL), maxL);
     const startIdx = Math.max(0, endIdx - (L - 1));
@@ -393,7 +396,6 @@ function chooseConsolidationWindow(bars1h, endIdx, atr1h) {
   return best;
 }
 
-// Refine zone edges using 30m bars within the anchor time window
 function refineWith30m(bars30m, startTimeSec, endTimeSec) {
   if (!Array.isArray(bars30m) || bars30m.length === 0) return null;
   const subset = bars30m.filter((b) => validBar(b) && b.time >= startTimeSec && b.time <= endTimeSec);
@@ -401,14 +403,12 @@ function refineWith30m(bars30m, startTimeSec, endTimeSec) {
   return rh ? { lo: rh.lo, hi: rh.hi } : null;
 }
 
-// Re-anchor a regime: use exit, then find last consolidation block pre-exit, refine with 30m.
 function reanchorRegime(regime, bars1h, bars30m, atr1h) {
   const lo0 = regime._low;
   const hi0 = regime._high;
 
   const exit = exitConfirmed1h(bars1h, lo0, hi0, CFG.EXIT_CONSEC_BARS_1H);
 
-  // If no clean exit, keep as-is (fallback behavior)
   if (!exit.confirmed || exit.lastTouchIndex < 0) {
     return {
       ...regime,
@@ -422,7 +422,7 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
     };
   }
 
-  // Anchor window ends at last touch (the final negotiation bar)
+  // ✅ CRITICAL FIX: exclude the impulse/exit candle from defining the consolidation range
   const anchorEnd = Math.max(0, exit.lastTouchIndex - 1);
 
   const chosen = chooseConsolidationWindow(bars1h, anchorEnd, atr1h);
@@ -442,11 +442,9 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
   const startTime = bars1h[chosen.startIdx]?.time ?? null;
   const endTime = bars1h[chosen.endIdx]?.time ?? null;
 
-  // 1H anchor bounds
   let newLo = chosen.lo;
   let newHi = chosen.hi;
 
-  // 30m refine (if we have times)
   if (Number.isFinite(startTime) && Number.isFinite(endTime)) {
     const refined = refineWith30m(bars30m, startTime, endTime);
     if (refined) {
@@ -455,7 +453,6 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
     }
   }
 
-  // If something went weird, keep original
   if (!(Number.isFinite(newLo) && Number.isFinite(newHi)) || newHi <= newLo) {
     return {
       ...regime,
@@ -493,54 +490,13 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
   };
 }
 
-// Enforce disjoint final output (no overlaps)
-function makeDisjoint(bands) {
-  const sorted = bands.slice().sort((a, b) => a._low - b._low);
-  const out = [];
-
-  for (const z of sorted) {
-    if (!out.length) { out.push({ ...z }); continue; }
-    const last = out[out.length - 1];
-
-    if (z._low < last._high) {
-      const mid = round2((z._low + last._high) / 2);
-
-      const newLastHigh = mid;
-      const newCurLow = mid;
-
-      const lastWidth = newLastHigh - last._low;
-      const curWidth = z._high - newCurLow;
-
-      // if trimming collapses one zone, keep stronger
-      if (lastWidth <= 0 || curWidth <= 0) {
-        const keepLast = Number(last.strength ?? 0) >= Number(z.strength ?? 0);
-        if (keepLast) continue;
-        out[out.length - 1] = { ...z };
-        continue;
-      }
-
-      last._high = newLastHigh;
-      last.priceRange = [round2(newLastHigh), round2(last._low)];
-      last.price = round2((last._low + newLastHigh) / 2);
-
-      const cur = { ...z };
-      cur._low = newCurLow;
-      cur.priceRange = [round2(cur._high), round2(newCurLow)];
-      cur.price = round2((newCurLow + cur._high) / 2);
-
-      out.push(cur);
-    } else {
-      out.push({ ...z });
-    }
-  }
-
-  // return in strength order for UI
-  out.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
-  return out;
-}
+/* ---------------- Tier + negotiationMid ---------------- */
 
 function median(values) {
-  const arr = (values || []).filter((x) => Number.isFinite(x)).slice().sort((a,b)=>a-b);
+  const arr = (values || [])
+    .filter((x) => Number.isFinite(x))
+    .slice()
+    .sort((a, b) => a - b);
   if (arr.length === 0) return null;
   const mid = Math.floor(arr.length / 2);
   return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
@@ -554,7 +510,6 @@ function addTiersAndMidlines(zones, bars1h) {
     const pocket = z.details?.facts?.pocketNow ?? null;
     const pocketWidth = pocket?.width != null ? Number(pocket.width) : null;
 
-    // Tier rules (B: keep multiple tiers)
     let tier = "micro";
     if (score >= 90 || (hasClear4H && z.details?.facts?.anchorMode === "anchored_last_consolidation")) {
       tier = "structure";
@@ -562,7 +517,6 @@ function addTiersAndMidlines(zones, bars1h) {
       tier = "pocket";
     }
 
-    // negotiationMid for pockets: median close inside pocket window
     let negotiationMid = null;
     if (tier === "pocket" && pocket?.startIdx1h != null && pocket?.endIdx1h != null) {
       const s = Math.max(0, Number(pocket.startIdx1h));
@@ -581,13 +535,14 @@ function addTiersAndMidlines(zones, bars1h) {
         ...z.details,
         facts: {
           ...(z.details?.facts ?? {}),
-          negotiationMid,       // <-- pink dashed line value (for pocket zones)
+          negotiationMid,
         },
       },
     };
   });
 }
 
+/* ---------------- Main ---------------- */
 
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const b30 = normalizeBars(bars30m);
@@ -647,15 +602,14 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const merged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
   const regimesGlobal = clusterUnionBands(merged);
 
-  // Apply proximity only after regimes exist
-  // ✅ GLOBAL selection (no proximity bias)
+  // ✅ GLOBAL selection (no proximity bias right now)
   let selected = regimesGlobal
-    .filter((z) => Number(z.strength ?? 0) >= 75)
+    .filter((z) => Number(z.strength ?? 0) >= CFG.MIN_SCORE_GLOBAL)
     .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
 
-  let selectionMode = ">=75";
+  let selectionMode = `>=${CFG.MIN_SCORE_GLOBAL}`;
 
-  // ✅ Guardrail: never return empty
+  // Guardrail: never return empty
   if (selected.length === 0) {
     selected = regimesGlobal
       .slice()
@@ -664,28 +618,22 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     selectionMode = `top${CFG.FALLBACK_TOP_N}`;
   }
 
-
-  // ✅ RE-ANCHOR each selected regime to last consolidation before strong exit
+  // Re-anchor each selected regime to last consolidation before strong exit
   const anchored = selected.map((z) => reanchorRegime(z, b1h, b30, atr1h));
 
-  // ✅ enforce disjoint (no overlaps) so no yellow blob
-  // ✅ keep overlaps; we will differentiate by tier in the UI
+  // Label tiers + compute negotiationMid for pocket zones
   const labeled = addTiersAndMidlines(anchored, b1h);
-  return labeled.map(...)
-
 
   // Output contract-safe
- const labeled = addTiersAndMidlines(anchored, b1h);
-
- return labeled.map((z) => ({
-  type: z.type,
-  tier: z.tier,                // ✅ NEW
-  price: z.price,
-  priceRange: z.priceRange,
-  strength: z.strength,
-  details: {
-    ...z.details,
-    selectionMode,
-  },
-}));
- 
+  return labeled.map((z) => ({
+    type: z.type,
+    tier: z.tier, // "structure" | "pocket" | "micro"
+    price: z.price,
+    priceRange: z.priceRange,
+    strength: z.strength,
+    details: {
+      ...z.details,
+      selectionMode,
+    },
+  }));
+}
