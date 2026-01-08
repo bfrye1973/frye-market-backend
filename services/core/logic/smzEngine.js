@@ -840,14 +840,14 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
 
   // Label tiers + compute negotiationMid for pocket zones
   let labeled = addTiersAndMidlines(anchored, b1h);
-
-  // Collapse overlapping STRUCTURE zones into one parent structure (keeps children in facts)
   labeled = collapseOverlappingStructureZones(labeled, {
     overlapPct: CFG.STRUCT_OVERLAP_PCT,
     nearPoints: CFG.STRUCT_NEAR_POINTS,
   });
 
-  // Output contract-safe
+  // ✅ NEW: add pocket children inside each structure zone
+  labeled = expandPocketChildren(labeled, b1h);
+
   return labeled.map((z) => ({
     type: z.type,
     tier: z.tier ?? "micro",
@@ -859,4 +859,3 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
       selectionMode,
     },
   }));
-}
