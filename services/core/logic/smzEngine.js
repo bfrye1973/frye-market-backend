@@ -598,24 +598,22 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const regimesGlobal = clusterUnionBands(merged);
 
   // Apply proximity only after regimes exist
-  const regimesInBand = filterToBand(regimesGlobal, currentPrice, CFG.WINDOW_POINTS);
+  // ✅ GLOBAL selection (no proximity bias)
+  let selected = regimesGlobal
+    .filter((z) => Number(z.strength ?? 0) >= 75)
+    .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
 
-  // Selection
-  let selected = regimesInBand.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_PRIMARY);
-  let selectionMode = `>=${CFG.MIN_STRENGTH_PRIMARY}`;
+  let selectionMode = ">=75";
 
+  // ✅ Guardrail: never return empty
   if (selected.length === 0) {
-    selected = regimesInBand.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_FALLBACK);
-    selectionMode = `>=${CFG.MIN_STRENGTH_FALLBACK}`;
-  }
-
-  if (selected.length === 0) {
-    selected = regimesInBand
+    selected = regimesGlobal
       .slice()
       .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0))
       .slice(0, CFG.FALLBACK_TOP_N);
     selectionMode = `top${CFG.FALLBACK_TOP_N}`;
   }
+
 
   // ✅ RE-ANCHOR each selected regime to last consolidation before strong exit
   const anchored = selected.map((z) => reanchorRegime(z, b1h, b30, atr1h));
