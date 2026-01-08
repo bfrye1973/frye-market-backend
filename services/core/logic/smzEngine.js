@@ -1,67 +1,51 @@
 // src/services/core/logic/smzEngine.js
 // Institutional SMZ detection + scoring + TradingView-style level output.
 //
-// LOCKED GAME PLAN (CURRENT):
-// 1) Detect + score globally across full provided history (no proximity bias in selection)
-// 2) Create preliminary regimes (bands) from scored candidates (overlap + clustering)
-// 3) Select zones globally by score (>=75 for now; we can re-lock later)
-// 4) RE-ANCHOR each selected regime using:
-//    - 1H truth: strong exit = 2 consecutive 1H bars fully outside zone on same side
-//    - last consolidation block BEFORE exit (start at 10 bars, auto-adjust 6–24)
-//    - refine edges using 30m bars within the same time window
-//    - IMPORTANT: exclude the impulse/exit candle from defining consolidation bounds
-// 5) Label zones with tiers: structure / pocket / micro + compute negotiationMid for pocket zones
-// 6) Collapse overlapping STRUCTURE zones into a single parent structure while preserving children internally
-//    (micro zones are untouched)
+// CURRENT BEHAVIOR (LOCKED):
+// - Score globally (no proximity bias right now)
+// - Collapse overlapping STRUCTURE zones into parent structures (keep MICRO)
+// - Re-anchor to last consolidation before confirmed exit (exclude impulse candle)
+// - Add tiers: structure / micro (pocket children emitted as separate tier)
+// - Emit POCKET children inside each STRUCTURE zone and compute negotiationMid
 //
-// NOTES:
-// - WINDOW_POINTS=40 is kept in config for later UI use, but NOT used in selection right now.
-// - Scoring delegated to smzInstitutionalRubric.js (which provides s.facts incl pocketNow if enabled).
+// NOTE: WINDOW_POINTS kept for later UI filter; not used for selection right now.
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
-  // Kept for later UI filtering if desired (NOT used for selection right now)
-  WINDOW_POINTS: 40,
+  WINDOW_POINTS: 40, // kept for later UI use
 
-  // Guardrail
   FALLBACK_TOP_N: 12,
 
-  // Candidate strictness
   MIN_TOUCHES_1H: 5,
   MIN_TOUCHES_4H: 3,
 
-  // Bucket sizing from ATR
   BUCKET_ATR_MULT_1H: 1.0,
   BUCKET_ATR_MULT_4H: 1.2,
 
-  // Merge/cluster (preliminary regimes)
   MERGE_OVERLAP: 0.55,
   CLUSTER_OVERLAP: 0.30,
 
-  // Stop condition (LOCKED)
   EXIT_CONSEC_BARS_1H: 2,
 
-  // Anchor-window (start 10, allow 6–24)
   ANCHOR_START_BARS_1H: 10,
   ANCHOR_MIN_BARS_1H: 6,
   ANCHOR_MAX_BARS_1H: 24,
 
-  // Consolidation quality guardrails (behavior proxy)
-  AVG_RANGE_ATR_MAX: 1.25, // average bar range vs ATR
-  WIDTH_ATR_MAX: 3.25,     // total consolidation height vs ATR
+  AVG_RANGE_ATR_MAX: 1.25,
+  WIDTH_ATR_MAX: 3.25,
 
-  // Current selection rule (locked for now)
   MIN_SCORE_GLOBAL: 75,
 
-  // Structure collapse rule (locked for now)
-  STRUCT_OVERLAP_PCT: 0.50, // 50%
-  STRUCT_NEAR_POINTS: 4.0,  // within ~4 pts gap
+  STRUCT_OVERLAP_PCT: 0.50,
+  STRUCT_NEAR_POINTS: 4.0,
 };
 
 const GRID_STEP = 0.25;
 
-function round2(x) { return Math.round(x * 100) / 100; }
+function round2(x) {
+  return Math.round(x * 100) / 100;
+}
 
 function normalizeBars(arr) {
   return (Array.isArray(arr) ? arr : [])
@@ -77,12 +61,13 @@ function normalizeBars(arr) {
         volume: Number(b.v ?? b.volume ?? 0),
       };
     })
-    .filter((b) =>
-      Number.isFinite(b.time) &&
-      Number.isFinite(b.open) &&
-      Number.isFinite(b.high) &&
-      Number.isFinite(b.low) &&
-      Number.isFinite(b.close)
+    .filter(
+      (b) =>
+        Number.isFinite(b.time) &&
+        Number.isFinite(b.open) &&
+        Number.isFinite(b.high) &&
+        Number.isFinite(b.low) &&
+        Number.isFinite(b.close)
     )
     .sort((a, b) => a.time - b.time);
 }
@@ -95,7 +80,8 @@ function computeATR(candles, period = 14) {
   if (!Array.isArray(candles) || candles.length < period + 2) return 1;
   const trs = [];
   for (let i = 1; i < candles.length; i++) {
-    const c = candles[i], p = candles[i - 1];
+    const c = candles[i],
+      p = candles[i - 1];
     if (!validBar(c) || !validBar(p)) continue;
     const tr = Math.max(
       c.high - c.low,
@@ -109,15 +95,18 @@ function computeATR(candles, period = 14) {
   return atr > 0 ? atr : 1;
 }
 
-function snapDown(x, step) { return Math.floor(x / step) * step; }
-function snapUp(x, step) { return Math.ceil(x / step) * step; }
+function snapDown(x, step) {
+  return Math.floor(x / step) * step;
+}
+function snapUp(x, step) {
+  return Math.ceil(x / step) * step;
+}
 
 function minLow(candles) {
   let m = Infinity;
   for (const c of candles) if (validBar(c)) m = Math.min(m, c.low);
   return m === Infinity ? null : m;
 }
-
 function maxHigh(candles) {
   let m = -Infinity;
   for (const c of candles) if (validBar(c)) m = Math.max(m, c.high);
@@ -134,15 +123,16 @@ function overlapPct(a, b) {
 }
 
 function overlapsLoose(a, b, threshold) {
-  return overlapPct({ low: a._low, high: a._high }, { low: b._low, high: b._high }) >= threshold;
+  return (
+    overlapPct({ low: a._low, high: a._high }, { low: b._low, high: b._high }) >= threshold
+  );
 }
 
 function barOverlapsZone(bar, lo, hi) {
-  return bar && Number.isFinite(bar.high) && Number.isFinite(bar.low) && (bar.high >= lo && bar.low <= hi);
+  return bar && Number.isFinite(bar.high) && Number.isFinite(bar.low) && bar.high >= lo && bar.low <= hi;
 }
 
 function barOutsideSide(bar, lo, hi) {
-  // returns "above" if bar fully above zone, "below" if fully below, else null
   if (!bar || !Number.isFinite(bar.high) || !Number.isFinite(bar.low)) return null;
   if (bar.low > hi) return "above";
   if (bar.high < lo) return "below";
@@ -157,8 +147,6 @@ function lastTouchIndex1h(bars1h, lo, hi) {
   return -1;
 }
 
-// STOP CONDITION (LOCKED):
-// Find last touch index, then require next 2 consecutive 1H bars fully outside on SAME side.
 function exitConfirmed1h(bars1h, lo, hi, consec = 2) {
   const idx = lastTouchIndex1h(bars1h, lo, hi);
   if (idx < 0) return { lastTouchIndex: -1, confirmed: false, side: null, exitBars: 0 };
@@ -168,16 +156,15 @@ function exitConfirmed1h(bars1h, lo, hi, consec = 2) {
 
   for (let j = idx + 1; j < bars1h.length && exitBars < consec; j++) {
     const s = barOutsideSide(bars1h[j], lo, hi);
-    if (!s) break; // overlap/re-entry: negotiation continues
+    if (!s) break;
     if (!side) side = s;
-    if (s !== side) break; // must continue same direction
+    if (s !== side) break;
     exitBars++;
   }
 
   return { lastTouchIndex: idx, confirmed: exitBars >= consec, side, exitBars };
 }
 
-// GLOBAL bucket candidates across full price range
 function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
   const loAll = minLow(candles);
   const hiAll = maxHigh(candles);
@@ -201,12 +188,13 @@ function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
 
   const out = [];
   for (const b of buckets) {
-    if (b.touches >= minTouches) out.push({ tf, price_low: round2(b.low), price_high: round2(b.high) });
+    if (b.touches >= minTouches) {
+      out.push({ tf, price_low: round2(b.low), price_high: round2(b.high) });
+    }
   }
   return out;
 }
 
-// Merge helper
 function mergeTwoZones(a, b) {
   const mergedLow = round2(Math.min(a._low, b._low));
   const mergedHigh = round2(Math.max(a._high, b._high));
@@ -233,7 +221,6 @@ function mergeTwoZones(a, b) {
   };
 }
 
-// Overlap-only merge (preliminary cleanup)
 function mergeByOverlap(zones, threshold) {
   const sorted = zones.slice().sort((x, y) => x._low - y._low);
   const out = [];
@@ -247,7 +234,6 @@ function mergeByOverlap(zones, threshold) {
   return out;
 }
 
-// Cluster union to form preliminary regimes
 function clusterUnionBands(zones) {
   const input = zones.slice().sort((a, b) => a._low - b._low);
   const clusters = [];
@@ -287,6 +273,7 @@ function clusterUnionBands(zones) {
 
     return {
       type: "institutional",
+      tier: "structure",
       price: round2((low + high) / 2),
       priceRange: [high, low],
       strength,
@@ -296,6 +283,7 @@ function clusterUnionBands(zones) {
         members: Array.from(new Set(memberIds)),
         tfs: Array.from(tfs),
         flags: { hasClear4H },
+        facts: {},
       },
       _low: low,
       _high: high,
@@ -362,9 +350,7 @@ function chooseConsolidationWindow(bars1h, endIdx, atr1h) {
     const bias = Math.abs(L - CFG.ANCHOR_START_BARS_1H) * 0.01;
     const total = score + bias;
 
-    if (!best || total < best.total) {
-      best = { startIdx, endIdx, L, lo: rh.lo, hi: rh.hi, width: rh.width, total };
-    }
+    if (!best || total < best.total) best = { startIdx, endIdx, L, lo: rh.lo, hi: rh.hi, width: rh.width, total };
   }
 
   if (!best) {
@@ -387,8 +373,10 @@ function refineWith30m(bars30m, startTimeSec, endTimeSec) {
 }
 
 function reanchorRegime(regime, bars1h, bars30m, atr1h) {
-  const lo0 = regime._low;
-  const hi0 = regime._high;
+  const lo0 = Number(regime._low);
+  const hi0 = Number(regime._high);
+
+  if (!Number.isFinite(lo0) || !Number.isFinite(hi0) || hi0 <= lo0) return regime;
 
   const exit = exitConfirmed1h(bars1h, lo0, hi0, CFG.EXIT_CONSEC_BARS_1H);
 
@@ -400,12 +388,13 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
         facts: {
           ...(regime.details?.facts ?? {}),
           anchorMode: "no_exit_keep_original",
+          negotiationMid: null,
         },
       },
     };
   }
 
-  // ✅ CRITICAL FIX: exclude the impulse/exit candle from defining the consolidation range
+  // ✅ CRITICAL FIX: exclude the impulse/exit candle
   const anchorEnd = Math.max(0, exit.lastTouchIndex - 1);
 
   const chosen = chooseConsolidationWindow(bars1h, anchorEnd, atr1h);
@@ -417,6 +406,7 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
         facts: {
           ...(regime.details?.facts ?? {}),
           anchorMode: "exit_no_window_keep_original",
+          negotiationMid: null,
         },
       },
     };
@@ -430,24 +420,10 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
 
   if (Number.isFinite(startTime) && Number.isFinite(endTime)) {
     const refined = refineWith30m(bars30m, startTime, endTime);
-    if (refined) {
-      newLo = refined.lo;
-      newHi = refined.hi;
-    }
+    if (refined) { newLo = refined.lo; newHi = refined.hi; }
   }
 
-  if (!(Number.isFinite(newLo) && Number.isFinite(newHi)) || newHi <= newLo) {
-    return {
-      ...regime,
-      details: {
-        ...regime.details,
-        facts: {
-          ...(regime.details?.facts ?? {}),
-          anchorMode: "bad_bounds_keep_original",
-        },
-      },
-    };
-  }
+  if (!(Number.isFinite(newLo) && Number.isFinite(newHi)) || newHi <= newLo) return regime;
 
   newLo = round2(newLo);
   newHi = round2(newHi);
@@ -468,43 +444,32 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
         anchorEndTime: endTime,
         exitSide1h: exit.side,
         exitBars1h: exit.exitBars,
+        negotiationMid: null, // set by pocket child
       },
     },
   };
 }
 
-/* ---------------- Tier + negotiationMid ---------------- */
+/* ---------------- Pocket + Midline ---------------- */
 
 function median(values) {
-  const arr = (values || [])
-    .filter((x) => Number.isFinite(x))
-    .slice()
-    .sort((a, b) => a - b);
+  const arr = (values || []).filter((x) => Number.isFinite(x)).slice().sort((a, b) => a - b);
   if (arr.length === 0) return null;
   const mid = Math.floor(arr.length / 2);
   return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
 }
 
-// Find the tightest pocket inside a STRUCTURE zone, using 1H bars.
-// - Prefer the anchor window if available (anchorStartTime/anchorEndTime).
-// - Fallback: last 120 1H bars.
-// - Scan windows 3–8 bars (you asked for tight pockets).
 function findPocketFromBars1h(bars1h, zoneLow, zoneHigh, startTimeSec = null, endTimeSec = null) {
   if (!Array.isArray(bars1h) || bars1h.length < 20) return null;
 
-  // Build working slice
   let slice = bars1h;
-
   if (Number.isFinite(startTimeSec) && Number.isFinite(endTimeSec)) {
     slice = bars1h.filter((b) => validBar(b) && b.time >= startTimeSec && b.time <= endTimeSec);
   } else {
-    // fallback: last ~120 hours
     slice = bars1h.slice(-120).filter(validBar);
   }
-
   if (slice.length < 10) return null;
 
-  // We only care about bars interacting with the zone (negotiation inside structure)
   const inZone = slice.filter((b) => b.high >= zoneLow && b.low <= zoneHigh);
   if (inZone.length < 6) return null;
 
@@ -517,9 +482,8 @@ function findPocketFromBars1h(bars1h, zoneLow, zoneHigh, startTimeSec = null, en
     for (let i = 0; i + w - 1 < inZone.length; i++) {
       const win = inZone.slice(i, i + w);
 
-      let lo = Infinity;
-      let hi = -Infinity;
-      let closes = [];
+      let lo = Infinity, hi = -Infinity;
+      const closes = [];
 
       for (const b of win) {
         lo = Math.min(lo, b.low);
@@ -528,16 +492,11 @@ function findPocketFromBars1h(bars1h, zoneLow, zoneHigh, startTimeSec = null, en
       }
 
       const width = hi - lo;
-
-      // Your pocket definition: ~3–4 points tight range (SPY)
       if (width > 4.0) continue;
 
-      // Require strong overlap behavior: most bars overlap the pocket range (always true by definition),
-      // but we also require the median close to fall inside pocket (tight agreement).
       const mid = median(closes);
       if (!Number.isFinite(mid) || mid < lo || mid > hi) continue;
 
-      // Prefer tightest width, then more bars
       const score = width - (w * 0.05);
 
       if (!best || score < best.score) {
@@ -558,8 +517,6 @@ function findPocketFromBars1h(bars1h, zoneLow, zoneHigh, startTimeSec = null, en
   return best;
 }
 
-// Emit POCKET child zones for each STRUCTURE zone.
-// These are the blue-box zones you want inside the yellow structure.
 function expandPocketChildren(zones, bars1h) {
   const out = [];
   for (const z of zones || []) {
@@ -583,7 +540,7 @@ function expandPocketChildren(zones, bars1h) {
       tier: "pocket",
       price: round2((pocket.low + pocket.high) / 2),
       priceRange: [pocket.high, pocket.low],
-      strength: z.strength, // keep strength aligned to parent for now
+      strength: z.strength,
       details: {
         ...z.details,
         id: `smz_pocket_${z.details?.id ?? "unknown"}`,
@@ -606,8 +563,7 @@ function expandPocketChildren(zones, bars1h) {
   return out;
 }
 
-
-/* ---------------- Collapse overlapping STRUCTURE zones ---------------- */
+/* ---------------- Collapse STRUCTURE overlaps ---------------- */
 
 function collapseOverlappingStructureZones(zones, opts = {}) {
   const OVERLAP_PCT = Number.isFinite(opts.overlapPct) ? opts.overlapPct : CFG.STRUCT_OVERLAP_PCT;
@@ -622,18 +578,11 @@ function collapseOverlappingStructureZones(zones, opts = {}) {
     else others.push(z);
   }
 
-  if (structures.length <= 1) {
-    const out = structures.concat(others);
-    out.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
-    return out;
-  }
-
   // Ensure _low/_high exist
   for (const z of structures) {
     if (!Number.isFinite(z._low) || !Number.isFinite(z._high)) {
-      const pr = z.priceRange || [];
-      z._high = Number(pr[0]);
-      z._low = Number(pr[1]);
+      z._high = Number(z.priceRange?.[0]);
+      z._low = Number(z.priceRange?.[1]);
     }
   }
 
@@ -651,7 +600,7 @@ function collapseOverlappingStructureZones(zones, opts = {}) {
   }
 
   function separationPts(a, b) {
-    return Math.max(0, b._low - a._high); // 0 if overlaps
+    return Math.max(0, b._low - a._high);
   }
 
   const parents = [];
@@ -679,7 +628,6 @@ function collapseOverlappingStructureZones(zones, opts = {}) {
     group.low = Math.min(group.low, z._low);
     group.high = Math.max(group.high, z._high);
     group.strength = Math.max(group.strength, Number(z.strength ?? 0));
-
     if (z.details?.flags?.hasClear4H) group.flags.hasClear4H = true;
 
     (z.details?.tfs ?? []).forEach((x) => group.tfs.add(x));
@@ -735,16 +683,12 @@ function collapseOverlappingStructureZones(zones, opts = {}) {
     const ov = overlapRatio(tmpA, z);
     const gap = separationPts(tmpA, z);
 
-    if (ov >= OVERLAP_PCT && gap <= NEAR_POINTS) {
-      addToGroup(z);
-    } else {
-      flushGroup();
-      startGroup(z);
-    }
+    if (ov >= OVERLAP_PCT && gap <= NEAR_POINTS) addToGroup(z);
+    else { flushGroup(); startGroup(z); }
   }
   flushGroup();
 
-  // Dedupe exact duplicate parents by priceRange
+  // Dedupe exact duplicates (by range+tier)
   const seen = new Set();
   const dedupParents = [];
   for (const p of parents) {
@@ -759,7 +703,7 @@ function collapseOverlappingStructureZones(zones, opts = {}) {
   return out;
 }
 
-/* ---------------- Main ---------------- */
+/* ---------------- Main entry ---------------- */
 
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const b30 = normalizeBars(bars30m);
@@ -783,7 +727,6 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const cand1h = buildBucketCandidatesGlobal(b1h, bucket1h, CFG.MIN_TOUCHES_1H, "1h");
   const cand4h = buildBucketCandidatesGlobal(b4h, bucket4h, CFG.MIN_TOUCHES_4H, "4h");
 
-  // Score globally
   const scored = [...cand1h, ...cand4h]
     .map((z, idx) => {
       const lo = z.price_low;
@@ -799,6 +742,7 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
 
       return {
         type: "institutional",
+        tier: "structure",
         price: round2((lo + hi) / 2),
         priceRange: [round2(hi), round2(lo)],
         strength: s.scoreTotal,
@@ -815,40 +759,37 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     })
     .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
 
-  // Preliminary regimes (global)
   const merged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
-  const regimesGlobal = clusterUnionBands(merged);
+  let regimes = clusterUnionBands(merged);
 
-  // ✅ GLOBAL selection (no proximity bias right now)
-  let selected = regimesGlobal
+  // GLOBAL selection (>=75)
+  regimes = regimes
     .filter((z) => Number(z.strength ?? 0) >= CFG.MIN_SCORE_GLOBAL)
     .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
 
   let selectionMode = `>=${CFG.MIN_SCORE_GLOBAL}`;
 
-  // Guardrail: never return empty
-  if (selected.length === 0) {
-    selected = regimesGlobal
+  if (regimes.length === 0) {
+    regimes = clusterUnionBands(merged)
       .slice()
       .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0))
       .slice(0, CFG.FALLBACK_TOP_N);
     selectionMode = `top${CFG.FALLBACK_TOP_N}`;
   }
 
-  // Re-anchor each selected regime to last consolidation before strong exit
-  const anchored = selected.map((z) => reanchorRegime(z, b1h, b30, atr1h));
+  // Re-anchor
+  regimes = regimes.map((z) => reanchorRegime(z, b1h, b30, atr1h));
 
-  // Label tiers + compute negotiationMid for pocket zones
-  let labeled = addTiersAndMidlines(anchored, b1h);
-  labeled = collapseOverlappingStructureZones(labeled, {
+  // Collapse STRUCTURE overlaps into parent structures
+  regimes = collapseOverlappingStructureZones(regimes, {
     overlapPct: CFG.STRUCT_OVERLAP_PCT,
     nearPoints: CFG.STRUCT_NEAR_POINTS,
   });
 
-  // ✅ NEW: add pocket children inside each structure zone
-  labeled = expandPocketChildren(labeled, b1h);
+  // Add POCKET children inside each STRUCTURE
+  regimes = expandPocketChildren(regimes, b1h);
 
-  return labeled.map((z) => ({
+  return regimes.map((z) => ({
     type: z.type,
     tier: z.tier ?? "micro",
     price: z.price,
@@ -859,3 +800,4 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
       selectionMode,
     },
   }));
+}
