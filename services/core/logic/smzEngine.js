@@ -675,14 +675,17 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
 
 
   // Output contract-safe
-  return disjoint.map((z) => ({
-    type: z.type,
-    price: z.price,
-    priceRange: z.priceRange,
-    strength: z.strength,
-    details: {
-      ...z.details,
-      selectionMode,
-    },
-  }));
-}
+ const labeled = addTiersAndMidlines(anchored, b1h);
+
+ return labeled.map((z) => ({
+  type: z.type,
+  tier: z.tier,                // ✅ NEW
+  price: z.price,
+  priceRange: z.priceRange,
+  strength: z.strength,
+  details: {
+    ...z.details,
+    selectionMode,
+  },
+}));
+ 
