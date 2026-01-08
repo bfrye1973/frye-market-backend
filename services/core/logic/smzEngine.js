@@ -485,45 +485,127 @@ function median(values) {
   return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
 }
 
-function addTiersAndMidlines(zones, bars1h) {
-  return (zones || []).map((z) => {
-    const score = Number(z.strength ?? 0);
-    const hasClear4H = Boolean(z.details?.flags?.hasClear4H);
+// Find the tightest pocket inside a STRUCTURE zone, using 1H bars.
+// - Prefer the anchor window if available (anchorStartTime/anchorEndTime).
+// - Fallback: last 120 1H bars.
+// - Scan windows 3–8 bars (you asked for tight pockets).
+function findPocketFromBars1h(bars1h, zoneLow, zoneHigh, startTimeSec = null, endTimeSec = null) {
+  if (!Array.isArray(bars1h) || bars1h.length < 20) return null;
 
-    const pocket = z.details?.facts?.pocketNow ?? null;
-    const pocketWidth = pocket?.width != null ? Number(pocket.width) : null;
+  // Build working slice
+  let slice = bars1h;
 
-    let tier = "micro";
-    if (score >= 90 || (hasClear4H && z.details?.facts?.anchorMode === "anchored_last_consolidation")) {
-      tier = "structure";
-    } else if (pocket && Number.isFinite(pocketWidth) && pocketWidth <= 4.0) {
-      tier = "pocket";
-    }
+  if (Number.isFinite(startTimeSec) && Number.isFinite(endTimeSec)) {
+    slice = bars1h.filter((b) => validBar(b) && b.time >= startTimeSec && b.time <= endTimeSec);
+  } else {
+    // fallback: last ~120 hours
+    slice = bars1h.slice(-120).filter(validBar);
+  }
 
-    let negotiationMid = null;
-    if (tier === "pocket" && pocket?.startIdx1h != null && pocket?.endIdx1h != null) {
-      const s = Math.max(0, Number(pocket.startIdx1h));
-      const e = Math.min((bars1h?.length ?? 0) - 1, Number(pocket.endIdx1h));
-      if (Array.isArray(bars1h) && e >= s) {
-        const closes = bars1h.slice(s, e + 1).map((b) => Number(b?.close));
-        const m = median(closes);
-        if (m != null) negotiationMid = round2(m);
+  if (slice.length < 10) return null;
+
+  // We only care about bars interacting with the zone (negotiation inside structure)
+  const inZone = slice.filter((b) => b.high >= zoneLow && b.low <= zoneHigh);
+  if (inZone.length < 6) return null;
+
+  const minW = 3;
+  const maxW = 8;
+
+  let best = null;
+
+  for (let w = minW; w <= maxW; w++) {
+    for (let i = 0; i + w - 1 < inZone.length; i++) {
+      const win = inZone.slice(i, i + w);
+
+      let lo = Infinity;
+      let hi = -Infinity;
+      let closes = [];
+
+      for (const b of win) {
+        lo = Math.min(lo, b.low);
+        hi = Math.max(hi, b.high);
+        closes.push(Number(b.close));
+      }
+
+      const width = hi - lo;
+
+      // Your pocket definition: ~3–4 points tight range (SPY)
+      if (width > 4.0) continue;
+
+      // Require strong overlap behavior: most bars overlap the pocket range (always true by definition),
+      // but we also require the median close to fall inside pocket (tight agreement).
+      const mid = median(closes);
+      if (!Number.isFinite(mid) || mid < lo || mid > hi) continue;
+
+      // Prefer tightest width, then more bars
+      const score = width - (w * 0.05);
+
+      if (!best || score < best.score) {
+        best = {
+          low: round2(lo),
+          high: round2(hi),
+          width: round2(width),
+          bars: w,
+          negotiationMid: round2(mid),
+          startTime: win[0]?.time ?? null,
+          endTime: win[win.length - 1]?.time ?? null,
+          score,
+        };
       }
     }
+  }
 
-    return {
-      ...z,
-      tier,
+  return best;
+}
+
+// Emit POCKET child zones for each STRUCTURE zone.
+// These are the blue-box zones you want inside the yellow structure.
+function expandPocketChildren(zones, bars1h) {
+  const out = [];
+  for (const z of zones || []) {
+    out.push(z);
+
+    if ((z.tier ?? "") !== "structure") continue;
+
+    const zoneLow = Number(z.priceRange?.[1]);
+    const zoneHigh = Number(z.priceRange?.[0]);
+    if (!Number.isFinite(zoneLow) || !Number.isFinite(zoneHigh) || zoneHigh <= zoneLow) continue;
+
+    const facts = z.details?.facts ?? {};
+    const startTimeSec = Number.isFinite(facts.anchorStartTime) ? facts.anchorStartTime : null;
+    const endTimeSec = Number.isFinite(facts.anchorEndTime) ? facts.anchorEndTime : null;
+
+    const pocket = findPocketFromBars1h(bars1h, zoneLow, zoneHigh, startTimeSec, endTimeSec);
+    if (!pocket) continue;
+
+    out.push({
+      type: "institutional",
+      tier: "pocket",
+      price: round2((pocket.low + pocket.high) / 2),
+      priceRange: [pocket.high, pocket.low],
+      strength: z.strength, // keep strength aligned to parent for now
       details: {
         ...z.details,
+        id: `smz_pocket_${z.details?.id ?? "unknown"}`,
         facts: {
-          ...(z.details?.facts ?? {}),
-          negotiationMid,
+          ...(facts ?? {}),
+          pocketOf: z.details?.id ?? null,
+          pocketLow: pocket.low,
+          pocketHigh: pocket.high,
+          pocketWidth: pocket.width,
+          pocketBars1h: pocket.bars,
+          negotiationMid: pocket.negotiationMid,
+          pocketStartTime: pocket.startTime,
+          pocketEndTime: pocket.endTime,
         },
       },
-    };
-  });
+      _low: pocket.low,
+      _high: pocket.high,
+    });
+  }
+  return out;
 }
+
 
 /* ---------------- Collapse overlapping STRUCTURE zones ---------------- */
 
