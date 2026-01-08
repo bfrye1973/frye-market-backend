@@ -1,61 +1,47 @@
 // src/services/core/logic/smzEngine.js
 // Institutional SMZ detection + scoring + TradingView-style overlap reduction.
 //
-// GAME PLAN (LOCKED):
-// 1) Detect + score globally across full provided history (no proximity windowing in discovery)
-// 2) Build regimes globally (behavior-driven width):
-//    - overlap merge
-//    - merge touching/near slices ONLY if they share the same negotiation window (prevents mega-zone)
+// LOCKED GAME PLAN:
+// 1) Detect + score globally across full provided history
+// 2) Build regimes globally (behavior-driven width)
 // 3) Apply proximity filter AFTER regimes exist: currentPrice ± 40
 // 4) Select regimes: >=90 (fallback >=85, else top N)
 // 5) Output render objects (bands). Evidence remains per-member.
 //
 // STOP CONDITION (LOCKED):
 // - Timeframe of truth: 1H
-// - Strong move out of zone = 2 consecutive 1H bars fully outside zone on SAME SIDE (above OR below)
-// - This is used to define/guard regime boundaries (behavior change).
+// - Strong move out of zone = 2 consecutive 1H bars fully outside zone on SAME SIDE
 //
-// Scoring delegated to smzInstitutionalRubric.js
+// USER REQUIREMENT (LOCKED):
+// - Final output bands MUST be DISJOINT (no overlaps)
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
-  // Output filter band (LOCKED)
   WINDOW_POINTS: 40,
 
-  // Primary institutional band (LOCKED target)
   MIN_STRENGTH_PRIMARY: 90,
-
-  // Guardrail fallback threshold
   MIN_STRENGTH_FALLBACK: 85,
-
-  // If still empty, return top N in band so output is never empty
   FALLBACK_TOP_N: 12,
 
-  // Candidate strictness
   MIN_TOUCHES_1H: 5,
   MIN_TOUCHES_4H: 3,
 
-  // Bucket sizing from ATR
   BUCKET_ATR_MULT_1H: 1.0,
   BUCKET_ATR_MULT_4H: 1.2,
 
-  // Merge controls
   MERGE_OVERLAP: 0.55,
   CLUSTER_OVERLAP: 0.30,
 
-  // Behavior-driven "near merge" limits
-  // - Allows merging touching/near slices when they belong to the SAME negotiation episode.
-  // - Prevents chain-merging the entire price grid across history.
-  NEAR_POINTS: 0.50,            // allow touching/near adjacency (includes gap==0)
-  TOUCH_TIME_WINDOW_1H: 48,     // max distance between "last touch" times to be same negotiation (~2 days)
+  // Near-merge: allow touching slices ONLY if same negotiation episode
+  NEAR_POINTS: 0.50,
+  TOUCH_TIME_WINDOW_1H: 48,
 
-  // Stop condition config (LOCKED)
-  EXIT_CONSEC_BARS_1H: 2,       // 2 consecutive 1H bars outside zone
+  // Stop condition
+  EXIT_CONSEC_BARS_1H: 2,
 };
 
 const GRID_STEP = 0.25;
-
 function round2(x) { return Math.round(x * 100) / 100; }
 
 function normalizeBars(arr) {
@@ -107,6 +93,17 @@ function computeATR(candles, period = 14) {
 function snapDown(x, step) { return Math.floor(x / step) * step; }
 function snapUp(x, step) { return Math.ceil(x / step) * step; }
 
+function minLow(candles) {
+  let m = Infinity;
+  for (const c of candles) if (validBar(c)) m = Math.min(m, c.low);
+  return m === Infinity ? null : m;
+}
+function maxHigh(candles) {
+  let m = -Infinity;
+  for (const c of candles) if (validBar(c)) m = Math.max(m, c.high);
+  return m === -Infinity ? null : m;
+}
+
 function overlapPct(a, b) {
   const lo = Math.max(a.low, b.low);
   const hi = Math.min(a.high, b.high);
@@ -120,30 +117,15 @@ function overlapsLoose(a, b, threshold) {
   return overlapPct({ low: a._low, high: a._high }, { low: b._low, high: b._high }) >= threshold;
 }
 
-function minLow(candles) {
-  let m = Infinity;
-  for (const c of candles) if (validBar(c)) m = Math.min(m, c.low);
-  return m === Infinity ? null : m;
-}
-
-function maxHigh(candles) {
-  let m = -Infinity;
-  for (const c of candles) if (validBar(c)) m = Math.max(m, c.high);
-  return m === -Infinity ? null : m;
-}
-
 function barOverlapsZone(bar, lo, hi) {
   return bar && Number.isFinite(bar.high) && Number.isFinite(bar.low) && (bar.high >= lo && bar.low <= hi);
 }
-
 function barOutsideSide(bar, lo, hi) {
-  // returns "above" if bar is fully above zone, "below" if fully below, else null
   if (!bar || !Number.isFinite(bar.high) || !Number.isFinite(bar.low)) return null;
   if (bar.low > hi) return "above";
   if (bar.high < lo) return "below";
   return null;
 }
-
 function lastTouchIndex1h(bars1h, lo, hi) {
   if (!Array.isArray(bars1h) || bars1h.length === 0) return -1;
   for (let i = bars1h.length - 1; i >= 0; i--) {
@@ -152,9 +134,6 @@ function lastTouchIndex1h(bars1h, lo, hi) {
   return -1;
 }
 
-// STOP CONDITION (LOCKED):
-// - Find last touch (overlap) index
-// - Require next 2 consecutive 1H bars are fully outside on SAME side (above OR below)
 function exitConfirmed1h(bars1h, lo, hi, consec = 2) {
   const idx = lastTouchIndex1h(bars1h, lo, hi);
   if (idx < 0) return { lastTouchIndex: -1, confirmed: false, side: null, exitBars: 0 };
@@ -164,11 +143,9 @@ function exitConfirmed1h(bars1h, lo, hi, consec = 2) {
 
   for (let j = idx + 1; j < bars1h.length && exitBars < consec; j++) {
     const s = barOutsideSide(bars1h[j], lo, hi);
-    if (!s) break; // re-entry or overlap => negotiation not ended
-
+    if (!s) break;
     if (!side) side = s;
-    if (s !== side) break; // must continue same direction (follow-through)
-
+    if (s !== side) break;
     exitBars++;
   }
 
@@ -180,7 +157,7 @@ function exitConfirmed1h(bars1h, lo, hi, consec = 2) {
   };
 }
 
-// GLOBAL bucket candidates across full price range
+// GLOBAL bucket candidates
 function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
   const loAll = minLow(candles);
   const hiAll = maxHigh(candles);
@@ -188,13 +165,10 @@ function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
 
   const start = snapDown(loAll, GRID_STEP);
   const end = snapUp(hiAll, GRID_STEP);
-
   const step = Math.max(GRID_STEP, snapUp(bucketSize, GRID_STEP));
 
   const buckets = [];
-  for (let lo = start; lo < end; lo += step) {
-    buckets.push({ tf, low: lo, high: lo + step, touches: 0 });
-  }
+  for (let lo = start; lo < end; lo += step) buckets.push({ tf, low: lo, high: lo + step, touches: 0 });
 
   for (const c of candles) {
     if (!validBar(c)) continue;
@@ -205,14 +179,11 @@ function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
 
   const out = [];
   for (const b of buckets) {
-    if (b.touches >= minTouches) {
-      out.push({ tf, price_low: round2(b.low), price_high: round2(b.high) });
-    }
+    if (b.touches >= minTouches) out.push({ tf, price_low: round2(b.low), price_high: round2(b.high) });
   }
   return out;
 }
 
-// Merge helper: combine two zone objects into one (keeps members and uses max strength)
 function mergeTwoZones(a, b) {
   const mergedLow = round2(Math.min(a._low, b._low));
   const mergedHigh = round2(Math.max(a._high, b._high));
@@ -224,7 +195,6 @@ function mergeTwoZones(a, b) {
 
   const tfs = new Set([...(a.details?.tfs ?? []), a.details?.tf, ...(b.details?.tfs ?? []), b.details?.tf].filter(Boolean));
 
-  // carry lastTouchIndex if present (use max = most recent)
   const aLT = Number(a.details?.facts?.lastTouchIndex1h ?? -1);
   const bLT = Number(b.details?.facts?.lastTouchIndex1h ?? -1);
   const lastTouch = Math.max(aLT, bLT);
@@ -248,27 +218,20 @@ function mergeTwoZones(a, b) {
   };
 }
 
-// Stage 1: overlap merge (existing behavior)
 function mergeByOverlap(zones, threshold) {
   const sorted = zones.slice().sort((x, y) => x._low - y._low);
   const out = [];
-
   for (const z of sorted) {
     if (!out.length) { out.push(z); continue; }
-
     const last = out[out.length - 1];
     const ov = overlapPct({ low: last._low, high: last._high }, { low: z._low, high: z._high });
-
     if (ov >= threshold) out[out.length - 1] = mergeTwoZones(last, z);
     else out.push(z);
   }
   return out;
 }
 
-// Stage 2: behavior-driven near merge (touching/near slices)
-// - We allow merging gap==0 ONLY if the slices share the same negotiation episode,
-//   approximated by "last touch index" being close in time.
-// - This prevents chain-merging across the entire year's grid.
+// ✅ FIX 1: Don't near-merge across confirmed exits
 function mergeByNearNegotiation(zones, bars1h) {
   const sorted = zones.slice().sort((a, b) => a._low - b._low);
   const out = [];
@@ -278,52 +241,36 @@ function mergeByNearNegotiation(zones, bars1h) {
 
     const last = out[out.length - 1];
 
-    const gap = round2(z._low - last._high); // can be 0 (touching), small positive, or negative (overlap)
-    const nearByPrice = gap <= CFG.NEAR_POINTS; // includes touching and tiny gaps
+    const gap = round2(z._low - last._high); // 0 = touching
+    const nearByPrice = gap <= CFG.NEAR_POINTS;
 
-    // compute last touch indices if missing
-    const lastLo = last._low, lastHi = last._high;
-    const zLo = z._low, zHi = z._high;
+    const ltA = Number.isFinite(last.details?.facts?.lastTouchIndex1h)
+      ? Number(last.details.facts.lastTouchIndex1h)
+      : lastTouchIndex1h(bars1h, last._low, last._high);
 
-    const lastLT = Number(last.details?.facts?.lastTouchIndex1h);
-    const zLT = Number(z.details?.facts?.lastTouchIndex1h);
-
-    const ltA = Number.isFinite(lastLT) && lastLT >= 0 ? lastLT : lastTouchIndex1h(bars1h, lastLo, lastHi);
-    const ltB = Number.isFinite(zLT) && zLT >= 0 ? zLT : lastTouchIndex1h(bars1h, zLo, zHi);
+    const ltB = Number.isFinite(z.details?.facts?.lastTouchIndex1h)
+      ? Number(z.details.facts.lastTouchIndex1h)
+      : lastTouchIndex1h(bars1h, z._low, z._high);
 
     const sameEpisode =
-      ltA >= 0 &&
-      ltB >= 0 &&
-      Math.abs(ltA - ltB) <= CFG.TOUCH_TIME_WINDOW_1H;
+      ltA >= 0 && ltB >= 0 && Math.abs(ltA - ltB) <= CFG.TOUCH_TIME_WINDOW_1H;
 
-    // Only near-merge when price adjacency + same negotiation episode
-    if (nearByPrice && sameEpisode) {
-      // merge and preserve facts
-      const merged = mergeTwoZones(
-        {
-          ...last,
-          details: {
-            ...last.details,
-            facts: { ...(last.details?.facts ?? {}), lastTouchIndex1h: ltA },
-          },
-        },
-        {
-          ...z,
-          details: {
-            ...z.details,
-            facts: { ...(z.details?.facts ?? {}), lastTouchIndex1h: ltB },
-          },
-        }
+    // stop-condition facts (already computed at scoring time)
+    const aExit = Boolean(last.details?.facts?.exitConfirmed1h);
+    const bExit = Boolean(z.details?.facts?.exitConfirmed1h);
+
+    // HARD BOUNDARY: if either side has a confirmed exit, do NOT merge across it
+    const blockedByExit = aExit || bExit;
+
+    if (nearByPrice && sameEpisode && !blockedByExit) {
+      out[out.length - 1] = mergeTwoZones(
+        { ...last, details: { ...last.details, facts: { ...(last.details?.facts ?? {}), lastTouchIndex1h: ltA } } },
+        { ...z, details: { ...z.details, facts: { ...(z.details?.facts ?? {}), lastTouchIndex1h: ltB } } }
       );
-      out[out.length - 1] = merged;
     } else {
-      // ensure z carries its lastTouch fact for later stages
       out.push({
         ...z,
-        details: {
-          ...z.details,
-          facts: { ...(z.details?.facts ?? {}), lastTouchIndex1h: ltB },
-        },
+        details: { ...z.details, facts: { ...(z.details?.facts ?? {}), lastTouchIndex1h: ltB } },
       });
     }
   }
@@ -331,7 +278,6 @@ function mergeByNearNegotiation(zones, bars1h) {
   return out;
 }
 
-// Cluster union to create render-bands (loose overlap)
 function clusterUnionBands(zones) {
   const input = zones.slice().sort((a, b) => a._low - b._low);
   const clusters = [];
@@ -349,37 +295,15 @@ function clusterUnionBands(zones) {
   }
 
   const bands = clusters.map((c, idx) => {
-    let low = Infinity;
-    let high = -Infinity;
-    let strength = 0;
-
+    let low = Infinity, high = -Infinity, strength = 0;
     const memberIds = [];
     const tfs = new Set();
     let hasClear4H = false;
 
-    // best member for debugging
-    let bestMemberId = null;
-    let bestMemberTf = null;
-    let bestStrength = -Infinity;
-
-    // also keep the most recent lastTouchIndex among members
-    let lastTouchMax = -1;
-
     for (const m of c.members) {
       low = Math.min(low, m._low);
       high = Math.max(high, m._high);
-
-      const s = Number(m.strength ?? 0);
-      strength = Math.max(strength, s);
-
-      if (s > bestStrength || (s === bestStrength && m.details?.tf === "4h")) {
-        bestStrength = s;
-        bestMemberId = m.details?.id ?? null;
-        bestMemberTf = m.details?.tf ?? null;
-      }
-
-      const lt = Number(m.details?.facts?.lastTouchIndex1h ?? -1);
-      if (Number.isFinite(lt)) lastTouchMax = Math.max(lastTouchMax, lt);
+      strength = Math.max(strength, Number(m.strength ?? 0));
 
       if (m.details?.id) memberIds.push(m.details.id);
       if (m.details?.tf) tfs.add(m.details.tf);
@@ -388,8 +312,7 @@ function clusterUnionBands(zones) {
       if (Array.isArray(m.details?.members)) memberIds.push(...m.details.members);
     }
 
-    low = round2(low);
-    high = round2(high);
+    low = round2(low); high = round2(high);
 
     return {
       type: "institutional",
@@ -399,14 +322,9 @@ function clusterUnionBands(zones) {
       details: {
         id: `smz_band_${idx}`,
         tf: "mixed",
-        bestMemberId,
-        bestMemberTf,
         members: Array.from(new Set(memberIds)),
         tfs: Array.from(tfs),
         flags: { hasClear4H },
-        facts: {
-          lastTouchIndex1h: lastTouchMax,
-        },
       },
       _low: low,
       _high: high,
@@ -420,8 +338,59 @@ function clusterUnionBands(zones) {
 function filterToBand(zones, currentPrice, windowPts) {
   const loBand = currentPrice - windowPts;
   const hiBand = currentPrice + windowPts;
-  // overlap-based inclusion (best choice)
   return zones.filter((z) => z._high >= loBand && z._low <= hiBand);
+}
+
+// ✅ FIX 2: Make final selected bands DISJOINT (no overlap).
+// We sort by price (low->high) and trim overlaps at the midpoint.
+function makeDisjoint(bands) {
+  const sorted = bands.slice().sort((a, b) => a._low - b._low);
+  const out = [];
+
+  for (const z of sorted) {
+    if (!out.length) { out.push({ ...z }); continue; }
+
+    const last = out[out.length - 1];
+
+    // overlap?
+    if (z._low < last._high) {
+      const mid = round2((z._low + last._high) / 2);
+
+      // trim last high down, trim current low up
+      const newLastHigh = mid;
+      const newCurLow = mid;
+
+      // ensure non-negative width; if collapse occurs, drop the weaker one
+      const lastWidth = newLastHigh - last._low;
+      const curWidth = z._high - newCurLow;
+
+      if (lastWidth <= 0 || curWidth <= 0) {
+        // keep stronger, drop weaker
+        const keepLast = Number(last.strength ?? 0) >= Number(z.strength ?? 0);
+        if (keepLast) continue; // drop current
+        out[out.length - 1] = { ...z }; // replace last
+        continue;
+      }
+
+      // apply trims
+      last._high = newLastHigh;
+      last.priceRange = [round2(newLastHigh), round2(last._low)];
+      last.price = round2((last._low + newLastHigh) / 2);
+
+      const cur = { ...z };
+      cur._low = newCurLow;
+      cur.priceRange = [round2(cur._high), round2(newCurLow)];
+      cur.price = round2((newCurLow + cur._high) / 2);
+
+      out.push(cur);
+    } else {
+      out.push({ ...z });
+    }
+  }
+
+  // restore strength sort for UI consumption
+  out.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
+  return out;
 }
 
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
@@ -446,7 +415,6 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const cand1h = buildBucketCandidatesGlobal(b1h, bucket1h, CFG.MIN_TOUCHES_1H, "1h");
   const cand4h = buildBucketCandidatesGlobal(b4h, bucket4h, CFG.MIN_TOUCHES_4H, "4h");
 
-  // Score all candidates globally (no proximity filtering here)
   const scored = [...cand1h, ...cand4h]
     .map((z, idx) => {
       const lo = z.price_low;
@@ -460,7 +428,6 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
         currentPrice,
       });
 
-      // attach stop-condition diagnostics (for later merges + debugging)
       const exit = exitConfirmed1h(b1h, lo, hi, CFG.EXIT_CONSEC_BARS_1H);
 
       return {
@@ -487,15 +454,12 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     })
     .sort((a, b) => b.strength - a.strength);
 
-  // Consolidate globally into regimes (behavior-driven)
   const overlapMerged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
   const nearMerged = mergeByNearNegotiation(overlapMerged, b1h);
   const regimesGlobal = clusterUnionBands(nearMerged);
 
-  // Apply proximity only AFTER regimes exist (LOCKED)
   const regimesInBand = filterToBand(regimesGlobal, currentPrice, CFG.WINDOW_POINTS);
 
-  // Select regimes by strength (LOCKED)
   let selected = regimesInBand.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_PRIMARY);
   let selectionMode = `>=${CFG.MIN_STRENGTH_PRIMARY}`;
 
@@ -512,9 +476,9 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     selectionMode = `top${CFG.FALLBACK_TOP_N}`;
   }
 
-  selected.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
+  // ✅ enforce "NO overlaps" on the final render set
+  selected = makeDisjoint(selected);
 
-  // Contract-safe output
   return selected.map((z) => ({
     type: z.type,
     price: z.price,
