@@ -1,34 +1,28 @@
 // src/services/core/logic/smzEngine.js
 // Institutional SMZ detection + scoring + TradingView-style level output.
 //
-// LOCKED GAME PLAN:
-// 1) Detect + score globally across full provided history (no proximity in discovery)
+// LOCKED GAME PLAN (CURRENT):
+// 1) Detect + score globally across full provided history (no proximity bias in selection)
 // 2) Create preliminary regimes (bands) from scored candidates (overlap + clustering)
-// 3) (Keep WINDOW_POINTS=40 in config for later UI use, but DO NOT filter by price right now)
-// 4) Select regimes by score threshold (currently >=75)
-// 5) RE-ANCHOR each selected regime using:
+// 3) Select zones globally by score (>=75 for now; we can re-lock later)
+// 4) RE-ANCHOR each selected regime using:
 //    - 1H truth: strong exit = 2 consecutive 1H bars fully outside zone on same side
 //    - last consolidation block BEFORE exit (start at 10 bars, auto-adjust 6–24)
 //    - refine edges using 30m bars within the same time window
 //    - IMPORTANT: exclude the impulse/exit candle from defining consolidation bounds
-// 6) Keep multiple zones (B) and LABEL them: structure / pocket / micro
-//    Also compute negotiationMid (median close) for pocket zones.
+// 5) Label zones with tiers: structure / pocket / micro + compute negotiationMid for pocket zones
+// 6) Collapse overlapping STRUCTURE zones into a single parent structure while preserving children internally
+//    (micro zones are untouched)
 //
-// STOP CONDITION (LOCKED):
-// - Timeframe of truth: 1H
-// - Strong move out of zone = 2 consecutive 1H bars fully outside zone on SAME SIDE
-//
-// Scoring delegated to smzInstitutionalRubric.js
+// NOTES:
+// - WINDOW_POINTS=40 is kept in config for later UI use, but NOT used in selection right now.
+// - Scoring delegated to smzInstitutionalRubric.js (which provides s.facts incl pocketNow if enabled).
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
-  // Keep for later UI (not used for selection right now)
+  // Kept for later UI filtering if desired (NOT used for selection right now)
   WINDOW_POINTS: 40,
-
-  // Legacy thresholds kept for later (not used for selection right now)
-  MIN_STRENGTH_PRIMARY: 90,
-  MIN_STRENGTH_FALLBACK: 85,
 
   // Guardrail
   FALLBACK_TOP_N: 12,
@@ -54,18 +48,20 @@ const CFG = {
   ANCHOR_MAX_BARS_1H: 24,
 
   // Consolidation quality guardrails (behavior proxy)
-  AVG_RANGE_ATR_MAX: 1.25,
-  WIDTH_ATR_MAX: 3.25,
+  AVG_RANGE_ATR_MAX: 1.25, // average bar range vs ATR
+  WIDTH_ATR_MAX: 3.25,     // total consolidation height vs ATR
 
-  // Current selection rule (locked for now): find the right zones first
+  // Current selection rule (locked for now)
   MIN_SCORE_GLOBAL: 75,
+
+  // Structure collapse rule (locked for now)
+  STRUCT_OVERLAP_PCT: 0.50, // 50%
+  STRUCT_NEAR_POINTS: 4.0,  // within ~4 pts gap
 };
 
 const GRID_STEP = 0.25;
 
-function round2(x) {
-  return Math.round(x * 100) / 100;
-}
+function round2(x) { return Math.round(x * 100) / 100; }
 
 function normalizeBars(arr) {
   return (Array.isArray(arr) ? arr : [])
@@ -81,13 +77,12 @@ function normalizeBars(arr) {
         volume: Number(b.v ?? b.volume ?? 0),
       };
     })
-    .filter(
-      (b) =>
-        Number.isFinite(b.time) &&
-        Number.isFinite(b.open) &&
-        Number.isFinite(b.high) &&
-        Number.isFinite(b.low) &&
-        Number.isFinite(b.close)
+    .filter((b) =>
+      Number.isFinite(b.time) &&
+      Number.isFinite(b.open) &&
+      Number.isFinite(b.high) &&
+      Number.isFinite(b.low) &&
+      Number.isFinite(b.close)
     )
     .sort((a, b) => a.time - b.time);
 }
@@ -100,10 +95,13 @@ function computeATR(candles, period = 14) {
   if (!Array.isArray(candles) || candles.length < period + 2) return 1;
   const trs = [];
   for (let i = 1; i < candles.length; i++) {
-    const c = candles[i],
-      p = candles[i - 1];
+    const c = candles[i], p = candles[i - 1];
     if (!validBar(c) || !validBar(p)) continue;
-    const tr = Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+    const tr = Math.max(
+      c.high - c.low,
+      Math.abs(c.high - p.close),
+      Math.abs(c.low - p.close)
+    );
     trs.push(tr);
   }
   const slice = trs.slice(-period);
@@ -111,12 +109,8 @@ function computeATR(candles, period = 14) {
   return atr > 0 ? atr : 1;
 }
 
-function snapDown(x, step) {
-  return Math.floor(x / step) * step;
-}
-function snapUp(x, step) {
-  return Math.ceil(x / step) * step;
-}
+function snapDown(x, step) { return Math.floor(x / step) * step; }
+function snapUp(x, step) { return Math.ceil(x / step) * step; }
 
 function minLow(candles) {
   let m = Infinity;
@@ -140,19 +134,11 @@ function overlapPct(a, b) {
 }
 
 function overlapsLoose(a, b, threshold) {
-  return (
-    overlapPct({ low: a._low, high: a._high }, { low: b._low, high: b._high }) >= threshold
-  );
+  return overlapPct({ low: a._low, high: a._high }, { low: b._low, high: b._high }) >= threshold;
 }
 
 function barOverlapsZone(bar, lo, hi) {
-  return (
-    bar &&
-    Number.isFinite(bar.high) &&
-    Number.isFinite(bar.low) &&
-    bar.high >= lo &&
-    bar.low <= hi
-  );
+  return bar && Number.isFinite(bar.high) && Number.isFinite(bar.low) && (bar.high >= lo && bar.low <= hi);
 }
 
 function barOutsideSide(bar, lo, hi) {
@@ -182,7 +168,7 @@ function exitConfirmed1h(bars1h, lo, hi, consec = 2) {
 
   for (let j = idx + 1; j < bars1h.length && exitBars < consec; j++) {
     const s = barOutsideSide(bars1h[j], lo, hi);
-    if (!s) break; // overlap/re-entry
+    if (!s) break; // overlap/re-entry: negotiation continues
     if (!side) side = s;
     if (s !== side) break; // must continue same direction
     exitBars++;
@@ -230,9 +216,7 @@ function mergeTwoZones(a, b) {
     .concat(a.details?.members ?? [a.details?.id].filter(Boolean))
     .concat(b.details?.members ?? [b.details?.id].filter(Boolean));
 
-  const tfs = new Set(
-    [ ...(a.details?.tfs ?? []), a.details?.tf, ...(b.details?.tfs ?? []), b.details?.tf ].filter(Boolean)
-  );
+  const tfs = new Set([...(a.details?.tfs ?? []), a.details?.tf, ...(b.details?.tfs ?? []), b.details?.tf].filter(Boolean));
 
   return {
     ...a,
@@ -372,7 +356,6 @@ function chooseConsolidationWindow(bars1h, endIdx, atr1h) {
 
     const avgOk = avgR <= CFG.AVG_RANGE_ATR_MAX * atr1h;
     const widthOk = rh.width <= CFG.WIDTH_ATR_MAX * atr1h;
-
     if (!avgOk || !widthOk) continue;
 
     const score = rh.width;
@@ -542,6 +525,158 @@ function addTiersAndMidlines(zones, bars1h) {
   });
 }
 
+/* ---------------- Collapse overlapping STRUCTURE zones ---------------- */
+
+function collapseOverlappingStructureZones(zones, opts = {}) {
+  const OVERLAP_PCT = Number.isFinite(opts.overlapPct) ? opts.overlapPct : CFG.STRUCT_OVERLAP_PCT;
+  const NEAR_POINTS = Number.isFinite(opts.nearPoints) ? opts.nearPoints : CFG.STRUCT_NEAR_POINTS;
+
+  const list = Array.isArray(zones) ? zones.slice() : [];
+  const structures = [];
+  const others = [];
+
+  for (const z of list) {
+    if ((z.tier ?? "") === "structure") structures.push(z);
+    else others.push(z);
+  }
+
+  if (structures.length <= 1) {
+    const out = structures.concat(others);
+    out.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
+    return out;
+  }
+
+  // Ensure _low/_high exist
+  for (const z of structures) {
+    if (!Number.isFinite(z._low) || !Number.isFinite(z._high)) {
+      const pr = z.priceRange || [];
+      z._high = Number(pr[0]);
+      z._low = Number(pr[1]);
+    }
+  }
+
+  structures.sort((a, b) => a._low - b._low);
+
+  function overlapRatio(a, b) {
+    const lo = Math.max(a._low, b._low);
+    const hi = Math.min(a._high, b._high);
+    const inter = hi - lo;
+    if (inter <= 0) return 0;
+    const wa = a._high - a._low;
+    const wb = b._high - b._low;
+    const denom = Math.min(wa, wb);
+    return denom > 0 ? inter / denom : 0;
+  }
+
+  function separationPts(a, b) {
+    return Math.max(0, b._low - a._high); // 0 if overlaps
+  }
+
+  const parents = [];
+  let group = null;
+
+  function startGroup(z) {
+    group = {
+      low: z._low,
+      high: z._high,
+      strength: Number(z.strength ?? 0),
+      flags: { ...(z.details?.flags ?? {}) },
+      tfs: new Set([...(z.details?.tfs ?? []), z.details?.tf].filter(Boolean)),
+      members: new Set([...(z.details?.members ?? []), z.details?.id].filter(Boolean)),
+      children: [{
+        id: z.details?.id ?? null,
+        strength: Number(z.strength ?? 0),
+        priceRange: z.priceRange ?? null,
+        tier: z.tier ?? null,
+      }],
+      sample: z,
+    };
+  }
+
+  function addToGroup(z) {
+    group.low = Math.min(group.low, z._low);
+    group.high = Math.max(group.high, z._high);
+    group.strength = Math.max(group.strength, Number(z.strength ?? 0));
+
+    if (z.details?.flags?.hasClear4H) group.flags.hasClear4H = true;
+
+    (z.details?.tfs ?? []).forEach((x) => group.tfs.add(x));
+    if (z.details?.tf) group.tfs.add(z.details.tf);
+
+    (z.details?.members ?? []).forEach((m) => group.members.add(m));
+    if (z.details?.id) group.members.add(z.details.id);
+
+    group.children.push({
+      id: z.details?.id ?? null,
+      strength: Number(z.strength ?? 0),
+      priceRange: z.priceRange ?? null,
+      tier: z.tier ?? null,
+    });
+  }
+
+  function flushGroup() {
+    if (!group) return;
+
+    const low = round2(group.low);
+    const high = round2(group.high);
+
+    parents.push({
+      type: "institutional",
+      tier: "structure",
+      _low: low,
+      _high: high,
+      priceRange: [high, low],
+      price: round2((high + low) / 2),
+      strength: group.strength,
+      details: {
+        ...(group.sample?.details ?? {}),
+        id: `smz_struct_${parents.length + 1}`,
+        tf: "mixed",
+        tfs: Array.from(group.tfs),
+        members: Array.from(group.members),
+        flags: { ...(group.flags ?? {}) },
+        facts: {
+          ...(group.sample?.details?.facts ?? {}),
+          collapsedChildren: group.children,
+          collapsedCount: group.children.length,
+        },
+      },
+    });
+
+    group = null;
+  }
+
+  for (const z of structures) {
+    if (!group) { startGroup(z); continue; }
+
+    const tmpA = { _low: group.low, _high: group.high };
+    const ov = overlapRatio(tmpA, z);
+    const gap = separationPts(tmpA, z);
+
+    if (ov >= OVERLAP_PCT && gap <= NEAR_POINTS) {
+      addToGroup(z);
+    } else {
+      flushGroup();
+      startGroup(z);
+    }
+  }
+  flushGroup();
+
+  // Dedupe exact duplicate parents by priceRange
+  const seen = new Set();
+  const dedupParents = [];
+  for (const p of parents) {
+    const key = `${p.priceRange?.[1]}-${p.priceRange?.[0]}|${p.tier}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dedupParents.push(p);
+  }
+
+  const out = dedupParents.concat(others);
+  out.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
+  return out;
+}
+
 /* ---------------- Main ---------------- */
 
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
@@ -622,12 +757,18 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const anchored = selected.map((z) => reanchorRegime(z, b1h, b30, atr1h));
 
   // Label tiers + compute negotiationMid for pocket zones
-  const labeled = addTiersAndMidlines(anchored, b1h);
+  let labeled = addTiersAndMidlines(anchored, b1h);
+
+  // Collapse overlapping STRUCTURE zones into one parent structure (keeps children in facts)
+  labeled = collapseOverlappingStructureZones(labeled, {
+    overlapPct: CFG.STRUCT_OVERLAP_PCT,
+    nearPoints: CFG.STRUCT_NEAR_POINTS,
+  });
 
   // Output contract-safe
   return labeled.map((z) => ({
     type: z.type,
-    tier: z.tier, // "structure" | "pocket" | "micro"
+    tier: z.tier ?? "micro",
     price: z.price,
     priceRange: z.priceRange,
     strength: z.strength,
