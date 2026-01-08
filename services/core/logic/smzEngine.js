@@ -1,16 +1,15 @@
 // src/services/core/logic/smzEngine.js
 // Institutional SMZ detection + scoring + TradingView-style overlap reduction.
 //
-// MODE (what we’re doing now):
+// MODE (current game plan):
 // 1) Detect + score globally across full provided history
-// 2) Build TradingView-style regimes globally (NO proximity filtering pre-consolidation)
+// 2) Consolidate globally into TradingView-style regimes:
+//    - overlap merge
+//    - gap merge (tiny gaps only; NO "touch chaining")
+//    - cluster union (loose overlap)
 // 3) Filter regimes to currentPrice ± 40
 // 4) Select ALL regimes >= 90 (no max cap)
-// 5) Merge overlaps/gaps into TradingView-style bands
-//
-// ✅ MISSING GUARDRAIL (now honored):
-// No proximity filtering before regime consolidation.
-// Proximity (±40) happens ONLY after regimes are built.
+// 5) Guardrail if empty: >=85, else top N
 //
 // Scoring delegated to smzInstitutionalRubric.js
 
@@ -41,7 +40,8 @@ const CFG = {
   MERGE_OVERLAP: 0.55,
   CLUSTER_OVERLAP: 0.30,
 
-  // ✅ NEW (TradingView ladder-killer): merge tiny gaps
+  // ✅ GAP MERGE (TradingView ladder-killer)
+  // IMPORTANT: merges ONLY small POSITIVE gaps (gap > 0), never "touching"
   GAP_POINTS: 1.75,
   BRIDGE_POINTS: 2.50,
   STRONG_SCORE: 92,
@@ -177,7 +177,7 @@ function mergeByOverlap(zones, threshold) {
         .concat(last.details?.members ?? [last.details?.id].filter(Boolean))
         .concat(z.details?.members ?? [z.details?.id].filter(Boolean));
 
-      const tfs = new Set([last.details?.tf, z.details?.tf].filter(Boolean));
+      const tfs = new Set([...(last.details?.tfs ?? []), last.details?.tf, ...(z.details?.tfs ?? []), z.details?.tf].filter(Boolean));
 
       out[out.length - 1] = {
         ...last,
@@ -188,7 +188,7 @@ function mergeByOverlap(zones, threshold) {
         strength,
         details: {
           ...last.details,
-          members,
+          members: Array.from(new Set(members)),
           tfs: Array.from(tfs),
         },
       };
@@ -199,8 +199,9 @@ function mergeByOverlap(zones, threshold) {
   return out;
 }
 
-// ✅ NEW: Gap-merge pass (TradingView ladder-killer)
-// Merges zones separated by tiny gaps (and optional strong-bridge).
+// ✅ Gap merge pass (TradingView ladder-killer)
+// IMPORTANT: we merge ONLY when there is a SMALL POSITIVE GAP (gap > 0).
+// We DO NOT merge "touching" slices (gap == 0), because that chains across the entire grid.
 function mergeByGap(zones, gapPts, bridgePts, strongScore) {
   const sorted = zones.slice().sort((a, b) => a._low - b._low);
   const out = [];
@@ -213,8 +214,9 @@ function mergeByGap(zones, gapPts, bridgePts, strongScore) {
     const lastStrength = Number(last.strength ?? 0);
     const zStrength = Number(z.strength ?? 0);
 
-    const gap = round2(z._low - last._high);
-    const overlapsOrTouches = z._low <= last._high;
+    const gap = round2(z._low - last._high); // positive means a real empty space
+
+    const smallGap = gap > 0 && gap <= gapPts;
 
     const strongBridge =
       gap > 0 &&
@@ -222,9 +224,7 @@ function mergeByGap(zones, gapPts, bridgePts, strongScore) {
       lastStrength >= strongScore &&
       zStrength >= strongScore;
 
-    const smallGap = gap > 0 && gap <= gapPts;
-
-    if (overlapsOrTouches || smallGap || strongBridge) {
+    if (smallGap || strongBridge) {
       const mergedLow = round2(Math.min(last._low, z._low));
       const mergedHigh = round2(Math.max(last._high, z._high));
       const strength = Math.max(lastStrength, zStrength);
@@ -233,9 +233,7 @@ function mergeByGap(zones, gapPts, bridgePts, strongScore) {
         .concat(last.details?.members ?? [last.details?.id].filter(Boolean))
         .concat(z.details?.members ?? [z.details?.id].filter(Boolean));
 
-      const tfs = new Set([...(last.details?.tfs ?? []), ...(z.details?.tfs ?? [])].filter(Boolean));
-      if (last.details?.tf) tfs.add(last.details.tf);
-      if (z.details?.tf) tfs.add(z.details.tf);
+      const tfs = new Set([...(last.details?.tfs ?? []), last.details?.tf, ...(z.details?.tfs ?? []), z.details?.tf].filter(Boolean));
 
       out[out.length - 1] = {
         ...last,
@@ -284,7 +282,7 @@ function clusterUnionBands(zones) {
     const tfs = new Set();
     let hasClear4H = false;
 
-    // ✅ pick best member for debugging / truth anchor
+    // best member for debugging
     let bestMemberId = null;
     let bestMemberTf = null;
     let bestStrength = -Infinity;
@@ -304,9 +302,9 @@ function clusterUnionBands(zones) {
 
       if (m.details?.id) memberIds.push(m.details.id);
       if (m.details?.tf) tfs.add(m.details.tf);
+      if (Array.isArray(m.details?.tfs)) m.details.tfs.forEach((x) => tfs.add(x));
       if (m.details?.flags?.hasClear4H) hasClear4H = true;
       if (Array.isArray(m.details?.members)) memberIds.push(...m.details.members);
-      if (Array.isArray(m.details?.tfs)) m.details.tfs.forEach((x) => tfs.add(x));
     }
 
     low = round2(low);
@@ -331,7 +329,6 @@ function clusterUnionBands(zones) {
     };
   });
 
-  // Keep score order (strongest first)
   bands.sort((a, b) => b.strength - a.strength);
   return bands;
 }
@@ -339,6 +336,7 @@ function clusterUnionBands(zones) {
 function filterToBand(zones, currentPrice, windowPts) {
   const loBand = currentPrice - windowPts;
   const hiBand = currentPrice + windowPts;
+  // keep overlap logic (best choice)
   return zones.filter((z) => z._high >= loBand && z._low <= hiBand);
 }
 
@@ -395,41 +393,36 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     })
     .sort((a, b) => b.strength - a.strength);
 
-  // Stage 1: overlap merge (existing)
-  const merged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
+  // ✅ Global consolidation (NO proximity filtering here)
+  const overlapMerged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
+  const gapMerged = mergeByGap(overlapMerged, CFG.GAP_POINTS, CFG.BRIDGE_POINTS, CFG.STRONG_SCORE);
+  const regimesGlobal = clusterUnionBands(gapMerged);
 
-  // ✅ Stage 2: gap merge (NEW)
-  const gapMerged = mergeByGap(merged, CFG.GAP_POINTS, CFG.BRIDGE_POINTS, CFG.STRONG_SCORE);
-
-  // ✅ Stage 3: build global regimes first (NO proximity yet)
-  const regimes = clusterUnionBands(gapMerged);
-
-  // ✅ NOW apply proximity filter to regimes (locked rule)
-  const banded = filterToBand(regimes, currentPrice, CFG.WINDOW_POINTS);
+  // ✅ Proximity filter ONLY AFTER regimes exist (locked rule)
+  const regimesInBand = filterToBand(regimesGlobal, currentPrice, CFG.WINDOW_POINTS);
 
   // --- PRIMARY selection: all >=90 regimes ---
-  let selected = banded.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_PRIMARY);
+  let selected = regimesInBand.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_PRIMARY);
   let selectionMode = `>=${CFG.MIN_STRENGTH_PRIMARY}`;
 
   // ✅ GUARDRAIL: if empty, relax to >=85
   if (selected.length === 0) {
-    selected = banded.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_FALLBACK);
+    selected = regimesInBand.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_FALLBACK);
     selectionMode = `>=${CFG.MIN_STRENGTH_FALLBACK}`;
   }
 
   // ✅ GUARDRAIL: if still empty, return top N in-band by score
   if (selected.length === 0) {
-    selected = banded
+    selected = regimesInBand
       .slice()
       .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0))
       .slice(0, CFG.FALLBACK_TOP_N);
     selectionMode = `top${CFG.FALLBACK_TOP_N}`;
   }
 
-  // Keep strongest first
   selected.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
 
-  // Final output (contract-safe)
+  // Contract-safe output
   return selected.map((z) => ({
     type: z.type,
     price: z.price,
@@ -437,7 +430,7 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     strength: z.strength,
     details: {
       ...z.details,
-      selectionMode, // tells you if guardrail triggered
+      selectionMode,
     },
   }));
 }
