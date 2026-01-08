@@ -539,6 +539,56 @@ function makeDisjoint(bands) {
   return out;
 }
 
+function median(values) {
+  const arr = (values || []).filter((x) => Number.isFinite(x)).slice().sort((a,b)=>a-b);
+  if (arr.length === 0) return null;
+  const mid = Math.floor(arr.length / 2);
+  return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+}
+
+function addTiersAndMidlines(zones, bars1h) {
+  return (zones || []).map((z) => {
+    const score = Number(z.strength ?? 0);
+    const hasClear4H = Boolean(z.details?.flags?.hasClear4H);
+
+    const pocket = z.details?.facts?.pocketNow ?? null;
+    const pocketWidth = pocket?.width != null ? Number(pocket.width) : null;
+
+    // Tier rules (B: keep multiple tiers)
+    let tier = "micro";
+    if (score >= 90 || (hasClear4H && z.details?.facts?.anchorMode === "anchored_last_consolidation")) {
+      tier = "structure";
+    } else if (pocket && Number.isFinite(pocketWidth) && pocketWidth <= 4.0) {
+      tier = "pocket";
+    }
+
+    // negotiationMid for pockets: median close inside pocket window
+    let negotiationMid = null;
+    if (tier === "pocket" && pocket?.startIdx1h != null && pocket?.endIdx1h != null) {
+      const s = Math.max(0, Number(pocket.startIdx1h));
+      const e = Math.min((bars1h?.length ?? 0) - 1, Number(pocket.endIdx1h));
+      if (Array.isArray(bars1h) && e >= s) {
+        const closes = bars1h.slice(s, e + 1).map((b) => Number(b?.close));
+        const m = median(closes);
+        if (m != null) negotiationMid = round2(m);
+      }
+    }
+
+    return {
+      ...z,
+      tier,
+      details: {
+        ...z.details,
+        facts: {
+          ...(z.details?.facts ?? {}),
+          negotiationMid,       // <-- pink dashed line value (for pocket zones)
+        },
+      },
+    };
+  });
+}
+
+
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const b30 = normalizeBars(bars30m);
   const b1h = normalizeBars(bars1h);
