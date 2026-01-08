@@ -423,7 +423,7 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
   }
 
   // Anchor window ends at last touch (the final negotiation bar)
-  const anchorEnd = exit.lastTouchIndex;
+  const anchorEnd = Math.max(0, exit.lastTouchIndex - 1);
 
   const chosen = chooseConsolidationWindow(bars1h, anchorEnd, atr1h);
   if (!chosen) {
@@ -619,7 +619,10 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const anchored = selected.map((z) => reanchorRegime(z, b1h, b30, atr1h));
 
   // ✅ enforce disjoint (no overlaps) so no yellow blob
-  const disjoint = makeDisjoint(anchored);
+  // ✅ keep overlaps; we will differentiate by tier in the UI
+  const labeled = addTiersAndMidlines(anchored, b1h);
+  return labeled.map(...)
+
 
   // Output contract-safe
   return disjoint.map((z) => ({
