@@ -1,54 +1,69 @@
 // src/services/core/logic/smzEngine.js
-// Institutional SMZ detection + scoring + TradingView-style overlap reduction.
+// Institutional SMZ detection + scoring + TradingView-style level output.
 //
 // LOCKED GAME PLAN:
-// 1) Detect + score globally across full provided history
-// 2) Build regimes globally (behavior-driven width)
+// 1) Detect + score globally across full provided history (no proximity in discovery)
+// 2) Create preliminary regimes (bands) from scored candidates (overlap + clustering)
 // 3) Apply proximity filter AFTER regimes exist: currentPrice ± 40
 // 4) Select regimes: >=90 (fallback >=85, else top N)
-// 5) Output render objects (bands). Evidence remains per-member.
+// 5) RE-ANCHOR each selected regime using:
+//    - 1H truth: strong exit = 2 consecutive 1H bars fully outside zone on same side
+//    - last consolidation block BEFORE exit (start at 10 bars, auto-adjust 6–24)
+//    - refine edges using 30m bars within the same time window
+// 6) Enforce DISJOINT output (no overlaps) to prevent “one yellow blob”
 //
 // STOP CONDITION (LOCKED):
 // - Timeframe of truth: 1H
 // - Strong move out of zone = 2 consecutive 1H bars fully outside zone on SAME SIDE
 //
-// USER REQUIREMENT (LOCKED):
-// - Final output bands MUST be DISJOINT (no overlaps)
+// Scoring delegated to smzInstitutionalRubric.js
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
+  // Output band around current price (LOCKED)
   WINDOW_POINTS: 40,
 
+  // Selection thresholds (LOCKED)
   MIN_STRENGTH_PRIMARY: 90,
   MIN_STRENGTH_FALLBACK: 85,
   FALLBACK_TOP_N: 12,
 
+  // Candidate strictness
   MIN_TOUCHES_1H: 5,
   MIN_TOUCHES_4H: 3,
 
+  // Bucket sizing from ATR
   BUCKET_ATR_MULT_1H: 1.0,
   BUCKET_ATR_MULT_4H: 1.2,
 
+  // Merge/cluster (preliminary regimes)
   MERGE_OVERLAP: 0.55,
   CLUSTER_OVERLAP: 0.30,
 
-  // Near-merge: allow touching slices ONLY if same negotiation episode
-  NEAR_POINTS: 0.50,
-  TOUCH_TIME_WINDOW_1H: 48,
-
-  // Stop condition
+  // Stop condition (LOCKED)
   EXIT_CONSEC_BARS_1H: 2,
+
+  // Anchor-window (your decision: start 10, allow 6–24)
+  ANCHOR_START_BARS_1H: 10,
+  ANCHOR_MIN_BARS_1H: 6,
+  ANCHOR_MAX_BARS_1H: 24,
+
+  // Consolidation quality guardrails (behavior proxy, not “indicator trading”)
+  // These only help the engine decide how far back to include bars.
+  AVG_RANGE_ATR_MAX: 1.25,  // average bar range vs ATR
+  WIDTH_ATR_MAX: 3.25,      // total consolidation height vs ATR
 };
 
 const GRID_STEP = 0.25;
+
 function round2(x) { return Math.round(x * 100) / 100; }
 
 function normalizeBars(arr) {
   return (Array.isArray(arr) ? arr : [])
     .map((b) => {
       const rawT = Number(b.t ?? b.time ?? 0);
-      const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT;
+      const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT; // ms->sec if needed
       return {
         time,
         open: Number(b.o ?? b.open ?? 0),
@@ -120,12 +135,15 @@ function overlapsLoose(a, b, threshold) {
 function barOverlapsZone(bar, lo, hi) {
   return bar && Number.isFinite(bar.high) && Number.isFinite(bar.low) && (bar.high >= lo && bar.low <= hi);
 }
+
 function barOutsideSide(bar, lo, hi) {
+  // returns "above" if bar fully above zone, "below" if fully below, else null
   if (!bar || !Number.isFinite(bar.high) || !Number.isFinite(bar.low)) return null;
   if (bar.low > hi) return "above";
   if (bar.high < lo) return "below";
   return null;
 }
+
 function lastTouchIndex1h(bars1h, lo, hi) {
   if (!Array.isArray(bars1h) || bars1h.length === 0) return -1;
   for (let i = bars1h.length - 1; i >= 0; i--) {
@@ -134,6 +152,8 @@ function lastTouchIndex1h(bars1h, lo, hi) {
   return -1;
 }
 
+// STOP CONDITION (LOCKED):
+// Find last touch index, then require next 2 consecutive 1H bars fully outside on SAME side.
 function exitConfirmed1h(bars1h, lo, hi, consec = 2) {
   const idx = lastTouchIndex1h(bars1h, lo, hi);
   if (idx < 0) return { lastTouchIndex: -1, confirmed: false, side: null, exitBars: 0 };
@@ -143,9 +163,9 @@ function exitConfirmed1h(bars1h, lo, hi, consec = 2) {
 
   for (let j = idx + 1; j < bars1h.length && exitBars < consec; j++) {
     const s = barOutsideSide(bars1h[j], lo, hi);
-    if (!s) break;
+    if (!s) break; // overlap/re-entry: negotiation continues
     if (!side) side = s;
-    if (s !== side) break;
+    if (s !== side) break; // must continue same direction
     exitBars++;
   }
 
@@ -157,7 +177,7 @@ function exitConfirmed1h(bars1h, lo, hi, consec = 2) {
   };
 }
 
-// GLOBAL bucket candidates
+// GLOBAL bucket candidates across full price range
 function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
   const loAll = minLow(candles);
   const hiAll = maxHigh(candles);
@@ -168,7 +188,9 @@ function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
   const step = Math.max(GRID_STEP, snapUp(bucketSize, GRID_STEP));
 
   const buckets = [];
-  for (let lo = start; lo < end; lo += step) buckets.push({ tf, low: lo, high: lo + step, touches: 0 });
+  for (let lo = start; lo < end; lo += step) {
+    buckets.push({ tf, low: lo, high: lo + step, touches: 0 });
+  }
 
   for (const c of candles) {
     if (!validBar(c)) continue;
@@ -184,6 +206,7 @@ function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
   return out;
 }
 
+// Merge helper
 function mergeTwoZones(a, b) {
   const mergedLow = round2(Math.min(a._low, b._low));
   const mergedHigh = round2(Math.max(a._high, b._high));
@@ -194,10 +217,6 @@ function mergeTwoZones(a, b) {
     .concat(b.details?.members ?? [b.details?.id].filter(Boolean));
 
   const tfs = new Set([...(a.details?.tfs ?? []), a.details?.tf, ...(b.details?.tfs ?? []), b.details?.tf].filter(Boolean));
-
-  const aLT = Number(a.details?.facts?.lastTouchIndex1h ?? -1);
-  const bLT = Number(b.details?.facts?.lastTouchIndex1h ?? -1);
-  const lastTouch = Math.max(aLT, bLT);
 
   return {
     ...a,
@@ -210,14 +229,11 @@ function mergeTwoZones(a, b) {
       ...a.details,
       members: Array.from(new Set(members)),
       tfs: Array.from(tfs),
-      facts: {
-        ...(a.details?.facts ?? {}),
-        lastTouchIndex1h: lastTouch,
-      },
     },
   };
 }
 
+// Overlap-only merge (preliminary cleanup)
 function mergeByOverlap(zones, threshold) {
   const sorted = zones.slice().sort((x, y) => x._low - y._low);
   const out = [];
@@ -231,53 +247,7 @@ function mergeByOverlap(zones, threshold) {
   return out;
 }
 
-// ✅ FIX 1: Don't near-merge across confirmed exits
-function mergeByNearNegotiation(zones, bars1h) {
-  const sorted = zones.slice().sort((a, b) => a._low - b._low);
-  const out = [];
-
-  for (const z of sorted) {
-    if (!out.length) { out.push(z); continue; }
-
-    const last = out[out.length - 1];
-
-    const gap = round2(z._low - last._high); // 0 = touching
-    const nearByPrice = gap <= CFG.NEAR_POINTS;
-
-    const ltA = Number.isFinite(last.details?.facts?.lastTouchIndex1h)
-      ? Number(last.details.facts.lastTouchIndex1h)
-      : lastTouchIndex1h(bars1h, last._low, last._high);
-
-    const ltB = Number.isFinite(z.details?.facts?.lastTouchIndex1h)
-      ? Number(z.details.facts.lastTouchIndex1h)
-      : lastTouchIndex1h(bars1h, z._low, z._high);
-
-    const sameEpisode =
-      ltA >= 0 && ltB >= 0 && Math.abs(ltA - ltB) <= CFG.TOUCH_TIME_WINDOW_1H;
-
-    // stop-condition facts (already computed at scoring time)
-    const aExit = Boolean(last.details?.facts?.exitConfirmed1h);
-    const bExit = Boolean(z.details?.facts?.exitConfirmed1h);
-
-    // HARD BOUNDARY: if either side has a confirmed exit, do NOT merge across it
-    const blockedByExit = aExit || bExit;
-
-    if (nearByPrice && sameEpisode && !blockedByExit) {
-      out[out.length - 1] = mergeTwoZones(
-        { ...last, details: { ...last.details, facts: { ...(last.details?.facts ?? {}), lastTouchIndex1h: ltA } } },
-        { ...z, details: { ...z.details, facts: { ...(z.details?.facts ?? {}), lastTouchIndex1h: ltB } } }
-      );
-    } else {
-      out.push({
-        ...z,
-        details: { ...z.details, facts: { ...(z.details?.facts ?? {}), lastTouchIndex1h: ltB } },
-      });
-    }
-  }
-
-  return out;
-}
-
+// Cluster union to form preliminary regimes
 function clusterUnionBands(zones) {
   const input = zones.slice().sort((a, b) => a._low - b._low);
   const clusters = [];
@@ -312,7 +282,8 @@ function clusterUnionBands(zones) {
       if (Array.isArray(m.details?.members)) memberIds.push(...m.details.members);
     }
 
-    low = round2(low); high = round2(high);
+    low = round2(low);
+    high = round2(high);
 
     return {
       type: "institutional",
@@ -331,7 +302,8 @@ function clusterUnionBands(zones) {
     };
   });
 
-  bands.sort((a, b) => b.strength - a.strength);
+  // strongest first
+  bands.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
   return bands;
 }
 
@@ -341,38 +313,212 @@ function filterToBand(zones, currentPrice, windowPts) {
   return zones.filter((z) => z._high >= loBand && z._low <= hiBand);
 }
 
-// ✅ FIX 2: Make final selected bands DISJOINT (no overlap).
-// We sort by price (low->high) and trim overlaps at the midpoint.
+// ---------- Anchor-window extraction (THE KEY CHANGE) ----------
+
+function sliceBarsByIndex(bars, startIdx, endIdx) {
+  if (!Array.isArray(bars) || bars.length === 0) return [];
+  const s = Math.max(0, startIdx);
+  const e = Math.min(bars.length - 1, endIdx);
+  if (s > e) return [];
+  return bars.slice(s, e + 1);
+}
+
+function meanRange(bars) {
+  if (!Array.isArray(bars) || bars.length === 0) return 0;
+  let sum = 0, n = 0;
+  for (const b of bars) {
+    if (!validBar(b)) continue;
+    sum += (b.high - b.low);
+    n++;
+  }
+  return n ? sum / n : 0;
+}
+
+function rangeHighLow(bars) {
+  let lo = Infinity, hi = -Infinity;
+  for (const b of (bars || [])) {
+    if (!validBar(b)) continue;
+    lo = Math.min(lo, b.low);
+    hi = Math.max(hi, b.high);
+  }
+  if (lo === Infinity || hi === -Infinity) return null;
+  return { lo: round2(lo), hi: round2(hi), width: round2(hi - lo) };
+}
+
+// Decide best consolidation window length (6–24), starting at 10.
+// We pick the tightest (smallest width) window that still looks like consolidation:
+// - avg bar range <= AVG_RANGE_ATR_MAX * ATR
+// - total width <= WIDTH_ATR_MAX * ATR
+function chooseConsolidationWindow(bars1h, endIdx, atr1h) {
+  const minL = CFG.ANCHOR_MIN_BARS_1H;
+  const maxL = CFG.ANCHOR_MAX_BARS_1H;
+
+  let best = null;
+
+  for (let L = minL; L <= maxL; L++) {
+    const startIdx = endIdx - (L - 1);
+    if (startIdx < 0) continue;
+
+    const windowBars = sliceBarsByIndex(bars1h, startIdx, endIdx);
+    const rh = rangeHighLow(windowBars);
+    if (!rh) continue;
+
+    const avgR = meanRange(windowBars);
+
+    const avgOk = avgR <= CFG.AVG_RANGE_ATR_MAX * atr1h;
+    const widthOk = rh.width <= CFG.WIDTH_ATR_MAX * atr1h;
+
+    if (!avgOk || !widthOk) continue;
+
+    // Prefer the tightest width; tie-breaker: closer to start-at-10
+    const score = rh.width;
+    const bias = Math.abs(L - CFG.ANCHOR_START_BARS_1H) * 0.01;
+    const total = score + bias;
+
+    if (!best || total < best.total) {
+      best = { startIdx, endIdx, L, lo: rh.lo, hi: rh.hi, width: rh.width, total };
+    }
+  }
+
+  // If nothing passes guardrails, fall back to exactly 10 bars (clamped)
+  if (!best) {
+    const L = Math.min(Math.max(CFG.ANCHOR_START_BARS_1H, minL), maxL);
+    const startIdx = Math.max(0, endIdx - (L - 1));
+    const windowBars = sliceBarsByIndex(bars1h, startIdx, endIdx);
+    const rh = rangeHighLow(windowBars);
+    if (rh) return { startIdx, endIdx, L, lo: rh.lo, hi: rh.hi, width: rh.width, total: rh.width };
+    return null;
+  }
+
+  return best;
+}
+
+// Refine zone edges using 30m bars within the anchor time window
+function refineWith30m(bars30m, startTimeSec, endTimeSec) {
+  if (!Array.isArray(bars30m) || bars30m.length === 0) return null;
+  const subset = bars30m.filter((b) => validBar(b) && b.time >= startTimeSec && b.time <= endTimeSec);
+  const rh = rangeHighLow(subset);
+  return rh ? { lo: rh.lo, hi: rh.hi } : null;
+}
+
+// Re-anchor a regime: use exit, then find last consolidation block pre-exit, refine with 30m.
+function reanchorRegime(regime, bars1h, bars30m, atr1h) {
+  const lo0 = regime._low;
+  const hi0 = regime._high;
+
+  const exit = exitConfirmed1h(bars1h, lo0, hi0, CFG.EXIT_CONSEC_BARS_1H);
+
+  // If no clean exit, keep as-is (fallback behavior)
+  if (!exit.confirmed || exit.lastTouchIndex < 0) {
+    return {
+      ...regime,
+      details: {
+        ...regime.details,
+        facts: {
+          ...(regime.details?.facts ?? {}),
+          anchorMode: "no_exit_keep_original",
+        },
+      },
+    };
+  }
+
+  // Anchor window ends at last touch (the final negotiation bar)
+  const anchorEnd = exit.lastTouchIndex;
+
+  const chosen = chooseConsolidationWindow(bars1h, anchorEnd, atr1h);
+  if (!chosen) {
+    return {
+      ...regime,
+      details: {
+        ...regime.details,
+        facts: {
+          ...(regime.details?.facts ?? {}),
+          anchorMode: "exit_no_window_keep_original",
+        },
+      },
+    };
+  }
+
+  const startTime = bars1h[chosen.startIdx]?.time ?? null;
+  const endTime = bars1h[chosen.endIdx]?.time ?? null;
+
+  // 1H anchor bounds
+  let newLo = chosen.lo;
+  let newHi = chosen.hi;
+
+  // 30m refine (if we have times)
+  if (Number.isFinite(startTime) && Number.isFinite(endTime)) {
+    const refined = refineWith30m(bars30m, startTime, endTime);
+    if (refined) {
+      newLo = refined.lo;
+      newHi = refined.hi;
+    }
+  }
+
+  // If something went weird, keep original
+  if (!(Number.isFinite(newLo) && Number.isFinite(newHi)) || newHi <= newLo) {
+    return {
+      ...regime,
+      details: {
+        ...regime.details,
+        facts: {
+          ...(regime.details?.facts ?? {}),
+          anchorMode: "bad_bounds_keep_original",
+        },
+      },
+    };
+  }
+
+  newLo = round2(newLo);
+  newHi = round2(newHi);
+
+  return {
+    ...regime,
+    _low: newLo,
+    _high: newHi,
+    priceRange: [newHi, newLo],
+    price: round2((newLo + newHi) / 2),
+    details: {
+      ...regime.details,
+      facts: {
+        ...(regime.details?.facts ?? {}),
+        anchorMode: "anchored_last_consolidation",
+        anchorBars1h: chosen.L,
+        anchorStartTime: startTime,
+        anchorEndTime: endTime,
+        exitSide1h: exit.side,
+        exitBars1h: exit.exitBars,
+      },
+    },
+  };
+}
+
+// Enforce disjoint final output (no overlaps)
 function makeDisjoint(bands) {
   const sorted = bands.slice().sort((a, b) => a._low - b._low);
   const out = [];
 
   for (const z of sorted) {
     if (!out.length) { out.push({ ...z }); continue; }
-
     const last = out[out.length - 1];
 
-    // overlap?
     if (z._low < last._high) {
       const mid = round2((z._low + last._high) / 2);
 
-      // trim last high down, trim current low up
       const newLastHigh = mid;
       const newCurLow = mid;
 
-      // ensure non-negative width; if collapse occurs, drop the weaker one
       const lastWidth = newLastHigh - last._low;
       const curWidth = z._high - newCurLow;
 
+      // if trimming collapses one zone, keep stronger
       if (lastWidth <= 0 || curWidth <= 0) {
-        // keep stronger, drop weaker
         const keepLast = Number(last.strength ?? 0) >= Number(z.strength ?? 0);
-        if (keepLast) continue; // drop current
-        out[out.length - 1] = { ...z }; // replace last
+        if (keepLast) continue;
+        out[out.length - 1] = { ...z };
         continue;
       }
 
-      // apply trims
       last._high = newLastHigh;
       last.priceRange = [round2(newLastHigh), round2(last._low)];
       last.price = round2((last._low + newLastHigh) / 2);
@@ -388,7 +534,7 @@ function makeDisjoint(bands) {
     }
   }
 
-  // restore strength sort for UI consumption
+  // return in strength order for UI
   out.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
   return out;
 }
@@ -415,6 +561,7 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const cand1h = buildBucketCandidatesGlobal(b1h, bucket1h, CFG.MIN_TOUCHES_1H, "1h");
   const cand4h = buildBucketCandidatesGlobal(b4h, bucket4h, CFG.MIN_TOUCHES_4H, "4h");
 
+  // Score globally
   const scored = [...cand1h, ...cand4h]
     .map((z, idx) => {
       const lo = z.price_low;
@@ -428,8 +575,6 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
         currentPrice,
       });
 
-      const exit = exitConfirmed1h(b1h, lo, hi, CFG.EXIT_CONSEC_BARS_1H);
-
       return {
         type: "institutional",
         price: round2((lo + hi) / 2),
@@ -440,26 +585,22 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
           tf: z.tf,
           parts: s.parts,
           flags: s.flags,
-          facts: {
-            ...s.facts,
-            lastTouchIndex1h: exit.lastTouchIndex,
-            exitConfirmed1h: exit.confirmed,
-            exitSide1h: exit.side,
-            exitBars1h: exit.exitBars,
-          },
+          facts: s.facts,
         },
         _low: lo,
         _high: hi,
       };
     })
-    .sort((a, b) => b.strength - a.strength);
+    .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
 
-  const overlapMerged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
-  const nearMerged = mergeByNearNegotiation(overlapMerged, b1h);
-  const regimesGlobal = clusterUnionBands(nearMerged);
+  // Preliminary regimes (global)
+  const merged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
+  const regimesGlobal = clusterUnionBands(merged);
 
+  // Apply proximity only after regimes exist
   const regimesInBand = filterToBand(regimesGlobal, currentPrice, CFG.WINDOW_POINTS);
 
+  // Selection
   let selected = regimesInBand.filter((z) => Number(z.strength ?? 0) >= CFG.MIN_STRENGTH_PRIMARY);
   let selectionMode = `>=${CFG.MIN_STRENGTH_PRIMARY}`;
 
@@ -476,10 +617,14 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     selectionMode = `top${CFG.FALLBACK_TOP_N}`;
   }
 
-  // ✅ enforce "NO overlaps" on the final render set
-  selected = makeDisjoint(selected);
+  // ✅ RE-ANCHOR each selected regime to last consolidation before strong exit
+  const anchored = selected.map((z) => reanchorRegime(z, b1h, b30, atr1h));
 
-  return selected.map((z) => ({
+  // ✅ enforce disjoint (no overlaps) so no yellow blob
+  const disjoint = makeDisjoint(anchored);
+
+  // Output contract-safe
+  return disjoint.map((z) => ({
     type: z.type,
     price: z.price,
     priceRange: z.priceRange,
