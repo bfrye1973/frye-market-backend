@@ -955,6 +955,20 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     overlapPct: CFG.STRUCT_OVERLAP_PCT,
     nearPoints: CFG.STRUCT_NEAR_POINTS,
   });
+  // ✅ PRICE WINDOW FILTER (DISCOVERY VIEW)
+  // Keep only structures within ±WINDOW_POINTS of current price.
+  // This prevents deep historical zones (e.g. 530) from cluttering the chart.
+  const winLo = currentPrice - CFG.WINDOW_POINTS;
+  const winHi = currentPrice + CFG.WINDOW_POINTS;
+
+  regimes = (regimes || []).filter((z) => {
+    if ((z.tier ?? "") !== "structure") return true; // keep non-structures if any exist pre-pocket
+    const lo = Number(z.priceRange?.[1]);
+    const hi = Number(z.priceRange?.[0]);
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return false;
+    // keep if zone intersects the window
+    return hi >= winLo && lo <= winHi;
+  });
 
   // Add POCKET children inside each STRUCTURE
   regimes = expandPocketChildren(regimes, b1h);
