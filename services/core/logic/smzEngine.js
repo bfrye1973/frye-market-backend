@@ -41,7 +41,7 @@ const CFG = {
   WIDTH_ATR_MAX: 3.25,
 
   // Working threshold (70–100)
-  MIN_SCORE_GLOBAL: 70,
+  MIN_SCORE_GLOBAL: 75,
 
   STRUCT_OVERLAP_PCT: 0.50,
   STRUCT_NEAR_POINTS: 4.0,
