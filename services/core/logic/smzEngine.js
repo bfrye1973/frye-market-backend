@@ -45,7 +45,7 @@ const CFG = {
 
   // ✅ TESTING MODE (visibility)
   // Show more candidates while we validate correctness.
-  MIN_SCORE_GLOBAL: 60,
+  MIN_SCORE_GLOBAL: 70,
 
   STRUCT_OVERLAP_PCT: 0.50,
   STRUCT_NEAR_POINTS: 4.0,
