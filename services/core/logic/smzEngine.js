@@ -2,26 +2,23 @@
 // Institutional SMZ detection + scoring + TradingView-style level output.
 //
 // CURRENT BEHAVIOR (LOCKED):
-// - Score globally
-// - Collapse overlapping STRUCTURE zones into parent structures (keep MICRO)
+// - Score globally (rubric decides strength; relevance may exist inside rubric)
 // - Re-anchor to last consolidation before confirmed exit (exclude impulse candle)
-// - Add tiers: structure / pocket (pocket children emitted as separate tier)
-// - Emit POCKET children inside each STRUCTURE zone and compute negotiationMid
+// - Collapse overlapping STRUCTURE zones into parent structures
+// - Emit POCKET children (one per STRUCTURE) and compute negotiationMid
 //
-// PATCH (2026-01-09) — Zone 2 fix:
-// ✅ Fix #1 (required): Exit confirmation must be based on the "launch window", not the whole regime bounds.
-//    - Old: exitConfirmed1h(bars1h, regimeLow, regimeHigh)
-//    - New: scan for the latest consolidation window (6–24 bars, ATR rules) whose NEXT 2x 1H bars are fully outside
-//           THAT window's bounds (same side). This finds the true "launch" inside a wide regime.
-//    - Still excludes impulse candles by anchoring end at the last bar of the consolidation window.
-// ✅ Fix #3 (testing): MIN_SCORE_GLOBAL lowered from 75 → 60 to increase visibility during testing.
-//
-// NOTE: WINDOW_POINTS kept for later UI filter; not used for selection right now.
+// PATCHES:
+// ✅ Inner launch-window anchoring: confirm exit relative to the consolidation window (not wide regime bounds)
+// ✅ Testing: MIN_SCORE_GLOBAL = 70 (working mode)
+// ✅ NEW (LOCKED): STRUCTURE qualification gate
+//    STRUCTURE = tight acceptance -> violent exit -> no immediate return
+//    If a regime cannot prove a valid anchored consolidation + confirmed exit,
+//    it is NOT STRUCTURE and is demoted to tier:"micro" (Engine 1 decision).
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
-  WINDOW_POINTS: 40, // kept for later UI use
+  WINDOW_POINTS: 40, // kept for later UI use (optional filter)
 
   FALLBACK_TOP_N: 12,
 
@@ -43,12 +40,16 @@ const CFG = {
   AVG_RANGE_ATR_MAX: 1.25,
   WIDTH_ATR_MAX: 3.25,
 
-  // ✅ TESTING MODE (visibility)
-  // Show more candidates while we validate correctness.
+  // Working threshold (70–100)
   MIN_SCORE_GLOBAL: 70,
 
   STRUCT_OVERLAP_PCT: 0.50,
   STRUCT_NEAR_POINTS: 4.0,
+
+  // ✅ STRUCTURE qualification (Engine 1 definition)
+  // If anchored window is wider than this, it is not a "tight acceptance" structure.
+  // (We keep it absolute for SPY; ATR gate already exists in window chooser.)
+  STRUCT_MAX_WIDTH_PTS: 4.0,
 };
 
 const GRID_STEP = 0.25;
@@ -376,7 +377,6 @@ function chooseConsolidationWindow(bars1h, endIdx, atr1h) {
     const widthOk = rh.width <= CFG.WIDTH_ATR_MAX * atr1h;
     if (!avgOk || !widthOk) continue;
 
-    // Tightest window wins, with slight bias to ~10 bars.
     const score = rh.width;
     const bias = Math.abs(L - CFG.ANCHOR_START_BARS_1H) * 0.01;
     const total = score + bias;
@@ -405,11 +405,6 @@ function refineWith30m(bars30m, startTimeSec, endTimeSec) {
   return rh ? { lo: rh.lo, hi: rh.hi } : null;
 }
 
-/**
- * ✅ NEW: Confirm violent exit relative to a CONSOLIDATION WINDOW (not a wide regime).
- * - Window ends at endIdx (last bar of negotiation)
- * - Next 2 bars (endIdx+1, endIdx+2) must be fully outside the window (same side).
- */
 function exitAfterWindowConfirmed1h(bars1h, windowLo, windowHi, endIdx, consec = 2) {
   if (!Array.isArray(bars1h) || bars1h.length === 0) return { confirmed: false, side: null, exitBars: 0 };
   if (!Number.isFinite(windowLo) || !Number.isFinite(windowHi) || windowHi <= windowLo) {
@@ -431,35 +426,19 @@ function exitAfterWindowConfirmed1h(bars1h, windowLo, windowHi, endIdx, consec =
   return { confirmed: exitBars >= consec, side, exitBars };
 }
 
-/**
- * ✅ NEW: Find the latest valid "launch window" inside a regime.
- *
- * Why: Wide regimes (like 680–686.87) can hide the true exit from the real negotiation (680–684).
- * This scan finds a consolidation window that itself has a valid 2-bar exit, using your locked rules.
- *
- * Strategy (locked intent):
- * - Scan endIdx from most recent backward (latest launch wins)
- * - For each endIdx, compute best consolidation window (6–24, ATR rules)
- * - Confirm 2-bar exit relative to that window bounds
- * - Require window to be inside the original regime bounds (with small epsilon)
- * - Return the FIRST match (latest) to match your "latest violent move" intent
- */
 function findLatestLaunchWindowInsideRegime(bars1h, regimeLo, regimeHi, atr1h) {
   if (!Array.isArray(bars1h) || bars1h.length < 30) return null;
   if (!Number.isFinite(regimeLo) || !Number.isFinite(regimeHi) || regimeHi <= regimeLo) return null;
 
-  // Small tolerance so rounding doesn't reject valid windows.
   const EPS = 0.10;
 
-  const lastPossibleEnd = bars1h.length - 1 - CFG.EXIT_CONSEC_BARS_1H; // need room for 2 exit bars
-  const minEnd = CFG.ANCHOR_MIN_BARS_1H; // must have enough history
+  const lastPossibleEnd = bars1h.length - 1 - CFG.EXIT_CONSEC_BARS_1H; // room for exit bars
+  const minEnd = CFG.ANCHOR_MIN_BARS_1H;
 
   for (let endIdx = lastPossibleEnd; endIdx >= minEnd; endIdx--) {
-    // Choose the best consolidation ending at endIdx
     const chosen = chooseConsolidationWindow(bars1h, endIdx, atr1h);
     if (!chosen) continue;
 
-    // Must sit inside the regime bounds (prevent random tight ranges elsewhere)
     if (chosen.lo < regimeLo - EPS) continue;
     if (chosen.hi > regimeHi + EPS) continue;
 
@@ -470,7 +449,7 @@ function findLatestLaunchWindowInsideRegime(bars1h, regimeLo, regimeHi, atr1h) {
       ...chosen,
       exitSide1h: exit.side,
       exitBars1h: exit.exitBars,
-      anchorEndIdx: chosen.endIdx, // explicitly last negotiation bar
+      anchorEndIdx: chosen.endIdx,
     };
   }
 
@@ -483,10 +462,8 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
 
   if (!Number.isFinite(lo0) || !Number.isFinite(hi0) || hi0 <= lo0) return regime;
 
-  // ✅ NEW PATH: Find the latest valid launch window INSIDE the wide regime and anchor to it.
   const inner = findLatestLaunchWindowInsideRegime(bars1h, lo0, hi0, atr1h);
 
-  // If we found a valid inner launch, anchor to that window.
   if (inner) {
     const startTime = bars1h[inner.startIdx]?.time ?? null;
     const endTime = bars1h[inner.endIdx]?.time ?? null;
@@ -523,17 +500,14 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
           anchorEndTime: endTime,
           exitSide1h: inner.exitSide1h ?? null,
           exitBars1h: inner.exitBars1h ?? null,
-          // Helpful debug flags:
           anchorExitMeasuredAgainst: "window",
           anchorEndIdx1h: inner.anchorEndIdx ?? inner.endIdx,
-          negotiationMid: null, // set by pocket child
+          negotiationMid: null,
         },
       },
     };
   }
 
-  // ---- FALLBACK (older behavior) ----
-  // If no inner launch window is found, fall back to confirming exit relative to the wide regime.
   const exit = exitConfirmed1h(bars1h, lo0, hi0, CFG.EXIT_CONSEC_BARS_1H);
 
   if (!exit.confirmed || exit.lastTouchIndex < 0) {
@@ -550,7 +524,7 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
     };
   }
 
-  // ✅ Exclude the impulse/exit candle (locked rule)
+  // Exclude impulse candle (locked)
   const anchorEnd = Math.max(0, exit.lastTouchIndex - 1);
 
   const chosen = chooseConsolidationWindow(bars1h, anchorEnd, atr1h);
@@ -604,10 +578,66 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
         exitSide1h: exit.side,
         exitBars1h: exit.exitBars,
         anchorExitMeasuredAgainst: "regime",
-        negotiationMid: null, // set by pocket child
+        negotiationMid: null,
       },
     },
   };
+}
+
+/* ---------------- STRUCTURE QUALIFICATION (NEW) ---------------- */
+
+/**
+ * STRUCTURE = tight acceptance -> violent exit -> (no immediate return implicitly by exit rule)
+ * If not provable, demote to tier:"micro" (Engine 1 decision).
+ *
+ * We apply this AFTER re-anchoring because re-anchoring yields the true consolidation window.
+ */
+function qualifyStructureOrDemote(regimes) {
+  return (regimes || []).map((z) => {
+    if ((z.tier ?? "") !== "structure") return z;
+
+    const facts = z.details?.facts ?? {};
+    const anchorMode = facts.anchorMode ?? null;
+
+    // Must have a consolidation anchor window and a confirmed exit side/bars.
+    const anchorBars = Number(facts.anchorBars1h ?? 0);
+    const exitBars = Number(facts.exitBars1h ?? 0);
+    const exitSide = facts.exitSide1h ?? null;
+
+    const lo = Number(z.priceRange?.[1]);
+    const hi = Number(z.priceRange?.[0]);
+    const width = Number.isFinite(lo) && Number.isFinite(hi) ? hi - lo : Infinity;
+
+    const isAnchored = anchorMode === "anchored_last_consolidation";
+    const hasAcceptance = anchorBars >= CFG.ANCHOR_MIN_BARS_1H && width <= CFG.STRUCT_MAX_WIDTH_PTS;
+    const hasExit = exitBars >= CFG.EXIT_CONSEC_BARS_1H && (exitSide === "above" || exitSide === "below");
+
+    const isStructure = isAnchored && hasAcceptance && hasExit;
+
+    if (isStructure) return z;
+
+    // Demote to micro
+    return {
+      ...z,
+      tier: "micro",
+      details: {
+        ...z.details,
+        facts: {
+          ...facts,
+          demotedFrom: "structure",
+          demoteReason: {
+            isAnchored,
+            hasAcceptance,
+            hasExit,
+            widthPts: round2(width),
+            anchorBars1h: anchorBars,
+            exitBars1h: exitBars,
+            exitSide1h: exitSide,
+          },
+        },
+      },
+    };
+  });
 }
 
 /* ---------------- Pocket + Midline ---------------- */
@@ -661,7 +691,6 @@ function findPocketFromBars1h(bars1h, zoneLow, zoneHigh, startTimeSec = null, en
       const mid = median(closes);
       if (!Number.isFinite(mid) || mid < lo || mid > hi) continue;
 
-      // Quality-first: tightness dominates; mild preference for slightly longer windows.
       const score = width - w * 0.05;
 
       if (!best || score < best.score) {
@@ -743,7 +772,6 @@ function collapseOverlappingStructureZones(zones, opts = {}) {
     else others.push(z);
   }
 
-  // Ensure _low/_high exist
   for (const z of structures) {
     if (!Number.isFinite(z._low) || !Number.isFinite(z._high)) {
       z._high = Number(z.priceRange?.[0]);
@@ -861,7 +889,6 @@ function collapseOverlappingStructureZones(zones, opts = {}) {
   }
   flushGroup();
 
-  // Dedupe exact duplicates (by range+tier)
   const seen = new Set();
   const dedupParents = [];
   for (const p of parents) {
@@ -884,7 +911,10 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const b4h = normalizeBars(bars4h);
 
   const currentPrice =
-    b30.at(-1)?.close ?? b1h.at(-1)?.close ?? b4h.at(-1)?.close ?? null;
+    b30.at(-1)?.close ??
+    b1h.at(-1)?.close ??
+    b4h.at(-1)?.close ??
+    null;
 
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) return [];
 
@@ -947,27 +977,16 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     selectionMode = `top${CFG.FALLBACK_TOP_N}`;
   }
 
-  // Re-anchor (now with inner launch-window exit finding)
+  // Re-anchor (inner launch-window exit finding)
   regimes = regimes.map((z) => reanchorRegime(z, b1h, b30, atr1h));
+
+  // ✅ STRUCTURE qualification gate (demote non-structures to micro)
+  regimes = qualifyStructureOrDemote(regimes);
 
   // Collapse STRUCTURE overlaps into parent structures
   regimes = collapseOverlappingStructureZones(regimes, {
     overlapPct: CFG.STRUCT_OVERLAP_PCT,
     nearPoints: CFG.STRUCT_NEAR_POINTS,
-  });
-  // ✅ PRICE WINDOW FILTER (DISCOVERY VIEW)
-  // Keep only structures within ±WINDOW_POINTS of current price.
-  // This prevents deep historical zones (e.g. 530) from cluttering the chart.
-  const winLo = currentPrice - CFG.WINDOW_POINTS;
-  const winHi = currentPrice + CFG.WINDOW_POINTS;
-
-  regimes = (regimes || []).filter((z) => {
-    if ((z.tier ?? "") !== "structure") return true; // keep non-structures if any exist pre-pocket
-    const lo = Number(z.priceRange?.[1]);
-    const hi = Number(z.priceRange?.[0]);
-    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return false;
-    // keep if zone intersects the window
-    return hi >= winLo && lo <= winHi;
   });
 
   // Add POCKET children inside each STRUCTURE
