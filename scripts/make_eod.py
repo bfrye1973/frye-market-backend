@@ -55,7 +55,7 @@ LUX_CONV = 50
 LUX_LEN  = 20
 
 # ✅ NEW: long-history for Lux statefulness (more like TradingView)
-SPY_PSI_HISTORY_DAYS = int(os.environ.get("SPY_PSI_HISTORY_DAYS", "2000"))
+SPY_PSI_HISTORY_DAYS = int(os.environ.get("SPY_PSI_HISTORY_DAYS", "4000"))
 
 def clamp(x: float, lo: float, hi: float) -> float:
     try:
