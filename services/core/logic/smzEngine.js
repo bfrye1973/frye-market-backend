@@ -40,7 +40,7 @@ const CFG = {
   WIDTH_ATR_MAX: 3.25,
 
   // ✅ Working threshold (70–100)
-  MIN_SCORE_GLOBAL: 70,
+  MIN_SCORE_GLOBAL: 75,
 
   STRUCT_OVERLAP_PCT: 0.50,
   STRUCT_NEAR_POINTS: 4.0,
@@ -906,6 +906,21 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
 
   // ✅ Qualify structure (or demote to micro)
   regimes = qualifyStructureOrDemote(regimes);
+
+  // ✅ Apply ±WINDOW_POINTS filter (TradingView-style focus)
+  const winLo = currentPrice - CFG.WINDOW_POINTS;
+  const winHi = currentPrice + CFG.WINDOW_POINTS;
+
+  regimes = (regimes || []).filter((z) => {
+    const pr = Array.isArray(z.priceRange) ? z.priceRange : null;
+    const hi = pr ? Number(pr[0]) : NaN; // priceRange = [high, low]
+    const lo = pr ? Number(pr[1]) : NaN;
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return false;
+
+    // keep if intersects the window
+    return hi >= winLo && lo <= winHi;
+  });
+
 
   // ✅ Collapse overlaps
   regimes = collapseOverlappingStructureZones(regimes, {
