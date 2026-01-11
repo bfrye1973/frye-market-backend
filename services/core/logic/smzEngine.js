@@ -18,7 +18,7 @@ const CFG = {
 
   STRUCT_MAX_WIDTH_PTS: 4.0, // SPY hard cap
 
-  MIN_SCORE_GLOBAL: 70,
+  MIN_SCORE_GLOBAL: 75,
 };
 
 function round2(x) {
