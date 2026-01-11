@@ -983,6 +983,24 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   // ✅ STRUCTURE qualification gate (demote non-structures to micro)
   regimes = qualifyStructureOrDemote(regimes);
 
+  // ✅ Keep only zones near current price (TradingView-style focus)
+  // Applies AFTER qualification so we don't “promote” junk; we only filter visibility.
+  const winLo = currentPrice - CFG.WINDOW_POINTS;
+  const winHi = currentPrice + CFG.WINDOW_POINTS;
+
+  regimes = (regimes || []).filter((z) => {
+    const lo = Number(z.priceRange?.[1]);
+    const hi = Number(z.priceRange?.[0]);
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return false;
+
+    // Keep if zone intersects window
+    if (hi >= winLo && lo <= winHi) return true;
+
+    // Otherwise drop it (even if structure), so chart stays clean like TradingView
+    return false;
+  });
+
+
   // Collapse STRUCTURE overlaps into parent structures
   regimes = collapseOverlappingStructureZones(regimes, {
     overlapPct: CFG.STRUCT_OVERLAP_PCT,
