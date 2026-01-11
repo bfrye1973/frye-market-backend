@@ -279,7 +279,7 @@ def main():
                 ro_score += 1
     risk_on_4h = round(pct(ro_score, ro_den), 2) if ro_den>0 else 50.0
 
-    spy_4h = fetch_polygon_4h("SPY", key, lookback_days=120)
+    spy_4h = fetch_polygon_4h("SPY", key, lookback_days=365)
     if len(spy_4h) < 25:
         print("[fatal] insufficient SPY 4H bars", file=sys.stderr)
         sys.exit(2)
