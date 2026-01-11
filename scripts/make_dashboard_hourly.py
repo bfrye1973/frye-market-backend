@@ -321,7 +321,7 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
     spy_1h: List[dict] = []
     spy_4h: List[dict] = []
     if key:
-        spy_1h = fetch_polygon_bars(POLY_1H_URL, key, "SPY", lookback_days=40)
+        spy_1h = fetch_polygon_bars(POLY_1H_URL, key, "SPY", lookback_days=365)
         spy_4h = fetch_polygon_bars(POLY_4H_URL, key, "SPY", lookback_days=80)
 
     ema_sign = 0
