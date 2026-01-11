@@ -361,8 +361,10 @@ def main():
         "smi_4h_pct": round(float(smi_pct), 2),
         "smi_bonus_pts": int(smi_bonus),
 
-        "squeeze_psi_4h": round(float(squeeze_psi_4h), 2),
-        "squeeze_4h_pct": round(float(squeeze_exp_4h), 2),
+        "squeeze_psi_4h_pct"] = round(float(squeeze_psi_4h), 2)
+        "squeeze_expansion_pct"] = round(float(squeeze_exp_4h), 2)
+        "squeeze_pct"] = metrics["squeeze_psi_4h_pct"]
+
 
         "liquidity_4h": round(float(liquidity_4h), 2),
         "volatility_4h_pct": round(float(vol_pct), 3),
