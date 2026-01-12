@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_eod.py (R14.0 — SHORT-MEMORY Lux PSI + EMA Structure + Internals Weak Gate)
+Ferrari Dashboard — make_eod.py (R14.1 — SHORT-MEMORY Lux PSI + Ferrari 3-Color Squeeze + Internals Weak Gate)
 
 LOCKED INTENT:
-- 10m Lux squeeze is canonical behavior.
-- EOD Lux PSI is a SHORT-MEMORY, current-state detector (weeks), NOT long-history.
+- 10m Lux squeeze behavior is canonical.
+- EOD Lux PSI is SHORT-MEMORY current-state (weeks), NOT long history.
 - Squeeze meaning = PSI tightness (higher = tighter).
+- Ferrari-simple squeeze light colors:
+    RED    psi >= 90
+    YELLOW 70 <= psi < 90
+    GREEN  psi < 70
 - PSI gate stays:
     >=90  danger  => NO ENTRIES (exits allowed)
     84-89 caution => A+ only
     25-83 free    => normal
     <25  minor    => chop caution
-- Bull trend may remain Bull while allowEntries=false when internals are weak.
+- Internals Weak can block entries even if trend is Bull.
+- Option A: break the "exact 50" dead-zone with a tiny bias.
 """
 
 from __future__ import annotations
@@ -46,12 +51,16 @@ LUX_CONV = 50
 LUX_LEN  = 20
 
 # ✅ SHORT MEMORY PSI window (trading days)
-# Start at 10 (~2 weeks). If you want slightly slower, use 12–14.
-PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "10"))
+PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "10"))  # ~2 weeks by default
 
 # Fetch days (ONLY for EMAs/ATR stability, NOT PSI memory)
 SPY_FETCH_DAYS    = int(os.environ.get("SPY_FETCH_DAYS", "260"))   # enough for EMA50 stability
 SECTOR_FETCH_DAYS = int(os.environ.get("SECTOR_FETCH_DAYS", "120"))
+
+# Option A: "exact 50" dead-zone breaker
+PSI_DEADZONE_EPS = float(os.environ.get("PSI_DEADZONE_EPS", "0.25"))  # treat |psi-50| < eps as ambiguous
+PSI_BIAS_TREND   = float(os.environ.get("PSI_BIAS_TREND", "49.0"))    # trend flow -> nudge below 50
+PSI_BIAS_WEAK    = float(os.environ.get("PSI_BIAS_WEAK", "51.0"))     # weaker flow -> nudge above 50
 
 def clamp(x: float, lo: float, hi: float) -> float:
     try:
@@ -66,7 +75,7 @@ def now_utc_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent":"make-eod/2.0","Cache-Control":"no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent":"make-eod/2.1","Cache-Control":"no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -171,6 +180,14 @@ def squeeze_score_from_regime(regime_key: str) -> float:
     if regime_key == "caution": return 30.0
     if regime_key == "free": return 100.0
     return 60.0
+
+def squeeze_light_color_3(psi: float) -> str:
+    # Ferrari simple 3 colors
+    if psi >= 90.0:
+        return "red"
+    if psi >= 70.0:
+        return "yellow"
+    return "green"
 
 def daily_breadth_participation_from_sector_etfs() -> Tuple[float, float]:
     good = align = barup = 0
@@ -293,7 +310,11 @@ def main():
     psi = float(psi) if isinstance(psi,(int,float)) else 50.0
     psi = float(clamp(psi, 0.0, 100.0))
 
-    regime_key, regime_color, no_entries, mode_label = squeeze_regime(psi)
+    # ✅ Option A: break exact-50 dead-zone (semantic disambiguation, tiny nudge)
+    if abs(psi - 50.0) < PSI_DEADZONE_EPS:
+        psi = PSI_BIAS_TREND if ema_structure >= 55.0 else PSI_BIAS_WEAK
+
+    regime_key, _regime_color, no_entries, mode_label = squeeze_regime(psi)
     squeeze_score = squeeze_score_from_regime(regime_key)
 
     vol_pct = float(volatility_atr14_pct(C, H, L))
@@ -323,6 +344,7 @@ def main():
         a_plus_only = False
 
     updated_utc = now_utc_iso()
+    squeeze_light = squeeze_light_color_3(psi)
 
     components = {
         "emaStructure": round(ema_structure, 1),
@@ -344,7 +366,7 @@ def main():
         "participationDailyPct": participation_daily,
         "squeezePsi": round(psi, 2),
         "squeezeRegime": regime_key,
-        "squeezeColor": regime_color,
+        "squeezeColor": squeeze_light,  # Ferrari 3-color
         "volatilityPct": round(vol_pct, 3),
         "liquidityPct": round(liq_pct, 2),
         "riskOnPct": risk_on,
@@ -373,22 +395,26 @@ def main():
         "breadth_daily_pct": breadth_daily,
         "participation_daily_pct": participation_daily,
         "breadth_confirm_pct": round(float(breadth_confirm), 2),
-        "daily_squeeze_pct": round(float(psi), 2),      # ✅ UI reads this
+
+        # UI reads this:
+        "daily_squeeze_pct": round(float(psi), 2),
         "squeeze_regime": regime_key,
+        "psi_window_days": int(PSI_WIN_D),
+
         "volatility_pct": round(float(vol_pct), 3),
         "liquidity_pct": round(float(liq_pct), 2),
         "liq_norm_pct": round(float(liq_norm), 2),
         "vol_score_pct": round(float(vol_score), 2),
         "conditions_pct": round(float(conditions), 2),
+
         "risk_on_daily_pct": risk_on,
         "internals_weak": bool(internals_weak),
         "red_sectors_count": int(red_count),
-        "psi_window_days": int(PSI_WIN_D),              # ✅ debug proof
     }
 
     engineLights = {
         "eodSqueezeGate": {
-            "state": regime_color,
+            "state": squeeze_light,     # Ferrari 3-color
             "active": True,
             "psi": round(psi, 2),
             "regime": regime_key,
@@ -414,7 +440,7 @@ def main():
         "sectorCards": cards,
         "engineLights": engineLights,
         "meta": {
-            "source": "make_eod.py R14.0 short-psi",
+            "source": "make_eod.py R14.1 short-psi + ferrari-3color",
             "tz": "America/Phoenix",
         }
     }
@@ -423,7 +449,7 @@ def main():
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
-    print(f"[eod] psi={psi:.2f} psiWin={PSI_WIN_D} state={state} regime={regime_key} allowEntries={allow_entries}", flush=True)
+    print(f"[eod] psi={psi:.2f} psiWin={PSI_WIN_D} squeezeLight={squeeze_light} state={state} regime={regime_key} allowEntries={allow_entries}", flush=True)
 
 if __name__ == "__main__":
     try:
