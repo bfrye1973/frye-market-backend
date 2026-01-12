@@ -1,19 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_4h.py (R13.2 — FIXED SYNTAX + SQUEEZE KEYS ALIGNED)
+Ferrari Dashboard — make_dashboard_4h.py (R13.3 — SHORT-MEMORY LUX PSI, 10m-Behavior)
 
-This version:
-✅ Fixes workflow SyntaxError (no assignments inside dict literal)
-✅ Keeps LuxAlgo PSI formula (stateful max/min + corr(log(span), bar_index, length))
-✅ DOES NOT increase history (keeps lookback_days=120)
-✅ Adds consistent squeeze keys:
-   - squeeze_psi_4h_pct (tightness 0..100)
-   - squeeze_expansion_pct (100-psi)
-   - squeeze_pct (same as tightness; matches 10m tile meaning)
-✅ Keeps legacy keys for backward compatibility:
-   - squeeze_psi_4h (tightness)
-   - squeeze_4h_pct (expansion)
+LOCKED INTENT (per old teammate):
+- 10m Lux PSI is canonical behavior.
+- 4h Lux PSI must behave like 10m (short-memory "current squeeze"), not long-history memory.
+- Dashboard squeeze represents PSI tightness (higher = tighter), NOT expansion.
+- 4h squeeze is a soft component (context), not dominant.
+
+This script:
+- Reads sectorCards from a source json (data/outlook_source_4h.json)
+- Fetches SPY 4h bars from Polygon (modest lookback; NOT long)
+- Computes:
+  * EMA10 posture from dist (0..100)
+  * SMI 12/5/5 + signal, normalized 0..100
+  * Momentum combo (50/50 EMA posture + SMI)
+  * Lux PSI tightness using SHORT window closes (PSI_WIN_4H bars)
+  * Expansion = 100 - PSI (stored)
+  * Liquidity (EMA vol3/vol12)
+  * Volatility (ATR% scaled)
+  * Risk-on from sectorCards
+  * overall4h score via weighted average
+
+Outputs:
+- data/outlook_4h.json (expected by /live/4h proxy)
 """
 
 from __future__ import annotations
@@ -39,11 +50,13 @@ OFFENSIVE = {"information technology", "consumer discretionary", "communication 
 DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
 
 FULL_EMA_DIST = 0.60
-SMI_BONUS_MAX = 5
 
 SMI_K_LEN = 12
 SMI_D_LEN = 5
 SMI_EMA_LEN = 5
+
+SMI_BONUS_MAX = 5
+SMI_BONUS_SCORE_MAX = 3.0
 
 # momentum combo (balanced)
 W_EMA_POSTURE = 0.50
@@ -53,12 +66,17 @@ W_SMI_4H = 0.50
 W_EMA_SCORE = 0.35
 W_MOM_SCORE = 0.25
 W_BREADTH = 0.15
-W_SQUEEZE_EXP = 0.10
-W_LIQ_NORM = 0.07
-W_VOL_SCORE = 0.05
+W_SQUEEZE = 0.10     # score uses EXPANSION as a soft factor
+W_LIQ = 0.07
+W_VOL = 0.05
 W_RISKON = 0.03
 
-SMI_BONUS_SCORE_MAX = 3.0
+# ---- SHORT-MEMORY PSI WINDOW (LOCKED INTENT) ----
+# default ~3 trading weeks worth of 4h bars (roughly 2 bars/day => ~30 bars/3w, but we use 60 for safety)
+PSI_WIN_4H = int(os.environ.get("PSI_WIN_4H", "60"))
+
+# modest fetch, not long (keep your request)
+FETCH_DAYS_4H = int(os.environ.get("FETCH_DAYS_4H", "120"))
 
 
 def now_utc_iso() -> str:
@@ -80,15 +98,16 @@ def pct(a: float, b: float) -> float:
 
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "make-dashboard/4h/1.3", "Cache-Control": "no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent": "make-dashboard/4h/1.4", "Cache-Control": "no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def fetch_polygon_4h(sym: str, key: str, lookback_days: int = 120) -> List[dict]:
+def fetch_polygon_4h(sym: str, key: str, lookback_days: int) -> List[dict]:
     end = datetime.now(UTC).date()
     start = end - timedelta(days=lookback_days)
     url = POLY_4H_URL.format(sym=sym, start=start, end=end, key=key)
+
     try:
         js = fetch_json(url, timeout=25)
     except Exception:
@@ -114,7 +133,7 @@ def fetch_polygon_4h(sym: str, key: str, lookback_days: int = 120) -> List[dict]
 
     out.sort(key=lambda x: x["time"])
 
-    # drop in-flight 4h bucket (avoid partial bar)
+    # drop in-flight 4h bar
     if out:
         now = int(time.time())
         last = out[-1]["time"]
@@ -145,7 +164,7 @@ def tr_series(H: List[float], L: List[float], C: List[float]) -> List[float]:
 
 def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
     """
-    LuxAlgo PSI:
+    LuxAlgo PSI (canonical):
       max := nz(max(src, max - (max-src)/conv), src)
       min := nz(min(src, min + (src-min)/conv), src)
       diff = log(max-min)
@@ -169,7 +188,7 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
     if len(win) < length:
         return None
 
-    xs = list(range(length))  # bar_index window (affine-invariant)
+    xs = list(range(length))
     xbar = sum(xs) / length
     ybar = sum(win) / length
 
@@ -258,9 +277,9 @@ def compute_overall_weighted(
         W_EMA_SCORE * ema_posture
         + W_MOM_SCORE * momentum_combo
         + W_BREADTH * clamp(breadth_pct, 0.0, 100.0)
-        + W_SQUEEZE_EXP * clamp(squeeze_exp, 0.0, 100.0)
-        + W_LIQ_NORM * liq_norm
-        + W_VOL_SCORE * vol_sc
+        + W_SQUEEZE * clamp(squeeze_exp, 0.0, 100.0)
+        + W_LIQ * liq_norm
+        + W_VOL * vol_sc
         + W_RISKON * clamp(risk_on, 0.0, 100.0)
         + bonus
     )
@@ -271,9 +290,9 @@ def compute_overall_weighted(
         "ema10": round(W_EMA_SCORE * ema_posture, 2),
         "momentum": round(W_MOM_SCORE * momentum_combo, 2),
         "breadth": round(W_BREADTH * breadth_pct, 2),
-        "squeeze": round(W_SQUEEZE_EXP * squeeze_exp, 2),
-        "liquidity": round(W_LIQ_NORM * liq_norm, 2),
-        "volatility": round(W_VOL_SCORE * vol_sc, 2),
+        "squeeze": round(W_SQUEEZE * squeeze_exp, 2),
+        "liquidity": round(W_LIQ * liq_norm, 2),
+        "volatility": round(W_VOL * vol_sc, 2),
         "riskOn": round(W_RISKON * risk_on, 2),
         "smiBonus": round(bonus, 2),
     }
@@ -300,7 +319,7 @@ def main():
 
     cards = src.get("sectorCards") or []
 
-    # Breadth/Momentum from cards (NH/NL, UP/DOWN)
+    # breadth + momentum from cards
     NH = NL = UP = DN = 0.0
     for c in cards:
         NH += float(c.get("nh", 0))
@@ -311,7 +330,7 @@ def main():
     breadth_4h = round(pct(NH, NH + NL), 2) if (NH + NL) > 0 else 50.0
     momentum_4h_legacy = round(pct(UP, UP + DN), 2) if (UP + DN) > 0 else 50.0
 
-    # Risk-on from cards
+    # risk-on from cards
     by = {(c.get("sector") or "").strip().lower(): c for c in cards}
     ro_score = ro_den = 0
     for s in OFFENSIVE:
@@ -328,8 +347,8 @@ def main():
                 ro_score += 1
     risk_on_4h = round(pct(ro_score, ro_den), 2) if ro_den > 0 else 50.0
 
-    # SPY 4h bars (KEEP SHORT HISTORY by request)
-    spy_4h = fetch_polygon_4h("SPY", key, lookback_days=120)
+    # SPY 4h bars (modest history, per intent)
+    spy_4h = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H)
     if len(spy_4h) < 25:
         print("[fatal] insufficient SPY 4H bars", file=sys.stderr)
         sys.exit(2)
@@ -339,13 +358,13 @@ def main():
     C = [b["close"] for b in spy_4h]
     V = [b["volume"] for b in spy_4h]
 
-    # EMA10 posture (distance)
+    # EMA10 posture
     e10 = ema_series(C, 10)[-1]
     ema_dist_pct = 0.0 if e10 == 0 else 100.0 * (C[-1] - e10) / e10
     ema_sign = 1 if ema_dist_pct > 0 else (-1 if ema_dist_pct < 0 else 0)
     ema10_posture = posture_from_dist(ema_dist_pct, FULL_EMA_DIST)
 
-    # SMI (12/5/5)
+    # SMI 12/5/5
     smi_series, sig_series = tv_smi_and_signal(H, L, C, SMI_K_LEN, SMI_D_LEN, SMI_EMA_LEN)
     smi_val = float(smi_series[-1]) if smi_series else 0.0
     sig_val = float(sig_series[-1]) if sig_series else 0.0
@@ -360,17 +379,17 @@ def main():
         elif smi_val < sig_val:
             smi_bonus = -SMI_BONUS_MAX
 
-    # Lux PSI (tightness) + expansion
-    psi = lux_psi_from_closes(C, conv=50, length=20)
+    # ---- Lux PSI (SHORT-MEMORY WINDOWED) ----
+    Cw = C[-PSI_WIN_4H:] if len(C) > PSI_WIN_4H else C
+    psi = lux_psi_from_closes(Cw, conv=50, length=20)
     squeeze_psi_4h = float(psi) if isinstance(psi, (int, float)) else 50.0
     squeeze_exp_4h = clamp(100.0 - squeeze_psi_4h, 0.0, 100.0)
 
-    # Liquidity (EMA vol3/vol12)
+    # Liquidity + Volatility
     v3 = ema_last(V, 3)
     v12 = ema_last(V, 12)
     liquidity_4h = 0.0 if not v12 or v12 <= 0 else clamp(100.0 * (v3 / v12), 0.0, 200.0)
 
-    # Volatility (ATR% * 6.25)
     trs = tr_series(H, L, C)
     atr3 = ema_last(trs, 3) if trs else None
     vol_pct = 0.0 if not atr3 or C[-1] <= 0 else max(0.0, 100.0 * atr3 / C[-1])
@@ -388,7 +407,7 @@ def main():
                 rising_good += 1
     sector_dir_4h = round(pct(rising_good, rising_total), 2) if rising_total > 0 else 50.0
 
-    # Overall score (weighted)
+    # Overall score
     state, score, comps = compute_overall_weighted(
         ema_posture=float(ema10_posture),
         momentum_combo=float(momentum_combo_4h),
@@ -418,12 +437,12 @@ def main():
         "smi_4h_pct": round(float(smi_pct), 2),
         "smi_bonus_pts": int(smi_bonus),
 
-        # ---- SQUEEZE (aligned to 10m meaning; psi tightness) ----
+        # SQUEEZE (tightness is what we display)
         "squeeze_psi_4h_pct": round(float(squeeze_psi_4h), 2),
         "squeeze_expansion_pct": round(float(squeeze_exp_4h), 2),
         "squeeze_pct": round(float(squeeze_psi_4h), 2),
 
-        # legacy keys kept for safety (do not break any old consumers)
+        # legacy keys (kept)
         "squeeze_psi_4h": round(float(squeeze_psi_4h), 2),
         "squeeze_4h_pct": round(float(squeeze_exp_4h), 2),
 
@@ -433,6 +452,10 @@ def main():
 
         "sector_dir_4h_pct": float(sector_dir_4h),
         "riskOn_4h_pct": float(risk_on_4h),
+
+        # debug
+        "psi_window_4h_bars": int(PSI_WIN_4H),
+        "fetch_days_4h": int(FETCH_DAYS_4H),
     }
 
     fourHour = {
@@ -446,7 +469,7 @@ def main():
     }
 
     out = {
-        "version": "r4h-v3-weightedavg",
+        "version": "r4h-v4-weightedavg-shortpsi",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
@@ -462,7 +485,8 @@ def main():
     print(
         f"[4h] score={score:.2f} state={state} emaPost={ema10_posture:.2f} mom={momentum_combo_4h:.2f} "
         f"breadth={breadth_4h:.2f} psi={squeeze_psi_4h:.2f} exp={squeeze_exp_4h:.2f} "
-        f"liq={liquidity_4h:.2f} volScaled={vol_scaled:.2f} riskOn={risk_on_4h:.2f} smiBonus={smi_bonus:+d}",
+        f"liq={liquidity_4h:.2f} volScaled={vol_scaled:.2f} riskOn={risk_on_4h:.2f} "
+        f"smiBonus={smi_bonus:+d} psiWin={PSI_WIN_4H}",
         flush=True,
     )
 
