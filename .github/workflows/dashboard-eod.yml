@@ -48,11 +48,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/build_outlook_source_from_polygon.py \
-            --sectors-dir data/sectors \
-            --days 20 \
-            --out data/outlook_source.json
-          head -n 60 data/outlook_source.json || true
+          python -u scripts/build_outlook_source_daily.py \
+           --sectors-dir data/sectors \
+           --days 90 \
+           --lookback-days 20 \
+           --out data/outlook_source_daily.json
+
           
       # 2) Normalize to sectorCards
       - name: Normalize sectorCards source
@@ -97,8 +98,9 @@ jobs:
         run: |
           set -euo pipefail
           python -u scripts/make_eod.py \
-            --source data/outlook_source.json \
-            --out    data/outlook.json
+           --source data/outlook_source_daily.json \
+           --out    data/outlook.json
+
 
       # 3.5) Mirror to legacy daily block (optional, keep if used by UI)
       - name: Mirror to legacy daily block
