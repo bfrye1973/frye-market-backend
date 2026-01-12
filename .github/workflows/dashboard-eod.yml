@@ -41,7 +41,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      # 1) Build sectorCards source (daily)
+      # 1) Build sectorCards source (DAILY) -> data/outlook_source_daily.json
       - name: Build sectorCards source (daily)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -49,58 +49,65 @@ jobs:
           set -euo pipefail
           mkdir -p data
           python -u scripts/build_outlook_source_daily.py \
-           --sectors-dir data/sectors \
-           --days 90 \
-           --lookback-days 20 \
-           --out data/outlook_source_daily.json
+            --sectors-dir data/sectors \
+            --days 90 \
+            --lookback-days 20 \
+            --out data/outlook_source_daily.json
+          head -n 60 data/outlook_source_daily.json || true
 
-          
-      # 2) Normalize to sectorCards
-      - name: Normalize sectorCards source
+      # 2) Normalize to sectorCards (guard in case builder ever outputs "groups")
+      - name: Normalize sectorCards source (daily)
         run: |
           set -euo pipefail
           python - <<'PY'
           import json,sys
-          p="data/outlook_source.json"
+          p="data/outlook_source_daily.json"
           j=json.load(open(p,"r",encoding="utf-8"))
+
           cards=j.get("sectorCards") or []
           if not cards and "groups" in j:
             def pct(a,b): return 0.0 if b<=0 else 100.0*a/b
             by={}
             for k,g in j["groups"].items():
               nh=int(g.get("nh",0)); nl=int(g.get("nl",0))
-              u=int(g.get("u",0));   d=int(g.get("d",0))
+              u=int(g.get("u",0));  d=int(g.get("d",0))
               b=pct(nh,nh+nl); m=pct(u,u+d)
               by[k.lower()]={"sector":k.title(),"breadth_pct":round(b,2),
                              "momentum_pct":round(m,2),"nh":nh,"nl":nl,"up":u,"down":d}
             cards=list(by.values())
-          json.dump({"sectorCards":cards},open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
-          print(f"[normalize] sectorCards={len(cards)}")
+
+          # Preserve mode if present; enforce daily if missing
+          mode=(j.get("mode") or "daily")
+          out={"mode":mode,"sectorCards":cards,"meta":(j.get("meta") or {})}
+          json.dump(out,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
+          print(f"[normalize] mode={mode} sectorCards={len(cards)}")
           PY
 
-      - name: Validate sectorCards source
+      - name: Validate sectorCards source (daily)
         run: |
           set -euo pipefail
           python - <<'PY'
           import json,sys
-          j=json.load(open("data/outlook_source.json"))
+          j=json.load(open("data/outlook_source_daily.json","r",encoding="utf-8"))
+          mode=(j.get("mode") or "").strip().lower()
           cards=j.get("sectorCards") or []
           need=("sector","breadth_pct","momentum_pct","nh","nl","up","down")
+          if mode and mode!="daily":
+            print(f"[sectors] INVALID mode={mode} (expected daily)"); sys.exit(2)
           if len(cards)!=11 or not all(k in cards[0] for k in need):
             print(f"[sectors] INVALID source: cards={len(cards)} need={need}"); sys.exit(2)
-          print(f"[sectors] OK cards=11 | {cards[0]['sector']}") 
+          print(f"[sectors] OK mode={mode or 'daily'} cards=11 | {cards[0]['sector']}")
           PY
 
-      # 3) Build EOD payload
+      # 3) Build EOD payload -> data/outlook.json
       - name: Build EOD payload
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           python -u scripts/make_eod.py \
-           --source data/outlook_source_daily.json \
-           --out    data/outlook.json
-
+            --source data/outlook_source_daily.json \
+            --out    data/outlook.json
 
       # 3.5) Mirror to legacy daily block (optional, keep if used by UI)
       - name: Mirror to legacy daily block
@@ -120,36 +127,47 @@ jobs:
               return None if v!=v else v
             except:
               return None
+
           p="data/outlook.json"
           j=json.load(open(p,"r",encoding="utf-8"))
           m=j.get("metrics") or {}
-          t=num(m.get("daily_trend_pct")); p1=num(m.get("participation_pct"))
-          sq=num(m.get("daily_squeeze_pct")); v=num(m.get("volatility_pct"))
-          li=num(m.get("liquidity_pct")); ro=num(m.get("risk_on_daily_pct"))
+
+          # Keep these mirrors conservative; do NOT overwrite core EOD fields
+          sq=num(m.get("daily_squeeze_pct"))
+          v=num(m.get("volatility_pct"))
+          li=num(m.get("liquidity_pct"))
+          ro=num(m.get("risk_on_daily_pct"))
+
           trendDaily=j.get("trendDaily") or {}
-          trendDaily.setdefault("trend",{}); trendDaily.setdefault("participation",{})
-          trendDaily.setdefault("volatilityRegime",{}); trendDaily.setdefault("liquidityRegime",{})
-          if t is not None:  trendDaily["trend"]["emaSlope"]=t
-          if p1 is not None: trendDaily["participation"]["pctAboveMA"]=p1
-          if sq is not None: j.setdefault("metrics",{})["squeeze_daily_pct"]=sq
-          if v  is not None:
+          trendDaily.setdefault("trend",{})
+          trendDaily.setdefault("participation",{})
+          trendDaily.setdefault("volatilityRegime",{})
+          trendDaily.setdefault("liquidityRegime",{})
+
+          if sq is not None:
+            j.setdefault("metrics",{})["squeeze_daily_pct"]=sq
+
+          if v is not None:
             trendDaily["volatilityRegime"]["atrPct"]=v
             b=band_vol(v)
             if b: trendDaily["volatilityRegime"]["band"]=b
+
           if li is not None:
             trendDaily["liquidityRegime"]["psi"]=li
             b=band_liq(li)
             if b: trendDaily["liquidityRegime"]["band"]=b
+
           if ro is not None:
             rot=j.get("rotation") or {}
             rot["riskOnPct"]=ro
             j["rotation"]=rot
+
           j["trendDaily"]=trendDaily
           json.dump(j,open(p,"w",encoding="utf-8"),separators=(",",":"))
           print("[eod-mirror] trendDaily keys:", list(trendDaily.keys()))
           PY
 
-      # 4) Compute Lux strategy (EOD) — two-color fields
+      # 4) Compute Lux strategy (EOD) — mirror/color only
       - name: Compute Lux strategy (EOD)
         run: |
           set -euo pipefail
