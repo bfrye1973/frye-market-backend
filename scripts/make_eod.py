@@ -1,39 +1,48 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_eod.py (R14.1 — SHORT-MEMORY Lux PSI + Ferrari 3-Color Squeeze + Internals Weak Gate)
+Ferrari Dashboard — make_eod.py (R15.0 — SHORT-MEMORY Lux PSI (20d) + Ferrari 3-Color + Internals Weak Gate)
 
 LOCKED INTENT:
-- 10m Lux squeeze behavior is canonical.
-- EOD Lux PSI is SHORT-MEMORY current-state (weeks), NOT long history.
-- Squeeze meaning = PSI tightness (higher = tighter).
+- EOD Lux PSI is a SHORT-MEMORY "current state" detector (weeks), not long history.
+- PSI meaning = tightness (higher = tighter).
+- PSI window (lookback) default is 20 trading days (your preference).
 - Ferrari-simple squeeze light colors:
     RED    psi >= 90
     YELLOW 70 <= psi < 90
     GREEN  psi < 70
-- PSI gate stays:
+- PSI gate remains:
     >=90  danger  => NO ENTRIES (exits allowed)
     84-89 caution => A+ only
     25-83 free    => normal
     <25  minor    => chop caution
-- Internals Weak can block entries even if trend is Bull.
-- Option A: break the "exact 50" dead-zone with a tiny bias.
+- Bull trend may remain Bull while allowEntries=false when internals are weak.
+- Guardrail: input source mode must be "daily" to prevent intraday contamination.
+- Option A: break exact-50 dead-zone with a tiny bias (semantic disambiguation).
+
+Outputs:
+- data/outlook.json (via workflow --out)
 """
 
 from __future__ import annotations
-import argparse, json, os, sys, math
+
+import argparse
+import json
+import math
+import os
+import sys
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
-import urllib.request
 
 UTC = timezone.utc
+POLY_BASE = "https://api.polygon.io"
 
 SECTOR_ETFS = ["XLK","XLY","XLC","XLP","XLU","XLV","XLRE","XLE","XLF","XLB","XLI"]
 OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
 DEFENSIVE = {"consumer staples","utilities","health care","real estate"}
 
 POLY_KEY  = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_API_KEY") or os.environ.get("POLY_KEY") or ""
-POLY_BASE = "https://api.polygon.io"
 
 # --- EMA distance saturations (daily) ---
 FULL_DIST_10 = 0.60
@@ -50,17 +59,20 @@ W_CONDITIONS   = 0.15
 LUX_CONV = 50
 LUX_LEN  = 20
 
-# ✅ SHORT MEMORY PSI window (trading days)
-PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "10"))  # ~2 weeks by default
+# ✅ SHORT MEMORY PSI window (TRADING DAYS) — YOU REQUESTED 20
+PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "20"))
 
 # Fetch days (ONLY for EMAs/ATR stability, NOT PSI memory)
-SPY_FETCH_DAYS    = int(os.environ.get("SPY_FETCH_DAYS", "260"))   # enough for EMA50 stability
+SPY_FETCH_DAYS    = int(os.environ.get("SPY_FETCH_DAYS", "260"))
 SECTOR_FETCH_DAYS = int(os.environ.get("SECTOR_FETCH_DAYS", "120"))
 
 # Option A: "exact 50" dead-zone breaker
-PSI_DEADZONE_EPS = float(os.environ.get("PSI_DEADZONE_EPS", "0.25"))  # treat |psi-50| < eps as ambiguous
-PSI_BIAS_TREND   = float(os.environ.get("PSI_BIAS_TREND", "49.0"))    # trend flow -> nudge below 50
-PSI_BIAS_WEAK    = float(os.environ.get("PSI_BIAS_WEAK", "51.0"))     # weaker flow -> nudge above 50
+PSI_DEADZONE_EPS = float(os.environ.get("PSI_DEADZONE_EPS", "0.25"))
+PSI_BIAS_TREND   = float(os.environ.get("PSI_BIAS_TREND", "49.0"))
+PSI_BIAS_WEAK    = float(os.environ.get("PSI_BIAS_WEAK", "51.0"))
+
+def now_utc_iso() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def clamp(x: float, lo: float, hi: float) -> float:
     try:
@@ -71,11 +83,8 @@ def clamp(x: float, lo: float, hi: float) -> float:
 def pct(a: float, b: float) -> float:
     return 0.0 if b <= 0 else 100.0 * float(a) / float(b)
 
-def now_utc_iso() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent":"make-eod/2.1","Cache-Control":"no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent":"make-eod/3.0","Cache-Control":"no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -113,28 +122,50 @@ def ema_series(vals: List[float], span: int) -> List[float]:
         out.append(e)
     return out
 
+def dist_pct(close: float, ema: float) -> float:
+    if ema <= 0:
+        return 0.0
+    return 100.0 * (close - ema) / ema
+
+def posture_from_dist(distp: float, full_dist: float) -> float:
+    unit = clamp(distp / max(full_dist, 1e-9), -1.0, 1.0)
+    return clamp(50.0 + 50.0 * unit, 0.0, 100.0)
+
 def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
+    """
+    LuxAlgo PSI:
+      max := nz(max(src, max - (max-src)/conv), src)
+      min := nz(min(src, min + (src-min)/conv), src)
+      diff = log(max-min)
+      psi  = -50*corr(diff, bar_index, length) + 50
+    """
     if len(closes) < length + 2:
         return None
+
     mx = None
     mn = None
     diffs: List[float] = []
     eps = 1e-12
+
     for src in map(float, closes):
         mx = src if mx is None else max(mx - (mx - src)/conv, src)
         mn = src if mn is None else min(mn + (src - mn)/conv, src)
         span = max(mx - mn, eps)
         diffs.append(math.log(span))
+
     win = diffs[-length:]
     if len(win) < length:
         return None
+
     xs = list(range(length))
-    xbar = sum(xs)/length
-    ybar = sum(win)/length
+    xbar = sum(xs) / length
+    ybar = sum(win) / length
+
     nume = sum((x - xbar) * (y - ybar) for x, y in zip(xs, win))
     denx = sum((x - xbar) ** 2 for x in xs)
     deny = sum((y - ybar) ** 2 for y in win)
     den = math.sqrt(denx * deny) if denx > 0 and deny > 0 else 0.0
+
     r = (nume / den) if den != 0 else 0.0
     psi = -50.0 * r + 50.0
     return float(clamp(psi, 0.0, 100.0))
@@ -142,7 +173,7 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
 def volatility_atr14_pct(C: List[float], H: List[float], L: List[float]) -> float:
     if len(C) < 20:
         return 20.0
-    trs=[max(H[i]-L[i], abs(H[i]-C[i-1]), abs(L[i]-C[i-1])) for i in range(1,len(C))]
+    trs = [max(H[i]-L[i], abs(H[i]-C[i-1]), abs(L[i]-C[i-1])) for i in range(1, len(C))]
     if len(trs) < 14:
         return 20.0
     atr = sum(trs[-14:]) / 14.0
@@ -156,15 +187,6 @@ def liquidity_5_20(V: List[float]) -> float:
     if v20 <= 0:
         return 0.0
     return clamp(100.0 * (v5 / v20), 0.0, 120.0)
-
-def posture_from_dist(distp: float, full_dist: float) -> float:
-    unit = clamp(distp / max(full_dist, 1e-9), -1.0, 1.0)
-    return clamp(50.0 + 50.0 * unit, 0.0, 100.0)
-
-def dist_pct(close: float, ema: float) -> float:
-    if ema <= 0:
-        return 0.0
-    return 100.0 * (close - ema) / ema
 
 def squeeze_regime(psi: float) -> Tuple[str, str, bool, str]:
     if psi >= 90.0:
@@ -189,40 +211,23 @@ def squeeze_light_color_3(psi: float) -> str:
         return "yellow"
     return "green"
 
-def daily_breadth_participation_from_sector_etfs() -> Tuple[float, float]:
-    good = align = barup = 0
-    for sym in SECTOR_ETFS:
-        b = poly_daily_bars(sym, days=SECTOR_FETCH_DAYS)
-        if len(b) < 30:
-            continue
-        closes = [x["c"] for x in b]
-        opens  = [x["o"] for x in b]
-        e10 = ema_series(closes, 10)[-1]
-        e20 = ema_series(closes, 20)[-1]
-        good += 1
-        if e10 > e20: align += 1
-        if closes[-1] > opens[-1]: barup += 1
-    if good <= 0:
-        return (50.0, 50.0)
-    align_pct = pct(align, good)
-    barup_pct = pct(barup, good)
-    breadth_daily = clamp(0.60*align_pct + 0.40*barup_pct, 0.0, 100.0)
-    participation = clamp(align_pct, 0.0, 100.0)
-    return (round(breadth_daily,2), round(participation,2))
-
 def compute_eod_state(close: float, ema10: float, ema20: float, ema50: float) -> Tuple[str, str]:
     d10 = dist_pct(close, ema10)
     above20 = close > ema20
     below50 = close < ema50
     if above20:
-        if d10 >= EMA10_PULLBACK_TOL: return ("bull", "bull")
+        if d10 >= EMA10_PULLBACK_TOL:
+            return ("bull", "bull")
         return ("neutral", "pullback")
-    if below50: return ("bear", "regime_damage")
+    if below50:
+        return ("bear", "regime_damage")
     return ("bear", "bear")
 
 def apply_score_guardrails(state: str, score: float) -> float:
-    if state == "bull": return clamp(score, 55.0, 100.0)
-    if state == "neutral": return clamp(score, 45.0, 65.0)
+    if state == "bull":
+        return clamp(score, 55.0, 100.0)
+    if state == "neutral":
+        return clamp(score, 45.0, 65.0)
     return clamp(score, 0.0, 45.0)
 
 def sector_is_red(card: dict) -> bool:
@@ -260,6 +265,29 @@ def compute_sectorcards_risk_on(cards: List[dict]) -> float:
             score += (1 if float(b) < 50.0 else 0)
     return round(pct(score, considered or 1), 2)
 
+def daily_breadth_participation_from_sector_etfs() -> Tuple[float, float]:
+    good = align = barup = 0
+    for sym in SECTOR_ETFS:
+        b = poly_daily_bars(sym, days=SECTOR_FETCH_DAYS)
+        if len(b) < 30:
+            continue
+        closes = [x["c"] for x in b]
+        opens  = [x["o"] for x in b]
+        e10 = ema_series(closes, 10)[-1]
+        e20 = ema_series(closes, 20)[-1]
+        good += 1
+        if e10 > e20:
+            align += 1
+        if closes[-1] > opens[-1]:
+            barup += 1
+    if good <= 0:
+        return (50.0, 50.0)
+    align_pct = pct(align, good)
+    barup_pct = pct(barup, good)
+    breadth_daily = clamp(0.60*align_pct + 0.40*barup_pct, 0.0, 100.0)
+    participation = clamp(align_pct, 0.0, 100.0)
+    return (round(breadth_daily,2), round(participation,2))
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True)
@@ -275,6 +303,12 @@ def main():
     except Exception as e:
         print("[error] cannot read source:", e, file=sys.stderr)
         sys.exit(1)
+
+    # ✅ Guardrail: must be DAILY source
+    mode = (src.get("mode") or "").strip().lower()
+    if mode and mode != "daily":
+        print(f"[fatal] EOD source mode must be 'daily'. got: {mode}", file=sys.stderr)
+        sys.exit(2)
 
     cards = src.get("sectorCards") or []
 
@@ -304,13 +338,13 @@ def main():
 
     state, state_label = compute_eod_state(close, e10, e20, e50)
 
-    # ✅ SHORT MEMORY PSI
+    # ✅ SHORT MEMORY PSI using last PSI_WIN_D closes
     Cw = C[-PSI_WIN_D:] if len(C) > PSI_WIN_D else C
     psi = lux_psi_from_closes(Cw, conv=LUX_CONV, length=LUX_LEN)
     psi = float(psi) if isinstance(psi,(int,float)) else 50.0
     psi = float(clamp(psi, 0.0, 100.0))
 
-    # ✅ Option A: break exact-50 dead-zone (semantic disambiguation, tiny nudge)
+    # ✅ Option A: break exact-50 dead-zone
     if abs(psi - 50.0) < PSI_DEADZONE_EPS:
         psi = PSI_BIAS_TREND if ema_structure >= 55.0 else PSI_BIAS_WEAK
 
@@ -366,7 +400,7 @@ def main():
         "participationDailyPct": participation_daily,
         "squeezePsi": round(psi, 2),
         "squeezeRegime": regime_key,
-        "squeezeColor": squeeze_light,  # Ferrari 3-color
+        "squeezeColor": squeeze_light,
         "volatilityPct": round(vol_pct, 3),
         "liquidityPct": round(liq_pct, 2),
         "riskOnPct": risk_on,
@@ -395,18 +429,14 @@ def main():
         "breadth_daily_pct": breadth_daily,
         "participation_daily_pct": participation_daily,
         "breadth_confirm_pct": round(float(breadth_confirm), 2),
-
-        # UI reads this:
-        "daily_squeeze_pct": round(float(psi), 2),
+        "daily_squeeze_pct": round(float(psi), 2),   # ✅ UI reads this
         "squeeze_regime": regime_key,
         "psi_window_days": int(PSI_WIN_D),
-
         "volatility_pct": round(float(vol_pct), 3),
         "liquidity_pct": round(float(liq_pct), 2),
         "liq_norm_pct": round(float(liq_norm), 2),
         "vol_score_pct": round(float(vol_score), 2),
         "conditions_pct": round(float(conditions), 2),
-
         "risk_on_daily_pct": risk_on,
         "internals_weak": bool(internals_weak),
         "red_sectors_count": int(red_count),
@@ -414,7 +444,7 @@ def main():
 
     engineLights = {
         "eodSqueezeGate": {
-            "state": squeeze_light,     # Ferrari 3-color
+            "state": squeeze_light,
             "active": True,
             "psi": round(psi, 2),
             "regime": regime_key,
@@ -440,7 +470,7 @@ def main():
         "sectorCards": cards,
         "engineLights": engineLights,
         "meta": {
-            "source": "make_eod.py R14.1 short-psi + ferrari-3color",
+            "source": "make_eod.py R15.0 short-psi(20d) + ferrari-3color + guardrail",
             "tz": "America/Phoenix",
         }
     }
