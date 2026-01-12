@@ -73,7 +73,7 @@ W_RISKON = 0.03
 
 # ---- SHORT-MEMORY PSI WINDOW (LOCKED INTENT) ----
 # default ~3 trading weeks worth of 4h bars (roughly 2 bars/day => ~30 bars/3w, but we use 60 for safety)
-PSI_WIN_4H = int(os.environ.get("PSI_WIN_4H", "60"))
+PSI_WIN_4H = int(os.environ.get("PSI_WIN_4H", "16"))
 
 # modest fetch, not long (keep your request)
 FETCH_DAYS_4H = int(os.environ.get("FETCH_DAYS_4H", "120"))
