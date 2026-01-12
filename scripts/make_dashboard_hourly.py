@@ -85,7 +85,7 @@ SMI_BONUS_SCORE_MAX = 3.0
 
 # ---- SHORT-MEMORY PSI WINDOW (LOCKED INTENT) ----
 # default ~10 trading days of 1h bars (approx 24 bars/day)
-PSI_WIN_1H = int(os.environ.get("PSI_WIN_1H", "240"))
+PSI_WIN_1H = int(os.environ.get("PSI_WIN_1H", "120"))
 
 # modest fetch lookbacks (NOT long)
 FETCH_DAYS_1H = int(os.environ.get("FETCH_DAYS_1H", "40"))
