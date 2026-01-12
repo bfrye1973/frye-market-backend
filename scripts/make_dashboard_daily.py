@@ -53,7 +53,7 @@ LUX_CONV = 50
 LUX_LEN  = 20
 
 # --- SHORT MEMORY window (2–3 weeks default) ---
-PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "14"))
+PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "10"))
 
 # --- fetch days (not long) ---
 FETCH_DAYS_SPY = int(os.environ.get("FETCH_DAYS_SPY", "260"))     # enough for EMA50 stability
