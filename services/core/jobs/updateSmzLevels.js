@@ -6,6 +6,11 @@
 // ✅ Active pockets: clustered to reduce overlap spam + Option C tagging (structure_linked vs emerging).
 // ✅ NEW: "Building now" = pockets whose window ended within last ~2 weeks of 1H bars (RECENT_END_BARS_1H).
 //
+// ✅ NEW (requested): Tighten ONLY monster structures in THIS JOB output (does not touch Engine 1).
+//    - Only if original width > 4.5 pts
+//    - Uses anchorStartTime/anchorEndTime to compute true window range
+//    - Overwrites priceRange ONLY for monster structures
+//
 // Uses DEEP provider (jobs only), chart provider remains untouched.
 
 import fs from "fs";
@@ -25,32 +30,37 @@ const STICKY_FILE = path.resolve(__dirname, "../data/smz-structures-registry.jso
 const DAYS_30M = 180;
 const DAYS_1H = 365;
 
-// ✅ Active pocket settings (LOCKED for now, tweak later if needed)
-const POCKET_FIND_DAYS_1H = 180;      // find pockets from last 6 months
-const POCKET_WINDOW_PTS = 40;         // only pockets within ±40 points of current price
-const POCKET_MAX_WIDTH_PTS = 4.0;     // SPY hard cap
+// ✅ Active pocket settings
+const POCKET_FIND_DAYS_1H = 180;
+const POCKET_WINDOW_PTS = 40;
+const POCKET_MAX_WIDTH_PTS = 4.0;
 const POCKET_MIN_BARS = 3;
 const POCKET_MAX_BARS = 12;
-const POCKET_MIN_ACCEPT_PCT = 0.65;   // % closes inside window
-const POCKET_STRUCT_BUFFER_PTS = 1; // ✅ NEW: pockets within 1.5pts outside a structure are hidden
+const POCKET_MIN_ACCEPT_PCT = 0.65;
 
+// ✅ Pocket buffer (keep as you set it)
+const POCKET_STRUCT_BUFFER_PTS = 1;
 
-// ✅ NEW: "building now" recency gate (~2 weeks of 1H bars)
-const POCKET_RECENT_END_BARS_1H = 70; // ~2 weeks
+// ✅ "building now" recency gate (~2 weeks of 1H bars)
+const POCKET_RECENT_END_BARS_1H = 70;
 
 // Pocket overlap reduction (prevents spam)
-const POCKET_CLUSTER_OVERLAP = 0.55;  // overlap ratio to consider same cluster
-const POCKET_CLUSTER_MID_PTS = 0.60;  // midline proximity
-const POCKET_MAX_RETURN = 10;         // max pockets returned
+const POCKET_CLUSTER_OVERLAP = 0.55;
+const POCKET_CLUSTER_MID_PTS = 0.60;
+const POCKET_MAX_RETURN = 10;
 
 // Option C classification
-const STRUCT_LINK_NEAR_PTS = 1.0;     // within 1pt of structure mid/edge = linked
+const STRUCT_LINK_NEAR_PTS = 1.0;
 
 // Sticky snapshot rules (overlay-only)
-const STICKY_ROUND_STEP = 0.25;       // structureKey quantization
-const STICKY_KEEP_WITHIN_BAND_PTS = POCKET_WINDOW_PTS; // reuse ±40 band
-const STICKY_ARCHIVE_DAYS = 30;       // archive if not seen in live output for 30 days AND outside band
-const STICKY_MAX_WITHIN_BAND = 12;    // cap sticky within band (clean)
+const STICKY_ROUND_STEP = 0.25;
+const STICKY_KEEP_WITHIN_BAND_PTS = POCKET_WINDOW_PTS;
+const STICKY_ARCHIVE_DAYS = 30;
+const STICKY_MAX_WITHIN_BAND = 12;
+
+// ✅ NEW: tighten monster structures ONLY in job output
+const STRUCT_MONSTER_WIDTH_PTS = 4.5;
+const STRUCT_TIGHT_MAX_PTS = 4.25;
 
 // ---------------- Helpers ----------------
 
@@ -78,6 +88,28 @@ function normalizeBars(raw) {
         Number.isFinite(b.close)
     )
     .sort((a, b) => a.time - b.time);
+}
+
+function isBarOk(b) {
+  return (
+    b &&
+    Number.isFinite(b.time) &&
+    Number.isFinite(b.high) &&
+    Number.isFinite(b.low) &&
+    Number.isFinite(b.close)
+  );
+}
+
+function rangeHiLo(list) {
+  let lo = Infinity,
+    hi = -Infinity;
+  for (const b of list || []) {
+    if (!isBarOk(b)) continue;
+    lo = Math.min(lo, b.low);
+    hi = Math.max(hi, b.high);
+  }
+  if (!(hi > lo) || lo === Infinity || hi === -Infinity) return null;
+  return { hi: round2(hi), lo: round2(lo) };
 }
 
 function aggregateTo4h(bars1h) {
@@ -148,14 +180,18 @@ function snapStep(x, step) {
 }
 
 function median(values) {
-  const arr = (values || []).filter((x) => Number.isFinite(x)).slice().sort((a, b) => a - b);
+  const arr = (values || [])
+    .filter((x) => Number.isFinite(x))
+    .slice()
+    .sort((a, b) => a - b);
   if (!arr.length) return null;
   const mid = Math.floor(arr.length / 2);
   return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
 }
 
 function closeAcceptancePct(bars, lo, hi) {
-  let n = 0, inside = 0;
+  let n = 0,
+    inside = 0;
   for (const b of bars) {
     if (!b || !Number.isFinite(b.close)) continue;
     n++;
@@ -186,7 +222,7 @@ function exitConfirmedAfterIndex(bars, lo, hi, endIdx, consec = 2) {
   return { confirmed: count >= consec, side, bars: count };
 }
 
-// ✅ Touches include wicks (high/low overlap), not just bodies.
+// Touches include wicks
 function historyBoostScore(barsHist, lo, hi, mid) {
   let touches = 0;
   let midHits = 0;
@@ -194,10 +230,7 @@ function historyBoostScore(barsHist, lo, hi, mid) {
   for (const b of barsHist) {
     if (!b || !Number.isFinite(b.high) || !Number.isFinite(b.low) || !Number.isFinite(b.close)) continue;
 
-    // touch = wick overlap with zone
     if (b.high >= lo && b.low <= hi) touches++;
-
-    // mid hit = close near mid
     if (Number.isFinite(mid) && Math.abs(b.close - mid) <= 0.25) midHits++;
   }
 
@@ -243,6 +276,61 @@ function isStructureLinked(pocket, liveStructures) {
   return false;
 }
 
+// ✅ NEW: tighten monster structures in job output (no engine changes)
+function tightenMonsterStructuresInJob(zones, bars1h, bars30m) {
+  if (!Array.isArray(zones)) return zones;
+
+  return zones.map((z) => {
+    if (!z || z.tier !== "structure") return z;
+
+    const pr = z.priceRange || [];
+    const hi0 = Number(pr[0]);
+    const lo0 = Number(pr[1]);
+    if (!Number.isFinite(hi0) || !Number.isFinite(lo0) || hi0 <= lo0) return z;
+
+    const width0 = hi0 - lo0;
+    if (width0 <= STRUCT_MONSTER_WIDTH_PTS) return z;
+
+    const facts = z.details?.facts || {};
+    const startTime = Number(facts.anchorStartTime);
+    const endTime = Number(facts.anchorEndTime);
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) return z;
+
+    const slice1h = (bars1h || []).filter((b) => isBarOk(b) && b.time >= startTime && b.time <= endTime);
+    const r1h = rangeHiLo(slice1h);
+    if (!r1h) return z;
+
+    let hi = r1h.hi;
+    let lo = r1h.lo;
+
+    const slice30 = (bars30m || []).filter((b) => isBarOk(b) && b.time >= startTime && b.time <= endTime);
+    const r30 = rangeHiLo(slice30);
+    if (r30) {
+      hi = r30.hi;
+      lo = r30.lo;
+    }
+
+    const widthT = hi - lo;
+    if (!(widthT > 0) || widthT > STRUCT_TIGHT_MAX_PTS) return z;
+
+    return {
+      ...z,
+      priceRange: [hi, lo],
+      price: round2((hi + lo) / 2),
+      details: {
+        ...z.details,
+        facts: {
+          ...facts,
+          tightenedInJob: true,
+          tightenedFromWidthPts: round2(width0),
+          tightenedToWidthPts: round2(widthT),
+          tightenedRange: [hi, lo],
+        },
+      },
+    };
+  });
+}
+
 // ---------------- Sticky snapshot store (overlay-only) ----------------
 
 function loadSticky() {
@@ -281,7 +369,6 @@ function updateStickyFromLive(liveStructures, currentPrice) {
   const byKey = new Map();
   for (const s of list) if (s?.structureKey) byKey.set(s.structureKey, s);
 
-  // Mark seen in live (frozen ranges)
   for (const z of liveStructures || []) {
     const pr = z?.priceRange;
     if (!Array.isArray(pr) || pr.length < 2) continue;
@@ -312,7 +399,6 @@ function updateStickyFromLive(liveStructures, currentPrice) {
     }
   }
 
-  // Archive if not seen for 30 days AND outside ±40 band
   const bandLo = currentPrice - STICKY_KEEP_WITHIN_BAND_PTS;
   const bandHi = currentPrice + STICKY_KEEP_WITHIN_BAND_PTS;
   const cutoffMs = Date.now() - STICKY_ARCHIVE_DAYS * 24 * 3600 * 1000;
@@ -335,7 +421,6 @@ function updateStickyFromLive(liveStructures, currentPrice) {
     }
   }
 
-  // Active sticky within band, capped
   const withinBand = list
     .filter((s) => s?.status === "active")
     .filter((s) => {
@@ -394,13 +479,11 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
   const winLo = currentPrice - POCKET_WINDOW_PTS;
   const winHi = currentPrice + POCKET_WINDOW_PTS;
 
-  // ✅ NEW: Only pockets ending within last ~2 weeks of 1H bars
   const recentEndMinIdx = Math.max(0, barsFind.length - POCKET_RECENT_END_BARS_1H);
 
   const pockets = [];
 
   for (let endIdx = 0; endIdx < barsFind.length - 3; endIdx++) {
-    // ✅ recency gate
     if (endIdx < recentEndMinIdx) continue;
 
     for (let w = POCKET_MIN_BARS; w <= POCKET_MAX_BARS; w++) {
@@ -409,7 +492,8 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
 
       const win = barsFind.slice(startIdx, endIdx + 1);
 
-      let lo = Infinity, hi = -Infinity;
+      let lo = Infinity,
+        hi = -Infinity;
       const closes = [];
 
       for (const b of win) {
@@ -428,25 +512,20 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
       const accept = closeAcceptancePct(win, lo, hi);
       if (accept < POCKET_MIN_ACCEPT_PCT) continue;
 
-      // Must be BUILDING: no violent 2-bar exit right after this window
       const exit = exitConfirmedAfterIndex(barsFind, lo, hi, endIdx, 2);
       if (exit.confirmed) continue;
 
-      // Must intersect ±40 band now
       if (!(hi >= winLo && lo <= winHi)) continue;
 
-      // StrengthNow: tightness + duration + acceptance
       const tightScore = Math.max(0, 60 - width * 12);
       const durScore = Math.min(25, w * 2.5);
       const accScore = Math.min(15, (accept - 0.5) * 30);
       const strengthNow = round2(Math.min(100, tightScore + durScore + accScore));
 
-      // Relevance: closer to current price = higher
       const distMid = Math.abs(mid - currentPrice);
       const rel = Math.max(0, 1 - Math.min(1, distMid / POCKET_WINDOW_PTS));
       const relevanceScore = round2(rel * 100);
 
-      // History boost: wicks count as touches
       const h = historyBoostScore(bars1hAll, lo, hi, mid);
       const strengthHistory = h.score;
 
@@ -462,7 +541,7 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
         type: "institutional",
         tier: "pocket_active",
         status: "building",
-        priceRange: [round2(hi), round2(lo)], // [high, low]
+        priceRange: [round2(hi), round2(lo)],
         price: round2((hi + lo) / 2),
         negotiationMid: round2(mid),
         barsCount: w,
@@ -480,7 +559,6 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
     }
   }
 
-  // Cluster overlapping pockets → keep best per cluster
   pockets.sort((a, b) => (b.strengthTotal ?? 0) - (a.strengthTotal ?? 0));
 
   const clusters = [];
@@ -551,17 +629,12 @@ function pocketTooCloseToAnyStructure(pocket, structures, bufferPts = 1.5) {
     const sLo = Number(sr[1]);
     if (!Number.isFinite(sHi) || !Number.isFinite(sLo) || sHi <= sLo) continue;
 
-    // 1) Overlap/touch => reject
-    const overlaps = pHi >= sLo && pLo <= sHi;
-    if (overlaps) return true;
+    if (pHi >= sLo && pLo <= sHi) return true;
 
-    // 2) Outside but within buffer => reject
-    // pocket above structure
     if (pLo > sHi) {
       const gap = pLo - sHi;
       if (gap <= bufferPts) return true;
     }
-    // pocket below structure
     if (pHi < sLo) {
       const gap = sLo - pHi;
       if (gap <= bufferPts) return true;
@@ -570,7 +643,6 @@ function pocketTooCloseToAnyStructure(pocket, structures, bufferPts = 1.5) {
 
   return false;
 }
-
 
 // ---------------- Main ----------------
 
@@ -614,19 +686,19 @@ async function main() {
 
     console.log("[SMZ] currentPrice:", currentPrice);
 
-    // ✅ Authoritative live output (do NOT alter)
     console.log("[SMZ] Running Institutional engine…");
-    const levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
-    console.log("[SMZ] Institutional levels generated:", levelsLive.length);
+    const levelsLive0 = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
+    console.log("[SMZ] Institutional levels generated:", levelsLive0.length);
+
+    // ✅ APPLY tightening in the JOB output only
+    const levelsLive = tightenMonsterStructuresInJob(levelsLive0, bars1h, bars30m);
 
     const liveStructures = levelsLive.filter((z) => (z?.tier ?? "") === "structure");
 
-    // ✅ Sticky snapshots (overlay-only lane)
     console.log("[SMZ] Updating sticky snapshot store…");
     const structuresSticky = updateStickyFromLive(liveStructures, currentPrice);
     console.log("[SMZ] structures_sticky (within band):", structuresSticky.length);
 
-    // ✅ Active pockets (clustered + recent) + Option C lane tagging
     console.log("[SMZ] Computing active pockets (building)…");
     const pocketsActive = computeActivePockets({ bars1hAll: bars1h, currentPrice });
 
@@ -638,19 +710,19 @@ async function main() {
         structureLinked: linked,
       };
     });
-    // ✅ NEW: remove pockets that overlap/touch structures OR are within 1.5 pts outside a structure
+
     const pocketsClean = pocketsTagged.filter(
       (p) => !pocketTooCloseToAnyStructure(p, liveStructures, POCKET_STRUCT_BUFFER_PTS)
-   );
+    );
 
-    const linkedCount = pocketsTagged.filter((p) => p.structureLinked).length;
+    const linkedCount = pocketsClean.filter((p) => p.structureLinked).length;
     console.log(
       "[SMZ] Active pockets returned:",
-      pocketsTagged.length,
+      pocketsClean.length,
       "| linked:",
       linkedCount,
       "| emerging:",
-      pocketsTagged.length - linkedCount
+      pocketsClean.length - linkedCount
     );
 
     const payload = {
@@ -678,11 +750,16 @@ async function main() {
           cluster_mid_pts: POCKET_CLUSTER_MID_PTS,
           max_return: POCKET_MAX_RETURN,
           structure_link_near_pts: STRUCT_LINK_NEAR_PTS,
+          struct_buffer_pts: POCKET_STRUCT_BUFFER_PTS,
+          tighten_in_job: {
+            monster_width_pts: STRUCT_MONSTER_WIDTH_PTS,
+            tight_max_pts: STRUCT_TIGHT_MAX_PTS,
+          },
         },
       },
-      levels: levelsLive,                 // ✅ authoritative live levels
-      pockets_active: pocketsClean,      // ✅ clustered + recent + lane tagged
-      structures_sticky: structuresSticky // ✅ overlay-only snapshots
+      levels: levelsLive,
+      pockets_active: pocketsClean,
+      structures_sticky: structuresSticky,
     };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
