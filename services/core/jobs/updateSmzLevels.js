@@ -32,7 +32,7 @@ const POCKET_MAX_WIDTH_PTS = 4.0;     // SPY hard cap
 const POCKET_MIN_BARS = 3;
 const POCKET_MAX_BARS = 12;
 const POCKET_MIN_ACCEPT_PCT = 0.65;   // % closes inside window
-const POCKET_STRUCT_BUFFER_PTS = 1.5; // ✅ NEW: pockets within 1.5pts outside a structure are hidden
+const POCKET_STRUCT_BUFFER_PTS = 1; // ✅ NEW: pockets within 1.5pts outside a structure are hidden
 
 
 // ✅ NEW: "building now" recency gate (~2 weeks of 1H bars)
