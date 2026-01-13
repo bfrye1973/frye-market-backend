@@ -59,7 +59,7 @@ LUX_CONV = 50
 LUX_LEN  = 20
 
 # ✅ SHORT MEMORY PSI window (TRADING DAYS) — you wanted 20
-PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "20"))
+PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "10"))
 
 # Fetch days (ONLY for EMAs/ATR stability, NOT PSI memory)
 SPY_FETCH_DAYS    = int(os.environ.get("SPY_FETCH_DAYS", "260"))
