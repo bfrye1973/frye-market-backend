@@ -4,6 +4,7 @@
 // ✅ Live structures remain authoritative: computeSmartMoneyLevels() output is the ONLY source for live STRUCTURES.
 // ✅ Sticky persistence is overlay-only: structures_sticky[] (frozen snapshots, never merged into live).
 // ✅ Active pockets: clustered to reduce overlap spam + Option C tagging (structure_linked vs emerging).
+// ✅ NEW: "Building now" = pockets whose window ended within last ~2 weeks of 1H bars (RECENT_END_BARS_1H).
 //
 // Uses DEEP provider (jobs only), chart provider remains untouched.
 
@@ -32,7 +33,10 @@ const POCKET_MIN_BARS = 3;
 const POCKET_MAX_BARS = 12;
 const POCKET_MIN_ACCEPT_PCT = 0.65;   // % closes inside window
 
-// Pocket overlap reduction (NEW, prevents spam)
+// ✅ NEW: "building now" recency gate (~2 weeks of 1H bars)
+const POCKET_RECENT_END_BARS_1H = 70; // ~2 weeks
+
+// Pocket overlap reduction (prevents spam)
 const POCKET_CLUSTER_OVERLAP = 0.55;  // overlap ratio to consider same cluster
 const POCKET_CLUSTER_MID_PTS = 0.60;  // midline proximity
 const POCKET_MAX_RETURN = 10;         // max pockets returned
@@ -43,9 +47,8 @@ const STRUCT_LINK_NEAR_PTS = 1.0;     // within 1pt of structure mid/edge = link
 // Sticky snapshot rules (overlay-only)
 const STICKY_ROUND_STEP = 0.25;       // structureKey quantization
 const STICKY_KEEP_WITHIN_BAND_PTS = POCKET_WINDOW_PTS; // reuse ±40 band
-const STICKY_SEEN_DAYS_KEEP = 30;     // if live seen within 30 days, keep active
+const STICKY_ARCHIVE_DAYS = 30;       // archive if not seen in live output for 30 days AND outside band
 const STICKY_MAX_WITHIN_BAND = 12;    // cap sticky within band (clean)
-const STICKY_ARCHIVE_DAYS = 30;       // archive if not seen in live output for 30 trading days (approx)
 
 // ---------------- Helpers ----------------
 
@@ -132,14 +135,14 @@ function round2(x) {
   return Math.round(Number(x) * 100) / 100;
 }
 
+function isoNow() {
+  return new Date().toISOString();
+}
+
 function snapStep(x, step) {
   const n = Number(x);
   if (!Number.isFinite(n)) return null;
   return Math.round(n / step) * step;
-}
-
-function isoNow() {
-  return new Date().toISOString();
 }
 
 function median(values) {
@@ -181,13 +184,18 @@ function exitConfirmedAfterIndex(bars, lo, hi, endIdx, consec = 2) {
   return { confirmed: count >= consec, side, bars: count };
 }
 
+// ✅ Touches include wicks (high/low overlap), not just bodies.
 function historyBoostScore(barsHist, lo, hi, mid) {
   let touches = 0;
   let midHits = 0;
 
   for (const b of barsHist) {
     if (!b || !Number.isFinite(b.high) || !Number.isFinite(b.low) || !Number.isFinite(b.close)) continue;
+
+    // touch = wick overlap with zone
     if (b.high >= lo && b.low <= hi) touches++;
+
+    // mid hit = close near mid
     if (Number.isFinite(mid) && Math.abs(b.close - mid) <= 0.25) midHits++;
   }
 
@@ -268,13 +276,10 @@ function updateStickyFromLive(liveStructures, currentPrice) {
   const list = store.structures.slice();
   const now = isoNow();
 
-  // Index by key
   const byKey = new Map();
-  for (const s of list) {
-    if (s?.structureKey) byKey.set(s.structureKey, s);
-  }
+  for (const s of list) if (s?.structureKey) byKey.set(s.structureKey, s);
 
-  // Mark seen for current live structures (DO NOT CHANGE RANGE)
+  // Mark seen in live (frozen ranges)
   for (const z of liveStructures || []) {
     const pr = z?.priceRange;
     if (!Array.isArray(pr) || pr.length < 2) continue;
@@ -289,10 +294,11 @@ function updateStickyFromLive(liveStructures, currentPrice) {
       existing.lastSeenUtc = now;
       existing.timesSeen = Number(existing.timesSeen ?? 0) + 1;
       existing.maxStrengthSeen = Math.max(Number(existing.maxStrengthSeen ?? 0), Number(z.strength ?? 0));
+      existing.status = "active";
     } else {
       const entry = {
         structureKey: key,
-        priceRange: [round2(hi), round2(lo)], // frozen snapshot
+        priceRange: [round2(hi), round2(lo)],
         firstSeenUtc: now,
         lastSeenUtc: now,
         timesSeen: 1,
@@ -304,8 +310,7 @@ function updateStickyFromLive(liveStructures, currentPrice) {
     }
   }
 
-  // Archive rules (overlay-only)
-  // Archive if not seen in live for ~30 days AND outside ±40 band.
+  // Archive if not seen for 30 days AND outside ±40 band
   const bandLo = currentPrice - STICKY_KEEP_WITHIN_BAND_PTS;
   const bandHi = currentPrice + STICKY_KEEP_WITHIN_BAND_PTS;
   const cutoffMs = Date.now() - STICKY_ARCHIVE_DAYS * 24 * 3600 * 1000;
@@ -317,7 +322,6 @@ function updateStickyFromLive(liveStructures, currentPrice) {
 
     const hi = Number(pr[0]);
     const lo = Number(pr[1]);
-    const mid = (hi + lo) / 2;
 
     const lastSeenMs = Date.parse(s.lastSeenUtc || "");
     const old = Number.isFinite(lastSeenMs) ? lastSeenMs < cutoffMs : false;
@@ -329,7 +333,7 @@ function updateStickyFromLive(liveStructures, currentPrice) {
     }
   }
 
-  // Build structures_sticky list (active + within band, capped)
+  // Active sticky within band, capped
   const withinBand = list
     .filter((s) => s?.status === "active")
     .filter((s) => {
@@ -350,7 +354,6 @@ function updateStickyFromLive(liveStructures, currentPrice) {
     })
     .slice(0, STICKY_MAX_WITHIN_BAND);
 
-  // Save store
   const newStore = {
     ok: true,
     meta: { ...(store.meta ?? {}), updated_at_utc: now },
@@ -378,7 +381,7 @@ function updateStickyFromLive(liveStructures, currentPrice) {
   }));
 }
 
-// ---------------- Active pockets (clustered) ----------------
+// ---------------- Active pockets (clustered + RECENT only) ----------------
 
 function computeActivePockets({ bars1hAll, currentPrice }) {
   const nowSec = bars1hAll.at(-1)?.time ?? Math.floor(Date.now() / 1000);
@@ -389,9 +392,15 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
   const winLo = currentPrice - POCKET_WINDOW_PTS;
   const winHi = currentPrice + POCKET_WINDOW_PTS;
 
+  // ✅ NEW: Only pockets ending within last ~2 weeks of 1H bars
+  const recentEndMinIdx = Math.max(0, barsFind.length - POCKET_RECENT_END_BARS_1H);
+
   const pockets = [];
 
   for (let endIdx = 0; endIdx < barsFind.length - 3; endIdx++) {
+    // ✅ recency gate
+    if (endIdx < recentEndMinIdx) continue;
+
     for (let w = POCKET_MIN_BARS; w <= POCKET_MAX_BARS; w++) {
       const startIdx = endIdx - (w - 1);
       if (startIdx < 0) continue;
@@ -417,20 +426,25 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
       const accept = closeAcceptancePct(win, lo, hi);
       if (accept < POCKET_MIN_ACCEPT_PCT) continue;
 
+      // Must be BUILDING: no violent 2-bar exit right after this window
       const exit = exitConfirmedAfterIndex(barsFind, lo, hi, endIdx, 2);
       if (exit.confirmed) continue;
 
+      // Must intersect ±40 band now
       if (!(hi >= winLo && lo <= winHi)) continue;
 
+      // StrengthNow: tightness + duration + acceptance
       const tightScore = Math.max(0, 60 - width * 12);
       const durScore = Math.min(25, w * 2.5);
       const accScore = Math.min(15, (accept - 0.5) * 30);
       const strengthNow = round2(Math.min(100, tightScore + durScore + accScore));
 
+      // Relevance: closer to current price = higher
       const distMid = Math.abs(mid - currentPrice);
       const rel = Math.max(0, 1 - Math.min(1, distMid / POCKET_WINDOW_PTS));
       const relevanceScore = round2(rel * 100);
 
+      // History boost: wicks count as touches
       const h = historyBoostScore(bars1hAll, lo, hi, mid);
       const strengthHistory = h.score;
 
@@ -446,7 +460,7 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
         type: "institutional",
         tier: "pocket_active",
         status: "building",
-        priceRange: [round2(hi), round2(lo)],
+        priceRange: [round2(hi), round2(lo)], // [high, low]
         price: round2((hi + lo) / 2),
         negotiationMid: round2(mid),
         barsCount: w,
@@ -573,7 +587,7 @@ async function main() {
     const structuresSticky = updateStickyFromLive(liveStructures, currentPrice);
     console.log("[SMZ] structures_sticky (within band):", structuresSticky.length);
 
-    // ✅ Active pockets (clustered) + Option C lane tagging
+    // ✅ Active pockets (clustered + recent) + Option C lane tagging
     console.log("[SMZ] Computing active pockets (building)…");
     const pocketsActive = computeActivePockets({ bars1hAll: bars1h, currentPrice });
 
@@ -587,7 +601,14 @@ async function main() {
     });
 
     const linkedCount = pocketsTagged.filter((p) => p.structureLinked).length;
-    console.log("[SMZ] Active pockets returned:", pocketsTagged.length, "| linked:", linkedCount, "| emerging:", pocketsTagged.length - linkedCount);
+    console.log(
+      "[SMZ] Active pockets returned:",
+      pocketsTagged.length,
+      "| linked:",
+      linkedCount,
+      "| emerging:",
+      pocketsTagged.length - linkedCount
+    );
 
     const payload = {
       ok: true,
@@ -599,8 +620,8 @@ async function main() {
           file: path.basename(STICKY_FILE),
           round_step: STICKY_ROUND_STEP,
           band_pts: STICKY_KEEP_WITHIN_BAND_PTS,
-          keep_within_band_cap: STICKY_MAX_WITHIN_BAND,
-          keep_seen_days: STICKY_SEEN_DAYS_KEEP,
+          within_band_cap: STICKY_MAX_WITHIN_BAND,
+          archive_days: STICKY_ARCHIVE_DAYS,
         },
         pocket_settings: {
           find_days_1h: POCKET_FIND_DAYS_1H,
@@ -609,15 +630,16 @@ async function main() {
           min_bars: POCKET_MIN_BARS,
           max_bars: POCKET_MAX_BARS,
           min_accept_pct: POCKET_MIN_ACCEPT_PCT,
+          recent_end_bars_1h: POCKET_RECENT_END_BARS_1H,
           cluster_overlap: POCKET_CLUSTER_OVERLAP,
           cluster_mid_pts: POCKET_CLUSTER_MID_PTS,
           max_return: POCKET_MAX_RETURN,
           structure_link_near_pts: STRUCT_LINK_NEAR_PTS,
         },
       },
-      levels: levelsLive,                 // ✅ authoritative live levels (structures + pockets + micro filtered at route)
-      pockets_active: pocketsTagged,      // ✅ clustered + lane tagged
-      structures_sticky: structuresSticky // ✅ overlay-only snapshot lane
+      levels: levelsLive,                 // ✅ authoritative live levels
+      pockets_active: pocketsTagged,      // ✅ clustered + recent + lane tagged
+      structures_sticky: structuresSticky // ✅ overlay-only snapshots
     };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
