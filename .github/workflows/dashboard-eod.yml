@@ -51,7 +51,7 @@ jobs:
           python -u scripts/build_outlook_source_daily.py \
             --sectors-dir data/sectors \
             --days 90 \
-            --lookback-days 20 \
+            --lookback-days 10 \
             --out data/outlook_source_daily.json
           head -n 60 data/outlook_source_daily.json || true
 
