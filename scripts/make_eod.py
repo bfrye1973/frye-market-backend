@@ -1,27 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_eod.py (R15.0 — SHORT-MEMORY Lux PSI (20d) + Ferrari 3-Color + Internals Weak Gate)
+Ferrari Dashboard — make_eod.py (R15.1 — EOD Balanced Breadth Confirm)
 
-LOCKED INTENT:
-- EOD Lux PSI is a SHORT-MEMORY "current state" detector (weeks), not long history.
-- PSI meaning = tightness (higher = tighter).
-- PSI window (lookback) default is 20 trading days (your preference).
-- Ferrari-simple squeeze light colors:
+What’s locked:
+- EOD Lux PSI = SHORT-MEMORY current-state detector (weeks), not long history
+- PSI window default = 20 trading days (PSI_WIN_D=20)
+- PSI meaning = tightness (higher = tighter)
+- Ferrari 3-color squeeze light:
     RED    psi >= 90
     YELLOW 70 <= psi < 90
     GREEN  psi < 70
-- PSI gate remains:
-    >=90  danger  => NO ENTRIES (exits allowed)
-    84-89 caution => A+ only
-    25-83 free    => normal
-    <25  minor    => chop caution
-- Bull trend may remain Bull while allowEntries=false when internals are weak.
-- Guardrail: input source mode must be "daily" to prevent intraday contamination.
-- Option A: break exact-50 dead-zone with a tiny bias (semantic disambiguation).
+- Guardrail: source.mode must be "daily" (prevents intraday contamination)
+- Internals Weak can block entries even if state is Bull
+- Option A: break the “exact 50” dead-zone with tiny bias
 
-Outputs:
-- data/outlook.json (via workflow --out)
+What changed in R15.1:
+- breadth_confirm now blends:
+    50% ETF confirm (EMA10>EMA20 + bar-up on sector ETFs)
+    25% sectorCards average breadth_pct
+    25% sectorCards average momentum_pct
+  This prevents “EOD 95” when sectorCards are mixed.
 """
 
 from __future__ import annotations
@@ -42,7 +41,7 @@ SECTOR_ETFS = ["XLK","XLY","XLC","XLP","XLU","XLV","XLRE","XLE","XLF","XLB","XLI
 OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
 DEFENSIVE = {"consumer staples","utilities","health care","real estate"}
 
-POLY_KEY  = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_API_KEY") or os.environ.get("POLY_KEY") or ""
+POLY_KEY = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_API_KEY") or os.environ.get("POLY_KEY") or ""
 
 # --- EMA distance saturations (daily) ---
 FULL_DIST_10 = 0.60
@@ -59,7 +58,7 @@ W_CONDITIONS   = 0.15
 LUX_CONV = 50
 LUX_LEN  = 20
 
-# ✅ SHORT MEMORY PSI window (TRADING DAYS) — YOU REQUESTED 20
+# ✅ SHORT MEMORY PSI window (TRADING DAYS) — you wanted 20
 PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "20"))
 
 # Fetch days (ONLY for EMAs/ATR stability, NOT PSI memory)
@@ -84,7 +83,7 @@ def pct(a: float, b: float) -> float:
     return 0.0 if b <= 0 else 100.0 * float(a) / float(b)
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent":"make-eod/3.0","Cache-Control":"no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent":"make-eod/3.1","Cache-Control":"no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -132,40 +131,28 @@ def posture_from_dist(distp: float, full_dist: float) -> float:
     return clamp(50.0 + 50.0 * unit, 0.0, 100.0)
 
 def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
-    """
-    LuxAlgo PSI:
-      max := nz(max(src, max - (max-src)/conv), src)
-      min := nz(min(src, min + (src-min)/conv), src)
-      diff = log(max-min)
-      psi  = -50*corr(diff, bar_index, length) + 50
-    """
+    # LuxAlgo PSI
     if len(closes) < length + 2:
         return None
-
     mx = None
     mn = None
     diffs: List[float] = []
     eps = 1e-12
-
     for src in map(float, closes):
         mx = src if mx is None else max(mx - (mx - src)/conv, src)
         mn = src if mn is None else min(mn + (src - mn)/conv, src)
         span = max(mx - mn, eps)
         diffs.append(math.log(span))
-
     win = diffs[-length:]
     if len(win) < length:
         return None
-
     xs = list(range(length))
     xbar = sum(xs) / length
     ybar = sum(win) / length
-
     nume = sum((x - xbar) * (y - ybar) for x, y in zip(xs, win))
     denx = sum((x - xbar) ** 2 for x in xs)
     deny = sum((y - ybar) ** 2 for y in win)
     den = math.sqrt(denx * deny) if denx > 0 and deny > 0 else 0.0
-
     r = (nume / den) if den != 0 else 0.0
     psi = -50.0 * r + 50.0
     return float(clamp(psi, 0.0, 100.0))
@@ -173,7 +160,7 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
 def volatility_atr14_pct(C: List[float], H: List[float], L: List[float]) -> float:
     if len(C) < 20:
         return 20.0
-    trs = [max(H[i]-L[i], abs(H[i]-C[i-1]), abs(L[i]-C[i-1])) for i in range(1, len(C))]
+    trs=[max(H[i]-L[i], abs(H[i]-C[i-1]), abs(L[i]-C[i-1])) for i in range(1,len(C))]
     if len(trs) < 14:
         return 20.0
     atr = sum(trs[-14:]) / 14.0
@@ -204,7 +191,6 @@ def squeeze_score_from_regime(regime_key: str) -> float:
     return 60.0
 
 def squeeze_light_color_3(psi: float) -> str:
-    # Ferrari simple 3 colors
     if psi >= 90.0:
         return "red"
     if psi >= 70.0:
@@ -265,6 +251,21 @@ def compute_sectorcards_risk_on(cards: List[dict]) -> float:
             score += (1 if float(b) < 50.0 else 0)
     return round(pct(score, considered or 1), 2)
 
+def sectorcards_avgs(cards: List[dict]) -> Tuple[float, float]:
+    if not cards:
+        return (50.0, 50.0)
+    bs = []
+    ms = []
+    for c in cards:
+        try:
+            bs.append(float(c.get("breadth_pct", 50.0)))
+            ms.append(float(c.get("momentum_pct", 50.0)))
+        except Exception:
+            continue
+    if not bs or not ms:
+        return (50.0, 50.0)
+    return (sum(bs)/len(bs), sum(ms)/len(ms))
+
 def daily_breadth_participation_from_sector_etfs() -> Tuple[float, float]:
     good = align = barup = 0
     for sym in SECTOR_ETFS:
@@ -304,7 +305,7 @@ def main():
         print("[error] cannot read source:", e, file=sys.stderr)
         sys.exit(1)
 
-    # ✅ Guardrail: must be DAILY source
+    # Guardrail: must be DAILY source
     mode = (src.get("mode") or "").strip().lower()
     if mode and mode != "daily":
         print(f"[fatal] EOD source mode must be 'daily'. got: {mode}", file=sys.stderr)
@@ -338,13 +339,13 @@ def main():
 
     state, state_label = compute_eod_state(close, e10, e20, e50)
 
-    # ✅ SHORT MEMORY PSI using last PSI_WIN_D closes
+    # SHORT MEMORY PSI
     Cw = C[-PSI_WIN_D:] if len(C) > PSI_WIN_D else C
     psi = lux_psi_from_closes(Cw, conv=LUX_CONV, length=LUX_LEN)
     psi = float(psi) if isinstance(psi,(int,float)) else 50.0
     psi = float(clamp(psi, 0.0, 100.0))
 
-    # ✅ Option A: break exact-50 dead-zone
+    # Option A: break exact-50 dead-zone
     if abs(psi - 50.0) < PSI_DEADZONE_EPS:
         psi = PSI_BIAS_TREND if ema_structure >= 55.0 else PSI_BIAS_WEAK
 
@@ -359,10 +360,20 @@ def main():
 
     conditions = float(clamp(0.40*squeeze_score + 0.30*liq_norm + 0.30*vol_score, 0.0, 100.0))
 
-    breadth_daily, participation_daily = daily_breadth_participation_from_sector_etfs()
-    breadth_confirm = float(clamp(0.60*breadth_daily + 0.40*participation_daily, 0.0, 100.0))
+    # ETF confirm
+    etf_breadth, etf_participation = daily_breadth_participation_from_sector_etfs()
+    etf_confirm = float(clamp(0.60*etf_breadth + 0.40*etf_participation, 0.0, 100.0))
 
-    internals_weak, red_count, internals_reason = compute_internals_weak(cards, participation_daily, breadth_daily)
+    # sectorCards averages
+    cards_b_avg, cards_m_avg = sectorcards_avgs(cards)
+
+    # ✅ BALANCED blend: 50% ETF confirm, 25% card breadth, 25% card momentum
+    breadth_confirm = float(clamp(
+        0.50*etf_confirm + 0.25*cards_b_avg + 0.25*cards_m_avg,
+        0.0, 100.0
+    ))
+
+    internals_weak, red_count, internals_reason = compute_internals_weak(cards, etf_participation, etf_breadth)
     risk_on = compute_sectorcards_risk_on(cards)
 
     score_raw = float(W_EMA_STRUCT*ema_structure + W_BREADTH_CONF*breadth_confirm + W_CONDITIONS*conditions)
@@ -390,14 +401,17 @@ def main():
         "internalsWeak": bool(internals_weak),
         "redSectors": int(red_count),
         "psiWindowDays": int(PSI_WIN_D),
+        "etfConfirm": round(etf_confirm, 1),
+        "cardsBreadthAvg": round(cards_b_avg, 1),
+        "cardsMomentumAvg": round(cards_m_avg, 1),
     }
 
     daily = {
         "state": state,
         "stateLabel": state_label,
         "score": round(score, 1),
-        "breadthDailyPct": breadth_daily,
-        "participationDailyPct": participation_daily,
+        "breadthDailyPct": etf_breadth,
+        "participationDailyPct": etf_participation,
         "squeezePsi": round(psi, 2),
         "squeezeRegime": regime_key,
         "squeezeColor": squeeze_light,
@@ -426,20 +440,30 @@ def main():
     metrics = {
         "overall_eod_score": round(score, 1),
         "overall_eod_state": state,
-        "breadth_daily_pct": breadth_daily,
-        "participation_daily_pct": participation_daily,
+
+        "breadth_daily_pct": etf_breadth,
+        "participation_daily_pct": etf_participation,
         "breadth_confirm_pct": round(float(breadth_confirm), 2),
-        "daily_squeeze_pct": round(float(psi), 2),   # ✅ UI reads this
+
+        "daily_squeeze_pct": round(float(psi), 2),
         "squeeze_regime": regime_key,
         "psi_window_days": int(PSI_WIN_D),
+
         "volatility_pct": round(float(vol_pct), 3),
         "liquidity_pct": round(float(liq_pct), 2),
         "liq_norm_pct": round(float(liq_norm), 2),
         "vol_score_pct": round(float(vol_score), 2),
         "conditions_pct": round(float(conditions), 2),
+
         "risk_on_daily_pct": risk_on,
+
         "internals_weak": bool(internals_weak),
         "red_sectors_count": int(red_count),
+
+        # debug visibility
+        "etf_confirm_pct": round(float(etf_confirm), 2),
+        "cards_breadth_avg": round(float(cards_b_avg), 2),
+        "cards_momentum_avg": round(float(cards_m_avg), 2),
     }
 
     engineLights = {
@@ -470,7 +494,7 @@ def main():
         "sectorCards": cards,
         "engineLights": engineLights,
         "meta": {
-            "source": "make_eod.py R15.0 short-psi(20d) + ferrari-3color + guardrail",
+            "source": "make_eod.py R15.1 balanced-breadth + short-psi(20d)",
             "tz": "America/Phoenix",
         }
     }
@@ -479,7 +503,12 @@ def main():
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
-    print(f"[eod] psi={psi:.2f} psiWin={PSI_WIN_D} squeezeLight={squeeze_light} state={state} regime={regime_key} allowEntries={allow_entries}", flush=True)
+    print(
+        f"[eod] psi={psi:.2f} win={PSI_WIN_D} etfConfirm={etf_confirm:.1f} "
+        f"cardsB={cards_b_avg:.1f} cardsM={cards_m_avg:.1f} breadthConfirm={breadth_confirm:.1f} "
+        f"score={score:.1f} state={state}",
+        flush=True
+    )
 
 if __name__ == "__main__":
     try:
