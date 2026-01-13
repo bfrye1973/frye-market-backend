@@ -1,10 +1,9 @@
 // src/services/core/jobs/updateSmzLevels.js
 // Institutional Smart Money Zones Job — writes smz-levels.json
 //
-// Adds:
-// ✅ Sticky STRUCTURE registry (structures persist across runs)
-// ✅ pockets_active de-overlap clustering (reduces overlapping spam)
-// ✅ Option C lanes: structure_linked vs emerging
+// ✅ Live structures remain authoritative: computeSmartMoneyLevels() output is the ONLY source for live STRUCTURES.
+// ✅ Sticky persistence is overlay-only: structures_sticky[] (frozen snapshots, never merged into live).
+// ✅ Active pockets: clustered to reduce overlap spam + Option C tagging (structure_linked vs emerging).
 //
 // Uses DEEP provider (jobs only), chart provider remains untouched.
 
@@ -14,17 +13,12 @@ import { fileURLToPath } from "url";
 
 import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
 import { getBarsFromPolygonDeep } from "../../../api/providers/polygonBarsDeep.js";
-import {
-  loadRegistry,
-  saveRegistry,
-  mergeStructuresIntoRegistry,
-} from "../logic/smzStructureRegistry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const OUTFILE = path.resolve(__dirname, "../data/smz-levels.json");
-const REGISTRY_FILE = path.resolve(__dirname, "../data/smz-structures-registry.json");
+const STICKY_FILE = path.resolve(__dirname, "../data/smz-structures-registry.json");
 
 // ✅ Lookback days (LOCKED)
 const DAYS_30M = 180;
@@ -38,21 +32,29 @@ const POCKET_MIN_BARS = 3;
 const POCKET_MAX_BARS = 12;
 const POCKET_MIN_ACCEPT_PCT = 0.65;   // % closes inside window
 
-// Pocket overlap reduction (NEW, to prevent spam)
-const POCKET_CLUSTER_OVERLAP = 0.55;   // overlap ratio to consider same pocket cluster
-const POCKET_CLUSTER_MID_PTS = 0.60;   // midline proximity to cluster
-const POCKET_MAX_RETURN = 10;          // return top N pockets after clustering
+// Pocket overlap reduction (NEW, prevents spam)
+const POCKET_CLUSTER_OVERLAP = 0.55;  // overlap ratio to consider same cluster
+const POCKET_CLUSTER_MID_PTS = 0.60;  // midline proximity
+const POCKET_MAX_RETURN = 10;         // max pockets returned
 
-// Lane classification (Option C)
-const STRUCT_LINK_NEAR_PTS = 1.0;      // if within 1pt of structure edges/mid, call it linked
+// Option C classification
+const STRUCT_LINK_NEAR_PTS = 1.0;     // within 1pt of structure mid/edge = linked
 
-// Normalize Polygon aggregate bars to { time(sec), open, high, low, close, volume }
+// Sticky snapshot rules (overlay-only)
+const STICKY_ROUND_STEP = 0.25;       // structureKey quantization
+const STICKY_KEEP_WITHIN_BAND_PTS = POCKET_WINDOW_PTS; // reuse ±40 band
+const STICKY_SEEN_DAYS_KEEP = 30;     // if live seen within 30 days, keep active
+const STICKY_MAX_WITHIN_BAND = 12;    // cap sticky within band (clean)
+const STICKY_ARCHIVE_DAYS = 30;       // archive if not seen in live output for 30 trading days (approx)
+
+// ---------------- Helpers ----------------
+
 function normalizeBars(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((b) => {
-      const tms = Number(b.t ?? b.time ?? 0); // Polygon often ms
-      const t = tms > 1e12 ? Math.floor(tms / 1000) : tms; // -> sec
+      const tms = Number(b.t ?? b.time ?? 0);
+      const t = tms > 1e12 ? Math.floor(tms / 1000) : tms;
       return {
         time: t,
         open: Number(b.o ?? b.open ?? 0),
@@ -73,7 +75,6 @@ function normalizeBars(raw) {
     .sort((a, b) => a.time - b.time);
 }
 
-// Build synthetic 4H bars from 1H bars
 function aggregateTo4h(bars1h) {
   if (!Array.isArray(bars1h) || bars1h.length < 8) return [];
   const out = [];
@@ -128,7 +129,17 @@ function spanInfo(label, bars) {
 }
 
 function round2(x) {
-  return Math.round(x * 100) / 100;
+  return Math.round(Number(x) * 100) / 100;
+}
+
+function snapStep(x, step) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n / step) * step;
+}
+
+function isoNow() {
+  return new Date().toISOString();
 }
 
 function median(values) {
@@ -155,7 +166,6 @@ function barOutsideSide(bar, lo, hi) {
   return null;
 }
 
-// Confirm violent exit after a window end index (2 consecutive bars fully outside, same side)
 function exitConfirmedAfterIndex(bars, lo, hi, endIdx, consec = 2) {
   let side = null;
   let count = 0;
@@ -172,7 +182,6 @@ function exitConfirmedAfterIndex(bars, lo, hi, endIdx, consec = 2) {
 }
 
 function historyBoostScore(barsHist, lo, hi, mid) {
-  // simple + stable: count touches + midline-close hits
   let touches = 0;
   let midHits = 0;
 
@@ -182,38 +191,10 @@ function historyBoostScore(barsHist, lo, hi, mid) {
     if (Number.isFinite(mid) && Math.abs(b.close - mid) <= 0.25) midHits++;
   }
 
-  // Convert to a 0..100 scale-ish (caps prevent runaway)
   const touchScore = Math.min(65, touches * 1.1);
   const midScore = Math.min(35, midHits * 2.0);
 
-  return {
-    touches,
-    midHits,
-    score: round2(touchScore + midScore),
-  };
-}
-
-function computeATR(barsAsc, period = 14) {
-  if (!Array.isArray(barsAsc) || barsAsc.length < period + 2) return 1;
-  let sum = 0;
-  let n = 0;
-  for (let i = 1; i < barsAsc.length; i++) {
-    const c = barsAsc[i];
-    const p = barsAsc[i - 1];
-    if (!c || !p) continue;
-    if (![c.high, c.low, p.close].every(Number.isFinite)) continue;
-    const tr = Math.max(
-      c.high - c.low,
-      Math.abs(c.high - p.close),
-      Math.abs(c.low - p.close)
-    );
-    if (Number.isFinite(tr)) {
-      sum += tr;
-      n++;
-    }
-  }
-  const use = Math.max(1, Math.min(n, period));
-  return use ? sum / use : 1;
+  return { touches, midHits, score: round2(touchScore + midScore) };
 }
 
 function overlapRatioRange(aHi, aLo, bHi, bLo) {
@@ -225,14 +206,14 @@ function overlapRatioRange(aHi, aLo, bHi, bLo) {
   return denom > 0 ? inter / denom : 0;
 }
 
-function isStructureLinked(pocket, structures) {
+function isStructureLinked(pocket, liveStructures) {
   const pr = pocket?.priceRange;
   if (!Array.isArray(pr) || pr.length < 2) return false;
   const pHi = Number(pr[0]);
   const pLo = Number(pr[1]);
   const pMid = Number.isFinite(pocket?.negotiationMid) ? pocket.negotiationMid : (pHi + pLo) / 2;
 
-  for (const s of structures || []) {
+  for (const s of liveStructures || []) {
     const sr = s?.priceRange;
     if (!Array.isArray(sr) || sr.length < 2) continue;
     const sHi = Number(sr[0]);
@@ -240,9 +221,8 @@ function isStructureLinked(pocket, structures) {
     const sMid = (sHi + sLo) / 2;
 
     const ov = overlapRatioRange(pHi, pLo, sHi, sLo);
-    if (ov >= 0.15) return true; // any meaningful overlap
+    if (ov >= 0.15) return true;
 
-    // or near boundary/mid
     const near =
       Math.abs(pMid - sMid) <= STRUCT_LINK_NEAR_PTS ||
       Math.abs(pMid - sHi) <= STRUCT_LINK_NEAR_PTS ||
@@ -253,7 +233,153 @@ function isStructureLinked(pocket, structures) {
   return false;
 }
 
-// ✅ Active pockets finder (forming, no violent exit yet)
+// ---------------- Sticky snapshot store (overlay-only) ----------------
+
+function loadSticky() {
+  try {
+    if (!fs.existsSync(STICKY_FILE)) {
+      return { ok: true, meta: { created_at_utc: isoNow() }, structures: [] };
+    }
+    const raw = fs.readFileSync(STICKY_FILE, "utf8");
+    const json = JSON.parse(raw);
+    return {
+      ok: true,
+      meta: json?.meta ?? { created_at_utc: isoNow() },
+      structures: Array.isArray(json?.structures) ? json.structures : [],
+    };
+  } catch {
+    return { ok: true, meta: { created_at_utc: isoNow(), recovered: true }, structures: [] };
+  }
+}
+
+function saveSticky(store) {
+  fs.mkdirSync(path.dirname(STICKY_FILE), { recursive: true });
+  fs.writeFileSync(STICKY_FILE, JSON.stringify(store, null, 2), "utf8");
+}
+
+function structureKeyFromRange(hi, lo) {
+  const qHi = snapStep(hi, STICKY_ROUND_STEP);
+  const qLo = snapStep(lo, STICKY_ROUND_STEP);
+  return `SPY|mixed|hi=${qHi?.toFixed(2)}|lo=${qLo?.toFixed(2)}`;
+}
+
+function updateStickyFromLive(liveStructures, currentPrice) {
+  const store = loadSticky();
+  const list = store.structures.slice();
+  const now = isoNow();
+
+  // Index by key
+  const byKey = new Map();
+  for (const s of list) {
+    if (s?.structureKey) byKey.set(s.structureKey, s);
+  }
+
+  // Mark seen for current live structures (DO NOT CHANGE RANGE)
+  for (const z of liveStructures || []) {
+    const pr = z?.priceRange;
+    if (!Array.isArray(pr) || pr.length < 2) continue;
+    const hi = Number(pr[0]);
+    const lo = Number(pr[1]);
+    if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi <= lo) continue;
+
+    const key = structureKeyFromRange(hi, lo);
+    const existing = byKey.get(key);
+
+    if (existing) {
+      existing.lastSeenUtc = now;
+      existing.timesSeen = Number(existing.timesSeen ?? 0) + 1;
+      existing.maxStrengthSeen = Math.max(Number(existing.maxStrengthSeen ?? 0), Number(z.strength ?? 0));
+    } else {
+      const entry = {
+        structureKey: key,
+        priceRange: [round2(hi), round2(lo)], // frozen snapshot
+        firstSeenUtc: now,
+        lastSeenUtc: now,
+        timesSeen: 1,
+        maxStrengthSeen: Number(z.strength ?? 0),
+        status: "active",
+      };
+      list.push(entry);
+      byKey.set(key, entry);
+    }
+  }
+
+  // Archive rules (overlay-only)
+  // Archive if not seen in live for ~30 days AND outside ±40 band.
+  const bandLo = currentPrice - STICKY_KEEP_WITHIN_BAND_PTS;
+  const bandHi = currentPrice + STICKY_KEEP_WITHIN_BAND_PTS;
+  const cutoffMs = Date.now() - STICKY_ARCHIVE_DAYS * 24 * 3600 * 1000;
+
+  for (const s of list) {
+    if (!s || s.status === "archived") continue;
+    const pr = s.priceRange;
+    if (!Array.isArray(pr) || pr.length < 2) continue;
+
+    const hi = Number(pr[0]);
+    const lo = Number(pr[1]);
+    const mid = (hi + lo) / 2;
+
+    const lastSeenMs = Date.parse(s.lastSeenUtc || "");
+    const old = Number.isFinite(lastSeenMs) ? lastSeenMs < cutoffMs : false;
+    const inBand = hi >= bandLo && lo <= bandHi;
+
+    if (old && !inBand) {
+      s.status = "archived";
+      s.archivedUtc = now;
+    }
+  }
+
+  // Build structures_sticky list (active + within band, capped)
+  const withinBand = list
+    .filter((s) => s?.status === "active")
+    .filter((s) => {
+      const pr = s.priceRange;
+      if (!Array.isArray(pr) || pr.length < 2) return false;
+      const hi = Number(pr[0]);
+      const lo = Number(pr[1]);
+      return hi >= bandLo && lo <= bandHi;
+    })
+    .sort((a, b) => {
+      const sa = Number(a.maxStrengthSeen ?? 0);
+      const sb = Number(b.maxStrengthSeen ?? 0);
+      if (sb !== sa) return sb - sa;
+      const ta = Number(a.timesSeen ?? 0);
+      const tb = Number(b.timesSeen ?? 0);
+      if (tb !== ta) return tb - ta;
+      return Date.parse(b.lastSeenUtc || "1970-01-01") - Date.parse(a.lastSeenUtc || "1970-01-01");
+    })
+    .slice(0, STICKY_MAX_WITHIN_BAND);
+
+  // Save store
+  const newStore = {
+    ok: true,
+    meta: { ...(store.meta ?? {}), updated_at_utc: now },
+    structures: list,
+  };
+  saveSticky(newStore);
+
+  return withinBand.map((s) => ({
+    type: "institutional",
+    tier: "structure_sticky",
+    priceRange: s.priceRange,
+    strength: round2(Number(s.maxStrengthSeen ?? 0)),
+    details: {
+      id: s.structureKey,
+      facts: {
+        sticky: {
+          structureKey: s.structureKey,
+          firstSeenUtc: s.firstSeenUtc,
+          lastSeenUtc: s.lastSeenUtc,
+          timesSeen: s.timesSeen,
+          maxStrengthSeen: s.maxStrengthSeen,
+        },
+      },
+    },
+  }));
+}
+
+// ---------------- Active pockets (clustered) ----------------
+
 function computeActivePockets({ bars1hAll, currentPrice }) {
   const nowSec = bars1hAll.at(-1)?.time ?? Math.floor(Date.now() / 1000);
 
@@ -291,25 +417,20 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
       const accept = closeAcceptancePct(win, lo, hi);
       if (accept < POCKET_MIN_ACCEPT_PCT) continue;
 
-      // Must be BUILDING: no violent 2-bar exit right after this window
       const exit = exitConfirmedAfterIndex(barsFind, lo, hi, endIdx, 2);
       if (exit.confirmed) continue;
 
-      // Must be relevant to current price band (±40)
       if (!(hi >= winLo && lo <= winHi)) continue;
 
-      // StrengthNow: tightness + duration + acceptance
       const tightScore = Math.max(0, 60 - width * 12);
       const durScore = Math.min(25, w * 2.5);
       const accScore = Math.min(15, (accept - 0.5) * 30);
       const strengthNow = round2(Math.min(100, tightScore + durScore + accScore));
 
-      // Relevance: closer to current price = higher
       const distMid = Math.abs(mid - currentPrice);
-      const rel = Math.max(0, 1 - Math.min(1, distMid / POCKET_WINDOW_PTS)); // 0..1
+      const rel = Math.max(0, 1 - Math.min(1, distMid / POCKET_WINDOW_PTS));
       const relevanceScore = round2(rel * 100);
 
-      // History boost: use full 365d bars
       const h = historyBoostScore(bars1hAll, lo, hi, mid);
       const strengthHistory = h.score;
 
@@ -325,7 +446,7 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
         type: "institutional",
         tier: "pocket_active",
         status: "building",
-        priceRange: [round2(hi), round2(lo)], // [high, low]
+        priceRange: [round2(hi), round2(lo)],
         price: round2((hi + lo) / 2),
         negotiationMid: round2(mid),
         barsCount: w,
@@ -334,10 +455,7 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
         relevanceScore,
         strengthHistory,
         strengthTotal,
-        history: {
-          touches: h.touches,
-          midHits: h.midHits,
-        },
+        history: { touches: h.touches, midHits: h.midHits },
         window: {
           startTime: win[0]?.time ?? null,
           endTime: win[win.length - 1]?.time ?? null,
@@ -346,11 +464,10 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
     }
   }
 
-  // NEW: cluster overlapping pockets → keep best representative per cluster
+  // Cluster overlapping pockets → keep best per cluster
   pockets.sort((a, b) => (b.strengthTotal ?? 0) - (a.strengthTotal ?? 0));
 
-  const clusters = []; // each cluster is { rep, members[] }
-
+  const clusters = [];
   const getHL = (p) => {
     const pr = p?.priceRange;
     if (!Array.isArray(pr) || pr.length < 2) return null;
@@ -374,10 +491,8 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
       const midDist = Math.abs(r.mid - rr.mid);
 
       if (ov >= POCKET_CLUSTER_OVERLAP || midDist <= POCKET_CLUSTER_MID_PTS) {
-        // same cluster
         c.members.push(p);
 
-        // keep best rep by strengthTotal then relevance
         const rep = c.rep;
         const repScore = (rep.strengthTotal ?? 0) * 1.0 + (rep.relevanceScore ?? 0) * 0.2;
         const pScore = (p.strengthTotal ?? 0) * 1.0 + (p.relevanceScore ?? 0) * 0.2;
@@ -390,13 +505,10 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
     if (!placed) clusters.push({ rep: p, members: [p] });
   }
 
-  const reps = clusters
+  return clusters
     .map((c) => ({
       ...c.rep,
-      cluster: {
-        size: c.members.length,
-        bestOf: c.members.length,
-      },
+      cluster: { size: c.members.length },
     }))
     .sort((a, b) => {
       const ra = (a.relevanceScore ?? 0);
@@ -405,9 +517,9 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
       return (b.strengthTotal ?? 0) - (a.strengthTotal ?? 0);
     })
     .slice(0, POCKET_MAX_RETURN);
-
-  return reps;
 }
+
+// ---------------- Main ----------------
 
 async function main() {
   try {
@@ -447,55 +559,26 @@ async function main() {
       throw new Error("Could not determine currentPrice from bars.");
     }
 
-    const atr1h = computeATR(bars1h, 14);
+    console.log("[SMZ] currentPrice:", currentPrice);
 
-    console.log("[SMZ] currentPrice:", currentPrice, "| atr1h:", round2(atr1h));
-
+    // ✅ Authoritative live output (do NOT alter)
     console.log("[SMZ] Running Institutional engine…");
-    const zonesFresh = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
-    console.log("[SMZ] Institutional zones generated:", zonesFresh.length);
+    const levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
+    console.log("[SMZ] Institutional levels generated:", levelsLive.length);
 
-    // Separate fresh STRUCTURES from other levels
-    const freshStructures = zonesFresh.filter((z) => (z?.tier ?? "") === "structure");
-    const freshNonStructure = zonesFresh.filter((z) => (z?.tier ?? "") !== "structure");
+    const liveStructures = levelsLive.filter((z) => (z?.tier ?? "") === "structure");
 
-    // ✅ Sticky registry merge
-    console.log("[SMZ] Loading structure registry…");
-    const registry = loadRegistry(REGISTRY_FILE);
+    // ✅ Sticky snapshots (overlay-only lane)
+    console.log("[SMZ] Updating sticky snapshot store…");
+    const structuresSticky = updateStickyFromLive(liveStructures, currentPrice);
+    console.log("[SMZ] structures_sticky (within band):", structuresSticky.length);
 
-    console.log("[SMZ] Merging structures into registry…");
-    const { updatedRegistry, activeStructures } = mergeStructuresIntoRegistry({
-      registry,
-      freshStructures,
-      bars1h,
-      currentPrice,
-      atr1h,
-      opts: {
-        // tuned to preserve majors without exploding count
-        MATCH_OVERLAP: 0.50,
-        MATCH_MID_ATR: 0.90,
-        LOCK_STRENGTH: 90,
-        LOCK_CONFIRMATIONS: 2,
-        ARCHIVE_DIST_ATR: 10,
-        ARCHIVE_TOUCH_LOOKBACK: 160,
-      },
-    });
-
-    saveRegistry(REGISTRY_FILE, updatedRegistry);
-
-    console.log("[SMZ] Registry active structures:", activeStructures.length);
-    console.log("[SMZ] Registry total structures (incl archived):", updatedRegistry.structures?.length ?? 0);
-
-    // ✅ Active pockets (building now) — clustered
+    // ✅ Active pockets (clustered) + Option C lane tagging
     console.log("[SMZ] Computing active pockets (building)…");
-    const pocketsActive = computeActivePockets({
-      bars1hAll: bars1h,
-      currentPrice,
-    });
+    const pocketsActive = computeActivePockets({ bars1hAll: bars1h, currentPrice });
 
-    // Option C tagging: structure_linked vs emerging
     const pocketsTagged = pocketsActive.map((p) => {
-      const linked = isStructureLinked(p, activeStructures);
+      const linked = isStructureLinked(p, liveStructures);
       return {
         ...p,
         lane: linked ? "structure_linked" : "emerging",
@@ -503,17 +586,8 @@ async function main() {
       };
     });
 
-    console.log("[SMZ] Active pockets (clustered) returned:", pocketsTagged.length);
     const linkedCount = pocketsTagged.filter((p) => p.structureLinked).length;
-    console.log("[SMZ] Active pockets linked:", linkedCount, "| emerging:", pocketsTagged.length - linkedCount);
-
-    // Payload levels:
-    // - STRUCTURES come from registry (sticky)
-    // - Non-structure from fresh engine (completed pockets, etc.)
-    const levelsOut = [
-      ...activeStructures,
-      ...freshNonStructure,
-    ];
+    console.log("[SMZ] Active pockets returned:", pocketsTagged.length, "| linked:", linkedCount, "| emerging:", pocketsTagged.length - linkedCount);
 
     const payload = {
       ok: true,
@@ -521,11 +595,12 @@ async function main() {
         generated_at_utc: new Date().toISOString(),
         lookback_days: { "30m": DAYS_30M, "1h": DAYS_1H, "4h(synth)": DAYS_1H },
         current_price: round2(currentPrice),
-        atr_1h: round2(atr1h),
-        registry: {
-          file: path.basename(REGISTRY_FILE),
-          active_structures: activeStructures.length,
-          total_structures_including_archived: updatedRegistry.structures?.length ?? 0,
+        sticky: {
+          file: path.basename(STICKY_FILE),
+          round_step: STICKY_ROUND_STEP,
+          band_pts: STICKY_KEEP_WITHIN_BAND_PTS,
+          keep_within_band_cap: STICKY_MAX_WITHIN_BAND,
+          keep_seen_days: STICKY_SEEN_DAYS_KEEP,
         },
         pocket_settings: {
           find_days_1h: POCKET_FIND_DAYS_1H,
@@ -540,8 +615,9 @@ async function main() {
           structure_link_near_pts: STRUCT_LINK_NEAR_PTS,
         },
       },
-      levels: levelsOut,
-      pockets_active: pocketsTagged,
+      levels: levelsLive,                 // ✅ authoritative live levels (structures + pockets + micro filtered at route)
+      pockets_active: pocketsTagged,      // ✅ clustered + lane tagged
+      structures_sticky: structuresSticky // ✅ overlay-only snapshot lane
     };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
@@ -557,6 +633,7 @@ async function main() {
         ok: true,
         levels: [],
         pockets_active: [],
+        structures_sticky: [],
         note: "SMZ institutional job error, no levels generated this run",
       };
       fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
