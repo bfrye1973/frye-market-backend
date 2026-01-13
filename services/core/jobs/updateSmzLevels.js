@@ -32,6 +32,8 @@ const POCKET_MAX_WIDTH_PTS = 4.0;     // SPY hard cap
 const POCKET_MIN_BARS = 3;
 const POCKET_MAX_BARS = 12;
 const POCKET_MIN_ACCEPT_PCT = 0.65;   // % closes inside window
+const POCKET_STRUCT_BUFFER_PTS = 1.5; // ✅ NEW: pockets within 1.5pts outside a structure are hidden
+
 
 // ✅ NEW: "building now" recency gate (~2 weeks of 1H bars)
 const POCKET_RECENT_END_BARS_1H = 70; // ~2 weeks
@@ -533,6 +535,43 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
     .slice(0, POCKET_MAX_RETURN);
 }
 
+function pocketTooCloseToAnyStructure(pocket, structures, bufferPts = 1.5) {
+  const pr = pocket?.priceRange;
+  if (!Array.isArray(pr) || pr.length < 2) return true;
+
+  const pHi = Number(pr[0]);
+  const pLo = Number(pr[1]);
+  if (!Number.isFinite(pHi) || !Number.isFinite(pLo) || pHi <= pLo) return true;
+
+  for (const s of structures || []) {
+    const sr = s?.priceRange;
+    if (!Array.isArray(sr) || sr.length < 2) continue;
+
+    const sHi = Number(sr[0]);
+    const sLo = Number(sr[1]);
+    if (!Number.isFinite(sHi) || !Number.isFinite(sLo) || sHi <= sLo) continue;
+
+    // 1) Overlap/touch => reject
+    const overlaps = pHi >= sLo && pLo <= sHi;
+    if (overlaps) return true;
+
+    // 2) Outside but within buffer => reject
+    // pocket above structure
+    if (pLo > sHi) {
+      const gap = pLo - sHi;
+      if (gap <= bufferPts) return true;
+    }
+    // pocket below structure
+    if (pHi < sLo) {
+      const gap = sLo - pHi;
+      if (gap <= bufferPts) return true;
+    }
+  }
+
+  return false;
+}
+
+
 // ---------------- Main ----------------
 
 async function main() {
@@ -599,6 +638,10 @@ async function main() {
         structureLinked: linked,
       };
     });
+    // ✅ NEW: remove pockets that overlap/touch structures OR are within 1.5 pts outside a structure
+    const pocketsClean = pocketsTagged.filter(
+      (p) => !pocketTooCloseToAnyStructure(p, liveStructures, POCKET_STRUCT_BUFFER_PTS)
+   );
 
     const linkedCount = pocketsTagged.filter((p) => p.structureLinked).length;
     console.log(
@@ -638,7 +681,7 @@ async function main() {
         },
       },
       levels: levelsLive,                 // ✅ authoritative live levels
-      pockets_active: pocketsTagged,      // ✅ clustered + recent + lane tagged
+      pockets_active: pocketsClean,      // ✅ clustered + recent + lane tagged
       structures_sticky: structuresSticky // ✅ overlay-only snapshots
     };
 
