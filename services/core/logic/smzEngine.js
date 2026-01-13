@@ -7,10 +7,10 @@
 // - Collapse overlapping STRUCTURE zones into parent structures
 // - Emit POCKET children and compute negotiationMid
 //
-// LOCKED by user:
+// NEW (LOCKED by user):
 // ✅ High-score zones are never demoted (STRUCT_SCORE_LOCK)
-// ✅ Tighten logic is metadata-only (DO NOT overwrite priceRange)
-//    This prevents losing important zones like 692–693.
+// ✅ After collapse, STRUCTURE display range is tightened to the anchored window (and 30m refine)
+//    so wide "monster" zones shrink to true acceptance (fixes 683–695 type ranges)
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
@@ -592,9 +592,10 @@ function qualifyStructureOrDemote(regimes) {
   return (regimes || []).map((z) => {
     if ((z.tier ?? "") !== "structure") return z;
 
+    // ✅ SCORE LOCK: high-score institutional zones NEVER get demoted
     const strength = Number(z.strength ?? 0);
     if (Number.isFinite(strength) && strength >= CFG.STRUCT_SCORE_LOCK) {
-      return z;
+      return z; // keep as STRUCTURE no matter what width/anchor gate says
     }
 
     const facts = z.details?.facts ?? {};
@@ -616,6 +617,7 @@ function qualifyStructureOrDemote(regimes) {
 
     if (isStructure) return z;
 
+    // Demote to micro
     return {
       ...z,
       tier: "micro",
@@ -624,34 +626,32 @@ function qualifyStructureOrDemote(regimes) {
         facts: {
           ...facts,
           demotedFrom: "structure",
+          demoteReason: {
+            isAnchored,
+            hasAcceptance,
+            hasExit,
+            widthPts: round2(width),
+            anchorBars1h: anchorBars,
+            exitBars1h: exitBars,
+            exitSide1h: exitSide,
+          },
         },
       },
     };
   });
 }
 
-/* ---------------- Tighten STRUCTURES (METADATA ONLY) ---------------- */
+/* ---------------- Tighten STRUCTURES after collapse ---------------- */
 /**
- * IMPORTANT:
- * We do NOT overwrite priceRange.
- * We only record a suggested tightened range in facts.tightenedRange.
- * This prevents removing key zones like 692–693.
+ * After collapse, some parent structures can become wide again.
+ * If a structure has an anchored window (anchorStartTime/anchorEndTime),
+ * we override the displayed priceRange to the true window range (and 30m refine).
+ * This is the "tighten" fix that preserves tier/score, but restores true acceptance bounds.
  */
-function tightenOnlyMonsterStructures(regimes, bars1h, bars30m) {
+function tightenStructuresToAnchorWindow(regimes, bars1h, bars30m) {
   const out = [];
   for (const z of regimes || []) {
     if ((z?.tier ?? "") !== "structure") {
-      out.push(z);
-      continue;
-    }
-
-    const pr = z.priceRange || [];
-    const hi0 = Number(pr[0]);
-    const lo0 = Number(pr[1]);
-    const width0 = Number.isFinite(hi0) && Number.isFinite(lo0) ? (hi0 - lo0) : Infinity;
-
-    // ✅ Only tighten really wide monsters (prevents breaking good tight zones like 692–693)
-    if (!(width0 > 4.5)) {
       out.push(z);
       continue;
     }
@@ -689,30 +689,31 @@ function tightenOnlyMonsterStructures(regimes, bars1h, bars30m) {
       newHi = refined.hi;
     }
 
-    const widthT = newHi - newLo;
+    const width = newHi - newLo;
 
-    // Tightened range must be "tight acceptance" sized
-    if (!Number.isFinite(widthT) || widthT <= 0 || widthT > (CFG.STRUCT_MAX_WIDTH_PTS + 0.25)) {
+    // Apply tightening if it results in a tight acceptance window (<= 4 pts + small tolerance)
+    if (!Number.isFinite(width) || width <= 0 || width > (CFG.STRUCT_MAX_WIDTH_PTS + 0.25)) {
       out.push(z);
       continue;
     }
 
-    out.push({
+    const tightened = {
       ...z,
       _low: round2(newLo),
       _high: round2(newHi),
-      priceRange: [round2(newHi), round2(newLo)], // ✅ overwrite ONLY for monster structures
-      price: round2((newHi + newLo) / 2),
+      priceRange: [round2(newHi), round2(newLo)],
+      price: round2((newLo + newHi) / 2),
       details: {
         ...z.details,
         facts: {
           ...(facts ?? {}),
           tightenedToAnchorWindow: true,
-          tightenedWidthPts: round2(widthT),
-          tightenedFromWidthPts: round2(width0),
+          tightenedWidthPts: round2(width),
         },
       },
-    });
+    };
+
+    out.push(tightened);
   }
   return out;
 }
@@ -980,79 +981,6 @@ function collapseOverlappingStructureZones(zones, opts = {}) {
   return out;
 }
 
-
-function tightenStructuresToAnchorWindow(regimes, bars1h, bars30m) {
-  const out = [];
-  for (const z of regimes || []) {
-    if ((z?.tier ?? "") !== "structure") {
-      out.push(z);
-      continue;
-    }
-
-    const facts = z?.details?.facts ?? {};
-    const anchorMode = facts.anchorMode ?? null;
-    const startTime = Number(facts.anchorStartTime);
-    const endTime = Number(facts.anchorEndTime);
-
-    // Only tighten if we have a real anchored window
-    if (
-      anchorMode !== "anchored_last_consolidation" ||
-      !Number.isFinite(startTime) ||
-      !Number.isFinite(endTime) ||
-      endTime <= startTime
-    ) {
-      out.push(z);
-      continue;
-    }
-
-    // Compute true hi/lo of the anchor window
-    const slice1h = (bars1h || []).filter(
-      (b) => validBar(b) && b.time >= startTime && b.time <= endTime
-    );
-    const rh1h = rangeHighLow(slice1h);
-    if (!rh1h) {
-      out.push(z);
-      continue;
-    }
-
-    let newLo = rh1h.lo;
-    let newHi = rh1h.hi;
-
-    // Optional 30m refine
-    const refined = refineWith30m(bars30m, startTime, endTime);
-    if (refined && Number.isFinite(refined.lo) && Number.isFinite(refined.hi) && refined.hi > refined.lo) {
-      newLo = refined.lo;
-      newHi = refined.hi;
-    }
-
-    const width = newHi - newLo;
-
-    // Only apply tightening if it creates a tight acceptance zone
-    if (!Number.isFinite(width) || width <= 0 || width > (CFG.STRUCT_MAX_WIDTH_PTS + 0.25)) {
-      out.push(z);
-      continue;
-    }
-
-    out.push({
-      ...z,
-      _low: round2(newLo),
-      _high: round2(newHi),
-      priceRange: [round2(newHi), round2(newLo)],
-      price: round2((newHi + newLo) / 2),
-      details: {
-        ...z.details,
-        facts: {
-          ...(facts ?? {}),
-          tightenedToAnchorWindow: true,
-          tightenedWidthPts: round2(width),
-        },
-      },
-    });
-  }
-  return out;
-}
-
-
 /* ---------------- Main entry ---------------- */
 
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
@@ -1126,23 +1054,22 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     selectionMode = `top${CFG.FALLBACK_TOP_N}`;
   }
 
-  // Re-anchor (kept)
+  // Re-anchor
   regimes = regimes.map((z) => reanchorRegime(z, b1h, b30, atr1h));
 
-  // Qualify/demote (kept, with score lock)
+  // Qualify/demote (with score lock)
   regimes = qualifyStructureOrDemote(regimes);
 
-  // Collapse overlaps into parent structures (kept)
+  // Collapse overlaps into parent structures
   regimes = collapseOverlappingStructureZones(regimes, {
     overlapPct: CFG.STRUCT_OVERLAP_PCT,
     nearPoints: CFG.STRUCT_NEAR_POINTS,
   });
 
-  // ✅ Tightened range is metadata only (no priceRange overwrite)
+  // ✅ Tighten displayed structure ranges to the anchored window AFTER collapse
   regimes = tightenStructuresToAnchorWindow(regimes, b1h, b30);
 
-
-  // Add POCKET children (kept)
+  // Add POCKET children
   regimes = expandPocketChildren(regimes, b1h);
 
   return regimes.map((z) => ({
