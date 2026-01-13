@@ -45,6 +45,7 @@ const CFG = {
 
   STRUCT_OVERLAP_PCT: 0.50,
   STRUCT_NEAR_POINTS: 4.0,
+  STRUCT_SCORE_LOCK: 90,
 
   // ✅ STRUCTURE qualification (Engine 1 definition)
   // If anchored window is wider than this, it is not a "tight acceptance" structure.
@@ -595,6 +596,13 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
 function qualifyStructureOrDemote(regimes) {
   return (regimes || []).map((z) => {
     if ((z.tier ?? "") !== "structure") return z;
+
+    // ✅ SCORE LOCK: high-score institutional zones NEVER get demoted
+    const strength = Number(z.strength ?? 0);
+    if (Number.isFinite(strength) && strength >= CFG.STRUCT_SCORE_LOCK) {
+      return z; // keep as STRUCTURE no matter what width/anchor gate says
+    }
+
 
     const facts = z.details?.facts ?? {};
     const anchorMode = facts.anchorMode ?? null;
