@@ -1066,7 +1066,7 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   });
 
   // ✅ Tightened range is metadata only (no priceRange overwrite)
-  regimes = tightenOnlyMonsterStructures(regimes, b1h, b30);
+  regimes = tightenStructuresToAnchorWindow(regimes, b1h, b30);
 
 
   // Add POCKET children (kept)
