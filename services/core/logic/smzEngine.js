@@ -980,6 +980,79 @@ function collapseOverlappingStructureZones(zones, opts = {}) {
   return out;
 }
 
+
+function tightenStructuresToAnchorWindow(regimes, bars1h, bars30m) {
+  const out = [];
+  for (const z of regimes || []) {
+    if ((z?.tier ?? "") !== "structure") {
+      out.push(z);
+      continue;
+    }
+
+    const facts = z?.details?.facts ?? {};
+    const anchorMode = facts.anchorMode ?? null;
+    const startTime = Number(facts.anchorStartTime);
+    const endTime = Number(facts.anchorEndTime);
+
+    // Only tighten if we have a real anchored window
+    if (
+      anchorMode !== "anchored_last_consolidation" ||
+      !Number.isFinite(startTime) ||
+      !Number.isFinite(endTime) ||
+      endTime <= startTime
+    ) {
+      out.push(z);
+      continue;
+    }
+
+    // Compute true hi/lo of the anchor window
+    const slice1h = (bars1h || []).filter(
+      (b) => validBar(b) && b.time >= startTime && b.time <= endTime
+    );
+    const rh1h = rangeHighLow(slice1h);
+    if (!rh1h) {
+      out.push(z);
+      continue;
+    }
+
+    let newLo = rh1h.lo;
+    let newHi = rh1h.hi;
+
+    // Optional 30m refine
+    const refined = refineWith30m(bars30m, startTime, endTime);
+    if (refined && Number.isFinite(refined.lo) && Number.isFinite(refined.hi) && refined.hi > refined.lo) {
+      newLo = refined.lo;
+      newHi = refined.hi;
+    }
+
+    const width = newHi - newLo;
+
+    // Only apply tightening if it creates a tight acceptance zone
+    if (!Number.isFinite(width) || width <= 0 || width > (CFG.STRUCT_MAX_WIDTH_PTS + 0.25)) {
+      out.push(z);
+      continue;
+    }
+
+    out.push({
+      ...z,
+      _low: round2(newLo),
+      _high: round2(newHi),
+      priceRange: [round2(newHi), round2(newLo)],
+      price: round2((newHi + newLo) / 2),
+      details: {
+        ...z.details,
+        facts: {
+          ...(facts ?? {}),
+          tightenedToAnchorWindow: true,
+          tightenedWidthPts: round2(width),
+        },
+      },
+    });
+  }
+  return out;
+}
+
+
 /* ---------------- Main entry ---------------- */
 
 export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
