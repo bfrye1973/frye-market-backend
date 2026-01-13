@@ -637,10 +637,21 @@ function qualifyStructureOrDemote(regimes) {
  * We only record a suggested tightened range in facts.tightenedRange.
  * This prevents removing key zones like 692–693.
  */
-function addTightenedRangeMetadata(regimes, bars1h, bars30m) {
+function tightenOnlyMonsterStructures(regimes, bars1h, bars30m) {
   const out = [];
   for (const z of regimes || []) {
     if ((z?.tier ?? "") !== "structure") {
+      out.push(z);
+      continue;
+    }
+
+    const pr = z.priceRange || [];
+    const hi0 = Number(pr[0]);
+    const lo0 = Number(pr[1]);
+    const width0 = Number.isFinite(hi0) && Number.isFinite(lo0) ? (hi0 - lo0) : Infinity;
+
+    // ✅ Only tighten really wide monsters (prevents breaking good tight zones like 692–693)
+    if (!(width0 > 4.5)) {
       out.push(z);
       continue;
     }
@@ -678,21 +689,30 @@ function addTightenedRangeMetadata(regimes, bars1h, bars30m) {
       newHi = refined.hi;
     }
 
-    const width = newHi - newLo;
+    const widthT = newHi - newLo;
 
-    const updated = {
+    // Tightened range must be "tight acceptance" sized
+    if (!Number.isFinite(widthT) || widthT <= 0 || widthT > (CFG.STRUCT_MAX_WIDTH_PTS + 0.25)) {
+      out.push(z);
+      continue;
+    }
+
+    out.push({
       ...z,
+      _low: round2(newLo),
+      _high: round2(newHi),
+      priceRange: [round2(newHi), round2(newLo)], // ✅ overwrite ONLY for monster structures
+      price: round2((newHi + newLo) / 2),
       details: {
         ...z.details,
         facts: {
           ...(facts ?? {}),
-          tightenedRange: [round2(newHi), round2(newLo)],
-          tightenedWidthPts: round2(width),
+          tightenedToAnchorWindow: true,
+          tightenedWidthPts: round2(widthT),
+          tightenedFromWidthPts: round2(width0),
         },
       },
-    };
-
-    out.push(updated);
+    });
   }
   return out;
 }
@@ -1046,7 +1066,8 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   });
 
   // ✅ Tightened range is metadata only (no priceRange overwrite)
-  regimes = addTightenedRangeMetadata(regimes, b1h, b30);
+  regimes = tightenOnlyMonsterStructures(regimes, b1h, b30);
+
 
   // Add POCKET children (kept)
   regimes = expandPocketChildren(regimes, b1h);
