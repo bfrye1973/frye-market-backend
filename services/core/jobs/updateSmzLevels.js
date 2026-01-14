@@ -8,6 +8,15 @@
 // ✅ Active pockets: clustered to reduce overlap spam + Option C tagging (structure_linked vs emerging).
 // ✅ "Building now" = pockets whose window ended within last ~2 weeks of 1H bars.
 //
+// ✅ NEW (LOCKED BY YOU):
+// - You may manually edit sticky registry zones in smz-structures-registry.json.
+// - If a registry zone has locked:true OR rangeSource:"manual" OR manualRange:[hi,lo],
+//   it becomes AUTHORITATIVE and MUST NEVER be:
+//   - overwritten by live candidates
+//   - replaced by backfill
+//   - archived
+//   - removed by STICKY_MAX_WITHIN_BAND cap (locked zones are included first)
+//
 // Uses DEEP provider (jobs only), chart provider remains untouched.
 
 import fs from "fs";
@@ -173,8 +182,7 @@ function median(values) {
 }
 
 function closeAcceptancePct(bars, lo, hi) {
-  let n = 0,
-    inside = 0;
+  let n = 0, inside = 0;
   for (const b of bars) {
     if (!b || !Number.isFinite(b.close)) continue;
     n++;
@@ -230,6 +238,58 @@ function overlapRatioRange(aHi, aLo, bHi, bLo) {
   if (inter <= 0) return 0;
   const denom = Math.min(aHi - aLo, bHi - bLo);
   return denom > 0 ? inter / denom : 0;
+}
+
+// --- Manual/locked sticky helpers (NEW) ---
+// Locked zones MUST NEVER be overwritten/backfilled/archived/capped-out.
+function isLockedSticky(s) {
+  return !!(
+    s &&
+    (s.locked === true ||
+      s.rangeSource === "manual" ||
+      (Array.isArray(s.manualRange) && s.manualRange.length === 2))
+  );
+}
+
+function hiLoFromAnyRange(obj) {
+  const pr =
+    Array.isArray(obj?.manualRange) && obj.manualRange.length === 2
+      ? obj.manualRange
+      : obj?.priceRange;
+
+  if (!Array.isArray(pr) || pr.length < 2) return null;
+
+  let hi = Number(pr[0]);
+  let lo = Number(pr[1]);
+  if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
+  if (lo > hi) [lo, hi] = [hi, lo];
+  if (!(hi > lo)) return null;
+
+  return { hi, lo, mid: (hi + lo) / 2 };
+}
+
+function overlapsHL(a, b, minOv = 0.10) {
+  if (!a || !b) return false;
+  const ov = overlapRatioRange(a.hi, a.lo, b.hi, b.lo);
+  if (ov >= minOv) return true;
+
+  // containment counts as overlap
+  if (a.hi <= b.hi && a.lo >= b.lo) return true;
+  if (b.hi <= a.hi && b.lo >= a.lo) return true;
+
+  return false;
+}
+
+function overlapsAnyLocked(rangeObj, lockedList) {
+  const r = hiLoFromAnyRange(rangeObj);
+  if (!r) return false;
+
+  for (const s of lockedList || []) {
+    const sr = hiLoFromAnyRange(s);
+    if (!sr) continue;
+    if (overlapsHL(r, sr, 0.10)) return true;
+  }
+  return false;
 }
 
 function isStructureLinked(pocket, liveStructures) {
@@ -395,8 +455,7 @@ function findDistinctExitEventsForRange(bars1h, lo, hi, minSepSec) {
 }
 
 function makeBackfillBands(bars1h) {
-  let loAll = Infinity,
-    hiAll = -Infinity;
+  let loAll = Infinity, hiAll = -Infinity;
   for (const b of bars1h || []) {
     if (!b || !Number.isFinite(b.low) || !Number.isFinite(b.high)) continue;
     loAll = Math.min(loAll, b.low);
@@ -459,12 +518,17 @@ function runStickyBackfillOnce(store, bars1h) {
 
   console.log("[SMZ][BACKFILL] Running one-time sticky backfill…");
 
+  const locked = (store.structures || []).filter(isLockedSticky);
+
   const bands = makeBackfillBands(bars1h);
   const candidates = [];
 
   for (const band of bands) {
     const lo = band.lo;
     const hi = band.hi;
+
+    // ✅ Never backfill over a manually locked zone
+    if (overlapsAnyLocked({ priceRange: [hi, lo] }, locked)) continue;
 
     const touches = countTouches(bars1h, lo, hi);
     if (touches < STICKY_BACKFILL_TOUCHES_MIN) continue;
@@ -513,6 +577,9 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
   const list = store.structures.slice();
   const nowIso = isoNow();
 
+  // ✅ Locked/manual zones are authoritative + immutable
+  const locked = list.filter(isLockedSticky);
+
   const byKey = new Map();
   for (const s of list) if (s?.structureKey) byKey.set(s.structureKey, s);
 
@@ -525,10 +592,15 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
     const lo = Number(pr[1]);
     if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi <= lo) continue;
 
+    // ✅ If live candidate overlaps a locked/manual sticky zone, ignore it.
+    if (overlapsAnyLocked({ priceRange: [hi, lo] }, locked)) continue;
+
     const key = structureKeyFromRange(hi, lo);
     const existing = byKey.get(key);
 
     if (existing) {
+      // If existing is locked, we still allow stats to update (timesSeen/maxStrength/exits),
+      // but NEVER rewrite its ranges or allow it to archive/cap out.
       existing.lastSeenUtc = nowIso;
       existing.timesSeen = Number(existing.timesSeen ?? 0) + 1;
       existing.maxStrengthSeen = Math.max(Number(existing.maxStrengthSeen ?? 0), Number(z.strength ?? 0));
@@ -574,13 +646,19 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
     }
   }
 
-  // Archive if not seen for N days AND outside ±band (unless confirmed)
+  // Archive if not seen for N days AND outside ±band (unless confirmed OR locked/manual)
   const bandLo = currentPrice - STICKY_KEEP_WITHIN_BAND_PTS;
   const bandHi = currentPrice + STICKY_KEEP_WITHIN_BAND_PTS;
   const cutoffMs = Date.now() - STICKY_ARCHIVE_DAYS * 24 * 3600 * 1000;
 
   for (const s of list) {
     if (!s || s.status === "archived") continue;
+
+    // ✅ locked/manual zones never archive
+    if (isLockedSticky(s)) {
+      s.status = "active";
+      continue;
+    }
 
     // ✅ confirmed zones never archive
     if (s.stickyConfirmed) continue;
@@ -601,15 +679,21 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
     }
   }
 
-  const withinBand = list
+  // ✅ Build within-band list:
+  // - locked/manual zones always included first (if in band)
+  // - then autos by score up to remaining cap
+  const activeInBand = list
     .filter((s) => s?.status === "active")
     .filter((s) => {
-      const pr = s.priceRange;
-      if (!Array.isArray(pr) || pr.length < 2) return false;
-      const hi = Number(pr[0]);
-      const lo = Number(pr[1]);
-      return hi >= bandLo && lo <= bandHi;
-    })
+      const r = hiLoFromAnyRange(s);
+      if (!r) return false;
+      return r.hi >= bandLo && r.lo <= bandHi;
+    });
+
+  const lockedInBand = activeInBand.filter(isLockedSticky);
+
+  const autosInBand = activeInBand
+    .filter((s) => !isLockedSticky(s))
     .sort((a, b) => {
       const ca = a.stickyConfirmed ? 1 : 0;
       const cb = b.stickyConfirmed ? 1 : 0;
@@ -624,8 +708,10 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
       if (tb !== ta) return tb - ta;
 
       return Date.parse(b.lastSeenUtc || "1970-01-01") - Date.parse(a.lastSeenUtc || "1970-01-01");
-    })
-    .slice(0, STICKY_MAX_WITHIN_BAND);
+    });
+
+  const remaining = Math.max(0, STICKY_MAX_WITHIN_BAND - lockedInBand.length);
+  const withinBand = [...lockedInBand, ...autosInBand.slice(0, remaining)];
 
   const newStore = {
     ok: true,
@@ -637,10 +723,10 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
   return withinBand.map((s) => ({
     type: "institutional",
     tier: "structure_sticky",
-    priceRange: (Array.isArray(s.manualRange) && s.manualRange.length === 2)
-      ? s.manualRange
-      : s.priceRange,
-    
+    priceRange:
+      (Array.isArray(s.manualRange) && s.manualRange.length === 2)
+        ? s.manualRange
+        : s.priceRange,
     strength: round2(Number(s.maxStrengthSeen ?? 0)),
     details: {
       id: s.structureKey,
@@ -657,6 +743,12 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
           distinctExitCount: Number(s.distinctExitCount ?? 0),
           exits: Array.isArray(s.exits) ? s.exits : [],
           backfilled: !!s.backfilled,
+
+          // helpful debug fields (safe)
+          locked: !!s.locked,
+          rangeSource: s.rangeSource ?? null,
+          manualRange:
+            (Array.isArray(s.manualRange) && s.manualRange.length === 2) ? s.manualRange : null,
         },
       },
     },
@@ -687,8 +779,7 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
 
       const win = barsFind.slice(startIdx, endIdx + 1);
 
-      let lo = Infinity,
-        hi = -Infinity;
+      let lo = Infinity, hi = -Infinity;
       const closes = [];
 
       for (const b of win) {
@@ -866,7 +957,14 @@ async function main() {
     });
 
     const linkedCount = pocketsTagged.filter((p) => p.structureLinked).length;
-    console.log("[SMZ] Active pockets returned:", pocketsTagged.length, "| linked:", linkedCount, "| emerging:", pocketsTagged.length - linkedCount);
+    console.log(
+      "[SMZ] Active pockets returned:",
+      pocketsTagged.length,
+      "| linked:",
+      linkedCount,
+      "| emerging:",
+      pocketsTagged.length - linkedCount
+    );
 
     const payload = {
       ok: true,
