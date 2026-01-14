@@ -60,7 +60,7 @@ const STICKY_MAX_WITHIN_BAND = 12;
 
 // ✅ NEW: tighten monster structures ONLY in job output
 const STRUCT_MONSTER_WIDTH_PTS = 4.5;
-const STRUCT_TIGHT_MAX_PTS = 4.25;
+const STRUCT_TIGHT_MAX_PTS = 6.5;
 
 // ---------------- Helpers ----------------
 
