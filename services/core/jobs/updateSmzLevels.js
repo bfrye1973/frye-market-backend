@@ -3,8 +3,9 @@
 //
 // ✅ Live structures remain authoritative: computeSmartMoneyLevels() output is the ONLY source for live STRUCTURES.
 // ✅ Sticky persistence is overlay-only: structures_sticky[] (frozen snapshots, never merged into live).
+// ✅ Sticky upgrade: "MAJOR" zones become permanent after 2 distinct confirmed exits (never archived).
 // ✅ Active pockets: clustered to reduce overlap spam + Option C tagging (structure_linked vs emerging).
-// ✅ NEW: "Building now" = pockets whose window ended within last ~2 weeks of 1H bars (RECENT_END_BARS_1H).
+// ✅ "Building now" = pockets whose window ended within last ~2 weeks of 1H bars (POCKET_RECENT_END_BARS_1H).
 //
 // Uses DEEP provider (jobs only), chart provider remains untouched.
 
@@ -33,7 +34,7 @@ const POCKET_MIN_BARS = 3;
 const POCKET_MAX_BARS = 12;
 const POCKET_MIN_ACCEPT_PCT = 0.65;   // % closes inside window
 
-// ✅ NEW: "building now" recency gate (~2 weeks of 1H bars)
+// ✅ "building now" recency gate (~2 weeks of 1H bars)
 const POCKET_RECENT_END_BARS_1H = 70; // ~2 weeks
 
 // Pocket overlap reduction (prevents spam)
@@ -45,10 +46,15 @@ const POCKET_MAX_RETURN = 10;         // max pockets returned
 const STRUCT_LINK_NEAR_PTS = 1.0;     // within 1pt of structure mid/edge = linked
 
 // Sticky snapshot rules (overlay-only)
-const STICKY_ROUND_STEP = 0.25;       // structureKey quantization
+const STICKY_ROUND_STEP = 0.25;                 // structureKey quantization
 const STICKY_KEEP_WITHIN_BAND_PTS = POCKET_WINDOW_PTS; // reuse ±40 band
-const STICKY_ARCHIVE_DAYS = 30;       // archive if not seen in live output for 30 days AND outside band
-const STICKY_MAX_WITHIN_BAND = 12;    // cap sticky within band (clean)
+const STICKY_ARCHIVE_DAYS = 30;                 // archive if not seen in live output for 30 days AND outside band (unless confirmed)
+const STICKY_MAX_WITHIN_BAND = 12;              // cap sticky within band (clean)
+
+// ✅ Sticky confirmation: 2 distinct exits => permanent
+const STICKY_CONFIRM_EXITS_REQUIRED = 2;         // two distinct exits
+const STICKY_EXIT_MIN_SEP_SEC = 3 * 86400;       // exits must be separated by >= 3 days to count as distinct
+const STICKY_EXIT_MAX_STORE = 6;                 // keep recent exit events per zone (for audit)
 
 // ---------------- Helpers ----------------
 
@@ -271,15 +277,66 @@ function structureKeyFromRange(hi, lo) {
   return `SPY|mixed|hi=${qHi?.toFixed(2)}|lo=${qLo?.toFixed(2)}`;
 }
 
+// Capture/track confirmed exits for "major zone" confirmation
+function recordExitEvent(existing, facts, nowIso) {
+  const exitBars = Number(facts?.exitBars1h ?? 0);
+  const exitSide = facts?.exitSide1h ?? null;
+  const anchorEndTime = Number(facts?.anchorEndTime ?? NaN);
+
+  if (!(exitBars >= 2 && (exitSide === "above" || exitSide === "below") && Number.isFinite(anchorEndTime))) {
+    return; // nothing to record
+  }
+
+  existing.exits = Array.isArray(existing.exits) ? existing.exits : [];
+
+  // Prevent duplicates for same anchorEndTime
+  if (existing.exits.some((e) => Number(e?.anchorEndTime) === anchorEndTime)) {
+    return;
+  }
+
+  existing.exits.push({
+    side: exitSide,
+    exitBars: exitBars,
+    anchorEndTime: anchorEndTime,
+    recordedUtc: nowIso,
+  });
+
+  // Keep most recent N for audit
+  existing.exits.sort((a, b) => Number(b.anchorEndTime) - Number(a.anchorEndTime));
+  existing.exits = existing.exits.slice(0, STICKY_EXIT_MAX_STORE);
+}
+
+function countDistinctExitEvents(exits) {
+  const arr = (Array.isArray(exits) ? exits : [])
+    .filter((e) => Number.isFinite(Number(e?.anchorEndTime)))
+    .slice()
+    .sort((a, b) => Number(a.anchorEndTime) - Number(b.anchorEndTime));
+
+  if (arr.length === 0) return 0;
+
+  let count = 1;
+  let lastT = Number(arr[0].anchorEndTime);
+
+  for (let i = 1; i < arr.length; i++) {
+    const t = Number(arr[i].anchorEndTime);
+    if (!Number.isFinite(t)) continue;
+    if (t - lastT >= STICKY_EXIT_MIN_SEP_SEC) {
+      count++;
+      lastT = t;
+    }
+  }
+  return count;
+}
+
 function updateStickyFromLive(liveStructures, currentPrice) {
   const store = loadSticky();
   const list = store.structures.slice();
-  const now = isoNow();
+  const nowIso = isoNow();
 
   const byKey = new Map();
   for (const s of list) if (s?.structureKey) byKey.set(s.structureKey, s);
 
-  // Mark seen in live (frozen ranges)
+  // Mark seen in live (frozen ranges) + record exit events for confirmation
   for (const z of liveStructures || []) {
     const pr = z?.priceRange;
     if (!Array.isArray(pr) || pr.length < 2) continue;
@@ -291,32 +348,70 @@ function updateStickyFromLive(liveStructures, currentPrice) {
     const existing = byKey.get(key);
 
     if (existing) {
-      existing.lastSeenUtc = now;
+      existing.lastSeenUtc = nowIso;
       existing.timesSeen = Number(existing.timesSeen ?? 0) + 1;
-      existing.maxStrengthSeen = Math.max(Number(existing.maxStrengthSeen ?? 0), Number(z.strength ?? 0));
+      existing.maxStrengthSeen = Math.max(
+        Number(existing.maxStrengthSeen ?? 0),
+        Number(z.strength ?? 0)
+      );
       existing.status = "active";
+      existing.priceRange = existing.priceRange ?? [round2(hi), round2(lo)];
+
+      // ✅ record exit event (if present in engine facts)
+      const facts = z?.details?.facts ?? {};
+      recordExitEvent(existing, facts, nowIso);
+
+      // ✅ promote to permanent after 2 distinct exits
+      const distinctExits = countDistinctExitEvents(existing.exits);
+      existing.distinctExitCount = distinctExits;
+      if (!existing.stickyConfirmed && distinctExits >= STICKY_CONFIRM_EXITS_REQUIRED) {
+        existing.stickyConfirmed = true;
+        existing.confirmedUtc = nowIso;
+      }
     } else {
       const entry = {
         structureKey: key,
         priceRange: [round2(hi), round2(lo)],
-        firstSeenUtc: now,
-        lastSeenUtc: now,
+        firstSeenUtc: nowIso,
+        lastSeenUtc: nowIso,
         timesSeen: 1,
         maxStrengthSeen: Number(z.strength ?? 0),
         status: "active",
+
+        // confirmation fields
+        stickyConfirmed: false,
+        confirmedUtc: null,
+        exits: [],
+        distinctExitCount: 0,
       };
+
+      // record exit if present on first sighting
+      const facts = z?.details?.facts ?? {};
+      recordExitEvent(entry, facts, nowIso);
+
+      const distinctExits = countDistinctExitEvents(entry.exits);
+      entry.distinctExitCount = distinctExits;
+      if (distinctExits >= STICKY_CONFIRM_EXITS_REQUIRED) {
+        entry.stickyConfirmed = true;
+        entry.confirmedUtc = nowIso;
+      }
+
       list.push(entry);
       byKey.set(key, entry);
     }
   }
 
-  // Archive if not seen for 30 days AND outside ±40 band
+  // Archive if not seen for N days AND outside ±band (unless confirmed)
   const bandLo = currentPrice - STICKY_KEEP_WITHIN_BAND_PTS;
   const bandHi = currentPrice + STICKY_KEEP_WITHIN_BAND_PTS;
   const cutoffMs = Date.now() - STICKY_ARCHIVE_DAYS * 24 * 3600 * 1000;
 
   for (const s of list) {
     if (!s || s.status === "archived") continue;
+
+    // ✅ confirmed zones never archive (permanent memory)
+    if (s.stickyConfirmed) continue;
+
     const pr = s.priceRange;
     if (!Array.isArray(pr) || pr.length < 2) continue;
 
@@ -329,11 +424,11 @@ function updateStickyFromLive(liveStructures, currentPrice) {
 
     if (old && !inBand) {
       s.status = "archived";
-      s.archivedUtc = now;
+      s.archivedUtc = nowIso;
     }
   }
 
-  // Active sticky within band, capped
+  // Active sticky within band, capped (prefer confirmed + stronger + more seen)
   const withinBand = list
     .filter((s) => s?.status === "active")
     .filter((s) => {
@@ -344,19 +439,26 @@ function updateStickyFromLive(liveStructures, currentPrice) {
       return hi >= bandLo && lo <= bandHi;
     })
     .sort((a, b) => {
+      // ✅ confirmed zones first
+      const ca = a.stickyConfirmed ? 1 : 0;
+      const cb = b.stickyConfirmed ? 1 : 0;
+      if (cb !== ca) return cb - ca;
+
       const sa = Number(a.maxStrengthSeen ?? 0);
       const sb = Number(b.maxStrengthSeen ?? 0);
       if (sb !== sa) return sb - sa;
+
       const ta = Number(a.timesSeen ?? 0);
       const tb = Number(b.timesSeen ?? 0);
       if (tb !== ta) return tb - ta;
+
       return Date.parse(b.lastSeenUtc || "1970-01-01") - Date.parse(a.lastSeenUtc || "1970-01-01");
     })
     .slice(0, STICKY_MAX_WITHIN_BAND);
 
   const newStore = {
     ok: true,
-    meta: { ...(store.meta ?? {}), updated_at_utc: now },
+    meta: { ...(store.meta ?? {}), updated_at_utc: nowIso },
     structures: list,
   };
   saveSticky(newStore);
@@ -375,6 +477,11 @@ function updateStickyFromLive(liveStructures, currentPrice) {
           lastSeenUtc: s.lastSeenUtc,
           timesSeen: s.timesSeen,
           maxStrengthSeen: s.maxStrengthSeen,
+          status: s.status,
+          stickyConfirmed: !!s.stickyConfirmed,
+          confirmedUtc: s.confirmedUtc ?? null,
+          distinctExitCount: Number(s.distinctExitCount ?? 0),
+          exits: Array.isArray(s.exits) ? s.exits : [],
         },
       },
     },
@@ -392,13 +499,12 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
   const winLo = currentPrice - POCKET_WINDOW_PTS;
   const winHi = currentPrice + POCKET_WINDOW_PTS;
 
-  // ✅ NEW: Only pockets ending within last ~2 weeks of 1H bars
+  // ✅ Only pockets ending within last ~2 weeks of 1H bars
   const recentEndMinIdx = Math.max(0, barsFind.length - POCKET_RECENT_END_BARS_1H);
 
   const pockets = [];
 
   for (let endIdx = 0; endIdx < barsFind.length - 3; endIdx++) {
-    // ✅ recency gate
     if (endIdx < recentEndMinIdx) continue;
 
     for (let w = POCKET_MIN_BARS; w <= POCKET_MAX_BARS; w++) {
@@ -449,10 +555,11 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
       const strengthHistory = h.score;
 
       const strengthTotal = round2(
-        Math.min(100,
+        Math.min(
+          100,
           strengthNow * 0.55 +
-          relevanceScore * 0.30 +
-          strengthHistory * 0.15
+            relevanceScore * 0.30 +
+            strengthHistory * 0.15
         )
       );
 
@@ -622,6 +729,8 @@ async function main() {
           band_pts: STICKY_KEEP_WITHIN_BAND_PTS,
           within_band_cap: STICKY_MAX_WITHIN_BAND,
           archive_days: STICKY_ARCHIVE_DAYS,
+          confirm_exits_required: STICKY_CONFIRM_EXITS_REQUIRED,
+          exit_min_sep_sec: STICKY_EXIT_MIN_SEP_SEC,
         },
         pocket_settings: {
           find_days_1h: POCKET_FIND_DAYS_1H,
@@ -639,7 +748,7 @@ async function main() {
       },
       levels: levelsLive,                 // ✅ authoritative live levels
       pockets_active: pocketsTagged,      // ✅ clustered + recent + lane tagged
-      structures_sticky: structuresSticky // ✅ overlay-only snapshots
+      structures_sticky: structuresSticky // ✅ overlay-only snapshots (within band)
     };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
