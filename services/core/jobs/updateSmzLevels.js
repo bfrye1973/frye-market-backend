@@ -637,7 +637,10 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
   return withinBand.map((s) => ({
     type: "institutional",
     tier: "structure_sticky",
-    priceRange: s.priceRange,
+    priceRange: (Array.isArray(s.manualRange) && s.manualRange.length === 2)
+      ? s.manualRange
+      : s.priceRange,
+    
     strength: round2(Number(s.maxStrengthSeen ?? 0)),
     details: {
       id: s.structureKey,
