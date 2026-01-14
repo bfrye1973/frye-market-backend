@@ -1,67 +1,65 @@
-// src/services/core/logic/smzEngine.js
-// Institutional SMZ detection + scoring + TradingView-style level output.
+// src/services/core/jobs/updateSmzLevels.js
+// Institutional Smart Money Zones Job — writes smz-levels.json
 //
-// LOCKED BEHAVIOR (preserved):
-// - Score globally via rubric
-// - Re-anchor to last consolidation before confirmed exit (exclude impulse candle)
-// - Collapse overlapping STRUCTURE zones into parent structures
-// - Emit POCKET children and compute negotiationMid
+// ✅ Live structures remain authoritative: computeSmartMoneyLevels() output is the ONLY source for live STRUCTURES.
+// ✅ Sticky persistence is overlay-only: structures_sticky[] (frozen snapshots, never merged into live).
+// ✅ Active pockets: clustered to reduce overlap spam + Option C tagging (structure_linked vs emerging).
+// ✅ NEW: "Building now" = pockets whose window ended within last ~2 weeks of 1H bars (RECENT_END_BARS_1H).
 //
-// NEW (LOCKED by user):
-// ✅ High-score zones are never demoted (STRUCT_SCORE_LOCK)
-// ✅ After collapse, STRUCTURE display range is tightened to the anchored window (and 30m refine)
-//    so wide "monster" zones shrink to true acceptance (fixes 683–695 type ranges)
+// Uses DEEP provider (jobs only), chart provider remains untouched.
 
-import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-const CFG = {
-  WINDOW_POINTS: 40,
+import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
+import { getBarsFromPolygonDeep } from "../../../api/providers/polygonBarsDeep.js";
 
-  FALLBACK_TOP_N: 12,
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-  MIN_TOUCHES_1H: 5,
-  MIN_TOUCHES_4H: 3,
+const OUTFILE = path.resolve(__dirname, "../data/smz-levels.json");
+const STICKY_FILE = path.resolve(__dirname, "../data/smz-structures-registry.json");
 
-  BUCKET_ATR_MULT_1H: 1.0,
-  BUCKET_ATR_MULT_4H: 1.2,
+// ✅ Lookback days (LOCKED)
+const DAYS_30M = 180;
+const DAYS_1H = 365;
 
-  MERGE_OVERLAP: 0.55,
-  CLUSTER_OVERLAP: 0.30,
+// ✅ Active pocket settings (LOCKED for now, tweak later if needed)
+const POCKET_FIND_DAYS_1H = 180;      // find pockets from last 6 months
+const POCKET_WINDOW_PTS = 40;         // only pockets within ±40 points of current price
+const POCKET_MAX_WIDTH_PTS = 4.0;     // SPY hard cap
+const POCKET_MIN_BARS = 3;
+const POCKET_MAX_BARS = 12;
+const POCKET_MIN_ACCEPT_PCT = 0.65;   // % closes inside window
 
-  EXIT_CONSEC_BARS_1H: 2,
+// ✅ NEW: "building now" recency gate (~2 weeks of 1H bars)
+const POCKET_RECENT_END_BARS_1H = 70; // ~2 weeks
 
-  ANCHOR_START_BARS_1H: 10,
-  ANCHOR_MIN_BARS_1H: 6,
-  ANCHOR_MAX_BARS_1H: 24,
+// Pocket overlap reduction (prevents spam)
+const POCKET_CLUSTER_OVERLAP = 0.55;  // overlap ratio to consider same cluster
+const POCKET_CLUSTER_MID_PTS = 0.60;  // midline proximity
+const POCKET_MAX_RETURN = 10;         // max pockets returned
 
-  AVG_RANGE_ATR_MAX: 1.25,
-  WIDTH_ATR_MAX: 3.25,
+// Option C classification
+const STRUCT_LINK_NEAR_PTS = 1.0;     // within 1pt of structure mid/edge = linked
 
-  MIN_SCORE_GLOBAL: 75,
+// Sticky snapshot rules (overlay-only)
+const STICKY_ROUND_STEP = 0.25;       // structureKey quantization
+const STICKY_KEEP_WITHIN_BAND_PTS = POCKET_WINDOW_PTS; // reuse ±40 band
+const STICKY_ARCHIVE_DAYS = 30;       // archive if not seen in live output for 30 days AND outside band
+const STICKY_MAX_WITHIN_BAND = 12;    // cap sticky within band (clean)
 
-  STRUCT_OVERLAP_PCT: 0.50,
-  STRUCT_NEAR_POINTS: 4.0,
+// ---------------- Helpers ----------------
 
-  // ✅ High scores never demote
-  STRUCT_SCORE_LOCK: 90,
-
-  // STRUCTURE qualification: tight acceptance cap for SPY
-  STRUCT_MAX_WIDTH_PTS: 4.0,
-};
-
-const GRID_STEP = 0.25;
-
-function round2(x) {
-  return Math.round(x * 100) / 100;
-}
-
-function normalizeBars(arr) {
-  return (Array.isArray(arr) ? arr : [])
+function normalizeBars(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
     .map((b) => {
-      const rawT = Number(b.t ?? b.time ?? 0);
-      const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT;
+      const tms = Number(b.t ?? b.time ?? 0);
+      const t = tms > 1e12 ? Math.floor(tms / 1000) : tms;
       return {
-        time,
+        time: t,
         open: Number(b.o ?? b.open ?? 0),
         high: Number(b.h ?? b.high ?? 0),
         low: Number(b.l ?? b.low ?? 0),
@@ -80,70 +78,88 @@ function normalizeBars(arr) {
     .sort((a, b) => a.time - b.time);
 }
 
-function validBar(b) {
-  return b && Number.isFinite(b.high) && Number.isFinite(b.low) && Number.isFinite(b.close);
-}
+function aggregateTo4h(bars1h) {
+  if (!Array.isArray(bars1h) || bars1h.length < 8) return [];
+  const out = [];
+  let cur = null;
 
-function computeATR(candles, period = 14) {
-  if (!Array.isArray(candles) || candles.length < period + 2) return 1;
-  const trs = [];
-  for (let i = 1; i < candles.length; i++) {
-    const c = candles[i],
-      p = candles[i - 1];
-    if (!validBar(c) || !validBar(p)) continue;
-    const tr = Math.max(
-      c.high - c.low,
-      Math.abs(c.high - p.close),
-      Math.abs(c.low - p.close)
-    );
-    trs.push(tr);
+  for (const b of bars1h) {
+    const block = Math.floor(b.time / (4 * 3600)) * (4 * 3600);
+    if (!cur || cur.time !== block) {
+      if (cur) out.push(cur);
+      cur = {
+        time: block,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume ?? 0,
+      };
+    } else {
+      cur.high = Math.max(cur.high, b.high);
+      cur.low = Math.min(cur.low, b.low);
+      cur.close = b.close;
+      cur.volume += b.volume ?? 0;
+    }
   }
-  const slice = trs.slice(-period);
-  const atr = slice.reduce((a, b) => a + b, 0) / Math.max(1, slice.length);
-  return atr > 0 ? atr : 1;
+  if (cur) out.push(cur);
+  return out;
 }
 
-function snapDown(x, step) {
-  return Math.floor(x / step) * step;
-}
-function snapUp(x, step) {
-  return Math.ceil(x / step) * step;
-}
-
-function minLow(candles) {
-  let m = Infinity;
-  for (const c of candles) if (validBar(c)) m = Math.min(m, c.low);
-  return m === Infinity ? null : m;
-}
-function maxHigh(candles) {
+function maxHigh(bars) {
+  if (!Array.isArray(bars) || !bars.length) return null;
   let m = -Infinity;
-  for (const c of candles) if (validBar(c)) m = Math.max(m, c.high);
-  return m === -Infinity ? null : m;
+  for (const b of bars) if (Number.isFinite(b.high)) m = Math.max(m, b.high);
+  return m === -Infinity ? null : Number(m.toFixed(2));
 }
 
-function overlapPct(a, b) {
-  const lo = Math.max(a.low, b.low);
-  const hi = Math.min(a.high, b.high);
-  const inter = hi - lo;
-  if (inter <= 0) return 0;
-  const denom = Math.min(a.high - a.low, b.high - b.low);
-  return denom > 0 ? inter / denom : 0;
-}
+function spanInfo(label, bars) {
+  if (!Array.isArray(bars) || bars.length === 0) {
+    console.log(`[SMZ] COVERAGE ${label}: none`);
+    return;
+  }
+  const first = bars[0].time;
+  const last = bars[bars.length - 1].time;
+  const days = (last - first) / 86400;
 
-function overlapsLoose(a, b, threshold) {
-  return (
-    overlapPct({ low: a._low, high: a._high }, { low: b._low, high: b._high }) >= threshold
+  console.log(
+    `[SMZ] COVERAGE ${label}:`,
+    "bars =", bars.length,
+    "| from =", new Date(first * 1000).toISOString(),
+    "| to =", new Date(last * 1000).toISOString(),
+    "| spanDays =", days.toFixed(1)
   );
 }
 
-function barOverlapsZone(bar, lo, hi) {
-  return (
-    bar &&
-    Number.isFinite(bar.high) &&
-    Number.isFinite(bar.low) &&
-    bar.high >= lo &&
-    bar.low <= hi
-  );
+function round2(x) {
+  return Math.round(Number(x) * 100) / 100;
+}
+
+function isoNow() {
+  return new Date().toISOString();
+}
+
+function snapStep(x, step) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n / step) * step;
+}
+
+function median(values) {
+  const arr = (values || []).filter((x) => Number.isFinite(x)).slice().sort((a, b) => a - b);
+  if (!arr.length) return null;
+  const mid = Math.floor(arr.length / 2);
+  return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+}
+
+function closeAcceptancePct(bars, lo, hi) {
+  let n = 0, inside = 0;
+  for (const b of bars) {
+    if (!b || !Number.isFinite(b.close)) continue;
+    n++;
+    if (b.close >= lo && b.close <= hi) inside++;
+  }
+  return n ? inside / n : 0;
 }
 
 function barOutsideSide(bar, lo, hi) {
@@ -153,934 +169,508 @@ function barOutsideSide(bar, lo, hi) {
   return null;
 }
 
-function lastTouchIndex1h(bars1h, lo, hi) {
-  if (!Array.isArray(bars1h) || bars1h.length === 0) return -1;
-  for (let i = bars1h.length - 1; i >= 0; i--) {
-    if (barOverlapsZone(bars1h[i], lo, hi)) return i;
-  }
-  return -1;
-}
-
-function exitConfirmed1h(bars1h, lo, hi, consec = 2) {
-  const idx = lastTouchIndex1h(bars1h, lo, hi);
-  if (idx < 0) return { lastTouchIndex: -1, confirmed: false, side: null, exitBars: 0 };
-
+function exitConfirmedAfterIndex(bars, lo, hi, endIdx, consec = 2) {
   let side = null;
-  let exitBars = 0;
+  let count = 0;
 
-  for (let j = idx + 1; j < bars1h.length && exitBars < consec; j++) {
-    const s = barOutsideSide(bars1h[j], lo, hi);
+  for (let i = endIdx + 1; i < bars.length && count < consec; i++) {
+    const s = barOutsideSide(bars[i], lo, hi);
     if (!s) break;
     if (!side) side = s;
     if (s !== side) break;
-    exitBars++;
+    count++;
   }
 
-  return { lastTouchIndex: idx, confirmed: exitBars >= consec, side, exitBars };
+  return { confirmed: count >= consec, side, bars: count };
 }
 
-function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
-  const loAll = minLow(candles);
-  const hiAll = maxHigh(candles);
-  if (!Number.isFinite(loAll) || !Number.isFinite(hiAll) || hiAll <= loAll) return [];
+// ✅ Touches include wicks (high/low overlap), not just bodies.
+function historyBoostScore(barsHist, lo, hi, mid) {
+  let touches = 0;
+  let midHits = 0;
 
-  const start = snapDown(loAll, GRID_STEP);
-  const end = snapUp(hiAll, GRID_STEP);
-  const step = Math.max(GRID_STEP, snapUp(bucketSize, GRID_STEP));
+  for (const b of barsHist) {
+    if (!b || !Number.isFinite(b.high) || !Number.isFinite(b.low) || !Number.isFinite(b.close)) continue;
 
-  const buckets = [];
-  for (let lo = start; lo < end; lo += step) {
-    buckets.push({ tf, low: lo, high: lo + step, touches: 0 });
+    // touch = wick overlap with zone
+    if (b.high >= lo && b.low <= hi) touches++;
+
+    // mid hit = close near mid
+    if (Number.isFinite(mid) && Math.abs(b.close - mid) <= 0.25) midHits++;
   }
 
-  for (const c of candles) {
-    if (!validBar(c)) continue;
-    for (const b of buckets) {
-      if (c.high >= b.low && c.low <= b.high) b.touches++;
+  const touchScore = Math.min(65, touches * 1.1);
+  const midScore = Math.min(35, midHits * 2.0);
+
+  return { touches, midHits, score: round2(touchScore + midScore) };
+}
+
+function overlapRatioRange(aHi, aLo, bHi, bLo) {
+  const lo = Math.max(aLo, bLo);
+  const hi = Math.min(aHi, bHi);
+  const inter = hi - lo;
+  if (inter <= 0) return 0;
+  const denom = Math.min(aHi - aLo, bHi - bLo);
+  return denom > 0 ? inter / denom : 0;
+}
+
+function isStructureLinked(pocket, liveStructures) {
+  const pr = pocket?.priceRange;
+  if (!Array.isArray(pr) || pr.length < 2) return false;
+  const pHi = Number(pr[0]);
+  const pLo = Number(pr[1]);
+  const pMid = Number.isFinite(pocket?.negotiationMid) ? pocket.negotiationMid : (pHi + pLo) / 2;
+
+  for (const s of liveStructures || []) {
+    const sr = s?.priceRange;
+    if (!Array.isArray(sr) || sr.length < 2) continue;
+    const sHi = Number(sr[0]);
+    const sLo = Number(sr[1]);
+    const sMid = (sHi + sLo) / 2;
+
+    const ov = overlapRatioRange(pHi, pLo, sHi, sLo);
+    if (ov >= 0.15) return true;
+
+    const near =
+      Math.abs(pMid - sMid) <= STRUCT_LINK_NEAR_PTS ||
+      Math.abs(pMid - sHi) <= STRUCT_LINK_NEAR_PTS ||
+      Math.abs(pMid - sLo) <= STRUCT_LINK_NEAR_PTS;
+
+    if (near) return true;
+  }
+  return false;
+}
+
+// ---------------- Sticky snapshot store (overlay-only) ----------------
+
+function loadSticky() {
+  try {
+    if (!fs.existsSync(STICKY_FILE)) {
+      return { ok: true, meta: { created_at_utc: isoNow() }, structures: [] };
+    }
+    const raw = fs.readFileSync(STICKY_FILE, "utf8");
+    const json = JSON.parse(raw);
+    return {
+      ok: true,
+      meta: json?.meta ?? { created_at_utc: isoNow() },
+      structures: Array.isArray(json?.structures) ? json.structures : [],
+    };
+  } catch {
+    return { ok: true, meta: { created_at_utc: isoNow(), recovered: true }, structures: [] };
+  }
+}
+
+function saveSticky(store) {
+  fs.mkdirSync(path.dirname(STICKY_FILE), { recursive: true });
+  fs.writeFileSync(STICKY_FILE, JSON.stringify(store, null, 2), "utf8");
+}
+
+function structureKeyFromRange(hi, lo) {
+  const qHi = snapStep(hi, STICKY_ROUND_STEP);
+  const qLo = snapStep(lo, STICKY_ROUND_STEP);
+  return `SPY|mixed|hi=${qHi?.toFixed(2)}|lo=${qLo?.toFixed(2)}`;
+}
+
+function updateStickyFromLive(liveStructures, currentPrice) {
+  const store = loadSticky();
+  const list = store.structures.slice();
+  const now = isoNow();
+
+  const byKey = new Map();
+  for (const s of list) if (s?.structureKey) byKey.set(s.structureKey, s);
+
+  // Mark seen in live (frozen ranges)
+  for (const z of liveStructures || []) {
+    const pr = z?.priceRange;
+    if (!Array.isArray(pr) || pr.length < 2) continue;
+    const hi = Number(pr[0]);
+    const lo = Number(pr[1]);
+    if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi <= lo) continue;
+
+    const key = structureKeyFromRange(hi, lo);
+    const existing = byKey.get(key);
+
+    if (existing) {
+      existing.lastSeenUtc = now;
+      existing.timesSeen = Number(existing.timesSeen ?? 0) + 1;
+      existing.maxStrengthSeen = Math.max(Number(existing.maxStrengthSeen ?? 0), Number(z.strength ?? 0));
+      existing.status = "active";
+    } else {
+      const entry = {
+        structureKey: key,
+        priceRange: [round2(hi), round2(lo)],
+        firstSeenUtc: now,
+        lastSeenUtc: now,
+        timesSeen: 1,
+        maxStrengthSeen: Number(z.strength ?? 0),
+        status: "active",
+      };
+      list.push(entry);
+      byKey.set(key, entry);
     }
   }
 
-  const out = [];
-  for (const b of buckets) {
-    if (b.touches >= minTouches) {
-      out.push({ tf, price_low: round2(b.low), price_high: round2(b.high) });
+  // Archive if not seen for 30 days AND outside ±40 band
+  const bandLo = currentPrice - STICKY_KEEP_WITHIN_BAND_PTS;
+  const bandHi = currentPrice + STICKY_KEEP_WITHIN_BAND_PTS;
+  const cutoffMs = Date.now() - STICKY_ARCHIVE_DAYS * 24 * 3600 * 1000;
+
+  for (const s of list) {
+    if (!s || s.status === "archived") continue;
+    const pr = s.priceRange;
+    if (!Array.isArray(pr) || pr.length < 2) continue;
+
+    const hi = Number(pr[0]);
+    const lo = Number(pr[1]);
+
+    const lastSeenMs = Date.parse(s.lastSeenUtc || "");
+    const old = Number.isFinite(lastSeenMs) ? lastSeenMs < cutoffMs : false;
+    const inBand = hi >= bandLo && lo <= bandHi;
+
+    if (old && !inBand) {
+      s.status = "archived";
+      s.archivedUtc = now;
     }
   }
-  return out;
-}
 
-function mergeTwoZones(a, b) {
-  const mergedLow = round2(Math.min(a._low, b._low));
-  const mergedHigh = round2(Math.max(a._high, b._high));
-  const strength = Math.max(Number(a.strength ?? 0), Number(b.strength ?? 0));
+  // Active sticky within band, capped
+  const withinBand = list
+    .filter((s) => s?.status === "active")
+    .filter((s) => {
+      const pr = s.priceRange;
+      if (!Array.isArray(pr) || pr.length < 2) return false;
+      const hi = Number(pr[0]);
+      const lo = Number(pr[1]);
+      return hi >= bandLo && lo <= bandHi;
+    })
+    .sort((a, b) => {
+      const sa = Number(a.maxStrengthSeen ?? 0);
+      const sb = Number(b.maxStrengthSeen ?? 0);
+      if (sb !== sa) return sb - sa;
+      const ta = Number(a.timesSeen ?? 0);
+      const tb = Number(b.timesSeen ?? 0);
+      if (tb !== ta) return tb - ta;
+      return Date.parse(b.lastSeenUtc || "1970-01-01") - Date.parse(a.lastSeenUtc || "1970-01-01");
+    })
+    .slice(0, STICKY_MAX_WITHIN_BAND);
 
-  const members = []
-    .concat(a.details?.members ?? [a.details?.id].filter(Boolean))
-    .concat(b.details?.members ?? [b.details?.id].filter(Boolean));
-
-  const tfs = new Set(
-    [
-      ...(a.details?.tfs ?? []),
-      a.details?.tf,
-      ...(b.details?.tfs ?? []),
-      b.details?.tf,
-    ].filter(Boolean)
-  );
-
-  return {
-    ...a,
-    _low: mergedLow,
-    _high: mergedHigh,
-    price: round2((mergedLow + mergedHigh) / 2),
-    priceRange: [mergedHigh, mergedLow],
-    strength,
-    details: {
-      ...a.details,
-      members: Array.from(new Set(members)),
-      tfs: Array.from(tfs),
-    },
+  const newStore = {
+    ok: true,
+    meta: { ...(store.meta ?? {}), updated_at_utc: now },
+    structures: list,
   };
-}
+  saveSticky(newStore);
 
-function mergeByOverlap(zones, threshold) {
-  const sorted = zones.slice().sort((x, y) => x._low - y._low);
-  const out = [];
-  for (const z of sorted) {
-    if (!out.length) {
-      out.push(z);
-      continue;
-    }
-    const last = out[out.length - 1];
-    const ov = overlapPct({ low: last._low, high: last._high }, { low: z._low, high: z._high });
-    if (ov >= threshold) out[out.length - 1] = mergeTwoZones(last, z);
-    else out.push(z);
-  }
-  return out;
-}
-
-function clusterUnionBands(zones) {
-  const input = zones.slice().sort((a, b) => a._low - b._low);
-  const clusters = [];
-
-  for (const z of input) {
-    let placed = false;
-    for (const c of clusters) {
-      if (c.members.some((m) => overlapsLoose(m, z, CFG.CLUSTER_OVERLAP))) {
-        c.members.push(z);
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) clusters.push({ members: [z] });
-  }
-
-  const bands = clusters.map((c, idx) => {
-    let low = Infinity,
-      high = -Infinity,
-      strength = 0;
-    const memberIds = [];
-    const tfs = new Set();
-    let hasClear4H = false;
-
-    for (const m of c.members) {
-      low = Math.min(low, m._low);
-      high = Math.max(high, m._high);
-      strength = Math.max(strength, Number(m.strength ?? 0));
-
-      if (m.details?.id) memberIds.push(m.details.id);
-      if (m.details?.tf) tfs.add(m.details.tf);
-      if (Array.isArray(m.details?.tfs)) m.details.tfs.forEach((x) => tfs.add(x));
-      if (m.details?.flags?.hasClear4H) hasClear4H = true;
-      if (Array.isArray(m.details?.members)) memberIds.push(...m.details.members);
-    }
-
-    low = round2(low);
-    high = round2(high);
-
-    return {
-      type: "institutional",
-      tier: "structure",
-      price: round2((low + high) / 2),
-      priceRange: [high, low],
-      strength,
-      details: {
-        id: `smz_band_${idx}`,
-        tf: "mixed",
-        members: Array.from(new Set(memberIds)),
-        tfs: Array.from(tfs),
-        flags: { hasClear4H },
-        facts: {},
-      },
-      _low: low,
-      _high: high,
-    };
-  });
-
-  bands.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
-  return bands;
-}
-
-/* ---------------- Anchor-window extraction ---------------- */
-
-function sliceBarsByIndex(bars, startIdx, endIdx) {
-  if (!Array.isArray(bars) || bars.length === 0) return [];
-  const s = Math.max(0, startIdx);
-  const e = Math.min(bars.length - 1, endIdx);
-  if (s > e) return [];
-  return bars.slice(s, e + 1);
-}
-
-function meanRange(bars) {
-  if (!Array.isArray(bars) || bars.length === 0) return 0;
-  let sum = 0,
-    n = 0;
-  for (const b of bars) {
-    if (!validBar(b)) continue;
-    sum += b.high - b.low;
-    n++;
-  }
-  return n ? sum / n : 0;
-}
-
-function rangeHighLow(bars) {
-  let lo = Infinity,
-    hi = -Infinity;
-  for (const b of bars || []) {
-    if (!validBar(b)) continue;
-    lo = Math.min(lo, b.low);
-    hi = Math.max(hi, b.high);
-  }
-  if (lo === Infinity || hi === -Infinity) return null;
-  return { lo: round2(lo), hi: round2(hi), width: round2(hi - lo) };
-}
-
-function chooseConsolidationWindow(bars1h, endIdx, atr1h) {
-  const minL = CFG.ANCHOR_MIN_BARS_1H;
-  const maxL = CFG.ANCHOR_MAX_BARS_1H;
-
-  let best = null;
-
-  for (let L = minL; L <= maxL; L++) {
-    const startIdx = endIdx - (L - 1);
-    if (startIdx < 0) continue;
-
-    const windowBars = sliceBarsByIndex(bars1h, startIdx, endIdx);
-    const rh = rangeHighLow(windowBars);
-    if (!rh) continue;
-
-    const avgR = meanRange(windowBars);
-
-    const avgOk = avgR <= CFG.AVG_RANGE_ATR_MAX * atr1h;
-    const widthOk = rh.width <= CFG.WIDTH_ATR_MAX * atr1h;
-    if (!avgOk || !widthOk) continue;
-
-    const score = rh.width;
-    const bias = Math.abs(L - CFG.ANCHOR_START_BARS_1H) * 0.01;
-    const total = score + bias;
-
-    if (!best || total < best.total) {
-      best = { startIdx, endIdx, L, lo: rh.lo, hi: rh.hi, width: rh.width, total };
-    }
-  }
-
-  if (!best) {
-    const L = Math.min(Math.max(CFG.ANCHOR_START_BARS_1H, minL), maxL);
-    const startIdx = Math.max(0, endIdx - (L - 1));
-    const windowBars = sliceBarsByIndex(bars1h, startIdx, endIdx);
-    const rh = rangeHighLow(windowBars);
-    if (rh) return { startIdx, endIdx, L, lo: rh.lo, hi: rh.hi, width: rh.width, total: rh.width };
-    return null;
-  }
-
-  return best;
-}
-
-function refineWith30m(bars30m, startTimeSec, endTimeSec) {
-  if (!Array.isArray(bars30m) || bars30m.length === 0) return null;
-  const subset = bars30m.filter((b) => validBar(b) && b.time >= startTimeSec && b.time <= endTimeSec);
-  const rh = rangeHighLow(subset);
-  return rh ? { lo: rh.lo, hi: rh.hi } : null;
-}
-
-function exitAfterWindowConfirmed1h(bars1h, windowLo, windowHi, endIdx, consec = 2) {
-  if (!Array.isArray(bars1h) || bars1h.length === 0) return { confirmed: false, side: null, exitBars: 0 };
-  if (!Number.isFinite(windowLo) || !Number.isFinite(windowHi) || windowHi <= windowLo) {
-    return { confirmed: false, side: null, exitBars: 0 };
-  }
-  if (!Number.isFinite(endIdx) || endIdx < 0) return { confirmed: false, side: null, exitBars: 0 };
-
-  let side = null;
-  let exitBars = 0;
-
-  for (let j = endIdx + 1; j < bars1h.length && exitBars < consec; j++) {
-    const s = barOutsideSide(bars1h[j], windowLo, windowHi);
-    if (!s) break;
-    if (!side) side = s;
-    if (s !== side) break;
-    exitBars++;
-  }
-
-  return { confirmed: exitBars >= consec, side, exitBars };
-}
-
-function findLatestLaunchWindowInsideRegime(bars1h, regimeLo, regimeHi, atr1h) {
-  if (!Array.isArray(bars1h) || bars1h.length < 30) return null;
-  if (!Number.isFinite(regimeLo) || !Number.isFinite(regimeHi) || regimeHi <= regimeLo) return null;
-
-  const EPS = 0.10;
-
-  const lastPossibleEnd = bars1h.length - 1 - CFG.EXIT_CONSEC_BARS_1H;
-  const minEnd = CFG.ANCHOR_MIN_BARS_1H;
-
-  for (let endIdx = lastPossibleEnd; endIdx >= minEnd; endIdx--) {
-    const chosen = chooseConsolidationWindow(bars1h, endIdx, atr1h);
-    if (!chosen) continue;
-
-    if (chosen.lo < regimeLo - EPS) continue;
-    if (chosen.hi > regimeHi + EPS) continue;
-
-    const exit = exitAfterWindowConfirmed1h(
-      bars1h,
-      chosen.lo,
-      chosen.hi,
-      chosen.endIdx,
-      CFG.EXIT_CONSEC_BARS_1H
-    );
-    if (!exit.confirmed) continue;
-
-    return {
-      ...chosen,
-      exitSide1h: exit.side,
-      exitBars1h: exit.exitBars,
-      anchorEndIdx: chosen.endIdx,
-    };
-  }
-
-  return null;
-}
-
-function reanchorRegime(regime, bars1h, bars30m, atr1h) {
-  const lo0 = Number(regime._low);
-  const hi0 = Number(regime._high);
-
-  if (!Number.isFinite(lo0) || !Number.isFinite(hi0) || hi0 <= lo0) return regime;
-
-  const inner = findLatestLaunchWindowInsideRegime(bars1h, lo0, hi0, atr1h);
-
-  if (inner) {
-    const startTime = bars1h[inner.startIdx]?.time ?? null;
-    const endTime = bars1h[inner.endIdx]?.time ?? null;
-
-    let newLo = inner.lo;
-    let newHi = inner.hi;
-
-    if (Number.isFinite(startTime) && Number.isFinite(endTime)) {
-      const refined = refineWith30m(bars30m, startTime, endTime);
-      if (refined) {
-        newLo = refined.lo;
-        newHi = refined.hi;
-      }
-    }
-
-    if (!(Number.isFinite(newLo) && Number.isFinite(newHi)) || newHi <= newLo) return regime;
-
-    newLo = round2(newLo);
-    newHi = round2(newHi);
-
-    return {
-      ...regime,
-      _low: newLo,
-      _high: newHi,
-      priceRange: [newHi, newLo],
-      price: round2((newLo + newHi) / 2),
-      details: {
-        ...regime.details,
-        facts: {
-          ...(regime.details?.facts ?? {}),
-          anchorMode: "anchored_last_consolidation",
-          anchorBars1h: inner.L,
-          anchorStartTime: startTime,
-          anchorEndTime: endTime,
-          exitSide1h: inner.exitSide1h ?? null,
-          exitBars1h: inner.exitBars1h ?? null,
-          anchorExitMeasuredAgainst: "window",
-          anchorEndIdx1h: inner.anchorEndIdx ?? inner.endIdx,
-          negotiationMid: null,
-        },
-      },
-    };
-  }
-
-  const exit = exitConfirmed1h(bars1h, lo0, hi0, CFG.EXIT_CONSEC_BARS_1H);
-
-  if (!exit.confirmed || exit.lastTouchIndex < 0) {
-    return {
-      ...regime,
-      details: {
-        ...regime.details,
-        facts: {
-          ...(regime.details?.facts ?? {}),
-          anchorMode: "no_exit_keep_original",
-          negotiationMid: null,
-        },
-      },
-    };
-  }
-
-  const anchorEnd = Math.max(0, exit.lastTouchIndex - 1);
-
-  const chosen = chooseConsolidationWindow(bars1h, anchorEnd, atr1h);
-  if (!chosen) {
-    return {
-      ...regime,
-      details: {
-        ...regime.details,
-        facts: {
-          ...(regime.details?.facts ?? {}),
-          anchorMode: "exit_no_window_keep_original",
-          negotiationMid: null,
-        },
-      },
-    };
-  }
-
-  const startTime = bars1h[chosen.startIdx]?.time ?? null;
-  const endTime = bars1h[chosen.endIdx]?.time ?? null;
-
-  let newLo = chosen.lo;
-  let newHi = chosen.hi;
-
-  if (Number.isFinite(startTime) && Number.isFinite(endTime)) {
-    const refined = refineWith30m(bars30m, startTime, endTime);
-    if (refined) {
-      newLo = refined.lo;
-      newHi = refined.hi;
-    }
-  }
-
-  if (!(Number.isFinite(newLo) && Number.isFinite(newHi)) || newHi <= newLo) return regime;
-
-  newLo = round2(newLo);
-  newHi = round2(newHi);
-
-  return {
-    ...regime,
-    _low: newLo,
-    _high: newHi,
-    priceRange: [newHi, newLo],
-    price: round2((newLo + newHi) / 2),
+  return withinBand.map((s) => ({
+    type: "institutional",
+    tier: "structure_sticky",
+    priceRange: s.priceRange,
+    strength: round2(Number(s.maxStrengthSeen ?? 0)),
     details: {
-      ...regime.details,
+      id: s.structureKey,
       facts: {
-        ...(regime.details?.facts ?? {}),
-        anchorMode: "anchored_last_consolidation",
-        anchorBars1h: chosen.L,
-        anchorStartTime: startTime,
-        anchorEndTime: endTime,
-        exitSide1h: exit.side,
-        exitBars1h: exit.exitBars,
-        anchorExitMeasuredAgainst: "regime",
-        negotiationMid: null,
+        sticky: {
+          structureKey: s.structureKey,
+          firstSeenUtc: s.firstSeenUtc,
+          lastSeenUtc: s.lastSeenUtc,
+          timesSeen: s.timesSeen,
+          maxStrengthSeen: s.maxStrengthSeen,
+        },
       },
     },
-  };
+  }));
 }
 
-/* ---------------- STRUCTURE QUALIFICATION (with score lock) ---------------- */
+// ---------------- Active pockets (clustered + RECENT only) ----------------
 
-function qualifyStructureOrDemote(regimes) {
-  return (regimes || []).map((z) => {
-    if ((z.tier ?? "") !== "structure") return z;
+function computeActivePockets({ bars1hAll, currentPrice }) {
+  const nowSec = bars1hAll.at(-1)?.time ?? Math.floor(Date.now() / 1000);
 
-    // ✅ SCORE LOCK: high-score institutional zones NEVER get demoted
-    const strength = Number(z.strength ?? 0);
-    if (Number.isFinite(strength) && strength >= CFG.STRUCT_SCORE_LOCK) {
-      return z; // keep as STRUCTURE no matter what width/anchor gate says
-    }
+  const cutoffFind = nowSec - POCKET_FIND_DAYS_1H * 86400;
+  const barsFind = bars1hAll.filter((b) => b.time >= cutoffFind);
 
-    const facts = z.details?.facts ?? {};
-    const anchorMode = facts.anchorMode ?? null;
+  const winLo = currentPrice - POCKET_WINDOW_PTS;
+  const winHi = currentPrice + POCKET_WINDOW_PTS;
 
-    const anchorBars = Number(facts.anchorBars1h ?? 0);
-    const exitBars = Number(facts.exitBars1h ?? 0);
-    const exitSide = facts.exitSide1h ?? null;
+  // ✅ NEW: Only pockets ending within last ~2 weeks of 1H bars
+  const recentEndMinIdx = Math.max(0, barsFind.length - POCKET_RECENT_END_BARS_1H);
 
-    const lo = Number(z.priceRange?.[1]);
-    const hi = Number(z.priceRange?.[0]);
-    const width = Number.isFinite(lo) && Number.isFinite(hi) ? hi - lo : Infinity;
+  const pockets = [];
 
-    const isAnchored = anchorMode === "anchored_last_consolidation";
-    const hasAcceptance = anchorBars >= CFG.ANCHOR_MIN_BARS_1H && width <= CFG.STRUCT_MAX_WIDTH_PTS;
-    const hasExit = exitBars >= CFG.EXIT_CONSEC_BARS_1H && (exitSide === "above" || exitSide === "below");
+  for (let endIdx = 0; endIdx < barsFind.length - 3; endIdx++) {
+    // ✅ recency gate
+    if (endIdx < recentEndMinIdx) continue;
 
-    const isStructure = isAnchored && hasAcceptance && hasExit;
+    for (let w = POCKET_MIN_BARS; w <= POCKET_MAX_BARS; w++) {
+      const startIdx = endIdx - (w - 1);
+      if (startIdx < 0) continue;
 
-    if (isStructure) return z;
+      const win = barsFind.slice(startIdx, endIdx + 1);
 
-    // Demote to micro
-    return {
-      ...z,
-      tier: "micro",
-      details: {
-        ...z.details,
-        facts: {
-          ...facts,
-          demotedFrom: "structure",
-          demoteReason: {
-            isAnchored,
-            hasAcceptance,
-            hasExit,
-            widthPts: round2(width),
-            anchorBars1h: anchorBars,
-            exitBars1h: exitBars,
-            exitSide1h: exitSide,
-          },
-        },
-      },
-    };
-  });
-}
-
-/* ---------------- Tighten STRUCTURES after collapse ---------------- */
-/**
- * After collapse, some parent structures can become wide again.
- * If a structure has an anchored window (anchorStartTime/anchorEndTime),
- * we override the displayed priceRange to the true window range (and 30m refine).
- * This is the "tighten" fix that preserves tier/score, but restores true acceptance bounds.
- */
-function tightenStructuresToAnchorWindow(regimes, bars1h, bars30m) {
-  const out = [];
-  for (const z of regimes || []) {
-    if ((z?.tier ?? "") !== "structure") {
-      out.push(z);
-      continue;
-    }
-
-    const facts = z?.details?.facts ?? {};
-    const anchorMode = facts.anchorMode ?? null;
-    const startTime = Number(facts.anchorStartTime);
-    const endTime = Number(facts.anchorEndTime);
-
-    if (
-      anchorMode !== "anchored_last_consolidation" ||
-      !Number.isFinite(startTime) ||
-      !Number.isFinite(endTime) ||
-      endTime <= startTime
-    ) {
-      out.push(z);
-      continue;
-    }
-
-    const slice1h = (bars1h || []).filter(
-      (b) => validBar(b) && b.time >= startTime && b.time <= endTime
-    );
-    const rh1h = rangeHighLow(slice1h);
-    if (!rh1h) {
-      out.push(z);
-      continue;
-    }
-
-    let newLo = rh1h.lo;
-    let newHi = rh1h.hi;
-
-    const refined = refineWith30m(bars30m, startTime, endTime);
-    if (refined && Number.isFinite(refined.lo) && Number.isFinite(refined.hi) && refined.hi > refined.lo) {
-      newLo = refined.lo;
-      newHi = refined.hi;
-    }
-
-    const width = newHi - newLo;
-
-    // Apply tightening if it results in a tight acceptance window (<= 4 pts + small tolerance)
-    if (!Number.isFinite(width) || width <= 0 || width > (CFG.STRUCT_MAX_WIDTH_PTS + 0.25)) {
-      out.push(z);
-      continue;
-    }
-
-    const tightened = {
-      ...z,
-      _low: round2(newLo),
-      _high: round2(newHi),
-      priceRange: [round2(newHi), round2(newLo)],
-      price: round2((newLo + newHi) / 2),
-      details: {
-        ...z.details,
-        facts: {
-          ...(facts ?? {}),
-          tightenedToAnchorWindow: true,
-          tightenedWidthPts: round2(width),
-        },
-      },
-    };
-
-    out.push(tightened);
-  }
-  return out;
-}
-
-/* ---------------- Pocket + Midline ---------------- */
-
-function median(values) {
-  const arr = (values || [])
-    .filter((x) => Number.isFinite(x))
-    .slice()
-    .sort((a, b) => a - b);
-  if (arr.length === 0) return null;
-  const mid = Math.floor(arr.length / 2);
-  return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
-}
-
-function findPocketFromBars1h(bars1h, zoneLow, zoneHigh, startTimeSec = null, endTimeSec = null) {
-  if (!Array.isArray(bars1h) || bars1h.length < 20) return null;
-
-  let slice = bars1h;
-  if (Number.isFinite(startTimeSec) && Number.isFinite(endTimeSec)) {
-    slice = bars1h.filter((b) => validBar(b) && b.time >= startTimeSec && b.time <= endTimeSec);
-  } else {
-    slice = bars1h.slice(-120).filter(validBar);
-  }
-  if (slice.length < 10) return null;
-
-  const inZone = slice.filter((b) => b.high >= zoneLow && b.low <= zoneHigh);
-  if (inZone.length < 6) return null;
-
-  const minW = 3;
-  const maxW = 8;
-
-  let best = null;
-
-  for (let w = minW; w <= maxW; w++) {
-    for (let i = 0; i + w - 1 < inZone.length; i++) {
-      const win = inZone.slice(i, i + w);
-
-      let lo = Infinity,
-        hi = -Infinity;
+      let lo = Infinity, hi = -Infinity;
       const closes = [];
 
       for (const b of win) {
         lo = Math.min(lo, b.low);
         hi = Math.max(hi, b.high);
-        closes.push(Number(b.close));
+        closes.push(b.close);
       }
 
       const width = hi - lo;
-      if (width > 4.0) continue;
+      if (!Number.isFinite(width) || width <= 0) continue;
+      if (width > POCKET_MAX_WIDTH_PTS) continue;
 
       const mid = median(closes);
-      if (!Number.isFinite(mid) || mid < lo || mid > hi) continue;
+      if (!Number.isFinite(mid)) continue;
 
-      const score = width - w * 0.05;
+      const accept = closeAcceptancePct(win, lo, hi);
+      if (accept < POCKET_MIN_ACCEPT_PCT) continue;
 
-      if (!best || score < best.score) {
-        best = {
-          low: round2(lo),
-          high: round2(hi),
-          width: round2(width),
-          bars: w,
-          negotiationMid: round2(mid),
+      // Must be BUILDING: no violent 2-bar exit right after this window
+      const exit = exitConfirmedAfterIndex(barsFind, lo, hi, endIdx, 2);
+      if (exit.confirmed) continue;
+
+      // Must intersect ±40 band now
+      if (!(hi >= winLo && lo <= winHi)) continue;
+
+      // StrengthNow: tightness + duration + acceptance
+      const tightScore = Math.max(0, 60 - width * 12);
+      const durScore = Math.min(25, w * 2.5);
+      const accScore = Math.min(15, (accept - 0.5) * 30);
+      const strengthNow = round2(Math.min(100, tightScore + durScore + accScore));
+
+      // Relevance: closer to current price = higher
+      const distMid = Math.abs(mid - currentPrice);
+      const rel = Math.max(0, 1 - Math.min(1, distMid / POCKET_WINDOW_PTS));
+      const relevanceScore = round2(rel * 100);
+
+      // History boost: wicks count as touches
+      const h = historyBoostScore(bars1hAll, lo, hi, mid);
+      const strengthHistory = h.score;
+
+      const strengthTotal = round2(
+        Math.min(100,
+          strengthNow * 0.55 +
+          relevanceScore * 0.30 +
+          strengthHistory * 0.15
+        )
+      );
+
+      pockets.push({
+        type: "institutional",
+        tier: "pocket_active",
+        status: "building",
+        priceRange: [round2(hi), round2(lo)], // [high, low]
+        price: round2((hi + lo) / 2),
+        negotiationMid: round2(mid),
+        barsCount: w,
+        acceptancePct: round2(accept),
+        strengthNow,
+        relevanceScore,
+        strengthHistory,
+        strengthTotal,
+        history: { touches: h.touches, midHits: h.midHits },
+        window: {
           startTime: win[0]?.time ?? null,
           endTime: win[win.length - 1]?.time ?? null,
-          score,
-        };
+        },
+      });
+    }
+  }
+
+  // Cluster overlapping pockets → keep best per cluster
+  pockets.sort((a, b) => (b.strengthTotal ?? 0) - (a.strengthTotal ?? 0));
+
+  const clusters = [];
+  const getHL = (p) => {
+    const pr = p?.priceRange;
+    if (!Array.isArray(pr) || pr.length < 2) return null;
+    let hi = Number(pr[0]);
+    let lo = Number(pr[1]);
+    if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
+    if (lo > hi) [lo, hi] = [hi, lo];
+    return { hi, lo, mid: Number(p.negotiationMid) };
+  };
+
+  for (const p of pockets) {
+    const r = getHL(p);
+    if (!r) continue;
+
+    let placed = false;
+    for (const c of clusters) {
+      const rr = getHL(c.rep);
+      if (!rr) continue;
+
+      const ov = overlapRatioRange(r.hi, r.lo, rr.hi, rr.lo);
+      const midDist = Math.abs(r.mid - rr.mid);
+
+      if (ov >= POCKET_CLUSTER_OVERLAP || midDist <= POCKET_CLUSTER_MID_PTS) {
+        c.members.push(p);
+
+        const rep = c.rep;
+        const repScore = (rep.strengthTotal ?? 0) * 1.0 + (rep.relevanceScore ?? 0) * 0.2;
+        const pScore = (p.strengthTotal ?? 0) * 1.0 + (p.relevanceScore ?? 0) * 0.2;
+        if (pScore > repScore) c.rep = p;
+
+        placed = true;
+        break;
       }
     }
+    if (!placed) clusters.push({ rep: p, members: [p] });
   }
 
-  return best;
-}
-
-function expandPocketChildren(zones, bars1h) {
-  const out = [];
-  for (const z of zones || []) {
-    out.push(z);
-
-    if ((z.tier ?? "") !== "structure") continue;
-
-    const zoneLow = Number(z.priceRange?.[1]);
-    const zoneHigh = Number(z.priceRange?.[0]);
-    if (!Number.isFinite(zoneLow) || !Number.isFinite(zoneHigh) || zoneHigh <= zoneLow) continue;
-
-    const facts = z.details?.facts ?? {};
-    const startTimeSec = Number.isFinite(facts.anchorStartTime) ? facts.anchorStartTime : null;
-    const endTimeSec = Number.isFinite(facts.anchorEndTime) ? facts.anchorEndTime : null;
-
-    const pocket = findPocketFromBars1h(bars1h, zoneLow, zoneHigh, startTimeSec, endTimeSec);
-    if (!pocket) continue;
-
-    out.push({
-      type: "institutional",
-      tier: "pocket",
-      price: round2((pocket.low + pocket.high) / 2),
-      priceRange: [pocket.high, pocket.low],
-      strength: z.strength,
-      details: {
-        ...z.details,
-        id: `smz_pocket_${z.details?.id ?? "unknown"}`,
-        facts: {
-          ...(facts ?? {}),
-          pocketOf: z.details?.id ?? null,
-          pocketLow: pocket.low,
-          pocketHigh: pocket.high,
-          pocketWidth: pocket.width,
-          pocketBars1h: pocket.bars,
-          negotiationMid: pocket.negotiationMid,
-          pocketStartTime: pocket.startTime,
-          pocketEndTime: pocket.endTime,
-        },
-      },
-      _low: pocket.low,
-      _high: pocket.high,
-    });
-  }
-  return out;
-}
-
-/* ---------------- Collapse STRUCTURE overlaps ---------------- */
-
-function collapseOverlappingStructureZones(zones, opts = {}) {
-  const OVERLAP_PCT = Number.isFinite(opts.overlapPct) ? opts.overlapPct : CFG.STRUCT_OVERLAP_PCT;
-  const NEAR_POINTS = Number.isFinite(opts.nearPoints) ? opts.nearPoints : CFG.STRUCT_NEAR_POINTS;
-
-  const list = Array.isArray(zones) ? zones.slice() : [];
-  const structures = [];
-  const others = [];
-
-  for (const z of list) {
-    if ((z.tier ?? "") === "structure") structures.push(z);
-    else others.push(z);
-  }
-
-  for (const z of structures) {
-    if (!Number.isFinite(z._low) || !Number.isFinite(z._high)) {
-      z._high = Number(z.priceRange?.[0]);
-      z._low = Number(z.priceRange?.[1]);
-    }
-  }
-
-  structures.sort((a, b) => a._low - b._low);
-
-  function overlapRatio(a, b) {
-    const lo = Math.max(a._low, b._low);
-    const hi = Math.min(a._high, b._high);
-    const inter = hi - lo;
-    if (inter <= 0) return 0;
-    const wa = a._high - a._low;
-    const wb = b._high - b._low;
-    const denom = Math.min(wa, wb);
-    return denom > 0 ? inter / denom : 0;
-  }
-
-  function separationPts(a, b) {
-    return Math.max(0, b._low - a._high);
-  }
-
-  const parents = [];
-  let group = null;
-
-  function startGroup(z) {
-    group = {
-      low: z._low,
-      high: z._high,
-      strength: Number(z.strength ?? 0),
-      flags: { ...(z.details?.flags ?? {}) },
-      tfs: new Set([...(z.details?.tfs ?? []), z.details?.tf].filter(Boolean)),
-      members: new Set([...(z.details?.members ?? []), z.details?.id].filter(Boolean)),
-      children: [
-        {
-          id: z.details?.id ?? null,
-          strength: Number(z.strength ?? 0),
-          priceRange: z.priceRange ?? null,
-          tier: z.tier ?? null,
-        },
-      ],
-      sample: z,
-    };
-  }
-
-  function addToGroup(z) {
-    group.low = Math.min(group.low, z._low);
-    group.high = Math.max(group.high, z._high);
-    group.strength = Math.max(group.strength, Number(z.strength ?? 0));
-    if (z.details?.flags?.hasClear4H) group.flags.hasClear4H = true;
-
-    (z.details?.tfs ?? []).forEach((x) => group.tfs.add(x));
-    if (z.details?.tf) group.tfs.add(z.details.tf);
-
-    (z.details?.members ?? []).forEach((m) => group.members.add(m));
-    if (z.details?.id) group.members.add(z.details.id);
-
-    group.children.push({
-      id: z.details?.id ?? null,
-      strength: Number(z.strength ?? 0),
-      priceRange: z.priceRange ?? null,
-      tier: z.tier ?? null,
-    });
-  }
-
-  function flushGroup() {
-    if (!group) return;
-
-    const low = round2(group.low);
-    const high = round2(group.high);
-
-    parents.push({
-      type: "institutional",
-      tier: "structure",
-      _low: low,
-      _high: high,
-      priceRange: [high, low],
-      price: round2((high + low) / 2),
-      strength: group.strength,
-      details: {
-        ...(group.sample?.details ?? {}),
-        id: `smz_struct_${parents.length + 1}`,
-        tf: "mixed",
-        tfs: Array.from(group.tfs),
-        members: Array.from(group.members),
-        flags: { ...(group.flags ?? {}) },
-        facts: {
-          ...(group.sample?.details?.facts ?? {}),
-          collapsedChildren: group.children,
-          collapsedCount: group.children.length,
-        },
-      },
-    });
-
-    group = null;
-  }
-
-  for (const z of structures) {
-    if (!group) {
-      startGroup(z);
-      continue;
-    }
-
-    const tmpA = { _low: group.low, _high: group.high };
-    const ov = overlapRatio(tmpA, z);
-    const gap = separationPts(tmpA, z);
-
-    if (ov >= OVERLAP_PCT && gap <= NEAR_POINTS) addToGroup(z);
-    else {
-      flushGroup();
-      startGroup(z);
-    }
-  }
-  flushGroup();
-
-  const seen = new Set();
-  const dedupParents = [];
-  for (const p of parents) {
-    const key = `${p.priceRange?.[1]}-${p.priceRange?.[0]}|${p.tier}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    dedupParents.push(p);
-  }
-
-  const out = dedupParents.concat(others);
-  out.sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
-  return out;
-}
-
-/* ---------------- Main entry ---------------- */
-
-export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
-  const b30 = normalizeBars(bars30m);
-  const b1h = normalizeBars(bars1h);
-  const b4h = normalizeBars(bars4h);
-
-  const currentPrice =
-    b30.at(-1)?.close ??
-    b1h.at(-1)?.close ??
-    b4h.at(-1)?.close ??
-    null;
-
-  if (!Number.isFinite(currentPrice) || currentPrice <= 0) return [];
-
-  const atr1h = computeATR(b1h, 14);
-  const atr4h = computeATR(b4h, 14);
-
-  const bucket1h = Math.max(0.5, atr1h * CFG.BUCKET_ATR_MULT_1H);
-  const bucket4h = Math.max(0.75, atr4h * CFG.BUCKET_ATR_MULT_4H);
-
-  const cand1h = buildBucketCandidatesGlobal(b1h, bucket1h, CFG.MIN_TOUCHES_1H, "1h");
-  const cand4h = buildBucketCandidatesGlobal(b4h, bucket4h, CFG.MIN_TOUCHES_4H, "4h");
-
-  const scored = [...cand1h, ...cand4h]
-    .map((z, idx) => {
-      const lo = z.price_low;
-      const hi = z.price_high;
-
-      const s = scoreInstitutional({
-        lo,
-        hi,
-        bars1h: b1h,
-        bars4h: b4h,
-        currentPrice,
-      });
-
-      return {
-        type: "institutional",
-        tier: "structure",
-        price: round2((lo + hi) / 2),
-        priceRange: [round2(hi), round2(lo)],
-        strength: s.scoreTotal,
-        details: {
-          id: `smz_${z.tf}_${idx}`,
-          tf: z.tf,
-          parts: s.parts,
-          flags: s.flags,
-          facts: s.facts,
-        },
-        _low: lo,
-        _high: hi,
-      };
+  return clusters
+    .map((c) => ({
+      ...c.rep,
+      cluster: { size: c.members.length },
+    }))
+    .sort((a, b) => {
+      const ra = (a.relevanceScore ?? 0);
+      const rb = (b.relevanceScore ?? 0);
+      if (rb !== ra) return rb - ra;
+      return (b.strengthTotal ?? 0) - (a.strengthTotal ?? 0);
     })
-    .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
-
-  const merged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
-  let regimes = clusterUnionBands(merged);
-
-  regimes = regimes
-    .filter((z) => Number(z.strength ?? 0) >= CFG.MIN_SCORE_GLOBAL)
-    .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
-
-  let selectionMode = `>=${CFG.MIN_SCORE_GLOBAL}`;
-
-  if (regimes.length === 0) {
-    regimes = clusterUnionBands(merged)
-      .slice()
-      .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0))
-      .slice(0, CFG.FALLBACK_TOP_N);
-    selectionMode = `top${CFG.FALLBACK_TOP_N}`;
-  }
-
-  // Re-anchor
-  regimes = regimes.map((z) => reanchorRegime(z, b1h, b30, atr1h));
-
-  // Qualify/demote (with score lock)
-  regimes = qualifyStructureOrDemote(regimes);
-
-  // Collapse overlaps into parent structures
-  regimes = collapseOverlappingStructureZones(regimes, {
-    overlapPct: CFG.STRUCT_OVERLAP_PCT,
-    nearPoints: CFG.STRUCT_NEAR_POINTS,
-  });
-
-  // ✅ Tighten displayed structure ranges to the anchored window AFTER collapse
-  regimes = tightenStructuresToAnchorWindow(regimes, b1h, b30);
-
-  // Add POCKET children
-  regimes = expandPocketChildren(regimes, b1h);
-
-  return regimes.map((z) => ({
-    type: z.type,
-    tier: z.tier ?? "micro",
-    price: z.price,
-    priceRange: z.priceRange,
-    strength: z.strength,
-    details: {
-      ...z.details,
-      selectionMode,
-    },
-  }));
+    .slice(0, POCKET_MAX_RETURN);
 }
+
+// ---------------- Main ----------------
+
+async function main() {
+  try {
+    console.log("[SMZ] Fetching multi-TF bars (DEEP)…");
+
+    const [bars30mRaw, bars1hRaw] = await Promise.all([
+      getBarsFromPolygonDeep("SPY", "30m", DAYS_30M),
+      getBarsFromPolygonDeep("SPY", "1h", DAYS_1H),
+    ]);
+
+    const bars30m = normalizeBars(bars30mRaw);
+    const bars1h = normalizeBars(bars1hRaw);
+    const bars4h = aggregateTo4h(bars1h);
+
+    console.log("[SMZ] 30m bars:", bars30m.length);
+    console.log("[SMZ] 1h  bars:", bars1h.length);
+
+    spanInfo("30m", bars30m);
+    spanInfo("1h", bars1h);
+    spanInfo("4h(synth)", bars4h);
+
+    console.log(
+      "[SMZ] maxHigh 30m:",
+      maxHigh(bars30m),
+      "1h:",
+      maxHigh(bars1h),
+      "4h(synth):",
+      maxHigh(bars4h)
+    );
+
+    const currentPrice =
+      bars30m.at(-1)?.close ??
+      bars1h.at(-1)?.close ??
+      null;
+
+    if (!Number.isFinite(currentPrice)) {
+      throw new Error("Could not determine currentPrice from bars.");
+    }
+
+    console.log("[SMZ] currentPrice:", currentPrice);
+
+    // ✅ Authoritative live output (do NOT alter)
+    console.log("[SMZ] Running Institutional engine…");
+    const levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
+    console.log("[SMZ] Institutional levels generated:", levelsLive.length);
+
+    const liveStructures = levelsLive.filter((z) => (z?.tier ?? "") === "structure");
+
+    // ✅ Sticky snapshots (overlay-only lane)
+    console.log("[SMZ] Updating sticky snapshot store…");
+    const structuresSticky = updateStickyFromLive(liveStructures, currentPrice);
+    console.log("[SMZ] structures_sticky (within band):", structuresSticky.length);
+
+    // ✅ Active pockets (clustered + recent) + Option C lane tagging
+    console.log("[SMZ] Computing active pockets (building)…");
+    const pocketsActive = computeActivePockets({ bars1hAll: bars1h, currentPrice });
+
+    const pocketsTagged = pocketsActive.map((p) => {
+      const linked = isStructureLinked(p, liveStructures);
+      return {
+        ...p,
+        lane: linked ? "structure_linked" : "emerging",
+        structureLinked: linked,
+      };
+    });
+
+    const linkedCount = pocketsTagged.filter((p) => p.structureLinked).length;
+    console.log(
+      "[SMZ] Active pockets returned:",
+      pocketsTagged.length,
+      "| linked:",
+      linkedCount,
+      "| emerging:",
+      pocketsTagged.length - linkedCount
+    );
+
+    const payload = {
+      ok: true,
+      meta: {
+        generated_at_utc: new Date().toISOString(),
+        lookback_days: { "30m": DAYS_30M, "1h": DAYS_1H, "4h(synth)": DAYS_1H },
+        current_price: round2(currentPrice),
+        sticky: {
+          file: path.basename(STICKY_FILE),
+          round_step: STICKY_ROUND_STEP,
+          band_pts: STICKY_KEEP_WITHIN_BAND_PTS,
+          within_band_cap: STICKY_MAX_WITHIN_BAND,
+          archive_days: STICKY_ARCHIVE_DAYS,
+        },
+        pocket_settings: {
+          find_days_1h: POCKET_FIND_DAYS_1H,
+          window_points: POCKET_WINDOW_PTS,
+          max_width_pts: POCKET_MAX_WIDTH_PTS,
+          min_bars: POCKET_MIN_BARS,
+          max_bars: POCKET_MAX_BARS,
+          min_accept_pct: POCKET_MIN_ACCEPT_PCT,
+          recent_end_bars_1h: POCKET_RECENT_END_BARS_1H,
+          cluster_overlap: POCKET_CLUSTER_OVERLAP,
+          cluster_mid_pts: POCKET_CLUSTER_MID_PTS,
+          max_return: POCKET_MAX_RETURN,
+          structure_link_near_pts: STRUCT_LINK_NEAR_PTS,
+        },
+      },
+      levels: levelsLive,                 // ✅ authoritative live levels
+      pockets_active: pocketsTagged,      // ✅ clustered + recent + lane tagged
+      structures_sticky: structuresSticky // ✅ overlay-only snapshots
+    };
+
+    fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
+    fs.writeFileSync(OUTFILE, JSON.stringify(payload, null, 2), "utf8");
+
+    console.log("[SMZ] Saved institutional zones to:", OUTFILE);
+    console.log("[SMZ] Job complete.");
+  } catch (err) {
+    console.error("[SMZ] FAILED:", err);
+
+    try {
+      const fallback = {
+        ok: true,
+        levels: [],
+        pockets_active: [],
+        structures_sticky: [],
+        note: "SMZ institutional job error, no levels generated this run",
+      };
+      fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
+      fs.writeFileSync(OUTFILE, JSON.stringify(fallback, null, 2), "utf8");
+      console.log("[SMZ] Wrote fallback empty smz-levels.json");
+    } catch (inner) {
+      console.error("[SMZ] Also failed to write fallback smz-levels.json:", inner);
+    }
+
+    process.exitCode = 1;
+  }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
+}
+
+export default main;
