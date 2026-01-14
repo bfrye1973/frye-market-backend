@@ -687,7 +687,9 @@ async function main() {
     const levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
     console.log("[SMZ] Institutional levels generated:", levelsLive.length);
 
-    const liveStructures = levelsLive.filter((z) => (z?.tier ?? "") === "structure");
+    const liveStructures = levelsLive.filter((z) =>
+      (z?.tier ?? "") === "structure" || ((z?.tier ?? "") === "micro" && (z?.strength ?? 0) >= 80)
+    );
 
     // ✅ Sticky snapshots (overlay-only lane)
     console.log("[SMZ] Updating sticky snapshot store…");
