@@ -1,24 +1,21 @@
 // src/services/core/logic/smzEngine.js
 // Institutional SMZ detection + scoring + TradingView-style level output.
 //
-// CURRENT BEHAVIOR (LOCKED):
-// - Score globally (rubric decides strength; relevance may exist inside rubric)
+// LOCKED BEHAVIOR (preserved):
+// - Score globally via rubric
 // - Re-anchor to last consolidation before confirmed exit (exclude impulse candle)
 // - Collapse overlapping STRUCTURE zones into parent structures
-// - Emit POCKET children (one per STRUCTURE) and compute negotiationMid
+// - Emit POCKET children and compute negotiationMid
 //
-// PATCHES:
-// ✅ Inner launch-window anchoring: confirm exit relative to the consolidation window (not wide regime bounds)
-// ✅ Testing: MIN_SCORE_GLOBAL = 70 (working mode)
-// ✅ NEW (LOCKED): STRUCTURE qualification gate
-//    STRUCTURE = tight acceptance -> violent exit -> no immediate return
-//    If a regime cannot prove a valid anchored consolidation + confirmed exit,
-//    it is NOT STRUCTURE and is demoted to tier:"micro" (Engine 1 decision).
+// NEW (LOCKED by user):
+// ✅ High-score zones are never demoted (STRUCT_SCORE_LOCK)
+// ✅ After collapse, STRUCTURE display range is tightened to the anchored window (and 30m refine)
+//    so wide "monster" zones shrink to true acceptance (fixes 683–695 type ranges)
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
 const CFG = {
-  WINDOW_POINTS: 40, // kept for later UI use (optional filter)
+  WINDOW_POINTS: 40,
 
   FALLBACK_TOP_N: 12,
 
@@ -40,16 +37,15 @@ const CFG = {
   AVG_RANGE_ATR_MAX: 1.25,
   WIDTH_ATR_MAX: 3.25,
 
-  // Working threshold (70–100)
   MIN_SCORE_GLOBAL: 75,
 
   STRUCT_OVERLAP_PCT: 0.50,
   STRUCT_NEAR_POINTS: 4.0,
+
+  // ✅ High scores never demote
   STRUCT_SCORE_LOCK: 90,
 
-  // ✅ STRUCTURE qualification (Engine 1 definition)
-  // If anchored window is wider than this, it is not a "tight acceptance" structure.
-  // (We keep it absolute for SPY; ATR gate already exists in window chooser.)
+  // STRUCTURE qualification: tight acceptance cap for SPY
   STRUCT_MAX_WIDTH_PTS: 4.0,
 };
 
@@ -63,7 +59,7 @@ function normalizeBars(arr) {
   return (Array.isArray(arr) ? arr : [])
     .map((b) => {
       const rawT = Number(b.t ?? b.time ?? 0);
-      const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT; // ms->sec
+      const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT;
       return {
         time,
         open: Number(b.o ?? b.open ?? 0),
@@ -433,7 +429,7 @@ function findLatestLaunchWindowInsideRegime(bars1h, regimeLo, regimeHi, atr1h) {
 
   const EPS = 0.10;
 
-  const lastPossibleEnd = bars1h.length - 1 - CFG.EXIT_CONSEC_BARS_1H; // room for exit bars
+  const lastPossibleEnd = bars1h.length - 1 - CFG.EXIT_CONSEC_BARS_1H;
   const minEnd = CFG.ANCHOR_MIN_BARS_1H;
 
   for (let endIdx = lastPossibleEnd; endIdx >= minEnd; endIdx--) {
@@ -443,7 +439,13 @@ function findLatestLaunchWindowInsideRegime(bars1h, regimeLo, regimeHi, atr1h) {
     if (chosen.lo < regimeLo - EPS) continue;
     if (chosen.hi > regimeHi + EPS) continue;
 
-    const exit = exitAfterWindowConfirmed1h(bars1h, chosen.lo, chosen.hi, chosen.endIdx, CFG.EXIT_CONSEC_BARS_1H);
+    const exit = exitAfterWindowConfirmed1h(
+      bars1h,
+      chosen.lo,
+      chosen.hi,
+      chosen.endIdx,
+      CFG.EXIT_CONSEC_BARS_1H
+    );
     if (!exit.confirmed) continue;
 
     return {
@@ -525,7 +527,6 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
     };
   }
 
-  // Exclude impulse candle (locked)
   const anchorEnd = Math.max(0, exit.lastTouchIndex - 1);
 
   const chosen = chooseConsolidationWindow(bars1h, anchorEnd, atr1h);
@@ -585,14 +586,8 @@ function reanchorRegime(regime, bars1h, bars30m, atr1h) {
   };
 }
 
-/* ---------------- STRUCTURE QUALIFICATION (NEW) ---------------- */
+/* ---------------- STRUCTURE QUALIFICATION (with score lock) ---------------- */
 
-/**
- * STRUCTURE = tight acceptance -> violent exit -> (no immediate return implicitly by exit rule)
- * If not provable, demote to tier:"micro" (Engine 1 decision).
- *
- * We apply this AFTER re-anchoring because re-anchoring yields the true consolidation window.
- */
 function qualifyStructureOrDemote(regimes) {
   return (regimes || []).map((z) => {
     if ((z.tier ?? "") !== "structure") return z;
@@ -603,11 +598,9 @@ function qualifyStructureOrDemote(regimes) {
       return z; // keep as STRUCTURE no matter what width/anchor gate says
     }
 
-
     const facts = z.details?.facts ?? {};
     const anchorMode = facts.anchorMode ?? null;
 
-    // Must have a consolidation anchor window and a confirmed exit side/bars.
     const anchorBars = Number(facts.anchorBars1h ?? 0);
     const exitBars = Number(facts.exitBars1h ?? 0);
     const exitSide = facts.exitSide1h ?? null;
@@ -646,6 +639,83 @@ function qualifyStructureOrDemote(regimes) {
       },
     };
   });
+}
+
+/* ---------------- Tighten STRUCTURES after collapse ---------------- */
+/**
+ * After collapse, some parent structures can become wide again.
+ * If a structure has an anchored window (anchorStartTime/anchorEndTime),
+ * we override the displayed priceRange to the true window range (and 30m refine).
+ * This is the "tighten" fix that preserves tier/score, but restores true acceptance bounds.
+ */
+function tightenStructuresToAnchorWindow(regimes, bars1h, bars30m) {
+  const out = [];
+  for (const z of regimes || []) {
+    if ((z?.tier ?? "") !== "structure") {
+      out.push(z);
+      continue;
+    }
+
+    const facts = z?.details?.facts ?? {};
+    const anchorMode = facts.anchorMode ?? null;
+    const startTime = Number(facts.anchorStartTime);
+    const endTime = Number(facts.anchorEndTime);
+
+    if (
+      anchorMode !== "anchored_last_consolidation" ||
+      !Number.isFinite(startTime) ||
+      !Number.isFinite(endTime) ||
+      endTime <= startTime
+    ) {
+      out.push(z);
+      continue;
+    }
+
+    const slice1h = (bars1h || []).filter(
+      (b) => validBar(b) && b.time >= startTime && b.time <= endTime
+    );
+    const rh1h = rangeHighLow(slice1h);
+    if (!rh1h) {
+      out.push(z);
+      continue;
+    }
+
+    let newLo = rh1h.lo;
+    let newHi = rh1h.hi;
+
+    const refined = refineWith30m(bars30m, startTime, endTime);
+    if (refined && Number.isFinite(refined.lo) && Number.isFinite(refined.hi) && refined.hi > refined.lo) {
+      newLo = refined.lo;
+      newHi = refined.hi;
+    }
+
+    const width = newHi - newLo;
+
+    // Apply tightening if it results in a tight acceptance window (<= 4 pts + small tolerance)
+    if (!Number.isFinite(width) || width <= 0 || width > (CFG.STRUCT_MAX_WIDTH_PTS + 0.25)) {
+      out.push(z);
+      continue;
+    }
+
+    const tightened = {
+      ...z,
+      _low: round2(newLo),
+      _high: round2(newHi),
+      priceRange: [round2(newHi), round2(newLo)],
+      price: round2((newLo + newHi) / 2),
+      details: {
+        ...z.details,
+        facts: {
+          ...(facts ?? {}),
+          tightenedToAnchorWindow: true,
+          tightenedWidthPts: round2(width),
+        },
+      },
+    };
+
+    out.push(tightened);
+  }
+  return out;
 }
 
 /* ---------------- Pocket + Midline ---------------- */
@@ -970,7 +1040,6 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
   const merged = mergeByOverlap(scored, CFG.MERGE_OVERLAP);
   let regimes = clusterUnionBands(merged);
 
-  // GLOBAL selection (>= MIN_SCORE_GLOBAL)
   regimes = regimes
     .filter((z) => Number(z.strength ?? 0) >= CFG.MIN_SCORE_GLOBAL)
     .sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0));
@@ -985,19 +1054,22 @@ export function computeSmartMoneyLevels(bars30m, bars1h, bars4h) {
     selectionMode = `top${CFG.FALLBACK_TOP_N}`;
   }
 
-  // Re-anchor (inner launch-window exit finding)
+  // Re-anchor
   regimes = regimes.map((z) => reanchorRegime(z, b1h, b30, atr1h));
 
-  // ✅ STRUCTURE qualification gate (demote non-structures to micro)
+  // Qualify/demote (with score lock)
   regimes = qualifyStructureOrDemote(regimes);
 
-  // Collapse STRUCTURE overlaps into parent structures
+  // Collapse overlaps into parent structures
   regimes = collapseOverlappingStructureZones(regimes, {
     overlapPct: CFG.STRUCT_OVERLAP_PCT,
     nearPoints: CFG.STRUCT_NEAR_POINTS,
   });
 
-  // Add POCKET children inside each STRUCTURE
+  // ✅ Tighten displayed structure ranges to the anchored window AFTER collapse
+  regimes = tightenStructuresToAnchorWindow(regimes, b1h, b30);
+
+  // Add POCKET children
   regimes = expandPocketChildren(regimes, b1h);
 
   return regimes.map((z) => ({
