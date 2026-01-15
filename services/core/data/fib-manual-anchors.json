@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "meta": { "schema": "fib-manual-anchors@1" },
+  "anchors": [
+    {
+      "symbol": "SPY",
+      "tf": "1h",
+      "wave": "W1",
+      "low": 688.65,
+      "high": 690.46,
+      "context": "W2",
+      "degree": "minute",
+      "comment": "Minute W1 anchor (manual). Engine 2 ignores degree; context is manual."
+    }
+  ]
+}
