@@ -39,6 +39,17 @@
       "rangeSource": "manual",
       "status": "active",
       "stickyConfirmed": true
+    },
+    {
+      "structureKey": "MANUAL|SPY|689.78-691.00",
+      "symbol": "SPY",
+      "tier": "structure",
+      "manualRange": [691.00, 689.78],
+      "priceRange": [691.00, 689.78],
+      "locked": true,
+      "rangeSource": "manual",
+      "status": "active",
+      "stickyConfirmed": true
     }
   ]
 }
