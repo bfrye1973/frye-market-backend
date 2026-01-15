@@ -74,6 +74,8 @@ app.use("/live", liveRouter); // ✅ GitHub JSON proxies
 app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
 app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution shelves
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
+app.use("/api/v1", fibLevelsRouter);
+
 
 // ✅ Engine 2 route mount
 // NOTE: fibLevelsRouter defines GET "/fib-levels", so we mount it at "/api/v1"
