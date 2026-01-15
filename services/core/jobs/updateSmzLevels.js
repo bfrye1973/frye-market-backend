@@ -1,8 +1,17 @@
 // services/core/jobs/updateSmzLevels.js
 // Engine 1 SMZ job (stable version - NO pocket/micro merge)
-// - Runs smzEngine
-// - Updates sticky registry (manualRange wins)
+// - Runs smzEngine (LOCKED)
+// - Updates sticky registry (AUTO ONLY)
+// - Loads manual structures from smz-manual-structures.json (SOURCE OF TRUTH)
 // - Writes smz-levels.json for frontend
+//
+// LOCKED REQUIREMENTS (per user):
+// ✅ smzEngine.js untouched
+// ✅ frontend overlay untouched
+// ✅ manual zones persist across runs/deploy/backfill
+// ✅ manual zones NOT stored in registry
+// ✅ manual zones immune to caps/cleanup/overlap suppression
+// ✅ structures_sticky: manual first, then auto
 
 import fs from "fs";
 import path from "path";
@@ -16,6 +25,7 @@ const __dirname = path.dirname(__filename);
 
 const OUTFILE = path.resolve(__dirname, "../data/smz-levels.json");
 const STICKY_FILE = path.resolve(__dirname, "../data/smz-structures-registry.json");
+const MANUAL_FILE = path.resolve(__dirname, "../data/smz-manual-structures.json");
 
 // Lookbacks
 const DAYS_30M = 180;
@@ -74,7 +84,13 @@ function normalizeBars(raw) {
         volume: Number(b.v ?? b.volume ?? 0),
       };
     })
-    .filter((b) => Number.isFinite(b.time) && Number.isFinite(b.high) && Number.isFinite(b.low) && Number.isFinite(b.close))
+    .filter(
+      (b) =>
+        Number.isFinite(b.time) &&
+        Number.isFinite(b.high) &&
+        Number.isFinite(b.low) &&
+        Number.isFinite(b.close)
+    )
     .sort((a, b) => a.time - b.time);
 }
 
@@ -87,7 +103,14 @@ function aggregateTo4h(bars1h) {
     const block = Math.floor(b.time / (4 * 3600)) * (4 * 3600);
     if (!cur || cur.time !== block) {
       if (cur) out.push(cur);
-      cur = { time: block, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? 0 };
+      cur = {
+        time: block,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume ?? 0,
+      };
     } else {
       cur.high = Math.max(cur.high, b.high);
       cur.low = Math.min(cur.low, b.low);
@@ -105,14 +128,90 @@ function snapStep(x, step) {
   return Math.round(n / step) * step;
 }
 
-// ---------------- Sticky store ----------------
+function rangesOverlap(hiA, loA, hiB, loB) {
+  const aHi = Math.max(Number(hiA), Number(loA));
+  const aLo = Math.min(Number(hiA), Number(loA));
+  const bHi = Math.max(Number(hiB), Number(loB));
+  const bLo = Math.min(Number(hiB), Number(loB));
+  if (![aHi, aLo, bHi, bLo].every(Number.isFinite)) return false;
+  return !(aHi < bLo || aLo > bHi);
+}
+
+// ---------------- Manual structures (SOURCE OF TRUTH) ----------------
+
+function normalizeManualStructure(s) {
+  const mr = Array.isArray(s?.manualRange) ? s.manualRange : null;
+  const pr = Array.isArray(s?.priceRange) ? s.priceRange : null;
+
+  const hi0 = Number(mr?.[0] ?? pr?.[0]);
+  const lo0 = Number(mr?.[1] ?? pr?.[1]);
+  if (!Number.isFinite(hi0) || !Number.isFinite(lo0)) return null;
+
+  const hi = round2(Math.max(hi0, lo0));
+  const lo = round2(Math.min(hi0, lo0));
+  if (!(hi > lo)) return null;
+
+  const structureKey =
+    typeof s?.structureKey === "string" && s.structureKey.length
+      ? s.structureKey
+      : `MANUAL|SPY|${lo.toFixed(2)}-${hi.toFixed(2)}`;
+
+  return {
+    structureKey,
+    symbol: "SPY",
+    tier: "structure",
+    manualRange: [hi, lo],
+    priceRange: [hi, lo],
+    locked: true,
+    rangeSource: "manual",
+    status: "active",
+    stickyConfirmed: true,
+    // Optional pass-through fields (kept if present)
+    ...(s?.notes ? { notes: s.notes } : {}),
+  };
+}
+
+function loadManualStructures() {
+  if (!fs.existsSync(MANUAL_FILE)) {
+    console.log(`[SMZ] Manual file not found (ok): ${MANUAL_FILE}`);
+    return [];
+  }
+  try {
+    const raw = fs.readFileSync(MANUAL_FILE, "utf8");
+    const json = JSON.parse(raw);
+    const arr = Array.isArray(json?.structures) ? json.structures : [];
+    const out = arr.map(normalizeManualStructure).filter(Boolean);
+
+    console.log(`[SMZ] Manual structures loaded: ${out.length} (${MANUAL_FILE})`);
+    return out;
+  } catch (e) {
+    console.warn(`[SMZ] Manual file failed to load: ${MANUAL_FILE} :: ${e?.message}`);
+    return [];
+  }
+}
+
+function manualOverlapsAny(manualList, hi, lo) {
+  for (const m of manualList || []) {
+    const r = Array.isArray(m?.manualRange) ? m.manualRange : m?.priceRange;
+    if (!Array.isArray(r) || r.length !== 2) continue;
+    if (rangesOverlap(hi, lo, r[0], r[1])) return true;
+  }
+  return false;
+}
+
+// ---------------- Sticky store (AUTO ONLY) ----------------
 
 function loadSticky() {
   try {
-    if (!fs.existsSync(STICKY_FILE)) return { ok: true, meta: { created_at_utc: isoNow() }, structures: [] };
+    if (!fs.existsSync(STICKY_FILE))
+      return { ok: true, meta: { created_at_utc: isoNow() }, structures: [] };
     const raw = fs.readFileSync(STICKY_FILE, "utf8");
     const json = JSON.parse(raw);
-    return { ok: true, meta: json?.meta ?? { created_at_utc: isoNow() }, structures: Array.isArray(json?.structures) ? json.structures : [] };
+    return {
+      ok: true,
+      meta: json?.meta ?? { created_at_utc: isoNow() },
+      structures: Array.isArray(json?.structures) ? json.structures : [],
+    };
   } catch {
     return { ok: true, meta: { created_at_utc: isoNow(), recovered: true }, structures: [] };
   }
@@ -123,19 +222,30 @@ function saveSticky(store) {
   fs.writeFileSync(STICKY_FILE, JSON.stringify(store, null, 2), "utf8");
 }
 
+function isManualLike(s) {
+  return !!(
+    s &&
+    (s.rangeSource === "manual" ||
+      (Array.isArray(s.manualRange) && s.manualRange.length === 2) ||
+      (typeof s.structureKey === "string" && s.structureKey.startsWith("MANUAL|")))
+  );
+}
+
+// Safety: registry is AUTO ONLY — strip anything manual-like.
+function stripManualFromRegistryStore(store) {
+  const before = Array.isArray(store?.structures) ? store.structures.length : 0;
+  const structures = (store?.structures || []).filter((s) => !isManualLike(s));
+  const after = structures.length;
+  if (before !== after) {
+    console.log(`[SMZ] Stripped manual from registry store: ${before} -> ${after}`);
+  }
+  return { ...(store || {}), structures };
+}
+
 function structureKeyFromRange(hi, lo) {
   const qHi = snapStep(hi, STICKY_ROUND_STEP);
   const qLo = snapStep(lo, STICKY_ROUND_STEP);
   return `SPY|mixed|hi=${qHi?.toFixed(2)}|lo=${qLo?.toFixed(2)}`;
-}
-
-function isLockedSticky(s) {
-  return !!(
-    s &&
-    (s.locked === true ||
-      s.rangeSource === "manual" ||
-      (Array.isArray(s.manualRange) && s.manualRange.length === 2))
-  );
 }
 
 function barOverlapsRange(b, lo, hi) {
@@ -167,7 +277,14 @@ function recordExitEvent(existing, facts, nowIso) {
   const exitSide = facts?.exitSide1h ?? null;
   const anchorEndTime = Number(facts?.anchorEndTime ?? NaN);
 
-  if (!(exitBars >= 2 && (exitSide === "above" || exitSide === "below") && Number.isFinite(anchorEndTime))) return;
+  if (
+    !(
+      exitBars >= 2 &&
+      (exitSide === "above" || exitSide === "below") &&
+      Number.isFinite(anchorEndTime)
+    )
+  )
+    return;
 
   existing.exits = Array.isArray(existing.exits) ? existing.exits : [];
   if (existing.exits.some((e) => Number(e?.anchorEndTime) === anchorEndTime)) return;
@@ -198,14 +315,15 @@ function countDistinctExitEvents(exits) {
   return count;
 }
 
-// One-time backfill (simple)
+// One-time backfill (simple) — AUTO ONLY
 function runStickyBackfillOnce(store, bars1h) {
   const meta = store.meta ?? {};
   if (meta.backfill_done_utc) return store;
 
   console.log("[SMZ][BACKFILL] Running one-time sticky backfill…");
 
-  let loAll = Infinity, hiAll = -Infinity;
+  let loAll = Infinity,
+    hiAll = -Infinity;
   for (const b of bars1h || []) {
     if (!b || !Number.isFinite(b.low) || !Number.isFinite(b.high)) continue;
     loAll = Math.min(loAll, b.low);
@@ -229,13 +347,20 @@ function runStickyBackfillOnce(store, bars1h) {
       if (!barOverlapsRange(bars1h[i], lo, hi)) continue;
 
       let lastTouch = i;
-      while (lastTouch + 1 < bars1h.length && barOverlapsRange(bars1h[lastTouch + 1], lo, hi)) lastTouch++;
+      while (lastTouch + 1 < bars1h.length && barOverlapsRange(bars1h[lastTouch + 1], lo, hi))
+        lastTouch++;
 
       const e = exitConfirmedAfterIndex(bars1h, lo, hi, lastTouch, 2);
-      if (!e.confirmed) { i = lastTouch; continue; }
+      if (!e.confirmed) {
+        i = lastTouch;
+        continue;
+      }
 
       const anchorEndTime = bars1h[lastTouch]?.time;
-      if (!Number.isFinite(anchorEndTime)) { i = lastTouch; continue; }
+      if (!Number.isFinite(anchorEndTime)) {
+        i = lastTouch;
+        continue;
+      }
 
       exits.push({ side: e.side, exitBars: e.bars, anchorEndTime });
       i = lastTouch;
@@ -245,7 +370,8 @@ function runStickyBackfillOnce(store, bars1h) {
     const distinct = [];
     for (const ev of exits) {
       if (!distinct.length) distinct.push(ev);
-      else if (ev.anchorEndTime - distinct[distinct.length - 1].anchorEndTime >= STICKY_EXIT_MIN_SEP_SEC) distinct.push(ev);
+      else if (ev.anchorEndTime - distinct[distinct.length - 1].anchorEndTime >= STICKY_EXIT_MIN_SEP_SEC)
+        distinct.push(ev);
     }
 
     if (distinct.length < STICKY_CONFIRM_EXITS_REQUIRED) continue;
@@ -258,8 +384,7 @@ function runStickyBackfillOnce(store, bars1h) {
   const top = candidates.slice(0, STICKY_BACKFILL_MAX_NEW);
 
   const nowIso = isoNow();
-  const lockedManual = (store.structures || []).filter(isLockedSticky);
-  
+
   for (const c of top) {
     const key = structureKeyFromRange(c.hi, c.lo);
     if (store.structures.some((s) => s.structureKey === key)) continue;
@@ -285,36 +410,38 @@ function runStickyBackfillOnce(store, bars1h) {
   return store;
 }
 
-function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll) {
-  let store = loadSticky();
+/**
+ * Build structures_sticky = manual first + auto (capped).
+ * Updates registry with AUTO candidates only.
+ */
+function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualStructures) {
+  // 1) Load registry (auto-only), then strip any manual pollution
+  let store = stripManualFromRegistryStore(loadSticky());
 
+  // 2) Optional one-time backfill (auto-only)
   if (STICKY_BACKFILL_ONCE && Array.isArray(bars1hAll) && bars1hAll.length > 100) {
     store = runStickyBackfillOnce(store, bars1hAll);
+    store = stripManualFromRegistryStore(store);
   }
 
-  const list = store.structures.slice();
+  // Operate on a working list of AUTO entries only
+  const list = (store.structures || []).slice();
   const nowIso = isoNow();
-
-  const locked = list.filter(isLockedSticky);
 
   const byKey = new Map();
   for (const s of list) if (s?.structureKey) byKey.set(s.structureKey, s);
 
+  // 3) Update AUTO entries from live candidates, but NEVER allow autos to overlap manual
   for (const z of stickyCandidates || []) {
     const pr = z?.priceRange;
     if (!Array.isArray(pr) || pr.length !== 2) continue;
 
-    const hi = Number(pr[0]), lo = Number(pr[1]);
+    const hi = Number(pr[0]),
+      lo = Number(pr[1]);
     if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi <= lo) continue;
 
-    const overlapsLocked = locked.some((s) => {
-      const r = Array.isArray(s.manualRange) ? s.manualRange : s.priceRange;
-      if (!Array.isArray(r) || r.length !== 2) return false;
-      const sHi = Math.max(Number(r[0]), Number(r[1]));
-      const sLo = Math.min(Number(r[0]), Number(r[1]));
-      return !(hi < sLo || lo > sHi);
-    });
-    if (overlapsLocked) continue;
+    // Manual zones always win: do not add/update autos that overlap manual
+    if (manualOverlapsAny(manualStructures, hi, lo)) continue;
 
     const key = structureKeyFromRange(hi, lo);
     const existing = byKey.get(key);
@@ -364,20 +491,20 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll) {
     }
   }
 
+  // 4) Archive logic applies ONLY to autos (manual not in registry)
   const bandLo = currentPrice - STICKY_KEEP_WITHIN_BAND_PTS;
   const bandHi = currentPrice + STICKY_KEEP_WITHIN_BAND_PTS;
   const cutoffMs = Date.now() - STICKY_ARCHIVE_DAYS * 24 * 3600 * 1000;
 
   for (const s of list) {
     if (!s || s.status === "archived") continue;
-
-    if (isLockedSticky(s)) { s.status = "active"; continue; }
     if (s.stickyConfirmed) continue;
 
     const pr = s.priceRange;
     if (!Array.isArray(pr) || pr.length !== 2) continue;
 
-    const hi = Number(pr[0]), lo = Number(pr[1]);
+    const hi = Number(pr[0]),
+      lo = Number(pr[1]);
     const lastSeenMs = Date.parse(s.lastSeenUtc || "");
     const old = Number.isFinite(lastSeenMs) ? lastSeenMs < cutoffMs : false;
     const inBand = hi >= bandLo && lo <= bandHi;
@@ -388,39 +515,68 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll) {
     }
   }
 
-  const activeInBand = list
+  // 5) Select autos within band (capped), excluding any overlapping manual
+  const activeInBandAutos = list
     .filter((s) => s?.status === "active")
     .filter((s) => {
-      const r = Array.isArray(s.manualRange) && s.manualRange.length === 2 ? s.manualRange : s.priceRange;
-      if (!Array.isArray(r) || r.length !== 2) return false;
-      const hi = Math.max(Number(r[0]), Number(r[1]));
-      const lo = Math.min(Number(r[0]), Number(r[1]));
-      return hi >= bandLo && lo <= bandHi;
+      const pr = s.priceRange;
+      if (!Array.isArray(pr) || pr.length !== 2) return false;
+      const hi = Math.max(Number(pr[0]), Number(pr[1]));
+      const lo = Math.min(Number(pr[0]), Number(pr[1]));
+      if (!(hi >= bandLo && lo <= bandHi)) return false;
+
+      // safety: remove autos overlapping manual
+      return !manualOverlapsAny(manualStructures, hi, lo);
     });
 
-  const lockedInBand = activeInBand.filter(isLockedSticky);
+  const autosSorted = activeInBandAutos.sort((a, b) => {
+    const sa = Number(b.maxStrengthSeen ?? 0) - Number(a.maxStrengthSeen ?? 0);
+    if (sa !== 0) return sa;
+    return Number(b.timesSeen ?? 0) - Number(a.timesSeen ?? 0);
+  });
 
-  const autosInBand = activeInBand
-    .filter((s) => !isLockedSticky(s))
-    .sort((a, b) => {
-      const sa = Number(b.maxStrengthSeen ?? 0) - Number(a.maxStrengthSeen ?? 0);
-      if (sa !== 0) return sa;
-      return Number(b.timesSeen ?? 0) - Number(a.timesSeen ?? 0);
-    });
+  const autosWithinBand = autosSorted.slice(0, STICKY_MAX_WITHIN_BAND);
 
-  const remaining = Math.max(0, STICKY_MAX_WITHIN_BAND - lockedInBand.length);
-  const withinBand = [...lockedInBand, ...autosInBand.slice(0, remaining)];
-
-  const newStore = { ok: true, meta: { ...(store.meta ?? {}), updated_at_utc: nowIso }, structures: list };
+  // 6) Persist registry (AUTO ONLY)
+  const newStore = {
+    ok: true,
+    meta: { ...(store.meta ?? {}), updated_at_utc: nowIso },
+    structures: list.filter((s) => !isManualLike(s)),
+  };
   saveSticky(newStore);
 
-  return withinBand.map((s) => ({
+  // 7) Emit manual first (uncapped), then autos (capped)
+  const manualInBand = (manualStructures || []).filter((m) => {
+    const r = m?.manualRange ?? m?.priceRange;
+    if (!Array.isArray(r) || r.length !== 2) return false;
+    const hi = Math.max(Number(r[0]), Number(r[1]));
+    const lo = Math.min(Number(r[0]), Number(r[1]));
+    return hi >= bandLo && lo <= bandHi;
+  });
+
+  console.log(
+    `[SMZ] Emitting sticky structures: manual ${manualInBand.length} + auto ${autosWithinBand.length} = ${
+      manualInBand.length + autosWithinBand.length
+    }`
+  );
+
+  const emittedManual = manualInBand.map((m) => ({
     type: "institutional",
     tier: "structure_sticky",
-    priceRange: (Array.isArray(s.manualRange) && s.manualRange.length === 2) ? s.manualRange : s.priceRange,
+    priceRange: m.manualRange ?? m.priceRange,
+    strength: 100,
+    details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
+  }));
+
+  const emittedAutos = autosWithinBand.map((s) => ({
+    type: "institutional",
+    tier: "structure_sticky",
+    priceRange: s.priceRange,
     strength: round2(Number(s.maxStrengthSeen ?? 0)),
     details: { id: s.structureKey, facts: { sticky: s } },
   }));
+
+  return [...emittedManual, ...emittedAutos];
 }
 
 // ---------------- Active pockets ----------------
@@ -447,7 +603,8 @@ function closeAcceptancePct(bars, lo, hi) {
 }
 
 function historyBoostScore(barsHist, lo, hi, mid) {
-  let touches = 0, midHits = 0;
+  let touches = 0,
+    midHits = 0;
   for (const b of barsHist) {
     if (!b || !Number.isFinite(b.high) || !Number.isFinite(b.low) || !Number.isFinite(b.close)) continue;
     if (b.high >= lo && b.low <= hi) touches++;
@@ -480,7 +637,8 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
 
       const win = barsFind.slice(startIdx, endIdx + 1);
 
-      let lo = Infinity, hi = -Infinity;
+      let lo = Infinity,
+        hi = -Infinity;
       const closes = [];
 
       for (const b of win) {
@@ -516,7 +674,9 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
       const h = historyBoostScore(bars1hAll, lo, hi, mid);
       const strengthHistory = h.score;
 
-      const strengthTotal = round2(Math.min(100, strengthNow * 0.55 + relevanceScore * 0.30 + strengthHistory * 0.15));
+      const strengthTotal = round2(
+        Math.min(100, strengthNow * 0.55 + relevanceScore * 0.30 + strengthHistory * 0.15)
+      );
 
       pockets.push({
         type: "institutional",
@@ -542,7 +702,8 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
   const getHL = (p) => {
     const pr = p?.priceRange;
     if (!Array.isArray(pr) || pr.length < 2) return null;
-    let hi = Number(pr[0]), lo = Number(pr[1]);
+    let hi = Number(pr[0]),
+      lo = Number(pr[1]);
     if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
     if (lo > hi) [lo, hi] = [hi, lo];
     return { hi, lo, mid: Number(p.negotiationMid) };
@@ -625,9 +786,11 @@ async function main() {
 
     console.log("[SMZ] currentPrice:", round2(currentPrice));
 
+    // Load manual structures (SOURCE OF TRUTH)
+    const manualStructures = loadManualStructures();
+
     console.log("[SMZ] Running engine...");
     let levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
-
     console.log("[SMZ] levels generated:", levelsLive.length);
 
     const liveStructures = levelsLive.filter((z) => (z?.tier ?? "") === "structure");
@@ -639,7 +802,12 @@ async function main() {
       return false;
     });
 
-    const structuresSticky = updateStickyFromLive(stickyCandidates, currentPrice, bars1h);
+    const structuresSticky = updateStickyFromLive(
+      stickyCandidates,
+      currentPrice,
+      bars1h,
+      manualStructures
+    );
 
     const pocketsActive = computeActivePockets({ bars1hAll: bars1h, currentPrice });
 
@@ -654,6 +822,8 @@ async function main() {
         generated_at_utc: isoNow(),
         current_price: round2(currentPrice),
         lookback_days: { "30m": DAYS_30M, "1h": DAYS_1H },
+        manual_file: path.basename(MANUAL_FILE),
+        manual_structures_loaded: manualStructures.length,
       },
       levels: levelsLive,
       pockets_active: pocketsTagged,
@@ -669,7 +839,13 @@ async function main() {
     console.error("[SMZ] FAILED:", err);
 
     // write safe fallback
-    const fallback = { ok: true, levels: [], pockets_active: [], structures_sticky: [], note: "SMZ job error" };
+    const fallback = {
+      ok: true,
+      levels: [],
+      pockets_active: [],
+      structures_sticky: [],
+      note: "SMZ job error",
+    };
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
     fs.writeFileSync(OUTFILE, JSON.stringify(fallback, null, 2), "utf8");
 
