@@ -17,10 +17,6 @@
 //   - archived
 //   - removed by STICKY_MAX_WITHIN_BAND cap (locked zones are included first)
 //
-// ✅ NEW (OPTION B):
-// - Merge touching/near-adjacent POCKET + MICRO bands into ONE band in the final output.
-// - Done here (post-processing) so smzEngine.js stays locked.
-//
 // Uses DEEP provider (jobs only), chart provider remains untouched.
 
 import fs from "fs";
@@ -79,10 +75,6 @@ const STICKY_BACKFILL_TOUCHES_MIN = 10;
 const STICKY_BACKFILL_BUCKET_STEP = 0.25;
 const STICKY_BACKFILL_BUCKET_SIZE = 1.0; // SPY-safe bucket size
 const STICKY_BACKFILL_MAX_NEW = 30;
-
-// ✅ OPTION B: Merge touching/near-adjacent pocket/micro bands into one
-// If two pocket/micro ranges touch or are separated by <= this many points, merge.
-const POCKET_MICRO_GAP_MERGE_PTS = 0.75;
 
 // ---------------- Helpers ----------------
 
@@ -246,83 +238,6 @@ function overlapRatioRange(aHi, aLo, bHi, bLo) {
   if (inter <= 0) return 0;
   const denom = Math.min(aHi - aLo, bHi - bLo);
   return denom > 0 ? inter / denom : 0;
-}
-
-// ✅ OPTION B HELPER: Merge adjacent pocket/micro ranges into one band
-function mergeAdjacentPocketMicro(levels) {
-  if (!Array.isArray(levels) || levels.length < 2) return levels || [];
-
-  const isMergeTier = (t) => t === "pocket" || t === "micro";
-
-  const mergeable = [];
-  const others = [];
-  for (const z of levels) {
-    const tier = z?.tier ?? "";
-    const pr = z?.priceRange;
-    if (isMergeTier(tier) && Array.isArray(pr) && pr.length === 2) mergeable.push(z);
-    else others.push(z);
-  }
-
-  if (mergeable.length < 2) return levels;
-
-  const norm = mergeable
-    .map((z) => {
-      const hi = Number(z.priceRange[0]);
-      const lo = Number(z.priceRange[1]);
-      if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
-      return { z, hi: Math.max(hi, lo), lo: Math.min(hi, lo) };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.lo - b.lo);
-
-  const getStrength = (z) => Number(z?.strengthTotal ?? z?.strength ?? 0) || 0;
-
-  const groups = [];
-  let cur = null;
-
-  for (const item of norm) {
-    if (!cur) {
-      cur = { hi: item.hi, lo: item.lo, members: [item.z] };
-      continue;
-    }
-
-    const gap = item.lo - cur.hi; // >0 means separated
-    const touchesOrOverlaps = item.lo <= cur.hi;
-    const gapSmall = gap > 0 && gap <= POCKET_MICRO_GAP_MERGE_PTS;
-
-    if (touchesOrOverlaps || gapSmall) {
-      cur.hi = Math.max(cur.hi, item.hi);
-      cur.lo = Math.min(cur.lo, item.lo);
-      cur.members.push(item.z);
-    } else {
-      groups.push(cur);
-      cur = { hi: item.hi, lo: item.lo, members: [item.z] };
-    }
-  }
-  if (cur) groups.push(cur);
-
-  const merged = groups.map((g) => {
-    const best = g.members.slice().sort((a, b) => getStrength(b) - getStrength(a))[0];
-    const tier = g.members.some((x) => (x?.tier ?? "") === "pocket") ? "pocket" : "micro";
-    const ids = g.members.map((x) => x?.details?.id ?? null).filter(Boolean);
-
-    return {
-      ...best,
-      tier,
-      priceRange: [round2(g.hi), round2(g.lo)],
-      details: {
-        ...(best.details || {}),
-        facts: {
-          ...(best.details?.facts || {}),
-          mergedCount: g.members.length,
-          mergedFrom: ids,
-          mergedGapPts: POCKET_MICRO_GAP_MERGE_PTS,
-        },
-      },
-    };
-  });
-
-  return [...others, ...merged];
 }
 
 // --- Manual/locked sticky helpers (NEW) ---
@@ -684,6 +599,8 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
     const existing = byKey.get(key);
 
     if (existing) {
+      // If existing is locked, we still allow stats to update (timesSeen/maxStrength/exits),
+      // but NEVER rewrite its ranges or allow it to archive/cap out.
       existing.lastSeenUtc = nowIso;
       existing.timesSeen = Number(existing.timesSeen ?? 0) + 1;
       existing.maxStrengthSeen = Math.max(Number(existing.maxStrengthSeen ?? 0), Number(z.strength ?? 0));
@@ -762,6 +679,9 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
     }
   }
 
+  // ✅ Build within-band list:
+  // - locked/manual zones always included first (if in band)
+  // - then autos by score up to remaining cap
   const activeInBand = list
     .filter((s) => s?.status === "active")
     .filter((s) => {
@@ -823,6 +743,8 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
           distinctExitCount: Number(s.distinctExitCount ?? 0),
           exits: Array.isArray(s.exits) ? s.exits : [],
           backfilled: !!s.backfilled,
+
+          // helpful debug fields (safe)
           locked: !!s.locked,
           rangeSource: s.rangeSource ?? null,
           manualRange:
@@ -1007,11 +929,7 @@ async function main() {
 
     // ✅ Authoritative live output (Engine 1)
     console.log("[SMZ] Running Institutional engine…");
-    let levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
-
-    // ✅ OPTION B APPLY: merge touching pocket/micro into one band
-    levelsLive = mergeAdjacentPocketMicro(levelsLive);
-
+    const levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
     console.log("[SMZ] Institutional levels generated:", levelsLive.length);
 
     // Live structures for linking/tags only
@@ -1077,11 +995,6 @@ async function main() {
           cluster_mid_pts: POCKET_CLUSTER_MID_PTS,
           max_return: POCKET_MAX_RETURN,
           structure_link_near_pts: STRUCT_LINK_NEAR_PTS,
-        },
-        pocket_micro_merge: {
-          enabled: true,
-          gap_merge_pts: POCKET_MICRO_GAP_MERGE_PTS,
-          tiers: ["pocket", "micro"],
         },
       },
       levels: levelsLive,
