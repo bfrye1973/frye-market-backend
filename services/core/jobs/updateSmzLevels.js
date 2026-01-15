@@ -258,7 +258,9 @@ function runStickyBackfillOnce(store, bars1h) {
   const top = candidates.slice(0, STICKY_BACKFILL_MAX_NEW);
 
   const nowIso = isoNow();
-  store.structures = Array.isArray(store.structures) ? store.structures : [];
+  const lockedManual = (store.structures || []).filter(isLockedSticky);
+  store.structures = [...lockedManual];
+
 
   for (const c of top) {
     const key = structureKeyFromRange(c.hi, c.lo);
