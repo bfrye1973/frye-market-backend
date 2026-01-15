@@ -530,6 +530,18 @@ function median(values) {
   const mid = Math.floor(arr.length / 2);
   return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
 }
+function closeAcceptancePct(bars, lo, hi) {
+  let n = 0;
+  let inside = 0;
+
+  for (const b of bars) {
+    if (!b || !Number.isFinite(b.close)) continue;
+    n++;
+    if (b.close >= lo && b.close <= hi) inside++;
+  }
+
+  return n ? inside / n : 0;
+}
 
 function computeActivePockets({ bars1hAll, currentPrice }) {
   const nowSec = bars1hAll.at(-1)?.time ?? Math.floor(Date.now() / 1000);
