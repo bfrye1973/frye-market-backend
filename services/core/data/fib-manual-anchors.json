@@ -6,11 +6,11 @@
       "symbol": "SPY",
       "tf": "1h",
       "wave": "W1",
-      "low": 688.65,
+      "low": 688.70,
       "high": 690.46,
       "context": "W2",
       "degree": "minute",
-      "comment": "Minute W1 anchor (manual). Engine 2 ignores degree; context is manual."
+      "comment": "Manual W1 anchor for active 1h impulse. Lower bound adjusted to 688.70"
     }
   ]
 }
