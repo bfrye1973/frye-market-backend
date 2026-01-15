@@ -1,23 +1,9 @@
-// src/services/core/jobs/updateSmzLevels.js
-// Institutional Smart Money Zones Job — writes smz-levels.json
-//
-// ✅ Live structures remain authoritative: computeSmartMoneyLevels() output is the ONLY source for live STRUCTURES.
-// ✅ Sticky persistence is overlay-only: structures_sticky[] (frozen snapshots, never merged into live).
-// ✅ Sticky: "major zones" become permanent after 2 distinct confirmed exits (never archived).
-// ✅ Sticky: one-time historical backfill finds older major zones & locks them as confirmed.
-// ✅ Active pockets: clustered to reduce overlap spam + Option C tagging (structure_linked vs emerging).
-// ✅ "Building now" = pockets whose window ended within last ~2 weeks of 1H bars.
-//
-// ✅ NEW (LOCKED BY YOU):
-// - You may manually edit sticky registry zones in smz-structures-registry.json.
-// - If a registry zone has locked:true OR rangeSource:"manual" OR manualRange:[hi,lo],
-//   it becomes AUTHORITATIVE and MUST NEVER be:
-//   - overwritten by live candidates
-//   - replaced by backfill
-//   - archived
-//   - removed by STICKY_MAX_WITHIN_BAND cap (locked zones are included first)
-//
-// Uses DEEP provider (jobs only), chart provider remains untouched.
+// services/core/jobs/updateSmzLevels.js
+// Engine 1 SMZ job (simple version)
+// - Runs smzEngine
+// - Post-merges adjacent pocket/micro bands (Option B)
+// - Updates sticky registry (manualRange wins)
+// - Writes smz-levels.json for frontend
 
 import fs from "fs";
 import path from "path";
@@ -32,59 +18,50 @@ const __dirname = path.dirname(__filename);
 const OUTFILE = path.resolve(__dirname, "../data/smz-levels.json");
 const STICKY_FILE = path.resolve(__dirname, "../data/smz-structures-registry.json");
 
-// ✅ Lookback days (LOCKED)
+// Lookbacks
 const DAYS_30M = 180;
 const DAYS_1H = 365;
 
-// ✅ Active pocket settings (LOCKED for now)
+// Sticky settings
+const STICKY_ROUND_STEP = 0.25;
+const STICKY_KEEP_WITHIN_BAND_PTS = 40; // +/- 40 pts from current price
+const STICKY_ARCHIVE_DAYS = 30;
+const STICKY_MAX_WITHIN_BAND = 12;
+
+const STICKY_CONFIRM_EXITS_REQUIRED = 2;
+const STICKY_EXIT_MIN_SEP_SEC = 3 * 86400;
+const STICKY_EXIT_MAX_STORE = 8;
+
+const STICKY_INCLUDE_MICRO_MIN_STRENGTH = 80;
+
+// One-time backfill
+const STICKY_BACKFILL_ONCE = true;
+const STICKY_BACKFILL_TOUCHES_MIN = 10;
+const STICKY_BACKFILL_BUCKET_STEP = 0.25;
+const STICKY_BACKFILL_BUCKET_SIZE = 1.0;
+const STICKY_BACKFILL_MAX_NEW = 30;
+
+// Active pockets (kept same intent)
 const POCKET_FIND_DAYS_1H = 180;
 const POCKET_WINDOW_PTS = 40;
 const POCKET_MAX_WIDTH_PTS = 4.0;
 const POCKET_MIN_BARS = 3;
 const POCKET_MAX_BARS = 12;
 const POCKET_MIN_ACCEPT_PCT = 0.65;
-
-// ✅ "building now" recency gate (~2 weeks of 1H bars)
 const POCKET_RECENT_END_BARS_1H = 70;
-
-// Pocket overlap reduction
 const POCKET_CLUSTER_OVERLAP = 0.55;
 const POCKET_CLUSTER_MID_PTS = 0.60;
 const POCKET_MAX_RETURN = 10;
 
-// Option C classification
 const STRUCT_LINK_NEAR_PTS = 1.0;
 
-// Sticky snapshot rules (overlay-only)
-const STICKY_ROUND_STEP = 0.25;
-const STICKY_KEEP_WITHIN_BAND_PTS = POCKET_WINDOW_PTS; // ±40
-const STICKY_ARCHIVE_DAYS = 30;
-const STICKY_MAX_WITHIN_BAND = 12;
+// Option B: merge adjacent pocket/micro
+const POCKET_MICRO_GAP_MERGE_PTS = 0.75;
 
-// ✅ Sticky confirmation: 2 distinct exits => permanent
-const STICKY_CONFIRM_EXITS_REQUIRED = 2;
-const STICKY_EXIT_MIN_SEP_SEC = 3 * 86400;
-const STICKY_EXIT_MAX_STORE = 8;
+// ---------------- tiny helpers ----------------
 
-// ✅ Sticky candidates include major micro (so we don’t “lose” important zones)
-const STICKY_INCLUDE_MICRO_MIN_STRENGTH = 80;
-
-// ✅ One-time backfill
-const STICKY_BACKFILL_ONCE = true;
-const STICKY_BACKFILL_TOUCHES_MIN = 10;
-const STICKY_BACKFILL_BUCKET_STEP = 0.25;
-const STICKY_BACKFILL_BUCKET_SIZE = 1.0; // SPY-safe bucket size
-const STICKY_BACKFILL_MAX_NEW = 30;
-
-// ---------------- Helpers ----------------
-
-function isoNow() {
-  return new Date().toISOString();
-}
-
-function round2(x) {
-  return Math.round(Number(x) * 100) / 100;
-}
+const isoNow = () => new Date().toISOString();
+const round2 = (x) => Math.round(Number(x) * 100) / 100;
 
 function normalizeBars(raw) {
   if (!Array.isArray(raw)) return [];
@@ -101,14 +78,7 @@ function normalizeBars(raw) {
         volume: Number(b.v ?? b.volume ?? 0),
       };
     })
-    .filter(
-      (b) =>
-        Number.isFinite(b.time) &&
-        Number.isFinite(b.open) &&
-        Number.isFinite(b.high) &&
-        Number.isFinite(b.low) &&
-        Number.isFinite(b.close)
-    )
+    .filter((b) => Number.isFinite(b.time) && Number.isFinite(b.high) && Number.isFinite(b.low) && Number.isFinite(b.close))
     .sort((a, b) => a.time - b.time);
 }
 
@@ -121,14 +91,7 @@ function aggregateTo4h(bars1h) {
     const block = Math.floor(b.time / (4 * 3600)) * (4 * 3600);
     if (!cur || cur.time !== block) {
       if (cur) out.push(cur);
-      cur = {
-        time: block,
-        open: b.open,
-        high: b.high,
-        low: b.low,
-        close: b.close,
-        volume: b.volume ?? 0,
-      };
+      cur = { time: block, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? 0 };
     } else {
       cur.high = Math.max(cur.high, b.high);
       cur.low = Math.min(cur.low, b.low);
@@ -140,201 +103,92 @@ function aggregateTo4h(bars1h) {
   return out;
 }
 
-function maxHigh(bars) {
-  if (!Array.isArray(bars) || !bars.length) return null;
-  let m = -Infinity;
-  for (const b of bars) if (Number.isFinite(b.high)) m = Math.max(m, b.high);
-  return m === -Infinity ? null : Number(m.toFixed(2));
-}
-
-function spanInfo(label, bars) {
-  if (!Array.isArray(bars) || bars.length === 0) {
-    console.log(`[SMZ] COVERAGE ${label}: none`);
-    return;
-  }
-  const first = bars[0].time;
-  const last = bars[bars.length - 1].time;
-  const days = (last - first) / 86400;
-
-  console.log(
-    `[SMZ] COVERAGE ${label}:`,
-    "bars =", bars.length,
-    "| from =", new Date(first * 1000).toISOString(),
-    "| to =", new Date(last * 1000).toISOString(),
-    "| spanDays =", days.toFixed(1)
-  );
-}
-
 function snapStep(x, step) {
   const n = Number(x);
   if (!Number.isFinite(n)) return null;
   return Math.round(n / step) * step;
 }
 
-function median(values) {
-  const arr = (values || [])
-    .filter((x) => Number.isFinite(x))
-    .slice()
-    .sort((a, b) => a - b);
-  if (!arr.length) return null;
-  const mid = Math.floor(arr.length / 2);
-  return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
-}
+// ---------------- Option B: merge pocket/micro ----------------
 
-function closeAcceptancePct(bars, lo, hi) {
-  let n = 0, inside = 0;
-  for (const b of bars) {
-    if (!b || !Number.isFinite(b.close)) continue;
-    n++;
-    if (b.close >= lo && b.close <= hi) inside++;
+function mergeAdjacentPocketMicro(levels) {
+  if (!Array.isArray(levels) || levels.length < 2) return levels || [];
+
+  const isMergeTier = (t) => t === "pocket" || t === "micro";
+
+  const mergeable = [];
+  const others = [];
+
+  for (const z of levels) {
+    const tier = z?.tier ?? "";
+    const pr = z?.priceRange;
+    if (isMergeTier(tier) && Array.isArray(pr) && pr.length === 2) mergeable.push(z);
+    else others.push(z);
   }
-  return n ? inside / n : 0;
-}
+  if (mergeable.length < 2) return levels;
 
-function barOutsideSide(bar, lo, hi) {
-  if (!bar || !Number.isFinite(bar.high) || !Number.isFinite(bar.low)) return null;
-  if (bar.low > hi) return "above";
-  if (bar.high < lo) return "below";
-  return null;
-}
+  const norm = mergeable
+    .map((z) => {
+      const hi = Number(z.priceRange[0]);
+      const lo = Number(z.priceRange[1]);
+      if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
+      return { z, hi: Math.max(hi, lo), lo: Math.min(hi, lo) };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.lo - b.lo);
 
-function exitConfirmedAfterIndex(bars, lo, hi, endIdx, consec = 2) {
-  let side = null;
-  let count = 0;
+  const getStrength = (z) => Number(z?.strengthTotal ?? z?.strength ?? 0) || 0;
 
-  for (let i = endIdx + 1; i < bars.length && count < consec; i++) {
-    const s = barOutsideSide(bars[i], lo, hi);
-    if (!s) break;
-    if (!side) side = s;
-    if (s !== side) break;
-    count++;
+  const groups = [];
+  let cur = null;
+
+  for (const item of norm) {
+    if (!cur) {
+      cur = { hi: item.hi, lo: item.lo, members: [item.z] };
+      continue;
+    }
+    const gap = item.lo - cur.hi;
+    const touches = item.lo <= cur.hi;
+    const gapSmall = gap > 0 && gap <= POCKET_MICRO_GAP_MERGE_PTS;
+
+    if (touches || gapSmall) {
+      cur.hi = Math.max(cur.hi, item.hi);
+      cur.lo = Math.min(cur.lo, item.lo);
+      cur.members.push(item.z);
+    } else {
+      groups.push(cur);
+      cur = { hi: item.hi, lo: item.lo, members: [item.z] };
+    }
   }
+  if (cur) groups.push(cur);
 
-  return { confirmed: count >= consec, side, bars: count };
+  const merged = groups.map((g) => {
+    const best = g.members.slice().sort((a, b) => getStrength(b) - getStrength(a))[0];
+    const tier = g.members.some((x) => (x?.tier ?? "") === "pocket") ? "pocket" : "micro";
+    const ids = g.members.map((x) => x?.details?.id ?? null).filter(Boolean);
+
+    return {
+      ...best,
+      tier,
+      priceRange: [Number(g.hi.toFixed(2)), Number(g.lo.toFixed(2))],
+      details: {
+        ...(best.details || {}),
+        facts: { ...(best.details?.facts || {}), mergedFrom: ids, mergedCount: g.members.length, mergedGapPts: POCKET_MICRO_GAP_MERGE_PTS },
+      },
+    };
+  });
+
+  return [...others, ...merged];
 }
 
-// ✅ Touches include wicks (high/low overlap), not just bodies.
-function historyBoostScore(barsHist, lo, hi, mid) {
-  let touches = 0;
-  let midHits = 0;
-
-  for (const b of barsHist) {
-    if (!b || !Number.isFinite(b.high) || !Number.isFinite(b.low) || !Number.isFinite(b.close)) continue;
-
-    if (b.high >= lo && b.low <= hi) touches++;
-    if (Number.isFinite(mid) && Math.abs(b.close - mid) <= 0.25) midHits++;
-  }
-
-  const touchScore = Math.min(65, touches * 1.1);
-  const midScore = Math.min(35, midHits * 2.0);
-
-  return { touches, midHits, score: round2(touchScore + midScore) };
-}
-
-function overlapRatioRange(aHi, aLo, bHi, bLo) {
-  const lo = Math.max(aLo, bLo);
-  const hi = Math.min(aHi, bHi);
-  const inter = hi - lo;
-  if (inter <= 0) return 0;
-  const denom = Math.min(aHi - aLo, bHi - bLo);
-  return denom > 0 ? inter / denom : 0;
-}
-
-// --- Manual/locked sticky helpers (NEW) ---
-// Locked zones MUST NEVER be overwritten/backfilled/archived/capped-out.
-function isLockedSticky(s) {
-  return !!(
-    s &&
-    (s.locked === true ||
-      s.rangeSource === "manual" ||
-      (Array.isArray(s.manualRange) && s.manualRange.length === 2))
-  );
-}
-
-function hiLoFromAnyRange(obj) {
-  const pr =
-    Array.isArray(obj?.manualRange) && obj.manualRange.length === 2
-      ? obj.manualRange
-      : obj?.priceRange;
-
-  if (!Array.isArray(pr) || pr.length < 2) return null;
-
-  let hi = Number(pr[0]);
-  let lo = Number(pr[1]);
-  if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
-  if (lo > hi) [lo, hi] = [hi, lo];
-  if (!(hi > lo)) return null;
-
-  return { hi, lo, mid: (hi + lo) / 2 };
-}
-
-function overlapsHL(a, b, minOv = 0.10) {
-  if (!a || !b) return false;
-  const ov = overlapRatioRange(a.hi, a.lo, b.hi, b.lo);
-  if (ov >= minOv) return true;
-
-  // containment counts as overlap
-  if (a.hi <= b.hi && a.lo >= b.lo) return true;
-  if (b.hi <= a.hi && b.lo >= a.lo) return true;
-
-  return false;
-}
-
-function overlapsAnyLocked(rangeObj, lockedList) {
-  const r = hiLoFromAnyRange(rangeObj);
-  if (!r) return false;
-
-  for (const s of lockedList || []) {
-    const sr = hiLoFromAnyRange(s);
-    if (!sr) continue;
-    if (overlapsHL(r, sr, 0.10)) return true;
-  }
-  return false;
-}
-
-function isStructureLinked(pocket, liveStructures) {
-  const pr = pocket?.priceRange;
-  if (!Array.isArray(pr) || pr.length < 2) return false;
-  const pHi = Number(pr[0]);
-  const pLo = Number(pr[1]);
-  const pMid = Number.isFinite(pocket?.negotiationMid)
-    ? pocket.negotiationMid
-    : (pHi + pLo) / 2;
-
-  for (const s of liveStructures || []) {
-    const sr = s?.priceRange;
-    if (!Array.isArray(sr) || sr.length < 2) continue;
-    const sHi = Number(sr[0]);
-    const sLo = Number(sr[1]);
-    const sMid = (sHi + sLo) / 2;
-
-    const ov = overlapRatioRange(pHi, pLo, sHi, sLo);
-    if (ov >= 0.15) return true;
-
-    const near =
-      Math.abs(pMid - sMid) <= STRUCT_LINK_NEAR_PTS ||
-      Math.abs(pMid - sHi) <= STRUCT_LINK_NEAR_PTS ||
-      Math.abs(pMid - sLo) <= STRUCT_LINK_NEAR_PTS;
-
-    if (near) return true;
-  }
-  return false;
-}
-
-// ---------------- Sticky snapshot store (overlay-only) ----------------
+// ---------------- Sticky store ----------------
 
 function loadSticky() {
   try {
-    if (!fs.existsSync(STICKY_FILE)) {
-      return { ok: true, meta: { created_at_utc: isoNow() }, structures: [] };
-    }
+    if (!fs.existsSync(STICKY_FILE)) return { ok: true, meta: { created_at_utc: isoNow() }, structures: [] };
     const raw = fs.readFileSync(STICKY_FILE, "utf8");
     const json = JSON.parse(raw);
-    return {
-      ok: true,
-      meta: json?.meta ?? { created_at_utc: isoNow() },
-      structures: Array.isArray(json?.structures) ? json.structures : [],
-    };
+    return { ok: true, meta: json?.meta ?? { created_at_utc: isoNow() }, structures: Array.isArray(json?.structures) ? json.structures : [] };
   } catch {
     return { ok: true, meta: { created_at_utc: isoNow(), recovered: true }, structures: [] };
   }
@@ -351,26 +205,50 @@ function structureKeyFromRange(hi, lo) {
   return `SPY|mixed|hi=${qHi?.toFixed(2)}|lo=${qLo?.toFixed(2)}`;
 }
 
+function isLockedSticky(s) {
+  return !!(
+    s &&
+    (s.locked === true ||
+      s.rangeSource === "manual" ||
+      (Array.isArray(s.manualRange) && s.manualRange.length === 2))
+  );
+}
+
+function barOverlapsRange(b, lo, hi) {
+  return b && Number.isFinite(b.high) && Number.isFinite(b.low) && b.high >= lo && b.low <= hi;
+}
+
+function exitConfirmedAfterIndex(bars, lo, hi, endIdx, consec = 2) {
+  const outside = (bar) => {
+    if (!bar || !Number.isFinite(bar.high) || !Number.isFinite(bar.low)) return null;
+    if (bar.low > hi) return "above";
+    if (bar.high < lo) return "below";
+    return null;
+  };
+
+  let side = null;
+  let count = 0;
+  for (let i = endIdx + 1; i < bars.length && count < consec; i++) {
+    const s = outside(bars[i]);
+    if (!s) break;
+    if (!side) side = s;
+    if (s !== side) break;
+    count++;
+  }
+  return { confirmed: count >= consec, side, bars: count };
+}
+
 function recordExitEvent(existing, facts, nowIso) {
   const exitBars = Number(facts?.exitBars1h ?? 0);
   const exitSide = facts?.exitSide1h ?? null;
   const anchorEndTime = Number(facts?.anchorEndTime ?? NaN);
 
-  if (!(exitBars >= 2 && (exitSide === "above" || exitSide === "below") && Number.isFinite(anchorEndTime))) {
-    return;
-  }
+  if (!(exitBars >= 2 && (exitSide === "above" || exitSide === "below") && Number.isFinite(anchorEndTime))) return;
 
   existing.exits = Array.isArray(existing.exits) ? existing.exits : [];
-
   if (existing.exits.some((e) => Number(e?.anchorEndTime) === anchorEndTime)) return;
 
-  existing.exits.push({
-    side: exitSide,
-    exitBars,
-    anchorEndTime,
-    recordedUtc: nowIso,
-  });
-
+  existing.exits.push({ side: exitSide, exitBars, anchorEndTime, recordedUtc: nowIso });
   existing.exits.sort((a, b) => Number(b.anchorEndTime) - Number(a.anchorEndTime));
   existing.exits = existing.exits.slice(0, STICKY_EXIT_MAX_STORE);
 }
@@ -381,11 +259,10 @@ function countDistinctExitEvents(exits) {
     .slice()
     .sort((a, b) => Number(a.anchorEndTime) - Number(b.anchorEndTime));
 
-  if (arr.length === 0) return 0;
+  if (!arr.length) return 0;
 
   let count = 1;
   let lastT = Number(arr[0].anchorEndTime);
-
   for (let i = 1; i < arr.length; i++) {
     const t = Number(arr[i].anchorEndTime);
     if (!Number.isFinite(t)) continue;
@@ -397,222 +274,142 @@ function countDistinctExitEvents(exits) {
   return count;
 }
 
-// ---- Backfill helpers ----
+// One-time backfill (simple)
+function runStickyBackfillOnce(store, bars1h) {
+  const meta = store.meta ?? {};
+  if (meta.backfill_done_utc) return store;
 
-function barOverlapsRange(b, lo, hi) {
-  return b && Number.isFinite(b.high) && Number.isFinite(b.low) && b.high >= lo && b.low <= hi;
-}
+  console.log("[SMZ][BACKFILL] Running one-time sticky backfill…");
 
-function countTouches(bars, lo, hi) {
-  let t = 0;
-  for (const b of bars || []) if (barOverlapsRange(b, lo, hi)) t++;
-  return t;
-}
-
-function findDistinctExitEventsForRange(bars1h, lo, hi, minSepSec) {
-  const events = [];
-
-  for (let i = 0; i < bars1h.length - 3; i++) {
-    if (!barOverlapsRange(bars1h[i], lo, hi)) continue;
-
-    let lastTouch = i;
-    while (lastTouch + 1 < bars1h.length && barOverlapsRange(bars1h[lastTouch + 1], lo, hi)) {
-      lastTouch++;
-    }
-
-    const e = exitConfirmedAfterIndex(bars1h, lo, hi, lastTouch, 2);
-    if (!e.confirmed) {
-      i = lastTouch;
-      continue;
-    }
-
-    const anchorEndTime = bars1h[lastTouch]?.time;
-    if (!Number.isFinite(anchorEndTime)) {
-      i = lastTouch;
-      continue;
-    }
-
-    events.push({
-      side: e.side,
-      exitBars: e.bars,
-      anchorEndTime,
-    });
-
-    i = lastTouch;
-  }
-
-  events.sort((a, b) => a.anchorEndTime - b.anchorEndTime);
-  const distinct = [];
-  for (const ev of events) {
-    if (!distinct.length) {
-      distinct.push(ev);
-      continue;
-    }
-    const prev = distinct[distinct.length - 1];
-    if (ev.anchorEndTime - prev.anchorEndTime >= minSepSec) distinct.push(ev);
-  }
-  return distinct;
-}
-
-function makeBackfillBands(bars1h) {
   let loAll = Infinity, hiAll = -Infinity;
   for (const b of bars1h || []) {
     if (!b || !Number.isFinite(b.low) || !Number.isFinite(b.high)) continue;
     loAll = Math.min(loAll, b.low);
     hiAll = Math.max(hiAll, b.high);
   }
-  if (!Number.isFinite(loAll) || !Number.isFinite(hiAll) || hiAll <= loAll) return [];
+  if (!Number.isFinite(loAll) || !Number.isFinite(hiAll) || hiAll <= loAll) return store;
 
   const start = Math.floor(loAll / STICKY_BACKFILL_BUCKET_STEP) * STICKY_BACKFILL_BUCKET_STEP;
   const end = Math.ceil(hiAll / STICKY_BACKFILL_BUCKET_STEP) * STICKY_BACKFILL_BUCKET_STEP;
 
-  const bands = [];
+  const candidates = [];
   for (let lo = start; lo < end; lo += STICKY_BACKFILL_BUCKET_SIZE) {
     const hi = lo + STICKY_BACKFILL_BUCKET_SIZE;
-    bands.push({ lo: round2(lo), hi: round2(hi) });
-  }
-  return bands;
-}
 
-function addConfirmedSticky(store, hi, lo, maxStrengthSeen, exits) {
-  const key = structureKeyFromRange(hi, lo);
-  const nowIso = isoNow();
-
-  const existing = (store.structures || []).find((s) => s.structureKey === key);
-  if (existing) {
-    existing.lastSeenUtc = nowIso;
-    existing.status = "active";
-    existing.maxStrengthSeen = Math.max(Number(existing.maxStrengthSeen ?? 0), Number(maxStrengthSeen ?? 0));
-    existing.stickyConfirmed = true;
-    existing.confirmedUtc = existing.confirmedUtc ?? nowIso;
-    existing.exits = Array.isArray(existing.exits) ? existing.exits : [];
-    for (const e of exits || []) {
-      if (!existing.exits.some((x) => Number(x.anchorEndTime) === Number(e.anchorEndTime))) {
-        existing.exits.push({ ...e, recordedUtc: nowIso });
-      }
-    }
-    existing.distinctExitCount = Math.max(existing.distinctExitCount ?? 0, exits?.length ?? 0);
-    existing.backfilled = existing.backfilled || true;
-    return;
-  }
-
-  store.structures.push({
-    structureKey: key,
-    priceRange: [round2(hi), round2(lo)],
-    firstSeenUtc: nowIso,
-    lastSeenUtc: nowIso,
-    timesSeen: 1,
-    maxStrengthSeen: Number(maxStrengthSeen ?? 0),
-    status: "active",
-    stickyConfirmed: true,
-    confirmedUtc: nowIso,
-    exits: (exits || []).map((e) => ({ ...e, recordedUtc: nowIso })),
-    distinctExitCount: exits?.length ?? 0,
-    backfilled: true,
-  });
-}
-
-function runStickyBackfillOnce(store, bars1h) {
-  const meta = store.meta ?? {};
-  if (meta.backfill_done_utc) return store; // already done
-
-  console.log("[SMZ][BACKFILL] Running one-time sticky backfill…");
-
-  const locked = (store.structures || []).filter(isLockedSticky);
-
-  const bands = makeBackfillBands(bars1h);
-  const candidates = [];
-
-  for (const band of bands) {
-    const lo = band.lo;
-    const hi = band.hi;
-
-    // ✅ Never backfill over a manually locked zone
-    if (overlapsAnyLocked({ priceRange: [hi, lo] }, locked)) continue;
-
-    const touches = countTouches(bars1h, lo, hi);
+    let touches = 0;
+    for (const b of bars1h) if (barOverlapsRange(b, lo, hi)) touches++;
     if (touches < STICKY_BACKFILL_TOUCHES_MIN) continue;
 
-    const exits = findDistinctExitEventsForRange(bars1h, lo, hi, STICKY_EXIT_MIN_SEP_SEC);
-    if (exits.length < STICKY_CONFIRM_EXITS_REQUIRED) continue;
+    const exits = [];
+    for (let i = 0; i < bars1h.length - 3; i++) {
+      if (!barOverlapsRange(bars1h[i], lo, hi)) continue;
 
-    // Simple strength proxy: touches + exits
-    const strength = Math.min(100, touches * 1.5 + exits.length * 15);
+      let lastTouch = i;
+      while (lastTouch + 1 < bars1h.length && barOverlapsRange(bars1h[lastTouch + 1], lo, hi)) lastTouch++;
 
-    candidates.push({ lo, hi, touches, exits, strength });
+      const e = exitConfirmedAfterIndex(bars1h, lo, hi, lastTouch, 2);
+      if (!e.confirmed) { i = lastTouch; continue; }
+
+      const anchorEndTime = bars1h[lastTouch]?.time;
+      if (!Number.isFinite(anchorEndTime)) { i = lastTouch; continue; }
+
+      exits.push({ side: e.side, exitBars: e.bars, anchorEndTime });
+      i = lastTouch;
+    }
+
+    // distinct exits by min sep
+    exits.sort((a, b) => a.anchorEndTime - b.anchorEndTime);
+    const distinct = [];
+    for (const ev of exits) {
+      if (!distinct.length) distinct.push(ev);
+      else if (ev.anchorEndTime - distinct[distinct.length - 1].anchorEndTime >= STICKY_EXIT_MIN_SEP_SEC) distinct.push(ev);
+    }
+
+    if (distinct.length < STICKY_CONFIRM_EXITS_REQUIRED) continue;
+
+    const strength = Math.min(100, touches * 1.5 + distinct.length * 15);
+    candidates.push({ lo: round2(lo), hi: round2(hi), strength, exits: distinct });
   }
 
   candidates.sort((a, b) => b.strength - a.strength);
   const top = candidates.slice(0, STICKY_BACKFILL_MAX_NEW);
 
+  const nowIso = isoNow();
+  store.structures = Array.isArray(store.structures) ? store.structures : [];
+
   for (const c of top) {
-    addConfirmedSticky(store, c.hi, c.lo, c.strength, c.exits);
+    const key = structureKeyFromRange(c.hi, c.lo);
+    if (store.structures.some((s) => s.structureKey === key)) continue;
+
+    store.structures.push({
+      structureKey: key,
+      priceRange: [c.hi, c.lo],
+      firstSeenUtc: nowIso,
+      lastSeenUtc: nowIso,
+      timesSeen: 1,
+      maxStrengthSeen: c.strength,
+      status: "active",
+      stickyConfirmed: true,
+      confirmedUtc: nowIso,
+      exits: (c.exits || []).map((e) => ({ ...e, recordedUtc: nowIso })),
+      distinctExitCount: c.exits?.length ?? 0,
+      backfilled: true,
+    });
   }
 
-  store.meta = {
-    ...(store.meta ?? {}),
-    backfill_done_utc: isoNow(),
-    backfill_added: top.length,
-    backfill_params: {
-      touches_min: STICKY_BACKFILL_TOUCHES_MIN,
-      bucket_size: STICKY_BACKFILL_BUCKET_SIZE,
-      exit_min_sep_sec: STICKY_EXIT_MIN_SEP_SEC,
-      exits_required: STICKY_CONFIRM_EXITS_REQUIRED,
-      max_new: STICKY_BACKFILL_MAX_NEW,
-    },
-  };
-
+  store.meta = { ...(store.meta ?? {}), backfill_done_utc: nowIso, backfill_added: top.length };
   console.log("[SMZ][BACKFILL] Added confirmed sticky zones:", top.length);
   return store;
 }
 
-function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfill) {
+function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll) {
   let store = loadSticky();
 
-  // ✅ ONE-TIME backfill
-  if (STICKY_BACKFILL_ONCE && Array.isArray(bars1hAllForBackfill) && bars1hAllForBackfill.length > 100) {
-    store = runStickyBackfillOnce(store, bars1hAllForBackfill);
+  if (STICKY_BACKFILL_ONCE && Array.isArray(bars1hAll) && bars1hAll.length > 100) {
+    store = runStickyBackfillOnce(store, bars1hAll);
   }
 
   const list = store.structures.slice();
   const nowIso = isoNow();
 
-  // ✅ Locked/manual zones are authoritative + immutable
   const locked = list.filter(isLockedSticky);
 
   const byKey = new Map();
   for (const s of list) if (s?.structureKey) byKey.set(s.structureKey, s);
 
-  // Update sticky from candidates (structures + major micro)
+  // Update/create from candidates, but never overwrite locked/manual zones
   for (const z of stickyCandidates || []) {
     const pr = z?.priceRange;
-    if (!Array.isArray(pr) || pr.length < 2) continue;
+    if (!Array.isArray(pr) || pr.length !== 2) continue;
 
-    const hi = Number(pr[0]);
-    const lo = Number(pr[1]);
+    const hi = Number(pr[0]), lo = Number(pr[1]);
     if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi <= lo) continue;
 
-    // ✅ If live candidate overlaps a locked/manual sticky zone, ignore it.
-    if (overlapsAnyLocked({ priceRange: [hi, lo] }, locked)) continue;
+    // If overlaps any locked manual zone, ignore candidate
+    const overlapsLocked = locked.some((s) => {
+      const r = Array.isArray(s.manualRange) ? s.manualRange : s.priceRange;
+      if (!Array.isArray(r) || r.length !== 2) return false;
+      const sHi = Math.max(Number(r[0]), Number(r[1]));
+      const sLo = Math.min(Number(r[0]), Number(r[1]));
+      return !(hi < sLo || lo > sHi);
+    });
+    if (overlapsLocked) continue;
 
     const key = structureKeyFromRange(hi, lo);
     const existing = byKey.get(key);
 
     if (existing) {
-      // If existing is locked, we still allow stats to update (timesSeen/maxStrength/exits),
-      // but NEVER rewrite its ranges or allow it to archive/cap out.
       existing.lastSeenUtc = nowIso;
       existing.timesSeen = Number(existing.timesSeen ?? 0) + 1;
       existing.maxStrengthSeen = Math.max(Number(existing.maxStrengthSeen ?? 0), Number(z.strength ?? 0));
       existing.status = "active";
-      existing.priceRange = existing.priceRange ?? [round2(hi), round2(lo)];
 
       const facts = z?.details?.facts ?? {};
       recordExitEvent(existing, facts, nowIso);
 
-      const distinctExits = countDistinctExitEvents(existing.exits);
-      existing.distinctExitCount = distinctExits;
-      if (!existing.stickyConfirmed && distinctExits >= STICKY_CONFIRM_EXITS_REQUIRED) {
+      const distinct = countDistinctExitEvents(existing.exits);
+      existing.distinctExitCount = distinct;
+      if (!existing.stickyConfirmed && distinct >= STICKY_CONFIRM_EXITS_REQUIRED) {
         existing.stickyConfirmed = true;
         existing.confirmedUtc = nowIso;
       }
@@ -634,9 +431,9 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
       const facts = z?.details?.facts ?? {};
       recordExitEvent(entry, facts, nowIso);
 
-      const distinctExits = countDistinctExitEvents(entry.exits);
-      entry.distinctExitCount = distinctExits;
-      if (distinctExits >= STICKY_CONFIRM_EXITS_REQUIRED) {
+      const distinct = countDistinctExitEvents(entry.exits);
+      entry.distinctExitCount = distinct;
+      if (distinct >= STICKY_CONFIRM_EXITS_REQUIRED) {
         entry.stickyConfirmed = true;
         entry.confirmedUtc = nowIso;
       }
@@ -646,7 +443,7 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
     }
   }
 
-  // Archive if not seen for N days AND outside ±band (unless confirmed OR locked/manual)
+  // Archive autos (never archive locked/manual, never archive confirmed)
   const bandLo = currentPrice - STICKY_KEEP_WITHIN_BAND_PTS;
   const bandHi = currentPrice + STICKY_KEEP_WITHIN_BAND_PTS;
   const cutoffMs = Date.now() - STICKY_ARCHIVE_DAYS * 24 * 3600 * 1000;
@@ -654,21 +451,13 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
   for (const s of list) {
     if (!s || s.status === "archived") continue;
 
-    // ✅ locked/manual zones never archive
-    if (isLockedSticky(s)) {
-      s.status = "active";
-      continue;
-    }
-
-    // ✅ confirmed zones never archive
+    if (isLockedSticky(s)) { s.status = "active"; continue; }
     if (s.stickyConfirmed) continue;
 
     const pr = s.priceRange;
-    if (!Array.isArray(pr) || pr.length < 2) continue;
+    if (!Array.isArray(pr) || pr.length !== 2) continue;
 
-    const hi = Number(pr[0]);
-    const lo = Number(pr[1]);
-
+    const hi = Number(pr[0]), lo = Number(pr[1]);
     const lastSeenMs = Date.parse(s.lastSeenUtc || "");
     const old = Number.isFinite(lastSeenMs) ? lastSeenMs < cutoffMs : false;
     const inBand = hi >= bandLo && lo <= bandHi;
@@ -679,15 +468,15 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
     }
   }
 
-  // ✅ Build within-band list:
-  // - locked/manual zones always included first (if in band)
-  // - then autos by score up to remaining cap
+  // Within band list: locked first, then top autos
   const activeInBand = list
     .filter((s) => s?.status === "active")
     .filter((s) => {
-      const r = hiLoFromAnyRange(s);
-      if (!r) return false;
-      return r.hi >= bandLo && r.lo <= bandHi;
+      const r = Array.isArray(s.manualRange) && s.manualRange.length === 2 ? s.manualRange : s.priceRange;
+      if (!Array.isArray(r) || r.length !== 2) return false;
+      const hi = Math.max(Number(r[0]), Number(r[1]));
+      const lo = Math.min(Number(r[0]), Number(r[1]));
+      return hi >= bandLo && lo <= bandHi;
     });
 
   const lockedInBand = activeInBand.filter(isLockedSticky);
@@ -695,67 +484,40 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAllForBackfi
   const autosInBand = activeInBand
     .filter((s) => !isLockedSticky(s))
     .sort((a, b) => {
-      const ca = a.stickyConfirmed ? 1 : 0;
-      const cb = b.stickyConfirmed ? 1 : 0;
-      if (cb !== ca) return cb - ca;
-
-      const sa = Number(a.maxStrengthSeen ?? 0);
-      const sb = Number(b.maxStrengthSeen ?? 0);
-      if (sb !== sa) return sb - sa;
-
-      const ta = Number(a.timesSeen ?? 0);
-      const tb = Number(b.timesSeen ?? 0);
-      if (tb !== ta) return tb - ta;
-
-      return Date.parse(b.lastSeenUtc || "1970-01-01") - Date.parse(a.lastSeenUtc || "1970-01-01");
+      const sa = Number(b.maxStrengthSeen ?? 0) - Number(a.maxStrengthSeen ?? 0);
+      if (sa !== 0) return sa;
+      return Number(b.timesSeen ?? 0) - Number(a.timesSeen ?? 0);
     });
 
   const remaining = Math.max(0, STICKY_MAX_WITHIN_BAND - lockedInBand.length);
   const withinBand = [...lockedInBand, ...autosInBand.slice(0, remaining)];
 
-  const newStore = {
-    ok: true,
-    meta: { ...(store.meta ?? {}), updated_at_utc: nowIso },
-    structures: list,
-  };
+  const newStore = { ok: true, meta: { ...(store.meta ?? {}), updated_at_utc: nowIso }, structures: list };
   saveSticky(newStore);
 
+  // Emit sticky zones using manualRange when present (this is what chart uses)
   return withinBand.map((s) => ({
     type: "institutional",
     tier: "structure_sticky",
-    priceRange:
-      (Array.isArray(s.manualRange) && s.manualRange.length === 2)
-        ? s.manualRange
-        : s.priceRange,
+    priceRange: (Array.isArray(s.manualRange) && s.manualRange.length === 2) ? s.manualRange : s.priceRange,
     strength: round2(Number(s.maxStrengthSeen ?? 0)),
-    details: {
-      id: s.structureKey,
-      facts: {
-        sticky: {
-          structureKey: s.structureKey,
-          firstSeenUtc: s.firstSeenUtc,
-          lastSeenUtc: s.lastSeenUtc,
-          timesSeen: s.timesSeen,
-          maxStrengthSeen: s.maxStrengthSeen,
-          status: s.status,
-          stickyConfirmed: !!s.stickyConfirmed,
-          confirmedUtc: s.confirmedUtc ?? null,
-          distinctExitCount: Number(s.distinctExitCount ?? 0),
-          exits: Array.isArray(s.exits) ? s.exits : [],
-          backfilled: !!s.backfilled,
-
-          // helpful debug fields (safe)
-          locked: !!s.locked,
-          rangeSource: s.rangeSource ?? null,
-          manualRange:
-            (Array.isArray(s.manualRange) && s.manualRange.length === 2) ? s.manualRange : null,
-        },
-      },
-    },
+    details: { id: s.structureKey, facts: { sticky: s } },
   }));
 }
 
-// ---------------- Active pockets (clustered + RECENT only) ----------------
+// ---------------- Active pockets (unchanged behavior) ----------------
+
+function historyBoostScore(barsHist, lo, hi, mid) {
+  let touches = 0, midHits = 0;
+  for (const b of barsHist) {
+    if (!b || !Number.isFinite(b.high) || !Number.isFinite(b.low) || !Number.isFinite(b.close)) continue;
+    if (b.high >= lo && b.low <= hi) touches++;
+    if (Number.isFinite(mid) && Math.abs(b.close - mid) <= 0.25) midHits++;
+  }
+  const touchScore = Math.min(65, touches * 1.1);
+  const midScore = Math.min(35, midHits * 2.0);
+  return { touches, midHits, score: round2(touchScore + midScore) };
+}
 
 function computeActivePockets({ bars1hAll, currentPrice }) {
   const nowSec = bars1hAll.at(-1)?.time ?? Math.floor(Date.now() / 1000);
@@ -815,9 +577,7 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
       const h = historyBoostScore(bars1hAll, lo, hi, mid);
       const strengthHistory = h.score;
 
-      const strengthTotal = round2(
-        Math.min(100, strengthNow * 0.55 + relevanceScore * 0.30 + strengthHistory * 0.15)
-      );
+      const strengthTotal = round2(Math.min(100, strengthNow * 0.55 + relevanceScore * 0.30 + strengthHistory * 0.15));
 
       pockets.push({
         type: "institutional",
@@ -832,23 +592,19 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
         relevanceScore,
         strengthHistory,
         strengthTotal,
-        history: { touches: h.touches, midHits: h.midHits },
-        window: {
-          startTime: win[0]?.time ?? null,
-          endTime: win[win.length - 1]?.time ?? null,
-        },
+        window: { startTime: win[0]?.time ?? null, endTime: win[win.length - 1]?.time ?? null },
       });
     }
   }
 
   pockets.sort((a, b) => (b.strengthTotal ?? 0) - (a.strengthTotal ?? 0));
 
+  // Cluster
   const clusters = [];
   const getHL = (p) => {
     const pr = p?.priceRange;
     if (!Array.isArray(pr) || pr.length < 2) return null;
-    let hi = Number(pr[0]);
-    let lo = Number(pr[1]);
+    let hi = Number(pr[0]), lo = Number(pr[1]);
     if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
     if (lo > hi) [lo, hi] = [hi, lo];
     return { hi, lo, mid: Number(p.negotiationMid) };
@@ -863,17 +619,17 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
       const rr = getHL(c.rep);
       if (!rr) continue;
 
-      const ov = overlapRatioRange(r.hi, r.lo, rr.hi, rr.lo);
+      const interLo = Math.max(r.lo, rr.lo);
+      const interHi = Math.min(r.hi, rr.hi);
+      const inter = interHi - interLo;
+      const denom = Math.min(r.hi - r.lo, rr.hi - rr.lo);
+      const ov = inter > 0 && denom > 0 ? inter / denom : 0;
+
       const midDist = Math.abs(r.mid - rr.mid);
 
       if (ov >= POCKET_CLUSTER_OVERLAP || midDist <= POCKET_CLUSTER_MID_PTS) {
         c.members.push(p);
-
-        const rep = c.rep;
-        const repScore = (rep.strengthTotal ?? 0) * 1.0 + (rep.relevanceScore ?? 0) * 0.2;
-        const pScore = (p.strengthTotal ?? 0) * 1.0 + (p.relevanceScore ?? 0) * 0.2;
-        if (pScore > repScore) c.rep = p;
-
+        if ((p.strengthTotal ?? 0) > (c.rep.strengthTotal ?? 0)) c.rep = p;
         placed = true;
         break;
       }
@@ -881,23 +637,42 @@ function computeActivePockets({ bars1hAll, currentPrice }) {
     if (!placed) clusters.push({ rep: p, members: [p] });
   }
 
-  return clusters
-    .map((c) => ({ ...c.rep, cluster: { size: c.members.length } }))
-    .sort((a, b) => {
-      const ra = a.relevanceScore ?? 0;
-      const rb = b.relevanceScore ?? 0;
-      if (rb !== ra) return rb - ra;
-      return (b.strengthTotal ?? 0) - (a.strengthTotal ?? 0);
-    })
-    .slice(0, POCKET_MAX_RETURN);
+  return clusters.map((c) => c.rep).slice(0, POCKET_MAX_RETURN);
 }
 
-// ---------------- Main ----------------
+function isStructureLinked(pocket, liveStructures) {
+  const pr = pocket?.priceRange;
+  if (!Array.isArray(pr) || pr.length < 2) return false;
+  const pHi = Number(pr[0]);
+  const pLo = Number(pr[1]);
+  const pMid = Number.isFinite(pocket?.negotiationMid) ? pocket.negotiationMid : (pHi + pLo) / 2;
+
+  for (const s of liveStructures || []) {
+    const sr = s?.priceRange;
+    if (!Array.isArray(sr) || sr.length < 2) continue;
+    const sHi = Number(sr[0]);
+    const sLo = Number(sr[1]);
+    const sMid = (sHi + sLo) / 2;
+
+    const near =
+      Math.abs(pMid - sMid) <= STRUCT_LINK_NEAR_PTS ||
+      Math.abs(pMid - sHi) <= STRUCT_LINK_NEAR_PTS ||
+      Math.abs(pMid - sLo) <= STRUCT_LINK_NEAR_PTS;
+
+    if (near) return true;
+
+    const interLo = Math.max(pLo, sLo);
+    const interHi = Math.min(pHi, sHi);
+    if (interHi > interLo) return true;
+  }
+  return false;
+}
+
+// ---------------- main ----------------
 
 async function main() {
   try {
-    console.log("[SMZ] Fetching multi-TF bars (DEEP)…");
-
+    console.log("[SMZ] Fetching bars (DEEP)...");
     const [bars30mRaw, bars1hRaw] = await Promise.all([
       getBarsFromPolygonDeep("SPY", "30m", DAYS_30M),
       getBarsFromPolygonDeep("SPY", "1h", DAYS_1H),
@@ -907,35 +682,21 @@ async function main() {
     const bars1h = normalizeBars(bars1hRaw);
     const bars4h = aggregateTo4h(bars1h);
 
-    console.log("[SMZ] 30m bars:", bars30m.length);
-    console.log("[SMZ] 1h  bars:", bars1h.length);
-
-    spanInfo("30m", bars30m);
-    spanInfo("1h", bars1h);
-    spanInfo("4h(synth)", bars4h);
-
-    console.log(
-      "[SMZ] maxHigh 30m:",
-      maxHigh(bars30m),
-      "1h:",
-      maxHigh(bars1h),
-      "4h(synth):",
-      maxHigh(bars4h)
-    );
-
     const currentPrice = bars30m.at(-1)?.close ?? bars1h.at(-1)?.close ?? null;
-    if (!Number.isFinite(currentPrice)) throw new Error("Could not determine currentPrice from bars.");
-    console.log("[SMZ] currentPrice:", currentPrice);
+    if (!Number.isFinite(currentPrice)) throw new Error("Could not determine currentPrice.");
 
-    // ✅ Authoritative live output (Engine 1)
-    console.log("[SMZ] Running Institutional engine…");
-    const levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
-    console.log("[SMZ] Institutional levels generated:", levelsLive.length);
+    console.log("[SMZ] currentPrice:", round2(currentPrice));
 
-    // Live structures for linking/tags only
+    console.log("[SMZ] Running engine...");
+    let levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
+
+    // Option B merge (touching pocket/micro => 1)
+    levelsLive = mergeAdjacentPocketMicro(levelsLive);
+
+    console.log("[SMZ] levels generated:", levelsLive.length);
+
     const liveStructures = levelsLive.filter((z) => (z?.tier ?? "") === "structure");
 
-    // Sticky candidates include structures + strong micro
     const stickyCandidates = levelsLive.filter((z) => {
       const t = z?.tier ?? "";
       if (t === "structure") return true;
@@ -943,59 +704,22 @@ async function main() {
       return false;
     });
 
-    console.log("[SMZ] Updating sticky snapshot store…");
     const structuresSticky = updateStickyFromLive(stickyCandidates, currentPrice, bars1h);
-    console.log("[SMZ] structures_sticky (within band):", structuresSticky.length);
 
-    console.log("[SMZ] Computing active pockets (building)…");
     const pocketsActive = computeActivePockets({ bars1hAll: bars1h, currentPrice });
 
-    // Lane tagging uses LIVE STRUCTURES ONLY (not micro)
-    const pocketsTagged = pocketsActive.map((p) => {
+    const pocketsTagged = (pocketsActive || []).map((p) => {
       const linked = isStructureLinked(p, liveStructures);
       return { ...p, lane: linked ? "structure_linked" : "emerging", structureLinked: linked };
     });
 
-    const linkedCount = pocketsTagged.filter((p) => p.structureLinked).length;
-    console.log(
-      "[SMZ] Active pockets returned:",
-      pocketsTagged.length,
-      "| linked:",
-      linkedCount,
-      "| emerging:",
-      pocketsTagged.length - linkedCount
-    );
-
     const payload = {
       ok: true,
       meta: {
-        generated_at_utc: new Date().toISOString(),
-        lookback_days: { "30m": DAYS_30M, "1h": DAYS_1H, "4h(synth)": DAYS_1H },
+        generated_at_utc: isoNow(),
         current_price: round2(currentPrice),
-        sticky: {
-          file: path.basename(STICKY_FILE),
-          round_step: STICKY_ROUND_STEP,
-          band_pts: STICKY_KEEP_WITHIN_BAND_PTS,
-          within_band_cap: STICKY_MAX_WITHIN_BAND,
-          archive_days: STICKY_ARCHIVE_DAYS,
-          confirm_exits_required: STICKY_CONFIRM_EXITS_REQUIRED,
-          exit_min_sep_sec: STICKY_EXIT_MIN_SEP_SEC,
-          include_micro_min_strength: STICKY_INCLUDE_MICRO_MIN_STRENGTH,
-          backfill_once: STICKY_BACKFILL_ONCE,
-        },
-        pocket_settings: {
-          find_days_1h: POCKET_FIND_DAYS_1H,
-          window_points: POCKET_WINDOW_PTS,
-          max_width_pts: POCKET_MAX_WIDTH_PTS,
-          min_bars: POCKET_MIN_BARS,
-          max_bars: POCKET_MAX_BARS,
-          min_accept_pct: POCKET_MIN_ACCEPT_PCT,
-          recent_end_bars_1h: POCKET_RECENT_END_BARS_1H,
-          cluster_overlap: POCKET_CLUSTER_OVERLAP,
-          cluster_mid_pts: POCKET_CLUSTER_MID_PTS,
-          max_return: POCKET_MAX_RETURN,
-          structure_link_near_pts: STRUCT_LINK_NEAR_PTS,
-        },
+        lookback_days: { "30m": DAYS_30M, "1h": DAYS_1H },
+        pocket_micro_merge: { enabled: true, gap_merge_pts: POCKET_MICRO_GAP_MERGE_PTS },
       },
       levels: levelsLive,
       pockets_active: pocketsTagged,
@@ -1005,25 +729,15 @@ async function main() {
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
     fs.writeFileSync(OUTFILE, JSON.stringify(payload, null, 2), "utf8");
 
-    console.log("[SMZ] Saved institutional zones to:", OUTFILE);
+    console.log("[SMZ] Saved:", OUTFILE);
     console.log("[SMZ] Job complete.");
   } catch (err) {
     console.error("[SMZ] FAILED:", err);
 
-    try {
-      const fallback = {
-        ok: true,
-        levels: [],
-        pockets_active: [],
-        structures_sticky: [],
-        note: "SMZ institutional job error, no levels generated this run",
-      };
-      fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
-      fs.writeFileSync(OUTFILE, JSON.stringify(fallback, null, 2), "utf8");
-      console.log("[SMZ] Wrote fallback empty smz-levels.json");
-    } catch (inner) {
-      console.error("[SMZ] Also failed to write fallback smz-levels.json:", inner);
-    }
+    // write safe fallback
+    const fallback = { ok: true, levels: [], pockets_active: [], structures_sticky: [], note: "SMZ job error" };
+    fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
+    fs.writeFileSync(OUTFILE, JSON.stringify(fallback, null, 2), "utf8");
 
     process.exitCode = 1;
   }
