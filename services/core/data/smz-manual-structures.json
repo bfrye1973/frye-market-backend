@@ -1,0 +1,44 @@
+{
+  "ok": true,
+  "meta": {
+    "schema": "smz-manual-structures@1",
+    "updatedUtc": "2026-01-15T00:00:00Z",
+    "symbol": "SPY",
+    "notes": "Manual SPY structure zones. Source-of-truth. Never overwritten by jobs."
+  },
+  "structures": [
+    {
+      "structureKey": "MANUAL|SPY|686.00-688.70",
+      "symbol": "SPY",
+      "tier": "structure",
+      "manualRange": [688.70, 686.00],
+      "priceRange": [688.70, 686.00],
+      "locked": true,
+      "rangeSource": "manual",
+      "status": "active",
+      "stickyConfirmed": true
+    },
+    {
+      "structureKey": "MANUAL|SPY|680.58-683.61",
+      "symbol": "SPY",
+      "tier": "structure",
+      "manualRange": [683.61, 680.58],
+      "priceRange": [683.61, 680.58],
+      "locked": true,
+      "rangeSource": "manual",
+      "status": "active",
+      "stickyConfirmed": true
+    },
+    {
+      "structureKey": "MANUAL|SPY|673.80-676.68",
+      "symbol": "SPY",
+      "tier": "structure",
+      "manualRange": [676.68, 673.80],
+      "priceRange": [676.68, 673.80],
+      "locked": true,
+      "rangeSource": "manual",
+      "status": "active",
+      "stickyConfirmed": true
+    }
+  ]
+}
