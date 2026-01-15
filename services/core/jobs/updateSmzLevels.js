@@ -519,6 +519,18 @@ function historyBoostScore(barsHist, lo, hi, mid) {
   return { touches, midHits, score: round2(touchScore + midScore) };
 }
 
+function median(values) {
+  const arr = (values || [])
+    .filter((x) => Number.isFinite(x))
+    .slice()
+    .sort((a, b) => a - b);
+
+  if (!arr.length) return null;
+
+  const mid = Math.floor(arr.length / 2);
+  return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+}
+
 function computeActivePockets({ bars1hAll, currentPrice }) {
   const nowSec = bars1hAll.at(-1)?.time ?? Math.floor(Date.now() / 1000);
 
