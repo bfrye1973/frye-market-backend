@@ -259,9 +259,7 @@ function runStickyBackfillOnce(store, bars1h) {
 
   const nowIso = isoNow();
   const lockedManual = (store.structures || []).filter(isLockedSticky);
-  store.structures = [...lockedManual];
-
-
+  
   for (const c of top) {
     const key = structureKeyFromRange(c.hi, c.lo);
     if (store.structures.some((s) => s.structureKey === key)) continue;
