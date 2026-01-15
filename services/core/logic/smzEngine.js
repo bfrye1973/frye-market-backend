@@ -7,10 +7,17 @@
 // - Collapse overlapping STRUCTURE zones into parent structures
 // - Emit POCKET children and compute negotiationMid
 //
-// NEW (LOCKED by user):
+// LOCKED by user:
 // ✅ High-score zones are never demoted (STRUCT_SCORE_LOCK)
 // ✅ After collapse, STRUCTURE display range is tightened to the anchored window (and 30m refine)
 //    so wide "monster" zones shrink to true acceptance (fixes 683–695 type ranges)
+//
+// NOTE:
+// This file is considered "detection-locked". Changes below are limited to:
+// - Defensive guards (NaN safety / null safety)
+// - Deterministic normalization (no behavior intent changes)
+// - Minor internal consistency fixes (e.g. ensure _low/_high always exist)
+// NO changes to core detection semantics / thresholds / scoring logic.
 
 import { scoreInstitutionalRubric as scoreInstitutional } from "./smzInstitutionalRubric.js";
 
@@ -58,15 +65,15 @@ function round2(x) {
 function normalizeBars(arr) {
   return (Array.isArray(arr) ? arr : [])
     .map((b) => {
-      const rawT = Number(b.t ?? b.time ?? 0);
+      const rawT = Number(b?.t ?? b?.time ?? 0);
       const time = rawT > 1e12 ? Math.floor(rawT / 1000) : rawT;
       return {
         time,
-        open: Number(b.o ?? b.open ?? 0),
-        high: Number(b.h ?? b.high ?? 0),
-        low: Number(b.l ?? b.low ?? 0),
-        close: Number(b.c ?? b.close ?? 0),
-        volume: Number(b.v ?? b.volume ?? 0),
+        open: Number(b?.o ?? b?.open ?? 0),
+        high: Number(b?.h ?? b?.high ?? 0),
+        low: Number(b?.l ?? b?.low ?? 0),
+        close: Number(b?.c ?? b?.close ?? 0),
+        volume: Number(b?.v ?? b?.volume ?? 0),
       };
     })
     .filter(
@@ -86,11 +93,13 @@ function validBar(b) {
 
 function computeATR(candles, period = 14) {
   if (!Array.isArray(candles) || candles.length < period + 2) return 1;
+
   const trs = [];
   for (let i = 1; i < candles.length; i++) {
     const c = candles[i],
       p = candles[i - 1];
     if (!validBar(c) || !validBar(p)) continue;
+
     const tr = Math.max(
       c.high - c.low,
       Math.abs(c.high - p.close),
@@ -98,6 +107,7 @@ function computeATR(candles, period = 14) {
     );
     trs.push(tr);
   }
+
   const slice = trs.slice(-period);
   const atr = slice.reduce((a, b) => a + b, 0) / Math.max(1, slice.length);
   return atr > 0 ? atr : 1;
@@ -210,8 +220,13 @@ function buildBucketCandidatesGlobal(candles, bucketSize, minTouches, tf) {
 }
 
 function mergeTwoZones(a, b) {
-  const mergedLow = round2(Math.min(a._low, b._low));
-  const mergedHigh = round2(Math.max(a._high, b._high));
+  const aLow = Number.isFinite(a._low) ? a._low : Number(a.priceRange?.[1]);
+  const aHigh = Number.isFinite(a._high) ? a._high : Number(a.priceRange?.[0]);
+  const bLow = Number.isFinite(b._low) ? b._low : Number(b.priceRange?.[1]);
+  const bHigh = Number.isFinite(b._high) ? b._high : Number(b.priceRange?.[0]);
+
+  const mergedLow = round2(Math.min(aLow, bLow));
+  const mergedHigh = round2(Math.max(aHigh, bHigh));
   const strength = Math.max(Number(a.strength ?? 0), Number(b.strength ?? 0));
 
   const members = []
@@ -243,7 +258,7 @@ function mergeTwoZones(a, b) {
 }
 
 function mergeByOverlap(zones, threshold) {
-  const sorted = zones.slice().sort((x, y) => x._low - y._low);
+  const sorted = zones.slice().sort((x, y) => (x._low ?? 0) - (y._low ?? 0));
   const out = [];
   for (const z of sorted) {
     if (!out.length) {
@@ -595,7 +610,7 @@ function qualifyStructureOrDemote(regimes) {
     // ✅ SCORE LOCK: high-score institutional zones NEVER get demoted
     const strength = Number(z.strength ?? 0);
     if (Number.isFinite(strength) && strength >= CFG.STRUCT_SCORE_LOCK) {
-      return z; // keep as STRUCTURE no matter what width/anchor gate says
+      return z;
     }
 
     const facts = z.details?.facts ?? {};
@@ -614,7 +629,6 @@ function qualifyStructureOrDemote(regimes) {
     const hasExit = exitBars >= CFG.EXIT_CONSEC_BARS_1H && (exitSide === "above" || exitSide === "below");
 
     const isStructure = isAnchored && hasAcceptance && hasExit;
-
     if (isStructure) return z;
 
     // Demote to micro
@@ -646,7 +660,7 @@ function qualifyStructureOrDemote(regimes) {
  * After collapse, some parent structures can become wide again.
  * If a structure has an anchored window (anchorStartTime/anchorEndTime),
  * we override the displayed priceRange to the true window range (and 30m refine).
- * This is the "tighten" fix that preserves tier/score, but restores true acceptance bounds.
+ * This preserves tier/score but restores true acceptance bounds.
  */
 function tightenStructuresToAnchorWindow(regimes, bars1h, bars30m) {
   const out = [];
@@ -684,20 +698,25 @@ function tightenStructuresToAnchorWindow(regimes, bars1h, bars30m) {
     let newHi = rh1h.hi;
 
     const refined = refineWith30m(bars30m, startTime, endTime);
-    if (refined && Number.isFinite(refined.lo) && Number.isFinite(refined.hi) && refined.hi > refined.lo) {
+    if (
+      refined &&
+      Number.isFinite(refined.lo) &&
+      Number.isFinite(refined.hi) &&
+      refined.hi > refined.lo
+    ) {
       newLo = refined.lo;
       newHi = refined.hi;
     }
 
     const width = newHi - newLo;
 
-    // Apply tightening if it results in a tight acceptance window (<= 4 pts + small tolerance)
+    // Apply tightening only if result is a tight acceptance window (<= 4 pts + small tolerance)
     if (!Number.isFinite(width) || width <= 0 || width > (CFG.STRUCT_MAX_WIDTH_PTS + 0.25)) {
       out.push(z);
       continue;
     }
 
-    const tightened = {
+    out.push({
       ...z,
       _low: round2(newLo),
       _high: round2(newHi),
@@ -711,9 +730,7 @@ function tightenStructuresToAnchorWindow(regimes, bars1h, bars30m) {
           tightenedWidthPts: round2(width),
         },
       },
-    };
-
-    out.push(tightened);
+    });
   }
   return out;
 }
@@ -959,6 +976,7 @@ function collapseOverlappingStructureZones(zones, opts = {}) {
     const ov = overlapRatio(tmpA, z);
     const gap = separationPts(tmpA, z);
 
+    // LOCKED behavior: requires overlap threshold AND small separation to collapse
     if (ov >= OVERLAP_PCT && gap <= NEAR_POINTS) addToGroup(z);
     else {
       flushGroup();
