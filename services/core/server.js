@@ -4,16 +4,17 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
+
 import { ohlcRouter } from "./routes/ohlc.js";
-import liveRouter from "./routes/live.js";   // ✅ live router
+import liveRouter from "./routes/live.js"; // ✅ live router
 import sectorcards10mRouter from "./routes/sectorcards-10m.js"; // ✅ sectorcards
+
 import smzLevels from "./routes/smzLevels.js"; // ✅ Smart Money levels API
 import smzShelves from "./routes/smzShelves.js"; // ✅ Accum/Dist shelves API
 import smzHierarchy from "./routes/smzHierarchy.js";
-import fibLevels from "./routes/fibLevels.js"; // ✅ Fib levels API (Engine 2)
 
-
-
+// ✅ Engine 2 (Fib) — IMPORTANT: this is a NAMED export, not default
+import { fibLevelsRouter } from "./routes/fibLevels.js";
 
 // --- App setup ---
 const app = express();
@@ -25,6 +26,7 @@ app.get("/__whoami", (req, res) => {
     ts: new Date().toISOString(),
   });
 });
+
 app.set("trust proxy", true);
 app.disable("x-powered-by");
 app.set("etag", false);
@@ -65,15 +67,17 @@ app.get("/", (_req, res) => {
 });
 
 // --- API routes ---
+// Existing routes
 app.use("/api/v1/ohlc", ohlcRouter);
 app.use("/api/sectorcards-10m", sectorcards10mRouter); // ✅ sectorcards adapter
-app.use("/live", liveRouter);  // ✅ GitHub JSON proxies
+app.use("/live", liveRouter); // ✅ GitHub JSON proxies
 app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
 app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution shelves
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
-app.use("/api/v1/fib-levels", fibLevels); // ✅ Fib levels (Engine 2)
 
-
+// ✅ Engine 2 route mount
+// NOTE: fibLevelsRouter defines GET "/fib-levels", so we mount it at "/api/v1"
+app.use("/api/v1", fibLevelsRouter);
 
 // --- 404 / errors ---
 app.use((req, res) =>
@@ -97,7 +101,10 @@ app.listen(PORT, HOST, () => {
   console.log("- /healthz");
   console.log("- /api/v1/ohlc");
   console.log("- /api/sectorcards-10m");
-  console.log("- /api/v1/smz-levels"); // ✅ new endpoint
+  console.log("- /api/v1/smz-levels");
+  console.log("- /api/v1/smz-shelves");
+  console.log("- /api/v1/smz-hierarchy");
+  console.log("- /api/v1/fib-levels"); // ✅ Engine 2 (GET /api/v1/fib-levels)
   console.log("- /live  (GitHub JSON proxies)");
 });
 
