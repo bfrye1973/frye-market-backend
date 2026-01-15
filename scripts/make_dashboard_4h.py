@@ -383,7 +383,14 @@ def main():
     Cw = C[-PSI_WIN_4H:] if len(C) > PSI_WIN_4H else C
     psi = lux_psi_from_closes(Cw, conv=50, length=20)
     squeeze_psi_4h = float(psi) if isinstance(psi, (int, float)) else 50.0
+    squeeze_psi_4h = float(clamp(squeeze_psi_4h, 0.0, 100.0))
+
+    # ✅ Dead-zone breaker (UX): avoid exact 50.0 when PSI is essentially neutral
+    if abs(squeeze_psi_4h - 50.0) < 0.25:
+        squeeze_psi_4h = 49.0 if float(ema10_posture) >= 55.0 else 51.0
+
     squeeze_exp_4h = clamp(100.0 - squeeze_psi_4h, 0.0, 100.0)
+
 
     # Liquidity + Volatility
     v3 = ema_last(V, 3)
