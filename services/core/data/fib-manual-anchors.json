@@ -10,11 +10,11 @@
       "active": true,
 
       "a": { "t": null, "p": 683.35 },
-      "b": { "t": null, "p": null },
+      "b": { "t": null, "p": 657.01 },
 
       "context": "W2",
       "waveMarks": {
-        "W2": { "t": null, "p": null },
+        "W2": { "t": "2026-12-19 6:00", "p": 675.34 },
         "W3": { "t": null, "p": null },
         "W4": { "t": null, "p": null },
         "W5": { "t": null, "p": null }
