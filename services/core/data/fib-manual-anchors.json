@@ -1,6 +1,6 @@
 {
   "ok": true,
-  "meta": { "schema": "fib-manual-anchors@2", "tz": "America/Phoenix" },
+  "meta": { "schema": "fib-manual-anchors@3", "tz": "America/Phoenix", "timeFormat": "YYYY-MM-DD HH:MM" },
   "anchors": [
     {
       "symbol": "SPY",
@@ -8,10 +8,18 @@
       "degree": "intermediate",
       "wave": "W1",
       "active": true,
-      "low": 683.35,
-      "high": null,
+
+      "a": { "t": null, "p": 683.35 },
+      "b": { "t": null, "p": null },
+
       "context": "W2",
-      "comment": "Intermediate W1: impulse launch out of institutional zone. High not yet locked."
+      "waveMarks": {
+        "W2": { "t": null, "p": null },
+        "W3": { "t": null, "p": null },
+        "W4": { "t": null, "p": null },
+        "W5": { "t": null, "p": null }
+      },
+      "comment": "Intermediate W1: impulse launch out of institutional zone. Fill b.p when high is locked. Times optional."
     },
     {
       "symbol": "SPY",
@@ -19,10 +27,18 @@
       "degree": "intermediate",
       "wave": "W4",
       "active": false,
-      "low": null,
-      "high": null,
+
+      "a": { "t": null, "p": null },
+      "b": { "t": null, "p": null },
+
       "context": "W4",
-      "comment": "Intermediate W4 placeholder (not yet formed/locked)."
+      "waveMarks": {
+        "W2": { "t": null, "p": null },
+        "W3": { "t": null, "p": null },
+        "W4": { "t": null, "p": null },
+        "W5": { "t": null, "p": null }
+      },
+      "comment": "Intermediate W4 placeholder (activate when formed)."
     },
 
     {
@@ -31,10 +47,18 @@
       "degree": "minor",
       "wave": "W1",
       "active": true,
-      "low": 675.28,
-      "high": 690.69,
+
+      "a": { "t": null, "p": 675.28 },
+      "b": { "t": null, "p": 690.69 },
+
       "context": "W2",
-      "comment": "Minor W1: large impulse leg (origin at 675.28)."
+      "waveMarks": {
+        "W2": { "t": null, "p": null },
+        "W3": { "t": null, "p": 697.24 },
+        "W4": { "t": null, "p": 688.39 },
+        "W5": { "t": null, "p": null }
+      },
+      "comment": "Minor W1 + manual wave marks (W3/W4 locked). Add W2/W5 when known."
     },
     {
       "symbol": "SPY",
@@ -42,10 +66,15 @@
       "degree": "minor",
       "wave": "W4",
       "active": true,
-      "low": 688.39,
-      "high": 697.24,
+
+      "a": { "t": null, "p": 688.39 },
+      "b": { "t": null, "p": 697.24 },
+
       "context": "W4",
-      "comment": "Minor W4: W3 high (697.24) to negotiation low (688.39)."
+      "waveMarks": {
+        "W4": { "t": null, "p": 688.39 }
+      },
+      "comment": "Minor W4 anchors (W3 high -> W4 low)."
     },
 
     {
@@ -54,10 +83,18 @@
       "degree": "minute",
       "wave": "W1",
       "active": true,
-      "low": 688.29,
-      "high": 695.42,
+
+      "a": { "t": null, "p": 688.29 },
+      "b": { "t": null, "p": 695.42 },
+
       "context": "W2",
-      "comment": "Minute W1: corrected micro impulse (black 1)."
+      "waveMarks": {
+        "W2": { "t": null, "p": null },
+        "W3": { "t": null, "p": null },
+        "W4": { "t": null, "p": null },
+        "W5": { "t": null, "p": null }
+      },
+      "comment": "Minute W1 locked. Fill waveMarks as you identify them."
     },
     {
       "symbol": "SPY",
@@ -65,11 +102,15 @@
       "degree": "minute",
       "wave": "W4",
       "active": false,
-      "low": null,
-      "high": null,
+
+      "a": { "t": null, "p": null },
+      "b": { "t": null, "p": null },
+
       "context": "W4",
-      "comment": "Minute W4 placeholder (not yet formed/locked)."
+      "waveMarks": {
+        "W4": { "t": null, "p": null }
+      },
+      "comment": "Minute W4 placeholder (activate when formed)."
     }
   ]
 }
-
