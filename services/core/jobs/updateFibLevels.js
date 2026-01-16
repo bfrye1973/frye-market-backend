@@ -1,11 +1,15 @@
 // src/services/core/jobs/updateFibLevels.js
-// Engine 2 job — reads fib-manual-anchors.json, fetches 1h bars from backend-1 /api/v1/ohlc,
-// computes fib output, writes fib-levels.json (atomic).
+// Engine 2 — Multi-degree, multi-wave fib job
 //
-// LOCKED:
-// - uses backend-1 /api/v1/ohlc (dashboard candle truth)
-// - 1h only v1
-// - 74% invalidation gate enforced in fibEngine
+// Reads:  data/fib-manual-anchors.json
+// Writes: data/fib-levels.json
+//
+// Supports:
+// - degree: intermediate | minor | minute
+// - wave: W1 | W4
+// - active: true (single active per group enforced by your editing discipline)
+//
+// Candle truth source (LOCKED): backend-1 /api/v1/ohlc (same semantics as dashboard candles)
 
 import fs from "fs";
 import path from "path";
@@ -19,13 +23,12 @@ const __dirname = path.dirname(__filename);
 const MANUAL_FILE = path.resolve(__dirname, "../data/fib-manual-anchors.json");
 const OUTFILE = path.resolve(__dirname, "../data/fib-levels.json");
 
-// Where to fetch candles from (backend-1)
+// backend-1 candle truth
 const API_BASE = process.env.FRYE_API_BASE || `http://127.0.0.1:${process.env.PORT || 3001}`;
 const OHLC_PATH = "/api/v1/ohlc";
 
-// Fetch parameters (keep loose—endpoint may ignore some)
-const DEFAULT_LIMIT = Number(process.env.FIB_OHLC_LIMIT || 500);
-const MODE = process.env.FIB_OHLC_MODE || "rth"; // if your ohlc supports mode; safe if ignored
+const DEFAULT_LIMIT = Number(process.env.FIB_OHLC_LIMIT || 600);
+const MODE = process.env.FIB_OHLC_MODE || "rth";
 
 function readJson(p) {
   return JSON.parse(fs.readFileSync(p, "utf-8"));
@@ -44,18 +47,13 @@ async function fetchOhlcBars({ symbol, tf }) {
   url.searchParams.set("limit", String(DEFAULT_LIMIT));
   url.searchParams.set("mode", MODE);
 
-  const res = await fetch(url.toString(), {
-    headers: { "accept": "application/json" }
-  });
-
+  const res = await fetch(url.toString(), { headers: { accept: "application/json" } });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`OHLC fetch failed ${res.status}: ${text.slice(0, 200)}`);
   }
 
   const data = await res.json();
-
-  // Accept multiple possible payload shapes
   const rawBars =
     data?.bars ||
     data?.candles ||
@@ -65,13 +63,23 @@ async function fetchOhlcBars({ symbol, tf }) {
   return normalizeBars(rawBars || []);
 }
 
-function selectAnchor(anchors, symbol, tf) {
-  if (!Array.isArray(anchors)) return null;
-  return anchors.find(a =>
-    String(a.symbol || "").toUpperCase() === String(symbol).toUpperCase() &&
-    String(a.tf || "").toLowerCase() === String(tf).toLowerCase() &&
-    String(a.wave || "").toUpperCase() === "W1"
-  ) || null;
+// Only active anchors with numeric low/high and valid wave W1 or W4.
+function pickActiveAnchors(anchors) {
+  const list = Array.isArray(anchors) ? anchors : [];
+  return list.filter((a) => {
+    if (!a) return false;
+    if (a.active !== true) return false;
+
+    const wave = String(a.wave || "").toUpperCase();
+    if (!["W1", "W4"].includes(wave)) return false;
+
+    const low = Number(a.low);
+    const high = Number(a.high);
+    if (!Number.isFinite(low) || !Number.isFinite(high) || !(high > low)) return false;
+
+    if (!a.symbol || !a.tf || !a.degree) return false;
+    return true;
+  });
 }
 
 (async function main() {
@@ -80,97 +88,100 @@ function selectAnchor(anchors, symbol, tf) {
   console.log(`[fib] API_BASE=${API_BASE}`);
 
   if (!fs.existsSync(MANUAL_FILE)) {
-    const out = {
+    atomicWriteJson(OUTFILE, {
       ok: false,
       reason: "NO_ANCHORS",
       message: "fib-manual-anchors.json not found",
-      meta: { schema: "fib-levels@1", generated_at_utc: new Date().toISOString() }
-    };
-    atomicWriteJson(OUTFILE, out);
+      meta: { schema: "fib-levels@2", generated_at_utc: new Date().toISOString() },
+      items: [],
+    });
     console.log(`[fib] wrote ${OUTFILE} (NO_ANCHORS: missing manual file)`);
     process.exit(0);
   }
 
   const manual = readJson(MANUAL_FILE);
-  const anchors = manual?.anchors || [];
-  const symbol = "SPY";
-  const tf = "1h";
+  const active = pickActiveAnchors(manual?.anchors);
 
-  const a = selectAnchor(anchors, symbol, tf);
-  if (!a) {
-    const out = {
+  if (!active.length) {
+    atomicWriteJson(OUTFILE, {
       ok: false,
       reason: "NO_ANCHORS",
-      message: "No matching W1 anchor found for SPY 1h",
-      meta: { schema: "fib-levels@1", symbol, tf, generated_at_utc: new Date().toISOString() }
-    };
-    atomicWriteJson(OUTFILE, out);
-    console.log(`[fib] wrote ${OUTFILE} (NO_ANCHORS: no SPY 1h W1 entry)`);
+      message: "No active anchors found. Need active:true + wave W1/W4 + numeric low/high.",
+      meta: { schema: "fib-levels@2", generated_at_utc: new Date().toISOString() },
+      items: [],
+    });
+    console.log(`[fib] wrote ${OUTFILE} (NO_ANCHORS: none active)`);
     process.exit(0);
   }
 
-  // Validate anchor fields
-  const low = Number(a.low);
-  const high = Number(a.high);
-  const context = a.context ?? null;
+  const items = [];
 
-  if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) {
-    const out = {
-      ok: false,
-      reason: "BAD_ANCHORS",
-      message: "Anchor low/high invalid. Ensure high > low and both numeric.",
-      meta: { schema: "fib-levels@1", symbol, tf, generated_at_utc: new Date().toISOString() },
-      anchors: { low: a.low, high: a.high, context }
-    };
-    atomicWriteJson(OUTFILE, out);
-    console.log(`[fib] wrote ${OUTFILE} (BAD_ANCHORS)`);
-    process.exit(0);
+  for (const a of active) {
+    const symbol = String(a.symbol).toUpperCase();
+    const tf = String(a.tf).toLowerCase();
+    const degree = String(a.degree).toLowerCase();
+    const wave = String(a.wave).toUpperCase();
+
+    let bars = [];
+    try {
+      bars = await fetchOhlcBars({ symbol, tf });
+    } catch (err) {
+      items.push({
+        ok: false,
+        reason: "OHLC_FETCH_FAILED",
+        message: String(err?.message || err),
+        meta: {
+          schema: "fib-levels@2",
+          symbol,
+          tf,
+          degree,
+          wave,
+          generated_at_utc: new Date().toISOString(),
+        },
+      });
+      continue;
+    }
+
+    const computed = computeFibFromAnchors({
+      symbol,
+      tf,
+      anchorLow: Number(a.low),
+      anchorHigh: Number(a.high),
+      context: a.context ?? null,
+      bars,
+    });
+
+    // Force meta fields so route can filter cleanly
+    items.push({
+      ...computed,
+      meta: {
+        ...(computed.meta || {}),
+        schema: "fib-levels@2",
+        symbol,
+        tf,
+        degree,
+        wave,
+        generated_at_utc: computed?.meta?.generated_at_utc || new Date().toISOString(),
+      },
+    });
   }
 
-  // Fetch bars
-  let bars = [];
-  try {
-    bars = await fetchOhlcBars({ symbol, tf });
-  } catch (err) {
-    const out = {
-      ok: false,
-      reason: "OHLC_FETCH_FAILED",
-      message: String(err?.message || err),
-      meta: { schema: "fib-levels@1", symbol, tf, generated_at_utc: new Date().toISOString() }
-    };
-    atomicWriteJson(OUTFILE, out);
-    console.log(`[fib] wrote ${OUTFILE} (OHLC_FETCH_FAILED)`);
-    process.exit(0);
-  }
-
-  // Compute output
-  const computed = computeFibFromAnchors({
-    symbol,
-    tf,
-    anchorLow: low,
-    anchorHigh: high,
-    context,
-    bars
+  atomicWriteJson(OUTFILE, {
+    ok: true,
+    meta: { schema: "fib-levels@2", generated_at_utc: new Date().toISOString() },
+    items,
   });
 
-  // If ATR isn’t computable, we still return ok:true (engine is graceful)
-  // but we also set a top-level reason for visibility (optional).
-  const out = computed;
-
-  atomicWriteJson(OUTFILE, out);
-  console.log(`[fib] wrote ${OUTFILE} ok=${out.ok} invalidated=${out?.signals?.invalidated ?? false}`);
+  console.log(`[fib] wrote ${OUTFILE} items=${items.length}`);
   process.exit(0);
-})().catch(err => {
-  const out = {
+})().catch((err) => {
+  atomicWriteJson(OUTFILE, {
     ok: false,
     reason: "JOB_CRASH",
     message: String(err?.stack || err),
-    meta: { schema: "fib-levels@1", generated_at_utc: new Date().toISOString() }
-  };
-  try {
-    fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
-    fs.writeFileSync(OUTFILE, JSON.stringify(out, null, 2));
-  } catch {}
+    meta: { schema: "fib-levels@2", generated_at_utc: new Date().toISOString() },
+    items: [],
+  });
   console.error("[fib] JOB_CRASH", err);
   process.exit(1);
 });
