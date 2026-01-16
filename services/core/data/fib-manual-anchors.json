@@ -115,7 +115,7 @@
         "W1": { "t": null, "p": null },
         "W2": { "t": null, "p": null },
         "W3": { "t": null, "p": null },
-        "W4": { "t": null, "p": 688.39 },
+        "W4": { "t": null, "p": null },
         "W5": { "t": null, "p": null }
       },
       "comment": "Minor W4 anchors (W3 high -> W4 low)."
