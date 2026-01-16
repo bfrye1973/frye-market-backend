@@ -1,6 +1,7 @@
 // src/services/core/routes/fibLevels.js
-// GET /api/v1/fib-levels?symbol=SPY&tf=1h
-// Reads fib-levels.json and returns it (or a filtered variant).
+// GET /api/v1/fib-levels?symbol=SPY&tf=1h&degree=minor&wave=W1|W4
+// Reads data/fib-levels.json (multi-degree, multi-wave) and returns the best match.
+// Always returns JSON (never throws raw errors).
 
 import fs from "fs";
 import path from "path";
@@ -18,31 +19,82 @@ fibLevelsRouter.get("/fib-levels", (req, res) => {
   try {
     const symbol = String(req.query.symbol || "SPY").toUpperCase();
     const tf = String(req.query.tf || "1h").toLowerCase();
+    const degree = req.query.degree ? String(req.query.degree).toLowerCase() : null;
+    const wave = req.query.wave ? String(req.query.wave).toUpperCase() : "W1";
 
     if (!fs.existsSync(DATA_FILE)) {
       return res.json({
         ok: false,
         reason: "NOT_BUILT_YET",
         message: "fib-levels.json not found yet. Run updateFibLevels.js",
-        meta: { schema: "fib-levels@1", symbol, tf, generated_at_utc: new Date().toISOString() }
+        meta: {
+          schema: "fib-levels@2",
+          symbol,
+          tf,
+          degree,
+          wave,
+          generated_at_utc: new Date().toISOString(),
+        },
       });
     }
 
     const raw = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
 
-    // v1 is SPY 1h only; still accept query and echo meta
-    if (raw?.meta) {
-      raw.meta.symbol = symbol;
-      raw.meta.tf = tf;
+    const items = Array.isArray(raw?.items) ? raw.items : [];
+
+    // Filter helpers (supports both top-level fields and meta fields)
+    const match = (it) => {
+      const ms = String(it?.meta?.symbol || it?.symbol || "").toUpperCase();
+      const mt = String(it?.meta?.tf || it?.tf || "").toLowerCase();
+      const md = String(it?.meta?.degree || it?.degree || "").toLowerCase();
+      const mw = String(it?.meta?.wave || it?.wave || "W1").toUpperCase();
+
+      if (ms !== symbol) return false;
+      if (mt !== tf) return false;
+      if (mw !== wave) return false;
+      if (degree && md !== degree) return false;
+      return true;
+    };
+
+    const matches = items.filter(match);
+
+    // If degree omitted, allow returning the first symbol+tf+wave match.
+    let chosen = matches[0] || null;
+
+    if (!chosen && !degree) {
+      chosen =
+        items.find((it) => {
+          const ms = String(it?.meta?.symbol || it?.symbol || "").toUpperCase();
+          const mt = String(it?.meta?.tf || it?.tf || "").toLowerCase();
+          const mw = String(it?.meta?.wave || it?.wave || "W1").toUpperCase();
+          return ms === symbol && mt === tf && mw === wave;
+        }) || null;
     }
 
-    return res.json(raw);
+    if (!chosen) {
+      return res.json({
+        ok: false,
+        reason: "NO_ANCHORS",
+        message:
+          "No fib output found for requested symbol/tf/degree/wave. Ensure anchors exist and are active, then run updateFibLevels.js.",
+        meta: {
+          schema: "fib-levels@2",
+          symbol,
+          tf,
+          degree,
+          wave,
+          generated_at_utc: new Date().toISOString(),
+        },
+      });
+    }
+
+    return res.json(chosen);
   } catch (err) {
     return res.json({
       ok: false,
       reason: "ROUTE_ERROR",
       message: String(err?.message || err),
-      meta: { schema: "fib-levels@1", generated_at_utc: new Date().toISOString() }
+      meta: { schema: "fib-levels@2", generated_at_utc: new Date().toISOString() },
     });
   }
 });
