@@ -1,7 +1,7 @@
 // src/services/core/routes/fibLevels.js
 // GET /api/v1/fib-levels?symbol=SPY&tf=1h&degree=minor&wave=W1|W4
 // Reads data/fib-levels.json (multi-degree, multi-wave) and returns the best match.
-// Always returns JSON (never throws raw errors).
+// Always returns JSON.
 
 import fs from "fs";
 import path from "path";
@@ -28,7 +28,7 @@ fibLevelsRouter.get("/fib-levels", (req, res) => {
         reason: "NOT_BUILT_YET",
         message: "fib-levels.json not found yet. Run updateFibLevels.js",
         meta: {
-          schema: "fib-levels@2",
+          schema: "fib-levels@3",
           symbol,
           tf,
           degree,
@@ -39,11 +39,9 @@ fibLevelsRouter.get("/fib-levels", (req, res) => {
     }
 
     const raw = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
-
     const items = Array.isArray(raw?.items) ? raw.items : [];
 
-    // Filter helpers (supports both top-level fields and meta fields)
-    const match = (it) => {
+    const matches = items.filter((it) => {
       const ms = String(it?.meta?.symbol || it?.symbol || "").toUpperCase();
       const mt = String(it?.meta?.tf || it?.tf || "").toLowerCase();
       const md = String(it?.meta?.degree || it?.degree || "").toLowerCase();
@@ -54,11 +52,9 @@ fibLevelsRouter.get("/fib-levels", (req, res) => {
       if (mw !== wave) return false;
       if (degree && md !== degree) return false;
       return true;
-    };
+    });
 
-    const matches = items.filter(match);
-
-    // If degree omitted, allow returning the first symbol+tf+wave match.
+    // If degree omitted, return first symbol+tf+wave match
     let chosen = matches[0] || null;
 
     if (!chosen && !degree) {
@@ -78,7 +74,7 @@ fibLevelsRouter.get("/fib-levels", (req, res) => {
         message:
           "No fib output found for requested symbol/tf/degree/wave. Ensure anchors exist and are active, then run updateFibLevels.js.",
         meta: {
-          schema: "fib-levels@2",
+          schema: "fib-levels@3",
           symbol,
           tf,
           degree,
@@ -94,7 +90,7 @@ fibLevelsRouter.get("/fib-levels", (req, res) => {
       ok: false,
       reason: "ROUTE_ERROR",
       message: String(err?.message || err),
-      meta: { schema: "fib-levels@2", generated_at_utc: new Date().toISOString() },
+      meta: { schema: "fib-levels@3", generated_at_utc: new Date().toISOString() },
     });
   }
 });
