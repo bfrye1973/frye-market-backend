@@ -1,16 +1,75 @@
 {
   "ok": true,
-  "meta": { "schema": "fib-manual-anchors@1" },
+  "meta": { "schema": "fib-manual-anchors@2", "tz": "America/Phoenix" },
   "anchors": [
     {
       "symbol": "SPY",
       "tf": "1h",
+      "degree": "intermediate",
       "wave": "W1",
-      "low": 688.70,
-      "high": 690.46,
+      "active": true,
+      "low": 683.35,
+      "high": null,
       "context": "W2",
+      "comment": "Intermediate W1: impulse launch out of institutional zone. High not yet locked."
+    },
+    {
+      "symbol": "SPY",
+      "tf": "1h",
+      "degree": "intermediate",
+      "wave": "W4",
+      "active": false,
+      "low": null,
+      "high": null,
+      "context": "W4",
+      "comment": "Intermediate W4 placeholder (not yet formed/locked)."
+    },
+
+    {
+      "symbol": "SPY",
+      "tf": "1h",
+      "degree": "minor",
+      "wave": "W1",
+      "active": true,
+      "low": 675.28,
+      "high": 690.69,
+      "context": "W2",
+      "comment": "Minor W1: large impulse leg (origin at 675.28)."
+    },
+    {
+      "symbol": "SPY",
+      "tf": "1h",
+      "degree": "minor",
+      "wave": "W4",
+      "active": true,
+      "low": 688.39,
+      "high": 697.24,
+      "context": "W4",
+      "comment": "Minor W4: W3 high (697.24) to negotiation low (688.39)."
+    },
+
+    {
+      "symbol": "SPY",
+      "tf": "10m",
       "degree": "minute",
-      "comment": "Manual W1 anchor for active 1h impulse. Lower bound adjusted to 688.70"
+      "wave": "W1",
+      "active": true,
+      "low": 688.29,
+      "high": 695.42,
+      "context": "W2",
+      "comment": "Minute W1: corrected micro impulse (black 1)."
+    },
+    {
+      "symbol": "SPY",
+      "tf": "10m",
+      "degree": "minute",
+      "wave": "W4",
+      "active": false,
+      "low": null,
+      "high": null,
+      "context": "W4",
+      "comment": "Minute W4 placeholder (not yet formed/locked)."
     }
   ]
 }
+
