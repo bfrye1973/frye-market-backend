@@ -26,8 +26,8 @@
       "degree": "primary",
       "wave": "W4",
       "active": false,
-      "a": { "t": null, "p": null },
-      "b": { "t": null, "p": null },
+      "a": { "t": "2026-12-29 11:00", "p": 687.24},
+      "b": { "t": "2025-11-21 10:00", "p": 655.62 },
       "context": "W4",
       "waveMarks": {
         "W1": { "t": null, "p": null },
