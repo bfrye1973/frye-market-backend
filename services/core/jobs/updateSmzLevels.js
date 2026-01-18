@@ -809,13 +809,10 @@ async function main() {
       manualStructures
     );
 
-    const pocketsActive = computeActivePockets({ bars1hAll: bars1h, currentPrice });
+    // 🚫 POCKETS DISABLED — shelves now replace pocket logic
+    const pocketsTagged = [];
 
-    const pocketsTagged = (pocketsActive || []).map((p) => {
-      const linked = isStructureLinked(p, liveStructures);
-      return { ...p, lane: linked ? "structure_linked" : "emerging", structureLinked: linked };
-    });
-
+    
     const payload = {
       ok: true,
       meta: {
