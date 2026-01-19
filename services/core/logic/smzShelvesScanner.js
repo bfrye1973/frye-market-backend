@@ -6,6 +6,13 @@
 // - Detect shelves across FULL history (no early prune by bandLow)
 // - Apply the ±bandPoints filter ONLY at the end (TradingView behavior)
 //
+// ✅ NEW FIXES (per user goals):
+// 1) Remove accidental early-pruning: distance weighting must NOT zero-out valid shelves
+//    before the final band filter.
+//    -> Use rangeDistanceWeight (distance from currentPrice to shelf RANGE, not center).
+// 2) Add ATH mode: when price is at/near all-time highs, prioritize actionable shelves
+//    BELOW price (accumulation) and avoid “needing overhead structure.”
+//
 // Output objects match SMZ frontend schema:
 // { type: "accumulation"|"distribution", price, priceRange:[high,low], strength:40–100 }
 
@@ -24,6 +31,11 @@ const STRONG_WICK_ATR = 0.7; // wick >= 0.7*ATR counts
 const BREAK_EPS = 0.05; // points
 const BREAK_LOOKAHEAD = 10; // bars
 const DISP_MIN_ATR = 0.6; // breakout displacement confirmation
+
+// ATH mode
+const ATH_EPS_ATR = 0.25; // within 0.25*ATR of all-time high => ATH mode
+const ATH_ACC_BOOST = 1.10; // slight preference for accumulation shelves at ATH
+const ATH_DIST_PENALTY = 0.92; // slight downweight for distribution shelves at ATH
 
 // output controls
 const MAX_SHELVES_OUT = 12;
@@ -70,11 +82,23 @@ function clamp(x, a, b) {
   return Math.max(a, Math.min(b, x));
 }
 
-// Higher relevance closer to current price
-function distanceWeight(center, currentPrice, bandPoints) {
-  const d = Math.abs(center - currentPrice);
+// Distance from current price to a shelf RANGE (not center).
+// - If current is inside [lo,hi] => 1.0
+// - If outside => fade linearly until bandPoints
+function rangeDistanceWeight(hi, lo, currentPrice, bandPoints) {
+  const H = Math.max(hi, lo);
+  const L = Math.min(hi, lo);
+
+  if (!(Number.isFinite(H) && Number.isFinite(L) && Number.isFinite(currentPrice))) return 0;
+
+  // inside shelf
+  if (currentPrice >= L && currentPrice <= H) return 1;
+
+  // distance to nearest edge
+  const d = currentPrice > H ? (currentPrice - H) : (L - currentPrice);
   if (d >= bandPoints) return 0;
-  return 1 - d / bandPoints; // linear fade
+
+  return 1 - d / bandPoints;
 }
 
 // TF confirmation boost (does NOT create shelves on its own)
@@ -132,7 +156,6 @@ function detectBreakout(bars, endIdx, hi, lo, center, atr) {
       }
     }
 
-    // track extremes anyway
     maxUp = Math.max(maxUp, (b.high - center) / atr);
     maxDown = Math.max(maxDown, (center - b.low) / atr);
   }
@@ -147,7 +170,7 @@ function detectBreakout(bars, endIdx, hi, lo, center, atr) {
 function mergeShelves(list) {
   if (!list.length) return [];
 
-  const EPS = 0.75; // stronger merge distance to collapse duplicates
+  const EPS = 0.75;
   const sorted = list.slice().sort((a, b) => a.priceRange[1] - b.priceRange[1]);
   const out = [];
   let cur = { ...sorted[0] };
@@ -190,8 +213,16 @@ function mergeShelves(list) {
 }
 
 function overlapsBand(hi, lo, bandLow, bandHigh) {
-  // Any overlap with the band
   return hi >= bandLow && lo <= bandHigh;
+}
+
+function detectAllTimeHighMode(bars, currentPrice, atr) {
+  let maxHigh = -Infinity;
+  for (const b of bars) maxHigh = Math.max(maxHigh, b.high);
+  if (!Number.isFinite(maxHigh) || !Number.isFinite(currentPrice)) return { athMode: false, maxHigh: null };
+  const eps = Math.max(0.25, atr * ATH_EPS_ATR);
+  const athMode = currentPrice >= (maxHigh - eps);
+  return { athMode, maxHigh };
 }
 
 // ---------- main compute ----------
@@ -208,8 +239,13 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
 
   const atr = computeATR(b10, ATR_PERIOD);
 
-  // ✅ CRITICAL FIX:
-  // Remove early pruning by bandLow. Scan full history.
+  const { athMode } = detectAllTimeHighMode(b10, currentPrice, atr);
+  if (athMode) {
+    // purely informational; job logs can show it
+    // console.log("[SHELVES] ATH MODE: true");
+  }
+
+  // ✅ Full-history scan
   const startIdx = 0;
 
   const candidates = [];
@@ -243,9 +279,6 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
 
       const width = hi - lo;
       if (width < SHELF_MIN_WIDTH || width > SHELF_MAX_WIDTH) continue;
-
-      // ❌ REMOVED: early relevance gate here
-      // We now detect shelves anywhere in history and filter later.
 
       const avgBody = bodySum / cnt;
       const avgRange = rangeSum / cnt || 1e-6;
@@ -296,13 +329,20 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
 
       const base = 0.4 * widthScore + 0.3 * wickScore + 0.3 * brScore;
 
-      // Distance weight is still useful, but now only matters if within band;
-      // outside band it becomes 0, which is fine (we also filter later).
-      const distW = distanceWeight(center, currentPrice, bandPoints);
+      // ✅ IMPORTANT FIX: range-based distance weight (won't early-zero valid overlaps)
+      const distW = rangeDistanceWeight(hi, lo, currentPrice, bandPoints);
+      if (distW <= 0) continue;
 
       const tfBoost = tfConfirmBoost(hi, lo, b30, b1h);
 
-      const final = base * distW * tfBoost;
+      // ✅ ATH mode bias: prioritize accumulation shelves below/near price
+      let athFactor = 1.0;
+      if (athMode) {
+        if (type === "accumulation") athFactor *= ATH_ACC_BOOST;
+        if (type === "distribution") athFactor *= ATH_DIST_PENALTY;
+      }
+
+      const final = base * distW * tfBoost * athFactor;
       if (final <= 0) continue;
 
       candidates.push({
@@ -316,10 +356,9 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
 
   if (!candidates.length) return [];
 
-  // merge overlaps
   const mergedAll = mergeShelves(candidates);
 
-  // ✅ FINAL BAND FILTER (TradingView behavior): overlap with band
+  // ✅ FINAL BAND FILTER: overlap with band (TradingView behavior)
   const merged = mergedAll.filter((s) => {
     const hi = Number(s?.priceRange?.[0]);
     const lo = Number(s?.priceRange?.[1]);
