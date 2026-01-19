@@ -379,7 +379,8 @@ function runStickyBackfillOnce(store, bars1h) {
 
   console.log("[SMZ][BACKFILL] Running one-time sticky backfill…");
 
-  let loAll = Infinity, hiAll = -Infinity;
+  let loAll = Infinity,
+    hiAll = -Infinity;
   for (const b of bars1h || []) {
     if (!b || !Number.isFinite(b.low) || !Number.isFinite(b.high)) continue;
     loAll = Math.min(loAll, b.low);
@@ -406,10 +407,16 @@ function runStickyBackfillOnce(store, bars1h) {
       while (lastTouch + 1 < bars1h.length && barOverlapsRange(bars1h[lastTouch + 1], lo, hi)) lastTouch++;
 
       const e = exitConfirmedAfterIndex(bars1h, lo, hi, lastTouch, 2);
-      if (!e.confirmed) { i = lastTouch; continue; }
+      if (!e.confirmed) {
+        i = lastTouch;
+        continue;
+      }
 
       const anchorEndTime = bars1h[lastTouch]?.time;
-      if (!Number.isFinite(anchorEndTime)) { i = lastTouch; continue; }
+      if (!Number.isFinite(anchorEndTime)) {
+        i = lastTouch;
+        continue;
+      }
 
       exits.push({ side: e.side, exitBars: e.bars, anchorEndTime });
       i = lastTouch;
@@ -487,6 +494,13 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
 
     if (manualOverlapsAny(manualStructures, hi, lo)) continue;
 
+    // ✅ HARD GUARD (LOCKED): refuse to even store oversized AUTO candidates
+    const widthNow = hi - lo;
+    if (widthNow > STRUCT_AUTO_MAX_WIDTH_PTS) {
+      // Keep log short; this is expected protection
+      continue;
+    }
+
     const key = structureKeyFromRange(hi, lo);
     const existing = byKey.get(key);
 
@@ -547,8 +561,8 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
     const pr = s.priceRange;
     if (!Array.isArray(pr) || pr.length !== 2) continue;
 
-    const hi = Number(pr[0]);
-    const lo = Number(pr[1]);
+    const hi = Math.max(Number(pr[0]), Number(pr[1]));
+    const lo = Math.min(Number(pr[0]), Number(pr[1]));
     const lastSeenMs = Date.parse(s.lastSeenUtc || "");
     const old = Number.isFinite(lastSeenMs) ? lastSeenMs < cutoffMs : false;
     const inBand = hi >= bandLo && lo <= bandHi;
@@ -557,6 +571,32 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
       s.status = "archived";
       s.archivedUtc = nowIso;
     }
+  }
+
+  // ✅ HARD GUARD (LOCKED): purge any oversized AUTO stickies from registry list BEFORE save + emit
+  const beforePurge = list.length;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const s = list[i];
+    if (!s || isManualLike(s)) continue;
+
+    const pr = s.priceRange;
+    if (!Array.isArray(pr) || pr.length !== 2) continue;
+
+    const hi = Math.max(Number(pr[0]), Number(pr[1]));
+    const lo = Math.min(Number(pr[0]), Number(pr[1]));
+    if (!Number.isFinite(hi) || !Number.isFinite(lo)) continue;
+
+    const width = hi - lo;
+    if (width > STRUCT_AUTO_MAX_WIDTH_PTS) {
+      console.log(
+        `[SMZ] PURGED auto sticky from registry (width ${width.toFixed(2)} > ${STRUCT_AUTO_MAX_WIDTH_PTS}):`,
+        pr
+      );
+      list.splice(i, 1);
+    }
+  }
+  if (beforePurge !== list.length) {
+    console.log(`[SMZ] Registry purge applied: ${beforePurge} -> ${list.length}`);
   }
 
   // Select autos within band (capped), excluding any overlapping manual
@@ -578,28 +618,8 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
   });
 
   const autosWithinBand = autosSorted.slice(0, STICKY_MAX_WITHIN_BAND);
-  // ✅ HARD GUARD (LOCKED): drop oversized AUTO stickies (> 4 pts)
-  const autosWithinBandFiltered = autosWithinBand.filter((s) => {
-    const pr = s?.priceRange;
-    if (!Array.isArray(pr) || pr.length !== 2) return false;
 
-    const hi = Math.max(Number(pr[0]), Number(pr[1]));
-    const lo = Math.min(Number(pr[0]), Number(pr[1]));
-    if (!Number.isFinite(hi) || !Number.isFinite(lo)) return false;
-
-    const width = hi - lo;
-    if (width > STRUCT_AUTO_MAX_WIDTH_PTS) {
-      console.log(
-        `[SMZ] DROPPED auto sticky (width ${width.toFixed(2)} > ${STRUCT_AUTO_MAX_WIDTH_PTS}):`,
-        pr
-      );
-      return false;
-    }
-    return true;
-  });
-
-
-  // Persist registry (AUTO ONLY)
+  // Persist registry (AUTO ONLY) — now guaranteed purged
   const newStore = {
     ok: true,
     meta: { ...(store.meta ?? {}), updated_at_utc: nowIso },
@@ -607,7 +627,7 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
   };
   saveSticky(newStore);
 
-  // Emit manual first (uncapped), then autos (capped + width-guarded)
+  // Emit manual first (uncapped), then autos (capped + width-guarded via purge)
   const manualInBand = (manualStructures || []).filter((m) => {
     const r = m?.manualRange ?? m?.priceRange;
     if (!Array.isArray(r) || r.length !== 2) return false;
@@ -617,8 +637,8 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
   });
 
   console.log(
-    `[SMZ] Emitting sticky structures: manual ${manualInBand.length} + auto ${autosWithinBandFiltered.length} = ${
-      manualInBand.length + autosWithinBandFiltered.length
+    `[SMZ] Emitting sticky structures: manual ${manualInBand.length} + auto ${autosWithinBand.length} = ${
+      manualInBand.length + autosWithinBand.length
     }`
   );
 
@@ -630,8 +650,7 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
     details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
   }));
 
-  const emittedAutos = autosWithinBandFiltered.map((s) => ({
-
+  const emittedAutos = autosWithinBand.map((s) => ({
     type: "institutional",
     tier: "structure_sticky",
     priceRange: s.priceRange,
@@ -677,12 +696,7 @@ async function main() {
       return false;
     });
 
-    const structuresSticky = updateStickyFromLive(
-      stickyCandidates,
-      currentPrice,
-      bars1h,
-      manualStructures
-    );
+    const structuresSticky = updateStickyFromLive(stickyCandidates, currentPrice, bars1h, manualStructures);
 
     // 🚫 POCKETS DISABLED — shelves now replace pocket logic
     const pocketsTagged = [];
