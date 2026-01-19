@@ -212,10 +212,6 @@ function rangeFromPriceRange(pr) {
   return { hi, lo, width: hi - lo };
 }
 
-function rangesOverlap(aHi, aLo, bHi, bLo) {
-  return !(aHi < bLo || aLo > bHi);
-}
-
 function manualStructureRanges(manualStructures) {
   return (manualStructures || [])
     .map((m) => {
