@@ -578,6 +578,26 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
   });
 
   const autosWithinBand = autosSorted.slice(0, STICKY_MAX_WITHIN_BAND);
+  // ✅ HARD GUARD (LOCKED): drop oversized AUTO stickies (> 4 pts)
+  const autosWithinBandFiltered = autosWithinBand.filter((s) => {
+    const pr = s?.priceRange;
+    if (!Array.isArray(pr) || pr.length !== 2) return false;
+
+    const hi = Math.max(Number(pr[0]), Number(pr[1]));
+    const lo = Math.min(Number(pr[0]), Number(pr[1]));
+    if (!Number.isFinite(hi) || !Number.isFinite(lo)) return false;
+
+    const width = hi - lo;
+    if (width > STRUCT_AUTO_MAX_WIDTH_PTS) {
+      console.log(
+        `[SMZ] DROPPED auto sticky (width ${width.toFixed(2)} > ${STRUCT_AUTO_MAX_WIDTH_PTS}):`,
+        pr
+      );
+      return false;
+    }
+    return true;
+  });
+
 
   // ✅ HARD GUARD: drop oversized AUTO stickies (> 4 pts)
   const autosWithinBandFiltered = autosWithinBand.filter((s) => {
@@ -630,6 +650,7 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
   }));
 
   const emittedAutos = autosWithinBandFiltered.map((s) => ({
+
     type: "institutional",
     tier: "structure_sticky",
     priceRange: s.priceRange,
