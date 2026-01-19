@@ -13,6 +13,11 @@
 // - Cluster definition: overlap OR small gap threshold (cluster_gap_pts = 0.60)
 // - Global cap: max 8 shelves total (TradingView clean feel)
 //
+// ✅ TEMP RULE (PER USER, FOR CLEAN LOOK RIGHT NOW):
+// - If a shelf touches/overlaps ANY sticky institutional structure (structures_sticky),
+//   remove the shelf (strict any overlap).
+// - We check against structures_sticky only (authoritative).
+//
 // Uses DEEP provider (jobs only), chart provider remains untouched.
 //
 // Efficient lookback plan (LOCKED for shelves):
@@ -32,6 +37,9 @@ const __dirname = path.dirname(__filename);
 
 const OUTFILE = path.resolve(__dirname, "../data/smz-shelves.json");
 const MANUAL_FILE = path.resolve(__dirname, "../data/smz-manual-shelves.json");
+
+// ✅ Read institutional truth from Engine 1 output
+const LEVELS_FILE = path.resolve(__dirname, "../data/smz-levels.json");
 
 // Config
 const SYMBOL = "SPY";
@@ -157,11 +165,11 @@ function overlapsBand(hi, lo, bandLow, bandHigh) {
 }
 
 function rangesOverlap(aHi, aLo, bHi, bLo) {
+  // strict any overlap
   return !(aHi < bLo || aLo > bHi);
 }
 
 function rangeGapPts(aHi, aLo, bHi, bLo) {
-  // 0 if overlap; otherwise the distance between the two ranges
   if (rangesOverlap(aHi, aLo, bHi, bLo)) return 0;
   if (aHi < bLo) return bLo - aHi;
   if (bHi < aLo) return aLo - bHi;
@@ -218,6 +226,58 @@ function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_S
   return { levels: mapped, minRaw, maxRaw };
 }
 
+// ---------------- Institutional structures (structures_sticky) ----------------
+
+function loadStickyStructureRanges() {
+  // We only need ranges from structures_sticky (authoritative)
+  if (!fs.existsSync(LEVELS_FILE)) {
+    console.warn(`[SHELVES] levels file not found for structure filter (ok): ${LEVELS_FILE}`);
+    return [];
+  }
+
+  try {
+    const raw = fs.readFileSync(LEVELS_FILE, "utf8");
+    const json = JSON.parse(raw);
+    const arr = Array.isArray(json?.structures_sticky) ? json.structures_sticky : [];
+
+    const ranges = arr
+      .map((z) => {
+        const pr = z?.priceRange;
+        const r = normalizeRange(pr);
+        return r ? { hi: r.hi, lo: r.lo } : null;
+      })
+      .filter(Boolean);
+
+    console.log(`[SHELVES] Loaded sticky structures for overlap filter: ${ranges.length} (${path.basename(LEVELS_FILE)})`);
+    return ranges;
+  } catch (e) {
+    console.warn(`[SHELVES] Failed to read sticky structures from ${LEVELS_FILE}: ${e?.message}`);
+    return [];
+  }
+}
+
+function removeShelvesOverlappingStickyStructures(levels, stickyRanges) {
+  const list = Array.isArray(levels) ? levels : [];
+  const structs = Array.isArray(stickyRanges) ? stickyRanges : [];
+  if (!list.length || !structs.length) return { kept: list, removedCount: 0 };
+
+  let removed = 0;
+
+  const kept = list.filter((s) => {
+    const r = normalizeRange(s?.priceRange);
+    if (!r) return false;
+
+    const overlapsAny = structs.some((z) => rangesOverlap(r.hi, r.lo, z.hi, z.lo));
+    if (overlapsAny) removed++;
+    return !overlapsAny;
+  });
+
+  if (removed) {
+    console.log(`[SHELVES] Removed shelves overlapping sticky structures (strict): ${removed}`);
+  }
+  return { kept, removedCount: removed };
+}
+
 // ---------------- Manual shelves (source of truth) ----------------
 
 function loadManualShelves() {
@@ -235,7 +295,6 @@ function loadManualShelves() {
         const type = normalizeType(s?.type);
         if (!type) return null;
 
-        // ✅ manualRange wins (like institutions)
         const r = normalizeRange(
           Array.isArray(s?.manualRange) && s.manualRange.length === 2
             ? s.manualRange
@@ -323,7 +382,6 @@ function shelfOverlapRatio(a, b) {
   return denom > 0 ? inter / denom : 0;
 }
 
-// Decide if shelf s belongs in cluster represented by rep
 function shelfBelongsToCluster(s, rep) {
   const sr = normalizeRange(s?.priceRange);
   const rr = normalizeRange(rep?.priceRange);
@@ -338,7 +396,6 @@ function shelfBelongsToCluster(s, rep) {
   return false;
 }
 
-// Pick best of same type (manual wins, then strength, then tighter width)
 function pickBestOfType(items, type) {
   const list = (items || [])
     .filter((x) => normalizeType(x?.type) === type)
@@ -351,18 +408,16 @@ function pickBestOfType(items, type) {
       if (sb !== 0) return sb;
       const aw = normalizeRange(a?.priceRange)?.width ?? Infinity;
       const bw = normalizeRange(b?.priceRange)?.width ?? Infinity;
-      return aw - bw; // tighter wins if same strength
+      return aw - bw;
     });
 
   return list[0] ?? null;
 }
 
-// ✅ Collapse into clusters, then keep max 1 acc + 1 dist per cluster
 function collapseShelvesByCluster(levels) {
   const list = Array.isArray(levels) ? levels.slice() : [];
   if (!list.length) return [];
 
-  // Sort strong first for stable clustering
   list.sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
 
   const clusters = [];
@@ -378,8 +433,6 @@ function collapseShelvesByCluster(levels) {
       if (shelfBelongsToCluster(s, c.rep)) {
         c.members.push(s);
 
-        // Optional rep update: keep rep as "best overall representative"
-        // Manual wins as rep; else strength wins; else tighter wins
         const rep = c.rep;
         const repManual = isManualShelf(rep) ? 1 : 0;
         const sManual = isManualShelf(s) ? 1 : 0;
@@ -416,29 +469,29 @@ function collapseShelvesByCluster(levels) {
     if (bestDist) out.push(bestDist);
   }
 
-  // Sort final by strength desc
   out.sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
   return out;
 }
 
-// Apply global cap max 8 shelves total (clean TradingView feel)
 function applyGlobalCap(levels, maxTotal = MAX_SHELVES_TOTAL) {
   const list = Array.isArray(levels) ? levels.slice() : [];
   if (list.length <= maxTotal) return list;
 
-  // Prefer balanced: up to half acc and half dist when possible
   const targetEach = Math.floor(maxTotal / 2);
 
-  const acc = list.filter((x) => normalizeType(x?.type) === "accumulation").sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
-  const dist = list.filter((x) => normalizeType(x?.type) === "distribution").sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
+  const acc = list
+    .filter((x) => normalizeType(x?.type) === "accumulation")
+    .sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
+
+  const dist = list
+    .filter((x) => normalizeType(x?.type) === "distribution")
+    .sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
 
   const picked = [];
 
-  // First pass: take up to targetEach of each
   picked.push(...acc.slice(0, targetEach));
   picked.push(...dist.slice(0, targetEach));
 
-  // Fill remaining slots by strength across leftovers
   if (picked.length < maxTotal) {
     const pickedSet = new Set(picked.map((x) => x));
     const leftovers = list
@@ -447,10 +500,11 @@ function applyGlobalCap(levels, maxTotal = MAX_SHELVES_TOTAL) {
     picked.push(...leftovers.slice(0, maxTotal - picked.length));
   }
 
-  // Final sort by strength
   picked.sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
   return picked.slice(0, maxTotal);
 }
+
+// ---------------- main ----------------
 
 async function main() {
   try {
@@ -485,19 +539,12 @@ async function main() {
 
     console.log("[SHELVES] currentPriceAnchor (from 30m/1h):", currentPriceAnchor.toFixed(2));
 
+    // ✅ Load institutional sticky structure ranges (authoritative) for shelf suppression
+    const stickyStructureRanges = loadStickyStructureRanges();
+
     // 1) Manual shelves (source-of-truth)
     const manualAll = loadManualShelves();
     const manualInBand = filterShelvesToBand(manualAll, currentPriceAnchor, BAND_POINTS);
-
-    if (manualInBand.length) {
-      console.log("[SHELVES] Manual shelves IN BAND:");
-      for (const m of manualInBand) {
-        const r = normalizeRange(m.priceRange);
-        console.log(
-          `  - ${m.type} ${r?.hi?.toFixed(2)}-${r?.lo?.toFixed(2)} strength=${m.strength} comment=${m.comment ?? ""}`
-        );
-      }
-    }
 
     // 2) Auto shelves (scanner)
     console.log("[SHELVES] Running shelves scanner (Acc/Dist)…");
@@ -525,11 +572,17 @@ async function main() {
       SHELF_STRENGTH_HI
     );
 
-    // 5) Merge then cluster-collapse (max 1 acc + 1 dist per cluster)
+    // 5) Merge shelves
     const mergedRaw = [...manualInBand, ...autoMapped];
-    const collapsed = collapseShelvesByCluster(mergedRaw);
 
-    // 6) Global cap (max 8 total)
+    // ✅ TEMP CLEAN RULE: remove ANY shelf that overlaps ANY sticky structure (strict)
+    const { kept: mergedNoInstitution, removedCount: removedByInstitution } =
+      removeShelvesOverlappingStickyStructures(mergedRaw, stickyStructureRanges);
+
+    // 6) Cluster-collapse (max 1 acc + 1 dist per cluster)
+    const collapsed = collapseShelvesByCluster(mergedNoInstitution);
+
+    // 7) Global cap (max 8 total)
     const finalLevels = applyGlobalCap(collapsed, MAX_SHELVES_TOTAL);
 
     console.log("[SHELVES] Strength remap:", {
@@ -539,7 +592,7 @@ async function main() {
     });
 
     console.log(
-      `[SHELVES] Emitting shelves: manual ${manualInBand.length} + auto ${autoMapped.length} => collapsed ${collapsed.length} => final ${finalLevels.length}`
+      `[SHELVES] Emitting shelves: manual ${manualInBand.length} + auto ${autoMapped.length} => merged ${mergedRaw.length} => afterInstitutionFilter ${mergedNoInstitution.length} (removed ${removedByInstitution}) => collapsed ${collapsed.length} => final ${finalLevels.length}`
     );
 
     const payload = {
@@ -565,6 +618,14 @@ async function main() {
           max_per_cluster: "1 accumulation + 1 distribution",
           global_cap_total: MAX_SHELVES_TOTAL,
           manual_override: "manual wins within its type; opposite type still allowed in same cluster",
+        },
+        institutional_filter: {
+          enabled: true,
+          source: path.basename(LEVELS_FILE),
+          key: "structures_sticky",
+          rule: "strict_any_overlap",
+          structures_count: stickyStructureRanges.length,
+          shelves_removed: removedByInstitution,
         },
       },
       levels: finalLevels,
