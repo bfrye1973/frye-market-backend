@@ -6,10 +6,12 @@
 // - Manual shelves loaded from data/smz-manual-shelves.json (source-of-truth)
 // - Manual shelves can use manualRange (wins) or priceRange
 // - Final output is within ±BAND_POINTS of currentPriceAnchor
-// - Manual shelves win on overlap (remove overlapping autos)
+// - Manual shelves win on overlap (TYPE-AWARE: manual Acc removes auto Acc only; manual Dist removes auto Dist only)
 // - Manual shelves can override score via scoreOverride
 // - Strength remap keeps shelves in 60–89 band
 // - FINAL: collapse overlaps into clusters (max 1 Acc + 1 Dist per cluster)
+// - Cluster definition: overlap OR small gap threshold (cluster_gap_pts = 0.60)
+// - Global cap: max 8 shelves total (TradingView clean feel)
 //
 // Uses DEEP provider (jobs only), chart provider remains untouched.
 //
@@ -40,16 +42,16 @@ const DAYS_15M = 180;
 const DAYS_30M = 180;
 const DAYS_1H = 180;
 
-// Shelves strength band (LOCKED)
+// Shelves strength band (LOCKED semantics)
 const SHELF_STRENGTH_LO = 60;
 const SHELF_STRENGTH_HI = 89;
 
 // ✅ Cluster rules (LOCKED)
-const SHELF_CLUSTER_OVERLAP = 0.55;
-const SHELF_CLUSTER_MID_PTS = 0.60;
+const SHELF_CLUSTER_OVERLAP = 0.55; // overlap ratio threshold
+const SHELF_CLUSTER_GAP_PTS = 0.60; // gap threshold (pts) — authoritative
 
-// Output controls
-const MAX_LEVELS_OUT = 12;
+// ✅ Global cap (LOCKED)
+const MAX_SHELVES_TOTAL = 8;
 
 // ---------- helpers ----------
 const isoNow = () => new Date().toISOString();
@@ -130,6 +132,13 @@ function pickCurrentPriceAnchor({ bars30m, bars1h }) {
   return Number.isFinite(c30) ? c30 : (Number.isFinite(c1h) ? c1h : null);
 }
 
+function normalizeType(t) {
+  const x = String(t ?? "").toLowerCase();
+  if (x === "accumulation" || x === "acc") return "accumulation";
+  if (x === "distribution" || x === "dist") return "distribution";
+  return null;
+}
+
 function normalizeRange(pr) {
   if (!Array.isArray(pr) || pr.length !== 2) return null;
   const a = Number(pr[0]);
@@ -138,7 +147,9 @@ function normalizeRange(pr) {
   const hi = round2(Math.max(a, b));
   const lo = round2(Math.min(a, b));
   if (!(hi > lo)) return null;
-  return { hi, lo, width: hi - lo, mid: (hi + lo) / 2 };
+  const width = hi - lo;
+  const mid = (hi + lo) / 2;
+  return { hi, lo, width, mid };
 }
 
 function overlapsBand(hi, lo, bandLow, bandHigh) {
@@ -147,6 +158,14 @@ function overlapsBand(hi, lo, bandLow, bandHigh) {
 
 function rangesOverlap(aHi, aLo, bHi, bLo) {
   return !(aHi < bLo || aLo > bHi);
+}
+
+function rangeGapPts(aHi, aLo, bHi, bLo) {
+  // 0 if overlap; otherwise the distance between the two ranges
+  if (rangesOverlap(aHi, aLo, bHi, bLo)) return 0;
+  if (aHi < bLo) return bLo - aHi;
+  if (bHi < aLo) return aLo - bHi;
+  return 0;
 }
 
 function filterShelvesToBand(levels, currentPrice, bandPoints) {
@@ -213,8 +232,8 @@ function loadManualShelves() {
 
     const out = arr
       .map((s) => {
-        const type = String(s?.type ?? "").toLowerCase();
-        if (type !== "accumulation" && type !== "distribution") return null;
+        const type = normalizeType(s?.type);
+        if (!type) return null;
 
         // ✅ manualRange wins (like institutions)
         const r = normalizeRange(
@@ -256,26 +275,39 @@ function loadManualShelves() {
   }
 }
 
-function removeAutosOverlappingManual(autoLevels, manualLevels) {
+function isManualShelf(s) {
+  return s?.rangeSource === "manual" || s?.locked === true || Number.isFinite(Number(s?.scoreOverride));
+}
+
+// ✅ TYPE-AWARE removal: manual removes autos only if same type overlaps
+function removeAutosOverlappingManualSameType(autoLevels, manualLevels) {
   if (!Array.isArray(autoLevels) || autoLevels.length === 0) return [];
   if (!Array.isArray(manualLevels) || manualLevels.length === 0) return autoLevels;
 
   let removed = 0;
+
   const out = autoLevels.filter((a) => {
+    const at = normalizeType(a?.type);
+    if (!at) return false;
+
     const ar = normalizeRange(a?.priceRange);
     if (!ar) return false;
 
-    const overlaps = manualLevels.some((m) => {
+    const overlapsSameTypeManual = manualLevels.some((m) => {
+      const mt = normalizeType(m?.type);
+      if (!mt || mt !== at) return false;
+
       const mr = normalizeRange(m?.priceRange);
       if (!mr) return false;
+
       return rangesOverlap(ar.hi, ar.lo, mr.hi, mr.lo);
     });
 
-    if (overlaps) removed++;
-    return !overlaps;
+    if (overlapsSameTypeManual) removed++;
+    return !overlapsSameTypeManual;
   });
 
-  if (removed) console.log(`[SHELVES] Autos removed due to manual overlap: ${removed}`);
+  if (removed) console.log(`[SHELVES] Autos removed due to MANUAL overlap (same type only): ${removed}`);
   return out;
 }
 
@@ -291,74 +323,133 @@ function shelfOverlapRatio(a, b) {
   return denom > 0 ? inter / denom : 0;
 }
 
-function isManualShelf(s) {
-  return s?.rangeSource === "manual" || s?.locked === true || Number.isFinite(Number(s?.scoreOverride));
+// Decide if shelf s belongs in cluster represented by rep
+function shelfBelongsToCluster(s, rep) {
+  const sr = normalizeRange(s?.priceRange);
+  const rr = normalizeRange(rep?.priceRange);
+  if (!sr || !rr) return false;
+
+  const ov = shelfOverlapRatio(s, rep);
+  if (ov >= SHELF_CLUSTER_OVERLAP) return true;
+
+  const gap = rangeGapPts(sr.hi, sr.lo, rr.hi, rr.lo);
+  if (gap <= SHELF_CLUSTER_GAP_PTS) return true;
+
+  return false;
 }
 
-// ✅ Collapse overlaps into clusters: max 1 acc + 1 dist per cluster (manual wins, then strength)
+// Pick best of same type (manual wins, then strength, then tighter width)
+function pickBestOfType(items, type) {
+  const list = (items || [])
+    .filter((x) => normalizeType(x?.type) === type)
+    .slice()
+    .sort((a, b) => {
+      const ma = isManualShelf(a) ? 1 : 0;
+      const mb = isManualShelf(b) ? 1 : 0;
+      if (mb !== ma) return mb - ma;
+      const sb = Number(b?.strength ?? 0) - Number(a?.strength ?? 0);
+      if (sb !== 0) return sb;
+      const aw = normalizeRange(a?.priceRange)?.width ?? Infinity;
+      const bw = normalizeRange(b?.priceRange)?.width ?? Infinity;
+      return aw - bw; // tighter wins if same strength
+    });
+
+  return list[0] ?? null;
+}
+
+// ✅ Collapse into clusters, then keep max 1 acc + 1 dist per cluster
 function collapseShelvesByCluster(levels) {
   const list = Array.isArray(levels) ? levels.slice() : [];
   if (!list.length) return [];
 
-  // strongest first helps cluster stability
+  // Sort strong first for stable clustering
   list.sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
 
   const clusters = [];
 
   for (const s of list) {
     const sr = normalizeRange(s?.priceRange);
-    if (!sr) continue;
+    const st = normalizeType(s?.type);
+    if (!sr || !st) continue;
 
     let placed = false;
+
     for (const c of clusters) {
-      const rr = normalizeRange(c.rep?.priceRange);
-      if (!rr) continue;
-
-      const ov = shelfOverlapRatio(s, c.rep);
-      const midDist = Math.abs(sr.mid - rr.mid);
-
-      if (ov >= SHELF_CLUSTER_OVERLAP || midDist <= SHELF_CLUSTER_MID_PTS) {
+      if (shelfBelongsToCluster(s, c.rep)) {
         c.members.push(s);
-        // keep rep as best (manual wins, then strength)
+
+        // Optional rep update: keep rep as "best overall representative"
+        // Manual wins as rep; else strength wins; else tighter wins
         const rep = c.rep;
         const repManual = isManualShelf(rep) ? 1 : 0;
         const sManual = isManualShelf(s) ? 1 : 0;
+
         if (sManual > repManual) c.rep = s;
-        else if (sManual === repManual && Number(s.strength ?? 0) > Number(rep.strength ?? 0)) c.rep = s;
+        else if (sManual === repManual) {
+          const ss = Number(s?.strength ?? 0);
+          const rs = Number(rep?.strength ?? 0);
+          if (ss > rs) c.rep = s;
+          else if (ss === rs) {
+            const sw = sr.width;
+            const rw = normalizeRange(rep?.priceRange)?.width ?? Infinity;
+            if (sw < rw) c.rep = s;
+          }
+        }
+
         placed = true;
         break;
       }
     }
-    if (!placed) clusters.push({ rep: s, members: [s] });
+
+    if (!placed) {
+      clusters.push({ rep: s, members: [s] });
+    }
   }
 
   const out = [];
 
   for (const c of clusters) {
-    const acc = c.members
-      .filter((x) => String(x?.type).toLowerCase() === "accumulation")
-      .sort((a, b) => {
-        const ma = isManualShelf(a) ? 1 : 0;
-        const mb = isManualShelf(b) ? 1 : 0;
-        if (mb !== ma) return mb - ma;
-        return Number(b?.strength ?? 0) - Number(a?.strength ?? 0);
-      })[0];
+    const bestAcc = pickBestOfType(c.members, "accumulation");
+    const bestDist = pickBestOfType(c.members, "distribution");
 
-    const dist = c.members
-      .filter((x) => String(x?.type).toLowerCase() === "distribution")
-      .sort((a, b) => {
-        const ma = isManualShelf(a) ? 1 : 0;
-        const mb = isManualShelf(b) ? 1 : 0;
-        if (mb !== ma) return mb - ma;
-        return Number(b?.strength ?? 0) - Number(a?.strength ?? 0);
-      })[0];
-
-    if (acc) out.push(acc);
-    if (dist) out.push(dist);
+    if (bestAcc) out.push(bestAcc);
+    if (bestDist) out.push(bestDist);
   }
 
+  // Sort final by strength desc
   out.sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
   return out;
+}
+
+// Apply global cap max 8 shelves total (clean TradingView feel)
+function applyGlobalCap(levels, maxTotal = MAX_SHELVES_TOTAL) {
+  const list = Array.isArray(levels) ? levels.slice() : [];
+  if (list.length <= maxTotal) return list;
+
+  // Prefer balanced: up to half acc and half dist when possible
+  const targetEach = Math.floor(maxTotal / 2);
+
+  const acc = list.filter((x) => normalizeType(x?.type) === "accumulation").sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
+  const dist = list.filter((x) => normalizeType(x?.type) === "distribution").sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
+
+  const picked = [];
+
+  // First pass: take up to targetEach of each
+  picked.push(...acc.slice(0, targetEach));
+  picked.push(...dist.slice(0, targetEach));
+
+  // Fill remaining slots by strength across leftovers
+  if (picked.length < maxTotal) {
+    const pickedSet = new Set(picked.map((x) => x));
+    const leftovers = list
+      .filter((x) => !pickedSet.has(x))
+      .sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
+    picked.push(...leftovers.slice(0, maxTotal - picked.length));
+  }
+
+  // Final sort by strength
+  picked.sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
+  return picked.slice(0, maxTotal);
 }
 
 async function main() {
@@ -402,7 +493,9 @@ async function main() {
       console.log("[SHELVES] Manual shelves IN BAND:");
       for (const m of manualInBand) {
         const r = normalizeRange(m.priceRange);
-        console.log(`  - ${m.type} ${r?.hi?.toFixed(2)}-${r?.lo?.toFixed(2)} strength=${m.strength} comment=${m.comment ?? ""}`);
+        console.log(
+          `  - ${m.type} ${r?.hi?.toFixed(2)}-${r?.lo?.toFixed(2)} strength=${m.strength} comment=${m.comment ?? ""}`
+        );
       }
     }
 
@@ -422,23 +515,22 @@ async function main() {
     console.log("[SHELVES] Shelves kept (auto band):", shelvesBand.length);
     console.log("[SHELVES] Shelves kept (manual band):", manualInBand.length);
 
-    // 3) Manual wins overlap: remove overlapping autos
-    const autoNoOverlap = removeAutosOverlappingManual(shelvesBand, manualInBand);
+    // 3) Manual wins overlap (TYPE-AWARE): remove overlapping autos only if same type
+    const autoNoOverlap = removeAutosOverlappingManualSameType(shelvesBand, manualInBand);
 
-    // 4) Remap AUTO strengths into shelf band
+    // 4) Remap AUTO strengths into shelf band (60–89)
     const { levels: autoMapped, minRaw, maxRaw } = remapShelvesStrengthToBand(
       autoNoOverlap,
       SHELF_STRENGTH_LO,
       SHELF_STRENGTH_HI
     );
 
-    // 5) Merge then cluster-collapse
+    // 5) Merge then cluster-collapse (max 1 acc + 1 dist per cluster)
     const mergedRaw = [...manualInBand, ...autoMapped];
-
     const collapsed = collapseShelvesByCluster(mergedRaw);
 
-    // keep output bounded
-    const finalLevels = collapsed.slice(0, MAX_LEVELS_OUT);
+    // 6) Global cap (max 8 total)
+    const finalLevels = applyGlobalCap(collapsed, MAX_SHELVES_TOTAL);
 
     console.log("[SHELVES] Strength remap:", {
       band: `${SHELF_STRENGTH_LO}-${SHELF_STRENGTH_HI}`,
@@ -446,7 +538,9 @@ async function main() {
       maxRaw,
     });
 
-    console.log(`[SHELVES] Emitting shelves: manual ${manualInBand.length} + auto ${autoMapped.length} => collapsed ${collapsed.length} => final ${finalLevels.length}`);
+    console.log(
+      `[SHELVES] Emitting shelves: manual ${manualInBand.length} + auto ${autoMapped.length} => collapsed ${collapsed.length} => final ${finalLevels.length}`
+    );
 
     const payload = {
       ok: true,
@@ -466,9 +560,11 @@ async function main() {
         manual_file: path.basename(MANUAL_FILE),
         manual_loaded_in_band: manualInBand.length,
         cluster_rules: {
-          overlap: SHELF_CLUSTER_OVERLAP,
-          mid_pts: SHELF_CLUSTER_MID_PTS,
+          overlap_ratio: SHELF_CLUSTER_OVERLAP,
+          gap_pts: SHELF_CLUSTER_GAP_PTS,
           max_per_cluster: "1 accumulation + 1 distribution",
+          global_cap_total: MAX_SHELVES_TOTAL,
+          manual_override: "manual wins within its type; opposite type still allowed in same cluster",
         },
       },
       levels: finalLevels,
