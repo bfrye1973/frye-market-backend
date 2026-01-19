@@ -63,6 +63,9 @@ const POCKET_CLUSTER_MID_PTS = 0.60;
 const POCKET_MAX_RETURN = 10;
 
 const STRUCT_LINK_NEAR_PTS = 1.0;
+// ✅ Institutional “monster” guard (AUTO ONLY)
+const STRUCT_AUTO_MAX_WIDTH_PTS = 4.0;
+
 
 // ---------------- tiny helpers ----------------
 
@@ -198,6 +201,76 @@ function manualOverlapsAny(manualList, hi, lo) {
   }
   return false;
 }
+
+function rangeFromPriceRange(pr) {
+  if (!Array.isArray(pr) || pr.length !== 2) return null;
+  const a = Number(pr[0]);
+  const b = Number(pr[1]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  const hi = Math.max(a, b);
+  const lo = Math.min(a, b);
+  return { hi, lo, width: hi - lo };
+}
+
+function rangesOverlap(aHi, aLo, bHi, bLo) {
+  return !(aHi < bLo || aLo > bHi);
+}
+
+function manualStructureRanges(manualStructures) {
+  return (manualStructures || [])
+    .map((m) => {
+      const r = Array.isArray(m?.manualRange) ? m.manualRange : m?.priceRange;
+      const rr = rangeFromPriceRange(r);
+      return rr ? { hi: rr.hi, lo: rr.lo } : null;
+    })
+    .filter(Boolean);
+}
+
+// ✅ Filter live structures so they can’t overwrite manual or become monsters
+function filterLiveLevelsByManualAndWidth(levelsLive, manualStructures) {
+  const manual = manualStructureRanges(manualStructures);
+
+  const kept = [];
+  const suppressed = [];
+
+  for (const z of levelsLive || []) {
+    const tier = String(z?.tier ?? "");
+    if (tier !== "structure") {
+      kept.push(z);
+      continue;
+    }
+
+    const r = rangeFromPriceRange(z?.priceRange);
+    if (!r) {
+      kept.push(z);
+      continue;
+    }
+
+    // 1) Manual always wins: if it overlaps any manual structure → suppress live structure
+    const overlapsManual = manual.some((m) => rangesOverlap(r.hi, r.lo, m.hi, m.lo));
+    if (overlapsManual) {
+      suppressed.push({ reason: "OVERLAPS_MANUAL_STRUCTURE", zone: z });
+      continue;
+    }
+
+    // 2) Monster kill-switch: if auto structure width > 4 pts → suppress
+    if (r.width > STRUCT_AUTO_MAX_WIDTH_PTS) {
+      suppressed.push({ reason: "AUTO_STRUCTURE_TOO_WIDE", widthPts: r.width, zone: z });
+      continue;
+    }
+
+    kept.push(z);
+  }
+
+  if (suppressed.length) {
+    console.log(
+      `[SMZ] Suppressed live structures: ${suppressed.length} (manual overlap + monster guard)`
+    );
+  }
+
+  return kept;
+}
+
 
 // ---------------- Sticky store (AUTO ONLY) ----------------
 
@@ -792,6 +865,10 @@ async function main() {
     console.log("[SMZ] Running engine...");
     let levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
     console.log("[SMZ] levels generated:", levelsLive.length);
+
+    // ✅ Manual zones + monster guard filter (prevents 690–697 style blobs)
+    levelsLive = filterLiveLevelsByManualAndWidth(levelsLive, manualStructures);
+
 
     const liveStructures = levelsLive.filter((z) => (z?.tier ?? "") === "structure");
 
