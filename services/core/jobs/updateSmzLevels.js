@@ -12,6 +12,7 @@
 // ✅ manual zones NOT stored in registry
 // ✅ manual zones immune to caps/cleanup/overlap suppression
 // ✅ structures_sticky: manual first, then auto
+// ✅ AUTO institutional max width = 4.0 pts (live + sticky autos)
 
 import fs from "fs";
 import path from "path";
@@ -50,7 +51,7 @@ const STICKY_BACKFILL_BUCKET_STEP = 0.25;
 const STICKY_BACKFILL_BUCKET_SIZE = 1.0;
 const STICKY_BACKFILL_MAX_NEW = 30;
 
-// Active pockets
+// Active pockets (DISABLED output, but helpers remain untouched)
 const POCKET_FIND_DAYS_1H = 180;
 const POCKET_WINDOW_PTS = 40;
 const POCKET_MAX_WIDTH_PTS = 4.0;
@@ -63,9 +64,9 @@ const POCKET_CLUSTER_MID_PTS = 0.60;
 const POCKET_MAX_RETURN = 10;
 
 const STRUCT_LINK_NEAR_PTS = 1.0;
-// ✅ Institutional “monster” guard (AUTO ONLY)
-const STRUCT_AUTO_MAX_WIDTH_PTS = 4.0;
 
+// ✅ Institutional “monster” guard (AUTO ONLY) — LOCKED
+const STRUCT_AUTO_MAX_WIDTH_PTS = 4.0;
 
 // ---------------- tiny helpers ----------------
 
@@ -150,6 +151,7 @@ function normalizeManualStructure(s) {
   const lo0 = Number(mr?.[1] ?? pr?.[1]);
   if (!Number.isFinite(hi0) || !Number.isFinite(lo0)) return null;
 
+  // ✅ Manual structures are NEVER width-limited (manual always wins)
   const hi = round2(Math.max(hi0, lo0));
   const lo = round2(Math.min(hi0, lo0));
   if (!(hi > lo)) return null;
@@ -169,7 +171,6 @@ function normalizeManualStructure(s) {
     rangeSource: "manual",
     status: "active",
     stickyConfirmed: true,
-    // Optional pass-through fields (kept if present)
     ...(s?.notes ? { notes: s.notes } : {}),
   };
 }
@@ -242,14 +243,12 @@ function filterLiveLevelsByManualAndWidth(levelsLive, manualStructures) {
       continue;
     }
 
-    // 1) Manual always wins: if it overlaps any manual structure → suppress live structure
     const overlapsManual = manual.some((m) => rangesOverlap(r.hi, r.lo, m.hi, m.lo));
     if (overlapsManual) {
       suppressed.push({ reason: "OVERLAPS_MANUAL_STRUCTURE", zone: z });
       continue;
     }
 
-    // 2) Monster kill-switch: if auto structure width > 4 pts → suppress
     if (r.width > STRUCT_AUTO_MAX_WIDTH_PTS) {
       suppressed.push({ reason: "AUTO_STRUCTURE_TOO_WIDE", widthPts: r.width, zone: z });
       continue;
@@ -259,14 +258,11 @@ function filterLiveLevelsByManualAndWidth(levelsLive, manualStructures) {
   }
 
   if (suppressed.length) {
-    console.log(
-      `[SMZ] Suppressed live structures: ${suppressed.length} (manual overlap + monster guard)`
-    );
+    console.log(`[SMZ] Suppressed live structures: ${suppressed.length} (manual overlap + monster guard)`);
   }
 
   return kept;
 }
-
 
 // ---------------- Sticky store (AUTO ONLY) ----------------
 
@@ -300,7 +296,6 @@ function isManualLike(s) {
   );
 }
 
-// Safety: registry is AUTO ONLY — strip anything manual-like.
 function stripManualFromRegistryStore(store) {
   const before = Array.isArray(store?.structures) ? store.structures.length : 0;
   const structures = (store?.structures || []).filter((s) => !isManualLike(s));
@@ -346,14 +341,7 @@ function recordExitEvent(existing, facts, nowIso) {
   const exitSide = facts?.exitSide1h ?? null;
   const anchorEndTime = Number(facts?.anchorEndTime ?? NaN);
 
-  if (
-    !(
-      exitBars >= 2 &&
-      (exitSide === "above" || exitSide === "below") &&
-      Number.isFinite(anchorEndTime)
-    )
-  )
-    return;
+  if (!(exitBars >= 2 && (exitSide === "above" || exitSide === "below") && Number.isFinite(anchorEndTime))) return;
 
   existing.exits = Array.isArray(existing.exits) ? existing.exits : [];
   if (existing.exits.some((e) => Number(e?.anchorEndTime) === anchorEndTime)) return;
@@ -391,8 +379,7 @@ function runStickyBackfillOnce(store, bars1h) {
 
   console.log("[SMZ][BACKFILL] Running one-time sticky backfill…");
 
-  let loAll = Infinity,
-    hiAll = -Infinity;
+  let loAll = Infinity, hiAll = -Infinity;
   for (const b of bars1h || []) {
     if (!b || !Number.isFinite(b.low) || !Number.isFinite(b.high)) continue;
     loAll = Math.min(loAll, b.low);
@@ -416,20 +403,13 @@ function runStickyBackfillOnce(store, bars1h) {
       if (!barOverlapsRange(bars1h[i], lo, hi)) continue;
 
       let lastTouch = i;
-      while (lastTouch + 1 < bars1h.length && barOverlapsRange(bars1h[lastTouch + 1], lo, hi))
-        lastTouch++;
+      while (lastTouch + 1 < bars1h.length && barOverlapsRange(bars1h[lastTouch + 1], lo, hi)) lastTouch++;
 
       const e = exitConfirmedAfterIndex(bars1h, lo, hi, lastTouch, 2);
-      if (!e.confirmed) {
-        i = lastTouch;
-        continue;
-      }
+      if (!e.confirmed) { i = lastTouch; continue; }
 
       const anchorEndTime = bars1h[lastTouch]?.time;
-      if (!Number.isFinite(anchorEndTime)) {
-        i = lastTouch;
-        continue;
-      }
+      if (!Number.isFinite(anchorEndTime)) { i = lastTouch; continue; }
 
       exits.push({ side: e.side, exitBars: e.bars, anchorEndTime });
       i = lastTouch;
@@ -439,8 +419,7 @@ function runStickyBackfillOnce(store, bars1h) {
     const distinct = [];
     for (const ev of exits) {
       if (!distinct.length) distinct.push(ev);
-      else if (ev.anchorEndTime - distinct[distinct.length - 1].anchorEndTime >= STICKY_EXIT_MIN_SEP_SEC)
-        distinct.push(ev);
+      else if (ev.anchorEndTime - distinct[distinct.length - 1].anchorEndTime >= STICKY_EXIT_MIN_SEP_SEC) distinct.push(ev);
     }
 
     if (distinct.length < STICKY_CONFIRM_EXITS_REQUIRED) continue;
@@ -484,32 +463,28 @@ function runStickyBackfillOnce(store, bars1h) {
  * Updates registry with AUTO candidates only.
  */
 function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualStructures) {
-  // 1) Load registry (auto-only), then strip any manual pollution
   let store = stripManualFromRegistryStore(loadSticky());
 
-  // 2) Optional one-time backfill (auto-only)
   if (STICKY_BACKFILL_ONCE && Array.isArray(bars1hAll) && bars1hAll.length > 100) {
     store = runStickyBackfillOnce(store, bars1hAll);
     store = stripManualFromRegistryStore(store);
   }
 
-  // Operate on a working list of AUTO entries only
   const list = (store.structures || []).slice();
   const nowIso = isoNow();
 
   const byKey = new Map();
   for (const s of list) if (s?.structureKey) byKey.set(s.structureKey, s);
 
-  // 3) Update AUTO entries from live candidates, but NEVER allow autos to overlap manual
+  // Update AUTO entries from live candidates, but NEVER allow autos to overlap manual
   for (const z of stickyCandidates || []) {
     const pr = z?.priceRange;
     if (!Array.isArray(pr) || pr.length !== 2) continue;
 
-    const hi = Number(pr[0]),
-      lo = Number(pr[1]);
+    const hi = Number(pr[0]);
+    const lo = Number(pr[1]);
     if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi <= lo) continue;
 
-    // Manual zones always win: do not add/update autos that overlap manual
     if (manualOverlapsAny(manualStructures, hi, lo)) continue;
 
     const key = structureKeyFromRange(hi, lo);
@@ -560,7 +535,7 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
     }
   }
 
-  // 4) Archive logic applies ONLY to autos (manual not in registry)
+  // Archive logic applies ONLY to autos (manual not in registry)
   const bandLo = currentPrice - STICKY_KEEP_WITHIN_BAND_PTS;
   const bandHi = currentPrice + STICKY_KEEP_WITHIN_BAND_PTS;
   const cutoffMs = Date.now() - STICKY_ARCHIVE_DAYS * 24 * 3600 * 1000;
@@ -572,8 +547,8 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
     const pr = s.priceRange;
     if (!Array.isArray(pr) || pr.length !== 2) continue;
 
-    const hi = Number(pr[0]),
-      lo = Number(pr[1]);
+    const hi = Number(pr[0]);
+    const lo = Number(pr[1]);
     const lastSeenMs = Date.parse(s.lastSeenUtc || "");
     const old = Number.isFinite(lastSeenMs) ? lastSeenMs < cutoffMs : false;
     const inBand = hi >= bandLo && lo <= bandHi;
@@ -584,7 +559,7 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
     }
   }
 
-  // 5) Select autos within band (capped), excluding any overlapping manual
+  // Select autos within band (capped), excluding any overlapping manual
   const activeInBandAutos = list
     .filter((s) => s?.status === "active")
     .filter((s) => {
@@ -593,8 +568,6 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
       const hi = Math.max(Number(pr[0]), Number(pr[1]));
       const lo = Math.min(Number(pr[0]), Number(pr[1]));
       if (!(hi >= bandLo && lo <= bandHi)) return false;
-
-      // safety: remove autos overlapping manual
       return !manualOverlapsAny(manualStructures, hi, lo);
     });
 
@@ -606,7 +579,26 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
 
   const autosWithinBand = autosSorted.slice(0, STICKY_MAX_WITHIN_BAND);
 
-  // 6) Persist registry (AUTO ONLY)
+  // ✅ HARD GUARD: drop oversized AUTO stickies (> 4 pts)
+  const autosWithinBandFiltered = autosWithinBand.filter((s) => {
+    const pr = s?.priceRange;
+    if (!Array.isArray(pr) || pr.length !== 2) return false;
+    const hi = Math.max(Number(pr[0]), Number(pr[1]));
+    const lo = Math.min(Number(pr[0]), Number(pr[1]));
+    if (!Number.isFinite(hi) || !Number.isFinite(lo)) return false;
+    const width = hi - lo;
+
+    if (width > STRUCT_AUTO_MAX_WIDTH_PTS) {
+      console.log(
+        `[SMZ] DROPPED auto sticky (width ${width.toFixed(2)} > ${STRUCT_AUTO_MAX_WIDTH_PTS}):`,
+        pr
+      );
+      return false;
+    }
+    return true;
+  });
+
+  // Persist registry (AUTO ONLY)
   const newStore = {
     ok: true,
     meta: { ...(store.meta ?? {}), updated_at_utc: nowIso },
@@ -614,7 +606,7 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
   };
   saveSticky(newStore);
 
-  // 7) Emit manual first (uncapped), then autos (capped)
+  // Emit manual first (uncapped), then autos (capped + width-guarded)
   const manualInBand = (manualStructures || []).filter((m) => {
     const r = m?.manualRange ?? m?.priceRange;
     if (!Array.isArray(r) || r.length !== 2) return false;
@@ -624,8 +616,8 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
   });
 
   console.log(
-    `[SMZ] Emitting sticky structures: manual ${manualInBand.length} + auto ${autosWithinBand.length} = ${
-      manualInBand.length + autosWithinBand.length
+    `[SMZ] Emitting sticky structures: manual ${manualInBand.length} + auto ${autosWithinBandFiltered.length} = ${
+      manualInBand.length + autosWithinBandFiltered.length
     }`
   );
 
@@ -637,7 +629,7 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
     details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
   }));
 
-  const emittedAutos = autosWithinBand.map((s) => ({
+  const emittedAutos = autosWithinBandFiltered.map((s) => ({
     type: "institutional",
     tier: "structure_sticky",
     priceRange: s.priceRange,
@@ -646,194 +638,6 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
   }));
 
   return [...emittedManual, ...emittedAutos];
-}
-
-// ---------------- Active pockets ----------------
-
-function median(values) {
-  const arr = (values || [])
-    .filter((x) => Number.isFinite(x))
-    .slice()
-    .sort((a, b) => a - b);
-  if (!arr.length) return null;
-  const mid = Math.floor(arr.length / 2);
-  return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
-}
-
-function closeAcceptancePct(bars, lo, hi) {
-  let n = 0;
-  let inside = 0;
-  for (const b of bars) {
-    if (!b || !Number.isFinite(b.close)) continue;
-    n++;
-    if (b.close >= lo && b.close <= hi) inside++;
-  }
-  return n ? inside / n : 0;
-}
-
-function historyBoostScore(barsHist, lo, hi, mid) {
-  let touches = 0,
-    midHits = 0;
-  for (const b of barsHist) {
-    if (!b || !Number.isFinite(b.high) || !Number.isFinite(b.low) || !Number.isFinite(b.close)) continue;
-    if (b.high >= lo && b.low <= hi) touches++;
-    if (Number.isFinite(mid) && Math.abs(b.close - mid) <= 0.25) midHits++;
-  }
-  const touchScore = Math.min(65, touches * 1.1);
-  const midScore = Math.min(35, midHits * 2.0);
-  return { touches, midHits, score: round2(touchScore + midScore) };
-}
-
-function computeActivePockets({ bars1hAll, currentPrice }) {
-  const nowSec = bars1hAll.at(-1)?.time ?? Math.floor(Date.now() / 1000);
-
-  const cutoffFind = nowSec - POCKET_FIND_DAYS_1H * 86400;
-  const barsFind = bars1hAll.filter((b) => b.time >= cutoffFind);
-
-  const winLo = currentPrice - POCKET_WINDOW_PTS;
-  const winHi = currentPrice + POCKET_WINDOW_PTS;
-
-  const recentEndMinIdx = Math.max(0, barsFind.length - POCKET_RECENT_END_BARS_1H);
-
-  const pockets = [];
-
-  for (let endIdx = 0; endIdx < barsFind.length - 3; endIdx++) {
-    if (endIdx < recentEndMinIdx) continue;
-
-    for (let w = POCKET_MIN_BARS; w <= POCKET_MAX_BARS; w++) {
-      const startIdx = endIdx - (w - 1);
-      if (startIdx < 0) continue;
-
-      const win = barsFind.slice(startIdx, endIdx + 1);
-
-      let lo = Infinity,
-        hi = -Infinity;
-      const closes = [];
-
-      for (const b of win) {
-        lo = Math.min(lo, b.low);
-        hi = Math.max(hi, b.high);
-        closes.push(b.close);
-      }
-
-      const width = hi - lo;
-      if (!Number.isFinite(width) || width <= 0) continue;
-      if (width > POCKET_MAX_WIDTH_PTS) continue;
-
-      const mid = median(closes);
-      if (!Number.isFinite(mid)) continue;
-
-      const accept = closeAcceptancePct(win, lo, hi);
-      if (accept < POCKET_MIN_ACCEPT_PCT) continue;
-
-      const exit = exitConfirmedAfterIndex(barsFind, lo, hi, endIdx, 2);
-      if (exit.confirmed) continue;
-
-      if (!(hi >= winLo && lo <= winHi)) continue;
-
-      const tightScore = Math.max(0, 60 - width * 12);
-      const durScore = Math.min(25, w * 2.5);
-      const accScore = Math.min(15, (accept - 0.5) * 30);
-      const strengthNow = round2(Math.min(100, tightScore + durScore + accScore));
-
-      const distMid = Math.abs(mid - currentPrice);
-      const rel = Math.max(0, 1 - Math.min(1, distMid / POCKET_WINDOW_PTS));
-      const relevanceScore = round2(rel * 100);
-
-      const h = historyBoostScore(bars1hAll, lo, hi, mid);
-      const strengthHistory = h.score;
-
-      const strengthTotal = round2(
-        Math.min(100, strengthNow * 0.55 + relevanceScore * 0.30 + strengthHistory * 0.15)
-      );
-
-      pockets.push({
-        type: "institutional",
-        tier: "pocket_active",
-        status: "building",
-        priceRange: [round2(hi), round2(lo)],
-        price: round2((hi + lo) / 2),
-        negotiationMid: round2(mid),
-        barsCount: w,
-        acceptancePct: round2(accept),
-        strengthNow,
-        relevanceScore,
-        strengthHistory,
-        strengthTotal,
-        window: { startTime: win[0]?.time ?? null, endTime: win[win.length - 1]?.time ?? null },
-      });
-    }
-  }
-
-  pockets.sort((a, b) => (b.strengthTotal ?? 0) - (a.strengthTotal ?? 0));
-
-  const clusters = [];
-  const getHL = (p) => {
-    const pr = p?.priceRange;
-    if (!Array.isArray(pr) || pr.length < 2) return null;
-    let hi = Number(pr[0]),
-      lo = Number(pr[1]);
-    if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
-    if (lo > hi) [lo, hi] = [hi, lo];
-    return { hi, lo, mid: Number(p.negotiationMid) };
-  };
-
-  for (const p of pockets) {
-    const r = getHL(p);
-    if (!r) continue;
-
-    let placed = false;
-    for (const c of clusters) {
-      const rr = getHL(c.rep);
-      if (!rr) continue;
-
-      const interLo = Math.max(r.lo, rr.lo);
-      const interHi = Math.min(r.hi, rr.hi);
-      const inter = interHi - interLo;
-      const denom = Math.min(r.hi - r.lo, rr.hi - rr.lo);
-      const ov = inter > 0 && denom > 0 ? inter / denom : 0;
-
-      const midDist = Math.abs(r.mid - rr.mid);
-
-      if (ov >= POCKET_CLUSTER_OVERLAP || midDist <= POCKET_CLUSTER_MID_PTS) {
-        c.members.push(p);
-        if ((p.strengthTotal ?? 0) > (c.rep.strengthTotal ?? 0)) c.rep = p;
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) clusters.push({ rep: p, members: [p] });
-  }
-
-  return clusters.map((c) => c.rep).slice(0, POCKET_MAX_RETURN);
-}
-
-function isStructureLinked(pocket, liveStructures) {
-  const pr = pocket?.priceRange;
-  if (!Array.isArray(pr) || pr.length < 2) return false;
-  const pHi = Number(pr[0]);
-  const pLo = Number(pr[1]);
-  const pMid = Number.isFinite(pocket?.negotiationMid) ? pocket.negotiationMid : (pHi + pLo) / 2;
-
-  for (const s of liveStructures || []) {
-    const sr = s?.priceRange;
-    if (!Array.isArray(sr) || sr.length < 2) continue;
-    const sHi = Number(sr[0]);
-    const sLo = Number(sr[1]);
-    const sMid = (sHi + sLo) / 2;
-
-    const near =
-      Math.abs(pMid - sMid) <= STRUCT_LINK_NEAR_PTS ||
-      Math.abs(pMid - sHi) <= STRUCT_LINK_NEAR_PTS ||
-      Math.abs(pMid - sLo) <= STRUCT_LINK_NEAR_PTS;
-
-    if (near) return true;
-
-    const interLo = Math.max(pLo, sLo);
-    const interHi = Math.min(pHi, sHi);
-    if (interHi > interLo) return true;
-  }
-  return false;
 }
 
 // ---------------- main ----------------
@@ -855,18 +659,14 @@ async function main() {
 
     console.log("[SMZ] currentPrice:", round2(currentPrice));
 
-    // Load manual structures (SOURCE OF TRUTH)
     const manualStructures = loadManualStructures();
 
     console.log("[SMZ] Running engine...");
     let levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
     console.log("[SMZ] levels generated:", levelsLive.length);
 
-    // ✅ Manual zones + monster guard filter (prevents 690–697 style blobs)
+    // ✅ Manual overlap + 4pt guard for LIVE structures
     levelsLive = filterLiveLevelsByManualAndWidth(levelsLive, manualStructures);
-
-
-    const liveStructures = levelsLive.filter((z) => (z?.tier ?? "") === "structure");
 
     const stickyCandidates = levelsLive.filter((z) => {
       const t = z?.tier ?? "";
@@ -885,7 +685,6 @@ async function main() {
     // 🚫 POCKETS DISABLED — shelves now replace pocket logic
     const pocketsTagged = [];
 
-    
     const payload = {
       ok: true,
       meta: {
@@ -908,7 +707,6 @@ async function main() {
   } catch (err) {
     console.error("[SMZ] FAILED:", err);
 
-    // write safe fallback
     const fallback = {
       ok: true,
       levels: [],
