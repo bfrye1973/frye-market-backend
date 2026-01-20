@@ -13,6 +13,8 @@ import smzLevels from "./routes/smzLevels.js"; // ✅ Smart Money levels API
 import smzShelves from "./routes/smzShelves.js"; // ✅ Accum/Dist shelves API
 import smzHierarchy from "./routes/smzHierarchy.js";
 import { engine5ContextRouter } from "./routes/engine5Context.js";
+import { reactionScoreRouter } from "./routes/reactionScore.js";
+
 
 
 // ✅ Engine 2 (Fib) — IMPORTANT: this is a NAMED export, not default
@@ -78,6 +80,8 @@ app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution s
 app.use("/api/v1", engine5ContextRouter);
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 app.use("/api/v1", fibLevelsRouter);
+app.use("/api/v1", reactionScoreRouter);
+
 
 
 // ✅ Engine 2 route mount
