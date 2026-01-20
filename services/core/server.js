@@ -12,6 +12,8 @@ import sectorcards10mRouter from "./routes/sectorcards-10m.js"; // ✅ sectorcar
 import smzLevels from "./routes/smzLevels.js"; // ✅ Smart Money levels API
 import smzShelves from "./routes/smzShelves.js"; // ✅ Accum/Dist shelves API
 import smzHierarchy from "./routes/smzHierarchy.js";
+import { engine5ContextRouter } from "./routes/engine5Context.js";
+
 
 // ✅ Engine 2 (Fib) — IMPORTANT: this is a NAMED export, not default
 import { fibLevelsRouter } from "./routes/fibLevels.js";
@@ -73,6 +75,7 @@ app.use("/api/sectorcards-10m", sectorcards10mRouter); // ✅ sectorcards adapte
 app.use("/live", liveRouter); // ✅ GitHub JSON proxies
 app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
 app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution shelves
+app.use("/api/v1", engine5ContextRouter);
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 app.use("/api/v1", fibLevelsRouter);
 
