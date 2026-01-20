@@ -29,9 +29,9 @@ const BREAK_LOOKAHEAD = 10;
 const DISP_MIN_ATR = 0.6;
 
 // Relevance windows (15m bars)
-const BARS_PER_DAY_15M = 26;         // trading day approx
-const REL_3D_BARS = 3 * BARS_PER_DAY_15M;  // 78 bars
-const REL_7D_BARS = 7 * BARS_PER_DAY_15M;  // 182 bars
+const BARS_PER_DAY_15M = 26; // trading day approx
+const REL_3D_BARS = 3 * BARS_PER_DAY_15M; // 78 bars
+const REL_7D_BARS = 7 * BARS_PER_DAY_15M; // 182 bars
 
 // weighting: 3 days matters most
 const REL_W_3D = 0.7;
@@ -114,11 +114,17 @@ function tfConfirmBoost(hi, lo, bars30m, bars1h) {
 
   let hit30 = false;
   for (const b of bars30m) {
-    if (b.high >= zLo && b.low <= zHi) { hit30 = true; break; }
+    if (b.high >= zLo && b.low <= zHi) {
+      hit30 = true;
+      break;
+    }
   }
   let hit1h = false;
   for (const b of bars1h) {
-    if (b.high >= zLo && b.low <= zHi) { hit1h = true; break; }
+    if (b.high >= zLo && b.low <= zHi) {
+      hit1h = true;
+      break;
+    }
   }
 
   let boost = 1.0;
@@ -131,8 +137,10 @@ function detectBreakout(bars, endIdx, hi, lo, center, atr) {
   const n = bars.length;
   const maxIdx = Math.min(n - 1, endIdx + BREAK_LOOKAHEAD);
 
-  let up = false, down = false;
-  let maxUp = 0, maxDown = 0;
+  let up = false,
+    down = false;
+  let maxUp = 0,
+    maxDown = 0;
 
   for (let i = endIdx + 1; i <= maxIdx; i++) {
     const b = bars[i];
@@ -140,11 +148,17 @@ function detectBreakout(bars, endIdx, hi, lo, center, atr) {
 
     if (!up && close > hi + BREAK_EPS) {
       const move = (close - center) / atr;
-      if (move >= DISP_MIN_ATR) { up = true; maxUp = Math.max(maxUp, move); }
+      if (move >= DISP_MIN_ATR) {
+        up = true;
+        maxUp = Math.max(maxUp, move);
+      }
     }
     if (!down && close < lo - BREAK_EPS) {
       const move = (center - close) / atr;
-      if (move >= DISP_MIN_ATR) { down = true; maxDown = Math.max(maxDown, move); }
+      if (move >= DISP_MIN_ATR) {
+        down = true;
+        maxDown = Math.max(maxDown, move);
+      }
     }
 
     maxUp = Math.max(maxUp, (b.high - center) / atr);
@@ -167,7 +181,11 @@ function mergeShelves(list) {
 
   for (let i = 1; i < sorted.length; i++) {
     const s = sorted[i];
-    if (s.type !== cur.type) { out.push(cur); cur = { ...s }; continue; }
+    if (s.type !== cur.type) {
+      out.push(cur);
+      cur = { ...s };
+      continue;
+    }
 
     const [hi1, lo1] = cur.priceRange;
     const [hi2, lo2] = s.priceRange;
@@ -190,7 +208,10 @@ function mergeShelves(list) {
       cur._score = Math.max(cur._score, s._score);
 
       // keep best relevance diagnostics
-      if (!cur._diag || (s._diag && (s._diag?.relevance?.weightedScore ?? 0) > (cur._diag?.relevance?.weightedScore ?? 0))) {
+      if (
+        !cur._diag ||
+        (s._diag && (s._diag?.relevance?.weightedScore ?? 0) > (cur._diag?.relevance?.weightedScore ?? 0))
+      ) {
         cur._diag = s._diag;
       }
     } else {
@@ -212,29 +233,41 @@ function detectAllTimeHighMode(bars, currentPrice, atr) {
   for (const b of bars) maxHigh = Math.max(maxHigh, b.high);
   if (!Number.isFinite(maxHigh) || !Number.isFinite(currentPrice)) return { athMode: false, maxHigh: null };
   const eps = Math.max(0.25, atr * ATH_EPS_ATR);
-  const athMode = currentPrice >= (maxHigh - eps);
+  const athMode = currentPrice >= maxHigh - eps;
   return { athMode, maxHigh: Number.isFinite(maxHigh) ? maxHigh : null };
 }
 
 // ---------- relevance metrics (5–7 days, weighted to last 3) ----------
+// ✅ UPDATED Q3 + Q5 HERE ONLY
 function computeBehaviorOverWindow(bars, hi, lo, startIdx) {
-  // StartIdx is the index where we begin measuring behavior (recent window)
   const H = Math.max(hi, lo);
   const L = Math.min(hi, lo);
   const width = Math.max(H - L, 1e-6);
   const tol = width * ACCEPT_TOL_PCT;
 
-  let accept = 0;
-  let reject = 0;
   let total = 0;
 
-  let upperW = 0;
-  let lowerW = 0;
+  // Old accept/reject counters (kept for reference, but no longer decisive)
+  let acceptNear = 0;
+  let rejectFar = 0;
 
+  // ✅ Q3: wick-touch frequency counters (THIS is the key change)
+  let upperWickTouches = 0; // repeated rejection at top edge
+  let lowerWickTouches = 0; // repeated rejection at bottom edge (or liquidity grabs)
+
+  // Failed pushes (stronger “trap” signals)
   let failedPushUp = 0;
   let failedPushDown = 0;
 
-  // progress tracking
+  // ✅ Q5: acceptance requires sustained closes + progress
+  let closesAbove = 0; // closes above zone (beyond tol)
+  let closesBelow = 0; // closes below zone (beyond tol)
+
+  // Progress over time
+  let firstClose = null;
+  let lastClose = null;
+
+  // Stall tracking (time passes but no extension)
   const mid = (H + L) / 2;
   let bestUp = 0;
   let bestDn = 0;
@@ -242,64 +275,111 @@ function computeBehaviorOverWindow(bars, hi, lo, startIdx) {
   for (let i = startIdx; i < bars.length; i++) {
     const b = bars[i];
     if (!isFiniteBar(b)) continue;
+
     total++;
 
-    // acceptance vs rejection based on CLOSE location
     const c = b.close;
-    const near = (c >= (L - tol) && c <= (H + tol));
-    if (near) accept++; else reject++;
+    if (firstClose == null) firstClose = c;
+    lastClose = c;
 
-    // wick sums
-    const bodyHi = Math.max(b.open, b.close);
-    const bodyLo = Math.min(b.open, b.close);
-    upperW += Math.max(0, b.high - bodyHi);
-    lowerW += Math.max(0, bodyLo - b.low);
+    // old near/far (for visibility)
+    const near = c >= (L - tol) && c <= (H + tol);
+    if (near) acceptNear++;
+    else rejectFar++;
 
-    // failed pushes (price pokes outside but doesn't hold)
-    if (b.high > H && b.close < H) failedPushUp++;
-    if (b.low < L && b.close > L) failedPushDown++;
+    // ✅ Q3: wick-touch frequency (not wick size)
+    // upper wick touch: price traded into/above top edge but did NOT close above it
+    if (b.high >= H && c <= H) upperWickTouches++;
 
+    // lower wick touch: price traded into/below bottom edge but did NOT close below it
+    if (b.low <= L && c >= L) lowerWickTouches++;
+
+    // failed pushes (strong)
+    if (b.high > H && c < H) failedPushUp++;
+    if (b.low < L && c > L) failedPushDown++;
+
+    // ✅ Q5: sustained closes beyond zone edges (acceptance/rejection proof)
+    if (c > (H + tol)) closesAbove++;
+    if (c < (L - tol)) closesBelow++;
+
+    // stall tracking
     bestUp = Math.max(bestUp, b.high - mid);
     bestDn = Math.max(bestDn, mid - b.low);
   }
 
-  const acceptanceRate = total ? accept / total : 0;
-  const rejectionRate = total ? reject / total : 0;
+  const acceptanceRate = total ? acceptNear / total : 0;
+  const rejectionRate = total ? rejectFar / total : 0;
 
-  const wSum = upperW + lowerW + 1e-9;
-  const upperWickRatio = upperW / wSum;
-  const lowerWickRatio = lowerW / wSum;
+  // wick touch rates
+  const upperTouchRate = total ? upperWickTouches / total : 0;
+  const lowerTouchRate = total ? lowerWickTouches / total : 0;
 
-  const netProgressPts = Math.max(bestUp, bestDn);
-  // stallScore: higher means less progress (more stall)
-  // normalized by width so it's comparable
-  const progNorm = clamp(netProgressPts / (width * 3), 0, 1); // 0..1
+  // wick bias (frequency-based)
+  let wickBias = "neutral";
+  if (upperWickTouches >= lowerWickTouches + 2) wickBias = "distribution";
+  else if (lowerWickTouches >= upperWickTouches + 2) wickBias = "accumulation";
+
+  // net progress over time (simple, human-readable)
+  const netProgressSigned = (firstClose != null && lastClose != null) ? (lastClose - firstClose) : 0;
+
+  // stall score (higher means more stall)
+  const netExcursionPts = Math.max(bestUp, bestDn);
+  const progNorm = clamp(netExcursionPts / (width * 3), 0, 1);
   const stallScore = 1 - progNorm;
 
-  // distribution signals: rejection + upper wicks + failed pushes up + stall
-  const distScore =
-    0.35 * rejectionRate +
-    0.25 * upperWickRatio +
-    0.20 * (failedPushUp > 0 ? 1 : 0) +
-    0.20 * stallScore;
+  // sustained close threshold
+  const sustainMin = Math.max(2, Math.floor(total * 0.15));
+  const sustainedClosesAbove = closesAbove >= sustainMin;
+  const sustainedClosesBelow = closesBelow >= sustainMin;
 
-  // accumulation signals: acceptance + lower wicks + failed pushes down + stall
+  // ✅ New Q5 interpretation
+  // - If price repeatedly tests but cannot sustain closes through the edge → rejection
+  // - If price can sustain closes through the edge → acceptance (for that side)
+  //
+  // For distribution we care about: failedPushUp + upperWickTouches + stall + no sustainedClosesAbove
+  // For accumulation we care about: failedPushDown + lowerWickTouches + stall + no sustainedClosesBelow
+
+  const distScore =
+    0.35 * clamp(upperTouchRate, 0, 1) +
+    0.25 * clamp(failedPushUp > 0 ? 1 : 0, 0, 1) +
+    0.20 * stallScore +
+    0.20 * clamp(!sustainedClosesAbove ? 1 : 0, 0, 1);
+
   const accScore =
-    0.35 * acceptanceRate +
-    0.25 * lowerWickRatio +
-    0.20 * (failedPushDown > 0 ? 1 : 0) +
-    0.20 * stallScore;
+    0.35 * clamp(lowerTouchRate, 0, 1) +
+    0.25 * clamp(failedPushDown > 0 ? 1 : 0, 0, 1) +
+    0.20 * stallScore +
+    0.20 * clamp(!sustainedClosesBelow ? 1 : 0, 0, 1);
 
   return {
     samples: total,
+
+    // legacy visibility
     acceptanceRate: round2(acceptanceRate),
     rejectionRate: round2(rejectionRate),
-    upperWickRatio: round2(upperWickRatio),
-    lowerWickRatio: round2(lowerWickRatio),
+
+    // ✅ Q3
+    upperWickTouches,
+    lowerWickTouches,
+    upperTouchRate: round2(upperTouchRate),
+    lowerTouchRate: round2(lowerTouchRate),
+    wickBias,
+
+    // traps
     failedPushUp,
     failedPushDown,
-    netProgressPts: round2(netProgressPts),
+
+    // ✅ Q5
+    closesAbove,
+    closesBelow,
+    sustainedClosesAbove,
+    sustainedClosesBelow,
+    netProgressSignedPts: round2(netProgressSigned),
+
+    // stall
     stallScore: round2(stallScore),
+
+    // final behavior scores (0..1)
     distScore: round2(clamp(distScore, 0, 1)),
     accScore: round2(clamp(accScore, 0, 1)),
   };
@@ -316,9 +396,8 @@ function decideTypeByRelevance({ b10, hi, lo }) {
   const distWeighted = round2(REL_W_3D * w3.distScore + REL_W_7D * w7.distScore);
   const accWeighted = round2(REL_W_3D * w3.accScore + REL_W_7D * w7.accScore);
 
-  // winner takes label
   const typeByRelevance = distWeighted > accWeighted ? "distribution" : "accumulation";
-  const confidence = round2(Math.abs(distWeighted - accWeighted)); // 0..1-ish
+  const confidence = round2(Math.abs(distWeighted - accWeighted));
 
   return {
     window3d: w3,
@@ -354,8 +433,12 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
       const sIdx = endIdx - win + 1;
       const slice = b10.slice(sIdx, endIdx + 1);
 
-      let hi = -Infinity, lo = Infinity;
-      let bodySum = 0, rangeSum = 0, inside = 0, cnt = 0;
+      let hi = -Infinity,
+        lo = Infinity;
+      let bodySum = 0,
+        rangeSum = 0,
+        inside = 0,
+        cnt = 0;
 
       for (const b of slice) {
         hi = Math.max(hi, b.high);
@@ -388,21 +471,21 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
       const br = detectBreakout(b10, endIdx, hi, lo, center, atr);
       if (br.dir === "none") continue;
 
-      // Formation type (old behavior)
+      // Formation type (for reference only)
       let typeFormation = null;
       if (br.dir === "up") typeFormation = "accumulation";
       else typeFormation = "distribution";
 
       // scoring (unchanged)
-      // wickScore uses count of strong wicks inside the formation window
-      let strongLower = 0, strongUpper = 0;
+      let strongLower = 0,
+        strongUpper = 0;
       for (const b of slice) {
         const bodyHi = Math.max(b.open, b.close);
         const bodyLo = Math.min(b.open, b.close);
         const upperWick = b.high - bodyHi;
         const lowerWick = bodyLo - b.low;
-        if ((upperWick / atr) >= STRONG_WICK_ATR) strongUpper++;
-        if ((lowerWick / atr) >= STRONG_WICK_ATR) strongLower++;
+        if (upperWick / atr >= STRONG_WICK_ATR) strongUpper++;
+        if (lowerWick / atr >= STRONG_WICK_ATR) strongLower++;
       }
 
       const widthScore = 1 - (width - SHELF_MIN_WIDTH) / (SHELF_MAX_WIDTH - SHELF_MIN_WIDTH);
@@ -424,10 +507,7 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
       const final = base * distW * tfBoost * athFactor;
       if (final <= 0) continue;
 
-      // ✅ NEW: Relevance-based classification (5–7 days, weighted to 3 days)
       const relevance = decideTypeByRelevance({ b10, hi, lo });
-
-      // FINAL type comes from relevance (not formation)
       const typeFinal = relevance.typeByRelevance;
 
       candidates.push({
@@ -481,7 +561,6 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
     return width >= SHELF_MIN_WIDTH && width <= SHELF_MAX_WIDTH;
   });
 
-
   const merged = mergedAllTight.filter((s) => {
     const hi = Number(s?.priceRange?.[0]);
     const lo = Number(s?.priceRange?.[1]);
@@ -502,10 +581,7 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
       return {
         type: s.type,
         price: Number(s.price.toFixed(2)),
-        priceRange: [
-          Number(s.priceRange[0].toFixed(2)),
-          Number(s.priceRange[1].toFixed(2)),
-        ],
+        priceRange: [Number(s.priceRange[0].toFixed(2)), Number(s.priceRange[1].toFixed(2))],
         strength,
         diagnostic: s._diag,
       };
