@@ -11,7 +11,7 @@
       "shelfKey": "MANUAL_SHELF|SPY|ACC|692.00-688.80",
       "symbol": "SPY",
       "type": "accumulation",
-      "manualRange": [691.08, 689.81],
+      "manualRange": [],
       "priceRange": [691.08, 689.81],
       "locked": true,
       "rangeSource": "manual",
