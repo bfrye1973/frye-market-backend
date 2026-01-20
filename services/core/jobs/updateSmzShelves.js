@@ -1,4 +1,4 @@
-// src/services/core/jobs/updateSmzShelves.js
+// services/core/jobs/updateSmzShelves.js
 // Smart Money Shelves Job — writes smz-shelves.json (blue/red shelves)
 //
 // ✅ LOCKED "INSTITUTION STYLE" BEHAVIOR:
@@ -17,6 +17,11 @@
 // - If a shelf touches/overlaps ANY sticky institutional structure (structures_sticky),
 //   remove the shelf (strict any overlap).
 // - We check against structures_sticky only (authoritative).
+//
+// ✅ NEW LOCKED RULE (PER USER):
+// - NO TWO SHELVES CAN TOUCH/OVERLAP in final output.
+// - Higher strength shelf always wins.
+// - Implemented as final "no-touch winner" pass after clustering + global cap.
 //
 // Uses DEEP provider (jobs only), chart provider remains untouched.
 //
@@ -164,8 +169,8 @@ function overlapsBand(hi, lo, bandLow, bandHigh) {
   return hi >= bandLow && lo <= bandHigh;
 }
 
+// strict any overlap / touch
 function rangesOverlap(aHi, aLo, bHi, bLo) {
-  // strict any overlap
   return !(aHi < bLo || aLo > bHi);
 }
 
@@ -229,7 +234,6 @@ function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_S
 // ---------------- Institutional structures (structures_sticky) ----------------
 
 function loadStickyStructureRanges() {
-  // We only need ranges from structures_sticky (authoritative)
   if (!fs.existsSync(LEVELS_FILE)) {
     console.warn(`[SHELVES] levels file not found for structure filter (ok): ${LEVELS_FILE}`);
     return [];
@@ -454,9 +458,7 @@ function collapseShelvesByCluster(levels) {
       }
     }
 
-    if (!placed) {
-      clusters.push({ rep: s, members: [s] });
-    }
+    if (!placed) clusters.push({ rep: s, members: [s] });
   }
 
   const out = [];
@@ -464,7 +466,6 @@ function collapseShelvesByCluster(levels) {
   for (const c of clusters) {
     const bestAcc = pickBestOfType(c.members, "accumulation");
     const bestDist = pickBestOfType(c.members, "distribution");
-
     if (bestAcc) out.push(bestAcc);
     if (bestDist) out.push(bestDist);
   }
@@ -488,7 +489,6 @@ function applyGlobalCap(levels, maxTotal = MAX_SHELVES_TOTAL) {
     .sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
 
   const picked = [];
-
   picked.push(...acc.slice(0, targetEach));
   picked.push(...dist.slice(0, targetEach));
 
@@ -502,6 +502,42 @@ function applyGlobalCap(levels, maxTotal = MAX_SHELVES_TOTAL) {
 
   picked.sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
   return picked.slice(0, maxTotal);
+}
+
+// ✅ NEW: Final "no-touch winner" pass.
+// Sort by strength desc; keep only shelves that do NOT overlap/touch any kept shelf.
+function applyNoTouchWinnerPass(levels) {
+  const list = Array.isArray(levels) ? levels.slice() : [];
+  if (!list.length) return [];
+
+  list.sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
+
+  const kept = [];
+  let removed = 0;
+
+  for (const s of list) {
+    const sr = normalizeRange(s?.priceRange);
+    if (!sr) continue;
+
+    const touchesExisting = kept.some((k) => {
+      const kr = normalizeRange(k?.priceRange);
+      if (!kr) return false;
+      return rangesOverlap(sr.hi, sr.lo, kr.hi, kr.lo); // strict any overlap/touch
+    });
+
+    if (touchesExisting) {
+      removed++;
+      continue;
+    }
+
+    kept.push(s);
+  }
+
+  if (removed) {
+    console.log(`[SHELVES] No-touch winner pass removed: ${removed}`);
+  }
+
+  return kept;
 }
 
 // ---------------- main ----------------
@@ -528,10 +564,6 @@ async function main() {
     const s30 = spanInfo("30m", bars30m);
     const s1h = spanInfo("1h", bars1h);
 
-    console.log("[SHELVES] last close 15m:", lastClose(bars15m));
-    console.log("[SHELVES] last close 30m:", lastClose(bars30m));
-    console.log("[SHELVES] last close 1h :", lastClose(bars1h));
-
     const currentPriceAnchor = pickCurrentPriceAnchor({ bars30m, bars1h });
     if (!Number.isFinite(currentPriceAnchor)) {
       throw new Error("Cannot determine currentPriceAnchor from 30m/1h bars");
@@ -539,7 +571,7 @@ async function main() {
 
     console.log("[SHELVES] currentPriceAnchor (from 30m/1h):", currentPriceAnchor.toFixed(2));
 
-    // ✅ Load institutional sticky structure ranges (authoritative) for shelf suppression
+    // ✅ Institutional sticky structure ranges (authoritative)
     const stickyStructureRanges = loadStickyStructureRanges();
 
     // 1) Manual shelves (source-of-truth)
@@ -575,7 +607,7 @@ async function main() {
     // 5) Merge shelves
     const mergedRaw = [...manualInBand, ...autoMapped];
 
-    // ✅ TEMP CLEAN RULE: remove ANY shelf that overlaps ANY sticky structure (strict)
+    // ✅ TEMP CLEAN RULE: remove ANY shelf overlapping ANY sticky structure (strict)
     const { kept: mergedNoInstitution, removedCount: removedByInstitution } =
       removeShelvesOverlappingStickyStructures(mergedRaw, stickyStructureRanges);
 
@@ -583,7 +615,10 @@ async function main() {
     const collapsed = collapseShelvesByCluster(mergedNoInstitution);
 
     // 7) Global cap (max 8 total)
-    const finalLevels = applyGlobalCap(collapsed, MAX_SHELVES_TOTAL);
+    const capped = applyGlobalCap(collapsed, MAX_SHELVES_TOTAL);
+
+    // ✅ 8) Final "no-touch winner" pass (no shelves can touch)
+    const finalLevels = applyNoTouchWinnerPass(capped);
 
     console.log("[SHELVES] Strength remap:", {
       band: `${SHELF_STRENGTH_LO}-${SHELF_STRENGTH_HI}`,
@@ -592,7 +627,7 @@ async function main() {
     });
 
     console.log(
-      `[SHELVES] Emitting shelves: manual ${manualInBand.length} + auto ${autoMapped.length} => merged ${mergedRaw.length} => afterInstitutionFilter ${mergedNoInstitution.length} (removed ${removedByInstitution}) => collapsed ${collapsed.length} => final ${finalLevels.length}`
+      `[SHELVES] Emitting shelves: manual ${manualInBand.length} + auto ${autoMapped.length} => merged ${mergedRaw.length} => afterInstitutionFilter ${mergedNoInstitution.length} (removed ${removedByInstitution}) => collapsed ${collapsed.length} => capped ${capped.length} => final ${finalLevels.length}`
     );
 
     const payload = {
@@ -626,6 +661,11 @@ async function main() {
           rule: "strict_any_overlap",
           structures_count: stickyStructureRanges.length,
           shelves_removed: removedByInstitution,
+        },
+        no_touch_winner: {
+          enabled: true,
+          rule: "strict_any_overlap",
+          winner: "higher_strength_kept",
         },
       },
       levels: finalLevels,
