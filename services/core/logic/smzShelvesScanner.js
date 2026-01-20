@@ -471,7 +471,18 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
 
   const mergedAll = mergeShelves(candidates);
 
-  const merged = mergedAll.filter((s) => {
+  // ✅ HARD GUARD: merging can create monster shelves. Enforce width AFTER merge.
+  const mergedAllTight = mergedAll.filter((s) => {
+    const hi = Number(s?.priceRange?.[0]);
+    const lo = Number(s?.priceRange?.[1]);
+    if (!Number.isFinite(hi) || !Number.isFinite(lo)) return false;
+
+    const width = Math.abs(hi - lo);
+    return width >= SHELF_MIN_WIDTH && width <= SHELF_MAX_WIDTH;
+  });
+
+
+  const merged = mergedAllTight.filter((s) => {
     const hi = Number(s?.priceRange?.[0]);
     const lo = Number(s?.priceRange?.[1]);
     if (!Number.isFinite(hi) || !Number.isFinite(lo)) return false;
