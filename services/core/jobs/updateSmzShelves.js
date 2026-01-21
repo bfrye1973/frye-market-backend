@@ -173,6 +173,15 @@ function overlapsBand(hi, lo, bandLow, bandHigh) {
 function rangesOverlap(aHi, aLo, bHi, bLo) {
   return !(aHi < bLo || aLo > bHi);
 }
+// overlap ratio (used for 25% institutional overlap rule)
+function overlapRatio(aHi, aLo, bHi, bLo) {
+  const lo = Math.max(aLo, bLo);
+  const hi = Math.min(aHi, bHi);
+  const inter = hi - lo;
+  if (inter <= 0) return 0;
+  const denom = Math.min(aHi - aLo, bHi - bLo);
+  return denom > 0 ? inter / denom : 0;
+}
 
 function rangeGapPts(aHi, aLo, bHi, bLo) {
   if (rangesOverlap(aHi, aLo, bHi, bLo)) return 0;
@@ -260,6 +269,15 @@ function loadStickyStructureRanges() {
   }
 }
 
+function overlapRatio(aHi, aLo, bHi, bLo) {
+  const lo = Math.max(aLo, bLo);
+  const hi = Math.min(aHi, bHi);
+  const inter = hi - lo;
+  if (inter <= 0) return 0;
+  const denom = Math.min(aHi - aLo, bHi - bLo);
+  return denom > 0 ? inter / denom : 0;
+}
+
 function removeShelvesOverlappingStickyStructures(levels, stickyRanges) {
   const list = Array.isArray(levels) ? levels : [];
   const structs = Array.isArray(stickyRanges) ? stickyRanges : [];
@@ -271,7 +289,10 @@ function removeShelvesOverlappingStickyStructures(levels, stickyRanges) {
     const r = normalizeRange(s?.priceRange);
     if (!r) return false;
 
-    const overlapsAny = structs.some((z) => rangesOverlap(r.hi, r.lo, z.hi, z.lo));
+  const overlapsAny = structs.some(
+   (z) => overlapRatio(r.hi, r.lo, z.hi, z.lo) >= 0.25
+ );
+
     if (overlapsAny) removed++;
     return !overlapsAny;
   });
