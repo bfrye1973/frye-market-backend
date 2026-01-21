@@ -5,24 +5,12 @@
 //
 // GET /api/v1/volume-behavior?symbol=SPY&tf=1h&zoneLo=475.2&zoneHi=476.1
 // Optional: touchIndex, lookback, reactionScore
-//
-// NOTE: Bars retrieval must be wired to your existing provider.
-// I left a single function stub `fetchBars(...)` for you to connect.
 
 import express from "express";
 import { computeVolumeBehavior } from "../logic/volumeBehaviorEngine.js";
+import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
 
 export const volumeBehaviorRouter = express.Router();
-
-async function fetchBars(/* symbol, tf, limit */) {
-  // ✅ WIRE THIS to your existing bars provider (Polygon / cached JSON / etc.)
-  // Must return bars in ascending time order, newest last:
-  // [{ t, o, h, l, c, v }, ...]
-  //
-  // If you tell me the exact provider file you use in core (one path),
-  // I’ll replace this stub with the correct import + call in one shot.
-  throw new Error("fetchBars() not wired");
-}
 
 volumeBehaviorRouter.get("/volume-behavior", async (req, res) => {
   try {
@@ -45,11 +33,19 @@ volumeBehaviorRouter.get("/volume-behavior", async (req, res) => {
     const touchIndex = req.query.touchIndex != null ? Number(req.query.touchIndex) : null;
     const reactionScore = req.query.reactionScore != null ? Number(req.query.reactionScore) : null;
 
-    // Bars count: we need enough to compute AVGV20 + pullback/reversal windows.
-    // Safe default:
-    const limit = Math.max(120, lookback + 40);
+    // ✅ polygonBars.js takes DAYS, not bar count.
+    // We choose safe defaults per timeframe.
+    const days =
+      tf === "1m" ? 5 :
+      tf === "5m" ? 10 :
+      tf === "10m" ? 14 :
+      tf === "15m" ? 21 :
+      tf === "30m" ? 35 :
+      tf === "1h" ? 60 :
+      tf === "4h" ? 180 :
+      120;
 
-    const bars = await fetchBars(symbol, tf, limit);
+    const bars = await getBarsFromPolygon(symbol, tf, days, { mode: "intraday" });
 
     const result = computeVolumeBehavior({
       bars,
