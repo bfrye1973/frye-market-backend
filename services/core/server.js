@@ -14,7 +14,7 @@ import smzShelves from "./routes/smzShelves.js"; // ✅ Accum/Dist shelves API
 import smzHierarchy from "./routes/smzHierarchy.js";
 import { engine5ContextRouter } from "./routes/engine5Context.js";
 import { reactionScoreRouter } from "./routes/reactionScore.js";
-
+import { volumeBehaviorRouter } from "./routes/volumeBehavior.js";
 
 
 // ✅ Engine 2 (Fib) — IMPORTANT: this is a NAMED export, not default
@@ -81,6 +81,7 @@ app.use("/api/v1", engine5ContextRouter);
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 app.use("/api/v1", fibLevelsRouter);
 app.use("/api/v1", reactionScoreRouter);
+app.use("/api/v1", volumeBehaviorRouter);
 
 
 
