@@ -7,38 +7,39 @@
     "notes": "Manual SPY structure zones. Source-of-truth. Never overwritten by jobs."
   },
   "structures": [
-    {
-      "structureKey": "MANUAL|SPY|686.00-688.70",
-      "symbol": "SPY",
-      "tier": "structure",
-      "manualRange": [688.70, 686.00],
-      "priceRange": [688.70, 686.00],
-      "locked": true,
-      "rangeSource": "manual",
-      "status": "active",
-      "stickyConfirmed": true
-    },
-    {
-      "structureKey": "MANUAL|SPY|680.58-683.61",
-      "symbol": "SPY",
-      "tier": "structure",
-      "manualRange": [683.61, 680.58],
-      "priceRange": [683.61, 680.58],
-      "locked": true,
-      "rangeSource": "manual",
-      "status": "active",
-      "stickyConfirmed": true
-    },
-    {
-      "structureKey": "MANUAL|SPY|673.80-676.68",
-      "symbol": "SPY",
-      "tier": "structure",
-      "manualRange": [676.68, 673.80],
-      "priceRange": [676.68, 673.80],
-      "locked": true,
-      "rangeSource": "manual",
-      "status": "active",
-      "stickyConfirmed": true
-    }
-  ]
+  { 
+    "structureKey": "MANUAL|SPY|NEG|687.16-688.22",
+  "symbol": "SPY",
+  "tier": "structure",
+  "manualRange": [688.22, 687.16],
+  "priceRange": [688.22, 687.16],
+  "locked": true,
+  "rangeSource": "manual",
+  "status": "active",
+  "stickyConfirmed": true,
+  "notes": "NEGOTIATED / VALUE zone inside institutional 686.00–688.70 (turquoise)"
+},
+{
+  "structureKey": "MANUAL|SPY|NEG|682.22-683.19",
+  "symbol": "SPY",
+  "tier": "structure",
+  "manualRange": [683.19, 682.22],
+  "priceRange": [683.19, 682.22],
+  "locked": true,
+  "rangeSource": "manual",
+  "status": "active",
+  "stickyConfirmed": true,
+  "notes": "NEGOTIATED / VALUE zone inside institutional 680.58–683.61 (turquoise)"
+},
+{
+  "structureKey": "MANUAL|SPY|NEG|674.73-676.55",
+  "symbol": "SPY",
+  "tier": "structure",
+  "manualRange": [676.55, 674.73],
+  "priceRange": [676.55, 674.73],
+  "locked": true,
+  "rangeSource": "manual",
+  "status": "active",
+  "stickyConfirmed": true,
+  "notes": "NEGOTIATED / VALUE zone inside institutional 673.80–676.68 (turquoise)"
 }
