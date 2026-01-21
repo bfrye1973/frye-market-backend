@@ -670,7 +670,7 @@ async function main() {
           enabled: true,
           source: path.basename(LEVELS_FILE),
           key: "structures_sticky",
-          rule: "strict_any_overlap",
+          rule: "overlap_ratio>=0.25",
           structures_count: stickyStructureRanges.length,
           shelves_removed: removedByInstitution,
         },
