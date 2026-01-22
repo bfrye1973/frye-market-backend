@@ -1,0 +1,518 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Ferrari Dashboard — make_eod.py (R15.1 — EOD Balanced Breadth Confirm)
+
+What’s locked:
+- EOD Lux PSI = SHORT-MEMORY current-state detector (weeks), not long history
+- PSI window default = 20 trading days (PSI_WIN_D=20)
+- PSI meaning = tightness (higher = tighter)
+- Ferrari 3-color squeeze light:
+    RED    psi >= 90
+    YELLOW 70 <= psi < 90
+    GREEN  psi < 70
+- Guardrail: source.mode must be "daily" (prevents intraday contamination)
+- Internals Weak can block entries even if state is Bull
+- Option A: break the “exact 50” dead-zone with tiny bias
+
+What changed in R15.1:
+- breadth_confirm now blends:
+    50% ETF confirm (EMA10>EMA20 + bar-up on sector ETFs)
+    25% sectorCards average breadth_pct
+    25% sectorCards average momentum_pct
+  This prevents “EOD 95” when sectorCards are mixed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import sys
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional, Tuple
+
+UTC = timezone.utc
+POLY_BASE = "https://api.polygon.io"
+
+SECTOR_ETFS = ["XLK","XLY","XLC","XLP","XLU","XLV","XLRE","XLE","XLF","XLB","XLI"]
+OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
+DEFENSIVE = {"consumer staples","utilities","health care","real estate"}
+
+POLY_KEY = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_API_KEY") or os.environ.get("POLY_KEY") or ""
+
+# --- EMA distance saturations (daily) ---
+FULL_DIST_10 = 0.60
+FULL_DIST_20 = 1.00
+FULL_DIST_50 = 2.00
+EMA10_PULLBACK_TOL = -0.20
+
+# --- Score weights (sum=1.00) ---
+W_EMA_STRUCT   = 0.60
+W_BREADTH_CONF = 0.25
+W_CONDITIONS   = 0.15
+
+# --- Lux PSI params ---
+LUX_CONV = 50
+LUX_LEN  = 20
+
+# ✅ SHORT MEMORY PSI window (TRADING DAYS) — you wanted 20
+PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "10"))
+
+# Fetch days (ONLY for EMAs/ATR stability, NOT PSI memory)
+SPY_FETCH_DAYS    = int(os.environ.get("SPY_FETCH_DAYS", "260"))
+SECTOR_FETCH_DAYS = int(os.environ.get("SECTOR_FETCH_DAYS", "120"))
+
+# Option A: "exact 50" dead-zone breaker
+PSI_DEADZONE_EPS = float(os.environ.get("PSI_DEADZONE_EPS", "0.25"))
+PSI_BIAS_TREND   = float(os.environ.get("PSI_BIAS_TREND", "49.0"))
+PSI_BIAS_WEAK    = float(os.environ.get("PSI_BIAS_WEAK", "51.0"))
+
+def now_utc_iso() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def clamp(x: float, lo: float, hi: float) -> float:
+    try:
+        return max(lo, min(hi, float(x)))
+    except Exception:
+        return lo
+
+def pct(a: float, b: float) -> float:
+    return 0.0 if b <= 0 else 100.0 * float(a) / float(b)
+
+def fetch_json(url: str, timeout: int = 30) -> dict:
+    req = urllib.request.Request(url, headers={"User-Agent":"make-eod/3.1","Cache-Control":"no-store"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+def poly_daily_bars(ticker: str, days: int) -> List[dict]:
+    end = datetime.now(UTC).date()
+    start = (end - timedelta(days=days)).strftime("%Y-%m-%d")
+    end_s = end.strftime("%Y-%m-%d")
+    url = f"{POLY_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end_s}?adjusted=true&sort=asc&limit=50000&apiKey={POLY_KEY}"
+    try:
+        js = fetch_json(url, timeout=25)
+        rows = js.get("results") or []
+    except Exception:
+        rows = []
+    out: List[dict] = []
+    for r in rows:
+        try:
+            out.append({
+                "t": int(r["t"])//1000,
+                "o": float(r["o"]),
+                "h": float(r["h"]),
+                "l": float(r["l"]),
+                "c": float(r["c"]),
+                "v": float(r.get("v",0.0))
+            })
+        except Exception:
+            pass
+    return out
+
+def ema_series(vals: List[float], span: int) -> List[float]:
+    k = 2.0 / (span + 1.0)
+    out: List[float] = []
+    e: Optional[float] = None
+    for v in vals:
+        e = v if e is None else e + k * (v - e)
+        out.append(e)
+    return out
+
+def dist_pct(close: float, ema: float) -> float:
+    if ema <= 0:
+        return 0.0
+    return 100.0 * (close - ema) / ema
+
+def posture_from_dist(distp: float, full_dist: float) -> float:
+    unit = clamp(distp / max(full_dist, 1e-9), -1.0, 1.0)
+    return clamp(50.0 + 50.0 * unit, 0.0, 100.0)
+
+def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
+    # LuxAlgo PSI
+    if len(closes) < length + 2:
+        return None
+    mx = None
+    mn = None
+    diffs: List[float] = []
+    eps = 1e-12
+    for src in map(float, closes):
+        mx = src if mx is None else max(mx - (mx - src)/conv, src)
+        mn = src if mn is None else min(mn + (src - mn)/conv, src)
+        span = max(mx - mn, eps)
+        diffs.append(math.log(span))
+    win = diffs[-length:]
+    if len(win) < length:
+        return None
+    xs = list(range(length))
+    xbar = sum(xs) / length
+    ybar = sum(win) / length
+    nume = sum((x - xbar) * (y - ybar) for x, y in zip(xs, win))
+    denx = sum((x - xbar) ** 2 for x in xs)
+    deny = sum((y - ybar) ** 2 for y in win)
+    den = math.sqrt(denx * deny) if denx > 0 and deny > 0 else 0.0
+    r = (nume / den) if den != 0 else 0.0
+    psi = -50.0 * r + 50.0
+    return float(clamp(psi, 0.0, 100.0))
+
+def volatility_atr14_pct(C: List[float], H: List[float], L: List[float]) -> float:
+    if len(C) < 20:
+        return 20.0
+    trs=[max(H[i]-L[i], abs(H[i]-C[i-1]), abs(L[i]-C[i-1])) for i in range(1,len(C))]
+    if len(trs) < 14:
+        return 20.0
+    atr = sum(trs[-14:]) / 14.0
+    return max(0.0, 100.0 * atr / C[-1]) if C[-1] > 0 else 0.0
+
+def liquidity_5_20(V: List[float]) -> float:
+    if len(V) < 20:
+        return 70.0
+    v5  = sum(V[-5:]) / 5.0
+    v20 = sum(V[-20:]) / 20.0
+    if v20 <= 0:
+        return 0.0
+    return clamp(100.0 * (v5 / v20), 0.0, 120.0)
+
+def squeeze_regime(psi: float) -> Tuple[str, str, bool, str]:
+    if psi >= 90.0:
+        return ("danger", "red", True, "NO ENTRIES (exits allowed)")
+    if psi >= 84.0:
+        return ("caution", "yellow", False, "A+ ONLY")
+    if psi >= 25.0:
+        return ("free", "green", False, "NORMAL")
+    return ("minor", "blue", False, "CHOP CAUTION")
+
+def squeeze_score_from_regime(regime_key: str) -> float:
+    if regime_key == "danger": return 0.0
+    if regime_key == "caution": return 30.0
+    if regime_key == "free": return 100.0
+    return 60.0
+
+def squeeze_light_color_3(psi: float) -> str:
+    if psi >= 90.0:
+        return "red"
+    if psi >= 70.0:
+        return "yellow"
+    return "green"
+
+def compute_eod_state(close: float, ema10: float, ema20: float, ema50: float) -> Tuple[str, str]:
+    d10 = dist_pct(close, ema10)
+    above20 = close > ema20
+    below50 = close < ema50
+    if above20:
+        if d10 >= EMA10_PULLBACK_TOL:
+            return ("bull", "bull")
+        return ("neutral", "pullback")
+    if below50:
+        return ("bear", "regime_damage")
+    return ("bear", "bear")
+
+def apply_score_guardrails(state: str, score: float) -> float:
+    if state == "bull":
+        return clamp(score, 55.0, 100.0)
+    if state == "neutral":
+        return clamp(score, 45.0, 65.0)
+    return clamp(score, 0.0, 45.0)
+
+def sector_is_red(card: dict) -> bool:
+    try:
+        b = float(card.get("breadth_pct", 50.0))
+        m = float(card.get("momentum_pct", 50.0))
+    except Exception:
+        return False
+    return (b <= 45.0) and (m <= 45.0)
+
+def compute_internals_weak(cards: List[dict], participation_daily: float, breadth_daily: float) -> Tuple[bool, int, str]:
+    red = sum(1 for c in (cards or []) if sector_is_red(c))
+    if red >= 7:
+        return True, red, f"INTERNALS WEAK: {red}/11 sectors red"
+    if isinstance(participation_daily,(int,float)) and participation_daily < 55.0:
+        return True, red, f"INTERNALS WEAK: participation {participation_daily:.1f}%"
+    if isinstance(breadth_daily,(int,float)) and breadth_daily < 50.0:
+        return True, red, f"INTERNALS WEAK: breadth {breadth_daily:.1f}%"
+    return False, red, ""
+
+def compute_sectorcards_risk_on(cards: List[dict]) -> float:
+    if not cards:
+        return 50.0
+    by = {(c.get("sector") or "").strip().lower(): c for c in cards}
+    score = considered = 0
+    for s in OFFENSIVE:
+        b = by.get(s, {}).get("breadth_pct")
+        if isinstance(b,(int,float)):
+            considered += 1
+            score += (1 if float(b) > 50.0 else 0)
+    for s in DEFENSIVE:
+        b = by.get(s, {}).get("breadth_pct")
+        if isinstance(b,(int,float)):
+            considered += 1
+            score += (1 if float(b) < 50.0 else 0)
+    return round(pct(score, considered or 1), 2)
+
+def sectorcards_avgs(cards: List[dict]) -> Tuple[float, float]:
+    if not cards:
+        return (50.0, 50.0)
+    bs = []
+    ms = []
+    for c in cards:
+        try:
+            bs.append(float(c.get("breadth_pct", 50.0)))
+            ms.append(float(c.get("momentum_pct", 50.0)))
+        except Exception:
+            continue
+    if not bs or not ms:
+        return (50.0, 50.0)
+    return (sum(bs)/len(bs), sum(ms)/len(ms))
+
+def daily_breadth_participation_from_sector_etfs() -> Tuple[float, float]:
+    good = align = barup = 0
+    for sym in SECTOR_ETFS:
+        b = poly_daily_bars(sym, days=SECTOR_FETCH_DAYS)
+        if len(b) < 30:
+            continue
+        closes = [x["c"] for x in b]
+        opens  = [x["o"] for x in b]
+        e10 = ema_series(closes, 10)[-1]
+        e20 = ema_series(closes, 20)[-1]
+        good += 1
+        if e10 > e20:
+            align += 1
+        if closes[-1] > opens[-1]:
+            barup += 1
+    if good <= 0:
+        return (50.0, 50.0)
+    align_pct = pct(align, good)
+    barup_pct = pct(barup, good)
+    breadth_daily = clamp(0.60*align_pct + 0.40*barup_pct, 0.0, 100.0)
+    participation = clamp(align_pct, 0.0, 100.0)
+    return (round(breadth_daily,2), round(participation,2))
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--source", required=True)
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args()
+
+    if not POLY_KEY:
+        print("[fatal] Missing POLYGON_API_KEY", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        src = json.load(open(args.source,"r",encoding="utf-8"))
+    except Exception as e:
+        print("[error] cannot read source:", e, file=sys.stderr)
+        sys.exit(1)
+
+    # Guardrail: must be DAILY source
+    mode = (src.get("mode") or "").strip().lower()
+    if mode and mode != "daily":
+        print(f"[fatal] EOD source mode must be 'daily'. got: {mode}", file=sys.stderr)
+        sys.exit(2)
+
+    cards = src.get("sectorCards") or []
+
+    bars = poly_daily_bars("SPY", days=SPY_FETCH_DAYS)
+    if len(bars) < 120:
+        print("[fatal] insufficient SPY daily bars", file=sys.stderr)
+        sys.exit(2)
+
+    C = [b["c"] for b in bars]
+    H = [b["h"] for b in bars]
+    L = [b["l"] for b in bars]
+    V = [b["v"] for b in bars]
+    close = float(C[-1])
+
+    e10 = ema_series(C, 10)[-1]
+    e20 = ema_series(C, 20)[-1]
+    e50 = ema_series(C, 50)[-1]
+
+    d10 = dist_pct(close, e10)
+    d20 = dist_pct(close, e20)
+    d50 = dist_pct(close, e50)
+
+    ema10_post = posture_from_dist(d10, FULL_DIST_10)
+    ema20_post = posture_from_dist(d20, FULL_DIST_20)
+    ema50_post = posture_from_dist(d50, FULL_DIST_50)
+    ema_structure = float(clamp(0.50*ema20_post + 0.30*ema10_post + 0.20*ema50_post, 0.0, 100.0))
+
+    state, state_label = compute_eod_state(close, e10, e20, e50)
+
+    # SHORT MEMORY PSI
+    Cw = C[-PSI_WIN_D:] if len(C) > PSI_WIN_D else C
+    psi = lux_psi_from_closes(Cw, conv=LUX_CONV, length=LUX_LEN)
+    psi = float(psi) if isinstance(psi,(int,float)) else 50.0
+    psi = float(clamp(psi, 0.0, 100.0))
+
+    # Option A: break exact-50 dead-zone
+    if abs(psi - 50.0) < PSI_DEADZONE_EPS:
+        psi = PSI_BIAS_TREND if ema_structure >= 55.0 else PSI_BIAS_WEAK
+
+    regime_key, _regime_color, no_entries, mode_label = squeeze_regime(psi)
+    squeeze_score = squeeze_score_from_regime(regime_key)
+
+    vol_pct = float(volatility_atr14_pct(C, H, L))
+    vol_score = float(clamp(100.0 - clamp(vol_pct, 0.0, 200.0), 0.0, 100.0))
+
+    liq_pct = float(liquidity_5_20(V))
+    liq_norm = float(clamp((liq_pct / 120.0) * 100.0, 0.0, 100.0))
+
+    conditions = float(clamp(0.40*squeeze_score + 0.30*liq_norm + 0.30*vol_score, 0.0, 100.0))
+
+    # ETF confirm
+    etf_breadth, etf_participation = daily_breadth_participation_from_sector_etfs()
+    etf_confirm = float(clamp(0.60*etf_breadth + 0.40*etf_participation, 0.0, 100.0))
+
+    # sectorCards averages
+    cards_b_avg, cards_m_avg = sectorcards_avgs(cards)
+
+    # ✅ BALANCED blend: 50% ETF confirm, 25% card breadth, 25% card momentum
+    breadth_confirm = float(clamp(
+        0.50*etf_confirm + 0.25*cards_b_avg + 0.25*cards_m_avg,
+        0.0, 100.0
+    ))
+
+    internals_weak, red_count, internals_reason = compute_internals_weak(cards, etf_participation, etf_breadth)
+    risk_on = compute_sectorcards_risk_on(cards)
+
+    score_raw = float(W_EMA_STRUCT*ema_structure + W_BREADTH_CONF*breadth_confirm + W_CONDITIONS*conditions)
+    score = apply_score_guardrails(state, score_raw)
+
+    allow_exits = True
+    allow_entries = (not no_entries)
+    a_plus_only = (regime_key == "caution")
+    danger_active = (regime_key == "danger")
+
+    if internals_weak:
+        allow_entries = False
+        a_plus_only = False
+
+    updated_utc = now_utc_iso()
+    squeeze_light = squeeze_light_color_3(psi)
+
+    components = {
+        "emaStructure": round(ema_structure, 1),
+        "breadthConfirm": round(breadth_confirm, 1),
+        "conditions": round(conditions, 1),
+        "squeezePsi": round(psi, 1),
+        "liquidityNorm": round(liq_norm, 1),
+        "volScore": round(vol_score, 1),
+        "internalsWeak": bool(internals_weak),
+        "redSectors": int(red_count),
+        "psiWindowDays": int(PSI_WIN_D),
+        "etfConfirm": round(etf_confirm, 1),
+        "cardsBreadthAvg": round(cards_b_avg, 1),
+        "cardsMomentumAvg": round(cards_m_avg, 1),
+    }
+
+    daily = {
+        "state": state,
+        "stateLabel": state_label,
+        "score": round(score, 1),
+        "breadthDailyPct": etf_breadth,
+        "participationDailyPct": etf_participation,
+        "squeezePsi": round(psi, 2),
+        "squeezeRegime": regime_key,
+        "squeezeColor": squeeze_light,
+        "volatilityPct": round(vol_pct, 3),
+        "liquidityPct": round(liq_pct, 2),
+        "riskOnPct": risk_on,
+        "internalsWeak": bool(internals_weak),
+        "internalsWeakReason": internals_reason if internals_weak else "",
+        "redSectorsCount": int(red_count),
+        "overallEOD": {
+            "state": state,
+            "score": round(score, 1),
+            "components": components,
+            "lastChanged": updated_utc,
+        },
+        "tradeGate": {
+            "allowEntries": bool(allow_entries),
+            "allowExits": bool(allow_exits),
+            "mode": ("INTERNALS WEAK — NO LONG ENTRIES" if internals_weak else mode_label),
+            "aPlusOnly": bool(a_plus_only),
+            "danger": bool(danger_active),
+            "psi": round(psi, 2),
+        }
+    }
+
+    metrics = {
+        "overall_eod_score": round(score, 1),
+        "overall_eod_state": state,
+
+        "breadth_daily_pct": etf_breadth,
+        "participation_daily_pct": etf_participation,
+        "breadth_confirm_pct": round(float(breadth_confirm), 2),
+
+        "daily_squeeze_pct": round(float(psi), 2),
+        "squeeze_regime": regime_key,
+        "psi_window_days": int(PSI_WIN_D),
+
+        "volatility_pct": round(float(vol_pct), 3),
+        "liquidity_pct": round(float(liq_pct), 2),
+        "liq_norm_pct": round(float(liq_norm), 2),
+        "vol_score_pct": round(float(vol_score), 2),
+        "conditions_pct": round(float(conditions), 2),
+
+        "risk_on_daily_pct": risk_on,
+
+        "internals_weak": bool(internals_weak),
+        "red_sectors_count": int(red_count),
+
+        # debug visibility
+        "etf_confirm_pct": round(float(etf_confirm), 2),
+        "cards_breadth_avg": round(float(cards_b_avg), 2),
+        "cards_momentum_avg": round(float(cards_m_avg), 2),
+    }
+
+    engineLights = {
+        "eodSqueezeGate": {
+            "state": squeeze_light,
+            "active": True,
+            "psi": round(psi, 2),
+            "regime": regime_key,
+            "allowEntries": bool(allow_entries),
+            "allowExits": bool(allow_exits),
+            "mode": daily["tradeGate"]["mode"],
+            "lastChanged": updated_utc,
+        },
+        "eodInternals": {
+            "state": ("red" if internals_weak else "green"),
+            "active": bool(internals_weak),
+            "redSectors": int(red_count),
+            "reason": internals_reason if internals_weak else "",
+            "lastChanged": updated_utc,
+        }
+    }
+
+    out = {
+        "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_at_utc": updated_utc,
+        "metrics": metrics,
+        "daily": daily,
+        "sectorCards": cards,
+        "engineLights": engineLights,
+        "meta": {
+            "source": "make_eod.py R15.1 balanced-breadth + short-psi(20d)",
+            "tz": "America/Phoenix",
+        }
+    }
+
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+
+    print(
+        f"[eod] psi={psi:.2f} win={PSI_WIN_D} etfConfirm={etf_confirm:.1f} "
+        f"cardsB={cards_b_avg:.1f} cardsM={cards_m_avg:.1f} breadthConfirm={breadth_confirm:.1f} "
+        f"score={score:.1f} state={state}",
+        flush=True
+    )
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print("[error]", e, file=sys.stderr)
+        sys.exit(1)
