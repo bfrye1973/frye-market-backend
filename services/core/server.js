@@ -80,19 +80,16 @@ app.use("/api/sectorcards-10m", sectorcards10mRouter); // ✅ sectorcards adapte
 app.use("/live", liveRouter); // ✅ GitHub JSON proxies
 app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
 app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution shelves
-app.use("/api/v1", engine5ContextRouter);
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 
-// ✅ Engine 2 route mount (ONLY ONCE)
+// Routers mounted under /api/v1
+app.use("/api/v1", engine5ContextRouter);
 app.use("/api/v1", fibLevelsRouter);
-
-// ✅ Engines 3/4/5 routes
 app.use("/api/v1", reactionScoreRouter);
 app.use("/api/v1", volumeBehaviorRouter);
 app.use("/api/v1", confluenceScoreRouter);
 
 // ✅ Engine 6 route mount
-// tradePermissionRouter defines GET/POST "/trade-permission", so mount at "/api/v1"
 app.use("/api/v1", tradePermissionRouter);
 
 // --- 404 / errors ---
@@ -120,8 +117,9 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/v1/smz-levels");
   console.log("- /api/v1/smz-shelves");
   console.log("- /api/v1/smz-hierarchy");
-  console.log("- /api/v1/fib-levels"); // ✅ Engine 2
-  console.log("- /api/v1/trade-permission"); // ✅ Engine 6
+  console.log("- /api/v1/fib-levels");
+  console.log("- /api/v1/confluence-score");
+  console.log("- /api/v1/trade-permission   ✅ Engine 6");
   console.log("- /live  (GitHub JSON proxies)");
 });
 
