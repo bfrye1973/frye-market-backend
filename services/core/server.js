@@ -17,9 +17,11 @@ import { reactionScoreRouter } from "./routes/reactionScore.js";
 import { volumeBehaviorRouter } from "./routes/volumeBehavior.js";
 import { confluenceScoreRouter } from "./routes/confluenceScore.js";
 
-
 // ✅ Engine 2 (Fib) — IMPORTANT: this is a NAMED export, not default
 import { fibLevelsRouter } from "./routes/fibLevels.js";
+
+// ✅ Engine 6 (Trade Permission)
+import { tradePermissionRouter } from "./routes/tradePermission.js";
 
 // --- App setup ---
 const app = express();
@@ -46,7 +48,7 @@ app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && ALLOW.has(origin)) res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
@@ -80,16 +82,18 @@ app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
 app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution shelves
 app.use("/api/v1", engine5ContextRouter);
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
+
+// ✅ Engine 2 route mount (ONLY ONCE)
 app.use("/api/v1", fibLevelsRouter);
+
+// ✅ Engines 3/4/5 routes
 app.use("/api/v1", reactionScoreRouter);
 app.use("/api/v1", volumeBehaviorRouter);
 app.use("/api/v1", confluenceScoreRouter);
 
-
-
-// ✅ Engine 2 route mount
-// NOTE: fibLevelsRouter defines GET "/fib-levels", so we mount it at "/api/v1"
-app.use("/api/v1", fibLevelsRouter);
+// ✅ Engine 6 route mount
+// tradePermissionRouter defines GET/POST "/trade-permission", so mount at "/api/v1"
+app.use("/api/v1", tradePermissionRouter);
 
 // --- 404 / errors ---
 app.use((req, res) =>
@@ -116,7 +120,8 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/v1/smz-levels");
   console.log("- /api/v1/smz-shelves");
   console.log("- /api/v1/smz-hierarchy");
-  console.log("- /api/v1/fib-levels"); // ✅ Engine 2 (GET /api/v1/fib-levels)
+  console.log("- /api/v1/fib-levels"); // ✅ Engine 2
+  console.log("- /api/v1/trade-permission"); // ✅ Engine 6
   console.log("- /live  (GitHub JSON proxies)");
 });
 
