@@ -13,7 +13,7 @@
 // Output contract (stable):
 // {
 //   flags: { pullbackContraction, reversalExpansion, absorptionDetected, distributionDetected,
-//            liquidityTrap, initiativeMoveConfirmed },
+//            liquidityTrap, initiativeMoveConfirmed, volumeDivergence },
 //   ratios: { pullbackVolRatio, reversalVolRatio },
 //   timing: { touchIndex, touchBarsAgo },
 //   volumeScore: 0..15,
@@ -29,6 +29,24 @@ function sma(values) {
   if (!values.length) return null;
   const s = values.reduce((a, b) => a + b, 0);
   return s / values.length;
+}
+
+// simple slope of y vs index 0..n-1 using least squares
+function linSlope(values) {
+  const n = values.length;
+  if (n < 2) return 0;
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for (let i = 0; i < n; i++) {
+    const x = i;
+    const y = values[i];
+    sumX += x;
+    sumY += y;
+    sumXY += x * y;
+    sumXX += x * x;
+  }
+  const denom = n * sumXX - sumX * sumX;
+  if (denom === 0) return 0;
+  return (n * sumXY - sumX * sumY) / denom;
 }
 
 function atrFromBars(bars, len = 14) {
@@ -95,6 +113,11 @@ export function computeVolumeBehavior({
     pullbackContractionMax = 0.85,
     absorptionVolMinRatio = 1.30,
     absorptionMaxDisplacementAtr = 0.25,
+
+    // ✅ NEW: divergence params (small suppress only)
+    divergenceBars = 6,
+    divergencePriceMinAtr = 0.25,
+    divergenceVolMaxRatio = 0.95,
   } = opts;
 
   if (!Array.isArray(bars) || bars.length < Math.max(avgVolLen + 5, 30)) {
@@ -106,6 +129,7 @@ export function computeVolumeBehavior({
         distributionDetected: false,
         liquidityTrap: false,
         initiativeMoveConfirmed: false,
+        volumeDivergence: false,
       },
       ratios: { pullbackVolRatio: null, reversalVolRatio: null },
       timing: { touchIndex: null, touchBarsAgo: null },
@@ -128,6 +152,7 @@ export function computeVolumeBehavior({
         distributionDetected: false,
         liquidityTrap: false,
         initiativeMoveConfirmed: false,
+        volumeDivergence: false,
       },
       ratios: { pullbackVolRatio: null, reversalVolRatio: null },
       timing: { touchIndex: null, touchBarsAgo: null },
@@ -166,6 +191,7 @@ export function computeVolumeBehavior({
         distributionDetected: false,
         liquidityTrap: false,
         initiativeMoveConfirmed: false,
+        volumeDivergence: false,
       },
       ratios: { pullbackVolRatio: null, reversalVolRatio: null },
       timing: { touchIndex: null, touchBarsAgo: null },
@@ -207,6 +233,44 @@ export function computeVolumeBehavior({
   const reversalExpansion =
     reversalVolRatio != null ? reversalVolRatio >= reversalExpansionMin : false;
 
+  // ✅ NEW: Volume Divergence (event-based, post-touch)
+  // Meaning: price is moving but participation is not confirming.
+  let volumeDivergence = false;
+  let divergenceType = null;
+
+  if (avgVol && atr && ti != null) {
+    const dStart = ti;
+    const dEnd = Math.min(n, ti + divergenceBars);
+    const seg = bars.slice(dStart, dEnd);
+
+    if (seg.length >= 4) {
+      const closes = seg.map((b) => b.c);
+      const vols = seg.map((b) => (b.v || 0));
+
+      const priceMove = closes[closes.length - 1] - closes[0];
+      const priceMoveAbsAtr = Math.abs(priceMove) / atr;
+
+      const volAvg = sma(vols) ?? null;
+      const volAvgRatio = volAvg != null && avgVol > 0 ? volAvg / avgVol : null;
+
+      const priceSlope = linSlope(closes);
+      const volSlope = linSlope(vols);
+
+      const meaningful = priceMoveAbsAtr >= divergencePriceMinAtr;
+      const lowParticipation = volAvgRatio != null ? volAvgRatio <= divergenceVolMaxRatio : false;
+
+      if (meaningful && lowParticipation) {
+        if (priceSlope > 0 && volSlope <= 0) {
+          volumeDivergence = true;
+          divergenceType = "weak_up"; // price rising, volume not supporting
+        } else if (priceSlope < 0 && volSlope <= 0) {
+          volumeDivergence = true;
+          divergenceType = "weak_down"; // price falling, volume fading (sell pressure weakening)
+        }
+      }
+    }
+  }
+
   // Timing bonus: first touch recency
   let timingBonus = 0;
   if (touchBarsAgo <= 20) timingBonus = 3;
@@ -225,11 +289,9 @@ export function computeVolumeBehavior({
     const breakBar = barClosesOutsideZone(b0, zone);
     const breakVolRatio = avgVol > 0 ? (b0.v || 0) / avgVol : null;
 
-    const backInside =
-      barTouchesZone(b1, zone) && !barClosesOutsideZone(b1, zone);
+    const backInside = barTouchesZone(b1, zone) && !barClosesOutsideZone(b1, zone);
 
-    const spikeAfter =
-      avgVol > 0 ? (b1.v || 0) / avgVol >= trapVolSpikeRatio : false;
+    const spikeAfter = avgVol > 0 ? (b1.v || 0) / avgVol >= trapVolSpikeRatio : false;
 
     const breakWasNotConviction =
       breakVolRatio != null ? breakVolRatio <= trapBreakVolMaxRatio : false;
@@ -248,12 +310,15 @@ export function computeVolumeBehavior({
     const a1 = Math.min(n, ti + 3);
     const windowBars = bars.slice(a0, a1);
     const windowVolAvg = sma(windowBars.map((b) => b.v || 0)) ?? null;
-    const windowVolRatio = windowVolAvg != null && avgVol > 0 ? windowVolAvg / avgVol : null;
+    const windowVolRatio =
+      windowVolAvg != null && avgVol > 0 ? windowVolAvg / avgVol : null;
 
     const displacement = Math.abs(windowBars[windowBars.length - 1].c - windowBars[0].c);
     const maxDisp = atr * absorptionMaxDisplacementAtr;
 
-    const insideMostly = windowBars.filter((b) => barTouchesZone(b, zone)).length >= Math.floor(windowBars.length * 0.6);
+    const insideMostly =
+      windowBars.filter((b) => barTouchesZone(b, zone)).length >=
+      Math.floor(windowBars.length * 0.6);
 
     if (
       insideMostly &&
@@ -266,7 +331,6 @@ export function computeVolumeBehavior({
   }
 
   // Distribution/Accumulation hint (VERY light-touch; informational only):
-  // We don’t decide direction, but we flag “supply-like” vs “demand-like” wick + location.
   let distributionDetected = false;
   let accumulationHint = false;
 
@@ -278,7 +342,7 @@ export function computeVolumeBehavior({
   if (pos >= 0.70 && w.upperDominant && (tb.v || 0) >= (avgVol || 0) * 1.10) {
     distributionDetected = true;
   }
-  // If near bottom of zone and lower wicks dominate (rejection), it’s demand-ish (accumulation context).
+  // If near bottom of zone and lower wicks dominate (rejection), it’s demand-ish.
   if (pos <= 0.30 && w.lowerDominant && (tb.v || 0) >= (avgVol || 0) * 1.10) {
     accumulationHint = true;
   }
@@ -304,12 +368,10 @@ export function computeVolumeBehavior({
   let volumeScore = contractionScore + expansionScore + timingBonus;
 
   // Penalties / caps (behavioral safety rails)
-  // Trap: cap score hard
   if (liquidityTrap) {
     volumeScore = Math.min(volumeScore, 3);
   }
 
-  // Distribution signal: suppress slightly (informational; not invalidation)
   if (distributionDetected) {
     volumeScore = Math.max(0, volumeScore - 4);
   }
@@ -319,6 +381,11 @@ export function computeVolumeBehavior({
     volumeScore = Math.max(0, volumeScore - 2);
   }
 
+  // ✅ Divergence = participation not confirming price progress (small suppress only)
+  if (volumeDivergence) {
+    volumeScore = Math.max(0, volumeScore - 3);
+  }
+
   volumeScore = clamp(volumeScore, 0, 15);
 
   const volumeConfirmed = pullbackContraction && reversalExpansion && !liquidityTrap;
@@ -326,8 +393,8 @@ export function computeVolumeBehavior({
   // Initiative label (optional): only set if we’re given reactionScore
   const initiativeMoveConfirmed =
     reactionScore != null
-      ? (reactionScore >= 6 && reversalExpansion && !liquidityTrap)
-      : (reversalExpansion && !liquidityTrap);
+      ? reactionScore >= 6 && reversalExpansion && !liquidityTrap
+      : reversalExpansion && !liquidityTrap;
 
   return {
     flags: {
@@ -337,9 +404,7 @@ export function computeVolumeBehavior({
       distributionDetected,
       liquidityTrap,
       initiativeMoveConfirmed,
-      // Note: We do not output an explicit "accumulationDetected" boolean here
-      // because Engine 1 already labels zone type. This hint is internal.
-      // If you want it surfaced later, we can add a separate field safely.
+      volumeDivergence,
     },
     ratios: {
       pullbackVolRatio,
@@ -358,6 +423,8 @@ export function computeVolumeBehavior({
       pullbackBars,
       reversalBars,
       lookbackBars,
+      divergenceBars,
+      divergence: { volumeDivergence, divergenceType },
       pullbackRange: [pbStart, pbEnd - 1],
       reversalRange: [rvStart, rvEnd - 1],
       zone: { lo: zone.lo, hi: zone.hi },
