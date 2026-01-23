@@ -53,8 +53,8 @@
       "waveMarks": {
         "W1": { "t": "2025-12-11 10:00", "p": 688.94 },
         "W2": { "t": "2025-12-19 11:00", "p": 675.01 },
-        "W3": { "t": null,              "p": null },
-        "W4": { "t": null,              "p": null },
+        "W3": { "t": "2026-1-13 11:00",  "p": 697.65 },
+        "W4": { "t": "2026-1-21 l0:00"   "p": 675.00 },
         "W5": { "t": null,              "p": null }
       },
       "comment": "Intermediate W1 fib uses a/b; labels use waveMarks (candle-locked)."
@@ -66,8 +66,8 @@
       "wave": "W4",
       "active": false,
 
-      "a": { "t": null, "p": null },
-      "b": { "t": null, "p": null },
+      "a": { "t": "2026-1-13 11:00, "p": 697 },
+      "b": { "t": :2026- 1-21 11;00, "p": 678 },
 
       "context": "W4",
       "waveMarks": {
