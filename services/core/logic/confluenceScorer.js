@@ -99,21 +99,17 @@ function deriveVolumeState(volume) {
 }
 
 function tfToCompressionBars(tf) {
-  // Optional time-in-zone bonus thresholds
-  // (we do NOT require this; it only adds points if present)
   const t = String(tf || "").toLowerCase();
-  if (t === "10m") return 24; // ~4 hours
+  if (t === "10m") return 24;
   if (t === "15m") return 20;
   if (t === "30m") return 16;
-  if (t === "1h") return 12;  // ~half day
-  if (t === "4h") return 6;   // ~1 day
-  if (t === "1d") return 4;   // ~a week (loose)
+  if (t === "1h") return 12;
+  if (t === "4h") return 6;
+  if (t === "1d") return 4;
   return 12;
 }
 
 function readBarsInZone(zone) {
-  // Optional – read whatever Engine 1 exposes (defensive)
-  // If none exist, we simply do not award time-in-zone points.
   const candidates = [
     zone?.barsInZone,
     zone?.bars_in_zone,
@@ -133,32 +129,20 @@ function readBarsInZone(zone) {
 }
 
 /**
- * ✅ NEW: Tiered Compression / Pre-Ignition
- *
+ * Tiered Compression / Pre-Ignition
  * Option B locked:
  * - Primary: ATR-tightness (zoneWidth / ATR)
- * - Secondary: time-in-zone optional bonus (if provided)
+ * - Secondary: time-in-zone optional bonus
  *
  * Major: NEGOTIATED max 30
- * Minor: INSTITUTIONAL max 10 (only when no negotiated active; enforced by caller)
- *
- * Requires "quiet" to be considered "COILING":
- * - no initiativeMoveConfirmed
- * - no liquidityTrap
+ * Minor: INSTITUTIONAL max 10
  */
 function computeCompression({ zone, zoneType, tf, fib, volume }) {
   if (!zone || !zoneType) {
     return {
-      active: false,
-      tier: "NONE",
-      score: 0,
-      state: "NONE",
-      zoneWidth: null,
-      atr: null,
-      widthAtrRatio: null,
-      quiet: false,
-      barsInZone: null,
-      barsThreshold: null,
+      active: false, tier: "NONE", score: 0, state: "NONE",
+      zoneWidth: null, atr: null, widthAtrRatio: null,
+      quiet: false, barsInZone: null, barsThreshold: null,
       reasons: [],
     };
   }
@@ -170,16 +154,9 @@ function computeCompression({ zone, zoneType, tf, fib, volume }) {
 
   if (tier === "NONE") {
     return {
-      active: false,
-      tier,
-      score: 0,
-      state: "NONE",
-      zoneWidth: null,
-      atr: null,
-      widthAtrRatio: null,
-      quiet: false,
-      barsInZone: null,
-      barsThreshold: null,
+      active: false, tier, score: 0, state: "NONE",
+      zoneWidth: null, atr: null, widthAtrRatio: null,
+      quiet: false, barsInZone: null, barsThreshold: null,
       reasons: [],
     };
   }
@@ -201,12 +178,10 @@ function computeCompression({ zone, zoneType, tf, fib, volume }) {
   const f = volume?.flags || {};
   const hasInitiative = isTrue(f.initiativeMoveConfirmed);
   const hasTrap = isTrue(f.liquidityTrap);
-
   const quiet = !hasInitiative && !hasTrap;
 
   const reasons = [];
 
-  // If not quiet, we still report state but do NOT give pre-ignition credit.
   if (!quiet) {
     const st = hasTrap ? "TRAP_SUSPECTED" : "IGNITING";
     return {
@@ -224,23 +199,20 @@ function computeCompression({ zone, zoneType, tf, fib, volume }) {
     };
   }
 
-  // Quiet: now we can compute COILING score.
   let score = 0;
 
-  // Base credit for being in a compression-eligible zone type
+  // Base credit
   score += (tier === "NEGOTIATED" ? 8 : 2);
   reasons.push("IN_COMPRESSION_ZONE");
 
-  // ATR tightness credit (primary)
+  // Tightness credit (primary)
   if (widthAtrRatio != null) {
-    // Smaller ratio => tighter
     if (tier === "NEGOTIATED") {
       if (widthAtrRatio <= 0.60) { score += 14; reasons.push("TIGHT_VS_ATR_STRONG"); }
       else if (widthAtrRatio <= 0.80) { score += 10; reasons.push("TIGHT_VS_ATR_GOOD"); }
       else if (widthAtrRatio <= 1.00) { score += 6; reasons.push("TIGHT_VS_ATR_OK"); }
       else { score += 2; reasons.push("TIGHT_VS_ATR_WEAK"); }
     } else {
-      // institutional minor credit
       if (widthAtrRatio <= 0.80) { score += 4; reasons.push("TIGHT_VS_ATR_GOOD"); }
       else if (widthAtrRatio <= 1.00) { score += 3; reasons.push("TIGHT_VS_ATR_OK"); }
       else if (widthAtrRatio <= 1.20) { score += 2; reasons.push("TIGHT_VS_ATR_WEAK"); }
@@ -248,11 +220,11 @@ function computeCompression({ zone, zoneType, tf, fib, volume }) {
     }
   }
 
-  // Quiet participation credit
+  // Quiet credit
   score += (tier === "NEGOTIATED" ? 6 : 2);
   reasons.push("VOLUME_QUIET");
 
-  // Time-in-zone bonus (OPTIONAL, secondary)
+  // Time-in-zone bonus (secondary, optional)
   const barsInZone = readBarsInZone(zone);
   const barsThreshold = tfToCompressionBars(tf);
   if (barsInZone != null && barsInZone >= barsThreshold) {
@@ -384,8 +356,26 @@ export function computeConfluenceScore({
   // Component scores
   // ----------------------------
 
-  // Engine 1 score (0-100): use readiness/strength if present
-  const e1Score = clamp(Number(activeZone.readiness ?? activeZone.strength ?? 0), 0, 100);
+  // ✅ Golden ignition detection:
+  // Negotiated ignition zone inside institutional container = best possible location
+  const institutionalContainer = engine1Context?.active?.institutional ?? null;
+  const inGoldenIgnition = (zoneType === "NEGOTIATED" && !!institutionalContainer);
+
+  // Engine 1 score base
+  let e1Score = clamp(Number(activeZone.readiness ?? activeZone.strength ?? 0), 0, 100);
+
+  // If we're in negotiated ignition, use institutional container strength if present,
+  // otherwise apply a safe strong floor so we don't score "0" in the golden zone.
+  if (inGoldenIgnition) {
+    const instStrength = toNum(institutionalContainer?.strength ?? institutionalContainer?.readiness);
+    if (instStrength != null) {
+      e1Score = Math.max(e1Score, clamp(instStrength, 0, 100));
+    } else {
+      // Safe floor (because this is your golden rule location)
+      e1Score = Math.max(e1Score, 70);
+      reasons.push("GOLDEN_IGNITION_LOCATION");
+    }
+  }
 
   // Engine 2 score (0-20)
   const e2Score = clamp(calcEngine2Score(fib), 0, 20);
@@ -416,23 +406,18 @@ export function computeConfluenceScore({
   flags.volumeConfirmed = volumeConfirmed;
 
   // ----------------------------
-  // ✅ NEW: Tiered compression
-  // Major: negotiated, Minor: institutional (only when no negotiated active)
-  // If active zone is SHELF, we do not add compression credit here.
+  // Compression (tiered)
   // ----------------------------
   let compression = { active: false, tier: "NONE", score: 0, state: "NONE" };
-
-  if (zoneType === "NEGOTIATED") {
-    compression = computeCompression({ zone: activeZone, zoneType, tf, fib, volume });
-  } else if (zoneType === "INSTITUTIONAL") {
+  if (zoneType === "NEGOTIATED" || zoneType === "INSTITUTIONAL") {
     compression = computeCompression({ zone: activeZone, zoneType, tf, fib, volume });
   }
 
   // Weighted 0–100 (LOCKED scale)
-  const e1Norm = e1Score;                 // 0..100
-  const e2Norm = (e2Score / 20) * 100;    // 0..100
-  const e3Norm = (e3Capped / 10) * 100;   // 0..100
-  const e4Norm = (e4Capped / 15) * 100;   // 0..100
+  const e1Norm = e1Score;
+  const e2Norm = (e2Score / 20) * 100;
+  const e3Norm = (e3Capped / 10) * 100;
+  const e4Norm = (e4Capped / 15) * 100;
 
   let total =
     weights.e1 * e1Norm +
@@ -440,14 +425,13 @@ export function computeConfluenceScore({
     weights.e3 * e3Norm +
     weights.e4 * e4Norm;
 
-  // Engine 1 weak-location cap (safety)
-  if (e1Score < engine1WeakCapThreshold) {
+  // ✅ Weak-location cap (DISABLED in golden ignition)
+  if (!inGoldenIgnition && e1Score < engine1WeakCapThreshold) {
     reasons.push("ENGINE1_WEAK_LOCATION");
     total = Math.min(total, engine1WeakCapValue);
   }
 
-  // ✅ Add compression as a PRE-IGNITION boost (Option B: ATR-first, time optional)
-  // This is the “ready to explode” early warning you want.
+  // Pre-ignition boost
   if (compression?.score > 0) {
     total += compression.score;
     if (compression.active) reasons.push("COILING_PRE_IGNITION");
@@ -487,7 +471,7 @@ export function computeConfluenceScore({
       total,
       label,
     },
-    flags: { ...flags, zoneType },
+    flags: { ...flags, zoneType, goldenIgnition: inGoldenIgnition },
     context: {
       activeZone: {
         id: activeZone.id ?? null,
@@ -499,6 +483,7 @@ export function computeConfluenceScore({
         strength: activeZone.strength ?? null,
         readiness: activeZone.readiness ?? null,
       },
+      institutionalContainer: institutionalContainer ?? null,
       fib,
       reaction,
       volume,
