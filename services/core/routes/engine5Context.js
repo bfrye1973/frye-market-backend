@@ -77,6 +77,21 @@ function priceInside(price, z) {
   return price >= z.lo && price <= z.hi;
 }
 
+// ✅ Canonical ID detection (matches frontend overlay behavior)
+function zoneId(z) {
+  return String(
+    z?.details?.id ??
+      z?.details?.facts?.sticky?.structureKey ??
+      z?.structureKey ??
+      z?.id ??
+      ""
+  );
+}
+
+function isNegotiatedZone(z) {
+  return zoneId(z).includes("|NEG|");
+}
+
 // ---------------- ROUTE ----------------
 router.get("/engine5-context", (req, res) => {
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
@@ -96,22 +111,24 @@ router.get("/engine5-context", (req, res) => {
     levelsJson?.meta?.generated_at_utc ||
     new Date().toISOString();
 
+  // Prefer shelves job anchor (it’s what you already use operationally)
   const currentPrice =
     shelvesJson?.meta?.current_price_anchor ??
     levelsJson?.meta?.current_price ??
     null;
 
-  // ---------------- NEGOTIATED ZONES ----------------
-  const negotiated = (Array.isArray(levelsJson?.structures_sticky)
+  const structuresSticky = Array.isArray(levelsJson?.structures_sticky)
     ? levelsJson.structures_sticky
-    : []
-  )
-    .filter((z) => String(z?.structureKey ?? "").includes("|NEG|"))
+    : [];
+
+  // ---------------- NEGOTIATED ZONES (NEVER FILTERED) ----------------
+  const negotiated = structuresSticky
+    .filter(isNegotiatedZone)
     .map((z) => {
       const r = normalizeRange(z?.priceRange);
       if (!r) return null;
       return {
-        id: z.structureKey,
+        id: zoneId(z),
         lo: r.lo,
         hi: r.hi,
         mid: r.mid,
@@ -120,16 +137,13 @@ router.get("/engine5-context", (req, res) => {
     .filter(Boolean);
 
   // ---------------- INSTITUTIONAL ZONES ----------------
-  const institutional = (Array.isArray(levelsJson?.structures_sticky)
-    ? levelsJson.structures_sticky
-    : []
-  )
-    .filter((z) => !String(z?.structureKey ?? "").includes("|NEG|"))
+  const institutional = structuresSticky
+    .filter((z) => !isNegotiatedZone(z))
     .map((z) => {
       const r = normalizeRange(z?.priceRange);
       if (!r) return null;
       return {
-        id: z?.details?.id ?? z.structureKey,
+        id: zoneId(z),
         lo: r.lo,
         hi: r.hi,
         mid: r.mid,
@@ -141,8 +155,23 @@ router.get("/engine5-context", (req, res) => {
   // ---------------- ACTIVE NEGOTIATED ----------------
   let activeNegotiated = null;
   if (Number.isFinite(currentPrice)) {
-    activeNegotiated =
-      negotiated.find((n) => priceInside(currentPrice, n)) || null;
+    // if multiple, pick tightest (most precise) as "active"
+    const hits = negotiated.filter((n) => priceInside(currentPrice, n));
+    if (hits.length) {
+      hits.sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo)); // narrowest first
+      activeNegotiated = hits[0];
+    }
+  }
+
+  // ---------------- ACTIVE INSTITUTIONAL ----------------
+  let activeInstitutional = null;
+  if (Number.isFinite(currentPrice)) {
+    const hits = institutional.filter((i) => priceInside(currentPrice, i));
+    if (hits.length) {
+      // prefer narrowest container if multiple
+      hits.sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo));
+      activeInstitutional = hits[0];
+    }
   }
 
   // ---------------- BUILD INSTITUTIONAL GAPS ----------------
@@ -176,11 +205,11 @@ router.get("/engine5-context", (req, res) => {
     const r = normalizeRange(s?.priceRange);
     if (!r) continue;
 
-    // 48h persistence
+    // 48h persistence (based on shelves job timestamp)
     const updatedUtc = shelvesJson?.meta?.generated_at_utc;
     if (!updatedUtc || hoursSince(updatedUtc) > SHELF_PERSIST_HOURS) continue;
 
-    // Institutional overlap tolerance
+    // Institutional overlap tolerance: block only if penetration > $0.50
     let blocked = false;
     for (const inst of institutional) {
       const p = penetrationDepth(r, inst);
@@ -191,20 +220,20 @@ router.get("/engine5-context", (req, res) => {
     }
     if (blocked) continue;
 
-    // Assign gap
+    // Assign gap by midpoint (only between institutionals)
     const gap = gaps.find((g) => r.mid <= g.hi && r.mid >= g.lo);
     if (!gap) continue;
 
     shelfCandidates.push({
-      id: `${symbol}|${s.type}|${r.lo}|${r.hi}`,
-      type: s.type,
+      id: `${symbol}|${String(s?.type ?? "shelf")}|${r.lo}|${r.hi}`,
+      type: String(s?.type ?? "").toLowerCase(),
       lo: r.lo,
       hi: r.hi,
       mid: r.mid,
       width: r.width,
-      strength: Number(s.strength) || 0,
+      strength: Number(s?.strength) || 0,
       gapId: gap.gapId,
-      isManual: s.rangeSource === "manual" || s.locked === true,
+      isManual: s?.rangeSource === "manual" || s?.locked === true,
     });
   }
 
@@ -217,11 +246,12 @@ router.get("/engine5-context", (req, res) => {
 
     for (let i = 0; i < list.length; i++) {
       const old = list[i];
+
+      // manual shelf cannot be replaced by auto
       if (old.isManual && !shelf.isManual) continue;
 
       const delta = shelf.strength - old.strength;
-      const widthOk =
-        shelf.width <= old.width * 1.25 || delta >= 20;
+      const widthOk = shelf.width <= old.width * 1.25 || delta >= 20;
 
       if (delta >= REPLACEMENT_STRENGTH_DELTA && widthOk) {
         list[i] = shelf;
@@ -236,7 +266,9 @@ router.get("/engine5-context", (req, res) => {
 
   const shelves = Object.values(shelvesByGap)
     .flatMap((list) =>
-      list.sort((a, b) => b.strength - a.strength).slice(0, MAX_SHELVES_PER_GAP)
+      list
+        .sort((a, b) => b.strength - a.strength)
+        .slice(0, MAX_SHELVES_PER_GAP)
     )
     .map((s) => ({
       id: s.id,
@@ -252,15 +284,9 @@ router.get("/engine5-context", (req, res) => {
   if (Number.isFinite(currentPrice)) {
     const hits = shelves.filter((s) => priceInside(currentPrice, s));
     if (hits.length) {
-      activeShelf = hits.sort((a, b) => b.strength - a.strength)[0];
+      hits.sort((a, b) => b.strength - a.strength);
+      activeShelf = hits[0];
     }
-  }
-
-  // ---------------- ACTIVE INSTITUTIONAL ----------------
-  let activeInstitutional = null;
-  if (Number.isFinite(currentPrice)) {
-    activeInstitutional =
-      institutional.find((i) => priceInside(currentPrice, i)) || null;
   }
 
   // ---------------- RESPONSE ----------------
