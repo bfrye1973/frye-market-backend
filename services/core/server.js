@@ -44,15 +44,26 @@ const ALLOW = new Set([
   "https://frye-dashboard.onrender.com",
   "http://localhost:3000",
 ]);
+
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && ALLOW.has(origin)) res.setHeader("Access-Control-Allow-Origin", origin);
+
+  // Always set a deterministic ACAO so GET never “forgets” the header.
+  const allowOrigin =
+    origin && ALLOW.has(origin) ? origin : "https://frye-dashboard.onrender.com";
+
+  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Idempotency-Key");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With, X-Idempotency-Key"
+  );
+
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
+
 
 // --- Static (optional) ---
 const __filename = fileURLToPath(import.meta.url);
