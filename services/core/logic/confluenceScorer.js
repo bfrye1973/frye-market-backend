@@ -12,48 +12,34 @@ function labelFromScore(total) {
   return "IGNORE";
 }
 
-function isInsideZone(price, z) {
-  if (price == null || !z) return false;
-  const lo = Number(z.lo);
-  const hi = Number(z.hi);
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return false;
-  return price >= lo && price <= hi;
+function midpoint(lo, hi) {
+  const a = Number(lo);
+  const b = Number(hi);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Number(((a + b) / 2).toFixed(2));
 }
 
-function pickBestInstitutional(institutionals, price) {
-  const inside = (institutionals || []).filter(z => isInsideZone(price, z));
-  if (!inside.length) return null;
-  // pick highest strength (ties: narrower zone)
-  inside.sort((a, b) => {
-    const sa = Number(a.strength ?? 0);
-    const sb = Number(b.strength ?? 0);
-    if (sb !== sa) return sb - sa;
-    const wa = Math.abs(Number(a.hi) - Number(a.lo));
-    const wb = Math.abs(Number(b.hi) - Number(b.lo));
-    return wa - wb;
-  });
-  return inside[0];
+function isTruthy(x) {
+  return x === true;
 }
 
-function pickBestShelf(shelves, price) {
-  const inside = (shelves || []).filter(z => isInsideZone(price, z));
-  if (!inside.length) return null;
-  // pick highest readiness (fallback to strength)
-  inside.sort((a, b) => {
-    const ra = Number(a.readiness ?? a.strength ?? 0);
-    const rb = Number(b.readiness ?? b.strength ?? 0);
-    return rb - ra;
-  });
-  return inside[0];
+// LOCKED priority: negotiated -> shelf -> institutional
+function getActiveZone(ctx) {
+  const neg = ctx?.active?.negotiated ?? null;
+  const shelf = ctx?.active?.shelf ?? null;
+  const inst = ctx?.active?.institutional ?? null;
+
+  const zone = neg || shelf || inst || null;
+
+  if (!zone) return { zone: null, zoneType: null };
+
+  // Determine type label for UI
+  if (neg) return { zone, zoneType: "NEGOTIATED" };
+  if (shelf) return { zone, zoneType: "SHELF" };
+  return { zone, zoneType: "INSTITUTIONAL" };
 }
 
-/**
- * Engine 1 dead-zone gate (institutional only)
- * Spec (LOCKED):
- *  - sticky.status === "archived" OR sticky.archivedUtc exists OR
- *  - sticky.distinctExitCount >= 2 OR sticky.exits.length >= 2 OR
- *  - (exitSide1h exists AND exitBars1h > 0)
- */
+// Engine 1 dead-zone gate (institutional only)
 function institutionalIsDead(inst) {
   const facts = inst?.details?.facts || {};
   const sticky = facts?.sticky || {};
@@ -76,20 +62,47 @@ function institutionalIsDead(inst) {
 }
 
 function calcEngine2Score(fib) {
-  // max 20: +10 retrace zone, +10 near50
   const s = fib?.signals || {};
   let score = 0;
-  if (s.inRetraceZone) score += 10;
-  if (s.near50) score += 10;
-  return score;
+  if (isTruthy(s.inRetraceZone)) score += 10;
+  if (isTruthy(s.near50)) score += 10;
+  return score; // 0..20
 }
 
-function calcBiasFromShelf(shelf) {
-  if (!shelf) return null;
-  const t = String(shelf.type || "").toLowerCase();
+function calcBiasFromZone(zone, zoneType) {
+  // Prefer shelf semantics (accumulation/distribution) when available
+  if (!zone) return null;
+
+  const t = String(zone.type || zone.zoneType || "").toLowerCase();
+
+  // If negotiated zones encode type like accumulation/distribution, honor it:
   if (t === "accumulation") return "long";
   if (t === "distribution") return "short";
+
+  // If institutional-only, bias is unknown at Engine 5 level
+  if (zoneType === "INSTITUTIONAL") return null;
+
   return null;
+}
+
+function deriveVolumeState(volume) {
+  const note = String(volume?.diagnostics?.note || "");
+
+  // If engine4 couldn't find a touch, keep it explicit
+  if (note.includes("NO_TOUCH_FOUND")) return "NO_TOUCH";
+
+  const f = volume?.flags || {};
+
+  // Priority (LOCKED)
+  if (isTruthy(f.liquidityTrap)) return "TRAP_SUSPECTED";
+  if (isTruthy(f.initiativeMoveConfirmed)) return "INITIATIVE";
+  if (isTruthy(f.volumeDivergence)) return "DIVERGENCE";
+  if (isTruthy(f.absorptionDetected)) return "ABSORPTION";
+  if (isTruthy(f.distributionDetected)) return "DISTRIBUTION";
+  if (isTruthy(f.pullbackContraction)) return "PULLBACK_CONTRACTION";
+  if (isTruthy(f.reversalExpansion)) return "REVERSAL_EXPANSION";
+
+  return "NO_SIGNAL";
 }
 
 export function computeConfluenceScore({
@@ -98,10 +111,10 @@ export function computeConfluenceScore({
   degree,
   wave,
   price,
-  engine1Context, // /engine5-context payload
-  fibW1,          // /fib-levels payload (W1)
-  reaction,       // /reaction-score payload
-  volume,         // /volume-behavior payload
+  engine1Context,
+  fib,
+  reaction,
+  volume,
   weights = { e1: 0.60, e2: 0.15, e3: 0.10, e4: 0.15 },
   engine1WeakCapThreshold = 50,
   engine1WeakCapValue = 55,
@@ -109,22 +122,15 @@ export function computeConfluenceScore({
   const reasons = [];
   const flags = {};
 
-  const institutionals = engine1Context?.render?.institutional || [];
-  const shelves = engine1Context?.render?.shelves || [];
+  const { zone: activeZone, zoneType } = getActiveZone(engine1Context);
 
-  const inst = pickBestInstitutional(institutionals, price);
-  const shelf = pickBestShelf(shelves, price);
+  const tradeReady = !!activeZone;
 
-  const inInstitutional = !!inst;
-  const inShelf = !!shelf;
-  const inZone = inInstitutional || inShelf;
+  flags.zoneType = zoneType;
+  flags.tradeReady = tradeReady;
 
-  flags.inInstitutional = inInstitutional;
-  flags.inShelf = inShelf;
-  flags.inZone = inZone;
-
-  // HARD GATE A: must be inside some zone
-  if (!inZone) {
+  // HARD GATE: must be inside an active zone
+  if (!activeZone) {
     return {
       ok: true,
       symbol,
@@ -144,14 +150,26 @@ export function computeConfluenceScore({
         total: 0,
         label: "IGNORE",
       },
-      flags: { ...flags, fibInvalidated: false },
-      context: { institutional: null, shelf: null },
+      flags,
+      context: {
+        activeZone: null,
+        institutional: engine1Context?.active?.institutional ?? null,
+        negotiated: engine1Context?.active?.negotiated ?? null,
+        shelf: engine1Context?.active?.shelf ?? null,
+      },
+      targets: {
+        entryTarget: null,
+        exitTarget: null,
+        exitTargetHi: null,
+        exitTargetLo: null,
+      },
+      volumeState: "NO_SIGNAL",
     };
   }
 
-  // HARD GATE B: fib invalidation (74%)
-  const fibSignals = fibW1?.signals || {};
-  const fibInvalidated = !!fibSignals.invalidated;
+  // HARD GATE: fib invalidation (74%)
+  const fibSignals = fib?.signals || {};
+  const fibInvalidated = isTruthy(fibSignals.invalidated);
   flags.fibInvalidated = fibInvalidated;
 
   if (fibInvalidated) {
@@ -164,7 +182,7 @@ export function computeConfluenceScore({
       invalid: true,
       reasonCodes: ["FIB_INVALIDATION_74"],
       tradeReady: false,
-      bias: calcBiasFromShelf(shelf),
+      bias: calcBiasFromZone(activeZone, zoneType),
       price,
       scores: {
         engine1: 0,
@@ -175,12 +193,25 @@ export function computeConfluenceScore({
         label: "IGNORE",
       },
       flags,
-      context: { institutional: inst ?? null, shelf: shelf ?? null, fib: fibW1 ?? null },
+      context: {
+        activeZone,
+        institutional: engine1Context?.active?.institutional ?? null,
+        negotiated: engine1Context?.active?.negotiated ?? null,
+        shelf: engine1Context?.active?.shelf ?? null,
+        fib,
+      },
+      targets: {
+        entryTarget: midpoint(activeZone.lo, activeZone.hi),
+        exitTarget: null,
+        exitTargetHi: activeZone.hi ?? null,
+        exitTargetLo: activeZone.lo ?? null,
+      },
+      volumeState: deriveVolumeState(volume),
     };
   }
 
-  // HARD GATE C: institutional dead/archived (only if institutional is involved)
-  if (inInstitutional && institutionalIsDead(inst)) {
+  // HARD GATE: institutional dead/archived (only if institutional is involved as active zone)
+  if (zoneType === "INSTITUTIONAL" && institutionalIsDead(activeZone)) {
     return {
       ok: true,
       symbol,
@@ -190,7 +221,7 @@ export function computeConfluenceScore({
       invalid: true,
       reasonCodes: ["ZONE_ARCHIVED_OR_EXITED"],
       tradeReady: false,
-      bias: calcBiasFromShelf(shelf),
+      bias: null,
       price,
       scores: {
         engine1: 0,
@@ -201,70 +232,97 @@ export function computeConfluenceScore({
         label: "IGNORE",
       },
       flags,
-      context: { institutional: inst, shelf: shelf ?? null, fib: fibW1 ?? null },
+      context: {
+        activeZone,
+        institutional: engine1Context?.active?.institutional ?? null,
+        negotiated: engine1Context?.active?.negotiated ?? null,
+        shelf: engine1Context?.active?.shelf ?? null,
+        fib,
+      },
+      targets: {
+        entryTarget: midpoint(activeZone.lo, activeZone.hi),
+        exitTarget: null,
+        exitTargetHi: activeZone.hi ?? null,
+        exitTargetLo: activeZone.lo ?? null,
+      },
+      volumeState: deriveVolumeState(volume),
     };
   }
 
-  // Engine 1 score (0-100): if both present, blend regime+readiness
-  const instStrength = inInstitutional ? Number(inst.strength ?? 0) : 0;
-  const shelfReadiness = inShelf ? Number(shelf.readiness ?? shelf.strength ?? 0) : 0;
+  // ----------------------------
+  // Component scores
+  // ----------------------------
 
-  let engine1Score = 0;
-  if (inInstitutional && inShelf) engine1Score = clamp(0.60 * instStrength + 0.40 * shelfReadiness, 0, 100);
-  else if (inShelf) engine1Score = clamp(shelfReadiness, 0, 100);
-  else engine1Score = clamp(instStrength, 0, 100);
+  // Engine 1 score (0-100): use zone strength/readiness if present
+  // negotiated/shelf likely have readiness/strength; institutional has strength.
+  const e1Score = clamp(
+    Number(activeZone.readiness ?? activeZone.strength ?? 0),
+    0,
+    100
+  );
 
   // Engine 2 score (0-20)
-  const engine2Score = clamp(calcEngine2Score(fibW1), 0, 20);
+  const e2Score = clamp(calcEngine2Score(fib), 0, 20);
 
   // Engine 3 score (0-10)
-  const reactionScore = clamp(Number(reaction?.reactionScore ?? 0), 0, 10);
+  const e3Score = clamp(Number(reaction?.reactionScore ?? 0), 0, 10);
 
   // Engine 4 score (0-15)
-  const volumeScoreRaw = clamp(Number(volume?.volumeScore ?? 0), 0, 15);
+  const e4ScoreRaw = clamp(Number(volume?.volumeScore ?? 0), 0, 15);
 
   // Caps (NOT hard gates)
-  let reactionScoreCapped = reactionScore;
-  if (reactionScore <= 2) {
+  let e3Capped = e3Score;
+  if (e3Score <= 2) {
     reasons.push("REACTION_WEAK");
-    reactionScoreCapped = Math.min(reactionScoreCapped, 2);
+    e3Capped = Math.min(e3Capped, 2);
   }
 
-  let volumeScoreCapped = volumeScoreRaw;
-  const liquidityTrap = !!volume?.flags?.liquidityTrap;
+  const liquidityTrap = isTruthy(volume?.flags?.liquidityTrap);
   flags.liquidityTrap = liquidityTrap;
 
+  let e4Capped = e4ScoreRaw;
   if (liquidityTrap) {
     reasons.push("VOLUME_TRAP_SUSPECTED");
-    volumeScoreCapped = Math.min(volumeScoreCapped, 3);
+    e4Capped = Math.min(e4Capped, 3);
   }
 
-  const volumeConfirmed = !!volume?.volumeConfirmed;
+  const volumeConfirmed = isTruthy(volume?.volumeConfirmed);
   flags.volumeConfirmed = volumeConfirmed;
 
-  // Weighted 0–100 assembly (recommended)
-  const e1Norm = clamp(engine1Score, 0, 100);
-  const e2Norm = clamp((engine2Score / 20) * 100, 0, 100);
-  const e3Norm = clamp((reactionScoreCapped / 10) * 100, 0, 100);
-  const e4Norm = clamp((volumeScoreCapped / 15) * 100, 0, 100);
+  // Weighted 0–100 (LOCKED scale)
+  const e1Norm = e1Score;                 // already 0..100
+  const e2Norm = (e2Score / 20) * 100;    // 0..100
+  const e3Norm = (e3Capped / 10) * 100;   // 0..100
+  const e4Norm = (e4Capped / 15) * 100;   // 0..100
 
-  let total = (
+  let total =
     weights.e1 * e1Norm +
     weights.e2 * e2Norm +
     weights.e3 * e3Norm +
-    weights.e4 * e4Norm
-  );
+    weights.e4 * e4Norm;
 
   // Engine 1 weak-location cap (safety)
-  if (engine1Score < engine1WeakCapThreshold) {
+  if (e1Score < engine1WeakCapThreshold) {
     reasons.push("ENGINE1_WEAK_LOCATION");
     total = Math.min(total, engine1WeakCapValue);
   }
 
   total = clamp(Math.round(total), 0, 100);
-
   const label = labelFromScore(total);
-  const bias = calcBiasFromShelf(shelf);
+
+  // Targets (LOCKED rules)
+  const entryTarget = midpoint(activeZone.lo, activeZone.hi);
+
+  const bias = calcBiasFromZone(activeZone, zoneType);
+
+  let exitTarget = null;
+  const exitTargetHi = activeZone.hi ?? null;
+  const exitTargetLo = activeZone.lo ?? null;
+
+  if (bias === "long") exitTarget = exitTargetHi;
+  if (bias === "short") exitTarget = exitTargetLo;
+
+  const volumeState = deriveVolumeState(volume);
 
   return {
     ok: true,
@@ -278,36 +336,42 @@ export function computeConfluenceScore({
     bias,
     price,
     scores: {
-      engine1: Math.round(engine1Score),
-      engine2: Math.round(engine2Score),
-      engine3: Number(reactionScore.toFixed(2)),
-      engine4: Number(volumeScoreRaw.toFixed(2)),
+      engine1: Math.round(e1Score),
+      engine2: Math.round(e2Score),
+      engine3: Number(e3Score.toFixed(2)),
+      engine4: Number(e4ScoreRaw.toFixed(2)),
       total,
       label,
-      parts: {
-        e1Norm: Number(e1Norm.toFixed(2)),
-        e2Norm: Number(e2Norm.toFixed(2)),
-        e3Norm: Number(e3Norm.toFixed(2)),
-        e4Norm: Number(e4Norm.toFixed(2)),
-        volumeScoreCapped: Number(volumeScoreCapped.toFixed(2)),
-        reactionScoreCapped: Number(reactionScoreCapped.toFixed(2)),
-      }
     },
-    flags,
+    flags: {
+      ...flags,
+      zoneType,
+    },
     context: {
-      institutional: inst ?? null,
-      shelf: shelf ?? null,
-      engine1: {
-        institutionalStrength: instStrength,
-        shelfReadiness: shelfReadiness,
-        engine1ScoreUsed: engine1Score,
+      // UI-friendly: the exact zone used
+      activeZone: {
+        id: activeZone.id ?? null,
+        zoneType,
+        type: activeZone.type ?? null, // accumulation/distribution if present
+        lo: activeZone.lo ?? null,
+        hi: activeZone.hi ?? null,
+        mid: activeZone.mid ?? entryTarget ?? null,
+        strength: activeZone.strength ?? null,
+        readiness: activeZone.readiness ?? null,
       },
-      fib: fibW1 ?? null,
-      reaction: reaction ?? null,
-      volume: volume ?? null,
-      zoneUsed: inShelf
-        ? { id: shelf?.id ?? null, source: "shelf", lo: shelf?.lo ?? null, hi: shelf?.hi ?? null }
-        : { id: inst?.id ?? null, source: "institutional", lo: inst?.lo ?? null, hi: inst?.hi ?? null },
-    }
+      institutional: engine1Context?.active?.institutional ?? null,
+      negotiated: engine1Context?.active?.negotiated ?? null,
+      shelf: engine1Context?.active?.shelf ?? null,
+      fib,
+      reaction,
+      volume,
+    },
+    targets: {
+      entryTarget,
+      exitTarget,
+      exitTargetHi,
+      exitTargetLo,
+    },
+    volumeState,
   };
 }
