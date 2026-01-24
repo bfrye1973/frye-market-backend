@@ -47,7 +47,7 @@
       "active": true,
 
       "a": { "t": null, "p": 688.94 },
-      "b": { "t": null, "p": 657.01 },
+      "b": { "t": null, "p": 676.01 },
 
       "context": "W2",
       "waveMarks": {
@@ -87,16 +87,16 @@
       "wave": "W1",
       "active": true,
 
-      "a": { "t": null, "p": 675.28 },
-      "b": { "t": null, "p": 690.69 },
+      "a": { "t": "2026-1-13 10:00", "p": 695.41 }, 
+      "b": { "t": "2026-1-21 10:00", "p": 681.59 },
 
       "context": "W2",
       "waveMarks": {
-        "W1": { "t": "2025-12-26 10:00", "p": 690.43 },
-        "W2": { "t": "2026-01-02 10:00", "p": 683.01 },
-        "W3": { "t": "2026-01-13 06:00", "p": 697.20 },
-        "W4": { "t": "2026-11-14 08:00", "p": 688.30 },
-        "W5": { "t": null,              "p": null }
+        "W1": { "t": "2026 01-13 10:00", "p": 695.41 },
+        "W2": { "t": "2026-01-21 10:00", "p": 675.88 },
+        "W3": { "t": null, "p": null },
+        "W4": { "t": null, "p": null },
+        "W5": { "t": null, "p": null }
       },
       "comment": "Minor W1 fib uses a/b; labels + wave lines use waveMarks."
     },
@@ -107,8 +107,8 @@
       "wave": "W4",
       "active": true,
 
-      "a": { "t": null, "p": 688.39 },
-      "b": { "t": null, "p": 697.24 },
+      "a": { "t": null, "p": null },
+      "b": { "t": null, "p": null },
 
       "context": "W4",
       "waveMarks": {
@@ -128,16 +128,16 @@
       "wave": "W1",
       "active": true,
 
-      "a": { "t": null, "p": 688.29 },
-      "b": { "t": null, "p": 695.42 },
+      "a": { "t": null, "p": null },
+      "b": { "t": null, "p": null },
 
       "context": "W2",
       "waveMarks": {
-        "W1": { "t": "2026-01-15 10:00", "p": 695.11 },
-        "W2": { "t": "2025-01-16 08:00", "p": 690.21 },
-        "W3": { "t": null,              "p": null },
-        "W4": { "t": null,              "p": null },
-        "W5": { "t": null,              "p": null }
+        "W1": { "t": null, "p": null },
+        "W2": { "t": null, "p": null },
+        "W3": { "t": null, "p": null },
+        "W4": { "t": null, "p": null },
+        "W5": { "t": null, "p": null }
       },
       "comment": "Minute W1 fib uses a/b; labels use waveMarks. Verify W2 year (currently 2025 per your message)."
     },
