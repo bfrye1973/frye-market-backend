@@ -15,6 +15,7 @@
 // - Max 2 shelves per gap
 // - Shelf replacement requires strength +7
 // - Explicit active.* zones are returned
+// - NEW: nearest.shelf returned when active.shelf is null
 
 import express from "express";
 import fs from "fs";
@@ -90,6 +91,13 @@ function zoneId(z) {
 
 function isNegotiatedZone(z) {
   return zoneId(z).includes("|NEG|");
+}
+
+// Distance from price to shelf edge (for nearest)
+function shelfDistance(price, shelf) {
+  if (priceInside(price, shelf)) return { side: "INSIDE", distancePts: 0 };
+  if (price > shelf.hi) return { side: "ABOVE", distancePts: round2(price - shelf.hi) };
+  return { side: "BELOW", distancePts: round2(shelf.lo - price) };
 }
 
 // ---------------- ROUTE ----------------
@@ -289,6 +297,29 @@ router.get("/engine5-context", (req, res) => {
     }
   }
 
+  // ---------------- NEAREST SHELF (when not active) ----------------
+  let nearestShelf = null;
+  if (Number.isFinite(currentPrice) && !activeShelf && Array.isArray(shelves) && shelves.length) {
+    const ranked = shelves
+      .map((s) => {
+        const d = shelfDistance(currentPrice, s);
+        return { s, ...d };
+      })
+      .sort((a, b) => {
+        if (a.distancePts !== b.distancePts) return a.distancePts - b.distancePts;
+        return Number(b.s?.strength ?? 0) - Number(a.s?.strength ?? 0);
+      });
+
+    const best = ranked[0];
+    if (best?.s) {
+      nearestShelf = {
+        ...best.s,
+        side: best.side,
+        distancePts: best.distancePts,
+      };
+    }
+  }
+
   // ---------------- RESPONSE ----------------
   return res.json({
     ok: true,
@@ -312,6 +343,9 @@ router.get("/engine5-context", (req, res) => {
       negotiated: activeNegotiated,
       shelf: activeShelf,
       institutional: activeInstitutional,
+    },
+    nearest: {
+      shelf: nearestShelf,
     },
   });
 });
