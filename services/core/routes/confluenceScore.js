@@ -5,18 +5,22 @@ import { computeConfluenceScore } from "../logic/confluenceScorer.js";
 export const confluenceScoreRouter = express.Router();
 
 function baseUrlFromReq(req) {
-  // Works on Render behind proxy if trust proxy is enabled; fallback to https.
   const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
   return `${proto}://${req.get("host")}`;
 }
 
 async function jget(url) {
-  const r = await fetch(url, { headers: { "accept": "application/json" } });
+  const r = await fetch(url, { headers: { accept: "application/json" } });
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw new Error(`GET ${url} -> ${r.status} ${text.slice(0, 200)}`);
   }
   return r.json();
+}
+
+function num(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
 }
 
 confluenceScoreRouter.get("/confluence-score", async (req, res) => {
@@ -28,36 +32,71 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
 
     const base = baseUrlFromReq(req);
 
-    // Engine 2 first (we need price even for location gate)
-    const fibUrl = `${base}/api/v1/fib-levels?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}&degree=${encodeURIComponent(degree)}&wave=${encodeURIComponent(wave)}`;
+    // ----------------------------
+    // Engine 2 first (price source)
+    // ----------------------------
+    const fibUrl =
+      `${base}/api/v1/fib-levels` +
+      `?symbol=${encodeURIComponent(symbol)}` +
+      `&tf=${encodeURIComponent(tf)}` +
+      `&degree=${encodeURIComponent(degree)}` +
+      `&wave=${encodeURIComponent(wave)}`;
+
     const fib = await jget(fibUrl);
+
+    // IMPORTANT: price MUST be set for zone selection
     const price = fib?.diagnostics?.price ?? null;
 
-    // Engine 1 context (institutional + shelves)
-    const e1Url = `${base}/api/v1/engine5-context?symbol=${encodeURIComponent(symbol)}`;
+    // --------------------------------------------
+    // Engine 1 context (MUST pass tf — FIX #1)
+    // --------------------------------------------
+    const e1Url =
+      `${base}/api/v1/engine5-context` +
+      `?symbol=${encodeURIComponent(symbol)}` +
+      `&tf=${encodeURIComponent(tf)}`;
+
     const engine1Context = await jget(e1Url);
 
-    // Determine which zone we’re inside so we can query Engine 4 + (optionally) Engine 3
-    // We let computeConfluenceScore pick best in-zone institutional/shelf, but we need zone bounds for volume endpoint.
-    // So do a quick pick here by reusing the same endpoint response shape:
     const institutionals = engine1Context?.render?.institutional || [];
     const shelves = engine1Context?.render?.shelves || [];
 
-    const inInst = institutionals.find(z => price != null && price >= Number(z.lo) && price <= Number(z.hi));
-    const inShelf = shelves.find(z => price != null && price >= Number(z.lo) && price <= Number(z.hi));
+    // Pick the active zone ONLY if price is inside it (NO guessing)
+    const inInst = institutionals.find(
+      (z) => price != null && num(z.lo) != null && num(z.hi) != null && price >= num(z.lo) && price <= num(z.hi)
+    );
+    const inShelf = shelves.find(
+      (z) => price != null && num(z.lo) != null && num(z.hi) != null && price >= num(z.lo) && price <= num(z.hi)
+    );
 
     const zoneUsed = inShelf || inInst || null;
-    const zoneLo = zoneUsed ? Number(zoneUsed.lo) : null;
-    const zoneHi = zoneUsed ? Number(zoneUsed.hi) : null;
+    const zoneLo = zoneUsed ? num(zoneUsed.lo) : null;
+    const zoneHi = zoneUsed ? num(zoneUsed.hi) : null;
+    const zoneId = zoneUsed?.id ?? null;
 
-    // Engine 3 (reaction) — your endpoint already enforces NOT_IN_ZONE
-    const e3Url = `${base}/api/v1/reaction-score?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}`;
+    // --------------------------------------------
+    // Engine 3 (reaction) — pass zoneId if we have it (FIX #3)
+    // --------------------------------------------
+    const e3Url =
+      `${base}/api/v1/reaction-score` +
+      `?symbol=${encodeURIComponent(symbol)}` +
+      `&tf=${encodeURIComponent(tf)}` +
+      (zoneId ? `&zoneId=${encodeURIComponent(zoneId)}` : "");
+
     const reaction = await jget(e3Url);
 
-    // Engine 4 (volume) — only meaningful if we have a zone range
+    // --------------------------------------------
+    // Engine 4 (volume) — must call INTERNAL localhost (FIX #2)
+    // --------------------------------------------
     let volume = null;
-    if (zoneLo != null && zoneHi != null && Number.isFinite(zoneLo) && Number.isFinite(zoneHi)) {
-      const e4Url = `${base}/api/v1/volume-behavior?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}&zoneLo=${encodeURIComponent(zoneLo)}&zoneHi=${encodeURIComponent(zoneHi)}`;
+
+    if (zoneLo != null && zoneHi != null) {
+      const e4Url =
+        `http://localhost:10000/api/v1/volume-behavior` +
+        `?symbol=${encodeURIComponent(symbol)}` +
+        `&tf=${encodeURIComponent(tf)}` +
+        `&zoneLo=${encodeURIComponent(zoneLo)}` +
+        `&zoneHi=${encodeURIComponent(zoneHi)}`;
+
       volume = await jget(e4Url);
     } else {
       volume = {
@@ -69,6 +108,9 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
       };
     }
 
+    // ----------------------------
+    // Compute Engine 5 output
+    // ----------------------------
     const out = computeConfluenceScore({
       symbol,
       tf,
