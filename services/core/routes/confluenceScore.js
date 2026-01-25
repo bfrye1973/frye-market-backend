@@ -21,17 +21,21 @@ async function jget(url) {
 /**
  * ✅ Deterministic CORS for this route
  *
- * Key fix: echo the request Origin when present.
- * If no Origin header (curl / direct nav), allow "*".
+ * Fix goal:
+ * - Ensure GET (success AND error) includes ACAO
+ * - Avoid browsers reporting backend 500 as "CORS blocked"
  *
- * This prevents the common failure where ACAO is set to a different domain than req Origin.
+ * Strategy:
+ * - Echo request Origin when present
+ * - If no Origin (curl/direct), default to the dashboard origin (NOT wildcard)
  */
 function applyCors(req, res) {
   const origin = req.headers.origin;
 
-  // Echo origin if present; otherwise wildcard.
-  // This is the most reliable behavior for browser fetch.
-  res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  // Prefer echoing browser origin. If missing, default to dashboard origin.
+  const allowOrigin = origin || "https://frye-dashboard.onrender.com";
+
+  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
   res.setHeader("Vary", "Origin");
 
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
@@ -40,12 +44,12 @@ function applyCors(req, res) {
     "Content-Type, Authorization, X-Requested-With, X-Idempotency-Key"
   );
 
-  // Only set Allow-Credentials if you actually use cookies/credentials.
-  // If the frontend is NOT using credentials include, leave this off.
+  // IMPORTANT:
+  // Do NOT set Allow-Credentials unless the frontend uses credentials: "include".
   // res.setHeader("Access-Control-Allow-Credentials", "true");
 }
 
-// Explicit OPTIONS handler (removes ambiguity)
+// Explicit OPTIONS handler
 confluenceScoreRouter.options("/confluence-score", (req, res) => {
   applyCors(req, res);
   return res.sendStatus(204);
@@ -72,11 +76,11 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
 
     const engine1Context = await jget(ctxUrl);
 
-    // Authoritative price comes from Engine 1 context now
+    // Authoritative price comes from Engine 1 context
     const price = engine1Context?.meta?.current_price ?? null;
 
     // ----------------------------
-    // Engine 2 fib (signals only; do NOT use as price source anymore)
+    // Engine 2 fib (signals only; NOT price source)
     // ----------------------------
     const fibUrl =
       `${base}/api/v1/fib-levels` +
@@ -95,7 +99,8 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     const activeShelf = engine1Context?.active?.shelf ?? null;
     const activeInstitutional = engine1Context?.active?.institutional ?? null;
 
-    const activeZone = activeNegotiated || activeShelf || activeInstitutional || null;
+    const activeZone =
+      activeNegotiated || activeShelf || activeInstitutional || null;
 
     const zoneId = activeZone?.id ?? null;
     const zoneLo = activeZone?.lo ?? null;
@@ -113,19 +118,44 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     const reaction = await jget(e3Url);
 
     // ----------------------------
-    // Engine 4 (volume) — INTERNAL localhost only
+    // Engine 4 (volume) — DO NOT hard-fail on Render
+    //
+    // On Render, http://localhost:10000 will NOT resolve unless Engine 4
+    // is running in the same container. So:
+    // 1) Prefer ENGINE4_BASE_URL if provided
+    // 2) Otherwise fallback to localhost (local dev)
+    // 3) If it fails, DEGRADE gracefully (do not throw)
     // ----------------------------
     let volume = null;
 
     if (zoneLo != null && zoneHi != null) {
+      const e4Base =
+        process.env.ENGINE4_BASE_URL?.trim() || "http://localhost:10000";
+
       const e4Url =
-        `http://localhost:10000/api/v1/volume-behavior` +
+        `${e4Base}/api/v1/volume-behavior` +
         `?symbol=${encodeURIComponent(symbol)}` +
         `&tf=${encodeURIComponent(tf)}` +
         `&zoneLo=${encodeURIComponent(zoneLo)}` +
         `&zoneHi=${encodeURIComponent(zoneHi)}`;
 
-      volume = await jget(e4Url);
+      try {
+        volume = await jget(e4Url);
+      } catch (e) {
+        // ✅ degrade instead of killing confluence-score
+        volume = {
+          ok: true,
+          volumeScore: 0,
+          volumeConfirmed: false,
+          reasonCodes: ["ENGINE4_UNAVAILABLE"],
+          flags: {},
+          diagnostics: {
+            note: "Engine 4 unreachable — degraded volume scoring",
+            engine4Base: e4Base,
+            error: String(e?.message || e),
+          },
+        };
+      }
     } else {
       volume = {
         ok: true,
@@ -148,9 +178,6 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
       reaction,
       volume,
     });
-
-    // Diagnostic log (optional but useful for 1 deploy)
-    // console.log("[confluence-score] origin:", req.headers.origin, "ACAO:", res.getHeader("Access-Control-Allow-Origin"));
 
     return res.json(out);
   } catch (err) {
