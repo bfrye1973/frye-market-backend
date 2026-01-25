@@ -2,8 +2,9 @@
 // Engine 6 — Trade Permission API
 //
 // ✅ Supports:
-//   GET  /api/v1/trade-permission (sanity)
-//   POST /api/v1/trade-permission (preferred; avoids giant querystrings)
+//   GET     /api/v1/trade-permission (sanity / simple testing)
+//   POST    /api/v1/trade-permission (preferred; avoids giant querystrings)
+//   OPTIONS /api/v1/trade-permission (explicit preflight)
 //
 // Body shape:
 // {
@@ -27,17 +28,40 @@ function safeJsonParse(s) {
   }
 }
 
+/**
+ * ✅ Deterministic CORS (route-level belt + suspenders)
+ * - Echo request Origin when present
+ * - If no Origin (curl/direct), default to dashboard origin
+ */
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  const allowOrigin = origin || "https://frye-dashboard.onrender.com";
+
+  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With, X-Idempotency-Key"
+  );
+  // Do NOT set Allow-Credentials unless you use credentials: "include"
+  // res.setHeader("Access-Control-Allow-Credentials", "true");
+}
+
 function buildInput(req) {
   const body = req.body || {};
   const q = req.query || {};
 
-  const symbol = body.symbol || q.symbol || "SPY";
-  const tf = body.tf || q.tf || "1h";
+  const symbol = String(body.symbol || q.symbol || "SPY").toUpperCase();
+  const tf = String(body.tf || q.tf || "1h");
 
   const engine5 =
     body.engine5 ||
-    (typeof q.engine5 === "string" ? safeJsonParse(q.engine5) : null) ||
-    { invalid: false, total: 0, reasonCodes: [] };
+    (typeof q.engine5 === "string" ? safeJsonParse(q.engine5) : null) || {
+      invalid: false,
+      total: 0,
+      reasonCodes: [],
+    };
 
   const marketMeter =
     body.marketMeter ||
@@ -51,8 +75,9 @@ function buildInput(req) {
 
   const intent =
     body.intent ||
-    (typeof q.intent === "string" ? safeJsonParse(q.intent) : null) ||
-    { action: "NEW_ENTRY" };
+    (typeof q.intent === "string" ? safeJsonParse(q.intent) : null) || {
+      action: "NEW_ENTRY",
+    };
 
   return {
     symbol,
@@ -65,11 +90,21 @@ function buildInput(req) {
   };
 }
 
+// ✅ Explicit OPTIONS handler (removes any ambiguity for preflight)
+tradePermissionRouter.options("/trade-permission", (req, res) => {
+  applyCors(req, res);
+  return res.sendStatus(204);
+});
+
 tradePermissionRouter.get("/trade-permission", (req, res) => {
+  applyCors(req, res);
+
   try {
     const input = buildInput(req);
     const result = computeTradePermission(input);
-    res.json({
+
+    return res.json({
+      ok: true,
       engine: "engine6.tradePermission",
       symbol: input.symbol,
       tf: input.tf,
@@ -78,15 +113,24 @@ tradePermissionRouter.get("/trade-permission", (req, res) => {
     });
   } catch (err) {
     console.error("[engine6 GET] error:", err);
-    res.status(500).json({ ok: false, error: "ENGINE6_ERROR", detail: String(err?.message || err) });
+    applyCors(req, res);
+    return res.status(500).json({
+      ok: false,
+      error: "ENGINE6_ERROR",
+      detail: String(err?.message || err),
+    });
   }
 });
 
 tradePermissionRouter.post("/trade-permission", (req, res) => {
+  applyCors(req, res);
+
   try {
     const input = buildInput(req);
     const result = computeTradePermission(input);
-    res.json({
+
+    return res.json({
+      ok: true,
       engine: "engine6.tradePermission",
       symbol: input.symbol,
       tf: input.tf,
@@ -95,6 +139,11 @@ tradePermissionRouter.post("/trade-permission", (req, res) => {
     });
   } catch (err) {
     console.error("[engine6 POST] error:", err);
-    res.status(500).json({ ok: false, error: "ENGINE6_ERROR", detail: String(err?.message || err) });
+    applyCors(req, res);
+    return res.status(500).json({
+      ok: false,
+      error: "ENGINE6_ERROR",
+      detail: String(err?.message || err),
+    });
   }
 });
