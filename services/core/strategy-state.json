@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "updatedAt": "2026-01-25T00:00:00.000Z",
+  "global": {
+    "paperOnly": true
+  },
+  "symbols": {
+    "SPY": {
+      "updatedAt": "2026-01-25T00:00:00.000Z",
+      "strategies": {
+        "scalp@10m": {
+          "strategyId": "scalp",
+          "tf": "10m",
+          "enabled": true,
+          "scalpMode": true,
+          "sizeCapBand": "M"
+        },
+        "minor@1h": {
+          "strategyId": "minor",
+          "tf": "1h",
+          "enabled": true,
+          "scalpMode": false,
+          "sizeCapBand": "M"
+        },
+        "intermediate@4h": {
+          "strategyId": "intermediate",
+          "tf": "4h",
+          "enabled": true,
+          "scalpMode": false,
+          "sizeCapBand": "S"
+        }
+      }
+    }
+  }
+}
