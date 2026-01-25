@@ -17,6 +17,8 @@ import { reactionScoreRouter } from "./routes/reactionScore.js";
 import { volumeBehaviorRouter } from "./routes/volumeBehavior.js";
 import { confluenceScoreRouter } from "./routes/confluenceScore.js";
 import tradingRouter from "./routes/trading.js";
+import optionsRouter from "./routes/options.js";
+
 
 
 // ✅ Engine 2 (Fib) — IMPORTANT: this is a NAMED export, not default
@@ -93,6 +95,7 @@ app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
 app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution shelves
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 app.use("/api/trading", tradingRouter);
+app.use("/api/v1/options", optionsRouter);
 
 
 // Routers mounted under /api/v1
