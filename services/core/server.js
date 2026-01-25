@@ -40,30 +40,28 @@ app.set("etag", false);
 app.use(express.json({ limit: "1mb" }));
 
 // --- CORS (dashboard + local dev) ---
-const ALLOW = new Set([
-  "https://frye-dashboard.onrender.com",
-  "http://localhost:3000",
-]);
-
+// ✅ Deterministic: echo Origin if present, else "*"
+// This prevents "OPTIONS 204 ok, GET blocked" due to origin mismatches.
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
-  // Always set a deterministic ACAO so GET never “forgets” the header.
-  const allowOrigin =
-    origin && ALLOW.has(origin) ? origin : "https://frye-dashboard.onrender.com";
-
-  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  // Echo origin for browser fetch; fallback to wildcard for curl/direct loads.
+  res.setHeader("Access-Control-Allow-Origin", origin || "*");
   res.setHeader("Vary", "Origin");
+
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization, X-Requested-With, X-Idempotency-Key"
   );
 
+  // If you ever use cookies/credentials in fetch, uncomment:
+  // (Do NOT combine Allow-Credentials with "*"; echoing origin makes it safe)
+  // if (origin) res.setHeader("Access-Control-Allow-Credentials", "true");
+
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
-
 
 // --- Static (optional) ---
 const __filename = fileURLToPath(import.meta.url);
@@ -107,6 +105,7 @@ app.use("/api/v1", tradePermissionRouter);
 app.use((req, res) =>
   res.status(404).json({ ok: false, error: "Not Found", path: req.path })
 );
+
 app.use((err, _req, res, _next) => {
   console.error("[server] unhandled:", err?.stack || err);
   res.status(500).json({
