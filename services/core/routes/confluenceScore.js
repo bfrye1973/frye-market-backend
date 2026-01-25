@@ -18,39 +18,41 @@ async function jget(url) {
   return r.json();
 }
 
-// ✅ CORS helper for this route (belt + suspenders)
-// This guarantees GET responses always include ACAO, fixing "OPTIONS 204 ok, GET blocked" cases.
-function applyCorsForDashboard(req, res) {
+/**
+ * ✅ Deterministic CORS for this route
+ *
+ * Key fix: echo the request Origin when present.
+ * If no Origin header (curl / direct nav), allow "*".
+ *
+ * This prevents the common failure where ACAO is set to a different domain than req Origin.
+ */
+function applyCors(req, res) {
   const origin = req.headers.origin;
-  const allow = new Set([
-    "https://frye-dashboard.onrender.com",
-    "http://localhost:3000",
-  ]);
 
-  // Always set a deterministic origin header
-  const allowOrigin = origin && allow.has(origin)
-    ? origin
-    : "https://frye-dashboard.onrender.com";
-
-  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  // Echo origin if present; otherwise wildcard.
+  // This is the most reliable behavior for browser fetch.
+  res.setHeader("Access-Control-Allow-Origin", origin || "*");
   res.setHeader("Vary", "Origin");
+
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization, X-Requested-With, X-Idempotency-Key"
   );
+
+  // Only set Allow-Credentials if you actually use cookies/credentials.
+  // If the frontend is NOT using credentials include, leave this off.
+  // res.setHeader("Access-Control-Allow-Credentials", "true");
 }
 
-// ✅ (Optional) Explicit OPTIONS handler for this route
-// Not strictly required if global middleware handles OPTIONS, but harmless and removes ambiguity.
+// Explicit OPTIONS handler (removes ambiguity)
 confluenceScoreRouter.options("/confluence-score", (req, res) => {
-  applyCorsForDashboard(req, res);
+  applyCors(req, res);
   return res.sendStatus(204);
 });
 
 confluenceScoreRouter.get("/confluence-score", async (req, res) => {
-  // ✅ Ensure CORS headers are present on the ACTUAL GET response
-  applyCorsForDashboard(req, res);
+  applyCors(req, res);
 
   try {
     const symbol = String(req.query.symbol || "SPY").toUpperCase();
@@ -86,8 +88,8 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     const fib = await jget(fibUrl);
 
     // ----------------------------
-    // Determine active zone from Engine 1 explicit fields (NO guessing)
-    // Priority: active.negotiated -> active.shelf -> active.institutional
+    // Active zone (NO guessing)
+    // Priority: negotiated -> shelf -> institutional
     // ----------------------------
     const activeNegotiated = engine1Context?.active?.negotiated ?? null;
     const activeShelf = engine1Context?.active?.shelf ?? null;
@@ -112,7 +114,6 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
 
     // ----------------------------
     // Engine 4 (volume) — INTERNAL localhost only
-    // Runs against the ACTIVE zone range
     // ----------------------------
     let volume = null;
 
@@ -136,9 +137,6 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
       };
     }
 
-    // ----------------------------
-    // Engine 5 compute
-    // ----------------------------
     const out = computeConfluenceScore({
       symbol,
       tf,
@@ -151,10 +149,13 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
       volume,
     });
 
-    res.json(out);
+    // Diagnostic log (optional but useful for 1 deploy)
+    // console.log("[confluence-score] origin:", req.headers.origin, "ACAO:", res.getHeader("Access-Control-Allow-Origin"));
+
+    return res.json(out);
   } catch (err) {
-    // ✅ include CORS on error responses too (already applied above)
-    res.status(500).json({
+    applyCors(req, res);
+    return res.status(500).json({
       ok: false,
       error: String(err?.message || err),
     });
