@@ -19,21 +19,26 @@ async function jget(url) {
 }
 
 /**
- * ✅ Deterministic CORS for this route
+ * ✅ Deterministic CORS for this route (HARD SET)
  *
  * Fix goal:
  * - Ensure GET (success AND error) includes ACAO
- * - Avoid browsers reporting backend 500 as "CORS blocked"
+ * - Remove any ambiguity from "echo origin" behavior
  *
  * Strategy:
- * - Echo request Origin when present
- * - If no Origin (curl/direct), default to the dashboard origin (NOT wildcard)
+ * - Always allow the dashboard origin (and optionally localhost dev)
  */
 function applyCors(req, res) {
   const origin = req.headers.origin;
 
-  // Prefer echoing browser origin. If missing, default to dashboard origin.
-  const allowOrigin = origin || "https://frye-dashboard.onrender.com";
+  // Allow dashboard in production, allow localhost in dev
+  const isAllowed =
+    origin === "https://frye-dashboard.onrender.com" ||
+    origin === "http://localhost:3000";
+
+  const allowOrigin = isAllowed
+    ? origin
+    : "https://frye-dashboard.onrender.com";
 
   res.setHeader("Access-Control-Allow-Origin", allowOrigin);
   res.setHeader("Vary", "Origin");
