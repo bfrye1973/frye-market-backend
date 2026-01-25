@@ -18,7 +18,40 @@ async function jget(url) {
   return r.json();
 }
 
+// ✅ CORS helper for this route (belt + suspenders)
+// This guarantees GET responses always include ACAO, fixing "OPTIONS 204 ok, GET blocked" cases.
+function applyCorsForDashboard(req, res) {
+  const origin = req.headers.origin;
+  const allow = new Set([
+    "https://frye-dashboard.onrender.com",
+    "http://localhost:3000",
+  ]);
+
+  // Always set a deterministic origin header
+  const allowOrigin = origin && allow.has(origin)
+    ? origin
+    : "https://frye-dashboard.onrender.com";
+
+  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With, X-Idempotency-Key"
+  );
+}
+
+// ✅ (Optional) Explicit OPTIONS handler for this route
+// Not strictly required if global middleware handles OPTIONS, but harmless and removes ambiguity.
+confluenceScoreRouter.options("/confluence-score", (req, res) => {
+  applyCorsForDashboard(req, res);
+  return res.sendStatus(204);
+});
+
 confluenceScoreRouter.get("/confluence-score", async (req, res) => {
+  // ✅ Ensure CORS headers are present on the ACTUAL GET response
+  applyCorsForDashboard(req, res);
+
   try {
     const symbol = String(req.query.symbol || "SPY").toUpperCase();
     const tf = String(req.query.tf || "1h");
@@ -120,6 +153,7 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
 
     res.json(out);
   } catch (err) {
+    // ✅ include CORS on error responses too (already applied above)
     res.status(500).json({
       ok: false,
       error: String(err?.message || err),
