@@ -16,6 +16,8 @@ import { engine5ContextRouter } from "./routes/engine5Context.js";
 import { reactionScoreRouter } from "./routes/reactionScore.js";
 import { volumeBehaviorRouter } from "./routes/volumeBehavior.js";
 import { confluenceScoreRouter } from "./routes/confluenceScore.js";
+import tradingRouter from "./routes/trading.js";
+
 
 // ✅ Engine 2 (Fib) — IMPORTANT: this is a NAMED export, not default
 import { fibLevelsRouter } from "./routes/fibLevels.js";
@@ -90,6 +92,8 @@ app.use("/live", liveRouter); // ✅ GitHub JSON proxies
 app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
 app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution shelves
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
+app.use("/api/trading", tradingRouter);
+
 
 // Routers mounted under /api/v1
 app.use("/api/v1", engine5ContextRouter);
