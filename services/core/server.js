@@ -98,6 +98,26 @@ app.use("/api/v1", reactionScoreRouter);
 app.use("/api/v1", volumeBehaviorRouter);
 app.use("/api/v1", confluenceScoreRouter);
 
+// 🔒 HARD CORS GUARANTEE for Strategy endpoint
+app.use("/api/v1/confluence-score", (req, res, next) => {
+  res.setHeader(
+    "Access-Control-Allow-Origin",
+    "https://frye-dashboard.onrender.com"
+  );
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With, X-Idempotency-Key"
+  );
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
+
 // ✅ Engine 6 route mount
 app.use("/api/v1", tradePermissionRouter);
 
