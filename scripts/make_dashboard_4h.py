@@ -1,30 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_4h.py (R13.3 — SHORT-MEMORY LUX PSI, 10m-Behavior)
+Ferrari Dashboard — make_dashboard_4h.py (R13.4 — BODY-AWARE EMA posture)
 
-LOCKED INTENT (per old teammate):
-- 10m Lux PSI is canonical behavior.
-- 4h Lux PSI must behave like 10m (short-memory "current squeeze"), not long-history memory.
-- Dashboard squeeze represents PSI tightness (higher = tighter), NOT expansion.
-- 4h squeeze is a soft component (context), not dominant.
+CHANGE (single intent):
+- 4H EMA posture uses BODY midpoint ( (O+C)/2 ) vs EMA10 instead of close-only.
+  This prevents wick dips below EMA10 from crashing the 4H bridge score.
+  Matches your observation: “body is above 10 EMA; wicks dip but get bought.”
 
-This script:
-- Reads sectorCards from a source json (data/outlook_source_4h.json)
-- Fetches SPY 4h bars from Polygon (modest lookback; NOT long)
-- Computes:
-  * EMA10 posture from dist (0..100)
-  * SMI 12/5/5 + signal, normalized 0..100
-  * Momentum combo (50/50 EMA posture + SMI)
-  * Lux PSI tightness using SHORT window closes (PSI_WIN_4H bars)
-  * Expansion = 100 - PSI (stored)
-  * Liquidity (EMA vol3/vol12)
-  * Volatility (ATR% scaled)
-  * Risk-on from sectorCards
-  * overall4h score via weighted average
-
-Outputs:
-- data/outlook_4h.json (expected by /live/4h proxy)
+Everything else unchanged:
+- Short-memory Lux PSI (PSI_WIN_4H)
+- SMI 12/5/5
+- Weighted-average scoring
+- Sector breadth/momentum from sectorCards
 """
 
 from __future__ import annotations
@@ -72,10 +60,9 @@ W_VOL = 0.05
 W_RISKON = 0.03
 
 # ---- SHORT-MEMORY PSI WINDOW (LOCKED INTENT) ----
-# default ~3 trading weeks worth of 4h bars (roughly 2 bars/day => ~30 bars/3w, but we use 60 for safety)
 PSI_WIN_4H = int(os.environ.get("PSI_WIN_4H", "16"))
 
-# modest fetch, not long (keep your request)
+# modest fetch, not long
 FETCH_DAYS_4H = int(os.environ.get("FETCH_DAYS_4H", "120"))
 
 
@@ -98,7 +85,7 @@ def pct(a: float, b: float) -> float:
 
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "make-dashboard/4h/1.4", "Cache-Control": "no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent": "make-dashboard/4h/1.5", "Cache-Control": "no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -163,13 +150,6 @@ def tr_series(H: List[float], L: List[float], C: List[float]) -> List[float]:
 
 
 def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
-    """
-    LuxAlgo PSI (canonical):
-      max := nz(max(src, max - (max-src)/conv), src)
-      min := nz(min(src, min + (src-min)/conv), src)
-      diff = log(max-min)
-      psi  = -50*corr(diff, bar_index, length) + 50
-    """
     if not closes or len(closes) < max(5, length + 2):
         return None
 
@@ -192,12 +172,12 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
     xbar = sum(xs) / length
     ybar = sum(win) / length
 
-    num = sum((x - xbar) * (y - ybar) for x, y in zip(xs, win))
+    numv = sum((x - xbar) * (y - ybar) for x, y in zip(xs, win))
     denx = sum((x - xbar) ** 2 for x in xs)
     deny = sum((y - ybar) ** 2 for y in win)
     den = math.sqrt(denx * deny) if denx > 0 and deny > 0 else 0.0
 
-    r = (num / den) if den != 0 else 0.0
+    r = (numv / den) if den != 0 else 0.0
     psi = -50.0 * r + 50.0
     return float(clamp(psi, 0.0, 100.0))
 
@@ -347,20 +327,22 @@ def main():
                 ro_score += 1
     risk_on_4h = round(pct(ro_score, ro_den), 2) if ro_den > 0 else 50.0
 
-    # SPY 4h bars (modest history, per intent)
+    # SPY 4h bars (modest history)
     spy_4h = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H)
     if len(spy_4h) < 25:
         print("[fatal] insufficient SPY 4H bars", file=sys.stderr)
         sys.exit(2)
 
+    O = [b["open"] for b in spy_4h]
     H = [b["high"] for b in spy_4h]
     L = [b["low"] for b in spy_4h]
     C = [b["close"] for b in spy_4h]
     V = [b["volume"] for b in spy_4h]
 
-    # EMA10 posture
+    # EMA10 posture (BODY-AWARE)
     e10 = ema_series(C, 10)[-1]
-    ema_dist_pct = 0.0 if e10 == 0 else 100.0 * (C[-1] - e10) / e10
+    body_mid = (float(O[-1]) + float(C[-1])) / 2.0
+    ema_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_mid - e10) / e10
     ema_sign = 1 if ema_dist_pct > 0 else (-1 if ema_dist_pct < 0 else 0)
     ema10_posture = posture_from_dist(ema_dist_pct, FULL_EMA_DIST)
 
@@ -385,12 +367,11 @@ def main():
     squeeze_psi_4h = float(psi) if isinstance(psi, (int, float)) else 50.0
     squeeze_psi_4h = float(clamp(squeeze_psi_4h, 0.0, 100.0))
 
-    # ✅ Dead-zone breaker (UX): avoid exact 50.0 when PSI is essentially neutral
+    # ✅ Dead-zone breaker (UX)
     if abs(squeeze_psi_4h - 50.0) < 0.25:
         squeeze_psi_4h = 49.0 if float(ema10_posture) >= 55.0 else 51.0
 
     squeeze_exp_4h = clamp(100.0 - squeeze_psi_4h, 0.0, 100.0)
-
 
     # Liquidity + Volatility
     v3 = ema_last(V, 3)
@@ -444,7 +425,6 @@ def main():
         "smi_4h_pct": round(float(smi_pct), 2),
         "smi_bonus_pts": int(smi_bonus),
 
-        # SQUEEZE (tightness is what we display)
         "squeeze_psi_4h_pct": round(float(squeeze_psi_4h), 2),
         "squeeze_expansion_pct": round(float(squeeze_exp_4h), 2),
         "squeeze_pct": round(float(squeeze_psi_4h), 2),
@@ -460,7 +440,6 @@ def main():
         "sector_dir_4h_pct": float(sector_dir_4h),
         "riskOn_4h_pct": float(risk_on_4h),
 
-        # debug
         "psi_window_4h_bars": int(PSI_WIN_4H),
         "fetch_days_4h": int(FETCH_DAYS_4H),
     }
@@ -476,7 +455,7 @@ def main():
     }
 
     out = {
-        "version": "r4h-v4-weightedavg-shortpsi",
+        "version": "r4h-v4-weightedavg-shortpsi-bodyema",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
