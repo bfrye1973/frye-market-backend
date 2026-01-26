@@ -343,11 +343,10 @@ def main():
     e10 = ema_series(C, 10)[-1]
 
     close_dist_pct = 0.0 if e10 == 0 else 100.0 * (float(C[-1]) - e10) / e10
-    body_top = max(float(O[-1]), float(C[-1]))
+    body_top = max(float(O[-1]), float(C[-1]))  # top of candle body (defense)
     body_top_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_top - e10) / e10
 
-    # If wick reclaimed EMA10 and close is only slightly below EMA10, treat as neutral/reclaimed.
-    # This prevents "wick probes" from crashing the bridge score.
+    # If wick reclaimed EMA10 and close is only slightly below EMA10, treat as reclaimed/neutral.
     RECLAIM_TOL_PCT = float(os.environ.get("EMA10_RECLAIM_TOL_PCT", "0.20"))  # 0.20% default
     wick_reclaimed = float(H[-1]) > float(e10)
 
@@ -355,12 +354,12 @@ def main():
         # consider reclaimed: do NOT allow bearish dist here
         ema_dist_pct = max(0.0, body_top_dist_pct)
     else:
-    # normal behavior
-    ema_dist_pct = close_dist_pct
+        # normal behavior
+        ema_dist_pct = close_dist_pct
 
-ema_sign = 1 if ema_dist_pct > 0 else (-1 if ema_dist_pct < 0 else 0)
-ema10_posture = posture_from_dist(ema_dist_pct, FULL_EMA_DIST)
-
+    ema_sign = 1 if ema_dist_pct > 0 else (-1 if ema_dist_pct < 0 else 0)
+    ema10_posture = posture_from_dist(ema_dist_pct, FULL_EMA_DIST)
+    
     # SMI 12/5/5
     smi_series, sig_series = tv_smi_and_signal(H, L, C, SMI_K_LEN, SMI_D_LEN, SMI_EMA_LEN)
     smi_val = float(smi_series[-1]) if smi_series else 0.0
