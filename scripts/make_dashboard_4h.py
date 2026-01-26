@@ -339,10 +339,10 @@ def main():
     C = [b["close"] for b in spy_4h]
     V = [b["volume"] for b in spy_4h]
 
-    # EMA10 posture (BODY-AWARE)
+    # EMA10 posture (DEFENSE-AWARE: use top of candle body)
     e10 = ema_series(C, 10)[-1]
-    body_mid = (float(O[-1]) + float(C[-1])) / 2.0
-    ema_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_mid - e10) / e10
+    body_top = max(float(O[-1]), float(C[-1]))  # top of body (defense)
+    ema_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_top - e10) / e10
     ema_sign = 1 if ema_dist_pct > 0 else (-1 if ema_dist_pct < 0 else 0)
     ema10_posture = posture_from_dist(ema_dist_pct, FULL_EMA_DIST)
 
