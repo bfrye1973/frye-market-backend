@@ -8,16 +8,15 @@
   },
   "structures": [
     {
-      "structureKey": "MANUAL|SPY|690.00-693.70",
+      "structureKey": "MANUAL|SPY|686.00-688.70",
       "symbol": "SPY",
       "tier": "structure",
-      "manualRange": [693.00, 691.00],
-      "priceRange": [693.70, 691.00],
+      "manualRange": [688.70, 686.00],
+      "priceRange": [688.70, 686.00],
       "locked": true,
       "rangeSource": "manual",
       "status": "active",
       "stickyConfirmed": true
-       "notes": "NEGOTIATED / VALUE zone inside institutional 691.78-692.36 (turquoise)"
     },
     {
       "structureKey": "MANUAL|SPY|NEG|687.16-688.22",
