@@ -347,7 +347,7 @@ def main():
     body_top_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_top - e10) / e10
 
     # If wick reclaimed EMA10 and close is only slightly below EMA10, treat as reclaimed/neutral.
-    RECLAIM_TOL_PCT = float(os.environ.get("EMA10_RECLAIM_TOL_PCT", "0.20"))  # 0.20% default
+    RECLAIM_TOL_PCT = float(os.environ.get("EMA10_RECLAIM_TOL_PCT", "0.60"))  # 0.60% default
     wick_reclaimed = float(H[-1]) > float(e10)
 
     if wick_reclaimed and close_dist_pct >= -RECLAIM_TOL_PCT:
