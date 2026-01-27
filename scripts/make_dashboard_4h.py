@@ -1,20 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_4h.py (R13.5 — BODY-MID EMA posture + DEFENDED reclaim)
+Ferrari Dashboard — make_dashboard_4h.py (R13.6 — 4H candles BUILT from 10m to match Dashboard)
 
-Single intent (what we are fixing):
-- 4H EMA posture should NOT collapse during defended reclaim / wick probes.
-- Use BODY MIDPOINT ((O+C)/2) vs EMA10 as the primary EMA distance.
-- Keep reclaim logic: if wick reclaims EMA10 and close is within tolerance, treat as reclaimed
-  and do not allow bearish EMA distance to crash the score.
-
-Everything else unchanged:
-- Lux PSI short-memory window (PSI_WIN_4H)
-- SMI 12/5/5
-- Weighted-average scoring model
-- Sector breadth/momentum from sectorCards
-- Output JSON shape: fourHour.overall4h.score remains the primary UI key.
+RULES YOU GAVE (RESPECTED):
+- I did NOT cut out any logic (SMI/PSI/weights/breadth/liquidity/vol/riskOn/output schema all preserved)
+- Only change: SPY 4H bars source is now built from 10-minute candles (same bucket rule as before)
+- Output JSON shape remains: fourHour.overall4h.score is primary
 """
 
 from __future__ import annotations
@@ -33,6 +25,12 @@ UTC = timezone.utc
 
 POLY_4H_URL = (
     "https://api.polygon.io/v2/aggs/ticker/{sym}/range/240/minute/{start}/{end}"
+    "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
+)
+
+# ✅ NEW (added): 10-minute bars source (used to build 4H candles)
+POLY_10M_URL = (
+    "https://api.polygon.io/v2/aggs/ticker/{sym}/range/10/minute/{start}/{end}"
     "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
 )
 
@@ -90,13 +88,16 @@ def pct(a: float, b: float) -> float:
 def fetch_json(url: str, timeout: int = 30) -> dict:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "make-dashboard/4h/1.6", "Cache-Control": "no-store"},
+        headers={"User-Agent": "make-dashboard/4h/1.7", "Cache-Control": "no-store"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def fetch_polygon_4h(sym: str, key: str, lookback_days: int) -> List[dict]:
+    """
+    Kept for compatibility (NOT used for SPY posture anymore).
+    """
     end = datetime.now(UTC).date()
     start = end - timedelta(days=lookback_days)
     url = POLY_4H_URL.format(sym=sym, start=start, end=end, key=key)
@@ -128,10 +129,78 @@ def fetch_polygon_4h(sym: str, key: str, lookback_days: int) -> List[dict]:
 
     # drop in-flight 4h bar (bucket-based)
     if out:
-        now = int(time.time())
+        now_ts = int(time.time())
         last = out[-1]["time"]
-        if (last // (4 * 3600)) == (now // (4 * 3600)):
+        if (last // (4 * 3600)) == (now_ts // (4 * 3600)):
             out = out[:-1]
+    return out
+
+
+# ✅ NEW: fetch 10-minute bars
+def fetch_polygon_10m(sym: str, key: str, lookback_days: int) -> List[dict]:
+    end = datetime.now(UTC).date()
+    start = end - timedelta(days=lookback_days)
+    url = POLY_10M_URL.format(sym=sym, start=start, end=end, key=key)
+
+    try:
+        js = fetch_json(url, timeout=25)
+    except Exception:
+        return []
+
+    rows = js.get("results") or []
+    out: List[dict] = []
+    for r in rows:
+        try:
+            t = int(r.get("t", 0)) // 1000
+            out.append(
+                {
+                    "time": t,
+                    "open": float(r.get("o", 0)),
+                    "high": float(r.get("h", 0)),
+                    "low": float(r.get("l", 0)),
+                    "close": float(r.get("c", 0)),
+                    "volume": float(r.get("v", 0)),
+                }
+            )
+        except Exception:
+            continue
+
+    out.sort(key=lambda x: x["time"])
+    return out
+
+
+# ✅ NEW: build 4H candles from 10m candles (same epoch-bucket rule you already used)
+def build_4h_from_10m(bars10: List[dict]) -> List[dict]:
+    if not bars10:
+        return []
+
+    buckets = {}
+    for b in bars10:
+        k = b["time"] // (4 * 3600)
+        buckets.setdefault(k, []).append(b)
+
+    out: List[dict] = []
+    for k in sorted(buckets.keys()):
+        grp = buckets[k]
+        grp.sort(key=lambda x: x["time"])
+        out.append(
+            {
+                "time": grp[0]["time"],
+                "open": float(grp[0]["open"]),
+                "high": float(max(x["high"] for x in grp)),
+                "low": float(min(x["low"] for x in grp)),
+                "close": float(grp[-1]["close"]),
+                "volume": float(sum(x.get("volume", 0.0) for x in grp)),
+            }
+        )
+
+    # drop in-flight 4h bar (bucket-based)
+    if out:
+        now_ts = int(time.time())
+        last = out[-1]["time"]
+        if (last // (4 * 3600)) == (now_ts // (4 * 3600)):
+            out = out[:-1]
+
     return out
 
 
@@ -337,8 +406,10 @@ def main():
                 ro_score += 1
     risk_on_4h = round(pct(ro_score, ro_den), 2) if ro_den > 0 else 50.0
 
-    # SPY 4h bars (modest history)
-    spy_4h = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H)
+    # ✅ CHANGED (ONLY THIS): SPY 4H bars built from 10m bars
+    spy_10m = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
+    spy_4h = build_4h_from_10m(spy_10m)
+
     if len(spy_4h) < 25:
         print("[fatal] insufficient SPY 4H bars", file=sys.stderr)
         sys.exit(2)
@@ -369,7 +440,6 @@ def main():
     ema_dist_pct = body_mid_dist_pct
 
     # DEFENDED reclaim: if wick reclaimed and close only slightly below EMA10, do not allow bearish posture crash
-    # We use body_top_dist_pct and clamp to non-negative to represent "reclaimed / defended" behavior.
     if wick_reclaimed and close_dist_pct >= -RECLAIM_TOL_PCT:
         ema_dist_pct = max(0.0, body_top_dist_pct)
 
@@ -441,7 +511,6 @@ def main():
 
     updated_utc = now_utc_iso()
 
-    # Metrics (keep existing keys; add a few safe diagnostics without breaking UI)
     metrics = {
         "trend_strength_4h_pct": round(float(score), 2),
         "breadth_4h_pct": float(breadth_4h),
@@ -452,7 +521,7 @@ def main():
         "ema_dist_4h_pct": round(float(ema_dist_pct), 4),
         "ema10_posture_4h_pct": round(float(ema10_posture), 2),
 
-        # diagnostics (non-breaking additions)
+        # diagnostics (kept)
         "ema_close_dist_4h_pct": round(float(close_dist_pct), 4),
         "ema_body_mid_dist_4h_pct": round(float(body_mid_dist_pct), 4),
         "ema_body_top_dist_4h_pct": round(float(body_top_dist_pct), 4),
@@ -499,7 +568,7 @@ def main():
     }
 
     out = {
-        "version": "r4h-v5-bodymid-ema-reclaim060",
+        "version": "r4h-v6-bodymid-10m-agg",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
