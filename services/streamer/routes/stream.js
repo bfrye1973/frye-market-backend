@@ -66,6 +66,16 @@ function sseSend(res, obj) {
   res.write(`data: ${JSON.stringify(obj)}\n\n`);
 }
 
+function limitByTf(tfStr) {
+  if (tfStr === "10m") return 2000; // ~1 month+
+  if (tfStr === "30m") return 2500; // ~2 months+
+  if (tfStr === "1h") return 4000;  // ~6+ months
+  if (tfStr === "4h") return 4000;  // ~1+ year
+  if (tfStr === "1d") return 5000;  // years
+  if (tfStr === "1m") return 5000;  // keep 1m reasonable
+  return 2000;
+}
+
 /* -------------------- RTH bucketing -------------------- */
 
 function nyAnchors(unixSec) {
@@ -196,13 +206,51 @@ function updateAggFrom1m(lastAgg, bar1m, tfMin, mode) {
   return { agg: lastAgg, changed: false };
 }
 
+/* -------------------- shared snapshot builder (used by SSE + JSON) -------------------- */
+
+async function buildSnapshotBars(symbol, tfStr) {
+  const raw = await fetchTfFromBackend1(symbol, tfStr, limitByTf(tfStr));
+  return raw.map(normBar).filter(Boolean).sort((a, b) => a.time - b.time);
+}
+
 /* -------------------- health -------------------- */
 
 router.get("/healthz", (_req, res) => {
   res.json({ ok: true, service: "streamer" });
 });
 
-/* -------------------- /stream/agg -------------------- */
+/* -------------------- /api/agg-snapshot (plain JSON) -------------------- */
+/* CI-safe: returns history bars without SSE streaming */
+
+router.get("/api/agg-snapshot", async (req, res) => {
+  try {
+    const apiKey = resolvePolygonKey();
+    if (!apiKey) return res.status(500).json({ ok: false, error: "Missing Polygon API key" });
+
+    const symbol = String(req.query.symbol || "SPY").toUpperCase();
+    const tfStr = normalizeTfStr(req.query.tf || "10m");
+    const mode = normalizeMode(req.query.mode || "rth");
+    const tfMin = normalizeTfMin(tfStr);
+    const tf = labelTf(tfMin);
+
+    const bars = await buildSnapshotBars(symbol, tfStr);
+
+    return res.json({
+      ok: true,
+      type: "snapshot",
+      symbol,
+      tf,
+      mode,
+      count: bars.length,
+      bars,
+      updated_at_utc: new Date().toISOString(),
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+/* -------------------- /stream/agg (SSE) -------------------- */
 
 router.get("/agg", async (req, res) => {
   const apiKey = resolvePolygonKey();
@@ -218,22 +266,9 @@ router.get("/agg", async (req, res) => {
 
   sseHeaders(res);
 
-  // ✅ TradingView-style history: fetch native timeframe directly
-  // Limits tuned to your request
-  const limitByTf = (() => {
-    if (tfStr === "10m") return 2000; // ~1 month+
-    if (tfStr === "30m") return 2500; // ~2 months+
-    if (tfStr === "1h") return 4000;  // ~6+ months
-    if (tfStr === "4h") return 4000;  // ~1+ year
-    if (tfStr === "1d") return 5000;  // years
-    if (tfStr === "1m") return 5000;  // keep 1m reasonable
-    return 2000;
-  })();
-
   let snapshotBars = [];
   try {
-    const raw = await fetchTfFromBackend1(symbol, tfStr, limitByTf);
-    snapshotBars = raw.map(normBar).filter(Boolean).sort((a, b) => a.time - b.time);
+    snapshotBars = await buildSnapshotBars(symbol, tfStr);
   } catch {
     snapshotBars = [];
   }
@@ -300,7 +335,6 @@ router.get("/agg", async (req, res) => {
         const bar1m = parseAM(msg);
         if (!bar1m) continue;
 
-        // If user asked 1m, emit directly; else aggregate from 1m into requested tf
         const { agg, changed } = updateAggFrom1m(aggBar, bar1m, tfMin, mode);
         aggBar = agg;
         if (changed && aggBar) emitBar(aggBar);
