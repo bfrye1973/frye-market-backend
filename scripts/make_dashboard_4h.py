@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_4h.py (R13.4 — BODY-AWARE EMA posture)
+Ferrari Dashboard — make_dashboard_4h.py (R13.5 — BODY-MID EMA posture + DEFENDED reclaim)
 
-CHANGE (single intent):
-- 4H EMA posture uses BODY midpoint ( (O+C)/2 ) vs EMA10 instead of close-only.
-  This prevents wick dips below EMA10 from crashing the 4H bridge score.
-  Matches your observation: “body is above 10 EMA; wicks dip but get bought.”
+Single intent (what we are fixing):
+- 4H EMA posture should NOT collapse during defended reclaim / wick probes.
+- Use BODY MIDPOINT ((O+C)/2) vs EMA10 as the primary EMA distance.
+- Keep reclaim logic: if wick reclaims EMA10 and close is within tolerance, treat as reclaimed
+  and do not allow bearish EMA distance to crash the score.
 
 Everything else unchanged:
-- Short-memory Lux PSI (PSI_WIN_4H)
+- Lux PSI short-memory window (PSI_WIN_4H)
 - SMI 12/5/5
-- Weighted-average scoring
+- Weighted-average scoring model
 - Sector breadth/momentum from sectorCards
+- Output JSON shape: fourHour.overall4h.score remains the primary UI key.
 """
 
 from __future__ import annotations
@@ -37,7 +39,8 @@ POLY_4H_URL = (
 OFFENSIVE = {"information technology", "consumer discretionary", "communication services", "industrials"}
 DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
 
-FULL_EMA_DIST = 0.60
+# FULL_EMA_DIST controls how fast posture saturates to 0/100
+FULL_EMA_DIST = 0.60  # percent
 
 SMI_K_LEN = 12
 SMI_D_LEN = 5
@@ -85,7 +88,10 @@ def pct(a: float, b: float) -> float:
 
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "make-dashboard/4h/1.5", "Cache-Control": "no-store"})
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "make-dashboard/4h/1.6", "Cache-Control": "no-store"},
+    )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -120,7 +126,7 @@ def fetch_polygon_4h(sym: str, key: str, lookback_days: int) -> List[dict]:
 
     out.sort(key=lambda x: x["time"])
 
-    # drop in-flight 4h bar
+    # drop in-flight 4h bar (bucket-based)
     if out:
         now = int(time.time())
         last = out[-1]["time"]
@@ -182,8 +188,10 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
     return float(clamp(psi, 0.0, 100.0))
 
 
-def tv_smi_and_signal(H: List[float], L: List[float], C: List[float],
-                      lengthK: int, lengthD: int, lengthEMA: int) -> Tuple[List[float], List[float]]:
+def tv_smi_and_signal(
+    H: List[float], L: List[float], C: List[float],
+    lengthK: int, lengthD: int, lengthEMA: int
+) -> Tuple[List[float], List[float]]:
     n = len(C)
     if n < max(lengthK, lengthD, lengthEMA) + 5:
         return [], []
@@ -264,6 +272,8 @@ def compute_overall_weighted(
         + bonus
     )
     score = clamp(score_raw, 0.0, 100.0)
+
+    # State gate (locked intent)
     state = "bull" if (ema_sign > 0 and score >= 60.0) else ("bear" if (ema_sign < 0 and score < 60.0) else "neutral")
 
     comps = {
@@ -339,27 +349,34 @@ def main():
     C = [b["close"] for b in spy_4h]
     V = [b["volume"] for b in spy_4h]
 
-    # EMA10 posture (DEFENSE-AWARE reclaim)
+    # EMA10 (computed on closes; posture measured using BODY-MID + reclaim protection)
     e10 = ema_series(C, 10)[-1]
 
+    # Distances (%)
     close_dist_pct = 0.0 if e10 == 0 else 100.0 * (float(C[-1]) - e10) / e10
-    body_top = max(float(O[-1]), float(C[-1]))  # top of candle body (defense)
+    body_mid = (float(O[-1]) + float(C[-1])) / 2.0
+    body_mid_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_mid - e10) / e10
+    body_top = max(float(O[-1]), float(C[-1]))
     body_top_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_top - e10) / e10
 
-    # If wick reclaimed EMA10 and close is only slightly below EMA10, treat as reclaimed/neutral.
-    RECLAIM_TOL_PCT = float(os.environ.get("EMA10_RECLAIM_TOL_PCT", "0.60"))  # 0.60% default
+    # Reclaim tolerance (default widened to match real defended reclaim)
+    RECLAIM_TOL_PCT = float(os.environ.get("EMA10_RECLAIM_TOL_PCT", "0.60"))
+
+    # Wick reclaim detection
     wick_reclaimed = float(H[-1]) > float(e10)
 
-    if wick_reclaimed and close_dist_pct >= -RECLAIM_TOL_PCT:
-        # consider reclaimed: do NOT allow bearish dist here
-        ema_dist_pct = max(0.0, body_top_dist_pct)
-    else:
-        # normal behavior
-        ema_dist_pct = close_dist_pct
+    # PRIMARY behavior: BODY-MID distance
+    ema_dist_pct = body_mid_dist_pct
 
+    # DEFENDED reclaim: if wick reclaimed and close only slightly below EMA10, do not allow bearish posture crash
+    # We use body_top_dist_pct and clamp to non-negative to represent "reclaimed / defended" behavior.
+    if wick_reclaimed and close_dist_pct >= -RECLAIM_TOL_PCT:
+        ema_dist_pct = max(0.0, body_top_dist_pct)
+
+    # Sign + posture
     ema_sign = 1 if ema_dist_pct > 0 else (-1 if ema_dist_pct < 0 else 0)
     ema10_posture = posture_from_dist(ema_dist_pct, FULL_EMA_DIST)
-    
+
     # SMI 12/5/5
     smi_series, sig_series = tv_smi_and_signal(H, L, C, SMI_K_LEN, SMI_D_LEN, SMI_EMA_LEN)
     smi_val = float(smi_series[-1]) if smi_series else 0.0
@@ -381,7 +398,7 @@ def main():
     squeeze_psi_4h = float(psi) if isinstance(psi, (int, float)) else 50.0
     squeeze_psi_4h = float(clamp(squeeze_psi_4h, 0.0, 100.0))
 
-    # ✅ Dead-zone breaker (UX)
+    # Dead-zone breaker (UX)
     if abs(squeeze_psi_4h - 50.0) < 0.25:
         squeeze_psi_4h = 49.0 if float(ema10_posture) >= 55.0 else 51.0
 
@@ -424,6 +441,7 @@ def main():
 
     updated_utc = now_utc_iso()
 
+    # Metrics (keep existing keys; add a few safe diagnostics without breaking UI)
     metrics = {
         "trend_strength_4h_pct": round(float(score), 2),
         "breadth_4h_pct": float(breadth_4h),
@@ -433,6 +451,13 @@ def main():
         "ema_sign_4h": int(ema_sign),
         "ema_dist_4h_pct": round(float(ema_dist_pct), 4),
         "ema10_posture_4h_pct": round(float(ema10_posture), 2),
+
+        # diagnostics (non-breaking additions)
+        "ema_close_dist_4h_pct": round(float(close_dist_pct), 4),
+        "ema_body_mid_dist_4h_pct": round(float(body_mid_dist_pct), 4),
+        "ema_body_top_dist_4h_pct": round(float(body_top_dist_pct), 4),
+        "ema_wick_reclaimed_4h": bool(wick_reclaimed),
+        "ema_reclaim_tol_pct": float(RECLAIM_TOL_PCT),
 
         "smi_4h": round(float(smi_val), 4),
         "smi_signal_4h": round(float(sig_val), 4),
@@ -461,7 +486,12 @@ def main():
     fourHour = {
         "sectorDirection4h": {"risingPct": float(sector_dir_4h)},
         "riskOn4h": {"riskOnPct": float(risk_on_4h)},
-        "overall4h": {"state": state, "score": round(float(score), 2), "components": comps, "lastChanged": updated_utc},
+        "overall4h": {
+            "state": state,
+            "score": round(float(score), 2),
+            "components": comps,
+            "lastChanged": updated_utc
+        },
         "signals": {
             "sigSMI4hBullCross": {"active": False, "reason": "", "lastChanged": updated_utc},
             "sigSMI4hBearCross": {"active": False, "reason": "", "lastChanged": updated_utc},
@@ -469,7 +499,7 @@ def main():
     }
 
     out = {
-        "version": "r4h-v4-weightedavg-shortpsi-bodyema",
+        "version": "r4h-v5-bodymid-ema-reclaim060",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
@@ -486,7 +516,7 @@ def main():
         f"[4h] score={score:.2f} state={state} emaPost={ema10_posture:.2f} mom={momentum_combo_4h:.2f} "
         f"breadth={breadth_4h:.2f} psi={squeeze_psi_4h:.2f} exp={squeeze_exp_4h:.2f} "
         f"liq={liquidity_4h:.2f} volScaled={vol_scaled:.2f} riskOn={risk_on_4h:.2f} "
-        f"smiBonus={smi_bonus:+d} psiWin={PSI_WIN_4H}",
+        f"smiBonus={smi_bonus:+d} psiWin={PSI_WIN_4H} reclaimTol={RECLAIM_TOL_PCT}",
         flush=True,
     )
 
