@@ -38,7 +38,7 @@ POLY_10M_URL = (
 # ✅ Backend-2 stream agg (this is what your chart uses)
 B2_STREAM_AGG_BASE = os.environ.get("B2_STREAM_AGG_BASE", "https://frye-market-backend-2.onrender.com/stream/agg")
 B2_TF = os.environ.get("B2_TF_4H_SOURCE", "10m")
-B2_LIMIT = int(os.environ.get("B2_LIMIT_4H_SOURCE", "8000"))
+B2_LIMIT = int(os.environ.get("B2_LIMIT_4H_SOURCE", "1200"))
 
 OFFENSIVE = {"information technology", "consumer discretionary", "communication services", "industrials"}
 DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
@@ -510,8 +510,10 @@ def main():
 
     # ✅ SPY bars source (MATCH CHART): Backend-2 tf=10m → build 4H
     spy_10m = fetch_backend2_10m("SPY", tf=B2_TF, limit=B2_LIMIT, lookback_days=FETCH_DAYS_4H)
-    if not spy_10m and key:
-        spy_10m = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
+    if not spy_10m:
+        print("[warn] backend-2 10m unavailable; falling back to polygon 10m", flush=True)
+
+        
 
     spy_4h = build_4h_from_10m(spy_10m)
 
