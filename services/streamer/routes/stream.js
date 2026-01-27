@@ -219,6 +219,39 @@ router.get("/healthz", (_req, res) => {
   res.json({ ok: true, service: "streamer" });
 });
 
+/* -------------------- /stream/agg-snapshot (plain JSON) -------------------- */
+/* CI-safe: returns the SAME snapshot bars as /stream/agg, but NOT SSE */
+
+router.get("/agg-snapshot", async (req, res) => {
+  try {
+    const apiKey = resolvePolygonKey();
+    if (!apiKey) return res.status(500).json({ ok: false, error: "Missing Polygon API key" });
+
+    const symbol = String(req.query.symbol || "SPY").toUpperCase();
+    const tfStr = normalizeTfStr(req.query.tf || "10m");
+
+    const limit = Number(req.query.limit || 0);
+    const lim = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 5000) : limitByTf(tfStr);
+
+    const raw = await fetchTfFromBackend1(symbol, tfStr, lim);
+    const snapshotBars = raw.map(normBar).filter(Boolean).sort((a, b) => a.time - b.time);
+
+    return res.json({
+      ok: true,
+      type: "snapshot",
+      symbol,
+      tf: tfStr,
+      mode: "rth",
+      count: snapshotBars.length,
+      bars: snapshotBars,
+      updated_at_utc: new Date().toISOString(),
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+
 /* -------------------- /api/agg-snapshot (plain JSON) -------------------- */
 /* CI-safe: returns history bars without SSE streaming */
 
