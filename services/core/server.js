@@ -18,6 +18,7 @@ import { volumeBehaviorRouter } from "./routes/volumeBehavior.js";
 import { confluenceScoreRouter } from "./routes/confluenceScore.js";
 import tradingRouter from "./routes/trading.js";
 import optionsRouter from "./routes/options.js";
+import runAllEngines from "./routes/runAllEngines.js";
 
 
 
@@ -96,6 +97,8 @@ app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution s
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 app.use("/api/trading", tradingRouter);
 app.use("/api/v1/options", optionsRouter);
+app.use("/api/v1", runAllEnginesRouter); 
+
 
 
 // Routers mounted under /api/v1
