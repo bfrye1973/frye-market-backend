@@ -518,8 +518,12 @@ def main():
     spy_4h = build_4h_from_10m(spy_10m)
 
     if len(spy_4h) < 25:
-        print("[fatal] insufficient SPY 4H bars", file=sys.stderr)
-        sys.exit(2)
+        print("[warn] insufficient SPY 4H bars from 10m; falling back to polygon 4H", flush=True)
+        spy_4h = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H)
+
+        if len(spy_4h) < 25:
+            print("[fatal] insufficient SPY 4H bars even after fallback", file=sys.stderr)
+            sys.exit(2)
 
     O = [b["open"] for b in spy_4h]
     H = [b["high"] for b in spy_4h]
