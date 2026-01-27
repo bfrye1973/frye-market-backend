@@ -8,28 +8,14 @@ const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// points to: src/services/core/jobs/runAllEngines.sh
+// /services/core/routes -> /services/core/jobs
 const JOB_SCRIPT = path.resolve(__dirname, "../jobs/runAllEngines.sh");
 
-function requireCronToken(req) {
-  const expected = process.env.ENGINE_CRON_TOKEN;
-  if (!expected) return { ok: false, status: 500, msg: "ENGINE_CRON_TOKEN not set" };
-
-  const got = req.header("X-ENGINE-CRON-TOKEN") || "";
-  if (got !== expected) return { ok: false, status: 401, msg: "Unauthorized" };
-
-  return { ok: true };
-}
-
-router.post("/api/v1/run-all-engines", async (req, res) => {
-  const auth = requireCronToken(req);
-  if (!auth.ok) return res.status(auth.status).json({ ok: false, error: auth.msg });
-
+function runScript(res) {
   const startedAt = new Date().toISOString();
 
-  // Spawn bash script inside the web-service container
   const child = spawn("bash", [JOB_SCRIPT], {
-    cwd: path.resolve(__dirname, ".."), // core/
+    cwd: path.resolve(__dirname, ".."), // services/core
     env: process.env,
   });
 
@@ -46,10 +32,33 @@ router.post("/api/v1/run-all-engines", async (req, res) => {
       code,
       startedAt,
       endedAt,
-      stdout: stdout.slice(-8000), // keep response small
+      stdout: stdout.slice(-8000),
       stderr: stderr.slice(-8000),
     });
   });
+}
+
+// 🔒 optional token gate (works for both GET and POST)
+function checkToken(req) {
+  const expected = process.env.ENGINE_CRON_TOKEN;
+  if (!expected) return { ok: true }; // allow if not set (dev)
+  const got = req.header("X-ENGINE-CRON-TOKEN") || req.query.token || "";
+  if (got !== expected) return { ok: false, status: 401, msg: "Unauthorized" };
+  return { ok: true };
+}
+
+// ✅ Browser-friendly: GET /api/v1/run-all-engines
+router.get("/run-all-engines", (req, res) => {
+  const auth = checkToken(req);
+  if (!auth.ok) return res.status(auth.status).json({ ok: false, error: auth.msg });
+  return runScript(res);
+});
+
+// ✅ Cron-friendly: POST /api/v1/run-all-engines
+router.post("/run-all-engines", (req, res) => {
+  const auth = checkToken(req);
+  if (!auth.ok) return res.status(auth.status).json({ ok: false, error: auth.msg });
+  return runScript(res);
 });
 
 export default router;
