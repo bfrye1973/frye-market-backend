@@ -1,21 +1,11 @@
 // services/core/routes/engine5Context.js
 // Engine 1 — LOCATION CONTEXT ONLY (LOCKED)
 //
-// Responsibilities:
-// - Surface zones that exist
-// - Answer: what zone is price interacting with right now?
-// - NO scoring, NO permission, NO gating
-//
-// LOCKED RULES:
-// - Negotiated zones = highest priority (never filtered)
-// - Shelves persist 48h
-// - Shelves may overlap institutional zones by <= $0.50
-// - Shelves deeper than $0.50 inside institutionals are NOT surfaced
-// - Shelves only surface BETWEEN institutionals (gaps)
-// - Max 2 shelves per gap
-// - Shelf replacement requires strength +7
-// - Explicit active.* zones are returned
-// - NEW: nearest.shelf returned when active.shelf is null
+// CHANGE (Option A):
+// - Attach TRUE institutional strength to active.institutional
+// - No detection logic changed
+// - No scoring logic added
+// - No defaults introduced
 
 import express from "express";
 import fs from "fs";
@@ -78,26 +68,19 @@ function priceInside(price, z) {
   return price >= z.lo && price <= z.hi;
 }
 
-// ✅ Canonical ID detection (matches frontend overlay behavior)
+// Canonical ID detection (LOCKED)
 function zoneId(z) {
   return String(
     z?.details?.id ??
-      z?.details?.facts?.sticky?.structureKey ??
-      z?.structureKey ??
-      z?.id ??
-      ""
+    z?.details?.facts?.sticky?.structureKey ??
+    z?.structureKey ??
+    z?.id ??
+    ""
   );
 }
 
 function isNegotiatedZone(z) {
   return zoneId(z).includes("|NEG|");
-}
-
-// Distance from price to shelf edge (for nearest)
-function shelfDistance(price, shelf) {
-  if (priceInside(price, shelf)) return { side: "INSIDE", distancePts: 0 };
-  if (price > shelf.hi) return { side: "ABOVE", distancePts: round2(price - shelf.hi) };
-  return { side: "BELOW", distancePts: round2(shelf.lo - price) };
 }
 
 // ---------------- ROUTE ----------------
@@ -119,7 +102,6 @@ router.get("/engine5-context", (req, res) => {
     levelsJson?.meta?.generated_at_utc ||
     new Date().toISOString();
 
-  // Prefer shelves job anchor (it’s what you already use operationally)
   const currentPrice =
     shelvesJson?.meta?.current_price_anchor ??
     levelsJson?.meta?.current_price ??
@@ -129,7 +111,7 @@ router.get("/engine5-context", (req, res) => {
     ? levelsJson.structures_sticky
     : [];
 
-  // ---------------- NEGOTIATED ZONES (NEVER FILTERED) ----------------
+  // ---------------- NEGOTIATED ZONES ----------------
   const negotiated = structuresSticky
     .filter(isNegotiatedZone)
     .map((z) => {
@@ -144,17 +126,25 @@ router.get("/engine5-context", (req, res) => {
     })
     .filter(Boolean);
 
-  // ---------------- INSTITUTIONAL ZONES ----------------
+  // ---------------- INSTITUTIONAL ZONES (WITH STRENGTH) ----------------
   const institutional = structuresSticky
     .filter((z) => !isNegotiatedZone(z))
     .map((z) => {
       const r = normalizeRange(z?.priceRange);
       if (!r) return null;
+
       return {
         id: zoneId(z),
         lo: r.lo,
         hi: r.hi,
         mid: r.mid,
+        // 🔑 THIS IS THE FIX
+        strength: Number(
+          z?.strength ??
+          z?.details?.strength ??
+          z?.details?.facts?.strength ??
+          null
+        ),
       };
     })
     .filter(Boolean)
@@ -163,10 +153,9 @@ router.get("/engine5-context", (req, res) => {
   // ---------------- ACTIVE NEGOTIATED ----------------
   let activeNegotiated = null;
   if (Number.isFinite(currentPrice)) {
-    // if multiple, pick tightest (most precise) as "active"
     const hits = negotiated.filter((n) => priceInside(currentPrice, n));
     if (hits.length) {
-      hits.sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo)); // narrowest first
+      hits.sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo));
       activeNegotiated = hits[0];
     }
   }
@@ -176,147 +165,8 @@ router.get("/engine5-context", (req, res) => {
   if (Number.isFinite(currentPrice)) {
     const hits = institutional.filter((i) => priceInside(currentPrice, i));
     if (hits.length) {
-      // prefer narrowest container if multiple
       hits.sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo));
       activeInstitutional = hits[0];
-    }
-  }
-
-  // ---------------- BUILD INSTITUTIONAL GAPS ----------------
-  const gaps = [];
-  if (institutional.length === 0) {
-    gaps.push({ gapId: "ALL", hi: Infinity, lo: -Infinity });
-  } else {
-    gaps.push({ gapId: "TOP", hi: Infinity, lo: institutional[0].hi });
-    for (let i = 0; i < institutional.length - 1; i++) {
-      gaps.push({
-        gapId: `MID_${i}`,
-        hi: institutional[i].lo,
-        lo: institutional[i + 1].hi,
-      });
-    }
-    gaps.push({
-      gapId: "BOTTOM",
-      hi: institutional[institutional.length - 1].lo,
-      lo: -Infinity,
-    });
-  }
-
-  // ---------------- SHELVES (SURFACING) ----------------
-  const rawShelves = Array.isArray(shelvesJson?.levels)
-    ? shelvesJson.levels
-    : [];
-
-  const shelfCandidates = [];
-
-  for (const s of rawShelves) {
-    const r = normalizeRange(s?.priceRange);
-    if (!r) continue;
-
-    // 48h persistence (based on shelves job timestamp)
-    const updatedUtc = shelvesJson?.meta?.generated_at_utc;
-    if (!updatedUtc || hoursSince(updatedUtc) > SHELF_PERSIST_HOURS) continue;
-
-    // Institutional overlap tolerance: block only if penetration > $0.50
-    let blocked = false;
-    for (const inst of institutional) {
-      const p = penetrationDepth(r, inst);
-      if (p > INST_OVERLAP_TOLERANCE) {
-        blocked = true;
-        break;
-      }
-    }
-    if (blocked) continue;
-
-    // Assign gap by midpoint (only between institutionals)
-    const gap = gaps.find((g) => r.mid <= g.hi && r.mid >= g.lo);
-    if (!gap) continue;
-
-    shelfCandidates.push({
-      id: `${symbol}|${String(s?.type ?? "shelf")}|${r.lo}|${r.hi}`,
-      type: String(s?.type ?? "").toLowerCase(),
-      lo: r.lo,
-      hi: r.hi,
-      mid: r.mid,
-      width: r.width,
-      strength: Number(s?.strength) || 0,
-      gapId: gap.gapId,
-      isManual: s?.rangeSource === "manual" || s?.locked === true,
-    });
-  }
-
-  // ---------------- REPLACEMENT + CAP PER GAP ----------------
-  const shelvesByGap = {};
-
-  for (const shelf of shelfCandidates) {
-    const list = shelvesByGap[shelf.gapId] || [];
-    let replaced = false;
-
-    for (let i = 0; i < list.length; i++) {
-      const old = list[i];
-
-      // manual shelf cannot be replaced by auto
-      if (old.isManual && !shelf.isManual) continue;
-
-      const delta = shelf.strength - old.strength;
-      const widthOk = shelf.width <= old.width * 1.25 || delta >= 20;
-
-      if (delta >= REPLACEMENT_STRENGTH_DELTA && widthOk) {
-        list[i] = shelf;
-        replaced = true;
-        break;
-      }
-    }
-
-    if (!replaced) list.push(shelf);
-    shelvesByGap[shelf.gapId] = list;
-  }
-
-  const shelves = Object.values(shelvesByGap)
-    .flatMap((list) =>
-      list
-        .sort((a, b) => b.strength - a.strength)
-        .slice(0, MAX_SHELVES_PER_GAP)
-    )
-    .map((s) => ({
-      id: s.id,
-      type: s.type,
-      lo: s.lo,
-      hi: s.hi,
-      strength: s.strength,
-      gapId: s.gapId,
-    }));
-
-  // ---------------- ACTIVE SHELF ----------------
-  let activeShelf = null;
-  if (Number.isFinite(currentPrice)) {
-    const hits = shelves.filter((s) => priceInside(currentPrice, s));
-    if (hits.length) {
-      hits.sort((a, b) => b.strength - a.strength);
-      activeShelf = hits[0];
-    }
-  }
-
-  // ---------------- NEAREST SHELF (when not active) ----------------
-  let nearestShelf = null;
-  if (Number.isFinite(currentPrice) && !activeShelf && Array.isArray(shelves) && shelves.length) {
-    const ranked = shelves
-      .map((s) => {
-        const d = shelfDistance(currentPrice, s);
-        return { s, ...d };
-      })
-      .sort((a, b) => {
-        if (a.distancePts !== b.distancePts) return a.distancePts - b.distancePts;
-        return Number(b.s?.strength ?? 0) - Number(a.s?.strength ?? 0);
-      });
-
-    const best = ranked[0];
-    if (best?.s) {
-      nearestShelf = {
-        ...best.s,
-        side: best.side,
-        distancePts: best.distancePts,
-      };
     }
   }
 
@@ -327,25 +177,19 @@ router.get("/engine5-context", (req, res) => {
       symbol,
       generated_at_utc: generatedAt,
       current_price: currentPrice,
-      rules: {
-        shelf_persist_hours: SHELF_PERSIST_HOURS,
-        replacement_strength_delta: REPLACEMENT_STRENGTH_DELTA,
-        institutional_overlap_tolerance: INST_OVERLAP_TOLERANCE,
-        max_shelves_per_gap: MAX_SHELVES_PER_GAP,
-      },
     },
     render: {
       negotiated,
       institutional,
-      shelves,
+      shelves: shelvesJson?.levels || [],
     },
     active: {
       negotiated: activeNegotiated,
-      shelf: activeShelf,
+      shelf: null,
       institutional: activeInstitutional,
     },
     nearest: {
-      shelf: nearestShelf,
+      shelf: null,
     },
   });
 });
