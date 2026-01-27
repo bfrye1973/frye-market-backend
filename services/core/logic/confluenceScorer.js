@@ -128,14 +128,65 @@ function readBarsInZone(zone) {
   return null;
 }
 
+// --- NEW (Option B v1) helpers ---
+function readAvgTR8(diagnostics) {
+  // TR-only quiet: try common keys (Engine 4 may provide one of these)
+  const d = diagnostics || {};
+  const candidates = [
+    d.avgTR8,
+    d.avgTr8,
+    d.avg_true_range_8,
+    d.avgTrueRange8,
+    d.meanTR8,
+    d.meanTr8,
+    d.tr8Avg,
+  ];
+  for (const c of candidates) {
+    const n = toNum(c);
+    if (n != null) return n;
+  }
+  return null;
+}
+
+function squeezeScoreNegotiated(ratio) {
+  // 0–20
+  if (ratio == null) return 0;
+  if (ratio <= 0.60) return 20;
+  if (ratio <= 0.90) {
+    // linear 0.60..0.90 => 20..10
+    const t = (ratio - 0.60) / (0.90 - 0.60);
+    return Math.round(20 + (10 - 20) * t);
+  }
+  if (ratio <= 1.20) {
+    // linear 0.90..1.20 => 10..0
+    const t = (ratio - 0.90) / (1.20 - 0.90);
+    return Math.round(10 + (0 - 10) * t);
+  }
+  return 0;
+}
+
+function squeezeScoreInstitutional(ratio) {
+  // scaled 0–7 using same curve
+  if (ratio == null) return 0;
+  const n20 = squeezeScoreNegotiated(ratio); // 0..20
+  return Math.round((n20 / 20) * 7);
+}
+
 /**
- * Tiered Compression / Pre-Ignition
- * Option B locked:
- * - Primary: ATR-tightness (zoneWidth / ATR)
- * - Secondary: time-in-zone optional bonus
+ * Tiered Compression / Pre-Ignition (Option B v1 tuned)
  *
- * Major: NEGOTIATED max 30
- * Minor: INSTITUTIONAL max 10
+ * - Major: NEGOTIATED max 30
+ *   - squeeze 0..20
+ *   - quiet  0..10  (TR-only)
+ *
+ * - Minor: INSTITUTIONAL max 10
+ *   - squeeze 0..7
+ *   - quiet  0..3   (TR-only)
+ *
+ * State rules:
+ * - COILING if widthAtrRatio <= 0.80 AND quiet=true
+ * - COMPRESSING if widthAtrRatio <= 1.10
+ * - NONE otherwise
  */
 function computeCompression({ zone, zoneType, tf, fib, volume }) {
   if (!zone || !zoneType) {
@@ -175,78 +226,102 @@ function computeCompression({ zone, zoneType, tf, fib, volume }) {
       ? zoneWidth / atr
       : null;
 
-  const f = volume?.flags || {};
-  const hasInitiative = isTrue(f.initiativeMoveConfirmed);
-  const hasTrap = isTrue(f.liquidityTrap);
-  const quiet = !hasInitiative && !hasTrap;
-
   const reasons = [];
-
-  if (!quiet) {
-    const st = hasTrap ? "TRAP_SUSPECTED" : "IGNITING";
-    return {
-      active: false,
-      tier,
-      score: 0,
-      state: st,
-      zoneWidth,
-      atr,
-      widthAtrRatio: widthAtrRatio != null ? Number(widthAtrRatio.toFixed(3)) : null,
-      quiet: false,
-      barsInZone: readBarsInZone(zone),
-      barsThreshold: tfToCompressionBars(tf),
-      reasons: [hasTrap ? "TRAP_PRESENT" : "INITIATIVE_PRESENT"],
-    };
-  }
-
-  let score = 0;
-
-  // Base credit
-  score += (tier === "NEGOTIATED" ? 8 : 2);
   reasons.push("IN_COMPRESSION_ZONE");
 
-  // Tightness credit (primary)
-  if (widthAtrRatio != null) {
-    if (tier === "NEGOTIATED") {
-      if (widthAtrRatio <= 0.60) { score += 14; reasons.push("TIGHT_VS_ATR_STRONG"); }
-      else if (widthAtrRatio <= 0.80) { score += 10; reasons.push("TIGHT_VS_ATR_GOOD"); }
-      else if (widthAtrRatio <= 1.00) { score += 6; reasons.push("TIGHT_VS_ATR_OK"); }
-      else { score += 2; reasons.push("TIGHT_VS_ATR_WEAK"); }
-    } else {
-      if (widthAtrRatio <= 0.80) { score += 4; reasons.push("TIGHT_VS_ATR_GOOD"); }
-      else if (widthAtrRatio <= 1.00) { score += 3; reasons.push("TIGHT_VS_ATR_OK"); }
-      else if (widthAtrRatio <= 1.20) { score += 2; reasons.push("TIGHT_VS_ATR_WEAK"); }
-      else { score += 1; reasons.push("TIGHT_VS_ATR_LOOSE"); }
+  if (widthAtrRatio == null) {
+    reasons.push("NO_ATR_TIGHTNESS_METRIC");
+  }
+
+  // --- Quiet (TR-only v1) ---
+  // Prefer avgTR8 if available; otherwise fallback to non-igniting proxy.
+  const avgTR8 = readAvgTR8(volume?.diagnostics);
+  let quiet = false;
+
+  if (avgTR8 != null && atr != null && atr > 0) {
+    // quiet if avgTR8 <= 0.80 * ATR
+    quiet = avgTR8 <= 0.80 * atr;
+    reasons.push(quiet ? "QUIET_TR_OK" : "QUIET_TR_HIGH");
+  } else {
+    // Fallback (no TR metric available): treat as quiet if not igniting and not trap
+    const f = volume?.flags || {};
+    const hasInitiative = isTrue(f.initiativeMoveConfirmed);
+    const hasTrap = isTrue(f.liquidityTrap);
+    quiet = !hasInitiative && !hasTrap;
+    reasons.push("QUIET_FALLBACK_NO_TR_METRIC");
+    if (hasTrap) reasons.push("TRAP_PRESENT");
+    if (hasInitiative) reasons.push("INITIATIVE_PRESENT");
+  }
+
+  // --- Squeeze score (tight vs ATR) ---
+  const squeeze =
+    tier === "NEGOTIATED"
+      ? squeezeScoreNegotiated(widthAtrRatio)
+      : squeezeScoreInstitutional(widthAtrRatio);
+
+  if (tier === "NEGOTIATED") {
+    if (widthAtrRatio != null) {
+      if (widthAtrRatio <= 0.60) reasons.push("SQUEEZE_STRONG");
+      else if (widthAtrRatio <= 0.90) reasons.push("SQUEEZE_GOOD");
+      else if (widthAtrRatio <= 1.20) reasons.push("SQUEEZE_WEAK");
+      else reasons.push("SQUEEZE_NONE");
+    }
+  } else {
+    if (widthAtrRatio != null) {
+      if (widthAtrRatio <= 0.60) reasons.push("SQUEEZE_STRONG");
+      else if (widthAtrRatio <= 0.90) reasons.push("SQUEEZE_GOOD");
+      else if (widthAtrRatio <= 1.20) reasons.push("SQUEEZE_WEAK");
+      else reasons.push("SQUEEZE_NONE");
     }
   }
 
-  // Quiet credit
-  score += (tier === "NEGOTIATED" ? 6 : 2);
-  reasons.push("VOLUME_QUIET");
+  // --- Quiet score ---
+  const quietScore =
+    tier === "NEGOTIATED"
+      ? (quiet ? 10 : 0)
+      : (quiet ? 3 : 0);
 
-  // Time-in-zone bonus (secondary, optional)
-  const barsInZone = readBarsInZone(zone);
-  const barsThreshold = tfToCompressionBars(tf);
-  if (barsInZone != null && barsInZone >= barsThreshold) {
-    score += (tier === "NEGOTIATED" ? 6 : 2);
-    reasons.push("TIME_IN_ZONE_CONFIRMED");
+  // Total compression score (cap by tier)
+  const cap = (tier === "NEGOTIATED" ? 30 : 10);
+  let score = clamp(Math.round(squeeze + quietScore), 0, cap);
+
+  // State rules (LOCKED per Option B)
+  let state = "NONE";
+  const ratio = widthAtrRatio;
+
+  if (ratio != null) {
+    if (ratio <= 0.80 && quiet) state = "COILING";
+    else if (ratio <= 1.10) state = "COMPRESSING";
+    else state = "NONE";
+  } else {
+    // If we can't compute ratio, we cannot call it compressing/coiling
+    state = "NONE";
   }
 
-  const cap = (tier === "NEGOTIATED" ? 30 : 10);
-  score = clamp(Math.round(score), 0, cap);
+  // Active = true only when "COILING" and score is meaningful (prevents weak coil)
+  const activeThreshold = (tier === "NEGOTIATED" ? 18 : 6);
+  const active = (state === "COILING" && score >= activeThreshold);
+
+  // Keep these for debug/telemetry even if we don’t use time bonus anymore
+  const barsInZone = readBarsInZone(zone);
+  const barsThreshold = tfToCompressionBars(tf);
 
   return {
-    active: score >= (tier === "NEGOTIATED" ? 18 : 6),
+    active,
     tier,
     score,
-    state: score >= (tier === "NEGOTIATED" ? 22 : 8) ? "COILING" : "COMPRESSING",
+    state,
     zoneWidth,
     atr,
     widthAtrRatio: widthAtrRatio != null ? Number(widthAtrRatio.toFixed(3)) : null,
-    quiet: true,
+    quiet,
     barsInZone,
     barsThreshold,
-    reasons,
+    reasons: [
+      ...reasons,
+      `SQUEEZE=${squeeze}`,
+      `QUIET=${quietScore}`,
+    ],
   };
 }
 
@@ -406,7 +481,7 @@ export function computeConfluenceScore({
   flags.volumeConfirmed = volumeConfirmed;
 
   // ----------------------------
-  // Compression (tiered)
+  // Compression (tiered) — Option B v1 tuned
   // ----------------------------
   let compression = { active: false, tier: "NONE", score: 0, state: "NONE" };
   if (zoneType === "NEGOTIATED" || zoneType === "INSTITUTIONAL") {
@@ -434,6 +509,8 @@ export function computeConfluenceScore({
   // Pre-ignition boost
   if (compression?.score > 0) {
     total += compression.score;
+
+    // Only add COILING_PRE_IGNITION when it's truly coiling/active
     if (compression.active) reasons.push("COILING_PRE_IGNITION");
   }
 
