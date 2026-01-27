@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_4h.py (R13.6 — 4H candles BUILT from 10m to match Dashboard)
+Ferrari Dashboard — make_dashboard_4h.py (R13.7 — BODY-MID EMA posture + DEFENDED reclaim + SPY source = Backend-2 10m)
 
-RULES YOU GAVE (RESPECTED):
-- I did NOT cut out any logic (SMI/PSI/weights/breadth/liquidity/vol/riskOn/output schema all preserved)
-- Only change: SPY 4H bars source is now built from 10-minute candles (same bucket rule as before)
-- Output JSON shape remains: fourHour.overall4h.score is primary
+ONLY CHANGE vs your current file:
+- SPY bars are now sourced from Backend-2 /stream/agg (tf=10m) and aggregated into 4H candles.
+- If Backend-2 is unavailable, we fall back to Polygon 10m (if POLYGON_API_KEY exists).
+- Everything else (SMI/PSI/weights/breadth/liquidity/vol/riskOn/output schema) is unchanged.
 """
 
 from __future__ import annotations
@@ -17,9 +17,10 @@ import math
 import os
 import sys
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any
 
 UTC = timezone.utc
 
@@ -28,11 +29,16 @@ POLY_4H_URL = (
     "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
 )
 
-# ✅ NEW (added): 10-minute bars source (used to build 4H candles)
+# Polygon 10m fallback (used only if Backend-2 is unavailable)
 POLY_10M_URL = (
     "https://api.polygon.io/v2/aggs/ticker/{sym}/range/10/minute/{start}/{end}"
     "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
 )
+
+# ✅ Backend-2 stream agg (this is what your chart uses)
+B2_STREAM_AGG_BASE = os.environ.get("B2_STREAM_AGG_BASE", "https://frye-market-backend-2.onrender.com/stream/agg")
+B2_TF = os.environ.get("B2_TF_4H_SOURCE", "10m")
+B2_LIMIT = int(os.environ.get("B2_LIMIT_4H_SOURCE", "8000"))
 
 OFFENSIVE = {"information technology", "consumer discretionary", "communication services", "industrials"}
 DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
@@ -85,19 +91,16 @@ def pct(a: float, b: float) -> float:
         return 0.0
 
 
-def fetch_json(url: str, timeout: int = 30) -> dict:
+def fetch_json(url: str, timeout: int = 30) -> Any:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "make-dashboard/4h/1.7", "Cache-Control": "no-store"},
+        headers={"User-Agent": "make-dashboard/4h/1.8", "Cache-Control": "no-store"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def fetch_polygon_4h(sym: str, key: str, lookback_days: int) -> List[dict]:
-    """
-    Kept for compatibility (NOT used for SPY posture anymore).
-    """
     end = datetime.now(UTC).date()
     start = end - timedelta(days=lookback_days)
     url = POLY_4H_URL.format(sym=sym, start=start, end=end, key=key)
@@ -136,7 +139,6 @@ def fetch_polygon_4h(sym: str, key: str, lookback_days: int) -> List[dict]:
     return out
 
 
-# ✅ NEW: fetch 10-minute bars
 def fetch_polygon_10m(sym: str, key: str, lookback_days: int) -> List[dict]:
     end = datetime.now(UTC).date()
     start = end - timedelta(days=lookback_days)
@@ -169,8 +171,111 @@ def fetch_polygon_10m(sym: str, key: str, lookback_days: int) -> List[dict]:
     return out
 
 
-# ✅ NEW: build 4H candles from 10m candles (same epoch-bucket rule you already used)
+def _coerce_ts_to_sec(t: Any) -> int:
+    try:
+        ti = int(float(t))
+    except Exception:
+        return 0
+    # if ms (13 digits) convert to sec
+    if ti > 2_000_000_000_000:
+        return ti // 1000
+    return ti
+
+
+def _extract_bar_list(js: Any) -> List[Any]:
+    if isinstance(js, list):
+        return js
+    if isinstance(js, dict):
+        for k in ("bars", "data", "candles", "results", "items"):
+            v = js.get(k)
+            if isinstance(v, list):
+                return v
+    return []
+
+
+def _normalize_bar(b: Any) -> Optional[dict]:
+    """
+    Accepts common bar shapes and returns dict with:
+    time/open/high/low/close/volume  (time in seconds)
+    """
+    if isinstance(b, dict):
+        # Most common possibilities:
+        # {t,o,h,l,c,v} OR {time,open,high,low,close,volume}
+        t = b.get("time", b.get("t"))
+        o = b.get("open", b.get("o"))
+        h = b.get("high", b.get("h"))
+        l = b.get("low", b.get("l"))
+        c = b.get("close", b.get("c"))
+        v = b.get("volume", b.get("v", 0.0))
+        if t is None or o is None or h is None or l is None or c is None:
+            return None
+        ts = _coerce_ts_to_sec(t)
+        if ts <= 0:
+            return None
+        return {
+            "time": int(ts),
+            "open": float(o),
+            "high": float(h),
+            "low": float(l),
+            "close": float(c),
+            "volume": float(v or 0.0),
+        }
+
+    # Sometimes bars might arrive as arrays like [t,o,h,l,c,v]
+    if isinstance(b, (list, tuple)) and len(b) >= 5:
+        ts = _coerce_ts_to_sec(b[0])
+        if ts <= 0:
+            return None
+        o = b[1]
+        h = b[2]
+        l = b[3]
+        c = b[4]
+        v = b[5] if len(b) > 5 else 0.0
+        return {
+            "time": int(ts),
+            "open": float(o),
+            "high": float(h),
+            "low": float(l),
+            "close": float(c),
+            "volume": float(v or 0.0),
+        }
+    return None
+
+
+def fetch_backend2_10m(sym: str, tf: str = "10m", limit: int = 8000, lookback_days: int = 120) -> List[dict]:
+    """
+    Pull bars from Backend-2 stream agg, then filter by lookback_days.
+    """
+    qs = urllib.parse.urlencode({"symbol": sym, "tf": tf, "limit": str(limit)})
+    url = f"{B2_STREAM_AGG_BASE}?{qs}"
+
+    try:
+        js = fetch_json(url, timeout=25)
+    except Exception:
+        return []
+
+    raw = _extract_bar_list(js)
+    out: List[dict] = []
+    for b in raw:
+        nb = _normalize_bar(b)
+        if nb:
+            out.append(nb)
+
+    out.sort(key=lambda x: x["time"])
+
+    # filter to lookback window
+    if out and lookback_days > 0:
+        cutoff = int((datetime.now(UTC) - timedelta(days=int(lookback_days))).timestamp())
+        out = [b for b in out if b["time"] >= cutoff]
+
+    return out
+
+
 def build_4h_from_10m(bars10: List[dict]) -> List[dict]:
+    """
+    Build 4H candles from 10m candles using 4-hour epoch buckets.
+    Output shape matches fetch_polygon_4h(): time/open/high/low/close/volume
+    """
     if not bars10:
         return []
 
@@ -365,9 +470,6 @@ def main():
     args = ap.parse_args()
 
     key = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_API_KEY") or os.environ.get("POLY_KEY") or ""
-    if not key:
-        print("[fatal] missing POLYGON_API_KEY", file=sys.stderr)
-        sys.exit(2)
 
     try:
         with open(args.source, "r", encoding="utf-8") as f:
@@ -406,8 +508,11 @@ def main():
                 ro_score += 1
     risk_on_4h = round(pct(ro_score, ro_den), 2) if ro_den > 0 else 50.0
 
-    # ✅ CHANGED (ONLY THIS): SPY 4H bars built from 10m bars
-    spy_10m = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
+    # ✅ SPY bars source (MATCH CHART): Backend-2 tf=10m → build 4H
+    spy_10m = fetch_backend2_10m("SPY", tf=B2_TF, limit=B2_LIMIT, lookback_days=FETCH_DAYS_4H)
+    if not spy_10m and key:
+        spy_10m = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
+
     spy_4h = build_4h_from_10m(spy_10m)
 
     if len(spy_4h) < 25:
@@ -521,7 +626,7 @@ def main():
         "ema_dist_4h_pct": round(float(ema_dist_pct), 4),
         "ema10_posture_4h_pct": round(float(ema10_posture), 2),
 
-        # diagnostics (kept)
+        # diagnostics (non-breaking additions)
         "ema_close_dist_4h_pct": round(float(close_dist_pct), 4),
         "ema_body_mid_dist_4h_pct": round(float(body_mid_dist_pct), 4),
         "ema_body_top_dist_4h_pct": round(float(body_top_dist_pct), 4),
@@ -568,7 +673,7 @@ def main():
     }
 
     out = {
-        "version": "r4h-v6-bodymid-10m-agg",
+        "version": "r4h-v7-bodymid-b2-10m-agg",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
