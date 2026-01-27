@@ -12,15 +12,17 @@ import sectorcards10mRouter from "./routes/sectorcards-10m.js"; // ✅ sectorcar
 import smzLevels from "./routes/smzLevels.js"; // ✅ Smart Money levels API
 import smzShelves from "./routes/smzShelves.js"; // ✅ Accum/Dist shelves API
 import smzHierarchy from "./routes/smzHierarchy.js";
+
 import { engine5ContextRouter } from "./routes/engine5Context.js";
 import { reactionScoreRouter } from "./routes/reactionScore.js";
 import { volumeBehaviorRouter } from "./routes/volumeBehavior.js";
 import { confluenceScoreRouter } from "./routes/confluenceScore.js";
+
 import tradingRouter from "./routes/trading.js";
 import optionsRouter from "./routes/options.js";
-import runAllEngines from "./routes/runAllEngines.js";
 
-
+// ✅ NEW: run-all-engines router (default export)
+import runAllEnginesRouter from "./routes/runAllEngines.js";
 
 // ✅ Engine 2 (Fib) — IMPORTANT: this is a NAMED export, not default
 import { fibLevelsRouter } from "./routes/fibLevels.js";
@@ -46,23 +48,23 @@ app.use(express.json({ limit: "1mb" }));
 
 // --- CORS (dashboard + local dev) ---
 // ✅ Deterministic: echo Origin if present, else "*"
-// This prevents "OPTIONS 204 ok, GET blocked" due to origin mismatches.
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
-  // Echo origin for browser fetch; fallback to wildcard for curl/direct loads.
   res.setHeader("Access-Control-Allow-Origin", origin || "*");
   res.setHeader("Vary", "Origin");
 
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, X-Requested-With, X-Idempotency-Key"
+    [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "X-Idempotency-Key",
+      "X-ENGINE-CRON-TOKEN", // ✅ allow cron trigger header
+    ].join(", ")
   );
-
-  // If you ever use cookies/credentials in fetch, uncomment:
-  // (Do NOT combine Allow-Credentials with "*"; echoing origin makes it safe)
-  // if (origin) res.setHeader("Access-Control-Allow-Credentials", "true");
 
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
@@ -92,14 +94,13 @@ app.get("/", (_req, res) => {
 app.use("/api/v1/ohlc", ohlcRouter);
 app.use("/api/sectorcards-10m", sectorcards10mRouter); // ✅ sectorcards adapter
 app.use("/live", liveRouter); // ✅ GitHub JSON proxies
+
 app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
 app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution shelves
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
+
 app.use("/api/trading", tradingRouter);
 app.use("/api/v1/options", optionsRouter);
-app.use("/api/v1", runAllEnginesRouter); 
-
-
 
 // Routers mounted under /api/v1
 app.use("/api/v1", engine5ContextRouter);
@@ -108,25 +109,8 @@ app.use("/api/v1", reactionScoreRouter);
 app.use("/api/v1", volumeBehaviorRouter);
 app.use("/api/v1", confluenceScoreRouter);
 
-// 🔒 HARD CORS GUARANTEE for Strategy endpoint
-app.use("/api/v1/confluence-score", (req, res, next) => {
-  res.setHeader(
-    "Access-Control-Allow-Origin",
-    "https://frye-dashboard.onrender.com"
-  );
-  res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, X-Requested-With, X-Idempotency-Key"
-  );
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-  next();
-});
-
+// ✅ run-all-engines (must be in the /api/v1 group)
+app.use("/api/v1", runAllEnginesRouter);
 
 // ✅ Engine 6 route mount
 app.use("/api/v1", tradePermissionRouter);
@@ -159,7 +143,8 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/v1/smz-hierarchy");
   console.log("- /api/v1/fib-levels");
   console.log("- /api/v1/confluence-score");
-  console.log("- /api/v1/trade-permission   ✅ Engine 6");
+  console.log("- /api/v1/run-all-engines   ✅ cron trigger");
+  console.log("- /api/v1/trade-permission  ✅ Engine 6");
   console.log("- /live  (GitHub JSON proxies)");
 });
 
