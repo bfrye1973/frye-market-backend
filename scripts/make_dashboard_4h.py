@@ -542,7 +542,7 @@ def main():
     body_top_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_top - e10) / e10
 
     # Reclaim tolerance (default widened to match real defended reclaim)
-    RECLAIM_TOL_PCT = float(os.environ.get("EMA10_RECLAIM_TOL_PCT", "0.60"))
+    RECLAIM_TOL_PCT = float(os.environ.get("EMA10_RECLAIM_TOL_PCT", "0.30"))
 
     # Wick reclaim detection
     wick_reclaimed = float(H[-1]) > float(e10)
