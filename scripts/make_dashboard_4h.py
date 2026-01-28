@@ -44,7 +44,7 @@ OFFENSIVE = {"information technology", "consumer discretionary", "communication 
 DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
 
 # FULL_EMA_DIST controls how fast posture saturates to 0/100
-FULL_EMA_DIST = 0.60  # percent
+FULL_EMA_DIST = 0.90  # percent
 
 SMI_K_LEN = 12
 SMI_D_LEN = 5
