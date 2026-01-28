@@ -47,7 +47,7 @@ POLY_KEY = os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_API_KEY") o
 FULL_DIST_10 = 0.60
 FULL_DIST_20 = 1.00
 FULL_DIST_50 = 2.00
-EMA10_PULLBACK_TOL = -0.20
+EMA10_PULLBACK_TOL = -0.40
 
 # --- Score weights (sum=1.00) ---
 W_EMA_STRUCT   = 0.60
@@ -59,7 +59,7 @@ LUX_CONV = 50
 LUX_LEN  = 20
 
 # ✅ SHORT MEMORY PSI window (TRADING DAYS) — you wanted 20
-PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "10"))
+PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "20"))
 
 # Fetch days (ONLY for EMAs/ATR stability, NOT PSI memory)
 SPY_FETCH_DAYS    = int(os.environ.get("SPY_FETCH_DAYS", "260"))
