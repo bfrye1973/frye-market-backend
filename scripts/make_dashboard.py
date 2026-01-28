@@ -8,6 +8,16 @@ make_dashboard.py — compose dashboard payloads (intraday / hourly / eod)
 - Normalizes intraday metrics to the UI schema
 - For intraday (10m): attaches an `outlook` field to each sectorCard
   using config-driven thresholds from config/sector_outlook_10m.json.
+
+UPDATE (per your request):
+✅ Adds "hysteresis" so 10m Index Sector outlook does NOT flip fast.
+Mode B (Balanced):
+  - Enter Bullish: breadth >= 55 AND momentum >= 55
+  - Stay Bullish until breadth < 51 OR momentum < 51
+  - Enter Bearish: breadth <= 45 AND momentum <= 45
+  - Stay Bearish until breadth > 49 OR momentum > 49
+This requires remembering the last outlook per sector, so we persist a tiny cache:
+  data/sector_outlook_state_10m.json
 """
 
 from __future__ import annotations
@@ -65,25 +75,32 @@ ORDER = [
 # Config-driven 10m outlook thresholds
 # -------------------------------------------------------------------
 
-# We expect: config/sector_outlook_10m.json at repo root.
-# Example:
-# {
-#   "bullish_breadth": 52,
-#   "bullish_momentum": 52,
-#   "bearish_breadth": 48,
-#   "bearish_momentum": 48,
-#   "default": "Neutral"
-# }
-
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 OUTLOOK_CFG_PATH = os.path.join(ROOT, "config", "sector_outlook_10m.json")
 
+# ✅ State cache (so hysteresis can “stick” between runs)
+OUTLOOK_STATE_PATH = os.path.join(ROOT, "data", "sector_outlook_state_10m.json")
+
+# Default config supports old keys and new hysteresis keys.
+# If you keep a simple config file, these defaults will be used.
 DEFAULT_OUTLOOK_CFG: Dict[str, Any] = {
+    # OLD (kept for compatibility)
     "bullish_breadth": 55.0,
     "bullish_momentum": 55.0,
     "bearish_breadth": 45.0,
     "bearish_momentum": 45.0,
     "default": "Neutral",
+
+    # NEW (Mode B Balanced hysteresis)
+    "bull_enter_breadth": 55.0,
+    "bull_enter_momentum": 55.0,
+    "bull_exit_breadth": 51.0,
+    "bull_exit_momentum": 51.0,
+
+    "bear_enter_breadth": 45.0,
+    "bear_enter_momentum": 45.0,
+    "bear_exit_breadth": 49.0,
+    "bear_exit_momentum": 49.0,
 }
 
 
@@ -91,9 +108,11 @@ def load_outlook_cfg() -> Dict[str, Any]:
     try:
         with open(OUTLOOK_CFG_PATH, "r", encoding="utf-8") as f:
             cfg = json.load(f)
-        # Merge onto defaults so missing keys don't crash anything
         out = dict(DEFAULT_OUTLOOK_CFG)
-        out.update({k: v for k, v in cfg.items() if k in DEFAULT_OUTLOOK_CFG})
+        if isinstance(cfg, dict):
+            for k in DEFAULT_OUTLOOK_CFG:
+                if k in cfg:
+                    out[k] = cfg[k]
         return out
     except Exception as e:
         print(f"[warn] sector_outlook_10m.json not found or invalid: {e}. Using defaults.", file=sys.stderr)
@@ -103,14 +122,51 @@ def load_outlook_cfg() -> Dict[str, Any]:
 OUTLOOK_CFG = load_outlook_cfg()
 
 
-def label_outlook_10m(card: Dict[str, Any]) -> str:
+def load_outlook_state() -> Dict[str, str]:
     """
-    10m sector outlook for Index Sectors row.
+    Load last-known outlook per sector so we can apply hysteresis (stickiness).
+    Expected shape:
+      { "Information Technology": "Bullish", ... }
+    """
+    try:
+        with open(OUTLOOK_STATE_PATH, "r", encoding="utf-8") as f:
+            j = json.load(f)
+        if isinstance(j, dict):
+            # normalize values
+            out: Dict[str, str] = {}
+            for k, v in j.items():
+                if isinstance(k, str) and isinstance(v, str):
+                    out[k] = v
+            return out
+    except Exception:
+        pass
+    return {}
 
-    Tuned via config/sector_outlook_10m.json:
-      - Bullish: breadth >= bullish_breadth AND momentum >= bullish_momentum
-      - Bearish: breadth <= bearish_breadth AND momentum <= bearish_momentum
-      - Else: default (usually "Neutral")
+
+def save_outlook_state(state: Dict[str, str]) -> None:
+    try:
+        os.makedirs(os.path.dirname(OUTLOOK_STATE_PATH), exist_ok=True)
+        with open(OUTLOOK_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, separators=(",", ":"))
+    except Exception as e:
+        print(f"[warn] could not write outlook state cache: {e}", file=sys.stderr)
+
+
+def label_outlook_10m(card: Dict[str, Any], prev: str) -> str:
+    """
+    10m sector outlook with hysteresis (Mode B Balanced).
+
+    Enter Bullish:
+      b >= 55 AND m >= 55
+    Stay Bullish until:
+      b < 51 OR m < 51
+
+    Enter Bearish:
+      b <= 45 AND m <= 45
+    Stay Bearish until:
+      b > 49 OR m > 49
+
+    Else: Neutral
     """
     try:
         b = float(card.get("breadth_pct", 0.0))
@@ -118,17 +174,43 @@ def label_outlook_10m(card: Dict[str, Any]) -> str:
     except Exception:
         return OUTLOOK_CFG["default"]
 
-    if b >= OUTLOOK_CFG["bullish_breadth"] and m >= OUTLOOK_CFG["bullish_momentum"]:
+    # Normalize prev
+    prev_norm = prev if prev in ("Bullish", "Bearish", "Neutral") else OUTLOOK_CFG["default"]
+
+    bull_enter_b = float(OUTLOOK_CFG["bull_enter_breadth"])
+    bull_enter_m = float(OUTLOOK_CFG["bull_enter_momentum"])
+    bull_exit_b  = float(OUTLOOK_CFG["bull_exit_breadth"])
+    bull_exit_m  = float(OUTLOOK_CFG["bull_exit_momentum"])
+
+    bear_enter_b = float(OUTLOOK_CFG["bear_enter_breadth"])
+    bear_enter_m = float(OUTLOOK_CFG["bear_enter_momentum"])
+    bear_exit_b  = float(OUTLOOK_CFG["bear_exit_breadth"])
+    bear_exit_m  = float(OUTLOOK_CFG["bear_exit_momentum"])
+
+    # If currently Bullish, only drop when it truly breaks
+    if prev_norm == "Bullish":
+        if b < bull_exit_b or m < bull_exit_m:
+            return "Neutral"
         return "Bullish"
-    if b <= OUTLOOK_CFG["bearish_breadth"] and m <= OUTLOOK_CFG["bearish_momentum"]:
+
+    # If currently Bearish, only lift when it truly recovers
+    if prev_norm == "Bearish":
+        if b > bear_exit_b or m > bear_exit_m:
+            return "Neutral"
         return "Bearish"
-    return OUTLOOK_CFG["default"]
+
+    # If Neutral, require strong confirmation to enter states
+    if b >= bull_enter_b and m >= bull_enter_m:
+        return "Bullish"
+    if b <= bear_enter_b and m <= bear_enter_m:
+        return "Bearish"
+
+    return "Neutral"
 
 
 # -------------------------------------------------------------------
 # Generic helpers
 # -------------------------------------------------------------------
-
 
 def coalesce(*vals):
     for v in vals:
@@ -154,7 +236,6 @@ def load_json(path: str) -> Dict[str, Any]:
 # Sector card normalization
 # -------------------------------------------------------------------
 
-
 def ensure_sector_cards(source: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Return 11 sectorCards in canonical ORDER.
@@ -171,7 +252,6 @@ def ensure_sector_cards(source: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     cards = source.get("sectorCards")
     if isinstance(cards, list) and cards:
-        # Ensure all canonical sectors exist
         got = {c.get("sector") for c in cards if isinstance(c, dict)}
         for name in ORDER:
             if name not in got:
@@ -186,12 +266,10 @@ def ensure_sector_cards(source: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "down": 0,
                     }
                 )
-        # Sort into canonical order
         key = {n: i for i, n in enumerate(ORDER)}
         cards.sort(key=lambda c: key.get(c.get("sector", ""), 999))
         return cards
 
-    # Derive from groups if no sectorCards provided
     groups = source.get("groups") or {}
     derived: List[Dict[str, Any]] = []
     for name in ORDER:
@@ -220,7 +298,6 @@ def ensure_sector_cards(source: Dict[str, Any]) -> List[Dict[str, Any]]:
 # Intraday composition (10m)
 # -------------------------------------------------------------------
 
-
 def compose_intraday(src: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalize intraday payload:
@@ -228,15 +305,24 @@ def compose_intraday(src: Dict[str, Any]) -> Dict[str, Any]:
       - Normalize metrics to the 10m schema.
       - Preserve intraday / engineLights from the source.
       - Ensure we always have 11 canonical sectorCards.
-      - Attach a 10m `outlook` field to each sectorCard using config-driven rules.
+      - Attach a 10m `outlook` field to each sectorCard using hysteresis + persisted state.
     """
     cards = ensure_sector_cards(src)
 
-    # Attach or override outlook for 10m cards using config thresholds,
-    # but only if upstream hasn't already set an outlook.
+    # Load last-known outlook so the outlook doesn't chatter
+    prev_state = load_outlook_state()
+    next_state: Dict[str, str] = dict(prev_state)
+
     for c in cards:
-        if "outlook" not in c:
-            c["outlook"] = label_outlook_10m(c)
+        sector = c.get("sector") or ""
+        prev = prev_state.get(sector, OUTLOOK_CFG["default"])
+        new_outlook = label_outlook_10m(c, prev=prev)
+        c["outlook"] = new_outlook
+        if sector:
+            next_state[sector] = new_outlook
+
+    # Persist the new outlook state
+    save_outlook_state(next_state)
 
     m_in = dict(src.get("metrics") or {})
 
@@ -291,7 +377,6 @@ def compose_intraday(src: Dict[str, Any]) -> Dict[str, Any]:
 # Hourly / EOD passthrough
 # -------------------------------------------------------------------
 
-
 def compose_hourly(src: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(src)
     out["updated_at"] = now_phx()
@@ -311,7 +396,6 @@ def compose_eod(src: Dict[str, Any]) -> Dict[str, Any]:
 # -------------------------------------------------------------------
 # CLI
 # -------------------------------------------------------------------
-
 
 def main():
     ap = argparse.ArgumentParser(description="Compose dashboard payloads.")
