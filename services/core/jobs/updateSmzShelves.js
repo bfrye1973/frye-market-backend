@@ -14,14 +14,22 @@
 // - Global cap: max 8 shelves total (TradingView clean feel)
 //
 // ✅ TEMP RULE (PER USER, FOR CLEAN LOOK RIGHT NOW):
-// - If a shelf touches/overlaps ANY sticky institutional structure (structures_sticky),
-//   remove the shelf (strict any overlap).
+// - If a shelf overlaps ANY *true* sticky institutional structure, remove the shelf.
+// - IMPORTANT FIX (per user rule):
+//   "True institutional" = strength >= 90 only
+//   Weak structures (60–89) are NOT institutional.
+//   Negotiated (|NEG|) are NOT institutional.
 // - We check against structures_sticky only (authoritative).
 //
 // ✅ NEW LOCKED RULE (PER USER):
 // - NO TWO SHELVES CAN TOUCH/OVERLAP in final output.
 // - Higher strength shelf always wins.
 // - Implemented as final "no-touch winner" pass after clustering + global cap.
+//
+// ✅ NEW USER RULE (LOCKED):
+// - Any sticky structure with strength 60–89 that is NOT |NEG| becomes a shelf.
+// - This makes "weak institutionals" become shelves (as requested).
+// - Negotiated zones never become shelves.
 //
 // Uses DEEP provider (jobs only), chart provider remains untouched.
 //
@@ -58,6 +66,9 @@ const DAYS_1H = 180;
 // Shelves strength band (LOCKED semantics)
 const SHELF_STRENGTH_LO = 60;
 const SHELF_STRENGTH_HI = 89;
+
+// ✅ True institutional threshold (LOCKED by user)
+const INSTITUTIONAL_MIN = 90;
 
 // ✅ Cluster rules (LOCKED)
 const SHELF_CLUSTER_OVERLAP = 0.55; // overlap ratio threshold
@@ -241,7 +252,9 @@ function remapShelvesStrengthToBand(levels, lo = SHELF_STRENGTH_LO, hi = SHELF_S
 }
 
 // ---------------- Institutional structures (structures_sticky) ----------------
-
+//
+// ✅ FIXED: only treat strength>=90 structures as institutionals for overlap suppression
+// ✅ NEG is never treated as institutional
 function loadStickyStructureRanges() {
   if (!fs.existsSync(LEVELS_FILE)) {
     console.warn(`[SHELVES] levels file not found for structure filter (ok): ${LEVELS_FILE}`);
@@ -254,6 +267,12 @@ function loadStickyStructureRanges() {
     const arr = Array.isArray(json?.structures_sticky) ? json.structures_sticky : [];
 
     const ranges = arr
+      .filter((z) => {
+        const id = String(z?.details?.id ?? z?.structureKey ?? z?.details?.facts?.sticky?.structureKey ?? "");
+        if (id.includes("|NEG|")) return false;
+        const strength = Number(z?.strength ?? NaN);
+        return Number.isFinite(strength) && strength >= INSTITUTIONAL_MIN;
+      })
       .map((z) => {
         const pr = z?.priceRange;
         const r = normalizeRange(pr);
@@ -261,7 +280,11 @@ function loadStickyStructureRanges() {
       })
       .filter(Boolean);
 
-    console.log(`[SHELVES] Loaded sticky structures for overlap filter: ${ranges.length} (${path.basename(LEVELS_FILE)})`);
+    console.log(
+      `[SHELVES] Loaded TRUE institutionals (>=${INSTITUTIONAL_MIN}) for overlap filter: ${ranges.length} (${path.basename(
+        LEVELS_FILE
+      )})`
+    );
     return ranges;
   } catch (e) {
     console.warn(`[SHELVES] Failed to read sticky structures from ${LEVELS_FILE}: ${e?.message}`);
@@ -280,18 +303,76 @@ function removeShelvesOverlappingStickyStructures(levels, stickyRanges) {
     const r = normalizeRange(s?.priceRange);
     if (!r) return false;
 
-  const overlapsAny = structs.some(
-   (z) => overlapRatio(r.hi, r.lo, z.hi, z.lo) >= 0.25
- );
+    const overlapsAny = structs.some(
+      (z) => overlapRatio(r.hi, r.lo, z.hi, z.lo) >= 0.25
+    );
 
     if (overlapsAny) removed++;
     return !overlapsAny;
   });
 
   if (removed) {
-    console.log(`[SHELVES] Removed shelves overlapping sticky structures (strict): ${removed}`);
+    console.log(`[SHELVES] Removed shelves overlapping TRUE institutionals (>=${INSTITUTIONAL_MIN}): ${removed}`);
   }
   return { kept, removedCount: removed };
+}
+
+// ---------------- NEW: Weak structures (60–89) become shelves ----------------
+//
+// Rule: structures_sticky where strength is 60–89 and NOT NEG become shelves.
+// Manual institutionals are strength 100, so they will not be converted.
+function loadWeakInstitutionalsAsShelves() {
+  if (!fs.existsSync(LEVELS_FILE)) return [];
+
+  try {
+    const raw = fs.readFileSync(LEVELS_FILE, "utf8");
+    const json = JSON.parse(raw);
+    const arr = Array.isArray(json?.structures_sticky) ? json.structures_sticky : [];
+
+    const out = [];
+
+    for (const z of arr) {
+      const id = String(z?.details?.id ?? z?.structureKey ?? z?.details?.facts?.sticky?.structureKey ?? "");
+      if (id.includes("|NEG|")) continue;
+
+      const strengthRaw = Number(z?.strength ?? NaN);
+      if (!Number.isFinite(strengthRaw)) continue;
+
+      if (strengthRaw < SHELF_STRENGTH_LO || strengthRaw >= INSTITUTIONAL_MIN) continue;
+
+      const r = normalizeRange(z?.priceRange);
+      if (!r) continue;
+
+      // Map to acc/dist if possible; default to accumulation.
+      const facts = z?.details?.facts ?? {};
+      const exitSide = facts?.exitSide1h ?? null;
+      const type =
+        exitSide === "below" ? "distribution" :
+        exitSide === "above" ? "accumulation" :
+        "accumulation";
+
+      const strength = clampInt(strengthRaw, SHELF_STRENGTH_LO, SHELF_STRENGTH_HI);
+
+      out.push({
+        type,
+        price: round2(r.mid),
+        priceRange: [r.hi, r.lo],
+        strength,
+        strength_raw: round2(strengthRaw),
+        strength_source: "weak_institutional_convert",
+        comment: `Converted weak structure (${round2(strengthRaw)})`,
+        locked: false,
+        rangeSource: "weak_institutional",
+        status: "active",
+      });
+    }
+
+    console.log(`[SHELVES] Weak structures converted to shelves: ${out.length}`);
+    return out;
+  } catch (e) {
+    console.warn(`[SHELVES] Failed to convert weak structures: ${e?.message}`);
+    return [];
+  }
 }
 
 // ---------------- Manual shelves (source of truth) ----------------
@@ -517,7 +598,6 @@ function applyGlobalCap(levels, maxTotal = MAX_SHELVES_TOTAL) {
 }
 
 // ✅ NEW: Final "no-touch winner" pass.
-// Sort by strength desc; keep only shelves that do NOT overlap/touch any kept shelf.
 function applyNoTouchWinnerPass(levels) {
   const list = Array.isArray(levels) ? levels.slice() : [];
   if (!list.length) return [];
@@ -534,7 +614,7 @@ function applyNoTouchWinnerPass(levels) {
     const touchesExisting = kept.some((k) => {
       const kr = normalizeRange(k?.priceRange);
       if (!kr) return false;
-      return rangesOverlap(sr.hi, sr.lo, kr.hi, kr.lo); // strict any overlap/touch
+      return rangesOverlap(sr.hi, sr.lo, kr.hi, kr.lo);
     });
 
     if (touchesExisting) {
@@ -583,18 +663,22 @@ async function main() {
 
     console.log("[SHELVES] currentPriceAnchor (from 30m/1h):", currentPriceAnchor.toFixed(2));
 
-    // ✅ Institutional sticky structure ranges (authoritative)
+    // ✅ TRUE institutionals (>=90 only) used for overlap suppression
     const stickyStructureRanges = loadStickyStructureRanges();
 
-    // 1) Manual shelves (source-of-truth)
+    // 1) Manual shelves
     const manualAll = loadManualShelves();
     const manualInBand = filterShelvesToBand(manualAll, currentPriceAnchor, BAND_POINTS);
 
-    // 2) Auto shelves (scanner)
+    // 2) Weak structures (60–89) -> shelves
+    const weakAll = loadWeakInstitutionalsAsShelves();
+    const weakInBand = filterShelvesToBand(weakAll, currentPriceAnchor, BAND_POINTS);
+
+    // 3) Auto shelves (scanner)
     console.log("[SHELVES] Running shelves scanner (Acc/Dist)…");
     const shelvesRaw =
       computeShelves({
-        bars10m: bars15m, // historical naming
+        bars10m: bars15m,
         bars30m,
         bars1h,
         bandPoints: BAND_POINTS,
@@ -605,31 +689,32 @@ async function main() {
     console.log("[SHELVES] Shelves generated (auto raw):", shelvesRaw.length);
     console.log("[SHELVES] Shelves kept (auto band):", shelvesBand.length);
     console.log("[SHELVES] Shelves kept (manual band):", manualInBand.length);
+    console.log("[SHELVES] Weak-structure shelves kept (band):", weakInBand.length);
 
-    // 3) Manual wins overlap (TYPE-AWARE): remove overlapping autos only if same type
+    // 4) Manual wins overlap (TYPE-AWARE): remove overlapping autos only if same type
     const autoNoOverlap = removeAutosOverlappingManualSameType(shelvesBand, manualInBand);
 
-    // 4) Remap AUTO strengths into shelf band (60–89)
+    // 5) Remap AUTO strengths into shelf band (60–89)
     const { levels: autoMapped, minRaw, maxRaw } = remapShelvesStrengthToBand(
       autoNoOverlap,
       SHELF_STRENGTH_LO,
       SHELF_STRENGTH_HI
     );
 
-    // 5) Merge shelves
-    const mergedRaw = [...manualInBand, ...autoMapped];
+    // 6) Merge shelves: manual + weakConverted + auto
+    const mergedRaw = [...manualInBand, ...weakInBand, ...autoMapped];
 
-    // ✅ TEMP CLEAN RULE: remove ANY shelf overlapping ANY sticky structure (strict)
+    // ✅ TEMP CLEAN RULE (kept): remove shelves overlapping TRUE institutionals (>=90 only)
     const { kept: mergedNoInstitution, removedCount: removedByInstitution } =
       removeShelvesOverlappingStickyStructures(mergedRaw, stickyStructureRanges);
 
-    // 6) Cluster-collapse (max 1 acc + 1 dist per cluster)
+    // 7) Cluster-collapse (max 1 acc + 1 dist per cluster)
     const collapsed = collapseShelvesByCluster(mergedNoInstitution);
 
-    // 7) Global cap (max 8 total)
+    // 8) Global cap (max 8 total)
     const capped = applyGlobalCap(collapsed, MAX_SHELVES_TOTAL);
 
-    // ✅ 8) Final "no-touch winner" pass (no shelves can touch)
+    // ✅ 9) Final "no-touch winner" pass (no shelves can touch)
     const finalLevels = applyNoTouchWinnerPass(capped);
 
     console.log("[SHELVES] Strength remap:", {
@@ -639,7 +724,7 @@ async function main() {
     });
 
     console.log(
-      `[SHELVES] Emitting shelves: manual ${manualInBand.length} + auto ${autoMapped.length} => merged ${mergedRaw.length} => afterInstitutionFilter ${mergedNoInstitution.length} (removed ${removedByInstitution}) => collapsed ${collapsed.length} => capped ${capped.length} => final ${finalLevels.length}`
+      `[SHELVES] Emitting shelves: manual ${manualInBand.length} + weak ${weakInBand.length} + auto ${autoMapped.length} => merged ${mergedRaw.length} => afterInstitutionFilter ${mergedNoInstitution.length} (removed ${removedByInstitution}) => collapsed ${collapsed.length} => capped ${capped.length} => final ${finalLevels.length}`
     );
 
     const payload = {
@@ -659,18 +744,16 @@ async function main() {
         },
         manual_file: path.basename(MANUAL_FILE),
         manual_loaded_in_band: manualInBand.length,
-        cluster_rules: {
-          overlap_ratio: SHELF_CLUSTER_OVERLAP,
-          gap_pts: SHELF_CLUSTER_GAP_PTS,
-          max_per_cluster: "1 accumulation + 1 distribution",
-          global_cap_total: MAX_SHELVES_TOTAL,
-          manual_override: "manual wins within its type; opposite type still allowed in same cluster",
+        weak_structure_convert: {
+          enabled: true,
+          rule: `structures_sticky strength ${SHELF_STRENGTH_LO}–${SHELF_STRENGTH_HI} (non-NEG) => shelves`,
+          in_band: weakInBand.length,
         },
         institutional_filter: {
           enabled: true,
           source: path.basename(LEVELS_FILE),
           key: "structures_sticky",
-          rule: "overlap_ratio>=0.25",
+          rule: `true institutionals only (strength>=${INSTITUTIONAL_MIN}), overlap_ratio>=0.25`,
           structures_count: stickyStructureRanges.length,
           shelves_removed: removedByInstitution,
         },
