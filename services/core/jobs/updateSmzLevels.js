@@ -61,10 +61,10 @@ const DAYS_1H = 180;
 
 // Shelves strength band (LOCKED semantics)
 const SHELF_STRENGTH_LO = 60;
-const SHELF_STRENGTH_HI = 89;
+const SHELF_STRENGTH_HI = 84;
 
 // ✅ True institutional threshold
-const INSTITUTIONAL_MIN = 90;
+const INSTITUTIONAL_MIN = 85;
 
 // ✅ Cluster rules (LOCKED)
 const SHELF_CLUSTER_OVERLAP = 0.55; // overlap ratio threshold
