@@ -1,5 +1,5 @@
 // services/core/jobs/updateSmzLevels.js
-// Engine 1 SMZ job (stable version - NO pocket/micro merge)
+// Engine 1 SMZ job (stable version)
 // - Runs smzEngine (LOCKED)
 // - Updates sticky registry (AUTO ONLY)
 // - Loads manual structures from smz-manual-structures.json (SOURCE OF TRUTH)
@@ -12,7 +12,8 @@
 // ✅ manual zones immune to caps/cleanup/overlap suppression
 // ✅ structures_sticky: manual first, then auto
 // ✅ AUTO institutional max width = 4.0 pts (live + sticky autos)
-// ✅ NEW: manual structures are ALWAYS emitted (not band-limited)
+// ✅ NEW: manual structures are ALWAYS emitted in structures_sticky (not band-limited)
+// ✅ NEW: if engine compute fails, still emit manual structures (never go blind)
 
 import fs from "fs";
 import path from "path";
@@ -34,7 +35,7 @@ const DAYS_1H = 365;
 
 // Sticky settings
 const STICKY_ROUND_STEP = 0.25;
-const STICKY_KEEP_WITHIN_BAND_PTS = 40; // +/- 40 pts from current price (AUTO only)
+const STICKY_KEEP_WITHIN_BAND_PTS = 40; // +/- 40 pts from current price (AUTO ONLY)
 const STICKY_ARCHIVE_DAYS = 30;
 const STICKY_MAX_WITHIN_BAND = 12;
 
@@ -283,9 +284,7 @@ function stripManualFromRegistryStore(store) {
   const before = Array.isArray(store?.structures) ? store.structures.length : 0;
   const structures = (store?.structures || []).filter((s) => !isManualLike(s));
   const after = structures.length;
-  if (before !== after) {
-    console.log(`[SMZ] Stripped manual from registry store: ${before} -> ${after}`);
-  }
+  if (before !== after) console.log(`[SMZ] Stripped manual from registry store: ${before} -> ${after}`);
   return { ...(store || {}), structures };
 }
 
@@ -355,7 +354,7 @@ function countDistinctExitEvents(exits) {
   return count;
 }
 
-// One-time backfill (AUTO ONLY)
+// One-time backfill (AUTO ONLY) — kept as-is in spirit
 function runStickyBackfillOnce(store, bars1h) {
   const meta = store.meta ?? {};
   if (meta.backfill_done_utc) return store;
@@ -389,16 +388,10 @@ function runStickyBackfillOnce(store, bars1h) {
       while (lastTouch + 1 < bars1h.length && barOverlapsRange(bars1h[lastTouch + 1], lo, hi)) lastTouch++;
 
       const e = exitConfirmedAfterIndex(bars1h, lo, hi, lastTouch, 2);
-      if (!e.confirmed) {
-        i = lastTouch;
-        continue;
-      }
+      if (!e.confirmed) { i = lastTouch; continue; }
 
       const anchorEndTime = bars1h[lastTouch]?.time;
-      if (!Number.isFinite(anchorEndTime)) {
-        i = lastTouch;
-        continue;
-      }
+      if (!Number.isFinite(anchorEndTime)) { i = lastTouch; continue; }
 
       exits.push({ side: e.side, exitBars: e.bars, anchorEndTime });
       i = lastTouch;
@@ -421,7 +414,6 @@ function runStickyBackfillOnce(store, bars1h) {
   const top = candidates.slice(0, STICKY_BACKFILL_MAX_NEW);
 
   const nowIso = isoNow();
-
   for (const c of top) {
     const key = structureKeyFromRange(c.hi, c.lo);
     if (store.structures.some((s) => s.structureKey === key)) continue;
@@ -551,22 +543,6 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
     }
   }
 
-  // Purge oversized autos (safety)
-  for (let i = list.length - 1; i >= 0; i--) {
-    const s = list[i];
-    if (!s || isManualLike(s)) continue;
-
-    const pr = s.priceRange;
-    if (!Array.isArray(pr) || pr.length !== 2) continue;
-
-    const hi = Math.max(Number(pr[0]), Number(pr[1]));
-    const lo = Math.min(Number(pr[0]), Number(pr[1]));
-    if (!Number.isFinite(hi) || !Number.isFinite(lo)) continue;
-
-    const width = hi - lo;
-    if (width > STRUCT_AUTO_MAX_WIDTH_PTS) list.splice(i, 1);
-  }
-
   // Select autos within band (capped), excluding any overlapping manual
   const activeInBandAutos = list
     .filter((s) => s?.status === "active")
@@ -595,7 +571,7 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
   };
   saveSticky(newStore);
 
-  // ✅ NEW: manual structures ALWAYS emitted (NOT band-limited)
+  // ✅ Manual ALWAYS emitted
   const emittedManual = (manualStructures || []).map((m) => ({
     type: "institutional",
     tier: "structure_sticky",
@@ -659,15 +635,7 @@ async function main() {
       return false;
     });
 
-    const structuresSticky = updateStickyFromLive(
-      stickyCandidates,
-      currentPrice,
-      bars1h,
-      manualStructures
-    );
-
-    // pockets disabled
-    const pocketsTagged = [];
+    const structuresSticky = updateStickyFromLive(stickyCandidates, currentPrice, bars1h, manualStructures);
 
     const payload = {
       ok: true,
@@ -679,7 +647,7 @@ async function main() {
         manual_structures_loaded: manualStructures.length,
       },
       levels: levelsLive,
-      pockets_active: pocketsTagged,
+      pockets_active: [],
       structures_sticky: structuresSticky,
     };
 
@@ -691,7 +659,7 @@ async function main() {
   } catch (err) {
     console.error("[SMZ] FAILED:", err);
 
-    // ✅ FALLBACK STILL EMITS MANUAL STRUCTURES (never go blind)
+    // ✅ fallback still emits manual structures
     const fallbackStructuresSticky = (manualStructures || []).map((m) => ({
       type: "institutional",
       tier: "structure_sticky",
