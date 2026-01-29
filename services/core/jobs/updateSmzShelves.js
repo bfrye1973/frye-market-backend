@@ -207,8 +207,24 @@ async function main() {
 
     const bars30m = bars30mRaw || [];
     const bars1h = bars1hRaw || [];
-    const currentPrice = bars30m.at(-1)?.close ?? bars1h.at(-1)?.close;
-    if (!Number.isFinite(currentPrice)) throw new Error("No current price");
+    function lastFiniteClose(bars) {
+      if (!Array.isArray(bars)) return null;
+      for (let i = bars.length - 1; i >= 0; i--) {
+        const c = bars[i]?.close;
+        if (Number.isFinite(c)) return c;
+     }
+     return null;
+   }
+
+const currentPrice =
+  lastFiniteClose(bars30m) ??
+  lastFiniteClose(bars1h);
+
+if (!Number.isFinite(currentPrice)) {
+  console.warn("[SHELVES] No finite close found; skipping run safely.");
+  return;
+}
+
 
     const previousShelves = loadPreviousShelves();
     const manualShelves = loadManualShelves();
