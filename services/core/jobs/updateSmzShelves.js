@@ -36,8 +36,8 @@ const DAYS_1H = 180;
 
 // Strength bands
 const SHELF_MIN = 60;
-const SHELF_MAX = 89;
-const INSTITUTIONAL_MIN = 90;
+const SHELF_MAX = 84;
+const INSTITUTIONAL_MIN = 85;
 
 // Persistence
 const SHELF_PERSIST_HOURS = 48;
