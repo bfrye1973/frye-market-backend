@@ -1,13 +1,17 @@
 // services/core/jobs/updateSmzShelves.js
-// Shelves job (Acc/Dist) + conversion + persistence
+// Shelves Job — writes smz-shelves.json
 //
 // LOCKED USER RULES:
-// - Institutional = 85–100 (suppresses shelves)
-// - Any sticky structure < 85 (and not MANUAL, not |NEG|) becomes a shelf
-// - Shelves persist 48 hours; revisit resets timer; stronger overlaps replace
-// - Manual shelves override auto shelves
-// - No-touch winner pass (no shelves touch/overlap)
-// - Global cap 8
+// - Institutional threshold = 85–100 (suppresses shelves inside by overlap filter)
+// - Any non-manual, non-NEG sticky structure with strength < 85 becomes a shelf
+// - Shelves persist 48 hours; revisit resets timer; stronger overlap replaces
+// - Manual shelves override autos
+// - Auto shelves come from scanner (computeShelves)
+// - Cluster + cap + no-touch preserved
+//
+// IMPORTANT FIXES:
+// - bars are normalized before using .close (prevents "No finite close")
+// - withinBand helper included (no ReferenceError)
 
 import fs from "fs";
 import path from "path";
@@ -33,14 +37,9 @@ const DAYS_1H = 180;
 const SHELF_STRENGTH_LO = 60;
 const SHELF_STRENGTH_HI = 89;
 
-// ✅ NEW threshold
-const INSTITUTIONAL_MIN = 85;
-
-// persistence
+const INSTITUTIONAL_MIN = 85;  // ✅ 85–100
 const SHELF_PERSIST_HOURS = 48;
-const REPLACEMENT_DELTA = 1; // "stronger replaces" = strictly greater
 
-// clustering/caps
 const SHELF_CLUSTER_OVERLAP = 0.55;
 const SHELF_CLUSTER_GAP_PTS = 0.60;
 const MAX_SHELVES_TOTAL = 8;
@@ -101,22 +100,9 @@ function normalizeRange(pr) {
   return { hi, lo, width, mid };
 }
 
-function overlapsBand(hi, lo, bandLow, bandHigh) {
-  return hi >= bandLow && lo <= bandHigh;
-}
-
-function filterToBand(levels, currentPrice, bandPoints) {
-  if (!Array.isArray(levels)) return [];
-  if (!Number.isFinite(currentPrice)) return levels;
-
-  const lo = currentPrice - bandPoints;
-  const hi = currentPrice + bandPoints;
-
-  return levels.filter((s) => {
-    const r = normalizeRange(s?.priceRange);
-    if (!r) return false;
-    return overlapsBand(r.hi, r.lo, lo, hi);
-  });
+function withinBand(r, price, bandPts) {
+  if (!r || !Number.isFinite(price)) return false;
+  return r.hi >= price - bandPts && r.lo <= price + bandPts;
 }
 
 function rangesOverlap(aHi, aLo, bHi, bLo) {
@@ -150,7 +136,6 @@ function isManualShelf(s) {
   return s?.rangeSource === "manual" || s?.locked === true || Number.isFinite(Number(s?.scoreOverride));
 }
 
-// ---------- load previous shelves for persistence ----------
 function loadPrevShelves() {
   if (!fs.existsSync(OUTFILE)) return [];
   try {
@@ -172,7 +157,7 @@ function priceInside(price, r) {
   return Number.isFinite(price) && price >= r.lo && price <= r.hi;
 }
 
-// ---------- institutional ranges for suppression (>=85 only) ----------
+// institutional ranges that suppress shelves (>=85 only)
 function loadInstitutionalRangesForSuppression() {
   if (!fs.existsSync(LEVELS_FILE)) return [];
   try {
@@ -180,25 +165,23 @@ function loadInstitutionalRangesForSuppression() {
     const json = JSON.parse(raw);
     const arr = Array.isArray(json?.structures_sticky) ? json.structures_sticky : [];
 
-    const ranges = arr
+    return arr
       .filter((z) => {
         const id = String(z?.details?.id ?? z?.structureKey ?? "");
-        if (id.includes("|NEG|")) return false; // negotiated never suppress shelves
+        if (id.includes("|NEG|")) return false;
         const s = Number(z?.strength ?? NaN);
         return Number.isFinite(s) && s >= INSTITUTIONAL_MIN;
       })
       .map((z) => normalizeRange(z?.priceRange))
       .filter(Boolean)
       .map((r) => ({ hi: r.hi, lo: r.lo }));
-
-    return ranges;
   } catch {
     return [];
   }
 }
 
-// ---------- convert any sticky structure <85 into a shelf ----------
-function convertStructuresToShelves() {
+// convert non-manual, non-NEG structures with strength <85 into shelves
+function convertStructuresToShelves(nowIso) {
   if (!fs.existsSync(LEVELS_FILE)) return [];
   try {
     const raw = fs.readFileSync(LEVELS_FILE, "utf8");
@@ -210,18 +193,15 @@ function convertStructuresToShelves() {
     for (const z of arr) {
       const id = String(z?.details?.id ?? z?.structureKey ?? "");
       if (id.includes("|NEG|")) continue;
-      if (id.startsWith("MANUAL|")) continue; // you control manual institutionals
+      if (id.startsWith("MANUAL|")) continue; // user controls manual institutionals
 
       const sRaw = Number(z?.strength ?? NaN);
       if (!Number.isFinite(sRaw)) continue;
-
-      // anything below 85 becomes a shelf
-      if (sRaw >= INSTITUTIONAL_MIN) continue;
+      if (sRaw >= INSTITUTIONAL_MIN) continue; // 85+ stays institutional
 
       const r = normalizeRange(z?.priceRange);
       if (!r) continue;
 
-      // map type from exitSide if available
       const facts = z?.details?.facts ?? {};
       const exitSide = facts?.exitSide1h ?? null;
       const type =
@@ -238,8 +218,8 @@ function convertStructuresToShelves() {
         strength_raw: round2(sRaw),
         rangeSource: "converted_structure",
         comment: `Converted from structure (${round2(sRaw)})`,
-        firstSeenUtc: isoNow(),
-        lastSeenUtc: isoNow(),
+        firstSeenUtc: nowIso,
+        lastSeenUtc: nowIso,
         maxStrengthSeen: strength,
       });
     }
@@ -250,8 +230,8 @@ function convertStructuresToShelves() {
   }
 }
 
-// ---------- manual shelves ----------
-function loadManualShelves() {
+// manual shelves
+function loadManualShelves(nowIso) {
   if (!fs.existsSync(MANUAL_FILE)) return [];
   try {
     const raw = fs.readFileSync(MANUAL_FILE, "utf8");
@@ -282,8 +262,8 @@ function loadManualShelves() {
           comment: typeof s?.comment === "string" ? s.comment : null,
           shelfKey: s?.shelfKey ?? null,
           status: s?.status ?? "active",
-          firstSeenUtc: isoNow(),
-          lastSeenUtc: isoNow(),
+          firstSeenUtc: nowIso,
+          lastSeenUtc: nowIso,
           maxStrengthSeen: strength,
         };
       })
@@ -294,12 +274,11 @@ function loadManualShelves() {
   }
 }
 
-// ---------- remove autos overlapping manual same type ----------
+// remove autos overlapping manual same type
 function removeAutosOverlappingManualSameType(autoLevels, manualLevels) {
   if (!Array.isArray(autoLevels) || !autoLevels.length) return [];
   if (!Array.isArray(manualLevels) || !manualLevels.length) return autoLevels;
 
-  let removed = 0;
   const out = autoLevels.filter((a) => {
     const at = normalizeType(a?.type);
     if (!at) return false;
@@ -310,20 +289,20 @@ function removeAutosOverlappingManualSameType(autoLevels, manualLevels) {
     const overlapsSameTypeManual = manualLevels.some((m) => {
       const mt = normalizeType(m?.type);
       if (!mt || mt !== at) return false;
+
       const mr = normalizeRange(m?.priceRange);
       if (!mr) return false;
+
       return rangesOverlap(ar.hi, ar.lo, mr.hi, mr.lo);
     });
 
-    if (overlapsSameTypeManual) removed++;
     return !overlapsSameTypeManual;
   });
 
-  if (removed) console.log(`[SHELVES] Autos removed due to MANUAL overlap (same type only): ${removed}`);
   return out;
 }
 
-// ---------- clustering ----------
+// clustering + cap + no-touch (kept)
 function shelfOverlapRatio(a, b) {
   const ar = normalizeRange(a?.priceRange);
   const br = normalizeRange(b?.priceRange);
@@ -427,34 +406,12 @@ function collapseShelvesByCluster(levels) {
 function applyGlobalCap(levels, maxTotal = MAX_SHELVES_TOTAL) {
   const list = Array.isArray(levels) ? levels.slice() : [];
   if (list.length <= maxTotal) return list;
-
-  const targetEach = Math.floor(maxTotal / 2);
-
-  const acc = list
-    .filter((x) => normalizeType(x?.type) === "accumulation")
-    .sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
-
-  const dist = list
-    .filter((x) => normalizeType(x?.type) === "distribution")
-    .sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
-
-  const picked = [];
-  picked.push(...acc.slice(0, targetEach));
-  picked.push(...dist.slice(0, targetEach));
-
-  if (picked.length < maxTotal) {
-    const pickedSet = new Set(picked.map((x) => x));
-    const leftovers = list
-      .filter((x) => !pickedSet.has(x))
-      .sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
-    picked.push(...leftovers.slice(0, maxTotal - picked.length));
-  }
-
-  picked.sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
-  return picked.slice(0, maxTotal);
+  return list
+    .slice()
+    .sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0))
+    .slice(0, maxTotal);
 }
 
-// no-touch winner pass
 function applyNoTouchWinnerPass(levels) {
   const list = Array.isArray(levels) ? levels.slice() : [];
   if (!list.length) return [];
@@ -462,8 +419,6 @@ function applyNoTouchWinnerPass(levels) {
   list.sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0));
 
   const kept = [];
-  let removed = 0;
-
   for (const s of list) {
     const sr = normalizeRange(s?.priceRange);
     if (!sr) continue;
@@ -474,15 +429,9 @@ function applyNoTouchWinnerPass(levels) {
       return rangesOverlap(sr.hi, sr.lo, kr.hi, kr.lo);
     });
 
-    if (touchesExisting) {
-      removed++;
-      continue;
-    }
-
-    kept.push(s);
+    if (!touchesExisting) kept.push(s);
   }
 
-  if (removed) console.log(`[SHELVES] No-touch winner pass removed: ${removed}`);
   return kept;
 }
 
@@ -490,17 +439,17 @@ function applyNoTouchWinnerPass(levels) {
 function mergeWithMemory(current, prev, currentPrice, nowIso) {
   const out = [];
 
-  // keep prev within band and not expired; revisit resets if price is inside
+  // keep prev within band and not expired; revisit resets if price inside
   for (const p of prev || []) {
     const r = normalizeRange(p?.priceRange);
     if (!r) continue;
-    if (!Number.isFinite(currentPrice) || !withinBand(r, currentPrice)) continue;
+    if (!withinBand(r, currentPrice, BAND_POINTS)) continue;
 
     const age = hoursSince(p?.lastSeenUtc);
     if (age > SHELF_PERSIST_HOURS) continue;
 
     const updated = { ...p };
-    if (priceInside(currentPrice, r)) updated.lastSeenUtc = nowIso; // revisit resets
+    if (priceInside(currentPrice, r)) updated.lastSeenUtc = nowIso;
     if (!updated.maxStrengthSeen) updated.maxStrengthSeen = Number(updated.strength ?? 0);
     out.push(updated);
   }
@@ -509,7 +458,7 @@ function mergeWithMemory(current, prev, currentPrice, nowIso) {
   for (const n of current || []) {
     const rn = normalizeRange(n?.priceRange);
     if (!rn) continue;
-    if (!Number.isFinite(currentPrice) || !withinBand(rn, currentPrice)) continue;
+    if (!withinBand(rn, currentPrice, BAND_POINTS)) continue;
 
     let merged = false;
 
@@ -518,28 +467,22 @@ function mergeWithMemory(current, prev, currentPrice, nowIso) {
       const ro = normalizeRange(o?.priceRange);
       if (!ro) continue;
 
-      // replace/refresh only when same type overlaps
       if (normalizeType(o?.type) !== normalizeType(n?.type)) continue;
       if (!rangesOverlap(rn.hi, rn.lo, ro.hi, ro.lo)) continue;
 
-      // overwrite if stronger
       const oldMax = Number(o.maxStrengthSeen ?? o.strength ?? 0);
       const newS = Number(n.strength ?? 0);
-      if (newS >= oldMax + REPLACEMENT_DELTA) {
+
+      if (newS > oldMax) {
         out[i] = {
           ...o,
           ...n,
           firstSeenUtc: o.firstSeenUtc ?? nowIso,
           lastSeenUtc: nowIso,
-          maxStrengthSeen: Math.max(oldMax, newS),
+          maxStrengthSeen: newS,
         };
       } else {
-        // not stronger -> keep old but refresh lastSeen (re-detected)
-        out[i] = {
-          ...o,
-          lastSeenUtc: nowIso,
-          maxStrengthSeen: oldMax,
-        };
+        out[i] = { ...o, lastSeenUtc: nowIso, maxStrengthSeen: oldMax };
       }
 
       merged = true;
@@ -569,7 +512,6 @@ async function main() {
       getBarsFromPolygonDeep(SYMBOL, "1h", DAYS_1H),
     ]);
 
-    // ✅ FIX: normalize so we always have .close
     const bars15m = normalizeBars(bars15mRaw || []);
     const bars30m = normalizeBars(bars30mRaw || []);
     const bars1h  = normalizeBars(bars1hRaw || []);
@@ -582,22 +524,20 @@ async function main() {
       return;
     }
 
+    const nowIso = isoNow();
     console.log("[SHELVES] currentPriceAnchor:", round2(currentPriceAnchor));
 
-    const nowIso = isoNow();
-
-    // 0) Load previous shelves for persistence
     const prevShelves = loadPrevShelves();
 
-    // 1) Manual shelves
-    const manualAll = loadManualShelves();
-    const manualInBand = filterToBand(manualAll, currentPriceAnchor, BAND_POINTS);
+    // manual shelves
+    const manualAll = loadManualShelves(nowIso);
+    const manualInBand = manualAll.filter((s) => withinBand(normalizeRange(s.priceRange), currentPriceAnchor, BAND_POINTS));
 
-    // 2) Convert structures <85 into shelves
-    const convertedAll = convertStructuresToShelves();
-    const convertedInBand = filterToBand(convertedAll, currentPriceAnchor, BAND_POINTS);
+    // converted shelves
+    const convertedAll = convertStructuresToShelves(nowIso);
+    const convertedInBand = convertedAll.filter((s) => withinBand(normalizeRange(s.priceRange), currentPriceAnchor, BAND_POINTS));
 
-    // 3) Auto shelves (scanner)
+    // auto shelves from scanner
     console.log("[SHELVES] Running shelves scanner (Acc/Dist)…");
     const shelvesRaw =
       computeShelves({
@@ -607,12 +547,12 @@ async function main() {
         bandPoints: BAND_POINTS,
       }) || [];
 
-    const shelvesBand = filterToBand(shelvesRaw, currentPriceAnchor, BAND_POINTS);
+    const shelvesBand = shelvesRaw.filter((s) => withinBand(normalizeRange(s?.priceRange), currentPriceAnchor, BAND_POINTS));
 
-    // 4) Manual wins overlap (same type)
+    // manual wins overlap (same type)
     const autoNoOverlap = removeAutosOverlappingManualSameType(shelvesBand, manualInBand);
 
-    // 5) Remap auto strengths into 60–89
+    // remap auto strengths into 60–89 and normalize object shape
     const autoMapped = autoNoOverlap
       .map((s) => {
         const type = normalizeType(s?.type);
@@ -632,13 +572,12 @@ async function main() {
       })
       .filter(Boolean);
 
-    // 6) Merge current shelves (manual + converted + auto)
     const currentShelves = [...manualInBand, ...convertedInBand, ...autoMapped];
 
-    // 7) Persistence merge
+    // persistence merge
     const withMemory = mergeWithMemory(currentShelves, prevShelves, currentPriceAnchor, nowIso);
 
-    // 8) Suppress shelves inside institutionals (>=85)
+    // suppress shelves inside institutionals (>=85)
     const instRanges = loadInstitutionalRangesForSuppression();
     const suppressed = withMemory.filter((s) => {
       const r = normalizeRange(s?.priceRange);
@@ -647,7 +586,6 @@ async function main() {
       return !overlapsInst;
     });
 
-    // 9) Cluster collapse + cap + no-touch
     const collapsed = collapseShelvesByCluster(suppressed);
     const capped = applyGlobalCap(collapsed, MAX_SHELVES_TOTAL);
     const finalLevels = applyNoTouchWinnerPass(capped);
@@ -664,7 +602,6 @@ async function main() {
         converted_structures_in_band: convertedInBand.length,
         manual_in_band: manualInBand.length,
         auto_in_band: autoMapped.length,
-        prev_kept: (prevShelves || []).length,
       },
       levels: finalLevels,
     };
