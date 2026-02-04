@@ -1,6 +1,6 @@
 // services/core/jobs/updateSmzLevels.js
 // Engine 1 SMZ job (stable version)
-// - Runs smzEngine (LOCKED)
+// - Runs smzEngine (LOCKED — DO NOT MODIFY)
 // - Updates sticky registry (AUTO ONLY)
 // - Loads manual structures from smz-manual-structures.json (SOURCE OF TRUTH)
 // - Writes smz-levels.json for frontend
@@ -12,14 +12,21 @@
 // ✅ manual zones immune to caps/cleanup/overlap suppression
 // ✅ structures_sticky: manual first, then auto
 // ✅ AUTO institutional max width = 4.0 pts (live + sticky autos)
-// ✅ NEW: manual structures are ALWAYS emitted in structures_sticky (not band-limited)
-// ✅ NEW: if engine compute fails, still emit manual structures (never go blind)
+// ✅ manual structures are ALWAYS emitted in structures_sticky (not band-limited)
+// ✅ if engine compute fails, still emit manual structures (never go blind)
+//
+// BETA UPGRADE (NEW):
+// ✅ Add diagnostics so you can tune scores:
+//   - strength_raw: 0..100 (truth, original rubric score)
+//   - confidence:   0..1   (diagnostic confidence)
+// ✅ Add levels_debug so you can see full score spread
+// ✅ Add explicit isNegotiated flag (so negotiated is never yellow)
 
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { computeSmartMoneyLevels } from "../logic/smzEngine.js";
+import { computeSmartMoneyLevels } from "../logic/smzEngine.js"; // LOCKED
 import { getBarsFromPolygonDeep } from "../../../api/providers/polygonBarsDeep.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,7 +42,7 @@ const DAYS_1H = 365;
 
 // Sticky settings
 const STICKY_ROUND_STEP = 0.25;
-const STICKY_KEEP_WITHIN_BAND_PTS = 40; // +/- 40 pts from current price (AUTO ONLY)
+const STICKY_KEEP_WITHIN_BAND_PTS = 40; // AUTO ONLY
 const STICKY_ARCHIVE_DAYS = 30;
 const STICKY_MAX_WITHIN_BAND = 12;
 
@@ -55,9 +62,28 @@ const STICKY_BACKFILL_MAX_NEW = 30;
 // ✅ Institutional “monster” guard (AUTO ONLY) — LOCKED
 const STRUCT_AUTO_MAX_WIDTH_PTS = 4.0;
 
+// ✅ Beta debug controls
+const DEBUG_LEVELS_COUNT = 25;
+const INSTITUTIONAL_MIN = 85; // policy threshold (display)
+const SMZ_PRIME_MIN = 90;     // your original SMZ prime band
+
 // ---------------- tiny helpers ----------------
 const isoNow = () => new Date().toISOString();
 const round2 = (x) => Math.round(Number(x) * 100) / 100;
+
+function clamp01(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+// Convert institutional strength (0..100) to confidence (0..1)
+// We map 75 -> 0, 100 -> 1 because engine MIN_SCORE_GLOBAL is 75.
+function confidenceFromInstitutionalStrength(strength) {
+  const s = Number(strength);
+  if (!Number.isFinite(s)) return 0;
+  return clamp01((s - 75) / 25);
+}
 
 function normalizeBars(raw) {
   if (!Array.isArray(raw)) return [];
@@ -156,6 +182,9 @@ function normalizeManualStructure(s) {
       ? s.structureKey
       : `MANUAL|SPY|${lo.toFixed(2)}-${hi.toFixed(2)}`;
 
+  const notes = typeof s?.notes === "string" ? s.notes : null;
+  const isNegotiated = structureKey.includes("|NEG|") || (notes && notes.toUpperCase().includes("NEGOTIATED"));
+
   return {
     structureKey,
     symbol: "SPY",
@@ -166,7 +195,8 @@ function normalizeManualStructure(s) {
     rangeSource: "manual",
     status: "active",
     stickyConfirmed: true,
-    ...(s?.notes ? { notes: s.notes } : {}),
+    ...(notes ? { notes } : {}),
+    isNegotiated: !!isNegotiated,
   };
 }
 
@@ -354,7 +384,7 @@ function countDistinctExitEvents(exits) {
   return count;
 }
 
-// One-time backfill (AUTO ONLY) — kept as-is in spirit
+// One-time backfill (AUTO ONLY) — kept
 function runStickyBackfillOnce(store, bars1h) {
   const meta = store.meta ?? {};
   if (meta.backfill_done_utc) return store;
@@ -555,7 +585,13 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
       return !manualOverlapsAny(manualStructures, hi, lo);
     });
 
-  const autosSorted = activeInBandAutos.sort((a, b) => {
+  // Debug list (pre-cap) so you can see score spread
+  const autosDebug = activeInBandAutos
+    .slice()
+    .sort((a, b) => Number(b.maxStrengthSeen ?? 0) - Number(a.maxStrengthSeen ?? 0))
+    .slice(0, DEBUG_LEVELS_COUNT);
+
+  const autosSorted = activeInBandAutos.slice().sort((a, b) => {
     const sa = Number(b.maxStrengthSeen ?? 0) - Number(a.maxStrengthSeen ?? 0);
     if (sa !== 0) return sa;
     return Number(b.timesSeen ?? 0) - Number(a.timesSeen ?? 0);
@@ -571,26 +607,62 @@ function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, manualS
   };
   saveSticky(newStore);
 
-  // ✅ Manual ALWAYS emitted
-  const emittedManual = (manualStructures || []).map((m) => ({
-    type: "institutional",
-    tier: "structure_sticky",
-    priceRange: m.manualRange ?? m.priceRange,
-    strength: 100,
-    details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
-  }));
+  // ✅ Manual ALWAYS emitted (manual first)
+  const emittedManual = (manualStructures || []).map((m) => {
+    const isNeg = !!m.isNegotiated;
+    return {
+      type: "institutional",
+      tier: "structure_sticky",
+      priceRange: m.manualRange ?? m.priceRange,
 
-  const emittedAutos = autosWithinBand.map((s) => ({
-    type: "institutional",
-    tier: "structure_sticky",
-    priceRange: s.priceRange,
-    strength: round2(Number(s.maxStrengthSeen ?? 0)),
-    details: { id: s.structureKey, facts: { sticky: s } },
-  }));
+      // Manual is always strength 100 (truth)
+      strength: 100,
+      strength_raw: 100,
+      confidence: 1,
+
+      // NEW explicit negotiated marker
+      isNegotiated: isNeg,
+
+      details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
+    };
+  });
+
+  const emittedAutos = autosWithinBand.map((s) => {
+    const raw = round2(Number(s.maxStrengthSeen ?? 0));
+    const conf = round2(confidenceFromInstitutionalStrength(raw));
+    return {
+      type: "institutional",
+      tier: "structure_sticky",
+      priceRange: s.priceRange,
+
+      strength: raw,
+      strength_raw: raw,
+      confidence: conf,
+
+      isNegotiated: false,
+
+      details: { id: s.structureKey, facts: { sticky: s } },
+    };
+  });
+
+  const emittedAutosDebug = autosDebug.map((s) => {
+    const raw = round2(Number(s.maxStrengthSeen ?? 0));
+    const conf = round2(confidenceFromInstitutionalStrength(raw));
+    return {
+      type: "institutional",
+      tier: "structure_sticky",
+      priceRange: s.priceRange,
+      strength: raw,
+      strength_raw: raw,
+      confidence: conf,
+      isNegotiated: false,
+      details: { id: s.structureKey, facts: { sticky: s } },
+    };
+  });
 
   console.log(`[SMZ] Emitting sticky structures: manual ${emittedManual.length} + auto ${emittedAutos.length}`);
 
-  return [...emittedManual, ...emittedAutos];
+  return { structures_sticky: [...emittedManual, ...emittedAutos], structures_sticky_debug: [...emittedManual, ...emittedAutosDebug] };
 }
 
 // ---------------- main ----------------
@@ -616,17 +688,51 @@ async function main() {
     console.log("[SMZ] currentPrice:", Number.isFinite(currentPrice) ? round2(currentPrice) : "null");
 
     console.log("[SMZ] Running engine...");
-    let levelsLive = [];
+    let levelsEngineRaw = [];
     try {
-      levelsLive = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
+      levelsEngineRaw = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
     } catch (e) {
       console.warn("[SMZ] Engine compute failed (continuing with manual only):", e?.message);
-      levelsLive = [];
+      levelsEngineRaw = [];
     }
-    console.log("[SMZ] levels generated:", levelsLive.length);
+    console.log("[SMZ] levels generated:", levelsEngineRaw.length);
 
-    // Manual overlap + 4pt guard for LIVE structures
-    levelsLive = filterLiveLevelsByManualAndWidth(levelsLive, manualStructures);
+    // ✅ DEBUG LIST: top institutional candidates before suppression
+    const levels_debug = levelsEngineRaw
+      .filter((z) => (z?.type === "institutional"))
+      .map((z) => {
+        const raw = Number(z?.strength ?? NaN);
+        const conf = confidenceFromInstitutionalStrength(raw);
+        const id = z?.details?.id ?? null;
+        const notes = z?.details?.facts?.notes ?? z?.details?.notes ?? null;
+        const isNeg = (typeof id === "string" && id.includes("|NEG|")) || (typeof notes === "string" && notes.toUpperCase().includes("NEGOTIATED"));
+        return {
+          ...z,
+          strength_raw: Number.isFinite(raw) ? round2(raw) : null,
+          confidence: round2(conf),
+          isNegotiated: !!isNeg,
+        };
+      })
+      .sort((a, b) => Number(b?.strength_raw ?? 0) - Number(a?.strength_raw ?? 0))
+      .slice(0, DEBUG_LEVELS_COUNT);
+
+    // Manual overlap + 4pt guard for LIVE structures (auto only)
+    let levelsLive = filterLiveLevelsByManualAndWidth(levelsEngineRaw, manualStructures);
+
+    // Add strength_raw + confidence to levels output too (truth fields)
+    levelsLive = (levelsLive || []).map((z) => {
+      const raw = Number(z?.strength ?? NaN);
+      const conf = confidenceFromInstitutionalStrength(raw);
+      const id = z?.details?.id ?? null;
+      const notes = z?.details?.facts?.notes ?? z?.details?.notes ?? null;
+      const isNeg = (typeof id === "string" && id.includes("|NEG|")) || (typeof notes === "string" && notes.toUpperCase().includes("NEGOTIATED"));
+      return {
+        ...z,
+        strength_raw: Number.isFinite(raw) ? round2(raw) : null,
+        confidence: round2(conf),
+        isNegotiated: !!isNeg,
+      };
+    });
 
     const stickyCandidates = levelsLive.filter((z) => {
       const t = z?.tier ?? "";
@@ -635,7 +741,8 @@ async function main() {
       return false;
     });
 
-    const structuresSticky = updateStickyFromLive(stickyCandidates, currentPrice, bars1h, manualStructures);
+    const { structures_sticky, structures_sticky_debug } =
+      updateStickyFromLive(stickyCandidates, currentPrice, bars1h, manualStructures);
 
     const payload = {
       ok: true,
@@ -643,12 +750,31 @@ async function main() {
         generated_at_utc: isoNow(),
         current_price: Number.isFinite(currentPrice) ? round2(currentPrice) : null,
         lookback_days: { "30m": DAYS_30M, "1h": DAYS_1H },
+
         manual_file: path.basename(MANUAL_FILE),
         manual_structures_loaded: manualStructures.length,
+
+        // beta policy
+        institutional_min: INSTITUTIONAL_MIN,
+        smz_prime_min: SMZ_PRIME_MIN,
+
+        // debug
+        debug_levels_count: DEBUG_LEVELS_COUNT,
       },
+
+      // live engine output (with truth fields)
       levels: levelsLive,
+
+      // optional debug list for tuning thresholds
+      levels_debug,
+
       pockets_active: [],
-      structures_sticky: structuresSticky,
+
+      // sticky output (manual first, then auto)
+      structures_sticky,
+
+      // optional debug sticky list (manual + top autos before cap)
+      structures_sticky_debug,
     };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
@@ -660,13 +786,19 @@ async function main() {
     console.error("[SMZ] FAILED:", err);
 
     // ✅ fallback still emits manual structures
-    const fallbackStructuresSticky = (manualStructures || []).map((m) => ({
-      type: "institutional",
-      tier: "structure_sticky",
-      priceRange: m.manualRange ?? m.priceRange,
-      strength: 100,
-      details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
-    }));
+    const fallbackStructuresSticky = (manualStructures || []).map((m) => {
+      const isNeg = !!m.isNegotiated;
+      return {
+        type: "institutional",
+        tier: "structure_sticky",
+        priceRange: m.manualRange ?? m.priceRange,
+        strength: 100,
+        strength_raw: 100,
+        confidence: 1,
+        isNegotiated: isNeg,
+        details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
+      };
+    });
 
     const fallback = {
       ok: true,
@@ -675,11 +807,15 @@ async function main() {
         current_price: null,
         manual_file: path.basename(MANUAL_FILE),
         manual_structures_loaded: manualStructures.length,
+        institutional_min: INSTITUTIONAL_MIN,
+        smz_prime_min: SMZ_PRIME_MIN,
         note: "SMZ job error — emitted manual structures only",
       },
       levels: [],
+      levels_debug: [],
       pockets_active: [],
       structures_sticky: fallbackStructuresSticky,
+      structures_sticky_debug: fallbackStructuresSticky,
     };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
