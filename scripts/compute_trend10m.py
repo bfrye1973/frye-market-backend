@@ -1,20 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — compute_trend10m.py (R13.0 — 10m posture refactor: EMA10 primary + EMA8/18 secondary)
-
-WHAT CHANGED (per your request)
-- ✅ PRIMARY posture now uses: Close vs EMA10  (intuitive “above/below 10 EMA”)
-- ✅ SECONDARY posture uses: EMA8 vs EMA18 gap (fast scalp feel)
-- Momentum combo now blends:
-    70% Primary (Close vs EMA10)
-    20% SMI(12/7/5 as before)
-    10% Secondary (EMA8/EMA18)
-- Overall10m scoring now uses PRIMARY ema10_dist_pct (not ema_gap_pct)
-- We keep legacy fields for compatibility:
-    metrics["ema_gap_pct"] still exists (now refers to EMA8/EMA18 gap)
-    metrics["ema_sign"] now refers to PRIMARY EMA10 sign
-- Lux PSI logic unchanged (tightness is displayed; expansion is used for scoring)
+Ferrari Dashboard — compute_trend10m.py (R12.7 Fast Bee Engine, 10m squeeze fix)
 
 Post-processes data/outlook_intraday.json to compute:
 
@@ -71,15 +58,9 @@ SECTOR_ETFS = {
 OFFENSIVE = {"information technology", "consumer discretionary", "communication services", "industrials"}
 DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
 
-# Overall weights (points model)
+# Overall weights (same as 1h/EOD)
 W_EMA, W_MOM, W_BR, W_SQ, W_LIQ, W_RISK = 40, 25, 15, 10, 10, 5
 FULL_EMA_DIST = 0.60
-
-# Momentum combo weights (10m)
-W_PRIMARY = 0.70    # Close vs EMA10 posture
-W_SMI     = 0.20    # SMI(12/7/5)
-W_SECOND  = 0.10    # EMA8 vs EMA18 posture
-
 
 # ------------------------------ Helpers ------------------------------
 
@@ -112,10 +93,7 @@ def save_json(path: str, obj: dict) -> None:
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "compute-trend10m/2.0", "Cache-Control": "no-store"},
-    )
+    req = urllib.request.Request(url, headers={"User-Agent":"compute-trend10m/1.0","Cache-Control":"no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -142,17 +120,16 @@ def fetch_polygon_bars(sym: str, lookback_days: int = 5) -> List[dict]:
                 "open": float(r.get("o", 0)),
                 "high": float(r.get("h", 0)),
                 "low":  float(r.get("l", 0)),
-                "close": float(r.get("c", 0)),
+                "close":float(r.get("c", 0)),
                 "volume": float(r.get("v", 0)),
             })
         except Exception:
             continue
-
-    # drop in-flight 10m bar
+    # drop in-flight bar
     if out:
         bucket = 600
         now = int(time.time())
-        cur = (now // bucket) * bucket
+        cur  = (now // bucket) * bucket
         if (out[-1]["time"] // bucket) * bucket == cur:
             out = out[:-1]
     return out
@@ -162,7 +139,7 @@ def ema_series(values: List[float], span: int) -> List[float]:
     out: List[float] = []
     e: Optional[float] = None
     for v in values:
-        e = v if e is None else e + k * (v - e)
+        e = v if e is None else e + k*(v - e)
         out.append(e)
     return out
 
@@ -179,24 +156,19 @@ def smi_kd(H: List[float], L: List[float], C: List[float],
     n = len(C)
     if n < max(k_len, d_len) + 6:
         return [], []
-
-    HH = []
-    LL = []
+    HH=[]; LL=[]
     for i in range(n):
         i0 = max(0, i - (k_len - 1))
-        HH.append(max(H[i0:i+1]))
-        LL.append(min(L[i0:i+1]))
-
-    mid = [(HH[i] + LL[i]) / 2.0 for i in range(n)]
-    rng = [(HH[i] - LL[i]) for i in range(n)]
-    m = [C[i] - mid[i] for i in range(n)]
+        HH.append(max(H[i0:i+1])); LL.append(min(L[i0:i+1]))
+    mid=[(HH[i]+LL[i])/2.0 for i in range(n)]
+    rng=[(HH[i]-LL[i]) for i in range(n)]
+    m=[C[i]-mid[i] for i in range(n)]
 
     def ema_vals(vals, span):
         k = 2.0 / (span + 1.0)
-        e = None
-        out = []
+        e=None; out=[]
         for v in vals:
-            e = v if e is None else e + k * (v - e)
+            e = v if e is None else e + k*(v - e)
             out.append(e)
         return out
 
@@ -205,79 +177,62 @@ def smi_kd(H: List[float], L: List[float], C: List[float],
     r1 = ema_vals(rng, k_len)
     r2 = ema_vals(r1, ema_len)
 
-    K = []
+    K=[]
     for i in range(n):
-        denom = (r2[i] or 0.0) / 2.0
-        v = 0.0 if denom == 0 else 100.0 * (m2[i] / denom)
-        if not (v == v):
-            v = 0.0
-        K.append(max(-100.0, min(100.0, v)))
+        denom = (r2[i] or 0.0)/2.0
+        v = 0.0 if denom==0 else 100.0*(m2[i]/denom)
+        if not (v==v): v = 0.0
+        K.append(max(-100.0,min(100.0,v)))
 
-    D = []
-    k = 2.0 / (d_len + 1.0)
-    e = None
+    D=[]
+    k = 2.0/(d_len+1.0)
+    e=None
     for v in K:
-        e = v if e is None else e + k * (v - e)
+        e = v if e is None else e + k*(v - e)
         D.append(e)
     return K, D
 
 def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
-    if not closes or len(closes) < max(5, length + 2):
+    if not closes or len(closes) < max(5, length+2):
         return None
     mx = mn = None
     diffs: List[float] = []
     for src in map(float, closes):
-        mx = src if mx is None else max(mx - (mx - src) / conv, src)
-        mn = src if mn is None else min(mn + (src - mn) / conv, src)
+        mx = src if mx is None else max(mx - (mx - src)/conv, src)
+        mn = src if mn is None else min(mn + (src - mn)/conv, src)
         span = max(mx - mn, 1e-12)
         diffs.append(math.log(span))
-
     n = length
     xs = list(range(n))
     win = diffs[-n:]
     if len(win) < n:
         return None
-    xbar = sum(xs) / n
-    ybar = sum(win) / n
-    num = sum((x - xbar) * (y - ybar) for x, y in zip(xs, win))
-    den = (sum((x - xbar) ** 2 for x in xs) * sum((y - ybar) ** 2 for y in win)) or 1.0
+    xbar = sum(xs)/n
+    ybar = sum(win)/n
+    num = sum((x-xbar)*(y-ybar) for x,y in zip(xs,win))
+    den = (sum((x-xbar)**2 for x in xs)*sum((y-ybar)**2 for y in win)) or 1.0
     r = num / math.sqrt(den)
-    psi = -50.0 * r + 50.0
-    return float(clamp(psi, 0.0, 100.0))
+    psi = -50.0*r + 50.0
+    return float(clamp(psi,0.0,100.0))
 
 def lin_points(pct_val: float, weight: int) -> int:
     return int(round(weight * ((float(pct_val) - 50.0) / 50.0)))
 
-def compute_overall10m(
-    ema_sign: int,
-    ema10_dist_pct: float,
-    momentum_pct: float,
-    breadth_pct: float,
-    squeeze_expansion_pct: float,
-    liquidity_pct: float,
-    riskon_pct: float
-) -> Tuple[str, int, dict]:
+def compute_overall10m(ema_sign: int, ema10_dist_pct: float,
+                       momentum_pct: float, breadth_pct: float,
+                       squeeze_expansion_pct: float, liquidity_pct: float,
+                       riskon_pct: float) -> Tuple[str, int, dict]:
     dist_unit = clamp(ema10_dist_pct / FULL_EMA_DIST, -1.0, 1.0)
     ema_pts = int(round(abs(dist_unit) * W_EMA)) * (1 if ema_sign > 0 else -1 if ema_sign < 0 else 0)
-
     m_pts  = lin_points(momentum_pct, W_MOM)
     b_pts  = lin_points(breadth_pct,  W_BR)
     sq_pts = lin_points(squeeze_expansion_pct, W_SQ)
     lq_pts = lin_points(min(100.0, clamp(liquidity_pct, 0.0, 120.0)), W_LIQ)
     ro_pts = lin_points(riskon_pct, W_RISK)
-
-    score = int(clamp(50 + ema_pts + m_pts + b_pts + sq_pts + lq_pts + ro_pts, 0, 100))
-    state = "bull" if (ema_sign > 0 and score >= 60) else ("bear" if (ema_sign < 0 and score < 60) else "neutral")
-    comps = {
-        "ema10": ema_pts,
-        "momentum": m_pts,
-        "breadth": b_pts,
-        "squeeze": sq_pts,
-        "liquidity": lq_pts,
-        "riskOn": ro_pts
-    }
+    score  = int(clamp(50 + ema_pts + m_pts + b_pts + sq_pts + lq_pts + ro_pts, 0, 100))
+    state  = "bull" if (ema_sign > 0 and score >= 60) else ("bear" if (ema_sign < 0 and score < 60) else "neutral")
+    comps  = {"ema10": ema_pts, "momentum": m_pts, "breadth": b_pts, "squeeze": sq_pts, "liquidity": lq_pts, "riskOn": ro_pts}
     return state, score, comps
-
 
 # ------------------------------ Core logic ------------------------------
 
@@ -290,6 +245,21 @@ def compute_10m():
     metrics = j.get("metrics") or {}
     intraday = j.get("intraday") or {}
     cards = j.get("sectorCards") or []
+    prev_js = {}
+    try:
+        prev_js = fetch_json(INTRADAY_URL_DEFAULT) or {}
+    except Exception:
+        prev_js = {}
+
+    # Aggregate sector NH/NL/UP/DOWN for slow breadth/momentum
+    NH = NL = UP = DN = 0.0
+    for c in cards:
+        NH += float(c.get("nh", 0))
+        NL += float(c.get("nl", 0))
+        UP += float(c.get("up", 0))
+        DN += float(c.get("down", 0))
+    breadth_slow = round(pct(NH, NH+NL), 2) if (NH+NL) > 0 else 50.0
+    momentum_slow = round(pct(UP, UP+DN), 2) if (UP+DN) > 0 else 50.0
 
     # Fast breadth via sector ETFs (EMA10>20 + bar up)
     etf_bars: Dict[str, List[dict]] = {}
@@ -300,156 +270,130 @@ def compute_10m():
     for sym, bars in etf_bars.items():
         if len(bars) < 2:
             continue
-        C_etf = [b["close"] for b in bars]
-        O_etf = [b["open"]  for b in bars]
-        e10_etf = ema_series(C_etf, 10)
-        e20_etf = ema_series(C_etf, 20)
+        C = [b["close"] for b in bars]
+        O = [b["open"]  for b in bars]
+        e10 = ema_series(C, 10)
+        e20 = ema_series(C, 20)
         total += 1
-        if e10_etf[-1] > e20_etf[-1]:
+        if e10[-1] > e20[-1]:
             aligned += 1
-        if C_etf[-1] > O_etf[-1]:
+        if C[-1] > O[-1]:
             barup += 1
 
     align_pct = pct(aligned, total)
     barup_pct = pct(barup, total)
-    breadth_fast = clamp(0.60 * align_pct + 0.40 * barup_pct, 0.0, 100.0)
-    metrics["breadth_align_fast_pct"] = round(align_pct, 2)
-    metrics["breadth_10m_pct"] = round(breadth_fast, 2)
+    breadth_fast = clamp(0.60*align_pct + 0.40*barup_pct, 0.0, 100.0)
+    metrics["breadth_align_fast_pct"] = round(align_pct,2)
+    metrics["breadth_10m_pct"] = round(breadth_fast,2)
 
     # SPY 10m bars
     spy_10m = fetch_polygon_bars("SPY", lookback_days=5)
-
     ema_sign = 0
-    ema10_dist_pct = 0.0          # PRIMARY dist (Close vs EMA10)
-    ema818_gap_pct = 0.0          # SECONDARY dist (EMA8 vs EMA18)
-    primary_posture = 50.0        # PRIMARY posture (0..100)
-    secondary_posture = 50.0      # SECONDARY posture (0..100)
-    smi10 = None
+    ema_gap_pct = 0.0
     momentum_combo_10m = 50.0
+    e8 = e18 = []
+    k10 = d10 = []
 
-    if len(spy_10m) >= 25:
+    if len(spy_10m) >= 6:
         H = [b["high"] for b in spy_10m]
         L = [b["low"]  for b in spy_10m]
         C = [b["close"] for b in spy_10m]
 
-        # ✅ PRIMARY: Close vs EMA10
-        e10 = ema_series(C, 10)
-        ema10 = e10[-1]
-        close = C[-1]
-        ema10_dist_pct = 0.0 if ema10 == 0 else 100.0 * (close - ema10) / ema10
-        ema_sign = 1 if ema10_dist_pct > 0 else (-1 if ema10_dist_pct < 0 else 0)
-        primary_posture = clamp(
-            50.0 + 50.0 * clamp(ema10_dist_pct / FULL_EMA_DIST, -1.0, 1.0),
-            0.0, 100.0
-        )
-
-        # ✅ SECONDARY: EMA8 vs EMA18 (fast feel)
         e8  = ema_series(C, 8)
         e18 = ema_series(C, 18)
-        ema818_gap_pct = 0.0 if e18[-1] == 0 else 100.0 * (e8[-1] - e18[-1]) / e18[-1]
-        secondary_posture = clamp(
-            50.0 + 50.0 * clamp(ema818_gap_pct / FULL_EMA_DIST, -1.0, 1.0),
-            0.0, 100.0
-        )
+        ema_gap_pct = 0.0 if e18[-1] == 0 else 100.0 * (e8[-1] - e18[-1]) / e18[-1]
+        ema_sign = 1 if e8[-1] > e18[-1] else (-1 if e8[-1] < e18[-1] else 0)
 
-        # SMI(10m) (unchanged settings)
+        # EMA posture
+        ema_posture = clamp(50.0 + 50.0 * clamp(ema_gap_pct / FULL_EMA_DIST, -1.0, 1.0), 0.0, 100.0)
+
+        # SMI(10m)
         k10, d10 = smi_kd(H, L, C, k_len=12, d_len=7, ema_len=5)
+        smi10 = None
         if k10 and d10:
-            smi10 = clamp(50.0 + 0.5 * (k10[-1] - d10[-1]), 0.0, 100.0)
-
-        # ✅ Momentum combo (primary dominates; secondary is a small “speed” add)
+            smi10 = clamp(50.0 + 0.5*(k10[-1] - d10[-1]), 0.0, 100.0)
         if smi10 is None:
-            momentum_combo_10m = clamp(
-                0.85 * primary_posture + 0.15 * secondary_posture,
-                0.0, 100.0
-            )
+            momentum_combo_10m = ema_posture
         else:
-            momentum_combo_10m = clamp(
-                W_PRIMARY * primary_posture + W_SMI * smi10 + W_SECOND * secondary_posture,
-                0.0, 100.0
-            )
+            momentum_combo_10m = clamp(0.70*ema_posture + 0.30*smi10, 0.0, 100.0)
 
-    # Store momentum metrics
-    metrics["momentum_10m_pct"] = round(momentum_combo_10m, 2)
-    metrics["momentum_combo_10m_pct"] = round(momentum_combo_10m, 2)
+    metrics["momentum_10m_pct"]       = round(momentum_combo_10m,2)
+    metrics["momentum_combo_10m_pct"] = round(momentum_combo_10m,2)
+    metrics["ema_sign"]   = int(ema_sign)
+    metrics["ema_gap_pct"]= round(ema_gap_pct,3)
 
-    # Store EMA metrics (keep legacy field names where possible)
-    metrics["ema_sign"] = int(ema_sign)  # now PRIMARY sign (Close vs EMA10)
-    metrics["ema10_dist_pct"] = round(float(ema10_dist_pct), 4)
-    metrics["ema10_posture_10m_pct"] = round(float(primary_posture), 2)
-
-    metrics["ema_gap_pct"] = round(float(ema818_gap_pct), 4)  # legacy name; now EMA8/EMA18 gap
-    metrics["ema8_ema18_posture_10m_pct"] = round(float(secondary_posture), 2)
-
-    # Lux PSI Squeeze 10m (unchanged)
+    # Lux PSI Squeeze 10m
+    # EOD uses PSI directly as squeezePct; here we mirror that:
+    # - squeeze_psi_10m_pct   = PSI (tightness 0..100)
+    # - squeeze_expansion_pct = 100 - PSI
+    # - squeeze_pct           = PSI   (so the tile acts like EOD)
     squeeze_psi_10m = 50.0
     squeeze_exp = 50.0
     if len(spy_10m) >= 25:
-        Cc = [b["close"] for b in spy_10m]
-        psi = lux_psi_from_closes(Cc, conv=50, length=20)
-        if isinstance(psi, (int, float)):
+        C = [b["close"] for b in spy_10m]
+        psi = lux_psi_from_closes(C, conv=50, length=20)
+        if isinstance(psi,(int,float)):
             squeeze_psi_10m = clamp(psi, 0.0, 100.0)
             squeeze_exp = clamp(100.0 - squeeze_psi_10m, 0.0, 100.0)
 
-    metrics["squeeze_psi_10m_pct"] = round(squeeze_psi_10m, 2)
-    metrics["squeeze_expansion_pct"] = round(squeeze_exp, 2)
-    metrics["squeeze_pct"] = metrics["squeeze_psi_10m_pct"]  # display tightness
+    metrics["squeeze_psi_10m_pct"]   = round(squeeze_psi_10m,2)
+    metrics["squeeze_expansion_pct"] = round(squeeze_exp,2)
+    # IMPORTANT: 10m tile now shows PSI like EOD; expansion still available in squeeze_expansion_pct
+    metrics["squeeze_pct"]           = metrics["squeeze_psi_10m_pct"]
 
-    # Liquidity & Volatility 10m (unchanged)
+    # Liquidity & Volatility 10m
     liquidity_psi = 50.0
     volatility_pct = 0.0
     if len(spy_10m) >= 2:
         V = [b["volume"] for b in spy_10m]
-        v3 = ema_last(V, 3)
+        v3  = ema_last(V, 3)
         v12 = ema_last(V, 12)
         liquidity_psi = 0.0 if not v12 or v12 <= 0 else clamp(100.0 * (v3 / v12), 0.0, 200.0)
-
-        Cc = [b["close"] for b in spy_10m]
-        Hh = [b["high"] for b in spy_10m]
-        Ll = [b["low"] for b in spy_10m]
-        trs = tr_series(Hh, Ll, Cc)
+        C = [b["close"] for b in spy_10m]
+        H = [b["high"]  for b in spy_10m]
+        L = [b["low"]   for b in spy_10m]
+        trs = tr_series(H, L, C)
         atr3 = ema_last(trs, 3) if trs else None
-        volatility_pct = 0.0 if not atr3 or Cc[-1] <= 0 else max(0.0, 100.0 * atr3 / Cc[-1])
+        volatility_pct = 0.0 if not atr3 or C[-1] <= 0 else max(0.0, 100.0*atr3/C[-1])
 
-    metrics["liquidity_psi"] = round(liquidity_psi, 2)
-    metrics["volatility_pct"] = round(volatility_pct, 3)
+    metrics["liquidity_psi"]  = round(liquidity_psi,2)
+    metrics["volatility_pct"] = round(volatility_pct,3)
 
-    # SectorDir10m & RiskOn10m from sectorCards (unchanged)
+    # SectorDir10m & RiskOn10m from sectorCards
     rising_good = rising_total = 0
     for c in cards:
         bp = c.get("breadth_pct")
         mp = c.get("momentum_pct")
-        if isinstance(bp, (int, float)) and isinstance(mp, (int, float)):
+        if isinstance(bp,(int,float)) and isinstance(mp,(int,float)):
             rising_total += 1
             if bp >= 55.0 and mp >= 55.0:
                 rising_good += 1
-    rising_pct = round(pct(rising_good, rising_total), 2) if rising_total > 0 else 50.0
+    rising_pct = round(pct(rising_good, rising_total),2) if rising_total>0 else 50.0
 
     by = {(c.get("sector") or "").strip().lower(): c for c in cards}
     ro_score = ro_den = 0
     for s in OFFENSIVE:
         bp = by.get(s, {}).get("breadth_pct")
-        if isinstance(bp, (int, float)):
+        if isinstance(bp,(int,float)):
             ro_den += 1
             if bp >= 55.0:
                 ro_score += 1
     for s in DEFENSIVE:
         bp = by.get(s, {}).get("breadth_pct")
-        if isinstance(bp, (int, float)):
+        if isinstance(bp,(int,float)):
             ro_den += 1
             if bp <= 45.0:
                 ro_score += 1
-    risk_on_10m = round(pct(ro_score, ro_den), 2) if ro_den > 0 else 50.0
+    risk_on_10m = round(pct(ro_score, ro_den),2) if ro_den>0 else 50.0
     metrics["riskOn_10m_pct"] = risk_on_10m
 
-    # Overall10m composite (points model)
-    # ✅ EMA points now use PRIMARY ema10_dist_pct
+    # Overall10m composite (still uses expansion for scoring)
     state, score, comps = compute_overall10m(
         ema_sign=ema_sign,
-        ema10_dist_pct=ema10_dist_pct,
+        ema10_dist_pct=ema_gap_pct,
         momentum_pct=momentum_combo_10m,
         breadth_pct=breadth_fast,
-        squeeze_expansion_pct=squeeze_exp,  # scoring uses expansion
+        squeeze_expansion_pct=squeeze_exp,
         liquidity_pct=liquidity_psi,
         riskon_pct=risk_on_10m,
     )
@@ -488,13 +432,11 @@ def compute_10m():
     save_json(INTRADAY_PATH, j)
     print(
         f"[10m] breadth_fast={breadth_fast:.2f} momCombo={momentum_combo_10m:.2f} "
-        f"ema10Dist={ema10_dist_pct:.3f}% ema818Gap={ema818_gap_pct:.3f}% "
         f"squeezePsi={squeeze_psi_10m:.2f} squeezeExp={squeeze_exp:.2f} "
         f"liqPsi={liquidity_psi:.2f} volPct={volatility_pct:.3f} "
         f"riskOn={risk_on_10m:.2f} risingPct={rising_pct:.2f} overall={state}/{score}",
         flush=True,
     )
-
 
 # ------------------------------ Main ------------------------------
 
