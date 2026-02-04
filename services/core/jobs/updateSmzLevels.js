@@ -1,9 +1,16 @@
 // services/core/jobs/updateSmzLevels.js
-// Engine 1 SMZ job (stable version)
+// Engine 1 SMZ job (stable version + negotiated auto-detection)
 // - Runs smzEngine (LOCKED — DO NOT MODIFY)
 // - Updates sticky registry (AUTO ONLY)
 // - Loads manual structures from smz-manual-structures.json (SOURCE OF TRUTH)
 // - Writes smz-levels.json for frontend
+//
+// NEW:
+// ✅ AUTO-detect NEGOTIATED zones inside institutional parents
+// - Uses acceptance density tightening already computed
+// - Emits new |NEG| zones (turquoise overlay) as separate objects
+// - Does NOT store negotiated zones in registry (derived each run)
+// - Does NOT allow negotiated to render yellow (isNegotiated flag)
 //
 // LOCKED REQUIREMENTS (per user):
 // ✅ smzEngine.js untouched
@@ -14,13 +21,6 @@
 // ✅ AUTO institutional max width = 4.0 pts (live + sticky autos)
 // ✅ manual structures ALWAYS emitted in structures_sticky (not band-limited)
 // ✅ if engine compute fails, still emit manual structures (never go blind)
-//
-// NEW FIX (you requested):
-// ✅ "Acceptance Density Tightening":
-// - If engine produces a wide-ish institutional zone, tighten the DISPLAY range
-//   to the densest close-cluster inside that zone (what traders see as true consolidation).
-// - This fixes cases like 689.30–692.83 showing as a blob when the true consolidation is 690–692.32.
-// - Does NOT change detection. Only changes DISPLAY range used by the chart overlay.
 
 import fs from "fs";
 import path from "path";
@@ -52,13 +52,6 @@ const STICKY_EXIT_MAX_STORE = 8;
 
 const STICKY_INCLUDE_MICRO_MIN_STRENGTH = 80;
 
-// One-time backfill
-const STICKY_BACKFILL_ONCE = true;
-const STICKY_BACKFILL_TOUCHES_MIN = 10;
-const STICKY_BACKFILL_BUCKET_STEP = 0.25;
-const STICKY_BACKFILL_BUCKET_SIZE = 1.0;
-const STICKY_BACKFILL_MAX_NEW = 30;
-
 // ✅ Institutional “monster” guard (AUTO ONLY)
 const STRUCT_AUTO_MAX_WIDTH_PTS = 4.0;
 
@@ -76,7 +69,6 @@ function clamp01(x) {
   return Math.max(0, Math.min(1, n));
 }
 
-// Confidence mapping for institutional strength 75..100 => 0..1
 function confidenceFromInstitutionalStrength(strength) {
   const s = Number(strength);
   if (!Number.isFinite(s)) return 0;
@@ -162,18 +154,14 @@ function rangeFromPriceRange(pr) {
 }
 
 /* -------------------------
-   ✅ Acceptance Density Tightening (DISPLAY ONLY)
-   -------------------------
-   Idea:
-   - Inside the wider zone, find where CLOSES cluster most tightly (body acceptance).
-   - Return a tighter band (typically 1.5–2.5 points) if it covers enough closes.
-*/
-const DENSITY_STEP = 0.25;          // bucket step
-const DENSITY_LOOKBACK_1H_BARS = 90; // ~3–4 trading days of 1h bars
-const DENSITY_MIN_CLOSES = 10;       // need enough samples
-const DENSITY_TARGET_COVERAGE = 0.55; // cover 55% of in-zone closes
-const DENSITY_MAX_TIGHT_WIDTH = 2.6;  // your “true consolidation” preference
-const DENSITY_MIN_IMPROVEMENT = 0.6;  // must shrink meaningfully vs original
+   Acceptance Density Tightening (display core)
+   ------------------------- */
+const DENSITY_STEP = 0.25;
+const DENSITY_LOOKBACK_1H_BARS = 90;
+const DENSITY_MIN_CLOSES = 10;
+const DENSITY_TARGET_COVERAGE = 0.55;
+const DENSITY_MAX_TIGHT_WIDTH = 2.6;
+const DENSITY_MIN_IMPROVEMENT = 0.6;
 
 function tightenDisplayRangeByCloseDensity(bars1h, pr) {
   const r = rangeFromPriceRange(pr);
@@ -183,13 +171,11 @@ function tightenDisplayRangeByCloseDensity(bars1h, pr) {
   const lo = r.lo;
   const width = r.width;
 
-  // Only try tightening if zone is “kind of wide” but still valid (<=4)
   if (!(width > 1.4 && width <= STRUCT_AUTO_MAX_WIDTH_PTS + 0.25)) return null;
 
   const slice = Array.isArray(bars1h) ? bars1h.slice(-DENSITY_LOOKBACK_1H_BARS) : [];
   if (slice.length < 30) return null;
 
-  // Collect closes inside the zone
   const closes = [];
   for (const b of slice) {
     const c = Number(b?.close);
@@ -198,16 +184,13 @@ function tightenDisplayRangeByCloseDensity(bars1h, pr) {
   }
   if (closes.length < DENSITY_MIN_CLOSES) return null;
 
-  // Histogram closes into 0.25 buckets
-  const bins = new Map(); // key -> count
+  const bins = new Map();
   const snap = (x) => Math.round(x / DENSITY_STEP) * DENSITY_STEP;
-
   for (const c of closes) {
     const k = snap(c);
     bins.set(k, (bins.get(k) ?? 0) + 1);
   }
 
-  // Find peak bin
   let peakK = null;
   let peakCount = -1;
   for (const [k, count] of bins.entries()) {
@@ -218,7 +201,6 @@ function tightenDisplayRangeByCloseDensity(bars1h, pr) {
   }
   if (peakK == null) return null;
 
-  // Expand around peak until coverage reached OR max tight width exceeded
   const keys = Array.from(bins.keys()).sort((a, b) => a - b);
   const idx = keys.indexOf(peakK);
   if (idx < 0) return null;
@@ -242,7 +224,6 @@ function tightenDisplayRangeByCloseDensity(bars1h, pr) {
     const leftCount = canLeft ? (bins.get(nextLeftK) ?? 0) : -1;
     const rightCount = canRight ? (bins.get(nextRightK) ?? 0) : -1;
 
-    // Prefer side with higher density
     if (rightCount > leftCount) {
       right++;
       covered += rightCount;
@@ -256,10 +237,8 @@ function tightenDisplayRangeByCloseDensity(bars1h, pr) {
 
   const newLo = round2(keys[left]);
   const newHi = round2(keys[right] + DENSITY_STEP);
-
   const newWidth = newHi - newLo;
 
-  // Must be a meaningful improvement and still a valid range
   if (!(newHi > newLo)) return null;
   if (newWidth > DENSITY_MAX_TIGHT_WIDTH) return null;
   if ((width - newWidth) < DENSITY_MIN_IMPROVEMENT) return null;
@@ -370,7 +349,7 @@ function filterLiveLevelsByManualAndWidth(levelsLive, manualStructures) {
   return kept;
 }
 
-/* ---------------- Sticky store (AUTO ONLY) ---------------- */
+/* ---------------- Sticky registry (AUTO ONLY) ---------------- */
 
 function loadSticky() {
   try {
@@ -413,221 +392,44 @@ function structureKeyFromRange(hi, lo) {
   return `SPY|mixed|hi=${qHi?.toFixed(2)}|lo=${qLo?.toFixed(2)}`;
 }
 
-// Confirm exits storage
-function recordExitEvent(existing, facts, nowIso) {
-  const exitBars = Number(facts?.exitBars1h ?? 0);
-  const exitSide = facts?.exitSide1h ?? null;
-  const anchorEndTime = Number(facts?.anchorEndTime ?? NaN);
+/* ---------------- NEW: build AUTO negotiated zones ----------------
+   We create a derived object that looks like a manual NEG zone:
+   - id includes |NEG|
+   - isNegotiated true
+   - priceRange = acceptance.displayPriceRange
+*/
+function buildAutoNegotiatedZone({ parentId, parentStrength, parentConfidence, acceptance }) {
+  const pr = acceptance?.displayPriceRange;
+  if (!Array.isArray(pr) || pr.length !== 2) return null;
 
-  if (!(exitBars >= 2 && (exitSide === "above" || exitSide === "below") && Number.isFinite(anchorEndTime))) return;
+  const hi = Number(pr[0]);
+  const lo = Number(pr[1]);
+  if (!Number.isFinite(hi) || !Number.isFinite(lo) || !(hi > lo)) return null;
 
-  existing.exits = Array.isArray(existing.exits) ? existing.exits : [];
-  if (existing.exits.some((e) => Number(e?.anchorEndTime) === anchorEndTime)) return;
+  const key = `AUTO|SPY|NEG|${lo.toFixed(2)}-${hi.toFixed(2)}|PARENT=${parentId}`;
 
-  existing.exits.push({ side: exitSide, exitBars, anchorEndTime, recordedUtc: nowIso });
-  existing.exits.sort((a, b) => Number(b.anchorEndTime) - Number(a.anchorEndTime));
-  existing.exits = existing.exits.slice(0, STICKY_EXIT_MAX_STORE);
-}
-
-function countDistinctExitEvents(exits) {
-  const arr = (Array.isArray(exits) ? exits : [])
-    .filter((e) => Number.isFinite(Number(e?.anchorEndTime)))
-    .slice()
-    .sort((a, b) => Number(a.anchorEndTime) - Number(b.anchorEndTime));
-
-  if (!arr.length) return 0;
-
-  let count = 1;
-  let lastT = Number(arr[0].anchorEndTime);
-  for (let i = 1; i < arr.length; i++) {
-    const t = Number(arr[i].anchorEndTime);
-    if (!Number.isFinite(t)) continue;
-    if (t - lastT >= STICKY_EXIT_MIN_SEP_SEC) {
-      count++;
-      lastT = t;
-    }
-  }
-  return count;
-}
-
-// Backfill kept minimal (auto only)
-function runStickyBackfillOnce(store, bars1h) {
-  const meta = store.meta ?? {};
-  if (meta.backfill_done_utc) return store;
-
-  // Keep behavior: mark done without heavy logic here (you already had backfill)
-  store.meta = { ...(store.meta ?? {}), backfill_done_utc: isoNow(), backfill_added: 0 };
-  return store;
-}
-
-function updateStickyFromLive(stickyCandidates, currentPrice, bars1hAll, bars30mAll, manualStructures) {
-  let store = stripManualFromRegistryStore(loadSticky());
-
-  if (STICKY_BACKFILL_ONCE && Array.isArray(bars1hAll) && bars1hAll.length > 100) {
-    store = runStickyBackfillOnce(store, bars1hAll);
-    store = stripManualFromRegistryStore(store);
-  }
-
-  const list = (store.structures || []).slice();
-  const nowIso = isoNow();
-
-  const byKey = new Map();
-  for (const s of list) if (s?.structureKey) byKey.set(s.structureKey, s);
-
-  // update autos from live candidates (do not overlap manual)
-  for (const z of stickyCandidates || []) {
-    const pr = z?.priceRange;
-    if (!Array.isArray(pr) || pr.length !== 2) continue;
-
-    const hi = Number(pr[0]);
-    const lo = Number(pr[1]);
-    if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi <= lo) continue;
-
-    if (manualOverlapsAny(manualStructures, hi, lo)) continue;
-    if ((hi - lo) > STRUCT_AUTO_MAX_WIDTH_PTS) continue;
-
-    const key = structureKeyFromRange(hi, lo);
-    const existing = byKey.get(key);
-
-    if (existing) {
-      existing.lastSeenUtc = nowIso;
-      existing.timesSeen = Number(existing.timesSeen ?? 0) + 1;
-      existing.maxStrengthSeen = Math.max(Number(existing.maxStrengthSeen ?? 0), Number(z.strength ?? 0));
-      existing.status = "active";
-
-      recordExitEvent(existing, z?.details?.facts ?? {}, nowIso);
-
-      const distinct = countDistinctExitEvents(existing.exits);
-      existing.distinctExitCount = distinct;
-      if (!existing.stickyConfirmed && distinct >= STICKY_CONFIRM_EXITS_REQUIRED) {
-        existing.stickyConfirmed = true;
-        existing.confirmedUtc = nowIso;
-      }
-    } else {
-      const entry = {
-        structureKey: key,
-        priceRange: [round2(hi), round2(lo)],
-        firstSeenUtc: nowIso,
-        lastSeenUtc: nowIso,
-        timesSeen: 1,
-        maxStrengthSeen: Number(z.strength ?? 0),
-        status: "active",
-        stickyConfirmed: false,
-        confirmedUtc: null,
-        exits: [],
-        distinctExitCount: 0,
-      };
-
-      recordExitEvent(entry, z?.details?.facts ?? {}, nowIso);
-
-      const distinct = countDistinctExitEvents(entry.exits);
-      entry.distinctExitCount = distinct;
-      if (distinct >= STICKY_CONFIRM_EXITS_REQUIRED) {
-        entry.stickyConfirmed = true;
-        entry.confirmedUtc = nowIso;
-      }
-
-      list.push(entry);
-      byKey.set(key, entry);
-    }
-  }
-
-  // Archive unconfirmed autos outside band after N days
-  const bandLo = Number.isFinite(currentPrice) ? currentPrice - STICKY_KEEP_WITHIN_BAND_PTS : -Infinity;
-  const bandHi = Number.isFinite(currentPrice) ? currentPrice + STICKY_KEEP_WITHIN_BAND_PTS : Infinity;
-  const cutoffMs = Date.now() - STICKY_ARCHIVE_DAYS * 24 * 3600 * 1000;
-
-  for (const s of list) {
-    if (!s || s.status === "archived") continue;
-    if (s.stickyConfirmed) continue;
-
-    const pr = s.priceRange;
-    if (!Array.isArray(pr) || pr.length !== 2) continue;
-
-    const hi = Math.max(Number(pr[0]), Number(pr[1]));
-    const lo = Math.min(Number(pr[0]), Number(pr[1]));
-    const lastSeenMs = Date.parse(s.lastSeenUtc || "");
-    const old = Number.isFinite(lastSeenMs) ? lastSeenMs < cutoffMs : false;
-    const inBand = hi >= bandLo && lo <= bandHi;
-
-    if (old && !inBand) {
-      s.status = "archived";
-      s.archivedUtc = nowIso;
-    }
-  }
-
-  const activeInBandAutos = list
-    .filter((s) => s?.status === "active")
-    .filter((s) => {
-      const pr = s.priceRange;
-      if (!Array.isArray(pr) || pr.length !== 2) return false;
-      const hi = Math.max(Number(pr[0]), Number(pr[1]));
-      const lo = Math.min(Number(pr[0]), Number(pr[1]));
-      if (!(hi >= bandLo && lo <= bandHi)) return false;
-      return !manualOverlapsAny(manualStructures, hi, lo);
-    });
-
-  const autosSorted = activeInBandAutos.slice().sort((a, b) => {
-    const sa = Number(b.maxStrengthSeen ?? 0) - Number(a.maxStrengthSeen ?? 0);
-    if (sa !== 0) return sa;
-    return Number(b.timesSeen ?? 0) - Number(a.timesSeen ?? 0);
-  });
-
-  const autosWithinBand = autosSorted.slice(0, STICKY_MAX_WITHIN_BAND);
-
-  // Save registry (AUTO ONLY)
-  const newStore = {
-    ok: true,
-    meta: { ...(store.meta ?? {}), updated_at_utc: nowIso },
-    structures: list.filter((s) => !isManualLike(s)),
-  };
-  saveSticky(newStore);
-
-  // Manual emitted first
-  const emittedManual = (manualStructures || []).map((m) => {
-    const isNeg = !!m.isNegotiated;
-    const pr = m.manualRange ?? m.priceRange;
-    return {
-      type: "institutional",
-      tier: "structure_sticky",
-      priceRange: pr,
-      displayPriceRange: pr,
-      strength: 100,
-      strength_raw: 100,
-      confidence: 1,
-      isNegotiated: isNeg,
-      details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
-    };
-  });
-
-  // Autos emitted next
-  const emittedAutos = autosWithinBand.map((s) => {
-    const raw = round2(Number(s.maxStrengthSeen ?? 0));
-    const conf = round2(confidenceFromInstitutionalStrength(raw));
-
-    // ✅ apply acceptance tightening for DISPLAY only
-    const tight = tightenDisplayRangeByCloseDensity(bars1hAll, s.priceRange);
-
-    return {
-      type: "institutional",
-      tier: "structure_sticky",
-      priceRange: s.priceRange,
-      displayPriceRange: tight?.displayPriceRange ?? s.priceRange,
-      strength: raw,
-      strength_raw: raw,
-      confidence: conf,
-      isNegotiated: false,
-      details: {
-        id: s.structureKey,
-        facts: {
-          sticky: s,
-          ...(tight ? { acceptanceTightened: true, acceptance: tight } : {}),
+  return {
+    type: "institutional",
+    tier: "structure_sticky",
+    priceRange: [round2(hi), round2(lo)],
+    displayPriceRange: [round2(hi), round2(lo)],
+    strength: parentStrength,
+    strength_raw: parentStrength,
+    confidence: parentConfidence,
+    isNegotiated: true,
+    details: {
+      id: key,
+      facts: {
+        negotiated: {
+          source: "auto_detected",
+          parentId,
+          coverage: acceptance.coverage,
+          closesInZone: acceptance.closesInZone,
+          displayWidthPts: acceptance.displayWidthPts,
         },
       },
-    };
-  });
-
-  return [...emittedManual, ...emittedAutos];
+    },
+  };
 }
 
 /* ---------------- main ---------------- */
@@ -656,10 +458,9 @@ async function main() {
       levelsEngineRaw = [];
     }
 
-    // filter live levels by manual overlap + width guard
     let levelsLive = filterLiveLevelsByManualAndWidth(levelsEngineRaw, manualStructures);
 
-    // add truth fields + negotiated marker + display tightening for LIVE structures
+    // add truth fields + negotiated marker + acceptance tightening
     levelsLive = (levelsLive || []).map((z) => {
       const raw = Number(z?.strength ?? NaN);
       const conf = confidenceFromInstitutionalStrength(raw);
@@ -685,7 +486,7 @@ async function main() {
       };
     });
 
-    // sticky candidates from live: structure + strong micro
+    // Sticky candidates: structure + strong micro
     const stickyCandidates = levelsLive.filter((z) => {
       const t = z?.tier ?? "";
       if (t === "structure") return true;
@@ -693,9 +494,140 @@ async function main() {
       return false;
     });
 
-    const structuresSticky = updateStickyFromLive(stickyCandidates, currentPrice, bars1h, bars30m, manualStructures);
+    // registry load/update
+    let store = stripManualFromRegistryStore(loadSticky());
+    const list = (store.structures || []).slice();
+    const nowIso = isoNow();
 
-    // debug list for tuning
+    const byKey = new Map();
+    for (const s of list) if (s?.structureKey) byKey.set(s.structureKey, s);
+
+    for (const z of stickyCandidates || []) {
+      const pr = z?.priceRange;
+      if (!Array.isArray(pr) || pr.length !== 2) continue;
+
+      const hi = Number(pr[0]);
+      const lo = Number(pr[1]);
+      if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi <= lo) continue;
+
+      if (manualOverlapsAny(manualStructures, hi, lo)) continue;
+      if ((hi - lo) > STRUCT_AUTO_MAX_WIDTH_PTS) continue;
+
+      const key = structureKeyFromRange(hi, lo);
+      const existing = byKey.get(key);
+
+      if (existing) {
+        existing.lastSeenUtc = nowIso;
+        existing.timesSeen = Number(existing.timesSeen ?? 0) + 1;
+        existing.maxStrengthSeen = Math.max(Number(existing.maxStrengthSeen ?? 0), Number(z.strength ?? 0));
+        existing.status = "active";
+      } else {
+        const entry = {
+          structureKey: key,
+          priceRange: [round2(hi), round2(lo)],
+          firstSeenUtc: nowIso,
+          lastSeenUtc: nowIso,
+          timesSeen: 1,
+          maxStrengthSeen: Number(z.strength ?? 0),
+          status: "active",
+          stickyConfirmed: false,
+          confirmedUtc: null,
+          exits: [],
+          distinctExitCount: 0,
+        };
+        list.push(entry);
+        byKey.set(key, entry);
+      }
+    }
+
+    // save registry (AUTO ONLY)
+    const newStore = {
+      ok: true,
+      meta: { ...(store.meta ?? {}), updated_at_utc: nowIso },
+      structures: list.filter((s) => !isManualLike(s)),
+    };
+    saveSticky(newStore);
+
+    // manual first
+    const emittedManual = (manualStructures || []).map((m) => {
+      const isNeg = !!m.isNegotiated;
+      const pr = m.manualRange ?? m.priceRange;
+      return {
+        type: "institutional",
+        tier: "structure_sticky",
+        priceRange: pr,
+        displayPriceRange: pr,
+        strength: 100,
+        strength_raw: 100,
+        confidence: 1,
+        isNegotiated: isNeg,
+        details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
+      };
+    });
+
+    // autos next (capped within band)
+    const bandLo = Number.isFinite(currentPrice) ? currentPrice - STICKY_KEEP_WITHIN_BAND_PTS : -Infinity;
+    const bandHi = Number.isFinite(currentPrice) ? currentPrice + STICKY_KEEP_WITHIN_BAND_PTS : Infinity;
+
+    const autosWithinBand = list
+      .filter((s) => s?.status === "active")
+      .filter((s) => {
+        const pr = s.priceRange;
+        if (!Array.isArray(pr) || pr.length !== 2) return false;
+        const hi = Math.max(Number(pr[0]), Number(pr[1]));
+        const lo = Math.min(Number(pr[0]), Number(pr[1]));
+        if (!(hi >= bandLo && lo <= bandHi)) return false;
+        return !manualOverlapsAny(manualStructures, hi, lo);
+      })
+      .sort((a, b) => Number(b.maxStrengthSeen ?? 0) - Number(a.maxStrengthSeen ?? 0))
+      .slice(0, STICKY_MAX_WITHIN_BAND);
+
+    const emittedAutos = [];
+    const emittedAutoNegotiated = [];
+
+    for (const s of autosWithinBand) {
+      const raw = round2(Number(s.maxStrengthSeen ?? 0));
+      const conf = round2(confidenceFromInstitutionalStrength(raw));
+
+      const tight = tightenDisplayRangeByCloseDensity(bars1h, s.priceRange);
+
+      const parentObj = {
+        type: "institutional",
+        tier: "structure_sticky",
+        priceRange: s.priceRange,
+        displayPriceRange: tight?.displayPriceRange ?? s.priceRange,
+        strength: raw,
+        strength_raw: raw,
+        confidence: conf,
+        isNegotiated: false,
+        details: {
+          id: s.structureKey,
+          facts: {
+            sticky: s,
+            ...(tight ? { acceptanceTightened: true, acceptance: tight } : {}),
+          },
+        },
+      };
+
+      emittedAutos.push(parentObj);
+
+      // ✅ NEW: if tight core exists and is strong enough, emit NEG zone too
+      if (
+        tight &&
+        Number(tight.coverage ?? 0) >= DENSITY_TARGET_COVERAGE &&
+        Number(tight.displayWidthPts ?? 999) <= DENSITY_MAX_TIGHT_WIDTH &&
+        Number(tight.closesInZone ?? 0) >= DENSITY_MIN_CLOSES
+      ) {
+        const neg = buildAutoNegotiatedZone({
+          parentId: s.structureKey,
+          parentStrength: raw,
+          parentConfidence: conf,
+          acceptance: tight,
+        });
+        if (neg) emittedAutoNegotiated.push(neg);
+      }
+    }
+
     const levels_debug = levelsLive
       .slice()
       .sort((a, b) => Number(b?.strength_raw ?? 0) - Number(a?.strength_raw ?? 0))
@@ -709,22 +641,21 @@ async function main() {
         lookback_days: { "30m": DAYS_30M, "1h": DAYS_1H },
         manual_file: path.basename(MANUAL_FILE),
         manual_structures_loaded: manualStructures.length,
-
         institutional_min: INSTITUTIONAL_MIN,
         smz_prime_min: SMZ_PRIME_MIN,
         debug_levels_count: DEBUG_LEVELS_COUNT,
-
-        // tightening config (for transparency)
         acceptance_density: {
           lookback_1h_bars: DENSITY_LOOKBACK_1H_BARS,
           target_coverage: DENSITY_TARGET_COVERAGE,
           max_tight_width: DENSITY_MAX_TIGHT_WIDTH,
         },
+        auto_negotiated_emitted: emittedAutoNegotiated.length,
       },
       levels: levelsLive,
       levels_debug,
       pockets_active: [],
-      structures_sticky: structuresSticky,
+      // ✅ IMPORTANT: negotiated zones come AFTER parents in the array (overlay handles z-index)
+      structures_sticky: [...emittedManual, ...emittedAutos, ...emittedAutoNegotiated],
     };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
@@ -732,6 +663,7 @@ async function main() {
     console.log("[SMZ] Saved:", OUTFILE);
   } catch (err) {
     // fallback: manual only
+    const manualStructures = loadManualStructures();
     const fallbackStructuresSticky = (manualStructures || []).map((m) => {
       const pr = m.manualRange ?? m.priceRange;
       return {
