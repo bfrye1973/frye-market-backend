@@ -9,12 +9,13 @@
 // - Auto shelves come from scanner (computeShelves)
 // - Shelves are NOT institutional and must NEVER be colored yellow (frontend rule)
 //
-// BETA CHANGES (THIS FILE):
+// BETA CHANGES:
 // ✅ Preserve true shelf scoring:
 //   - strength_raw (0..100) from scanner (truth)
 //   - confidence (0..1) from scanner (truth)
-//   - strength mapped to 65..89 (policy band you tune)
+//   - strength mapped to 65..89 (policy band)
 // ✅ Stops “everything becomes 89” by mapping from confidence instead of clamping 90–100 down to 89.
+// ✅ Adds levels_debug so you can SEE the score spread (65–85 etc.) during beta testing.
 
 import fs from "fs";
 import path from "path";
@@ -32,7 +33,8 @@ const LEVELS_FILE = path.resolve(__dirname, "../data/smz-levels.json");
 
 const SYMBOL = "SPY";
 
-// NOTE: you can tune this later; leaving as-is for your current beta environment
+// NOTE: Keeping your current beta environment as-is.
+// Later we can change this to 6 if you want tighter local shelves.
 const BAND_POINTS = 40;
 
 const DAYS_15M = 180;
@@ -50,6 +52,9 @@ const SHELF_CLUSTER_OVERLAP = 0.55;
 const SHELF_CLUSTER_GAP_PTS = 0.60;
 const MAX_SHELVES_TOTAL = 8;
 
+// ✅ beta debug list size (how many shelves you want to inspect)
+const DEBUG_LEVELS_COUNT = 25;
+
 const isoNow = () => new Date().toISOString();
 const round2 = (x) => Math.round(Number(x) * 100) / 100;
 
@@ -58,6 +63,7 @@ function clampInt(x, lo, hi) {
   if (!Number.isFinite(n)) return lo;
   return Math.max(lo, Math.min(hi, n));
 }
+
 function clamp01(x) {
   const n = Number(x);
   if (!Number.isFinite(n)) return 0;
@@ -235,21 +241,15 @@ function convertStructuresToShelves(nowIso) {
         exitSide === "above" ? "accumulation" :
         "accumulation";
 
-      // treat structure strength (0..100) as confidence proxy
       const conf = clamp01(sRaw / 100);
       const strength = mapShelfStrengthFromConfidence(conf);
 
       out.push({
         type,
         priceRange: [r.hi, r.lo],
-
-        // policy score
         strength,
-
-        // truth fields
         strength_raw: round2(sRaw),
         confidence: round2(conf),
-
         rangeSource: "converted_structure",
         comment: `Converted from structure (${round2(sRaw)})`,
         firstSeenUtc: nowIso,
@@ -285,10 +285,7 @@ function loadManualShelves(nowIso) {
         const scoreOverride = Number.isFinite(Number(s?.scoreOverride)) ? Number(s.scoreOverride) : null;
         const base = scoreOverride ?? Number(s?.strength ?? 75);
 
-        // manual shelves still follow policy band
         const strength = clampInt(base, SHELF_STRENGTH_LO, SHELF_STRENGTH_HI);
-
-        // give manual shelves confidence for consistency (best-effort)
         const conf = confidenceFromRawStrength(strength);
 
         return {
@@ -297,7 +294,6 @@ function loadManualShelves(nowIso) {
           strength,
           strength_raw: null,
           confidence: round2(conf),
-
           rangeSource: "manual",
           locked: true,
           scoreOverride,
@@ -481,7 +477,6 @@ function applyNoTouchWinnerPass(levels) {
 function mergeWithMemory(current, prev, currentPrice, nowIso) {
   const out = [];
 
-  // keep prev within band and not expired; revisit resets if price inside
   for (const p of prev || []) {
     const r = normalizeRange(p?.priceRange);
     if (!r) continue;
@@ -496,7 +491,6 @@ function mergeWithMemory(current, prev, currentPrice, nowIso) {
     out.push(updated);
   }
 
-  // merge in current detections/conversions
   for (const n of current || []) {
     const rn = normalizeRange(n?.priceRange);
     if (!rn) continue;
@@ -570,15 +564,12 @@ async function main() {
 
     const prevShelves = loadPrevShelves();
 
-    // manual shelves
     const manualAll = loadManualShelves(nowIso);
     const manualInBand = manualAll.filter((s) => withinBand(normalizeRange(s.priceRange), currentPriceAnchor, BAND_POINTS));
 
-    // converted shelves
     const convertedAll = convertStructuresToShelves(nowIso);
     const convertedInBand = convertedAll.filter((s) => withinBand(normalizeRange(s.priceRange), currentPriceAnchor, BAND_POINTS));
 
-    // auto shelves from scanner
     console.log("[SHELVES] Running shelves scanner (Acc/Dist)…");
     const shelvesRaw =
       computeShelves({
@@ -590,10 +581,9 @@ async function main() {
 
     const shelvesBand = shelvesRaw.filter((s) => withinBand(normalizeRange(s?.priceRange), currentPriceAnchor, BAND_POINTS));
 
-    // manual wins overlap (same type)
     const autoNoOverlap = removeAutosOverlappingManualSameType(shelvesBand, manualInBand);
 
-    // ✅ MAP auto shelves into 65–89 using confidence, and preserve truth fields
+    // Map auto shelves into 65–89 using confidence, preserve truth fields
     const autoMapped = autoNoOverlap
       .map((s) => {
         const type = normalizeType(s?.type);
@@ -602,23 +592,19 @@ async function main() {
         const r = normalizeRange(s?.priceRange);
         if (!r) return null;
 
-        // scanner truth
         const raw = Number(s?.strength_raw ?? s?.strength ?? 75);
         const conf = Number.isFinite(Number(s?.confidence))
           ? clamp01(Number(s.confidence))
           : confidenceFromRawStrength(raw);
 
-        // policy score
         const strength = mapShelfStrengthFromConfidence(conf);
 
         return {
           type,
           priceRange: [r.hi, r.lo],
-
-          strength, // policy 65..89
+          strength,
           strength_raw: Number.isFinite(raw) ? round2(raw) : null,
           confidence: round2(conf),
-
           rangeSource: "auto",
           firstSeenUtc: nowIso,
           lastSeenUtc: nowIso,
@@ -629,17 +615,24 @@ async function main() {
 
     const currentShelves = [...manualInBand, ...convertedInBand, ...autoMapped];
 
-    // persistence merge
     const withMemory = mergeWithMemory(currentShelves, prevShelves, currentPriceAnchor, nowIso);
 
-    // suppress shelves inside institutionals (>=85)
     const instRanges = loadInstitutionalRangesForSuppression();
+
+    // suppress shelves inside institutionals (>=85)
     const suppressed = withMemory.filter((s) => {
       const r = normalizeRange(s?.priceRange);
       if (!r) return false;
       const overlapsInst = instRanges.some((z) => overlapRatio(r.hi, r.lo, z.hi, z.lo) >= 0.25);
       return !overlapsInst;
     });
+
+    // ✅ DEBUG LIST: show shelves BEFORE the final “winner” filters
+    // This is what lets you see 65–85 values during beta testing.
+    const levels_debug = suppressed
+      .slice()
+      .sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0))
+      .slice(0, DEBUG_LEVELS_COUNT);
 
     const collapsed = collapseShelvesByCluster(suppressed);
     const capped = applyGlobalCap(collapsed, MAX_SHELVES_TOTAL);
@@ -657,15 +650,19 @@ async function main() {
         converted_structures_in_band: convertedInBand.length,
         manual_in_band: manualInBand.length,
         auto_in_band: autoMapped.length,
+        debug_levels_count: DEBUG_LEVELS_COUNT,
       },
       levels: finalLevels,
+
+      // ✅ NEW: beta inspection list (not used by chart unless you choose to later)
+      levels_debug,
     };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
     fs.writeFileSync(OUTFILE, JSON.stringify(payload, null, 2), "utf8");
 
     console.log("[SHELVES] Saved shelves to:", OUTFILE);
-    console.log("[SHELVES] Job complete. levels:", finalLevels.length);
+    console.log("[SHELVES] Job complete. levels:", finalLevels.length, "debug:", levels_debug.length);
   } catch (err) {
     console.error("[SHELVES] FAILED:", err);
     process.exitCode = 1;
