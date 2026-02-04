@@ -48,7 +48,10 @@ app.set("etag", false);
 app.use(express.json({ limit: "1mb" }));
 
 // --- CORS (dashboard + local dev) ---
-// ✅ Deterministic: echo Origin if present, else "*"
+// ✅ Long-term durable CORS:
+// - Echo Origin if present (browser), else "*"
+// - Echo requested headers for preflight (fixes Cache-Control / pragma / future headers)
+// - Always handle OPTIONS with 204
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
@@ -56,16 +59,26 @@ app.use((req, res, next) => {
   res.setHeader("Vary", "Origin");
 
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
+
+  // ✅ KEY FIX (Option A):
+  // If the browser requests specific headers in preflight, allow them.
+  // This prevents random CORS breaks when frontend adds headers like "cache-control".
+  const reqHdrs = req.headers["access-control-request-headers"];
   res.setHeader(
     "Access-Control-Allow-Headers",
-    [
-      "Content-Type",
-      "Authorization",
-      "X-Requested-With",
-      "X-Idempotency-Key",
-      "X-ENGINE-CRON-TOKEN", // ✅ allow cron trigger header
-    ].join(", ")
+    reqHdrs ||
+      [
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "X-Idempotency-Key",
+        "X-ENGINE-CRON-TOKEN", // ✅ allow cron trigger header
+      ].join(", ")
   );
+
+  // If you later use cookies/auth sessions, keep this.
+  // If not, it doesn't hurt.
+  res.setHeader("Access-Control-Allow-Credentials", "true");
 
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
@@ -145,6 +158,7 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/v1/smz-hierarchy");
   console.log("- /api/v1/fib-levels");
   console.log("- /api/v1/confluence-score");
+  console.log("- /api/v1/dashboard-snapshot");
   console.log("- /api/v1/run-all-engines   ✅ cron trigger");
   console.log("- /api/v1/trade-permission  ✅ Engine 6");
   console.log("- /live  (GitHub JSON proxies)");
