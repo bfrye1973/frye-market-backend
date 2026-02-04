@@ -1,74 +1,67 @@
-// services/core/jobs/updateSmzShelves.js
-// Shelves Job — writes smz-shelves.json
+// services/core/jobs/updateSmzLevels.js
+// Engine 1 SMZ job (stable version + negotiated auto-detection)
+// - Runs smzEngine (LOCKED — DO NOT MODIFY)
+// - Updates sticky registry (AUTO ONLY)
+// - Loads manual structures from smz-manual-structures.json (SOURCE OF TRUTH)
+// - Writes smz-levels.json for frontend
 //
-// ✅ NEW LOCKED OUTPUT RULE (Phase 1):
-// - Emit ONLY:
-//    - 1 best Accumulation shelf
-//    - 1 best Distribution shelf
-//   within band_points
+// NEW:
+// ✅ AUTO-detect NEGOTIATED zones inside institutional parents
+// - Uses acceptance density tightening already computed
+// - Emits new |NEG| zones (turquoise overlay) as separate objects
+// - Does NOT store negotiated zones in registry (derived each run)
+// - Does NOT allow negotiated to render yellow (isNegotiated flag)
 //
-// ✅ Persistence:
-// - Shelves persist 48 hours
-// - Only replaced if a NEW overlapping shelf is stronger by a margin
-//
-// ✅ Manual shelves:
-// - Always win vs autos of same type (if in band + active)
-//
-// ✅ Shelves are NEVER institutional and NEVER yellow (frontend rule)
-//
-// ✅ Beta truth fields:
-// - strength_raw (0..100 if present)
-// - confidence (0..1 if present)
-// - strength (policy 65..89)
+// LOCKED REQUIREMENTS (per user):
+// ✅ smzEngine.js untouched
+// ✅ manual zones persist across runs/deploy/backfill
+// ✅ manual zones NOT stored in registry
+// ✅ manual zones immune to caps/cleanup/overlap suppression
+// ✅ structures_sticky: manual first, then auto
+// ✅ AUTO institutional max width = 4.0 pts (live + sticky autos)
+// ✅ manual structures ALWAYS emitted in structures_sticky (not band-limited)
+// ✅ if engine compute fails, still emit manual structures (never go blind)
 
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { computeShelves } from "../logic/smzShelvesScanner.js";
+import { computeSmartMoneyLevels } from "../logic/smzEngine.js"; // LOCKED
 import { getBarsFromPolygonDeep } from "../../../api/providers/polygonBarsDeep.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const OUTFILE = path.resolve(__dirname, "../data/smz-shelves.json");
-const MANUAL_FILE = path.resolve(__dirname, "../data/smz-manual-shelves.json");
-const LEVELS_FILE = path.resolve(__dirname, "../data/smz-levels.json");
+const OUTFILE = path.resolve(__dirname, "../data/smz-levels.json");
+const STICKY_FILE = path.resolve(__dirname, "../data/smz-structures-registry.json");
+const MANUAL_FILE = path.resolve(__dirname, "../data/smz-manual-structures.json");
 
-const SYMBOL = "SPY";
-
-// Keep your current beta band unless you want to tighten later
-const BAND_POINTS = 40;
-
-const DAYS_15M = 180;
+// Lookbacks
 const DAYS_30M = 180;
-const DAYS_1H = 180;
+const DAYS_1H = 365;
 
-// Shelf scoring band (policy)
-const SHELF_STRENGTH_LO = 65;
-const SHELF_STRENGTH_HI = 89;
+// Sticky settings
+const STICKY_ROUND_STEP = 0.25;
+const STICKY_KEEP_WITHIN_BAND_PTS = 40; // AUTO ONLY
+const STICKY_ARCHIVE_DAYS = 30;
+const STICKY_MAX_WITHIN_BAND = 12;
 
-// Institutional suppression threshold
-const INSTITUTIONAL_MIN = 85;
+const STICKY_CONFIRM_EXITS_REQUIRED = 2;
+const STICKY_EXIT_MIN_SEP_SEC = 3 * 86400;
+const STICKY_EXIT_MAX_STORE = 8;
 
-// Persistence window
-const SHELF_PERSIST_HOURS = 48;
+const STICKY_INCLUDE_MICRO_MIN_STRENGTH = 80;
 
-// ✅ Replacement stability guard (very important)
-// A new overlapping shelf must beat the old max by at least this many points
-const REPLACE_MARGIN_PTS = 3;
+// ✅ Institutional “monster” guard (AUTO ONLY)
+const STRUCT_AUTO_MAX_WIDTH_PTS = 4.0;
 
-// Debug list size
+// Debug/beta
 const DEBUG_LEVELS_COUNT = 25;
+const INSTITUTIONAL_MIN = 85;
+const SMZ_PRIME_MIN = 90;
 
 const isoNow = () => new Date().toISOString();
 const round2 = (x) => Math.round(Number(x) * 100) / 100;
-
-function clampInt(x, lo, hi) {
-  const n = Math.round(Number(x));
-  if (!Number.isFinite(n)) return lo;
-  return Math.max(lo, Math.min(hi, n));
-}
 
 function clamp01(x) {
   const n = Number(x);
@@ -76,18 +69,10 @@ function clamp01(x) {
   return Math.max(0, Math.min(1, n));
 }
 
-// Map confidence (0..1) -> shelf band (65..89)
-function mapShelfStrengthFromConfidence(conf) {
-  const c = clamp01(conf);
-  const mapped = Math.round(SHELF_STRENGTH_LO + (SHELF_STRENGTH_HI - SHELF_STRENGTH_LO) * c);
-  return clampInt(mapped, SHELF_STRENGTH_LO, SHELF_STRENGTH_HI);
-}
-
-// Fallback confidence from raw scanner score 40..100 -> 0..1
-function confidenceFromRawStrength(raw) {
-  const r = Number(raw);
-  if (!Number.isFinite(r)) return 0;
-  return clamp01((r - 40) / 60);
+function confidenceFromInstitutionalStrength(strength) {
+  const s = Number(strength);
+  if (!Number.isFinite(s)) return 0;
+  return clamp01((s - 75) / 25);
 }
 
 function normalizeBars(raw) {
@@ -115,508 +100,602 @@ function normalizeBars(raw) {
     .sort((a, b) => a.time - b.time);
 }
 
-function lastFiniteClose(bars) {
-  if (!Array.isArray(bars)) return null;
-  for (let i = bars.length - 1; i >= 0; i--) {
-    const c = bars[i]?.close;
-    if (Number.isFinite(c)) return c;
+function aggregateTo4h(bars1h) {
+  if (!Array.isArray(bars1h) || bars1h.length < 8) return [];
+  const out = [];
+  let cur = null;
+
+  for (const b of bars1h) {
+    const block = Math.floor(b.time / (4 * 3600)) * (4 * 3600);
+    if (!cur || cur.time !== block) {
+      if (cur) out.push(cur);
+      cur = {
+        time: block,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume ?? 0,
+      };
+    } else {
+      cur.high = Math.max(cur.high, b.high);
+      cur.low = Math.min(cur.low, b.low);
+      cur.close = b.close;
+      cur.volume += b.volume ?? 0;
+    }
   }
-  return null;
+  if (cur) out.push(cur);
+  return out;
 }
 
-function normalizeRange(pr) {
+function snapStep(x, step) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n / step) * step;
+}
+
+function rangesOverlap(hiA, loA, hiB, loB) {
+  const aHi = Math.max(Number(hiA), Number(loA));
+  const aLo = Math.min(Number(hiA), Number(loA));
+  const bHi = Math.max(Number(hiB), Number(loB));
+  const bLo = Math.min(Number(hiB), Number(loB));
+  if (![aHi, aLo, bHi, bLo].every(Number.isFinite)) return false;
+  return !(aHi < bLo || aLo > bHi);
+}
+
+function rangeFromPriceRange(pr) {
   if (!Array.isArray(pr) || pr.length !== 2) return null;
   const a = Number(pr[0]);
   const b = Number(pr[1]);
   if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-  const hi = round2(Math.max(a, b));
-  const lo = round2(Math.min(a, b));
-  if (!(hi > lo)) return null;
-  const width = hi - lo;
-  const mid = (hi + lo) / 2;
-  return { hi, lo, width, mid };
+  const hi = Math.max(a, b);
+  const lo = Math.min(a, b);
+  return { hi, lo, width: hi - lo };
 }
 
-function withinBand(r, price, bandPts) {
-  if (!r || !Number.isFinite(price)) return false;
-  return r.hi >= price - bandPts && r.lo <= price + bandPts;
-}
+/* -------------------------
+   Acceptance Density Tightening (display core)
+   ------------------------- */
+const DENSITY_STEP = 0.25;
+const DENSITY_LOOKBACK_1H_BARS = 90;
+const DENSITY_MIN_CLOSES = 10;
+const DENSITY_TARGET_COVERAGE = 0.55;
+const DENSITY_MAX_TIGHT_WIDTH = 2.6;
+const DENSITY_MIN_IMPROVEMENT = 0.6;
 
-function rangesOverlap(aHi, aLo, bHi, bLo) {
-  return !(aHi < bLo || aLo > bHi);
-}
+function tightenDisplayRangeByCloseDensity(bars1h, pr) {
+  const r = rangeFromPriceRange(pr);
+  if (!r) return null;
 
-function overlapRatio(aHi, aLo, bHi, bLo) {
-  const lo = Math.max(aLo, bLo);
-  const hi = Math.min(aHi, bHi);
-  const inter = hi - lo;
-  if (inter <= 0) return 0;
-  const denom = Math.min(aHi - aLo, bHi - bLo);
-  return denom > 0 ? inter / denom : 0;
-}
+  const hi = r.hi;
+  const lo = r.lo;
+  const width = r.width;
 
-function normalizeType(t) {
-  const x = String(t ?? "").toLowerCase();
-  if (x === "accumulation" || x === "acc") return "accumulation";
-  if (x === "distribution" || x === "dist") return "distribution";
-  return null;
-}
+  if (!(width > 1.4 && width <= STRUCT_AUTO_MAX_WIDTH_PTS + 0.25)) return null;
 
-function isManualShelf(s) {
-  return s?.rangeSource === "manual" || s?.locked === true || Number.isFinite(Number(s?.scoreOverride));
-}
+  const slice = Array.isArray(bars1h) ? bars1h.slice(-DENSITY_LOOKBACK_1H_BARS) : [];
+  if (slice.length < 30) return null;
 
-function loadPrevShelves() {
-  if (!fs.existsSync(OUTFILE)) return [];
-  try {
-    const raw = fs.readFileSync(OUTFILE, "utf8");
-    const json = JSON.parse(raw);
-    return Array.isArray(json?.levels) ? json.levels : [];
-  } catch {
-    return [];
+  const closes = [];
+  for (const b of slice) {
+    const c = Number(b?.close);
+    if (!Number.isFinite(c)) continue;
+    if (c >= lo && c <= hi) closes.push(c);
   }
-}
+  if (closes.length < DENSITY_MIN_CLOSES) return null;
 
-function hoursSince(ts) {
-  const t = Date.parse(ts || "");
-  if (!Number.isFinite(t)) return Infinity;
-  return (Date.now() - t) / (3600 * 1000);
-}
-
-function priceInside(price, r) {
-  return Number.isFinite(price) && price >= r.lo && price <= r.hi;
-}
-
-// institutional ranges that suppress shelves (>=85 only)
-function loadInstitutionalRangesForSuppression() {
-  if (!fs.existsSync(LEVELS_FILE)) return [];
-  try {
-    const raw = fs.readFileSync(LEVELS_FILE, "utf8");
-    const json = JSON.parse(raw);
-    const arr = Array.isArray(json?.structures_sticky) ? json.structures_sticky : [];
-
-    return arr
-      .filter((z) => {
-        // exclude negotiated from suppression source list
-        const id = String(z?.details?.id ?? z?.structureKey ?? "");
-        if (z?.isNegotiated === true) return false;
-        if (id.includes("|NEG|")) return false;
-
-        const s = Number(z?.strength ?? NaN);
-        return Number.isFinite(s) && s >= INSTITUTIONAL_MIN;
-      })
-      .map((z) => normalizeRange(z?.displayPriceRange ?? z?.priceRange))
-      .filter(Boolean)
-      .map((r) => ({ hi: r.hi, lo: r.lo }));
-  } catch {
-    return [];
+  const bins = new Map();
+  const snap = (x) => Math.round(x / DENSITY_STEP) * DENSITY_STEP;
+  for (const c of closes) {
+    const k = snap(c);
+    bins.set(k, (bins.get(k) ?? 0) + 1);
   }
-}
 
-// convert non-manual, non-NEG structures with strength <85 into shelves
-function convertStructuresToShelves(nowIso, currentPriceAnchor) {
-  if (!fs.existsSync(LEVELS_FILE)) return [];
-  try {
-    const raw = fs.readFileSync(LEVELS_FILE, "utf8");
-    const json = JSON.parse(raw);
-    const arr = Array.isArray(json?.structures_sticky) ? json.structures_sticky : [];
+  let peakK = null;
+  let peakCount = -1;
+  for (const [k, count] of bins.entries()) {
+    if (count > peakCount) {
+      peakCount = count;
+      peakK = k;
+    }
+  }
+  if (peakK == null) return null;
 
-    const out = [];
+  const keys = Array.from(bins.keys()).sort((a, b) => a - b);
+  const idx = keys.indexOf(peakK);
+  if (idx < 0) return null;
 
-    for (const z of arr) {
-      const id = String(z?.details?.id ?? z?.structureKey ?? "");
-      if (z?.isNegotiated === true) continue;
-      if (id.includes("|NEG|")) continue;
-      if (id.startsWith("MANUAL|")) continue;
+  const total = closes.length;
+  const target = Math.ceil(total * DENSITY_TARGET_COVERAGE);
 
-      const sRaw = Number(z?.strength ?? NaN);
-      if (!Number.isFinite(sRaw)) continue;
-      if (sRaw >= INSTITUTIONAL_MIN) continue;
+  let left = idx;
+  let right = idx;
+  let covered = bins.get(peakK) ?? 0;
 
-      const r = normalizeRange(z?.displayPriceRange ?? z?.priceRange);
-      if (!r) continue;
+  const bandWidth = () => (keys[right] - keys[left]) + DENSITY_STEP;
 
-      // trader-safe type: overhead = distribution, under = accumulation
-      let type = "accumulation";
-      if (Number.isFinite(currentPriceAnchor)) {
-        if (r.lo > currentPriceAnchor) type = "distribution";
-        else if (r.hi < currentPriceAnchor) type = "accumulation";
-      }
+  while (covered < target) {
+    const canLeft = left > 0;
+    const canRight = right < keys.length - 1;
+    if (!canLeft && !canRight) break;
 
-      const conf = clamp01(sRaw / 100);
-      const strength = mapShelfStrengthFromConfidence(conf);
+    const nextLeftK = canLeft ? keys[left - 1] : null;
+    const nextRightK = canRight ? keys[right + 1] : null;
+    const leftCount = canLeft ? (bins.get(nextLeftK) ?? 0) : -1;
+    const rightCount = canRight ? (bins.get(nextRightK) ?? 0) : -1;
 
-      out.push({
-        type,
-        priceRange: [r.hi, r.lo],
-        strength,
-        strength_raw: round2(sRaw),
-        confidence: round2(conf),
-        rangeSource: "converted_structure",
-        comment: `Converted from structure (${round2(sRaw)})`,
-        firstSeenUtc: nowIso,
-        lastSeenUtc: nowIso,
-        maxStrengthSeen: strength,
-      });
+    if (rightCount > leftCount) {
+      right++;
+      covered += rightCount;
+    } else {
+      left--;
+      covered += leftCount;
     }
 
-    return out;
-  } catch {
-    return [];
+    if (bandWidth() > DENSITY_MAX_TIGHT_WIDTH) break;
   }
+
+  const newLo = round2(keys[left]);
+  const newHi = round2(keys[right] + DENSITY_STEP);
+  const newWidth = newHi - newLo;
+
+  if (!(newHi > newLo)) return null;
+  if (newWidth > DENSITY_MAX_TIGHT_WIDTH) return null;
+  if ((width - newWidth) < DENSITY_MIN_IMPROVEMENT) return null;
+
+  const coverage = round2(covered / total);
+
+  return {
+    displayPriceRange: [newHi, newLo],
+    displayWidthPts: round2(newWidth),
+    coverage,
+    closesInZone: total,
+  };
 }
 
-// manual shelves
-function loadManualShelves(nowIso) {
+/* ---------------- Manual structures ---------------- */
+
+function normalizeManualStructure(s) {
+  const mr = Array.isArray(s?.manualRange) ? s.manualRange : null;
+  const pr = Array.isArray(s?.priceRange) ? s.priceRange : null;
+
+  const hi0 = Number(mr?.[0] ?? pr?.[0]);
+  const lo0 = Number(mr?.[1] ?? pr?.[1]);
+  if (!Number.isFinite(hi0) || !Number.isFinite(lo0)) return null;
+
+  const hi = round2(Math.max(hi0, lo0));
+  const lo = round2(Math.min(hi0, lo0));
+  if (!(hi > lo)) return null;
+
+  const structureKey =
+    typeof s?.structureKey === "string" && s.structureKey.length
+      ? s.structureKey
+      : `MANUAL|SPY|${lo.toFixed(2)}-${hi.toFixed(2)}`;
+
+  const notes = typeof s?.notes === "string" ? s.notes : null;
+  const isNegotiated = structureKey.includes("|NEG|") || (notes && notes.toUpperCase().includes("NEGOTIATED"));
+
+  return {
+    structureKey,
+    symbol: "SPY",
+    tier: "structure",
+    manualRange: [hi, lo],
+    priceRange: [hi, lo],
+    locked: true,
+    rangeSource: "manual",
+    status: "active",
+    stickyConfirmed: true,
+    ...(notes ? { notes } : {}),
+    isNegotiated: !!isNegotiated,
+  };
+}
+
+function loadManualStructures() {
   if (!fs.existsSync(MANUAL_FILE)) return [];
   try {
     const raw = fs.readFileSync(MANUAL_FILE, "utf8");
     const json = JSON.parse(raw);
-    const arr = Array.isArray(json?.levels) ? json.levels : [];
-
-    return arr
-      .map((s) => {
-        const type = normalizeType(s?.type);
-        if (!type) return null;
-
-        const r = normalizeRange(
-          Array.isArray(s?.manualRange) && s.manualRange.length === 2 ? s.manualRange : s.priceRange
-        );
-        if (!r) return null;
-
-        const scoreOverride = Number.isFinite(Number(s?.scoreOverride)) ? Number(s.scoreOverride) : null;
-        const base = scoreOverride ?? Number(s?.strength ?? 75);
-
-        const strength = clampInt(base, SHELF_STRENGTH_LO, SHELF_STRENGTH_HI);
-
-        // best-effort confidence for manual shelves
-        const conf = confidenceFromRawStrength(strength);
-
-        return {
-          type,
-          priceRange: [r.hi, r.lo],
-          strength,
-          strength_raw: null,
-          confidence: round2(conf),
-          rangeSource: "manual",
-          locked: true,
-          scoreOverride,
-          comment: typeof s?.comment === "string" ? s.comment : null,
-          shelfKey: s?.shelfKey ?? null,
-          status: s?.status ?? "active",
-          firstSeenUtc: nowIso,
-          lastSeenUtc: nowIso,
-          maxStrengthSeen: strength,
-        };
-      })
-      .filter(Boolean)
-      .filter((s) => String(s.status).toLowerCase() !== "inactive");
+    const arr = Array.isArray(json?.structures) ? json.structures : [];
+    return arr.map(normalizeManualStructure).filter(Boolean);
   } catch {
     return [];
   }
 }
 
-// remove autos overlapping manual same type
-function removeAutosOverlappingManualSameType(autoLevels, manualLevels) {
-  if (!Array.isArray(autoLevels) || !autoLevels.length) return [];
-  if (!Array.isArray(manualLevels) || !manualLevels.length) return autoLevels;
-
-  return autoLevels.filter((a) => {
-    const at = normalizeType(a?.type);
-    if (!at) return false;
-
-    const ar = normalizeRange(a?.priceRange);
-    if (!ar) return false;
-
-    const overlapsSameTypeManual = manualLevels.some((m) => {
-      const mt = normalizeType(m?.type);
-      if (!mt || mt !== at) return false;
-
-      const mr = normalizeRange(m?.priceRange);
-      if (!mr) return false;
-
-      return rangesOverlap(ar.hi, ar.lo, mr.hi, mr.lo);
-    });
-
-    return !overlapsSameTypeManual;
-  });
+function manualOverlapsAny(manualList, hi, lo) {
+  for (const m of manualList || []) {
+    const r = Array.isArray(m?.manualRange) ? m.manualRange : m?.priceRange;
+    if (!Array.isArray(r) || r.length !== 2) continue;
+    if (rangesOverlap(hi, lo, r[0], r[1])) return true;
+  }
+  return false;
 }
 
-/**
- * ✅ Stable memory merge:
- * - Keep previous shelves within band and within 48 hours
- * - Only replace if new overlaps and beats by margin, OR new is manual
- */
-function mergeWithMemoryStable(current, prev, currentPrice, nowIso) {
-  const out = [];
-
-  // 1) keep prev if in band and not expired
-  for (const p of prev || []) {
-    const r = normalizeRange(p?.priceRange);
-    if (!r) continue;
-    if (!withinBand(r, currentPrice, BAND_POINTS)) continue;
-
-    const age = hoursSince(p?.lastSeenUtc);
-    if (age > SHELF_PERSIST_HOURS) continue;
-
-    const keep = { ...p };
-    if (priceInside(currentPrice, r)) keep.lastSeenUtc = nowIso;
-
-    const s = Number(keep.strength ?? 0);
-    keep.maxStrengthSeen = Number(keep.maxStrengthSeen ?? s);
-    out.push(keep);
-  }
-
-  // 2) merge in current detections with margin logic
-  for (const n of current || []) {
-    const rn = normalizeRange(n?.priceRange);
-    if (!rn) continue;
-    if (!withinBand(rn, currentPrice, BAND_POINTS)) continue;
-
-    const nType = normalizeType(n?.type);
-    if (!nType) continue;
-
-    const nStrength = Number(n?.strength ?? 0);
-    const nManual = isManualShelf(n);
-
-    let merged = false;
-
-    for (let i = 0; i < out.length; i++) {
-      const o = out[i];
-      const oType = normalizeType(o?.type);
-      if (oType !== nType) continue;
-
-      const ro = normalizeRange(o?.priceRange);
-      if (!ro) continue;
-
-      if (!rangesOverlap(rn.hi, rn.lo, ro.hi, ro.lo)) continue;
-
-      const oMax = Number(o.maxStrengthSeen ?? o.strength ?? 0);
-      const oManual = isManualShelf(o);
-
-      // Manual always wins
-      if (nManual && !oManual) {
-        out[i] = {
-          ...o,
-          ...n,
-          firstSeenUtc: o.firstSeenUtc ?? nowIso,
-          lastSeenUtc: nowIso,
-          maxStrengthSeen: Math.max(oMax, nStrength),
-        };
-        merged = true;
-        break;
-      }
-
-      // If both manual or both auto: only replace if strong enough margin
-      const shouldReplace =
-        (nStrength >= (oMax + REPLACE_MARGIN_PTS));
-
-      if (shouldReplace) {
-        out[i] = {
-          ...o,
-          ...n,
-          firstSeenUtc: o.firstSeenUtc ?? nowIso,
-          lastSeenUtc: nowIso,
-          maxStrengthSeen: Math.max(oMax, nStrength),
-        };
-      } else {
-        // keep old, but mark it seen
-        out[i] = {
-          ...o,
-          lastSeenUtc: nowIso,
-          maxStrengthSeen: oMax,
-        };
-      }
-
-      merged = true;
-      break;
-    }
-
-    if (!merged) {
-      out.push({
-        ...n,
-        firstSeenUtc: n.firstSeenUtc ?? nowIso,
-        lastSeenUtc: nowIso,
-        maxStrengthSeen: Number(n.strength ?? 0),
-      });
-    }
-  }
-
-  return out;
-}
-
-/**
- * ✅ Final selection: exactly 1 Acc + 1 Dist
- * - Manual shelves win
- * - Otherwise strongest wins
- * - Tie-breaker: tighter width wins
- */
-function pickBestPerTypeStable(levels, type) {
-  const items = (Array.isArray(levels) ? levels : [])
-    .filter((x) => normalizeType(x?.type) === type)
-    .map((x) => {
-      const r = normalizeRange(x?.priceRange);
-      const width = r?.width ?? Infinity;
-      const manual = isManualShelf(x) ? 1 : 0;
-      const strength = Number(x?.strength ?? 0);
-      const maxSeen = Number(x?.maxStrengthSeen ?? strength);
-      return { x, width, manual, strength, maxSeen };
+function manualStructureRanges(manualStructures) {
+  return (manualStructures || [])
+    .map((m) => {
+      const r = Array.isArray(m?.manualRange) ? m.manualRange : m?.priceRange;
+      const rr = rangeFromPriceRange(r);
+      return rr ? { hi: rr.hi, lo: rr.lo } : null;
     })
-    .filter((o) => o.width !== Infinity);
-
-  if (!items.length) return null;
-
-  items.sort((a, b) => {
-    // manual first
-    if (b.manual !== a.manual) return b.manual - a.manual;
-
-    // then maxStrengthSeen
-    if (b.maxSeen !== a.maxSeen) return b.maxSeen - a.maxSeen;
-
-    // then current strength
-    if (b.strength !== a.strength) return b.strength - a.strength;
-
-    // then tighter width
-    return a.width - b.width;
-  });
-
-  return items[0].x;
+    .filter(Boolean);
 }
+
+function filterLiveLevelsByManualAndWidth(levelsLive, manualStructures) {
+  const manual = manualStructureRanges(manualStructures);
+  const kept = [];
+
+  for (const z of levelsLive || []) {
+    const tier = String(z?.tier ?? "");
+    if (tier !== "structure") {
+      kept.push(z);
+      continue;
+    }
+
+    const r = rangeFromPriceRange(z?.priceRange);
+    if (!r) {
+      kept.push(z);
+      continue;
+    }
+
+    const overlapsManual = manual.some((m) => rangesOverlap(r.hi, r.lo, m.hi, m.lo));
+    if (overlapsManual) continue;
+
+    if (r.width > STRUCT_AUTO_MAX_WIDTH_PTS) continue;
+
+    kept.push(z);
+  }
+
+  return kept;
+}
+
+/* ---------------- Sticky registry (AUTO ONLY) ---------------- */
+
+function loadSticky() {
+  try {
+    if (!fs.existsSync(STICKY_FILE))
+      return { ok: true, meta: { created_at_utc: isoNow() }, structures: [] };
+    const raw = fs.readFileSync(STICKY_FILE, "utf8");
+    const json = JSON.parse(raw);
+    return {
+      ok: true,
+      meta: json?.meta ?? { created_at_utc: isoNow() },
+      structures: Array.isArray(json?.structures) ? json.structures : [],
+    };
+  } catch {
+    return { ok: true, meta: { created_at_utc: isoNow(), recovered: true }, structures: [] };
+  }
+}
+
+function saveSticky(store) {
+  fs.mkdirSync(path.dirname(STICKY_FILE), { recursive: true });
+  fs.writeFileSync(STICKY_FILE, JSON.stringify(store, null, 2), "utf8");
+}
+
+function isManualLike(s) {
+  return !!(
+    s &&
+    (s.rangeSource === "manual" ||
+      (Array.isArray(s.manualRange) && s.manualRange.length === 2) ||
+      (typeof s.structureKey === "string" && s.structureKey.startsWith("MANUAL|")))
+  );
+}
+
+function stripManualFromRegistryStore(store) {
+  const structures = (store?.structures || []).filter((s) => !isManualLike(s));
+  return { ...(store || {}), structures };
+}
+
+function structureKeyFromRange(hi, lo) {
+  const qHi = snapStep(hi, STICKY_ROUND_STEP);
+  const qLo = snapStep(lo, STICKY_ROUND_STEP);
+  return `SPY|mixed|hi=${qHi?.toFixed(2)}|lo=${qLo?.toFixed(2)}`;
+}
+
+/* ---------------- NEW: build AUTO negotiated zones ----------------
+   We create a derived object that looks like a manual NEG zone:
+   - id includes |NEG|
+   - isNegotiated true
+   - priceRange = acceptance.displayPriceRange
+*/
+function buildAutoNegotiatedZone({ parentId, parentStrength, parentConfidence, acceptance }) {
+  const pr = acceptance?.displayPriceRange;
+  if (!Array.isArray(pr) || pr.length !== 2) return null;
+
+  const hi = Number(pr[0]);
+  const lo = Number(pr[1]);
+  if (!Number.isFinite(hi) || !Number.isFinite(lo) || !(hi > lo)) return null;
+
+  const key = `AUTO|SPY|NEG|${lo.toFixed(2)}-${hi.toFixed(2)}|PARENT=${parentId}`;
+
+  return {
+    type: "institutional",
+    tier: "structure_sticky",
+    priceRange: [round2(hi), round2(lo)],
+    displayPriceRange: [round2(hi), round2(lo)],
+    strength: parentStrength,
+    strength_raw: parentStrength,
+    confidence: parentConfidence,
+    isNegotiated: true,
+    details: {
+      id: key,
+      facts: {
+        negotiated: {
+          source: "auto_detected",
+          parentId,
+          coverage: acceptance.coverage,
+          closesInZone: acceptance.closesInZone,
+          displayWidthPts: acceptance.displayWidthPts,
+        },
+      },
+    },
+  };
+}
+
+/* ---------------- main ---------------- */
 
 async function main() {
-  try {
-    console.log("[SHELVES] Fetching bars (DEEP)…");
+  const manualStructures = loadManualStructures();
 
-    const [bars15mRaw, bars30mRaw, bars1hRaw] = await Promise.all([
-      getBarsFromPolygonDeep(SYMBOL, "15m", DAYS_15M),
-      getBarsFromPolygonDeep(SYMBOL, "30m", DAYS_30M),
-      getBarsFromPolygonDeep(SYMBOL, "1h", DAYS_1H),
+  try {
+    const [bars30mRaw, bars1hRaw] = await Promise.all([
+      getBarsFromPolygonDeep("SPY", "30m", DAYS_30M),
+      getBarsFromPolygonDeep("SPY", "1h", DAYS_1H),
     ]);
 
-    const bars15m = normalizeBars(bars15mRaw || []);
-    const bars30m = normalizeBars(bars30mRaw || []);
-    const bars1h = normalizeBars(bars1hRaw || []);
+    const bars30m = normalizeBars(bars30mRaw);
+    const bars1h = normalizeBars(bars1hRaw);
+    const bars4h = aggregateTo4h(bars1h);
 
-    const currentPriceAnchor =
-      lastFiniteClose(bars30m) ?? lastFiniteClose(bars1h);
+    const currentPrice =
+      (bars30m.length ? bars30m[bars30m.length - 1].close : null) ??
+      (bars1h.length ? bars1h[bars1h.length - 1].close : null);
 
-    if (!Number.isFinite(currentPriceAnchor)) {
-      console.warn("[SHELVES] No finite close found; skipping run safely.");
-      return;
+    let levelsEngineRaw = [];
+    try {
+      levelsEngineRaw = computeSmartMoneyLevels(bars30m, bars1h, bars4h) || [];
+    } catch {
+      levelsEngineRaw = [];
     }
 
-    const nowIso = isoNow();
-    console.log("[SHELVES] currentPriceAnchor:", round2(currentPriceAnchor));
+    let levelsLive = filterLiveLevelsByManualAndWidth(levelsEngineRaw, manualStructures);
 
-    const prevShelves = loadPrevShelves();
+    // add truth fields + negotiated marker + acceptance tightening
+    levelsLive = (levelsLive || []).map((z) => {
+      const raw = Number(z?.strength ?? NaN);
+      const conf = confidenceFromInstitutionalStrength(raw);
+      const id = String(z?.details?.id ?? "");
+      const notes = z?.details?.facts?.notes ?? z?.details?.notes ?? null;
+      const isNeg = id.includes("|NEG|") || (typeof notes === "string" && notes.toUpperCase().includes("NEGOTIATED"));
 
-    // manual shelves
-    const manualAll = loadManualShelves(nowIso);
-    const manualInBand = manualAll.filter((s) => withinBand(normalizeRange(s.priceRange), currentPriceAnchor, BAND_POINTS));
+      const tight = tightenDisplayRangeByCloseDensity(bars1h, z?.priceRange);
 
-    // converted shelves (structures <85 -> shelves)
-    const convertedAll = convertStructuresToShelves(nowIso, currentPriceAnchor);
-    const convertedInBand = convertedAll.filter((s) => withinBand(normalizeRange(s.priceRange), currentPriceAnchor, BAND_POINTS));
-
-    // auto shelves from scanner
-    console.log("[SHELVES] Running shelves scanner (Acc/Dist)…");
-    const shelvesRaw =
-      computeShelves({
-        bars10m: bars15m,
-        bars30m,
-        bars1h,
-        bandPoints: BAND_POINTS,
-      }) || [];
-
-    const shelvesBand = shelvesRaw.filter((s) => withinBand(normalizeRange(s?.priceRange), currentPriceAnchor, BAND_POINTS));
-
-    // manual wins overlap (same type)
-    const autoNoOverlap = removeAutosOverlappingManualSameType(shelvesBand, manualInBand);
-
-    // map auto shelves into 65–89 and preserve truth fields
-    const autoMapped = autoNoOverlap
-      .map((s) => {
-        const type = normalizeType(s?.type);
-        if (!type) return null;
-
-        const r = normalizeRange(s?.priceRange);
-        if (!r) return null;
-
-        const raw = Number(s?.strength_raw ?? s?.strength ?? 75);
-        const conf = Number.isFinite(Number(s?.confidence))
-          ? clamp01(Number(s.confidence))
-          : confidenceFromRawStrength(raw);
-
-        const strength = mapShelfStrengthFromConfidence(conf);
-
-        return {
-          type,
-          priceRange: [r.hi, r.lo],
-          strength,
-          strength_raw: Number.isFinite(raw) ? round2(raw) : null,
-          confidence: round2(conf),
-          rangeSource: "auto",
-          firstSeenUtc: nowIso,
-          lastSeenUtc: nowIso,
-          maxStrengthSeen: strength,
-        };
-      })
-      .filter(Boolean);
-
-    const currentShelves = [...manualInBand, ...convertedInBand, ...autoMapped];
-
-    // stable persistence merge
-    const withMemory = mergeWithMemoryStable(currentShelves, prevShelves, currentPriceAnchor, nowIso);
-
-    // suppress shelves that overlap institutional zones (>=85)
-    const instRanges = loadInstitutionalRangesForSuppression();
-    const suppressed = withMemory.filter((s) => {
-      const r = normalizeRange(s?.priceRange);
-      if (!r) return false;
-      const overlapsInst = instRanges.some((z) => overlapRatio(r.hi, r.lo, z.hi, z.lo) >= 0.25);
-      return !overlapsInst;
+      return {
+        ...z,
+        strength_raw: Number.isFinite(raw) ? round2(raw) : null,
+        confidence: round2(conf),
+        isNegotiated: !!isNeg,
+        displayPriceRange: tight?.displayPriceRange ?? z?.priceRange,
+        details: {
+          ...(z.details ?? {}),
+          facts: {
+            ...(z.details?.facts ?? {}),
+            ...(tight ? { acceptanceTightened: true, acceptance: tight } : {}),
+          },
+        },
+      };
     });
 
-    // DEBUG: top candidates before final pick
-    const levels_debug = suppressed
+    // Sticky candidates: structure + strong micro
+    const stickyCandidates = levelsLive.filter((z) => {
+      const t = z?.tier ?? "";
+      if (t === "structure") return true;
+      if (t === "micro" && Number(z?.strength ?? 0) >= STICKY_INCLUDE_MICRO_MIN_STRENGTH) return true;
+      return false;
+    });
+
+    // registry load/update
+    let store = stripManualFromRegistryStore(loadSticky());
+    const list = (store.structures || []).slice();
+    const nowIso = isoNow();
+
+    const byKey = new Map();
+    for (const s of list) if (s?.structureKey) byKey.set(s.structureKey, s);
+
+    for (const z of stickyCandidates || []) {
+      const pr = z?.priceRange;
+      if (!Array.isArray(pr) || pr.length !== 2) continue;
+
+      const hi = Number(pr[0]);
+      const lo = Number(pr[1]);
+      if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi <= lo) continue;
+
+      if (manualOverlapsAny(manualStructures, hi, lo)) continue;
+      if ((hi - lo) > STRUCT_AUTO_MAX_WIDTH_PTS) continue;
+
+      const key = structureKeyFromRange(hi, lo);
+      const existing = byKey.get(key);
+
+      if (existing) {
+        existing.lastSeenUtc = nowIso;
+        existing.timesSeen = Number(existing.timesSeen ?? 0) + 1;
+        existing.maxStrengthSeen = Math.max(Number(existing.maxStrengthSeen ?? 0), Number(z.strength ?? 0));
+        existing.status = "active";
+      } else {
+        const entry = {
+          structureKey: key,
+          priceRange: [round2(hi), round2(lo)],
+          firstSeenUtc: nowIso,
+          lastSeenUtc: nowIso,
+          timesSeen: 1,
+          maxStrengthSeen: Number(z.strength ?? 0),
+          status: "active",
+          stickyConfirmed: false,
+          confirmedUtc: null,
+          exits: [],
+          distinctExitCount: 0,
+        };
+        list.push(entry);
+        byKey.set(key, entry);
+      }
+    }
+
+    // save registry (AUTO ONLY)
+    const newStore = {
+      ok: true,
+      meta: { ...(store.meta ?? {}), updated_at_utc: nowIso },
+      structures: list.filter((s) => !isManualLike(s)),
+    };
+    saveSticky(newStore);
+
+    // manual first
+    const emittedManual = (manualStructures || []).map((m) => {
+      const isNeg = !!m.isNegotiated;
+      const pr = m.manualRange ?? m.priceRange;
+      return {
+        type: "institutional",
+        tier: "structure_sticky",
+        priceRange: pr,
+        displayPriceRange: pr,
+        strength: 100,
+        strength_raw: 100,
+        confidence: 1,
+        isNegotiated: isNeg,
+        details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
+      };
+    });
+
+    // autos next (capped within band)
+    const bandLo = Number.isFinite(currentPrice) ? currentPrice - STICKY_KEEP_WITHIN_BAND_PTS : -Infinity;
+    const bandHi = Number.isFinite(currentPrice) ? currentPrice + STICKY_KEEP_WITHIN_BAND_PTS : Infinity;
+
+    const autosWithinBand = list
+      .filter((s) => s?.status === "active")
+      .filter((s) => {
+        const pr = s.priceRange;
+        if (!Array.isArray(pr) || pr.length !== 2) return false;
+        const hi = Math.max(Number(pr[0]), Number(pr[1]));
+        const lo = Math.min(Number(pr[0]), Number(pr[1]));
+        if (!(hi >= bandLo && lo <= bandHi)) return false;
+        return !manualOverlapsAny(manualStructures, hi, lo);
+      })
+      .sort((a, b) => Number(b.maxStrengthSeen ?? 0) - Number(a.maxStrengthSeen ?? 0))
+      .slice(0, STICKY_MAX_WITHIN_BAND);
+
+    const emittedAutos = [];
+    const emittedAutoNegotiated = [];
+
+    for (const s of autosWithinBand) {
+      const raw = round2(Number(s.maxStrengthSeen ?? 0));
+      const conf = round2(confidenceFromInstitutionalStrength(raw));
+
+      const tight = tightenDisplayRangeByCloseDensity(bars1h, s.priceRange);
+
+      const parentObj = {
+        type: "institutional",
+        tier: "structure_sticky",
+        priceRange: s.priceRange,
+        displayPriceRange: tight?.displayPriceRange ?? s.priceRange,
+        strength: raw,
+        strength_raw: raw,
+        confidence: conf,
+        isNegotiated: false,
+        details: {
+          id: s.structureKey,
+          facts: {
+            sticky: s,
+            ...(tight ? { acceptanceTightened: true, acceptance: tight } : {}),
+          },
+        },
+      };
+
+      emittedAutos.push(parentObj);
+
+      // ✅ NEW: if tight core exists and is strong enough, emit NEG zone too
+      if (
+        tight &&
+        Number(tight.coverage ?? 0) >= DENSITY_TARGET_COVERAGE &&
+        Number(tight.displayWidthPts ?? 999) <= DENSITY_MAX_TIGHT_WIDTH &&
+        Number(tight.closesInZone ?? 0) >= DENSITY_MIN_CLOSES
+      ) {
+        const neg = buildAutoNegotiatedZone({
+          parentId: s.structureKey,
+          parentStrength: raw,
+          parentConfidence: conf,
+          acceptance: tight,
+        });
+        if (neg) emittedAutoNegotiated.push(neg);
+      }
+    }
+
+    const levels_debug = levelsLive
       .slice()
-      .sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0))
+      .sort((a, b) => Number(b?.strength_raw ?? 0) - Number(a?.strength_raw ?? 0))
       .slice(0, DEBUG_LEVELS_COUNT);
-
-    // FINAL: exactly 1 accumulation + 1 distribution
-    const bestAcc = pickBestPerTypeStable(suppressed, "accumulation");
-    const bestDist = pickBestPerTypeStable(suppressed, "distribution");
-
-    const finalLevels = [];
-    if (bestAcc) finalLevels.push(bestAcc);
-    if (bestDist) finalLevels.push(bestDist);
 
     const payload = {
       ok: true,
       meta: {
-        generated_at_utc: nowIso,
-        symbol: SYMBOL,
-        band_points: BAND_POINTS,
-        current_price_anchor: round2(currentPriceAnchor),
+        generated_at_utc: isoNow(),
+        current_price: Number.isFinite(currentPrice) ? round2(currentPrice) : null,
+        lookback_days: { "30m": DAYS_30M, "1h": DAYS_1H },
+        manual_file: path.basename(MANUAL_FILE),
+        manual_structures_loaded: manualStructures.length,
         institutional_min: INSTITUTIONAL_MIN,
-        shelf_persist_hours: SHELF_PERSIST_HOURS,
-        replace_margin_pts: REPLACE_MARGIN_PTS,
-        converted_structures_in_band: convertedInBand.length,
-        manual_in_band: manualInBand.length,
-        auto_in_band: autoMapped.length,
+        smz_prime_min: SMZ_PRIME_MIN,
         debug_levels_count: DEBUG_LEVELS_COUNT,
+        acceptance_density: {
+          lookback_1h_bars: DENSITY_LOOKBACK_1H_BARS,
+          target_coverage: DENSITY_TARGET_COVERAGE,
+          max_tight_width: DENSITY_MAX_TIGHT_WIDTH,
+        },
+        auto_negotiated_emitted: emittedAutoNegotiated.length,
       },
-      levels: finalLevels,
+      levels: levelsLive,
       levels_debug,
+      pockets_active: [],
+      // ✅ IMPORTANT: negotiated zones come AFTER parents in the array (overlay handles z-index)
+      structures_sticky: [...emittedManual, ...emittedAutos, ...emittedAutoNegotiated],
     };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
     fs.writeFileSync(OUTFILE, JSON.stringify(payload, null, 2), "utf8");
-
-    console.log("[SHELVES] Saved shelves to:", OUTFILE);
-    console.log("[SHELVES] Job complete. levels:", finalLevels.length, "debug:", levels_debug.length);
+    console.log("[SMZ] Saved:", OUTFILE);
   } catch (err) {
-    console.error("[SHELVES] FAILED:", err);
+    // fallback: manual only
+    const manualStructures = loadManualStructures();
+    const fallbackStructuresSticky = (manualStructures || []).map((m) => {
+      const pr = m.manualRange ?? m.priceRange;
+      return {
+        type: "institutional",
+        tier: "structure_sticky",
+        priceRange: pr,
+        displayPriceRange: pr,
+        strength: 100,
+        strength_raw: 100,
+        confidence: 1,
+        isNegotiated: !!m.isNegotiated,
+        details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
+      };
+    });
+
+    const fallback = {
+      ok: true,
+      meta: {
+        generated_at_utc: isoNow(),
+        current_price: null,
+        manual_file: path.basename(MANUAL_FILE),
+        manual_structures_loaded: manualStructures.length,
+        note: "SMZ job error — emitted manual structures only",
+      },
+      levels: [],
+      levels_debug: [],
+      pockets_active: [],
+      structures_sticky: fallbackStructuresSticky,
+    };
+
+    fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
+    fs.writeFileSync(OUTFILE, JSON.stringify(fallback, null, 2), "utf8");
     process.exitCode = 1;
   }
 }
