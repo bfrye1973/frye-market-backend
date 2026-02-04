@@ -20,7 +20,7 @@ const DEFAULT_BAND_POINTS = 40;
 // shelf window scan
 const WINDOW_SIZES = [3, 5, 7];
 const SHELF_MIN_WIDTH = 0.5; // points
-const SHELF_MAX_WIDTH = 3.0; // points
+const SHELF_MAX_WIDTH = 2.0; // points
 const BODY_TO_RANGE_MAX = 0.55;
 const OVERLAP_RATIO_MIN = 0.7;
 
