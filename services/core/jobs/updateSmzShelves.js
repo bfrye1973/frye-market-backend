@@ -1,17 +1,20 @@
 // services/core/jobs/updateSmzShelves.js
 // Shelves Job — writes smz-shelves.json
 //
-// LOCKED USER RULES:
+// USER RULES (LOCKED):
 // - Institutional threshold = 85–100 (suppresses shelves inside by overlap filter)
-// - Any non-manual, non-NEG sticky structure with strength < 85 becomes a shelf
+// - Converted shelves: non-manual, non-NEG sticky structures with strength < 85
 // - Shelves persist 48 hours; revisit resets timer; stronger overlap replaces
 // - Manual shelves override autos
 // - Auto shelves come from scanner (computeShelves)
-// - Cluster + cap + no-touch preserved
+// - Shelves are NOT institutional and must NEVER be colored yellow (frontend rule)
 //
-// IMPORTANT FIXES:
-// - bars are normalized before using .close (prevents "No finite close")
-// - withinBand helper included (no ReferenceError)
+// BETA CHANGES (THIS FILE):
+// ✅ Preserve true shelf scoring:
+//   - strength_raw (0..100) from scanner (truth)
+//   - confidence (0..1) from scanner (truth)
+//   - strength mapped to 65..89 (policy band you tune)
+// ✅ Stops “everything becomes 89” by mapping from confidence instead of clamping 90–100 down to 89.
 
 import fs from "fs";
 import path from "path";
@@ -28,16 +31,19 @@ const MANUAL_FILE = path.resolve(__dirname, "../data/smz-manual-shelves.json");
 const LEVELS_FILE = path.resolve(__dirname, "../data/smz-levels.json");
 
 const SYMBOL = "SPY";
+
+// NOTE: you can tune this later; leaving as-is for your current beta environment
 const BAND_POINTS = 40;
 
 const DAYS_15M = 180;
 const DAYS_30M = 180;
 const DAYS_1H = 180;
 
-const SHELF_STRENGTH_LO = 60;
+// ✅ Beta policy bands
+const SHELF_STRENGTH_LO = 65;
 const SHELF_STRENGTH_HI = 89;
 
-const INSTITUTIONAL_MIN = 85;  // ✅ 85–100
+const INSTITUTIONAL_MIN = 85; // 85–100
 const SHELF_PERSIST_HOURS = 48;
 
 const SHELF_CLUSTER_OVERLAP = 0.55;
@@ -51,6 +57,25 @@ function clampInt(x, lo, hi) {
   const n = Math.round(Number(x));
   if (!Number.isFinite(n)) return lo;
   return Math.max(lo, Math.min(hi, n));
+}
+function clamp01(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+// Map confidence (0..1) -> shelf band (65..89)
+function mapShelfStrengthFromConfidence(conf) {
+  const c = clamp01(conf);
+  const mapped = Math.round(SHELF_STRENGTH_LO + (SHELF_STRENGTH_HI - SHELF_STRENGTH_LO) * c);
+  return clampInt(mapped, SHELF_STRENGTH_LO, SHELF_STRENGTH_HI);
+}
+
+// Fallback if confidence missing: raw scanner score 40..100 -> 0..1
+function confidenceFromRawStrength(raw) {
+  const r = Number(raw);
+  if (!Number.isFinite(r)) return 0;
+  return clamp01((r - 40) / 60);
 }
 
 function normalizeBars(raw) {
@@ -193,29 +218,38 @@ function convertStructuresToShelves(nowIso) {
     for (const z of arr) {
       const id = String(z?.details?.id ?? z?.structureKey ?? "");
       if (id.includes("|NEG|")) continue;
-      if (id.startsWith("MANUAL|")) continue; // user controls manual institutionals
+      if (id.startsWith("MANUAL|")) continue;
 
       const sRaw = Number(z?.strength ?? NaN);
       if (!Number.isFinite(sRaw)) continue;
-      if (sRaw >= INSTITUTIONAL_MIN) continue; // 85+ stays institutional
+      if (sRaw >= INSTITUTIONAL_MIN) continue;
 
       const r = normalizeRange(z?.priceRange);
       if (!r) continue;
 
       const facts = z?.details?.facts ?? {};
       const exitSide = facts?.exitSide1h ?? null;
+
       const type =
         exitSide === "below" ? "distribution" :
         exitSide === "above" ? "accumulation" :
         "accumulation";
 
-      const strength = clampInt(sRaw, SHELF_STRENGTH_LO, SHELF_STRENGTH_HI);
+      // treat structure strength (0..100) as confidence proxy
+      const conf = clamp01(sRaw / 100);
+      const strength = mapShelfStrengthFromConfidence(conf);
 
       out.push({
         type,
         priceRange: [r.hi, r.lo],
+
+        // policy score
         strength,
+
+        // truth fields
         strength_raw: round2(sRaw),
+        confidence: round2(conf),
+
         rangeSource: "converted_structure",
         comment: `Converted from structure (${round2(sRaw)})`,
         firstSeenUtc: nowIso,
@@ -250,12 +284,20 @@ function loadManualShelves(nowIso) {
 
         const scoreOverride = Number.isFinite(Number(s?.scoreOverride)) ? Number(s.scoreOverride) : null;
         const base = scoreOverride ?? Number(s?.strength ?? 75);
+
+        // manual shelves still follow policy band
         const strength = clampInt(base, SHELF_STRENGTH_LO, SHELF_STRENGTH_HI);
+
+        // give manual shelves confidence for consistency (best-effort)
+        const conf = confidenceFromRawStrength(strength);
 
         return {
           type,
           priceRange: [r.hi, r.lo],
           strength,
+          strength_raw: null,
+          confidence: round2(conf),
+
           rangeSource: "manual",
           locked: true,
           scoreOverride,
@@ -279,7 +321,7 @@ function removeAutosOverlappingManualSameType(autoLevels, manualLevels) {
   if (!Array.isArray(autoLevels) || !autoLevels.length) return [];
   if (!Array.isArray(manualLevels) || !manualLevels.length) return autoLevels;
 
-  const out = autoLevels.filter((a) => {
+  return autoLevels.filter((a) => {
     const at = normalizeType(a?.type);
     if (!at) return false;
 
@@ -298,8 +340,6 @@ function removeAutosOverlappingManualSameType(autoLevels, manualLevels) {
 
     return !overlapsSameTypeManual;
   });
-
-  return out;
 }
 
 // clustering + cap + no-touch (kept)
@@ -337,8 +377,10 @@ function pickBestOfType(items, type) {
       const ma = isManualShelf(a) ? 1 : 0;
       const mb = isManualShelf(b) ? 1 : 0;
       if (mb !== ma) return mb - ma;
+
       const sb = Number(b?.strength ?? 0) - Number(a?.strength ?? 0);
       if (sb !== 0) return sb;
+
       const aw = normalizeRange(a?.priceRange)?.width ?? Infinity;
       const bw = normalizeRange(b?.priceRange)?.width ?? Infinity;
       return aw - bw;
@@ -514,10 +556,9 @@ async function main() {
 
     const bars15m = normalizeBars(bars15mRaw || []);
     const bars30m = normalizeBars(bars30mRaw || []);
-    const bars1h  = normalizeBars(bars1hRaw || []);
+    const bars1h = normalizeBars(bars1hRaw || []);
 
-    const currentPriceAnchor =
-      lastFiniteClose(bars30m) ?? lastFiniteClose(bars1h);
+    const currentPriceAnchor = lastFiniteClose(bars30m) ?? lastFiniteClose(bars1h);
 
     if (!Number.isFinite(currentPriceAnchor)) {
       console.warn("[SHELVES] No finite close found; skipping run safely.");
@@ -552,18 +593,32 @@ async function main() {
     // manual wins overlap (same type)
     const autoNoOverlap = removeAutosOverlappingManualSameType(shelvesBand, manualInBand);
 
-    // remap auto strengths into 60–89 and normalize object shape
+    // ✅ MAP auto shelves into 65–89 using confidence, and preserve truth fields
     const autoMapped = autoNoOverlap
       .map((s) => {
         const type = normalizeType(s?.type);
         if (!type) return null;
+
         const r = normalizeRange(s?.priceRange);
         if (!r) return null;
-        const strength = clampInt(Number(s?.strength ?? 75), SHELF_STRENGTH_LO, SHELF_STRENGTH_HI);
+
+        // scanner truth
+        const raw = Number(s?.strength_raw ?? s?.strength ?? 75);
+        const conf = Number.isFinite(Number(s?.confidence))
+          ? clamp01(Number(s.confidence))
+          : confidenceFromRawStrength(raw);
+
+        // policy score
+        const strength = mapShelfStrengthFromConfidence(conf);
+
         return {
           type,
           priceRange: [r.hi, r.lo],
-          strength,
+
+          strength, // policy 65..89
+          strength_raw: Number.isFinite(raw) ? round2(raw) : null,
+          confidence: round2(conf),
+
           rangeSource: "auto",
           firstSeenUtc: nowIso,
           lastSeenUtc: nowIso,
