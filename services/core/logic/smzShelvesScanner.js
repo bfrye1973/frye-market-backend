@@ -7,10 +7,13 @@
 //
 // UPDATED (per user):
 // - Relevance must be 5–7 days, with most weight on last 3 days
-// - Type (accumulation vs distribution) must be decided by RECENT BEHAVIOR, not breakout direction
+// - Type (accumulation vs distribution) decided by RECENT BEHAVIOR, not breakout direction
 //
-// Output (additive diagnostic only):
-// { type, price, priceRange:[high,low], strength, diagnostic:{...} }
+// OUTPUT (beta truth fields):
+// - strength_raw: 0..100 (raw scanner score)
+// - confidence:   0..1   (diagnostic confidence = rel strength)
+// - strength:     same as strength_raw (for backward compatibility)
+//   NOTE: The shelves job will map into 65..89 policy band.
 
 const DEFAULT_BAND_POINTS = 40;
 
@@ -234,11 +237,10 @@ function detectAllTimeHighMode(bars, currentPrice, atr) {
   if (!Number.isFinite(maxHigh) || !Number.isFinite(currentPrice)) return { athMode: false, maxHigh: null };
   const eps = Math.max(0.25, atr * ATH_EPS_ATR);
   const athMode = currentPrice >= maxHigh - eps;
-  return { athMode, maxHigh: Number.isFinite(maxHigh) ? maxHigh : null };
+  return { athMode, maxHigh: Number.isFinite(maxHigh) ? round2(maxHigh) : null };
 }
 
 // ---------- relevance metrics (5–7 days, weighted to last 3) ----------
-// ✅ UPDATED Q3 + Q5 HERE ONLY
 function computeBehaviorOverWindow(bars, hi, lo, startIdx) {
   const H = Math.max(hi, lo);
   const L = Math.min(hi, lo);
@@ -251,23 +253,23 @@ function computeBehaviorOverWindow(bars, hi, lo, startIdx) {
   let acceptNear = 0;
   let rejectFar = 0;
 
-  // ✅ Q3: wick-touch frequency counters (THIS is the key change)
-  let upperWickTouches = 0; // repeated rejection at top edge
-  let lowerWickTouches = 0; // repeated rejection at bottom edge (or liquidity grabs)
+  // wick-touch frequency counters
+  let upperWickTouches = 0;
+  let lowerWickTouches = 0;
 
   // Failed pushes (stronger “trap” signals)
   let failedPushUp = 0;
   let failedPushDown = 0;
 
-  // ✅ Q5: acceptance requires sustained closes + progress
-  let closesAbove = 0; // closes above zone (beyond tol)
-  let closesBelow = 0; // closes below zone (beyond tol)
+  // sustained closes beyond zone edges
+  let closesAbove = 0;
+  let closesBelow = 0;
 
   // Progress over time
   let firstClose = null;
   let lastClose = null;
 
-  // Stall tracking (time passes but no extension)
+  // Stall tracking
   const mid = (H + L) / 2;
   let bestUp = 0;
   let bestDn = 0;
@@ -282,23 +284,20 @@ function computeBehaviorOverWindow(bars, hi, lo, startIdx) {
     if (firstClose == null) firstClose = c;
     lastClose = c;
 
-    // old near/far (for visibility)
+    // legacy near/far
     const near = c >= (L - tol) && c <= (H + tol);
     if (near) acceptNear++;
     else rejectFar++;
 
-    // ✅ Q3: wick-touch frequency (not wick size)
-    // upper wick touch: price traded into/above top edge but did NOT close above it
+    // wick-touch frequency (not wick size)
     if (b.high >= H && c <= H) upperWickTouches++;
-
-    // lower wick touch: price traded into/below bottom edge but did NOT close below it
     if (b.low <= L && c >= L) lowerWickTouches++;
 
-    // failed pushes (strong)
+    // failed pushes
     if (b.high > H && c < H) failedPushUp++;
     if (b.low < L && c > L) failedPushDown++;
 
-    // ✅ Q5: sustained closes beyond zone edges (acceptance/rejection proof)
+    // sustained closes beyond
     if (c > (H + tol)) closesAbove++;
     if (c < (L - tol)) closesBelow++;
 
@@ -310,34 +309,22 @@ function computeBehaviorOverWindow(bars, hi, lo, startIdx) {
   const acceptanceRate = total ? acceptNear / total : 0;
   const rejectionRate = total ? rejectFar / total : 0;
 
-  // wick touch rates
   const upperTouchRate = total ? upperWickTouches / total : 0;
   const lowerTouchRate = total ? lowerWickTouches / total : 0;
 
-  // wick bias (frequency-based)
   let wickBias = "neutral";
   if (upperWickTouches >= lowerWickTouches + 2) wickBias = "distribution";
   else if (lowerWickTouches >= upperWickTouches + 2) wickBias = "accumulation";
 
-  // net progress over time (simple, human-readable)
   const netProgressSigned = (firstClose != null && lastClose != null) ? (lastClose - firstClose) : 0;
 
-  // stall score (higher means more stall)
   const netExcursionPts = Math.max(bestUp, bestDn);
   const progNorm = clamp(netExcursionPts / (width * 3), 0, 1);
   const stallScore = 1 - progNorm;
 
-  // sustained close threshold
   const sustainMin = Math.max(2, Math.floor(total * 0.15));
   const sustainedClosesAbove = closesAbove >= sustainMin;
   const sustainedClosesBelow = closesBelow >= sustainMin;
-
-  // ✅ New Q5 interpretation
-  // - If price repeatedly tests but cannot sustain closes through the edge → rejection
-  // - If price can sustain closes through the edge → acceptance (for that side)
-  //
-  // For distribution we care about: failedPushUp + upperWickTouches + stall + no sustainedClosesAbove
-  // For accumulation we care about: failedPushDown + lowerWickTouches + stall + no sustainedClosesBelow
 
   const distScore =
     0.35 * clamp(upperTouchRate, 0, 1) +
@@ -353,33 +340,26 @@ function computeBehaviorOverWindow(bars, hi, lo, startIdx) {
 
   return {
     samples: total,
-
-    // legacy visibility
     acceptanceRate: round2(acceptanceRate),
     rejectionRate: round2(rejectionRate),
 
-    // ✅ Q3
     upperWickTouches,
     lowerWickTouches,
     upperTouchRate: round2(upperTouchRate),
     lowerTouchRate: round2(lowerTouchRate),
     wickBias,
 
-    // traps
     failedPushUp,
     failedPushDown,
 
-    // ✅ Q5
     closesAbove,
     closesBelow,
     sustainedClosesAbove,
     sustainedClosesBelow,
     netProgressSignedPts: round2(netProgressSigned),
 
-    // stall
     stallScore: round2(stallScore),
 
-    // final behavior scores (0..1)
     distScore: round2(clamp(distScore, 0, 1)),
     accScore: round2(clamp(accScore, 0, 1)),
   };
@@ -433,16 +413,13 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
       const sIdx = endIdx - win + 1;
       const slice = b10.slice(sIdx, endIdx + 1);
 
-      let hi = -Infinity,
-        lo = Infinity;
-      let bodySum = 0,
-        rangeSum = 0,
-        inside = 0,
-        cnt = 0;
+      let hi = -Infinity, lo = Infinity;
+      let bodySum = 0, rangeSum = 0, inside = 0, cnt = 0;
 
       for (const b of slice) {
         hi = Math.max(hi, b.high);
         lo = Math.min(lo, b.low);
+
         const body = Math.abs(b.close - b.open);
         const range = b.high - b.low;
         bodySum += body;
@@ -471,14 +448,13 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
       const br = detectBreakout(b10, endIdx, hi, lo, center, atr);
       if (br.dir === "none") continue;
 
-      // Formation type (for reference only)
+      // Formation type (reference only; final type comes from relevance)
       let typeFormation = null;
       if (br.dir === "up") typeFormation = "accumulation";
       else typeFormation = "distribution";
 
-      // scoring (unchanged)
-      let strongLower = 0,
-        strongUpper = 0;
+      // wick score (formation)
+      let strongLower = 0, strongUpper = 0;
       for (const b of slice) {
         const bodyHi = Math.max(b.open, b.close);
         const bodyLo = Math.min(b.open, b.close);
@@ -551,12 +527,11 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
 
   const mergedAll = mergeShelves(candidates);
 
-  // ✅ HARD GUARD: merging can create monster shelves. Enforce width AFTER merge.
+  // HARD GUARD: merging can create monster shelves. Enforce width AFTER merge.
   const mergedAllTight = mergedAll.filter((s) => {
     const hi = Number(s?.priceRange?.[0]);
     const lo = Number(s?.priceRange?.[1]);
     if (!Number.isFinite(hi) || !Number.isFinite(lo)) return false;
-
     const width = Math.abs(hi - lo);
     return width >= SHELF_MIN_WIDTH && width <= SHELF_MAX_WIDTH;
   });
@@ -570,23 +545,33 @@ export function computeShelves({ bars10m, bars30m, bars1h, bandPoints = DEFAULT_
 
   if (!merged.length) return [];
 
+  // normalize to strongest in-band shelf
   let max = 0;
   for (const s of merged) max = Math.max(max, s._score);
   if (max <= 0) max = 1;
 
   const out = merged
     .map((s) => {
-      const rel = s._score / max;
-      const strength = Math.round(40 + 60 * rel);
+      const rel = clamp(s._score / max, 0, 1); // 0..1
+      const strength_raw = Math.round(40 + 60 * rel); // 40..100 raw scanner
+      const confidence = Math.round(rel * 1000) / 1000; // 0..1 with 3 decimals
+
       return {
         type: s.type,
         price: Number(s.price.toFixed(2)),
         priceRange: [Number(s.priceRange[0].toFixed(2)), Number(s.priceRange[1].toFixed(2))],
-        strength,
+
+        // backward compatible
+        strength: strength_raw,
+
+        // beta truth fields
+        strength_raw,
+        confidence,
+
         diagnostic: s._diag,
       };
     })
-    .sort((a, b) => b.strength - a.strength)
+    .sort((a, b) => (b.strength_raw ?? b.strength ?? 0) - (a.strength_raw ?? a.strength ?? 0))
     .slice(0, MAX_SHELVES_OUT);
 
   return out;
