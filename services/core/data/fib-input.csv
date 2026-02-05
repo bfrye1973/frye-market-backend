@@ -1,4 +1,4 @@
-Symbol,degree,tf,wave,kind,datetime_az,price	
+symbol,degree,tf,wave,kind,datetime_az,price	
 SPY,	primary,	1d,	W1,	LOW,,			
 SPY,	primary,	1d,	W1,	HIGH,,			
 SPY,	primary,	1d,	W4, LOW,	11/21/2025 10:00,	655.52	
