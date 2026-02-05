@@ -1,24 +1,28 @@
 // src/services/core/jobs/updateFibLevels.js
-// Engine 2 — Multi-degree, multi-wave fib job (AZ-time aware + waveMarks passthrough)
+// Engine 2 — Reads SIMPLE anchors file and generates fib-levels.json safely
 //
-// Reads:  data/fib-manual-anchors.json
-// Writes: data/fib-levels.json (overwrites placeholder)
-// Supports: degree (primary/intermediate/minor/minute) + wave (W1/W4)
+// INPUT (easy): data/fib-anchors-simple.json
+// OUTPUT (engine): data/fib-levels.json
+//
+// - Supports degrees: primary/intermediate/minor/minute
+// - Supports waves: W1 and W4
+// - Converts AZ time strings -> tSec
+// - Passes marks -> waveMarks with tSec
+// - Computes fib using w1.low/high or w4.low/high if present
+//
 // Candle truth source: backend-1 /api/v1/ohlc
 
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-
 import { computeFibFromAnchors, normalizeBars } from "../logic/fibEngine.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const MANUAL_FILE = path.resolve(__dirname, "../data/fib-manual-anchors.json");
+const SIMPLE_FILE = path.resolve(__dirname, "../data/fib-anchors-simple.json");
 const OUTFILE = path.resolve(__dirname, "../data/fib-levels.json");
 
-// Candle truth
 const API_BASE = process.env.FRYE_API_BASE || `http://127.0.0.1:${process.env.PORT || 3001}`;
 const OHLC_PATH = "/api/v1/ohlc";
 
@@ -35,11 +39,7 @@ function atomicWriteJson(filepath, obj) {
   fs.renameSync(tmp, filepath);
 }
 
-// AZ time parser: Phoenix is UTC-7 year-round (no DST).
-// Accepts:
-// - "YYYY-MM-DD HH:MM"
-// - "YYYY-MM-DD HH:MM:SS"
-// - ISO with timezone already ("...Z" or "...-07:00")
+// Phoenix is UTC-7 year-round (no DST)
 function azToEpochSeconds(t) {
   if (!t) return null;
 
@@ -50,39 +50,35 @@ function azToEpochSeconds(t) {
   const s = String(t).trim();
   if (!s) return null;
 
+  // Already ISO w/ timezone
   if (s.includes("T") && (s.endsWith("Z") || s.match(/[+-]\d\d:\d\d$/))) {
     const ms = Date.parse(s);
     return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
   }
 
+  // "YYYY-MM-DD HH:MM" -> append -07:00
   const isoLocal = s.replace(" ", "T");
   const withSeconds = isoLocal.length === 16 ? `${isoLocal}:00` : isoLocal;
   const ms = Date.parse(`${withSeconds}-07:00`);
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
-function normPoint(pt) {
-  if (!pt || typeof pt !== "object") return null;
-  const p = Number(pt.p);
+function normTP(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  const p = Number(obj.p);
   if (!Number.isFinite(p)) return null;
-  const tSec = azToEpochSeconds(pt.t);
-  return { p, t: pt.t ?? null, tSec: Number.isFinite(tSec) ? tSec : null };
+  const t = obj.t ?? null;
+  const tSec = azToEpochSeconds(t);
+  return { p, t, tSec: Number.isFinite(tSec) ? tSec : null };
 }
 
-function normWaveMarks(marks) {
-  if (!marks || typeof marks !== "object") return null;
+function normMarks(marks) {
   const out = {};
+  if (!marks || typeof marks !== "object") return null;
   for (const k of Object.keys(marks)) {
-    const m = marks[k];
-    if (!m || typeof m !== "object") continue;
-    const p = Number(m.p ?? m.price);
-    if (!Number.isFinite(p)) continue;
-    const tSec = azToEpochSeconds(m.t ?? m.time);
-    out[k] = {
-      p,
-      t: (m.t ?? m.time) || null,
-      tSec: Number.isFinite(tSec) ? tSec : null,
-    };
+    const tp = normTP(marks[k]);
+    if (!tp) continue;
+    out[k] = tp;
   }
   return Object.keys(out).length ? out : null;
 }
@@ -110,142 +106,110 @@ async function fetchOhlcBars({ symbol, tf }) {
   return normalizeBars(rawBars || []);
 }
 
-function pickActiveAnchors(anchors) {
-  const list = Array.isArray(anchors) ? anchors : [];
-  return list.filter((a) => {
-    if (!a) return false;
-    if (a.active !== true) return false;
-
-    const wave = String(a.wave || "").toUpperCase();
-    if (!["W1", "W4"].includes(wave)) return false;
-
-    if (!a.symbol || !a.tf || !a.degree) return false;
-
-    const low = Number(a.low);
-    const high = Number(a.high);
-    const hasLowHigh = Number.isFinite(low) && Number.isFinite(high) && high > low;
-
-    const A = normPoint(a.a);
-    const B = normPoint(a.b);
-    const hasAB = A && B && Number.isFinite(A.p) && Number.isFinite(B.p) && A.p !== B.p;
-
-    return hasLowHigh || hasAB;
+function pushItem(items, computed, metaExtra, anchorsExtra) {
+  items.push({
+    ...computed,
+    meta: {
+      ...(computed.meta || {}),
+      schema: "fib-levels@3",
+      ...metaExtra,
+      generated_at_utc: computed?.meta?.generated_at_utc || new Date().toISOString(),
+    },
+    anchors: {
+      ...(computed.anchors || {}),
+      ...anchorsExtra,
+    },
   });
 }
 
-function resolveLowHigh(a) {
-  const low = Number(a.low);
-  const high = Number(a.high);
-  if (Number.isFinite(low) && Number.isFinite(high) && high > low) {
-    return { low, high };
-  }
-
-  const A = normPoint(a.a);
-  const B = normPoint(a.b);
-  if (A && B) {
-    const lo = Math.min(A.p, B.p);
-    const hi = Math.max(A.p, B.p);
-    if (hi > lo) return { low: lo, high: hi };
-  }
-
-  return null;
-}
-
 (async function main() {
-  const started = new Date().toISOString();
-  console.log(`[fib] updateFibLevels start ${started}`);
-  console.log(`[fib] API_BASE=${API_BASE}`);
+  console.log(`[fib] updateFibLevels start ${new Date().toISOString()}`);
 
-  if (!fs.existsSync(MANUAL_FILE)) {
+  if (!fs.existsSync(SIMPLE_FILE)) {
     atomicWriteJson(OUTFILE, {
       ok: false,
       reason: "NO_ANCHORS",
-      message: "fib-manual-anchors.json not found",
+      message: "fib-anchors-simple.json not found",
       meta: { schema: "fib-levels@3", generated_at_utc: new Date().toISOString() },
       items: [],
     });
-    console.log(`[fib] wrote ${OUTFILE} (NO_ANCHORS: missing manual file)`);
+    console.log(`[fib] wrote ${OUTFILE} (missing simple file)`);
     process.exit(0);
   }
 
-  const manual = readJson(MANUAL_FILE);
-  const active = pickActiveAnchors(manual?.anchors);
+  const simple = readJson(SIMPLE_FILE);
+  const symbols = simple?.symbols || {};
+  const spy = symbols?.SPY;
 
-  if (!active.length) {
+  if (!spy) {
     atomicWriteJson(OUTFILE, {
       ok: false,
       reason: "NO_ANCHORS",
-      message: "No active anchors found. Need active:true + wave W1/W4 + (low/high) or (a/b).",
+      message: "No SPY section found in fib-anchors-simple.json",
       meta: { schema: "fib-levels@3", generated_at_utc: new Date().toISOString() },
       items: [],
     });
-    console.log(`[fib] wrote ${OUTFILE} (NO_ANCHORS: none active)`);
+    console.log(`[fib] wrote ${OUTFILE} (no SPY)`);
     process.exit(0);
   }
 
+  const degrees = ["primary", "intermediate", "minor", "minute"];
   const items = [];
 
-  for (const a of active) {
-    const symbol = String(a.symbol).toUpperCase();
-    const tf = String(a.tf).toLowerCase();
-    const degree = String(a.degree).toLowerCase();
-    const wave = String(a.wave).toUpperCase();
+  for (const degree of degrees) {
+    const cfg = spy[degree];
+    if (!cfg) continue;
 
-    const resolved = resolveLowHigh(a);
-    if (!resolved) {
-      items.push({
-        ok: false,
-        reason: "BAD_ANCHORS",
-        message: "Could not resolve low/high from anchor record (need low/high or a/b points).",
-        meta: { schema: "fib-levels@3", symbol, tf, degree, wave, generated_at_utc: new Date().toISOString() },
-      });
-      continue;
-    }
+    const tf = String(cfg.tf || "").toLowerCase();
+    if (!tf) continue;
 
-    let bars = [];
-    try {
-      bars = await fetchOhlcBars({ symbol, tf });
-    } catch (err) {
-      items.push({
-        ok: false,
-        reason: "OHLC_FETCH_FAILED",
-        message: String(err?.message || err),
-        meta: { schema: "fib-levels@3", symbol, tf, degree, wave, generated_at_utc: new Date().toISOString() },
-      });
-      continue;
-    }
+    const marks = normMarks(cfg.marks);
 
-    const computed = computeFibFromAnchors({
-      symbol,
-      tf,
-      anchorLow: resolved.low,
-      anchorHigh: resolved.high,
-      context: a.context ?? null,
-      bars,
-    });
+    // Build W1 fib if low/high exists
+    const w1Low = normTP(cfg?.w1?.low);
+    const w1High = normTP(cfg?.w1?.high);
 
-    const A = normPoint(a.a);
-    const B = normPoint(a.b);
-    const waveMarks = normWaveMarks(a.waveMarks);
-
-    items.push({
-      ...computed,
-      meta: {
-        ...(computed.meta || {}),
-        schema: "fib-levels@3",
-        symbol,
+    if (w1Low && w1High && w1High.p > w1Low.p) {
+      const bars = await fetchOhlcBars({ symbol: "SPY", tf });
+      const computed = computeFibFromAnchors({
+        symbol: "SPY",
         tf,
-        degree,
-        wave,
-        generated_at_utc: computed?.meta?.generated_at_utc || new Date().toISOString(),
-      },
-      anchors: {
-        ...(computed.anchors || {}),
-        a: A,
-        b: B,
-        waveMarks,
-      },
-    });
+        anchorLow: w1Low.p,
+        anchorHigh: w1High.p,
+        context: "W2",
+        bars,
+      });
+
+      pushItem(
+        items,
+        computed,
+        { symbol: "SPY", tf, degree, wave: "W1" },
+        { a: w1Low, b: w1High, waveMarks: marks }
+      );
+    }
+
+    // Build W4 fib if low/high exists
+    const w4Low = normTP(cfg?.w4?.low);
+    const w4High = normTP(cfg?.w4?.high);
+
+    if (w4Low && w4High && w4High.p > w4Low.p) {
+      const bars = await fetchOhlcBars({ symbol: "SPY", tf });
+      const computed = computeFibFromAnchors({
+        symbol: "SPY",
+        tf,
+        anchorLow: w4Low.p,
+        anchorHigh: w4High.p,
+        context: "W4",
+        bars,
+      });
+
+      pushItem(
+        items,
+        computed,
+        { symbol: "SPY", tf, degree, wave: "W4" },
+        { a: w4Low, b: w4High, waveMarks: marks }
+      );
+    }
   }
 
   atomicWriteJson(OUTFILE, {
