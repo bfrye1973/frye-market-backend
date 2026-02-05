@@ -1,24 +1,29 @@
-symbol,degree,tf,wave,kind,datetime_az,price
-SPY,primary,1d,MARK,W1,2025-05-19 11:00,590.57
-SPY,primary,1d,MARK,W2,2025-05-27 11:00,573.24
-SPY,primary,1d,MARK,W3,2026-12-29 11:00,687.24
-SPY,primary,1d,MARK,W4,2025-11-21 10:00,655.62
-
-SPY,intermediate,1h,W1,LOW,2025-12-11 10:00,657.01
-SPY,intermediate,1h,W1,HIGH,2025-12-11 10:00,683.35
-SPY,intermediate,1h,MARK,W1,2025-12-11 10:00,688.94
-SPY,intermediate,1h,MARK,W2,2025-12-19 11:00,675.41
-
-SPY,minor,1h,W1,LOW,2025-12-26 10:00,675.28
-SPY,minor,1h,W1,HIGH,2026-01-13 06:00,690.69
-SPY,minor,1h,W4,LOW,2026-11-14 08:00,688.30
-SPY,minor,1h,W4,HIGH,2026-01-13 06:00,697.24
-SPY,minor,1h,MARK,W1,2025-12-26 10:00,690.43
-SPY,minor,1h,MARK,W2,2026-01-02 10:00,683.01
-SPY,minor,1h,MARK,W3,2026-01-13 06:00,697.20
-SPY,minor,1h,MARK,W4,2026-11-14 08:00,688.30
-
-SPY,minute,10m,W1,LOW,2026-01-15 10:00,688.29
-SPY,minute,10m,W1,HIGH,2026-01-15 10:00,695.42
-SPY,minute,10m,MARK,W1,2026-01-15 10:00,695.11
-SPY,minute,10m,MARK,W2,2026-01-16 08:00,690.21
+mbol,	degree,	tf,	wave,	kind,	datetime_az,	price	
+SPY,	primary,	1d,	W1,	LOW			
+SPY,	primary,	1d,	W1,	HIGH			
+SPY,	primary,	1d,	W4, LOW,	11/21/2025 10:00,	655.52	
+SPY,	primary,	1d,	W4,	HIGH,	12/29/2025 11:00,	687.24	
+SPY,  primary,	1d,	MARK,	W1,	5/19/2025 11:00,	590.57	
+SPY,	primary,	1d,	MARK,	W2,	5/27/2025 11:00,	573.24	
+SPY,	primary,	1d,	MARK,	W3,	10/29/2025 11:00,	687.24	
+SPY,	primary,	1d,	MARK,	W4,	11/21/2025 10:00,	655.62	
+SPY,	intermediate,	1h,	W1,	LOW,	12/18/2025 10:00,	671.58	
+SPY,	intermediate,	1h,	W1,	HIGH,	12/11/2025 10:00,	686	
+SPY,	intermediate,	1h,	W4,	LOW,			
+SPY,	intermediate,	1h,	W4,	HIGH,			
+SPY,  intermediate,	1h,	MARK,	W1,	12/11/2025 8:00,	688.94	
+SPY, 	intermediate,	1h,	MARK,	W2,	12/19/2025 11:00,	675.41	
+SPY,	intermediate,	1h,	MARK,	W3,			
+SPY,	intermediat,e	1h,	MARK,	W4,		
+SPY,	minor,	1h,	W1,	LOW,	1/21/2026 10:00,	679.89	
+SPY,	minor,	1h,	W1,	HIGH,	1/13/2026 6:00,	697.24	
+SPY,	minor,	1h,	W4,	LOW,	 11/14/2025 8:00,	679.50	
+SPY,	minor,	1h,	W4,	HIGH,	1/13/2026 6:00,	697.24	
+SPY,	minor,	1h,	MARK,	W1,	1/13/2026 6:00,	697.24	
+SPY,	minor,	1h,	MARK,	W2,	1/21/2026 10:00,	679.89	
+SPY,	minor,	1h,	MARK,	W3,	1/29/2026 6:00,	697.57	
+SPY,	minor,	1h,	MARK,	W4,	2/5/2026 8:00, 679.5	
+SPY,	minute,	10m,	W1,	LOW,	
+SPY,	minute,	10m,	W1,	HIGH,			
+SPY,	minute,	10m, MARK,	W1,			
+SPY,  minute,	10m, MARK,	W2,			
