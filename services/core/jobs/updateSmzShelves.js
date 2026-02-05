@@ -1,20 +1,21 @@
 // services/core/jobs/updateSmzShelves.js
 // Shelves Job — writes smz-shelves.json
 //
-// ✅ LOCKED OUTPUT RULE (Phase 2 - Interval Shelves):
-// - Build institutional "lanes" (intervals) from smz-levels institutional parents (non-NEG).
-// - For EACH interval, emit ONLY:
-//    - 1 best Accumulation shelf
-//    - 1 best Distribution shelf
-//
-// ✅ Stability:
-// - Shelves persist 48 hours.
-// - Only replaced if NEW overlapping shelf beats old by a margin.
+// ✅ GOAL (LOCKED):
+// - Shelves are stable context zones between institutional parents.
+// - Emit 1 best Acc + 1 best Dist per institutional interval.
+// - Persist 48 hours, only replace if clearly stronger.
 // - Manual shelves override autos.
+// - Shelves NEVER yellow (frontend rule).
 //
-// ✅ Shelves NEVER yellow (frontend rule)
+// ✅ FIXES INCLUDED:
+// - Interval selection using Engine1 institutional anchors (smz-levels.json)
+// - 48h persistence + replace margin guard
+// - Final SAME-TYPE overlap de-dupe (prevents double distribution near 691)
+// - Keeps levels_debug for audit
 //
-// ✅ Keeps levels_debug for audit.
+// NOTE:
+// - Max shelf width is handled in smzShelvesScanner.js (you already set max width = 2.0 there)
 
 import fs from "fs";
 import path from "path";
@@ -32,25 +33,30 @@ const LEVELS_FILE = path.resolve(__dirname, "../data/smz-levels.json");
 
 const SYMBOL = "SPY";
 
-// Keep your current band until you want to tighten later
+// You can tighten later (6–10 recommended), but leaving as-is per your current beta
 const BAND_POINTS = 40;
 
 const DAYS_15M = 180;
 const DAYS_30M = 180;
 const DAYS_1H = 180;
 
+// Shelf display band (policy)
 const SHELF_STRENGTH_LO = 65;
 const SHELF_STRENGTH_HI = 89;
 
+// Institutional threshold (for suppression + anchor selection)
 const INSTITUTIONAL_MIN = 85;
+
+// Persistence
 const SHELF_PERSIST_HOURS = 48;
 
-// replacement margin for stability (prevents flipping)
+// Stability guard: only replace if new is >= oldMax + margin
 const REPLACE_MARGIN_PTS = 3;
 
+// Debug
 const DEBUG_LEVELS_COUNT = 25;
 
-// interval cap (prevents clutter even if many parents exist)
+// Prevent too many intervals cluttering output
 const MAX_INTERVALS_OUT = 6;
 
 const isoNow = () => new Date().toISOString();
@@ -61,16 +67,21 @@ function clampInt(x, lo, hi) {
   if (!Number.isFinite(n)) return lo;
   return Math.max(lo, Math.min(hi, n));
 }
+
 function clamp01(x) {
   const n = Number(x);
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.min(1, n));
 }
+
+// Map confidence (0..1) -> shelf band (65..89)
 function mapShelfStrengthFromConfidence(conf) {
   const c = clamp01(conf);
   const mapped = Math.round(SHELF_STRENGTH_LO + (SHELF_STRENGTH_HI - SHELF_STRENGTH_LO) * c);
   return clampInt(mapped, SHELF_STRENGTH_LO, SHELF_STRENGTH_HI);
 }
+
+// If confidence missing: raw scanner score 40..100 -> 0..1
 function confidenceFromRawStrength(raw) {
   const r = Number(raw);
   if (!Number.isFinite(r)) return 0;
@@ -173,11 +184,11 @@ function priceInside(price, r) {
 }
 
 /**
- * Institutional parent "anchors" used to create intervals.
- * We use smz-levels structures_sticky:
- * - must be institutional parent (not NEG)
- * - prefer displayPriceRange if present
- * - include manual and strong autos (>=85)
+ * Institutional anchors from Engine1 output:
+ * - from smz-levels.json structures_sticky
+ * - exclude negotiated
+ * - include manual, and autos >=85
+ * - prefer displayPriceRange if present (tighter is more correct)
  */
 function loadInstitutionalAnchors(currentPriceAnchor) {
   if (!fs.existsSync(LEVELS_FILE)) return [];
@@ -194,31 +205,33 @@ function loadInstitutionalAnchors(currentPriceAnchor) {
       if (id.includes("|NEG|")) continue;
 
       const s = Number(z?.strength_raw ?? z?.strength);
-      // allow manual (100) and strong autos (>=85)
       if (!Number.isFinite(s)) continue;
-      if (s < INSTITUTIONAL_MIN && !id.startsWith("MANUAL|")) continue;
+
+      // manual always allowed; autos only if institutional strength
+      const isManual = id.startsWith("MANUAL|");
+      if (!isManual && s < INSTITUTIONAL_MIN) continue;
 
       const r = normalizeRange(z?.displayPriceRange ?? z?.priceRange);
       if (!r) continue;
 
-      // only keep anchors within band neighborhood (stops far-away anchors exploding intervals)
+      // only anchors near current band (prevents far-away anchors creating extra intervals)
       if (!withinBand(r, currentPriceAnchor, BAND_POINTS)) continue;
 
-      anchors.push({ id, ...r, strength: s });
+      anchors.push({ id, ...r, strength: s, isManual });
     }
 
-    // sort by mid price
     anchors.sort((a, b) => a.mid - b.mid);
 
-    // de-dupe near-identical mids
+    // merge near-identical midpoints (keep stronger/manual)
     const out = [];
     for (const a of anchors) {
       if (!out.length) out.push(a);
       else {
         const prev = out[out.length - 1];
         if (Math.abs(a.mid - prev.mid) < 0.25) {
-          // keep stronger
-          if (a.strength > prev.strength) out[out.length - 1] = a;
+          const aRank = (a.isManual ? 1000 : 0) + a.strength;
+          const pRank = (prev.isManual ? 1000 : 0) + prev.strength;
+          if (aRank > pRank) out[out.length - 1] = a;
         } else out.push(a);
       }
     }
@@ -230,50 +243,40 @@ function loadInstitutionalAnchors(currentPriceAnchor) {
 }
 
 /**
- * Build intervals between anchors:
- * boundary = midpoint between adjacent anchor mids
- * interval i = [boundary(i-1), boundary(i)]
+ * Build intervals between anchors using midpoint boundaries.
+ * Intervals are within the overall band around current price.
  */
 function buildIntervalsFromAnchors(anchors, currentPriceAnchor) {
-  if (!anchors.length) {
-    // single "global" interval if no anchors found
-    const lo = round2(currentPriceAnchor - BAND_POINTS);
-    const hi = round2(currentPriceAnchor + BAND_POINTS);
-    return [{ key: "GLOBAL", lo, hi }];
-  }
+  const bandLo = round2(currentPriceAnchor - BAND_POINTS);
+  const bandHi = round2(currentPriceAnchor + BAND_POINTS);
+
+  if (!anchors.length) return [{ key: "GLOBAL", lo: bandLo, hi: bandHi }];
 
   const mids = anchors.map((a) => a.mid);
-
   const boundaries = [];
-  for (let i = 0; i < mids.length - 1; i++) {
-    boundaries.push(round2((mids[i] + mids[i + 1]) / 2));
-  }
+  for (let i = 0; i < mids.length - 1; i++) boundaries.push(round2((mids[i] + mids[i + 1]) / 2));
 
   const intervals = [];
 
-  // first interval: band low to first boundary
-  intervals.push({
-    key: `I0`,
-    lo: round2(currentPriceAnchor - BAND_POINTS),
-    hi: boundaries[0] ?? round2(currentPriceAnchor + BAND_POINTS),
-  });
+  // first
+  intervals.push({ key: "I0", lo: bandLo, hi: boundaries[0] ?? bandHi });
 
+  // middle + last
   for (let i = 1; i < mids.length; i++) {
-    const lo = boundaries[i - 1] ?? round2(currentPriceAnchor - BAND_POINTS);
-    const hi = boundaries[i] ?? round2(currentPriceAnchor + BAND_POINTS);
+    const lo = boundaries[i - 1] ?? bandLo;
+    const hi = boundaries[i] ?? bandHi;
     intervals.push({ key: `I${i}`, lo, hi });
   }
 
-  // Keep only intervals that actually intersect the band (safety)
-  const bandLo = currentPriceAnchor - BAND_POINTS;
-  const bandHi = currentPriceAnchor + BAND_POINTS;
-
-  const filtered = intervals.filter((it) => it.hi >= bandLo && it.lo <= bandHi);
-
-  // Cap output intervals
-  return filtered.slice(0, MAX_INTERVALS_OUT);
+  // keep only intervals that intersect band; cap count
+  return intervals
+    .filter((it) => it.hi >= bandLo && it.lo <= bandHi)
+    .slice(0, MAX_INTERVALS_OUT);
 }
 
+/**
+ * Institutional suppression ranges (>=85, non-NEG)
+ */
 function loadInstitutionalRangesForSuppression() {
   if (!fs.existsSync(LEVELS_FILE)) return [];
   try {
@@ -283,66 +286,15 @@ function loadInstitutionalRangesForSuppression() {
 
     return arr
       .filter((z) => {
-        const id = String(z?.details?.id ?? z?.structureKey ?? "");
+        const id = String(z?.details?.id ?? "");
         if (z?.isNegotiated === true) return false;
         if (id.includes("|NEG|")) return false;
-        const s = Number(z?.strength ?? NaN);
+        const s = Number(z?.strength_raw ?? z?.strength);
         return Number.isFinite(s) && s >= INSTITUTIONAL_MIN;
       })
       .map((z) => normalizeRange(z?.displayPriceRange ?? z?.priceRange))
       .filter(Boolean)
       .map((r) => ({ hi: r.hi, lo: r.lo }));
-  } catch {
-    return [];
-  }
-}
-
-function convertStructuresToShelves(nowIso, currentPriceAnchor) {
-  if (!fs.existsSync(LEVELS_FILE)) return [];
-  try {
-    const raw = fs.readFileSync(LEVELS_FILE, "utf8");
-    const json = JSON.parse(raw);
-    const arr = Array.isArray(json?.structures_sticky) ? json.structures_sticky : [];
-
-    const out = [];
-    for (const z of arr) {
-      const id = String(z?.details?.id ?? z?.structureKey ?? "");
-      if (z?.isNegotiated === true) continue;
-      if (id.includes("|NEG|")) continue;
-      if (id.startsWith("MANUAL|")) continue;
-
-      const sRaw = Number(z?.strength ?? NaN);
-      if (!Number.isFinite(sRaw)) continue;
-      if (sRaw >= INSTITUTIONAL_MIN) continue;
-
-      const r = normalizeRange(z?.displayPriceRange ?? z?.priceRange);
-      if (!r) continue;
-
-      // trader-safe type: overhead=distribution, under=accumulation
-      let type = "accumulation";
-      if (Number.isFinite(currentPriceAnchor)) {
-        if (r.lo > currentPriceAnchor) type = "distribution";
-        else if (r.hi < currentPriceAnchor) type = "accumulation";
-      }
-
-      const conf = clamp01(sRaw / 100);
-      const strength = mapShelfStrengthFromConfidence(conf);
-
-      out.push({
-        type,
-        priceRange: [r.hi, r.lo],
-        strength,
-        strength_raw: round2(sRaw),
-        confidence: round2(conf),
-        rangeSource: "converted_structure",
-        comment: `Converted from structure (${round2(sRaw)})`,
-        firstSeenUtc: nowIso,
-        lastSeenUtc: nowIso,
-        maxStrengthSeen: strength,
-      });
-    }
-
-    return out;
   } catch {
     return [];
   }
@@ -395,6 +347,60 @@ function loadManualShelves(nowIso) {
   }
 }
 
+/**
+ * Convert weak structures (<85) to shelves (optional support)
+ * Type chosen trader-safe: overhead = distribution, under = accumulation.
+ */
+function convertStructuresToShelves(nowIso, currentPriceAnchor) {
+  if (!fs.existsSync(LEVELS_FILE)) return [];
+  try {
+    const raw = fs.readFileSync(LEVELS_FILE, "utf8");
+    const json = JSON.parse(raw);
+    const arr = Array.isArray(json?.structures_sticky) ? json.structures_sticky : [];
+
+    const out = [];
+    for (const z of arr) {
+      const id = String(z?.details?.id ?? "");
+      if (z?.isNegotiated === true) continue;
+      if (id.includes("|NEG|")) continue;
+      if (id.startsWith("MANUAL|")) continue;
+
+      const sRaw = Number(z?.strength_raw ?? z?.strength);
+      if (!Number.isFinite(sRaw)) continue;
+      if (sRaw >= INSTITUTIONAL_MIN) continue;
+
+      const r = normalizeRange(z?.displayPriceRange ?? z?.priceRange);
+      if (!r) continue;
+
+      let type = "accumulation";
+      if (Number.isFinite(currentPriceAnchor)) {
+        if (r.lo > currentPriceAnchor) type = "distribution";
+        else if (r.hi < currentPriceAnchor) type = "accumulation";
+      }
+
+      const conf = clamp01(sRaw / 100);
+      const strength = mapShelfStrengthFromConfidence(conf);
+
+      out.push({
+        type,
+        priceRange: [r.hi, r.lo],
+        strength,
+        strength_raw: round2(sRaw),
+        confidence: round2(conf),
+        rangeSource: "converted_structure",
+        comment: `Converted from structure (${round2(sRaw)})`,
+        firstSeenUtc: nowIso,
+        lastSeenUtc: nowIso,
+        maxStrengthSeen: strength,
+      });
+    }
+
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 function removeAutosOverlappingManualSameType(autoLevels, manualLevels) {
   if (!Array.isArray(autoLevels) || !autoLevels.length) return [];
   if (!Array.isArray(manualLevels) || !manualLevels.length) return autoLevels;
@@ -420,10 +426,13 @@ function removeAutosOverlappingManualSameType(autoLevels, manualLevels) {
   });
 }
 
+/**
+ * Stable 48h persistence merge with margin replace.
+ */
 function mergeWithMemoryStable(current, prev, currentPrice, nowIso) {
   const out = [];
 
-  // keep prev within band and not expired
+  // keep prev if in band and not expired
   for (const p of prev || []) {
     const r = normalizeRange(p?.priceRange);
     if (!r) continue;
@@ -440,7 +449,7 @@ function mergeWithMemoryStable(current, prev, currentPrice, nowIso) {
     out.push(keep);
   }
 
-  // merge in current detections with margin logic
+  // merge in current detections
   for (const n of current || []) {
     const rn = normalizeRange(n?.priceRange);
     if (!rn) continue;
@@ -467,6 +476,7 @@ function mergeWithMemoryStable(current, prev, currentPrice, nowIso) {
       const oMax = Number(o.maxStrengthSeen ?? o.strength ?? 0);
       const oManual = isManualShelf(o);
 
+      // manual always overrides
       if (nManual && !oManual) {
         out[i] = {
           ...o,
@@ -479,7 +489,8 @@ function mergeWithMemoryStable(current, prev, currentPrice, nowIso) {
         break;
       }
 
-      const shouldReplace = (nStrength >= (oMax + REPLACE_MARGIN_PTS));
+      // replace only if margin
+      const shouldReplace = nStrength >= (oMax + REPLACE_MARGIN_PTS);
 
       if (shouldReplace) {
         out[i] = {
@@ -510,10 +521,16 @@ function mergeWithMemoryStable(current, prev, currentPrice, nowIso) {
   return out;
 }
 
-function intervalContainsMid(interval, shelfMid) {
-  return shelfMid >= interval.lo && shelfMid <= interval.hi;
+/**
+ * Interval membership by mid price.
+ */
+function intervalContainsMid(interval, mid) {
+  return mid >= interval.lo && mid <= interval.hi;
 }
 
+/**
+ * Pick best per type inside interval.
+ */
 function pickBestPerTypeInInterval(levels, interval, type) {
   const items = (Array.isArray(levels) ? levels : [])
     .filter((x) => normalizeType(x?.type) === type)
@@ -526,8 +543,9 @@ function pickBestPerTypeInInterval(levels, interval, type) {
       const strength = Number(x?.strength ?? 0);
       const maxSeen = Number(x?.maxStrengthSeen ?? strength);
 
-      // prefer shelves closer to middle of interval to reduce edge spam
-      const distToCenter = Math.abs(r.mid - ((interval.lo + interval.hi) / 2));
+      // center preference reduces edge spam
+      const center = (interval.lo + interval.hi) / 2;
+      const distToCenter = Math.abs(r.mid - center);
 
       return { x, manual, strength, maxSeen, width: r.width, distToCenter };
     })
@@ -544,6 +562,50 @@ function pickBestPerTypeInInterval(levels, interval, type) {
   });
 
   return items[0].x;
+}
+
+/**
+ * FINAL cleanup: remove same-type overlapping shelves (prevents double distribution near 691)
+ * - If overlapRatio >= 0.25, keep stronger
+ * - Prefer auto over converted_structure on ties
+ */
+function dedupeOverlappingShelvesSameType(levels) {
+  const list = Array.isArray(levels) ? levels.slice() : [];
+
+  list.sort((a, b) => {
+    const sa = Number(a?.strength ?? 0);
+    const sb = Number(b?.strength ?? 0);
+    if (sb !== sa) return sb - sa;
+
+    const aAuto = String(a?.rangeSource) === "auto" ? 1 : 0;
+    const bAuto = String(b?.rangeSource) === "auto" ? 1 : 0;
+    if (bAuto !== aAuto) return bAuto - aAuto;
+
+    return 0;
+  });
+
+  const kept = [];
+  for (const s of list) {
+    const sr = normalizeRange(s?.priceRange);
+    if (!sr) continue;
+
+    const st = normalizeType(s?.type);
+    if (!st) continue;
+
+    const overlapsSameType = kept.some((k) => {
+      const kt = normalizeType(k?.type);
+      if (kt !== st) return false;
+
+      const kr = normalizeRange(k?.priceRange);
+      if (!kr) return false;
+
+      return overlapRatio(sr.hi, sr.lo, kr.hi, kr.lo) >= 0.25;
+    });
+
+    if (!overlapsSameType) kept.push(s);
+  }
+
+  return kept;
 }
 
 async function main() {
@@ -579,14 +641,17 @@ async function main() {
     const convertedAll = convertStructuresToShelves(nowIso, currentPriceAnchor);
     const convertedInBand = convertedAll.filter((s) => withinBand(normalizeRange(s.priceRange), currentPriceAnchor, BAND_POINTS));
 
-    // auto shelves
+    // auto shelves from scanner
     console.log("[SHELVES] Running shelves scanner…");
     const shelvesRaw =
       computeShelves({ bars10m: bars15m, bars30m, bars1h, bandPoints: BAND_POINTS }) || [];
 
     const shelvesBand = shelvesRaw.filter((s) => withinBand(normalizeRange(s?.priceRange), currentPriceAnchor, BAND_POINTS));
+
+    // manual wins overlap (same type)
     const autoNoOverlap = removeAutosOverlappingManualSameType(shelvesBand, manualInBand);
 
+    // map autos to policy strength
     const autoMapped = autoNoOverlap
       .map((s) => {
         const type = normalizeType(s?.type);
@@ -615,7 +680,7 @@ async function main() {
 
     const currentShelves = [...manualInBand, ...convertedInBand, ...autoMapped];
 
-    // stable memory merge
+    // stable persistence merge
     const withMemory = mergeWithMemoryStable(currentShelves, prevShelves, currentPriceAnchor, nowIso);
 
     // suppress shelves inside institutional parents
@@ -627,7 +692,7 @@ async function main() {
       return !overlapsInst;
     });
 
-    // debug candidates
+    // debug list (audit)
     const levels_debug = suppressed
       .slice()
       .sort((a, b) => Number(b?.strength ?? 0) - Number(a?.strength ?? 0))
@@ -637,25 +702,28 @@ async function main() {
     const anchors = loadInstitutionalAnchors(currentPriceAnchor);
     const intervals = buildIntervalsFromAnchors(anchors, currentPriceAnchor);
 
-    const finalLevels = [];
+    const picked = [];
     for (const it of intervals) {
       const bestAcc = pickBestPerTypeInInterval(suppressed, it, "accumulation");
       const bestDist = pickBestPerTypeInInterval(suppressed, it, "distribution");
-      if (bestAcc) finalLevels.push(bestAcc);
-      if (bestDist) finalLevels.push(bestDist);
+      if (bestAcc) picked.push(bestAcc);
+      if (bestDist) picked.push(bestDist);
     }
 
-    // de-dupe by range/type
+    // de-dupe exact duplicates first
     const seen = new Set();
     const dedup = [];
-    for (const s of finalLevels) {
+    for (const s of picked) {
       const r = normalizeRange(s?.priceRange);
       if (!r) continue;
-      const key = `${normalizeType(s?.type)}|${r.lo}-${r.hi}`;
+      const key = `${normalizeType(s?.type)}|${r.lo}-${r.hi}|${String(s?.rangeSource ?? "")}`;
       if (seen.has(key)) continue;
       seen.add(key);
       dedup.push(s);
     }
+
+    // FINAL de-dupe: remove same-type overlap stacks
+    const finalLevels = dedupeOverlappingShelvesSameType(dedup);
 
     const payload = {
       ok: true,
@@ -674,7 +742,7 @@ async function main() {
         institutional_anchors_in_band: anchors.length,
         intervals_out: intervals.length,
       },
-      levels: dedup,
+      levels: finalLevels,
       levels_debug,
     };
 
@@ -682,7 +750,7 @@ async function main() {
     fs.writeFileSync(OUTFILE, JSON.stringify(payload, null, 2), "utf8");
 
     console.log("[SHELVES] Saved:", OUTFILE);
-    console.log("[SHELVES] levels:", dedup.length, "debug:", levels_debug.length);
+    console.log("[SHELVES] levels:", finalLevels.length, "debug:", levels_debug.length);
   } catch (err) {
     console.error("[SHELVES] FAILED:", err);
     process.exitCode = 1;
