@@ -2,21 +2,9 @@
 // Engine 2 — Multi-degree, multi-wave fib job (AZ-time aware + waveMarks passthrough)
 //
 // Reads:  data/fib-manual-anchors.json
-// Writes: data/fib-levels.json
-//
-// Supports:
-// - degree: intermediate | minor | minute
-// - wave: W1 | W4
-// - active: true
-// - Anchor endpoints can be provided as either:
-//    A) low/high numbers
-//    B) a/b points with AZ time: { t:"YYYY-MM-DD HH:MM", p:number }
-//
-// NEW:
-// - Converts AZ time (America/Phoenix) to epoch seconds using fixed -07:00 offset
-// - Passes through anchor points + waveMarks into output so frontend can place labels on candles.
-//
-// Candle truth source (LOCKED): backend-1 /api/v1/ohlc
+// Writes: data/fib-levels.json (overwrites placeholder)
+// Supports: degree (primary/intermediate/minor/minute) + wave (W1/W4)
+// Candle truth source: backend-1 /api/v1/ohlc
 
 import fs from "fs";
 import path from "path";
@@ -30,7 +18,7 @@ const __dirname = path.dirname(__filename);
 const MANUAL_FILE = path.resolve(__dirname, "../data/fib-manual-anchors.json");
 const OUTFILE = path.resolve(__dirname, "../data/fib-levels.json");
 
-// backend-1 candle truth
+// Candle truth
 const API_BASE = process.env.FRYE_API_BASE || `http://127.0.0.1:${process.env.PORT || 3001}`;
 const OHLC_PATH = "/api/v1/ohlc";
 
@@ -55,7 +43,6 @@ function atomicWriteJson(filepath, obj) {
 function azToEpochSeconds(t) {
   if (!t) return null;
 
-  // If already a number-ish epoch seconds
   if (typeof t === "number" && Number.isFinite(t)) {
     return t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
   }
@@ -63,16 +50,13 @@ function azToEpochSeconds(t) {
   const s = String(t).trim();
   if (!s) return null;
 
-  // If ISO with timezone info, Date can parse it
   if (s.includes("T") && (s.endsWith("Z") || s.match(/[+-]\d\d:\d\d$/))) {
     const ms = Date.parse(s);
     return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
   }
 
-  // If "YYYY-MM-DD HH:MM" or "YYYY-MM-DD HH:MM:SS", treat as AZ and append -07:00
-  // Convert " " to "T"
   const isoLocal = s.replace(" ", "T");
-  const withSeconds = isoLocal.length === 16 ? `${isoLocal}:00` : isoLocal; // add :00 if missing seconds
+  const withSeconds = isoLocal.length === 16 ? `${isoLocal}:00` : isoLocal;
   const ms = Date.parse(`${withSeconds}-07:00`);
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
@@ -126,7 +110,6 @@ async function fetchOhlcBars({ symbol, tf }) {
   return normalizeBars(rawBars || []);
 }
 
-// Active anchors with valid wave W1/W4 and resolvable low/high
 function pickActiveAnchors(anchors) {
   const list = Array.isArray(anchors) ? anchors : [];
   return list.filter((a) => {
@@ -138,7 +121,6 @@ function pickActiveAnchors(anchors) {
 
     if (!a.symbol || !a.tf || !a.degree) return false;
 
-    // allow either low/high OR a/b points
     const low = Number(a.low);
     const high = Number(a.high);
     const hasLowHigh = Number.isFinite(low) && Number.isFinite(high) && high > low;
@@ -152,14 +134,12 @@ function pickActiveAnchors(anchors) {
 }
 
 function resolveLowHigh(a) {
-  // Prefer explicit low/high if present
   const low = Number(a.low);
   const high = Number(a.high);
   if (Number.isFinite(low) && Number.isFinite(high) && high > low) {
     return { low, high };
   }
 
-  // Else derive from a/b prices
   const A = normPoint(a.a);
   const B = normPoint(a.b);
   if (A && B) {
@@ -244,7 +224,6 @@ function resolveLowHigh(a) {
       bars,
     });
 
-    // Pass through points + waveMarks so frontend can place labels at correct candles.
     const A = normPoint(a.a);
     const B = normPoint(a.b);
     const waveMarks = normWaveMarks(a.waveMarks);
@@ -262,10 +241,9 @@ function resolveLowHigh(a) {
       },
       anchors: {
         ...(computed.anchors || {}),
-        // keep low/high/direction/context from engine
         a: A,
         b: B,
-        waveMarks: waveMarks,
+        waveMarks,
       },
     });
   }
