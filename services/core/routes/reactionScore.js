@@ -1,18 +1,23 @@
 // services/core/routes/reactionScore.js
 //
-// Engine 3 (Reaction) — thin wrapper that FIXES false NOT_IN_ZONE.
-// No behavioral scoring implemented here (still placeholders),
-// BUT we correctly resolve zone lo/hi and verify containment using Engine 1 truth.
+// Engine 3 (Reaction) — thin wrapper ONLY.
+// - Locks response fields
+// - Echoes resolved zone (id/source/lo/hi)
+// - Resolves zoneId via /engine5-context (active first, then render arrays)
+// - Uses meta.current_price for containment (prevents false NOT_IN_ZONE)
+// - Fetches bars via existing /api/v1/ohlc route
+// - Computes ATR locally (no new dependencies)
+// - Applies preset modes: scalp | swing | long (or strategyId mapping)
+// - Calls computeReactionQuality() (no math changes inside engine)
 //
-// Purpose:
-// - Lock response fields
-// - Echo resolved zone (id/source/lo/hi)
-// - Fix negotiated zoneId resolution
-// - Fix NOT_IN_ZONE false positives by using meta.current_price
+// IMPORTANT: This file is a wrapper. Engine 3 math lives in reactionQualityEngine.js.
 
 import express from "express";
+import { computeReactionQuality } from "../logic/reactionQualityEngine.js";
 
 export const reactionScoreRouter = express.Router();
+
+/* -------------------- helpers -------------------- */
 
 function toNum(x) {
   const n = Number(x);
@@ -30,12 +35,10 @@ async function fetchJson(url, { timeoutMs = 12000 } = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const r = await fetch(url, { signal: controller.signal });
+    const r = await fetch(url, { signal: controller.signal, cache: "no-store" });
     const text = await r.text();
     let json = null;
-    try {
-      json = JSON.parse(text);
-    } catch {}
+    try { json = JSON.parse(text); } catch {}
     return { ok: r.ok, status: r.status, json, text };
   } catch (e) {
     return { ok: false, status: 0, json: null, text: String(e?.message || e) };
@@ -61,7 +64,6 @@ function findZoneById(ctx, zoneId) {
     { z: act.shelf, source: "shelf_active" },
     { z: act.institutional, source: "institutional_active" },
   ];
-
   for (const c of activeCandidates) {
     if (c.z && String(c.z.id || "") === String(zoneId)) {
       return { ...c.z, _source: c.source };
@@ -75,7 +77,6 @@ function findZoneById(ctx, zoneId) {
     { arr: r.shelves, source: "shelves_render" },
     { arr: r.institutional, source: "institutional_render" },
   ];
-
   for (const a of arrays) {
     const list = Array.isArray(a.arr) ? a.arr : [];
     for (const z of list) {
@@ -88,32 +89,330 @@ function findZoneById(ctx, zoneId) {
   return null;
 }
 
+/* -------------------- preset mapping (LOCKED) -------------------- */
+
+// If caller provides mode=scalp|swing|long, we use it.
+// Else if caller provides strategyId, map it.
+// Else: default = swing (safe).
+function resolveMode({ mode, strategyId }) {
+  const m = (mode || "").toString().toLowerCase().trim();
+  if (m === "scalp" || m === "swing" || m === "long") return m;
+
+  const sid = (strategyId || "").toString().trim();
+  if (sid === "intraday_scalp@10m") return "scalp";
+  if (sid === "minor_swing@1h") return "swing";
+  if (sid === "intermediate_long@4h") return "long";
+
+  return "swing";
+}
+
+function presetOpts(mode) {
+  // These are the LOCKED defaults we agreed on.
+  if (mode === "scalp") {
+    return {
+      lookbackBars: 6,
+      windowBars: 2,          // evaluate 1–2 bars after touch (fast)
+      breakDepthAtr: 0.25,
+      reclaimWindowBars: 1
+    };
+  }
+  if (mode === "long") {
+    return {
+      lookbackBars: 25,
+      windowBars: 10,
+      breakDepthAtr: 0.25,
+      reclaimWindowBars: 5
+    };
+  }
+  // swing default
+  return {
+    lookbackBars: 15,
+    windowBars: 6,
+    breakDepthAtr: 0.25,
+    reclaimWindowBars: 3
+  };
+}
+
+/* -------------------- ATR (tiny, local) -------------------- */
+
+function computeATR14(bars, len = 14) {
+  // bars: chronological, {high, low, close}
+  if (!Array.isArray(bars) || bars.length < len + 2) return null;
+
+  const trs = [];
+  for (let i = 1; i < bars.length; i++) {
+    const h = bars[i].high, l = bars[i].low, pc = bars[i - 1].close;
+    if (![h, l, pc].every(Number.isFinite)) continue;
+    const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+    trs.push(tr);
+  }
+  if (trs.length < len) return null;
+
+  // Wilder smoothing
+  let atr = trs.slice(0, len).reduce((a, b) => a + b, 0) / len;
+  for (let i = len; i < trs.length; i++) {
+    atr = ((atr * (len - 1)) + trs[i]) / len;
+  }
+  return atr;
+}
+
+/* -------------------- reason codes (scalp-friendly) -------------------- */
+
+function buildReasonCodes({ inZone, rqe, mode }) {
+  const codes = [];
+  if (!inZone) {
+    codes.push("NOT_IN_ZONE");
+    return codes;
+  }
+
+  if (!rqe || rqe.flags?.NO_TOUCH || rqe.reason === "NO_TOUCH") {
+    codes.push("NO_TOUCH");
+    return codes;
+  }
+
+  // “quick intent” heuristics (do not change math, just explain)
+  // SLOW_REACTION: for scalp, if exitBars > 2
+  if (mode === "scalp" && Number.isFinite(rqe.exitBars) && rqe.exitBars > 2) {
+    codes.push("SLOW_REACTION");
+  }
+
+  // WEAK_DISPLACEMENT: raw ATR excursion too small
+  if (Number.isFinite(rqe.displacementAtrRaw) && rqe.displacementAtrRaw < (mode === "scalp" ? 0.15 : 0.20)) {
+    codes.push("WEAK_DISPLACEMENT");
+  }
+
+  if (rqe.structureState === "FAILURE") codes.push("FAILURE");
+  if (rqe.structureState === "FAKEOUT_RECLAIM") codes.push("RECLAIM");
+
+  return codes;
+}
+
+/* -------------------- route -------------------- */
+
 /**
- * GET /api/v1/reaction-score?symbol=SPY&tf=1h&zoneId=...&source=shelf&lo=...&hi=...
+ * GET /api/v1/reaction-score
  *
- * Behavior:
- * - If lo/hi provided -> use them
- * - Else if zoneId provided -> resolve lo/hi via /engine5-context (active first, then render arrays)
- * - Determine withinZone using meta.current_price
- * - reasonCodes:
- *    - [] if withinZone
- *    - ["NOT_IN_ZONE"] otherwise
+ * Required:
+ *   symbol=SPY
+ *   tf=10m|30m|1h|4h|1d  (we pass into /ohlc as timeframe)
  *
- * Scoring:
- * - Still placeholders (0) until full Engine 3 behavior is plugged back in.
+ * Optional:
+ *   mode=scalp|swing|long
+ *   strategyId=intraday_scalp@10m|minor_swing@1h|intermediate_long@4h
+ *
+ * Optional zone selection:
+ *   lo/hi OR zoneId (resolved through engine5-context)
+ *   source=institutional|shelf|negotiated (echo only)
  */
 reactionScoreRouter.get("/reaction-score", async (req, res) => {
-  const { symbol, tf, zoneId, source } = req.query;
-  const qLo = req.query.lo;
-  const qHi = req.query.hi;
+  try {
+    const { symbol, tf, zoneId, source, mode, strategyId } = req.query;
+    const qLo = req.query.lo;
+    const qHi = req.query.hi;
 
-  if (!symbol || !tf) {
-    return res.status(400).json({
+    if (!symbol || !tf) {
+      return res.status(400).json({
+        ok: false,
+        invalid: true,
+        reactionScore: 0,
+        structureState: "HOLD",
+        reasonCodes: ["MISSING_SYMBOL_OR_TF"],
+        zone: null,
+        rejectionSpeed: 0,
+        displacementAtr: 0,
+        reclaimOrFailure: 0,
+        touchQuality: 0,
+        samples: 0,
+        price: null,
+        atr: null,
+      });
+    }
+
+    const sym = String(symbol).toUpperCase();
+    const timeframe = String(tf);
+
+    const chosenMode = resolveMode({ mode, strategyId });
+    const p = presetOpts(chosenMode);
+
+    // Start with explicit lo/hi
+    let lo = toNum(qLo);
+    let hi = toNum(qHi);
+    let resolvedSource = source ? String(source) : null;
+
+    // Always use engine5-context for meta.current_price truth
+    const base = getBaseUrl(req);
+    const ctxUrl = `${base}/api/v1/engine5-context?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}`;
+    const ctxResp = await fetchJson(ctxUrl);
+
+    let ctx = null;
+    let currentPrice =
+      toNum(ctxResp.json?.meta?.current_price) ??
+      toNum(ctxResp.json?.meta?.currentPrice) ??
+      null;
+
+    if (ctxResp.ok && ctxResp.json) ctx = ctxResp.json;
+
+    // If lo/hi missing, resolve from zoneId via context
+    if ((lo == null || hi == null) && zoneId && ctx) {
+      const z = findZoneById(ctx, zoneId);
+      if (z) {
+        lo = toNum(z.lo);
+        hi = toNum(z.hi);
+        resolvedSource = resolvedSource || z._source || null;
+      }
+    }
+
+    const inZone = within(currentPrice, lo, hi);
+
+    const zone = {
+      id: zoneId ?? null,
+      source: resolvedSource,
+      lo,
+      hi,
+    };
+
+    // If not in zone OR zone bounds missing, return locked contract with NOT_IN_ZONE
+    if (!inZone || lo == null || hi == null) {
+      return res.json({
+        ok: true,
+        invalid: false,
+        reactionScore: 0,
+        structureState: "HOLD",
+        reasonCodes: ["NOT_IN_ZONE"],
+        zone,
+        rejectionSpeed: 0,
+        displacementAtr: 0,
+        reclaimOrFailure: 0,
+        touchQuality: 0,
+        samples: 0,
+        price: currentPrice,
+        atr: null,
+        mode: chosenMode,
+      });
+    }
+
+    // Fetch bars via existing OHLC endpoint
+    const ohlcUrl =
+      `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}` +
+      `&timeframe=${encodeURIComponent(timeframe)}` +
+      `&limit=${encodeURIComponent(200)}`;
+
+    const barsResp = await fetchJson(ohlcUrl);
+    if (!barsResp.ok || !Array.isArray(barsResp.json)) {
+      return res.status(502).json({
+        ok: false,
+        invalid: true,
+        reactionScore: 0,
+        structureState: "HOLD",
+        reasonCodes: ["BARS_UNAVAILABLE"],
+        zone,
+        rejectionSpeed: 0,
+        displacementAtr: 0,
+        reclaimOrFailure: 0,
+        touchQuality: 0,
+        samples: 0,
+        price: currentPrice,
+        atr: null,
+        mode: chosenMode,
+      });
+    }
+
+    // Normalize bars to RQE expected keys (open/high/low/close/volume)
+    const fullBars = barsResp.json
+      .map(b => ({
+        open: Number(b.open),
+        high: Number(b.high),
+        low: Number(b.low),
+        close: Number(b.close),
+        volume: Number(b.volume ?? 0),
+      }))
+      .filter(b => [b.open, b.high, b.low, b.close].every(Number.isFinite));
+
+    // Use only last lookback slice for touch detection + eval window
+    const bars = fullBars.length > p.lookbackBars ? fullBars.slice(-p.lookbackBars) : fullBars;
+
+    const atrVal = computeATR14(fullBars, 14) || computeATR14(fullBars, 10) || null;
+
+    if (!atrVal) {
+      return res.status(502).json({
+        ok: false,
+        invalid: true,
+        reactionScore: 0,
+        structureState: "HOLD",
+        reasonCodes: ["ATR_UNAVAILABLE"],
+        zone,
+        rejectionSpeed: 0,
+        displacementAtr: 0,
+        reclaimOrFailure: 0,
+        touchQuality: 0,
+        samples: 0,
+        price: currentPrice,
+        atr: null,
+        mode: chosenMode,
+      });
+    }
+
+    // Compute using Engine 3 math (UNCHANGED)
+    const rqe = computeReactionQuality({
+      bars,
+      zone: {
+        lo,
+        hi,
+        side: "demand", // NOTE: we keep default; direction is not Engine 3 job here
+        id: zoneId ?? null,
+      },
+      atr: atrVal,
+      opts: {
+        tf: timeframe,
+        windowBars: p.windowBars,
+        breakDepthAtr: p.breakDepthAtr,
+        reclaimWindowBars: p.reclaimWindowBars,
+      }
+    });
+
+    // Locked explainability conversions to 0–10
+    const rejectionSpeed = Number.isFinite(rqe.rejectionSpeedPoints) ? rqe.rejectionSpeedPoints * 2.5 : 0;
+    const displacementAtr = Number.isFinite(rqe.displacementPoints) ? rqe.displacementPoints * 2.5 : 0;
+    const reclaimOrFailure =
+      rqe.structureState === "HOLD" ? 10 :
+      rqe.structureState === "FAKEOUT_RECLAIM" ? 5 :
+      rqe.structureState === "FAILURE" ? 0 : 0;
+
+    const reasonCodes = buildReasonCodes({ inZone, rqe, mode: chosenMode });
+
+    // touchQuality: if inside zone AND we detected a touch index, 10 else 0
+    const touchQuality = (inZone && rqe.touchIndex != null) ? 10 : 0;
+
+    return res.json({
+      ok: true,
+      invalid: false,
+
+      reactionScore: rqe.reactionScore,              // LOCKED
+      structureState: rqe.structureState === "FAKEOUT_RECLAIM" ? "RECLAIM" : rqe.structureState, // alias per your wording
+      reasonCodes,                                   // LOCKED
+
+      zone,                                          // LOCKED echo
+
+      rejectionSpeed,
+      displacementAtr,
+      reclaimOrFailure,
+      touchQuality,
+
+      samples: rqe.windowBars,
+      price: currentPrice,
+      atr: rqe.atr,
+
+      mode: chosenMode,
+    });
+
+  } catch (err) {
+    return res.status(500).json({
       ok: false,
       invalid: true,
       reactionScore: 0,
       structureState: "HOLD",
-      reasonCodes: ["MISSING_SYMBOL_OR_TF"],
+      reasonCodes: ["REACTION_SCORE_ERROR"],
+      message: err?.message || String(err),
       zone: null,
       rejectionSpeed: 0,
       displacementAtr: 0,
@@ -124,73 +423,4 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       atr: null,
     });
   }
-
-  const sym = String(symbol).toUpperCase();
-  const timeframe = String(tf);
-
-  // Start with any explicit lo/hi from query
-  let lo = toNum(qLo);
-  let hi = toNum(qHi);
-  let resolvedSource = source ? String(source) : null;
-
-  // Fetch engine5-context if we need current_price OR need to resolve zoneId
-  let ctx = null;
-  let currentPrice = null;
-
-  const needCtx = true; // always use Engine 1 price truth for containment
-  if (needCtx) {
-    const base = getBaseUrl(req);
-    const ctxUrl = `${base}/api/v1/engine5-context?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}`;
-    const ctxResp = await fetchJson(ctxUrl);
-
-    if (ctxResp.ok && ctxResp.json) {
-      ctx = ctxResp.json;
-      // Support both meta.current_price and meta.current_price (already in your engine5-context)
-      currentPrice =
-        toNum(ctx?.meta?.current_price) ??
-        toNum(ctx?.meta?.currentPrice) ??
-        null;
-    }
-  }
-
-  // If lo/hi missing, resolve from zoneId via context
-  if ((lo == null || hi == null) && zoneId && ctx) {
-    const z = findZoneById(ctx, zoneId);
-    if (z) {
-      lo = toNum(z.lo);
-      hi = toNum(z.hi);
-      resolvedSource = resolvedSource || z._source || null;
-    }
-  }
-
-  const inZone = within(currentPrice, lo, hi);
-
-  const zone = {
-    id: zoneId ?? null,
-    source: resolvedSource,
-    lo,
-    hi,
-  };
-
-  return res.json({
-    ok: true,
-    invalid: false,
-
-    // LOCKED NAMES (placeholders for now)
-    reactionScore: 0,
-    structureState: "HOLD",
-    reasonCodes: inZone ? [] : ["NOT_IN_ZONE"],
-
-    // ECHO ZONE (LOCKED)
-    zone,
-
-    // explainability placeholders (LOCKED)
-    rejectionSpeed: 0,
-    displacementAtr: 0,
-    reclaimOrFailure: 0,
-    touchQuality: inZone ? 10 : 0, // small helpful truth: touch exists if inside
-    samples: 0,
-    price: currentPrice,
-    atr: null,
-  });
 });
