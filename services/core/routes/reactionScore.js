@@ -313,7 +313,15 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
     if (exitedZone && Number.isFinite(rqe.exitBars) && rqe.exitBars <= sp.triggerExitBarsMax) stage = "TRIGGERED";
     if (Number.isFinite(rqe.reactionScore) && rqe.reactionScore >= sp.confirmScore) stage = "CONFIRMED";
 
+    // ✅ ADD THIS EXACT BLOCK RIGHT HERE
+    if (!inZone && stage !== "TRIGGERED") {
+      armed = false;
+      stage = "IDLE";
+    }
+
+    // keep existing line below
     const reasonCodes = buildReasonCodes({ inZone, rqe, mode: chosenMode });
+
 
     // GOLDEN RULE: reactionScore is 0 when NOT_IN_ZONE
     const reactionScoreOut = inZone ? rqe.reactionScore : 0;
