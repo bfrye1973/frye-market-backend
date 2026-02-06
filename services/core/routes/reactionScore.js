@@ -7,10 +7,14 @@
 // - Uses meta.current_price for containment (prevents false NOT_IN_ZONE)
 // - Fetches bars via existing /api/v1/ohlc route
 // - Computes ATR locally (no new dependencies)
-// - Applies preset modes: scalp | swing | long (or strategyId mapping)
+// - Applies preset modes: scalp | swing | long (strategy 1/2/3)
 // - Calls computeReactionQuality() (no math changes inside engine)
 //
-// IMPORTANT: This file is a wrapper. Engine 3 math lives in reactionQualityEngine.js.
+// NEW (LOCKED): ARMED/STAGE telemetry for ALL modes (scalp/swing/long)
+// - armed: true when price is in-zone AND compression is tight for that mode
+// - stage: IDLE | ARMED | TRIGGERED | CONFIRMED
+//   * TRIGGERED can occur even if price is now outside zone (fast exit)
+//   * reactionScore remains 0 when NOT_IN_ZONE (golden rule)
 
 import express from "express";
 import { computeReactionQuality } from "../logic/reactionQualityEngine.js";
@@ -91,9 +95,6 @@ function findZoneById(ctx, zoneId) {
 
 /* -------------------- preset mapping (LOCKED) -------------------- */
 
-// If caller provides mode=scalp|swing|long, we use it.
-// Else if caller provides strategyId, map it.
-// Else: default = swing (safe).
 function resolveMode({ mode, strategyId }) {
   const m = (mode || "").toString().toLowerCase().trim();
   if (m === "scalp" || m === "swing" || m === "long") return m;
@@ -107,22 +108,21 @@ function resolveMode({ mode, strategyId }) {
 }
 
 function presetOpts(mode) {
-  // These are the LOCKED defaults we agreed on.
+  // NOTE: lookbackBars MUST be >= 10 due to computeReactionQuality() guard.
   if (mode === "scalp") {
-  return {
-    lookbackBars: 12,   // MUST be >= 10 for computeReactionQuality()
-    windowBars: 2,
-    breakDepthAtr: 0.25,
-    reclaimWindowBars: 1
-  };
-}
-
+    return {
+      lookbackBars: 12,
+      windowBars: 2,
+      breakDepthAtr: 0.25,
+      reclaimWindowBars: 1,
+    };
+  }
   if (mode === "long") {
     return {
       lookbackBars: 25,
       windowBars: 10,
       breakDepthAtr: 0.25,
-      reclaimWindowBars: 5
+      reclaimWindowBars: 5,
     };
   }
   // swing default
@@ -130,14 +130,13 @@ function presetOpts(mode) {
     lookbackBars: 15,
     windowBars: 6,
     breakDepthAtr: 0.25,
-    reclaimWindowBars: 3
+    reclaimWindowBars: 3,
   };
 }
 
-/* -------------------- ATR (tiny, local) -------------------- */
+/* -------------------- ATR -------------------- */
 
-function computeATR14(bars, len = 14) {
-  // bars: chronological, {high, low, close}
+function computeATR(bars, len = 14) {
   if (!Array.isArray(bars) || bars.length < len + 2) return null;
 
   const trs = [];
@@ -157,54 +156,69 @@ function computeATR14(bars, len = 14) {
   return atr;
 }
 
-/* -------------------- reason codes (scalp-friendly) -------------------- */
+/* -------------------- ARMED / STAGE -------------------- */
+
+function compressionN(bars, atr, n) {
+  if (!Array.isArray(bars) || bars.length < n || !Number.isFinite(atr) || atr <= 0) return null;
+  const lastN = bars.slice(-n);
+  const maxH = Math.max(...lastN.map(b => b.high));
+  const minL = Math.min(...lastN.map(b => b.low));
+  return (maxH - minL) / atr; // lower = tighter
+}
+
+function stagePreset(mode) {
+  // Tuned by intent horizon (strategy 1/2/3). No Engine 3 math changes.
+  if (mode === "scalp") {
+    return {
+      compBars: 3,
+      compMax: 0.35,     // tight coil
+      triggerExitBarsMax: 2,
+      confirmScore: 7.0,
+    };
+  }
+  if (mode === "swing") {
+    return {
+      compBars: 5,
+      compMax: 0.45,
+      triggerExitBarsMax: 3,
+      confirmScore: 7.0,
+    };
+  }
+  // long
+  return {
+    compBars: 8,
+    compMax: 0.55,
+    triggerExitBarsMax: 4,
+    confirmScore: 7.0,
+  };
+}
+
+/* -------------------- reason codes -------------------- */
 
 function buildReasonCodes({ inZone, rqe, mode }) {
   const codes = [];
-  if (!inZone) {
-    codes.push("NOT_IN_ZONE");
-    return codes;
-  }
+  if (!inZone) codes.push("NOT_IN_ZONE");
 
-  if (!rqe || rqe.flags?.NO_TOUCH || rqe.reason === "NO_TOUCH") {
+  // If we could compute, add fast-glance diagnostics
+  if (rqe?.reason === "NO_TOUCH" || rqe?.flags?.NO_TOUCH) {
     codes.push("NO_TOUCH");
-    return codes;
+    return Array.from(new Set(codes));
   }
 
-  // “quick intent” heuristics (do not change math, just explain)
-  // SLOW_REACTION: for scalp, if exitBars > 2
-  if (mode === "scalp" && Number.isFinite(rqe.exitBars) && rqe.exitBars > 2) {
+  if (mode === "scalp" && Number.isFinite(rqe?.exitBars) && rqe.exitBars > 2) {
     codes.push("SLOW_REACTION");
   }
-
-  // WEAK_DISPLACEMENT: raw ATR excursion too small
-  if (Number.isFinite(rqe.displacementAtrRaw) && rqe.displacementAtrRaw < (mode === "scalp" ? 0.15 : 0.20)) {
+  if (Number.isFinite(rqe?.displacementAtrRaw) && rqe.displacementAtrRaw < (mode === "scalp" ? 0.15 : 0.20)) {
     codes.push("WEAK_DISPLACEMENT");
   }
+  if (rqe?.structureState === "FAILURE") codes.push("FAILURE");
+  if (rqe?.structureState === "FAKEOUT_RECLAIM") codes.push("RECLAIM");
 
-  if (rqe.structureState === "FAILURE") codes.push("FAILURE");
-  if (rqe.structureState === "FAKEOUT_RECLAIM") codes.push("RECLAIM");
-
-  return codes;
+  return Array.from(new Set(codes));
 }
 
 /* -------------------- route -------------------- */
 
-/**
- * GET /api/v1/reaction-score
- *
- * Required:
- *   symbol=SPY
- *   tf=10m|30m|1h|4h|1d  (we pass into /ohlc as timeframe)
- *
- * Optional:
- *   mode=scalp|swing|long
- *   strategyId=intraday_scalp@10m|minor_swing@1h|intermediate_long@4h
- *
- * Optional zone selection:
- *   lo/hi OR zoneId (resolved through engine5-context)
- *   source=institutional|shelf|negotiated (echo only)
- */
 reactionScoreRouter.get("/reaction-score", async (req, res) => {
   try {
     const { symbol, tf, zoneId, source, mode, strategyId } = req.query;
@@ -226,6 +240,8 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
         samples: 0,
         price: null,
         atr: null,
+        armed: false,
+        stage: "IDLE",
       });
     }
 
@@ -234,6 +250,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const chosenMode = resolveMode({ mode, strategyId });
     const p = presetOpts(chosenMode);
+    const sp = stagePreset(chosenMode);
 
     // Start with explicit lo/hi
     let lo = toNum(qLo);
@@ -246,12 +263,12 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
     const ctxResp = await fetchJson(ctxUrl);
 
     let ctx = null;
-    let currentPrice =
-      toNum(ctxResp.json?.meta?.current_price) ??
-      toNum(ctxResp.json?.meta?.currentPrice) ??
-      null;
-
     if (ctxResp.ok && ctxResp.json) ctx = ctxResp.json;
+
+    const currentPrice =
+      toNum(ctx?.meta?.current_price) ??
+      toNum(ctx?.meta?.currentPrice) ??
+      null;
 
     // If lo/hi missing, resolve from zoneId via context
     if ((lo == null || hi == null) && zoneId && ctx) {
@@ -263,8 +280,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       }
     }
 
-    const inZone = within(currentPrice, lo, hi);
-
     const zone = {
       id: zoneId ?? null,
       source: resolvedSource,
@@ -272,8 +287,8 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       hi,
     };
 
-    // If not in zone OR zone bounds missing, return locked contract with NOT_IN_ZONE
-    if (!inZone || lo == null || hi == null) {
+    // If we still don't have bounds, we can't evaluate anything safely.
+    if (lo == null || hi == null) {
       return res.json({
         ok: true,
         invalid: false,
@@ -288,15 +303,19 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
         samples: 0,
         price: currentPrice,
         atr: null,
+        armed: false,
+        stage: "IDLE",
         mode: chosenMode,
       });
     }
 
-    // Fetch bars via existing OHLC endpoint
+    const inZone = within(currentPrice, lo, hi);
+
+    // Fetch bars via existing OHLC endpoint (always; needed for TRIGGERED/ARMED)
     const ohlcUrl =
       `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}` +
       `&timeframe=${encodeURIComponent(timeframe)}` +
-      `&limit=${encodeURIComponent(200)}`;
+      `&limit=${encodeURIComponent(250)}`;
 
     const barsResp = await fetchJson(ohlcUrl);
     if (!barsResp.ok || !Array.isArray(barsResp.json)) {
@@ -314,11 +333,13 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
         samples: 0,
         price: currentPrice,
         atr: null,
+        armed: false,
+        stage: "IDLE",
         mode: chosenMode,
       });
     }
 
-    // Normalize bars to RQE expected keys (open/high/low/close/volume)
+    // Normalize bars to RQE expected keys
     const fullBars = barsResp.json
       .map(b => ({
         open: Number(b.open),
@@ -329,11 +350,10 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       }))
       .filter(b => [b.open, b.high, b.low, b.close].every(Number.isFinite));
 
-    // Use only last lookback slice for touch detection + eval window
+    // Slice lookback (must be >=10 per preset)
     const bars = fullBars.length > p.lookbackBars ? fullBars.slice(-p.lookbackBars) : fullBars;
 
-    const atrVal = computeATR14(fullBars, 14) || computeATR14(fullBars, 10) || null;
-
+    const atrVal = computeATR(fullBars, 14) || computeATR(fullBars, 10) || null;
     if (!atrVal) {
       return res.status(502).json({
         ok: false,
@@ -349,17 +369,19 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
         samples: 0,
         price: currentPrice,
         atr: null,
+        armed: false,
+        stage: "IDLE",
         mode: chosenMode,
       });
     }
 
-    // Compute using Engine 3 math (UNCHANGED)
+    // Compute Engine 3 reaction (UNCHANGED MATH)
     const rqe = computeReactionQuality({
       bars,
       zone: {
         lo,
         hi,
-        side: "demand", // NOTE: we keep default; direction is not Engine 3 job here
+        side: "demand", // direction is not Engine 3's job here (engine 5/6 own bias)
         id: zoneId ?? null,
       },
       atr: atrVal,
@@ -371,7 +393,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       }
     });
 
-    // Locked explainability conversions to 0–10
+    // Behavior subsignals (0–10)
     const rejectionSpeed = Number.isFinite(rqe.rejectionSpeedPoints) ? rqe.rejectionSpeedPoints * 2.5 : 0;
     const displacementAtr = Number.isFinite(rqe.displacementPoints) ? rqe.displacementPoints * 2.5 : 0;
     const reclaimOrFailure =
@@ -379,20 +401,59 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       rqe.structureState === "FAKEOUT_RECLAIM" ? 5 :
       rqe.structureState === "FAILURE" ? 0 : 0;
 
+    const touchQuality = (within(currentPrice, lo, hi) && rqe.touchIndex != null) ? 10 : 0;
+
+    // ARMED / STAGE
+    let armed = false;
+    let stage = "IDLE";
+
+    const comp = compressionN(bars, atrVal, sp.compBars);
+    const isTight = comp != null && comp <= sp.compMax;
+
+    const lastClose = bars[bars.length - 1]?.close ?? null;
+    const exitedZone =
+      Number.isFinite(lastClose) &&
+      (lastClose > Math.max(lo, hi) || lastClose < Math.min(lo, hi));
+
+    // IDLE / ARMED
+    if (inZone && isTight) {
+      armed = true;
+      stage = "ARMED";
+    } else if (inZone) {
+      stage = "IDLE"; // in zone but not coiling tight enough for "armed"
+    } else {
+      stage = "IDLE";
+    }
+
+    // TRIGGERED (fast exit) can be true even if now NOT_IN_ZONE
+    if (exitedZone && Number.isFinite(rqe.exitBars) && rqe.exitBars <= sp.triggerExitBarsMax) {
+      stage = "TRIGGERED";
+    }
+
+    // CONFIRMED
+    if (Number.isFinite(rqe.reactionScore) && rqe.reactionScore >= sp.confirmScore) {
+      stage = "CONFIRMED";
+    }
+
+    // reasonCodes
     const reasonCodes = buildReasonCodes({ inZone, rqe, mode: chosenMode });
 
-    // touchQuality: if inside zone AND we detected a touch index, 10 else 0
-    const touchQuality = (inZone && rqe.touchIndex != null) ? 10 : 0;
+    // LOCKED GOLDEN RULE: score is 0 when NOT_IN_ZONE
+    const reactionScoreOut = inZone ? rqe.reactionScore : 0;
+
+    // structureState alias per your wording (HOLD / RECLAIM / FAILURE)
+    const structureStateOut =
+      rqe.structureState === "FAKEOUT_RECLAIM" ? "RECLAIM" : rqe.structureState;
 
     return res.json({
       ok: true,
       invalid: false,
 
-      reactionScore: rqe.reactionScore,              // LOCKED
-      structureState: rqe.structureState === "FAKEOUT_RECLAIM" ? "RECLAIM" : rqe.structureState, // alias per your wording
-      reasonCodes,                                   // LOCKED
+      reactionScore: reactionScoreOut,     // LOCKED
+      structureState: structureStateOut,    // LOCKED
+      reasonCodes,                         // LOCKED
 
-      zone,                                          // LOCKED echo
+      zone,                                // LOCKED echo
 
       rejectionSpeed,
       displacementAtr,
@@ -402,6 +463,11 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       samples: rqe.windowBars,
       price: currentPrice,
       atr: rqe.atr,
+
+      // NEW (LOCKED TELEMETRY)
+      armed,
+      stage,
+      compression: comp,
 
       mode: chosenMode,
     });
@@ -422,6 +488,8 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       samples: 0,
       price: null,
       atr: null,
+      armed: false,
+      stage: "IDLE",
     });
   }
 });
