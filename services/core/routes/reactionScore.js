@@ -140,7 +140,14 @@ function compressionN(bars, atr, n) {
 }
 
 function stagePreset(mode) {
-  if (mode === "scalp") return { compBars: 3, compMax: 0.35, triggerExitBarsMax: 2, confirmScore: 7.0 };
+   if (mode === "scalp")
+   return {
+     compBars: 3,
+     compMax: 1.05,          // <-- KEY CHANGE
+     triggerExitBarsMax: 2,
+     confirmScore: 7.0
+   };
+  
   if (mode === "swing") return { compBars: 5, compMax: 0.45, triggerExitBarsMax: 3, confirmScore: 7.0 };
   return { compBars: 8, compMax: 0.55, triggerExitBarsMax: 4, confirmScore: 7.0 }; // long
 }
