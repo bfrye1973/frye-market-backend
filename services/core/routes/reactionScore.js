@@ -59,7 +59,6 @@ function within(price, lo, hi) {
 function findZoneById(ctx, zoneId) {
   if (!ctx || !zoneId) return null;
 
-  // 1) Active zones first (authoritative)
   const act = ctx.active || {};
   const activeCandidates = [
     { z: act.negotiated, source: "negotiated_active" },
@@ -72,7 +71,6 @@ function findZoneById(ctx, zoneId) {
     }
   }
 
-  // 2) Render arrays next (display list)
   const r = ctx.render || {};
   const arrays = [
     { arr: r.negotiated, source: "negotiated_render" },
@@ -107,12 +105,8 @@ function resolveMode({ mode, strategyId }) {
 
 function presetOpts(mode) {
   // lookbackBars MUST be >= 10 (computeReactionQuality() guard)
-  if (mode === "scalp") {
-    return { lookbackBars: 12, windowBars: 2, breakDepthAtr: 0.25, reclaimWindowBars: 1 };
-  }
-  if (mode === "long") {
-    return { lookbackBars: 25, windowBars: 10, breakDepthAtr: 0.25, reclaimWindowBars: 5 };
-  }
+  if (mode === "scalp") return { lookbackBars: 12, windowBars: 2, breakDepthAtr: 0.25, reclaimWindowBars: 1 };
+  if (mode === "long")  return { lookbackBars: 25, windowBars: 10, breakDepthAtr: 0.25, reclaimWindowBars: 5 };
   return { lookbackBars: 15, windowBars: 6, breakDepthAtr: 0.25, reclaimWindowBars: 3 }; // swing
 }
 
@@ -185,7 +179,8 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
         zone: null,
         rejectionSpeed: 0, displacementAtr: 0, reclaimOrFailure: 0, touchQuality: 0,
         samples: 0, price: null, atr: null,
-        armed: false, stage: "IDLE",
+        armed: false, stage: "IDLE", compression: null,
+        mode: null,
       });
     }
 
@@ -235,9 +230,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       });
     }
 
-    const inZone = within(currentPrice, loPad, hiPad);
-
-
     // bars via /ohlc
     const ohlcUrl = `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}&timeframe=${encodeURIComponent(timeframe)}&limit=250`;
     const barsResp = await fetchJson(ohlcUrl);
@@ -265,29 +257,32 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const bars = fullBars.length > p.lookbackBars ? fullBars.slice(-p.lookbackBars) : fullBars;
 
-    // --- ATR (safe) ---
-    const atrVal =
-      computeATR(fullBars, 14) ||
-      computeATR(fullBars, 10) ||
-      null;
+    // ATR is REQUIRED for Engine 3 compute + compression scoring
+    const atrVal = computeATR(fullBars, 14) || computeATR(fullBars, 10) || null;
+    if (!atrVal || !Number.isFinite(atrVal) || atrVal <= 0) {
+      return res.json({
+        ok: true, invalid: false,
+        reactionScore: 0, structureState: "HOLD", reasonCodes: ["ATR_UNAVAILABLE"],
+        zone,
+        rejectionSpeed: 0, displacementAtr: 0, reclaimOrFailure: 0, touchQuality: 0,
+        samples: 0, price: currentPrice, atr: null,
+        armed: false, stage: "IDLE", compression: null,
+        mode: chosenMode,
+      });
+    }
 
-   // --- Zone padding (deviation) ---
-   // SCALP uses fixed $1.30 (SPY ~700 moves fast)
-   // SWING/LONG use small ATR-based padding
-   let pad = 0;
+    // Zone padding (deviation)
+    let pad = 0;
+    if (chosenMode === "scalp") pad = 1.30;
+    else pad = Math.min(0.10 * atrVal, 1.00);
 
-   if (chosenMode === "scalp") {
-     pad = 1.30;
-   } else if (atrVal && Number.isFinite(atrVal)) {
-     pad = Math.min(0.10 * atrVal, 1.00);
-   } else {
-     pad = 0;
-   }
+    const loPad = lo - pad;
+    const hiPad = hi + pad;
 
-   // Expanded zone used ONLY for containment + trigger logic
-   const loPad = (lo != null) ? lo - pad : lo;
-   const hiPad = (hi != null) ? hi + pad : hi;
+    // containment uses padded bounds
+    const inZone = within(currentPrice, loPad, hiPad);
 
+    // Compute Engine 3 reaction (UNCHANGED MATH) using ORIGINAL zone bounds (lo/hi)
     const rqe = computeReactionQuality({
       bars,
       zone: { lo, hi, side: "demand", id: zoneId ?? null },
@@ -314,27 +309,35 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
     const isTight = comp != null && comp <= sp.compMax;
 
     const lastClose = bars[bars.length - 1]?.close ?? null;
-    const exitedZone =
-      Number.isFinite(lastClose) &&
-      (lastClose > hiPad || lastClose < loPad);
-
+    const exitedZone = Number.isFinite(lastClose) && (lastClose > hiPad || lastClose < loPad);
 
     let armed = false;
     let stage = "IDLE";
 
     if (inZone && isTight) { armed = true; stage = "ARMED"; }
-    if (exitedZone && Number.isFinite(rqe.exitBars) && rqe.exitBars <= sp.triggerExitBarsMax) stage = "TRIGGERED";
-    if (Number.isFinite(rqe.reactionScore) && rqe.reactionScore >= sp.confirmScore) stage = "CONFIRMED";
 
-    // ✅ ADD THIS EXACT BLOCK RIGHT HERE
+    if (exitedZone && Number.isFinite(rqe.exitBars) && rqe.exitBars <= sp.triggerExitBarsMax) {
+      stage = "TRIGGERED";
+    }
+
+    // CONFIRMED:
+    // - SCALP requires prior ARM/TRIGGER
+    // - SWING/LONG can confirm directly
+    if (
+      Number.isFinite(rqe.reactionScore) &&
+      rqe.reactionScore >= sp.confirmScore &&
+      (chosenMode !== "scalp" || stage === "TRIGGERED" || armed === true)
+    ) {
+      stage = "CONFIRMED";
+    }
+
+    // HARD GATE: if not in zone, only TRIGGERED may remain
     if (!inZone && stage !== "TRIGGERED") {
       armed = false;
       stage = "IDLE";
     }
 
-    // keep existing line below
     const reasonCodes = buildReasonCodes({ inZone, rqe, mode: chosenMode });
-
 
     // GOLDEN RULE: reactionScore is 0 when NOT_IN_ZONE
     const reactionScoreOut = inZone ? rqe.reactionScore : 0;
@@ -387,6 +390,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       armed: false,
       stage: "IDLE",
       compression: null,
+      mode: null,
     });
   }
 });
