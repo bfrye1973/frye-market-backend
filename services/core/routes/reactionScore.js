@@ -235,7 +235,8 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       });
     }
 
-    const inZone = within(currentPrice, lo, hi);
+    const inZone = within(currentPrice, loPad, hiPad);
+
 
     // bars via /ohlc
     const ohlcUrl = `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}&timeframe=${encodeURIComponent(timeframe)}&limit=250`;
@@ -264,18 +265,28 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const bars = fullBars.length > p.lookbackBars ? fullBars.slice(-p.lookbackBars) : fullBars;
 
-    const atrVal = computeATR(fullBars, 14) || computeATR(fullBars, 10) || null;
-    if (!atrVal) {
-      return res.status(502).json({
-        ok: false, invalid: true,
-        reactionScore: 0, structureState: "HOLD", reasonCodes: ["ATR_UNAVAILABLE"],
-        zone,
-        rejectionSpeed: 0, displacementAtr: 0, reclaimOrFailure: 0, touchQuality: 0,
-        samples: 0, price: currentPrice, atr: null,
-        armed: false, stage: "IDLE", compression: null,
-        mode: chosenMode,
-      });
-    }
+    // --- ATR (safe) ---
+    const atrVal =
+      computeATR(fullBars, 14) ||
+      computeATR(fullBars, 10) ||
+      null;
+
+   // --- Zone padding (deviation) ---
+   // SCALP uses fixed $1.30 (SPY ~700 moves fast)
+   // SWING/LONG use small ATR-based padding
+   let pad = 0;
+
+   if (chosenMode === "scalp") {
+     pad = 1.30;
+   } else if (atrVal && Number.isFinite(atrVal)) {
+     pad = Math.min(0.10 * atrVal, 1.00);
+   } else {
+     pad = 0;
+   }
+
+   // Expanded zone used ONLY for containment + trigger logic
+   const loPad = (lo != null) ? lo - pad : lo;
+   const hiPad = (hi != null) ? hi + pad : hi;
 
     const rqe = computeReactionQuality({
       bars,
@@ -303,8 +314,10 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
     const isTight = comp != null && comp <= sp.compMax;
 
     const lastClose = bars[bars.length - 1]?.close ?? null;
-    const exitedZone = Number.isFinite(lastClose) &&
-      (lastClose > Math.max(lo, hi) || lastClose < Math.min(lo, hi));
+    const exitedZone =
+      Number.isFinite(lastClose) &&
+      (lastClose > hiPad || lastClose < loPad);
+
 
     let armed = false;
     let stage = "IDLE";
