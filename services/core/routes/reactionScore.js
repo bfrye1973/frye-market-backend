@@ -109,13 +109,14 @@ function resolveMode({ mode, strategyId }) {
 function presetOpts(mode) {
   // These are the LOCKED defaults we agreed on.
   if (mode === "scalp") {
-    return {
-      lookbackBars: 6,
-      windowBars: 2,          // evaluate 1–2 bars after touch (fast)
-      breakDepthAtr: 0.25,
-      reclaimWindowBars: 1
-    };
-  }
+  return {
+    lookbackBars: 12,   // MUST be >= 10 for computeReactionQuality()
+    windowBars: 2,
+    breakDepthAtr: 0.25,
+    reclaimWindowBars: 1
+  };
+}
+
   if (mode === "long") {
     return {
       lookbackBars: 25,
