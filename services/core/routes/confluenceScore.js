@@ -4,13 +4,18 @@ import { computeConfluenceScore } from "../logic/confluenceScorer.js";
 
 export const confluenceScoreRouter = express.Router();
 
+/* ---------------------------- helpers ---------------------------- */
 function baseUrlFromReq(req) {
-  const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  const xf = req.headers["x-forwarded-proto"];
+  const proto = (Array.isArray(xf) ? xf[0] : xf) || req.protocol || "https";
   return `${proto}://${req.get("host")}`;
 }
 
-async function jget(url) {
-  const r = await fetch(url, { headers: { accept: "application/json" } });
+async function jget(url, opts = {}) {
+  const r = await fetch(url, {
+    headers: { accept: "application/json", ...(opts.headers || {}) },
+    ...opts,
+  });
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw new Error(`GET ${url} -> ${r.status} ${text.slice(0, 200)}`);
@@ -20,6 +25,7 @@ async function jget(url) {
 
 /**
  * ✅ Deterministic CORS for this route (HARD SET)
+ * (kept as-is to match your current production behavior)
  */
 function applyCors(req, res) {
   const origin = req.headers.origin;
@@ -28,9 +34,7 @@ function applyCors(req, res) {
     origin === "https://frye-dashboard.onrender.com" ||
     origin === "http://localhost:3000";
 
-  const allowOrigin = isAllowed
-    ? origin
-    : "https://frye-dashboard.onrender.com";
+  const allowOrigin = isAllowed ? origin : "https://frye-dashboard.onrender.com";
 
   res.setHeader("Access-Control-Allow-Origin", allowOrigin);
   res.setHeader("Vary", "Origin");
@@ -48,9 +52,7 @@ confluenceScoreRouter.options("/confluence-score", (req, res) => {
   return res.sendStatus(204);
 });
 
-// ----------------------------
-// Step 3B helpers (LOCKED)
-// ----------------------------
+/* ---------------------------- Step 3B helpers (LOCKED) ---------------------------- */
 function containsPrice(z, price) {
   if (!z || !Number.isFinite(price)) return false;
   const lo = Number(z.lo);
@@ -104,9 +106,9 @@ function modeFromStrategyId(strategyId) {
   return "swing";
 }
 
-function volumeStateFromEngine4(engine4, activeZone) {
+function volumeStateFromEngine4(engine4, zoneRef) {
   // LOCKED labels & priority
-  if (!activeZone) return "NO_ACTIVE_ZONE";
+  if (!zoneRef) return "NO_ACTIVE_ZONE";
   if (!engine4 || !engine4.flags) return "NO_SIGNAL";
 
   const f = engine4.flags;
@@ -119,9 +121,7 @@ function volumeStateFromEngine4(engine4, activeZone) {
   return "NEGOTIATING";
 }
 
-// ----------------------------
-// Route
-// ----------------------------
+/* ---------------------------- Route ---------------------------- */
 confluenceScoreRouter.get("/confluence-score", async (req, res) => {
   applyCors(req, res);
 
@@ -133,9 +133,9 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
 
     const base = baseUrlFromReq(req);
 
-    // ----------------------------
-    // Engine 1 context FIRST (authoritative for price + active zones)
-    // ----------------------------
+    /* ----------------------------
+       Engine 1 context FIRST
+       ---------------------------- */
     const ctxUrl =
       `${base}/api/v1/engine5-context` +
       `?symbol=${encodeURIComponent(symbol)}` +
@@ -150,10 +150,11 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     // Strategy/mode (Engine 5 owns this)
     const strategyId = strategyIdFromReqOrContext(req, engine1Context, tf);
     const mode = modeFromStrategyId(strategyId);
+    const isScalp = mode === "scalp";
 
-    // ----------------------------
-    // Engine 2 fib (signals only; NOT price source)
-    // ----------------------------
+    /* ----------------------------
+       Engine 2 fib (signals only)
+       ---------------------------- */
     const fibUrl =
       `${base}/api/v1/fib-levels` +
       `?symbol=${encodeURIComponent(symbol)}` +
@@ -163,37 +164,58 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
 
     const fib = await jget(fibUrl);
 
-    // ----------------------------
-    // Active execution zone (NO guessing, containment required)
-    // Priority: negotiated -> shelf -> institutional
-    // ----------------------------
+    /* ----------------------------
+       Active execution zone (strict)
+       ---------------------------- */
     const activeZone = priceOk ? pickActiveExecutionZone(engine1Context, price) : null;
 
-    const zoneId = activeZone?.id ?? null;
-    const zoneLo = activeZone?.lo ?? null;
-    const zoneHi = activeZone?.hi ?? null;
+    /**
+     * ✅ NEW SYSTEM BEHAVIOR (critical):
+     * If there is NO active zone, we do NOT want the system to go fully dead for scalps.
+     * For SCALP only, use nearest.shelf as a deterministic reference zone for Engine 3/4
+     * so Engine 3 can output TRIGGERED after the break.
+     *
+     * This does NOT violate "no guessing":
+     * - activeZone remains strict
+     * - execZoneRef is explicitly tagged as fallback reference
+     */
+    let execZoneRef = activeZone;
+    let execZoneRefSource = "ACTIVE";
 
-    // ----------------------------
-    // Engine 3 (reaction) — keep aligned with mode, pass zoneId if present
-    // ----------------------------
+    if (!execZoneRef && isScalp) {
+      const ns = engine1Context?.nearest?.shelf ?? null;
+      if (ns && ns.lo != null && ns.hi != null) {
+        execZoneRef = ns;
+        execZoneRefSource = "NEAREST_SHELF_SCALP_REF";
+      }
+    }
+
+    const zoneId = execZoneRef?.id ?? null;
+    const zoneLo = execZoneRef?.lo ?? null;
+    const zoneHi = execZoneRef?.hi ?? null;
+
+    /* ----------------------------
+       Engine 3 (reaction) — pass strategyId + zoneId + lo/hi
+       ---------------------------- */
     const e3Url =
       `${base}/api/v1/reaction-score` +
       `?symbol=${encodeURIComponent(symbol)}` +
       `&tf=${encodeURIComponent(tf)}` +
-      `&mode=${encodeURIComponent(mode)}` +
-      (zoneId ? `&zoneId=${encodeURIComponent(zoneId)}` : "");
+      `&strategyId=${encodeURIComponent(strategyId)}` +
+      (zoneId ? `&zoneId=${encodeURIComponent(zoneId)}` : "") +
+      (zoneLo != null ? `&lo=${encodeURIComponent(zoneLo)}` : "") +
+      (zoneHi != null ? `&hi=${encodeURIComponent(zoneHi)}` : "");
 
     const reaction = await jget(e3Url);
 
-    // ----------------------------
-    // Engine 4 (volume) — call ONLY if activeZone exists; pass mode; degrade gracefully
-    // ----------------------------
+    /* ----------------------------
+       Engine 4 (volume) — call only if we have a zone reference
+       ---------------------------- */
     let volume = null;
     let volumeState = "NO_ACTIVE_ZONE";
 
-    if (activeZone && zoneLo != null && zoneHi != null) {
-      const e4Base =
-        process.env.ENGINE4_BASE_URL?.trim() || "http://localhost:10000";
+    if (execZoneRef && zoneLo != null && zoneHi != null) {
+      const e4Base = process.env.ENGINE4_BASE_URL?.trim() || "http://localhost:10000";
 
       const e4Url =
         `${e4Base}/api/v1/volume-behavior` +
@@ -220,9 +242,8 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
         };
       }
 
-      volumeState = volumeStateFromEngine4(volume, activeZone);
+      volumeState = volumeStateFromEngine4(volume, execZoneRef);
     } else {
-      // No active zone => hard gate upstream (Engine 1 rule)
       volume = {
         ok: true,
         volumeScore: 0,
@@ -234,9 +255,9 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
       volumeState = "NO_ACTIVE_ZONE";
     }
 
-    // ----------------------------
-    // Confluence aggregation
-    // ----------------------------
+    /* ----------------------------
+       Confluence aggregation (Engine 5 scorer)
+       ---------------------------- */
     const out = computeConfluenceScore({
       symbol,
       tf,
@@ -249,35 +270,45 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
       volume,
     });
 
-    // ----------------------------
-    // Step 3B: Attach translated truth for UI + downstream engines
-    // (Non-breaking: add fields if missing, never remove)
-    // ----------------------------
+    /* ----------------------------
+       Attach translated truth for UI + downstream engines (non-breaking)
+       ---------------------------- */
     out.strategyId = out.strategyId ?? strategyId;
     out.mode = out.mode ?? mode;
+
+    // Expose whether we used active zone or scalp fallback reference
+    out.zoneRefSource = out.zoneRefSource ?? execZoneRefSource;
 
     out.volumeState = volumeState;
 
     out.context = out.context || {};
+
+    // Always expose the exec zone reference used for E3/E4 calls
     out.context.activeZone =
       out.context.activeZone ||
-      (activeZone
+      (execZoneRef
         ? {
-            id: activeZone.id ?? null,
-            zoneType: activeZone.zoneType ?? activeZone.type ?? null,
-            lo: activeZone.lo ?? null,
-            hi: activeZone.hi ?? null,
-            mid: activeZone.mid ?? null,
-            strength: activeZone.strength ?? null,
+            id: execZoneRef.id ?? null,
+            zoneType: execZoneRef.zoneType ?? execZoneRef.type ?? null,
+            lo: execZoneRef.lo ?? null,
+            hi: execZoneRef.hi ?? null,
+            mid: execZoneRef.mid ?? null,
+            strength: execZoneRef.strength ?? null,
+            source: execZoneRefSource,
           }
         : null);
 
+    // Raw E4 transparency
     out.context.volume = out.context.volume || {};
     out.context.volume.volumeScore = volume?.volumeScore ?? 0;
     out.context.volume.volumeConfirmed = volume?.volumeConfirmed ?? false;
     out.context.volume.flags = volume?.flags ?? {};
     out.context.volume.mode = mode;
     out.context.volume.state = volumeState;
+    out.context.volume.reasonCodes = Array.isArray(volume?.reasonCodes) ? volume.reasonCodes : [];
+
+    // Ensure reaction includes stage/armed etc (Engine 3 now provides this)
+    out.context.reaction = out.context.reaction || reaction || null;
 
     return res.json(out);
   } catch (err) {
