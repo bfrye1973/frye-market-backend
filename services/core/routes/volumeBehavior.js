@@ -4,7 +4,10 @@
 // No scoring changes. No logic changes.
 //
 // GET /api/v1/volume-behavior?symbol=SPY&tf=1h&zoneLo=475.2&zoneHi=476.1
-// Optional: touchIndex, lookback, reactionScore
+// Optional: touchIndex, lookback, reactionScore, mode
+//
+// mode: scalp | swing | long
+// (Step 1: we only pass it through; Engine 4 logic will use it in Step 2)
 
 import express from "express";
 import { computeVolumeBehavior } from "../logic/volumeBehaviorEngine.js";
@@ -33,6 +36,12 @@ volumeBehaviorRouter.get("/volume-behavior", async (req, res) => {
     const touchIndex = req.query.touchIndex != null ? Number(req.query.touchIndex) : null;
     const reactionScore = req.query.reactionScore != null ? Number(req.query.reactionScore) : null;
 
+    // ✅ NEW: mode passthrough (Step 1 only)
+    const modeRaw = req.query.mode != null ? String(req.query.mode) : "";
+    const mode = ["scalp", "swing", "long"].includes(modeRaw.toLowerCase())
+      ? modeRaw.toLowerCase()
+      : null;
+
     // ✅ polygonBars.js takes DAYS, not bar count.
     // We choose safe defaults per timeframe.
     const days =
@@ -52,12 +61,16 @@ volumeBehaviorRouter.get("/volume-behavior", async (req, res) => {
       zone,
       touchIndex,
       reactionScore,
-      opts: { lookbackBars: lookback },
+      opts: {
+        lookbackBars: lookback,
+        ...(mode ? { mode } : {}),
+      },
     });
 
     return res.json({
       symbol,
       tf,
+      mode: mode || "default",
       zone,
       ...result,
     });
