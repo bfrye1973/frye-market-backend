@@ -1,5 +1,8 @@
 // src/services/core/logic/confluenceScorer.js
-// FULL FILE — crash-safe + Option B tuned + location.state
+// FINAL: Stage-first scalp weighting + mode-aware golden coil + compression fix
+// - Keeps contracts stable
+// - Uses zoneRefOverride if provided by confluenceScore route (prevents "system off" for scalps)
+// - Fix: no "quiet-only" compression points when squeeze is NONE
 
 function clamp(n, lo, hi) {
   return Math.max(lo, Math.min(hi, n));
@@ -28,8 +31,10 @@ function toNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
-function getActiveZone(ctx) {
-  // LOCKED priority: negotiated -> shelf -> institutional
+/**
+ * Engine 1 active zone priority (LOCKED): negotiated -> shelf -> institutional
+ */
+function getActiveZoneFromEngine1(ctx) {
   const neg = ctx?.active?.negotiated ?? null;
   const shelf = ctx?.active?.shelf ?? null;
   const inst = ctx?.active?.institutional ?? null;
@@ -42,34 +47,28 @@ function getActiveZone(ctx) {
   return { zone, zoneType: "INSTITUTIONAL" };
 }
 
-// ✅ Location state for UI
-function deriveLocation(engine1Context, activeZone, zoneType) {
-  const act = engine1Context?.active || {};
-  const neg = act.negotiated ?? null;
-  const shelf = act.shelf ?? null;
-  const inst = act.institutional ?? null;
+/**
+ * 🔥 NEW: allow route-level zone reference override (for scalp after break)
+ * - confluenceScore route can pass exec zone ref as zoneRefOverride
+ * - this prevents "NO_ZONE_NO_TRADE" hard zero during TRIGGERED window
+ */
+function getExecutionZone({ engine1Context, zoneRefOverride }) {
+  if (zoneRefOverride && zoneRefOverride.lo != null && zoneRefOverride.hi != null) {
+    // zoneRefOverride should include zoneType if possible
+    const zt =
+      zoneRefOverride.zoneType ||
+      zoneRefOverride.type ||
+      null;
 
-  if (!neg && !shelf && !inst) {
-    return { state: "NOT_IN_ZONE", zoneType: null, shelfType: null, zoneId: null };
+    const zoneType =
+      zt === "NEGOTIATED" || zt === "SHELF" || zt === "INSTITUTIONAL"
+        ? zt
+        : null;
+
+    return { zone: zoneRefOverride, zoneType: zoneType || null, override: true };
   }
-
-  if (neg) {
-    return { state: "PRICE_IN_GOLDEN_RULE", zoneType: "NEGOTIATED", shelfType: null, zoneId: neg.id ?? null };
-  }
-
-  if (shelf) {
-    const t = String(shelf.type || "").toLowerCase();
-    const shelfType = (t === "distribution") ? "distribution" : (t === "accumulation") ? "accumulation" : null;
-
-    return {
-      state: shelfType === "distribution" ? "PRICE_IN_DISTRIBUTION_SHELF" : "PRICE_IN_ACCUMULATION_SHELF",
-      zoneType: "SHELF",
-      shelfType,
-      zoneId: shelf.id ?? null,
-    };
-  }
-
-  return { state: "PRICE_IN_INSTITUTIONAL_ZONE", zoneType: "INSTITUTIONAL", shelfType: null, zoneId: inst?.id ?? activeZone?.id ?? null };
+  const { zone, zoneType } = getActiveZoneFromEngine1(engine1Context);
+  return { zone, zoneType, override: false };
 }
 
 // Engine 1 dead-zone gate (institutional only)
@@ -102,14 +101,11 @@ function calcEngine2Score(fib) {
   return score; // 0..20
 }
 
-function calcBiasFromZone(zone, zoneType) {
+function calcBiasFromZone(zone) {
   if (!zone) return null;
-
   const t = String(zone.type || zone.zoneType || "").toLowerCase();
   if (t === "accumulation") return "long";
   if (t === "distribution") return "short";
-
-  if (zoneType === "INSTITUTIONAL") return null;
   return null;
 }
 
@@ -119,7 +115,7 @@ function deriveVolumeState(volume) {
 
   const f = volume?.flags || {};
   if (isTrue(f.liquidityTrap)) return "TRAP_SUSPECTED";
-  if (isTrue(f.initiativeMoveConfirmed)) return "INITIATIVE";
+  if (isTrue(f.initiativeMoveConfirmed) && isTrue(volume?.volumeConfirmed)) return "INITIATIVE";
   if (isTrue(f.volumeDivergence)) return "DIVERGENCE";
   if (isTrue(f.absorptionDetected)) return "ABSORPTION";
   if (isTrue(f.distributionDetected)) return "DISTRIBUTION";
@@ -128,47 +124,12 @@ function deriveVolumeState(volume) {
   return "NO_SIGNAL";
 }
 
-function readBarsInZone(zone) {
-  const candidates = [
-    zone?.barsInZone,
-    zone?.bars_in_zone,
-    zone?.details?.facts?.barsInZone,
-    zone?.details?.facts?.bars_in_zone,
-    zone?.details?.facts?.barsInside,
-    zone?.details?.facts?.bars_inside,
-    zone?.details?.facts?.insideBars,
-    zone?.details?.facts?.inside_bars,
-    zone?.details?.facts?.durationBars,
-  ];
-  for (const c of candidates) {
-    const n = toNum(c);
-    if (n != null) return n;
-  }
-  return null;
-}
-
-function tfToCompressionBars(tf) {
-  const t = String(tf || "").toLowerCase();
-  if (t === "10m") return 24;
-  if (t === "15m") return 20;
-  if (t === "30m") return 16;
-  if (t === "1h") return 12;
-  if (t === "4h") return 6;
-  if (t === "1d") return 4;
-  return 12;
-}
-
-// Option B: TR-only quiet helper
+/* -------------------- Compression (Option B tuned + FIX) -------------------- */
 function readAvgTR8(diagnostics) {
   const d = diagnostics || {};
   const candidates = [
-    d.avgTR8,
-    d.avgTr8,
-    d.avg_true_range_8,
-    d.avgTrueRange8,
-    d.meanTR8,
-    d.meanTr8,
-    d.tr8Avg,
+    d.avgTR8, d.avgTr8, d.avg_true_range_8, d.avgTrueRange8,
+    d.meanTR8, d.meanTr8, d.tr8Avg,
   ];
   for (const c of candidates) {
     const n = toNum(c);
@@ -196,10 +157,9 @@ function squeezeScoreInstitutional(ratio) {
   return Math.round((n20 / 20) * 7);
 }
 
-// ✅ Option B tuned computeCompression
-function computeCompression({ zone, zoneType, tf, fib, volume }) {
+function computeCompression({ zone, zoneType, fib, volume }) {
   if (!zone || !zoneType) {
-    return { active: false, tier: "NONE", score: 0, state: "NONE", zoneWidth: null, atr: null, widthAtrRatio: null, quiet: false, barsInZone: null, barsThreshold: null, reasons: [] };
+    return { active: false, tier: "NONE", score: 0, state: "NONE", zoneWidth: null, atr: null, widthAtrRatio: null, quiet: false, reasons: [] };
   }
 
   const tier =
@@ -208,7 +168,7 @@ function computeCompression({ zone, zoneType, tf, fib, volume }) {
     "NONE";
 
   if (tier === "NONE") {
-    return { active: false, tier, score: 0, state: "NONE", zoneWidth: null, atr: null, widthAtrRatio: null, quiet: false, barsInZone: null, barsThreshold: null, reasons: [] };
+    return { active: false, tier, score: 0, state: "NONE", zoneWidth: null, atr: null, widthAtrRatio: null, quiet: false, reasons: [] };
   }
 
   const lo = toNum(zone.lo);
@@ -222,25 +182,23 @@ function computeCompression({ zone, zoneType, tf, fib, volume }) {
 
   const reasons = ["IN_COMPRESSION_ZONE"];
 
-  // Quiet (TR-only)
+  // Quiet (TR-only preferred, fallback to not-igniting proxy)
   const avgTR8 = readAvgTR8(volume?.diagnostics);
   let quiet = false;
-
   if (avgTR8 != null && atr != null && atr > 0) {
     quiet = avgTR8 <= 0.80 * atr;
     reasons.push(quiet ? "QUIET_TR_OK" : "QUIET_TR_HIGH");
   } else {
     const f = volume?.flags || {};
-    const hasInitiative = isTrue(f.initiativeMoveConfirmed);
-    const hasTrap = isTrue(f.liquidityTrap);
-    quiet = !hasInitiative && !hasTrap;
+    quiet = !isTrue(f.initiativeMoveConfirmed) && !isTrue(f.liquidityTrap);
     reasons.push("QUIET_FALLBACK_NO_TR_METRIC");
   }
 
   // Squeeze
-  const squeeze = (tier === "NEGOTIATED")
-    ? squeezeScoreNegotiated(widthAtrRatio)
-    : squeezeScoreInstitutional(widthAtrRatio);
+  const squeeze =
+    tier === "NEGOTIATED"
+      ? squeezeScoreNegotiated(widthAtrRatio)
+      : squeezeScoreInstitutional(widthAtrRatio);
 
   if (widthAtrRatio == null) reasons.push("NO_ATR_TIGHTNESS_METRIC");
   else if (widthAtrRatio <= 0.60) reasons.push("SQUEEZE_STRONG");
@@ -248,26 +206,24 @@ function computeCompression({ zone, zoneType, tf, fib, volume }) {
   else if (widthAtrRatio <= 1.20) reasons.push("SQUEEZE_WEAK");
   else reasons.push("SQUEEZE_NONE");
 
-  // Quiet score by tier
-  const quietScore =
+  // ✅ FIX: if squeeze==0, do NOT award quiet-only points.
+  const quietScoreRaw =
     tier === "NEGOTIATED" ? (quiet ? 10 : 0) : (quiet ? 3 : 0);
 
-  const cap = tier === "NEGOTIATED" ? 30 : 10;
-  let score = clamp(Math.round(squeeze + quietScore), 0, cap);
+  const quietScore = squeeze > 0 ? quietScoreRaw : 0;
 
-  // State rules
+  const cap = tier === "NEGOTIATED" ? 30 : 10;
+  const score = clamp(Math.round(squeeze + quietScore), 0, cap);
+
   let state = "NONE";
   if (widthAtrRatio != null) {
-    if (widthAtrRatio <= 0.80 && quiet) state = "COILING";
-    else if (widthAtrRatio <= 1.10) state = "COMPRESSING";
+    if (widthAtrRatio <= 0.80 && quiet && squeeze > 0) state = "COILING";
+    else if (widthAtrRatio <= 1.10 && squeeze > 0) state = "COMPRESSING";
     else state = "NONE";
   }
 
   const activeThreshold = tier === "NEGOTIATED" ? 18 : 6;
-  const active = (state === "COILING" && score >= activeThreshold);
-
-  const barsInZone = readBarsInZone(zone);
-  const barsThreshold = tfToCompressionBars(tf);
+  const active = state === "COILING" && score >= activeThreshold;
 
   return {
     active,
@@ -278,12 +234,76 @@ function computeCompression({ zone, zoneType, tf, fib, volume }) {
     atr,
     widthAtrRatio: widthAtrRatio != null ? Number(widthAtrRatio.toFixed(3)) : null,
     quiet,
-    barsInZone,
-    barsThreshold,
     reasons: [...reasons, `SQUEEZE=${squeeze}`, `QUIET=${quietScore}`],
   };
 }
 
+/* -------------------- Location label -------------------- */
+function deriveLocationState(engine1Context, zone, zoneType, strategyMode, reaction) {
+  const act = engine1Context?.active || {};
+  if (act.negotiated) return { state: "PRICE_IN_GOLDEN_RULE", zoneType: "NEGOTIATED", shelfType: null, zoneId: act.negotiated.id ?? null };
+  if (act.shelf) {
+    const t = String(act.shelf.type || "").toLowerCase();
+    const shelfType = t === "distribution" ? "distribution" : t === "accumulation" ? "accumulation" : null;
+    return {
+      state: shelfType === "distribution" ? "PRICE_IN_DISTRIBUTION_SHELF" : "PRICE_IN_ACCUMULATION_SHELF",
+      zoneType: "SHELF",
+      shelfType,
+      zoneId: act.shelf.id ?? null,
+    };
+  }
+  if (act.institutional) return { state: "PRICE_IN_INSTITUTIONAL_ZONE", zoneType: "INSTITUTIONAL", shelfType: null, zoneId: act.institutional.id ?? null };
+
+  // If no active zone, but scalp TRIGGERED exists, we still show system state
+  if (strategyMode === "scalp" && reaction?.stage === "TRIGGERED") {
+    return { state: "TRIGGERED_OUTSIDE_ZONE", zoneType: zoneType || null, shelfType: null, zoneId: zone?.id ?? null };
+  }
+  return { state: "NOT_IN_ZONE", zoneType: null, shelfType: null, zoneId: null };
+}
+
+/* -------------------- NEW: Golden Coil mode-aware flag -------------------- */
+function computeGoldenCoil({ mode, flags, compression, reaction }) {
+  const goldenIgnition = flags?.goldenIgnition === true;
+
+  if (!goldenIgnition) return false;
+
+  if (mode === "scalp") {
+    // Scalp: show golden coil when we are ARMED in golden rule and compression has meaningful score
+    return reaction?.armed === true && (Number(compression?.score) || 0) >= 8;
+  }
+
+  // Swing/Long: classic rule
+  return compression?.active === true && compression?.state === "COILING";
+}
+
+/* -------------------- Engine 3 weighting -------------------- */
+function reactionPartForMode({ mode, reaction }) {
+  const score = clamp(Number(reaction?.reactionScore ?? 0), 0, 10);
+  const stage = String(reaction?.stage || "IDLE").toUpperCase();
+  const structureState = String(reaction?.structureState || "HOLD").toUpperCase();
+  const reasonCodes = Array.isArray(reaction?.reasonCodes) ? reaction.reasonCodes : [];
+
+  if (reasonCodes.includes("NOT_IN_ZONE")) return 0;
+  if (structureState === "FAILURE") return 0;
+
+  // Scalp: stage-first 0..15
+  if (mode === "scalp") {
+    let base = 0;
+    if (stage === "ARMED") base = 6;
+    else if (stage === "TRIGGERED") base = 12;
+    else if (stage === "CONFIRMED") base = 15;
+    else base = 0;
+
+    // optional trim (0..3)
+    const trim = clamp(score - 5, 0, 3);
+    return clamp(base + trim, 0, 15);
+  }
+
+  // Swing/Long: score-first 0..15
+  return clamp(score * 1.5, 0, 15);
+}
+
+/* -------------------- MAIN -------------------- */
 export function computeConfluenceScore({
   symbol,
   tf,
@@ -294,6 +314,9 @@ export function computeConfluenceScore({
   fib,
   reaction,
   volume,
+  strategyId,
+  mode,
+  zoneRefOverride, // optional: provided by route to prevent "system off" for scalp
   weights = { e1: 0.60, e2: 0.15, e3: 0.10, e4: 0.15 },
   engine1WeakCapThreshold = 50,
   engine1WeakCapValue = 55,
@@ -301,10 +324,28 @@ export function computeConfluenceScore({
   const reasons = [];
   const flags = {};
 
-  const { zone: activeZone, zoneType } = getActiveZone(engine1Context);
+  const strategyMode = mode || (String(strategyId || "").includes("intraday_scalp") ? "scalp" : "swing");
 
-  // HARD GATE: must be inside an active zone
-  if (!activeZone) {
+  const { zone: execZone, zoneType: execZoneType } = getExecutionZone({
+    engine1Context,
+    zoneRefOverride,
+  });
+
+  // HARD GATE: fib invalidation (74%)
+  const fibSignals = fib?.signals || {};
+  const fibInvalidated = isTrue(fibSignals.invalidated);
+  flags.fibInvalidated = fibInvalidated;
+
+  // Determine institutional container for golden ignition (Engine 1 truth)
+  const institutionalContainer = engine1Context?.active?.institutional ?? null;
+
+  // Determine zoneType for flags: use execution zone type if available, else from engine1
+  flags.zoneType = execZoneType;
+
+  // If we have no execZone and we’re not in scalp TRIGGERED, we gate
+  const scalpTriggered = strategyMode === "scalp" && String(reaction?.stage || "").toUpperCase() === "TRIGGERED";
+
+  if (!execZone && !scalpTriggered) {
     return {
       ok: true,
       symbol,
@@ -316,25 +357,15 @@ export function computeConfluenceScore({
       tradeReady: false,
       bias: null,
       price,
-      location: deriveLocation(engine1Context, null, null),
+      location: deriveLocationState(engine1Context, null, null, strategyMode, reaction),
       scores: { engine1: 0, engine2: 0, engine3: 0, engine4: 0, compression: 0, total: 0, label: "IGNORE" },
-      flags: { zoneType: null, tradeReady: false },
+      flags: { zoneType: null, tradeReady: false, fibInvalidated },
       context: { activeZone: null },
       targets: { entryTarget: null, exitTarget: null, exitTargetHi: null, exitTargetLo: null },
       volumeState: "NO_SIGNAL",
       compression: { active: false, tier: "NONE", score: 0, state: "NONE" },
     };
   }
-
-  flags.zoneType = zoneType;
-  flags.tradeReady = true;
-
-  const location = deriveLocation(engine1Context, activeZone, zoneType);
-
-  // HARD GATE: fib invalidation (74%)
-  const fibSignals = fib?.signals || {};
-  const fibInvalidated = isTrue(fibSignals.invalidated);
-  flags.fibInvalidated = fibInvalidated;
 
   if (fibInvalidated) {
     return {
@@ -346,20 +377,25 @@ export function computeConfluenceScore({
       invalid: true,
       reasonCodes: ["FIB_INVALIDATION_74"],
       tradeReady: false,
-      bias: calcBiasFromZone(activeZone, zoneType),
+      bias: calcBiasFromZone(execZone),
       price,
-      location,
+      location: deriveLocationState(engine1Context, execZone, execZoneType, strategyMode, reaction),
       scores: { engine1: 0, engine2: 0, engine3: 0, engine4: 0, compression: 0, total: 0, label: "IGNORE" },
       flags,
-      context: { activeZone, fib },
-      targets: { entryTarget: midpoint(activeZone.lo, activeZone.hi), exitTarget: null, exitTargetHi: activeZone.hi ?? null, exitTargetLo: activeZone.lo ?? null },
+      context: { activeZone: execZone, fib },
+      targets: {
+        entryTarget: execZone ? midpoint(execZone.lo, execZone.hi) : null,
+        exitTarget: null,
+        exitTargetHi: execZone?.hi ?? null,
+        exitTargetLo: execZone?.lo ?? null,
+      },
       volumeState: deriveVolumeState(volume),
       compression: { active: false, tier: "NONE", score: 0, state: "NONE" },
     };
   }
 
-  // HARD GATE: institutional dead/archived (only if institutional is ACTIVE zone)
-  if (zoneType === "INSTITUTIONAL" && institutionalIsDead(activeZone)) {
+  // Institutional dead gate ONLY if execution zone is institutional
+  if (execZoneType === "INSTITUTIONAL" && institutionalIsDead(execZone)) {
     return {
       ok: true,
       symbol,
@@ -371,22 +407,28 @@ export function computeConfluenceScore({
       tradeReady: false,
       bias: null,
       price,
-      location,
+      location: deriveLocationState(engine1Context, execZone, execZoneType, strategyMode, reaction),
       scores: { engine1: 0, engine2: 0, engine3: 0, engine4: 0, compression: 0, total: 0, label: "IGNORE" },
       flags,
-      context: { activeZone, fib },
-      targets: { entryTarget: midpoint(activeZone.lo, activeZone.hi), exitTarget: null, exitTargetHi: activeZone.hi ?? null, exitTargetLo: activeZone.lo ?? null },
+      context: { activeZone: execZone, fib },
+      targets: {
+        entryTarget: midpoint(execZone.lo, execZone.hi),
+        exitTarget: null,
+        exitTargetHi: execZone?.hi ?? null,
+        exitTargetLo: execZone?.lo ?? null,
+      },
       volumeState: deriveVolumeState(volume),
       compression: { active: false, tier: "NONE", score: 0, state: "NONE" },
     };
   }
 
-  // Golden ignition: negotiated inside institutional
-  const institutionalContainer = engine1Context?.active?.institutional ?? null;
-  const inGoldenIgnition = (zoneType === "NEGOTIATED" && !!institutionalContainer);
+  // Golden ignition detection: negotiated ignition inside institutional container
+  const inGoldenIgnition = (execZoneType === "NEGOTIATED" && !!institutionalContainer);
+  flags.goldenIgnition = inGoldenIgnition;
+  flags.tradeReady = true;
 
-  // Engine 1 score (purely from activeZone strength/readiness)
-  let e1Score = clamp(Number(activeZone.readiness ?? activeZone.strength ?? 0), 0, 100);
+  // Engine 1 score base (prefer institutional strength if golden ignition)
+  let e1Score = clamp(Number(execZone?.readiness ?? execZone?.strength ?? 0), 0, 100);
 
   if (inGoldenIgnition) {
     const instStrength = toNum(institutionalContainer?.strength ?? institutionalContainer?.readiness);
@@ -398,18 +440,16 @@ export function computeConfluenceScore({
     }
   }
 
-  // Engine 2/3/4
+  // Engine 2 score (0..20)
   const e2Score = clamp(calcEngine2Score(fib), 0, 20);
-  const e3Score = clamp(Number(reaction?.reactionScore ?? 0), 0, 10);
+
+  // Engine 3 contribution (0..15) based on mode + stage
+  const e3Part = reactionPartForMode({ mode: strategyMode, reaction });
+
+  // Engine 4 score (0..15)
   const e4ScoreRaw = clamp(Number(volume?.volumeScore ?? 0), 0, 15);
 
-  // Caps (not hard gates)
-  let e3Capped = e3Score;
-  if (e3Score <= 2) {
-    reasons.push("REACTION_WEAK");
-    e3Capped = Math.min(e3Capped, 2);
-  }
-
+  // Soft caps/penalties
   const liquidityTrap = isTrue(volume?.flags?.liquidityTrap);
   flags.liquidityTrap = liquidityTrap;
 
@@ -419,19 +459,21 @@ export function computeConfluenceScore({
     e4Capped = Math.min(e4Capped, 3);
   }
 
-  const volumeConfirmed = isTrue(volume?.volumeConfirmed);
-  flags.volumeConfirmed = volumeConfirmed;
-
-  // Compression (Option B tuned)
-  let compression = { active: false, tier: "NONE", score: 0, state: "NONE" };
-  if (zoneType === "NEGOTIATED" || zoneType === "INSTITUTIONAL") {
-    compression = computeCompression({ zone: activeZone, zoneType, tf, fib, volume });
+  // Reaction weak signal (keep for UI reasons)
+  if ((reaction?.reactionScore ?? 0) <= 2) {
+    reasons.push("REACTION_WEAK");
   }
 
-  // Normalize to 0..100
+  // Compression
+  let compression = { active: false, tier: "NONE", score: 0, state: "NONE" };
+  if (execZoneType === "NEGOTIATED" || execZoneType === "INSTITUTIONAL") {
+    compression = computeCompression({ zone: execZone, zoneType: execZoneType, fib, volume });
+  }
+
+  // Normalize components to 0..100
   const e1Norm = e1Score;
   const e2Norm = (e2Score / 20) * 100;
-  const e3Norm = (e3Capped / 10) * 100;
+  const e3Norm = (e3Part / 15) * 100;     // stage-based for scalp
   const e4Norm = (e4Capped / 15) * 100;
 
   let total =
@@ -440,13 +482,13 @@ export function computeConfluenceScore({
     weights.e3 * e3Norm +
     weights.e4 * e4Norm;
 
-  // Weak-location cap (disabled in golden ignition)
+  // Weak location cap (disabled in golden ignition)
   if (!inGoldenIgnition && e1Score < engine1WeakCapThreshold) {
     reasons.push("ENGINE1_WEAK_LOCATION");
     total = Math.min(total, engine1WeakCapValue);
   }
 
-  // Compression boost
+  // Pre-ignition boost
   if (compression?.score > 0) {
     total += compression.score;
     if (compression.active) reasons.push("COILING_PRE_IGNITION");
@@ -455,16 +497,19 @@ export function computeConfluenceScore({
   total = clamp(Math.round(total), 0, 100);
   const label = labelFromScore(total);
 
-  const entryTarget = midpoint(activeZone.lo, activeZone.hi);
-  const bias = calcBiasFromZone(activeZone, zoneType);
+  const entryTarget = execZone ? midpoint(execZone.lo, execZone.hi) : null;
+  const bias = calcBiasFromZone(execZone);
 
-  const exitTargetHi = activeZone.hi ?? null;
-  const exitTargetLo = activeZone.lo ?? null;
+  const exitTargetHi = execZone?.hi ?? null;
+  const exitTargetLo = execZone?.lo ?? null;
   let exitTarget = null;
   if (bias === "long") exitTarget = exitTargetHi;
   if (bias === "short") exitTarget = exitTargetLo;
 
   const volumeState = deriveVolumeState(volume);
+
+  // ✅ mode-aware golden coil flag for UI (fixes Scalp mismatch)
+  flags.goldenCoil = computeGoldenCoil({ mode: strategyMode, flags, compression, reaction });
 
   return {
     ok: true,
@@ -477,28 +522,30 @@ export function computeConfluenceScore({
     tradeReady: true,
     bias,
     price,
-    location,
+    location: deriveLocationState(engine1Context, execZone, execZoneType, strategyMode, reaction),
     scores: {
       engine1: Math.round(e1Score),
       engine2: Math.round(e2Score),
-      engine3: Number(e3Score.toFixed(2)),
+      engine3: Math.round((e3Part / 15) * 15), // keep on 0..15 scale feel
       engine4: Number(e4ScoreRaw.toFixed(2)),
       compression: compression.score,
       total,
       label,
     },
-    flags: { ...flags, zoneType, goldenIgnition: inGoldenIgnition },
+    flags: { ...flags, zoneType: execZoneType },
     context: {
-      activeZone: {
-        id: activeZone.id ?? null,
-        zoneType,
-        type: activeZone.type ?? null,
-        lo: activeZone.lo ?? null,
-        hi: activeZone.hi ?? null,
-        mid: activeZone.mid ?? entryTarget ?? null,
-        strength: activeZone.strength ?? null,
-        readiness: activeZone.readiness ?? null,
-      },
+      activeZone: execZone
+        ? {
+            id: execZone.id ?? null,
+            zoneType: execZoneType,
+            type: execZone.type ?? null,
+            lo: execZone.lo ?? null,
+            hi: execZone.hi ?? null,
+            mid: execZone.mid ?? entryTarget ?? null,
+            strength: execZone.strength ?? null,
+            readiness: execZone.readiness ?? null,
+          }
+        : null,
       institutionalContainer: institutionalContainer ?? null,
       fib,
       reaction,
