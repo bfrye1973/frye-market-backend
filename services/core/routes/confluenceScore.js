@@ -25,7 +25,6 @@ async function jget(url, opts = {}) {
 
 /**
  * ✅ Deterministic CORS for this route (HARD SET)
- * (kept as-is to match your current production behavior)
  */
 function applyCors(req, res) {
   const origin = req.headers.origin;
@@ -52,7 +51,7 @@ confluenceScoreRouter.options("/confluence-score", (req, res) => {
   return res.sendStatus(204);
 });
 
-/* ---------------------------- Step 3B helpers (LOCKED) ---------------------------- */
+/* ---------------------------- helpers (LOCKED) ---------------------------- */
 function containsPrice(z, price) {
   if (!z || !Number.isFinite(price)) return false;
   const lo = Number(z.lo);
@@ -76,7 +75,6 @@ function pickActiveExecutionZone(engine1Context, price) {
 }
 
 function strategyIdFromReqOrContext(req, engine1Context, tf) {
-  // Prefer explicit strategyId
   const fromReq = req.query.strategyId != null ? String(req.query.strategyId) : "";
   if (fromReq) return fromReq;
 
@@ -89,8 +87,7 @@ function strategyIdFromReqOrContext(req, engine1Context, tf) {
 
   if (fromCtx) return String(fromCtx);
 
-  // Fallback (LOCKED-ish) if no strategyId present:
-  // Use tf to choose a stable default strategy family.
+  // fallback by tf (stable default)
   const t = String(tf || "").toLowerCase();
   if (t === "5m" || t === "10m" || t === "15m") return "intraday_scalp@10m";
   if (t === "30m" || t === "1h") return "minor_swing@1h";
@@ -107,7 +104,6 @@ function modeFromStrategyId(strategyId) {
 }
 
 function volumeStateFromEngine4(engine4, zoneRef) {
-  // LOCKED labels & priority
   if (!zoneRef) return "NO_ACTIVE_ZONE";
   if (!engine4 || !engine4.flags) return "NO_SIGNAL";
 
@@ -143,11 +139,11 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
 
     const engine1Context = await jget(ctxUrl);
 
-    // Authoritative price comes from Engine 1 context
+    // Authoritative price from Engine 1 context
     const price = Number(engine1Context?.meta?.current_price ?? NaN);
     const priceOk = Number.isFinite(price);
 
-    // Strategy/mode (Engine 5 owns this)
+    // Strategy/mode
     const strategyId = strategyIdFromReqOrContext(req, engine1Context, tf);
     const mode = modeFromStrategyId(strategyId);
     const isScalp = mode === "scalp";
@@ -170,14 +166,9 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     const activeZone = priceOk ? pickActiveExecutionZone(engine1Context, price) : null;
 
     /**
-     * ✅ NEW SYSTEM BEHAVIOR (critical):
-     * If there is NO active zone, we do NOT want the system to go fully dead for scalps.
-     * For SCALP only, use nearest.shelf as a deterministic reference zone for Engine 3/4
-     * so Engine 3 can output TRIGGERED after the break.
-     *
-     * This does NOT violate "no guessing":
-     * - activeZone remains strict
-     * - execZoneRef is explicitly tagged as fallback reference
+     * ✅ SCALP behavior:
+     * If NO active zone, do not "turn off".
+     * Use nearest shelf as deterministic reference for E3/E4.
      */
     let execZoneRef = activeZone;
     let execZoneRefSource = "ACTIVE";
@@ -195,7 +186,7 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     const zoneHi = execZoneRef?.hi ?? null;
 
     /* ----------------------------
-       Engine 3 (reaction) — pass strategyId + zoneId + lo/hi
+       Engine 3 (reaction)
        ---------------------------- */
     const e3Url =
       `${base}/api/v1/reaction-score` +
@@ -209,7 +200,7 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     const reaction = await jget(e3Url);
 
     /* ----------------------------
-       Engine 4 (volume) — call only if we have a zone reference
+       Engine 4 (volume)
        ---------------------------- */
     let volume = null;
     let volumeState = "NO_ACTIVE_ZONE";
@@ -257,7 +248,22 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
 
     /* ----------------------------
        Confluence aggregation (Engine 5 scorer)
+       ✅ pass mode + strategyId + zoneRefOverride
        ---------------------------- */
+    const zoneRefOverride = execZoneRef
+      ? {
+          id: execZoneRef.id ?? null,
+          lo: execZoneRef.lo ?? null,
+          hi: execZoneRef.hi ?? null,
+          mid: execZoneRef.mid ?? null,
+          strength: execZoneRef.strength ?? null,
+          type: execZoneRef.type ?? null,
+          zoneType: execZoneRefSource === "ACTIVE"
+            ? (activeZone ? (engine1Context?.active?.negotiated ? "NEGOTIATED" : engine1Context?.active?.shelf ? "SHELF" : engine1Context?.active?.institutional ? "INSTITUTIONAL" : null) : null)
+            : "SHELF",
+        }
+      : null;
+
     const out = computeConfluenceScore({
       symbol,
       tf,
@@ -268,6 +274,10 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
       fib,
       reaction,
       volume,
+      strategyId,
+      mode,
+      zoneRefOverride,
+      zoneRefSource: execZoneRefSource,
     });
 
     /* ----------------------------
@@ -275,21 +285,18 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
        ---------------------------- */
     out.strategyId = out.strategyId ?? strategyId;
     out.mode = out.mode ?? mode;
-
-    // Expose whether we used active zone or scalp fallback reference
     out.zoneRefSource = out.zoneRefSource ?? execZoneRefSource;
-
-    out.volumeState = volumeState;
+    out.volumeState = out.volumeState ?? volumeState;
 
     out.context = out.context || {};
 
-    // Always expose the exec zone reference used for E3/E4 calls
+    // Always expose the exec zone reference used for E3/E4
     out.context.activeZone =
       out.context.activeZone ||
       (execZoneRef
         ? {
             id: execZoneRef.id ?? null,
-            zoneType: execZoneRef.zoneType ?? execZoneRef.type ?? null,
+            zoneType: zoneRefOverride?.zoneType ?? execZoneRef.zoneType ?? execZoneRef.type ?? null,
             lo: execZoneRef.lo ?? null,
             hi: execZoneRef.hi ?? null,
             mid: execZoneRef.mid ?? null,
@@ -307,7 +314,7 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     out.context.volume.state = volumeState;
     out.context.volume.reasonCodes = Array.isArray(volume?.reasonCodes) ? volume.reasonCodes : [];
 
-    // Ensure reaction includes stage/armed etc (Engine 3 now provides this)
+    // Ensure reaction includes stage/armed etc
     out.context.reaction = out.context.reaction || reaction || null;
 
     return res.json(out);
