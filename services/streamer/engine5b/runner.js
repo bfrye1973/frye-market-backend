@@ -8,6 +8,8 @@ const BACKEND1_BASE =
   process.env.HIST_BASE ||
   "https://frye-market-backend-1.onrender.com";
 
+/* -------------------- small helpers -------------------- */
+
 function resolvePolygonKey() {
   return (
     process.env.POLYGON_API ||
@@ -33,7 +35,10 @@ function safeJsonParse(s) {
 }
 
 async function jget(url) {
-  const r = await fetch(url, { headers: { accept: "application/json" }, cache: "no-store" });
+  const r = await fetch(url, {
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
   if (!r.ok) throw new Error(`GET ${url} -> ${r.status}`);
   return r.json();
 }
@@ -45,9 +50,13 @@ async function jpost(url, body) {
     body: JSON.stringify(body),
   });
   const j = await r.json().catch(() => null);
-  if (!r.ok) throw new Error(`POST ${url} -> ${r.status} ${(j && JSON.stringify(j).slice(0,200)) || ""}`);
+  if (!r.ok) {
+    throw new Error(`POST ${url} -> ${r.status} ${(j && JSON.stringify(j).slice(0, 200)) || ""}`);
+  }
   return j;
 }
+
+/* -------------------- Engine 1 zone pick (strict + scalp fallback) -------------------- */
 
 function pickZoneFromEngine1Context(ctx) {
   const price = Number(ctx?.meta?.current_price ?? NaN);
@@ -58,7 +67,7 @@ function pickZoneFromEngine1Context(ctx) {
 
   const active = activeNeg || activeShelf || activeInst || null;
 
-  // Strict containment check
+  // STRICT containment check (no guessing)
   if (active && Number.isFinite(price)) {
     const lo = Number(active.lo), hi = Number(active.hi);
     if (Number.isFinite(lo) && Number.isFinite(hi) && lo <= price && price <= hi) {
@@ -66,7 +75,7 @@ function pickZoneFromEngine1Context(ctx) {
     }
   }
 
-  // Scalp fallback: nearest shelf
+  // Scalp fallback: nearest shelf reference (deterministic)
   const ns = ctx?.nearest?.shelf ?? null;
   if (ns?.lo != null && ns?.hi != null) {
     const lo = Number(ns.lo), hi = Number(ns.hi);
@@ -79,6 +88,7 @@ function pickZoneFromEngine1Context(ctx) {
 }
 
 /* -------------------- 1s microbar builder from ticks -------------------- */
+
 function applyTickTo1s(cur, tick) {
   const price = Number(tick?.p);
   const size = Number(tick?.s ?? 0);
@@ -87,12 +97,22 @@ function applyTickTo1s(cur, tick) {
 
   const sec = tSec; // 1s bucket
 
+  // new second
   if (!cur || cur.time < sec) {
-    return { time: sec, open: price, high: price, low: price, close: price, volume: Number.isFinite(size) ? size : 0 };
+    return {
+      time: sec,
+      open: price,
+      high: price,
+      low: price,
+      close: price,
+      volume: Number.isFinite(size) ? size : 0,
+    };
   }
 
+  // ignore out-of-order
   if (cur.time !== sec) return cur;
 
+  // update current second bar
   const b = { ...cur };
   b.high = Math.max(b.high, price);
   b.low = Math.min(b.low, price);
@@ -101,9 +121,10 @@ function applyTickTo1s(cur, tick) {
   return b;
 }
 
-/* -------------------- Decision helpers -------------------- */
+/* -------------------- State machine helpers -------------------- */
+
 function isKillSwitchOn() {
-  return engine5bState.risk.killSwitch === true;
+  return engine5bState.risk?.killSwitch === true;
 }
 
 function inCooldown() {
@@ -114,6 +135,15 @@ function inCooldown() {
 function stageSet(newStage) {
   engine5bState.sm.stage = newStage;
   engine5bState.sm.lastDecision = `${nowUtc()} stage=${newStage}`;
+}
+
+function hardResetToIdle(reason) {
+  engine5bState.sm.stage = "IDLE";
+  engine5bState.sm.armedAtMs = null;
+  engine5bState.sm.triggeredAtMs = null;
+  engine5bState.sm.cooldownUntilMs = null;
+  engine5bState.sm.outsideCount = 0;
+  engine5bState.sm.lastDecision = `${nowUtc()} reset=IDLE reason=${reason || "UNKNOWN"}`;
 }
 
 function resetOutsideCount() {
@@ -127,18 +157,18 @@ function isArmedRecent() {
 }
 
 function breakoutCheck(closePx) {
-  const { lo, hi } = engine5bState.zone;
+  const { lo, hi } = engine5bState.zone || {};
   if (!Number.isFinite(closePx) || lo == null || hi == null) return { outside: false, dir: null };
 
   const breakoutPts = Number(engine5bState.config.breakoutPts || 0.02);
 
-  // long-only v1
+  // v1: long-only
   if (engine5bState.config.longOnly) {
     const outside = closePx > (Number(hi) + breakoutPts);
     return { outside, dir: outside ? "LONG" : null };
   }
 
-  // future: allow shorts
+  // future: both directions
   const up = closePx > (Number(hi) + breakoutPts);
   const dn = closePx < (Number(lo) - breakoutPts);
   if (up) return { outside: true, dir: "LONG" };
@@ -147,16 +177,25 @@ function breakoutCheck(closePx) {
 }
 
 /* -------------------- Engine calls -------------------- */
+
 async function refreshZone() {
   const url = `${BACKEND1_BASE}/api/v1/engine5-context?symbol=SPY&tf=10m`;
   const ctx = await jget(url);
   const z = pickZoneFromEngine1Context(ctx);
+
   engine5bState.zone = { ...engine5bState.zone, ...z, refreshedAtUtc: nowUtc() };
+
+  // ✅ Clean weekend/closed-market reset:
+  // If there is no valid zone reference, force the state machine to IDLE
+  // so we never remain "ARMED" while market is closed / price feed invalid.
+  if (engine5bState.zone?.source === "NONE") {
+    hardResetToIdle("NO_ZONE_SOURCE_NONE");
+  }
 }
 
 /**
- * ✅ FIX: correct risk/killswitch source of truth
- * Engine 8 confirmed: GET /api/trading/status returns killSwitch
+ * ✅ Correct kill switch truth source:
+ * GET /api/trading/status (Engine 8)
  */
 async function refreshRisk() {
   const url = `${BACKEND1_BASE}/api/trading/status`;
@@ -169,10 +208,15 @@ async function refreshRisk() {
     updatedAtUtc: nowUtc(),
     raw: j,
   };
+
+  // If kill switch is on, hard reset state (safest)
+  if (engine5bState.risk.killSwitch === true) {
+    hardResetToIdle("KILL_SWITCH_ON");
+  }
 }
 
 async function refreshE3() {
-  const { lo, hi } = engine5bState.zone;
+  const { lo, hi } = engine5bState.zone || {};
   if (lo == null || hi == null) return;
 
   const url =
@@ -190,9 +234,17 @@ async function refreshE3() {
     raw: j,
   };
 
-  // update state machine base stage
+  const reasonCodes = Array.isArray(j?.reasonCodes) ? j.reasonCodes : [];
   const stage = engine5bState.e3.stage;
 
+  // ✅ Clean weekend/closed-market reset:
+  // If Engine 3 says NOT_IN_ZONE, we must not remain ARMED.
+  if (reasonCodes.includes("NOT_IN_ZONE")) {
+    hardResetToIdle("E3_NOT_IN_ZONE");
+    return;
+  }
+
+  // Update state machine base stage
   if (stage === "ARMED") {
     if (engine5bState.sm.stage === "IDLE") stageSet("ARMED");
     engine5bState.sm.armedAtMs = engine5bState.sm.armedAtMs || Date.now();
@@ -207,7 +259,7 @@ async function refreshE3() {
 }
 
 async function refreshE4_1m() {
-  const { lo, hi } = engine5bState.zone;
+  const { lo, hi } = engine5bState.zone || {};
   if (lo == null || hi == null) return;
 
   const url =
@@ -226,4 +278,196 @@ async function refreshE4_1m() {
   };
 }
 
-async function tryExec
+async function tryExecutePaper(dir, barTimeSec) {
+  // Safety: monitor-only by default
+  if (!engine5bState.config.executeEnabled) {
+    return { ok: false, skipped: true, reason: "EXECUTE_DISABLED" };
+  }
+
+  // Safety: kill switch (authoritative)
+  if (isKillSwitchOn()) {
+    return { ok: false, skipped: true, reason: "KILL_SWITCH" };
+  }
+
+  // Engine 4 hard block
+  if (engine5bState.e4?.liquidityTrap) {
+    return { ok: false, skipped: true, reason: "E4_LIQUIDITY_TRAP" };
+  }
+
+  // Engine 4 threshold
+  if ((engine5bState.e4?.volumeScore ?? 0) < 7) {
+    return { ok: false, skipped: true, reason: "E4_VOLUME_SCORE_LT_7" };
+  }
+
+  const idempotencyKey = `SPY|intraday_scalp@10m|${dir}|${barTimeSec}`;
+
+  const body = {
+    idempotencyKey,
+    symbol: "SPY",
+    strategyId: "intraday_scalp@10m",
+    side: "ENTRY",
+    // NOTE: Engine 6/7 wiring is next. For now execute is OFF by env.
+    engine6: { permission: "ALLOW" },
+    engine7: { finalR: 0.1 },
+    assetType: "EQUITY",
+    paper: true,
+    engine5: { bias: dir === "LONG" ? "long" : "short" },
+  };
+
+  const url = `${BACKEND1_BASE}/api/trading/execute`;
+  return await jpost(url, body);
+}
+
+/* -------------------- Core loop -------------------- */
+
+export function startEngine5B({ log = console.log } = {}) {
+  const KEY = resolvePolygonKey();
+  if (!KEY) {
+    log("[engine5b] Missing POLYGON_API_KEY — not started");
+    return { stop() {} };
+  }
+
+  // config from env (safe defaults)
+  engine5bState.config.executeEnabled = String(process.env.ENGINE5B_EXECUTE_PAPER || "0") === "1";
+  engine5bState.config.mode = engine5bState.config.executeEnabled ? "paper" : "monitor";
+  engine5bState.config.longOnly = String(process.env.ENGINE5B_LONG_ONLY || "1") === "1";
+
+  log(`[engine5b] starting mode=${engine5bState.config.mode} execute=${engine5bState.config.executeEnabled}`);
+
+  let stopped = false;
+  let ws = null;
+
+  // timers
+  let zoneTimer = null;
+  let riskTimer = null;
+  let e3Timer = null;
+  let e4Timer = null;
+
+  // tick microbars
+  let cur1s = null;
+  let lastClosedSec = null;
+
+  async function safe(fn, label) {
+    try { await fn(); }
+    catch (e) { log(`[engine5b] ${label} error: ${e?.message || e}`); }
+  }
+
+  // initial fetches
+  safe(refreshZone, "refreshZone");
+  safe(refreshRisk, "refreshRisk");
+  safe(refreshE3, "refreshE3");
+  safe(refreshE4_1m, "refreshE4_1m");
+
+  // schedule
+  zoneTimer = setInterval(() => safe(refreshZone, "refreshZone"), engine5bState.config.zoneRefreshMs);
+  riskTimer = setInterval(() => safe(refreshRisk, "refreshRisk"), 5000);
+  e3Timer = setInterval(() => safe(refreshE3, "refreshE3"), engine5bState.config.e3IntervalMs);
+  e4Timer = setInterval(() => safe(refreshE4_1m, "refreshE4_1m"), engine5bState.config.e4RefreshMs);
+
+  function connectWs() {
+    if (stopped) return;
+    ws = new WebSocket(POLY_WS_URL);
+
+    ws.on("open", () => {
+      ws.send(JSON.stringify({ action: "auth", params: KEY }));
+      ws.send(JSON.stringify({ action: "subscribe", params: `T.SPY` }));
+      log("[engine5b] WS open, subscribed T.SPY");
+    });
+
+    ws.on("message", async (buf) => {
+      const msg = safeJsonParse(buf.toString("utf8"));
+      if (!msg) return;
+
+      const arr = Array.isArray(msg) ? msg : [msg];
+      for (const ev of arr) {
+        if (ev?.ev === "status") continue;
+        if (ev?.ev !== "T") continue;
+        if (String(ev?.sym || "").toUpperCase() !== "SPY") continue;
+
+        // If kill switch, ignore ticks and stay idle
+        if (isKillSwitchOn()) {
+          hardResetToIdle("KILL_SWITCH_TICK_BLOCK");
+          continue;
+        }
+
+        engine5bState.lastTick = {
+          t: ev.t,
+          p: ev.p,
+          s: ev.s,
+          updatedAtUtc: nowUtc(),
+        };
+
+        cur1s = applyTickTo1s(cur1s, ev);
+
+        const sec = cur1s?.time;
+        if (!sec) continue;
+
+        if (lastClosedSec == null) lastClosedSec = sec;
+
+        // We "close" the bar when the second changes
+        if (sec !== lastClosedSec) {
+          engine5bState.lastBar1s = { ...cur1s, closedAtUtc: nowUtc() };
+
+          const closePx = Number(cur1s?.close);
+          const { outside, dir } = breakoutCheck(closePx);
+
+          // Only trigger if ARMED, recent, and not cooling down
+          if (engine5bState.sm.stage === "ARMED" && isArmedRecent() && !inCooldown()) {
+            if (outside) engine5bState.sm.outsideCount += 1;
+            else resetOutsideCount();
+
+            // Require persistence (default 2 consecutive 1s closes outside)
+            if (engine5bState.sm.outsideCount >= engine5bState.config.persistBars) {
+              stageSet("TRIGGERED");
+              engine5bState.sm.triggeredAtMs = Date.now();
+
+              const result = await (async () => {
+                try { return await tryExecutePaper(dir || "LONG", sec); }
+                catch (e) { return { ok: false, error: String(e?.message || e) }; }
+              })();
+
+              engine5bState.sm.lastDecision =
+                `${nowUtc()} TRIGGERED outside=${engine5bState.sm.outsideCount} exec=${JSON.stringify(result).slice(0, 200)}`;
+
+              // Always cooldown (even monitor) to prevent repeated spam
+              engine5bState.sm.cooldownUntilMs = Date.now() + engine5bState.config.cooldownMs;
+              stageSet("COOLDOWN");
+              resetOutsideCount();
+            }
+          }
+
+          // Cooldown expiry -> IDLE
+          if (engine5bState.sm.stage === "COOLDOWN" && !inCooldown()) {
+            hardResetToIdle("COOLDOWN_EXPIRED");
+          }
+
+          lastClosedSec = sec;
+        }
+      }
+    });
+
+    ws.on("close", () => {
+      log("[engine5b] WS closed; reconnecting in 2.5s");
+      setTimeout(() => connectWs(), 2500);
+    });
+
+    ws.on("error", (err) => {
+      log(`[engine5b] WS error: ${err?.message || err}`);
+      try { ws.close(); } catch {}
+    });
+  }
+
+  connectWs();
+
+  return {
+    stop() {
+      stopped = true;
+      try { ws?.close?.(); } catch {}
+      if (zoneTimer) clearInterval(zoneTimer);
+      if (riskTimer) clearInterval(riskTimer);
+      if (e3Timer) clearInterval(e3Timer);
+      if (e4Timer) clearInterval(e4Timer);
+      log("[engine5b] stopped");
+    },
+  };
+}
