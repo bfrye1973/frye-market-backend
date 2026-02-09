@@ -55,6 +55,15 @@ function toBoolEnv01(name, fallbackBool) {
   return fallbackBool;
 }
 
+function clampInt(n, lo, hi) {
+  if (!Number.isFinite(n)) return lo;
+  return Math.max(lo, Math.min(hi, Math.trunc(n)));
+}
+function clampFloat(n, lo, hi) {
+  if (!Number.isFinite(n)) return lo;
+  return Math.max(lo, Math.min(hi, n));
+}
+
 async function jget(url) {
   const r = await fetch(url, { headers: { accept: "application/json" }, cache: "no-store" });
   if (!r.ok) throw new Error(`GET ${url} -> ${r.status}`);
@@ -103,7 +112,7 @@ function pickZoneFromEngine1Context(ctx) {
   return { id: null, lo: null, hi: null, source: "NONE" };
 }
 
-/* -------------------- 1s microbar from ticks -------------------- */
+/* -------------------- 1s and 1m builders from ticks -------------------- */
 
 function applyTickTo1s(cur, tick) {
   const price = Number(tick?.p);
@@ -117,6 +126,27 @@ function applyTickTo1s(cur, tick) {
     return { time: sec, open: price, high: price, low: price, close: price, volume: Number.isFinite(size) ? size : 0 };
   }
   if (cur.time !== sec) return cur;
+
+  const b = { ...cur };
+  b.high = Math.max(b.high, price);
+  b.low = Math.min(b.low, price);
+  b.close = price;
+  b.volume = Number(b.volume || 0) + Number(size || 0);
+  return b;
+}
+
+function applyTickTo1m(cur, tick) {
+  const price = Number(tick?.p);
+  const size = Number(tick?.s ?? 0);
+  const tSec = toUnixSec(tick?.t);
+  if (!Number.isFinite(price) || !Number.isFinite(tSec)) return cur;
+
+  const minSec = Math.floor(tSec / 60) * 60;
+
+  if (!cur || cur.time < minSec) {
+    return { time: minSec, open: price, high: price, low: price, close: price, volume: Number.isFinite(size) ? size : 0 };
+  }
+  if (cur.time !== minSec) return cur;
 
   const b = { ...cur };
   b.high = Math.max(b.high, price);
@@ -148,6 +178,16 @@ function hardResetToIdle(reason) {
   engine5bState.sm.triggeredAtMs = null;
   engine5bState.sm.cooldownUntilMs = null;
   engine5bState.sm.outsideCount = 0;
+
+  // extra fields for pullback pattern
+  engine5bState.sm.pbState = null;          // null | IMPULSE_SEEN | PULLBACK_SEEN
+  engine5bState.sm.impulse1mTime = null;
+  engine5bState.sm.impulse1mHigh = null;
+  engine5bState.sm.pullback1mTime = null;
+  engine5bState.sm.pullbackHigh = null;
+  engine5bState.sm.triggerLine = null;
+  engine5bState.sm.triggerAboveCount = 0;
+
   engine5bState.sm.lastDecision = `${nowUtc()} reset=IDLE reason=${reason || "UNKNOWN"}`;
 }
 
@@ -161,13 +201,25 @@ function isArmedRecent() {
   return Date.now() - t <= engine5bState.config.armedWindowMs;
 }
 
+/**
+ * Option 1 entry:
+ * After impulse candle, wait for next candle wick down, then enter when price breaks pullback candle HIGH.
+ */
+function pullbackReclaimCheck_1s(closePx) {
+  const line = Number(engine5bState.sm.triggerLine);
+  if (!Number.isFinite(closePx) || !Number.isFinite(line)) return false;
+
+  // we want the break ABOVE pullback candle high; use breakoutPts as tiny buffer
+  const req = line + Number(engine5bState.config.breakoutPts || 0.02);
+  return closePx > req;
+}
+
 function breakoutCheck(closePx) {
   const { lo, hi } = engine5bState.zone || {};
   if (!Number.isFinite(closePx) || lo == null || hi == null) return { outside: false, dir: null };
 
   const breakoutPts = Number(engine5bState.config.breakoutPts || 0.02);
 
-  // long-only v1
   if (engine5bState.config.longOnly) {
     const outside = closePx > (Number(hi) + breakoutPts);
     return { outside, dir: outside ? "LONG" : null };
@@ -188,14 +240,12 @@ async function refreshZone() {
   const z = pickZoneFromEngine1Context(ctx);
   engine5bState.zone = { ...engine5bState.zone, ...z, refreshedAtUtc: nowUtc() };
 
-  // Weekend/closed reset
   if (engine5bState.zone?.source === "NONE") {
     hardResetToIdle("NO_ZONE_SOURCE_NONE");
   }
 }
 
 async function refreshRisk() {
-  // ✅ Kill switch truth from Engine 8
   const url = `${BACKEND1_BASE}/api/trading/status`;
   const j = await jget(url);
 
@@ -262,6 +312,30 @@ async function refreshE4_1m() {
 
   const j = await jget(url);
 
+  // Safety: if Engine 4 responds with a different zone, treat as stale
+  const rzLo = Number(j?.zone?.lo);
+  const rzHi = Number(j?.zone?.hi);
+  const reqLo = Number(lo);
+  const reqHi = Number(hi);
+
+  const match =
+    Number.isFinite(rzLo) &&
+    Number.isFinite(rzHi) &&
+    Math.abs(rzLo - reqLo) < 1e-6 &&
+    Math.abs(rzHi - reqHi) < 1e-6;
+
+  if (!match) {
+    engine5bState.e4 = {
+      ok: false,
+      volumeScore: 0,
+      volumeConfirmed: false,
+      liquidityTrap: false,
+      updatedAtUtc: nowUtc(),
+      raw: { ok: false, error: "ZONE_MISMATCH_STALE", requested: { lo, hi }, received: j?.zone ?? null },
+    };
+    return;
+  }
+
   engine5bState.e4 = {
     ok: true,
     volumeScore: Number(j?.volumeScore ?? 0),
@@ -276,8 +350,10 @@ async function tryExecutePaper(dir, barTimeSec) {
   if (!engine5bState.config.executeEnabled) return { ok: false, skipped: true, reason: "EXECUTE_DISABLED" };
   if (isKillSwitchOn()) return { ok: false, skipped: true, reason: "KILL_SWITCH" };
 
-  // Engine4 blocks
+  // Engine 4 hard blocks
   if (engine5bState.e4?.liquidityTrap) return { ok: false, skipped: true, reason: "E4_LIQUIDITY_TRAP" };
+
+  // Require volume score threshold for entry
   if ((engine5bState.e4?.volumeScore ?? 0) < 7) return { ok: false, skipped: true, reason: "E4_VOLUME_SCORE_LT_7" };
 
   const idempotencyKey = `SPY|intraday_scalp@10m|${dir}|${barTimeSec}`;
@@ -312,15 +388,21 @@ export function startEngine5B({ log = console.log } = {}) {
   engine5bState.config.mode = engine5bState.config.executeEnabled ? "paper" : "monitor";
   engine5bState.config.longOnly = toBoolEnv01("ENGINE5B_LONG_ONLY", true);
 
-  // ✅ tunables from env (your new setting)
+  // tunables from env
   engine5bState.config.persistBars = clampInt(toIntEnv("ENGINE5B_PERSIST_BARS", engine5bState.config.persistBars ?? 2), 1, 5);
   engine5bState.config.breakoutPts = clampFloat(toFloatEnv("ENGINE5B_BREAKOUT_PTS", engine5bState.config.breakoutPts ?? 0.02), 0.0, 1.0);
   engine5bState.config.cooldownMs = clampInt(toIntEnv("ENGINE5B_COOLDOWN_MS", engine5bState.config.cooldownMs ?? 120000), 1000, 60 * 60 * 1000);
   engine5bState.config.armedWindowMs = clampInt(toIntEnv("ENGINE5B_ARMED_WINDOW_MS", engine5bState.config.armedWindowMs ?? 120000), 1000, 60 * 60 * 1000);
   engine5bState.config.e3IntervalMs = clampInt(toIntEnv("ENGINE5B_E3_INTERVAL_MS", engine5bState.config.e3IntervalMs ?? 2000), 250, 60000);
 
+  // NEW: pullback reclaim tunables (safe defaults for your Option 1)
+  const IMPULSE_RANGE_PTS = clampFloat(toFloatEnv("ENGINE5B_IMPULSE_RANGE_PTS", 0.40), 0.05, 5.0); // impulse candle must be "big"
+  const PULLBACK_WICK_PTS = clampFloat(toFloatEnv("ENGINE5B_PULLBACK_WICK_PTS", 0.20), 0.01, 5.0);   // wick down amount
+  const PULLBACK_MAX_MINUTES = clampInt(toIntEnv("ENGINE5B_PULLBACK_MAX_MINUTES", 3), 1, 10);         // must happen soon
+
   log(`[engine5b] starting mode=${engine5bState.config.mode} execute=${engine5bState.config.executeEnabled}`);
-  log(`[engine5b] cfg persistBars=${engine5bState.config.persistBars} breakoutPts=${engine5bState.config.breakoutPts} cooldownMs=${engine5bState.config.cooldownMs} armedWindowMs=${engine5bState.config.armedWindowMs} e3IntervalMs=${engine5bState.config.e3IntervalMs}`);
+  log(`[engine5b] cfg persistBars=${engine5bState.config.persistBars} breakoutPts=${engine5bState.config.breakoutPts} cooldownMs=${engine5bState.config.cooldownMs}`);
+  log(`[engine5b] pullback cfg impulseRangePts=${IMPULSE_RANGE_PTS} pullbackWickPts=${PULLBACK_WICK_PTS} pullbackMaxMin=${PULLBACK_MAX_MINUTES}`);
 
   let stopped = false;
   let ws = null;
@@ -334,6 +416,14 @@ export function startEngine5B({ log = console.log } = {}) {
   // tick microbars
   let cur1s = null;
   let lastClosedSec = null;
+
+  // 1m bar builder for "impulse" + "next candle pullback"
+  let cur1m = null;
+  let lastClosedMinSec = null;
+
+  // init pullback state
+  engine5bState.sm.pbState = engine5bState.sm.pbState ?? null;
+  engine5bState.sm.triggerAboveCount = engine5bState.sm.triggerAboveCount ?? 0;
 
   async function safe(fn, label) {
     try { await fn(); }
@@ -379,40 +469,129 @@ export function startEngine5B({ log = console.log } = {}) {
 
         engine5bState.lastTick = { t: ev.t, p: ev.p, s: ev.s, updatedAtUtc: nowUtc() };
 
+        // Update 1s bar
         cur1s = applyTickTo1s(cur1s, ev);
-
         const sec = cur1s?.time;
         if (!sec) continue;
 
+        // Update 1m bar
+        cur1m = applyTickTo1m(cur1m, ev);
+        const minSec = cur1m?.time ?? null;
+
+        /* ---------- 1m close events: detect impulse then pullback candle ---------- */
+        if (minSec != null) {
+          if (lastClosedMinSec == null) lastClosedMinSec = minSec;
+
+          if (minSec !== lastClosedMinSec) {
+            // We effectively "closed" the previous 1m bar when we moved into a new minute
+            const closed1m = cur1m; // current object contains the minute bucket (already updated), good enough for our pattern
+            // Pattern only matters if we have zone and we are ARMED (or very recently armed)
+            const haveZone = engine5bState.zone?.source && engine5bState.zone.source !== "NONE";
+            const armedOk = engine5bState.e3?.stage === "ARMED" || engine5bState.sm.stage === "ARMED";
+
+            if (haveZone && armedOk) {
+              // If we have IMPULSE_SEEN but pullback takes too long, reset the pullback pattern
+              if (engine5bState.sm.pbState === "IMPULSE_SEEN") {
+                const impulseT = Number(engine5bState.sm.impulse1mTime ?? 0);
+                if (impulseT > 0) {
+                  const minsPassed = Math.floor((minSec - impulseT) / 60);
+                  if (minsPassed > PULLBACK_MAX_MINUTES) {
+                    engine5bState.sm.pbState = null;
+                    engine5bState.sm.impulse1mTime = null;
+                    engine5bState.sm.impulse1mHigh = null;
+                    engine5bState.sm.pullback1mTime = null;
+                    engine5bState.sm.pullbackHigh = null;
+                    engine5bState.sm.triggerLine = null;
+                    engine5bState.sm.triggerAboveCount = 0;
+                    engine5bState.sm.lastDecision = `${nowUtc()} pb_reset=TIMEOUT`;
+                  }
+                }
+              }
+
+              // Detect impulse candle (the "8:01" style candle)
+              if (!engine5bState.sm.pbState) {
+                const range = Number(closed1m.high) - Number(closed1m.low);
+                const zoneHi = Number(engine5bState.zone.hi);
+                const breakoutPts = Number(engine5bState.config.breakoutPts || 0.02);
+
+                // impulse definition: big range + close above zoneHi
+                if (Number.isFinite(range) && range >= IMPULSE_RANGE_PTS && Number(closed1m.close) > (zoneHi + breakoutPts)) {
+                  engine5bState.sm.pbState = "IMPULSE_SEEN";
+                  engine5bState.sm.impulse1mTime = minSec;
+                  engine5bState.sm.impulse1mHigh = Number(closed1m.high);
+                  engine5bState.sm.lastDecision = `${nowUtc()} pb=IMPULSE_SEEN impulseHigh=${engine5bState.sm.impulse1mHigh}`;
+                }
+              } else if (engine5bState.sm.pbState === "IMPULSE_SEEN") {
+                // The VERY NEXT candle should wick down then reclaim.
+                // We capture THIS candle's HIGH as the "pullback candle high" (Option 1 trigger line)
+                const impulseHigh = Number(engine5bState.sm.impulse1mHigh);
+                const wickDown = impulseHigh - Number(closed1m.low);
+
+                if (Number.isFinite(impulseHigh) && Number.isFinite(wickDown) && wickDown >= PULLBACK_WICK_PTS) {
+                  engine5bState.sm.pbState = "PULLBACK_SEEN";
+                  engine5bState.sm.pullback1mTime = minSec;
+                  engine5bState.sm.pullbackHigh = Number(closed1m.high);
+                  engine5bState.sm.triggerLine = Number(closed1m.high); // ✅ Option 1: break pullback candle HIGH
+                  engine5bState.sm.triggerAboveCount = 0;
+                  engine5bState.sm.lastDecision = `${nowUtc()} pb=PULLBACK_SEEN triggerLine=${engine5bState.sm.triggerLine}`;
+                }
+              }
+            }
+
+            lastClosedMinSec = minSec;
+          }
+        }
+
+        /* ---------- 1s close events: trigger logic ---------- */
         if (lastClosedSec == null) lastClosedSec = sec;
 
         if (sec !== lastClosedSec) {
           engine5bState.lastBar1s = { ...cur1s, closedAtUtc: nowUtc() };
 
           const closePx = Number(cur1s?.close);
-          const { outside, dir } = breakoutCheck(closePx);
 
-          if (engine5bState.sm.stage === "ARMED" && isArmedRecent() && !inCooldown()) {
-            if (outside) engine5bState.sm.outsideCount += 1;
-            else resetOutsideCount();
+          // If we are in PULLBACK_SEEN state, trigger on break of pullback candle high (Option 1)
+          if (
+            engine5bState.sm.pbState === "PULLBACK_SEEN" &&
+            engine5bState.sm.stage === "ARMED" &&
+            isArmedRecent() &&
+            !inCooldown()
+          ) {
+            const above = pullbackReclaimCheck_1s(closePx);
+            if (above) engine5bState.sm.triggerAboveCount = Number(engine5bState.sm.triggerAboveCount || 0) + 1;
+            else engine5bState.sm.triggerAboveCount = 0;
 
-            if (engine5bState.sm.outsideCount >= engine5bState.config.persistBars) {
+            if (engine5bState.sm.triggerAboveCount >= engine5bState.config.persistBars) {
+              // ✅ TRIGGER
               stageSet("TRIGGERED");
               engine5bState.sm.triggeredAtMs = Date.now();
 
               const result = await (async () => {
-                try { return await tryExecutePaper(dir || "LONG", sec); }
+                try { return await tryExecutePaper("LONG", sec); }
                 catch (e) { return { ok: false, error: String(e?.message || e) }; }
               })();
 
               engine5bState.sm.lastDecision =
-                `${nowUtc()} TRIGGERED outside=${engine5bState.sm.outsideCount} exec=${JSON.stringify(result).slice(0, 200)}`;
+                `${nowUtc()} TRIGGERED(PULLBACK_RECLAIM) aboveCount=${engine5bState.sm.triggerAboveCount} exec=${JSON.stringify(result).slice(0, 200)}`;
 
+              // cooldown
               engine5bState.sm.cooldownUntilMs = Date.now() + engine5bState.config.cooldownMs;
               stageSet("COOLDOWN");
-              resetOutsideCount();
+
+              // reset pullback pattern after trigger
+              engine5bState.sm.pbState = null;
+              engine5bState.sm.impulse1mTime = null;
+              engine5bState.sm.impulse1mHigh = null;
+              engine5bState.sm.pullback1mTime = null;
+              engine5bState.sm.pullbackHigh = null;
+              engine5bState.sm.triggerLine = null;
+              engine5bState.sm.triggerAboveCount = 0;
             }
           }
+
+          // fallback legacy breakout trigger (still available if you want later)
+          // NOTE: we keep it passive. Pullback pattern is the primary now.
+          // const { outside, dir } = breakoutCheck(closePx);
 
           if (engine5bState.sm.stage === "COOLDOWN" && !inCooldown()) {
             hardResetToIdle("COOLDOWN_EXPIRED");
@@ -447,15 +626,4 @@ export function startEngine5B({ log = console.log } = {}) {
       log("[engine5b] stopped");
     },
   };
-}
-
-/* -------------------- clamps -------------------- */
-
-function clampInt(n, lo, hi) {
-  if (!Number.isFinite(n)) return lo;
-  return Math.max(lo, Math.min(hi, Math.trunc(n)));
-}
-function clampFloat(n, lo, hi) {
-  if (!Number.isFinite(n)) return lo;
-  return Math.max(lo, Math.min(hi, n));
 }
