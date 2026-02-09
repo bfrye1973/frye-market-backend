@@ -8,7 +8,7 @@ const BACKEND1_BASE =
   process.env.HIST_BASE ||
   "https://frye-market-backend-1.onrender.com";
 
-/* -------------------- small helpers -------------------- */
+/* -------------------- helpers -------------------- */
 
 function resolvePolygonKey() {
   return (
@@ -34,11 +34,29 @@ function safeJsonParse(s) {
   try { return JSON.parse(s); } catch { return null; }
 }
 
+function toIntEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+}
+
+function toFloatEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function toBoolEnv01(name, fallbackBool) {
+  const raw = String(process.env[name] ?? "").trim();
+  if (raw === "1") return true;
+  if (raw === "0") return false;
+  return fallbackBool;
+}
+
 async function jget(url) {
-  const r = await fetch(url, {
-    headers: { accept: "application/json" },
-    cache: "no-store",
-  });
+  const r = await fetch(url, { headers: { accept: "application/json" }, cache: "no-store" });
   if (!r.ok) throw new Error(`GET ${url} -> ${r.status}`);
   return r.json();
 }
@@ -50,9 +68,7 @@ async function jpost(url, body) {
     body: JSON.stringify(body),
   });
   const j = await r.json().catch(() => null);
-  if (!r.ok) {
-    throw new Error(`POST ${url} -> ${r.status} ${(j && JSON.stringify(j).slice(0, 200)) || ""}`);
-  }
+  if (!r.ok) throw new Error(`POST ${url} -> ${r.status} ${(j && JSON.stringify(j).slice(0, 200)) || ""}`);
   return j;
 }
 
@@ -67,7 +83,7 @@ function pickZoneFromEngine1Context(ctx) {
 
   const active = activeNeg || activeShelf || activeInst || null;
 
-  // STRICT containment check (no guessing)
+  // STRICT containment (no guessing)
   if (active && Number.isFinite(price)) {
     const lo = Number(active.lo), hi = Number(active.hi);
     if (Number.isFinite(lo) && Number.isFinite(hi) && lo <= price && price <= hi) {
@@ -87,7 +103,7 @@ function pickZoneFromEngine1Context(ctx) {
   return { id: null, lo: null, hi: null, source: "NONE" };
 }
 
-/* -------------------- 1s microbar builder from ticks -------------------- */
+/* -------------------- 1s microbar from ticks -------------------- */
 
 function applyTickTo1s(cur, tick) {
   const price = Number(tick?.p);
@@ -95,24 +111,13 @@ function applyTickTo1s(cur, tick) {
   const tSec = toUnixSec(tick?.t);
   if (!Number.isFinite(price) || !Number.isFinite(tSec)) return cur;
 
-  const sec = tSec; // 1s bucket
+  const sec = tSec;
 
-  // new second
   if (!cur || cur.time < sec) {
-    return {
-      time: sec,
-      open: price,
-      high: price,
-      low: price,
-      close: price,
-      volume: Number.isFinite(size) ? size : 0,
-    };
+    return { time: sec, open: price, high: price, low: price, close: price, volume: Number.isFinite(size) ? size : 0 };
   }
-
-  // ignore out-of-order
   if (cur.time !== sec) return cur;
 
-  // update current second bar
   const b = { ...cur };
   b.high = Math.max(b.high, price);
   b.low = Math.min(b.low, price);
@@ -121,7 +126,7 @@ function applyTickTo1s(cur, tick) {
   return b;
 }
 
-/* -------------------- State machine helpers -------------------- */
+/* -------------------- state machine helpers -------------------- */
 
 function isKillSwitchOn() {
   return engine5bState.risk?.killSwitch === true;
@@ -162,13 +167,12 @@ function breakoutCheck(closePx) {
 
   const breakoutPts = Number(engine5bState.config.breakoutPts || 0.02);
 
-  // v1: long-only
+  // long-only v1
   if (engine5bState.config.longOnly) {
     const outside = closePx > (Number(hi) + breakoutPts);
     return { outside, dir: outside ? "LONG" : null };
   }
 
-  // future: both directions
   const up = closePx > (Number(hi) + breakoutPts);
   const dn = closePx < (Number(lo) - breakoutPts);
   if (up) return { outside: true, dir: "LONG" };
@@ -176,28 +180,22 @@ function breakoutCheck(closePx) {
   return { outside: false, dir: null };
 }
 
-/* -------------------- Engine calls -------------------- */
+/* -------------------- engine calls -------------------- */
 
 async function refreshZone() {
   const url = `${BACKEND1_BASE}/api/v1/engine5-context?symbol=SPY&tf=10m`;
   const ctx = await jget(url);
   const z = pickZoneFromEngine1Context(ctx);
-
   engine5bState.zone = { ...engine5bState.zone, ...z, refreshedAtUtc: nowUtc() };
 
-  // ✅ Clean weekend/closed-market reset:
-  // If there is no valid zone reference, force the state machine to IDLE
-  // so we never remain "ARMED" while market is closed / price feed invalid.
+  // Weekend/closed reset
   if (engine5bState.zone?.source === "NONE") {
     hardResetToIdle("NO_ZONE_SOURCE_NONE");
   }
 }
 
-/**
- * ✅ Correct kill switch truth source:
- * GET /api/trading/status (Engine 8)
- */
 async function refreshRisk() {
+  // ✅ Kill switch truth from Engine 8
   const url = `${BACKEND1_BASE}/api/trading/status`;
   const j = await jget(url);
 
@@ -209,7 +207,6 @@ async function refreshRisk() {
     raw: j,
   };
 
-  // If kill switch is on, hard reset state (safest)
   if (engine5bState.risk.killSwitch === true) {
     hardResetToIdle("KILL_SWITCH_ON");
   }
@@ -237,14 +234,11 @@ async function refreshE3() {
   const reasonCodes = Array.isArray(j?.reasonCodes) ? j.reasonCodes : [];
   const stage = engine5bState.e3.stage;
 
-  // ✅ Clean weekend/closed-market reset:
-  // If Engine 3 says NOT_IN_ZONE, we must not remain ARMED.
   if (reasonCodes.includes("NOT_IN_ZONE")) {
     hardResetToIdle("E3_NOT_IN_ZONE");
     return;
   }
 
-  // Update state machine base stage
   if (stage === "ARMED") {
     if (engine5bState.sm.stage === "IDLE") stageSet("ARMED");
     engine5bState.sm.armedAtMs = engine5bState.sm.armedAtMs || Date.now();
@@ -279,25 +273,12 @@ async function refreshE4_1m() {
 }
 
 async function tryExecutePaper(dir, barTimeSec) {
-  // Safety: monitor-only by default
-  if (!engine5bState.config.executeEnabled) {
-    return { ok: false, skipped: true, reason: "EXECUTE_DISABLED" };
-  }
+  if (!engine5bState.config.executeEnabled) return { ok: false, skipped: true, reason: "EXECUTE_DISABLED" };
+  if (isKillSwitchOn()) return { ok: false, skipped: true, reason: "KILL_SWITCH" };
 
-  // Safety: kill switch (authoritative)
-  if (isKillSwitchOn()) {
-    return { ok: false, skipped: true, reason: "KILL_SWITCH" };
-  }
-
-  // Engine 4 hard block
-  if (engine5bState.e4?.liquidityTrap) {
-    return { ok: false, skipped: true, reason: "E4_LIQUIDITY_TRAP" };
-  }
-
-  // Engine 4 threshold
-  if ((engine5bState.e4?.volumeScore ?? 0) < 7) {
-    return { ok: false, skipped: true, reason: "E4_VOLUME_SCORE_LT_7" };
-  }
+  // Engine4 blocks
+  if (engine5bState.e4?.liquidityTrap) return { ok: false, skipped: true, reason: "E4_LIQUIDITY_TRAP" };
+  if ((engine5bState.e4?.volumeScore ?? 0) < 7) return { ok: false, skipped: true, reason: "E4_VOLUME_SCORE_LT_7" };
 
   const idempotencyKey = `SPY|intraday_scalp@10m|${dir}|${barTimeSec}`;
 
@@ -306,9 +287,8 @@ async function tryExecutePaper(dir, barTimeSec) {
     symbol: "SPY",
     strategyId: "intraday_scalp@10m",
     side: "ENTRY",
-    // NOTE: Engine 6/7 wiring is next. For now execute is OFF by env.
-    engine6: { permission: "ALLOW" },
-    engine7: { finalR: 0.1 },
+    engine6: { permission: "ALLOW" }, // next: real Engine 6
+    engine7: { finalR: 0.1 },         // next: real Engine 7
     assetType: "EQUITY",
     paper: true,
     engine5: { bias: dir === "LONG" ? "long" : "short" },
@@ -318,7 +298,7 @@ async function tryExecutePaper(dir, barTimeSec) {
   return await jpost(url, body);
 }
 
-/* -------------------- Core loop -------------------- */
+/* -------------------- main loop -------------------- */
 
 export function startEngine5B({ log = console.log } = {}) {
   const KEY = resolvePolygonKey();
@@ -327,12 +307,20 @@ export function startEngine5B({ log = console.log } = {}) {
     return { stop() {} };
   }
 
-  // config from env (safe defaults)
-  engine5bState.config.executeEnabled = String(process.env.ENGINE5B_EXECUTE_PAPER || "0") === "1";
+  // base config from env
+  engine5bState.config.executeEnabled = toBoolEnv01("ENGINE5B_EXECUTE_PAPER", false);
   engine5bState.config.mode = engine5bState.config.executeEnabled ? "paper" : "monitor";
-  engine5bState.config.longOnly = String(process.env.ENGINE5B_LONG_ONLY || "1") === "1";
+  engine5bState.config.longOnly = toBoolEnv01("ENGINE5B_LONG_ONLY", true);
+
+  // ✅ tunables from env (your new setting)
+  engine5bState.config.persistBars = clampInt(toIntEnv("ENGINE5B_PERSIST_BARS", engine5bState.config.persistBars ?? 2), 1, 5);
+  engine5bState.config.breakoutPts = clampFloat(toFloatEnv("ENGINE5B_BREAKOUT_PTS", engine5bState.config.breakoutPts ?? 0.02), 0.0, 1.0);
+  engine5bState.config.cooldownMs = clampInt(toIntEnv("ENGINE5B_COOLDOWN_MS", engine5bState.config.cooldownMs ?? 120000), 1000, 60 * 60 * 1000);
+  engine5bState.config.armedWindowMs = clampInt(toIntEnv("ENGINE5B_ARMED_WINDOW_MS", engine5bState.config.armedWindowMs ?? 120000), 1000, 60 * 60 * 1000);
+  engine5bState.config.e3IntervalMs = clampInt(toIntEnv("ENGINE5B_E3_INTERVAL_MS", engine5bState.config.e3IntervalMs ?? 2000), 250, 60000);
 
   log(`[engine5b] starting mode=${engine5bState.config.mode} execute=${engine5bState.config.executeEnabled}`);
+  log(`[engine5b] cfg persistBars=${engine5bState.config.persistBars} breakoutPts=${engine5bState.config.breakoutPts} cooldownMs=${engine5bState.config.cooldownMs} armedWindowMs=${engine5bState.config.armedWindowMs} e3IntervalMs=${engine5bState.config.e3IntervalMs}`);
 
   let stopped = false;
   let ws = null;
@@ -384,18 +372,12 @@ export function startEngine5B({ log = console.log } = {}) {
         if (ev?.ev !== "T") continue;
         if (String(ev?.sym || "").toUpperCase() !== "SPY") continue;
 
-        // If kill switch, ignore ticks and stay idle
         if (isKillSwitchOn()) {
           hardResetToIdle("KILL_SWITCH_TICK_BLOCK");
           continue;
         }
 
-        engine5bState.lastTick = {
-          t: ev.t,
-          p: ev.p,
-          s: ev.s,
-          updatedAtUtc: nowUtc(),
-        };
+        engine5bState.lastTick = { t: ev.t, p: ev.p, s: ev.s, updatedAtUtc: nowUtc() };
 
         cur1s = applyTickTo1s(cur1s, ev);
 
@@ -404,19 +386,16 @@ export function startEngine5B({ log = console.log } = {}) {
 
         if (lastClosedSec == null) lastClosedSec = sec;
 
-        // We "close" the bar when the second changes
         if (sec !== lastClosedSec) {
           engine5bState.lastBar1s = { ...cur1s, closedAtUtc: nowUtc() };
 
           const closePx = Number(cur1s?.close);
           const { outside, dir } = breakoutCheck(closePx);
 
-          // Only trigger if ARMED, recent, and not cooling down
           if (engine5bState.sm.stage === "ARMED" && isArmedRecent() && !inCooldown()) {
             if (outside) engine5bState.sm.outsideCount += 1;
             else resetOutsideCount();
 
-            // Require persistence (default 2 consecutive 1s closes outside)
             if (engine5bState.sm.outsideCount >= engine5bState.config.persistBars) {
               stageSet("TRIGGERED");
               engine5bState.sm.triggeredAtMs = Date.now();
@@ -429,14 +408,12 @@ export function startEngine5B({ log = console.log } = {}) {
               engine5bState.sm.lastDecision =
                 `${nowUtc()} TRIGGERED outside=${engine5bState.sm.outsideCount} exec=${JSON.stringify(result).slice(0, 200)}`;
 
-              // Always cooldown (even monitor) to prevent repeated spam
               engine5bState.sm.cooldownUntilMs = Date.now() + engine5bState.config.cooldownMs;
               stageSet("COOLDOWN");
               resetOutsideCount();
             }
           }
 
-          // Cooldown expiry -> IDLE
           if (engine5bState.sm.stage === "COOLDOWN" && !inCooldown()) {
             hardResetToIdle("COOLDOWN_EXPIRED");
           }
@@ -470,4 +447,15 @@ export function startEngine5B({ log = console.log } = {}) {
       log("[engine5b] stopped");
     },
   };
+}
+
+/* -------------------- clamps -------------------- */
+
+function clampInt(n, lo, hi) {
+  if (!Number.isFinite(n)) return lo;
+  return Math.max(lo, Math.min(hi, Math.trunc(n)));
+}
+function clampFloat(n, lo, hi) {
+  if (!Number.isFinite(n)) return lo;
+  return Math.max(lo, Math.min(hi, n));
 }
