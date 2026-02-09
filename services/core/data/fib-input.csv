@@ -26,7 +26,7 @@ SPY,	minor,	1h,	MARK,	W4,	2/5/2026 8:00, 679.5
 SPY,	minute,	10m,	W1,	LOW, 2/6/2026 9:00, 681.02
 SPY,	minute,	10m,	W1,	HIGH, 2/6/2026 6:00, 682.02
 SPY,	minute,	10m,	W4,	LOW, 2/9/2026 8:00, 688.84	
-SPY,	minute,	10m,	W4,	HIGH, 2/9/2026 5:00 691.77		
+SPY,	minute,	10m,	W4,	HIGH, 2/9/2026 5:00, 691.77		
 SPY,	minute,	10m, MARK,	W1, 2/6/2026 6:00, 682.02			
 SPY,  minute,	10m, MARK,	W2, 2/6/2026 8:00, 680.84			
 SPY,  minute,	10m, MARK,	W3, 2/9/2026 5:00, 691.77
