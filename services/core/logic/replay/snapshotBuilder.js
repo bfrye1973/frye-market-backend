@@ -88,13 +88,14 @@ export async function buildReplaySnapshot({
   decisionUrl,      // optional
   permissionUrl,    // optional
 }) {
-  // 1) Market Meter from file (truth as produced by jobs)
-  const outlookPath = path.join(dataDir, "outlook_intraday.json");
-  const outlook = safeReadJson(outlookPath);
+  // 1) Market Meter from /live/intraday (truth served via proxy)
+  const liveIntradayUrl = `http://localhost:${process.env.PORT}/live/intraday`;
+  const outlook = await safeFetchJson(liveIntradayUrl);
 
   const market = outlook?.ok === false
     ? { ok: false, reason: outlook.reason, raw: outlook }
     : extractMarket(outlook);
+
 
   // 2) SMZ Hierarchy (exact API output)
   const smzHierarchy = smzHierarchyUrl
