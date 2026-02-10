@@ -113,17 +113,16 @@ export async function buildReplaySnapshot({
     ? await safeFetchJson(fibUrl)
     : { ok: false, reason: "NO_FIB_URL" };
 
-  // 4) Decision (best effort)
-  let decision = {
-    ok: false,
-    reason: "NO_DECISION_SOURCE",
-    setupScore: null,
-    setupLabel: null,
-    permission: null,
-    direction: null,
-    sizeMultiplier: null,
-    reasonCodes: [],
-  };
+  // 4) Decision (Engine 5 confluence)
+  const confluenceUrl =
+    `http://localhost:${process.env.PORT}/api/v1/confluence-score` +
+    `?symbol=${symbol}` +
+    `&tf=10m` +
+    `&degree=minute` +
+    `&wave=W1` +
+    `&strategyId=intraday_scalp@10m`;
+
+  const decision = await safeFetchJson(confluenceUrl);
 
   // If you later add decision endpoints, we fold them in:
   if (decisionUrl) {
