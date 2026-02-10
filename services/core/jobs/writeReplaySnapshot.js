@@ -15,7 +15,7 @@ const DATA_DIR = path.resolve(__dirname, "..", "data");
 const symbol = process.env.REPLAY_SYMBOL || "SPY";
 
 // Core API base (for smz-hierarchy + fib endpoints)
-const CORE_BASE = process.env.CORE_BASE_URL || "http://localhost:10000"; // set to your backend-1 port in local dev
+const CORE_BASE = process.env.CORE_BASE_URL || `http://localhost:${process.env.PORT}`;
 const SMZ_HIER_URL =
   process.env.REPLAY_SMZ_HIER_URL ||
   `${CORE_BASE}/api/v1/smz-hierarchy`;
