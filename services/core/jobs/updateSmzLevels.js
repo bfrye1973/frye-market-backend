@@ -158,6 +158,33 @@ function rangeFromPriceRange(pr) {
   return { hi, lo, width: hi - lo };
 }
 
+// Edge-to-edge distance between two price ranges (institutional spacing)
+function rangeGapPts(aHi, aLo, bHi, bLo) {
+  const Ahi = Math.max(aHi, aLo);
+  const Alo = Math.min(aHi, aLo);
+  const Bhi = Math.max(bHi, bLo);
+  const Blo = Math.min(bHi, bLo);
+
+  if (
+    !Number.isFinite(Ahi) ||
+    !Number.isFinite(Alo) ||
+    !Number.isFinite(Bhi) ||
+    !Number.isFinite(Blo)
+  ) {
+    return Infinity;
+  }
+
+  // Overlapping ranges → zero gap
+  if (!(Ahi < Blo || Alo > Bhi)) return 0;
+
+  // Non-overlapping → edge distance
+  if (Ahi < Blo) return Blo - Ahi;
+  if (Bhi < Alo) return Alo - Bhi;
+
+  return Infinity;
+}
+
+
 /* -------------------------
    Acceptance Density Tightening (display core)
 ------------------------- */
@@ -464,9 +491,17 @@ function enforceInstitutionalMinGap(parents, ownedNegParentIds = new Set()) {
 
   const kept = [];
   for (const item of list) {
-    const tooClose = kept.some((k) => Math.abs(item.mid - k.mid) < INST_MIN_GAP_PTS);
-    if (!tooClose) kept.push(item);
-  }
+   const rItem = rangeFromPriceRange(item.z?.displayPriceRange ?? item.z?.priceRange);
+   if (!rItem) continue;
+
+   const tooClose = kept.some((k) => {
+     const rKeep = rangeFromPriceRange(k.z?.displayPriceRange ?? k.z?.priceRange);
+     if (!rKeep) return false;
+
+     const gap = rangeGapPts(rItem.hi, rItem.lo, rKeep.hi, rKeep.lo);
+     return gap < INST_MIN_GAP_PTS;
+   });
+
 
   return kept.map((k) => k.z);
 }
