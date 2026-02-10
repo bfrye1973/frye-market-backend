@@ -718,10 +718,10 @@ async function main() {
           .filter(Boolean)
      );
 
-// Enforce spacing on AUTO institutionals only
-const emittedAutosSpaced = enforceInstitutionalMinGap(emittedAutos, ownedNegParents);
+     // Enforce spacing on AUTO institutionals only
+     const emittedAutosSpaced = enforceInstitutionalMinGap(emittedAutos, ownedNegParents);
 
-structures_sticky: [...emittedManual, ...emittedAutosSpaced, ...emittedAutoNegotiated],
+     structures_sticky: [...emittedManual, ...emittedAutosSpaced, ...emittedAutoNegotiated],
 
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
