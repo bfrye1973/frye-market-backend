@@ -16,7 +16,10 @@ const symbol = process.env.REPLAY_SYMBOL || "SPY";
 
 // Core API base (for smz-hierarchy + fib endpoints)
 const CORE_BASE = process.env.CORE_BASE_URL || "http://localhost:10000"; // set to your backend-1 port in local dev
-const SMZ_HIER_URL = process.env.REPLAY_SMZ_HIER_URL || `${CORE_BASE}/api/v1/smz-hierarchy`;
+const SMZ_HIER_URL =
+  process.env.REPLAY_SMZ_HIER_URL ||
+  `${CORE_BASE}/api/v1/smz-hierarchy?symbol=${symbol}&tf=10m`;
+
 const FIB_URL =
   process.env.REPLAY_FIB_URL ||
   `${CORE_BASE}/api/v1/fib-levels?symbol=${symbol}&tf=1h&degree=minor&wave=W1`;
