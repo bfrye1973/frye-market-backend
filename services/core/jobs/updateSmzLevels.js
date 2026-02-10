@@ -1,24 +1,21 @@
 // services/core/jobs/updateSmzLevels.js
 // Engine 1 SMZ job (stable + auto negotiated + institutional spacing)
-// - Runs smzEngine (LOCKED — DO NOT MODIFY)
-// - Updates sticky registry (AUTO ONLY)
-// - Loads manual structures from smz-manual-structures.json (SOURCE OF TRUTH)
-// - Writes smz-levels.json for frontend
 //
-// ✅ NEW:
-// - Auto-detect NEGOTIATED zones inside institutional parents using acceptance density
-// - Emit negotiated zones as separate objects (turquoise overlay)
-// - Enforce institutional parent min-gap (6 pts) to prevent overlapping institutional blobs
+// ✅ Runs smzEngine (LOCKED — DO NOT MODIFY)
+// ✅ Loads manual structures (SOURCE OF TRUTH)
+// ✅ Updates sticky registry (AUTO ONLY)
+// ✅ Emits smz-levels.json (frontend reads this)
 //
-// LOCKED REQUIREMENTS (per user):
-// ✅ smzEngine.js untouched
-// ✅ manual zones persist across runs
-// ✅ manual zones NOT stored in registry
-// ✅ manual zones immune to caps/cleanup/overlap suppression
-// ✅ structures_sticky: manual first, then auto, then negotiated
-// ✅ AUTO institutional max width = 4.0 pts
-// ✅ manual structures ALWAYS emitted (not band-limited)
-// ✅ if engine compute fails, still emit manual structures (never go blind)
+// ✅ NEW (locked):
+// - Auto-detect NEGOTIATED zones inside institutional parents (acceptance density)
+// - Institutional parents MUST NOT overlap or be closer than 6 pts (edge-to-edge)
+// - Manual parents always emitted (never band limited)
+// - If engine fails, still emit manual-only file (never go blind)
+//
+// IMPORTANT: This is a JOB SCRIPT for Render cron.
+// - NO exports
+// - NO import.meta
+// - Runs immediately
 
 import fs from "fs";
 import path from "path";
@@ -46,7 +43,7 @@ const STICKY_MAX_WITHIN_BAND = 12;
 
 const STICKY_INCLUDE_MICRO_MIN_STRENGTH = 80;
 
-// Institutional “monster” guard (AUTO ONLY)
+// Institutional guard (AUTO ONLY)
 const STRUCT_AUTO_MAX_WIDTH_PTS = 4.0;
 
 // Debug/beta
@@ -54,7 +51,7 @@ const DEBUG_LEVELS_COUNT = 25;
 const INSTITUTIONAL_MIN = 85;
 const SMZ_PRIME_MIN = 90;
 
-// Institutional spacing (prevents overlapping parents)
+// ✅ Institutional spacing rule (EDGE GAP, not mid-to-mid)
 const INST_MIN_GAP_PTS = 6.0;
 
 // Acceptance density tightening
@@ -139,15 +136,6 @@ function snapStep(x, step) {
   return Math.round(n / step) * step;
 }
 
-function rangesOverlap(hiA, loA, hiB, loB) {
-  const aHi = Math.max(Number(hiA), Number(loA));
-  const aLo = Math.min(Number(hiA), Number(loA));
-  const bHi = Math.max(Number(hiB), Number(loB));
-  const bLo = Math.min(Number(hiB), Number(loB));
-  if (![aHi, aLo, bHi, bLo].every(Number.isFinite)) return false;
-  return !(aHi < bLo || aLo > bHi);
-}
-
 function rangeFromPriceRange(pr) {
   if (!Array.isArray(pr) || pr.length !== 2) return null;
   const a = Number(pr[0]);
@@ -158,7 +146,16 @@ function rangeFromPriceRange(pr) {
   return { hi, lo, width: hi - lo };
 }
 
-// Edge-to-edge distance between two price ranges (institutional spacing)
+function rangesOverlap(hiA, loA, hiB, loB) {
+  const aHi = Math.max(Number(hiA), Number(loA));
+  const aLo = Math.min(Number(hiA), Number(loA));
+  const bHi = Math.max(Number(hiB), Number(loB));
+  const bLo = Math.min(Number(hiB), Number(loB));
+  if (![aHi, aLo, bHi, bLo].every(Number.isFinite)) return false;
+  return !(aHi < bLo || aLo > bHi);
+}
+
+// ✅ edge-to-edge gap between two ranges
 function rangeGapPts(aHi, aLo, bHi, bLo) {
   const Ahi = Math.max(aHi, aLo);
   const Alo = Math.min(aHi, aLo);
@@ -174,19 +171,18 @@ function rangeGapPts(aHi, aLo, bHi, bLo) {
     return Infinity;
   }
 
-  // Overlapping ranges → zero gap
+  // overlap => gap 0
   if (!(Ahi < Blo || Alo > Bhi)) return 0;
 
-  // Non-overlapping → edge distance
+  // disjoint => edge distance
   if (Ahi < Blo) return Blo - Ahi;
   if (Bhi < Alo) return Alo - Bhi;
 
   return Infinity;
 }
 
-
 /* -------------------------
-   Acceptance Density Tightening (display core)
+   Acceptance Density Tightening
 ------------------------- */
 function tightenDisplayRangeByCloseDensity(bars1h, pr) {
   const r = rangeFromPriceRange(pr);
@@ -417,7 +413,7 @@ function structureKeyFromRange(hi, lo) {
   return `SPY|mixed|hi=${qHi?.toFixed(2)}|lo=${qLo?.toFixed(2)}`;
 }
 
-/* ---------------- AUTO negotiated zone emitter ---------------- */
+/* ---------------- Auto negotiated zone emitter ---------------- */
 
 function buildAutoNegotiatedZone({ parentId, parentStrength, parentConfidence, acceptance }) {
   const pr = acceptance?.displayPriceRange;
@@ -453,55 +449,38 @@ function buildAutoNegotiatedZone({ parentId, parentStrength, parentConfidence, a
   };
 }
 
-/* ---------------- Institutional min-gap reducer ---------------- */
+/* ---------------- Institutional spacing (edge gap) ---------------- */
 
 function institutionalPriorityScore(z, ownsNeg) {
-  const id = String(z?.details?.id ?? z?.structureKey ?? "");
-  const isManual = id.startsWith("MANUAL|") ? 1 : 0;
+  const id = String(z?.details?.id ?? "");
   const strength = Number(z?.strength_raw ?? z?.strength ?? 0);
   const stickyFacts = z?.details?.facts?.sticky ?? {};
   const timesSeen = Number(stickyFacts?.timesSeen ?? 0);
-  return (isManual * 1_000_000) + (ownsNeg ? 100_000 : 0) + (strength * 1_000) + timesSeen;
+  return (ownsNeg ? 100_000 : 0) + (strength * 1_000) + timesSeen;
 }
 
-function getMidFromZone(z) {
-  const pr = z?.displayPriceRange ?? z?.priceRange;
-  if (!Array.isArray(pr) || pr.length !== 2) return null;
-  const a = Number(pr[0]);
-  const b = Number(pr[1]);
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-  const hi = Math.max(a, b);
-  const lo = Math.min(a, b);
-  if (!(hi > lo)) return null;
-  return (hi + lo) / 2;
-}
-
-function enforceInstitutionalMinGap(parents, ownedNegParentIds = new Set()) {
-  const list = (Array.isArray(parents) ? parents.slice() : [])
+function enforceInstitutionalSpacingEdgeGap(emittedAutos, ownedNegParentIds) {
+  const list = (Array.isArray(emittedAutos) ? emittedAutos.slice() : [])
     .map((z) => {
-      const id = String(z?.details?.id ?? z?.structureKey ?? "");
-      const mid = getMidFromZone(z);
+      const id = String(z?.details?.id ?? "");
+      const r = rangeFromPriceRange(z?.displayPriceRange ?? z?.priceRange);
+      if (!r) return null;
       const ownsNeg = ownedNegParentIds.has(id);
       const score = institutionalPriorityScore(z, ownsNeg);
-      return { z, id, mid, score };
+      return { z, id, r, ownsNeg, score };
     })
-    .filter((x) => Number.isFinite(x.mid));
+    .filter(Boolean);
 
   list.sort((a, b) => b.score - a.score);
 
   const kept = [];
   for (const item of list) {
-   const rItem = rangeFromPriceRange(item.z?.displayPriceRange ?? item.z?.priceRange);
-   if (!rItem) continue;
-
-   const tooClose = kept.some((k) => {
-     const rKeep = rangeFromPriceRange(k.z?.displayPriceRange ?? k.z?.priceRange);
-     if (!rKeep) return false;
-
-     const gap = rangeGapPts(rItem.hi, rItem.lo, rKeep.hi, rKeep.lo);
-     return gap < INST_MIN_GAP_PTS;
-   });
-
+    const tooClose = kept.some((k) => {
+      const gap = rangeGapPts(item.r.hi, item.r.lo, k.r.hi, k.r.lo);
+      return gap < INST_MIN_GAP_PTS;
+    });
+    if (!tooClose) kept.push(item);
+  }
 
   return kept.map((k) => k.z);
 }
@@ -533,10 +512,10 @@ async function main() {
       levelsEngineRaw = [];
     }
 
-    // filter live structures by manual overlap + max width
+    // Filter live structures
     let levelsLive = filterLiveLevelsByManualAndWidth(levelsEngineRaw, manualStructures);
 
-    // add truth fields + acceptance tightening
+    // Add truth fields + acceptance tightening
     levelsLive = (levelsLive || []).map((z) => {
       const raw = Number(z?.strength ?? NaN);
       const conf = confidenceFromInstitutionalStrength(raw);
@@ -606,10 +585,6 @@ async function main() {
           timesSeen: 1,
           maxStrengthSeen: Number(z.strength ?? 0),
           status: "active",
-          stickyConfirmed: false,
-          confirmedUtc: null,
-          exits: [],
-          distinctExitCount: 0,
         };
         list.push(entry);
         byKey.set(key, entry);
@@ -625,7 +600,6 @@ async function main() {
 
     // Emit manual (always)
     const emittedManual = (manualStructures || []).map((m) => {
-      const isNeg = !!m.isNegotiated;
       const pr = m.manualRange ?? m.priceRange;
       return {
         type: "institutional",
@@ -635,7 +609,7 @@ async function main() {
         strength: 100,
         strength_raw: 100,
         confidence: 1,
-        isNegotiated: isNeg,
+        isNegotiated: !!m.isNegotiated,
         details: { id: m.structureKey, facts: { sticky: { ...m, source: "manual_file" } } },
       };
     });
@@ -701,7 +675,7 @@ async function main() {
       }
     }
 
-    // Owned NEG parents set (so those parents survive spacing)
+    // Owned NEG parents set
     const ownedNegParents = new Set(
       (emittedAutoNegotiated || [])
         .map((z) => {
@@ -711,8 +685,8 @@ async function main() {
         .filter(Boolean)
     );
 
-    // Enforce spacing on AUTO institutionals only
-    const emittedAutosSpaced = enforceInstitutionalMinGap(emittedAutos, ownedNegParents);
+    // Enforce spacing on AUTO parents
+    const emittedAutosSpaced = enforceInstitutionalSpacingEdgeGap(emittedAutos, ownedNegParents);
 
     const levels_debug = levelsLive
       .slice()
@@ -750,9 +724,9 @@ async function main() {
   } catch (err) {
     console.error("[SMZ] FAILED:", err);
 
-    // fallback: manual only
-    const manualStructures2 = loadManualStructures();
-    const fallbackStructuresSticky = (manualStructures2 || []).map((m) => {
+    // fallback manual-only
+    const manual2 = loadManualStructures();
+    const stickyManualOnly = (manual2 || []).map((m) => {
       const pr = m.manualRange ?? m.priceRange;
       return {
         type: "institutional",
@@ -773,13 +747,13 @@ async function main() {
         generated_at_utc: isoNow(),
         current_price: null,
         manual_file: path.basename(MANUAL_FILE),
-        manual_structures_loaded: manualStructures2.length,
+        manual_structures_loaded: manual2.length,
         note: "SMZ job error — emitted manual structures only",
       },
       levels: [],
       levels_debug: [],
       pockets_active: [],
-      structures_sticky: fallbackStructuresSticky,
+      structures_sticky: stickyManualOnly,
     };
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
@@ -788,8 +762,8 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main();
-}
-
-export default main;
+// ✅ Run immediately (Render cron safe)
+main().catch((err) => {
+  console.error("[SMZ] Fatal error:", err);
+  process.exit(1);
+});
