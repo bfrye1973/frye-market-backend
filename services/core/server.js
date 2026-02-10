@@ -18,6 +18,8 @@ import { reactionScoreRouter } from "./routes/reactionScore.js";
 import { volumeBehaviorRouter } from "./routes/volumeBehavior.js";
 import { confluenceScoreRouter } from "./routes/confluenceScore.js";
 import dashboardSnapshotRouter from "./routes/dashboardSnapshot.js";
+import replayRouter from "./routes/replay.js";
+
 
 import tradingRouter from "./routes/trading.js";
 import optionsRouter from "./routes/options.js";
@@ -123,6 +125,8 @@ app.use("/api/v1", reactionScoreRouter);
 app.use("/api/v1", volumeBehaviorRouter);
 app.use("/api/v1", confluenceScoreRouter);
 app.use("/api/v1", dashboardSnapshotRouter);
+app.use("/api/v1", replayRouter);
+
 
 // ✅ run-all-engines (must be in the /api/v1 group)
 app.use("/api/v1", runAllEnginesRouter);
