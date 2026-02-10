@@ -18,7 +18,8 @@ const symbol = process.env.REPLAY_SYMBOL || "SPY";
 const CORE_BASE = process.env.CORE_BASE_URL || "http://localhost:10000"; // set to your backend-1 port in local dev
 const SMZ_HIER_URL =
   process.env.REPLAY_SMZ_HIER_URL ||
-  `${CORE_BASE}/api/v1/smz-hierarchy?symbol=${symbol}&tf=10m`;
+  `${CORE_BASE}/api/v1/smz-hierarchy`;
+
 
 const FIB_URL =
   process.env.REPLAY_FIB_URL ||
