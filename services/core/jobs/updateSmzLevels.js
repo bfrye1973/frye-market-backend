@@ -143,6 +143,59 @@ function rangesOverlap(hiA, loA, hiB, loB) {
   return !(aHi < bLo || aLo > bHi);
 }
 
+// ✅ Institutional parent spacing rule (prevents stacked/near-duplicate parents)
+// Keep only one institutional parent per 6-point neighborhood (mid-to-mid).
+const INST_MIN_GAP_PTS = 6.0;
+
+function institutionalPriorityScore(z, ownsNeg) {
+  const id = String(z?.details?.id ?? z?.structureKey ?? "");
+  const isManual = id.startsWith("MANUAL|") ? 1 : 0;
+  const strength = Number(z?.strength_raw ?? z?.strength ?? 0);
+  const stickyFacts = z?.details?.facts?.sticky ?? {};
+  const timesSeen = Number(stickyFacts?.timesSeen ?? 0);
+
+  // Priority: manual >> ownsNeg >> strength >> timesSeen
+  return (isManual * 1_000_000) + (ownsNeg ? 100_000 : 0) + (strength * 1_000) + timesSeen;
+}
+
+function getMidFromZone(z) {
+  const pr = z?.displayPriceRange ?? z?.priceRange;
+  if (!Array.isArray(pr) || pr.length !== 2) return null;
+  const a = Number(pr[0]);
+  const b = Number(pr[1]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  const hi = Math.max(a, b);
+  const lo = Math.min(a, b);
+  if (!(hi > lo)) return null;
+  return (hi + lo) / 2;
+}
+
+// Takes a list of institutional parents and returns a pruned list with spacing enforced
+function enforceInstitutionalMinGap(parents, ownedNegParentIds = new Set()) {
+  const list = (Array.isArray(parents) ? parents.slice() : [])
+    .map((z) => {
+      const id = String(z?.details?.id ?? z?.structureKey ?? "");
+      const mid = getMidFromZone(z);
+      const ownsNeg = ownedNegParentIds.has(id);
+      const score = institutionalPriorityScore(z, ownsNeg);
+      return { z, id, mid, score };
+    })
+    .filter((x) => Number.isFinite(x.mid));
+
+  // Strongest priority first
+  list.sort((a, b) => b.score - a.score);
+
+  const kept = [];
+  for (const item of list) {
+    const tooClose = kept.some((k) => Math.abs(item.mid - k.mid) < INST_MIN_GAP_PTS);
+    if (!tooClose) kept.push(item);
+  }
+
+  // Return original zone objects
+  return kept.map((k) => k.z);
+}
+
+
 function rangeFromPriceRange(pr) {
   if (!Array.isArray(pr) || pr.length !== 2) return null;
   const a = Number(pr[0]);
@@ -655,8 +708,21 @@ async function main() {
       levels_debug,
       pockets_active: [],
       // ✅ IMPORTANT: negotiated zones come AFTER parents in the array (overlay handles z-index)
-      structures_sticky: [...emittedManual, ...emittedAutos, ...emittedAutoNegotiated],
-    };
+      // Build set of auto-negotiated parent ids so we keep those parents
+      const ownedNegParents = new Set(
+        (emittedAutoNegotiated || [])
+          .map((z) => {
+            const m = String(z?.details?.id ?? "").match(/\|PARENT=(.+)$/);
+            return m ? m[1] : null;
+          })
+          .filter(Boolean)
+     );
+
+// Enforce spacing on AUTO institutionals only
+const emittedAutosSpaced = enforceInstitutionalMinGap(emittedAutos, ownedNegParents);
+
+structures_sticky: [...emittedManual, ...emittedAutosSpaced, ...emittedAutoNegotiated],
+
 
     fs.mkdirSync(path.dirname(OUTFILE), { recursive: true });
     fs.writeFileSync(OUTFILE, JSON.stringify(payload, null, 2), "utf8");
