@@ -98,8 +98,14 @@ export async function buildReplaySnapshot({
 
   // 2) SMZ Hierarchy (exact API output)
   const smzHierarchy = smzHierarchyUrl
-    ? await safeFetchJson(smzHierarchyUrl + (smzHierarchyUrl.includes("?") ? `&symbol=${symbol}` : `?symbol=${symbol}`))
-    : { ok: false, reason: "NO_SMZ_HIERARCHY_URL" };
+  ? await safeFetchJson(
+      smzHierarchyUrl +
+        (smzHierarchyUrl.includes("?")
+          ? `&symbol=${symbol}&tf=10m`
+          : `?symbol=${symbol}&tf=10m`)
+    )
+  : { ok: false, reason: "NO_SMZ_HIERARCHY_URL" };
+
 
   // 3) Fib (authoritative endpoint)
   const fib = fibUrl
