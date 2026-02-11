@@ -120,7 +120,7 @@ export async function buildReplaySnapshot({
     `&tf=10m` +
     `&degree=minute` +
     `&wave=W1` +
-    `&strategyId=intraday_scalp@10m`;
+    `&strategyId=intraday_scalp@10m_TEST`;
 
   const decision = await safeFetchJson(confluenceUrl);
 
