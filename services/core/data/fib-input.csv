@@ -1,6 +1,6 @@
 symbol,degree,tf,wave,kind,datetime_az,price
-SPY,primary,1d,W1,LOW,,
-SPY,primary,1d,W1,HIGH,,
+SPY,primary,1d,W1,HIGH,2025-05-19 11:00,589.62
+SPY,primary,1d,W1,LOW,2025-05-27 11:00,574.33
 SPY,primary,1d,W4,LOW,2025-11-21 10:00,655.52
 SPY,primary,1d,W4,HIGH,2025-12-29 11:00,687.24
 SPY,primary,1d,MARK,W1,2025-05-19 11:00,590.57
