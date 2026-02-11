@@ -117,6 +117,60 @@ function volumeStateFromEngine4(engine4, zoneRef) {
   return "NEGOTIATING";
 }
 
+/**
+ * ✅ Core requirement:
+ * DO NOT “shut down” Strategy section when NOT in zone.
+ * - Convert NO_ZONE_NO_TRADE invalid -> NOT_IN_ZONE_WAITING (invalid=false, tradeReady=false)
+ * - Always attach fib (anchors) so Elliott wave marks show in Strategy cards
+ */
+function normalizeNoZoneToWaiting(out, { fib, engine1ContextLite, reaction, volume, volumeState, symbol, tf, degree, wave, price, strategyId, mode }) {
+  // Always attach fib so Strategy UI can render Elliott anchors consistently
+  out.context = out.context || {};
+  out.context.fib = fib || null;
+
+  // Attach light Engine 1 context (so UI can show “nearest/active” if you want)
+  out.context.engine1 = out.context.engine1 || engine1ContextLite || null;
+
+  // Ensure reaction/volume are always present
+  out.context.reaction = out.context.reaction || reaction || null;
+  out.context.volume = out.context.volume || {};
+  out.context.volume.raw = out.context.volume.raw || volume || null;
+  out.context.volume.state = out.context.volume.state || volumeState || "NO_ACTIVE_ZONE";
+
+  // If scorer returned invalid ONLY because "NO_ZONE_NO_TRADE", keep UI alive
+  const rcs = Array.isArray(out?.reasonCodes) ? out.reasonCodes : [];
+  const noZoneOnly = out?.invalid === true && rcs.length === 1 && rcs[0] === "NO_ZONE_NO_TRADE";
+
+  if (noZoneOnly) {
+    out.invalid = false;             // ✅ not invalid; just waiting
+    out.tradeReady = false;
+
+    out.flags = out.flags || {};
+    out.flags.tradeReady = false;
+    out.flags.withinZone = false;
+
+    out.reasonCodes = ["NOT_IN_ZONE_WAITING_FOR_SETUP"];
+
+    out.symbol = out.symbol ?? symbol;
+    out.tf = out.tf ?? tf;
+    out.degree = out.degree ?? degree;
+    out.wave = out.wave ?? wave;
+    out.price = out.price ?? (price ?? null);
+    out.strategyId = out.strategyId ?? strategyId;
+    out.mode = out.mode ?? mode;
+
+    // Location always explicit
+    out.location = out.location || { state: "NOT_IN_ZONE", zoneType: null, shelfType: null, zoneId: null };
+
+    // Scores stay 0, label IGNORE — still fine
+    out.scores = out.scores || { engine1: 0, engine2: 0, engine3: 0, engine4: 0, compression: 0, total: 0, label: "IGNORE" };
+    out.scores.total = 0;
+    out.scores.label = "IGNORE";
+  }
+
+  return out;
+}
+
 /* ---------------------------- Route ---------------------------- */
 confluenceScoreRouter.get("/confluence-score", async (req, res) => {
   applyCors(req, res);
@@ -130,7 +184,7 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     const base = baseUrlFromReq(req);
 
     /* ----------------------------
-       Engine 1 context FIRST
+       Engine 1 context FIRST (authoritative price)
        ---------------------------- */
     const ctxUrl =
       `${base}/api/v1/engine5-context` +
@@ -149,7 +203,7 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     const isScalp = mode === "scalp";
 
     /* ----------------------------
-       Engine 2 fib (signals only)
+       Engine 2 fib (ALWAYS attempt; degrade if missing)
        ---------------------------- */
     const fibUrl =
       `${base}/api/v1/fib-levels` +
@@ -158,7 +212,17 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
       `&degree=${encodeURIComponent(degree)}` +
       `&wave=${encodeURIComponent(wave)}`;
 
-    const fib = await jget(fibUrl);
+    let fib = null;
+    try {
+      fib = await jget(fibUrl);
+    } catch (e) {
+      fib = {
+        ok: false,
+        reason: "ENGINE2_UNAVAILABLE",
+        message: String(e?.message || e),
+        meta: { symbol, tf, degree, wave, generated_at_utc: null },
+      };
+    }
 
     /* ----------------------------
        Active execution zone (strict)
@@ -166,7 +230,7 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     const activeZone = priceOk ? pickActiveExecutionZone(engine1Context, price) : null;
 
     /**
-     * ✅ SCALP behavior:
+     * ✅ Scalp behavior:
      * If NO active zone, do not "turn off".
      * Use nearest shelf as deterministic reference for E3/E4.
      */
@@ -186,7 +250,7 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     const zoneHi = execZoneRef?.hi ?? null;
 
     /* ----------------------------
-       Engine 3 (reaction)
+       Engine 3 (reaction) — degrade if missing
        ---------------------------- */
     const e3Url =
       `${base}/api/v1/reaction-score` +
@@ -197,15 +261,32 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
       (zoneLo != null ? `&lo=${encodeURIComponent(zoneLo)}` : "") +
       (zoneHi != null ? `&hi=${encodeURIComponent(zoneHi)}` : "");
 
-    const reaction = await jget(e3Url);
+    let reaction = null;
+    try {
+      reaction = await jget(e3Url);
+    } catch (e) {
+      reaction = {
+        ok: true,
+        invalid: false,
+        reactionScore: 0,
+        structureState: "HOLD",
+        reasonCodes: ["ENGINE3_UNAVAILABLE"],
+        zone: { id: zoneId, lo: zoneLo, hi: zoneHi },
+        armed: false,
+        stage: "IDLE",
+        mode,
+        diagnostics: { error: String(e?.message || e) },
+      };
+    }
 
     /* ----------------------------
-       Engine 4 (volume)
+       Engine 4 (volume) — degrade if missing
        ---------------------------- */
     let volume = null;
     let volumeState = "NO_ACTIVE_ZONE";
 
     if (execZoneRef && zoneLo != null && zoneHi != null) {
+      // Engine 4 is usually local in backend-1; env override allowed
       const e4Base = process.env.ENGINE4_BASE_URL?.trim() || "http://localhost:10000";
 
       const e4Url =
@@ -248,7 +329,6 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
 
     /* ----------------------------
        Confluence aggregation (Engine 5 scorer)
-       ✅ pass mode + strategyId + zoneRefOverride
        ---------------------------- */
     const zoneRefOverride = execZoneRef
       ? {
@@ -258,9 +338,18 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
           mid: execZoneRef.mid ?? null,
           strength: execZoneRef.strength ?? null,
           type: execZoneRef.type ?? null,
-          zoneType: execZoneRefSource === "ACTIVE"
-            ? (activeZone ? (engine1Context?.active?.negotiated ? "NEGOTIATED" : engine1Context?.active?.shelf ? "SHELF" : engine1Context?.active?.institutional ? "INSTITUTIONAL" : null) : null)
-            : "SHELF",
+          zoneType:
+            execZoneRefSource === "ACTIVE"
+              ? (activeZone
+                  ? (engine1Context?.active?.negotiated
+                      ? "NEGOTIATED"
+                      : engine1Context?.active?.shelf
+                        ? "SHELF"
+                        : engine1Context?.active?.institutional
+                          ? "INSTITUTIONAL"
+                          : null)
+                  : null)
+              : "SHELF",
         }
       : null;
 
@@ -271,7 +360,7 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
       wave,
       price: priceOk ? price : null,
       engine1Context,
-      fib,
+      fib,          // always passed even if ok:false
       reaction,
       volume,
       strategyId,
@@ -281,7 +370,7 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     });
 
     /* ----------------------------
-       Attach translated truth for UI + downstream engines (non-breaking)
+       Attach translated truth for UI + downstream engines
        ---------------------------- */
     out.strategyId = out.strategyId ?? strategyId;
     out.mode = out.mode ?? mode;
@@ -305,7 +394,7 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
           }
         : null);
 
-    // Raw E4 transparency
+    // Always expose E4 transparency
     out.context.volume = out.context.volume || {};
     out.context.volume.volumeScore = volume?.volumeScore ?? 0;
     out.context.volume.volumeConfirmed = volume?.volumeConfirmed ?? false;
@@ -313,9 +402,38 @@ confluenceScoreRouter.get("/confluence-score", async (req, res) => {
     out.context.volume.mode = mode;
     out.context.volume.state = volumeState;
     out.context.volume.reasonCodes = Array.isArray(volume?.reasonCodes) ? volume.reasonCodes : [];
+    out.context.volume.raw = out.context.volume.raw || volume || null;
 
-    // Ensure reaction includes stage/armed etc
+    // Always expose E3
     out.context.reaction = out.context.reaction || reaction || null;
+
+    // ✅ Always attach fib so Elliott anchors show even when not in zone
+    out.context.fib = out.context.fib || fib || null;
+
+    // Light Engine 1 context for UI (not huge)
+    const engine1ContextLite = {
+      meta: engine1Context?.meta || null,
+      active: engine1Context?.active || null,
+      nearest: engine1Context?.nearest || null,
+      // negotiated/institutional/shelves arrays can be large; keep under render if you want
+      // render: engine1Context?.render || null,
+    };
+
+    // ✅ Convert NO_ZONE_NO_TRADE invalid->waiting so Strategy section stays alive
+    normalizeNoZoneToWaiting(out, {
+      fib,
+      engine1ContextLite,
+      reaction,
+      volume,
+      volumeState,
+      symbol,
+      tf,
+      degree,
+      wave,
+      price: priceOk ? price : null,
+      strategyId,
+      mode,
+    });
 
     return res.json(out);
   } catch (err) {
