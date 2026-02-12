@@ -4,12 +4,6 @@
 // - Pulls Engine 1 context (WHERE) for optional zoneContext
 // - Calls Engine 6 v1 permission via POST with correct payload
 // - ✅ Adds Engine 2 "Wave Phase" + FibScore block per Strategy card
-//
-// Engine 2 mapping (LOCKED for Strategy cards):
-// - Scalp card  -> degree=minor,        tf=1h
-// - Swing card  -> degree=intermediate, tf=1h
-// - Long card   -> degree=primary,      tf=1d
-// - Minute/10m  -> display-only later (NOT gating)  (not attached here)
 
 import express from "express";
 
@@ -78,17 +72,12 @@ function normalizeEngine5ForEngine6(confluenceJson) {
     ? confluenceJson.reasonCodes
     : [];
 
-  // Engine 5 total usually lives at scores.total; fallback to other shapes
   const total =
     Number(confluenceJson?.scores?.total) ||
     Number(confluenceJson?.total) ||
     0;
 
-  const label =
-    confluenceJson?.scores?.label ||
-    confluenceJson?.label ||
-    null;
-
+  const label = confluenceJson?.scores?.label || confluenceJson?.label || null;
   const flags = confluenceJson?.flags || null;
   const compression = confluenceJson?.compression || null;
   const bias = confluenceJson?.bias ?? null;
@@ -120,7 +109,6 @@ const ENGINE2_MAP = {
   intermediate_long: { degree: "primary", tf: "1d" },   // Long card shows Primary 1d
 };
 
-// Simple bucketing from your existing strategyIds
 function bucketForStrategyId(strategyId) {
   const id = String(strategyId || "");
   if (id.startsWith("intraday_scalp")) return "intraday_scalp";
@@ -140,7 +128,6 @@ async function fetchFibLevels({ symbol, tf, degree, wave }) {
 }
 
 async function fetchLastBarTimeSec({ symbol, tf }) {
-  // Engine 5 confirmed this is reliable.
   const u = new URL(`${CORE_BASE}/api/v1/ohlc`);
   u.searchParams.set("symbol", symbol);
   u.searchParams.set("timeframe", tf);
@@ -149,7 +136,6 @@ async function fetchLastBarTimeSec({ symbol, tf }) {
   const r = await fetchJson(u.toString(), { timeoutMs: 15000 });
   const j = r?.json;
 
-  // Support common shapes: {bars:[...]}, {data:[...]}, or direct array
   const bar =
     (Array.isArray(j) ? j[0] :
     (Array.isArray(j?.bars) ? j.bars[0] :
@@ -160,16 +146,13 @@ async function fetchLastBarTimeSec({ symbol, tf }) {
 }
 
 function calcFibScore(payloadW1, payloadW4) {
-  // prefer W1 if ok, else W4
   const p = (payloadW1 && payloadW1.ok) ? payloadW1 : ((payloadW4 && payloadW4.ok) ? payloadW4 : null);
   if (!p) return { fibScore: 0, invalidated: false, anchorTag: null };
 
   const invalidated = !!p?.signals?.invalidated;
   const anchorTag = p?.signals?.tag ?? null;
 
-  if (invalidated) {
-    return { fibScore: 0, invalidated: true, anchorTag };
-  }
+  if (invalidated) return { fibScore: 0, invalidated: true, anchorTag };
 
   let score = 0;
   if (p?.signals?.inRetraceZone) score += 10;
@@ -178,26 +161,43 @@ function calcFibScore(payloadW1, payloadW4) {
   return { fibScore: score, invalidated: false, anchorTag };
 }
 
+/**
+ * ✅ CRITICAL FIX:
+ * Reject placeholder marks like {p:0, tSec:null}
+ * because Number(null) === 0 which was incorrectly treated as a real time.
+ */
+function isRealMark(m) {
+  if (!m || typeof m !== "object") return false;
+
+  const p = Number(m.p);
+  const tSec = m.tSec;
+
+  // SPY marks can’t be price 0; treat <=0 as placeholder
+  if (!Number.isFinite(p) || p <= 0) return false;
+
+  // tSec must be a real epoch seconds number (not null)
+  if (typeof tSec !== "number" || !Number.isFinite(tSec) || tSec <= 0) return false;
+
+  return true;
+}
+
 function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec) {
   const order = ["W1", "W2", "W3", "W4", "W5"];
   const marksPresent = [];
 
   for (const k of order) {
-    const m = waveMarks?.[k];
-    if (m && Number.isFinite(Number(m.tSec)) && Number.isFinite(Number(m.p))) {
-      marksPresent.push(k);
-    }
+    if (isRealMark(waveMarks?.[k])) marksPresent.push(k);
   }
 
-  if (!marksPresent.length || !Number.isFinite(Number(lastBarTimeSec))) {
+  if (!marksPresent.length || typeof lastBarTimeSec !== "number" || !Number.isFinite(lastBarTimeSec)) {
     return { phase: "UNKNOWN", lastMark: null, nextMark: null, marksPresent };
   }
 
   let lastKey = null;
   for (const k of order) {
-    const tSec = Number(waveMarks?.[k]?.tSec);
-    if (!Number.isFinite(tSec)) continue;
-    if (tSec <= lastBarTimeSec) lastKey = k;
+    const m = waveMarks?.[k];
+    if (!isRealMark(m)) continue;
+    if (m.tSec <= lastBarTimeSec) lastKey = k;
   }
 
   if (!lastKey) {
@@ -219,8 +219,8 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec) {
 
   return {
     phase: `IN_${lastKey}`,
-    lastMark: waveMarks?.[lastKey] ? { key: lastKey, ...waveMarks[lastKey] } : null,
-    nextMark: nextKey && waveMarks?.[nextKey] ? { key: nextKey, ...waveMarks[nextKey] } : null,
+    lastMark: { key: lastKey, ...waveMarks[lastKey] },
+    nextMark: nextKey ? { key: nextKey, ...waveMarks[nextKey] } : null,
     marksPresent,
   };
 }
@@ -268,20 +268,16 @@ async function buildEngine2Block({ symbol, degree, tf }) {
 router.get("/dashboard-snapshot", async (req, res) => {
   const symbol = (req.query.symbol || "SPY").toString().toUpperCase();
 
-  // includeContext=1 returns Engine1 context in payload (and sends zoneContext to Engine6)
   const includeContext =
     String(req.query.includeContext || "") === "1" ||
     String(req.query.includeContext || "").toLowerCase() === "true";
 
-  // For Engine 6 intent (optional)
   const intentAction = (req.query.intent || "NEW_ENTRY").toString();
 
   const base = getBaseUrl(req);
   const now = new Date().toISOString();
 
-  // LOCKED Strategy row cards (these are Engine 5/6 frames)
-  // NOTE: We do NOT change these here (to avoid breaking current behavior).
-  // We only attach Engine 2 block for Elliott phase display using the LOCKED mapping above.
+  // LOCKED strategy mappings (existing)
   const strategies = [
     { strategyId: "intraday_scalp@10m", tf: "10m", degree: "minute", wave: "W1" },
     { strategyId: "minor_swing@1h", tf: "1h", degree: "minor", wave: "W1" },
@@ -317,7 +313,7 @@ router.get("/dashboard-snapshot", async (req, res) => {
       symbol,
       tf: s.tf,
       engine5,
-      marketMeter: null, // optional, fill later when Market Meter pipeline is stable
+      marketMeter: null,
       zoneContext,
       intent: { action: intentAction },
     };
@@ -336,8 +332,7 @@ router.get("/dashboard-snapshot", async (req, res) => {
     strategies: {},
   };
 
-  // Step 4: attach Engine 2 (Elliott phase + fib score) per strategy card (LOCKED mapping)
-  // This is display/stability for the Strategy row: "Minor 1h — IN_W4 — FibScore 10/20 — invalidated:false"
+  // Step 4: attach Engine 2 per strategy (LOCKED mapping)
   const engine2Promises = strategies.map(async (s) => {
     const bucket = bucketForStrategyId(s.strategyId);
     const map = bucket ? ENGINE2_MAP[bucket] : null;
