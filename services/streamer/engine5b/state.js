@@ -15,44 +15,23 @@ export const engine5bState = {
   lastTick: null,
   lastBar1s: null,
 
-  e3: {
-    ok: false,
-    stage: "IDLE",
-    armed: false,
-    reactionScore: 0,
-    updatedAtUtc: null,
-    raw: null,
-  },
-  e4: {
-    ok: false,
-    volumeScore: 0,
-    volumeConfirmed: false,
-    liquidityTrap: false,
-    updatedAtUtc: null,
-    raw: null,
-  },
+  e3: { ok: false, stage: "IDLE", armed: false, reactionScore: 0, updatedAtUtc: null, raw: null },
+  e4: { ok: false, volumeScore: 0, volumeConfirmed: false, liquidityTrap: false, updatedAtUtc: null, raw: null },
 
-  risk: {
-    killSwitch: null,
-    paperOnly: null,
-    allowlist: null,
-    updatedAtUtc: null,
-    raw: null,
-  },
+  risk: { killSwitch: null, paperOnly: null, allowlist: null, updatedAtUtc: null, raw: null },
 
-  // ✅ GO signal (display-only, no execution)
-  // Contract: stable keys always present
+  // ✅ GO (display-only; Engine 5B owns scalp GO)
   go: {
     signal: false,
     direction: null,        // "LONG" | "SHORT"
-    atUtc: null,            // ISO UTC
+    atUtc: null,            // ISO UTC string
     price: null,            // number
-    reason: null,           // short string
+    reason: null,           // short label
     reasonCodes: [],        // string[]
     triggerType: null,      // "PULLBACK_RECLAIM" | "BREAKOUT"
     triggerLine: null,      // number
     cooldownUntilMs: null,  // epoch ms
-    _holdUntilMs: null,     // internal (not required by UI)
+    _holdUntilMs: null,     // internal
   },
 
   sm: {
@@ -65,12 +44,12 @@ export const engine5bState = {
   },
 
   config: {
-    mode: "monitor", // monitor | paper
-    executeEnabled: false, // ⚠️ remains OFF (display-only GO)
+    mode: "monitor",          // monitor | paper
+    executeEnabled: false,
     longOnly: true,
 
     breakoutPts: 0.02,
-    persistBars: 1, // ✅ OPTION A: was 2, now 1 (blink trigger)
+    persistBars: 1,           // ✅ OPTION A: was 2, now 1 (blink trigger)
 
     armedWindowMs: 120000,
 
@@ -80,7 +59,7 @@ export const engine5bState = {
 
     cooldownMs: 120000,
 
-    // ✅ GO visibility hold (minimum). GO still clears at cooldown expiry.
+    // ✅ minimum GO visibility window (ms)
     goHoldMs: Number(process.env.ENGINE5B_GO_HOLD_MS || 120000),
   },
 };
