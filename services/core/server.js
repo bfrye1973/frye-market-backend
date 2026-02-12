@@ -19,6 +19,7 @@ import { volumeBehaviorRouter } from "./routes/volumeBehavior.js";
 import { confluenceScoreRouter } from "./routes/confluenceScore.js";
 import dashboardSnapshotRouter from "./routes/dashboardSnapshot.js";
 import replayRouter from "./routes/replay.js";
+import { scalpStatusRouter } from "./routes/scalpStatus.js";
 
 
 import tradingRouter from "./routes/trading.js";
@@ -126,6 +127,8 @@ app.use("/api/v1", volumeBehaviorRouter);
 app.use("/api/v1", confluenceScoreRouter);
 app.use("/api/v1", dashboardSnapshotRouter);
 app.use("/api/v1", replayRouter);
+app.use("/api/v1", scalpStatusRouter);
+
 
 
 // ✅ run-all-engines (must be in the /api/v1 group)
