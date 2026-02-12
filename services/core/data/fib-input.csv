@@ -17,7 +17,7 @@ SPY,intermediate,1h,MARK,W2,2025-12-19 11:00,672.68
 SPY,intermediate,1h,MARK,W3,2026-01-28 06:00,698.24
 SPY,intermediate,1h,MARK,W4,2026-02-06 08:00,676.90
 
-SPY,minor,1h,W1,LOW,,
+SPY,minor,1h,W1,LOW,2026-02-06 10:00,677.10
 SPY,minor,1h,W1,HIGH,2026-02-11 07:00,697.06
 SPY,minor,1h,W4,LOW,,
 SPY,minor,1h,W4,HIGH,,
