@@ -120,9 +120,9 @@ export async function buildReplaySnapshot({
     `&tf=10m` +
     `&degree=minute` +
     `&wave=W1` +
-    `&strategyId=intraday_scalp@10m_TEST`;
+    `&strategyId=intraday_scalp@10m`;
 
-  const decision = await safeFetchJson(confluenceUrl);
+  let decision = await safeFetchJson(confluenceUrl);
 
   // If you later add decision endpoints, we fold them in:
   if (decisionUrl) {
@@ -133,6 +133,7 @@ export async function buildReplaySnapshot({
     const p = await safeFetchJson(permissionUrl);
     if (p?.ok !== false) decision = { ...decision, ...p, ok: true };
   }
+
 
   // Structure wrapper required by passover
   const structure = {
