@@ -1,28 +1,28 @@
-// services/streamer/lib/goReplayRecorder.js
-const lastByKey = new Map(); // key -> last signal boolean
+// services/streamer/engine5b/goReplayRecorder.js
+// Sends GO to backend-1 replay recorder ONLY on rising edge (false -> true)
+
+const lastSignalByStrategy = new Map(); // strategyId -> boolean
 
 function nowIso() {
   return new Date().toISOString();
 }
 
-export async function recordGoOnRisingEdge({ strategyId, symbol = "SPY", go }) {
+export async function recordGoOnRisingEdge({ backend1Base, symbol = "SPY", strategyId, go }) {
+  if (!backend1Base) return;
+  if (!strategyId) return;
   if (!go || typeof go.signal !== "boolean") return;
 
-  const key = `${symbol}|${strategyId}`;
-  const prev = lastByKey.get(key) ?? false;
+  const prev = lastSignalByStrategy.get(strategyId) ?? false;
   const curr = go.signal === true;
 
-  // update state immediately
-  lastByKey.set(key, curr);
+  // update stored state now
+  lastSignalByStrategy.set(strategyId, curr);
 
   // only fire on NO -> YES
   if (prev || !curr) return;
 
-  const base = (process.env.BACKEND1_BASE_URL || "").replace(/\/+$/, "");
-  if (!base) {
-    console.error("[goReplayRecorder] missing BACKEND1_BASE_URL");
-    return;
-  }
+  const base = String(backend1Base).replace(/\/+$/, "");
+  const url = `${base}/api/v1/replay/record-go`;
 
   const payload = {
     symbol,
@@ -38,17 +38,18 @@ export async function recordGoOnRisingEdge({ strategyId, symbol = "SPY", go }) {
   };
 
   try {
-    const res = await fetch(`${base}/api/v1/replay/record-go`, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
 
-    const txt = await res.text().catch(() => "");
+    const text = await res.text().catch(() => "");
     if (!res.ok) {
-      console.error("[goReplayRecorder] record-go failed", res.status, txt.slice(0, 250));
+      console.error("[goReplayRecorder] record-go failed", res.status, text.slice(0, 200));
       return;
     }
+
     console.log("[goReplayRecorder] GO recorded", strategyId, payload.atUtc);
   } catch (e) {
     console.error("[goReplayRecorder] exception", e?.message || e);
