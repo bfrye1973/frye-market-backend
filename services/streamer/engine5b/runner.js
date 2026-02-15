@@ -1,6 +1,8 @@
 // services/streamer/engine5b/runner.js
 import WebSocket from "ws";
 import { engine5bState } from "./state.js";
+import { recordGoOnRisingEdge } from "./goReplayRecorder.js";
+
 
 const POLY_WS_URL = "wss://socket.polygon.io/stocks";
 const BACKEND1_BASE =
@@ -690,6 +692,14 @@ export function startEngine5B({ log = console.log } = {}) {
                 triggerLine: Number(engine5bState.sm.triggerLine),
                 cooldownUntilMs: engine5bState.sm.cooldownUntilMs,
               });
+              // ✅ Auto-record GO into Replay (Backend-1) on rising edge
+              recordGoOnRisingEdge({
+                backend1Base: BACKEND1_BASE,
+                symbol: "SPY",
+                strategyId: "intraday_scalp@10m",
+                go: engine5bState.go,
+              }).catch(() => {});
+
 
               engine5bState.sm.lastDecision =
                 `${nowUtc()} GO(PULLBACK_RECLAIM) aboveCount=${engine5bState.sm.triggerAboveCount} cooldownUntilMs=${engine5bState.sm.cooldownUntilMs}`;
