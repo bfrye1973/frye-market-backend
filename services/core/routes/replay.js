@@ -129,6 +129,12 @@ function safeNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * ✅ UPDATED: Engine score extraction mapping
+ * Engine 5 confluence returns:
+ *   decision.scores.engine1..engine4 and decision.scores.total, decision.scores.label
+ * We also keep fallbacks for older e1/e2/e3/e4 shapes.
+ */
 function summarizeEngineScores(snapshot) {
   // Best-effort summary. Don’t crash if fields change.
   const d = snapshot?.decision || {};
@@ -138,32 +144,51 @@ function summarizeEngineScores(snapshot) {
   const total = safeNum(scores?.total);
   const label = scores?.label || null;
 
-  // attempt to pull component breakdowns if present
+  // ✅ Prefer canonical confluence keys first, then fallback keys
   const e1 =
+    safeNum(scores?.engine1) ??
     safeNum(scores?.e1) ??
+    safeNum(scores?.components?.engine1) ??
     safeNum(scores?.components?.e1) ??
+    safeNum(scores?.breakdown?.engine1) ??
     safeNum(scores?.breakdown?.e1) ??
     null;
+
   const e2 =
+    safeNum(scores?.engine2) ??
     safeNum(scores?.e2) ??
+    safeNum(scores?.components?.engine2) ??
     safeNum(scores?.components?.e2) ??
+    safeNum(scores?.breakdown?.engine2) ??
     safeNum(scores?.breakdown?.e2) ??
     null;
+
   const e3 =
+    safeNum(scores?.engine3) ??
     safeNum(scores?.e3) ??
+    safeNum(scores?.components?.engine3) ??
     safeNum(scores?.components?.e3) ??
+    safeNum(scores?.breakdown?.engine3) ??
     safeNum(scores?.breakdown?.e3) ??
     null;
+
   const e4 =
+    safeNum(scores?.engine4) ??
     safeNum(scores?.e4) ??
+    safeNum(scores?.components?.engine4) ??
     safeNum(scores?.components?.e4) ??
+    safeNum(scores?.breakdown?.engine4) ??
     safeNum(scores?.breakdown?.e4) ??
     null;
 
   // fibScore usually lives on node.engine2 in dashboard-snapshot, but replay snapshot fib is full payload.
-  const fibScore = safeNum(snapshot?.fib?.fibScore) ?? safeNum(snapshot?.fib?.scores?.fibScore) ?? null;
+  const fibScore =
+    safeNum(snapshot?.fib?.fibScore) ??
+    safeNum(snapshot?.fib?.scores?.fibScore) ??
+    null;
 
   const zoneId =
+    d?.location?.zoneId ||
     ctx?.activeZone?.id ||
     ctx?.zone?.id ||
     snapshot?.structure?.smzHierarchy?.render?.active?.id ||
@@ -244,7 +269,10 @@ router.get("/replay/snapshot", (req, res) => {
   }
   const file = snapshotPath(DATA_DIR, date, time);
   const snap = readJson(file);
-  if (!snap) return res.status(404).json({ ok: false, reason: "NOT_FOUND", date, time });
+  if (!snap)
+    return res
+      .status(404)
+      .json({ ok: false, reason: "NOT_FOUND", date, time });
   res.json(snap);
 });
 
@@ -283,7 +311,9 @@ router.post("/replay/record-go", async (req, res) => {
   try {
     const body = req.body || {};
     const symbol = String(body.symbol || "SPY").toUpperCase();
-    const strategyId = normalizeStrategyId(body.strategyId || "intraday_scalp@10m");
+    const strategyId = normalizeStrategyId(
+      body.strategyId || "intraday_scalp@10m"
+    );
 
     // Determine AZ day/time
     const { dateYmd, timeHHMM, timeHHMMSS } = azParts(new Date());
@@ -292,7 +322,11 @@ router.post("/replay/record-go", async (req, res) => {
     ensureDirSync(dayDir);
 
     // Dedupe/rate limit
-    const minIntervalSec = clampInt(process.env.REPLAY_GO_MIN_INTERVAL_SEC || 20, 5, 600);
+    const minIntervalSec = clampInt(
+      process.env.REPLAY_GO_MIN_INTERVAL_SEC || 20,
+      5,
+      600
+    );
     const ledger = await loadLedger(DATA_DIR, dateYmd);
     ledger.lastByStrategy = ledger.lastByStrategy || {};
 
@@ -300,7 +334,12 @@ router.post("/replay/record-go", async (req, res) => {
     const last = ledger.lastByStrategy[strategyId] || {};
     const lastSentMs = Number(last.lastSentMs || 0);
     if (lastSentMs && nowMs - lastSentMs < minIntervalSec * 1000) {
-      return res.json({ ok: true, skipped: true, reason: "RATE_LIMIT", minIntervalSec });
+      return res.json({
+        ok: true,
+        skipped: true,
+        reason: "RATE_LIMIT",
+        minIntervalSec,
+      });
     }
 
     // If no go payload provided, attempt to pull scalp-status (works for scalp)
@@ -313,13 +352,17 @@ router.post("/replay/record-go", async (req, res) => {
       price: safeNum(body.price),
       reason: body.reason || null,
       reasonCodes: Array.isArray(body.reasonCodes) ? body.reasonCodes : [],
-      cooldownUntilMs: Number.isFinite(Number(body.cooldownUntilMs)) ? Number(body.cooldownUntilMs) : null,
+      cooldownUntilMs: Number.isFinite(Number(body.cooldownUntilMs))
+        ? Number(body.cooldownUntilMs)
+        : null,
     };
 
     if (!go.direction || !go.triggerType) {
       // try to hydrate from scalp-status proxy if this is scalp strategy
       const cb = coreBase();
-      const scalp = await jget(`${cb}/api/v1/scalp-status`, { timeoutMs: 8000 }).catch(() => null);
+      const scalp = await jget(`${cb}/api/v1/scalp-status`, {
+        timeoutMs: 8000,
+      }).catch(() => null);
       const sg = scalp?.go || null;
       if (sg && sg.signal === true) {
         go = {
@@ -330,22 +373,32 @@ router.post("/replay/record-go", async (req, res) => {
           atUtc: isIso(sg.atUtc) ? sg.atUtc : go.atUtc,
           price: safeNum(sg.price) ?? go.price,
           reason: sg.reason || go.reason,
-          reasonCodes: Array.isArray(sg.reasonCodes) ? sg.reasonCodes : go.reasonCodes,
-          cooldownUntilMs: Number.isFinite(Number(sg.cooldownUntilMs)) ? Number(sg.cooldownUntilMs) : go.cooldownUntilMs,
+          reasonCodes: Array.isArray(sg.reasonCodes)
+            ? sg.reasonCodes
+            : go.reasonCodes,
+          cooldownUntilMs: Number.isFinite(Number(sg.cooldownUntilMs))
+            ? Number(sg.cooldownUntilMs)
+            : go.cooldownUntilMs,
         };
       }
     }
 
     // Dedupe by go.atUtc (or fallback to HHMMSS) per strategy
-    const goKey = `${symbol}|${strategyId}|${go.direction || "—"}|${go.atUtc || timeHHMMSS}`;
+    const goKey = `${symbol}|${strategyId}|${go.direction || "—"}|${
+      go.atUtc || timeHHMMSS
+    }`;
     if (last.lastGoKey && last.lastGoKey === goKey) {
-      return res.json({ ok: true, skipped: true, reason: "DUPLICATE_GO_KEY", goKey });
+      return res.json({
+        ok: true,
+        skipped: true,
+        reason: "DUPLICATE_GO_KEY",
+        goKey,
+      });
     }
 
     // Build snapshot (reuse snapshotBuilder)
     const cb = coreBase();
-    const smzHierUrl =
-      process.env.REPLAY_SMZ_HIER_URL || `${cb}/api/v1/smz-hierarchy`;
+    const smzHierUrl = process.env.REPLAY_SMZ_HIER_URL || `${cb}/api/v1/smz-hierarchy`;
     const fibUrl =
       process.env.REPLAY_FIB_URL ||
       `${cb}/api/v1/fib-levels?symbol=${symbol}&tf=1h&degree=minor&wave=W1`;
@@ -355,7 +408,9 @@ router.post("/replay/record-go", async (req, res) => {
       process.env.REPLAY_DECISION_URL ||
       `${cb}/api/v1/confluence-score?symbol=${encodeURIComponent(
         symbol
-      )}&tf=10m&degree=minute&wave=W1&strategyId=${encodeURIComponent(strategyId)}`;
+      )}&tf=10m&degree=minute&wave=W1&strategyId=${encodeURIComponent(
+        strategyId
+      )}`;
 
     const permissionUrl = process.env.REPLAY_PERMISSION_URL || null;
 
