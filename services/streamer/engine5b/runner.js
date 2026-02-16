@@ -681,6 +681,9 @@ export function startEngine5B({ log = console.log } = {}) {
               // cooldown
               engine5bState.sm.cooldownUntilMs = Date.now() + engine5bState.config.cooldownMs;
 
+              // ✅ Rising edge check BEFORE setGo
+              const wasGo = engine5bState.go?.signal === true;
+
               // ✅ Set GO (display-only) — holds until cooldown (or holdMs) expires
               setGo({
                 direction: "LONG",
@@ -692,13 +695,16 @@ export function startEngine5B({ log = console.log } = {}) {
                 triggerLine: Number(engine5bState.sm.triggerLine),
                 cooldownUntilMs: engine5bState.sm.cooldownUntilMs,
               });
-              // ✅ Auto-record GO into Replay (Backend-1) on rising edge
-              recordGoOnRisingEdge({
-                backend1Base: BACKEND1_BASE,
-                symbol: "SPY",
-                strategyId: "intraday_scalp@10m",
-                go: engine5bState.go,
-              }).catch(() => {});
+
+              // ✅ Auto-record ONLY on NO→YES rising edge
+              if (!wasGo && engine5bState.go?.signal === true) {
+                recordGoOnRisingEdge({
+                  backend1Base: BACKEND1_BASE,
+                  symbol: "SPY",
+                  strategyId: "intraday_scalp@10m",
+                  go: engine5bState.go,
+                }).catch(() => {});
+              }
 
 
               engine5bState.sm.lastDecision =
