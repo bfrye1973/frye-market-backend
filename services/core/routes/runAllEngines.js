@@ -1,3 +1,4 @@
+// services/core/routes/runAllEngines.js
 import express from "express";
 import { spawn } from "child_process";
 import path from "path";
@@ -16,6 +17,12 @@ const ENGINE1_RUNNER = path.resolve(CORE_DIR, "jobs/runEngine1AndShelves.js");
 
 // Existing master runner (keeps everything else intact)
 const JOB_SCRIPT_ALL = path.resolve(CORE_DIR, "jobs/runAllEngines.sh");
+
+// ✅ NEW: Replay cadence snapshot writer (HHMM.json)
+const REPLAY_SNAPSHOT_JOB = path.resolve(CORE_DIR, "jobs/writeReplaySnapshot.js");
+
+// ✅ NEW: simple overlap guard to prevent concurrent runs (cron + manual)
+let IS_RUNNING = false;
 
 // 🔒 optional token gate (works for both GET and POST)
 function checkToken(req) {
@@ -46,59 +53,82 @@ async function handle(req, res) {
   const auth = checkToken(req);
   if (!auth.ok) return res.status(auth.status).json({ ok: false, error: auth.msg });
 
-  const startedAt = new Date().toISOString();
-
-  // Step 1: ALWAYS run Engine 1 + Shelves using the new runner
-  const step1 = await runStep({
-    cmd: "node",
-    args: [ENGINE1_RUNNER],
-    cwd: CORE_DIR,
-  });
-
-  // If Engine 1 fails, stop here (don’t run the rest)
-  if (step1.code !== 0) {
-    const endedAt = new Date().toISOString();
+  // ✅ NEW: overlap guard (prevents races writing same HHMM.json bucket)
+  if (IS_RUNNING) {
     return res.json({
-      ok: false,
-      code: step1.code,
-      startedAt,
-      endedAt,
-      step: "engine1_and_shelves",
-      stdout: step1.stdout.slice(-12000),
-      stderr: step1.stderr.slice(-12000),
+      ok: true,
+      skipped: true,
+      reason: "ALREADY_RUNNING",
+      startedAt: new Date().toISOString(),
     });
   }
 
-  // Step 2: run the existing full engine chain script (keeps everything else)
-  const step2 = await runStep({
-    cmd: "bash",
-    args: [JOB_SCRIPT_ALL],
-    cwd: CORE_DIR,
-  });
+  IS_RUNNING = true;
 
-  const endedAt = new Date().toISOString();
+  try {
+    const startedAt = new Date().toISOString();
 
-  // Combine output (keep tail so response stays small)
-  const combinedStdout = [
-    "== STEP 1: node jobs/runEngine1AndShelves.js ==",
-    step1.stdout,
-    "== STEP 2: bash jobs/runAllEngines.sh ==",
-    step2.stdout,
-  ].join("\n");
+    // Step 1: ALWAYS run Engine 1 + Shelves using the new runner
+    const step1 = await runStep({
+      cmd: "node",
+      args: [ENGINE1_RUNNER],
+      cwd: CORE_DIR,
+    });
 
-  const combinedStderr = [
-    step1.stderr,
-    step2.stderr,
-  ].join("\n");
+    // If Engine 1 fails, stop here (don’t run the rest)
+    if (step1.code !== 0) {
+      const endedAt = new Date().toISOString();
+      return res.json({
+        ok: false,
+        code: step1.code,
+        startedAt,
+        endedAt,
+        step: "engine1_and_shelves",
+        stdout: step1.stdout.slice(-12000),
+        stderr: step1.stderr.slice(-12000),
+      });
+    }
 
-  return res.json({
-    ok: step2.code === 0,
-    code: step2.code,
-    startedAt,
-    endedAt,
-    stdout: combinedStdout.slice(-12000),
-    stderr: combinedStderr.slice(-12000),
-  });
+    // Step 2: run the existing full engine chain script (keeps everything else)
+    const step2 = await runStep({
+      cmd: "bash",
+      args: [JOB_SCRIPT_ALL],
+      cwd: CORE_DIR,
+    });
+
+    // ✅ NEW Step 3: write Replay cadence snapshot (HHMM.json)
+    const step3 = await runStep({
+      cmd: "node",
+      args: [REPLAY_SNAPSHOT_JOB],
+      cwd: CORE_DIR,
+    });
+
+    const endedAt = new Date().toISOString();
+
+    // Combine output (keep tail so response stays small)
+    const combinedStdout = [
+      "== STEP 1: node jobs/runEngine1AndShelves.js ==",
+      step1.stdout,
+      "== STEP 2: bash jobs/runAllEngines.sh ==",
+      step2.stdout,
+      "== STEP 3: node jobs/writeReplaySnapshot.js ==",
+      step3.stdout,
+    ].join("\n");
+
+    const combinedStderr = [step1.stderr, step2.stderr, step3.stderr].join("\n");
+
+    return res.json({
+      ok: step2.code === 0 && step3.code === 0,
+      code: step2.code !== 0 ? step2.code : step3.code,
+      startedAt,
+      endedAt,
+      stdout: combinedStdout.slice(-12000),
+      stderr: combinedStderr.slice(-12000),
+    });
+  } finally {
+    // ✅ NEW: always release lock even if something throws
+    IS_RUNNING = false;
+  }
 }
 
 // Browser-friendly GET /api/v1/run-all-engines
