@@ -1,7 +1,5 @@
 // services/streamer/engine5b/goReplayRecorder.js
-// Sends GO to backend-1 replay recorder ONLY on rising edge (false -> true)
-
-const lastSignalByStrategy = new Map(); // strategyId -> boolean
+// Fire-and-forget: runner.js is responsible for rising-edge detection.
 
 function nowIso() {
   return new Date().toISOString();
@@ -10,16 +8,7 @@ function nowIso() {
 export async function recordGoOnRisingEdge({ backend1Base, symbol = "SPY", strategyId, go }) {
   if (!backend1Base) return;
   if (!strategyId) return;
-  if (!go || typeof go.signal !== "boolean") return;
-
-  const prev = lastSignalByStrategy.get(strategyId) ?? false;
-  const curr = go.signal === true;
-
-  // update stored state now
-  lastSignalByStrategy.set(strategyId, curr);
-
-  // only fire on NO -> YES
-  if (prev || !curr) return;
+  if (!go || go.signal !== true) return; // should only be called on rising edge
 
   const base = String(backend1Base).replace(/\/+$/, "");
   const url = `${base}/api/v1/replay/record-go`;
