@@ -444,6 +444,7 @@ router.post("/replay/record-go", async (req, res) => {
     const event = {
       tsUtc: go.atUtc || new Date().toISOString(),
       type: "GO_SIGNAL",
+      goKey,
       symbol,
       strategyId,
       direction: go.direction,
