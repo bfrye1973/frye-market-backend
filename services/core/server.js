@@ -20,6 +20,8 @@ import { confluenceScoreRouter } from "./routes/confluenceScore.js";
 import dashboardSnapshotRouter from "./routes/dashboardSnapshot.js";
 import replayRouter from "./routes/replay.js";
 import { scalpStatusRouter } from "./routes/scalpStatus.js";
+import { alertsRouter } from "./routes/alerts.js";
+
 
 
 import tradingRouter from "./routes/trading.js";
@@ -128,6 +130,8 @@ app.use("/api/v1", confluenceScoreRouter);
 app.use("/api/v1", dashboardSnapshotRouter);
 app.use("/api/v1", replayRouter);
 app.use("/api/v1", scalpStatusRouter);
+app.use("/api/v1/alerts", alertsRouter);
+
 
 
 
