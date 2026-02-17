@@ -296,7 +296,7 @@ def main():
     ema10_dist_pct = 0.0 if e10 == 0 else 100.0 * (close - e10) / e10
     ema10_posture = posture_from_dist(ema10_dist_pct, FULL_EMA_DIST)
 
-    stack_ok = 100.0 if e10 > e20 else 0.0
+    stack_ok = 100.0 if (close > e10 and close > e20 and e10 > e20) else 0.0
     slope = slope_score(e10_series)
 
     structure_score = (
