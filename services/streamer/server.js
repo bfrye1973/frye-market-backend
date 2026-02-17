@@ -3,7 +3,7 @@ import express from "express";
 import streamRouter from "./routes/stream.js";
 import scalpRouter from "./routes/scalp.js";
 import { startEngine5B } from "./engine5b/runner.js";
-import { pushoverTestRouter } from "./routes/pushoverTest.js";
+
 
 
 const app = express();
@@ -68,7 +68,6 @@ app.use("/stream", streamRouter);
    Engine 5B routes
 -------------------------------------------------- */
 app.use("/stream", scalpRouter);
-app.use("/api/v1", pushoverTestRouter);
 
 /* -------------------------------------------------
    Background runner
