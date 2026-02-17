@@ -7,8 +7,15 @@ export function ensureDir(dir) {
 }
 
 export function replayRoot(dataDir) {
+  // If REPLAY_DATA_DIR is set (recommended on Render with persistent disk),
+  // store replay under that absolute path.
+  const override = (process.env.REPLAY_DATA_DIR || "").trim();
+  if (override) return path.join(override, "replay");
+
+  // Default: store under the service dataDir (ephemeral on Render)
   return path.join(dataDir, "replay");
 }
+
 
 export function dayDir(dataDir, dateYmd) {
   return path.join(replayRoot(dataDir), dateYmd);
