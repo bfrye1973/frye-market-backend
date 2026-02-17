@@ -4,7 +4,6 @@ import { engine5bState } from "./state.js";
 import { recordGoOnRisingEdge } from "./goReplayRecorder.js";
 import { maybeSendInstantGoAlert } from "../../core/logic/alerts/instantGoPushover.js";
 
-
 const POLY_WS_URL = "wss://socket.polygon.io/stocks";
 const BACKEND1_BASE =
   process.env.BACKEND1_BASE ||
@@ -99,7 +98,8 @@ async function jpost(url, body) {
 
 /* -------------------- GO helpers (display-only) -------------------- */
 
-function setGo(payload) {
+// ✅ FIXED: setGo must be async because we await maybeSendInstantGoAlert
+async function setGo(payload) {
   const nowMs = Date.now();
   const holdMs = Number(engine5bState.config?.goHoldMs || 120000);
 
@@ -108,6 +108,9 @@ function setGo(payload) {
     : nowMs + holdMs;
 
   const holdUntil = Math.max(nowMs + holdMs, cooldownUntilMs);
+
+  // snapshot previous state for false->true detection
+  const prevGo = engine5bState.go ? { ...engine5bState.go } : { signal: false };
 
   engine5bState.go = engine5bState.go || {};
   engine5bState.go.signal = true;
@@ -124,6 +127,13 @@ function setGo(payload) {
     : null;
   engine5bState.go.cooldownUntilMs = cooldownUntilMs;
   engine5bState.go._holdUntilMs = holdUntil;
+
+  // ✅ INSTANT PUSH (safe helper — never throws)
+  await maybeSendInstantGoAlert({
+    symbol: "SPY",
+    prevGo,
+    nextGo: engine5bState.go,
+  });
 }
 
 function clearGoIfExpired() {
@@ -158,7 +168,12 @@ function pickZoneFromEngine1Context(ctx) {
   if (active && Number.isFinite(price)) {
     const lo = Number(active.lo),
       hi = Number(active.hi);
-    if (Number.isFinite(lo) && Number.isFinite(hi) && lo <= price && price <= hi) {
+    if (
+      Number.isFinite(lo) &&
+      Number.isFinite(hi) &&
+      lo <= price &&
+      price <= hi
+    ) {
       return { id: active.id ?? null, lo, hi, source: "ACTIVE" };
     }
   }
@@ -510,10 +525,16 @@ export function startEngine5B({ log = console.log } = {}) {
     10
   );
 
-  log(`[engine5b] starting mode=${engine5bState.config.mode} execute=${engine5bState.config.executeEnabled}`);
-  log(`[engine5b] cfg persistBars=${engine5bState.config.persistBars} breakoutPts=${engine5bState.config.breakoutPts} cooldownMs=${engine5bState.config.cooldownMs}`);
+  log(
+    `[engine5b] starting mode=${engine5bState.config.mode} execute=${engine5bState.config.executeEnabled}`
+  );
+  log(
+    `[engine5b] cfg persistBars=${engine5bState.config.persistBars} breakoutPts=${engine5bState.config.breakoutPts} cooldownMs=${engine5bState.config.cooldownMs}`
+  );
   log(`[engine5b] GO hold ms=${engine5bState.config.goHoldMs}`);
-  log(`[engine5b] pullback cfg impulseRangePts=${IMPULSE_RANGE_PTS} pullbackWickPts=${PULLBACK_WICK_PTS} pullbackMaxMin=${PULLBACK_MAX_MINUTES}`);
+  log(
+    `[engine5b] pullback cfg impulseRangePts=${IMPULSE_RANGE_PTS} pullbackWickPts=${PULLBACK_WICK_PTS} pullbackMaxMin=${PULLBACK_MAX_MINUTES}`
+  );
 
   let stopped = false;
   let ws = null;
@@ -551,10 +572,19 @@ export function startEngine5B({ log = console.log } = {}) {
   safe(refreshE4_1m, "refreshE4_1m");
 
   // schedule
-  zoneTimer = setInterval(() => safe(refreshZone, "refreshZone"), engine5bState.config.zoneRefreshMs);
+  zoneTimer = setInterval(
+    () => safe(refreshZone, "refreshZone"),
+    engine5bState.config.zoneRefreshMs
+  );
   riskTimer = setInterval(() => safe(refreshRisk, "refreshRisk"), 5000);
-  e3Timer = setInterval(() => safe(refreshE3, "refreshE3"), engine5bState.config.e3IntervalMs);
-  e4Timer = setInterval(() => safe(refreshE4_1m, "refreshE4_1m"), engine5bState.config.e4RefreshMs);
+  e3Timer = setInterval(
+    () => safe(refreshE3, "refreshE3"),
+    engine5bState.config.e3IntervalMs
+  );
+  e4Timer = setInterval(
+    () => safe(refreshE4_1m, "refreshE4_1m"),
+    engine5bState.config.e4RefreshMs
+  );
 
   function connectWs() {
     if (stopped) return;
@@ -584,7 +614,12 @@ export function startEngine5B({ log = console.log } = {}) {
           continue;
         }
 
-        engine5bState.lastTick = { t: ev.t, p: ev.p, s: ev.s, updatedAtUtc: nowUtc() };
+        engine5bState.lastTick = {
+          t: ev.t,
+          p: ev.p,
+          s: ev.s,
+          updatedAtUtc: nowUtc(),
+        };
 
         // Update 1s bar
         cur1s = applyTickTo1s(cur1s, ev);
@@ -601,8 +636,11 @@ export function startEngine5B({ log = console.log } = {}) {
 
           if (minSec !== lastClosedMinSec) {
             const closed1m = cur1m;
-            const haveZone = engine5bState.zone?.source && engine5bState.zone.source !== "NONE";
-            const armedOk = engine5bState.e3?.stage === "ARMED" || engine5bState.sm.stage === "ARMED";
+            const haveZone =
+              engine5bState.zone?.source && engine5bState.zone.source !== "NONE";
+            const armedOk =
+              engine5bState.e3?.stage === "ARMED" ||
+              engine5bState.sm.stage === "ARMED";
 
             if (haveZone && armedOk) {
               if (engine5bState.sm.pbState === "IMPULSE_SEEN") {
@@ -623,14 +661,15 @@ export function startEngine5B({ log = console.log } = {}) {
               }
 
               if (!engine5bState.sm.pbState) {
-                const range = Number(closed1m.high) - Number(closed1m.low);
+                const range =
+                  Number(closed1m.high) - Number(closed1m.low);
                 const zoneHi = Number(engine5bState.zone.hi);
                 const breakoutPts = Number(engine5bState.config.breakoutPts || 0.02);
 
                 if (
                   Number.isFinite(range) &&
                   range >= IMPULSE_RANGE_PTS &&
-                  Number(closed1m.close) > (zoneHi + breakoutPts)
+                  Number(closed1m.close) > zoneHi + breakoutPts
                 ) {
                   engine5bState.sm.pbState = "IMPULSE_SEEN";
                   engine5bState.sm.impulse1mTime = minSec;
@@ -641,7 +680,11 @@ export function startEngine5B({ log = console.log } = {}) {
                 const impulseHigh = Number(engine5bState.sm.impulse1mHigh);
                 const wickDown = impulseHigh - Number(closed1m.low);
 
-                if (Number.isFinite(impulseHigh) && Number.isFinite(wickDown) && wickDown >= PULLBACK_WICK_PTS) {
+                if (
+                  Number.isFinite(impulseHigh) &&
+                  Number.isFinite(wickDown) &&
+                  wickDown >= PULLBACK_WICK_PTS
+                ) {
                   engine5bState.sm.pbState = "PULLBACK_SEEN";
                   engine5bState.sm.pullback1mTime = minSec;
                   engine5bState.sm.pullbackHigh = Number(closed1m.high);
@@ -671,22 +714,28 @@ export function startEngine5B({ log = console.log } = {}) {
             !inCooldown()
           ) {
             const above = pullbackReclaimCheck_1s(closePx);
-            if (above) engine5bState.sm.triggerAboveCount = Number(engine5bState.sm.triggerAboveCount || 0) + 1;
+            if (above)
+              engine5bState.sm.triggerAboveCount =
+                Number(engine5bState.sm.triggerAboveCount || 0) + 1;
             else engine5bState.sm.triggerAboveCount = 0;
 
-            if (engine5bState.sm.triggerAboveCount >= engine5bState.config.persistBars) {
+            if (
+              engine5bState.sm.triggerAboveCount >=
+              engine5bState.config.persistBars
+            ) {
               // ✅ TRIGGER — DISPLAY ONLY (NO EXECUTION)
               stageSet("TRIGGERED");
               engine5bState.sm.triggeredAtMs = Date.now();
 
               // cooldown
-              engine5bState.sm.cooldownUntilMs = Date.now() + engine5bState.config.cooldownMs;
+              engine5bState.sm.cooldownUntilMs =
+                Date.now() + engine5bState.config.cooldownMs;
 
               // ✅ Rising edge check BEFORE setGo
               const wasGo = engine5bState.go?.signal === true;
 
-              // ✅ Set GO (display-only) — holds until cooldown (or holdMs) expires
-              setGo({
+              // ✅ Set GO (display-only)
+              await setGo({
                 direction: "LONG",
                 atUtc: nowUtc(),
                 price: Number.isFinite(closePx) ? closePx : null,
@@ -706,7 +755,6 @@ export function startEngine5B({ log = console.log } = {}) {
                   go: engine5bState.go,
                 }).catch(() => {});
               }
-
 
               engine5bState.sm.lastDecision =
                 `${nowUtc()} GO(PULLBACK_RECLAIM) aboveCount=${engine5bState.sm.triggerAboveCount} cooldownUntilMs=${engine5bState.sm.cooldownUntilMs}`;
