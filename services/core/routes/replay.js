@@ -11,6 +11,7 @@ import {
   readJson,
   snapshotPath,
   eventsPath,
+  dayDir as replayDayDir, // ✅ NEW: use replayStore root resolver (REPLAY_DATA_DIR aware)
 } from "../logic/replay/replayStore.js";
 
 import { buildReplaySnapshot } from "../logic/replay/snapshotBuilder.js";
@@ -96,17 +97,18 @@ function ensureDirSync(p) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
 }
 
-function replayDayDir(dataDir, dateYmd) {
-  return path.join(dataDir, "replay", dateYmd);
+// ✅ FIXED: use replayStore’s dayDir() so REPLAY_DATA_DIR applies everywhere
+function dayPath(dataDir, dateYmd) {
+  return replayDayDir(dataDir, dateYmd);
 }
 
 function goSnapshotFile(dataDir, dateYmd, timeHHMMSS) {
   // e.g. HHMMSS_GO.json
-  return path.join(replayDayDir(dataDir, dateYmd), `${timeHHMMSS}_GO.json`);
+  return path.join(dayPath(dataDir, dateYmd), `${timeHHMMSS}_GO.json`);
 }
 
 function goLedgerPath(dataDir, dateYmd) {
-  return path.join(replayDayDir(dataDir, dateYmd), `go-ledger.json`);
+  return path.join(dayPath(dataDir, dateYmd), `go-ledger.json`);
 }
 
 function clampInt(n, lo, hi) {
@@ -318,8 +320,9 @@ router.post("/replay/record-go", async (req, res) => {
     // Determine AZ day/time
     const { dateYmd, timeHHMM, timeHHMMSS } = azParts(new Date());
 
-    const dayDir = replayDayDir(DATA_DIR, dateYmd);
-    ensureDirSync(dayDir);
+    // ✅ FIXED: ensure day directory under replayStore root (REPLAY_DATA_DIR aware)
+    const dayDirPath = dayPath(DATA_DIR, dateYmd);
+    ensureDirSync(dayDirPath);
 
     // Dedupe/rate limit
     const minIntervalSec = clampInt(
@@ -398,7 +401,8 @@ router.post("/replay/record-go", async (req, res) => {
 
     // Build snapshot (reuse snapshotBuilder)
     const cb = coreBase();
-    const smzHierUrl = process.env.REPLAY_SMZ_HIER_URL || `${cb}/api/v1/smz-hierarchy`;
+    const smzHierUrl =
+      process.env.REPLAY_SMZ_HIER_URL || `${cb}/api/v1/smz-hierarchy`;
     const fibUrl =
       process.env.REPLAY_FIB_URL ||
       `${cb}/api/v1/fib-levels?symbol=${symbol}&tf=1h&degree=minor&wave=W1`;
@@ -433,7 +437,7 @@ router.post("/replay/record-go", async (req, res) => {
       tradingDayAz: dateYmd,
     };
 
-    // Write GO snapshot file (HHMMSS_GO.json)
+    // Write GO snapshot file (HHMMSS_GO.json) ✅ FIXED ROOT
     const snapFile = goSnapshotFile(DATA_DIR, dateYmd, timeHHMMSS);
     await writeJsonAtomic(snapFile, snapshot);
 
@@ -471,7 +475,7 @@ router.post("/replay/record-go", async (req, res) => {
 
     const appended = await appendEvent(DATA_DIR, dateYmd, event);
 
-    // Update ledger
+    // Update ledger ✅ FIXED ROOT
     ledger.lastByStrategy[strategyId] = {
       lastGoKey: goKey,
       lastSentMs: nowMs,
