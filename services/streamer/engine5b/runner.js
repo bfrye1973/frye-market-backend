@@ -2,6 +2,7 @@
 import WebSocket from "ws";
 import { engine5bState } from "./state.js";
 import { recordGoOnRisingEdge } from "./goReplayRecorder.js";
+import { maybeSendInstantGoAlert } from "../../core/logic/alerts/instantGoPushover.js";
 
 
 const POLY_WS_URL = "wss://socket.polygon.io/stocks";
