@@ -3,7 +3,8 @@
 // LIVE JSON proxies + computed pills endpoint
 //   /live/intraday          -> data-live-10min/data/outlook_intraday.json
 //   /live/hourly            -> data-live-hourly/data/outlook_hourly.json
-//   /live/4h                -> data-live-4h/data/outlook_4h.json          ✅ NEW
+//   /live/30m               -> data-live-30m/data/outlook_30m.json          ✅ NEW
+//   /live/4h                -> data-live-4h/data/outlook_4h.json
 //   /live/eod               -> data-live-eod/data/outlook.json
 //   /live/intraday-deltas   -> data-live-10min-sandbox/data/outlook_intraday.json (LEAN)
 //   /live/pills             -> { stamp5, stamp10, sectors:{ <11>:{ d5m, d10m } } }
@@ -18,29 +19,49 @@ const GH_REPO  = process.env.LIVE_GH_REPO  || "frye-market-backend";
 
 const INTRA_BRANCH   = process.env.LIVE_INTRADAY_BRANCH   || "data-live-10min";
 const HOURLY_BRANCH  = process.env.LIVE_HOURLY_BRANCH     || "data-live-hourly";
-const H4_BRANCH      = process.env.LIVE_4H_BRANCH         || "data-live-4h";          // ✅ NEW
+const M30_BRANCH     = process.env.LIVE_30M_BRANCH        || "data-live-30m";         // ✅ NEW
+const H4_BRANCH      = process.env.LIVE_4H_BRANCH         || "data-live-4h";
 const EOD_BRANCH     = process.env.LIVE_EOD_BRANCH        || "data-live-eod";
 const SANDBOX_BRANCH = process.env.LIVE_SANDBOX_BRANCH    || "data-live-10min-sandbox";
 
 const INTRA_PATH   = process.env.LIVE_INTRADAY_PATH   || "data/outlook_intraday.json";
 const HOURLY_PATH  = process.env.LIVE_HOURLY_PATH     || "data/outlook_hourly.json";
-const H4_PATH      = process.env.LIVE_4H_PATH         || "data/outlook_4h.json";      // ✅ NEW
+const M30_PATH     = process.env.LIVE_30M_PATH        || "data/outlook_30m.json";     // ✅ NEW
+const H4_PATH      = process.env.LIVE_4H_PATH         || "data/outlook_4h.json";
 const EOD_PATH     = process.env.LIVE_EOD_PATH        || "data/outlook.json";
 const SANDBOX_PATH = process.env.LIVE_SANDBOX_PATH    || "data/outlook_intraday.json";
 
 /* =============================== Helpers ================================= */
-const norm = (s="") => s.trim().toLowerCase();
+const norm = (s = "") => s.trim().toLowerCase();
 const ALIASES = {
-  healthcare: "health care","health-care":"health care","health care":"health care",
-  "info tech":"information technology","technology":"information technology","tech":"information technology",
-  communications:"communication services","comm services":"communication services","telecom":"communication services",
-  staples:"consumer staples","discretionary":"consumer discretionary",
-  finance:"financials","industry":"industrials","reit":"real estate","reits":"real estate",
+  healthcare: "health care",
+  "health-care": "health care",
+  "health care": "health care",
+  "info tech": "information technology",
+  technology: "information technology",
+  tech: "information technology",
+  communications: "communication services",
+  "comm services": "communication services",
+  telecom: "communication services",
+  staples: "consumer staples",
+  discretionary: "consumer discretionary",
+  finance: "financials",
+  industry: "industrials",
+  reit: "real estate",
+  reits: "real estate",
 };
 const ORDER = [
-  "information technology","materials","health care","communication services",
-  "real estate","energy","consumer staples","consumer discretionary",
-  "financials","utilities","industrials",
+  "information technology",
+  "materials",
+  "health care",
+  "communication services",
+  "real estate",
+  "energy",
+  "consumer staples",
+  "consumer discretionary",
+  "financials",
+  "utilities",
+  "industrials",
 ];
 
 const cacheBust = () => `t=${Date.now()}`;
@@ -61,7 +82,7 @@ async function fetchText(url) {
 }
 async function fetchJson(url) {
   const r = await fetchText(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}: ${r.text?.slice(0,120)}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}: ${r.text?.slice(0, 120)}`);
   return JSON.parse(r.text);
 }
 
@@ -69,9 +90,10 @@ async function fetchJson(url) {
 function netNHMapFromCards(cards = []) {
   const out = {};
   for (const c of Array.isArray(cards) ? cards : []) {
-    const canon = ALIASES[norm(c?.sector || "")] || (c?.sector || "");
+    const canon = ALIASES[norm(c?.sector || "")] || c?.sector || "";
     const key = norm(canon);
-    const nh = Number(c?.nh ?? NaN), nl = Number(c?.nl ?? NaN);
+    const nh = Number(c?.nh ?? NaN),
+      nl = Number(c?.nl ?? NaN);
     if (key && Number.isFinite(nh) && Number.isFinite(nl)) out[key] = nh - nl;
   }
   return out;
@@ -83,10 +105,12 @@ liveRouter.get("/intraday", async (_req, res) => {
   const url = rawUrl(GH_OWNER, GH_REPO, INTRA_BRANCH, INTRA_PATH);
   try {
     const r = await fetchText(url);
-    res.status(r.status); setNoStore(res); return res.send(r.text);
+    res.status(r.status);
+    setNoStore(res);
+    return res.send(r.text);
   } catch (err) {
     console.error("[live] intraday error:", err);
-    return res.status(502).json({ ok:false, error:"Bad Gateway" });
+    return res.status(502).json({ ok: false, error: "Bad Gateway" });
   }
 });
 
@@ -95,22 +119,40 @@ liveRouter.get("/hourly", async (_req, res) => {
   const url = rawUrl(GH_OWNER, GH_REPO, HOURLY_BRANCH, HOURLY_PATH);
   try {
     const r = await fetchText(url);
-    res.status(r.status); setNoStore(res); return res.send(r.text);
+    res.status(r.status);
+    setNoStore(res);
+    return res.send(r.text);
   } catch (err) {
     console.error("[live] hourly error:", err);
-    return res.status(502).json({ ok:false, error:"Bad Gateway" });
+    return res.status(502).json({ ok: false, error: "Bad Gateway" });
   }
 });
 
-// ✅ 4-hour
+// ✅ 30-minute Bridge
+liveRouter.get("/30m", async (_req, res) => {
+  const url = rawUrl(GH_OWNER, GH_REPO, M30_BRANCH, M30_PATH);
+  try {
+    const r = await fetchText(url);
+    res.status(r.status);
+    setNoStore(res);
+    return res.send(r.text);
+  } catch (err) {
+    console.error("[live] 30m error:", err);
+    return res.status(502).json({ ok: false, error: "Bad Gateway" });
+  }
+});
+
+// 4-hour
 liveRouter.get("/4h", async (_req, res) => {
   const url = rawUrl(GH_OWNER, GH_REPO, H4_BRANCH, H4_PATH);
   try {
     const r = await fetchText(url);
-    res.status(r.status); setNoStore(res); return res.send(r.text);
+    res.status(r.status);
+    setNoStore(res);
+    return res.send(r.text);
   } catch (err) {
     console.error("[live] 4h error:", err);
-    return res.status(502).json({ ok:false, error:"Bad Gateway" });
+    return res.status(502).json({ ok: false, error: "Bad Gateway" });
   }
 });
 
@@ -119,10 +161,12 @@ liveRouter.get("/eod", async (_req, res) => {
   const url = rawUrl(GH_OWNER, GH_REPO, EOD_BRANCH, EOD_PATH);
   try {
     const r = await fetchText(url);
-    res.status(r.status); setNoStore(res); return res.send(r.text);
+    res.status(r.status);
+    setNoStore(res);
+    return res.send(r.text);
   } catch (err) {
     console.error("[live] eod error:", err);
-    return res.status(502).json({ ok:false, error:"Bad Gateway" });
+    return res.status(502).json({ ok: false, error: "Bad Gateway" });
   }
 });
 
@@ -131,7 +175,11 @@ liveRouter.get("/intraday-deltas", async (_req, res) => {
   const url = rawUrl(GH_OWNER, GH_REPO, SANDBOX_BRANCH, SANDBOX_PATH);
   try {
     const r = await fetchText(url);
-    if (!r.ok) { res.status(r.status); setNoStore(res); return res.send(r.text); }
+    if (!r.ok) {
+      res.status(r.status);
+      setNoStore(res);
+      return res.send(r.text);
+    }
     const j = JSON.parse(r.text);
     const sectors = j?.deltas?.sectors || j?.outlook?.sectors || {};
     const lean = {
@@ -139,21 +187,26 @@ liveRouter.get("/intraday-deltas", async (_req, res) => {
       deltasUpdatedAt: j?.deltasUpdatedAt || j?.sectorsUpdatedAt || j?.updated_at || null,
       barTs: j?.barTs || j?.ts || null,
       deltas: {
-        sectors: Object.fromEntries(Object.keys(sectors).map((k) => {
-          const v = sectors[k] || {};
-          const netTilt = typeof v.netTilt === "number"
-            ? v.netTilt
-            : (typeof v.dBreadthPct === "number" && typeof v.dMomentumPct === "number")
-              ? (v.dBreadthPct + v.dMomentumPct)/2
-              : null;
-          return [k, { netTilt }];
-        })),
+        sectors: Object.fromEntries(
+          Object.keys(sectors).map((k) => {
+            const v = sectors[k] || {};
+            const netTilt =
+              typeof v.netTilt === "number"
+                ? v.netTilt
+                : typeof v.dBreadthPct === "number" && typeof v.dMomentumPct === "number"
+                ? (v.dBreadthPct + v.dMomentumPct) / 2
+                : null;
+            return [k, { netTilt }];
+          })
+        ),
       },
     };
-    res.status(200); setNoStore(res); return res.send(JSON.stringify(lean));
+    res.status(200);
+    setNoStore(res);
+    return res.send(JSON.stringify(lean));
   } catch (err) {
     console.error("[live] intraday-deltas trim error:", err);
-    return res.status(502).json({ ok:false, error:"Bad Gateway" });
+    return res.status(502).json({ ok: false, error: "Bad Gateway" });
   }
 });
 
@@ -167,33 +220,35 @@ liveRouter.get("/pills", async (_req, res) => {
   try {
     const now = Date.now();
     if (pillsCache.json && now - pillsCache.at < 25_000) {
-      setNoStore(res); return res.status(200).send(JSON.stringify(pillsCache.json));
+      setNoStore(res);
+      return res.status(200).send(JSON.stringify(pillsCache.json));
     }
 
     // Fetch current canonical and sandbox (lean) in parallel
-    const url10  = rawUrl(GH_OWNER, GH_REPO, INTRA_BRANCH, INTRA_PATH);
-    const url5   = rawUrl(GH_OWNER, GH_REPO, SANDBOX_BRANCH, SANDBOX_PATH);
+    const url10 = rawUrl(GH_OWNER, GH_REPO, INTRA_BRANCH, INTRA_PATH);
+    const url5 = rawUrl(GH_OWNER, GH_REPO, SANDBOX_BRANCH, SANDBOX_PATH);
     const [j10raw, j5raw] = await Promise.all([fetchJson(url10), fetchJson(url5)]);
 
     // Canonical map + ts
-    const ts10  = j10raw?.sectorsUpdatedAt || j10raw?.updated_at || null;
+    const ts10 = j10raw?.sectorsUpdatedAt || j10raw?.updated_at || null;
     const map10 = netNHMapFromCards(Array.isArray(j10raw?.sectorCards) ? j10raw.sectorCards : []);
 
     // Δ10m
     let d10m = {};
     if (!lastCanon.ts || !lastCanon.map) {
-      d10m = Object.fromEntries(Object.keys(map10).map(k => [k, 0])); // first run = zeros
+      d10m = Object.fromEntries(Object.keys(map10).map((k) => [k, 0])); // first run = zeros
     } else if (ts10 && ts10 !== lastCanon.ts) {
       const keys = new Set([...Object.keys(map10), ...Object.keys(lastCanon.map)]);
       for (const k of keys) {
-        const a = map10[k], b = lastCanon.map[k];
-        d10m[k] = (Number.isFinite(a) && Number.isFinite(b)) ? +(a - b).toFixed(2) : 0;
+        const a = map10[k],
+          b = lastCanon.map[k];
+        d10m[k] = Number.isFinite(a) && Number.isFinite(b) ? +(a - b).toFixed(2) : 0;
       }
     } else {
       // same stamp → keep previous deltas (zeros if first run)
       d10m = pillsCache.json?.sectors
-        ? Object.fromEntries(Object.entries(pillsCache.json.sectors).map(([k,v]) => [k, v.d10m ?? 0]))
-        : Object.fromEntries(Object.keys(map10).map(k => [k, 0]));
+        ? Object.fromEntries(Object.entries(pillsCache.json.sectors).map(([k, v]) => [k, v.d10m ?? 0]))
+        : Object.fromEntries(Object.keys(map10).map((k) => [k, 0]));
     }
     // Update last canonical snapshot
     if (ts10 && ts10 !== lastCanon.ts) lastCanon = { ts: ts10, map: map10 };
@@ -203,31 +258,34 @@ liveRouter.get("/pills", async (_req, res) => {
     const ts5 = j5raw?.deltasUpdatedAt || j5raw?.sectorsUpdatedAt || j5raw?.updated_at || null;
 
     // Assemble sectors union in canonical order
-    const keysUnion = Array.from(new Set(
-      ORDER.concat(Object.keys(map10 || {}))
-        .concat(Object.keys(sectors5 || {}).map(k => norm(ALIASES[norm(k)] || k)))
-    ));
+    const keysUnion = Array.from(
+      new Set(
+        ORDER.concat(Object.keys(map10 || {})).concat(
+          Object.keys(sectors5 || {}).map((k) => norm(ALIASES[norm(k)] || k))
+        )
+      )
+    );
     const sectors = {};
     for (const kRaw of keysUnion) {
       const k = norm(kRaw);
       // map sandbox key back through aliases if needed
-      const d5src = Object.entries(sectors5).find(([name]) =>
-        norm(ALIASES[norm(name)] || name) === k
-      );
+      const d5src = Object.entries(sectors5).find(([name]) => norm(ALIASES[norm(name)] || name) === k);
       const tilt = d5src ? d5src[1]?.netTilt : null;
       sectors[k] = {
-        d5m: (typeof tilt === "number" && Number.isFinite(tilt)) ? +(+tilt).toFixed(2) : null,
-        d10m: (typeof d10m[k] === "number" && Number.isFinite(d10m[k])) ? d10m[k] : 0,
+        d5m: typeof tilt === "number" && Number.isFinite(tilt) ? +(+tilt).toFixed(2) : null,
+        d10m: typeof d10m[k] === "number" && Number.isFinite(d10m[k]) ? d10m[k] : 0,
       };
     }
 
     const out = { stamp5: ts5, stamp10: ts10, sectors };
-    pillsCache.json = out; pillsCache.at = now;
+    pillsCache.json = out;
+    pillsCache.at = now;
 
-    setNoStore(res); return res.status(200).send(JSON.stringify(out));
+    setNoStore(res);
+    return res.status(200).send(JSON.stringify(out));
   } catch (err) {
     console.error("[live] /pills error:", err);
-    return res.status(502).json({ ok:false, error:"Bad Gateway" });
+    return res.status(502).json({ ok: false, error: "Bad Gateway" });
   }
 });
 
