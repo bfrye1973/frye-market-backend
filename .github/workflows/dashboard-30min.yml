@@ -1,0 +1,91 @@
+name: dashboard-30min
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Every 30 minutes, Mon–Fri (UTC). Adjust if you want market-hours only.
+    - cron: "*/30 * * * 1-5"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build_and_publish_30m:
+    name: Build and Publish 30m Bridge
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: dashboard-30min
+      cancel-in-progress: true
+    env:
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-30m
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build 30m payload
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python -u scripts/make_dashboard_30m.py --out data/outlook_30m.json
+          head -n 50 data/outlook_30m.json || true
+
+      - name: Write heartbeat
+        run: |
+          set -euo pipefail
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_30m.txt
+
+      - name: Stage artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/bridge30
+          cp -f data/outlook_30m.json /tmp/bridge30/outlook_30m.json
+          cp -f data/heartbeat_30m.txt /tmp/bridge30/heartbeat_30m.txt
+
+      - name: Prepare live branch
+        env:
+          LIVE_BRANCH: data-live-30m
+        run: |
+          set -euo pipefail
+          git config user.name  "actions-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git reset --hard
+          git clean -fdx
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${LIVE_BRANCH}"
+            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
+          else
+            git checkout --orphan "${LIVE_BRANCH}"
+          fi
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+          mkdir -p data
+          cp -f /tmp/bridge30/outlook_30m.json data/outlook_30m.json
+          cp -f /tmp/bridge30/heartbeat_30m.txt data/heartbeat_30m.txt
+
+      - name: Commit and push live branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          LIVE_BRANCH: data-live-30m
+        run: |
+          set -euo pipefail
+          git add data
+          git commit -m "30m live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin "${LIVE_BRANCH}" --force

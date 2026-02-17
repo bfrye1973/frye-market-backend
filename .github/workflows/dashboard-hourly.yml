@@ -1,0 +1,265 @@
+name: dashboard-hourly
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Run every 40 minutes on weekdays (UTC). Rotation :00 → :40 → :20 → :00 …
+    - cron: "*/40 * * * 1-5"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build_and_publish_hourly:
+    name: Build and Publish Hourly (1h valuation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: dashboard-hourly-v2
+      cancel-in-progress: true
+
+    env:
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-hourly
+      PYTHONUNBUFFERED: "1"
+      HOUR_LOOKBACK_DAYS: "10"
+      H4_LOOKBACK_DAYS:   "21"
+      EMA_FAST:           "8"
+      EMA_SLOW:           "18"
+      VOL_FAST:           "3"
+      VOL_SLOW:           "12"
+      FD_MAX_WORKERS:     "6"
+      FD_RETRY_MAX:       "1"
+      FORCE_PUBLISH:      "false"
+      POLY_KEY:           ${{ secrets.POLY_KEY }}
+      POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
+      
+    steps:
+      # 0) Start/diagnostics
+      - name: Start timer (UTC)
+        id: t0
+        run: |
+          set -euo pipefail
+          START_TS="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "START_TS=$START_TS" >> "$GITHUB_ENV"
+          echo "::notice:: hourly run started at $START_TS"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install --upgrade requests python-dateutil tzdata
+
+      # 1) Build hourly sectorCards source using TRUE hourly engine (Polygon 1h)
+      - name: Build sectorCards source (hourly groups)
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          echo "::notice:: FD_MAX_WORKERS=$FD_MAX_WORKERS FD_RETRY_MAX=$FD_RETRY_MAX HOUR_LOOKBACK_DAYS=$HOUR_LOOKBACK_DAYS H4D=$H4_LOOKBACK_DAYS"
+          python -u scripts/build_outlook_hourly_source.py \
+            --sectors-dir "data/sectors" \
+            --out "data/outlook_source.json"
+          head -n 60 data/outlook_source.json || true
+
+      # 2) Normalize source (groups → sectorCards) – keep as-is
+      - name: Normalize source (groups → sectorCards)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          p="data/outlook_source.json"
+          try:
+              j=json.load(open(p,"r",encoding="utf-8"))
+          except Exception as e:
+              print("invalid source:", e); sys.exit(1)
+
+          def pct(a,b): return 0.0 if b==0 else round(100.0*float(a)/float(b), 2)
+
+          if isinstance(j.get("sectorCards"), list) and j["sectorCards"]:
+              out = {"sectorCards": j["sectorCards"]}
+          elif isinstance(j.get("groups"), dict):
+              groups=j["groups"]
+              order=[
+                "information technology","materials","health care","communication services",
+                "real estate","energy","consumer staples","consumer discretionary",
+                "financials","utilities","industrials",
+              ]
+              alias={
+                "healthcare":"health care","health-care":"health care",
+                "info tech":"information technology","technology":"information technology","tech":"information technology",
+                "communications":"communication services","comm":"communication services","telecom":"communication services",
+                "staples":"consumer staples","discretionary":"consumer discretionary",
+                "finance":"financials","industry":"industrials","reit":"real estate","reits":"real estate",
+              }
+              def norm(s): return (s or "").strip().lower()
+              bucket={}
+              for raw,g in (groups or {}).items():
+                  k=alias.get(norm(raw), norm(raw))
+                  if not k:
+                      continue
+                  nh=int(g.get("nh",0)); nl=int(g.get("nl",0)); up=int(g.get("u",0)); dn=int(g.get("d",0))
+                  b=pct(nh,nh+nl); m=pct(up,up+dn)
+                  bucket[k]={"sector":k.title(),"breadth_pct":b,"momentum_pct":m,"nh":nh,"nl":nl,"up":up,"down":dn}
+              rows=[ bucket.get(name,{"sector":name.title(),"breadth_pct":0.0,"momentum_pct":0.0,"nh":0,"nl":0,"up":0,"down":0}) for name in order ]
+              out={"sectorCards": rows}
+          else:
+              print("missing sectorCards/groups"); sys.exit(1)
+
+          json.dump(out, open(p,"w",encoding="utf-8"), ensure_ascii=False)
+          print("sectorCards:", len(out["sectorCards"]))
+          PY
+
+      # 3) Compose → outlook_hourly.json
+      - name: Build hourly payload (1h + 4h)
+        env:
+          POLYGON_API_KEY:   ${{ secrets.POLYGON_API_KEY }}
+          HOUR_LOOKBACK_DAYS: ${{ env.HOUR_LOOKBACK_DAYS }}
+          H4_LOOKBACK_DAYS:   ${{ env.H4_LOOKBACK_DAYS }}
+          EMA_FAST:           ${{ env.EMA_FAST }}
+          EMA_SLOW:           ${{ env.EMA_SLOW }}
+          VOL_FAST:           ${{ env.VOL_FAST }}
+          VOL_SLOW:           ${{ env.VOL_SLOW }}
+        run: |
+          set -euo pipefail
+          python -u scripts/make_dashboard_hourly.py \
+            --source "data/outlook_source.json" \
+            --out    "data/outlook_hourly.json"
+
+      # 4) Optional Lux hook (safe)
+      - name: Compute Lux strategy (1h)
+        run: |
+          set -euo pipefail
+          python -u scripts/compute_trend_hourly.py || true
+
+      # 5) Ensure minimum signals
+      - name: Ensure 1h signals (safe)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, datetime
+          p="data/outlook_hourly.json"
+          j=json.load(open(p,"r",encoding="utf-8"))
+          def now(): return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+          hourly=j.get("hourly") or {}
+          sigs=hourly.get("signals") or {}
+          s=sigs.get("sigOverall1h") or {}
+          s.setdefault("state",(hourly.get("overall1h") or {}).get("state","neutral"))
+          s.setdefault("lastChanged", now())
+          sigs["sigOverall1h"]=s
+          hourly["signals"]=sigs
+          j["hourly"]=hourly
+          json.dump(j,open(p,"w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
+          PY
+
+      # 6) Validate payload
+      - name: Validate required keys
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,sys
+          j=json.load(open("data/outlook_hourly.json","r",encoding="utf-8"))
+          m=j.get("metrics") or {}
+          need=("breadth_1h_pct","momentum_1h_pct","squeeze_1h_pct","liquidity_1h","volatility_1h_pct")
+          miss=[k for k in need if k not in m]
+          sc=j.get("sectorCards") or []
+          if miss or not isinstance(sc,list) or len(sc)!=11:
+              print("missing:", miss, "len(sectorCards)=",len(sc)); sys.exit(1)
+          print("OK metrics & sectorCards")
+          PY
+
+      # 7) Heartbeat used in diff
+      - name: Write heartbeat
+        run: |
+          set -euo pipefail
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_1h.txt
+          cat data/heartbeat_1h.txt
+
+      # 8) Diff remote vs local
+      - name: Detect change
+        id: diff
+        run: |
+          set -euo pipefail
+          CHANGED="true"
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
+            git show "origin/${LIVE_BRANCH}:data/outlook_hourly.json" > /tmp/prev.json 2>/dev/null || true
+            git show "origin/${LIVE_BRANCH}:data/heartbeat_1h.txt"  > /tmp/prev.hb   2>/dev/null || true
+            if [ -s /tmp/prev.json ] && cmp -s /tmp/prev.json data/outlook_hourly.json; then
+              if [ -s /tmp/prev.hb ] && cmp -s /tmp/prev.hb data/heartbeat_1h.txt; then
+                CHANGED="false"
+              fi
+            fi
+          fi
+          if [ "${FORCE_PUBLISH}" = "true" ]; then CHANGED="true"; fi
+          echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "::notice:: changed=${CHANGED}"
+
+      # 9) Publish live branch (safe)
+      - name: Publish live branch (safe)
+        if: ${{ steps.diff.outputs.changed == 'true' }}
+        run: |
+          set -euo pipefail
+
+          echo "Stage artifacts to external temp dir…"
+          TMP_DIR="$(mktemp -d)"
+          cp -f data/outlook_hourly.json  "${TMP_DIR}/outlook_hourly.json"
+          [ -f data/outlook_source.json ] && cp -f data/outlook_source.json "${TMP_DIR}/outlook_source.json" || true
+          cp -f data/heartbeat_1h.txt    "${TMP_DIR}/heartbeat_1h.txt"
+
+          echo "Configure git identity…"
+          git config user.email "user@local"
+          git config user.name  "CI Bot"
+
+          echo "Fetch remote branch (if exists)…"
+          git fetch --depth=1 origin "${LIVE_BRANCH}" || true
+
+          echo "Clean working tree before checkout…"
+          git rm -r --cached . 2>/dev/null || true
+          git reset --hard
+          git clean -fdx
+
+          echo "Checkout or create ${LIVE_BRANCH}…"
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
+          else
+            git checkout -B "${LIVE_BRANCH}"
+          fi
+          git branch --set-upstream-to="origin/${LIVE_BRANCH}" "${LIVE_BRANCH}" || true
+
+          echo "Restore files from temp -> data/…"
+          mkdir -p data
+          mv "${TMP_DIR}/outlook_hourly.json" data/outlook_hourly.json
+          [ -f "${TMP_DIR}/outlook_source.json" ] && mv "${TMP_DIR}/outlook_source.json" data/outlook_source.json || true
+          mv "${TMP_DIR}/heartbeat_1h.txt" data/heartbeat_1h.txt
+
+          echo "Stage and commit…"
+          git add -f data/outlook_hourly.json
+          [ -f data/outlook_source.json ] && git add -f data/outlook_source.json || true
+          git add -f data/heartbeat_1h.txt
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "hourly publish ${START_TS}"
+          echo "Push to origin/${LIVE_BRANCH}…"
+          git push origin "${LIVE_BRANCH}"
+
+      - name: Done
+        run: |
+          echo "::notice:: hourly job completed"

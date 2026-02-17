@@ -1,0 +1,36 @@
+symbol,degree,tf,wave,kind,datetime_az,price
+SPY,primary,1d,W1,HIGH,2025-05-19 11:00,589.62
+SPY,primary,1d,W1,LOW,2025-05-27 11:00,574.33
+SPY,primary,1d,W4,LOW,2025-11-21 10:00,655.52
+SPY,primary,1d,W4,HIGH,2025-12-29 11:00,687.24
+SPY,primary,1d,MARK,W1,2025-05-19 11:00,590.57
+SPY,primary,1d,MARK,W2,2025-05-27 11:00,573.24
+SPY,primary,1d,MARK,W3,2025-10-29 11:00,687.24
+SPY,primary,1d,MARK,W4,2025-11-21 10:00,655.62
+
+SPY,intermediate,1h,W1,LOW,2025-12-19 11:00,672.68
+SPY,intermediate,1h,W1,HIGH,2026-01-28 06:00,698.24
+SPY,intermediate,1h,W4,LOW,2026-02-06 08:00,676.90
+SPY,intermediate,1h,W4,HIGH,2026-01-28 06:00,698.24
+SPY,intermediate,1h,MARK,W1,2025-12-11 08:00,688.94
+SPY,intermediate,1h,MARK,W2,2025-12-19 11:00,672.68
+SPY,intermediate,1h,MARK,W3,2026-01-28 06:00,698.24
+SPY,intermediate,1h,MARK,W4,2026-02-06 08:00,676.90
+
+SPY,minor,1h,W1,LOW,2026-02-06 10:00,677.10
+SPY,minor,1h,W1,HIGH,2026-02-11 07:00,697.06
+SPY,minor,1h,W4,LOW,,
+SPY,minor,1h,W4,HIGH,,
+SPY,minor,1h,MARK,W1,2026-02-11 07:00,697.06
+SPY,minor,1h,MARK,W2,,
+SPY,minor,1h,MARK,W3,,
+SPY,minor,1h,MARK,W4,,
+
+SPY,minute,10m,W1,LOW,,
+SPY,minute,10m,W1,HIGH,,
+SPY,minute,10m,W4,LOW,,
+SPY,minute,10m,W4,HIGH,,
+SPY,minute,10m,MARK,W1,,
+SPY,minute,10m,MARK,W2,,
+SPY,minute,10m,MARK,W3,,
+SPY,minute,10m,MARK,W4,,
