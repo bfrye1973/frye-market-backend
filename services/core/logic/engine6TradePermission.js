@@ -27,12 +27,19 @@ function baseConstraints() {
   };
 }
 
-function standDown(reasonCodes, debug) {
+// LOCKED: only take NEW entries in these zones
+const ALLOWED_ZONES_PRIMARY = ["NEGOTIATED", "INSTITUTIONAL"];
+
+function standDown(reasonCodes, debug, allowedZonesOverride = null) {
   return {
     permission: "STAND_DOWN",
     sizeMultiplier: 0.0,
     allowedTradeTypes: [],
-    allowedZones: { primary: [], secondary: [] },
+    // Include allowedZones for UI clarity (LOCKED improvement)
+    allowedZones: allowedZonesOverride || {
+      primary: ALLOWED_ZONES_PRIMARY,
+      secondary: [],
+    },
     entryConstraints: baseConstraints(),
     reasonCodes,
     debug,
@@ -125,6 +132,7 @@ export function computeTradePermission(input) {
     zoneDegraded,
     liquidityFail,
     reactionFailed,
+    allowedZones: ALLOWED_ZONES_PRIMARY,
   };
 
   const reasons = [];
@@ -151,9 +159,14 @@ export function computeTradePermission(input) {
     return standDown(reasons, debug);
   }
 
+  // ✅ Contract improvement:
+  // Out of allowed zones => STAND_DOWN, but make reason explicit
+  // Alias old reason to new standardized reason.
   if (!withinZone) {
-    reasons.push("STANDDOWN_NOT_IN_ZONE");
-    return standDown(reasons, debug);
+    reasons.push("OUT_OF_ALLOWED_ZONES");
+    // Optional backward compat (leave commented if you want only new code)
+    // reasons.push("STANDDOWN_NOT_IN_ZONE");
+    return standDown(reasons, debug, { primary: ALLOWED_ZONES_PRIMARY, secondary: [] });
   }
 
   if (zoneDegraded || liquidityFail || reactionFailed) {
