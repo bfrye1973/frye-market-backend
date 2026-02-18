@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_30m.py (R2 — True 30m Bridge, STRUCTURE TIERS)
+Ferrari Dashboard — make_dashboard_30m.py (R3 — True 30m Bridge, STRUCTURE TIERS + RECLAIM TOL)
 
 Intent (locked by user):
 - 30m is a TRUE bridge timeframe (between 10m entry and 1h regime).
-- Primary structure is EMA10/EMA20 (intuitive) with "prove it" behavior:
-    * When price is ABOVE both EMA10 & EMA20 but not yet proven/stacked → ~60 zone
-    * When price is BELOW both → bearish
+- Primary structure is EMA10/EMA20 with "prove it" behavior.
+- If price is sitting ON the EMAs (within tolerance), do NOT collapse to 0 structure.
 - Secondary is EMA8 vs EMA18 (fast feel).
-- Lux PSI is tightness (display), expansion is a soft score component.
+- Lux PSI is tightness (display); expansion is a soft score component.
 - Breadth uses sector ETFs on 30m bars (EMA10>EMA20 + last bar up).
 
 Output:
@@ -25,7 +24,7 @@ import sys
 import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 UTC = timezone.utc
 
@@ -75,12 +74,16 @@ W_SECOND  = 0.10
 LUX_CONV = 50
 LUX_LEN  = 20
 
-# Window controls
-PSI_WIN_30M = int(os.environ.get("PSI_WIN_30M", "26"))         # ~13 hours of 30m bars
-FETCH_DAYS_30M = int(os.environ.get("FETCH_DAYS_30M", "30"))   # modest history
+# Windows
+PSI_WIN_30M = int(os.environ.get("PSI_WIN_30M", "26"))
+FETCH_DAYS_30M = int(os.environ.get("FETCH_DAYS_30M", "30"))
 
 # Structure tier bonus threshold (ema10-ema20 separation %)
 EMA_GAP_BONUS_PCT = float(os.environ.get("EMA_GAP_BONUS_PCT", "0.15"))
+
+# ✅ NEW: reclaim tolerance around EMA10/EMA20 (percent)
+# If within this %, treat as "touching" the EMA for structure tiers.
+EMA_RECLAIM_TOL_PCT = float(os.environ.get("EMA_RECLAIM_TOL_PCT", "0.10"))  # 0.10% default
 
 
 def now_utc_iso() -> str:
@@ -98,7 +101,7 @@ def pct(a: float, b: float) -> float:
 def fetch_json(url: str, timeout: int = 30) -> dict:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "make-dashboard/30m/2.0", "Cache-Control": "no-store"},
+        headers={"User-Agent": "make-dashboard/30m/3.0", "Cache-Control": "no-store"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -174,14 +177,12 @@ def tv_smi_and_signal(H: List[float], L: List[float], C: List[float],
     n = len(C)
     if n < max(lengthK, lengthD, lengthEMA) + 5:
         return [], []
-
     HH: List[float] = []
     LL: List[float] = []
     for i in range(n):
         i0 = max(0, i - (lengthK - 1))
         HH.append(max(H[i0:i+1]))
         LL.append(min(L[i0:i+1]))
-
     rangeHL = [HH[i] - LL[i] for i in range(n)]
     rel = [C[i] - (HH[i] + LL[i]) / 2.0 for i in range(n)]
 
@@ -266,11 +267,9 @@ def main():
         print("[fatal] insufficient SPY 30m bars", file=sys.stderr)
         sys.exit(2)
 
-    O = [b["open"] for b in spy]
     H = [b["high"] for b in spy]
     L = [b["low"] for b in spy]
     C = [b["close"] for b in spy]
-    V = [b["volume"] for b in spy]
 
     # EMAs
     e10_series = ema_series(C, 10)
@@ -282,17 +281,20 @@ def main():
     e20 = float(e20_series[-1])
     close = float(C[-1])
 
-    # EMA posture for metrics (still useful)
+    # EMA posture (for metrics)
     ema10_dist_pct = 0.0 if e10 == 0 else 100.0 * (close - e10) / e10
     ema10_posture = posture_from_dist(ema10_dist_pct, FULL_EMA_DIST)
 
-    # --------- STRUCTURE TIERS (the fix) ----------
-    above_10 = close > e10
-    above_20 = close > e20
+    # --------- STRUCTURE TIERS + RECLAIM TOL ----------
+    tol10 = abs(ema10_dist_pct) <= EMA_RECLAIM_TOL_PCT
+    ema20_dist_pct = 0.0 if e20 == 0 else 100.0 * (close - e20) / e20
+    tol20 = abs(ema20_dist_pct) <= EMA_RECLAIM_TOL_PCT
+
+    above_10 = (close > e10) or tol10
+    above_20 = (close > e20) or tol20
     stacked  = e10 > e20
     ema_gap_pct = (abs((e10 - e20) / e20) * 100.0) if e20 != 0 else 0.0
 
-    # Tiered structure score (user-friendly "prove it" logic)
     if (not above_10) and (not above_20):
         structure_score = 0.0
         structure_tier = "below_both"
@@ -309,7 +311,6 @@ def main():
         structure_score = 50.0
         structure_tier = "unknown"
 
-    # Bonus if separation expanding (only once stacked + holding)
     if structure_score >= 80.0 and ema_gap_pct > EMA_GAP_BONUS_PCT:
         structure_score = 100.0
         structure_tier = "above_both_stacked_gap"
@@ -317,8 +318,7 @@ def main():
     structure_score = float(clamp(structure_score, 0.0, 100.0))
 
     # EMA sign for state gate (conservative)
-    # bull only when above both and stacked; bear only when below both and not stacked
-    if above_10 and above_20 and stacked:
+    if above_10 and above_20 and stacked and (close > e10) and (close > e20):
         ema_sign = 1
     elif (not above_10) and (not above_20) and (not stacked):
         ema_sign = -1
@@ -326,7 +326,7 @@ def main():
         ema_sign = 0
 
     # --------- SECONDARY fast feel (EMA8 vs EMA18) ----------
-    ema818_gap_pct = 0.0 if e18_series[-1] == 0 else 100.0 * (float(e8_series[-1]) - float(e18_series[-1])) / float(e18_series[-1])
+    ema818_gap_pct = 0.0 if float(e18_series[-1]) == 0 else 100.0 * (float(e8_series[-1]) - float(e18_series[-1])) / float(e18_series[-1])
     secondary_posture = posture_from_dist(ema818_gap_pct, FULL_EMA_DIST)
 
     # --------- SMI ----------
@@ -342,25 +342,24 @@ def main():
         elif smi_val < sig_val:
             smi_bonus = -SMI_BONUS_SCORE_MAX
 
-    # Momentum combo uses STRUCTURE TIERS as primary driver
     momentum_combo = clamp(
         W_PRIMARY * structure_score + W_SMI * smi_pct + W_SECOND * secondary_posture,
         0.0, 100.0
     )
 
-    # --------- Lux PSI (tightness display, expansion score) ----------
+    # --------- Lux PSI ----------
     Cw = C[-PSI_WIN_30M:] if len(C) > PSI_WIN_30M else C
     psi = lux_psi_from_closes(Cw, conv=LUX_CONV, length=LUX_LEN)
     squeeze_psi = float(psi) if isinstance(psi, (int, float)) else 50.0
     squeeze_psi = float(clamp(squeeze_psi, 0.0, 100.0))
     squeeze_exp = float(clamp(100.0 - squeeze_psi, 0.0, 100.0))
 
-    # --------- Breadth from sector ETFs on 30m ----------
+    # --------- Breadth ----------
     align_pct, barup_pct, etf_cards = compute_breadth_sector_etfs_30m(key)
     breadth_pct = float(clamp(0.60 * align_pct + 0.40 * barup_pct, 0.0, 100.0))
     risk_on = float(riskon_from_alignment(etf_cards))
 
-    # --------- Final 30m score (structure-first) ----------
+    # --------- Final score ----------
     score_raw = (
         W_STRUCT  * structure_score +
         W_MOM     * momentum_combo +
@@ -369,13 +368,12 @@ def main():
         smi_bonus
     )
     score = float(clamp(score_raw, 0.0, 100.0))
-
     state = "bull" if (ema_sign > 0 and score >= 60.0) else ("bear" if (ema_sign < 0 and score < 60.0) else "neutral")
 
     updated = now_utc_iso()
 
     out = {
-        "version": "r30m-v2-truebridge-structuretiers",
+        "version": "r30m-v3-truebridge-structuretiers-reclaimtol",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated,
         "metrics": {
@@ -389,6 +387,7 @@ def main():
             "ema_gap_10_20_pct": round(float(ema_gap_pct), 4),
             "structure_tier": structure_tier,
             "structure_score_30m": round(float(structure_score), 2),
+            "ema_reclaim_tol_pct": float(EMA_RECLAIM_TOL_PCT),
 
             "ema818_gap_pct": round(float(ema818_gap_pct), 4),
             "ema8_ema18_posture_30m_pct": round(float(secondary_posture), 2),
@@ -425,9 +424,7 @@ def main():
             }
         },
         "sectorEtfCards": etf_cards,
-        "meta": {
-            "after_hours": False,
-        }
+        "meta": {"after_hours": False},
     }
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
@@ -436,7 +433,7 @@ def main():
 
     print(
         f"[30m] score={score:.2f} state={state} tier={structure_tier} struct={structure_score:.1f} "
-        f"ema10Dist={ema10_dist_pct:.3f}% gap10_20={ema_gap_pct:.3f}% breadth={breadth_pct:.1f} psi={squeeze_psi:.1f}",
+        f"ema10Dist={ema10_dist_pct:.3f}% tol={EMA_RECLAIM_TOL_PCT:.2f}% breadth={breadth_pct:.1f} psi={squeeze_psi:.1f}",
         flush=True,
     )
 
