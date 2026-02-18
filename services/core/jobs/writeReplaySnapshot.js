@@ -73,7 +73,10 @@ function selfBaseUrl() {
 // Build Engine 6 input from decision snapshot (LOCKED mapping)
 // -------------------------
 function buildEngine6InputFromDecision({ symbol, tf, decision }) {
-  // Engine 6 requires engine5.total + engine5.invalid (LOCKED from teammate)
+  // ----- LOCKED CONFIG -----
+  const BUFFER_PTS = 0.25; // ✅ your choice
+
+  // Engine 6 required inputs
   const total = decision?.scores?.total;
   const invalid = Boolean(decision?.invalid);
 
@@ -83,20 +86,63 @@ function buildEngine6InputFromDecision({ symbol, tf, decision }) {
     reasonCodes: Array.isArray(decision?.reasonCodes) ? decision.reasonCodes : [],
   };
 
-  // Zone context (optional but practically required)
-  // We derive withinZone from decision.location.state when available.
-  const locState = decision?.location?.state || null;
-  const withinZone = locState === "PRICE_IN_GOLDEN_RULE" || locState === "PRICE_IN_ZONE" || false;
+  // Current price
+  const price = typeof decision?.price === "number" ? decision.price : null;
+
+  // Allowed zones from Engine 1 context (ACTIVE truth)
+  const e1 = decision?.context?.engine1 || {};
+  const negotiated = e1?.active?.negotiated || null;
+  const institutional = e1?.active?.institutional || null;
+
+  function inRange(p, lo, hi, buf) {
+    if (typeof p !== "number") return false;
+    if (typeof lo !== "number" || typeof hi !== "number") return false;
+    const low = Math.min(lo, hi) - buf;
+    const high = Math.max(lo, hi) + buf;
+    return p >= low && p <= high;
+  }
+
+  const inNegotiated = negotiated
+    ? inRange(price, negotiated.lo, negotiated.hi, BUFFER_PTS)
+    : false;
+
+  const inInstitutional = institutional
+    ? inRange(price, institutional.lo, institutional.hi, BUFFER_PTS)
+    : false;
+
+  // ✅ Your rule: trades only in NEGOTIATED or INSTITUTIONAL (with buffer)
+  const withinZone = Boolean(inNegotiated || inInstitutional);
+
+  // For UI/debug clarity
+  const zoneType = inNegotiated
+    ? "NEGOTIATED"
+    : inInstitutional
+    ? "INSTITUTIONAL"
+    : "NONE";
 
   const zoneContext = {
     withinZone,
-    zoneType: decision?.location?.zoneType || decision?.flags?.zoneType || "UNKNOWN",
+    zoneType,
+    bufferPts: BUFFER_PTS,
     flags: {
       degraded: false,
       liquidityFail: Boolean(decision?.flags?.liquidityTrap),
       reactionFailed: false,
     },
   };
+
+  const intent = { action: "NEW_ENTRY" };
+
+  return {
+    symbol,
+    tf,
+    asOf: new Date().toISOString(),
+    engine5,
+    marketMeter: null, // v1 defaults are OK
+    zoneContext,
+    intent,
+  };
+}
 
   const intent = { action: "NEW_ENTRY" };
 
