@@ -92,9 +92,17 @@ function buildEngine6InputFromDecision({ symbol, tf, decision }) {
 
   const price = typeof decision?.price === "number" ? decision.price : null;
 
-  const e1 = decision?.context?.engine1 || {};
-  const negotiated = e1?.active?.negotiated || null;
-  const institutional = e1?.active?.institutional || null;
+  const ctx = decision?.context || {};
+  const e1 = ctx.engine1 || {};
+  const active = e1.active || {};
+
+  // Primary: engine1.active.*
+  const negotiated = active.negotiated || null;
+  const institutional =
+    active.institutional ||
+    // Fallback: sometimes institutional is the "institutionalContainer" style
+    ctx.institutionalContainer ||
+    null;
 
   function inRange(p, lo, hi, buf) {
     if (typeof p !== "number") return false;
@@ -124,6 +132,7 @@ function buildEngine6InputFromDecision({ symbol, tf, decision }) {
     withinZone,
     zoneType,
     bufferPts: BUFFER_PTS,
+    source: institutional ? "engine1.active.institutional" : "none",
     flags: {
       degraded: false,
       liquidityFail: Boolean(decision?.flags?.liquidityTrap),
