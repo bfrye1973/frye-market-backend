@@ -10,9 +10,10 @@
 // - Presets by mode: scalp | swing | long
 // - Calls computeReactionQuality() (no engine math changes)
 //
-// NEW (LOCKED): ARMED/STAGE for ALL modes
-// - armed: true when in-zone + tight compression
-// - stage: IDLE | ARMED | TRIGGERED | CONFIRMED
+// NEW (DIAGNOSTICS ONLY):
+// - Adds C-level breakdown fields:
+//   zonePosition, rejectionCandidate, rejectionReasons, nextConfirmDown/Up
+//   candle anatomy diagnostics: upperWick, body, range, closeBackInsideZone
 
 import express from "express";
 import { computeReactionQuality } from "../logic/reactionQualityEngine.js";
@@ -104,10 +105,9 @@ function resolveMode({ mode, strategyId }) {
 }
 
 function presetOpts(mode) {
-  // lookbackBars MUST be >= 10 (computeReactionQuality() guard)
   if (mode === "scalp") return { lookbackBars: 12, windowBars: 2, breakDepthAtr: 0.25, reclaimWindowBars: 1 };
   if (mode === "long")  return { lookbackBars: 25, windowBars: 10, breakDepthAtr: 0.25, reclaimWindowBars: 5 };
-  return { lookbackBars: 15, windowBars: 6, breakDepthAtr: 0.25, reclaimWindowBars: 3 }; // swing
+  return { lookbackBars: 15, windowBars: 6, breakDepthAtr: 0.25, reclaimWindowBars: 3 };
 }
 
 /* -------------------- ATR -------------------- */
@@ -140,16 +140,16 @@ function compressionN(bars, atr, n) {
 }
 
 function stagePreset(mode) {
-   if (mode === "scalp")
-   return {
-     compBars: 3,
-     compMax: 1.05,          // <-- KEY CHANGE
-     triggerExitBarsMax: 2,
-     confirmScore: 7.0
-   };
-  
+  if (mode === "scalp")
+    return {
+      compBars: 3,
+      compMax: 1.05,
+      triggerExitBarsMax: 2,
+      confirmScore: 7.0
+    };
+
   if (mode === "swing") return { compBars: 5, compMax: 0.45, triggerExitBarsMax: 3, confirmScore: 7.0 };
-  return { compBars: 8, compMax: 0.55, triggerExitBarsMax: 4, confirmScore: 7.0 }; // long
+  return { compBars: 8, compMax: 0.55, triggerExitBarsMax: 4, confirmScore: 7.0 };
 }
 
 function buildReasonCodes({ inZone, rqe, mode }) {
@@ -169,6 +169,71 @@ function buildReasonCodes({ inZone, rqe, mode }) {
   if (rqe?.structureState === "FAKEOUT_RECLAIM") codes.push("RECLAIM");
 
   return Array.from(new Set(codes));
+}
+
+/* -------------------- NEW: candle + rejection diagnostics -------------------- */
+
+function candleAnatomy(bar) {
+  if (!bar) return { upperWick: null, body: null, range: null };
+  const o = Number(bar.open), h = Number(bar.high), l = Number(bar.low), c = Number(bar.close);
+  if (![o, h, l, c].every(Number.isFinite)) return { upperWick: null, body: null, range: null };
+  const body = Math.abs(c - o);
+  const upperWick = h - Math.max(o, c);
+  const range = h - l;
+  return { upperWick, body, range };
+}
+
+function zonePosition(price, lo, hi) {
+  if (price == null || lo == null || hi == null) return "UNKNOWN";
+  const a = Math.min(lo, hi);
+  const b = Math.max(lo, hi);
+  const mid = (a + b) / 2;
+
+  if (price > b) return "ABOVE_ZONE";
+  if (price < a) return "BELOW_ZONE";
+
+  // Inside zone
+  const upperBand = mid + (b - mid) * 0.5; // top half of upper half
+  const lowerBand = mid - (mid - a) * 0.5;
+
+  if (price >= upperBand) return "UPPER_BAND";
+  if (price <= lowerBand) return "LOWER_BAND";
+  return "MIDLINE";
+}
+
+function buildRejectionDiagnostics({ lastBar, lo, hi }) {
+  // User-locked rule for "rejection begins":
+  // A) upperWick >= body
+  // B) close back inside zone (attempt above + close <= hi)
+  const { upperWick, body, range } = candleAnatomy(lastBar);
+
+  const h = lastBar ? Number(lastBar.high) : null;
+  const c = lastBar ? Number(lastBar.close) : null;
+
+  const attemptedAbove = (h != null && hi != null) ? (h > hi) : false;
+  const closeBackInside = (c != null && hi != null) ? (c <= hi) : false;
+
+  const wickRule = (upperWick != null && body != null) ? (upperWick >= body) : false;
+
+  const rejectionCandidate = Boolean(wickRule && attemptedAbove && closeBackInside);
+
+  const rejectionReasons = [];
+  if (wickRule) rejectionReasons.push("UPPER_WICK_GE_BODY");
+  if (attemptedAbove) rejectionReasons.push("ATTEMPTED_ABOVE_ZONE_HI");
+  if (closeBackInside) rejectionReasons.push("CLOSE_BACK_INSIDE_ZONE");
+
+  // Next confirms (simple, readable)
+  const a = Math.min(lo, hi);
+  const b = Math.max(lo, hi);
+  const mid = (a + b) / 2;
+
+  return {
+    candle: { upperWick, body, range, attemptedAbove, closeBackInside },
+    rejectionCandidate,
+    rejectionReasons,
+    nextConfirmDown: `Confirm rejection if price breaks below midline ${mid.toFixed(2)} then fails to reclaim`,
+    nextConfirmUp: `Confirm acceptance if price holds above zoneHi ${b.toFixed(2)} after breakout`,
+  };
 }
 
 /* -------------------- route -------------------- */
@@ -327,9 +392,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       stage = "TRIGGERED";
     }
 
-    // CONFIRMED:
-    // - SCALP requires prior ARM/TRIGGER
-    // - SWING/LONG can confirm directly
     if (
       Number.isFinite(rqe.reactionScore) &&
       rqe.reactionScore >= sp.confirmScore &&
@@ -338,7 +400,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       stage = "CONFIRMED";
     }
 
-    // HARD GATE: if not in zone, only TRIGGERED may remain
     if (!inZone && stage !== "TRIGGERED") {
       armed = false;
       stage = "IDLE";
@@ -346,21 +407,23 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const reasonCodes = buildReasonCodes({ inZone, rqe, mode: chosenMode });
 
-    // GOLDEN RULE: reactionScore is 0 when NOT_IN_ZONE
     const reactionScoreOut = inZone ? rqe.reactionScore : 0;
 
-    // Alias FAKEOUT_RECLAIM -> RECLAIM for UI
     const structureStateOut = rqe.structureState === "FAKEOUT_RECLAIM" ? "RECLAIM" : rqe.structureState;
+
+    // --------- NEW: C-level diagnostics (no math changes) ----------
+    const pos = zonePosition(currentPrice, lo, hi);
+    const rej = buildRejectionDiagnostics({ lastBar: bars[bars.length - 1], lo, hi });
 
     return res.json({
       ok: true,
       invalid: false,
 
+      // LOCKED fields
       reactionScore: reactionScoreOut,
       structureState: structureStateOut,
       reasonCodes,
-
-      zone,
+      zone: zone,
 
       rejectionSpeed,
       displacementAtr,
@@ -376,6 +439,22 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       compression: comp,
 
       mode: chosenMode,
+
+      // NEW fields (safe additions)
+      zonePosition: pos,
+      rejectionCandidate: rej.rejectionCandidate,
+      rejectionReasons: rej.rejectionReasons,
+      nextConfirmDown: rej.nextConfirmDown,
+      nextConfirmUp: rej.nextConfirmUp,
+      diagnostics: {
+        candle: rej.candle,
+        zone: {
+          lo,
+          hi,
+          mid: ((Math.min(lo, hi) + Math.max(lo, hi)) / 2),
+          padded: { lo: loPad, hi: hiPad, pad },
+        },
+      },
     });
 
   } catch (err) {
