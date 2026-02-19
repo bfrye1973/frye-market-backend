@@ -123,7 +123,7 @@ async function fetchJson(url, { timeoutMs = 12000 } = {}) {
 
 async function fetchLastCloseAsPrice({ baseUrl, symbol, tf }) {
   // Use a small limit. /ohlc returns array of bars.
-  const url = `${baseUrl}/api/v1/ohlc?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(tf)}&limit=5`;
+  const url = `${baseUrl}/api/v1/ohlc?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}&limit=5`;
   const resp = await fetchJson(url);
   if (!resp.ok || !Array.isArray(resp.json) || resp.json.length === 0) return null;
 
