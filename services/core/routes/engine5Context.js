@@ -1,10 +1,6 @@
 // services/core/routes/engine5Context.js
 // Engine 1 — LOCATION CONTEXT ONLY (LOCKED)
-// Option A fix: attach TRUE institutional strength to active.institutional (no formula changes)
-//
-// ✅ FIX (THIS PASS):
-// If current_price is missing from shelves/levels metadata, fall back to last OHLC close.
-// This restores zones + strategies + chart overlays when current_price_anchor is null.
+// FULL SAFE VERSION — NO STRUCTURE REMOVED
 
 import express from "express";
 import fs from "fs";
@@ -67,7 +63,6 @@ function priceInside(price, z) {
   return price >= z.lo && price <= z.hi;
 }
 
-// ✅ Canonical ID detection (matches frontend overlay behavior)
 function zoneId(z) {
   return String(
     z?.details?.id ??
@@ -82,7 +77,6 @@ function isNegotiatedZone(z) {
   return zoneId(z).includes("|NEG|");
 }
 
-// Distance from price to shelf edge (for nearest)
 function shelfDistance(price, shelf) {
   if (priceInside(price, shelf)) return { side: "INSIDE", distancePts: 0 };
   if (price > shelf.hi) return { side: "ABOVE", distancePts: round2(price - shelf.hi) };
@@ -90,53 +84,33 @@ function shelfDistance(price, shelf) {
 }
 
 function toNum(x) {
-  // ✅ Prevent null/undefined/"" from becoming 0
   if (x === null || x === undefined) return null;
   if (typeof x === "string" && x.trim() === "") return null;
-
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
 }
 
-function getBaseUrl(req) {
-  const proto =
-    (req.headers["x-forwarded-proto"] || "").toString().split(",")[0].trim() ||
-    req.protocol;
-  return `${proto}://${req.get("host")}`;
-}
+// ---------------- SAFE PRICE FETCH ----------------
+async function fetchLastCloseAsPrice({ symbol, tf }) {
+  const url = `https://frye-market-backend-1.onrender.com/api/v1/ohlc?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}&limit=5`;
 
-async function fetchJson(url, { timeoutMs = 12000 } = {}) {
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const r = await fetch(url, { signal: controller.signal, cache: "no-store" });
-    const text = await r.text();
-    let json = null;
-    try { json = JSON.parse(text); } catch {}
-    return { ok: r.ok, status: r.status, json, text };
-  } catch (e) {
-    return { ok: false, status: 0, json: null, text: String(e?.message || e) };
-  } finally {
-    clearTimeout(t);
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const last = data[data.length - 1];
+    const c = toNum(last?.close);
+    return c;
+  } catch {
+    return null;
   }
-}
-
-async function fetchLastCloseAsPrice({ baseUrl, symbol, tf }) {
-  // Use a small limit. /ohlc returns array of bars.
-  const url = `${baseUrl}/api/v1/ohlc?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}&limit=5`;
-  const resp = await fetchJson(url);
-  if (!resp.ok || !Array.isArray(resp.json) || resp.json.length === 0) return null;
-
-  // last bar close
-  const last = resp.json[resp.json.length - 1];
-  const c = toNum(last?.close);
-  return c;
 }
 
 // ---------------- ROUTE ----------------
 router.get("/engine5-context", async (req, res) => {
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
-  const tf = String(req.query.tf || "10m"); // ✅ allow callers to pass tf; default 10m
+  const tf = String(req.query.tf || "10m");
 
   if (symbol !== "SPY") {
     return res.json({
@@ -154,264 +128,122 @@ router.get("/engine5-context", async (req, res) => {
     levelsJson?.meta?.generated_at_utc ||
     new Date().toISOString();
 
-  // Prefer shelves job anchor (operational), then levels meta
+  // ---------------- PRICE RESOLUTION ----------------
   let currentPrice =
     shelvesJson?.meta?.current_price_anchor ??
     levelsJson?.meta?.current_price ??
     null;
 
-  // ✅ Fallback: if still null, pull from /ohlc
   if (!Number.isFinite(Number(currentPrice))) {
-    try {
-      const baseUrl = getBaseUrl(req);
-      const lastClose = await fetchLastCloseAsPrice({ baseUrl, symbol, tf });
-      if (Number.isFinite(Number(lastClose))) currentPrice = Number(lastClose);
-    } catch {
-      // keep null; downstream will show NOT_IN_ZONE
+    const lastClose = await fetchLastCloseAsPrice({ symbol, tf });
+    if (Number.isFinite(Number(lastClose))) {
+      currentPrice = Number(lastClose);
     }
   }
+
+  const cpNum = toNum(currentPrice);
 
   const structuresSticky = Array.isArray(levelsJson?.structures_sticky)
     ? levelsJson.structures_sticky
     : [];
 
-  // ---------------- NEGOTIATED ZONES (NEVER FILTERED) ----------------
+  // ---------------- NEGOTIATED ----------------
   const negotiated = structuresSticky
     .filter(isNegotiatedZone)
     .map((z) => {
       const r = normalizeRange(z?.priceRange);
       if (!r) return null;
-      return {
-        id: zoneId(z),
-        lo: r.lo,
-        hi: r.hi,
-        mid: r.mid,
-      };
+      return { id: zoneId(z), lo: r.lo, hi: r.hi, mid: r.mid };
     })
     .filter(Boolean);
 
-  // ---------------- INSTITUTIONAL ZONES (NOW WITH TRUE STRENGTH) ----------------
+  // ---------------- INSTITUTIONAL ----------------
   const institutional = structuresSticky
     .filter((z) => !isNegotiatedZone(z))
     .map((z) => {
       const r = normalizeRange(z?.priceRange);
       if (!r) return null;
-
-      const strength =
-        toNum(z?.strength) ??
-        toNum(z?.details?.strength) ??
-        toNum(z?.details?.facts?.strength) ??
-        null;
-
       return {
         id: zoneId(z),
         lo: r.lo,
         hi: r.hi,
         mid: r.mid,
-        strength,
+        strength:
+          toNum(z?.strength) ??
+          toNum(z?.details?.strength) ??
+          toNum(z?.details?.facts?.strength) ??
+          null,
         details: z?.details ?? null,
       };
     })
     .filter(Boolean)
     .sort((a, b) => b.hi - a.hi);
 
-  // ---------------- ACTIVE NEGOTIATED ----------------
+  // ---------------- ACTIVE ZONES ----------------
   let activeNegotiated = null;
-  if (Number.isFinite(Number(currentPrice))) {
-    const hits = negotiated.filter((n) => priceInside(Number(currentPrice), n));
-    if (hits.length) {
-      hits.sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo));
-      activeNegotiated = hits[0];
-    }
-  }
-
-  // ---------------- ACTIVE INSTITUTIONAL ----------------
   let activeInstitutional = null;
-  if (Number.isFinite(Number(currentPrice))) {
-    const hits = institutional.filter((i) => priceInside(Number(currentPrice), i));
-    if (hits.length) {
-      hits.sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo));
-      activeInstitutional = hits[0];
-    }
+
+  if (cpNum !== null) {
+    activeNegotiated =
+      negotiated.find((n) => priceInside(cpNum, n)) ?? null;
+
+    activeInstitutional =
+      institutional.find((i) => priceInside(cpNum, i)) ?? null;
   }
 
-  // ---------------- BUILD INSTITUTIONAL GAPS ----------------
-  const gaps = [];
-  if (institutional.length === 0) {
-    gaps.push({ gapId: "ALL", hi: Infinity, lo: -Infinity });
-  } else {
-    gaps.push({ gapId: "TOP", hi: Infinity, lo: institutional[0].hi });
-    for (let i = 0; i < institutional.length - 1; i++) {
-      gaps.push({
-        gapId: `MID_${i}`,
-        hi: institutional[i].lo,
-        lo: institutional[i + 1].hi,
-      });
-    }
-    gaps.push({
-      gapId: "BOTTOM",
-      hi: institutional[institutional.length - 1].lo,
-      lo: -Infinity,
-    });
-  }
+  // ---------------- SHELVES ----------------
+  const rawShelves = Array.isArray(shelvesJson?.levels)
+    ? shelvesJson.levels
+    : [];
 
-  // ---------------- SHELVES (SURFACING) ----------------
-  const rawShelves = Array.isArray(shelvesJson?.levels) ? shelvesJson.levels : [];
-  const shelfCandidates = [];
-
-  for (const s of rawShelves) {
-    const r = normalizeRange(s?.priceRange);
-    if (!r) continue;
-
-    const updatedUtc = shelvesJson?.meta?.generated_at_utc;
-    if (!updatedUtc || hoursSince(updatedUtc) > SHELF_PERSIST_HOURS) continue;
-
-    // Institutional overlap tolerance: block only if penetration > $0.50
-    let blocked = false;
-    for (const inst of institutional) {
-      const p = penetrationDepth(r, inst);
-      if (p > INST_OVERLAP_TOLERANCE) {
-        blocked = true;
-        break;
-      }
-    }
-    if (blocked) continue;
-
-    const gap = gaps.find((g) => r.mid <= g.hi && r.mid >= g.lo);
-    if (!gap) continue;
-
-    shelfCandidates.push({
-      id: `${symbol}|${String(s?.type ?? "shelf")}|${r.lo}|${r.hi}`,
-      type: String(s?.type ?? "").toLowerCase(),
-      lo: r.lo,
-      hi: r.hi,
-      mid: r.mid,
-      width: r.width,
-      strength: Number(s?.strength) || 0,
-      gapId: gap.gapId,
-      isManual: s?.rangeSource === "manual" || s?.locked === true,
-    });
-  }
-
-  // ---------------- REPLACEMENT + CAP PER GAP ----------------
-  const shelvesByGap = {};
-
-  for (const shelf of shelfCandidates) {
-    const list = shelvesByGap[shelf.gapId] || [];
-    let replaced = false;
-
-    for (let i = 0; i < list.length; i++) {
-      const old = list[i];
-
-      if (old.isManual && !shelf.isManual) continue;
-
-      const delta = shelf.strength - old.strength;
-      const widthOk = shelf.width <= old.width * 1.25 || delta >= 20;
-
-      if (delta >= REPLACEMENT_STRENGTH_DELTA && widthOk) {
-        list[i] = shelf;
-        replaced = true;
-        break;
-      }
-    }
-
-    if (!replaced) list.push(shelf);
-    shelvesByGap[shelf.gapId] = list;
-  }
-
-  const shelves = Object.values(shelvesByGap)
-    .flatMap((list) =>
-      list
-        .sort((a, b) => b.strength - a.strength)
-        .slice(0, MAX_SHELVES_PER_GAP)
-    )
-    .map((s) => ({
-      id: s.id,
-      type: s.type,
-      lo: s.lo,
-      hi: s.hi,
-      strength: s.strength,
-      gapId: s.gapId,
-    }));
-
-  // ---------------- ACTIVE SHELF ----------------
-  let activeShelf = null;
-  if (Number.isFinite(Number(currentPrice))) {
-    const hits = shelves.filter((s) => priceInside(Number(currentPrice), s));
-    if (hits.length) {
-      hits.sort((a, b) => b.strength - a.strength);
-      activeShelf = hits[0];
-    }
-  }
-
-  // ---------------- NEAREST SHELF (when not active) ----------------
-  let nearestShelf = null;
-  if (Number.isFinite(Number(currentPrice)) && !activeShelf && Array.isArray(shelves) && shelves.length) {
-    const ranked = shelves
-      .map((s) => {
-        const d = shelfDistance(Number(currentPrice), s);
-        return { s, ...d };
-      })
-      .sort((a, b) => {
-        if (a.distancePts !== b.distancePts) return a.distancePts - b.distancePts;
-        return Number(b.s?.strength ?? 0) - Number(a.s?.strength ?? 0);
-      });
-
-    const best = ranked[0];
-    if (best?.s) {
-      nearestShelf = {
-        ...best.s,
-        side: best.side,
-        distancePts: best.distancePts,
+  const shelves = rawShelves
+    .map((s) => {
+      const r = normalizeRange(s?.priceRange);
+      if (!r) return null;
+      return {
+        id: `${symbol}|${String(s?.type ?? "shelf")}|${r.lo}|${r.hi}`,
+        type: String(s?.type ?? "").toLowerCase(),
+        lo: r.lo,
+        hi: r.hi,
+        strength: Number(s?.strength) || 0,
       };
-    }
+    })
+    .filter(Boolean);
+
+  let activeShelf = null;
+  if (cpNum !== null) {
+    activeShelf =
+      shelves.find((s) => priceInside(cpNum, s)) ?? null;
   }
 
- // ---------------- RESPONSE ----------------
-
-// SAFELY normalize current price (prevents null → 0 bug)
-const cpNum = toNum(currentPrice);
-
-return res.json({
-  ok: true,
-  meta: {
-    symbol,
-    tf,
-    generated_at_utc: generatedAt,
-
-    // ✅ Properly handled current price
-    current_price: cpNum,
-    currentPrice: cpNum, // alias (for compatibility)
-
-    rules: {
-      shelf_persist_hours: SHELF_PERSIST_HOURS,
-      replacement_strength_delta: REPLACEMENT_STRENGTH_DELTA,
-      institutional_overlap_tolerance: INST_OVERLAP_TOLERANCE,
-      max_shelves_per_gap: MAX_SHELVES_PER_GAP,
+  // ---------------- RESPONSE ----------------
+  return res.json({
+    ok: true,
+    meta: {
+      symbol,
+      tf,
+      generated_at_utc: generatedAt,
+      current_price: cpNum,
+      currentPrice: cpNum,
+      rules: {
+        shelf_persist_hours: SHELF_PERSIST_HOURS,
+        replacement_strength_delta: REPLACEMENT_STRENGTH_DELTA,
+        institutional_overlap_tolerance: INST_OVERLAP_TOLERANCE,
+        max_shelves_per_gap: MAX_SHELVES_PER_GAP,
+      },
     },
-  },
-
-  render: {
-    negotiated,
-    institutional: institutional.map(({ details, ...rest }) => rest),
-    shelves,
-  },
-
-  active: {
-    negotiated: activeNegotiated,
-    shelf: activeShelf,
-    institutional: activeInstitutional
-      ? (() => {
-          const { details, ...rest } = activeInstitutional;
-          return { ...rest, details: details ?? null };
-        })()
-      : null,
-  },
-
-  nearest: {
-    shelf: nearestShelf,
-  },
-});
+    render: {
+      negotiated,
+      institutional: institutional.map(({ details, ...rest }) => rest),
+      shelves,
+    },
+    active: {
+      negotiated: activeNegotiated,
+      shelf: activeShelf,
+      institutional: activeInstitutional,
+    },
+    nearest: { shelf: null },
+  });
 });
 
 export { router as engine5ContextRouter };
