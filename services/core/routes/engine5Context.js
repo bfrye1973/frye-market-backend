@@ -90,6 +90,10 @@ function shelfDistance(price, shelf) {
 }
 
 function toNum(x) {
+  // ✅ Prevent null/undefined/"" from becoming 0
+  if (x === null || x === undefined) return null;
+  if (typeof x === "string" && x.trim() === "") return null;
+
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
 }
