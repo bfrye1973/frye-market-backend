@@ -1,6 +1,10 @@
 // services/core/routes/engine5Context.js
 // Engine 1 — LOCATION CONTEXT ONLY (LOCKED)
 // Option A fix: attach TRUE institutional strength to active.institutional (no formula changes)
+//
+// ✅ FIX (THIS PASS):
+// If current_price is missing from shelves/levels metadata, fall back to last OHLC close.
+// This restores zones + strategies + chart overlays when current_price_anchor is null.
 
 import express from "express";
 import fs from "fs";
@@ -90,9 +94,46 @@ function toNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
+function getBaseUrl(req) {
+  const proto =
+    (req.headers["x-forwarded-proto"] || "").toString().split(",")[0].trim() ||
+    req.protocol;
+  return `${proto}://${req.get("host")}`;
+}
+
+async function fetchJson(url, { timeoutMs = 12000 } = {}) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, { signal: controller.signal, cache: "no-store" });
+    const text = await r.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch {}
+    return { ok: r.ok, status: r.status, json, text };
+  } catch (e) {
+    return { ok: false, status: 0, json: null, text: String(e?.message || e) };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function fetchLastCloseAsPrice({ baseUrl, symbol, tf }) {
+  // Use a small limit. /ohlc returns array of bars.
+  const url = `${baseUrl}/api/v1/ohlc?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(tf)}&limit=5`;
+  const resp = await fetchJson(url);
+  if (!resp.ok || !Array.isArray(resp.json) || resp.json.length === 0) return null;
+
+  // last bar close
+  const last = resp.json[resp.json.length - 1];
+  const c = toNum(last?.close);
+  return c;
+}
+
 // ---------------- ROUTE ----------------
-router.get("/engine5-context", (req, res) => {
+router.get("/engine5-context", async (req, res) => {
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
+  const tf = String(req.query.tf || "10m"); // ✅ allow callers to pass tf; default 10m
+
   if (symbol !== "SPY") {
     return res.json({
       ok: false,
@@ -109,11 +150,22 @@ router.get("/engine5-context", (req, res) => {
     levelsJson?.meta?.generated_at_utc ||
     new Date().toISOString();
 
-  // Prefer shelves job anchor (it’s what you already use operationally)
-  const currentPrice =
+  // Prefer shelves job anchor (operational), then levels meta
+  let currentPrice =
     shelvesJson?.meta?.current_price_anchor ??
     levelsJson?.meta?.current_price ??
     null;
+
+  // ✅ Fallback: if still null, pull from /ohlc
+  if (!Number.isFinite(Number(currentPrice))) {
+    try {
+      const baseUrl = getBaseUrl(req);
+      const lastClose = await fetchLastCloseAsPrice({ baseUrl, symbol, tf });
+      if (Number.isFinite(Number(lastClose))) currentPrice = Number(lastClose);
+    } catch {
+      // keep null; downstream will show NOT_IN_ZONE
+    }
+  }
 
   const structuresSticky = Array.isArray(levelsJson?.structures_sticky)
     ? levelsJson.structures_sticky
@@ -141,7 +193,6 @@ router.get("/engine5-context", (req, res) => {
       const r = normalizeRange(z?.priceRange);
       if (!r) return null;
 
-      // ✅ Option A: carry the already-computed Engine 1 strength forward
       const strength =
         toNum(z?.strength) ??
         toNum(z?.details?.strength) ??
@@ -153,8 +204,8 @@ router.get("/engine5-context", (req, res) => {
         lo: r.lo,
         hi: r.hi,
         mid: r.mid,
-        strength, // ✅ crucial
-        details: z?.details ?? null, // keep for dead/archived facts if needed later
+        strength,
+        details: z?.details ?? null,
       };
     })
     .filter(Boolean)
@@ -162,8 +213,8 @@ router.get("/engine5-context", (req, res) => {
 
   // ---------------- ACTIVE NEGOTIATED ----------------
   let activeNegotiated = null;
-  if (Number.isFinite(currentPrice)) {
-    const hits = negotiated.filter((n) => priceInside(currentPrice, n));
+  if (Number.isFinite(Number(currentPrice))) {
+    const hits = negotiated.filter((n) => priceInside(Number(currentPrice), n));
     if (hits.length) {
       hits.sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo));
       activeNegotiated = hits[0];
@@ -172,8 +223,8 @@ router.get("/engine5-context", (req, res) => {
 
   // ---------------- ACTIVE INSTITUTIONAL ----------------
   let activeInstitutional = null;
-  if (Number.isFinite(currentPrice)) {
-    const hits = institutional.filter((i) => priceInside(currentPrice, i));
+  if (Number.isFinite(Number(currentPrice))) {
+    const hits = institutional.filter((i) => priceInside(Number(currentPrice), i));
     if (hits.length) {
       hits.sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo));
       activeInstitutional = hits[0];
@@ -201,17 +252,13 @@ router.get("/engine5-context", (req, res) => {
   }
 
   // ---------------- SHELVES (SURFACING) ----------------
-  const rawShelves = Array.isArray(shelvesJson?.levels)
-    ? shelvesJson.levels
-    : [];
-
+  const rawShelves = Array.isArray(shelvesJson?.levels) ? shelvesJson.levels : [];
   const shelfCandidates = [];
 
   for (const s of rawShelves) {
     const r = normalizeRange(s?.priceRange);
     if (!r) continue;
 
-    // 48h persistence (based on shelves job timestamp)
     const updatedUtc = shelvesJson?.meta?.generated_at_utc;
     if (!updatedUtc || hoursSince(updatedUtc) > SHELF_PERSIST_HOURS) continue;
 
@@ -226,7 +273,6 @@ router.get("/engine5-context", (req, res) => {
     }
     if (blocked) continue;
 
-    // Assign gap by midpoint (only between institutionals)
     const gap = gaps.find((g) => r.mid <= g.hi && r.mid >= g.lo);
     if (!gap) continue;
 
@@ -253,7 +299,6 @@ router.get("/engine5-context", (req, res) => {
     for (let i = 0; i < list.length; i++) {
       const old = list[i];
 
-      // manual shelf cannot be replaced by auto
       if (old.isManual && !shelf.isManual) continue;
 
       const delta = shelf.strength - old.strength;
@@ -287,8 +332,8 @@ router.get("/engine5-context", (req, res) => {
 
   // ---------------- ACTIVE SHELF ----------------
   let activeShelf = null;
-  if (Number.isFinite(currentPrice)) {
-    const hits = shelves.filter((s) => priceInside(currentPrice, s));
+  if (Number.isFinite(Number(currentPrice))) {
+    const hits = shelves.filter((s) => priceInside(Number(currentPrice), s));
     if (hits.length) {
       hits.sort((a, b) => b.strength - a.strength);
       activeShelf = hits[0];
@@ -297,10 +342,10 @@ router.get("/engine5-context", (req, res) => {
 
   // ---------------- NEAREST SHELF (when not active) ----------------
   let nearestShelf = null;
-  if (Number.isFinite(currentPrice) && !activeShelf && Array.isArray(shelves) && shelves.length) {
+  if (Number.isFinite(Number(currentPrice)) && !activeShelf && Array.isArray(shelves) && shelves.length) {
     const ranked = shelves
       .map((s) => {
-        const d = shelfDistance(currentPrice, s);
+        const d = shelfDistance(Number(currentPrice), s);
         return { s, ...d };
       })
       .sort((a, b) => {
@@ -323,8 +368,11 @@ router.get("/engine5-context", (req, res) => {
     ok: true,
     meta: {
       symbol,
+      tf,
       generated_at_utc: generatedAt,
-      current_price: currentPrice,
+      current_price: Number.isFinite(Number(currentPrice)) ? Number(currentPrice) : null,
+      // optional alias for other consumers
+      currentPrice: Number.isFinite(Number(currentPrice)) ? Number(currentPrice) : null,
       rules: {
         shelf_persist_hours: SHELF_PERSIST_HOURS,
         replacement_strength_delta: REPLACEMENT_STRENGTH_DELTA,
@@ -334,17 +382,18 @@ router.get("/engine5-context", (req, res) => {
     },
     render: {
       negotiated,
-      institutional: institutional.map(({ details, ...rest }) => rest), // don’t leak huge details by default
+      institutional: institutional.map(({ details, ...rest }) => rest),
       shelves,
     },
     active: {
       negotiated: activeNegotiated,
       shelf: activeShelf,
-      institutional: activeInstitutional ? (() => {
-        // Keep details on active only (used for dead/archived checks)
-        const { details, ...rest } = activeInstitutional;
-        return { ...rest, details: details ?? null };
-      })() : null,
+      institutional: activeInstitutional
+        ? (() => {
+            const { details, ...rest } = activeInstitutional;
+            return { ...rest, details: details ?? null };
+          })()
+        : null,
     },
     nearest: {
       shelf: nearestShelf,
