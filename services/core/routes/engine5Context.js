@@ -363,42 +363,51 @@ router.get("/engine5-context", async (req, res) => {
     }
   }
 
-  // ---------------- RESPONSE ----------------
-  return res.json({
-    ok: true,
-    meta: {
-      symbol,
-      tf,
-      generated_at_utc: generatedAt,
-      current_price: Number.isFinite(Number(currentPrice)) ? Number(currentPrice) : null,
-      // optional alias for other consumers
-      currentPrice: Number.isFinite(Number(currentPrice)) ? Number(currentPrice) : null,
-      rules: {
-        shelf_persist_hours: SHELF_PERSIST_HOURS,
-        replacement_strength_delta: REPLACEMENT_STRENGTH_DELTA,
-        institutional_overlap_tolerance: INST_OVERLAP_TOLERANCE,
-        max_shelves_per_gap: MAX_SHELVES_PER_GAP,
-      },
+ // ---------------- RESPONSE ----------------
+
+// SAFELY normalize current price (prevents null → 0 bug)
+const cpNum = toNum(currentPrice);
+
+return res.json({
+  ok: true,
+  meta: {
+    symbol,
+    tf,
+    generated_at_utc: generatedAt,
+
+    // ✅ Properly handled current price
+    current_price: cpNum,
+    currentPrice: cpNum, // alias (for compatibility)
+
+    rules: {
+      shelf_persist_hours: SHELF_PERSIST_HOURS,
+      replacement_strength_delta: REPLACEMENT_STRENGTH_DELTA,
+      institutional_overlap_tolerance: INST_OVERLAP_TOLERANCE,
+      max_shelves_per_gap: MAX_SHELVES_PER_GAP,
     },
-    render: {
-      negotiated,
-      institutional: institutional.map(({ details, ...rest }) => rest),
-      shelves,
-    },
-    active: {
-      negotiated: activeNegotiated,
-      shelf: activeShelf,
-      institutional: activeInstitutional
-        ? (() => {
-            const { details, ...rest } = activeInstitutional;
-            return { ...rest, details: details ?? null };
-          })()
-        : null,
-    },
-    nearest: {
-      shelf: nearestShelf,
-    },
-  });
+  },
+
+  render: {
+    negotiated,
+    institutional: institutional.map(({ details, ...rest }) => rest),
+    shelves,
+  },
+
+  active: {
+    negotiated: activeNegotiated,
+    shelf: activeShelf,
+    institutional: activeInstitutional
+      ? (() => {
+          const { details, ...rest } = activeInstitutional;
+          return { ...rest, details: details ?? null };
+        })()
+      : null,
+  },
+
+  nearest: {
+    shelf: nearestShelf,
+  },
+});
 });
 
 export { router as engine5ContextRouter };
