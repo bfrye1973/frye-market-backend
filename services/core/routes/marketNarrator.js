@@ -1,10 +1,11 @@
 // services/core/routes/marketNarrator.js
 // Engine 14A (Read-only) — Market Narrator (SPY only)
 //
-// Purpose (v1):
-// 1) Layer 1: 3–4 hour narrative (recent sequence / auction story)
-// 2) Layer 2: current narrative (what is happening right now)
-// 3) Layer 3: next narrative (what it's looking for next vs negotiated/institutional zones)
+// v2 upgrades:
+// ✅ Layer 1 now covers last 6 hours (6 x 1h candles)
+// ✅ Detects "fast rejection" long lower wick candles and narrates them
+// ✅ Adds SPX macro shelves (6800/6900/7000) mapped to SPY using fixed ratio:
+//    SPX 6900 ↔ SPY 688  (user-locked mapping)
 //
 // Uses ONLY:
 // - OHLCV bars: /api/v1/ohlc?symbol=SPY&tf=1h
@@ -84,7 +85,8 @@ function candleStats(bar) {
   const upperWick = h - Math.max(o, c);
   const lowerWick = Math.min(o, c) - l;
   const bodyPct = range > 0 ? body / range : 0;
-  return { o, h, l, c, range, body, upperWick, lowerWick, bodyPct };
+  const closePos = range > 0 ? (c - l) / range : 0.5; // 0..1
+  return { o, h, l, c, range, body, upperWick, lowerWick, bodyPct, closePos };
 }
 
 /* ---------------- zone proximity helpers ---------------- */
@@ -103,7 +105,6 @@ function distToZone(price, z) {
   return p < a ? a - p : p - b;
 }
 
-// Find nearest allowed zone from negotiated + institutional arrays
 function nearestAllowedZone({ price, negotiated = [], institutional = [] }) {
   let best = null;
 
@@ -112,7 +113,6 @@ function nearestAllowedZone({ price, negotiated = [], institutional = [] }) {
     for (const z of list) {
       const d = distToZone(price, z);
       if (d == null) continue;
-
       if (!best || d < best.distancePts) {
         best = {
           zoneType,
@@ -133,6 +133,49 @@ function nearestAllowedZone({ price, negotiated = [], institutional = [] }) {
   return best;
 }
 
+/* ---------------- SPX macro shelves (fixed mapping) ---------------- */
+// User locked: SPX 6900 ↔ SPY 688
+const SPX_SHELVES = [6800, 6900, 7000];
+const SPX_TO_SPY_RATIO = 6900 / 688; // ≈ 10.02907
+
+function buildMacroShelves({ price }) {
+  const p = toNum(price);
+  const mapped = SPX_SHELVES.map((lvl) => ({
+    spx: lvl,
+    spy: lvl / SPX_TO_SPY_RATIO,
+  }));
+
+  let nearest = null;
+  if (p != null) {
+    for (const m of mapped) {
+      const d = Math.abs(p - m.spy);
+      if (!nearest || d < nearest.distancePts) {
+        nearest = {
+          spx: m.spx,
+          spy: m.spy,
+          distancePts: d,
+          side: p > m.spy ? "ABOVE" : p < m.spy ? "BELOW" : "ON",
+        };
+      }
+    }
+  }
+
+  return {
+    source: "SPX_ROUND_NUMBERS_FIXED",
+    ratio: round2(SPX_TO_SPY_RATIO),
+    spxLevels: SPX_SHELVES.slice(),
+    spyMapped: mapped.map((m) => round2(m.spy)),
+    nearest: nearest
+      ? {
+          spx: nearest.spx,
+          spy: round2(nearest.spy),
+          distancePts: round2(nearest.distancePts),
+          side: nearest.side,
+        }
+      : null,
+  };
+}
+
 /* ---------------- market structure helpers ---------------- */
 
 function summarizeImpulse(bar, atr) {
@@ -140,13 +183,12 @@ function summarizeImpulse(bar, atr) {
   if (!s || !Number.isFinite(atr) || atr <= 0) return { impulseScore: 0, direction: "FLAT", rangeAtr: null, bodyPct: null };
 
   const dir = s.c > s.o ? "UP" : s.c < s.o ? "DOWN" : "FLAT";
-
   const rangeAtr = s.range / atr;
-  const bodyDominant = s.bodyPct; // 0..1
+  const bodyDominant = s.bodyPct;
 
   let score = 0;
-  score += clamp(rangeAtr / 2.0, 0, 1) * 5; // up to 5
-  score += clamp(bodyDominant, 0, 1) * 5; // up to 5
+  score += clamp(rangeAtr / 2.0, 0, 1) * 5;
+  score += clamp(bodyDominant, 0, 1) * 5;
 
   return {
     impulseScore: Math.round(score),
@@ -157,11 +199,9 @@ function summarizeImpulse(bar, atr) {
 }
 
 function rangeHiLo(bars) {
-  let hi = -Infinity,
-    lo = Infinity;
+  let hi = -Infinity, lo = Infinity;
   for (const b of bars) {
-    const h = toNum(b.high),
-      l = toNum(b.low);
+    const h = toNum(b.high), l = toNum(b.low);
     if (h == null || l == null) continue;
     if (h > hi) hi = h;
     if (l < lo) lo = l;
@@ -170,7 +210,6 @@ function rangeHiLo(bars) {
   return { hi, lo, mid: (hi + lo) / 2, width: hi - lo };
 }
 
-// Detect "balance" as compression: recent width vs ATR small + overlapping closes.
 function detectBalance({ bars, atr, n = 12, maxWidthAtr = 2.25 }) {
   if (!Array.isArray(bars) || bars.length < n || !Number.isFinite(atr) || atr <= 0) return null;
   const slice = bars.slice(-n);
@@ -180,7 +219,7 @@ function detectBalance({ bars, atr, n = 12, maxWidthAtr = 2.25 }) {
   const widthAtr = r.width / atr;
   const isBalance = widthAtr <= maxWidthAtr;
 
-  // ✅ FIX: tighter overlap band so overlapPct is meaningful
+  // tighter overlap band
   const bandLo = r.mid - 0.25 * r.width;
   const bandHi = r.mid + 0.25 * r.width;
 
@@ -251,7 +290,6 @@ function phaseFromBalanceAndLast({ balance, lastBar, prevBar, atr }) {
   return { phase: "CORRECTION", details: {} };
 }
 
-// Detect the "two full-bodied candles" violent move you care about
 function detectViolentExpansion({ bars, atr, balance }) {
   if (!Array.isArray(bars) || bars.length < 3 || !Number.isFinite(atr) || atr <= 0) {
     return { signal: false };
@@ -286,61 +324,148 @@ function detectViolentExpansion({ bars, atr, balance }) {
   };
 }
 
-/* ---------------- Layer 1/2/3 narrative builders ---------------- */
+/* ---------------- Layer narratives ---------------- */
 
-function classifyBar(bar, atr) {
-  const s = candleStats(bar);
-  if (!s || !Number.isFinite(atr) || atr <= 0) return { type: "UNKNOWN" };
+// Detect bullish fast rejection lower wicks in last N bars
+function detectLowerWickRejections({ bars, atr, keyLevels = [], windowBars = 6 }) {
+  if (!Array.isArray(bars) || bars.length < 2 || !Number.isFinite(atr) || atr <= 0) {
+    return { detected: false, count: 0, strongest: null, hits: [] };
+  }
 
-  const dir = s.c > s.o ? "UP" : s.c < s.o ? "DOWN" : "FLAT";
-  const rangeAtr = s.range / atr;
-  const strong = rangeAtr >= 1.1 && s.bodyPct >= 0.55;
+  const eps = 0.15 * atr; // "touched zone" tolerance
+  const slice = bars.slice(-windowBars);
 
-  // "Heavy" candle = big body, directional close
-  if (strong && dir === "UP") return { type: "IMPULSE_UP", rangeAtr: round2(rangeAtr), bodyPct: round2(s.bodyPct) };
-  if (strong && dir === "DOWN") return { type: "IMPULSE_DOWN", rangeAtr: round2(rangeAtr), bodyPct: round2(s.bodyPct) };
+  const hits = [];
 
-  // Hesitation / doji-like
-  if (s.bodyPct <= 0.25 && rangeAtr <= 0.9) return { type: "HESITATION", rangeAtr: round2(rangeAtr), bodyPct: round2(s.bodyPct) };
+  for (let i = 0; i < slice.length; i++) {
+    const b = slice[i];
+    const s = candleStats(b);
+    if (!s) continue;
 
-  return { type: dir === "UP" ? "UP_BAR" : dir === "DOWN" ? "DOWN_BAR" : "FLAT", rangeAtr: round2(rangeAtr), bodyPct: round2(s.bodyPct) };
+    // Long lower wick + strong close (upper half)
+    const wickToBody = s.body > 0 ? s.lowerWick / s.body : (s.lowerWick > 0 ? 99 : 0);
+    const longLowerWick = wickToBody >= 1.25;
+    const strongClose = s.closePos >= 0.60;
+
+    if (!(longLowerWick && strongClose)) continue;
+
+    // Did it probe into a key level?
+    let touched = null;
+    for (const lvl of keyLevels) {
+      const L = toNum(lvl);
+      if (L == null) continue;
+      // low at or below level (+eps), and close back above it → “bought up quickly”
+      if (s.l <= (L + eps) && s.c >= (L - eps)) {
+        touched = L;
+        break;
+      }
+    }
+
+    hits.push({
+      indexFromEnd: slice.length - 1 - i,
+      low: round2(s.l),
+      close: round2(s.c),
+      wickToBody: round2(wickToBody),
+      closePos: round2(s.closePos),
+      touchedLevel: touched != null ? round2(touched) : null,
+    });
+  }
+
+  // Pick strongest by wickToBody
+  let strongest = null;
+  for (const h of hits) {
+    if (!strongest || (h.wickToBody ?? 0) > (strongest.wickToBody ?? 0)) strongest = h;
+  }
+
+  return {
+    detected: hits.length > 0,
+    count: hits.length,
+    strongest,
+    hits: hits.slice(-6),
+  };
 }
 
-function buildLayer1RecentNarrative({ bars, atr, zones }) {
-  const lastN = bars.slice(-4);
-  const types = lastN.map((b) => classifyBar(b, atr).type);
+function buildKeyLevels({ balance, zones, macroShelves }) {
+  const levels = [];
 
-  // Simple sequence recognition
+  if (balance?.hi != null) levels.push(balance.hi);
+  if (balance?.lo != null) levels.push(balance.lo);
+
+  if (zones?.activeZone?.lo != null) levels.push(zones.activeZone.lo);
+  if (zones?.activeZone?.hi != null) levels.push(zones.activeZone.hi);
+
+  if (zones?.nearestAllowed?.lo != null) levels.push(zones.nearestAllowed.lo);
+  if (zones?.nearestAllowed?.hi != null) levels.push(zones.nearestAllowed.hi);
+
+  // macro shelf mapped to SPY
+  if (macroShelves?.nearest?.spy != null) levels.push(macroShelves.nearest.spy);
+  if (Array.isArray(macroShelves?.spyMapped)) {
+    for (const v of macroShelves.spyMapped) levels.push(v);
+  }
+
+  // uniq + numbers
+  const uniq = [];
+  for (const v of levels.map(toNum).filter((x) => x != null)) {
+    const r = round2(v);
+    if (!uniq.includes(r)) uniq.push(r);
+  }
+  return uniq.sort((a, b) => a - b);
+}
+
+function buildLayer1RecentNarrative({ bars, atr, zones, keyLevels }) {
+  const windowBars = 6;
+  const slice = bars.slice(-windowBars);
+
+  // Classify last 6 bars roughly
+  const types = slice.map((b) => {
+    const s = candleStats(b);
+    if (!s || !Number.isFinite(atr) || atr <= 0) return "UNKNOWN";
+    const dir = s.c > s.o ? "UP" : s.c < s.o ? "DOWN" : "FLAT";
+    const rangeAtr = s.range / atr;
+    const strong = rangeAtr >= 1.1 && s.bodyPct >= 0.55;
+
+    if (strong && dir === "UP") return "IMPULSE_UP";
+    if (strong && dir === "DOWN") return "IMPULSE_DOWN";
+    if (s.bodyPct <= 0.25 && rangeAtr <= 0.9) return "HESITATION";
+    return dir === "UP" ? "UP_BAR" : dir === "DOWN" ? "DOWN_BAR" : "FLAT";
+  });
+
   const hasUpImpulse = types.includes("IMPULSE_UP");
   const hasDownImpulse = types.includes("IMPULSE_DOWN");
 
-  let sequence = "MIXED";
+  let sequence = "MIXED_ROTATION";
   if (hasUpImpulse && !hasDownImpulse) sequence = "BUYERS_PUSH";
   if (hasDownImpulse && !hasUpImpulse) sequence = "SELLERS_PUSH";
   if (hasUpImpulse && hasDownImpulse) sequence = "PUSH_AND_PULLBACK";
 
-  // Absorption heuristic: down impulse appears but we are still in/near an allowed zone and didn't cascade lower
-  const absorptionHint =
-    hasDownImpulse &&
-    (zones?.inAllowedZone || (zones?.nearestAllowed?.distancePts != null && zones.nearestAllowed.distancePts <= 1.5));
+  const wickInfo = detectLowerWickRejections({ bars, atr, keyLevels, windowBars });
 
-  const text = (() => {
-    if (sequence === "BUYERS_PUSH") return "Last 3–4 hours: buyers pushed with expanding candles and limited hesitation.";
-    if (sequence === "SELLERS_PUSH") return "Last 3–4 hours: sellers pushed with expanding candles and limited bounce.";
-    if (sequence === "PUSH_AND_PULLBACK") return "Last 3–4 hours: push-and-pullback sequence (initiative move met with counter-pressure).";
-    return "Last 3–4 hours: mixed rotation with no clean directional dominance.";
-  })();
+  // Narrative text with wick detail (your requested behavior)
+  let text = "";
+  if (sequence === "BUYERS_PUSH") text = "Last 6 hours: buyers pushed with expanding candles and limited hesitation.";
+  else if (sequence === "SELLERS_PUSH") text = "Last 6 hours: sellers pushed with expanding candles and limited bounce.";
+  else if (sequence === "PUSH_AND_PULLBACK") text = "Last 6 hours: push-and-pullback sequence (initiative move met with counter-pressure).";
+  else text = "Last 6 hours: mixed rotation with no clean directional dominance.";
+
+  if (wickInfo.detected && wickInfo.strongest) {
+    const s = wickInfo.strongest;
+    if (s.touchedLevel != null) {
+      text += ` Notable bullish defense: a long lower wick probed down into ${s.touchedLevel.toFixed(2)} and was bought up quickly, closing at ${s.close.toFixed(2)}.`;
+    } else {
+      text += ` Notable bullish defense: a long lower wick was bought up quickly (close ${s.close.toFixed(2)}).`;
+    }
+  }
 
   return {
-    windowBars: 4,
+    windowBars,
     sequence,
     barTypes: types,
-    absorptionHint: Boolean(absorptionHint),
+    lowerWickRejections: wickInfo,
     text,
   };
 }
 
-function buildLayer2CurrentNarrative({ price, phase, zones, violentExpansion, impulse }) {
+function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, violentExpansion }) {
   const inAllowed = Boolean(zones?.inAllowedZone);
   const near = zones?.nearestAllowed?.distancePts != null ? zones.nearestAllowed.distancePts : null;
 
@@ -352,6 +477,10 @@ function buildLayer2CurrentNarrative({ price, phase, zones, violentExpansion, im
     text += `Price ${price != null ? price.toFixed(2) : ""} is outside allowed zones, but near ${zones.nearestAllowed.zoneType} by ${near.toFixed(2)} pts. `;
   } else {
     text += `Price ${price != null ? price.toFixed(2) : ""} is not near an allowed zone. `;
+  }
+
+  if (macroShelves?.nearest?.spx != null && macroShelves?.nearest?.spy != null) {
+    text += `Macro shelf check: SPX ${macroShelves.nearest.spx} maps to ~SPY ${macroShelves.nearest.spy.toFixed(2)} (price is ${macroShelves.nearest.side} by ${macroShelves.nearest.distancePts.toFixed(2)}). `;
   }
 
   if (violentExpansion?.signal) {
@@ -368,7 +497,7 @@ function buildLayer2CurrentNarrative({ price, phase, zones, violentExpansion, im
   };
 }
 
-function buildLayer3NextNarrative({ zones, balance, price }) {
+function buildLayer3NextNarrative({ zones, balance, macroShelves, price }) {
   const out = {
     decision: [],
     confirmations: [],
@@ -380,10 +509,15 @@ function buildLayer3NextNarrative({ zones, balance, price }) {
   const bLo = toNum(balance?.lo);
 
   if (bHi != null && bLo != null) {
-    out.confirmations.push({ if: `Hold above ${bHi.toFixed(2)}`, then: "Acceptance up / continuation bias" });
-    out.invalidations.push({ if: `Break below ${bLo.toFixed(2)}`, then: "Acceptance down / bearish continuation risk" });
+    out.confirmations.push({ if: `Decisive close above ${bHi.toFixed(2)}`, then: "Acceptance up / continuation bias" });
+    out.invalidations.push({ if: `Decisive close below ${bLo.toFixed(2)}`, then: "Acceptance down / bearish continuation risk" });
     out.decision.push({ level: round2(bHi), label: "Balance High" });
     out.decision.push({ level: round2(bLo), label: "Balance Low" });
+  }
+
+  // Macro shelf guidance
+  if (macroShelves?.nearest?.spx != null) {
+    out.decision.push({ level: macroShelves.nearest.spy, label: `Macro shelf (SPX ${macroShelves.nearest.spx})` });
   }
 
   // Zone-relative "what I'm looking for"
@@ -410,7 +544,7 @@ function buildLayer3NextNarrative({ zones, balance, price }) {
       out.decision.push({ level: round2(lo), label: `${z.zoneType} lo` });
       out.decision.push({ level: round2(hi), label: `${z.zoneType} hi` });
 
-      out.confirmations.push({ if: `Re-enter ${z.zoneType} ${lo.toFixed(2)}–${hi.toFixed(2)}`, then: "Eligible for zone-based reading" });
+      out.confirmations.push({ if: `Re-enter ${z.zoneType} ${lo.toFixed(2)}–${hi.toFixed(2)}`, then: "Eligible for zone-based reading (no chase rule)" });
       out.invalidations.push({ if: `Continue away from zone`, then: "Remain stand-down / avoid chase" });
 
       out.text =
@@ -501,24 +635,27 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
         : null,
     };
 
+    const macroShelves = buildMacroShelves({ price });
+
     const balance = detectBalance({ bars, atr, n: 12, maxWidthAtr: 2.25 });
     const { phase, details } = phaseFromBalanceAndLast({ balance, lastBar: last, prevBar: prev, atr });
 
     const impulse = summarizeImpulse(last, atr);
     const violentExpansion = detectViolentExpansion({ bars, atr, balance });
 
-    // LAYER 1/2/3
-    const layer1 = buildLayer1RecentNarrative({ bars, atr, zones });
-    const layer2 = buildLayer2CurrentNarrative({ price, phase, zones, violentExpansion, impulse });
-    const layer3 = buildLayer3NextNarrative({ zones, balance, price });
+    const keyLevels = buildKeyLevels({ balance, zones, macroShelves });
 
-    // Narrative paragraph (readable)
+    // LAYER 1/2/3
+    const layer1 = buildLayer1RecentNarrative({ bars, atr, zones, keyLevels });
+    const layer2 = buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, violentExpansion });
+    const layer3 = buildLayer3NextNarrative({ zones, balance, macroShelves, price });
+
     const narrativeText =
       `${layer1.text} ` +
       `${layer2.text} ` +
       `${layer3.text}`;
 
-    // Keep the original compact "ifThen" too (still useful)
+    // Convenience ifThen
     const ifThen = (() => {
       const arr = [];
       const bHi = balance?.hi;
@@ -532,6 +669,9 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       } else if (zones?.nearestAllowed?.distancePts != null) {
         arr.push(`Near allowed zone (${zones.nearestAllowed.zoneType}) in ${zones.nearestAllowed.distancePts.toFixed(2)} pts`);
       }
+      if (macroShelves?.nearest?.spx != null) {
+        arr.push(`Macro shelf: SPX ${macroShelves.nearest.spx} ≈ SPY ${macroShelves.nearest.spy.toFixed(2)}`);
+      }
       return arr.slice(0, 8);
     })();
 
@@ -541,17 +681,24 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       tf,
       asOf: new Date().toISOString(),
 
-      // Core numbers
       price,
       atr,
 
-      // Compact classifier fields (still used by dashboard if needed)
       phase,
-      bias: phase === "ACCEPTANCE_UP" ? "BULLISH" :
-            phase === "ACCEPTANCE_DOWN" ? "BEARISH" :
-            phase === "EXPANSION" ? (details?.dir === "UP" ? "BULLISH" : "BEARISH") :
-            phase === "REJECTION" ? (details?.dir === "UP" ? "BULLISH_REVERSAL_RISK" : "BEARISH_REVERSAL_RISK") :
-            "NEUTRAL",
+      bias:
+        phase === "ACCEPTANCE_UP"
+          ? "BULLISH"
+          : phase === "ACCEPTANCE_DOWN"
+          ? "BEARISH"
+          : phase === "EXPANSION"
+          ? details?.dir === "UP"
+            ? "BULLISH"
+            : "BEARISH"
+          : phase === "REJECTION"
+          ? details?.dir === "UP"
+            ? "BULLISH_REVERSAL_RISK"
+            : "BEARISH_REVERSAL_RISK"
+          : "NEUTRAL",
 
       confidence: clamp(
         balance?.isBalance
@@ -561,7 +708,6 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
         100
       ),
 
-      // Balance + impulse + violentExpansion
       balance: balance
         ? {
             isBalance: balance.isBalance,
@@ -584,21 +730,16 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
 
       violentExpansion,
       zones,
+      macroShelves,
 
-      // Layered narratives
       layer1,
       layer2,
       layer3,
 
-      // Readable paragraph
       narrativeText,
 
-      // Convenience next block
       next: {
-        keyLevels: [
-          ...(balance ? [round2(balance.hi), round2(balance.lo)] : []),
-          ...(zones?.activeZone ? [round2(zones.activeZone.lo), round2(zones.activeZone.hi)] : []),
-        ].filter((v) => Number.isFinite(v)),
+        keyLevels: keyLevels,
         ifThen,
       },
     });
