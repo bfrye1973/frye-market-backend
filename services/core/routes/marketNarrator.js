@@ -1,27 +1,27 @@
 // services/core/routes/marketNarrator.js
 // Engine 14A (Read-only) — Market Narrator (SPY only)
 //
-// v3 upgrades:
-// ✅ style=descriptive → ALWAYS returns exactly 3 paragraphs in narrativeText
-// ✅ Layer 1 looks back 6 hours (6 x 1h candles)
-// ✅ Detects BOTH:
+// v4 upgrades:
+// ✅ style=descriptive → EXACTLY 3 paragraphs every time
+// ✅ Layer 1 covers last 6 hours (6 x 1h candles)
+// ✅ Wick detectors:
 //    - lower wick buyback (bullish defense / absorption)
 //    - upper wick rejection (seller rejection / supply)
-// ✅ Adds SPX macro shelves (6800/6900/7000) mapped to SPY using fixed ratio:
-//    SPX 6900 ↔ SPY 688  (user-locked)
+// ✅ SPX macro shelves (6800/6900/7000) mapped to SPY using fixed ratio (SPX 6900 ↔ SPY 688)
+// ✅ Engine 2 context (Minor=1h, Intermediate=4h)
+// ✅ Fib levels derived from Engine 2 anchors (W1/W2) + “near fib” narrative guidance
 //
 // Uses ONLY:
 // - OHLCV bars: /api/v1/ohlc?symbol=SPY&tf=1h
 // - Zone context: /api/v1/engine5-context?symbol=SPY&tf=1h
+// - Engine 2 already-calculated anchors via /api/v1/fib-levels (read-only) if needed
 //
 // Not a signal generator. Does not change engine math.
-// Deterministic, audit-friendly.
 
 import express from "express";
 
 export const marketNarratorRouter = express.Router();
 
-// Prefer loopback inside the same service container.
 const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
 
 /* ---------------- helpers ---------------- */
@@ -47,9 +47,7 @@ async function fetchJson(url, { timeoutMs = 15000 } = {}) {
     const r = await fetch(url, { signal: controller.signal, cache: "no-store" });
     const text = await r.text();
     let json = null;
-    try {
-      json = JSON.parse(text);
-    } catch {}
+    try { json = JSON.parse(text); } catch {}
     return { ok: r.ok, status: r.status, json, text };
   } catch (e) {
     return { ok: false, status: 0, json: null, text: String(e?.message || e) };
@@ -62,27 +60,21 @@ function computeATR(bars, len = 14) {
   if (!Array.isArray(bars) || bars.length < len + 2) return null;
   const trs = [];
   for (let i = 1; i < bars.length; i++) {
-    const h = bars[i].high,
-      l = bars[i].low,
-      pc = bars[i - 1].close;
+    const h = bars[i].high, l = bars[i].low, pc = bars[i - 1].close;
     if (![h, l, pc].every(Number.isFinite)) continue;
     const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
     trs.push(tr);
   }
   if (trs.length < len) return null;
 
-  // Wilder smoothing
   let atr = trs.slice(0, len).reduce((a, b) => a + b, 0) / len;
   for (let i = len; i < trs.length; i++) atr = atr * ((len - 1) / len) + trs[i] * (1 / len);
   return atr;
 }
 
 function candleStats(bar) {
-  const o = toNum(bar?.open),
-    h = toNum(bar?.high),
-    l = toNum(bar?.low),
-    c = toNum(bar?.close);
-  if ([o, h, l, c].some((v) => v == null)) return null;
+  const o = toNum(bar?.open), h = toNum(bar?.high), l = toNum(bar?.low), c = toNum(bar?.close);
+  if ([o, h, l, c].some(v => v == null)) return null;
 
   const range = h - l;
   const body = Math.abs(c - o);
@@ -96,7 +88,6 @@ function candleStats(bar) {
 
 /* ---------------- zone proximity helpers ---------------- */
 
-// distance from price to zone boundary (0 if inside)
 function distToZone(price, z) {
   const p = toNum(price);
   const lo = toNum(z?.lo);
@@ -141,14 +132,11 @@ function nearestAllowedZone({ price, negotiated = [], institutional = [] }) {
 /* ---------------- SPX macro shelves (fixed mapping) ---------------- */
 // User locked: SPX 6900 ↔ SPY 688
 const SPX_SHELVES = [6800, 6900, 7000];
-const SPX_TO_SPY_RATIO = 6900 / 688; // ≈ 10.02907
+const SPX_TO_SPY_RATIO = 6900 / 688;
 
 function buildMacroShelves({ price }) {
   const p = toNum(price);
-  const mapped = SPX_SHELVES.map((lvl) => ({
-    spx: lvl,
-    spy: lvl / SPX_TO_SPY_RATIO,
-  }));
+  const mapped = SPX_SHELVES.map((lvl) => ({ spx: lvl, spy: lvl / SPX_TO_SPY_RATIO }));
 
   let nearest = null;
   if (p != null) {
@@ -171,14 +159,100 @@ function buildMacroShelves({ price }) {
     spxLevels: SPX_SHELVES.slice(),
     spyMapped: mapped.map((m) => round2(m.spy)),
     nearest: nearest
-      ? {
-          spx: nearest.spx,
-          spy: round2(nearest.spy),
-          distancePts: round2(nearest.distancePts),
-          side: nearest.side,
-        }
+      ? { spx: nearest.spx, spy: round2(nearest.spy), distancePts: round2(nearest.distancePts), side: nearest.side }
       : null,
   };
+}
+
+/* ---------------- Engine 2: wave + fib (read-only) ---------------- */
+
+// Locked: minor=1h, intermediate=4h
+const ENGINE2_CTX = {
+  minor: { tf: "1h", degree: "minor", wave: "W1" },
+  intermediate: { tf: "4h", degree: "intermediate", wave: "W1" },
+};
+
+// Pull fib-levels payload (which contains anchors + signals)
+async function fetchFibLevels({ symbol, tf, degree, wave }) {
+  const u = new URL(`${CORE_BASE}/api/v1/fib-levels`);
+  u.searchParams.set("symbol", symbol);
+  u.searchParams.set("tf", tf);
+  u.searchParams.set("degree", degree);
+  u.searchParams.set("wave", wave);
+  const r = await fetchJson(u.toString(), { timeoutMs: 15000 });
+  return (r.ok && r.json) ? r.json : null;
+}
+
+// Extract W1/W2 anchor prices if present
+function extractW1W2Anchors(payload) {
+  // supports various shapes; we try common spots
+  const anchors =
+    payload?.anchors ||
+    payload?.data?.anchors ||
+    payload?.fib?.anchors ||
+    null;
+
+  const w1 = anchors?.W1?.p ?? anchors?.w1?.p ?? anchors?.W1 ?? null;
+  const w2 = anchors?.W2?.p ?? anchors?.w2?.p ?? anchors?.W2 ?? null;
+
+  const p1 = toNum(w1);
+  const p2 = toNum(w2);
+
+  if (p1 == null || p2 == null) return null;
+
+  return { W1: p1, W2: p2 };
+}
+
+// Build standard fib levels from W1/W2
+function computeFibLevelsFromW1W2({ W1, W2 }) {
+  const hi = Math.max(W1, W2);
+  const lo = Math.min(W1, W2);
+  const range = hi - lo;
+  if (!(range > 0)) return null;
+
+  // retracements from hi down
+  const retr = [0.382, 0.5, 0.618, 0.786].map(r => ({
+    tag: `${Math.round(r * 1000) / 10}%`,
+    price: hi - range * r,
+    kind: "RETRACEMENT"
+  }));
+
+  // extensions above hi (common)
+  const ext = [1.0, 1.272, 1.618].map(e => ({
+    tag: `${e.toFixed(3)}x`,
+    price: hi + range * (e - 1.0),
+    kind: "EXTENSION"
+  }));
+
+  // also include boundaries
+  const base = [
+    { tag: "LOW", price: lo, kind: "ANCHOR" },
+    { tag: "HIGH", price: hi, kind: "ANCHOR" }
+  ];
+
+  const all = [...base, ...retr, ...ext]
+    .map(x => ({ ...x, price: round2(x.price) }))
+    .filter(x => x.price != null)
+    .sort((a, b) => a.price - b.price);
+
+  return { lo: round2(lo), hi: round2(hi), range: round2(range), levels: all };
+}
+
+function nearestFibLevel({ price, fib, atr }) {
+  const p = toNum(price);
+  if (p == null || !fib?.levels?.length) return null;
+
+  let best = null;
+  for (const lvl of fib.levels) {
+    const d = Math.abs(p - lvl.price);
+    if (!best || d < best.distancePts) best = { ...lvl, distancePts: d };
+  }
+
+  const dPts = best ? best.distancePts : null;
+  const nearPts = dPts != null ? round2(dPts) : null;
+  const nearAtr = (dPts != null && Number.isFinite(atr) && atr > 0) ? round2(dPts / atr) : null;
+
+  return best ? { tag: best.tag, kind: best.kind, price: best.price, distancePts: nearPts, distanceAtr: nearAtr } : null;
 }
 
 /* ---------------- market structure helpers ---------------- */
@@ -206,11 +280,9 @@ function summarizeImpulse(bar, atr) {
 }
 
 function rangeHiLo(bars) {
-  let hi = -Infinity,
-    lo = Infinity;
+  let hi = -Infinity, lo = Infinity;
   for (const b of bars) {
-    const h = toNum(b.high),
-      l = toNum(b.low);
+    const h = toNum(b.high), l = toNum(b.low);
     if (h == null || l == null) continue;
     if (h > hi) hi = h;
     if (l < lo) lo = l;
@@ -335,7 +407,7 @@ function detectViolentExpansion({ bars, atr, balance }) {
 
 /* ---------------- Layer narratives ---------------- */
 
-function buildKeyLevels({ balance, zones, macroShelves }) {
+function buildKeyLevels({ balance, zones, macroShelves, fibMinor, fibInter }) {
   const levels = [];
 
   if (balance?.hi != null) levels.push(balance.hi);
@@ -348,25 +420,31 @@ function buildKeyLevels({ balance, zones, macroShelves }) {
   if (zones?.nearestAllowed?.hi != null) levels.push(zones.nearestAllowed.hi);
 
   if (macroShelves?.nearest?.spy != null) levels.push(macroShelves.nearest.spy);
-  if (Array.isArray(macroShelves?.spyMapped)) {
-    for (const v of macroShelves.spyMapped) levels.push(v);
-  }
+  if (Array.isArray(macroShelves?.spyMapped)) macroShelves.spyMapped.forEach(v => levels.push(v));
+
+  // Add a few nearest fib levels (minor + intermediate)
+  const addFib = (fib) => {
+    if (!fib?.levels?.length) return;
+    for (const lvl of fib.levels) levels.push(lvl.price);
+  };
+  addFib(fibMinor);
+  addFib(fibInter);
 
   const uniq = [];
-  for (const v of levels.map(toNum).filter((x) => x != null)) {
+  for (const v of levels.map(toNum).filter(x => x != null)) {
     const r = round2(v);
     if (!uniq.includes(r)) uniq.push(r);
   }
   return uniq.sort((a, b) => a - b);
 }
 
-// Generic wick rejection detector (lower or upper)
+// Wick rejection detector (lower/upper)
 function detectWickRejections({ bars, atr, keyLevels = [], windowBars = 6, side = "LOWER" }) {
   if (!Array.isArray(bars) || bars.length < 2 || !Number.isFinite(atr) || atr <= 0) {
     return { detected: false, count: 0, strongest: null, hits: [] };
   }
 
-  const eps = 0.15 * atr; // tolerance
+  const eps = 0.15 * atr;
   const slice = bars.slice(-windowBars);
   const hits = [];
 
@@ -379,25 +457,18 @@ function detectWickRejections({ bars, atr, keyLevels = [], windowBars = 6, side 
     const wickToBody = s.body > 0 ? wick / s.body : (wick > 0 ? 99 : 0);
 
     const longWick = wickToBody >= 1.25;
-
-    // strong close rules:
-    // LOWER wick buyback: close in upper half (>= 0.60)
-    // UPPER wick rejection: close in lower half (<= 0.40)
     const strongClose = side === "LOWER" ? (s.closePos >= 0.60) : (s.closePos <= 0.40);
 
     if (!(longWick && strongClose)) continue;
 
-    // level tag:
     let touched = null;
     for (const lvl of keyLevels) {
       const L = toNum(lvl);
       if (L == null) continue;
 
       if (side === "LOWER") {
-        // low probes into level and closes back above
         if (s.l <= (L + eps) && s.c >= (L - eps)) { touched = L; break; }
       } else {
-        // high probes into level and closes back below
         if (s.h >= (L - eps) && s.c <= (L + eps)) { touched = L; break; }
       }
     }
@@ -418,12 +489,7 @@ function detectWickRejections({ bars, atr, keyLevels = [], windowBars = 6, side 
     if (!strongest || (h.wickToBody ?? 0) > (strongest.wickToBody ?? 0)) strongest = h;
   }
 
-  return {
-    detected: hits.length > 0,
-    count: hits.length,
-    strongest,
-    hits: hits.slice(-6),
-  };
+  return { detected: hits.length > 0, count: hits.length, strongest, hits: hits.slice(-6) };
 }
 
 function buildLayer1RecentNarrative({ bars, atr, keyLevels }) {
@@ -445,7 +511,7 @@ function buildLayer1RecentNarrative({ bars, atr, keyLevels }) {
 
   const hasUpImpulse = types.includes("IMPULSE_UP");
   const hasDownImpulse = types.includes("IMPULSE_DOWN");
-  const hesitations = types.filter((t) => t === "HESITATION").length;
+  const hesitations = types.filter(t => t === "HESITATION").length;
 
   let sequence = "MIXED_ROTATION";
   if (hasUpImpulse && !hasDownImpulse && hesitations <= 2) sequence = "BUYERS_PUSH";
@@ -461,7 +527,6 @@ function buildLayer1RecentNarrative({ bars, atr, keyLevels }) {
   else if (sequence === "PUSH_AND_PULLBACK") text = "Last 6 hours: push-and-pullback sequence (initiative move met with counter-pressure).";
   else text = "Last 6 hours: mixed rotation with no clean directional dominance.";
 
-  // Add wick commentary (your requested behavior)
   if (lowerWicks.detected && lowerWicks.strongest) {
     const s = lowerWicks.strongest;
     if (s.touchedLevel != null) {
@@ -480,17 +545,10 @@ function buildLayer1RecentNarrative({ bars, atr, keyLevels }) {
     }
   }
 
-  return {
-    windowBars,
-    sequence,
-    barTypes: types,
-    lowerWickRejections: lowerWicks,
-    upperWickRejections: upperWicks,
-    text,
-  };
+  return { windowBars, sequence, barTypes: types, lowerWickRejections: lowerWicks, upperWickRejections: upperWicks, text };
 }
 
-function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, violentExpansion }) {
+function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, fibCtx }) {
   const inAllowed = Boolean(zones?.inAllowedZone);
   const near = zones?.nearestAllowed?.distancePts != null ? zones.nearestAllowed.distancePts : null;
 
@@ -508,27 +566,17 @@ function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impuls
     text += `Macro shelf: SPX ${macroShelves.nearest.spx} maps to ~SPY ${macroShelves.nearest.spy.toFixed(2)} (price is ${macroShelves.nearest.side} by ${macroShelves.nearest.distancePts.toFixed(2)}). `;
   }
 
-  if (violentExpansion?.signal) {
-    text += `We recently printed a violent 2-bar expansion ${violentExpansion.direction}. `;
-  } else if (impulse?.impulseScore != null) {
+  if (fibCtx?.summary) text += `${fibCtx.summary} `;
+
+  if (impulse?.impulseScore != null) {
     text += `Latest impulse score is ${impulse.impulseScore}/10 (${impulse.direction}). `;
   }
 
-  return {
-    phase,
-    inAllowedZone: inAllowed,
-    nearAllowedPts: near,
-    text,
-  };
+  return { phase, inAllowedZone: inAllowed, nearAllowedPts: near, text };
 }
 
-function buildLayer3NextNarrative({ zones, balance, macroShelves }) {
-  const out = {
-    decision: [],
-    confirmations: [],
-    invalidations: [],
-    text: "",
-  };
+function buildLayer3NextNarrative({ zones, balance, macroShelves, fibCtx }) {
+  const out = { decision: [], confirmations: [], invalidations: [], text: "" };
 
   const bHi = toNum(balance?.hi);
   const bLo = toNum(balance?.lo);
@@ -544,6 +592,10 @@ function buildLayer3NextNarrative({ zones, balance, macroShelves }) {
     out.decision.push({ level: macroShelves.nearest.spy, label: `Macro shelf (SPX ${macroShelves.nearest.spx})` });
   }
 
+  if (fibCtx?.nextRules?.length) {
+    fibCtx.nextRules.forEach(r => out.confirmations.push(r));
+  }
+
   if (zones?.activeZone?.lo != null && zones?.activeZone?.hi != null) {
     const lo = Number(zones.activeZone.lo);
     const hi = Number(zones.activeZone.hi);
@@ -552,8 +604,7 @@ function buildLayer3NextNarrative({ zones, balance, macroShelves }) {
     out.confirmations.push({ if: `Hold above zone high ${hi.toFixed(2)}`, then: "Acceptance / continuation inside higher range" });
     out.invalidations.push({ if: `Lose midline ${mid.toFixed(2)}`, then: "Shift back into balance / rejection risk" });
 
-    out.text =
-      `What I'm watching next: hold above ${hi.toFixed(2)} for acceptance, or lose midline ${mid.toFixed(2)} for rejection back into value.`;
+    out.text = `What I'm watching next: hold above ${hi.toFixed(2)} for acceptance, or lose midline ${mid.toFixed(2)} for rejection back into value.`;
     return out;
   }
 
@@ -570,8 +621,7 @@ function buildLayer3NextNarrative({ zones, balance, macroShelves }) {
       out.confirmations.push({ if: `Re-enter ${z.zoneType} ${lo.toFixed(2)}–${hi.toFixed(2)}`, then: "Eligible for zone-based reading (no chase)" });
       out.invalidations.push({ if: `Continue away from zone`, then: "Remain stand-down / avoid chase" });
 
-      out.text =
-        `What I'm watching next: price is ${d.toFixed(2)} pts from ${z.zoneType}. I want a clean re-entry into ${lo.toFixed(2)}–${hi.toFixed(2)} before considering a setup.`;
+      out.text = `What I'm watching next: price is ${d.toFixed(2)} pts from ${z.zoneType}. I want a clean re-entry into ${lo.toFixed(2)}–${hi.toFixed(2)} before considering a setup.`;
       return out;
     }
   }
@@ -580,7 +630,8 @@ function buildLayer3NextNarrative({ zones, balance, macroShelves }) {
   return out;
 }
 
-// EXACTLY 3 paragraphs when style=descriptive
+/* ---------------- Narrative formatting ---------------- */
+
 function buildNarrativeTextDescriptive({ layer1, layer2, layer3 }) {
   const p1 = layer1?.text || "Last 6 hours: no recent narrative available.";
   const p2 = layer2?.text || "Right now: no current narrative available.";
@@ -593,14 +644,14 @@ function buildNarrativeTextDescriptive({ layer1, layer2, layer3 }) {
 marketNarratorRouter.get("/market-narrator", async (req, res) => {
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
   const tf = String(req.query.tf || "1h");
-  const style = String(req.query.style || "").toLowerCase().trim(); // descriptive or default
+  const style = String(req.query.style || "").toLowerCase().trim();
 
   if (symbol !== "SPY") {
     return res.json({ ok: false, error: "SPY_ONLY_V1", meta: { symbol, supported: ["SPY"] } });
   }
 
   try {
-    // Bars
+    // 1) Bars
     const ohlcUrl = new URL(`${CORE_BASE}/api/v1/ohlc`);
     ohlcUrl.searchParams.set("symbol", symbol);
     ohlcUrl.searchParams.set("tf", tf);
@@ -628,11 +679,10 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       .filter((b) => [b.open, b.high, b.low, b.close].every(Number.isFinite));
 
     const atr = computeATR(bars, 14) || computeATR(bars, 10) || null;
-
     const last = bars[bars.length - 1];
     const prev = bars[bars.length - 2];
 
-    // Zone context
+    // 2) Zones (engine5-context)
     const ctxUrl = new URL(`${CORE_BASE}/api/v1/engine5-context`);
     ctxUrl.searchParams.set("symbol", symbol);
     ctxUrl.searchParams.set("tf", tf);
@@ -647,7 +697,9 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
 
     const nearest = nearestAllowedZone({ price, negotiated, institutional });
 
-    const inAllowed = Boolean(ctx?.active?.negotiated && price != null) || Boolean(ctx?.active?.institutional && price != null);
+    const inAllowed =
+      Boolean(ctx?.active?.negotiated && price != null) ||
+      Boolean(ctx?.active?.institutional && price != null);
 
     const zones = {
       inAllowedZone: Boolean(inAllowed),
@@ -657,59 +709,97 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
         ? { zoneType: "INSTITUTIONAL", ...ctx.active.institutional }
         : null,
       nearestAllowed: nearest
-        ? {
-            zoneType: nearest.zoneType,
-            zoneId: nearest.id,
-            lo: nearest.lo,
-            hi: nearest.hi,
-            distancePts: nearest.distancePts,
-          }
+        ? { zoneType: nearest.zoneType, zoneId: nearest.id, lo: nearest.lo, hi: nearest.hi, distancePts: nearest.distancePts }
         : null,
     };
 
     const macroShelves = buildMacroShelves({ price });
 
+    // 3) Engine 2 context + fib (minor + intermediate)
+    const [fibMinorRaw, fibInterRaw] = await Promise.all([
+      fetchFibLevels({ symbol, ...ENGINE2_CTX.minor }).catch(() => null),
+      fetchFibLevels({ symbol, ...ENGINE2_CTX.intermediate }).catch(() => null),
+    ]);
+
+    const minorAnch = fibMinorRaw ? extractW1W2Anchors(fibMinorRaw) : null;
+    const interAnch = fibInterRaw ? extractW1W2Anchors(fibInterRaw) : null;
+
+    const fibMinor = minorAnch ? computeFibLevelsFromW1W2(minorAnch) : null;
+    const fibInter = interAnch ? computeFibLevelsFromW1W2(interAnch) : null;
+
+    const nearestMinor = nearestFibLevel({ price, fib: fibMinor, atr });
+    const nearestInter = nearestFibLevel({ price, fib: fibInter, atr });
+
+    const engine2 = {
+      minor: {
+        tf: ENGINE2_CTX.minor.tf,
+        degree: ENGINE2_CTX.minor.degree,
+        wave: ENGINE2_CTX.minor.wave,
+        ok: Boolean(fibMinorRaw?.ok),
+        phase: fibMinorRaw?.phase ?? fibMinorRaw?.signals?.phase ?? fibMinorRaw?.meta?.phase ?? "UNKNOWN",
+        anchorTag: fibMinorRaw?.anchorTag ?? fibMinorRaw?.signals?.tag ?? null,
+        fibScore: fibMinorRaw?.fibScore ?? 0,
+        invalidated: Boolean(fibMinorRaw?.invalidated ?? fibMinorRaw?.signals?.invalidated),
+        anchors: minorAnch ? { W1: minorAnch.W1, W2: minorAnch.W2 } : null,
+        nearestLevel: nearestMinor,
+      },
+      intermediate: {
+        tf: ENGINE2_CTX.intermediate.tf,
+        degree: ENGINE2_CTX.intermediate.degree,
+        wave: ENGINE2_CTX.intermediate.wave,
+        ok: Boolean(fibInterRaw?.ok),
+        phase: fibInterRaw?.phase ?? fibInterRaw?.signals?.phase ?? fibInterRaw?.meta?.phase ?? "UNKNOWN",
+        anchorTag: fibInterRaw?.anchorTag ?? fibInterRaw?.signals?.tag ?? null,
+        fibScore: fibInterRaw?.fibScore ?? 0,
+        invalidated: Boolean(fibInterRaw?.invalidated ?? fibInterRaw?.signals?.invalidated),
+        anchors: interAnch ? { W1: interAnch.W1, W2: interAnch.W2 } : null,
+        nearestLevel: nearestInter,
+      },
+    };
+
+    // Build a short fib summary for paragraph 2 + rules for paragraph 3
+    const fibCtx = (() => {
+      const parts = [];
+      const rules = [];
+
+      const add = (name, near) => {
+        if (!near) return;
+        if (near.distancePts != null && near.distancePts <= 0.35) {
+          parts.push(`${name} fib: near ${near.kind.toLowerCase()} ${near.tag} at ${near.price.toFixed(2)} (within ${near.distancePts.toFixed(2)} pts).`);
+          rules.push({ if: `Respect fib ${near.tag} (${name})`, then: "Watch for rejection vs acceptance at this line" });
+        } else if (near.distanceAtr != null && near.distanceAtr <= 0.25) {
+          parts.push(`${name} fib: near ${near.tag} at ${near.price.toFixed(2)} (~${near.distanceAtr.toFixed(2)} ATR away).`);
+        }
+      };
+
+      add("Minor", nearestMinor);
+      add("Intermediate", nearestInter);
+
+      return {
+        summary: parts.length ? parts.join(" ") : "",
+        nextRules: rules,
+      };
+    })();
+
+    // 4) Market regime
     const balance = detectBalance({ bars, atr, n: 12, maxWidthAtr: 2.25 });
     const { phase, details } = phaseFromBalanceAndLast({ balance, lastBar: last, prevBar: prev, atr });
 
     const impulse = summarizeImpulse(last, atr);
     const violentExpansion = detectViolentExpansion({ bars, atr, balance });
 
-    const keyLevels = buildKeyLevels({ balance, zones, macroShelves });
+    // key levels (include fib levels too)
+    const keyLevels = buildKeyLevels({ balance, zones, macroShelves, fibMinor, fibInter });
 
-    // Layer 1/2/3
+    // LAYER 1/2/3
     const layer1 = buildLayer1RecentNarrative({ bars, atr, keyLevels });
-    const layer2 = buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, violentExpansion });
-    const layer3 = buildLayer3NextNarrative({ zones, balance, macroShelves });
+    const layer2 = buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, fibCtx });
+    const layer3 = buildLayer3NextNarrative({ zones, balance, macroShelves, fibCtx });
 
     const narrativeText =
       style === "descriptive"
         ? buildNarrativeTextDescriptive({ layer1, layer2, layer3 })
         : `${layer1.text} ${layer2.text} ${layer3.text}`;
-
-    // Convenience ifThen
-    const ifThen = (() => {
-      const arr = [];
-      const bHi = balance?.hi;
-      const bLo = balance?.lo;
-
-      if (Number.isFinite(bHi) && Number.isFinite(bLo)) {
-        arr.push(`If hold above ${bHi.toFixed(2)} → acceptance up / continuation bias`);
-        arr.push(`If break below ${bLo.toFixed(2)} → acceptance down / bearish continuation risk`);
-      }
-
-      if (zones?.activeZone?.lo != null && zones?.activeZone?.hi != null) {
-        arr.push(`Active zone: ${zones.activeZone.zoneType} ${Number(zones.activeZone.lo).toFixed(2)}–${Number(zones.activeZone.hi).toFixed(2)}`);
-      } else if (zones?.nearestAllowed?.distancePts != null) {
-        arr.push(`Near allowed zone (${zones.nearestAllowed.zoneType}) in ${zones.nearestAllowed.distancePts.toFixed(2)} pts`);
-      }
-
-      if (macroShelves?.nearest?.spx != null) {
-        arr.push(`Macro shelf: SPX ${macroShelves.nearest.spx} ≈ SPY ${macroShelves.nearest.spy.toFixed(2)}`);
-      }
-
-      return arr.slice(0, 10);
-    })();
 
     return res.json({
       ok: true,
@@ -722,19 +812,11 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
 
       phase,
       bias:
-        phase === "ACCEPTANCE_UP"
-          ? "BULLISH"
-          : phase === "ACCEPTANCE_DOWN"
-          ? "BEARISH"
-          : phase === "EXPANSION"
-          ? details?.dir === "UP"
-            ? "BULLISH"
-            : "BEARISH"
-          : phase === "REJECTION"
-          ? details?.dir === "UP"
-            ? "BULLISH_REVERSAL_RISK"
-            : "BEARISH_REVERSAL_RISK"
-          : "NEUTRAL",
+        phase === "ACCEPTANCE_UP" ? "BULLISH" :
+        phase === "ACCEPTANCE_DOWN" ? "BEARISH" :
+        phase === "EXPANSION" ? (details?.dir === "UP" ? "BULLISH" : "BEARISH") :
+        phase === "REJECTION" ? (details?.dir === "UP" ? "BULLISH_REVERSAL_RISK" : "BEARISH_REVERSAL_RISK") :
+        "NEUTRAL",
 
       confidence: clamp(
         balance?.isBalance
@@ -744,18 +826,16 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
         100
       ),
 
-      balance: balance
-        ? {
-            isBalance: balance.isBalance,
-            n: balance.n,
-            hi: round2(balance.hi),
-            lo: round2(balance.lo),
-            mid: round2(balance.mid),
-            width: round2(balance.width),
-            widthAtr: round2(balance.widthAtr),
-            overlapPct: round2(balance.overlapPct),
-          }
-        : null,
+      balance: balance ? {
+        isBalance: balance.isBalance,
+        n: balance.n,
+        hi: round2(balance.hi),
+        lo: round2(balance.lo),
+        mid: round2(balance.mid),
+        width: round2(balance.width),
+        widthAtr: round2(balance.widthAtr),
+        overlapPct: round2(balance.overlapPct),
+      } : null,
 
       impulse: {
         direction: impulse.direction,
@@ -765,8 +845,15 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       },
 
       violentExpansion,
+
       zones,
       macroShelves,
+
+      engine2,
+      fib: {
+        minor: fibMinor,
+        intermediate: fibInter,
+      },
 
       layer1,
       layer2,
@@ -776,9 +863,9 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
 
       next: {
         keyLevels,
-        ifThen,
       },
     });
+
   } catch (e) {
     return res.status(500).json({
       ok: false,
