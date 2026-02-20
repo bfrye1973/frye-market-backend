@@ -14,6 +14,12 @@
 // - Adds C-level breakdown fields:
 //   zonePosition, rejectionCandidate, rejectionReasons, nextConfirmDown/Up
 //   candle anatomy diagnostics: upperWick, body, range, closeBackInsideZone
+//
+// ✅ NEW (SAFE WRAPPER IMPROVEMENT):
+// - If caller does NOT pass zoneId/lo/hi, auto-pick active zone from engine5-context:
+//   negotiated_active -> shelf_active -> institutional_active
+// - This prevents the strategy/dashboard from "stopping" when the caller omits zone args.
+// - No engine math changes.
 
 import express from "express";
 import { computeReactionQuality } from "../logic/reactionQualityEngine.js";
@@ -279,6 +285,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       toNum(ctx?.meta?.currentPrice) ??
       null;
 
+    // 1) If caller passed zoneId and lo/hi missing -> resolve by id
     if ((lo == null || hi == null) && zoneId && ctx) {
       const z = findZoneById(ctx, zoneId);
       if (z) {
@@ -288,8 +295,33 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       }
     }
 
-    const zone = { id: zoneId ?? null, source: resolvedSource, lo, hi };
+    // ✅ 2) NEW: If caller did NOT pass zoneId/lo/hi -> auto-pick active zone
+    // This ensures dashboard/strategy can call reaction-score without needing to pipe zone params.
+    let autoPickedId = null;
+    if ((lo == null || hi == null) && !zoneId && ctx) {
+      const act = ctx.active || {};
+      const pick =
+        act.negotiated ? { ...act.negotiated, _source: "negotiated_active" } :
+        act.shelf ? { ...act.shelf, _source: "shelf_active" } :
+        act.institutional ? { ...act.institutional, _source: "institutional_active" } :
+        null;
 
+      if (pick) {
+        lo = toNum(pick.lo);
+        hi = toNum(pick.hi);
+        autoPickedId = pick.id ? String(pick.id) : null;
+        resolvedSource = resolvedSource || pick._source || null;
+      }
+    }
+
+    const zone = {
+      id: (zoneId ?? autoPickedId) ?? null,
+      source: resolvedSource,
+      lo,
+      hi
+    };
+
+    // If still no zone bounds -> stay alive, return idle safely (DO NOT break dashboard)
     if (lo == null || hi == null) {
       return res.json({
         ok: true, invalid: false,
@@ -303,7 +335,8 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
     }
 
     // bars via /ohlc
-    const ohlcUrl = `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}&timeframe=${encodeURIComponent(timeframe)}&limit=250`;
+    // ✅ SAFE FIX: use tf= (your OHLC endpoint expects tf, not timeframe)
+    const ohlcUrl = `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}&limit=250`;
     const barsResp = await fetchJson(ohlcUrl);
     if (!barsResp.ok || !Array.isArray(barsResp.json)) {
       return res.status(502).json({
@@ -357,7 +390,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
     // Compute Engine 3 reaction (UNCHANGED MATH) using ORIGINAL zone bounds (lo/hi)
     const rqe = computeReactionQuality({
       bars,
-      zone: { lo, hi, side: "demand", id: zoneId ?? null },
+      zone: { lo, hi, side: "demand", id: (zoneId ?? autoPickedId) ?? null },
       atr: atrVal,
       opts: {
         tf: timeframe,
