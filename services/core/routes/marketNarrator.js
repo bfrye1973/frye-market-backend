@@ -73,6 +73,36 @@ function summarizeImpulse(last, atr) {
 
   const dir = s.c > s.o ? "UP" : (s.c < s.o ? "DOWN" : "FLAT");
 
+  // Find nearest allowed zone from negotiated + institutional arrays
+  function nearestAllowedZone({ price, negotiated = [], institutional = [] }) {
+    let best = null;
+
+    const scan = (arr, zoneType) => {
+      const list = Array.isArray(arr) ? arr : [];
+      for (const z of list) {
+        const d = distToZone(price, z);
+        if (d == null) continue;
+
+        if (!best || d < best.distancePts) {
+          best = {
+            zoneType,
+            id: z?.id ?? null,
+            lo: z?.lo ?? null,
+            hi: z?.hi ?? null,
+            mid: z?.mid ?? null,
+            strength: z?.strength ?? null,
+            distancePts: d,
+          };
+        }
+      }
+    };
+
+  scan(negotiated, "NEGOTIATED");
+  scan(institutional, "INSTITUTIONAL");
+
+  return best;
+}
+
   // Simple scoring: body dominance + range expansion vs ATR
   const rangeAtr = s.range / atr;
   const bodyDominant = s.bodyPct; // 0..1
