@@ -21,6 +21,7 @@ import dashboardSnapshotRouter from "./routes/dashboardSnapshot.js";
 import replayRouter from "./routes/replay.js";
 import { scalpStatusRouter } from "./routes/scalpStatus.js";
 import { alertsRouter } from "./routes/alerts.js";
+import marketNarratorRouter from "./routes/marketNarrator.js";
 
 
 
@@ -131,8 +132,7 @@ app.use("/api/v1", dashboardSnapshotRouter);
 app.use("/api/v1", replayRouter);
 app.use("/api/v1", scalpStatusRouter);
 app.use("/api/v1/alerts", alertsRouter);
-
-
+app.use("/api/v1", marketNarratorRouter);
 
 
 // ✅ run-all-engines (must be in the /api/v1 group)
