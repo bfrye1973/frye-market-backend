@@ -17,10 +17,15 @@ export const marketNarratorRouter = express.Router();
 // Prefer loopback inside the same service container.
 const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
 
-// ---------------- helpers ----------------
+/* ---------------- helpers ---------------- */
+
 function toNum(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
+}
+
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
 }
 
 async function fetchJson(url, { timeoutMs = 15000 } = {}) {
@@ -49,6 +54,8 @@ function computeATR(bars, len = 14) {
     trs.push(tr);
   }
   if (trs.length < len) return null;
+
+  // Wilder smoothing
   let atr = trs.slice(0, len).reduce((a, b) => a + b, 0) / len;
   for (let i = len; i < trs.length; i++) atr = ((atr * (len - 1)) + trs[i]) / len;
   return atr;
@@ -65,43 +72,59 @@ function candleStats(bar) {
   return { o, h, l, c, range, body, upperWick, lowerWick, bodyPct };
 }
 
-function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+/* ---------------- zone proximity helpers ---------------- */
 
-function summarizeImpulse(last, atr) {
-  const s = candleStats(last);
-  if (!s || !Number.isFinite(atr) || atr <= 0) return { impulseScore: 0, direction: "FLAT" };
+// distance from price to zone boundary (0 if inside)
+function distToZone(price, z) {
+  const p = toNum(price);
+  const lo = toNum(z?.lo);
+  const hi = toNum(z?.hi);
+  if (p == null || lo == null || hi == null) return null;
 
-  const dir = s.c > s.o ? "UP" : (s.c < s.o ? "DOWN" : "FLAT");
+  const a = Math.min(lo, hi);
+  const b = Math.max(lo, hi);
 
-  // Find nearest allowed zone from negotiated + institutional arrays
-  function nearestAllowedZone({ price, negotiated = [], institutional = [] }) {
-    let best = null;
+  if (p >= a && p <= b) return 0;
+  return p < a ? (a - p) : (p - b);
+}
 
-    const scan = (arr, zoneType) => {
-      const list = Array.isArray(arr) ? arr : [];
-      for (const z of list) {
-        const d = distToZone(price, z);
-        if (d == null) continue;
+// Find nearest allowed zone from negotiated + institutional arrays
+function nearestAllowedZone({ price, negotiated = [], institutional = [] }) {
+  let best = null;
 
-        if (!best || d < best.distancePts) {
-          best = {
-            zoneType,
-            id: z?.id ?? null,
-            lo: z?.lo ?? null,
-            hi: z?.hi ?? null,
-            mid: z?.mid ?? null,
-            strength: z?.strength ?? null,
-            distancePts: d,
-          };
-        }
+  const scan = (arr, zoneType) => {
+    const list = Array.isArray(arr) ? arr : [];
+    for (const z of list) {
+      const d = distToZone(price, z);
+      if (d == null) continue;
+
+      if (!best || d < best.distancePts) {
+        best = {
+          zoneType,
+          id: z?.id ?? null,
+          lo: z?.lo ?? null,
+          hi: z?.hi ?? null,
+          mid: z?.mid ?? null,
+          strength: z?.strength ?? null,
+          distancePts: d,
+        };
       }
-    };
+    }
+  };
 
   scan(negotiated, "NEGOTIATED");
   scan(institutional, "INSTITUTIONAL");
 
   return best;
 }
+
+/* ---------------- market structure helpers ---------------- */
+
+function summarizeImpulse(last, atr) {
+  const s = candleStats(last);
+  if (!s || !Number.isFinite(atr) || atr <= 0) return { impulseScore: 0, direction: "FLAT" };
+
+  const dir = s.c > s.o ? "UP" : (s.c < s.o ? "DOWN" : "FLAT");
 
   // Simple scoring: body dominance + range expansion vs ATR
   const rangeAtr = s.range / atr;
@@ -139,10 +162,12 @@ function detectBalance({ bars, atr, n = 12, maxWidthAtr = 2.25 }) {
   const bandLo = r.mid - 0.5 * r.width;
   const bandHi = r.mid + 0.5 * r.width;
   let inside = 0;
+
   for (const b of slice) {
     const c = toNum(b.close);
     if (c != null && c >= bandLo && c <= bandHi) inside++;
   }
+
   const overlapPct = inside / slice.length;
 
   return {
@@ -164,14 +189,6 @@ function phaseFromBalanceAndLast({ balance, lastBar, prevBar, atr }) {
     return { phase: "UNKNOWN", details: {} };
   }
 
-  // Definitions:
-  // BALANCE: compressed range
-  // EXPANSION: strong candle closes outside balance bounds
-  // RETEST: price returns near boundary after expansion
-  // ACCEPTANCE: 2 closes outside on same side
-  // REJECTION: wick outside + close back inside, or strong reverse candle back into balance
-  // TRAP_RISK: breakout attempt on weak body / low range, or immediate failure back into balance
-
   const { hi, lo } = balance;
   const lastClose = last.c;
   const prevClose = prev.c;
@@ -182,7 +199,6 @@ function phaseFromBalanceAndLast({ balance, lastBar, prevBar, atr }) {
 
   const lastRangeAtr = last.range / atr;
   const lastBodyPct = last.bodyPct;
-
   const strongImpulse = lastRangeAtr >= 1.1 && lastBodyPct >= 0.55;
 
   // Acceptance: 2 consecutive closes outside same side
@@ -193,12 +209,7 @@ function phaseFromBalanceAndLast({ balance, lastBar, prevBar, atr }) {
   const wickAbove = last.h > hi && backInside;
   const wickBelow = last.l < lo && backInside;
 
-  // Retest: after being outside, returns within 0.25*ATR of boundary
-  const retestBand = 0.25 * atr;
-  const nearHi = Math.abs(lastClose - hi) <= retestBand;
-  const nearLo = Math.abs(lastClose - lo) <= retestBand;
-
-  // Trap risk: breakout attempt (outside) but weak impulse OR immediate back inside on next bar
+  // Trap risk: breakout attempt (outside) but weak impulse
   const weakBreak = (outsideUp || outsideDown) && !strongImpulse;
 
   if (balance.isBalance) {
@@ -215,13 +226,11 @@ function phaseFromBalanceAndLast({ balance, lastBar, prevBar, atr }) {
 
     if (weakBreak) return { phase: "TRAP_RISK", details: { hi, lo } };
 
-    // If back inside and compressed -> balance
     return { phase: "BALANCE", details: { hi, lo } };
   }
 
   // Not balance: fall back to impulse/correction
   if (strongImpulse) return { phase: "IMPULSE", details: { dir: lastClose > prevClose ? "UP" : "DOWN" } };
-  if ((nearHi || nearLo) && backInside) return { phase: "RETEST", details: { near: nearHi ? "HI" : "LO", hi, lo } };
   return { phase: "CORRECTION", details: {} };
 }
 
@@ -230,20 +239,17 @@ function buildIfThen({ phase, balance, zones }) {
   const bHi = balance?.hi;
   const bLo = balance?.lo;
 
-  // Always include balance boundaries if we have them
   if (Number.isFinite(bHi) && Number.isFinite(bLo)) {
     out.push(`If hold above ${bHi.toFixed(2)} → acceptance up / continuation bias`);
     out.push(`If break below ${bLo.toFixed(2)} → acceptance down / bearish continuation risk`);
   }
 
-  // Include zone edges (negotiated/institutional) for context
   if (zones?.activeZone?.lo != null && zones?.activeZone?.hi != null) {
     out.push(`Active zone: ${zones.activeZone.zoneType} ${Number(zones.activeZone.lo).toFixed(2)}–${Number(zones.activeZone.hi).toFixed(2)}`);
   } else if (zones?.nearestAllowed?.distancePts != null) {
     out.push(`Near allowed zone (${zones.nearestAllowed.zoneType}) in ${zones.nearestAllowed.distancePts.toFixed(2)} pts`);
   }
 
-  // Phase specific guidance
   if (phase === "BALANCE") out.push("Balance regime: wait for edge + expansion candle; avoid mid-range churn.");
   if (phase === "EXPANSION") out.push("Expansion regime: watch for retest + acceptance; avoid chasing late bars.");
   if (phase.startsWith("ACCEPTANCE")) out.push("Acceptance regime: continuation favored; pullbacks should be smaller/controlled.");
@@ -253,7 +259,7 @@ function buildIfThen({ phase, balance, zones }) {
   return out.slice(0, 8);
 }
 
-// ---------------- route ----------------
+/* ---------------- route ---------------- */
 // GET /api/v1/market-narrator?symbol=SPY&tf=1h
 marketNarratorRouter.get("/market-narrator", async (req, res) => {
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
@@ -315,9 +321,10 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
     const institutional = ctx?.render?.institutional || [];
 
     const nearest = nearestAllowedZone({ price, negotiated, institutional });
+
     const inAllowed =
-      (ctx?.active?.negotiated && price != null) ||
-      (ctx?.active?.institutional && price != null);
+      Boolean(ctx?.active?.negotiated && price != null) ||
+      Boolean(ctx?.active?.institutional && price != null);
 
     const zones = {
       inAllowedZone: Boolean(inAllowed),
