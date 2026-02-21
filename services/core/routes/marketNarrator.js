@@ -166,13 +166,15 @@ function buildMacroShelves({ price }) {
 
 /* ---------------- Engine 2: wave + fib (read-only) ---------------- */
 
-// Locked: minor=1h, intermediate=4h
+// LOCKED (per your CSV reality):
+// - minor uses 1h
+// - intermediate uses 1h (NOT 4h) because anchors exist there today
 const ENGINE2_CTX = {
   minor: { tf: "1h", degree: "minor", wave: "W1" },
-  intermediate: { tf: "4h", degree: "intermediate", wave: "W1" },
+  intermediate: { tf: "1h", degree: "intermediate", wave: "W1" },
 };
 
-// Pull fib-levels payload (which contains anchors + signals)
+// Pull fib-levels payload (anchors + fib + signals are already computed by Engine 2)
 async function fetchFibLevels({ symbol, tf, degree, wave }) {
   const u = new URL(`${CORE_BASE}/api/v1/fib-levels`);
   u.searchParams.set("symbol", symbol);
@@ -180,62 +182,124 @@ async function fetchFibLevels({ symbol, tf, degree, wave }) {
   u.searchParams.set("degree", degree);
   u.searchParams.set("wave", wave);
   const r = await fetchJson(u.toString(), { timeoutMs: 15000 });
-  return (r.ok && r.json) ? r.json : null;
+  return r?.ok && r?.json ? r.json : null;
 }
 
-// Extract W1/W2 anchor prices if present
-function extractW1W2Anchors(payload) {
-  // supports various shapes; we try common spots
-  const anchors =
-    payload?.anchors ||
-    payload?.data?.anchors ||
-    payload?.fib?.anchors ||
-    null;
-
-  const w1 = anchors?.W1?.p ?? anchors?.w1?.p ?? anchors?.W1 ?? null;
-  const w2 = anchors?.W2?.p ?? anchors?.w2?.p ?? anchors?.W2 ?? null;
-
-  const p1 = toNum(w1);
-  const p2 = toNum(w2);
-
-  if (p1 == null || p2 == null) return null;
-
-  return { W1: p1, W2: p2 };
+/**
+ * Engine 2 fib-levels@3 schema (confirmed):
+ * payload.anchors.low/high
+ * payload.anchors.waveMarks.W1/W2/W3/W4 (with p/t/tSec)
+ * payload.signals.tag (e.g. "W2")
+ * payload.fib.r382/r500/r618/invalidation
+ *
+ * We treat 0 or missing as NOT real.
+ */
+function isRealPrice(p) {
+  const n = Number(p);
+  return Number.isFinite(n) && n > 0;
 }
 
-// Build standard fib levels from W1/W2
-function computeFibLevelsFromW1W2({ W1, W2 }) {
-  const hi = Math.max(W1, W2);
-  const lo = Math.min(W1, W2);
-  const range = hi - lo;
-  if (!(range > 0)) return null;
+function getWaveMark(payload, key) {
+  const p = payload?.anchors?.waveMarks?.[key]?.p;
+  return isRealPrice(p) ? Number(p) : null;
+}
 
-  // retracements from hi down
-  const retr = [0.382, 0.5, 0.618, 0.786].map(r => ({
-    tag: `${Math.round(r * 1000) / 10}%`,
-    price: hi - range * r,
-    kind: "RETRACEMENT"
-  }));
+// Extract W1/W2 prices (and low/high if present)
+function extractWaveContext(payload) {
+  if (!payload || !payload.ok) return null;
 
-  // extensions above hi (common)
-  const ext = [1.0, 1.272, 1.618].map(e => ({
-    tag: `${e.toFixed(3)}x`,
-    price: hi + range * (e - 1.0),
-    kind: "EXTENSION"
-  }));
+  const low = payload?.anchors?.low;
+  const high = payload?.anchors?.high;
 
-  // also include boundaries
-  const base = [
-    { tag: "LOW", price: lo, kind: "ANCHOR" },
-    { tag: "HIGH", price: hi, kind: "ANCHOR" }
-  ];
+  const ctx = {
+    low: isRealPrice(low) ? Number(low) : null,
+    high: isRealPrice(high) ? Number(high) : null,
+    direction: payload?.anchors?.direction || null,
+    tag: payload?.signals?.tag ?? payload?.anchors?.context ?? null, // usually "W2"
+    waveMarks: {
+      W1: getWaveMark(payload, "W1"),
+      W2: getWaveMark(payload, "W2"),
+      W3: getWaveMark(payload, "W3"),
+      W4: getWaveMark(payload, "W4"),
+    },
+    fib: payload?.fib || null, // already computed by Engine 2
+  };
 
-  const all = [...base, ...retr, ...ext]
-    .map(x => ({ ...x, price: round2(x.price) }))
-    .filter(x => x.price != null)
-    .sort((a, b) => a.price - b.price);
+  return ctx;
+}
 
-  return { lo: round2(lo), hi: round2(hi), range: round2(range), levels: all };
+// Convert Engine 2 fib object into a consistent list for "nearest fib level" logic
+function buildFibLevelsFromEngine2(payload) {
+  const ctx = extractWaveContext(payload);
+  if (!ctx) return null;
+
+  // Prefer Engine2's computed fib levels directly
+  const f = ctx.fib || {};
+  const levels = [];
+
+  // Anchors
+  if (ctx.low != null) levels.push({ tag: "LOW", kind: "ANCHOR", price: round2(ctx.low) });
+  if (ctx.high != null) levels.push({ tag: "HIGH", kind: "ANCHOR", price: round2(ctx.high) });
+
+  // Retracements (Engine 2 naming)
+  if (isRealPrice(f.r382)) levels.push({ tag: "38.2%", kind: "RETRACEMENT", price: round2(f.r382) });
+  if (isRealPrice(f.r500)) levels.push({ tag: "50.0%", kind: "RETRACEMENT", price: round2(f.r500) });
+  if (isRealPrice(f.r618)) levels.push({ tag: "61.8%", kind: "RETRACEMENT", price: round2(f.r618) });
+
+  // Invalidation (important line)
+  if (isRealPrice(f.invalidation)) levels.push({ tag: "INVALIDATION", kind: "RISK_LINE", price: round2(f.invalidation) });
+
+  // Keep levels sorted and unique
+  const uniq = [];
+  for (const l of levels) {
+    if (l?.price == null) continue;
+    const key = `${l.kind}|${l.tag}|${l.price}`;
+    if (!uniq.find((x) => `${x.kind}|${x.tag}|${x.price}` === key)) uniq.push(l);
+  }
+  uniq.sort((a, b) => a.price - b.price);
+
+  return {
+    ok: true,
+    meta: payload?.meta || null,
+    tag: ctx.tag,
+    direction: ctx.direction,
+    waveMarks: ctx.waveMarks,
+    levels: uniq,
+  };
+}
+
+// Wave 3 target projection when W3 mark is missing (W3 pending):
+// target = W2 + ratio * (W1_high - W1_low)
+function computeWave3TargetsFromW1({ payload }) {
+  const ctx = extractWaveContext(payload);
+  if (!ctx) return null;
+
+  const w1Low = ctx.low;
+  const w1High = ctx.high;
+  const w2 = ctx.waveMarks?.W2;
+
+  // Need W1 low/high AND W2 mark
+  if (w1Low == null || w1High == null || w2 == null) return null;
+
+  const wave1Len = Math.abs(w1High - w1Low);
+  if (!(wave1Len > 0)) return null;
+
+  const dir = (ctx.direction || "up").toLowerCase(); // usually "up"
+  const ratios = [1.0, 1.272, 1.618];
+
+  const targets = ratios.map((r) => {
+    const t = dir === "down" ? (w2 - r * wave1Len) : (w2 + r * wave1Len);
+    return { ratio: r, price: round2(t) };
+  });
+
+  return {
+    w3Pending: ctx.waveMarks?.W3 == null, // true when W3 mark not set
+    wave1Len: round2(wave1Len),
+    w2: round2(w2),
+    direction: dir,
+    targets,
+    primary618: targets.find((t) => t.ratio === 1.618)?.price ?? null,
+  };
 }
 
 function nearestFibLevel({ price, fib, atr }) {
@@ -252,7 +316,9 @@ function nearestFibLevel({ price, fib, atr }) {
   const nearPts = dPts != null ? round2(dPts) : null;
   const nearAtr = (dPts != null && Number.isFinite(atr) && atr > 0) ? round2(dPts / atr) : null;
 
-  return best ? { tag: best.tag, kind: best.kind, price: best.price, distancePts: nearPts, distanceAtr: nearAtr } : null;
+  return best
+    ? { tag: best.tag, kind: best.kind, price: best.price, distancePts: nearPts, distanceAtr: nearAtr }
+    : null;
 }
 
 /* ---------------- market structure helpers ---------------- */
@@ -279,6 +345,33 @@ function summarizeImpulse(bar, atr) {
   };
 }
 
+function computeWave3Targets({ wave1Low, wave1High, wave2Price, direction = "up" }) {
+  const lo = toNum(wave1Low);
+  const hi = toNum(wave1High);
+  const w2 = toNum(wave2Price);
+  if (lo == null || hi == null || w2 == null) return null;
+
+  const wave1Len = Math.abs(hi - lo);
+  if (!(wave1Len > 0)) return null;
+
+  const ratios = [1.0, 1.272, 1.618];
+
+  const targets = ratios.map((r) => {
+    const price =
+      direction === "down"
+        ? (w2 - r * wave1Len)
+        : (w2 + r * wave1Len);
+
+    return { ratio: r, price: round2(price) };
+  });
+
+  return {
+    wave1Len: round2(wave1Len),
+    wave2Price: round2(w2),
+    direction,
+    targets,
+  };
+}
 function rangeHiLo(bars) {
   let hi = -Infinity, lo = Infinity;
   for (const b of bars) {
