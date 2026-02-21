@@ -3,7 +3,7 @@
 //
 // v4 upgrades:
 // ✅ style=descriptive → EXACTLY 3 paragraphs every time
-// ✅ Layer 1 covers last 6 hours (6 x 1h candles)
+// ✅ Layer 1 covers last 24 hours (6 x 1h candles)
 // ✅ Wick detectors:
 //    - lower wick buyback (bullish defense / absorption)
 //    - upper wick rejection (seller rejection / supply)
@@ -439,7 +439,7 @@ function buildKeyLevels({ balance, zones, macroShelves, fibMinor, fibInter }) {
 }
 
 // Wick rejection detector (lower/upper)
-function detectWickRejections({ bars, atr, keyLevels = [], windowBars = 6, side = "LOWER" }) {
+function detectWickRejections({ bars, atr, keyLevels = [], windowBars = 24, side = "LOWER" }) {
   if (!Array.isArray(bars) || bars.length < 2 || !Number.isFinite(atr) || atr <= 0) {
     return { detected: false, count: 0, strongest: null, hits: [] };
   }
@@ -493,7 +493,7 @@ function detectWickRejections({ bars, atr, keyLevels = [], windowBars = 6, side 
 }
 
 function buildLayer1RecentNarrative({ bars, atr, keyLevels }) {
-  const windowBars = 6;
+  const windowBars = 24;
   const slice = bars.slice(-windowBars);
 
   const types = slice.map((b) => {
@@ -522,10 +522,10 @@ function buildLayer1RecentNarrative({ bars, atr, keyLevels }) {
   const upperWicks = detectWickRejections({ bars, atr, keyLevels, windowBars, side: "UPPER" });
 
   let text = "";
-  if (sequence === "BUYERS_PUSH") text = "Last 6 hours: buyers pushed with expanding candles and limited hesitation.";
-  else if (sequence === "SELLERS_PUSH") text = "Last 6 hours: sellers pushed with expanding candles and limited bounce.";
-  else if (sequence === "PUSH_AND_PULLBACK") text = "Last 6 hours: push-and-pullback sequence (initiative move met with counter-pressure).";
-  else text = "Last 6 hours: mixed rotation with no clean directional dominance.";
+  if (sequence === "BUYERS_PUSH") text = "Last 24 hours: buyers pushed with expanding candles and limited hesitation.";
+  else if (sequence === "SELLERS_PUSH") text = "Last 24 hours: sellers pushed with expanding candles and limited bounce.";
+  else if (sequence === "PUSH_AND_PULLBACK") text = "Last 24 hours: push-and-pullback sequence (initiative move met with counter-pressure).";
+  else text = "Last 24 hours: mixed rotation with no clean directional dominance.";
 
   if (lowerWicks.detected && lowerWicks.strongest) {
     const s = lowerWicks.strongest;
@@ -633,7 +633,7 @@ function buildLayer3NextNarrative({ zones, balance, macroShelves, fibCtx }) {
 /* ---------------- Narrative formatting ---------------- */
 
 function buildNarrativeTextDescriptive({ layer1, layer2, layer3 }) {
-  const p1 = layer1?.text || "Last 6 hours: no recent narrative available.";
+  const p1 = layer1?.text || "Last 24 hours: no recent narrative available.";
   const p2 = layer2?.text || "Right now: no current narrative available.";
   const p3 = layer3?.text || "What I'm watching next: no next-step narrative available.";
   return `${p1}\n\n${p2}\n\n${p3}`;
