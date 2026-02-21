@@ -68,6 +68,41 @@ async function fetchJson(url, { timeoutMs = 15000 } = {}) {
   }
 }
 
+// ✅ Backward-compat helper (prevents crashes if old code still calls computeFibLevelsFromW1W2)
+function computeFibLevelsFromW1W2({ W1, W2 }) {
+  const a = toNum(W1);
+  const b = toNum(W2);
+  if (a == null || b == null) return null;
+
+  const hi = Math.max(a, b);
+  const lo = Math.min(a, b);
+  const range = hi - lo;
+  if (!(range > 0)) return null;
+
+  const retr = [0.382, 0.5, 0.618, 0.786].map((r) => ({
+    tag: `${Math.round(r * 1000) / 10}%`,
+    price: round2(hi - range * r),
+    kind: "RETRACEMENT",
+  }));
+
+  const ext = [1.0, 1.272, 1.618].map((e) => ({
+    tag: `${e.toFixed(3)}x`,
+    price: round2(hi + range * (e - 1.0)),
+    kind: "EXTENSION",
+  }));
+
+  const base = [
+    { tag: "LOW", price: round2(lo), kind: "ANCHOR" },
+    { tag: "HIGH", price: round2(hi), kind: "ANCHOR" },
+  ];
+
+  const levels = [...base, ...retr, ...ext]
+    .filter((x) => x.price != null)
+    .sort((x, y) => x.price - y.price);
+
+  return { lo: round2(lo), hi: round2(hi), range: round2(range), levels };
+}
+
 function computeATR(bars, len = 14) {
   if (!Array.isArray(bars) || bars.length < len + 2) return null;
   const trs = [];
