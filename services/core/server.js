@@ -21,8 +21,7 @@ import dashboardSnapshotRouter from "./routes/dashboardSnapshot.js";
 import replayRouter from "./routes/replay.js";
 import { scalpStatusRouter } from "./routes/scalpStatus.js";
 import { alertsRouter } from "./routes/alerts.js";
-import marketNarratorAIRouter from "./routes/marketNarratorAI.js";
-
+import marketNarratorRouter from "./routes/marketNarrator.js";
 
 
 
