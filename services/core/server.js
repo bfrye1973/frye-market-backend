@@ -132,6 +132,7 @@ app.use("/api/v1", dashboardSnapshotRouter);
 app.use("/api/v1", replayRouter);
 app.use("/api/v1", scalpStatusRouter);
 app.use("/api/v1/alerts", alertsRouter);
+app.use("/api/v1", marketNarratorRouter);
 app.use("/api/v1", marketNarratorAIRouter);
 
 
