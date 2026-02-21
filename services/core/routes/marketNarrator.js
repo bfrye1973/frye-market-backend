@@ -40,6 +40,18 @@ function round2(n) {
   return Number.isFinite(x) ? Math.round(x * 100) / 100 : null;
 }
 
+// ✅ Backward-compat helper (prevents crashes if old code still calls extractW1W2Anchors)
+function extractW1W2Anchors(payload) {
+  const w1 = payload?.anchors?.waveMarks?.W1?.p;
+  const w2 = payload?.anchors?.waveMarks?.W2?.p;
+
+  const p1 = toNum(w1);
+  const p2 = toNum(w2);
+
+  if (!p1 || p1 <= 0 || !p2 || p2 <= 0) return null;
+
+  return { W1: p1, W2: p2 };
+}
 async function fetchJson(url, { timeoutMs = 15000 } = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
