@@ -194,6 +194,7 @@ function buildMacroShelves({ price }) {
 
 /* ---------------- Engine 2 (Fib/Wave) truth parsing ---------------- */
 
+// Degrees we want inside narrator
 const ENGINE2_CTX = {
   primary: { tf: "1d", degree: "primary", wave: "W1" },
   intermediate: { tf: "1h", degree: "intermediate", wave: "W1" },
@@ -205,14 +206,55 @@ function isRealPrice(p) {
   return Number.isFinite(n) && n > 0;
 }
 
-async function fetchFibLevels({ symbol, tf, degree, wave }) {
-  const u = new URL(`${CORE_BASE}/api/v1/fib-levels`);
-  u.searchParams.set("symbol", symbol);
-  u.searchParams.set("tf", tf);
-  u.searchParams.set("degree", degree);
-  u.searchParams.set("wave", wave);
-  const r = await fetchJson(u.toString(), { timeoutMs: 15000 });
-  return r?.ok && r?.json ? r.json : null;
+// Robust fetch:
+// 1) try CORE_BASE loopback
+// 2) fallback to the same host that served this request (req host)
+// Returns { ok, baseUsed, payload, errors[] }
+async function fetchFibLevelsRobust(req, { symbol, tf, degree, wave }) {
+  const bases = [];
+
+  // 1) Loopback base (fast)
+  if (CORE_BASE) bases.push(String(CORE_BASE));
+
+  // 2) Same request host (most reliable on Render)
+  const proto = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
+  const host = req.get?.("host");
+  if (host) bases.push(`${proto}://${host}`);
+
+  const errors = [];
+
+  for (const base of bases) {
+    try {
+      const u = new URL(`${base}/api/v1/fib-levels`);
+      u.searchParams.set("symbol", symbol);
+      u.searchParams.set("tf", tf);
+      u.searchParams.set("degree", degree);
+      u.searchParams.set("wave", wave);
+
+      const r = await fetchJson(u.toString(), { timeoutMs: 15000 });
+
+      // We accept only a valid fib-levels payload: HTTP OK + json.ok === true
+      if (r?.ok && r?.json && r.json.ok === true) {
+        return { ok: true, baseUsed: base, payload: r.json, errors };
+      }
+
+      errors.push({
+        base,
+        httpOk: Boolean(r?.ok),
+        status: r?.status ?? 0,
+        sample: String(r?.text || "").slice(0, 160),
+      });
+    } catch (e) {
+      errors.push({
+        base,
+        httpOk: false,
+        status: 0,
+        sample: String(e?.message || e).slice(0, 160),
+      });
+    }
+  }
+
+  return { ok: false, baseUsed: null, payload: null, errors };
 }
 
 function getWaveMark(payload, key) {
@@ -228,7 +270,7 @@ function parseFibLevelsV3(payload) {
   const low = payload?.anchors?.low;
   const high = payload?.anchors?.high;
 
-  const out = {
+  return {
     ok: true,
     schema,
     meta: payload?.meta || null,
@@ -259,8 +301,6 @@ function parseFibLevelsV3(payload) {
       reference_786: isRealPrice(payload?.fib?.reference_786) ? Number(payload.fib.reference_786) : null,
     },
   };
-
-  return out;
 }
 
 function buildFibLevelsList(e2Parsed) {
@@ -268,15 +308,22 @@ function buildFibLevelsList(e2Parsed) {
 
   const levels = [];
 
-  if (e2Parsed.anchors?.low != null) levels.push({ tag: "LOW", kind: "ANCHOR", price: round2(e2Parsed.anchors.low) });
-  if (e2Parsed.anchors?.high != null) levels.push({ tag: "HIGH", kind: "ANCHOR", price: round2(e2Parsed.anchors.high) });
+  if (e2Parsed.anchors?.low != null)
+    levels.push({ tag: "LOW", kind: "ANCHOR", price: round2(e2Parsed.anchors.low) });
+  if (e2Parsed.anchors?.high != null)
+    levels.push({ tag: "HIGH", kind: "ANCHOR", price: round2(e2Parsed.anchors.high) });
 
-  if (e2Parsed.fib?.r382 != null) levels.push({ tag: "38.2%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r382) });
-  if (e2Parsed.fib?.r500 != null) levels.push({ tag: "50.0%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r500) });
-  if (e2Parsed.fib?.r618 != null) levels.push({ tag: "61.8%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r618) });
-  if (e2Parsed.fib?.reference_786 != null) levels.push({ tag: "78.6%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.reference_786) });
+  if (e2Parsed.fib?.r382 != null)
+    levels.push({ tag: "38.2%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r382) });
+  if (e2Parsed.fib?.r500 != null)
+    levels.push({ tag: "50.0%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r500) });
+  if (e2Parsed.fib?.r618 != null)
+    levels.push({ tag: "61.8%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r618) });
+  if (e2Parsed.fib?.reference_786 != null)
+    levels.push({ tag: "78.6%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.reference_786) });
 
-  if (e2Parsed.fib?.invalidation != null) levels.push({ tag: "INVALIDATION", kind: "RISK_LINE", price: round2(e2Parsed.fib.invalidation) });
+  if (e2Parsed.fib?.invalidation != null)
+    levels.push({ tag: "INVALIDATION", kind: "RISK_LINE", price: round2(e2Parsed.fib.invalidation) });
 
   const uniq = [];
   for (const l of levels) {
@@ -291,6 +338,7 @@ function buildFibLevelsList(e2Parsed) {
 
 function computeProjectedW3(e2Parsed) {
   if (!e2Parsed?.ok) return null;
+
   const tag = String(e2Parsed.tag || "").toUpperCase();
   const w3 = e2Parsed.waveMarks?.W3;
   const w2 = e2Parsed.waveMarks?.W2;
@@ -309,6 +357,7 @@ function computeProjectedW3(e2Parsed) {
 
   const dir = String(e2Parsed.direction || "up").toLowerCase();
   const ratios = [1.0, 1.272, 1.618];
+
   const targets = ratios.map((r) => {
     const px = dir === "down" ? w2 - r * wave1Len : w2 + r * wave1Len;
     return { ratio: r, price: round2(px) };
