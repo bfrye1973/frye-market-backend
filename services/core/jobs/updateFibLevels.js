@@ -6,10 +6,17 @@
 //
 // - Forgiving parser: skips bad rows, logs warnings, does NOT crash on one mistake
 // - Uses AZ time (America/Phoenix) by applying fixed -07:00 offset
-// - Builds W1 and W4 fib anchors per (symbol, degree, tf)
-// - Passes wave label marks (MARK) as anchors.waveMarks with tSec for candle locking
+// - Builds fib outputs per (symbol, degree, tf):
+//     - W1 fib (requires W1 LOW + HIGH)
+//     - W4 fib (optional; requires W4 LOW + HIGH)
+// - Passes MARK wave labels (MARK) as anchors.waveMarks with tSec for candle locking
 //
 // Candle truth source: backend-1 /api/v1/ohlc
+//
+// IMPORTANT FIX:
+// - Context/tag must NOT be hard-coded to "W2"
+// - Context is derived from the highest available MARK (W5→W4→W3→W2→W1)
+// - This makes PRIMARY/INTERMEDIATE/MINOR/ (later MINUTE) alignment readable + correct
 
 import fs from "fs";
 import path from "path";
@@ -22,8 +29,13 @@ const __dirname = path.dirname(__filename);
 const CSV_FILE = path.resolve(__dirname, "../data/fib-input.csv");
 const OUTFILE = path.resolve(__dirname, "../data/fib-levels.json");
 
-// backend-1 candle truth
-const API_BASE = process.env.FRYE_API_BASE || `http://127.0.0.1:${process.env.PORT || 3001}`;
+// backend-1 candle truth (Render-safe loopback default)
+const DEFAULT_PORT = Number(process.env.PORT) || 8080;
+const API_BASE =
+  process.env.FRYE_API_BASE && String(process.env.FRYE_API_BASE).trim().length
+    ? String(process.env.FRYE_API_BASE).trim()
+    : `http://127.0.0.1:${DEFAULT_PORT}`;
+
 const OHLC_PATH = "/api/v1/ohlc";
 
 const DEFAULT_LIMIT = Number(process.env.FIB_OHLC_LIMIT || 600);
@@ -38,7 +50,6 @@ function atomicWriteJson(filepath, obj) {
 // Phoenix is UTC-7 year-round (no DST)
 function azToEpochSeconds(t) {
   if (!t) return null;
-
   const s = String(t).trim();
   if (!s) return null;
 
@@ -81,7 +92,41 @@ function parseCsv(text) {
   return { header, rows };
 }
 
+function toNum(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normMark(dtAz, price) {
+  const p = toNum(price);
+  if (!Number.isFinite(p)) return null;
+  const t = dtAz ? String(dtAz).trim() : null;
+  const tSec = azToEpochSeconds(t);
+  return { p, t: t || null, tSec: Number.isFinite(tSec) ? tSec : null };
+}
+
+function keyFor(symbol, degree, tf) {
+  return `${symbol}__${degree}__${tf}`;
+}
+
+function deriveContextFromMarks(marks) {
+  // Highest completed wave wins (locks signals.tag + anchors.context)
+  if (!marks || typeof marks !== "object") return "W2"; // default expectation for W1 fib outputs
+  const has = (k) => !!(marks?.[k] && Number.isFinite(Number(marks[k].p)) && Number(marks[k].p) > 0);
+  if (has("W5")) return "W5";
+  if (has("W4")) return "W4";
+  if (has("W3")) return "W3";
+  if (has("W2")) return "W2";
+  if (has("W1")) return "W1";
+  return "W2";
+}
+
+const barsCache = new Map(); // key: symbol__tf__limit__mode
+
 async function fetchOhlcBars({ symbol, tf }) {
+  const cacheKey = `${symbol}__${tf}__${DEFAULT_LIMIT}__${MODE}`;
+  if (barsCache.has(cacheKey)) return barsCache.get(cacheKey);
+
   const url = new URL(`${API_BASE}${OHLC_PATH}`);
   url.searchParams.set("symbol", symbol);
   url.searchParams.set("tf", tf);
@@ -101,24 +146,9 @@ async function fetchOhlcBars({ symbol, tf }) {
     data?.data ||
     (Array.isArray(data) ? data : null);
 
-  return normalizeBars(rawBars || []);
-}
-
-function keyFor(symbol, degree, tf) {
-  return `${symbol}__${degree}__${tf}`;
-}
-
-function toNum(x) {
-  const n = Number(x);
-  return Number.isFinite(n) ? n : null;
-}
-
-function normMark(dtAz, price) {
-  const p = toNum(price);
-  if (!Number.isFinite(p)) return null;
-  const t = dtAz ? String(dtAz).trim() : null;
-  const tSec = azToEpochSeconds(t);
-  return { p, t: t || null, tSec: Number.isFinite(tSec) ? tSec : null };
+  const normalized = normalizeBars(rawBars || []);
+  barsCache.set(cacheKey, normalized);
+  return normalized;
 }
 
 (async function main() {
@@ -156,7 +186,6 @@ function normMark(dtAz, price) {
 
   // Accumulate per (symbol,degree,tf)
   const buckets = new Map();
-
   const warn = (msg) => console.log(`[fib][WARN] ${msg}`);
 
   for (const r of rows) {
@@ -204,7 +233,6 @@ function normMark(dtAz, price) {
       }
       b.w4[kind.toLowerCase()] = normMark(dtAz, price);
     } else if (wave === "MARK") {
-      // kind holds which wave label: W1..W5
       if (!["W1", "W2", "W3", "W4", "W5"].includes(kind)) {
         warn(`Line ${r.__line}: MARK kind must be W1..W5`);
         continue;
@@ -219,71 +247,110 @@ function normMark(dtAz, price) {
   const items = [];
 
   for (const b of buckets.values()) {
-    // Build waveMarks
     const waveMarks = Object.keys(b.marks).length ? b.marks : null;
+    const derivedContext = deriveContextFromMarks(waveMarks);
 
-    // Compute W1 fib if we have both endpoints
-    if (b.w1.low && b.w1.high && b.w1.high.p > b.w1.low.p) {
-      const bars = await fetchOhlcBars({ symbol: b.symbol, tf: b.tf });
-      const computed = computeFibFromAnchors({
-        symbol: b.symbol,
-        tf: b.tf,
-        anchorLow: b.w1.low.p,
-        anchorHigh: b.w1.high.p,
-        context: "W2",
-        bars,
-      });
-
-      items.push({
-        ...computed,
-        meta: {
-          ...(computed.meta || {}),
-          schema: "fib-levels@3",
-          symbol: b.symbol,
-          tf: b.tf,
-          degree: b.degree,
-          wave: "W1",
-          generated_at_utc: computed?.meta?.generated_at_utc || new Date().toISOString(),
-        },
-        anchors: {
-          ...(computed.anchors || {}),
-          a: b.w1.low,
-          b: b.w1.high,
-          waveMarks,
-        },
-      });
+    // Fetch bars once per bucket (symbol,tf)
+    let bars = [];
+    try {
+      bars = await fetchOhlcBars({ symbol: b.symbol, tf: b.tf });
+    } catch (e) {
+      warn(`OHLC fetch failed for ${b.symbol} ${b.tf}: ${String(e?.message || e).slice(0, 200)}`);
+      bars = [];
     }
 
-    // Compute W4 fib if we have both endpoints
-    if (b.w4.low && b.w4.high && b.w4.high.p > b.w4.low.p) {
-      const bars = await fetchOhlcBars({ symbol: b.symbol, tf: b.tf });
-      const computed = computeFibFromAnchors({
-        symbol: b.symbol,
-        tf: b.tf,
-        anchorLow: b.w4.low.p,
-        anchorHigh: b.w4.high.p,
-        context: "W4",
-        bars,
-      });
+    // --- W1 output (primary/intermediate/minor/minute all use W1 anchors when present) ---
+    if (b.w1.low && b.w1.high) {
+      const lo = b.w1.low.p;
+      const hi = b.w1.high.p;
+      if (!(Number.isFinite(lo) && Number.isFinite(hi) && hi !== lo)) {
+        warn(`Bad W1 anchors for ${b.symbol} ${b.degree} ${b.tf}`);
+      } else {
+        const anchorLow = Math.min(lo, hi);
+        const anchorHigh = Math.max(lo, hi);
 
-      items.push({
-        ...computed,
-        meta: {
-          ...(computed.meta || {}),
-          schema: "fib-levels@3",
+        const computed = computeFibFromAnchors({
           symbol: b.symbol,
           tf: b.tf,
-          degree: b.degree,
-          wave: "W4",
-          generated_at_utc: computed?.meta?.generated_at_utc || new Date().toISOString(),
-        },
-        anchors: {
-          ...(computed.anchors || {}),
-          a: b.w4.low,
-          b: b.w4.high,
-          waveMarks,
-        },
-      });
+          anchorLow,
+          anchorHigh,
+          context: derivedContext, // ✅ FIX: no more hard-coded "W2"
+          bars,
+        });
+
+        items.push({
+          ...computed,
+          meta: {
+            ...(computed.meta || {}),
+            schema: "fib-levels@3",
+            symbol: b.symbol,
+            tf: b.tf,
+            degree: b.degree,
+            wave: "W1",
+            generated_at_utc: computed?.meta?.generated_at_utc || new Date().toISOString(),
+          },
+          anchors: {
+            ...(computed.anchors || {}),
+            // Preserve original row anchors exactly as given (a=LOW row, b=HIGH row)
+            a: b.w1.low,
+            b: b.w1.high,
+            // Pass through marks for wave-state alignment
+            waveMarks,
+            // Ensure context aligns with derivedContext
+            context: derivedContext,
+          },
+          // Ensure signals.tag matches derived context (if fibEngine didn't set it)
+          signals: {
+            ...(computed.signals || {}),
+            tag: computed?.signals?.tag || derivedContext,
+          },
+        });
+      }
+    }
+
+    // --- W4 output (optional) ---
+    if (b.w4.low && b.w4.high) {
+      const lo = b.w4.low.p;
+      const hi = b.w4.high.p;
+      if (!(Number.isFinite(lo) && Number.isFinite(hi) && hi !== lo)) {
+        warn(`Bad W4 anchors for ${b.symbol} ${b.degree} ${b.tf}`);
+      } else {
+        const anchorLow = Math.min(lo, hi);
+        const anchorHigh = Math.max(lo, hi);
+
+        const computed = computeFibFromAnchors({
+          symbol: b.symbol,
+          tf: b.tf,
+          anchorLow,
+          anchorHigh,
+          context: "W4",
+          bars,
+        });
+
+        items.push({
+          ...computed,
+          meta: {
+            ...(computed.meta || {}),
+            schema: "fib-levels@3",
+            symbol: b.symbol,
+            tf: b.tf,
+            degree: b.degree,
+            wave: "W4",
+            generated_at_utc: computed?.meta?.generated_at_utc || new Date().toISOString(),
+          },
+          anchors: {
+            ...(computed.anchors || {}),
+            a: b.w4.low,
+            b: b.w4.high,
+            waveMarks,
+            context: "W4",
+          },
+          signals: {
+            ...(computed.signals || {}),
+            tag: computed?.signals?.tag || "W4",
+          },
+        });
+      }
     }
   }
 
