@@ -1,11 +1,14 @@
 // src/services/core/logic/fibEngine.js
 // Engine 2 — Fib Engine (manual anchors, geometric confluence only)
-// LOCKED:
+//
+// LOCKED (updated):
 // - 1h only in v1 (job enforces)
 // - 74% hard invalidation gate
 // - 78.6% optional reference only
 // - W2/W4 tagging is manual-only (context field), no guessing
 // - ATR computed internally (optional, graceful fallback)
+// - ✅ SAFE MODE (LOCKED by user): invalidation is determined by the **last 1h CLOSE**,
+//   not intrabar touches. Reset requires a 1h close back above the invalidation line.
 
 export function computeFibFromAnchors({
   symbol,
@@ -20,7 +23,10 @@ export function computeFibFromAnchors({
   near50FixedMin = 0.25, // SPY-friendly default; if ATR missing, we still have a sane threshold
   minSpanAtr = 0, // v1: do NOT reject small spans (minute waves). Keep 0. If you later want it: set 3–5.
   invalidationGate = 0.74,
-  invalidationRef = 0.786
+  invalidationRef = 0.786,
+
+  // ✅ NEW: invalidation mode (safe default)
+  invalidationMode = "close" // "close" | "touch"
 }) {
   // Basic validation
   const low = Number(anchorLow);
@@ -37,8 +43,10 @@ export function computeFibFromAnchors({
   // For v1 we store low/high explicitly; treat as bullish impulse low→high.
   const direction = "up";
 
-  // Latest price from bars if available (close of last bar); else null
+  // Latest bar (normalized bars are {t,o,h,l,c,v})
   const last = bars.length ? bars[bars.length - 1] : null;
+
+  // Price we expose in diagnostics: last close
   const price = last ? Number(last.c) : null;
 
   // Compute ATR (optional)
@@ -62,8 +70,8 @@ export function computeFibFromAnchors({
   const r618 = round2(high - 0.618 * span);
 
   // Invalidation levels
-  const invGate = round2(high - invalidationGate * span); // HARD FAIL
-  const invRef = round2(high - invalidationRef * span);   // reference only
+  const invGate = round2(high - invalidationGate * span); // HARD FAIL gate (74%)
+  const invRef = round2(high - invalidationRef * span);   // reference only (78.6%)
 
   // Retrace zone bounds (order-safe)
   const retraceLo = Math.min(r618, r382);
@@ -77,51 +85,101 @@ export function computeFibFromAnchors({
     tag: context ?? null
   };
 
-  // If we have a price, compute states
-  if (Number.isFinite(price)) {
-    // Hard invalidation (bullish: price below invGate)
-    if (price < invGate) {
-      return {
-        ok: true,
-        meta: {
-          schema: "fib-levels@1",
-          symbol,
-          tf,
-          generated_at_utc: nowUtcISO
-        },
-        anchors: { low, high, direction, context: context ?? null },
-        fib: {
-          r382,
-          r500,
-          r618,
-          invalidation: invGate,
-          reference_786: invRef
-        },
-        signals: {
-          inRetraceZone: false,
-          near50: false,
-          invalidated: true,
-          tag: context ?? null
-        },
-        diagnostics: {
-          price,
-          atr: atrOk ? round4(atr) : null,
-          atrPeriod,
-          near50Threshold: atrOk ? round4(Math.max(near50AtrFrac * atr, near50FixedMin)) : near50FixedMin,
-          span: round4(span),
-          spanAtr: atrOk ? round4(spanAtr) : null,
-          note: "INVALIDATED: price breached 74% retrace gate."
-        }
-      };
-    }
-
-    // Retrace zone membership (38.2 → 61.8)
-    signals.inRetraceZone = price >= retraceLo && price <= retraceHi;
-
-    // Near 50% (center of gravity)
-    const threshold = atrOk ? Math.max(near50AtrFrac * atr, near50FixedMin) : near50FixedMin;
-    signals.near50 = Math.abs(price - r500) <= threshold;
+  // If we have no bars/price, return valid shell
+  if (!Number.isFinite(price)) {
+    return {
+      ok: true,
+      meta: {
+        schema: "fib-levels@1",
+        symbol,
+        tf,
+        generated_at_utc: nowUtcISO
+      },
+      anchors: { low, high, direction, context: context ?? null },
+      fib: {
+        r382,
+        r500,
+        r618,
+        invalidation: invGate,
+        reference_786: invRef
+      },
+      signals,
+      diagnostics: {
+        price: null,
+        atr: atrOk ? round4(atr) : null,
+        atrPeriod,
+        near50Threshold: atrOk ? round4(Math.max(near50AtrFrac * atr, near50FixedMin)) : near50FixedMin,
+        span: round4(span),
+        spanAtr: atrOk ? round4(spanAtr) : null,
+        note: "NO_PRICE: last close not available."
+      }
+    };
   }
+
+  // ✅ SAFE invalidation evaluation
+  // - close mode (LOCKED): use last close only
+  // - touch mode: use last low (intrabar breach)
+  const lastClose = Number(last?.c);
+  const lastLow = Number(last?.l);
+
+  const mode = String(invalidationMode || "close").toLowerCase();
+  const evalPx =
+    mode === "touch"
+      ? (Number.isFinite(lastLow) ? lastLow : lastClose)
+      : lastClose;
+
+  const invalidatedNow = Number.isFinite(evalPx) ? evalPx < invGate : false;
+
+  if (invalidatedNow) {
+    // Hard invalidation
+    signals.invalidated = true;
+
+    // We still return ok:true (this is a *valid* computation with an invalidated state)
+    return {
+      ok: true,
+      meta: {
+        schema: "fib-levels@1",
+        symbol,
+        tf,
+        generated_at_utc: nowUtcISO
+      },
+      anchors: { low, high, direction, context: context ?? null },
+      fib: {
+        r382,
+        r500,
+        r618,
+        invalidation: invGate,
+        reference_786: invRef
+      },
+      signals: {
+        inRetraceZone: false,
+        near50: false,
+        invalidated: true,
+        tag: context ?? null
+      },
+      diagnostics: {
+        price: round2(lastClose),
+        atr: atrOk ? round4(atr) : null,
+        atrPeriod,
+        near50Threshold: atrOk ? round4(Math.max(near50AtrFrac * atr, near50FixedMin)) : near50FixedMin,
+        span: round4(span),
+        spanAtr: atrOk ? round4(spanAtr) : null,
+        invalidationMode: mode,
+        invalidationEvalPrice: round2(evalPx),
+        note:
+          mode === "touch"
+            ? "INVALIDATED: intrabar low breached 74% retrace gate."
+            : "INVALIDATED: 1h close breached 74% retrace gate."
+      }
+    };
+  }
+
+  // Retrace zone membership (38.2 → 61.8)
+  signals.inRetraceZone = price >= retraceLo && price <= retraceHi;
+
+  // Near 50% (center of gravity)
+  const threshold = atrOk ? Math.max(near50AtrFrac * atr, near50FixedMin) : near50FixedMin;
+  signals.near50 = Math.abs(price - r500) <= threshold;
 
   // Normal valid output
   return {
@@ -142,12 +200,14 @@ export function computeFibFromAnchors({
     },
     signals,
     diagnostics: {
-      price: Number.isFinite(price) ? round2(price) : null,
+      price: round2(lastClose),
       atr: atrOk ? round4(atr) : null,
       atrPeriod,
       near50Threshold: atrOk ? round4(Math.max(near50AtrFrac * atr, near50FixedMin)) : near50FixedMin,
       span: round4(span),
       spanAtr: atrOk ? round4(spanAtr) : null,
+      invalidationMode: mode,
+      invalidationEvalPrice: round2(evalPx),
       note: atrOk ? null : "NOT_ENOUGH_BARS: ATR not computable; near50 uses fixed fallback."
     }
   };
@@ -184,7 +244,10 @@ export function normalizeBars(rawBars) {
     const c = b.c ?? b.close;
     const v = b.v ?? b.volume ?? null;
 
-    const oo = Number(o), hh = Number(h), ll = Number(l), cc = Number(c);
+    const oo = Number(o),
+      hh = Number(h),
+      ll = Number(l),
+      cc = Number(c);
     if (![oo, hh, ll, cc].every(Number.isFinite)) continue;
 
     out.push({
@@ -213,7 +276,9 @@ export function computeATR(bars, period = 14) {
   for (let i = 1; i < bars.length; i++) {
     const cur = bars[i];
     const prev = bars[i - 1];
-    const hi = cur.h, lo = cur.l, prevClose = prev.c;
+    const hi = cur.h,
+      lo = cur.l,
+      prevClose = prev.c;
     const range1 = hi - lo;
     const range2 = Math.abs(hi - prevClose);
     const range3 = Math.abs(lo - prevClose);
@@ -221,7 +286,7 @@ export function computeATR(bars, period = 14) {
   }
   if (tr.length < period) return null;
 
-  // Wilder smoothing: first ATR = SMA(TR, period), then ATR = (prevATR*(period-1) + TR)/period
+  // Wilder smoothing
   let atr = 0;
   for (let i = 0; i < period; i++) atr += tr[i];
   atr /= period;
