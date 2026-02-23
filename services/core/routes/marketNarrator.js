@@ -1,28 +1,33 @@
 // services/core/routes/marketNarrator.js
 // Engine 14A (Read-only) — Market Narrator (SPY only)
 //
-// v4 upgrades:
-// ✅ style=descriptive → EXACTLY 3 paragraphs every time
-// ✅ Layer 1 covers last 24 hours (6 x 1h candles)
-// ✅ Wick detectors:
-//    - lower wick buyback (bullish defense / absorption)
-//    - upper wick rejection (seller rejection / supply)
+// CLEAN REWRITE (v6):
+// ✅ Primary + Intermediate + Minor stack included (Primary=1d, Intermediate=1h, Minor=1h)
+// ✅ Policy (LOCKED): Neutral until MINOR resets
+//    - If minor is invalidated → overall bias stays NEUTRAL (even if primary/intermediate are bullish)
+// ✅ style=descriptive → EXACTLY 3 paragraphs separated by \n\n
+// ✅ Deterministic defended support/resistance tags + structured levels over last 24h (ATR-based clustering)
 // ✅ SPX macro shelves (6800/6900/7000) mapped to SPY using fixed ratio (SPX 6900 ↔ SPY 688)
-// ✅ Engine 2 context (Minor=1h, Intermediate=4h)
-// ✅ Fib levels derived from Engine 2 anchors (W1/W2) + “near fib” narrative guidance
+// ✅ Engine 2 parsing uses fib-levels@3 truth (anchors.waveMarks + fib.r382/r500/r618/invalidation + signals.tag)
+// ✅ W3 pending behavior (locked): if tag=W2 and waveMarks.W3.p==0 → project W3 targets from W2 using 1.0/1.272/1.618
 //
 // Uses ONLY:
-// - OHLCV bars: /api/v1/ohlc?symbol=SPY&tf=1h
+// - OHLCV bars: /api/v1/ohlc?symbol=SPY&tf=1h&limit=250
 // - Zone context: /api/v1/engine5-context?symbol=SPY&tf=1h
-// - Engine 2 already-calculated anchors via /api/v1/fib-levels (read-only) if needed
+// - Engine 2 truth: /api/v1/fib-levels?... (primary/intermediate/minor)
 //
-// Not a signal generator. Does not change engine math.
+// Not a signal generator. Narration-only.
 
 import express from "express";
 
 export const marketNarratorRouter = express.Router();
 
-const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
+/* ---------------- CORE_BASE (Render-safe loopback) ---------------- */
+const PORT = Number(process.env.PORT) || 8080;
+const CORE_BASE =
+  process.env.CORE_BASE && process.env.CORE_BASE.trim().length
+    ? process.env.CORE_BASE.trim()
+    : `http://127.0.0.1:${PORT}`;
 
 /* ---------------- helpers ---------------- */
 
@@ -40,18 +45,17 @@ function round2(n) {
   return Number.isFinite(x) ? Math.round(x * 100) / 100 : null;
 }
 
-// ✅ Backward-compat helper (prevents crashes if old code still calls extractW1W2Anchors)
-function extractW1W2Anchors(payload) {
-  const w1 = payload?.anchors?.waveMarks?.W1?.p;
-  const w2 = payload?.anchors?.waveMarks?.W2?.p;
-
-  const p1 = toNum(w1);
-  const p2 = toNum(w2);
-
-  if (!p1 || p1 <= 0 || !p2 || p2 <= 0) return null;
-
-  return { W1: p1, W2: p2 };
+function isoFromBarTime(barTime) {
+  const t = toNum(barTime);
+  if (t == null) return null;
+  const ms = t > 3_000_000_000 ? t : t * 1000;
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return null;
+  }
 }
+
 async function fetchJson(url, { timeoutMs = 15000 } = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -59,7 +63,9 @@ async function fetchJson(url, { timeoutMs = 15000 } = {}) {
     const r = await fetch(url, { signal: controller.signal, cache: "no-store" });
     const text = await r.text();
     let json = null;
-    try { json = JSON.parse(text); } catch {}
+    try {
+      json = JSON.parse(text);
+    } catch {}
     return { ok: r.ok, status: r.status, json, text };
   } catch (e) {
     return { ok: false, status: 0, json: null, text: String(e?.message || e) };
@@ -68,46 +74,13 @@ async function fetchJson(url, { timeoutMs = 15000 } = {}) {
   }
 }
 
-// ✅ Backward-compat helper (prevents crashes if old code still calls computeFibLevelsFromW1W2)
-function computeFibLevelsFromW1W2({ W1, W2 }) {
-  const a = toNum(W1);
-  const b = toNum(W2);
-  if (a == null || b == null) return null;
-
-  const hi = Math.max(a, b);
-  const lo = Math.min(a, b);
-  const range = hi - lo;
-  if (!(range > 0)) return null;
-
-  const retr = [0.382, 0.5, 0.618, 0.786].map((r) => ({
-    tag: `${Math.round(r * 1000) / 10}%`,
-    price: round2(hi - range * r),
-    kind: "RETRACEMENT",
-  }));
-
-  const ext = [1.0, 1.272, 1.618].map((e) => ({
-    tag: `${e.toFixed(3)}x`,
-    price: round2(hi + range * (e - 1.0)),
-    kind: "EXTENSION",
-  }));
-
-  const base = [
-    { tag: "LOW", price: round2(lo), kind: "ANCHOR" },
-    { tag: "HIGH", price: round2(hi), kind: "ANCHOR" },
-  ];
-
-  const levels = [...base, ...retr, ...ext]
-    .filter((x) => x.price != null)
-    .sort((x, y) => x.price - y.price);
-
-  return { lo: round2(lo), hi: round2(hi), range: round2(range), levels };
-}
-
 function computeATR(bars, len = 14) {
   if (!Array.isArray(bars) || bars.length < len + 2) return null;
   const trs = [];
   for (let i = 1; i < bars.length; i++) {
-    const h = bars[i].high, l = bars[i].low, pc = bars[i - 1].close;
+    const h = bars[i].high,
+      l = bars[i].low,
+      pc = bars[i - 1].close;
     if (![h, l, pc].every(Number.isFinite)) continue;
     const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
     trs.push(tr);
@@ -120,15 +93,18 @@ function computeATR(bars, len = 14) {
 }
 
 function candleStats(bar) {
-  const o = toNum(bar?.open), h = toNum(bar?.high), l = toNum(bar?.low), c = toNum(bar?.close);
-  if ([o, h, l, c].some(v => v == null)) return null;
+  const o = toNum(bar?.open),
+    h = toNum(bar?.high),
+    l = toNum(bar?.low),
+    c = toNum(bar?.close);
+  if ([o, h, l, c].some((v) => v == null)) return null;
 
   const range = h - l;
   const body = Math.abs(c - o);
   const upperWick = h - Math.max(o, c);
   const lowerWick = Math.min(o, c) - l;
   const bodyPct = range > 0 ? body / range : 0;
-  const closePos = range > 0 ? (c - l) / range : 0.5; // 0..1
+  const closePos = range > 0 ? (c - l) / range : 0.5;
 
   return { o, h, l, c, range, body, upperWick, lowerWick, bodyPct, closePos };
 }
@@ -206,22 +182,29 @@ function buildMacroShelves({ price }) {
     spxLevels: SPX_SHELVES.slice(),
     spyMapped: mapped.map((m) => round2(m.spy)),
     nearest: nearest
-      ? { spx: nearest.spx, spy: round2(nearest.spy), distancePts: round2(nearest.distancePts), side: nearest.side }
+      ? {
+          spx: nearest.spx,
+          spy: round2(nearest.spy),
+          distancePts: round2(nearest.distancePts),
+          side: nearest.side,
+        }
       : null,
   };
 }
 
-/* ---------------- Engine 2: wave + fib (read-only) ---------------- */
+/* ---------------- Engine 2 (Fib/Wave) truth parsing ---------------- */
 
-// LOCKED (per your CSV reality):
-// - minor uses 1h
-// - intermediate uses 1h (NOT 4h) because anchors exist there today
 const ENGINE2_CTX = {
-  minor: { tf: "1h", degree: "minor", wave: "W1" },
+  primary: { tf: "1d", degree: "primary", wave: "W1" },
   intermediate: { tf: "1h", degree: "intermediate", wave: "W1" },
+  minor: { tf: "1h", degree: "minor", wave: "W1" },
 };
 
-// Pull fib-levels payload (anchors + fib + signals are already computed by Engine 2)
+function isRealPrice(p) {
+  const n = Number(p);
+  return Number.isFinite(n) && n > 0;
+}
+
 async function fetchFibLevels({ symbol, tf, degree, wave }) {
   const u = new URL(`${CORE_BASE}/api/v1/fib-levels`);
   u.searchParams.set("symbol", symbol);
@@ -232,71 +215,69 @@ async function fetchFibLevels({ symbol, tf, degree, wave }) {
   return r?.ok && r?.json ? r.json : null;
 }
 
-/**
- * Engine 2 fib-levels@3 schema (confirmed):
- * payload.anchors.low/high
- * payload.anchors.waveMarks.W1/W2/W3/W4 (with p/t/tSec)
- * payload.signals.tag (e.g. "W2")
- * payload.fib.r382/r500/r618/invalidation
- *
- * We treat 0 or missing as NOT real.
- */
-function isRealPrice(p) {
-  const n = Number(p);
-  return Number.isFinite(n) && n > 0;
-}
-
 function getWaveMark(payload, key) {
   const p = payload?.anchors?.waveMarks?.[key]?.p;
   return isRealPrice(p) ? Number(p) : null;
 }
 
-// Extract W1/W2 prices (and low/high if present)
-function extractWaveContext(payload) {
-  if (!payload || !payload.ok) return null;
+function parseFibLevelsV3(payload) {
+  if (!payload || payload.ok !== true) return { ok: false };
+
+  const schema = payload?.meta?.schema || null;
 
   const low = payload?.anchors?.low;
   const high = payload?.anchors?.high;
 
-  const ctx = {
-    low: isRealPrice(low) ? Number(low) : null,
-    high: isRealPrice(high) ? Number(high) : null,
+  const out = {
+    ok: true,
+    schema,
+    meta: payload?.meta || null,
+    degree: payload?.meta?.degree || null,
+    tf: payload?.meta?.tf || null,
+    wave: payload?.meta?.wave || null,
     direction: payload?.anchors?.direction || null,
-    tag: payload?.signals?.tag ?? payload?.anchors?.context ?? null, // usually "W2"
+    tag: payload?.signals?.tag ?? payload?.anchors?.context ?? null,
+    signals: payload?.signals || null,
+    diagnostics: payload?.diagnostics || null,
+    anchors: {
+      low: isRealPrice(low) ? Number(low) : null,
+      high: isRealPrice(high) ? Number(high) : null,
+      context: payload?.anchors?.context ?? null,
+    },
     waveMarks: {
       W1: getWaveMark(payload, "W1"),
       W2: getWaveMark(payload, "W2"),
       W3: getWaveMark(payload, "W3"),
       W4: getWaveMark(payload, "W4"),
+      W5: getWaveMark(payload, "W5"),
     },
-    fib: payload?.fib || null, // already computed by Engine 2
+    fib: {
+      r382: isRealPrice(payload?.fib?.r382) ? Number(payload.fib.r382) : null,
+      r500: isRealPrice(payload?.fib?.r500) ? Number(payload.fib.r500) : null,
+      r618: isRealPrice(payload?.fib?.r618) ? Number(payload.fib.r618) : null,
+      invalidation: isRealPrice(payload?.fib?.invalidation) ? Number(payload.fib.invalidation) : null,
+      reference_786: isRealPrice(payload?.fib?.reference_786) ? Number(payload.fib.reference_786) : null,
+    },
   };
 
-  return ctx;
+  return out;
 }
 
-// Convert Engine 2 fib object into a consistent list for "nearest fib level" logic
-function buildFibLevelsFromEngine2(payload) {
-  const ctx = extractWaveContext(payload);
-  if (!ctx) return null;
+function buildFibLevelsList(e2Parsed) {
+  if (!e2Parsed?.ok) return null;
 
-  // Prefer Engine2's computed fib levels directly
-  const f = ctx.fib || {};
   const levels = [];
 
-  // Anchors
-  if (ctx.low != null) levels.push({ tag: "LOW", kind: "ANCHOR", price: round2(ctx.low) });
-  if (ctx.high != null) levels.push({ tag: "HIGH", kind: "ANCHOR", price: round2(ctx.high) });
+  if (e2Parsed.anchors?.low != null) levels.push({ tag: "LOW", kind: "ANCHOR", price: round2(e2Parsed.anchors.low) });
+  if (e2Parsed.anchors?.high != null) levels.push({ tag: "HIGH", kind: "ANCHOR", price: round2(e2Parsed.anchors.high) });
 
-  // Retracements (Engine 2 naming)
-  if (isRealPrice(f.r382)) levels.push({ tag: "38.2%", kind: "RETRACEMENT", price: round2(f.r382) });
-  if (isRealPrice(f.r500)) levels.push({ tag: "50.0%", kind: "RETRACEMENT", price: round2(f.r500) });
-  if (isRealPrice(f.r618)) levels.push({ tag: "61.8%", kind: "RETRACEMENT", price: round2(f.r618) });
+  if (e2Parsed.fib?.r382 != null) levels.push({ tag: "38.2%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r382) });
+  if (e2Parsed.fib?.r500 != null) levels.push({ tag: "50.0%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r500) });
+  if (e2Parsed.fib?.r618 != null) levels.push({ tag: "61.8%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r618) });
+  if (e2Parsed.fib?.reference_786 != null) levels.push({ tag: "78.6%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.reference_786) });
 
-  // Invalidation (important line)
-  if (isRealPrice(f.invalidation)) levels.push({ tag: "INVALIDATION", kind: "RISK_LINE", price: round2(f.invalidation) });
+  if (e2Parsed.fib?.invalidation != null) levels.push({ tag: "INVALIDATION", kind: "RISK_LINE", price: round2(e2Parsed.fib.invalidation) });
 
-  // Keep levels sorted and unique
   const uniq = [];
   for (const l of levels) {
     if (l?.price == null) continue;
@@ -305,70 +286,174 @@ function buildFibLevelsFromEngine2(payload) {
   }
   uniq.sort((a, b) => a.price - b.price);
 
-  return {
-    ok: true,
-    meta: payload?.meta || null,
-    tag: ctx.tag,
-    direction: ctx.direction,
-    waveMarks: ctx.waveMarks,
-    levels: uniq,
-  };
+  return { ok: true, levels: uniq };
 }
 
-// Wave 3 target projection when W3 mark is missing (W3 pending):
-// target = W2 + ratio * (W1_high - W1_low)
-function computeWave3TargetsFromW1({ payload }) {
-  const ctx = extractWaveContext(payload);
-  if (!ctx) return null;
+function computeProjectedW3(e2Parsed) {
+  if (!e2Parsed?.ok) return null;
+  const tag = String(e2Parsed.tag || "").toUpperCase();
+  const w3 = e2Parsed.waveMarks?.W3;
+  const w2 = e2Parsed.waveMarks?.W2;
+  const lo = e2Parsed.anchors?.low;
+  const hi = e2Parsed.anchors?.high;
 
-  const w1Low = ctx.low;
-  const w1High = ctx.high;
-  const w2 = ctx.waveMarks?.W2;
+  const w3Missing = !isRealPrice(w3);
+  const isW2 = tag === "W2";
 
-  // Need W1 low/high AND W2 mark
-  if (w1Low == null || w1High == null || w2 == null) return null;
+  if (!isW2 || !w3Missing) return { pending: false };
 
-  const wave1Len = Math.abs(w1High - w1Low);
-  if (!(wave1Len > 0)) return null;
+  if (w2 == null || lo == null || hi == null) return { pending: true, error: "MISSING_ANCHORS_FOR_PROJECTION" };
 
-  const dir = (ctx.direction || "up").toLowerCase(); // usually "up"
+  const wave1Len = Math.abs(hi - lo);
+  if (!(wave1Len > 0)) return { pending: true, error: "BAD_W1_LEN" };
+
+  const dir = String(e2Parsed.direction || "up").toLowerCase();
   const ratios = [1.0, 1.272, 1.618];
-
   const targets = ratios.map((r) => {
-    const t = dir === "down" ? (w2 - r * wave1Len) : (w2 + r * wave1Len);
-    return { ratio: r, price: round2(t) };
+    const px = dir === "down" ? w2 - r * wave1Len : w2 + r * wave1Len;
+    return { ratio: r, price: round2(px) };
   });
 
+  const primary618 = targets.find((t) => t.ratio === 1.618)?.price ?? null;
+
   return {
-    w3Pending: ctx.waveMarks?.W3 == null, // true when W3 mark not set
-    wave1Len: round2(wave1Len),
+    pending: true,
     w2: round2(w2),
+    wave1Len: round2(wave1Len),
     direction: dir,
     targets,
-    primary618: targets.find((t) => t.ratio === 1.618)?.price ?? null,
+    primary618,
   };
 }
 
-function nearestFibLevel({ price, fib, atr }) {
+function nearestLevel({ price, levelList, atr }) {
   const p = toNum(price);
-  if (p == null || !fib?.levels?.length) return null;
+  if (p == null || !levelList?.ok || !Array.isArray(levelList.levels) || levelList.levels.length === 0) return null;
 
   let best = null;
-  for (const lvl of fib.levels) {
+  for (const lvl of levelList.levels) {
     const d = Math.abs(p - lvl.price);
     if (!best || d < best.distancePts) best = { ...lvl, distancePts: d };
   }
 
   const dPts = best ? best.distancePts : null;
   const nearPts = dPts != null ? round2(dPts) : null;
-  const nearAtr = (dPts != null && Number.isFinite(atr) && atr > 0) ? round2(dPts / atr) : null;
+  const nearAtr = dPts != null && Number.isFinite(atr) && atr > 0 ? round2(dPts / atr) : null;
 
   return best
     ? { tag: best.tag, kind: best.kind, price: best.price, distancePts: nearPts, distanceAtr: nearAtr }
     : null;
 }
 
+/* ---------------- defended levels (deterministic tags) ---------------- */
+
+function roundToBand(x, band) {
+  const n = toNum(x);
+  const b = toNum(band);
+  if (n == null || b == null || b <= 0) return null;
+  return Math.round(n / b) * b;
+}
+
+function detectDefendedLevels({ bars, atr, windowBars = 24 }) {
+  if (!Array.isArray(bars) || bars.length < 10 || !Number.isFinite(atr) || atr <= 0) {
+    return { tags: [], defendedSupportLevels: [], defendedResistanceLevels: [] };
+  }
+
+  const tol = 0.15 * atr;
+  const slice = bars.slice(-windowBars);
+
+  const supportEvents = [];
+  const resistEvents = [];
+
+  for (const b of slice) {
+    const s = candleStats(b);
+    if (!s) continue;
+
+    const lowerWickToBody = s.body > 0 ? s.lowerWick / s.body : s.lowerWick > 0 ? 99 : 0;
+    const upperWickToBody = s.body > 0 ? s.upperWick / s.body : s.upperWick > 0 ? 99 : 0;
+
+    const supportCandidate = lowerWickToBody >= 1.25 && s.closePos >= 0.60 ? roundToBand(s.l, tol) : null;
+    const resistCandidate = upperWickToBody >= 1.25 && s.closePos <= 0.40 ? roundToBand(s.h, tol) : null;
+
+    if (supportCandidate != null) {
+      supportEvents.push({ level: supportCandidate, time: b.time });
+    }
+    if (resistCandidate != null) {
+      resistEvents.push({ level: resistCandidate, time: b.time });
+    }
+  }
+
+  const cluster = (events) => {
+    const m = new Map();
+    for (const ev of events) {
+      const k = round2(ev.level);
+      if (k == null) continue;
+      if (!m.has(k)) m.set(k, { price: k, touches: 0, lastSeenUtc: null });
+      const item = m.get(k);
+      item.touches += 1;
+      item.lastSeenUtc = isoFromBarTime(ev.time) || item.lastSeenUtc;
+    }
+    return Array.from(m.values())
+      .filter((x) => x.touches >= 3)
+      .sort((a, b) => b.touches - a.touches);
+  };
+
+  const defendedSupportLevels = cluster(supportEvents);
+  const defendedResistanceLevels = cluster(resistEvents);
+
+  const tags = [];
+  if (defendedSupportLevels.length) tags.push("DEFENDED_SUPPORT");
+  if (defendedResistanceLevels.length) tags.push("DEFENDED_RESISTANCE");
+
+  return { tags, defendedSupportLevels, defendedResistanceLevels };
+}
+
 /* ---------------- market structure helpers ---------------- */
+
+function rangeHiLo(bars) {
+  let hi = -Infinity,
+    lo = Infinity;
+  for (const b of bars) {
+    const h = toNum(b.high),
+      l = toNum(b.low);
+    if (h == null || l == null) continue;
+    if (h > hi) hi = h;
+    if (l < lo) lo = l;
+  }
+  if (!Number.isFinite(hi) || !Number.isFinite(lo) || !(hi > lo)) return null;
+  return { hi, lo, mid: (hi + lo) / 2, width: hi - lo };
+}
+
+function detectBalance({ bars, atr, n = 12, maxWidthAtr = 2.25 }) {
+  if (!Array.isArray(bars) || bars.length < n || !Number.isFinite(atr) || atr <= 0) return null;
+  const slice = bars.slice(-n);
+  const r = rangeHiLo(slice);
+  if (!r) return null;
+
+  const widthAtr = r.width / atr;
+  const isBalance = widthAtr <= maxWidthAtr;
+
+  const bandLo = r.mid - 0.25 * r.width;
+  const bandHi = r.mid + 0.25 * r.width;
+
+  let inside = 0;
+  for (const b of slice) {
+    const c = toNum(b.close);
+    if (c != null && c >= bandLo && c <= bandHi) inside++;
+  }
+  const overlapPct = inside / slice.length;
+
+  return {
+    isBalance: Boolean(isBalance && overlapPct >= 0.55),
+    n,
+    hi: r.hi,
+    lo: r.lo,
+    mid: r.mid,
+    width: r.width,
+    widthAtr,
+    overlapPct,
+  };
+}
 
 function summarizeImpulse(bar, atr) {
   const s = candleStats(bar);
@@ -389,77 +474,6 @@ function summarizeImpulse(bar, atr) {
     direction: dir,
     rangeAtr: round2(rangeAtr),
     bodyPct: round2(bodyDominant),
-  };
-}
-
-function computeWave3Targets({ wave1Low, wave1High, wave2Price, direction = "up" }) {
-  const lo = toNum(wave1Low);
-  const hi = toNum(wave1High);
-  const w2 = toNum(wave2Price);
-  if (lo == null || hi == null || w2 == null) return null;
-
-  const wave1Len = Math.abs(hi - lo);
-  if (!(wave1Len > 0)) return null;
-
-  const ratios = [1.0, 1.272, 1.618];
-
-  const targets = ratios.map((r) => {
-    const price =
-      direction === "down"
-        ? (w2 - r * wave1Len)
-        : (w2 + r * wave1Len);
-
-    return { ratio: r, price: round2(price) };
-  });
-
-  return {
-    wave1Len: round2(wave1Len),
-    wave2Price: round2(w2),
-    direction,
-    targets,
-  };
-}
-function rangeHiLo(bars) {
-  let hi = -Infinity, lo = Infinity;
-  for (const b of bars) {
-    const h = toNum(b.high), l = toNum(b.low);
-    if (h == null || l == null) continue;
-    if (h > hi) hi = h;
-    if (l < lo) lo = l;
-  }
-  if (!Number.isFinite(hi) || !Number.isFinite(lo) || !(hi > lo)) return null;
-  return { hi, lo, mid: (hi + lo) / 2, width: hi - lo };
-}
-
-function detectBalance({ bars, atr, n = 12, maxWidthAtr = 2.25 }) {
-  if (!Array.isArray(bars) || bars.length < n || !Number.isFinite(atr) || atr <= 0) return null;
-  const slice = bars.slice(-n);
-  const r = rangeHiLo(slice);
-  if (!r) return null;
-
-  const widthAtr = r.width / atr;
-  const isBalance = widthAtr <= maxWidthAtr;
-
-  // tighter overlap band
-  const bandLo = r.mid - 0.25 * r.width;
-  const bandHi = r.mid + 0.25 * r.width;
-
-  let inside = 0;
-  for (const b of slice) {
-    const c = toNum(b.close);
-    if (c != null && c >= bandLo && c <= bandHi) inside++;
-  }
-  const overlapPct = inside / slice.length;
-
-  return {
-    isBalance: Boolean(isBalance && overlapPct >= 0.55),
-    n,
-    hi: r.hi,
-    lo: r.lo,
-    mid: r.mid,
-    width: r.width,
-    widthAtr,
-    overlapPct,
   };
 }
 
@@ -511,266 +525,148 @@ function phaseFromBalanceAndLast({ balance, lastBar, prevBar, atr }) {
   return { phase: "CORRECTION", details: {} };
 }
 
-function detectViolentExpansion({ bars, atr, balance }) {
-  if (!Array.isArray(bars) || bars.length < 3 || !Number.isFinite(atr) || atr <= 0) {
-    return { signal: false };
-  }
+/* ---------------- Narration helpers (stack + neutral-until-reset policy) ---------------- */
 
-  const last = candleStats(bars[bars.length - 1]);
-  const prev = candleStats(bars[bars.length - 2]);
-  if (!last || !prev) return { signal: false };
-
-  const lastStrong = last.range / atr >= 1.1 && last.bodyPct >= 0.55;
-  const prevStrong = prev.range / atr >= 1.1 && prev.bodyPct >= 0.55;
-
-  const lastDir = last.c > last.o ? "UP" : last.c < last.o ? "DOWN" : "FLAT";
-  const prevDir = prev.c > prev.o ? "UP" : prev.c < prev.o ? "DOWN" : "FLAT";
-  const sameDir = lastDir !== "FLAT" && lastDir === prevDir;
-
-  const hi = toNum(balance?.hi);
-  const lo = toNum(balance?.lo);
-  const brokeUp = hi != null ? prev.c > hi || last.c > hi : false;
-  const brokeDown = lo != null ? prev.c < lo || last.c < lo : false;
-
-  const signal = Boolean(lastStrong && prevStrong && sameDir);
-
-  return {
-    signal,
-    direction: signal ? lastDir : null,
-    bars: signal ? 2 : 0,
-    brokeBalance: signal ? Boolean(brokeUp || brokeDown) : false,
-    brokeDir: signal ? (brokeUp ? "UP" : brokeDown ? "DOWN" : null) : null,
-    last: { rangeAtr: round2(last.range / atr), bodyPct: round2(last.bodyPct) },
-    prev: { rangeAtr: round2(prev.range / atr), bodyPct: round2(prev.bodyPct) },
+function stackLine({ primary, intermediate, minor }) {
+  const fmt = (x) => {
+    if (!x?.ok) return "N/A";
+    const tag = x.tag ? String(x.tag).toUpperCase() : "UNKNOWN";
+    const inv = x.signals?.invalidated ? " (invalidated)" : "";
+    return `${tag}${inv}`;
   };
+  return `Alignment: Primary=${fmt(primary)}, Intermediate=${fmt(intermediate)}, Minor=${fmt(minor)}.`;
+}
+
+function minorResetRuleText(minorParsed) {
+  if (!minorParsed?.ok) return "Minor wave/fib unavailable; stay neutral until execution layer is readable.";
+  if (!minorParsed.signals?.invalidated) return null;
+
+  const inv = minorParsed.fib?.invalidation;
+  const ref786 = minorParsed.fib?.reference_786;
+
+  // Keep it simple and actionable
+  if (inv != null) {
+    return `Execution layer: Minor is invalidated (74% gate breached). Stay neutral on minor/minute longs until price resets above the minor invalidation line near ${inv.toFixed(2)} and holds.`;
+  }
+  if (ref786 != null) {
+    return `Execution layer: Minor is invalidated (74% gate breached). Stay neutral on minor/minute longs until price resets above ~${ref786.toFixed(2)} and holds.`;
+  }
+  return `Execution layer: Minor is invalidated (74% gate breached). Stay neutral until minor resets.`;
 }
 
 /* ---------------- Layer narratives ---------------- */
 
-function buildKeyLevels({ balance, zones, macroShelves, fibMinor, fibInter }) {
-  const levels = [];
+function buildLayer1RecentNarrative({ last24, defended }) {
+  let text = "Last 24 hours: mixed rotation with no clean directional dominance.";
 
-  if (balance?.hi != null) levels.push(balance.hi);
-  if (balance?.lo != null) levels.push(balance.lo);
-
-  if (zones?.activeZone?.lo != null) levels.push(zones.activeZone.lo);
-  if (zones?.activeZone?.hi != null) levels.push(zones.activeZone.hi);
-
-  if (zones?.nearestAllowed?.lo != null) levels.push(zones.nearestAllowed.lo);
-  if (zones?.nearestAllowed?.hi != null) levels.push(zones.nearestAllowed.hi);
-
-  if (macroShelves?.nearest?.spy != null) levels.push(macroShelves.nearest.spy);
-  if (Array.isArray(macroShelves?.spyMapped)) macroShelves.spyMapped.forEach(v => levels.push(v));
-
-  // Add a few nearest fib levels (minor + intermediate)
-  const addFib = (fib) => {
-    if (!fib?.levels?.length) return;
-    for (const lvl of fib.levels) levels.push(lvl.price);
-  };
-  addFib(fibMinor);
-  addFib(fibInter);
-
-  const uniq = [];
-  for (const v of levels.map(toNum).filter(x => x != null)) {
-    const r = round2(v);
-    if (!uniq.includes(r)) uniq.push(r);
+  if (defended?.defendedSupportLevels?.length) {
+    const top = defended.defendedSupportLevels[0];
+    text += ` Defended support formed near ${top.price.toFixed(2)} (touches: ${top.touches}).`;
   }
-  return uniq.sort((a, b) => a - b);
+  if (defended?.defendedResistanceLevels?.length) {
+    const top = defended.defendedResistanceLevels[0];
+    text += ` Defended resistance formed near ${top.price.toFixed(2)} (touches: ${top.touches}).`;
+  }
+
+  const last = last24[last24.length - 1];
+  const s = candleStats(last);
+  if (s) {
+    const dir = s.c > s.o ? "up" : s.c < s.o ? "down" : "flat";
+    text += ` Latest bar closed ${dir} at ${s.c.toFixed(2)}.`;
+  }
+
+  return { text };
 }
 
-// Wick rejection detector (lower/upper)
-function detectWickRejections({ bars, atr, keyLevels = [], windowBars = 24, side = "LOWER" }) {
-  if (!Array.isArray(bars) || bars.length < 2 || !Number.isFinite(atr) || atr <= 0) {
-    return { detected: false, count: 0, strongest: null, hits: [] };
-  }
-
-  const eps = 0.15 * atr;
-  const slice = bars.slice(-windowBars);
-  const hits = [];
-
-  for (let i = 0; i < slice.length; i++) {
-    const b = slice[i];
-    const s = candleStats(b);
-    if (!s) continue;
-
-    const wick = side === "LOWER" ? s.lowerWick : s.upperWick;
-    const wickToBody = s.body > 0 ? wick / s.body : (wick > 0 ? 99 : 0);
-
-    const longWick = wickToBody >= 1.25;
-    const strongClose = side === "LOWER" ? (s.closePos >= 0.60) : (s.closePos <= 0.40);
-
-    if (!(longWick && strongClose)) continue;
-
-    let touched = null;
-    for (const lvl of keyLevels) {
-      const L = toNum(lvl);
-      if (L == null) continue;
-
-      if (side === "LOWER") {
-        if (s.l <= (L + eps) && s.c >= (L - eps)) { touched = L; break; }
-      } else {
-        if (s.h >= (L - eps) && s.c <= (L + eps)) { touched = L; break; }
-      }
-    }
-
-    hits.push({
-      indexFromEnd: slice.length - 1 - i,
-      high: round2(s.h),
-      low: round2(s.l),
-      close: round2(s.c),
-      wickToBody: round2(wickToBody),
-      closePos: round2(s.closePos),
-      touchedLevel: touched != null ? round2(touched) : null,
-    });
-  }
-
-  let strongest = null;
-  for (const h of hits) {
-    if (!strongest || (h.wickToBody ?? 0) > (strongest.wickToBody ?? 0)) strongest = h;
-  }
-
-  return { detected: hits.length > 0, count: hits.length, strongest, hits: hits.slice(-6) };
-}
-
-function buildLayer1RecentNarrative({ bars, atr, keyLevels }) {
-  const windowBars = 24;
-  const slice = bars.slice(-windowBars);
-
-  const types = slice.map((b) => {
-    const s = candleStats(b);
-    if (!s || !Number.isFinite(atr) || atr <= 0) return "UNKNOWN";
-    const dir = s.c > s.o ? "UP" : s.c < s.o ? "DOWN" : "FLAT";
-    const rangeAtr = s.range / atr;
-    const strong = rangeAtr >= 1.1 && s.bodyPct >= 0.55;
-
-    if (strong && dir === "UP") return "IMPULSE_UP";
-    if (strong && dir === "DOWN") return "IMPULSE_DOWN";
-    if (s.bodyPct <= 0.25 && rangeAtr <= 0.9) return "HESITATION";
-    return dir === "UP" ? "UP_BAR" : dir === "DOWN" ? "DOWN_BAR" : "FLAT";
-  });
-
-  const hasUpImpulse = types.includes("IMPULSE_UP");
-  const hasDownImpulse = types.includes("IMPULSE_DOWN");
-  const hesitations = types.filter(t => t === "HESITATION").length;
-
-  let sequence = "MIXED_ROTATION";
-  if (hasUpImpulse && !hasDownImpulse && hesitations <= 2) sequence = "BUYERS_PUSH";
-  if (hasDownImpulse && !hasUpImpulse && hesitations <= 2) sequence = "SELLERS_PUSH";
-  if (hasUpImpulse && hasDownImpulse) sequence = "PUSH_AND_PULLBACK";
-
-  const lowerWicks = detectWickRejections({ bars, atr, keyLevels, windowBars, side: "LOWER" });
-  const upperWicks = detectWickRejections({ bars, atr, keyLevels, windowBars, side: "UPPER" });
-
-  let text = "";
-  if (sequence === "BUYERS_PUSH") text = "Last 24 hours: buyers pushed with expanding candles and limited hesitation.";
-  else if (sequence === "SELLERS_PUSH") text = "Last 24 hours: sellers pushed with expanding candles and limited bounce.";
-  else if (sequence === "PUSH_AND_PULLBACK") text = "Last 24 hours: push-and-pullback sequence (initiative move met with counter-pressure).";
-  else text = "Last 24 hours: mixed rotation with no clean directional dominance.";
-
-  if (lowerWicks.detected && lowerWicks.strongest) {
-    const s = lowerWicks.strongest;
-    if (s.touchedLevel != null) {
-      text += ` Bullish defense: a long lower wick probed into ${s.touchedLevel.toFixed(2)} and was bought up quickly, closing at ${s.close.toFixed(2)}.`;
-    } else {
-      text += ` Bullish defense: a long lower wick was bought up quickly (close ${s.close.toFixed(2)}).`;
-    }
-  }
-
-  if (upperWicks.detected && upperWicks.strongest) {
-    const s = upperWicks.strongest;
-    if (s.touchedLevel != null) {
-      text += ` Seller rejection: a long upper wick tagged ${s.touchedLevel.toFixed(2)} and was sold back down, closing at ${s.close.toFixed(2)}.`;
-    } else {
-      text += ` Seller rejection: a long upper wick was sold back down (close ${s.close.toFixed(2)}).`;
-    }
-  }
-
-  return { windowBars, sequence, barTypes: types, lowerWickRejections: lowerWicks, upperWickRejections: upperWicks, text };
-}
-
-function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, fibCtx }) {
+function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, stack, minorReset }) {
   const inAllowed = Boolean(zones?.inAllowedZone);
   const near = zones?.nearestAllowed?.distancePts != null ? zones.nearestAllowed.distancePts : null;
 
   let text = `Right now: phase is ${phase}. `;
 
   if (inAllowed && zones?.activeZone) {
-    text += `Price ${price != null ? price.toFixed(2) : ""} is inside ${zones.activeZone.zoneType} zone ${Number(zones.activeZone.lo).toFixed(2)}–${Number(zones.activeZone.hi).toFixed(2)}. `;
+    text += `Price ${price != null ? price.toFixed(2) : ""} is inside ${zones.activeZone.zoneType} zone ${Number(
+      zones.activeZone.lo
+    ).toFixed(2)}–${Number(zones.activeZone.hi).toFixed(2)}. `;
   } else if (near != null) {
-    text += `Price ${price != null ? price.toFixed(2) : ""} is outside allowed zones, but near ${zones.nearestAllowed.zoneType} by ${near.toFixed(2)} pts. `;
+    text += `Price ${price != null ? price.toFixed(2) : ""} is outside allowed zones, but near ${
+      zones.nearestAllowed.zoneType
+    } by ${near.toFixed(2)} pts. `;
   } else {
     text += `Price ${price != null ? price.toFixed(2) : ""} is not near an allowed zone. `;
   }
 
   if (macroShelves?.nearest?.spx != null && macroShelves?.nearest?.spy != null) {
-    text += `Macro shelf: SPX ${macroShelves.nearest.spx} maps to ~SPY ${macroShelves.nearest.spy.toFixed(2)} (price is ${macroShelves.nearest.side} by ${macroShelves.nearest.distancePts.toFixed(2)}). `;
+    text += `Macro shelf: SPX ${macroShelves.nearest.spx} maps to ~SPY ${macroShelves.nearest.spy.toFixed(
+      2
+    )} (price is ${macroShelves.nearest.side} by ${macroShelves.nearest.distancePts.toFixed(2)}). `;
   }
 
-  if (fibCtx?.summary) text += `${fibCtx.summary} `;
+  if (stack) text += `${stack} `;
+
+  if (minorReset) text += `${minorReset} `;
 
   if (impulse?.impulseScore != null) {
     text += `Latest impulse score is ${impulse.impulseScore}/10 (${impulse.direction}). `;
   }
 
-  return { phase, inAllowedZone: inAllowed, nearAllowedPts: near, text };
+  return { text: text.trim() };
 }
 
-function buildLayer3NextNarrative({ zones, balance, macroShelves, fibCtx }) {
-  const out = { decision: [], confirmations: [], invalidations: [], text: "" };
-
+function buildLayer3NextNarrative({ zones, balance, macroShelves, minorReset, e2NextRules }) {
   const bHi = toNum(balance?.hi);
   const bLo = toNum(balance?.lo);
 
-  if (bHi != null && bLo != null) {
-    out.confirmations.push({ if: `Decisive close above ${bHi.toFixed(2)}`, then: "Acceptance up / continuation bias" });
-    out.invalidations.push({ if: `Decisive close below ${bLo.toFixed(2)}`, then: "Acceptance down / bearish continuation risk" });
-    out.decision.push({ level: round2(bHi), label: "Balance High" });
-    out.decision.push({ level: round2(bLo), label: "Balance Low" });
-  }
-
-  if (macroShelves?.nearest?.spx != null) {
-    out.decision.push({ level: macroShelves.nearest.spy, label: `Macro shelf (SPX ${macroShelves.nearest.spx})` });
-  }
-
-  if (fibCtx?.nextRules?.length) {
-    fibCtx.nextRules.forEach(r => out.confirmations.push(r));
-  }
-
-  if (zones?.activeZone?.lo != null && zones?.activeZone?.hi != null) {
-    const lo = Number(zones.activeZone.lo);
-    const hi = Number(zones.activeZone.hi);
-    const mid = (Math.min(lo, hi) + Math.max(lo, hi)) / 2;
-
-    out.confirmations.push({ if: `Hold above zone high ${hi.toFixed(2)}`, then: "Acceptance / continuation inside higher range" });
-    out.invalidations.push({ if: `Lose midline ${mid.toFixed(2)}`, then: "Shift back into balance / rejection risk" });
-
-    out.text = `What I'm watching next: hold above ${hi.toFixed(2)} for acceptance, or lose midline ${mid.toFixed(2)} for rejection back into value.`;
-    return out;
-  }
-
-  if (zones?.nearestAllowed?.distancePts != null) {
-    const z = zones.nearestAllowed;
-    const lo = toNum(z.lo);
-    const hi = toNum(z.hi);
-    const d = toNum(z.distancePts);
-
-    if (lo != null && hi != null && d != null) {
-      out.decision.push({ level: round2(lo), label: `${z.zoneType} lo` });
-      out.decision.push({ level: round2(hi), label: `${z.zoneType} hi` });
-
-      out.confirmations.push({ if: `Re-enter ${z.zoneType} ${lo.toFixed(2)}–${hi.toFixed(2)}`, then: "Eligible for zone-based reading (no chase)" });
-      out.invalidations.push({ if: `Continue away from zone`, then: "Remain stand-down / avoid chase" });
-
-      out.text = `What I'm watching next: price is ${d.toFixed(2)} pts from ${z.zoneType}. I want a clean re-entry into ${lo.toFixed(2)}–${hi.toFixed(2)} before considering a setup.`;
-      return out;
+  // If minor is invalidated, "next" should emphasize reset conditions first.
+  if (minorReset) {
+    let t = `What I'm watching next: ${minorReset} `;
+    if (bHi != null && bLo != null) {
+      t += `Also watch balance guardrails: close above ${bHi.toFixed(2)} for acceptance, or below ${bLo.toFixed(2)} for acceptance down. `;
     }
+    if (macroShelves?.nearest?.spx != null && macroShelves?.nearest?.spy != null) {
+      t += `Macro friction remains around ~${macroShelves.nearest.spy.toFixed(2)} (SPX ${macroShelves.nearest.spx}). `;
+    }
+    if (Array.isArray(e2NextRules) && e2NextRules.length) t += e2NextRules.join(" ");
+    return { text: t.trim() };
   }
 
-  out.text = "What I'm watching next: no nearby allowed zone. Wait for price to approach negotiated/institutional structure.";
-  return out;
-}
+  if (bHi != null && bLo != null) {
+    let t = `What I'm watching next: a decisive close above ${bHi.toFixed(
+      2
+    )} favors acceptance up, while a decisive close below ${bLo.toFixed(2)} favors acceptance down. `;
 
-/* ---------------- Narrative formatting ---------------- */
+    if (zones?.activeZone?.lo != null && zones?.activeZone?.hi != null) {
+      const lo = Number(zones.activeZone.lo);
+      const hi = Number(zones.activeZone.hi);
+      const mid = (Math.min(lo, hi) + Math.max(lo, hi)) / 2;
+      t += `Within zones, hold above ${hi.toFixed(2)} for acceptance, or lose midline ${mid.toFixed(
+        2
+      )} for rejection risk. `;
+    } else if (
+      zones?.nearestAllowed?.distancePts != null &&
+      zones?.nearestAllowed?.lo != null &&
+      zones?.nearestAllowed?.hi != null
+    ) {
+      const lo = Number(zones.nearestAllowed.lo);
+      const hi = Number(zones.nearestAllowed.hi);
+      t += `I want a clean re-entry into ${lo.toFixed(2)}–${hi.toFixed(2)} before upgrading the read. `;
+    } else {
+      t += `No nearby allowed zone — wait for price to approach negotiated/institutional structure. `;
+    }
+
+    if (macroShelves?.nearest?.spx != null && macroShelves?.nearest?.spy != null) {
+      t += `Macro friction remains around ~${macroShelves.nearest.spy.toFixed(2)} (SPX ${macroShelves.nearest.spx}). `;
+    }
+
+    if (Array.isArray(e2NextRules) && e2NextRules.length) t += e2NextRules.join(" ");
+
+    return { text: t.trim() };
+  }
+
+  let t = "What I'm watching next: keep it simple — wait for clear acceptance or rejection at nearby structure.";
+  if (Array.isArray(e2NextRules) && e2NextRules.length) t += " " + e2NextRules.join(" ");
+  return { text: t };
+}
 
 function buildNarrativeTextDescriptive({ layer1, layer2, layer3 }) {
   const p1 = layer1?.text || "Last 24 hours: no recent narrative available.";
@@ -791,7 +687,7 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
   }
 
   try {
-    // 1) Bars
+    // 1) Bars (1h)
     const ohlcUrl = new URL(`${CORE_BASE}/api/v1/ohlc`);
     ohlcUrl.searchParams.set("symbol", symbol);
     ohlcUrl.searchParams.set("tf", tf);
@@ -802,7 +698,7 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       return res.status(502).json({
         ok: false,
         error: "BARS_UNAVAILABLE",
-        meta: { symbol, tf },
+        meta: { symbol, tf, coreBase: CORE_BASE },
         detail: barsResp.text?.slice(0, 200) || "no bars",
       });
     }
@@ -821,8 +717,9 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
     const atr = computeATR(bars, 14) || computeATR(bars, 10) || null;
     const last = bars[bars.length - 1];
     const prev = bars[bars.length - 2];
+    const last24 = bars.slice(-24);
 
-    // 2) Zones (engine5-context)
+    // 2) Zones (engine5-context) — degrade gracefully if missing
     const ctxUrl = new URL(`${CORE_BASE}/api/v1/engine5-context`);
     ctxUrl.searchParams.set("symbol", symbol);
     ctxUrl.searchParams.set("tf", tf);
@@ -830,7 +727,8 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
     const ctxResp = await fetchJson(ctxUrl.toString(), { timeoutMs: 15000 });
     const ctx = ctxResp.ok && ctxResp.json ? ctxResp.json : null;
 
-    const price = toNum(ctx?.meta?.current_price) ?? toNum(ctx?.meta?.currentPrice) ?? toNum(last?.close) ?? null;
+    const price =
+      toNum(ctx?.meta?.current_price) ?? toNum(ctx?.meta?.currentPrice) ?? toNum(last?.close) ?? null;
 
     const negotiated = ctx?.render?.negotiated || [];
     const institutional = ctx?.render?.institutional || [];
@@ -838,10 +736,10 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
     const nearest = nearestAllowedZone({ price, negotiated, institutional });
 
     const inAllowed =
-      Boolean(ctx?.active?.negotiated && price != null) ||
-      Boolean(ctx?.active?.institutional && price != null);
+      Boolean(ctx?.active?.negotiated && price != null) || Boolean(ctx?.active?.institutional && price != null);
 
     const zones = {
+      zonesOk: Boolean(ctxResp.ok && ctx),
       inAllowedZone: Boolean(inAllowed),
       activeZone: ctx?.active?.negotiated
         ? { zoneType: "NEGOTIATED", ...ctx.active.negotiated }
@@ -849,92 +747,143 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
         ? { zoneType: "INSTITUTIONAL", ...ctx.active.institutional }
         : null,
       nearestAllowed: nearest
-        ? { zoneType: nearest.zoneType, zoneId: nearest.id, lo: nearest.lo, hi: nearest.hi, distancePts: nearest.distancePts }
+        ? {
+            zoneType: nearest.zoneType,
+            zoneId: nearest.id,
+            lo: nearest.lo,
+            hi: nearest.hi,
+            distancePts: nearest.distancePts,
+          }
         : null,
     };
 
     const macroShelves = buildMacroShelves({ price });
 
-    // 3) Engine 2 context + fib (minor + intermediate)
-    const [fibMinorRaw, fibInterRaw] = await Promise.all([
-      fetchFibLevels({ symbol, ...ENGINE2_CTX.minor }).catch(() => null),
-      fetchFibLevels({ symbol, ...ENGINE2_CTX.intermediate }).catch(() => null),
-    ]);
+    // 3) Engine 2 (primary + intermediate + minor) — NEVER 500 on failure
+    let primaryRaw = null;
+    let interRaw = null;
+    let minorRaw = null;
 
-    const minorAnch = fibMinorRaw ? extractW1W2Anchors(fibMinorRaw) : null;
-    const interAnch = fibInterRaw ? extractW1W2Anchors(fibInterRaw) : null;
+    try {
+      [primaryRaw, interRaw, minorRaw] = await Promise.all([
+        fetchFibLevels({ symbol, ...ENGINE2_CTX.primary }).catch(() => null),
+        fetchFibLevels({ symbol, ...ENGINE2_CTX.intermediate }).catch(() => null),
+        fetchFibLevels({ symbol, ...ENGINE2_CTX.minor }).catch(() => null),
+      ]);
+    } catch {
+      primaryRaw = null;
+      interRaw = null;
+      minorRaw = null;
+    }
 
-    const fibMinor = minorAnch ? computeFibLevelsFromW1W2(minorAnch) : null;
-    const fibInter = interAnch ? computeFibLevelsFromW1W2(interAnch) : null;
+    const e2Primary = parseFibLevelsV3(primaryRaw);
+    const e2Inter = parseFibLevelsV3(interRaw);
+    const e2Minor = parseFibLevelsV3(minorRaw);
 
-    const nearestMinor = nearestFibLevel({ price, fib: fibMinor, atr });
-    const nearestInter = nearestFibLevel({ price, fib: fibInter, atr });
+    const listPrimary = buildFibLevelsList(e2Primary);
+    const listInter = buildFibLevelsList(e2Inter);
+    const listMinor = buildFibLevelsList(e2Minor);
+
+    const nearestPrimary = nearestLevel({ price, levelList: listPrimary, atr });
+    const nearestInter = nearestLevel({ price, levelList: listInter, atr });
+    const nearestMinor = nearestLevel({ price, levelList: listMinor, atr });
+
+    const projPrimaryW3 = computeProjectedW3(e2Primary);
+    const projInterW3 = computeProjectedW3(e2Inter);
+    const projMinorW3 = computeProjectedW3(e2Minor);
 
     const engine2 = {
-      minor: {
-        tf: ENGINE2_CTX.minor.tf,
-        degree: ENGINE2_CTX.minor.degree,
-        wave: ENGINE2_CTX.minor.wave,
-        ok: Boolean(fibMinorRaw?.ok),
-        phase: fibMinorRaw?.phase ?? fibMinorRaw?.signals?.phase ?? fibMinorRaw?.meta?.phase ?? "UNKNOWN",
-        anchorTag: fibMinorRaw?.anchorTag ?? fibMinorRaw?.signals?.tag ?? null,
-        fibScore: fibMinorRaw?.fibScore ?? 0,
-        invalidated: Boolean(fibMinorRaw?.invalidated ?? fibMinorRaw?.signals?.invalidated),
-        anchors: minorAnch ? { W1: minorAnch.W1, W2: minorAnch.W2 } : null,
-        nearestLevel: nearestMinor,
+      primary: {
+        tf: ENGINE2_CTX.primary.tf,
+        degree: ENGINE2_CTX.primary.degree,
+        wave: ENGINE2_CTX.primary.wave,
+        ok: Boolean(e2Primary.ok),
+        schema: e2Primary.schema ?? null,
+        tag: e2Primary.tag ?? null,
+        direction: e2Primary.direction ?? null,
+        waveMarks: e2Primary.waveMarks ?? null,
+        fib: e2Primary.fib ?? null,
+        invalidated: Boolean(e2Primary.signals?.invalidated),
+        nearestLevel: nearestPrimary,
+        projectedW3: projPrimaryW3,
       },
       intermediate: {
         tf: ENGINE2_CTX.intermediate.tf,
         degree: ENGINE2_CTX.intermediate.degree,
         wave: ENGINE2_CTX.intermediate.wave,
-        ok: Boolean(fibInterRaw?.ok),
-        phase: fibInterRaw?.phase ?? fibInterRaw?.signals?.phase ?? fibInterRaw?.meta?.phase ?? "UNKNOWN",
-        anchorTag: fibInterRaw?.anchorTag ?? fibInterRaw?.signals?.tag ?? null,
-        fibScore: fibInterRaw?.fibScore ?? 0,
-        invalidated: Boolean(fibInterRaw?.invalidated ?? fibInterRaw?.signals?.invalidated),
-        anchors: interAnch ? { W1: interAnch.W1, W2: interAnch.W2 } : null,
+        ok: Boolean(e2Inter.ok),
+        schema: e2Inter.schema ?? null,
+        tag: e2Inter.tag ?? null,
+        direction: e2Inter.direction ?? null,
+        waveMarks: e2Inter.waveMarks ?? null,
+        fib: e2Inter.fib ?? null,
+        invalidated: Boolean(e2Inter.signals?.invalidated),
         nearestLevel: nearestInter,
+        projectedW3: projInterW3,
+      },
+      minor: {
+        tf: ENGINE2_CTX.minor.tf,
+        degree: ENGINE2_CTX.minor.degree,
+        wave: ENGINE2_CTX.minor.wave,
+        ok: Boolean(e2Minor.ok),
+        schema: e2Minor.schema ?? null,
+        tag: e2Minor.tag ?? null,
+        direction: e2Minor.direction ?? null,
+        waveMarks: e2Minor.waveMarks ?? null,
+        fib: e2Minor.fib ?? null,
+        invalidated: Boolean(e2Minor.signals?.invalidated),
+        nearestLevel: nearestMinor,
+        projectedW3: projMinorW3,
       },
     };
 
-    // Build a short fib summary for paragraph 2 + rules for paragraph 3
-    const fibCtx = (() => {
-      const parts = [];
-      const rules = [];
+    // Next rules (include invalidation lines for each degree)
+    const e2NextRules = [];
+    const addRules = (label, e2) => {
+      if (!e2?.ok) return;
+      if (e2.fib?.invalidation != null) e2NextRules.push(`${label} invalidation: ${e2.fib.invalidation.toFixed(2)}.`);
+      if (String(e2.tag || "").toUpperCase() === "W2" && e2.projectedW3?.pending && e2.projectedW3?.primary618 != null) {
+        e2NextRules.push(`${label} W3 (proj 1.618): ~${e2.projectedW3.primary618.toFixed(2)}.`);
+      }
+    };
+    addRules("Primary", engine2.primary);
+    addRules("Intermediate", engine2.intermediate);
+    addRules("Minor", engine2.minor);
 
-      const add = (name, near) => {
-        if (!near) return;
-        if (near.distancePts != null && near.distancePts <= 0.35) {
-          parts.push(`${name} fib: near ${near.kind.toLowerCase()} ${near.tag} at ${near.price.toFixed(2)} (within ${near.distancePts.toFixed(2)} pts).`);
-          rules.push({ if: `Respect fib ${near.tag} (${name})`, then: "Watch for rejection vs acceptance at this line" });
-        } else if (near.distanceAtr != null && near.distanceAtr <= 0.25) {
-          parts.push(`${name} fib: near ${near.tag} at ${near.price.toFixed(2)} (~${near.distanceAtr.toFixed(2)} ATR away).`);
-        }
-      };
+    // Stack + policy: neutral until minor resets
+    const stack = stackLine({ primary: e2Primary, intermediate: e2Inter, minor: e2Minor });
+    const minorReset = minorResetRuleText(e2Minor);
 
-      add("Minor", nearestMinor);
-      add("Intermediate", nearestInter);
-
-      return {
-        summary: parts.length ? parts.join(" ") : "",
-        nextRules: rules,
-      };
-    })();
-
-    // 4) Market regime
+    // 4) Market regime (1h)
     const balance = detectBalance({ bars, atr, n: 12, maxWidthAtr: 2.25 });
     const { phase, details } = phaseFromBalanceAndLast({ balance, lastBar: last, prevBar: prev, atr });
-
     const impulse = summarizeImpulse(last, atr);
-    const violentExpansion = detectViolentExpansion({ bars, atr, balance });
 
-    // key levels (include fib levels too)
-    const keyLevels = buildKeyLevels({ balance, zones, macroShelves, fibMinor, fibInter });
+    // 5) Defended levels tags (deterministic)
+    const defended = detectDefendedLevels({ bars, atr, windowBars: 24 });
 
-    // LAYER 1/2/3
-    const layer1 = buildLayer1RecentNarrative({ bars, atr, keyLevels });
-    const layer2 = buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, fibCtx });
-    const layer3 = buildLayer3NextNarrative({ zones, balance, macroShelves, fibCtx });
+    // 6) Bias override (LOCKED): neutral until minor resets
+    const baseBias =
+      phase === "ACCEPTANCE_UP"
+        ? "BULLISH"
+        : phase === "ACCEPTANCE_DOWN"
+        ? "BEARISH"
+        : phase === "EXPANSION"
+        ? details?.dir === "UP"
+          ? "BULLISH"
+          : "BEARISH"
+        : phase === "REJECTION"
+        ? details?.dir === "UP"
+          ? "BULLISH_REVERSAL_RISK"
+          : "BEARISH_REVERSAL_RISK"
+        : "NEUTRAL";
+
+    const bias = minorReset ? "NEUTRAL" : baseBias;
+
+    // 7) Layers
+    const layer1 = buildLayer1RecentNarrative({ last24, defended });
+    const layer2 = buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, stack, minorReset });
+    const layer3 = buildLayer3NextNarrative({ zones, balance, macroShelves, minorReset, e2NextRules });
 
     const narrativeText =
       style === "descriptive"
@@ -946,36 +895,34 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       symbol,
       tf,
       asOf: new Date().toISOString(),
+      coreBase: CORE_BASE,
 
       price,
-      atr,
+      atr: atr != null ? round2(atr) : null,
 
       phase,
-      bias:
-        phase === "ACCEPTANCE_UP" ? "BULLISH" :
-        phase === "ACCEPTANCE_DOWN" ? "BEARISH" :
-        phase === "EXPANSION" ? (details?.dir === "UP" ? "BULLISH" : "BEARISH") :
-        phase === "REJECTION" ? (details?.dir === "UP" ? "BULLISH_REVERSAL_RISK" : "BEARISH_REVERSAL_RISK") :
-        "NEUTRAL",
+      bias,
 
       confidence: clamp(
         balance?.isBalance
-          ? Math.round(50 + clamp(1 - balance.widthAtr / 2.25, 0, 1) * 25 + impulse.impulseScore * 2)
+          ? Math.round(50 + clamp(1 - (balance.widthAtr || 0) / 2.25, 0, 1) * 25 + impulse.impulseScore * 2)
           : Math.round(40 + impulse.impulseScore * 4),
         0,
         100
       ),
 
-      balance: balance ? {
-        isBalance: balance.isBalance,
-        n: balance.n,
-        hi: round2(balance.hi),
-        lo: round2(balance.lo),
-        mid: round2(balance.mid),
-        width: round2(balance.width),
-        widthAtr: round2(balance.widthAtr),
-        overlapPct: round2(balance.overlapPct),
-      } : null,
+      balance: balance
+        ? {
+            isBalance: balance.isBalance,
+            n: balance.n,
+            hi: round2(balance.hi),
+            lo: round2(balance.lo),
+            mid: round2(balance.mid),
+            width: round2(balance.width),
+            widthAtr: round2(balance.widthAtr),
+            overlapPct: round2(balance.overlapPct),
+          }
+        : null,
 
       impulse: {
         direction: impulse.direction,
@@ -984,28 +931,21 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
         bodyPct: impulse.bodyPct,
       },
 
-      violentExpansion,
-
       zones,
       macroShelves,
 
       engine2,
-      fib: {
-        minor: fibMinor,
-        intermediate: fibInter,
-      },
+
+      tags: defended.tags,
+      defendedSupportLevels: defended.defendedSupportLevels,
+      defendedResistanceLevels: defended.defendedResistanceLevels,
 
       layer1,
       layer2,
       layer3,
 
       narrativeText,
-
-      next: {
-        keyLevels,
-      },
     });
-
   } catch (e) {
     return res.status(500).json({
       ok: false,
