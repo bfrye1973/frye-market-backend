@@ -955,21 +955,17 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
         intermediate: { ok: iRes.ok, baseUsed: iRes.baseUsed, errors: iRes.errors },
         minor: { ok: mRes.ok, baseUsed: mRes.baseUsed, errors: mRes.errors },
       },
-      // DO NOT CLOSE HERE.
-      confidence: clamp(...),
-      balance: ...,
-      ...
-      narrativeText,
-    });
-      
-
+      // then continue with your REAL existing fields (confidence, balance, etc.)
       confidence: clamp(
-        balance?.isBalance
-          ? Math.round(50 + clamp(1 - (balance.widthAtr || 0) / 2.25, 0, 1) * 25 + impulse.impulseScore * 2)
-          : Math.round(40 + impulse.impulseScore * 4),
-        0,
-        100
-      ),
+      balance?.isBalance
+        ? Math.round(50 + clamp(1 - (balance.widthAtr || 0) / 2.25, 0, 1) * 25 + impulse.impulseScore * 2)
+        : Math.round(40 + impulse.impulseScore * 4),
+      0,
+      100
+    ),
+
+     // ...rest of your actual object...
+   });
 
       balance: balance
         ? {
