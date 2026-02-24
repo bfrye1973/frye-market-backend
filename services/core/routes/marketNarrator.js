@@ -1,21 +1,24 @@
 // services/core/routes/marketNarrator.js
 // Engine 14A (Read-only) — Market Narrator (SPY only)
 //
-// CLEAN REWRITE (v6.1):
+// CLEAN REWRITE (v7):
 // ✅ Primary + Intermediate + Minor stack included (Primary=1d, Intermediate=1h, Minor=1h)
 // ✅ Policy (LOCKED): Neutral until MINOR resets
-//    - If minor is invalidated → overall bias stays NEUTRAL
 // ✅ style=descriptive → EXACTLY 3 paragraphs separated by \n\n
 // ✅ Deterministic defended support/resistance tags + structured levels over last 24h (ATR-based clustering)
 // ✅ SPX macro shelves (6800/6900/7000) mapped to SPY using fixed ratio (SPX 6900 ↔ SPY 688)
-// ✅ Engine 2 parsing uses fib-levels@3 truth
+// ✅ Engine 2 parsing uses fib-levels@3 truth + robust fetch + engine2Fetch diagnostics
 // ✅ W3 pending behavior (locked): if tag=W2 and waveMarks.W3.p==0 → project W3 targets from W2 using 1.0/1.272/1.618
-// ✅ Robust Engine2 fetch: tries CORE_BASE, then req host; outputs engine2Fetch diagnostics
+// ✅ NEW: engineStack summaries for Engines 3/4/5 (Option A, minimal & safe)
+//    - E3: /api/v1/reaction-score?symbol=SPY&tf=1h
+//    - E4: /api/v1/volume-behavior?symbol=SPY&tf=1h&zoneLo=...&zoneHi=...
+//    - E5: /api/v1/confluence-score?symbol=SPY&tf=1h
 //
 // Uses ONLY:
 // - OHLCV bars: /api/v1/ohlc?symbol=SPY&tf=1h&limit=250
 // - Zone context: /api/v1/engine5-context?symbol=SPY&tf=1h
 // - Engine 2 truth: /api/v1/fib-levels?... (primary/intermediate/minor)
+// - Engine 3/4/5 summaries: endpoints above
 //
 // Not a signal generator. Narration-only.
 
@@ -209,14 +212,11 @@ function isRealPrice(p) {
 // Robust fetch:
 // 1) try CORE_BASE loopback
 // 2) fallback to the same host that served this request (req host)
-// Returns { ok, baseUsed, payload, errors[] }
 async function fetchFibLevelsRobust(req, { symbol, tf, degree, wave }) {
   const bases = [];
 
-  // 1) Loopback base (fast)
   if (CORE_BASE) bases.push(String(CORE_BASE));
 
-  // 2) Same request host (most reliable on Render)
   const proto = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
   const host = req.get("host");
   if (host) bases.push(`${proto}://${host}`);
@@ -384,6 +384,100 @@ function nearestLevel({ price, levelList, atr }) {
   return best ? { tag: best.tag, kind: best.kind, price: best.price, distancePts: nearPts, distanceAtr: nearAtr } : null;
 }
 
+/* ---------------- Engine 3/4/5 summaries (Option A) ---------------- */
+
+async function fetchEngine3Summary(req, { symbol, tf }) {
+  const proto = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
+  const host = req.get("host");
+  const base = host ? `${proto}://${host}` : CORE_BASE;
+
+  const u = new URL(`${base}/api/v1/reaction-score`);
+  u.searchParams.set("symbol", symbol);
+  u.searchParams.set("tf", tf);
+
+  const r = await fetchJson(u.toString(), { timeoutMs: 12000 });
+  const j = r.ok && r.json ? r.json : null;
+
+  if (!j || j.ok !== true) {
+    return { ok: false, notes: ["unavailable"], raw: null };
+  }
+
+  return {
+    ok: true,
+    stage: j.stage ?? null,
+    armed: Boolean(j.armed),
+    reactionScore: toNum(j.reactionScore) ?? null,
+    structureState: j.structureState ?? null,
+    zonePosition: j.zonePosition ?? null,
+    reasonCodes: Array.isArray(j.reasonCodes) ? j.reasonCodes : [],
+  };
+}
+
+async function fetchEngine4Summary(req, { symbol, tf, zoneLo, zoneHi }) {
+  const proto = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
+  const host = req.get("host");
+  const base = host ? `${proto}://${host}` : CORE_BASE;
+
+  if (!Number.isFinite(zoneLo) || !Number.isFinite(zoneHi)) {
+    return { ok: false, notes: ["no_zone_range"] };
+  }
+
+  const u = new URL(`${base}/api/v1/volume-behavior`);
+  u.searchParams.set("symbol", symbol);
+  u.searchParams.set("tf", tf);
+  u.searchParams.set("zoneLo", String(zoneLo));
+  u.searchParams.set("zoneHi", String(zoneHi));
+
+  const r = await fetchJson(u.toString(), { timeoutMs: 12000 });
+  const j = r.ok && r.json ? r.json : null;
+
+  if (!j || j.error) {
+    return { ok: false, notes: [j?.error || "unavailable"] };
+  }
+
+  return {
+    ok: true,
+    volumeRegime: j.volumeRegime ?? null,
+    pressureBias: j.pressureBias ?? null,
+    volumeScore: toNum(j.volumeScore) ?? null,
+    volumeConfirmed: Boolean(j.volumeConfirmed),
+    flowSummary: Array.isArray(j.flowSummary) ? j.flowSummary : [],
+    nextConfirm: j.nextConfirm ?? null,
+    reasonCodes: Array.isArray(j.reasonCodes) ? j.reasonCodes : [],
+  };
+}
+
+async function fetchEngine5Summary(req, { symbol, tf }) {
+  const proto = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
+  const host = req.get("host");
+  const base = host ? `${proto}://${host}` : CORE_BASE;
+
+  const u = new URL(`${base}/api/v1/confluence-score`);
+  u.searchParams.set("symbol", symbol);
+  u.searchParams.set("tf", tf);
+
+  const r = await fetchJson(u.toString(), { timeoutMs: 12000 });
+  const j = r.ok && r.json ? r.json : null;
+
+  if (!j || j.ok !== true) {
+    return { ok: false, notes: ["unavailable"] };
+  }
+
+  // total can be at scores.total or top-level total in some variants
+  const confluenceTotal = toNum(j?.scores?.total) ?? toNum(j?.total) ?? null;
+  const label = j?.scores?.label ?? j?.label ?? null;
+
+  return {
+    ok: true,
+    confluenceTotal,
+    label,
+    tradeReady: Boolean(j.tradeReady),
+    reasonCodes: Array.isArray(j.reasonCodes) ? j.reasonCodes : [],
+    // display-only GO summary if present in the future
+    go: j?.go && typeof j.go === "object" ? j.go : null,
+  };
+}
+
 /* ---------------- defended levels (deterministic tags) ---------------- */
 
 function roundToBand(x, band) {
@@ -525,34 +619,15 @@ function phaseFromBalanceAndLast({ balance, lastBar, prevBar, atr }) {
 
   const outsideUp = lastClose > hi;
   const outsideDown = lastClose < lo;
-  const backInside = lastClose <= hi && lastClose >= lo;
 
   const lastRangeAtr = last.range / atr;
   const lastBodyPct = last.bodyPct;
   const strongImpulse = lastRangeAtr >= 1.1 && lastBodyPct >= 0.55;
 
-  const acceptanceUp = prevClose > hi && lastClose > hi;
-  const acceptanceDown = prevClose < lo && lastClose < lo;
-
-  const wickAbove = last.h > hi && backInside;
-  const wickBelow = last.l < lo && backInside;
-
-  const weakBreak = (outsideUp || outsideDown) && !strongImpulse;
-
   if (balance.isBalance) {
-    if (acceptanceUp) return { phase: "ACCEPTANCE_UP", details: { hi, lo } };
-    if (acceptanceDown) return { phase: "ACCEPTANCE_DOWN", details: { hi, lo } };
-
     if ((outsideUp || outsideDown) && strongImpulse) {
       return { phase: "EXPANSION", details: { dir: outsideUp ? "UP" : "DOWN", hi, lo } };
     }
-
-    if (wickAbove || wickBelow) {
-      return { phase: "REJECTION", details: { dir: wickAbove ? "DOWN" : "UP", hi, lo } };
-    }
-
-    if (weakBreak) return { phase: "TRAP_RISK", details: { hi, lo } };
-
     return { phase: "BALANCE", details: { hi, lo } };
   }
 
@@ -572,7 +647,6 @@ function stackLine({ primary, intermediate, minor }) {
   return `Alignment: Primary=${fmt(primary)}, Intermediate=${fmt(intermediate)}, Minor=${fmt(minor)}.`;
 }
 
-// Locked rule: neutral until minor resets. Also use safe wording: 1h close when invalidationMode=close.
 function minorResetRuleText(minorParsed) {
   if (!minorParsed?.ok) return "Minor wave/fib unavailable; stay neutral until execution layer is readable.";
   if (!minorParsed.signals?.invalidated) return null;
@@ -584,9 +658,8 @@ function minorResetRuleText(minorParsed) {
     if (mode === "close") {
       return `Execution layer: Minor is invalidated (74% gate). Stay neutral on minor/minute longs until a 1h close back above ${inv.toFixed(2)}.`;
     }
-    return `Execution layer: Minor is invalidated (74% gate). Stay neutral on minor/minute longs until price resets above ${inv.toFixed(2)}.`;
+    return `Execution layer: Minor is invalidated (74% gate). Stay neutral until price resets above ${inv.toFixed(2)}.`;
   }
-
   return `Execution layer: Minor is invalidated (74% gate). Stay neutral until minor resets.`;
 }
 
@@ -614,7 +687,7 @@ function buildLayer1RecentNarrative({ last24, defended }) {
   return { text };
 }
 
-function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, stack, minorReset }) {
+function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, stack, minorReset, engineStack }) {
   const inAllowed = Boolean(zones?.inAllowedZone);
   const near = zones?.nearestAllowed?.distancePts != null ? zones.nearestAllowed.distancePts : null;
 
@@ -641,6 +714,24 @@ function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impuls
   if (stack) text += `${stack} `;
   if (minorReset) text += `${minorReset} `;
 
+  if (engineStack?.engine3?.ok) {
+    text += `Engine3: stage ${engineStack.engine3.stage || "UNKNOWN"}, reactionScore ${engineStack.engine3.reactionScore ?? "n/a"}. `;
+  } else {
+    text += `Engine3 unavailable. `;
+  }
+
+  if (engineStack?.engine4?.ok) {
+    text += `Engine4: ${engineStack.engine4.volumeRegime || "UNKNOWN"} volume, ${engineStack.engine4.pressureBias || "UNKNOWN"} (score ${engineStack.engine4.volumeScore ?? "n/a"}). `;
+  } else {
+    text += `Engine4 unavailable. `;
+  }
+
+  if (engineStack?.engine5?.ok) {
+    text += `Engine5: confluence ${engineStack.engine5.confluenceTotal ?? "n/a"} (${engineStack.engine5.label || "n/a"}), tradeReady ${engineStack.engine5.tradeReady ? "true" : "false"}. `;
+  } else {
+    text += `Engine5 unavailable. `;
+  }
+
   if (impulse?.impulseScore != null) {
     text += `Latest impulse score is ${impulse.impulseScore}/10 (${impulse.direction}). `;
   }
@@ -648,7 +739,7 @@ function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impuls
   return { text: text.trim() };
 }
 
-function buildLayer3NextNarrative({ zones, balance, macroShelves, minorReset, e2NextRules }) {
+function buildLayer3NextNarrative({ zones, balance, macroShelves, minorReset, e2NextRules, engineStack }) {
   const bHi = toNum(balance?.hi);
   const bLo = toNum(balance?.lo);
 
@@ -662,6 +753,9 @@ function buildLayer3NextNarrative({ zones, balance, macroShelves, minorReset, e2
     if (macroShelves?.nearest?.spx != null && macroShelves?.nearest?.spy != null) {
       t += `Macro friction remains around ~${macroShelves.nearest.spy.toFixed(2)} (SPX ${macroShelves.nearest.spx}). `;
     }
+    if (engineStack?.engine4?.ok && engineStack.engine4.nextConfirm) {
+      t += `Volume check: ${engineStack.engine4.nextConfirm} `;
+    }
     if (Array.isArray(e2NextRules) && e2NextRules.length) t += e2NextRules.join(" ");
     return { text: t.trim() };
   }
@@ -672,9 +766,10 @@ function buildLayer3NextNarrative({ zones, balance, macroShelves, minorReset, e2
     )} favors acceptance up, while a decisive close below ${bLo.toFixed(2)} favors acceptance down. `;
 
     if (zones?.activeZone?.lo != null && zones?.activeZone?.hi != null) {
-      const lo = Number(zones.activeZone.lo);
       const hi = Number(zones.activeZone.hi);
+      const lo = Number(zones.activeZone.lo);
       const mid = (Math.min(lo, hi) + Math.max(lo, hi)) / 2;
+
       t += `Within zones, hold above ${hi.toFixed(2)} for acceptance, or lose midline ${mid.toFixed(
         2
       )} for rejection risk. `;
@@ -682,6 +777,10 @@ function buildLayer3NextNarrative({ zones, balance, macroShelves, minorReset, e2
 
     if (macroShelves?.nearest?.spx != null && macroShelves?.nearest?.spy != null) {
       t += `Macro friction remains around ~${macroShelves.nearest.spy.toFixed(2)} (SPX ${macroShelves.nearest.spx}). `;
+    }
+
+    if (engineStack?.engine4?.ok && engineStack.engine4.nextConfirm) {
+      t += `Volume check: ${engineStack.engine4.nextConfirm} `;
     }
 
     if (Array.isArray(e2NextRules) && e2NextRules.length) t += e2NextRules.join(" ");
@@ -861,7 +960,7 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       minor: { ok: mRes.ok, baseUsed: mRes.baseUsed, errors: mRes.errors },
     };
 
-    // Next rules
+    // Next rules (for paragraph 3)
     const e2NextRules = [];
     const addRules = (label, e2) => {
       if (!e2?.ok) return;
@@ -877,6 +976,22 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
     addRules("Primary", engine2.primary);
     addRules("Intermediate", engine2.intermediate);
     addRules("Minor", engine2.minor);
+
+    // Engine 3/4/5 summaries (Option A)
+    const zoneLo = toNum(zones?.activeZone?.lo) ?? toNum(zones?.nearestAllowed?.lo);
+    const zoneHi = toNum(zones?.activeZone?.hi) ?? toNum(zones?.nearestAllowed?.hi);
+
+    const [e3, e4, e5] = await Promise.all([
+      fetchEngine3Summary(req, { symbol, tf }),
+      fetchEngine4Summary(req, { symbol, tf, zoneLo, zoneHi }),
+      fetchEngine5Summary(req, { symbol, tf }),
+    ]);
+
+    const engineStack = {
+      engine3: e3,
+      engine4: e4,
+      engine5: e5,
+    };
 
     // Stack + policy: neutral until minor resets
     const stack = stackLine({ primary: e2Primary, intermediate: e2Inter, minor: e2Minor });
@@ -900,18 +1015,30 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
         ? details?.dir === "UP"
           ? "BULLISH"
           : "BEARISH"
-        : phase === "REJECTION"
-        ? details?.dir === "UP"
-          ? "BULLISH_REVERSAL_RISK"
-          : "BEARISH_REVERSAL_RISK"
         : "NEUTRAL";
 
     const bias = minorReset ? "NEUTRAL" : baseBias;
 
     // 7) Layers
     const layer1 = buildLayer1RecentNarrative({ last24, defended });
-    const layer2 = buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, stack, minorReset });
-    const layer3 = buildLayer3NextNarrative({ zones, balance, macroShelves, minorReset, e2NextRules });
+    const layer2 = buildLayer2CurrentNarrative({
+      price,
+      phase,
+      zones,
+      macroShelves,
+      impulse,
+      stack,
+      minorReset,
+      engineStack,
+    });
+    const layer3 = buildLayer3NextNarrative({
+      zones,
+      balance,
+      macroShelves,
+      minorReset,
+      e2NextRules,
+      engineStack,
+    });
 
     const narrativeText =
       style === "descriptive"
@@ -965,6 +1092,8 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
 
       engine2,
       engine2Fetch,
+
+      engineStack,
 
       tags: defended.tags,
       defendedSupportLevels: defended.defendedSupportLevels,
