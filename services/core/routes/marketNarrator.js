@@ -1,7 +1,7 @@
 // services/core/routes/marketNarrator.js
 // Engine 14A (Read-only) — Market Narrator (SPY only)
 //
-// CLEAN REWRITE (v7):
+// CLEAN REWRITE (v8):
 // ✅ Primary + Intermediate + Minor stack included (Primary=1d, Intermediate=1h, Minor=1h)
 // ✅ Policy (LOCKED): Neutral until MINOR resets
 // ✅ style=descriptive → EXACTLY 3 paragraphs separated by \n\n
@@ -9,16 +9,16 @@
 // ✅ SPX macro shelves (6800/6900/7000) mapped to SPY using fixed ratio (SPX 6900 ↔ SPY 688)
 // ✅ Engine 2 parsing uses fib-levels@3 truth + robust fetch + engine2Fetch diagnostics
 // ✅ W3 pending behavior (locked): if tag=W2 and waveMarks.W3.p==0 → project W3 targets from W2 using 1.0/1.272/1.618
-// ✅ NEW: engineStack summaries for Engines 3/4/5 (Option A, minimal & safe)
-//    - E3: /api/v1/reaction-score?symbol=SPY&tf=1h
-//    - E4: /api/v1/volume-behavior?symbol=SPY&tf=1h&zoneLo=...&zoneHi=...
-//    - E5: /api/v1/confluence-score?symbol=SPY&tf=1h
+// ✅ EngineStack summaries for Engines 3/4/5 (Option A, minimal & safe)
+// ✅ NEW: stackState + stackReasons (deterministic one-line state)
 //
-// Uses ONLY:
-// - OHLCV bars: /api/v1/ohlc?symbol=SPY&tf=1h&limit=250
-// - Zone context: /api/v1/engine5-context?symbol=SPY&tf=1h
-// - Engine 2 truth: /api/v1/fib-levels?... (primary/intermediate/minor)
-// - Engine 3/4/5 summaries: endpoints above
+// Endpoints used:
+// - /api/v1/ohlc?symbol=SPY&tf=1h&limit=250
+// - /api/v1/engine5-context?symbol=SPY&tf=1h
+// - /api/v1/fib-levels?... (primary/intermediate/minor)
+// - /api/v1/reaction-score?symbol=SPY&tf=1h
+// - /api/v1/volume-behavior?symbol=SPY&tf=1h&zoneLo=...&zoneHi=...
+// - /api/v1/confluence-score?symbol=SPY&tf=1h
 //
 // Not a signal generator. Narration-only.
 
@@ -209,9 +209,6 @@ function isRealPrice(p) {
   return Number.isFinite(n) && n > 0;
 }
 
-// Robust fetch:
-// 1) try CORE_BASE loopback
-// 2) fallback to the same host that served this request (req host)
 async function fetchFibLevelsRobust(req, { symbol, tf, degree, wave }) {
   const bases = [];
 
@@ -386,11 +383,14 @@ function nearestLevel({ price, levelList, atr }) {
 
 /* ---------------- Engine 3/4/5 summaries (Option A) ---------------- */
 
-async function fetchEngine3Summary(req, { symbol, tf }) {
+function requestBase(req) {
   const proto = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
   const host = req.get("host");
-  const base = host ? `${proto}://${host}` : CORE_BASE;
+  return host ? `${proto}://${host}` : CORE_BASE;
+}
 
+async function fetchEngine3Summary(req, { symbol, tf }) {
+  const base = requestBase(req);
   const u = new URL(`${base}/api/v1/reaction-score`);
   u.searchParams.set("symbol", symbol);
   u.searchParams.set("tf", tf);
@@ -399,7 +399,7 @@ async function fetchEngine3Summary(req, { symbol, tf }) {
   const j = r.ok && r.json ? r.json : null;
 
   if (!j || j.ok !== true) {
-    return { ok: false, notes: ["unavailable"], raw: null };
+    return { ok: false, notes: ["unavailable"] };
   }
 
   return {
@@ -414,9 +414,7 @@ async function fetchEngine3Summary(req, { symbol, tf }) {
 }
 
 async function fetchEngine4Summary(req, { symbol, tf, zoneLo, zoneHi }) {
-  const proto = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
-  const host = req.get("host");
-  const base = host ? `${proto}://${host}` : CORE_BASE;
+  const base = requestBase(req);
 
   if (!Number.isFinite(zoneLo) || !Number.isFinite(zoneHi)) {
     return { ok: false, notes: ["no_zone_range"] };
@@ -448,10 +446,7 @@ async function fetchEngine4Summary(req, { symbol, tf, zoneLo, zoneHi }) {
 }
 
 async function fetchEngine5Summary(req, { symbol, tf }) {
-  const proto = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
-  const host = req.get("host");
-  const base = host ? `${proto}://${host}` : CORE_BASE;
-
+  const base = requestBase(req);
   const u = new URL(`${base}/api/v1/confluence-score`);
   u.searchParams.set("symbol", symbol);
   u.searchParams.set("tf", tf);
@@ -463,7 +458,6 @@ async function fetchEngine5Summary(req, { symbol, tf }) {
     return { ok: false, notes: ["unavailable"] };
   }
 
-  // total can be at scores.total or top-level total in some variants
   const confluenceTotal = toNum(j?.scores?.total) ?? toNum(j?.total) ?? null;
   const label = j?.scores?.label ?? j?.label ?? null;
 
@@ -473,9 +467,58 @@ async function fetchEngine5Summary(req, { symbol, tf }) {
     label,
     tradeReady: Boolean(j.tradeReady),
     reasonCodes: Array.isArray(j.reasonCodes) ? j.reasonCodes : [],
-    // display-only GO summary if present in the future
     go: j?.go && typeof j.go === "object" ? j.go : null,
   };
+}
+
+/* ---------------- stackState (deterministic) ---------------- */
+
+function computeStackState({ phase, engine2, engineStack }) {
+  const reasons = [];
+
+  // 1) Hard stop: minor invalidated
+  if (Boolean(engine2?.minor?.invalidated)) {
+    reasons.push("MINOR_INVALIDATED");
+    return { stackState: "STACK_EXECUTION_INVALIDATED", stackReasons: reasons };
+  }
+
+  const e3 = engineStack?.engine3;
+  const e4 = engineStack?.engine4;
+  const e5 = engineStack?.engine5;
+
+  const reactionScore = Number(e3?.reactionScore);
+  const volConfirmed = Boolean(e4?.volumeConfirmed);
+  const tradeReady = Boolean(e5?.tradeReady);
+  const confluenceTotal = Number(e5?.confluenceTotal);
+
+  const reactionOk = Number.isFinite(reactionScore) ? reactionScore >= 5 : false;
+  const confluenceOk = Number.isFinite(confluenceTotal) ? confluenceTotal >= 85 : false;
+
+  // 2) Trigger active
+  if (tradeReady && volConfirmed && reactionOk) {
+    reasons.push("TRADE_READY");
+    reasons.push("VOLUME_CONFIRMED");
+    reasons.push("REACTION_CONFIRMED");
+    return { stackState: "STACK_TRIGGER_ACTIVE", stackReasons: reasons };
+  }
+
+  // 3) High confluence coil, no trigger
+  if (tradeReady && confluenceOk && (!volConfirmed || !reactionOk)) {
+    reasons.push("HIGH_CONFLUENCE");
+    reasons.push("TRADE_READY");
+    if (!volConfirmed) reasons.push("VOLUME_NOT_CONFIRMED");
+    if (!reactionOk) reasons.push("REACTION_NOT_CONFIRMED");
+    return { stackState: "STACK_HIGH_CONFLUENCE_COIL_NO_TRIGGER", stackReasons: reasons };
+  }
+
+  // 4) Balance rotation
+  if (String(phase || "").toUpperCase() === "BALANCE") {
+    reasons.push("PHASE_BALANCE");
+    return { stackState: "STACK_BALANCE_ROTATION", stackReasons: reasons };
+  }
+
+  reasons.push("FALLBACK");
+  return { stackState: "STACK_UNCLEAR", stackReasons: reasons };
 }
 
 /* ---------------- defended levels (deterministic tags) ---------------- */
@@ -687,7 +730,17 @@ function buildLayer1RecentNarrative({ last24, defended }) {
   return { text };
 }
 
-function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impulse, stack, minorReset, engineStack }) {
+function buildLayer2CurrentNarrative({
+  price,
+  phase,
+  zones,
+  macroShelves,
+  impulse,
+  stack,
+  minorReset,
+  engineStack,
+  stackState,
+}) {
   const inAllowed = Boolean(zones?.inAllowedZone);
   const near = zones?.nearestAllowed?.distancePts != null ? zones.nearestAllowed.distancePts : null;
 
@@ -712,6 +765,7 @@ function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impuls
   }
 
   if (stack) text += `${stack} `;
+  if (stackState) text += `StackState: ${stackState}. `;
   if (minorReset) text += `${minorReset} `;
 
   if (engineStack?.engine3?.ok) {
@@ -727,7 +781,9 @@ function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impuls
   }
 
   if (engineStack?.engine5?.ok) {
-    text += `Engine5: confluence ${engineStack.engine5.confluenceTotal ?? "n/a"} (${engineStack.engine5.label || "n/a"}), tradeReady ${engineStack.engine5.tradeReady ? "true" : "false"}. `;
+    text += `Engine5: confluence ${engineStack.engine5.confluenceTotal ?? "n/a"} (${engineStack.engine5.label || "n/a"}), tradeReady ${
+      engineStack.engine5.tradeReady ? "true" : "false"
+    }. `;
   } else {
     text += `Engine5 unavailable. `;
   }
@@ -799,7 +855,7 @@ function buildNarrativeTextDescriptive({ layer1, layer2, layer3 }) {
 }
 
 /* ---------------- route ---------------- */
-// GET /api/v1/market-narrator?symbol=SPY&tf=1h&style=descriptive
+
 marketNarratorRouter.get("/market-narrator", async (req, res) => {
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
   const tf = String(req.query.tf || "1h");
@@ -987,25 +1043,20 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       fetchEngine5Summary(req, { symbol, tf }),
     ]);
 
-    const engineStack = {
-      engine3: e3,
-      engine4: e4,
-      engine5: e5,
-    };
-
-    // Stack + policy: neutral until minor resets
-    const stack = stackLine({ primary: e2Primary, intermediate: e2Inter, minor: e2Minor });
-    const minorReset = minorResetRuleText(e2Minor);
+    const engineStack = { engine3: e3, engine4: e4, engine5: e5 };
 
     // 4) Market regime (1h)
     const balance = detectBalance({ bars, atr, n: 12, maxWidthAtr: 2.25 });
     const { phase, details } = phaseFromBalanceAndLast({ balance, lastBar: last, prevBar: prev, atr });
     const impulse = summarizeImpulse(last, atr);
 
+    // stackState
+    const { stackState, stackReasons } = computeStackState({ phase, engine2, engineStack });
+
     // 5) Defended levels tags (deterministic)
     const defended = detectDefendedLevels({ bars, atr, windowBars: 24 });
 
-    // 6) Bias override (LOCKED)
+    // 6) Bias override (LOCKED): neutral until minor resets
     const baseBias =
       phase === "ACCEPTANCE_UP"
         ? "BULLISH"
@@ -1017,9 +1068,12 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
           : "BEARISH"
         : "NEUTRAL";
 
+    const minorReset = minorResetRuleText(e2Minor);
     const bias = minorReset ? "NEUTRAL" : baseBias;
 
     // 7) Layers
+    const stack = stackLine({ primary: e2Primary, intermediate: e2Inter, minor: e2Minor });
+
     const layer1 = buildLayer1RecentNarrative({ last24, defended });
     const layer2 = buildLayer2CurrentNarrative({
       price,
@@ -1030,6 +1084,7 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       stack,
       minorReset,
       engineStack,
+      stackState,
     });
     const layer3 = buildLayer3NextNarrative({
       zones,
@@ -1094,6 +1149,9 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       engine2Fetch,
 
       engineStack,
+
+      stackState,
+      stackReasons,
 
       tags: defended.tags,
       defendedSupportLevels: defended.defendedSupportLevels,
