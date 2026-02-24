@@ -950,16 +950,18 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       bias,
 
       engine2,
-
       engine2Fetch: {
         primary: { ok: pRes.ok, baseUsed: pRes.baseUsed, errors: pRes.errors },
         intermediate: { ok: iRes.ok, baseUsed: iRes.baseUsed, errors: iRes.errors },
         minor: { ok: mRes.ok, baseUsed: mRes.baseUsed, errors: mRes.errors },
       },
-
-      tags,
+      // DO NOT CLOSE HERE.
+      confidence: clamp(...),
+      balance: ...,
       ...
+      narrativeText,
     });
+      
 
       confidence: clamp(
         balance?.isBalance
