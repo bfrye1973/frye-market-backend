@@ -1,15 +1,16 @@
 // services/core/routes/marketNarrator.js
 // Engine 14A (Read-only) — Market Narrator (SPY only)
 //
-// CLEAN REWRITE (v6):
+// CLEAN REWRITE (v6.1):
 // ✅ Primary + Intermediate + Minor stack included (Primary=1d, Intermediate=1h, Minor=1h)
 // ✅ Policy (LOCKED): Neutral until MINOR resets
-//    - If minor is invalidated → overall bias stays NEUTRAL (even if primary/intermediate are bullish)
+//    - If minor is invalidated → overall bias stays NEUTRAL
 // ✅ style=descriptive → EXACTLY 3 paragraphs separated by \n\n
 // ✅ Deterministic defended support/resistance tags + structured levels over last 24h (ATR-based clustering)
 // ✅ SPX macro shelves (6800/6900/7000) mapped to SPY using fixed ratio (SPX 6900 ↔ SPY 688)
-// ✅ Engine 2 parsing uses fib-levels@3 truth (anchors.waveMarks + fib.r382/r500/r618/invalidation + signals.tag)
+// ✅ Engine 2 parsing uses fib-levels@3 truth
 // ✅ W3 pending behavior (locked): if tag=W2 and waveMarks.W3.p==0 → project W3 targets from W2 using 1.0/1.272/1.618
+// ✅ Robust Engine2 fetch: tries CORE_BASE, then req host; outputs engine2Fetch diagnostics
 //
 // Uses ONLY:
 // - OHLCV bars: /api/v1/ohlc?symbol=SPY&tf=1h&limit=250
@@ -78,9 +79,9 @@ function computeATR(bars, len = 14) {
   if (!Array.isArray(bars) || bars.length < len + 2) return null;
   const trs = [];
   for (let i = 1; i < bars.length; i++) {
-    const h = bars[i].high,
-      l = bars[i].low,
-      pc = bars[i - 1].close;
+    const h = bars[i].high;
+    const l = bars[i].low;
+    const pc = bars[i - 1].close;
     if (![h, l, pc].every(Number.isFinite)) continue;
     const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
     trs.push(tr);
@@ -93,10 +94,10 @@ function computeATR(bars, len = 14) {
 }
 
 function candleStats(bar) {
-  const o = toNum(bar?.open),
-    h = toNum(bar?.high),
-    l = toNum(bar?.low),
-    c = toNum(bar?.close);
+  const o = toNum(bar?.open);
+  const h = toNum(bar?.high);
+  const l = toNum(bar?.low);
+  const c = toNum(bar?.close);
   if ([o, h, l, c].some((v) => v == null)) return null;
 
   const range = h - l;
@@ -194,7 +195,6 @@ function buildMacroShelves({ price }) {
 
 /* ---------------- Engine 2 (Fib/Wave) truth parsing ---------------- */
 
-// Degrees we want inside narrator
 const ENGINE2_CTX = {
   primary: { tf: "1d", degree: "primary", wave: "W1" },
   intermediate: { tf: "1h", degree: "intermediate", wave: "W1" },
@@ -218,7 +218,7 @@ async function fetchFibLevelsRobust(req, { symbol, tf, degree, wave }) {
 
   // 2) Same request host (most reliable on Render)
   const proto = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
-  const host = req.get?.("host");
+  const host = req.get("host");
   if (host) bases.push(`${proto}://${host}`);
 
   const errors = [];
@@ -233,7 +233,6 @@ async function fetchFibLevelsRobust(req, { symbol, tf, degree, wave }) {
 
       const r = await fetchJson(u.toString(), { timeoutMs: 15000 });
 
-      // We accept only a valid fib-levels payload: HTTP OK + json.ok === true
       if (r?.ok && r?.json && r.json.ok === true) {
         return { ok: true, baseUsed: base, payload: r.json, errors };
       }
@@ -265,14 +264,12 @@ function getWaveMark(payload, key) {
 function parseFibLevelsV3(payload) {
   if (!payload || payload.ok !== true) return { ok: false };
 
-  const schema = payload?.meta?.schema || null;
-
   const low = payload?.anchors?.low;
   const high = payload?.anchors?.high;
 
   return {
     ok: true,
-    schema,
+    schema: payload?.meta?.schema || null,
     meta: payload?.meta || null,
     degree: payload?.meta?.degree || null,
     tf: payload?.meta?.tf || null,
@@ -308,17 +305,12 @@ function buildFibLevelsList(e2Parsed) {
 
   const levels = [];
 
-  if (e2Parsed.anchors?.low != null)
-    levels.push({ tag: "LOW", kind: "ANCHOR", price: round2(e2Parsed.anchors.low) });
-  if (e2Parsed.anchors?.high != null)
-    levels.push({ tag: "HIGH", kind: "ANCHOR", price: round2(e2Parsed.anchors.high) });
+  if (e2Parsed.anchors?.low != null) levels.push({ tag: "LOW", kind: "ANCHOR", price: round2(e2Parsed.anchors.low) });
+  if (e2Parsed.anchors?.high != null) levels.push({ tag: "HIGH", kind: "ANCHOR", price: round2(e2Parsed.anchors.high) });
 
-  if (e2Parsed.fib?.r382 != null)
-    levels.push({ tag: "38.2%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r382) });
-  if (e2Parsed.fib?.r500 != null)
-    levels.push({ tag: "50.0%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r500) });
-  if (e2Parsed.fib?.r618 != null)
-    levels.push({ tag: "61.8%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r618) });
+  if (e2Parsed.fib?.r382 != null) levels.push({ tag: "38.2%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r382) });
+  if (e2Parsed.fib?.r500 != null) levels.push({ tag: "50.0%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r500) });
+  if (e2Parsed.fib?.r618 != null) levels.push({ tag: "61.8%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.r618) });
   if (e2Parsed.fib?.reference_786 != null)
     levels.push({ tag: "78.6%", kind: "RETRACEMENT", price: round2(e2Parsed.fib.reference_786) });
 
@@ -389,9 +381,7 @@ function nearestLevel({ price, levelList, atr }) {
   const nearPts = dPts != null ? round2(dPts) : null;
   const nearAtr = dPts != null && Number.isFinite(atr) && atr > 0 ? round2(dPts / atr) : null;
 
-  return best
-    ? { tag: best.tag, kind: best.kind, price: best.price, distancePts: nearPts, distanceAtr: nearAtr }
-    : null;
+  return best ? { tag: best.tag, kind: best.kind, price: best.price, distancePts: nearPts, distanceAtr: nearAtr } : null;
 }
 
 /* ---------------- defended levels (deterministic tags) ---------------- */
@@ -424,12 +414,8 @@ function detectDefendedLevels({ bars, atr, windowBars = 24 }) {
     const supportCandidate = lowerWickToBody >= 1.25 && s.closePos >= 0.60 ? roundToBand(s.l, tol) : null;
     const resistCandidate = upperWickToBody >= 1.25 && s.closePos <= 0.40 ? roundToBand(s.h, tol) : null;
 
-    if (supportCandidate != null) {
-      supportEvents.push({ level: supportCandidate, time: b.time });
-    }
-    if (resistCandidate != null) {
-      resistEvents.push({ level: resistCandidate, time: b.time });
-    }
+    if (supportCandidate != null) supportEvents.push({ level: supportCandidate, time: b.time });
+    if (resistCandidate != null) resistEvents.push({ level: resistCandidate, time: b.time });
   }
 
   const cluster = (events) => {
@@ -460,11 +446,11 @@ function detectDefendedLevels({ bars, atr, windowBars = 24 }) {
 /* ---------------- market structure helpers ---------------- */
 
 function rangeHiLo(bars) {
-  let hi = -Infinity,
-    lo = Infinity;
+  let hi = -Infinity;
+  let lo = Infinity;
   for (const b of bars) {
-    const h = toNum(b.high),
-      l = toNum(b.low);
+    const h = toNum(b.high);
+    const l = toNum(b.low);
     if (h == null || l == null) continue;
     if (h > hi) hi = h;
     if (l < lo) lo = l;
@@ -574,7 +560,7 @@ function phaseFromBalanceAndLast({ balance, lastBar, prevBar, atr }) {
   return { phase: "CORRECTION", details: {} };
 }
 
-/* ---------------- Narration helpers (stack + neutral-until-reset policy) ---------------- */
+/* ---------------- Narration helpers ---------------- */
 
 function stackLine({ primary, intermediate, minor }) {
   const fmt = (x) => {
@@ -586,21 +572,22 @@ function stackLine({ primary, intermediate, minor }) {
   return `Alignment: Primary=${fmt(primary)}, Intermediate=${fmt(intermediate)}, Minor=${fmt(minor)}.`;
 }
 
+// Locked rule: neutral until minor resets. Also use safe wording: 1h close when invalidationMode=close.
 function minorResetRuleText(minorParsed) {
   if (!minorParsed?.ok) return "Minor wave/fib unavailable; stay neutral until execution layer is readable.";
   if (!minorParsed.signals?.invalidated) return null;
 
   const inv = minorParsed.fib?.invalidation;
-  const ref786 = minorParsed.fib?.reference_786;
+  const mode = String(minorParsed.diagnostics?.invalidationMode || "").toLowerCase();
 
-  // Keep it simple and actionable
   if (inv != null) {
-    return `Execution layer: Minor is invalidated (74% gate breached). Stay neutral on minor/minute longs until price resets above the minor invalidation line near ${inv.toFixed(2)} and holds.`;
+    if (mode === "close") {
+      return `Execution layer: Minor is invalidated (74% gate). Stay neutral on minor/minute longs until a 1h close back above ${inv.toFixed(2)}.`;
+    }
+    return `Execution layer: Minor is invalidated (74% gate). Stay neutral on minor/minute longs until price resets above ${inv.toFixed(2)}.`;
   }
-  if (ref786 != null) {
-    return `Execution layer: Minor is invalidated (74% gate breached). Stay neutral on minor/minute longs until price resets above ~${ref786.toFixed(2)} and holds.`;
-  }
-  return `Execution layer: Minor is invalidated (74% gate breached). Stay neutral until minor resets.`;
+
+  return `Execution layer: Minor is invalidated (74% gate). Stay neutral until minor resets.`;
 }
 
 /* ---------------- Layer narratives ---------------- */
@@ -652,7 +639,6 @@ function buildLayer2CurrentNarrative({ price, phase, zones, macroShelves, impuls
   }
 
   if (stack) text += `${stack} `;
-
   if (minorReset) text += `${minorReset} `;
 
   if (impulse?.impulseScore != null) {
@@ -666,11 +652,12 @@ function buildLayer3NextNarrative({ zones, balance, macroShelves, minorReset, e2
   const bHi = toNum(balance?.hi);
   const bLo = toNum(balance?.lo);
 
-  // If minor is invalidated, "next" should emphasize reset conditions first.
   if (minorReset) {
     let t = `What I'm watching next: ${minorReset} `;
     if (bHi != null && bLo != null) {
-      t += `Also watch balance guardrails: close above ${bHi.toFixed(2)} for acceptance, or below ${bLo.toFixed(2)} for acceptance down. `;
+      t += `Also watch balance guardrails: close above ${bHi.toFixed(2)} for acceptance, or below ${bLo.toFixed(
+        2
+      )} for acceptance down. `;
     }
     if (macroShelves?.nearest?.spx != null && macroShelves?.nearest?.spy != null) {
       t += `Macro friction remains around ~${macroShelves.nearest.spy.toFixed(2)} (SPX ${macroShelves.nearest.spx}). `;
@@ -691,16 +678,6 @@ function buildLayer3NextNarrative({ zones, balance, macroShelves, minorReset, e2
       t += `Within zones, hold above ${hi.toFixed(2)} for acceptance, or lose midline ${mid.toFixed(
         2
       )} for rejection risk. `;
-    } else if (
-      zones?.nearestAllowed?.distancePts != null &&
-      zones?.nearestAllowed?.lo != null &&
-      zones?.nearestAllowed?.hi != null
-    ) {
-      const lo = Number(zones.nearestAllowed.lo);
-      const hi = Number(zones.nearestAllowed.hi);
-      t += `I want a clean re-entry into ${lo.toFixed(2)}–${hi.toFixed(2)} before upgrading the read. `;
-    } else {
-      t += `No nearby allowed zone — wait for price to approach negotiated/institutional structure. `;
     }
 
     if (macroShelves?.nearest?.spx != null && macroShelves?.nearest?.spy != null) {
@@ -712,9 +689,7 @@ function buildLayer3NextNarrative({ zones, balance, macroShelves, minorReset, e2
     return { text: t.trim() };
   }
 
-  let t = "What I'm watching next: keep it simple — wait for clear acceptance or rejection at nearby structure.";
-  if (Array.isArray(e2NextRules) && e2NextRules.length) t += " " + e2NextRules.join(" ");
-  return { text: t };
+  return { text: "What I'm watching next: keep it simple — wait for clear acceptance or rejection at nearby structure." };
 }
 
 function buildNarrativeTextDescriptive({ layer1, layer2, layer3 }) {
@@ -768,7 +743,7 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
     const prev = bars[bars.length - 2];
     const last24 = bars.slice(-24);
 
-    // 2) Zones (engine5-context) — degrade gracefully if missing
+    // 2) Zones (engine5-context)
     const ctxUrl = new URL(`${CORE_BASE}/api/v1/engine5-context`);
     ctxUrl.searchParams.set("symbol", symbol);
     ctxUrl.searchParams.set("tf", tf);
@@ -781,11 +756,11 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
 
     const negotiated = ctx?.render?.negotiated || [];
     const institutional = ctx?.render?.institutional || [];
-
     const nearest = nearestAllowedZone({ price, negotiated, institutional });
 
     const inAllowed =
-      Boolean(ctx?.active?.negotiated && price != null) || Boolean(ctx?.active?.institutional && price != null);
+      Boolean(ctx?.active?.negotiated && price != null) ||
+      Boolean(ctx?.active?.institutional && price != null);
 
     const zones = {
       zonesOk: Boolean(ctxResp.ok && ctx),
@@ -808,21 +783,17 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
 
     const macroShelves = buildMacroShelves({ price });
 
-    // 3) Engine 2 (primary + intermediate + minor) — NEVER 500 on failure
-    let primaryRaw = null;
-    let interRaw = null;
-    let minorRaw = null;
+    // 3) Engine 2 (primary + intermediate + minor) — robust fetch
+    const [pRes, iRes, mRes] = await Promise.all([
+      fetchFibLevelsRobust(req, { symbol, ...ENGINE2_CTX.primary }),
+      fetchFibLevelsRobust(req, { symbol, ...ENGINE2_CTX.intermediate }),
+      fetchFibLevelsRobust(req, { symbol, ...ENGINE2_CTX.minor }),
+    ]);
 
-   const [pRes, iRes, mRes] = await Promise.all([
-     fetchFibLevelsRobust(req, { symbol, ...ENGINE2_CTX.primary }),
-     fetchFibLevelsRobust(req, { symbol, ...ENGINE2_CTX.intermediate }),
-     fetchFibLevelsRobust(req, { symbol, ...ENGINE2_CTX.minor }),
-   ]);
+    const primaryRaw = pRes.ok ? pRes.payload : null;
+    const interRaw = iRes.ok ? iRes.payload : null;
+    const minorRaw = mRes.ok ? mRes.payload : null;
 
-   primaryRaw = pRes.ok ? pRes.payload : null;
-   interRaw   = iRes.ok ? iRes.payload : null;
-   minorRaw   = mRes.ok ? mRes.payload : null; 
-    
     const e2Primary = parseFibLevelsV3(primaryRaw);
     const e2Inter = parseFibLevelsV3(interRaw);
     const e2Minor = parseFibLevelsV3(minorRaw);
@@ -884,12 +855,22 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       },
     };
 
-    // Next rules (include invalidation lines for each degree)
+    const engine2Fetch = {
+      primary: { ok: pRes.ok, baseUsed: pRes.baseUsed, errors: pRes.errors },
+      intermediate: { ok: iRes.ok, baseUsed: iRes.baseUsed, errors: iRes.errors },
+      minor: { ok: mRes.ok, baseUsed: mRes.baseUsed, errors: mRes.errors },
+    };
+
+    // Next rules
     const e2NextRules = [];
     const addRules = (label, e2) => {
       if (!e2?.ok) return;
       if (e2.fib?.invalidation != null) e2NextRules.push(`${label} invalidation: ${e2.fib.invalidation.toFixed(2)}.`);
-      if (String(e2.tag || "").toUpperCase() === "W2" && e2.projectedW3?.pending && e2.projectedW3?.primary618 != null) {
+      if (
+        String(e2.tag || "").toUpperCase() === "W2" &&
+        e2.projectedW3?.pending &&
+        e2.projectedW3?.primary618 != null
+      ) {
         e2NextRules.push(`${label} W3 (proj 1.618): ~${e2.projectedW3.primary618.toFixed(2)}.`);
       }
     };
@@ -909,7 +890,7 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
     // 5) Defended levels tags (deterministic)
     const defended = detectDefendedLevels({ bars, atr, windowBars: 24 });
 
-    // 6) Bias override (LOCKED): neutral until minor resets
+    // 6) Bias override (LOCKED)
     const baseBias =
       phase === "ACCEPTANCE_UP"
         ? "BULLISH"
@@ -937,35 +918,27 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
         ? buildNarrativeTextDescriptive({ layer1, layer2, layer3 })
         : `${layer1.text} ${layer2.text} ${layer3.text}`;
 
-    return res.json({
-      ok: true,
-      symbol,
-      tf,
-      asOf: new Date().toISOString(),
-
-      price,
-      atr,
-
-      phase,
-      bias,
-
-      engine2,
-      engine2Fetch: {
-        primary: { ok: pRes.ok, baseUsed: pRes.baseUsed, errors: pRes.errors },
-        intermediate: { ok: iRes.ok, baseUsed: iRes.baseUsed, errors: iRes.errors },
-        minor: { ok: mRes.ok, baseUsed: mRes.baseUsed, errors: mRes.errors },
-      },
-      // then continue with your REAL existing fields (confidence, balance, etc.)
-      confidence: clamp(
+    const confidence = clamp(
       balance?.isBalance
         ? Math.round(50 + clamp(1 - (balance.widthAtr || 0) / 2.25, 0, 1) * 25 + impulse.impulseScore * 2)
         : Math.round(40 + impulse.impulseScore * 4),
       0,
       100
-    ),
+    );
 
-     // ...rest of your actual object...
-   });
+    return res.json({
+      ok: true,
+      symbol,
+      tf,
+      asOf: new Date().toISOString(),
+      coreBase: CORE_BASE,
+
+      price,
+      atr: atr != null ? round2(atr) : null,
+
+      phase,
+      bias,
+      confidence,
 
       balance: balance
         ? {
@@ -991,6 +964,7 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       macroShelves,
 
       engine2,
+      engine2Fetch,
 
       tags: defended.tags,
       defendedSupportLevels: defended.defendedSupportLevels,
