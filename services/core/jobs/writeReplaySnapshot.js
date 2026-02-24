@@ -1,17 +1,22 @@
 // services/core/jobs/writeReplaySnapshot.js
 //
 // Replay cadence snapshot writer (HHMM.json)
-// - Builds snapshot by calling local backend-1 endpoints (market, smz, fib, decision)
-// - Adds Engine 6 permission into: decision.permission ✅
+//
+// What it does:
+// - Builds a replay snapshot by calling local backend-1 endpoints (SMZ, Fib, Decisions)
 // - Computes Engine 6 permission LOCALLY (no /trade-permission HTTP) ✅
-// - Uses buffered withinZone logic (bufferPts = 0.25) ✅
-// - Computes Engine 15 readiness (E3 + E4 glue) and stores into snapshot.engine15 ✅
+// - Computes Engine 15 readiness (calls E3 + E4 using deterministic zone bounds) ✅
+// - Writes snapshot even if some parts fail (LOCKED: never crash)
 //
-// LOCKED: Never crash. If anything fails, write snapshot with ok:false.
+// IMPORTANT FIX (your current issue):
+// - Your container has NO /api/v1/market-meter or /api/v1/live endpoints (all 404).
+// - So market fetch will always fail.
+// - We will NOT let missing market endpoint make snapshotOk=false.
+// - We will still include a safe market object with lastPrice derived from decision.price
+//   so replay UI doesn’t crash.
 //
-// IMPORTANT (Replay determinism):
-// - Replay is deterministic ONLY for what is stored in the snapshot file.
-// - Therefore Engine 15 must be computed NOW (at snapshot-write time), not during replay playback.
+// LOCKED: Never crash. If anything fails, write snapshot with ok:false (per section),
+// but still write the file.
 
 import path from "path";
 import { writeReplaySnapshot } from "../logic/replay/writeSnapshot.js";
@@ -86,7 +91,7 @@ function selfBaseUrl() {
 // - Allow "barely outside" with bufferPts = 0.25
 // -------------------------
 function buildEngine6InputFromDecision({ symbol, tf, decision }) {
-  const BUFFER_PTS = 0.25; // ✅ your choice
+  const BUFFER_PTS = 0.25; // ✅ locked choice
 
   const total = decision?.scores?.total;
   const invalid = Boolean(decision?.invalid);
@@ -103,11 +108,9 @@ function buildEngine6InputFromDecision({ symbol, tf, decision }) {
   const e1 = ctx.engine1 || {};
   const active = e1.active || {};
 
-  // Primary: engine1.active.*
   const negotiated = active.negotiated || null;
   const institutional =
     active.institutional ||
-    // Fallback: sometimes institutional is the "institutionalContainer" style
     ctx.institutionalContainer ||
     null;
 
@@ -154,7 +157,7 @@ function buildEngine6InputFromDecision({ symbol, tf, decision }) {
     tf,
     asOf: new Date().toISOString(),
     engine5,
-    marketMeter: null, // v1 defaults are OK
+    marketMeter: null, // v1
     zoneContext,
     intent,
   };
@@ -171,7 +174,7 @@ function normalizePermissionResult(result) {
 }
 
 // -------------------------
-// Strategies we store in snapshot (v1)
+// Strategies to store in snapshot (v1)
 // -------------------------
 const STRATEGIES = [
   { strategyId: "intraday_scalp@10m", tf: "10m" },
@@ -188,12 +191,17 @@ export async function main() {
   const base = selfBaseUrl();
   const symbol = "SPY";
 
-  // Core snapshot sources (already in your v1 design)
-  const marketUrl = `${base}/api/v1/market-meter?mode=intraday`;
+  // NOTE: Market endpoints are 404 in this container.
+  // We will NOT call a market URL anymore. We will synthesize a safe market object
+  // from decision price so the UI has a lastPrice to render.
+  //
+  // If you later add a real market endpoint, we can re-enable fetch safely.
+
+  // Core snapshot sources
   const smzUrl = `${base}/api/v1/smz-hierarchy?symbol=${encodeURIComponent(symbol)}&tf=10m`;
   const fibUrl = `${base}/api/v1/fib-levels?symbol=${encodeURIComponent(symbol)}&tf=1h&degree=minor`;
 
-  // Decisions for all strategies (additive; keeps old snapshot.decision behavior)
+  // Decisions for all strategies
   const decisionFetches = STRATEGIES.map(({ strategyId, tf }) => {
     const mode = mapStrategyToMode(strategyId);
     const url =
@@ -204,8 +212,7 @@ export async function main() {
     return safeFetch(`decision:${strategyId}`, url);
   });
 
-  const [marketRes, smzRes, fibRes, ...decisionResults] = await Promise.all([
-    safeFetch("market", marketUrl),
+  const [smzRes, fibRes, ...decisionResults] = await Promise.all([
     safeFetch("structure.smzHierarchy", smzUrl),
     safeFetch("fib", fibUrl),
     ...decisionFetches,
@@ -219,15 +226,34 @@ export async function main() {
     decisionByStrategy[s.strategyId] = res.ok ? res.data : { ok: false, error: res.error };
   }
 
-  // Keep legacy snapshot.decision pointing to scalp (so existing UI doesn’t break)
+  // Legacy scalp decision pointer
   const scalpDecision = decisionByStrategy["intraday_scalp@10m"] || { ok: false, error: "missing scalp decision" };
+
+  // Synthesize market data (safe) from decision price
+  const inferredPrice =
+    typeof scalpDecision?.price === "number"
+      ? scalpDecision.price
+      : null;
+
+  const marketSynthetic = {
+    ok: false,
+    error: "MARKET_ENDPOINT_NOT_FOUND_IN_CONTAINER",
+    raw: {
+      intraday: {
+        lastPrice: inferredPrice,
+      },
+      price: inferredPrice,
+    },
+    inferredFrom: "decision.price",
+  };
 
   const snapshot = {
     ok: true,
     tsUtc: new Date().toISOString(),
     symbol,
 
-    market: marketRes.ok ? marketRes.data : { ok: false, error: marketRes.error },
+    // market is present so UI won’t crash, but marked ok:false
+    market: marketSynthetic,
 
     structure: {
       smzHierarchy: smzRes.ok ? smzRes.data : { ok: false, error: smzRes.error },
@@ -256,11 +282,7 @@ export async function main() {
     for (const { strategyId, tf } of STRATEGIES) {
       const d = snapshot.decisions?.[strategyId];
       if (d && d.ok) {
-        const e6Input = buildEngine6InputFromDecision({
-          symbol,
-          tf,
-          decision: d,
-        });
+        const e6Input = buildEngine6InputFromDecision({ symbol, tf, decision: d });
         const e6Result = computeEngine6(e6Input);
         d.permission = normalizePermissionResult(e6Result);
       } else if (d) {
@@ -275,7 +297,6 @@ export async function main() {
       snapshot.decision.permission = null;
     }
   } catch (e) {
-    // Never crash: default permission
     for (const { strategyId } of STRATEGIES) {
       const d = snapshot.decisions?.[strategyId];
       if (d && d.ok && !d.permission) {
@@ -313,17 +334,15 @@ export async function main() {
       const d = snapshot.decisions?.[strategyId];
       const mode = mapStrategyToMode(strategyId);
 
-      // Price: decision.price is best. Fallback to market raw (best-effort).
       const price =
         (typeof d?.price === "number" ? d.price : null) ??
-        (typeof snapshot?.market?.raw?.intraday?.lastPrice === "number" ? snapshot.market.raw.intraday.lastPrice : null) ??
-        (typeof snapshot?.market?.raw?.price === "number" ? snapshot.market.raw.price : null) ??
+        inferredPrice ??
         null;
 
-      // Zone: pick from decision context (deterministic)
+      // IMPORTANT: We pick zone deterministically from decision.context (Replay safe)
       const zone = d && d.ok ? pickZoneFromDecision(d) : null;
 
-      // If no zone, still produce a readiness object (WAIT) without crashing
+      // If no zone exists, still store readiness object (WAIT)
       if (!zone || !Number.isFinite(zone.lo) || !Number.isFinite(zone.hi)) {
         engine15ByStrategy[strategyId] = computeReadiness({
           symbol,
@@ -338,7 +357,6 @@ export async function main() {
         continue;
       }
 
-      // Engine 3 (Reaction) — requires lo/hi OR zoneId
       const e3Url =
         `${base}/api/v1/reaction-score?symbol=${encodeURIComponent(symbol)}` +
         `&tf=${encodeURIComponent(tf)}` +
@@ -347,7 +365,6 @@ export async function main() {
         `&hi=${encodeURIComponent(zone.hi)}` +
         `&strategyId=${encodeURIComponent(strategyId)}`;
 
-      // Engine 4 (Volume) — requires zoneLo/zoneHi
       const e4Url =
         `${base}/api/v1/volume-behavior?symbol=${encodeURIComponent(symbol)}` +
         `&tf=${encodeURIComponent(tf)}` +
@@ -392,17 +409,16 @@ export async function main() {
 
   // -------------------------
   // Overall ok (still writes even if false)
-  // Snapshot ok should reflect the core sources only (not Engine 15 additive)
+  //
+  // IMPORTANT FIX:
+  // - Do NOT require market.ok (it is always false because endpoint is missing)
+  // - Snapshot ok should reflect core deterministic sources only:
+  //   smz + fib + all decisions
   // -------------------------
   const allDecisionsOk = STRATEGIES.every(({ strategyId }) => snapshot.decisions?.[strategyId]?.ok);
-  snapshot.ok = Boolean(marketRes.ok && smzRes.ok && fibRes.ok && allDecisionsOk);
+  snapshot.ok = Boolean(smzRes.ok && fibRes.ok && allDecisionsOk);
 
-  const result = writeReplaySnapshot({
-    dataDir,
-    dateYmd,
-    timeHHMM,
-    snapshot,
-  });
+  const result = writeReplaySnapshot({ dataDir, dateYmd, timeHHMM, snapshot });
 
   console.log(
     JSON.stringify(
@@ -412,10 +428,10 @@ export async function main() {
         dateYmd,
         timeHHMM,
         snapshotOk: snapshot.ok,
-        // Keep old log fields:
         permission: snapshot?.decision?.permission || null,
-        // New:
         engine15Ok: Boolean(snapshot?.engine15?.ok),
+        marketOk: snapshot?.market?.ok === true,
+        marketError: snapshot?.market?.error || null,
       },
       null,
       0
