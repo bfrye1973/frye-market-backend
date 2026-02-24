@@ -5,11 +5,18 @@
 // - Adds Engine 6 permission into: decision.permission ✅
 // - Computes Engine 6 permission LOCALLY (no /trade-permission HTTP) ✅
 // - Uses buffered withinZone logic (bufferPts = 0.25) ✅
+// - Computes Engine 15 readiness (E3 + E4 glue) and stores into snapshot.engine15 ✅
+//
 // LOCKED: Never crash. If anything fails, write snapshot with ok:false.
+//
+// IMPORTANT (Replay determinism):
+// - Replay is deterministic ONLY for what is stored in the snapshot file.
+// - Therefore Engine 15 must be computed NOW (at snapshot-write time), not during replay playback.
 
 import path from "path";
 import { writeReplaySnapshot } from "../logic/replay/writeSnapshot.js";
 import { computeTradePermission as computeEngine6 } from "../logic/engine6TradePermission.js";
+import { computeReadiness, pickZoneFromDecision, mapStrategyToMode } from "../logic/engine15Readiness.js";
 
 // -------------------------
 // Time helpers (America/Phoenix)
@@ -164,6 +171,15 @@ function normalizePermissionResult(result) {
 }
 
 // -------------------------
+// Strategies we store in snapshot (v1)
+// -------------------------
+const STRATEGIES = [
+  { strategyId: "intraday_scalp@10m", tf: "10m" },
+  { strategyId: "minor_swing@1h", tf: "1h" },
+  { strategyId: "intermediate_long@4h", tf: "4h" },
+];
+
+// -------------------------
 // Main job
 // -------------------------
 export async function main() {
@@ -172,17 +188,39 @@ export async function main() {
   const base = selfBaseUrl();
   const symbol = "SPY";
 
+  // Core snapshot sources (already in your v1 design)
   const marketUrl = `${base}/api/v1/market-meter?mode=intraday`;
   const smzUrl = `${base}/api/v1/smz-hierarchy?symbol=${encodeURIComponent(symbol)}&tf=10m`;
   const fibUrl = `${base}/api/v1/fib-levels?symbol=${encodeURIComponent(symbol)}&tf=1h&degree=minor`;
-  const decisionUrl = `${base}/api/v1/confluence-score?symbol=${encodeURIComponent(symbol)}&tf=10m&strategyId=intraday_scalp@10m&mode=scalp`;
 
-  const [marketRes, smzRes, fibRes, decisionRes] = await Promise.all([
+  // Decisions for all strategies (additive; keeps old snapshot.decision behavior)
+  const decisionFetches = STRATEGIES.map(({ strategyId, tf }) => {
+    const mode = mapStrategyToMode(strategyId);
+    const url =
+      `${base}/api/v1/confluence-score?symbol=${encodeURIComponent(symbol)}` +
+      `&tf=${encodeURIComponent(tf)}` +
+      `&strategyId=${encodeURIComponent(strategyId)}` +
+      `&mode=${encodeURIComponent(mode)}`;
+    return safeFetch(`decision:${strategyId}`, url);
+  });
+
+  const [marketRes, smzRes, fibRes, ...decisionResults] = await Promise.all([
     safeFetch("market", marketUrl),
     safeFetch("structure.smzHierarchy", smzUrl),
     safeFetch("fib", fibUrl),
-    safeFetch("decision", decisionUrl),
+    ...decisionFetches,
   ]);
+
+  // Build decisions map
+  const decisionByStrategy = {};
+  for (let i = 0; i < STRATEGIES.length; i++) {
+    const s = STRATEGIES[i];
+    const res = decisionResults[i];
+    decisionByStrategy[s.strategyId] = res.ok ? res.data : { ok: false, error: res.error };
+  }
+
+  // Keep legacy snapshot.decision pointing to scalp (so existing UI doesn’t break)
+  const scalpDecision = decisionByStrategy["intraday_scalp@10m"] || { ok: false, error: "missing scalp decision" };
 
   const snapshot = {
     ok: true,
@@ -197,7 +235,9 @@ export async function main() {
 
     fib: fibRes.ok ? fibRes.data : { ok: false, error: fibRes.error },
 
-    decision: decisionRes.ok ? decisionRes.data : { ok: false, error: decisionRes.error },
+    // Legacy + new
+    decision: scalpDecision,
+    decisions: decisionByStrategy,
 
     meta: {
       schema: "replay-snapshot@v1",
@@ -207,31 +247,155 @@ export async function main() {
     },
   };
 
-  // Compute Engine 6 locally
+  // -------------------------
+  // Compute Engine 6 locally per strategy (LOCKED: never crash)
+  // Writes into: snapshot.decisions[strategyId].permission
+  // Keeps legacy: snapshot.decision.permission in sync with scalp
+  // -------------------------
   try {
-    if (snapshot.decision && snapshot.decision.ok) {
-      const e6Input = buildEngine6InputFromDecision({
-        symbol,
-        tf: "10m",
-        decision: snapshot.decision,
-      });
+    for (const { strategyId, tf } of STRATEGIES) {
+      const d = snapshot.decisions?.[strategyId];
+      if (d && d.ok) {
+        const e6Input = buildEngine6InputFromDecision({
+          symbol,
+          tf,
+          decision: d,
+        });
+        const e6Result = computeEngine6(e6Input);
+        d.permission = normalizePermissionResult(e6Result);
+      } else if (d) {
+        d.permission = null;
+      }
+    }
 
-      const e6Result = computeEngine6(e6Input);
-      snapshot.decision.permission = normalizePermissionResult(e6Result);
-    } else {
+    if (snapshot.decision && snapshot.decision.ok) {
+      snapshot.decision.permission =
+        snapshot.decisions?.["intraday_scalp@10m"]?.permission ?? snapshot.decision.permission ?? null;
+    } else if (snapshot.decision) {
       snapshot.decision.permission = null;
     }
   } catch (e) {
-    snapshot.decision.permission = {
-      state: "STAND_DOWN",
-      sizeMultiplier: 0,
-      reasonCodes: ["ENGINE6_COMPUTE_ERROR"],
-      debug: { error: String(e?.message || e) },
+    // Never crash: default permission
+    for (const { strategyId } of STRATEGIES) {
+      const d = snapshot.decisions?.[strategyId];
+      if (d && d.ok && !d.permission) {
+        d.permission = {
+          state: "STAND_DOWN",
+          sizeMultiplier: 0,
+          reasonCodes: ["ENGINE6_COMPUTE_ERROR"],
+          debug: { error: String(e?.message || e) },
+        };
+      }
+    }
+
+    if (snapshot.decision && snapshot.decision.ok && !snapshot.decision.permission) {
+      snapshot.decision.permission = {
+        state: "STAND_DOWN",
+        sizeMultiplier: 0,
+        reasonCodes: ["ENGINE6_COMPUTE_ERROR"],
+        debug: { error: String(e?.message || e) },
+      };
+    }
+  }
+
+  // -------------------------
+  // Compute Engine 15 readiness per strategy (Replay deterministic)
+  // - Calls E3 (/reaction-score) using lo/hi (required today)
+  // - Calls E4 (/volume-behavior) using zoneLo/zoneHi (required)
+  // - Uses Engine 6 permission already attached into decision.permission
+  //
+  // LOCKED: Never crash. If anything fails, store ok:false.
+  // -------------------------
+  try {
+    const engine15ByStrategy = {};
+
+    for (const { strategyId, tf } of STRATEGIES) {
+      const d = snapshot.decisions?.[strategyId];
+      const mode = mapStrategyToMode(strategyId);
+
+      // Price: decision.price is best. Fallback to market raw (best-effort).
+      const price =
+        (typeof d?.price === "number" ? d.price : null) ??
+        (typeof snapshot?.market?.raw?.intraday?.lastPrice === "number" ? snapshot.market.raw.intraday.lastPrice : null) ??
+        (typeof snapshot?.market?.raw?.price === "number" ? snapshot.market.raw.price : null) ??
+        null;
+
+      // Zone: pick from decision context (deterministic)
+      const zone = d && d.ok ? pickZoneFromDecision(d) : null;
+
+      // If no zone, still produce a readiness object (WAIT) without crashing
+      if (!zone || !Number.isFinite(zone.lo) || !Number.isFinite(zone.hi)) {
+        engine15ByStrategy[strategyId] = computeReadiness({
+          symbol,
+          tf,
+          strategyId,
+          price,
+          zone: null,
+          engine3: null,
+          engine4: null,
+          permission: d?.permission || null,
+        });
+        continue;
+      }
+
+      // Engine 3 (Reaction) — requires lo/hi OR zoneId
+      const e3Url =
+        `${base}/api/v1/reaction-score?symbol=${encodeURIComponent(symbol)}` +
+        `&tf=${encodeURIComponent(tf)}` +
+        `&mode=${encodeURIComponent(mode)}` +
+        `&lo=${encodeURIComponent(zone.lo)}` +
+        `&hi=${encodeURIComponent(zone.hi)}` +
+        `&strategyId=${encodeURIComponent(strategyId)}`;
+
+      // Engine 4 (Volume) — requires zoneLo/zoneHi
+      const e4Url =
+        `${base}/api/v1/volume-behavior?symbol=${encodeURIComponent(symbol)}` +
+        `&tf=${encodeURIComponent(tf)}` +
+        `&mode=${encodeURIComponent(mode)}` +
+        `&zoneLo=${encodeURIComponent(zone.lo)}` +
+        `&zoneHi=${encodeURIComponent(zone.hi)}`;
+
+      const [e3Res, e4Res] = await Promise.all([
+        safeFetch(`engine3:${strategyId}`, e3Url),
+        safeFetch(`engine4:${strategyId}`, e4Url),
+      ]);
+
+      const engine3 = e3Res.ok ? e3Res.data : { ok: false, error: e3Res.error };
+      const engine4 = e4Res.ok ? e4Res.data : { ok: false, error: e4Res.error };
+
+      engine15ByStrategy[strategyId] = computeReadiness({
+        symbol,
+        tf,
+        strategyId,
+        price,
+        zone,
+        engine3,
+        engine4,
+        permission: d?.permission || null,
+      });
+    }
+
+    snapshot.engine15 = {
+      ok: true,
+      schema: "engine15-readiness@v1",
+      generatedAtUtc: snapshot.tsUtc,
+      byStrategy: engine15ByStrategy,
+    };
+  } catch (e) {
+    snapshot.engine15 = {
+      ok: false,
+      schema: "engine15-readiness@v1",
+      error: String(e?.message || e),
+      byStrategy: {},
     };
   }
 
+  // -------------------------
   // Overall ok (still writes even if false)
-  snapshot.ok = Boolean(marketRes.ok && smzRes.ok && fibRes.ok && decisionRes.ok);
+  // Snapshot ok should reflect the core sources only (not Engine 15 additive)
+  // -------------------------
+  const allDecisionsOk = STRATEGIES.every(({ strategyId }) => snapshot.decisions?.[strategyId]?.ok);
+  snapshot.ok = Boolean(marketRes.ok && smzRes.ok && fibRes.ok && allDecisionsOk);
 
   const result = writeReplaySnapshot({
     dataDir,
@@ -248,7 +412,10 @@ export async function main() {
         dateYmd,
         timeHHMM,
         snapshotOk: snapshot.ok,
+        // Keep old log fields:
         permission: snapshot?.decision?.permission || null,
+        // New:
+        engine15Ok: Boolean(snapshot?.engine15?.ok),
       },
       null,
       0
