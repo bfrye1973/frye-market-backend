@@ -813,18 +813,16 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
     let interRaw = null;
     let minorRaw = null;
 
-    try {
-      [primaryRaw, interRaw, minorRaw] = await Promise.all([
-        fetchFibLevels({ symbol, ...ENGINE2_CTX.primary }).catch(() => null),
-        fetchFibLevels({ symbol, ...ENGINE2_CTX.intermediate }).catch(() => null),
-        fetchFibLevels({ symbol, ...ENGINE2_CTX.minor }).catch(() => null),
-      ]);
-    } catch {
-      primaryRaw = null;
-      interRaw = null;
-      minorRaw = null;
-    }
+   const [pRes, iRes, mRes] = await Promise.all([
+     fetchFibLevelsRobust(req, { symbol, ...ENGINE2_CTX.primary }),
+     fetchFibLevelsRobust(req, { symbol, ...ENGINE2_CTX.intermediate }),
+     fetchFibLevelsRobust(req, { symbol, ...ENGINE2_CTX.minor }),
+   ]);
 
+   primaryRaw = pRes.ok ? pRes.payload : null;
+   interRaw   = iRes.ok ? iRes.payload : null;
+   minorRaw   = mRes.ok ? mRes.payload : null; 
+    
     const e2Primary = parseFibLevelsV3(primaryRaw);
     const e2Inter = parseFibLevelsV3(interRaw);
     const e2Minor = parseFibLevelsV3(minorRaw);
@@ -944,13 +942,24 @@ marketNarratorRouter.get("/market-narrator", async (req, res) => {
       symbol,
       tf,
       asOf: new Date().toISOString(),
-      coreBase: CORE_BASE,
 
       price,
-      atr: atr != null ? round2(atr) : null,
+      atr,
 
       phase,
       bias,
+
+      engine2,
+
+      engine2Fetch: {
+        primary: { ok: pRes.ok, baseUsed: pRes.baseUsed, errors: pRes.errors },
+        intermediate: { ok: iRes.ok, baseUsed: iRes.baseUsed, errors: iRes.errors },
+        minor: { ok: mRes.ok, baseUsed: mRes.baseUsed, errors: mRes.errors },
+      },
+
+      tags,
+      ...
+    });
 
       confidence: clamp(
         balance?.isBalance
