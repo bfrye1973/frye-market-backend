@@ -65,7 +65,7 @@ app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", origin || "*");
   res.setHeader("Vary", "Origin");
 
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST,PUT,DELETE");
 
   // ✅ KEY FIX (Option A):
   // If the browser requests specific headers in preflight, allow them.
