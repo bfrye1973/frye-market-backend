@@ -16,6 +16,11 @@
 //   - No dependency on Engine 1/2; Engine 3 is purely evaluative.
 //   - Designed for OHLCV arrays where bars are chronological (oldest -> newest).
 //   - Touch selection: by default, uses the MOST RECENT touch in the series.
+//
+// ✅ FIX (ENGINE 3 WORKING):
+//   Displacement for SHORT (supply) must measure away from the DEFENDED EDGE.
+//   Old: bestPts = zone.lo - minLow  (stays 0 on "tag hi -> dump to mid" unless zone.lo breaks)
+//   New: bestPts = zone.hi - minLow  (captures dump off the top of the zone)
 
 function clamp(x, lo, hi) {
   return Math.max(lo, Math.min(hi, x));
@@ -243,16 +248,30 @@ export function computeReactionQuality(params) {
 
   // 2) Displacement (ATR)
   const end = Math.min(bars.length - 1, touchIndex + windowBars);
+
+  // We preserve the legacy short displacement for debug/comparison
+  // but the scoring displacementAtrRaw uses the FIXED edge-based version.
   let bestPts = 0;
+  let legacyBestPts = 0;
 
   if (side === "demand") {
     let maxHigh = -Infinity;
     for (let i = touchIndex; i <= end; i++) maxHigh = Math.max(maxHigh, bars[i].high);
+
+    // LONG displacement remains: move above zone.hi
     bestPts = Math.max(0, maxHigh - zone.hi);
+    legacyBestPts = bestPts;
   } else {
     let minLow = Infinity;
     for (let i = touchIndex; i <= end; i++) minLow = Math.min(minLow, bars[i].low);
-    bestPts = Math.max(0, zone.lo - minLow);
+
+    // ✅ FIXED SHORT displacement:
+    // measure move DOWN away from the defended edge (zone.hi), not from zone.lo.
+    // This captures "upper tag -> dump" even when zone.lo isn't broken.
+    bestPts = Math.max(0, zone.hi - minLow);
+
+    // legacy (old behavior) kept for reference
+    legacyBestPts = Math.max(0, zone.lo - minLow);
   }
 
   const displacementAtrRaw = bestPts / atrAtTouch;
@@ -314,6 +333,7 @@ export function computeReactionQuality(params) {
 
     // displacement
     bestExcursionPts: bestPts,
+    bestExcursionPtsLegacy: legacyBestPts, // safe additional field
     atr: atrAtTouch,
     displacementAtrRaw,
     displacementPoints,
