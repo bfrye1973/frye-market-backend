@@ -8,21 +8,38 @@
 // - Fetches bars via existing /api/v1/ohlc route
 // - Computes ATR locally
 // - Presets by mode: scalp | swing | long
-// - Calls computeReactionQuality() (no engine math changes)
+// - Calls computeReactionQuality() (math engine)
 //
-// NEW (DIAGNOSTICS ONLY):
-// - Adds C-level breakdown fields:
-//   zonePosition, rejectionCandidate, rejectionReasons, nextConfirmDown/Up
-//   candle anatomy diagnostics: upperWick, body, range, closeBackInsideZone
+// DIAGNOSTICS:
+// - zonePosition
+// - rejectionCandidate/reasons (upper-wick rejection helper)
+// - candle anatomy
 //
 // ✅ SAFE WRAPPER IMPROVEMENTS:
 // - If caller does NOT pass zoneId/lo/hi, auto-pick active zone from engine5-context:
 //   negotiated_active -> shelf_active -> institutional_active
 //
-// ✅ FIX (ENGINE 3 SIGNALS):
-// - direction awareness: ?direction=LONG|SHORT or ?side=demand|supply (default LONG/demand)
-// - NEW: Active Reaction Window ("touched recently") so we don’t die when price has already left the zone
-// - Stage TRIGGERED should come from rqe.exitBars (already direction-aware), not strict "still in zone"
+// ✅ ENGINE 3 GAMEPLAN IMPLEMENTED (Negotiated zones only):
+// 1) Wick Arm → Re-entry Trigger (2-candle pattern)
+//    - SHORT: Candle#1 upper wick probe + close back inside -> ARMED
+//             Candle#2 wicks back into zone -> TRIGGERED (short)
+//    - LONG:  Candle#1 lower wick probe + close back inside -> ARMED
+//             Candle#2 wicks back into zone -> TRIGGERED (long)
+//    (Per your instruction: "re-entry only needs to wick inside zone")
+//
+// 2) Control Candle ("buyers/sellers have control")
+//    - bodyPct >= 0.65
+//    - close near extreme (top/bottom 20%)
+//    - bodyAtr >= 0.25 (30m/1h friendly; still works for 10m)
+//
+// 3) Control Flip reversal (only if flip candle wicks into negotiated zone)
+//    - SELLER_CONTROL then within 1–3 bars BUYER_CONTROL (LONG)
+//    - BUYER_CONTROL then within 1–3 bars SELLER_CONTROL (SHORT)
+//    - Must wick into negotiated zone (turquoise)
+//
+// Notes:
+// - All negotiated-only by design to match your strategy.
+// - If passing lo/hi manually, include source=negotiated_manual to enable negotiated-only triggers.
 
 import express from "express";
 import { computeReactionQuality } from "../logic/reactionQualityEngine.js";
@@ -64,6 +81,17 @@ function within(price, lo, hi) {
   const a = Math.min(lo, hi);
   const b = Math.max(lo, hi);
   return price >= a && price <= b;
+}
+
+function barTouchesZone(bar, lo, hi) {
+  if (!bar || lo == null || hi == null) return false;
+  const a = Math.min(lo, hi);
+  const b = Math.max(lo, hi);
+  const h = Number(bar.high);
+  const l = Number(bar.low);
+  if (!Number.isFinite(h) || !Number.isFinite(l)) return false;
+  // overlap test
+  return l <= b && h >= a;
 }
 
 function findZoneById(ctx, zoneId) {
@@ -114,9 +142,9 @@ function resolveMode({ mode, strategyId }) {
 }
 
 function presetOpts(mode) {
-  if (mode === "scalp") return { lookbackBars: 12, windowBars: 2, breakDepthAtr: 0.25, reclaimWindowBars: 1 };
+  if (mode === "scalp") return { lookbackBars: 80, windowBars: 2, breakDepthAtr: 0.25, reclaimWindowBars: 1 };
   if (mode === "long")  return { lookbackBars: 25, windowBars: 10, breakDepthAtr: 0.25, reclaimWindowBars: 5 };
-  return { lookbackBars: 15, windowBars: 6, breakDepthAtr: 0.25, reclaimWindowBars: 3 };
+  return { lookbackBars: 40, windowBars: 6, breakDepthAtr: 0.25, reclaimWindowBars: 3 };
 }
 
 /* -------------------- ATR -------------------- */
@@ -138,7 +166,7 @@ function computeATR(bars, len = 14) {
   return atr;
 }
 
-/* -------------------- ARMED/STAGE -------------------- */
+/* -------------------- ARMED/STAGE helpers -------------------- */
 
 function compressionN(bars, atr, n) {
   if (!Array.isArray(bars) || bars.length < n || !Number.isFinite(atr) || atr <= 0) return null;
@@ -180,16 +208,18 @@ function buildReasonCodes({ inScope, rqe, mode }) {
   return Array.from(new Set(codes));
 }
 
-/* -------------------- candle + rejection diagnostics -------------------- */
+/* -------------------- candle diagnostics -------------------- */
 
 function candleAnatomy(bar) {
-  if (!bar) return { upperWick: null, body: null, range: null };
+  if (!bar) return { upperWick: null, lowerWick: null, body: null, range: null, bodyPct: null };
   const o = Number(bar.open), h = Number(bar.high), l = Number(bar.low), c = Number(bar.close);
-  if (![o, h, l, c].every(Number.isFinite)) return { upperWick: null, body: null, range: null };
+  if (![o, h, l, c].every(Number.isFinite)) return { upperWick: null, lowerWick: null, body: null, range: null, bodyPct: null };
   const body = Math.abs(c - o);
   const upperWick = h - Math.max(o, c);
+  const lowerWick = Math.min(o, c) - l;
   const range = h - l;
-  return { upperWick, body, range };
+  const bodyPct = range > 0 ? (body / range) : null;
+  return { upperWick, lowerWick, body, range, bodyPct };
 }
 
 function zonePosition(price, lo, hi) {
@@ -209,15 +239,14 @@ function zonePosition(price, lo, hi) {
   return "MIDLINE";
 }
 
-function buildRejectionDiagnostics({ lastBar, lo, hi }) {
-  const { upperWick, body, range } = candleAnatomy(lastBar);
-
-  const h = lastBar ? Number(lastBar.high) : null;
-  const c = lastBar ? Number(lastBar.close) : null;
+// Existing upper rejection helper (kept)
+function buildUpperRejectionDiagnostics({ bar, lo, hi }) {
+  const { upperWick, body, range } = candleAnatomy(bar);
+  const h = bar ? Number(bar.high) : null;
+  const c = bar ? Number(bar.close) : null;
 
   const attemptedAbove = (h != null && hi != null) ? (h > hi) : false;
   const closeBackInside = (c != null && hi != null) ? (c <= hi) : false;
-
   const wickRule = (upperWick != null && body != null) ? (upperWick >= body) : false;
 
   const rejectionCandidate = Boolean(wickRule && attemptedAbove && closeBackInside);
@@ -238,6 +267,35 @@ function buildRejectionDiagnostics({ lastBar, lo, hi }) {
     nextConfirmDown: `Confirm rejection if price breaks below midline ${mid.toFixed(2)} then fails to reclaim`,
     nextConfirmUp: `Confirm acceptance if price holds above zoneHi ${b.toFixed(2)} after breakout`,
   };
+}
+
+/* -------------------- control candle detection -------------------- */
+
+function detectControlCandle(bar, atr) {
+  const o = Number(bar?.open), h = Number(bar?.high), l = Number(bar?.low), c = Number(bar?.close);
+  if (![o, h, l, c].every(Number.isFinite)) return { control: "NONE", bodyPct: null, bodyAtr: null };
+
+  const range = h - l;
+  if (!(range > 0) || !Number.isFinite(atr) || atr <= 0) return { control: "NONE", bodyPct: null, bodyAtr: null };
+
+  const body = Math.abs(c - o);
+  const bodyPct = body / range;
+  const bodyAtr = body / atr;
+
+  // Your chosen test rule (recommended starter)
+  const bodyDominant = bodyPct >= 0.65;
+  const bigEnough = bodyAtr >= 0.25;
+
+  // Close near extreme (top/bottom 20%)
+  const closeNearLow = c <= (l + 0.20 * range);
+  const closeNearHigh = c >= (h - 0.20 * range);
+
+  if (bodyDominant && bigEnough) {
+    if (c < o && closeNearLow) return { control: "SELLER", bodyPct, bodyAtr };
+    if (c > o && closeNearHigh) return { control: "BUYER", bodyPct, bodyAtr };
+  }
+
+  return { control: "NONE", bodyPct, bodyAtr };
 }
 
 /* -------------------- direction parsing (SAFE) -------------------- */
@@ -290,6 +348,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const base = getBaseUrl(req);
 
+    // engine5-context (price truth + optional zoneId resolution)
     const ctxUrl = `${base}/api/v1/engine5-context?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}`;
     const ctxResp = await fetchJson(ctxUrl);
     const ctx = (ctxResp.ok && ctxResp.json) ? ctxResp.json : null;
@@ -299,6 +358,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       toNum(ctx?.meta?.currentPrice) ??
       null;
 
+    // 1) If caller passed zoneId and lo/hi missing -> resolve by id
     if ((lo == null || hi == null) && zoneId && ctx) {
       const z = findZoneById(ctx, zoneId);
       if (z) {
@@ -308,6 +368,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       }
     }
 
+    // 2) Auto-pick active zone if caller did not pass zone args
     let autoPickedId = null;
     if ((lo == null || hi == null) && !zoneId && ctx) {
       const act = ctx.active || {};
@@ -325,8 +386,14 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       }
     }
 
-    const zone = { id: (zoneId ?? autoPickedId) ?? null, source: resolvedSource, lo, hi };
+    const zone = {
+      id: (zoneId ?? autoPickedId) ?? null,
+      source: resolvedSource,
+      lo,
+      hi
+    };
 
+    // If still no zone bounds -> safe idle
     if (lo == null || hi == null) {
       return res.json({
         ok: true, invalid: false,
@@ -339,6 +406,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       });
     }
 
+    // bars via /ohlc
     const ohlcUrl = `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}&limit=250`;
     const barsResp = await fetchJson(ohlcUrl);
     if (!barsResp.ok || !Array.isArray(barsResp.json)) {
@@ -365,6 +433,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const bars = fullBars.length > p.lookbackBars ? fullBars.slice(-p.lookbackBars) : fullBars;
 
+    // ATR required
     const atrVal = computeATR(fullBars, 14) || computeATR(fullBars, 10) || null;
     if (!atrVal || !Number.isFinite(atrVal) || atrVal <= 0) {
       return res.json({
@@ -378,6 +447,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       });
     }
 
+    // Zone padding (deviation)
     let pad = 0;
     if (chosenMode === "scalp") pad = 1.30;
     else pad = Math.min(0.10 * atrVal, 1.00);
@@ -387,6 +457,10 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const inZoneNow = within(currentPrice, loPad, hiPad);
 
+    // Negotiated-only gating for your strategy (turquoise)
+    const isNegotiatedZone = String(resolvedSource || "").toLowerCase().includes("negotiated");
+
+    // Compute core reaction (RQE)
     const rqe = computeReactionQuality({
       bars,
       zone: { lo, hi, side, id: (zoneId ?? autoPickedId) ?? null },
@@ -399,47 +473,154 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       },
     });
 
-    // ✅ Active Reaction Window:
-    // If we touched the zone very recently, we are "in scope" even if price has already moved away.
+    // touch window diagnostics
     const barsAgo = (rqe?.touchIndex == null) ? null : (bars.length - 1 - rqe.touchIndex);
-    const reactionWindowBars = Math.max(2, p.windowBars + 1); // scalp(2)->3
+    const reactionWindowBars = Math.max(2, p.windowBars + 1);
     const touchedRecently = (barsAgo != null && barsAgo >= 0 && barsAgo <= reactionWindowBars);
 
-    // Staging (direction-aware) based on RQE itself
-    let armed = false;
-    let stage = "IDLE";
+    // Grab last bars for pattern logic
+    const lastBar = bars[bars.length - 1] || null;
+    const prevBar = bars[bars.length - 2] || null;
+    const prev2Bar = bars[bars.length - 3] || null;
+    const prev3Bar = bars[bars.length - 4] || null;
 
+    // Existing rejection diagnostics (upper-wick)
+    const rej = buildUpperRejectionDiagnostics({ bar: lastBar, lo, hi });
+
+    // Anatomy for wick-arm logic (needs upper + lower)
+    const aLast = candleAnatomy(lastBar);
+    const aPrev = candleAnatomy(prevBar);
+
+    const lastO = Number(lastBar?.open);
+    const lastC = Number(lastBar?.close);
+    const lastH = Number(lastBar?.high);
+    const lastL = Number(lastBar?.low);
+
+    const prevO = Number(prevBar?.open);
+    const prevC = Number(prevBar?.close);
+    const prevH = Number(prevBar?.high);
+    const prevL = Number(prevBar?.low);
+
+    // ------------------------
+    // 1) WICK ARM (Candle #1)
+    // ------------------------
+    // SHORT arm: upper wick >= body, attempted above zoneHi, close back inside (<= hi), and candle touches zone
+    const lastAttemptAbove = Number.isFinite(lastH) && lastH > hi;
+    const lastCloseBackInsideFromAbove = Number.isFinite(lastC) && lastC <= hi;
+    const lastUpperWickRule = (aLast.upperWick != null && aLast.body != null) ? (aLast.upperWick >= aLast.body) : false;
+    const lastTouchesZone = barTouchesZone(lastBar, lo, hi);
+    const wickArmShortNow = Boolean(isNegotiatedZone && lastTouchesZone && lastUpperWickRule && lastAttemptAbove && lastCloseBackInsideFromAbove);
+
+    // LONG arm: lower wick >= body, attempted below zoneLo, close back inside (>= lo), and candle touches zone
+    const lastAttemptBelow = Number.isFinite(lastL) && lastL < lo;
+    const lastCloseBackInsideFromBelow = Number.isFinite(lastC) && lastC >= lo;
+    const lastLowerWickRule = (aLast.lowerWick != null && aLast.body != null) ? (aLast.lowerWick >= aLast.body) : false;
+    const wickArmLongNow = Boolean(isNegotiatedZone && lastTouchesZone && lastLowerWickRule && lastAttemptBelow && lastCloseBackInsideFromBelow);
+
+    // Arm on previous candle (needed for re-entry trigger today)
+    const prevTouchesZone = barTouchesZone(prevBar, lo, hi);
+    const prevUpperWickRule = (aPrev.upperWick != null && aPrev.body != null) ? (aPrev.upperWick >= aPrev.body) : false;
+    const prevLowerWickRule = (aPrev.lowerWick != null && aPrev.body != null) ? (aPrev.lowerWick >= aPrev.body) : false;
+    const prevAttemptAbove = Number.isFinite(prevH) && prevH > hi;
+    const prevAttemptBelow = Number.isFinite(prevL) && prevL < lo;
+    const prevCloseBackInsideFromAbove = Number.isFinite(prevC) && prevC <= hi;
+    const prevCloseBackInsideFromBelow = Number.isFinite(prevC) && prevC >= lo;
+
+    const wickArmShortPrev = Boolean(isNegotiatedZone && prevTouchesZone && prevUpperWickRule && prevAttemptAbove && prevCloseBackInsideFromAbove);
+    const wickArmLongPrev = Boolean(isNegotiatedZone && prevTouchesZone && prevLowerWickRule && prevAttemptBelow && prevCloseBackInsideFromBelow);
+
+    // -----------------------------------
+    // 2) RE-ENTRY TRIGGER (Candle #2)
+    // -----------------------------------
+    // Per your rule: trigger only needs to WICK inside zone (touch overlap), not close inside.
+    const reEntryTouchesZoneNow = barTouchesZone(lastBar, lo, hi);
+
+    const wickReEntryTriggerShort = Boolean(side === "supply" && wickArmShortPrev && reEntryTouchesZoneNow);
+    const wickReEntryTriggerLong = Boolean(side === "demand" && wickArmLongPrev && reEntryTouchesZoneNow);
+
+    // ------------------------
+    // 3) CONTROL CANDLE
+    // ------------------------
+    const ctrlLast = detectControlCandle(lastBar, atrVal);
+    const ctrlPrev = detectControlCandle(prevBar, atrVal);
+    const ctrlPrev2 = detectControlCandle(prev2Bar, atrVal);
+    const ctrlPrev3 = detectControlCandle(prev3Bar, atrVal);
+
+    // ------------------------
+    // 4) CONTROL FLIP (Negotiated only)
+    // ------------------------
+    // Flip candle must wick into negotiated zone (touch overlap)
+    const flipWicksIntoZoneNow = Boolean(isNegotiatedZone && reEntryTouchesZoneNow);
+
+    // For LONG: recent SELLER control (within last 1–3 bars) then BUYER control now
+    const hadRecentSellerControl =
+      (ctrlPrev.control === "SELLER") ||
+      (ctrlPrev2.control === "SELLER") ||
+      (ctrlPrev3.control === "SELLER");
+
+    const hadRecentBuyerControl =
+      (ctrlPrev.control === "BUYER") ||
+      (ctrlPrev2.control === "BUYER") ||
+      (ctrlPrev3.control === "BUYER");
+
+    const controlFlipLong = Boolean(
+      side === "demand" &&
+      flipWicksIntoZoneNow &&
+      ctrlLast.control === "BUYER" &&
+      hadRecentSellerControl
+    );
+
+    const controlFlipShort = Boolean(
+      side === "supply" &&
+      flipWicksIntoZoneNow &&
+      ctrlLast.control === "SELLER" &&
+      hadRecentBuyerControl
+    );
+
+    // ------------------------
+    // Existing computed metrics
+    // ------------------------
+    const rejectionSpeed = Number.isFinite(rqe.rejectionSpeedPoints) ? rqe.rejectionSpeedPoints * 2.5 : 0;
+    const displacementAtr = Number.isFinite(rqe.displacementPoints) ? rqe.displacementPoints * 2.5 : 0;
+    const reclaimOrFailure =
+      rqe.structureState === "HOLD" ? 10 :
+      rqe.structureState === "FAKEOUT_RECLAIM" ? 5 :
+      rqe.structureState === "FAILURE" ? 0 : 0;
+
+    // ------------------------
+    // ARMED / STAGE
+    // ------------------------
     const comp = compressionN(bars, atrVal, sp.compBars);
     const isTight = comp != null && comp <= sp.compMax;
 
-    const lastBar = bars[bars.length - 1] || null;
-    const prevBar = bars[bars.length - 2] || null;
-    const lastC = lastBar ? Number(lastBar.close) : null;
-    const prevC = prevBar ? Number(prevBar.close) : null;
+    let armed = false;
+    let stage = "IDLE";
 
-    const rej = buildRejectionDiagnostics({ lastBar, lo, hi });
+    // Arm conditions (negotiated-only):
+    // - In zone now OR touched recently, AND
+    //   - tight compression OR wick arm candle now (Candle #1)
+    const wickArmNowMatchesSide = (side === "supply") ? wickArmShortNow : wickArmLongNow;
 
-    const acceptanceCandidate =
-      (Number.isFinite(lastC) && lastC > hi) &&
-      (
-        (Number.isFinite(prevC) && prevC <= hi) ||
-        (Number.isFinite(prevC) && prevC > hi)
-      );
-
-    const flipCandidate = (side === "supply") ? !!rej.rejectionCandidate : !!acceptanceCandidate;
-
-    // ARMED: if we're currently in zone OR we just touched it, and (tight OR scalp flip)
-    if ((inZoneNow || touchedRecently) && (isTight || (chosenMode === "scalp" && flipCandidate))) {
+    if (isNegotiatedZone && (inZoneNow || touchedRecently) && (isTight || (chosenMode === "scalp" && wickArmNowMatchesSide))) {
       armed = true;
       stage = "ARMED";
     }
 
-    // TRIGGERED: use rqe.exitBars (already direction aware via side)
-    if (Number.isFinite(rqe?.exitBars) && rqe.exitBars <= sp.triggerExitBarsMax) {
+    // TRIGGER conditions:
+    // A) Your primary entry: wick-arm previous candle -> re-entry wick touches zone now (Candle #2)
+    const primaryReEntryTrigger = Boolean(isNegotiatedZone && (wickReEntryTriggerShort || wickReEntryTriggerLong));
+
+    // B) Control flip entry
+    const controlFlipTrigger = Boolean(controlFlipLong || controlFlipShort);
+
+    // C) Fallback: fast confirmed exit per RQE (kept, but not relied upon)
+    const fastExitTrigger = Boolean(Number.isFinite(rqe?.exitBars) && rqe.exitBars <= sp.triggerExitBarsMax);
+
+    if (primaryReEntryTrigger || controlFlipTrigger || fastExitTrigger) {
       stage = "TRIGGERED";
     }
 
-    // CONFIRMED: quality gate; scalp still requires ARMED/TRIGGERED
+    // CONFIRMED: quality threshold; scalp requires ARMED/TRIGGERED
     if (
       Number.isFinite(rqe?.reactionScore) &&
       rqe.reactionScore >= sp.confirmScore &&
@@ -448,35 +629,35 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       stage = "CONFIRMED";
     }
 
-    // Scope for output / reason codes:
-    // If TRIGGERED/CONFIRMED or touched recently, we should NOT zero-out reaction.
-    const inScope = Boolean(inZoneNow || touchedRecently || stage === "TRIGGERED" || stage === "CONFIRMED");
-
-    // Output metrics
-    const rejectionSpeed = Number.isFinite(rqe.rejectionSpeedPoints) ? rqe.rejectionSpeedPoints * 2.5 : 0;
-    const displacementAtr = Number.isFinite(rqe.displacementPoints) ? rqe.displacementPoints * 2.5 : 0;
-    const reclaimOrFailure =
-      rqe.structureState === "HOLD" ? 10 :
-      rqe.structureState === "FAKEOUT_RECLAIM" ? 5 :
-      rqe.structureState === "FAILURE" ? 0 : 0;
+    // Scope: if we are in the reaction window or have triggered/confirmed, do NOT zero outputs
+    const inScope = Boolean(
+      (isNegotiatedZone && (inZoneNow || touchedRecently)) ||
+      stage === "TRIGGERED" ||
+      stage === "CONFIRMED"
+    );
 
     const touchQuality = (inScope && rqe.touchIndex != null) ? 10 : 0;
 
     const reasonCodes = buildReasonCodes({ inScope, rqe, mode: chosenMode });
 
-    // ✅ Do not zero out reactionScore when we are inScope (recent touch / triggered)
     const reactionScoreOut = inScope ? rqe.reactionScore : 0;
-
     const structureStateOut = rqe.structureState === "FAKEOUT_RECLAIM" ? "RECLAIM" : rqe.structureState;
 
     const pos = zonePosition(currentPrice, lo, hi);
 
-    // Simple exit label (for diagnostics only)
+    // Basic exit label (diagnostic)
     const exitedUp = Number.isFinite(lastC) && lastC > hiPad;
     const exitedDown = Number.isFinite(lastC) && lastC < loPad;
     const triggeredExit =
       side === "demand" ? (exitedUp ? "EXIT_UP" : "NONE") : (exitedDown ? "EXIT_DOWN" : "NONE");
 
+    // Signal label (diagnostic)
+    let signalType = "NONE";
+    if (primaryReEntryTrigger) signalType = "WICK_REENTRY";
+    else if (controlFlipTrigger) signalType = "CONTROL_FLIP";
+    else if (fastExitTrigger) signalType = "FAST_EXIT";
+
+    // Return response
     return res.json({
       ok: true,
       invalid: false,
@@ -502,30 +683,54 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
       mode: chosenMode,
 
-      // Safe additions
+      // Safe additions (diagnostics)
+      side,
+      direction: side === "supply" ? "SHORT" : "LONG",
+      isNegotiatedZone,
+
       zonePosition: pos,
+
+      // Existing upper rejection diagnostics (still useful)
       rejectionCandidate: rej.rejectionCandidate,
       rejectionReasons: rej.rejectionReasons,
       nextConfirmDown: rej.nextConfirmDown,
       nextConfirmUp: rej.nextConfirmUp,
 
-      side,
-      direction: side === "supply" ? "SHORT" : "LONG",
-      flipCandidate,
-      acceptanceCandidate: !!acceptanceCandidate,
+      // Wick arm + trigger diagnostics
+      wickArmNow: wickArmNowMatchesSide,
+      wickArmPrev: (side === "supply") ? wickArmShortPrev : wickArmLongPrev,
+      reEntryTouchesZoneNow,
+      primaryReEntryTrigger,
+
+      // Control diagnostics
+      controlCandle: ctrlLast.control,
+      controlBodyPct: ctrlLast.bodyPct,
+      controlBodyAtr: ctrlLast.bodyAtr,
+
+      controlFlipTrigger,
+      signalType,
       triggeredExit,
+
       touchedRecently,
       barsSinceTouch: barsAgo,
       inScope,
 
       diagnostics: {
-        candle: rej.candle,
+        candle: {
+          last: aLast,
+          prev: aPrev
+        },
         zone: {
           lo,
           hi,
           mid: ((Math.min(lo, hi) + Math.max(lo, hi)) / 2),
           padded: { lo: loPad, hi: hiPad, pad },
         },
+        controlRecent: {
+          prev: ctrlPrev.control,
+          prev2: ctrlPrev2.control,
+          prev3: ctrlPrev3.control,
+        }
       },
     });
 
