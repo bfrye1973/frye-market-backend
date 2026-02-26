@@ -1,26 +1,27 @@
 // services/core/routes/reactionScore.js
 //
-// Engine 3 (Reaction) — thin wrapper ONLY.
-// ALIGNMENT (LOCKED by Engine 5 teammate):
-// - Engine 3 MUST use Engine 5-selected active zone (containment-first).
-// - Engine 3 MUST NOT pick zones from render arrays.
-// - Scalp GO uses E3 stage===ARMED (NOT CONFIRMED).
+// Engine 3 (Reaction Score) — wrapper
 //
-// THIS TEST VERSION (v1):
-// - ARMED fires early when inside ACTIVE NEGOTIATED zone AND
-//   (wick probe OR control candle) on the most recent bar.
-// - Keeps computeReactionQuality() for scoring/diagnostics but does not require it to ARM.
+// LOCKED (per Engine 5 teammate):
+// - Engine 3 MUST follow Engine 5 zone selection truth:
+//   containment-first active.* (negotiated -> shelf -> institutional)
+//   scalp fallback: nearest.shelf
+// - Engine 3 MUST NOT pick from render arrays.
 //
-// Notes:
-// - If caller provides lo/hi or zoneId, we still respect it (manual testing / debugging).
-// - Auto-zone selection comes ONLY from engine5-context activeZone/active.* (never render arrays).
+// TEST MODE (to get signals firing fast):
+// - For SCALP: stage becomes ARMED if we are INSIDE ACTIVE NEGOTIATED zone and:
+//    A) Wick probe candle (upper/lower wick >= body + probe beyond edge + close back inside), OR
+//    B) Control candle (bodyPct>=0.65 + close near extreme + bodyAtr>=0.25)
+//
+// NOTE:
+// - Engine 5B scalp GO uses stage===ARMED. We do NOT require CONFIRMED.
 
 import express from "express";
 import { computeReactionQuality } from "../logic/reactionQualityEngine.js";
 
 export const reactionScoreRouter = express.Router();
 
-/* -------------------- helpers -------------------- */
+/* -------------------- small utils -------------------- */
 
 function toNum(x) {
   const n = Number(x);
@@ -41,7 +42,9 @@ async function fetchJson(url, { timeoutMs = 12000 } = {}) {
     const r = await fetch(url, { signal: controller.signal, cache: "no-store" });
     const text = await r.text();
     let json = null;
-    try { json = JSON.parse(text); } catch {}
+    try {
+      json = JSON.parse(text);
+    } catch {}
     return { ok: r.ok, status: r.status, json, text };
   } catch (e) {
     return { ok: false, status: 0, json: null, text: String(e?.message || e) };
@@ -57,11 +60,24 @@ function within(price, lo, hi) {
   return price >= a && price <= b;
 }
 
-function zoneTypeIsNegotiated(z) {
-  const t = String(z?.zoneType || z?.type || z?.kind || "").toUpperCase();
-  const id = String(z?.id || "").toUpperCase();
-  // Accept either explicit zoneType or ID containing "|NEG|"
-  return t === "NEGOTIATED" || id.includes("|NEG|");
+function resolveMode({ mode, strategyId }) {
+  const m = (mode || "").toString().toLowerCase().trim();
+  if (m === "scalp" || m === "swing" || m === "long") return m;
+
+  const sid = (strategyId || "").toString().trim();
+  if (sid === "intraday_scalp@10m") return "scalp";
+  if (sid === "minor_swing@1h") return "swing";
+  if (sid === "intermediate_long@4h") return "long";
+  return "swing";
+}
+
+function presetOpts(mode) {
+  // scalp lookback higher for diagnostics; arming is still strict (must be in-zone)
+  if (mode === "scalp")
+    return { lookbackBars: 80, windowBars: 2, breakDepthAtr: 0.25, reclaimWindowBars: 1 };
+  if (mode === "long")
+    return { lookbackBars: 25, windowBars: 10, breakDepthAtr: 0.25, reclaimWindowBars: 5 };
+  return { lookbackBars: 40, windowBars: 6, breakDepthAtr: 0.25, reclaimWindowBars: 3 };
 }
 
 function resolveSideFromQuery(req) {
@@ -77,32 +93,6 @@ function resolveSideFromQuery(req) {
   return "demand";
 }
 
-/* -------------------- preset mapping (LOCKED) -------------------- */
-
-function resolveMode({ mode, strategyId }) {
-  const m = (mode || "").toString().toLowerCase().trim();
-  if (m === "scalp" || m === "swing" || m === "long") return m;
-
-  const sid = (strategyId || "").toString().trim();
-  if (sid === "intraday_scalp@10m") return "scalp";
-  if (sid === "minor_swing@1h") return "swing";
-  if (sid === "intermediate_long@4h") return "long";
-
-  return "swing";
-}
-
-function presetOpts(mode) {
-  if (mode === "scalp") return { lookbackBars: 80, windowBars: 2, breakDepthAtr: 0.25, reclaimWindowBars: 1 };
-  if (mode === "long")  return { lookbackBars: 25, windowBars: 10, breakDepthAtr: 0.25, reclaimWindowBars: 5 };
-  return { lookbackBars: 40, windowBars: 6, breakDepthAtr: 0.25, reclaimWindowBars: 3 };
-}
-
-function stagePreset(mode) {
-  if (mode === "scalp") return { compBars: 3, compMax: 1.05, triggerExitBarsMax: 2, confirmScore: 7.0 };
-  if (mode === "swing") return { compBars: 5, compMax: 0.45, triggerExitBarsMax: 3, confirmScore: 7.0 };
-  return { compBars: 8, compMax: 0.55, triggerExitBarsMax: 4, confirmScore: 7.0 };
-}
-
 /* -------------------- ATR -------------------- */
 
 function computeATR(bars, len = 14) {
@@ -110,7 +100,9 @@ function computeATR(bars, len = 14) {
 
   const trs = [];
   for (let i = 1; i < bars.length; i++) {
-    const h = bars[i].high, l = bars[i].low, pc = bars[i - 1].close;
+    const h = bars[i].high;
+    const l = bars[i].low;
+    const pc = bars[i - 1].close;
     if (![h, l, pc].every(Number.isFinite)) continue;
     const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
     trs.push(tr);
@@ -122,7 +114,7 @@ function computeATR(bars, len = 14) {
   return atr;
 }
 
-/* -------------------- candle + control detection -------------------- */
+/* -------------------- candle analysis -------------------- */
 
 function candleAnatomy(bar) {
   if (!bar) return { upperWick: null, lowerWick: null, body: null, range: null, bodyPct: null };
@@ -136,7 +128,6 @@ function candleAnatomy(bar) {
   return { upperWick, lowerWick, body, range, bodyPct };
 }
 
-// v1 control candle (your recommended starter)
 function detectControlCandle(bar, atr) {
   const o = Number(bar?.open), h = Number(bar?.high), l = Number(bar?.low), c = Number(bar?.close);
   if (![o, h, l, c].every(Number.isFinite)) return { control: "NONE", bodyPct: null, bodyAtr: null };
@@ -161,54 +152,42 @@ function detectControlCandle(bar, atr) {
   return { control: "NONE", bodyPct, bodyAtr };
 }
 
-/* -------------------- Engine 5 context zone selection (LOCKED) -------------------- */
+/* -------------------- Engine 5 zone selection (LOCKED) -------------------- */
 
 function pickZoneFromEngine5Context(ctx) {
-  // Canonical (preferred): ctx.zones.activeZone
-  const az =
-    ctx?.zones?.activeZone ||
-    ctx?.zones?.active_zone ||
-    ctx?.activeZone ||
-    null;
-
-  if (az && az.lo != null && az.hi != null) {
-    return { ...az, _source: "engine5_activeZone" };
+  // 1) containment-first: active.negotiated -> active.shelf -> active.institutional
+  const act = ctx?.active || {};
+  if (act.negotiated && act.negotiated.lo != null && act.negotiated.hi != null) {
+    return { ...act.negotiated, zoneType: "NEGOTIATED", _source: "active.negotiated" };
+  }
+  if (act.shelf && act.shelf.lo != null && act.shelf.hi != null) {
+    return { ...act.shelf, zoneType: "SHELF", _source: "active.shelf" };
+  }
+  if (act.institutional && act.institutional.lo != null && act.institutional.hi != null) {
+    return { ...act.institutional, zoneType: "INSTITUTIONAL", _source: "active.institutional" };
   }
 
-  // Older/alt shape: ctx.active.{negotiated,shelf,institutional}
-  const act = ctx?.active || null;
-  if (act) {
-    if (act.negotiated?.lo != null && act.negotiated?.hi != null) return { ...act.negotiated, _source: "active.negotiated" };
-    if (act.shelf?.lo != null && act.shelf?.hi != null) return { ...act.shelf, _source: "active.shelf" };
-    if (act.institutional?.lo != null && act.institutional?.hi != null) return { ...act.institutional, _source: "active.institutional" };
-  }
-
-  const ns =
-    ctx?.zones?.nearestShelf ||
-    ctx?.zones?.nearest_shelf ||
-    ctx?.zones?.nearestAllowed ||
-    ctx?.nearestShelf ||
-    ctx?.nearestAllowed ||
-    ctx?.nearest?.shelf ||     // ✅ your actual shape
-    null;
-
+  // 2) scalp deterministic fallback: nearest.shelf
+  const ns = ctx?.nearest?.shelf || null;
   if (ns && ns.lo != null && ns.hi != null) {
-    return {
-    ...ns,
-    lo: toNum(ns.lo),
-    hi: toNum(ns.hi),
-    _source: "NEAREST_SHELF_SCALP_REF",
-  };
+    return { ...ns, zoneType: "SHELF", _source: "NEAREST_SHELF_SCALP_REF" };
+  }
+
+  return null;
 }
 
-return null;
+function isNegotiatedZone(zone) {
+  const id = String(zone?.id || "").toUpperCase();
+  const zt = String(zone?.zoneType || zone?.type || "").toUpperCase();
+  return zt === "NEGOTIATED" || id.includes("|NEG|");
+}
 
 /* -------------------- reason codes -------------------- */
 
-function buildReasonCodes({ inZoneNow, rqe, mode, stage }) {
+function buildReasonCodes({ inZoneNow, stage, rqe, mode }) {
   const codes = [];
 
-  // Engine 5B resets on NOT_IN_ZONE, so only emit it if we are truly not in zone AND not armed.
+  // Engine 5B resets when NOT_IN_ZONE; only emit if not in zone AND not armed
   if (!inZoneNow && stage !== "ARMED") codes.push("NOT_IN_ZONE");
 
   if (rqe?.reason === "NO_TOUCH" || rqe?.flags?.NO_TOUCH) {
@@ -230,9 +209,7 @@ function buildReasonCodes({ inZoneNow, rqe, mode, stage }) {
 
 reactionScoreRouter.get("/reaction-score", async (req, res) => {
   try {
-    const { symbol, tf, zoneId, source, mode, strategyId } = req.query;
-    const qLo = req.query.lo;
-    const qHi = req.query.hi;
+    const { symbol, tf, mode, strategyId } = req.query;
 
     if (!symbol || !tf) {
       return res.status(400).json({
@@ -248,14 +225,13 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const sym = String(symbol).toUpperCase();
     const timeframe = String(tf);
-
     const chosenMode = resolveMode({ mode, strategyId });
-    const p = presetOpts(chosenMode);
-    const sp = stagePreset(chosenMode);
     const side = resolveSideFromQuery(req);
+    const p = presetOpts(chosenMode);
 
-    // Bars
     const base = getBaseUrl(req);
+
+    // 1) Get bars first
     const ohlcUrl = `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}&limit=250`;
     const barsResp = await fetchJson(ohlcUrl);
     if (!barsResp.ok || !Array.isArray(barsResp.json)) {
@@ -280,15 +256,16 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       }))
       .filter(b => [b.open, b.high, b.low, b.close].every(Number.isFinite));
 
-    const bars = fullBars.length > p.lookbackBars ? fullBars.slice(-p.lookbackBars) : fullBars;
-    const lastBar = bars[bars.length - 1] || null;
-
     const lastCloseFallback = Number.isFinite(fullBars[fullBars.length - 1]?.close)
       ? fullBars[fullBars.length - 1].close
       : null;
 
-    // ATR
     const atrVal = computeATR(fullBars, 14) || computeATR(fullBars, 10) || null;
+
+    const bars = fullBars.length > p.lookbackBars ? fullBars.slice(-p.lookbackBars) : fullBars;
+    const lastBar = bars[bars.length - 1] || null;
+
+    // If ATR unavailable, still return something safe
     if (!atrVal || !Number.isFinite(atrVal) || atrVal <= 0) {
       return res.json({
         ok: true, invalid: false,
@@ -301,12 +278,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       });
     }
 
-    // Zone padding
-    let pad = 0;
-    if (chosenMode === "scalp") pad = 1.30;
-    else pad = Math.min(0.10 * atrVal, 1.00);
-
-    // Engine 5 context
+    // 2) Engine 5 context
     const ctxUrl = `${base}/api/v1/engine5-context?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}`;
     const ctxResp = await fetchJson(ctxUrl);
     const ctx = (ctxResp.ok && ctxResp.json) ? ctxResp.json : null;
@@ -317,26 +289,28 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       lastCloseFallback ??
       null;
 
-    // Resolve zone (manual inputs supported, but canonical is Engine 5 activeZone)
-    let lo = toNum(qLo);
-    let hi = toNum(qHi);
-    let resolvedSource = source ? String(source) : null;
-    let pickedZone = null;
+    // 3) Resolve zone: caller lo/hi overrides, else engine5 picked zone
+    let lo = toNum(req.query.lo);
+    let hi = toNum(req.query.hi);
+    let zoneObj = null;
+    let zoneSource = req.query.source ? String(req.query.source) : null;
+    let zoneId = req.query.zoneId ? String(req.query.zoneId) : null;
 
     if (lo != null && hi != null) {
-      pickedZone = { id: zoneId ?? null, lo, hi, _source: resolvedSource || "caller_bounds" };
+      zoneObj = { id: zoneId ?? null, lo, hi, zoneType: "MANUAL", _source: zoneSource || "caller_bounds" };
     } else {
-      pickedZone = pickZoneFromEngine5Context(ctx);
-      if (pickedZone) {
-        lo = toNum(pickedZone.lo);
-        hi = toNum(pickedZone.hi);
-        resolvedSource = resolvedSource || pickedZone._source || "engine5_activeZone";
+      zoneObj = pickZoneFromEngine5Context(ctx);
+      if (zoneObj) {
+        lo = toNum(zoneObj.lo);
+        hi = toNum(zoneObj.hi);
+        zoneId = zoneId ?? (zoneObj.id ? String(zoneObj.id) : null);
+        zoneSource = zoneSource || zoneObj._source || null;
       }
     }
 
     const zone = {
-      id: (zoneId ?? pickedZone?.id) ?? null,
-      source: resolvedSource,
+      id: zoneId,
+      source: zoneSource,
       lo,
       hi,
     };
@@ -347,24 +321,26 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
         reactionScore: 0, structureState: "HOLD", reasonCodes: ["NOT_IN_ZONE"],
         zone,
         rejectionSpeed: 0, displacementAtr: 0, reclaimOrFailure: 0, touchQuality: 0,
-        samples: 0, price: currentPrice, atr: null,
+        samples: 0, price: currentPrice, atr: atrVal,
         armed: false, stage: "IDLE", compression: null,
         mode: chosenMode,
       });
     }
+
+    // Padding for containment check (kept from your prior logic)
+    let pad = 0;
+    if (chosenMode === "scalp") pad = 1.30;
+    else pad = Math.min(0.10 * atrVal, 1.00);
 
     const loPad = lo - pad;
     const hiPad = hi + pad;
 
     const inZoneNow = within(currentPrice, loPad, hiPad);
 
-    // Active negotiated check (turquoise only)
-    const isNegotiated = zoneTypeIsNegotiated(pickedZone) || String(zone.id || "").includes("|NEG|");
-
-    // Compute RQE (kept for scoring/diagnostics)
+    // 4) Compute RQE (kept for scoring/diagnostics)
     const rqe = computeReactionQuality({
       bars,
-      zone: { lo, hi, side, id: zone.id ?? null },
+      zone: { lo, hi, side, id: zoneId ?? null },
       atr: atrVal,
       opts: {
         tf: timeframe,
@@ -374,7 +350,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       },
     });
 
-    // Metrics (locked)
     const rejectionSpeed = Number.isFinite(rqe.rejectionSpeedPoints) ? rqe.rejectionSpeedPoints * 2.5 : 0;
     const displacementAtr = Number.isFinite(rqe.displacementPoints) ? rqe.displacementPoints * 2.5 : 0;
     const reclaimOrFailure =
@@ -382,64 +357,46 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       rqe.structureState === "FAKEOUT_RECLAIM" ? 5 :
       rqe.structureState === "FAILURE" ? 0 : 0;
 
-    // ARMED TEST RULES (v1)
+    // 5) ARMED logic (SCALP testing)
+    let stage = "IDLE";
+    let armed = false;
+
+    const negotiated = isNegotiatedZone(zoneObj);
+
+    // Only arm if negotiated + in zone now (your intraday scalp contract)
     const a = candleAnatomy(lastBar);
     const o = Number(lastBar?.open), h = Number(lastBar?.high), l = Number(lastBar?.low), c = Number(lastBar?.close);
 
-    // Wick probe SHORT: upper wick >= body, attempted above zoneHi, close back inside (<= hi)
     const wickProbeShort =
-      isNegotiated &&
+      negotiated &&
       inZoneNow &&
       (a.upperWick != null && a.body != null && a.upperWick >= a.body) &&
       Number.isFinite(h) && h > hi &&
       Number.isFinite(c) && c <= hi;
 
-    // Wick probe LONG: lower wick >= body, attempted below zoneLo, close back inside (>= lo)
     const wickProbeLong =
-      isNegotiated &&
+      negotiated &&
       inZoneNow &&
       (a.lowerWick != null && a.body != null && a.lowerWick >= a.body) &&
       Number.isFinite(l) && l < lo &&
       Number.isFinite(c) && c >= lo;
 
-    // Control candle (buyer/seller control)
     const ctrl = detectControlCandle(lastBar, atrVal);
     const controlArms =
-      isNegotiated &&
+      negotiated &&
       inZoneNow &&
       (ctrl.control === "SELLER" || ctrl.control === "BUYER");
-
-    // Stage / armed (scalp-first)
-    let stage = "IDLE";
-    let armed = false;
 
     if (chosenMode === "scalp") {
       if (wickProbeShort || wickProbeLong || controlArms) {
         armed = true;
         stage = "ARMED";
       }
-    } else {
-      // keep legacy behavior for swing/long for now (no change)
-      // (We can extend later once scalp is stable.)
-      armed = false;
-      stage = "IDLE";
     }
 
-    // Compression diagnostic (kept)
-    let compression = null;
-    try {
-      const n = sp.compBars;
-      if (Array.isArray(bars) && bars.length >= n) {
-        const lastN = bars.slice(-n);
-        const maxH = Math.max(...lastN.map(b => b.high));
-        const minL = Math.min(...lastN.map(b => b.low));
-        compression = (maxH - minL) / atrVal;
-      }
-    } catch {}
+    const reasonCodes = buildReasonCodes({ inZoneNow, stage, rqe, mode: chosenMode });
 
-    const reasonCodes = buildReasonCodes({ inZoneNow, rqe, mode: chosenMode, stage });
-
-    // For scalp testing: keep reactionScore if in zone OR armed, else 0
+    // For scalp testing: show score if in zone OR armed
     const inScope = inZoneNow || stage === "ARMED";
     const reactionScoreOut = inScope ? rqe.reactionScore : 0;
     const touchQuality = (inScope && rqe.touchIndex != null) ? 10 : 0;
@@ -467,23 +424,25 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
       armed,
       stage,
-      compression,
+      compression: null,
 
       mode: chosenMode,
 
-      // diagnostics (safe additions)
+      // Diagnostics (safe additions)
       side,
       direction: side === "supply" ? "SHORT" : "LONG",
-      isNegotiatedZone: !!isNegotiated,
+      inZoneNow,
+      negotiatedZone: negotiated,
 
-      wickProbeShort: !!wickProbeShort,
-      wickProbeLong: !!wickProbeLong,
+      wickProbeShort,
+      wickProbeLong,
 
       controlCandle: ctrl.control,
       controlBodyPct: ctrl.bodyPct,
       controlBodyAtr: ctrl.bodyAtr,
 
       candle: a,
+      padded: { lo: loPad, hi: hiPad, pad },
     });
 
   } catch (err) {
