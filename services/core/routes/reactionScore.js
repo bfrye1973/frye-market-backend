@@ -2,26 +2,30 @@
 //
 // Engine 3 (Reaction Score) — wrapper
 //
-// LOCKED (per Engine 5 teammate):
-// - Engine 3 MUST follow Engine 5 zone selection truth:
-//   containment-first active.* (negotiated -> shelf -> institutional)
-//   scalp fallback: nearest.shelf
-// - Engine 3 MUST NOT pick from render arrays.
+// LOCKED (Engine 5 alignment):
+// - Engine 3 must follow Engine 5 zone truth: active.negotiated -> active.shelf -> active.institutional
+// - Scalp fallback if no active contains price: nearest.shelf
+// - Engine 3 must NOT pick from render arrays.
 //
-// TEST MODE (to get signals firing fast):
-// - For SCALP: stage becomes ARMED if we are INSIDE ACTIVE NEGOTIATED zone and:
-//    A) Wick probe candle (upper/lower wick >= body + probe beyond edge + close back inside), OR
-//    B) Control candle (bodyPct>=0.65 + close near extreme + bodyAtr>=0.25)
+// FIX (this version):
+// - Engine 5B calls E3 with lo/hi only (no id/type/source). We enrich zone metadata by matching
+//   request lo/hi against engine5-context active zone bounds using a tolerance.
+// - This allows negotiated arming logic to work during /scalp-status.
+//
+// SCALP TEST ARMING (v1):
+// - Base: Arm on wick probe OR control candle, only inside NEGOTIATED zone.
+// - Optional testing switch: E3_TOUCH_ARMS_NEGOTIATED=1
+//   -> Arm whenever price is inside inferred negotiated zone.
 //
 // NOTE:
-// - Engine 5B scalp GO uses stage===ARMED. We do NOT require CONFIRMED.
+// - Engine 5B uses stage===ARMED; CONFIRMED is not required for scalp GO.
 
 import express from "express";
 import { computeReactionQuality } from "../logic/reactionQualityEngine.js";
 
 export const reactionScoreRouter = express.Router();
 
-/* -------------------- small utils -------------------- */
+/* -------------------- utils -------------------- */
 
 function toNum(x) {
   const n = Number(x);
@@ -60,6 +64,18 @@ function within(price, lo, hi) {
   return price >= a && price <= b;
 }
 
+function abs(x) {
+  return Math.abs(x);
+}
+
+function boundsMatch(reqLo, reqHi, actLo, actHi, eps = 1e-3) {
+  // eps=0.001 is safe for 2-decimal zone bounds
+  if (![reqLo, reqHi, actLo, actHi].every(Number.isFinite)) return false;
+  return abs(reqLo - actLo) <= eps && abs(reqHi - actHi) <= eps;
+}
+
+/* -------------------- mode + side -------------------- */
+
 function resolveMode({ mode, strategyId }) {
   const m = (mode || "").toString().toLowerCase().trim();
   if (m === "scalp" || m === "swing" || m === "long") return m;
@@ -68,11 +84,11 @@ function resolveMode({ mode, strategyId }) {
   if (sid === "intraday_scalp@10m") return "scalp";
   if (sid === "minor_swing@1h") return "swing";
   if (sid === "intermediate_long@4h") return "long";
+
   return "swing";
 }
 
 function presetOpts(mode) {
-  // scalp lookback higher for diagnostics; arming is still strict (must be in-zone)
   if (mode === "scalp")
     return { lookbackBars: 80, windowBars: 2, breakDepthAtr: 0.25, reclaimWindowBars: 1 };
   if (mode === "long")
@@ -114,7 +130,7 @@ function computeATR(bars, len = 14) {
   return atr;
 }
 
-/* -------------------- candle analysis -------------------- */
+/* -------------------- candle logic -------------------- */
 
 function candleAnatomy(bar) {
   if (!bar) return { upperWick: null, lowerWick: null, body: null, range: null, bodyPct: null };
@@ -155,7 +171,6 @@ function detectControlCandle(bar, atr) {
 /* -------------------- Engine 5 zone selection (LOCKED) -------------------- */
 
 function pickZoneFromEngine5Context(ctx) {
-  // 1) containment-first: active.negotiated -> active.shelf -> active.institutional
   const act = ctx?.active || {};
   if (act.negotiated && act.negotiated.lo != null && act.negotiated.hi != null) {
     return { ...act.negotiated, zoneType: "NEGOTIATED", _source: "active.negotiated" };
@@ -167,7 +182,7 @@ function pickZoneFromEngine5Context(ctx) {
     return { ...act.institutional, zoneType: "INSTITUTIONAL", _source: "active.institutional" };
   }
 
-  // 2) scalp deterministic fallback: nearest.shelf
+  // scalp fallback
   const ns = ctx?.nearest?.shelf || null;
   if (ns && ns.lo != null && ns.hi != null) {
     return { ...ns, zoneType: "SHELF", _source: "NEAREST_SHELF_SCALP_REF" };
@@ -176,10 +191,10 @@ function pickZoneFromEngine5Context(ctx) {
   return null;
 }
 
-function isNegotiatedZone(zone) {
-  const id = String(zone?.id || "").toUpperCase();
-  const zt = String(zone?.zoneType || zone?.type || "").toUpperCase();
-  return zt === "NEGOTIATED" || id.includes("|NEG|");
+function isNegotiatedByMeta(zoneType, zoneId) {
+  if (String(zoneType || "").toUpperCase() === "NEGOTIATED") return true;
+  const id = String(zoneId || "").toUpperCase();
+  return id.includes("|NEG|");
 }
 
 /* -------------------- reason codes -------------------- */
@@ -187,7 +202,7 @@ function isNegotiatedZone(zone) {
 function buildReasonCodes({ inZoneNow, stage, rqe, mode }) {
   const codes = [];
 
-  // Engine 5B resets when NOT_IN_ZONE; only emit if not in zone AND not armed
+  // Engine 5B resets on NOT_IN_ZONE; only emit when truly out and not armed.
   if (!inZoneNow && stage !== "ARMED") codes.push("NOT_IN_ZONE");
 
   if (rqe?.reason === "NO_TOUCH" || rqe?.flags?.NO_TOUCH) {
@@ -225,13 +240,14 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const sym = String(symbol).toUpperCase();
     const timeframe = String(tf);
+
     const chosenMode = resolveMode({ mode, strategyId });
     const side = resolveSideFromQuery(req);
     const p = presetOpts(chosenMode);
 
     const base = getBaseUrl(req);
 
-    // 1) Get bars first
+    // Bars
     const ohlcUrl = `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}&limit=250`;
     const barsResp = await fetchJson(ohlcUrl);
     if (!barsResp.ok || !Array.isArray(barsResp.json)) {
@@ -256,16 +272,14 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       }))
       .filter(b => [b.open, b.high, b.low, b.close].every(Number.isFinite));
 
+    const bars = fullBars.length > p.lookbackBars ? fullBars.slice(-p.lookbackBars) : fullBars;
+    const lastBar = bars[bars.length - 1] || null;
     const lastCloseFallback = Number.isFinite(fullBars[fullBars.length - 1]?.close)
       ? fullBars[fullBars.length - 1].close
       : null;
 
+    // ATR
     const atrVal = computeATR(fullBars, 14) || computeATR(fullBars, 10) || null;
-
-    const bars = fullBars.length > p.lookbackBars ? fullBars.slice(-p.lookbackBars) : fullBars;
-    const lastBar = bars[bars.length - 1] || null;
-
-    // If ATR unavailable, still return something safe
     if (!atrVal || !Number.isFinite(atrVal) || atrVal <= 0) {
       return res.json({
         ok: true, invalid: false,
@@ -278,7 +292,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       });
     }
 
-    // 2) Engine 5 context
+    // Engine5 context
     const ctxUrl = `${base}/api/v1/engine5-context?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}`;
     const ctxResp = await fetchJson(ctxUrl);
     const ctx = (ctxResp.ok && ctxResp.json) ? ctxResp.json : null;
@@ -289,24 +303,47 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       lastCloseFallback ??
       null;
 
-    // 3) Resolve zone: caller lo/hi overrides, else engine5 picked zone
-    let lo = toNum(req.query.lo);
-    let hi = toNum(req.query.hi);
-    let zoneObj = null;
-    let zoneSource = req.query.source ? String(req.query.source) : null;
+    // Requested zone (Engine5B passes lo/hi only)
+    const reqLo = toNum(req.query.lo);
+    const reqHi = toNum(req.query.hi);
     let zoneId = req.query.zoneId ? String(req.query.zoneId) : null;
+    let zoneSource = req.query.source ? String(req.query.source) : null;
 
-    if (lo != null && hi != null) {
-      zoneObj = { id: zoneId ?? null, lo, hi, zoneType: "MANUAL", _source: zoneSource || "caller_bounds" };
-    } else {
-      zoneObj = pickZoneFromEngine5Context(ctx);
-      if (zoneObj) {
-        lo = toNum(zoneObj.lo);
-        hi = toNum(zoneObj.hi);
-        zoneId = zoneId ?? (zoneObj.id ? String(zoneObj.id) : null);
-        zoneSource = zoneSource || zoneObj._source || null;
+    // Active picked zone (Engine5 truth)
+    const picked = pickZoneFromEngine5Context(ctx);
+
+    // Resolve bounds:
+    // - if request provides lo/hi, use them
+    // - else use picked zone
+    let lo = reqLo;
+    let hi = reqHi;
+
+    if ((lo == null || hi == null) && picked) {
+      lo = toNum(picked.lo);
+      hi = toNum(picked.hi);
+      zoneId = zoneId ?? (picked.id ? String(picked.id) : null);
+      zoneSource = zoneSource ?? (picked._source || null);
+    }
+
+    // Enrich metadata by matching request bounds to active zone bounds
+    // This is the critical fix for /scalp-status.
+    let inferredZoneType = null;
+    let inferredZoneId = null;
+    let inferredSource = null;
+
+    if (picked && lo != null && hi != null) {
+      const pLo = toNum(picked.lo);
+      const pHi = toNum(picked.hi);
+
+      if (boundsMatch(lo, hi, pLo, pHi, 1e-3)) {
+        inferredZoneType = String(picked.zoneType || "").toUpperCase() || null;
+        inferredZoneId = picked.id ? String(picked.id) : null;
+        inferredSource = "ACTIVE";
       }
     }
+
+    if (!zoneId && inferredZoneId) zoneId = inferredZoneId;
+    if (!zoneSource && inferredSource) zoneSource = inferredSource;
 
     const zone = {
       id: zoneId,
@@ -327,7 +364,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       });
     }
 
-    // Padding for containment check (kept from your prior logic)
+    // containment padding (same as your earlier)
     let pad = 0;
     if (chosenMode === "scalp") pad = 1.30;
     else pad = Math.min(0.10 * atrVal, 1.00);
@@ -337,7 +374,10 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const inZoneNow = within(currentPrice, loPad, hiPad);
 
-    // 4) Compute RQE (kept for scoring/diagnostics)
+    // negotiated classification (inferred or by id)
+    const negotiatedZone = isNegotiatedByMeta(inferredZoneType, zoneId);
+
+    // RQE compute (kept)
     const rqe = computeReactionQuality({
       bars,
       zone: { lo, hi, side, id: zoneId ?? null },
@@ -357,38 +397,48 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       rqe.structureState === "FAKEOUT_RECLAIM" ? 5 :
       rqe.structureState === "FAILURE" ? 0 : 0;
 
-    // 5) ARMED logic (SCALP testing)
-    let stage = "IDLE";
-    let armed = false;
-
-    const negotiated = isNegotiatedZone(zoneObj);
-
-    // Only arm if negotiated + in zone now (your intraday scalp contract)
+    // SCALP ARMING RULES (v1)
     const a = candleAnatomy(lastBar);
-    const o = Number(lastBar?.open), h = Number(lastBar?.high), l = Number(lastBar?.low), c = Number(lastBar?.close);
+    const o = Number(lastBar?.open);
+    const h = Number(lastBar?.high);
+    const l = Number(lastBar?.low);
+    const c = Number(lastBar?.close);
 
+    // Wick probes (requires probe beyond edge + close back inside)
     const wickProbeShort =
-      negotiated &&
+      negotiatedZone &&
       inZoneNow &&
       (a.upperWick != null && a.body != null && a.upperWick >= a.body) &&
       Number.isFinite(h) && h > hi &&
       Number.isFinite(c) && c <= hi;
 
     const wickProbeLong =
-      negotiated &&
+      negotiatedZone &&
       inZoneNow &&
       (a.lowerWick != null && a.body != null && a.lowerWick >= a.body) &&
       Number.isFinite(l) && l < lo &&
       Number.isFinite(c) && c >= lo;
 
     const ctrl = detectControlCandle(lastBar, atrVal);
+
+    // Direction-aware control (recommended)
     const controlArms =
-      negotiated &&
+      negotiatedZone &&
       inZoneNow &&
-      (ctrl.control === "SELLER" || ctrl.control === "BUYER");
+      (
+        (side === "demand" && ctrl.control === "BUYER") ||
+        (side === "supply" && ctrl.control === "SELLER")
+      );
+
+    // Optional testing flag: arm on zone touch whenever inside negotiated
+    const touchArmsEnabled = String(process.env.E3_TOUCH_ARMS_NEGOTIATED || "").trim() === "1";
+    const touchArms = Boolean(touchArmsEnabled && negotiatedZone && inZoneNow);
+
+    let stage = "IDLE";
+    let armed = false;
 
     if (chosenMode === "scalp") {
-      if (wickProbeShort || wickProbeLong || controlArms) {
+      if (touchArms || wickProbeShort || wickProbeLong || controlArms) {
         armed = true;
         stage = "ARMED";
       }
@@ -396,7 +446,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const reasonCodes = buildReasonCodes({ inZoneNow, stage, rqe, mode: chosenMode });
 
-    // For scalp testing: show score if in zone OR armed
+    // Keep score visible if in zone or armed (so UI shows activity)
     const inScope = inZoneNow || stage === "ARMED";
     const reactionScoreOut = inScope ? rqe.reactionScore : 0;
     const touchQuality = (inScope && rqe.touchIndex != null) ? 10 : 0;
@@ -428,11 +478,18 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
       mode: chosenMode,
 
-      // Diagnostics (safe additions)
+      // diagnostics
       side,
       direction: side === "supply" ? "SHORT" : "LONG",
       inZoneNow,
-      negotiatedZone: negotiated,
+
+      negotiatedZone,
+      inferredZoneType,
+      inferredSource: inferredSource,
+      inferredFromActiveMatch: inferredZoneType != null,
+
+      touchArmsEnabled,
+      touchArms,
 
       wickProbeShort,
       wickProbeLong,
