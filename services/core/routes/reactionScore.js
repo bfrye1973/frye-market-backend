@@ -183,22 +183,25 @@ function pickZoneFromEngine5Context(ctx) {
     if (act.institutional?.lo != null && act.institutional?.hi != null) return { ...act.institutional, _source: "active.institutional" };
   }
 
-  // Scalp-only fallback per Engine 5 teammate: nearest shelf ref if provided
   const ns =
     ctx?.zones?.nearestShelf ||
     ctx?.zones?.nearest_shelf ||
     ctx?.zones?.nearestAllowed ||
     ctx?.nearestShelf ||
     ctx?.nearestAllowed ||
+    ctx?.nearest?.shelf ||     // ✅ your actual shape
     null;
 
-  // Only accept if it looks like a shelf-ish object (has lo/hi)
   if (ns && ns.lo != null && ns.hi != null) {
-    return { ...ns, _source: "NEAREST_SHELF_SCALP_REF" };
-  }
-
-  return null;
+    return {
+    ...ns,
+    lo: toNum(ns.lo),
+    hi: toNum(ns.hi),
+    _source: "NEAREST_SHELF_SCALP_REF",
+  };
 }
+
+return null;
 
 /* -------------------- reason codes -------------------- */
 
