@@ -11,6 +11,11 @@
 // - pressureBias: BEARISH_PRESSURE | NEUTRAL_PRESSURE
 // - flowSummary: readable list of active flags/state
 // - nextConfirm: short “what’s missing” message
+//
+// COMPAT (for Engine 5B / scalp-status):
+// - ok (bool)
+// - updatedAtUtc (string)
+// - raw (object)
 
 import express from "express";
 import { computeVolumeBehavior } from "../logic/volumeBehaviorEngine.js";
@@ -31,9 +36,6 @@ function deriveVolumeRegime(volumeScore, flags) {
 }
 
 function derivePressureBias(flags) {
-  // Conservative v1:
-  // - distribution => bearish pressure
-  // - otherwise neutral (until we add initiativeSide BUY/SELL)
   if (flags?.distributionDetected) return "BEARISH_PRESSURE";
   return "NEUTRAL_PRESSURE";
 }
@@ -58,7 +60,8 @@ function buildFlowSummary(result) {
 function nextConfirmText(regime, bias, flags) {
   if (flags?.liquidityTrap) return "Trap risk detected — wait for clean reclaim/confirmation.";
   if (regime === "QUIET") return "Volume is quiet — wait for expansion candle + follow-through.";
-  if (bias === "BEARISH_PRESSURE") return "Bearish pressure flagged — confirm with displacement down / reclaim failure.";
+  if (bias === "BEARISH_PRESSURE")
+    return "Bearish pressure flagged — confirm with displacement down / reclaim failure.";
   return "No strong volume signal — wait for initiative or absorption/distribution confirmation.";
 }
 
@@ -72,8 +75,11 @@ volumeBehaviorRouter.get("/volume-behavior", async (req, res) => {
 
     if (!(Number.isFinite(zoneLo) && Number.isFinite(zoneHi))) {
       return res.status(400).json({
+        ok: false,
         error: "MISSING_ZONE_RANGE",
         message: "Provide zoneLo and zoneHi (numbers). Engine 1 owns zone selection.",
+        updatedAtUtc: new Date().toISOString(),
+        raw: null,
       });
     }
 
@@ -111,7 +117,7 @@ volumeBehaviorRouter.get("/volume-behavior", async (req, res) => {
       },
     });
 
-    // -------- NEW derived fields (no engine math change) --------
+    // -------- derived fields (no engine math change) --------
     const flags = result?.flags || {};
     const volumeScore = result?.volumeScore;
 
@@ -120,24 +126,37 @@ volumeBehaviorRouter.get("/volume-behavior", async (req, res) => {
     const flowSummary = buildFlowSummary(result);
     const nextConfirm = nextConfirmText(volumeRegime, pressureBias, flags);
 
-    return res.json({
+    // Build the canonical payload once (so raw + top-level match exactly)
+    const payload = {
       symbol,
       tf,
       mode: mode || "default",
-      zone,
-
+      zone, // IMPORTANT: echo EXACT requested lo/hi (helps strict match)
       ...result,
 
-      // new derived fields
+      // derived fields
       volumeRegime,
       pressureBias,
       flowSummary,
       nextConfirm,
+    };
+
+    // ✅ Compatibility wrapper for Engine 5B / scalp-status
+    return res.json({
+      ok: true,
+      updatedAtUtc: new Date().toISOString(),
+      raw: payload,
+
+      // keep existing response shape too (non-breaking)
+      ...payload,
     });
   } catch (err) {
     return res.status(500).json({
+      ok: false,
       error: "VOLUME_BEHAVIOR_ERROR",
       message: err?.message || String(err),
+      updatedAtUtc: new Date().toISOString(),
+      raw: null,
     });
   }
 });
