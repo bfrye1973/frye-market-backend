@@ -15,19 +15,14 @@
 //   zonePosition, rejectionCandidate, rejectionReasons, nextConfirmDown/Up
 //   candle anatomy diagnostics: upperWick, body, range, closeBackInsideZone
 //
-// ✅ NEW (SAFE WRAPPER IMPROVEMENT):
+// ✅ SAFE WRAPPER IMPROVEMENTS:
 // - If caller does NOT pass zoneId/lo/hi, auto-pick active zone from engine5-context:
 //   negotiated_active -> shelf_active -> institutional_active
-// - This prevents the strategy/dashboard from "stopping" when the caller omits zone args.
-// - No engine math changes.
 //
-// ✅ FIX (ENGINE 3 WORKING):
-// - Add direction awareness via query params (backwards compatible):
-//    ?direction=LONG|SHORT   OR   ?side=demand|supply
-//   Default remains LONG/demand if omitted.
-// - Pass correct side into computeReactionQuality()
-// - Loosen ARMED for scalp via flip candidates (rejection/acceptance) so engine "arms" on real SPY behavior.
-// - Make TRIGGERED direction-aware (LONG triggers on exit above hiPad; SHORT triggers on exit below loPad)
+// ✅ FIX (ENGINE 3 SIGNALS):
+// - direction awareness: ?direction=LONG|SHORT or ?side=demand|supply (default LONG/demand)
+// - NEW: Active Reaction Window ("touched recently") so we don’t die when price has already left the zone
+// - Stage TRIGGERED should come from rqe.exitBars (already direction-aware), not strict "still in zone"
 
 import express from "express";
 import { computeReactionQuality } from "../logic/reactionQualityEngine.js";
@@ -166,9 +161,9 @@ function stagePreset(mode) {
   return { compBars: 8, compMax: 0.55, triggerExitBarsMax: 4, confirmScore: 7.0 };
 }
 
-function buildReasonCodes({ inZone, rqe, mode }) {
+function buildReasonCodes({ inScope, rqe, mode }) {
   const codes = [];
-  if (!inZone) codes.push("NOT_IN_ZONE");
+  if (!inScope) codes.push("NOT_IN_ZONE");
 
   if (rqe?.reason === "NO_TOUCH" || rqe?.flags?.NO_TOUCH) {
     codes.push("NO_TOUCH");
@@ -185,7 +180,7 @@ function buildReasonCodes({ inZone, rqe, mode }) {
   return Array.from(new Set(codes));
 }
 
-/* -------------------- NEW: candle + rejection diagnostics -------------------- */
+/* -------------------- candle + rejection diagnostics -------------------- */
 
 function candleAnatomy(bar) {
   if (!bar) return { upperWick: null, body: null, range: null };
@@ -206,8 +201,7 @@ function zonePosition(price, lo, hi) {
   if (price > b) return "ABOVE_ZONE";
   if (price < a) return "BELOW_ZONE";
 
-  // Inside zone
-  const upperBand = mid + (b - mid) * 0.5; // top half of upper half
+  const upperBand = mid + (b - mid) * 0.5;
   const lowerBand = mid - (mid - a) * 0.5;
 
   if (price >= upperBand) return "UPPER_BAND";
@@ -216,9 +210,6 @@ function zonePosition(price, lo, hi) {
 }
 
 function buildRejectionDiagnostics({ lastBar, lo, hi }) {
-  // User-locked rule for "rejection begins":
-  // A) upperWick >= body
-  // B) close back inside zone (attempt above + close <= hi)
   const { upperWick, body, range } = candleAnatomy(lastBar);
 
   const h = lastBar ? Number(lastBar.high) : null;
@@ -236,7 +227,6 @@ function buildRejectionDiagnostics({ lastBar, lo, hi }) {
   if (attemptedAbove) rejectionReasons.push("ATTEMPTED_ABOVE_ZONE_HI");
   if (closeBackInside) rejectionReasons.push("CLOSE_BACK_INSIDE_ZONE");
 
-  // Next confirms (simple, readable)
   const a = Math.min(lo, hi);
   const b = Math.max(lo, hi);
   const mid = (a + b) / 2;
@@ -250,16 +240,12 @@ function buildRejectionDiagnostics({ lastBar, lo, hi }) {
   };
 }
 
-/* -------------------- NEW: direction parsing (SAFE) -------------------- */
+/* -------------------- direction parsing (SAFE) -------------------- */
 
 function resolveSideFromQuery(req) {
-  // Backwards compatible: if no direction/side is provided -> LONG/demand.
   const directionRaw = String(req.query.direction || "").toUpperCase().trim();
   const sideRaw = String(req.query.side || "").toLowerCase().trim();
 
-  // accepted values:
-  // direction: LONG/SHORT (also BUY/SELL)
-  // side: demand/supply
   if (sideRaw === "supply" || sideRaw === "short" || sideRaw === "bearish") return "supply";
   if (sideRaw === "demand" || sideRaw === "long" || sideRaw === "bullish") return "demand";
 
@@ -296,7 +282,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
     const p = presetOpts(chosenMode);
     const sp = stagePreset(chosenMode);
 
-    // ✅ NEW: direction-aware side (default demand)
     const side = resolveSideFromQuery(req);
 
     let lo = toNum(qLo);
@@ -305,7 +290,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const base = getBaseUrl(req);
 
-    // engine5-context (price truth + optional zoneId resolution)
     const ctxUrl = `${base}/api/v1/engine5-context?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}`;
     const ctxResp = await fetchJson(ctxUrl);
     const ctx = (ctxResp.ok && ctxResp.json) ? ctxResp.json : null;
@@ -315,7 +299,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       toNum(ctx?.meta?.currentPrice) ??
       null;
 
-    // 1) If caller passed zoneId and lo/hi missing -> resolve by id
     if ((lo == null || hi == null) && zoneId && ctx) {
       const z = findZoneById(ctx, zoneId);
       if (z) {
@@ -325,8 +308,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       }
     }
 
-    // ✅ 2) NEW: If caller did NOT pass zoneId/lo/hi -> auto-pick active zone
-    // This ensures dashboard/strategy can call reaction-score without needing to pipe zone params.
     let autoPickedId = null;
     if ((lo == null || hi == null) && !zoneId && ctx) {
       const act = ctx.active || {};
@@ -344,14 +325,8 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       }
     }
 
-    const zone = {
-      id: (zoneId ?? autoPickedId) ?? null,
-      source: resolvedSource,
-      lo,
-      hi
-    };
+    const zone = { id: (zoneId ?? autoPickedId) ?? null, source: resolvedSource, lo, hi };
 
-    // If still no zone bounds -> stay alive, return idle safely (DO NOT break dashboard)
     if (lo == null || hi == null) {
       return res.json({
         ok: true, invalid: false,
@@ -364,8 +339,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       });
     }
 
-    // bars via /ohlc
-    // ✅ SAFE FIX: use tf= (your OHLC endpoint expects tf, not timeframe)
     const ohlcUrl = `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}&limit=250`;
     const barsResp = await fetchJson(ohlcUrl);
     if (!barsResp.ok || !Array.isArray(barsResp.json)) {
@@ -392,7 +365,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const bars = fullBars.length > p.lookbackBars ? fullBars.slice(-p.lookbackBars) : fullBars;
 
-    // ATR is REQUIRED for Engine 3 compute + compression scoring
     const atrVal = computeATR(fullBars, 14) || computeATR(fullBars, 10) || null;
     if (!atrVal || !Number.isFinite(atrVal) || atrVal <= 0) {
       return res.json({
@@ -406,7 +378,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       });
     }
 
-    // Zone padding (deviation)
     let pad = 0;
     if (chosenMode === "scalp") pad = 1.30;
     else pad = Math.min(0.10 * atrVal, 1.00);
@@ -414,10 +385,8 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
     const loPad = lo - pad;
     const hiPad = hi + pad;
 
-    // containment uses padded bounds
-    const inZone = within(currentPrice, loPad, hiPad);
+    const inZoneNow = within(currentPrice, loPad, hiPad);
 
-    // Compute Engine 3 reaction (MATH engine, now DIRECTION-AWARE) using ORIGINAL zone bounds (lo/hi)
     const rqe = computeReactionQuality({
       bars,
       zone: { lo, hi, side, id: (zoneId ?? autoPickedId) ?? null },
@@ -430,29 +399,26 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       },
     });
 
-    const rejectionSpeed = Number.isFinite(rqe.rejectionSpeedPoints) ? rqe.rejectionSpeedPoints * 2.5 : 0;
-    const displacementAtr = Number.isFinite(rqe.displacementPoints) ? rqe.displacementPoints * 2.5 : 0;
-    const reclaimOrFailure =
-      rqe.structureState === "HOLD" ? 10 :
-      rqe.structureState === "FAKEOUT_RECLAIM" ? 5 :
-      rqe.structureState === "FAILURE" ? 0 : 0;
+    // ✅ Active Reaction Window:
+    // If we touched the zone very recently, we are "in scope" even if price has already moved away.
+    const barsAgo = (rqe?.touchIndex == null) ? null : (bars.length - 1 - rqe.touchIndex);
+    const reactionWindowBars = Math.max(2, p.windowBars + 1); // scalp(2)->3
+    const touchedRecently = (barsAgo != null && barsAgo >= 0 && barsAgo <= reactionWindowBars);
 
-    const touchQuality = (inZone && rqe.touchIndex != null) ? 10 : 0;
+    // Staging (direction-aware) based on RQE itself
+    let armed = false;
+    let stage = "IDLE";
 
-    // --------- NEW: flip candidates (SAFE arming improvement for scalp) ----------
+    const comp = compressionN(bars, atrVal, sp.compBars);
+    const isTight = comp != null && comp <= sp.compMax;
+
     const lastBar = bars[bars.length - 1] || null;
     const prevBar = bars[bars.length - 2] || null;
-
-    const lastH = lastBar ? Number(lastBar.high) : null;
-    const lastL = lastBar ? Number(lastBar.low) : null;
     const lastC = lastBar ? Number(lastBar.close) : null;
     const prevC = prevBar ? Number(prevBar.close) : null;
 
-    // Rejection candidate already defined (raw zone bounds)
     const rej = buildRejectionDiagnostics({ lastBar, lo, hi });
 
-    // Acceptance candidate (simple + readable):
-    // close above hi (raw) AND either prev close was <= hi OR we have 2 bars holding above hi
     const acceptanceCandidate =
       (Number.isFinite(lastC) && lastC > hi) &&
       (
@@ -460,62 +426,56 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
         (Number.isFinite(prevC) && prevC > hi)
       );
 
-    // Side-aligned flipCandidate used for scalp ARMED:
-    // - supply (SHORT): rejectionCandidate (attempt above then close back inside)
-    // - demand (LONG): acceptanceCandidate (close above and hold)
     const flipCandidate = (side === "supply") ? !!rej.rejectionCandidate : !!acceptanceCandidate;
 
-    // ARMED/STAGE
-    const comp = compressionN(bars, atrVal, sp.compBars);
-    const isTight = comp != null && comp <= sp.compMax;
-
-    // Direction-aware trigger:
-    // LONG (demand): triggered when close exits ABOVE hiPad
-    // SHORT (supply): triggered when close exits BELOW loPad
-    const exitedUp = Number.isFinite(lastC) && lastC > hiPad;
-    const exitedDown = Number.isFinite(lastC) && lastC < loPad;
-
-    const exitedZoneDir = (side === "demand") ? exitedUp : exitedDown;
-
-    let armed = false;
-    let stage = "IDLE";
-
-    // Primary arming:
-    // - Requires inZone always
-    // - Tight compression OR (scalp + flipCandidate)
-    if (inZone && (isTight || (chosenMode === "scalp" && flipCandidate))) {
+    // ARMED: if we're currently in zone OR we just touched it, and (tight OR scalp flip)
+    if ((inZoneNow || touchedRecently) && (isTight || (chosenMode === "scalp" && flipCandidate))) {
       armed = true;
       stage = "ARMED";
     }
 
-    // Triggered: fast exit in the correct direction
-    if (exitedZoneDir && Number.isFinite(rqe.exitBars) && rqe.exitBars <= sp.triggerExitBarsMax) {
+    // TRIGGERED: use rqe.exitBars (already direction aware via side)
+    if (Number.isFinite(rqe?.exitBars) && rqe.exitBars <= sp.triggerExitBarsMax) {
       stage = "TRIGGERED";
     }
 
-    // Confirmed: quality threshold; scalp requires prior TRIGGERED or ARMED
+    // CONFIRMED: quality gate; scalp still requires ARMED/TRIGGERED
     if (
-      Number.isFinite(rqe.reactionScore) &&
+      Number.isFinite(rqe?.reactionScore) &&
       rqe.reactionScore >= sp.confirmScore &&
       (chosenMode !== "scalp" || stage === "TRIGGERED" || armed === true)
     ) {
       stage = "CONFIRMED";
     }
 
-    // Out of zone -> idle unless already TRIGGERED
-    if (!inZone && stage !== "TRIGGERED") {
-      armed = false;
-      stage = "IDLE";
-    }
+    // Scope for output / reason codes:
+    // If TRIGGERED/CONFIRMED or touched recently, we should NOT zero-out reaction.
+    const inScope = Boolean(inZoneNow || touchedRecently || stage === "TRIGGERED" || stage === "CONFIRMED");
 
-    const reasonCodes = buildReasonCodes({ inZone, rqe, mode: chosenMode });
+    // Output metrics
+    const rejectionSpeed = Number.isFinite(rqe.rejectionSpeedPoints) ? rqe.rejectionSpeedPoints * 2.5 : 0;
+    const displacementAtr = Number.isFinite(rqe.displacementPoints) ? rqe.displacementPoints * 2.5 : 0;
+    const reclaimOrFailure =
+      rqe.structureState === "HOLD" ? 10 :
+      rqe.structureState === "FAKEOUT_RECLAIM" ? 5 :
+      rqe.structureState === "FAILURE" ? 0 : 0;
 
-    const reactionScoreOut = inZone ? rqe.reactionScore : 0;
+    const touchQuality = (inScope && rqe.touchIndex != null) ? 10 : 0;
+
+    const reasonCodes = buildReasonCodes({ inScope, rqe, mode: chosenMode });
+
+    // ✅ Do not zero out reactionScore when we are inScope (recent touch / triggered)
+    const reactionScoreOut = inScope ? rqe.reactionScore : 0;
 
     const structureStateOut = rqe.structureState === "FAKEOUT_RECLAIM" ? "RECLAIM" : rqe.structureState;
 
-    // --------- NEW: C-level diagnostics (no breaking changes) ----------
     const pos = zonePosition(currentPrice, lo, hi);
+
+    // Simple exit label (for diagnostics only)
+    const exitedUp = Number.isFinite(lastC) && lastC > hiPad;
+    const exitedDown = Number.isFinite(lastC) && lastC < loPad;
+    const triggeredExit =
+      side === "demand" ? (exitedUp ? "EXIT_UP" : "NONE") : (exitedDown ? "EXIT_DOWN" : "NONE");
 
     return res.json({
       ok: true,
@@ -542,21 +502,21 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
       mode: chosenMode,
 
-      // NEW fields (safe additions)
+      // Safe additions
       zonePosition: pos,
-
-      // Existing rejection diagnostics
       rejectionCandidate: rej.rejectionCandidate,
       rejectionReasons: rej.rejectionReasons,
       nextConfirmDown: rej.nextConfirmDown,
       nextConfirmUp: rej.nextConfirmUp,
 
-      // ✅ NEW: direction diagnostics (safe)
       side,
       direction: side === "supply" ? "SHORT" : "LONG",
       flipCandidate,
       acceptanceCandidate: !!acceptanceCandidate,
-      triggeredExit: side === "demand" ? (exitedUp ? "EXIT_UP" : "NONE") : (exitedDown ? "EXIT_DOWN" : "NONE"),
+      triggeredExit,
+      touchedRecently,
+      barsSinceTouch: barsAgo,
+      inScope,
 
       diagnostics: {
         candle: rej.candle,
@@ -565,12 +525,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
           hi,
           mid: ((Math.min(lo, hi) + Math.max(lo, hi)) / 2),
           padded: { lo: loPad, hi: hiPad, pad },
-        },
-        lastBar: {
-          high: Number.isFinite(lastH) ? lastH : null,
-          low: Number.isFinite(lastL) ? lastL : null,
-          close: Number.isFinite(lastC) ? lastC : null,
-          prevClose: Number.isFinite(prevC) ? prevC : null,
         },
       },
     });
