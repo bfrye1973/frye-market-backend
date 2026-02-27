@@ -308,6 +308,20 @@ function pullbackReclaimCheck_1s(closePx) {
 async function refreshZone() {
   const url = `${BACKEND1_BASE}/api/v1/engine5-context?symbol=SPY&tf=10m`;
   const ctx = await jget(url);
+
+  // ✅ Cache active negotiated bounds for other engines to use (E3/E4)
+  // This prevents hammering engine5-context in refreshE3 refresh loop.
+  const an = ctx?.active?.negotiated ?? null;
+  engine5bState.zone = engine5bState.zone || {};
+  engine5bState.zone.activeNegotiated = an
+    ? {
+        id: an.id ?? null,
+        lo: an.lo != null ? Number(an.lo) : null,
+        hi: an.hi != null ? Number(an.hi) : null,
+        mid: an.mid != null ? Number(an.mid) : null,
+      }
+    : null;
+
   const z = pickZoneFromEngine1Context(ctx);
   engine5bState.zone = { ...engine5bState.zone, ...z, refreshedAtUtc: nowUtc() };
 
@@ -333,8 +347,25 @@ async function refreshRisk() {
   }
 }
 
+/**
+ * ✅ UPDATED (LOCKED):
+ * When active.negotiated exists, ALWAYS call Engine 3 using active.negotiated lo/hi.
+ * This ensures negotiatedZone inference works and patterns can ARM inside negotiated zone.
+ */
 async function refreshE3() {
-  const { lo, hi } = engine5bState.zone || {};
+  // Prefer active negotiated bounds if present
+  const an = engine5bState.zone?.activeNegotiated ?? null;
+
+  let lo = an?.lo != null ? Number(an.lo) : null;
+  let hi = an?.hi != null ? Number(an.hi) : null;
+
+  // fallback: current picked zone
+  if (lo == null || hi == null) {
+    const z = engine5bState.zone || {};
+    lo = z?.lo != null ? Number(z.lo) : null;
+    hi = z?.hi != null ? Number(z.hi) : null;
+  }
+
   if (lo == null || hi == null) return;
 
   const url =
@@ -375,8 +406,26 @@ async function refreshE3() {
   }
 }
 
+/**
+ * NOTE:
+ * This function name is kept to avoid breaking timers.
+ * ✅ UPDATED to use active negotiated bounds when available so E4 evaluates the SAME negotiated zone as E3.
+ * (We are not changing your overall strategy logic here; just aligning the zone bounds.)
+ */
 async function refreshE4_1m() {
-  const { lo, hi } = engine5bState.zone || {};
+  // Prefer active negotiated bounds if present
+  const an = engine5bState.zone?.activeNegotiated ?? null;
+
+  let lo = an?.lo != null ? Number(an.lo) : null;
+  let hi = an?.hi != null ? Number(an.hi) : null;
+
+  // fallback: current picked zone
+  if (lo == null || hi == null) {
+    const z = engine5bState.zone || {};
+    lo = z?.lo != null ? Number(z.lo) : null;
+    hi = z?.hi != null ? Number(z.hi) : null;
+  }
+
   if (lo == null || hi == null) return;
 
   const url =
@@ -481,22 +530,34 @@ export function startEngine5B({ log = console.log } = {}) {
     5
   );
   engine5bState.config.breakoutPts = clampFloat(
-    toFloatEnv("ENGINE5B_BREAKOUT_PTS", engine5bState.config.breakoutPts ?? 0.02),
+    toFloatEnv(
+      "ENGINE5B_BREAKOUT_PTS",
+      engine5bState.config.breakoutPts ?? 0.02
+    ),
     0.0,
     1.0
   );
   engine5bState.config.cooldownMs = clampInt(
-    toIntEnv("ENGINE5B_COOLDOWN_MS", engine5bState.config.cooldownMs ?? 120000),
+    toIntEnv(
+      "ENGINE5B_COOLDOWN_MS",
+      engine5bState.config.cooldownMs ?? 120000
+    ),
     1000,
     60 * 60 * 1000
   );
   engine5bState.config.armedWindowMs = clampInt(
-    toIntEnv("ENGINE5B_ARMED_WINDOW_MS", engine5bState.config.armedWindowMs ?? 120000),
+    toIntEnv(
+      "ENGINE5B_ARMED_WINDOW_MS",
+      engine5bState.config.armedWindowMs ?? 120000
+    ),
     1000,
     60 * 60 * 1000
   );
   engine5bState.config.e3IntervalMs = clampInt(
-    toIntEnv("ENGINE5B_E3_INTERVAL_MS", engine5bState.config.e3IntervalMs ?? 2000),
+    toIntEnv(
+      "ENGINE5B_E3_INTERVAL_MS",
+      engine5bState.config.e3IntervalMs ?? 2000
+    ),
     250,
     60000
   );
@@ -661,8 +722,7 @@ export function startEngine5B({ log = console.log } = {}) {
               }
 
               if (!engine5bState.sm.pbState) {
-                const range =
-                  Number(closed1m.high) - Number(closed1m.low);
+                const range = Number(closed1m.high) - Number(closed1m.low);
                 const zoneHi = Number(engine5bState.zone.hi);
                 const breakoutPts = Number(engine5bState.config.breakoutPts || 0.02);
 
@@ -719,17 +779,13 @@ export function startEngine5B({ log = console.log } = {}) {
                 Number(engine5bState.sm.triggerAboveCount || 0) + 1;
             else engine5bState.sm.triggerAboveCount = 0;
 
-            if (
-              engine5bState.sm.triggerAboveCount >=
-              engine5bState.config.persistBars
-            ) {
+            if (engine5bState.sm.triggerAboveCount >= engine5bState.config.persistBars) {
               // ✅ TRIGGER — DISPLAY ONLY (NO EXECUTION)
               stageSet("TRIGGERED");
               engine5bState.sm.triggeredAtMs = Date.now();
 
               // cooldown
-              engine5bState.sm.cooldownUntilMs =
-                Date.now() + engine5bState.config.cooldownMs;
+              engine5bState.sm.cooldownUntilMs = Date.now() + engine5bState.config.cooldownMs;
 
               // ✅ Rising edge check BEFORE setGo
               const wasGo = engine5bState.go?.signal === true;
