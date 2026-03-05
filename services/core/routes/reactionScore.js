@@ -19,6 +19,16 @@
 //
 // NOTE:
 // - Engine 5B uses stage===ARMED; CONFIRMED is not required for scalp GO.
+//
+// NEW UPGRADES (per Engine 5 request):
+// 1) Add ARMED candle metadata (safe additive fields):
+//    armedCandleHigh / armedCandleLow / armedCandleTimeMs (and TimeSec)
+// 2) Make bounds inference more stable for bounds-only callers:
+//    - wider epsilon + 2dp compare
+//    - consistently populate zone.id + negotiatedZone when matching active zone
+// 3) Make scalp touch arming possible (conservative):
+//    - touchArmsEnabled via env E3_TOUCH_ARMS_NEGOTIATED=1
+//    - touchArms requires: negotiatedZone && inZoneNow && last bar touches zone now (touchIndex==lastIdx)
 
 import express from "express";
 import { computeReactionQuality } from "../logic/reactionQualityEngine.js";
@@ -68,10 +78,39 @@ function abs(x) {
   return Math.abs(x);
 }
 
-function boundsMatch(reqLo, reqHi, actLo, actHi, eps = 1e-3) {
-  // eps=0.001 is safe for 2-decimal zone bounds
+function round2(x) {
+  if (!Number.isFinite(x)) return null;
+  return Math.round(x * 100) / 100;
+}
+
+/**
+ * More stable bounds match:
+ * - direct epsilon compare (default wider for 2dp zones)
+ * - also compare rounded-to-2-decimals
+ */
+function boundsMatch(reqLo, reqHi, actLo, actHi, eps = 1e-2) {
+  // eps=0.01 is stable for 2-decimal zone bounds
   if (![reqLo, reqHi, actLo, actHi].every(Number.isFinite)) return false;
-  return abs(reqLo - actLo) <= eps && abs(reqHi - actHi) <= eps;
+
+  const direct =
+    abs(reqLo - actLo) <= eps &&
+    abs(reqHi - actHi) <= eps;
+
+  if (direct) return true;
+
+  const rReqLo = round2(reqLo);
+  const rReqHi = round2(reqHi);
+  const rActLo = round2(actLo);
+  const rActHi = round2(actHi);
+
+  return (
+    rReqLo != null &&
+    rReqHi != null &&
+    rActLo != null &&
+    rActHi != null &&
+    rReqLo === rActLo &&
+    rReqHi === rActHi
+  );
 }
 
 /* -------------------- mode + side -------------------- */
@@ -220,6 +259,26 @@ function buildReasonCodes({ inZoneNow, stage, rqe, mode }) {
   return Array.from(new Set(codes));
 }
 
+/* -------------------- time helpers -------------------- */
+
+function inferTimeMsFromBar(bar) {
+  // Our OHLC route returns {time, open, high, low, close, volume}
+  // time is typically unix seconds. If it looks like ms, keep it.
+  const t = toNum(bar?.time);
+  if (t == null) return null;
+  if (t > 1e12) return Math.round(t);          // already ms
+  if (t > 1e9) return Math.round(t * 1000);    // seconds -> ms
+  return null;
+}
+
+function inferTimeSecFromBar(bar) {
+  const t = toNum(bar?.time);
+  if (t == null) return null;
+  if (t > 1e12) return Math.floor(t / 1000);
+  if (t > 1e9) return Math.floor(t);
+  return null;
+}
+
 /* -------------------- route -------------------- */
 
 reactionScoreRouter.get("/reaction-score", async (req, res) => {
@@ -264,6 +323,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const fullBars = barsResp.json
       .map(b => ({
+        time: toNum(b.time), // ✅ keep time for armedCandleTime
         open: Number(b.open),
         high: Number(b.high),
         low: Number(b.low),
@@ -325,8 +385,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       zoneSource = zoneSource ?? (picked._source || null);
     }
 
-    // Enrich metadata by matching request bounds to active zone bounds
-    // This is the critical fix for /scalp-status.
+    // Enrich metadata by matching request bounds to active zone bounds (stable)
     let inferredZoneType = null;
     let inferredZoneId = null;
     let inferredSource = null;
@@ -335,7 +394,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       const pLo = toNum(picked.lo);
       const pHi = toNum(picked.hi);
 
-      if (boundsMatch(lo, hi, pLo, pHi, 1e-3)) {
+      if (boundsMatch(lo, hi, pLo, pHi, 1e-2)) {
         inferredZoneType = String(picked.zoneType || "").toUpperCase() || null;
         inferredZoneId = picked.id ? String(picked.id) : null;
         inferredSource = "ACTIVE";
@@ -421,7 +480,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const ctrl = detectControlCandle(lastBar, atrVal);
 
-    // Direction-aware control (recommended)
+    // Direction-aware control
     const controlArms =
       negotiatedZone &&
       inZoneNow &&
@@ -430,9 +489,12 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
         (side === "supply" && ctrl.control === "SELLER")
       );
 
-    // Optional testing flag: arm on zone touch whenever inside negotiated
+    // Optional testing flag: arm on touch, but conservative (must be touching now)
     const touchArmsEnabled = String(process.env.E3_TOUCH_ARMS_NEGOTIATED || "").trim() === "1";
-    const touchArms = Boolean(touchArmsEnabled && negotiatedZone && inZoneNow);
+    const lastIdx = bars.length - 1;
+    const touchingNow = (rqe?.touchIndex != null) && (rqe.touchIndex === lastIdx);
+
+    const touchArms = Boolean(touchArmsEnabled && negotiatedZone && inZoneNow && touchingNow);
 
     let stage = "IDLE";
     let armed = false;
@@ -452,6 +514,19 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
     const touchQuality = (inScope && rqe.touchIndex != null) ? 10 : 0;
 
     const structureStateOut = rqe.structureState === "FAKEOUT_RECLAIM" ? "RECLAIM" : rqe.structureState;
+
+    // ✅ NEW: ARMED candle metadata (additive)
+    let armedCandleHigh = null;
+    let armedCandleLow = null;
+    let armedCandleTimeMs = null;
+    let armedCandleTimeSec = null;
+
+    if (stage === "ARMED") {
+      armedCandleHigh = Number.isFinite(h) ? h : null;
+      armedCandleLow = Number.isFinite(l) ? l : null;
+      armedCandleTimeMs = inferTimeMsFromBar(lastBar);
+      armedCandleTimeSec = inferTimeSecFromBar(lastBar);
+    }
 
     return res.json({
       ok: true,
@@ -489,6 +564,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       inferredFromActiveMatch: inferredZoneType != null,
 
       touchArmsEnabled,
+      touchingNow,
       touchArms,
 
       wickProbeShort,
@@ -500,6 +576,12 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
       candle: a,
       padded: { lo: loPad, hi: hiPad, pad },
+
+      // ✅ NEW additive fields (ARMED candle metadata)
+      armedCandleHigh,
+      armedCandleLow,
+      armedCandleTimeMs,
+      armedCandleTimeSec,
     });
 
   } catch (err) {
