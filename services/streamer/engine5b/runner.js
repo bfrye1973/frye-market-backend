@@ -700,6 +700,14 @@ export function startEngine5B({ log = console.log } = {}) {
     10
   );
 
+  // ✅ NEW: fallback trigger tunables
+  const ARMED_TRIGGER_ENABLED = toBoolEnv01("ENGINE5B_ARMED_TRIGGER_ENABLED", true);
+  const ARMED_TRIGGER_MAX_AGE_MS = clampInt(
+    toIntEnv("ENGINE5B_ARMED_TRIGGER_MAX_AGE_MS", 15 * 60 * 1000),
+    1000,
+    60 * 60 * 1000
+  );
+
   log(
     `[engine5b] starting mode=${engine5bState.config.mode} execute=${engine5bState.config.executeEnabled}`
   );
@@ -718,6 +726,9 @@ export function startEngine5B({ log = console.log } = {}) {
   );
   log(
     `[engine5b] negotiated analysis maxDist=${process.env.ENGINE5B_NEGOTIATED_MAX_DIST_PTS ?? 3.0}`
+  );
+  log(
+    `[engine5b] armed trigger enabled=${ARMED_TRIGGER_ENABLED} maxAgeMs=${ARMED_TRIGGER_MAX_AGE_MS}`
   );
 
   let stopped = false;
@@ -884,6 +895,27 @@ export function startEngine5B({ log = console.log } = {}) {
           }
         }
 
+        /* ---------- 1s close events: fallback trigger line from ARMED candle ---------- */
+        if (
+          ARMED_TRIGGER_ENABLED &&
+          engine5bState.sm.stage === "ARMED" &&
+          engine5bState.sm.pbState == null &&
+          !Number.isFinite(Number(engine5bState.sm.triggerLine))
+        ) {
+          const armedHigh = Number(engine5bState.e3?.raw?.armedCandleHigh);
+          const armedTimeMs = Number(engine5bState.e3?.raw?.armedCandleTimeMs ?? 0);
+
+          if (Number.isFinite(armedHigh) && armedHigh > 0) {
+            const ageOk =
+              !armedTimeMs || Date.now() - armedTimeMs <= ARMED_TRIGGER_MAX_AGE_MS;
+
+            if (ageOk) {
+              engine5bState.sm.triggerLine = armedHigh;
+              engine5bState.sm.lastDecision = `${nowUtc()} armed_triggerLine=${armedHigh}`;
+            }
+          }
+        }
+
         /* ---------- 1s close events: trigger logic ---------- */
         if (lastClosedSec == null) lastClosedSec = sec;
 
@@ -891,7 +923,7 @@ export function startEngine5B({ log = console.log } = {}) {
           engine5bState.lastBar1s = { ...cur1s, closedAtUtc: nowUtc() };
           const closePx = Number(cur1s?.close);
 
-          // ✅ Option 1 trigger (kept exactly as your current behavior)
+          // ✅ Option 1 trigger (original pullback reclaim)
           if (
             engine5bState.sm.pbState === "PULLBACK_SEEN" &&
             engine5bState.sm.stage === "ARMED" &&
@@ -948,6 +980,60 @@ export function startEngine5B({ log = console.log } = {}) {
               engine5bState.sm.impulse1mHigh = null;
               engine5bState.sm.pullback1mTime = null;
               engine5bState.sm.pullbackHigh = null;
+              engine5bState.sm.triggerLine = null;
+              engine5bState.sm.triggerAboveCount = 0;
+            }
+          }
+
+          // ✅ NEW: fallback ARMED-candle trigger
+          if (
+            ARMED_TRIGGER_ENABLED &&
+            engine5bState.sm.pbState == null &&
+            engine5bState.sm.stage === "ARMED" &&
+            isArmedRecent() &&
+            !inCooldown() &&
+            Number.isFinite(Number(engine5bState.sm.triggerLine))
+          ) {
+            const above = pullbackReclaimCheck_1s(closePx);
+            if (above)
+              engine5bState.sm.triggerAboveCount =
+                Number(engine5bState.sm.triggerAboveCount || 0) + 1;
+            else engine5bState.sm.triggerAboveCount = 0;
+
+            if (engine5bState.sm.triggerAboveCount >= engine5bState.config.persistBars) {
+              stageSet("TRIGGERED");
+              engine5bState.sm.triggeredAtMs = Date.now();
+
+              engine5bState.sm.cooldownUntilMs =
+                Date.now() + engine5bState.config.cooldownMs;
+
+              const wasGo = engine5bState.go?.signal === true;
+
+              await setGo({
+                direction: "LONG",
+                atUtc: nowUtc(),
+                price: Number.isFinite(closePx) ? closePx : null,
+                reason: "ARMED_CANDLE_BREAK",
+                reasonCodes: ["ARMED_CANDLE_BREAK", "E3_ARMED", "E4_OK", "TRIGGER_LINE_BREAK"],
+                triggerType: "ARMED_CANDLE_BREAK",
+                triggerLine: Number(engine5bState.sm.triggerLine),
+                cooldownUntilMs: engine5bState.sm.cooldownUntilMs,
+              });
+
+              if (!wasGo && engine5bState.go?.signal === true) {
+                recordGoOnRisingEdge({
+                  backend1Base: BACKEND1_BASE,
+                  symbol: "SPY",
+                  strategyId: "intraday_scalp@10m",
+                  go: engine5bState.go,
+                }).catch(() => {});
+              }
+
+              engine5bState.sm.lastDecision =
+                `${nowUtc()} GO(ARMED_CANDLE_BREAK) aboveCount=${engine5bState.sm.triggerAboveCount} cooldownUntilMs=${engine5bState.sm.cooldownUntilMs}`;
+
+              stageSet("COOLDOWN");
+
               engine5bState.sm.triggerLine = null;
               engine5bState.sm.triggerAboveCount = 0;
             }
