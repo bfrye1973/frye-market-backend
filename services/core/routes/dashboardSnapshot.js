@@ -9,6 +9,12 @@
 // - Adds "NEAR_ALLOWED_ZONE" status when price is within 1.50 pts of an allowed zone
 // - Does NOT change Engine 6 permission rules
 // - Allowed zones for this display: NEGOTIATED + INSTITUTIONAL only (Option 1 locked)
+//
+// ✅ NEW (Engine 6 v2 MarketMind) — additive only:
+// - Fetch MarketMind scores once per snapshot (from MARKETMIND_URL if set)
+// - Calls Engine 6 v2 (/trade-permission-v2) per strategy
+// - Attaches output under strategies[strategyId].engine6v2
+// - Keeps v1 permission untouched under strategies[strategyId].permission
 
 import express from "express";
 
@@ -101,6 +107,45 @@ function buildZoneContext(engine1ContextJson) {
 }
 
 /* -------------------------
+   ✅ NEW: MarketMind scores fetcher (for Engine 6 v2)
+------------------------- */
+
+// Optional env var. If not set, we return null scores (safe).
+// Expected JSON shape at MARKETMIND_URL (flexible):
+// { score10m, score1h, score4h, scoreEOD, scoreMaster }
+const MARKETMIND_URL = process.env.MARKETMIND_URL || null;
+
+function toScore(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function fetchMarketMindScores({ timeoutMs = 12000 } = {}) {
+  if (!MARKETMIND_URL) {
+    return {
+      score10m: null,
+      score1h: null,
+      score4h: null,
+      scoreEOD: null,
+      scoreMaster: null,
+      _src: "NONE",
+    };
+  }
+
+  const r = await fetchJson(MARKETMIND_URL, { timeoutMs });
+  const j = r?.json;
+
+  return {
+    score10m: toScore(j?.score10m),
+    score1h: toScore(j?.score1h),
+    score4h: toScore(j?.score4h),
+    scoreEOD: toScore(j?.scoreEOD),
+    scoreMaster: toScore(j?.scoreMaster),
+    _src: "MARKETMIND_URL",
+  };
+}
+
+/* -------------------------
    ✅ NEW: Near allowed-zone arming (DISPLAY ONLY)
 ------------------------- */
 
@@ -155,7 +200,10 @@ function nearestAllowedZone({ price, negotiated = [], institutional = [] }) {
 function applyNearAllowedZoneDisplay({ confluence, ctx }) {
   if (!confluence || typeof confluence !== "object") return confluence;
 
-  const price = toNum(confluence?.price) ?? toNum(ctx?.meta?.current_price) ?? toNum(ctx?.meta?.currentPrice);
+  const price =
+    toNum(confluence?.price) ??
+    toNum(ctx?.meta?.current_price) ??
+    toNum(ctx?.meta?.currentPrice);
 
   // If no price, can't compute "near"
   if (price == null) return confluence;
@@ -400,6 +448,16 @@ router.get("/dashboard-snapshot", async (req, res) => {
   const base = getBaseUrl(req);
   const now = new Date().toISOString();
 
+  // ✅ NEW: fetch MarketMind scores once per snapshot (optional, safe if MARKETMIND_URL not set)
+  const marketMind = await fetchMarketMindScores().catch(() => ({
+    score10m: null,
+    score1h: null,
+    score4h: null,
+    scoreEOD: null,
+    scoreMaster: null,
+    _src: "ERR",
+  }));
+
   // LOCKED strategy mappings (existing)
   const strategies = [
     { strategyId: "intraday_scalp@10m", tf: "10m", degree: "minute", wave: "W1" },
@@ -447,12 +505,38 @@ router.get("/dashboard-snapshot", async (req, res) => {
     permissionBodies.map((body) => postJson(permissionUrl, body))
   );
 
+  // ✅ NEW: call Engine 6 v2 MarketMind via POST for each strategy
+  const permissionV2Url = `${base}/api/v1/trade-permission-v2`;
+
+  const permissionV2Bodies = strategies.map((s, i) => {
+    const con = confluenceResp[i]?.json || {};
+
+    const setupScore = Number(con?.scores?.total) || Number(con?.total) || 0;
+    const label = con?.scores?.label || con?.label || "D";
+    const invalid = Boolean(con?.invalid);
+
+    return {
+      symbol,
+      strategyId: s.strategyId,
+      market: marketMind,
+      setup: { setupScore, label, invalid },
+    };
+  });
+
+  const permissionV2Resp = await Promise.all(
+    permissionV2Bodies.map((body) => postJson(permissionV2Url, body))
+  );
+
   // Build output
   const out = {
     ok: true,
     symbol,
     now,
     includeContext,
+
+    // ✅ NEW: for debugging + trust (what Engine 6 v2 saw)
+    marketMind,
+
     strategies: {},
   };
 
@@ -499,6 +583,7 @@ router.get("/dashboard-snapshot", async (req, res) => {
   strategies.forEach((s, i) => {
     const con = confluenceResp[i];
     const perm = permissionResp[i];
+    const permV2 = permissionV2Resp[i];
     const ctx = ctxAllResp[i];
 
     // ✅ DISPLAY ONLY: apply NEAR_ALLOWED_ZONE based on ctx.render (negotiated + institutional)
@@ -515,9 +600,14 @@ router.get("/dashboard-snapshot", async (req, res) => {
       wave: s.wave,
 
       confluence: patchedConfluence,
+
+      // ✅ Engine 6 v1 output (unchanged)
       permission: perm.json || { ok: false, status: perm.status, error: perm.text },
 
-      // ✅ NEW: Engine 2 summary block for Strategy cards
+      // ✅ Engine 6 v2 MarketMind output (added; does not break existing UI)
+      engine6v2: permV2?.json || { ok: false, status: permV2?.status || 0, error: permV2?.text || "no_v2" },
+
+      // ✅ Engine 2 summary block for Strategy cards
       engine2: engine2ByStrategy[s.strategyId] || undefined,
 
       // Preserve existing includeContext output behavior
