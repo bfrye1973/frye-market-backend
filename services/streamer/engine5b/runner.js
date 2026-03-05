@@ -70,6 +70,32 @@ function clampFloat(n, lo, hi) {
   return Math.max(lo, Math.min(hi, n));
 }
 
+function distanceToZone(price, z) {
+  const p = Number(price);
+  const lo = Number(z?.lo);
+  const hi = Number(z?.hi);
+  if (!Number.isFinite(p) || !Number.isFinite(lo) || !Number.isFinite(hi)) return Infinity;
+  const a = Math.min(lo, hi);
+  const b = Math.max(lo, hi);
+  if (p >= a && p <= b) return 0;
+  if (p < a) return a - p;
+  return p - b;
+}
+
+function normalizeZone(z, source = "UNKNOWN") {
+  if (!z || z.lo == null || z.hi == null) return null;
+  const lo = Number(z.lo);
+  const hi = Number(z.hi);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+  return {
+    id: z.id ?? null,
+    lo,
+    hi,
+    mid: z.mid != null && Number.isFinite(Number(z.mid)) ? Number(z.mid) : null,
+    source,
+  };
+}
+
 async function jget(url) {
   const r = await fetch(url, {
     headers: { accept: "application/json" },
@@ -191,6 +217,40 @@ function pickZoneFromEngine1Context(ctx) {
   return { id: null, lo: null, hi: null, source: "NONE" };
 }
 
+function pickNegotiatedAnalysisZone(ctx) {
+  const price = Number(ctx?.meta?.current_price ?? NaN);
+
+  // 1) Prefer active negotiated if it exists
+  const activeNeg = normalizeZone(ctx?.active?.negotiated, "ACTIVE_NEGOTIATED");
+  if (activeNeg) return activeNeg;
+
+  // 2) Else prefer nearest negotiated from render list within testing window
+  const negotiated = Array.isArray(ctx?.render?.negotiated) ? ctx.render.negotiated : [];
+  if (!negotiated.length || !Number.isFinite(price)) return null;
+
+  const maxDist = Number(process.env.ENGINE5B_NEGOTIATED_MAX_DIST_PTS ?? 3.0);
+  let best = null;
+
+  for (const z of negotiated) {
+    const nz = normalizeZone(z, "RENDER_NEGOTIATED");
+    if (!nz) continue;
+    const d = distanceToZone(price, nz);
+    if (!Number.isFinite(d) || d > maxDist) continue;
+    if (!best || d < best.distancePts) {
+      best = { ...nz, distancePts: d };
+    }
+  }
+
+  if (!best) return null;
+  return {
+    id: best.id,
+    lo: best.lo,
+    hi: best.hi,
+    mid: best.mid ?? null,
+    source: best.source,
+  };
+}
+
 /* -------------------- 1s and 1m builders from ticks -------------------- */
 
 function applyTickTo1s(cur, tick) {
@@ -310,7 +370,7 @@ async function refreshZone() {
   const url = `${BACKEND1_BASE}/api/v1/engine5-context?symbol=SPY&tf=10m`;
   const ctx = await jget(url);
 
-  // ✅ Cache active negotiated bounds for other engines to use (E3/E4)
+  // ✅ Cache active negotiated bounds for other engines to use
   const an = ctx?.active?.negotiated ?? null;
   engine5bState.zone = engine5bState.zone || {};
   engine5bState.zone.activeNegotiated = an
@@ -326,15 +386,16 @@ async function refreshZone() {
   const z = pickZoneFromEngine1Context(ctx);
   engine5bState.zone = { ...engine5bState.zone, ...z, refreshedAtUtc: nowUtc() };
 
-  // ✅ Add analysis zone (additive; UI can ignore)
-  // Prefer active negotiated even if price is outside; else use current zone bounds.
-  const an2 = engine5bState.zone.activeNegotiated;
-  if (an2?.lo != null && an2?.hi != null) {
+  // ✅ Analysis zone for scalp:
+  // Prefer negotiated, else containment zone
+  const negotiatedAnalysis = pickNegotiatedAnalysisZone(ctx);
+
+  if (negotiatedAnalysis) {
     engine5bState.zone.analysis = {
-      id: an2.id ?? null,
-      lo: Number(an2.lo),
-      hi: Number(an2.hi),
-      source: "ACTIVE_NEGOTIATED",
+      id: negotiatedAnalysis.id ?? null,
+      lo: Number(negotiatedAnalysis.lo),
+      hi: Number(negotiatedAnalysis.hi),
+      source: negotiatedAnalysis.source ?? "NEGOTIATED_ANALYSIS",
       updatedAtUtc: nowUtc(),
     };
   } else if (engine5bState.zone?.lo != null && engine5bState.zone?.hi != null) {
@@ -373,16 +434,16 @@ async function refreshRisk() {
 
 /**
  * ✅ UPDATED (LOCKED):
- * - Always call Engine 3 using active.negotiated lo/hi when available
- * ✅ FIX:
+ * - Prefer analysis zone for scalp
  * - Do NOT hard reset on first NOT_IN_ZONE
  */
 async function refreshE3() {
-  // Prefer active negotiated bounds if present
-  const an = engine5bState.zone?.activeNegotiated ?? null;
+  const az = engine5bState.zone?.analysis ?? null;
 
-  let lo = an?.lo != null ? Number(an.lo) : null;
-  let hi = an?.hi != null ? Number(an.hi) : null;
+  let lo = az?.lo != null ? Number(az.lo) : null;
+  let hi = az?.hi != null ? Number(az.hi) : null;
+  const zoneId = az?.id ?? null;
+  const zoneSource = az?.source ?? null;
 
   // fallback: current picked zone
   if (lo == null || hi == null) {
@@ -395,9 +456,11 @@ async function refreshE3() {
 
   const url =
     `${BACKEND1_BASE}/api/v1/reaction-score` +
-    `?symbol=SPY&tf=10m&strategyId=intraday_scalp@10m&lo=${encodeURIComponent(
-      lo
-    )}&hi=${encodeURIComponent(hi)}`;
+    `?symbol=SPY&tf=10m&strategyId=intraday_scalp@10m` +
+    `&lo=${encodeURIComponent(lo)}` +
+    `&hi=${encodeURIComponent(hi)}` +
+    (zoneId ? `&zoneId=${encodeURIComponent(zoneId)}` : "") +
+    (zoneSource ? `&source=${encodeURIComponent(zoneSource)}` : "");
 
   const j = await jget(url);
 
@@ -413,7 +476,7 @@ async function refreshE3() {
   const reasonCodes = Array.isArray(j?.reasonCodes) ? j.reasonCodes : [];
   const stage = engine5bState.e3.stage;
 
-  // ✅ FIX: tolerate NOT_IN_ZONE for a grace window (prevents shutdown during violent moves)
+  // ✅ FIX: tolerate NOT_IN_ZONE for a grace window
   const NOT_IN_ZONE_N = clampInt(toIntEnv("ENGINE5B_NOT_IN_ZONE_N", 3), 1, 10);
   const NOT_IN_ZONE_GRACE_MS = clampInt(
     toIntEnv("ENGINE5B_NOT_IN_ZONE_GRACE_MS", 90000),
@@ -428,7 +491,6 @@ async function refreshE3() {
 
     const elapsed = Date.now() - Number(engine5bState.sm.lastNotInZoneMs || Date.now());
 
-    // Only hard reset after N consecutive AND grace window exceeded
     if (
       engine5bState.sm.outsideCount >= NOT_IN_ZONE_N &&
       elapsed >= NOT_IN_ZONE_GRACE_MS
@@ -437,12 +499,10 @@ async function refreshE3() {
       return;
     }
 
-    // Do not reset immediately
     engine5bState.sm.lastDecision =
       `${nowUtc()} e3=NOT_IN_ZONE outsideCount=${engine5bState.sm.outsideCount} elapsedMs=${elapsed}`;
     return;
   } else {
-    // Clear outside tracking when NOT_IN_ZONE clears
     engine5bState.sm.outsideCount = 0;
     engine5bState.sm.lastNotInZoneMs = null;
   }
@@ -452,7 +512,6 @@ async function refreshE3() {
     engine5bState.sm.armedAtMs = engine5bState.sm.armedAtMs || Date.now();
   }
 
-  // kept for backward compat (if stage names evolve)
   if (stage === "TRIGGERED" || stage === "CONFIRMED") {
     if (engine5bState.sm.stage !== "TRIGGERED") {
       stageSet("TRIGGERED");
@@ -465,15 +524,14 @@ async function refreshE3() {
  * NOTE:
  * This function name is kept to avoid breaking timers.
  * ✅ FIX:
- * - Call Engine 4 with tf=10m (NOT 1m)
- * - Use active negotiated bounds if available (same zone as E3)
+ * - Call Engine 4 with tf=10m
+ * - Use analysis zone first
  */
 async function refreshE4_1m() {
-  // Prefer active negotiated bounds if present
-  const an = engine5bState.zone?.activeNegotiated ?? null;
+  const az = engine5bState.zone?.analysis ?? null;
 
-  let lo = an?.lo != null ? Number(an.lo) : null;
-  let hi = an?.hi != null ? Number(an.hi) : null;
+  let lo = az?.lo != null ? Number(az.lo) : null;
+  let hi = az?.hi != null ? Number(az.hi) : null;
 
   // fallback: current picked zone
   if (lo == null || hi == null) {
@@ -484,7 +542,6 @@ async function refreshE4_1m() {
 
   if (lo == null || hi == null) return;
 
-  // ✅ CRITICAL: tf must be 10m so touches match the 10m zone logic
   const url =
     `${BACKEND1_BASE}/api/v1/volume-behavior` +
     `?symbol=SPY&tf=10m&zoneLo=${encodeURIComponent(
@@ -658,6 +715,9 @@ export function startEngine5B({ log = console.log } = {}) {
       "ENGINE5B_NOT_IN_ZONE_GRACE_MS",
       90000
     )}`
+  );
+  log(
+    `[engine5b] negotiated analysis maxDist=${process.env.ENGINE5B_NEGOTIATED_MAX_DIST_PTS ?? 3.0}`
   );
 
   let stopped = false;
