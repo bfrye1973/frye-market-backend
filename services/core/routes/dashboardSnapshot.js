@@ -10,11 +10,15 @@
 // - Does NOT change Engine 6 permission rules
 // - Allowed zones for this display: NEGOTIATED + INSTITUTIONAL only (Option 1 locked)
 //
-// ✅ NEW (Engine 6 v2 MarketMind) — additive only:
+// ✅ NEW (ENGINE 6 V2):
 // - Fetch MarketMind scores once per snapshot (from MARKETMIND_URL if set)
 // - Calls Engine 6 v2 (/trade-permission-v2) per strategy
 // - Attaches output under strategies[strategyId].engine6v2
-// - Keeps v1 permission untouched under strategies[strategyId].permission
+// - Does NOT remove/replace v1 permission (so frontend won’t break)
+//
+// ✅ CRITICAL FIX (ENGINE 6 V1):
+// - Adds explicit zoneContext.zoneType + zoneContext.withinZone computed from Engine 1 context
+// - This prevents Engine 6 v1 from showing OUT_OF_ALLOWED_ZONES when price is clearly inside an allowed zone
 
 import express from "express";
 
@@ -96,22 +100,69 @@ function normalizeEngine5ForEngine6(confluenceJson) {
   return { invalid, total, reasonCodes, label, flags, compression, bias };
 }
 
+/* -------------------------
+   ✅ CRITICAL FIX: Build zoneContext with explicit telemetry for Engine 6 v1
+------------------------- */
+
+function isInside(price, z) {
+  const p = Number(price);
+  const lo = Number(z?.lo);
+  const hi = Number(z?.hi);
+  if (!Number.isFinite(p) || !Number.isFinite(lo) || !Number.isFinite(hi)) return false;
+
+  const a = Math.min(lo, hi);
+  const b = Math.max(lo, hi);
+  return p >= a && p <= b;
+}
+
+function computeZoneTelemetryFromCtx(ctx) {
+  const price = Number(ctx?.meta?.current_price ?? ctx?.meta?.currentPrice);
+  const active = ctx?.active || {};
+
+  let zoneType = "UNKNOWN";
+  let activeZone = null;
+
+  if (active?.negotiated) {
+    zoneType = "NEGOTIATED";
+    activeZone = active.negotiated;
+  } else if (active?.institutional) {
+    zoneType = "INSTITUTIONAL";
+    activeZone = active.institutional;
+  } else if (active?.shelf) {
+    zoneType = "SHELF";
+    activeZone = active.shelf;
+  }
+
+  const withinZone = activeZone ? isInside(price, activeZone) : false;
+
+  return { zoneType, withinZone };
+}
+
 function buildZoneContext(engine1ContextJson) {
   if (!engine1ContextJson || typeof engine1ContextJson !== "object") return null;
+
+  const { zoneType, withinZone } = computeZoneTelemetryFromCtx(engine1ContextJson);
 
   return {
     meta: engine1ContextJson.meta || null,
     active: engine1ContextJson.active || null,
     nearest: engine1ContextJson.nearest || null,
+
+    // ✅ REQUIRED by Engine 6 v1
+    zoneType,
+    withinZone,
+
+    // Optional: place for flags later (Engine 6 reads zone.flags if provided)
+    flags: engine1ContextJson.flags || null,
   };
 }
 
 /* -------------------------
-   ✅ NEW: MarketMind scores fetcher (for Engine 6 v2)
+   ✅ NEW: MarketMind scores (Engine 6 v2 input)
 ------------------------- */
 
-// Optional env var. If not set, we return null scores (safe).
-// Expected JSON shape at MARKETMIND_URL (flexible):
+// Provide a JSON endpoint that returns MarketMind scores (0–100).
+// Expected shape (flexible):
 // { score10m, score1h, score4h, scoreEOD, scoreMaster }
 const MARKETMIND_URL = process.env.MARKETMIND_URL || null;
 
@@ -489,6 +540,7 @@ router.get("/dashboard-snapshot", async (req, res) => {
     const engine5 = normalizeEngine5ForEngine6(con);
 
     // Keep existing includeContext behavior for payload (only attach zoneContext when requested)
+    // ✅ Zone telemetry fix lives inside buildZoneContext()
     const zoneContext = includeContext ? buildZoneContext(ctxAllResp[i]?.json) : null;
 
     return {
@@ -601,13 +653,14 @@ router.get("/dashboard-snapshot", async (req, res) => {
 
       confluence: patchedConfluence,
 
-      // ✅ Engine 6 v1 output (unchanged)
+      // ✅ existing Engine 6 v1 output (unchanged)
       permission: perm.json || { ok: false, status: perm.status, error: perm.text },
 
-      // ✅ Engine 6 v2 MarketMind output (added; does not break existing UI)
-      engine6v2: permV2?.json || { ok: false, status: permV2?.status || 0, error: permV2?.text || "no_v2" },
+      // ✅ NEW Engine 6 v2 MarketMind output (added, does not break UI)
+      engine6v2:
+        permV2?.json || { ok: false, status: permV2?.status || 0, error: permV2?.text || "no_v2" },
 
-      // ✅ Engine 2 summary block for Strategy cards
+      // ✅ NEW: Engine 2 summary block for Strategy cards
       engine2: engine2ByStrategy[s.strategyId] || undefined,
 
       // Preserve existing includeContext output behavior
