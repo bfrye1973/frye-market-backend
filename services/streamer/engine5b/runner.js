@@ -164,7 +164,7 @@ function pickZoneFromEngine1Context(ctx) {
 
   const active = activeNeg || activeShelf || activeInst || null;
 
-  // STRICT containment (no guessing)
+  // STRICT containment (no guessing) — this remains the CONTAINMENT zone
   if (active && Number.isFinite(price)) {
     const lo = Number(active.lo),
       hi = Number(active.hi);
@@ -271,6 +271,7 @@ function hardResetToIdle(reason) {
   engine5bState.sm.triggeredAtMs = null;
   engine5bState.sm.cooldownUntilMs = null;
   engine5bState.sm.outsideCount = 0;
+  engine5bState.sm.lastNotInZoneMs = null;
 
   // extra fields for pullback pattern
   engine5bState.sm.pbState = null; // null | IMPULSE_SEEN | PULLBACK_SEEN
@@ -310,7 +311,6 @@ async function refreshZone() {
   const ctx = await jget(url);
 
   // ✅ Cache active negotiated bounds for other engines to use (E3/E4)
-  // This prevents hammering engine5-context in refreshE3 refresh loop.
   const an = ctx?.active?.negotiated ?? null;
   engine5bState.zone = engine5bState.zone || {};
   engine5bState.zone.activeNegotiated = an
@@ -322,8 +322,32 @@ async function refreshZone() {
       }
     : null;
 
+  // Containment zone (strict)
   const z = pickZoneFromEngine1Context(ctx);
   engine5bState.zone = { ...engine5bState.zone, ...z, refreshedAtUtc: nowUtc() };
+
+  // ✅ Add analysis zone (additive; UI can ignore)
+  // Prefer active negotiated even if price is outside; else use current zone bounds.
+  const an2 = engine5bState.zone.activeNegotiated;
+  if (an2?.lo != null && an2?.hi != null) {
+    engine5bState.zone.analysis = {
+      id: an2.id ?? null,
+      lo: Number(an2.lo),
+      hi: Number(an2.hi),
+      source: "ACTIVE_NEGOTIATED",
+      updatedAtUtc: nowUtc(),
+    };
+  } else if (engine5bState.zone?.lo != null && engine5bState.zone?.hi != null) {
+    engine5bState.zone.analysis = {
+      id: engine5bState.zone.id ?? null,
+      lo: Number(engine5bState.zone.lo),
+      hi: Number(engine5bState.zone.hi),
+      source: engine5bState.zone.source ?? "UNKNOWN",
+      updatedAtUtc: nowUtc(),
+    };
+  } else {
+    engine5bState.zone.analysis = null;
+  }
 
   if (engine5bState.zone?.source === "NONE") {
     hardResetToIdle("NO_ZONE_SOURCE_NONE");
@@ -349,8 +373,9 @@ async function refreshRisk() {
 
 /**
  * ✅ UPDATED (LOCKED):
- * When active.negotiated exists, ALWAYS call Engine 3 using active.negotiated lo/hi.
- * This ensures negotiatedZone inference works and patterns can ARM inside negotiated zone.
+ * - Always call Engine 3 using active.negotiated lo/hi when available
+ * ✅ FIX:
+ * - Do NOT hard reset on first NOT_IN_ZONE
  */
 async function refreshE3() {
   // Prefer active negotiated bounds if present
@@ -388,9 +413,38 @@ async function refreshE3() {
   const reasonCodes = Array.isArray(j?.reasonCodes) ? j.reasonCodes : [];
   const stage = engine5bState.e3.stage;
 
+  // ✅ FIX: tolerate NOT_IN_ZONE for a grace window (prevents shutdown during violent moves)
+  const NOT_IN_ZONE_N = clampInt(toIntEnv("ENGINE5B_NOT_IN_ZONE_N", 3), 1, 10);
+  const NOT_IN_ZONE_GRACE_MS = clampInt(
+    toIntEnv("ENGINE5B_NOT_IN_ZONE_GRACE_MS", 90000),
+    1000,
+    10 * 60 * 1000
+  );
+
   if (reasonCodes.includes("NOT_IN_ZONE")) {
-    hardResetToIdle("E3_NOT_IN_ZONE");
+    engine5bState.sm.outsideCount = Number(engine5bState.sm.outsideCount || 0) + 1;
+    engine5bState.sm.lastNotInZoneMs =
+      engine5bState.sm.lastNotInZoneMs || Date.now();
+
+    const elapsed = Date.now() - Number(engine5bState.sm.lastNotInZoneMs || Date.now());
+
+    // Only hard reset after N consecutive AND grace window exceeded
+    if (
+      engine5bState.sm.outsideCount >= NOT_IN_ZONE_N &&
+      elapsed >= NOT_IN_ZONE_GRACE_MS
+    ) {
+      hardResetToIdle(`E3_NOT_IN_ZONE_N${NOT_IN_ZONE_N}_GRACE_EXCEEDED`);
+      return;
+    }
+
+    // Do not reset immediately
+    engine5bState.sm.lastDecision =
+      `${nowUtc()} e3=NOT_IN_ZONE outsideCount=${engine5bState.sm.outsideCount} elapsedMs=${elapsed}`;
     return;
+  } else {
+    // Clear outside tracking when NOT_IN_ZONE clears
+    engine5bState.sm.outsideCount = 0;
+    engine5bState.sm.lastNotInZoneMs = null;
   }
 
   if (stage === "ARMED") {
@@ -398,6 +452,7 @@ async function refreshE3() {
     engine5bState.sm.armedAtMs = engine5bState.sm.armedAtMs || Date.now();
   }
 
+  // kept for backward compat (if stage names evolve)
   if (stage === "TRIGGERED" || stage === "CONFIRMED") {
     if (engine5bState.sm.stage !== "TRIGGERED") {
       stageSet("TRIGGERED");
@@ -409,8 +464,9 @@ async function refreshE3() {
 /**
  * NOTE:
  * This function name is kept to avoid breaking timers.
- * ✅ UPDATED to use active negotiated bounds when available so E4 evaluates the SAME negotiated zone as E3.
- * (We are not changing your overall strategy logic here; just aligning the zone bounds.)
+ * ✅ FIX:
+ * - Call Engine 4 with tf=10m (NOT 1m)
+ * - Use active negotiated bounds if available (same zone as E3)
  */
 async function refreshE4_1m() {
   // Prefer active negotiated bounds if present
@@ -428,9 +484,10 @@ async function refreshE4_1m() {
 
   if (lo == null || hi == null) return;
 
+  // ✅ CRITICAL: tf must be 10m so touches match the 10m zone logic
   const url =
     `${BACKEND1_BASE}/api/v1/volume-behavior` +
-    `?symbol=SPY&tf=1m&zoneLo=${encodeURIComponent(
+    `?symbol=SPY&tf=10m&zoneLo=${encodeURIComponent(
       lo
     )}&zoneHi=${encodeURIComponent(hi)}&mode=scalp`;
 
@@ -596,6 +653,12 @@ export function startEngine5B({ log = console.log } = {}) {
   log(
     `[engine5b] pullback cfg impulseRangePts=${IMPULSE_RANGE_PTS} pullbackWickPts=${PULLBACK_WICK_PTS} pullbackMaxMin=${PULLBACK_MAX_MINUTES}`
   );
+  log(
+    `[engine5b] NOT_IN_ZONE relax N=${toIntEnv("ENGINE5B_NOT_IN_ZONE_N", 3)} graceMs=${toIntEnv(
+      "ENGINE5B_NOT_IN_ZONE_GRACE_MS",
+      90000
+    )}`
+  );
 
   let stopped = false;
   let ws = null;
@@ -617,6 +680,8 @@ export function startEngine5B({ log = console.log } = {}) {
   // init pullback state
   engine5bState.sm.pbState = engine5bState.sm.pbState ?? null;
   engine5bState.sm.triggerAboveCount = engine5bState.sm.triggerAboveCount ?? 0;
+  engine5bState.sm.outsideCount = engine5bState.sm.outsideCount ?? 0;
+  engine5bState.sm.lastNotInZoneMs = engine5bState.sm.lastNotInZoneMs ?? null;
 
   async function safe(fn, label) {
     try {
@@ -766,7 +831,7 @@ export function startEngine5B({ log = console.log } = {}) {
           engine5bState.lastBar1s = { ...cur1s, closedAtUtc: nowUtc() };
           const closePx = Number(cur1s?.close);
 
-          // ✅ Option 1 trigger
+          // ✅ Option 1 trigger (kept exactly as your current behavior)
           if (
             engine5bState.sm.pbState === "PULLBACK_SEEN" &&
             engine5bState.sm.stage === "ARMED" &&
