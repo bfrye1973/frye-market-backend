@@ -289,7 +289,7 @@ function computeArmedFreshnessInfo() {
     engine5bState.e3?.raw?.armedCandleTimeMs ?? 0
   );
 
-  const baseTimeMs = armedCandleTimeMs || armedAtMs || 0;
+  const baseTimeMs = Math.max(armedAtMs || 0, armedCandleTimeMs || 0);
   const triggerFresh = baseTimeMs > 0 && nowMs - baseTimeMs <= armedWindowMs;
 
   let armedValid = false;
