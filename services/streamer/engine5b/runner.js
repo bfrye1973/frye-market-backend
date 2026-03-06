@@ -65,6 +65,7 @@ function clampInt(n, lo, hi) {
   if (!Number.isFinite(n)) return lo;
   return Math.max(lo, Math.min(hi, Math.trunc(n)));
 }
+
 function clampFloat(n, lo, hi) {
   if (!Number.isFinite(n)) return lo;
   return Math.max(lo, Math.min(hi, n));
@@ -74,7 +75,9 @@ function distanceToZone(price, z) {
   const p = Number(price);
   const lo = Number(z?.lo);
   const hi = Number(z?.hi);
-  if (!Number.isFinite(p) || !Number.isFinite(lo) || !Number.isFinite(hi)) return Infinity;
+  if (!Number.isFinite(p) || !Number.isFinite(lo) || !Number.isFinite(hi)) {
+    return Infinity;
+  }
   const a = Math.min(lo, hi);
   const b = Math.max(lo, hi);
   if (p >= a && p <= b) return 0;
@@ -91,9 +94,14 @@ function normalizeZone(z, source = "UNKNOWN") {
     id: z.id ?? null,
     lo,
     hi,
-    mid: z.mid != null && Number.isFinite(Number(z.mid)) ? Number(z.mid) : null,
+    mid:
+      z.mid != null && Number.isFinite(Number(z.mid)) ? Number(z.mid) : null,
     source,
   };
+}
+
+function isFinitePositive(n) {
+  return Number.isFinite(n) && n > 0;
 }
 
 async function jget(url) {
@@ -115,16 +123,18 @@ async function jpost(url, body) {
     body: JSON.stringify(body),
   });
   const j = await r.json().catch(() => null);
-  if (!r.ok)
+  if (!r.ok) {
     throw new Error(
-      `POST ${url} -> ${r.status} ${(j && JSON.stringify(j).slice(0, 200)) || ""}`
+      `POST ${url} -> ${r.status} ${
+        (j && JSON.stringify(j).slice(0, 200)) || ""
+      }`
     );
+  }
   return j;
 }
 
 /* -------------------- GO helpers (display-only) -------------------- */
 
-// ✅ FIXED: setGo must be async because we await maybeSendInstantGoAlert
 async function setGo(payload) {
   const nowMs = Date.now();
   const holdMs = Number(engine5bState.config?.goHoldMs || 120000);
@@ -135,7 +145,6 @@ async function setGo(payload) {
 
   const holdUntil = Math.max(nowMs + holdMs, cooldownUntilMs);
 
-  // snapshot previous state for false->true detection
   const prevGo = engine5bState.go ? { ...engine5bState.go } : { signal: false };
 
   engine5bState.go = engine5bState.go || {};
@@ -154,7 +163,6 @@ async function setGo(payload) {
   engine5bState.go.cooldownUntilMs = cooldownUntilMs;
   engine5bState.go._holdUntilMs = holdUntil;
 
-  // ✅ INSTANT PUSH (safe helper — never throws)
   await maybeSendInstantGoAlert({
     symbol: "SPY",
     prevGo,
@@ -190,10 +198,9 @@ function pickZoneFromEngine1Context(ctx) {
 
   const active = activeNeg || activeShelf || activeInst || null;
 
-  // STRICT containment (no guessing) — this remains the CONTAINMENT zone
   if (active && Number.isFinite(price)) {
-    const lo = Number(active.lo),
-      hi = Number(active.hi);
+    const lo = Number(active.lo);
+    const hi = Number(active.hi);
     if (
       Number.isFinite(lo) &&
       Number.isFinite(hi) &&
@@ -204,13 +211,17 @@ function pickZoneFromEngine1Context(ctx) {
     }
   }
 
-  // Scalp fallback: nearest shelf reference (deterministic)
   const ns = ctx?.nearest?.shelf ?? null;
   if (ns?.lo != null && ns?.hi != null) {
-    const lo = Number(ns.lo),
-      hi = Number(ns.hi);
+    const lo = Number(ns.lo);
+    const hi = Number(ns.hi);
     if (Number.isFinite(lo) && Number.isFinite(hi)) {
-      return { id: ns.id ?? null, lo, hi, source: "NEAREST_SHELF_SCALP_REF" };
+      return {
+        id: ns.id ?? null,
+        lo,
+        hi,
+        source: "NEAREST_SHELF_SCALP_REF",
+      };
     }
   }
 
@@ -220,12 +231,15 @@ function pickZoneFromEngine1Context(ctx) {
 function pickNegotiatedAnalysisZone(ctx) {
   const price = Number(ctx?.meta?.current_price ?? NaN);
 
-  // 1) Prefer active negotiated if it exists
-  const activeNeg = normalizeZone(ctx?.active?.negotiated, "ACTIVE_NEGOTIATED");
+  const activeNeg = normalizeZone(
+    ctx?.active?.negotiated,
+    "ACTIVE_NEGOTIATED"
+  );
   if (activeNeg) return activeNeg;
 
-  // 2) Else prefer nearest negotiated from render list within testing window
-  const negotiated = Array.isArray(ctx?.render?.negotiated) ? ctx.render.negotiated : [];
+  const negotiated = Array.isArray(ctx?.render?.negotiated)
+    ? ctx.render.negotiated
+    : [];
   if (!negotiated.length || !Number.isFinite(price)) return null;
 
   const maxDist = Number(process.env.ENGINE5B_NEGOTIATED_MAX_DIST_PTS ?? 3.0);
@@ -333,8 +347,7 @@ function hardResetToIdle(reason) {
   engine5bState.sm.outsideCount = 0;
   engine5bState.sm.lastNotInZoneMs = null;
 
-  // extra fields for pullback pattern
-  engine5bState.sm.pbState = null; // null | IMPULSE_SEEN | PULLBACK_SEEN
+  engine5bState.sm.pbState = null;
   engine5bState.sm.impulse1mTime = null;
   engine5bState.sm.impulse1mHigh = null;
   engine5bState.sm.pullback1mTime = null;
@@ -342,7 +355,9 @@ function hardResetToIdle(reason) {
   engine5bState.sm.triggerLine = null;
   engine5bState.sm.triggerAboveCount = 0;
 
-  engine5bState.sm.lastDecision = `${nowUtc()} reset=IDLE reason=${reason || "UNKNOWN"}`;
+  engine5bState.sm.lastDecision = `${nowUtc()} reset=IDLE reason=${
+    reason || "UNKNOWN"
+  }`;
 }
 
 function isArmedRecent() {
@@ -351,17 +366,23 @@ function isArmedRecent() {
   return Date.now() - t <= engine5bState.config.armedWindowMs;
 }
 
-/**
- * Option 1 entry:
- * After impulse candle, wait for next candle wick down, then enter when price breaks pullback candle HIGH.
- */
 function pullbackReclaimCheck_1s(closePx) {
   const line = Number(engine5bState.sm.triggerLine);
   if (!Number.isFinite(closePx) || !Number.isFinite(line)) return false;
 
-  // we want the break ABOVE pullback candle high; use breakoutPts as tiny buffer
   const req = line + Number(engine5bState.config.breakoutPts || 0.02);
   return closePx > req;
+}
+
+function volumeGateOk() {
+  const minScore = clampInt(
+    toIntEnv("ENGINE5B_E4_MIN_SCORE", 6),
+    0,
+    15
+  );
+
+  if (engine5bState.e4?.liquidityTrap === true) return false;
+  return Number(engine5bState.e4?.volumeScore ?? 0) >= minScore;
 }
 
 /* -------------------- engine calls -------------------- */
@@ -370,7 +391,6 @@ async function refreshZone() {
   const url = `${BACKEND1_BASE}/api/v1/engine5-context?symbol=SPY&tf=10m`;
   const ctx = await jget(url);
 
-  // ✅ Cache active negotiated bounds for other engines to use
   const an = ctx?.active?.negotiated ?? null;
   engine5bState.zone = engine5bState.zone || {};
   engine5bState.zone.activeNegotiated = an
@@ -382,12 +402,9 @@ async function refreshZone() {
       }
     : null;
 
-  // Containment zone (strict)
   const z = pickZoneFromEngine1Context(ctx);
   engine5bState.zone = { ...engine5bState.zone, ...z, refreshedAtUtc: nowUtc() };
 
-  // ✅ Analysis zone for scalp:
-  // Prefer negotiated, else containment zone
   const negotiatedAnalysis = pickNegotiatedAnalysisZone(ctx);
 
   if (negotiatedAnalysis) {
@@ -398,7 +415,10 @@ async function refreshZone() {
       source: negotiatedAnalysis.source ?? "NEGOTIATED_ANALYSIS",
       updatedAtUtc: nowUtc(),
     };
-  } else if (engine5bState.zone?.lo != null && engine5bState.zone?.hi != null) {
+  } else if (
+    engine5bState.zone?.lo != null &&
+    engine5bState.zone?.hi != null
+  ) {
     engine5bState.zone.analysis = {
       id: engine5bState.zone.id ?? null,
       lo: Number(engine5bState.zone.lo),
@@ -432,11 +452,6 @@ async function refreshRisk() {
   }
 }
 
-/**
- * ✅ UPDATED (LOCKED):
- * - Prefer analysis zone for scalp
- * - Do NOT hard reset on first NOT_IN_ZONE
- */
 async function refreshE3() {
   const az = engine5bState.zone?.analysis ?? null;
 
@@ -445,7 +460,6 @@ async function refreshE3() {
   const zoneId = az?.id ?? null;
   const zoneSource = az?.source ?? null;
 
-  // fallback: current picked zone
   if (lo == null || hi == null) {
     const z = engine5bState.zone || {};
     lo = z?.lo != null ? Number(z.lo) : null;
@@ -476,7 +490,6 @@ async function refreshE3() {
   const reasonCodes = Array.isArray(j?.reasonCodes) ? j.reasonCodes : [];
   const stage = engine5bState.e3.stage;
 
-  // ✅ FIX: tolerate NOT_IN_ZONE for a grace window
   const NOT_IN_ZONE_N = clampInt(toIntEnv("ENGINE5B_NOT_IN_ZONE_N", 3), 1, 10);
   const NOT_IN_ZONE_GRACE_MS = clampInt(
     toIntEnv("ENGINE5B_NOT_IN_ZONE_GRACE_MS", 90000),
@@ -485,11 +498,13 @@ async function refreshE3() {
   );
 
   if (reasonCodes.includes("NOT_IN_ZONE")) {
-    engine5bState.sm.outsideCount = Number(engine5bState.sm.outsideCount || 0) + 1;
+    engine5bState.sm.outsideCount =
+      Number(engine5bState.sm.outsideCount || 0) + 1;
     engine5bState.sm.lastNotInZoneMs =
       engine5bState.sm.lastNotInZoneMs || Date.now();
 
-    const elapsed = Date.now() - Number(engine5bState.sm.lastNotInZoneMs || Date.now());
+    const elapsed =
+      Date.now() - Number(engine5bState.sm.lastNotInZoneMs || Date.now());
 
     if (
       engine5bState.sm.outsideCount >= NOT_IN_ZONE_N &&
@@ -499,8 +514,9 @@ async function refreshE3() {
       return;
     }
 
-    engine5bState.sm.lastDecision =
-      `${nowUtc()} e3=NOT_IN_ZONE outsideCount=${engine5bState.sm.outsideCount} elapsedMs=${elapsed}`;
+    engine5bState.sm.lastDecision = `${nowUtc()} e3=NOT_IN_ZONE outsideCount=${
+      engine5bState.sm.outsideCount
+    } elapsedMs=${elapsed}`;
     return;
   } else {
     engine5bState.sm.outsideCount = 0;
@@ -520,20 +536,12 @@ async function refreshE3() {
   }
 }
 
-/**
- * NOTE:
- * This function name is kept to avoid breaking timers.
- * ✅ FIX:
- * - Call Engine 4 with tf=10m
- * - Use analysis zone first
- */
 async function refreshE4_1m() {
   const az = engine5bState.zone?.analysis ?? null;
 
   let lo = az?.lo != null ? Number(az.lo) : null;
   let hi = az?.hi != null ? Number(az.hi) : null;
 
-  // fallback: current picked zone
   if (lo == null || hi == null) {
     const z = engine5bState.zone || {};
     lo = z?.lo != null ? Number(z.lo) : null;
@@ -544,13 +552,11 @@ async function refreshE4_1m() {
 
   const url =
     `${BACKEND1_BASE}/api/v1/volume-behavior` +
-    `?symbol=SPY&tf=10m&zoneLo=${encodeURIComponent(
-      lo
-    )}&zoneHi=${encodeURIComponent(hi)}&mode=scalp`;
+    `?symbol=SPY&tf=10m&zoneLo=${encodeURIComponent(lo)}` +
+    `&zoneHi=${encodeURIComponent(hi)}&mode=scalp`;
 
   const j = await jget(url);
 
-  // Safety: if Engine 4 responds with a different zone, treat as stale
   const rzLo = Number(j?.zone?.lo);
   const rzHi = Number(j?.zone?.hi);
   const reqLo = Number(lo);
@@ -589,20 +595,22 @@ async function refreshE4_1m() {
   };
 }
 
-// ⚠️ kept (but NEVER called in this step)
+// kept but not called here
 async function tryExecutePaper(dir, barTimeSec) {
-  if (!engine5bState.config.executeEnabled)
+  if (!engine5bState.config.executeEnabled) {
     return { ok: false, skipped: true, reason: "EXECUTE_DISABLED" };
-  if (isKillSwitchOn())
+  }
+  if (isKillSwitchOn()) {
     return { ok: false, skipped: true, reason: "KILL_SWITCH" };
+  }
 
-  // Engine 4 hard blocks
-  if (engine5bState.e4?.liquidityTrap)
+  if (engine5bState.e4?.liquidityTrap) {
     return { ok: false, skipped: true, reason: "E4_LIQUIDITY_TRAP" };
+  }
 
-  // Require volume score threshold for entry
-  if ((engine5bState.e4?.volumeScore ?? 0) < 7)
+  if ((engine5bState.e4?.volumeScore ?? 0) < 7) {
     return { ok: false, skipped: true, reason: "E4_VOLUME_SCORE_LT_7" };
+  }
 
   const idempotencyKey = `SPY|intraday_scalp@10m|${dir}|${barTimeSec}`;
 
@@ -631,13 +639,10 @@ export function startEngine5B({ log = console.log } = {}) {
     return { stop() {} };
   }
 
-  // base config from env
-  // ⚠️ execution remains OFF (display-only GO)
   engine5bState.config.executeEnabled = false;
   engine5bState.config.mode = "monitor";
   engine5bState.config.longOnly = toBoolEnv01("ENGINE5B_LONG_ONLY", true);
 
-  // tunables from env
   engine5bState.config.persistBars = clampInt(
     toIntEnv("ENGINE5B_PERSIST_BARS", engine5bState.config.persistBars ?? 2),
     1,
@@ -676,21 +681,19 @@ export function startEngine5B({ log = console.log } = {}) {
     60000
   );
 
-  // GO visibility hold
   engine5bState.config.goHoldMs = clampInt(
     toIntEnv("ENGINE5B_GO_HOLD_MS", engine5bState.config.goHoldMs ?? 120000),
     1000,
     10 * 60 * 1000
   );
 
-  // NEW: pullback reclaim tunables (safe defaults for your Option 1)
   const IMPULSE_RANGE_PTS = clampFloat(
-    toFloatEnv("ENGINE5B_IMPULSE_RANGE_PTS", 0.40),
+    toFloatEnv("ENGINE5B_IMPULSE_RANGE_PTS", 0.4),
     0.05,
     5.0
   );
   const PULLBACK_WICK_PTS = clampFloat(
-    toFloatEnv("ENGINE5B_PULLBACK_WICK_PTS", 0.20),
+    toFloatEnv("ENGINE5B_PULLBACK_WICK_PTS", 0.2),
     0.01,
     5.0
   );
@@ -700,12 +703,19 @@ export function startEngine5B({ log = console.log } = {}) {
     10
   );
 
-  // ✅ NEW: fallback trigger tunables
-  const ARMED_TRIGGER_ENABLED = toBoolEnv01("ENGINE5B_ARMED_TRIGGER_ENABLED", true);
+  const ARMED_TRIGGER_ENABLED = toBoolEnv01(
+    "ENGINE5B_ARMED_TRIGGER_ENABLED",
+    true
+  );
   const ARMED_TRIGGER_MAX_AGE_MS = clampInt(
     toIntEnv("ENGINE5B_ARMED_TRIGGER_MAX_AGE_MS", 15 * 60 * 1000),
     1000,
     60 * 60 * 1000
+  );
+  const E4_MIN_SCORE = clampInt(
+    toIntEnv("ENGINE5B_E4_MIN_SCORE", 6),
+    0,
+    15
   );
 
   log(
@@ -719,40 +729,41 @@ export function startEngine5B({ log = console.log } = {}) {
     `[engine5b] pullback cfg impulseRangePts=${IMPULSE_RANGE_PTS} pullbackWickPts=${PULLBACK_WICK_PTS} pullbackMaxMin=${PULLBACK_MAX_MINUTES}`
   );
   log(
-    `[engine5b] NOT_IN_ZONE relax N=${toIntEnv("ENGINE5B_NOT_IN_ZONE_N", 3)} graceMs=${toIntEnv(
-      "ENGINE5B_NOT_IN_ZONE_GRACE_MS",
-      90000
-    )}`
+    `[engine5b] NOT_IN_ZONE relax N=${toIntEnv(
+      "ENGINE5B_NOT_IN_ZONE_N",
+      3
+    )} graceMs=${toIntEnv("ENGINE5B_NOT_IN_ZONE_GRACE_MS", 90000)}`
   );
   log(
-    `[engine5b] negotiated analysis maxDist=${process.env.ENGINE5B_NEGOTIATED_MAX_DIST_PTS ?? 3.0}`
+    `[engine5b] negotiated analysis maxDist=${
+      process.env.ENGINE5B_NEGOTIATED_MAX_DIST_PTS ?? 3.0
+    }`
   );
   log(
     `[engine5b] armed trigger enabled=${ARMED_TRIGGER_ENABLED} maxAgeMs=${ARMED_TRIGGER_MAX_AGE_MS}`
   );
+  log(`[engine5b] e4 min score=${E4_MIN_SCORE}`);
 
   let stopped = false;
   let ws = null;
 
-  // timers
   let zoneTimer = null;
   let riskTimer = null;
   let e3Timer = null;
   let e4Timer = null;
 
-  // tick microbars
   let cur1s = null;
   let lastClosedSec = null;
 
-  // 1m bar builder for "impulse" + "next candle pullback"
   let cur1m = null;
   let lastClosedMinSec = null;
 
-  // init pullback state
   engine5bState.sm.pbState = engine5bState.sm.pbState ?? null;
-  engine5bState.sm.triggerAboveCount = engine5bState.sm.triggerAboveCount ?? 0;
+  engine5bState.sm.triggerAboveCount =
+    engine5bState.sm.triggerAboveCount ?? 0;
   engine5bState.sm.outsideCount = engine5bState.sm.outsideCount ?? 0;
-  engine5bState.sm.lastNotInZoneMs = engine5bState.sm.lastNotInZoneMs ?? null;
+  engine5bState.sm.lastNotInZoneMs =
+    engine5bState.sm.lastNotInZoneMs ?? null;
 
   async function safe(fn, label) {
     try {
@@ -762,13 +773,11 @@ export function startEngine5B({ log = console.log } = {}) {
     }
   }
 
-  // initial fetches
   safe(refreshZone, "refreshZone");
   safe(refreshRisk, "refreshRisk");
   safe(refreshE3, "refreshE3");
   safe(refreshE4_1m, "refreshE4_1m");
 
-  // schedule
   zoneTimer = setInterval(
     () => safe(refreshZone, "refreshZone"),
     engine5bState.config.zoneRefreshMs
@@ -803,7 +812,6 @@ export function startEngine5B({ log = console.log } = {}) {
         if (ev?.ev !== "T") continue;
         if (String(ev?.sym || "").toUpperCase() !== "SPY") continue;
 
-        // clear GO when expired (runs continuously)
         clearGoIfExpired();
 
         if (isKillSwitchOn()) {
@@ -818,23 +826,21 @@ export function startEngine5B({ log = console.log } = {}) {
           updatedAtUtc: nowUtc(),
         };
 
-        // Update 1s bar
         cur1s = applyTickTo1s(cur1s, ev);
         const sec = cur1s?.time;
         if (!sec) continue;
 
-        // Update 1m bar
         cur1m = applyTickTo1m(cur1m, ev);
         const minSec = cur1m?.time ?? null;
 
-        /* ---------- 1m close events: detect impulse then pullback candle ---------- */
         if (minSec != null) {
           if (lastClosedMinSec == null) lastClosedMinSec = minSec;
 
           if (minSec !== lastClosedMinSec) {
             const closed1m = cur1m;
             const haveZone =
-              engine5bState.zone?.source && engine5bState.zone.source !== "NONE";
+              engine5bState.zone?.source &&
+              engine5bState.zone.source !== "NONE";
             const armedOk =
               engine5bState.e3?.stage === "ARMED" ||
               engine5bState.sm.stage === "ARMED";
@@ -860,7 +866,9 @@ export function startEngine5B({ log = console.log } = {}) {
               if (!engine5bState.sm.pbState) {
                 const range = Number(closed1m.high) - Number(closed1m.low);
                 const zoneHi = Number(engine5bState.zone.hi);
-                const breakoutPts = Number(engine5bState.config.breakoutPts || 0.02);
+                const breakoutPts = Number(
+                  engine5bState.config.breakoutPts || 0.02
+                );
 
                 if (
                   Number.isFinite(range) &&
@@ -895,7 +903,6 @@ export function startEngine5B({ log = console.log } = {}) {
           }
         }
 
-        /* ---------- 1s close events: fallback trigger line from ARMED candle ---------- */
         if (
           ARMED_TRIGGER_ENABLED &&
           engine5bState.sm.stage === "ARMED" &&
@@ -903,11 +910,14 @@ export function startEngine5B({ log = console.log } = {}) {
           !Number.isFinite(Number(engine5bState.sm.triggerLine))
         ) {
           const armedHigh = Number(engine5bState.e3?.raw?.armedCandleHigh);
-          const armedTimeMs = Number(engine5bState.e3?.raw?.armedCandleTimeMs ?? 0);
+          const armedTimeMs = Number(
+            engine5bState.e3?.raw?.armedCandleTimeMs ?? 0
+          );
 
-          if (Number.isFinite(armedHigh) && armedHigh > 0) {
+          if (isFinitePositive(armedHigh)) {
             const ageOk =
-              !armedTimeMs || Date.now() - armedTimeMs <= ARMED_TRIGGER_MAX_AGE_MS;
+              !armedTimeMs ||
+              Date.now() - armedTimeMs <= ARMED_TRIGGER_MAX_AGE_MS;
 
             if (ageOk) {
               engine5bState.sm.triggerLine = armedHigh;
@@ -916,14 +926,12 @@ export function startEngine5B({ log = console.log } = {}) {
           }
         }
 
-        /* ---------- 1s close events: trigger logic ---------- */
         if (lastClosedSec == null) lastClosedSec = sec;
 
         if (sec !== lastClosedSec) {
           engine5bState.lastBar1s = { ...cur1s, closedAtUtc: nowUtc() };
           const closePx = Number(cur1s?.close);
 
-          // ✅ Option 1 trigger (original pullback reclaim)
           if (
             engine5bState.sm.pbState === "PULLBACK_SEEN" &&
             engine5bState.sm.stage === "ARMED" &&
@@ -931,35 +939,43 @@ export function startEngine5B({ log = console.log } = {}) {
             !inCooldown()
           ) {
             const above = pullbackReclaimCheck_1s(closePx);
-            if (above)
+            if (above) {
               engine5bState.sm.triggerAboveCount =
                 Number(engine5bState.sm.triggerAboveCount || 0) + 1;
-            else engine5bState.sm.triggerAboveCount = 0;
+            } else {
+              engine5bState.sm.triggerAboveCount = 0;
+            }
 
-            if (engine5bState.sm.triggerAboveCount >= engine5bState.config.persistBars) {
-              // ✅ TRIGGER — DISPLAY ONLY (NO EXECUTION)
+            if (
+              engine5bState.sm.triggerAboveCount >=
+                engine5bState.config.persistBars &&
+              volumeGateOk()
+            ) {
               stageSet("TRIGGERED");
               engine5bState.sm.triggeredAtMs = Date.now();
 
-              // cooldown
-              engine5bState.sm.cooldownUntilMs = Date.now() + engine5bState.config.cooldownMs;
+              engine5bState.sm.cooldownUntilMs =
+                Date.now() + engine5bState.config.cooldownMs;
 
-              // ✅ Rising edge check BEFORE setGo
               const wasGo = engine5bState.go?.signal === true;
+              const triggerLineForGo = Number(engine5bState.sm.triggerLine);
 
-              // ✅ Set GO (display-only)
               await setGo({
                 direction: "LONG",
                 atUtc: nowUtc(),
                 price: Number.isFinite(closePx) ? closePx : null,
                 reason: "PULLBACK_RECLAIM",
-                reasonCodes: ["PB_RECLAIM", "E3_ARMED", "E4_OK", "TRIGGER_LINE_BREAK"],
+                reasonCodes: [
+                  "PB_RECLAIM",
+                  "E3_ARMED",
+                  "E4_OK",
+                  "TRIGGER_LINE_BREAK",
+                ],
                 triggerType: "PULLBACK_RECLAIM",
-                triggerLine: Number(engine5bState.sm.triggerLine),
+                triggerLine: triggerLineForGo,
                 cooldownUntilMs: engine5bState.sm.cooldownUntilMs,
               });
 
-              // ✅ Auto-record ONLY on NO→YES rising edge
               if (!wasGo && engine5bState.go?.signal === true) {
                 recordGoOnRisingEdge({
                   backend1Base: BACKEND1_BASE,
@@ -969,12 +985,10 @@ export function startEngine5B({ log = console.log } = {}) {
                 }).catch(() => {});
               }
 
-              engine5bState.sm.lastDecision =
-                `${nowUtc()} GO(PULLBACK_RECLAIM) aboveCount=${engine5bState.sm.triggerAboveCount} cooldownUntilMs=${engine5bState.sm.cooldownUntilMs}`;
+              engine5bState.sm.lastDecision = `${nowUtc()} GO(PULLBACK_RECLAIM) aboveCount=${engine5bState.sm.triggerAboveCount} cooldownUntilMs=${engine5bState.sm.cooldownUntilMs}`;
 
               stageSet("COOLDOWN");
 
-              // reset pullback pattern after trigger
               engine5bState.sm.pbState = null;
               engine5bState.sm.impulse1mTime = null;
               engine5bState.sm.impulse1mHigh = null;
@@ -985,7 +999,6 @@ export function startEngine5B({ log = console.log } = {}) {
             }
           }
 
-          // ✅ NEW: fallback ARMED-candle trigger
           if (
             ARMED_TRIGGER_ENABLED &&
             engine5bState.sm.pbState == null &&
@@ -994,13 +1007,22 @@ export function startEngine5B({ log = console.log } = {}) {
             !inCooldown() &&
             Number.isFinite(Number(engine5bState.sm.triggerLine))
           ) {
+            const triggerLine = Number(engine5bState.sm.triggerLine);
+
             const above = pullbackReclaimCheck_1s(closePx);
-            if (above)
+            if (above) {
               engine5bState.sm.triggerAboveCount =
                 Number(engine5bState.sm.triggerAboveCount || 0) + 1;
-            else engine5bState.sm.triggerAboveCount = 0;
+            } else {
+              engine5bState.sm.triggerAboveCount = 0;
+            }
 
-            if (engine5bState.sm.triggerAboveCount >= engine5bState.config.persistBars) {
+            if (
+              engine5bState.sm.triggerAboveCount >=
+                engine5bState.config.persistBars &&
+              isFinitePositive(triggerLine) &&
+              volumeGateOk()
+            ) {
               stageSet("TRIGGERED");
               engine5bState.sm.triggeredAtMs = Date.now();
 
@@ -1014,9 +1036,14 @@ export function startEngine5B({ log = console.log } = {}) {
                 atUtc: nowUtc(),
                 price: Number.isFinite(closePx) ? closePx : null,
                 reason: "ARMED_CANDLE_BREAK",
-                reasonCodes: ["ARMED_CANDLE_BREAK", "E3_ARMED", "E4_OK", "TRIGGER_LINE_BREAK"],
+                reasonCodes: [
+                  "ARMED_CANDLE_BREAK",
+                  "E3_ARMED",
+                  "E4_OK",
+                  "TRIGGER_LINE_BREAK",
+                ],
                 triggerType: "ARMED_CANDLE_BREAK",
-                triggerLine: Number(engine5bState.sm.triggerLine),
+                triggerLine,
                 cooldownUntilMs: engine5bState.sm.cooldownUntilMs,
               });
 
@@ -1029,8 +1056,7 @@ export function startEngine5B({ log = console.log } = {}) {
                 }).catch(() => {});
               }
 
-              engine5bState.sm.lastDecision =
-                `${nowUtc()} GO(ARMED_CANDLE_BREAK) aboveCount=${engine5bState.sm.triggerAboveCount} cooldownUntilMs=${engine5bState.sm.cooldownUntilMs}`;
+              engine5bState.sm.lastDecision = `${nowUtc()} GO(ARMED_CANDLE_BREAK) aboveCount=${engine5bState.sm.triggerAboveCount} triggerLine=${triggerLine} cooldownUntilMs=${engine5bState.sm.cooldownUntilMs}`;
 
               stageSet("COOLDOWN");
 
