@@ -204,7 +204,13 @@ function computeSetupAliveInfo() {
 function computeArmedFreshnessInfo() {
   const nowMs = Date.now();
   const armedWindowMs = Number(engine5bState.config?.armedWindowMs || 120000);
-  const triggerLine = Number(engine5bState.sm?.triggerLine);
+
+  const rawTriggerLine = engine5bState.sm?.triggerLine;
+  const triggerLine =
+    rawTriggerLine === null || rawTriggerLine === undefined
+      ? null
+      : Number(rawTriggerLine);
+
   const currentPrice = getLastPrice();
 
   const armedAtMs = Number(engine5bState.sm?.armedAtMs ?? 0);
@@ -240,6 +246,7 @@ function computeArmedFreshnessInfo() {
 
   let tooExtended = false;
   if (
+    triggerLine !== null &&
     Number.isFinite(triggerLine) &&
     Number.isFinite(currentPrice) &&
     Math.abs(currentPrice - triggerLine) > maxExtendedPts
@@ -302,17 +309,18 @@ function classifyMoveType() {
   const zonePos01 = Number(diagnostics?.zonePos01);
   const inZoneNow = e3Raw?.inZoneNow === true || isInsideZone(refPrice, az);
 
-  const aboveZone = Number.isFinite(refPrice) && Number.isFinite(hi)
-    ? refPrice > hi + breakoutPts
-    : false;
+  const aboveZone =
+    Number.isFinite(refPrice) && Number.isFinite(hi)
+      ? refPrice > hi + breakoutPts
+      : false;
 
-  const belowZone = Number.isFinite(refPrice) && Number.isFinite(lo)
-    ? refPrice < lo - breakoutPts
-    : false;
+  const belowZone =
+    Number.isFinite(refPrice) && Number.isFinite(lo)
+      ? refPrice < lo - breakoutPts
+      : false;
 
-  const belowMid = Number.isFinite(refPrice) && Number.isFinite(mid)
-    ? refPrice < mid
-    : false;
+  const belowMid =
+    Number.isFinite(refPrice) && Number.isFinite(mid) ? refPrice < mid : false;
 
   const touchedUpper =
     (Number.isFinite(zonePos01) && zonePos01 >= 0.7) ||
@@ -434,10 +442,17 @@ function scoreMoveType(moveType, info) {
     if (Number.isFinite(refPrice) && Number.isFinite(hi) && refPrice > hi) {
       structurePts += 20;
     }
-    if (Number.isFinite(refPrice) && Number.isFinite(hi) && refPrice > hi + 0.02) {
+    if (
+      Number.isFinite(refPrice) &&
+      Number.isFinite(hi) &&
+      refPrice > hi + 0.02
+    ) {
       structurePts += 10;
     }
-    if (engine5bState.sm?.pbState === "IMPULSE_SEEN" || engine5bState.sm?.pbState === "PULLBACK_SEEN") {
+    if (
+      engine5bState.sm?.pbState === "IMPULSE_SEEN" ||
+      engine5bState.sm?.pbState === "PULLBACK_SEEN"
+    ) {
       structurePts += 5;
     }
   } else if (moveType === "UPPER_REJECTION") {
