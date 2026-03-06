@@ -104,6 +104,427 @@ function isFinitePositive(n) {
   return Number.isFinite(n) && n > 0;
 }
 
+function getZoneMid(zone) {
+  if (!zone) return null;
+  if (Number.isFinite(Number(zone.mid))) return Number(zone.mid);
+
+  const lo = Number(zone.lo);
+  const hi = Number(zone.hi);
+  if (Number.isFinite(lo) && Number.isFinite(hi)) {
+    return (lo + hi) / 2;
+  }
+  return null;
+}
+
+function getLastPrice() {
+  const tickP = Number(engine5bState.lastTick?.p);
+  if (Number.isFinite(tickP)) return tickP;
+
+  const close1s = Number(engine5bState.lastBar1s?.close);
+  if (Number.isFinite(close1s)) return close1s;
+
+  return NaN;
+}
+
+function directionFromMoveType(moveType) {
+  switch (moveType) {
+    case "ACCEPTANCE":
+    case "LOWER_REJECTION":
+      return "LONG";
+    case "UPPER_REJECTION":
+    case "FAILURE":
+      return "SHORT";
+    default:
+      return null;
+  }
+}
+
+function isInsideZone(price, zone) {
+  const p = Number(price);
+  const lo = Number(zone?.lo);
+  const hi = Number(zone?.hi);
+  if (!Number.isFinite(p) || !Number.isFinite(lo) || !Number.isFinite(hi)) {
+    return false;
+  }
+  const a = Math.min(lo, hi);
+  const b = Math.max(lo, hi);
+  return p >= a && p <= b;
+}
+
+function computeSetupAliveInfo() {
+  const price = getLastPrice();
+  const az = engine5bState.zone?.analysis ?? null;
+  const raw = engine5bState.e3?.raw ?? null;
+
+  if (!az || !Number.isFinite(price)) {
+    return {
+      setupAlive: false,
+      eligibilityReason: "NO_ANALYSIS_ZONE_OR_PRICE",
+    };
+  }
+
+  if (isInsideZone(price, az)) {
+    return {
+      setupAlive: true,
+      eligibilityReason: "INSIDE_ANALYSIS_ZONE",
+    };
+  }
+
+  const paddedLo = Number(raw?.padded?.lo);
+  const paddedHi = Number(raw?.padded?.hi);
+  if (Number.isFinite(paddedLo) && Number.isFinite(paddedHi)) {
+    const paddedZone = { lo: paddedLo, hi: paddedHi };
+    if (isInsideZone(price, paddedZone)) {
+      return {
+        setupAlive: true,
+        eligibilityReason: "INSIDE_E3_PADDED_ZONE",
+      };
+    }
+  }
+
+  const nearDistPts = clampFloat(
+    toFloatEnv("ENGINE5B_SETUP_ALIVE_NEAR_DIST_PTS", 1.0),
+    0.0,
+    10.0
+  );
+  const dist = distanceToZone(price, az);
+  if (Number.isFinite(dist) && dist <= nearDistPts) {
+    return {
+      setupAlive: true,
+      eligibilityReason: `NEAR_ANALYSIS_ZONE_${dist.toFixed(2)}PT`,
+    };
+  }
+
+  return {
+    setupAlive: false,
+    eligibilityReason: "OUTSIDE_ANALYSIS_ELIGIBILITY",
+  };
+}
+
+function computeArmedFreshnessInfo() {
+  const nowMs = Date.now();
+  const armedWindowMs = Number(engine5bState.config?.armedWindowMs || 120000);
+  const triggerLine = Number(engine5bState.sm?.triggerLine);
+  const currentPrice = getLastPrice();
+
+  const armedAtMs = Number(engine5bState.sm?.armedAtMs ?? 0);
+  const armedCandleTimeMs = Number(
+    engine5bState.e3?.raw?.armedCandleTimeMs ?? 0
+  );
+
+  const baseTimeMs = armedCandleTimeMs || armedAtMs || 0;
+  const triggerFresh = baseTimeMs > 0 && nowMs - baseTimeMs <= armedWindowMs;
+
+  let armedValid = false;
+  let staleReason = null;
+
+  if (
+    engine5bState.e3?.stage === "ARMED" ||
+    engine5bState.sm?.stage === "ARMED"
+  ) {
+    armedValid = true;
+  }
+
+  if (!armedValid) {
+    staleReason = "NOT_ARMED";
+  } else if (!triggerFresh) {
+    armedValid = false;
+    staleReason = "ARMED_CONTEXT_STALE";
+  }
+
+  const maxExtendedPts = clampFloat(
+    toFloatEnv("ENGINE5B_MOVE_TOO_EXTENDED_PTS", 1.5),
+    0.05,
+    20.0
+  );
+
+  let tooExtended = false;
+  if (
+    Number.isFinite(triggerLine) &&
+    Number.isFinite(currentPrice) &&
+    Math.abs(currentPrice - triggerLine) > maxExtendedPts
+  ) {
+    tooExtended = true;
+    if (!staleReason) staleReason = "TOO_EXTENDED_FROM_TRIGGER";
+  }
+
+  return {
+    armedValid,
+    triggerFresh,
+    tooExtended,
+    staleReason,
+  };
+}
+
+function classifyMoveType() {
+  const az = engine5bState.zone?.analysis ?? null;
+  const e3 = engine5bState.e3 ?? null;
+  const e3Raw = e3?.raw ?? null;
+  const e4 = engine5bState.e4 ?? null;
+  const e4Raw = e4?.raw ?? null;
+
+  const price = getLastPrice();
+  const closePx = Number(engine5bState.lastBar1s?.close);
+  const refPrice = Number.isFinite(closePx) ? closePx : price;
+
+  const lo = Number(az?.lo);
+  const hi = Number(az?.hi);
+  const mid = getZoneMid(az);
+
+  const breakoutPts = Number(engine5bState.config?.breakoutPts || 0.02);
+
+  const structureState = String(e3Raw?.structureState || "").toUpperCase();
+  const reasonCodes = Array.isArray(e3Raw?.reasonCodes)
+    ? e3Raw.reasonCodes.map((x) => String(x).toUpperCase())
+    : [];
+
+  const flags = e4Raw?.flags || {};
+  const diagnostics = e4Raw?.diagnostics || {};
+  const pressureBias = String(e4Raw?.pressureBias || "").toUpperCase();
+
+  const candle = e3Raw?.candle || {};
+  const upperWick = Number(candle?.upperWick);
+  const lowerWick = Number(candle?.lowerWick);
+  const body = Number(candle?.body);
+
+  const upperDominant =
+    upperWick > 0 &&
+    body >= 0 &&
+    upperWick > body &&
+    upperWick >= lowerWick;
+
+  const lowerDominant =
+    lowerWick > 0 &&
+    body >= 0 &&
+    lowerWick > body &&
+    lowerWick >= upperWick;
+
+  const zonePos01 = Number(diagnostics?.zonePos01);
+  const inZoneNow = e3Raw?.inZoneNow === true || isInsideZone(refPrice, az);
+
+  const aboveZone = Number.isFinite(refPrice) && Number.isFinite(hi)
+    ? refPrice > hi + breakoutPts
+    : false;
+
+  const belowZone = Number.isFinite(refPrice) && Number.isFinite(lo)
+    ? refPrice < lo - breakoutPts
+    : false;
+
+  const belowMid = Number.isFinite(refPrice) && Number.isFinite(mid)
+    ? refPrice < mid
+    : false;
+
+  const touchedUpper =
+    (Number.isFinite(zonePos01) && zonePos01 >= 0.7) ||
+    (Number.isFinite(refPrice) &&
+      Number.isFinite(hi) &&
+      refPrice >= hi - Math.max(breakoutPts, 0.1)) ||
+    upperDominant ||
+    e3Raw?.wickProbeShort === true;
+
+  const touchedLower =
+    (Number.isFinite(zonePos01) && zonePos01 <= 0.3) ||
+    (Number.isFinite(refPrice) &&
+      Number.isFinite(lo) &&
+      refPrice <= lo + Math.max(breakoutPts, 0.1)) ||
+    lowerDominant ||
+    e3Raw?.wickProbeLong === true;
+
+  const e4ExpansionUp =
+    flags?.initiativeMoveConfirmed === true &&
+    pressureBias.includes("BUY");
+
+  const e4ExpansionDown =
+    (flags?.distributionDetected === true ||
+      flags?.initiativeMoveConfirmed === true) &&
+    pressureBias.includes("SELL");
+
+  const e4ReversalDown =
+    flags?.reversalExpansion === true ||
+    flags?.distributionDetected === true ||
+    pressureBias.includes("SELL");
+
+  const e4ReversalUp =
+    flags?.reversalExpansion === true ||
+    flags?.absorptionDetected === true ||
+    pressureBias.includes("BUY");
+
+  const e4Conflict = e4?.liquidityTrap === true;
+
+  // Priority: FAILURE > rejection > acceptance > none
+  if (
+    !e4Conflict &&
+    (structureState === "FAILURE" || reasonCodes.includes("FAILURE")) &&
+    belowMid
+  ) {
+    return "FAILURE";
+  }
+
+  if (
+    !e4Conflict &&
+    touchedUpper &&
+    (upperDominant || belowZone || e4ReversalDown)
+  ) {
+    return "UPPER_REJECTION";
+  }
+
+  if (
+    !e4Conflict &&
+    touchedLower &&
+    (lowerDominant || inZoneNow || e4ReversalUp)
+  ) {
+    return "LOWER_REJECTION";
+  }
+
+  if (!e4Conflict && aboveZone && (e4ExpansionUp || e3?.stage === "ARMED")) {
+    return "ACCEPTANCE";
+  }
+
+  if (
+    !e4Conflict &&
+    aboveZone &&
+    String(e3?.stage || "").toUpperCase() === "TRIGGERED"
+  ) {
+    return "ACCEPTANCE";
+  }
+
+  if (
+    !e4Conflict &&
+    belowZone &&
+    (structureState === "FAILURE" || e4ExpansionDown)
+  ) {
+    return "FAILURE";
+  }
+
+  return "NONE";
+}
+
+function scoreMoveType(moveType, info) {
+  const e3 = engine5bState.e3 ?? null;
+  const e3Raw = e3?.raw ?? null;
+  const e4 = engine5bState.e4 ?? null;
+  const e4Raw = e4?.raw ?? null;
+  const az = engine5bState.zone?.analysis ?? null;
+
+  const price = getLastPrice();
+  const closePx = Number(engine5bState.lastBar1s?.close);
+  const refPrice = Number.isFinite(closePx) ? closePx : price;
+
+  const lo = Number(az?.lo);
+  const hi = Number(az?.hi);
+  const mid = getZoneMid(az);
+
+  const candle = e3Raw?.candle || {};
+  const upperWick = Number(candle?.upperWick);
+  const lowerWick = Number(candle?.lowerWick);
+  const body = Number(candle?.body);
+
+  const flags = e4Raw?.flags || {};
+  const pressureBias = String(e4Raw?.pressureBias || "").toUpperCase();
+  const structureState = String(e3Raw?.structureState || "").toUpperCase();
+  const reactionScore = clampInt(Number(e3?.reactionScore ?? 0), 0, 10);
+  const volumeScore = clampInt(Number(e4?.volumeScore ?? 0), 0, 15);
+
+  let structurePts = 0; // /35
+  let reactionPts = 0; // /25
+  let volumePts = 0; // /25
+  let freshnessPts = 0; // /15
+
+  if (moveType === "ACCEPTANCE") {
+    if (Number.isFinite(refPrice) && Number.isFinite(hi) && refPrice > hi) {
+      structurePts += 20;
+    }
+    if (Number.isFinite(refPrice) && Number.isFinite(hi) && refPrice > hi + 0.02) {
+      structurePts += 10;
+    }
+    if (engine5bState.sm?.pbState === "IMPULSE_SEEN" || engine5bState.sm?.pbState === "PULLBACK_SEEN") {
+      structurePts += 5;
+    }
+  } else if (moveType === "UPPER_REJECTION") {
+    if (upperWick > body && upperWick > 0) structurePts += 15;
+    if (Number.isFinite(refPrice) && Number.isFinite(hi) && refPrice <= hi) {
+      structurePts += 10;
+    }
+    if (pressureBias.includes("SELL")) structurePts += 10;
+  } else if (moveType === "LOWER_REJECTION") {
+    if (lowerWick > body && lowerWick > 0) structurePts += 15;
+    if (Number.isFinite(refPrice) && Number.isFinite(lo) && refPrice >= lo) {
+      structurePts += 10;
+    }
+    if (pressureBias.includes("BUY")) structurePts += 10;
+  } else if (moveType === "FAILURE") {
+    if (structureState === "FAILURE") structurePts += 15;
+    if (Number.isFinite(refPrice) && Number.isFinite(mid) && refPrice < mid) {
+      structurePts += 10;
+    }
+    if (Number.isFinite(refPrice) && Number.isFinite(lo) && refPrice < lo) {
+      structurePts += 10;
+    }
+  }
+
+  reactionPts += Math.round((reactionScore / 10) * 20);
+
+  const e3Stage = String(e3?.stage || "").toUpperCase();
+  if (e3Stage === "ARMED") reactionPts += 3;
+  if (e3Stage === "TRIGGERED" || e3Stage === "CONFIRMED") reactionPts += 5;
+
+  if (e3Raw?.touchingNow === true || e3Raw?.touchArms === true) {
+    reactionPts += 2;
+  }
+
+  volumePts += Math.round((volumeScore / 15) * 18);
+
+  if (e4?.volumeConfirmed === true) volumePts += 4;
+  if (flags?.reversalExpansion === true) volumePts += 3;
+  if (flags?.pullbackContraction === true) volumePts += 2;
+  if (flags?.initiativeMoveConfirmed === true) volumePts += 3;
+  if (flags?.distributionDetected === true) volumePts += 3;
+  if (flags?.absorptionDetected === true) volumePts += 3;
+  if (e4?.liquidityTrap === true) volumePts -= 8;
+
+  if (info?.triggerFresh) freshnessPts += 8;
+  if (info?.armedValid) freshnessPts += 4;
+  if (info?.setupAlive) freshnessPts += 3;
+  if (info?.tooExtended) freshnessPts -= 6;
+
+  structurePts = clampInt(structurePts, 0, 35);
+  reactionPts = clampInt(reactionPts, 0, 25);
+  volumePts = clampInt(volumePts, 0, 25);
+  freshnessPts = clampInt(freshnessPts, 0, 15);
+
+  return clampInt(
+    structurePts + reactionPts + volumePts + freshnessPts,
+    0,
+    100
+  );
+}
+
+function recomputeMoveClassification() {
+  engine5bState.sm = engine5bState.sm || {};
+
+  const aliveInfo = computeSetupAliveInfo();
+  const freshInfo = computeArmedFreshnessInfo();
+  const moveType = classifyMoveType();
+  const moveDirection = directionFromMoveType(moveType);
+
+  const combinedInfo = {
+    ...aliveInfo,
+    ...freshInfo,
+  };
+
+  const moveScore = scoreMoveType(moveType, combinedInfo);
+
+  engine5bState.sm.moveType = moveType;
+  engine5bState.sm.moveScore = moveScore;
+  engine5bState.sm.moveDirection = moveDirection;
+  engine5bState.sm.setupAlive = aliveInfo.setupAlive;
+  engine5bState.sm.armedValid = freshInfo.armedValid;
+  engine5bState.sm.triggerFresh = freshInfo.triggerFresh;
+  engine5bState.sm.tooExtended = freshInfo.tooExtended;
+  engine5bState.sm.staleReason = freshInfo.staleReason;
+  engine5bState.sm.eligibilityReason = aliveInfo.eligibilityReason;
+}
+
 async function jget(url) {
   const r = await fetch(url, {
     headers: { accept: "application/json" },
@@ -358,6 +779,8 @@ function hardResetToIdle(reason) {
   engine5bState.sm.lastDecision = `${nowUtc()} reset=IDLE reason=${
     reason || "UNKNOWN"
   }`;
+
+  recomputeMoveClassification();
 }
 
 function isArmedRecent() {
@@ -432,7 +855,10 @@ async function refreshZone() {
 
   if (engine5bState.zone?.source === "NONE") {
     hardResetToIdle("NO_ZONE_SOURCE_NONE");
+    return;
   }
+
+  recomputeMoveClassification();
 }
 
 async function refreshRisk() {
@@ -449,7 +875,10 @@ async function refreshRisk() {
 
   if (engine5bState.risk.killSwitch === true) {
     hardResetToIdle("KILL_SWITCH_ON");
+    return;
   }
+
+  recomputeMoveClassification();
 }
 
 async function refreshE3() {
@@ -517,6 +946,7 @@ async function refreshE3() {
     engine5bState.sm.lastDecision = `${nowUtc()} e3=NOT_IN_ZONE outsideCount=${
       engine5bState.sm.outsideCount
     } elapsedMs=${elapsed}`;
+    recomputeMoveClassification();
     return;
   } else {
     engine5bState.sm.outsideCount = 0;
@@ -534,6 +964,8 @@ async function refreshE3() {
       engine5bState.sm.triggeredAtMs = Date.now();
     }
   }
+
+  recomputeMoveClassification();
 }
 
 async function refreshE4_1m() {
@@ -582,6 +1014,7 @@ async function refreshE4_1m() {
         received: j?.zone ?? null,
       },
     };
+    recomputeMoveClassification();
     return;
   }
 
@@ -593,6 +1026,8 @@ async function refreshE4_1m() {
     updatedAtUtc: nowUtc(),
     raw: j,
   };
+
+  recomputeMoveClassification();
 }
 
 // kept but not called here
@@ -764,6 +1199,16 @@ export function startEngine5B({ log = console.log } = {}) {
   engine5bState.sm.outsideCount = engine5bState.sm.outsideCount ?? 0;
   engine5bState.sm.lastNotInZoneMs =
     engine5bState.sm.lastNotInZoneMs ?? null;
+  engine5bState.sm.moveType = engine5bState.sm.moveType ?? "NONE";
+  engine5bState.sm.moveScore = engine5bState.sm.moveScore ?? 0;
+  engine5bState.sm.moveDirection = engine5bState.sm.moveDirection ?? null;
+  engine5bState.sm.setupAlive = engine5bState.sm.setupAlive ?? false;
+  engine5bState.sm.armedValid = engine5bState.sm.armedValid ?? false;
+  engine5bState.sm.triggerFresh = engine5bState.sm.triggerFresh ?? false;
+  engine5bState.sm.tooExtended = engine5bState.sm.tooExtended ?? false;
+  engine5bState.sm.staleReason = engine5bState.sm.staleReason ?? null;
+  engine5bState.sm.eligibilityReason =
+    engine5bState.sm.eligibilityReason ?? null;
 
   async function safe(fn, label) {
     try {
@@ -899,6 +1344,7 @@ export function startEngine5B({ log = console.log } = {}) {
               }
             }
 
+            recomputeMoveClassification();
             lastClosedMinSec = minSec;
           }
         }
@@ -922,6 +1368,7 @@ export function startEngine5B({ log = console.log } = {}) {
             if (ageOk) {
               engine5bState.sm.triggerLine = armedHigh;
               engine5bState.sm.lastDecision = `${nowUtc()} armed_triggerLine=${armedHigh}`;
+              recomputeMoveClassification();
             }
           }
         }
@@ -1067,6 +1514,8 @@ export function startEngine5B({ log = console.log } = {}) {
 
           if (engine5bState.sm.stage === "COOLDOWN" && !inCooldown()) {
             hardResetToIdle("COOLDOWN_EXPIRED");
+          } else {
+            recomputeMoveClassification();
           }
 
           lastClosedSec = sec;
