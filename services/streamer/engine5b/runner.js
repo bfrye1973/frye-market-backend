@@ -151,6 +151,77 @@ function isInsideZone(price, zone) {
   return p >= a && p <= b;
 }
 
+function zoneKey(z) {
+  return [
+    z?.id ?? "",
+    Number(z?.lo ?? NaN),
+    Number(z?.hi ?? NaN),
+    z?.source ?? "",
+  ].join("|");
+}
+
+function buildInteractionZoneCandidates() {
+  const out = [];
+  const seen = new Set();
+
+  const analysis = normalizeZone(
+    engine5bState.zone?.analysis,
+    engine5bState.zone?.analysis?.source ?? "ANALYSIS"
+  );
+  const activeNegotiated = normalizeZone(
+    engine5bState.zone?.activeNegotiated,
+    "ACTIVE_NEGOTIATED"
+  );
+  const containment = normalizeZone(
+    engine5bState.zone,
+    engine5bState.zone?.source ?? "CONTAINMENT"
+  );
+
+  for (const z of [analysis, activeNegotiated, containment]) {
+    if (!z) continue;
+    const k = zoneKey(z);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(z);
+  }
+
+  return out;
+}
+
+function pickClosestInteractionZone(price) {
+  const p = Number(price);
+  if (!Number.isFinite(p)) {
+    return {
+      zone: null,
+      distancePts: Infinity,
+    };
+  }
+
+  const zones = buildInteractionZoneCandidates();
+  if (!zones.length) {
+    return {
+      zone: null,
+      distancePts: Infinity,
+    };
+  }
+
+  let best = null;
+  for (const z of zones) {
+    const d = distanceToZone(p, z);
+    if (!Number.isFinite(d)) continue;
+    if (!best || d < best.distancePts) {
+      best = { zone: z, distancePts: d };
+    }
+  }
+
+  return (
+    best || {
+      zone: null,
+      distancePts: Infinity,
+    }
+  );
+}
+
 function computeSetupAliveInfo() {
   const price = getLastPrice();
   const az = engine5bState.zone?.analysis ?? null;
@@ -263,20 +334,34 @@ function computeArmedFreshnessInfo() {
   };
 }
 
+function getInteractionContext() {
+  const price = getLastPrice();
+  const refPrice = Number.isFinite(Number(engine5bState.lastBar1s?.close))
+    ? Number(engine5bState.lastBar1s?.close)
+    : price;
+
+  const picked = pickClosestInteractionZone(refPrice);
+  return {
+    refPrice,
+    price,
+    zone: picked.zone,
+    distancePts: picked.distancePts,
+  };
+}
+
 function classifyMoveType() {
-  const az = engine5bState.zone?.analysis ?? null;
   const e3 = engine5bState.e3 ?? null;
   const e3Raw = e3?.raw ?? null;
   const e4 = engine5bState.e4 ?? null;
   const e4Raw = e4?.raw ?? null;
 
-  const price = getLastPrice();
-  const closePx = Number(engine5bState.lastBar1s?.close);
-  const refPrice = Number.isFinite(closePx) ? closePx : price;
+  const interaction = getInteractionContext();
+  const cz = interaction.zone ?? engine5bState.zone?.analysis ?? null;
+  const refPrice = interaction.refPrice;
 
-  const lo = Number(az?.lo);
-  const hi = Number(az?.hi);
-  const mid = getZoneMid(az);
+  const lo = Number(cz?.lo);
+  const hi = Number(cz?.hi);
+  const mid = getZoneMid(cz);
 
   const breakoutPts = Number(engine5bState.config?.breakoutPts || 0.02);
 
@@ -307,7 +392,7 @@ function classifyMoveType() {
     lowerWick >= upperWick;
 
   const zonePos01 = Number(diagnostics?.zonePos01);
-  const inZoneNow = e3Raw?.inZoneNow === true || isInsideZone(refPrice, az);
+  const inZoneNow = e3Raw?.inZoneNow === true || isInsideZone(refPrice, cz);
 
   const aboveZone =
     Number.isFinite(refPrice) && Number.isFinite(hi)
@@ -357,50 +442,51 @@ function classifyMoveType() {
     flags?.absorptionDetected === true ||
     pressureBias.includes("BUY");
 
+  const bullishConfirm =
+    e4ReversalUp ||
+    e4ExpansionUp ||
+    pressureBias.includes("BUY") ||
+    Number(e3Raw?.reclaimOrFailure ?? 0) >= 7;
+
+  const bearishConfirm =
+    e4ReversalDown ||
+    e4ExpansionDown ||
+    pressureBias.includes("SELL") ||
+    structureState === "FAILURE" ||
+    reasonCodes.includes("FAILURE") ||
+    belowMid ||
+    belowZone;
+
   const e4Conflict = e4?.liquidityTrap === true;
 
   // Priority: FAILURE > rejection > acceptance > none
   if (
     !e4Conflict &&
     (structureState === "FAILURE" || reasonCodes.includes("FAILURE")) &&
-    belowMid
+    (belowMid || belowZone)
   ) {
     return "FAILURE";
   }
 
-  if (
-    !e4Conflict &&
-    touchedUpper &&
-    (upperDominant || belowZone || e4ReversalDown)
-  ) {
+  if (!e4Conflict && touchedUpper && bearishConfirm) {
     return "UPPER_REJECTION";
   }
 
-  if (
-    !e4Conflict &&
-    touchedLower &&
-    (lowerDominant || inZoneNow || e4ReversalUp)
-  ) {
+  if (!e4Conflict && touchedLower && bullishConfirm && !bearishConfirm) {
     return "LOWER_REJECTION";
-  }
-
-  if (!e4Conflict && aboveZone && (e4ExpansionUp || e3?.stage === "ARMED")) {
-    return "ACCEPTANCE";
   }
 
   if (
     !e4Conflict &&
     aboveZone &&
-    String(e3?.stage || "").toUpperCase() === "TRIGGERED"
+    (e4ExpansionUp ||
+      String(e3?.stage || "").toUpperCase() === "ARMED" ||
+      String(e3?.stage || "").toUpperCase() === "TRIGGERED")
   ) {
     return "ACCEPTANCE";
   }
 
-  if (
-    !e4Conflict &&
-    belowZone &&
-    (structureState === "FAILURE" || e4ExpansionDown)
-  ) {
+  if (!e4Conflict && belowZone && bearishConfirm) {
     return "FAILURE";
   }
 
@@ -412,15 +498,14 @@ function scoreMoveType(moveType, info) {
   const e3Raw = e3?.raw ?? null;
   const e4 = engine5bState.e4 ?? null;
   const e4Raw = e4?.raw ?? null;
-  const az = engine5bState.zone?.analysis ?? null;
 
-  const price = getLastPrice();
-  const closePx = Number(engine5bState.lastBar1s?.close);
-  const refPrice = Number.isFinite(closePx) ? closePx : price;
+  const interaction = getInteractionContext();
+  const cz = interaction.zone ?? engine5bState.zone?.analysis ?? null;
+  const refPrice = interaction.refPrice;
 
-  const lo = Number(az?.lo);
-  const hi = Number(az?.hi);
-  const mid = getZoneMid(az);
+  const lo = Number(cz?.lo);
+  const hi = Number(cz?.hi);
+  const mid = getZoneMid(cz);
 
   const candle = e3Raw?.candle || {};
   const upperWick = Number(candle?.upperWick);
@@ -460,13 +545,17 @@ function scoreMoveType(moveType, info) {
     if (Number.isFinite(refPrice) && Number.isFinite(hi) && refPrice <= hi) {
       structurePts += 10;
     }
-    if (pressureBias.includes("SELL")) structurePts += 10;
+    if (pressureBias.includes("SELL")) structurePts += 5;
+    if (flags?.distributionDetected === true) structurePts += 5;
   } else if (moveType === "LOWER_REJECTION") {
     if (lowerWick > body && lowerWick > 0) structurePts += 15;
     if (Number.isFinite(refPrice) && Number.isFinite(lo) && refPrice >= lo) {
       structurePts += 10;
     }
-    if (pressureBias.includes("BUY")) structurePts += 10;
+    if (pressureBias.includes("BUY")) structurePts += 5;
+    if (flags?.absorptionDetected === true || flags?.reversalExpansion === true) {
+      structurePts += 5;
+    }
   } else if (moveType === "FAILURE") {
     if (structureState === "FAILURE") structurePts += 15;
     if (Number.isFinite(refPrice) && Number.isFinite(mid) && refPrice < mid) {
@@ -522,6 +611,8 @@ function recomputeMoveClassification() {
   const moveType = classifyMoveType();
   const moveDirection = directionFromMoveType(moveType);
 
+  const interaction = getInteractionContext();
+
   const combinedInfo = {
     ...aliveInfo,
     ...freshInfo,
@@ -538,6 +629,12 @@ function recomputeMoveClassification() {
   engine5bState.sm.tooExtended = freshInfo.tooExtended;
   engine5bState.sm.staleReason = freshInfo.staleReason;
   engine5bState.sm.eligibilityReason = aliveInfo.eligibilityReason;
+
+  engine5bState.sm.interactionZoneId = interaction.zone?.id ?? null;
+  engine5bState.sm.interactionZoneSource = interaction.zone?.source ?? null;
+  engine5bState.sm.interactionZoneDistPts = Number.isFinite(interaction.distancePts)
+    ? Number(interaction.distancePts.toFixed(4))
+    : null;
 }
 
 async function jget(url) {
@@ -1224,6 +1321,12 @@ export function startEngine5B({ log = console.log } = {}) {
   engine5bState.sm.staleReason = engine5bState.sm.staleReason ?? null;
   engine5bState.sm.eligibilityReason =
     engine5bState.sm.eligibilityReason ?? null;
+  engine5bState.sm.interactionZoneId =
+    engine5bState.sm.interactionZoneId ?? null;
+  engine5bState.sm.interactionZoneSource =
+    engine5bState.sm.interactionZoneSource ?? null;
+  engine5bState.sm.interactionZoneDistPts =
+    engine5bState.sm.interactionZoneDistPts ?? null;
 
   async function safe(fn, label) {
     try {
