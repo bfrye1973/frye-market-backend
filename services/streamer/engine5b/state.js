@@ -62,7 +62,7 @@ export const engine5bState = {
     outsideCount: 0,
     lastDecision: null,
 
-    // ✅ Pass 1 — move classification (informational only)
+    // ✅ move classification
     moveType: "NONE", // NONE | ACCEPTANCE | UPPER_REJECTION | LOWER_REJECTION | FAILURE
     moveScore: 0, // 0..100
     moveDirection: null, // LONG | SHORT | null
@@ -72,6 +72,11 @@ export const engine5bState = {
     tooExtended: false,
     staleReason: null,
     eligibilityReason: null,
+
+    // ✅ debug: which zone was used for classification
+    interactionZoneId: null,
+    interactionZoneSource: null,
+    interactionZoneDistPts: null,
   },
 
   config: {
