@@ -634,24 +634,45 @@ function recomputeMoveClassification() {
 
   const moveScore = scoreMoveType(moveType, combinedInfo);
 
-  engine5bState.sm.moveType = moveType;
-  engine5bState.sm.moveScore = moveScore;
-  engine5bState.sm.moveDirection = moveDirection;
-  engine5bState.sm.setupAlive = aliveInfo.setupAlive;
-  engine5bState.sm.armedValid = freshInfo.armedValid;
-  engine5bState.sm.triggerFresh = freshInfo.triggerFresh;
-  engine5bState.sm.tooExtended = freshInfo.tooExtended;
-  engine5bState.sm.staleReason = freshInfo.staleReason;
-  engine5bState.sm.eligibilityReason = aliveInfo.eligibilityReason;
+ const aliveInfo = computeSetupAliveInfo();
 
-  engine5bState.sm.interactionZoneId = interaction.zone?.id ?? null;
-  engine5bState.sm.interactionZoneSource = interaction.zone?.source ?? null;
-  engine5bState.sm.interactionZoneDistPts = Number.isFinite(
-    interaction.distancePts
-  )
-    ? Number(interaction.distancePts.toFixed(4))
-    : null;
+if (
+  aliveInfo.setupAlive === true &&
+  engine5bState.e3?.stage === "ARMED"
+) {
+  engine5bState.sm.armedAtMs = Date.now();
 }
+
+const freshInfo = computeArmedFreshnessInfo();
+const moveType = classifyMoveType();
+const moveDirection = directionFromMoveType(moveType);
+
+const interaction = getInteractionContext();
+
+const combinedInfo = {
+  ...aliveInfo,
+  ...freshInfo,
+};
+
+const moveScore = scoreMoveType(moveType, combinedInfo);
+
+engine5bState.sm.moveType = moveType;
+engine5bState.sm.moveScore = moveScore;
+engine5bState.sm.moveDirection = moveDirection;
+engine5bState.sm.setupAlive = aliveInfo.setupAlive;
+engine5bState.sm.armedValid = freshInfo.armedValid;
+engine5bState.sm.triggerFresh = freshInfo.triggerFresh;
+engine5bState.sm.tooExtended = freshInfo.tooExtended;
+engine5bState.sm.staleReason = freshInfo.staleReason;
+engine5bState.sm.eligibilityReason = aliveInfo.eligibilityReason;
+
+engine5bState.sm.interactionZoneId = interaction.zone?.id ?? null;
+engine5bState.sm.interactionZoneSource = interaction.zone?.source ?? null;
+engine5bState.sm.interactionZoneDistPts = Number.isFinite(
+  interaction.distancePts
+)
+  ? Number(interaction.distancePts.toFixed(4))
+  : null;
 
 async function jget(url) {
   const r = await fetch(url, {
