@@ -621,10 +621,17 @@ function recomputeMoveClassification() {
   engine5bState.sm = engine5bState.sm || {};
 
   const aliveInfo = computeSetupAliveInfo();
+
+  if (
+    aliveInfo.setupAlive === true &&
+    engine5bState.e3?.stage === "ARMED"
+  ) {
+    engine5bState.sm.armedAtMs = Date.now();
+  }
+
   const freshInfo = computeArmedFreshnessInfo();
   const moveType = classifyMoveType();
   const moveDirection = directionFromMoveType(moveType);
-
   const interaction = getInteractionContext();
 
   const combinedInfo = {
@@ -634,45 +641,24 @@ function recomputeMoveClassification() {
 
   const moveScore = scoreMoveType(moveType, combinedInfo);
 
- const aliveInfo = computeSetupAliveInfo();
+  engine5bState.sm.moveType = moveType;
+  engine5bState.sm.moveScore = moveScore;
+  engine5bState.sm.moveDirection = moveDirection;
+  engine5bState.sm.setupAlive = aliveInfo.setupAlive;
+  engine5bState.sm.armedValid = freshInfo.armedValid;
+  engine5bState.sm.triggerFresh = freshInfo.triggerFresh;
+  engine5bState.sm.tooExtended = freshInfo.tooExtended;
+  engine5bState.sm.staleReason = freshInfo.staleReason;
+  engine5bState.sm.eligibilityReason = aliveInfo.eligibilityReason;
 
-if (
-  aliveInfo.setupAlive === true &&
-  engine5bState.e3?.stage === "ARMED"
-) {
-  engine5bState.sm.armedAtMs = Date.now();
+  engine5bState.sm.interactionZoneId = interaction.zone?.id ?? null;
+  engine5bState.sm.interactionZoneSource = interaction.zone?.source ?? null;
+  engine5bState.sm.interactionZoneDistPts = Number.isFinite(
+    interaction.distancePts
+  )
+    ? Number(interaction.distancePts.toFixed(4))
+    : null;
 }
-
-const freshInfo = computeArmedFreshnessInfo();
-const moveType = classifyMoveType();
-const moveDirection = directionFromMoveType(moveType);
-
-const interaction = getInteractionContext();
-
-const combinedInfo = {
-  ...aliveInfo,
-  ...freshInfo,
-};
-
-const moveScore = scoreMoveType(moveType, combinedInfo);
-
-engine5bState.sm.moveType = moveType;
-engine5bState.sm.moveScore = moveScore;
-engine5bState.sm.moveDirection = moveDirection;
-engine5bState.sm.setupAlive = aliveInfo.setupAlive;
-engine5bState.sm.armedValid = freshInfo.armedValid;
-engine5bState.sm.triggerFresh = freshInfo.triggerFresh;
-engine5bState.sm.tooExtended = freshInfo.tooExtended;
-engine5bState.sm.staleReason = freshInfo.staleReason;
-engine5bState.sm.eligibilityReason = aliveInfo.eligibilityReason;
-
-engine5bState.sm.interactionZoneId = interaction.zone?.id ?? null;
-engine5bState.sm.interactionZoneSource = interaction.zone?.source ?? null;
-engine5bState.sm.interactionZoneDistPts = Number.isFinite(
-  interaction.distancePts
-)
-  ? Number(interaction.distancePts.toFixed(4))
-  : null;
 
 async function jget(url) {
   const r = await fetch(url, {
@@ -721,7 +707,9 @@ async function setGo(payload) {
   engine5bState.go.signal = true;
   engine5bState.go.direction = payload.direction || null;
   engine5bState.go.atUtc = payload.atUtc || nowUtc();
-  engine5bState.go.price = Number.isFinite(payload.price) ? payload.price : null;
+  engine5bState.go.price = Number.isFinite(payload.price)
+    ? payload.price
+    : null;
   engine5bState.go.reason = payload.reason || null;
   engine5bState.go.reasonCodes = Array.isArray(payload.reasonCodes)
     ? payload.reasonCodes
@@ -947,11 +935,7 @@ function pullbackReclaimCheck_1s(closePx) {
 }
 
 function volumeGateOk() {
-  const minScore = clampInt(
-    toIntEnv("ENGINE5B_E4_MIN_SCORE", 6),
-    0,
-    15
-  );
+  const minScore = clampInt(toIntEnv("ENGINE5B_E4_MIN_SCORE", 6), 0, 15);
 
   if (engine5bState.e4?.liquidityTrap === true) return false;
   return Number(engine5bState.e4?.volumeScore ?? 0) >= minScore;
@@ -975,7 +959,11 @@ async function refreshZone() {
     : null;
 
   const z = pickZoneFromEngine1Context(ctx);
-  engine5bState.zone = { ...engine5bState.zone, ...z, refreshedAtUtc: nowUtc() };
+  engine5bState.zone = {
+    ...engine5bState.zone,
+    ...z,
+    refreshedAtUtc: nowUtc(),
+  };
 
   const negotiatedAnalysis = pickNegotiatedAnalysisZone(ctx);
 
@@ -1296,11 +1284,7 @@ export function startEngine5B({ log = console.log } = {}) {
     1000,
     60 * 60 * 1000
   );
-  const E4_MIN_SCORE = clampInt(
-    toIntEnv("ENGINE5B_E4_MIN_SCORE", 6),
-    0,
-    15
-  );
+  const E4_MIN_SCORE = clampInt(toIntEnv("ENGINE5B_E4_MIN_SCORE", 6), 0, 15);
 
   log(
     `[engine5b] starting mode=${engine5bState.config.mode} execute=${engine5bState.config.executeEnabled}`
