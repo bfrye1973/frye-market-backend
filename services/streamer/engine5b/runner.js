@@ -442,29 +442,34 @@ function classifyMoveType() {
     flags?.absorptionDetected === true ||
     pressureBias.includes("BUY");
 
+  const failureSignal =
+    structureState === "FAILURE" || reasonCodes.includes("FAILURE");
+
+  const strongBullishAcceptance =
+    aboveZone &&
+    (e4ExpansionUp ||
+      pressureBias.includes("BUY") ||
+      flags?.absorptionDetected === true ||
+      (Number(e3Raw?.reclaimOrFailure ?? 0) >= 7 && !belowMid && !belowZone));
+
   const bullishConfirm =
     e4ReversalUp ||
     e4ExpansionUp ||
     pressureBias.includes("BUY") ||
-    Number(e3Raw?.reclaimOrFailure ?? 0) >= 7;
+    (Number(e3Raw?.reclaimOrFailure ?? 0) >= 7 && !failureSignal);
 
   const bearishConfirm =
     e4ReversalDown ||
     e4ExpansionDown ||
     pressureBias.includes("SELL") ||
-    structureState === "FAILURE" ||
-    reasonCodes.includes("FAILURE") ||
+    failureSignal ||
     belowMid ||
     belowZone;
 
   const e4Conflict = e4?.liquidityTrap === true;
 
   // Priority: FAILURE > rejection > acceptance > none
-  if (
-    !e4Conflict &&
-    (structureState === "FAILURE" || reasonCodes.includes("FAILURE")) &&
-    (belowMid || belowZone)
-  ) {
+  if (!e4Conflict && failureSignal && !strongBullishAcceptance) {
     return "FAILURE";
   }
 
@@ -515,6 +520,12 @@ function scoreMoveType(moveType, info) {
   const flags = e4Raw?.flags || {};
   const pressureBias = String(e4Raw?.pressureBias || "").toUpperCase();
   const structureState = String(e3Raw?.structureState || "").toUpperCase();
+  const reasonCodes = Array.isArray(e3Raw?.reasonCodes)
+    ? e3Raw.reasonCodes.map((x) => String(x).toUpperCase())
+    : [];
+  const failureSignal =
+    structureState === "FAILURE" || reasonCodes.includes("FAILURE");
+
   const reactionScore = clampInt(Number(e3?.reactionScore ?? 0), 0, 10);
   const volumeScore = clampInt(Number(e4?.volumeScore ?? 0), 0, 15);
 
@@ -553,11 +564,14 @@ function scoreMoveType(moveType, info) {
       structurePts += 10;
     }
     if (pressureBias.includes("BUY")) structurePts += 5;
-    if (flags?.absorptionDetected === true || flags?.reversalExpansion === true) {
+    if (
+      flags?.absorptionDetected === true ||
+      flags?.reversalExpansion === true
+    ) {
       structurePts += 5;
     }
   } else if (moveType === "FAILURE") {
-    if (structureState === "FAILURE") structurePts += 15;
+    if (failureSignal) structurePts += 15;
     if (Number.isFinite(refPrice) && Number.isFinite(mid) && refPrice < mid) {
       structurePts += 10;
     }
@@ -632,7 +646,9 @@ function recomputeMoveClassification() {
 
   engine5bState.sm.interactionZoneId = interaction.zone?.id ?? null;
   engine5bState.sm.interactionZoneSource = interaction.zone?.source ?? null;
-  engine5bState.sm.interactionZoneDistPts = Number.isFinite(interaction.distancePts)
+  engine5bState.sm.interactionZoneDistPts = Number.isFinite(
+    interaction.distancePts
+  )
     ? Number(interaction.distancePts.toFixed(4))
     : null;
 }
