@@ -15,23 +15,43 @@ export const engine5bState = {
   lastTick: null,
   lastBar1s: null,
 
-  e3: { ok: false, stage: "IDLE", armed: false, reactionScore: 0, updatedAtUtc: null, raw: null },
-  e4: { ok: false, volumeScore: 0, volumeConfirmed: false, liquidityTrap: false, updatedAtUtc: null, raw: null },
+  e3: {
+    ok: false,
+    stage: "IDLE",
+    armed: false,
+    reactionScore: 0,
+    updatedAtUtc: null,
+    raw: null,
+  },
+  e4: {
+    ok: false,
+    volumeScore: 0,
+    volumeConfirmed: false,
+    liquidityTrap: false,
+    updatedAtUtc: null,
+    raw: null,
+  },
 
-  risk: { killSwitch: null, paperOnly: null, allowlist: null, updatedAtUtc: null, raw: null },
+  risk: {
+    killSwitch: null,
+    paperOnly: null,
+    allowlist: null,
+    updatedAtUtc: null,
+    raw: null,
+  },
 
   // ✅ GO (display-only; Engine 5B owns scalp GO)
   go: {
     signal: false,
-    direction: null,        // "LONG" | "SHORT"
-    atUtc: null,            // ISO UTC string
-    price: null,            // number
-    reason: null,           // short label
-    reasonCodes: [],        // string[]
-    triggerType: null,      // "PULLBACK_RECLAIM" | "BREAKOUT"
-    triggerLine: null,      // number
-    cooldownUntilMs: null,  // epoch ms
-    _holdUntilMs: null,     // internal
+    direction: null, // "LONG" | "SHORT"
+    atUtc: null, // ISO UTC string
+    price: null, // number
+    reason: null, // short label
+    reasonCodes: [], // string[]
+    triggerType: null, // "PULLBACK_RECLAIM" | "BREAKOUT"
+    triggerLine: null, // number
+    cooldownUntilMs: null, // epoch ms
+    _holdUntilMs: null, // internal
   },
 
   sm: {
@@ -41,15 +61,26 @@ export const engine5bState = {
     cooldownUntilMs: null,
     outsideCount: 0,
     lastDecision: null,
+
+    // ✅ Pass 1 — move classification (informational only)
+    moveType: "NONE", // NONE | ACCEPTANCE | UPPER_REJECTION | LOWER_REJECTION | FAILURE
+    moveScore: 0, // 0..100
+    moveDirection: null, // LONG | SHORT | null
+    setupAlive: false,
+    armedValid: false,
+    triggerFresh: false,
+    tooExtended: false,
+    staleReason: null,
+    eligibilityReason: null,
   },
 
   config: {
-    mode: "monitor",          // monitor | paper
+    mode: "monitor", // monitor | paper
     executeEnabled: false,
     longOnly: true,
 
     breakoutPts: 0.02,
-    persistBars: 1,           // ✅ OPTION A: was 2, now 1 (blink trigger)
+    persistBars: 1, // ✅ OPTION A: was 2, now 1 (blink trigger)
 
     armedWindowMs: 120000,
 
