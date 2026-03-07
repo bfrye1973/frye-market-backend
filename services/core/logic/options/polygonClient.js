@@ -39,6 +39,47 @@ async function fetchJson(url) {
   return json;
 }
 
+export async function polygonListOptionContracts({
+  underlying_ticker,
+  expired = false,
+  limit = 1000,
+  sort = "expiration_date",
+  order = "asc",
+  next_url = null
+}) {
+  if (next_url) return fetchJson(next_url);
+
+  const u = new URL(`${POLYGON_BASE}/v3/reference/options/contracts`);
+  u.searchParams.set("underlying_ticker", underlying_ticker);
+  u.searchParams.set("expired", String(expired));
+  u.searchParams.set("limit", String(limit));
+  u.searchParams.set("sort", sort);
+  u.searchParams.set("order", order);
+
+  return fetchJson(u.toString());
+}
+
+export async function polygonOptionsChainSnapshot({
+  underlying,
+  expiration_date,
+  contract_type,
+  limit = 250,
+  sort = "strike_price",
+  order = "asc",
+  next_url = null
+}) {
+  if (next_url) return fetchJson(next_url);
+
+  const u = new URL(`${POLYGON_BASE}/v3/snapshot/options/${encodeURIComponent(underlying)}`);
+  if (expiration_date) u.searchParams.set("expiration_date", expiration_date);
+  if (contract_type) u.searchParams.set("contract_type", contract_type);
+  u.searchParams.set("limit", String(limit));
+  u.searchParams.set("sort", sort);
+  u.searchParams.set("order", order);
+
+  return fetchJson(u.toString());
+}
+
 export async function polygonLastTrade(ticker) {
   const u = new URL(`${POLYGON_BASE}/v2/last/trade/${encodeURIComponent(ticker)}`);
   const j = await fetchJson(u.toString());
