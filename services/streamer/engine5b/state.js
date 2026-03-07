@@ -40,18 +40,17 @@ export const engine5bState = {
     raw: null,
   },
 
-  // ✅ GO (display-only; Engine 5B owns scalp GO)
   go: {
     signal: false,
     direction: null, // "LONG" | "SHORT"
-    atUtc: null, // ISO UTC string
-    price: null, // number
-    reason: null, // short label
-    reasonCodes: [], // string[]
-    triggerType: null, // "PULLBACK_RECLAIM" | "BREAKOUT"
-    triggerLine: null, // number
-    cooldownUntilMs: null, // epoch ms
-    _holdUntilMs: null, // internal
+    atUtc: null,
+    price: null,
+    reason: null,
+    reasonCodes: [],
+    triggerType: null,
+    triggerLine: null,
+    cooldownUntilMs: null,
+    _holdUntilMs: null,
   },
 
   sm: {
@@ -62,10 +61,9 @@ export const engine5bState = {
     outsideCount: 0,
     lastDecision: null,
 
-    // ✅ move classification
     moveType: "NONE", // NONE | ACCEPTANCE | UPPER_REJECTION | LOWER_REJECTION | FAILURE
-    moveScore: 0, // 0..100
-    moveDirection: null, // LONG | SHORT | null
+    moveScore: 0,
+    moveDirection: null,
     setupAlive: false,
     armedValid: false,
     triggerFresh: false,
@@ -73,19 +71,25 @@ export const engine5bState = {
     staleReason: null,
     eligibilityReason: null,
 
-    // ✅ debug: which zone was used for classification
     interactionZoneId: null,
     interactionZoneSource: null,
     interactionZoneDistPts: null,
+
+    // ✅ Pass 2 — early reversal detector (informational only)
+    earlyReversal: false,
+    earlyReversalDirection: null, // LONG | SHORT | null
+    earlyReversalReason: null,
+    earlyReversalControlMid: null,
+    earlyReversalTouchBarsAgo: null,
   },
 
   config: {
-    mode: "monitor", // monitor | paper
+    mode: "monitor",
     executeEnabled: false,
     longOnly: true,
 
     breakoutPts: 0.02,
-    persistBars: 1, // ✅ OPTION A: was 2, now 1 (blink trigger)
+    persistBars: 1,
 
     armedWindowMs: 120000,
 
@@ -94,8 +98,6 @@ export const engine5bState = {
     e4RefreshMs: 60000,
 
     cooldownMs: 120000,
-
-    // ✅ minimum GO visibility window (ms)
     goHoldMs: Number(process.env.ENGINE5B_GO_HOLD_MS || 120000),
   },
 };
