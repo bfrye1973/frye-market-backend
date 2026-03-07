@@ -25,10 +25,8 @@ import marketNarratorRouter from "./routes/marketNarrator.js";
 import marketNarratorAIRouter from "./routes/marketNarratorAI.js";
 import drawingsRouter from "./routes/drawings.js";
 import optionsScalpRouter from "./routes/optionsScalp.js";
-
-
 import tradingRouter from "./routes/trading.js";
-import optionsRouter from "./routes/options.js";
+
 
 // ✅ NEW: run-all-engines router (default export)
 import runAllEnginesRouter from "./routes/runAllEngines.js";
@@ -122,7 +120,7 @@ app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution s
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 
 app.use("/api/trading", tradingRouter);
-app.use("/api/v1/options", optionsRouter);
+
 
 // Routers mounted under /api/v1
 app.use("/api/v1", engine5ContextRouter);
