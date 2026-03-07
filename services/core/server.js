@@ -24,6 +24,7 @@ import { alertsRouter } from "./routes/alerts.js";
 import marketNarratorRouter from "./routes/marketNarrator.js";
 import marketNarratorAIRouter from "./routes/marketNarratorAI.js";
 import drawingsRouter from "./routes/drawings.js";
+import optionsScalpRouter from "./routes/optionsScalp.js";
 
 
 import tradingRouter from "./routes/trading.js";
@@ -136,6 +137,7 @@ app.use("/api/v1/alerts", alertsRouter);
 app.use("/api/v1", marketNarratorRouter);
 app.use("/api/v1", marketNarratorAIRouter);
 app.use("/api/v1", drawingsRouter);
+app.use("/api/v1/options", optionsScalpRouter);
 
 
 // ✅ run-all-engines (must be in the /api/v1 group)
