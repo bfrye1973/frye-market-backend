@@ -1,85 +1,53 @@
-import { polygonLastTrade } from "./polygonClient.js";
+const POLYGON_BASE = "https://api.polygon.io";
 
-const ALLOWED_SYMBOL = "SPY";
+function getApiKey() {
+  const key =
+    process.env.POLYGON_API_KEY ||
+    process.env.POLY_API_KEY ||
+    process.env.POLYGON_KEY;
 
-function nextTradingDayYmd(fromDate = new Date()) {
-  // Use UTC to stay deterministic on backend
-  const d = new Date(Date.UTC(
-    fromDate.getUTCFullYear(),
-    fromDate.getUTCMonth(),
-    fromDate.getUTCDate()
-  ));
-
-  // move to next day first
-  d.setUTCDate(d.getUTCDate() + 1);
-
-  // skip weekend
-  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) {
-    d.setUTCDate(d.getUTCDate() + 1);
-  }
-
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  if (!key) throw new Error("MISSING_POLYGON_API_KEY");
+  return key;
 }
 
-function biasToRight(bias) {
-  const b = String(bias || "").toLowerCase();
-  if (b === "long") return "CALL";
-  if (b === "short") return "PUT";
-  return null;
+function withApiKey(url) {
+  const u = new URL(url);
+  if (!u.searchParams.has("apiKey")) {
+    u.searchParams.set("apiKey", getApiKey());
+  }
+  return u.toString();
 }
 
-export async function selectScalpOption({ symbol, bias }) {
-  const sym = String(symbol || "").toUpperCase();
-  if (sym !== ALLOWED_SYMBOL) {
-    return {
-      ok: false,
-      reason: "SYMBOL_NOT_ALLOWED",
-      allowed: [ALLOWED_SYMBOL]
-    };
+async function fetchJson(url) {
+  const res = await fetch(withApiKey(url));
+  const text = await res.text();
+
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = { raw: text };
   }
 
-  const right = biasToRight(bias);
-  if (!right) {
-    return {
-      ok: false,
-      reason: "INVALID_BIAS",
-      need: 'bias must be "long" or "short"'
-    };
+  if (!res.ok) {
+    const err = new Error(json?.error || json?.message || `HTTP_${res.status}`);
+    err.status = res.status;
+    err.body = json;
+    throw err;
   }
 
-  const spot = await polygonLastTrade(sym);
-  const last = Number(spot?.last);
+  return json;
+}
 
-  if (!Number.isFinite(last) || last <= 0) {
-    return {
-      ok: false,
-      reason: "SPOT_PRICE_UNAVAILABLE",
-      spot
-    };
-  }
+export async function polygonLastTrade(ticker) {
+  const u = new URL(`${POLYGON_BASE}/v2/last/trade/${encodeURIComponent(ticker)}`);
+  const j = await fetchJson(u.toString());
 
-  const strike = Math.floor(last) + 1;
-  const expiration = nextTradingDayYmd(new Date());
+  const p = Number(j?.results?.p);
+  const t = j?.results?.t ? new Date(j.results.t).toISOString() : null;
 
   return {
-    ok: true,
-    symbol: sym,
-    strategyId: "intraday_scalp@10m",
-    bias,
-    right,
-    underlyingLast: last,
-    selection: {
-      expiration,
-      strike,
-      right
-    },
-    rules: {
-      expiration: "NEXT_TRADING_DAY",
-      strike: "floor(SPY)+1"
-    },
-    ts: new Date().toISOString()
+    last: Number.isFinite(p) ? p : null,
+    ts: t
   };
 }
