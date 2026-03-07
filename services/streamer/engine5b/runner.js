@@ -349,6 +349,166 @@ function getInteractionContext() {
   };
 }
 
+/* -------------------- early reversal helpers -------------------- */
+
+function getTouchBar() {
+  const e4Touch = engine5bState.e4?.raw?.diagnostics?.touchBar ?? null;
+  if (e4Touch) return e4Touch;
+
+  const e3Touch = engine5bState.e3?.raw?.touchBar ?? null;
+  if (e3Touch) return e3Touch;
+
+  return null;
+}
+
+function getTouchBarsAgo() {
+  const t = Number(engine5bState.e4?.raw?.timing?.touchBarsAgo);
+  return Number.isFinite(t) ? t : null;
+}
+
+function computeBarWickMetrics(bar) {
+  const o = Number(bar?.o);
+  const h = Number(bar?.h);
+  const l = Number(bar?.l);
+  const c = Number(bar?.c);
+
+  if (
+    !Number.isFinite(o) ||
+    !Number.isFinite(h) ||
+    !Number.isFinite(l) ||
+    !Number.isFinite(c)
+  ) {
+    return null;
+  }
+
+  const upperWick = h - Math.max(o, c);
+  const lowerWick = Math.min(o, c) - l;
+  const body = Math.abs(c - o);
+  const bodyMid = (o + c) / 2;
+
+  return {
+    o,
+    h,
+    l,
+    c,
+    upperWick,
+    lowerWick,
+    body,
+    bodyMid,
+  };
+}
+
+function computeEarlyReversalSignal() {
+  const interaction = getInteractionContext();
+  const cz = interaction.zone ?? engine5bState.zone?.analysis ?? null;
+  const refPrice = interaction.refPrice;
+
+  const lo = Number(cz?.lo);
+  const hi = Number(cz?.hi);
+  const breakoutPts = Number(engine5bState.config?.breakoutPts || 0.02);
+
+  const e3Raw = engine5bState.e3?.raw ?? null;
+  const e4Raw = engine5bState.e4?.raw ?? null;
+  const flags = e4Raw?.flags || {};
+  const diagnostics = e4Raw?.diagnostics || {};
+  const pressureBias = String(e4Raw?.pressureBias || "").toUpperCase();
+  const structureState = String(e3Raw?.structureState || "").toUpperCase();
+  const reasonCodes = Array.isArray(e3Raw?.reasonCodes)
+    ? e3Raw.reasonCodes.map((x) => String(x).toUpperCase())
+    : [];
+
+  const touchBar = getTouchBar();
+  const tm = computeBarWickMetrics(touchBar);
+  const touchBarsAgo = getTouchBarsAgo();
+  const zonePos01 = Number(diagnostics?.zonePos01);
+
+  if (!tm || !Number.isFinite(lo) || !Number.isFinite(hi)) {
+    return {
+      active: false,
+      direction: null,
+      reason: null,
+      controlMid: null,
+      touchBarsAgo: null,
+    };
+  }
+
+  const recentEnough =
+    Number.isFinite(touchBarsAgo) ? touchBarsAgo <= 1 : true;
+
+  const touchedUpper =
+    (Number.isFinite(zonePos01) && zonePos01 >= 0.65) ||
+    tm.h >= hi - Math.max(breakoutPts, 0.05);
+
+  const touchedLower =
+    (Number.isFinite(zonePos01) && zonePos01 <= 0.35) ||
+    tm.l <= lo + Math.max(breakoutPts, 0.05);
+
+  const upperReject =
+    touchedUpper &&
+    tm.upperWick > tm.body &&
+    Number.isFinite(tm.c) &&
+    tm.c <= hi;
+
+  const lowerReject =
+    touchedLower &&
+    tm.lowerWick > tm.body &&
+    Number.isFinite(tm.c) &&
+    tm.c >= lo;
+
+  const shortConfirm =
+    Number.isFinite(refPrice) &&
+    refPrice < tm.bodyMid &&
+    refPrice < tm.c;
+
+  const longConfirm =
+    Number.isFinite(refPrice) &&
+    refPrice > tm.bodyMid &&
+    refPrice > tm.c;
+
+  const bearishContext =
+    flags?.reversalExpansion === true ||
+    flags?.distributionDetected === true ||
+    pressureBias.includes("SELL") ||
+    structureState === "FAILURE" ||
+    reasonCodes.includes("FAILURE");
+
+  const bullishContext =
+    flags?.absorptionDetected === true ||
+    flags?.reversalExpansion === true ||
+    pressureBias.includes("BUY") ||
+    Number(e3Raw?.reclaimOrFailure ?? 0) >= 7;
+
+  if (recentEnough && upperReject && shortConfirm && bearishContext) {
+    return {
+      active: true,
+      direction: "SHORT",
+      reason: "UPPER_REJECTION_EARLY",
+      controlMid: Number.isFinite(tm.bodyMid) ? Number(tm.bodyMid) : null,
+      touchBarsAgo: Number.isFinite(touchBarsAgo) ? touchBarsAgo : null,
+    };
+  }
+
+  if (recentEnough && lowerReject && longConfirm && bullishContext) {
+    return {
+      active: true,
+      direction: "LONG",
+      reason: "LOWER_REJECTION_EARLY",
+      controlMid: Number.isFinite(tm.bodyMid) ? Number(tm.bodyMid) : null,
+      touchBarsAgo: Number.isFinite(touchBarsAgo) ? touchBarsAgo : null,
+    };
+  }
+
+  return {
+    active: false,
+    direction: null,
+    reason: null,
+    controlMid: Number.isFinite(tm.bodyMid) ? Number(tm.bodyMid) : null,
+    touchBarsAgo: Number.isFinite(touchBarsAgo) ? touchBarsAgo : null,
+  };
+}
+
+/* -------------------- move classification -------------------- */
+
 function classifyMoveType() {
   const e3 = engine5bState.e3 ?? null;
   const e3Raw = e3?.raw ?? null;
@@ -468,7 +628,6 @@ function classifyMoveType() {
 
   const e4Conflict = e4?.liquidityTrap === true;
 
-  // Priority: FAILURE > rejection > acceptance > none
   if (!e4Conflict && failureSignal && !strongBullishAcceptance) {
     return "FAILURE";
   }
@@ -529,10 +688,10 @@ function scoreMoveType(moveType, info) {
   const reactionScore = clampInt(Number(e3?.reactionScore ?? 0), 0, 10);
   const volumeScore = clampInt(Number(e4?.volumeScore ?? 0), 0, 15);
 
-  let structurePts = 0; // /35
-  let reactionPts = 0; // /25
-  let volumePts = 0; // /25
-  let freshnessPts = 0; // /15
+  let structurePts = 0;
+  let reactionPts = 0;
+  let volumePts = 0;
+  let freshnessPts = 0;
 
   if (moveType === "ACCEPTANCE") {
     if (Number.isFinite(refPrice) && Number.isFinite(hi) && refPrice > hi) {
@@ -633,6 +792,7 @@ function recomputeMoveClassification() {
   const moveType = classifyMoveType();
   const moveDirection = directionFromMoveType(moveType);
   const interaction = getInteractionContext();
+  const early = computeEarlyReversalSignal();
 
   const combinedInfo = {
     ...aliveInfo,
@@ -657,6 +817,18 @@ function recomputeMoveClassification() {
     interaction.distancePts
   )
     ? Number(interaction.distancePts.toFixed(4))
+    : null;
+
+  engine5bState.sm.earlyReversal = early.active;
+  engine5bState.sm.earlyReversalDirection = early.direction;
+  engine5bState.sm.earlyReversalReason = early.reason;
+  engine5bState.sm.earlyReversalControlMid = Number.isFinite(early.controlMid)
+    ? Number(early.controlMid.toFixed(4))
+    : null;
+  engine5bState.sm.earlyReversalTouchBarsAgo = Number.isFinite(
+    early.touchBarsAgo
+  )
+    ? early.touchBarsAgo
     : null;
 }
 
@@ -1348,6 +1520,16 @@ export function startEngine5B({ log = console.log } = {}) {
     engine5bState.sm.interactionZoneSource ?? null;
   engine5bState.sm.interactionZoneDistPts =
     engine5bState.sm.interactionZoneDistPts ?? null;
+
+  engine5bState.sm.earlyReversal = engine5bState.sm.earlyReversal ?? false;
+  engine5bState.sm.earlyReversalDirection =
+    engine5bState.sm.earlyReversalDirection ?? null;
+  engine5bState.sm.earlyReversalReason =
+    engine5bState.sm.earlyReversalReason ?? null;
+  engine5bState.sm.earlyReversalControlMid =
+    engine5bState.sm.earlyReversalControlMid ?? null;
+  engine5bState.sm.earlyReversalTouchBarsAgo =
+    engine5bState.sm.earlyReversalTouchBarsAgo ?? null;
 
   async function safe(fn, label) {
     try {
