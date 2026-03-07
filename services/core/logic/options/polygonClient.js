@@ -1,93 +1,85 @@
-const POLYGON_BASE = "https://api.polygon.io";
+import { polygonLastTrade } from "./polygonClient.js";
 
-function getApiKey() {
-  const key = process.env.POLYGON_API_KEY || process.env.POLY_API_KEY || process.env.POLYGON_KEY;
-  if (!key) throw new Error("MISSING_POLYGON_API_KEY");
-  return key;
-}
+const ALLOWED_SYMBOL = "SPY";
 
-function withApiKey(url) {
-  const u = new URL(url);
-  if (!u.searchParams.has("apiKey")) u.searchParams.set("apiKey", getApiKey());
-  return u.toString();
-}
+function nextTradingDayYmd(fromDate = new Date()) {
+  // Use UTC to stay deterministic on backend
+  const d = new Date(Date.UTC(
+    fromDate.getUTCFullYear(),
+    fromDate.getUTCMonth(),
+    fromDate.getUTCDate()
+  ));
 
-async function fetchJson(url) {
-  const res = await fetch(withApiKey(url));
-  const text = await res.text();
-  let json;
-  try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  // move to next day first
+  d.setUTCDate(d.getUTCDate() + 1);
 
-  if (!res.ok) {
-    const msg = json?.error || json?.message || `HTTP_${res.status}`;
-    const err = new Error(msg);
-    err.status = res.status;
-    err.body = json;
-    throw err;
+  // skip weekend
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) {
+    d.setUTCDate(d.getUTCDate() + 1);
   }
-  return json;
+
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-/**
- * GET /v3/reference/options/contracts
- * Used to build expirations list. :contentReference[oaicite:4]{index=4}
- */
-export async function polygonListOptionContracts({
-  underlying_ticker,
-  expired = false,
-  limit = 1000,
-  sort = "expiration_date",
-  order = "asc",
-  next_url = null
-}) {
-  if (next_url) return fetchJson(next_url);
-
-  const u = new URL(`${POLYGON_BASE}/v3/reference/options/contracts`);
-  u.searchParams.set("underlying_ticker", underlying_ticker);
-  u.searchParams.set("expired", String(expired));
-  u.searchParams.set("limit", String(limit));
-  u.searchParams.set("sort", sort);
-  u.searchParams.set("order", order);
-  return fetchJson(u.toString());
+function biasToRight(bias) {
+  const b = String(bias || "").toLowerCase();
+  if (b === "long") return "CALL";
+  if (b === "short") return "PUT";
+  return null;
 }
 
-/**
- * GET /v3/snapshot/options/{underlyingAsset}
- * Chain snapshot with OI/quotes/trades etc. :contentReference[oaicite:5]{index=5}
- */
-export async function polygonOptionsChainSnapshot({
-  underlying,
-  expiration_date,
-  contract_type, // "call" | "put"
-  limit = 250,
-  sort = "strike_price",
-  order = "asc",
-  next_url = null
-}) {
-  if (next_url) return fetchJson(next_url);
+export async function selectScalpOption({ symbol, bias }) {
+  const sym = String(symbol || "").toUpperCase();
+  if (sym !== ALLOWED_SYMBOL) {
+    return {
+      ok: false,
+      reason: "SYMBOL_NOT_ALLOWED",
+      allowed: [ALLOWED_SYMBOL]
+    };
+  }
 
-  const u = new URL(`${POLYGON_BASE}/v3/snapshot/options/${encodeURIComponent(underlying)}`);
-  if (expiration_date) u.searchParams.set("expiration_date", expiration_date);
-  if (contract_type) u.searchParams.set("contract_type", contract_type);
-  u.searchParams.set("limit", String(limit));
-  u.searchParams.set("sort", sort);
-  u.searchParams.set("order", order);
-  return fetchJson(u.toString());
-}
+  const right = biasToRight(bias);
+  if (!right) {
+    return {
+      ok: false,
+      reason: "INVALID_BIAS",
+      need: 'bias must be "long" or "short"'
+    };
+  }
 
-/**
- * Underlying last trade (spot). Lightweight.
- * If this endpoint isn't on your plan, we can swap to another snapshot endpoint.
- */
-export async function polygonLastTrade(ticker) {
-  const u = new URL(`${POLYGON_BASE}/v2/last/trade/${encodeURIComponent(ticker)}`);
-  const j = await fetchJson(u.toString());
+  const spot = await polygonLastTrade(sym);
+  const last = Number(spot?.last);
 
-  const p = Number(j?.results?.p);
-  const t = j?.results?.t ? new Date(j.results.t).toISOString() : null;
+  if (!Number.isFinite(last) || last <= 0) {
+    return {
+      ok: false,
+      reason: "SPOT_PRICE_UNAVAILABLE",
+      spot
+    };
+  }
+
+  const strike = Math.floor(last) + 1;
+  const expiration = nextTradingDayYmd(new Date());
 
   return {
-    last: Number.isFinite(p) ? p : null,
-    ts: t
+    ok: true,
+    symbol: sym,
+    strategyId: "intraday_scalp@10m",
+    bias,
+    right,
+    underlyingLast: last,
+    selection: {
+      expiration,
+      strike,
+      right
+    },
+    rules: {
+      expiration: "NEXT_TRADING_DAY",
+      strike: "floor(SPY)+1"
+    },
+    ts: new Date().toISOString()
   };
 }
