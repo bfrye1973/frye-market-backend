@@ -2,7 +2,7 @@ async function fetchBars(symbol, tf) {
   const baseUrl = getBaseUrl();
   const url = new URL("/api/v1/ohlc", baseUrl);
   url.searchParams.set("symbol", symbol);
-  url.searchParams.set("tf", tf);
+  url.searchParams.set("timeframe", tf);
   url.searchParams.set("limit", "120");
 
   const res = await fetch(url.toString(), {
