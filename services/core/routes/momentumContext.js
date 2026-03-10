@@ -1,14 +1,12 @@
-// momentumContext.js
+// services/core/routes/momentumContext.js
 
-const express = require("express");
-const router = express.Router();
+import express from "express";
+import { buildMomentumContext } from "../logic/engine45/buildMomentumContext.js";
 
-const buildMomentumContext = require(
-  "../logic/engine45/buildMomentumContext"
-);
+export const momentumContextRouter = express.Router();
 
-router.get("/api/v1/momentum-context", async (req, res) => {
-  const symbol = req.query.symbol || "SPY";
+momentumContextRouter.get("/momentum-context", async (req, res) => {
+  const symbol = String(req.query.symbol || "SPY").toUpperCase().trim();
 
   try {
     const result = await buildMomentumContext(symbol);
@@ -17,9 +15,28 @@ router.get("/api/v1/momentum-context", async (req, res) => {
     res.json({
       ok: true,
       symbol,
-      momentumState: "UNKNOWN"
+      smi10m: {
+        k: null,
+        d: null,
+        direction: "UNKNOWN",
+        cross: "NONE",
+      },
+      smi1h: {
+        k: null,
+        d: null,
+        direction: "UNKNOWN",
+        cross: "NONE",
+      },
+      alignment: "MIXED",
+      compression: {
+        active: false,
+        bars: 0,
+        width: 0,
+      },
+      momentumState: "UNKNOWN",
+      detail: String(err?.message || err),
     });
   }
 });
 
-module.exports = router;
+export default momentumContextRouter;
