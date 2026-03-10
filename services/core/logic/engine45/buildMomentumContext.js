@@ -2,6 +2,7 @@
 
 import { computeSMI, detectCross } from "./computeSMI.js";
 import { detectCompression } from "./detectCompression.js";
+import detectCompressionRelease from "./detectCompressionRelease.js";
 
 const CACHE_TTL_MS = 10_000;
 const cache = new Map();
@@ -123,6 +124,29 @@ function round2(v) {
   return Number((Number(v) || 0).toFixed(2));
 }
 
+function buildSlopeBlock(release) {
+  return {
+    smi10m: round2(release?.slope?.smi ?? 0),
+    signal10m: round2(release?.slope?.signal ?? 0),
+    expanding: release?.slope?.expanding === true,
+    widthNow: round2(release?.slope?.widthNow ?? 0),
+    widthPrev: round2(release?.slope?.widthPrev ?? 0),
+  };
+}
+
+function buildCompressionSignalBlock(release) {
+  return {
+    state: String(release?.state || "NONE").toUpperCase(),
+    quality: String(release?.quality || "NONE").toUpperCase(),
+    tightness: Number.isFinite(Number(release?.tightness))
+      ? Number(release.tightness)
+      : 0,
+    releaseBarsAgo:
+      release?.releaseBarsAgo == null ? null : Number(release.releaseBarsAgo),
+    early: release?.early === true,
+  };
+}
+
 function unknownPayload(symbol, detail = null) {
   return {
     ok: true,
@@ -146,6 +170,20 @@ function unknownPayload(symbol, detail = null) {
       width: 0,
     },
     momentumState: "UNKNOWN",
+    compressionSignal: {
+      state: "NONE",
+      quality: "NONE",
+      tightness: 0,
+      releaseBarsAgo: null,
+      early: false,
+    },
+    slope: {
+      smi10m: 0,
+      signal10m: 0,
+      expanding: false,
+      widthNow: 0,
+      widthPrev: 0,
+    },
     ...(detail ? { detail } : {}),
   };
 }
@@ -207,31 +245,67 @@ export async function buildMomentumContext(symbol = "SPY") {
       minBars: 4,
     });
 
+    const release = detectCompressionRelease(
+      smi10.smi,
+      smi10.signal,
+      compression,
+      {
+        lookback: 10,
+        crossWindow: 3,
+      }
+    );
+
     let momentumState = "NORMAL";
+
     if (compression.active && cross10 !== "NONE") {
       momentumState = "EXPANDING";
     } else if (compression.active) {
       momentumState = "COILING";
     }
 
+    // Phase 2 override with better release-state awareness
+    if (
+      release?.state === "RELEASING_UP" ||
+      release?.state === "RELEASING_DOWN"
+    ) {
+      momentumState = "EXPANDING";
+    } else if (release?.state === "COILING") {
+      momentumState = "COILING";
+    }
+
     const result = {
       ok: true,
       symbol: sym,
+
       smi10m: {
         k: round2(k10),
         d: round2(d10),
         direction: dir10,
         cross: cross10,
       },
+
       smi1h: {
         k: round2(k1h),
         d: round2(d1h),
         direction: dir1h,
         cross: cross1h,
       },
+
       alignment: buildAlignment(dir10, dir1h),
-      compression,
+
+      compression: {
+        active: compression.active === true,
+        bars: Number.isFinite(Number(compression?.bars))
+          ? Number(compression.bars)
+          : 0,
+        width: round2(compression?.width ?? 0),
+      },
+
       momentumState,
+
+      compressionSignal: buildCompressionSignalBlock(release),
+
+      slope: buildSlopeBlock(release),
     };
 
     cache.set(sym, { ts: now, data: result });
