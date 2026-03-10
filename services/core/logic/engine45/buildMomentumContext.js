@@ -1,29 +1,44 @@
-// buildMomentumContext.js
+// services/core/logic/engine45/buildMomentumContext.js
 
-const axios = require("axios");
-const { computeSMI, detectCross } = require("./computeSMI");
-const detectCompression = require("./detectCompression");
+import { computeSMI, detectCross } from "./computeSMI.js";
+import { detectCompression } from "./detectCompression.js";
 
-const cache = {};
-const CACHE_TTL = 10000;
+const CACHE_TTL_MS = 10_000;
+const cache = new Map();
+
+const DEFAULT_SETTINGS = {
+  lengthK: 12,
+  lengthD: 7,
+  lengthEMA: 5,
+};
+
+function getBaseUrl() {
+  const port = Number(process.env.PORT) || 8080;
+  return process.env.CORE_INTERNAL_BASE_URL || `http://127.0.0.1:${port}`;
+}
 
 async function fetchBars(symbol, tf) {
-  const res = await axios.get(
-    `http://localhost:10000/api/v1/ohlc`,
-    {
-      params: {
-        symbol,
-        tf,
-        limit: 120
-      }
-    }
-  );
+  const baseUrl = getBaseUrl();
+  const url = new URL("/api/v1/ohlc", baseUrl);
+  url.searchParams.set("symbol", symbol);
+  url.searchParams.set("tf", tf);
+  url.searchParams.set("limit", "120");
 
-  if (!res.data || !res.data.bars) {
-    throw new Error("OHLC fetch failed");
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!res.ok) {
+    throw new Error(`OHLC fetch failed (${tf}) status=${res.status}`);
   }
 
-  return res.data.bars;
+  const data = await res.json();
+  if (!data?.ok || !Array.isArray(data?.bars)) {
+    throw new Error(`OHLC payload invalid (${tf})`);
+  }
+
+  return data.bars;
 }
 
 function buildDirection(k, d) {
@@ -38,39 +53,89 @@ function buildAlignment(dir10, dir1h) {
   return "MIXED";
 }
 
-async function buildMomentumContext(symbol = "SPY") {
-  const cached = cache[symbol];
+function round2(v) {
+  return Number((Number(v) || 0).toFixed(2));
+}
 
-  if (cached && Date.now() - cached.time < CACHE_TTL) {
+function unknownPayload(symbol, detail = null) {
+  return {
+    ok: true,
+    symbol,
+    smi10m: {
+      k: null,
+      d: null,
+      direction: "UNKNOWN",
+      cross: "NONE",
+    },
+    smi1h: {
+      k: null,
+      d: null,
+      direction: "UNKNOWN",
+      cross: "NONE",
+    },
+    alignment: "MIXED",
+    compression: {
+      active: false,
+      bars: 0,
+      width: 0,
+    },
+    momentumState: "UNKNOWN",
+    ...(detail ? { detail } : {}),
+  };
+}
+
+export async function buildMomentumContext(symbol = "SPY") {
+  const sym = String(symbol || "SPY").toUpperCase().trim();
+  const now = Date.now();
+
+  const cached = cache.get(sym);
+  if (cached && now - cached.ts < CACHE_TTL_MS) {
     return cached.data;
   }
 
   try {
-    const bars10m = await fetchBars(symbol, "10m");
-    const bars1h = await fetchBars(symbol, "1h");
+    const [bars10m, bars1h] = await Promise.all([
+      fetchBars(sym, "10m"),
+      fetchBars(sym, "1h"),
+    ]);
 
-    const smi10 = computeSMI(bars10m);
-    const smi1h = computeSMI(bars1h);
+    const smi10 = computeSMI(
+      bars10m,
+      DEFAULT_SETTINGS.lengthK,
+      DEFAULT_SETTINGS.lengthD,
+      DEFAULT_SETTINGS.lengthEMA
+    );
+    const smi1h = computeSMI(
+      bars1h,
+      DEFAULT_SETTINGS.lengthK,
+      DEFAULT_SETTINGS.lengthD,
+      DEFAULT_SETTINGS.lengthEMA
+    );
 
-    const k10 = smi10.smi.at(-1);
-    const d10 = smi10.signal.at(-1);
+    if (!smi10?.smi?.length || !smi10?.signal?.length || !smi1h?.smi?.length || !smi1h?.signal?.length) {
+      const fallback = unknownPayload(sym, "insufficient_smi_data");
+      cache.set(sym, { ts: now, data: fallback });
+      return fallback;
+    }
 
-    const k1h = smi1h.smi.at(-1);
-    const d1h = smi1h.signal.at(-1);
+    const k10 = smi10.smi[smi10.smi.length - 1];
+    const d10 = smi10.signal[smi10.signal.length - 1];
+    const k1h = smi1h.smi[smi1h.smi.length - 1];
+    const d1h = smi1h.signal[smi1h.signal.length - 1];
 
     const dir10 = buildDirection(k10, d10);
     const dir1h = buildDirection(k1h, d1h);
 
-    const cross10 = detectCross(smi10.smi, smi10.signal);
-    const cross1h = detectCross(smi1h.smi, smi1h.signal);
+    const cross10 = detectCross(smi10.smi, smi10.signal, 3);
+    const cross1h = detectCross(smi1h.smi, smi1h.signal, 3);
 
-    const compression = detectCompression(
-      smi10.smi,
-      smi10.signal
-    );
+    const compression = detectCompression(smi10.smi, smi10.signal, {
+      lookback: 10,
+      threshold: 5,
+      minBars: 4,
+    });
 
     let momentumState = "NORMAL";
-
     if (compression.active && cross10 !== "NONE") {
       momentumState = "EXPANDING";
     } else if (compression.active) {
@@ -79,42 +144,29 @@ async function buildMomentumContext(symbol = "SPY") {
 
     const result = {
       ok: true,
-      symbol,
-
+      symbol: sym,
       smi10m: {
-        k: Number(k10.toFixed(2)),
-        d: Number(d10.toFixed(2)),
+        k: round2(k10),
+        d: round2(d10),
         direction: dir10,
-        cross: cross10
+        cross: cross10,
       },
-
       smi1h: {
-        k: Number(k1h.toFixed(2)),
-        d: Number(d1h.toFixed(2)),
+        k: round2(k1h),
+        d: round2(d1h),
         direction: dir1h,
-        cross: cross1h
+        cross: cross1h,
       },
-
       alignment: buildAlignment(dir10, dir1h),
-
       compression,
-
-      momentumState
+      momentumState,
     };
 
-    cache[symbol] = {
-      time: Date.now(),
-      data: result
-    };
-
+    cache.set(sym, { ts: now, data: result });
     return result;
   } catch (err) {
-    return {
-      ok: true,
-      symbol,
-      momentumState: "UNKNOWN"
-    };
+    const fallback = unknownPayload(sym, String(err?.message || err));
+    cache.set(sym, { ts: now, data: fallback });
+    return fallback;
   }
 }
-
-module.exports = buildMomentumContext;
