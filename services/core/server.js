@@ -26,6 +26,7 @@ import marketNarratorAIRouter from "./routes/marketNarratorAI.js";
 import drawingsRouter from "./routes/drawings.js";
 import optionsScalpRouter from "./routes/optionsScalp.js";
 import tradingRouter from "./routes/trading.js";
+import { momentumContextRouter } from "./routes/momentumContext.js";
 
 
 // ✅ NEW: run-all-engines router (default export)
@@ -128,6 +129,7 @@ app.use("/api/v1", fibLevelsRouter);
 app.use("/api/v1", reactionScoreRouter);
 app.use("/api/v1", volumeBehaviorRouter);
 app.use("/api/v1", confluenceScoreRouter);
+app.use("/api/v1", momentumContextRouter);
 app.use("/api/v1", dashboardSnapshotRouter);
 app.use("/api/v1", replayRouter);
 app.use("/api/v1", scalpStatusRouter);
