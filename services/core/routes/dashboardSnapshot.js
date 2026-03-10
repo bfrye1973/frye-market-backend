@@ -3,22 +3,28 @@
 // - Pulls Engine 5 confluence (E1–E4 combined)
 // - Pulls Engine 1 context (WHERE) for optional zoneContext
 // - Calls Engine 6 v1 permission via POST with correct payload
-// - ✅ Adds Engine 2 "Wave Phase" + FibScore block per Strategy card
+// - Adds Engine 2 "Wave Phase" + FibScore block per Strategy card
 //
-// ✅ NEW (DISPLAY ONLY):
+// DISPLAY ONLY:
 // - Adds "NEAR_ALLOWED_ZONE" status when price is within 1.50 pts of an allowed zone
 // - Does NOT change Engine 6 permission rules
-// - Allowed zones for this display: NEGOTIATED + INSTITUTIONAL only (Option 1 locked)
+// - Allowed zones for this display: NEGOTIATED + INSTITUTIONAL only
 //
-// ✅ NEW (ENGINE 6 V2):
+// ENGINE 6 V2:
 // - Fetch MarketMind scores once per snapshot (from MARKETMIND_URL if set)
 // - Calls Engine 6 v2 (/trade-permission-v2) per strategy
 // - Attaches output under strategies[strategyId].engine6v2
-// - Does NOT remove/replace v1 permission (so frontend won’t break)
+// - Does NOT remove/replace v1 permission
 //
-// ✅ CRITICAL FIX (ENGINE 6 V1):
+// ENGINE 6 V1 FIX:
 // - Adds explicit zoneContext.zoneType + zoneContext.withinZone computed from Engine 1 context
-// - This prevents Engine 6 v1 from showing OUT_OF_ALLOWED_ZONES when price is clearly inside an allowed zone
+// - Prevents Engine 6 v1 from showing OUT_OF_ALLOWED_ZONES when price is clearly inside an allowed zone
+//
+// ENGINE 4.5:
+// - Fetches /api/v1/momentum-context once per snapshot
+// - Attaches output at top-level as `momentum`
+// - Also attaches same block to each strategy card as `momentum` for easy frontend use
+// - Does NOT change Engine 5 / Engine 6 scoring yet
 
 import express from "express";
 
@@ -76,6 +82,24 @@ async function postJson(url, body, { timeoutMs = 25000 } = {}) {
   }
 }
 
+async function fetchMomentumContext(base, symbol, { timeoutMs = 12000 } = {}) {
+  const u = new URL(`${base}/api/v1/momentum-context`);
+  u.searchParams.set("symbol", symbol);
+
+  const r = await fetchJson(u.toString(), { timeoutMs });
+  return (
+    r?.json || {
+      ok: false,
+      symbol,
+      smi10m: { k: null, d: null, direction: "UNKNOWN", cross: "NONE" },
+      smi1h: { k: null, d: null, direction: "UNKNOWN", cross: "NONE" },
+      alignment: "MIXED",
+      compression: { active: false, bars: 0, width: 0 },
+      momentumState: "UNKNOWN",
+    }
+  );
+}
+
 // Normalize Engine 5 output → the minimal Engine 6 v1 expects
 function normalizeEngine5ForEngine6(confluenceJson) {
   if (!confluenceJson || typeof confluenceJson !== "object") {
@@ -101,9 +125,8 @@ function normalizeEngine5ForEngine6(confluenceJson) {
 }
 
 /* -------------------------
-   ✅ CRITICAL FIX: Build zoneContext with explicit telemetry for Engine 6 v1
+   Engine 6 v1 zone telemetry helpers
 ------------------------- */
-
 function isInside(price, z) {
   const p = Number(price);
   const lo = Number(z?.lo);
@@ -147,23 +170,15 @@ function buildZoneContext(engine1ContextJson) {
     meta: engine1ContextJson.meta || null,
     active: engine1ContextJson.active || null,
     nearest: engine1ContextJson.nearest || null,
-
-    // ✅ REQUIRED by Engine 6 v1
     zoneType,
     withinZone,
-
-    // Optional: place for flags later (Engine 6 reads zone.flags if provided)
     flags: engine1ContextJson.flags || null,
   };
 }
 
 /* -------------------------
-   ✅ NEW: MarketMind scores (Engine 6 v2 input)
+   MarketMind scores (Engine 6 v2 input)
 ------------------------- */
-
-// Provide a JSON endpoint that returns MarketMind scores (0–100).
-// Expected shape (flexible):
-// { score10m, score1h, score4h, scoreEOD, scoreMaster }
 const MARKETMIND_URL = process.env.MARKETMIND_URL || null;
 
 function toScore(x) {
@@ -197,9 +212,8 @@ async function fetchMarketMindScores({ timeoutMs = 12000 } = {}) {
 }
 
 /* -------------------------
-   ✅ NEW: Near allowed-zone arming (DISPLAY ONLY)
+   Near allowed-zone arming (DISPLAY ONLY)
 ------------------------- */
-
 const NEAR_ALLOWED_ZONE_WINDOW_PTS = 1.5;
 
 function toNum(x) {
@@ -217,7 +231,7 @@ function distToZone(price, z) {
   const b = Math.max(lo, hi);
 
   if (p >= a && p <= b) return 0;
-  return p < a ? (a - p) : (p - b);
+  return p < a ? a - p : p - b;
 }
 
 function nearestAllowedZone({ price, negotiated = [], institutional = [] }) {
@@ -256,13 +270,11 @@ function applyNearAllowedZoneDisplay({ confluence, ctx }) {
     toNum(ctx?.meta?.current_price) ??
     toNum(ctx?.meta?.currentPrice);
 
-  // If no price, can't compute "near"
   if (price == null) return confluence;
 
   const loc = confluence.location || {};
   const state = String(loc.state || "");
 
-  // Only apply when NOT in zone already
   if (state !== "NOT_IN_ZONE") return confluence;
 
   const negotiated = ctx?.render?.negotiated || [];
@@ -272,13 +284,11 @@ function applyNearAllowedZoneDisplay({ confluence, ctx }) {
 
   if (!nearest || !Number.isFinite(nearest.distancePts)) return confluence;
 
-  // We only care about "near" when outside (distance > 0)
   const near =
     nearest.distancePts > 0 &&
     nearest.distancePts <= NEAR_ALLOWED_ZONE_WINDOW_PTS;
 
   if (!near) {
-    // still attach nearest (helpful display/debug) but do NOT change state
     return {
       ...confluence,
       location: {
@@ -295,7 +305,6 @@ function applyNearAllowedZoneDisplay({ confluence, ctx }) {
     };
   }
 
-  // Upgrade display state (still does NOT change Engine 6)
   return {
     ...confluence,
     location: {
@@ -318,15 +327,12 @@ function applyNearAllowedZoneDisplay({ confluence, ctx }) {
 /* -------------------------
    Engine 2 (Fib + Elliott) attach helpers
 ------------------------- */
-
-// Prefer loopback inside backend-1/core for cron + internal calls.
 const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
 
-// LOCKED mapping for Strategy cards (E2 display)
 const ENGINE2_MAP = {
-  intraday_scalp: { degree: "minor", tf: "1h" },        // Scalp card shows Minor 1h
-  minor_swing:    { degree: "intermediate", tf: "1h" }, // Swing card shows Intermediate 1h
-  intermediate_long: { degree: "primary", tf: "1d" },   // Long card shows Primary 1d
+  intraday_scalp: { degree: "minor", tf: "1h" },
+  minor_swing: { degree: "intermediate", tf: "1h" },
+  intermediate_long: { degree: "primary", tf: "1d" },
 };
 
 function bucketForStrategyId(strategyId) {
@@ -350,8 +356,6 @@ async function fetchFibLevels({ symbol, tf, degree, wave }) {
 async function fetchLastBarTimeSec({ symbol, tf }) {
   const u = new URL(`${CORE_BASE}/api/v1/ohlc`);
   u.searchParams.set("symbol", symbol);
-
-  // KEEP EXISTING (do not change): your ohlc route may accept timeframe internally
   u.searchParams.set("timeframe", tf);
   u.searchParams.set("limit", "1");
 
@@ -359,16 +363,23 @@ async function fetchLastBarTimeSec({ symbol, tf }) {
   const j = r?.json;
 
   const bar =
-    (Array.isArray(j) ? j[0] :
-    (Array.isArray(j?.bars) ? j.bars[0] :
-    (Array.isArray(j?.data) ? j.data[0] : null)));
+    Array.isArray(j) ? j[0] :
+    Array.isArray(j?.bars) ? j.bars[0] :
+    Array.isArray(j?.data) ? j.data[0] :
+    null;
 
   const t = Number(bar?.time ?? bar?.t ?? bar?.tSec);
   return Number.isFinite(t) ? t : null;
 }
 
 function calcFibScore(payloadW1, payloadW4) {
-  const p = (payloadW1 && payloadW1.ok) ? payloadW1 : ((payloadW4 && payloadW4.ok) ? payloadW4 : null);
+  const p =
+    payloadW1 && payloadW1.ok
+      ? payloadW1
+      : payloadW4 && payloadW4.ok
+        ? payloadW4
+        : null;
+
   if (!p) return { fibScore: 0, invalidated: false, anchorTag: null };
 
   const invalidated = !!p?.signals?.invalidated;
@@ -383,21 +394,13 @@ function calcFibScore(payloadW1, payloadW4) {
   return { fibScore: score, invalidated: false, anchorTag };
 }
 
-/**
- * ✅ CRITICAL FIX:
- * Reject placeholder marks like {p:0, tSec:null}
- * because Number(null) === 0 which was incorrectly treated as a real time.
- */
 function isRealMark(m) {
   if (!m || typeof m !== "object") return false;
 
   const p = Number(m.p);
   const tSec = m.tSec;
 
-  // SPY marks can’t be price 0; treat <=0 as placeholder
   if (!Number.isFinite(p) || p <= 0) return false;
-
-  // tSec must be a real epoch seconds number (not null)
   if (typeof tSec !== "number" || !Number.isFinite(tSec) || tSec <= 0) return false;
 
   return true;
@@ -436,7 +439,10 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec) {
   let nextKey = null;
   for (let i = lastIdx + 1; i < order.length; i++) {
     const k = order[i];
-    if (marksPresent.includes(k)) { nextKey = k; break; }
+    if (marksPresent.includes(k)) {
+      nextKey = k;
+      break;
+    }
   }
 
   return {
@@ -458,7 +464,6 @@ async function buildEngine2Block({ symbol, degree, tf }) {
 
   const { fibScore, invalidated, anchorTag } = calcFibScore(w1, w4);
 
-  // wave marks usually live under W1 payload; fallback to W4
   const waveMarks =
     (w1?.ok ? w1?.anchors?.waveMarks : null) ||
     (w4?.ok ? w4?.anchors?.waveMarks : null) ||
@@ -473,7 +478,7 @@ async function buildEngine2Block({ symbol, degree, tf }) {
     degree,
     tf,
     ok,
-    waveRequested: (w4?.ok ? "W4" : (w1?.ok ? "W1" : null)),
+    waveRequested: w4?.ok ? "W4" : w1?.ok ? "W1" : null,
     fibScore,
     invalidated,
     phase,
@@ -499,7 +504,6 @@ router.get("/dashboard-snapshot", async (req, res) => {
   const base = getBaseUrl(req);
   const now = new Date().toISOString();
 
-  // ✅ NEW: fetch MarketMind scores once per snapshot (optional, safe if MARKETMIND_URL not set)
   const marketMind = await fetchMarketMindScores().catch(() => ({
     score10m: null,
     score1h: null,
@@ -509,14 +513,22 @@ router.get("/dashboard-snapshot", async (req, res) => {
     _src: "ERR",
   }));
 
-  // LOCKED strategy mappings (existing)
+  const momentum = await fetchMomentumContext(base, symbol).catch(() => ({
+    ok: false,
+    symbol,
+    smi10m: { k: null, d: null, direction: "UNKNOWN", cross: "NONE" },
+    smi1h: { k: null, d: null, direction: "UNKNOWN", cross: "NONE" },
+    alignment: "MIXED",
+    compression: { active: false, bars: 0, width: 0 },
+    momentumState: "UNKNOWN",
+  }));
+
   const strategies = [
     { strategyId: "intraday_scalp@10m", tf: "10m", degree: "minute", wave: "W1" },
     { strategyId: "minor_swing@1h", tf: "1h", degree: "minor", wave: "W1" },
     { strategyId: "intermediate_long@4h", tf: "4h", degree: "intermediate", wave: "W1" },
   ];
 
-  // Step 1: fetch Engine 5 confluence for each strategy
   const confluenceUrls = strategies.map(
     (s) =>
       `${base}/api/v1/confluence-score?symbol=${symbol}&tf=${s.tf}&degree=${s.degree}&wave=${s.wave}`
@@ -524,23 +536,17 @@ router.get("/dashboard-snapshot", async (req, res) => {
 
   const confluenceResp = await Promise.all(confluenceUrls.map((u) => fetchJson(u)));
 
-  // ✅ ALWAYS fetch Engine 1 context per TF (used for NEAR_ALLOWED_ZONE display).
-  // If includeContext=false, we use it internally but do not return it to client.
   const ctxAllResp = await Promise.all(
     strategies.map((s) =>
       fetchJson(`${base}/api/v1/engine5-context?symbol=${symbol}&tf=${s.tf}`)
     )
   );
 
-  // Step 3: call Engine 6 v1 via POST for each strategy (correct payload)
   const permissionUrl = `${base}/api/v1/trade-permission`;
 
   const permissionBodies = strategies.map((s, i) => {
     const con = confluenceResp[i]?.json;
     const engine5 = normalizeEngine5ForEngine6(con);
-
-    // Keep existing includeContext behavior for payload (only attach zoneContext when requested)
-    // ✅ Zone telemetry fix lives inside buildZoneContext()
     const zoneContext = includeContext ? buildZoneContext(ctxAllResp[i]?.json) : null;
 
     return {
@@ -557,7 +563,6 @@ router.get("/dashboard-snapshot", async (req, res) => {
     permissionBodies.map((body) => postJson(permissionUrl, body))
   );
 
-  // ✅ NEW: call Engine 6 v2 MarketMind via POST for each strategy
   const permissionV2Url = `${base}/api/v1/trade-permission-v2`;
 
   const permissionV2Bodies = strategies.map((s, i) => {
@@ -579,20 +584,16 @@ router.get("/dashboard-snapshot", async (req, res) => {
     permissionV2Bodies.map((body) => postJson(permissionV2Url, body))
   );
 
-  // Build output
   const out = {
     ok: true,
     symbol,
     now,
     includeContext,
-
-    // ✅ NEW: for debugging + trust (what Engine 6 v2 saw)
     marketMind,
-
+    momentum,
     strategies: {},
   };
 
-  // Step 4: attach Engine 2 per strategy (LOCKED mapping)
   const engine2Promises = strategies.map(async (s) => {
     const bucket = bucketForStrategyId(s.strategyId);
     const map = bucket ? ENGINE2_MAP[bucket] : null;
@@ -638,10 +639,9 @@ router.get("/dashboard-snapshot", async (req, res) => {
     const permV2 = permissionV2Resp[i];
     const ctx = ctxAllResp[i];
 
-    // ✅ DISPLAY ONLY: apply NEAR_ALLOWED_ZONE based on ctx.render (negotiated + institutional)
     const rawConfluence = con.json || { ok: false, status: con.status, error: con.text };
     const patchedConfluence =
-      (ctx?.ok !== false && ctx?.json)
+      ctx?.ok !== false && ctx?.json
         ? applyNearAllowedZoneDisplay({ confluence: rawConfluence, ctx: ctx.json })
         : rawConfluence;
 
@@ -650,20 +650,16 @@ router.get("/dashboard-snapshot", async (req, res) => {
       tf: s.tf,
       degree: s.degree,
       wave: s.wave,
-
       confluence: patchedConfluence,
-
-      // ✅ existing Engine 6 v1 output (unchanged)
       permission: perm.json || { ok: false, status: perm.status, error: perm.text },
-
-      // ✅ NEW Engine 6 v2 MarketMind output (added, does not break UI)
       engine6v2:
-        permV2?.json || { ok: false, status: permV2?.status || 0, error: permV2?.text || "no_v2" },
-
-      // ✅ NEW: Engine 2 summary block for Strategy cards
+        permV2?.json || {
+          ok: false,
+          status: permV2?.status || 0,
+          error: permV2?.text || "no_v2",
+        },
       engine2: engine2ByStrategy[s.strategyId] || undefined,
-
-      // Preserve existing includeContext output behavior
+      momentum,
       context: includeContext
         ? ctx?.json || { ok: false, status: ctx?.status || 0, error: ctx?.text || "no_context" }
         : undefined,
