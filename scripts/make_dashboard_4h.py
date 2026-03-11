@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_4h.py (R13.7 — BODY-MID EMA posture + DEFENDED reclaim + SPY source = Backend-2 10m)
-
-ONLY CHANGE vs your current file:
-- SPY bars are now sourced from Backend-2 /stream/agg (tf=10m) and aggregated into 4H candles.
-- If Backend-2 is unavailable, we fall back to Polygon 10m (if POLYGON_API_KEY exists).
-- Everything else (SMI/PSI/weights/breadth/liquidity/vol/riskOn/output schema) is unchanged.
+Ferrari Dashboard — make_dashboard_4h.py
+R13.8 — RESPONSIVE 4H BRIDGE FIX
+- SPY bars sourced from Backend-2 /stream/agg-snapshot (tf=10m) and aggregated into 4H candles
+- If Backend-2 is unavailable, falls back to Polygon 4H
+- Keeps output schema unchanged
+- Keeps 4H responsive, but prevents fake bullish inflation during recovery
+- 10 EMA remains directional, but 20/50/200 now control score ceilings
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Tuple, Any
+from typing import Any, List, Optional, Tuple
 
 UTC = timezone.utc
 
@@ -29,13 +30,13 @@ POLY_4H_URL = (
     "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
 )
 
-# Polygon 10m fallback (used only if Backend-2 is unavailable)
+# Polygon 10m fallback (kept available if needed later)
 POLY_10M_URL = (
     "https://api.polygon.io/v2/aggs/ticker/{sym}/range/10/minute/{start}/{end}"
     "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
 )
 
-# ✅ Backend-2 stream agg (this is what your chart uses)
+# Backend-2 stream agg (same chart source)
 B2_STREAM_AGG_BASE = "https://frye-market-backend-2.onrender.com/stream/agg-snapshot"
 B2_TF = os.environ.get("B2_TF_4H_SOURCE", "10m")
 B2_LIMIT = int(os.environ.get("B2_LIMIT_4H_SOURCE", "1200"))
@@ -53,18 +54,18 @@ SMI_EMA_LEN = 5
 SMI_BONUS_MAX = 5
 SMI_BONUS_SCORE_MAX = 3.0
 
-# momentum combo (balanced)
-W_EMA_POSTURE = 0.50
-W_SMI_4H = 0.50
+# momentum combo (responsive, but less 10-EMA-dominant)
+W_EMA_POSTURE = 0.40
+W_SMI_4H = 0.60
 
 # weighted-average score weights (sum=1.00)
-W_EMA_SCORE = 0.35
-W_MOM_SCORE = 0.25
+W_EMA_SCORE = 0.28
+W_MOM_SCORE = 0.27
 W_BREADTH = 0.15
 W_SQUEEZE = 0.10     # score uses EXPANSION as a soft factor
-W_LIQ = 0.07
+W_LIQ = 0.10
 W_VOL = 0.05
-W_RISKON = 0.03
+W_RISKON = 0.05
 
 # ---- SHORT-MEMORY PSI WINDOW (LOCKED INTENT) ----
 PSI_WIN_4H = int(os.environ.get("PSI_WIN_4H", "16"))
@@ -176,7 +177,6 @@ def _coerce_ts_to_sec(t: Any) -> int:
         ti = int(float(t))
     except Exception:
         return 0
-    # if ms (13 digits) convert to sec
     if ti > 2_000_000_000_000:
         return ti // 1000
     return ti
@@ -196,11 +196,9 @@ def _extract_bar_list(js: Any) -> List[Any]:
 def _normalize_bar(b: Any) -> Optional[dict]:
     """
     Accepts common bar shapes and returns dict with:
-    time/open/high/low/close/volume  (time in seconds)
+    time/open/high/low/close/volume (time in seconds)
     """
     if isinstance(b, dict):
-        # Most common possibilities:
-        # {t,o,h,l,c,v} OR {time,open,high,low,close,volume}
         t = b.get("time", b.get("t"))
         o = b.get("open", b.get("o"))
         h = b.get("high", b.get("h"))
@@ -221,7 +219,6 @@ def _normalize_bar(b: Any) -> Optional[dict]:
             "volume": float(v or 0.0),
         }
 
-    # Sometimes bars might arrive as arrays like [t,o,h,l,c,v]
     if isinstance(b, (list, tuple)) and len(b) >= 5:
         ts = _coerce_ts_to_sec(b[0])
         if ts <= 0:
@@ -263,7 +260,6 @@ def fetch_backend2_10m(sym: str, tf: str = "10m", limit: int = 8000, lookback_da
 
     out.sort(key=lambda x: x["time"])
 
-    # filter to lookback window
     if out and lookback_days > 0:
         cutoff = int((datetime.now(UTC) - timedelta(days=int(lookback_days))).timestamp())
         out = [b for b in out if b["time"] >= cutoff]
@@ -299,7 +295,6 @@ def build_4h_from_10m(bars10: List[dict]) -> List[dict]:
             }
         )
 
-    # drop in-flight 4h bar (bucket-based)
     if out:
         now_ts = int(time.time())
         last = out[-1]["time"]
@@ -363,8 +358,12 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
 
 
 def tv_smi_and_signal(
-    H: List[float], L: List[float], C: List[float],
-    lengthK: int, lengthD: int, lengthEMA: int
+    H: List[float],
+    L: List[float],
+    C: List[float],
+    lengthK: int,
+    lengthD: int,
+    lengthEMA: int
 ) -> Tuple[List[float], List[float]]:
     n = len(C)
     if n < max(lengthK, lengthD, lengthEMA) + 5:
@@ -415,6 +414,35 @@ def score_liq(liq: float) -> float:
     return (liq_c / 120.0) * 100.0
 
 
+def apply_structure_soft_cap(
+    score: float,
+    above10: bool,
+    above20: bool,
+    above50: bool,
+    above200: bool,
+) -> float:
+    """
+    Keep 4H responsive, but stop fake bullish inflation during recovery.
+    10 EMA can move the score, but 20/50/200 determine how far that move can go.
+    """
+    cap = 100.0
+
+    if above10 and (not above20) and (not above50) and (not above200):
+        cap = 48.0
+    elif above10 and (not above20) and (not above50) and above200:
+        cap = 54.0
+    elif above10 and above20 and (not above50):
+        cap = 61.0
+    elif above10 and above20 and above50 and (not above200):
+        cap = 67.0
+    elif (not above10) and (not above20) and (not above50) and above200:
+        cap = 46.0
+    elif (not above10) and (not above20) and above50 and above200:
+        cap = 56.0
+
+    return min(score, cap)
+
+
 def compute_overall_weighted(
     ema_posture: float,
     momentum_combo: float,
@@ -425,6 +453,10 @@ def compute_overall_weighted(
     risk_on: float,
     smi_bonus_pts: int,
     ema_sign: int,
+    above10: bool,
+    above20: bool,
+    above50: bool,
+    above200: bool,
 ) -> Tuple[str, float, dict]:
     liq_norm = score_liq(liquidity_val)
     vol_sc = score_vol(vol_scaled)
@@ -447,7 +479,16 @@ def compute_overall_weighted(
     )
     score = clamp(score_raw, 0.0, 100.0)
 
-    # State gate (locked intent)
+    # responsive structure ceiling
+    score = apply_structure_soft_cap(
+        score=score,
+        above10=above10,
+        above20=above20,
+        above50=above50,
+        above200=above200,
+    )
+
+    # State gate (still responsive, but no longer 10-EMA-only)
     state = "bull" if (ema_sign > 0 and score >= 60.0) else ("bear" if (ema_sign < 0 and score < 60.0) else "neutral")
 
     comps = {
@@ -508,12 +549,10 @@ def main():
                 ro_score += 1
     risk_on_4h = round(pct(ro_score, ro_den), 2) if ro_den > 0 else 50.0
 
-    # ✅ SPY bars source (MATCH CHART): Backend-2 tf=10m → build 4H
+    # SPY bars source (MATCH CHART): Backend-2 tf=10m → build 4H
     spy_10m = fetch_backend2_10m("SPY", tf=B2_TF, limit=B2_LIMIT, lookback_days=FETCH_DAYS_4H)
     if not spy_10m:
-        print("[warn] backend-2 10m unavailable; falling back to polygon 10m", flush=True)
-
-        
+        print("[warn] backend-2 10m unavailable; falling back to polygon 10m/4h path", flush=True)
 
     spy_4h = build_4h_from_10m(spy_10m)
 
@@ -531,31 +570,47 @@ def main():
     C = [b["close"] for b in spy_4h]
     V = [b["volume"] for b in spy_4h]
 
-    # EMA10 (computed on closes; posture measured using BODY-MID + reclaim protection)
+    # EMA stack (bridge must know recovery vs true structure)
     e10 = ema_series(C, 10)[-1]
+    e20 = ema_series(C, 20)[-1]
+    e50 = ema_series(C, 50)[-1]
+    e200 = ema_series(C, 200)[-1] if len(C) >= 200 else ema_series(C, min(200, len(C)))[-1]
 
-    # Distances (%)
+    price = float(C[-1])
+    above10 = price > e10
+    above20 = price > e20
+    above50 = price > e50
+    above200 = price > e200
+
+    # Distances (%), still anchored to EMA10 for directional responsiveness
     close_dist_pct = 0.0 if e10 == 0 else 100.0 * (float(C[-1]) - e10) / e10
     body_mid = (float(O[-1]) + float(C[-1])) / 2.0
     body_mid_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_mid - e10) / e10
     body_top = max(float(O[-1]), float(C[-1]))
     body_top_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_top - e10) / e10
 
-    # Reclaim tolerance (default widened to match real defended reclaim)
+    # Reclaim tolerance (kept configurable)
     RECLAIM_TOL_PCT = float(os.environ.get("EMA10_RECLAIM_TOL_PCT", "0.30"))
 
     # Wick reclaim detection
     wick_reclaimed = float(H[-1]) > float(e10)
 
-    # PRIMARY behavior: BODY-MID distance
+    # Primary behavior: BODY-MID distance
     ema_dist_pct = body_mid_dist_pct
 
-    # DEFENDED reclaim: if wick reclaimed and close only slightly below EMA10, do not allow bearish posture crash
+    # Softer defended reclaim:
+    # still avoids a bearish crash, but does not force bullish posture
     if wick_reclaimed and close_dist_pct >= -RECLAIM_TOL_PCT:
-        ema_dist_pct = max(0.0, body_top_dist_pct)
+        ema_dist_pct = max(body_mid_dist_pct, -0.10)
 
-    # Sign + posture
-    ema_sign = 1 if ema_dist_pct > 0 else (-1 if ema_dist_pct < 0 else 0)
+    # EMA sign: still responsive, but not 10-EMA-only
+    if above10 and above20:
+        ema_sign = 1
+    elif (not above10) and (not above20):
+        ema_sign = -1
+    else:
+        ema_sign = 0
+
     ema10_posture = posture_from_dist(ema_dist_pct, FULL_EMA_DIST)
 
     # SMI 12/5/5
@@ -573,7 +628,7 @@ def main():
         elif smi_val < sig_val:
             smi_bonus = -SMI_BONUS_MAX
 
-    # ---- Lux PSI (SHORT-MEMORY WINDOWED) ----
+    # Lux PSI (SHORT-MEMORY WINDOWED)
     Cw = C[-PSI_WIN_4H:] if len(C) > PSI_WIN_4H else C
     psi = lux_psi_from_closes(Cw, conv=50, length=20)
     squeeze_psi_4h = float(psi) if isinstance(psi, (int, float)) else 50.0
@@ -618,6 +673,10 @@ def main():
         risk_on=float(risk_on_4h),
         smi_bonus_pts=int(smi_bonus),
         ema_sign=int(ema_sign),
+        above10=bool(above10),
+        above20=bool(above20),
+        above50=bool(above50),
+        above200=bool(above200),
     )
 
     updated_utc = now_utc_iso()
@@ -638,6 +697,16 @@ def main():
         "ema_body_top_dist_4h_pct": round(float(body_top_dist_pct), 4),
         "ema_wick_reclaimed_4h": bool(wick_reclaimed),
         "ema_reclaim_tol_pct": float(RECLAIM_TOL_PCT),
+
+        # extra EMA stack diagnostics (non-breaking additions)
+        "ema10_4h": round(float(e10), 4),
+        "ema20_4h": round(float(e20), 4),
+        "ema50_4h": round(float(e50), 4),
+        "ema200_4h": round(float(e200), 4),
+        "price_above_ema10_4h": bool(above10),
+        "price_above_ema20_4h": bool(above20),
+        "price_above_ema50_4h": bool(above50),
+        "price_above_ema200_4h": bool(above200),
 
         "smi_4h": round(float(smi_val), 4),
         "smi_signal_4h": round(float(sig_val), 4),
@@ -679,7 +748,7 @@ def main():
     }
 
     out = {
-        "version": "r4h-v7-bodymid-b2-10m-agg",
+        "version": "r4h-v8-responsive-bridge-softcaps",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
@@ -696,7 +765,8 @@ def main():
         f"[4h] score={score:.2f} state={state} emaPost={ema10_posture:.2f} mom={momentum_combo_4h:.2f} "
         f"breadth={breadth_4h:.2f} psi={squeeze_psi_4h:.2f} exp={squeeze_exp_4h:.2f} "
         f"liq={liquidity_4h:.2f} volScaled={vol_scaled:.2f} riskOn={risk_on_4h:.2f} "
-        f"smiBonus={smi_bonus:+d} psiWin={PSI_WIN_4H} reclaimTol={RECLAIM_TOL_PCT}",
+        f"smiBonus={smi_bonus:+d} psiWin={PSI_WIN_4H} reclaimTol={RECLAIM_TOL_PCT} "
+        f"above10={int(above10)} above20={int(above20)} above50={int(above50)} above200={int(above200)}",
         flush=True,
     )
 
