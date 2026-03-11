@@ -427,18 +427,29 @@ def apply_structure_soft_cap(
     """
     cap = 100.0
 
+    # Above 10 only = early bounce, still damaged
     if above10 and (not above20) and (not above50) and (not above200):
-        cap = 48.0
-    elif above10 and (not above20) and (not above50) and above200:
-        cap = 54.0
-    elif above10 and above20 and (not above50):
-        cap = 61.0
-    elif above10 and above20 and above50 and (not above200):
-        cap = 67.0
-    elif (not above10) and (not above20) and (not above50) and above200:
         cap = 46.0
-    elif (not above10) and (not above20) and above50 and above200:
+
+    # Above 10 only, but still above 200 = weak recovery inside better long backdrop
+    elif above10 and (not above20) and (not above50) and above200:
+        cap = 50.0
+
+    # Above 10 + 20, but below 50 = improving, not strong yet
+    elif above10 and above20 and (not above50):
         cap = 56.0
+
+    # Above 10 + 20 + 50, but below 200 = improving with overhead damage
+    elif above10 and above20 and above50 and (not above200):
+        cap = 63.0
+
+    # Below 10/20/50, but above 200 = damaged pullback
+    elif (not above10) and (not above20) and (not above50) and above200:
+        cap = 42.0
+
+    # Below 10/20, but above 50 + 200 = pullback in still-better structure
+    elif (not above10) and (not above20) and above50 and above200:
+        cap = 52.0
 
     return min(score, cap)
 
