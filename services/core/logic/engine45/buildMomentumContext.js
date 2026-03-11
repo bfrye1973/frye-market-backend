@@ -3,6 +3,7 @@
 import { computeSMI, detectCross } from "./computeSMI.js";
 import { detectCompression } from "./detectCompression.js";
 import detectCompressionRelease from "./detectCompressionRelease.js";
+import buildDecisionHint from "./buildDecisionHint.js";
 
 const CACHE_TTL_MS = 10_000;
 const cache = new Map();
@@ -42,7 +43,9 @@ async function fetchBars(symbol, tf) {
     }
 
     throw new Error(
-      `OHLC fetch failed (${tf}) status=${res.status}${detail ? ` detail=${detail.slice(0, 300)}` : ""}`
+      `OHLC fetch failed (${tf}) status=${res.status}${
+        detail ? ` detail=${detail.slice(0, 300)}` : ""
+      }`
     );
   }
 
@@ -184,6 +187,11 @@ function unknownPayload(symbol, detail = null) {
       widthNow: 0,
       widthPrev: 0,
     },
+    decisionHint: {
+      biasAssist: "NEUTRAL",
+      releaseAssist: "NONE",
+      summary: "Momentum context unavailable.",
+    },
     ...(detail ? { detail } : {}),
   };
 }
@@ -239,21 +247,18 @@ export async function buildMomentumContext(symbol = "SPY") {
     const cross10 = detectCross(smi10.smi, smi10.signal, 3);
     const cross1h = detectCross(smi1h.smi, smi1h.signal, 3);
 
+    const alignment = buildAlignment(dir10, dir1h);
+
     const compression = detectCompression(smi10.smi, smi10.signal, {
       lookback: 10,
       threshold: 5,
       minBars: 4,
     });
 
-    const release = detectCompressionRelease(
-      smi10.smi,
-      smi10.signal,
-      compression,
-      {
-        lookback: 10,
-        crossWindow: 3,
-      }
-    );
+    const release = detectCompressionRelease(smi10.smi, smi10.signal, compression, {
+      lookback: 10,
+      crossWindow: 3,
+    });
 
     let momentumState = "NORMAL";
 
@@ -263,7 +268,6 @@ export async function buildMomentumContext(symbol = "SPY") {
       momentumState = "COILING";
     }
 
-    // Phase 2 override with better release-state awareness
     if (
       release?.state === "RELEASING_UP" ||
       release?.state === "RELEASING_DOWN"
@@ -272,6 +276,23 @@ export async function buildMomentumContext(symbol = "SPY") {
     } else if (release?.state === "COILING") {
       momentumState = "COILING";
     }
+
+    const compressionSignal = buildCompressionSignalBlock(release);
+    const slope = buildSlopeBlock(release);
+
+    const decisionHint = buildDecisionHint({
+      alignment,
+      momentumState,
+      compressionSignal,
+      smi10m: {
+        direction: dir10,
+        cross: cross10,
+      },
+      smi1h: {
+        direction: dir1h,
+        cross: cross1h,
+      },
+    });
 
     const result = {
       ok: true,
@@ -291,7 +312,7 @@ export async function buildMomentumContext(symbol = "SPY") {
         cross: cross1h,
       },
 
-      alignment: buildAlignment(dir10, dir1h),
+      alignment,
 
       compression: {
         active: compression.active === true,
@@ -303,9 +324,11 @@ export async function buildMomentumContext(symbol = "SPY") {
 
       momentumState,
 
-      compressionSignal: buildCompressionSignalBlock(release),
+      compressionSignal,
 
-      slope: buildSlopeBlock(release),
+      slope,
+
+      decisionHint,
     };
 
     cache.set(sym, { ts: now, data: result });
