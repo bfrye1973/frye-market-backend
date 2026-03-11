@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_daily.py (EOD v2 — STRUCTURE + LUX PSI (SHORT) + SAFETY GATES)
+Ferrari Dashboard — make_dashboard_daily.py
+EOD v3 — STRUCTURE-FIRST (20/50/200 backbone) + SHORT LUX PSI + SAFETY GATES
 
 LOCKED INTENT:
-- EOD is structure-first (EMA10/20/50) + safety gates.
-- Lux PSI is a short-memory *current-state detector* (NOT long history).
+- EOD is structure-first and slower than 4H.
+- 10 EMA is a minor short-term modifier only.
+- 20 / 50 / 200 are the real daily structure backbone.
+- Lux PSI is a short-memory current-state detector (NOT long history).
 - PSI meaning = tightness (higher = tighter).
 - PSI ≥ 90 => NO ENTRIES (exits allowed).
 - Internals Weak can block entries even if trend is Bull.
-- This is NOT a TradingView clone.
-
-Writes:
-- data/outlook.json  (EOD canonical file for /live/eod)
+- Output schema remains backward compatible for /live/eod.
 """
 
 from __future__ import annotations
@@ -35,28 +35,29 @@ POLY_URL_DAY = (
     "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
 )
 
-SECTOR_ETFS = ["XLK","XLY","XLC","XLP","XLU","XLV","XLRE","XLE","XLF","XLB","XLI"]
+SECTOR_ETFS = ["XLK", "XLY", "XLC", "XLP", "XLU", "XLV", "XLRE", "XLE", "XLF", "XLB", "XLI"]
 
-OFFENSIVE = {"information technology","consumer discretionary","communication services","industrials"}
-DEFENSIVE = {"consumer staples","utilities","health care","real estate"}
+OFFENSIVE = {"information technology", "consumer discretionary", "communication services", "industrials"}
+DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
 
 # --- EOD structure thresholds ---
-EMA10_PULLBACK_TOL = -0.20  # % distance from EMA10 allowed while still "bull" (pullback threshold)
+EMA10_PULLBACK_TOL = -0.20  # kept for diagnostics / minor modifier use
 
 # --- Score weights (sum=1.00) ---
-W_EMA_STRUCT   = 0.60
-W_BREADTH_CONF = 0.25
-W_CONDITIONS   = 0.15
+W_EMA_STRUCT = 0.65
+W_BREADTH_CONF = 0.20
+W_CONDITIONS = 0.15
 
 # --- Lux PSI params (LuxAlgo defaults) ---
 LUX_CONV = 50
-LUX_LEN  = 20
+LUX_LEN = 20
 
 # --- SHORT MEMORY window (2–3 weeks default) ---
 PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "10"))
 
-# --- fetch days (not long) ---
-FETCH_DAYS_SPY = int(os.environ.get("FETCH_DAYS_SPY", "260"))     # enough for EMA50 stability
+# --- fetch days ---
+# Increased SPY default to stabilize EMA200. Still configurable.
+FETCH_DAYS_SPY = int(os.environ.get("FETCH_DAYS_SPY", "420"))
 FETCH_DAYS_SECTORS = int(os.environ.get("FETCH_DAYS_SECTORS", "120"))
 
 # --- internals weak thresholds (LOCKED) ---
@@ -81,7 +82,7 @@ def pct(a: float, b: float) -> float:
 
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "make-eod/2.0", "Cache-Control": "no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent": "make-eod/3.0", "Cache-Control": "no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -105,14 +106,16 @@ def poly_daily_bars(ticker: str, days: int) -> List[dict]:
     out: List[dict] = []
     for r in rows:
         try:
-            out.append({
-                "t": int(r.get("t", 0)) // 1000,
-                "o": float(r.get("o", 0)),
-                "h": float(r.get("h", 0)),
-                "l": float(r.get("l", 0)),
-                "c": float(r.get("c", 0)),
-                "v": float(r.get("v", 0.0)),
-            })
+            out.append(
+                {
+                    "t": int(r.get("t", 0)) // 1000,
+                    "o": float(r.get("o", 0)),
+                    "h": float(r.get("h", 0)),
+                    "l": float(r.get("l", 0)),
+                    "c": float(r.get("c", 0)),
+                    "v": float(r.get("v", 0.0)),
+                }
+            )
         except Exception:
             continue
     return out
@@ -182,7 +185,7 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
 def volatility_atr14_pct(C: List[float], H: List[float], L: List[float]) -> float:
     if len(C) < 20:
         return 20.0
-    trs = [max(H[i]-L[i], abs(H[i]-C[i-1]), abs(L[i]-C[i-1])) for i in range(1, len(C))]
+    trs = [max(H[i] - L[i], abs(H[i] - C[i - 1]), abs(L[i] - C[i - 1])) for i in range(1, len(C))]
     if len(trs) < 14:
         return 20.0
     atr = sum(trs[-14:]) / 14.0
@@ -248,26 +251,100 @@ def daily_breadth_participation_from_sector_etfs() -> Tuple[float, float]:
     return (round(breadth_daily, 2), round(participation, 2))
 
 
-def compute_eod_state(close: float, ema10: float, ema20: float, ema50: float) -> Tuple[str, str]:
-    d10 = dist_pct(close, ema10)
+def compute_stack_score(
+    close: float,
+    ema10: float,
+    ema20: float,
+    ema50: float,
+    ema200: float,
+) -> float:
+    """
+    Stable daily structure ladder.
+    Heavier reward for 200 / 50 / 20 than for 10.
+    """
+    score = 0.0
+
+    if close > ema200:
+        score += 35.0
+    if close > ema50:
+        score += 25.0
+    if close > ema20:
+        score += 20.0
+    if close > ema10:
+        score += 10.0
+
+    if ema10 > ema20:
+        score += 3.0
+    if ema20 > ema50:
+        score += 4.0
+    if ema50 > ema200:
+        score += 3.0
+
+    return clamp(score, 0.0, 100.0)
+
+
+def compute_eod_state(close: float, ema10: float, ema20: float, ema50: float, ema200: float) -> Tuple[str, str]:
+    above10 = close > ema10
     above20 = close > ema20
-    below50 = close < ema50
+    above50 = close > ema50
+    above200 = close > ema200
 
-    if above20:
-        if d10 >= EMA10_PULLBACK_TOL:
+    # strongest daily structure
+    if above20 and above50 and above200:
+        if above10:
             return ("bull", "bull")
+        return ("bull", "pullback")
+
+    # below 20 but above 50/200 = normal pullback, not real damage
+    if (not above20) and above50 and above200:
         return ("neutral", "pullback")
-    if below50:
-        return ("bear", "regime_damage")
-    return ("bear", "bear")
+
+    # above 20 but below 50 while above 200 = transition / recovery
+    if above20 and (not above50) and above200:
+        return ("neutral", "transition")
+
+    # below 50 but above 200 = intermediate damage, but macro still intact
+    if (not above50) and above200:
+        return ("neutral", "intermediate_damage")
+
+    # below 200 = real regime damage
+    return ("bear", "regime_damage")
 
 
-def apply_score_guardrails(state: str, score: float) -> float:
+def apply_eod_score_guardrails(
+    state: str,
+    state_label: str,
+    score: float,
+    above10: bool,
+    above20: bool,
+    above50: bool,
+    above200: bool,
+) -> float:
+    """
+    Keep EOD slower and structural.
+    10 EMA can tweak, but 20/50/200 control the range.
+    """
+    # hard damage
+    if not above200:
+        return clamp(score, 0.0, 45.0)
+
+    # above 200 but below 50 = macro intact, intermediate damage
+    if above200 and (not above50):
+        return clamp(score, 50.0, 60.0)
+
+    # above 50 and above 200, but below 20 = pullback
+    if above50 and above200 and (not above20):
+        return clamp(score, 54.0, 66.0)
+
+    # above 20 / 50 / 200 but below 10 = healthy pullback
+    if above20 and above50 and above200 and (not above10):
+        return clamp(score, 60.0, 74.0)
+
     if state == "bull":
-        return clamp(score, 55.0, 100.0)
+        return clamp(score, 62.0, 100.0)
     if state == "neutral":
-        return clamp(score, 45.0, 65.0)
-    return clamp(score, 0.0, 45.0)
+        return clamp(score, 50.0, 70.0)
+    return clamp(score, 0.0, 48.0)
 
 
 def sector_is_red(card: dict) -> bool:
@@ -325,9 +402,9 @@ def main():
 
     cards = src.get("sectorCards") or []
 
-    # SPY daily bars (modest; enough for EMAs)
+    # SPY daily bars
     bars = poly_daily_bars("SPY", days=FETCH_DAYS_SPY)
-    if len(bars) < 120:
+    if len(bars) < 220:
         print("[fatal] insufficient SPY daily bars", file=sys.stderr)
         sys.exit(2)
 
@@ -340,18 +417,41 @@ def main():
     e10 = ema_series(C, 10)[-1]
     e20 = ema_series(C, 20)[-1]
     e50 = ema_series(C, 50)[-1]
+    e200 = ema_series(C, 200)[-1]
 
     d10 = dist_pct(close, e10)
     d20 = dist_pct(close, e20)
     d50 = dist_pct(close, e50)
+    d200 = dist_pct(close, e200)
 
-    # structure posture components
-    ema10_post = posture_from_dist(d10, 0.60)
-    ema20_post = posture_from_dist(d20, 1.00)
-    ema50_post = posture_from_dist(d50, 2.00)
-    ema_structure = float(clamp(0.50 * ema20_post + 0.30 * ema10_post + 0.20 * ema50_post, 0.0, 100.0))
+    above10 = close > e10
+    above20 = close > e20
+    above50 = close > e50
+    above200 = close > e200
 
-    state, state_label = compute_eod_state(close, e10, e20, e50)
+    # posture components
+    # 10 EMA is intentionally less important here than in 4H
+    ema10_post = posture_from_dist(d10, 0.80)
+    ema20_post = posture_from_dist(d20, 1.20)
+    ema50_post = posture_from_dist(d50, 2.50)
+    ema200_post = posture_from_dist(d200, 4.50)
+
+    stack_score = compute_stack_score(close, e10, e20, e50, e200)
+
+    # slower, structure-first blend
+    ema_structure = float(
+        clamp(
+            0.40 * stack_score
+            + 0.15 * ema10_post
+            + 0.20 * ema20_post
+            + 0.15 * ema50_post
+            + 0.10 * ema200_post,
+            0.0,
+            100.0,
+        )
+    )
+
+    state, state_label = compute_eod_state(close, e10, e20, e50, e200)
 
     # ---- Lux PSI (SHORT MEMORY) ----
     Cw = C[-PSI_WIN_D:] if len(C) > PSI_WIN_D else C
@@ -378,7 +478,15 @@ def main():
     risk_on = compute_sectorcards_risk_on(cards)
 
     score_raw = float(W_EMA_STRUCT * ema_structure + W_BREADTH_CONF * breadth_confirm + W_CONDITIONS * conditions)
-    score = apply_score_guardrails(state, score_raw)
+    score = apply_eod_score_guardrails(
+        state=state,
+        state_label=state_label,
+        score=score_raw,
+        above10=bool(above10),
+        above20=bool(above20),
+        above50=bool(above50),
+        above200=bool(above200),
+    )
 
     # trade gate from PSI regime
     allow_exits = True
@@ -403,6 +511,13 @@ def main():
         "internalsWeak": bool(internals_weak),
         "redSectors": int(red_count),
         "psiWindowDays": int(PSI_WIN_D),
+
+        # new non-breaking diagnostics
+        "stackScore": round(stack_score, 1),
+        "ema10Post": round(ema10_post, 1),
+        "ema20Post": round(ema20_post, 1),
+        "ema50Post": round(ema50_post, 1),
+        "ema200Post": round(ema200_post, 1),
     }
 
     daily = {
@@ -413,9 +528,12 @@ def main():
         "ema10": round(float(e10), 4),
         "ema20": round(float(e20), 4),
         "ema50": round(float(e50), 4),
+        "ema200": round(float(e200), 4),
+
         "d10_pct": round(float(d10), 3),
         "d20_pct": round(float(d20), 3),
         "d50_pct": round(float(d50), 3),
+        "d200_pct": round(float(d200), 3),
 
         "breadthDailyPct": breadth_daily,
         "participationDailyPct": participation_daily,
@@ -456,10 +574,15 @@ def main():
         "ema10": round(float(e10), 6),
         "ema20": round(float(e20), 6),
         "ema50": round(float(e50), 6),
+        "ema200": round(float(e200), 6),
+
         "d10_pct": round(float(d10), 4),
         "d20_pct": round(float(d20), 4),
         "d50_pct": round(float(d50), 4),
+        "d200_pct": round(float(d200), 4),
+
         "ema_structure": round(float(ema_structure), 2),
+        "stack_score": round(float(stack_score), 2),
 
         "breadth_daily_pct": breadth_daily,
         "participation_daily_pct": participation_daily,
@@ -483,6 +606,10 @@ def main():
         "red_sectors_count": int(red_count),
 
         # debug
+        "price_above_ema10": bool(above10),
+        "price_above_ema20": bool(above20),
+        "price_above_ema50": bool(above50),
+        "price_above_ema200": bool(above200),
         "psi_window_days": int(PSI_WIN_D),
         "fetch_days_spy": int(FETCH_DAYS_SPY),
         "fetch_days_sectors": int(FETCH_DAYS_SECTORS),
@@ -516,7 +643,7 @@ def main():
         "sectorCards": cards,
         "engineLights": engineLights,
         "meta": {
-            "source": "make_dashboard_daily.py EOD v2",
+            "source": "make_dashboard_daily.py EOD v3",
             "tz": "America/Phoenix",
         }
     }
@@ -526,8 +653,10 @@ def main():
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
     print(
-        f"[eod] state={state} score={score:.1f} psi={psi:.2f} regime={regime_key} "
-        f"internalsWeak={internals_weak} redSectors={red_count} allowEntries={allow_entries} psiWin={PSI_WIN_D}",
+        f"[eod] state={state} label={state_label} score={score:.1f} raw={score_raw:.1f} "
+        f"psi={psi:.2f} regime={regime_key} internalsWeak={internals_weak} redSectors={red_count} "
+        f"allowEntries={allow_entries} above10={int(above10)} above20={int(above20)} "
+        f"above50={int(above50)} above200={int(above200)} psiWin={PSI_WIN_D}",
         flush=True
     )
 
