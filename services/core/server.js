@@ -27,6 +27,7 @@ import drawingsRouter from "./routes/drawings.js";
 import optionsScalpRouter from "./routes/optionsScalp.js";
 import tradingRouter from "./routes/trading.js";
 import { momentumContextRouter } from "./routes/momentumContext.js";
+import scalpLabRouter from "./routes/scalpLab.js";
 
 
 // ✅ NEW: run-all-engines router (default export)
@@ -138,6 +139,7 @@ app.use("/api/v1", marketNarratorRouter);
 app.use("/api/v1", marketNarratorAIRouter);
 app.use("/api/v1", drawingsRouter);
 app.use("/api/v1/options", optionsScalpRouter);
+app.use("/api/v1", scalpLabRouter);
 
 
 // ✅ run-all-engines (must be in the /api/v1 group)
