@@ -56,8 +56,8 @@ export async function fetchEngine4(symbol, zone) {
   return getJson(ROUTES.ENGINE4, {
     symbol,
     tf: "10m",
-    lo: zone?.lo,
-    hi: zone?.hi,
+    zoneLo: zone?.lo,
+    zoneHi: zone?.hi,
   });
 }
 
