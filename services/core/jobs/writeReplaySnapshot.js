@@ -4,24 +4,28 @@
 //
 // What it does:
 // - Builds a replay snapshot by calling local backend-1 endpoints (SMZ, Fib, Decisions)
-// - Computes Engine 6 permission LOCALLY (no /trade-permission HTTP) ✅
-// - Computes Engine 15 readiness (calls E3 + E4 using deterministic zone bounds) ✅
-// - Writes snapshot even if some parts fail (LOCKED: never crash)
+// - Computes Engine 6 permission LOCALLY (no /trade-permission HTTP)
+// - Computes Engine 15 readiness (calls E3 + E4 using deterministic zone bounds)
+// - Writes snapshot even if some parts fail
 //
-// IMPORTANT FIX (your current issue):
-// - Your container has NO /api/v1/market-meter or /api/v1/live endpoints (all 404).
-// - So market fetch will always fail.
-// - We will NOT let missing market endpoint make snapshotOk=false.
-// - We will still include a safe market object with lastPrice derived from decision.price
-//   so replay UI doesn’t crash.
+// IMPORTANT:
+// - Market endpoints may be unavailable in this container.
+// - We do NOT let missing market endpoint make snapshotOk=false.
+// - We synthesize a safe market object from decision.price so replay UI doesn’t crash.
 //
-// LOCKED: Never crash. If anything fails, write snapshot with ok:false (per section),
-// but still write the file.
+// RENDER-SAFE FIX:
+// - Never default to /var/data
+// - Default replay base dir to writable project data folder
+// - Let writeSnapshot.js append /replay internally if that is its contract
 
 import path from "path";
 import { writeReplaySnapshot } from "../logic/replay/writeSnapshot.js";
 import { computeTradePermission as computeEngine6 } from "../logic/engine6TradePermission.js";
-import { computeReadiness, pickZoneFromDecision, mapStrategyToMode } from "../logic/engine15Readiness.js";
+import {
+  computeReadiness,
+  pickZoneFromDecision,
+  mapStrategyToMode,
+} from "../logic/engine15Readiness.js";
 
 // -------------------------
 // Time helpers (America/Phoenix)
@@ -38,7 +42,10 @@ function azNowParts(date = new Date()) {
     hour12: false,
   });
 
-  const parts = Object.fromEntries(fmt.formatToParts(date).map((p) => [p.type, p.value]));
+  const parts = Object.fromEntries(
+    fmt.formatToParts(date).map((p) => [p.type, p.value])
+  );
+
   const dateYmd = `${parts.year}-${parts.month}-${parts.day}`;
   const timeHHMM = `${parts.hour}${parts.minute}`;
   return { dateYmd, timeHHMM };
@@ -46,28 +53,42 @@ function azNowParts(date = new Date()) {
 
 // -------------------------
 // Replay data directory resolver
+// RENDER-SAFE:
+// - Default to project data directory, NOT /var/data
+// - Do NOT append "replay" here; downstream writer may already do that
 // -------------------------
 function resolveReplayDataDir() {
-  const base = process.env.REPLAY_DATA_DIR || "/var/data";
-  return base.endsWith("/replay") ? base : path.join(base, "replay");
+  return (
+    process.env.REPLAY_DATA_DIR ||
+    "/opt/render/project/src/services/core/data"
+  );
 }
 
 // -------------------------
 // HTTP helpers (Node has global fetch)
 // -------------------------
 async function fetchJson(url) {
-  const res = await fetch(url, { headers: { accept: "application/json" } });
+  const res = await fetch(url, {
+    headers: { accept: "application/json" },
+  });
+
   const text = await res.text();
+
   let json = null;
   try {
     json = text ? JSON.parse(text) : null;
   } catch {
     json = null;
   }
+
   if (!res.ok) {
-    const msg = (json && (json.error || json.message)) || text || `HTTP ${res.status}`;
+    const msg =
+      (json && (json.error || json.message)) ||
+      text ||
+      `HTTP ${res.status}`;
     throw new Error(`${res.status} ${res.statusText}: ${msg}`);
   }
+
   return json;
 }
 
@@ -86,12 +107,12 @@ function selfBaseUrl() {
 }
 
 // -------------------------
-// Build Engine 6 input from decision snapshot (LOCKED mapping)
+// Build Engine 6 input from decision snapshot
 // - Only trade in NEGOTIATED or INSTITUTIONAL zones
 // - Allow "barely outside" with bufferPts = 0.25
 // -------------------------
 function buildEngine6InputFromDecision({ symbol, tf, decision }) {
-  const BUFFER_PTS = 0.25; // ✅ locked choice
+  const BUFFER_PTS = 0.25;
 
   const total = decision?.scores?.total;
   const invalid = Boolean(decision?.invalid);
@@ -99,10 +120,13 @@ function buildEngine6InputFromDecision({ symbol, tf, decision }) {
   const engine5 = {
     total: typeof total === "number" ? total : 0,
     invalid,
-    reasonCodes: Array.isArray(decision?.reasonCodes) ? decision.reasonCodes : [],
+    reasonCodes: Array.isArray(decision?.reasonCodes)
+      ? decision.reasonCodes
+      : [],
   };
 
-  const price = typeof decision?.price === "number" ? decision.price : null;
+  const price =
+    typeof decision?.price === "number" ? decision.price : null;
 
   const ctx = decision?.context || {};
   const e1 = ctx.engine1 || {};
@@ -110,9 +134,7 @@ function buildEngine6InputFromDecision({ symbol, tf, decision }) {
 
   const negotiated = active.negotiated || null;
   const institutional =
-    active.institutional ||
-    ctx.institutionalContainer ||
-    null;
+    active.institutional || ctx.institutionalContainer || null;
 
   function inRange(p, lo, hi, buf) {
     if (typeof p !== "number") return false;
@@ -157,7 +179,7 @@ function buildEngine6InputFromDecision({ symbol, tf, decision }) {
     tf,
     asOf: new Date().toISOString(),
     engine5,
-    marketMeter: null, // v1
+    marketMeter: null,
     zoneContext,
     intent,
   };
@@ -165,16 +187,22 @@ function buildEngine6InputFromDecision({ symbol, tf, decision }) {
 
 function normalizePermissionResult(result) {
   if (!result) return null;
+
   return {
     state: result.permission || "STAND_DOWN",
-    sizeMultiplier: typeof result.sizeMultiplier === "number" ? result.sizeMultiplier : 0,
-    reasonCodes: Array.isArray(result.reasonCodes) ? result.reasonCodes : [],
+    sizeMultiplier:
+      typeof result.sizeMultiplier === "number"
+        ? result.sizeMultiplier
+        : 0,
+    reasonCodes: Array.isArray(result.reasonCodes)
+      ? result.reasonCodes
+      : [],
     debug: result.debug || undefined,
   };
 }
 
 // -------------------------
-// Strategies to store in snapshot (v1)
+// Strategies to store in snapshot
 // -------------------------
 const STRATEGIES = [
   { strategyId: "intraday_scalp@10m", tf: "10m" },
@@ -191,21 +219,24 @@ export async function main() {
   const base = selfBaseUrl();
   const symbol = "SPY";
 
-  // NOTE: Market endpoints are 404 in this container.
-  // We will NOT call a market URL anymore. We will synthesize a safe market object
-  // from decision price so the UI has a lastPrice to render.
-  //
-  // If you later add a real market endpoint, we can re-enable fetch safely.
-
   // Core snapshot sources
-  const smzUrl = `${base}/api/v1/smz-hierarchy?symbol=${encodeURIComponent(symbol)}&tf=10m`;
-  const fibUrl = `${base}/api/v1/fib-levels?symbol=${encodeURIComponent(symbol)}&tf=1h&degree=minor`;
+  const smzUrl =
+    `${base}/api/v1/smz-hierarchy` +
+    `?symbol=${encodeURIComponent(symbol)}` +
+    `&tf=10m`;
+
+  const fibUrl =
+    `${base}/api/v1/fib-levels` +
+    `?symbol=${encodeURIComponent(symbol)}` +
+    `&tf=1h` +
+    `&degree=minor`;
 
   // Decisions for all strategies
   const decisionFetches = STRATEGIES.map(({ strategyId, tf }) => {
     const mode = mapStrategyToMode(strategyId);
     const url =
-      `${base}/api/v1/confluence-score?symbol=${encodeURIComponent(symbol)}` +
+      `${base}/api/v1/confluence-score` +
+      `?symbol=${encodeURIComponent(symbol)}` +
       `&tf=${encodeURIComponent(tf)}` +
       `&strategyId=${encodeURIComponent(strategyId)}` +
       `&mode=${encodeURIComponent(mode)}`;
@@ -221,15 +252,21 @@ export async function main() {
   // Build decisions map
   const decisionByStrategy = {};
   for (let i = 0; i < STRATEGIES.length; i++) {
-    const s = STRATEGIES[i];
+    const strategy = STRATEGIES[i];
     const res = decisionResults[i];
-    decisionByStrategy[s.strategyId] = res.ok ? res.data : { ok: false, error: res.error };
+    decisionByStrategy[strategy.strategyId] = res.ok
+      ? res.data
+      : { ok: false, error: res.error };
   }
 
   // Legacy scalp decision pointer
-  const scalpDecision = decisionByStrategy["intraday_scalp@10m"] || { ok: false, error: "missing scalp decision" };
+  const scalpDecision =
+    decisionByStrategy["intraday_scalp@10m"] || {
+      ok: false,
+      error: "missing scalp decision",
+    };
 
-  // Synthesize market data (safe) from decision price
+  // Synthesize market data safely from decision price
   const inferredPrice =
     typeof scalpDecision?.price === "number"
       ? scalpDecision.price
@@ -252,16 +289,16 @@ export async function main() {
     tsUtc: new Date().toISOString(),
     symbol,
 
-    // market is present so UI won’t crash, but marked ok:false
     market: marketSynthetic,
 
     structure: {
-      smzHierarchy: smzRes.ok ? smzRes.data : { ok: false, error: smzRes.error },
+      smzHierarchy: smzRes.ok
+        ? smzRes.data
+        : { ok: false, error: smzRes.error },
     },
 
     fib: fibRes.ok ? fibRes.data : { ok: false, error: fibRes.error },
 
-    // Legacy + new
     decision: scalpDecision,
     decisions: decisionByStrategy,
 
@@ -274,33 +311,40 @@ export async function main() {
   };
 
   // -------------------------
-  // Compute Engine 6 locally per strategy (LOCKED: never crash)
+  // Compute Engine 6 locally per strategy
   // Writes into: snapshot.decisions[strategyId].permission
   // Keeps legacy: snapshot.decision.permission in sync with scalp
   // -------------------------
   try {
     for (const { strategyId, tf } of STRATEGIES) {
-      const d = snapshot.decisions?.[strategyId];
-      if (d && d.ok) {
-        const e6Input = buildEngine6InputFromDecision({ symbol, tf, decision: d });
+      const decision = snapshot.decisions?.[strategyId];
+
+      if (decision && decision.ok) {
+        const e6Input = buildEngine6InputFromDecision({
+          symbol,
+          tf,
+          decision,
+        });
         const e6Result = computeEngine6(e6Input);
-        d.permission = normalizePermissionResult(e6Result);
-      } else if (d) {
-        d.permission = null;
+        decision.permission = normalizePermissionResult(e6Result);
+      } else if (decision) {
+        decision.permission = null;
       }
     }
 
     if (snapshot.decision && snapshot.decision.ok) {
       snapshot.decision.permission =
-        snapshot.decisions?.["intraday_scalp@10m"]?.permission ?? snapshot.decision.permission ?? null;
+        snapshot.decisions?.["intraday_scalp@10m"]?.permission ??
+        snapshot.decision.permission ??
+        null;
     } else if (snapshot.decision) {
       snapshot.decision.permission = null;
     }
   } catch (e) {
     for (const { strategyId } of STRATEGIES) {
-      const d = snapshot.decisions?.[strategyId];
-      if (d && d.ok && !d.permission) {
-        d.permission = {
+      const decision = snapshot.decisions?.[strategyId];
+      if (decision && decision.ok && !decision.permission) {
+        decision.permission = {
           state: "STAND_DOWN",
           sizeMultiplier: 0,
           reasonCodes: ["ENGINE6_COMPUTE_ERROR"],
@@ -309,7 +353,11 @@ export async function main() {
       }
     }
 
-    if (snapshot.decision && snapshot.decision.ok && !snapshot.decision.permission) {
+    if (
+      snapshot.decision &&
+      snapshot.decision.ok &&
+      !snapshot.decision.permission
+    ) {
       snapshot.decision.permission = {
         state: "STAND_DOWN",
         sizeMultiplier: 0,
@@ -320,29 +368,25 @@ export async function main() {
   }
 
   // -------------------------
-  // Compute Engine 15 readiness per strategy (Replay deterministic)
-  // - Calls E3 (/reaction-score) using lo/hi (required today)
-  // - Calls E4 (/volume-behavior) using zoneLo/zoneHi (required)
-  // - Uses Engine 6 permission already attached into decision.permission
-  //
-  // LOCKED: Never crash. If anything fails, store ok:false.
+  // Compute Engine 15 readiness per strategy
+  // - Calls E3 (/reaction-score) using lo/hi
+  // - Calls E4 (/volume-behavior) using zoneLo/zoneHi
   // -------------------------
   try {
     const engine15ByStrategy = {};
 
     for (const { strategyId, tf } of STRATEGIES) {
-      const d = snapshot.decisions?.[strategyId];
+      const decision = snapshot.decisions?.[strategyId];
       const mode = mapStrategyToMode(strategyId);
 
       const price =
-        (typeof d?.price === "number" ? d.price : null) ??
+        (typeof decision?.price === "number" ? decision.price : null) ??
         inferredPrice ??
         null;
 
-      // IMPORTANT: We pick zone deterministically from decision.context (Replay safe)
-      const zone = d && d.ok ? pickZoneFromDecision(d) : null;
+      const zone =
+        decision && decision.ok ? pickZoneFromDecision(decision) : null;
 
-      // If no zone exists, still store readiness object (WAIT)
       if (!zone || !Number.isFinite(zone.lo) || !Number.isFinite(zone.hi)) {
         engine15ByStrategy[strategyId] = computeReadiness({
           symbol,
@@ -352,13 +396,14 @@ export async function main() {
           zone: null,
           engine3: null,
           engine4: null,
-          permission: d?.permission || null,
+          permission: decision?.permission || null,
         });
         continue;
       }
 
       const e3Url =
-        `${base}/api/v1/reaction-score?symbol=${encodeURIComponent(symbol)}` +
+        `${base}/api/v1/reaction-score` +
+        `?symbol=${encodeURIComponent(symbol)}` +
         `&tf=${encodeURIComponent(tf)}` +
         `&mode=${encodeURIComponent(mode)}` +
         `&lo=${encodeURIComponent(zone.lo)}` +
@@ -366,7 +411,8 @@ export async function main() {
         `&strategyId=${encodeURIComponent(strategyId)}`;
 
       const e4Url =
-        `${base}/api/v1/volume-behavior?symbol=${encodeURIComponent(symbol)}` +
+        `${base}/api/v1/volume-behavior` +
+        `?symbol=${encodeURIComponent(symbol)}` +
         `&tf=${encodeURIComponent(tf)}` +
         `&mode=${encodeURIComponent(mode)}` +
         `&zoneLo=${encodeURIComponent(zone.lo)}` +
@@ -377,8 +423,13 @@ export async function main() {
         safeFetch(`engine4:${strategyId}`, e4Url),
       ]);
 
-      const engine3 = e3Res.ok ? e3Res.data : { ok: false, error: e3Res.error };
-      const engine4 = e4Res.ok ? e4Res.data : { ok: false, error: e4Res.error };
+      const engine3 = e3Res.ok
+        ? e3Res.data
+        : { ok: false, error: e3Res.error };
+
+      const engine4 = e4Res.ok
+        ? e4Res.data
+        : { ok: false, error: e4Res.error };
 
       engine15ByStrategy[strategyId] = computeReadiness({
         symbol,
@@ -388,7 +439,7 @@ export async function main() {
         zone,
         engine3,
         engine4,
-        permission: d?.permission || null,
+        permission: decision?.permission || null,
       });
     }
 
@@ -408,17 +459,22 @@ export async function main() {
   }
 
   // -------------------------
-  // Overall ok (still writes even if false)
-  //
-  // IMPORTANT FIX:
-  // - Do NOT require market.ok (it is always false because endpoint is missing)
-  // - Snapshot ok should reflect core deterministic sources only:
-  //   smz + fib + all decisions
+  // Overall ok
+  // - Do NOT require market.ok
+  // - Snapshot ok reflects deterministic core sources only
   // -------------------------
-  const allDecisionsOk = STRATEGIES.every(({ strategyId }) => snapshot.decisions?.[strategyId]?.ok);
+  const allDecisionsOk = STRATEGIES.every(
+    ({ strategyId }) => snapshot.decisions?.[strategyId]?.ok
+  );
+
   snapshot.ok = Boolean(smzRes.ok && fibRes.ok && allDecisionsOk);
 
-  const result = writeReplaySnapshot({ dataDir, dateYmd, timeHHMM, snapshot });
+  const result = writeReplaySnapshot({
+    dataDir,
+    dateYmd,
+    timeHHMM,
+    snapshot,
+  });
 
   console.log(
     JSON.stringify(
