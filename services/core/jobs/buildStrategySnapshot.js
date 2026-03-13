@@ -11,7 +11,9 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = path.resolve(__dirname, "../data");
 const SNAPSHOT_FILE = path.resolve(DATA_DIR, "strategy-snapshot.json");
 
-const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
+const CORE_BASE =
+  process.env.CORE_BASE ||
+  "https://frye-market-backend-1.onrender.com";
 const symbol = "SPY";
 
 async function fetchJson(url) {
