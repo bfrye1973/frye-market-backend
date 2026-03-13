@@ -49,12 +49,25 @@ async function fetchBars(symbol, tf) {
     );
   }
 
-  const data = await res.json();
+ const data = await res.json();
 
-  console.log(
-    `[engine45] OHLC ${tf} payload:`,
-    JSON.stringify(data).slice(0, 500)
-  );
+ // Safe debug logging (disabled unless explicitly enabled)
+ const DEBUG_ENGINE45 =
+   String(process.env.DEBUG_ENGINE45 || "").toLowerCase() === "true";
+
+ if (DEBUG_ENGINE45) {
+   const bars = Array.isArray(data)
+     ? data
+     : Array.isArray(data?.bars)
+     ? data.bars
+     : Array.isArray(data?.data?.bars)
+     ? data.data.bars
+     : Array.isArray(data?.rows)
+     ? data.rows
+     : [];
+
+   console.log(`[engine45] OHLC ${tf} bars: ${bars.length}`);
+ }
 
   let bars = null;
 
