@@ -13,7 +13,7 @@ const SNAPSHOT_FILE = path.resolve(DATA_DIR, "strategy-snapshot.json");
 
 const CORE_BASE =
   process.env.CORE_BASE ||
-  "https://frye-market-backend-1.onrender.com";
+  "http://127.0.0.1:10000";
 const symbol = "SPY";
 
 async function fetchJson(url) {
