@@ -2,14 +2,15 @@
 // Stable snapshot builder (SPY only)
 
 import fs from "fs";
-import path from "path";
 import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+/* -----------------------------
+   Absolute snapshot path
+------------------------------*/
 
-const DATA_DIR = path.resolve(__dirname, "../data");
-const SNAPSHOT_FILE = path.resolve(DATA_DIR, "strategy-snapshot.json");
+// IMPORTANT: force the correct Render path
+const DATA_DIR = "/opt/render/project/src/services/core/data";
+const SNAPSHOT_FILE = `${DATA_DIR}/strategy-snapshot.json`;
 
 const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
 const symbol = "SPY";
@@ -87,7 +88,7 @@ const STRATEGIES = [
 ];
 
 /* -----------------------------
-   Process one strategy
+   Process a single strategy
 ------------------------------*/
 async function processStrategy(s, momentum, marketMind) {
 
@@ -179,8 +180,10 @@ async function buildSnapshot() {
     result.strategies[s.strategyId] = s;
   });
 
+  /* Ensure data folder exists */
   fs.mkdirSync(DATA_DIR, { recursive: true });
 
+  /* Write snapshot */
   fs.writeFileSync(
     SNAPSHOT_FILE,
     JSON.stringify(result, null, 2)
