@@ -1,6 +1,7 @@
 // services/core/routes/engine5Context.js
 // Engine 1 — LOCATION CONTEXT ONLY (LOCKED)
 // Option A fix: attach TRUE institutional strength to active.institutional (no formula changes)
+// + Engine 14 advisory context attached to response
 
 import express from "express";
 import fs from "fs";
@@ -19,7 +20,12 @@ const SHELVES_FILE = path.resolve(__dirname, "../data/smz-shelves.json");
 const SHELF_PERSIST_HOURS = 48;
 const MAX_SHELVES_PER_GAP = 2;
 const REPLACEMENT_STRENGTH_DELTA = 7;
-const INST_OVERLAP_TOLERANCE = 0.50;
+const INST_OVERLAP_TOLERANCE = 0.5;
+
+const CORE_BASE =
+  process.env.ENGINE14_CORE_BASE ||
+  process.env.CORE_BASE ||
+  `http://127.0.0.1:${process.env.PORT || 10000}`;
 
 // ---------------- HELPERS ----------------
 function round2(n) {
@@ -63,7 +69,7 @@ function priceInside(price, z) {
   return price >= z.lo && price <= z.hi;
 }
 
-// ✅ Canonical ID detection (matches frontend overlay behavior)
+// Canonical ID detection (matches frontend overlay behavior)
 function zoneId(z) {
   return String(
     z?.details?.id ??
@@ -78,7 +84,6 @@ function isNegotiatedZone(z) {
   return zoneId(z).includes("|NEG|");
 }
 
-// Distance from price to shelf edge (for nearest)
 function shelfDistance(price, shelf) {
   if (priceInside(price, shelf)) return { side: "INSIDE", distancePts: 0 };
   if (price > shelf.hi) return { side: "ABOVE", distancePts: round2(price - shelf.hi) };
@@ -90,8 +95,53 @@ function toNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
+async function fetchEngine14(symbol) {
+  try {
+    const url = new URL("/api/v1/scalp-lab", CORE_BASE);
+    url.searchParams.set("symbol", symbol);
+
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      headers: { accept: "application/json" },
+    });
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `ENGINE14_HTTP_${res.status}`,
+      };
+    }
+
+    const json = await res.json();
+
+    return {
+      ok: Boolean(json?.ok),
+      setup: json?.setup || null,
+      candleQuality: json?.candleQuality || null,
+      candlePattern: json?.candlePattern || null,
+      momentum: json?.momentum
+        ? {
+            smi10m: json.momentum.smi10m || null,
+            smi1h: json.momentum.smi1h || null,
+            alignment: json.momentum.alignment || null,
+            conflict: json.momentum.conflict || null,
+          }
+        : null,
+      zone: json?.zone || null,
+      price: json?.price || null,
+      asOf: json?.asOf || null,
+      labState: json?.labState || null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err?.message || "ENGINE14_FETCH_FAILED",
+    };
+  }
+}
+
 // ---------------- ROUTE ----------------
-router.get("/engine5-context", (req, res) => {
+router.get("/engine5-context", async (req, res) => {
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
   if (symbol !== "SPY") {
     return res.json({
@@ -109,7 +159,6 @@ router.get("/engine5-context", (req, res) => {
     levelsJson?.meta?.generated_at_utc ||
     new Date().toISOString();
 
-  // Prefer shelves job anchor (it’s what you already use operationally)
   const currentPrice =
     shelvesJson?.meta?.current_price_anchor ??
     levelsJson?.meta?.current_price ??
@@ -141,7 +190,6 @@ router.get("/engine5-context", (req, res) => {
       const r = normalizeRange(z?.priceRange);
       if (!r) return null;
 
-      // ✅ Option A: carry the already-computed Engine 1 strength forward
       const strength =
         toNum(z?.strength) ??
         toNum(z?.details?.strength) ??
@@ -153,8 +201,8 @@ router.get("/engine5-context", (req, res) => {
         lo: r.lo,
         hi: r.hi,
         mid: r.mid,
-        strength, // ✅ crucial
-        details: z?.details ?? null, // keep for dead/archived facts if needed later
+        strength,
+        details: z?.details ?? null,
       };
     })
     .filter(Boolean)
@@ -211,11 +259,9 @@ router.get("/engine5-context", (req, res) => {
     const r = normalizeRange(s?.priceRange);
     if (!r) continue;
 
-    // 48h persistence (based on shelves job timestamp)
     const updatedUtc = shelvesJson?.meta?.generated_at_utc;
     if (!updatedUtc || hoursSince(updatedUtc) > SHELF_PERSIST_HOURS) continue;
 
-    // Institutional overlap tolerance: block only if penetration > $0.50
     let blocked = false;
     for (const inst of institutional) {
       const p = penetrationDepth(r, inst);
@@ -226,7 +272,6 @@ router.get("/engine5-context", (req, res) => {
     }
     if (blocked) continue;
 
-    // Assign gap by midpoint (only between institutionals)
     const gap = gaps.find((g) => r.mid <= g.hi && r.mid >= g.lo);
     if (!gap) continue;
 
@@ -253,7 +298,6 @@ router.get("/engine5-context", (req, res) => {
     for (let i = 0; i < list.length; i++) {
       const old = list[i];
 
-      // manual shelf cannot be replaced by auto
       if (old.isManual && !shelf.isManual) continue;
 
       const delta = shelf.strength - old.strength;
@@ -295,7 +339,7 @@ router.get("/engine5-context", (req, res) => {
     }
   }
 
-  // ---------------- NEAREST SHELF (when not active) ----------------
+  // ---------------- NEAREST SHELF ----------------
   let nearestShelf = null;
   if (Number.isFinite(currentPrice) && !activeShelf && Array.isArray(shelves) && shelves.length) {
     const ranked = shelves
@@ -305,7 +349,7 @@ router.get("/engine5-context", (req, res) => {
       })
       .sort((a, b) => {
         if (a.distancePts !== b.distancePts) return a.distancePts - b.distancePts;
-        return Number(b.s?.strength ?? 0) - Number(a.s?.strength ?? 0);
+        return Number(b?.s?.strength ?? 0) - Number(a?.s?.strength ?? 0);
       });
 
     const best = ranked[0];
@@ -317,6 +361,9 @@ router.get("/engine5-context", (req, res) => {
       };
     }
   }
+
+  // ---------------- ENGINE 14 ADVISORY ----------------
+  const engine14 = await fetchEngine14(symbol);
 
   // ---------------- RESPONSE ----------------
   return res.json({
@@ -334,20 +381,24 @@ router.get("/engine5-context", (req, res) => {
     },
     render: {
       negotiated,
-      institutional: institutional.map(({ details, ...rest }) => rest), // don’t leak huge details by default
+      institutional: institutional.map(({ details, ...rest }) => rest),
       shelves,
     },
     active: {
       negotiated: activeNegotiated,
       shelf: activeShelf,
-      institutional: activeInstitutional ? (() => {
-        // Keep details on active only (used for dead/archived checks)
-        const { details, ...rest } = activeInstitutional;
-        return { ...rest, details: details ?? null };
-      })() : null,
+      institutional: activeInstitutional
+        ? (() => {
+            const { details, ...rest } = activeInstitutional;
+            return { ...rest, details: details ?? null };
+          })()
+        : null,
     },
     nearest: {
       shelf: nearestShelf,
+    },
+    advisory: {
+      engine14,
     },
   });
 });
