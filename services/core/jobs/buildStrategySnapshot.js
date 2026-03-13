@@ -22,7 +22,7 @@ function nowIso() {
 /* -----------------------------
    Safe HTTP GET
 ------------------------------*/
-async function fetchJson(url, timeoutMs = 15000) {
+async function fetchJson(url, timeoutMs = 30000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -50,7 +50,7 @@ async function fetchJson(url, timeoutMs = 15000) {
 /* -----------------------------
    Safe HTTP POST
 ------------------------------*/
-async function postJson(url, body, timeoutMs = 15000) {
+async function postJson(url, body, timeoutMs = 30000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
