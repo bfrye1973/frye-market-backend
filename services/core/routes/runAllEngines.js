@@ -12,133 +12,232 @@ const __dirname = path.dirname(__filename);
 // We run everything from services/core
 const CORE_DIR = path.resolve(__dirname, "..");
 
-// New Engine 1 runner (your updated canonical command)
+// Canonical jobs
 const ENGINE1_RUNNER = path.resolve(CORE_DIR, "jobs/runEngine1AndShelves.js");
-
-// Existing master runner (keeps everything else intact)
 const JOB_SCRIPT_ALL = path.resolve(CORE_DIR, "jobs/runAllEngines.sh");
-
-// ✅ NEW: Replay cadence snapshot writer (HHMM.json)
 const REPLAY_SNAPSHOT_JOB = path.resolve(CORE_DIR, "jobs/writeReplaySnapshot.js");
 
-// ✅ NEW: simple overlap guard to prevent concurrent runs (cron + manual)
+// Overlap guard
 let IS_RUNNING = false;
+let LAST_RUN = {
+  startedAt: null,
+  endedAt: null,
+  ok: null,
+  step: null,
+  error: null,
+};
 
-// 🔒 optional token gate (works for both GET and POST)
+// Optional token gate
 function checkToken(req) {
   const expected = process.env.ENGINE_CRON_TOKEN;
-  if (!expected) return { ok: true }; // allow if not set (dev)
+  if (!expected) return { ok: true };
   const got = req.header("X-ENGINE-CRON-TOKEN") || req.query.token || "";
   if (got !== expected) return { ok: false, status: 401, msg: "Unauthorized" };
   return { ok: true };
 }
 
-function runStep({ cmd, args, cwd }) {
+function runStep({ cmd, args, cwd, label }) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, env: process.env });
+    const child = spawn(cmd, args, {
+      cwd,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
 
-    child.stdout.on("data", (d) => (stdout += d.toString()));
-    child.stderr.on("data", (d) => (stderr += d.toString()));
+    child.stdout.on("data", (d) => {
+      const s = d.toString();
+      stdout += s;
+      process.stdout.write(`[run-all-engines][${label}][stdout] ${s}`);
+    });
+
+    child.stderr.on("data", (d) => {
+      const s = d.toString();
+      stderr += s;
+      process.stderr.write(`[run-all-engines][${label}][stderr] ${s}`);
+    });
+
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      resolve({
+        code: 999,
+        stdout,
+        stderr: `${stderr}\nSpawn error: ${err.message}`,
+      });
+    });
 
     child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
       resolve({ code, stdout, stderr });
     });
   });
 }
 
+async function runAllEnginesChain() {
+  const startedAt = new Date().toISOString();
+  LAST_RUN = {
+    startedAt,
+    endedAt: null,
+    ok: null,
+    step: "starting",
+    error: null,
+  };
+
+  console.log(`[run-all-engines] START ${startedAt}`);
+
+  try {
+    LAST_RUN.step = "engine1_and_shelves";
+
+    const step1 = await runStep({
+      cmd: "node",
+      args: [ENGINE1_RUNNER],
+      cwd: CORE_DIR,
+      label: "step1-engine1-and-shelves",
+    });
+
+    if (step1.code !== 0) {
+      const endedAt = new Date().toISOString();
+      LAST_RUN = {
+        startedAt,
+        endedAt,
+        ok: false,
+        step: "engine1_and_shelves",
+        error: step1.stderr.slice(-4000) || `Step 1 failed with code ${step1.code}`,
+      };
+      console.error(`[run-all-engines] FAIL step1 code=${step1.code}`);
+      return;
+    }
+
+    LAST_RUN.step = "run_all_engines";
+
+    const step2 = await runStep({
+      cmd: "bash",
+      args: [JOB_SCRIPT_ALL],
+      cwd: CORE_DIR,
+      label: "step2-run-all-engines",
+    });
+
+    if (step2.code !== 0) {
+      const endedAt = new Date().toISOString();
+      LAST_RUN = {
+        startedAt,
+        endedAt,
+        ok: false,
+        step: "run_all_engines",
+        error: step2.stderr.slice(-4000) || `Step 2 failed with code ${step2.code}`,
+      };
+      console.error(`[run-all-engines] FAIL step2 code=${step2.code}`);
+      return;
+    }
+
+    LAST_RUN.step = "write_replay_snapshot";
+
+    const step3 = await runStep({
+      cmd: "node",
+      args: [REPLAY_SNAPSHOT_JOB],
+      cwd: CORE_DIR,
+      label: "step3-write-replay-snapshot",
+    });
+
+    if (step3.code !== 0) {
+      const endedAt = new Date().toISOString();
+      LAST_RUN = {
+        startedAt,
+        endedAt,
+        ok: false,
+        step: "write_replay_snapshot",
+        error: step3.stderr.slice(-4000) || `Step 3 failed with code ${step3.code}`,
+      };
+      console.error(`[run-all-engines] FAIL step3 code=${step3.code}`);
+      return;
+    }
+
+    const endedAt = new Date().toISOString();
+    LAST_RUN = {
+      startedAt,
+      endedAt,
+      ok: true,
+      step: "done",
+      error: null,
+    };
+
+    console.log(`[run-all-engines] SUCCESS started=${startedAt} ended=${endedAt}`);
+  } catch (err) {
+    const endedAt = new Date().toISOString();
+    LAST_RUN = {
+      startedAt,
+      endedAt,
+      ok: false,
+      step: "exception",
+      error: err?.stack || err?.message || String(err),
+    };
+    console.error("[run-all-engines] EXCEPTION", err);
+  } finally {
+    IS_RUNNING = false;
+  }
+}
+
 async function handle(req, res) {
   const auth = checkToken(req);
-  if (!auth.ok) return res.status(auth.status).json({ ok: false, error: auth.msg });
+  if (!auth.ok) {
+    return res.status(auth.status).json({ ok: false, error: auth.msg });
+  }
 
-  // ✅ NEW: overlap guard (prevents races writing same HHMM.json bucket)
   if (IS_RUNNING) {
     return res.json({
       ok: true,
       skipped: true,
       reason: "ALREADY_RUNNING",
       startedAt: new Date().toISOString(),
+      lastRun: LAST_RUN,
     });
   }
 
   IS_RUNNING = true;
 
-  try {
-    const startedAt = new Date().toISOString();
+  const acceptedAt = new Date().toISOString();
 
-    // Step 1: ALWAYS run Engine 1 + Shelves using the new runner
-    const step1 = await runStep({
-      cmd: "node",
-      args: [ENGINE1_RUNNER],
-      cwd: CORE_DIR,
-    });
-
-    // If Engine 1 fails, stop here (don’t run the rest)
-    if (step1.code !== 0) {
-      const endedAt = new Date().toISOString();
-      return res.json({
-        ok: false,
-        code: step1.code,
-        startedAt,
-        endedAt,
-        step: "engine1_and_shelves",
-        stdout: step1.stdout.slice(-12000),
-        stderr: step1.stderr.slice(-12000),
-      });
-    }
-
-    // Step 2: run the existing full engine chain script (keeps everything else)
-    const step2 = await runStep({
-      cmd: "bash",
-      args: [JOB_SCRIPT_ALL],
-      cwd: CORE_DIR,
-    });
-
-    // ✅ NEW Step 3: write Replay cadence snapshot (HHMM.json)
-    const step3 = await runStep({
-      cmd: "node",
-      args: [REPLAY_SNAPSHOT_JOB],
-      cwd: CORE_DIR,
-    });
-
-    const endedAt = new Date().toISOString();
-
-    // Combine output (keep tail so response stays small)
-    const combinedStdout = [
-      "== STEP 1: node jobs/runEngine1AndShelves.js ==",
-      step1.stdout,
-      "== STEP 2: bash jobs/runAllEngines.sh ==",
-      step2.stdout,
-      "== STEP 3: node jobs/writeReplaySnapshot.js ==",
-      step3.stdout,
-    ].join("\n");
-
-    const combinedStderr = [step1.stderr, step2.stderr, step3.stderr].join("\n");
-
-    return res.json({
-      ok: step2.code === 0 && step3.code === 0,
-      code: step2.code !== 0 ? step2.code : step3.code,
-      startedAt,
-      endedAt,
-      stdout: combinedStdout.slice(-12000),
-      stderr: combinedStderr.slice(-12000),
-    });
-  } finally {
-    // ✅ NEW: always release lock even if something throws
+  runAllEnginesChain().catch((err) => {
+    console.error("[run-all-engines] background chain crashed", err);
     IS_RUNNING = false;
-  }
+  });
+
+  return res.json({
+    ok: true,
+    accepted: true,
+    startedAt: acceptedAt,
+    message: "Engine run started in background",
+  });
 }
 
-// Browser-friendly GET /api/v1/run-all-engines
+// Browser-friendly GET
 router.get("/run-all-engines", (req, res) => {
   handle(req, res);
 });
 
-// Cron-friendly POST /api/v1/run-all-engines
+// Cron-friendly POST
 router.post("/run-all-engines", (req, res) => {
   handle(req, res);
+});
+
+// Optional status route for debugging
+router.get("/run-all-engines/status", (req, res) => {
+  const auth = checkToken(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ ok: false, error: auth.msg });
+  }
+
+  return res.json({
+    ok: true,
+    isRunning: IS_RUNNING,
+    lastRun: LAST_RUN,
+    checkedAt: new Date().toISOString(),
+  });
 });
 
 export default router;
