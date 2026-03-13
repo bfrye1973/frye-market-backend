@@ -1,5 +1,5 @@
 // services/core/jobs/buildStrategySnapshot.js
-// Phase-1 snapshot builder (SPY only)
+// Safe snapshot builder (SPY only)
 
 import fs from "fs";
 import path from "path";
@@ -14,64 +14,115 @@ const SNAPSHOT_FILE = path.resolve(DATA_DIR, "strategy-snapshot.json");
 const CORE_BASE =
   process.env.CORE_BASE ||
   "http://127.0.0.1:10000";
+
 const symbol = "SPY";
 
-async function fetchJson(url) {
+function nowIso() {
+  return new Date().toISOString();
+}
+
+/* -----------------------------
+   Safe fetch with timeout
+------------------------------*/
+async function fetchJson(url, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    const r = await fetch(url);
-    const j = await r.json();
-    return j;
-  } catch {
-    return { ok: false };
+    const res = await fetch(url, {
+      method: "GET",
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+
+    const text = await res.text();
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { ok: false, error: "invalid_json", raw: text };
+    }
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  } finally {
+    clearTimeout(t);
   }
 }
 
-async function postJson(url, body) {
+/* -----------------------------
+   Safe POST with timeout
+------------------------------*/
+async function postJson(url, body, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    const r = await fetch(url, {
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(body),
     });
 
-    const j = await r.json();
-    return j;
-  } catch {
-    return { ok: false };
+    const text = await res.text();
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { ok: false, error: "invalid_json", raw: text };
+    }
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  } finally {
+    clearTimeout(t);
   }
 }
 
+/* -----------------------------
+   Strategy list
+------------------------------*/
+const STRATEGIES = [
+  { strategyId: "intraday_scalp@10m", tf: "10m", degree: "minute", wave: "W1" },
+  { strategyId: "minor_swing@1h", tf: "1h", degree: "minor", wave: "W1" },
+  { strategyId: "intermediate_long@4h", tf: "4h", degree: "intermediate", wave: "W1" },
+];
+
+/* -----------------------------
+   Build snapshot
+------------------------------*/
 async function buildSnapshot() {
 
-  const now = new Date().toISOString();
+  console.log("Starting strategy snapshot build...");
 
   const momentum = await fetchJson(
     `${CORE_BASE}/api/v1/momentum-context?symbol=${symbol}`
   );
 
-  const strategies = [
-    { strategyId: "intraday_scalp@10m", tf: "10m", degree: "minute", wave: "W1" },
-    { strategyId: "minor_swing@1h", tf: "1h", degree: "minor", wave: "W1" },
-    { strategyId: "intermediate_long@4h", tf: "4h", degree: "intermediate", wave: "W1" }
-  ];
+  console.log("Momentum fetched");
+
+  const marketMind = {
+    score10m: null,
+    score1h: null,
+    score4h: null,
+    scoreEOD: null,
+    scoreMaster: null,
+  };
 
   const result = {
     ok: true,
     symbol,
-    now,
+    now: nowIso(),
     includeContext: true,
     momentum,
-    marketMind: {
-      score10m: null,
-      score1h: null,
-      score4h: null,
-      scoreEOD: null,
-      scoreMaster: null
-    },
-    strategies: {}
+    marketMind,
+    strategies: {},
   };
 
-  for (const s of strategies) {
+  for (const s of STRATEGIES) {
+
+    console.log(`Processing strategy ${s.strategyId}`);
 
     const confluence = await fetchJson(
       `${CORE_BASE}/api/v1/confluence-score?symbol=${symbol}&tf=${s.tf}&degree=${s.degree}&wave=${s.wave}`
@@ -87,7 +138,7 @@ async function buildSnapshot() {
         symbol,
         tf: s.tf,
         engine5: confluence,
-        intent: { action: "NEW_ENTRY" }
+        intent: { action: "NEW_ENTRY" },
       }
     );
 
@@ -96,12 +147,12 @@ async function buildSnapshot() {
       {
         symbol,
         strategyId: s.strategyId,
-        market: result.marketMind,
+        market: marketMind,
         setup: {
           setupScore: Number(confluence?.scores?.total || 0),
           label: confluence?.scores?.label || "D",
-          invalid: Boolean(confluence?.invalid)
-        }
+          invalid: Boolean(confluence?.invalid),
+        },
       }
     );
 
@@ -115,7 +166,7 @@ async function buildSnapshot() {
       engine6v2: permissionV2,
       engine2: null,
       momentum,
-      context
+      context,
     };
   }
 
@@ -129,4 +180,9 @@ async function buildSnapshot() {
   console.log("Strategy snapshot written:", SNAPSHOT_FILE);
 }
 
-buildSnapshot();
+/* -----------------------------
+   Run builder
+------------------------------*/
+buildSnapshot().catch((err) => {
+  console.error("Snapshot builder failed:", err);
+});
