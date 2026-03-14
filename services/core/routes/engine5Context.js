@@ -1,7 +1,13 @@
 // services/core/routes/engine5Context.js
 // Engine 1 — LOCATION CONTEXT ONLY (LOCKED)
 // Option A fix: attach TRUE institutional strength to active.institutional (no formula changes)
-// + Engine 14 advisory context attached to response
+//
+// TEMP STABILIZATION CHANGE:
+// - Engine 14 advisory removed for now
+// - Reason: break recursion / hotspot risk
+//   engine5-context -> scalp-lab -> engine5-context
+//
+// Zone truth remains unchanged.
 
 import express from "express";
 import fs from "fs";
@@ -22,11 +28,6 @@ const MAX_SHELVES_PER_GAP = 2;
 const REPLACEMENT_STRENGTH_DELTA = 7;
 const INST_OVERLAP_TOLERANCE = 0.5;
 
-const CORE_BASE =
-  process.env.ENGINE14_CORE_BASE ||
-  process.env.CORE_BASE ||
-  `http://127.0.0.1:${process.env.PORT || 10000}`;
-
 // ---------------- HELPERS ----------------
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
@@ -46,9 +47,12 @@ function normalizeRange(range) {
   const a = Number(range[0]);
   const b = Number(range[1]);
   if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+
   const hi = round2(Math.max(a, b));
   const lo = round2(Math.min(a, b));
+
   if (!(hi > lo)) return null;
+
   return {
     hi,
     lo,
@@ -95,54 +99,10 @@ function toNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
-async function fetchEngine14(symbol) {
-  try {
-    const url = new URL("/api/v1/scalp-lab", CORE_BASE);
-    url.searchParams.set("symbol", symbol);
-
-    const res = await fetch(url.toString(), {
-      method: "GET",
-      headers: { accept: "application/json" },
-    });
-
-    if (!res.ok) {
-      return {
-        ok: false,
-        error: `ENGINE14_HTTP_${res.status}`,
-      };
-    }
-
-    const json = await res.json();
-
-    return {
-      ok: Boolean(json?.ok),
-      setup: json?.setup || null,
-      candleQuality: json?.candleQuality || null,
-      candlePattern: json?.candlePattern || null,
-      momentum: json?.momentum
-        ? {
-            smi10m: json.momentum.smi10m || null,
-            smi1h: json.momentum.smi1h || null,
-            alignment: json.momentum.alignment || null,
-            conflict: json.momentum.conflict || null,
-          }
-        : null,
-      zone: json?.zone || null,
-      price: json?.price || null,
-      asOf: json?.asOf || null,
-      labState: json?.labState || null,
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err?.message || "ENGINE14_FETCH_FAILED",
-    };
-  }
-}
-
 // ---------------- ROUTE ----------------
 router.get("/engine5-context", async (req, res) => {
   const symbol = String(req.query.symbol || "SPY").toUpperCase();
+
   if (symbol !== "SPY") {
     return res.json({
       ok: false,
@@ -174,6 +134,7 @@ router.get("/engine5-context", async (req, res) => {
     .map((z) => {
       const r = normalizeRange(z?.priceRange);
       if (!r) return null;
+
       return {
         id: zoneId(z),
         lo: r.lo,
@@ -234,6 +195,7 @@ router.get("/engine5-context", async (req, res) => {
     gaps.push({ gapId: "ALL", hi: Infinity, lo: -Infinity });
   } else {
     gaps.push({ gapId: "TOP", hi: Infinity, lo: institutional[0].hi });
+
     for (let i = 0; i < institutional.length - 1; i++) {
       gaps.push({
         gapId: `MID_${i}`,
@@ -241,6 +203,7 @@ router.get("/engine5-context", async (req, res) => {
         lo: institutional[i + 1].hi,
       });
     }
+
     gaps.push({
       gapId: "BOTTOM",
       hi: institutional[institutional.length - 1].lo,
@@ -341,7 +304,12 @@ router.get("/engine5-context", async (req, res) => {
 
   // ---------------- NEAREST SHELF ----------------
   let nearestShelf = null;
-  if (Number.isFinite(currentPrice) && !activeShelf && Array.isArray(shelves) && shelves.length) {
+  if (
+    Number.isFinite(currentPrice) &&
+    !activeShelf &&
+    Array.isArray(shelves) &&
+    shelves.length
+  ) {
     const ranked = shelves
       .map((s) => {
         const d = shelfDistance(currentPrice, s);
@@ -361,9 +329,6 @@ router.get("/engine5-context", async (req, res) => {
       };
     }
   }
-
-  // ---------------- ENGINE 14 ADVISORY ----------------
-  const engine14 = await fetchEngine14(symbol);
 
   // ---------------- RESPONSE ----------------
   return res.json({
@@ -396,9 +361,6 @@ router.get("/engine5-context", async (req, res) => {
     },
     nearest: {
       shelf: nearestShelf,
-    },
-    advisory: {
-      engine14,
     },
   });
 });
