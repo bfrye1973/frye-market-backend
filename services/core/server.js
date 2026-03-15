@@ -34,7 +34,7 @@ import { fibLevelsRouter } from "./routes/fibLevels.js";
 import { tradePermissionRouter } from "./routes/tradePermission.js";
 
 // ✅ NEW: startup snapshot builder
-import buildStrategySnapshot from "./jobs/buildStrategySnapshot.js";
+import { buildSnapshot as buildStrategySnapshot } from "./jobs/buildStrategySnapshot.js";
 
 // --- App setup ---
 const app = express();
