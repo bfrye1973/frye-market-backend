@@ -4,6 +4,7 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
+import { spawn } from "child_process";
 
 import { ohlcRouter } from "./routes/ohlc.js";
 import liveRouter from "./routes/live.js";
@@ -33,11 +34,12 @@ import runAllEnginesRouter from "./routes/runAllEngines.js";
 import { fibLevelsRouter } from "./routes/fibLevels.js";
 import { tradePermissionRouter } from "./routes/tradePermission.js";
 
-// ✅ NEW: startup snapshot builder
-import { buildSnapshot as buildStrategySnapshot } from "./jobs/buildStrategySnapshot.js";
-
 // --- App setup ---
 const app = express();
+
+// --- Paths ---
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // WHO AM I TEST ROUTE
 app.get("/__whoami", (req, res) => {
@@ -81,8 +83,6 @@ app.use((req, res, next) => {
 });
 
 // --- Static (optional) ---
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 app.use(express.static(path.join(__dirname, "public")));
 
 // --- Health endpoints ---
@@ -143,10 +143,10 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-// ✅ NEW: startup snapshot helper
+// --- Startup snapshot helper ---
 let STARTUP_SNAPSHOT_RUNNING = false;
 
-async function runStartupSnapshotBuild() {
+function runStartupSnapshotBuild() {
   if (STARTUP_SNAPSHOT_RUNNING) {
     console.log("[startup-snapshot] skipped: already running");
     return;
@@ -156,17 +156,44 @@ async function runStartupSnapshotBuild() {
   const startedAt = new Date().toISOString();
   console.log(`[startup-snapshot] START @ ${startedAt}`);
 
-  try {
-    await buildStrategySnapshot();
-    console.log(`[startup-snapshot] SUCCESS @ ${new Date().toISOString()}`);
-  } catch (err) {
+  const child = spawn("node", ["./jobs/buildStrategySnapshot.js"], {
+    cwd: __dirname,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdout = "";
+  let stderr = "";
+
+  child.stdout.on("data", (d) => {
+    stdout += d.toString();
+  });
+
+  child.stderr.on("data", (d) => {
+    stderr += d.toString();
+  });
+
+  child.on("close", (code) => {
+    if (code === 0) {
+      console.log(`[startup-snapshot] SUCCESS @ ${new Date().toISOString()}`);
+      if (stdout.trim()) console.log(stdout.trim());
+    } else {
+      console.error(
+        `[startup-snapshot] FAIL @ ${new Date().toISOString()} | code=${code}`
+      );
+      if (stdout.trim()) console.log(stdout.trim());
+      if (stderr.trim()) console.error(stderr.trim());
+    }
+    STARTUP_SNAPSHOT_RUNNING = false;
+  });
+
+  child.on("error", (err) => {
     console.error(
-      `[startup-snapshot] FAIL @ ${new Date().toISOString()} |`,
+      `[startup-snapshot] SPAWN ERROR @ ${new Date().toISOString()} |`,
       err?.stack || err?.message || String(err)
     );
-  } finally {
     STARTUP_SNAPSHOT_RUNNING = false;
-  }
+  });
 }
 
 // --- Start ---
@@ -189,7 +216,7 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/v1/trade-permission  ✅ Engine 6");
   console.log("- /live  (GitHub JSON proxies)");
 
-  // ✅ NEW: build snapshot after server is already healthy/listening
+  // Build snapshot after server is already listening
   setTimeout(() => {
     runStartupSnapshotBuild();
   }, 1500);
