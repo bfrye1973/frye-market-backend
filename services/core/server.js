@@ -6,11 +6,11 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { ohlcRouter } from "./routes/ohlc.js";
-import liveRouter from "./routes/live.js"; // ✅ live router
-import sectorcards10mRouter from "./routes/sectorcards-10m.js"; // ✅ sectorcards
+import liveRouter from "./routes/live.js";
+import sectorcards10mRouter from "./routes/sectorcards-10m.js";
 
-import smzLevels from "./routes/smzLevels.js"; // ✅ Smart Money levels API
-import smzShelves from "./routes/smzShelves.js"; // ✅ Accum/Dist shelves API
+import smzLevels from "./routes/smzLevels.js";
+import smzShelves from "./routes/smzShelves.js";
 import smzHierarchy from "./routes/smzHierarchy.js";
 
 import { engine5ContextRouter } from "./routes/engine5Context.js";
@@ -29,15 +29,12 @@ import tradingRouter from "./routes/trading.js";
 import { momentumContextRouter } from "./routes/momentumContext.js";
 import scalpLabRouter from "./routes/scalpLab.js";
 
-
-// ✅ NEW: run-all-engines router (default export)
 import runAllEnginesRouter from "./routes/runAllEngines.js";
-
-// ✅ Engine 2 (Fib) — IMPORTANT: this is a NAMED export, not default
 import { fibLevelsRouter } from "./routes/fibLevels.js";
-
-// ✅ Engine 6 (Trade Permission)
 import { tradePermissionRouter } from "./routes/tradePermission.js";
+
+// ✅ NEW: startup snapshot builder
+import buildStrategySnapshot from "./jobs/buildStrategySnapshot.js";
 
 // --- App setup ---
 const app = express();
@@ -55,11 +52,7 @@ app.disable("x-powered-by");
 app.set("etag", false);
 app.use(express.json({ limit: "1mb" }));
 
-// --- CORS (dashboard + local dev) ---
-// ✅ Long-term durable CORS:
-// - Echo Origin if present (browser), else "*"
-// - Echo requested headers for preflight (fixes Cache-Control / pragma / future headers)
-// - Always handle OPTIONS with 204
+// --- CORS ---
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
@@ -68,9 +61,6 @@ app.use((req, res, next) => {
 
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST,PUT,DELETE");
 
-  // ✅ KEY FIX (Option A):
-  // If the browser requests specific headers in preflight, allow them.
-  // This prevents random CORS breaks when frontend adds headers like "cache-control".
   const reqHdrs = req.headers["access-control-request-headers"];
   res.setHeader(
     "Access-Control-Allow-Headers",
@@ -80,12 +70,10 @@ app.use((req, res, next) => {
         "Authorization",
         "X-Requested-With",
         "X-Idempotency-Key",
-        "X-ENGINE-CRON-TOKEN", // ✅ allow cron trigger header
+        "X-ENGINE-CRON-TOKEN",
       ].join(", ")
   );
 
-  // If you later use cookies/auth sessions, keep this.
-  // If not, it doesn't hurt.
   res.setHeader("Access-Control-Allow-Credentials", "true");
 
   if (req.method === "OPTIONS") return res.sendStatus(204);
@@ -112,19 +100,16 @@ app.get("/", (_req, res) => {
 });
 
 // --- API routes ---
-// Existing routes
 app.use("/api/v1/ohlc", ohlcRouter);
-app.use("/api/sectorcards-10m", sectorcards10mRouter); // ✅ sectorcards adapter
-app.use("/live", liveRouter); // ✅ GitHub JSON proxies
+app.use("/api/sectorcards-10m", sectorcards10mRouter);
+app.use("/live", liveRouter);
 
-app.use("/api/v1/smz-levels", smzLevels); // ✅ Smart Money levels
-app.use("/api/v1/smz-shelves", smzShelves); // ✅ Accumulation / Distribution shelves
+app.use("/api/v1/smz-levels", smzLevels);
+app.use("/api/v1/smz-shelves", smzShelves);
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 
 app.use("/api/trading", tradingRouter);
 
-
-// Routers mounted under /api/v1
 app.use("/api/v1", engine5ContextRouter);
 app.use("/api/v1", fibLevelsRouter);
 app.use("/api/v1", reactionScoreRouter);
@@ -141,11 +126,7 @@ app.use("/api/v1", drawingsRouter);
 app.use("/api/v1/options", optionsScalpRouter);
 app.use("/api/v1", scalpLabRouter);
 
-
-// ✅ run-all-engines (must be in the /api/v1 group)
 app.use("/api/v1", runAllEnginesRouter);
-
-// ✅ Engine 6 route mount
 app.use("/api/v1", tradePermissionRouter);
 
 // --- 404 / errors ---
@@ -162,9 +143,36 @@ app.use((err, _req, res, _next) => {
   });
 });
 
+// ✅ NEW: startup snapshot helper
+let STARTUP_SNAPSHOT_RUNNING = false;
+
+async function runStartupSnapshotBuild() {
+  if (STARTUP_SNAPSHOT_RUNNING) {
+    console.log("[startup-snapshot] skipped: already running");
+    return;
+  }
+
+  STARTUP_SNAPSHOT_RUNNING = true;
+  const startedAt = new Date().toISOString();
+  console.log(`[startup-snapshot] START @ ${startedAt}`);
+
+  try {
+    await buildStrategySnapshot();
+    console.log(`[startup-snapshot] SUCCESS @ ${new Date().toISOString()}`);
+  } catch (err) {
+    console.error(
+      `[startup-snapshot] FAIL @ ${new Date().toISOString()} |`,
+      err?.stack || err?.message || String(err)
+    );
+  } finally {
+    STARTUP_SNAPSHOT_RUNNING = false;
+  }
+}
+
 // --- Start ---
 const PORT = Number(process.env.PORT) || 8080;
 const HOST = "0.0.0.0";
+
 app.listen(PORT, HOST, () => {
   console.log(`[OK] core listening on :${PORT}`);
   console.log("- /api/health  (Render healthcheck)");
@@ -180,6 +188,11 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/v1/run-all-engines   ✅ cron trigger");
   console.log("- /api/v1/trade-permission  ✅ Engine 6");
   console.log("- /live  (GitHub JSON proxies)");
+
+  // ✅ NEW: build snapshot after server is already healthy/listening
+  setTimeout(() => {
+    runStartupSnapshotBuild();
+  }, 1500);
 });
 
 export default app;
