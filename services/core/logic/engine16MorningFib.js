@@ -55,15 +55,6 @@ const DTF_PARTS = new Intl.DateTimeFormat("en-US", {
   hour12: false,
 });
 
-function clamp(x, lo, hi) {
-  return Math.max(lo, Math.min(hi, x));
-}
-
-function num(x) {
-  const n = Number(x);
-  return Number.isFinite(n) ? n : null;
-}
-
 function avg(values) {
   if (!Array.isArray(values) || !values.length) return null;
   const sum = values.reduce((a, b) => a + b, 0);
@@ -118,6 +109,14 @@ function getNyPartsFromMs(ms) {
     dateKey: `${out.year}-${out.month}-${out.day}`,
     minuteOfDay: Number(out.hour) * 60 + Number(out.minute),
   };
+}
+
+function formatNyTimeFromMs(ms) {
+  if (!Number.isFinite(ms)) return null;
+  const p = getNyPartsFromMs(ms);
+  const hh = String(p.hour).padStart(2, "0");
+  const mm = String(p.minute).padStart(2, "0");
+  return `${hh}:${mm}`;
 }
 
 function getLatestSessionDateKey(closedBars) {
@@ -364,7 +363,9 @@ function chooseRelevantNegotiatedZone({ zones, bars, symbol, candidate, context 
         : launchBar.c;
 
     const zoneMid = (range.lo + range.hi) / 2;
-    const distance = Number.isFinite(launchPrice) ? Math.abs(zoneMid - launchPrice) : Number.MAX_VALUE;
+    const distance = Number.isFinite(launchPrice)
+      ? Math.abs(zoneMid - launchPrice)
+      : Number.MAX_VALUE;
 
     scored.push({
       raw: z,
@@ -396,7 +397,9 @@ async function readNegotiatedZonesFromDisk() {
     const filePath = path.join(__dirname, "../data/smz-levels.json");
     const txt = await readFile(filePath, "utf8");
     const parsed = JSON.parse(txt);
-    const arr = Array.isArray(parsed?.structures_sticky) ? parsed.structures_sticky : [];
+    const arr = Array.isArray(parsed?.structures_sticky)
+      ? parsed.structures_sticky
+      : [];
     return arr;
   } catch {
     return [];
@@ -417,6 +420,96 @@ function buildSyntheticLaunchZone(bars, candidate) {
   return { lo, hi };
 }
 
+function findExtremeBarByPrice(bars, key, mode = "first") {
+  if (!Array.isArray(bars) || !bars.length) return null;
+
+  let best = null;
+  for (const b of bars) {
+    const v = Number(b?.[key]);
+    if (!Number.isFinite(v)) continue;
+
+    if (!best) {
+      best = b;
+      continue;
+    }
+
+    const bestV = Number(best?.[key]);
+
+    if (key === "h") {
+      if (v > bestV) best = b;
+      else if (v === bestV && mode === "first" && b.t < best.t) best = b;
+      else if (v === bestV && mode === "last" && b.t > best.t) best = b;
+    } else if (key === "l") {
+      if (v < bestV) best = b;
+      else if (v === bestV && mode === "first" && b.t < best.t) best = b;
+      else if (v === bestV && mode === "last" && b.t > best.t) best = b;
+    }
+  }
+
+  return best;
+}
+
+function buildAnchorTimes({
+  premarketLowBar,
+  premarketHighBar,
+  sessionHighBar,
+  sessionLowBar,
+  candidate,
+  context,
+  usedNegotiatedZoneAnchor,
+}) {
+  const premarketLowMs = Number.isFinite(premarketLowBar?.t) ? premarketLowBar.t : null;
+  const premarketHighMs = Number.isFinite(premarketHighBar?.t) ? premarketHighBar.t : null;
+  const sessionHighMs = Number.isFinite(sessionHighBar?.t) ? sessionHighBar.t : null;
+  const sessionLowMs = Number.isFinite(sessionLowBar?.t) ? sessionLowBar.t : null;
+
+  let anchorAMs = null;
+  let anchorBMs = null;
+
+  if (context === "LONG_CONTEXT") {
+    anchorAMs = usedNegotiatedZoneAnchor
+      ? Number.isFinite(candidate?.t)
+        ? candidate.t
+        : premarketLowMs
+      : premarketLowMs;
+    anchorBMs = sessionHighMs;
+  } else if (context === "SHORT_CONTEXT") {
+    anchorAMs = usedNegotiatedZoneAnchor
+      ? Number.isFinite(candidate?.t)
+        ? candidate.t
+        : premarketHighMs
+      : premarketHighMs;
+    anchorBMs = sessionLowMs;
+  }
+
+  return {
+    premarketLowMs,
+    premarketHighMs,
+    sessionHighMs,
+    sessionLowMs,
+    anchorAMs,
+    anchorBMs,
+
+    premarketLowTime: formatNyTimeFromMs(premarketLowMs),
+    premarketHighTime: formatNyTimeFromMs(premarketHighMs),
+    sessionHighTime: formatNyTimeFromMs(sessionHighMs),
+    sessionLowTime: formatNyTimeFromMs(sessionLowMs),
+    anchorATime: formatNyTimeFromMs(anchorAMs),
+    anchorBTime: formatNyTimeFromMs(anchorBMs),
+  };
+}
+
+function emptyTimeFields() {
+  return {
+    premarketLowTime: null,
+    premarketHighTime: null,
+    sessionHighTime: null,
+    sessionLowTime: null,
+    anchorATime: null,
+    anchorBTime: null,
+  };
+}
+
 export async function computeMorningFib({
   symbol = DEFAULT_SYMBOL,
   tf = DEFAULT_TF,
@@ -424,7 +517,6 @@ export async function computeMorningFib({
   includeVolume = true,
 } = {}) {
   const timeframe = SUPPORTED_TF.has(String(tf)) ? String(tf) : DEFAULT_TF;
-  const tfMs = getTfMs(timeframe);
 
   let rawBars;
   try {
@@ -473,6 +565,15 @@ export async function computeMorningFib({
     };
   }
 
+  const premarketLowBar = findExtremeBarByPrice(premarketBars, "l", "first");
+  const premarketHighBar = findExtremeBarByPrice(premarketBars, "h", "first");
+  const regularSessionHighBar = regularBars.length
+    ? findExtremeBarByPrice(regularBars, "h", "first")
+    : null;
+  const regularSessionLowBar = regularBars.length
+    ? findExtremeBarByPrice(regularBars, "l", "first")
+    : null;
+
   if (!morningBars.length || !regularBars.length) {
     return {
       ok: true,
@@ -487,6 +588,7 @@ export async function computeMorningFib({
         sessionLow: null,
         anchorA: null,
         anchorB: null,
+        ...emptyTimeFields(),
       },
       fib: {
         r382: null,
@@ -536,7 +638,9 @@ export async function computeMorningFib({
     const atr = atrAtIndex(closedBars, idx, 14);
     if (!(Number.isFinite(atr) && atr > 0)) continue;
 
-    const sessionBarsToNow = todayBars.filter((b) => inRegularSession(b) && b.t <= bar.t);
+    const sessionBarsToNow = todayBars.filter(
+      (b) => inRegularSession(b) && b.t <= bar.t
+    );
     if (!sessionBarsToNow.length) continue;
 
     const sessionHighAtBar = Math.max(...sessionBarsToNow.map((b) => b.h));
@@ -562,6 +666,9 @@ export async function computeMorningFib({
 
     const magnitude = direction === "LONG_CONTEXT" ? longMove : shortMove;
 
+    const sessionHighBarAtBar = findExtremeBarByPrice(sessionBarsToNow, "h", "first");
+    const sessionLowBarAtBar = findExtremeBarByPrice(sessionBarsToNow, "l", "first");
+
     const candidate = {
       index: idx,
       t: bar.t,
@@ -570,6 +677,12 @@ export async function computeMorningFib({
       magnitude,
       sessionHigh: sessionHighAtBar,
       sessionLow: sessionLowAtBar,
+      sessionHighBarT: Number.isFinite(sessionHighBarAtBar?.t)
+        ? sessionHighBarAtBar.t
+        : null,
+      sessionLowBarT: Number.isFinite(sessionLowBarAtBar?.t)
+        ? sessionLowBarAtBar.t
+        : null,
       anchorA: direction === "LONG_CONTEXT" ? premarketLow : premarketHigh,
       anchorB: direction === "LONG_CONTEXT" ? sessionHighAtBar : sessionLowAtBar,
     };
@@ -606,6 +719,12 @@ export async function computeMorningFib({
         sessionLow: round2(Math.min(...regularBars.map((b) => b.l))),
         anchorA: null,
         anchorB: null,
+        premarketLowTime: formatNyTimeFromMs(premarketLowBar?.t),
+        premarketHighTime: formatNyTimeFromMs(premarketHighBar?.t),
+        sessionHighTime: formatNyTimeFromMs(regularSessionHighBar?.t),
+        sessionLowTime: formatNyTimeFromMs(regularSessionLowBar?.t),
+        anchorATime: null,
+        anchorBTime: null,
       },
       fib: {
         r382: null,
@@ -701,17 +820,24 @@ export async function computeMorningFib({
 
   const postLockBars = closedBars.filter((b) => b.t > bestCandidate.t);
   const hasPulledBack = postLockBars.some(
-    (b) => barTouchesNumericZone(b, zoneRaw.pullbackZone) || barTouchesNumericZone(b, zoneRaw.secondaryZone)
+    (b) =>
+      barTouchesNumericZone(b, zoneRaw.pullbackZone) ||
+      barTouchesNumericZone(b, zoneRaw.secondaryZone)
   );
 
-  const wickTouched = barTouchesNumericZone(latestClosedBar, zoneRaw.pullbackZone) ||
+  const wickTouched =
+    barTouchesNumericZone(latestClosedBar, zoneRaw.pullbackZone) ||
     barTouchesNumericZone(latestClosedBar, zoneRaw.secondaryZone);
 
   const wickRejectionLong =
-    bestCandidate.context === "LONG_CONTEXT" && wickTouched && bullishWickRejection(latestClosedBar);
+    bestCandidate.context === "LONG_CONTEXT" &&
+    wickTouched &&
+    bullishWickRejection(latestClosedBar);
 
   const wickRejectionShort =
-    bestCandidate.context === "SHORT_CONTEXT" && wickTouched && bearishWickRejection(latestClosedBar);
+    bestCandidate.context === "SHORT_CONTEXT" &&
+    wickTouched &&
+    bearishWickRejection(latestClosedBar);
 
   const breakoutReady =
     bestCandidate.context === "LONG_CONTEXT" &&
@@ -769,6 +895,16 @@ export async function computeMorningFib({
     }
   }
 
+  const anchorTimes = buildAnchorTimes({
+    premarketLowBar,
+    premarketHighBar,
+    sessionHighBar: { t: bestCandidate.sessionHighBarT },
+    sessionLowBar: { t: bestCandidate.sessionLowBarT },
+    candidate: bestCandidate,
+    context: bestCandidate.context,
+    usedNegotiatedZoneAnchor,
+  });
+
   return {
     ok: true,
     symbol,
@@ -783,6 +919,13 @@ export async function computeMorningFib({
       sessionLow: round2(bestCandidate.sessionLow),
       anchorA: round2(bestCandidate.anchorA),
       anchorB: round2(bestCandidate.anchorB),
+
+      premarketLowTime: anchorTimes.premarketLowTime,
+      premarketHighTime: anchorTimes.premarketHighTime,
+      sessionHighTime: anchorTimes.sessionHighTime,
+      sessionLowTime: anchorTimes.sessionLowTime,
+      anchorATime: anchorTimes.anchorATime,
+      anchorBTime: anchorTimes.anchorBTime,
     },
 
     fib,
