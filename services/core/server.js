@@ -33,6 +33,7 @@ import scalpLabRouter from "./routes/scalpLab.js";
 import runAllEnginesRouter from "./routes/runAllEngines.js";
 import { fibLevelsRouter } from "./routes/fibLevels.js";
 import { tradePermissionRouter } from "./routes/tradePermission.js";
+import { morningFibRouter } from "./routes/morningFib.js";
 
 // --- App setup ---
 const app = express();
@@ -125,6 +126,7 @@ app.use("/api/v1", marketNarratorAIRouter);
 app.use("/api/v1", drawingsRouter);
 app.use("/api/v1/options", optionsScalpRouter);
 app.use("/api/v1", scalpLabRouter);
+app.use("/api/v1", morningFibRouter);
 
 app.use("/api/v1", runAllEnginesRouter);
 app.use("/api/v1", tradePermissionRouter);
