@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_eod.py (R16.1 — DIAGNOSTIC BUILD)
+Ferrari Dashboard — make_eod.py (R16.2 — FIXED PSI + FIXED EOD FLOOR)
 
-Purpose of this version:
-- Keep current R16.0 logic intact
-- Add hard diagnostics so we can PROVE where EOD is getting stuck
-- No schema-breaking changes
-- No guessing, only observability
-
-What remains locked:
+What’s locked:
 - EOD Lux PSI = SHORT-MEMORY current-state detector (weeks), not long history
 - PSI meaning = tightness (higher = tighter)
 - Ferrari 3-color squeeze light:
     RED    psi >= 90
     YELLOW 70 <= psi < 90
     GREEN  psi < 70
-- Guardrail: source.mode must be "daily"
+- Guardrail: source.mode must be "daily" (prevents intraday contamination)
 - Internals Weak can block entries even if state is Bull
 - Option A: break the “exact 50” dead-zone with tiny bias
+
+What changed in R16.2:
+- FIXED: PSI input window now has enough bars to actually compute
+- FIXED: above-200 but below-50 no longer floors overall to 50; now can score 35–50
+- Keeps EOD structural and slower than 4H
+- Keeps output schema backward compatible
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ W_CONDITIONS = 0.15
 LUX_CONV = 50
 LUX_LEN = 20
 
-# SHORT MEMORY PSI window (TRADING DAYS)
+# Short-memory PSI window (TRADING DAYS)
 PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "20"))
 
 # Fetch days (EMAs / ATR stability, NOT PSI memory)
@@ -68,8 +68,6 @@ SECTOR_FETCH_DAYS = int(os.environ.get("SECTOR_FETCH_DAYS", "120"))
 PSI_DEADZONE_EPS = float(os.environ.get("PSI_DEADZONE_EPS", "0.25"))
 PSI_BIAS_TREND = float(os.environ.get("PSI_BIAS_TREND", "49.0"))
 PSI_BIAS_WEAK = float(os.environ.get("PSI_BIAS_WEAK", "51.0"))
-
-# Toggle for diagnosis
 DISABLE_PSI_DEADZONE_BIAS = os.environ.get("DISABLE_PSI_DEADZONE_BIAS", "0").strip() == "1"
 
 
@@ -89,7 +87,7 @@ def pct(a: float, b: float) -> float:
 
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "make-eod/4.1", "Cache-Control": "no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent": "make-eod/4.2", "Cache-Control": "no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -279,23 +277,28 @@ def apply_score_guardrails(
     above50: bool,
     above200: bool,
 ) -> float:
+    """
+    Fix:
+    - above 200 but below 50 is no longer forced to 50–60
+    - now allowed to show true weakness: 35–50
+    """
     if not above200:
-        return clamp(score, 0.0, 45.0)
+        return clamp(score, 0.0, 35.0)
 
     if above200 and (not above50):
-        return clamp(score, 50.0, 60.0)
+        return clamp(score, 35.0, 50.0)
 
     if above50 and above200 and (not above20):
-        return clamp(score, 54.0, 66.0)
+        return clamp(score, 45.0, 60.0)
 
     if above20 and above50 and above200 and (not above10):
-        return clamp(score, 60.0, 74.0)
+        return clamp(score, 55.0, 70.0)
 
     if state == "bull":
-        return clamp(score, 62.0, 100.0)
+        return clamp(score, 60.0, 100.0)
     if state == "neutral":
-        return clamp(score, 50.0, 70.0)
-    return clamp(score, 0.0, 48.0)
+        return clamp(score, 40.0, 65.0)
+    return clamp(score, 0.0, 40.0)
 
 
 def sector_is_red(card: dict) -> bool:
@@ -392,7 +395,6 @@ def main():
         print("[error] cannot read source:", e, file=sys.stderr)
         sys.exit(1)
 
-    # Guardrail: must be DAILY source
     mode = (src.get("mode") or "").strip().lower()
     if mode and mode != "daily":
         print(f"[fatal] EOD source mode must be 'daily'. got: {mode}", file=sys.stderr)
@@ -411,13 +413,8 @@ def main():
     V = [b["v"] for b in bars]
     close = float(C[-1])
 
-    # --- DIAGNOSTIC: latest bar freshness ---
     last_bar_ts = int(bars[-1]["t"])
     last_bar_dt = datetime.fromtimestamp(last_bar_ts, UTC).strftime("%Y-%m-%d")
-    print(
-        f"[EOD BARS] last_bar_date={last_bar_dt} last_close={close:.4f} total_bars={len(bars)}",
-        flush=True
-    )
 
     e10 = ema_series(C, 10)[-1]
     e20 = ema_series(C, 20)[-1]
@@ -455,34 +452,19 @@ def main():
 
     state, state_label = compute_eod_state(close, e10, e20, e50, e200)
 
-    # SHORT MEMORY PSI
-    Cw = C[-PSI_WIN_D:] if len(C) > PSI_WIN_D else C
-
-    # --- DIAGNOSTIC: exact closes feeding PSI ---
-    print(
-        f"[EOD PSI INPUT] win={PSI_WIN_D} closes={[round(x, 4) for x in Cw]}",
-        flush=True
-    )
+    # FIXED PSI INPUT
+    psi_input_days = max(PSI_WIN_D + 2, LUX_LEN + 2)
+    Cw = C[-psi_input_days:] if len(C) > psi_input_days else C
 
     psi_raw_obj = lux_psi_from_closes(Cw, conv=LUX_CONV, length=LUX_LEN)
     psi_raw = float(psi_raw_obj) if isinstance(psi_raw_obj, (int, float)) else 50.0
     psi_raw = float(clamp(psi_raw, 0.0, 100.0))
 
-    # --- DIAGNOSTIC: raw PSI before dead-zone bias ---
-    print(f"[EOD PSI RAW] psi_raw={psi_raw:.6f}", flush=True)
-
     psi = psi_raw
 
-    # Option A: break exact-50 dead-zone
     if not DISABLE_PSI_DEADZONE_BIAS:
         if abs(psi - 50.0) < PSI_DEADZONE_EPS:
             psi = PSI_BIAS_TREND if ema_structure >= 55.0 else PSI_BIAS_WEAK
-
-    # --- DIAGNOSTIC: final PSI after dead-zone bias ---
-    print(
-        f"[EOD PSI FINAL] psi_final={psi:.6f} deadzone_disabled={int(DISABLE_PSI_DEADZONE_BIAS)}",
-        flush=True
-    )
 
     regime_key, _regime_color, no_entries, mode_label = squeeze_regime(psi)
     squeeze_score = squeeze_score_from_regime(regime_key)
@@ -512,14 +494,6 @@ def main():
     risk_on = compute_sectorcards_risk_on(cards)
 
     score_raw = float(W_EMA_STRUCT * ema_structure + W_BREADTH_CONF * breadth_confirm + W_CONDITIONS * conditions)
-
-    # --- DIAGNOSTIC: raw score pieces before guardrail ---
-    print(
-        f"[EOD SCORE RAW] ema_structure={ema_structure:.2f} breadth_confirm={breadth_confirm:.2f} "
-        f"conditions={conditions:.2f} score_raw={score_raw:.2f}",
-        flush=True
-    )
-
     score = apply_score_guardrails(
         state=state,
         score=score_raw,
@@ -527,13 +501,6 @@ def main():
         above20=bool(above20),
         above50=bool(above50),
         above200=bool(above200),
-    )
-
-    # --- DIAGNOSTIC: final score after guardrail ---
-    print(
-        f"[EOD SCORE FINAL] state={state} label={state_label} final_score={score:.2f} "
-        f"above10={int(above10)} above20={int(above20)} above50={int(above50)} above200={int(above200)}",
-        flush=True
     )
 
     allow_exits = True
@@ -561,8 +528,6 @@ def main():
         "etfConfirm": round(etf_confirm, 1),
         "cardsBreadthAvg": round(cards_b_avg, 1),
         "cardsMomentumAvg": round(cards_m_avg, 1),
-
-        # non-breaking diagnostics
         "stackScore": round(stack_score, 1),
         "ema10Post": round(ema10_post, 1),
         "ema20Post": round(ema20_post, 1),
@@ -575,17 +540,14 @@ def main():
         "state": state,
         "stateLabel": state_label,
         "score": round(score, 1),
-
         "ema10": round(float(e10), 4),
         "ema20": round(float(e20), 4),
         "ema50": round(float(e50), 4),
         "ema200": round(float(e200), 4),
-
         "d10_pct": round(float(d10), 3),
         "d20_pct": round(float(d20), 3),
         "d50_pct": round(float(d50), 3),
         "d200_pct": round(float(d200), 3),
-
         "breadthDailyPct": etf_breadth,
         "participationDailyPct": etf_participation,
         "squeezePsi": round(psi, 2),
@@ -616,30 +578,23 @@ def main():
     metrics = {
         "overall_eod_score": round(score, 1),
         "overall_eod_state": state,
-
         "breadth_daily_pct": etf_breadth,
         "participation_daily_pct": etf_participation,
         "breadth_confirm_pct": round(float(breadth_confirm), 2),
-
         "daily_squeeze_pct": round(float(psi), 2),
         "squeeze_regime": regime_key,
         "psi_window_days": int(PSI_WIN_D),
-
         "volatility_pct": round(float(vol_pct), 3),
         "liquidity_pct": round(float(liq_pct), 2),
         "liq_norm_pct": round(float(liq_norm), 2),
         "vol_score_pct": round(float(vol_score), 2),
         "conditions_pct": round(float(conditions), 2),
-
         "risk_on_daily_pct": risk_on,
-
         "internals_weak": bool(internals_weak),
         "red_sectors_count": int(red_count),
-
         "etf_confirm_pct": round(float(etf_confirm), 2),
         "cards_breadth_avg": round(float(cards_b_avg), 2),
         "cards_momentum_avg": round(float(cards_m_avg), 2),
-
         "ema10": round(float(e10), 6),
         "ema20": round(float(e20), 6),
         "ema50": round(float(e50), 6),
@@ -654,12 +609,11 @@ def main():
         "price_above_ema20": bool(above20),
         "price_above_ema50": bool(above50),
         "price_above_ema200": bool(above200),
-
-        # diagnostic visibility
         "psi_raw": round(float(psi_raw), 6),
         "last_bar_date": last_bar_dt,
         "last_close": round(float(close), 4),
         "deadzone_disabled": bool(DISABLE_PSI_DEADZONE_BIAS),
+        "psi_input_days": int(psi_input_days),
     }
 
     engineLights = {
@@ -690,7 +644,7 @@ def main():
         "sectorCards": cards,
         "engineLights": engineLights,
         "meta": {
-            "source": "make_eod.py R16.1 diagnostic build",
+            "source": "make_eod.py R16.2 fixed-psi + fixed-eod-floor",
             "tz": "America/Phoenix",
         }
     }
@@ -700,10 +654,10 @@ def main():
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
     print(
-        f"[eod] psiRaw={psi_raw:.4f} psiFinal={psi:.4f} win={PSI_WIN_D} "
-        f"etfConfirm={etf_confirm:.1f} cardsB={cards_b_avg:.1f} cardsM={cards_m_avg:.1f} "
-        f"breadthConfirm={breadth_confirm:.1f} scoreRaw={score_raw:.1f} score={score:.1f} "
-        f"state={state} label={state_label}",
+        f"[eod] lastBar={last_bar_dt} lastClose={close:.2f} psiInputDays={psi_input_days} "
+        f"psiRaw={psi_raw:.4f} psiFinal={psi:.4f} breadthConfirm={breadth_confirm:.1f} "
+        f"scoreRaw={score_raw:.1f} score={score:.1f} state={state} label={state_label} "
+        f"above10={int(above10)} above20={int(above20)} above50={int(above50)} above200={int(above200)}",
         flush=True
     )
 
