@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_30m.py (R5 — TRUE 30m BRIDGE, CALIBRATED TO 46–49 IN CHOP)
+Ferrari Dashboard — make_dashboard_30m.py (R6 — TRUE 30m BRIDGE, SIMPLIFIED + FIXED)
 
 Intent (locked by user):
 - 30m is a TRUE bridge timeframe (between 10m entry and 1h regime).
@@ -68,7 +68,6 @@ W_BREADTH = 0.20
 W_SQ_EXP = 0.15
 
 # Momentum combo
-# Reduce structure influence so it isn't counted too heavily twice.
 W_PRIMARY = 0.35
 W_SMI = 0.40
 W_SECOND = 0.25
@@ -82,10 +81,7 @@ PSI_WIN_30M = int(os.environ.get("PSI_WIN_30M", "26"))
 FETCH_DAYS_30M = int(os.environ.get("FETCH_DAYS_30M", "30"))
 
 # Thresholds
-EMA_GAP_BONUS_PCT = float(os.environ.get("EMA_GAP_BONUS_PCT", "0.15"))
 EMA_RECLAIM_TOL_PCT = float(os.environ.get("EMA_RECLAIM_TOL_PCT", "0.10"))
-
-# New bridge calibration thresholds
 EMA50_RECLAIM_TOL_PCT = float(os.environ.get("EMA50_RECLAIM_TOL_PCT", "0.15"))
 EMA_TREND_GAP_STRONG_PCT = float(os.environ.get("EMA_TREND_GAP_STRONG_PCT", "0.20"))
 
@@ -108,7 +104,7 @@ def pct(a: float, b: float) -> float:
 def fetch_json(url: str, timeout: int = 30) -> dict:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "make-dashboard/30m/5.0", "Cache-Control": "no-store"},
+        headers={"User-Agent": "make-dashboard/30m/6.0", "Cache-Control": "no-store"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -143,7 +139,6 @@ def fetch_polygon_30m(sym: str, key: str, lookback_days: int) -> List[dict]:
 
     out.sort(key=lambda x: x["time"])
 
-    # Drop in-flight 30m bar
     if out:
         now = int(time.time())
         last = out[-1]["time"]
@@ -308,10 +303,6 @@ def apply_structure_soft_cap(
     reclaim_tol_pct: float,
     ema50_reclaim_tol_pct: float,
 ) -> float:
-    """
-    30m should live in the mid/high 40s while stabilizing.
-    It should not become bullish just because it barely reclaimed EMA50.
-    """
     above10 = (close > e10) or near(close, e10, reclaim_tol_pct)
     above20 = (close > e20) or near(close, e20, reclaim_tol_pct)
     above50 = close > e50
@@ -321,15 +312,11 @@ def apply_structure_soft_cap(
 
     if (not above10) and (not above20):
         cap = 42.0
-
     elif above10 and (not above20):
         cap = 46.0
-
     elif above10 and above20 and (not above50):
         cap = 49.0
-
     elif above10 and above20 and above50:
-        # Bare reclaim above 50 with tiny EMA separation = still just stabilization
         if near50 or ema_gap_pct < EMA_TREND_GAP_STRONG_PCT:
             cap = 49.0
         else:
@@ -357,7 +344,6 @@ def main():
     L = [b["low"] for b in spy]
     C = [b["close"] for b in spy]
 
-    # EMAs
     e10_series = ema_series(C, 10)
     e20_series = ema_series(C, 20)
     e50_series = ema_series(C, 50)
@@ -369,7 +355,6 @@ def main():
     e50 = float(e50_series[-1])
     close = float(C[-1])
 
-    # EMA posture (for metrics)
     ema10_dist_pct = 0.0 if e10 == 0 else 100.0 * (close - e10) / e10
     ema10_posture = posture_from_dist(ema10_dist_pct, FULL_EMA_DIST)
 
@@ -402,7 +387,7 @@ def main():
 
     elif above_10 and above_20 and stacked and above_50:
         if ema_gap_pct < EMA_TREND_GAP_STRONG_PCT:
-            structure_score = 54.0
+            structure_score = 56.0
             structure_tier = "above50_reclaim"
         else:
             structure_score = 64.0
@@ -412,13 +397,10 @@ def main():
         structure_score = 38.0
         structure_tier = "unknown"
 
-    if structure_score >= 64.0 and ema_gap_pct > EMA_GAP_BONUS_PCT:
-        structure_score = 72.0
-        structure_tier = "above50_trend_gap"
+    # IMPORTANT: removed the old 72 inflation bonus block
 
     structure_score = float(clamp(structure_score, 0.0, 100.0))
 
-    # EMA sign for state gate
     if above_10 and above_20 and stacked and above_50 and (close > e10) and (close > e20):
         ema_sign = 1
     elif (not above_10) and (not above_20) and (not stacked):
@@ -426,11 +408,9 @@ def main():
     else:
         ema_sign = 0
 
-    # --------- SECONDARY fast feel (EMA8 vs EMA18) ----------
     ema818_gap_pct = 0.0 if float(e18_series[-1]) == 0 else 100.0 * (float(e8_series[-1]) - float(e18_series[-1])) / float(e18_series[-1])
     secondary_posture = posture_from_dist(ema818_gap_pct, FULL_EMA_DIST)
 
-    # --------- SMI ----------
     smi_series, sig_series = tv_smi_and_signal(H, L, C, SMI_K_LEN, SMI_D_LEN, SMI_EMA_LEN)
     smi_val = float(smi_series[-1]) if smi_series else 0.0
     sig_val = float(sig_series[-1]) if sig_series else 0.0
@@ -449,19 +429,16 @@ def main():
         100.0,
     )
 
-    # --------- Lux PSI ----------
     Cw = C[-PSI_WIN_30M:] if len(C) > PSI_WIN_30M else C
     psi = lux_psi_from_closes(Cw, conv=LUX_CONV, length=LUX_LEN)
     squeeze_psi = float(psi) if isinstance(psi, (int, float)) else 50.0
     squeeze_psi = float(clamp(squeeze_psi, 0.0, 100.0))
     squeeze_exp = float(clamp(100.0 - squeeze_psi, 0.0, 100.0))
 
-    # --------- Breadth ----------
     align_pct, barup_pct, etf_cards = compute_breadth_sector_etfs_30m(key)
     breadth_pct = float(clamp(0.60 * align_pct + 0.40 * barup_pct, 0.0, 100.0))
     risk_on = float(riskon_from_alignment(etf_cards))
 
-    # --------- Final score ----------
     score_raw = (
         W_STRUCT * structure_score
         + W_MOM * momentum_combo
@@ -488,7 +465,7 @@ def main():
     updated = now_utc_iso()
 
     out = {
-        "version": "r30m-v5-truebridge-calibrated-46-49",
+        "version": "r30m-v6-truebridge-simplified-fixed",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated,
         "metrics": {
