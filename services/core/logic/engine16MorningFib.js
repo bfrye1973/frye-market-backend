@@ -849,13 +849,16 @@ export async function computeMorningFib({
   let readinessLabel = "NO_SETUP";
 
   // -------------------------------------------------
-  // EXHAUSTION REVERSAL (TOP / BOTTOM) — 5 BAR MEMORY
+  // EXHAUSTION REVERSAL (TOP / BOTTOM) — SEQUENCE DETECTOR
   // -------------------------------------------------
   const lookbackStart = Math.max(1, closedBars.length - EXHAUSTION_LOOKBACK_BARS);
+
   for (let i = lookbackStart; i < closedBars.length; i++) {
     const bar = closedBars[i];
-    const prevBar = closedBars[i - 1];
-    if (!bar || !prevBar) continue;
+    if (!bar) continue;
+
+    const next1 = i + 1 < closedBars.length ? closedBars[i + 1] : null;
+    const next2 = i + 2 < closedBars.length ? closedBars[i + 2] : null;
 
     const range = Number.isFinite(bar.h) && Number.isFinite(bar.l) ? bar.h - bar.l : 0;
     if (!(range > 0)) continue;
@@ -863,24 +866,14 @@ export async function computeMorningFib({
     const upperWick = bar.h - Math.max(bar.o, bar.c);
     const lowerWick = Math.min(bar.o, bar.c) - bar.l;
 
-    const upperWickStrong = upperWick / range >= 0.4;
-    const lowerWickStrong = lowerWick / range >= 0.4;
+    const upperWickStrong = upperWick / range >= 0.35;
+    const lowerWickStrong = lowerWick / range >= 0.35;
 
     const bearishClose =
       Number.isFinite(bar.c) && Number.isFinite(bar.o) && bar.c < bar.o;
 
     const bullishClose =
       Number.isFinite(bar.c) && Number.isFinite(bar.o) && bar.c > bar.o;
-
-    const nextBar = i + 1 < closedBars.length ? closedBars[i + 1] : null;
-
-    const momentumShiftDown = nextBar
-      ? Number.isFinite(nextBar.c) && Number.isFinite(bar.c) && nextBar.c < bar.c
-      : Number.isFinite(latestClose) && Number.isFinite(bar.c) && latestClose < bar.c;
-
-    const momentumShiftUp = nextBar
-      ? Number.isFinite(nextBar.c) && Number.isFinite(bar.c) && nextBar.c > bar.c
-      : Number.isFinite(latestClose) && Number.isFinite(bar.c) && latestClose > bar.c;
 
     const nearHigh =
       Number.isFinite(bar.h) &&
@@ -892,13 +885,71 @@ export async function computeMorningFib({
       Number.isFinite(bestCandidate.sessionLow) &&
       bar.l <= bestCandidate.sessionLow * 1.002;
 
-    if (
-      bestCandidate.context === "LONG_CONTEXT" &&
+    const rejectionUnderHigh =
+      Number.isFinite(bar.c) &&
+      Number.isFinite(bestCandidate.sessionHigh) &&
+      bar.c < bestCandidate.sessionHigh;
+
+    const reclaimAboveLow =
+      Number.isFinite(bar.c) &&
+      Number.isFinite(bestCandidate.sessionLow) &&
+      bar.c > bestCandidate.sessionLow;
+
+    const lowerHigh1 =
+      next1 && Number.isFinite(next1.h) && Number.isFinite(bar.h) && next1.h <= bar.h;
+
+    const higherLow1 =
+      next1 && Number.isFinite(next1.l) && Number.isFinite(bar.l) && next1.l >= bar.l;
+
+    const weakerClose1 =
+      next1 && Number.isFinite(next1.c) && Number.isFinite(bar.c) && next1.c < bar.c;
+
+    const strongerClose1 =
+      next1 && Number.isFinite(next1.c) && Number.isFinite(bar.c) && next1.c > bar.c;
+
+    const weakerClose2 =
+      next2 && Number.isFinite(next2.c) && Number.isFinite(bar.c) && next2.c < bar.c;
+
+    const strongerClose2 =
+      next2 && Number.isFinite(next2.c) && Number.isFinite(bar.c) && next2.c > bar.c;
+
+    const loseFastStructureShort =
+      (next1 && Number.isFinite(next1.c) && Number.isFinite(bar.l) && next1.c < bar.l) ||
+      (next2 && Number.isFinite(next2.c) && Number.isFinite(bar.l) && next2.c < bar.l);
+
+    const regainFastStructureLong =
+      (next1 && Number.isFinite(next1.c) && Number.isFinite(bar.h) && next1.c > bar.h) ||
+      (next2 && Number.isFinite(next2.c) && Number.isFinite(bar.h) && next2.c > bar.h);
+
+    const shortSequenceConfirmed =
       nearHigh &&
-      upperWickStrong &&
-      bearishClose &&
-      momentumShiftDown
-    ) {
+      (
+        upperWickStrong ||
+        bearishClose ||
+        rejectionUnderHigh
+      ) &&
+      (
+        lowerHigh1 ||
+        weakerClose1 ||
+        weakerClose2 ||
+        loseFastStructureShort
+      );
+
+    const longSequenceConfirmed =
+      nearLow &&
+      (
+        lowerWickStrong ||
+        bullishClose ||
+        reclaimAboveLow
+      ) &&
+      (
+        higherLow1 ||
+        strongerClose1 ||
+        strongerClose2 ||
+        regainFastStructureLong
+      );
+
+    if (bestCandidate.context === "LONG_CONTEXT" && shortSequenceConfirmed) {
       exhaustionDetected = true;
       exhaustionShort = true;
       exhaustionLong = false;
@@ -907,13 +958,7 @@ export async function computeMorningFib({
       break;
     }
 
-    if (
-      bestCandidate.context === "SHORT_CONTEXT" &&
-      nearLow &&
-      lowerWickStrong &&
-      bullishClose &&
-      momentumShiftUp
-    ) {
+    if (bestCandidate.context === "SHORT_CONTEXT" && longSequenceConfirmed) {
       exhaustionDetected = true;
       exhaustionLong = true;
       exhaustionShort = false;
@@ -952,8 +997,6 @@ export async function computeMorningFib({
     }
   }
 
-  let finalContext = bestCandidate.context;
-
   // -------------------------------------------------
   // CONFIRMED REVERSAL (LATER THAN EXHAUSTION)
   // -------------------------------------------------
@@ -988,6 +1031,8 @@ export async function computeMorningFib({
     failedBreakdown = true;
     reversalDetected = true;
   }
+
+  let finalContext = bestCandidate.context;
 
   if (
     bestCandidate.context === "LONG_CONTEXT" &&
@@ -1035,7 +1080,8 @@ export async function computeMorningFib({
     trendContinuation = true;
   }
 
-  // Strategy classification / Engine 15 readiness mapping
+  // Priority:
+  // EXHAUSTION > REVERSAL > BREAKDOWN > BREAKOUT > PULLBACK > CONTINUATION
   if (exhaustionDetected && exhaustionActive) {
     strategyType = "EXHAUSTION";
     readinessLabel = "EXHAUSTION_READY";
