@@ -7,6 +7,9 @@
 // - Track pullback state
 // - Detect wick rejection
 // - Detect breakout / breakdown continuation
+// - Detect reversal structure
+// - Detect trend continuation
+// - Classify current strategy type
 // - Optionally refine anchors using negotiated zones
 // - Optionally overlay Engine 4 volume context
 //
@@ -510,6 +513,17 @@ function emptyTimeFields() {
   };
 }
 
+function emptyStrategyFields() {
+  return {
+    strategyType: "NONE",
+    readinessLabel: "NO_SETUP",
+    failedBreakout: false,
+    failedBreakdown: false,
+    reversalDetected: false,
+    trendContinuation: false,
+  };
+}
+
 export async function computeMorningFib({
   symbol = DEFAULT_SYMBOL,
   tf = DEFAULT_TF,
@@ -607,6 +621,7 @@ export async function computeMorningFib({
       hasPulledBack: false,
       breakoutReady: false,
       breakdownReady: false,
+      ...emptyStrategyFields(),
       usedNegotiatedZoneAnchor: false,
       negotiatedZoneUsed: null,
       impulseVolumeConfirmed: false,
@@ -743,6 +758,7 @@ export async function computeMorningFib({
       hasPulledBack: false,
       breakoutReady: false,
       breakdownReady: false,
+      ...emptyStrategyFields(),
       usedNegotiatedZoneAnchor: false,
       negotiatedZoneUsed: null,
       impulseVolumeConfirmed: false,
@@ -814,7 +830,6 @@ export async function computeMorningFib({
   const latestClosedBar = closedBars[closedBars.length - 1];
   const latestClose = latestClosedBar?.c;
 
-  const stateInfo = classifyState(bestCandidate.context, latestClose, fibRaw);
   const insidePrimaryZone = insideZoneByClose(latestClose, zoneRaw.pullbackZone);
   const insideSecondaryZone = insideZoneByClose(latestClose, zoneRaw.secondaryZone);
 
@@ -850,6 +865,137 @@ export async function computeMorningFib({
     hasPulledBack &&
     Number.isFinite(latestClose) &&
     latestClose < bestCandidate.sessionLow;
+
+  // -------------------------------------------------
+  // Engine 16 Strategy Layer (4 core strategies)
+  // -------------------------------------------------
+  const pullbackMid =
+    zoneRaw?.pullbackZone
+      ? (zoneRaw.pullbackZone.lo + zoneRaw.pullbackZone.hi) / 2
+      : null;
+
+  let failedBreakout = false;
+  let failedBreakdown = false;
+  let reversalDetected = false;
+  let trendContinuation = false;
+  let strategyType = "NONE";
+  let readinessLabel = "NO_SETUP";
+
+  // Short reversal off highs:
+  // - previous context was long
+  // - price pushed above impulse/session high
+  // - failed to hold
+  // - broke back below pullback mid
+  // - displacement down is meaningful
+  if (
+    bestCandidate.context === "LONG_CONTEXT" &&
+    Number.isFinite(latestClosedBar?.h) &&
+    Number.isFinite(bestCandidate.sessionHigh) &&
+    latestClosedBar.h > bestCandidate.sessionHigh &&
+    Number.isFinite(latestClose) &&
+    latestClose < bestCandidate.sessionHigh &&
+    Number.isFinite(pullbackMid) &&
+    latestClose < pullbackMid &&
+    Number.isFinite(bestCandidate.atr) &&
+    (bestCandidate.sessionHigh - latestClose) > bestCandidate.atr * 0.5
+  ) {
+    failedBreakout = true;
+    reversalDetected = true;
+  }
+
+  // Long reversal off lows:
+  // - previous context was short
+  // - price pushed below impulse/session low
+  // - failed to hold
+  // - reclaimed pullback mid
+  // - displacement up is meaningful
+  if (
+    bestCandidate.context === "SHORT_CONTEXT" &&
+    Number.isFinite(latestClosedBar?.l) &&
+    Number.isFinite(bestCandidate.sessionLow) &&
+    latestClosedBar.l < bestCandidate.sessionLow &&
+    Number.isFinite(latestClose) &&
+    latestClose > bestCandidate.sessionLow &&
+    Number.isFinite(pullbackMid) &&
+    latestClose > pullbackMid &&
+    Number.isFinite(bestCandidate.atr) &&
+    (latestClose - bestCandidate.sessionLow) > bestCandidate.atr * 0.5
+  ) {
+    failedBreakdown = true;
+    reversalDetected = true;
+  }
+
+  // Context flip is mandatory when reversal structure confirms
+  let finalContext = bestCandidate.context;
+
+  if (
+    bestCandidate.context === "LONG_CONTEXT" &&
+    failedBreakout &&
+    reversalDetected &&
+    Number.isFinite(pullbackMid) &&
+    Number.isFinite(latestClose) &&
+    latestClose < pullbackMid
+  ) {
+    finalContext = "SHORT_CONTEXT";
+  }
+
+  if (
+    bestCandidate.context === "SHORT_CONTEXT" &&
+    failedBreakdown &&
+    reversalDetected &&
+    Number.isFinite(pullbackMid) &&
+    Number.isFinite(latestClose) &&
+    latestClose > pullbackMid
+  ) {
+    finalContext = "LONG_CONTEXT";
+  }
+
+  // Continuation:
+  // trend still intact, reversal not active, and price remains near the impulse edge
+  if (
+    finalContext === "LONG_CONTEXT" &&
+    !reversalDetected &&
+    Number.isFinite(latestClose) &&
+    Number.isFinite(bestCandidate.sessionHigh) &&
+    Number.isFinite(bestCandidate.atr) &&
+    latestClose >= bestCandidate.sessionHigh - bestCandidate.atr * 0.35
+  ) {
+    trendContinuation = true;
+  }
+
+  if (
+    finalContext === "SHORT_CONTEXT" &&
+    !reversalDetected &&
+    Number.isFinite(latestClose) &&
+    Number.isFinite(bestCandidate.sessionLow) &&
+    Number.isFinite(bestCandidate.atr) &&
+    latestClose <= bestCandidate.sessionLow + bestCandidate.atr * 0.35
+  ) {
+    trendContinuation = true;
+  }
+
+  // Strategy classification / Engine 15 readiness mapping
+  if (reversalDetected && (failedBreakout || failedBreakdown)) {
+    strategyType = "REVERSAL";
+    readinessLabel = "REVERSAL_READY";
+  } else if (hasPulledBack && breakdownReady) {
+    strategyType = "BREAKDOWN";
+    readinessLabel = "BREAKDOWN_READY";
+  } else if (hasPulledBack && breakoutReady) {
+    strategyType = "BREAKOUT";
+    readinessLabel = "BREAKOUT_READY";
+  } else if (hasPulledBack && insidePrimaryZone) {
+    strategyType = "PULLBACK_PRIMARY";
+    readinessLabel = "PULLBACK_READY";
+  } else if (hasPulledBack && insideSecondaryZone) {
+    strategyType = "PULLBACK_SECONDARY";
+    readinessLabel = "PULLBACK_READY";
+  } else if (trendContinuation) {
+    strategyType = "CONTINUATION";
+    readinessLabel = "CONTINUATION_READY";
+  }
+
+  const stateInfo = classifyState(finalContext, latestClose, fibRaw);
 
   let volumeContext = {
     volumeScore: 0,
@@ -901,7 +1047,7 @@ export async function computeMorningFib({
     sessionHighBar: { t: bestCandidate.sessionHighBarT },
     sessionLowBar: { t: bestCandidate.sessionLowBarT },
     candidate: bestCandidate,
-    context: bestCandidate.context,
+    context: finalContext,
     usedNegotiatedZoneAnchor,
   });
 
@@ -910,7 +1056,7 @@ export async function computeMorningFib({
     symbol,
     date: dateKey,
     timeframe,
-    context: bestCandidate.context,
+    context: finalContext,
 
     anchors: {
       premarketLow: round2(premarketLow),
@@ -943,6 +1089,13 @@ export async function computeMorningFib({
     hasPulledBack,
     breakoutReady,
     breakdownReady,
+
+    strategyType,
+    readinessLabel,
+    failedBreakout,
+    failedBreakdown,
+    reversalDetected,
+    trendContinuation,
 
     usedNegotiatedZoneAnchor,
     negotiatedZoneUsed,
