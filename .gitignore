@@ -1,0 +1,40 @@
+# ----------------------------
+# General ignores
+# ----------------------------
+
+# Secrets and build artifacts
+.env
+node_modules/
+npm-debug.log*
+.DS_Store
+
+# Python cache / virtualenvs
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Logs
+*.log
+
+# ----------------------------
+# 🚨 Important exceptions (data artifacts we ALWAYS keep)
+# ----------------------------
+
+# Keep the whole data tree
+!data/
+!data/**
+
+# Explicitly keep the key JSONs
+!data/outlook.json
+!data/outlook_source.json
+!data/history.json
+
+# Keep heartbeat file so every run commits
+!data/heartbeat.txt
+
+# Always keep archive snapshots (hourly + eod)
+!data/archive/**
