@@ -2,7 +2,7 @@
 // GET /api/v1/chart-overlay?symbol=SPY&tf=30m
 
 import express from "express";
-import { computeChartOverlay } from "../logic/engine17ChartOverlay.js";
+import computeChartOverlay from "../logic/engine17ChartOverlay.js";
 
 export const chartOverlayRouter = express.Router();
 
