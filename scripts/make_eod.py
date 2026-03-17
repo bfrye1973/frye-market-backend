@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_eod.py (R16.0 — EOD STRUCTURE-BACKBONE + SHORT PSI + SAFETY GATES)
+Ferrari Dashboard — make_eod.py (R16.1 — DIAGNOSTIC BUILD)
 
-What’s locked:
+Purpose of this version:
+- Keep current R16.0 logic intact
+- Add hard diagnostics so we can PROVE where EOD is getting stuck
+- No schema-breaking changes
+- No guessing, only observability
+
+What remains locked:
 - EOD Lux PSI = SHORT-MEMORY current-state detector (weeks), not long history
 - PSI meaning = tightness (higher = tighter)
 - Ferrari 3-color squeeze light:
     RED    psi >= 90
     YELLOW 70 <= psi < 90
     GREEN  psi < 70
-- Guardrail: source.mode must be "daily" (prevents intraday contamination)
+- Guardrail: source.mode must be "daily"
 - Internals Weak can block entries even if state is Bull
 - Option A: break the “exact 50” dead-zone with tiny bias
-
-What changed in R16.0:
-- EOD is now more structural and slower
-- EMA10 is demoted to minor short-term modifier
-- EMA20 / EMA50 / EMA200 form the real daily backbone
-- below 50 but above 200 no longer gets treated like full bear damage
-- score guardrails now respect 20/50/200 structure
-- output schema remains backward compatible
 """
 
 from __future__ import annotations
@@ -63,7 +61,6 @@ LUX_LEN = 20
 PSI_WIN_D = int(os.environ.get("PSI_WIN_D", "20"))
 
 # Fetch days (EMAs / ATR stability, NOT PSI memory)
-# Increased default to support EMA200 stability.
 SPY_FETCH_DAYS = int(os.environ.get("SPY_FETCH_DAYS", "420"))
 SECTOR_FETCH_DAYS = int(os.environ.get("SECTOR_FETCH_DAYS", "120"))
 
@@ -71,6 +68,9 @@ SECTOR_FETCH_DAYS = int(os.environ.get("SECTOR_FETCH_DAYS", "120"))
 PSI_DEADZONE_EPS = float(os.environ.get("PSI_DEADZONE_EPS", "0.25"))
 PSI_BIAS_TREND = float(os.environ.get("PSI_BIAS_TREND", "49.0"))
 PSI_BIAS_WEAK = float(os.environ.get("PSI_BIAS_WEAK", "51.0"))
+
+# Toggle for diagnosis
+DISABLE_PSI_DEADZONE_BIAS = os.environ.get("DISABLE_PSI_DEADZONE_BIAS", "0").strip() == "1"
 
 
 def now_utc_iso() -> str:
@@ -89,7 +89,7 @@ def pct(a: float, b: float) -> float:
 
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "make-eod/4.0", "Cache-Control": "no-store"})
+    req = urllib.request.Request(url, headers={"User-Agent": "make-eod/4.1", "Cache-Control": "no-store"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -148,21 +148,24 @@ def posture_from_dist(distp: float, full_dist: float) -> float:
 
 
 def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
-    # LuxAlgo PSI
     if len(closes) < length + 2:
         return None
+
     mx = None
     mn = None
     diffs: List[float] = []
     eps = 1e-12
+
     for src in map(float, closes):
         mx = src if mx is None else max(mx - (mx - src) / conv, src)
         mn = src if mn is None else min(mn + (src - mn) / conv, src)
         span = max(mx - mn, eps)
         diffs.append(math.log(span))
+
     win = diffs[-length:]
     if len(win) < length:
         return None
+
     xs = list(range(length))
     xbar = sum(xs) / length
     ybar = sum(win) / length
@@ -224,10 +227,6 @@ def squeeze_light_color_3(psi: float) -> str:
 
 
 def compute_stack_score(close: float, ema10: float, ema20: float, ema50: float, ema200: float) -> float:
-    """
-    Stable daily structure ladder.
-    200 / 50 / 20 matter much more than 10.
-    """
     score = 0.0
 
     if close > ema200:
@@ -280,10 +279,6 @@ def apply_score_guardrails(
     above50: bool,
     above200: bool,
 ) -> float:
-    """
-    Keep EOD slower and structural.
-    10 EMA can tweak, but 20/50/200 control the range.
-    """
     if not above200:
         return clamp(score, 0.0, 45.0)
 
@@ -416,6 +411,14 @@ def main():
     V = [b["v"] for b in bars]
     close = float(C[-1])
 
+    # --- DIAGNOSTIC: latest bar freshness ---
+    last_bar_ts = int(bars[-1]["t"])
+    last_bar_dt = datetime.fromtimestamp(last_bar_ts, UTC).strftime("%Y-%m-%d")
+    print(
+        f"[EOD BARS] last_bar_date={last_bar_dt} last_close={close:.4f} total_bars={len(bars)}",
+        flush=True
+    )
+
     e10 = ema_series(C, 10)[-1]
     e20 = ema_series(C, 20)[-1]
     e50 = ema_series(C, 50)[-1]
@@ -431,7 +434,6 @@ def main():
     above50 = close > e50
     above200 = close > e200
 
-    # EOD posture components (10 EMA intentionally less important)
     ema10_post = posture_from_dist(d10, FULL_DIST_10)
     ema20_post = posture_from_dist(d20, FULL_DIST_20)
     ema50_post = posture_from_dist(d50, FULL_DIST_50)
@@ -455,13 +457,32 @@ def main():
 
     # SHORT MEMORY PSI
     Cw = C[-PSI_WIN_D:] if len(C) > PSI_WIN_D else C
-    psi = lux_psi_from_closes(Cw, conv=LUX_CONV, length=LUX_LEN)
-    psi = float(psi) if isinstance(psi, (int, float)) else 50.0
-    psi = float(clamp(psi, 0.0, 100.0))
+
+    # --- DIAGNOSTIC: exact closes feeding PSI ---
+    print(
+        f"[EOD PSI INPUT] win={PSI_WIN_D} closes={[round(x, 4) for x in Cw]}",
+        flush=True
+    )
+
+    psi_raw_obj = lux_psi_from_closes(Cw, conv=LUX_CONV, length=LUX_LEN)
+    psi_raw = float(psi_raw_obj) if isinstance(psi_raw_obj, (int, float)) else 50.0
+    psi_raw = float(clamp(psi_raw, 0.0, 100.0))
+
+    # --- DIAGNOSTIC: raw PSI before dead-zone bias ---
+    print(f"[EOD PSI RAW] psi_raw={psi_raw:.6f}", flush=True)
+
+    psi = psi_raw
 
     # Option A: break exact-50 dead-zone
-    if abs(psi - 50.0) < PSI_DEADZONE_EPS:
-        psi = PSI_BIAS_TREND if ema_structure >= 55.0 else PSI_BIAS_WEAK
+    if not DISABLE_PSI_DEADZONE_BIAS:
+        if abs(psi - 50.0) < PSI_DEADZONE_EPS:
+            psi = PSI_BIAS_TREND if ema_structure >= 55.0 else PSI_BIAS_WEAK
+
+    # --- DIAGNOSTIC: final PSI after dead-zone bias ---
+    print(
+        f"[EOD PSI FINAL] psi_final={psi:.6f} deadzone_disabled={int(DISABLE_PSI_DEADZONE_BIAS)}",
+        flush=True
+    )
 
     regime_key, _regime_color, no_entries, mode_label = squeeze_regime(psi)
     squeeze_score = squeeze_score_from_regime(regime_key)
@@ -474,23 +495,31 @@ def main():
 
     conditions = float(clamp(0.40 * squeeze_score + 0.30 * liq_norm + 0.30 * vol_score, 0.0, 100.0))
 
-    # ETF confirm
     etf_breadth, etf_participation = daily_breadth_participation_from_sector_etfs()
     etf_confirm = float(clamp(0.60 * etf_breadth + 0.40 * etf_participation, 0.0, 100.0))
 
-    # sectorCards averages
     cards_b_avg, cards_m_avg = sectorcards_avgs(cards)
 
-    # Balanced blend kept
-    breadth_confirm = float(clamp(
-        0.50 * etf_confirm + 0.25 * cards_b_avg + 0.25 * cards_m_avg,
-        0.0, 100.0
-    ))
+    breadth_confirm = float(
+        clamp(
+            0.50 * etf_confirm + 0.25 * cards_b_avg + 0.25 * cards_m_avg,
+            0.0,
+            100.0,
+        )
+    )
 
     internals_weak, red_count, internals_reason = compute_internals_weak(cards, etf_participation, etf_breadth)
     risk_on = compute_sectorcards_risk_on(cards)
 
     score_raw = float(W_EMA_STRUCT * ema_structure + W_BREADTH_CONF * breadth_confirm + W_CONDITIONS * conditions)
+
+    # --- DIAGNOSTIC: raw score pieces before guardrail ---
+    print(
+        f"[EOD SCORE RAW] ema_structure={ema_structure:.2f} breadth_confirm={breadth_confirm:.2f} "
+        f"conditions={conditions:.2f} score_raw={score_raw:.2f}",
+        flush=True
+    )
+
     score = apply_score_guardrails(
         state=state,
         score=score_raw,
@@ -498,6 +527,13 @@ def main():
         above20=bool(above20),
         above50=bool(above50),
         above200=bool(above200),
+    )
+
+    # --- DIAGNOSTIC: final score after guardrail ---
+    print(
+        f"[EOD SCORE FINAL] state={state} label={state_label} final_score={score:.2f} "
+        f"above10={int(above10)} above20={int(above20)} above50={int(above50)} above200={int(above200)}",
+        flush=True
     )
 
     allow_exits = True
@@ -532,6 +568,7 @@ def main():
         "ema20Post": round(ema20_post, 1),
         "ema50Post": round(ema50_post, 1),
         "ema200Post": round(ema200_post, 1),
+        "psiRaw": round(psi_raw, 4),
     }
 
     daily = {
@@ -539,7 +576,6 @@ def main():
         "stateLabel": state_label,
         "score": round(score, 1),
 
-        # added for visibility; non-breaking
         "ema10": round(float(e10), 4),
         "ema20": round(float(e20), 4),
         "ema50": round(float(e50), 4),
@@ -600,7 +636,6 @@ def main():
         "internals_weak": bool(internals_weak),
         "red_sectors_count": int(red_count),
 
-        # kept + expanded debug visibility
         "etf_confirm_pct": round(float(etf_confirm), 2),
         "cards_breadth_avg": round(float(cards_b_avg), 2),
         "cards_momentum_avg": round(float(cards_m_avg), 2),
@@ -619,6 +654,12 @@ def main():
         "price_above_ema20": bool(above20),
         "price_above_ema50": bool(above50),
         "price_above_ema200": bool(above200),
+
+        # diagnostic visibility
+        "psi_raw": round(float(psi_raw), 6),
+        "last_bar_date": last_bar_dt,
+        "last_close": round(float(close), 4),
+        "deadzone_disabled": bool(DISABLE_PSI_DEADZONE_BIAS),
     }
 
     engineLights = {
@@ -649,7 +690,7 @@ def main():
         "sectorCards": cards,
         "engineLights": engineLights,
         "meta": {
-            "source": "make_eod.py R16.0 structure-backbone + short-psi(20d)",
+            "source": "make_eod.py R16.1 diagnostic build",
             "tz": "America/Phoenix",
         }
     }
@@ -659,10 +700,10 @@ def main():
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
     print(
-        f"[eod] psi={psi:.2f} win={PSI_WIN_D} etfConfirm={etf_confirm:.1f} "
-        f"cardsB={cards_b_avg:.1f} cardsM={cards_m_avg:.1f} breadthConfirm={breadth_confirm:.1f} "
-        f"scoreRaw={score_raw:.1f} score={score:.1f} state={state} label={state_label} "
-        f"above10={int(above10)} above20={int(above20)} above50={int(above50)} above200={int(above200)}",
+        f"[eod] psiRaw={psi_raw:.4f} psiFinal={psi:.4f} win={PSI_WIN_D} "
+        f"etfConfirm={etf_confirm:.1f} cardsB={cards_b_avg:.1f} cardsM={cards_m_avg:.1f} "
+        f"breadthConfirm={breadth_confirm:.1f} scoreRaw={score_raw:.1f} score={score:.1f} "
+        f"state={state} label={state_label}",
         flush=True
     )
 
