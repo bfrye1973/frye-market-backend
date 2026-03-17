@@ -956,7 +956,15 @@ async function processStrategy(s, momentum, marketMind, engine16) {
     engine4: patchedConfluence?.context?.volume || null,
     engine5: patchedConfluence || null,
   });
+  let executionBias = "NORMAL";
 
+  if (engine15?.readiness === "EXHAUSTION_READY") {
+    if (engine15?.direction === "SHORT") {
+      executionBias = "SHORT_PRIORITY";
+    } else if (engine15?.direction === "LONG") {
+      executionBias = "LONG_PRIORITY";
+    }
+  }
   return {
     strategyId: s.strategyId,
     tf: s.tf,
@@ -974,6 +982,7 @@ async function processStrategy(s, momentum, marketMind, engine16) {
     engine2,
     engine16,
     engine15,
+    executionBias,
     momentum,
     context: engine1Context,
   };
