@@ -1,9 +1,19 @@
 // services/core/jobs/buildStrategySnapshot.js
 // Stable snapshot builder (SPY only)
-// Phase 2: avoids /api/v1/confluence-score and computes confluence directly
+// Phase 3:
+// - avoids /api/v1/confluence-score fan-out on frontend
+// - computes confluence directly
+// - attaches Engine 16 (Morning Fib / strategy detection)
+// - attaches Engine 15 strategy readiness translator
+//
+// IMPORTANT:
+// - This does NOT replace old engine15Readiness.js
+// - This uses the NEW translator file:
+//   services/core/logic/engine15StrategyReadiness.js
 
 import fs from "fs";
 import { computeConfluenceScore } from "../logic/confluenceScorer.js";
+import { computeEngine15Readiness } from "../logic/engine15StrategyReadiness.js";
 
 /* -----------------------------
    Absolute paths / constants
@@ -35,14 +45,6 @@ function nowIso() {
 function toNum(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
-}
-
-function round2(v) {
-  return Number((Number(v) || 0).toFixed(2));
-}
-
-function clamp(n, lo, hi) {
-  return Math.max(lo, Math.min(hi, n));
 }
 
 /* -----------------------------
@@ -167,6 +169,75 @@ function fallbackMomentum(sym) {
 async function fetchMomentumContext(sym) {
   const r = await fetchJson(`${CORE_BASE}/api/v1/momentum-context?symbol=${sym}`, 15000);
   return r?.json || fallbackMomentum(sym);
+}
+
+/* -----------------------------
+   Engine 16
+------------------------------*/
+function fallbackEngine16(sym) {
+  return {
+    ok: false,
+    symbol: sym,
+    date: null,
+    timeframe: "30m",
+    context: "NONE",
+    anchors: {
+      premarketLow: null,
+      premarketHigh: null,
+      sessionHigh: null,
+      sessionLow: null,
+      anchorA: null,
+      anchorB: null,
+    },
+    fib: {
+      r382: null,
+      r500: null,
+      r618: null,
+      r786: null,
+    },
+    pullbackZone: { lo: null, hi: null },
+    secondaryZone: { lo: null, hi: null },
+    state: "NO_IMPULSE",
+    insidePrimaryZone: false,
+    insideSecondaryZone: false,
+    invalidated: false,
+    wickRejectionLong: false,
+    wickRejectionShort: false,
+    hasPulledBack: false,
+    breakoutReady: false,
+    breakdownReady: false,
+    strategyType: "NONE",
+    readinessLabel: "NO_SETUP",
+    exhaustionDetected: false,
+    exhaustionShort: false,
+    exhaustionLong: false,
+    exhaustionActive: false,
+    exhaustionBarTime: null,
+    exhaustionBarPrice: null,
+    meta: {
+      marketTz: "America/New_York",
+      impulseWindowMinutes: 90,
+      atrPeriod: 14,
+      atrMultiple: 1.2,
+    },
+    error: "ENGINE16_UNAVAILABLE",
+  };
+}
+
+async function fetchEngine16(sym) {
+  const r = await fetchJson(
+    `${CORE_BASE}/api/v1/morning-fib?symbol=${encodeURIComponent(sym)}&tf=30m`,
+    30000
+  );
+
+  if (r.ok && r.json) {
+    return r.json;
+  }
+
+  return {
+    ...fallbackEngine16(sym),
+    error: r?.text || "ENGINE16_FETCH_FAILED",
+  };
 }
 
 /* -----------------------------
@@ -649,7 +720,7 @@ async function fetchVolume({ symbol, tf, zoneLo, zoneHi, mode }) {
 /* -----------------------------
    Build one strategy
 ------------------------------*/
-async function processStrategy(s, momentum, marketMind) {
+async function processStrategy(s, momentum, marketMind, engine16) {
   console.log(`→ Processing ${s.strategyId}`);
 
   const contextResp = await fetchJson(
@@ -877,6 +948,15 @@ async function processStrategy(s, momentum, marketMind) {
     }
   }
 
+  const engine15 = computeEngine15Readiness({
+    symbol,
+    strategyId: s.strategyId,
+    engine16,
+    engine3: patchedConfluence?.context?.reaction || null,
+    engine4: patchedConfluence?.context?.volume || null,
+    engine5: patchedConfluence || null,
+  });
+
   return {
     strategyId: s.strategyId,
     tf: s.tf,
@@ -892,6 +972,8 @@ async function processStrategy(s, momentum, marketMind) {
         error: permissionV2Resp?.text || "no_v2",
       },
     engine2,
+    engine16,
+    engine15,
     momentum,
     context: engine1Context,
   };
@@ -907,6 +989,10 @@ async function buildSnapshot() {
   console.log("Momentum fetched");
 
   const marketMind = await fetchMarketMindScores();
+  console.log("MarketMind fetched");
+
+  const engine16 = await fetchEngine16(symbol);
+  console.log("Engine16 fetched");
 
   const result = {
     ok: true,
@@ -915,13 +1001,14 @@ async function buildSnapshot() {
     includeContext: true,
     marketMind,
     momentum,
+    engine16,
     strategies: {},
   };
 
   // sequential on purpose: gentler on backend-1
   for (const s of STRATEGIES) {
     try {
-      const strategy = await processStrategy(s, momentum, marketMind);
+      const strategy = await processStrategy(s, momentum, marketMind, engine16);
       result.strategies[s.strategyId] = strategy;
     } catch (err) {
       result.strategies[s.strategyId] = {
@@ -933,6 +1020,15 @@ async function buildSnapshot() {
         permission: { ok: false, error: "builder_strategy_failed" },
         engine6v2: { ok: false, error: "builder_strategy_failed" },
         engine2: null,
+        engine16,
+        engine15: {
+          ok: false,
+          error: "builder_strategy_failed",
+          readiness: "NO_SETUP",
+          strategyType: "NONE",
+          direction: "NONE",
+          active: false,
+        },
         momentum,
         context: { ok: false, error: "builder_strategy_failed" },
       };
