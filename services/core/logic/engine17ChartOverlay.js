@@ -35,7 +35,7 @@ async function readNegotiatedZones() {
       : [];
 
     const negotiated = zones
-      .filter((z) => String(z?.structureKey || "").includes("|NEG|"))
+      .filter((z) => String(z?.structureKey || z?.id || "").includes("|NEG|"))
       .map((z) => {
         const pr = Array.isArray(z?.priceRange)
           ? z.priceRange
@@ -66,6 +66,12 @@ async function readNegotiatedZones() {
   } catch {
     return [];
   }
+}
+
+function safeSignalLabel(kind) {
+  return String(kind || "")
+    .replaceAll("_", " ")
+    .trim();
 }
 
 export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
@@ -139,51 +145,134 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
       price: fibResult.anchors?.anchorB,
       label: "Fib B",
     },
-  ];
+  ].filter((a) => Number.isFinite(a?.price));
 
+  // IMPORTANT:
+  // Keep Engine 16 truth intact and forward the new exhaustion / strategy fields.
   const fibOverlay = {
     context: fibResult.context,
+
     anchorA: fibResult.anchors?.anchorA,
     anchorB: fibResult.anchors?.anchorB,
+
+    anchors: {
+      premarketLow: fibResult.anchors?.premarketLow,
+      premarketHigh: fibResult.anchors?.premarketHigh,
+      sessionHigh: fibResult.anchors?.sessionHigh,
+      sessionLow: fibResult.anchors?.sessionLow,
+      anchorA: fibResult.anchors?.anchorA,
+      anchorB: fibResult.anchors?.anchorB,
+
+      premarketLowTime: fibResult.anchors?.premarketLowTime || null,
+      premarketHighTime: fibResult.anchors?.premarketHighTime || null,
+      sessionHighTime: fibResult.anchors?.sessionHighTime || null,
+      sessionLowTime: fibResult.anchors?.sessionLowTime || null,
+      anchorATime: fibResult.anchors?.anchorATime || null,
+      anchorBTime: fibResult.anchors?.anchorBTime || null,
+    },
+
     levels: fibResult.fib,
     primaryZone: fibResult.pullbackZone,
     secondaryZone: fibResult.secondaryZone,
+
     usedNegotiatedZoneAnchor: fibResult.usedNegotiatedZoneAnchor,
+    negotiatedZoneUsed: fibResult.negotiatedZoneUsed || null,
+
+    state: fibResult.state,
+    insidePrimaryZone: !!fibResult.insidePrimaryZone,
+    insideSecondaryZone: !!fibResult.insideSecondaryZone,
+    invalidated: !!fibResult.invalidated,
+
+    wickRejectionLong: !!fibResult.wickRejectionLong,
+    wickRejectionShort: !!fibResult.wickRejectionShort,
+
+    hasPulledBack: !!fibResult.hasPulledBack,
+    breakoutReady: !!fibResult.breakoutReady,
+    breakdownReady: !!fibResult.breakdownReady,
+
+    strategyType: fibResult.strategyType || "NONE",
+    readinessLabel: fibResult.readinessLabel || "NO_SETUP",
+    failedBreakout: !!fibResult.failedBreakout,
+    failedBreakdown: !!fibResult.failedBreakdown,
+    reversalDetected: !!fibResult.reversalDetected,
+    trendContinuation: !!fibResult.trendContinuation,
+
+    exhaustionDetected: !!fibResult.exhaustionDetected,
+    exhaustionShort: !!fibResult.exhaustionShort,
+    exhaustionLong: !!fibResult.exhaustionLong,
+    exhaustionBarTime: fibResult.exhaustionBarTime || null,
+    exhaustionBarPrice: Number.isFinite(fibResult.exhaustionBarPrice)
+      ? fibResult.exhaustionBarPrice
+      : null,
+    exhaustionLookbackBars: Number.isFinite(fibResult.exhaustionLookbackBars)
+      ? fibResult.exhaustionLookbackBars
+      : null,
+    exhaustionActive: !!fibResult.exhaustionActive,
+
+    impulseVolumeConfirmed: !!fibResult.impulseVolumeConfirmed,
+    volumeContext: fibResult.volumeContext || {
+      volumeScore: 0,
+      volumeConfirmed: false,
+      volumeRegime: "UNKNOWN",
+      pressureBias: "NEUTRAL_PRESSURE",
+      flowSummary: [],
+    },
   };
 
   const signals = [];
 
-  if (fibResult.state) {
+  // Highest-priority strategy signals first
+  if (fibResult.exhaustionDetected && fibResult.exhaustionActive) {
     signals.push({
-      kind: fibResult.state,
-      price: fibResult.anchors?.anchorB,
-      label: fibResult.state.replace("_", " "),
+      kind: fibResult.exhaustionShort
+        ? "EXHAUSTION_SHORT"
+        : fibResult.exhaustionLong
+        ? "EXHAUSTION_LONG"
+        : "EXHAUSTION",
+      price: Number.isFinite(fibResult.exhaustionBarPrice)
+        ? fibResult.exhaustionBarPrice
+        : fibResult.anchors?.anchorB,
+      label: fibResult.exhaustionShort
+        ? "Exhaustion Short"
+        : fibResult.exhaustionLong
+        ? "Exhaustion Long"
+        : "Exhaustion",
+      severity: "high",
+      time: fibResult.exhaustionBarTime || null,
     });
-  }
+  } else {
+    if (fibResult.state) {
+      signals.push({
+        kind: fibResult.state,
+        price: fibResult.anchors?.anchorB,
+        label: safeSignalLabel(fibResult.state),
+      });
+    }
 
-  if (fibResult.impulseVolumeConfirmed) {
-    signals.push({
-      kind: "IMPULSE_VOLUME_CONFIRMED",
-      price: fibResult.anchors?.anchorB,
-      label: "Volume Confirmed",
-      severity: "info",
-    });
-  }
+    if (fibResult.impulseVolumeConfirmed) {
+      signals.push({
+        kind: "IMPULSE_VOLUME_CONFIRMED",
+        price: fibResult.anchors?.anchorB,
+        label: "Volume Confirmed",
+        severity: "info",
+      });
+    }
 
-  if (fibResult.breakoutReady) {
-    signals.push({
-      kind: "BREAKOUT_READY",
-      price: fibResult.anchors?.sessionHigh,
-      label: "Breakout Ready",
-    });
-  }
+    if (fibResult.breakoutReady) {
+      signals.push({
+        kind: "BREAKOUT_READY",
+        price: fibResult.anchors?.sessionHigh,
+        label: "Breakout Ready",
+      });
+    }
 
-  if (fibResult.breakdownReady) {
-    signals.push({
-      kind: "BREAKDOWN_READY",
-      price: fibResult.anchors?.sessionLow,
-      label: "Breakdown Ready",
-    });
+    if (fibResult.breakdownReady) {
+      signals.push({
+        kind: "BREAKDOWN_READY",
+        price: fibResult.anchors?.sessionLow,
+        label: "Breakdown Ready",
+      });
+    }
   }
 
   const badges = [
@@ -194,6 +283,31 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
       value: fibResult.impulseVolumeConfirmed ? "CONFIRMED" : "NORMAL",
     },
   ];
+
+  // Add strategy/readiness pills
+  if (fibResult.strategyType && fibResult.strategyType !== "NONE") {
+    badges.unshift({
+      kind: "STRATEGY",
+      value: fibResult.strategyType,
+    });
+  }
+
+  if (fibResult.readinessLabel && fibResult.readinessLabel !== "NO_SETUP") {
+    badges.unshift({
+      kind: "READINESS",
+      value: fibResult.readinessLabel,
+    });
+  }
+
+  // Add exhaustion priority pill
+  if (fibResult.exhaustionDetected && fibResult.exhaustionActive) {
+    badges.unshift({
+      kind: fibResult.exhaustionShort
+        ? "EXHAUSTION_READY_SHORT"
+        : "EXHAUSTION_READY_LONG",
+      value: "EXHAUSTION READY",
+    });
+  }
 
   return {
     ok: true,
@@ -207,6 +321,8 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
     dayRange: {
       currentDayLow: fibResult.anchors?.premarketLow,
       currentDayHigh: fibResult.anchors?.sessionHigh,
+      currentDayLowTime: fibResult.anchors?.premarketLowTime || null,
+      currentDayHighTime: fibResult.anchors?.sessionHighTime || null,
     },
 
     signals,
