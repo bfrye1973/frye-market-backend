@@ -3,9 +3,8 @@ name: dashboard-archive-30m
 on:
   workflow_dispatch: {}
   schedule:
-    # 1h before open (12:30 UTC) then every 30m during RTH
-    - cron: "30 12 * * 1-5"
-    - cron: "0,30 13-20 * * 1-5"
+    # every 30 minutes, Monday-Friday
+    - cron: "*/30 * * * 1-5"
 
 jobs:
   archive:
@@ -18,8 +17,8 @@ jobs:
       contents: write
 
     env:
-      LIVE_BRANCH: data-live-10min
-      ARCHIVE_BRANCH: data-archive-10min
+      LIVE_BRANCH: data-live-30m
+      ARCHIVE_BRANCH: data-archive-30m
 
     steps:
       - name: Checkout (shallow)
@@ -27,16 +26,14 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 1) Fetch the latest live payload to a TEMP dir (NOT the repo)
-      - name: Fetch latest 10m payload (live branch → /tmp)
+      - name: Fetch latest 30m payload (live branch → /tmp)
         run: |
           set -e
-          mkdir -p /tmp/live10
-          curl -sSL "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/${LIVE_BRANCH}/data/outlook_intraday.json" \
-            -o /tmp/live10/outlook_intraday.json
-          test -s /tmp/live10/outlook_intraday.json
+          mkdir -p /tmp/live30
+          curl -sSL "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/${LIVE_BRANCH}/data/outlook_30m.json" \
+            -o /tmp/live30/outlook_30m.json
+          test -s /tmp/live30/outlook_30m.json
 
-      # 2) Switch/create archive branch with a clean tree
       - name: Prepare archive branch (clean working tree)
         run: |
           set -e
@@ -47,11 +44,10 @@ jobs:
             git checkout --orphan "${ARCHIVE_BRANCH}"
             rm -rf *
           fi
-          # ensure repo is clean
-          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-          mkdir -p data/archive/10min/dashboard
 
-      # 3) Stamp + copy snapshot into archive path and commit
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+          mkdir -p data/archive/30m/dashboard
+
       - name: Stamp snapshot and commit
         env:
           GIT_AUTHOR_NAME: "frye-bot"
@@ -61,7 +57,7 @@ jobs:
         run: |
           set -e
           TS="$(date -u +%Y%m%dT%H%M%SZ)"
-          cp -f /tmp/live10/outlook_intraday.json "data/archive/10min/dashboard/outlook_${TS}.json"
-          git add "data/archive/10min/dashboard/outlook_${TS}.json"
-          git commit -m "Archive snapshot 10m @ ${TS}" || echo "nothing to commit"
+          cp -f /tmp/live30/outlook_30m.json "data/archive/30m/dashboard/outlook_30m_${TS}.json"
+          git add "data/archive/30m/dashboard/outlook_30m_${TS}.json"
+          git commit -m "Archive snapshot 30m @ ${TS}" || echo "nothing to commit"
           git push origin "${ARCHIVE_BRANCH}"
