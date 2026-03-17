@@ -31,10 +31,8 @@ import { computeVolumeBehavior } from "./volumeBehaviorEngine.js";
 const MARKET_TZ = "America/New_York";
 const DEFAULT_SYMBOL = "SPY";
 const DEFAULT_TF = "30m";
-
-// ~5 trading-day-equivalent coverage in calendar days.
-// Using calendar days because Polygon provider is day-window based.
 const FETCH_DAYS = 8;
+const EXHAUSTION_LOOKBACK_BARS = 5;
 
 const TF_MS = {
   "1m": 60_000,
@@ -135,17 +133,17 @@ function filterBarsForDate(closedBars, dateKey) {
 
 function inPremarket(bar) {
   const p = getNyPartsFromMs(bar.t);
-  return p.minuteOfDay >= 240 && p.minuteOfDay < 570; // 04:00 to 09:30 ET
+  return p.minuteOfDay >= 240 && p.minuteOfDay < 570;
 }
 
 function inMorningImpulseWindow(bar) {
   const p = getNyPartsFromMs(bar.t);
-  return p.minuteOfDay >= 570 && p.minuteOfDay < 660; // 09:30 to 11:00 ET
+  return p.minuteOfDay >= 570 && p.minuteOfDay < 660;
 }
 
 function inRegularSession(bar) {
   const p = getNyPartsFromMs(bar.t);
-  return p.minuteOfDay >= 570 && p.minuteOfDay < 960; // 09:30 to 16:00 ET
+  return p.minuteOfDay >= 570 && p.minuteOfDay < 960;
 }
 
 function atrAtIndex(bars, endIndex, len = 14) {
@@ -222,28 +220,16 @@ function classifyState(context, latestClose, fib) {
   }
 
   if (context === "LONG_CONTEXT") {
-    if (latestClose > fib.r500) {
-      return { state: "ABOVE_PULLBACK", invalidated: false };
-    }
-    if (latestClose >= fib.r618) {
-      return { state: "IN_PULLBACK", invalidated: false };
-    }
-    if (latestClose >= fib.r786) {
-      return { state: "DEEP_PULLBACK", invalidated: false };
-    }
+    if (latestClose > fib.r500) return { state: "ABOVE_PULLBACK", invalidated: false };
+    if (latestClose >= fib.r618) return { state: "IN_PULLBACK", invalidated: false };
+    if (latestClose >= fib.r786) return { state: "DEEP_PULLBACK", invalidated: false };
     return { state: "BELOW_PULLBACK", invalidated: true };
   }
 
   if (context === "SHORT_CONTEXT") {
-    if (latestClose < fib.r500) {
-      return { state: "ABOVE_PULLBACK", invalidated: false };
-    }
-    if (latestClose <= fib.r618) {
-      return { state: "IN_PULLBACK", invalidated: false };
-    }
-    if (latestClose <= fib.r786) {
-      return { state: "DEEP_PULLBACK", invalidated: false };
-    }
+    if (latestClose < fib.r500) return { state: "ABOVE_PULLBACK", invalidated: false };
+    if (latestClose <= fib.r618) return { state: "IN_PULLBACK", invalidated: false };
+    if (latestClose <= fib.r786) return { state: "DEEP_PULLBACK", invalidated: false };
     return { state: "BELOW_PULLBACK", invalidated: true };
   }
 
@@ -321,7 +307,6 @@ function chooseRelevantNegotiatedZone({ zones, bars, symbol, candidate, context 
 
   const start = Math.max(0, candidate.index - 3);
   const windowBars = bars.slice(start, candidate.index + 1);
-
   const scored = [];
 
   for (const z of zones) {
@@ -401,10 +386,7 @@ async function readNegotiatedZonesFromDisk() {
     const filePath = path.join(__dirname, "../data/smz-levels.json");
     const txt = await readFile(filePath, "utf8");
     const parsed = JSON.parse(txt);
-    const arr = Array.isArray(parsed?.structures_sticky)
-      ? parsed.structures_sticky
-      : [];
-    return arr;
+    return Array.isArray(parsed?.structures_sticky) ? parsed.structures_sticky : [];
   } catch {
     return [];
   }
@@ -420,7 +402,6 @@ function buildSyntheticLaunchZone(bars, candidate) {
   const hi = Math.max(...seg.map((b) => b.h));
 
   if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return null;
-
   return { lo, hi };
 }
 
@@ -487,13 +468,6 @@ function buildAnchorTimes({
   }
 
   return {
-    premarketLowMs,
-    premarketHighMs,
-    sessionHighMs,
-    sessionLowMs,
-    anchorAMs,
-    anchorBMs,
-
     premarketLowTime: formatNyTimeFromMs(premarketLowMs),
     premarketHighTime: formatNyTimeFromMs(premarketHighMs),
     sessionHighTime: formatNyTimeFromMs(sessionHighMs),
@@ -525,6 +499,10 @@ function emptyStrategyFields() {
     exhaustionDetected: false,
     exhaustionShort: false,
     exhaustionLong: false,
+    exhaustionBarTime: null,
+    exhaustionBarPrice: null,
+    exhaustionLookbackBars: EXHAUSTION_LOOKBACK_BARS,
+    exhaustionActive: false,
   };
 }
 
@@ -608,12 +586,7 @@ export async function computeMorningFib({
         anchorB: null,
         ...emptyTimeFields(),
       },
-      fib: {
-        r382: null,
-        r500: null,
-        r618: null,
-        r786: null,
-      },
+      fib: { r382: null, r500: null, r618: null, r786: null },
       pullbackZone: { lo: null, hi: null },
       secondaryZone: { lo: null, hi: null },
       state: "NO_IMPULSE",
@@ -671,7 +644,6 @@ export async function computeMorningFib({
 
     const longQualifies = longMove >= threshold;
     const shortQualifies = shortMove >= threshold;
-
     if (!longQualifies && !shortQualifies) continue;
 
     const direction =
@@ -696,12 +668,8 @@ export async function computeMorningFib({
       magnitude,
       sessionHigh: sessionHighAtBar,
       sessionLow: sessionLowAtBar,
-      sessionHighBarT: Number.isFinite(sessionHighBarAtBar?.t)
-        ? sessionHighBarAtBar.t
-        : null,
-      sessionLowBarT: Number.isFinite(sessionLowBarAtBar?.t)
-        ? sessionLowBarAtBar.t
-        : null,
+      sessionHighBarT: Number.isFinite(sessionHighBarAtBar?.t) ? sessionHighBarAtBar.t : null,
+      sessionLowBarT: Number.isFinite(sessionLowBarAtBar?.t) ? sessionLowBarAtBar.t : null,
       anchorA: direction === "LONG_CONTEXT" ? premarketLow : premarketHigh,
       anchorB: direction === "LONG_CONTEXT" ? sessionHighAtBar : sessionLowAtBar,
     };
@@ -716,10 +684,7 @@ export async function computeMorningFib({
       continue;
     }
 
-    if (
-      candidate.magnitude === bestCandidate.magnitude &&
-      candidate.t < bestCandidate.t
-    ) {
+    if (candidate.magnitude === bestCandidate.magnitude && candidate.t < bestCandidate.t) {
       bestCandidate = candidate;
     }
   }
@@ -745,12 +710,7 @@ export async function computeMorningFib({
         anchorATime: null,
         anchorBTime: null,
       },
-      fib: {
-        r382: null,
-        r500: null,
-        r618: null,
-        r786: null,
-      },
+      fib: { r382: null, r500: null, r618: null, r786: null },
       pullbackZone: { lo: null, hi: null },
       secondaryZone: { lo: null, hi: null },
       state: "NO_IMPULSE",
@@ -870,9 +830,6 @@ export async function computeMorningFib({
     Number.isFinite(latestClose) &&
     latestClose < bestCandidate.sessionLow;
 
-  // -------------------------------------------------
-  // Engine 16 Strategy Layer
-  // -------------------------------------------------
   const pullbackMid =
     zoneRaw?.pullbackZone
       ? (zoneRaw.pullbackZone.lo + zoneRaw.pullbackZone.hi) / 2
@@ -885,100 +842,121 @@ export async function computeMorningFib({
   let exhaustionDetected = false;
   let exhaustionShort = false;
   let exhaustionLong = false;
+  let exhaustionBarTime = null;
+  let exhaustionBarPrice = null;
+  let exhaustionActive = false;
   let strategyType = "NONE";
   let readinessLabel = "NO_SETUP";
 
   // -------------------------------------------------
-  // EXHAUSTION REVERSAL (TOP / BOTTOM) — EARLY ENTRY
+  // EXHAUSTION REVERSAL (TOP / BOTTOM) — 5 BAR MEMORY
   // -------------------------------------------------
-  const prevBar =
-    closedBars.length >= 2 ? closedBars[closedBars.length - 2] : null;
+  const lookbackStart = Math.max(1, closedBars.length - EXHAUSTION_LOOKBACK_BARS);
+  for (let i = lookbackStart; i < closedBars.length; i++) {
+    const bar = closedBars[i];
+    const prevBar = closedBars[i - 1];
+    if (!bar || !prevBar) continue;
 
-  const latestRange =
-    Number.isFinite(latestClosedBar?.h) && Number.isFinite(latestClosedBar?.l)
-      ? latestClosedBar.h - latestClosedBar.l
-      : 0;
+    const range = Number.isFinite(bar.h) && Number.isFinite(bar.l) ? bar.h - bar.l : 0;
+    if (!(range > 0)) continue;
 
-  const latestUpperWick =
-    latestRange > 0
-      ? latestClosedBar.h - Math.max(latestClosedBar.o, latestClosedBar.c)
-      : 0;
+    const upperWick = bar.h - Math.max(bar.o, bar.c);
+    const lowerWick = Math.min(bar.o, bar.c) - bar.l;
 
-  const latestLowerWick =
-    latestRange > 0
-      ? Math.min(latestClosedBar.o, latestClosedBar.c) - latestClosedBar.l
-      : 0;
+    const upperWickStrong = upperWick / range >= 0.4;
+    const lowerWickStrong = lowerWick / range >= 0.4;
 
-  const nearHigh =
-    Number.isFinite(latestClosedBar?.h) &&
-    Number.isFinite(bestCandidate.sessionHigh) &&
-    latestClosedBar.h >= bestCandidate.sessionHigh * 0.998;
+    const bearishClose =
+      Number.isFinite(bar.c) && Number.isFinite(bar.o) && bar.c < bar.o;
 
-  const nearLow =
-    Number.isFinite(latestClosedBar?.l) &&
-    Number.isFinite(bestCandidate.sessionLow) &&
-    latestClosedBar.l <= bestCandidate.sessionLow * 1.002;
+    const bullishClose =
+      Number.isFinite(bar.c) && Number.isFinite(bar.o) && bar.c > bar.o;
 
-  const upperWickStrong =
-    latestRange > 0 && latestUpperWick / latestRange >= 0.4;
+    const nextBar = i + 1 < closedBars.length ? closedBars[i + 1] : null;
 
-  const lowerWickStrong =
-    latestRange > 0 && latestLowerWick / latestRange >= 0.4;
+    const momentumShiftDown = nextBar
+      ? Number.isFinite(nextBar.c) && Number.isFinite(bar.c) && nextBar.c < bar.c
+      : Number.isFinite(latestClose) && Number.isFinite(bar.c) && latestClose < bar.c;
 
-  const bearishClose =
-    Number.isFinite(latestClosedBar?.c) &&
-    Number.isFinite(latestClosedBar?.o) &&
-    latestClosedBar.c < latestClosedBar.o;
+    const momentumShiftUp = nextBar
+      ? Number.isFinite(nextBar.c) && Number.isFinite(bar.c) && nextBar.c > bar.c
+      : Number.isFinite(latestClose) && Number.isFinite(bar.c) && latestClose > bar.c;
 
-  const bullishClose =
-    Number.isFinite(latestClosedBar?.c) &&
-    Number.isFinite(latestClosedBar?.o) &&
-    latestClosedBar.c > latestClosedBar.o;
+    const nearHigh =
+      Number.isFinite(bar.h) &&
+      Number.isFinite(bestCandidate.sessionHigh) &&
+      bar.h >= bestCandidate.sessionHigh * 0.998;
 
-  const momentumShiftDown =
-    Number.isFinite(latestClosedBar?.c) &&
-    Number.isFinite(prevBar?.c) &&
-    latestClosedBar.c < prevBar.c;
+    const nearLow =
+      Number.isFinite(bar.l) &&
+      Number.isFinite(bestCandidate.sessionLow) &&
+      bar.l <= bestCandidate.sessionLow * 1.002;
 
-  const momentumShiftUp =
-    Number.isFinite(latestClosedBar?.c) &&
-    Number.isFinite(prevBar?.c) &&
-    latestClosedBar.c > prevBar.c;
+    if (
+      bestCandidate.context === "LONG_CONTEXT" &&
+      nearHigh &&
+      upperWickStrong &&
+      bearishClose &&
+      momentumShiftDown
+    ) {
+      exhaustionDetected = true;
+      exhaustionShort = true;
+      exhaustionLong = false;
+      exhaustionBarTime = formatNyTimeFromMs(bar.t);
+      exhaustionBarPrice = round2(bar.h);
+      break;
+    }
 
-  // Short exhaustion at highs
-  if (
-    bestCandidate.context === "LONG_CONTEXT" &&
-    nearHigh &&
-    upperWickStrong &&
-    bearishClose &&
-    momentumShiftDown
-  ) {
-    exhaustionShort = true;
-    exhaustionDetected = true;
+    if (
+      bestCandidate.context === "SHORT_CONTEXT" &&
+      nearLow &&
+      lowerWickStrong &&
+      bullishClose &&
+      momentumShiftUp
+    ) {
+      exhaustionDetected = true;
+      exhaustionLong = true;
+      exhaustionShort = false;
+      exhaustionBarTime = formatNyTimeFromMs(bar.t);
+      exhaustionBarPrice = round2(bar.l);
+      break;
+    }
   }
 
-  // Long exhaustion at lows
-  if (
-    bestCandidate.context === "SHORT_CONTEXT" &&
-    nearLow &&
-    lowerWickStrong &&
-    bullishClose &&
-    momentumShiftUp
-  ) {
-    exhaustionLong = true;
-    exhaustionDetected = true;
+  // Invalidation for exhaustion memory
+  if (exhaustionShort) {
+    const reclaimInvalidates =
+      Number.isFinite(exhaustionBarPrice) &&
+      Number.isFinite(latestClosedBar?.c) &&
+      latestClosedBar.c > exhaustionBarPrice;
+    exhaustionActive = !reclaimInvalidates;
+    if (!exhaustionActive) {
+      exhaustionDetected = false;
+      exhaustionShort = false;
+      exhaustionBarTime = null;
+      exhaustionBarPrice = null;
+    }
   }
+
+  if (exhaustionLong) {
+    const breakdownInvalidates =
+      Number.isFinite(exhaustionBarPrice) &&
+      Number.isFinite(latestClosedBar?.c) &&
+      latestClosedBar.c < exhaustionBarPrice;
+    exhaustionActive = !breakdownInvalidates;
+    if (!exhaustionActive) {
+      exhaustionDetected = false;
+      exhaustionLong = false;
+      exhaustionBarTime = null;
+      exhaustionBarPrice = null;
+    }
+  }
+
+  let finalContext = bestCandidate.context;
 
   // -------------------------------------------------
   // CONFIRMED REVERSAL (LATER THAN EXHAUSTION)
   // -------------------------------------------------
-
-  // Short reversal off highs:
-  // - previous context was long
-  // - price pushed above impulse/session high
-  // - failed to hold
-  // - broke back below pullback mid
-  // - displacement down is meaningful
   if (
     bestCandidate.context === "LONG_CONTEXT" &&
     Number.isFinite(latestClosedBar?.h) &&
@@ -995,12 +973,6 @@ export async function computeMorningFib({
     reversalDetected = true;
   }
 
-  // Long reversal off lows:
-  // - previous context was short
-  // - price pushed below impulse/session low
-  // - failed to hold
-  // - reclaimed pullback mid
-  // - displacement up is meaningful
   if (
     bestCandidate.context === "SHORT_CONTEXT" &&
     Number.isFinite(latestClosedBar?.l) &&
@@ -1016,9 +988,6 @@ export async function computeMorningFib({
     failedBreakdown = true;
     reversalDetected = true;
   }
-
-  // Context flip is mandatory when confirmed reversal structure confirms
-  let finalContext = bestCandidate.context;
 
   if (
     bestCandidate.context === "LONG_CONTEXT" &&
@@ -1042,8 +1011,6 @@ export async function computeMorningFib({
     finalContext = "LONG_CONTEXT";
   }
 
-  // Continuation:
-  // trend still intact, reversal not active, and price remains near the impulse edge
   if (
     finalContext === "LONG_CONTEXT" &&
     !reversalDetected &&
@@ -1069,9 +1036,7 @@ export async function computeMorningFib({
   }
 
   // Strategy classification / Engine 15 readiness mapping
-  // Priority order:
-  // EXHAUSTION > REVERSAL > BREAKDOWN > BREAKOUT > PULLBACK > CONTINUATION
-  if (exhaustionDetected) {
+  if (exhaustionDetected && exhaustionActive) {
     strategyType = "EXHAUSTION";
     readinessLabel = "EXHAUSTION_READY";
   } else if (reversalDetected && (failedBreakout || failedBreakdown)) {
@@ -1195,9 +1160,14 @@ export async function computeMorningFib({
     failedBreakdown,
     reversalDetected,
     trendContinuation,
+
     exhaustionDetected,
     exhaustionShort,
     exhaustionLong,
+    exhaustionBarTime,
+    exhaustionBarPrice,
+    exhaustionLookbackBars: EXHAUSTION_LOOKBACK_BARS,
+    exhaustionActive,
 
     usedNegotiatedZoneAnchor,
     negotiatedZoneUsed,
