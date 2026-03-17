@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ferrari Dashboard — make_dashboard_30m.py (R3 — True 30m Bridge, STRUCTURE TIERS + RECLAIM TOL)
+Ferrari Dashboard — make_dashboard_30m.py (R4 — TRUE 30m BRIDGE, LESS INFLATED)
 
 Intent (locked by user):
 - 30m is a TRUE bridge timeframe (between 10m entry and 1h regime).
@@ -10,6 +10,7 @@ Intent (locked by user):
 - Secondary is EMA8 vs EMA18 (fast feel).
 - Lux PSI is tightness (display); expansion is a soft score component.
 - Breadth uses sector ETFs on 30m bars (EMA10>EMA20 + last bar up).
+- 30m should NOT run too bullish while still below EMA50.
 
 Output:
 - data/outlook_30m.json (published to data-live-30m)
@@ -60,19 +61,20 @@ SMI_EMA_LEN = 5
 SMI_BONUS_SCORE_MAX = 3.0
 
 # Score weights (sum = 1.00)
-W_STRUCT  = 0.50
-W_MOM     = 0.25
-W_BREADTH = 0.15
-W_SQ_EXP  = 0.10
+W_STRUCT = 0.45
+W_MOM = 0.25
+W_BREADTH = 0.20
+W_SQ_EXP = 0.10
 
-# Momentum combo: Primary structure + SMI + EMA8/18 (secondary)
-W_PRIMARY = 0.70
-W_SMI     = 0.20
-W_SECOND  = 0.10
+# Momentum combo:
+# Reduce structure influence inside momentum so it does not get counted twice too hard.
+W_PRIMARY = 0.45
+W_SMI = 0.35
+W_SECOND = 0.20
 
 # Lux PSI
 LUX_CONV = 50
-LUX_LEN  = 20
+LUX_LEN = 20
 
 # Windows
 PSI_WIN_30M = int(os.environ.get("PSI_WIN_30M", "26"))
@@ -81,13 +83,13 @@ FETCH_DAYS_30M = int(os.environ.get("FETCH_DAYS_30M", "30"))
 # Structure tier bonus threshold (ema10-ema20 separation %)
 EMA_GAP_BONUS_PCT = float(os.environ.get("EMA_GAP_BONUS_PCT", "0.15"))
 
-# ✅ NEW: reclaim tolerance around EMA10/EMA20 (percent)
-# If within this %, treat as "touching" the EMA for structure tiers.
-EMA_RECLAIM_TOL_PCT = float(os.environ.get("EMA_RECLAIM_TOL_PCT", "0.10"))  # 0.10% default
+# Reclaim tolerance around EMA10/EMA20 (percent)
+EMA_RECLAIM_TOL_PCT = float(os.environ.get("EMA_RECLAIM_TOL_PCT", "0.10"))
 
 
 def now_utc_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 def clamp(x: float, lo: float, hi: float) -> float:
     try:
@@ -95,16 +97,19 @@ def clamp(x: float, lo: float, hi: float) -> float:
     except Exception:
         return lo
 
+
 def pct(a: float, b: float) -> float:
     return 0.0 if b <= 0 else 100.0 * float(a) / float(b)
+
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "make-dashboard/30m/3.0", "Cache-Control": "no-store"},
+        headers={"User-Agent": "make-dashboard/30m/4.0", "Cache-Control": "no-store"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
 
 def fetch_polygon_30m(sym: str, key: str, lookback_days: int) -> List[dict]:
     end = datetime.now(UTC).date()
@@ -114,29 +119,36 @@ def fetch_polygon_30m(sym: str, key: str, lookback_days: int) -> List[dict]:
         js = fetch_json(url, timeout=25)
     except Exception:
         return []
+
     rows = js.get("results") or []
     out: List[dict] = []
     for r in rows:
         try:
             t = int(r.get("t", 0)) // 1000
-            out.append({
-                "time": t,
-                "open": float(r.get("o", 0)),
-                "high": float(r.get("h", 0)),
-                "low":  float(r.get("l", 0)),
-                "close": float(r.get("c", 0)),
-                "volume": float(r.get("v", 0)),
-            })
+            out.append(
+                {
+                    "time": t,
+                    "open": float(r.get("o", 0)),
+                    "high": float(r.get("h", 0)),
+                    "low": float(r.get("l", 0)),
+                    "close": float(r.get("c", 0)),
+                    "volume": float(r.get("v", 0)),
+                }
+            )
         except Exception:
             continue
+
     out.sort(key=lambda x: x["time"])
+
     # Drop in-flight 30m bar
     if out:
         now = int(time.time())
         last = out[-1]["time"]
         if (last // (30 * 60)) == (now // (30 * 60)):
             out = out[:-1]
+
     return out
+
 
 def ema_series(vals: List[float], span: int) -> List[float]:
     k = 2.0 / (span + 1.0)
@@ -147,20 +159,25 @@ def ema_series(vals: List[float], span: int) -> List[float]:
         out.append(e)
     return out
 
+
 def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
     if not closes or len(closes) < max(5, length + 2):
         return None
+
     mx = mn = None
     diffs: List[float] = []
     eps = 1e-12
+
     for src in map(float, closes):
         mx = src if mx is None else max(mx - (mx - src) / conv, src)
         mn = src if mn is None else min(mn + (src - mn) / conv, src)
         span = max(mx - mn, eps)
         diffs.append(math.log(span))
+
     win = diffs[-length:]
     if len(win) < length:
         return None
+
     xs = list(range(length))
     xbar = sum(xs) / length
     ybar = sum(win) / length
@@ -172,17 +189,26 @@ def lux_psi_from_closes(closes: List[float], conv: int = 50, length: int = 20) -
     psi = -50.0 * r + 50.0
     return float(clamp(psi, 0.0, 100.0))
 
-def tv_smi_and_signal(H: List[float], L: List[float], C: List[float],
-                      lengthK: int, lengthD: int, lengthEMA: int) -> Tuple[List[float], List[float]]:
+
+def tv_smi_and_signal(
+    H: List[float],
+    L: List[float],
+    C: List[float],
+    lengthK: int,
+    lengthD: int,
+    lengthEMA: int,
+) -> Tuple[List[float], List[float]]:
     n = len(C)
     if n < max(lengthK, lengthD, lengthEMA) + 5:
         return [], []
+
     HH: List[float] = []
     LL: List[float] = []
     for i in range(n):
         i0 = max(0, i - (lengthK - 1))
-        HH.append(max(H[i0:i+1]))
-        LL.append(min(L[i0:i+1]))
+        HH.append(max(H[i0:i + 1]))
+        LL.append(min(L[i0:i + 1]))
+
     rangeHL = [HH[i] - LL[i] for i in range(n)]
     rel = [C[i] - (HH[i] + LL[i]) / 2.0 for i in range(n)]
 
@@ -202,35 +228,46 @@ def tv_smi_and_signal(H: List[float], L: List[float], C: List[float],
     sig = ema_series(smi, lengthEMA)
     return smi, sig
 
+
 def smi_to_pct(smi_val: float) -> float:
     return clamp(50.0 + 0.5 * float(smi_val), 0.0, 100.0)
+
 
 def posture_from_dist(dist_pct: float, full_dist: float) -> float:
     unit = clamp(dist_pct / max(full_dist, 1e-9), -1.0, 1.0)
     return clamp(50.0 + 50.0 * unit, 0.0, 100.0)
 
+
 def compute_breadth_sector_etfs_30m(key: str) -> Tuple[float, float, List[dict]]:
     aligned = barup = total = 0
     cards = []
+
     for sym, sector in SECTOR_ETFS.items():
         bars = fetch_polygon_30m(sym, key, lookback_days=7)
         if len(bars) < 25:
             continue
+
         C = [b["close"] for b in bars]
         O = [b["open"] for b in bars]
         e10 = ema_series(C, 10)
         e20 = ema_series(C, 20)
+
         a = bool(e10[-1] > e20[-1])
         u = bool(C[-1] > O[-1])
+
         total += 1
         aligned += 1 if a else 0
         barup += 1 if u else 0
+
         cards.append({"sector": sector, "symbol": sym, "aligned": a, "barup": u})
+
     if total <= 0:
         return 50.0, 50.0, cards
+
     align_pct = pct(aligned, total)
     barup_pct = pct(barup, total)
     return round(align_pct, 2), round(barup_pct, 2), cards
+
 
 def riskon_from_alignment(cards: List[dict]) -> float:
     if not cards:
@@ -250,6 +287,48 @@ def riskon_from_alignment(cards: List[dict]) -> float:
         den += 1
         score += 1 if not c.get("aligned") else 0
     return round(pct(score, den or 1), 2)
+
+
+def apply_structure_soft_cap(
+    score: float,
+    close: float,
+    e10: float,
+    e20: float,
+    e50: float,
+    reclaim_tol_pct: float,
+) -> float:
+    """
+    30m should not print a bullish bridge score while still below the 50 EMA.
+    This keeps 30m as a true stabilization / prove-it timeframe.
+    """
+    def near(price: float, ema: float) -> bool:
+        if ema == 0:
+            return False
+        return abs((price - ema) / ema) * 100.0 <= reclaim_tol_pct
+
+    above10 = (close > e10) or near(close, e10)
+    above20 = (close > e20) or near(close, e20)
+    above50 = close > e50
+
+    cap = 100.0
+
+    # Below 10 and 20 = weak
+    if (not above10) and (not above20):
+        cap = 42.0
+
+    # Above/near 10 but below/near 20 = early bounce only
+    elif above10 and (not above20):
+        cap = 48.0
+
+    # Above/near both 10 and 20 but below 50 = base / stabilization, not breakout
+    elif above10 and above20 and (not above50):
+        cap = 54.0
+
+    # Above 50 unlocks more constructive behavior
+    elif above10 and above20 and above50:
+        cap = 72.0
+
+    return min(score, cap)
 
 
 def main():
@@ -274,11 +353,13 @@ def main():
     # EMAs
     e10_series = ema_series(C, 10)
     e20_series = ema_series(C, 20)
-    e8_series  = ema_series(C, 8)
+    e50_series = ema_series(C, 50)
+    e8_series = ema_series(C, 8)
     e18_series = ema_series(C, 18)
 
     e10 = float(e10_series[-1])
     e20 = float(e20_series[-1])
+    e50 = float(e50_series[-1])
     close = float(C[-1])
 
     # EMA posture (for metrics)
@@ -292,27 +373,32 @@ def main():
 
     above_10 = (close > e10) or tol10
     above_20 = (close > e20) or tol20
-    stacked  = e10 > e20
+    above_50 = close > e50
+    stacked = e10 > e20
     ema_gap_pct = (abs((e10 - e20) / e20) * 100.0) if e20 != 0 else 0.0
 
+    # Less inflated structure tiers
     if (not above_10) and (not above_20):
-        structure_score = 0.0
+        structure_score = 20.0
         structure_tier = "below_both"
     elif above_10 and (not above_20):
-        structure_score = 40.0
+        structure_score = 35.0
         structure_tier = "between_10_20"
     elif above_10 and above_20 and (not stacked):
-        structure_score = 60.0
+        structure_score = 48.0
         structure_tier = "above_both_not_stacked"
-    elif above_10 and above_20 and stacked:
-        structure_score = 80.0
-        structure_tier = "above_both_stacked"
+    elif above_10 and above_20 and stacked and (not above_50):
+        structure_score = 58.0
+        structure_tier = "above_both_stacked_below50"
+    elif above_10 and above_20 and stacked and above_50:
+        structure_score = 72.0
+        structure_tier = "above_both_stacked_above50"
     else:
-        structure_score = 50.0
+        structure_score = 45.0
         structure_tier = "unknown"
 
-    if structure_score >= 80.0 and ema_gap_pct > EMA_GAP_BONUS_PCT:
-        structure_score = 100.0
+    if structure_score >= 72.0 and ema_gap_pct > EMA_GAP_BONUS_PCT:
+        structure_score = 82.0
         structure_tier = "above_both_stacked_gap"
 
     structure_score = float(clamp(structure_score, 0.0, 100.0))
@@ -344,7 +430,8 @@ def main():
 
     momentum_combo = clamp(
         W_PRIMARY * structure_score + W_SMI * smi_pct + W_SECOND * secondary_posture,
-        0.0, 100.0
+        0.0,
+        100.0,
     )
 
     # --------- Lux PSI ----------
@@ -361,19 +448,31 @@ def main():
 
     # --------- Final score ----------
     score_raw = (
-        W_STRUCT  * structure_score +
-        W_MOM     * momentum_combo +
-        W_BREADTH * breadth_pct +
-        W_SQ_EXP  * squeeze_exp +
-        smi_bonus
+        W_STRUCT * structure_score
+        + W_MOM * momentum_combo
+        + W_BREADTH * breadth_pct
+        + W_SQ_EXP * squeeze_exp
+        + smi_bonus
     )
+
     score = float(clamp(score_raw, 0.0, 100.0))
-    state = "bull" if (ema_sign > 0 and score >= 60.0) else ("bear" if (ema_sign < 0 and score < 60.0) else "neutral")
+
+    # Soft structure ceiling to stop fake bullish 30m readings
+    score = apply_structure_soft_cap(
+        score=score,
+        close=close,
+        e10=e10,
+        e20=e20,
+        e50=e50,
+        reclaim_tol_pct=EMA_RECLAIM_TOL_PCT,
+    )
+
+    state = "bull" if (ema_sign > 0 and score >= 60.0) else ("bear" if (ema_sign < 0 and score < 45.0) else "neutral")
 
     updated = now_utc_iso()
 
     out = {
-        "version": "r30m-v3-truebridge-structuretiers-reclaimtol",
+        "version": "r30m-v4-truebridge-lessinflated",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated,
         "metrics": {
@@ -388,6 +487,7 @@ def main():
             "structure_tier": structure_tier,
             "structure_score_30m": round(float(structure_score), 2),
             "ema_reclaim_tol_pct": float(EMA_RECLAIM_TOL_PCT),
+            "price_above_ema50_30m": bool(above_50),
 
             "ema818_gap_pct": round(float(ema818_gap_pct), 4),
             "ema8_ema18_posture_30m_pct": round(float(secondary_posture), 2),
@@ -433,7 +533,8 @@ def main():
 
     print(
         f"[30m] score={score:.2f} state={state} tier={structure_tier} struct={structure_score:.1f} "
-        f"ema10Dist={ema10_dist_pct:.3f}% tol={EMA_RECLAIM_TOL_PCT:.2f}% breadth={breadth_pct:.1f} psi={squeeze_psi:.1f}",
+        f"ema10Dist={ema10_dist_pct:.3f}% tol={EMA_RECLAIM_TOL_PCT:.2f}% breadth={breadth_pct:.1f} "
+        f"psi={squeeze_psi:.1f} above50={int(above_50)}",
         flush=True,
     )
 
