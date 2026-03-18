@@ -983,16 +983,15 @@ async function processStrategy(s, momentum, marketMind, engine16) {
     }
   }
 
-  const engine15Decision = computeEngine15DecisionReferee({
+  // ✅ Engine 15 (READINESS with lifecycle override)
+  const engine15 = computeEngine15Readiness({
     symbol,
     strategyId: s.strategyId,
     engine16,
-    engine5: patchedConfluence || null,
-    momentum,
-    permission: permissionResp?.json || null,
     engine3: patchedConfluence?.context?.reaction || null,
     engine4: patchedConfluence?.context?.volume || null,
-    zoneContext,
+    engine5: patchedConfluence || null,
+    engine15Decision: engine15Decision || null, // 🔥 NEW
   });
 
   return {
