@@ -1,6 +1,6 @@
 // services/core/logic/engine15DecisionReferee.js
 //
-// Engine 15B — Decision Referee + Lifecycle v2
+// Engine 15B — Decision Referee + Lifecycle v3
 //
 // Mission:
 // - Engine 16 = pattern candidate
@@ -17,10 +17,10 @@
 // - whether the setup is fresh / mature / completed
 // - what the next focus should be
 //
-// Safe first implementation of lifecycle:
+// Safe lifecycle implementation:
 // - trusts one primary Engine 16 candidate
-// - uses zone-path progression for lifecycle
-// - uses ATR as backup helper only
+// - uses full zone-path progression for lifecycle
+// - uses ATR only as backup helper
 // - never throws
 
 const VALID_STRATEGY_TYPES = new Set([
@@ -218,7 +218,38 @@ function normalizeE4(engine4 = null) {
   };
 }
 
+function normalizeRenderZone(z, fallbackType = "ZONE") {
+  const lo = toNum(z?.lo);
+  const hi = toNum(z?.hi);
+  if (lo == null || hi == null) return null;
+
+  return {
+    id: z?.id || `${fallbackType}|${Math.min(lo, hi)}|${Math.max(lo, hi)}`,
+    type: safeUpper(z?.type || z?.zoneType || fallbackType, fallbackType),
+    lo: Math.min(lo, hi),
+    hi: Math.max(lo, hi),
+    mid: toNum(z?.mid) ?? ((Math.min(lo, hi) + Math.max(lo, hi)) / 2),
+    strength: toNum(z?.strength),
+  };
+}
+
 function normalizeZoneContext(ctx = null) {
+  const renderNegotiatedRaw = Array.isArray(ctx?.render?.negotiated) ? ctx.render.negotiated : [];
+  const renderInstitutionalRaw = Array.isArray(ctx?.render?.institutional) ? ctx.render.institutional : [];
+  const renderShelvesRaw = Array.isArray(ctx?.render?.shelves) ? ctx.render.shelves : [];
+
+  const renderNegotiated = renderNegotiatedRaw
+    .map((z) => normalizeRenderZone(z, "NEGOTIATED"))
+    .filter(Boolean);
+
+  const renderInstitutional = renderInstitutionalRaw
+    .map((z) => normalizeRenderZone(z, "INSTITUTIONAL"))
+    .filter(Boolean);
+
+  const renderShelves = renderShelvesRaw
+    .map((z) => normalizeRenderZone(z, "SHELF"))
+    .filter(Boolean);
+
   return {
     zoneType: safeUpper(ctx?.zoneType, "UNKNOWN"),
     withinZone:
@@ -243,6 +274,11 @@ function normalizeZoneContext(ctx = null) {
     nearest: ctx?.nearest || null,
     meta: ctx?.meta || null,
     flags: ctx?.flags || null,
+    render: {
+      negotiated: renderNegotiated,
+      institutional: renderInstitutional,
+      shelves: renderShelves,
+    },
   };
 }
 
@@ -816,22 +852,14 @@ function dedupeZones(list = []) {
   const seen = new Set();
 
   for (const z of Array.isArray(list) ? list : []) {
-    const lo = toNum(z?.lo);
-    const hi = toNum(z?.hi);
-    if (lo == null || hi == null) continue;
+    const normalized = normalizeRenderZone(z, z?.zoneType || z?.type || "ZONE");
+    if (!normalized) continue;
 
-    const id = z?.id || `${Math.min(lo, hi)}|${Math.max(lo, hi)}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
+    const key = normalized.id || `${normalized.type}|${normalized.lo}|${normalized.hi}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
 
-    out.push({
-      id,
-      type: safeUpper(z?.type || z?.zoneType || "ZONE", "ZONE"),
-      lo: Math.min(lo, hi),
-      hi: Math.max(lo, hi),
-      mid: toNum(z?.mid) ?? zoneMid(z),
-      strength: toNum(z?.strength),
-    });
+    out.push(normalized);
   }
 
   return out;
@@ -842,41 +870,69 @@ function buildOrderedZonePath({
   signalPrice,
   zoneContext,
 }) {
-  const currentActive = [];
-  const nearest = [];
-  const renderNegotiated = zoneContext?.meta?.render?.negotiated || zoneContext?.render?.negotiated || [];
-  const renderInstitutional = zoneContext?.meta?.render?.institutional || zoneContext?.render?.institutional || [];
+  const activeZones = [];
+  const nearestZones = [];
 
   if (zoneContext?.active?.negotiated) {
-    currentActive.push({
+    activeZones.push({
       ...zoneContext.active.negotiated,
       zoneType: "NEGOTIATED",
     });
   }
+
   if (zoneContext?.active?.shelf) {
-    currentActive.push({
+    activeZones.push({
       ...zoneContext.active.shelf,
       zoneType: "SHELF",
     });
   }
+
   if (zoneContext?.active?.institutional) {
-    currentActive.push({
+    activeZones.push({
       ...zoneContext.active.institutional,
       zoneType: "INSTITUTIONAL",
     });
   }
+
   if (zoneContext?.nearest?.shelf) {
-    nearest.push({
+    nearestZones.push({
       ...zoneContext.nearest.shelf,
       zoneType: "SHELF",
     });
   }
 
+  if (zoneContext?.nearest?.negotiated) {
+    nearestZones.push({
+      ...zoneContext.nearest.negotiated,
+      zoneType: "NEGOTIATED",
+    });
+  }
+
+  if (zoneContext?.nearest?.institutional) {
+    nearestZones.push({
+      ...zoneContext.nearest.institutional,
+      zoneType: "INSTITUTIONAL",
+    });
+  }
+
+  const renderNegotiated = Array.isArray(zoneContext?.render?.negotiated)
+    ? zoneContext.render.negotiated
+    : [];
+
+  const renderInstitutional = Array.isArray(zoneContext?.render?.institutional)
+    ? zoneContext.render.institutional
+    : [];
+
+  const renderShelves = Array.isArray(zoneContext?.render?.shelves)
+    ? zoneContext.render.shelves
+    : [];
+
   const all = dedupeZones([
-    ...currentActive,
-    ...nearest,
+    ...activeZones,
+    ...nearestZones,
     ...renderNegotiated,
     ...renderInstitutional,
+    ...renderShelves,
   ]);
 
   const s = toNum(signalPrice);
@@ -886,39 +942,61 @@ function buildOrderedZonePath({
 
   if (direction === "SHORT") {
     filtered = all.filter((z) => {
-      const mid = z.mid ?? zoneMid(z);
-      return mid != null && mid < s;
+      const lo = toNum(z.lo);
+      const hi = toNum(z.hi);
+      const mid = toNum(z.mid) ?? zoneMid(z);
+      if (lo == null || hi == null || mid == null) return false;
+
+      // keep zones below signal or overlapping just beneath it
+      return mid < s || lo < s || hi < s;
     });
 
     filtered.sort((a, b) => {
-      const da = Math.abs((a.mid ?? zoneMid(a)) - s);
-      const db = Math.abs((b.mid ?? zoneMid(b)) - s);
+      const ma = toNum(a.mid) ?? zoneMid(a);
+      const mb = toNum(b.mid) ?? zoneMid(b);
+      const da = ma == null ? 999999 : Math.abs(s - ma);
+      const db = mb == null ? 999999 : Math.abs(s - mb);
       return da - db;
     });
   } else if (direction === "LONG") {
     filtered = all.filter((z) => {
-      const mid = z.mid ?? zoneMid(z);
-      return mid != null && mid > s;
+      const lo = toNum(z.lo);
+      const hi = toNum(z.hi);
+      const mid = toNum(z.mid) ?? zoneMid(z);
+      if (lo == null || hi == null || mid == null) return false;
+
+      return mid > s || lo > s || hi > s;
     });
 
     filtered.sort((a, b) => {
-      const da = Math.abs((a.mid ?? zoneMid(a)) - s);
-      const db = Math.abs((b.mid ?? zoneMid(b)) - s);
+      const ma = toNum(a.mid) ?? zoneMid(a);
+      const mb = toNum(b.mid) ?? zoneMid(b);
+      const da = ma == null ? 999999 : Math.abs(ma - s);
+      const db = mb == null ? 999999 : Math.abs(mb - s);
       return da - db;
     });
   }
 
-  const trimmed = filtered.slice(0, 6);
+  const finalPath = [];
+  const used = new Set();
 
-  return trimmed.map((z, idx) => ({
-    id: z.id,
-    type: z.type,
-    lo: z.lo,
-    hi: z.hi,
-    mid: z.mid ?? zoneMid(z),
-    strength: z.strength ?? null,
-    tpSlot: idx === 0 ? 1 : idx === 1 ? 2 : idx + 1,
-  }));
+  for (const z of filtered) {
+    const key = z.id || `${z.type}|${z.lo}|${z.hi}`;
+    if (used.has(key)) continue;
+    used.add(key);
+    finalPath.push({
+      id: z.id,
+      type: z.type,
+      lo: z.lo,
+      hi: z.hi,
+      mid: toNum(z.mid) ?? zoneMid(z),
+      strength: z.strength ?? null,
+      tpSlot: finalPath.length + 1,
+    });
+    if (finalPath.length >= 8) break;
+  }
+
+  return finalPath;
 }
 
 function countZonesHit({ direction, currentPrice, zonesInPath }) {
@@ -1098,7 +1176,6 @@ function determineLifecycle({
     nextFocus = "WAIT_FOR_TRIGGER";
   }
 
-  // completion / missed rules
   if (targetProgress01 >= 1 || (moveFromSignalAtr != null && moveFromSignalAtr >= 1.25)) {
     if (action === "ENTER_OK" || action === "REDUCE_OK" || action === "WATCH") {
       if (secondTargetHit) {
@@ -1118,7 +1195,6 @@ function determineLifecycle({
     }
   }
 
-  // if setup was once live but edge mostly spent, mark missed/completed
   if (
     !firstTargetHit &&
     !secondTargetHit &&
@@ -1285,7 +1361,6 @@ export function buildFinalDecision({
     action,
   });
 
-  // lifecycle can reduce emphasis after move is already spent
   if (lifecycle.lifecycleStage === "MISSED" || lifecycle.lifecycleStage === "EXPIRED") {
     action = "NO_ACTION";
   }
@@ -1308,7 +1383,7 @@ export function buildFinalDecision({
 
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v2",
+    engine: "engine15.decisionReferee.v3",
     symbol,
     strategyId,
     strategyType: winner?.strategyType || "NONE",
@@ -1384,7 +1459,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v2",
+      engine: "engine15.decisionReferee.v3",
       symbol,
       strategyId,
       strategyType: "NONE",
