@@ -1,29 +1,26 @@
 // services/core/logic/engine15DecisionReferee.js
 //
-// Engine 15B — Decision Referee
+// Engine 15B — Decision Referee + Lifecycle v2
 //
 // Mission:
 // - Engine 16 = pattern candidate
 // - Engine 5 = quality validator
 // - Engine 4.5 = directional assist
 // - Engine 6 = risk gate
-// - Engine 15B = final referee
+// - Engine 15B = final referee + setup lifecycle manager
 //
 // Engine 15B decides:
 // - what strategy wins
 // - what direction is favored
 // - how ready it is
 // - whether action is allowed now
+// - whether the setup is fresh / mature / completed
+// - what the next focus should be
 //
-// It does NOT:
-// - rescore quality from scratch
-// - replace Engine 6 permission
-// - replace Engine 8 execution
-// - detect raw zones/fibs itself
-//
-// Safe first draft:
+// Safe first implementation of lifecycle:
 // - trusts one primary Engine 16 candidate
-// - supports future multi-candidate expansion
+// - uses zone-path progression for lifecycle
+// - uses ATR as backup helper only
 // - never throws
 
 const VALID_STRATEGY_TYPES = new Set([
@@ -63,6 +60,17 @@ const VALID_BIAS = new Set([
   "NONE",
 ]);
 
+const VALID_LIFECYCLE = new Set([
+  "BUILDING",
+  "LIVE",
+  "PARTIALLY_COMPLETED",
+  "MATURE",
+  "COMPLETED",
+  "EXPIRED",
+  "MISSED",
+  "INVALIDATED",
+]);
+
 const BASE_PRIORITY = {
   EXHAUSTION: 100,
   REVERSAL: 90,
@@ -82,6 +90,11 @@ function clamp(n, lo, hi) {
   const x = Number(n);
   if (!Number.isFinite(x)) return lo;
   return Math.max(lo, Math.min(hi, x));
+}
+
+function toNum(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
 }
 
 function scoreToGrade(score) {
@@ -228,6 +241,7 @@ function normalizeZoneContext(ctx = null) {
     requiresAllowedZone: ctx?.requiresAllowedZone === true,
     active: ctx?.active || null,
     nearest: ctx?.nearest || null,
+    meta: ctx?.meta || null,
     flags: ctx?.flags || null,
   };
 }
@@ -255,6 +269,20 @@ function normalizeEngine16(engine16 = null) {
     wickRejectionLong: engine16?.wickRejectionLong === true,
     wickRejectionShort: engine16?.wickRejectionShort === true,
     context: safeUpper(engine16?.context, "NONE"),
+    state: safeUpper(engine16?.state, "NONE"),
+    currentPrice:
+      toNum(engine16?.currentPrice) ??
+      toNum(engine16?.lastPrice) ??
+      toNum(engine16?.price) ??
+      toNum(engine16?.meta?.currentPrice) ??
+      null,
+    exhaustionBarPrice: toNum(engine16?.exhaustionBarPrice),
+    exhaustionBarTime: engine16?.exhaustionBarTime || engine16?.signalTimes?.exhaustionTime || null,
+    atr: toNum(engine16?.meta?.atr) ?? toNum(engine16?.meta?.atrValue) ?? toNum(engine16?.meta?.atr14) ?? null,
+    currentDayHigh: toNum(engine16?.dayRange?.currentDayHigh),
+    currentDayLow: toNum(engine16?.dayRange?.currentDayLow),
+    sessionHigh: toNum(engine16?.sessionStructure?.regularSessionHigh) ?? toNum(engine16?.anchors?.sessionHigh),
+    sessionLow: toNum(engine16?.sessionStructure?.regularSessionLow) ?? toNum(engine16?.anchors?.sessionLow),
     error: engine16?.error || null,
     reasonCodes: Array.isArray(engine16?.reasonCodes) ? engine16.reasonCodes : [],
   };
@@ -271,6 +299,7 @@ function normalizeEngine5(engine5 = null) {
     total,
     grade: engine5?.scores?.label || engine5?.label || scoreToGrade(total),
     invalid: engine5?.invalid === true,
+    price: toNum(engine5?.price),
     perEngine: {
       engine1: Number(engine5?.scores?.engine1) || 0,
       engine2: Number(engine5?.scores?.engine2) || 0,
@@ -324,7 +353,6 @@ export function pickWinningStrategy({ candidates = [], engine5, momentum } = {})
     const base = BASE_PRIORITY[type] || 0;
 
     let priority = base;
-
     priority += clamp(Math.round((e5.total || 0) / 5), 0, 20);
 
     if (dir === "LONG" && mom.alignment === "BULLISH") priority += 8;
@@ -727,7 +755,434 @@ export function evaluateTriggerReadiness({
   };
 }
 
-export function buildExecutionBias({
+/* -----------------------------
+   Lifecycle helpers
+------------------------------*/
+function extractCurrentPrice({ engine5, zoneContext, engine16 }) {
+  return (
+    toNum(engine5?.price) ??
+    toNum(zoneContext?.meta?.current_price) ??
+    toNum(zoneContext?.meta?.currentPrice) ??
+    toNum(engine16?.currentPrice) ??
+    null
+  );
+}
+
+function parseHmmToMinutes(s) {
+  if (!s || typeof s !== "string") return null;
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+  return hh * 60 + mm;
+}
+
+function getBarsSinceSignal({ strategyId, signalTime }) {
+  const mins = parseHmmToMinutes(signalTime);
+  if (mins == null) return null;
+
+  let barSize = 10;
+  if (String(strategyId).includes("@1h")) barSize = 60;
+  if (String(strategyId).includes("@4h")) barSize = 240;
+
+  const now = new Date();
+  const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const delta = currentMinutes - mins;
+
+  if (!Number.isFinite(delta) || delta < 0) return null;
+  return Math.max(0, Math.floor(delta / barSize));
+}
+
+function zoneMid(z) {
+  const lo = toNum(z?.lo);
+  const hi = toNum(z?.hi);
+  if (lo == null || hi == null) return null;
+  return (lo + hi) / 2;
+}
+
+function containsPrice(z, price) {
+  const p = toNum(price);
+  const lo = toNum(z?.lo);
+  const hi = toNum(z?.hi);
+  if (p == null || lo == null || hi == null) return false;
+  const a = Math.min(lo, hi);
+  const b = Math.max(lo, hi);
+  return p >= a && p <= b;
+}
+
+function dedupeZones(list = []) {
+  const out = [];
+  const seen = new Set();
+
+  for (const z of Array.isArray(list) ? list : []) {
+    const lo = toNum(z?.lo);
+    const hi = toNum(z?.hi);
+    if (lo == null || hi == null) continue;
+
+    const id = z?.id || `${Math.min(lo, hi)}|${Math.max(lo, hi)}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+
+    out.push({
+      id,
+      type: safeUpper(z?.type || z?.zoneType || "ZONE", "ZONE"),
+      lo: Math.min(lo, hi),
+      hi: Math.max(lo, hi),
+      mid: toNum(z?.mid) ?? zoneMid(z),
+      strength: toNum(z?.strength),
+    });
+  }
+
+  return out;
+}
+
+function buildOrderedZonePath({
+  direction,
+  signalPrice,
+  zoneContext,
+}) {
+  const currentActive = [];
+  const nearest = [];
+  const renderNegotiated = zoneContext?.meta?.render?.negotiated || zoneContext?.render?.negotiated || [];
+  const renderInstitutional = zoneContext?.meta?.render?.institutional || zoneContext?.render?.institutional || [];
+
+  if (zoneContext?.active?.negotiated) {
+    currentActive.push({
+      ...zoneContext.active.negotiated,
+      zoneType: "NEGOTIATED",
+    });
+  }
+  if (zoneContext?.active?.shelf) {
+    currentActive.push({
+      ...zoneContext.active.shelf,
+      zoneType: "SHELF",
+    });
+  }
+  if (zoneContext?.active?.institutional) {
+    currentActive.push({
+      ...zoneContext.active.institutional,
+      zoneType: "INSTITUTIONAL",
+    });
+  }
+  if (zoneContext?.nearest?.shelf) {
+    nearest.push({
+      ...zoneContext.nearest.shelf,
+      zoneType: "SHELF",
+    });
+  }
+
+  const all = dedupeZones([
+    ...currentActive,
+    ...nearest,
+    ...renderNegotiated,
+    ...renderInstitutional,
+  ]);
+
+  const s = toNum(signalPrice);
+  if (s == null) return [];
+
+  let filtered = [];
+
+  if (direction === "SHORT") {
+    filtered = all.filter((z) => {
+      const mid = z.mid ?? zoneMid(z);
+      return mid != null && mid < s;
+    });
+
+    filtered.sort((a, b) => {
+      const da = Math.abs((a.mid ?? zoneMid(a)) - s);
+      const db = Math.abs((b.mid ?? zoneMid(b)) - s);
+      return da - db;
+    });
+  } else if (direction === "LONG") {
+    filtered = all.filter((z) => {
+      const mid = z.mid ?? zoneMid(z);
+      return mid != null && mid > s;
+    });
+
+    filtered.sort((a, b) => {
+      const da = Math.abs((a.mid ?? zoneMid(a)) - s);
+      const db = Math.abs((b.mid ?? zoneMid(b)) - s);
+      return da - db;
+    });
+  }
+
+  const trimmed = filtered.slice(0, 6);
+
+  return trimmed.map((z, idx) => ({
+    id: z.id,
+    type: z.type,
+    lo: z.lo,
+    hi: z.hi,
+    mid: z.mid ?? zoneMid(z),
+    strength: z.strength ?? null,
+    tpSlot: idx === 0 ? 1 : idx === 1 ? 2 : idx + 1,
+  }));
+}
+
+function countZonesHit({ direction, currentPrice, zonesInPath }) {
+  const p = toNum(currentPrice);
+  if (p == null) return { zonesHit: 0, hitIds: [] };
+
+  let zonesHit = 0;
+  const hitIds = [];
+
+  for (const z of Array.isArray(zonesInPath) ? zonesInPath : []) {
+    const lo = toNum(z.lo);
+    const hi = toNum(z.hi);
+    if (lo == null || hi == null) continue;
+
+    let hit = false;
+
+    if (direction === "SHORT") {
+      hit = p <= hi || containsPrice(z, p);
+    } else if (direction === "LONG") {
+      hit = p >= lo || containsPrice(z, p);
+    }
+
+    if (hit) {
+      zonesHit += 1;
+      hitIds.push(z.id);
+    }
+  }
+
+  return { zonesHit, hitIds };
+}
+
+function calcMoveFromSignal({ direction, signalPrice, currentPrice, atr }) {
+  const s = toNum(signalPrice);
+  const p = toNum(currentPrice);
+  const a = toNum(atr);
+
+  if (s == null || p == null) {
+    return {
+      moveFromSignalPts: null,
+      moveFromSignalAtr: null,
+    };
+  }
+
+  const pts = direction === "SHORT" ? s - p : direction === "LONG" ? p - s : null;
+  const atrMove = pts != null && a != null && a > 0 ? pts / a : null;
+
+  return {
+    moveFromSignalPts: pts,
+    moveFromSignalAtr: atrMove,
+  };
+}
+
+function estimateTargetProgress01({
+  zonesHit,
+  zonesInPath,
+  moveFromSignalAtr,
+}) {
+  const targetCount = Math.min(2, Array.isArray(zonesInPath) ? zonesInPath.length : 0);
+
+  if (targetCount <= 0) {
+    if (moveFromSignalAtr == null) return 0;
+    return clamp(moveFromSignalAtr / 1.25, 0, 1);
+  }
+
+  if (zonesHit >= 2) return 1;
+  if (zonesHit === 1) return 0.7;
+
+  if (moveFromSignalAtr == null) return 0;
+  return clamp(moveFromSignalAtr / 1.25, 0, 0.69);
+}
+
+function determineLifecycle({
+  strategyId,
+  winner,
+  engine16,
+  engine5,
+  zoneContext,
+  readinessLabel,
+  action,
+}) {
+  const currentPrice = extractCurrentPrice({ engine5, zoneContext, engine16 });
+  const signalPrice =
+    winner?.strategyType === "EXHAUSTION"
+      ? toNum(engine16?.exhaustionBarPrice)
+      : toNum(engine16?.currentPrice);
+
+  const atr =
+    toNum(engine16?.atr) ??
+    toNum(engine16?.meta?.atr) ??
+    toNum(zoneContext?.meta?.atr) ??
+    null;
+
+  const signalTime =
+    winner?.strategyType === "EXHAUSTION"
+      ? engine16?.exhaustionBarTime
+      : null;
+
+  const barsSinceSignal = getBarsSinceSignal({
+    strategyId,
+    signalTime,
+  });
+
+  const { moveFromSignalPts, moveFromSignalAtr } = calcMoveFromSignal({
+    direction: winner?.direction,
+    signalPrice,
+    currentPrice,
+    atr,
+  });
+
+  const zonesInPath = buildOrderedZonePath({
+    direction: winner?.direction,
+    signalPrice,
+    zoneContext,
+  });
+
+  const { zonesHit, hitIds } = countZonesHit({
+    direction: winner?.direction,
+    currentPrice,
+    zonesInPath,
+  });
+
+  const targetProgress01 = estimateTargetProgress01({
+    zonesHit,
+    zonesInPath,
+    moveFromSignalAtr,
+  });
+
+  const firstTargetHit = zonesHit >= 1;
+  const secondTargetHit = zonesHit >= 2;
+
+  let lifecycleStage = "BUILDING";
+  let isFreshSetup = true;
+  let entryWindowOpen = false;
+  let setupCompleted = false;
+  let runnerActive = false;
+  let nextFocus = "STAY_WITH_CURRENT_SETUP";
+
+  if (engine16?.invalidated === true) {
+    lifecycleStage = "INVALIDATED";
+    isFreshSetup = false;
+    entryWindowOpen = false;
+    nextFocus = "LOOK_FOR_NEW_SETUP";
+  } else if (
+    readinessLabel === "WAIT" &&
+    action === "NO_ACTION" &&
+    (barsSinceSignal != null && barsSinceSignal >= 6) &&
+    !firstTargetHit
+  ) {
+    lifecycleStage = "EXPIRED";
+    isFreshSetup = false;
+    entryWindowOpen = false;
+    nextFocus = "LOOK_FOR_NEW_SETUP";
+  } else if (secondTargetHit) {
+    lifecycleStage = "MATURE";
+    isFreshSetup = false;
+    entryWindowOpen = false;
+    runnerActive = true;
+    nextFocus = "MANAGE_RUNNER";
+  } else if (firstTargetHit) {
+    lifecycleStage = "PARTIALLY_COMPLETED";
+    isFreshSetup = false;
+    entryWindowOpen = false;
+    runnerActive = true;
+    nextFocus = "LOOK_FOR_CONTINUATION_TO_NEXT_ZONE";
+  } else if (
+    (action === "WATCH" || action === "WAIT" || action === "ENTER_OK" || action === "REDUCE_OK") &&
+    (readinessLabel === "ARMING" || readinessLabel === "READY" || readinessLabel === "CONFIRMED")
+  ) {
+    lifecycleStage = "LIVE";
+    isFreshSetup = (moveFromSignalAtr == null || moveFromSignalAtr < 0.7) && !firstTargetHit;
+    entryWindowOpen = isFreshSetup;
+    nextFocus = "STAY_WITH_CURRENT_SETUP";
+  } else {
+    lifecycleStage = "BUILDING";
+    isFreshSetup = false;
+    entryWindowOpen = false;
+    nextFocus = "WAIT_FOR_TRIGGER";
+  }
+
+  // completion / missed rules
+  if (targetProgress01 >= 1 || (moveFromSignalAtr != null && moveFromSignalAtr >= 1.25)) {
+    if (action === "ENTER_OK" || action === "REDUCE_OK" || action === "WATCH") {
+      if (secondTargetHit) {
+        lifecycleStage = "MATURE";
+        runnerActive = true;
+        nextFocus = "MANAGE_RUNNER";
+      } else if (firstTargetHit) {
+        lifecycleStage = "PARTIALLY_COMPLETED";
+        runnerActive = true;
+        nextFocus = "LOOK_FOR_CONTINUATION_TO_NEXT_ZONE";
+      } else {
+        lifecycleStage = "MISSED";
+        isFreshSetup = false;
+        entryWindowOpen = false;
+        nextFocus = "LOOK_FOR_NEW_SETUP";
+      }
+    }
+  }
+
+  // if setup was once live but edge mostly spent, mark missed/completed
+  if (
+    !firstTargetHit &&
+    !secondTargetHit &&
+    moveFromSignalAtr != null &&
+    moveFromSignalAtr >= 1.25 &&
+    lifecycleStage === "LIVE"
+  ) {
+    lifecycleStage = "MISSED";
+    isFreshSetup = false;
+    entryWindowOpen = false;
+    nextFocus = "LOOK_FOR_NEW_SETUP";
+  }
+
+  if (
+    (lifecycleStage === "PARTIALLY_COMPLETED" || lifecycleStage === "MATURE") &&
+    runnerActive !== true
+  ) {
+    runnerActive = true;
+  }
+
+  if (lifecycleStage === "COMPLETED") {
+    setupCompleted = true;
+    isFreshSetup = false;
+    entryWindowOpen = false;
+    nextFocus = "LOOK_FOR_NEW_SETUP";
+  }
+
+  const edgeRemainingPct =
+    lifecycleStage === "BUILDING" ? 100 :
+    lifecycleStage === "LIVE" ? 100 :
+    lifecycleStage === "PARTIALLY_COMPLETED" ? 66 :
+    lifecycleStage === "MATURE" ? 33 :
+    lifecycleStage === "COMPLETED" ? 0 :
+    lifecycleStage === "MISSED" ? 0 :
+    lifecycleStage === "EXPIRED" ? 0 :
+    lifecycleStage === "INVALIDATED" ? 0 :
+    0;
+
+  return {
+    lifecycleStage: VALID_LIFECYCLE.has(lifecycleStage) ? lifecycleStage : "BUILDING",
+    isFreshSetup,
+    entryWindowOpen,
+    signalPrice,
+    currentPrice,
+    barsSinceSignal,
+    moveFromSignalPts,
+    moveFromSignalAtr,
+    zonesInPath: zonesInPath.map((z) => ({
+      ...z,
+      hit: hitIds.includes(z.id),
+    })),
+    zonesHit,
+    targetCount: Math.min(2, zonesInPath.length),
+    targetProgress01,
+    firstTargetHit,
+    secondTargetHit,
+    runnerActive,
+    setupCompleted,
+    edgeRemainingPct,
+    nextFocus,
+  };
+}
+
+function buildExecutionBias({
   winner,
   momentumGate,
   hardBlockers,
@@ -820,6 +1275,24 @@ export function buildFinalDecision({
 
   if (!VALID_ACTIONS.has(action)) action = "NO_ACTION";
 
+  const lifecycle = determineLifecycle({
+    strategyId,
+    winner,
+    engine16: normalizeEngine16(engine16),
+    engine5: normalizeEngine5(engine5),
+    zoneContext: normalizeZoneContext(zoneContext),
+    readinessLabel: trigger.readinessLabel,
+    action,
+  });
+
+  // lifecycle can reduce emphasis after move is already spent
+  if (lifecycle.lifecycleStage === "MISSED" || lifecycle.lifecycleStage === "EXPIRED") {
+    action = "NO_ACTION";
+  }
+  if (lifecycle.lifecycleStage === "COMPLETED" || lifecycle.setupCompleted) {
+    action = "NO_ACTION";
+  }
+
   const reasonCodes = [
     ...(trigger.reasonCodes || []),
     ...(quality.reasonCodes || []),
@@ -833,9 +1306,9 @@ export function buildFinalDecision({
     ...(trigger.blockers || []),
   ];
 
-  const out = {
+  return {
     ok: true,
-    engine: "engine15.decisionReferee.v1",
+    engine: "engine15.decisionReferee.v2",
     symbol,
     strategyId,
     strategyType: winner?.strategyType || "NONE",
@@ -863,6 +1336,7 @@ export function buildFinalDecision({
     },
     permission: p.permission,
     sizeMultiplier: p.sizeMultiplier,
+    lifecycle,
     debug: {
       hardBlockers: hard,
       quality,
@@ -870,8 +1344,6 @@ export function buildFinalDecision({
       trigger,
     },
   };
-
-  return out;
 }
 
 /* -----------------------------
@@ -912,7 +1384,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v1",
+      engine: "engine15.decisionReferee.v2",
       symbol,
       strategyId,
       strategyType: "NONE",
@@ -940,6 +1412,26 @@ export function computeEngine15DecisionReferee({
       },
       permission: "UNKNOWN",
       sizeMultiplier: null,
+      lifecycle: {
+        lifecycleStage: "BUILDING",
+        isFreshSetup: false,
+        entryWindowOpen: false,
+        signalPrice: null,
+        currentPrice: null,
+        barsSinceSignal: null,
+        moveFromSignalPts: null,
+        moveFromSignalAtr: null,
+        zonesInPath: [],
+        zonesHit: 0,
+        targetCount: 0,
+        targetProgress01: 0,
+        firstTargetHit: false,
+        secondTargetHit: false,
+        runnerActive: false,
+        setupCompleted: false,
+        edgeRemainingPct: 100,
+        nextFocus: "LOOK_FOR_NEW_SETUP",
+      },
       debug: {},
     };
   }
