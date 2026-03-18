@@ -1,6 +1,6 @@
 // services/core/logic/engine15DecisionReferee.js
 //
-// Engine 15B — Decision Referee + Lifecycle v4
+// Engine 15B — Decision Referee + Lifecycle v5
 //
 // Mission:
 // - Engine 16 = pattern candidate
@@ -17,17 +17,12 @@
 // - whether the setup is fresh / mature / completed
 // - what the next focus should be
 //
-// Lifecycle v4 adds:
+// Lifecycle v5:
 // - full zone-path progression
 // - TP1 / TP2 lifecycle
 // - block 2 protection via TP1 zone reclaim
 // - runner completion via 30m 10 EMA rule
-//
-// Safe lifecycle implementation:
-// - trusts one primary Engine 16 candidate
-// - uses full zone-path progression for lifecycle
-// - uses ATR only as backup helper
-// - never throws
+// - HARD FIX: no runner exit unless ema10_30m is a real number
 
 const VALID_STRATEGY_TYPES = new Set([
   "EXHAUSTION",
@@ -165,36 +160,36 @@ function normalizeMomentum(momentum = null) {
     smi10m: {
       direction: safeUpper(momentum?.smi10m?.direction, "UNKNOWN"),
       cross: safeUpper(momentum?.smi10m?.cross, "NONE"),
-      k: Number.isFinite(Number(momentum?.smi10m?.k))
-        ? Number(momentum.smi10m.k)
-        : null,
-      d: Number.isFinite(Number(momentum?.smi10m?.d))
-        ? Number(momentum.smi10m.d)
-        : null,
+      k: toNum(momentum?.smi10m?.k),
+      d: toNum(momentum?.smi10m?.d),
     },
     smi1h: {
       direction: safeUpper(momentum?.smi1h?.direction, "UNKNOWN"),
       cross: safeUpper(momentum?.smi1h?.cross, "NONE"),
-      k: Number.isFinite(Number(momentum?.smi1h?.k))
-        ? Number(momentum.smi1h.k)
-        : null,
-      d: Number.isFinite(Number(momentum?.smi1h?.d))
-        ? Number(momentum.smi1h.d)
-        : null,
+      k: toNum(momentum?.smi1h?.k),
+      d: toNum(momentum?.smi1h?.d),
     },
     compressionSignal: {
       state: safeUpper(momentum?.compressionSignal?.state, "NONE"),
       quality: safeUpper(momentum?.compressionSignal?.quality, "NONE"),
       early: momentum?.compressionSignal?.early === true,
-      tightness: Number.isFinite(Number(momentum?.compressionSignal?.tightness))
-        ? Number(momentum.compressionSignal.tightness)
-        : null,
+      tightness: toNum(momentum?.compressionSignal?.tightness),
     },
     decisionHint: {
       biasAssist: safeUpper(momentum?.decisionHint?.biasAssist, "NONE"),
       releaseAssist: safeUpper(momentum?.decisionHint?.releaseAssist, "NONE"),
       summary: momentum?.decisionHint?.summary || null,
     },
+
+    // preserve any possible 30m EMA carriers
+    ema30m: momentum?.ema30m || null,
+    ema10_30m:
+      toNum(momentum?.ema30m?.ema10) ??
+      toNum(momentum?.ema30m?.value10) ??
+      toNum(momentum?.ema30m?.ema_10) ??
+      toNum(momentum?.ema30m10) ??
+      toNum(momentum?.ema10_30m) ??
+      null,
   };
 }
 
@@ -202,9 +197,7 @@ function normalizeE3(engine3 = null) {
   return {
     stage: safeUpper(engine3?.stage, "IDLE"),
     armed: engine3?.armed === true,
-    reactionScore: Number.isFinite(Number(engine3?.reactionScore))
-      ? Number(engine3.reactionScore)
-      : 0,
+    reactionScore: toNum(engine3?.reactionScore) ?? 0,
     structureState: safeUpper(engine3?.structureState, "HOLD"),
     confirmed: engine3?.confirmed === true,
     reasonCodes: Array.isArray(engine3?.reasonCodes) ? engine3.reasonCodes : [],
@@ -213,9 +206,7 @@ function normalizeE3(engine3 = null) {
 
 function normalizeE4(engine4 = null) {
   return {
-    volumeScore: Number.isFinite(Number(engine4?.volumeScore))
-      ? Number(engine4.volumeScore)
-      : 0,
+    volumeScore: toNum(engine4?.volumeScore) ?? 0,
     volumeConfirmed: engine4?.volumeConfirmed === true,
     pressureBias: safeUpper(engine4?.pressureBias, "NEUTRAL"),
     volumeRegime: safeUpper(engine4?.volumeRegime, "UNKNOWN"),
@@ -244,18 +235,6 @@ function normalizeZoneContext(ctx = null) {
   const renderInstitutionalRaw = Array.isArray(ctx?.render?.institutional) ? ctx.render.institutional : [];
   const renderShelvesRaw = Array.isArray(ctx?.render?.shelves) ? ctx.render.shelves : [];
 
-  const renderNegotiated = renderNegotiatedRaw
-    .map((z) => normalizeRenderZone(z, "NEGOTIATED"))
-    .filter(Boolean);
-
-  const renderInstitutional = renderInstitutionalRaw
-    .map((z) => normalizeRenderZone(z, "INSTITUTIONAL"))
-    .filter(Boolean);
-
-  const renderShelves = renderShelvesRaw
-    .map((z) => normalizeRenderZone(z, "SHELF"))
-    .filter(Boolean);
-
   return {
     zoneType: safeUpper(ctx?.zoneType, "UNKNOWN"),
     withinZone:
@@ -281,9 +260,15 @@ function normalizeZoneContext(ctx = null) {
     meta: ctx?.meta || null,
     flags: ctx?.flags || null,
     render: {
-      negotiated: renderNegotiated,
-      institutional: renderInstitutional,
-      shelves: renderShelves,
+      negotiated: renderNegotiatedRaw
+        .map((z) => normalizeRenderZone(z, "NEGOTIATED"))
+        .filter(Boolean),
+      institutional: renderInstitutionalRaw
+        .map((z) => normalizeRenderZone(z, "INSTITUTIONAL"))
+        .filter(Boolean),
+      shelves: renderShelvesRaw
+        .map((z) => normalizeRenderZone(z, "SHELF"))
+        .filter(Boolean),
     },
   };
 }
@@ -320,11 +305,11 @@ function normalizeEngine16(engine16 = null) {
       null,
     exhaustionBarPrice: toNum(engine16?.exhaustionBarPrice),
     exhaustionBarTime: engine16?.exhaustionBarTime || engine16?.signalTimes?.exhaustionTime || null,
-    atr: toNum(engine16?.meta?.atr) ?? toNum(engine16?.meta?.atrValue) ?? toNum(engine16?.meta?.atr14) ?? null,
-    currentDayHigh: toNum(engine16?.dayRange?.currentDayHigh),
-    currentDayLow: toNum(engine16?.dayRange?.currentDayLow),
-    sessionHigh: toNum(engine16?.sessionStructure?.regularSessionHigh) ?? toNum(engine16?.anchors?.sessionHigh),
-    sessionLow: toNum(engine16?.sessionStructure?.regularSessionLow) ?? toNum(engine16?.anchors?.sessionLow),
+    atr:
+      toNum(engine16?.meta?.atr) ??
+      toNum(engine16?.meta?.atrValue) ??
+      toNum(engine16?.meta?.atr14) ??
+      null,
     error: engine16?.error || null,
     reasonCodes: Array.isArray(engine16?.reasonCodes) ? engine16.reasonCodes : [],
   };
@@ -442,45 +427,17 @@ export function evaluateHardBlockers({
   const z = normalizeZoneContext(zoneContext);
   const e16 = normalizeEngine16(engine16);
 
-  if (!winner || winner.strategyType === "NONE") {
-    blockers.push("NO_VALID_STRATEGY");
-  }
+  if (!winner || winner.strategyType === "NONE") blockers.push("NO_VALID_STRATEGY");
+  if (winner?.direction === "NONE") blockers.push("NO_DIRECTION");
+  if (p.permission === "STAND_DOWN") blockers.push("E6_STAND_DOWN");
+  if (e16.invalidated === true) blockers.push("E16_INVALIDATED");
+  if (z.validLocation === false) blockers.push("INVALID_LOCATION");
+  if (z.allowed === false) blockers.push("ZONE_NOT_ALLOWED");
+  if (z.wrongZone === true) blockers.push("WRONG_ZONE");
+  if (z.requiresAllowedZone === true && z.withinZone !== true) blockers.push("OUTSIDE_REQUIRED_ZONE");
 
-  if (winner?.direction === "NONE") {
-    blockers.push("NO_DIRECTION");
-  }
-
-  if (p.permission === "STAND_DOWN") {
-    blockers.push("E6_STAND_DOWN");
-  }
-
-  if (e16.invalidated === true) {
-    blockers.push("E16_INVALIDATED");
-  }
-
-  if (z.validLocation === false) {
-    blockers.push("INVALID_LOCATION");
-  }
-
-  if (z.allowed === false) {
-    blockers.push("ZONE_NOT_ALLOWED");
-  }
-
-  if (z.wrongZone === true) {
-    blockers.push("WRONG_ZONE");
-  }
-
-  if (z.requiresAllowedZone === true && z.withinZone !== true) {
-    blockers.push("OUTSIDE_REQUIRED_ZONE");
-  }
-
-  if (z.withinZone !== true && winner?.strategyType === "BREAKOUT") {
-    conflicts.push("BREAKOUT_NOT_IN_ZONE");
-  }
-
-  if (z.withinZone !== true && winner?.strategyType === "BREAKDOWN") {
-    conflicts.push("BREAKDOWN_NOT_IN_ZONE");
-  }
+  if (z.withinZone !== true && winner?.strategyType === "BREAKOUT") conflicts.push("BREAKOUT_NOT_IN_ZONE");
+  if (z.withinZone !== true && winner?.strategyType === "BREAKDOWN") conflicts.push("BREAKDOWN_NOT_IN_ZONE");
 
   if (
     winner?.strategyType === "EXHAUSTION" &&
@@ -571,9 +528,7 @@ export function evaluateMomentumGate({
 
   const smi10 = mom.smi10m.direction;
   const smi1h = mom.smi1h.direction;
-
-  const isFastCountertrendType =
-    type === "EXHAUSTION" || type === "REVERSAL";
+  const isFastCountertrendType = type === "EXHAUSTION" || type === "REVERSAL";
 
   if (dir === "LONG") {
     if (mom.alignment === "BULLISH") {
@@ -586,15 +541,10 @@ export function evaluateMomentumGate({
       reasonCodes.push("COUNTERTREND_EXPECTED");
       reasonCodes.push("E45_COUNTERTREND_LONG_OK");
 
-      if (smi10 === "UP") {
-        reasonCodes.push("E45_10M_SUPPORTS_LONG");
-      } else {
-        conflicts.push("EARLY_LONG_WITHOUT_10M_CONFIRM");
-      }
+      if (smi10 === "UP") reasonCodes.push("E45_10M_SUPPORTS_LONG");
+      else conflicts.push("EARLY_LONG_WITHOUT_10M_CONFIRM");
 
-      if (smi1h !== "UP") {
-        conflicts.push("HIGHER_TF_NOT_CONFIRMED");
-      }
+      if (smi1h !== "UP") conflicts.push("HIGHER_TF_NOT_CONFIRMED");
     } else {
       blockers.push("MOMENTUM_MISMATCH_LONG");
     }
@@ -611,23 +561,16 @@ export function evaluateMomentumGate({
       reasonCodes.push("COUNTERTREND_EXPECTED");
       reasonCodes.push("E45_COUNTERTREND_SHORT_OK");
 
-      if (smi10 === "DOWN") {
-        reasonCodes.push("E45_10M_SUPPORTS_SHORT");
-      } else {
-        conflicts.push("EARLY_SHORT_WITHOUT_10M_CONFIRM");
-      }
+      if (smi10 === "DOWN") reasonCodes.push("E45_10M_SUPPORTS_SHORT");
+      else conflicts.push("EARLY_SHORT_WITHOUT_10M_CONFIRM");
 
-      if (smi1h !== "DOWN") {
-        conflicts.push("HIGHER_TF_NOT_CONFIRMED");
-      }
+      if (smi1h !== "DOWN") conflicts.push("HIGHER_TF_NOT_CONFIRMED");
     } else {
       blockers.push("MOMENTUM_MISMATCH_SHORT");
     }
   }
 
-  if (dir === "NONE") {
-    blockers.push("MOMENTUM_DIRECTION_NONE");
-  }
+  if (dir === "NONE") blockers.push("MOMENTUM_DIRECTION_NONE");
 
   if (scalpMode) reasonCodes.push("MODE_SCALP");
   if (swingMode) reasonCodes.push("MODE_SWING");
@@ -686,18 +629,12 @@ export function evaluateTriggerReadiness({
 
   const qualityPass = qualityGate?.qualityGatePassed === true;
   const momentumPass = momentumGate?.momentumGatePassed === true;
-
-  const isFastCountertrendType =
-    winner.strategyType === "EXHAUSTION" || winner.strategyType === "REVERSAL";
-
-  const weakButTrackableQuality =
-    Number(qualityGate?.qualityScore ?? 0) >= 60;
+  const isFastCountertrendType = winner.strategyType === "EXHAUSTION" || winner.strategyType === "REVERSAL";
+  const weakButTrackableQuality = Number(qualityGate?.qualityScore ?? 0) >= 60;
 
   if (!qualityPass) {
     readinessLabel = "NEAR";
-    if (weakButTrackableQuality) {
-      reasonCodes.push("QUALITY_TRACKABLE_NOT_TRADEABLE");
-    }
+    if (weakButTrackableQuality) reasonCodes.push("QUALITY_TRACKABLE_NOT_TRADEABLE");
     blockers.push(...(qualityGate?.blockers || []));
     reasonCodes.push(...(qualityGate?.reasonCodes || []));
   } else {
@@ -766,11 +703,7 @@ export function evaluateTriggerReadiness({
       reasonCodes.push("ABSORPTION_SUPPORTS_LONG");
     }
 
-    if (
-      readinessLabel === "NEAR" &&
-      momentumPass &&
-      (qualityPass || weakButTrackableQuality)
-    ) {
+    if (readinessLabel === "NEAR" && momentumPass && (qualityPass || weakButTrackableQuality)) {
       readinessLabel = "ARMING";
       if (entryStyle === "NONE") entryStyle = "EARLY_COUNTERTREND";
       reasonCodes.push("FAST_MARKET_EARLY_ARM");
@@ -864,7 +797,6 @@ function dedupeZones(list = []) {
     const key = `${normalized.type}|${normalized.lo}|${normalized.hi}`;
     if (seen.has(key)) continue;
     seen.add(key);
-
     out.push(normalized);
   }
 
@@ -879,59 +811,17 @@ function buildOrderedZonePath({
   const activeZones = [];
   const nearestZones = [];
 
-  if (zoneContext?.active?.negotiated) {
-    activeZones.push({
-      ...zoneContext.active.negotiated,
-      zoneType: "NEGOTIATED",
-    });
-  }
+  if (zoneContext?.active?.negotiated) activeZones.push({ ...zoneContext.active.negotiated, zoneType: "NEGOTIATED" });
+  if (zoneContext?.active?.shelf) activeZones.push({ ...zoneContext.active.shelf, zoneType: "SHELF" });
+  if (zoneContext?.active?.institutional) activeZones.push({ ...zoneContext.active.institutional, zoneType: "INSTITUTIONAL" });
 
-  if (zoneContext?.active?.shelf) {
-    activeZones.push({
-      ...zoneContext.active.shelf,
-      zoneType: "SHELF",
-    });
-  }
+  if (zoneContext?.nearest?.shelf) nearestZones.push({ ...zoneContext.nearest.shelf, zoneType: "SHELF" });
+  if (zoneContext?.nearest?.negotiated) nearestZones.push({ ...zoneContext.nearest.negotiated, zoneType: "NEGOTIATED" });
+  if (zoneContext?.nearest?.institutional) nearestZones.push({ ...zoneContext.nearest.institutional, zoneType: "INSTITUTIONAL" });
 
-  if (zoneContext?.active?.institutional) {
-    activeZones.push({
-      ...zoneContext.active.institutional,
-      zoneType: "INSTITUTIONAL",
-    });
-  }
-
-  if (zoneContext?.nearest?.shelf) {
-    nearestZones.push({
-      ...zoneContext.nearest.shelf,
-      zoneType: "SHELF",
-    });
-  }
-
-  if (zoneContext?.nearest?.negotiated) {
-    nearestZones.push({
-      ...zoneContext.nearest.negotiated,
-      zoneType: "NEGOTIATED",
-    });
-  }
-
-  if (zoneContext?.nearest?.institutional) {
-    nearestZones.push({
-      ...zoneContext.nearest.institutional,
-      zoneType: "INSTITUTIONAL",
-    });
-  }
-
-  const renderNegotiated = Array.isArray(zoneContext?.render?.negotiated)
-    ? zoneContext.render.negotiated
-    : [];
-
-  const renderInstitutional = Array.isArray(zoneContext?.render?.institutional)
-    ? zoneContext.render.institutional
-    : [];
-
-  const renderShelves = Array.isArray(zoneContext?.render?.shelves)
-    ? zoneContext.render.shelves
-    : [];
+  const renderNegotiated = Array.isArray(zoneContext?.render?.negotiated) ? zoneContext.render.negotiated : [];
+  const renderInstitutional = Array.isArray(zoneContext?.render?.institutional) ? zoneContext.render.institutional : [];
+  const renderShelves = Array.isArray(zoneContext?.render?.shelves) ? zoneContext.render.shelves : [];
 
   const all = dedupeZones([
     ...activeZones,
@@ -1087,12 +977,8 @@ function didReclaimTp1Zone({ direction, currentPrice, tp1Zone }) {
   const hi = toNum(tp1Zone?.hi);
   if (p == null || lo == null || hi == null) return false;
 
-  if (direction === "SHORT") {
-    return p > hi;
-  }
-  if (direction === "LONG") {
-    return p < lo;
-  }
+  if (direction === "SHORT") return p > hi;
+  if (direction === "LONG") return p < lo;
   return false;
 }
 
@@ -1104,6 +990,8 @@ function determineRunnerExitByEma({
   const p = toNum(currentPrice);
   const ema = toNum(ema10_30m);
 
+  // HARD FIX:
+  // never trigger EMA runner exit without a real EMA value
   if (p == null || ema == null) {
     return {
       runnerExitTriggered: false,
@@ -1149,7 +1037,6 @@ function determineLifecycle({
 
   const atr =
     toNum(engine16?.atr) ??
-    toNum(engine16?.meta?.atr) ??
     toNum(zoneContext?.meta?.atr) ??
     null;
 
@@ -1202,12 +1089,8 @@ function determineLifecycle({
       })
     : false;
 
-  const ema10_30m =
-    toNum(momentum?.ema30m?.ema10) ??
-    toNum(momentum?.ema30m?.value10) ??
-    toNum(momentum?.ema30m?.ema_10) ??
-    toNum(momentum?.ema30m10) ??
-    null;
+  const normalizedMomentum = normalizeMomentum(momentum);
+  const ema10_30m = normalizedMomentum.ema10_30m;
 
   const runnerExit = determineRunnerExitByEma({
     direction: winner?.direction,
@@ -1299,7 +1182,6 @@ function determineLifecycle({
   }
 
   // Block 2 protection:
-  // after TP1, if price reclaims TP1 zone, protect block 2.
   if (firstTargetHit && !secondTargetHit && tp1Reclaimed) {
     block2Protected = true;
     block2ExitReason =
@@ -1313,7 +1195,7 @@ function determineLifecycle({
   }
 
   // Runner completion:
-  // if runner is active and 30m 10 EMA exit triggers, trade is completed.
+  // only valid if EMA proof exists AND rule actually triggered
   if ((secondTargetHit || block2Protected || lifecycleStage === "MATURE") && runnerExit.runnerExitTriggered) {
     lifecycleStage = "COMPLETED";
     setupCompleted = true;
@@ -1360,7 +1242,7 @@ function determineLifecycle({
     runnerActive,
     runnerExitTriggered: runnerExit.runnerExitTriggered,
     runnerExitReason: runnerExit.runnerExitReason,
-    ema10_30m: ema10_30m,
+    ema10_30m,
     setupCompleted,
     edgeRemainingPct,
     nextFocus,
@@ -1374,14 +1256,11 @@ function buildExecutionBias({
 } = {}) {
   const bias = safeUpper(momentumGate?.executionBias, "NONE");
 
-  if (VALID_BIAS.has(bias) && bias !== "NONE") {
-    return bias;
-  }
+  if (VALID_BIAS.has(bias) && bias !== "NONE") return bias;
 
   if (hardBlockers?.hardBlocked) {
     if (winner?.direction === "LONG") return "LONG_COUNTERTREND";
     if (winner?.direction === "SHORT") return "SHORT_COUNTERTREND";
-    return "NONE";
   }
 
   return "NONE";
@@ -1410,7 +1289,6 @@ export function buildFinalDecision({
   });
 
   const quality = evaluateQualityGate({
-    winner,
     engine5,
   });
 
@@ -1487,12 +1365,8 @@ export function buildFinalDecision({
     ...(mom.reasonCodes || []),
   ];
 
-  if (lifecycle.block2Protected) {
-    reasonCodes.push("BLOCK2_PROTECTED");
-  }
-  if (lifecycle.runnerExitTriggered) {
-    reasonCodes.push("RUNNER_EXIT_TRIGGERED");
-  }
+  if (lifecycle.block2Protected) reasonCodes.push("BLOCK2_PROTECTED");
+  if (lifecycle.runnerExitTriggered) reasonCodes.push("RUNNER_EXIT_TRIGGERED");
 
   const blockers = [
     ...(hard.blockers || []),
@@ -1503,7 +1377,7 @@ export function buildFinalDecision({
 
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v4",
+    engine: "engine15.decisionReferee.v5",
     symbol,
     strategyId,
     strategyType: winner?.strategyType || "NONE",
@@ -1579,7 +1453,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v4",
+      engine: "engine15.decisionReferee.v5",
       symbol,
       strategyId,
       strategyType: "NONE",
