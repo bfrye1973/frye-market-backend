@@ -1,15 +1,15 @@
 // services/core/logic/engine15DecisionReferee.js
 //
-// Engine 15 v2 — Decision Referee
+// Engine 15B — Decision Referee
 //
 // Mission:
 // - Engine 16 = pattern candidate
 // - Engine 5 = quality validator
 // - Engine 4.5 = directional assist
 // - Engine 6 = risk gate
-// - Engine 15 = final referee
+// - Engine 15B = final referee
 //
-// Engine 15 decides:
+// Engine 15B decides:
 // - what strategy wins
 // - what direction is favored
 // - how ready it is
@@ -22,7 +22,7 @@
 // - detect raw zones/fibs itself
 //
 // Safe first draft:
-// - works with one primary Engine 16 candidate
+// - trusts one primary Engine 16 candidate
 // - supports future multi-candidate expansion
 // - never throws
 
@@ -114,12 +114,28 @@ function normalizeDirection(x, engine16 = null) {
 }
 
 function normalizePermission(permissionObj = null) {
-  const p = safeUpper(permissionObj?.permission, "UNKNOWN");
-  const sizeMultiplier = Number(permissionObj?.sizeMultiplier);
+  const permission = safeUpper(
+    permissionObj?.permission ??
+      permissionObj?.state ??
+      permissionObj?.verdict,
+    "UNKNOWN"
+  );
+
+  const sizeMultiplierRaw =
+    permissionObj?.sizeMultiplier ??
+    permissionObj?.multiplier ??
+    permissionObj?.riskMultiplier;
+
+  const sizeMultiplier = Number(sizeMultiplierRaw);
+
   return {
-    permission: ["ALLOW", "REDUCE", "STAND_DOWN"].includes(p) ? p : "UNKNOWN",
+    permission: ["ALLOW", "REDUCE", "STAND_DOWN"].includes(permission)
+      ? permission
+      : "UNKNOWN",
     sizeMultiplier: Number.isFinite(sizeMultiplier) ? sizeMultiplier : null,
-    reasonCodes: Array.isArray(permissionObj?.reasonCodes) ? permissionObj.reasonCodes : [],
+    reasonCodes: Array.isArray(permissionObj?.reasonCodes)
+      ? permissionObj.reasonCodes
+      : [],
   };
 }
 
@@ -130,14 +146,22 @@ function normalizeMomentum(momentum = null) {
     smi10m: {
       direction: safeUpper(momentum?.smi10m?.direction, "UNKNOWN"),
       cross: safeUpper(momentum?.smi10m?.cross, "NONE"),
-      k: Number.isFinite(Number(momentum?.smi10m?.k)) ? Number(momentum.smi10m.k) : null,
-      d: Number.isFinite(Number(momentum?.smi10m?.d)) ? Number(momentum.smi10m.d) : null,
+      k: Number.isFinite(Number(momentum?.smi10m?.k))
+        ? Number(momentum.smi10m.k)
+        : null,
+      d: Number.isFinite(Number(momentum?.smi10m?.d))
+        ? Number(momentum.smi10m.d)
+        : null,
     },
     smi1h: {
       direction: safeUpper(momentum?.smi1h?.direction, "UNKNOWN"),
       cross: safeUpper(momentum?.smi1h?.cross, "NONE"),
-      k: Number.isFinite(Number(momentum?.smi1h?.k)) ? Number(momentum.smi1h.k) : null,
-      d: Number.isFinite(Number(momentum?.smi1h?.d)) ? Number(momentum.smi1h.d) : null,
+      k: Number.isFinite(Number(momentum?.smi1h?.k))
+        ? Number(momentum.smi1h.k)
+        : null,
+      d: Number.isFinite(Number(momentum?.smi1h?.d))
+        ? Number(momentum.smi1h.d)
+        : null,
     },
     compressionSignal: {
       state: safeUpper(momentum?.compressionSignal?.state, "NONE"),
@@ -163,6 +187,7 @@ function normalizeE3(engine3 = null) {
       ? Number(engine3.reactionScore)
       : 0,
     structureState: safeUpper(engine3?.structureState, "HOLD"),
+    confirmed: engine3?.confirmed === true,
     reasonCodes: Array.isArray(engine3?.reasonCodes) ? engine3.reasonCodes : [],
   };
 }
@@ -183,7 +208,24 @@ function normalizeE4(engine4 = null) {
 function normalizeZoneContext(ctx = null) {
   return {
     zoneType: safeUpper(ctx?.zoneType, "UNKNOWN"),
-    withinZone: ctx?.withinZone === true,
+    withinZone:
+      ctx?.withinZone === true ||
+      ctx?.insideZone === true ||
+      ctx?.insideAllowedZone === true,
+    validLocation:
+      ctx?.validLocation === true
+        ? true
+        : ctx?.validLocation === false
+        ? false
+        : null,
+    allowed:
+      ctx?.allowed === true
+        ? true
+        : ctx?.allowed === false
+        ? false
+        : null,
+    wrongZone: ctx?.wrongZone === true,
+    requiresAllowedZone: ctx?.requiresAllowedZone === true,
     active: ctx?.active || null,
     nearest: ctx?.nearest || null,
     flags: ctx?.flags || null,
@@ -222,6 +264,7 @@ function normalizeEngine5(engine5 = null) {
   const total =
     Number(engine5?.scores?.total) ||
     Number(engine5?.total) ||
+    Number(engine5?.score) ||
     0;
 
   return {
@@ -282,7 +325,7 @@ export function pickWinningStrategy({ candidates = [], engine5, momentum } = {})
 
     let priority = base;
 
-    // score contribution
+    // quality score contribution
     priority += clamp(Math.round((e5.total || 0) / 5), 0, 20);
 
     // momentum alignment bonus / penalty
@@ -348,16 +391,39 @@ export function evaluateHardBlockers({
     blockers.push("E16_INVALIDATED");
   }
 
-  if (["NEGOTIATED", "INSTITUTIONAL", "SHELF"].includes(z.zoneType) === false) {
-    blockers.push("ZONE_TYPE_NOT_ALLOWED");
+  // Explicit location / zone invalidation only.
+  // Do not block just because zoneType is unknown.
+  if (z.validLocation === false) {
+    blockers.push("INVALID_LOCATION");
   }
 
+  if (z.allowed === false) {
+    blockers.push("ZONE_NOT_ALLOWED");
+  }
+
+  if (z.wrongZone === true) {
+    blockers.push("WRONG_ZONE");
+  }
+
+  if (z.requiresAllowedZone === true && z.withinZone !== true) {
+    blockers.push("OUTSIDE_REQUIRED_ZONE");
+  }
+
+  // Keep these as conflict notes unless explicit location flags above say otherwise
   if (z.withinZone !== true && winner?.strategyType === "BREAKOUT") {
     conflicts.push("BREAKOUT_NOT_IN_ZONE");
   }
 
   if (z.withinZone !== true && winner?.strategyType === "BREAKDOWN") {
     conflicts.push("BREAKDOWN_NOT_IN_ZONE");
+  }
+
+  if (
+    winner?.strategyType === "EXHAUSTION" &&
+    e16.exhaustionDetected === true &&
+    e16.exhaustionActive === false
+  ) {
+    blockers.push("EXHAUSTION_INACTIVE");
   }
 
   return {
@@ -382,6 +448,7 @@ export function evaluateQualityGate({ winner, engine5 } = {}) {
       qualityBand: "INVALID",
       qualityScore: e5.total,
       qualityGrade: e5.grade,
+      qualityBreakdown: e5.perEngine,
       reasonCodes,
       blockers,
     };
@@ -429,8 +496,8 @@ export function evaluateMomentumGate({
   const type = winner?.strategyType || "NONE";
 
   let momentumGatePassed = false;
-  let reasonCodes = [];
-  let blockers = [];
+  const reasonCodes = [];
+  const blockers = [];
   let bias = "NONE";
 
   const scalpMode = sid.includes("INTRADAY_SCALP");
@@ -452,10 +519,10 @@ export function evaluateMomentumGate({
         reasonCodes.push("E45_COUNTERTREND_LONG_OK");
         blockers.push("HIGHER_TF_NOT_CONFIRMED");
       } else {
-        blockers.push("MOMENTUM_NOT_SUPPORTING_LONG");
+        blockers.push("MOMENTUM_MISMATCH_LONG");
       }
     } else {
-      blockers.push("MOMENTUM_NOT_SUPPORTING_LONG");
+      blockers.push("MOMENTUM_MISMATCH_LONG");
     }
   }
 
@@ -471,10 +538,10 @@ export function evaluateMomentumGate({
         reasonCodes.push("E45_COUNTERTREND_SHORT_OK");
         blockers.push("HIGHER_TF_NOT_CONFIRMED");
       } else {
-        blockers.push("MOMENTUM_NOT_SUPPORTING_SHORT");
+        blockers.push("MOMENTUM_MISMATCH_SHORT");
       }
     } else {
-      blockers.push("MOMENTUM_NOT_SUPPORTING_SHORT");
+      blockers.push("MOMENTUM_MISMATCH_SHORT");
     }
   }
 
@@ -482,11 +549,13 @@ export function evaluateMomentumGate({
     blockers.push("MOMENTUM_DIRECTION_NONE");
   }
 
-  // Soft mode-specific note hooks for debugging
   if (scalpMode) reasonCodes.push("MODE_SCALP");
   if (swingMode) reasonCodes.push("MODE_SWING");
   if (longMode) reasonCodes.push("MODE_INTERMEDIATE");
 
+  // Important:
+  // These blockers are informational / downgrade-oriented in v1.
+  // They do not become hard blockers by themselves.
   return {
     momentumGatePassed,
     executionBias: VALID_BIAS.has(bias) ? bias : "NONE",
@@ -494,6 +563,8 @@ export function evaluateMomentumGate({
     blockers,
     alignment: mom.alignment,
     momentumState: mom.momentumState,
+    smi10Direction: smi10,
+    smi1hDirection: smi1h,
   };
 }
 
@@ -531,7 +602,6 @@ export function evaluateTriggerReadiness({
     };
   }
 
-  // Base readiness from quality + momentum
   let readinessLabel = "WAIT";
   let entryStyle = "NONE";
   let triggerConfirmed = false;
@@ -555,7 +625,7 @@ export function evaluateTriggerReadiness({
     reasonCodes.push(...(momentumGate?.reasonCodes || []));
   }
 
-  // Promote off E3 / E4
+  // Promote off Engine 3 / Engine 4
   if (qualityPass) {
     if (e3.stage === "ARMED" || e3.armed === true) {
       readinessLabel = "ARMING";
@@ -573,7 +643,7 @@ export function evaluateTriggerReadiness({
     }
 
     if (
-      e3.stage === "CONFIRMED" &&
+      (e3.stage === "CONFIRMED" || e3.confirmed === true) &&
       (e4.volumeConfirmed === true || e4.volumeScore >= 9)
     ) {
       readinessLabel = "CONFIRMED";
@@ -684,13 +754,19 @@ export function buildFinalDecision({
   } else if (trigger.readinessLabel === "NEAR" || trigger.readinessLabel === "ARMING") {
     action = "WATCH";
   } else if (trigger.readinessLabel === "READY") {
-    action = p.permission === "REDUCE" ? "REDUCE_OK" : p.permission === "ALLOW" ? "WAIT" : "BLOCKED";
+    action =
+      p.permission === "REDUCE"
+        ? "REDUCE_OK"
+        : p.permission === "ALLOW"
+        ? "WAIT"
+        : "BLOCKED";
   } else if (trigger.readinessLabel === "CONFIRMED") {
-    action = p.permission === "ALLOW"
-      ? "ENTER_OK"
-      : p.permission === "REDUCE"
-      ? "REDUCE_OK"
-      : "BLOCKED";
+    action =
+      p.permission === "ALLOW"
+        ? "ENTER_OK"
+        : p.permission === "REDUCE"
+        ? "REDUCE_OK"
+        : "BLOCKED";
   }
 
   if (!VALID_ACTIONS.has(action)) action = "NO_ACTION";
