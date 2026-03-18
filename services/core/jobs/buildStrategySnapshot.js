@@ -8,15 +8,15 @@
 // - attaches Engine 15B decision referee in parallel
 //
 // IMPORTANT:
-// - This does NOT replace old engine15Readiness.js
+// - This does NOT replace old engine15 readiness logic
 // - This keeps old engine15 and old executionBias intact for frontend safety
-// - This adds new:
-//   services/core/logic/engine15DecisionReferee.js
-//   attached as: engine15Decision
+// - This adds new engine15Decision
+// - This version also passes FULL render zone ladders into Engine 15B
+//   so lifecycle can build complete zonesInPath
 
 import fs from "fs";
 import { computeConfluenceScore } from "../logic/confluenceScorer.js";
-import { computeEngine15Readiness } from "../logic/engine15StrategyReadiness.js";
+import computeEngine15Readiness from "../logic/engine15StrategyReadiness.js";
 import { computeEngine15DecisionReferee } from "../logic/engine15DecisionReferee.js";
 
 /* -----------------------------
@@ -315,6 +315,20 @@ function buildZoneContext(engine1ContextJson) {
     zoneType,
     withinZone,
     flags: engine1ContextJson.flags || null,
+
+    // THIS IS THE IMPORTANT NEW PART:
+    // pass the full render ladders so Engine 15B can build full zonesInPath
+    render: {
+      negotiated: Array.isArray(engine1ContextJson?.render?.negotiated)
+        ? engine1ContextJson.render.negotiated
+        : [],
+      institutional: Array.isArray(engine1ContextJson?.render?.institutional)
+        ? engine1ContextJson.render.institutional
+        : [],
+      shelves: Array.isArray(engine1ContextJson?.render?.shelves)
+        ? engine1ContextJson.render.shelves
+        : [],
+    },
   };
 }
 
@@ -886,6 +900,7 @@ async function processStrategy(s, momentum, marketMind, engine16) {
     meta: engine1Context?.meta ?? null,
     active: engine1Context?.active ?? null,
     nearest: engine1Context?.nearest ?? null,
+    render: engine1Context?.render ?? null,
   };
 
   const patchedConfluence =
@@ -1037,7 +1052,6 @@ async function buildSnapshot() {
     strategies: {},
   };
 
-  // sequential on purpose: gentler on backend-1
   for (const s of STRATEGIES) {
     try {
       const strategy = await processStrategy(s, momentum, marketMind, engine16);
@@ -1063,7 +1077,7 @@ async function buildSnapshot() {
         },
         engine15Decision: {
           ok: false,
-          engine: "engine15.decisionReferee.v1",
+          engine: "engine15.decisionReferee.v2",
           error: "builder_strategy_failed",
           strategyType: "NONE",
           direction: "NONE",
@@ -1090,6 +1104,26 @@ async function buildSnapshot() {
           },
           permission: "UNKNOWN",
           sizeMultiplier: null,
+          lifecycle: {
+            lifecycleStage: "BUILDING",
+            isFreshSetup: false,
+            entryWindowOpen: false,
+            signalPrice: null,
+            currentPrice: null,
+            barsSinceSignal: null,
+            moveFromSignalPts: null,
+            moveFromSignalAtr: null,
+            zonesInPath: [],
+            zonesHit: 0,
+            targetCount: 0,
+            targetProgress01: 0,
+            firstTargetHit: false,
+            secondTargetHit: false,
+            runnerActive: false,
+            setupCompleted: false,
+            edgeRemainingPct: 100,
+            nextFocus: "LOOK_FOR_NEW_SETUP",
+          },
           debug: {},
         },
         executionBias: "NORMAL",
