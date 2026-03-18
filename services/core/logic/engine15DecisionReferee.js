@@ -103,7 +103,6 @@ function normalizeDirection(x, engine16 = null) {
 
   if (s === "LONG" || s === "SHORT") return s;
 
-  // fallback off Engine 16 directional flags
   if (engine16?.exhaustionShort === true) return "SHORT";
   if (engine16?.exhaustionLong === true) return "LONG";
   if (engine16?.breakdownReady === true) return "SHORT";
@@ -326,16 +325,13 @@ export function pickWinningStrategy({ candidates = [], engine5, momentum } = {})
 
     let priority = base;
 
-    // quality score contribution
     priority += clamp(Math.round((e5.total || 0) / 5), 0, 20);
 
-    // momentum alignment bonus / penalty
     if (dir === "LONG" && mom.alignment === "BULLISH") priority += 8;
     if (dir === "SHORT" && mom.alignment === "BEARISH") priority += 8;
     if (dir === "LONG" && mom.alignment === "BEARISH") priority -= 10;
     if (dir === "SHORT" && mom.alignment === "BULLISH") priority -= 10;
 
-    // exhaustion active bonus
     if (type === "EXHAUSTION" && c?.engine16?.exhaustionActive) priority += 5;
 
     const candidateScore = {
@@ -392,8 +388,6 @@ export function evaluateHardBlockers({
     blockers.push("E16_INVALIDATED");
   }
 
-  // Explicit location / zone invalidation only.
-  // Do not block just because zoneType is unknown.
   if (z.validLocation === false) {
     blockers.push("INVALID_LOCATION");
   }
@@ -410,7 +404,6 @@ export function evaluateHardBlockers({
     blockers.push("OUTSIDE_REQUIRED_ZONE");
   }
 
-  // Keep these as conflict notes unless explicit location flags above say otherwise
   if (z.withinZone !== true && winner?.strategyType === "BREAKOUT") {
     conflicts.push("BREAKOUT_NOT_IN_ZONE");
   }
@@ -499,6 +492,7 @@ export function evaluateMomentumGate({
   let momentumGatePassed = false;
   const reasonCodes = [];
   const blockers = [];
+  const conflicts = [];
   let bias = "NONE";
 
   const scalpMode = sid.includes("INTRADAY_SCALP");
@@ -508,19 +502,28 @@ export function evaluateMomentumGate({
   const smi10 = mom.smi10m.direction;
   const smi1h = mom.smi1h.direction;
 
+  const isFastCountertrendType =
+    type === "EXHAUSTION" || type === "REVERSAL";
+
   if (dir === "LONG") {
     if (mom.alignment === "BULLISH") {
       momentumGatePassed = true;
       bias = "LONG_PRIORITY";
       reasonCodes.push("E45_BULLISH_ALIGNED");
-    } else if (type === "EXHAUSTION" || type === "REVERSAL") {
+    } else if (isFastCountertrendType) {
+      momentumGatePassed = true;
+      bias = "LONG_COUNTERTREND";
+      reasonCodes.push("COUNTERTREND_EXPECTED");
+      reasonCodes.push("E45_COUNTERTREND_LONG_OK");
+
       if (smi10 === "UP") {
-        momentumGatePassed = true;
-        bias = "LONG_COUNTERTREND";
-        reasonCodes.push("E45_COUNTERTREND_LONG_OK");
-        blockers.push("HIGHER_TF_NOT_CONFIRMED");
+        reasonCodes.push("E45_10M_SUPPORTS_LONG");
       } else {
-        blockers.push("MOMENTUM_MISMATCH_LONG");
+        conflicts.push("EARLY_LONG_WITHOUT_10M_CONFIRM");
+      }
+
+      if (smi1h !== "UP") {
+        conflicts.push("HIGHER_TF_NOT_CONFIRMED");
       }
     } else {
       blockers.push("MOMENTUM_MISMATCH_LONG");
@@ -532,14 +535,20 @@ export function evaluateMomentumGate({
       momentumGatePassed = true;
       bias = "SHORT_PRIORITY";
       reasonCodes.push("E45_BEARISH_ALIGNED");
-    } else if (type === "EXHAUSTION" || type === "REVERSAL") {
+    } else if (isFastCountertrendType) {
+      momentumGatePassed = true;
+      bias = "SHORT_COUNTERTREND";
+      reasonCodes.push("COUNTERTREND_EXPECTED");
+      reasonCodes.push("E45_COUNTERTREND_SHORT_OK");
+
       if (smi10 === "DOWN") {
-        momentumGatePassed = true;
-        bias = "SHORT_COUNTERTREND";
-        reasonCodes.push("E45_COUNTERTREND_SHORT_OK");
-        blockers.push("HIGHER_TF_NOT_CONFIRMED");
+        reasonCodes.push("E45_10M_SUPPORTS_SHORT");
       } else {
-        blockers.push("MOMENTUM_MISMATCH_SHORT");
+        conflicts.push("EARLY_SHORT_WITHOUT_10M_CONFIRM");
+      }
+
+      if (smi1h !== "DOWN") {
+        conflicts.push("HIGHER_TF_NOT_CONFIRMED");
       }
     } else {
       blockers.push("MOMENTUM_MISMATCH_SHORT");
@@ -554,14 +563,12 @@ export function evaluateMomentumGate({
   if (swingMode) reasonCodes.push("MODE_SWING");
   if (longMode) reasonCodes.push("MODE_INTERMEDIATE");
 
-  // Important:
-  // These blockers are informational / downgrade-oriented in v1.
-  // They do not become hard blockers by themselves.
   return {
     momentumGatePassed,
     executionBias: VALID_BIAS.has(bias) ? bias : "NONE",
     reasonCodes,
     blockers,
+    conflicts,
     alignment: mom.alignment,
     momentumState: mom.momentumState,
     smi10Direction: smi10,
@@ -610,26 +617,43 @@ export function evaluateTriggerReadiness({
   const qualityPass = qualityGate?.qualityGatePassed === true;
   const momentumPass = momentumGate?.momentumGatePassed === true;
 
+  const isFastCountertrendType =
+    winner.strategyType === "EXHAUSTION" || winner.strategyType === "REVERSAL";
+
+  const weakButTrackableQuality =
+    Number(qualityGate?.qualityScore ?? 0) >= 60;
+
   if (!qualityPass) {
     readinessLabel = "NEAR";
+    if (weakButTrackableQuality) {
+      reasonCodes.push("QUALITY_TRACKABLE_NOT_TRADEABLE");
+    }
     blockers.push(...(qualityGate?.blockers || []));
     reasonCodes.push(...(qualityGate?.reasonCodes || []));
   } else {
+    readinessLabel = "NEAR";
     reasonCodes.push(...(qualityGate?.reasonCodes || []));
   }
 
   if (!momentumPass) {
-    if (readinessLabel === "WAIT") readinessLabel = "NEAR";
     blockers.push(...(momentumGate?.blockers || []));
     reasonCodes.push(...(momentumGate?.reasonCodes || []));
   } else {
     reasonCodes.push(...(momentumGate?.reasonCodes || []));
   }
 
-  // Promote off Engine 3 / Engine 4
+  if (isFastCountertrendType && momentumPass) {
+    if (readinessLabel === "WAIT" || readinessLabel === "NEAR") {
+      readinessLabel = "ARMING";
+      entryStyle = "EARLY_COUNTERTREND";
+      reasonCodes.push("FAST_LANE_COUNTERTREND_SETUP");
+    }
+  }
+
   if (qualityPass) {
     if (e3.stage === "ARMED" || e3.armed === true) {
       readinessLabel = "ARMING";
+      if (entryStyle === "NONE") entryStyle = "CONFIRMATION";
       reasonCodes.push("E3_ARMED");
     }
 
@@ -655,17 +679,31 @@ export function evaluateTriggerReadiness({
     }
   }
 
-  // Strategy-specific nudges
-  if (winner.strategyType === "EXHAUSTION" || winner.strategyType === "REVERSAL") {
+  if (isFastCountertrendType) {
     if (e4.flags?.reversalExpansion) {
       reasonCodes.push("REVERSAL_VOLUME_PRESENT");
-      if (readinessLabel === "NEAR" && qualityPass) readinessLabel = "ARMING";
+      if (readinessLabel === "NEAR") {
+        readinessLabel = "ARMING";
+        if (entryStyle === "NONE") entryStyle = "EARLY_COUNTERTREND";
+      }
     }
-    if (e4.flags?.distributionDetected && winner.direction === "SHORT") {
+
+    if (winner.direction === "SHORT" && e4.flags?.distributionDetected) {
       reasonCodes.push("DISTRIBUTION_SUPPORTS_SHORT");
     }
-    if (e4.flags?.absorptionDetected && winner.direction === "LONG") {
+
+    if (winner.direction === "LONG" && e4.flags?.absorptionDetected) {
       reasonCodes.push("ABSORPTION_SUPPORTS_LONG");
+    }
+
+    if (
+      readinessLabel === "NEAR" &&
+      momentumPass &&
+      (qualityPass || weakButTrackableQuality)
+    ) {
+      readinessLabel = "ARMING";
+      if (entryStyle === "NONE") entryStyle = "EARLY_COUNTERTREND";
+      reasonCodes.push("FAST_MARKET_EARLY_ARM");
     }
   }
 
@@ -694,9 +732,19 @@ export function buildExecutionBias({
   momentumGate,
   hardBlockers,
 } = {}) {
-  if (hardBlockers?.hardBlocked) return "NONE";
   const bias = safeUpper(momentumGate?.executionBias, "NONE");
-  return VALID_BIAS.has(bias) ? bias : "NONE";
+
+  if (VALID_BIAS.has(bias) && bias !== "NONE") {
+    return bias;
+  }
+
+  if (hardBlockers?.hardBlocked) {
+    if (winner?.direction === "LONG") return "LONG_COUNTERTREND";
+    if (winner?.direction === "SHORT") return "SHORT_COUNTERTREND";
+    return "NONE";
+  }
+
+  return "NONE";
 }
 
 export function buildFinalDecision({
@@ -799,7 +847,7 @@ export function buildFinalDecision({
     entryStyle: trigger.entryStyle || "NONE",
     reasonCodes: [...new Set(reasonCodes)],
     blockers: [...new Set(blockers)],
-    conflicts: [...new Set(hard.conflicts || [])],
+    conflicts: [...new Set([...(hard.conflicts || []), ...(mom.conflicts || [])])],
     qualityGatePassed: quality.qualityGatePassed === true,
     momentumGatePassed: mom.momentumGatePassed === true,
     permissionGatePassed: p.permission === "ALLOW" || p.permission === "REDUCE",
