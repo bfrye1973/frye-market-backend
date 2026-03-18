@@ -5,15 +5,19 @@
 // - computes confluence directly
 // - attaches Engine 16 (Morning Fib / strategy detection)
 // - attaches Engine 15 strategy readiness translator
+// - attaches Engine 15B decision referee in parallel
 //
 // IMPORTANT:
 // - This does NOT replace old engine15Readiness.js
-// - This uses the NEW translator file:
-//   services/core/logic/engine15StrategyReadiness.js
+// - This keeps old engine15 and old executionBias intact for frontend safety
+// - This adds new:
+//   services/core/logic/engine15DecisionReferee.js
+//   attached as: engine15Decision
 
 import fs from "fs";
 import { computeConfluenceScore } from "../logic/confluenceScorer.js";
 import { computeEngine15Readiness } from "../logic/engine15StrategyReadiness.js";
+import { computeEngine15DecisionReferee } from "../logic/engine15DecisionReferee.js";
 
 /* -----------------------------
    Absolute paths / constants
@@ -865,6 +869,8 @@ async function processStrategy(s, momentum, marketMind, engine16) {
     stage: reaction?.stage ?? "IDLE",
     armed: reaction?.armed ?? false,
     reactionScore: Number(reaction?.reactionScore ?? 0),
+    confirmed: reaction?.confirmed === true,
+    structureState: reaction?.structureState ?? "HOLD",
     reasonCodes: Array.isArray(reaction?.reasonCodes) ? reaction.reasonCodes : [],
   };
 
@@ -887,12 +893,14 @@ async function processStrategy(s, momentum, marketMind, engine16) {
       ? applyNearAllowedZoneDisplay({ confluence, ctx: engine1Context })
       : confluence;
 
+  const zoneContext = buildZoneContext(engine1Context);
+
   const permissionBody = {
     symbol,
     tf: s.tf,
     engine5: normalizeEngine5ForEngine6(patchedConfluence),
     marketMeter: null,
-    zoneContext: buildZoneContext(engine1Context),
+    zoneContext,
     intent: { action: "NEW_ENTRY" },
   };
 
@@ -956,6 +964,7 @@ async function processStrategy(s, momentum, marketMind, engine16) {
     engine4: patchedConfluence?.context?.volume || null,
     engine5: patchedConfluence || null,
   });
+
   let executionBias = "NORMAL";
 
   if (engine15?.readiness === "EXHAUSTION_READY") {
@@ -965,6 +974,19 @@ async function processStrategy(s, momentum, marketMind, engine16) {
       executionBias = "LONG_PRIORITY";
     }
   }
+
+  const engine15Decision = computeEngine15DecisionReferee({
+    symbol,
+    strategyId: s.strategyId,
+    engine16,
+    engine5: patchedConfluence || null,
+    momentum,
+    permission: permissionResp?.json || null,
+    engine3: patchedConfluence?.context?.reaction || null,
+    engine4: patchedConfluence?.context?.volume || null,
+    zoneContext,
+  });
+
   return {
     strategyId: s.strategyId,
     tf: s.tf,
@@ -982,6 +1004,7 @@ async function processStrategy(s, momentum, marketMind, engine16) {
     engine2,
     engine16,
     engine15,
+    engine15Decision,
     executionBias,
     momentum,
     context: engine1Context,
@@ -1038,6 +1061,38 @@ async function buildSnapshot() {
           direction: "NONE",
           active: false,
         },
+        engine15Decision: {
+          ok: false,
+          engine: "engine15.decisionReferee.v1",
+          error: "builder_strategy_failed",
+          strategyType: "NONE",
+          direction: "NONE",
+          readinessLabel: "WAIT",
+          executionBias: "NONE",
+          action: "NO_ACTION",
+          priority: 0,
+          entryStyle: "NONE",
+          reasonCodes: ["BUILDER_STRATEGY_FAILED"],
+          blockers: [String(err?.message || err)],
+          conflicts: [],
+          qualityGatePassed: false,
+          momentumGatePassed: false,
+          permissionGatePassed: false,
+          qualityScore: 0,
+          qualityGrade: "IGNORE",
+          qualityBand: "INVALID",
+          qualityBreakdown: {
+            engine1: 0,
+            engine2: 0,
+            engine3: 0,
+            engine4: 0,
+            compression: 0,
+          },
+          permission: "UNKNOWN",
+          sizeMultiplier: null,
+          debug: {},
+        },
+        executionBias: "NORMAL",
         momentum,
         context: { ok: false, error: "builder_strategy_failed" },
       };
