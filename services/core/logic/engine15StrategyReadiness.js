@@ -1,167 +1,899 @@
-// services/core/logic/engine15Readiness.js
+// services/core/logic/engine15DecisionReferee.js
 //
-// Engine 15 — Readiness / Display Translator
+// Engine 15B — Decision Referee
 //
-// Purpose:
-// - Read Engine 16's final readiness label
-// - Translate it into one clean readiness object for snapshot/UI
-// - Do NOT infer readiness
-// - Do NOT resolve priority
-// - Do NOT stale-filter
+// Mission:
+// - Engine 16 = pattern candidate
+// - Engine 5 = quality validator
+// - Engine 4.5 = directional assist
+// - Engine 6 = risk gate
+// - Engine 15B = final referee
 //
-// Engine 16 is the source of truth.
+// Engine 15B decides:
+// - what strategy wins
+// - what direction is favored
+// - how ready it is
+// - whether action is allowed now
 //
-// Locked readiness labels:
-//   EXHAUSTION_READY
-//   REVERSAL_READY
-//   BREAKDOWN_READY
-//   BREAKOUT_READY
-//   PULLBACK_READY
-//   CONTINUATION_READY
-//   NO_SETUP
+// It does NOT:
+// - rescore quality from scratch
+// - replace Engine 6 permission
+// - replace Engine 8 execution
+// - detect raw zones/fibs itself
+//
+// Safe first draft:
+// - trusts one primary Engine 16 candidate
+// - supports future multi-candidate expansion
+// - never throws
 
-const VALID_READINESS = new Set([
-  "EXHAUSTION_READY",
-  "REVERSAL_READY",
-  "BREAKDOWN_READY",
-  "BREAKOUT_READY",
-  "PULLBACK_READY",
-  "CONTINUATION_READY",
-  "NO_SETUP",
+const VALID_STRATEGY_TYPES = new Set([
+  "EXHAUSTION",
+  "REVERSAL",
+  "BREAKDOWN",
+  "BREAKOUT",
+  "PULLBACK",
+  "CONTINUATION",
+  "NONE",
 ]);
 
-function safeUpper(x) {
-  return String(x || "").trim().toUpperCase();
+const VALID_READINESS = new Set([
+  "WAIT",
+  "NEAR",
+  "ARMING",
+  "READY",
+  "CONFIRMED",
+  "STAND_DOWN",
+]);
+
+const VALID_ACTIONS = new Set([
+  "NO_ACTION",
+  "WATCH",
+  "WAIT",
+  "ENTER_OK",
+  "REDUCE_OK",
+  "BLOCKED",
+]);
+
+const VALID_BIAS = new Set([
+  "LONG_PRIORITY",
+  "SHORT_PRIORITY",
+  "LONG_COUNTERTREND",
+  "SHORT_COUNTERTREND",
+  "BALANCED",
+  "NONE",
+]);
+
+const BASE_PRIORITY = {
+  EXHAUSTION: 100,
+  REVERSAL: 90,
+  BREAKDOWN: 80,
+  BREAKOUT: 75,
+  PULLBACK: 65,
+  CONTINUATION: 55,
+  NONE: 0,
+};
+
+function safeUpper(x, fallback = "") {
+  const s = String(x ?? fallback).trim().toUpperCase();
+  return s || fallback;
 }
 
-function pickDirection(engine16 = null) {
-  if (!engine16 || typeof engine16 !== "object") return "NONE";
+function clamp(n, lo, hi) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return lo;
+  return Math.max(lo, Math.min(hi, x));
+}
 
-  // Locked: exhaustion direction is authoritative when present.
-  if (engine16.exhaustionShort === true) return "SHORT";
-  if (engine16.exhaustionLong === true) return "LONG";
+function scoreToGrade(score) {
+  const s = Number(score) || 0;
+  if (s >= 90) return "A+";
+  if (s >= 80) return "A";
+  if (s >= 70) return "B";
+  if (s >= 60) return "C";
+  return "IGNORE";
+}
 
-  // Optional future-friendly directional hints from Engine 16.
-  if (engine16.breakdownReady === true) return "SHORT";
-  if (engine16.breakoutReady === true) return "LONG";
-  if (engine16.wickRejectionShort === true) return "SHORT";
-  if (engine16.wickRejectionLong === true) return "LONG";
+function normalizeStrategyType(x) {
+  const s = safeUpper(x, "NONE");
+  return VALID_STRATEGY_TYPES.has(s) ? s : "NONE";
+}
 
-  const explicit = safeUpper(engine16.direction);
-  if (["LONG", "SHORT", "NONE"].includes(explicit)) return explicit;
+function normalizeDirection(x, engine16 = null) {
+  const s = safeUpper(x, "NONE");
+  if (["LONG", "SHORT", "NONE"].includes(s)) return s;
+
+  // fallback off Engine 16 directional flags
+  if (engine16?.exhaustionShort === true) return "SHORT";
+  if (engine16?.exhaustionLong === true) return "LONG";
+  if (engine16?.breakdownReady === true) return "SHORT";
+  if (engine16?.breakoutReady === true) return "LONG";
+  if (engine16?.wickRejectionShort === true) return "SHORT";
+  if (engine16?.wickRejectionLong === true) return "LONG";
 
   return "NONE";
 }
 
-function normalizeReadinessLabel(engine16 = null) {
-  const raw = safeUpper(engine16?.readinessLabel || "NO_SETUP");
-  return VALID_READINESS.has(raw) ? raw : "NO_SETUP";
-}
+function normalizePermission(permissionObj = null) {
+  const permission = safeUpper(
+    permissionObj?.permission ??
+      permissionObj?.state ??
+      permissionObj?.verdict,
+    "UNKNOWN"
+  );
 
-function normalizeStrategyType(engine16 = null) {
-  const raw = safeUpper(engine16?.strategyType || "");
-  switch (raw) {
-    case "EXHAUSTION":
-    case "REVERSAL":
-    case "BREAKDOWN":
-    case "BREAKOUT":
-    case "PULLBACK":
-    case "CONTINUATION":
-      return raw;
-    default:
-      return "NONE";
-  }
-}
+  const sizeMultiplierRaw =
+    permissionObj?.sizeMultiplier ??
+    permissionObj?.multiplier ??
+    permissionObj?.riskMultiplier;
 
-function buildReasonCodes(engine16 = null, readiness = "NO_SETUP", direction = "NONE") {
-  const codes = [];
-
-  codes.push(`ENGINE16_${readiness}`);
-
-  if (direction === "LONG") codes.push("DIRECTION_LONG");
-  if (direction === "SHORT") codes.push("DIRECTION_SHORT");
-  if (direction === "NONE") codes.push("DIRECTION_NONE");
-
-  if (engine16?.strategyType) {
-    codes.push(`ENGINE16_STRATEGY_${safeUpper(engine16.strategyType)}`);
-  }
-
-  if (engine16?.exhaustionDetected === true) codes.push("ENGINE16_EXHAUSTION_DETECTED");
-  if (engine16?.exhaustionActive === true) codes.push("ENGINE16_EXHAUSTION_ACTIVE");
-
-  return codes;
-}
-
-export function computeEngine15Readiness({
-  symbol = "SPY",
-  strategyId = null,
-  engine16 = null,
-  engine3 = null,
-  engine4 = null,
-  engine5 = null,
-} = {}) {
-  const readiness = normalizeReadinessLabel(engine16);
-  const strategyType = normalizeStrategyType(engine16);
-  const direction = pickDirection(engine16);
-
-  const active =
-    readiness !== "NO_SETUP" &&
-    (
-      strategyType !== "EXHAUSTION" ||
-      engine16?.exhaustionActive === true
-    );
+  const sizeMultiplier = Number(sizeMultiplierRaw);
 
   return {
-    ok: true,
-    engine: "engine15.readiness.v1",
-    symbol,
-    strategyId,
-    readiness,
-    strategyType,
-    direction,
-    active,
-    reasonCodes: buildReasonCodes(engine16, readiness, direction),
+    permission: ["ALLOW", "REDUCE", "STAND_DOWN"].includes(permission)
+      ? permission
+      : "UNKNOWN",
+    sizeMultiplier: Number.isFinite(sizeMultiplier) ? sizeMultiplier : null,
+    reasonCodes: Array.isArray(permissionObj?.reasonCodes)
+      ? permissionObj.reasonCodes
+      : [],
+  };
+}
 
-    // Read-only pass-through / debug context for UI
-    source: {
-      owner: "ENGINE16",
-      readinessLabel: engine16?.readinessLabel || "NO_SETUP",
-      strategyType: engine16?.strategyType || "NONE",
-      exhaustionDetected: engine16?.exhaustionDetected === true,
-      exhaustionActive: engine16?.exhaustionActive === true,
-      exhaustionShort: engine16?.exhaustionShort === true,
-      exhaustionLong: engine16?.exhaustionLong === true,
+function normalizeMomentum(momentum = null) {
+  return {
+    alignment: safeUpper(momentum?.alignment, "MIXED"),
+    momentumState: safeUpper(momentum?.momentumState, "UNKNOWN"),
+    smi10m: {
+      direction: safeUpper(momentum?.smi10m?.direction, "UNKNOWN"),
+      cross: safeUpper(momentum?.smi10m?.cross, "NONE"),
+      k: Number.isFinite(Number(momentum?.smi10m?.k))
+        ? Number(momentum.smi10m.k)
+        : null,
+      d: Number.isFinite(Number(momentum?.smi10m?.d))
+        ? Number(momentum.smi10m.d)
+        : null,
     },
-
-    // Optional debug visibility from other engines.
-    // Engine 15 does NOT use these to decide readiness.
-    debug: {
-      engine3: engine3
-        ? {
-            stage: engine3.stage || null,
-            armed: engine3.armed === true,
-            reactionScore:
-              typeof engine3.reactionScore === "number" ? engine3.reactionScore : null,
-          }
+    smi1h: {
+      direction: safeUpper(momentum?.smi1h?.direction, "UNKNOWN"),
+      cross: safeUpper(momentum?.smi1h?.cross, "NONE"),
+      k: Number.isFinite(Number(momentum?.smi1h?.k))
+        ? Number(momentum.smi1h.k)
         : null,
-      engine4: engine4
-        ? {
-            volumeScore:
-              typeof engine4.volumeScore === "number" ? engine4.volumeScore : null,
-            volumeConfirmed: engine4.volumeConfirmed === true,
-            pressureBias: engine4.pressureBias || null,
-            volumeRegime: engine4.volumeRegime || null,
-          }
+      d: Number.isFinite(Number(momentum?.smi1h?.d))
+        ? Number(momentum.smi1h.d)
         : null,
-      engine5: engine5
-        ? {
-            total:
-              typeof engine5?.scores?.total === "number" ? engine5.scores.total : null,
-            label: engine5?.scores?.label || null,
-          }
+    },
+    compressionSignal: {
+      state: safeUpper(momentum?.compressionSignal?.state, "NONE"),
+      quality: safeUpper(momentum?.compressionSignal?.quality, "NONE"),
+      early: momentum?.compressionSignal?.early === true,
+      tightness: Number.isFinite(Number(momentum?.compressionSignal?.tightness))
+        ? Number(momentum.compressionSignal.tightness)
         : null,
+    },
+    decisionHint: {
+      biasAssist: safeUpper(momentum?.decisionHint?.biasAssist, "NONE"),
+      releaseAssist: safeUpper(momentum?.decisionHint?.releaseAssist, "NONE"),
+      summary: momentum?.decisionHint?.summary || null,
     },
   };
 }
 
-export default computeEngine15Readiness;
+function normalizeE3(engine3 = null) {
+  return {
+    stage: safeUpper(engine3?.stage, "IDLE"),
+    armed: engine3?.armed === true,
+    reactionScore: Number.isFinite(Number(engine3?.reactionScore))
+      ? Number(engine3.reactionScore)
+      : 0,
+    structureState: safeUpper(engine3?.structureState, "HOLD"),
+    confirmed: engine3?.confirmed === true,
+    reasonCodes: Array.isArray(engine3?.reasonCodes) ? engine3.reasonCodes : [],
+  };
+}
+
+function normalizeE4(engine4 = null) {
+  return {
+    volumeScore: Number.isFinite(Number(engine4?.volumeScore))
+      ? Number(engine4.volumeScore)
+      : 0,
+    volumeConfirmed: engine4?.volumeConfirmed === true,
+    pressureBias: safeUpper(engine4?.pressureBias, "NEUTRAL"),
+    volumeRegime: safeUpper(engine4?.volumeRegime, "UNKNOWN"),
+    state: safeUpper(engine4?.state, "NO_SIGNAL"),
+    flags: engine4?.flags || {},
+  };
+}
+
+function normalizeZoneContext(ctx = null) {
+  return {
+    zoneType: safeUpper(ctx?.zoneType, "UNKNOWN"),
+    withinZone:
+      ctx?.withinZone === true ||
+      ctx?.insideZone === true ||
+      ctx?.insideAllowedZone === true,
+    validLocation:
+      ctx?.validLocation === true
+        ? true
+        : ctx?.validLocation === false
+        ? false
+        : null,
+    allowed:
+      ctx?.allowed === true
+        ? true
+        : ctx?.allowed === false
+        ? false
+        : null,
+    wrongZone: ctx?.wrongZone === true,
+    requiresAllowedZone: ctx?.requiresAllowedZone === true,
+    active: ctx?.active || null,
+    nearest: ctx?.nearest || null,
+    flags: ctx?.flags || null,
+  };
+}
+
+function normalizeEngine16(engine16 = null) {
+  const strategyType = normalizeStrategyType(engine16?.strategyType);
+  const readinessLabel = safeUpper(engine16?.readinessLabel, "NO_SETUP");
+  const direction = normalizeDirection(engine16?.direction, engine16);
+
+  return {
+    ok: engine16?.ok !== false,
+    strategyType,
+    readinessLabel,
+    direction,
+    exhaustionDetected: engine16?.exhaustionDetected === true,
+    exhaustionActive: engine16?.exhaustionActive === true,
+    exhaustionShort: engine16?.exhaustionShort === true,
+    exhaustionLong: engine16?.exhaustionLong === true,
+    hasPulledBack: engine16?.hasPulledBack === true,
+    breakoutReady: engine16?.breakoutReady === true,
+    breakdownReady: engine16?.breakdownReady === true,
+    invalidated: engine16?.invalidated === true,
+    insidePrimaryZone: engine16?.insidePrimaryZone === true,
+    insideSecondaryZone: engine16?.insideSecondaryZone === true,
+    wickRejectionLong: engine16?.wickRejectionLong === true,
+    wickRejectionShort: engine16?.wickRejectionShort === true,
+    context: safeUpper(engine16?.context, "NONE"),
+    error: engine16?.error || null,
+    reasonCodes: Array.isArray(engine16?.reasonCodes) ? engine16.reasonCodes : [],
+  };
+}
+
+function normalizeEngine5(engine5 = null) {
+  const total =
+    Number(engine5?.scores?.total) ||
+    Number(engine5?.total) ||
+    Number(engine5?.score) ||
+    0;
+
+  return {
+    total,
+    grade: engine5?.scores?.label || engine5?.label || scoreToGrade(total),
+    invalid: engine5?.invalid === true,
+    perEngine: {
+      engine1: Number(engine5?.scores?.engine1) || 0,
+      engine2: Number(engine5?.scores?.engine2) || 0,
+      engine3: Number(engine5?.scores?.engine3) || 0,
+      engine4: Number(engine5?.scores?.engine4) || 0,
+      compression: Number(engine5?.scores?.compression) || 0,
+    },
+    reasonCodes: Array.isArray(engine5?.reasonCodes) ? engine5.reasonCodes : [],
+  };
+}
+
+/* -----------------------------
+   Candidate resolution
+------------------------------*/
+export function resolveStrategyCandidates({ engine16 } = {}) {
+  const e16 = normalizeEngine16(engine16);
+
+  if (!e16.ok || e16.strategyType === "NONE" || e16.readinessLabel === "NO_SETUP") {
+    return [];
+  }
+
+  return [
+    {
+      strategyType: e16.strategyType,
+      direction: e16.direction,
+      source: "ENGINE16",
+      engine16: e16,
+    },
+  ];
+}
+
+export function pickWinningStrategy({ candidates = [], engine5, momentum } = {}) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return {
+      strategyType: "NONE",
+      direction: "NONE",
+      priority: 0,
+      source: "NONE",
+      candidate: null,
+    };
+  }
+
+  const e5 = normalizeEngine5(engine5);
+  const mom = normalizeMomentum(momentum);
+
+  let best = null;
+
+  for (const c of candidates) {
+    const type = normalizeStrategyType(c?.strategyType);
+    const dir = normalizeDirection(c?.direction, c?.engine16);
+    const base = BASE_PRIORITY[type] || 0;
+
+    let priority = base;
+
+    // quality score contribution
+    priority += clamp(Math.round((e5.total || 0) / 5), 0, 20);
+
+    // momentum alignment bonus / penalty
+    if (dir === "LONG" && mom.alignment === "BULLISH") priority += 8;
+    if (dir === "SHORT" && mom.alignment === "BEARISH") priority += 8;
+    if (dir === "LONG" && mom.alignment === "BEARISH") priority -= 10;
+    if (dir === "SHORT" && mom.alignment === "BULLISH") priority -= 10;
+
+    // exhaustion active bonus
+    if (type === "EXHAUSTION" && c?.engine16?.exhaustionActive) priority += 5;
+
+    const candidateScore = {
+      strategyType: type,
+      direction: dir,
+      priority,
+      source: c?.source || "ENGINE16",
+      candidate: c,
+    };
+
+    if (!best || candidateScore.priority > best.priority) {
+      best = candidateScore;
+    }
+  }
+
+  return best || {
+    strategyType: "NONE",
+    direction: "NONE",
+    priority: 0,
+    source: "NONE",
+    candidate: null,
+  };
+}
+
+/* -----------------------------
+   Gates / blockers
+------------------------------*/
+export function evaluateHardBlockers({
+  winner,
+  permission,
+  zoneContext,
+  engine16,
+} = {}) {
+  const blockers = [];
+  const conflicts = [];
+
+  const p = normalizePermission(permission);
+  const z = normalizeZoneContext(zoneContext);
+  const e16 = normalizeEngine16(engine16);
+
+  if (!winner || winner.strategyType === "NONE") {
+    blockers.push("NO_VALID_STRATEGY");
+  }
+
+  if (winner?.direction === "NONE") {
+    blockers.push("NO_DIRECTION");
+  }
+
+  if (p.permission === "STAND_DOWN") {
+    blockers.push("E6_STAND_DOWN");
+  }
+
+  if (e16.invalidated === true) {
+    blockers.push("E16_INVALIDATED");
+  }
+
+  // Explicit location / zone invalidation only.
+  // Do not block just because zoneType is unknown.
+  if (z.validLocation === false) {
+    blockers.push("INVALID_LOCATION");
+  }
+
+  if (z.allowed === false) {
+    blockers.push("ZONE_NOT_ALLOWED");
+  }
+
+  if (z.wrongZone === true) {
+    blockers.push("WRONG_ZONE");
+  }
+
+  if (z.requiresAllowedZone === true && z.withinZone !== true) {
+    blockers.push("OUTSIDE_REQUIRED_ZONE");
+  }
+
+  // Keep these as conflict notes unless explicit location flags above say otherwise
+  if (z.withinZone !== true && winner?.strategyType === "BREAKOUT") {
+    conflicts.push("BREAKOUT_NOT_IN_ZONE");
+  }
+
+  if (z.withinZone !== true && winner?.strategyType === "BREAKDOWN") {
+    conflicts.push("BREAKDOWN_NOT_IN_ZONE");
+  }
+
+  if (
+    winner?.strategyType === "EXHAUSTION" &&
+    e16.exhaustionDetected === true &&
+    e16.exhaustionActive === false
+  ) {
+    blockers.push("EXHAUSTION_INACTIVE");
+  }
+
+  return {
+    blockers,
+    conflicts,
+    hardBlocked: blockers.length > 0,
+  };
+}
+
+export function evaluateQualityGate({ winner, engine5 } = {}) {
+  const e5 = normalizeEngine5(engine5);
+
+  let qualityGatePassed = false;
+  let qualityBand = "WEAK";
+  const reasonCodes = [];
+  const blockers = [];
+
+  if (e5.invalid) {
+    blockers.push("E5_INVALID");
+    return {
+      qualityGatePassed: false,
+      qualityBand: "INVALID",
+      qualityScore: e5.total,
+      qualityGrade: e5.grade,
+      qualityBreakdown: e5.perEngine,
+      reasonCodes,
+      blockers,
+    };
+  }
+
+  if (e5.total >= 80) {
+    qualityGatePassed = true;
+    qualityBand = "STRONG";
+    reasonCodes.push("E5_SCORE_STRONG");
+  } else if (e5.total >= 70) {
+    qualityGatePassed = true;
+    qualityBand = "TRADABLE";
+    reasonCodes.push("E5_SCORE_GOOD");
+  } else if (e5.total >= 60) {
+    qualityGatePassed = false;
+    qualityBand = "WATCH";
+    reasonCodes.push("E5_SCORE_WATCH_ONLY");
+    blockers.push("QUALITY_BELOW_TRADE_THRESHOLD");
+  } else {
+    qualityGatePassed = false;
+    qualityBand = "WEAK";
+    reasonCodes.push("E5_SCORE_WEAK");
+    blockers.push("QUALITY_TOO_LOW");
+  }
+
+  return {
+    qualityGatePassed,
+    qualityBand,
+    qualityScore: e5.total,
+    qualityGrade: e5.grade,
+    qualityBreakdown: e5.perEngine,
+    reasonCodes,
+    blockers,
+  };
+}
+
+export function evaluateMomentumGate({
+  strategyId,
+  winner,
+  momentum,
+} = {}) {
+  const mom = normalizeMomentum(momentum);
+  const sid = safeUpper(strategyId, "");
+  const dir = winner?.direction || "NONE";
+  const type = winner?.strategyType || "NONE";
+
+  let momentumGatePassed = false;
+  const reasonCodes = [];
+  const blockers = [];
+  let bias = "NONE";
+
+  const scalpMode = sid.includes("INTRADAY_SCALP");
+  const swingMode = sid.includes("MINOR_SWING");
+  const longMode = sid.includes("INTERMEDIATE_LONG");
+
+  const smi10 = mom.smi10m.direction;
+  const smi1h = mom.smi1h.direction;
+
+  if (dir === "LONG") {
+    if (mom.alignment === "BULLISH") {
+      momentumGatePassed = true;
+      bias = "LONG_PRIORITY";
+      reasonCodes.push("E45_BULLISH_ALIGNED");
+    } else if (type === "EXHAUSTION" || type === "REVERSAL") {
+      if (smi10 === "UP") {
+        momentumGatePassed = true;
+        bias = "LONG_COUNTERTREND";
+        reasonCodes.push("E45_COUNTERTREND_LONG_OK");
+        blockers.push("HIGHER_TF_NOT_CONFIRMED");
+      } else {
+        blockers.push("MOMENTUM_MISMATCH_LONG");
+      }
+    } else {
+      blockers.push("MOMENTUM_MISMATCH_LONG");
+    }
+  }
+
+  if (dir === "SHORT") {
+    if (mom.alignment === "BEARISH") {
+      momentumGatePassed = true;
+      bias = "SHORT_PRIORITY";
+      reasonCodes.push("E45_BEARISH_ALIGNED");
+    } else if (type === "EXHAUSTION" || type === "REVERSAL") {
+      if (smi10 === "DOWN") {
+        momentumGatePassed = true;
+        bias = "SHORT_COUNTERTREND";
+        reasonCodes.push("E45_COUNTERTREND_SHORT_OK");
+        blockers.push("HIGHER_TF_NOT_CONFIRMED");
+      } else {
+        blockers.push("MOMENTUM_MISMATCH_SHORT");
+      }
+    } else {
+      blockers.push("MOMENTUM_MISMATCH_SHORT");
+    }
+  }
+
+  if (dir === "NONE") {
+    blockers.push("MOMENTUM_DIRECTION_NONE");
+  }
+
+  if (scalpMode) reasonCodes.push("MODE_SCALP");
+  if (swingMode) reasonCodes.push("MODE_SWING");
+  if (longMode) reasonCodes.push("MODE_INTERMEDIATE");
+
+  // Important:
+  // These blockers are informational / downgrade-oriented in v1.
+  // They do not become hard blockers by themselves.
+  return {
+    momentumGatePassed,
+    executionBias: VALID_BIAS.has(bias) ? bias : "NONE",
+    reasonCodes,
+    blockers,
+    alignment: mom.alignment,
+    momentumState: mom.momentumState,
+    smi10Direction: smi10,
+    smi1hDirection: smi1h,
+  };
+}
+
+export function evaluateTriggerReadiness({
+  winner,
+  engine3,
+  engine4,
+  qualityGate,
+  momentumGate,
+  hardBlockers,
+} = {}) {
+  const e3 = normalizeE3(engine3);
+  const e4 = normalizeE4(engine4);
+
+  const reasonCodes = [];
+  const blockers = [];
+
+  if (hardBlockers?.hardBlocked) {
+    return {
+      readinessLabel: "STAND_DOWN",
+      entryStyle: "NONE",
+      triggerConfirmed: false,
+      reasonCodes: ["HARD_BLOCKED"],
+      blockers: [...(hardBlockers?.blockers || [])],
+    };
+  }
+
+  if (!winner || winner.strategyType === "NONE") {
+    return {
+      readinessLabel: "WAIT",
+      entryStyle: "NONE",
+      triggerConfirmed: false,
+      reasonCodes: ["NO_STRATEGY"],
+      blockers: ["NO_STRATEGY"],
+    };
+  }
+
+  let readinessLabel = "WAIT";
+  let entryStyle = "NONE";
+  let triggerConfirmed = false;
+
+  const qualityPass = qualityGate?.qualityGatePassed === true;
+  const momentumPass = momentumGate?.momentumGatePassed === true;
+
+  if (!qualityPass) {
+    readinessLabel = "NEAR";
+    blockers.push(...(qualityGate?.blockers || []));
+    reasonCodes.push(...(qualityGate?.reasonCodes || []));
+  } else {
+    reasonCodes.push(...(qualityGate?.reasonCodes || []));
+  }
+
+  if (!momentumPass) {
+    if (readinessLabel === "WAIT") readinessLabel = "NEAR";
+    blockers.push(...(momentumGate?.blockers || []));
+    reasonCodes.push(...(momentumGate?.reasonCodes || []));
+  } else {
+    reasonCodes.push(...(momentumGate?.reasonCodes || []));
+  }
+
+  // Promote off Engine 3 / Engine 4
+  if (qualityPass) {
+    if (e3.stage === "ARMED" || e3.armed === true) {
+      readinessLabel = "ARMING";
+      reasonCodes.push("E3_ARMED");
+    }
+
+    if (
+      (e3.stage === "TRIGGERED" || e3.stage === "CONFIRMED") &&
+      (e4.volumeConfirmed === true || e4.volumeScore >= 7)
+    ) {
+      readinessLabel = "READY";
+      entryStyle = "CONFIRMATION";
+      reasonCodes.push("E3_TRIGGER_MATURE");
+      reasonCodes.push("E4_VOLUME_SUPPORT");
+    }
+
+    if (
+      (e3.stage === "CONFIRMED" || e3.confirmed === true) &&
+      (e4.volumeConfirmed === true || e4.volumeScore >= 9)
+    ) {
+      readinessLabel = "CONFIRMED";
+      entryStyle = "CONFIRMATION";
+      triggerConfirmed = true;
+      reasonCodes.push("E3_CONFIRMED");
+      reasonCodes.push("E4_CONFIRMED");
+    }
+  }
+
+  // Strategy-specific nudges
+  if (winner.strategyType === "EXHAUSTION" || winner.strategyType === "REVERSAL") {
+    if (e4.flags?.reversalExpansion) {
+      reasonCodes.push("REVERSAL_VOLUME_PRESENT");
+      if (readinessLabel === "NEAR" && qualityPass) readinessLabel = "ARMING";
+    }
+    if (e4.flags?.distributionDetected && winner.direction === "SHORT") {
+      reasonCodes.push("DISTRIBUTION_SUPPORTS_SHORT");
+    }
+    if (e4.flags?.absorptionDetected && winner.direction === "LONG") {
+      reasonCodes.push("ABSORPTION_SUPPORTS_LONG");
+    }
+  }
+
+  if (winner.strategyType === "BREAKOUT" || winner.strategyType === "BREAKDOWN") {
+    if (e4.flags?.initiativeMoveConfirmed) {
+      reasonCodes.push("INITIATIVE_VOLUME_PRESENT");
+      if (readinessLabel === "ARMING") readinessLabel = "READY";
+    } else if (qualityPass) {
+      blockers.push("VOLUME_NOT_CONFIRMED");
+    }
+  }
+
+  if (!VALID_READINESS.has(readinessLabel)) readinessLabel = "WAIT";
+
+  return {
+    readinessLabel,
+    entryStyle,
+    triggerConfirmed,
+    reasonCodes,
+    blockers,
+  };
+}
+
+export function buildExecutionBias({
+  winner,
+  momentumGate,
+  hardBlockers,
+} = {}) {
+  if (hardBlockers?.hardBlocked) return "NONE";
+  const bias = safeUpper(momentumGate?.executionBias, "NONE");
+  return VALID_BIAS.has(bias) ? bias : "NONE";
+}
+
+export function buildFinalDecision({
+  symbol = "SPY",
+  strategyId = null,
+  winner,
+  engine16,
+  engine5,
+  momentum,
+  permission,
+  engine3,
+  engine4,
+  zoneContext,
+} = {}) {
+  const p = normalizePermission(permission);
+
+  const hard = evaluateHardBlockers({
+    winner,
+    permission,
+    zoneContext,
+    engine16,
+  });
+
+  const quality = evaluateQualityGate({
+    winner,
+    engine5,
+  });
+
+  const mom = evaluateMomentumGate({
+    strategyId,
+    winner,
+    momentum,
+  });
+
+  const trigger = evaluateTriggerReadiness({
+    winner,
+    engine3,
+    engine4,
+    qualityGate: quality,
+    momentumGate: mom,
+    hardBlockers: hard,
+  });
+
+  const executionBias = buildExecutionBias({
+    winner,
+    momentumGate: mom,
+    hardBlockers: hard,
+  });
+
+  let action = "NO_ACTION";
+
+  if (trigger.readinessLabel === "STAND_DOWN") {
+    action = "BLOCKED";
+  } else if (trigger.readinessLabel === "WAIT") {
+    action = "NO_ACTION";
+  } else if (trigger.readinessLabel === "NEAR" || trigger.readinessLabel === "ARMING") {
+    action = "WATCH";
+  } else if (trigger.readinessLabel === "READY") {
+    action =
+      p.permission === "REDUCE"
+        ? "REDUCE_OK"
+        : p.permission === "ALLOW"
+        ? "WAIT"
+        : "BLOCKED";
+  } else if (trigger.readinessLabel === "CONFIRMED") {
+    action =
+      p.permission === "ALLOW"
+        ? "ENTER_OK"
+        : p.permission === "REDUCE"
+        ? "REDUCE_OK"
+        : "BLOCKED";
+  }
+
+  if (!VALID_ACTIONS.has(action)) action = "NO_ACTION";
+
+  const reasonCodes = [
+    ...(trigger.reasonCodes || []),
+    ...(quality.reasonCodes || []),
+    ...(mom.reasonCodes || []),
+  ];
+
+  const blockers = [
+    ...(hard.blockers || []),
+    ...(quality.blockers || []),
+    ...(mom.blockers || []),
+    ...(trigger.blockers || []),
+  ];
+
+  const out = {
+    ok: true,
+    engine: "engine15.decisionReferee.v1",
+    symbol,
+    strategyId,
+    strategyType: winner?.strategyType || "NONE",
+    direction: winner?.direction || "NONE",
+    readinessLabel: trigger.readinessLabel,
+    executionBias,
+    action,
+    priority: Number.isFinite(Number(winner?.priority)) ? Number(winner.priority) : 0,
+    entryStyle: trigger.entryStyle || "NONE",
+    reasonCodes: [...new Set(reasonCodes)],
+    blockers: [...new Set(blockers)],
+    conflicts: [...new Set(hard.conflicts || [])],
+    qualityGatePassed: quality.qualityGatePassed === true,
+    momentumGatePassed: mom.momentumGatePassed === true,
+    permissionGatePassed: p.permission === "ALLOW" || p.permission === "REDUCE",
+    qualityScore: quality.qualityScore,
+    qualityGrade: quality.qualityGrade,
+    qualityBand: quality.qualityBand,
+    qualityBreakdown: quality.qualityBreakdown || {
+      engine1: 0,
+      engine2: 0,
+      engine3: 0,
+      engine4: 0,
+      compression: 0,
+    },
+    permission: p.permission,
+    sizeMultiplier: p.sizeMultiplier,
+    debug: {
+      hardBlockers: hard,
+      quality,
+      momentum: mom,
+      trigger,
+    },
+  };
+
+  return out;
+}
+
+/* -----------------------------
+   Main entry
+------------------------------*/
+export function computeEngine15DecisionReferee({
+  symbol = "SPY",
+  strategyId = null,
+  engine16 = null,
+  engine5 = null,
+  momentum = null,
+  permission = null,
+  engine3 = null,
+  engine4 = null,
+  zoneContext = null,
+} = {}) {
+  try {
+    const candidates = resolveStrategyCandidates({ engine16 });
+
+    const winner = pickWinningStrategy({
+      candidates,
+      engine5,
+      momentum,
+    });
+
+    return buildFinalDecision({
+      symbol,
+      strategyId,
+      winner,
+      engine16,
+      engine5,
+      momentum,
+      permission,
+      engine3,
+      engine4,
+      zoneContext,
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      engine: "engine15.decisionReferee.v1",
+      symbol,
+      strategyId,
+      strategyType: "NONE",
+      direction: "NONE",
+      readinessLabel: "WAIT",
+      executionBias: "NONE",
+      action: "NO_ACTION",
+      priority: 0,
+      entryStyle: "NONE",
+      reasonCodes: ["ENGINE15_REFEREE_ERROR"],
+      blockers: [String(err?.message || err)],
+      conflicts: [],
+      qualityGatePassed: false,
+      momentumGatePassed: false,
+      permissionGatePassed: false,
+      qualityScore: 0,
+      qualityGrade: "IGNORE",
+      qualityBand: "INVALID",
+      qualityBreakdown: {
+        engine1: 0,
+        engine2: 0,
+        engine3: 0,
+        engine4: 0,
+        compression: 0,
+      },
+      permission: "UNKNOWN",
+      sizeMultiplier: null,
+      debug: {},
+    };
+  }
+}
+
+export default computeEngine15DecisionReferee;
