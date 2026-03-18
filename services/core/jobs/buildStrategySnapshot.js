@@ -971,14 +971,7 @@ async function processStrategy(s, momentum, marketMind, engine16) {
     }
   }
 
-  const engine15 = computeEngine15Readiness({
-    symbol,
-    strategyId: s.strategyId,
-    engine16,
-    engine3: patchedConfluence?.context?.reaction || null,
-    engine4: patchedConfluence?.context?.volume || null,
-    engine5: patchedConfluence || null,
-  });
+  const engine15 
 
   let executionBias = "NORMAL";
 
