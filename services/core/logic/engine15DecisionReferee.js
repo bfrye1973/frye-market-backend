@@ -99,8 +99,9 @@ function normalizeStrategyType(x) {
 }
 
 function normalizeDirection(x, engine16 = null) {
-  const s = safeUpper(x, "NONE");
-  if (["LONG", "SHORT", "NONE"].includes(s)) return s;
+  const s = safeUpper(x, "");
+
+  if (s === "LONG" || s === "SHORT") return s;
 
   // fallback off Engine 16 directional flags
   if (engine16?.exhaustionShort === true) return "SHORT";
