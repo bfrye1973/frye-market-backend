@@ -1,6 +1,6 @@
 // services/core/logic/engine15DecisionReferee.js
 //
-// Engine 15B — Decision Referee + Lifecycle v3
+// Engine 15B — Decision Referee + Lifecycle v4
 //
 // Mission:
 // - Engine 16 = pattern candidate
@@ -16,6 +16,12 @@
 // - whether action is allowed now
 // - whether the setup is fresh / mature / completed
 // - what the next focus should be
+//
+// Lifecycle v4 adds:
+// - full zone-path progression
+// - TP1 / TP2 lifecycle
+// - block 2 protection via TP1 zone reclaim
+// - runner completion via 30m 10 EMA rule
 //
 // Safe lifecycle implementation:
 // - trusts one primary Engine 16 candidate
@@ -491,7 +497,7 @@ export function evaluateHardBlockers({
   };
 }
 
-export function evaluateQualityGate({ winner, engine5 } = {}) {
+export function evaluateQualityGate({ engine5 } = {}) {
   const e5 = normalizeEngine5(engine5);
 
   let qualityGatePassed = false;
@@ -855,7 +861,7 @@ function dedupeZones(list = []) {
     const normalized = normalizeRenderZone(z, z?.zoneType || z?.type || "ZONE");
     if (!normalized) continue;
 
-    const key = normalized.id || `${normalized.type}|${normalized.lo}|${normalized.hi}`;
+    const key = `${normalized.type}|${normalized.lo}|${normalized.hi}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
@@ -946,9 +952,7 @@ function buildOrderedZonePath({
       const hi = toNum(z.hi);
       const mid = toNum(z.mid) ?? zoneMid(z);
       if (lo == null || hi == null || mid == null) return false;
-
-      // keep zones below signal or overlapping just beneath it
-      return mid < s || lo < s || hi < s;
+      return mid <= s || lo <= s || hi <= s;
     });
 
     filtered.sort((a, b) => {
@@ -964,8 +968,7 @@ function buildOrderedZonePath({
       const hi = toNum(z.hi);
       const mid = toNum(z.mid) ?? zoneMid(z);
       if (lo == null || hi == null || mid == null) return false;
-
-      return mid > s || lo > s || hi > s;
+      return mid >= s || lo >= s || hi >= s;
     });
 
     filtered.sort((a, b) => {
@@ -981,9 +984,10 @@ function buildOrderedZonePath({
   const used = new Set();
 
   for (const z of filtered) {
-    const key = z.id || `${z.type}|${z.lo}|${z.hi}`;
+    const key = `${z.type}|${z.lo}|${z.hi}`;
     if (used.has(key)) continue;
     used.add(key);
+
     finalPath.push({
       id: z.id,
       type: z.type,
@@ -993,6 +997,7 @@ function buildOrderedZonePath({
       strength: z.strength ?? null,
       tpSlot: finalPath.length + 1,
     });
+
     if (finalPath.length >= 8) break;
   }
 
@@ -1068,6 +1073,64 @@ function estimateTargetProgress01({
   return clamp(moveFromSignalAtr / 1.25, 0, 0.69);
 }
 
+function getTp1Zone(zonesInPath = []) {
+  return Array.isArray(zonesInPath) && zonesInPath.length > 0 ? zonesInPath[0] : null;
+}
+
+function getTp2Zone(zonesInPath = []) {
+  return Array.isArray(zonesInPath) && zonesInPath.length > 1 ? zonesInPath[1] : null;
+}
+
+function didReclaimTp1Zone({ direction, currentPrice, tp1Zone }) {
+  const p = toNum(currentPrice);
+  const lo = toNum(tp1Zone?.lo);
+  const hi = toNum(tp1Zone?.hi);
+  if (p == null || lo == null || hi == null) return false;
+
+  if (direction === "SHORT") {
+    return p > hi;
+  }
+  if (direction === "LONG") {
+    return p < lo;
+  }
+  return false;
+}
+
+function determineRunnerExitByEma({
+  direction,
+  currentPrice,
+  ema10_30m,
+}) {
+  const p = toNum(currentPrice);
+  const ema = toNum(ema10_30m);
+
+  if (p == null || ema == null) {
+    return {
+      runnerExitTriggered: false,
+      runnerExitReason: null,
+    };
+  }
+
+  if (direction === "SHORT" && p > ema) {
+    return {
+      runnerExitTriggered: true,
+      runnerExitReason: "RUNNER_EXIT_30M_CLOSE_ABOVE_10EMA",
+    };
+  }
+
+  if (direction === "LONG" && p < ema) {
+    return {
+      runnerExitTriggered: true,
+      runnerExitReason: "RUNNER_EXIT_30M_CLOSE_BELOW_10EMA",
+    };
+  }
+
+  return {
+    runnerExitTriggered: false,
+    runnerExitReason: null,
+  };
+}
+
 function determineLifecycle({
   strategyId,
   winner,
@@ -1076,6 +1139,7 @@ function determineLifecycle({
   zoneContext,
   readinessLabel,
   action,
+  momentum,
 }) {
   const currentPrice = extractCurrentPrice({ engine5, zoneContext, engine16 });
   const signalPrice =
@@ -1127,12 +1191,38 @@ function determineLifecycle({
   const firstTargetHit = zonesHit >= 1;
   const secondTargetHit = zonesHit >= 2;
 
+  const tp1Zone = getTp1Zone(zonesInPath);
+  const tp2Zone = getTp2Zone(zonesInPath);
+
+  const tp1Reclaimed = firstTargetHit
+    ? didReclaimTp1Zone({
+        direction: winner?.direction,
+        currentPrice,
+        tp1Zone,
+      })
+    : false;
+
+  const ema10_30m =
+    toNum(momentum?.ema30m?.ema10) ??
+    toNum(momentum?.ema30m?.value10) ??
+    toNum(momentum?.ema30m?.ema_10) ??
+    toNum(momentum?.ema30m10) ??
+    null;
+
+  const runnerExit = determineRunnerExitByEma({
+    direction: winner?.direction,
+    currentPrice,
+    ema10_30m,
+  });
+
   let lifecycleStage = "BUILDING";
   let isFreshSetup = true;
   let entryWindowOpen = false;
   let setupCompleted = false;
   let runnerActive = false;
   let nextFocus = "STAY_WITH_CURRENT_SETUP";
+  let block2Protected = false;
+  let block2ExitReason = null;
 
   if (engine16?.invalidated === true) {
     lifecycleStage = "INVALIDATED";
@@ -1208,15 +1298,26 @@ function determineLifecycle({
     nextFocus = "LOOK_FOR_NEW_SETUP";
   }
 
-  if (
-    (lifecycleStage === "PARTIALLY_COMPLETED" || lifecycleStage === "MATURE") &&
-    runnerActive !== true
-  ) {
+  // Block 2 protection:
+  // after TP1, if price reclaims TP1 zone, protect block 2.
+  if (firstTargetHit && !secondTargetHit && tp1Reclaimed) {
+    block2Protected = true;
+    block2ExitReason =
+      winner?.direction === "SHORT"
+        ? "BLOCK2_EXIT_TP1_ZONE_RECLAIM_SHORT"
+        : "BLOCK2_EXIT_TP1_ZONE_RECLAIM_LONG";
+
+    lifecycleStage = "MATURE";
     runnerActive = true;
+    nextFocus = "MANAGE_RUNNER";
   }
 
-  if (lifecycleStage === "COMPLETED") {
+  // Runner completion:
+  // if runner is active and 30m 10 EMA exit triggers, trade is completed.
+  if ((secondTargetHit || block2Protected || lifecycleStage === "MATURE") && runnerExit.runnerExitTriggered) {
+    lifecycleStage = "COMPLETED";
     setupCompleted = true;
+    runnerActive = false;
     isFreshSetup = false;
     entryWindowOpen = false;
     nextFocus = "LOOK_FOR_NEW_SETUP";
@@ -1251,7 +1352,15 @@ function determineLifecycle({
     targetProgress01,
     firstTargetHit,
     secondTargetHit,
+    tp1Zone,
+    tp2Zone,
+    tp1Reclaimed,
+    block2Protected,
+    block2ExitReason,
     runnerActive,
+    runnerExitTriggered: runnerExit.runnerExitTriggered,
+    runnerExitReason: runnerExit.runnerExitReason,
+    ema10_30m: ema10_30m,
     setupCompleted,
     edgeRemainingPct,
     nextFocus,
@@ -1290,6 +1399,7 @@ export function buildFinalDecision({
   engine4,
   zoneContext,
 } = {}) {
+  const normalizedMomentum = normalizeMomentum(momentum);
   const p = normalizePermission(permission);
 
   const hard = evaluateHardBlockers({
@@ -1307,7 +1417,7 @@ export function buildFinalDecision({
   const mom = evaluateMomentumGate({
     strategyId,
     winner,
-    momentum,
+    momentum: normalizedMomentum,
   });
 
   const trigger = evaluateTriggerReadiness({
@@ -1359,12 +1469,15 @@ export function buildFinalDecision({
     zoneContext: normalizeZoneContext(zoneContext),
     readinessLabel: trigger.readinessLabel,
     action,
+    momentum: normalizedMomentum,
   });
 
-  if (lifecycle.lifecycleStage === "MISSED" || lifecycle.lifecycleStage === "EXPIRED") {
-    action = "NO_ACTION";
-  }
-  if (lifecycle.lifecycleStage === "COMPLETED" || lifecycle.setupCompleted) {
+  if (
+    lifecycle.lifecycleStage === "MISSED" ||
+    lifecycle.lifecycleStage === "EXPIRED" ||
+    lifecycle.lifecycleStage === "COMPLETED" ||
+    lifecycle.setupCompleted
+  ) {
     action = "NO_ACTION";
   }
 
@@ -1373,6 +1486,13 @@ export function buildFinalDecision({
     ...(quality.reasonCodes || []),
     ...(mom.reasonCodes || []),
   ];
+
+  if (lifecycle.block2Protected) {
+    reasonCodes.push("BLOCK2_PROTECTED");
+  }
+  if (lifecycle.runnerExitTriggered) {
+    reasonCodes.push("RUNNER_EXIT_TRIGGERED");
+  }
 
   const blockers = [
     ...(hard.blockers || []),
@@ -1383,7 +1503,7 @@ export function buildFinalDecision({
 
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v3",
+    engine: "engine15.decisionReferee.v4",
     symbol,
     strategyId,
     strategyType: winner?.strategyType || "NONE",
@@ -1459,7 +1579,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v3",
+      engine: "engine15.decisionReferee.v4",
       symbol,
       strategyId,
       strategyType: "NONE",
@@ -1502,7 +1622,15 @@ export function computeEngine15DecisionReferee({
         targetProgress01: 0,
         firstTargetHit: false,
         secondTargetHit: false,
+        tp1Zone: null,
+        tp2Zone: null,
+        tp1Reclaimed: false,
+        block2Protected: false,
+        block2ExitReason: null,
         runnerActive: false,
+        runnerExitTriggered: false,
+        runnerExitReason: null,
+        ema10_30m: null,
         setupCompleted: false,
         edgeRemainingPct: 100,
         nextFocus: "LOOK_FOR_NEW_SETUP",
