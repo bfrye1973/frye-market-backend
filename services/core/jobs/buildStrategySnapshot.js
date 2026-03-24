@@ -315,9 +315,6 @@ function buildZoneContext(engine1ContextJson) {
     zoneType,
     withinZone,
     flags: engine1ContextJson.flags || null,
-
-    // THIS IS THE IMPORTANT NEW PART:
-    // pass the full render ladders so Engine 15B can build full zonesInPath
     render: {
       negotiated: Array.isArray(engine1ContextJson?.render?.negotiated)
         ? engine1ContextJson.render.negotiated
@@ -971,7 +968,33 @@ async function processStrategy(s, momentum, marketMind, engine16) {
     }
   }
 
-  const engine15 
+  const engine15Decision = computeEngine15DecisionReferee({
+    symbol,
+    strategyId: s.strategyId,
+    engine16,
+    engine5: patchedConfluence || null,
+    momentum,
+    permission:
+      permissionResp?.json ||
+      {
+        permission: "UNKNOWN",
+        sizeMultiplier: null,
+        reasonCodes: [],
+      },
+    engine3: patchedConfluence?.context?.reaction || null,
+    engine4: patchedConfluence?.context?.volume || null,
+    zoneContext,
+  });
+
+  const engine15 = computeEngine15Readiness({
+    symbol,
+    strategyId: s.strategyId,
+    engine16,
+    engine3: patchedConfluence?.context?.reaction || null,
+    engine4: patchedConfluence?.context?.volume || null,
+    engine5: patchedConfluence || null,
+    engine15Decision: engine15Decision || null,
+  });
 
   let executionBias = "NORMAL";
 
@@ -982,17 +1005,6 @@ async function processStrategy(s, momentum, marketMind, engine16) {
       executionBias = "LONG_PRIORITY";
     }
   }
-
-  // ✅ Engine 15 (READINESS with lifecycle override)
-  const engine15 = computeEngine15Readiness({
-    symbol,
-    strategyId: s.strategyId,
-    engine16,
-    engine3: patchedConfluence?.context?.reaction || null,
-    engine4: patchedConfluence?.context?.volume || null,
-    engine5: patchedConfluence || null,
-    engine15Decision: engine15Decision || null, // 🔥 NEW
-  });
 
   return {
     strategyId: s.strategyId,
