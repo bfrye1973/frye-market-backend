@@ -2,12 +2,13 @@
 //
 // Engine 15B — Decision Referee
 //
-// v6 upgrade:
-// - keeps lifecycle logic
-// - adds setupChain
-// - adds nextSetupType
-// - promotes pullback -> continuation when rejection appears
-// - adds light higher-timeframe exhaustion weighting
+// v7 upgrade:
+// - restores direction inheritance from higher-timeframe exhaustion context
+// - fixes lifecycle currentPrice sourcing
+// - fixes nonsense move math when price is missing
+// - builds real setupChain
+// - adds meaningful nextSetupType for HTF exhaustion + LTF trigger build
+// - keeps lifecycle logic defensive
 //
 // Notes:
 // - pure logic only
@@ -202,6 +203,7 @@ function normalizeZoneContext(ctx = null) {
         : ctx?.validLocation === false
         ? false
         : null,
+    meta: ctx?.meta || null,
     active: ctx?.active || null,
     nearest: ctx?.nearest || null,
     render: {
@@ -274,9 +276,6 @@ function inferHigherTimeframeExhaustion({ strategyId, engine16, momentum } = {})
   const e16 = normalizeEngine16(engine16);
   const mom = normalizeMomentum(momentum);
 
-  // light v1/v2 style weighting:
-  // if exhaustion is active and 1h momentum agrees with direction,
-  // treat it like stronger / more structural exhaustion.
   let score = 0;
   let primaryExhaustionTF = null;
   const reasonCodes = [];
@@ -303,6 +302,28 @@ function inferHigherTimeframeExhaustion({ strategyId, engine16, momentum } = {})
   }
 
   return { score, primaryExhaustionTF, reasonCodes };
+}
+
+function deriveDirectionFromHTFContext({ winner, engine16, momentum } = {}) {
+  const current = safeUpper(winner?.direction, "NONE");
+  if (current !== "NONE") return current;
+
+  const e16 = normalizeEngine16(engine16);
+  const mom = normalizeMomentum(momentum);
+
+  if (e16.exhaustionShort) return "SHORT";
+  if (e16.exhaustionLong) return "LONG";
+  if (e16.breakdownReady) return "SHORT";
+  if (e16.breakoutReady) return "LONG";
+  if (e16.wickRejectionShort) return "SHORT";
+  if (e16.wickRejectionLong) return "LONG";
+
+  if (e16.strategyType === "EXHAUSTION") {
+    if (mom.smi1h.direction === "DOWN") return "SHORT";
+    if (mom.smi1h.direction === "UP") return "LONG";
+  }
+
+  return "NONE";
 }
 
 /* -----------------------------
@@ -339,6 +360,7 @@ export function pickWinningStrategy({
       source: "NONE",
       candidate: null,
       primaryExhaustionTF: null,
+      htfReasonCodes: [],
     };
   }
 
@@ -349,17 +371,17 @@ export function pickWinningStrategy({
 
   for (const c of candidates) {
     const type = normalizeStrategyType(c?.strategyType);
-    const dir = normalizeDirection(c?.direction, c?.engine16);
+    const dirInitial = normalizeDirection(c?.direction, c?.engine16);
     const base = BASE_PRIORITY[type] || 0;
 
     let priority = base;
 
     priority += clamp(Math.round((e5.total || 0) / 5), 0, 20);
 
-    if (dir === "LONG" && mom.alignment === "BULLISH") priority += 8;
-    if (dir === "SHORT" && mom.alignment === "BEARISH") priority += 8;
-    if (dir === "LONG" && mom.alignment === "BEARISH") priority -= 8;
-    if (dir === "SHORT" && mom.alignment === "BULLISH") priority -= 8;
+    if (dirInitial === "LONG" && mom.alignment === "BULLISH") priority += 8;
+    if (dirInitial === "SHORT" && mom.alignment === "BEARISH") priority += 8;
+    if (dirInitial === "LONG" && mom.alignment === "BEARISH") priority -= 8;
+    if (dirInitial === "SHORT" && mom.alignment === "BULLISH") priority -= 8;
 
     if (type === "EXHAUSTION" && c?.engine16?.exhaustionActive) priority += 5;
 
@@ -371,9 +393,17 @@ export function pickWinningStrategy({
 
     priority += htf.score;
 
+    const resolvedDirection = dirInitial !== "NONE"
+      ? dirInitial
+      : deriveDirectionFromHTFContext({
+          winner: { direction: dirInitial },
+          engine16: c?.engine16,
+          momentum,
+        });
+
     const candidateScore = {
       strategyType: type,
-      direction: dir,
+      direction: resolvedDirection,
       priority,
       source: c?.source || "ENGINE16",
       candidate: c,
@@ -670,6 +700,84 @@ function evaluateContinuationPromotion({
 }
 
 /* -----------------------------
+   Setup chain
+------------------------------*/
+function buildSetupChain({
+  winner,
+  engine16,
+  promotedStrategyType,
+  nextSetupType,
+} = {}) {
+  const chain = [];
+  const type = winner?.strategyType || "NONE";
+  const e16 = normalizeEngine16(engine16);
+  const dir = safeUpper(winner?.direction, "NONE");
+
+  if (winner?.primaryExhaustionTF) {
+    chain.push(`${winner.primaryExhaustionTF}_EXHAUSTION`);
+  }
+
+  if (type === "EXHAUSTION") {
+    chain.push("EXHAUSTION");
+  } else if (type === "REVERSAL") {
+    chain.push("REVERSAL");
+  } else if (type === "BREAKDOWN") {
+    chain.push("BREAKDOWN");
+  } else if (type === "BREAKOUT") {
+    chain.push("BREAKOUT");
+  }
+
+  if (e16.hasPulledBack || e16.strategyType === "PULLBACK" || e16.readinessLabel === "PULLBACK_READY") {
+    chain.push("PULLBACK");
+  }
+
+  if (e16.insidePrimaryZone || e16.insideSecondaryZone) {
+    chain.push("IN_TRIGGER_ZONE");
+  }
+
+  if (dir === "SHORT" && e16.wickRejectionShort) {
+    chain.push("SHORT_REJECTION_PRESENT");
+  }
+  if (dir === "LONG" && e16.wickRejectionLong) {
+    chain.push("LONG_REJECTION_PRESENT");
+  }
+
+  if (promotedStrategyType === "CONTINUATION") {
+    chain.push("CONTINUATION_PENDING");
+  } else if (nextSetupType !== "NONE") {
+    chain.push(nextSetupType);
+  } else if (type === "EXHAUSTION" && e16.hasPulledBack) {
+    chain.push("TRIGGER_PENDING");
+  }
+
+  if (chain.length === 0) chain.push("BUILDING");
+
+  return [...new Set(chain)];
+}
+
+function deriveNextSetupType({
+  winner,
+  engine16,
+  promotedStrategyType,
+  nextSetupType,
+} = {}) {
+  const e16 = normalizeEngine16(engine16);
+
+  if (nextSetupType && nextSetupType !== "NONE") return nextSetupType;
+  if (promotedStrategyType === "CONTINUATION") return "CONTINUATION_TRIGGER";
+
+  if (winner?.strategyType === "EXHAUSTION") {
+    if (e16.hasPulledBack) return "TRIGGER_CONFIRM";
+    return "PULLBACK";
+  }
+
+  if (winner?.strategyType === "REVERSAL") return "TRIGGER_CONFIRM";
+  if (winner?.strategyType === "PULLBACK") return "CONTINUATION_TRIGGER";
+
+  return "NONE";
+}
+
+/* -----------------------------
    Trigger readiness
 ------------------------------*/
 export function evaluateTriggerReadiness({
@@ -798,7 +906,24 @@ export function evaluateTriggerReadiness({
     }
   }
 
+  if (
+    winner.strategyType === "EXHAUSTION" &&
+    e16.hasPulledBack &&
+    readinessLabel === "NEAR"
+  ) {
+    readinessLabel = "ARMING";
+    entryStyle = "PULLBACK_BUILD";
+    reasonCodes.push("HTF_EXHAUSTION_LTF_PULLBACK_BUILD");
+  }
+
   const setupChain = buildSetupChain({
+    winner,
+    engine16: e16,
+    promotedStrategyType,
+    nextSetupType,
+  });
+
+  nextSetupType = deriveNextSetupType({
     winner,
     engine16: e16,
     promotedStrategyType,
@@ -820,46 +945,7 @@ export function evaluateTriggerReadiness({
 }
 
 /* -----------------------------
-   Setup chain
-------------------------------*/
-function buildSetupChain({
-  winner,
-  engine16,
-  promotedStrategyType,
-  nextSetupType,
-} = {}) {
-  const chain = [];
-
-  const type = winner?.strategyType || "NONE";
-  const e16 = normalizeEngine16(engine16);
-
-  if (type === "EXHAUSTION") {
-    chain.push("EXHAUSTION");
-  } else if (type === "REVERSAL") {
-    chain.push("REVERSAL");
-  } else if (type === "BREAKDOWN") {
-    chain.push("BREAKDOWN");
-  } else if (type === "BREAKOUT") {
-    chain.push("BREAKOUT");
-  }
-
-  if (e16.hasPulledBack || e16.strategyType === "PULLBACK" || e16.readinessLabel === "PULLBACK_READY") {
-    chain.push("PULLBACK");
-  }
-
-  if (promotedStrategyType === "CONTINUATION") {
-    chain.push("CONTINUATION_PENDING");
-  } else if (nextSetupType !== "NONE") {
-    chain.push(nextSetupType);
-  }
-
-  if (chain.length === 0) chain.push("BUILDING");
-
-  return [...new Set(chain)];
-}
-
-/* -----------------------------
-   Lifecycle
+   Lifecycle helpers
 ------------------------------*/
 function makeZoneCandidate(z, type, tpSlot) {
   return {
@@ -904,17 +990,11 @@ function isZoneHit(zone, direction, currentPrice) {
   const dir = safeUpper(direction, "NONE");
   const lo = toNum(zone.lo);
   const hi = toNum(zone.hi);
-  const mid = toNum(zone.mid, lo != null && hi != null ? (lo + hi) / 2 : null);
 
-  if (mid == null) return false;
+  if (lo == null || hi == null) return false;
 
-  if (dir === "SHORT") {
-    return currentPrice <= hi;
-  }
-
-  if (dir === "LONG") {
-    return currentPrice >= lo;
-  }
+  if (dir === "SHORT") return currentPrice <= hi;
+  if (dir === "LONG") return currentPrice >= lo;
 
   return false;
 }
@@ -939,12 +1019,23 @@ function dedupeZones(zones = []) {
   return out;
 }
 
+function extractCurrentPrice(zoneContext) {
+  const zc = normalizeZoneContext(zoneContext);
+
+  return (
+    toNum(zc?.meta?.current_price) ??
+    toNum(zc?.meta?.currentPrice) ??
+    toNum(zoneContext?.meta?.current_price) ??
+    toNum(zoneContext?.meta?.currentPrice) ??
+    null
+  );
+}
+
 function buildLifecycle({
   strategyId,
   winner,
   engine16,
   zoneContext,
-  permission,
 } = {}) {
   const e16 = normalizeEngine16(engine16);
   const zc = normalizeZoneContext(zoneContext);
@@ -956,20 +1047,11 @@ function buildLifecycle({
     toNum(zc?.active?.shelf?.mid) ??
     null;
 
-  const currentPrice =
-    toNum(zc?.active?.negotiated?.mid) ??
-    toNum(zc?.active?.institutional?.mid) ??
-    toNum(zc?.active?.shelf?.mid) ??
-    toNum(zc?.nearest?.negotiated?.mid) ??
-    toNum(zc?.nearest?.institutional?.mid) ??
-    toNum(zc?.nearest?.shelf?.mid) ??
-    toNum(zoneContext?.meta?.current_price) ??
-    null;
+  const currentPrice = extractCurrentPrice(zoneContext);
 
   const direction = winner?.direction || "NONE";
 
   const ladders = [];
-
   const activeInst = zc?.active?.institutional;
   const activeNeg = zc?.active?.negotiated;
   const activeShelf = zc?.active?.shelf;
@@ -1001,7 +1083,6 @@ function buildLifecycle({
   }
 
   const zonesHit = path.filter((z) => z.hit).length;
-
   const tp1Zone = path[0] || null;
   const tp2Zone = path[1] || null;
 
@@ -1030,9 +1111,6 @@ function buildLifecycle({
     nextFocus = "MANAGE_RUNNER";
   }
 
-  // simple runner exit rules:
-  // v6 keeps your current style but safer:
-  // if strategy already matured and current E16 setup is gone or reversed, mark completed
   const noSetupNow =
     e16.strategyType === "NONE" ||
     e16.readinessLabel === "NO_SETUP" ||
@@ -1070,20 +1148,13 @@ function buildLifecycle({
   const targetProgress01 =
     secondTargetHit ? 1 : firstTargetHit ? 0.7 : 0;
 
-  const signalTime =
-    e16.signalTimes?.exhaustionTime ||
-    e16.exhaustionBarTime ||
-    null;
-
-  const barsSinceSignal = signalTime ? null : null;
-
   return {
     lifecycleStage,
     isFreshSetup: lifecycleStage === "BUILDING",
     entryWindowOpen: lifecycleStage === "BUILDING",
     signalPrice,
     currentPrice,
-    barsSinceSignal,
+    barsSinceSignal: null,
     moveFromSignalPts:
       Number.isFinite(signalPrice) && Number.isFinite(currentPrice)
         ? Math.abs(currentPrice - signalPrice)
@@ -1165,8 +1236,13 @@ export function buildFinalDecision({
 } = {}) {
   const p = normalizePermission(permission);
 
+  const resolvedWinner = {
+    ...winner,
+    direction: deriveDirectionFromHTFContext({ winner, engine16, momentum }),
+  };
+
   const hard = evaluateHardBlockers({
-    winner,
+    winner: resolvedWinner,
     permission,
     zoneContext,
     engine16,
@@ -1178,12 +1254,12 @@ export function buildFinalDecision({
 
   const mom = evaluateMomentumGate({
     strategyId,
-    winner,
+    winner: resolvedWinner,
     momentum,
   });
 
   const triggerBase = evaluateTriggerReadiness({
-    winner,
+    winner: resolvedWinner,
     engine16,
     engine3,
     engine4,
@@ -1195,10 +1271,9 @@ export function buildFinalDecision({
 
   const lifecycle = buildLifecycle({
     strategyId,
-    winner,
+    winner: resolvedWinner,
     engine16,
     zoneContext,
-    permission,
   });
 
   const trigger = applyLifecycleOverride({
@@ -1240,7 +1315,7 @@ export function buildFinalDecision({
     ...(trigger.reasonCodes || []),
     ...(quality.reasonCodes || []),
     ...(mom.reasonCodes || []),
-    ...(winner?.htfReasonCodes || []),
+    ...(resolvedWinner?.htfReasonCodes || []),
   ];
 
   const blockers = [
@@ -1257,15 +1332,15 @@ export function buildFinalDecision({
 
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v6",
+    engine: "engine15.decisionReferee.v7",
     symbol,
     strategyId,
-    strategyType: trigger.promotedStrategyType || winner?.strategyType || "NONE",
-    direction: winner?.direction || "NONE",
+    strategyType: trigger.promotedStrategyType || resolvedWinner?.strategyType || "NONE",
+    direction: resolvedWinner?.direction || "NONE",
     readinessLabel: trigger.readinessLabel,
     executionBias,
     action,
-    priority: Number.isFinite(Number(winner?.priority)) ? Number(winner.priority) : 0,
+    priority: Number.isFinite(Number(resolvedWinner?.priority)) ? Number(resolvedWinner.priority) : 0,
     entryStyle: trigger.entryStyle || "NONE",
     reasonCodes: [...new Set(reasonCodes)],
     blockers: [...new Set(blockers)],
@@ -1287,7 +1362,7 @@ export function buildFinalDecision({
     sizeMultiplier: p.sizeMultiplier,
     setupChain: Array.isArray(trigger.setupChain) ? trigger.setupChain : [],
     nextSetupType: trigger.nextSetupType || "NONE",
-    primaryExhaustionTF: winner?.primaryExhaustionTF || null,
+    primaryExhaustionTF: resolvedWinner?.primaryExhaustionTF || null,
     lifecycle,
     debug: {
       hardBlockers: hard,
@@ -1337,7 +1412,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v6",
+      engine: "engine15.decisionReferee.v7",
       symbol,
       strategyId,
       strategyType: "NONE",
