@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
+import { createTradeJournalEntryFromEngine8Fill } from "../journal/tradeJournalStore.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,20 +15,22 @@ const EXEC_FILE = path.resolve(DATA_DIR, "paper-executions.json");           // 
 
 // ---- Config (env-based, safe defaults) ----
 //
-// ENGINE8_PAPER_ONLY=1           -> refuse any ticket that claims paper:false
-// ENGINE8_KILL_SWITCH=1          -> block all NEW entries (and exits too, unless allowExits enabled)
-// ENGINE8_ALLOW_EXITS_ON_STANDDOWN=1 -> allow exits even if Engine6 says STAND_DOWN
-// ENGINE8_ALLOWLIST=SPY,QQQ      -> allowed symbols
+// ENGINE8_PAPER_ONLY=1                 -> refuse any ticket that claims paper:false
+// ENGINE8_KILL_SWITCH=1                -> block all NEW entries (and exits too, unless allowExits enabled)
+// ENGINE8_ALLOW_EXITS_ON_STANDDOWN=1   -> allow exits even if Engine6 says STAND_DOWN
+// ENGINE8_ALLOWLIST=SPY,QQQ            -> allowed symbols
 //
 function cfg() {
   const allowlist = (process.env.ENGINE8_ALLOWLIST || "SPY,QQQ")
-    .split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
 
   return {
     paperOnly: process.env.ENGINE8_PAPER_ONLY === "1",
     killSwitch: process.env.ENGINE8_KILL_SWITCH === "1",
     allowExitsOnStandDown: process.env.ENGINE8_ALLOW_EXITS_ON_STANDDOWN === "1",
-    allowlist
+    allowlist,
   };
 }
 
@@ -72,10 +75,6 @@ function normalizeSymbol(sym) {
   return String(sym || "").trim().toUpperCase();
 }
 
-function requiredString(v) {
-  return typeof v === "string" && v.trim().length > 0;
-}
-
 function toNumberOrNull(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -86,6 +85,30 @@ function clampQty(qty) {
   if (!Number.isFinite(n)) return 0;
   // qty must be integer >= 0
   return Math.max(0, Math.floor(n));
+}
+
+function normalizeAction(ticket, side) {
+  const explicit = String(ticket?.action || "").trim().toUpperCase();
+  if (explicit) return explicit;
+
+  return isExitSide(side) ? "EXIT" : "NEW_ENTRY";
+}
+
+function normalizeAssetType(ticket) {
+  return String(ticket?.assetType || "EQUITY").trim().toUpperCase();
+}
+
+function normalizeOption(ticket) {
+  const assetType = normalizeAssetType(ticket);
+  if (assetType !== "OPTION") return null;
+
+  return {
+    right: String(ticket?.option?.right || "").trim().toUpperCase() || null,
+    expiration: String(ticket?.option?.expiration || "").trim() || null,
+    strike: toNumberOrNull(ticket?.option?.strike),
+    contractSymbol: String(ticket?.option?.contractSymbol || "").trim() || null,
+    midPrice: toNumberOrNull(ticket?.option?.midPrice),
+  };
 }
 
 // -------------------- Public API --------------------
@@ -99,7 +122,7 @@ export async function getTradingStatus() {
     killSwitch: c.killSwitch,
     allowExitsOnStandDown: c.allowExitsOnStandDown,
     allowlist: c.allowlist,
-    ts: nowIso()
+    ts: nowIso(),
   };
 }
 
@@ -111,7 +134,7 @@ export async function getRiskStatus() {
     paperOnly: c.paperOnly,
     allowExitsOnStandDown: c.allowExitsOnStandDown,
     allowlist: c.allowlist,
-    ts: nowIso()
+    ts: nowIso(),
   };
 }
 
@@ -132,7 +155,7 @@ export async function cancelPaperOrder(body) {
   }
 
   const orders = readJson(ORDERS_FILE, []);
-  const idx = orders.findIndex(o => o.orderId === orderId);
+  const idx = orders.findIndex((o) => o.orderId === orderId);
 
   if (idx === -1) {
     return { ok: false, rejected: true, reason: "ORDER_NOT_FOUND", orderId };
@@ -188,6 +211,8 @@ export async function executeTradeTicket(ticket) {
     return { ok: false, rejected: true, reason: "MISSING_SIDE", idempotencyKey, symbol };
   }
 
+  const action = normalizeAction(ticket, side);
+
   // Engine 7 sizing: prefer qty as final.
   const qty = clampQty(ticket?.qty);
   if (qty <= 0) {
@@ -208,12 +233,12 @@ export async function executeTradeTicket(ticket) {
       ok: true,
       duplicate: true,
       idempotencyKey,
-      result: ledger[idempotencyKey]
+      result: ledger[idempotencyKey],
     };
   }
 
   // -------- Safety rails (kill + permission) --------
-  const exitIntent = isExitSide(side);
+  const exitIntent = action === "EXIT" || action === "REDUCE" || isExitSide(side);
 
   if (c.killSwitch) {
     // kill switch blocks everything by default (safest)
@@ -233,7 +258,7 @@ export async function executeTradeTicket(ticket) {
         reason: "ENGINE6_STAND_DOWN",
         idempotencyKey,
         symbol,
-        exitIntent
+        exitIntent,
       };
       ledger[idempotencyKey] = rej;
       writeJson(LEDGER_FILE, ledger);
@@ -247,8 +272,12 @@ export async function executeTradeTicket(ticket) {
   const timeInForce = String(ticket?.timeInForce || "DAY").toUpperCase();
 
   // We “fill immediately” for Phase 1.
-  const intendedMid = toNumberOrNull(ticket?.entry?.intendedMidpoint ?? ticket?.engine5?.targets?.entryTarget);
+  const intendedMid = toNumberOrNull(
+    ticket?.entry?.intendedMidpoint ?? ticket?.engine5?.targets?.entryTarget
+  );
   const fillPrice = intendedMid; // for paper v1 use intended midpoint as avg fill if provided
+  const assetType = normalizeAssetType(ticket);
+  const option = normalizeOption(ticket);
 
   const order = {
     orderId,
@@ -258,7 +287,8 @@ export async function executeTradeTicket(ticket) {
     symbol,
     strategyId,
     timeframe: String(ticket?.timeframe || ""),
-    assetType: String(ticket?.assetType || "EQUITY").toUpperCase(),
+    assetType,
+    action,
     side: String(side).toUpperCase(),
     orderType,
     timeInForce,
@@ -269,10 +299,11 @@ export async function executeTradeTicket(ticket) {
     engine6: ticket?.engine6 || null,
     engine7: ticket?.engine7 || null,
     engine5: ticket?.engine5 || null,
+    option,
     status: "filled",
     filledQty: qty,
     avgPrice: fillPrice,
-    filledAt: nowIso()
+    filledAt: nowIso(),
   };
 
   // persist orders + executions
@@ -288,9 +319,14 @@ export async function executeTradeTicket(ticket) {
     idempotencyKey,
     symbol,
     strategyId,
+    action,
     side: order.side,
     qty,
-    status: "filled"
+    filledQty: qty,
+    avgPrice: fillPrice,
+    assetType: order.assetType,
+    option,
+    status: "filled",
   });
   writeJson(EXEC_FILE, executions);
 
@@ -298,16 +334,33 @@ export async function executeTradeTicket(ticket) {
     ok: true,
     rejected: false,
     orderId,
+    action,
     status: "filled",
     filledQty: qty,
     avgPrice: fillPrice,
     idempotencyKey,
-    paper: true
+    paper: true,
+    assetType: order.assetType,
+    option,
   };
 
   // write idempotency ledger after success
   ledger[idempotencyKey] = result;
   writeJson(LEDGER_FILE, ledger);
+
+  // Engine 10 Journal hook:
+  // create journal row only for a non-duplicate opening fill
+  if (action === "NEW_ENTRY") {
+    try {
+      await createTradeJournalEntryFromEngine8Fill({
+        ticket,
+        order,
+        result,
+      });
+    } catch (err) {
+      console.error("[engine8->journal] create entry failed:", err?.stack || err);
+    }
+  }
 
   return result;
 }
