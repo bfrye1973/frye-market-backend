@@ -235,7 +235,7 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
         ? "Exhaustion Long"
         : "Exhaustion",
       severity: "high",
-      time: fibResult.exhaustionBarTime || null,
+      time: fibResult.signalTimes?.exhaustionTime || fibResult.exhaustionBarTime || null,
     });
   } else {
     if (fibResult.state) {
