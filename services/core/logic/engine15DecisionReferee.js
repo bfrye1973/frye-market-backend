@@ -1,14 +1,12 @@
 // services/core/logic/engine15DecisionReferee.js
 //
-// Engine 15B — Decision Referee
+// Engine 15C — Decision Referee
 //
-// v7 upgrade:
-// - restores direction inheritance from higher-timeframe exhaustion context
-// - fixes lifecycle currentPrice sourcing
-// - fixes nonsense move math when price is missing
-// - builds real setupChain
-// - adds meaningful nextSetupType for HTF exhaustion + LTF trigger build
-// - keeps lifecycle logic defensive
+// Step 1 safe fix:
+// - preserves structural direction when entry is blocked
+// - stops E6_STAND_DOWN from hard-collapsing valid structure
+// - stops E16_INVALIDATED from auto-wiping HTF structure context
+// - keeps existing snapshot/frontend contract stable
 //
 // Notes:
 // - pure logic only
@@ -438,6 +436,7 @@ export function evaluateHardBlockers({
 } = {}) {
   const blockers = [];
   const conflicts = [];
+  const softBlockers = [];
 
   const p = normalizePermission(permission);
   const z = normalizeZoneContext(zoneContext);
@@ -451,12 +450,16 @@ export function evaluateHardBlockers({
     blockers.push("NO_DIRECTION");
   }
 
+  // Step 1 fix:
+  // Keep permission stand-down as a blocker, but NOT a hard structure killer.
   if (p.permission === "STAND_DOWN") {
-    blockers.push("E6_STAND_DOWN");
+    softBlockers.push("E6_STAND_DOWN");
   }
 
+  // Step 1 fix:
+  // Keep Engine 16 invalidation visible, but do NOT auto-kill the whole setup here.
   if (e16.invalidated === true) {
-    blockers.push("E16_INVALIDATED");
+    softBlockers.push("E16_INVALIDATED");
   }
 
   if (
@@ -467,8 +470,9 @@ export function evaluateHardBlockers({
   }
 
   return {
-    blockers,
+    blockers: [...blockers, ...softBlockers],
     conflicts,
+    softBlockers,
     hardBlocked: blockers.length > 0,
   };
 }
@@ -844,6 +848,11 @@ export function evaluateTriggerReadiness({
     reasonCodes.push(...(momentumGate?.reasonCodes || []));
   } else {
     reasonCodes.push(...(momentumGate?.reasonCodes || []));
+  }
+
+  // Keep soft blockers visible without collapsing structure
+  if (Array.isArray(hardBlockers?.softBlockers) && hardBlockers.softBlockers.length) {
+    blockers.push(...hardBlockers.softBlockers);
   }
 
   if (qualityPass) {
@@ -1332,7 +1341,7 @@ export function buildFinalDecision({
 
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v7",
+    engine: "engine15.decisionReferee.v7.1",
     symbol,
     strategyId,
     strategyType: trigger.promotedStrategyType || resolvedWinner?.strategyType || "NONE",
@@ -1412,7 +1421,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v7",
+      engine: "engine15.decisionReferee.v7.1",
       symbol,
       strategyId,
       strategyType: "NONE",
