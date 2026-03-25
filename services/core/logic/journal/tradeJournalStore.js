@@ -74,18 +74,11 @@ function directionFromTicket(ticket, order) {
   if (bias === "long") return "LONG";
   if (bias === "short") return "SHORT";
 
-  return (
-    directionFromSide(ticket?.side) ||
-    directionFromSide(order?.side) ||
-    "UNKNOWN"
-  );
+  return directionFromSide(ticket?.side) || directionFromSide(order?.side) || "UNKNOWN";
 }
 
 function accountModeFromTicket(ticket, order) {
-  const paper =
-    order?.paper === true ||
-    ticket?.paper !== false;
-
+  const paper = order?.paper === true || ticket?.paper !== false;
   return paper ? "PAPER" : "LIVE";
 }
 
@@ -98,22 +91,12 @@ function getAction(ticket, order, result) {
   if (a) return a;
 
   const side = toUpper(ticket?.side || order?.side);
-  const exitLike =
-    side.includes("SELL") ||
-    side.includes("CLOSE") ||
-    side.includes("EXIT");
-
+  const exitLike = side.includes("SELL") || side.includes("CLOSE") || side.includes("EXIT");
   return exitLike ? "EXIT" : "NEW_ENTRY";
 }
 
 function getEventTime(order, result) {
-  return (
-    order?.filledAt ||
-    result?.filledAt ||
-    order?.ts ||
-    result?.ts ||
-    nowIso()
-  );
+  return order?.filledAt || result?.filledAt || order?.ts || result?.ts || nowIso();
 }
 
 function getEntryQty(order, result, ticket) {
@@ -156,7 +139,7 @@ function activeZoneFromStrategyNode(strategyNode) {
     hi: toNumberOrNull(zone?.hi),
     mid: toNumberOrNull(zone?.mid),
     strength: zone?.strength ?? null,
-    source: zone?.source ?? null
+    source: zone?.source ?? null,
   };
 }
 
@@ -195,7 +178,7 @@ function buildFrozenSetup(strategySnapshot, strategyId) {
       confluence: null,
       engine16: strategySnapshot?.engine16 || null,
       momentum: strategySnapshot?.momentum || null,
-      context: null
+      context: null,
     };
   }
 
@@ -233,9 +216,7 @@ function buildFrozenSetup(strategySnapshot, strategyId) {
       strategyNode?.engine15?.readiness ||
       strategyNode?.engine16?.readinessLabel ||
       "UNKNOWN",
-    action:
-      strategyNode?.engine15Decision?.action ||
-      "UNKNOWN",
+    action: strategyNode?.engine15Decision?.action || "UNKNOWN",
     executionBias:
       strategyNode?.engine15Decision?.executionBias ||
       strategyNode?.executionBias ||
@@ -253,7 +234,7 @@ function buildFrozenSetup(strategySnapshot, strategyId) {
     confluence: clone(strategyNode?.confluence || null),
     engine16: clone(strategyNode?.engine16 || strategySnapshot?.engine16 || null),
     momentum: clone(strategyNode?.momentum || strategySnapshot?.momentum || null),
-    context: clone(strategyNode?.context || null)
+    context: clone(strategyNode?.context || null),
   };
 }
 
@@ -261,7 +242,7 @@ function readStrategySnapshot() {
   return readJson(SNAPSHOT_FILE, {
     ok: false,
     now: nowIso(),
-    strategies: {}
+    strategies: {},
   });
 }
 
@@ -286,11 +267,46 @@ function writeJournalTrades(trades) {
 }
 
 function findExistingTrade(trades, { orderId, idempotencyKey }) {
-  return trades.find(
+  return (
+    trades.find(
+      (t) =>
+        t?.orderLink?.orderId === orderId ||
+        t?.orderLink?.idempotencyKey === idempotencyKey
+    ) || null
+  );
+}
+
+function findOpenTradeForExecution(trades, ticket, order, result) {
+  const symbol = normalizeSymbol(order?.symbol || ticket?.symbol || result?.symbol);
+  const strategyId = String(order?.strategyId || ticket?.strategyId || result?.strategyId || "").trim();
+  const direction =
+    String(ticket?.engine5?.bias || "").trim().toLowerCase() ||
+    String(result?.direction || "").trim().toLowerCase() ||
+    "";
+
+  const openTrades = trades.filter((t) => t?.status === "OPEN");
+
+  let candidates = openTrades.filter(
     (t) =>
-      t?.orderLink?.orderId === orderId ||
-      t?.orderLink?.idempotencyKey === idempotencyKey
-  ) || null;
+      normalizeSymbol(t?.symbol) === symbol &&
+      String(t?.strategyId || "").trim() === strategyId
+  );
+
+  if (direction === "long" || direction === "short") {
+    candidates = candidates.filter(
+      (t) => String(t?.direction || "").trim().toUpperCase() === direction.toUpperCase()
+    );
+  }
+
+  if (!candidates.length) return null;
+
+  candidates.sort((a, b) => {
+    const ta = Date.parse(a?.createdAt || 0) || 0;
+    const tb = Date.parse(b?.createdAt || 0) || 0;
+    return tb - ta;
+  });
+
+  return candidates[0];
 }
 
 function baseReview() {
@@ -299,8 +315,31 @@ function baseReview() {
     notes: "",
     mistakeFlags: [],
     followedPlan: null,
-    tags: []
+    tags: [],
   };
+}
+
+function minutesBetweenIso(startIso, endIso) {
+  const a = Date.parse(startIso || "");
+  const b = Date.parse(endIso || "");
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.max(0, Math.round((b - a) / 60000));
+}
+
+function computeResultFromRealizedPnL(realizedPnL) {
+  const n = toNumberOrNull(realizedPnL);
+  if (n == null) return null;
+  if (n > 0) return "WIN";
+  if (n < 0) return "LOSS";
+  return "BREAKEVEN";
+}
+
+function buildExitEventType(action, remainingQty) {
+  const a = toUpper(action);
+  if (a === "REDUCE") return "PARTIAL_CLOSE";
+  if (a === "EXIT" && remainingQty === 0) return "FULL_CLOSE";
+  if (a === "EXIT") return "UNKNOWN_EXIT";
+  return "UNKNOWN_EXIT";
 }
 
 export async function listTrades(filters = {}) {
@@ -350,7 +389,7 @@ export async function getTradeById(tradeId) {
 export async function createTradeJournalEntryFromEngine8Fill({
   ticket,
   order,
-  result
+  result,
 }) {
   const action = getAction(ticket, order, result);
 
@@ -360,7 +399,7 @@ export async function createTradeJournalEntryFromEngine8Fill({
       created: false,
       skipped: true,
       reason: "NOT_OPENING_FILL",
-      action
+      action,
     };
   }
 
@@ -372,7 +411,7 @@ export async function createTradeJournalEntryFromEngine8Fill({
       skipped: true,
       reason: "ORDER_NOT_FILLED",
       action,
-      status
+      status,
     };
   }
 
@@ -389,7 +428,7 @@ export async function createTradeJournalEntryFromEngine8Fill({
       created: false,
       skipped: true,
       reason: "TRADE_ALREADY_RECORDED",
-      tradeId: existing.tradeId
+      tradeId: existing.tradeId,
     };
   }
 
@@ -421,7 +460,7 @@ export async function createTradeJournalEntryFromEngine8Fill({
 
     orderLink: {
       orderId: orderId || null,
-      idempotencyKey: idempotencyKey || null
+      idempotencyKey: idempotencyKey || null,
     },
 
     setup: frozenSetup,
@@ -434,7 +473,7 @@ export async function createTradeJournalEntryFromEngine8Fill({
       source: "ENGINE8_PAPER_FILL",
       orderType: toUpper(order?.orderType || ticket?.orderType || "MARKET"),
       orderId: orderId || null,
-      idempotencyKey: idempotencyKey || null
+      idempotencyKey: idempotencyKey || null,
     },
 
     option:
@@ -444,14 +483,12 @@ export async function createTradeJournalEntryFromEngine8Fill({
             expiration: order?.option?.expiration ?? ticket?.option?.expiration ?? null,
             strike: toNumberOrNull(order?.option?.strike ?? ticket?.option?.strike),
             contractSymbol:
-              order?.option?.contractSymbol ??
-              ticket?.option?.contractSymbol ??
-              null,
+              order?.option?.contractSymbol ?? ticket?.option?.contractSymbol ?? null,
             premiumEntry:
               toNumberOrNull(order?.avgPrice) ??
               toNumberOrNull(order?.option?.midPrice) ??
               toNumberOrNull(ticket?.option?.midPrice) ??
-              null
+              null,
           }
         : null,
 
@@ -464,13 +501,13 @@ export async function createTradeJournalEntryFromEngine8Fill({
         remainingQty: qty,
         reason: "ENTRY_FILLED",
         action: "NEW_ENTRY",
-        source: "engine8_execution"
-      }
+        source: "engine8_execution",
+      },
     ],
 
     qty: {
       originalQty: qty,
-      remainingQty: qty
+      remainingQty: qty,
     },
 
     summary: {
@@ -480,13 +517,13 @@ export async function createTradeJournalEntryFromEngine8Fill({
       realizedPnL: null,
       realizedPoints: null,
       realizedR: null,
-      percentReturn: null
+      percentReturn: null,
     },
 
     review: baseReview(),
 
     createdAt: eventTime,
-    updatedAt: eventTime
+    updatedAt: eventTime,
   };
 
   trades.unshift(trade);
@@ -496,6 +533,144 @@ export async function createTradeJournalEntryFromEngine8Fill({
     ok: true,
     created: true,
     tradeId,
-    trade
+    trade,
+  };
+}
+
+export async function applyEngine8ExecutionToJournal({
+  ticket,
+  order,
+  result,
+}) {
+  const action = getAction(ticket, order, result);
+
+  if (action === "NEW_ENTRY") {
+    return createTradeJournalEntryFromEngine8Fill({ ticket, order, result });
+  }
+
+  if (action !== "REDUCE" && action !== "EXIT") {
+    return {
+      ok: true,
+      updated: false,
+      skipped: true,
+      reason: "ACTION_NOT_HANDLED",
+      action,
+    };
+  }
+
+  const status = toUpper(order?.status || result?.status);
+  if (status !== "FILLED") {
+    return {
+      ok: true,
+      updated: false,
+      skipped: true,
+      reason: "ORDER_NOT_FILLED",
+      action,
+      status,
+    };
+  }
+
+  const trades = readJournalTrades();
+  const trade = findOpenTradeForExecution(trades, ticket, order, result);
+
+  if (!trade) {
+    return {
+      ok: false,
+      updated: false,
+      error: "OPEN_TRADE_NOT_FOUND_FOR_EXECUTION",
+      action,
+      symbol: order?.symbol || ticket?.symbol || null,
+      strategyId: order?.strategyId || ticket?.strategyId || null,
+    };
+  }
+
+  const qtyClosed =
+    toNumberOrNull(order?.filledQty) ??
+    toNumberOrNull(result?.filledQty) ??
+    toNumberOrNull(order?.qty) ??
+    toNumberOrNull(ticket?.qty) ??
+    0;
+
+  const closePrice =
+    toNumberOrNull(order?.avgPrice) ??
+    toNumberOrNull(result?.avgPrice) ??
+    toNumberOrNull(order?.option?.midPrice) ??
+    toNumberOrNull(result?.option?.midPrice) ??
+    toNumberOrNull(ticket?.option?.midPrice) ??
+    toNumberOrNull(order?.intendedMidpoint) ??
+    toNumberOrNull(ticket?.entry?.intendedMidpoint) ??
+    null;
+
+  const prevRemaining = toNumberOrNull(trade?.qty?.remainingQty) ?? 0;
+  const nextRemaining = Math.max(0, prevRemaining - qtyClosed);
+  const eventTime = getEventTime(order, result);
+
+  const eventType = buildExitEventType(action, nextRemaining);
+  const reason =
+    eventType === "PARTIAL_CLOSE"
+      ? "PARTIAL_CLOSE"
+      : eventType === "FULL_CLOSE"
+        ? "FULL_CLOSE"
+        : "UNKNOWN_EXIT";
+
+  trade.events = Array.isArray(trade.events) ? trade.events : [];
+  trade.events.push({
+    eventType,
+    ts: eventTime,
+    price: closePrice,
+    qtyClosed,
+    remainingQty: nextRemaining,
+    reason,
+    action,
+    source: "engine8_execution",
+  });
+
+  trade.qty = trade.qty || {};
+  trade.qty.originalQty =
+    toNumberOrNull(trade.qty.originalQty) ??
+    toNumberOrNull(trade.entry?.qty) ??
+    prevRemaining;
+  trade.qty.remainingQty = nextRemaining;
+
+  const entryPrice = toNumberOrNull(trade?.entry?.price);
+  let realizedPoints = toNumberOrNull(trade?.summary?.realizedPoints) ?? 0;
+
+  if (entryPrice != null && closePrice != null && qtyClosed > 0) {
+    const dir = String(trade?.direction || "").toUpperCase();
+    const priceDelta =
+      dir === "SHORT"
+        ? entryPrice - closePrice
+        : closePrice - entryPrice;
+
+    realizedPoints += priceDelta * qtyClosed;
+  }
+
+  trade.summary = trade.summary || {};
+  trade.summary.realizedPoints = realizedPoints;
+
+  if (nextRemaining === 0) {
+    trade.status = "CLOSED";
+    trade.summary.closeTime = eventTime;
+    trade.summary.durationMinutes = minutesBetweenIso(trade.summary.openTime, eventTime);
+    trade.summary.realizedPnL = realizedPoints;
+    trade.summary.percentReturn = null;
+    trade.summary.realizedR = null;
+    trade.result = computeResultFromRealizedPnL(realizedPoints);
+  } else {
+    trade.status = "OPEN";
+  }
+
+  trade.updatedAt = eventTime;
+
+  writeJournalTrades(trades);
+
+  return {
+    ok: true,
+    updated: true,
+    tradeId: trade.tradeId,
+    status: trade.status,
+    remainingQty: nextRemaining,
+    eventType,
+    trade,
   };
 }
