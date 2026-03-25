@@ -57,15 +57,6 @@ function makePaperOrderId() {
   return `PAPER-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
 }
 
-function isExitSide(side) {
-  const s = String(side || "").toUpperCase();
-  return (
-    s.includes("SELL") ||
-    s.includes("CLOSE") ||
-    s.includes("EXIT")
-  );
-}
-
 function normalizeSymbol(sym) {
   return String(sym || "").trim().toUpperCase();
 }
@@ -82,20 +73,112 @@ function clampQty(qty) {
   return Math.max(0, Math.floor(n));
 }
 
-function normalizeAction(ticket, side) {
-  const explicit = String(ticket?.action || "").trim().toUpperCase();
-  if (explicit) return explicit;
-
-  return isExitSide(side) ? "EXIT" : "NEW_ENTRY";
-}
-
 function normalizeAssetType(ticket) {
   return String(ticket?.assetType || "EQUITY").trim().toUpperCase();
+}
+
+function normalizeIntent(ticket) {
+  return String(ticket?.intent || "").trim().toUpperCase() || null;
+}
+
+function normalizeDirection(ticket) {
+  return String(
+    ticket?.direction ||
+      ticket?.signalEvent?.direction ||
+      ticket?.engine5?.bias ||
+      ""
+  )
+    .trim()
+    .toUpperCase() || null;
+}
+
+function isExitSide(side) {
+  const s = String(side || "").toUpperCase();
+  return (
+    s.includes("SELL_TO_CLOSE") ||
+    s.includes("BUY_TO_CLOSE") ||
+    s.includes("CLOSE") ||
+    s.includes("EXIT") ||
+    s.includes("REDUCE")
+  );
+}
+
+function inferRightFromDirection(direction) {
+  if (direction === "LONG") return "CALL";
+  if (direction === "SHORT") return "PUT";
+  return null;
+}
+
+function nextTradingDayYmd(fromDate = new Date()) {
+  const d = new Date(Date.UTC(
+    fromDate.getUTCFullYear(),
+    fromDate.getUTCMonth(),
+    fromDate.getUTCDate()
+  ));
+
+  d.setUTCDate(d.getUTCDate() + 1);
+
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) {
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function inferAtmStrike(ticket) {
+  const price =
+    toNumberOrNull(ticket?.signalEvent?.signalPrice) ??
+    toNumberOrNull(ticket?.entry?.price) ??
+    toNumberOrNull(ticket?.entry?.intendedMidpoint) ??
+    toNumberOrNull(ticket?.engine5?.targets?.entryTarget);
+
+  if (price == null) return null;
+  return Math.round(price);
+}
+
+/**
+ * For the new automation path:
+ * - intent=ENTRY
+ * - assetType=OPTION
+ * - direction=LONG|SHORT
+ *
+ * Force:
+ * - side=BUY_TO_OPEN
+ * - action=NEW_ENTRY
+ * - LONG => CALL
+ * - SHORT => PUT
+ * - 0DTE
+ * - ATM
+ * - contracts default 3
+ */
+function normalizeAutomationOptionContract(ticket) {
+  const assetType = normalizeAssetType(ticket);
+  const intent = normalizeIntent(ticket);
+  const direction = normalizeDirection(ticket);
+
+  if (!(assetType === "OPTION" && intent === "ENTRY" && (direction === "LONG" || direction === "SHORT"))) {
+    return null;
+  }
+
+  return {
+    right: inferRightFromDirection(direction),
+    expiration:
+      String(ticket?.option?.expiration || "").trim() || nowIso().slice(0, 10), // 0DTE = today
+    strike: toNumberOrNull(ticket?.option?.strike) ?? inferAtmStrike(ticket),
+    contractSymbol: String(ticket?.option?.contractSymbol || "").trim() || null,
+    midPrice: toNumberOrNull(ticket?.option?.midPrice),
+  };
 }
 
 function normalizeOption(ticket) {
   const assetType = normalizeAssetType(ticket);
   if (assetType !== "OPTION") return null;
+
+  const autoOption = normalizeAutomationOptionContract(ticket);
+  if (autoOption) return autoOption;
 
   return {
     right: String(ticket?.option?.right || "").trim().toUpperCase() || null,
@@ -104,6 +187,49 @@ function normalizeOption(ticket) {
     contractSymbol: String(ticket?.option?.contractSymbol || "").trim() || null,
     midPrice: toNumberOrNull(ticket?.option?.midPrice),
   };
+}
+
+function normalizeSide(ticket) {
+  const explicit = String(ticket?.side || "").trim().toUpperCase();
+  if (explicit) return explicit;
+
+  const assetType = normalizeAssetType(ticket);
+  const intent = normalizeIntent(ticket);
+  const direction = normalizeDirection(ticket);
+
+  if (assetType === "OPTION" && intent === "ENTRY" && (direction === "LONG" || direction === "SHORT")) {
+    return "BUY_TO_OPEN";
+  }
+
+  return "";
+}
+
+function normalizeAction(ticket, side) {
+  const explicit = String(ticket?.action || "").trim().toUpperCase();
+  if (explicit) return explicit;
+
+  const assetType = normalizeAssetType(ticket);
+  const intent = normalizeIntent(ticket);
+  const direction = normalizeDirection(ticket);
+
+  if (assetType === "OPTION" && intent === "ENTRY" && (direction === "LONG" || direction === "SHORT")) {
+    return "NEW_ENTRY";
+  }
+
+  return isExitSide(side) ? "EXIT" : "NEW_ENTRY";
+}
+
+function normalizeQty(ticket) {
+  // For new automation path, prefer contracts, fallback qty, default 3
+  const assetType = normalizeAssetType(ticket);
+  const intent = normalizeIntent(ticket);
+  const direction = normalizeDirection(ticket);
+
+  if (assetType === "OPTION" && intent === "ENTRY" && (direction === "LONG" || direction === "SHORT")) {
+    return clampQty(ticket?.contracts ?? ticket?.qty ?? 3);
+  }
+
+  return clampQty(ticket?.qty);
 }
 
 // -------------------- Public API --------------------
@@ -189,14 +315,14 @@ export async function executeTradeTicket(ticket) {
     return { ok: false, rejected: true, reason: "MISSING_STRATEGY_ID", idempotencyKey, symbol };
   }
 
-  const side = String(ticket?.side || "").trim();
+  const side = normalizeSide(ticket);
   if (!side) {
     return { ok: false, rejected: true, reason: "MISSING_SIDE", idempotencyKey, symbol };
   }
 
   const action = normalizeAction(ticket, side);
+  const qty = normalizeQty(ticket);
 
-  const qty = clampQty(ticket?.qty);
   if (qty <= 0) {
     return { ok: false, rejected: true, reason: "SIZE_ZERO_OR_MISSING_QTY", idempotencyKey, symbol };
   }
@@ -247,11 +373,20 @@ export async function executeTradeTicket(ticket) {
   const timeInForce = String(ticket?.timeInForce || "DAY").toUpperCase();
 
   const intendedMid = toNumberOrNull(
-    ticket?.entry?.intendedMidpoint ?? ticket?.engine5?.targets?.entryTarget
+    ticket?.entry?.intendedMidpoint ??
+    ticket?.entry?.price ??
+    ticket?.signalEvent?.signalPrice ??
+    ticket?.engine5?.targets?.entryTarget
   );
-  const fillPrice = intendedMid;
+
+  // For this automation path, we may not yet have option premium.
+  // Keep avgPrice null unless a real premium input exists.
   const assetType = normalizeAssetType(ticket);
   const option = normalizeOption(ticket);
+  const fillPrice =
+    toNumberOrNull(option?.midPrice) ??
+    (assetType === "EQUITY" ? intendedMid : null);
+
   const filledAt = nowIso();
 
   const order = {
@@ -274,6 +409,7 @@ export async function executeTradeTicket(ticket) {
     engine6: ticket?.engine6 || null,
     engine7: ticket?.engine7 || null,
     engine5: ticket?.engine5 || null,
+    signalEvent: ticket?.signalEvent || null,
     option,
     status: "filled",
     filledQty: qty,
@@ -300,6 +436,7 @@ export async function executeTradeTicket(ticket) {
     avgPrice: fillPrice,
     assetType: order.assetType,
     option,
+    signalEvent: ticket?.signalEvent || null,
     status: "filled",
   });
   writeJson(EXEC_FILE, executions);
