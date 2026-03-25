@@ -37,6 +37,7 @@ import { morningFibRouter } from "./routes/morningFib.js";
 import chartOverlayRouter from "./routes/chartOverlay.js";
 import tradeJournalRouter from "./routes/tradeJournal.js";
 import { engine15AlertsRouter } from "./routes/engine15Alerts.js";
+import runShelvesJobRouter from "./routes/runShelvesJob.js";
 
 // --- App setup ---
 const app = express();
@@ -132,7 +133,7 @@ app.use("/api/v1", scalpLabRouter);
 app.use("/api/v1", morningFibRouter);
 app.use("/api/v1", chartOverlayRouter);
 app.use("/api/v1", tradeJournalRouter);
-
+app.use("/api/v1", runShelvesJobRouter);
 app.use("/api/v1", runAllEnginesRouter);
 app.use("/api/v1", tradePermissionRouter);
 app.use("/api/v1", engine15AlertsRouter);
