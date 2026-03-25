@@ -8,6 +8,10 @@
 // - stops E16_INVALIDATED from auto-wiping HTF structure context
 // - keeps existing snapshot/frontend contract stable
 //
+// Step 1.5 safe addition:
+// - adds signalEvent block so frontend/debug can see exact setup signal time
+// - uses Engine 16 signalTimes first, then safe fallbacks
+//
 // Notes:
 // - pure logic only
 // - no route fanout
@@ -1228,6 +1232,65 @@ function applyLifecycleOverride({
   return out;
 }
 
+function buildSignalEvent({ winner, engine16 } = {}) {
+  const e16 = normalizeEngine16(engine16);
+  const resolvedType = normalizeStrategyType(winner?.strategyType || e16.strategyType);
+  const resolvedDirection = safeUpper(winner?.direction || e16.direction, "NONE");
+
+  let signalType = "NONE";
+  let signalTime = null;
+  let signalPrice = null;
+  let signalSource = null;
+
+  if (resolvedType === "EXHAUSTION" || e16.exhaustionDetected === true) {
+    signalType = "EXHAUSTION";
+    signalTime =
+      e16?.signalTimes?.exhaustionTime ||
+      e16?.exhaustionBarTime ||
+      null;
+    signalPrice =
+      toNum(e16?.exhaustionBarPrice) ??
+      null;
+    signalSource = "ENGINE16_EXHAUSTION";
+  } else if (resolvedType === "REVERSAL" || e16.reversalDetected === true) {
+    signalType = "REVERSAL";
+    signalTime =
+      e16?.signalTimes?.reversalTime ||
+      null;
+    signalPrice = null;
+    signalSource = "ENGINE16_REVERSAL";
+  } else if (resolvedType === "BREAKDOWN" || e16.breakdownReady === true) {
+    signalType = "BREAKDOWN";
+    signalTime =
+      e16?.signalTimes?.breakdownReadyTime ||
+      null;
+    signalPrice = null;
+    signalSource = "ENGINE16_BREAKDOWN";
+  } else if (resolvedType === "BREAKOUT" || e16.breakoutReady === true) {
+    signalType = "BREAKOUT";
+    signalTime =
+      e16?.signalTimes?.breakoutReadyTime ||
+      null;
+    signalPrice = null;
+    signalSource = "ENGINE16_BREAKOUT";
+  } else if (resolvedType === "CONTINUATION" || e16.trendContinuation === true) {
+    signalType = "CONTINUATION";
+    signalTime =
+      e16?.signalTimes?.continuationTime ||
+      null;
+    signalPrice = null;
+    signalSource = "ENGINE16_CONTINUATION";
+  }
+
+  return {
+    signalType,
+    direction: resolvedDirection,
+    signalTime,
+    signalPrice,
+    signalSource,
+  };
+}
+
 /* -----------------------------
    Final decision
 ------------------------------*/
@@ -1283,6 +1346,11 @@ export function buildFinalDecision({
     winner: resolvedWinner,
     engine16,
     zoneContext,
+  });
+
+  const signalEvent = buildSignalEvent({
+    winner: resolvedWinner,
+    engine16,
   });
 
   const trigger = applyLifecycleOverride({
@@ -1341,7 +1409,7 @@ export function buildFinalDecision({
 
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v7.1",
+    engine: "engine15.decisionReferee.v7.2",
     symbol,
     strategyId,
     strategyType: trigger.promotedStrategyType || resolvedWinner?.strategyType || "NONE",
@@ -1372,6 +1440,7 @@ export function buildFinalDecision({
     setupChain: Array.isArray(trigger.setupChain) ? trigger.setupChain : [],
     nextSetupType: trigger.nextSetupType || "NONE",
     primaryExhaustionTF: resolvedWinner?.primaryExhaustionTF || null,
+    signalEvent,
     lifecycle,
     debug: {
       hardBlockers: hard,
@@ -1421,7 +1490,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v7.1",
+      engine: "engine15.decisionReferee.v7.2",
       symbol,
       strategyId,
       strategyType: "NONE",
@@ -1452,6 +1521,13 @@ export function computeEngine15DecisionReferee({
       setupChain: [],
       nextSetupType: "NONE",
       primaryExhaustionTF: null,
+      signalEvent: {
+        signalType: "NONE",
+        direction: "NONE",
+        signalTime: null,
+        signalPrice: null,
+        signalSource: null,
+      },
       lifecycle: {
         lifecycleStage: "BUILDING",
         isFreshSetup: false,
