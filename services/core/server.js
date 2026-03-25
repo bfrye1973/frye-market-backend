@@ -36,6 +36,7 @@ import { tradePermissionRouter } from "./routes/tradePermission.js";
 import { morningFibRouter } from "./routes/morningFib.js";
 import chartOverlayRouter from "./routes/chartOverlay.js";
 import tradeJournalRouter from "./routes/tradeJournal.js";
+import { engine15AlertsRouter } from "./routes/engine15Alerts.js";
 
 // --- App setup ---
 const app = express();
@@ -134,6 +135,7 @@ app.use("/api/v1", tradeJournalRouter);
 
 app.use("/api/v1", runAllEnginesRouter);
 app.use("/api/v1", tradePermissionRouter);
+app.use("/api/v1", engine15AlertsRouter);
 
 // --- 404 / errors ---
 app.use((req, res) =>
