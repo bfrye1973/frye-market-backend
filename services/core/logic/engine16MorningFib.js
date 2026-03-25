@@ -8,7 +8,8 @@ import { fileURLToPath } from "url";
 import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
 import { computeVolumeBehavior } from "./volumeBehaviorEngine.js";
 
-const MARKET_TZ = "America/New_York";
+const MARKET_TZ = "America/New_York";      // keeps session logic correct
+const DISPLAY_TZ = "America/Phoenix";      // fixes shown times to Arizona
 const DEFAULT_SYMBOL = "SPY";
 const DEFAULT_TF = "30m";
 const FETCH_DAYS = 8;
@@ -30,6 +31,16 @@ const SUPPORTED_TF = new Set(["10m", "30m"]);
 
 const DTF_PARTS = new Intl.DateTimeFormat("en-US", {
   timeZone: MARKET_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+const DISPLAY_DTF_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: DISPLAY_TZ,
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
@@ -93,9 +104,26 @@ function getNyPartsFromMs(ms) {
   };
 }
 
-function formatNyTimeFromMs(ms) {
+function getDisplayPartsFromMs(ms) {
+  const parts = DISPLAY_DTF_PARTS.formatToParts(new Date(ms));
+  const out = {};
+  for (const p of parts) {
+    if (p.type !== "literal") out[p.type] = p.value;
+  }
+  return {
+    year: Number(out.year),
+    month: Number(out.month),
+    day: Number(out.day),
+    hour: Number(out.hour),
+    minute: Number(out.minute),
+    dateKey: `${out.year}-${out.month}-${out.day}`,
+    minuteOfDay: Number(out.hour) * 60 + Number(out.minute),
+  };
+}
+
+function formatDisplayTimeFromMs(ms) {
   if (!Number.isFinite(ms)) return null;
-  const p = getNyPartsFromMs(ms);
+  const p = getDisplayPartsFromMs(ms);
   return `${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
 }
 
@@ -438,12 +466,12 @@ function buildAnchorTimes({
   }
 
   return {
-    premarketLowTime: formatNyTimeFromMs(premarketLowMs),
-    premarketHighTime: formatNyTimeFromMs(premarketHighMs),
-    sessionHighTime: formatNyTimeFromMs(sessionHighMs),
-    sessionLowTime: formatNyTimeFromMs(sessionLowMs),
-    anchorATime: formatNyTimeFromMs(anchorAMs),
-    anchorBTime: formatNyTimeFromMs(anchorBMs),
+    premarketLowTime: formatDisplayTimeFromMs(premarketLowMs),
+    premarketHighTime: formatDisplayTimeFromMs(premarketHighMs),
+    sessionHighTime: formatDisplayTimeFromMs(sessionHighMs),
+    sessionLowTime: formatDisplayTimeFromMs(sessionLowMs),
+    anchorATime: formatDisplayTimeFromMs(anchorAMs),
+    anchorBTime: formatDisplayTimeFromMs(anchorBMs),
   };
 }
 
@@ -617,14 +645,14 @@ export async function computeMorningFib({
       dayRange: {
         currentDayHigh: round2(currentDayHighBar?.h),
         currentDayLow: round2(currentDayLowBar?.l),
-        currentDayHighTime: formatNyTimeFromMs(currentDayHighBar?.t),
-        currentDayLowTime: formatNyTimeFromMs(currentDayLowBar?.t),
+        currentDayHighTime: formatDisplayTimeFromMs(currentDayHighBar?.t),
+        currentDayLowTime: formatDisplayTimeFromMs(currentDayLowBar?.t),
       },
       sessionStructure: {
         premarketHigh: round2(premarketHigh),
-        premarketHighTime: formatNyTimeFromMs(premarketHighBar?.t),
+        premarketHighTime: formatDisplayTimeFromMs(premarketHighBar?.t),
         premarketLow: round2(premarketLow),
-        premarketLowTime: formatNyTimeFromMs(premarketLowBar?.t),
+        premarketLowTime: formatDisplayTimeFromMs(premarketLowBar?.t),
         regularSessionHigh: null,
         regularSessionHighTime: null,
         regularSessionLow: null,
@@ -653,6 +681,7 @@ export async function computeMorningFib({
       },
       meta: {
         marketTz: MARKET_TZ,
+        displayTz: DISPLAY_TZ,
         impulseWindowMinutes: 90,
         atrPeriod: 14,
         atrMultiple: 1.2,
@@ -742,10 +771,10 @@ export async function computeMorningFib({
         sessionLow: round2(Math.min(...regularBars.map((b) => b.l))),
         anchorA: null,
         anchorB: null,
-        premarketLowTime: formatNyTimeFromMs(premarketLowBar?.t),
-        premarketHighTime: formatNyTimeFromMs(premarketHighBar?.t),
-        sessionHighTime: formatNyTimeFromMs(regularSessionHighBar?.t),
-        sessionLowTime: formatNyTimeFromMs(regularSessionLowBar?.t),
+        premarketLowTime: formatDisplayTimeFromMs(premarketLowBar?.t),
+        premarketHighTime: formatDisplayTimeFromMs(premarketHighBar?.t),
+        sessionHighTime: formatDisplayTimeFromMs(regularSessionHighBar?.t),
+        sessionLowTime: formatDisplayTimeFromMs(regularSessionLowBar?.t),
         anchorATime: null,
         anchorBTime: null,
       },
@@ -766,18 +795,18 @@ export async function computeMorningFib({
       dayRange: {
         currentDayHigh: round2(currentDayHighBar?.h),
         currentDayLow: round2(currentDayLowBar?.l),
-        currentDayHighTime: formatNyTimeFromMs(currentDayHighBar?.t),
-        currentDayLowTime: formatNyTimeFromMs(currentDayLowBar?.t),
+        currentDayHighTime: formatDisplayTimeFromMs(currentDayHighBar?.t),
+        currentDayLowTime: formatDisplayTimeFromMs(currentDayLowBar?.t),
       },
       sessionStructure: {
         premarketHigh: round2(premarketHigh),
-        premarketHighTime: formatNyTimeFromMs(premarketHighBar?.t),
+        premarketHighTime: formatDisplayTimeFromMs(premarketHighBar?.t),
         premarketLow: round2(premarketLow),
-        premarketLowTime: formatNyTimeFromMs(premarketLowBar?.t),
+        premarketLowTime: formatDisplayTimeFromMs(premarketLowBar?.t),
         regularSessionHigh: round2(regularSessionHighBar?.h),
-        regularSessionHighTime: formatNyTimeFromMs(regularSessionHighBar?.t),
+        regularSessionHighTime: formatDisplayTimeFromMs(regularSessionHighBar?.t),
         regularSessionLow: round2(regularSessionLowBar?.l),
-        regularSessionLowTime: formatNyTimeFromMs(regularSessionLowBar?.t),
+        regularSessionLowTime: formatDisplayTimeFromMs(regularSessionLowBar?.t),
       },
       signalTimes: emptySignalTimes(),
       state: "NO_IMPULSE",
@@ -802,6 +831,7 @@ export async function computeMorningFib({
       },
       meta: {
         marketTz: MARKET_TZ,
+        displayTz: DISPLAY_TZ,
         impulseWindowMinutes: 90,
         atrPeriod: 14,
         atrMultiple: 1.2,
@@ -813,12 +843,12 @@ export async function computeMorningFib({
   const rawAnchorB = bestCandidate.anchorB;
   const rawAnchorATime =
     bestCandidate.context === "LONG_CONTEXT"
-      ? formatNyTimeFromMs(premarketLowBar?.t)
-      : formatNyTimeFromMs(premarketHighBar?.t);
+      ? formatDisplayTimeFromMs(premarketLowBar?.t)
+      : formatDisplayTimeFromMs(premarketHighBar?.t);
   const rawAnchorBTime =
     bestCandidate.context === "LONG_CONTEXT"
-      ? formatNyTimeFromMs(bestCandidate.sessionHighBarT)
-      : formatNyTimeFromMs(bestCandidate.sessionLowBarT);
+      ? formatDisplayTimeFromMs(bestCandidate.sessionHighBarT)
+      : formatDisplayTimeFromMs(bestCandidate.sessionLowBarT);
 
   let usedNegotiatedZoneAnchor = false;
   let negotiatedZoneUsed = null;
@@ -1017,7 +1047,7 @@ export async function computeMorningFib({
 
     debugExhaustion = {
       checkedBars: EXHAUSTION_LOOKBACK_BARS,
-      detectedBarTime: shortSequenceConfirmed || longSequenceConfirmed ? formatNyTimeFromMs(bar.t) : null,
+      detectedBarTime: shortSequenceConfirmed || longSequenceConfirmed ? formatDisplayTimeFromMs(bar.t) : null,
       detectedBarPrice: shortSequenceConfirmed ? round2(bar.h) : longSequenceConfirmed ? round2(bar.l) : null,
       nearHigh,
       nearLow,
@@ -1025,14 +1055,14 @@ export async function computeMorningFib({
       lowerWickStrong,
       shortSequenceConfirmed,
       longSequenceConfirmed,
-      lastBarCheckedTime: formatNyTimeFromMs(bar.t),
+      lastBarCheckedTime: formatDisplayTimeFromMs(bar.t),
     };
 
     if (shortSequenceConfirmed) {
       exhaustionDetected = true;
       exhaustionShort = true;
       exhaustionLong = false;
-      exhaustionBarTime = formatNyTimeFromMs(bar.t);
+      exhaustionBarTime = formatDisplayTimeFromMs(bar.t);
       exhaustionBarPrice = round2(bar.h);
       break;
     }
@@ -1041,7 +1071,7 @@ export async function computeMorningFib({
       exhaustionDetected = true;
       exhaustionLong = true;
       exhaustionShort = false;
-      exhaustionBarTime = formatNyTimeFromMs(bar.t);
+      exhaustionBarTime = formatDisplayTimeFromMs(bar.t);
       exhaustionBarPrice = round2(bar.l);
       break;
     }
@@ -1049,7 +1079,7 @@ export async function computeMorningFib({
 
   if (exhaustionShort) {
     const exhaustionBarIdx = closedBars.findIndex(
-      (b) => formatNyTimeFromMs(b.t) === exhaustionBarTime && round2(b.h) === exhaustionBarPrice
+      (b) => formatDisplayTimeFromMs(b.t) === exhaustionBarTime && round2(b.h) === exhaustionBarPrice
     );
     const barsSince = exhaustionBarIdx >= 0 ? (closedBars.length - 1) - exhaustionBarIdx : EXHAUSTION_MIN_ACTIVE_BARS + 1;
     const invalid =
@@ -1068,7 +1098,7 @@ export async function computeMorningFib({
 
   if (exhaustionLong) {
     const exhaustionBarIdx = closedBars.findIndex(
-      (b) => formatNyTimeFromMs(b.t) === exhaustionBarTime && round2(b.l) === exhaustionBarPrice
+      (b) => formatDisplayTimeFromMs(b.t) === exhaustionBarTime && round2(b.l) === exhaustionBarPrice
     );
     const barsSince = exhaustionBarIdx >= 0 ? (closedBars.length - 1) - exhaustionBarIdx : EXHAUSTION_MIN_ACTIVE_BARS + 1;
     const invalid =
@@ -1241,15 +1271,15 @@ export async function computeMorningFib({
   });
 
   const signalTimes = {
-    stateBarTime: formatNyTimeFromMs(latestClosedBar?.t),
-    wickRejectionLongTime: wickRejectionLong ? formatNyTimeFromMs(latestClosedBar?.t) : null,
-    wickRejectionShortTime: wickRejectionShort ? formatNyTimeFromMs(latestClosedBar?.t) : null,
-    breakoutReadyTime: breakoutReady ? formatNyTimeFromMs(latestClosedBar?.t) : null,
-    breakdownReadyTime: breakdownReady ? formatNyTimeFromMs(latestClosedBar?.t) : null,
-    impulseVolumeConfirmedTime: impulseVolumeConfirmed ? formatNyTimeFromMs(latestClosedBar?.t) : null,
+    stateBarTime: formatDisplayTimeFromMs(latestClosedBar?.t),
+    wickRejectionLongTime: wickRejectionLong ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
+    wickRejectionShortTime: wickRejectionShort ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
+    breakoutReadyTime: breakoutReady ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
+    breakdownReadyTime: breakdownReady ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
+    impulseVolumeConfirmedTime: impulseVolumeConfirmed ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
     exhaustionTime: exhaustionDetected ? exhaustionBarTime : null,
-    reversalTime: reversalDetected ? formatNyTimeFromMs(latestClosedBar?.t) : null,
-    continuationTime: trendContinuation ? formatNyTimeFromMs(latestClosedBar?.t) : null,
+    reversalTime: reversalDetected ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
+    continuationTime: trendContinuation ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
   };
 
   return {
@@ -1295,19 +1325,19 @@ export async function computeMorningFib({
     dayRange: {
       currentDayHigh: round2(currentDayHighBar?.h),
       currentDayLow: round2(currentDayLowBar?.l),
-      currentDayHighTime: formatNyTimeFromMs(currentDayHighBar?.t),
-      currentDayLowTime: formatNyTimeFromMs(currentDayLowBar?.t),
+      currentDayHighTime: formatDisplayTimeFromMs(currentDayHighBar?.t),
+      currentDayLowTime: formatDisplayTimeFromMs(currentDayLowBar?.t),
     },
 
     sessionStructure: {
       premarketHigh: round2(premarketHigh),
-      premarketHighTime: formatNyTimeFromMs(premarketHighBar?.t),
+      premarketHighTime: formatDisplayTimeFromMs(premarketHighBar?.t),
       premarketLow: round2(premarketLow),
-      premarketLowTime: formatNyTimeFromMs(premarketLowBar?.t),
+      premarketLowTime: formatDisplayTimeFromMs(premarketLowBar?.t),
       regularSessionHigh: round2(regularSessionHighBar?.h),
-      regularSessionHighTime: formatNyTimeFromMs(regularSessionHighBar?.t),
+      regularSessionHighTime: formatDisplayTimeFromMs(regularSessionHighBar?.t),
       regularSessionLow: round2(regularSessionLowBar?.l),
-      regularSessionLowTime: formatNyTimeFromMs(regularSessionLowBar?.t),
+      regularSessionLowTime: formatDisplayTimeFromMs(regularSessionLowBar?.t),
     },
 
     signalTimes,
@@ -1348,6 +1378,7 @@ export async function computeMorningFib({
 
     meta: {
       marketTz: MARKET_TZ,
+      displayTz: DISPLAY_TZ,
       impulseWindowMinutes: 90,
       atrPeriod: 14,
       atrMultiple: 1.2,
