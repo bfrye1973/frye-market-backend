@@ -2,24 +2,21 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
-import { createTradeJournalEntryFromEngine8Fill } from "../journal/tradeJournalStore.js";
+import {
+  createTradeJournalEntryFromEngine8Fill,
+  applyEngine8ExecutionToJournal,
+} from "../journal/tradeJournalStore.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // core/data
 const DATA_DIR = path.resolve(__dirname, "../../data");
-const LEDGER_FILE = path.resolve(DATA_DIR, "paper-idempotency-ledger.json"); // map idempotencyKey -> saved result
-const ORDERS_FILE = path.resolve(DATA_DIR, "paper-orders.json");             // list of orders
-const EXEC_FILE = path.resolve(DATA_DIR, "paper-executions.json");           // list of execution attempts
+const LEDGER_FILE = path.resolve(DATA_DIR, "paper-idempotency-ledger.json");
+const ORDERS_FILE = path.resolve(DATA_DIR, "paper-orders.json");
+const EXEC_FILE = path.resolve(DATA_DIR, "paper-executions.json");
 
 // ---- Config (env-based, safe defaults) ----
-//
-// ENGINE8_PAPER_ONLY=1                 -> refuse any ticket that claims paper:false
-// ENGINE8_KILL_SWITCH=1                -> block all NEW entries (and exits too, unless allowExits enabled)
-// ENGINE8_ALLOW_EXITS_ON_STANDDOWN=1   -> allow exits even if Engine6 says STAND_DOWN
-// ENGINE8_ALLOWLIST=SPY,QQQ            -> allowed symbols
-//
 function cfg() {
   const allowlist = (process.env.ENGINE8_ALLOWLIST || "SPY,QQQ")
     .split(",")
@@ -57,15 +54,13 @@ function nowIso() {
 }
 
 function makePaperOrderId() {
-  // deterministic-ish unique id
   return `PAPER-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
 }
 
 function isExitSide(side) {
-  // Keep it simple; supports equities + options text
   const s = String(side || "").toUpperCase();
   return (
-    s.includes("SELL") ||          // SELL, SELL_SHORT, SELL_TO_CLOSE
+    s.includes("SELL") ||
     s.includes("CLOSE") ||
     s.includes("EXIT")
   );
@@ -84,7 +79,6 @@ function toNumberOrNull(v) {
 function clampQty(qty) {
   const n = Number(qty);
   if (!Number.isFinite(n)) return 0;
-  // qty must be integer >= 0
   return Math.max(0, Math.floor(n));
 }
 
@@ -162,7 +156,6 @@ export async function cancelPaperOrder(body) {
     return { ok: false, rejected: true, reason: "ORDER_NOT_FOUND", orderId };
   }
 
-  // If already filled, we can’t cancel (paper mimic)
   if (orders[idx].status === "filled") {
     return { ok: false, rejected: true, reason: "CANNOT_CANCEL_FILLED", orderId };
   }
@@ -174,20 +167,9 @@ export async function cancelPaperOrder(body) {
   return { ok: true, orderId, status: "canceled" };
 }
 
-/**
- * POST /api/trading/execute
- * Enforces:
- * - idempotency required + dedupe
- * - kill switch
- * - engine6.permission
- * - engine7 sizing (qty > 0)
- * - allowlist symbol
- * - paperOnly enforcement
- */
 export async function executeTradeTicket(ticket) {
   const c = cfg();
 
-  // -------- Validate required fields --------
   const idempotencyKey = String(ticket?.idempotencyKey || "").trim();
   if (!idempotencyKey) {
     return { ok: false, rejected: true, reason: "MISSING_IDEMPOTENCY_KEY" };
@@ -214,20 +196,16 @@ export async function executeTradeTicket(ticket) {
 
   const action = normalizeAction(ticket, side);
 
-  // Engine 7 sizing: prefer qty as final.
   const qty = clampQty(ticket?.qty);
   if (qty <= 0) {
-    // If they used finalR only, we still refuse — Engine8 must not compute size.
     return { ok: false, rejected: true, reason: "SIZE_ZERO_OR_MISSING_QTY", idempotencyKey, symbol };
   }
 
-  // Paper-only enforcement
-  const paper = ticket?.paper !== false; // default true
+  const paper = ticket?.paper !== false;
   if (c.paperOnly && paper === false) {
     return { ok: false, rejected: true, reason: "PAPER_ONLY_ENFORCED", idempotencyKey, symbol };
   }
 
-  // -------- Idempotency dedupe --------
   const ledger = readJson(LEDGER_FILE, {});
   if (ledger[idempotencyKey]) {
     return {
@@ -238,13 +216,10 @@ export async function executeTradeTicket(ticket) {
     };
   }
 
-  // -------- Safety rails (kill + permission) --------
   const exitIntent = action === "EXIT" || action === "REDUCE" || isExitSide(side);
 
   if (c.killSwitch) {
-    // kill switch blocks everything by default (safest)
     const rej = { ok: false, rejected: true, reason: "KILL_SWITCH", idempotencyKey, symbol };
-    // store in ledger so repeats don’t spam logs
     ledger[idempotencyKey] = rej;
     writeJson(LEDGER_FILE, ledger);
     return rej;
@@ -267,23 +242,22 @@ export async function executeTradeTicket(ticket) {
     }
   }
 
-  // -------- Create a paper order --------
   const orderId = makePaperOrderId();
   const orderType = String(ticket?.orderType || "MARKET").toUpperCase();
   const timeInForce = String(ticket?.timeInForce || "DAY").toUpperCase();
 
-  // We “fill immediately” for Phase 1.
   const intendedMid = toNumberOrNull(
     ticket?.entry?.intendedMidpoint ?? ticket?.engine5?.targets?.entryTarget
   );
-  const fillPrice = intendedMid; // for paper v1 use intended midpoint as avg fill if provided
+  const fillPrice = intendedMid;
   const assetType = normalizeAssetType(ticket);
   const option = normalizeOption(ticket);
+  const filledAt = nowIso();
 
   const order = {
     orderId,
     idempotencyKey,
-    ts: nowIso(),
+    ts: filledAt,
     paper: true,
     symbol,
     strategyId,
@@ -304,17 +278,16 @@ export async function executeTradeTicket(ticket) {
     status: "filled",
     filledQty: qty,
     avgPrice: fillPrice,
-    filledAt: nowIso(),
+    filledAt,
   };
 
-  // persist orders + executions
   const orders = readJson(ORDERS_FILE, []);
   orders.unshift(order);
   writeJson(ORDERS_FILE, orders);
 
   const executions = readJson(EXEC_FILE, []);
   executions.unshift({
-    ts: nowIso(),
+    ts: filledAt,
     ok: true,
     orderId,
     idempotencyKey,
@@ -343,24 +316,28 @@ export async function executeTradeTicket(ticket) {
     paper: true,
     assetType: order.assetType,
     option,
+    filledAt,
   };
 
-  // write idempotency ledger after success
   ledger[idempotencyKey] = result;
   writeJson(LEDGER_FILE, ledger);
 
-  // Engine 10 Journal hook:
-  // create journal row only for a non-duplicate opening fill
-  if (action === "NEW_ENTRY") {
-    try {
+  try {
+    if (action === "NEW_ENTRY") {
       await createTradeJournalEntryFromEngine8Fill({
         ticket,
         order,
         result,
       });
-    } catch (err) {
-      console.error("[engine8->journal] create entry failed:", err?.stack || err);
+    } else if (action === "REDUCE" || action === "EXIT") {
+      await applyEngine8ExecutionToJournal({
+        ticket,
+        order,
+        result,
+      });
     }
+  } catch (err) {
+    console.error("[engine8->journal] journal sync failed:", err?.stack || err);
   }
 
   return result;
