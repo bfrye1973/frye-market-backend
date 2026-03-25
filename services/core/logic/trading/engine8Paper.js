@@ -82,14 +82,16 @@ function normalizeIntent(ticket) {
 }
 
 function normalizeDirection(ticket) {
-  return String(
-    ticket?.direction ||
-      ticket?.signalEvent?.direction ||
-      ticket?.engine5?.bias ||
-      ""
-  )
-    .trim()
-    .toUpperCase() || null;
+  return (
+    String(
+      ticket?.direction ||
+        ticket?.signalEvent?.direction ||
+        ticket?.engine5?.bias ||
+        ""
+    )
+      .trim()
+      .toUpperCase() || null
+  );
 }
 
 function isExitSide(side) {
@@ -109,23 +111,13 @@ function inferRightFromDirection(direction) {
   return null;
 }
 
-function nextTradingDayYmd(fromDate = new Date()) {
-  const d = new Date(Date.UTC(
-    fromDate.getUTCFullYear(),
-    fromDate.getUTCMonth(),
-    fromDate.getUTCDate()
-  ));
-
-  d.setUTCDate(d.getUTCDate() + 1);
-
-  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) {
-    d.setUTCDate(d.getUTCDate() + 1);
-  }
-
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function normalizeOptionPrice(option = {}) {
+  return (
+    toNumberOrNull(option?.midPrice) ??
+    toNumberOrNull(option?.avgPrice) ??
+    toNumberOrNull(option?.premium) ??
+    null
+  );
 }
 
 function inferAtmStrike(ticket) {
@@ -140,36 +132,46 @@ function inferAtmStrike(ticket) {
 }
 
 /**
- * For the new automation path:
- * - intent=ENTRY
- * - assetType=OPTION
- * - direction=LONG|SHORT
+ * Automatic options-entry path for Engine 15 / signal automation:
+ * - intent = ENTRY
+ * - assetType = OPTION
+ * - direction = LONG | SHORT
  *
  * Force:
- * - side=BUY_TO_OPEN
- * - action=NEW_ENTRY
+ * - side = BUY_TO_OPEN
+ * - action = NEW_ENTRY
  * - LONG => CALL
  * - SHORT => PUT
- * - 0DTE
- * - ATM
- * - contracts default 3
+ * - 0DTE (today)
+ * - ATM strike
+ * - premium comes from option.midPrice / option.avgPrice / option.premium
  */
 function normalizeAutomationOptionContract(ticket) {
   const assetType = normalizeAssetType(ticket);
   const intent = normalizeIntent(ticket);
   const direction = normalizeDirection(ticket);
 
-  if (!(assetType === "OPTION" && intent === "ENTRY" && (direction === "LONG" || direction === "SHORT"))) {
+  if (
+    !(
+      assetType === "OPTION" &&
+      intent === "ENTRY" &&
+      (direction === "LONG" || direction === "SHORT")
+    )
+  ) {
     return null;
   }
+
+  const normalizedPremium = normalizeOptionPrice(ticket?.option || {});
 
   return {
     right: inferRightFromDirection(direction),
     expiration:
-      String(ticket?.option?.expiration || "").trim() || nowIso().slice(0, 10), // 0DTE = today
+      String(ticket?.option?.expiration || "").trim() ||
+      nowIso().slice(0, 10), // 0DTE = today
     strike: toNumberOrNull(ticket?.option?.strike) ?? inferAtmStrike(ticket),
-    contractSymbol: String(ticket?.option?.contractSymbol || "").trim() || null,
-    midPrice: toNumberOrNull(ticket?.option?.midPrice),
+    contractSymbol:
+      String(ticket?.option?.contractSymbol || "").trim() || null,
+    midPrice: normalizedPremium,
   };
 }
 
@@ -180,12 +182,15 @@ function normalizeOption(ticket) {
   const autoOption = normalizeAutomationOptionContract(ticket);
   if (autoOption) return autoOption;
 
+  const normalizedPremium = normalizeOptionPrice(ticket?.option || {});
+
   return {
     right: String(ticket?.option?.right || "").trim().toUpperCase() || null,
     expiration: String(ticket?.option?.expiration || "").trim() || null,
     strike: toNumberOrNull(ticket?.option?.strike),
-    contractSymbol: String(ticket?.option?.contractSymbol || "").trim() || null,
-    midPrice: toNumberOrNull(ticket?.option?.midPrice),
+    contractSymbol:
+      String(ticket?.option?.contractSymbol || "").trim() || null,
+    midPrice: normalizedPremium,
   };
 }
 
@@ -197,7 +202,11 @@ function normalizeSide(ticket) {
   const intent = normalizeIntent(ticket);
   const direction = normalizeDirection(ticket);
 
-  if (assetType === "OPTION" && intent === "ENTRY" && (direction === "LONG" || direction === "SHORT")) {
+  if (
+    assetType === "OPTION" &&
+    intent === "ENTRY" &&
+    (direction === "LONG" || direction === "SHORT")
+  ) {
     return "BUY_TO_OPEN";
   }
 
@@ -212,7 +221,11 @@ function normalizeAction(ticket, side) {
   const intent = normalizeIntent(ticket);
   const direction = normalizeDirection(ticket);
 
-  if (assetType === "OPTION" && intent === "ENTRY" && (direction === "LONG" || direction === "SHORT")) {
+  if (
+    assetType === "OPTION" &&
+    intent === "ENTRY" &&
+    (direction === "LONG" || direction === "SHORT")
+  ) {
     return "NEW_ENTRY";
   }
 
@@ -220,12 +233,15 @@ function normalizeAction(ticket, side) {
 }
 
 function normalizeQty(ticket) {
-  // For new automation path, prefer contracts, fallback qty, default 3
   const assetType = normalizeAssetType(ticket);
   const intent = normalizeIntent(ticket);
   const direction = normalizeDirection(ticket);
 
-  if (assetType === "OPTION" && intent === "ENTRY" && (direction === "LONG" || direction === "SHORT")) {
+  if (
+    assetType === "OPTION" &&
+    intent === "ENTRY" &&
+    (direction === "LONG" || direction === "SHORT")
+  ) {
     return clampQty(ticket?.contracts ?? ticket?.qty ?? 3);
   }
 
@@ -283,7 +299,12 @@ export async function cancelPaperOrder(body) {
   }
 
   if (orders[idx].status === "filled") {
-    return { ok: false, rejected: true, reason: "CANNOT_CANCEL_FILLED", orderId };
+    return {
+      ok: false,
+      rejected: true,
+      reason: "CANNOT_CANCEL_FILLED",
+      orderId,
+    };
   }
 
   orders[idx].status = "canceled";
@@ -303,33 +324,68 @@ export async function executeTradeTicket(ticket) {
 
   const symbol = normalizeSymbol(ticket?.symbol);
   if (!symbol) {
-    return { ok: false, rejected: true, reason: "MISSING_SYMBOL", idempotencyKey };
+    return {
+      ok: false,
+      rejected: true,
+      reason: "MISSING_SYMBOL",
+      idempotencyKey,
+    };
   }
 
   if (!c.allowlist.includes(symbol)) {
-    return { ok: false, rejected: true, reason: "SYMBOL_NOT_ALLOWED", symbol, idempotencyKey };
+    return {
+      ok: false,
+      rejected: true,
+      reason: "SYMBOL_NOT_ALLOWED",
+      symbol,
+      idempotencyKey,
+    };
   }
 
   const strategyId = String(ticket?.strategyId || "").trim();
   if (!strategyId) {
-    return { ok: false, rejected: true, reason: "MISSING_STRATEGY_ID", idempotencyKey, symbol };
+    return {
+      ok: false,
+      rejected: true,
+      reason: "MISSING_STRATEGY_ID",
+      idempotencyKey,
+      symbol,
+    };
   }
 
   const side = normalizeSide(ticket);
   if (!side) {
-    return { ok: false, rejected: true, reason: "MISSING_SIDE", idempotencyKey, symbol };
+    return {
+      ok: false,
+      rejected: true,
+      reason: "MISSING_SIDE",
+      idempotencyKey,
+      symbol,
+    };
   }
 
   const action = normalizeAction(ticket, side);
   const qty = normalizeQty(ticket);
 
   if (qty <= 0) {
-    return { ok: false, rejected: true, reason: "SIZE_ZERO_OR_MISSING_QTY", idempotencyKey, symbol };
+    return {
+      ok: false,
+      rejected: true,
+      reason: "SIZE_ZERO_OR_MISSING_QTY",
+      idempotencyKey,
+      symbol,
+    };
   }
 
   const paper = ticket?.paper !== false;
   if (c.paperOnly && paper === false) {
-    return { ok: false, rejected: true, reason: "PAPER_ONLY_ENFORCED", idempotencyKey, symbol };
+    return {
+      ok: false,
+      rejected: true,
+      reason: "PAPER_ONLY_ENFORCED",
+      idempotencyKey,
+      symbol,
+    };
   }
 
   const ledger = readJson(LEDGER_FILE, {});
@@ -342,10 +398,17 @@ export async function executeTradeTicket(ticket) {
     };
   }
 
-  const exitIntent = action === "EXIT" || action === "REDUCE" || isExitSide(side);
+  const exitIntent =
+    action === "EXIT" || action === "REDUCE" || isExitSide(side);
 
   if (c.killSwitch) {
-    const rej = { ok: false, rejected: true, reason: "KILL_SWITCH", idempotencyKey, symbol };
+    const rej = {
+      ok: false,
+      rejected: true,
+      reason: "KILL_SWITCH",
+      idempotencyKey,
+      symbol,
+    };
     ledger[idempotencyKey] = rej;
     writeJson(LEDGER_FILE, ledger);
     return rej;
@@ -374,18 +437,37 @@ export async function executeTradeTicket(ticket) {
 
   const intendedMid = toNumberOrNull(
     ticket?.entry?.intendedMidpoint ??
-    ticket?.entry?.price ??
-    ticket?.signalEvent?.signalPrice ??
-    ticket?.engine5?.targets?.entryTarget
+      ticket?.entry?.price ??
+      ticket?.signalEvent?.signalPrice ??
+      ticket?.engine5?.targets?.entryTarget
   );
 
-  // For this automation path, we may not yet have option premium.
-  // Keep avgPrice null unless a real premium input exists.
   const assetType = normalizeAssetType(ticket);
   const option = normalizeOption(ticket);
+  const intent = normalizeIntent(ticket);
+  const direction = normalizeDirection(ticket);
+
+  // Automatic option entry now REQUIRES premium input so avgPrice is authoritative
+  if (
+    assetType === "OPTION" &&
+    intent === "ENTRY" &&
+    (direction === "LONG" || direction === "SHORT") &&
+    (option?.midPrice == null || option?.midPrice <= 0)
+  ) {
+    return {
+      ok: false,
+      rejected: true,
+      reason: "MISSING_OPTION_MIDPRICE",
+      message:
+        "Automatic option entry requires option.midPrice (or option.avgPrice / option.premium) so avgPrice is non-null.",
+      idempotencyKey,
+      symbol,
+      strategyId,
+    };
+  }
+
   const fillPrice =
-    toNumberOrNull(option?.midPrice) ??
-    (assetType === "EQUITY" ? intendedMid : null);
+    assetType === "OPTION" ? option?.midPrice ?? null : intendedMid;
 
   const filledAt = nowIso();
 
