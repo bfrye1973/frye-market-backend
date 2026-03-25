@@ -47,6 +47,12 @@ function toNumberOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function round2(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return null;
+  return Math.round(x * 100) / 100;
+}
+
 function normalizeSymbol(sym) {
   return String(sym || "").trim().toUpperCase();
 }
@@ -99,17 +105,7 @@ function getEventTime(order, result) {
   return order?.filledAt || result?.filledAt || order?.ts || result?.ts || nowIso();
 }
 
-function getEntryQty(order, result, ticket) {
-  const n =
-    toNumberOrNull(order?.filledQty) ??
-    toNumberOrNull(result?.filledQty) ??
-    toNumberOrNull(order?.qty) ??
-    toNumberOrNull(ticket?.qty);
-
-  return Number.isFinite(n) ? n : 0;
-}
-
-function getEntryPrice(order, result, ticket) {
+function getExecutionPrice(order, result, ticket) {
   return (
     toNumberOrNull(order?.avgPrice) ??
     toNumberOrNull(result?.avgPrice) ??
@@ -120,6 +116,16 @@ function getEntryPrice(order, result, ticket) {
     toNumberOrNull(ticket?.entry?.intendedMidpoint) ??
     null
   );
+}
+
+function getEntryQty(order, result, ticket) {
+  const n =
+    toNumberOrNull(order?.filledQty) ??
+    toNumberOrNull(result?.filledQty) ??
+    toNumberOrNull(order?.qty) ??
+    toNumberOrNull(ticket?.qty);
+
+  return Number.isFinite(n) ? n : 0;
 }
 
 function activeZoneFromStrategyNode(strategyNode) {
@@ -342,6 +348,58 @@ function buildExitEventType(action, remainingQty) {
   return "UNKNOWN_EXIT";
 }
 
+function computeEventPnl({ trade, closePrice, qtyClosed }) {
+  const entryPrice = toNumberOrNull(trade?.entry?.price);
+  const qty = toNumberOrNull(qtyClosed);
+  if (entryPrice == null || closePrice == null || qty == null || qty <= 0) {
+    return {
+      eventRealizedPoints: null,
+      eventRealizedPnL: null,
+      pnlBasis: "MISSING_PRICE",
+    };
+  }
+
+  const assetType = toUpper(trade?.assetType || "EQUITY");
+  const direction = toUpper(trade?.direction || "UNKNOWN");
+
+  if (assetType === "OPTION") {
+    const premiumDiff = closePrice - entryPrice;
+    const signedPremiumDiff = direction === "SHORT" ? -premiumDiff : premiumDiff;
+
+    return {
+      eventRealizedPoints: round2(signedPremiumDiff * qty),
+      eventRealizedPnL: round2(signedPremiumDiff * qty * 100),
+      pnlBasis: "OPTION_PREMIUM",
+    };
+  }
+
+  const priceDelta = direction === "SHORT"
+    ? entryPrice - closePrice
+    : closePrice - entryPrice;
+
+  return {
+    eventRealizedPoints: round2(priceDelta * qty),
+    eventRealizedPnL: round2(priceDelta * qty),
+    pnlBasis: "EQUITY_SHARE",
+  };
+}
+
+function sumEventField(events, key) {
+  const rows = Array.isArray(events) ? events : [];
+  let total = 0;
+  let hasAny = false;
+
+  for (const ev of rows) {
+    const n = toNumberOrNull(ev?.[key]);
+    if (n != null) {
+      total += n;
+      hasAny = true;
+    }
+  }
+
+  return hasAny ? round2(total) : null;
+}
+
 export async function listTrades(filters = {}) {
   let trades = readJournalTrades();
 
@@ -436,7 +494,7 @@ export async function createTradeJournalEntryFromEngine8Fill({
   const strategyId = String(order?.strategyId || ticket?.strategyId || "").trim();
   const eventTime = getEventTime(order, result);
   const qty = getEntryQty(order, result, ticket);
-  const price = getEntryPrice(order, result, ticket);
+  const price = getExecutionPrice(order, result, ticket);
   const direction = directionFromTicket(ticket, order);
   const timeframe = strategyTimeframe(strategyId, order?.timeframe || ticket?.timeframe);
   const accountMode = accountModeFromTicket(ticket, order);
@@ -484,11 +542,7 @@ export async function createTradeJournalEntryFromEngine8Fill({
             strike: toNumberOrNull(order?.option?.strike ?? ticket?.option?.strike),
             contractSymbol:
               order?.option?.contractSymbol ?? ticket?.option?.contractSymbol ?? null,
-            premiumEntry:
-              toNumberOrNull(order?.avgPrice) ??
-              toNumberOrNull(order?.option?.midPrice) ??
-              toNumberOrNull(ticket?.option?.midPrice) ??
-              null,
+            premiumEntry: price,
           }
         : null,
 
@@ -502,6 +556,9 @@ export async function createTradeJournalEntryFromEngine8Fill({
         reason: "ENTRY_FILLED",
         action: "NEW_ENTRY",
         source: "engine8_execution",
+        eventRealizedPoints: null,
+        eventRealizedPnL: null,
+        pnlBasis: assetType === "OPTION" ? "OPTION_PREMIUM" : "EQUITY_SHARE",
       },
     ],
 
@@ -591,15 +648,7 @@ export async function applyEngine8ExecutionToJournal({
     toNumberOrNull(ticket?.qty) ??
     0;
 
-  const closePrice =
-    toNumberOrNull(order?.avgPrice) ??
-    toNumberOrNull(result?.avgPrice) ??
-    toNumberOrNull(order?.option?.midPrice) ??
-    toNumberOrNull(result?.option?.midPrice) ??
-    toNumberOrNull(ticket?.option?.midPrice) ??
-    toNumberOrNull(order?.intendedMidpoint) ??
-    toNumberOrNull(ticket?.entry?.intendedMidpoint) ??
-    null;
+  const closePrice = getExecutionPrice(order, result, ticket);
 
   const prevRemaining = toNumberOrNull(trade?.qty?.remainingQty) ?? 0;
   const nextRemaining = Math.max(0, prevRemaining - qtyClosed);
@@ -613,6 +662,12 @@ export async function applyEngine8ExecutionToJournal({
         ? "FULL_CLOSE"
         : "UNKNOWN_EXIT";
 
+  const pnl = computeEventPnl({
+    trade,
+    closePrice,
+    qtyClosed,
+  });
+
   trade.events = Array.isArray(trade.events) ? trade.events : [];
   trade.events.push({
     eventType,
@@ -623,6 +678,9 @@ export async function applyEngine8ExecutionToJournal({
     reason,
     action,
     source: "engine8_execution",
+    eventRealizedPoints: pnl.eventRealizedPoints,
+    eventRealizedPnL: pnl.eventRealizedPnL,
+    pnlBasis: pnl.pnlBasis,
   });
 
   trade.qty = trade.qty || {};
@@ -632,32 +690,27 @@ export async function applyEngine8ExecutionToJournal({
     prevRemaining;
   trade.qty.remainingQty = nextRemaining;
 
-  const entryPrice = toNumberOrNull(trade?.entry?.price);
-  let realizedPoints = toNumberOrNull(trade?.summary?.realizedPoints) ?? 0;
-
-  if (entryPrice != null && closePrice != null && qtyClosed > 0) {
-    const dir = String(trade?.direction || "").toUpperCase();
-    const priceDelta =
-      dir === "SHORT"
-        ? entryPrice - closePrice
-        : closePrice - entryPrice;
-
-    realizedPoints += priceDelta * qtyClosed;
-  }
-
   trade.summary = trade.summary || {};
-  trade.summary.realizedPoints = realizedPoints;
+  trade.summary.realizedPoints = sumEventField(trade.events, "eventRealizedPoints");
+  trade.summary.realizedPnL = sumEventField(trade.events, "eventRealizedPnL");
 
   if (nextRemaining === 0) {
     trade.status = "CLOSED";
     trade.summary.closeTime = eventTime;
     trade.summary.durationMinutes = minutesBetweenIso(trade.summary.openTime, eventTime);
-    trade.summary.realizedPnL = realizedPoints;
     trade.summary.percentReturn = null;
     trade.summary.realizedR = null;
-    trade.result = computeResultFromRealizedPnL(realizedPoints);
+    trade.result = computeResultFromRealizedPnL(trade.summary.realizedPnL);
   } else {
     trade.status = "OPEN";
+    trade.result = null;
+  }
+
+  if (trade.assetType === "OPTION" && trade.option) {
+    const latestClosePrice = toNumberOrNull(closePrice);
+    if (latestClosePrice != null) {
+      trade.option.premiumLastExit = latestClosePrice;
+    }
   }
 
   trade.updatedAt = eventTime;
