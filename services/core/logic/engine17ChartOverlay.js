@@ -9,6 +9,12 @@
 // Produces:
 //   Chart overlay payload for frontend drawing
 //
+// Updated for:
+// - explicit dayRange passthrough
+// - sessionStructure passthrough
+// - anchorLabels / anchorDebug passthrough
+// - exhaustion early + trigger split
+// - signalTimes passthrough
 
 import path from "path";
 import { readFile } from "fs/promises";
@@ -169,6 +175,22 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
       anchorBTime: fibResult.anchors?.anchorBTime || null,
     },
 
+    anchorLabels: fibResult.anchorLabels || {
+      anchorAType: "IMPULSE_BASE",
+      anchorBType: "IMPULSE_HIGH",
+    },
+
+    anchorDebug: fibResult.anchorDebug || {
+      rawAnchorA: null,
+      rawAnchorATime: null,
+      finalAnchorA: null,
+      finalAnchorATime: null,
+      rawAnchorB: null,
+      rawAnchorBTime: null,
+      finalAnchorB: null,
+      finalAnchorBTime: null,
+    },
+
     levels: fibResult.fib,
     primaryZone: fibResult.pullbackZone,
     secondaryZone: fibResult.secondaryZone,
@@ -207,6 +229,17 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
       : null,
     exhaustionActive: !!fibResult.exhaustionActive,
 
+    exhaustionEarly: !!fibResult.exhaustionEarly,
+    exhaustionEarlyShort: !!fibResult.exhaustionEarlyShort,
+    exhaustionEarlyLong: !!fibResult.exhaustionEarlyLong,
+
+    exhaustionTrigger: !!fibResult.exhaustionTrigger,
+    exhaustionTriggerShort: !!fibResult.exhaustionTriggerShort,
+    exhaustionTriggerLong: !!fibResult.exhaustionTriggerLong,
+
+    signalTimes: fibResult.signalTimes || {},
+    debugExhaustion: fibResult.debugExhaustion || null,
+
     impulseVolumeConfirmed: !!fibResult.impulseVolumeConfirmed,
     volumeContext: fibResult.volumeContext || {
       volumeScore: 0,
@@ -219,23 +252,45 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
 
   const signals = [];
 
-  if (fibResult.exhaustionDetected && fibResult.exhaustionActive) {
+  if (fibResult.exhaustionTrigger === true && fibResult.exhaustionActive) {
     signals.push({
-      kind: fibResult.exhaustionShort
-        ? "EXHAUSTION_SHORT"
-        : fibResult.exhaustionLong
-        ? "EXHAUSTION_LONG"
-        : "EXHAUSTION",
+      kind: fibResult.exhaustionTriggerShort
+        ? "EXHAUSTION_TRIGGER_SHORT"
+        : fibResult.exhaustionTriggerLong
+        ? "EXHAUSTION_TRIGGER_LONG"
+        : "EXHAUSTION_TRIGGER",
       price: Number.isFinite(fibResult.exhaustionBarPrice)
         ? fibResult.exhaustionBarPrice
         : fibResult.anchors?.anchorB,
-      label: fibResult.exhaustionShort
-        ? "Exhaustion Short"
-        : fibResult.exhaustionLong
-        ? "Exhaustion Long"
-        : "Exhaustion",
+      label: fibResult.exhaustionTriggerShort
+        ? "Exhaustion Trigger Short"
+        : fibResult.exhaustionTriggerLong
+        ? "Exhaustion Trigger Long"
+        : "Exhaustion Trigger",
       severity: "high",
-      time: fibResult.signalTimes?.exhaustionTime || fibResult.exhaustionBarTime || null,
+      time:
+        fibResult.signalTimes?.exhaustionTriggerTime ||
+        fibResult.signalTimes?.exhaustionTime ||
+        fibResult.exhaustionBarTime ||
+        null,
+    });
+  } else if (fibResult.exhaustionEarly === true) {
+    signals.push({
+      kind: fibResult.exhaustionEarlyShort
+        ? "EXHAUSTION_EARLY_SHORT"
+        : fibResult.exhaustionEarlyLong
+        ? "EXHAUSTION_EARLY_LONG"
+        : "EXHAUSTION_EARLY",
+      price: Number.isFinite(fibResult.exhaustionBarPrice)
+        ? fibResult.exhaustionBarPrice
+        : fibResult.anchors?.anchorB,
+      label: fibResult.exhaustionEarlyShort
+        ? "Exhaustion Early Short"
+        : fibResult.exhaustionEarlyLong
+        ? "Exhaustion Early Long"
+        : "Exhaustion Early",
+      severity: "medium",
+      time: fibResult.signalTimes?.exhaustionEarlyTime || null,
     });
   } else {
     if (fibResult.state) {
@@ -295,12 +350,21 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
     });
   }
 
-  if (fibResult.exhaustionDetected && fibResult.exhaustionActive) {
+  if (fibResult.exhaustionTrigger === true && fibResult.exhaustionActive) {
     badges.unshift({
-      kind: fibResult.exhaustionShort
+      kind: fibResult.exhaustionTriggerShort
         ? "EXHAUSTION_READY_SHORT"
         : "EXHAUSTION_READY_LONG",
       value: "EXHAUSTION READY",
+    });
+  } else if (fibResult.exhaustionEarly === true) {
+    badges.unshift({
+      kind: fibResult.exhaustionEarlyShort
+        ? "EXHAUSTION_WATCH_SHORT"
+        : fibResult.exhaustionEarlyLong
+        ? "EXHAUSTION_WATCH_LONG"
+        : "EXHAUSTION_WATCH",
+      value: "EXHAUSTION WATCH",
     });
   }
 
@@ -309,12 +373,13 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
     zones,
     fib: fibOverlay,
     anchors,
-    dayRange: {
+    dayRange: fibResult.dayRange || {
       currentDayLow: fibResult.anchors?.premarketLow,
       currentDayHigh: fibResult.anchors?.sessionHigh,
       currentDayLowTime: fibResult.anchors?.premarketLowTime || null,
       currentDayHighTime: fibResult.anchors?.sessionHighTime || null,
     },
+    sessionStructure: fibResult.sessionStructure || null,
     signals,
     badges,
     meta: {
