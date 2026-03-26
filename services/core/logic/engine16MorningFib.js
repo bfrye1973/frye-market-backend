@@ -1,5 +1,24 @@
 // services/core/logic/engine16MorningFib.js
 // Engine 16 — Morning Impulse Fib Engine
+//
+// Current version goals
+// - Detect morning impulse move
+// - Build fib retracement structure
+// - Track pullback state
+// - Detect wick rejection
+// - Detect breakout / breakdown continuation
+// - Detect reversal structure
+// - Detect exhaustion EARLY + exhaustion TRIGGER
+// - Detect trend continuation
+// - Classify current strategy type
+// - Optionally refine anchors using negotiated zones
+// - Optionally overlay Engine 4 volume context
+//
+// Notes
+// - Engine 16 does NOT place trades
+// - Engine 16 does NOT override Engine 1 / 2 / 6
+// - readinessLabel becomes EXHAUSTION_READY ONLY on TRIGGER, not EARLY
+// - chart / engine 15 can still see EARLY fields for watch-state visuals
 
 import path from "path";
 import { readFile } from "fs/promises";
@@ -8,11 +27,13 @@ import { fileURLToPath } from "url";
 import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
 import { computeVolumeBehavior } from "./volumeBehaviorEngine.js";
 
-const MARKET_TZ = "America/New_York";      // keeps session logic correct
-const DISPLAY_TZ = "America/Phoenix";      // fixes shown times to Arizona
+const MARKET_TZ = "America/New_York";
+const DISPLAY_TZ = "America/Phoenix";
+
 const DEFAULT_SYMBOL = "SPY";
 const DEFAULT_TF = "30m";
 const FETCH_DAYS = 8;
+
 const EXHAUSTION_LOOKBACK_BARS = 5;
 const EXHAUSTION_MIN_ACTIVE_BARS = 2;
 
@@ -29,7 +50,7 @@ const TF_MS = {
 
 const SUPPORTED_TF = new Set(["10m", "30m"]);
 
-const DTF_PARTS = new Intl.DateTimeFormat("en-US", {
+const NY_DTF_PARTS = new Intl.DateTimeFormat("en-US", {
   timeZone: MARKET_TZ,
   year: "numeric",
   month: "2-digit",
@@ -56,6 +77,11 @@ function avg(values) {
 
 function round2(x) {
   return Number.isFinite(x) ? Math.round(x * 100) / 100 : null;
+}
+
+function toNum(x, fb = null) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : fb;
 }
 
 function normalizeBarsForEngine16(bars) {
@@ -87,8 +113,8 @@ function isClosedBar(bar, tf, nowMs = Date.now()) {
   return Number.isFinite(bar?.t) && bar.t + tfMs <= nowMs;
 }
 
-function getNyPartsFromMs(ms) {
-  const parts = DTF_PARTS.formatToParts(new Date(ms));
+function partsFromFormatter(ms, formatter) {
+  const parts = formatter.formatToParts(new Date(ms));
   const out = {};
   for (const p of parts) {
     if (p.type !== "literal") out[p.type] = p.value;
@@ -104,21 +130,12 @@ function getNyPartsFromMs(ms) {
   };
 }
 
+function getNyPartsFromMs(ms) {
+  return partsFromFormatter(ms, NY_DTF_PARTS);
+}
+
 function getDisplayPartsFromMs(ms) {
-  const parts = DISPLAY_DTF_PARTS.formatToParts(new Date(ms));
-  const out = {};
-  for (const p of parts) {
-    if (p.type !== "literal") out[p.type] = p.value;
-  }
-  return {
-    year: Number(out.year),
-    month: Number(out.month),
-    day: Number(out.day),
-    hour: Number(out.hour),
-    minute: Number(out.minute),
-    dateKey: `${out.year}-${out.month}-${out.day}`,
-    minuteOfDay: Number(out.hour) * 60 + Number(out.minute),
-  };
+  return partsFromFormatter(ms, DISPLAY_DTF_PARTS);
 }
 
 function formatDisplayTimeFromMs(ms) {
@@ -138,17 +155,17 @@ function filterBarsForDate(closedBars, dateKey) {
 
 function inPremarket(bar) {
   const p = getNyPartsFromMs(bar.t);
-  return p.minuteOfDay >= 240 && p.minuteOfDay < 570;
+  return p.minuteOfDay >= 240 && p.minuteOfDay < 570; // 04:00–09:30 ET
 }
 
 function inMorningImpulseWindow(bar) {
   const p = getNyPartsFromMs(bar.t);
-  return p.minuteOfDay >= 570 && p.minuteOfDay < 660;
+  return p.minuteOfDay >= 570 && p.minuteOfDay < 660; // 09:30–11:00 ET
 }
 
 function inRegularSession(bar) {
   const p = getNyPartsFromMs(bar.t);
-  return p.minuteOfDay >= 570 && p.minuteOfDay < 960;
+  return p.minuteOfDay >= 570 && p.minuteOfDay < 960; // 09:30–16:00 ET
 }
 
 function atrAtIndex(bars, endIndex, len = 14) {
@@ -316,7 +333,6 @@ function chooseRelevantNegotiatedZone({ zones, bars, symbol, candidate, context 
     const isActive =
       (typeof z?.status === "string" ? z.status.toLowerCase() === "active" : false) ||
       z?.stickyConfirmed === true;
-
     if (!isActive) continue;
 
     const range = safeRangeFromZoneObject(z);
@@ -343,12 +359,8 @@ function chooseRelevantNegotiatedZone({ zones, bars, symbol, candidate, context 
 
     const launchPrice =
       context === "SHORT_CONTEXT"
-        ? Number.isFinite(launchBar?.h)
-          ? launchBar.h
-          : launchBar.c
-        : Number.isFinite(launchBar?.l)
-        ? launchBar.l
-        : launchBar.c;
+        ? Number.isFinite(launchBar?.h) ? launchBar.h : launchBar.c
+        : Number.isFinite(launchBar?.l) ? launchBar.l : launchBar.c;
 
     const zoneMid = (range.lo + range.hi) / 2;
     const distance = Number.isFinite(launchPrice)
@@ -365,6 +377,7 @@ function chooseRelevantNegotiatedZone({ zones, bars, symbol, candidate, context 
   }
 
   if (!scored.length) return null;
+
   scored.sort((a, b) => a.distance - b.distance);
   const best = scored[0];
 
@@ -451,16 +464,12 @@ function buildAnchorTimes({
 
   if (context === "LONG_CONTEXT") {
     anchorAMs = usedNegotiatedZoneAnchor
-      ? Number.isFinite(candidate?.t)
-        ? candidate.t
-        : premarketLowMs
+      ? Number.isFinite(candidate?.t) ? candidate.t : premarketLowMs
       : premarketLowMs;
     anchorBMs = sessionHighMs;
   } else if (context === "SHORT_CONTEXT") {
     anchorAMs = usedNegotiatedZoneAnchor
-      ? Number.isFinite(candidate?.t)
-        ? candidate.t
-        : premarketHighMs
+      ? Number.isFinite(candidate?.t) ? candidate.t : premarketHighMs
       : premarketHighMs;
     anchorBMs = sessionLowMs;
   }
@@ -497,36 +506,8 @@ function emptySignalTimes() {
     exhaustionTime: null,
     reversalTime: null,
     continuationTime: null,
-  };
-}
-
-function emptyStrategyFields() {
-  return {
-    strategyType: "NONE",
-    readinessLabel: "NO_SETUP",
-    failedBreakout: false,
-    failedBreakdown: false,
-    reversalDetected: false,
-    trendContinuation: false,
-    exhaustionDetected: false,
-    exhaustionShort: false,
-    exhaustionLong: false,
-    exhaustionBarTime: null,
-    exhaustionBarPrice: null,
-    exhaustionLookbackBars: EXHAUSTION_LOOKBACK_BARS,
-    exhaustionActive: false,
-    debugExhaustion: {
-      checkedBars: EXHAUSTION_LOOKBACK_BARS,
-      detectedBarTime: null,
-      detectedBarPrice: null,
-      nearHigh: false,
-      nearLow: false,
-      upperWickStrong: false,
-      lowerWickStrong: false,
-      shortSequenceConfirmed: false,
-      longSequenceConfirmed: false,
-      lastBarCheckedTime: null,
-    },
+    exhaustionEarlyTime: null,
+    exhaustionTriggerTime: null,
   };
 }
 
@@ -540,6 +521,223 @@ function buildAnchorLabels(context) {
   return {
     anchorAType: "IMPULSE_BASE",
     anchorBType: "IMPULSE_HIGH",
+  };
+}
+
+function emptyStrategyFields() {
+  return {
+    strategyType: "NONE",
+    readinessLabel: "NO_SETUP",
+    failedBreakout: false,
+    failedBreakdown: false,
+    reversalDetected: false,
+    trendContinuation: false,
+
+    exhaustionDetected: false,
+    exhaustionShort: false,
+    exhaustionLong: false,
+    exhaustionBarTime: null,
+    exhaustionBarPrice: null,
+    exhaustionLookbackBars: EXHAUSTION_LOOKBACK_BARS,
+    exhaustionActive: false,
+
+    exhaustionEarly: false,
+    exhaustionEarlyShort: false,
+    exhaustionEarlyLong: false,
+
+    exhaustionTrigger: false,
+    exhaustionTriggerShort: false,
+    exhaustionTriggerLong: false,
+
+    debugExhaustion: {
+      checkedBars: EXHAUSTION_LOOKBACK_BARS,
+      detectedBarTime: null,
+      detectedBarPrice: null,
+      nearHigh: false,
+      nearLow: false,
+      upperWickStrong: false,
+      lowerWickStrong: false,
+      shortSequenceConfirmed: false,
+      longSequenceConfirmed: false,
+      rejectionCountNearHighs: 0,
+      failedExtensionCountNearHighs: 0,
+      rejectionCountNearLows: 0,
+      failedExtensionCountNearLows: 0,
+      lastBarCheckedTime: null,
+    },
+  };
+}
+
+function getBodies(bars) {
+  return bars.map((b) => Math.abs((b?.c ?? 0) - (b?.o ?? 0))).filter(Number.isFinite);
+}
+
+function confirmExhaustionPhases({
+  bars,
+  sessionHigh,
+  sessionLow,
+  latestIndex,
+  lookbackBars,
+}) {
+  const start = Math.max(1, latestIndex - lookbackBars + 1);
+
+  let rejectionCountNearHighs = 0;
+  let failedExtensionCountNearHighs = 0;
+  let rejectionCountNearLows = 0;
+  let failedExtensionCountNearLows = 0;
+
+  let shortEarlyIdx = null;
+  let longEarlyIdx = null;
+  let shortTriggerIdx = null;
+  let longTriggerIdx = null;
+
+  let lastDebug = {
+    checkedBars: lookbackBars,
+    detectedBarTime: null,
+    detectedBarPrice: null,
+    nearHigh: false,
+    nearLow: false,
+    upperWickStrong: false,
+    lowerWickStrong: false,
+    shortSequenceConfirmed: false,
+    longSequenceConfirmed: false,
+    rejectionCountNearHighs: 0,
+    failedExtensionCountNearHighs: 0,
+    rejectionCountNearLows: 0,
+    failedExtensionCountNearLows: 0,
+    lastBarCheckedTime: null,
+  };
+
+  for (let i = start; i <= latestIndex; i++) {
+    const bar = bars[i];
+    const prev = bars[i - 1];
+    if (!bar || !prev) continue;
+
+    const range = Number(bar.h) - Number(bar.l);
+    if (!(range > 0)) continue;
+
+    const upperWick = bar.h - Math.max(bar.o, bar.c);
+    const lowerWick = Math.min(bar.o, bar.c) - bar.l;
+    const upperWickStrong = upperWick / range >= 0.25;
+    const lowerWickStrong = lowerWick / range >= 0.25;
+
+    const bearishClose = Number.isFinite(bar.c) && Number.isFinite(bar.o) && bar.c < bar.o;
+    const bullishClose = Number.isFinite(bar.c) && Number.isFinite(bar.o) && bar.c > bar.o;
+
+    const nearHigh =
+      Number.isFinite(bar.h) &&
+      Number.isFinite(sessionHigh) &&
+      bar.h >= sessionHigh - range * 2;
+
+    const nearLow =
+      Number.isFinite(bar.l) &&
+      Number.isFinite(sessionLow) &&
+      bar.l <= sessionLow + range * 2;
+
+    const failedHigherPush =
+      Number.isFinite(prev.h) &&
+      Number.isFinite(bar.h) &&
+      bar.h <= prev.h + Math.max(0.05, range * 0.10);
+
+    const failedLowerPush =
+      Number.isFinite(prev.l) &&
+      Number.isFinite(bar.l) &&
+      bar.l >= prev.l - Math.max(0.05, range * 0.10);
+
+    if (nearHigh && (upperWickStrong || bearishClose || bar.c < prev.c)) {
+      rejectionCountNearHighs += 1;
+    }
+    if (nearHigh && failedHigherPush) {
+      failedExtensionCountNearHighs += 1;
+    }
+
+    if (nearLow && (lowerWickStrong || bullishClose || bar.c > prev.c)) {
+      rejectionCountNearLows += 1;
+    }
+    if (nearLow && failedLowerPush) {
+      failedExtensionCountNearLows += 1;
+    }
+
+    const shortSequenceConfirmed =
+      rejectionCountNearHighs >= 2 && failedExtensionCountNearHighs >= 2;
+
+    const longSequenceConfirmed =
+      rejectionCountNearLows >= 2 && failedExtensionCountNearLows >= 2;
+
+    if (shortSequenceConfirmed && shortEarlyIdx == null) shortEarlyIdx = i;
+    if (longSequenceConfirmed && longEarlyIdx == null) longEarlyIdx = i;
+
+    // trigger detection = first real displacement after early cluster
+    const recentBodies = getBodies(bars.slice(Math.max(0, i - 5), i));
+    const avgBody = avg(recentBodies) || 0;
+    const body = Math.abs(bar.c - bar.o);
+
+    const strongBearishCandle =
+      body >= avgBody * 1.3 &&
+      bar.c < bar.o &&
+      (bar.c - bar.l) <= range * 0.35;
+
+    const strongBullishCandle =
+      body >= avgBody * 1.3 &&
+      bar.c > bar.o &&
+      (bar.h - bar.c) <= range * 0.35;
+
+    const breaksShortStructure =
+      Number.isFinite(prev.l) &&
+      Number.isFinite(bar.c) &&
+      bar.c < prev.l;
+
+    const breaksLongStructure =
+      Number.isFinite(prev.h) &&
+      Number.isFinite(bar.c) &&
+      bar.c > prev.h;
+
+    if (shortEarlyIdx != null && shortTriggerIdx == null) {
+      if (strongBearishCandle && breaksShortStructure) {
+        shortTriggerIdx = i;
+      }
+    }
+
+    if (longEarlyIdx != null && longTriggerIdx == null) {
+      if (strongBullishCandle && breaksLongStructure) {
+        longTriggerIdx = i;
+      }
+    }
+
+    lastDebug = {
+      checkedBars: lookbackBars,
+      detectedBarTime:
+        shortTriggerIdx != null
+          ? formatDisplayTimeFromMs(bars[shortTriggerIdx]?.t)
+          : longTriggerIdx != null
+          ? formatDisplayTimeFromMs(bars[longTriggerIdx]?.t)
+          : null,
+      detectedBarPrice:
+        shortTriggerIdx != null
+          ? round2(bars[shortTriggerIdx]?.h)
+          : longTriggerIdx != null
+          ? round2(bars[longTriggerIdx]?.l)
+          : null,
+      nearHigh,
+      nearLow,
+      upperWickStrong,
+      lowerWickStrong,
+      shortSequenceConfirmed,
+      longSequenceConfirmed,
+      rejectionCountNearHighs,
+      failedExtensionCountNearHighs,
+      rejectionCountNearLows,
+      failedExtensionCountNearLows,
+      lastBarCheckedTime: formatDisplayTimeFromMs(bar.t),
+    };
+  }
+
+  return {
+    shortEarlyIdx,
+    longEarlyIdx,
+    shortTriggerIdx,
+    longTriggerIdx,
+    debug: lastDebug,
   };
 }
 
@@ -612,81 +810,88 @@ export async function computeMorningFib({
   const currentDayHighBar = findExtremeBarByPrice(todayBars, "h", "first");
   const currentDayLowBar = findExtremeBarByPrice(todayBars, "l", "first");
 
+  const noImpulseBase = {
+    ok: true,
+    symbol,
+    date: dateKey,
+    timeframe,
+    context: "NONE",
+    anchors: {
+      premarketLow: round2(premarketLow),
+      premarketHigh: round2(premarketHigh),
+      sessionHigh: regularBars.length ? round2(Math.max(...regularBars.map((b) => b.h))) : null,
+      sessionLow: regularBars.length ? round2(Math.min(...regularBars.map((b) => b.l))) : null,
+      anchorA: null,
+      anchorB: null,
+      premarketLowTime: formatDisplayTimeFromMs(premarketLowBar?.t),
+      premarketHighTime: formatDisplayTimeFromMs(premarketHighBar?.t),
+      sessionHighTime: formatDisplayTimeFromMs(regularSessionHighBar?.t),
+      sessionLowTime: formatDisplayTimeFromMs(regularSessionLowBar?.t),
+      anchorATime: null,
+      anchorBTime: null,
+    },
+    anchorLabels: buildAnchorLabels("NONE"),
+    anchorDebug: {
+      rawAnchorA: null,
+      rawAnchorATime: null,
+      finalAnchorA: null,
+      finalAnchorATime: null,
+      rawAnchorB: null,
+      rawAnchorBTime: null,
+      finalAnchorB: null,
+      finalAnchorBTime: null,
+    },
+    fib: { r382: null, r500: null, r618: null, r786: null },
+    pullbackZone: { lo: null, hi: null },
+    secondaryZone: { lo: null, hi: null },
+    dayRange: {
+      currentDayHigh: round2(currentDayHighBar?.h),
+      currentDayLow: round2(currentDayLowBar?.l),
+      currentDayHighTime: formatDisplayTimeFromMs(currentDayHighBar?.t),
+      currentDayLowTime: formatDisplayTimeFromMs(currentDayLowBar?.t),
+    },
+    sessionStructure: {
+      premarketHigh: round2(premarketHigh),
+      premarketHighTime: formatDisplayTimeFromMs(premarketHighBar?.t),
+      premarketLow: round2(premarketLow),
+      premarketLowTime: formatDisplayTimeFromMs(premarketLowBar?.t),
+      regularSessionHigh: round2(regularSessionHighBar?.h),
+      regularSessionHighTime: formatDisplayTimeFromMs(regularSessionHighBar?.t),
+      regularSessionLow: round2(regularSessionLowBar?.l),
+      regularSessionLowTime: formatDisplayTimeFromMs(regularSessionLowBar?.t),
+    },
+    signalTimes: emptySignalTimes(),
+    state: "NO_IMPULSE",
+    insidePrimaryZone: false,
+    insideSecondaryZone: false,
+    invalidated: false,
+    wickRejectionLong: false,
+    wickRejectionShort: false,
+    hasPulledBack: false,
+    breakoutReady: false,
+    breakdownReady: false,
+    ...emptyStrategyFields(),
+    usedNegotiatedZoneAnchor: false,
+    negotiatedZoneUsed: null,
+    impulseVolumeConfirmed: false,
+    volumeContext: {
+      volumeScore: 0,
+      volumeConfirmed: false,
+      volumeRegime: "UNKNOWN",
+      pressureBias: "NEUTRAL_PRESSURE",
+      flowSummary: [],
+    },
+    meta: {
+      marketTz: MARKET_TZ,
+      displayTz: DISPLAY_TZ,
+      impulseWindowMinutes: 90,
+      atrPeriod: 14,
+      atrMultiple: 1.2,
+    },
+  };
+
   if (!morningBars.length || !regularBars.length) {
-    return {
-      ok: true,
-      symbol,
-      date: dateKey,
-      timeframe,
-      context: "NONE",
-      anchors: {
-        premarketLow: round2(premarketLow),
-        premarketHigh: round2(premarketHigh),
-        sessionHigh: null,
-        sessionLow: null,
-        anchorA: null,
-        anchorB: null,
-        ...emptyTimeFields(),
-      },
-      anchorLabels: buildAnchorLabels("NONE"),
-      anchorDebug: {
-        rawAnchorA: null,
-        rawAnchorATime: null,
-        finalAnchorA: null,
-        finalAnchorATime: null,
-        rawAnchorB: null,
-        rawAnchorBTime: null,
-        finalAnchorB: null,
-        finalAnchorBTime: null,
-      },
-      fib: { r382: null, r500: null, r618: null, r786: null },
-      pullbackZone: { lo: null, hi: null },
-      secondaryZone: { lo: null, hi: null },
-      dayRange: {
-        currentDayHigh: round2(currentDayHighBar?.h),
-        currentDayLow: round2(currentDayLowBar?.l),
-        currentDayHighTime: formatDisplayTimeFromMs(currentDayHighBar?.t),
-        currentDayLowTime: formatDisplayTimeFromMs(currentDayLowBar?.t),
-      },
-      sessionStructure: {
-        premarketHigh: round2(premarketHigh),
-        premarketHighTime: formatDisplayTimeFromMs(premarketHighBar?.t),
-        premarketLow: round2(premarketLow),
-        premarketLowTime: formatDisplayTimeFromMs(premarketLowBar?.t),
-        regularSessionHigh: null,
-        regularSessionHighTime: null,
-        regularSessionLow: null,
-        regularSessionLowTime: null,
-      },
-      signalTimes: emptySignalTimes(),
-      state: "NO_IMPULSE",
-      insidePrimaryZone: false,
-      insideSecondaryZone: false,
-      invalidated: false,
-      wickRejectionLong: false,
-      wickRejectionShort: false,
-      hasPulledBack: false,
-      breakoutReady: false,
-      breakdownReady: false,
-      ...emptyStrategyFields(),
-      usedNegotiatedZoneAnchor: false,
-      negotiatedZoneUsed: null,
-      impulseVolumeConfirmed: false,
-      volumeContext: {
-        volumeScore: 0,
-        volumeConfirmed: false,
-        volumeRegime: "UNKNOWN",
-        pressureBias: "NEUTRAL_PRESSURE",
-        flowSummary: [],
-      },
-      meta: {
-        marketTz: MARKET_TZ,
-        displayTz: DISPLAY_TZ,
-        impulseWindowMinutes: 90,
-        atrPeriod: 14,
-        atrMultiple: 1.2,
-      },
-    };
+    return noImpulseBase;
   }
 
   let bestCandidate = null;
@@ -724,7 +929,6 @@ export async function computeMorningFib({
         : "SHORT_CONTEXT";
 
     const magnitude = direction === "LONG_CONTEXT" ? longMove : shortMove;
-
     const sessionHighBarAtBar = findExtremeBarByPrice(sessionBarsToNow, "h", "first");
     const sessionLowBarAtBar = findExtremeBarByPrice(sessionBarsToNow, "l", "first");
 
@@ -758,85 +962,7 @@ export async function computeMorningFib({
   }
 
   if (!bestCandidate) {
-    return {
-      ok: true,
-      symbol,
-      date: dateKey,
-      timeframe,
-      context: "NONE",
-      anchors: {
-        premarketLow: round2(premarketLow),
-        premarketHigh: round2(premarketHigh),
-        sessionHigh: round2(Math.max(...regularBars.map((b) => b.h))),
-        sessionLow: round2(Math.min(...regularBars.map((b) => b.l))),
-        anchorA: null,
-        anchorB: null,
-        premarketLowTime: formatDisplayTimeFromMs(premarketLowBar?.t),
-        premarketHighTime: formatDisplayTimeFromMs(premarketHighBar?.t),
-        sessionHighTime: formatDisplayTimeFromMs(regularSessionHighBar?.t),
-        sessionLowTime: formatDisplayTimeFromMs(regularSessionLowBar?.t),
-        anchorATime: null,
-        anchorBTime: null,
-      },
-      anchorLabels: buildAnchorLabels("NONE"),
-      anchorDebug: {
-        rawAnchorA: null,
-        rawAnchorATime: null,
-        finalAnchorA: null,
-        finalAnchorATime: null,
-        rawAnchorB: null,
-        rawAnchorBTime: null,
-        finalAnchorB: null,
-        finalAnchorBTime: null,
-      },
-      fib: { r382: null, r500: null, r618: null, r786: null },
-      pullbackZone: { lo: null, hi: null },
-      secondaryZone: { lo: null, hi: null },
-      dayRange: {
-        currentDayHigh: round2(currentDayHighBar?.h),
-        currentDayLow: round2(currentDayLowBar?.l),
-        currentDayHighTime: formatDisplayTimeFromMs(currentDayHighBar?.t),
-        currentDayLowTime: formatDisplayTimeFromMs(currentDayLowBar?.t),
-      },
-      sessionStructure: {
-        premarketHigh: round2(premarketHigh),
-        premarketHighTime: formatDisplayTimeFromMs(premarketHighBar?.t),
-        premarketLow: round2(premarketLow),
-        premarketLowTime: formatDisplayTimeFromMs(premarketLowBar?.t),
-        regularSessionHigh: round2(regularSessionHighBar?.h),
-        regularSessionHighTime: formatDisplayTimeFromMs(regularSessionHighBar?.t),
-        regularSessionLow: round2(regularSessionLowBar?.l),
-        regularSessionLowTime: formatDisplayTimeFromMs(regularSessionLowBar?.t),
-      },
-      signalTimes: emptySignalTimes(),
-      state: "NO_IMPULSE",
-      insidePrimaryZone: false,
-      insideSecondaryZone: false,
-      invalidated: false,
-      wickRejectionLong: false,
-      wickRejectionShort: false,
-      hasPulledBack: false,
-      breakoutReady: false,
-      breakdownReady: false,
-      ...emptyStrategyFields(),
-      usedNegotiatedZoneAnchor: false,
-      negotiatedZoneUsed: null,
-      impulseVolumeConfirmed: false,
-      volumeContext: {
-        volumeScore: 0,
-        volumeConfirmed: false,
-        volumeRegime: "UNKNOWN",
-        pressureBias: "NEUTRAL_PRESSURE",
-        flowSummary: [],
-      },
-      meta: {
-        marketTz: MARKET_TZ,
-        displayTz: DISPLAY_TZ,
-        impulseWindowMinutes: 90,
-        atrPeriod: 14,
-        atrMultiple: 1.2,
-      },
-    };
+    return noImpulseBase;
   }
 
   const rawAnchorA = bestCandidate.anchorA;
@@ -947,169 +1073,101 @@ export async function computeMorningFib({
   let failedBreakdown = false;
   let reversalDetected = false;
   let trendContinuation = false;
+
   let exhaustionDetected = false;
   let exhaustionShort = false;
   let exhaustionLong = false;
   let exhaustionBarTime = null;
   let exhaustionBarPrice = null;
   let exhaustionActive = false;
-  let strategyType = "NONE";
-  let readinessLabel = "NO_SETUP";
 
-  let debugExhaustion = {
-    checkedBars: EXHAUSTION_LOOKBACK_BARS,
-    detectedBarTime: null,
-    detectedBarPrice: null,
-    nearHigh: false,
-    nearLow: false,
-    upperWickStrong: false,
-    lowerWickStrong: false,
-    shortSequenceConfirmed: false,
-    longSequenceConfirmed: false,
-    lastBarCheckedTime: null,
-  };
+  let exhaustionEarly = false;
+  let exhaustionEarlyShort = false;
+  let exhaustionEarlyLong = false;
 
-  const lookbackStart = Math.max(1, closedBars.length - EXHAUSTION_LOOKBACK_BARS);
+  let exhaustionTrigger = false;
+  let exhaustionTriggerShort = false;
+  let exhaustionTriggerLong = false;
 
-  for (let i = lookbackStart; i < closedBars.length; i++) {
-    const bar = closedBars[i];
-    if (!bar) continue;
+  let debugExhaustion = emptyStrategyFields().debugExhaustion;
 
-    const next1 = i + 1 < closedBars.length ? closedBars[i + 1] : null;
-    const next2 = i + 2 < closedBars.length ? closedBars[i + 2] : null;
+  const latestIndex = closedBars.length - 1;
+  const ex = confirmExhaustionPhases({
+    bars: closedBars,
+    sessionHigh: bestCandidate.sessionHigh,
+    sessionLow: bestCandidate.sessionLow,
+    latestIndex,
+    lookbackBars: EXHAUSTION_LOOKBACK_BARS,
+  });
 
-    const range = Number.isFinite(bar.h) && Number.isFinite(bar.l) ? bar.h - bar.l : 0;
-    if (!(range > 0)) continue;
+  debugExhaustion = ex.debug;
 
-    const upperWick = bar.h - Math.max(bar.o, bar.c);
-    const lowerWick = Math.min(bar.o, bar.c) - bar.l;
-
-    const upperWickStrong = upperWick / range >= 0.25;
-    const lowerWickStrong = lowerWick / range >= 0.25;
-
-    const bearishClose =
-      Number.isFinite(bar.c) && Number.isFinite(bar.o) && bar.c < bar.o;
-    const bullishClose =
-      Number.isFinite(bar.c) && Number.isFinite(bar.o) && bar.c > bar.o;
-
-    const nearHigh =
-      Number.isFinite(bar.h) &&
-      Number.isFinite(bestCandidate.sessionHigh) &&
-      bar.h >= bestCandidate.sessionHigh * 0.995;
-
-    const nearLow =
-      Number.isFinite(bar.l) &&
-      Number.isFinite(bestCandidate.sessionLow) &&
-      bar.l <= bestCandidate.sessionLow * 1.005;
-
-    const rejectionUnderHigh =
-      Number.isFinite(bar.c) &&
-      Number.isFinite(bestCandidate.sessionHigh) &&
-      bar.c < bestCandidate.sessionHigh;
-
-    const reclaimAboveLow =
-      Number.isFinite(bar.c) &&
-      Number.isFinite(bestCandidate.sessionLow) &&
-      bar.c > bestCandidate.sessionLow;
-
-    const lowerHigh1 =
-      next1 && Number.isFinite(next1.h) && Number.isFinite(bar.h) && next1.h <= bar.h;
-    const higherLow1 =
-      next1 && Number.isFinite(next1.l) && Number.isFinite(bar.l) && next1.l >= bar.l;
-
-    const weakerClose1 =
-      next1 && Number.isFinite(next1.c) && Number.isFinite(bar.c) && next1.c < bar.c;
-    const strongerClose1 =
-      next1 && Number.isFinite(next1.c) && Number.isFinite(bar.c) && next1.c > bar.c;
-
-    const weakerClose2 =
-      next2 && Number.isFinite(next2.c) && Number.isFinite(bar.c) && next2.c < bar.c;
-    const strongerClose2 =
-      next2 && Number.isFinite(next2.c) && Number.isFinite(bar.c) && next2.c > bar.c;
-
-    const loseFastStructureShort =
-      (next1 && Number.isFinite(next1.c) && Number.isFinite(bar.l) && next1.c < bar.l) ||
-      (next2 && Number.isFinite(next2.c) && Number.isFinite(bar.l) && next2.c < bar.l);
-
-    const regainFastStructureLong =
-      (next1 && Number.isFinite(next1.c) && Number.isFinite(bar.h) && next1.c > bar.h) ||
-      (next2 && Number.isFinite(next2.c) && Number.isFinite(bar.h) && next2.c > bar.h);
-
-    const shortSequenceConfirmed =
-      nearHigh &&
-      (upperWickStrong || bearishClose || rejectionUnderHigh) &&
-      (lowerHigh1 || weakerClose1 || weakerClose2 || loseFastStructureShort);
-
-    const longSequenceConfirmed =
-      nearLow &&
-      (lowerWickStrong || bullishClose || reclaimAboveLow) &&
-      (higherLow1 || strongerClose1 || strongerClose2 || regainFastStructureLong);
-
-    debugExhaustion = {
-      checkedBars: EXHAUSTION_LOOKBACK_BARS,
-      detectedBarTime: shortSequenceConfirmed || longSequenceConfirmed ? formatDisplayTimeFromMs(bar.t) : null,
-      detectedBarPrice: shortSequenceConfirmed ? round2(bar.h) : longSequenceConfirmed ? round2(bar.l) : null,
-      nearHigh,
-      nearLow,
-      upperWickStrong,
-      lowerWickStrong,
-      shortSequenceConfirmed,
-      longSequenceConfirmed,
-      lastBarCheckedTime: formatDisplayTimeFromMs(bar.t),
-    };
-
-    if (shortSequenceConfirmed) {
-      exhaustionDetected = true;
-      exhaustionShort = true;
-      exhaustionLong = false;
-      exhaustionBarTime = formatDisplayTimeFromMs(bar.t);
-      exhaustionBarPrice = round2(bar.h);
-      break;
-    }
-
-    if (longSequenceConfirmed) {
-      exhaustionDetected = true;
-      exhaustionLong = true;
-      exhaustionShort = false;
-      exhaustionBarTime = formatDisplayTimeFromMs(bar.t);
-      exhaustionBarPrice = round2(bar.l);
-      break;
-    }
+  if (ex.shortEarlyIdx != null) {
+    exhaustionEarly = true;
+    exhaustionEarlyShort = true;
+  }
+  if (ex.longEarlyIdx != null) {
+    exhaustionEarly = true;
+    exhaustionEarlyLong = true;
   }
 
-  if (exhaustionShort) {
-    const exhaustionBarIdx = closedBars.findIndex(
-      (b) => formatDisplayTimeFromMs(b.t) === exhaustionBarTime && round2(b.h) === exhaustionBarPrice
-    );
-    const barsSince = exhaustionBarIdx >= 0 ? (closedBars.length - 1) - exhaustionBarIdx : EXHAUSTION_MIN_ACTIVE_BARS + 1;
+  if (ex.shortTriggerIdx != null) {
+    exhaustionTrigger = true;
+    exhaustionTriggerShort = true;
+    exhaustionDetected = true;
+    exhaustionShort = true;
+    exhaustionLong = false;
+
+    const bar = closedBars[ex.shortTriggerIdx];
+    exhaustionBarTime = formatDisplayTimeFromMs(bar?.t);
+    exhaustionBarPrice = round2(bar?.h);
+  } else if (ex.longTriggerIdx != null) {
+    exhaustionTrigger = true;
+    exhaustionTriggerLong = true;
+    exhaustionDetected = true;
+    exhaustionLong = true;
+    exhaustionShort = false;
+
+    const bar = closedBars[ex.longTriggerIdx];
+    exhaustionBarTime = formatDisplayTimeFromMs(bar?.t);
+    exhaustionBarPrice = round2(bar?.l);
+  }
+
+  if (exhaustionTriggerShort) {
+    const idx = ex.shortTriggerIdx;
+    const barsSince = idx != null ? (latestIndex - idx) : EXHAUSTION_MIN_ACTIVE_BARS + 1;
     const invalid =
       barsSince > EXHAUSTION_MIN_ACTIVE_BARS &&
       Number.isFinite(latestClose) &&
       Number.isFinite(exhaustionBarPrice) &&
       latestClose > exhaustionBarPrice;
+
     exhaustionActive = !invalid;
     if (!exhaustionActive) {
       exhaustionDetected = false;
       exhaustionShort = false;
+      exhaustionTrigger = false;
+      exhaustionTriggerShort = false;
       exhaustionBarTime = null;
       exhaustionBarPrice = null;
     }
   }
 
-  if (exhaustionLong) {
-    const exhaustionBarIdx = closedBars.findIndex(
-      (b) => formatDisplayTimeFromMs(b.t) === exhaustionBarTime && round2(b.l) === exhaustionBarPrice
-    );
-    const barsSince = exhaustionBarIdx >= 0 ? (closedBars.length - 1) - exhaustionBarIdx : EXHAUSTION_MIN_ACTIVE_BARS + 1;
+  if (exhaustionTriggerLong) {
+    const idx = ex.longTriggerIdx;
+    const barsSince = idx != null ? (latestIndex - idx) : EXHAUSTION_MIN_ACTIVE_BARS + 1;
     const invalid =
       barsSince > EXHAUSTION_MIN_ACTIVE_BARS &&
       Number.isFinite(latestClose) &&
       Number.isFinite(exhaustionBarPrice) &&
       latestClose < exhaustionBarPrice;
+
     exhaustionActive = !invalid;
     if (!exhaustionActive) {
       exhaustionDetected = false;
       exhaustionLong = false;
+      exhaustionTrigger = false;
+      exhaustionTriggerLong = false;
       exhaustionBarTime = null;
       exhaustionBarPrice = null;
     }
@@ -1174,7 +1232,7 @@ export async function computeMorningFib({
   if (
     finalContext === "LONG_CONTEXT" &&
     !reversalDetected &&
-    !exhaustionDetected &&
+    !exhaustionTrigger &&
     Number.isFinite(latestClose) &&
     Number.isFinite(bestCandidate.sessionHigh) &&
     Number.isFinite(bestCandidate.atr) &&
@@ -1186,7 +1244,7 @@ export async function computeMorningFib({
   if (
     finalContext === "SHORT_CONTEXT" &&
     !reversalDetected &&
-    !exhaustionDetected &&
+    !exhaustionTrigger &&
     Number.isFinite(latestClose) &&
     Number.isFinite(bestCandidate.sessionLow) &&
     Number.isFinite(bestCandidate.atr) &&
@@ -1195,7 +1253,12 @@ export async function computeMorningFib({
     trendContinuation = true;
   }
 
-  if (exhaustionDetected && exhaustionActive) {
+  let strategyType = "NONE";
+  let readinessLabel = "NO_SETUP";
+
+  // EARLY = watch only, no readiness
+  // TRIGGER = actual entry state
+  if (exhaustionTrigger && exhaustionActive) {
     strategyType = "EXHAUSTION";
     readinessLabel = "EXHAUSTION_READY";
   } else if (reversalDetected && (failedBreakout || failedBreakdown)) {
@@ -1277,9 +1340,16 @@ export async function computeMorningFib({
     breakoutReadyTime: breakoutReady ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
     breakdownReadyTime: breakdownReady ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
     impulseVolumeConfirmedTime: impulseVolumeConfirmed ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
-    exhaustionTime: exhaustionDetected ? exhaustionBarTime : null,
+    exhaustionTime: exhaustionTrigger ? exhaustionBarTime : null,
     reversalTime: reversalDetected ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
     continuationTime: trendContinuation ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
+    exhaustionEarlyTime:
+      ex.shortEarlyIdx != null
+        ? formatDisplayTimeFromMs(closedBars[ex.shortEarlyIdx]?.t)
+        : ex.longEarlyIdx != null
+        ? formatDisplayTimeFromMs(closedBars[ex.longEarlyIdx]?.t)
+        : null,
+    exhaustionTriggerTime: exhaustionTrigger ? exhaustionBarTime : null,
   };
 
   return {
@@ -1368,6 +1438,15 @@ export async function computeMorningFib({
     exhaustionBarPrice,
     exhaustionLookbackBars: EXHAUSTION_LOOKBACK_BARS,
     exhaustionActive,
+
+    exhaustionEarly,
+    exhaustionEarlyShort,
+    exhaustionEarlyLong,
+
+    exhaustionTrigger,
+    exhaustionTriggerShort,
+    exhaustionTriggerLong,
+
     debugExhaustion,
 
     usedNegotiatedZoneAnchor,
@@ -1385,3 +1464,5 @@ export async function computeMorningFib({
     },
   };
 }
+
+export default computeMorningFib;
