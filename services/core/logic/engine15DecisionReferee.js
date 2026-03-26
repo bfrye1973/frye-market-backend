@@ -2,22 +2,16 @@
 //
 // Engine 15C — Decision Referee
 //
-// Step 1 safe fix:
-// - preserves structural direction when entry is blocked
-// - stops E6_STAND_DOWN from hard-collapsing valid structure
-// - stops E16_INVALIDATED from auto-wiping HTF structure context
-// - keeps existing snapshot/frontend contract stable
+// Updated for Engine 16 exhaustion early + trigger model
 //
-// Step 1.5 safe addition:
-// - adds signalEvent block so frontend/debug can see exact setup signal time
-// - uses Engine 16 signalTimes first, then safe fallbacks
-//
-// Notes:
+// Key rules:
+// - readinessLabel from Engine 16 remains important, but Engine 15 only treats
+//   exhaustionTrigger as a true exhaustion entry signal
+// - exhaustionEarly is watch-state only
+// - preserves existing contracts as much as possible
 // - pure logic only
 // - no route fanout
 // - safe / defensive
-// - does NOT replace Engine 6
-// - does NOT place orders
 
 const VALID_STRATEGY_TYPES = new Set([
   "EXHAUSTION",
@@ -100,6 +94,8 @@ function normalizeDirection(x, engine16 = null) {
   const s = safeUpper(x, "NONE");
   if (["LONG", "SHORT", "NONE"].includes(s)) return s;
 
+  if (engine16?.exhaustionTriggerShort === true) return "SHORT";
+  if (engine16?.exhaustionTriggerLong === true) return "LONG";
   if (engine16?.exhaustionShort === true) return "SHORT";
   if (engine16?.exhaustionLong === true) return "LONG";
   if (engine16?.breakdownReady === true) return "SHORT";
@@ -217,23 +213,58 @@ function normalizeZoneContext(ctx = null) {
 }
 
 function normalizeEngine16(engine16 = null) {
-  const strategyType = normalizeStrategyType(engine16?.strategyType);
-  const readinessLabel = safeUpper(engine16?.readinessLabel, "NO_SETUP");
-  const direction = normalizeDirection(engine16?.direction, engine16);
+  const rawStrategyType = normalizeStrategyType(engine16?.strategyType);
+  const rawReadinessLabel = safeUpper(engine16?.readinessLabel, "NO_SETUP");
+
+  const exhaustionEarly = engine16?.exhaustionEarly === true;
+  const exhaustionEarlyShort = engine16?.exhaustionEarlyShort === true;
+  const exhaustionEarlyLong = engine16?.exhaustionEarlyLong === true;
+
+  const exhaustionTrigger = engine16?.exhaustionTrigger === true;
+  const exhaustionTriggerShort = engine16?.exhaustionTriggerShort === true;
+  const exhaustionTriggerLong = engine16?.exhaustionTriggerLong === true;
+
+  let strategyType = rawStrategyType;
+  let readinessLabel = rawReadinessLabel;
+
+  // Engine 15 rule:
+  // exhaustionEarly is watch-only, not a real entry-ready strategy
+  if (exhaustionEarly && !exhaustionTrigger) {
+    if (strategyType === "EXHAUSTION") strategyType = "NONE";
+    if (readinessLabel === "EXHAUSTION_READY") readinessLabel = "NO_SETUP";
+  }
+
+  const direction = normalizeDirection(engine16?.direction, {
+    ...engine16,
+    exhaustionTriggerShort,
+    exhaustionTriggerLong,
+  });
 
   return {
     ok: engine16?.ok !== false,
     strategyType,
+    rawStrategyType,
     readinessLabel,
+    rawReadinessLabel,
     direction,
     context: safeUpper(engine16?.context, "NONE"),
     state: safeUpper(engine16?.state, "NONE"),
+
     exhaustionDetected: engine16?.exhaustionDetected === true,
     exhaustionActive: engine16?.exhaustionActive === true,
     exhaustionShort: engine16?.exhaustionShort === true,
     exhaustionLong: engine16?.exhaustionLong === true,
     exhaustionBarTime: engine16?.exhaustionBarTime || null,
     exhaustionBarPrice: toNum(engine16?.exhaustionBarPrice),
+
+    exhaustionEarly,
+    exhaustionEarlyShort,
+    exhaustionEarlyLong,
+
+    exhaustionTrigger,
+    exhaustionTriggerShort,
+    exhaustionTriggerLong,
+
     hasPulledBack: engine16?.hasPulledBack === true,
     breakoutReady: engine16?.breakoutReady === true,
     breakdownReady: engine16?.breakdownReady === true,
@@ -282,7 +313,7 @@ function inferHigherTimeframeExhaustion({ strategyId, engine16, momentum } = {})
   let primaryExhaustionTF = null;
   const reasonCodes = [];
 
-  if (e16.strategyType !== "EXHAUSTION") {
+  if (!(e16.exhaustionTrigger === true || e16.strategyType === "EXHAUSTION")) {
     return { score, primaryExhaustionTF, reasonCodes };
   }
 
@@ -313,6 +344,8 @@ function deriveDirectionFromHTFContext({ winner, engine16, momentum } = {}) {
   const e16 = normalizeEngine16(engine16);
   const mom = normalizeMomentum(momentum);
 
+  if (e16.exhaustionTriggerShort) return "SHORT";
+  if (e16.exhaustionTriggerLong) return "LONG";
   if (e16.exhaustionShort) return "SHORT";
   if (e16.exhaustionLong) return "LONG";
   if (e16.breakdownReady) return "SHORT";
@@ -333,6 +366,23 @@ function deriveDirectionFromHTFContext({ winner, engine16, momentum } = {}) {
 ------------------------------*/
 export function resolveStrategyCandidates({ engine16 } = {}) {
   const e16 = normalizeEngine16(engine16);
+
+  // trigger-ready exhaustion only
+  if (e16.exhaustionTrigger === true) {
+    return [
+      {
+        strategyType: "EXHAUSTION",
+        direction: e16.direction,
+        source: "ENGINE16",
+        engine16: e16,
+      },
+    ];
+  }
+
+  // early exhaustion is watch-only, no candidate yet
+  if (e16.exhaustionEarly === true) {
+    return [];
+  }
 
   if (!e16.ok || e16.strategyType === "NONE" || e16.readinessLabel === "NO_SETUP") {
     return [];
@@ -377,7 +427,6 @@ export function pickWinningStrategy({
     const base = BASE_PRIORITY[type] || 0;
 
     let priority = base;
-
     priority += clamp(Math.round((e5.total || 0) / 5), 0, 20);
 
     if (dirInitial === "LONG" && mom.alignment === "BULLISH") priority += 8;
@@ -385,7 +434,12 @@ export function pickWinningStrategy({
     if (dirInitial === "LONG" && mom.alignment === "BEARISH") priority -= 8;
     if (dirInitial === "SHORT" && mom.alignment === "BULLISH") priority -= 8;
 
-    if (type === "EXHAUSTION" && c?.engine16?.exhaustionActive) priority += 5;
+    if (
+      type === "EXHAUSTION" &&
+      (c?.engine16?.exhaustionTrigger === true || c?.engine16?.exhaustionActive)
+    ) {
+      priority += 5;
+    }
 
     const htf = inferHigherTimeframeExhaustion({
       strategyId,
@@ -395,13 +449,14 @@ export function pickWinningStrategy({
 
     priority += htf.score;
 
-    const resolvedDirection = dirInitial !== "NONE"
-      ? dirInitial
-      : deriveDirectionFromHTFContext({
-          winner: { direction: dirInitial },
-          engine16: c?.engine16,
-          momentum,
-        });
+    const resolvedDirection =
+      dirInitial !== "NONE"
+        ? dirInitial
+        : deriveDirectionFromHTFContext({
+            winner: { direction: dirInitial },
+            engine16: c?.engine16,
+            momentum,
+          });
 
     const candidateScore = {
       strategyType: type,
@@ -454,14 +509,10 @@ export function evaluateHardBlockers({
     blockers.push("NO_DIRECTION");
   }
 
-  // Step 1 fix:
-  // Keep permission stand-down as a blocker, but NOT a hard structure killer.
   if (p.permission === "STAND_DOWN") {
     softBlockers.push("E6_STAND_DOWN");
   }
 
-  // Step 1 fix:
-  // Keep Engine 16 invalidation visible, but do NOT auto-kill the whole setup here.
   if (e16.invalidated === true) {
     softBlockers.push("E16_INVALIDATED");
   }
@@ -725,6 +776,10 @@ function buildSetupChain({
     chain.push(`${winner.primaryExhaustionTF}_EXHAUSTION`);
   }
 
+  if (e16.exhaustionEarly === true && e16.exhaustionTrigger !== true) {
+    chain.push("EXHAUSTION_EARLY");
+  }
+
   if (type === "EXHAUSTION") {
     chain.push("EXHAUSTION");
   } else if (type === "REVERSAL") {
@@ -743,23 +798,18 @@ function buildSetupChain({
     chain.push("IN_TRIGGER_ZONE");
   }
 
-  if (dir === "SHORT" && e16.wickRejectionShort) {
-    chain.push("SHORT_REJECTION_PRESENT");
-  }
-  if (dir === "LONG" && e16.wickRejectionLong) {
-    chain.push("LONG_REJECTION_PRESENT");
-  }
+  if (dir === "SHORT" && e16.wickRejectionShort) chain.push("SHORT_REJECTION_PRESENT");
+  if (dir === "LONG" && e16.wickRejectionLong) chain.push("LONG_REJECTION_PRESENT");
 
   if (promotedStrategyType === "CONTINUATION") {
     chain.push("CONTINUATION_PENDING");
   } else if (nextSetupType !== "NONE") {
     chain.push(nextSetupType);
-  } else if (type === "EXHAUSTION" && e16.hasPulledBack) {
-    chain.push("TRIGGER_PENDING");
+  } else if (type === "EXHAUSTION" && e16.exhaustionTrigger === true) {
+    chain.push("TRIGGERED");
   }
 
   if (chain.length === 0) chain.push("BUILDING");
-
   return [...new Set(chain)];
 }
 
@@ -775,6 +825,8 @@ function deriveNextSetupType({
   if (promotedStrategyType === "CONTINUATION") return "CONTINUATION_TRIGGER";
 
   if (winner?.strategyType === "EXHAUSTION") {
+    if (e16.exhaustionTrigger === true) return "CONFIRM_FOLLOWTHROUGH";
+    if (e16.exhaustionEarly === true) return "WAIT_FOR_TRIGGER";
     if (e16.hasPulledBack) return "TRIGGER_CONFIRM";
     return "PULLBACK";
   }
@@ -818,6 +870,20 @@ export function evaluateTriggerReadiness({
     };
   }
 
+  // early exhaustion = watch only
+  if (e16.exhaustionEarly === true && e16.exhaustionTrigger !== true) {
+    return {
+      readinessLabel: "NEAR",
+      entryStyle: "EARLY_WARNING",
+      triggerConfirmed: false,
+      reasonCodes: ["EXHAUSTION_EARLY_WATCH"],
+      blockers: [],
+      promotedStrategyType: "NONE",
+      nextSetupType: "WAIT_FOR_TRIGGER",
+      setupChain: ["EXHAUSTION_EARLY", "WAIT_FOR_TRIGGER"],
+    };
+  }
+
   if (!winner || winner.strategyType === "NONE") {
     return {
       readinessLabel: "WAIT",
@@ -854,12 +920,25 @@ export function evaluateTriggerReadiness({
     reasonCodes.push(...(momentumGate?.reasonCodes || []));
   }
 
-  // Keep soft blockers visible without collapsing structure
   if (Array.isArray(hardBlockers?.softBlockers) && hardBlockers.softBlockers.length) {
     blockers.push(...hardBlockers.softBlockers);
   }
 
-  if (qualityPass) {
+  // exhaustion trigger is the actual entry-ready event
+  if (winner.strategyType === "EXHAUSTION" && e16.exhaustionTrigger === true) {
+    if (qualityPass && momentumPass) {
+      readinessLabel = "READY";
+      entryStyle = "EXHAUSTION_TRIGGER";
+      triggerConfirmed = true;
+      reasonCodes.push("ENGINE16_EXHAUSTION_TRIGGER");
+    } else {
+      readinessLabel = "ARMING";
+      entryStyle = "EXHAUSTION_TRIGGER_PENDING_FILTERS";
+      reasonCodes.push("ENGINE16_EXHAUSTION_TRIGGER_PENDING");
+    }
+  }
+
+  if (qualityPass && winner.strategyType !== "EXHAUSTION") {
     if (e3.stage === "ARMED" || e3.armed === true) {
       readinessLabel = "ARMING";
       reasonCodes.push("E3_ARMED");
@@ -890,7 +969,9 @@ export function evaluateTriggerReadiness({
   if (winner.strategyType === "EXHAUSTION" || winner.strategyType === "REVERSAL") {
     if (e4.flags?.reversalExpansion) {
       reasonCodes.push("REVERSAL_VOLUME_PRESENT");
-      if (readinessLabel === "NEAR" && qualityPass) readinessLabel = "ARMING";
+      if (readinessLabel === "NEAR" && qualityPass && e16.exhaustionTrigger !== true) {
+        readinessLabel = "ARMING";
+      }
     }
   }
 
@@ -984,15 +1065,11 @@ function sortZonesForDirection(zones = [], direction = "NONE", signalPrice = nul
   if (!Number.isFinite(sp)) return cleaned;
 
   if (dir === "SHORT") {
-    return cleaned
-      .filter((z) => z.mid < sp)
-      .sort((a, b) => b.mid - a.mid);
+    return cleaned.filter((z) => z.mid < sp).sort((a, b) => b.mid - a.mid);
   }
 
   if (dir === "LONG") {
-    return cleaned
-      .filter((z) => z.mid > sp)
-      .sort((a, b) => a.mid - b.mid);
+    return cleaned.filter((z) => z.mid > sp).sort((a, b) => a.mid - b.mid);
   }
 
   return cleaned;
@@ -1061,7 +1138,6 @@ function buildLifecycle({
     null;
 
   const currentPrice = extractCurrentPrice(zoneContext);
-
   const direction = winner?.direction || "NONE";
 
   const ladders = [];
@@ -1085,11 +1161,7 @@ function buildLifecycle({
     ladders.push(makeZoneCandidate(z, safeUpper(z?.type, "SHELF"), tpIndex++));
   }
 
-  const path = sortZonesForDirection(
-    dedupeZones(ladders),
-    direction,
-    signalPrice
-  );
+  const path = sortZonesForDirection(dedupeZones(ladders), direction, signalPrice);
 
   for (const z of path) {
     z.hit = isZoneHit(z, direction, currentPrice);
@@ -1242,42 +1314,33 @@ function buildSignalEvent({ winner, engine16 } = {}) {
   let signalPrice = null;
   let signalSource = null;
 
-  if (resolvedType === "EXHAUSTION" || e16.exhaustionDetected === true) {
+  if (e16.exhaustionTrigger === true) {
     signalType = "EXHAUSTION";
     signalTime =
+      e16?.signalTimes?.exhaustionTriggerTime ||
       e16?.signalTimes?.exhaustionTime ||
       e16?.exhaustionBarTime ||
       null;
-    signalPrice =
-      toNum(e16?.exhaustionBarPrice) ??
-      null;
-    signalSource = "ENGINE16_EXHAUSTION";
+    signalPrice = toNum(e16?.exhaustionBarPrice) ?? null;
+    signalSource = "ENGINE16_EXHAUSTION_TRIGGER";
   } else if (resolvedType === "REVERSAL" || e16.reversalDetected === true) {
     signalType = "REVERSAL";
-    signalTime =
-      e16?.signalTimes?.reversalTime ||
-      null;
+    signalTime = e16?.signalTimes?.reversalTime || null;
     signalPrice = null;
     signalSource = "ENGINE16_REVERSAL";
   } else if (resolvedType === "BREAKDOWN" || e16.breakdownReady === true) {
     signalType = "BREAKDOWN";
-    signalTime =
-      e16?.signalTimes?.breakdownReadyTime ||
-      null;
+    signalTime = e16?.signalTimes?.breakdownReadyTime || null;
     signalPrice = null;
     signalSource = "ENGINE16_BREAKDOWN";
   } else if (resolvedType === "BREAKOUT" || e16.breakoutReady === true) {
     signalType = "BREAKOUT";
-    signalTime =
-      e16?.signalTimes?.breakoutReadyTime ||
-      null;
+    signalTime = e16?.signalTimes?.breakoutReadyTime || null;
     signalPrice = null;
     signalSource = "ENGINE16_BREAKOUT";
   } else if (resolvedType === "CONTINUATION" || e16.trendContinuation === true) {
     signalType = "CONTINUATION";
-    signalTime =
-      e16?.signalTimes?.continuationTime ||
-      null;
+    signalTime = e16?.signalTimes?.continuationTime || null;
     signalPrice = null;
     signalSource = "ENGINE16_CONTINUATION";
   }
@@ -1320,9 +1383,7 @@ export function buildFinalDecision({
     engine16,
   });
 
-  const quality = evaluateQualityGate({
-    engine5,
-  });
+  const quality = evaluateQualityGate({ engine5 });
 
   const mom = evaluateMomentumGate({
     strategyId,
@@ -1409,7 +1470,7 @@ export function buildFinalDecision({
 
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v7.2",
+    engine: "engine15.decisionReferee.v7.3",
     symbol,
     strategyId,
     strategyType: trigger.promotedStrategyType || resolvedWinner?.strategyType || "NONE",
@@ -1490,7 +1551,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v7.2",
+      engine: "engine15.decisionReferee.v7.3",
       symbol,
       strategyId,
       strategyType: "NONE",
