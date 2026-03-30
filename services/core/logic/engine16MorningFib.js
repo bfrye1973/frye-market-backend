@@ -507,9 +507,19 @@ function emptySignalTimes() {
     exhaustionTriggerTime: null,
   };
 }
+
   function buildAnchorLabels(context) {
-   ...
- }
+  if (context === "SHORT_CONTEXT") {
+    return {
+      anchorAType: "IMPULSE_HIGH",
+      anchorBType: "IMPULSE_LOW",
+    };
+  }
+  return {
+    anchorAType: "IMPULSE_BASE",
+    anchorBType: "IMPULSE_HIGH",
+  };
+}
 
   function emptyStrategyFields() {
   return {
