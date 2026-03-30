@@ -915,12 +915,14 @@ export async function computeMorningFib({
 
   const latestIndex = closedBars.length - 1;
   const ex = confirmExhaustionPhases({
-    bars: closedBars,
-    sessionHigh: bestCandidate.sessionHigh,
-    sessionLow: bestCandidate.sessionLow,
-    latestIndex,
-    lookbackBars: EXHAUSTION_LOOKBACK_BARS,
-  });
+  bars: closedBars,
+  sessionHigh: bestCandidate.sessionHigh,
+  sessionLow: bestCandidate.sessionLow,
+  latestIndex,
+  lookbackBars: EXHAUSTION_LOOKBACK_BARS,
+  formatDisplayTimeFromMs,
+  round2,
+});
 
   debugExhaustion = ex.debug;
 
