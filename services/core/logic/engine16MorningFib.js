@@ -573,11 +573,7 @@ function emptyStrategyFields() {
       };
     }
 
-    function getBodies(bars) {
-      return bars.map((b) => Math.abs((b?.c ?? 0) - (b?.o ?? 0))).filter(Number.isFinite);
-    }
-     
-function getBodies(bars) {
+ function getBodies(bars) {
   return bars.map((b) => Math.abs((b?.c ?? 0) - (b?.o ?? 0))).filter(Number.isFinite);
 }
 
