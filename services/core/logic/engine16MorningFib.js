@@ -1079,32 +1079,19 @@ export async function computeMorningFib({
   const continuationTriggerLong = continuation.continuationTriggerLong;
   const debugContinuation = continuation.debugContinuation;
 
-  let strategyType = "NONE";
-  let readinessLabel = "NO_SETUP";
-
-  if (exhaustionTrigger && exhaustionActive) {
-    strategyType = "EXHAUSTION";
-    readinessLabel = "EXHAUSTION_READY";
-  } else if (reversalDetected && (failedBreakout || failedBreakdown)) {
-    strategyType = "REVERSAL";
-    readinessLabel = "REVERSAL_READY";
-  } else if (hasPulledBack && breakdownReady) {
-    strategyType = "BREAKDOWN";
-    readinessLabel = "BREAKDOWN_READY";
-  } else if (hasPulledBack && breakoutReady) {
-    strategyType = "BREAKOUT";
-    readinessLabel = "BREAKOUT_READY";
-  } else if (continuationTrigger) {
-    strategyType = "CONTINUATION";
-    readinessLabel = "CONTINUATION_READY";
-  } else if (hasPulledBack && insidePrimaryZone) {
-    strategyType = "PULLBACK_PRIMARY";
-    readinessLabel = "PULLBACK_READY";
-  } else if (hasPulledBack && insideSecondaryZone) {
-    strategyType = "PULLBACK_SECONDARY";
-    readinessLabel = "PULLBACK_READY";
-  }
-
+  const { strategyType, readinessLabel } = classifyEngine16Strategy({
+  exhaustionTrigger,
+  exhaustionActive,
+  reversalDetected,
+  failedBreakout,
+  failedBreakdown,
+  hasPulledBack,
+  breakdownReady,
+  breakoutReady,
+  continuationTrigger,
+  insidePrimaryZone,
+  insideSecondaryZone,
+});
   let volumeContext = {
     volumeScore: 0,
     volumeConfirmed: false,
