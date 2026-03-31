@@ -12,6 +12,10 @@
 // - No side effects
 // - Never infers lateness or context
 // - Consumes upstream metadata ONLY
+//
+// TESTING MODE CHANGE:
+// - Hard fib invalidation block removed
+// - input.engine5.invalid is preserved in debug, but does NOT auto-stand-down
 
 function clamp(n, lo, hi) {
   const x = Number(n);
@@ -35,24 +39,25 @@ function standDown(reasonCodes, debug, allowedZonesOverride = null) {
     permission: "STAND_DOWN",
     sizeMultiplier: 0.0,
     allowedTradeTypes: [],
-    allowedZones: allowedZonesOverride || {
-      primary: ALLOWED_ZONES_PRIMARY,
-      secondary: [],
-    },
+    allowedZones:
+      allowedZonesOverride || {
+        primary: ALLOWED_ZONES_PRIMARY,
+        secondary: [],
+      },
     entryConstraints: baseConstraints(),
     reasonCodes,
     debug,
   };
 }
 
-function reduce(reasonCodes, debug) {
+function reduce(reasonCodes, debug, allowedTradeTypes = ["PULLBACK"]) {
   return {
     permission: "REDUCE",
     sizeMultiplier: 0.5,
-    allowedTradeTypes: ["PULLBACK"],
+    allowedTradeTypes,
     allowedZones: {
       primary: ["NEGOTIATED"],
-      secondary: ["INSTITUTIONAL", "SHELF"],
+      secondary: ["INSTITUTIONAL", "SHELF", "NEAR_ALLOWED_ZONE"],
     },
     entryConstraints: baseConstraints(),
     reasonCodes,
@@ -60,14 +65,14 @@ function reduce(reasonCodes, debug) {
   };
 }
 
-function allow(reasonCodes, debug) {
+function allow(reasonCodes, debug, allowedTradeTypes = ["PULLBACK", "BREAKOUT", "CONTINUATION"]) {
   return {
     permission: "ALLOW",
     sizeMultiplier: 1.0,
-    allowedTradeTypes: ["PULLBACK", "BREAKOUT", "CONTINUATION"],
+    allowedTradeTypes,
     allowedZones: {
       primary: ["NEGOTIATED"],
-      secondary: ["INSTITUTIONAL", "SHELF"],
+      secondary: ["INSTITUTIONAL", "SHELF", "NEAR_ALLOWED_ZONE"],
     },
     entryConstraints: baseConstraints(),
     reasonCodes,
@@ -80,6 +85,7 @@ export function computeTradePermission(input) {
   const score =
     Number.isFinite(Number(rawScore)) ? clamp(rawScore, 0, 100) : null;
 
+  // Kept for debug/visibility only — no longer hard-blocking in testing
   const invalid = !!input?.engine5?.invalid;
 
   const mm = input?.marketMeter || {};
@@ -121,6 +127,8 @@ export function computeTradePermission(input) {
     h4State === "CONTRACTING" ||
     eodState === "CONTRACTING";
 
+  const strategyType = input?.strategyType || "UNKNOWN";
+
   const debug = {
     score,
     invalid,
@@ -138,37 +146,18 @@ export function computeTradePermission(input) {
     zoneDegraded,
     liquidityFail,
     reactionFailed,
+    strategyType,
     allowedZones: ALLOWED_ZONES_PRIMARY,
   };
 
   const reasons = [];
 
-    // ---------------- HARD STAND DOWN ----------------
+  // ---------------- HARD STAND DOWN ----------------
 
+  // TESTING MODE:
+  // hard invalidation removed on purpose
   if (invalid) {
-    const strategyType = input?.strategyType || "UNKNOWN";
-
-    if (
-      strategyType === "CONTINUATION" &&
-      (withinZone || nearAllowedZone)
-    ) {
-      reasons.push("REDUCE_INVALID_CONTINUATION_TESTING");
-      return {
-        permission: "REDUCE",
-        sizeMultiplier: 0.5,
-        allowedTradeTypes: ["CONTINUATION"],
-        allowedZones: {
-          primary: ["NEGOTIATED", "INSTITUTIONAL", "NEAR_ALLOWED_ZONE"],
-          secondary: ["SHELF"],
-        },
-        entryConstraints: baseConstraints(),
-        reasonCodes: reasons,
-        debug,
-      };
-    }
-
-    reasons.push("STANDDOWN_INVALID");
-    return standDown(reasons, debug);
+    reasons.push("INVALID_IGNORED_FOR_TESTING");
   }
 
   if (isNewEntry && eodRisk === "RISK_OFF") {
@@ -187,8 +176,6 @@ export function computeTradePermission(input) {
   }
 
   if (!withinZone && !nearAllowedZone) {
-    const strategyType = input?.strategyType || "UNKNOWN";
-
     if (strategyType === "CONTINUATION") {
       reasons.push("REDUCE_CONTINUATION_OUTSIDE_ZONE");
       return {
@@ -225,6 +212,12 @@ export function computeTradePermission(input) {
         ? "REDUCE_SCORE_55_69"
         : "REDUCE_SINGLE_TF_CONTRACTING"
     );
+
+    // continuation / breakdown testing stays reduced
+    if (strategyType === "CONTINUATION" || strategyType === "BREAKDOWN") {
+      return reduce(reasons, debug, ["CONTINUATION", "BREAKDOWN"]);
+    }
+
     return reduce(reasons, debug);
   }
 
@@ -238,6 +231,13 @@ export function computeTradePermission(input) {
     reasons.push("ALLOW_SCORE_UNKNOWN_TESTING");
   } else {
     reasons.push("ALLOW_SCORE_70_PLUS");
+  }
+
+  if (strategyType === "CONTINUATION" || strategyType === "BREAKDOWN") {
+    reasons.push("ALLOW_STRUCTURE_TESTING");
+    reasons.push("ALLOW_MARKET_OK");
+    reasons.push("ALLOW_ZONE_OK");
+    return allow(reasons, debug, ["CONTINUATION", "BREAKDOWN"]);
   }
 
   reasons.push("ALLOW_MARKET_OK");
