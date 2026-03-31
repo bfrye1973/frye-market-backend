@@ -2,7 +2,16 @@ name: dashboard-10min (github-runner, debug-publish)
 
 on:
   workflow_dispatch: {}
-  
+
+  schedule:
+    # Start 15 min before market open
+    # 5:45 AM Phoenix = 12:45 UTC
+    - cron: "45 12 * * 1-5"
+
+    # Then every 10 minutes during market hours
+    # 6:00 AM–1:50 PM Phoenix = 13:00–20:50 UTC
+    - cron: "0,10,20,30,40,50 13-20 * * 1-5"
+
 jobs:
   tenmin:
     name: Build & Publish Intraday (10m — debug)
@@ -23,7 +32,7 @@ jobs:
       FD_SCALPER_ENABLE: "true"
       FD_SCALPER_LOOKBACK: "3"
       FD_LOOKBACK_DAYS: "20"
-      FD_MAX_WORKERS: "10"      # bumped up for speed
+      FD_MAX_WORKERS: "10"
       FD_RETRY_MAX: "1"
 
       # Auth keys
@@ -41,7 +50,6 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Build 10m sector source from Polygon
       - name: Build sectorCards source (intraday10)
         run: |
           mkdir -p data
@@ -49,7 +57,6 @@ jobs:
             --sectors-dir data/sectors \
             --out data/outlook_source.json
 
-      # Build intraday dashboard payload
       - name: Build intraday payload (10m)
         run: |
           python -u scripts/make_dashboard.py \
@@ -57,24 +64,21 @@ jobs:
             --source data/outlook_source.json \
             --out data/outlook_intraday.json
 
-      # Compute 10m trend / engine-lights
       - name: Compute Lux strategy (10m)
         run: |
           python -u scripts/compute_trend10m.py
 
-      # Update pills (Δ5m / Δ10m) – always-on
       - name: Update pills (10m always-on)
         run: |
           python -u scripts/update_pills_10m_state.py
 
-      # Validate required keys in intraday payload
       - name: Validate required keys
         run: |
           python - << 'PY'
           import json, sys
-          j = json.load(open("data/outlook_intraday.json","r",encoding="utf-8"))
+          j = json.load(open("data/outlook_intraday.json", "r", encoding="utf-8"))
           m = j.get("metrics") or {}
-          need = ["breadth_10m_pct","momentum_10m_pct","squeeze_pct","liquidity_psi","volatility_pct"]
+          need = ["breadth_10m_pct", "momentum_10m_pct", "squeeze_pct", "liquidity_psi", "volatility_pct"]
           miss = [k for k in need if k not in m]
           sc = j.get("sectorCards") or []
           if miss:
@@ -83,7 +87,6 @@ jobs:
           print("OK metrics & sectors:", len(sc))
           PY
 
-      # Write heartbeat (AZ time)
       - name: Write heartbeat (AZ time marker)
         run: |
           python - << 'PY'
@@ -93,20 +96,18 @@ jobs:
           tz = zoneinfo.ZoneInfo("America/Phoenix")
           now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
           pathlib.Path("data").mkdir(exist_ok=True)
-          open("data/heartbeat_10m.txt","w",encoding="utf-8").write(now)
+          open("data/heartbeat_10m.txt", "w", encoding="utf-8").write(now)
           print("heartbeat_10m:", now)
           PY
 
-      # Stage artifacts for publish
       - name: Stage artifacts
         run: |
           mkdir -p publish
-          cp -f data/outlook_source.json   publish/outlook_source.json
+          cp -f data/outlook_source.json publish/outlook_source.json
           cp -f data/outlook_intraday.json publish/outlook_intraday.json
-          cp -f data/heartbeat_10m.txt     publish/heartbeat_10m.txt
+          cp -f data/heartbeat_10m.txt publish/heartbeat_10m.txt
           ls -l publish
 
-      # Detect changes vs remote (intraday + heartbeat)
       - name: Detect change vs remote (compare intraday + heartbeat)
         id: diff
         run: |
@@ -115,6 +116,7 @@ jobs:
           CHANGED=true
           rm -rf _remote_tmp
           mkdir -p _remote_tmp
+
           if git ls-remote --exit-code --heads origin "$LIVE_BRANCH" >/dev/null 2>&1; then
             git --work-tree="_remote_tmp" checkout "origin/$LIVE_BRANCH" -- "data/outlook_intraday.json" 2>/dev/null || echo "(remote intraday missing)"
             git --work-tree="_remote_tmp" checkout "origin/$LIVE_BRANCH" -- "data/heartbeat_10m.txt" 2>/dev/null || echo "(remote heartbeat missing)"
@@ -125,6 +127,7 @@ jobs:
             if [ -f "_remote_tmp/data/outlook_intraday.json" ]; then
               cmp -s "publish/outlook_intraday.json" "_remote_tmp/data/outlook_intraday.json" && JSON_SAME=0 || JSON_SAME=1
             fi
+
             if [ -f "_remote_tmp/data/heartbeat_10m.txt" ]; then
               cmp -s "publish/heartbeat_10m.txt" "_remote_tmp/data/heartbeat_10m.txt" && HB_SAME=0 || HB_SAME=1
             fi
@@ -139,25 +142,25 @@ jobs:
           else
             echo "(first publish for this branch)"
           fi
+
           echo "changed=${CHANGED}"
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
 
-      # Publish live branch (safe)
       - name: Publish (debug & push verbose)
         if: steps.diff.outputs.changed == 'true'
         run: |
           echo "==== PUBLISH DEBUG START ===="
           git config user.email "bot@ci.local"
-          git config user.name  "CI Bot"
+          git config user.name "CI Bot"
 
           git fetch origin "$LIVE_BRANCH" --depth=1 || echo "(new branch)"
           git checkout -B "$LIVE_BRANCH" "origin/$LIVE_BRANCH" || git checkout -B "$LIVE_BRANCH"
           git branch --set-upstream-to="origin/$LIVE_BRANCH" "$LIVE_BRANCH" || echo "(no upstream yet)"
 
           mkdir -p data
-          cp -f publish/outlook_source.json   data/outlook_source.json
+          cp -f publish/outlook_source.json data/outlook_source.json
           cp -f publish/outlook_intraday.json data/outlook_intraday.json
-          cp -f publish/heartbeat_10m.txt     data/heartbeat_10m.txt
+          cp -f publish/heartbeat_10m.txt data/heartbeat_10m.txt
 
           git add data/outlook_source.json data/outlook_intraday.json data/heartbeat_10m.txt
 
