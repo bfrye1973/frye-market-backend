@@ -305,7 +305,7 @@ function computeZoneTelemetryFromCtx(ctx) {
   return { zoneType, withinZone };
 }
 
-function buildZoneContext(engine1ContextJson) {
+function buildZoneContext(engine1ContextJson, confluenceLocation = null) {
   if (!engine1ContextJson || typeof engine1ContextJson !== "object") return null;
 
   const { zoneType, withinZone } = computeZoneTelemetryFromCtx(engine1ContextJson);
@@ -316,6 +316,8 @@ function buildZoneContext(engine1ContextJson) {
     nearest: engine1ContextJson.nearest || null,
     zoneType,
     withinZone,
+    locationState: confluenceLocation?.state || null,
+    nearAllowedZone: confluenceLocation?.nearAllowedZone === true,
     flags: engine1ContextJson.flags || null,
     render: {
       negotiated: Array.isArray(engine1ContextJson?.render?.negotiated)
