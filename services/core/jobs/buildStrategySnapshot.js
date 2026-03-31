@@ -249,8 +249,27 @@ async function fetchEngine16(sym) {
 ------------------------------*/
 function normalizeEngine5ForEngine6(confluenceJson) {
   if (!confluenceJson || typeof confluenceJson !== "object") {
-    return { invalid: false, total: 0, reasonCodes: [] };
+    return { invalid: false, total: null, reasonCodes: [] };
   }
+
+  const invalid = Boolean(confluenceJson.invalid);
+  const reasonCodes = Array.isArray(confluenceJson.reasonCodes)
+    ? confluenceJson.reasonCodes
+    : [];
+
+  const rawTotal =
+    Number(confluenceJson?.scores?.total) ||
+    Number(confluenceJson?.total);
+
+  const total = Number.isFinite(rawTotal) ? rawTotal : null;
+
+  const label = confluenceJson?.scores?.label || confluenceJson?.label || null;
+  const flags = confluenceJson?.flags || null;
+  const compression = confluenceJson?.compression || null;
+  const bias = confluenceJson?.bias ?? null;
+
+  return { invalid, total, reasonCodes, label, flags, compression, bias };
+}
 
   const invalid = Boolean(confluenceJson.invalid);
   const reasonCodes = Array.isArray(confluenceJson.reasonCodes)
