@@ -95,6 +95,7 @@ export function computeTradePermission(input) {
   const zone = input?.zoneContext || {};
   const zoneType = zone.zoneType || "UNKNOWN";
   const withinZone = !!zone.withinZone;
+  const nearAllowedZone = zone?.locationState === "NEAR_ALLOWED_ZONE" || zone?.nearAllowedZone === true;
 
   const flags = zone.flags || {};
   const zoneDegraded = !!flags.degraded;
@@ -129,6 +130,7 @@ export function computeTradePermission(input) {
     psiDanger,
     zoneType,
     withinZone,
+    nearAllowedZone,
     zoneDegraded,
     liquidityFail,
     reactionFailed,
@@ -159,10 +161,7 @@ export function computeTradePermission(input) {
     return standDown(reasons, debug);
   }
 
-  // ✅ Contract improvement:
-  // Out of allowed zones => STAND_DOWN, but make reason explicit
-  // Alias old reason to new standardized reason.
-  if (!withinZone) {
+   if (!withinZone && !nearAllowedZone) {
   const strategyType = input?.strategyType || "UNKNOWN";
 
   // ✅ Allow continuation outside zones (reduced risk)
@@ -182,14 +181,13 @@ export function computeTradePermission(input) {
     };
   }
 
-  // Everything else stays blocked
   reasons.push("OUT_OF_ALLOWED_ZONES");
   return standDown(reasons, debug, {
     primary: ALLOWED_ZONES_PRIMARY,
     secondary: [],
   });
 }
-
+  
   if (zoneDegraded || liquidityFail || reactionFailed) {
     reasons.push("STANDDOWN_ZONE_FLAGGED_BAD");
     return standDown(reasons, debug);
@@ -204,9 +202,12 @@ export function computeTradePermission(input) {
 
   // ---------------- ALLOW ----------------
 
-  reasons.push("ALLOW_SCORE_70_PLUS");
-  reasons.push("ALLOW_MARKET_OK");
-  reasons.push("ALLOW_ZONE_OK");
-
-  return allow(reasons, debug);
+if (nearAllowedZone && !withinZone) {
+  reasons.push("ALLOW_NEAR_ALLOWED_ZONE_TESTING");
 }
+
+reasons.push("ALLOW_SCORE_70_PLUS");
+reasons.push("ALLOW_MARKET_OK");
+reasons.push("ALLOW_ZONE_OK");
+
+return allow(reasons, debug);
