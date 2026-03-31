@@ -178,12 +178,12 @@ async function fetchMomentumContext(sym) {
 /* -----------------------------
    Engine 16
 ------------------------------*/
-function fallbackEngine16(sym) {
+function fallbackEngine16(sym, tf = "30m") {
   return {
     ok: false,
     symbol: sym,
     date: null,
-    timeframe: "30m",
+    timeframe: tf,
     context: "NONE",
     anchors: {
       premarketLow: null,
@@ -228,9 +228,9 @@ function fallbackEngine16(sym) {
   };
 }
 
-async function fetchEngine16(sym) {
+async function fetchEngine16(sym, tf = "30m") {
   const r = await fetchJson(
-    `${CORE_BASE}/api/v1/morning-fib?symbol=${encodeURIComponent(sym)}&tf=30m`,
+    `${CORE_BASE}/api/v1/morning-fib?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(tf)}`,
     30000
   );
 
@@ -239,7 +239,7 @@ async function fetchEngine16(sym) {
   }
 
   return {
-    ...fallbackEngine16(sym),
+    ...fallbackEngine16(sym, tf),
     error: r?.text || "ENGINE16_FETCH_FAILED",
   };
 }
@@ -271,7 +271,6 @@ function normalizeEngine5ForEngine6(confluenceJson) {
   return { invalid, total, reasonCodes, label, flags, compression, bias };
 }
 
-  
 function isInside(price, z) {
   const p = Number(price);
   const lo = Number(z?.lo);
@@ -910,22 +909,23 @@ async function processStrategy(s, momentum, marketMind, engine16) {
       : confluence;
 
   const zoneContext = buildZoneContext(
-  engine1Context,
-  patchedConfluence?.location || null
-);
+    engine1Context,
+    patchedConfluence?.location || null
+  );
 
   const permissionBody = {
-  symbol,
-  tf: s.tf,
-  strategyType:
-    patchedConfluence?.strategyType ||
-    engine16?.strategyType ||
-    "UNKNOWN",
-  engine5: normalizeEngine5ForEngine6(patchedConfluence),
-  marketMeter: null,
-  zoneContext,
-  intent: { action: "NEW_ENTRY" },
-};
+    symbol,
+    tf: s.tf,
+    strategyType:
+      patchedConfluence?.strategyType ||
+      engine16?.strategyType ||
+      "UNKNOWN",
+    engine5: normalizeEngine5ForEngine6(patchedConfluence),
+    marketMeter: null,
+    zoneContext,
+    intent: { action: "NEW_ENTRY" },
+  };
+
   const permissionResp = await postJson(
     `${CORE_BASE}/api/v1/trade-permission`,
     permissionBody,
@@ -1052,9 +1052,6 @@ async function buildSnapshot() {
   const marketMind = await fetchMarketMindScores();
   console.log("MarketMind fetched");
 
-  const engine16 = await fetchEngine16(symbol);
-  console.log("Engine16 fetched");
-
   const result = {
     ok: true,
     symbol,
@@ -1062,13 +1059,24 @@ async function buildSnapshot() {
     includeContext: true,
     marketMind,
     momentum,
-    engine16,
+    engine16: null,
     strategies: {},
   };
 
   for (const s of STRATEGIES) {
+    let engine16ForStrategy = null;
+
     try {
-      const strategy = await processStrategy(s, momentum, marketMind, engine16);
+      engine16ForStrategy = await fetchEngine16(symbol, s.tf);
+      console.log(`Engine16 fetched for ${s.strategyId} @ ${s.tf}`);
+
+      const strategy = await processStrategy(
+        s,
+        momentum,
+        marketMind,
+        engine16ForStrategy
+      );
+
       result.strategies[s.strategyId] = strategy;
     } catch (err) {
       result.strategies[s.strategyId] = {
@@ -1080,7 +1088,7 @@ async function buildSnapshot() {
         permission: { ok: false, error: "builder_strategy_failed" },
         engine6v2: { ok: false, error: "builder_strategy_failed" },
         engine2: null,
-        engine16,
+        engine16: engine16ForStrategy || fallbackEngine16(symbol, s.tf),
         engine15: {
           ok: false,
           error: "builder_strategy_failed",
