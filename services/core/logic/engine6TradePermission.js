@@ -140,10 +140,10 @@ export function computeTradePermission(input) {
   // ---------------- HARD STAND DOWN ----------------
 
   if (invalid || score === 0) {
-    reasons.push("STANDDOWN_INVALID_OR_ZERO");
-    return standDown(reasons, debug);
-  }
-
+  reasons.push("STANDDOWN_INVALID_OR_ZERO");
+  return standDown(reasons, debug);
+}
+  
   if (isNewEntry && eodRisk === "RISK_OFF") {
     reasons.push("STANDDOWN_EOD_RISK_OFF");
     return standDown(reasons, debug);
