@@ -909,11 +909,15 @@ async function processStrategy(s, momentum, marketMind, engine16) {
       ? applyNearAllowedZoneDisplay({ confluence, ctx: engine1Context })
       : confluence;
 
-  const zoneContext = buildZoneContext(engine1Context);
+  const zoneContext = buildZoneContext(
+  engine1Context,
+  patchedConfluence?.location || null
+);
 
   const permissionBody = {
     symbol,
     tf: s.tf,
+    strategyType: engine16?.strategyType || "UNKNOWN",
     engine5: normalizeEngine5ForEngine6(patchedConfluence),
     marketMeter: null,
     zoneContext,
