@@ -2,23 +2,25 @@
 //
 // Engine 15C — Decision Referee
 //
-// Engine 16C rewrite goals:
+// Engine 16C rewrite v8.1
+//
+// PRIMARY FIX IN THIS VERSION:
+// - preserve lower-timeframe signal direction
+// - higher-timeframe bias is a filter only
+// - HTF bias can downgrade / align / countertrend-tag the setup
+// - HTF bias must NOT flip the actual 10m trigger direction
+//
+// OTHER GOALS:
 // - preserve current stable contracts
 // - improve lifecycle truth for trigger / mature / completed
 // - add freshEntryNow
 // - add scalp summary for 10m trigger vs higher-timeframe bias
-// - keep Engine 6 / builder assumptions stable
 //
 // IMPORTANT:
-// - This is still a pure logic file
-// - No route fanout
-// - No Engine 6 redesign
-// - No builder redesign here
-//
-// NOTE:
-// - True 30m bias for intraday scalps is not yet passed into this file by the builder.
-// - For now, intraday scalp bias uses a safe HTF proxy from Engine 16 context + momentum.
-// - That keeps this patch stable without touching builder wiring first.
+// - pure logic only
+// - no route fanout
+// - no Engine 6 redesign
+// - no builder redesign here
 
 const VALID_STRATEGY_TYPES = new Set([
   "EXHAUSTION",
@@ -235,7 +237,6 @@ function normalizeEngine16(engine16 = null) {
   let strategyType = rawStrategyType;
   let readinessLabel = rawReadinessLabel;
 
-  // Early exhaustion is watch-only, not full entry-ready truth.
   if (exhaustionEarly && !exhaustionTrigger) {
     if (strategyType === "EXHAUSTION") strategyType = "NONE";
     if (readinessLabel === "EXHAUSTION_READY") readinessLabel = "NO_SETUP";
@@ -324,6 +325,38 @@ function isIntermediateStrategy(strategyId) {
   return String(strategyId || "").toLowerCase().includes("intermediate_long");
 }
 
+/* -----------------------------
+   Direction ownership
+------------------------------*/
+
+function deriveSignalDirectionFromEngine16(engine16 = null) {
+  const e16 = normalizeEngine16(engine16);
+
+  if (e16.exhaustionTriggerShort) return "SHORT";
+  if (e16.exhaustionTriggerLong) return "LONG";
+
+  if (e16.strategyType === "EXHAUSTION") {
+    if (e16.exhaustionShort) return "SHORT";
+    if (e16.exhaustionLong) return "LONG";
+    if (e16.wickRejectionShort) return "SHORT";
+    if (e16.wickRejectionLong) return "LONG";
+  }
+
+  if (e16.strategyType === "BREAKDOWN" || e16.breakdownReady) return "SHORT";
+  if (e16.strategyType === "BREAKOUT" || e16.breakoutReady) return "LONG";
+
+  if (e16.strategyType === "REVERSAL") {
+    if (e16.failedBreakout || e16.wickRejectionShort) return "SHORT";
+    if (e16.failedBreakdown || e16.wickRejectionLong) return "LONG";
+  }
+
+  return e16.direction || "NONE";
+}
+
+/* -----------------------------
+   HTF helpers
+------------------------------*/
+
 function inferHigherTimeframeExhaustion({ strategyId, engine16, momentum } = {}) {
   const sid = String(strategyId || "").toLowerCase();
   const e16 = normalizeEngine16(engine16);
@@ -339,8 +372,8 @@ function inferHigherTimeframeExhaustion({ strategyId, engine16, momentum } = {})
 
   if (sid.includes("intraday_scalp")) {
     if (
-      (e16.direction === "SHORT" && mom.smi1h.direction === "DOWN") ||
-      (e16.direction === "LONG" && mom.smi1h.direction === "UP")
+      (deriveSignalDirectionFromEngine16(e16) === "SHORT" && mom.smi1h.direction === "DOWN") ||
+      (deriveSignalDirectionFromEngine16(e16) === "LONG" && mom.smi1h.direction === "UP")
     ) {
       score += 10;
       primaryExhaustionTF = "1H";
@@ -356,34 +389,6 @@ function inferHigherTimeframeExhaustion({ strategyId, engine16, momentum } = {})
 
   return { score, primaryExhaustionTF, reasonCodes };
 }
-
-function deriveDirectionFromHTFContext({ winner, engine16, momentum } = {}) {
-  const current = safeUpper(winner?.direction, "NONE");
-  if (current !== "NONE") return current;
-
-  const e16 = normalizeEngine16(engine16);
-  const mom = normalizeMomentum(momentum);
-
-  if (e16.exhaustionTriggerShort) return "SHORT";
-  if (e16.exhaustionTriggerLong) return "LONG";
-  if (e16.exhaustionShort) return "SHORT";
-  if (e16.exhaustionLong) return "LONG";
-  if (e16.breakdownReady) return "SHORT";
-  if (e16.breakoutReady) return "LONG";
-  if (e16.wickRejectionShort) return "SHORT";
-  if (e16.wickRejectionLong) return "LONG";
-
-  if (e16.strategyType === "EXHAUSTION") {
-    if (mom.smi1h.direction === "DOWN") return "SHORT";
-    if (mom.smi1h.direction === "UP") return "LONG";
-  }
-
-  return "NONE";
-}
-
-/* -----------------------------
-   Scalp bias / alignment
-------------------------------*/
 
 function inferScalpBiasProxy({ strategyId, engine16, momentum } = {}) {
   const sid = String(strategyId || "").toLowerCase();
@@ -445,8 +450,8 @@ function inferScalpBiasProxy({ strategyId, engine16, momentum } = {}) {
   };
 }
 
-function classifyScalpAlignment({ strategyId, direction, engine16, momentum } = {}) {
-  const dir = safeUpper(direction, "NONE");
+function classifyScalpAlignment({ strategyId, signalDirection, engine16, momentum } = {}) {
+  const dir = safeUpper(signalDirection, "NONE");
   const proxy = inferScalpBiasProxy({ strategyId, engine16, momentum });
 
   if (!isScalpStrategy(strategyId)) {
@@ -489,12 +494,13 @@ function classifyScalpAlignment({ strategyId, direction, engine16, momentum } = 
 ------------------------------*/
 export function resolveStrategyCandidates({ engine16 } = {}) {
   const e16 = normalizeEngine16(engine16);
+  const signalDirection = deriveSignalDirectionFromEngine16(e16);
 
   if (e16.exhaustionTrigger === true) {
     return [
       {
         strategyType: "EXHAUSTION",
-        direction: e16.direction,
+        direction: signalDirection,
         source: "ENGINE16",
         engine16: e16,
       },
@@ -512,7 +518,7 @@ export function resolveStrategyCandidates({ engine16 } = {}) {
   return [
     {
       strategyType: e16.strategyType,
-      direction: e16.direction,
+      direction: signalDirection,
       source: "ENGINE16",
       engine16: e16,
     },
@@ -544,7 +550,7 @@ export function pickWinningStrategy({
 
   for (const c of candidates) {
     const type = normalizeStrategyType(c?.strategyType);
-    const dirInitial = normalizeDirection(c?.direction, c?.engine16);
+    const dirInitial = safeUpper(c?.direction, "NONE");
     const base = BASE_PRIORITY[type] || 0;
 
     let priority = base;
@@ -570,18 +576,9 @@ export function pickWinningStrategy({
 
     priority += htf.score;
 
-    const resolvedDirection =
-      dirInitial !== "NONE"
-        ? dirInitial
-        : deriveDirectionFromHTFContext({
-            winner: { direction: dirInitial },
-            engine16: c?.engine16,
-            momentum,
-          });
-
     const candidateScore = {
       strategyType: type,
-      direction: resolvedDirection,
+      direction: dirInitial,
       priority,
       source: c?.source || "ENGINE16",
       candidate: c,
@@ -718,7 +715,7 @@ export function evaluateMomentumGate({
   engine16,
 } = {}) {
   const mom = normalizeMomentum(momentum);
-  const dir = winner?.direction || "NONE";
+  const dir = safeUpper(winner?.direction, "NONE");
   const type = winner?.strategyType || "NONE";
 
   let momentumGatePassed = false;
@@ -729,7 +726,7 @@ export function evaluateMomentumGate({
 
   const scalp = classifyScalpAlignment({
     strategyId,
-    direction: dir,
+    signalDirection: dir,
     engine16,
     momentum,
   });
@@ -778,17 +775,17 @@ export function evaluateMomentumGate({
 
   if (isScalpStrategy(strategyId)) {
     reasonCodes.push("MODE_SCALP");
+
     if (scalp.alignmentState === "ALIGNED") {
       reasonCodes.push("SCALP_HTF_ALIGNED");
+      if (dir === "LONG" && bias === "NONE") bias = "LONG_PRIORITY";
+      if (dir === "SHORT" && bias === "NONE") bias = "SHORT_PRIORITY";
     } else if (scalp.alignmentState === "COUNTERTREND") {
       reasonCodes.push("SCALP_COUNTERTREND_REDUCED");
       conflicts.push("SCALP_COUNTERTREND");
-      if (bias === "LONG_PRIORITY") bias = "LONG_COUNTERTREND";
-      if (bias === "SHORT_PRIORITY") bias = "SHORT_COUNTERTREND";
-      if (bias === "NONE") {
-        if (dir === "LONG") bias = "LONG_COUNTERTREND";
-        if (dir === "SHORT") bias = "SHORT_COUNTERTREND";
-      }
+
+      if (dir === "LONG") bias = "LONG_COUNTERTREND";
+      if (dir === "SHORT") bias = "SHORT_COUNTERTREND";
     }
   }
 
@@ -1295,26 +1292,17 @@ function extractCurrentPrice(zoneContext) {
 function getLifecycleThresholds(strategyId) {
   if (isScalpStrategy(strategyId)) {
     return {
-      completionWindowBars: 3,
-      matureProgress01: 0.7,
-      completeProgress01: 1.0,
       triggerWindowPts: 0.75,
     };
   }
 
   if (isSwingStrategy(strategyId)) {
     return {
-      completionWindowBars: 4,
-      matureProgress01: 0.7,
-      completeProgress01: 1.0,
       triggerWindowPts: 1.5,
     };
   }
 
   return {
-    completionWindowBars: 5,
-    matureProgress01: 0.7,
-    completeProgress01: 1.0,
     triggerWindowPts: 2.0,
   };
 }
@@ -1411,7 +1399,6 @@ function buildLifecycle({
     nextFocus = "MANAGE_RUNNER";
   }
 
-  // Fallback maturity for live signals when path is sparse but move is already extended.
   if (
     lifecycleStage === "TRIGGERED" &&
     moveFromSignalPts != null &&
@@ -1458,7 +1445,6 @@ function buildLifecycle({
     nextFocus = "LOOK_FOR_NEW_SETUP";
   }
 
-  // If the setup previously triggered but structure is gone, complete it rather than collapsing back to nothing.
   if (
     (lifecycleStage === "TRIGGERED" || lifecycleStage === "MATURE") &&
     noSetupNow &&
@@ -1561,7 +1547,7 @@ function applyLifecycleOverride({
 function buildSignalEvent({ winner, engine16 } = {}) {
   const e16 = normalizeEngine16(engine16);
   const resolvedType = normalizeStrategyType(winner?.strategyType || e16.strategyType);
-  const resolvedDirection = safeUpper(winner?.direction || e16.direction, "NONE");
+  const resolvedDirection = safeUpper(winner?.direction, "NONE");
 
   let signalType = "NONE";
   let signalTime = null;
@@ -1667,9 +1653,12 @@ export function buildFinalDecision({
 } = {}) {
   const p = normalizePermission(permission);
 
+  // IMPORTANT:
+  // direction ownership stays with LTF Engine16 signal.
+  // HTF is used only by alignment / bias filters later.
   const resolvedWinner = {
     ...winner,
-    direction: deriveDirectionFromHTFContext({ winner, engine16, momentum }),
+    direction: safeUpper(winner?.direction, "NONE"),
   };
 
   const hard = evaluateHardBlockers({
@@ -1783,7 +1772,7 @@ export function buildFinalDecision({
 
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v8.0",
+    engine: "engine15.decisionReferee.v8.1",
     symbol,
     strategyId,
     strategyType: trigger.promotedStrategyType || resolvedWinner?.strategyType || "NONE",
@@ -1792,7 +1781,7 @@ export function buildFinalDecision({
     executionBias,
     action,
     freshEntryNow,
-    priority: Number.isFinite(Number(resolvedWinner?.priority)) ? Number(resolvedWinner.priority) : 0,
+    priority: Number.isFinite(Number(resolvedWinner?.priority)) ? Number(resolvedWinner.priority) : 0),
     entryStyle: trigger.entryStyle || "NONE",
     reasonCodes: [...new Set(reasonCodes)],
     blockers: [...new Set(blockers)],
@@ -1866,7 +1855,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v8.0",
+      engine: "engine15.decisionReferee.v8.1",
       symbol,
       strategyId,
       strategyType: "NONE",
