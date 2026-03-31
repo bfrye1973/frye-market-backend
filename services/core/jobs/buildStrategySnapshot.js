@@ -915,15 +915,17 @@ async function processStrategy(s, momentum, marketMind, engine16) {
 );
 
   const permissionBody = {
-    symbol,
-    tf: s.tf,
-    strategyType: engine16?.strategyType || "UNKNOWN",
-    engine5: normalizeEngine5ForEngine6(patchedConfluence),
-    marketMeter: null,
-    zoneContext,
-    intent: { action: "NEW_ENTRY" },
-  };
-
+  symbol,
+  tf: s.tf,
+  strategyType:
+    patchedConfluence?.strategyType ||
+    engine16?.strategyType ||
+    "UNKNOWN",
+  engine5: normalizeEngine5ForEngine6(patchedConfluence),
+  marketMeter: null,
+  zoneContext,
+  intent: { action: "NEW_ENTRY" },
+};
   const permissionResp = await postJson(
     `${CORE_BASE}/api/v1/trade-permission`,
     permissionBody,
