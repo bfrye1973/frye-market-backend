@@ -148,28 +148,31 @@ export function computeTradePermission(input) {
   if (invalid) {
   const strategyType = input?.strategyType || "UNKNOWN";
 
-  if (
-    strategyType === "CONTINUATION" &&
-    (withinZone || nearAllowedZone)
-  ) {
-    reasons.push("REDUCE_INVALID_CONTINUATION_TESTING");
-    return {
-      permission: "REDUCE",
-      sizeMultiplier: 0.5,
-      allowedTradeTypes: ["CONTINUATION"],
-      allowedZones: {
-        primary: ["NEGOTIATED", "INSTITUTIONAL", "NEAR_ALLOWED_ZONE"],
-        secondary: ["SHELF"],
-      },
-      entryConstraints: baseConstraints(),
-      reasonCodes: reasons,
-      debug,
-    };
-  }
+  if (invalid) {
+    const strategyType = input?.strategyType || "UNKNOWN";
 
-  reasons.push("STANDDOWN_INVALID");
-  return standDown(reasons, debug);
-}
+    if (
+      strategyType === "CONTINUATION" &&
+      (withinZone || nearAllowedZone)
+    ) {
+      reasons.push("REDUCE_INVALID_CONTINUATION_TESTING");
+      return {
+        permission: "REDUCE",
+        sizeMultiplier: 0.5,
+        allowedTradeTypes: ["CONTINUATION"],
+        allowedZones: {
+          primary: ["NEGOTIATED", "INSTITUTIONAL", "NEAR_ALLOWED_ZONE"],
+          secondary: ["SHELF"],
+        },
+        entryConstraints: baseConstraints(),
+        reasonCodes: reasons,
+        debug,
+      };
+    }  
+
+    reasons.push("STANDDOWN_INVALID");
+    return standDown(reasons, debug);
+  } 
 
   reasons.push("STANDDOWN_INVALID");
   return standDown(reasons, debug);
