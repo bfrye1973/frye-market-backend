@@ -1781,7 +1781,7 @@ export function buildFinalDecision({
     executionBias,
     action,
     freshEntryNow,
-    priority: Number.isFinite(Number(resolvedWinner?.priority)) ? Number(resolvedWinner.priority) : 0),
+    priority: Number.isFinite(Number(resolvedWinner?.priority)) ? Number(resolvedWinner.priority) : 0,
     entryStyle: trigger.entryStyle || "NONE",
     reasonCodes: [...new Set(reasonCodes)],
     blockers: [...new Set(blockers)],
