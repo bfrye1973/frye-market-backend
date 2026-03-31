@@ -41,6 +41,11 @@ function buildInputV1(req) {
   const symbol = body.symbol || q.symbol || "SPY";
   const tf = body.tf || q.tf || "1h";
 
+  const strategyType =
+    body.strategyType ||
+    q.strategyType ||
+    "UNKNOWN";
+
   const engine5 =
     body.engine5 ||
     (typeof q.engine5 === "string" ? safeJsonParse(q.engine5) : null) ||
@@ -64,6 +69,7 @@ function buildInputV1(req) {
   return {
     symbol,
     tf,
+    strategyType,
     asOf: new Date().toISOString(),
     engine5,
     marketMeter,
@@ -126,13 +132,11 @@ tradePermissionRouter.get("/trade-permission", (req, res) => {
     });
   } catch (err) {
     console.error("[engine6 v1 GET] error:", err);
-    res
-      .status(500)
-      .json({
-        ok: false,
-        error: "ENGINE6_V1_ERROR",
-        detail: String(err?.message || err),
-      });
+    res.status(500).json({
+      ok: false,
+      error: "ENGINE6_V1_ERROR",
+      detail: String(err?.message || err),
+    });
   }
 });
 
@@ -149,13 +153,11 @@ tradePermissionRouter.post("/trade-permission", (req, res) => {
     });
   } catch (err) {
     console.error("[engine6 v1 POST] error:", err);
-    res
-      .status(500)
-      .json({
-        ok: false,
-        error: "ENGINE6_V1_ERROR",
-        detail: String(err?.message || err),
-      });
+    res.status(500).json({
+      ok: false,
+      error: "ENGINE6_V1_ERROR",
+      detail: String(err?.message || err),
+    });
   }
 });
 
@@ -180,13 +182,11 @@ tradePermissionRouter.get("/trade-permission-v2", (req, res) => {
     });
   } catch (err) {
     console.error("[engine6 v2 GET] error:", err);
-    res
-      .status(500)
-      .json({
-        ok: false,
-        error: "ENGINE6_V2_ERROR",
-        detail: String(err?.message || err),
-      });
+    res.status(500).json({
+      ok: false,
+      error: "ENGINE6_V2_ERROR",
+      detail: String(err?.message || err),
+    });
   }
 });
 
@@ -208,12 +208,10 @@ tradePermissionRouter.post("/trade-permission-v2", (req, res) => {
     });
   } catch (err) {
     console.error("[engine6 v2 POST] error:", err);
-    res
-      .status(500)
-      .json({
-        ok: false,
-        error: "ENGINE6_V2_ERROR",
-        detail: String(err?.message || err),
-      });
+    res.status(500).json({
+      ok: false,
+      error: "ENGINE6_V2_ERROR",
+      detail: String(err?.message || err),
+    });
   }
 });
