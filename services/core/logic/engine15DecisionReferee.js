@@ -2,16 +2,23 @@
 //
 // Engine 15C — Decision Referee
 //
-// Updated for Engine 16 exhaustion early + trigger model
+// Engine 16C rewrite goals:
+// - preserve current stable contracts
+// - improve lifecycle truth for trigger / mature / completed
+// - add freshEntryNow
+// - add scalp summary for 10m trigger vs higher-timeframe bias
+// - keep Engine 6 / builder assumptions stable
 //
-// Key rules:
-// - readinessLabel from Engine 16 remains important, but Engine 15 only treats
-//   exhaustionTrigger as a true exhaustion entry signal
-// - exhaustionEarly is watch-state only
-// - preserves existing contracts as much as possible
-// - pure logic only
-// - no route fanout
-// - safe / defensive
+// IMPORTANT:
+// - This is still a pure logic file
+// - No route fanout
+// - No Engine 6 redesign
+// - No builder redesign here
+//
+// NOTE:
+// - True 30m bias for intraday scalps is not yet passed into this file by the builder.
+// - For now, intraday scalp bias uses a safe HTF proxy from Engine 16 context + momentum.
+// - That keeps this patch stable without touching builder wiring first.
 
 const VALID_STRATEGY_TYPES = new Set([
   "EXHAUSTION",
@@ -201,6 +208,7 @@ function normalizeZoneContext(ctx = null) {
         : ctx?.validLocation === false
         ? false
         : null,
+    nearAllowedZone: ctx?.nearAllowedZone === true,
     meta: ctx?.meta || null,
     active: ctx?.active || null,
     nearest: ctx?.nearest || null,
@@ -227,8 +235,7 @@ function normalizeEngine16(engine16 = null) {
   let strategyType = rawStrategyType;
   let readinessLabel = rawReadinessLabel;
 
-  // Engine 15 rule:
-  // exhaustionEarly is watch-only, not a real entry-ready strategy
+  // Early exhaustion is watch-only, not full entry-ready truth.
   if (exhaustionEarly && !exhaustionTrigger) {
     if (strategyType === "EXHAUSTION") strategyType = "NONE";
     if (readinessLabel === "EXHAUSTION_READY") readinessLabel = "NO_SETUP";
@@ -277,6 +284,7 @@ function normalizeEngine16(engine16 = null) {
     failedBreakdown: engine16?.failedBreakdown === true,
     reversalDetected: engine16?.reversalDetected === true,
     trendContinuation: engine16?.trendContinuation === true,
+    impulseVolumeConfirmed: engine16?.impulseVolumeConfirmed === true,
     signalTimes: engine16?.signalTimes || {},
     error: engine16?.error || null,
     reasonCodes: Array.isArray(engine16?.reasonCodes) ? engine16.reasonCodes : [],
@@ -302,6 +310,18 @@ function normalizeEngine5(engine5 = null) {
     },
     reasonCodes: Array.isArray(engine5?.reasonCodes) ? engine5.reasonCodes : [],
   };
+}
+
+function isScalpStrategy(strategyId) {
+  return String(strategyId || "").toLowerCase().includes("intraday_scalp");
+}
+
+function isSwingStrategy(strategyId) {
+  return String(strategyId || "").toLowerCase().includes("minor_swing");
+}
+
+function isIntermediateStrategy(strategyId) {
+  return String(strategyId || "").toLowerCase().includes("intermediate_long");
 }
 
 function inferHigherTimeframeExhaustion({ strategyId, engine16, momentum } = {}) {
@@ -362,12 +382,114 @@ function deriveDirectionFromHTFContext({ winner, engine16, momentum } = {}) {
 }
 
 /* -----------------------------
+   Scalp bias / alignment
+------------------------------*/
+
+function inferScalpBiasProxy({ strategyId, engine16, momentum } = {}) {
+  const sid = String(strategyId || "").toLowerCase();
+  const e16 = normalizeEngine16(engine16);
+  const mom = normalizeMomentum(momentum);
+
+  if (!sid.includes("intraday_scalp")) {
+    return {
+      higherTimeframeBias: "NONE",
+      higherTimeframeBiasSource: "NOT_SCALP",
+    };
+  }
+
+  if (e16.context === "LONG_CONTEXT") {
+    return {
+      higherTimeframeBias: "LONG",
+      higherTimeframeBiasSource: "ENGINE16_CONTEXT_PROXY",
+    };
+  }
+
+  if (e16.context === "SHORT_CONTEXT") {
+    return {
+      higherTimeframeBias: "SHORT",
+      higherTimeframeBiasSource: "ENGINE16_CONTEXT_PROXY",
+    };
+  }
+
+  if (mom.alignment === "BULLISH") {
+    return {
+      higherTimeframeBias: "LONG",
+      higherTimeframeBiasSource: "MOMENTUM_ALIGNMENT_PROXY",
+    };
+  }
+
+  if (mom.alignment === "BEARISH") {
+    return {
+      higherTimeframeBias: "SHORT",
+      higherTimeframeBiasSource: "MOMENTUM_ALIGNMENT_PROXY",
+    };
+  }
+
+  if (mom.smi1h.direction === "UP") {
+    return {
+      higherTimeframeBias: "LONG",
+      higherTimeframeBiasSource: "SMI_1H_PROXY",
+    };
+  }
+
+  if (mom.smi1h.direction === "DOWN") {
+    return {
+      higherTimeframeBias: "SHORT",
+      higherTimeframeBiasSource: "SMI_1H_PROXY",
+    };
+  }
+
+  return {
+    higherTimeframeBias: "NONE",
+    higherTimeframeBiasSource: "UNKNOWN_PROXY",
+  };
+}
+
+function classifyScalpAlignment({ strategyId, direction, engine16, momentum } = {}) {
+  const dir = safeUpper(direction, "NONE");
+  const proxy = inferScalpBiasProxy({ strategyId, engine16, momentum });
+
+  if (!isScalpStrategy(strategyId)) {
+    return {
+      alignmentState: "N/A",
+      scalpMode: "N/A",
+      higherTimeframeBias: proxy.higherTimeframeBias,
+      higherTimeframeBiasSource: proxy.higherTimeframeBiasSource,
+    };
+  }
+
+  if (dir === "NONE" || proxy.higherTimeframeBias === "NONE") {
+    return {
+      alignmentState: "UNKNOWN",
+      scalpMode: "WAIT",
+      higherTimeframeBias: proxy.higherTimeframeBias,
+      higherTimeframeBiasSource: proxy.higherTimeframeBiasSource,
+    };
+  }
+
+  if (dir === proxy.higherTimeframeBias) {
+    return {
+      alignmentState: "ALIGNED",
+      scalpMode: "NORMAL",
+      higherTimeframeBias: proxy.higherTimeframeBias,
+      higherTimeframeBiasSource: proxy.higherTimeframeBiasSource,
+    };
+  }
+
+  return {
+    alignmentState: "COUNTERTREND",
+    scalpMode: "REDUCED",
+    higherTimeframeBias: proxy.higherTimeframeBias,
+    higherTimeframeBiasSource: proxy.higherTimeframeBiasSource,
+  };
+}
+
+/* -----------------------------
    Candidate resolution
 ------------------------------*/
 export function resolveStrategyCandidates({ engine16 } = {}) {
   const e16 = normalizeEngine16(engine16);
 
-  // trigger-ready exhaustion only
   if (e16.exhaustionTrigger === true) {
     return [
       {
@@ -379,7 +501,6 @@ export function resolveStrategyCandidates({ engine16 } = {}) {
     ];
   }
 
-  // early exhaustion is watch-only, no candidate yet
   if (e16.exhaustionEarly === true) {
     return [];
   }
@@ -588,15 +709,15 @@ export function evaluateQualityGate({ engine5 } = {}) {
 }
 
 /* -----------------------------
-   Momentum
+   Momentum + scalp bias
 ------------------------------*/
 export function evaluateMomentumGate({
   strategyId,
   winner,
   momentum,
+  engine16,
 } = {}) {
   const mom = normalizeMomentum(momentum);
-  const sid = safeUpper(strategyId, "");
   const dir = winner?.direction || "NONE";
   const type = winner?.strategyType || "NONE";
 
@@ -606,12 +727,12 @@ export function evaluateMomentumGate({
   let conflicts = [];
   let bias = "NONE";
 
-  const scalpMode = sid.includes("INTRADAY_SCALP");
-  const swingMode = sid.includes("MINOR_SWING");
-  const longMode = sid.includes("INTERMEDIATE_LONG");
-
-  const smi10 = mom.smi10m.direction;
-  const smi1h = mom.smi1h.direction;
+  const scalp = classifyScalpAlignment({
+    strategyId,
+    direction: dir,
+    engine16,
+    momentum,
+  });
 
   if (dir === "LONG") {
     if (mom.alignment === "BULLISH") {
@@ -619,7 +740,7 @@ export function evaluateMomentumGate({
       bias = "LONG_PRIORITY";
       reasonCodes.push("E45_BULLISH_ALIGNED");
     } else if (type === "EXHAUSTION" || type === "REVERSAL") {
-      if (smi10 === "UP") {
+      if (mom.smi10m.direction === "UP") {
         momentumGatePassed = true;
         bias = "LONG_COUNTERTREND";
         reasonCodes.push("COUNTERTREND_EXPECTED");
@@ -640,7 +761,7 @@ export function evaluateMomentumGate({
       bias = "SHORT_PRIORITY";
       reasonCodes.push("E45_BEARISH_ALIGNED");
     } else if (type === "EXHAUSTION" || type === "REVERSAL") {
-      if (smi10 === "DOWN") {
+      if (mom.smi10m.direction === "DOWN") {
         momentumGatePassed = true;
         bias = "SHORT_COUNTERTREND";
         reasonCodes.push("COUNTERTREND_EXPECTED");
@@ -655,9 +776,24 @@ export function evaluateMomentumGate({
     }
   }
 
-  if (scalpMode) reasonCodes.push("MODE_SCALP");
-  if (swingMode) reasonCodes.push("MODE_SWING");
-  if (longMode) reasonCodes.push("MODE_INTERMEDIATE");
+  if (isScalpStrategy(strategyId)) {
+    reasonCodes.push("MODE_SCALP");
+    if (scalp.alignmentState === "ALIGNED") {
+      reasonCodes.push("SCALP_HTF_ALIGNED");
+    } else if (scalp.alignmentState === "COUNTERTREND") {
+      reasonCodes.push("SCALP_COUNTERTREND_REDUCED");
+      conflicts.push("SCALP_COUNTERTREND");
+      if (bias === "LONG_PRIORITY") bias = "LONG_COUNTERTREND";
+      if (bias === "SHORT_PRIORITY") bias = "SHORT_COUNTERTREND";
+      if (bias === "NONE") {
+        if (dir === "LONG") bias = "LONG_COUNTERTREND";
+        if (dir === "SHORT") bias = "SHORT_COUNTERTREND";
+      }
+    }
+  }
+
+  if (isSwingStrategy(strategyId)) reasonCodes.push("MODE_SWING");
+  if (isIntermediateStrategy(strategyId)) reasonCodes.push("MODE_INTERMEDIATE");
 
   return {
     momentumGatePassed,
@@ -667,8 +803,9 @@ export function evaluateMomentumGate({
     conflicts,
     alignment: mom.alignment,
     momentumState: mom.momentumState,
-    smi10Direction: smi10,
-    smi1hDirection: smi1h,
+    smi10Direction: mom.smi10m.direction,
+    smi1hDirection: mom.smi1h.direction,
+    scalpSummary: scalp,
   };
 }
 
@@ -766,6 +903,7 @@ function buildSetupChain({
   engine16,
   promotedStrategyType,
   nextSetupType,
+  lifecycleStage,
 } = {}) {
   const chain = [];
   const type = winner?.strategyType || "NONE";
@@ -780,15 +918,10 @@ function buildSetupChain({
     chain.push("EXHAUSTION_EARLY");
   }
 
-  if (type === "EXHAUSTION") {
-    chain.push("EXHAUSTION");
-  } else if (type === "REVERSAL") {
-    chain.push("REVERSAL");
-  } else if (type === "BREAKDOWN") {
-    chain.push("BREAKDOWN");
-  } else if (type === "BREAKOUT") {
-    chain.push("BREAKOUT");
-  }
+  if (type === "EXHAUSTION") chain.push("EXHAUSTION");
+  else if (type === "REVERSAL") chain.push("REVERSAL");
+  else if (type === "BREAKDOWN") chain.push("BREAKDOWN");
+  else if (type === "BREAKOUT") chain.push("BREAKOUT");
 
   if (e16.hasPulledBack || e16.strategyType === "PULLBACK" || e16.readinessLabel === "PULLBACK_READY") {
     chain.push("PULLBACK");
@@ -809,6 +942,10 @@ function buildSetupChain({
     chain.push("TRIGGERED");
   }
 
+  if (lifecycleStage === "TRIGGERED") chain.push("LIVE_TRIGGER");
+  if (lifecycleStage === "MATURE") chain.push("MATURE");
+  if (lifecycleStage === "COMPLETED") chain.push("COMPLETED");
+
   if (chain.length === 0) chain.push("BUILDING");
   return [...new Set(chain)];
 }
@@ -818,8 +955,13 @@ function deriveNextSetupType({
   engine16,
   promotedStrategyType,
   nextSetupType,
+  lifecycle,
 } = {}) {
   const e16 = normalizeEngine16(engine16);
+
+  if (lifecycle?.lifecycleStage === "COMPLETED") {
+    return "WAIT_FOR_NEW_SEQUENCE";
+  }
 
   if (nextSetupType && nextSetupType !== "NONE") return nextSetupType;
   if (promotedStrategyType === "CONTINUATION") return "CONTINUATION_TRIGGER";
@@ -841,6 +983,7 @@ function deriveNextSetupType({
    Trigger readiness
 ------------------------------*/
 export function evaluateTriggerReadiness({
+  strategyId,
   winner,
   engine16,
   engine3,
@@ -849,6 +992,7 @@ export function evaluateTriggerReadiness({
   qualityGate,
   momentumGate,
   hardBlockers,
+  lifecycle,
 } = {}) {
   const e16 = normalizeEngine16(engine16);
   const e3 = normalizeE3(engine3);
@@ -867,10 +1011,10 @@ export function evaluateTriggerReadiness({
       promotedStrategyType: winner?.strategyType || "NONE",
       nextSetupType: "NONE",
       setupChain: [],
+      freshEntryNow: false,
     };
   }
 
-  // early exhaustion = watch only
   if (e16.exhaustionEarly === true && e16.exhaustionTrigger !== true) {
     return {
       readinessLabel: "NEAR",
@@ -881,6 +1025,7 @@ export function evaluateTriggerReadiness({
       promotedStrategyType: "NONE",
       nextSetupType: "WAIT_FOR_TRIGGER",
       setupChain: ["EXHAUSTION_EARLY", "WAIT_FOR_TRIGGER"],
+      freshEntryNow: false,
     };
   }
 
@@ -894,6 +1039,7 @@ export function evaluateTriggerReadiness({
       promotedStrategyType: "NONE",
       nextSetupType: "NONE",
       setupChain: [],
+      freshEntryNow: false,
     };
   }
 
@@ -903,6 +1049,7 @@ export function evaluateTriggerReadiness({
   let readinessLabel = "WAIT";
   let entryStyle = "NONE";
   let triggerConfirmed = false;
+  let freshEntryNow = false;
 
   if (!qualityPass) {
     readinessLabel = "NEAR";
@@ -924,17 +1071,18 @@ export function evaluateTriggerReadiness({
     blockers.push(...hardBlockers.softBlockers);
   }
 
-  // exhaustion trigger is the actual entry-ready event
   if (winner.strategyType === "EXHAUSTION" && e16.exhaustionTrigger === true) {
     if (qualityPass && momentumPass) {
       readinessLabel = "READY";
       entryStyle = "EXHAUSTION_TRIGGER";
       triggerConfirmed = true;
+      freshEntryNow = true;
       reasonCodes.push("ENGINE16_EXHAUSTION_TRIGGER");
     } else {
       readinessLabel = "ARMING";
       entryStyle = "EXHAUSTION_TRIGGER_PENDING_FILTERS";
       reasonCodes.push("ENGINE16_EXHAUSTION_TRIGGER_PENDING");
+      freshEntryNow = false;
     }
   }
 
@@ -952,6 +1100,7 @@ export function evaluateTriggerReadiness({
       entryStyle = "CONFIRMATION";
       reasonCodes.push("E3_TRIGGER_MATURE");
       reasonCodes.push("E4_VOLUME_SUPPORT");
+      freshEntryNow = true;
     }
 
     if (
@@ -963,6 +1112,7 @@ export function evaluateTriggerReadiness({
       triggerConfirmed = true;
       reasonCodes.push("E3_CONFIRMED");
       reasonCodes.push("E4_CONFIRMED");
+      freshEntryNow = true;
     }
   }
 
@@ -1010,11 +1160,30 @@ export function evaluateTriggerReadiness({
     reasonCodes.push("HTF_EXHAUSTION_LTF_PULLBACK_BUILD");
   }
 
+  if (isScalpStrategy(strategyId) && momentumGate?.scalpSummary?.alignmentState === "COUNTERTREND") {
+    reasonCodes.push("SCALP_COUNTERTREND_REDUCED");
+    if (readinessLabel === "CONFIRMED") {
+      readinessLabel = "READY";
+    }
+  }
+
+  if (lifecycle?.lifecycleStage === "TRIGGERED") {
+    reasonCodes.push("LIFECYCLE_TRIGGERED");
+  }
+
+  if (lifecycle?.lifecycleStage === "MATURE") {
+    freshEntryNow = false;
+    if (readinessLabel === "CONFIRMED") readinessLabel = "READY";
+  }
+
+  if (!VALID_READINESS.has(readinessLabel)) readinessLabel = "WAIT";
+
   const setupChain = buildSetupChain({
     winner,
     engine16: e16,
     promotedStrategyType,
     nextSetupType,
+    lifecycleStage: lifecycle?.lifecycleStage || "BUILDING",
   });
 
   nextSetupType = deriveNextSetupType({
@@ -1022,9 +1191,8 @@ export function evaluateTriggerReadiness({
     engine16: e16,
     promotedStrategyType,
     nextSetupType,
+    lifecycle,
   });
-
-  if (!VALID_READINESS.has(readinessLabel)) readinessLabel = "WAIT";
 
   return {
     readinessLabel,
@@ -1035,6 +1203,7 @@ export function evaluateTriggerReadiness({
     promotedStrategyType,
     nextSetupType,
     setupChain,
+    freshEntryNow,
   };
 }
 
@@ -1112,13 +1281,42 @@ function dedupeZones(zones = []) {
 function extractCurrentPrice(zoneContext) {
   const zc = normalizeZoneContext(zoneContext);
 
-  return (
+  const price =
     toNum(zc?.meta?.current_price) ??
     toNum(zc?.meta?.currentPrice) ??
     toNum(zoneContext?.meta?.current_price) ??
     toNum(zoneContext?.meta?.currentPrice) ??
-    null
-  );
+    null;
+
+  if (!Number.isFinite(price) || price <= 0) return null;
+  return price;
+}
+
+function getLifecycleThresholds(strategyId) {
+  if (isScalpStrategy(strategyId)) {
+    return {
+      completionWindowBars: 3,
+      matureProgress01: 0.7,
+      completeProgress01: 1.0,
+      triggerWindowPts: 0.75,
+    };
+  }
+
+  if (isSwingStrategy(strategyId)) {
+    return {
+      completionWindowBars: 4,
+      matureProgress01: 0.7,
+      completeProgress01: 1.0,
+      triggerWindowPts: 1.5,
+    };
+  }
+
+  return {
+    completionWindowBars: 5,
+    matureProgress01: 0.7,
+    completeProgress01: 1.0,
+    triggerWindowPts: 2.0,
+  };
 }
 
 function buildLifecycle({
@@ -1129,6 +1327,8 @@ function buildLifecycle({
 } = {}) {
   const e16 = normalizeEngine16(engine16);
   const zc = normalizeZoneContext(zoneContext);
+  const direction = winner?.direction || "NONE";
+  const thresholds = getLifecycleThresholds(strategyId);
 
   const signalPrice =
     toNum(e16.exhaustionBarPrice) ??
@@ -1138,7 +1338,6 @@ function buildLifecycle({
     null;
 
   const currentPrice = extractCurrentPrice(zoneContext);
-  const direction = winner?.direction || "NONE";
 
   const ladders = [];
   const activeInst = zc?.active?.institutional;
@@ -1174,6 +1373,11 @@ function buildLifecycle({
   const firstTargetHit = tp1Zone ? tp1Zone.hit === true : false;
   const secondTargetHit = tp2Zone ? tp2Zone.hit === true : false;
 
+  const moveFromSignalPts =
+    Number.isFinite(signalPrice) && Number.isFinite(currentPrice)
+      ? Math.abs(currentPrice - signalPrice)
+      : null;
+
   let lifecycleStage = "BUILDING";
   let runnerActive = false;
   let runnerExitTriggered = false;
@@ -1181,6 +1385,17 @@ function buildLifecycle({
   let edgeRemainingPct = 100;
   let nextFocus = "WAIT_FOR_TRIGGER";
   let setupCompleted = false;
+
+  const hasLiveSignal =
+    e16.exhaustionTrigger === true ||
+    e16.breakoutReady === true ||
+    e16.breakdownReady === true ||
+    e16.trendContinuation === true;
+
+  if (hasLiveSignal) {
+    lifecycleStage = "TRIGGERED";
+    nextFocus = "LOOK_FOR_FOLLOWTHROUGH";
+  }
 
   if (firstTargetHit && !secondTargetHit) {
     lifecycleStage = "PARTIALLY_COMPLETED";
@@ -1194,6 +1409,19 @@ function buildLifecycle({
     runnerActive = true;
     edgeRemainingPct = 33;
     nextFocus = "MANAGE_RUNNER";
+  }
+
+  // Fallback maturity for live signals when path is sparse but move is already extended.
+  if (
+    lifecycleStage === "TRIGGERED" &&
+    moveFromSignalPts != null &&
+    moveFromSignalPts >= thresholds.triggerWindowPts &&
+    path.length === 0
+  ) {
+    lifecycleStage = "MATURE";
+    runnerActive = false;
+    edgeRemainingPct = 33;
+    nextFocus = "NO_FRESH_ENTRY";
   }
 
   const noSetupNow =
@@ -1230,20 +1458,40 @@ function buildLifecycle({
     nextFocus = "LOOK_FOR_NEW_SETUP";
   }
 
+  // If the setup previously triggered but structure is gone, complete it rather than collapsing back to nothing.
+  if (
+    (lifecycleStage === "TRIGGERED" || lifecycleStage === "MATURE") &&
+    noSetupNow &&
+    hasLiveSignal !== true
+  ) {
+    lifecycleStage = "COMPLETED";
+    runnerActive = false;
+    runnerExitTriggered = true;
+    runnerExitReason = "SETUP_NO_LONGER_ACTIVE";
+    edgeRemainingPct = 0;
+    setupCompleted = true;
+    nextFocus = "LOOK_FOR_NEW_SETUP";
+  }
+
   const targetProgress01 =
     secondTargetHit ? 1 : firstTargetHit ? 0.7 : 0;
 
+  const isFreshSetup =
+    lifecycleStage === "BUILDING" ||
+    lifecycleStage === "TRIGGERED";
+
+  const entryWindowOpen =
+    lifecycleStage === "BUILDING" ||
+    lifecycleStage === "TRIGGERED";
+
   return {
     lifecycleStage,
-    isFreshSetup: lifecycleStage === "BUILDING",
-    entryWindowOpen: lifecycleStage === "BUILDING",
+    isFreshSetup,
+    entryWindowOpen,
     signalPrice,
     currentPrice,
     barsSinceSignal: null,
-    moveFromSignalPts:
-      Number.isFinite(signalPrice) && Number.isFinite(currentPrice)
-        ? Math.abs(currentPrice - signalPrice)
-        : null,
+    moveFromSignalPts,
     moveFromSignalAtr: null,
     zonesInPath: path,
     zonesHit,
@@ -1298,7 +1546,13 @@ function applyLifecycleOverride({
     out.readinessLabel = "STAND_DOWN";
     out.entryStyle = "NONE";
     out.triggerConfirmed = false;
+    out.freshEntryNow = false;
     out.reasonCodes = [...new Set([...(out.reasonCodes || []), "RUNNER_EXIT_TRIGGERED"])];
+  }
+
+  if (lifecycle.lifecycleStage === "MATURE") {
+    out.freshEntryNow = false;
+    out.reasonCodes = [...new Set([...(out.reasonCodes || []), "SETUP_MATURE_NO_CHASE"])];
   }
 
   return out;
@@ -1354,6 +1608,48 @@ function buildSignalEvent({ winner, engine16 } = {}) {
   };
 }
 
+function buildScalpSummary({
+  strategyId,
+  winner,
+  engine16,
+  momentumGate,
+} = {}) {
+  if (!isScalpStrategy(strategyId)) {
+    return {
+      enabled: false,
+      higherTimeframeBias: "NONE",
+      higherTimeframeBiasSource: "NOT_SCALP",
+      triggerSignal: "NONE",
+      triggerDirection: "NONE",
+      alignmentState: "N/A",
+      scalpMode: "N/A",
+    };
+  }
+
+  const e16 = normalizeEngine16(engine16);
+  const triggerSignal =
+    winner?.strategyType && winner.strategyType !== "NONE"
+      ? winner.strategyType
+      : e16.strategyType;
+
+  const scalp = momentumGate?.scalpSummary || {
+    alignmentState: "UNKNOWN",
+    scalpMode: "WAIT",
+    higherTimeframeBias: "NONE",
+    higherTimeframeBiasSource: "UNKNOWN_PROXY",
+  };
+
+  return {
+    enabled: true,
+    higherTimeframeBias: scalp.higherTimeframeBias || "NONE",
+    higherTimeframeBiasSource: scalp.higherTimeframeBiasSource || "UNKNOWN_PROXY",
+    triggerSignal: safeUpper(triggerSignal, "NONE"),
+    triggerDirection: safeUpper(winner?.direction, "NONE"),
+    alignmentState: scalp.alignmentState || "UNKNOWN",
+    scalpMode: scalp.scalpMode || "WAIT",
+  };
+}
+
 /* -----------------------------
    Final decision
 ------------------------------*/
@@ -1389,9 +1685,18 @@ export function buildFinalDecision({
     strategyId,
     winner: resolvedWinner,
     momentum,
+    engine16,
+  });
+
+  const lifecycle = buildLifecycle({
+    strategyId,
+    winner: resolvedWinner,
+    engine16,
+    zoneContext,
   });
 
   const triggerBase = evaluateTriggerReadiness({
+    strategyId,
     winner: resolvedWinner,
     engine16,
     engine3,
@@ -1400,13 +1705,7 @@ export function buildFinalDecision({
     qualityGate: quality,
     momentumGate: mom,
     hardBlockers: hard,
-  });
-
-  const lifecycle = buildLifecycle({
-    strategyId,
-    winner: resolvedWinner,
-    engine16,
-    zoneContext,
+    lifecycle,
   });
 
   const signalEvent = buildSignalEvent({
@@ -1468,9 +1767,23 @@ export function buildFinalDecision({
     ...(mom.conflicts || []),
   ];
 
+  const scalpSummary = buildScalpSummary({
+    strategyId,
+    winner: resolvedWinner,
+    engine16,
+    momentumGate: mom,
+  });
+
+  const freshEntryNow =
+    trigger.freshEntryNow === true &&
+    lifecycle?.entryWindowOpen === true &&
+    lifecycle?.setupCompleted !== true &&
+    lifecycle?.lifecycleStage !== "MATURE" &&
+    lifecycle?.lifecycleStage !== "COMPLETED";
+
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v7.3",
+    engine: "engine15.decisionReferee.v8.0",
     symbol,
     strategyId,
     strategyType: trigger.promotedStrategyType || resolvedWinner?.strategyType || "NONE",
@@ -1478,6 +1791,7 @@ export function buildFinalDecision({
     readinessLabel: trigger.readinessLabel,
     executionBias,
     action,
+    freshEntryNow,
     priority: Number.isFinite(Number(resolvedWinner?.priority)) ? Number(resolvedWinner.priority) : 0,
     entryStyle: trigger.entryStyle || "NONE",
     reasonCodes: [...new Set(reasonCodes)],
@@ -1501,6 +1815,7 @@ export function buildFinalDecision({
     setupChain: Array.isArray(trigger.setupChain) ? trigger.setupChain : [],
     nextSetupType: trigger.nextSetupType || "NONE",
     primaryExhaustionTF: resolvedWinner?.primaryExhaustionTF || null,
+    scalpSummary,
     signalEvent,
     lifecycle,
     debug: {
@@ -1551,7 +1866,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v7.3",
+      engine: "engine15.decisionReferee.v8.0",
       symbol,
       strategyId,
       strategyType: "NONE",
@@ -1559,6 +1874,7 @@ export function computeEngine15DecisionReferee({
       readinessLabel: "WAIT",
       executionBias: "NONE",
       action: "NO_ACTION",
+      freshEntryNow: false,
       priority: 0,
       entryStyle: "NONE",
       reasonCodes: ["ENGINE15_REFEREE_ERROR"],
@@ -1582,6 +1898,15 @@ export function computeEngine15DecisionReferee({
       setupChain: [],
       nextSetupType: "NONE",
       primaryExhaustionTF: null,
+      scalpSummary: {
+        enabled: false,
+        higherTimeframeBias: "NONE",
+        higherTimeframeBiasSource: "ERROR",
+        triggerSignal: "NONE",
+        triggerDirection: "NONE",
+        alignmentState: "UNKNOWN",
+        scalpMode: "WAIT",
+      },
       signalEvent: {
         signalType: "NONE",
         direction: "NONE",
