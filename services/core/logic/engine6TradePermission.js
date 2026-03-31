@@ -163,11 +163,32 @@ export function computeTradePermission(input) {
   // Out of allowed zones => STAND_DOWN, but make reason explicit
   // Alias old reason to new standardized reason.
   if (!withinZone) {
-    reasons.push("OUT_OF_ALLOWED_ZONES");
-    // Optional backward compat (leave commented if you want only new code)
-    // reasons.push("STANDDOWN_NOT_IN_ZONE");
-    return standDown(reasons, debug, { primary: ALLOWED_ZONES_PRIMARY, secondary: [] });
+  const strategyType = input?.strategyType || "UNKNOWN";
+
+  // ✅ Allow continuation outside zones (reduced risk)
+  if (strategyType === "CONTINUATION") {
+    reasons.push("REDUCE_CONTINUATION_OUTSIDE_ZONE");
+    return {
+      permission: "REDUCE",
+      sizeMultiplier: 0.5,
+      allowedTradeTypes: ["CONTINUATION"],
+      allowedZones: {
+        primary: ["ANY"],
+        secondary: [],
+      },
+      entryConstraints: baseConstraints(),
+      reasonCodes: reasons,
+      debug,
+    };
   }
+
+  // Everything else stays blocked
+  reasons.push("OUT_OF_ALLOWED_ZONES");
+  return standDown(reasons, debug, {
+    primary: ALLOWED_ZONES_PRIMARY,
+    secondary: [],
+  });
+}
 
   if (zoneDegraded || liquidityFail || reactionFailed) {
     reasons.push("STANDDOWN_ZONE_FLAGGED_BAD");
