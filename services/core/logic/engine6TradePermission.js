@@ -146,9 +146,30 @@ export function computeTradePermission(input) {
   // ---------------- HARD STAND DOWN ----------------
 
   if (invalid) {
-    reasons.push("STANDDOWN_INVALID");
-    return standDown(reasons, debug);
+  const strategyType = input?.strategyType || "UNKNOWN";
+
+  if (
+    strategyType === "CONTINUATION" &&
+    (withinZone || nearAllowedZone)
+  ) {
+    reasons.push("REDUCE_INVALID_CONTINUATION_TESTING");
+    return {
+      permission: "REDUCE",
+      sizeMultiplier: 0.5,
+      allowedTradeTypes: ["CONTINUATION"],
+      allowedZones: {
+        primary: ["NEGOTIATED", "INSTITUTIONAL", "NEAR_ALLOWED_ZONE"],
+        secondary: ["SHELF"],
+      },
+      entryConstraints: baseConstraints(),
+      reasonCodes: reasons,
+      debug,
+    };
   }
+
+  reasons.push("STANDDOWN_INVALID");
+  return standDown(reasons, debug);
+}
 
   if (isNewEntry && eodRisk === "RISK_OFF") {
     reasons.push("STANDDOWN_EOD_RISK_OFF");
