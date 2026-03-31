@@ -1,25 +1,11 @@
 // services/core/logic/engine16MorningFib.js
 // Engine 16 — Morning Impulse Fib Engine
 //
-// Current version goals
-// - Detect morning impulse move
-// - Build fib retracement structure
-// - Track pullback state
-// - Detect wick rejection
-// - Detect breakout / breakdown continuation
-// - Detect reversal structure
-// - Detect exhaustion EARLY + exhaustion TRIGGER
-// - Detect trend continuation WATCH + TRIGGER
-// - Classify current strategy type
-// - Optionally refine anchors using negotiated zones
-// - Optionally overlay Engine 4 volume context
-//
-// Notes
-// - Engine 16 does NOT place trades
-// - Engine 16 does NOT override Engine 1 / 2 / 6
-// - readinessLabel becomes EXHAUSTION_READY ONLY on TRIGGER, not EARLY
-// - readinessLabel becomes CONTINUATION_READY ONLY on TRIGGER, not WATCH
-// - chart / engine 15 can still see EARLY / WATCH fields for visuals
+// Happy-medium v1
+// - keep current exhaustion trigger engine intact
+// - add market-regime awareness
+// - soften early promotion in neutral / transition
+// - do NOT over-tighten tested exhaustion signals
 
 import path from "path";
 import { readFile } from "fs/promises";
@@ -30,6 +16,7 @@ import { computeVolumeBehavior } from "./volumeBehaviorEngine.js";
 import { detectContinuation, emptyContinuationDebug } from "./engine16/continuation.js";
 import { confirmExhaustionPhases, emptyExhaustionDebug } from "./engine16/exhaustion.js";
 import { classifyEngine16Strategy } from "./engine16/strategy.js";
+import { defaultMarketRegime } from "./marketRegime.js";
 
 const MARKET_TZ = "America/New_York";
 const DISPLAY_TZ = "America/Phoenix";
@@ -40,9 +27,6 @@ const FETCH_DAYS = 8;
 
 const EXHAUSTION_LOOKBACK_BARS = 5;
 const EXHAUSTION_MIN_ACTIVE_BARS = 2;
-
-const CONTINUATION_WEAK_LOOKBACK = 3;
-const CONTINUATION_DISPLACEMENT_LOOKBACK = 5;
 
 const TF_MS = {
   "1m": 60_000,
@@ -162,17 +146,17 @@ function filterBarsForDate(closedBars, dateKey) {
 
 function inPremarket(bar) {
   const p = getNyPartsFromMs(bar.t);
-  return p.minuteOfDay >= 240 && p.minuteOfDay < 570; // 04:00–09:30 ET
+  return p.minuteOfDay >= 240 && p.minuteOfDay < 570;
 }
 
 function inMorningImpulseWindow(bar) {
   const p = getNyPartsFromMs(bar.t);
-  return p.minuteOfDay >= 570 && p.minuteOfDay < 660; // 09:30–11:00 ET
+  return p.minuteOfDay >= 570 && p.minuteOfDay < 660;
 }
 
 function inRegularSession(bar) {
   const p = getNyPartsFromMs(bar.t);
-  return p.minuteOfDay >= 570 && p.minuteOfDay < 960; // 09:30–16:00 ET
+  return p.minuteOfDay >= 570 && p.minuteOfDay < 960;
 }
 
 function atrAtIndex(bars, endIndex, len = 14) {
@@ -509,7 +493,7 @@ function emptySignalTimes() {
   };
 }
 
-  function buildAnchorLabels(context) {
+function buildAnchorLabels(context) {
   if (context === "SHORT_CONTEXT") {
     return {
       anchorAType: "IMPULSE_HIGH",
@@ -522,7 +506,7 @@ function emptySignalTimes() {
   };
 }
 
-  function emptyStrategyFields() {
+function emptyStrategyFields() {
   return {
     strategyType: "NONE",
     readinessLabel: "NO_SETUP",
@@ -559,10 +543,12 @@ function emptySignalTimes() {
     debugContinuation: emptyContinuationDebug(),
   };
 }
-    
 
- function getBodies(bars) {
-  return bars.map((b) => Math.abs((b?.c ?? 0) - (b?.o ?? 0))).filter(Number.isFinite);
+function normalizeRegime(regimeInput) {
+  if (regimeInput && typeof regimeInput === "object" && regimeInput.regime) {
+    return regimeInput;
+  }
+  return defaultMarketRegime("ENGINE16_NO_REGIME");
 }
 
 export async function computeMorningFib({
@@ -570,8 +556,10 @@ export async function computeMorningFib({
   tf = DEFAULT_TF,
   includeZones = true,
   includeVolume = true,
+  marketRegime = null,
 } = {}) {
   const timeframe = SUPPORTED_TF.has(String(tf)) ? String(tf) : DEFAULT_TF;
+  const regimeInfo = normalizeRegime(marketRegime);
 
   let rawBars;
   try {
@@ -585,6 +573,7 @@ export async function computeMorningFib({
       timeframe,
       context: "NONE",
       state: "NO_IMPULSE",
+      marketRegime: regimeInfo,
       error: "OHLC_UNAVAILABLE",
       detail: err?.message || String(err),
     };
@@ -600,6 +589,7 @@ export async function computeMorningFib({
       timeframe,
       context: "NONE",
       state: "NO_IMPULSE",
+      marketRegime: regimeInfo,
       error: "OHLC_UNAVAILABLE",
     };
   }
@@ -616,6 +606,7 @@ export async function computeMorningFib({
       symbol,
       context: "NONE",
       state: "NO_IMPULSE",
+      marketRegime: regimeInfo,
       error: "MISSING_PREMARKET_BARS",
     };
   }
@@ -640,6 +631,7 @@ export async function computeMorningFib({
     date: dateKey,
     timeframe,
     context: "NONE",
+    marketRegime: regimeInfo,
     anchors: {
       premarketLow: round2(premarketLow),
       premarketHigh: round2(premarketHigh),
@@ -916,14 +908,14 @@ export async function computeMorningFib({
 
   const latestIndex = closedBars.length - 1;
   const ex = confirmExhaustionPhases({
-  bars: closedBars,
-  sessionHigh: bestCandidate.sessionHigh,
-  sessionLow: bestCandidate.sessionLow,
-  latestIndex,
-  lookbackBars: EXHAUSTION_LOOKBACK_BARS,
-  formatDisplayTimeFromMs,
-  round2,
-});
+    bars: closedBars,
+    sessionHigh: bestCandidate.sessionHigh,
+    sessionLow: bestCandidate.sessionLow,
+    latestIndex,
+    lookbackBars: EXHAUSTION_LOOKBACK_BARS,
+    formatDisplayTimeFromMs,
+    round2,
+  });
 
   debugExhaustion = ex.debug;
 
@@ -1069,6 +1061,7 @@ export async function computeMorningFib({
     secondaryZoneRaw: zoneRaw.secondaryZone,
     exhaustionTrigger: exhaustionTrigger && exhaustionActive,
     reversalDetected,
+    formatDisplayTimeFromMs,
   });
 
   const trendContinuation = continuation.trendContinuation;
@@ -1081,18 +1074,22 @@ export async function computeMorningFib({
   const debugContinuation = continuation.debugContinuation;
 
   const { strategyType, readinessLabel } = classifyEngine16Strategy({
-  exhaustionTrigger,
-  exhaustionActive,
-  reversalDetected,
-  failedBreakout,
-  failedBreakdown,
-  hasPulledBack,
-  breakdownReady,
-  breakoutReady,
-  continuationTrigger,
-  insidePrimaryZone,
-  insideSecondaryZone,
-});
+    exhaustionTrigger,
+    exhaustionActive,
+    exhaustionEarly,
+    reversalDetected,
+    failedBreakout,
+    failedBreakdown,
+    hasPulledBack,
+    breakdownReady,
+    breakoutReady,
+    continuationWatch,
+    continuationTrigger,
+    insidePrimaryZone,
+    insideSecondaryZone,
+    marketRegime: regimeInfo,
+  });
+
   let volumeContext = {
     volumeScore: 0,
     volumeConfirmed: false,
@@ -1171,6 +1168,7 @@ export async function computeMorningFib({
     date: dateKey,
     timeframe,
     context: finalContext,
+    marketRegime: regimeInfo,
 
     anchors: {
       premarketLow: round2(premarketLow),
