@@ -271,24 +271,7 @@ function normalizeEngine5ForEngine6(confluenceJson) {
   return { invalid, total, reasonCodes, label, flags, compression, bias };
 }
 
-  const invalid = Boolean(confluenceJson.invalid);
-  const reasonCodes = Array.isArray(confluenceJson.reasonCodes)
-    ? confluenceJson.reasonCodes
-    : [];
-
-  const total =
-    Number(confluenceJson?.scores?.total) ||
-    Number(confluenceJson?.total) ||
-    0;
-
-  const label = confluenceJson?.scores?.label || confluenceJson?.label || null;
-  const flags = confluenceJson?.flags || null;
-  const compression = confluenceJson?.compression || null;
-  const bias = confluenceJson?.bias ?? null;
-
-  return { invalid, total, reasonCodes, label, flags, compression, bias };
-}
-
+  
 function isInside(price, z) {
   const p = Number(price);
   const lo = Number(z?.lo);
