@@ -171,6 +171,10 @@ export function computeTradePermission(input) {
   return standDown(reasons, debug);
 }
 
+  reasons.push("STANDDOWN_INVALID");
+  return standDown(reasons, debug);
+}
+
   if (isNewEntry && eodRisk === "RISK_OFF") {
     reasons.push("STANDDOWN_EOD_RISK_OFF");
     return standDown(reasons, debug);
