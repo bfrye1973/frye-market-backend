@@ -35,7 +35,6 @@ function standDown(reasonCodes, debug, allowedZonesOverride = null) {
     permission: "STAND_DOWN",
     sizeMultiplier: 0.0,
     allowedTradeTypes: [],
-    // Include allowedZones for UI clarity (LOCKED improvement)
     allowedZones: allowedZonesOverride || {
       primary: ALLOWED_ZONES_PRIMARY,
       secondary: [],
@@ -77,7 +76,10 @@ function allow(reasonCodes, debug) {
 }
 
 export function computeTradePermission(input) {
-  const score = clamp(input?.engine5?.total ?? 0, 0, 100);
+  const rawScore = input?.engine5?.total;
+  const score =
+    Number.isFinite(Number(rawScore)) ? clamp(rawScore, 0, 100) : null;
+
   const invalid = !!input?.engine5?.invalid;
 
   const mm = input?.marketMeter || {};
@@ -95,7 +97,9 @@ export function computeTradePermission(input) {
   const zone = input?.zoneContext || {};
   const zoneType = zone.zoneType || "UNKNOWN";
   const withinZone = !!zone.withinZone;
-  const nearAllowedZone = zone?.locationState === "NEAR_ALLOWED_ZONE" || zone?.nearAllowedZone === true;
+  const nearAllowedZone =
+    zone?.locationState === "NEAR_ALLOWED_ZONE" ||
+    zone?.nearAllowedZone === true;
 
   const flags = zone.flags || {};
   const zoneDegraded = !!flags.degraded;
@@ -141,11 +145,11 @@ export function computeTradePermission(input) {
 
   // ---------------- HARD STAND DOWN ----------------
 
-  if (invalid || score === 0) {
-  reasons.push("STANDDOWN_INVALID_OR_ZERO");
-  return standDown(reasons, debug);
-}
-  
+  if (invalid) {
+    reasons.push("STANDDOWN_INVALID");
+    return standDown(reasons, debug);
+  }
+
   if (isNewEntry && eodRisk === "RISK_OFF") {
     reasons.push("STANDDOWN_EOD_RISK_OFF");
     return standDown(reasons, debug);
@@ -161,33 +165,32 @@ export function computeTradePermission(input) {
     return standDown(reasons, debug);
   }
 
-   if (!withinZone && !nearAllowedZone) {
-  const strategyType = input?.strategyType || "UNKNOWN";
+  if (!withinZone && !nearAllowedZone) {
+    const strategyType = input?.strategyType || "UNKNOWN";
 
-  // ✅ Allow continuation outside zones (reduced risk)
-  if (strategyType === "CONTINUATION") {
-    reasons.push("REDUCE_CONTINUATION_OUTSIDE_ZONE");
-    return {
-      permission: "REDUCE",
-      sizeMultiplier: 0.5,
-      allowedTradeTypes: ["CONTINUATION"],
-      allowedZones: {
-        primary: ["ANY"],
-        secondary: [],
-      },
-      entryConstraints: baseConstraints(),
-      reasonCodes: reasons,
-      debug,
-    };
+    if (strategyType === "CONTINUATION") {
+      reasons.push("REDUCE_CONTINUATION_OUTSIDE_ZONE");
+      return {
+        permission: "REDUCE",
+        sizeMultiplier: 0.5,
+        allowedTradeTypes: ["CONTINUATION"],
+        allowedZones: {
+          primary: ["ANY"],
+          secondary: [],
+        },
+        entryConstraints: baseConstraints(),
+        reasonCodes: reasons,
+        debug,
+      };
+    }
+
+    reasons.push("OUT_OF_ALLOWED_ZONES");
+    return standDown(reasons, debug, {
+      primary: ALLOWED_ZONES_PRIMARY,
+      secondary: [],
+    });
   }
 
-  reasons.push("OUT_OF_ALLOWED_ZONES");
-  return standDown(reasons, debug, {
-    primary: ALLOWED_ZONES_PRIMARY,
-    secondary: [],
-  });
-}
-  
   if (zoneDegraded || liquidityFail || reactionFailed) {
     reasons.push("STANDDOWN_ZONE_FLAGGED_BAD");
     return standDown(reasons, debug);
@@ -195,19 +198,29 @@ export function computeTradePermission(input) {
 
   // ---------------- REDUCE ----------------
 
-  if (score < 70 || singleTfContracting) {
-    reasons.push(score < 70 ? "REDUCE_SCORE_55_69" : "REDUCE_SINGLE_TF_CONTRACTING");
+  if ((score != null && score < 70) || singleTfContracting) {
+    reasons.push(
+      score != null && score < 70
+        ? "REDUCE_SCORE_55_69"
+        : "REDUCE_SINGLE_TF_CONTRACTING"
+    );
     return reduce(reasons, debug);
   }
 
   // ---------------- ALLOW ----------------
 
-if (nearAllowedZone && !withinZone) {
-  reasons.push("ALLOW_NEAR_ALLOWED_ZONE_TESTING");
+  if (nearAllowedZone && !withinZone) {
+    reasons.push("ALLOW_NEAR_ALLOWED_ZONE_TESTING");
+  }
+
+  if (score == null) {
+    reasons.push("ALLOW_SCORE_UNKNOWN_TESTING");
+  } else {
+    reasons.push("ALLOW_SCORE_70_PLUS");
+  }
+
+  reasons.push("ALLOW_MARKET_OK");
+  reasons.push("ALLOW_ZONE_OK");
+
+  return allow(reasons, debug);
 }
-
-reasons.push("ALLOW_SCORE_70_PLUS");
-reasons.push("ALLOW_MARKET_OK");
-reasons.push("ALLOW_ZONE_OK");
-
-return allow(reasons, debug);
