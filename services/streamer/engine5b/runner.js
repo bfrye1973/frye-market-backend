@@ -1164,13 +1164,14 @@ async function refreshZone() {
   }
 
   if (engine5bState.zone?.source === "NONE") {
-    hardResetToIdle("NO_ZONE_SOURCE_NONE");
-    return;
-  }
-
-  recomputeMoveClassification();
+  hardResetToIdle("NO_ZONE_SOURCE_NONE");
+  return;
 }
 
+recomputeMoveClassification();
+}
+
+// ✅ refreshRisk FULLY CLOSED + CORRECT
 async function refreshRisk() {
   const url = `${BACKEND1_BASE}/api/trading/status`;
   const j = await jget(url);
@@ -1188,6 +1189,9 @@ async function refreshRisk() {
     return;
   }
 
+  // ✅ THIS WAS MISSING — REQUIRED
+  recomputeMoveClassification();
+}
   
 async function refreshE3() {
   const az = engine5bState.zone?.analysis ?? null;
