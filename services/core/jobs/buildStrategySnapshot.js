@@ -2,7 +2,7 @@
 // Stable snapshot builder (SPY only)
 //
 // Phase 4 / Conscious Brain wiring:
-// - computes shared market regime from OVERALL scores only
+// - computes shared market regime from LIVE Market Meter endpoints
 // - passes market regime into Engine 16 directly
 // - passes market regime into Engine 6 permission body
 // - keeps old engine15 + engine15Decision flow intact
@@ -26,7 +26,6 @@ const DATA_DIR = "/opt/render/project/src/services/core/data";
 const SNAPSHOT_FILE = `${DATA_DIR}/strategy-snapshot.json`;
 
 const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
-const MARKETMIND_URL = process.env.MARKETMIND_URL || null;
 
 const symbol = "SPY";
 
@@ -123,35 +122,62 @@ async function postJson(url, body, timeoutMs = 30000) {
 }
 
 /* -----------------------------
-   MarketMind
+   Live Market Meter (authoritative)
 ------------------------------*/
-function toScore(x) {
-  const n = Number(x);
-  return Number.isFinite(n) ? n : null;
-}
+async function fetchLiveMarketMeter() {
+  const [intraday, m30, hourly, h4, eod] = await Promise.all([
+    fetchJson(`${CORE_BASE}/live/intraday`, 15000),
+    fetchJson(`${CORE_BASE}/live/30m`, 15000),
+    fetchJson(`${CORE_BASE}/live/hourly`, 15000),
+    fetchJson(`${CORE_BASE}/live/4h`, 15000),
+    fetchJson(`${CORE_BASE}/live/eod`, 15000),
+  ]);
 
-async function fetchMarketMindScores() {
-  if (!MARKETMIND_URL) {
-    return {
-      score10m: null,
-      score1h: null,
-      score4h: null,
-      scoreEOD: null,
-      scoreMaster: null,
-      _src: "NONE",
-    };
-  }
-
-  const r = await fetchJson(MARKETMIND_URL, 15000);
-  const j = r?.json;
+  const intradayJ = intraday?.json || {};
+  const m30J = m30?.json || {};
+  const hourlyJ = hourly?.json || {};
+  const h4J = h4?.json || {};
+  const eodJ = eod?.json || {};
 
   return {
-    score10m: toScore(j?.score10m),
-    score1h: toScore(j?.score1h),
-    score4h: toScore(j?.score4h),
-    scoreEOD: toScore(j?.scoreEOD),
-    scoreMaster: toScore(j?.scoreMaster),
-    _src: "MARKETMIND_URL",
+    score10m:
+      toNum(intradayJ?.metrics?.overall_intraday_score),
+    state10m:
+      intradayJ?.metrics?.overall_intraday_state ?? null,
+
+    score30m:
+      toNum(m30J?.metrics?.overall_30m_score),
+    state30m:
+      m30J?.metrics?.overall_30m_state ?? null,
+
+    score1h:
+      toNum(hourlyJ?.metrics?.overall_hourly_score),
+    state1h:
+      hourlyJ?.metrics?.overall_hourly_state ?? null,
+
+    score4h:
+      toNum(h4J?.metrics?.trend_strength_4h_pct) ??
+      toNum(h4J?.fourHour?.overall4h?.score),
+    state4h:
+      h4J?.fourHour?.overall4h?.state ?? null,
+
+    scoreEOD:
+      toNum(eodJ?.metrics?.overall_eod_score) ??
+      toNum(eodJ?.daily?.overallEOD?.score),
+    stateEOD:
+      eodJ?.metrics?.overall_eod_state ??
+      eodJ?.daily?.overallEOD?.state ??
+      null,
+
+    raw: {
+      intraday: intradayJ,
+      m30: m30J,
+      hourly: hourlyJ,
+      h4: h4J,
+      eod: eodJ,
+    },
+
+    _src: "LIVE_10M_30M_1H_4H_EOD",
   };
 }
 
@@ -1053,16 +1079,28 @@ async function buildSnapshot() {
   const momentum = await fetchMomentumContext(symbol);
   console.log("Momentum fetched");
 
-  const marketMind = await fetchMarketMindScores();
-  console.log("MarketMind fetched");
+  const marketMind = await fetchLiveMarketMeter();
+  console.log("Live Market Meter fetched");
 
   const marketRegime = computeMarketRegime({
     score10m: marketMind?.score10m,
+    score30m: marketMind?.score30m,
     score1h: marketMind?.score1h,
     score4h: marketMind?.score4h,
     scoreEOD: marketMind?.scoreEOD,
+    state10m: marketMind?.state10m,
+    state30m: marketMind?.state30m,
+    state1h: marketMind?.state1h,
+    state4h: marketMind?.state4h,
+    stateEOD: marketMind?.stateEOD,
   });
-  console.log("Market regime computed:", marketRegime?.regime, marketRegime?.directionBias, marketRegime?.strictness);
+
+  console.log(
+    "Market regime computed:",
+    marketRegime?.regime,
+    marketRegime?.directionBias,
+    marketRegime?.strictness
+  );
 
   const result = {
     ok: true,
