@@ -1,17 +1,5 @@
 // services/core/routes/tradePermission.js
 // Engine 6 — Trade Permission API (v1 + v2 side-by-side)
-//
-// v1 = legacy zone/flags trade permission (engine6TradePermission.js)
-//   GET  /api/v1/trade-permission
-//   POST /api/v1/trade-permission
-//
-// v2 = MarketMind (subconscious scores) permission (engine6MarketMindPermission.js)
-//   GET  /api/v1/trade-permission-v2
-//   POST /api/v1/trade-permission-v2
-//
-// NOTE:
-// - Both endpoints accept POST JSON body (preferred)
-// - GET is supported for quick sanity testing (may default to conservative values)
 
 import express from "express";
 
@@ -66,6 +54,12 @@ function buildInputV1(req) {
     (typeof q.intent === "string" ? safeJsonParse(q.intent) : null) ||
     { action: "NEW_ENTRY" };
 
+  // ✅ NEW: accept marketRegime
+  const marketRegime =
+    body.marketRegime ||
+    (typeof q.marketRegime === "string" ? safeJsonParse(q.marketRegime) : null) ||
+    null;
+
   return {
     symbol,
     tf,
@@ -73,6 +67,7 @@ function buildInputV1(req) {
     asOf: new Date().toISOString(),
     engine5,
     marketMeter,
+    marketRegime, // 🔥 IMPORTANT
     zoneContext,
     intent,
   };
@@ -88,7 +83,6 @@ function buildInputV2(req) {
   const symbol = body.symbol || q.symbol || "SPY";
   const strategyId = body.strategyId || q.strategyId || "minor_swing@1h";
 
-  // MarketMind scores (required for v2)
   const market =
     body.market ||
     (typeof q.market === "string" ? safeJsonParse(q.market) : null) || {
@@ -99,7 +93,6 @@ function buildInputV2(req) {
       scoreMaster: null,
     };
 
-  // Engine 5 setup context for v2
   const setup =
     body.setup ||
     (typeof q.setup === "string" ? safeJsonParse(q.setup) : null) || {
@@ -123,6 +116,7 @@ tradePermissionRouter.get("/trade-permission", (req, res) => {
   try {
     const input = buildInputV1(req);
     const result = computeLegacy(input);
+
     res.json({
       engine: "engine6.tradePermission.v1",
       symbol: input.symbol,
@@ -144,6 +138,7 @@ tradePermissionRouter.post("/trade-permission", (req, res) => {
   try {
     const input = buildInputV1(req);
     const result = computeLegacy(input);
+
     res.json({
       engine: "engine6.tradePermission.v1",
       symbol: input.symbol,
