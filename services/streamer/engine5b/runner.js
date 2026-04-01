@@ -1091,7 +1091,7 @@ function hardResetToIdle(reason) {
   }`;
 
   recomputeMoveClassification();
-
+}
 
 function isArmedRecent() {
   const t = engine5bState.sm.armedAtMs;
