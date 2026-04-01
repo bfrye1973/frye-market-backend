@@ -1069,19 +1069,20 @@ export function evaluateTriggerReadiness({
   }
 
   if (winner.strategyType === "EXHAUSTION" && e16.exhaustionTrigger === true) {
-    if (qualityPass && momentumPass) {
-      readinessLabel = "READY";
-      entryStyle = "EXHAUSTION_TRIGGER";
-      triggerConfirmed = true;
-      freshEntryNow = true;
-      reasonCodes.push("ENGINE16_EXHAUSTION_TRIGGER");
-    } else {
-      readinessLabel = "ARMING";
-      entryStyle = "EXHAUSTION_TRIGGER_PENDING_FILTERS";
-      reasonCodes.push("ENGINE16_EXHAUSTION_TRIGGER_PENDING");
-      freshEntryNow = false;
-    }
+  readinessLabel = "READY";
+  entryStyle = "EXHAUSTION_TRIGGER";
+  triggerConfirmed = true;
+  freshEntryNow = true;
+
+  // still keep info, but DO NOT BLOCK trade
+  if (!qualityPass) {
+    reasonCodes.push("E5_WEAK_BUT_EXHAUSTION_TRIGGER");
   }
+
+  if (!momentumPass) {
+    reasonCodes.push("MOMENTUM_WEAK_BUT_TRIGGER_VALID");
+  }
+}
 
   if (qualityPass && winner.strategyType !== "EXHAUSTION") {
     if (e3.stage === "ARMED" || e3.armed === true) {
