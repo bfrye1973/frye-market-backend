@@ -1,11 +1,14 @@
 // services/core/logic/engine16MorningFib.js
 // Engine 16 — Morning Impulse Fib Engine
 //
-// Happy-medium v1
+// Happy-medium v2
 // - keep current exhaustion trigger engine intact
+// - keep pullback / continuation contract intact
 // - add market-regime awareness
-// - soften early promotion in neutral / transition
-// - do NOT over-tighten tested exhaustion signals
+// - add macro roadblock awareness from Engine 1 shared helper
+// - macro = caution / refinement only
+// - macro does NOT auto-kill pullbacks
+// - macro can downgrade blind continuation / breakout promotion near major SPX roadblocks
 
 import path from "path";
 import { readFile } from "fs/promises";
@@ -17,6 +20,7 @@ import { detectContinuation, emptyContinuationDebug } from "./engine16/continuat
 import { confirmExhaustionPhases, emptyExhaustionDebug } from "./engine16/exhaustion.js";
 import { classifyEngine16Strategy } from "./engine16/strategy.js";
 import { defaultMarketRegime } from "./marketRegime.js";
+import { computeMacroLevelContext } from "./engine1/macroLevels.js";
 
 const MARKET_TZ = "America/New_York";
 const DISPLAY_TZ = "America/Phoenix";
@@ -27,6 +31,9 @@ const FETCH_DAYS = 8;
 
 const EXHAUSTION_LOOKBACK_BARS = 5;
 const EXHAUSTION_MIN_ACTIVE_BARS = 2;
+
+// locked calibration used by Engine 1 route notes
+const LOCKED_SPY_TO_SPX_RATIO = 657.5 / 6600;
 
 const TF_MS = {
   "1m": 60_000,
@@ -551,12 +558,45 @@ function normalizeRegime(regimeInput) {
   return defaultMarketRegime("ENGINE16_NO_REGIME");
 }
 
+function estimateSPXFromSPY(spyPrice) {
+  const spy = toNum(spyPrice);
+  if (!Number.isFinite(spy)) return null;
+  return round2(spy / LOCKED_SPY_TO_SPX_RATIO);
+}
+
+function buildMacroRoadblock(macroLevelContext) {
+  const ctx =
+    macroLevelContext && typeof macroLevelContext === "object"
+      ? macroLevelContext
+      : null;
+
+  const withinMacroZone = ctx?.withinMacroZone === true;
+  const macroStrength = String(ctx?.macroStrength || "NONE").toUpperCase();
+  const nearMacroZone = macroStrength === "MEDIUM";
+  const active = withinMacroZone || nearMacroZone;
+
+  return {
+    active,
+    withinMacroZone,
+    nearMacroZone,
+    nearestMacroLevel: ctx?.nearestMacroLevel ?? null,
+    nearestSpyEquivalent: ctx?.nearestSpyEquivalent ?? null,
+    distancePts: Number.isFinite(Number(ctx?.distancePts))
+      ? Number(ctx.distancePts)
+      : null,
+    macroStrength,
+    activeZone: ctx?.activeZone ?? null,
+    source: ctx?.source ?? null,
+  };
+}
+
 export async function computeMorningFib({
   symbol = DEFAULT_SYMBOL,
   tf = DEFAULT_TF,
   includeZones = true,
   includeVolume = true,
   marketRegime = null,
+  macroLevelContext = null,
 } = {}) {
   const timeframe = SUPPORTED_TF.has(String(tf)) ? String(tf) : DEFAULT_TF;
   const regimeInfo = normalizeRegime(marketRegime);
@@ -574,6 +614,7 @@ export async function computeMorningFib({
       context: "NONE",
       state: "NO_IMPULSE",
       marketRegime: regimeInfo,
+      macroRoadblock: buildMacroRoadblock(macroLevelContext),
       error: "OHLC_UNAVAILABLE",
       detail: err?.message || String(err),
     };
@@ -590,8 +631,33 @@ export async function computeMorningFib({
       context: "NONE",
       state: "NO_IMPULSE",
       marketRegime: regimeInfo,
+      macroRoadblock: buildMacroRoadblock(macroLevelContext),
       error: "OHLC_UNAVAILABLE",
     };
+  }
+
+  const latestClosedBar = closedBars[closedBars.length - 1];
+  const latestClose = latestClosedBar?.c;
+
+  const localMacroContext =
+    macroLevelContext && typeof macroLevelContext === "object"
+      ? macroLevelContext
+      : computeMacroLevelContext({
+          spyPrice: latestClose,
+          spxPrice: estimateSPXFromSPY(latestClose),
+          minLevel: 4000,
+          maxLevel: 8000,
+          step: 100,
+          halfBand: 1.25,
+        });
+
+  const macroRoadblock = buildMacroRoadblock(localMacroContext);
+  const macroReasonCodes = [];
+  if (macroRoadblock.withinMacroZone) {
+    macroReasonCodes.push("AT_MACRO_ROADBLOCK");
+    macroReasonCodes.push("MACRO_CAUTION_HIGH");
+  } else if (macroRoadblock.nearMacroZone) {
+    macroReasonCodes.push("MACRO_CAUTION_HIGH");
   }
 
   const dateKey = getLatestSessionDateKey(closedBars);
@@ -607,6 +673,9 @@ export async function computeMorningFib({
       context: "NONE",
       state: "NO_IMPULSE",
       marketRegime: regimeInfo,
+      macroRoadblock,
+      macroLevelContext: localMacroContext,
+      macroReasonCodes,
       error: "MISSING_PREMARKET_BARS",
     };
   }
@@ -632,6 +701,9 @@ export async function computeMorningFib({
     timeframe,
     context: "NONE",
     marketRegime: regimeInfo,
+    macroLevelContext: localMacroContext,
+    macroRoadblock,
+    macroReasonCodes,
     anchors: {
       premarketLow: round2(premarketLow),
       premarketHigh: round2(premarketHigh),
@@ -840,9 +912,6 @@ export async function computeMorningFib({
     lo: round2(zoneRaw.secondaryZone.lo),
     hi: round2(zoneRaw.secondaryZone.hi),
   };
-
-  const latestClosedBar = closedBars[closedBars.length - 1];
-  const latestClose = latestClosedBar?.c;
 
   const insidePrimaryZone = insideZoneByClose(latestClose, zoneRaw.pullbackZone);
   const insideSecondaryZone = insideZoneByClose(latestClose, zoneRaw.secondaryZone);
@@ -1073,7 +1142,7 @@ export async function computeMorningFib({
   const continuationTriggerLong = continuation.continuationTriggerLong;
   const debugContinuation = continuation.debugContinuation;
 
-  const { strategyType, readinessLabel } = classifyEngine16Strategy({
+  let { strategyType, readinessLabel } = classifyEngine16Strategy({
     exhaustionTrigger,
     exhaustionActive,
     exhaustionEarly,
@@ -1089,6 +1158,26 @@ export async function computeMorningFib({
     insideSecondaryZone,
     marketRegime: regimeInfo,
   });
+
+  let macroContinuationDowngraded = false;
+
+  // macro = caution / refinement only
+  // do NOT kill pullbacks
+  // do NOT kill confirmed exhaustion triggers
+  // do soften blind continuation / breakout promotion near macro roadblocks
+  if (
+    macroRoadblock.active &&
+    (strategyType === "CONTINUATION" || strategyType === "BREAKOUT") &&
+    !insidePrimaryZone &&
+    !insideSecondaryZone
+  ) {
+    strategyType = "NONE";
+    readinessLabel = "WAIT_FOR_MAGNET_RESOLUTION";
+    macroContinuationDowngraded = true;
+    if (!macroReasonCodes.includes("WAIT_FOR_MAGNET_RESOLUTION")) {
+      macroReasonCodes.push("WAIT_FOR_MAGNET_RESOLUTION");
+    }
+  }
 
   let volumeContext = {
     volumeScore: 0,
@@ -1169,6 +1258,11 @@ export async function computeMorningFib({
     timeframe,
     context: finalContext,
     marketRegime: regimeInfo,
+
+    macroLevelContext: localMacroContext,
+    macroRoadblock,
+    macroReasonCodes,
+    macroContinuationDowngraded,
 
     anchors: {
       premarketLow: round2(premarketLow),
