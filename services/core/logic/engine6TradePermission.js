@@ -1,26 +1,24 @@
 // services/core/logic/engine6TradePermission.js
 // ENGINE 6 — Trade Permission Matrix (AUTHORITATIVE)
 //
-// Decides:
-//   - IF trades are allowed
-//   - WHAT type of trades are allowed
-//   - HOW aggressive sizing may be
+// Happy-medium v1
+// - add market-regime awareness
+// - do NOT over-tighten good signals
+// - use regime mainly for strictness / reduce behavior
 //
-// IMPORTANT:
-// - Pure logic only
-// - No Express
-// - No side effects
-// - Never infers lateness or context
-// - Consumes upstream metadata ONLY
-//
-// TESTING MODE CHANGE:
-// - Hard fib invalidation block removed
-// - input.engine5.invalid is preserved in debug, but does NOT auto-stand-down
+// IMPORTANT
+// - Engine 6 = permission / aggressiveness
+// - Engine 7 = actual position sizing
 
 function clamp(n, lo, hi) {
   const x = Number(n);
   if (!Number.isFinite(x)) return lo;
   return Math.max(lo, Math.min(hi, x));
+}
+
+function safeUpper(x, fallback = "") {
+  const s = String(x ?? fallback).trim().toUpperCase();
+  return s || fallback;
 }
 
 function baseConstraints() {
@@ -31,8 +29,16 @@ function baseConstraints() {
   };
 }
 
-// LOCKED: only take NEW entries in these zones
 const ALLOWED_ZONES_PRIMARY = ["NEGOTIATED", "INSTITUTIONAL"];
+
+function normalizeMarketRegime(regime = null) {
+  return {
+    regime: safeUpper(regime?.regime, "UNKNOWN"),
+    directionBias: safeUpper(regime?.directionBias, "NONE"),
+    strictness: safeUpper(regime?.strictness, "MEDIUM"),
+    reasonCodes: Array.isArray(regime?.reasonCodes) ? regime.reasonCodes : [],
+  };
+}
 
 function standDown(reasonCodes, debug, allowedZonesOverride = null) {
   return {
@@ -85,7 +91,6 @@ export function computeTradePermission(input) {
   const score =
     Number.isFinite(Number(rawScore)) ? clamp(rawScore, 0, 100) : null;
 
-  // Kept for debug/visibility only — no longer hard-blocking in testing
   const invalid = !!input?.engine5?.invalid;
 
   const mm = input?.marketMeter || {};
@@ -128,6 +133,7 @@ export function computeTradePermission(input) {
     eodState === "CONTRACTING";
 
   const strategyType = input?.strategyType || "UNKNOWN";
+  const marketRegime = normalizeMarketRegime(input?.marketRegime);
 
   const debug = {
     score,
@@ -147,6 +153,7 @@ export function computeTradePermission(input) {
     liquidityFail,
     reactionFailed,
     strategyType,
+    marketRegime,
     allowedZones: ALLOWED_ZONES_PRIMARY,
   };
 
@@ -154,8 +161,6 @@ export function computeTradePermission(input) {
 
   // ---------------- HARD STAND DOWN ----------------
 
-  // TESTING MODE:
-  // hard invalidation removed on purpose
   if (invalid) {
     reasons.push("INVALID_IGNORED_FOR_TESTING");
   }
@@ -204,6 +209,22 @@ export function computeTradePermission(input) {
     return standDown(reasons, debug);
   }
 
+  // ---------------- REGIME AWARE REDUCE ----------------
+  // happy-medium:
+  // - HIGH strictness => reduced permission, not full block
+  // - MEDIUM strictness => normal existing logic can still allow/reduce
+  // - LOW strictness => normal flow
+
+  if (isNewEntry && marketRegime.strictness === "HIGH") {
+    reasons.push("REDUCE_HIGH_STRICTNESS_REGIME");
+
+    if (strategyType === "CONTINUATION" || strategyType === "BREAKDOWN") {
+      return reduce(reasons, debug, ["CONTINUATION", "BREAKDOWN"]);
+    }
+
+    return reduce(reasons, debug, ["PULLBACK", "BREAKOUT", "CONTINUATION", "EXHAUSTION"]);
+  }
+
   // ---------------- REDUCE ----------------
 
   if ((score != null && score < 70) || singleTfContracting) {
@@ -213,7 +234,6 @@ export function computeTradePermission(input) {
         : "REDUCE_SINGLE_TF_CONTRACTING"
     );
 
-    // continuation / breakdown testing stays reduced
     if (strategyType === "CONTINUATION" || strategyType === "BREAKDOWN") {
       return reduce(reasons, debug, ["CONTINUATION", "BREAKDOWN"]);
     }
@@ -231,6 +251,12 @@ export function computeTradePermission(input) {
     reasons.push("ALLOW_SCORE_UNKNOWN_TESTING");
   } else {
     reasons.push("ALLOW_SCORE_70_PLUS");
+  }
+
+  if (marketRegime.strictness === "MEDIUM") {
+    reasons.push("ALLOW_WITH_CAUTION_TRANSITION_REGIME");
+  } else if (marketRegime.strictness === "LOW") {
+    reasons.push("ALLOW_ALIGNED_REGIME");
   }
 
   if (strategyType === "CONTINUATION" || strategyType === "BREAKDOWN") {
