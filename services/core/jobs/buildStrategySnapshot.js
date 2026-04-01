@@ -141,25 +141,37 @@ async function fetchLiveMarketMeter() {
 
   return {
     score10m:
-      toNum(intradayJ?.metrics?.overall_intraday_score),
+      toNum(intradayJ?.metrics?.overall_intraday_score) ??
+      toNum(intradayJ?.intraday?.overall10m?.score) ??
+      toNum(intradayJ?.engineLights?.["10m"]?.score),
     state10m:
-      intradayJ?.metrics?.overall_intraday_state ?? null,
+      intradayJ?.metrics?.overall_intraday_state ??
+      intradayJ?.intraday?.overall10m?.state ??
+      intradayJ?.engineLights?.["10m"]?.state ??
+      null,
 
     score30m:
-      toNum(m30J?.metrics?.overall_30m_score),
+      toNum(m30J?.metrics?.overall_30m_score) ??
+      toNum(m30J?.thirtyMin?.overall30m?.score),
     state30m:
-      m30J?.metrics?.overall_30m_state ?? null,
+      m30J?.metrics?.overall_30m_state ??
+      m30J?.thirtyMin?.overall30m?.state ??
+      null,
 
     score1h:
-      toNum(hourlyJ?.metrics?.overall_hourly_score),
+      toNum(hourlyJ?.metrics?.overall_hourly_score) ??
+      toNum(hourlyJ?.hourly?.overall1h?.score),
     state1h:
-      hourlyJ?.metrics?.overall_hourly_state ?? null,
+      hourlyJ?.metrics?.overall_hourly_state ??
+      hourlyJ?.hourly?.overall1h?.state ??
+      null,
 
     score4h:
       toNum(h4J?.metrics?.trend_strength_4h_pct) ??
       toNum(h4J?.fourHour?.overall4h?.score),
     state4h:
-      h4J?.fourHour?.overall4h?.state ?? null,
+      h4J?.fourHour?.overall4h?.state ??
+      null,
 
     scoreEOD:
       toNum(eodJ?.metrics?.overall_eod_score) ??
