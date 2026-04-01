@@ -72,31 +72,18 @@ export function classifyEngine16Strategy({
     strictness === "HIGH" &&
     (regime === "NEUTRAL" || regime === "TRANSITION");
 
-  // --------------------------------------------------
-  // 1) Confirmed exhaustion stays alive
-  // --------------------------------------------------
-  // Keep your proven exhaustion trigger behavior intact.
   if (exhaustionTrigger && exhaustionActive) {
     strategyType = "EXHAUSTION";
     readinessLabel = "EXHAUSTION_READY";
     return { strategyType, readinessLabel };
   }
 
-  // --------------------------------------------------
-  // 2) Continuation trigger is priority
-  // --------------------------------------------------
-  // Do not bury continuation triggers in transition.
   if (continuationReady) {
     strategyType = "CONTINUATION";
     readinessLabel = "CONTINUATION_READY";
     return { strategyType, readinessLabel };
   }
 
-  // --------------------------------------------------
-  // 3) Pullbacks are priority setups
-  // --------------------------------------------------
-  // Protect your bread-and-butter:
-  // trend -> pullback into EMA zone -> continuation opportunity
   if (primaryPullbackSetup) {
     strategyType = "PULLBACK_PRIMARY";
     readinessLabel = "PULLBACK_READY";
@@ -109,20 +96,12 @@ export function classifyEngine16Strategy({
     return { strategyType, readinessLabel };
   }
 
-  // --------------------------------------------------
-  // 4) Continuation watch stays visible
-  // --------------------------------------------------
-  // This helps surface "building" continuation without forcing READY.
   if (continuationBuilding) {
     strategyType = "NONE";
     readinessLabel = "WATCH";
     return { strategyType, readinessLabel };
   }
 
-  // --------------------------------------------------
-  // 5) Reversal / breakout / breakdown stricter in transition
-  // --------------------------------------------------
-  // These are the ones we soften when the market is messy.
   if (reversalReady) {
     if (highStrictnessTransition) {
       strategyType = "NONE";
@@ -156,10 +135,6 @@ export function classifyEngine16Strategy({
     return { strategyType, readinessLabel };
   }
 
-  // --------------------------------------------------
-  // 6) Early exhaustion stays watch-only
-  // --------------------------------------------------
-  // Price stretch / early sequence should not auto-promote.
   if (exhaustionEarly === true) {
     strategyType = "NONE";
     readinessLabel = "WATCH";
