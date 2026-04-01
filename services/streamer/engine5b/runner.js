@@ -1505,7 +1505,7 @@ export function startEngine5B({ log = console.log } = {}) {
   engine5bState.sm.triggerAboveCount =
     engine5bState.sm.triggerAboveCount ?? 0;
   engine5bState.sm.outsideCount = engine5bState.sm.outsideCount ?? 0;
-  engine5bState.sm.lastNotInZoneMs =
+  engine5bState.sm.lastNotInZoneMs = null;
     engine5bState.sm.lastNotInZoneMs ?? null;
   engine5bState.sm.moveType = engine5bState.sm.moveType ?? "NONE";
   engine5bState.sm.moveScore = engine5bState.sm.moveScore ?? 0;
