@@ -1,10 +1,10 @@
 // services/core/routes/engine5Context.js
 // Engine 1 — LOCATION CONTEXT ONLY (LOCKED)
-// Updated rule:
-// - Negotiated = highest priority
-// - Institutional = contextual container
-// - Shelves = secondary/supporting
-// - Shelves are NO LONGER blocked by institutional overlap
+// Updated hierarchy:
+// 1) Negotiated = highest priority / ignition
+// 2) Institutional = parent container / context
+// 3) Shelves = secondary / supporting
+// 4) Macro SPX round-number magnet layer = parallel location overlay
 //
 // TEMP STABILIZATION CHANGE:
 // - Engine 14 advisory removed for now
@@ -17,6 +17,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { computeMacroLevelContext } from "../logic/engine1/macroLevels.js";
 
 const router = express.Router();
 
@@ -96,6 +97,19 @@ function shelfDistance(price, shelf) {
 function toNum(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
+}
+
+// crude SPX estimate from SPY when direct SPX feed is not present
+function estimateSPXFromSPY(spyPrice) {
+  const spy = toNum(spyPrice);
+  if (!Number.isFinite(spy)) return null;
+
+  // Locked mapping approach:
+  // Use the relationship you validated:
+  // SPX 6600 ≈ SPY 658.25 midpoint of 657.0–659.5
+  // ratio ≈ 658.25 / 6600 = 0.0997348485
+  const lockedRatio = 658.25 / 6600;
+  return round2(spy / lockedRatio);
 }
 
 // ---------------- ROUTE ----------------
@@ -322,6 +336,20 @@ router.get("/engine5-context", async (req, res) => {
     }
   }
 
+  // ---------------- MACRO SPX MAGNET LAYER ----------------
+  // We currently support SPY only. Since this route is SPY-specific,
+  // we expose SPX macro levels mapped into SPY space using the locked ratio method.
+  const estimatedSPX = estimateSPXFromSPY(currentPrice);
+
+  const macroLevelContext = computeMacroLevelContext({
+    spyPrice: currentPrice,
+    spxPrice: estimatedSPX,
+    minLevel: 4000,
+    maxLevel: 8000,
+    step: 100,
+    halfBand: 1.25,
+  });
+
   // ---------------- RESPONSE ----------------
   return res.json({
     ok: true,
@@ -353,6 +381,7 @@ router.get("/engine5-context", async (req, res) => {
     nearest: {
       shelf: nearestShelf,
     },
+    macroLevelContext,
   });
 });
 
