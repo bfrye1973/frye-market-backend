@@ -1,23 +1,23 @@
 // services/core/jobs/buildStrategySnapshot.js
 // Stable snapshot builder (SPY only)
-// Phase 3:
-// - avoids /api/v1/confluence-score fan-out on frontend
-// - computes confluence directly
-// - attaches Engine 16 (Morning Fib / strategy detection)
-// - attaches Engine 15 strategy readiness translator
-// - attaches Engine 15B decision referee in parallel
+//
+// Phase 4 / Conscious Brain wiring:
+// - computes shared market regime from OVERALL scores only
+// - passes market regime into Engine 16 directly
+// - passes market regime into Engine 6 permission body
+// - keeps old engine15 + engine15Decision flow intact
 //
 // IMPORTANT:
-// - This does NOT replace old engine15 readiness logic
-// - This keeps old engine15 and old executionBias intact for frontend safety
-// - This adds new engine15Decision
-// - This version also passes FULL render zone ladders into Engine 15B
-//   so lifecycle can build complete zonesInPath
+// - MASTER is display only and NOT used for regime
+// - direction comes from 30m + 1h
+// - strictness comes from 4h + EOD
 
 import fs from "fs";
 import { computeConfluenceScore } from "../logic/confluenceScorer.js";
 import computeEngine15Readiness from "../logic/engine15StrategyReadiness.js";
 import { computeEngine15DecisionReferee } from "../logic/engine15DecisionReferee.js";
+import { computeMorningFib } from "../logic/engine16MorningFib.js";
+import { computeMarketRegime } from "../logic/marketRegime.js";
 
 /* -----------------------------
    Absolute paths / constants
@@ -178,13 +178,14 @@ async function fetchMomentumContext(sym) {
 /* -----------------------------
    Engine 16
 ------------------------------*/
-function fallbackEngine16(sym, tf = "30m") {
+function fallbackEngine16(sym, tf = "30m", marketRegime = null) {
   return {
     ok: false,
     symbol: sym,
     date: null,
     timeframe: tf,
     context: "NONE",
+    marketRegime: marketRegime || null,
     anchors: {
       premarketLow: null,
       premarketHigh: null,
@@ -228,20 +229,21 @@ function fallbackEngine16(sym, tf = "30m") {
   };
 }
 
-async function fetchEngine16(sym, tf = "30m") {
-  const r = await fetchJson(
-    `${CORE_BASE}/api/v1/morning-fib?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(tf)}`,
-    30000
-  );
-
-  if (r.ok && r.json) {
-    return r.json;
+async function buildEngine16Direct(sym, tf = "30m", marketRegime = null) {
+  try {
+    return await computeMorningFib({
+      symbol: sym,
+      tf,
+      includeZones: true,
+      includeVolume: true,
+      marketRegime,
+    });
+  } catch (err) {
+    return {
+      ...fallbackEngine16(sym, tf, marketRegime),
+      error: String(err?.message || err),
+    };
   }
-
-  return {
-    ...fallbackEngine16(sym, tf),
-    error: r?.text || "ENGINE16_FETCH_FAILED",
-  };
 }
 
 /* -----------------------------
@@ -738,7 +740,7 @@ async function fetchVolume({ symbol, tf, zoneLo, zoneHi, mode }) {
 /* -----------------------------
    Build one strategy
 ------------------------------*/
-async function processStrategy(s, momentum, marketMind, engine16) {
+async function processStrategy(s, momentum, marketMind, marketRegime, engine16) {
   console.log(`→ Processing ${s.strategyId}`);
 
   const contextResp = await fetchJson(
@@ -922,6 +924,7 @@ async function processStrategy(s, momentum, marketMind, engine16) {
       "UNKNOWN",
     engine5: normalizeEngine5ForEngine6(patchedConfluence),
     marketMeter: null,
+    marketRegime,
     zoneContext,
     intent: { action: "NEW_ENTRY" },
   };
@@ -1021,6 +1024,7 @@ async function processStrategy(s, momentum, marketMind, engine16) {
     tf: s.tf,
     degree: s.degree,
     wave: s.wave,
+    marketRegime,
     confluence: patchedConfluence,
     permission:
       permissionResp?.json || { ok: false, status: permissionResp?.status || 0, error: permissionResp?.text || "no_permission" },
@@ -1052,12 +1056,21 @@ async function buildSnapshot() {
   const marketMind = await fetchMarketMindScores();
   console.log("MarketMind fetched");
 
+  const marketRegime = computeMarketRegime({
+    score10m: marketMind?.score10m,
+    score1h: marketMind?.score1h,
+    score4h: marketMind?.score4h,
+    scoreEOD: marketMind?.scoreEOD,
+  });
+  console.log("Market regime computed:", marketRegime?.regime, marketRegime?.directionBias, marketRegime?.strictness);
+
   const result = {
     ok: true,
     symbol,
     now: nowIso(),
     includeContext: true,
     marketMind,
+    marketRegime,
     momentum,
     engine16: null,
     strategies: {},
@@ -1067,13 +1080,14 @@ async function buildSnapshot() {
     let engine16ForStrategy = null;
 
     try {
-      engine16ForStrategy = await fetchEngine16(symbol, s.tf);
-      console.log(`Engine16 fetched for ${s.strategyId} @ ${s.tf}`);
+      engine16ForStrategy = await buildEngine16Direct(symbol, s.tf, marketRegime);
+      console.log(`Engine16 built directly for ${s.strategyId} @ ${s.tf}`);
 
       const strategy = await processStrategy(
         s,
         momentum,
         marketMind,
+        marketRegime,
         engine16ForStrategy
       );
 
@@ -1084,11 +1098,12 @@ async function buildSnapshot() {
         tf: s.tf,
         degree: s.degree,
         wave: s.wave,
+        marketRegime,
         confluence: { ok: false, error: String(err?.message || err) },
         permission: { ok: false, error: "builder_strategy_failed" },
         engine6v2: { ok: false, error: "builder_strategy_failed" },
         engine2: null,
-        engine16: engine16ForStrategy || fallbackEngine16(symbol, s.tf),
+        engine16: engine16ForStrategy || fallbackEngine16(symbol, s.tf, marketRegime),
         engine15: {
           ok: false,
           error: "builder_strategy_failed",
