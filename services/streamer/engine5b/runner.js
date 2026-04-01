@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import { engine5bState } from "./state.js";
 import { recordGoOnRisingEdge } from "./goReplayRecorder.js";
 import { maybeSendInstantGoAlert } from "../../core/logic/alerts/instantGoPushover.js";
+import { runEngine16DBridge } from "../../core/logic/engine16D/engine16DRunner.js";
 
 const POLY_WS_URL = "wss://socket.polygon.io/stocks";
 const BACKEND1_BASE =
@@ -1090,6 +1091,11 @@ function hardResetToIdle(reason) {
   }`;
 
   recomputeMoveClassification();
+
+  await runEngine16DBridge({
+    backend1Base: BACKEND1_BASE,
+    log,
+  });
 }
 
 function isArmedRecent() {
