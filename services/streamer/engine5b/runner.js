@@ -1092,11 +1092,6 @@ function hardResetToIdle(reason) {
 
   recomputeMoveClassification();
 
-  await runEngine16DBridge({
-    backend1Base: BACKEND1_BASE,
-    log,
-  });
-}
 
 function isArmedRecent() {
   const t = engine5bState.sm.armedAtMs;
@@ -1193,9 +1188,7 @@ async function refreshRisk() {
     return;
   }
 
-  recomputeMoveClassification();
-}
-
+  
 async function refreshE3() {
   const az = engine5bState.zone?.analysis ?? null;
 
@@ -1280,9 +1273,13 @@ async function refreshE3() {
     }
   }
 
-  recomputeMoveClassification();
-}
+    recomputeMoveClassification();
 
+  await runEngine16DBridge({
+    backend1Base: BACKEND1_BASE,
+    log: console.log,
+  });
+}
 async function refreshE4_1m() {
   const az = engine5bState.zone?.analysis ?? null;
 
