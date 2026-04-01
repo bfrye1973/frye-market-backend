@@ -1,9 +1,8 @@
 // services/core/logic/engine1/macroLevels.js
 // Engine 1 — SPX macro magnet levels mapped into SPY
-// Purpose:
-// - Keep SPX as source of truth
-// - Convert major SPX round numbers into SPY zones
-// - Expose nearest macro decision zone for downstream engines
+// Hybrid model:
+// 1) Use LOCKED calibrated SPY zones for known major SPX levels
+// 2) Fall back to live ratio conversion for levels not yet calibrated
 
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
@@ -14,22 +13,30 @@ function toNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
+// 🔒 LOCKED CALIBRATED LEVELS
+// These are the exact SPY reaction zones you want the system to trust.
+const CALIBRATED_MACRO_ZONES = {
+  6400: { lo: 637.0, hi: 639.5, mid: 638.25 },
+  6500: { lo: 647.0, hi: 649.5, mid: 648.25 },
+  6600: { lo: 657.0, hi: 658.0, mid: 657.5 },
+};
+
 export function computeMacroLevelContext({
   spyPrice,
   spxPrice,
   minLevel = 4000,
   maxLevel = 8000,
   step = 100,
-  halfBand = 1.25,
+  halfBand = 1.25, // fallback only
 }) {
   const spy = toNum(spyPrice);
   const spx = toNum(spxPrice);
 
-  if (!Number.isFinite(spy) || !Number.isFinite(spx) || spx <= 0) {
+  if (!Number.isFinite(spy)) {
     return {
-      source: "SPX_ROUND_NUMBER_LIVE_RATIO",
+      source: "SPX_MACRO_HYBRID",
       spyPrice: spy,
-      spxPrice: spx,
+      spxPrice: toNum(spxPrice),
       ratio: null,
       nearestMacroLevel: null,
       nearestSpyEquivalent: null,
@@ -41,10 +48,30 @@ export function computeMacroLevelContext({
     };
   }
 
-  const ratio = spy / spx;
+  const ratio =
+    Number.isFinite(spx) && spx > 0
+      ? spy / spx
+      : null;
 
   const levels = [];
+
   for (let lvl = minLevel; lvl <= maxLevel; lvl += step) {
+    const calibrated = CALIBRATED_MACRO_ZONES[lvl];
+
+    if (calibrated) {
+      levels.push({
+        spxLevel: lvl,
+        spyEquivalent: round2(calibrated.mid),
+        lo: round2(calibrated.lo),
+        hi: round2(calibrated.hi),
+        mid: round2(calibrated.mid),
+        source: "CALIBRATED",
+      });
+      continue;
+    }
+
+    if (!Number.isFinite(ratio)) continue;
+
     const center = lvl * ratio;
     const lo = center - halfBand;
     const hi = center + halfBand;
@@ -55,6 +82,7 @@ export function computeMacroLevelContext({
       lo: round2(lo),
       hi: round2(hi),
       mid: round2(center),
+      source: "LIVE_RATIO",
     });
   }
 
@@ -72,15 +100,18 @@ export function computeMacroLevelContext({
 
   let macroStrength = "NONE";
   if (nearest) {
-    if (nearest.withinMacroZone) macroStrength = "HIGH";
-    else if (nearest.distancePts <= 2.5) macroStrength = "MEDIUM";
+    if (nearest.withinMacroZone) {
+      macroStrength = "HIGH";
+    } else if (nearest.distancePts <= 2.5) {
+      macroStrength = "MEDIUM";
+    }
   }
 
   return {
-    source: "SPX_ROUND_NUMBER_LIVE_RATIO",
+    source: "SPX_MACRO_HYBRID",
     spyPrice: round2(spy),
-    spxPrice: round2(spx),
-    ratio: round2(ratio),
+    spxPrice: Number.isFinite(spx) ? round2(spx) : null,
+    ratio: Number.isFinite(ratio) ? round2(ratio) : null,
     nearestMacroLevel: nearest?.spxLevel ?? null,
     nearestSpyEquivalent: nearest?.spyEquivalent ?? null,
     distancePts: nearest?.distancePts ?? null,
@@ -93,6 +124,7 @@ export function computeMacroLevelContext({
           hi: nearest.hi,
           mid: nearest.mid,
           spyEquivalent: nearest.spyEquivalent,
+          source: nearest.source,
         }
       : null,
     zones: levels,
