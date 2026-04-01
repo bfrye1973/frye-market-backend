@@ -1,6 +1,10 @@
 // services/core/routes/engine5Context.js
 // Engine 1 — LOCATION CONTEXT ONLY (LOCKED)
-// Option A fix: attach TRUE institutional strength to active.institutional (no formula changes)
+// Updated rule:
+// - Negotiated = highest priority
+// - Institutional = contextual container
+// - Shelves = secondary/supporting
+// - Shelves are NO LONGER blocked by institutional overlap
 //
 // TEMP STABILIZATION CHANGE:
 // - Engine 14 advisory removed for now
@@ -26,7 +30,6 @@ const SHELVES_FILE = path.resolve(__dirname, "../data/smz-shelves.json");
 const SHELF_PERSIST_HOURS = 48;
 const MAX_SHELVES_PER_GAP = 2;
 const REPLACEMENT_STRENGTH_DELTA = 7;
-const INST_OVERLAP_TOLERANCE = 0.5;
 
 // ---------------- HELPERS ----------------
 function round2(n) {
@@ -59,10 +62,6 @@ function normalizeRange(range) {
     mid: round2((hi + lo) / 2),
     width: round2(hi - lo),
   };
-}
-
-function penetrationDepth(a, b) {
-  return Math.max(0, Math.min(a.hi, b.hi) - Math.max(a.lo, b.lo));
 }
 
 function hoursSince(ts) {
@@ -128,7 +127,7 @@ router.get("/engine5-context", async (req, res) => {
     ? levelsJson.structures_sticky
     : [];
 
-  // ---------------- NEGOTIATED ZONES (NEVER FILTERED) ----------------
+  // ---------------- NEGOTIATED ZONES (HIGHEST PRIORITY / NEVER FILTERED) ----------------
   const negotiated = structuresSticky
     .filter(isNegotiatedZone)
     .map((z) => {
@@ -144,7 +143,7 @@ router.get("/engine5-context", async (req, res) => {
     })
     .filter(Boolean);
 
-  // ---------------- INSTITUTIONAL ZONES (NOW WITH TRUE STRENGTH) ----------------
+  // ---------------- INSTITUTIONAL ZONES (CONTEXTUAL CONTAINER) ----------------
   const institutional = structuresSticky
     .filter((z) => !isNegotiatedZone(z))
     .map((z) => {
@@ -211,7 +210,10 @@ router.get("/engine5-context", async (req, res) => {
     });
   }
 
-  // ---------------- SHELVES (SURFACING) ----------------
+  // ---------------- SHELVES (SECONDARY / SUPPORTING) ----------------
+  // LOCKED CHANGE:
+  // - Shelves are no longer blocked by institutional overlap
+  // - They are surfaced independently as supporting context
   const rawShelves = Array.isArray(shelvesJson?.levels)
     ? shelvesJson.levels
     : [];
@@ -224,16 +226,6 @@ router.get("/engine5-context", async (req, res) => {
 
     const updatedUtc = shelvesJson?.meta?.generated_at_utc;
     if (!updatedUtc || hoursSince(updatedUtc) > SHELF_PERSIST_HOURS) continue;
-
-    let blocked = false;
-    for (const inst of institutional) {
-      const p = penetrationDepth(r, inst);
-      if (p > INST_OVERLAP_TOLERANCE) {
-        blocked = true;
-        break;
-      }
-    }
-    if (blocked) continue;
 
     const gap = gaps.find((g) => r.mid <= g.hi && r.mid >= g.lo);
     if (!gap) continue;
@@ -340,7 +332,6 @@ router.get("/engine5-context", async (req, res) => {
       rules: {
         shelf_persist_hours: SHELF_PERSIST_HOURS,
         replacement_strength_delta: REPLACEMENT_STRENGTH_DELTA,
-        institutional_overlap_tolerance: INST_OVERLAP_TOLERANCE,
         max_shelves_per_gap: MAX_SHELVES_PER_GAP,
       },
     },
