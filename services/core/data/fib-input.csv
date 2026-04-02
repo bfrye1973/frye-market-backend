@@ -4,15 +4,27 @@ SPY,primary,1d,W1,LOW,2025-05-27 11:00,574.33
 SPY,primary,1d,W4,LOW,2025-11-21 10:00,655.52
 SPY,primary,1d,W4,HIGH,2025-12-29 11:00,687.24
 SPY,primary,1d,MARK,W5,2026-01-28 11:00,699.00
-SPY,intermediate,1h,W1,HIGH,2026-03-01 10:00,690.00
-SPY,intermediate,1h,W1,LOW,2026-03-13 10:30,662.00
-SPY,intermediate,1h,MARK,W1,2026-03-13 01:00,662.00
-SPY,intermediate,1h,MARK,W2,2026-03-18 2:00,674.50
-SPY,minor,1h,W1,HIGH,2026-03-17 10:00,672.00
-SPY,minor,1h,W1,LOW,2026-03-18 08:30,668.00
-SPY,minor,1h,MARK,W1,2026-03-18 2:00,674.50
-SPY,minor,1h,MARK,W2,2026-03-18 12:55,660.00
-SPY,minute,10m,W1,HIGH,2026-03-18 09:30,670.00
-SPY,minute,10m,W1,LOW,2026-03-18 08:30,668.00
-SPY,minute,10m,MARK,W1,2026-03-18 08:30,668.00
-SPY,minute,10m,MARK,W2,2026-03-18 09:30,670.00
+
+SPY,intermediate,1h,W1,HIGH,2026-01-28 11:00,699.00
+SPY,intermediate,1h,W1,LOW,2026-03-30 16:00,629.28
+SPY,intermediate,1h,MARK,W1,2026-03-30 16:00,629.28
+SPY,intermediate,1h,MARK,W2,,
+SPY,intermediate,1h,MARK,W3,,
+SPY,intermediate,1h,MARK,W4,,
+SPY,intermediate,1h,MARK,W5,,
+
+SPY,minor,1h,W1,HIGH,,
+SPY,minor,1h,W1,LOW,,
+SPY,minor,1h,MARK,W1,,
+SPY,minor,1h,MARK,W2,,
+SPY,minor,1h,MARK,W3,,
+SPY,minor,1h,MARK,W4,,
+SPY,minor,1h,MARK,W5,,
+
+SPY,minute,10m,W1,HIGH,,
+SPY,minute,10m,W1,LOW,,
+SPY,minute,10m,MARK,W1,,
+SPY,minute,10m,MARK,W2,,
+SPY,minute,10m,MARK,W3,,
+SPY,minute,10m,MARK,W4,,
+SPY,minute,10m,MARK,W5,,
