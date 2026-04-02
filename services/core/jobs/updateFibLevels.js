@@ -233,10 +233,10 @@ async function fetchOhlcBars({ symbol, tf }) {
       }
       b.w4[kind.toLowerCase()] = normMark(dtAz, price);
     } else if (wave === "MARK") {
-      if (!["W1", "W2", "W3", "W4", "W5"].includes(kind)) {
-        warn(`Line ${r.__line}: MARK kind must be W1..W5`);
-        continue;
-      }
+      if (!["W1", "W2", "W3", "W4", "W5", "A", "B", "C"].includes(kind)) {
+        warn(`Line ${r.__line}: MARK kind must be W1..W5 or A/B/C`);
+       continue;
+     }
       b.marks[kind] = normMark(dtAz, price);
     } else {
       warn(`Line ${r.__line}: wave must be W1, W4, or MARK`);
