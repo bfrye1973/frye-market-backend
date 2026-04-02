@@ -11,6 +11,11 @@
 // - MASTER is display only and NOT used for regime
 // - direction comes from 30m + 1h
 // - strictness comes from 4h + EOD
+//
+// PERFORMANCE / CORRECTNESS FIX:
+// - Engine 16 is only computed for intraday_scalp@10m
+// - minor_swing@1h and intermediate_long@4h get placeholder objects
+// - avoids fake 1h/4h fallback-to-30m Engine 16 usage
 
 import fs from "fs";
 import { computeConfluenceScore } from "../logic/confluenceScorer.js";
@@ -265,6 +270,21 @@ function fallbackEngine16(sym, tf = "30m", marketRegime = null) {
     },
     error: "ENGINE16_UNAVAILABLE",
   };
+}
+
+function skippedEngine16(sym, tf = null, marketRegime = null) {
+  return {
+    ok: false,
+    skipped: true,
+    reason: "ENGINE16_NOT_ENABLED_FOR_THIS_STRATEGY",
+    symbol: sym,
+    timeframe: tf,
+    marketRegime: marketRegime || null,
+  };
+}
+
+function isEngine16EnabledForStrategy(strategyId) {
+  return strategyId === "intraday_scalp@10m";
 }
 
 async function buildEngine16Direct(sym, tf = "30m", marketRegime = null) {
@@ -1130,8 +1150,13 @@ async function buildSnapshot() {
     let engine16ForStrategy = null;
 
     try {
-      engine16ForStrategy = await buildEngine16Direct(symbol, s.tf, marketRegime);
-      console.log(`Engine16 built directly for ${s.strategyId} @ ${s.tf}`);
+      if (isEngine16EnabledForStrategy(s.strategyId)) {
+        engine16ForStrategy = await buildEngine16Direct(symbol, s.tf, marketRegime);
+        console.log(`Engine16 built directly for ${s.strategyId} @ ${s.tf}`);
+      } else {
+        engine16ForStrategy = skippedEngine16(symbol, s.tf, marketRegime);
+        console.log(`Engine16 skipped for ${s.strategyId} @ ${s.tf}`);
+      }
 
       const strategy = await processStrategy(
         s,
