@@ -687,8 +687,10 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec) {
     }
   }
 
+  const phase = lastKey === "W5" ? "COMPLETE_W5" : `IN_${lastKey}`;
+
   return {
-    phase: `IN_${lastKey}`,
+    phase,
     lastMark: { key: lastKey, ...waveMarks[lastKey] },
     nextMark: nextKey ? { key: nextKey, ...waveMarks[nextKey] } : null,
     marksPresent,
