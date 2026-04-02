@@ -649,7 +649,7 @@ function isRealMark(m) {
 }
 
 function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec) {
-  const order = ["W1", "W2", "W3", "W4", "W5"];
+  const order = ["W1", "W2", "W3", "W4", "W5", "A", "B", "C"];
   const marksPresent = [];
 
   for (const k of order) {
@@ -687,8 +687,15 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec) {
     }
   }
 
-  const phase = lastKey === "W5" ? "COMPLETE_W5" : `IN_${lastKey}`;
+  let phase;
 
+  if (lastKey === "W5") {
+    phase = "COMPLETE_W5";
+  } else if (["A", "B", "C"].includes(lastKey)) {
+    phase = `IN_${lastKey}`;
+  } else {
+    phase = `IN_${lastKey}`;
+  }
   return {
     phase,
     lastMark: { key: lastKey, ...waveMarks[lastKey] },
