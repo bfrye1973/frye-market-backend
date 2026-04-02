@@ -25,7 +25,9 @@ function avg(values) {
 }
 
 function getBodies(bars) {
-  return bars.map((b) => Math.abs((b?.c ?? 0) - (b?.o ?? 0))).filter(Number.isFinite);
+  return bars
+    .map((b) => Math.abs((b?.c ?? 0) - (b?.o ?? 0)))
+    .filter(Number.isFinite);
 }
 
 export function confirmExhaustionPhases({
@@ -61,13 +63,19 @@ export function confirmExhaustionPhases({
 
     const upperWick = bar.h - Math.max(bar.o, bar.c);
     const lowerWick = Math.min(bar.o, bar.c) - bar.l;
+
     const upperWickStrong = upperWick / range >= 0.25;
     const lowerWickStrong = lowerWick / range >= 0.25;
 
     const bearishClose =
-      Number.isFinite(bar.c) && Number.isFinite(bar.o) && bar.c < bar.o;
+      Number.isFinite(bar.c) &&
+      Number.isFinite(bar.o) &&
+      bar.c < bar.o;
+
     const bullishClose =
-      Number.isFinite(bar.c) && Number.isFinite(bar.o) && bar.c > bar.o;
+      Number.isFinite(bar.c) &&
+      Number.isFinite(bar.o) &&
+      bar.c > bar.o;
 
     const nearHigh =
       Number.isFinite(bar.h) &&
@@ -104,13 +112,20 @@ export function confirmExhaustionPhases({
     }
 
     const shortSequenceConfirmed =
-      rejectionCountNearHighs >= 2 && failedExtensionCountNearHighs >= 2;
+      rejectionCountNearHighs >= 2 &&
+      failedExtensionCountNearHighs >= 2;
 
     const longSequenceConfirmed =
-      rejectionCountNearLows >= 2 && failedExtensionCountNearLows >= 2;
+      rejectionCountNearLows >= 2 &&
+      failedExtensionCountNearLows >= 2;
 
-    if (shortSequenceConfirmed && shortEarlyIdx == null) shortEarlyIdx = i;
-    if (longSequenceConfirmed && longEarlyIdx == null) longEarlyIdx = i;
+    if (shortSequenceConfirmed && shortEarlyIdx == null) {
+      shortEarlyIdx = i;
+    }
+
+    if (longSequenceConfirmed && longEarlyIdx == null) {
+      longEarlyIdx = i;
+    }
 
     const recentBodies = getBodies(bars.slice(Math.max(0, i - 5), i));
     const avgBody = avg(recentBodies) || 0;
@@ -176,11 +191,62 @@ export function confirmExhaustionPhases({
     };
   }
 
+  // ==========================================
+  // Directional resolution / mutual exclusion
+  // ==========================================
+  let resolvedShortEarlyIdx = shortEarlyIdx;
+  let resolvedLongEarlyIdx = longEarlyIdx;
+  let resolvedShortTriggerIdx = shortTriggerIdx;
+  let resolvedLongTriggerIdx = longTriggerIdx;
+
+  // If both early states exist, prefer the side that actually triggered.
+  // If neither triggered, prefer the most recent early state.
+  if (resolvedShortEarlyIdx != null && resolvedLongEarlyIdx != null) {
+    if (resolvedShortTriggerIdx != null && resolvedLongTriggerIdx == null) {
+      resolvedLongEarlyIdx = null;
+      resolvedLongTriggerIdx = null;
+    } else if (resolvedLongTriggerIdx != null && resolvedShortTriggerIdx == null) {
+      resolvedShortEarlyIdx = null;
+      resolvedShortTriggerIdx = null;
+    } else {
+      if (resolvedShortEarlyIdx > resolvedLongEarlyIdx) {
+        resolvedLongEarlyIdx = null;
+        resolvedLongTriggerIdx = null;
+      } else if (resolvedLongEarlyIdx > resolvedShortEarlyIdx) {
+        resolvedShortEarlyIdx = null;
+        resolvedShortTriggerIdx = null;
+      } else {
+        // Same-bar ambiguity: clear both and force neutral/watch behavior upstream
+        resolvedShortEarlyIdx = null;
+        resolvedLongEarlyIdx = null;
+        resolvedShortTriggerIdx = null;
+        resolvedLongTriggerIdx = null;
+      }
+    }
+  }
+
+  // If both triggers somehow exist, prefer the most recent one.
+  // If they occur on the same bar, clear both and let upstream remain WATCH.
+  if (resolvedShortTriggerIdx != null && resolvedLongTriggerIdx != null) {
+    if (resolvedShortTriggerIdx > resolvedLongTriggerIdx) {
+      resolvedLongTriggerIdx = null;
+      resolvedLongEarlyIdx = null;
+    } else if (resolvedLongTriggerIdx > resolvedShortTriggerIdx) {
+      resolvedShortTriggerIdx = null;
+      resolvedShortEarlyIdx = null;
+    } else {
+      resolvedShortTriggerIdx = null;
+      resolvedLongTriggerIdx = null;
+      resolvedShortEarlyIdx = null;
+      resolvedLongEarlyIdx = null;
+    }
+  }
+
   return {
-    shortEarlyIdx,
-    longEarlyIdx,
-    shortTriggerIdx,
-    longTriggerIdx,
+    shortEarlyIdx: resolvedShortEarlyIdx,
+    longEarlyIdx: resolvedLongEarlyIdx,
+    shortTriggerIdx: resolvedShortTriggerIdx,
+    longTriggerIdx: resolvedLongTriggerIdx,
     debug: lastDebug,
   };
 }
