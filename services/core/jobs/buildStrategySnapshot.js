@@ -287,7 +287,7 @@ function isEngine16EnabledForStrategy(strategyId) {
   return strategyId === "intraday_scalp@10m";
 }
 
-async function buildEngine16Direct(sym, tf = "30m", marketRegime = null) {
+async function buildEngine16Direct(sym, tf = "30m", marketRegime = null, engine2Context = null) {
   try {
     return await computeMorningFib({
       symbol: sym,
@@ -295,6 +295,7 @@ async function buildEngine16Direct(sym, tf = "30m", marketRegime = null) {
       includeZones: true,
       includeVolume: true,
       marketRegime,
+      engine2Context,
     });
   } catch (err) {
     return {
@@ -696,6 +697,7 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec) {
   } else {
     phase = `IN_${lastKey}`;
   }
+
   return {
     phase,
     lastMark: { key: lastKey, ...waveMarks[lastKey] },
@@ -1159,8 +1161,29 @@ async function buildSnapshot() {
     let engine16ForStrategy = null;
 
     try {
+      let engine2Context = {
+        primary: null,
+        intermediate: null,
+        minor: null,
+      };
+
+      try {
+        engine2Context = {
+          primary: await buildEngine2Block({ symbol, degree: "primary", tf: "1d" }),
+          intermediate: await buildEngine2Block({ symbol, degree: "intermediate", tf: "1h" }),
+          minor: await buildEngine2Block({ symbol, degree: "minor", tf: "10m" }),
+        };
+      } catch (e) {
+        console.warn("Engine2 context build failed:", e?.message);
+      }
+
       if (isEngine16EnabledForStrategy(s.strategyId)) {
-        engine16ForStrategy = await buildEngine16Direct(symbol, s.tf, marketRegime);
+        engine16ForStrategy = await buildEngine16Direct(
+          symbol,
+          s.tf,
+          marketRegime,
+          engine2Context
+        );
         console.log(`Engine16 built directly for ${s.strategyId} @ ${s.tf}`);
       } else {
         engine16ForStrategy = skippedEngine16(symbol, s.tf, marketRegime);
