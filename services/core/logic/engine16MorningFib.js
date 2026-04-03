@@ -600,6 +600,49 @@ export async function computeMorningFib({
 } = {}) {
   const timeframe = SUPPORTED_TF.has(String(tf)) ? String(tf) : DEFAULT_TF;
   const regimeInfo = normalizeRegime(marketRegime);
+  const engine2 = marketRegime?.engine2 || null;
+
+  // defaults
+  let macroBias = "NONE";
+  let waveState = "UNKNOWN";
+  let waveMode = "UNKNOWN";
+  let wavePrep = false;
+
+  if (engine2 && engine2.primary && engine2.intermediate) {
+
+    const primaryPhase = engine2.primary.phase;
+    const intermediatePhase = engine2.intermediate.phase;
+
+   // Primary completed → expect reversal cycle
+    if (primaryPhase === "COMPLETE_W5") {
+      macroBias = "SHORT_PREFERENCE";
+    }
+
+  // Interpret corrective structure
+  if (["IN_A", "IN_B", "IN_C"].includes(intermediatePhase)) {
+
+    waveMode = "CORRECTIVE";
+
+    if (intermediatePhase === "IN_A") {
+      waveState = "EARLY_CORRECTION";
+    }
+
+    if (intermediatePhase === "IN_B") {
+      waveState = "MID_CORRECTION";
+    }
+
+    if (intermediatePhase === "IN_C") {
+      waveState = "FINAL_CORRECTION";
+      wavePrep = true; // prepare for W3
+    }
+  }
+
+  // Impulse phase (after correction)
+  if (["IN_W3", "IN_W5"].includes(intermediatePhase)) {
+    waveMode = "IMPULSE";
+    waveState = "TRENDING";
+  }
+}
 
   let rawBars;
   try {
@@ -1158,7 +1201,41 @@ export async function computeMorningFib({
     insideSecondaryZone,
     marketRegime: regimeInfo,
   });
+  // ==============================
+// WAVE-BASED ADJUSTMENTS
+// ==============================
 
+// During A/B → do nothing for swing
+if (waveState === "EARLY_CORRECTION" || waveState === "MID_CORRECTION") {
+  if (strategyType === "CONTINUATION") {
+    strategyType = "NONE";
+    readinessLabel = "WAIT_CORRECTION";
+  }
+}
+
+// During C → prepare for reversal (short)
+if (waveState === "FINAL_CORRECTION") {
+
+  // soften continuation longs
+  if (strategyType === "CONTINUATION" && macroBias === "SHORT_PREFERENCE") {
+    strategyType = "NONE";
+    readinessLabel = "WAIT_FOR_C_COMPLETION";
+  }
+
+  // allow exhaustion SHORT setups to be more meaningful
+  if (exhaustionEarlyShort) {
+    readinessLabel = "WATCH_FOR_SHORT";
+  }
+}
+
+// Only allow SHORT trigger after confirmation
+if (
+  waveState === "FINAL_CORRECTION" &&
+  exhaustionTriggerShort
+) {
+  strategyType = "EXHAUSTION";
+  readinessLabel = "EXHAUSTION_READY";
+}
   let macroContinuationDowngraded = false;
 
   // macro = caution / refinement only
