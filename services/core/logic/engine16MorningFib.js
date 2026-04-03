@@ -1,7 +1,7 @@
 // services/core/logic/engine16MorningFib.js
 // Engine 16 — Morning Impulse Fib Engine
 //
-// Happy-medium v2
+// Happy-medium v3
 // - keep current exhaustion trigger engine intact
 // - keep pullback / continuation contract intact
 // - add market-regime awareness
@@ -9,6 +9,9 @@
 // - macro = caution / refinement only
 // - macro does NOT auto-kill pullbacks
 // - macro can downgrade blind continuation / breakout promotion near major SPX roadblocks
+// - add Engine 2 wave-phase awareness
+// - scalp remains allowed to trade A / B / C inside corrective structure
+// - Engine 2 provides context, not forced trade direction
 
 import path from "path";
 import { readFile } from "fs/promises";
@@ -590,6 +593,154 @@ function buildMacroRoadblock(macroLevelContext) {
   };
 }
 
+/* ==============================
+   ENGINE 2 PHASE AWARENESS
+============================== */
+
+function normalizeEngine2Node(node) {
+  if (!node || typeof node !== "object") return null;
+  return {
+    degree: node.degree ?? null,
+    tf: node.tf ?? null,
+    ok: node.ok ?? null,
+    phase: node.phase ?? "UNKNOWN",
+    lastMark: node.lastMark ?? null,
+    nextMark: node.nextMark ?? null,
+    fibScore: node.fibScore ?? null,
+    invalidated: node.invalidated ?? false,
+    anchorTag: node.anchorTag ?? null,
+    waveMode:
+      node.waveMode ??
+      (["IN_A", "IN_B", "IN_C"].includes(String(node.phase))
+        ? "corrective"
+        : ["IN_W1", "IN_W2", "IN_W3", "IN_W4", "COMPLETE_W5"].includes(String(node.phase))
+        ? "impulse"
+        : "unknown"),
+    isCorrective:
+      node.isCorrective ??
+      ["IN_A", "IN_B", "IN_C"].includes(String(node.phase)),
+    isImpulse:
+      node.isImpulse ??
+      ["IN_W1", "IN_W2", "IN_W3", "IN_W4", "COMPLETE_W5"].includes(String(node.phase)),
+    isFinalCorrectionLeg:
+      node.isFinalCorrectionLeg ??
+      String(node.phase) === "IN_C",
+    isWave3Setup:
+      node.isWave3Setup ?? false,
+    correctionDirection: node.correctionDirection ?? null,
+  };
+}
+
+function normalizeEngine2Context(input) {
+  if (!input || typeof input !== "object") {
+    return {
+      primary: null,
+      intermediate: null,
+      minor: null,
+    };
+  }
+
+  // nested contract preferred
+  if (input.primary || input.intermediate || input.minor) {
+    return {
+      primary: normalizeEngine2Node(input.primary),
+      intermediate: normalizeEngine2Node(input.intermediate),
+      minor: normalizeEngine2Node(input.minor),
+    };
+  }
+
+  // single block fallback
+  return {
+    primary: null,
+    intermediate: normalizeEngine2Node(input),
+    minor: null,
+  };
+}
+
+function inferCorrectionDirection(intermediateNode) {
+  if (!intermediateNode) return null;
+
+  const direct = String(intermediateNode.correctionDirection || "").toUpperCase();
+  if (direct === "UP" || direct === "DOWN") return direct;
+
+  const phase = String(intermediateNode.phase || "UNKNOWN");
+  const lastP = toNum(intermediateNode?.lastMark?.p);
+  const nextP = toNum(intermediateNode?.nextMark?.p);
+
+  // If next mark exists, infer the broader correction direction from last→next
+  if (Number.isFinite(lastP) && Number.isFinite(nextP) && nextP !== lastP) {
+    return nextP > lastP ? "UP" : "DOWN";
+  }
+
+  // final correction leg defaults
+  if (phase === "IN_C") {
+    if (Number.isFinite(lastP) && Number.isFinite(nextP) && nextP !== lastP) {
+      return nextP > lastP ? "UP" : "DOWN";
+    }
+  }
+
+  return null;
+}
+
+function buildWaveContext(engine2Ctx) {
+  const primary = engine2Ctx?.primary || null;
+  const intermediate = engine2Ctx?.intermediate || null;
+  const minor = engine2Ctx?.minor || null;
+
+  const primaryPhase = String(primary?.phase || "UNKNOWN");
+  const intermediatePhase = String(intermediate?.phase || "UNKNOWN");
+  const minorPhase = String(minor?.phase || "UNKNOWN");
+
+  const intermediateWaveMode = String(intermediate?.waveMode || "unknown").toUpperCase();
+  const correctionDirection = inferCorrectionDirection(intermediate);
+
+  let macroBias = "NONE";
+  let waveState = "UNKNOWN";
+  let wavePrep = false;
+  let scalpCorrectionDirection = correctionDirection;
+  let intermediateReadyForWave3 = false;
+
+  // If primary completed a W5 and intermediate is now corrective,
+  // directional preference depends on correction direction.
+  if (
+    primaryPhase === "COMPLETE_W5" &&
+    (intermediate?.isCorrective === true || ["IN_A", "IN_B", "IN_C"].includes(intermediatePhase))
+  ) {
+    if (correctionDirection === "UP") {
+      macroBias = "SHORT_PREFERENCE";
+    } else if (correctionDirection === "DOWN") {
+      macroBias = "LONG_PREFERENCE";
+    }
+  }
+
+  if (intermediatePhase === "IN_A") {
+    waveState = "EARLY_CORRECTION";
+  } else if (intermediatePhase === "IN_B") {
+    waveState = "MID_CORRECTION";
+  } else if (intermediatePhase === "IN_C") {
+    waveState = "FINAL_CORRECTION";
+    wavePrep = true;
+  } else if (["IN_W3", "IN_W5"].includes(intermediatePhase)) {
+    waveState = "TRENDING_IMPULSE";
+  }
+
+  if (intermediate?.isWave3Setup === true) {
+    intermediateReadyForWave3 = true;
+  }
+
+  return {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    intermediateWaveMode,
+    correctionDirection: scalpCorrectionDirection,
+    macroBias,
+    waveState,
+    wavePrep,
+    intermediateReadyForWave3,
+  };
+}
+
 export async function computeMorningFib({
   symbol = DEFAULT_SYMBOL,
   tf = DEFAULT_TF,
@@ -597,52 +748,20 @@ export async function computeMorningFib({
   includeVolume = true,
   marketRegime = null,
   macroLevelContext = null,
+  engine2Context = null,
 } = {}) {
   const timeframe = SUPPORTED_TF.has(String(tf)) ? String(tf) : DEFAULT_TF;
   const regimeInfo = normalizeRegime(marketRegime);
-  const engine2 = marketRegime?.engine2 || null;
 
-  // defaults
-  let macroBias = "NONE";
-  let waveState = "UNKNOWN";
-  let waveMode = "UNKNOWN";
-  let wavePrep = false;
+  const localEngine2Context = normalizeEngine2Context(
+    engine2Context ?? marketRegime?.engine2 ?? null
+  );
 
-  if (engine2 && engine2.primary && engine2.intermediate) {
-
-    const primaryPhase = engine2.primary.phase;
-    const intermediatePhase = engine2.intermediate.phase;
-
-   // Primary completed → expect reversal cycle
-    if (primaryPhase === "COMPLETE_W5") {
-      macroBias = "SHORT_PREFERENCE";
-    }
-
-  // Interpret corrective structure
-  if (["IN_A", "IN_B", "IN_C"].includes(intermediatePhase)) {
-
-    waveMode = "CORRECTIVE";
-
-    if (intermediatePhase === "IN_A") {
-      waveState = "EARLY_CORRECTION";
-    }
-
-    if (intermediatePhase === "IN_B") {
-      waveState = "MID_CORRECTION";
-    }
-
-    if (intermediatePhase === "IN_C") {
-      waveState = "FINAL_CORRECTION";
-      wavePrep = true; // prepare for W3
-    }
-  }
-
-  // Impulse phase (after correction)
-  if (["IN_W3", "IN_W5"].includes(intermediatePhase)) {
-    waveMode = "IMPULSE";
-    waveState = "TRENDING";
-  }
-}
+  const waveContext = buildWaveContext(localEngine2Context);
+  const waveReasonCodes = [];
+  let waveShortPrep = false;
+  let waveLongPrep = false;
+  let waveCountertrendCaution = false;
 
   let rawBars;
   try {
@@ -657,6 +776,12 @@ export async function computeMorningFib({
       context: "NONE",
       state: "NO_IMPULSE",
       marketRegime: regimeInfo,
+      engine2Context: localEngine2Context,
+      waveContext,
+      waveReasonCodes,
+      waveShortPrep,
+      waveLongPrep,
+      waveCountertrendCaution,
       macroRoadblock: buildMacroRoadblock(macroLevelContext),
       error: "OHLC_UNAVAILABLE",
       detail: err?.message || String(err),
@@ -674,6 +799,12 @@ export async function computeMorningFib({
       context: "NONE",
       state: "NO_IMPULSE",
       marketRegime: regimeInfo,
+      engine2Context: localEngine2Context,
+      waveContext,
+      waveReasonCodes,
+      waveShortPrep,
+      waveLongPrep,
+      waveCountertrendCaution,
       macroRoadblock: buildMacroRoadblock(macroLevelContext),
       error: "OHLC_UNAVAILABLE",
     };
@@ -716,6 +847,12 @@ export async function computeMorningFib({
       context: "NONE",
       state: "NO_IMPULSE",
       marketRegime: regimeInfo,
+      engine2Context: localEngine2Context,
+      waveContext,
+      waveReasonCodes,
+      waveShortPrep,
+      waveLongPrep,
+      waveCountertrendCaution,
       macroRoadblock,
       macroLevelContext: localMacroContext,
       macroReasonCodes,
@@ -744,6 +881,12 @@ export async function computeMorningFib({
     timeframe,
     context: "NONE",
     marketRegime: regimeInfo,
+    engine2Context: localEngine2Context,
+    waveContext,
+    waveReasonCodes,
+    waveShortPrep,
+    waveLongPrep,
+    waveCountertrendCaution,
     macroLevelContext: localMacroContext,
     macroRoadblock,
     macroReasonCodes,
@@ -1201,41 +1344,62 @@ export async function computeMorningFib({
     insideSecondaryZone,
     marketRegime: regimeInfo,
   });
+
   // ==============================
-// WAVE-BASED ADJUSTMENTS
-// ==============================
+  // ENGINE 2 WAVE-BASED CONTEXT
+  // ==============================
 
-// During A/B → do nothing for swing
-if (waveState === "EARLY_CORRECTION" || waveState === "MID_CORRECTION") {
-  if (strategyType === "CONTINUATION") {
-    strategyType = "NONE";
-    readinessLabel = "WAIT_CORRECTION";
+  // Scalp remains allowed to trade A/B/C.
+  // We do NOT block continuation during A/B/C.
+  // We only add caution / prep context near final correction leg.
+  if (waveContext.waveState === "FINAL_CORRECTION") {
+    if (waveContext.macroBias === "SHORT_PREFERENCE") {
+      waveShortPrep = true;
+      waveReasonCodes.push("ENGINE2_FINAL_CORRECTION_LEG");
+      waveReasonCodes.push("ENGINE2_SHORT_PREFERENCE");
+    } else if (waveContext.macroBias === "LONG_PREFERENCE") {
+      waveLongPrep = true;
+      waveReasonCodes.push("ENGINE2_FINAL_CORRECTION_LEG");
+      waveReasonCodes.push("ENGINE2_LONG_PREFERENCE");
+    }
+
+    // Do not kill scalp continuation during C.
+    // Only mark countertrend caution if continuation is pushing against expected post-C direction.
+    if (
+      strategyType === "CONTINUATION" ||
+      strategyType === "BREAKOUT"
+    ) {
+      if (
+        waveContext.macroBias === "SHORT_PREFERENCE" &&
+        (continuationTriggerLong || continuationWatchLong)
+      ) {
+        waveCountertrendCaution = true;
+        if (!waveReasonCodes.includes("COUNTERTREND_C_LEG_LONG")) {
+          waveReasonCodes.push("COUNTERTREND_C_LEG_LONG");
+        }
+      }
+
+      if (
+        waveContext.macroBias === "LONG_PREFERENCE" &&
+        (continuationTriggerShort || continuationWatchShort)
+      ) {
+        waveCountertrendCaution = true;
+        if (!waveReasonCodes.includes("COUNTERTREND_C_LEG_SHORT")) {
+          waveReasonCodes.push("COUNTERTREND_C_LEG_SHORT");
+        }
+      }
+    }
+
+    // During final C, make exhaustion early more informative without forcing trade.
+    if (waveShortPrep && exhaustionEarlyShort && !exhaustionTriggerShort) {
+      readinessLabel = "WATCH_FOR_SHORT";
+    }
+
+    if (waveLongPrep && exhaustionEarlyLong && !exhaustionTriggerLong) {
+      readinessLabel = "WATCH_FOR_LONG";
+    }
   }
-}
 
-// During C → prepare for reversal (short)
-if (waveState === "FINAL_CORRECTION") {
-
-  // soften continuation longs
-  if (strategyType === "CONTINUATION" && macroBias === "SHORT_PREFERENCE") {
-    strategyType = "NONE";
-    readinessLabel = "WAIT_FOR_C_COMPLETION";
-  }
-
-  // allow exhaustion SHORT setups to be more meaningful
-  if (exhaustionEarlyShort) {
-    readinessLabel = "WATCH_FOR_SHORT";
-  }
-}
-
-// Only allow SHORT trigger after confirmation
-if (
-  waveState === "FINAL_CORRECTION" &&
-  exhaustionTriggerShort
-) {
-  strategyType = "EXHAUSTION";
-  readinessLabel = "EXHAUSTION_READY";
-}
   let macroContinuationDowngraded = false;
 
   // macro = caution / refinement only
@@ -1335,6 +1499,13 @@ if (
     timeframe,
     context: finalContext,
     marketRegime: regimeInfo,
+
+    engine2Context: localEngine2Context,
+    waveContext,
+    waveReasonCodes,
+    waveShortPrep,
+    waveLongPrep,
+    waveCountertrendCaution,
 
     macroLevelContext: localMacroContext,
     macroRoadblock,
