@@ -754,7 +754,16 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
 
   if (lastKey === "W5") {
     phase = "COMPLETE_W5";
-  } else if (["A", "B", "C"].includes(lastKey)) {
+  } else if (lastKey === "B") {
+    const bPrice = Number(waveMarks?.B?.p);
+    const hasCurrentPrice = typeof currentPrice === "number" && Number.isFinite(currentPrice);
+
+    if (hasCurrentPrice && Number.isFinite(bPrice) && currentPrice > bPrice) {
+      phase = "IN_C";
+    } else {
+      phase = "IN_B";
+    }
+  } else if (["A", "C"].includes(lastKey)) {
     phase = `IN_${lastKey}`;
   } else {
     phase = `IN_${lastKey}`;
