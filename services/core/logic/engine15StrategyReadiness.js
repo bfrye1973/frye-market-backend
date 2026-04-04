@@ -276,7 +276,7 @@ function translateActiveIntermediateSwing({
   });
 }
 
- function translateActiveScalp({
+function translateActiveScalp({
   symbol,
   strategyId,
   engine16,
@@ -302,9 +302,6 @@ function translateActiveIntermediateSwing({
   const rawStrategyType = safeUpper(engine16?.strategyType, "NONE");
   const rawDirection = safeUpper(engine16?.direction, "NONE");
 
-  // Phase A fix:
-  // If Scalp engine is alive and explicitly says WATCH,
-  // do not collapse that into NO_SETUP just because strategyType is NONE.
   if (rawReadiness === "WATCH") {
     return buildOutput({
       symbol,
@@ -351,21 +348,6 @@ function translateActiveIntermediateSwing({
     source: {
       owner: "ENGINE16_ACTIVE",
       rawReadiness,
-    },
-  });
-}
-  return buildOutput({
-    symbol,
-    strategyId,
-    readiness: engine16.readinessLabel || "WATCH",
-    strategyType: engine16.strategyType,
-    direction: engine16.direction || "NONE",
-    active: true,
-    freshEntryNow: true,
-    reasonCodes: ["ENGINE16_ACTIVE"],
-    source: {
-      owner: "ENGINE16_ACTIVE",
-      rawReadiness: safeUpper(engine16?.readinessLabel, "WATCH"),
     },
   });
 }
