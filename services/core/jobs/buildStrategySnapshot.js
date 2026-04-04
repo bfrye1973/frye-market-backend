@@ -1194,11 +1194,19 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
 }
 
 async function buildEngine2State(symbol) {
-  const [primary, intermediate, minor] = await Promise.all([
-    buildEngine2Block({ symbol, degree: "primary", tf: "1d" }).catch(() => null),
-    buildEngine2Block({ symbol, degree: "intermediate", tf: "1h" }).catch(() => null),
-    buildEngine2Block({ symbol, degree: "minor", tf: "1h" }).catch(() => null),
-  ]);
+  const contextResp = await fetchJson(
+  `${CORE_BASE}/api/v1/engine5-context?symbol=${symbol}&tf=1h`,
+  30000
+);
+
+const engine1Context = contextResp?.json || {};
+const currentPrice = Number(engine1Context?.meta?.current_price ?? NaN);
+
+const [primary, intermediate, minor] = await Promise.all([
+  buildEngine2Block({ symbol, degree: "primary", tf: "1d", currentPrice }).catch(() => null),
+  buildEngine2Block({ symbol, degree: "intermediate", tf: "1h", currentPrice }).catch(() => null),
+  buildEngine2Block({ symbol, degree: "minor", tf: "1h", currentPrice }).catch(() => null),
+]);
 
   let correctionDirection = null;
 
