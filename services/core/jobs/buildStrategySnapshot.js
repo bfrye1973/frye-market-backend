@@ -1320,22 +1320,11 @@ async function buildSnapshot() {
   for (const s of STRATEGIES) {
     let engine16ForStrategy = null;
 
-    try {
-      let engine2Context = {
-        primary: null,
-        intermediate: null,
-        minor: null,
-      };
-
-      try {
-        engine2Context = {
-          primary: await buildEngine2Block({ symbol, degree: "primary", tf: "1d" }),
-          intermediate: await buildEngine2Block({ symbol, degree: "intermediate", tf: "1h" }),
-          minor: await buildEngine2Block({ symbol, degree: "minor", tf: "10m" }),
-        };
-      } catch (e) {
-        console.warn("Engine2 context build failed:", e?.message);
-      }
+    let engine2Context = {
+      primary: engine2State?.primary ?? null,
+      intermediate: engine2State?.intermediate ?? null,
+      minor: engine2State?.minor ?? null,
+    }; 
 
       if (isEngine16EnabledForStrategy(s.strategyId)) {
         engine16ForStrategy = await buildEngine16Direct(
