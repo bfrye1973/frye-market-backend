@@ -2,12 +2,13 @@
 //
 // Engine 15C — Decision Referee
 //
-// v8.2
+// v8.3
 // - keeps Engine 16 exhaustion EARLY as advisory only
 // - does NOT promote exhaustionEarly into a strategy candidate
 // - prevents early-only exhaustion from collapsing into STAND_DOWN / BLOCKED
 // - keeps exhaustionTrigger as the real tradable exhaustion event
-// - keeps current snapshot/frontend contract stable
+// - adds Engine16 unavailable/skipped guard for Intermediate Swing
+// - prevents fake BLOCKED / NO_VALID_STRATEGY / NO_DIRECTION when Engine 16 is skipped
 //
 // Notes:
 // - pure logic only
@@ -34,6 +35,8 @@ const VALID_READINESS = new Set([
   "READY",
   "CONFIRMED",
   "STAND_DOWN",
+  "PREP",
+  "TRIGGERED",
 ]);
 
 const VALID_ACTIONS = new Set([
@@ -226,11 +229,23 @@ function normalizeEngine16(engine16 = null) {
 
   return {
     ok: engine16?.ok !== false,
+    skipped: engine16?.skipped === true,
     strategyType,
     readinessLabel,
     direction,
     context: safeUpper(engine16?.context, "NONE"),
     state: safeUpper(engine16?.state, "NONE"),
+
+    waveState:
+      safeUpper(engine16?.waveState, "") ||
+      safeUpper(engine16?.waveContext?.waveState, "UNKNOWN"),
+    intermediatePhase:
+      safeUpper(engine16?.intermediatePhase, "") ||
+      safeUpper(engine16?.waveContext?.intermediatePhase, "") ||
+      safeUpper(engine16?.engine2Context?.intermediate?.phase, ""),
+    wavePrep:
+      engine16?.wavePrep === true ||
+      engine16?.waveContext?.wavePrep === true,
 
     exhaustionDetected: engine16?.exhaustionDetected === true,
     exhaustionActive: engine16?.exhaustionActive === true,
@@ -378,6 +393,116 @@ function macroMidpointHit({ zoneContext, currentPrice, direction } = {}) {
   if (dir === "LONG") return px >= mid;
   if (dir === "SHORT") return px <= mid;
   return false;
+}
+
+function isIntermediateSwingStrategy(strategyId) {
+  return safeUpper(strategyId).includes("MINOR_SWING");
+}
+
+function isEngine16Unavailable(engine16) {
+  return !engine16 || engine16.skipped === true || engine16.ok !== true;
+}
+
+function isFinalCorrectionPrep(engine16 = null) {
+  const e16 = normalizeEngine16(engine16);
+
+  return (
+    e16.wavePrep === true ||
+    e16.waveState === "FINAL_CORRECTION" ||
+    e16.intermediatePhase === "IN_C"
+  );
+}
+
+function buildUnavailableIntermediateSwingDecision({
+  symbol,
+  strategyId,
+  engine16,
+} = {}) {
+  const prep = isFinalCorrectionPrep(engine16);
+  const readinessLabel = prep ? "PREP" : "WAIT";
+
+  return {
+    ok: true,
+    engine: "engine15.decisionReferee.v8.3",
+    symbol,
+    strategyId,
+    strategyType: "NONE",
+    direction: "NONE",
+    readinessLabel,
+    executionBias: "NONE",
+    action: "NO_ACTION",
+    priority: 0,
+    entryStyle: "NONE",
+    freshEntryNow: false,
+    reasonCodes: prep
+      ? ["ENGINE16_UNAVAILABLE", "STRUCTURE_PREP_ONLY", "INTERMEDIATE_PREP"]
+      : ["ENGINE16_UNAVAILABLE", "WAIT_FOR_W3_W5_STRUCTURE"],
+    blockers: [],
+    conflicts: [],
+    qualityGatePassed: false,
+    momentumGatePassed: false,
+    permissionGatePassed: false,
+    qualityScore: 0,
+    qualityGrade: "IGNORE",
+    qualityBand: "INVALID",
+    qualityBreakdown: {
+      engine1: 0,
+      engine2: 0,
+      engine3: 0,
+      engine4: 0,
+      compression: 0,
+    },
+    permission: "NONE",
+    sizeMultiplier: 0,
+    setupChain: prep ? ["INTERMEDIATE_PREP"] : [],
+    nextSetupType: prep ? "WAIT_FOR_W3_TRIGGER" : "NONE",
+    primaryExhaustionTF: null,
+    signalEvent: {
+      signalType: "NONE",
+      direction: "NONE",
+      signalTime: null,
+      signalPrice: null,
+      signalSource: null,
+    },
+    lifecycle: {
+      lifecycleStage: "WAITING_STRUCTURE",
+      isFreshSetup: false,
+      entryWindowOpen: false,
+      freshEntryNow: false,
+      signalPrice: null,
+      currentPrice: null,
+      barsSinceSignal: null,
+      moveFromSignalPts: null,
+      moveFromSignalAtr: null,
+      zonesInPath: [],
+      zonesHit: 0,
+      targetCount: 0,
+      targetProgress01: 0,
+      firstTargetHit: false,
+      secondTargetHit: false,
+      tp1Zone: null,
+      tp2Zone: null,
+      tp1Reclaimed: false,
+      block2Protected: false,
+      block2ExitReason: null,
+      runnerActive: false,
+      runnerExitTriggered: false,
+      runnerExitReason: null,
+      ema10_30m: null,
+      setupCompleted: false,
+      edgeRemainingPct: 100,
+      nextFocus: prep ? "WAIT_FOR_W3_TRIGGER" : "WAIT_FOR_W3_W5_STRUCTURE",
+    },
+    debug: {
+      unavailableGuard: {
+        triggered: true,
+        engine16Skipped: engine16?.skipped === true,
+        engine16Ok: engine16?.ok === true,
+        waveState: safeUpper(engine16?.waveState || engine16?.waveContext?.waveState, "UNKNOWN"),
+        intermediatePhase: safeUpper(engine16?.intermediatePhase || engine16?.waveContext?.intermediatePhase, "UNKNOWN"),
+      },
+    },
+  };
 }
 
 /* -----------------------------
@@ -1464,7 +1589,7 @@ export function buildFinalDecision({
     action = "BLOCKED";
   } else if (trigger.readinessLabel === "WAIT") {
     action = "NO_ACTION";
-  } else if (trigger.readinessLabel === "WATCH" || trigger.readinessLabel === "NEAR" || trigger.readinessLabel === "ARMING") {
+  } else if (trigger.readinessLabel === "WATCH" || trigger.readinessLabel === "NEAR" || trigger.readinessLabel === "ARMING" || trigger.readinessLabel === "PREP") {
     action = "WATCH";
   } else if (trigger.readinessLabel === "READY") {
     action =
@@ -1473,7 +1598,7 @@ export function buildFinalDecision({
         : p.permission === "ALLOW"
         ? "ENTER_OK"
         : "BLOCKED";
-  } else if (trigger.readinessLabel === "CONFIRMED") {
+  } else if (trigger.readinessLabel === "CONFIRMED" || trigger.readinessLabel === "TRIGGERED") {
     action =
       p.permission === "ALLOW"
         ? "ENTER_OK"
@@ -1511,7 +1636,7 @@ export function buildFinalDecision({
 
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v8.2",
+    engine: "engine15.decisionReferee.v8.3",
     symbol,
     strategyId,
     strategyType: trigger.promotedStrategyType || resolvedWinner?.strategyType || "NONE",
@@ -1569,6 +1694,14 @@ export function computeEngine15DecisionReferee({
   zoneContext = null,
 } = {}) {
   try {
+    if (isIntermediateSwingStrategy(strategyId) && isEngine16Unavailable(engine16)) {
+      return buildUnavailableIntermediateSwingDecision({
+        symbol,
+        strategyId,
+        engine16,
+      });
+    }
+
     const candidates = resolveStrategyCandidates({ engine16 });
 
     const winner = pickWinningStrategy({
@@ -1593,7 +1726,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v8.2",
+      engine: "engine15.decisionReferee.v8.3",
       symbol,
       strategyId,
       strategyType: "NONE",
