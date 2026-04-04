@@ -16,6 +16,10 @@
 // - Engine 16 is only computed for intraday_scalp@10m
 // - minor_swing@1h and intermediate_long@4h get placeholder objects
 // - avoids fake 1h/4h fallback-to-30m Engine 16 usage
+//
+// NEW:
+// - skipped Engine 16 objects can now carry Engine 2 phase context
+// - this lets Intermediate Swing move WAIT -> PREP when Engine 2 reaches IN_C
 
 import fs from "fs";
 import { computeConfluenceScore } from "../logic/confluenceScorer.js";
@@ -175,8 +179,7 @@ async function fetchLiveMarketMeter() {
       toNum(h4J?.metrics?.trend_strength_4h_pct) ??
       toNum(h4J?.fourHour?.overall4h?.score),
     state4h:
-      h4J?.fourHour?.overall4h?.state ??
-      null,
+      h4J?.fourHour?.overall4h?.state ?? null,
 
     scoreEOD:
       toNum(eodJ?.metrics?.overall_eod_score) ??
@@ -272,7 +275,54 @@ function fallbackEngine16(sym, tf = "30m", marketRegime = null) {
   };
 }
 
-function skippedEngine16(sym, tf = null, marketRegime = null) {
+function buildSkippedWaveContext(engine2Context = null) {
+  const primaryPhase = engine2Context?.primary?.phase ?? "UNKNOWN";
+  const intermediatePhase = engine2Context?.intermediate?.phase ?? "UNKNOWN";
+  const minorPhase = engine2Context?.minor?.phase ?? "UNKNOWN";
+  const intermediateWaveMode = engine2Context?.intermediate?.waveMode ?? null;
+  const correctionDirection = engine2Context?.intermediate?.correctionDirection ?? null;
+
+  let macroBias = "NONE";
+  let waveState = "UNKNOWN";
+  let wavePrep = false;
+  let intermediateReadyForWave3 = false;
+
+  if (
+    primaryPhase === "COMPLETE_W5" &&
+    ["IN_A", "IN_B", "IN_C"].includes(intermediatePhase)
+  ) {
+    if (correctionDirection === "UP") macroBias = "SHORT_PREFERENCE";
+    if (correctionDirection === "DOWN") macroBias = "LONG_PREFERENCE";
+  }
+
+  if (intermediatePhase === "IN_A") waveState = "EARLY_CORRECTION";
+  if (intermediatePhase === "IN_B") waveState = "MID_CORRECTION";
+  if (intermediatePhase === "IN_C") {
+    waveState = "FINAL_CORRECTION";
+    wavePrep = true;
+    intermediateReadyForWave3 = true;
+  }
+
+  if (["IN_W3", "IN_W5"].includes(intermediatePhase)) {
+    waveState = "TRENDING_IMPULSE";
+  }
+
+  return {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    intermediateWaveMode,
+    correctionDirection,
+    macroBias,
+    waveState,
+    wavePrep,
+    intermediateReadyForWave3,
+  };
+}
+
+function skippedEngine16(sym, tf = null, marketRegime = null, engine2Context = null) {
+  const waveContext = buildSkippedWaveContext(engine2Context);
+
   return {
     ok: false,
     skipped: true,
@@ -280,6 +330,18 @@ function skippedEngine16(sym, tf = null, marketRegime = null) {
     symbol: sym,
     timeframe: tf,
     marketRegime: marketRegime || null,
+
+    // NEW: carry structure truth even when Engine16 is intentionally skipped
+    engine2Context: engine2Context || null,
+    waveContext,
+    waveState: waveContext.waveState,
+    wavePrep: waveContext.wavePrep,
+    macroBias: waveContext.macroBias,
+    primaryPhase: waveContext.primaryPhase,
+    intermediatePhase: waveContext.intermediatePhase,
+    minorPhase: waveContext.minorPhase,
+    intermediateWaveMode: waveContext.intermediateWaveMode,
+    correctionDirection: waveContext.correctionDirection,
   };
 }
 
@@ -566,7 +628,7 @@ function applyNearAllowedZoneDisplay({ confluence, ctx }) {
       nearAllowedZone: true,
       nearestAllowed: {
         zoneType: nearest.zoneType,
-        zoneId: nearest.id,
+        zoneId: nearest.zoneId,
         lo: nearest.lo,
         hi: nearest.hi,
         distancePts: Number(nearest.distancePts.toFixed(2)),
@@ -1129,6 +1191,7 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
     context: engine1Context,
   };
 }
+
 async function buildEngine2State(symbol) {
   const [primary, intermediate, minor] = await Promise.all([
     buildEngine2Block({ symbol, degree: "primary", tf: "1d" }).catch(() => null),
@@ -1139,7 +1202,6 @@ async function buildEngine2State(symbol) {
   let correctionDirection = null;
 
   if (intermediate?.waveMode === "CORRECTIVE") {
-    // Current rule: W2 after drop → correction UP
     correctionDirection = "UP";
   }
 
@@ -1156,6 +1218,7 @@ async function buildEngine2State(symbol) {
     correctionDirection,
   };
 }
+
 /* -----------------------------
    Build snapshot
 ------------------------------*/
@@ -1190,17 +1253,17 @@ async function buildSnapshot() {
   );
 
   const result = {
-  ok: true,
-  symbol,
-  now: nowIso(),
-  includeContext: true,
-  marketMind,
-  marketRegime,
-  momentum,
-  engine2State,   // 👈 ADD THIS LINE
-  engine16: null,
-  strategies: {},
-};
+    ok: true,
+    symbol,
+    now: nowIso(),
+    includeContext: true,
+    marketMind,
+    marketRegime,
+    momentum,
+    engine2State,
+    engine16: null,
+    strategies: {},
+  };
 
   for (const s of STRATEGIES) {
     let engine16ForStrategy = null;
@@ -1231,7 +1294,12 @@ async function buildSnapshot() {
         );
         console.log(`Engine16 built directly for ${s.strategyId} @ ${s.tf}`);
       } else {
-        engine16ForStrategy = skippedEngine16(symbol, s.tf, marketRegime);
+        engine16ForStrategy = skippedEngine16(
+          symbol,
+          s.tf,
+          marketRegime,
+          engine2Context
+        );
         console.log(`Engine16 skipped for ${s.strategyId} @ ${s.tf}`);
       }
 
@@ -1263,10 +1331,11 @@ async function buildSnapshot() {
           strategyType: "NONE",
           direction: "NONE",
           active: false,
+          freshEntryNow: false,
         },
         engine15Decision: {
           ok: false,
-          engine: "engine15.decisionReferee.v2",
+          engine: "engine15.decisionReferee.v8.3",
           error: "builder_strategy_failed",
           strategyType: "NONE",
           direction: "NONE",
@@ -1297,6 +1366,7 @@ async function buildSnapshot() {
             lifecycleStage: "BUILDING",
             isFreshSetup: false,
             entryWindowOpen: false,
+            freshEntryNow: false,
             signalPrice: null,
             currentPrice: null,
             barsSinceSignal: null,
@@ -1311,7 +1381,7 @@ async function buildSnapshot() {
             runnerActive: false,
             setupCompleted: false,
             edgeRemainingPct: 100,
-            nextFocus: "LOOK_FOR_NEW_SETUP",
+            nextFocus: "LOOK_FOR_NEXT_SETUP",
           },
           debug: {},
         },
