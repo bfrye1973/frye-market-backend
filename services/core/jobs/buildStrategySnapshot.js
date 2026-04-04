@@ -768,7 +768,7 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
   };
 }
 
-async function buildEngine2Block({ symbol, degree, tf }) {
+async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
   const [w1, w4, lastBarTimeSec] = await Promise.all([
     fetchFibLevels({ symbol, tf, degree, wave: "W1" }).catch(() => ({ ok: false })),
     fetchFibLevels({ symbol, tf, degree, wave: "W4" }).catch(() => ({ ok: false })),
