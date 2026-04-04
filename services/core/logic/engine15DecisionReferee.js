@@ -645,11 +645,19 @@ export function evaluateHardBlockers({
   const earlyOnly = isEarlyExhaustionOnly(e16);
 
   if (!earlyOnly) {
-    if (!winner || winner.strategyType === "NONE") {
+   const isScalp = String(strategyId || "").toLowerCase().includes("intraday_scalp");
+   const isWatchState = engine16?.readinessLabel === "WATCH";
+
+  if (!winner || winner.strategyType === "NONE") {
+    // Allow WATCH state for Scalp without treating as invalid
+    if (!(isScalp && isWatchState)) {
       blockers.push("NO_VALID_STRATEGY");
     }
+  }
 
-    if (winner?.direction === "NONE") {
+  if (winner?.direction === "NONE") {
+    // Allow WATCH state for Scalp without treating missing direction as invalid
+    if (!(isScalp && isWatchState)) {
       blockers.push("NO_DIRECTION");
     }
   }
@@ -1036,20 +1044,36 @@ export function evaluateTriggerReadiness({
     };
   }
 
-  if (!winner || winner.strategyType === "NONE") {
-    return {
-      readinessLabel: "WAIT",
-      entryStyle: "NONE",
-      triggerConfirmed: false,
-      freshEntryNow: false,
-      reasonCodes: ["NO_STRATEGY"],
-      blockers: ["NO_STRATEGY"],
-      promotedStrategyType: "NONE",
-      nextSetupType: "NONE",
-      setupChain: [],
-    };
-  }
+  const isScalp = String(strategyId || "").toLowerCase().includes("intraday_scalp");
+  const isWatchState = engine16?.readinessLabel === "WATCH";
 
+  if (!winner || winner.strategyType === "NONE") {
+    if (isScalp && isWatchState) {
+      return {
+        readinessLabel: "WATCH",
+        entryStyle: "NONE",
+        triggerConfirmed: false,
+        freshEntryNow: false,
+        reasonCodes: ["SCALP_PREP_ACTIVE"],
+        blockers: [],
+        promotedStrategyType: "NONE",
+        nextSetupType: "WAIT_FOR_TRIGGER",
+        setupChain: ["C_LEG_ACTIVE", "AWAITING_TRIGGER"],
+      };
+    }
+
+  return {
+    readinessLabel: "WAIT",
+    entryStyle: "NONE",
+    triggerConfirmed: false,
+    freshEntryNow: false,
+    reasonCodes: ["NO_STRATEGY"],
+    blockers: ["NO_STRATEGY"],
+    promotedStrategyType: "NONE",
+    nextSetupType: "NONE",
+    setupChain: [],
+  };
+}
   const qualityPass = qualityGate?.qualityGatePassed === true;
   const momentumPass = momentumGate?.momentumGatePassed === true;
 
