@@ -727,6 +727,18 @@ async function buildEngine2Block({ symbol, degree, tf }) {
     lastBarTimeSec
   );
 
+  const waveMode =
+  ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
+
+  const isCorrective = waveMode === "CORRECTIVE";
+  const isImpulse = waveMode === "IMPULSE";
+  const isFinalCorrectionLeg = phase === "IN_C";
+
+  let correctionDirection = null;
+  if (waveMode === "CORRECTIVE") {
+    correctionDirection = "UP";
+  }
+
   return {
     degree,
     tf,
@@ -739,8 +751,12 @@ async function buildEngine2Block({ symbol, degree, tf }) {
     nextMark,
     marksPresent,
     anchorTag: anchorTag ?? null,
+    waveMode,
+    isCorrective,
+    isImpulse,
+    isFinalCorrectionLeg,
+    correctionDirection,
   };
-}
 
 /* -----------------------------
    Reaction / Volume
