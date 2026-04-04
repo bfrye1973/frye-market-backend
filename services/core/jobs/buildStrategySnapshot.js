@@ -825,11 +825,11 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     (w4?.ok ? w4?.anchors?.waveMarks : null) ||
     null;
 
-  const { phase, lastMark, nextMark, marksPresent } = computeWavePhaseFromMarks(
-  waveMarks,
-  lastBarTimeSec,
-  currentPrice
-);
+  const { phase, confirmedPhase, phaseReason, lastMark, nextMark, marksPresent } = computeWavePhaseFromMarks(
+   waveMarks,
+   lastBarTimeSec,
+   currentPrice
+ );
 
   const waveMode =
     ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
@@ -851,6 +851,8 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     fibScore,
     invalidated,
     phase,
+    confirmedPhase,
+    phaseReason,
     lastMark,
     nextMark,
     marksPresent,
