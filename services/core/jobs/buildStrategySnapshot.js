@@ -720,7 +720,14 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
   }
 
   if (!marksPresent.length || typeof lastBarTimeSec !== "number" || !Number.isFinite(lastBarTimeSec)) {
-    return { phase: "UNKNOWN", lastMark: null, nextMark: null, marksPresent };
+    return {
+      phase: "UNKNOWN",
+      confirmedPhase: "UNKNOWN",
+      phaseReason: "NO_VALID_MARKS_OR_TIME",
+      lastMark: null,
+      nextMark: null,
+      marksPresent,
+    };
   }
 
   let lastKey = null;
@@ -734,6 +741,8 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
     const nk = marksPresent[0] || null;
     return {
       phase: "PRE_W1",
+      confirmedPhase: "PRE_W1",
+      phaseReason: "NO_MARK_REACHED_BY_TIME",
       lastMark: null,
       nextMark: nk ? { key: nk, ...waveMarks[nk] } : null,
       marksPresent,
@@ -769,7 +778,7 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
     phase = `IN_${lastKey}`;
   }
 
-    let confirmedPhase;
+  let confirmedPhase;
 
   if (lastKey === "W5") {
     confirmedPhase = "COMPLETE_W5";
@@ -798,6 +807,7 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
     nextMark: nextKey ? { key: nextKey, ...waveMarks[nextKey] } : null,
     marksPresent,
   };
+}
 
 async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
   const [w1, w4, lastBarTimeSec] = await Promise.all([
