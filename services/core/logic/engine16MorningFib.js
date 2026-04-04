@@ -1349,10 +1349,18 @@ export async function computeMorningFib({
   // ENGINE 2 WAVE-BASED CONTEXT
   // ==============================
 
+   // If we are in FINAL CORRECTION and no setup is detected yet,
+  // do NOT stay in NO_SETUP. Move to WATCH so system becomes aware.
+ 
   // Scalp remains allowed to trade A/B/C.
   // We do NOT block continuation during A/B/C.
   // We only add caution / prep context near final correction leg.
   if (waveContext.waveState === "FINAL_CORRECTION") {
+    if (strategyType === "NONE" && readinessLabel === "NO_SETUP") {
+      readinessLabel = "WATCH";
+      waveReasonCodes.push("C_LEG_ACTIVE_AWAITING_TRIGGER");
+    } 
+    
     if (waveContext.macroBias === "SHORT_PREFERENCE") {
       waveShortPrep = true;
       waveReasonCodes.push("ENGINE2_FINAL_CORRECTION_LEG");
