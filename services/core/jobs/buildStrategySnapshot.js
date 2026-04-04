@@ -1112,7 +1112,33 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
     context: engine1Context,
   };
 }
+async function buildEngine2State(symbol) {
+  const [primary, intermediate, minor] = await Promise.all([
+    buildEngine2Block({ symbol, degree: "primary", tf: "1d" }).catch(() => null),
+    buildEngine2Block({ symbol, degree: "intermediate", tf: "1h" }).catch(() => null),
+    buildEngine2Block({ symbol, degree: "minor", tf: "1h" }).catch(() => null),
+  ]);
 
+  let correctionDirection = null;
+
+  if (intermediate?.waveMode === "CORRECTIVE") {
+    // Current rule: W2 after drop → correction UP
+    correctionDirection = "UP";
+  }
+
+  return {
+    primary,
+    intermediate,
+    minor,
+
+    primaryPhase: primary?.phase ?? "UNKNOWN",
+    intermediatePhase: intermediate?.phase ?? "UNKNOWN",
+    minorPhase: minor?.phase ?? "UNKNOWN",
+
+    intermediateWaveMode: intermediate?.waveMode ?? null,
+    correctionDirection,
+  };
+}
 /* -----------------------------
    Build snapshot
 ------------------------------*/
@@ -1120,6 +1146,7 @@ async function buildSnapshot() {
   console.log("Starting strategy snapshot build...");
 
   const momentum = await fetchMomentumContext(symbol);
+  const engine2State = await buildEngine2State(symbol);
   console.log("Momentum fetched");
 
   const marketMind = await fetchLiveMarketMeter();
@@ -1146,16 +1173,17 @@ async function buildSnapshot() {
   );
 
   const result = {
-    ok: true,
-    symbol,
-    now: nowIso(),
-    includeContext: true,
-    marketMind,
-    marketRegime,
-    momentum,
-    engine16: null,
-    strategies: {},
-  };
+  ok: true,
+  symbol,
+  now: nowIso(),
+  includeContext: true,
+  marketMind,
+  marketRegime,
+  momentum,
+  engine2State,   // 👈 ADD THIS LINE
+  engine16: null,
+  strategies: {},
+};
 
   for (const s of STRATEGIES) {
     let engine16ForStrategy = null;
