@@ -628,6 +628,7 @@ export function pickWinningStrategy({
    Hard blockers
 ------------------------------*/
 export function evaluateHardBlockers({
+  strategyId,
   winner,
   permission,
   zoneContext,
@@ -645,20 +646,21 @@ export function evaluateHardBlockers({
   const earlyOnly = isEarlyExhaustionOnly(e16);
 
   if (!earlyOnly) {
-   const isScalp = String(strategyId || "").toLowerCase().includes("intraday_scalp");
-   const isWatchState = engine16?.readinessLabel === "WATCH";
+    const isScalp = String(strategyId || "").toLowerCase().includes("intraday_scalp");
+    const isWatchState = engine16?.readinessLabel === "WATCH";
 
-  if (!winner || winner.strategyType === "NONE") {
-    // Allow WATCH state for Scalp without treating as invalid
-    if (!(isScalp && isWatchState)) {
-      blockers.push("NO_VALID_STRATEGY");
+    if (!winner || winner.strategyType === "NONE") {
+      // Allow WATCH state for Scalp without treating as invalid
+      if (!(isScalp && isWatchState)) {
+        blockers.push("NO_VALID_STRATEGY");
+      }
     }
-  }
 
-  if (winner?.direction === "NONE") {
-    // Allow WATCH state for Scalp without treating missing direction as invalid
-    if (!(isScalp && isWatchState)) {
-      blockers.push("NO_DIRECTION");
+    if (winner?.direction === "NONE") {
+      // Allow WATCH state for Scalp without treating missing direction as invalid
+      if (!(isScalp && isWatchState)) {
+        blockers.push("NO_DIRECTION");
+      }
     }
   }
 
@@ -1562,12 +1564,13 @@ export function buildFinalDecision({
   };
 
   const hard = evaluateHardBlockers({
-    winner: resolvedWinner,
-    permission,
-    zoneContext,
-    engine16,
-  });
-
+  strategyId,
+  winner: resolvedWinner,
+  permission,
+  zoneContext,
+  engine16,
+});
+  
   const quality = evaluateQualityGate({
     engine5,
   });
