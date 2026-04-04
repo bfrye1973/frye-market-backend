@@ -728,7 +728,7 @@ async function buildEngine2Block({ symbol, degree, tf }) {
   );
 
   const waveMode =
-  ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
+    ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
 
   const isCorrective = waveMode === "CORRECTIVE";
   const isImpulse = waveMode === "IMPULSE";
@@ -757,6 +757,7 @@ async function buildEngine2Block({ symbol, degree, tf }) {
     isFinalCorrectionLeg,
     correctionDirection,
   };
+}
 
 /* -----------------------------
    Reaction / Volume
