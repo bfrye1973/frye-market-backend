@@ -276,12 +276,12 @@ function translateActiveIntermediateSwing({
   });
 }
 
-function translateActiveScalp({
+ function translateActiveScalp({
   symbol,
   strategyId,
   engine16,
 }) {
-  if (!engine16 || safeUpper(engine16?.strategyType, "NONE") === "NONE") {
+  if (!engine16) {
     return buildOutput({
       symbol,
       strategyId,
@@ -293,11 +293,67 @@ function translateActiveScalp({
       reasonCodes: ["NO_STRUCTURE"],
       source: {
         owner: "ENGINE16_ACTIVE",
-        rawReadiness: safeUpper(engine16?.readinessLabel, "NO_SETUP"),
+        rawReadiness: "NO_SETUP",
       },
     });
   }
 
+  const rawReadiness = safeUpper(engine16?.readinessLabel, "NO_SETUP");
+  const rawStrategyType = safeUpper(engine16?.strategyType, "NONE");
+  const rawDirection = safeUpper(engine16?.direction, "NONE");
+
+  // Phase A fix:
+  // If Scalp engine is alive and explicitly says WATCH,
+  // do not collapse that into NO_SETUP just because strategyType is NONE.
+  if (rawReadiness === "WATCH") {
+    return buildOutput({
+      symbol,
+      strategyId,
+      readiness: "WATCH",
+      strategyType: rawStrategyType,
+      direction: rawDirection,
+      active: true,
+      freshEntryNow: false,
+      reasonCodes: ["ENGINE16_ACTIVE", "SCALP_C_LEG_WATCH"],
+      source: {
+        owner: "ENGINE16_ACTIVE",
+        rawReadiness,
+      },
+    });
+  }
+
+  if (rawStrategyType === "NONE") {
+    return buildOutput({
+      symbol,
+      strategyId,
+      readiness: "NO_SETUP",
+      strategyType: "NONE",
+      direction: "NONE",
+      active: false,
+      freshEntryNow: false,
+      reasonCodes: ["NO_STRUCTURE"],
+      source: {
+        owner: "ENGINE16_ACTIVE",
+        rawReadiness,
+      },
+    });
+  }
+
+  return buildOutput({
+    symbol,
+    strategyId,
+    readiness: engine16.readinessLabel || "WATCH",
+    strategyType: engine16.strategyType,
+    direction: engine16.direction || "NONE",
+    active: true,
+    freshEntryNow: true,
+    reasonCodes: ["ENGINE16_ACTIVE"],
+    source: {
+      owner: "ENGINE16_ACTIVE",
+      rawReadiness,
+    },
+  });
+}
   return buildOutput({
     symbol,
     strategyId,
