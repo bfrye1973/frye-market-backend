@@ -1319,41 +1319,42 @@ async function buildSnapshot() {
 
   for (const s of STRATEGIES) {
     let engine16ForStrategy = null;
+  try {
+  let engine2Context = {
+    primary: engine2State?.primary ?? null,
+    intermediate: engine2State?.intermediate ?? null,
+    minor: engine2State?.minor ?? null,
+  };
 
-    let engine2Context = {
-      primary: engine2State?.primary ?? null,
-      intermediate: engine2State?.intermediate ?? null,
-      minor: engine2State?.minor ?? null,
-    }; 
+  if (isEngine16EnabledForStrategy(s.strategyId)) {
+    engine16ForStrategy = await buildEngine16Direct(
+      symbol,
+      s.tf,
+      marketRegime,
+      engine2Context
+    );
+    console.log(`Engine16 built directly for ${s.strategyId} @ ${s.tf}`);
+  } else {
+    engine16ForStrategy = skippedEngine16(
+      symbol,
+      s.tf,
+      marketRegime,
+      engine2Context
+    );
+    console.log(`Engine16 skipped for ${s.strategyId} @ ${s.tf}`);
+  }
 
-      if (isEngine16EnabledForStrategy(s.strategyId)) {
-        engine16ForStrategy = await buildEngine16Direct(
-          symbol,
-          s.tf,
-          marketRegime,
-          engine2Context
-        );
-        console.log(`Engine16 built directly for ${s.strategyId} @ ${s.tf}`);
-      } else {
-        engine16ForStrategy = skippedEngine16(
-          symbol,
-          s.tf,
-          marketRegime,
-          engine2Context
-        );
-        console.log(`Engine16 skipped for ${s.strategyId} @ ${s.tf}`);
-      }
+  const strategy = await processStrategy(
+    s,
+    momentum,
+    marketMind,
+    marketRegime,
+    engine16ForStrategy
+  );
 
-      const strategy = await processStrategy(
-        s,
-        momentum,
-        marketMind,
-        marketRegime,
-        engine16ForStrategy
-      );
-
-      result.strategies[s.strategyId] = strategy;
-    } catch (err) {
+  result.strategies[s.strategyId] = strategy;
+} catch (err) {
+  
       result.strategies[s.strategyId] = {
         strategyId: s.strategyId,
         tf: s.tf,
