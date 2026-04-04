@@ -769,13 +769,35 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
     phase = `IN_${lastKey}`;
   }
 
+    let confirmedPhase;
+
+  if (lastKey === "W5") {
+    confirmedPhase = "COMPLETE_W5";
+  } else {
+    confirmedPhase = `IN_${lastKey}`;
+  }
+
+  let phaseReason = "TIME_CONFIRMED_MARK";
+
+  if (lastKey === "B") {
+    const bPrice = Number(waveMarks?.B?.p);
+    const hasCurrentPrice = typeof currentPrice === "number" && Number.isFinite(currentPrice);
+
+    if (hasCurrentPrice && Number.isFinite(bPrice) && currentPrice > bPrice) {
+      phaseReason = "PRICE_ABOVE_B";
+    } else {
+      phaseReason = "B_CONFIRMED_WAITING_FOR_C";
+    }
+  }
+
   return {
     phase,
+    confirmedPhase,
+    phaseReason,
     lastMark: { key: lastKey, ...waveMarks[lastKey] },
     nextMark: nextKey ? { key: nextKey, ...waveMarks[nextKey] } : null,
     marksPresent,
   };
-}
 
 async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
   const [w1, w4, lastBarTimeSec] = await Promise.all([
