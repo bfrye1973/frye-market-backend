@@ -1000,6 +1000,7 @@ function deriveNextSetupType({
    Trigger readiness
 ------------------------------*/
 export function evaluateTriggerReadiness({
+  strategyId,
   winner,
   engine16,
   engine3,
@@ -1582,15 +1583,16 @@ export function buildFinalDecision({
   });
 
   const triggerBase = evaluateTriggerReadiness({
-    winner: resolvedWinner,
-    engine16,
-    engine3,
-    engine4,
-    momentum,
-    qualityGate: quality,
-    momentumGate: mom,
-    hardBlockers: hard,
-  });
+  strategyId,
+  winner: resolvedWinner,
+  engine16,
+  engine3,
+  engine4,
+  momentum,
+  qualityGate: quality,
+  momentumGate: mom,
+  hardBlockers: hard,
+});
 
   const lifecycle = buildLifecycle({
     strategyId,
