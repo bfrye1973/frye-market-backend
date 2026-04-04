@@ -711,7 +711,7 @@ function isRealMark(m) {
   return true;
 }
 
-function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec) {
+function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
   const order = ["W1", "W2", "W3", "W4", "W5", "A", "B", "C"];
   const marksPresent = [];
 
@@ -785,9 +785,10 @@ async function buildEngine2Block({ symbol, degree, tf }) {
     null;
 
   const { phase, lastMark, nextMark, marksPresent } = computeWavePhaseFromMarks(
-    waveMarks,
-    lastBarTimeSec
-  );
+  waveMarks,
+  lastBarTimeSec,
+  currentPrice
+);
 
   const waveMode =
     ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
