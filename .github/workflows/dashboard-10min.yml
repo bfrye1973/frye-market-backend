@@ -2,15 +2,16 @@ name: dashboard-10min (github-runner, debug-publish)
 
 on:
   workflow_dispatch: {}
-
   schedule:
-    # Start 15 min before market open
-    # 5:45 AM Phoenix = 12:45 UTC
-    - cron: "45 12 * * 1-5"
+  # Start at 5:30 AM Phoenix
+  # 5:30 AM Phoenix = 12:30 UTC
+  - cron: "30 12 * * 1-5"
 
-    # Then every 10 minutes during market hours
-    # 6:00 AM–1:50 PM Phoenix = 13:00–20:50 UTC
-    - cron: "0,10,20,30,40,50 13-20 * * 1-5"
+  # Then every 10 minutes from 5:40 AM to 1:50 PM Phoenix
+  # 5:40 AM–1:50 PM Phoenix = 12:40–20:50 UTC
+  - cron: "40,50 12 * * 1-5"
+  - cron: "0,10,20,30,40,50 13-20 * * 1-5" 
+ 
 
 jobs:
   tenmin:
