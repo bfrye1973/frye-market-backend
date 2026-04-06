@@ -963,7 +963,27 @@ export async function computeMorningFib({
       atrMultiple: 1.2,
     },
   };
-
+   // ==========================================
+  // FINAL_CORRECTION neutral decision-zone prep
+  // ==========================================
+  if (
+    waveContext.waveState === "FINAL_CORRECTION" &&
+    waveContext.wavePrep === true &&
+    macroRoadblock.active
+  ) {
+    noImpulseBase.context = "DECISION_ZONE";
+    noImpulseBase.state = "AWAIT_TRIGGER";
+    noImpulseBase.readinessLabel = "WATCH";
+    noImpulseBase.strategyType = "NONE";
+    noImpulseBase.waveReasonCodes = [
+      "FINAL_CORRECTION_DECISION_ZONE",
+      "WAITING_FOR_TRIGGER_RESOLUTION",
+      "NEUTRAL_BIAS_IN_DECISION_ZONE",
+    ];
+    noImpulseBase.waveShortPrep = false;
+    noImpulseBase.waveLongPrep = false;
+    noImpulseBase.waveCountertrendCaution = false;
+  } 
   if (!morningBars.length || !regularBars.length) {
     return noImpulseBase;
   }
