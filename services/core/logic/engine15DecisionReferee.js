@@ -1571,6 +1571,10 @@ export function buildFinalDecision({
   zoneContext,
   engine16,
 });
+ if (safeUpper(resolvedWinner?.strategyType, "NONE") === "NONE" && safeUpper(e16?.readinessLabel, "NO_SETUP") === "WATCH") {
+     hard.hardBlocked = false;
+     hard.blockers = (hard.blockers || []).filter((b) => b !== "NO_VALID_STRATEGY" && b !== "NO_DIRECTION");
+  }
   
   const quality = evaluateQualityGate({
     engine5,
