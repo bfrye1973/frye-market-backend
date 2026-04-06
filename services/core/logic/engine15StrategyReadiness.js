@@ -302,22 +302,26 @@ function translateActiveScalp({
   const rawStrategyType = safeUpper(engine16?.strategyType, "NONE");
   const rawDirection = safeUpper(engine16?.direction, "NONE");
 
-  if (rawReadiness === "WATCH") {
-    return buildOutput({
-      symbol,
-      strategyId,
-      readiness: "WATCH",
-      strategyType: rawStrategyType,
-      direction: rawDirection,
-      active: true,
-      freshEntryNow: false,
-      reasonCodes: ["ENGINE16_ACTIVE", "SCALP_C_LEG_WATCH"],
-      source: {
-        owner: "ENGINE16_ACTIVE",
-        rawReadiness,
-      },
-    });
-  }
+  if (
+  rawReadiness === "WATCH" ||
+  rawReadiness === "WATCH_FOR_SHORT" ||
+  rawReadiness === "WATCH_FOR_LONG"
+) {
+  return buildOutput({
+    symbol,
+    strategyId,
+    readiness: rawReadiness,
+    strategyType: rawStrategyType,
+    direction: rawDirection,
+    active: true,
+    freshEntryNow: false,
+    reasonCodes: ["ENGINE16_ACTIVE", "SCALP_PREP_WATCH"],
+    source: {
+      owner: "ENGINE16_ACTIVE",
+      rawReadiness,
+    },
+  });
+}
 
   if (rawStrategyType === "NONE") {
     return buildOutput({
