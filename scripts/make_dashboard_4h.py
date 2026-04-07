@@ -2,12 +2,15 @@
 # -*- coding: utf-8 -*-
 """
 Ferrari Dashboard — make_dashboard_4h.py
-R13.8 — RESPONSIVE 4H BRIDGE FIX
-- SPY bars sourced from Backend-2 /stream/agg-snapshot (tf=10m) and aggregated into 4H candles
-- If Backend-2 is unavailable, falls back to Polygon 4H
-- Keeps output schema unchanged
-- Keeps 4H responsive, but prevents fake bullish inflation during recovery
-- 10 EMA remains directional, but 20/50/200 now control score ceilings
+R14.0 — NATIVE POLYGON 240M PRIMARY + RESPONSIVE 4H BRIDGE FIX
+
+LOCKED INTENT:
+- Primary 4H candle truth = native Polygon 240m bars
+- Backend-2 10m aggregation is fallback only
+- Keep output schema unchanged
+- Keep 4H responsive, but prevent fake bullish inflation during recovery
+- 10 EMA remains directional, but 20/50/200 control score ceilings
+- Do NOT solve 4H EMA200 by massively increasing live 10m fetch depth
 """
 
 from __future__ import annotations
@@ -36,10 +39,10 @@ POLY_10M_URL = (
     "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
 )
 
-# Backend-2 stream agg (same chart source)
+# Backend-2 stream agg (fallback only)
 B2_STREAM_AGG_BASE = "https://frye-market-backend-2.onrender.com/stream/agg-snapshot"
 B2_TF = os.environ.get("B2_TF_4H_SOURCE", "10m")
-B2_LIMIT = int(os.environ.get("B2_LIMIT_4H_SOURCE", "6000"))
+B2_LIMIT = int(os.environ.get("B2_LIMIT_4H_SOURCE", "1200"))
 
 OFFENSIVE = {"information technology", "consumer discretionary", "communication services", "industrials"}
 DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
@@ -70,8 +73,9 @@ W_RISKON = 0.05
 # ---- SHORT-MEMORY PSI WINDOW (LOCKED INTENT) ----
 PSI_WIN_4H = int(os.environ.get("PSI_WIN_4H", "16"))
 
-# modest fetch, not long
-FETCH_DAYS_4H = int(os.environ.get("FETCH_DAYS_4H", "300"))
+# Native 240m bars are efficient enough to support longer history
+FETCH_DAYS_4H = int(os.environ.get("FETCH_DAYS_4H", "365"))
+
 
 def now_utc_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -94,7 +98,7 @@ def pct(a: float, b: float) -> float:
 def fetch_json(url: str, timeout: int = 30) -> Any:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "make-dashboard/4h/1.8", "Cache-Control": "no-store"},
+        headers={"User-Agent": "make-dashboard/4h/2.0", "Cache-Control": "no-store"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -238,9 +242,10 @@ def _normalize_bar(b: Any) -> Optional[dict]:
     return None
 
 
-def fetch_backend2_10m(sym: str, tf: str = "10m", limit: int = 8000, lookback_days: int = 120) -> List[dict]:
+def fetch_backend2_10m(sym: str, tf: str = "10m", limit: int = 1200, lookback_days: int = 120) -> List[dict]:
     """
     Pull bars from Backend-2 stream agg, then filter by lookback_days.
+    Fallback only.
     """
     qs = urllib.parse.urlencode({"symbol": sym, "tf": tf, "limit": str(limit)})
     url = f"{B2_STREAM_AGG_BASE}?{qs}"
@@ -498,7 +503,7 @@ def compute_overall_weighted(
         above200=above200,
     )
 
-    # State gate (still responsive, but no longer 10-EMA-only)
+    # State gate
     state = "bull" if (ema_sign > 0 and score >= 60.0) else ("bear" if (ema_sign < 0 and score < 60.0) else "neutral")
 
     comps = {
@@ -559,20 +564,27 @@ def main():
                 ro_score += 1
     risk_on_4h = round(pct(ro_score, ro_den), 2) if ro_den > 0 else 50.0
 
-    # SPY bars source (MATCH CHART): Backend-2 tf=10m → build 4H
-    spy_10m = fetch_backend2_10m("SPY", tf=B2_TF, limit=B2_LIMIT, lookback_days=FETCH_DAYS_4H)
-    if not spy_10m:
-        print("[warn] backend-2 10m unavailable; falling back to polygon 10m/4h path", flush=True)
+    # PRIMARY SOURCE: native Polygon 240m bars
+    spy_4h = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H)
+    source_used = "polygon_240m"
 
-    spy_4h = build_4h_from_10m(spy_10m)
+    # FALLBACK 1: backend-2 10m aggregation
+    if len(spy_4h) < 25:
+        print("[warn] insufficient Polygon 240m bars; falling back to Backend-2 10m aggregation", flush=True)
+        spy_10m = fetch_backend2_10m("SPY", tf=B2_TF, limit=B2_LIMIT, lookback_days=FETCH_DAYS_4H)
+        spy_4h = build_4h_from_10m(spy_10m)
+        source_used = "backend2_10m"
+
+    # FALLBACK 2: Polygon 10m aggregation
+    if len(spy_4h) < 25:
+        print("[warn] insufficient Backend-2 10m bars; falling back to Polygon 10m aggregation", flush=True)
+        poly_10m = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
+        spy_4h = build_4h_from_10m(poly_10m)
+        source_used = "polygon_10m"
 
     if len(spy_4h) < 25:
-        print("[warn] insufficient SPY 4H bars from 10m; falling back to polygon 4H", flush=True)
-        spy_4h = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H)
-
-        if len(spy_4h) < 25:
-            print("[fatal] insufficient SPY 4H bars even after fallback", file=sys.stderr)
-            sys.exit(2)
+        print("[fatal] insufficient SPY 4H bars even after all fallbacks", file=sys.stderr)
+        sys.exit(2)
 
     O = [b["open"] for b in spy_4h]
     H = [b["high"] for b in spy_4h]
@@ -580,7 +592,7 @@ def main():
     C = [b["close"] for b in spy_4h]
     V = [b["volume"] for b in spy_4h]
 
-    # EMA stack (bridge must know recovery vs true structure)
+    # EMA stack
     e10 = ema_series(C, 10)[-1]
     e20 = ema_series(C, 20)[-1]
     e50 = ema_series(C, 50)[-1]
@@ -592,28 +604,24 @@ def main():
     above50 = price > e50
     above200 = (price > e200) if e200 is not None else False
 
-    # Distances (%), still anchored to EMA10 for directional responsiveness
+    # Distances (%), anchored to EMA10 for responsiveness
     close_dist_pct = 0.0 if e10 == 0 else 100.0 * (float(C[-1]) - e10) / e10
     body_mid = (float(O[-1]) + float(C[-1])) / 2.0
     body_mid_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_mid - e10) / e10
     body_top = max(float(O[-1]), float(C[-1]))
     body_top_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_top - e10) / e10
 
-    # Reclaim tolerance (kept configurable)
     RECLAIM_TOL_PCT = float(os.environ.get("EMA10_RECLAIM_TOL_PCT", "0.30"))
-
-    # Wick reclaim detection
     wick_reclaimed = float(H[-1]) > float(e10)
 
     # Primary behavior: BODY-MID distance
     ema_dist_pct = body_mid_dist_pct
 
-    # Softer defended reclaim:
-    # still avoids a bearish crash, but does not force bullish posture
+    # Softer defended reclaim
     if wick_reclaimed and close_dist_pct >= -RECLAIM_TOL_PCT:
         ema_dist_pct = max(body_mid_dist_pct, -0.10)
 
-    # EMA sign: still responsive, but not 10-EMA-only
+    # EMA sign: not 10-EMA-only
     if above10 and above20:
         ema_sign = 1
     elif (not above10) and (not above20):
@@ -740,6 +748,8 @@ def main():
 
         "psi_window_4h_bars": int(PSI_WIN_4H),
         "fetch_days_4h": int(FETCH_DAYS_4H),
+        "source_used_4h": source_used,
+        "completed_4h_bars": int(len(spy_4h)),
     }
 
     fourHour = {
@@ -758,7 +768,7 @@ def main():
     }
 
     out = {
-        "version": "r4h-v8-responsive-bridge-softcaps",
+        "version": "r4h-v9-native240-primary-responsive-softcaps",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
@@ -772,7 +782,8 @@ def main():
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
     print(
-        f"[4h] score={score:.2f} state={state} emaPost={ema10_posture:.2f} mom={momentum_combo_4h:.2f} "
+        f"[4h] score={score:.2f} state={state} source={source_used} bars={len(spy_4h)} "
+        f"emaPost={ema10_posture:.2f} mom={momentum_combo_4h:.2f} "
         f"breadth={breadth_4h:.2f} psi={squeeze_psi_4h:.2f} exp={squeeze_exp_4h:.2f} "
         f"liq={liquidity_4h:.2f} volScaled={vol_scaled:.2f} riskOn={risk_on_4h:.2f} "
         f"smiBonus={smi_bonus:+d} psiWin={PSI_WIN_4H} reclaimTol={RECLAIM_TOL_PCT} "
