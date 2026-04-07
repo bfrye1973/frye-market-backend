@@ -1499,58 +1499,6 @@ export function buildEngine16SignalTimes({
 import { getBarsFromPolygon } from "../../../api/providers/polygonBars.js";
 import { computeVolumeBehavior } from "./volumeBehaviorEngine.js";
 
-import {
-  DEFAULT_SYMBOL,
-  DEFAULT_TF,
-  FETCH_DAYS,
-  SUPPORTED_TF,
-  MARKET_TZ,
-  DISPLAY_TZ,
-  round2,
-  atrAtIndex,
-  normalizeBarsForEngine16,
-  isClosedBar,
-  getLatestSessionDateKey,
-  filterBarsForDate,
-  inPremarket,
-  inMorningImpulseWindow,
-  inRegularSession,
-  findExtremeBarByPrice,
-  fibLong,
-  fibShort,
-  buildZonesFromFib,
-  insideZoneByClose,
-  barTouchesNumericZone,
-  bullishWickRejection,
-  bearishWickRejection,
-  classifyState,
-  chooseRelevantNegotiatedZone,
-  readNegotiatedZonesFromDisk,
-  buildSyntheticLaunchZone,
-  deriveVolumeRegime,
-  derivePressureBias,
-  buildFlowSummary,
-  buildAnchorTimes,
-  buildAnchorLabels,
-  normalizeRegime,
-  normalizeEngine2Context,
-  buildWaveContext,
-  resolveLocalMacroContext,
-  buildMacroRoadblock,
-  buildNoImpulseBase,
-} from "./engine16MorningFib.core.js";
-
-import {
-  computeFailureAndReversalState,
-  resolveFinalContext,
-  buildExhaustionState,
-  buildContinuationState,
-  buildStrategyClassification,
-  applyWaveContextAdjustments,
-  applyMacroContinuationDowngrade,
-  buildEngine16SignalTimes,
-} from "./engine16MorningFib.detectors.js";
-
 export async function computeMorningFib({
   symbol = DEFAULT_SYMBOL,
   tf = DEFAULT_TF,
