@@ -1627,6 +1627,11 @@ export async function computeMorningFib({
 
     strategyType,
     readinessLabel,
+    triggerConfirmed,
+    triggerType,
+    triggerDirection,
+    triggerLevel,
+    triggerTime,
     failedBreakout,
     failedBreakdown,
     reversalDetected,
