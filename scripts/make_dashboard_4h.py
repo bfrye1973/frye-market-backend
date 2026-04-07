@@ -71,8 +71,7 @@ W_RISKON = 0.05
 PSI_WIN_4H = int(os.environ.get("PSI_WIN_4H", "16"))
 
 # modest fetch, not long
-FETCH_DAYS_4H = int(os.environ.get("FETCH_DAYS_4H", "120"))
-
+FETCH_DAYS_4H = int(os.environ.get("FETCH_DAYS_4H", "300"))
 
 def now_utc_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -585,13 +584,13 @@ def main():
     e10 = ema_series(C, 10)[-1]
     e20 = ema_series(C, 20)[-1]
     e50 = ema_series(C, 50)[-1]
-    e200 = ema_series(C, 200)[-1] if len(C) >= 200 else ema_series(C, min(200, len(C)))[-1]
+    e200 = ema_series(C, 200)[-1] if len(C) >= 200 else None
 
     price = float(C[-1])
     above10 = price > e10
     above20 = price > e20
     above50 = price > e50
-    above200 = price > e200
+    above200 = (price > e200) if e200 is not None else False
 
     # Distances (%), still anchored to EMA10 for directional responsiveness
     close_dist_pct = 0.0 if e10 == 0 else 100.0 * (float(C[-1]) - e10) / e10
@@ -713,11 +712,11 @@ def main():
         "ema10_4h": round(float(e10), 4),
         "ema20_4h": round(float(e20), 4),
         "ema50_4h": round(float(e50), 4),
-        "ema200_4h": round(float(e200), 4),
+        "ema200_4h": round(float(e200), 4) if e200 is not None else None,
         "price_above_ema10_4h": bool(above10),
         "price_above_ema20_4h": bool(above20),
         "price_above_ema50_4h": bool(above50),
-        "price_above_ema200_4h": bool(above200),
+        "price_above_ema200_4h": bool(above200) if e200 is not None else None,
 
         "smi_4h": round(float(smi_val), 4),
         "smi_signal_4h": round(float(sig_val), 4),
