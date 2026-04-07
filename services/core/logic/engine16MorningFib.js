@@ -1163,7 +1163,6 @@ export async function computeMorningFib({
   let failedBreakout = false;
   let failedBreakdown = false;
   let reversalDetected = false;
-
   let exhaustionDetected = false;
   let exhaustionShort = false;
   let exhaustionLong = false;
@@ -1178,6 +1177,7 @@ export async function computeMorningFib({
   let exhaustionTrigger = false;
   let exhaustionTriggerShort = false;
   let exhaustionTriggerLong = false;
+
   let triggerConfirmed = false;
   let triggerType = null;
   let triggerDirection = null;
@@ -1203,6 +1203,7 @@ export async function computeMorningFib({
     exhaustionEarly = true;
     exhaustionEarlyShort = true;
   }
+
   if (ex.longEarlyIdx != null) {
     exhaustionEarly = true;
     exhaustionEarlyLong = true;
@@ -1214,18 +1215,10 @@ export async function computeMorningFib({
     exhaustionDetected = true;
     exhaustionShort = true;
     exhaustionLong = false;
-    
 
     const bar = closedBars[ex.shortTriggerIdx];
-    exhaustionBarTime = formatDisplayTimeFromMs(bar?.t);    
+    exhaustionBarTime = formatDisplayTimeFromMs(bar?.t);
     exhaustionBarPrice = round2(bar?.h);
-    // ✅ ADD THIS RIGHT HERE
-    triggerConfirmed = true;
-    triggerType = "EXHAUSTION";
-    triggerDirection = "SHORT";
-    triggerLevel = round2(bestCandidate.sessionLow);
-    triggerTime = exhaustionBarTime;
-    
   } else if (ex.longTriggerIdx != null) {
     exhaustionTrigger = true;
     exhaustionTriggerLong = true;
@@ -1236,18 +1229,13 @@ export async function computeMorningFib({
     const bar = closedBars[ex.longTriggerIdx];
     exhaustionBarTime = formatDisplayTimeFromMs(bar?.t);
     exhaustionBarPrice = round2(bar?.l);
-    // ✅ ADD THIS RIGHT HERE
-    triggerConfirmed = true;
-    triggerType = "EXHAUSTION";
-    triggerDirection = "LONG";
-    triggerLevel = round2(bestCandidate.sessionHigh);
-    triggerTime = exhaustionBarTime;
   }
 
   if (exhaustionTriggerShort) {
- 
     const idx = ex.shortTriggerIdx;
-    const barsSince = idx != null ? (latestIndex - idx) : EXHAUSTION_MIN_ACTIVE_BARS + 1;
+    const barsSince =
+      idx != null ? latestIndex - idx : EXHAUSTION_MIN_ACTIVE_BARS + 1;
+
     const invalid =
       barsSince > EXHAUSTION_MIN_ACTIVE_BARS &&
       Number.isFinite(latestClose) &&
@@ -1255,12 +1243,13 @@ export async function computeMorningFib({
       latestClose > exhaustionBarPrice;
 
     exhaustionActive = !invalid;
-  }  
-    
+  }
 
   if (exhaustionTriggerLong) {
     const idx = ex.longTriggerIdx;
-    const barsSince = idx != null ? (latestIndex - idx) : EXHAUSTION_MIN_ACTIVE_BARS + 1;
+    const barsSince =
+      idx != null ? latestIndex - idx : EXHAUSTION_MIN_ACTIVE_BARS + 1;
+
     const invalid =
       barsSince > EXHAUSTION_MIN_ACTIVE_BARS &&
       Number.isFinite(latestClose) &&
@@ -1268,7 +1257,29 @@ export async function computeMorningFib({
       latestClose < exhaustionBarPrice;
 
     exhaustionActive = !invalid;
-   }
+  }
+
+  // normalize trigger metadata from final confirmed trigger booleans
+  triggerConfirmed = false;
+  triggerType = null;
+  triggerDirection = null;
+  triggerLevel = null;
+  triggerTime = null;
+
+  if (exhaustionTriggerShort) {
+    triggerConfirmed = true;
+    triggerType = "EXHAUSTION";
+    triggerDirection = "SHORT";
+    triggerLevel = round2(bestCandidate.sessionLow);
+    triggerTime = exhaustionBarTime;
+  } else if (exhaustionTriggerLong) {
+    triggerConfirmed = true;
+    triggerType = "EXHAUSTION";
+    triggerDirection = "LONG";
+    triggerLevel = round2(bestCandidate.sessionHigh);
+    triggerTime = exhaustionBarTime;
+  }
+  
 
   if (
     bestCandidate.context === "LONG_CONTEXT" &&
