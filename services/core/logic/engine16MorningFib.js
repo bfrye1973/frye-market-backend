@@ -990,13 +990,6 @@ export function buildWaveContext(engine2Ctx) {
     intermediateReadyForWave3,
   };
 }
-import {
-  EXHAUSTION_LOOKBACK_BARS,
-  EXHAUSTION_MIN_ACTIVE_BARS,
-  round2,
-  formatDisplayTimeFromMs,
-} from "./engine16MorningFib.core.js";
-
 import { detectContinuation } from "./engine16/continuation.js";
 import { confirmExhaustionPhases } from "./engine16/exhaustion.js";
 import { classifyEngine16Strategy } from "./engine16/strategy.js";
