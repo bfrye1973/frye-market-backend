@@ -1178,6 +1178,11 @@ export async function computeMorningFib({
   let exhaustionTrigger = false;
   let exhaustionTriggerShort = false;
   let exhaustionTriggerLong = false;
+  let triggerConfirmed = false;
+  let triggerType = null;
+  let triggerDirection = null;
+  let triggerLevel = null;
+  let triggerTime = null;
 
   let debugExhaustion = emptyStrategyFields().debugExhaustion;
 
@@ -1209,10 +1214,18 @@ export async function computeMorningFib({
     exhaustionDetected = true;
     exhaustionShort = true;
     exhaustionLong = false;
+    
 
     const bar = closedBars[ex.shortTriggerIdx];
-    exhaustionBarTime = formatDisplayTimeFromMs(bar?.t);
+    exhaustionBarTime = formatDisplayTimeFromMs(bar?.t);    
     exhaustionBarPrice = round2(bar?.h);
+    // ✅ ADD THIS RIGHT HERE
+    triggerConfirmed = true;
+    triggerType = "EXHAUSTION";
+    triggerDirection = "SHORT";
+    triggerLevel = round2(bestCandidate.sessionLow);
+    triggerTime = exhaustionBarTime;
+    
   } else if (ex.longTriggerIdx != null) {
     exhaustionTrigger = true;
     exhaustionTriggerLong = true;
@@ -1223,7 +1236,13 @@ export async function computeMorningFib({
     const bar = closedBars[ex.longTriggerIdx];
     exhaustionBarTime = formatDisplayTimeFromMs(bar?.t);
     exhaustionBarPrice = round2(bar?.l);
-  }
+    // ✅ ADD THIS RIGHT HERE
+    triggerConfirmed = true;
+    triggerType = "EXHAUSTION";
+    triggerDirection = "LONG";
+    triggerLevel = round2(bestCandidate.sessionHigh);
+    triggerTime = exhaustionBarTime;
+  
 
   if (exhaustionTriggerShort) {
     const idx = ex.shortTriggerIdx;
