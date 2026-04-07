@@ -1255,15 +1255,8 @@ export async function computeMorningFib({
       latestClose > exhaustionBarPrice;
 
     exhaustionActive = !invalid;
-    if (!exhaustionActive) {
-      exhaustionDetected = false;
-      exhaustionShort = false;
-      exhaustionTrigger = false;
-      exhaustionTriggerShort = false;
-      exhaustionBarTime = null;
-      exhaustionBarPrice = null;
-    }
-  }
+  }  
+    
 
   if (exhaustionTriggerLong) {
     const idx = ex.longTriggerIdx;
@@ -1275,15 +1268,7 @@ export async function computeMorningFib({
       latestClose < exhaustionBarPrice;
 
     exhaustionActive = !invalid;
-    if (!exhaustionActive) {
-      exhaustionDetected = false;
-      exhaustionLong = false;
-      exhaustionTrigger = false;
-      exhaustionTriggerLong = false;
-      exhaustionBarTime = null;
-      exhaustionBarPrice = null;
-    }
-  }
+   }
 
   if (
     bestCandidate.context === "LONG_CONTEXT" &&
