@@ -39,7 +39,7 @@ POLY_10M_URL = (
 # Backend-2 stream agg (same chart source)
 B2_STREAM_AGG_BASE = "https://frye-market-backend-2.onrender.com/stream/agg-snapshot"
 B2_TF = os.environ.get("B2_TF_4H_SOURCE", "10m")
-B2_LIMIT = int(os.environ.get("B2_LIMIT_4H_SOURCE", "1200"))
+B2_LIMIT = int(os.environ.get("B2_LIMIT_4H_SOURCE", "6000"))
 
 OFFENSIVE = {"information technology", "consumer discretionary", "communication services", "industrials"}
 DEFENSIVE = {"consumer staples", "utilities", "health care", "real estate"}
