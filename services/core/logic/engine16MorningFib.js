@@ -1242,9 +1242,10 @@ export async function computeMorningFib({
     triggerDirection = "LONG";
     triggerLevel = round2(bestCandidate.sessionHigh);
     triggerTime = exhaustionBarTime;
-  
+  }
 
   if (exhaustionTriggerShort) {
+ 
     const idx = ex.shortTriggerIdx;
     const barsSince = idx != null ? (latestIndex - idx) : EXHAUSTION_MIN_ACTIVE_BARS + 1;
     const invalid =
