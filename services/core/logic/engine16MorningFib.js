@@ -1565,7 +1565,7 @@ if (!latestIsRegularSession) {
 }
 // 🔥 AFTER-HOURS PATCH END
 
-1539   return {
+return {
     ok: true,
     symbol,
     date: dateKey,
