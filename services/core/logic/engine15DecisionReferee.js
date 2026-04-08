@@ -1449,21 +1449,52 @@ function buildLifecycle({
     e16.readinessLabel === "NO_SETUP" ||
     e16.invalidated === true;
 
-  const oppositeExhaustion =
-    (direction === "SHORT" && (e16.exhaustionLong === true || e16.exhaustionTriggerLong === true)) ||
-    (direction === "LONG" && (e16.exhaustionShort === true || e16.exhaustionTriggerShort === true));
+  const oppositeSignalReset =
+    (direction === "SHORT" && (
+      e16.exhaustionLong === true ||
+      e16.exhaustionTriggerLong === true ||
+      e16.breakoutReady === true ||
+      e16.wickRejectionLong === true
+    )) ||
+    (direction === "LONG" && (
+      e16.exhaustionShort === true ||
+      e16.exhaustionTriggerShort === true ||
+      e16.breakdownReady === true ||
+      e16.wickRejectionShort === true
+    ));  
 
-  if (lifecycleStage === "MATURE" && (noSetupNow || oppositeExhaustion)) {
-    runnerActive = false;
-    runnerExitTriggered = true;
-    runnerExitReason = "RUNNER_EXIT_SETUP_CONTEXT_CHANGED";
-    lifecycleStage = "COMPLETED";
-    edgeRemainingPct = 0;
-    setupCompleted = true;
-    freshEntryNow = false;
-    nextFocus = "LOOK_FOR_NEXT_SETUP";
+  if (oppositeSignalReset) {
+    return {
+      lifecycleStage: "BUILDING",
+      isFreshSetup: true,
+      entryWindowOpen: false,
+      freshEntryNow: false,
+      signalPrice: null,
+      currentPrice,
+      barsSinceSignal: null,
+      moveFromSignalPts: null,
+      moveFromSignalAtr: null,
+      zonesInPath: [],
+      zonesHit: 0,
+      targetCount: 0,
+      targetProgress01: 0,
+      firstTargetHit: false,
+      secondTargetHit: false,
+      tp1Zone: null,
+      tp2Zone: null,
+      tp1Reclaimed: false,
+      block2Protected: false,
+      block2ExitReason: "OPPOSITE_SIGNAL_RESET",
+      runnerActive: false,
+      runnerExitTriggered: true,
+      runnerExitReason: "OPPOSITE_SIGNAL_RESET",
+      ema10_30m: null,
+      setupCompleted: false,
+      edgeRemainingPct: 100,
+      nextFocus: "WAIT_FOR_TRIGGER",
+    };
   }
-
+ 
   if (
     lifecycleStage === "MATURE" &&
     firstTargetHit &&
