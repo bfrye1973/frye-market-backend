@@ -1686,30 +1686,38 @@ export function buildFinalDecision({
   let action = "NO_ACTION";
 
   if (isEarlyExhaustionOnly(e16)) {
+  action = "WATCH";
+} else if (lifecycle?.lifecycleStage === "COMPLETED") {
+  action = "NO_ACTION";
+} else if (trigger.readinessLabel === "STAND_DOWN") {
+  if (
+    e16.readinessLabel === "PULLBACK_READY" ||
+    e16.readinessLabel === "WATCH" ||
+    e16.readinessLabel === "NEAR"
+  ) {
     action = "WATCH";
-  } else if (lifecycle?.lifecycleStage === "COMPLETED") {
-    action = "NO_ACTION";
-  } else if (trigger.readinessLabel === "STAND_DOWN") {
+  } else {
     action = "BLOCKED";
-  } else if (trigger.readinessLabel === "WAIT") {
-    action = "NO_ACTION";
-  } else if (trigger.readinessLabel === "WATCH" || trigger.readinessLabel === "NEAR" || trigger.readinessLabel === "ARMING" || trigger.readinessLabel === "PREP") {
-    action = "WATCH";
-  } else if (trigger.readinessLabel === "READY") {
-    action =
-      p.permission === "REDUCE"
-        ? "REDUCE_OK"
-        : p.permission === "ALLOW"
-        ? "ENTER_OK"
-        : "BLOCKED";
-  } else if (trigger.readinessLabel === "CONFIRMED" || trigger.readinessLabel === "TRIGGERED") {
-    action =
-      p.permission === "ALLOW"
-        ? "ENTER_OK"
-        : p.permission === "REDUCE"
-        ? "REDUCE_OK"
-        : "BLOCKED";
   }
+} else if (trigger.readinessLabel === "WAIT") {
+  action = "NO_ACTION";
+} else if (trigger.readinessLabel === "WATCH" || trigger.readinessLabel === "NEAR" || trigger.readinessLabel === "ARMING" || trigger.readinessLabel === "PREP") {
+  action = "WATCH";
+} else if (trigger.readinessLabel === "READY") {
+  action =
+    p.permission === "REDUCE"
+      ? "REDUCE_OK"
+      : p.permission === "ALLOW"
+      ? "ENTER_OK"
+      : "BLOCKED";
+} else if (trigger.readinessLabel === "CONFIRMED" || trigger.readinessLabel === "TRIGGERED") {
+  action =
+    p.permission === "ALLOW"
+      ? "ENTER_OK"
+      : p.permission === "REDUCE"
+      ? "REDUCE_OK"
+      : "BLOCKED";
+}
 
   if (!VALID_ACTIONS.has(action)) action = "NO_ACTION";
 
