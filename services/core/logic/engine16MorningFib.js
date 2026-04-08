@@ -85,6 +85,16 @@ function toNum(x, fb = null) {
   return Number.isFinite(n) ? n : fb;
 }
 
+function calculateEMA(values, length) {
+  if (!Array.isArray(values) || values.length < length) return null;
+  const k = 2 / (length + 1);
+  let ema = values[0];
+  for (let i = 1; i < values.length; i++) {
+    ema = values[i] * k + ema * (1 - k);
+  }
+  return round2(ema);
+}  
+  
 function normalizeBarsForEngine16(bars) {
   return Array.isArray(bars)
     ? bars
@@ -823,6 +833,21 @@ export async function computeMorningFib({
 
   const latestClosedBar = closedBars[closedBars.length - 1];
   const latestClose = latestClosedBar?.c;
+  const closes = closedBars.map((bar) => bar.c);
+  const ema10 = calculateEMA(closes, 10);
+  const ema20 = calculateEMA(closes, 20);
+  return {
+  ok: true,
+  symbol,
+  date: dateKey,
+  timeframe,
+  context: finalContext,
+  marketRegime: regimeInfo,
+  ema10,    // Add this line
+  ema20,    // Add this line
+};
+  
+  
 
   const localMacroContext =
     macroLevelContext && typeof macroLevelContext === "object"
