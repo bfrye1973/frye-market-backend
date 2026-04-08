@@ -1733,7 +1733,7 @@ export function buildFinalDecision({
         ? "ENTER_OK"
         : "BLOCKED";
   }
-}
+
 } else if (trigger.readinessLabel === "CONFIRMED" || trigger.readinessLabel === "TRIGGERED") {
   action =
     p.permission === "ALLOW"
