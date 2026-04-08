@@ -1704,12 +1704,36 @@ export function buildFinalDecision({
 } else if (trigger.readinessLabel === "WATCH" || trigger.readinessLabel === "NEAR" || trigger.readinessLabel === "ARMING" || trigger.readinessLabel === "PREP") {
   action = "WATCH";
 } else if (trigger.readinessLabel === "READY") {
-  action =
-    p.permission === "REDUCE"
-      ? "REDUCE_OK"
-      : p.permission === "ALLOW"
-      ? "ENTER_OK"
-      : "BLOCKED";
+
+  const ema10 = e16.ema10 ?? null;
+  const ema20 = e16.ema20 ?? null;
+  const price = lifecycle?.currentPrice ?? null;
+
+  let emaFilterPass = false;
+
+  if (direction === "SHORT") {
+    emaFilterPass =
+      (price !== null && ema10 !== null && price < ema10) ||
+      (ema10 !== null && ema20 !== null && ema10 < ema20);
+  }
+
+  if (direction === "LONG") {
+    emaFilterPass =
+      (price !== null && ema10 !== null && price > ema10) ||
+      (ema10 !== null && ema20 !== null && ema10 > ema20);
+  }
+
+  if (!emaFilterPass) {
+    action = "WATCH";
+  } else {
+    action =
+      p.permission === "REDUCE"
+        ? "REDUCE_OK"
+        : p.permission === "ALLOW"
+        ? "ENTER_OK"
+        : "BLOCKED";
+  }
+}
 } else if (trigger.readinessLabel === "CONFIRMED" || trigger.readinessLabel === "TRIGGERED") {
   action =
     p.permission === "ALLOW"
