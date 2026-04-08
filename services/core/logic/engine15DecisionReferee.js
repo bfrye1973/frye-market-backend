@@ -1322,6 +1322,46 @@ function buildLifecycle({
     toNum(zc?.active?.institutional?.mid) ??
     toNum(zc?.active?.shelf?.mid) ??
     null;
+    const hasRealTrigger =
+    e16.exhaustionTrigger === true ||
+    e16.exhaustionTriggerShort === true ||
+    e16.exhaustionTriggerLong === true ||
+    e16.breakoutReady === true ||
+    e16.breakdownReady === true;
+
+  if (!hasRealTrigger) {
+    const currentPrice = extractCurrentPrice(zoneContext);
+
+    return {
+      lifecycleStage: "BUILDING",
+      isFreshSetup: true,
+      entryWindowOpen: false,
+      freshEntryNow: false,
+      signalPrice: null,
+      currentPrice,
+      barsSinceSignal: null,
+      moveFromSignalPts: null,
+      moveFromSignalAtr: null,
+      zonesInPath: [],
+      zonesHit: 0,
+      targetCount: 0,
+      targetProgress01: 0,
+      firstTargetHit: false,
+      secondTargetHit: false,
+      tp1Zone: null,
+      tp2Zone: null,
+      tp1Reclaimed: false,
+      block2Protected: false,
+      block2ExitReason: null,
+      runnerActive: false,
+      runnerExitTriggered: false,
+      runnerExitReason: null,
+      ema10_30m: null,
+      setupCompleted: false,
+      edgeRemainingPct: 100,
+      nextFocus: "WAIT_FOR_TRIGGER",
+    };
+  }
 
   const currentPrice = extractCurrentPrice(zoneContext);
   const direction = winner?.direction || "NONE";
