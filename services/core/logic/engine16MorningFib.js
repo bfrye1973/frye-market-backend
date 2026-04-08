@@ -1535,8 +1535,37 @@ export async function computeMorningFib({
         : null,
     exhaustionTriggerTime: exhaustionTrigger ? exhaustionBarTime : null,
   };
+ 1537   };
 
-  return {
+  // 🔥 AFTER-HOURS PATCH START
+const latestNyParts = getNyPartsFromMs(latestClosedBar?.t);
+const latestIsRegularSession =
+  latestNyParts.minuteOfDay >= 570 && latestNyParts.minuteOfDay < 960;
+
+if (!latestIsRegularSession) {
+  const brokeRegularHigh =
+    Number.isFinite(latestClose) &&
+    Number.isFinite(bestCandidate?.sessionHigh) &&
+    latestClose > bestCandidate.sessionHigh;
+
+  const brokeRegularLow =
+    Number.isFinite(latestClose) &&
+    Number.isFinite(bestCandidate?.sessionLow) &&
+    latestClose < bestCandidate.sessionLow;
+
+  if (brokeRegularHigh) {
+    readinessLabel = "WATCH_FOR_LONG";
+    stateInfo.state = "ABOVE_PULLBACK";
+  }
+
+  if (brokeRegularLow) {
+    readinessLabel = "WATCH_FOR_SHORT";
+    stateInfo.state = "ABOVE_PULLBACK";
+  }
+}
+// 🔥 AFTER-HOURS PATCH END
+
+1539   return {
     ok: true,
     symbol,
     date: dateKey,
