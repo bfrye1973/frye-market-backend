@@ -829,6 +829,22 @@ function detectCInternalStructure(waveMarks, phase, currentPrice) {
   return "FORMING";
 }
 
+// 👇 ADD HERE (LINE ~831)
+function detectCExtensionZone(fib, currentPrice) {
+  if (!fib || typeof fib !== "object") return "NONE";
+
+  const r50 = Number(fib?.r500);
+  const r618 = Number(fib?.r618);
+  const p = Number(currentPrice);
+
+  if (!Number.isFinite(p)) return "NONE";
+
+  if (Number.isFinite(r618) && p > r618) return "ABOVE_618";
+  if (Number.isFinite(r50) && p > r50) return "ABOVE_50";
+
+  return "NONE";
+}
+
 async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
   const [w1, w4, lastBarTimeSec] = await Promise.all([
     fetchFibLevels({ symbol, tf, degree, wave: "W1" }).catch(() => ({ ok: false })),
