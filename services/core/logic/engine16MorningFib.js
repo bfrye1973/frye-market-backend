@@ -1452,7 +1452,7 @@ export async function computeMorningFib({
 
     waveShortPrep = true;
     prepBias = "SHORT_PREP";
-
+    }
     if (
       readinessLabel === "WATCH" ||
       readinessLabel === "NO_SETUP" ||
@@ -1460,7 +1460,7 @@ export async function computeMorningFib({
    ) {
       readinessLabel = "WATCH_FOR_SHORT";
    }
-      
+  }      
     if (
       strategyType === "CONTINUATION" ||
       strategyType === "BREAKOUT"
