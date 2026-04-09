@@ -709,6 +709,9 @@ function buildWaveContext(engine2Ctx) {
 
   const intermediateWaveMode = String(intermediate?.waveMode || "unknown").toUpperCase();
   const correctionDirection = inferCorrectionDirection(intermediate);
+  const cInternalStructure = String(intermediate?.cInternalStructure || "UNKNOWN");
+  const cExtensionZone = String(intermediate?.cExtensionZone || "NONE");
+  const cShortWatch = intermediate?.cShortWatch === true;
 
   let macroBias = "NONE";
   let waveState = "UNKNOWN";
@@ -751,6 +754,9 @@ function buildWaveContext(engine2Ctx) {
     macroBias,
     waveState,
     wavePrep,
+    cInternalStructure,
+    cExtensionZone,
+    cShortWatch,
     intermediateReadyForWave3,
   };
 }
