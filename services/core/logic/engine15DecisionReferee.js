@@ -9,6 +9,9 @@
 // - keeps exhaustionTrigger as the real tradable exhaustion event
 // - adds Engine16 unavailable/skipped guard for Intermediate Swing
 // - prevents fake BLOCKED / NO_VALID_STRATEGY / NO_DIRECTION when Engine 16 is skipped
+// - preserves Engine16 EMA values for READY-stage momentum filter
+// - uses lifecycle.currentPrice for current EMA filter contract
+// - missing EMA/current price => WATCH (not hard block)
 //
 // Notes:
 // - pure logic only
@@ -235,6 +238,10 @@ function normalizeEngine16(engine16 = null) {
     direction,
     context: safeUpper(engine16?.context, "NONE"),
     state: safeUpper(engine16?.state, "NONE"),
+
+    // Preserve EMA values from Engine 16 for READY-stage decision filtering.
+    ema10: toNum(engine16?.ema10),
+    ema20: toNum(engine16?.ema20),
 
     waveState:
       safeUpper(engine16?.waveState, "") ||
@@ -1065,18 +1072,19 @@ export function evaluateTriggerReadiness({
       };
     }
 
-  return {
-    readinessLabel: "WAIT",
-    entryStyle: "NONE",
-    triggerConfirmed: false,
-    freshEntryNow: false,
-    reasonCodes: ["NO_STRATEGY"],
-    blockers: ["NO_STRATEGY"],
-    promotedStrategyType: "NONE",
-    nextSetupType: "NONE",
-    setupChain: [],
-  };
-}
+    return {
+      readinessLabel: "WAIT",
+      entryStyle: "NONE",
+      triggerConfirmed: false,
+      freshEntryNow: false,
+      reasonCodes: ["NO_STRATEGY"],
+      blockers: ["NO_STRATEGY"],
+      promotedStrategyType: "NONE",
+      nextSetupType: "NONE",
+      setupChain: [],
+    };
+  }
+
   const qualityPass = qualityGate?.qualityGatePassed === true;
   const momentumPass = momentumGate?.momentumGatePassed === true;
 
@@ -1322,7 +1330,8 @@ function buildLifecycle({
     toNum(zc?.active?.institutional?.mid) ??
     toNum(zc?.active?.shelf?.mid) ??
     null;
-    const hasRealTrigger =
+
+  const hasRealTrigger =
     e16.exhaustionTrigger === true ||
     e16.exhaustionTriggerShort === true ||
     e16.exhaustionTriggerLong === true ||
@@ -1444,11 +1453,6 @@ function buildLifecycle({
     nextFocus = "LOOK_FOR_NEXT_SETUP";
   }
 
-  const noSetupNow =
-    e16.strategyType === "NONE" ||
-    e16.readinessLabel === "NO_SETUP" ||
-    e16.invalidated === true;
-
   const oppositeSignalReset =
     (direction === "SHORT" && (
       e16.exhaustionLong === true ||
@@ -1461,7 +1465,7 @@ function buildLifecycle({
       e16.exhaustionTriggerShort === true ||
       e16.breakdownReady === true ||
       e16.wickRejectionShort === true
-    ));  
+    ));
 
   if (oppositeSignalReset) {
     return {
@@ -1494,7 +1498,7 @@ function buildLifecycle({
       nextFocus: "WAIT_FOR_TRIGGER",
     };
   }
- 
+
   if (
     lifecycleStage === "MATURE" &&
     firstTargetHit &&
@@ -1587,7 +1591,7 @@ function applyLifecycleOverride({
   return out;
 }
 
-function buildSignalEvent({ engine16, winner, trigger } = {}) {
+function buildSignalEvent({ engine16, winner } = {}) {
   const e16 = normalizeEngine16(engine16);
 
   if (e16.exhaustionTrigger === true) {
@@ -1635,18 +1639,26 @@ export function buildFinalDecision({
     direction: deriveDirectionFromHTFContext({ winner, engine16, momentum }),
   };
 
+  const direction = safeUpper(resolvedWinner?.direction, "NONE");
+
   const hard = evaluateHardBlockers({
-  strategyId,
-  winner: resolvedWinner,
-  permission,
-  zoneContext,
-  engine16,
-});
- if (safeUpper(resolvedWinner?.strategyType, "NONE") === "NONE" && safeUpper(e16?.readinessLabel, "NO_SETUP") === "WATCH") {
-     hard.hardBlocked = false;
-     hard.blockers = (hard.blockers || []).filter((b) => b !== "NO_VALID_STRATEGY" && b !== "NO_DIRECTION");
+    strategyId,
+    winner: resolvedWinner,
+    permission,
+    zoneContext,
+    engine16,
+  });
+
+  if (
+    safeUpper(resolvedWinner?.strategyType, "NONE") === "NONE" &&
+    safeUpper(e16?.readinessLabel, "NO_SETUP") === "WATCH"
+  ) {
+    hard.hardBlocked = false;
+    hard.blockers = (hard.blockers || []).filter(
+      (b) => b !== "NO_VALID_STRATEGY" && b !== "NO_DIRECTION"
+    );
   }
-  
+
   const quality = evaluateQualityGate({
     engine5,
   });
@@ -1658,16 +1670,16 @@ export function buildFinalDecision({
   });
 
   const triggerBase = evaluateTriggerReadiness({
-  strategyId,
-  winner: resolvedWinner,
-  engine16,
-  engine3,
-  engine4,
-  momentum,
-  qualityGate: quality,
-  momentumGate: mom,
-  hardBlockers: hard,
-});
+    strategyId,
+    winner: resolvedWinner,
+    engine16,
+    engine3,
+    engine4,
+    momentum,
+    qualityGate: quality,
+    momentumGate: mom,
+    hardBlockers: hard,
+  });
 
   const lifecycle = buildLifecycle({
     strategyId,
@@ -1686,62 +1698,70 @@ export function buildFinalDecision({
   let action = "NO_ACTION";
 
   if (isEarlyExhaustionOnly(e16)) {
-  action = "WATCH";
-} else if (lifecycle?.lifecycleStage === "COMPLETED") {
-  action = "NO_ACTION";
-} else if (trigger.readinessLabel === "STAND_DOWN") {
-  if (
-    e16.readinessLabel === "PULLBACK_READY" ||
-    e16.readinessLabel === "WATCH" ||
-    e16.readinessLabel === "NEAR"
+    action = "WATCH";
+  } else if (lifecycle?.lifecycleStage === "COMPLETED") {
+    action = "NO_ACTION";
+  } else if (trigger.readinessLabel === "STAND_DOWN") {
+    if (
+      e16.readinessLabel === "PULLBACK_READY" ||
+      e16.readinessLabel === "WATCH" ||
+      e16.readinessLabel === "NEAR"
+    ) {
+      action = "WATCH";
+    } else {
+      action = "BLOCKED";
+    }
+  } else if (trigger.readinessLabel === "WAIT") {
+    action = "NO_ACTION";
+  } else if (
+    trigger.readinessLabel === "WATCH" ||
+    trigger.readinessLabel === "NEAR" ||
+    trigger.readinessLabel === "ARMING" ||
+    trigger.readinessLabel === "PREP"
   ) {
     action = "WATCH";
-  } else {
-    action = "BLOCKED";
-  }
-} else if (trigger.readinessLabel === "WAIT") {
-  action = "NO_ACTION";
-} else if (trigger.readinessLabel === "WATCH" || trigger.readinessLabel === "NEAR" || trigger.readinessLabel === "ARMING" || trigger.readinessLabel === "PREP") {
-  action = "WATCH";
-} else if (trigger.readinessLabel === "READY") {
+  } else if (trigger.readinessLabel === "READY") {
+    const ema10 = e16.ema10 ?? null;
+    const ema20 = e16.ema20 ?? null;
+    const price = lifecycle?.currentPrice ?? null;
 
-  const ema10 = e16.ema10 ?? null;
-  const ema20 = e16.ema20 ?? null;
-  const price = lifecycle?.currentPrice ?? null;
+    let emaFilterPass = false;
 
-  let emaFilterPass = false;
+    if (direction === "SHORT") {
+      emaFilterPass =
+        (price !== null && ema10 !== null && price < ema10) ||
+        (ema10 !== null && ema20 !== null && ema10 < ema20);
+    }
 
-  if (direction === "SHORT") {
-    emaFilterPass =
-      (price !== null && ema10 !== null && price < ema10) ||
-      (ema10 !== null && ema20 !== null && ema10 < ema20);
-  }
+    if (direction === "LONG") {
+      emaFilterPass =
+        (price !== null && ema10 !== null && price > ema10) ||
+        (ema10 !== null && ema20 !== null && ema10 > ema20);
+    }
 
-  if (direction === "LONG") {
-    emaFilterPass =
-      (price !== null && ema10 !== null && price > ema10) ||
-      (ema10 !== null && ema20 !== null && ema10 > ema20);
-  }
-
-  if (!emaFilterPass) {
-    action = "WATCH";
-  } else {
+    // Missing EMA / price / direction should not permit entry.
+    // Current contract: degrade to WATCH rather than hard block.
+    if (!emaFilterPass) {
+      action = "WATCH";
+    } else {
+      action =
+        p.permission === "REDUCE"
+          ? "REDUCE_OK"
+          : p.permission === "ALLOW"
+          ? "ENTER_OK"
+          : "BLOCKED";
+    }
+  } else if (
+    trigger.readinessLabel === "CONFIRMED" ||
+    trigger.readinessLabel === "TRIGGERED"
+  ) {
     action =
-      p.permission === "REDUCE"
-        ? "REDUCE_OK"
-        : p.permission === "ALLOW"
+      p.permission === "ALLOW"
         ? "ENTER_OK"
+        : p.permission === "REDUCE"
+        ? "REDUCE_OK"
         : "BLOCKED";
   }
-
-} else if (trigger.readinessLabel === "CONFIRMED" || trigger.readinessLabel === "TRIGGERED") {
-  action =
-    p.permission === "ALLOW"
-      ? "ENTER_OK"
-      : p.permission === "REDUCE"
-      ? "REDUCE_OK"
-      : "BLOCKED";
-}
 
   if (!VALID_ACTIONS.has(action)) action = "NO_ACTION";
 
