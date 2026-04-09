@@ -866,7 +866,12 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
    lastBarTimeSec,
    currentPrice
  );
-  
+  const fibSource = w1?.ok ? w1?.fib : w4?.ok ? w4?.fib : null;
+
+  const cExtensionZone =
+    phase === "IN_C"
+      ? detectCExtensionZone(fibSource, currentPrice)
+      : "NONE";
   const cInternalStructure = detectCInternalStructure(
     waveMarks,
     phase,
@@ -894,6 +899,7 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     phase,
     confirmedPhase,
     phaseReason,
+    cExtensionZone, 
     lastMark,
     nextMark,
     marksPresent,
