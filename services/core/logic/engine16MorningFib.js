@@ -1427,6 +1427,38 @@ export async function computeMorningFib({
       waveReasonCodes.push("ENGINE2_LONG_PREFERENCE");
     }
 
+  
+    if (
+      waveContext.cShortWatch === true &&
+      !exhaustionTriggerShort &&
+      !continuationTriggerShort
+    ) {
+    if (!waveReasonCodes.includes("ENGINE2_C_SHORT_WATCH")) {
+      waveReasonCodes.push("ENGINE2_C_SHORT_WATCH");
+    }
+
+    if (waveContext.cExtensionZone === "ABOVE_618") {
+      if (!waveReasonCodes.includes("ENGINE2_C_EXTENSION_ABOVE_618")) {
+        waveReasonCodes.push("ENGINE2_C_EXTENSION_ABOVE_618");
+      }
+    }
+
+    if (waveContext.cInternalStructure === "FORMING") {
+      if (!waveReasonCodes.includes("ENGINE2_C_INTERNAL_FORMING")) {
+        waveReasonCodes.push("ENGINE2_C_INTERNAL_FORMING");
+      }
+    }
+
+    waveShortPrep = true;
+
+    if (
+      readinessLabel === "WATCH" ||
+      readinessLabel === "NO_SETUP" ||
+      readinessLabel === "PULLBACK_READY"
+    ) {
+      readinessLabel = "WATCH_FOR_SHORT";
+    }
+  }
     if (
       strategyType === "CONTINUATION" ||
       strategyType === "BREAKOUT"
