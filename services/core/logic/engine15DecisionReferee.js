@@ -1104,19 +1104,7 @@ export function evaluateTriggerReadiness({
     setupChain: [],
   };
 }
-    return {
-      readinessLabel: "WAIT",
-      entryStyle: "NONE",
-      triggerConfirmed: false,
-      freshEntryNow: false,
-      reasonCodes: ["NO_STRATEGY"],
-      blockers: ["NO_STRATEGY"],
-      promotedStrategyType: "NONE",
-      nextSetupType: "NONE",
-      setupChain: [],
-    };
-  }
-
+    
   const qualityPass = qualityGate?.qualityGatePassed === true;
   const momentumPass = momentumGate?.momentumGatePassed === true;
 
