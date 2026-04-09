@@ -93,8 +93,8 @@ function calculateEMA(values, length) {
     ema = values[i] * k + ema * (1 - k);
   }
   return round2(ema);
-}  
-  
+}
+
 function normalizeBarsForEngine16(bars) {
   return Array.isArray(bars)
     ? bars
@@ -677,12 +677,10 @@ function inferCorrectionDirection(intermediateNode) {
   const lastP = toNum(intermediateNode?.lastMark?.p);
   const nextP = toNum(intermediateNode?.nextMark?.p);
 
-  // If next mark exists, infer the broader correction direction from last→next
   if (Number.isFinite(lastP) && Number.isFinite(nextP) && nextP !== lastP) {
     return nextP > lastP ? "UP" : "DOWN";
   }
 
-  // final correction leg defaults
   if (phase === "IN_C") {
     if (Number.isFinite(lastP) && Number.isFinite(nextP) && nextP !== lastP) {
       return nextP > lastP ? "UP" : "DOWN";
@@ -710,8 +708,6 @@ function buildWaveContext(engine2Ctx) {
   let scalpCorrectionDirection = correctionDirection;
   let intermediateReadyForWave3 = false;
 
-  // If primary completed a W5 and intermediate is now corrective,
-  // directional preference depends on correction direction.
   if (
     primaryPhase === "COMPLETE_W5" &&
     (intermediate?.isCorrective === true || ["IN_A", "IN_B", "IN_C"].includes(intermediatePhase))
@@ -800,12 +796,8 @@ export async function computeMorningFib({
 
   const bars = normalizeBarsForEngine16(rawBars);
   const closedBars = bars.filter((b) => isClosedBar(b, timeframe));
-  
-  const closes = closedBars.map(bar => bar.c); // Assuming "c" is the close price  
-  const ema10 = calculateEMA(closes.slice(-10), 10); // Calculate EMA10 from last 10 bars
-  const ema20 = calculateEMA(closes.slice(-20), 20); // Calculate EMA20 from last 20 bars
 
-   if (!closedBars.length) {
+  if (!closedBars.length) {
     return {
       ok: false,
       symbol,
@@ -826,10 +818,13 @@ export async function computeMorningFib({
 
   const latestClosedBar = closedBars[closedBars.length - 1];
   const latestClose = latestClosedBar?.c;
+
+  // EMA values for Engine 15 scalp momentum filter
+  // Calculate once from all closed bars only.
   const closes = closedBars.map((bar) => bar.c);
   const ema10 = calculateEMA(closes, 10);
   const ema20 = calculateEMA(closes, 20);
- 
+
   const localMacroContext =
     macroLevelContext && typeof macroLevelContext === "object"
       ? macroLevelContext
@@ -980,7 +975,8 @@ export async function computeMorningFib({
       atrMultiple: 1.2,
     },
   };
-   // ==========================================
+
+  // ==========================================
   // FINAL_CORRECTION neutral decision-zone prep
   // ==========================================
   if (
@@ -1000,7 +996,8 @@ export async function computeMorningFib({
     noImpulseBase.waveShortPrep = false;
     noImpulseBase.waveLongPrep = false;
     noImpulseBase.waveCountertrendCaution = false;
-  } 
+  }
+
   if (!morningBars.length || !regularBars.length) {
     return noImpulseBase;
   }
@@ -1276,7 +1273,6 @@ export async function computeMorningFib({
     exhaustionActive = !invalid;
   }
 
-  // normalize trigger metadata from final confirmed trigger booleans
   triggerConfirmed = false;
   triggerType = null;
   triggerDirection = null;
@@ -1296,7 +1292,6 @@ export async function computeMorningFib({
     triggerLevel = round2(bestCandidate.sessionHigh);
     triggerTime = exhaustionBarTime;
   }
-  
 
   if (
     bestCandidate.context === "LONG_CONTEXT" &&
@@ -1402,18 +1397,12 @@ export async function computeMorningFib({
   // ENGINE 2 WAVE-BASED CONTEXT
   // ==============================
 
-   // If we are in FINAL CORRECTION and no setup is detected yet,
-  // do NOT stay in NO_SETUP. Move to WATCH so system becomes aware.
- 
-  // Scalp remains allowed to trade A/B/C.
-  // We do NOT block continuation during A/B/C.
-  // We only add caution / prep context near final correction leg.
   if (waveContext.waveState === "FINAL_CORRECTION") {
     if (strategyType === "NONE" && readinessLabel === "NO_SETUP") {
       readinessLabel = "WATCH";
       waveReasonCodes.push("C_LEG_ACTIVE_AWAITING_TRIGGER");
-    } 
-    
+    }
+
     if (waveContext.macroBias === "SHORT_PREFERENCE") {
       waveShortPrep = true;
       waveReasonCodes.push("ENGINE2_FINAL_CORRECTION_LEG");
@@ -1424,8 +1413,6 @@ export async function computeMorningFib({
       waveReasonCodes.push("ENGINE2_LONG_PREFERENCE");
     }
 
-    // Do not kill scalp continuation during C.
-    // Only mark countertrend caution if continuation is pushing against expected post-C direction.
     if (
       strategyType === "CONTINUATION" ||
       strategyType === "BREAKOUT"
@@ -1451,7 +1438,6 @@ export async function computeMorningFib({
       }
     }
 
-    // During final C, make exhaustion early more informative without forcing trade.
     if (waveShortPrep && exhaustionEarlyShort && !exhaustionTriggerShort) {
       readinessLabel = "WATCH_FOR_SHORT";
     }
@@ -1463,10 +1449,6 @@ export async function computeMorningFib({
 
   let macroContinuationDowngraded = false;
 
-  // macro = caution / refinement only
-  // do NOT kill pullbacks
-  // do NOT kill confirmed exhaustion triggers
-  // do soften blind continuation / breakout promotion near macro roadblocks
   if (
     macroRoadblock.active &&
     (strategyType === "CONTINUATION" || strategyType === "BREAKOUT") &&
@@ -1552,6 +1534,7 @@ export async function computeMorningFib({
         : null,
     exhaustionTriggerTime: exhaustionTrigger ? exhaustionBarTime : null,
   };
+
   const latestNyParts = getNyPartsFromMs(latestClosedBar?.t);
   const latestIsRegularSession =
     latestNyParts.minuteOfDay >= 570 && latestNyParts.minuteOfDay < 960;
@@ -1578,17 +1561,17 @@ export async function computeMorningFib({
     }
   }
 
-  return { 
+  return {
     ok: true,
     symbol,
     date: dateKey,
     timeframe,
     context: finalContext,
     marketRegime: regimeInfo,
-    
+
     ema10,
     ema20,
-    
+
     engine2Context: localEngine2Context,
     waveContext,
     waveReasonCodes,
