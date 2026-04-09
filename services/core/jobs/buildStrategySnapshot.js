@@ -809,6 +809,26 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
   };
 }
 
+function detectCInternalStructure(waveMarks, phase, currentPrice) {
+  if (phase !== "IN_C") return null;
+
+  const markA = waveMarks?.A;
+  const markB = waveMarks?.B;
+
+  if (!isRealMark(markA) || !isRealMark(markB)) return null;
+
+  const aPrice = Number(markA.p);
+  const bPrice = Number(markB.p);
+  const p = Number(currentPrice);
+
+  if (!Number.isFinite(aPrice) || !Number.isFinite(bPrice)) return null;
+  if (!Number.isFinite(p)) return "FORMING";
+
+  if (p > aPrice) return "FORMING";
+
+  return "FORMING";
+}
+
 async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
   const [w1, w4, lastBarTimeSec] = await Promise.all([
     fetchFibLevels({ symbol, tf, degree, wave: "W1" }).catch(() => ({ ok: false })),
@@ -830,7 +850,12 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
    lastBarTimeSec,
    currentPrice
  );
-
+  
+  const cInternalStructure = detectCInternalStructure(
+    waveMarks,
+    phase,
+    currentPrice
+  );
   const waveMode =
     ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
 
@@ -862,6 +887,7 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     isImpulse,
     isFinalCorrectionLeg,
     correctionDirection,
+    cInternalStructure,
   };
 }
 
