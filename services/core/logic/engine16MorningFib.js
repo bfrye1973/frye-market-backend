@@ -805,14 +805,7 @@ export async function computeMorningFib({
   const ema10 = calculateEMA(closes.slice(-10), 10); // Calculate EMA10 from last 10 bars
   const ema20 = calculateEMA(closes.slice(-20), 20); // Calculate EMA20 from last 20 bars
 
-  return {
-  ...otherData,  // Other return values
-  ema10,
-  ema20,
-}; 
-  
-
-  if (!closedBars.length) {
+   if (!closedBars.length) {
     return {
       ok: false,
       symbol,
