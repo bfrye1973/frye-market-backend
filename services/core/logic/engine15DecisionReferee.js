@@ -2,7 +2,7 @@
 //
 // Engine 15C — Decision Referee
 //
-// v8.3
+// v8.4
 // - keeps Engine 16 exhaustion EARLY as advisory only
 // - does NOT promote exhaustionEarly into a strategy candidate
 // - prevents early-only exhaustion from collapsing into STAND_DOWN / BLOCKED
@@ -12,6 +12,8 @@
 // - preserves Engine16 EMA values for READY-stage momentum filter
 // - uses lifecycle.currentPrice for current EMA filter contract
 // - missing EMA/current price => WATCH (not hard block)
+// - FIX: continuationTriggerShort/Long now carry real direction truth
+// - continuationWatchShort/Long remain advisory only (not full trigger direction)
 //
 // Notes:
 // - pure logic only
@@ -104,15 +106,26 @@ function normalizeDirection(x, engine16 = null) {
   const s = safeUpper(x, "NONE");
   if (["LONG", "SHORT", "NONE"].includes(s)) return s;
 
+  // Exhaustion / reversal direction truth
   if (engine16?.exhaustionTriggerShort === true) return "SHORT";
   if (engine16?.exhaustionTriggerLong === true) return "LONG";
   if (engine16?.exhaustionShort === true) return "SHORT";
   if (engine16?.exhaustionLong === true) return "LONG";
+
+  // Continuation trigger direction truth
+  if (engine16?.continuationTriggerShort === true) return "SHORT";
+  if (engine16?.continuationTriggerLong === true) return "LONG";
+
+  // Breakout / breakdown direction truth
   if (engine16?.breakdownReady === true) return "SHORT";
   if (engine16?.breakoutReady === true) return "LONG";
+
+  // Rejection-based direction truth
   if (engine16?.wickRejectionShort === true) return "SHORT";
   if (engine16?.wickRejectionLong === true) return "LONG";
 
+  // Advisory continuation watch flags intentionally do NOT become
+  // full direction truth here. They are prep-only.
   return "NONE";
 }
 
@@ -239,7 +252,6 @@ function normalizeEngine16(engine16 = null) {
     context: safeUpper(engine16?.context, "NONE"),
     state: safeUpper(engine16?.state, "NONE"),
 
-    // Preserve EMA values from Engine 16 for READY-stage decision filtering.
     ema10: toNum(engine16?.ema10),
     ema20: toNum(engine16?.ema20),
 
@@ -283,6 +295,14 @@ function normalizeEngine16(engine16 = null) {
     failedBreakdown: engine16?.failedBreakdown === true,
     reversalDetected: engine16?.reversalDetected === true,
     trendContinuation: engine16?.trendContinuation === true,
+
+    continuationWatch: engine16?.continuationWatch === true,
+    continuationWatchShort: engine16?.continuationWatchShort === true,
+    continuationWatchLong: engine16?.continuationWatchLong === true,
+    continuationTrigger: engine16?.continuationTrigger === true,
+    continuationTriggerShort: engine16?.continuationTriggerShort === true,
+    continuationTriggerLong: engine16?.continuationTriggerLong === true,
+
     signalTimes,
     error: engine16?.error || null,
     reasonCodes: Array.isArray(engine16?.reasonCodes) ? engine16.reasonCodes : [],
@@ -354,6 +374,11 @@ function deriveDirectionFromHTFContext({ winner, engine16, momentum } = {}) {
   if (e16.exhaustionTriggerLong) return "LONG";
   if (e16.exhaustionShort) return "SHORT";
   if (e16.exhaustionLong) return "LONG";
+
+  // Continuation trigger direction truth
+  if (e16.continuationTriggerShort) return "SHORT";
+  if (e16.continuationTriggerLong) return "LONG";
+
   if (e16.breakdownReady) return "SHORT";
   if (e16.breakoutReady) return "LONG";
   if (e16.wickRejectionShort) return "SHORT";
@@ -430,7 +455,7 @@ function buildUnavailableIntermediateSwingDecision({
 
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v8.3",
+    engine: "engine15.decisionReferee.v8.4",
     symbol,
     strategyId,
     strategyType: "NONE",
@@ -518,12 +543,10 @@ function buildUnavailableIntermediateSwingDecision({
 export function resolveStrategyCandidates({ engine16 } = {}) {
   const e16 = normalizeEngine16(engine16);
 
-  // EARLY exhaustion is advisory only and must NOT become a strategy candidate.
   if (isEarlyExhaustionOnly(e16)) {
     return [];
   }
 
-  // Trigger exhaustion is the real tradable exhaustion candidate.
   if (e16.exhaustionTrigger === true) {
     return [
       {
@@ -649,7 +672,6 @@ export function evaluateHardBlockers({
   const z = normalizeZoneContext(zoneContext);
   const e16 = normalizeEngine16(engine16);
 
-  // EARLY-only exhaustion should NOT collapse into NO_VALID_STRATEGY / NO_DIRECTION.
   const earlyOnly = isEarlyExhaustionOnly(e16);
 
   if (!earlyOnly) {
@@ -657,14 +679,12 @@ export function evaluateHardBlockers({
     const isWatchState = engine16?.readinessLabel === "WATCH";
 
     if (!winner || winner.strategyType === "NONE") {
-      // Allow WATCH state for Scalp without treating as invalid
       if (!(isScalp && isWatchState)) {
         blockers.push("NO_VALID_STRATEGY");
       }
     }
 
     if (winner?.direction === "NONE") {
-      // Allow WATCH state for Scalp without treating missing direction as invalid
       if (!(isScalp && isWatchState)) {
         blockers.push("NO_DIRECTION");
       }
@@ -950,6 +970,8 @@ function buildSetupChain({
     chain.push("BREAKDOWN");
   } else if (type === "BREAKOUT") {
     chain.push("BREAKOUT");
+  } else if (type === "CONTINUATION") {
+    chain.push("CONTINUATION");
   }
 
   if (e16.hasPulledBack || e16.strategyType === "PULLBACK" || e16.readinessLabel === "PULLBACK_READY") {
@@ -965,6 +987,20 @@ function buildSetupChain({
   }
   if (dir === "LONG" && e16.wickRejectionLong) {
     chain.push("LONG_REJECTION_PRESENT");
+  }
+
+  if (e16.continuationTriggerShort) {
+    chain.push("CONTINUATION_TRIGGER_SHORT");
+  }
+  if (e16.continuationTriggerLong) {
+    chain.push("CONTINUATION_TRIGGER_LONG");
+  }
+
+  if (e16.continuationWatchShort) {
+    chain.push("CONTINUATION_WATCH_SHORT");
+  }
+  if (e16.continuationWatchLong) {
+    chain.push("CONTINUATION_WATCH_LONG");
   }
 
   if (promotedStrategyType === "CONTINUATION") {
@@ -991,6 +1027,15 @@ function deriveNextSetupType({
   if (e16.exhaustionEarly && !e16.exhaustionTrigger) return "WAIT_FOR_TRIGGER";
   if (nextSetupType && nextSetupType !== "NONE") return nextSetupType;
   if (promotedStrategyType === "CONTINUATION") return "CONTINUATION_TRIGGER";
+
+  if (winner?.strategyType === "CONTINUATION") {
+    if (e16.continuationTriggerShort || e16.continuationTriggerLong) {
+      return "CONTINUATION_TRIGGER";
+    }
+    if (e16.continuationWatchShort || e16.continuationWatchLong) {
+      return "WAIT_FOR_CONTINUATION_TRIGGER";
+    }
+  }
 
   if (winner?.strategyType === "EXHAUSTION") {
     if (e16.hasPulledBack) return "TRIGGER_CONFIRM";
@@ -1024,8 +1069,6 @@ export function evaluateTriggerReadiness({
   const reasonCodes = [];
   const blockers = [];
 
-  // EARLY exhaustion override:
-  // advisory only, NOT a strategy, but also NOT a hard-block collapse.
   if (isEarlyExhaustionOnly(e16)) {
     return {
       readinessLabel: "WATCH",
@@ -1059,6 +1102,11 @@ export function evaluateTriggerReadiness({
 
   if (!winner || winner.strategyType === "NONE") {
     if (isScalp && isWatchState) {
+      const advisoryChain = ["C_LEG_ACTIVE", "AWAITING_TRIGGER"];
+
+      if (e16.continuationWatchShort) advisoryChain.push("CONTINUATION_WATCH_SHORT");
+      if (e16.continuationWatchLong) advisoryChain.push("CONTINUATION_WATCH_LONG");
+
       return {
         readinessLabel: "WATCH",
         entryStyle: "NONE",
@@ -1068,7 +1116,7 @@ export function evaluateTriggerReadiness({
         blockers: [],
         promotedStrategyType: "NONE",
         nextSetupType: "WAIT_FOR_TRIGGER",
-        setupChain: ["C_LEG_ACTIVE", "AWAITING_TRIGGER"],
+        setupChain: advisoryChain,
       };
     }
 
@@ -1164,6 +1212,15 @@ export function evaluateTriggerReadiness({
     }
   }
 
+  // Continuation trigger should be treated as actionable trigger truth.
+  if (winner.strategyType === "CONTINUATION" && e16.continuationTrigger === true) {
+    readinessLabel = "READY";
+    entryStyle = "CONTINUATION_TRIGGER";
+    triggerConfirmed = true;
+    freshEntryNow = true;
+    reasonCodes.push("ENGINE16_CONTINUATION_TRIGGER");
+  }
+
   const promo = evaluateContinuationPromotion({
     winner,
     engine16,
@@ -1197,6 +1254,16 @@ export function evaluateTriggerReadiness({
     readinessLabel = "ARMING";
     entryStyle = "PULLBACK_BUILD";
     reasonCodes.push("HTF_EXHAUSTION_LTF_PULLBACK_BUILD");
+  }
+
+  if (
+    winner.strategyType === "CONTINUATION" &&
+    e16.continuationWatch === true &&
+    readinessLabel === "WAIT"
+  ) {
+    readinessLabel = "WATCH";
+    entryStyle = "CONTINUATION_WATCH";
+    reasonCodes.push("ENGINE16_CONTINUATION_WATCH");
   }
 
   const setupChain = buildSetupChain({
@@ -1315,6 +1382,14 @@ function extractCurrentPrice(zoneContext) {
   );
 }
 
+function getContinuationSignalTime(e16) {
+  return (
+    e16?.signalTimes?.continuationTriggerTime ||
+    e16?.signalTimes?.continuationTime ||
+    null
+  );
+}
+
 function buildLifecycle({
   strategyId,
   winner,
@@ -1324,8 +1399,22 @@ function buildLifecycle({
   const e16 = normalizeEngine16(engine16);
   const zc = normalizeZoneContext(zoneContext);
 
+  const continuationSignalPrice =
+    e16.continuationTriggerShort === true
+      ? toNum(zc?.active?.negotiated?.hi) ??
+        toNum(zc?.active?.institutional?.hi) ??
+        toNum(zc?.active?.shelf?.hi) ??
+        null
+      : e16.continuationTriggerLong === true
+      ? toNum(zc?.active?.negotiated?.lo) ??
+        toNum(zc?.active?.institutional?.lo) ??
+        toNum(zc?.active?.shelf?.lo) ??
+        null
+      : null;
+
   const signalPrice =
     getTriggerSignalPrice(e16) ??
+    continuationSignalPrice ??
     toNum(zc?.active?.negotiated?.mid) ??
     toNum(zc?.active?.institutional?.mid) ??
     toNum(zc?.active?.shelf?.mid) ??
@@ -1336,7 +1425,10 @@ function buildLifecycle({
     e16.exhaustionTriggerShort === true ||
     e16.exhaustionTriggerLong === true ||
     e16.breakoutReady === true ||
-    e16.breakdownReady === true;
+    e16.breakdownReady === true ||
+    e16.continuationTrigger === true ||
+    e16.continuationTriggerShort === true ||
+    e16.continuationTriggerLong === true;
 
   if (!hasRealTrigger) {
     const currentPrice = extractCurrentPrice(zoneContext);
@@ -1458,13 +1550,15 @@ function buildLifecycle({
       e16.exhaustionLong === true ||
       e16.exhaustionTriggerLong === true ||
       e16.breakoutReady === true ||
-      e16.wickRejectionLong === true
+      e16.wickRejectionLong === true ||
+      e16.continuationTriggerLong === true
     )) ||
     (direction === "LONG" && (
       e16.exhaustionShort === true ||
       e16.exhaustionTriggerShort === true ||
       e16.breakdownReady === true ||
-      e16.wickRejectionShort === true
+      e16.wickRejectionShort === true ||
+      e16.continuationTriggerShort === true
     ));
 
   if (oppositeSignalReset) {
@@ -1607,6 +1701,19 @@ function buildSignalEvent({ engine16, winner } = {}) {
     };
   }
 
+  if (e16.continuationTrigger === true) {
+    return {
+      signalType: "CONTINUATION",
+      direction:
+        e16.continuationTriggerShort ? "SHORT" :
+        e16.continuationTriggerLong ? "LONG" :
+        winner?.direction || "NONE",
+      signalTime: getContinuationSignalTime(e16),
+      signalPrice: null,
+      signalSource: "ENGINE16_CONTINUATION_TRIGGER",
+    };
+  }
+
   return {
     signalType: "NONE",
     direction: "NONE",
@@ -1739,8 +1846,6 @@ export function buildFinalDecision({
         (ema10 !== null && ema20 !== null && ema10 > ema20);
     }
 
-    // Missing EMA / price / direction should not permit entry.
-    // Current contract: degrade to WATCH rather than hard block.
     if (!emaFilterPass) {
       action = "WATCH";
     } else {
@@ -1787,12 +1892,11 @@ export function buildFinalDecision({
   const signalEvent = buildSignalEvent({
     engine16: e16,
     winner: resolvedWinner,
-    trigger,
   });
 
   return {
     ok: true,
-    engine: "engine15.decisionReferee.v8.3",
+    engine: "engine15.decisionReferee.v8.4",
     symbol,
     strategyId,
     strategyType: trigger.promotedStrategyType || resolvedWinner?.strategyType || "NONE",
@@ -1882,7 +1986,7 @@ export function computeEngine15DecisionReferee({
   } catch (err) {
     return {
       ok: false,
-      engine: "engine15.decisionReferee.v8.3",
+      engine: "engine15.decisionReferee.v8.4",
       symbol,
       strategyId,
       strategyType: "NONE",
