@@ -872,12 +872,18 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     phase === "IN_C"
       ? detectCExtensionZone(fibSource, currentPrice)
       : "NONE";
-  const cInternalStructure = detectCInternalStructure(
+  
+   const cInternalStructure = detectCInternalStructure(
     waveMarks,
     phase,
     currentPrice
   );
-  const waveMode =
+ 
+  const cShortWatch =
+    cInternalStructure === "FORMING" &&
+    cExtensionZone === "ABOVE_618"; 
+  
+   const waveMode =
     ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
 
   const isCorrective = waveMode === "CORRECTIVE";
@@ -910,6 +916,7 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     isFinalCorrectionLeg,
     correctionDirection,
     cInternalStructure,
+    cShortWatch,
   };
 }
 
