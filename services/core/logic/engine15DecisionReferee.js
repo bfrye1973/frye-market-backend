@@ -675,21 +675,12 @@ export function evaluateHardBlockers({
   const earlyOnly = isEarlyExhaustionOnly(e16);
 
   if (!earlyOnly) {
-    const isScalp = String(strategyId || "").toLowerCase().includes("intraday_scalp");
-    const isWatchState = engine16?.readinessLabel === "WATCH";
-
-    if (!winner || winner.strategyType === "NONE") {
-      if (!(isScalp && isWatchState)) {
-        blockers.push("NO_VALID_STRATEGY");
-      }
-    }
-
+  if (winner?.strategyType && winner.strategyType !== "NONE") {
     if (winner?.direction === "NONE") {
-      if (!(isScalp && isWatchState)) {
-        blockers.push("NO_DIRECTION");
-      }
+      blockers.push("NO_DIRECTION");
     }
   }
+}
 
   if (p.permission === "STAND_DOWN") {
     softBlockers.push("E6_STAND_DOWN");
@@ -1100,26 +1091,19 @@ export function evaluateTriggerReadiness({
   const isScalp = String(strategyId || "").toLowerCase().includes("intraday_scalp");
   const isWatchState = engine16?.readinessLabel === "WATCH";
 
-  if (!winner || winner.strategyType === "NONE") {
-    if (isScalp && isWatchState) {
-      const advisoryChain = ["C_LEG_ACTIVE", "AWAITING_TRIGGER"];
-
-      if (e16.continuationWatchShort) advisoryChain.push("CONTINUATION_WATCH_SHORT");
-      if (e16.continuationWatchLong) advisoryChain.push("CONTINUATION_WATCH_LONG");
-
-      return {
-        readinessLabel: "WATCH",
-        entryStyle: "NONE",
-        triggerConfirmed: false,
-        freshEntryNow: false,
-        reasonCodes: ["SCALP_PREP_ACTIVE"],
-        blockers: [],
-        promotedStrategyType: "NONE",
-        nextSetupType: "WAIT_FOR_TRIGGER",
-        setupChain: advisoryChain,
-      };
-    }
-
+ if (!winner || winner.strategyType === "NONE") {
+  return {
+    readinessLabel: "WAIT",
+    entryStyle: "NONE",
+    triggerConfirmed: false,
+    freshEntryNow: false,
+    reasonCodes: ["NO_SETUP"],
+    blockers: [],
+    promotedStrategyType: "NONE",
+    nextSetupType: "WAIT_FOR_TRIGGER",
+    setupChain: [],
+  };
+}
     return {
       readinessLabel: "WAIT",
       entryStyle: "NONE",
@@ -1756,20 +1740,17 @@ export function buildFinalDecision({
     engine16,
   });
 
-  if (
-    safeUpper(resolvedWinner?.strategyType, "NONE") === "NONE" &&
-    safeUpper(e16?.readinessLabel, "NO_SETUP") === "WATCH"
-  ) {
-    hard.hardBlocked = false;
-    hard.blockers = (hard.blockers || []).filter(
-      (b) => b !== "NO_VALID_STRATEGY" && b !== "NO_DIRECTION"
-    );
-  }
+  if (safeUpper(resolvedWinner?.strategyType, "NONE") === "NONE") {
+  hard.hardBlocked = false;
+  hard.blockers = [];
+}
 
   const quality = evaluateQualityGate({
     engine5,
   });
-
+  if (!resolvedWinner || resolvedWinner.strategyType === "NONE") {
+  quality.blockers = [];
+}
   const mom = evaluateMomentumGate({
     strategyId,
     winner: resolvedWinner,
