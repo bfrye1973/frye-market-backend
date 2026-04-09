@@ -836,19 +836,7 @@ export async function computeMorningFib({
   const closes = closedBars.map((bar) => bar.c);
   const ema10 = calculateEMA(closes, 10);
   const ema20 = calculateEMA(closes, 20);
-  return {
-  ok: true,
-  symbol,
-  date: dateKey,
-  timeframe,
-  context: finalContext,
-  marketRegime: regimeInfo,
-  ema10,    // Add this line
-  ema20,    // Add this line
-};
-  
-  
-
+ 
   const localMacroContext =
     macroLevelContext && typeof macroLevelContext === "object"
       ? macroLevelContext
@@ -1604,7 +1592,10 @@ export async function computeMorningFib({
     timeframe,
     context: finalContext,
     marketRegime: regimeInfo,
-
+    
+    ema10,
+    ema20,
+    
     engine2Context: localEngine2Context,
     waveContext,
     waveReasonCodes,
