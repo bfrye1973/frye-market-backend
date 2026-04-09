@@ -782,6 +782,7 @@ export async function computeMorningFib({
   let waveShortPrep = false;
   let waveLongPrep = false;
   let waveCountertrendCaution = false;
+  let prepBias = "NONE";
 
   let rawBars;
   try {
@@ -1450,15 +1451,16 @@ export async function computeMorningFib({
     }
 
     waveShortPrep = true;
+    prepBias = "SHORT_PREP";
 
     if (
       readinessLabel === "WATCH" ||
       readinessLabel === "NO_SETUP" ||
       readinessLabel === "PULLBACK_READY"
-    ) {
+   ) {
       readinessLabel = "WATCH_FOR_SHORT";
-    }
-  }
+   }
+      
     if (
       strategyType === "CONTINUATION" ||
       strategyType === "BREAKOUT"
@@ -1485,13 +1487,14 @@ export async function computeMorningFib({
     }
 
     if (waveShortPrep && exhaustionEarlyShort && !exhaustionTriggerShort) {
+      prepBias = "SHORT_PREP";
       readinessLabel = "WATCH_FOR_SHORT";
-    }
+   }
 
-    if (waveLongPrep && exhaustionEarlyLong && !exhaustionTriggerLong) {
-      readinessLabel = "WATCH_FOR_LONG";
-    }
-  }
+   if (waveLongPrep && exhaustionEarlyLong && !exhaustionTriggerLong) {
+     prepBias = "LONG_PREP";
+     readinessLabel = "WATCH_FOR_LONG";
+   }
 
   let macroContinuationDowngraded = false;
 
@@ -1596,15 +1599,16 @@ export async function computeMorningFib({
       Number.isFinite(bestCandidate?.sessionLow) &&
       latestClose < bestCandidate.sessionLow;
 
-    if (brokeRegularHigh) {
-      readinessLabel = "WATCH_FOR_LONG";
-      stateInfo.state = "ABOVE_PULLBACK";
-    }
+   if (brokeRegularHigh) {
+     prepBias = "LONG_PREP";
+     readinessLabel = "WATCH_FOR_LONG";
+     stateInfo.state = "ABOVE_PULLBACK";
+  }
 
-    if (brokeRegularLow) {
-      readinessLabel = "WATCH_FOR_SHORT";
-      stateInfo.state = "ABOVE_PULLBACK";
-    }
+  if (brokeRegularLow) {
+    prepBias = "SHORT_PREP";
+    readinessLabel = "WATCH_FOR_SHORT";
+    stateInfo.state = "ABOVE_PULLBACK";
   }
 
   return {
@@ -1614,6 +1618,7 @@ export async function computeMorningFib({
     timeframe,
     context: finalContext,
     marketRegime: regimeInfo,
+    prepBias,
 
     ema10,
     ema20,
