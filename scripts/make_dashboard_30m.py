@@ -62,10 +62,10 @@ SMI_EMA_LEN = 5
 SMI_BONUS_SCORE_MAX = 3.0
 
 # Score weights (sum = 1.00)
-W_STRUCT = 0.40
-W_MOM = 0.25
-W_BREADTH = 0.20
-W_SQ_EXP = 0.15
+W_STRUCT = 0.48
+W_MOM = 0.27
+W_BREADTH = 0.15
+W_SQ_EXP = 0.10
 
 # Momentum combo
 W_PRIMARY = 0.35
@@ -370,12 +370,12 @@ def main():
     ema_gap_pct = (abs((e10 - e20) / e20) * 100.0) if e20 != 0 else 0.0
 
     if (not above_10) and (not above_20) and above_50:
-    structure_score = 42.0
-    structure_tier = "below_10_20_above_50"
+        structure_score = 42.0
+        structure_tier = "below_10_20_above_50"
 
     elif (not above_10) and (not above_20):
-    structure_score = 25.0
-    structure_tier = "below_both"
+        structure_score = 25.0
+        structure_tier = "below_both"
 
     elif above_10 and (not above_20):
         structure_score = 30.0
