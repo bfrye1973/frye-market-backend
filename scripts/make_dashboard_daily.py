@@ -478,7 +478,7 @@ def main():
     risk_on = compute_sectorcards_risk_on(cards)
 
     score_raw = float(W_EMA_STRUCT * ema_structure + W_BREADTH_CONF * breadth_confirm + W_CONDITIONS * conditions)
-    score = apply_eod_score_guardrails(
+    score = apply_score_guardrails(
         state=state,
         state_label=state_label,
         score=score_raw,
@@ -487,11 +487,13 @@ def main():
         above50=bool(above50),
         above200=bool(above200),
     )
-    # Compression cap: don't call chop under resistance a strong daily trend
-    ema_gap_10_20 = abs((e10 - e20) / e20) * 100 if e20 != 0 else 0.0
-    dist_from_10 = abs((close - e10) / e10) * 100 if e10 != 0 else 0.0
 
-    if ema_gap_10_20 < 0.15 and dist_from_10 < 0.25:
+    # EOD stall / transition cap: don't call a stalled daily structure a strong trend
+    ema_gap_10_20 = abs((e10 - e20) / e20) * 100 if e20 != 0 else 0.0
+    ema_gap_20_50 = abs((e20 - e50) / e50) * 100 if e50 != 0 else 0.0
+    dist_from_20 = abs((close - e20) / e20) * 100 if e20 != 0 else 0.0
+
+    if above200 and ema_gap_10_20 < 0.35 and ema_gap_20_50 < 0.60 and dist_from_20 < 0.50:
         score = min(score, 55.0)
 
     # trade gate from PSI regime
