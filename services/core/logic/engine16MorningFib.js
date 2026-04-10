@@ -619,9 +619,6 @@ function normalizeEngine2Node(node) {
     cInternalStructure: node.cInternalStructure ?? null,
     cExtensionZone: node.cExtensionZone ?? null,
     cShortWatch: node.cShortWatch ?? false,
-    confirmedPhase: node.confirmedPhase ?? null,
-    phaseReason: node.phaseReason ?? null,
-    cInternalStructure: node.cInternalStructure ?? null,
     lastMark: node.lastMark ?? null,
     nextMark: node.nextMark ?? null,
     fibScore: node.fibScore ?? null,
@@ -658,7 +655,6 @@ function normalizeEngine2Context(input) {
     };
   }
 
-  // nested contract preferred
   if (input.primary || input.intermediate || input.minor) {
     return {
       primary: normalizeEngine2Node(input.primary),
@@ -667,7 +663,6 @@ function normalizeEngine2Context(input) {
     };
   }
 
-  // single block fallback
   return {
     primary: null,
     intermediate: normalizeEngine2Node(input),
@@ -803,6 +798,7 @@ export async function computeMorningFib({
       waveShortPrep,
       waveLongPrep,
       waveCountertrendCaution,
+      prepBias,
       macroRoadblock: buildMacroRoadblock(macroLevelContext),
       error: "OHLC_UNAVAILABLE",
       detail: err?.message || String(err),
@@ -826,6 +822,7 @@ export async function computeMorningFib({
       waveShortPrep,
       waveLongPrep,
       waveCountertrendCaution,
+      prepBias,
       macroRoadblock: buildMacroRoadblock(macroLevelContext),
       error: "OHLC_UNAVAILABLE",
     };
@@ -834,8 +831,6 @@ export async function computeMorningFib({
   const latestClosedBar = closedBars[closedBars.length - 1];
   const latestClose = latestClosedBar?.c;
 
-  // EMA values for Engine 15 scalp momentum filter
-  // Calculate once from all closed bars only.
   const closes = closedBars.map((bar) => bar.c);
   const ema10 = calculateEMA(closes, 10);
   const ema20 = calculateEMA(closes, 20);
@@ -880,6 +875,7 @@ export async function computeMorningFib({
       waveShortPrep,
       waveLongPrep,
       waveCountertrendCaution,
+      prepBias,
       macroRoadblock,
       macroLevelContext: localMacroContext,
       macroReasonCodes,
@@ -914,6 +910,7 @@ export async function computeMorningFib({
     waveShortPrep,
     waveLongPrep,
     waveCountertrendCaution,
+    prepBias,
     macroLevelContext: localMacroContext,
     macroRoadblock,
     macroReasonCodes,
@@ -991,9 +988,6 @@ export async function computeMorningFib({
     },
   };
 
-  // ==========================================
-  // FINAL_CORRECTION neutral decision-zone prep
-  // ==========================================
   if (
     waveContext.waveState === "FINAL_CORRECTION" &&
     waveContext.wavePrep === true &&
@@ -1011,13 +1005,13 @@ export async function computeMorningFib({
     noImpulseBase.waveShortPrep = false;
     noImpulseBase.waveLongPrep = false;
     noImpulseBase.waveCountertrendCaution = false;
+    noImpulseBase.prepBias = "NONE";
   }
 
   if (!morningBars.length || !regularBars.length) {
     return noImpulseBase;
   }
-
-  let bestCandidate = null;
+    let bestCandidate = null;
 
   for (const bar of morningBars) {
     const idx = closedBars.findIndex((b) => b.t === bar.t);
@@ -1420,47 +1414,49 @@ export async function computeMorningFib({
 
     if (waveContext.macroBias === "SHORT_PREFERENCE") {
       waveShortPrep = true;
+      prepBias = "SHORT_PREP";
       waveReasonCodes.push("ENGINE2_FINAL_CORRECTION_LEG");
       waveReasonCodes.push("ENGINE2_SHORT_PREFERENCE");
     } else if (waveContext.macroBias === "LONG_PREFERENCE") {
       waveLongPrep = true;
+      prepBias = "LONG_PREP";
       waveReasonCodes.push("ENGINE2_FINAL_CORRECTION_LEG");
       waveReasonCodes.push("ENGINE2_LONG_PREFERENCE");
     }
 
-  
     if (
       waveContext.cShortWatch === true &&
       !exhaustionTriggerShort &&
       !continuationTriggerShort
     ) {
-    if (!waveReasonCodes.includes("ENGINE2_C_SHORT_WATCH")) {
-      waveReasonCodes.push("ENGINE2_C_SHORT_WATCH");
-    }
+      if (!waveReasonCodes.includes("ENGINE2_C_SHORT_WATCH")) {
+        waveReasonCodes.push("ENGINE2_C_SHORT_WATCH");
+      }
 
-    if (waveContext.cExtensionZone === "ABOVE_618") {
-      if (!waveReasonCodes.includes("ENGINE2_C_EXTENSION_ABOVE_618")) {
-        waveReasonCodes.push("ENGINE2_C_EXTENSION_ABOVE_618");
+      if (waveContext.cExtensionZone === "ABOVE_618") {
+        if (!waveReasonCodes.includes("ENGINE2_C_EXTENSION_ABOVE_618")) {
+          waveReasonCodes.push("ENGINE2_C_EXTENSION_ABOVE_618");
+        }
+      }
+
+      if (waveContext.cInternalStructure === "FORMING") {
+        if (!waveReasonCodes.includes("ENGINE2_C_INTERNAL_FORMING")) {
+          waveReasonCodes.push("ENGINE2_C_INTERNAL_FORMING");
+        }
+      }
+
+      waveShortPrep = true;
+      prepBias = "SHORT_PREP";
+
+      if (
+        readinessLabel === "WATCH" ||
+        readinessLabel === "NO_SETUP" ||
+        readinessLabel === "PULLBACK_READY"
+      ) {
+        readinessLabel = "WATCH_FOR_SHORT";
       }
     }
 
-    if (waveContext.cInternalStructure === "FORMING") {
-      if (!waveReasonCodes.includes("ENGINE2_C_INTERNAL_FORMING")) {
-        waveReasonCodes.push("ENGINE2_C_INTERNAL_FORMING");
-      }
-    }
-
-    waveShortPrep = true;
-    prepBias = "SHORT_PREP";
-    
-    if (
-      readinessLabel === "WATCH" ||
-      readinessLabel === "NO_SETUP" ||
-      readinessLabel === "PULLBACK_READY"
-   ) {
-      readinessLabel = "WATCH_FOR_SHORT";
-   }
-  }      
     if (
       strategyType === "CONTINUATION" ||
       strategyType === "BREAKOUT"
@@ -1489,12 +1485,13 @@ export async function computeMorningFib({
     if (waveShortPrep && exhaustionEarlyShort && !exhaustionTriggerShort) {
       prepBias = "SHORT_PREP";
       readinessLabel = "WATCH_FOR_SHORT";
-   }
+    }
 
-   if (waveLongPrep && exhaustionEarlyLong && !exhaustionTriggerLong) {
-     prepBias = "LONG_PREP";
-     readinessLabel = "WATCH_FOR_LONG";
-   }
+    if (waveLongPrep && exhaustionEarlyLong && !exhaustionTriggerLong) {
+      prepBias = "LONG_PREP";
+      readinessLabel = "WATCH_FOR_LONG";
+    }
+  }
 
   let macroContinuationDowngraded = false;
 
@@ -1510,6 +1507,13 @@ export async function computeMorningFib({
     if (!macroReasonCodes.includes("WAIT_FOR_MAGNET_RESOLUTION")) {
       macroReasonCodes.push("WAIT_FOR_MAGNET_RESOLUTION");
     }
+  }
+
+  if (
+    macroRoadblock.active &&
+    (readinessLabel === "WATCH_FOR_SHORT" || readinessLabel === "WATCH_FOR_LONG")
+  ) {
+    macroContinuationDowngraded = false;
   }
 
   let volumeContext = {
@@ -1599,18 +1603,19 @@ export async function computeMorningFib({
       Number.isFinite(bestCandidate?.sessionLow) &&
       latestClose < bestCandidate.sessionLow;
 
-   if (brokeRegularHigh) {
-     prepBias = "LONG_PREP";
-     readinessLabel = "WATCH_FOR_LONG";
-     stateInfo.state = "ABOVE_PULLBACK";
+    if (brokeRegularHigh) {
+      prepBias = "LONG_PREP";
+      readinessLabel = "WATCH_FOR_LONG";
+      stateInfo.state = "ABOVE_PULLBACK";
+    }
+
+    if (brokeRegularLow) {
+      prepBias = "SHORT_PREP";
+      readinessLabel = "WATCH_FOR_SHORT";
+      stateInfo.state = "ABOVE_PULLBACK";
+    }
   }
 
-  if (brokeRegularLow) {
-    prepBias = "SHORT_PREP";
-    readinessLabel = "WATCH_FOR_SHORT";
-    stateInfo.state = "ABOVE_PULLBACK";
-  }
-}
   return {
     ok: true,
     symbol,
