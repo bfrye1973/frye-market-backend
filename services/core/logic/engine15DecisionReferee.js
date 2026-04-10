@@ -1404,18 +1404,27 @@ function buildLifecycle({
     e16.continuationTriggerShort === true ||
     e16.continuationTriggerLong === true;
 
-  if (!hasRealTrigger) {
-    const currentPrice = extractCurrentPrice(zoneContext);
+  const currentPrice = extractCurrentPrice(zoneContext);
 
+  // Locked contract:
+  // Signal detected != trade taken.
+  // Lifecycle starts only after actual trade execution is integrated.
+  // Until then, preserve signalPrice but keep lifecycle in NO_TRADE.
+  if (!hasRealTrigger || hasRealTrigger) {
     return {
-      lifecycleStage: "BUILDING",
-      isFreshSetup: true,
+      lifecycleStage: "NO_TRADE",
+      isFreshSetup: false,
       entryWindowOpen: false,
       freshEntryNow: false,
-      signalPrice: null,
+      signalPrice: hasRealTrigger ? signalPrice : null,
       currentPrice,
       barsSinceSignal: null,
-      moveFromSignalPts: null,
+      moveFromSignalPts:
+        hasRealTrigger &&
+        Number.isFinite(signalPrice) &&
+        Number.isFinite(currentPrice)
+          ? Math.abs(currentPrice - signalPrice)
+          : null,
       moveFromSignalAtr: null,
       zonesInPath: [],
       zonesHit: 0,
@@ -1434,212 +1443,10 @@ function buildLifecycle({
       ema10_30m: null,
       setupCompleted: false,
       edgeRemainingPct: 100,
-      nextFocus: "WAIT_FOR_TRIGGER",
+      nextFocus: hasRealTrigger ? "WAIT_FOR_EXECUTION" : "WAIT_FOR_TRIGGER",
     };
   }
-
-  const currentPrice = extractCurrentPrice(zoneContext);
-  const direction = winner?.direction || "NONE";
-
-  const ladders = [];
-  const activeInst = zc?.active?.institutional;
-  const activeNeg = zc?.active?.negotiated;
-  const activeShelf = zc?.active?.shelf;
-
-  if (activeInst) ladders.push(makeZoneCandidate(activeInst, "INSTITUTIONAL", 1));
-  if (activeNeg) ladders.push(makeZoneCandidate(activeNeg, "NEGOTIATED", 2));
-  if (activeShelf) ladders.push(makeZoneCandidate(activeShelf, safeUpper(activeShelf?.type, "SHELF"), 3));
-
-  let tpIndex = ladders.length + 1;
-
-  for (const z of zc.render.negotiated) {
-    ladders.push(makeZoneCandidate(z, "NEGOTIATED", tpIndex++));
-  }
-  for (const z of zc.render.institutional) {
-    ladders.push(makeZoneCandidate(z, "INSTITUTIONAL", tpIndex++));
-  }
-  for (const z of zc.render.shelves) {
-    ladders.push(makeZoneCandidate(z, safeUpper(z?.type, "SHELF"), tpIndex++));
-  }
-
-  const path = sortZonesForDirection(
-    dedupeZones(ladders),
-    direction,
-    signalPrice
-  );
-
-  for (const z of path) {
-    z.hit = isZoneHit(z, direction, currentPrice);
-  }
-
-  const zonesHit = path.filter((z) => z.hit).length;
-  const tp1Zone = path[0] || null;
-  const tp2Zone = path[1] || null;
-
-  const firstTargetHit = tp1Zone ? tp1Zone.hit === true : false;
-  const secondTargetHit = tp2Zone ? tp2Zone.hit === true : false;
-
-  let lifecycleStage = "BUILDING";
-  let runnerActive = false;
-  let runnerExitTriggered = false;
-  let runnerExitReason = null;
-  let edgeRemainingPct = 100;
-  let nextFocus = "WAIT_FOR_TRIGGER";
-  let setupCompleted = false;
-  let freshEntryNow = false;
-
-  if (firstTargetHit && !secondTargetHit) {
-    lifecycleStage = "PARTIALLY_COMPLETED";
-    runnerActive = true;
-    edgeRemainingPct = 66;
-    nextFocus = "LOOK_FOR_CONTINUATION_TO_NEXT_ZONE";
-  }
-
-  if (firstTargetHit && secondTargetHit) {
-    lifecycleStage = "MATURE";
-    runnerActive = true;
-    edgeRemainingPct = 33;
-    nextFocus = "MANAGE_RUNNER";
-  }
-
-  if (
-    macroMidpointHit({
-      zoneContext: zc,
-      currentPrice,
-      direction,
-    })
-  ) {
-    lifecycleStage = "COMPLETED";
-    runnerActive = false;
-    runnerExitTriggered = true;
-    runnerExitReason = "MACRO_MIDPOINT_HIT";
-    edgeRemainingPct = 0;
-    setupCompleted = true;
-    freshEntryNow = false;
-    nextFocus = "LOOK_FOR_NEXT_SETUP";
-  }
-
-  const oppositeSignalReset =
-    (direction === "SHORT" && (
-      e16.exhaustionLong === true ||
-      e16.exhaustionTriggerLong === true ||
-      e16.breakoutReady === true ||
-      e16.wickRejectionLong === true ||
-      e16.continuationTriggerLong === true
-    )) ||
-    (direction === "LONG" && (
-      e16.exhaustionShort === true ||
-      e16.exhaustionTriggerShort === true ||
-      e16.breakdownReady === true ||
-      e16.wickRejectionShort === true ||
-      e16.continuationTriggerShort === true
-    ));
-
-  if (oppositeSignalReset) {
-    return {
-      lifecycleStage: "BUILDING",
-      isFreshSetup: true,
-      entryWindowOpen: false,
-      freshEntryNow: false,
-      signalPrice: null,
-      currentPrice,
-      barsSinceSignal: null,
-      moveFromSignalPts: null,
-      moveFromSignalAtr: null,
-      zonesInPath: [],
-      zonesHit: 0,
-      targetCount: 0,
-      targetProgress01: 0,
-      firstTargetHit: false,
-      secondTargetHit: false,
-      tp1Zone: null,
-      tp2Zone: null,
-      tp1Reclaimed: false,
-      block2Protected: false,
-      block2ExitReason: "OPPOSITE_SIGNAL_RESET",
-      runnerActive: false,
-      runnerExitTriggered: true,
-      runnerExitReason: "OPPOSITE_SIGNAL_RESET",
-      ema10_30m: null,
-      setupCompleted: false,
-      edgeRemainingPct: 100,
-      nextFocus: "WAIT_FOR_TRIGGER",
-    };
-  }
-
-  if (
-    lifecycleStage === "MATURE" &&
-    firstTargetHit &&
-    secondTargetHit &&
-    zonesHit >= 3
-  ) {
-    runnerActive = false;
-    runnerExitTriggered = true;
-    runnerExitReason = "RUNNER_EXIT_PATH_EXTENDED";
-    lifecycleStage = "COMPLETED";
-    edgeRemainingPct = 0;
-    setupCompleted = true;
-    freshEntryNow = false;
-    nextFocus = "LOOK_FOR_NEXT_SETUP";
-  }
-
-  const targetProgress01 =
-    secondTargetHit ? 1 : firstTargetHit ? 0.7 : 0;
-
-  return {
-    lifecycleStage,
-    isFreshSetup: lifecycleStage === "BUILDING",
-    entryWindowOpen: lifecycleStage === "BUILDING",
-    freshEntryNow,
-    signalPrice,
-    currentPrice,
-    barsSinceSignal: null,
-    moveFromSignalPts:
-      Number.isFinite(signalPrice) && Number.isFinite(currentPrice)
-        ? Math.abs(currentPrice - signalPrice)
-        : null,
-    moveFromSignalAtr: null,
-    zonesInPath: path,
-    zonesHit,
-    targetCount: Math.min(2, path.length),
-    targetProgress01,
-    firstTargetHit,
-    secondTargetHit,
-    tp1Zone: tp1Zone
-      ? {
-          id: tp1Zone.id,
-          type: tp1Zone.type,
-          lo: tp1Zone.lo,
-          hi: tp1Zone.hi,
-          mid: tp1Zone.mid,
-          strength: tp1Zone.strength,
-          tpSlot: tp1Zone.tpSlot,
-        }
-      : null,
-    tp2Zone: tp2Zone
-      ? {
-          id: tp2Zone.id,
-          type: tp2Zone.type,
-          lo: tp2Zone.lo,
-          hi: tp2Zone.hi,
-          mid: tp2Zone.mid,
-          strength: tp2Zone.strength,
-          tpSlot: tp2Zone.tpSlot,
-        }
-      : null,
-    tp1Reclaimed: false,
-    block2Protected: false,
-    block2ExitReason: null,
-    runnerActive,
-    runnerExitTriggered,
-    runnerExitReason,
-    ema10_30m: null,
-    setupCompleted,
-    edgeRemainingPct,
-    nextFocus,
-  };
 }
-
 function applyLifecycleOverride({
   trigger,
   lifecycle,
