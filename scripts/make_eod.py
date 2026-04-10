@@ -493,8 +493,13 @@ def main():
     internals_weak, red_count, internals_reason = compute_internals_weak(cards, etf_participation, etf_breadth)
     risk_on = compute_sectorcards_risk_on(cards)
 
-    score_raw = float(W_EMA_STRUCT * ema_structure + W_BREADTH_CONF * breadth_confirm + W_CONDITIONS * conditions)
-    score = apply_score_guardrails(        
+    score_raw = float(
+        W_EMA_STRUCT * ema_structure
+        + W_BREADTH_CONF * breadth_confirm
+        + W_CONDITIONS * conditions
+    )
+
+    score = apply_score_guardrails(
         state=state,
         score=score_raw,
         above10=bool(above10),
@@ -503,22 +508,20 @@ def main():
         above200=bool(above200),
     )
 
-   # --- COMPRESSION CAP (CRITICAL FIX) ---
-   ema_gap_10_20 = abs((e10 - e20) / e20) * 100 if e20 != 0 else 0
-   dist_from_10 = abs((close - e10) / e10) * 100 if e10 != 0 else 0
-
-       # --- COMPRESSION CAP (CRITICAL FIX) ---
+    # --- COMPRESSION CAP (CRITICAL FIX) ---
     ema_gap_10_20 = abs((e10 - e20) / e20) * 100 if e20 != 0 else 0
     dist_from_10 = abs((close - e10) / e10) * 100 if e10 != 0 else 0
 
+    # If EMAs are tight AND price is sitting on them → compression
     if ema_gap_10_20 < 0.15 and dist_from_10 < 0.25:
         score = min(score, 55.0)
-       
+
     allow_exits = True
     allow_entries = (not no_entries)
     a_plus_only = (regime_key == "caution")
     danger_active = (regime_key == "danger")
 
+    
     if internals_weak:
         allow_entries = False
         a_plus_only = False
