@@ -507,9 +507,13 @@ def main():
    ema_gap_10_20 = abs((e10 - e20) / e20) * 100 if e20 != 0 else 0
    dist_from_10 = abs((close - e10) / e10) * 100 if e10 != 0 else 0
 
-   # If EMAs are tight AND price is sitting on them → compression
-   if ema_gap_10_20 < 0.15 and dist_from_10 < 0.25:
-    score = min(score, 55.0) 
+       # --- COMPRESSION CAP (CRITICAL FIX) ---
+    ema_gap_10_20 = abs((e10 - e20) / e20) * 100 if e20 != 0 else 0
+    dist_from_10 = abs((close - e10) / e10) * 100 if e10 != 0 else 0
+
+    if ema_gap_10_20 < 0.15 and dist_from_10 < 0.25:
+        score = min(score, 55.0)
+       
     allow_exits = True
     allow_entries = (not no_entries)
     a_plus_only = (regime_key == "caution")
