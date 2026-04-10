@@ -1610,7 +1610,7 @@ export async function computeMorningFib({
     readinessLabel = "WATCH_FOR_SHORT";
     stateInfo.state = "ABOVE_PULLBACK";
   }
-
+}
   return {
     ok: true,
     symbol,
