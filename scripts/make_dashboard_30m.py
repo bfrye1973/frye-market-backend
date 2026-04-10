@@ -369,9 +369,13 @@ def main():
     stacked = e10 > e20
     ema_gap_pct = (abs((e10 - e20) / e20) * 100.0) if e20 != 0 else 0.0
 
-    if (not above_10) and (not above_20):
-        structure_score = 18.0
-        structure_tier = "below_both"
+    if (not above_10) and (not above_20) and above_50:
+    structure_score = 42.0
+    structure_tier = "below_10_20_above_50"
+
+    elif (not above_10) and (not above_20):
+    structure_score = 25.0
+    structure_tier = "below_both"
 
     elif above_10 and (not above_20):
         structure_score = 30.0
