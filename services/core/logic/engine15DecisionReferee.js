@@ -58,6 +58,8 @@ const VALID_BIAS = new Set([
   "SHORT_PRIORITY",
   "LONG_COUNTERTREND",
   "SHORT_COUNTERTREND",
+  "LONG_PREP",
+  "SHORT_PREP",
   "BALANCED",
   "NONE",
 ]);
@@ -240,7 +242,6 @@ function normalizeEngine16(engine16 = null) {
   const strategyType = normalizeStrategyType(engine16?.strategyType);
   const readinessLabel = safeUpper(engine16?.readinessLabel, "NO_SETUP");
   const direction = normalizeDirection(engine16?.direction, engine16);
-
   const signalTimes = engine16?.signalTimes || {};
 
   return {
@@ -249,6 +250,7 @@ function normalizeEngine16(engine16 = null) {
     strategyType,
     readinessLabel,
     direction,
+    prepBias: safeUpper(engine16?.prepBias, "NONE"),
     context: safeUpper(engine16?.context, "NONE"),
     state: safeUpper(engine16?.state, "NONE"),
 
@@ -1769,8 +1771,20 @@ export function buildFinalDecision({
     lifecycle,
   });
 
-  const executionBias = VALID_BIAS.has(mom.executionBias) ? mom.executionBias : "NONE";
+  let executionBias = VALID_BIAS.has(mom.executionBias) ? mom.executionBias : "NONE";
 
+  const hasPriorityBias =
+    executionBias === "SHORT_PRIORITY" ||
+    executionBias === "LONG_PRIORITY" ||
+    executionBias === "SHORT_COUNTERTREND" ||
+    executionBias === "LONG_COUNTERTREND";
+
+  if (!hasPriorityBias) {
+    if (e16.prepBias === "SHORT_PREP" || e16.prepBias === "LONG_PREP") {
+      executionBias = e16.prepBias;
+    }
+  }
+  
   let action = "NO_ACTION";
 
   if (isEarlyExhaustionOnly(e16)) {
@@ -1791,6 +1805,8 @@ export function buildFinalDecision({
     action = "NO_ACTION";
   } else if (
     trigger.readinessLabel === "WATCH" ||
+    trigger.readinessLabel === "WATCH_FOR_SHORT" ||
+    trigger.readinessLabel === "WATCH_FOR_LONG" ||
     trigger.readinessLabel === "NEAR" ||
     trigger.readinessLabel === "ARMING" ||
     trigger.readinessLabel === "PREP"
