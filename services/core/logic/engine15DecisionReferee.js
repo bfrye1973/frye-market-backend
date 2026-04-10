@@ -1466,33 +1466,52 @@ function applyLifecycleOverride({
   return out;
 }
 
+// --- SIGNAL MEMORY (per session) ---
+const SIGNAL_MEMORY = {
+  lastSignal: null,
+};
+
 function buildSignalEvent({ engine16, winner } = {}) {
   const e16 = normalizeEngine16(engine16);
 
-  if (e16.exhaustionTrigger === true) {
-    return {
-      signalType: "EXHAUSTION",
-      direction:
-        e16.exhaustionTriggerShort ? "SHORT" :
-        e16.exhaustionTriggerLong ? "LONG" :
-        winner?.direction || "NONE",
-      signalTime: getTriggerSignalTime(e16),
-      signalPrice: getTriggerSignalPrice(e16),
-      signalSource: "ENGINE16_EXHAUSTION_TRIGGER",
-    };
+  const newSignal =
+    e16.exhaustionTrigger === true
+      ? {
+          signalType: "EXHAUSTION",
+          direction:
+            e16.exhaustionTriggerShort
+              ? "SHORT"
+              : e16.exhaustionTriggerLong
+              ? "LONG"
+              : winner?.direction || "NONE",
+          signalTime: getTriggerSignalTime(e16),
+          signalPrice: getTriggerSignalPrice(e16),
+          signalSource: "ENGINE16_EXHAUSTION_TRIGGER",
+        }
+      : e16.continuationTrigger === true
+      ? {
+          signalType: "CONTINUATION",
+          direction:
+            e16.continuationTriggerShort
+              ? "SHORT"
+              : e16.continuationTriggerLong
+              ? "LONG"
+              : winner?.direction || "NONE",
+          signalTime: getContinuationSignalTime(e16),
+          signalPrice:
+            getTriggerSignalPrice(e16) ?? null,
+          signalSource: "ENGINE16_CONTINUATION_TRIGGER",
+        }
+      : null;
+
+  // 🔒 LOCK FIRST VALID SIGNAL
+  if (newSignal && newSignal.signalPrice !== null) {
+    SIGNAL_MEMORY.lastSignal = newSignal;
   }
 
-  if (e16.continuationTrigger === true) {
-    return {
-      signalType: "CONTINUATION",
-      direction:
-        e16.continuationTriggerShort ? "SHORT" :
-        e16.continuationTriggerLong ? "LONG" :
-        winner?.direction || "NONE",
-      signalTime: getContinuationSignalTime(e16),
-      signalPrice: null,
-      signalSource: "ENGINE16_CONTINUATION_TRIGGER",
-    };
+  // 🧠 RETURN LOCKED SIGNAL IF EXISTS
+  if (SIGNAL_MEMORY.lastSignal) {
+    return SIGNAL_MEMORY.lastSignal;
   }
 
   return {
@@ -1503,234 +1522,6 @@ function buildSignalEvent({ engine16, winner } = {}) {
     signalSource: null,
   };
 }
-
-/* -----------------------------
-   Final decision
-------------------------------*/
-export function buildFinalDecision({
-  symbol = "SPY",
-  strategyId = null,
-  winner,
-  engine16,
-  engine5,
-  momentum,
-  permission,
-  engine3,
-  engine4,
-  zoneContext,
-} = {}) {
-  const p = normalizePermission(permission);
-  const e16 = normalizeEngine16(engine16);
-
-  const resolvedWinner = {
-    ...winner,
-    direction: deriveDirectionFromHTFContext({ winner, engine16, momentum }),
-  };
-
-  const direction = safeUpper(resolvedWinner?.direction, "NONE");
-
-  const hard = evaluateHardBlockers({
-    strategyId,
-    winner: resolvedWinner,
-    permission,
-    zoneContext,
-    engine16,
-  });
-
-  if (safeUpper(resolvedWinner?.strategyType, "NONE") === "NONE") {
-  hard.hardBlocked = false;
-  hard.blockers = [];
-}
-
-  const quality = evaluateQualityGate({
-    engine5,
-  });
-  if (!resolvedWinner || resolvedWinner.strategyType === "NONE") {
-  quality.blockers = [];
-}
-  const mom = evaluateMomentumGate({
-    strategyId,
-    winner: resolvedWinner,
-    momentum,
-  });
-
-  const triggerBase = evaluateTriggerReadiness({
-    strategyId,
-    winner: resolvedWinner,
-    engine16,
-    engine3,
-    engine4,
-    momentum,
-    qualityGate: quality,
-    momentumGate: mom,
-    hardBlockers: hard,
-  });
-
-  const lifecycle = buildLifecycle({
-    strategyId,
-    winner: resolvedWinner,
-    engine16,
-    zoneContext,
-  });
-
-  const trigger = applyLifecycleOverride({
-    trigger: triggerBase,
-    lifecycle,
-  });
-
-  let executionBias = VALID_BIAS.has(mom.executionBias) ? mom.executionBias : "NONE";
-
-  const hasPriorityBias =
-    executionBias === "SHORT_PRIORITY" ||
-    executionBias === "LONG_PRIORITY" ||
-    executionBias === "SHORT_COUNTERTREND" ||
-    executionBias === "LONG_COUNTERTREND";
-
-  if (!hasPriorityBias) {
-    if (e16.prepBias === "SHORT_PREP" || e16.prepBias === "LONG_PREP") {
-      executionBias = e16.prepBias;
-    }
-  }
-  
-  let action = "NO_ACTION";
-
-  if (isEarlyExhaustionOnly(e16)) {
-    action = "WATCH";
-  } else if (lifecycle?.lifecycleStage === "COMPLETED") {
-    action = "NO_ACTION";
-  } else if (trigger.readinessLabel === "STAND_DOWN") {
-    if (
-      e16.readinessLabel === "PULLBACK_READY" ||
-      e16.readinessLabel === "WATCH" ||
-      e16.readinessLabel === "NEAR"
-    ) {
-      action = "WATCH";
-    } else {
-      action = "BLOCKED";
-    }
-  } else if (trigger.readinessLabel === "WAIT") {
-    action = "NO_ACTION";
-  } else if (
-    trigger.readinessLabel === "WATCH" ||
-    trigger.readinessLabel === "WATCH_FOR_SHORT" ||
-    trigger.readinessLabel === "WATCH_FOR_LONG" ||
-    trigger.readinessLabel === "NEAR" ||
-    trigger.readinessLabel === "ARMING" ||
-    trigger.readinessLabel === "PREP"
-  ) {
-    action = "WATCH";
-  } else if (trigger.readinessLabel === "READY") {
-    const ema10 = e16.ema10 ?? null;
-    const ema20 = e16.ema20 ?? null;
-    const price = lifecycle?.currentPrice ?? null;
-
-    let emaFilterPass = false;
-
-    if (direction === "SHORT") {
-      emaFilterPass =
-        (price !== null && ema10 !== null && price < ema10) ||
-        (ema10 !== null && ema20 !== null && ema10 < ema20);
-    }
-
-    if (direction === "LONG") {
-      emaFilterPass =
-        (price !== null && ema10 !== null && price > ema10) ||
-        (ema10 !== null && ema20 !== null && ema10 > ema20);
-    }
-
-    if (!emaFilterPass) {
-      action = "WATCH";
-    } else {
-      action =
-        p.permission === "REDUCE"
-          ? "REDUCE_OK"
-          : p.permission === "ALLOW"
-          ? "ENTER_OK"
-          : "BLOCKED";
-    }
-  } else if (
-    trigger.readinessLabel === "CONFIRMED" ||
-    trigger.readinessLabel === "TRIGGERED"
-  ) {
-    action =
-      p.permission === "ALLOW"
-        ? "ENTER_OK"
-        : p.permission === "REDUCE"
-        ? "REDUCE_OK"
-        : "BLOCKED";
-  }
-
-  if (!VALID_ACTIONS.has(action)) action = "NO_ACTION";
-
-  const reasonCodes = [
-    ...(trigger.reasonCodes || []),
-    ...(quality.reasonCodes || []),
-    ...(mom.reasonCodes || []),
-    ...(resolvedWinner?.htfReasonCodes || []),
-  ];
-
-  const blockers = [
-    ...(hard.blockers || []),
-    ...(quality.blockers || []),
-    ...(mom.blockers || []),
-    ...(trigger.blockers || []),
-  ];
-
-  const conflicts = [
-    ...(hard.conflicts || []),
-    ...(mom.conflicts || []),
-  ];
-
-  const signalEvent = buildSignalEvent({
-    engine16: e16,
-    winner: resolvedWinner,
-  });
-
-  return {
-    ok: true,
-    engine: "engine15.decisionReferee.v8.4",
-    symbol,
-    strategyId,
-    strategyType: trigger.promotedStrategyType || resolvedWinner?.strategyType || "NONE",
-    direction: resolvedWinner?.direction || "NONE",
-    readinessLabel: trigger.readinessLabel,
-    executionBias,
-    action,
-    priority: Number.isFinite(Number(resolvedWinner?.priority)) ? Number(resolvedWinner.priority) : 0,
-    entryStyle: trigger.entryStyle || "NONE",
-    freshEntryNow: trigger.freshEntryNow === true,
-    reasonCodes: [...new Set(reasonCodes)],
-    blockers: [...new Set(blockers)],
-    conflicts: [...new Set(conflicts)],
-    qualityGatePassed: quality.qualityGatePassed === true,
-    momentumGatePassed: mom.momentumGatePassed === true,
-    permissionGatePassed: p.permission === "ALLOW" || p.permission === "REDUCE",
-    qualityScore: quality.qualityScore,
-    qualityGrade: quality.qualityGrade,
-    qualityBand: quality.qualityBand,
-    qualityBreakdown: quality.qualityBreakdown || {
-      engine1: 0,
-      engine2: 0,
-      engine3: 0,
-      engine4: 0,
-      compression: 0,
-    },
-    permission: p.permission,
-    sizeMultiplier: p.sizeMultiplier,
-    setupChain: Array.isArray(trigger.setupChain) ? trigger.setupChain : [],
-    nextSetupType: trigger.nextSetupType || "NONE",
-    primaryExhaustionTF: resolvedWinner?.primaryExhaustionTF || null,
-    signalEvent,
-    lifecycle,
-    debug: {
-      hardBlockers: hard,
-      quality,
-      momentum: mom,
-      trigger,
-    },
-  };
-}
-
 /* -----------------------------
    Main entry
 ------------------------------*/
