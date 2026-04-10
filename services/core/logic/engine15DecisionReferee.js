@@ -1404,39 +1404,48 @@ function buildLifecycle({
     e16.continuationTriggerShort === true ||
     e16.continuationTriggerLong === true;
 
-  if (!hasRealTrigger) {
-    const currentPrice = extractCurrentPrice(zoneContext);
+  const currentPrice = extractCurrentPrice(zoneContext);
 
-    return {
-      lifecycleStage: "BUILDING",
-      isFreshSetup: true,
-      entryWindowOpen: false,
-      freshEntryNow: false,
-      signalPrice: null,
-      currentPrice,
-      barsSinceSignal: null,
-      moveFromSignalPts: null,
-      moveFromSignalAtr: null,
-      zonesInPath: [],
-      zonesHit: 0,
-      targetCount: 0,
-      targetProgress01: 0,
-      firstTargetHit: false,
-      secondTargetHit: false,
-      tp1Zone: null,
-      tp2Zone: null,
-      tp1Reclaimed: false,
-      block2Protected: false,
-      block2ExitReason: null,
-      runnerActive: false,
-      runnerExitTriggered: false,
-      runnerExitReason: null,
-      ema10_30m: null,
-      setupCompleted: false,
-      edgeRemainingPct: 100,
-      nextFocus: "WAIT_FOR_TRIGGER",
-    };
+  let moveFromSignalPts = null;
+  if (signalPrice != null && currentPrice != null) {
+    moveFromSignalPts = round2(currentPrice - signalPrice);
   }
+
+  let nextFocus = "WAIT_FOR_TRIGGER";
+  if (hasRealTrigger) {
+    nextFocus = "WAIT_FOR_EXECUTION";
+  }
+
+  return {
+    lifecycleStage: "NO_TRADE",
+    isFreshSetup: hasRealTrigger,
+    entryWindowOpen: false,
+    freshEntryNow: false,
+    signalPrice,
+    currentPrice,
+    barsSinceSignal: null,
+    moveFromSignalPts,
+    moveFromSignalAtr: null,
+    zonesInPath: [],
+    zonesHit: 0,
+    targetCount: 0,
+    targetProgress01: 0,
+    firstTargetHit: false,
+    secondTargetHit: false,
+    tp1Zone: null,
+    tp2Zone: null,
+    tp1Reclaimed: false,
+    block2Protected: false,
+    block2ExitReason: null,
+    runnerActive: false,
+    runnerExitTriggered: false,
+    runnerExitReason: null,
+    ema10_30m: null,
+    setupCompleted: false,
+    edgeRemainingPct: 100,
+    nextFocus,
+  };
+}
 
   const currentPrice = extractCurrentPrice(zoneContext);
   const direction = winner?.direction || "NONE";
