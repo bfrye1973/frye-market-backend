@@ -108,26 +108,20 @@ function normalizeDirection(x, engine16 = null) {
   const s = safeUpper(x, "NONE");
   if (["LONG", "SHORT", "NONE"].includes(s)) return s;
 
-  // Exhaustion / reversal direction truth
   if (engine16?.exhaustionTriggerShort === true) return "SHORT";
   if (engine16?.exhaustionTriggerLong === true) return "LONG";
   if (engine16?.exhaustionShort === true) return "SHORT";
   if (engine16?.exhaustionLong === true) return "LONG";
 
-  // Continuation trigger direction truth
   if (engine16?.continuationTriggerShort === true) return "SHORT";
   if (engine16?.continuationTriggerLong === true) return "LONG";
 
-  // Breakout / breakdown direction truth
   if (engine16?.breakdownReady === true) return "SHORT";
   if (engine16?.breakoutReady === true) return "LONG";
 
-  // Rejection-based direction truth
   if (engine16?.wickRejectionShort === true) return "SHORT";
   if (engine16?.wickRejectionLong === true) return "LONG";
 
-  // Advisory continuation watch flags intentionally do NOT become
-  // full direction truth here. They are prep-only.
   return "NONE";
 }
 
@@ -224,8 +218,8 @@ function normalizeZoneContext(ctx = null) {
       ctx?.validLocation === true
         ? true
         : ctx?.validLocation === false
-        ? false
-        : null,
+          ? false
+          : null,
     meta: ctx?.meta || null,
     active: ctx?.active || null,
     nearest: ctx?.nearest || null,
@@ -377,7 +371,6 @@ function deriveDirectionFromHTFContext({ winner, engine16, momentum } = {}) {
   if (e16.exhaustionShort) return "SHORT";
   if (e16.exhaustionLong) return "LONG";
 
-  // Continuation trigger direction truth
   if (e16.continuationTriggerShort) return "SHORT";
   if (e16.continuationTriggerLong) return "LONG";
 
@@ -395,10 +388,7 @@ function deriveDirectionFromHTFContext({ winner, engine16, momentum } = {}) {
 }
 
 function isEarlyExhaustionOnly(e16) {
-  return (
-    e16?.exhaustionEarly === true &&
-    e16?.exhaustionTrigger !== true
-  );
+  return e16?.exhaustionEarly === true && e16?.exhaustionTrigger !== true;
 }
 
 function getTriggerSignalTime(e16) {
@@ -677,12 +667,12 @@ export function evaluateHardBlockers({
   const earlyOnly = isEarlyExhaustionOnly(e16);
 
   if (!earlyOnly) {
-  if (winner?.strategyType && winner.strategyType !== "NONE") {
-    if (winner?.direction === "NONE") {
-      blockers.push("NO_DIRECTION");
+    if (winner?.strategyType && winner.strategyType !== "NONE") {
+      if (winner?.direction === "NONE") {
+        blockers.push("NO_DIRECTION");
+      }
     }
   }
-}
 
   if (p.permission === "STAND_DOWN") {
     softBlockers.push("E6_STAND_DOWN");
@@ -846,7 +836,6 @@ export function evaluateMomentumGate({
     smi1hDirection: smi1h,
   };
 }
-
 /* -----------------------------
    Continuation promotion
 ------------------------------*/
@@ -967,7 +956,11 @@ function buildSetupChain({
     chain.push("CONTINUATION");
   }
 
-  if (e16.hasPulledBack || e16.strategyType === "PULLBACK" || e16.readinessLabel === "PULLBACK_READY") {
+  if (
+    e16.hasPulledBack ||
+    e16.strategyType === "PULLBACK" ||
+    e16.readinessLabel === "PULLBACK_READY"
+  ) {
     chain.push("PULLBACK");
   }
 
@@ -1090,23 +1083,20 @@ export function evaluateTriggerReadiness({
     };
   }
 
-  const isScalp = String(strategyId || "").toLowerCase().includes("intraday_scalp");
-  const isWatchState = engine16?.readinessLabel === "WATCH";
+  if (!winner || winner.strategyType === "NONE") {
+    return {
+      readinessLabel: "WAIT",
+      entryStyle: "NONE",
+      triggerConfirmed: false,
+      freshEntryNow: false,
+      reasonCodes: ["NO_SETUP"],
+      blockers: [],
+      promotedStrategyType: "NONE",
+      nextSetupType: "WAIT_FOR_TRIGGER",
+      setupChain: [],
+    };
+  }
 
- if (!winner || winner.strategyType === "NONE") {
-  return {
-    readinessLabel: "WAIT",
-    entryStyle: "NONE",
-    triggerConfirmed: false,
-    freshEntryNow: false,
-    reasonCodes: ["NO_SETUP"],
-    blockers: [],
-    promotedStrategyType: "NONE",
-    nextSetupType: "WAIT_FOR_TRIGGER",
-    setupChain: [],
-  };
-}
-    
   const qualityPass = qualityGate?.qualityGatePassed === true;
   const momentumPass = momentumGate?.momentumGatePassed === true;
 
@@ -1186,7 +1176,6 @@ export function evaluateTriggerReadiness({
     }
   }
 
-  // Continuation trigger should be treated as actionable trigger truth.
   if (winner.strategyType === "CONTINUATION" && e16.continuationTrigger === true) {
     readinessLabel = "READY";
     entryStyle = "CONTINUATION_TRIGGER";
@@ -1380,11 +1369,11 @@ function buildLifecycle({
         toNum(zc?.active?.shelf?.hi) ??
         null
       : e16.continuationTriggerLong === true
-      ? toNum(zc?.active?.negotiated?.lo) ??
-        toNum(zc?.active?.institutional?.lo) ??
-        toNum(zc?.active?.shelf?.lo) ??
-        null
-      : null;
+        ? toNum(zc?.active?.negotiated?.lo) ??
+          toNum(zc?.active?.institutional?.lo) ??
+          toNum(zc?.active?.shelf?.lo) ??
+          null
+        : null;
 
   const signalPrice =
     getTriggerSignalPrice(e16) ??
@@ -1408,13 +1397,10 @@ function buildLifecycle({
 
   let moveFromSignalPts = null;
   if (signalPrice != null && currentPrice != null) {
-    moveFromSignalPts = round2(currentPrice - signalPrice);
+    moveFromSignalPts = Math.round((currentPrice - signalPrice) * 100) / 100;
   }
 
-  let nextFocus = "WAIT_FOR_TRIGGER";
-  if (hasRealTrigger) {
-    nextFocus = "WAIT_FOR_EXECUTION";
-  }
+  const nextFocus = hasRealTrigger ? "WAIT_FOR_EXECUTION" : "WAIT_FOR_TRIGGER";
 
   return {
     lifecycleStage: "NO_TRADE",
@@ -1447,208 +1433,6 @@ function buildLifecycle({
   };
 }
 
-  const currentPrice = extractCurrentPrice(zoneContext);
-  const direction = winner?.direction || "NONE";
-
-  const ladders = [];
-  const activeInst = zc?.active?.institutional;
-  const activeNeg = zc?.active?.negotiated;
-  const activeShelf = zc?.active?.shelf;
-
-  if (activeInst) ladders.push(makeZoneCandidate(activeInst, "INSTITUTIONAL", 1));
-  if (activeNeg) ladders.push(makeZoneCandidate(activeNeg, "NEGOTIATED", 2));
-  if (activeShelf) ladders.push(makeZoneCandidate(activeShelf, safeUpper(activeShelf?.type, "SHELF"), 3));
-
-  let tpIndex = ladders.length + 1;
-
-  for (const z of zc.render.negotiated) {
-    ladders.push(makeZoneCandidate(z, "NEGOTIATED", tpIndex++));
-  }
-  for (const z of zc.render.institutional) {
-    ladders.push(makeZoneCandidate(z, "INSTITUTIONAL", tpIndex++));
-  }
-  for (const z of zc.render.shelves) {
-    ladders.push(makeZoneCandidate(z, safeUpper(z?.type, "SHELF"), tpIndex++));
-  }
-
-  const path = sortZonesForDirection(
-    dedupeZones(ladders),
-    direction,
-    signalPrice
-  );
-
-  for (const z of path) {
-    z.hit = isZoneHit(z, direction, currentPrice);
-  }
-
-  const zonesHit = path.filter((z) => z.hit).length;
-  const tp1Zone = path[0] || null;
-  const tp2Zone = path[1] || null;
-
-  const firstTargetHit = tp1Zone ? tp1Zone.hit === true : false;
-  const secondTargetHit = tp2Zone ? tp2Zone.hit === true : false;
-
-  let lifecycleStage = "BUILDING";
-  let runnerActive = false;
-  let runnerExitTriggered = false;
-  let runnerExitReason = null;
-  let edgeRemainingPct = 100;
-  let nextFocus = "WAIT_FOR_TRIGGER";
-  let setupCompleted = false;
-  let freshEntryNow = false;
-
-  if (firstTargetHit && !secondTargetHit) {
-    lifecycleStage = "PARTIALLY_COMPLETED";
-    runnerActive = true;
-    edgeRemainingPct = 66;
-    nextFocus = "LOOK_FOR_CONTINUATION_TO_NEXT_ZONE";
-  }
-
-  if (firstTargetHit && secondTargetHit) {
-    lifecycleStage = "MATURE";
-    runnerActive = true;
-    edgeRemainingPct = 33;
-    nextFocus = "MANAGE_RUNNER";
-  }
-
-  if (
-    macroMidpointHit({
-      zoneContext: zc,
-      currentPrice,
-      direction,
-    })
-  ) {
-    lifecycleStage = "COMPLETED";
-    runnerActive = false;
-    runnerExitTriggered = true;
-    runnerExitReason = "MACRO_MIDPOINT_HIT";
-    edgeRemainingPct = 0;
-    setupCompleted = true;
-    freshEntryNow = false;
-    nextFocus = "LOOK_FOR_NEXT_SETUP";
-  }
-
-  const oppositeSignalReset =
-    (direction === "SHORT" && (
-      e16.exhaustionLong === true ||
-      e16.exhaustionTriggerLong === true ||
-      e16.breakoutReady === true ||
-      e16.wickRejectionLong === true ||
-      e16.continuationTriggerLong === true
-    )) ||
-    (direction === "LONG" && (
-      e16.exhaustionShort === true ||
-      e16.exhaustionTriggerShort === true ||
-      e16.breakdownReady === true ||
-      e16.wickRejectionShort === true ||
-      e16.continuationTriggerShort === true
-    ));
-
-  if (oppositeSignalReset) {
-    return {
-      lifecycleStage: "BUILDING",
-      isFreshSetup: true,
-      entryWindowOpen: false,
-      freshEntryNow: false,
-      signalPrice: null,
-      currentPrice,
-      barsSinceSignal: null,
-      moveFromSignalPts: null,
-      moveFromSignalAtr: null,
-      zonesInPath: [],
-      zonesHit: 0,
-      targetCount: 0,
-      targetProgress01: 0,
-      firstTargetHit: false,
-      secondTargetHit: false,
-      tp1Zone: null,
-      tp2Zone: null,
-      tp1Reclaimed: false,
-      block2Protected: false,
-      block2ExitReason: "OPPOSITE_SIGNAL_RESET",
-      runnerActive: false,
-      runnerExitTriggered: true,
-      runnerExitReason: "OPPOSITE_SIGNAL_RESET",
-      ema10_30m: null,
-      setupCompleted: false,
-      edgeRemainingPct: 100,
-      nextFocus: "WAIT_FOR_TRIGGER",
-    };
-  }
-
-  if (
-    lifecycleStage === "MATURE" &&
-    firstTargetHit &&
-    secondTargetHit &&
-    zonesHit >= 3
-  ) {
-    runnerActive = false;
-    runnerExitTriggered = true;
-    runnerExitReason = "RUNNER_EXIT_PATH_EXTENDED";
-    lifecycleStage = "COMPLETED";
-    edgeRemainingPct = 0;
-    setupCompleted = true;
-    freshEntryNow = false;
-    nextFocus = "LOOK_FOR_NEXT_SETUP";
-  }
-
-  const targetProgress01 =
-    secondTargetHit ? 1 : firstTargetHit ? 0.7 : 0;
-
-  return {
-    lifecycleStage,
-    isFreshSetup: lifecycleStage === "BUILDING",
-    entryWindowOpen: lifecycleStage === "BUILDING",
-    freshEntryNow,
-    signalPrice,
-    currentPrice,
-    barsSinceSignal: null,
-    moveFromSignalPts:
-      Number.isFinite(signalPrice) && Number.isFinite(currentPrice)
-        ? Math.abs(currentPrice - signalPrice)
-        : null,
-    moveFromSignalAtr: null,
-    zonesInPath: path,
-    zonesHit,
-    targetCount: Math.min(2, path.length),
-    targetProgress01,
-    firstTargetHit,
-    secondTargetHit,
-    tp1Zone: tp1Zone
-      ? {
-          id: tp1Zone.id,
-          type: tp1Zone.type,
-          lo: tp1Zone.lo,
-          hi: tp1Zone.hi,
-          mid: tp1Zone.mid,
-          strength: tp1Zone.strength,
-          tpSlot: tp1Zone.tpSlot,
-        }
-      : null,
-    tp2Zone: tp2Zone
-      ? {
-          id: tp2Zone.id,
-          type: tp2Zone.type,
-          lo: tp2Zone.lo,
-          hi: tp2Zone.hi,
-          mid: tp2Zone.mid,
-          strength: tp2Zone.strength,
-          tpSlot: tp2Zone.tpSlot,
-        }
-      : null,
-    tp1Reclaimed: false,
-    block2Protected: false,
-    block2ExitReason: null,
-    runnerActive,
-    runnerExitTriggered,
-    runnerExitReason,
-    ema10_30m: null,
-    setupCompleted,
-    edgeRemainingPct,
-    nextFocus,
-  };
-}
-
 function applyLifecycleOverride({
   trigger,
   lifecycle,
@@ -1675,9 +1459,9 @@ function buildSignalEvent({ engine16, winner } = {}) {
     return {
       signalType: "EXHAUSTION",
       direction:
-        e16.exhaustionTriggerShort ? "SHORT" :
-        e16.exhaustionTriggerLong ? "LONG" :
-        winner?.direction || "NONE",
+        e16.exhaustionTriggerShort ? "SHORT"
+          : e16.exhaustionTriggerLong ? "LONG"
+            : winner?.direction || "NONE",
       signalTime: getTriggerSignalTime(e16),
       signalPrice: getTriggerSignalPrice(e16),
       signalSource: "ENGINE16_EXHAUSTION_TRIGGER",
@@ -1688,9 +1472,9 @@ function buildSignalEvent({ engine16, winner } = {}) {
     return {
       signalType: "CONTINUATION",
       direction:
-        e16.continuationTriggerShort ? "SHORT" :
-        e16.continuationTriggerLong ? "LONG" :
-        winner?.direction || "NONE",
+        e16.continuationTriggerShort ? "SHORT"
+          : e16.continuationTriggerLong ? "LONG"
+            : winner?.direction || "NONE",
       signalTime: getContinuationSignalTime(e16),
       signalPrice: null,
       signalSource: "ENGINE16_CONTINUATION_TRIGGER",
@@ -1740,16 +1524,18 @@ export function buildFinalDecision({
   });
 
   if (safeUpper(resolvedWinner?.strategyType, "NONE") === "NONE") {
-  hard.hardBlocked = false;
-  hard.blockers = [];
-}
+    hard.hardBlocked = false;
+    hard.blockers = [];
+  }
 
   const quality = evaluateQualityGate({
     engine5,
   });
+
   if (!resolvedWinner || resolvedWinner.strategyType === "NONE") {
-  quality.blockers = [];
-}
+    quality.blockers = [];
+  }
+
   const mom = evaluateMomentumGate({
     strategyId,
     winner: resolvedWinner,
@@ -1793,7 +1579,7 @@ export function buildFinalDecision({
       executionBias = e16.prepBias;
     }
   }
-  
+
   let action = "NO_ACTION";
 
   if (isEarlyExhaustionOnly(e16)) {
@@ -1847,8 +1633,8 @@ export function buildFinalDecision({
         p.permission === "REDUCE"
           ? "REDUCE_OK"
           : p.permission === "ALLOW"
-          ? "ENTER_OK"
-          : "BLOCKED";
+            ? "ENTER_OK"
+            : "BLOCKED";
     }
   } else if (
     trigger.readinessLabel === "CONFIRMED" ||
@@ -1858,8 +1644,8 @@ export function buildFinalDecision({
       p.permission === "ALLOW"
         ? "ENTER_OK"
         : p.permission === "REDUCE"
-        ? "REDUCE_OK"
-        : "BLOCKED";
+          ? "REDUCE_OK"
+          : "BLOCKED";
   }
 
   if (!VALID_ACTIONS.has(action)) action = "NO_ACTION";
@@ -1898,7 +1684,9 @@ export function buildFinalDecision({
     readinessLabel: trigger.readinessLabel,
     executionBias,
     action,
-    priority: Number.isFinite(Number(resolvedWinner?.priority)) ? Number(resolvedWinner.priority) : 0,
+    priority: Number.isFinite(Number(resolvedWinner?.priority))
+      ? Number(resolvedWinner.priority)
+      : 0,
     entryStyle: trigger.entryStyle || "NONE",
     freshEntryNow: trigger.freshEntryNow === true,
     reasonCodes: [...new Set(reasonCodes)],
@@ -2020,7 +1808,7 @@ export function computeEngine15DecisionReferee({
         signalSource: null,
       },
       lifecycle: {
-        lifecycleStage: "BUILDING",
+        lifecycleStage: "NO_TRADE",
         isFreshSetup: false,
         entryWindowOpen: false,
         freshEntryNow: false,
