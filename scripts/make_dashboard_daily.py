@@ -478,7 +478,7 @@ def main():
     risk_on = compute_sectorcards_risk_on(cards)
 
     score_raw = float(W_EMA_STRUCT * ema_structure + W_BREADTH_CONF * breadth_confirm + W_CONDITIONS * conditions)
-    score = apply_score_guardrails(
+    score = apply_eod_score_guardrails(
         state=state,
         state_label=state_label,
         score=score_raw,
