@@ -523,9 +523,9 @@ def main():
     if ema_gap_20_50 < 1.50:
         trend_quality *= 0.80
 
-    # price sitting too close to the daily 20 EMA = not true expansion
+    # price sitting too close to the daily 20 EMA
     if dist_from_20 < 1.00:
-    trend_quality *= 0.80
+        trend_quality *= 0.80
 
     score = score * trend_quality
 
