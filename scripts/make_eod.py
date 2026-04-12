@@ -508,13 +508,26 @@ def main():
         above200=bool(above200),
     )
 
-    # --- COMPRESSION CAP (CRITICAL FIX) ---
-    ema_gap_10_20 = abs((e10 - e20) / e20) * 100 if e20 != 0 else 0
-    dist_from_10 = abs((close - e10) / e10) * 100 if e10 != 0 else 0
+    # --- TREND QUALITY ADJUSTMENT (SAFE) ---
+    ema_gap_10_20 = abs((e10 - e20) / e20) * 100 if e20 != 0 else 0.0
+    ema_gap_20_50 = abs((e20 - e50) / e50) * 100 if e50 != 0 else 0.0
+    dist_from_20 = abs((close - e20) / e20) * 100 if e20 != 0 else 0.0
 
-    # If EMAs are tight AND price is sitting on them → compression
-    if ema_gap_10_20 < 0.15 and dist_from_10 < 0.25:
-        score = min(score, 55.0)
+    trend_quality = 1.0
+
+    # weak short-term EMA separation
+    if ema_gap_10_20 < 0.80:
+        trend_quality *= 0.80
+
+    # weak intermediate separation
+    if ema_gap_20_50 < 1.50:
+        trend_quality *= 0.80
+
+    # price sitting too close to the daily 20 EMA = not true expansion
+    if dist_from_20 < 1.00:
+    trend_quality *= 0.80
+
+    score = score * trend_quality
 
     allow_exits = True
     allow_entries = (not no_entries)
