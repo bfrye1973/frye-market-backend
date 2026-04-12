@@ -493,7 +493,7 @@ def main():
     ema_gap_20_50 = abs((e20 - e50) / e50) * 100 if e50 != 0 else 0.0
     dist_from_20 = abs((close - e20) / e20) * 100 if e20 != 0 else 0.0
 
-    if above200 and ema_gap_10_20 < 0.60:
+    if above200 and ema_gap_10_20 < 1.2:
         score = min(score, 55.0)
 
     # trade gate from PSI regime
