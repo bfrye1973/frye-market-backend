@@ -47,9 +47,8 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-
 // WHO AM I TEST ROUTE
-app.get("/__whoami", (req, res) => {
+app.get("/__whoami", (_req, res) => {
   res.json({
     backend: "BACKEND-CORE-R12.8",
     ts: new Date().toISOString(),
@@ -67,7 +66,6 @@ app.use((req, res, next) => {
 
   res.setHeader("Access-Control-Allow-Origin", origin || "*");
   res.setHeader("Vary", "Origin");
-
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST,PUT,DELETE");
 
   const reqHdrs = req.headers["access-control-request-headers"];
@@ -85,7 +83,10 @@ app.use((req, res, next) => {
 
   res.setHeader("Access-Control-Allow-Credentials", "true");
 
-  if (req.method === "OPTIONS") return res.sendStatus(204);
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
   next();
 });
 
@@ -93,13 +94,21 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, "public")));
 
 // --- Health endpoints ---
-app.get("/healthz", (_req, res) =>
-  res.json({ ok: true, service: "core", ts: new Date().toISOString() })
-);
+app.get("/healthz", (_req, res) => {
+  res.json({
+    ok: true,
+    service: "core",
+    ts: new Date().toISOString(),
+  });
+});
 
-app.get("/api/health", (_req, res) =>
-  res.json({ ok: true, service: "core", ts: new Date().toISOString() })
-);
+app.get("/api/health", (_req, res) => {
+  res.json({
+    ok: true,
+    service: "core",
+    ts: new Date().toISOString(),
+  });
+});
 
 // --- Root splash ---
 app.get("/", (_req, res) => {
@@ -141,11 +150,14 @@ app.use("/api/v1", tradePermissionRouter);
 app.use("/api/v1", engine15AlertsRouter);
 app.use("/api/v1", engine21AlignmentRoute);
 
-
 // --- 404 / errors ---
-app.use((req, res) =>
-  res.status(404).json({ ok: false, error: "Not Found", path: req.path })
-);
+app.use((req, res) => {
+  res.status(404).json({
+    ok: false,
+    error: "Not Found",
+    path: req.path,
+  });
+});
 
 app.use((err, _req, res, _next) => {
   console.error("[server] unhandled:", err?.stack || err);
@@ -189,14 +201,21 @@ function runStartupSnapshotBuild() {
   child.on("close", (code) => {
     if (code === 0) {
       console.log(`[startup-snapshot] SUCCESS @ ${new Date().toISOString()}`);
-      if (stdout.trim()) console.log(stdout.trim());
+      if (stdout.trim()) {
+        console.log(stdout.trim());
+      }
     } else {
       console.error(
         `[startup-snapshot] FAIL @ ${new Date().toISOString()} | code=${code}`
       );
-      if (stdout.trim()) console.log(stdout.trim());
-      if (stderr.trim()) console.error(stderr.trim());
+      if (stdout.trim()) {
+        console.log(stdout.trim());
+      }
+      if (stderr.trim()) {
+        console.error(stderr.trim());
+      }
     }
+
     STARTUP_SNAPSHOT_RUNNING = false;
   });
 
@@ -227,6 +246,7 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/v1/dashboard-snapshot");
   console.log("- /api/v1/run-all-engines   ✅ cron trigger");
   console.log("- /api/v1/trade-permission  ✅ Engine 6");
+  console.log("- /api/v1/engine21-alignment  ✅ Engine 21");
   console.log("- /live  (GitHub JSON proxies)");
 
   // Build snapshot after server is already listening
