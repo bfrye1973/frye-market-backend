@@ -1,39 +1,18 @@
 // services/core/logic/engine21Alignment.js
-// Engine 21 — Cross-Index Alignment (ESM)
+// Engine 21 — Cross-Index Alignment
+// SAFE VERSION: uses existing /api/v1/ohlc route exactly as-is
 
-import { fetchOhlc } from "../utils/ohlcHelper.js";
-
-// --- CONFIG ---
 const SYMBOLS = ["SPY", "QQQ", "DIA", "VIX"];
 const DEFAULT_TF = "30m";
 const MIN_BARS_REQUIRED = 25;
 const SCORE_PER_COMPONENT = 25;
 
-// --- HELPERS ---
-function toNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function extractClose(bar) {
-  if (!bar || typeof bar !== "object") return null;
-
-  return (
-    toNumber(bar.c) ??
-    toNumber(bar.close) ??
-    toNumber(bar.C) ??
-    null
-  );
-}
-
 function computeEMA(values, length) {
-  if (!Array.isArray(values) || values.length === 0) return null;
-  if (!Number.isInteger(length) || length <= 0) return null;
-  if (values.length < length) return null;
+  if (!Array.isArray(values) || values.length < length) return null;
 
   const k = 2 / (length + 1);
-
   let ema = values[0];
+
   for (let i = 1; i < values.length; i += 1) {
     ema = values[i] * k + ema * (1 - k);
   }
@@ -81,7 +60,34 @@ function buildComponentPayload({
   };
 }
 
-// --- MAIN ENGINE ---
+async function fetchBarsFromExistingOhlcRoute({ symbol, tf }) {
+  const port = Number(process.env.PORT) || 8080;
+  const baseUrl =
+    process.env.ENGINE21_OHLC_BASE_URL ||
+    `http://127.0.0.1:${port}`;
+
+  const url =
+    `${baseUrl}/api/v1/ohlc` +
+    `?symbol=${encodeURIComponent(symbol)}` +
+    `&timeframe=${encodeURIComponent(tf)}` +
+    `&limit=200`;
+
+  const res = await fetch(url, { cache: "no-store" });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`OHLC route failed ${res.status}: ${txt}`);
+  }
+
+  const data = await res.json();
+
+  if (!Array.isArray(data)) {
+    throw new Error("OHLC route did not return an array");
+  }
+
+  return data;
+}
+
 export async function computeEngine21Alignment({ tf = DEFAULT_TF } = {}) {
   const components = {};
   let bullishScore = 0;
@@ -89,7 +95,7 @@ export async function computeEngine21Alignment({ tf = DEFAULT_TF } = {}) {
 
   for (const symbol of SYMBOLS) {
     try {
-      const candles = await fetchOhlc({ symbol, tf });
+      const candles = await fetchBarsFromExistingOhlcRoute({ symbol, tf });
 
       if (!Array.isArray(candles) || candles.length < MIN_BARS_REQUIRED) {
         components[symbol] = buildComponentPayload({
@@ -104,7 +110,7 @@ export async function computeEngine21Alignment({ tf = DEFAULT_TF } = {}) {
       }
 
       const closes = candles
-        .map(extractClose)
+        .map((c) => Number(c.close))
         .filter((v) => Number.isFinite(v));
 
       if (closes.length < MIN_BARS_REQUIRED) {
