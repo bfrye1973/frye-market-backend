@@ -2,7 +2,7 @@
 // Engine 21 — Cross-Index Alignment
 // SAFE VERSION: uses existing /api/v1/ohlc route exactly as-is
 
-const SYMBOLS = ["SPY", "QQQ", "DIA", "VIX"];
+const SYMBOLS = ["SPY", "QQQ", "DIA", "UVXY"];
 const DEFAULT_TF = "30m";
 const MIN_BARS_REQUIRED = 25;
 const SCORE_PER_COMPONENT = 25;
