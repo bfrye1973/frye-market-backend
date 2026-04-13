@@ -172,16 +172,18 @@ export async function computeEngine21Alignment({ tf = DEFAULT_TF } = {}) {
   const alignmentScore = Math.max(bullishScore, bearishScore);
 
   if (bullishScore === 100) {
-    alignmentState = "FULL_BULL_ALIGNMENT";
-    bullishAligned = true;
-  } else if (bearishScore === 100) {
-    alignmentState = "FULL_BEAR_ALIGNMENT";
-    bearishAligned = true;
-  } else if (bullishScore >= 75 || bearishScore >= 75) {
-    alignmentState = "PARTIAL_ALIGNMENT";
-  } else if (bullishScore > 0 && bearishScore > 0) {
-    alignmentState = "MIXED_ALIGNMENT";
-  }
+  alignmentState = "FULL_BULL_ALIGNMENT";
+  bullishAligned = true;
+} else if (bearishScore === 100) {
+  alignmentState = "FULL_BEAR_ALIGNMENT";
+  bearishAligned = true;
+} else if (bullishScore >= 75 || bearishScore >= 75) {
+  alignmentState = "PARTIAL_ALIGNMENT";
+} else if (bullishScore >= 50 || bearishScore >= 50) {
+  alignmentState = "MIXED_ALIGNMENT";
+} else {
+  alignmentState = "NO_ALIGNMENT";
+}
 
   return {
     ok: true,
