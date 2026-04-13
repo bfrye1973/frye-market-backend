@@ -221,6 +221,35 @@ async function fetchMomentumContext(sym) {
   return r?.json || fallbackMomentum(sym);
 }
 
+function fallbackEngine21Alignment(tf) {
+  return {
+    ok: false,
+    tf,
+    alignmentState: "NO_ALIGNMENT",
+    alignmentScore: 0,
+    bullishAligned: false,
+    bearishAligned: false,
+    bullishScore: 0,
+    bearishScore: 0,
+    components: {},
+    updatedAt: null,
+    error: "ENGINE21_UNAVAILABLE",
+  };
+}
+
+async function fetchEngine21Alignment(tf) {
+  const r = await fetchJson(
+    `${CORE_BASE}/api/v1/engine21-alignment?tf=${encodeURIComponent(tf)}`,
+    15000
+  );
+
+  if (r?.ok && r?.json && typeof r.json === "object") {
+    return r.json;
+  }
+
+  return fallbackEngine21Alignment(tf);
+}
+
 /* -----------------------------
    Engine 16
 ------------------------------*/
@@ -1336,8 +1365,14 @@ async function buildSnapshot() {
   const engine2State = await buildEngine2State(symbol);
   console.log("Momentum fetched");
 
-  const marketMind = await fetchLiveMarketMeter();
-  console.log("Live Market Meter fetched");
+  const [marketMind, engine21TenMin, engine21ThirtyMin] = await Promise.all([
+  fetchLiveMarketMeter(),
+  fetchEngine21Alignment("10m"),
+  fetchEngine21Alignment("30m"),
+]);
+
+console.log("Live Market Meter fetched");
+console.log("Engine21 alignment fetched");
 
   const marketRegime = computeMarketRegime({
     score10m: marketMind?.score10m,
@@ -1360,17 +1395,21 @@ async function buildSnapshot() {
   );
 
   const result = {
-    ok: true,
-    symbol,
-    now: nowIso(),
-    includeContext: true,
-    marketMind,
-    marketRegime,
-    momentum,
-    engine2State,
-    engine16: null,
-    strategies: {},
-  };
+  ok: true,
+  symbol,
+  now: nowIso(),
+  includeContext: true,
+  marketMind,
+  marketRegime,
+  momentum,
+  engine2State,
+  engine21Alignment: {
+    tenMin: engine21TenMin,
+    thirtyMin: engine21ThirtyMin,
+  },
+  engine16: null,
+  strategies: {},
+};
 
   for (const s of STRATEGIES) {
     let engine16ForStrategy = null;
