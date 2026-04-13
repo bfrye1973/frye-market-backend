@@ -38,6 +38,7 @@ import chartOverlayRouter from "./routes/chartOverlay.js";
 import tradeJournalRouter from "./routes/tradeJournal.js";
 import { engine15AlertsRouter } from "./routes/engine15Alerts.js";
 import runShelvesJobRouter from "./routes/runShelvesJob.js";
+import engine21AlignmentRoute from "./routes/engine21Alignment.js";
 
 // --- App setup ---
 const app = express();
@@ -45,7 +46,7 @@ const app = express();
 // --- Paths ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const engine21AlignmentRoute = require("./routes/engine21Alignment");
+
 
 // WHO AM I TEST ROUTE
 app.get("/__whoami", (req, res) => {
