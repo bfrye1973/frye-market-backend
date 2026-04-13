@@ -45,6 +45,7 @@ const app = express();
 // --- Paths ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const engine21AlignmentRoute = require("./routes/engine21Alignment");
 
 // WHO AM I TEST ROUTE
 app.get("/__whoami", (req, res) => {
@@ -137,6 +138,8 @@ app.use("/api/v1", runShelvesJobRouter);
 app.use("/api/v1", runAllEnginesRouter);
 app.use("/api/v1", tradePermissionRouter);
 app.use("/api/v1", engine15AlertsRouter);
+app.use("/api/v1", engine21AlignmentRoute);
+
 
 // --- 404 / errors ---
 app.use((req, res) =>
