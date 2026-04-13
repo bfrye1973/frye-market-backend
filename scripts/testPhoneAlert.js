@@ -14,7 +14,7 @@
 // replace them below with the names your backend currently uses.
 
 const PUSHOVER_USER_KEY = process.env.PUSHOVER_USER_KEY || "";
-const PUSHOVER_API_TOKEN = process.env.PUSHOVER_API_TOKEN || "";
+const PUSHOVER_API_TOKEN = process.env.PUSHOVER_APP_TOKEN || "";
 
 // Optional extras
 const PUSHOVER_DEVICE = process.env.PUSHOVER_DEVICE || "";
