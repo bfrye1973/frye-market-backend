@@ -31,7 +31,7 @@ function getDirection({ price, ema10, ema20, symbol }) {
   const isBull = price > ema10 && price > ema20 && ema10 > ema20;
   const isBear = price < ema10 && price < ema20 && ema10 < ema20;
 
-  if (symbol === "VIX") {
+  if (symbol === "VIX" || symbol === "UVXY") {
     if (isBear) return "BEAR_CONFIRM";
     if (isBull) return "BULL_CONFIRM";
     return "NEUTRAL";
