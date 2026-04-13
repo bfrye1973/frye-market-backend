@@ -9,7 +9,7 @@ router.get("/engine21-alignment", async (req, res) => {
     const result = await computeEngine21Alignment({ tf });
     res.json(result);
   } catch (err) {
-    console.error("[engine21-alignment] failed:", err?.stack || err);
+    console.error("[engine21-alignment] error:", err);
     res.status(500).json({
       ok: false,
       error: "ENGINE_21_FAILED",
