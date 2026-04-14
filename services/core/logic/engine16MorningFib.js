@@ -1675,11 +1675,13 @@ export async function computeMorningFib({
     exhaustionTriggerTime: exhaustionTrigger ? exhaustionBarTime : null,
   };
 
-  const latestNyParts = getNyPartsFromMs(latestClosedBar?.t);
-  const latestIsRegularSession =
-    latestNyParts.minuteOfDay >= 570 && latestNyParts.minuteOfDay < 960;
+  const latestPhoenixParts = getDisplayPartsFromMs(latestClosedBar?.t);
 
-  if (!latestIsRegularSession) {
+  const afterHoursClosed =
+    latestPhoenixParts.hour > 17 ||
+    (latestPhoenixParts.hour === 17 && latestPhoenixParts.minute >= 0);
+
+  if (afterHoursClosed) {
     const brokeRegularHigh =
       Number.isFinite(latestClose) &&
       Number.isFinite(bestCandidate?.sessionHigh) &&
