@@ -1434,6 +1434,20 @@ export async function computeMorningFib({
   const continuationTriggerLong = continuation.continuationTriggerLong;
   const debugContinuation = continuation.debugContinuation;
 
+  const shortSetupDeveloping =
+    failedBreakout ||
+    exhaustionEarlyShort ||
+    exhaustionTriggerShort ||
+    continuationWatchShort ||
+    continuationTriggerShort;
+
+  const longSetupDeveloping =
+    failedBreakdown ||
+    exhaustionEarlyLong ||
+    exhaustionTriggerLong ||
+    continuationWatchLong ||
+    continuationTriggerLong;
+
   let { strategyType, readinessLabel } = classifyEngine16Strategy({
     exhaustionTrigger,
     exhaustionActive,
@@ -1494,9 +1508,6 @@ export async function computeMorningFib({
         }
       }
 
-      waveShortPrep = true;
-      prepBias = "SHORT_PREP";
-
       if (trendState_1h === "LONG_ONLY") {
         readinessLabel = "WATCH";
 
@@ -1504,17 +1515,18 @@ export async function computeMorningFib({
           waveReasonCodes.push("HOURLY_EMA_CONTINUATION_LONG");
         }
 
-        if (!waveReasonCodes.includes("SHORT_PREP_TIMING_GATED_BY_1H_EMA")) {
-          waveReasonCodes.push("SHORT_PREP_TIMING_GATED_BY_1H_EMA");
+        if (!waveReasonCodes.includes("SHORTS_DISABLED_BY_1H_EMA")) {
+          waveReasonCodes.push("SHORTS_DISABLED_BY_1H_EMA");
         }
       } else if (
         readinessLabel === "WATCH" ||
         readinessLabel === "NO_SETUP" ||
         readinessLabel === "PULLBACK_READY"
       ) {
+        waveShortPrep = true;
+        prepBias = "SHORT_PREP";
         readinessLabel = "WATCH_FOR_SHORT";
       }
-    }
 
     if (
       strategyType === "CONTINUATION" ||
@@ -1541,23 +1553,15 @@ export async function computeMorningFib({
       }
     }
 
-    if (waveShortPrep && exhaustionEarlyShort && !exhaustionTriggerShort) {
-      prepBias = "SHORT_PREP";
-
-      if (trendState_1h === "LONG_ONLY") {
-        readinessLabel = "WATCH";
-
-        if (!waveReasonCodes.includes("HOURLY_EMA_CONTINUATION_LONG")) {
-          waveReasonCodes.push("HOURLY_EMA_CONTINUATION_LONG");
-        }
-
-        if (!waveReasonCodes.includes("SHORT_PREP_TIMING_GATED_BY_1H_EMA")) {
-          waveReasonCodes.push("SHORT_PREP_TIMING_GATED_BY_1H_EMA");
-        }
-      } else {
-        readinessLabel = "WATCH_FOR_SHORT";
-      }
-    }
+   if (
+     exhaustionEarlyShort &&
+     !exhaustionTriggerShort &&
+     trendState_1h !== "LONG_ONLY"
+   ) {
+     waveShortPrep = true;
+     prepBias = "SHORT_PREP";
+     readinessLabel = "WATCH_FOR_SHORT";
+   }
 
     if (waveLongPrep && exhaustionEarlyLong && !exhaustionTriggerLong) {
       prepBias = "LONG_PREP";
