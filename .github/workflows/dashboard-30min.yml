@@ -1,9 +1,8 @@
-name: dashboard-30min
+name: dashboard-30min (github-runner, debug-publish)
 
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 30 minutes, Mon–Fri (UTC). Adjust if you want market-hours only.
     - cron: "*/30 * * * 1-5"
 
 defaults:
@@ -20,10 +19,13 @@ jobs:
     concurrency:
       group: dashboard-30min
       cancel-in-progress: true
+
     env:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-30m
       PYTHONUNBUFFERED: "1"
+
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
     steps:
       - name: Checkout
@@ -37,20 +39,94 @@ jobs:
         with:
           python-version: "3.11"
 
+      # -----------------------------
+      # BUILD 30m PAYLOAD
+      # -----------------------------
       - name: Build 30m payload
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p data
           python -u scripts/make_dashboard_30m.py --out data/outlook_30m.json
           head -n 50 data/outlook_30m.json || true
 
+      # -----------------------------
+      # 🔥 ENGINE 21 INJECTION (30m)
+      # -----------------------------
+      - name: Inject Engine 21 alignment (30m)
+        run: |
+          python - << 'PY'
+          import json, urllib.request
+
+          PATH = "data/outlook_30m.json"
+          URL = "https://frye-market-backend-1.onrender.com/api/v1/engine21-alignment?tf=30m"
+
+          fallback = {
+              "ok": False,
+              "tf": "30m",
+              "alignmentState": "NO_ALIGNMENT",
+              "alignmentScore": 0,
+              "bullishAligned": False,
+              "bearishAligned": False,
+              "bullishScore": 0,
+              "bearishScore": 0,
+              "components": {},
+              "updatedAt": None,
+              "error": "ENGINE21_UNAVAILABLE"
+          }
+
+          with open(PATH, "r", encoding="utf-8") as f:
+              j = json.load(f)
+
+          try:
+              req = urllib.request.Request(
+                  URL,
+                  headers={"User-Agent": "github-actions/engine21-30m"}
+              )
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  eng21 = json.loads(resp.read().decode("utf-8"))
+          except Exception:
+              eng21 = fallback
+
+          j["engine21Alignment"] = eng21
+
+          with open(PATH, "w", encoding="utf-8") as f:
+              json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
+
+          print("engine21Alignment (30m):", j["engine21Alignment"].get("alignmentState"), j["engine21Alignment"].get("alignmentScore"))
+          PY
+
+      # -----------------------------
+      # VALIDATE (VERY IMPORTANT)
+      # -----------------------------
+      - name: Validate required keys
+        run: |
+          python - << 'PY'
+          import json, sys
+
+          j = json.load(open("data/outlook_30m.json", "r", encoding="utf-8"))
+
+          eng21 = j.get("engine21Alignment") or {}
+          need = ["tf", "alignmentState", "alignmentScore"]
+          miss = [k for k in need if k not in eng21]
+
+          if miss:
+              print("missing engine21Alignment keys:", miss)
+              sys.exit(1)
+
+          print("OK engine21Alignment:", eng21.get("alignmentState"), eng21.get("alignmentScore"))
+          PY
+
+      # -----------------------------
+      # HEARTBEAT
+      # -----------------------------
       - name: Write heartbeat
         run: |
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_30m.txt
 
+      # -----------------------------
+      # STAGE FILES
+      # -----------------------------
       - name: Stage artifacts
         run: |
           set -euo pipefail
@@ -58,6 +134,9 @@ jobs:
           cp -f data/outlook_30m.json /tmp/bridge30/outlook_30m.json
           cp -f data/heartbeat_30m.txt /tmp/bridge30/heartbeat_30m.txt
 
+      # -----------------------------
+      # PREPARE BRANCH
+      # -----------------------------
       - name: Prepare live branch
         env:
           LIVE_BRANCH: data-live-30m
@@ -65,19 +144,26 @@ jobs:
           set -euo pipefail
           git config user.name  "actions-bot"
           git config user.email "bot@users.noreply.github.com"
+
           git reset --hard
           git clean -fdx
+
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git fetch origin "${LIVE_BRANCH}"
             git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
           else
             git checkout --orphan "${LIVE_BRANCH}"
           fi
+
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
           mkdir -p data
           cp -f /tmp/bridge30/outlook_30m.json data/outlook_30m.json
           cp -f /tmp/bridge30/heartbeat_30m.txt data/heartbeat_30m.txt
 
+      # -----------------------------
+      # PUSH
+      # -----------------------------
       - name: Commit and push live branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -85,7 +171,13 @@ jobs:
           LIVE_BRANCH: data-live-30m
         run: |
           set -euo pipefail
+
           git add data
           git commit -m "30m live $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
           git push origin "${LIVE_BRANCH}" --force
+
+      - name: Done
+        run: |
+          echo "DONE $(date -u +'%Y-%m-%dT%H:%M:%SZ")"
