@@ -3,15 +3,14 @@ name: dashboard-10min (github-runner, debug-publish)
 on:
   workflow_dispatch: {}
   schedule:
-  # Start at 5:30 AM Phoenix
-  # 5:30 AM Phoenix = 12:30 UTC
-  - cron: "30 12 * * 1-5"
+    # Start at 5:30 AM Phoenix
+    # 5:30 AM Phoenix = 12:30 UTC
+    - cron: "30 12 * * 1-5"
 
-  # Then every 10 minutes from 5:40 AM to 1:50 PM Phoenix
-  # 5:40 AM–1:50 PM Phoenix = 12:40–20:50 UTC
-  - cron: "40,50 12 * * 1-5"
-  - cron: "0,10,20,30,40,50 13-20 * * 1-5" 
- 
+    # Then every 10 minutes from 5:40 AM to 1:50 PM Phoenix
+    # 5:40 AM–1:50 PM Phoenix = 12:40–20:50 UTC
+    - cron: "40,50 12 * * 1-5"
+    - cron: "0,10,20,30,40,50 13-20 * * 1-5"
 
 jobs:
   tenmin:
@@ -69,10 +68,11 @@ jobs:
         run: |
           python -u scripts/compute_trend10m.py
 
-        name: Inject Engine 21 alignment (10m)
+      - name: Inject Engine 21 alignment (10m)
         run: |
           python - << 'PY'
-          import json, urllib.request
+          import json
+          import urllib.request
 
           PATH = "data/outlook_intraday.json"
           URL = "https://frye-market-backend-1.onrender.com/api/v1/engine21-alignment?tf=10m"
@@ -112,17 +112,23 @@ jobs:
           with open(PATH, "w", encoding="utf-8") as f:
               json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
 
-          print("engine21Alignment injected:", j["engine21Alignment"].get("alignmentState"), j["engine21Alignment"].get("alignmentScore"))
-          PY   
+          print(
+              "engine21Alignment injected:",
+              j["engine21Alignment"].get("alignmentState"),
+              j["engine21Alignment"].get("alignmentScore")
+          )
+          PY
 
       - name: Update pills (10m always-on)
         run: |
           python -u scripts/update_pills_10m_state.py
 
-        name: Validate required keys
+      - name: Validate required keys
         run: |
           python - << 'PY'
-          import json, sys
+          import json
+          import sys
+
           j = json.load(open("data/outlook_intraday.json", "r", encoding="utf-8"))
           m = j.get("metrics") or {}
           need = ["breadth_10m_pct", "momentum_10m_pct", "squeeze_pct", "liquidity_psi", "volatility_pct"]
@@ -150,7 +156,8 @@ jobs:
         run: |
           python - << 'PY'
           from datetime import datetime
-          import zoneinfo, pathlib
+          import pathlib
+          import zoneinfo
 
           tz = zoneinfo.ZoneInfo("America/Phoenix")
           now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
