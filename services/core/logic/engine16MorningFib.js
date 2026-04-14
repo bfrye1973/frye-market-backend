@@ -1847,4 +1847,4 @@ export async function computeMorningFib({
   };
 }
 
-export default computeMorningFib;
+module.exports = computeMorningFib;
