@@ -1518,7 +1518,7 @@ export async function computeMorningFib({
           waveReasonCodes.push("SHORTS_DISABLED_BY_1H_EMA");
         }
      } 
-      
+     }
       if (
       strategyType === "CONTINUATION" ||
       strategyType === "BREAKOUT"
