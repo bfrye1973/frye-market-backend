@@ -3,7 +3,7 @@ name: dashboard-30min (github-runner, debug-publish)
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "*/30 * * * 1-5"
+    - cron: "*/25 * * * 1-5"
 
 defaults:
   run:
@@ -178,6 +178,6 @@ jobs:
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
           git push origin "${LIVE_BRANCH}" --force
 
-      - name: Done
+        name: Done
         run: |
-          echo "DONE $(date -u +'%Y-%m-%dT%H:%M:%SZ")"
+          echo "DONE $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
