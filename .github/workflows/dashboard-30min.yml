@@ -164,7 +164,7 @@ jobs:
       # -----------------------------
       # PUSH
       # -----------------------------
-      - name: Commit and push live branch
+            - name: Commit and push live branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -178,6 +178,6 @@ jobs:
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
           git push origin "${LIVE_BRANCH}" --force
 
-        name: Done
+      - name: Done
         run: |
           echo "DONE $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
