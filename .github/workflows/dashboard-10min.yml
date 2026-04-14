@@ -69,11 +69,57 @@ jobs:
         run: |
           python -u scripts/compute_trend10m.py
 
+        name: Inject Engine 21 alignment (10m)
+        run: |
+          python - << 'PY'
+          import json, urllib.request
+
+          PATH = "data/outlook_intraday.json"
+          URL = "https://frye-market-backend-1.onrender.com/api/v1/engine21-alignment?tf=10m"
+
+          fallback = {
+              "ok": False,
+              "tf": "10m",
+              "alignmentState": "NO_ALIGNMENT",
+              "alignmentScore": 0,
+              "bullishAligned": False,
+              "bearishAligned": False,
+              "bullishScore": 0,
+              "bearishScore": 0,
+              "components": {},
+              "updatedAt": None,
+              "error": "ENGINE21_UNAVAILABLE"
+          }
+
+          try:
+              with open(PATH, "r", encoding="utf-8") as f:
+                  j = json.load(f)
+          except Exception as e:
+              raise SystemExit(f"cannot read {PATH}: {e}")
+
+          try:
+              req = urllib.request.Request(
+                  URL,
+                  headers={"User-Agent": "github-actions/engine21-10m"}
+              )
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  eng21 = json.loads(resp.read().decode("utf-8"))
+          except Exception:
+              eng21 = fallback
+
+          j["engine21Alignment"] = eng21
+
+          with open(PATH, "w", encoding="utf-8") as f:
+              json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
+
+          print("engine21Alignment injected:", j["engine21Alignment"].get("alignmentState"), j["engine21Alignment"].get("alignmentScore"))
+          PY   
+
       - name: Update pills (10m always-on)
         run: |
           python -u scripts/update_pills_10m_state.py
 
-      - name: Validate required keys
+        name: Validate required keys
         run: |
           python - << 'PY'
           import json, sys
@@ -81,11 +127,23 @@ jobs:
           m = j.get("metrics") or {}
           need = ["breadth_10m_pct", "momentum_10m_pct", "squeeze_pct", "liquidity_psi", "volatility_pct"]
           miss = [k for k in need if k not in m]
+
+          eng21 = j.get("engine21Alignment") or {}
+          eng21_need = ["tf", "alignmentState", "alignmentScore"]
+          eng21_miss = [k for k in eng21_need if k not in eng21]
+
           sc = j.get("sectorCards") or []
+
           if miss:
               print("missing metrics:", miss)
               sys.exit(1)
+
+          if eng21_miss:
+              print("missing engine21Alignment keys:", eng21_miss)
+              sys.exit(1)
+
           print("OK metrics & sectors:", len(sc))
+          print("OK engine21Alignment:", eng21.get("alignmentState"), eng21.get("alignmentScore"))
           PY
 
       - name: Write heartbeat (AZ time marker)
