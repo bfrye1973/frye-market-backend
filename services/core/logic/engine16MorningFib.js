@@ -778,6 +778,10 @@ export async function computeMorningFib({
   let waveLongPrep = false;
   let waveCountertrendCaution = false;
   let prepBias = "NONE";
+  let hourlyClose = null;
+  let ema10_1h = null;
+  let trendState_1h = "NEUTRAL";
+  let executionBias = "NONE";
 
   let rawBars;
   try {
@@ -799,6 +803,10 @@ export async function computeMorningFib({
       waveLongPrep,
       waveCountertrendCaution,
       prepBias,
+      executionBias,
+      trendState_1h,
+      hourlyClose,
+      ema10_1h,
       macroRoadblock: buildMacroRoadblock(macroLevelContext),
       error: "OHLC_UNAVAILABLE",
       detail: err?.message || String(err),
@@ -823,6 +831,10 @@ export async function computeMorningFib({
       waveLongPrep,
       waveCountertrendCaution,
       prepBias,
+      executionBias,
+      trendState_1h,
+      hourlyClose,
+      ema10_1h,
       macroRoadblock: buildMacroRoadblock(macroLevelContext),
       error: "OHLC_UNAVAILABLE",
     };
@@ -834,6 +846,35 @@ export async function computeMorningFib({
   const closes = closedBars.map((bar) => bar.c);
   const ema10 = calculateEMA(closes, 10);
   const ema20 = calculateEMA(closes, 20);
+
+  try {
+    const rawBars1h = await getBarsFromPolygon(symbol, "1h", FETCH_DAYS, {
+      mode: "intraday",
+    });
+    const bars1h = normalizeBarsForEngine16(rawBars1h);
+    const closedBars1h = bars1h.filter((b) => isClosedBar(b, "1h"));
+
+    if (closedBars1h.length >= 10) {
+      const closes1h = closedBars1h.map((bar) => bar.c);
+      hourlyClose = closes1h[closes1h.length - 1] ?? null;
+      ema10_1h = calculateEMA(closes1h, 10);
+
+      if (Number.isFinite(hourlyClose) && Number.isFinite(ema10_1h)) {
+        if (hourlyClose > ema10_1h) {
+          trendState_1h = "LONG_ONLY";
+          executionBias = "LONG_ONLY";
+        } else if (hourlyClose < ema10_1h) {
+          trendState_1h = "SHORT_ONLY";
+          executionBias = "SHORT_ONLY";
+        }
+      }
+    }
+  } catch {
+    trendState_1h = "NEUTRAL";
+    executionBias = "NONE";
+    hourlyClose = null;
+    ema10_1h = null;
+  }
 
   const localMacroContext =
     macroLevelContext && typeof macroLevelContext === "object"
@@ -876,6 +917,10 @@ export async function computeMorningFib({
       waveLongPrep,
       waveCountertrendCaution,
       prepBias,
+      executionBias,
+      trendState_1h,
+      hourlyClose,
+      ema10_1h,
       macroRoadblock,
       macroLevelContext: localMacroContext,
       macroReasonCodes,
@@ -911,6 +956,10 @@ export async function computeMorningFib({
     waveLongPrep,
     waveCountertrendCaution,
     prepBias,
+    executionBias,
+    trendState_1h,
+    hourlyClose,
+    ema10_1h,
     macroLevelContext: localMacroContext,
     macroRoadblock,
     macroReasonCodes,
@@ -1011,7 +1060,7 @@ export async function computeMorningFib({
   if (!morningBars.length || !regularBars.length) {
     return noImpulseBase;
   }
-    let bestCandidate = null;
+  let bestCandidate = null;
 
   for (const bar of morningBars) {
     const idx = closedBars.findIndex((b) => b.t === bar.t);
@@ -1448,7 +1497,17 @@ export async function computeMorningFib({
       waveShortPrep = true;
       prepBias = "SHORT_PREP";
 
-      if (
+      if (trendState_1h === "LONG_ONLY") {
+        readinessLabel = "WATCH";
+
+        if (!waveReasonCodes.includes("HOURLY_EMA_CONTINUATION_LONG")) {
+          waveReasonCodes.push("HOURLY_EMA_CONTINUATION_LONG");
+        }
+
+        if (!waveReasonCodes.includes("SHORT_PREP_TIMING_GATED_BY_1H_EMA")) {
+          waveReasonCodes.push("SHORT_PREP_TIMING_GATED_BY_1H_EMA");
+        }
+      } else if (
         readinessLabel === "WATCH" ||
         readinessLabel === "NO_SETUP" ||
         readinessLabel === "PULLBACK_READY"
@@ -1484,12 +1543,40 @@ export async function computeMorningFib({
 
     if (waveShortPrep && exhaustionEarlyShort && !exhaustionTriggerShort) {
       prepBias = "SHORT_PREP";
-      readinessLabel = "WATCH_FOR_SHORT";
+
+      if (trendState_1h === "LONG_ONLY") {
+        readinessLabel = "WATCH";
+
+        if (!waveReasonCodes.includes("HOURLY_EMA_CONTINUATION_LONG")) {
+          waveReasonCodes.push("HOURLY_EMA_CONTINUATION_LONG");
+        }
+
+        if (!waveReasonCodes.includes("SHORT_PREP_TIMING_GATED_BY_1H_EMA")) {
+          waveReasonCodes.push("SHORT_PREP_TIMING_GATED_BY_1H_EMA");
+        }
+      } else {
+        readinessLabel = "WATCH_FOR_SHORT";
+      }
     }
 
     if (waveLongPrep && exhaustionEarlyLong && !exhaustionTriggerLong) {
       prepBias = "LONG_PREP";
       readinessLabel = "WATCH_FOR_LONG";
+    }
+
+    if (
+      trendState_1h === "LONG_ONLY" &&
+      (exhaustionTriggerShort || continuationTriggerShort)
+    ) {
+      readinessLabel = "WATCH";
+
+      if (!waveReasonCodes.includes("HOURLY_EMA_CONTINUATION_LONG")) {
+        waveReasonCodes.push("HOURLY_EMA_CONTINUATION_LONG");
+      }
+
+      if (!waveReasonCodes.includes("SHORT_PREP_TIMING_GATED_BY_1H_EMA")) {
+        waveReasonCodes.push("SHORT_PREP_TIMING_GATED_BY_1H_EMA");
+      }
     }
   }
 
@@ -1624,6 +1711,10 @@ export async function computeMorningFib({
     context: finalContext,
     marketRegime: regimeInfo,
     prepBias,
+    executionBias,
+    trendState_1h,
+    hourlyClose,
+    ema10_1h,
 
     ema10,
     ema20,
