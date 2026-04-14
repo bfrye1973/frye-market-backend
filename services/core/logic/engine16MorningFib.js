@@ -12,6 +12,7 @@
 // - add Engine 2 wave-phase awareness
 // - scalp remains allowed to trade A / B / C inside corrective structure
 // - Engine 2 provides context, not forced trade direction
+// redeploy fix
 
 import path from "path";
 import { readFile } from "fs/promises";
