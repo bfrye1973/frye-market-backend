@@ -1476,8 +1476,6 @@ export async function computeMorningFib({
     }
 
     if (waveContext.macroBias === "SHORT_PREFERENCE") {
-      waveShortPrep = true;
-      prepBias = "SHORT_PREP";
       waveReasonCodes.push("ENGINE2_FINAL_CORRECTION_LEG");
       waveReasonCodes.push("ENGINE2_SHORT_PREFERENCE");
     } else if (waveContext.macroBias === "LONG_PREFERENCE") {
@@ -1518,17 +1516,9 @@ export async function computeMorningFib({
         if (!waveReasonCodes.includes("SHORTS_DISABLED_BY_1H_EMA")) {
           waveReasonCodes.push("SHORTS_DISABLED_BY_1H_EMA");
         }
-      } else if (
-        readinessLabel === "WATCH" ||
-        readinessLabel === "NO_SETUP" ||
-        readinessLabel === "PULLBACK_READY"
-      ) {
-        waveShortPrep = true;
-        prepBias = "SHORT_PREP";
-        readinessLabel = "WATCH_FOR_SHORT";
-      }
-
-    if (
+     } 
+      
+      if (
       strategyType === "CONTINUATION" ||
       strategyType === "BREAKOUT"
     ) {
