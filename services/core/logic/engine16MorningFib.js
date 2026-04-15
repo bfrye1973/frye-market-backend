@@ -1409,6 +1409,17 @@ export async function computeMorningFib({
   }
 
   const stateInfo = classifyState(finalContext, latestClose, fibRaw);
+  // ==============================
+  // TREND STATE OVERRIDE (NEW)
+  // ==============================
+
+  let activeState = stateInfo.state;
+
+  if (trendState_1h === "LONG_ONLY") {
+    activeState = "LONG_ACTIVE";
+  } else if (trendState_1h === "SHORT_ONLY") {
+    activeState = "SHORT_ACTIVE";
+  }
 
   const continuation = detectContinuation({
     bars: closedBars,
@@ -1418,7 +1429,7 @@ export async function computeMorningFib({
     hasPulledBack,
     insidePrimaryZone,
     insideSecondaryZone,
-    state: stateInfo.state,
+    state: activeState,
     pullbackZoneRaw: zoneRaw.pullbackZone,
     secondaryZoneRaw: zoneRaw.secondaryZone,
     exhaustionTrigger: exhaustionTrigger && exhaustionActive,
