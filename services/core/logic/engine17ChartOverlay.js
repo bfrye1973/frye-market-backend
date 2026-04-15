@@ -2,19 +2,14 @@
 //
 // Engine 17 — Chart Overlay / Visual Debug Engine
 //
-// Consumes:
-//   Engine 16 (Morning Fib)
-//   Engine 1 negotiated zones
-//
-// Produces:
-//   Chart overlay payload for frontend drawing
+// Produces chart overlay payload for frontend drawing
 //
 // Updated for:
-// - explicit dayRange passthrough
-// - sessionStructure passthrough
-// - anchorLabels / anchorDebug passthrough
-// - exhaustion early + trigger split
-// - signalTimes passthrough
+// - prepBias passthrough
+// - executionBias passthrough
+// - nextFocus passthrough
+// - market alignment passthrough
+// - scalp 10m / 30m overall passthrough
 
 import path from "path";
 import { readFile } from "fs/promises";
@@ -40,7 +35,7 @@ async function readNegotiatedZones() {
       ? parsed.structures_sticky
       : [];
 
-    const negotiated = zones
+    return zones
       .filter((z) => String(z?.structureKey || z?.id || "").includes("|NEG|"))
       .map((z) => {
         const pr = Array.isArray(z?.priceRange)
@@ -67,8 +62,6 @@ async function readNegotiatedZones() {
         };
       })
       .filter(Boolean);
-
-    return negotiated;
   } catch {
     return [];
   }
@@ -78,6 +71,11 @@ function safeSignalLabel(kind) {
   return String(kind || "")
     .replaceAll("_", " ")
     .trim();
+}
+
+function toNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
@@ -175,47 +173,29 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
       anchorBTime: fibResult.anchors?.anchorBTime || null,
     },
 
-    anchorLabels: fibResult.anchorLabels || {
-      anchorAType: "IMPULSE_BASE",
-      anchorBType: "IMPULSE_HIGH",
-    },
-
-    anchorDebug: fibResult.anchorDebug || {
-      rawAnchorA: null,
-      rawAnchorATime: null,
-      finalAnchorA: null,
-      finalAnchorATime: null,
-      rawAnchorB: null,
-      rawAnchorBTime: null,
-      finalAnchorB: null,
-      finalAnchorBTime: null,
-    },
-
     levels: fibResult.fib,
     primaryZone: fibResult.pullbackZone,
     secondaryZone: fibResult.secondaryZone,
 
-    usedNegotiatedZoneAnchor: fibResult.usedNegotiatedZoneAnchor,
-    negotiatedZoneUsed: fibResult.negotiatedZoneUsed || null,
-
     state: fibResult.state,
-    insidePrimaryZone: !!fibResult.insidePrimaryZone,
-    insideSecondaryZone: !!fibResult.insideSecondaryZone,
-    invalidated: !!fibResult.invalidated,
-
-    wickRejectionLong: !!fibResult.wickRejectionLong,
-    wickRejectionShort: !!fibResult.wickRejectionShort,
-
-    hasPulledBack: !!fibResult.hasPulledBack,
-    breakoutReady: !!fibResult.breakoutReady,
-    breakdownReady: !!fibResult.breakdownReady,
-
     strategyType: fibResult.strategyType || "NONE",
     readinessLabel: fibResult.readinessLabel || "NO_SETUP",
-    failedBreakout: !!fibResult.failedBreakout,
-    failedBreakdown: !!fibResult.failedBreakdown,
-    reversalDetected: !!fibResult.reversalDetected,
-    trendContinuation: !!fibResult.trendContinuation,
+
+    prepBias: fibResult.prepBias || "NONE",
+    executionBias: fibResult.executionBias || "NONE",
+    nextFocus: fibResult.nextFocus || "WAIT",
+
+    waveContext: fibResult.waveContext || {},
+    waveState:
+      fibResult.waveContext?.waveState ||
+      fibResult.waveState ||
+      "UNKNOWN",
+    macroBias:
+      fibResult.waveContext?.macroBias ||
+      fibResult.macroBias ||
+      "NONE",
+
+    signalTimes: fibResult.signalTimes || {},
 
     exhaustionDetected: !!fibResult.exhaustionDetected,
     exhaustionShort: !!fibResult.exhaustionShort,
@@ -223,9 +203,6 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
     exhaustionBarTime: fibResult.exhaustionBarTime || null,
     exhaustionBarPrice: Number.isFinite(fibResult.exhaustionBarPrice)
       ? fibResult.exhaustionBarPrice
-      : null,
-    exhaustionLookbackBars: Number.isFinite(fibResult.exhaustionLookbackBars)
-      ? fibResult.exhaustionLookbackBars
       : null,
     exhaustionActive: !!fibResult.exhaustionActive,
 
@@ -237,17 +214,16 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
     exhaustionTriggerShort: !!fibResult.exhaustionTriggerShort,
     exhaustionTriggerLong: !!fibResult.exhaustionTriggerLong,
 
-    signalTimes: fibResult.signalTimes || {},
-    debugExhaustion: fibResult.debugExhaustion || null,
-
     impulseVolumeConfirmed: !!fibResult.impulseVolumeConfirmed,
-    volumeContext: fibResult.volumeContext || {
-      volumeScore: 0,
-      volumeConfirmed: false,
-      volumeRegime: "UNKNOWN",
-      pressureBias: "NEUTRAL_PRESSURE",
-      flowSummary: [],
-    },
+    volumeContext: fibResult.volumeContext || {},
+
+    marketAlignment10Score: toNum(fibResult.marketAlignment10Score),
+    marketAlignment30Score: toNum(fibResult.marketAlignment30Score),
+    marketAlignment10State: fibResult.marketAlignment10State || "—",
+    marketAlignment30State: fibResult.marketAlignment30State || "—",
+
+    scalpOverall10: toNum(fibResult.scalpOverall10),
+    scalpOverall30: toNum(fibResult.scalpOverall30),
   };
 
   const signals = [];
@@ -327,47 +303,6 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
     }
   }
 
-  const badges = [
-    { kind: "CONTEXT", value: fibResult.context },
-    { kind: "STATE", value: fibResult.state },
-    {
-      kind: "VOLUME",
-      value: fibResult.impulseVolumeConfirmed ? "CONFIRMED" : "NORMAL",
-    },
-  ];
-
-  if (fibResult.strategyType && fibResult.strategyType !== "NONE") {
-    badges.unshift({
-      kind: "STRATEGY",
-      value: fibResult.strategyType,
-    });
-  }
-
-  if (fibResult.readinessLabel && fibResult.readinessLabel !== "NO_SETUP") {
-    badges.unshift({
-      kind: "READINESS",
-      value: fibResult.readinessLabel,
-    });
-  }
-
-  if (fibResult.exhaustionTrigger === true && fibResult.exhaustionActive) {
-    badges.unshift({
-      kind: fibResult.exhaustionTriggerShort
-        ? "EXHAUSTION_READY_SHORT"
-        : "EXHAUSTION_READY_LONG",
-      value: "EXHAUSTION READY",
-    });
-  } else if (fibResult.exhaustionEarly === true) {
-    badges.unshift({
-      kind: fibResult.exhaustionEarlyShort
-        ? "EXHAUSTION_WATCH_SHORT"
-        : fibResult.exhaustionEarlyLong
-        ? "EXHAUSTION_WATCH_LONG"
-        : "EXHAUSTION_WATCH",
-      value: "EXHAUSTION WATCH",
-    });
-  }
-
   return {
     ok: true,
     zones,
@@ -381,7 +316,7 @@ export async function computeChartOverlay({ symbol = "SPY", tf = "30m" } = {}) {
     },
     sessionStructure: fibResult.sessionStructure || null,
     signals,
-    badges,
+    badges: [],
     meta: {
       symbol,
       timeframe: tf,
