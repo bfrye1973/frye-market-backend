@@ -1,16 +1,15 @@
 symbol,degree,tf,wave,kind,datetime_az,price
 SPY,primary,1d,W1,HIGH,2025-05-19 11:00,589.62
 SPY,primary,1d,W1,LOW,2025-05-27 11:00,574.33
-SPY,primary,1d,W4,LOW,2025-11-21 10:00,655.52
-SPY,primary,1d,W4,HIGH,2025-12-29 11:00,687.24
-SPY,primary,1d,MARK,W5,2026-01-28 11:00,699.00
+SPY,primary,1d,MARK,W3,2025-02-20 11:00,603.00
+SPY,primary,1d,MARK,W4,2026-03-30 16:00,632.00
+SPY,primary,1d,MARK,W5,,
 
-SPY,intermediate,1h,W1,HIGH,2026-01-28 11:00,699.00
-SPY,intermediate,1h,W1,LOW,2026-03-30 16:00,629.28
-SPY,intermediate,1h,MARK,W1,2026-03-30 16:00,629.28
-SPY,intermediate,1h,MARK,A,2026-04-01 10:00,658.50
-SPY,intermediate,1h,MARK,B,2026-04-02 05:00,645.00
-SPY,intermediate,1h,MARK,C,,
+SPY,intermediate,1h,MARK,W1,2025-07-31 11:00,635.00
+SPY,intermediate,1h,MARK,W2,2025-08-04 11:00,620.00
+SPY,intermediate,1h,MARK,W3,2026-02-11 11:00,694.00
+SPY,intermediate,1h,MARK,W4,2026-03-30 16:00,629.28
+SPY,intermediate,1h,MARK,W5,,
 
 SPY,minor,1h,W1,HIGH,,
 SPY,minor,1h,W1,LOW,,
