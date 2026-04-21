@@ -380,14 +380,28 @@ function deriveDirectionFromHTFContext({ winner, engine16, momentum } = {}) {
   if (e16.exhaustionShort) return "SHORT";
   if (e16.exhaustionLong) return "LONG";
 
+  if (e16.exhaustionTriggerShort) return "SHORT";
+  if (e16.exhaustionTriggerLong) return "LONG";
+  if (e16.exhaustionShort) return "SHORT";
+  if (e16.exhaustionLong) return "LONG";
+
   if (e16.continuationTriggerShort) return "SHORT";
   if (e16.continuationTriggerLong) return "LONG";
+
+  if (e16.continuationWatchShort) return "SHORT";
+  if (e16.continuationWatchLong) return "LONG";
+
+  if (e16.prepBias === "SHORT_PREP") return "SHORT";
+  if (e16.prepBias === "LONG_PREP") return "LONG";
+
+  if (e16.executionBias === "SHORT_ONLY") return "SHORT";
+  if (e16.executionBias === "LONG_ONLY") return "LONG";
 
   if (e16.breakdownReady) return "SHORT";
   if (e16.breakoutReady) return "LONG";
   if (e16.wickRejectionShort) return "SHORT";
   if (e16.wickRejectionLong) return "LONG";
-
+  
   if (e16.strategyType === "EXHAUSTION" || e16.exhaustionTrigger === true) {
     if (mom.smi1h.direction === "DOWN") return "SHORT";
     if (mom.smi1h.direction === "UP") return "LONG";
