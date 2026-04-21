@@ -739,15 +739,7 @@ export function evaluateQualityGate({ engine5 } = {}) {
   let qualityBand = "WEAK";
   const reasonCodes = [];
   const blockers = [];
-  const continuationPrep =
-    winner?.strategyType === "CONTINUATION" &&
-    (
-      e16.continuationWatchShort === true ||
-      e16.continuationWatchLong === true ||
-      e16.prepBias === "SHORT_PREP" ||
-      e16.prepBias === "LONG_PREP"
-    );
-
+  
   if (e5.invalid) {
     blockers.push("E5_INVALID");
     return {
