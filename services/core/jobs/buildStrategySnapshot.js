@@ -788,78 +788,81 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
     }
   }
 
-  let phase;
+ let phase;
 
-  if (lastKey === "W5") {
-    phase = "COMPLETE_W5";
-  } else if (lastKey === "B") {
-    const bPrice = Number(waveMarks?.B?.p);
-    const hasCurrentPrice = typeof currentPrice === "number" && Number.isFinite(currentPrice);
+if (lastKey === "W5") {
+  phase = "COMPLETE_W5";
 
-    if (hasCurrentPrice && Number.isFinite(bPrice) && currentPrice > bPrice) {
-      phase = "IN_C";
-    } else {
-      phase = "IN_B";
-    }
-  }
-     
-   else if (lastKey === "W4") {
-     const w4Price = Number(waveMarks?.W4?.p);
-     const hasCurrentPrice = typeof currentPrice === "number" && Number.isFinite(currentPrice);
+} else if (lastKey === "W4") {
+  const w4Price = Number(waveMarks?.W4?.p);
+  const hasCurrentPrice =
+    typeof currentPrice === "number" && Number.isFinite(currentPrice);
 
-     if (hasCurrentPrice && Number.isFinite(w4Price) && currentPrice > w4Price) {
-       phase = "IN_W5";
-     } else {
-       phase = "IN_W4";
-     }
-   }
-   
-  } else if (["A", "C"].includes(lastKey)) {
-    phase = `IN_${lastKey}`;
+  if (hasCurrentPrice && Number.isFinite(w4Price) && currentPrice > w4Price) {
+    phase = "IN_W5";
   } else {
-    phase = `IN_${lastKey}`;
+    phase = "IN_W4";
   }
 
-  let confirmedPhase;
+} else if (lastKey === "B") {
+  const bPrice = Number(waveMarks?.B?.p);
+  const hasCurrentPrice =
+    typeof currentPrice === "number" && Number.isFinite(currentPrice);
 
-  if (lastKey === "W5") {
-    confirmedPhase = "COMPLETE_W5";
+  if (hasCurrentPrice && Number.isFinite(bPrice) && currentPrice > bPrice) {
+    phase = "IN_C";
   } else {
-    confirmedPhase = `IN_${lastKey}`;
+    phase = "IN_B";
   }
 
-  let phaseReason = "TIME_CONFIRMED_MARK";
+} else if (["A", "C"].includes(lastKey)) {
+  phase = `IN_${lastKey}`;
 
-  if (lastKey === "B") {
-    const bPrice = Number(waveMarks?.B?.p);
-    const hasCurrentPrice = typeof currentPrice === "number" && Number.isFinite(currentPrice);
-
-    if (hasCurrentPrice && Number.isFinite(bPrice) && currentPrice > bPrice) {
-      phaseReason = "PRICE_ABOVE_B";
-    } else {
-      phaseReason = "B_CONFIRMED_WAITING_FOR_C";
-    }
-  }
-    if (lastKey === "W4") {
-     const w4Price = Number(waveMarks?.W4?.p);
-     const hasCurrentPrice = typeof currentPrice === "number" && Number.isFinite(currentPrice);
-
-     if (hasCurrentPrice && Number.isFinite(w4Price) && currentPrice > w4Price) {
-       phaseReason = "PRICE_ABOVE_W4";
-     } else {
-       phaseReason = "W4_CONFIRMED_WAITING_FOR_W5";
-     }
-   }
-  return {
-    phase,
-    confirmedPhase,
-    phaseReason,
-    lastMark: { key: lastKey, ...waveMarks[lastKey] },
-    nextMark: nextKey ? { key: nextKey, ...waveMarks[nextKey] } : null,
-    marksPresent,
-  };
+} else {
+  phase = `IN_${lastKey}`;
 }
 
+let confirmedPhase;
+
+if (lastKey === "W5") {
+  confirmedPhase = "COMPLETE_W5";
+} else {
+  confirmedPhase = `IN_${lastKey}`;
+}
+
+let phaseReason = "TIME_CONFIRMED_MARK";
+
+if (lastKey === "W4") {
+  const w4Price = Number(waveMarks?.W4?.p);
+  const hasCurrentPrice =
+    typeof currentPrice === "number" && Number.isFinite(currentPrice);
+
+  if (hasCurrentPrice && Number.isFinite(w4Price) && currentPrice > w4Price) {
+    phaseReason = "PRICE_ABOVE_W4";
+  } else {
+    phaseReason = "W4_CONFIRMED_WAITING_FOR_W5";
+  }
+
+} else if (lastKey === "B") {
+  const bPrice = Number(waveMarks?.B?.p);
+  const hasCurrentPrice =
+    typeof currentPrice === "number" && Number.isFinite(currentPrice);
+
+  if (hasCurrentPrice && Number.isFinite(bPrice) && currentPrice > bPrice) {
+    phaseReason = "PRICE_ABOVE_B";
+  } else {
+    phaseReason = "B_CONFIRMED_WAITING_FOR_C";
+  }
+}
+
+return {
+  phase,
+  confirmedPhase,
+  phaseReason,
+  lastMark: { key: lastKey, ...waveMarks[lastKey] },
+  nextMark: nextKey ? { key: nextKey, ...waveMarks[nextKey] } : null,
+  marksPresent,
+}; 
 function detectCInternalStructure(waveMarks, phase, currentPrice) {
   if (phase !== "IN_C") return null;
 
