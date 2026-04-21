@@ -1437,15 +1437,14 @@ export async function computeMorningFib({
     formatDisplayTimeFromMs,
   });
 
-  const trendContinuation = continuation.trendContinuation;
-  const continuationWatch = continuation.continuationWatch;
-  const continuationWatchShort = continuation.continuationWatchShort;
-  const continuationWatchLong = continuation.continuationWatchLong;
-  const continuationTrigger = continuation.continuationTrigger;
-  const continuationTriggerShort = continuation.continuationTriggerShort;
-  const continuationTriggerLong = continuation.continuationTriggerLong;
+  let trendContinuation = continuation.trendContinuation;
+  let continuationWatch = continuation.continuationWatch;
+  let continuationWatchShort = continuation.continuationWatchShort;
+  let continuationWatchLong = continuation.continuationWatchLong;
+  let continuationTrigger = continuation.continuationTrigger;
+  let continuationTriggerShort = continuation.continuationTriggerShort;
+  let continuationTriggerLong = continuation.continuationTriggerLong;
   const debugContinuation = continuation.debugContinuation;
-
   const shortSetupDeveloping =
     failedBreakout ||
     exhaustionEarlyShort ||
@@ -1585,7 +1584,35 @@ export async function computeMorningFib({
       }
     }
   }
+    if (
+    waveContext.waveState === "TRENDING_IMPULSE" &&
+    finalContext === "LONG_CONTEXT" &&
+    executionBias === "LONG_ONLY" &&
+    !stateInfo.invalidated &&
+    !breakdownReady &&
+    !exhaustionTriggerShort &&
+    !continuationTriggerShort &&
+    strategyType === "NONE" &&
+    readinessLabel === "NO_SETUP"
+  ) {
+    waveLongPrep = true;
+    prepBias = "LONG_PREP";
 
+    strategyType = "CONTINUATION";
+    readinessLabel = "WATCH";
+
+    trendContinuation = true;
+    continuationWatch = true;
+    continuationWatchLong = true;
+
+    if (!waveReasonCodes.includes("IMPULSE_TREND_ACTIVE")) {
+      waveReasonCodes.push("IMPULSE_TREND_ACTIVE");
+    }
+
+    if (!waveReasonCodes.includes("EMA_CONTINUATION_ACTIVE")) {
+      waveReasonCodes.push("EMA_CONTINUATION_ACTIVE");
+    }
+  }
   let macroContinuationDowngraded = false;
 
   if (
