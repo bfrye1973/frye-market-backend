@@ -1130,6 +1130,14 @@ export function evaluateTriggerReadiness({
   }
 
   const qualityPass = qualityGate?.qualityGatePassed === true;
+  const continuationPrep =
+  winner?.strategyType === "CONTINUATION" &&
+  (
+    e16.continuationWatchShort === true ||
+    e16.continuationWatchLong === true ||
+    e16.prepBias === "SHORT_PREP" ||
+    e16.prepBias === "LONG_PREP"
+  );
   const momentumPass = momentumGate?.momentumGatePassed === true;
 
   let readinessLabel = "WAIT";
@@ -1137,7 +1145,7 @@ export function evaluateTriggerReadiness({
   let triggerConfirmed = false;
   let freshEntryNow = false;
 
-  if (!qualityPass) {
+  if (!qualityPass && !continuationPrep) {
     readinessLabel = "NEAR";
     blockers.push(...(qualityGate?.blockers || []));
     reasonCodes.push(...(qualityGate?.reasonCodes || []));
