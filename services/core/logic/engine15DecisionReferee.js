@@ -739,6 +739,14 @@ export function evaluateQualityGate({ engine5 } = {}) {
   let qualityBand = "WEAK";
   const reasonCodes = [];
   const blockers = [];
+  const continuationPrep =
+    winner?.strategyType === "CONTINUATION" &&
+    (
+      e16.continuationWatchShort === true ||
+      e16.continuationWatchLong === true ||
+      e16.prepBias === "SHORT_PREP" ||
+      e16.prepBias === "LONG_PREP"
+    );
 
   if (e5.invalid) {
     blockers.push("E5_INVALID");
@@ -1251,15 +1259,20 @@ export function evaluateTriggerReadiness({
     reasonCodes.push("HTF_EXHAUSTION_LTF_PULLBACK_BUILD");
   }
 
-  if (
-    winner.strategyType === "CONTINUATION" &&
-    e16.continuationWatch === true &&
-    readinessLabel === "WAIT"
-  ) {
+  if (continuationPrep) {
     readinessLabel = "WATCH";
-    entryStyle = "CONTINUATION_WATCH";
-    reasonCodes.push("ENGINE16_CONTINUATION_WATCH");
-  }
+    entryStyle = "CONTINUATION_PREP";
+    triggerConfirmed = false;
+    freshEntryNow = false;
+
+    if (e16.readinessLabel === "WAIT_FOR_MAGNET_RESOLUTION") {
+      reasonCodes.push("ENGINE16_WAIT_FOR_MAGNET_RESOLUTION");
+    }
+
+    if (e16.continuationWatch === true) {
+      reasonCodes.push("ENGINE16_CONTINUATION_WATCH");
+    }
+  }    
 
   const setupChain = buildSetupChain({
     winner,
