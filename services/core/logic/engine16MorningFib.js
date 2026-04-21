@@ -1506,6 +1506,8 @@ try {
     insideSecondaryZone,
     marketRegime: regimeInfo,
   });
+  const lastHigherLow = findLastHigherLow(closedBars);
+  const lastLowerHigh = findLastLowerHigh(closedBars);
   const breakdownRef = bestCandidate.sessionLow;
 
   const nearBreakdown =
@@ -1996,6 +1998,12 @@ function findLastLowerHigh(bars, lookback = 40) {
     
     breakdownRef: round2(bestCandidate.sessionLow),
     latestClose: round2(latestClose),
+
+    lastHigherLow,
+    lastLowerHigh,
+    close4h: round2(close4h),
+    ema10_4h: round2(ema10_4h),
+    trendState_4h,
     
     meta: {
       marketTz: MARKET_TZ,
