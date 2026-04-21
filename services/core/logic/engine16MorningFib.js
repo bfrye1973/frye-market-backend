@@ -1508,7 +1508,7 @@ try {
   });
   const lastHigherLow = findLastHigherLow(closedBars);
   const lastLowerHigh = findLastLowerHigh(closedBars);
-  const breakdownRef = bestCandidate.sessionLow;
+  const breakdownRef = lastHigherLow;
 
   const nearBreakdown =
     Number.isFinite(latestClose) &&
@@ -1517,7 +1517,7 @@ try {
     latestClose >= breakdownRef * 0.9975;
 
   if (
-    trendState_1h === "SHORT_ONLY" &&
+    trendState_4h === "SHORT_ONLY" &&
     nearBreakdown &&
     !continuationTriggerShort
   ) {
