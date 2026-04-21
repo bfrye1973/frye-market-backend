@@ -782,6 +782,11 @@ export async function computeMorningFib({
   let hourlyClose = null;
   let ema10_1h = null;
   let trendState_1h = "NEUTRAL";
+
+  let close4h = null;
+  let ema10_4h = null;
+  let trendState_4h = "NEUTRAL";
+
   let executionBias = "NONE";
 
   let rawBars;
@@ -849,34 +854,59 @@ export async function computeMorningFib({
   const ema20 = calculateEMA(closes, 20);
 
   try {
-    const rawBars1h = await getBarsFromPolygon(symbol, "1h", FETCH_DAYS, {
-      mode: "intraday",
-    });
-    const bars1h = normalizeBarsForEngine16(rawBars1h);
-    const closedBars1h = bars1h.filter((b) => isClosedBar(b, "1h"));
+  const rawBars1h = await getBarsFromPolygon(symbol, "1h", FETCH_DAYS, {
+    mode: "intraday",
+  });
+  const bars1h = normalizeBarsForEngine16(rawBars1h);
+  const closedBars1h = bars1h.filter((b) => isClosedBar(b, "1h"));
 
-    if (closedBars1h.length >= 10) {
-      const closes1h = closedBars1h.map((bar) => bar.c);
-      hourlyClose = closes1h[closes1h.length - 1] ?? null;
-      ema10_1h = calculateEMA(closes1h, 10);
+  if (closedBars1h.length >= 10) {
+    const closes1h = closedBars1h.map((bar) => bar.c);
+    hourlyClose = closes1h[closes1h.length - 1] ?? null;
+    ema10_1h = calculateEMA(closes1h, 10);
 
-      if (Number.isFinite(hourlyClose) && Number.isFinite(ema10_1h)) {
-        if (hourlyClose > ema10_1h) {
-          trendState_1h = "LONG_ONLY";
-          executionBias = "LONG_ONLY";
-        } else if (hourlyClose < ema10_1h) {
-          trendState_1h = "SHORT_ONLY";
-          executionBias = "SHORT_ONLY";
-        }
+    if (Number.isFinite(hourlyClose) && Number.isFinite(ema10_1h)) {
+      if (hourlyClose > ema10_1h) {
+        trendState_1h = "LONG_ONLY";
+        executionBias = "LONG_ONLY";
+      } else if (hourlyClose < ema10_1h) {
+        trendState_1h = "SHORT_ONLY";
+        executionBias = "SHORT_ONLY";
       }
     }
-  } catch {
-    trendState_1h = "NEUTRAL";
-    executionBias = "NONE";
-    hourlyClose = null;
-    ema10_1h = null;
   }
+} catch {
+  trendState_1h = "NEUTRAL";
+  executionBias = "NONE";
+  hourlyClose = null;
+  ema10_1h = null;
+}
 
+try {
+  const rawBars4h = await getBarsFromPolygon(symbol, "4h", FETCH_DAYS, {
+    mode: "intraday",
+  });
+  const bars4h = normalizeBarsForEngine16(rawBars4h);
+  const closedBars4h = bars4h.filter((b) => isClosedBar(b, "4h"));
+
+  if (closedBars4h.length >= 10) {
+    const closes4h = closedBars4h.map((bar) => bar.c);
+    close4h = closes4h[closes4h.length - 1] ?? null;
+    ema10_4h = calculateEMA(closes4h, 10);
+
+    if (Number.isFinite(close4h) && Number.isFinite(ema10_4h)) {
+      if (close4h > ema10_4h) {
+        trendState_4h = "LONG_ONLY";
+      } else if (close4h < ema10_4h) {
+        trendState_4h = "SHORT_ONLY";
+      }
+    }
+  }
+} catch {
+  trendState_4h = "NEUTRAL";
+  close4h = null;
+  ema10_4h = null;
+}
   const localMacroContext =
     macroLevelContext && typeof macroLevelContext === "object"
       ? macroLevelContext
@@ -1692,7 +1722,79 @@ export async function computeMorningFib({
         !!vr?.flags?.initiativeMoveConfirmed;
     }
   }
+  function findLastHigherLow(bars, lookback = 40) {
+  if (!Array.isArray(bars) || bars.length < 5) return null;
 
+  const slice = bars.slice(-lookback);
+  const swingLows = [];
+
+  for (let i = 1; i < slice.length - 1; i++) {
+    const prev = slice[i - 1];
+    const curr = slice[i];
+    const next = slice[i + 1];
+
+    if (
+      Number.isFinite(curr?.l) &&
+      Number.isFinite(prev?.l) &&
+      Number.isFinite(next?.l) &&
+      curr.l < prev.l &&
+      curr.l < next.l
+    ) {
+      swingLows.push({
+        l: curr.l,
+        t: curr.t,
+      });
+    }
+  }
+
+  if (!swingLows.length) return null;
+  if (swingLows.length === 1) return round2(swingLows[0].l);
+
+  for (let i = swingLows.length - 1; i >= 1; i--) {
+    if (swingLows[i].l > swingLows[i - 1].l) {
+      return round2(swingLows[i].l);
+    }
+  }
+
+  return round2(swingLows[swingLows.length - 1].l);
+}
+
+function findLastLowerHigh(bars, lookback = 40) {
+  if (!Array.isArray(bars) || bars.length < 5) return null;
+
+  const slice = bars.slice(-lookback);
+  const swingHighs = [];
+
+  for (let i = 1; i < slice.length - 1; i++) {
+    const prev = slice[i - 1];
+    const curr = slice[i];
+    const next = slice[i + 1];
+
+    if (
+      Number.isFinite(curr?.h) &&
+      Number.isFinite(prev?.h) &&
+      Number.isFinite(next?.h) &&
+      curr.h > prev.h &&
+      curr.h > next.h
+    ) {
+      swingHighs.push({
+        h: curr.h,
+        t: curr.t,
+      });
+    }
+  }
+
+  if (!swingHighs.length) return null;
+  if (swingHighs.length === 1) return round2(swingHighs[0].h);
+
+  for (let i = swingHighs.length - 1; i >= 1; i--) {
+    if (swingHighs[i].h < swingHighs[i - 1].h) {
+      return round2(swingHighs[i].h);
+    }
+  }
+
+  return round2(swingHighs[swingHighs.length - 1].h);
+}
   const anchorTimes = buildAnchorTimes({
     premarketLowBar,
     premarketHighBar,
