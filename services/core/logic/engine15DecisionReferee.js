@@ -689,13 +689,22 @@ export function evaluateHardBlockers({
 
   const earlyOnly = isEarlyExhaustionOnly(e16);
 
-  if (!earlyOnly) {
+  const continuationPrep =
+    e16.strategyType === "CONTINUATION" &&
+    (
+      e16.continuationWatchShort === true ||
+      e16.continuationWatchLong === true ||
+      e16.prepBias === "SHORT_PREP" ||
+      e16.prepBias === "LONG_PREP"
+    );
+
+  if (!earlyOnly && !continuationPrep) {
     if (winner?.strategyType && winner.strategyType !== "NONE") {
       if (winner?.direction === "NONE") {
         blockers.push("NO_DIRECTION");
       }
     }
-  }
+  } 
 
   if (p.permission === "STAND_DOWN") {
     softBlockers.push("E6_STAND_DOWN");
