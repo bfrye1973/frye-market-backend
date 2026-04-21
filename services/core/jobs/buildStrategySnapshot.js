@@ -862,7 +862,9 @@ return {
   lastMark: { key: lastKey, ...waveMarks[lastKey] },
   nextMark: nextKey ? { key: nextKey, ...waveMarks[nextKey] } : null,
   marksPresent,
-}; 
+};
+}
+
 function detectCInternalStructure(waveMarks, phase, currentPrice) {
   if (phase !== "IN_C") return null;
 
