@@ -1891,7 +1891,10 @@ export async function computeMorningFib({
 
     impulseVolumeConfirmed,
     volumeContext,
-
+    
+    breakdownRef: round2(bestCandidate.sessionLow),
+    latestClose: round2(latestClose),
+    
     meta: {
       marketTz: MARKET_TZ,
       displayTz: DISPLAY_TZ,
