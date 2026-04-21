@@ -1445,6 +1445,24 @@ export async function computeMorningFib({
   let continuationTriggerShort = continuation.continuationTriggerShort;
   let continuationTriggerLong = continuation.continuationTriggerLong;
   const debugContinuation = continuation.debugContinuation;
+  const breakdownRef = bestCandidate.sessionLow;
+
+  const nearBreakdown =
+    Number.isFinite(latestClose) &&
+    Number.isFinite(breakdownRef) &&
+    latestClose <= breakdownRef * 1.01 &&
+    latestClose >= breakdownRef;
+
+  if (
+    trendState_1h === "SHORT_ONLY" &&
+    nearBreakdown &&
+    !continuationTriggerShort
+  ) {
+    prepBias = "SHORT_PREP";
+    strategyType = "CONTINUATION";
+    continuationWatchShort = true;
+    readinessLabel = "WATCH_FOR_BREAKDOWN";
+  }
   const shortSetupDeveloping =
     failedBreakout ||
     exhaustionEarlyShort ||
