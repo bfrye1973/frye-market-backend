@@ -801,6 +801,19 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
     } else {
       phase = "IN_B";
     }
+  }
+     
+   else if (lastKey === "W4") {
+     const w4Price = Number(waveMarks?.W4?.p);
+     const hasCurrentPrice = typeof currentPrice === "number" && Number.isFinite(currentPrice);
+
+     if (hasCurrentPrice && Number.isFinite(w4Price) && currentPrice > w4Price) {
+       phase = "IN_W5";
+     } else {
+       phase = "IN_W4";
+     }
+   }
+   
   } else if (["A", "C"].includes(lastKey)) {
     phase = `IN_${lastKey}`;
   } else {
@@ -827,7 +840,16 @@ function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
       phaseReason = "B_CONFIRMED_WAITING_FOR_C";
     }
   }
+    if (lastKey === "W4") {
+     const w4Price = Number(waveMarks?.W4?.p);
+     const hasCurrentPrice = typeof currentPrice === "number" && Number.isFinite(currentPrice);
 
+     if (hasCurrentPrice && Number.isFinite(w4Price) && currentPrice > w4Price) {
+       phaseReason = "PRICE_ABOVE_W4";
+     } else {
+       phaseReason = "W4_CONFIRMED_WAITING_FOR_W5";
+     }
+   }
   return {
     phase,
     confirmedPhase,
