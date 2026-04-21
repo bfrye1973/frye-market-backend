@@ -1616,18 +1616,17 @@ export async function computeMorningFib({
   let macroContinuationDowngraded = false;
 
   if (
-    macroRoadblock.active &&
-    (strategyType === "CONTINUATION" || strategyType === "BREAKOUT") &&
-    !insidePrimaryZone &&
-    !insideSecondaryZone
-  ) {
-    strategyType = "NONE";
-    readinessLabel = "WAIT_FOR_MAGNET_RESOLUTION";
-    macroContinuationDowngraded = true;
-    if (!macroReasonCodes.includes("WAIT_FOR_MAGNET_RESOLUTION")) {
-      macroReasonCodes.push("WAIT_FOR_MAGNET_RESOLUTION");
-    }
+  macroRoadblock.active &&
+  (strategyType === "CONTINUATION" || strategyType === "BREAKOUT") &&
+  !insidePrimaryZone &&
+  !insideSecondaryZone
+) {
+  readinessLabel = "WAIT_FOR_MAGNET_RESOLUTION";
+  macroContinuationDowngraded = true;
+  if (!macroReasonCodes.includes("WAIT_FOR_MAGNET_RESOLUTION")) {
+    macroReasonCodes.push("WAIT_FOR_MAGNET_RESOLUTION");
   }
+}
 
   if (
     macroRoadblock.active &&
