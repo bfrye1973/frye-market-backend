@@ -1451,8 +1451,8 @@ export async function computeMorningFib({
     Number.isFinite(latestClose) &&
     Number.isFinite(breakdownRef) &&
     latestClose <= breakdownRef * 1.01 &&
-    latestClose >= breakdownRef;
-
+    latestClose >= breakdownRef * 0.9975;
+  
   if (
     trendState_1h === "SHORT_ONLY" &&
     nearBreakdown &&
