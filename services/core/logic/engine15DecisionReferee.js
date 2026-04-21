@@ -116,6 +116,15 @@ function normalizeDirection(x, engine16 = null) {
   if (engine16?.continuationTriggerShort === true) return "SHORT";
   if (engine16?.continuationTriggerLong === true) return "LONG";
 
+  if (engine16?.continuationWatchShort === true) return "SHORT";
+  if (engine16?.continuationWatchLong === true) return "LONG";
+
+  if (engine16?.prepBias === "SHORT_PREP") return "SHORT";
+  if (engine16?.prepBias === "LONG_PREP") return "LONG";
+
+  if (engine16?.executionBias === "SHORT_ONLY") return "SHORT";
+  if (engine16?.executionBias === "LONG_ONLY") return "LONG";
+
   if (engine16?.breakdownReady === true) return "SHORT";
   if (engine16?.breakoutReady === true) return "LONG";
 
