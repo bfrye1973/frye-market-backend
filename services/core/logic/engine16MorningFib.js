@@ -1655,39 +1655,63 @@ try {
       }
     }
   }
-    if (
-    waveContext.waveState === "TRENDING_IMPULSE" &&
-    finalContext === "LONG_CONTEXT" &&
-    executionBias === "LONG_ONLY" &&
-    !stateInfo.invalidated &&
-    !breakdownReady &&
-    !exhaustionTriggerShort &&
-    !continuationTriggerShort &&
-    (strategyType === "NONE" || strategyType === "EXHAUSTION") &&
-    (
-      readinessLabel === "NO_SETUP" ||
-      readinessLabel === "WATCH" ||
-      readinessLabel === "EXHAUSTION_READY"
-    )
-  ) {
-    waveLongPrep = true;
-    prepBias = "LONG_PREP";
+  const nearShortBreakdown =
+  Number.isFinite(latestClose) &&
+  Number.isFinite(lastHigherLow) &&
+  latestClose <= lastHigherLow * 1.01 &&
+  latestClose >= lastHigherLow * 0.9975;
 
-    strategyType = "CONTINUATION";
-    readinessLabel = "WATCH";
+const bullishButWeakening =
+  trendState_4h === "LONG_ONLY" &&
+  waveContext.waveState === "TRENDING_IMPULSE" &&
+  (
+    exhaustionEarlyShort ||
+    exhaustionTriggerShort ||
+    wickRejectionShort ||
+    nearShortBreakdown
+  );
+   if (
+  waveContext.waveState === "TRENDING_IMPULSE" &&
+  finalContext === "LONG_CONTEXT" &&
+  executionBias === "LONG_ONLY" &&
+  !stateInfo.invalidated &&
+  !breakdownReady &&
+  !exhaustionTriggerShort &&
+  !continuationTriggerShort &&
+  (strategyType === "NONE" || strategyType === "EXHAUSTION") &&
+  (
+    readinessLabel === "NO_SETUP" ||
+    readinessLabel === "WATCH" ||
+    readinessLabel === "EXHAUSTION_READY"
+  )
+) {
+  waveLongPrep = true;
+  prepBias = "LONG_PREP";
 
-    trendContinuation = true;
-    continuationWatch = true;
-    continuationWatchLong = true;
+  strategyType = "CONTINUATION";
+  readinessLabel = bullishButWeakening ? "WATCH" : "READY";
 
-    if (!waveReasonCodes.includes("IMPULSE_TREND_ACTIVE")) {
-      waveReasonCodes.push("IMPULSE_TREND_ACTIVE");
+  trendContinuation = true;
+  continuationWatch = true;
+  continuationWatchLong = true;
+
+  if (!waveReasonCodes.includes("IMPULSE_TREND_ACTIVE")) {
+    waveReasonCodes.push("IMPULSE_TREND_ACTIVE");
+  }
+
+  if (!waveReasonCodes.includes("EMA_CONTINUATION_ACTIVE")) {
+    waveReasonCodes.push("EMA_CONTINUATION_ACTIVE");
+  }
+
+  if (bullishButWeakening) {
+    if (!waveReasonCodes.includes("BULLISH_BUT_WEAKENING")) {
+      waveReasonCodes.push("BULLISH_BUT_WEAKENING");
     }
-
-    if (!waveReasonCodes.includes("EMA_CONTINUATION_ACTIVE")) {
-      waveReasonCodes.push("EMA_CONTINUATION_ACTIVE");
+    if (!waveReasonCodes.includes("SHORT_RISK_RISING")) {
+      waveReasonCodes.push("SHORT_RISK_RISING");
     }
   }
+} 
   if (
   waveContext.waveState === "TRENDING_IMPULSE" &&
   finalContext === "LONG_CONTEXT" &&
