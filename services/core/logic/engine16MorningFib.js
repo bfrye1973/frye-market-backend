@@ -1664,7 +1664,7 @@ try {
     !exhaustionTriggerShort &&
     !continuationTriggerShort &&
     strategyType === "NONE" &&
-    readinessLabel === "NO_SETUP"
+   (readinessLabel === "NO_SETUP" || readinessLabel === "WATCH")
   ) {
     waveLongPrep = true;
     prepBias = "LONG_PREP";
