@@ -274,8 +274,15 @@ function normalizeEngine16(engine16 = null) {
     exhaustionDetected: engine16?.exhaustionDetected === true,
     exhaustionActive: engine16?.exhaustionActive === true,
 
-    exhaustionEarly: engine16?.exhaustionEarly === true,
-    exhaustionTrigger: engine16?.exhaustionTrigger === true,
+    exhaustionEarly:
+      engine16?.exhaustionEarly === true ||
+      engine16?.exhaustionEarlyLong === true ||
+      engine16?.exhaustionEarlyShort === true,
+
+    exhaustionTrigger:
+      engine16?.exhaustionTrigger === true ||
+      engine16?.exhaustionTriggerLong === true ||
+      engine16?.exhaustionTriggerShort === true,
 
     exhaustionEarlyLong: engine16?.exhaustionEarlyLong === true,
     exhaustionEarlyShort: engine16?.exhaustionEarlyShort === true,
@@ -301,10 +308,17 @@ function normalizeEngine16(engine16 = null) {
     reversalDetected: engine16?.reversalDetected === true,
     trendContinuation: engine16?.trendContinuation === true,
 
-    continuationWatch: engine16?.continuationWatch === true,
+    continuationWatch:
+      engine16?.continuationWatch === true ||
+      engine16?.continuationWatchShort === true ||
+      engine16?.continuationWatchLong === true,
     continuationWatchShort: engine16?.continuationWatchShort === true,
     continuationWatchLong: engine16?.continuationWatchLong === true,
-    continuationTrigger: engine16?.continuationTrigger === true,
+
+    continuationTrigger:
+      engine16?.continuationTrigger === true ||
+      engine16?.continuationTriggerShort === true ||
+      engine16?.continuationTriggerLong === true,
     continuationTriggerShort: engine16?.continuationTriggerShort === true,
     continuationTriggerLong: engine16?.continuationTriggerLong === true,
 
@@ -401,7 +415,7 @@ function deriveDirectionFromHTFContext({ winner, engine16, momentum } = {}) {
   if (e16.breakoutReady) return "LONG";
   if (e16.wickRejectionShort) return "SHORT";
   if (e16.wickRejectionLong) return "LONG";
-  
+
   if (e16.strategyType === "EXHAUSTION" || e16.exhaustionTrigger === true) {
     if (mom.smi1h.direction === "DOWN") return "SHORT";
     if (mom.smi1h.direction === "UP") return "LONG";
@@ -573,7 +587,6 @@ export function resolveStrategyCandidates({ engine16 } = {}) {
     e16.exhaustionTriggerShort === true ||
     e16.exhaustionTriggerLong === true;
 
-  // 1️⃣ CONTINUATION TRIGGER (highest priority)
   if (hasContinuationTrigger) {
     return [
       {
@@ -585,7 +598,6 @@ export function resolveStrategyCandidates({ engine16 } = {}) {
     ];
   }
 
-  // 2️⃣ EXHAUSTION TRIGGER
   if (hasExhaustionTrigger) {
     return [
       {
@@ -597,25 +609,9 @@ export function resolveStrategyCandidates({ engine16 } = {}) {
     ];
   }
 
-  // 3️⃣ EARLY EXHAUSTION (ONLY if no continuation context)
   if (isEarlyExhaustionOnly(e16) && !hasContinuationWatch && e16.strategyType !== "CONTINUATION") {
     return [];
   }
-
-  // 4️⃣ NO SETUP
-  if (!e16.ok || e16.strategyType === "NONE" || e16.readinessLabel === "NO_SETUP") {
-    return [];
-  }
-
-  // 5️⃣ DEFAULT
-  return [
-    {
-      strategyType: e16.strategyType,
-      direction: e16.direction,
-      source: "ENGINE16",
-      engine16: e16,
-    },
-  ];
 
   if (!e16.ok || e16.strategyType === "NONE" || e16.readinessLabel === "NO_SETUP") {
     return [];
@@ -748,7 +744,7 @@ export function evaluateHardBlockers({
         blockers.push("NO_DIRECTION");
       }
     }
-  } 
+  }
 
   if (p.permission === "STAND_DOWN") {
     softBlockers.push("E6_STAND_DOWN");
@@ -824,6 +820,7 @@ export function evaluateQualityGate({ engine5 } = {}) {
     blockers,
   };
 }
+
 /* -----------------------------
    Momentum
 ------------------------------*/
@@ -908,6 +905,7 @@ export function evaluateMomentumGate({
     smi1hDirection: smi1h,
   };
 }
+
 /* -----------------------------
    Continuation promotion
 ------------------------------*/
@@ -1128,27 +1126,27 @@ export function evaluateTriggerReadiness({
   const blockers = [];
 
   const hasContinuationContext =
-  winner?.strategyType === "CONTINUATION" ||
-  e16.continuationTrigger === true ||
-  e16.continuationTriggerShort === true ||
-  e16.continuationTriggerLong === true ||
-  e16.continuationWatch === true ||
-  e16.continuationWatchShort === true ||
-  e16.continuationWatchLong === true;
+    winner?.strategyType === "CONTINUATION" ||
+    e16.continuationTrigger === true ||
+    e16.continuationTriggerShort === true ||
+    e16.continuationTriggerLong === true ||
+    e16.continuationWatch === true ||
+    e16.continuationWatchShort === true ||
+    e16.continuationWatchLong === true;
 
-if (isEarlyExhaustionOnly(e16) && !hasContinuationContext) {
-  return {
-    readinessLabel: "WATCH",
-    entryStyle: "EXHAUSTION_EARLY",
-    triggerConfirmed: false,
-    freshEntryNow: false,
-    reasonCodes: ["EXHAUSTION_EARLY_ADVISORY"],
-    blockers: Array.isArray(hardBlockers?.softBlockers) ? [...hardBlockers.softBlockers] : [],
-    promotedStrategyType: "NONE",
-    nextSetupType: "WAIT_FOR_TRIGGER",
-    setupChain: ["EXHAUSTION_EARLY", "WAIT_FOR_TRIGGER"],
-  };
-}
+  if (isEarlyExhaustionOnly(e16) && !hasContinuationContext) {
+    return {
+      readinessLabel: "WATCH",
+      entryStyle: "EXHAUSTION_EARLY",
+      triggerConfirmed: false,
+      freshEntryNow: false,
+      reasonCodes: ["EXHAUSTION_EARLY_ADVISORY"],
+      blockers: Array.isArray(hardBlockers?.softBlockers) ? [...hardBlockers.softBlockers] : [],
+      promotedStrategyType: "NONE",
+      nextSetupType: "WAIT_FOR_TRIGGER",
+      setupChain: ["EXHAUSTION_EARLY", "WAIT_FOR_TRIGGER"],
+    };
+  }
 
   if (hardBlockers?.hardBlocked) {
     return {
@@ -1180,13 +1178,13 @@ if (isEarlyExhaustionOnly(e16) && !hasContinuationContext) {
 
   const qualityPass = qualityGate?.qualityGatePassed === true;
   const continuationPrep =
-  winner?.strategyType === "CONTINUATION" &&
-  (
-    e16.continuationWatchShort === true ||
-    e16.continuationWatchLong === true ||
-    e16.prepBias === "SHORT_PREP" ||
-    e16.prepBias === "LONG_PREP"
-  );
+    winner?.strategyType === "CONTINUATION" &&
+    (
+      e16.continuationWatchShort === true ||
+      e16.continuationWatchLong === true ||
+      e16.prepBias === "SHORT_PREP" ||
+      e16.prepBias === "LONG_PREP"
+    );
   const momentumPass = momentumGate?.momentumGatePassed === true;
 
   let readinessLabel = "WAIT";
@@ -1321,7 +1319,7 @@ if (isEarlyExhaustionOnly(e16) && !hasContinuationContext) {
     if (e16.continuationWatch === true) {
       reasonCodes.push("ENGINE16_CONTINUATION_WATCH");
     }
-  }    
+  }
 
   const setupChain = buildSetupChain({
     winner,
@@ -1752,10 +1750,11 @@ export function buildFinalDecision({
   ];
 
   const blockers = [
-  ...(hard.blockers || []),
-  ...(mom.blockers || []),
-  ...(trigger.blockers || []),
-];
+    ...(hard.blockers || []),
+    ...(mom.blockers || []),
+    ...(trigger.blockers || []),
+  ];
+
   const conflicts = [
     ...(hard.conflicts || []),
     ...(mom.conflicts || []),
