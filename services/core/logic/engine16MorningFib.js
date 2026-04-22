@@ -1663,8 +1663,12 @@ try {
     !breakdownReady &&
     !exhaustionTriggerShort &&
     !continuationTriggerShort &&
-    strategyType === "NONE" &&
-   (readinessLabel === "NO_SETUP" || readinessLabel === "WATCH")
+    (strategyType === "NONE" || strategyType === "EXHAUSTION") &&
+    (
+      readinessLabel === "NO_SETUP" ||
+      readinessLabel === "WATCH" ||
+      readinessLabel === "EXHAUSTION_READY"
+    )
   ) {
     waveLongPrep = true;
     prepBias = "LONG_PREP";
