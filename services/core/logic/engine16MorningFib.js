@@ -1517,6 +1517,14 @@ try {
 ) {
   continuationTriggerShort = true;
 }
+  if (
+  trendState_4h === "LONG_ONLY" &&
+  Number.isFinite(lastLowerHigh) &&
+  Number.isFinite(latestClose) &&
+  latestClose > lastLowerHigh
+) {
+  continuationTriggerLong = true;
+}
   const breakdownRef = lastHigherLow;
 
   const nearBreakdown =
