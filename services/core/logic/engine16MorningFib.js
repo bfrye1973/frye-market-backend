@@ -1506,8 +1506,17 @@ try {
     insideSecondaryZone,
     marketRegime: regimeInfo,
   });
+ 
   const lastHigherLow = findLastHigherLow(closedBars);
   const lastLowerHigh = findLastLowerHigh(closedBars);
+  if (
+  trendState_4h === "SHORT_ONLY" &&
+  Number.isFinite(lastHigherLow) &&
+  Number.isFinite(latestClose) &&
+  latestClose < lastHigherLow
+) {
+  continuationTriggerShort = true;
+}
   const breakdownRef = lastHigherLow;
 
   const nearBreakdown =
