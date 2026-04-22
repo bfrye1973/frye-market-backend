@@ -739,17 +739,16 @@ export function evaluateQualityGate({ engine5 } = {}) {
   let qualityBand = "WEAK";
   const reasonCodes = [];
   const blockers = [];
-  
+
   if (e5.invalid) {
-    blockers.push("E5_INVALID");
     return {
       qualityGatePassed: false,
       qualityBand: "INVALID",
       qualityScore: e5.total,
       qualityGrade: e5.grade,
       qualityBreakdown: e5.perEngine,
-      reasonCodes,
-      blockers,
+      reasonCodes: ["E5_INVALID"],
+      blockers: [],
     };
   }
 
@@ -765,12 +764,10 @@ export function evaluateQualityGate({ engine5 } = {}) {
     qualityGatePassed = false;
     qualityBand = "WATCH";
     reasonCodes.push("E5_SCORE_WATCH_ONLY");
-    blockers.push("QUALITY_BELOW_TRADE_THRESHOLD");
   } else {
     qualityGatePassed = false;
     qualityBand = "WEAK";
     reasonCodes.push("E5_SCORE_WEAK");
-    blockers.push("QUALITY_TOO_LOW");
   }
 
   return {
@@ -783,7 +780,6 @@ export function evaluateQualityGate({ engine5 } = {}) {
     blockers,
   };
 }
-
 /* -----------------------------
    Momentum
 ------------------------------*/
@@ -1703,12 +1699,10 @@ export function buildFinalDecision({
   ];
 
   const blockers = [
-    ...(hard.blockers || []),
-    ...(quality.blockers || []),
-    ...(mom.blockers || []),
-    ...(trigger.blockers || []),
-  ];
-
+  ...(hard.blockers || []),
+  ...(mom.blockers || []),
+  ...(trigger.blockers || []),
+];
   const conflicts = [
     ...(hard.conflicts || []),
     ...(mom.conflicts || []),
