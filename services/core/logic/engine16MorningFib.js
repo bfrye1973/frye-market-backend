@@ -1526,15 +1526,19 @@ try {
     latestClose >= breakdownRef * 0.9975;
 
   if (
-    trendState_4h === "SHORT_ONLY" &&
-    nearBreakdown &&
-    !continuationTriggerShort
-  ) {
-    prepBias = "SHORT_PREP";
-    strategyType = "CONTINUATION";
-    continuationWatchShort = true;
+  trendState_4h === "SHORT_ONLY" &&
+  !continuationTriggerShort
+) {
+  prepBias = "SHORT_PREP";
+  strategyType = "CONTINUATION";
+  continuationWatchShort = true;
+
+  if (nearBreakdown) {
     readinessLabel = "WATCH_FOR_BREAKDOWN";
+  } else {
+    readinessLabel = "WATCH";
   }
+}
   // ==============================
   // ENGINE 2 WAVE-BASED CONTEXT
   // ==============================
