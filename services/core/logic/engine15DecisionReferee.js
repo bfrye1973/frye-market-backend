@@ -558,20 +558,65 @@ function buildUnavailableIntermediateSwingDecision({
 export function resolveStrategyCandidates({ engine16 } = {}) {
   const e16 = normalizeEngine16(engine16);
 
-  if (isEarlyExhaustionOnly(e16)) {
-    return [];
-  }
+  const hasContinuationTrigger =
+    e16.continuationTrigger === true ||
+    e16.continuationTriggerShort === true ||
+    e16.continuationTriggerLong === true;
 
-  if (e16.exhaustionTrigger === true) {
+  const hasContinuationWatch =
+    e16.continuationWatch === true ||
+    e16.continuationWatchShort === true ||
+    e16.continuationWatchLong === true;
+
+  const hasExhaustionTrigger =
+    e16.exhaustionTrigger === true ||
+    e16.exhaustionTriggerShort === true ||
+    e16.exhaustionTriggerLong === true;
+
+  // 1️⃣ CONTINUATION TRIGGER (highest priority)
+  if (hasContinuationTrigger) {
     return [
       {
-        strategyType: "EXHAUSTION",
+        strategyType: "CONTINUATION",
         direction: normalizeDirection(e16.direction, e16),
-        source: "ENGINE16_TRIGGER",
+        source: "ENGINE16_CONTINUATION_TRIGGER",
         engine16: e16,
       },
     ];
   }
+
+  // 2️⃣ EXHAUSTION TRIGGER
+  if (hasExhaustionTrigger) {
+    return [
+      {
+        strategyType: "EXHAUSTION",
+        direction: normalizeDirection(e16.direction, e16),
+        source: "ENGINE16_EXHAUSTION_TRIGGER",
+        engine16: e16,
+      },
+    ];
+  }
+
+  // 3️⃣ EARLY EXHAUSTION (ONLY if no continuation context)
+  if (isEarlyExhaustionOnly(e16) && !hasContinuationWatch && e16.strategyType !== "CONTINUATION") {
+    return [];
+  }
+
+  // 4️⃣ NO SETUP
+  if (!e16.ok || e16.strategyType === "NONE" || e16.readinessLabel === "NO_SETUP") {
+    return [];
+  }
+
+  // 5️⃣ DEFAULT
+  return [
+    {
+      strategyType: e16.strategyType,
+      direction: e16.direction,
+      source: "ENGINE16",
+      engine16: e16,
+    },
+  ];
+}
 
   if (!e16.ok || e16.strategyType === "NONE" || e16.readinessLabel === "NO_SETUP") {
     return [];
