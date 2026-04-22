@@ -1740,6 +1740,52 @@ const bullishButWeakening =
     waveReasonCodes.push("BULLISH_CONTINUATION_TRIGGER_CONFIRMED");
   }
 }
+// ==============================
+// FINAL TRIGGER / STATE CONSISTENCY
+// ==============================
+
+// Rebuild top-level umbrella flags from directional truth
+continuationWatch = continuationWatchLong || continuationWatchShort;
+continuationTrigger = continuationTriggerLong || continuationTriggerShort;
+exhaustionEarly = exhaustionEarlyLong || exhaustionEarlyShort;
+exhaustionTrigger = exhaustionTriggerLong || exhaustionTriggerShort;
+
+// Continuation outranks exhaustion
+if (continuationTrigger) {
+  strategyType = "CONTINUATION";
+  readinessLabel = "READY";
+  trendContinuation = true;
+  continuationWatch = true;
+
+  if (continuationTriggerLong) {
+    prepBias = "LONG_PREP";
+    continuationWatchLong = true;
+
+    if (!waveReasonCodes.includes("BULLISH_CONTINUATION_TRIGGER_CONFIRMED")) {
+      waveReasonCodes.push("BULLISH_CONTINUATION_TRIGGER_CONFIRMED");
+    }
+  }
+
+  if (continuationTriggerShort) {
+    prepBias = "SHORT_PREP";
+    continuationWatchShort = true;
+
+    if (!waveReasonCodes.includes("BEARISH_CONTINUATION_TRIGGER_CONFIRMED")) {
+      waveReasonCodes.push("BEARISH_CONTINUATION_TRIGGER_CONFIRMED");
+    }
+  }
+} else if (exhaustionTrigger) {
+  strategyType = "EXHAUSTION";
+  readinessLabel = "READY";
+
+  if (exhaustionTriggerLong && prepBias === "NONE") {
+    prepBias = "LONG_PREP";
+  }
+
+  if (exhaustionTriggerShort && prepBias === "NONE") {
+    prepBias = "SHORT_PREP";
+  }
+} 
   let macroContinuationDowngraded = false;
 
   if (
