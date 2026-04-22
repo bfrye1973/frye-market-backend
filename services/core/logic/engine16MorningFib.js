@@ -1996,7 +1996,7 @@ function findLastLowerHigh(bars, lookback = 40) {
     impulseVolumeConfirmed,
     volumeContext,
     
-    breakdownRef: round2(bestCandidate.sessionLow),
+    breakdownRef: round2(lastHigherLow),
     latestClose: round2(latestClose),
 
     lastHigherLow,
