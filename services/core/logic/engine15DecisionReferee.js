@@ -616,7 +616,6 @@ export function resolveStrategyCandidates({ engine16 } = {}) {
       engine16: e16,
     },
   ];
-}
 
   if (!e16.ok || e16.strategyType === "NONE" || e16.readinessLabel === "NO_SETUP") {
     return [];
