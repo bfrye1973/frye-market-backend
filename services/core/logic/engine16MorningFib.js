@@ -1684,6 +1684,34 @@ try {
       waveReasonCodes.push("EMA_CONTINUATION_ACTIVE");
     }
   }
+  if (
+  waveContext.waveState === "TRENDING_IMPULSE" &&
+  finalContext === "LONG_CONTEXT" &&
+  executionBias === "LONG_ONLY" &&
+  continuationTriggerLong === true
+) {
+  waveLongPrep = true;
+  prepBias = "LONG_PREP";
+
+  strategyType = "CONTINUATION";
+  readinessLabel = "READY";
+
+  trendContinuation = true;
+  continuationWatch = true;
+  continuationWatchLong = true;
+
+  if (!waveReasonCodes.includes("IMPULSE_TREND_ACTIVE")) {
+    waveReasonCodes.push("IMPULSE_TREND_ACTIVE");
+  }
+
+  if (!waveReasonCodes.includes("EMA_CONTINUATION_ACTIVE")) {
+    waveReasonCodes.push("EMA_CONTINUATION_ACTIVE");
+  }
+
+  if (!waveReasonCodes.includes("BULLISH_CONTINUATION_TRIGGER_CONFIRMED")) {
+    waveReasonCodes.push("BULLISH_CONTINUATION_TRIGGER_CONFIRMED");
+  }
+}
   let macroContinuationDowngraded = false;
 
   if (
