@@ -1127,19 +1127,28 @@ export function evaluateTriggerReadiness({
   const reasonCodes = [];
   const blockers = [];
 
-  if (isEarlyExhaustionOnly(e16)) {
-    return {
-      readinessLabel: "WATCH",
-      entryStyle: "EXHAUSTION_EARLY",
-      triggerConfirmed: false,
-      freshEntryNow: false,
-      reasonCodes: ["EXHAUSTION_EARLY_ADVISORY"],
-      blockers: Array.isArray(hardBlockers?.softBlockers) ? [...hardBlockers.softBlockers] : [],
-      promotedStrategyType: "NONE",
-      nextSetupType: "WAIT_FOR_TRIGGER",
-      setupChain: ["EXHAUSTION_EARLY", "WAIT_FOR_TRIGGER"],
-    };
-  }
+  const hasContinuationContext =
+  winner?.strategyType === "CONTINUATION" ||
+  e16.continuationTrigger === true ||
+  e16.continuationTriggerShort === true ||
+  e16.continuationTriggerLong === true ||
+  e16.continuationWatch === true ||
+  e16.continuationWatchShort === true ||
+  e16.continuationWatchLong === true;
+
+if (isEarlyExhaustionOnly(e16) && !hasContinuationContext) {
+  return {
+    readinessLabel: "WATCH",
+    entryStyle: "EXHAUSTION_EARLY",
+    triggerConfirmed: false,
+    freshEntryNow: false,
+    reasonCodes: ["EXHAUSTION_EARLY_ADVISORY"],
+    blockers: Array.isArray(hardBlockers?.softBlockers) ? [...hardBlockers.softBlockers] : [],
+    promotedStrategyType: "NONE",
+    nextSetupType: "WAIT_FOR_TRIGGER",
+    setupChain: ["EXHAUSTION_EARLY", "WAIT_FOR_TRIGGER"],
+  };
+}
 
   if (hardBlockers?.hardBlocked) {
     return {
