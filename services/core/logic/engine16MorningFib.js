@@ -820,12 +820,16 @@ function findLastLowerHigh(bars, lookback = 40) {
 
   if (!swingHighs.length) return null;
   if (swingHighs.length === 1) return round2(swingHighs[0].h);
-
-  for (let i = swingHighs.length - 1; i >= 1; i--) {
+   for (let i = swingHighs.length - 1; i >= 1; i--) {
     if (swingHighs[i].h < swingHighs[i - 1].h) {
       return round2(swingHighs[i].h);
     }
   }
+
+  return round2(swingHighs[swingHighs.length - 1].h);
+}
+
+export async function computeMorningFib({
 export async function computeMorningFib({
   symbol = DEFAULT_SYMBOL,
   tf = DEFAULT_TF,
