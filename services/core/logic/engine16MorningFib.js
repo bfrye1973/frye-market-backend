@@ -1942,16 +1942,6 @@ let macroContinuationDowngraded = false;
         !!vr?.flags?.initiativeMoveConfirmed;
     }
   
-  const anchorTimes = buildAnchorTimes({
-    premarketLowBar,
-    premarketHighBar,
-    sessionHighBar: { t: bestCandidate.sessionHighBarT },
-    sessionLowBar: { t: bestCandidate.sessionLowBarT },
-    candidate: bestCandidate,
-    context: finalContext,
-    usedNegotiatedZoneAnchor,
-  });
-
   const signalTimes = {
     stateBarTime: formatDisplayTimeFromMs(latestClosedBar?.t),
     wickRejectionLongTime: wickRejectionLong ? formatDisplayTimeFromMs(latestClosedBar?.t) : null,
@@ -2004,7 +1994,7 @@ let macroContinuationDowngraded = false;
     }
   }
     }
-
+ 
   let alignedContinuationLong =
     continuationTriggerLong === true &&
     strategyType === "CONTINUATION" &&
