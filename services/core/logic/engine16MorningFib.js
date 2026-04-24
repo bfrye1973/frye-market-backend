@@ -1947,10 +1947,7 @@ let macroContinuationDowngraded = false;
         !!vr?.flags?.initiativeMoveConfirmed;
     }
   }
- 
 
-  return round2(swingHighs[swingHighs.length - 1].h);
-}
   const anchorTimes = buildAnchorTimes({
     premarketLowBar,
     premarketHighBar,
