@@ -2003,6 +2003,52 @@ let macroContinuationDowngraded = false;
       stateInfo.state = "ABOVE_PULLBACK";
     }
   }
+    }
+
+  const alignedContinuationLong =
+    continuationTriggerLong === true &&
+    strategyType === "CONTINUATION" &&
+    executionBias === "LONG_ONLY";
+
+  const alignedContinuationShort =
+    continuationTriggerShort === true &&
+    strategyType === "CONTINUATION" &&
+    executionBias === "SHORT_ONLY";
+
+  if (alignedContinuationLong) {
+    prepBias = "LONG_PREP";
+    readinessLabel = "READY";
+    trendContinuation = true;
+    continuationWatch = true;
+    continuationWatchLong = true;
+    triggerConfirmed = true;
+    triggerType = "CONTINUATION";
+    triggerDirection = "LONG";
+    triggerLevel = round2(lastLowerHigh ?? latestClose);
+    triggerTime =
+      continuation?.continuationTriggerTime ||
+      formatDisplayTimeFromMs(latestClosedBar?.t);
+  }
+
+  if (alignedContinuationShort) {
+    prepBias = "SHORT_PREP";
+    readinessLabel = "READY";
+    trendContinuation = true;
+    continuationWatch = true;
+    continuationWatchShort = true;
+    triggerConfirmed = true;
+    triggerType = "CONTINUATION";
+    triggerDirection = "SHORT";
+    triggerLevel = round2(lastHigherLow ?? latestClose);
+    triggerTime =
+      continuation?.continuationTriggerTime ||
+      formatDisplayTimeFromMs(latestClosedBar?.t);
+  }
+
+  const finalInvalidated =
+    alignedContinuationLong || alignedContinuationShort
+      ? false
+      : stateInfo.invalidated;
 
   return {
     ok: true,
@@ -2088,7 +2134,7 @@ let macroContinuationDowngraded = false;
     state: stateInfo.state,
     insidePrimaryZone,
     insideSecondaryZone,
-    invalidated: stateInfo.invalidated,
+    invalidated: finalInvalidated,
 
     wickRejectionLong,
     wickRejectionShort,
