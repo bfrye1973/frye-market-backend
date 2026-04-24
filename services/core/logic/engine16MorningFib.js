@@ -2040,6 +2040,17 @@ let macroContinuationDowngraded = false;
   if (alignedContinuationLong || alignedContinuationShort) {
     finalInvalidated = false;
   }  
+
+  const anchorTimes = buildAnchorTimes({
+  premarketLowBar,
+  premarketHighBar,
+  sessionHighBar: { t: bestCandidate.sessionHighBarT },
+  sessionLowBar: { t: bestCandidate.sessionLowBarT },
+  candidate: bestCandidate,
+  context: finalContext,
+  usedNegotiatedZoneAnchor,
+});
+  
   return {
     ok: true,
     symbol,
@@ -2068,16 +2079,7 @@ let macroContinuationDowngraded = false;
     macroReasonCodes,
     macroContinuationDowngraded,
 
-    const anchorTimes = buildAnchorTimes({
-      premarketLowBar,
-      premarketHighBar,
-      sessionHighBar: { t: bestCandidate.sessionHighBarT },
-      sessionLowBar: { t: bestCandidate.sessionLowBarT },
-      candidate: bestCandidate,
-      context: finalContext,
-      usedNegotiatedZoneAnchor,
-    });
-
+   
     anchors: {
       premarketLow: round2(premarketLow),
       premarketHigh: round2(premarketHigh),
