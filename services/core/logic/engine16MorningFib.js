@@ -1913,7 +1913,7 @@ let macroContinuationDowngraded = false;
   let impulseVolumeConfirmed = false;
 
   if (includeVolume) {
-    const volumeZone = negotiatedZoneUsed
+      const volumeZone = negotiatedZoneUsed
       ? { lo: negotiatedZoneUsed.lo, hi: negotiatedZoneUsed.hi }
       : buildSyntheticLaunchZone(closedBars, bestCandidate);
 
@@ -2005,12 +2005,12 @@ let macroContinuationDowngraded = false;
   }
     }
 
-  const alignedContinuationLong =
+  let alignedContinuationLong =
     continuationTriggerLong === true &&
     strategyType === "CONTINUATION" &&
     executionBias === "LONG_ONLY";
 
-  const alignedContinuationShort =
+  let alignedContinuationShort =
     continuationTriggerShort === true &&
     strategyType === "CONTINUATION" &&
     executionBias === "SHORT_ONLY";
@@ -2044,12 +2044,12 @@ let macroContinuationDowngraded = false;
       continuation?.continuationTriggerTime ||
       formatDisplayTimeFromMs(latestClosedBar?.t);
   }
+  
+  let finalInvalidated = stateInfo.invalidated;
 
-  const finalInvalidated =
-    alignedContinuationLong || alignedContinuationShort
-      ? false
-      : stateInfo.invalidated;
-
+  if (alignedContinuationLong || alignedContinuationShort) {
+    finalInvalidated = false;
+  }  
   return {
     ok: true,
     symbol,
