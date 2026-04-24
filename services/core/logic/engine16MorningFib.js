@@ -1946,8 +1946,7 @@ let macroContinuationDowngraded = false;
         !!vr?.flags?.reversalExpansion ||
         !!vr?.flags?.initiativeMoveConfirmed;
     }
-  }
-
+  
   const anchorTimes = buildAnchorTimes({
     premarketLowBar,
     premarketHighBar,
