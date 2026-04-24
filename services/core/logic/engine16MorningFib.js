@@ -1941,6 +1941,7 @@ let macroContinuationDowngraded = false;
         !!vr?.flags?.reversalExpansion ||
         !!vr?.flags?.initiativeMoveConfirmed;
     }
+    }
   
   const signalTimes = {
     stateBarTime: formatDisplayTimeFromMs(latestClosedBar?.t),
@@ -1993,8 +1994,7 @@ let macroContinuationDowngraded = false;
       stateInfo.state = "ABOVE_PULLBACK";
     }
   }
-    }
- 
+     
   let alignedContinuationLong =
     continuationTriggerLong === true &&
     strategyType === "CONTINUATION" &&
