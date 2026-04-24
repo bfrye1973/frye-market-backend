@@ -756,7 +756,76 @@ function buildWaveContext(engine2Ctx) {
     intermediateReadyForWave3,
   };
 }
+ function findLastHigherLow(bars, lookback = 40) {
+  if (!Array.isArray(bars) || bars.length < 5) return null;
 
+  const slice = bars.slice(-lookback);
+  const swingLows = [];
+
+  for (let i = 1; i < slice.length - 1; i++) {
+    const prev = slice[i - 1];
+    const curr = slice[i];
+    const next = slice[i + 1];
+
+    if (
+      Number.isFinite(curr?.l) &&
+      Number.isFinite(prev?.l) &&
+      Number.isFinite(next?.l) &&
+      curr.l < prev.l &&
+      curr.l < next.l
+    ) {
+      swingLows.push({
+        l: curr.l,
+        t: curr.t,
+      });
+    }
+  }
+
+  if (!swingLows.length) return null;
+  if (swingLows.length === 1) return round2(swingLows[0].l);
+
+  for (let i = swingLows.length - 1; i >= 1; i--) {
+    if (swingLows[i].l > swingLows[i - 1].l) {
+      return round2(swingLows[i].l);
+    }
+  }
+
+  return round2(swingLows[swingLows.length - 1].l);
+}
+
+function findLastLowerHigh(bars, lookback = 40) {
+  if (!Array.isArray(bars) || bars.length < 5) return null;
+
+  const slice = bars.slice(-lookback);
+  const swingHighs = [];
+
+  for (let i = 1; i < slice.length - 1; i++) {
+    const prev = slice[i - 1];
+    const curr = slice[i];
+    const next = slice[i + 1];
+
+    if (
+      Number.isFinite(curr?.h) &&
+      Number.isFinite(prev?.h) &&
+      Number.isFinite(next?.h) &&
+      curr.h > prev.h &&
+      curr.h > next.h
+    ) {
+      swingHighs.push({
+        h: curr.h,
+        t: curr.t,
+      });
+    }
+  }
+
+  if (!swingHighs.length) return null;
+  if (swingHighs.length === 1) return round2(swingHighs[0].h);
+
+  for (let i = swingHighs.length - 1; i >= 1; i--) {
+    if (swingHighs[i].h < swingHighs[i - 1].h) {
+      return round2(swingHighs[i].h);
+    }
+  }
 export async function computeMorningFib({
   symbol = DEFAULT_SYMBOL,
   tf = DEFAULT_TF,
@@ -1873,76 +1942,7 @@ let macroContinuationDowngraded = false;
         !!vr?.flags?.initiativeMoveConfirmed;
     }
   }
-  function findLastHigherLow(bars, lookback = 40) {
-  if (!Array.isArray(bars) || bars.length < 5) return null;
-
-  const slice = bars.slice(-lookback);
-  const swingLows = [];
-
-  for (let i = 1; i < slice.length - 1; i++) {
-    const prev = slice[i - 1];
-    const curr = slice[i];
-    const next = slice[i + 1];
-
-    if (
-      Number.isFinite(curr?.l) &&
-      Number.isFinite(prev?.l) &&
-      Number.isFinite(next?.l) &&
-      curr.l < prev.l &&
-      curr.l < next.l
-    ) {
-      swingLows.push({
-        l: curr.l,
-        t: curr.t,
-      });
-    }
-  }
-
-  if (!swingLows.length) return null;
-  if (swingLows.length === 1) return round2(swingLows[0].l);
-
-  for (let i = swingLows.length - 1; i >= 1; i--) {
-    if (swingLows[i].l > swingLows[i - 1].l) {
-      return round2(swingLows[i].l);
-    }
-  }
-
-  return round2(swingLows[swingLows.length - 1].l);
-}
-
-function findLastLowerHigh(bars, lookback = 40) {
-  if (!Array.isArray(bars) || bars.length < 5) return null;
-
-  const slice = bars.slice(-lookback);
-  const swingHighs = [];
-
-  for (let i = 1; i < slice.length - 1; i++) {
-    const prev = slice[i - 1];
-    const curr = slice[i];
-    const next = slice[i + 1];
-
-    if (
-      Number.isFinite(curr?.h) &&
-      Number.isFinite(prev?.h) &&
-      Number.isFinite(next?.h) &&
-      curr.h > prev.h &&
-      curr.h > next.h
-    ) {
-      swingHighs.push({
-        h: curr.h,
-        t: curr.t,
-      });
-    }
-  }
-
-  if (!swingHighs.length) return null;
-  if (swingHighs.length === 1) return round2(swingHighs[0].h);
-
-  for (let i = swingHighs.length - 1; i >= 1; i--) {
-    if (swingHighs[i].h < swingHighs[i - 1].h) {
-      return round2(swingHighs[i].h);
-    }
-  }
+ 
 
   return round2(swingHighs[swingHighs.length - 1].h);
 }
