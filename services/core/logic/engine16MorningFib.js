@@ -826,10 +826,6 @@ function findLastLowerHigh(bars, lookback = 40) {
     }
   }
 
-  return round2(swingHighs[swingHighs.length - 1].h);
-}
-
-export async function computeMorningFib({
 export async function computeMorningFib({
   symbol = DEFAULT_SYMBOL,
   tf = DEFAULT_TF,
