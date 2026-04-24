@@ -1785,6 +1785,32 @@ if (continuationTrigger) {
   if (exhaustionTriggerShort && prepBias === "NONE") {
     prepBias = "SHORT_PREP";
   }
+}
+
+// ==============================
+// CONTINUATION INVALIDATION RECONCILE
+// ==============================
+
+if (
+  continuationTriggerShort === true &&
+  strategyType === "CONTINUATION" &&
+  executionBias === "SHORT_ONLY"
+) {
+  stateInfo.invalidated = false;
+}
+
+if (
+  continuationTriggerLong === true &&
+  strategyType === "CONTINUATION" &&
+  executionBias === "LONG_ONLY"
+) {
+  stateInfo.invalidated = false;
+}
+
+let macroContinuationDowngraded = false;
+  if (exhaustionTriggerShort && prepBias === "NONE") {
+    prepBias = "SHORT_PREP";
+  }
 } 
   let macroContinuationDowngraded = false;
 
