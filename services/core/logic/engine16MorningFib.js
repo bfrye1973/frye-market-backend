@@ -1882,11 +1882,6 @@ if (
 }
 
 let macroContinuationDowngraded = false;
-  if (exhaustionTriggerShort && prepBias === "NONE") {
-    prepBias = "SHORT_PREP";
-  }
-} 
-  let macroContinuationDowngraded = false;
 
   if (
   macroRoadblock.active &&
