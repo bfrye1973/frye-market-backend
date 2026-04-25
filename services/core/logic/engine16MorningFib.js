@@ -983,6 +983,23 @@ try {
   close4h = null;
   ema10_4h = null;
 }
+  const isActiveMinorW3 =
+  waveContext.primaryPhase === "IN_W5" &&
+  waveContext.intermediatePhase === "IN_W5" &&
+  waveContext.minorPhase === "IN_W3";
+
+if (isActiveMinorW3) {
+  if (trendState_4h === "LONG_ONLY") {
+    wave3Status = "ACTIVE_EXTENSION";
+    nextExpectedStructure = "WATCH_W3_EXTENSION";
+  } else if (trendState_4h === "SHORT_ONLY") {
+    wave3Status = "FIRST_WARNING";
+    nextExpectedStructure = "WATCH_FOR_W4_FORMATION";
+  } else {
+    wave3Status = "ACTIVE_EXTENSION";
+    nextExpectedStructure = "WATCH_W3_EXTENSION";
+  }
+}
   const localMacroContext =
     macroLevelContext && typeof macroLevelContext === "object"
       ? macroLevelContext
