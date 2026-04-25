@@ -27,6 +27,7 @@ import computeEngine15Readiness from "../logic/engine15StrategyReadiness.js";
 import { computeEngine15DecisionReferee } from "../logic/engine15DecisionReferee.js";
 import { computeMorningFib } from "../logic/engine16MorningFib.js";
 import { computeMarketRegime } from "../logic/marketRegime.js";
+import { updateSignalLock } from "../logic/signalLockStore.js";
 
 /* -----------------------------
    Absolute paths / constants
@@ -1335,6 +1336,12 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
     zoneContext,
   });
 
+ const lockedSignal = updateSignalLock({
+  symbol,
+  strategyId: s.strategyId,
+  signalEvent: engine15Decision?.signalEvent,
+});
+   
   const engine15 = computeEngine15Readiness({
     symbol,
     strategyId: s.strategyId,
@@ -1357,6 +1364,7 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
 
   return {
     strategyId: s.strategyId,
+    lockedSignal, 
     tf: s.tf,
     degree: s.degree,
     wave: s.wave,
