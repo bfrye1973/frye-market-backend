@@ -912,6 +912,8 @@ export async function computeMorningFib({
       waveShortPrep,
       waveLongPrep,
       waveCountertrendCaution,
+      wave3Status,
+      nextExpectedStructure,
       prepBias,
       executionBias,
       trendState_1h,
