@@ -848,6 +848,8 @@ export async function computeMorningFib({
   );
 
   const waveContext = buildWaveContext(localEngine2Context);
+  let wave3Status = "NONE";
+  let nextExpectedStructure = "NONE";
   const waveReasonCodes = [];
   let waveShortPrep = false;
   let waveLongPrep = false;
