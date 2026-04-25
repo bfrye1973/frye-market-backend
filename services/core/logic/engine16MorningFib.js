@@ -2094,6 +2094,8 @@ let macroContinuationDowngraded = false;
     waveShortPrep,
     waveLongPrep,
     waveCountertrendCaution,
+    wave3Status,
+    nextExpectedStructure,
 
     macroLevelContext: localMacroContext,
     macroRoadblock,
