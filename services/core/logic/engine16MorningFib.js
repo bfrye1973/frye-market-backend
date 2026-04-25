@@ -986,9 +986,7 @@ try {
   ema10_4h = null;
 }
    const isActiveMinorW3 =
-     (waveContext.primaryPhase === "IN_W5" || waveContext.primary === "IN_W5") &&
-     (waveContext.intermediatePhase === "IN_W5" || waveContext.intermediate === "IN_W5") &&
-     (waveContext.minorPhase === "IN_W3" || waveContext.minor === "IN_W3");
+  (waveContext.minorPhase === "IN_W3" || waveContext.minor === "IN_W3");
 
 if (isActiveMinorW3) {
   if (trendState_4h === "LONG_ONLY") {
