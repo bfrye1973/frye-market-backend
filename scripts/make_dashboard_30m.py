@@ -452,7 +452,31 @@ def main():
     )
 
     score = float(clamp(score_raw, 0.0, 100.0))
+    # -----------------------------
+    # 🔥 30m ACCELERATION BOOST (responsiveness layer)
+    # -----------------------------
+    accel_bonus = 0.0
 
+    # price holding above 10 EMA
+    if close > e10:
+        accel_bonus += 2.0
+
+    # EMA stacking improving
+    if e10 > e20:
+        accel_bonus += 2.0
+
+    # momentum strong
+    if smi_val > sig_val:
+        accel_bonus += 2.0
+
+    # strong upward push
+    if close > C[-2]:
+       accel_bonus += 1.5
+
+    # clamp total boost
+    accel_bonus = clamp(accel_bonus, 0.0, 6.0)
+
+    score = clamp(score + accel_bonus, 0.0, 100.0)
     score = apply_structure_soft_cap(
         score=score,
         close=close,
