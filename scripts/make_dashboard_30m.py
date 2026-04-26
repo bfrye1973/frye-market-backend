@@ -476,7 +476,6 @@ def main():
     # clamp total boost
     accel_bonus = clamp(accel_bonus, 0.0, 6.0)
 
-    score = clamp(score + accel_bonus, 0.0, 100.0)
     score = apply_structure_soft_cap(
         score=score,
         close=close,
@@ -487,6 +486,7 @@ def main():
         reclaim_tol_pct=EMA_RECLAIM_TOL_PCT,
         ema50_reclaim_tol_pct=EMA50_RECLAIM_TOL_PCT,
     )
+    score = clamp(score + accel_bonus, 0.0, 100.0)
 
     state = "bull" if (ema_sign > 0 and score >= 60.0) else ("bear" if (ema_sign < 0 and score < 45.0) else "neutral")
 
