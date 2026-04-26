@@ -1,9 +1,9 @@
-name: dashboard-30min (github-runner, debug-publish)
+name: dashboard-30min
 
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "*/25 * * * 1-5"
+    - cron: "*/30 * * * *"
 
 defaults:
   run:
@@ -24,7 +24,6 @@ jobs:
       TZ: America/Phoenix
       LIVE_BRANCH: data-live-30m
       PYTHONUNBUFFERED: "1"
-
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
     steps:
@@ -39,9 +38,12 @@ jobs:
         with:
           python-version: "3.11"
 
-      # -----------------------------
-      # BUILD 30m PAYLOAD
-      # -----------------------------
+      - name: Install deps
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install --upgrade requests python-dateutil tzdata
+
       - name: Build 30m payload
         run: |
           set -euo pipefail
@@ -49,10 +51,7 @@ jobs:
           python -u scripts/make_dashboard_30m.py --out data/outlook_30m.json
           head -n 50 data/outlook_30m.json || true
 
-      # -----------------------------
-      # 🔥 ENGINE 21 INJECTION (30m)
-      # -----------------------------
-      - name: Inject Engine 21 alignment (30m)
+      - name: Inject Engine 21 alignment 30m
         run: |
           python - << 'PY'
           import json, urllib.request
@@ -92,12 +91,13 @@ jobs:
           with open(PATH, "w", encoding="utf-8") as f:
               json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
 
-          print("engine21Alignment (30m):", j["engine21Alignment"].get("alignmentState"), j["engine21Alignment"].get("alignmentScore"))
+          print(
+              "engine21Alignment 30m:",
+              j["engine21Alignment"].get("alignmentState"),
+              j["engine21Alignment"].get("alignmentScore")
+          )
           PY
 
-      # -----------------------------
-      # VALIDATE (VERY IMPORTANT)
-      # -----------------------------
       - name: Validate required keys
         run: |
           python - << 'PY'
@@ -116,17 +116,11 @@ jobs:
           print("OK engine21Alignment:", eng21.get("alignmentState"), eng21.get("alignmentScore"))
           PY
 
-      # -----------------------------
-      # HEARTBEAT
-      # -----------------------------
       - name: Write heartbeat
         run: |
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_30m.txt
 
-      # -----------------------------
-      # STAGE FILES
-      # -----------------------------
       - name: Stage artifacts
         run: |
           set -euo pipefail
@@ -134,9 +128,6 @@ jobs:
           cp -f data/outlook_30m.json /tmp/bridge30/outlook_30m.json
           cp -f data/heartbeat_30m.txt /tmp/bridge30/heartbeat_30m.txt
 
-      # -----------------------------
-      # PREPARE BRANCH
-      # -----------------------------
       - name: Prepare live branch
         env:
           LIVE_BRANCH: data-live-30m
@@ -161,9 +152,6 @@ jobs:
           cp -f /tmp/bridge30/outlook_30m.json data/outlook_30m.json
           cp -f /tmp/bridge30/heartbeat_30m.txt data/heartbeat_30m.txt
 
-      # -----------------------------
-      # PUSH
-      # -----------------------------
       - name: Commit and push live branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
