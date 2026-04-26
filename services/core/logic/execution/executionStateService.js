@@ -1,7 +1,12 @@
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
-const DATA_DIR = path.resolve(process.cwd(), "services/core/data");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// go from services/core/logic/execution → services/core/data
+const DATA_DIR = path.resolve(__dirname, "../../data");
 const ORDERS_FILE = path.join(DATA_DIR, "paper-orders.json");
 
 function readOrders() {
