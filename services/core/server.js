@@ -39,6 +39,7 @@ import tradeJournalRouter from "./routes/tradeJournal.js";
 import { engine15AlertsRouter } from "./routes/engine15Alerts.js";
 import runShelvesJobRouter from "./routes/runShelvesJob.js";
 import engine21AlignmentRoute from "./routes/engine21Alignment.js";
+import executionStateRouter from "./routes/executionState.js";
 
 // --- App setup ---
 const app = express();
@@ -149,6 +150,7 @@ app.use("/api/v1", runAllEnginesRouter);
 app.use("/api/v1", tradePermissionRouter);
 app.use("/api/v1", engine15AlertsRouter);
 app.use("/api/v1", engine21AlignmentRoute);
+app.use("/api/v1/execution-state", executionStateRouter);
 
 // --- 404 / errors ---
 app.use((req, res) => {
