@@ -28,6 +28,7 @@ import { computeEngine15DecisionReferee } from "../logic/engine15DecisionReferee
 import { computeMorningFib } from "../logic/engine16MorningFib.js";
 import { computeMarketRegime } from "../logic/marketRegime.js";
 import { updateSignalLock } from "../logic/signalLockStore.js";
+import { getExecutionState } from "../logic/execution/executionStateService.js";
 
 /* -----------------------------
    Absolute paths / constants
@@ -1514,7 +1515,12 @@ console.log("Engine21 alignment fetched");
     engine16ForStrategy
   );
 
-  result.strategies[s.strategyId] = strategy;
+  const executionState = getExecutionState(symbol, s.strategyId);
+
+  result.strategies[s.strategyId] = {
+    ...strategy,
+    executionState
+  };
 } catch (err) {
   
       result.strategies[s.strategyId] = {
