@@ -66,7 +66,7 @@ W_VOL = 0.05
 W_RISKON = 0.05
 
 PSI_WIN_4H = int(os.environ.get("PSI_WIN_4H", "STATEFUL")) if os.environ.get("PSI_WIN_4H", "").isdigit() else 0
-FETCH_DAYS_4H = int(os.environ.get("FETCH_DAYS_4H", "365"))
+FETCH_DAYS_4H = int(os.environ.get("FETCH_DAYS_4H", "720"))
 
 
 def now_utc_iso() -> str:
