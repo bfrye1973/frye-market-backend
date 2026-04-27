@@ -554,6 +554,9 @@ def main():
 
     spy_4h = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H)
     source_used = "polygon_240m"
+    # --- TEST: build 4H from 10m (TradingView-style comparison) ---
+    spy_10m_test = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
+    spy_4h_session = build_4h_from_10m(spy_10m_test)
 
     if len(spy_4h) < 25:
         print("[warn] insufficient Polygon 240m bars; falling back to Backend-2 10m aggregation", flush=True)
@@ -627,6 +630,16 @@ def main():
 
     psi = lux_psi_stateful(C, conv=50, length=20)
     squeeze_psi_4h = float(psi) if isinstance(psi, (int, float)) else 50.0
+    # --- TEST PSI using session-built 4H candles ---
+    squeeze_psi_4h_session = None
+
+    if len(spy_4h_session) >= 25:
+        C_session = [b["close"] for b in spy_4h_session]
+        psi_session = lux_psi_stateful(C_session, conv=50, length=20)
+        
+        if isinstance(psi_session, (int, float)):
+            squeeze_psi_4h_session = float(clamp(psi_session, 0.0, 100.0))
+            
     squeeze_psi_4h = float(clamp(squeeze_psi_4h, 0.0, 100.0))
     squeeze_exp_4h = clamp(100.0 - squeeze_psi_4h, 0.0, 100.0)
 
@@ -704,9 +717,13 @@ def main():
         "squeeze_expansion_pct": round(float(squeeze_exp_4h), 2),
         "squeeze_pct": round(float(squeeze_psi_4h), 2),
 
+        # --- DEBUG: compare native Polygon 240m PSI vs session-built 4H PSI ---
+        "squeeze_psi_4h_pct_native": round(float(squeeze_psi_4h), 2),
+        "squeeze_psi_4h_pct_session": round(float(squeeze_psi_4h_session), 2) if squeeze_psi_4h_session is not None else None,
+        "session_4h_bars": int(len(spy_4h_session)),
+
         "squeeze_psi_4h": round(float(squeeze_psi_4h), 2),
         "squeeze_4h_pct": round(float(squeeze_exp_4h), 2),
-
         "liquidity_4h": round(float(liquidity_4h), 2),
         "volatility_4h_pct": round(float(vol_pct), 3),
         "volatility_4h_scaled": float(vol_scaled),
