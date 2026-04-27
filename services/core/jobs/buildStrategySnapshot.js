@@ -1220,13 +1220,14 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
   };
 
   confluence.context.reaction = {
-    stage: reaction?.stage ?? "IDLE",
-    armed: reaction?.armed ?? false,
-    reactionScore: Number(reaction?.reactionScore ?? 0),
-    confirmed: reaction?.confirmed === true,
-    structureState: reaction?.structureState ?? "HOLD",
-    reasonCodes: Array.isArray(reaction?.reasonCodes) ? reaction.reasonCodes : [],
-  };
+  stage: reaction?.stage ?? "IDLE",
+  armed: reaction?.armed ?? false,
+  reactionScore: Number(reaction?.reactionScore ?? 0),
+  confirmed: reaction?.confirmed === true,
+  structureState: reaction?.structureState ?? "HOLD",
+  reasonCodes: Array.isArray(reaction?.reasonCodes) ? reaction.reasonCodes : [],
+  waveReaction: reaction?.waveReaction || null,
+};
 
   confluence.context.volume = {
     volumeScore: Number(volume?.volumeScore ?? 0),
@@ -1334,6 +1335,7 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
       },
     engine3: patchedConfluence?.context?.reaction || null,
     engine4: patchedConfluence?.context?.volume || null,
+    waveReaction: reaction?.waveReaction || null,
     zoneContext,
   });
 
