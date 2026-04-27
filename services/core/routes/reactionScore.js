@@ -7,28 +7,23 @@
 // - Scalp fallback if no active contains price: nearest.shelf
 // - Engine 3 must NOT pick from render arrays.
 //
-// FIX (this version):
+// FIX:
 // - Engine 5B calls E3 with lo/hi only (no id/type/source). We enrich zone metadata by matching
 //   request lo/hi against engine5-context active zone bounds using a tolerance.
 // - This allows negotiated arming logic to work during /scalp-status.
 //
-// SCALP TEST ARMING (v1):
-// - Base: Arm on wick probe OR control candle, only inside NEGOTIATED zone.
-// - Optional testing switch: E3_TOUCH_ARMS_NEGOTIATED=1
-//   -> Arm whenever price is inside inferred negotiated zone.
+// SCALP ARMING:
+// - Arm on wick probe OR control candle, only inside NEGOTIATED zone.
 //
 // NOTE:
 // - Engine 5B uses stage===ARMED; CONFIRMED is not required for scalp GO.
 //
-// NEW UPGRADES (per Engine 5 request):
-// 1) Add ARMED candle metadata (safe additive fields):
-//    armedCandleHigh / armedCandleLow / armedCandleTimeMs (and TimeSec)
-// 2) Make bounds inference more stable for bounds-only callers:
+// UPGRADES:
+// 1) Add ARMED candle metadata:
+//    armedCandleHigh / armedCandleLow / armedCandleTimeMs / armedCandleTimeSec
+// 2) Make bounds inference stable for bounds-only callers:
 //    - wider epsilon + 2dp compare
 //    - consistently populate zone.id + negotiatedZone when matching active zone
-// 3) Make scalp touch arming possible (conservative):
-//    - touchArmsEnabled via env E3_TOUCH_ARMS_NEGOTIATED=1
-//    - touchArms requires: negotiatedZone && inZoneNow && last bar touches zone now (touchIndex==lastIdx)
 
 import express from "express";
 import { computeReactionQuality } from "../logic/reactionQualityEngine.js";
@@ -83,13 +78,7 @@ function round2(x) {
   return Math.round(x * 100) / 100;
 }
 
-/**
- * More stable bounds match:
- * - direct epsilon compare (default wider for 2dp zones)
- * - also compare rounded-to-2-decimals
- */
 function boundsMatch(reqLo, reqHi, actLo, actHi, eps = 1e-2) {
-  // eps=0.01 is stable for 2-decimal zone bounds
   if (![reqLo, reqHi, actLo, actHi].every(Number.isFinite)) return false;
 
   const direct =
@@ -162,33 +151,56 @@ function computeATR(bars, len = 14) {
     const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
     trs.push(tr);
   }
+
   if (trs.length < len) return null;
 
   let atr = trs.slice(0, len).reduce((a, b) => a + b, 0) / len;
-  for (let i = len; i < trs.length; i++) atr = ((atr * (len - 1)) + trs[i]) / len;
+  for (let i = len; i < trs.length; i++) {
+    atr = ((atr * (len - 1)) + trs[i]) / len;
+  }
+
   return atr;
 }
 
 /* -------------------- candle logic -------------------- */
 
 function candleAnatomy(bar) {
-  if (!bar) return { upperWick: null, lowerWick: null, body: null, range: null, bodyPct: null };
-  const o = Number(bar.open), h = Number(bar.high), l = Number(bar.low), c = Number(bar.close);
-  if (![o, h, l, c].every(Number.isFinite)) return { upperWick: null, lowerWick: null, body: null, range: null, bodyPct: null };
+  if (!bar) {
+    return { upperWick: null, lowerWick: null, body: null, range: null, bodyPct: null };
+  }
+
+  const o = Number(bar.open);
+  const h = Number(bar.high);
+  const l = Number(bar.low);
+  const c = Number(bar.close);
+
+  if (![o, h, l, c].every(Number.isFinite)) {
+    return { upperWick: null, lowerWick: null, body: null, range: null, bodyPct: null };
+  }
+
   const body = Math.abs(c - o);
   const upperWick = h - Math.max(o, c);
   const lowerWick = Math.min(o, c) - l;
   const range = h - l;
   const bodyPct = range > 0 ? (body / range) : null;
+
   return { upperWick, lowerWick, body, range, bodyPct };
 }
 
 function detectControlCandle(bar, atr) {
-  const o = Number(bar?.open), h = Number(bar?.high), l = Number(bar?.low), c = Number(bar?.close);
-  if (![o, h, l, c].every(Number.isFinite)) return { control: "NONE", bodyPct: null, bodyAtr: null };
+  const o = Number(bar?.open);
+  const h = Number(bar?.high);
+  const l = Number(bar?.low);
+  const c = Number(bar?.close);
+
+  if (![o, h, l, c].every(Number.isFinite)) {
+    return { control: "NONE", bodyPct: null, bodyAtr: null };
+  }
 
   const range = h - l;
-  if (!(range > 0) || !Number.isFinite(atr) || atr <= 0) return { control: "NONE", bodyPct: null, bodyAtr: null };
+  if (!(range > 0) || !Number.isFinite(atr) || atr <= 0) {
+    return { control: "NONE", bodyPct: null, bodyAtr: null };
+  }
 
   const body = Math.abs(c - o);
   const bodyPct = body / range;
@@ -204,6 +216,7 @@ function detectControlCandle(bar, atr) {
     if (c < o && closeNearLow) return { control: "SELLER", bodyPct, bodyAtr };
     if (c > o && closeNearHigh) return { control: "BUYER", bodyPct, bodyAtr };
   }
+
   return { control: "NONE", bodyPct, bodyAtr };
 }
 
@@ -211,17 +224,19 @@ function detectControlCandle(bar, atr) {
 
 function pickZoneFromEngine5Context(ctx) {
   const act = ctx?.active || {};
+
   if (act.negotiated && act.negotiated.lo != null && act.negotiated.hi != null) {
     return { ...act.negotiated, zoneType: "NEGOTIATED", _source: "active.negotiated" };
   }
+
   if (act.shelf && act.shelf.lo != null && act.shelf.hi != null) {
     return { ...act.shelf, zoneType: "SHELF", _source: "active.shelf" };
   }
+
   if (act.institutional && act.institutional.lo != null && act.institutional.hi != null) {
     return { ...act.institutional, zoneType: "INSTITUTIONAL", _source: "active.institutional" };
   }
 
-  // scalp fallback
   const ns = ctx?.nearest?.shelf || null;
   if (ns && ns.lo != null && ns.hi != null) {
     return { ...ns, zoneType: "SHELF", _source: "NEAREST_SHELF_SCALP_REF" };
@@ -241,7 +256,6 @@ function isNegotiatedByMeta(zoneType, zoneId) {
 function buildReasonCodes({ inZoneNow, stage, rqe, mode }) {
   const codes = [];
 
-  // Engine 5B resets on NOT_IN_ZONE; only emit when truly out and not armed.
   if (!inZoneNow && stage !== "ARMED") codes.push("NOT_IN_ZONE");
 
   if (rqe?.reason === "NO_TOUCH" || rqe?.flags?.NO_TOUCH) {
@@ -249,9 +263,16 @@ function buildReasonCodes({ inZoneNow, stage, rqe, mode }) {
     return Array.from(new Set(codes));
   }
 
-  if (mode === "scalp" && Number.isFinite(rqe?.exitBars) && rqe.exitBars > 2) codes.push("SLOW_REACTION");
-  if (Number.isFinite(rqe?.displacementAtrRaw) && rqe.displacementAtrRaw < (mode === "scalp" ? 0.15 : 0.20))
+  if (mode === "scalp" && Number.isFinite(rqe?.exitBars) && rqe.exitBars > 2) {
+    codes.push("SLOW_REACTION");
+  }
+
+  if (
+    Number.isFinite(rqe?.displacementAtrRaw) &&
+    rqe.displacementAtrRaw < (mode === "scalp" ? 0.15 : 0.20)
+  ) {
     codes.push("WEAK_DISPLACEMENT");
+  }
 
   if (rqe?.structureState === "FAILURE") codes.push("FAILURE");
   if (rqe?.structureState === "FAKEOUT_RECLAIM") codes.push("RECLAIM");
@@ -262,12 +283,10 @@ function buildReasonCodes({ inZoneNow, stage, rqe, mode }) {
 /* -------------------- time helpers -------------------- */
 
 function inferTimeMsFromBar(bar) {
-  // Our OHLC route returns {time, open, high, low, close, volume}
-  // time is typically unix seconds. If it looks like ms, keep it.
   const t = toNum(bar?.time);
   if (t == null) return null;
-  if (t > 1e12) return Math.round(t);          // already ms
-  if (t > 1e9) return Math.round(t * 1000);    // seconds -> ms
+  if (t > 1e12) return Math.round(t);
+  if (t > 1e9) return Math.round(t * 1000);
   return null;
 }
 
@@ -287,12 +306,22 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     if (!symbol || !tf) {
       return res.status(400).json({
-        ok: false, invalid: true,
-        reactionScore: 0, structureState: "HOLD", reasonCodes: ["MISSING_SYMBOL_OR_TF"],
+        ok: false,
+        invalid: true,
+        reactionScore: 0,
+        structureState: "HOLD",
+        reasonCodes: ["MISSING_SYMBOL_OR_TF"],
         zone: null,
-        rejectionSpeed: 0, displacementAtr: 0, reclaimOrFailure: 0, touchQuality: 0,
-        samples: 0, price: null, atr: null,
-        armed: false, stage: "IDLE", compression: null,
+        rejectionSpeed: 0,
+        displacementAtr: 0,
+        reclaimOrFailure: 0,
+        touchQuality: 0,
+        samples: 0,
+        price: null,
+        atr: null,
+        armed: false,
+        stage: "IDLE",
+        compression: null,
         mode: null,
       });
     }
@@ -306,24 +335,37 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const base = getBaseUrl(req);
 
-    // Bars
-    const ohlcUrl = `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}&limit=250`;
+    const ohlcUrl =
+      `${base}/api/v1/ohlc?symbol=${encodeURIComponent(sym)}` +
+      `&tf=${encodeURIComponent(timeframe)}&limit=250`;
+
     const barsResp = await fetchJson(ohlcUrl);
+
     if (!barsResp.ok || !Array.isArray(barsResp.json)) {
       return res.status(502).json({
-        ok: false, invalid: true,
-        reactionScore: 0, structureState: "HOLD", reasonCodes: ["BARS_UNAVAILABLE"],
+        ok: false,
+        invalid: true,
+        reactionScore: 0,
+        structureState: "HOLD",
+        reasonCodes: ["BARS_UNAVAILABLE"],
         zone: null,
-        rejectionSpeed: 0, displacementAtr: 0, reclaimOrFailure: 0, touchQuality: 0,
-        samples: 0, price: null, atr: null,
-        armed: false, stage: "IDLE", compression: null,
+        rejectionSpeed: 0,
+        displacementAtr: 0,
+        reclaimOrFailure: 0,
+        touchQuality: 0,
+        samples: 0,
+        price: null,
+        atr: null,
+        armed: false,
+        stage: "IDLE",
+        compression: null,
         mode: chosenMode,
       });
     }
 
     const fullBars = barsResp.json
       .map(b => ({
-        time: toNum(b.time), // ✅ keep time for armedCandleTime
+        time: toNum(b.time),
         open: Number(b.open),
         high: Number(b.high),
         low: Number(b.low),
@@ -332,28 +374,44 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       }))
       .filter(b => [b.open, b.high, b.low, b.close].every(Number.isFinite));
 
-    const bars = fullBars.length > p.lookbackBars ? fullBars.slice(-p.lookbackBars) : fullBars;
+    const bars = fullBars.length > p.lookbackBars
+      ? fullBars.slice(-p.lookbackBars)
+      : fullBars;
+
     const lastBar = bars[bars.length - 1] || null;
+
     const lastCloseFallback = Number.isFinite(fullBars[fullBars.length - 1]?.close)
       ? fullBars[fullBars.length - 1].close
       : null;
 
-    // ATR
     const atrVal = computeATR(fullBars, 14) || computeATR(fullBars, 10) || null;
+
     if (!atrVal || !Number.isFinite(atrVal) || atrVal <= 0) {
       return res.json({
-        ok: true, invalid: false,
-        reactionScore: 0, structureState: "HOLD", reasonCodes: ["ATR_UNAVAILABLE"],
+        ok: true,
+        invalid: false,
+        reactionScore: 0,
+        structureState: "HOLD",
+        reasonCodes: ["ATR_UNAVAILABLE"],
         zone: null,
-        rejectionSpeed: 0, displacementAtr: 0, reclaimOrFailure: 0, touchQuality: 0,
-        samples: 0, price: lastCloseFallback, atr: null,
-        armed: false, stage: "IDLE", compression: null,
+        rejectionSpeed: 0,
+        displacementAtr: 0,
+        reclaimOrFailure: 0,
+        touchQuality: 0,
+        samples: 0,
+        price: lastCloseFallback,
+        atr: null,
+        armed: false,
+        stage: "IDLE",
+        compression: null,
         mode: chosenMode,
       });
     }
 
-    // Engine5 context
-    const ctxUrl = `${base}/api/v1/engine5-context?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}`;
+    const ctxUrl =
+      `${base}/api/v1/engine5-context?symbol=${encodeURIComponent(sym)}` +
+      `&tf=${encodeURIComponent(timeframe)}`;
+
     const ctxResp = await fetchJson(ctxUrl);
     const ctx = (ctxResp.ok && ctxResp.json) ? ctxResp.json : null;
 
@@ -363,18 +421,14 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       lastCloseFallback ??
       null;
 
-    // Requested zone (Engine5B passes lo/hi only)
     const reqLo = toNum(req.query.lo);
     const reqHi = toNum(req.query.hi);
+
     let zoneId = req.query.zoneId ? String(req.query.zoneId) : null;
     let zoneSource = req.query.source ? String(req.query.source) : null;
 
-    // Active picked zone (Engine5 truth)
     const picked = pickZoneFromEngine5Context(ctx);
 
-    // Resolve bounds:
-    // - if request provides lo/hi, use them
-    // - else use picked zone
     let lo = reqLo;
     let hi = reqHi;
 
@@ -385,7 +439,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       zoneSource = zoneSource ?? (picked._source || null);
     }
 
-    // Enrich metadata by matching request bounds to active zone bounds (stable)
     let inferredZoneType = null;
     let inferredZoneId = null;
     let inferredSource = null;
@@ -413,30 +466,40 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     if (lo == null || hi == null || currentPrice == null) {
       return res.json({
-        ok: true, invalid: false,
-        reactionScore: 0, structureState: "HOLD", reasonCodes: ["NOT_IN_ZONE"],
+        ok: true,
+        invalid: false,
+        reactionScore: 0,
+        structureState: "HOLD",
+        reasonCodes: ["NOT_IN_ZONE"],
         zone,
-        rejectionSpeed: 0, displacementAtr: 0, reclaimOrFailure: 0, touchQuality: 0,
-        samples: 0, price: currentPrice, atr: atrVal,
-        armed: false, stage: "IDLE", compression: null,
+        rejectionSpeed: 0,
+        displacementAtr: 0,
+        reclaimOrFailure: 0,
+        touchQuality: 0,
+        samples: 0,
+        price: currentPrice,
+        atr: atrVal,
+        armed: false,
+        stage: "IDLE",
+        compression: null,
         mode: chosenMode,
       });
     }
 
-    // containment padding (same as your earlier)
     let pad = 0;
-    if (chosenMode === "scalp") pad = 1.30;
-    else pad = Math.min(0.10 * atrVal, 1.00);
+    if (chosenMode === "scalp") {
+      pad = 1.30;
+    } else {
+      pad = Math.min(0.10 * atrVal, 1.00);
+    }
 
     const loPad = lo - pad;
     const hiPad = hi + pad;
 
     const inZoneNow = within(currentPrice, loPad, hiPad);
 
-    // negotiated classification (inferred or by id)
     const negotiatedZone = isNegotiatedByMeta(inferredZoneType, zoneId);
 
-    // RQE compute (kept)
     const rqe = computeReactionQuality({
       bars,
       zone: { lo, hi, side, id: zoneId ?? null },
@@ -449,21 +512,25 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       },
     });
 
-    const rejectionSpeed = Number.isFinite(rqe.rejectionSpeedPoints) ? rqe.rejectionSpeedPoints * 2.5 : 0;
-    const displacementAtr = Number.isFinite(rqe.displacementPoints) ? rqe.displacementPoints * 2.5 : 0;
+    const rejectionSpeed = Number.isFinite(rqe.rejectionSpeedPoints)
+      ? rqe.rejectionSpeedPoints * 2.5
+      : 0;
+
+    const displacementAtr = Number.isFinite(rqe.displacementPoints)
+      ? rqe.displacementPoints * 2.5
+      : 0;
+
     const reclaimOrFailure =
       rqe.structureState === "HOLD" ? 10 :
       rqe.structureState === "FAKEOUT_RECLAIM" ? 5 :
       rqe.structureState === "FAILURE" ? 0 : 0;
 
-    // SCALP ARMING RULES (v1)
     const a = candleAnatomy(lastBar);
-    const o = Number(lastBar?.open);
+
     const h = Number(lastBar?.high);
     const l = Number(lastBar?.low);
     const c = Number(lastBar?.close);
 
-    // Wick probes (requires probe beyond edge + close back inside)
     const wickProbeShort =
       negotiatedZone &&
       inZoneNow &&
@@ -480,7 +547,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const ctrl = detectControlCandle(lastBar, atrVal);
 
-    // Direction-aware control
     const controlArms =
       negotiatedZone &&
       inZoneNow &&
@@ -489,18 +555,11 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
         (side === "supply" && ctrl.control === "SELLER")
       );
 
-    // Optional testing flag: arm on touch, but conservative (must be touching now)
-    const touchArmsEnabled = String(process.env.E3_TOUCH_ARMS_NEGOTIATED || "").trim() === "1";
-    const lastIdx = bars.length - 1;
-    const touchingNow = (rqe?.touchIndex != null) && (rqe.touchIndex === lastIdx);
-
-    const touchArms = Boolean(touchArmsEnabled && negotiatedZone && inZoneNow && touchingNow);
-
     let stage = "IDLE";
     let armed = false;
 
     if (chosenMode === "scalp") {
-      if (touchArms || wickProbeShort || wickProbeLong || controlArms) {
+      if (wickProbeShort || wickProbeLong || controlArms) {
         armed = true;
         stage = "ARMED";
       }
@@ -508,14 +567,13 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
     const reasonCodes = buildReasonCodes({ inZoneNow, stage, rqe, mode: chosenMode });
 
-    // Keep score visible if in zone or armed (so UI shows activity)
     const inScope = inZoneNow || stage === "ARMED";
     const reactionScoreOut = inScope ? rqe.reactionScore : 0;
     const touchQuality = (inScope && rqe.touchIndex != null) ? 10 : 0;
 
-    const structureStateOut = rqe.structureState === "FAKEOUT_RECLAIM" ? "RECLAIM" : rqe.structureState;
+    const structureStateOut =
+      rqe.structureState === "FAKEOUT_RECLAIM" ? "RECLAIM" : rqe.structureState;
 
-    // ✅ NEW: ARMED candle metadata (additive)
     let armedCandleHigh = null;
     let armedCandleLow = null;
     let armedCandleTimeMs = null;
@@ -532,7 +590,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       ok: true,
       invalid: false,
 
-      // LOCKED fields
       reactionScore: reactionScoreOut,
       structureState: structureStateOut,
       reasonCodes,
@@ -553,19 +610,14 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
       mode: chosenMode,
 
-      // diagnostics
       side,
       direction: side === "supply" ? "SHORT" : "LONG",
       inZoneNow,
 
       negotiatedZone,
       inferredZoneType,
-      inferredSource: inferredSource,
+      inferredSource,
       inferredFromActiveMatch: inferredZoneType != null,
-
-      touchArmsEnabled,
-      touchingNow,
-      touchArms,
 
       wickProbeShort,
       wickProbeLong,
@@ -577,7 +629,6 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
       candle: a,
       padded: { lo: loPad, hi: hiPad, pad },
 
-      // ✅ NEW additive fields (ARMED candle metadata)
       armedCandleHigh,
       armedCandleLow,
       armedCandleTimeMs,
