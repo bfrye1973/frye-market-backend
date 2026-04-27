@@ -989,6 +989,7 @@ try {
   (waveContext.minorPhase === "IN_W3" || waveContext.minor === "IN_W3");
 
 if (isActiveMinorW3) {
+  waveContext.waveState = "TRENDING_IMPULSE";
   if (trendState_4h === "LONG_ONLY") {
     wave3Status = "ACTIVE_EXTENSION";
     nextExpectedStructure = "WATCH_W3_EXTENSION";
