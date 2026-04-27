@@ -652,10 +652,18 @@ def main():
     psi = lux_psi_from_closes(Cw, conv=50, length=20)
     squeeze_psi_4h = float(psi) if isinstance(psi, (int, float)) else 50.0
     squeeze_psi_4h = float(clamp(squeeze_psi_4h, 0.0, 100.0))
+    # 🔥 EMA compression override (4H)
+    gap_10_20 = abs((e10 - e20) / e20) * 100 if e20 else 0.0
+    gap_20_50 = abs((e20 - e50) / e50) * 100 if e50 else 0.0
+
+    if gap_10_20 < 0.15 and gap_20_50 < 0.25:
+        squeeze_psi_4h = max(squeeze_psi_4h, 85.0)
+
+    if gap_10_20 < 0.08 and gap_20_50 < 0.15:
+        squeeze_psi_4h = max(squeeze_psi_4h, 95.0)
 
     # Dead-zone breaker (UX)
-    if abs(squeeze_psi_4h - 50.0) < 0.25:
-        squeeze_psi_4h = 49.0 if float(ema10_posture) >= 55.0 else 51.0
+    
 
     squeeze_exp_4h = clamp(100.0 - squeeze_psi_4h, 0.0, 100.0)
 
