@@ -68,7 +68,7 @@ def main():
 
     # IMPORTANT: we now expect trend_strength_1h_pct to exist (set by make_dashboard_hourly.py)
     ts = m.get("trend_strength_1h_pct") or m.get("trend_strength_pct")
-    sq = m.get("squeeze_1h_pct")
+    sq = m.get("squeeze_psi_1h_pct") or m.get("squeeze_pct") or m.get("squeeze_1h_pct")
     vol_pct = m.get("volatility_1h_pct")
     vol_scaled = m.get("volatility_1h_scaled")
     if isinstance(vol_pct,(int,float)) and not isinstance(vol_scaled,(int,float)):
