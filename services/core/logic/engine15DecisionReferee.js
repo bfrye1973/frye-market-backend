@@ -1595,6 +1595,7 @@ export function buildFinalDecision({
   permission,
   engine3,
   engine4,
+  waveReaction = null,
   zoneContext,
 } = {}) {
   const p = normalizePermission(permission);
@@ -1824,6 +1825,7 @@ export function computeEngine15DecisionReferee({
   permission = null,
   engine3 = null,
   engine4 = null,
+  waveReaction = null,
   zoneContext = null,
 } = {}) {
   try {
@@ -1845,17 +1847,18 @@ export function computeEngine15DecisionReferee({
     });
 
     return buildFinalDecision({
-      symbol,
-      strategyId,
-      winner,
-      engine16,
-      engine5,
-      momentum,
-      permission,
-      engine3,
-      engine4,
-      zoneContext,
-    });
+  symbol,
+  strategyId,
+  winner,
+  engine16,
+  engine5,
+  momentum,
+  permission,
+  engine3,
+  engine4,
+  waveReaction,
+  zoneContext,
+});
   } catch (err) {
     return {
       ok: false,
