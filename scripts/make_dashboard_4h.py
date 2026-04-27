@@ -323,18 +323,14 @@ def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20) -> O
     if not closes or len(closes) < max(5, length + 2):
         return None
 
-    mx = None
-    mn = None
+    mx = 0.0
+    mn = 0.0
     diffs: List[float] = []
     eps = 1e-12
 
     for src in map(float, closes):
-        if mx is None or mn is None:
-            mx = src
-            mn = src
-        else:
-            mx = max(src, mx - (mx - src) / conv)
-            mn = min(src, mn + (src - mn) / conv)
+        mx = max(src, mx - (mx - src) / conv)
+        mn = min(src, mn + (src - mn) / conv)
 
         span = max(mx - mn, eps)
         diffs.append(math.log(span))
