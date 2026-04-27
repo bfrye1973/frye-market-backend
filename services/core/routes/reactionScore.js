@@ -27,6 +27,7 @@
 
 import express from "express";
 import { computeReactionQuality } from "../logic/reactionQualityEngine.js";
+import { computeEngine3WaveReactionQuality } from "../logic/engine3WaveReactionQuality.js";
 
 export const reactionScoreRouter = express.Router();
 
@@ -574,6 +575,30 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
     const structureStateOut =
       rqe.structureState === "FAKEOUT_RECLAIM" ? "RECLAIM" : rqe.structureState;
 
+     let engine16ForWaveReaction = null;
+
+     try {
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const engine16Url = `${baseUrl}/api/v1/morning-fib?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(timeframe)}`;
+
+      const engine16Resp = await fetch(engine16Url);
+
+      if (engine16Resp.ok) {
+        engine16ForWaveReaction = await engine16Resp.json();
+      } else {
+        engine16ForWaveReaction = { unavailable: true };
+      }
+    } catch (err) {
+      engine16ForWaveReaction = { unavailable: true };
+    }
+
+    const waveReaction = computeEngine3WaveReactionQuality({
+      engine16: engine16ForWaveReaction,
+      reactionScore: reactionScoreOut,
+      structureState: structureStateOut,
+      reasonCodes,
+    });
+
     let armedCandleHigh = null;
     let armedCandleLow = null;
     let armedCandleTimeMs = null;
@@ -597,6 +622,7 @@ reactionScoreRouter.get("/reaction-score", async (req, res) => {
 
       rejectionSpeed,
       displacementAtr,
+      waveReaction, 
       reclaimOrFailure,
       touchQuality,
 
