@@ -464,6 +464,21 @@ def build_hourly(source_js: Optional[dict], hourly_url: str) -> dict:
         if isinstance(psi, (int, float)):
             squeeze_psi_1h = float(psi)
             squeeze_exp_1h = clamp(100.0 - float(psi), 0.0, 100.0)
+        # 🔥 EMA compression override (1H)
+        e10 = ema_series(C, 10)[-1]
+        e20 = ema_series(C, 20)[-1]
+        e50 = ema_series(C, 50)[-1]
+
+        gap_10_20 = abs((e10 - e20) / e20) * 100 if e20 else 0.0
+        gap_20_50 = abs((e20 - e50) / e50) * 100 if e50 else 0.0
+
+        if gap_10_20 < 0.15 and gap_20_50 < 0.25:
+            squeeze_psi_1h = max(squeeze_psi_1h, 85.0)
+
+        if gap_10_20 < 0.08 and gap_20_50 < 0.15:
+            squeeze_psi_1h = max(squeeze_psi_1h, 95.0) 
+        squeeze_exp_1h = clamp(100.0 - squeeze_psi_1h, 0.0, 100.0)
+         
 
     # Liquidity + Volatility
     liquidity_1h = 50.0
