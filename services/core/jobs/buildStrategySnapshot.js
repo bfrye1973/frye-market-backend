@@ -377,8 +377,10 @@ function skippedEngine16(sym, tf = null, marketRegime = null, engine2Context = n
 }
 
 function isEngine16EnabledForStrategy(strategyId) {
-  return strategyId === "intraday_scalp@10m";
-}
+  return (
+  strategyId === "intraday_scalp@10m" ||
+  strategyId === "minor_swing@1h"
+);
 
 async function buildEngine16Direct(sym, tf = "30m", marketRegime = null, engine2Context = null) {
   try {
