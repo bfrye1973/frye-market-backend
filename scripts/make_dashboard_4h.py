@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Ferrari Dashboard — make_dashboard_4h.py
-R15.0 — NATIVE POLYGON 240M PRIMARY + STATEFUL LUX PSI 4H FIX
+R18.0 — NATIVE 240M PRIMARY + 1H-BUILT 4H PSI TEST
 
 LOCKED INTENT:
 - Primary 4H candle truth = native Polygon 240m bars
@@ -10,7 +10,7 @@ LOCKED INTENT:
 - Keep output schema unchanged
 - Keep 4H responsive, but prevent fake bullish inflation during recovery
 - 10 EMA remains directional, but 20/50/200 control score ceilings
-- 4H squeeze uses stateful LuxAlgo PSI behavior, same direction as TradingView
+- 4H squeeze uses LuxAlgo PSI behavior, with debug test from 1H-built 4H candles
 """
 
 from __future__ import annotations
@@ -30,6 +30,11 @@ UTC = timezone.utc
 
 POLY_4H_URL = (
     "https://api.polygon.io/v2/aggs/ticker/{sym}/range/240/minute/{start}/{end}"
+    "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
+)
+
+POLY_1H_URL = (
+    "https://api.polygon.io/v2/aggs/ticker/{sym}/range/60/minute/{start}/{end}"
     "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
 )
 
@@ -126,8 +131,48 @@ def fetch_polygon_4h(sym: str, key: str, lookback_days: int) -> List[dict]:
             continue
 
     out.sort(key=lambda x: x["time"])
-    
+
+    if out:
+        now_ts = int(time.time())
+        last = out[-1]["time"]
+        if (last // (4 * 3600)) == (now_ts // (4 * 3600)):
+            out = out[:-1]
+
     return out
+
+
+def fetch_polygon_1h(sym: str, key: str, lookback_days: int) -> List[dict]:
+    end = datetime.now(UTC).date()
+    start = end - timedelta(days=lookback_days)
+    url = POLY_1H_URL.format(sym=sym, start=start, end=end, key=key)
+
+    try:
+        js = fetch_json(url, timeout=25)
+    except Exception:
+        return []
+
+    rows = js.get("results") or []
+    out: List[dict] = []
+
+    for r in rows:
+        try:
+            t = int(r.get("t", 0)) // 1000
+            out.append(
+                {
+                    "time": t,
+                    "open": float(r.get("o", 0)),
+                    "high": float(r.get("h", 0)),
+                    "low": float(r.get("l", 0)),
+                    "close": float(r.get("c", 0)),
+                    "volume": float(r.get("v", 0)),
+                }
+            )
+        except Exception:
+            continue
+
+    out.sort(key=lambda x: x["time"])
+    return out
+
 
 def fetch_polygon_10m(sym: str, key: str, lookback_days: int) -> List[dict]:
     end = datetime.now(UTC).date()
@@ -247,6 +292,45 @@ def fetch_backend2_10m(sym: str, tf: str = "10m", limit: int = 1200, lookback_da
     return out
 
 
+def build_4h_from_1h(bars1h: List[dict]) -> List[dict]:
+    """
+    Build synthetic 4H candles from Polygon 1H candles.
+
+    This is a TEST source for Lux PSI only:
+    - It keeps the current forming 4H bucket if Polygon provides the latest 1H bar.
+    - It groups by epoch 4H boundary to match common 4H bucket behavior.
+    - Main Market Meter remains native 240m until we confirm this matches TradingView.
+    """
+    if not bars1h:
+        return []
+
+    buckets = {}
+
+    for b in bars1h:
+        k = b["time"] // (4 * 3600)
+        buckets.setdefault(k, []).append(b)
+
+    out: List[dict] = []
+
+    for k in sorted(buckets.keys()):
+        grp = buckets[k]
+        grp.sort(key=lambda x: x["time"])
+
+        out.append(
+            {
+                "time": int(grp[0]["time"]),
+                "open": float(grp[0]["open"]),
+                "high": float(max(x["high"] for x in grp)),
+                "low": float(min(x["low"] for x in grp)),
+                "close": float(grp[-1]["close"]),
+                "volume": float(sum(x.get("volume", 0.0) for x in grp)),
+                "sourceBars": int(len(grp)),
+            }
+        )
+
+    return out
+
+
 def build_4h_from_10m(bars10: List[dict]) -> List[dict]:
     if not bars10:
         return []
@@ -303,25 +387,28 @@ def ema_last(vals: List[float], span: int) -> Optional[float]:
 def tr_series(H: List[float], L: List[float], C: List[float]) -> List[float]:
     return [max(H[i] - L[i], abs(H[i] - C[i - 1]), abs(L[i] - C[i - 1])) for i in range(1, len(C))]
 
-def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20,
-                    cache_path: Optional[str] = None) -> Optional[float]:
 
+def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
+    """
+    LuxAlgo Squeeze Index logic.
+
+    Pine source:
+      var max = 0.
+      var min = 0.
+      max := nz(math.max(src, max - (max - src) / conv), src)
+      min := nz(math.min(src, min + (src - min) / conv), src)
+      diff = math.log(max - min)
+      psi = -50 * ta.correlation(diff, bar_index, length) + 50
+
+    Important:
+    - mx/mn start at 0.0 to match the Pine `var max = 0.` / `var min = 0.`
+    - xs = 0..length-1 is mathematically equivalent for correlation window.
+    """
     if not closes or len(closes) < max(5, length + 2):
         return None
 
     mx = 0.0
     mn = 0.0
-
-    # 🔥 load previous state
-    if cache_path and os.path.exists(cache_path):
-        try:
-            with open(cache_path, "r") as f:
-                data = json.load(f)
-                mx = float(data.get("mx", 0.0))
-                mn = float(data.get("mn", 0.0))
-        except:
-            pass
-
     diffs: List[float] = []
     eps = 1e-12
 
@@ -331,14 +418,6 @@ def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20,
 
         span = max(mx - mn, eps)
         diffs.append(math.log(span))
-
-    # 🔥 save updated state
-    if cache_path:
-        try:
-            with open(cache_path, "w") as f:
-                json.dump({"mx": mx, "mn": mn}, f)
-        except:
-            pass
 
     win = diffs[-length:]
 
@@ -358,6 +437,7 @@ def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20,
     psi = -50.0 * r + 50.0
 
     return float(clamp(psi, 0.0, 100.0))
+
 
 def tv_smi_and_signal(
     H: List[float],
@@ -554,9 +634,14 @@ def main():
 
     spy_4h = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H)
     source_used = "polygon_240m"
-    # --- TEST: build 4H from 10m (TradingView-style comparison) ---
+    # --- TEST: build 4H from 10m (legacy comparison) ---
     spy_10m_test = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
     spy_4h_session = build_4h_from_10m(spy_10m_test)
+
+    # --- TEST: build 4H from 1H candles ---
+    # This is the key debug source because the 1H Market Meter already matches TradingView better.
+    spy_1h_test = fetch_polygon_1h("SPY", key, lookback_days=FETCH_DAYS_4H)
+    spy_4h_from_1h = build_4h_from_1h(spy_1h_test)
 
     if len(spy_4h) < 25:
         print("[warn] insufficient Polygon 240m bars; falling back to Backend-2 10m aggregation", flush=True)
@@ -628,12 +713,7 @@ def main():
         elif smi_val < sig_val:
             smi_bonus = -SMI_BONUS_MAX
 
-    psi = lux_psi_stateful(
-        C,
-        conv=50,
-        length=20,
-        cache_path="data/4h_cache.json"
-    )
+    psi = lux_psi_stateful(C, conv=50, length=20)
     squeeze_psi_4h = float(psi) if isinstance(psi, (int, float)) else 50.0
     # --- TEST PSI using session-built 4H candles ---
     squeeze_psi_4h_session = None
@@ -727,6 +807,12 @@ def main():
         "squeeze_psi_4h_pct_session": round(float(squeeze_psi_4h_session), 2) if squeeze_psi_4h_session is not None else None,
         "session_4h_bars": int(len(spy_4h_session)),
 
+        # --- DEBUG: compare 1H-built 4H PSI ---
+        "squeeze_psi_4h_pct_from_1h": round(float(squeeze_psi_4h_from_1h), 2) if squeeze_psi_4h_from_1h is not None else None,
+        "from_1h_4h_bars": int(len(spy_4h_from_1h)),
+        "polygon_1h_bars": int(len(spy_1h_test)),
+        "source_used_4h_from_1h": "polygon_60m_grouped_4h",
+
         "squeeze_psi_4h": round(float(squeeze_psi_4h), 2),
         "squeeze_4h_pct": round(float(squeeze_exp_4h), 2),
         "liquidity_4h": round(float(liquidity_4h), 2),
@@ -759,7 +845,7 @@ def main():
     }
 
     out = {
-        "version": "r4h-v15-stateful-lux-psi",
+        "version": "r4h-v18-1h-built-4h-psi-test",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
