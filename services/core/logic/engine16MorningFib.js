@@ -2160,7 +2160,17 @@ let macroContinuationDowngraded = false;
       regularSessionLowTime: formatDisplayTimeFromMs(regularSessionLowBar?.t),
     },
 
-    signalTimes,
+       signalTimes: {
+      ...signalTimes,
+      continuationTriggerTime:
+        (continuationTriggerLong || continuationTriggerShort)
+          ? triggerTime
+          : signalTimes.continuationTriggerTime,
+      continuationTime:
+        (continuationTriggerLong || continuationTriggerShort)
+          ? triggerTime
+          : signalTimes.continuationTime,
+    }, 
 
     state: stateInfo.state,
     insidePrimaryZone,
