@@ -635,7 +635,12 @@ def main():
         elif smi_val < sig_val:
             smi_bonus = -SMI_BONUS_MAX
 
-    psi = lux_psi_stateful(C, conv=50, length=20)
+    psi = lux_psi_stateful(
+        C,
+        conv=50,
+        length=20,
+        cache_path="data/4h_cache.json"
+    )
     squeeze_psi_4h = float(psi) if isinstance(psi, (int, float)) else 50.0
     # --- TEST PSI using session-built 4H candles ---
     squeeze_psi_4h_session = None
