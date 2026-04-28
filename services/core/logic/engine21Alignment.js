@@ -32,10 +32,10 @@ function getDirection({ price, ema10, ema20, symbol }) {
   const isBear = price < ema10 && price < ema20 && ema10 < ema20;
 
   if (symbol === "VIX" || symbol === "UVXY") {
-    if (isBear) return "BEAR_CONFIRM";
-    if (isBull) return "BULL_CONFIRM";
-    return "NEUTRAL";
-  }
+  if (isBear) return "BULL_CONFIRM";   // ↓ volatility = bullish market
+  if (isBull) return "BEAR_CONFIRM";   // ↑ volatility = bearish market
+  return "NEUTRAL";
+}
 
   if (isBull) return "BULL";
   if (isBear) return "BEAR";
