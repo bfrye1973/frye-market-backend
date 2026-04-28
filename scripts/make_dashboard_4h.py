@@ -310,21 +310,25 @@ def ema_last(vals: List[float], span: int) -> Optional[float]:
 def tr_series(H: List[float], L: List[float], C: List[float]) -> List[float]:
     return [max(H[i] - L[i], abs(H[i] - C[i - 1]), abs(L[i] - C[i - 1])) for i in range(1, len(C))]
 
+def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20,
+                    cache_path: Optional[str] = None) -> Optional[float]:
 
-def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
-    """
-    LuxAlgo Squeeze Index:
-
-    max := nz(math.max(src, max - (max - src) / conv), src)
-    min := nz(math.min(src, min + (src - min) / conv), src)
-    diff = math.log(max - min)
-    psi = -50 * ta.correlation(diff, bar_index, length) + 50
-    """
     if not closes or len(closes) < max(5, length + 2):
         return None
 
     mx = 0.0
     mn = 0.0
+
+    # 🔥 load previous state
+    if cache_path and os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r") as f:
+                data = json.load(f)
+                mx = float(data.get("mx", 0.0))
+                mn = float(data.get("mn", 0.0))
+        except:
+            pass
+
     diffs: List[float] = []
     eps = 1e-12
 
@@ -334,6 +338,14 @@ def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20) -> O
 
         span = max(mx - mn, eps)
         diffs.append(math.log(span))
+
+    # 🔥 save updated state
+    if cache_path:
+        try:
+            with open(cache_path, "w") as f:
+                json.dump({"mx": mx, "mn": mn}, f)
+        except:
+            pass
 
     win = diffs[-length:]
 
@@ -353,7 +365,6 @@ def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20) -> O
     psi = -50.0 * r + 50.0
 
     return float(clamp(psi, 0.0, 100.0))
-
 
 def tv_smi_and_signal(
     H: List[float],
