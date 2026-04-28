@@ -126,15 +126,8 @@ def fetch_polygon_4h(sym: str, key: str, lookback_days: int) -> List[dict]:
             continue
 
     out.sort(key=lambda x: x["time"])
-
-    if out:
-        now_ts = int(time.time())
-        last = out[-1]["time"]
-        if (last // (4 * 3600)) == (now_ts // (4 * 3600)):
-            out = out[:-1]
-
+    
     return out
-
 
 def fetch_polygon_10m(sym: str, key: str, lookback_days: int) -> List[dict]:
     end = datetime.now(UTC).date()
