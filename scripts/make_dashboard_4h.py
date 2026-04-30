@@ -712,28 +712,31 @@ def main():
             smi_bonus = +SMI_BONUS_MAX
         elif smi_val < sig_val:
             smi_bonus = -SMI_BONUS_MAX
-    squeeze_psi_4h_1h = None
+
+    # --- MAIN 4H PSI (native 240m candles) ---
     psi = lux_psi_stateful(C, conv=50, length=20)
     squeeze_psi_4h = float(psi) if isinstance(psi, (int, float)) else 50.0
-    # --- TEST PSI using session-built 4H candles ---
+
+    # --- TEST PSI using session-built 4H candles (10m source) ---
     squeeze_psi_4h_session = None
 
     if len(spy_4h_session) >= 25:
         C_session = [b["close"] for b in spy_4h_session]
         psi_session = lux_psi_stateful(C_session, conv=50, length=20)
-        
+
         if isinstance(psi_session, (int, float)):
             squeeze_psi_4h_session = float(clamp(psi_session, 0.0, 100.0))
-     # --- TEST PSI using 1H-built 4H candles ---
-     squeeze_psi_4h_1h = None
 
-     if len(spy_4h_from_1h) >= 25:
-         C_1h4h = [b["close"] for b in spy_4h_from_1h]
-         psi_1h4h = lux_psi_stateful(C_1h4h, conv=50, length=20)
+    # --- TEST PSI using 1H-built 4H candles ---
+    squeeze_psi_4h_1h = None
 
-         if isinstance(psi_1h4h, (int, float)):
-             squeeze_psi_4h_1h = float(clamp(psi_1h4h, 0.0, 100.0))       
-            
+    if len(spy_4h_from_1h) >= 25:
+        C_1h4h = [b["close"] for b in spy_4h_from_1h]
+        psi_1h4h = lux_psi_stateful(C_1h4h, conv=50, length=20)
+
+        if isinstance(psi_1h4h, (int, float)):
+            squeeze_psi_4h_1h = float(clamp(psi_1h4h, 0.0, 100.0))
+
     squeeze_psi_4h = float(clamp(squeeze_psi_4h, 0.0, 100.0))
     squeeze_exp_4h = clamp(100.0 - squeeze_psi_4h, 0.0, 100.0)
 
