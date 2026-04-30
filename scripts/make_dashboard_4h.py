@@ -809,8 +809,8 @@ def main():
         "smi_signal_4h": round(float(sig_val), 4),
         "smi_4h_pct": round(float(smi_pct), 2),
         "smi_bonus_pts": int(smi_bonus),
-
-        "squeeze_psi_4h_pct": round(float(squeeze_psi_4h), 2),
+  
+        "squeeze_psi_4h_pct": round(float(squeeze_psi_4h_1h), 2) if squeeze_psi_4h_1h is not None else round(float(squeeze_psi_4h), 2),
         "squeeze_expansion_pct": round(float(squeeze_exp_4h), 2),
         "squeeze_pct": round(float(squeeze_psi_4h), 2),
 
