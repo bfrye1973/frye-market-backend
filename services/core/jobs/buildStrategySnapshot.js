@@ -29,6 +29,7 @@ import { computeMorningFib } from "../logic/engine16MorningFib.js";
 import { computeMarketRegime } from "../logic/marketRegime.js";
 import { updateSignalLock } from "../logic/signalLockStore.js";
 import { getExecutionState } from "../logic/execution/executionStateService.js";
+import { computeEngine22ScalpOpportunity } from "../logic/engine22ScalpOpportunity.js";
 
 /* -----------------------------
    Absolute paths / constants
@@ -1366,7 +1367,15 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
       executionBias = "LONG_PRIORITY";
     }
   }
-
+    const engine22Scalp =
+    s.strategyId === "intraday_scalp@10m" && s.tf === "10m"
+      ? computeEngine22ScalpOpportunity({
+          symbol,
+          strategyId: s.strategyId,
+          tf: s.tf,
+          engine16,
+        })
+      : null;
   return {
     strategyId: s.strategyId,
     lockedSignal, 
@@ -1385,6 +1394,7 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
       },
     engine2,
     engine16,
+    engine22Scalp,
     engine15,
     engine15Decision,
     executionBias,
