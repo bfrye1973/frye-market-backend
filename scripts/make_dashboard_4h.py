@@ -808,7 +808,7 @@ def main():
         "session_4h_bars": int(len(spy_4h_session)),
 
         # --- DEBUG: compare 1H-built 4H PSI ---
-        "squeeze_psi_4h_pct_from_1h": round(float(squeeze_psi_4h_from_1h), 2) if squeeze_psi_4h_from_1h is not None else None,
+        "squeeze_psi_4h_pct_from_1h": round(float(squeeze_psi_4h_1h), 2) if squeeze_psi_4h_1h is not None else None, 
         "from_1h_4h_bars": int(len(spy_4h_from_1h)),
         "polygon_1h_bars": int(len(spy_1h_test)),
         "source_used_4h_from_1h": "polygon_60m_grouped_4h",
