@@ -1,6 +1,6 @@
 from pathlib import Path
 
-script = r'''#!/usr/bin/env python3
+
 # -*- coding: utf-8 -*-
 """
 Ferrari Dashboard — make_dashboard_4h.py
@@ -849,8 +849,3 @@ if __name__ == "__main__":
     except Exception as e:
         print("[4h-error]", e, file=sys.stderr)
         sys.exit(2)
-'''
-
-path = Path("/mnt/data/make_dashboard_4h_R19_clean.py")
-path.write_text(script, encoding="utf-8")
-print(path)
