@@ -1368,14 +1368,16 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
     }
   }
     const engine22Scalp =
-    s.strategyId === "intraday_scalp@10m" && s.tf === "10m"
-      ? computeEngine22ScalpOpportunity({
-          symbol,
-          strategyId: s.strategyId,
-          tf: s.tf,
-          engine16,
-        })
-      : null;
+      s.strategyId === "intraday_scalp@10m" && s.tf === "10m"
+        ? computeEngine22ScalpOpportunity({
+            symbol,
+            strategyId: s.strategyId,
+            tf: s.tf,
+            engine16,
+            reaction: patchedConfluence?.context?.reaction || null,
+            waveReaction: reaction?.waveReaction || null,
+          })
+        : null;
   return {
     strategyId: s.strategyId,
     lockedSignal, 
