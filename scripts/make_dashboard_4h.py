@@ -1,16 +1,18 @@
-#!/usr/bin/env python3
+from pathlib import Path
+
+script = r'''#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Ferrari Dashboard — make_dashboard_4h.py
-R18.0 — NATIVE 240M PRIMARY + 1H-BUILT 4H PSI TEST
+R19.0 — CLEAN 4H MARKET METER + 1H-BUILT 4H LUX PSI
 
 LOCKED INTENT:
-- Primary 4H candle truth = native Polygon 240m bars
-- Backend-2 10m aggregation is fallback only
-- Keep output schema unchanged
-- Keep 4H responsive, but prevent fake bullish inflation during recovery
-- 10 EMA remains directional, but 20/50/200 control score ceilings
-- 4H squeeze uses LuxAlgo PSI behavior, with debug test from 1H-built 4H candles
+- Native Polygon 240m remains the structural 4H source for EMA, SMI, volatility, liquidity, and scoring context.
+- 4H squeeze PSI uses TradingView-aligned 1H-built 4H candles when available.
+- Native 240m PSI remains available as a debug/reference field.
+- 10m-built 4H PSI remains available as a legacy/debug comparison field.
+- Keep existing output schema intact while adding clear source fields.
+- No persistence cache. No EMA override. No fake squeeze inflation.
 """
 
 from __future__ import annotations
@@ -95,19 +97,19 @@ def pct(a: float, b: float) -> float:
 def fetch_json(url: str, timeout: int = 30) -> Any:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "make-dashboard/4h/stateful-lux", "Cache-Control": "no-store"},
+        headers={"User-Agent": "make-dashboard/4h/r19", "Cache-Control": "no-store"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def fetch_polygon_4h(sym: str, key: str, lookback_days: int) -> List[dict]:
+def _fetch_polygon_range(sym: str, key: str, lookback_days: int, url_template: str, timeout: int = 25) -> List[dict]:
     end = datetime.now(UTC).date()
     start = end - timedelta(days=lookback_days)
-    url = POLY_4H_URL.format(sym=sym, start=start, end=end, key=key)
+    url = url_template.format(sym=sym, start=start, end=end, key=key)
 
     try:
-        js = fetch_json(url, timeout=25)
+        js = fetch_json(url, timeout=timeout)
     except Exception:
         return []
 
@@ -131,8 +133,15 @@ def fetch_polygon_4h(sym: str, key: str, lookback_days: int) -> List[dict]:
             continue
 
     out.sort(key=lambda x: x["time"])
+    return out
 
-    if out:
+
+def fetch_polygon_4h(sym: str, key: str, lookback_days: int, keep_live: bool = False) -> List[dict]:
+    out = _fetch_polygon_range(sym, key, lookback_days, POLY_4H_URL)
+
+    # Native 240m is used as completed structural 4H truth by default.
+    # The live/more responsive squeeze is handled by 1H-built 4H candles below.
+    if out and not keep_live:
         now_ts = int(time.time())
         last = out[-1]["time"]
         if (last // (4 * 3600)) == (now_ts // (4 * 3600)):
@@ -142,69 +151,12 @@ def fetch_polygon_4h(sym: str, key: str, lookback_days: int) -> List[dict]:
 
 
 def fetch_polygon_1h(sym: str, key: str, lookback_days: int) -> List[dict]:
-    end = datetime.now(UTC).date()
-    start = end - timedelta(days=lookback_days)
-    url = POLY_1H_URL.format(sym=sym, start=start, end=end, key=key)
-
-    try:
-        js = fetch_json(url, timeout=25)
-    except Exception:
-        return []
-
-    rows = js.get("results") or []
-    out: List[dict] = []
-
-    for r in rows:
-        try:
-            t = int(r.get("t", 0)) // 1000
-            out.append(
-                {
-                    "time": t,
-                    "open": float(r.get("o", 0)),
-                    "high": float(r.get("h", 0)),
-                    "low": float(r.get("l", 0)),
-                    "close": float(r.get("c", 0)),
-                    "volume": float(r.get("v", 0)),
-                }
-            )
-        except Exception:
-            continue
-
-    out.sort(key=lambda x: x["time"])
-    return out
+    # Keep latest 1H bars available. This source is used for TradingView-aligned 4H squeeze.
+    return _fetch_polygon_range(sym, key, lookback_days, POLY_1H_URL)
 
 
 def fetch_polygon_10m(sym: str, key: str, lookback_days: int) -> List[dict]:
-    end = datetime.now(UTC).date()
-    start = end - timedelta(days=lookback_days)
-    url = POLY_10M_URL.format(sym=sym, start=start, end=end, key=key)
-
-    try:
-        js = fetch_json(url, timeout=25)
-    except Exception:
-        return []
-
-    rows = js.get("results") or []
-    out: List[dict] = []
-
-    for r in rows:
-        try:
-            t = int(r.get("t", 0)) // 1000
-            out.append(
-                {
-                    "time": t,
-                    "open": float(r.get("o", 0)),
-                    "high": float(r.get("h", 0)),
-                    "low": float(r.get("l", 0)),
-                    "close": float(r.get("c", 0)),
-                    "volume": float(r.get("v", 0)),
-                }
-            )
-        except Exception:
-            continue
-
-    out.sort(key=lambda x: x["time"])
-    return out
+    return _fetch_polygon_range(sym, key, lookback_days, POLY_10M_URL)
 
 
 def _coerce_ts_to_sec(t: Any) -> int:
@@ -296,18 +248,16 @@ def build_4h_from_1h(bars1h: List[dict]) -> List[dict]:
     """
     Build synthetic 4H candles from Polygon 1H candles.
 
-    This is a TEST source for Lux PSI only:
-    - It keeps the current forming 4H bucket if Polygon provides the latest 1H bar.
-    - It groups by epoch 4H boundary to match common 4H bucket behavior.
-    - Main Market Meter remains native 240m until we confirm this matches TradingView.
+    This is now the preferred source for 4H Lux PSI because it matched TradingView in testing.
+    It does NOT replace the native 240m source for EMA/SMI/volatility/liquidity structure.
     """
     if not bars1h:
         return []
 
-    buckets = {}
+    buckets: dict[int, List[dict]] = {}
 
     for b in bars1h:
-        k = b["time"] // (4 * 3600)
+        k = int(b["time"]) // (4 * 3600)
         buckets.setdefault(k, []).append(b)
 
     out: List[dict] = []
@@ -331,14 +281,14 @@ def build_4h_from_1h(bars1h: List[dict]) -> List[dict]:
     return out
 
 
-def build_4h_from_10m(bars10: List[dict]) -> List[dict]:
+def build_4h_from_10m(bars10: List[dict], keep_live: bool = False) -> List[dict]:
     if not bars10:
         return []
 
-    buckets = {}
+    buckets: dict[int, List[dict]] = {}
 
     for b in bars10:
-        k = b["time"] // (4 * 3600)
+        k = int(b["time"]) // (4 * 3600)
         buckets.setdefault(k, []).append(b)
 
     out: List[dict] = []
@@ -348,16 +298,17 @@ def build_4h_from_10m(bars10: List[dict]) -> List[dict]:
         grp.sort(key=lambda x: x["time"])
         out.append(
             {
-                "time": grp[0]["time"],
+                "time": int(grp[0]["time"]),
                 "open": float(grp[0]["open"]),
                 "high": float(max(x["high"] for x in grp)),
                 "low": float(min(x["low"] for x in grp)),
                 "close": float(grp[-1]["close"]),
                 "volume": float(sum(x.get("volume", 0.0) for x in grp)),
+                "sourceBars": int(len(grp)),
             }
         )
 
-    if out:
+    if out and not keep_live:
         now_ts = int(time.time())
         last = out[-1]["time"]
         if (last // (4 * 3600)) == (now_ts // (4 * 3600)):
@@ -399,10 +350,6 @@ def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20) -> O
       min := nz(math.min(src, min + (src - min) / conv), src)
       diff = math.log(max - min)
       psi = -50 * ta.correlation(diff, bar_index, length) + 50
-
-    Important:
-    - mx/mn start at 0.0 to match the Pine `var max = 0.` / `var min = 0.`
-    - xs = 0..length-1 is mathematically equivalent for correlation window.
     """
     if not closes or len(closes) < max(5, length + 2):
         return None
@@ -445,7 +392,7 @@ def tv_smi_and_signal(
     C: List[float],
     lengthK: int,
     lengthD: int,
-    lengthEMA: int
+    lengthEMA: int,
 ) -> Tuple[List[float], List[float]]:
     n = len(C)
 
@@ -585,6 +532,13 @@ def compute_overall_weighted(
     return state, score, comps
 
 
+def _psi_from_bars(bars: List[dict]) -> Optional[float]:
+    if len(bars) < 25:
+        return None
+    closes = [float(b["close"]) for b in bars]
+    return lux_psi_stateful(closes, conv=50, length=20)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True, help="data/outlook_source_4h.json")
@@ -632,38 +586,40 @@ def main():
 
     risk_on_4h = round(pct(ro_score, ro_den), 2) if ro_den > 0 else 50.0
 
-    spy_4h = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H)
+    # --- STRUCTURAL 4H SOURCE: native Polygon 240m completed candles ---
+    spy_4h_native = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H, keep_live=False)
     source_used = "polygon_240m"
-    # --- TEST: build 4H from 10m (legacy comparison) ---
-    spy_10m_test = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
-    spy_4h_session = build_4h_from_10m(spy_10m_test)
 
-    # --- TEST: build 4H from 1H candles ---
-    # This is the key debug source because the 1H Market Meter already matches TradingView better.
-    spy_1h_test = fetch_polygon_1h("SPY", key, lookback_days=FETCH_DAYS_4H)
-    spy_4h_from_1h = build_4h_from_1h(spy_1h_test)
-
-    if len(spy_4h) < 25:
+    # Fallback only if native 240m truly fails.
+    if len(spy_4h_native) < 25:
         print("[warn] insufficient Polygon 240m bars; falling back to Backend-2 10m aggregation", flush=True)
         spy_10m = fetch_backend2_10m("SPY", tf=B2_TF, limit=B2_LIMIT, lookback_days=FETCH_DAYS_4H)
-        spy_4h = build_4h_from_10m(spy_10m)
-        source_used = "backend2_10m"
+        spy_4h_native = build_4h_from_10m(spy_10m, keep_live=False)
+        source_used = "backend2_10m_completed"
 
-    if len(spy_4h) < 25:
+    if len(spy_4h_native) < 25:
         print("[warn] insufficient Backend-2 10m bars; falling back to Polygon 10m aggregation", flush=True)
         poly_10m = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
-        spy_4h = build_4h_from_10m(poly_10m)
-        source_used = "polygon_10m"
+        spy_4h_native = build_4h_from_10m(poly_10m, keep_live=False)
+        source_used = "polygon_10m_completed"
 
-    if len(spy_4h) < 25:
+    if len(spy_4h_native) < 25:
         print("[fatal] insufficient SPY 4H bars even after all fallbacks", file=sys.stderr)
         sys.exit(2)
 
-    O = [b["open"] for b in spy_4h]
-    H = [b["high"] for b in spy_4h]
-    L = [b["low"] for b in spy_4h]
-    C = [b["close"] for b in spy_4h]
-    V = [b["volume"] for b in spy_4h]
+    # --- DEBUG/PSI SOURCES ---
+    spy_10m_test = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
+    spy_4h_from_10m = build_4h_from_10m(spy_10m_test, keep_live=True)
+
+    spy_1h_test = fetch_polygon_1h("SPY", key, lookback_days=FETCH_DAYS_4H)
+    spy_4h_from_1h = build_4h_from_1h(spy_1h_test)
+
+    # Native structure arrays stay native 240m.
+    O = [b["open"] for b in spy_4h_native]
+    H = [b["high"] for b in spy_4h_native]
+    L = [b["low"] for b in spy_4h_native]
+    C = [b["close"] for b in spy_4h_native]
+    V = [b["volume"] for b in spy_4h_native]
 
     e10 = ema_series(C, 10)[-1]
     e20 = ema_series(C, 20)[-1]
@@ -713,29 +669,25 @@ def main():
         elif smi_val < sig_val:
             smi_bonus = -SMI_BONUS_MAX
 
-    # --- MAIN 4H PSI (native 240m candles) ---
-    psi = lux_psi_stateful(C, conv=50, length=20)
-    squeeze_psi_4h = float(psi) if isinstance(psi, (int, float)) else 50.0
+    # --- PSI CALCULATIONS, KEPT SEPARATE ---
+    psi_native = _psi_from_bars(spy_4h_native)
+    squeeze_psi_4h_native = float(clamp(psi_native, 0.0, 100.0)) if isinstance(psi_native, (int, float)) else 50.0
 
-    # --- TEST PSI using session-built 4H candles (10m source) ---
-    squeeze_psi_4h_session = None
+    psi_10m = _psi_from_bars(spy_4h_from_10m)
+    squeeze_psi_4h_from_10m = float(clamp(psi_10m, 0.0, 100.0)) if isinstance(psi_10m, (int, float)) else None
 
-    if len(spy_4h_session) >= 25:
-        C_session = [b["close"] for b in spy_4h_session]
-        psi_session = lux_psi_stateful(C_session, conv=50, length=20)
+    psi_1h = _psi_from_bars(spy_4h_from_1h)
+    squeeze_psi_4h_from_1h = float(clamp(psi_1h, 0.0, 100.0)) if isinstance(psi_1h, (int, float)) else None
 
-        if isinstance(psi_session, (int, float)):
-            squeeze_psi_4h_session = float(clamp(psi_session, 0.0, 100.0))
-
-    # --- TEST PSI using 1H-built 4H candles ---
-    squeeze_psi_4h_1h = None
-
-    if len(spy_4h_from_1h) >= 25:
-        C_1h4h = [b["close"] for b in spy_4h_from_1h]
-        psi_1h4h = lux_psi_stateful(C_1h4h, conv=50, length=20)
-
-        if isinstance(psi_1h4h, (int, float)):
-            squeeze_psi_4h_1h = float(clamp(psi_1h4h, 0.0, 100.0))
+    # Production 4H squeeze:
+    # Prefer 1H-built 4H PSI because it matched TradingView during testing.
+    # Fall back to native 240m PSI if 1H data is unavailable.
+    if squeeze_psi_4h_from_1h is not None:
+        squeeze_psi_4h = squeeze_psi_4h_from_1h
+        squeeze_source_4h = "polygon_60m_grouped_4h"
+    else:
+        squeeze_psi_4h = squeeze_psi_4h_native
+        squeeze_source_4h = source_used
 
     squeeze_psi_4h = float(clamp(squeeze_psi_4h, 0.0, 100.0))
     squeeze_exp_4h = clamp(100.0 - squeeze_psi_4h, 0.0, 100.0)
@@ -809,24 +761,25 @@ def main():
         "smi_signal_4h": round(float(sig_val), 4),
         "smi_4h_pct": round(float(smi_pct), 2),
         "smi_bonus_pts": int(smi_bonus),
-  
-        "squeeze_psi_4h_pct": round(float(squeeze_psi_4h_1h), 2) if squeeze_psi_4h_1h is not None else round(float(squeeze_psi_4h), 2),
+
+        # Main/public squeeze fields use the production 4H squeeze source.
+        "squeeze_psi_4h_pct": round(float(squeeze_psi_4h), 2),
         "squeeze_expansion_pct": round(float(squeeze_exp_4h), 2),
         "squeeze_pct": round(float(squeeze_psi_4h), 2),
+        "squeeze_psi_4h": round(float(squeeze_psi_4h), 2),
+        "squeeze_4h_pct": round(float(squeeze_exp_4h), 2),
+        "squeeze_source_4h": squeeze_source_4h,
 
-        # --- DEBUG: compare native Polygon 240m PSI vs session-built 4H PSI ---
-        "squeeze_psi_4h_pct_native": round(float(squeeze_psi_4h), 2),
-        "squeeze_psi_4h_pct_session": round(float(squeeze_psi_4h_session), 2) if squeeze_psi_4h_session is not None else None,
-        "session_4h_bars": int(len(spy_4h_session)),
+        # Debug/reference fields keep every source separated.
+        "squeeze_psi_4h_pct_native": round(float(squeeze_psi_4h_native), 2),
+        "squeeze_psi_4h_pct_session": round(float(squeeze_psi_4h_from_10m), 2) if squeeze_psi_4h_from_10m is not None else None,
+        "squeeze_psi_4h_pct_from_1h": round(float(squeeze_psi_4h_from_1h), 2) if squeeze_psi_4h_from_1h is not None else None,
 
-        # --- DEBUG: compare 1H-built 4H PSI ---
-        "squeeze_psi_4h_pct_from_1h": round(float(squeeze_psi_4h_1h), 2) if squeeze_psi_4h_1h is not None else None, 
+        "session_4h_bars": int(len(spy_4h_from_10m)),
         "from_1h_4h_bars": int(len(spy_4h_from_1h)),
         "polygon_1h_bars": int(len(spy_1h_test)),
         "source_used_4h_from_1h": "polygon_60m_grouped_4h",
 
-        "squeeze_psi_4h": round(float(squeeze_psi_4h), 2),
-        "squeeze_4h_pct": round(float(squeeze_exp_4h), 2),
         "liquidity_4h": round(float(liquidity_4h), 2),
         "volatility_4h_pct": round(float(vol_pct), 3),
         "volatility_4h_scaled": float(vol_scaled),
@@ -838,7 +791,7 @@ def main():
         "lux_psi_mode_4h": "stateful",
         "fetch_days_4h": int(FETCH_DAYS_4H),
         "source_used_4h": source_used,
-        "completed_4h_bars": int(len(spy_4h)),
+        "completed_4h_bars": int(len(spy_4h_native)),
     }
 
     fourHour = {
@@ -857,7 +810,7 @@ def main():
     }
 
     out = {
-        "version": "r4h-v18-1h-built-4h-psi-test",
+        "version": "r4h-v19-clean-1h-built-psi",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
@@ -866,9 +819,10 @@ def main():
         "meta": {
             "cards_fresh": True,
             "after_hours": False,
-            "psi_mode_4h": "stateful_lux",
+            "psi_mode_4h": "stateful_lux_1h_built_preferred",
             "fetch_days_4h": int(FETCH_DAYS_4H),
-            "completed_4h_bars": int(len(spy_4h)),
+            "completed_4h_bars": int(len(spy_4h_native)),
+            "squeeze_source_4h": squeeze_source_4h,
         },
     }
 
@@ -878,12 +832,13 @@ def main():
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
     print(
-        f"[4h] score={score:.2f} state={state} source={source_used} bars={len(spy_4h)} "
+        f"[4h] score={score:.2f} state={state} source={source_used} bars={len(spy_4h_native)} "
+        f"psiMain={squeeze_psi_4h:.2f} psiNative={squeeze_psi_4h_native:.2f} "
+        f"psi1h={squeeze_psi_4h_from_1h if squeeze_psi_4h_from_1h is not None else 'NA'} "
         f"emaPost={ema10_posture:.2f} mom={momentum_combo_4h:.2f} "
-        f"breadth={breadth_4h:.2f} psi={squeeze_psi_4h:.2f} exp={squeeze_exp_4h:.2f} "
+        f"breadth={breadth_4h:.2f} exp={squeeze_exp_4h:.2f} "
         f"liq={liquidity_4h:.2f} volScaled={vol_scaled:.2f} riskOn={risk_on_4h:.2f} "
-        f"smiBonus={smi_bonus:+d} psiMode=stateful reclaimTol={RECLAIM_TOL_PCT} "
-        f"above10={int(above10)} above20={int(above20)} above50={int(above50)} above200={int(above200)}",
+        f"smiBonus={smi_bonus:+d} squeezeSource={squeeze_source_4h}",
         flush=True,
     )
 
@@ -894,3 +849,8 @@ if __name__ == "__main__":
     except Exception as e:
         print("[4h-error]", e, file=sys.stderr)
         sys.exit(2)
+'''
+
+path = Path("/mnt/data/make_dashboard_4h_R19_clean.py")
+path.write_text(script, encoding="utf-8")
+print(path)
