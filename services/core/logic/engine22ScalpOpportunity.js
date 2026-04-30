@@ -1,19 +1,229 @@
 // services/core/logic/engine22ScalpOpportunity.js
 // Engine 22 — Scalp Opportunity Engine
-// V2: Exhaustion Bounce Long + Exhaustion Rejection Short
-// Read-only. Does NOT affect Engine 15 / readiness / trades.
+// V3: Engine16 exhaustion + Engine3B quality + R:R + ATH/extension target
+// Read-only. Does NOT affect Engine 15 / lifecycle / trades.
 
 function toNum(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
 }
 
+function validPrice(x) {
+  const n = toNum(x);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function round2(x) {
   return Number.isFinite(x) ? Math.round(x * 100) / 100 : null;
 }
 
-function absRound2(x) {
-  return Number.isFinite(x) ? Math.round(Math.abs(x) * 100) / 100 : null;
+function safeBool(x) {
+  return x === true;
+}
+
+function normalizeScore(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function getReactionInputs(reaction, waveReactionFromArg) {
+  const waveReaction =
+    waveReactionFromArg ||
+    reaction?.waveReaction ||
+    null;
+
+  return {
+    reactionScore: normalizeScore(reaction?.reactionScore),
+    structureState: reaction?.structureState || null,
+    reasonCodes: Array.isArray(reaction?.reasonCodes) ? reaction.reasonCodes : [],
+    waveReaction,
+  };
+}
+
+function gradeReactionQuality({ side, reactionScore, waveReaction }) {
+  const wr = waveReaction || {};
+  const evidence = Array.isArray(wr.evidence) ? wr.evidence : [];
+
+  const momentumFading = safeBool(wr.momentumFading);
+  const failedContinuation = safeBool(wr.failedContinuation);
+
+  let score = 0;
+  const reasons = [];
+
+  if (reactionScore >= 4) {
+    score += 20;
+    reasons.push("ENGINE3_REACTION_SCORE_OK");
+  }
+
+  if (momentumFading) {
+    score += 20;
+    reasons.push("MOMENTUM_FADING");
+  }
+
+  if (side === "LONG") {
+    if (safeBool(wr.accumulationWarning)) {
+      score += 25;
+      reasons.push("ACCUMULATION_WARNING");
+    }
+    if (safeBool(wr.sellerAbsorption)) {
+      score += 25;
+      reasons.push("SELLER_ABSORPTION");
+    }
+    if (safeBool(wr.acceptedAtLows)) {
+      score += 10;
+      reasons.push("ACCEPTED_AT_LOWS");
+    }
+  }
+
+  if (side === "SHORT") {
+    if (safeBool(wr.distributionWarning)) {
+      score += 25;
+      reasons.push("DISTRIBUTION_WARNING");
+    }
+    if (safeBool(wr.buyerAbsorption)) {
+      score += 25;
+      reasons.push("BUYER_ABSORPTION");
+    }
+    if (safeBool(wr.acceptedAtHighs)) {
+      score += 10;
+      reasons.push("ACCEPTED_AT_HIGHS");
+    }
+    if (safeBool(wr.extensionRisk)) {
+      score += 10;
+      reasons.push("EXTENSION_RISK");
+    }
+  }
+
+  if (failedContinuation) {
+    score -= 20;
+    reasons.push("FAILED_CONTINUATION_RISK");
+  }
+
+  score = Math.max(0, Math.min(100, score));
+
+  const grade =
+    score >= 85 ? "A++" :
+    score >= 75 ? "A" :
+    score >= 60 ? "B" :
+    score >= 45 ? "C" :
+    "WEAK";
+
+  return {
+    score,
+    grade,
+    pass: score >= 60,
+    aPlusPlus: score >= 85,
+    reactionState: wr.reactionState || null,
+    reactionQualityScore: wr.reactionQualityScore ?? null,
+    traderMessage: wr.traderMessage || null,
+    evidence,
+    reasons,
+  };
+}
+
+function buildRiskPlan({ side, entry, exhaustionPrice, targetMove = 1 }) {
+  const entryPx = validPrice(entry);
+  const exPx = validPrice(exhaustionPrice);
+
+  if (!entryPx || !exPx) {
+    return {
+      pass: false,
+      grade: "INVALID",
+      reason: "MISSING_ENTRY_OR_STOP",
+      entry: round2(entryPx),
+      stop: round2(exPx),
+      target: null,
+      riskAmount: null,
+      rewardAmount: null,
+      riskReward: null,
+      minRequired: 2,
+      targetSource: "UNAVAILABLE",
+    };
+  }
+
+  const stop = exPx;
+  const riskAmount = Math.abs(entryPx - stop);
+
+  if (!Number.isFinite(riskAmount) || riskAmount <= 0) {
+    return {
+      pass: false,
+      grade: "INVALID",
+      reason: "INVALID_RISK",
+      entry: round2(entryPx),
+      stop: round2(stop),
+      target: null,
+      riskAmount: round2(riskAmount),
+      rewardAmount: null,
+      riskReward: null,
+      minRequired: 2,
+      targetSource: "UNAVAILABLE",
+    };
+  }
+
+  // At ATH / blue-sky, we do not know the next upside imbalance.
+  // Use measured extension target = max($1, 2R).
+  const rewardTarget = Math.max(Number(targetMove || 1), riskAmount * 2);
+  const target =
+    side === "LONG"
+      ? entryPx + rewardTarget
+      : entryPx - rewardTarget;
+
+  const rewardAmount = Math.abs(target - entryPx);
+  const riskReward = rewardAmount / riskAmount;
+
+  const pass = riskReward >= 2;
+
+  return {
+    pass,
+    grade:
+      riskReward >= 3 ? "A++" :
+      riskReward >= 2 ? "A" :
+      riskReward >= 1.9 ? "NEAR_PASS" :
+      "FAIL",
+    reason: pass ? "RISK_REWARD_PASS" : "RISK_REWARD_BELOW_2R",
+    entry: round2(entryPx),
+    stop: round2(stop),
+    target: round2(target),
+    riskAmount: round2(riskAmount),
+    rewardAmount: round2(rewardAmount),
+    riskReward: round2(riskReward),
+    minRequired: 2,
+    targetSource: "BLUE_SKY_EXTENSION",
+    exitRule: side === "LONG" ? "CLOSE_BELOW_EMA10_10M" : "CLOSE_ABOVE_EMA10_10M",
+  };
+}
+
+function buildManagement({ side, latestClose, ema10 }) {
+  const close = validPrice(latestClose);
+  const ema = validPrice(ema10);
+
+  if (!close || !ema) {
+    return {
+      exitRule: side === "LONG" ? "CLOSE_BELOW_EMA10_10M" : "CLOSE_ABOVE_EMA10_10M",
+      ema10: round2(ema),
+      trendActive: false,
+      exitSignal: false,
+      reason: "EMA10_UNAVAILABLE",
+    };
+  }
+
+  if (side === "LONG") {
+    return {
+      exitRule: "CLOSE_BELOW_EMA10_10M",
+      ema10: round2(ema),
+      trendActive: close >= ema,
+      exitSignal: close < ema,
+      reason: close >= ema ? "LONG_RUNNER_ABOVE_EMA10" : "LONG_EXIT_BELOW_EMA10",
+    };
+  }
+
+  return {
+    exitRule: "CLOSE_ABOVE_EMA10_10M",
+    ema10: round2(ema),
+    trendActive: close <= ema,
+    exitSignal: close > ema,
+    reason: close <= ema ? "SHORT_RUNNER_BELOW_EMA10" : "SHORT_EXIT_ABOVE_EMA10",
+  };
 }
 
 export function computeEngine22ScalpOpportunity({
@@ -21,10 +231,12 @@ export function computeEngine22ScalpOpportunity({
   strategyId = "intraday_scalp@10m",
   tf = "10m",
   engine16 = null,
+  reaction = null,
+  waveReaction = null,
 } = {}) {
   const base = {
     ok: true,
-    engine: "engine22.scalpOpportunity.v2",
+    engine: "engine22.scalpOpportunity.v3",
     active: false,
     mode: "OBSERVATION_ONLY",
     symbol,
@@ -53,6 +265,10 @@ export function computeEngine22ScalpOpportunity({
     distanceToEntry: null,
     needs: "WAIT_FOR_EXHAUSTION_TRIGGER",
 
+    quality: null,
+    risk: null,
+    management: null,
+
     reasonCodes: [],
     debug: {},
   };
@@ -71,24 +287,21 @@ export function computeEngine22ScalpOpportunity({
     };
   }
 
-  const latestClose = toNum(engine16.latestClose);
-  const ema10 = toNum(engine16.ema10);
-  const exhaustionPrice = toNum(engine16.exhaustionBarPrice);
+  const latestClose = validPrice(engine16.latestClose);
+  const ema10 = validPrice(engine16.ema10);
+  const exhaustionPrice = validPrice(engine16.exhaustionBarPrice);
 
   const exhaustionTriggerLong = engine16.exhaustionTriggerLong === true;
   const exhaustionTriggerShort = engine16.exhaustionTriggerShort === true;
   const exhaustionActive = engine16.exhaustionActive === true;
 
-  const hasPrice =
-    Number.isFinite(latestClose) &&
-    Number.isFinite(exhaustionPrice);
+  const { reactionScore, structureState, reasonCodes: engine3ReasonCodes, waveReaction: wr } =
+    getReactionInputs(reaction, waveReaction);
 
-  const hasEma = Number.isFinite(ema10);
-
-  if (!hasPrice) {
+  if (!latestClose || !exhaustionPrice) {
     return {
       ...base,
-      reasonCodes: ["MISSING_PRICE_OR_EXHAUSTION_LEVEL"],
+      reasonCodes: ["NO_EXHAUSTION_SCALP_TRIGGER"],
       debug: {
         latestClose,
         ema10,
@@ -96,15 +309,20 @@ export function computeEngine22ScalpOpportunity({
         exhaustionTriggerLong,
         exhaustionTriggerShort,
         exhaustionActive,
+        reactionScore,
+        structureState,
+        hasWaveReaction: !!wr,
       },
     };
   }
 
   // ============================================================
-  // LONG SETUP
-  // Hard selloff → exhaustion long → hold low → reclaim EMA10
+  // LONG: exhaustion bounce from low
+  // Engine16 detects the event. Engine3 grades quality.
+  // EMA10 is management/confirmation, NOT required for setup.
   // ============================================================
   if (exhaustionTriggerLong) {
+    const side = "LONG";
     const holdsLow = latestClose >= exhaustionPrice;
 
     if (!holdsLow) {
@@ -115,19 +333,36 @@ export function computeEngine22ScalpOpportunity({
           latestClose,
           ema10,
           exhaustionPrice,
-          exhaustionTriggerLong,
-          exhaustionTriggerShort,
-          exhaustionActive,
           holdsLow,
+          reactionScore,
+          structureState,
         },
       };
     }
 
-    const reclaimEma10 = hasEma && latestClose > ema10;
-    const distanceToEntry = hasEma ? ema10 - latestClose : null;
+    const quality = gradeReactionQuality({ side, reactionScore, waveReaction: wr });
+    const risk = buildRiskPlan({
+      side,
+      entry: latestClose,
+      exhaustionPrice,
+      targetMove: base.targetMove,
+    });
+    const management = buildManagement({ side, latestClose, ema10 });
 
-    const status = reclaimEma10 ? "ENTRY_LONG" : "PROBE_LONG";
-    const confidence = reclaimEma10 ? 72 : 65;
+    const qualityPass = quality.pass;
+    const riskPass = risk.pass;
+
+    const status = qualityPass && riskPass ? "ENTRY_LONG" : "PROBE_LONG";
+    const confidence = Math.min(
+      95,
+      Math.max(
+        50,
+        50 +
+          Math.round((quality.score || 0) * 0.3) +
+          (riskPass ? 10 : 0) +
+          (management.trendActive ? 5 : 0)
+      )
+    );
 
     return {
       ...base,
@@ -135,7 +370,7 @@ export function computeEngine22ScalpOpportunity({
       type: "EXHAUSTION_BOUNCE_LONG",
       status,
       direction: "LONG",
-      side: "LONG",
+      side,
 
       stop: "below exhaustion low",
       confidence,
@@ -146,19 +381,32 @@ export function computeEngine22ScalpOpportunity({
       },
 
       targetZone: {
-        lo: round2(latestClose + 0.5),
-        hi: round2(latestClose + 1.0),
+        lo: round2(risk?.target),
+        hi: round2(risk?.target),
       },
 
       invalidationLevel: round2(exhaustionPrice),
-      entryTriggerLevel: round2(ema10),
-      distanceToEntry: reclaimEma10 ? 0 : absRound2(distanceToEntry),
-      needs: reclaimEma10 ? "ENTRY_ACTIVE" : "RECLAIM_EMA10",
+      entryTriggerLevel: null,
+      distanceToEntry: null,
+      needs:
+        status === "ENTRY_LONG"
+          ? "ENTRY_ACTIVE"
+          : !qualityPass
+          ? "BETTER_ENGINE3_REACTION_QUALITY"
+          : !riskPass
+          ? "BETTER_RISK_REWARD"
+          : "WAIT",
+
+      quality,
+      risk,
+      management,
 
       reasonCodes: [
         "LONG_EXHAUSTION_TRIGGERED",
         "PRICE_HOLDING_EXHAUSTION_LOW",
-        reclaimEma10 ? "EMA10_RECLAIMED" : "WAITING_FOR_EMA10_RECLAIM",
+        qualityPass ? "ENGINE3_QUALITY_PASS" : "ENGINE3_QUALITY_WEAK",
+        riskPass ? "RISK_REWARD_PASS" : "RISK_REWARD_FAIL",
+        "EMA10_USED_FOR_MANAGEMENT_NOT_ENTRY",
         "OBSERVATION_ONLY",
       ],
 
@@ -169,18 +417,21 @@ export function computeEngine22ScalpOpportunity({
         exhaustionTriggerLong,
         exhaustionTriggerShort,
         exhaustionActive,
+        reactionScore,
+        structureState,
+        engine3ReasonCodes,
         holdsLow,
-        reclaimEma10,
-        distanceToEntry: reclaimEma10 ? 0 : absRound2(distanceToEntry),
       },
     };
   }
 
   // ============================================================
-  // SHORT SETUP
-  // Hard push up → exhaustion short → fail high → lose EMA10
+  // SHORT: exhaustion rejection from high
+  // Engine16 detects the event. Engine3 grades quality.
+  // EMA10 is management/confirmation, NOT required for setup.
   // ============================================================
   if (exhaustionTriggerShort) {
+    const side = "SHORT";
     const failsHigh = latestClose <= exhaustionPrice;
 
     if (!failsHigh) {
@@ -191,19 +442,36 @@ export function computeEngine22ScalpOpportunity({
           latestClose,
           ema10,
           exhaustionPrice,
-          exhaustionTriggerLong,
-          exhaustionTriggerShort,
-          exhaustionActive,
           failsHigh,
+          reactionScore,
+          structureState,
         },
       };
     }
 
-    const loseEma10 = hasEma && latestClose < ema10;
-    const distanceToEntry = hasEma ? latestClose - ema10 : null;
+    const quality = gradeReactionQuality({ side, reactionScore, waveReaction: wr });
+    const risk = buildRiskPlan({
+      side,
+      entry: latestClose,
+      exhaustionPrice,
+      targetMove: base.targetMove,
+    });
+    const management = buildManagement({ side, latestClose, ema10 });
 
-    const status = loseEma10 ? "ENTRY_SHORT" : "PROBE_SHORT";
-    const confidence = loseEma10 ? 72 : 65;
+    const qualityPass = quality.pass;
+    const riskPass = risk.pass;
+
+    const status = qualityPass && riskPass ? "ENTRY_SHORT" : "PROBE_SHORT";
+    const confidence = Math.min(
+      95,
+      Math.max(
+        50,
+        50 +
+          Math.round((quality.score || 0) * 0.3) +
+          (riskPass ? 10 : 0) +
+          (management.trendActive ? 5 : 0)
+      )
+    );
 
     return {
       ...base,
@@ -211,7 +479,7 @@ export function computeEngine22ScalpOpportunity({
       type: "EXHAUSTION_REJECTION_SHORT",
       status,
       direction: "SHORT",
-      side: "SHORT",
+      side,
 
       stop: "above exhaustion high",
       confidence,
@@ -222,19 +490,32 @@ export function computeEngine22ScalpOpportunity({
       },
 
       targetZone: {
-        lo: round2(latestClose - 1.0),
-        hi: round2(latestClose - 0.5),
+        lo: round2(risk?.target),
+        hi: round2(risk?.target),
       },
 
       invalidationLevel: round2(exhaustionPrice),
-      entryTriggerLevel: round2(ema10),
-      distanceToEntry: loseEma10 ? 0 : absRound2(distanceToEntry),
-      needs: loseEma10 ? "ENTRY_ACTIVE" : "LOSE_EMA10",
+      entryTriggerLevel: null,
+      distanceToEntry: null,
+      needs:
+        status === "ENTRY_SHORT"
+          ? "ENTRY_ACTIVE"
+          : !qualityPass
+          ? "BETTER_ENGINE3_REACTION_QUALITY"
+          : !riskPass
+          ? "BETTER_RISK_REWARD"
+          : "WAIT",
+
+      quality,
+      risk,
+      management,
 
       reasonCodes: [
         "SHORT_EXHAUSTION_TRIGGERED",
         "PRICE_FAILING_EXHAUSTION_HIGH",
-        loseEma10 ? "EMA10_LOST" : "WAITING_FOR_EMA10_LOSS",
+        qualityPass ? "ENGINE3_QUALITY_PASS" : "ENGINE3_QUALITY_WEAK",
+        riskPass ? "RISK_REWARD_PASS" : "RISK_REWARD_FAIL",
+        "EMA10_USED_FOR_MANAGEMENT_NOT_ENTRY",
         "OBSERVATION_ONLY",
       ],
 
@@ -245,9 +526,10 @@ export function computeEngine22ScalpOpportunity({
         exhaustionTriggerLong,
         exhaustionTriggerShort,
         exhaustionActive,
+        reactionScore,
+        structureState,
+        engine3ReasonCodes,
         failsHigh,
-        loseEma10,
-        distanceToEntry: loseEma10 ? 0 : absRound2(distanceToEntry),
       },
     };
   }
@@ -262,6 +544,9 @@ export function computeEngine22ScalpOpportunity({
       exhaustionTriggerLong,
       exhaustionTriggerShort,
       exhaustionActive,
+      reactionScore,
+      structureState,
+      hasWaveReaction: !!wr,
     },
   };
 }
