@@ -1,6 +1,6 @@
 // services/core/logic/engine22ScalpOpportunity.js
 // Engine 22 — Scalp Opportunity Engine
-// V3: Engine16 exhaustion + Engine3B quality + R:R + ATH/extension target
+// V4: Scalp exhaustion + dip-buy continuation + market bias
 // Read-only. Does NOT affect Engine 15 / lifecycle / trades.
 
 import { logEngine22Alert } from "./engine22AlertLogger.js";
@@ -29,10 +29,7 @@ function normalizeScore(x) {
 }
 
 function getReactionInputs(reaction, waveReactionFromArg) {
-  const waveReaction =
-    waveReactionFromArg ||
-    reaction?.waveReaction ||
-    null;
+  const waveReaction = waveReactionFromArg || reaction?.waveReaction || null;
 
   return {
     reactionScore: normalizeScore(reaction?.reactionScore),
@@ -163,14 +160,10 @@ function buildRiskPlan({ side, entry, exhaustionPrice, targetMove = 1 }) {
   }
 
   const rewardTarget = Math.max(Number(targetMove || 1), riskAmount * 2);
-  const target =
-    side === "LONG"
-      ? entryPx + rewardTarget
-      : entryPx - rewardTarget;
+  const target = side === "LONG" ? entryPx + rewardTarget : entryPx - rewardTarget;
 
   const rewardAmount = Math.abs(target - entryPx);
   const riskReward = rewardAmount / riskAmount;
-
   const pass = riskReward >= 2;
 
   return {
@@ -225,18 +218,19 @@ function buildManagement({ side, latestClose, ema10 }) {
     reason: close <= ema ? "SHORT_RUNNER_BELOW_EMA10" : "SHORT_EXIT_ABOVE_EMA10",
   };
 }
+
 function computeMarketBias({ engine2State, engine16, marketMind }) {
   const minutePhase = engine2State?.minute?.phase;
   const primary = engine2State?.primaryPhase;
   const intermediate = engine2State?.intermediatePhase;
   const minor = engine2State?.minorPhase;
 
-  const hourlyClose = engine16?.hourlyClose;
-  const ema10_1h = engine16?.ema10_1h;
+  const hourlyClose = validPrice(engine16?.hourlyClose);
+  const ema10_1h = validPrice(engine16?.ema10_1h);
 
-  const score1h = marketMind?.score1h;
-  const score4h = marketMind?.score4h;
-  const scoreEOD = marketMind?.scoreEOD;
+  const score1h = toNum(marketMind?.score1h);
+  const score4h = toNum(marketMind?.score4h);
+  const scoreEOD = toNum(marketMind?.scoreEOD);
 
   const longWave =
     ["IN_W3", "IN_W5"].includes(primary) &&
@@ -245,12 +239,22 @@ function computeMarketBias({ engine2State, engine16, marketMind }) {
     ["IN_W3", "IN_W5"].includes(minutePhase);
 
   const longTrend =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    score1h !== null &&
+    score4h !== null &&
+    scoreEOD !== null &&
     hourlyClose > ema10_1h &&
     score1h > 55 &&
     score4h > 58 &&
     scoreEOD > 61;
 
   const shortTrend =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    score1h !== null &&
+    score4h !== null &&
+    scoreEOD !== null &&
     hourlyClose < ema10_1h &&
     score1h < 55 &&
     score4h < 58 &&
@@ -260,8 +264,21 @@ function computeMarketBias({ engine2State, engine16, marketMind }) {
     return {
       bias: "LONG_ONLY_DIP_BUY",
       blockShorts: true,
+      blockLongs: false,
       allowLongs: true,
-      reason: "W3_W5_BULLISH_STRUCTURE"
+      allowShorts: false,
+      reason: "W3_W5_BULLISH_STRUCTURE",
+      inputs: {
+        primary,
+        intermediate,
+        minor,
+        minutePhase,
+        hourlyClose: round2(hourlyClose),
+        ema10_1h: round2(ema10_1h),
+        score1h,
+        score4h,
+        scoreEOD,
+      },
     };
   }
 
@@ -269,18 +286,45 @@ function computeMarketBias({ engine2State, engine16, marketMind }) {
     return {
       bias: "SHORT_ONLY_RIP_SELL",
       blockShorts: false,
+      blockLongs: true,
       allowLongs: false,
-      reason: "WEAK_MARKET_STRUCTURE"
+      allowShorts: true,
+      reason: "ALL_MAJOR_SCORES_WEAK_AND_1H_BELOW_EMA10",
+      inputs: {
+        primary,
+        intermediate,
+        minor,
+        minutePhase,
+        hourlyClose: round2(hourlyClose),
+        ema10_1h: round2(ema10_1h),
+        score1h,
+        score4h,
+        scoreEOD,
+      },
     };
   }
 
   return {
     bias: "NEUTRAL",
     blockShorts: false,
+    blockLongs: false,
     allowLongs: false,
-    reason: "NO_CLEAR_STRUCTURE"
+    allowShorts: false,
+    reason: "NO_CLEAR_STRUCTURE",
+    inputs: {
+      primary,
+      intermediate,
+      minor,
+      minutePhase,
+      hourlyClose: round2(hourlyClose),
+      ema10_1h: round2(ema10_1h),
+      score1h,
+      score4h,
+      scoreEOD,
+    },
   };
 }
+
 function logEntryIfNeeded({
   symbol,
   strategyId,
@@ -317,10 +361,12 @@ export function computeEngine22ScalpOpportunity({
   engine16 = null,
   reaction = null,
   waveReaction = null,
+  engine2State = null,
+  marketMind = null,
 } = {}) {
   const base = {
     ok: true,
-    engine: "engine22.scalpOpportunity.v3",
+    engine: "engine22.scalpOpportunity.v4",
     active: false,
     mode: "OBSERVATION_ONLY",
     symbol,
@@ -328,6 +374,7 @@ export function computeEngine22ScalpOpportunity({
     tf,
 
     supportedSetups: {
+      dipBuyContinuation: true,
       exhaustionBounceLong: true,
       exhaustionRejectionShort: true,
     },
@@ -347,8 +394,9 @@ export function computeEngine22ScalpOpportunity({
 
     entryTriggerLevel: null,
     distanceToEntry: null,
-    needs: "WAIT_FOR_EXHAUSTION_TRIGGER",
+    needs: "WAIT_FOR_SETUP",
 
+    marketBias: null,
     quality: null,
     risk: null,
     management: null,
@@ -372,19 +420,19 @@ export function computeEngine22ScalpOpportunity({
   }
 
   const marketBias = computeMarketBias({
-  engine2State,
-  engine16,
-  marketMind
-});
-  
+    engine2State,
+    engine16,
+    marketMind,
+  });
+
   const latestClose = validPrice(engine16.latestClose);
   const ema10 = validPrice(engine16.ema10);
   const ema20 = validPrice(engine16.ema20);
 
   const continuationWatchLong = engine16?.continuationWatchLong === true;
   const continuationTriggerLong = engine16?.continuationTriggerLong === true;
-  const exhaustionPrice = validPrice(engine16.exhaustionBarPrice);
 
+  const exhaustionPrice = validPrice(engine16.exhaustionBarPrice);
   const exhaustionTriggerLong = engine16.exhaustionTriggerLong === true;
   const exhaustionTriggerShort = engine16.exhaustionTriggerShort === true;
   const exhaustionActive = engine16.exhaustionActive === true;
@@ -397,116 +445,124 @@ export function computeEngine22ScalpOpportunity({
   } = getReactionInputs(reaction, waveReaction);
 
   if (!latestClose) {
-  return {
-    ...base,
-    marketBias,
-    reasonCodes: ["NO_PRICE_AVAILABLE"],
-    debug: {
-      latestClose,
-      ema10,
-      ema20,
-      exhaustionPrice,
-      exhaustionTriggerLong,
-      exhaustionTriggerShort,
-      exhaustionActive,
-      reactionScore,
-      structureState,
-      hasWaveReaction: !!wr,
-    },
-  };
-}
-
-// 👇 ADD THIS HERE (THIS IS STEP 2)
-
-// ===============================
-// CONTINUATION DIP BUY LOGIC
-// ===============================
-if (
-  marketBias?.bias === "LONG_ONLY_DIP_BUY" &&
-  continuationWatchLong
-) {
-  const pulledBack =
-    latestClose <= ema10 || latestClose <= ema20;
-
-  const reclaimed =
-    latestClose > ema10;
-
-  if (pulledBack && !reclaimed) {
     return {
       ...base,
-      active: true,
-      type: "DIP_BUY_WATCH",
-      status: "WATCH_LONG",
-      direction: "LONG",
-      side: "LONG",
       marketBias,
-      reasonCodes: [
-        "DIP_PULLBACK_DETECTED",
-        "WAIT_FOR_RECLAIM"
-      ],
+      reasonCodes: ["NO_PRICE_AVAILABLE"],
       debug: {
         latestClose,
         ema10,
         ema20,
-        pulledBack,
-        reclaimed
-      }
+        exhaustionPrice,
+        exhaustionTriggerLong,
+        exhaustionTriggerShort,
+        exhaustionActive,
+        reactionScore,
+        structureState,
+        hasWaveReaction: !!wr,
+      },
     };
   }
 
-  if (continuationTriggerLong) {
-    const confidence = 80;
+  // ============================================================
+  // CONTINUATION DIP BUY LOGIC
+  // ============================================================
+  if (marketBias?.bias === "LONG_ONLY_DIP_BUY" && continuationWatchLong) {
+    const pulledBack =
+      (ema10 !== null && latestClose <= ema10) ||
+      (ema20 !== null && latestClose <= ema20);
 
-    logEntryIfNeeded({
-      symbol,
-      strategyId,
-      tf,
-      type: "DIP_BUY_CONTINUATION",
-      status: "ENTRY_LONG",
-      direction: "LONG",
-      price: latestClose,
-      confidence,
-      targetMove: base.targetMove,
-      invalidationLevel: ema20,
-    });
+    const reclaimed = ema10 !== null && latestClose > ema10;
 
-    return {
-      ...base,
-      active: true,
-      type: "DIP_BUY_CONTINUATION",
-      status: "ENTRY_LONG",
-      direction: "LONG",
-      side: "LONG",
-      marketBias,
-      confidence,
-      reasonCodes: [
-        "DIP_BUY_CONFIRMED",
-        "EMA_RECLAIM",
-        "BREAK_MICRO_HIGH"
-      ],
-      debug: {
-        latestClose,
-        ema10,
-        ema20,
-        continuationTriggerLong
-      }
-    };
+    if (pulledBack && !reclaimed) {
+      return {
+        ...base,
+        active: true,
+        type: "DIP_BUY_WATCH",
+        status: "WATCH_LONG",
+        direction: "LONG",
+        side: "LONG",
+        marketBias,
+        needs: "WAIT_FOR_EMA10_RECLAIM_OR_CONTINUATION_TRIGGER",
+        reasonCodes: [
+          "LONG_ONLY_DIP_BUY_BIAS",
+          "DIP_PULLBACK_DETECTED",
+          "WAIT_FOR_RECLAIM",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          latestClose,
+          ema10,
+          ema20,
+          pulledBack,
+          reclaimed,
+          continuationWatchLong,
+          continuationTriggerLong,
+        },
+      };
+    }
+
+    if (continuationTriggerLong) {
+      const confidence = 80;
+
+      logEntryIfNeeded({
+        symbol,
+        strategyId,
+        tf,
+        type: "DIP_BUY_CONTINUATION",
+        status: "ENTRY_LONG",
+        direction: "LONG",
+        price: latestClose,
+        confidence,
+        targetMove: base.targetMove,
+        invalidationLevel: ema20,
+      });
+
+      return {
+        ...base,
+        active: true,
+        type: "DIP_BUY_CONTINUATION",
+        status: "ENTRY_LONG",
+        direction: "LONG",
+        side: "LONG",
+        marketBias,
+        confidence,
+        stop: "below EMA20 / last pullback low",
+        invalidationLevel: round2(ema20),
+        needs: "ENTRY_ACTIVE",
+        reasonCodes: [
+          "LONG_ONLY_DIP_BUY_BIAS",
+          "DIP_BUY_CONFIRMED",
+          "CONTINUATION_TRIGGER_LONG",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          latestClose,
+          ema10,
+          ema20,
+          continuationWatchLong,
+          continuationTriggerLong,
+        },
+      };
+    }
   }
-} 
+
   // ============================================================
   // LONG: exhaustion bounce from low
   // ============================================================
-  if (exhaustionTriggerLong) {
+  if (exhaustionTriggerLong && exhaustionPrice !== null) {
     const side = "LONG";
     const holdsLow = latestClose >= exhaustionPrice;
 
     if (!holdsLow) {
       return {
         ...base,
+        marketBias,
         reasonCodes: ["LONG_EXHAUSTION_LOW_FAILED"],
         debug: {
           latestClose,
           ema10,
+          ema20,
           exhaustionPrice,
           holdsLow,
           reactionScore,
@@ -516,19 +572,16 @@ if (
     }
 
     const quality = gradeReactionQuality({ side, reactionScore, waveReaction: wr });
-
     const risk = buildRiskPlan({
       side,
       entry: latestClose,
       exhaustionPrice,
       targetMove: base.targetMove,
     });
-
     const management = buildManagement({ side, latestClose, ema10 });
 
     const qualityPass = quality.pass;
     const riskPass = risk.pass;
-
     const status = qualityPass && riskPass ? "ENTRY_LONG" : "PROBE_LONG";
 
     const confidence = Math.min(
@@ -606,6 +659,7 @@ if (
       debug: {
         latestClose,
         ema10,
+        ema20,
         exhaustionPrice,
         exhaustionTriggerLong,
         exhaustionTriggerShort,
@@ -621,17 +675,45 @@ if (
   // ============================================================
   // SHORT: exhaustion rejection from high
   // ============================================================
-  if (exhaustionTriggerShort) {
+  if (exhaustionTriggerShort && exhaustionPrice !== null) {
     const side = "SHORT";
     const failsHigh = latestClose <= exhaustionPrice;
 
     if (!failsHigh) {
       return {
         ...base,
+        marketBias,
         reasonCodes: ["SHORT_EXHAUSTION_HIGH_FAILED"],
         debug: {
           latestClose,
           ema10,
+          ema20,
+          exhaustionPrice,
+          failsHigh,
+          reactionScore,
+          structureState,
+        },
+      };
+    }
+
+    if (marketBias?.blockShorts === true) {
+      return {
+        ...base,
+        active: true,
+        type: "SHORT_BLOCKED_BY_MARKET_BIAS",
+        status: "NO_SHORT",
+        direction: "NONE",
+        side: "SHORT",
+        marketBias,
+        reasonCodes: [
+          "SHORT_EXHAUSTION_TRIGGERED",
+          "SHORTS_BLOCKED_BY_W3_W5_LONG_BIAS",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          latestClose,
+          ema10,
+          ema20,
           exhaustionPrice,
           failsHigh,
           reactionScore,
@@ -641,19 +723,16 @@ if (
     }
 
     const quality = gradeReactionQuality({ side, reactionScore, waveReaction: wr });
-
     const risk = buildRiskPlan({
       side,
       entry: latestClose,
       exhaustionPrice,
       targetMove: base.targetMove,
     });
-
     const management = buildManagement({ side, latestClose, ema10 });
 
     const qualityPass = quality.pass;
     const riskPass = risk.pass;
-
     const status = qualityPass && riskPass ? "ENTRY_SHORT" : "PROBE_SHORT";
 
     const confidence = Math.min(
@@ -687,6 +766,7 @@ if (
       status,
       direction: "SHORT",
       side,
+      marketBias,
 
       stop: "above exhaustion high",
       confidence,
@@ -730,6 +810,7 @@ if (
       debug: {
         latestClose,
         ema10,
+        ema20,
         exhaustionPrice,
         exhaustionTriggerLong,
         exhaustionTriggerShort,
@@ -745,14 +826,17 @@ if (
   return {
     ...base,
     marketBias,
-    reasonCodes: ["NO_EXHAUSTION_SCALP_TRIGGER"],
+    reasonCodes: ["NO_ENGINE22_SCALP_SETUP"],
     debug: {
       latestClose,
       ema10,
+      ema20,
       exhaustionPrice,
       exhaustionTriggerLong,
       exhaustionTriggerShort,
       exhaustionActive,
+      continuationWatchLong,
+      continuationTriggerLong,
       reactionScore,
       structureState,
       hasWaveReaction: !!wr,
