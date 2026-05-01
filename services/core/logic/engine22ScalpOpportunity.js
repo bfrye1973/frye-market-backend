@@ -225,7 +225,62 @@ function buildManagement({ side, latestClose, ema10 }) {
     reason: close <= ema ? "SHORT_RUNNER_BELOW_EMA10" : "SHORT_EXIT_ABOVE_EMA10",
   };
 }
+function computeMarketBias({ engine2State, engine16, marketMind }) {
+  const minutePhase = engine2State?.minute?.phase;
+  const primary = engine2State?.primaryPhase;
+  const intermediate = engine2State?.intermediatePhase;
+  const minor = engine2State?.minorPhase;
 
+  const hourlyClose = engine16?.hourlyClose;
+  const ema10_1h = engine16?.ema10_1h;
+
+  const score1h = marketMind?.score1h;
+  const score4h = marketMind?.score4h;
+  const scoreEOD = marketMind?.scoreEOD;
+
+  const longWave =
+    ["IN_W3", "IN_W5"].includes(primary) &&
+    ["IN_W3", "IN_W5"].includes(intermediate) &&
+    ["IN_W3", "IN_W5"].includes(minor) &&
+    ["IN_W3", "IN_W5"].includes(minutePhase);
+
+  const longTrend =
+    hourlyClose > ema10_1h &&
+    score1h > 55 &&
+    score4h > 58 &&
+    scoreEOD > 61;
+
+  const shortTrend =
+    hourlyClose < ema10_1h &&
+    score1h < 55 &&
+    score4h < 58 &&
+    scoreEOD < 61;
+
+  if (longWave && longTrend) {
+    return {
+      bias: "LONG_ONLY_DIP_BUY",
+      blockShorts: true,
+      allowLongs: true,
+      reason: "W3_W5_BULLISH_STRUCTURE"
+    };
+  }
+
+  if (shortTrend) {
+    return {
+      bias: "SHORT_ONLY_RIP_SELL",
+      blockShorts: false,
+      allowLongs: false,
+      reason: "WEAK_MARKET_STRUCTURE"
+    };
+  }
+
+  return {
+    bias: "NEUTRAL",
+    blockShorts: false,
+    allowLongs: false,
+    reason: "NO_CLEAR_STRUCTURE"
+  };
+}
 function logEntryIfNeeded({
   symbol,
   strategyId,
@@ -316,6 +371,12 @@ export function computeEngine22ScalpOpportunity({
     };
   }
 
+  const marketBias = computeMarketBias({
+  engine2State,
+  engine16,
+  marketMind
+});
+  
   const latestClose = validPrice(engine16.latestClose);
   const ema10 = validPrice(engine16.ema10);
   const exhaustionPrice = validPrice(engine16.exhaustionBarPrice);
@@ -418,6 +479,7 @@ export function computeEngine22ScalpOpportunity({
       status,
       direction: "LONG",
       side,
+      marketBias,
 
       stop: "below exhaustion low",
       confidence,
@@ -599,6 +661,7 @@ export function computeEngine22ScalpOpportunity({
 
   return {
     ...base,
+    marketBias,
     reasonCodes: ["NO_EXHAUSTION_SCALP_TRIGGER"],
     debug: {
       latestClose,
