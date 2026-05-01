@@ -162,8 +162,6 @@ function buildRiskPlan({ side, entry, exhaustionPrice, targetMove = 1 }) {
     };
   }
 
-  // At ATH / blue-sky, we do not know the next upside imbalance.
-  // Use measured extension target = max($1, 2R).
   const rewardTarget = Math.max(Number(targetMove || 1), riskAmount * 2);
   const target =
     side === "LONG"
@@ -226,6 +224,35 @@ function buildManagement({ side, latestClose, ema10 }) {
     exitSignal: close > ema,
     reason: close <= ema ? "SHORT_RUNNER_BELOW_EMA10" : "SHORT_EXIT_ABOVE_EMA10",
   };
+}
+
+function logEntryIfNeeded({
+  symbol,
+  strategyId,
+  tf,
+  type,
+  status,
+  direction,
+  price,
+  confidence,
+  targetMove,
+  invalidationLevel,
+}) {
+  if (status !== "ENTRY_LONG" && status !== "ENTRY_SHORT") return;
+
+  logEngine22Alert({
+    symbol,
+    strategyId,
+    tf,
+    type,
+    status,
+    direction,
+    price,
+    confidence,
+    targetMove,
+    invalidationLevel,
+    triggeredAt: new Date().toISOString(),
+  });
 }
 
 export function computeEngine22ScalpOpportunity({
@@ -297,8 +324,12 @@ export function computeEngine22ScalpOpportunity({
   const exhaustionTriggerShort = engine16.exhaustionTriggerShort === true;
   const exhaustionActive = engine16.exhaustionActive === true;
 
-  const { reactionScore, structureState, reasonCodes: engine3ReasonCodes, waveReaction: wr } =
-    getReactionInputs(reaction, waveReaction);
+  const {
+    reactionScore,
+    structureState,
+    reasonCodes: engine3ReasonCodes,
+    waveReaction: wr,
+  } = getReactionInputs(reaction, waveReaction);
 
   if (!latestClose || !exhaustionPrice) {
     return {
@@ -320,8 +351,6 @@ export function computeEngine22ScalpOpportunity({
 
   // ============================================================
   // LONG: exhaustion bounce from low
-  // Engine16 detects the event. Engine3 grades quality.
-  // EMA10 is management/confirmation, NOT required for setup.
   // ============================================================
   if (exhaustionTriggerLong) {
     const side = "LONG";
@@ -343,18 +372,21 @@ export function computeEngine22ScalpOpportunity({
     }
 
     const quality = gradeReactionQuality({ side, reactionScore, waveReaction: wr });
+
     const risk = buildRiskPlan({
       side,
       entry: latestClose,
       exhaustionPrice,
       targetMove: base.targetMove,
     });
+
     const management = buildManagement({ side, latestClose, ema10 });
 
     const qualityPass = quality.pass;
     const riskPass = risk.pass;
 
     const status = qualityPass && riskPass ? "ENTRY_LONG" : "PROBE_LONG";
+
     const confidence = Math.min(
       95,
       Math.max(
@@ -365,6 +397,19 @@ export function computeEngine22ScalpOpportunity({
           (management.trendActive ? 5 : 0)
       )
     );
+
+    logEntryIfNeeded({
+      symbol,
+      strategyId,
+      tf,
+      type: "EXHAUSTION_BOUNCE_LONG",
+      status,
+      direction: "LONG",
+      price: latestClose,
+      confidence,
+      targetMove: base.targetMove,
+      invalidationLevel: exhaustionPrice,
+    });
 
     return {
       ...base,
@@ -390,6 +435,7 @@ export function computeEngine22ScalpOpportunity({
       invalidationLevel: round2(exhaustionPrice),
       entryTriggerLevel: null,
       distanceToEntry: null,
+
       needs:
         status === "ENTRY_LONG"
           ? "ENTRY_ACTIVE"
@@ -429,8 +475,6 @@ export function computeEngine22ScalpOpportunity({
 
   // ============================================================
   // SHORT: exhaustion rejection from high
-  // Engine16 detects the event. Engine3 grades quality.
-  // EMA10 is management/confirmation, NOT required for setup.
   // ============================================================
   if (exhaustionTriggerShort) {
     const side = "SHORT";
@@ -452,18 +496,21 @@ export function computeEngine22ScalpOpportunity({
     }
 
     const quality = gradeReactionQuality({ side, reactionScore, waveReaction: wr });
+
     const risk = buildRiskPlan({
       side,
       entry: latestClose,
       exhaustionPrice,
       targetMove: base.targetMove,
     });
+
     const management = buildManagement({ side, latestClose, ema10 });
 
     const qualityPass = quality.pass;
     const riskPass = risk.pass;
 
     const status = qualityPass && riskPass ? "ENTRY_SHORT" : "PROBE_SHORT";
+
     const confidence = Math.min(
       95,
       Math.max(
@@ -474,23 +521,19 @@ export function computeEngine22ScalpOpportunity({
           (management.trendActive ? 5 : 0)
       )
     );
-    // 👇 ADD THIS BLOCK RIGHT HERE (BEFORE RETURN)
 
-    if (status === "ENTRY_LONG") {
-      logEngine22Alert({
-        symbol,
-        strategyId,
-        tf,
-        type: "EXHAUSTION_BOUNCE_LONG",
-        status,
-        direction: "LONG",
-        price: latestClose,
-        confidence,
-        targetMove: 1.0,
-        invalidationLevel: exhaustionPrice,
-        triggeredAt: new Date().toISOString(),
-      });
-    }
+    logEntryIfNeeded({
+      symbol,
+      strategyId,
+      tf,
+      type: "EXHAUSTION_REJECTION_SHORT",
+      status,
+      direction: "SHORT",
+      price: latestClose,
+      confidence,
+      targetMove: base.targetMove,
+      invalidationLevel: exhaustionPrice,
+    });
 
     return {
       ...base,
@@ -516,6 +559,7 @@ export function computeEngine22ScalpOpportunity({
       invalidationLevel: round2(exhaustionPrice),
       entryTriggerLevel: null,
       distanceToEntry: null,
+
       needs:
         status === "ENTRY_SHORT"
           ? "ENTRY_ACTIVE"
