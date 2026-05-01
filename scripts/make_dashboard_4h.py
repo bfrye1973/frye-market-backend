@@ -1,7 +1,8 @@
-from pathlib import Path
-
-
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
+from __future__ import annotations
+
 """
 Ferrari Dashboard — make_dashboard_4h.py
 R19.0 — CLEAN 4H MARKET METER + 1H-BUILT 4H LUX PSI
@@ -15,7 +16,7 @@ LOCKED INTENT:
 - No persistence cache. No EMA override. No fake squeeze inflation.
 """
 
-from __future__ import annotations
+
 
 import argparse
 import json
