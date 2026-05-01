@@ -1376,6 +1376,8 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
             engine16,
             reaction: patchedConfluence?.context?.reaction || null,
             waveReaction: reaction?.waveReaction || null,
+            engine2State,
+            marketMind,
           })
         : null;
   return {
