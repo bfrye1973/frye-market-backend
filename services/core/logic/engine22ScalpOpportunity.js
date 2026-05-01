@@ -379,6 +379,10 @@ export function computeEngine22ScalpOpportunity({
   
   const latestClose = validPrice(engine16.latestClose);
   const ema10 = validPrice(engine16.ema10);
+  const ema20 = validPrice(engine16.ema20);
+
+  const continuationWatchLong = engine16?.continuationWatchLong === true;
+  const continuationTriggerLong = engine16?.continuationTriggerLong === true;
   const exhaustionPrice = validPrice(engine16.exhaustionBarPrice);
 
   const exhaustionTriggerLong = engine16.exhaustionTriggerLong === true;
@@ -392,9 +396,10 @@ export function computeEngine22ScalpOpportunity({
     waveReaction: wr,
   } = getReactionInputs(reaction, waveReaction);
 
-  if (!latestClose || !exhaustionPrice) {
+  if (!latestClose) {
     return {
       ...base,
+      marketBias,
       reasonCodes: ["NO_EXHAUSTION_SCALP_TRIGGER"],
       debug: {
         latestClose,
@@ -409,7 +414,92 @@ export function computeEngine22ScalpOpportunity({
       },
     };
   }
+  if (!latestClose || !exhaustionPrice) {
+  return {
+    ...base,
+    marketBias,
+    reasonCodes: ["NO_EXHAUSTION_SCALP_TRIGGER"],
+    debug: {...}
+  };
+}
 
+// 👇 ADD THIS HERE (THIS IS STEP 2)
+
+// ===============================
+// CONTINUATION DIP BUY LOGIC
+// ===============================
+if (
+  marketBias?.bias === "LONG_ONLY_DIP_BUY" &&
+  continuationWatchLong
+) {
+  const pulledBack =
+    latestClose <= ema10 || latestClose <= ema20;
+
+  const reclaimed =
+    latestClose > ema10;
+
+  if (pulledBack && !reclaimed) {
+    return {
+      ...base,
+      active: true,
+      type: "DIP_BUY_WATCH",
+      status: "WATCH_LONG",
+      direction: "LONG",
+      side: "LONG",
+      marketBias,
+      reasonCodes: [
+        "DIP_PULLBACK_DETECTED",
+        "WAIT_FOR_RECLAIM"
+      ],
+      debug: {
+        latestClose,
+        ema10,
+        ema20,
+        pulledBack,
+        reclaimed
+      }
+    };
+  }
+
+  if (continuationTriggerLong) {
+    const confidence = 80;
+
+    logEntryIfNeeded({
+      symbol,
+      strategyId,
+      tf,
+      type: "DIP_BUY_CONTINUATION",
+      status: "ENTRY_LONG",
+      direction: "LONG",
+      price: latestClose,
+      confidence,
+      targetMove: base.targetMove,
+      invalidationLevel: ema20,
+    });
+
+    return {
+      ...base,
+      active: true,
+      type: "DIP_BUY_CONTINUATION",
+      status: "ENTRY_LONG",
+      direction: "LONG",
+      side: "LONG",
+      marketBias,
+      confidence,
+      reasonCodes: [
+        "DIP_BUY_CONFIRMED",
+        "EMA_RECLAIM",
+        "BREAK_MICRO_HIGH"
+      ],
+      debug: {
+        latestClose,
+        ema10,
+        ema20,
+        continuationTriggerLong
+      }
+    };
+  }
+} 
   // ============================================================
   // LONG: exhaustion bounce from low
   // ============================================================
