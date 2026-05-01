@@ -151,12 +151,12 @@ export async function computeEngine21Alignment({ tf = DEFAULT_TF } = {}) {
       });
 
      if (symbol === "VIX" || symbol === "UVXY") {
-     if (direction === "BEAR_CONFIRM") bullishScore += SCORE_PER_COMPONENT;
-     if (direction === "BULL_CONFIRM") bearishScore += SCORE_PER_COMPONENT;
-   } else {
-     if (direction === "BULL") bullishScore += SCORE_PER_COMPONENT;
-     if (direction === "BEAR") bearishScore += SCORE_PER_COMPONENT;
-   }
+       if (direction === "BULL_CONFIRM") bullishScore += SCORE_PER_COMPONENT;
+       if (direction === "BEAR_CONFIRM") bearishScore += SCORE_PER_COMPONENT;
+     } else {
+       if (direction === "BULL") bullishScore += SCORE_PER_COMPONENT;
+       if (direction === "BEAR") bearishScore += SCORE_PER_COMPONENT;
+     }
     } catch (err) {
       components[symbol] = {
         symbol,
