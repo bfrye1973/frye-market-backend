@@ -3,8 +3,17 @@ import fs from "fs";
 const FILE_PATH =
   "/opt/render/project/src/services/core/data/engine22-alert-log.json";
 
-function nowIso() {
-  return new Date().toISOString();
+function nowPhoenix() {
+  return new Date().toLocaleString("en-US", {
+    timeZone: "America/Phoenix",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 }
 
 function readLog() {
