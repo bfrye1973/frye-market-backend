@@ -1374,7 +1374,13 @@ async function processStrategy(
       executionBias = "LONG_PRIORITY";
     }
   }
-     console.log("[E22 DEBUG]", {
+     python3 - <<'PY'
+from pathlib import Path
+
+path = Path("jobs/buildStrategySnapshot.js")
+text = path.read_text()
+
+old = '''   console.log("[E22 DEBUG]", {
      strategyId: s.strategyId,
      tf: s.tf,
      condition: s.strategyId === "intraday_scalp@10m" && s.tf === "10m"
@@ -1391,7 +1397,88 @@ async function processStrategy(
             engine2State,
             marketMind,
           })
-        : null;
+        : null;'''
+
+new = '''   console.log("[E22 DEBUG]", {
+     strategyId: s.strategyId,
+     tf: s.tf,
+     condition: s.strategyId === "intraday_scalp@10m" && s.tf === "10m",
+   });
+
+   let engine22Scalp = null;
+
+   if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
+     const reactionBlock = patchedConfluence?.context?.reaction || null;
+
+     console.log("[E22 LIVE INPUTS]", {
+       strategyId: s.strategyId,
+       tf: s.tf,
+       engine16Ok: engine16?.ok,
+       latestClose: engine16?.latestClose,
+       ema10: engine16?.ema10,
+       ema20: engine16?.ema20,
+       hourlyClose: engine16?.hourlyClose,
+       ema10_1h: engine16?.ema10_1h,
+       continuationWatchLong: engine16?.continuationWatchLong,
+       continuationTriggerLong: engine16?.continuationTriggerLong,
+       exhaustionTriggerLong: engine16?.exhaustionTriggerLong,
+       exhaustionTriggerShort: engine16?.exhaustionTriggerShort,
+       engine2Minute: engine2State?.minute,
+       marketMind,
+     });
+
+     try {
+       engine22Scalp = computeEngine22ScalpOpportunity({
+         symbol,
+         strategyId: s.strategyId,
+         tf: s.tf,
+         engine16,
+         reaction: reactionBlock,
+         waveReaction:
+           reactionBlock?.waveReaction ||
+           patchedConfluence?.waveReactionFromConfluence ||
+           null,
+         engine2State,
+         marketMind,
+       });
+     } catch (e) {
+       console.error("[E22 ERROR]", e?.stack || e);
+
+       engine22Scalp = {
+         ok: false,
+         engine: "engine22.scalpOpportunity.error",
+         active: false,
+         mode: "OBSERVATION_ONLY",
+         symbol,
+         strategyId: s.strategyId,
+         tf: s.tf,
+         type: "ERROR",
+         status: "ERROR",
+         direction: "NONE",
+         side: "NONE",
+         reasonCodes: ["ENGINE22_THROW"],
+         error: String(e?.message || e),
+       };
+     }
+   }
+
+   console.log("[E22 RESULT]", {
+     strategyId: s.strategyId,
+     isNull: engine22Scalp == null,
+     engine: engine22Scalp?.engine,
+     type: engine22Scalp?.type,
+     status: engine22Scalp?.status,
+     bias: engine22Scalp?.marketBias?.bias,
+     reasonCodes: engine22Scalp?.reasonCodes,
+     error: engine22Scalp?.error,
+   });'''
+
+if old not in text:
+    raise SystemExit("OLD BLOCK NOT FOUND - do not continue")
+
+path.write_text(text.replace(old, new))
+print("Engine 22 block replaced successfully")
+PY
   return {
     strategyId: s.strategyId,
     lockedSignal, 
