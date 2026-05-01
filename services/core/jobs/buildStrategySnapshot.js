@@ -1367,6 +1367,11 @@ async function processStrategy(s, momentum, marketMind, marketRegime, engine16) 
       executionBias = "LONG_PRIORITY";
     }
   }
+     console.log("[E22 DEBUG]", {
+     strategyId: s.strategyId,
+     tf: s.tf,
+     condition: s.strategyId === "intraday_scalp@10m" && s.tf === "10m"
+   }); 
     const engine22Scalp =
       s.strategyId === "intraday_scalp@10m" && s.tf === "10m"
         ? computeEngine22ScalpOpportunity({
