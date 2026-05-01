@@ -397,25 +397,6 @@ export function computeEngine22ScalpOpportunity({
   } = getReactionInputs(reaction, waveReaction);
 
   if (!latestClose) {
-    return {
-      ...base,
-      marketBias,
-      reasonCodes: ["NO_EXHAUSTION_SCALP_TRIGGER"],
-      debug: {
-        latestClose,
-        ema10,
-        exhaustionPrice,
-        exhaustionTriggerLong,
-        exhaustionTriggerShort,
-        exhaustionActive,
-        reactionScore,
-        structureState,
-        hasWaveReaction: !!wr,
-      },
-    };
-  }
-
-  if (!latestClose) {
   return {
     ...base,
     marketBias,
