@@ -1081,7 +1081,14 @@ async function fetchVolume({ symbol, tf, zoneLo, zoneHi, mode }) {
 /* -----------------------------
    Build one strategy
 ------------------------------*/
-async function processStrategy(s, momentum, marketMind, marketRegime, engine16) {
+async function processStrategy(
+  s,
+  momentum,
+  marketMind,
+  marketRegime,
+  engine16,
+  engine2State
+) {
   console.log(`→ Processing ${s.strategyId}`);
 
   const contextResp = await fetchJson(
@@ -1534,12 +1541,13 @@ console.log("Engine21 alignment fetched");
   }
 
   const strategy = await processStrategy(
-    s,
-    momentum,
-    marketMind,
-    marketRegime,
-    engine16ForStrategy
-  );
+  s,
+  momentum,
+  marketMind,
+  marketRegime,
+  engine16ForStrategy,
+  engine2State
+);
 
   const executionState = getExecutionState(symbol, s.strategyId);
 
