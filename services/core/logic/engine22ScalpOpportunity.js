@@ -3,6 +3,8 @@
 // V3: Engine16 exhaustion + Engine3B quality + R:R + ATH/extension target
 // Read-only. Does NOT affect Engine 15 / lifecycle / trades.
 
+import { logEngine22Alert } from "./engine22AlertLogger.js";
+
 function toNum(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
@@ -472,6 +474,23 @@ export function computeEngine22ScalpOpportunity({
           (management.trendActive ? 5 : 0)
       )
     );
+    // 👇 ADD THIS BLOCK RIGHT HERE (BEFORE RETURN)
+
+    if (status === "ENTRY_LONG") {
+      logEngine22Alert({
+        symbol,
+        strategyId,
+        tf,
+        type: "EXHAUSTION_BOUNCE_LONG",
+        status,
+        direction: "LONG",
+        price: latestClose,
+        confidence,
+        targetMove: 1.0,
+        invalidationLevel: exhaustionPrice,
+        triggeredAt: new Date().toISOString(),
+      });
+    }
 
     return {
       ...base,
