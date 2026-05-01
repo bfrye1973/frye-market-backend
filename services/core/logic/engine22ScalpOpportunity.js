@@ -414,12 +414,24 @@ export function computeEngine22ScalpOpportunity({
       },
     };
   }
-  if (!latestClose || !exhaustionPrice) {
+
+  if (!latestClose) {
   return {
     ...base,
     marketBias,
-    reasonCodes: ["NO_EXHAUSTION_SCALP_TRIGGER"],
-    debug: {...}
+    reasonCodes: ["NO_PRICE_AVAILABLE"],
+    debug: {
+      latestClose,
+      ema10,
+      ema20,
+      exhaustionPrice,
+      exhaustionTriggerLong,
+      exhaustionTriggerShort,
+      exhaustionActive,
+      reactionScore,
+      structureState,
+      hasWaveReaction: !!wr,
+    },
   };
 }
 
