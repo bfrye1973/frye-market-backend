@@ -29,7 +29,7 @@ export function logEngine22Alert(event) {
   if (!event || !event.status) return;
 
   const triggeredAt = event.triggeredAt || nowIso();
-
+ 
   const entry = {
     id: buildId({ ...event, triggeredAt }),
     symbol: event.symbol,
