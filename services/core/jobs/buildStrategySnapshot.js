@@ -1414,30 +1414,33 @@ async function buildEngine2State(symbol) {
 const engine1Context = contextResp?.json || {};
 const currentPrice = Number(engine1Context?.meta?.current_price ?? NaN);
 
-const [primary, intermediate, minor] = await Promise.all([
+const [primary, intermediate, minor, minute] = await Promise.all([
   buildEngine2Block({ symbol, degree: "primary", tf: "1d", currentPrice }).catch(() => null),
   buildEngine2Block({ symbol, degree: "intermediate", tf: "1h", currentPrice }).catch(() => null),
   buildEngine2Block({ symbol, degree: "minor", tf: "1h", currentPrice }).catch(() => null),
+  buildEngine2Block({ symbol, degree: "minute", tf: "10m", currentPrice }).catch(() => null),
 ]);
 
-  let correctionDirection = null;
+let correctionDirection = null;
 
-  if (intermediate?.waveMode === "CORRECTIVE") {
-    correctionDirection = "UP";
-  }
+if (intermediate?.waveMode === "CORRECTIVE") {
+  correctionDirection = "UP";
+}
 
-  return {
-    primary,
-    intermediate,
-    minor,
+return {
+  primary,
+  intermediate,
+  minor,
+  minute,
 
-    primaryPhase: primary?.phase ?? "UNKNOWN",
-    intermediatePhase: intermediate?.phase ?? "UNKNOWN",
-    minorPhase: minor?.phase ?? "UNKNOWN",
+  primaryPhase: primary?.phase ?? "UNKNOWN",
+  intermediatePhase: intermediate?.phase ?? "UNKNOWN",
+  minorPhase: minor?.phase ?? "UNKNOWN",
+  minutePhase: minute?.phase ?? "UNKNOWN",
 
-    intermediateWaveMode: intermediate?.waveMode ?? null,
-    correctionDirection,
-  };
+  intermediateWaveMode: intermediate?.waveMode ?? null,
+  correctionDirection,
+};
 }
 
 /* -----------------------------
