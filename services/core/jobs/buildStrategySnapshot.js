@@ -1552,7 +1552,82 @@ async function processStrategy(
     context: engine1Context,
   };
 }
+const FIB_INPUT_FILE = `${DATA_DIR}/fib-input.csv`;
 
+function parseCsvLine(line) {
+  return String(line || "")
+    .split(",")
+    .map((x) => x.trim());
+}
+
+function readFibInputRows() {
+  try {
+    if (!fs.existsSync(FIB_INPUT_FILE)) return [];
+
+    const text = fs.readFileSync(FIB_INPUT_FILE, "utf8");
+
+    return text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+      .slice(1)
+      .map((line) => {
+        const [symbol, degree, tf, wave, kind, datetime_az, price] =
+          parseCsvLine(line);
+
+        return {
+          symbol,
+          degree,
+          tf,
+          wave,
+          kind,
+          datetime_az,
+          price: Number(price),
+        };
+      });
+  } catch (err) {
+    console.warn("[Engine2] Failed reading fib-input.csv:", err?.message);
+    return [];
+  }
+}
+
+function getManualLevelRowsFor({ symbol, degree, tf }) {
+  return readFibInputRows().filter((row) => {
+    return (
+      String(row.symbol || "").toUpperCase() === String(symbol || "").toUpperCase() &&
+      String(row.degree || "").toLowerCase() === String(degree || "").toLowerCase() &&
+      String(row.tf || "").toLowerCase() === String(tf || "").toLowerCase() &&
+      String(row.kind || "").toUpperCase() === "LEVEL"
+    );
+  });
+}
+
+function attachManualLevelsToEngine2Block(block, levelRows = []) {
+  if (!block || typeof block !== "object") return block;
+
+  const findLevel = (name) => {
+    const row = levelRows.find(
+      (r) => String(r.wave || "").toUpperCase() === name
+    );
+
+    const price = Number(row?.price);
+    return Number.isFinite(price) ? price : null;
+  };
+
+  const aLow = findLevel("A_LOW");
+  const bHigh = findLevel("B_HIGH");
+  const cLow = findLevel("C_LOW");
+
+  return {
+    ...block,
+    aLow,
+    bHigh,
+    cLow,
+    w4Low: cLow,
+    lowerHighLevel: bHigh,
+    continuationLevel: bHigh,
+  };
+}
 async function buildEngine2State(symbol) {
   const contextResp = await fetchJson(
   `${CORE_BASE}/api/v1/engine5-context?symbol=${symbol}&tf=1h`,
