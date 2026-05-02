@@ -850,7 +850,649 @@ function toCorrectionReturn(base, detection) {
     debug: detection.debug || {},
   };
 }
+function getMinuteABCLevels(engine2State) {
+  const minute = engine2State?.minute || {};
 
+  const aLow = validPrice(minute?.aLow);
+  const bHigh =
+    validPrice(minute?.bHigh) ??
+    validPrice(minute?.lowerHighLevel) ??
+    validPrice(minute?.continuationLevel);
+
+  const cLow = validPrice(minute?.cLow);
+  const w3High =
+    validPrice(minute?.w3High) ??
+    (minute?.lastMark?.key === "W3" ? validPrice(minute?.lastMark?.p) : null);
+
+  return {
+    aLow,
+    bHigh,
+    cLow,
+    w3High,
+    w4Low: cLow,
+    lowerHighLevel: bHigh,
+    continuationLevel: bHigh,
+  };
+}
+
+function detectMinuteW4ABC({
+  engine2State,
+  engine16,
+  marketBias,
+  latestClose,
+  ema10,
+  ema20,
+}) {
+  const phases = getWavePhases(engine2State);
+  const {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    minutePhase,
+    confirmedMinutePhase,
+  } = phases;
+
+  const bullishFinalContext = isBullishFinalImpulseContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+  });
+
+  if (!bullishFinalContext || minutePhase !== "IN_W4") {
+    return {
+      active: false,
+      setupType: "NONE",
+      type: "NONE",
+      state: "NONE",
+      status: "NO_SCALP",
+      readiness: "WAIT",
+      reasonCodes: ["NOT_MINUTE_W4_CONTEXT"],
+    };
+  }
+
+  const close = validPrice(latestClose);
+  const e10 = validPrice(ema10);
+  const e20 = validPrice(ema20);
+
+  const prevClose =
+    validPrice(engine16?.previousClose) ??
+    validPrice(engine16?.prevClose) ??
+    null;
+
+  const continuationWatchLong = engine16?.continuationWatchLong === true;
+
+  const {
+    aLow,
+    bHigh,
+    cLow,
+    w3High,
+  } = getMinuteABCLevels(engine2State);
+
+  const hasALow = aLow !== null;
+  const hasBHigh = bHigh !== null;
+  const hasCLow = cLow !== null;
+
+  const aLowHeld =
+    hasALow &&
+    close !== null &&
+    close >= aLow * 0.995;
+
+  const cLowHeld =
+    hasCLow &&
+    close !== null &&
+    close >= cLow * 0.995;
+
+  const reclaimedEma10 =
+    close !== null &&
+    e10 !== null &&
+    (
+      prevClose !== null
+        ? prevClose <= e10 && close > e10
+        : close > e10
+    );
+
+  const aboveEma20 =
+    close !== null &&
+    e20 !== null &&
+    close > e20;
+
+  const belowEma10 =
+    close !== null &&
+    e10 !== null &&
+    close < e10;
+
+  const belowEma20 =
+    close !== null &&
+    e20 !== null &&
+    close < e20;
+
+  const brokeBHigh =
+    hasBHigh &&
+    close !== null &&
+    close > bHigh;
+
+  const rejectedBHigh =
+    hasBHigh &&
+    close !== null &&
+    close < bHigh;
+
+  // ============================================================
+  // STAGE 1:
+  // W4 active, but A low is not manually marked yet.
+  // ============================================================
+  if (!hasALow) {
+    return {
+      active: true,
+      setupType: "MINUTE_W4_ABC",
+      type: "W4_A_FORMING",
+      state: "W4_A_FORMING",
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_FOR_A_LOW",
+      triggerLevel: null,
+      stopLevel: null,
+      confidence: 0,
+      sizeMode: "NONE",
+      needs: "WAIT_FOR_A_LOW",
+      marketBias,
+      reasonCodes: [
+        "PRIMARY_W5",
+        "INTERMEDIATE_W5",
+        "MINOR_W5",
+        "MINUTE_W4_ACTIVE",
+        "WAIT_FOR_A_LOW",
+        "BLIND_DIP_BUY_BLOCKED",
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        w3High,
+        aLow,
+        bHigh,
+        cLow,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        correctionLeg: "IN_A",
+        nextFocus: "WAIT_FOR_A_LOW",
+      },
+    };
+  }
+
+  // ============================================================
+  // STAGE 2:
+  // A low exists, but B high is not marked yet.
+  // Allow structured A -> B long if confirmed.
+  // ============================================================
+  if (hasALow && !hasBHigh) {
+    const bBounceReady =
+      aLowHeld &&
+      reclaimedEma10;
+
+    const bBounceTrigger =
+      bBounceReady &&
+      (
+        aboveEma20 ||
+        continuationWatchLong
+      );
+
+    if (bBounceTrigger) {
+      return {
+        active: true,
+        setupType: "CORRECTION_A_TO_B_LONG",
+        type: "CORRECTION_A_TO_B_LONG",
+        state: "A_TO_B_TRIGGER_LONG",
+        status: "ENTRY_LONG",
+        readiness: "GO_LONG",
+        direction: "LONG",
+        side: "LONG",
+        allowLongEntry: true,
+        allowShort: false,
+        triggerConfirmed: true,
+        triggerType: aboveEma20
+          ? "A_LOW_HELD_EMA10_RECLAIM_ABOVE_EMA20"
+          : "A_LOW_HELD_EMA10_RECLAIM_CONTINUATION_WATCH",
+        triggerLevel: round2(e10),
+        stopLevel: round2(aLow),
+        confidence: 68,
+        sizeMode: "REDUCED",
+        needs: "ENTRY_ACTIVE",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "A_LOW_MARKED",
+          "A_LOW_HELD",
+          "EMA10_RECLAIM",
+          aboveEma20 ? "ABOVE_EMA20" : "CONTINUATION_WATCH_LONG",
+          "A_TO_B_TRIGGER_LONG",
+          "REDUCED_SIZE_COUNTERTREND_BOUNCE",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          w3High,
+          aLow,
+          bHigh,
+          cLow,
+          latestClose: close,
+          ema10: e10,
+          ema20: e20,
+          prevClose,
+          aLowHeld,
+          reclaimedEma10,
+          aboveEma20,
+          continuationWatchLong,
+          correctionLeg: "IN_B",
+          nextFocus: "TRADE_B_BOUNCE_THEN_MARK_B_HIGH",
+        },
+      };
+    }
+
+    if (bBounceReady) {
+      return {
+        active: true,
+        setupType: "CORRECTION_A_TO_B_LONG",
+        type: "A_TO_B_READY",
+        state: "A_TO_B_READY",
+        status: "WATCH",
+        readiness: "READY",
+        direction: "LONG",
+        side: "LONG",
+        allowLongEntry: false,
+        allowShort: false,
+        triggerConfirmed: false,
+        triggerType: "WAIT_ABOVE_EMA20_OR_CONTINUATION_WATCH",
+        triggerLevel: round2(e20 ?? e10),
+        stopLevel: round2(aLow),
+        confidence: 55,
+        sizeMode: "REDUCED",
+        needs: "WAIT_FOR_A_TO_B_TRIGGER",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "A_LOW_MARKED",
+          "A_LOW_HELD",
+          "EMA10_RECLAIM",
+          "WAIT_FOR_A_TO_B_CONFIRMATION",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          w3High,
+          aLow,
+          bHigh,
+          cLow,
+          latestClose: close,
+          ema10: e10,
+          ema20: e20,
+          prevClose,
+          aLowHeld,
+          reclaimedEma10,
+          aboveEma20,
+          continuationWatchLong,
+          correctionLeg: "IN_B",
+          nextFocus: "WAIT_FOR_B_BOUNCE_CONFIRMATION",
+        },
+      };
+    }
+
+    return {
+      active: true,
+      setupType: "MINUTE_W4_ABC",
+      type: "W4_A_LOW_ACTIVE",
+      state: "W4_A_LOW_ACTIVE",
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_FOR_B_BOUNCE",
+      triggerLevel: round2(e10),
+      stopLevel: round2(aLow),
+      confidence: 0,
+      sizeMode: "NONE",
+      needs: "WAIT_FOR_B_BOUNCE",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W4_ACTIVE",
+        "A_LOW_MARKED",
+        "WAIT_FOR_B_BOUNCE",
+        "BLIND_DIP_BUY_BLOCKED",
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        w3High,
+        aLow,
+        bHigh,
+        cLow,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        aLowHeld,
+        reclaimedEma10,
+        aboveEma20,
+        correctionLeg: "A_COMPLETE_WAIT_B",
+        nextFocus: "WAIT_FOR_B_BOUNCE",
+      },
+    };
+  }
+
+  // ============================================================
+  // STAGE 3:
+  // A and B exist, but C low not marked yet.
+  // Watch for C leg down.
+  // ============================================================
+  if (hasALow && hasBHigh && !hasCLow) {
+    const cLegStarting =
+      rejectedBHigh &&
+      (belowEma10 || belowEma20);
+
+    if (cLegStarting) {
+      return {
+        active: true,
+        setupType: "MINUTE_W4_ABC",
+        type: "W4_C_LEG_STARTING",
+        state: "W4_C_LEG_STARTING",
+        status: "WATCH",
+        readiness: "NO_TRADE",
+        direction: "NONE",
+        side: "NONE",
+        allowLongEntry: false,
+        allowShort: false,
+        triggerConfirmed: false,
+        triggerType: "B_HIGH_REJECTION_EMA_LOSS",
+        triggerLevel: round2(bHigh),
+        stopLevel: null,
+        confidence: 0,
+        sizeMode: "NONE",
+        needs: "WAIT_FOR_C_LOW",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "A_LOW_MARKED",
+          "B_HIGH_MARKED",
+          "B_HIGH_REJECTED",
+          belowEma10 ? "BELOW_EMA10" : "BELOW_EMA20",
+          "C_LEG_STARTING",
+          "NO_LONG_DURING_C_LEG",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          w3High,
+          aLow,
+          bHigh,
+          cLow,
+          latestClose: close,
+          ema10: e10,
+          ema20: e20,
+          prevClose,
+          rejectedBHigh,
+          belowEma10,
+          belowEma20,
+          correctionLeg: "IN_C",
+          nextFocus: "WAIT_FOR_C_LOW",
+        },
+      };
+    }
+
+    return {
+      active: true,
+      setupType: "MINUTE_W4_ABC",
+      type: "W4_WAIT_C_LEG",
+      state: "W4_WAIT_C_LEG",
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_FOR_C_LEG",
+      triggerLevel: round2(bHigh),
+      stopLevel: null,
+      confidence: 0,
+      sizeMode: "NONE",
+      needs: "WAIT_FOR_C_LOW",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W4_ACTIVE",
+        "A_LOW_MARKED",
+        "B_HIGH_MARKED",
+        "WAIT_FOR_C_LEG",
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        w3High,
+        aLow,
+        bHigh,
+        cLow,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        rejectedBHigh,
+        belowEma10,
+        belowEma20,
+        correctionLeg: "B_COMPLETE_WAIT_C",
+        nextFocus: "WAIT_FOR_C_LOW",
+      },
+    };
+  }
+
+  // ============================================================
+  // STAGE 4:
+  // A, B, C all exist.
+  // Watch for W5 long trigger.
+  // ============================================================
+  if (hasALow && hasBHigh && hasCLow) {
+    const cLowHeld =
+      close !== null &&
+      close >= cLow * 0.995;
+
+    const w5Ready =
+      cLowHeld &&
+      reclaimedEma10 &&
+      aboveEma20;
+
+    const w5Trigger =
+      w5Ready &&
+      brokeBHigh;
+
+    if (w5Trigger) {
+      return {
+        active: true,
+        setupType: "W4_TO_W5_LONG",
+        type: "W4_TO_W5_LONG",
+        state: "W5_TRIGGER_LONG",
+        status: "ENTRY_LONG",
+        readiness: "GO_LONG",
+        direction: "LONG",
+        side: "LONG",
+        allowLongEntry: true,
+        allowShort: false,
+        triggerConfirmed: true,
+        triggerType: "BREAK_ABOVE_B_HIGH",
+        triggerLevel: round2(bHigh),
+        stopLevel: round2(cLow),
+        confidence: 78,
+        sizeMode: "CAUTION",
+        needs: "ENTRY_ACTIVE",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "ABC_COMPLETE",
+          "C_LOW_HELD",
+          "EMA10_RECLAIM",
+          "ABOVE_EMA20",
+          "BREAK_ABOVE_B_HIGH",
+          "W5_TRIGGER_LONG",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          w3High,
+          aLow,
+          bHigh,
+          cLow,
+          latestClose: close,
+          ema10: e10,
+          ema20: e20,
+          prevClose,
+          cLowHeld,
+          reclaimedEma10,
+          aboveEma20,
+          brokeBHigh,
+          correctionLeg: "ABC_COMPLETE",
+          nextFocus: "W5_ACTIVE",
+        },
+      };
+    }
+
+    if (w5Ready) {
+      return {
+        active: true,
+        setupType: "W4_TO_W5_LONG",
+        type: "W5_READY",
+        state: "W5_READY",
+        status: "WATCH",
+        readiness: "READY",
+        direction: "LONG",
+        side: "LONG",
+        allowLongEntry: false,
+        allowShort: false,
+        triggerConfirmed: false,
+        triggerType: "WAIT_BREAK_ABOVE_B_HIGH",
+        triggerLevel: round2(bHigh),
+        stopLevel: round2(cLow),
+        confidence: 64,
+        sizeMode: "CAUTION",
+        needs: "WAIT_FOR_W5_TRIGGER",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "ABC_COMPLETE",
+          "C_LOW_HELD",
+          "EMA10_RECLAIM",
+          "ABOVE_EMA20",
+          "WAIT_FOR_B_HIGH_BREAK",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          w3High,
+          aLow,
+          bHigh,
+          cLow,
+          latestClose: close,
+          ema10: e10,
+          ema20: e20,
+          prevClose,
+          cLowHeld,
+          reclaimedEma10,
+          aboveEma20,
+          brokeBHigh,
+          correctionLeg: "ABC_COMPLETE",
+          nextFocus: "BREAK_B_HIGH_FOR_W5",
+        },
+      };
+    }
+
+    return {
+      active: true,
+      setupType: "W4_TO_W5_LONG",
+      type: "W4_ABC_COMPLETE_WAIT_TRIGGER",
+      state: "W4_ABC_COMPLETE_WAIT_TRIGGER",
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_W5_TRIGGER",
+      triggerLevel: round2(bHigh),
+      stopLevel: round2(cLow),
+      confidence: 0,
+      sizeMode: "NONE",
+      needs: "WAIT_FOR_EMA_RECLAIM_AND_B_BREAK",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W4_ACTIVE",
+        "ABC_COMPLETE",
+        "WAIT_FOR_W5_TRIGGER",
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        w3High,
+        aLow,
+        bHigh,
+        cLow,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        cLowHeld,
+        reclaimedEma10,
+        aboveEma20,
+        brokeBHigh,
+        correctionLeg: "ABC_COMPLETE",
+        nextFocus: "WAIT_FOR_EMA_RECLAIM_AND_B_BREAK",
+      },
+    };
+  }
+
+  return {
+    active: true,
+    setupType: "MINUTE_W4_ABC",
+    type: "W4_ACTIVE_WAIT",
+    state: "W4_ACTIVE_WAIT",
+    status: "WATCH",
+    readiness: "WATCH",
+    direction: "NONE",
+    side: "NONE",
+    allowLongEntry: false,
+    allowShort: false,
+    triggerConfirmed: false,
+    triggerType: "WAIT_W4_STRUCTURE",
+    triggerLevel: null,
+    stopLevel: null,
+    confidence: 0,
+    sizeMode: "NONE",
+    needs: "WAIT_FOR_W4_STRUCTURE",
+    marketBias,
+    reasonCodes: [
+      "MINUTE_W4_ACTIVE",
+      "WAIT_FOR_W4_STRUCTURE",
+      "OBSERVATION_ONLY",
+    ],
+    debug: {
+      ...phases,
+      w3High,
+      aLow,
+      bHigh,
+      cLow,
+      latestClose: close,
+      ema10: e10,
+      ema20: e20,
+      prevClose,
+      correctionLeg: "UNKNOWN",
+      nextFocus: "WAIT_FOR_W4_STRUCTURE",
+    },
+  };
+}
 export function computeEngine22ScalpOpportunity({
   symbol = "SPY",
   strategyId = "intraday_scalp@10m",
@@ -863,7 +1505,7 @@ export function computeEngine22ScalpOpportunity({
 } = {}) {
   const base = {
     ok: true,
-    engine: "engine22.scalpOpportunity.v5",
+    engine: "engine22.scalpOpportunity.v5.1",
     active: false,
     mode: "OBSERVATION_ONLY",
     symbol,
@@ -876,7 +1518,7 @@ export function computeEngine22ScalpOpportunity({
       exhaustionRejectionShort: true,
       w2ToW3Long: true,
       w4ToW5Long: true,
-      correctionAToBLong: false,
+      correctionAToBLong: true,
       correctionBToCShort: false,
     },
 
@@ -1034,9 +1676,8 @@ export function computeEngine22ScalpOpportunity({
     return toCorrectionReturn(base, w2ToW3Long);
   }
 
-  if (minutePhase === "IN_W4") {
-    const w4ToW5Long = detectCorrectionToImpulseLong({
-      setup: "W4_TO_W5_LONG",
+    if (minutePhase === "IN_W4") {
+    const minuteW4ABC = detectMinuteW4ABC({
       engine2State,
       engine16,
       marketBias,
@@ -1045,22 +1686,22 @@ export function computeEngine22ScalpOpportunity({
       ema20,
     });
 
-    if (w4ToW5Long?.status === "ENTRY_LONG") {
+    if (minuteW4ABC?.status === "ENTRY_LONG") {
       logEntryIfNeeded({
         symbol,
         strategyId,
         tf,
-        type: "W4_TO_W5_LONG",
+        type: minuteW4ABC.type || minuteW4ABC.setupType || "MINUTE_W4_ABC_LONG",
         status: "ENTRY_LONG",
         direction: "LONG",
         price: latestClose,
-        confidence: w4ToW5Long.confidence || 76,
+        confidence: minuteW4ABC.confidence || 68,
         targetMove: base.targetMove,
-        invalidationLevel: w4ToW5Long.stopLevel ?? null,
+        invalidationLevel: minuteW4ABC.stopLevel ?? null,
       });
     }
 
-    return toCorrectionReturn(base, w4ToW5Long);
+    return toCorrectionReturn(base, minuteW4ABC);
   }
 
   // ============================================================
