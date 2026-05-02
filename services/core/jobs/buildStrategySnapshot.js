@@ -976,10 +976,16 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
   const cShortWatch =
     cInternalStructure === "FORMING" &&
     cExtensionZone === "ABOVE_618"; 
-  
-   const waveMode =
-    ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
 
+  const wave3Retrace = computeWave3RetraceMap({
+    waveMarks,
+    currentPrice,
+    phase,
+  });
+  
+  const waveMode =
+   ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
+   
   const isCorrective = waveMode === "CORRECTIVE";
   const isImpulse = waveMode === "IMPULSE";
   const isFinalCorrectionLeg = phase === "IN_C";
@@ -1011,9 +1017,135 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     correctionDirection,
     cInternalStructure,
     cShortWatch,
+    wave3Retrace, 
   };
 }
+function getWaveMarkPrice(waveMarks, key) {
+  const p = Number(waveMarks?.[key]?.p);
+  return Number.isFinite(p) && p > 0 ? p : null;
+}
 
+function computeWave3RetraceMap({ waveMarks, currentPrice, phase }) {
+  const wave3Start = getWaveMarkPrice(waveMarks, "W2");
+  const wave3End = getWaveMarkPrice(waveMarks, "W3");
+  const price = Number(currentPrice);
+
+  if (!wave3Start || !wave3End || !Number.isFinite(price)) {
+    return {
+      active: false,
+      source: "MINUTE_W2_TO_W3",
+      reason: "MISSING_W2_W3_OR_PRICE",
+      wave3Start,
+      wave3End,
+      currentPrice: Number.isFinite(price) ? Number(price.toFixed(2)) : null,
+      levels: null,
+      zone: null,
+      timeline: {
+        label: "Wave 3 retracement map unavailable",
+        message: "Missing W2, W3, or current price.",
+      },
+    };
+  }
+
+  const range = wave3End - wave3Start;
+
+  if (!Number.isFinite(range) || range <= 0) {
+    return {
+      active: false,
+      source: "MINUTE_W2_TO_W3",
+      reason: "INVALID_WAVE3_RANGE",
+      wave3Start,
+      wave3End,
+      currentPrice: Number(price.toFixed(2)),
+      levels: null,
+      zone: null,
+      timeline: {
+        label: "Wave 3 retracement map invalid",
+        message: "Wave 3 start/end range is invalid.",
+      },
+    };
+  }
+
+  const levels = {
+    r236: wave3End - range * 0.236,
+    r382: wave3End - range * 0.382,
+    r500: wave3End - range * 0.5,
+    r618: wave3End - range * 0.618,
+    r786: wave3End - range * 0.786,
+  };
+
+  const roundLevels = Object.fromEntries(
+    Object.entries(levels).map(([k, v]) => [k, Number(v.toFixed(2))])
+  );
+
+  const zone50To618 = {
+    lo: Math.min(levels.r500, levels.r618),
+    hi: Math.max(levels.r500, levels.r618),
+  };
+
+  const inZone50To618 =
+    price >= zone50To618.lo &&
+    price <= zone50To618.hi;
+
+  const aboveZone =
+    price > zone50To618.hi;
+
+  const belowZone =
+    price < zone50To618.lo;
+
+  let zoneState = "NOT_IN_ZONE";
+  let message = "Price is not yet inside the 0.5–0.618 Wave 3 retracement zone. Wait for price action.";
+
+  if (inZone50To618) {
+    zoneState = "IN_50_618_ZONE";
+    message = "Price is inside the 0.5–0.618 Wave 3 retracement zone. Watch for Wave A low / B bounce. No trade yet.";
+  } else if (aboveZone) {
+    zoneState = "ABOVE_50_618_ZONE";
+    message = "Price is above the 0.5–0.618 Wave 3 retracement zone. Wave A may still be shallow or still forming.";
+  } else if (belowZone) {
+    zoneState = "BELOW_50_618_ZONE";
+    message = "Price has moved below the 0.5–0.618 Wave 3 retracement zone. Watch deeper W4 support such as 0.786.";
+  }
+
+  const active =
+    phase === "IN_W4" ||
+    phase === "IN_W2";
+
+  return {
+    active,
+    source: "MINUTE_W2_TO_W3",
+    reason: active ? "CORRECTION_PHASE_ACTIVE" : "NOT_IN_W2_W4",
+    wave3Start: Number(wave3Start.toFixed(2)),
+    wave3End: Number(wave3End.toFixed(2)),
+    currentPrice: Number(price.toFixed(2)),
+    range: Number(range.toFixed(2)),
+    levels: roundLevels,
+    zone: {
+      name: "WAVE_A_WATCH_ZONE_50_618",
+      state: zoneState,
+      lo: Number(zone50To618.lo.toFixed(2)),
+      hi: Number(zone50To618.hi.toFixed(2)),
+      inZone: inZone50To618,
+      aboveZone,
+      belowZone,
+    },
+    timeline: {
+      label:
+        phase === "IN_W4"
+          ? "Minute W4 active — watching Wave A pullback zone"
+          : phase === "IN_W2"
+          ? "Minute W2 active — watching correction pullback zone"
+          : "Wave 3 retracement map",
+      message,
+      nextFocus:
+        phase === "IN_W4"
+          ? "Wait for A low, B bounce, then W5 trigger structure."
+          : phase === "IN_W2"
+          ? "Wait for A low, B bounce, then W3 trigger structure."
+          : "No correction action needed.",
+    },
+  };
+}
 /* -----------------------------
    Reaction / Volume
 ------------------------------*/
