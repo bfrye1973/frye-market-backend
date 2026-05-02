@@ -1,7 +1,16 @@
 // services/core/logic/engine22ScalpOpportunity.js
 // Engine 22 — Scalp Opportunity Engine
-// V4: Scalp exhaustion + dip-buy continuation + market bias
-// Read-only. Does NOT affect Engine 15 / lifecycle / trades.
+// V5: Minute wave-aware scalp execution
+//
+// Core rules:
+// - Minute W3 = normal dip-buy scalps allowed
+// - Minute W5 = normal dip-buy scalps allowed
+// - Minute W2 = blind dip buys blocked
+// - Minute W4 = blind dip buys blocked
+// - W2 complete + W3 trigger = long entry allowed
+// - W4 complete + W5 trigger = long entry allowed
+//
+// Read-only. Does NOT affect Engine 15 / lifecycle / trades directly.
 
 import { logEngine22Alert } from "./engine22AlertLogger.js";
 
@@ -26,6 +35,67 @@ function safeBool(x) {
 function normalizeScore(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : 0;
+}
+
+function isImpulsePhase(x) {
+  return x === "IN_W3" || x === "IN_W5";
+}
+
+function isCorrectionPhase(x) {
+  return x === "IN_W2" || x === "IN_W4";
+}
+
+function getMinutePhase(engine2State) {
+  // Engine 2 confirmed:
+  // Use minute.phase first.
+  // Then minutePhase.
+  // Do NOT fallback to minorPhase for minute decisions.
+  return (
+    engine2State?.minute?.phase ||
+    engine2State?.minutePhase ||
+    "UNKNOWN"
+  );
+}
+
+function getWavePhases(engine2State) {
+  return {
+    primaryPhase:
+      engine2State?.primaryPhase ||
+      engine2State?.primary?.phase ||
+      "UNKNOWN",
+
+    intermediatePhase:
+      engine2State?.intermediatePhase ||
+      engine2State?.intermediate?.phase ||
+      "UNKNOWN",
+
+    minorPhase:
+      engine2State?.minorPhase ||
+      engine2State?.minor?.phase ||
+      "UNKNOWN",
+
+    minutePhase: getMinutePhase(engine2State),
+
+    confirmedMinutePhase:
+      engine2State?.minute?.confirmedPhase ||
+      "UNKNOWN",
+  };
+}
+
+function isBullishFinalImpulseContext({ primaryPhase, intermediatePhase, minorPhase }) {
+  return (
+    primaryPhase === "IN_W5" &&
+    intermediatePhase === "IN_W5" &&
+    minorPhase === "IN_W5"
+  );
+}
+
+function isBullishHigherWaveContext({ primaryPhase, intermediatePhase, minorPhase }) {
+  return (
+    isImpulsePhase(primaryPhase) &&
+    isImpulsePhase(intermediatePhase) &&
+    isImpulsePhase(minorPhase)
+  );
 }
 
 function getReactionInputs(reaction, waveReactionFromArg) {
@@ -220,23 +290,52 @@ function buildManagement({ side, latestClose, ema10 }) {
 }
 
 function computeMarketBias({ engine2State, engine16, marketMind }) {
-  const minutePhase = engine2State?.minute?.phase;
-  const primary = engine2State?.primaryPhase;
-  const intermediate = engine2State?.intermediatePhase;
-  const minor = engine2State?.minorPhase;
+  const phases = getWavePhases(engine2State);
+  const {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    minutePhase,
+  } = phases;
+
+  const finalImpulseContext = isBullishFinalImpulseContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+  });
+
+  const bullishHigherWaveContext = isBullishHigherWaveContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+  });
+
+  const minuteAllowsDipBuy =
+    minutePhase === "IN_W3" ||
+    minutePhase === "IN_W5";
+
+  const minuteBlocksDipBuy =
+    minutePhase === "IN_W2" ||
+    minutePhase === "IN_W4";
 
   const hourlyClose = validPrice(engine16?.hourlyClose);
   const ema10_1h = validPrice(engine16?.ema10_1h);
 
-  const score1h = toNum(marketMind?.score1h);
-  const score4h = toNum(marketMind?.score4h);
-  const scoreEOD = toNum(marketMind?.scoreEOD);
+  const score1h = toNum(
+    marketMind?.score1h ??
+    marketMind?.oneHourScore
+  );
 
-  const longWave =
-    ["IN_W3", "IN_W5"].includes(primary) &&
-    ["IN_W3", "IN_W5"].includes(intermediate) &&
-    ["IN_W3", "IN_W5"].includes(minor) &&
-    ["IN_W3", "IN_W5"].includes(minutePhase);
+  const score4h = toNum(
+    marketMind?.score4h ??
+    marketMind?.fourHourScore
+  );
+
+  const scoreEOD = toNum(
+    marketMind?.scoreEOD ??
+    marketMind?.masterScore ??
+    marketMind?.eodScore
+  );
 
   const longTrend =
     hourlyClose !== null &&
@@ -260,7 +359,7 @@ function computeMarketBias({ engine2State, engine16, marketMind }) {
     score4h < 58 &&
     scoreEOD < 61;
 
-  if (longWave && longTrend) {
+  if (bullishHigherWaveContext && minuteAllowsDipBuy && longTrend) {
     return {
       bias: "LONG_ONLY_DIP_BUY",
       blockShorts: true,
@@ -269,20 +368,61 @@ function computeMarketBias({ engine2State, engine16, marketMind }) {
       allowShorts: false,
       reason: "W3_W5_BULLISH_STRUCTURE",
       inputs: {
-        primary,
-        intermediate,
-        minor,
-        minutePhase,
+        ...phases,
         hourlyClose: round2(hourlyClose),
         ema10_1h: round2(ema10_1h),
         score1h,
         score4h,
         scoreEOD,
+        minuteAllowsDipBuy,
+        minuteBlocksDipBuy,
       },
     };
   }
 
-  if (shortTrend) {
+  if (finalImpulseContext && minuteBlocksDipBuy) {
+    return {
+      bias: "FINAL_IMPULSE_NO_SHORTS",
+      blockShorts: true,
+      blockLongs: true,
+      allowLongs: false,
+      allowShorts: false,
+      reason: "MINUTE_W2_W4_CORRECTION_INSIDE_FINAL_IMPULSE",
+      inputs: {
+        ...phases,
+        hourlyClose: round2(hourlyClose),
+        ema10_1h: round2(ema10_1h),
+        score1h,
+        score4h,
+        scoreEOD,
+        minuteAllowsDipBuy,
+        minuteBlocksDipBuy,
+      },
+    };
+  }
+
+  if (finalImpulseContext) {
+    return {
+      bias: "FINAL_IMPULSE_NO_SHORTS",
+      blockShorts: true,
+      blockLongs: false,
+      allowLongs: false,
+      allowShorts: false,
+      reason: "PRIMARY_INTERMEDIATE_MINOR_W5_BLOCK_SHORTS",
+      inputs: {
+        ...phases,
+        hourlyClose: round2(hourlyClose),
+        ema10_1h: round2(ema10_1h),
+        score1h,
+        score4h,
+        scoreEOD,
+        minuteAllowsDipBuy,
+        minuteBlocksDipBuy,
+      },
+    };
+  }
+
+  if (shortTrend && !finalImpulseContext) {
     return {
       bias: "SHORT_ONLY_RIP_SELL",
       blockShorts: false,
@@ -291,15 +431,14 @@ function computeMarketBias({ engine2State, engine16, marketMind }) {
       allowShorts: true,
       reason: "ALL_MAJOR_SCORES_WEAK_AND_1H_BELOW_EMA10",
       inputs: {
-        primary,
-        intermediate,
-        minor,
-        minutePhase,
+        ...phases,
         hourlyClose: round2(hourlyClose),
         ema10_1h: round2(ema10_1h),
         score1h,
         score4h,
         scoreEOD,
+        minuteAllowsDipBuy,
+        minuteBlocksDipBuy,
       },
     };
   }
@@ -312,15 +451,14 @@ function computeMarketBias({ engine2State, engine16, marketMind }) {
     allowShorts: false,
     reason: "NO_CLEAR_STRUCTURE",
     inputs: {
-      primary,
-      intermediate,
-      minor,
-      minutePhase,
+      ...phases,
       hourlyClose: round2(hourlyClose),
       ema10_1h: round2(ema10_1h),
       score1h,
       score4h,
       scoreEOD,
+      minuteAllowsDipBuy,
+      minuteBlocksDipBuy,
     },
   };
 }
@@ -354,6 +492,365 @@ function logEntryIfNeeded({
   });
 }
 
+function getCorrectionLevels({ engine2State, setup }) {
+  const minute = engine2State?.minute || {};
+
+  if (setup === "W2_TO_W3_LONG") {
+    const w2Low =
+      validPrice(minute?.w2Low) ??
+      validPrice(minute?.cLow) ??
+      validPrice(minute?.supportLevel) ??
+      validPrice(minute?.invalidationLevel);
+
+    const bHigh =
+      validPrice(minute?.bHigh) ??
+      validPrice(minute?.lowerHighLevel) ??
+      validPrice(minute?.continuationLevel);
+
+    return {
+      correctionLow: w2Low,
+      triggerLevel: bHigh,
+      correctionLowName: "w2Low",
+      triggerLevelName: "bHigh",
+    };
+  }
+
+  if (setup === "W4_TO_W5_LONG") {
+    const w4Low =
+      validPrice(minute?.w4Low) ??
+      (
+        minute?.lastMark?.key === "W4"
+          ? validPrice(minute?.lastMark?.p)
+          : null
+      ) ??
+      validPrice(minute?.cLow) ??
+      validPrice(minute?.supportLevel) ??
+      validPrice(minute?.invalidationLevel);
+
+    const bHigh =
+      validPrice(minute?.bHigh) ??
+      validPrice(minute?.lowerHighLevel) ??
+      validPrice(minute?.continuationLevel);
+
+    return {
+      correctionLow: w4Low,
+      triggerLevel: bHigh,
+      correctionLowName: "w4Low",
+      triggerLevelName: "bHigh",
+    };
+  }
+
+  return {
+    correctionLow: null,
+    triggerLevel: null,
+    correctionLowName: null,
+    triggerLevelName: null,
+  };
+}
+
+function detectCorrectionToImpulseLong({
+  setup,
+  engine2State,
+  engine16,
+  marketBias,
+  latestClose,
+  ema10,
+  ema20,
+}) {
+  const phases = getWavePhases(engine2State);
+  const {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    minutePhase,
+    confirmedMinutePhase,
+  } = phases;
+
+  const bullishHigherWaveContext = isBullishHigherWaveContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+  });
+
+  const requiredMinutePhase =
+    setup === "W2_TO_W3_LONG" ? "IN_W2" :
+    setup === "W4_TO_W5_LONG" ? "IN_W4" :
+    null;
+
+  const nextImpulse =
+    setup === "W2_TO_W3_LONG" ? "W3" :
+    setup === "W4_TO_W5_LONG" ? "W5" :
+    "UNKNOWN";
+
+  const readyState =
+    setup === "W2_TO_W3_LONG" ? "W3_READY" :
+    setup === "W4_TO_W5_LONG" ? "W5_READY" :
+    "READY";
+
+  const triggerState =
+    setup === "W2_TO_W3_LONG" ? "W3_TRIGGER_LONG" :
+    setup === "W4_TO_W5_LONG" ? "W5_TRIGGER_LONG" :
+    "TRIGGER_LONG";
+
+  const activeWaitType =
+    setup === "W2_TO_W3_LONG" ? "W2_ACTIVE_WAIT" :
+    setup === "W4_TO_W5_LONG" ? "W4_ACTIVE_WAIT" :
+    "CORRECTION_ACTIVE_WAIT";
+
+  const waitNeed =
+    setup === "W2_TO_W3_LONG" ? "WAIT_FOR_W3_TRIGGER" :
+    setup === "W4_TO_W5_LONG" ? "WAIT_FOR_W5_TRIGGER" :
+    "WAIT_FOR_TRIGGER";
+
+  if (!requiredMinutePhase || minutePhase !== requiredMinutePhase) {
+    return {
+      active: false,
+      setupType: "NONE",
+      reasonCodes: ["NOT_REQUIRED_MINUTE_PHASE"],
+    };
+  }
+
+  const {
+    correctionLow,
+    triggerLevel,
+    correctionLowName,
+    triggerLevelName,
+  } = getCorrectionLevels({ engine2State, setup });
+
+  const close = validPrice(latestClose);
+  const e10 = validPrice(ema10);
+  const e20 = validPrice(ema20);
+
+  const prevClose =
+    validPrice(engine16?.previousClose) ??
+    validPrice(engine16?.prevClose) ??
+    null;
+
+  const correctionLowHeld =
+    correctionLow !== null &&
+    close !== null &&
+    close >= correctionLow * 0.995;
+
+  const reclaimedEma10 =
+    close !== null &&
+    e10 !== null &&
+    (
+      prevClose !== null
+        ? prevClose <= e10 && close > e10
+        : close > e10
+    );
+
+  const aboveEma20 =
+    close !== null &&
+    e20 !== null &&
+    close > e20;
+
+  const brokeTriggerLevel =
+    close !== null &&
+    triggerLevel !== null &&
+    close > triggerLevel;
+
+  const missingLevels = [];
+  if (correctionLow === null) missingLevels.push(correctionLowName || "correctionLow");
+  if (triggerLevel === null) missingLevels.push(triggerLevelName || "triggerLevel");
+
+  const triggerConfirmed =
+    bullishHigherWaveContext &&
+    correctionLowHeld &&
+    reclaimedEma10 &&
+    aboveEma20 &&
+    brokeTriggerLevel;
+
+  const ready =
+    bullishHigherWaveContext &&
+    correctionLowHeld &&
+    reclaimedEma10 &&
+    aboveEma20 &&
+    !brokeTriggerLevel;
+
+  const confidenceBase =
+    setup === "W2_TO_W3_LONG" ? 88 :
+    setup === "W4_TO_W5_LONG" ? 76 :
+    70;
+
+  if (triggerConfirmed) {
+    return {
+      active: true,
+      setupType: setup,
+      type: setup,
+      state: triggerState,
+      status: "ENTRY_LONG",
+      readiness: "GO_LONG",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: true,
+      allowShort: false,
+      triggerConfirmed: true,
+      triggerType: "BREAK_ABOVE_B_HIGH_OR_LOWER_HIGH",
+      triggerLevel: round2(triggerLevel),
+      stopLevel: round2(correctionLow),
+      confidence: confidenceBase,
+      sizeMode: setup === "W2_TO_W3_LONG" ? "NORMAL" : "CAUTION",
+      needs: "ENTRY_ACTIVE",
+      marketBias,
+      reasonCodes: [
+        "BULLISH_HIGHER_WAVE_CONTEXT",
+        `${requiredMinutePhase}_ACTIVE`,
+        `${nextImpulse}_IMPULSE_TRIGGER`,
+        "CORRECTION_LOW_HELD",
+        "EMA10_RECLAIM",
+        "ABOVE_EMA20",
+        "BREAK_ABOVE_TRIGGER_LEVEL",
+        triggerState,
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        setup,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        correctionLow,
+        triggerLevel,
+        correctionLowHeld,
+        reclaimedEma10,
+        aboveEma20,
+        brokeTriggerLevel,
+        missingLevels,
+      },
+    };
+  }
+
+  if (ready) {
+    return {
+      active: true,
+      setupType: setup,
+      type: readyState,
+      state: readyState,
+      status: "WATCH",
+      readiness: "READY",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: false,
+      allowShort: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_BREAK_ABOVE_B_HIGH_OR_LOWER_HIGH",
+      triggerLevel: round2(triggerLevel),
+      stopLevel: round2(correctionLow),
+      confidence: Math.max(60, confidenceBase - 15),
+      sizeMode: setup === "W2_TO_W3_LONG" ? "NORMAL" : "CAUTION",
+      needs:
+        setup === "W2_TO_W3_LONG"
+          ? "WAIT_FOR_W3_TRIGGER"
+          : "WAIT_FOR_W5_TRIGGER",
+      marketBias,
+      reasonCodes: [
+        "BULLISH_HIGHER_WAVE_CONTEXT",
+        `${requiredMinutePhase}_ACTIVE`,
+        "CORRECTION_LOW_HELD",
+        "EMA10_RECLAIM",
+        "ABOVE_EMA20",
+        "WAIT_FOR_TRIGGER_LEVEL_BREAK",
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        setup,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        correctionLow,
+        triggerLevel,
+        correctionLowHeld,
+        reclaimedEma10,
+        aboveEma20,
+        brokeTriggerLevel,
+        missingLevels,
+      },
+    };
+  }
+
+  return {
+    active: true,
+    setupType: setup,
+    type: activeWaitType,
+    state: activeWaitType,
+    status: "WATCH",
+    readiness: "WATCH",
+    direction: "NONE",
+    side: "NONE",
+    allowLongEntry: false,
+    allowShort: false,
+    triggerConfirmed: false,
+    triggerType: `WAIT_${nextImpulse}_CONFIRMATION`,
+    triggerLevel: round2(triggerLevel),
+    stopLevel: round2(correctionLow),
+    confidence: 0,
+    sizeMode: "NONE",
+    needs: waitNeed,
+    marketBias,
+    reasonCodes: [
+      `${requiredMinutePhase}_ACTIVE`,
+      "BLIND_DIP_BUY_BLOCKED",
+      "WAIT_FOR_CORRECTION_TO_IMPULSE_TRIGGER",
+      ...(bullishHigherWaveContext ? ["BULLISH_HIGHER_WAVE_CONTEXT"] : ["NO_BULLISH_HIGHER_WAVE_CONTEXT"]),
+      ...(missingLevels.length ? ["MISSING_CORRECTION_LEVELS"] : []),
+      "OBSERVATION_ONLY",
+    ],
+    debug: {
+      ...phases,
+      setup,
+      latestClose: close,
+      ema10: e10,
+      ema20: e20,
+      prevClose,
+      correctionLow,
+      triggerLevel,
+      correctionLowHeld,
+      reclaimedEma10,
+      aboveEma20,
+      brokeTriggerLevel,
+      missingLevels,
+      note:
+        missingLevels.length
+          ? "Waiting because Engine 2 has not provided correction low / B high yet."
+          : "Waiting for reclaim and trigger confirmation.",
+    },
+  };
+}
+
+function toCorrectionReturn(base, detection) {
+  return {
+    ...base,
+    active: detection.active === true,
+    setupType: detection.setupType || null,
+    type: detection.type || detection.state || "CORRECTION_ACTIVE_WAIT",
+    state: detection.state || detection.type || "CORRECTION_ACTIVE_WAIT",
+    status: detection.status || "WATCH",
+    readiness: detection.readiness || "WATCH",
+    direction: detection.direction || "NONE",
+    side: detection.side || "NONE",
+    allowLongEntry: detection.allowLongEntry === true,
+    allowShort: detection.allowShort === true,
+    triggerConfirmed: detection.triggerConfirmed === true,
+    triggerType: detection.triggerType || null,
+    entryTriggerLevel: detection.triggerLevel ?? null,
+    invalidationLevel: detection.stopLevel ?? null,
+    stop:
+      detection.stopLevel != null
+        ? `below ${detection.stopLevel}`
+        : null,
+    confidence: detection.confidence || 0,
+    sizeMode: detection.sizeMode || "NONE",
+    needs: detection.needs || "WAIT_FOR_TRIGGER",
+    marketBias: detection.marketBias || base.marketBias || null,
+    reasonCodes: Array.isArray(detection.reasonCodes) ? detection.reasonCodes : [],
+    debug: detection.debug || {},
+  };
+}
+
 export function computeEngine22ScalpOpportunity({
   symbol = "SPY",
   strategyId = "intraday_scalp@10m",
@@ -366,7 +863,7 @@ export function computeEngine22ScalpOpportunity({
 } = {}) {
   const base = {
     ok: true,
-    engine: "engine22.scalpOpportunity.v4",
+    engine: "engine22.scalpOpportunity.v5",
     active: false,
     mode: "OBSERVATION_ONLY",
     symbol,
@@ -377,16 +874,29 @@ export function computeEngine22ScalpOpportunity({
       dipBuyContinuation: true,
       exhaustionBounceLong: true,
       exhaustionRejectionShort: true,
+      w2ToW3Long: true,
+      w4ToW5Long: true,
+      correctionAToBLong: false,
+      correctionBToCShort: false,
     },
 
+    setupType: null,
     type: "NONE",
+    state: "NONE",
     status: "NO_SCALP",
+    readiness: "WAIT",
     direction: "NONE",
     side: "NONE",
+
+    allowLongEntry: false,
+    allowShort: false,
+    triggerConfirmed: false,
+    triggerType: null,
 
     targetMove: 1.0,
     stop: null,
     confidence: 0,
+    sizeMode: "NONE",
 
     entryZone: null,
     targetZone: null,
@@ -419,6 +929,27 @@ export function computeEngine22ScalpOpportunity({
     };
   }
 
+  const phases = getWavePhases(engine2State);
+  const {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    minutePhase,
+    confirmedMinutePhase,
+  } = phases;
+
+  const finalImpulseContext = isBullishFinalImpulseContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+  });
+
+  const bullishHigherWaveContext = isBullishHigherWaveContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+  });
+
   const marketBias = computeMarketBias({
     engine2State,
     engine16,
@@ -450,6 +981,7 @@ export function computeEngine22ScalpOpportunity({
       marketBias,
       reasonCodes: ["NO_PRICE_AVAILABLE"],
       debug: {
+        ...phases,
         latestClose,
         ema10,
         ema20,
@@ -465,9 +997,85 @@ export function computeEngine22ScalpOpportunity({
   }
 
   // ============================================================
-  // CONTINUATION DIP BUY LOGIC
+  // PHASE 1 + PHASE 2:
+  // Minute W2/W4 correction logic.
+  //
+  // W2 and W4 block blind dip buys.
+  // If correction-to-impulse trigger fields are available, Engine 22 can
+  // promote W2 -> W3 or W4 -> W5.
   // ============================================================
-  if (marketBias?.bias === "LONG_ONLY_DIP_BUY" && continuationWatchLong) {
+
+  if (minutePhase === "IN_W2") {
+    const w2ToW3Long = detectCorrectionToImpulseLong({
+      setup: "W2_TO_W3_LONG",
+      engine2State,
+      engine16,
+      marketBias,
+      latestClose,
+      ema10,
+      ema20,
+    });
+
+    if (w2ToW3Long?.status === "ENTRY_LONG") {
+      logEntryIfNeeded({
+        symbol,
+        strategyId,
+        tf,
+        type: "W2_TO_W3_LONG",
+        status: "ENTRY_LONG",
+        direction: "LONG",
+        price: latestClose,
+        confidence: w2ToW3Long.confidence || 88,
+        targetMove: base.targetMove,
+        invalidationLevel: w2ToW3Long.stopLevel ?? null,
+      });
+    }
+
+    return toCorrectionReturn(base, w2ToW3Long);
+  }
+
+  if (minutePhase === "IN_W4") {
+    const w4ToW5Long = detectCorrectionToImpulseLong({
+      setup: "W4_TO_W5_LONG",
+      engine2State,
+      engine16,
+      marketBias,
+      latestClose,
+      ema10,
+      ema20,
+    });
+
+    if (w4ToW5Long?.status === "ENTRY_LONG") {
+      logEntryIfNeeded({
+        symbol,
+        strategyId,
+        tf,
+        type: "W4_TO_W5_LONG",
+        status: "ENTRY_LONG",
+        direction: "LONG",
+        price: latestClose,
+        confidence: w4ToW5Long.confidence || 76,
+        targetMove: base.targetMove,
+        invalidationLevel: w4ToW5Long.stopLevel ?? null,
+      });
+    }
+
+    return toCorrectionReturn(base, w4ToW5Long);
+  }
+
+  // ============================================================
+  // PHASE 3:
+  // Normal impulse dip-buy logic.
+  //
+  // Only allowed during Minute W3 or Minute W5.
+  // This prevents continuationTriggerLong from buying W2/W4 early.
+  // ============================================================
+
+  const minuteAllowsNormalDipBuy =
+    minutePhase === "IN_W3" ||
+    minutePhase === "IN_W5";
+
+  if (marketBias?.bias === "LONG_ONLY_DIP_BUY" && continuationWatchLong && minuteAllowsNormalDipBuy) {
     const pulledBack =
       (ema10 !== null && latestClose <= ema10) ||
       (ema20 !== null && latestClose <= ema20);
@@ -478,19 +1086,26 @@ export function computeEngine22ScalpOpportunity({
       return {
         ...base,
         active: true,
+        setupType: "DIP_BUY_CONTINUATION",
         type: "DIP_BUY_WATCH",
+        state: "DIP_BUY_WATCH",
         status: "WATCH_LONG",
+        readiness: "WATCH",
         direction: "LONG",
         side: "LONG",
+        allowLongEntry: false,
+        allowShort: false,
         marketBias,
         needs: "WAIT_FOR_EMA10_RECLAIM_OR_CONTINUATION_TRIGGER",
         reasonCodes: [
           "LONG_ONLY_DIP_BUY_BIAS",
+          `${minutePhase}_ALLOWS_DIP_BUY`,
           "DIP_PULLBACK_DETECTED",
           "WAIT_FOR_RECLAIM",
           "OBSERVATION_ONLY",
         ],
         debug: {
+          ...phases,
           latestClose,
           ema10,
           ema20,
@@ -498,12 +1113,17 @@ export function computeEngine22ScalpOpportunity({
           reclaimed,
           continuationWatchLong,
           continuationTriggerLong,
+          finalImpulseContext,
+          bullishHigherWaveContext,
         },
       };
     }
 
     if (continuationTriggerLong) {
-      const confidence = 80;
+      const confidence =
+        minutePhase === "IN_W3" ? 82 :
+        minutePhase === "IN_W5" ? 72 :
+        70;
 
       logEntryIfNeeded({
         symbol,
@@ -521,27 +1141,39 @@ export function computeEngine22ScalpOpportunity({
       return {
         ...base,
         active: true,
+        setupType: "DIP_BUY_CONTINUATION",
         type: "DIP_BUY_CONTINUATION",
+        state: "DIP_BUY_CONTINUATION",
         status: "ENTRY_LONG",
+        readiness: "GO_LONG",
         direction: "LONG",
         side: "LONG",
+        allowLongEntry: true,
+        allowShort: false,
+        triggerConfirmed: true,
+        triggerType: "CONTINUATION_TRIGGER_LONG",
         marketBias,
         confidence,
+        sizeMode: minutePhase === "IN_W5" ? "CAUTION" : "NORMAL",
         stop: "below EMA20 / last pullback low",
         invalidationLevel: round2(ema20),
         needs: "ENTRY_ACTIVE",
         reasonCodes: [
           "LONG_ONLY_DIP_BUY_BIAS",
+          `${minutePhase}_ALLOWS_DIP_BUY`,
           "DIP_BUY_CONFIRMED",
           "CONTINUATION_TRIGGER_LONG",
           "OBSERVATION_ONLY",
         ],
         debug: {
+          ...phases,
           latestClose,
           ema10,
           ema20,
           continuationWatchLong,
           continuationTriggerLong,
+          finalImpulseContext,
+          bullishHigherWaveContext,
         },
       };
     }
@@ -550,6 +1182,7 @@ export function computeEngine22ScalpOpportunity({
   // ============================================================
   // LONG: exhaustion bounce from low
   // ============================================================
+
   if (exhaustionTriggerLong && exhaustionPrice !== null) {
     const side = "LONG";
     const holdsLow = latestClose >= exhaustionPrice;
@@ -560,6 +1193,7 @@ export function computeEngine22ScalpOpportunity({
         marketBias,
         reasonCodes: ["LONG_EXHAUSTION_LOW_FAILED"],
         debug: {
+          ...phases,
           latestClose,
           ema10,
           ema20,
@@ -611,10 +1245,15 @@ export function computeEngine22ScalpOpportunity({
     return {
       ...base,
       active: true,
+      setupType: "EXHAUSTION_BOUNCE_LONG",
       type: "EXHAUSTION_BOUNCE_LONG",
+      state: "EXHAUSTION_BOUNCE_LONG",
       status,
+      readiness: status === "ENTRY_LONG" ? "GO_LONG" : "PROBE",
       direction: "LONG",
       side,
+      allowLongEntry: status === "ENTRY_LONG",
+      allowShort: false,
       marketBias,
 
       stop: "below exhaustion low",
@@ -657,6 +1296,7 @@ export function computeEngine22ScalpOpportunity({
       ],
 
       debug: {
+        ...phases,
         latestClose,
         ema10,
         ema20,
@@ -674,7 +1314,10 @@ export function computeEngine22ScalpOpportunity({
 
   // ============================================================
   // SHORT: exhaustion rejection from high
+  //
+  // Shorts are blocked by default during bullish final impulse context.
   // ============================================================
+
   if (exhaustionTriggerShort && exhaustionPrice !== null) {
     const side = "SHORT";
     const failsHigh = latestClose <= exhaustionPrice;
@@ -685,6 +1328,7 @@ export function computeEngine22ScalpOpportunity({
         marketBias,
         reasonCodes: ["SHORT_EXHAUSTION_HIGH_FAILED"],
         debug: {
+          ...phases,
           latestClose,
           ema10,
           ema20,
@@ -696,21 +1340,28 @@ export function computeEngine22ScalpOpportunity({
       };
     }
 
-    if (marketBias?.blockShorts === true) {
+    if (marketBias?.blockShorts === true || finalImpulseContext) {
       return {
         ...base,
         active: true,
+        setupType: "SHORT_BLOCKED_BY_MARKET_BIAS",
         type: "SHORT_BLOCKED_BY_MARKET_BIAS",
+        state: "FINAL_IMPULSE_NO_SHORTS",
         status: "NO_SHORT",
+        readiness: "NO_TRADE",
         direction: "NONE",
         side: "SHORT",
+        allowLongEntry: false,
+        allowShort: false,
         marketBias,
         reasonCodes: [
           "SHORT_EXHAUSTION_TRIGGERED",
           "SHORTS_BLOCKED_BY_W3_W5_LONG_BIAS",
+          finalImpulseContext ? "FINAL_IMPULSE_NO_SHORTS" : "MARKET_BIAS_BLOCKS_SHORTS",
           "OBSERVATION_ONLY",
         ],
         debug: {
+          ...phases,
           latestClose,
           ema10,
           ema20,
@@ -762,10 +1413,15 @@ export function computeEngine22ScalpOpportunity({
     return {
       ...base,
       active: true,
+      setupType: "EXHAUSTION_REJECTION_SHORT",
       type: "EXHAUSTION_REJECTION_SHORT",
+      state: "EXHAUSTION_REJECTION_SHORT",
       status,
+      readiness: status === "ENTRY_SHORT" ? "GO_SHORT" : "PROBE",
       direction: "SHORT",
       side,
+      allowLongEntry: false,
+      allowShort: status === "ENTRY_SHORT",
       marketBias,
 
       stop: "above exhaustion high",
@@ -808,6 +1464,7 @@ export function computeEngine22ScalpOpportunity({
       ],
 
       debug: {
+        ...phases,
         latestClose,
         ema10,
         ema20,
@@ -828,6 +1485,7 @@ export function computeEngine22ScalpOpportunity({
     marketBias,
     reasonCodes: ["NO_ENGINE22_SCALP_SETUP"],
     debug: {
+      ...phases,
       latestClose,
       ema10,
       ema20,
@@ -840,6 +1498,8 @@ export function computeEngine22ScalpOpportunity({
       reactionScore,
       structureState,
       hasWaveReaction: !!wr,
+      finalImpulseContext,
+      bullishHigherWaveContext,
     },
   };
 }
