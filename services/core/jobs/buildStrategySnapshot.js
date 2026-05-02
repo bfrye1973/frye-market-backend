@@ -36,6 +36,7 @@ import { computeEngine22ScalpOpportunity } from "../logic/engine22ScalpOpportuni
 ------------------------------*/
 const DATA_DIR = "/opt/render/project/src/services/core/data";
 const SNAPSHOT_FILE = `${DATA_DIR}/strategy-snapshot.json`;
+const FIB_INPUT_FILE = `${DATA_DIR}/fib-input.csv`;
 
 const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
 
@@ -1552,7 +1553,7 @@ async function processStrategy(
     context: engine1Context,
   };
 }
-const FIB_INPUT_FILE = `${DATA_DIR}/fib-input.csv`;
+
 
 function parseCsvLine(line) {
   return String(line || "")
@@ -1591,7 +1592,9 @@ function readFibInputRows() {
   }
 }
 
-function getManualLevelRowsFor({ symbol, degree, tf }) {
+function getManualLevelRowsFor(args = {}) {
+  const { symbol, degree, tf } = args;
+
   return readFibInputRows().filter((row) => {
     return (
       String(row.symbol || "").toUpperCase() === String(symbol || "").toUpperCase() &&
