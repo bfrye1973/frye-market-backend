@@ -938,6 +938,9 @@ function detectCExtensionZone(fib, currentPrice) {
 
   return "NONE";
 }
+readFibInputRows()
+getManualLevelRowsFor()
+attachManualLevelsToEngine2Block()
 
 async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
   const [w1, w4, lastBarTimeSec] = await Promise.all([
@@ -1566,6 +1569,17 @@ const [primary, intermediate, minor, minute] = await Promise.all([
   buildEngine2Block({ symbol, degree: "minute", tf: "10m", currentPrice }).catch(() => null),
 ]);
 
+ const minuteLevelRows = getManualLevelRowsFor({
+   symbol,
+   degree: "minute",
+   tf: "10m",
+ });
+
+ const minuteWithLevels = attachManualLevelsToEngine2Block(
+   minute,
+   minuteLevelRows
+ );
+
 let correctionDirection = null;
 
 if (intermediate?.waveMode === "CORRECTIVE") {
@@ -1576,12 +1590,12 @@ return {
   primary,
   intermediate,
   minor,
-  minute,
+  minute: minuteWithLevels,
 
   primaryPhase: primary?.phase ?? "UNKNOWN",
   intermediatePhase: intermediate?.phase ?? "UNKNOWN",
   minorPhase: minor?.phase ?? "UNKNOWN",
-  minutePhase: minute?.phase ?? "UNKNOWN",
+  minutePhase: minuteWithLevels?.phase ?? "UNKNOWN",
 
   intermediateWaveMode: intermediate?.waveMode ?? null,
   correctionDirection,
