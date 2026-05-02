@@ -1544,7 +1544,8 @@ console.log("Engine21 alignment fetched");
   momentum,
   marketMind,
   marketRegime,
-  engine16ForStrategy
+  engine16ForStrategy,
+  engine2State
 );
 
   const executionState = getExecutionState(symbol, s.strategyId);
