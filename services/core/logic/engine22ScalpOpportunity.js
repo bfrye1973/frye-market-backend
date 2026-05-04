@@ -1683,7 +1683,7 @@ export function computeEngine22ScalpOpportunity({
     waveReaction: wr,
   } = getReactionInputs(reaction, waveReaction);
 
-  if (!latestClose) {
+  if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
     return {
       ...base,
       marketBias,
@@ -1702,7 +1702,7 @@ export function computeEngine22ScalpOpportunity({
         hasWaveReaction: !!wr,
       },
     };
-  }
+  } 
 
   // ============================================================
   // PHASE 1 + PHASE 2:
