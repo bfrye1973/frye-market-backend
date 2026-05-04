@@ -113,12 +113,11 @@ async function main() {
       return;
     }
 
-    const url = "https://finnhub.io/api/v1/news?category=general";
+    const url = `https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(apiKey)}`;
 
     const headlines = await fetchJson(url, {
-      "X-Finnhub-Token": apiKey,
-      "User-Agent": "FryeDashboard-Engine24-NewsRisk"
-    });
+    "User-Agent": "FryeDashboard-Engine24-NewsRisk"
+  });
 
     const out = computeNewsRisk({
       headlines: Array.isArray(headlines) ? headlines : []
