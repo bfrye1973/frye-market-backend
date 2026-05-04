@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "active": false,
+  "riskLevel": "LOW",
+  "category": "UNKNOWN",
+  "headline": "",
+  "source": "FINNHUB",
+  "publishedAt": "",
+  "affected": {
+    "SPY": "NEUTRAL",
+    "QQQ": "NEUTRAL",
+    "VIX": "NEUTRAL",
+    "OIL": "NEUTRAL",
+    "USD": "NEUTRAL"
+  },
+  "engineAction": {
+    "blockNewLongs": false,
+    "blockNewShorts": false,
+    "pauseScalpsMinutes": 0,
+    "tightenStops": false,
+    "reasonCode": null
+  },
+  "reasonCodes": []
+}
