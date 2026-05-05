@@ -2145,7 +2145,172 @@ function normalizeW4ABCForEngine17(detection) {
     ],
   };
 }
+function detectNegotiatedZoneAbsorption({
+  engine1Context,
+  engine22State,
+  engine22Setup,
+  engine22Status,
+  latestClose,
+  ema10,
+  structureState,
+}) {
+  const activeNegotiated = engine1Context?.active?.negotiated || null;
+  const negotiatedZones = Array.isArray(engine1Context?.render?.negotiated)
+    ? engine1Context.render.negotiated
+    : [];
 
+  const close = validPrice(latestClose);
+  const e10 = validPrice(ema10);
+
+  const zoneLo = validPrice(activeNegotiated?.lo);
+  const zoneHi = validPrice(activeNegotiated?.hi);
+  const zoneMid = validPrice(activeNegotiated?.mid);
+
+  const hasActiveNegotiated =
+    activeNegotiated &&
+    zoneLo !== null &&
+    zoneHi !== null;
+
+  const stateUpper = String(engine22State || "").toUpperCase();
+  const setupUpper = String(engine22Setup || "").toUpperCase();
+  const statusUpper = String(engine22Status || "").toUpperCase();
+  const structureUpper = String(structureState || "").toUpperCase();
+
+  const w3LongActive =
+    statusUpper === "ENTRY_LONG" &&
+    (
+      stateUpper === "DIP_BUY_CONTINUATION" ||
+      stateUpper === "W3_DIP_BUY_TRIGGER_LONG" ||
+      setupUpper === "DIP_BUY_CONTINUATION" ||
+      setupUpper === "W3_DIP_BUY_CONTINUATION"
+    );
+
+  if (!hasActiveNegotiated) {
+    return {
+      state: "NO_ACTIVE_NEGOTIATED_ZONE",
+      zoneType: "NEGOTIATED",
+      priceInsideZone: false,
+      zoneLo: null,
+      zoneHi: null,
+      zoneMid: null,
+      buyersAbsorbing: false,
+      sellersRejecting: false,
+      continuationBias: "NONE",
+      risk: "NO_ACTIVE_NEGOTIATED_ZONE",
+      reasonCodes: ["NO_ACTIVE_NEGOTIATED_ZONE"],
+      negotiatedZoneCount: negotiatedZones.length,
+    };
+  }
+
+  const priceInsideZone =
+    close !== null &&
+    close >= Math.min(zoneLo, zoneHi) &&
+    close <= Math.max(zoneLo, zoneHi);
+
+  const priceAboveEma10 =
+    close !== null &&
+    e10 !== null &&
+    close > e10;
+
+  const zoneLost =
+    close !== null &&
+    close < Math.min(zoneLo, zoneHi);
+
+  if (zoneLost) {
+    return {
+      state: "NEGOTIATED_ZONE_LOST",
+      zoneType: "NEGOTIATED",
+      priceInsideZone,
+      zoneLo: round2(zoneLo),
+      zoneHi: round2(zoneHi),
+      zoneMid: round2(zoneMid),
+      buyersAbsorbing: false,
+      sellersRejecting: true,
+      continuationBias: "FAILED_BREAKOUT_RISK",
+      risk: "PRICE_LOST_NEGOTIATED_ZONE_LOW",
+      reasonCodes: [
+        "NEGOTIATED_ZONE_ACTIVE",
+        "CLOSE_BELOW_NEGOTIATED_ZONE_LOW",
+        "NEGOTIATED_ZONE_LOST",
+      ],
+      negotiatedZoneCount: negotiatedZones.length,
+    };
+  }
+
+  if (
+    hasActiveNegotiated &&
+    priceInsideZone &&
+    !priceAboveEma10 &&
+    structureUpper === "FAILURE"
+  ) {
+    return {
+      state: "NEGOTIATED_ZONE_REJECTION_WARNING",
+      zoneType: "NEGOTIATED",
+      priceInsideZone,
+      zoneLo: round2(zoneLo),
+      zoneHi: round2(zoneHi),
+      zoneMid: round2(zoneMid),
+      buyersAbsorbing: false,
+      sellersRejecting: true,
+      continuationBias: "CAUTION",
+      risk: "FAILED_BREAKOUT_PULLBACK_IF_ZONE_LOST",
+      reasonCodes: [
+        "PRICE_INSIDE_NEGOTIATED_ZONE",
+        "BELOW_EMA10",
+        "STRUCTURE_FAILURE",
+        "NEGOTIATED_ZONE_REJECTION_WARNING",
+      ],
+      negotiatedZoneCount: negotiatedZones.length,
+    };
+  }
+
+  if (
+    hasActiveNegotiated &&
+    priceInsideZone &&
+    w3LongActive &&
+    priceAboveEma10 &&
+    structureUpper !== "FAILURE"
+  ) {
+    return {
+      state: "NEGOTIATED_ZONE_BUYING_ACTIVE",
+      zoneType: "NEGOTIATED",
+      priceInsideZone,
+      zoneLo: round2(zoneLo),
+      zoneHi: round2(zoneHi),
+      zoneMid: round2(zoneMid),
+      buyersAbsorbing: true,
+      sellersRejecting: false,
+      continuationBias: "BULLISH_IF_ZONE_HOLDS",
+      risk: "FAILED_BREAKOUT_IF_ZONE_LOST",
+      reasonCodes: [
+        "PRICE_INSIDE_NEGOTIATED_ZONE",
+        "W3_DIP_BUY_ACTIVE",
+        "PRICE_ABOVE_EMA10",
+        "STRUCTURE_NOT_FAILURE",
+        "NEGOTIATED_ZONE_BUYING_ACTIVE",
+      ],
+      negotiatedZoneCount: negotiatedZones.length,
+    };
+  }
+
+  return {
+    state: "NEGOTIATED_ZONE_DECISION_POINT",
+    zoneType: "NEGOTIATED",
+    priceInsideZone,
+    zoneLo: round2(zoneLo),
+    zoneHi: round2(zoneHi),
+    zoneMid: round2(zoneMid),
+    buyersAbsorbing: false,
+    sellersRejecting: false,
+    continuationBias: "DECISION_POINT",
+    risk: "WAIT_FOR_ABSORPTION_OR_REJECTION",
+    reasonCodes: [
+      "PRICE_INTERACTING_WITH_NEGOTIATED_ZONE",
+      "WAIT_FOR_ABSORPTION_OR_REJECTION",
+    ],
+    negotiatedZoneCount: negotiatedZones.length,
+  };
+}
 function detectW3DipBuyContinuation({
   engine2State,
   engine16,
@@ -2438,7 +2603,9 @@ export function computeEngine22ScalpOpportunity({
   waveReaction = null,
   engine2State = null,
   marketMind = null,
+  engine1Context = null,
 } = {}) {
+  
   const base = {
     ok: true,
     engine: "engine22.scalpOpportunity.v5.2",
@@ -2566,7 +2733,24 @@ supportedSetups: {
     marketMind,
   });
 
-  const finish = (out) => applyTrendVsWaveSafety(out, trendVsWave);
+  const finish = (out) => {
+  const withTrend = applyTrendVsWaveSafety(out, trendVsWave);
+
+  const zoneAbsorption = detectNegotiatedZoneAbsorption({
+    engine1Context,
+    engine22State: withTrend?.state,
+    engine22Setup: withTrend?.setupType,
+    engine22Status: withTrend?.status,
+    latestClose,
+    ema10,
+    structureState,
+  });
+
+  return {
+    ...withTrend,
+    zoneAbsorption,
+  };
+};
 
   if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
     return finish({
