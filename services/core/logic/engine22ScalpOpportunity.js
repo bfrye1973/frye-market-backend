@@ -2165,15 +2165,16 @@ export function computeEngine22ScalpOpportunity({
     strategyId,
     tf,
 
-    supportedSetups: {
-      dipBuyContinuation: true,
-      exhaustionBounceLong: true,
-      exhaustionRejectionShort: true,
-      w2ToW3Long: true,
-      w4ToW5Long: true,
-      correctionAToBLong: true,
-      correctionBToCShort: false,
-    },
+supportedSetups: {
+  dipBuyContinuation: true,
+  w3DipBuyContinuation: true,
+  exhaustionBounceLong: true,
+  exhaustionRejectionShort: true,
+  w2ToW3Long: true,
+  w4ToW5Long: true,
+  correctionAToBLong: true,
+  correctionBToCShort: false,
+}, 
 
     setupType: null,
     type: "NONE",
