@@ -1525,8 +1525,11 @@ async function processStrategy(
             waveReaction: reaction?.waveReaction || null,
             engine2State,
             marketMind,
-          })
-        : null;
+
+           // Engine 1 negotiated-zone truth for Engine 22 zone absorption.
+           engine1Context,
+         })
+       : null;
   return {
     strategyId: s.strategyId,
     lockedSignal, 
