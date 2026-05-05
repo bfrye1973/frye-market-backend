@@ -1,6 +1,6 @@
 // services/core/logic/engine22ScalpOpportunity.js
 // Engine 22 — Scalp Opportunity Engine
-// V5: Minute wave-aware scalp execution
+// V5.2: Minute wave-aware scalp execution + trend-vs-wave safety layer
 //
 // Core rules:
 // - Minute W3 = normal dip-buy scalps allowed
@@ -8,7 +8,13 @@
 // - Minute W2 = blind dip buys blocked
 // - Minute W4 = blind dip buys blocked
 // - W2 complete + W3 trigger = long entry allowed
-// - W4 complete + W5 trigger = long entry allowed
+// - W4 complete + W5 trigger = long entry allowed ONLY when trend-vs-wave confirms W4 safety
+//
+// Trend-vs-wave safety:
+// - Engine 2 wave suggestion alone is NOT confirmation.
+// - Minor W4 suggestion must be checked against Market Meter + EMA trend.
+// - If higher timeframe trend remains strong, Engine 22 should show LATE_W3_CONSOLIDATION,
+//   suppress W4-specific entries, and keep public state Engine17-compatible.
 //
 // Read-only. Does NOT affect Engine 15 / lifecycle / trades directly.
 
@@ -35,6 +41,24 @@ function safeBool(x) {
 function normalizeScore(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : 0;
+}
+
+function firstNumber(...xs) {
+  for (const x of xs) {
+    const n = Number(x);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function boolOrNull(x) {
+  if (x === true) return true;
+  if (x === false) return false;
+  return null;
+}
+
+function upper(x) {
+  return String(x || "").trim().toUpperCase();
 }
 
 function isImpulsePhase(x) {
@@ -463,6 +487,557 @@ function computeMarketBias({ engine2State, engine16, marketMind }) {
   };
 }
 
+// ============================================================
+// Trend-vs-wave safety layer
+// ============================================================
+
+function computePriceAboveDailyEma10({ engine16, marketMind }) {
+  const direct = boolOrNull(engine16?.priceAboveDailyEma10);
+  if (direct !== null) return direct;
+
+  const trendState = upper(
+    engine16?.trendState_daily ??
+    engine16?.trendStateDaily ??
+    engine16?.dailyTrendState ??
+    engine16?.trendState_1d
+  );
+
+  if (["LONG_ONLY", "BULL", "BULLISH", "UP", "GREEN"].includes(trendState)) return true;
+  if (["SHORT_ONLY", "BEAR", "BEARISH", "DOWN", "RED"].includes(trendState)) return false;
+
+  const closeDaily = firstNumber(
+    engine16?.dailyClose,
+    engine16?.closeDaily,
+    engine16?.close1d,
+    engine16?.eodClose,
+    marketMind?.raw?.eod?.daily?.close,
+    marketMind?.raw?.eod?.metrics?.close,
+    marketMind?.raw?.eod?.metrics?.last_close,
+    marketMind?.raw?.eod?.meta?.current_price,
+    marketMind?.raw?.eod?.currentPrice
+  );
+
+  const ema10Daily = firstNumber(
+    engine16?.ema10_daily,
+    engine16?.dailyEma10,
+    engine16?.ema10Daily,
+    engine16?.ema10_1d,
+    engine16?.eodEma10,
+    marketMind?.raw?.eod?.daily?.ema10,
+    marketMind?.raw?.eod?.metrics?.ema10,
+    marketMind?.raw?.eod?.metrics?.ema10_daily
+  );
+
+  if (closeDaily !== null && ema10Daily !== null) {
+    return closeDaily > ema10Daily;
+  }
+
+  return null;
+}
+
+function computePriceAbove4hEma10({ engine16 }) {
+  const direct = boolOrNull(engine16?.priceAbove4hEma10);
+  if (direct !== null) return direct;
+
+  const close4h = firstNumber(
+    engine16?.close4h,
+    engine16?.fourHourClose,
+    engine16?.close_4h
+  );
+
+  const ema10_4h = firstNumber(
+    engine16?.ema10_4h,
+    engine16?.fourHourEma10,
+    engine16?.ema10_4h_value
+  );
+
+  if (close4h !== null && ema10_4h !== null) {
+    return close4h > ema10_4h;
+  }
+
+  const trendState = upper(
+    engine16?.trendState_4h ??
+    engine16?.trendState4h ??
+    engine16?.fourHourTrendState
+  );
+
+  if (["LONG_ONLY", "BULL", "BULLISH", "UP", "GREEN"].includes(trendState)) return true;
+  if (["SHORT_ONLY", "BEAR", "BEARISH", "DOWN", "RED"].includes(trendState)) return false;
+
+  return null;
+}
+
+function computePriceAbove1hEma10({ engine16 }) {
+  const hourlyClose = validPrice(engine16?.hourlyClose);
+  const ema10_1h = validPrice(engine16?.ema10_1h);
+
+  if (hourlyClose !== null && ema10_1h !== null) {
+    return hourlyClose > ema10_1h;
+  }
+
+  const trendState = upper(
+    engine16?.trendState_1h ??
+    engine16?.trendState1h ??
+    engine16?.hourlyTrendState
+  );
+
+  if (["LONG_ONLY", "BULL", "BULLISH", "UP", "GREEN"].includes(trendState)) return true;
+  if (["SHORT_ONLY", "BEAR", "BEARISH", "DOWN", "RED"].includes(trendState)) return false;
+
+  return null;
+}
+
+function computeManualW4Confirmed(engine2State) {
+  return (
+    engine2State?.minute?.confirmedPhase === "IN_W4" ||
+    engine2State?.minute?.lastMark?.key === "W4"
+  );
+}
+
+function getMarketScores(marketMind) {
+  const oneHourScore = firstNumber(
+    marketMind?.score1h,
+    marketMind?.oneHourScore,
+    marketMind?.raw?.hourly?.hourly?.overall1h?.score,
+    marketMind?.raw?.hourly?.metrics?.overall_hourly_score
+  );
+
+  const fourHourScore = firstNumber(
+    marketMind?.score4h,
+    marketMind?.fourHourScore,
+    marketMind?.raw?.h4?.fourHour?.overall4h?.score,
+    marketMind?.raw?.h4?.metrics?.trend_strength_4h_pct
+  );
+
+  const dailyScore = firstNumber(
+    marketMind?.scoreEOD,
+    marketMind?.eodScore,
+    marketMind?.raw?.eod?.daily?.overallEOD?.score,
+    marketMind?.raw?.eod?.metrics?.overall_eod_score
+  );
+
+  const masterScore = firstNumber(
+    marketMind?.scoreMaster,
+    marketMind?.masterScore,
+    marketMind?.overallScore,
+    marketMind?.raw?.master?.score,
+    marketMind?.raw?.eod?.metrics?.masterScore,
+    marketMind?.raw?.eod?.daily?.masterScore
+  );
+
+  return {
+    oneHourScore,
+    fourHourScore,
+    dailyScore,
+    masterScore,
+  };
+}
+
+function computeTrendVsWave({
+  engine2State,
+  engine16,
+  reaction,
+  waveReaction,
+  marketMind,
+}) {
+  const phases = getWavePhases(engine2State);
+  const {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    minutePhase,
+    confirmedMinutePhase,
+  } = phases;
+
+  const wr = waveReaction || reaction?.waveReaction || {};
+  const { oneHourScore, fourHourScore, dailyScore, masterScore } = getMarketScores(marketMind);
+
+  const priceAboveDailyEma10 = computePriceAboveDailyEma10({ engine16, marketMind });
+  const priceAbove4hEma10 = computePriceAbove4hEma10({ engine16 });
+  const priceAbove1hEma10 = computePriceAbove1hEma10({ engine16 });
+
+  const manualW4Confirmed = computeManualW4Confirmed(engine2State);
+
+  const distributionWarning =
+    reaction?.distributionWarning === true ||
+    wr?.distributionWarning === true;
+
+  const momentumFading =
+    reaction?.momentumFading === true ||
+    wr?.momentumFading === true;
+
+  const failedContinuation =
+    reaction?.failedContinuation === true ||
+    wr?.failedContinuation === true;
+
+  const structureState = reaction?.structureState || null;
+
+  const fourHourSupportive = fourHourScore !== null && fourHourScore >= 60;
+  const dailyStrong = dailyScore !== null && dailyScore >= 65;
+  const masterSupportive = masterScore === null || masterScore >= 60;
+
+  const fourHourWeak = fourHourScore !== null && fourHourScore < 50;
+  const oneHourWeak = oneHourScore !== null && oneHourScore < 50;
+
+  const reasonCodes = [];
+
+  if (masterScore === null) reasonCodes.push("MASTER_SCORE_UNAVAILABLE");
+  if (priceAboveDailyEma10 === null) reasonCodes.push("DAILY_EMA10_UNAVAILABLE_W4_NOT_CONFIRMED");
+  if (priceAbove4hEma10 === null) reasonCodes.push("FOUR_HOUR_EMA10_UNAVAILABLE");
+
+  // ------------------------------------------------------------
+  // Case 1:
+  // Engine 2 suggests Minor W4, but higher timeframe trend is still supportive.
+  // This is the original safety issue.
+  // ------------------------------------------------------------
+  if (
+    minorPhase === "IN_W4" &&
+    fourHourSupportive &&
+    dailyStrong &&
+    masterSupportive &&
+    priceAboveDailyEma10 === true
+  ) {
+    return {
+      state: "LATE_W3_CONSOLIDATION",
+      waveSuggestion: "POSSIBLE_W4",
+      trendConfirmation: "W3_STILL_SUPPORTED",
+      marketMeterBias: "BULLISH_SUPPORTIVE",
+      oneHourScore,
+      fourHourScore,
+      dailyScore,
+      masterScore,
+      priceAboveDailyEma10,
+      priceAbove4hEma10,
+      priceAbove1hEma10,
+      trueW4Confirmed: false,
+      suppressW4Entries: true,
+      forceNoBlindShorts: true,
+      minorPhase,
+      minutePhase,
+      confirmedMinutePhase,
+      reasonCodes: [
+        "ENGINE2_POSSIBLE_W4",
+        "FOUR_HOUR_SCORE_SUPPORTIVE",
+        "DAILY_SCORE_STRONG",
+        masterScore === null ? "MASTER_SCORE_UNAVAILABLE" : "MASTER_SCORE_SUPPORTIVE",
+        "DAILY_EMA10_HOLDING",
+        "W4_NOT_CONFIRMED",
+      ],
+    };
+  }
+
+  // ------------------------------------------------------------
+  // Case 2:
+  // Minor W4 is suggested and transition risk is rising, but not confirmed.
+  // 4H EMA loss / weak 4H is warning only unless daily EMA or manual W4 confirms.
+  // ------------------------------------------------------------
+  if (
+    minorPhase === "IN_W4" &&
+    (
+      fourHourWeak ||
+      priceAbove4hEma10 === false
+    ) &&
+    (
+      distributionWarning ||
+      momentumFading ||
+      failedContinuation
+    )
+  ) {
+    return {
+      state: "W4_TRANSITION_WARNING",
+      waveSuggestion: "POSSIBLE_W4",
+      trendConfirmation: "TRANSITION_RISK_RISING_NOT_CONFIRMED",
+      marketMeterBias: "WEAKENING",
+      oneHourScore,
+      fourHourScore,
+      dailyScore,
+      masterScore,
+      priceAboveDailyEma10,
+      priceAbove4hEma10,
+      priceAbove1hEma10,
+      trueW4Confirmed: false,
+      suppressW4Entries: true,
+      forceNoBlindShorts: false,
+      minorPhase,
+      minutePhase,
+      confirmedMinutePhase,
+      reasonCodes: [
+        "ENGINE2_POSSIBLE_W4",
+        fourHourWeak ? "FOUR_HOUR_SCORE_WEAK" : "FOUR_HOUR_SCORE_NOT_WEAK",
+        priceAbove4hEma10 === false ? "FOUR_HOUR_EMA10_LOST" : "FOUR_HOUR_EMA10_NOT_CONFIRMED_LOST",
+        distributionWarning ? "DISTRIBUTION_WARNING" : null,
+        momentumFading ? "MOMENTUM_FADING" : null,
+        failedContinuation ? "FAILED_CONTINUATION" : null,
+        "W4_TRANSITION_WARNING_ONLY",
+        "W4_NOT_CONFIRMED",
+      ].filter(Boolean),
+    };
+  }
+
+  // ------------------------------------------------------------
+  // Case 3:
+  // True W4 confirmation.
+  // Only daily EMA10 loss or manual official W4 mark confirms W4 in this version.
+  // Manual W4 is only considered when Minor phase is already suggesting W4.
+  // This prevents a completed Minute W4 inside Minor W3 from falsely confirming Minor W4.
+  // ------------------------------------------------------------
+  if (
+    minorPhase === "IN_W4" &&
+    (
+      priceAboveDailyEma10 === false ||
+      manualW4Confirmed === true
+    )
+  ) {
+    return {
+      state: "W4_CONFIRMED",
+      waveSuggestion: "CONFIRMED_W4",
+      trendConfirmation: priceAboveDailyEma10 === false
+        ? "DAILY_EMA10_LOST"
+        : "MANUAL_W4_CONFIRMED",
+      marketMeterBias: "CORRECTION_CONFIRMED",
+      oneHourScore,
+      fourHourScore,
+      dailyScore,
+      masterScore,
+      priceAboveDailyEma10,
+      priceAbove4hEma10,
+      priceAbove1hEma10,
+      trueW4Confirmed: true,
+      suppressW4Entries: false,
+      forceNoBlindShorts: false,
+      minorPhase,
+      minutePhase,
+      confirmedMinutePhase,
+      reasonCodes: [
+        "ENGINE2_MINOR_W4",
+        priceAboveDailyEma10 === false ? "DAILY_EMA10_LOST" : null,
+        manualW4Confirmed === true ? "MANUAL_W4_CONFIRMED" : null,
+        "W4_CONFIRMED",
+      ].filter(Boolean),
+    };
+  }
+
+  // ------------------------------------------------------------
+  // Case 4:
+  // Current live condition:
+  // Minor W3 still active + Minute W5 active + higher timeframe still strong,
+  // but 1H / structure is weak.
+  // This is not a W4 confirmation. It is a W3 continuation watch / warning.
+  // ------------------------------------------------------------
+  if (
+    minorPhase === "IN_W3" &&
+    minutePhase === "IN_W5" &&
+    fourHourSupportive &&
+    dailyStrong
+  ) {
+    const shortTermWeak =
+      oneHourWeak ||
+      priceAbove1hEma10 === false ||
+      structureState === "FAILURE";
+
+    return {
+      state: "W3_CONTINUATION_WATCH",
+      waveSuggestion: "MINOR_W3_STILL_ACTIVE",
+      trendConfirmation: shortTermWeak
+        ? "HIGHER_TIMEFRAME_SUPPORTED_BUT_SHORT_TERM_WEAK"
+        : "W3_STILL_SUPPORTED",
+      marketMeterBias: shortTermWeak
+        ? "MIXED_BULLISH_HIGHER_TIMEFRAME"
+        : "BULLISH_SUPPORTIVE",
+      oneHourScore,
+      fourHourScore,
+      dailyScore,
+      masterScore,
+      priceAboveDailyEma10,
+      priceAbove4hEma10,
+      priceAbove1hEma10,
+      trueW4Confirmed: false,
+      suppressW4Entries: false,
+      forceNoBlindShorts: true,
+      minorPhase,
+      minutePhase,
+      confirmedMinutePhase,
+      reasonCodes: [
+        "MINOR_W3_ACTIVE",
+        "MINUTE_W5_ACTIVE",
+        "FOUR_HOUR_SCORE_SUPPORTIVE",
+        "DAILY_SCORE_STRONG",
+        shortTermWeak ? "SHORT_TERM_WEAKNESS_PRESENT" : "SHORT_TERM_STILL_SUPPORTED",
+        oneHourWeak ? "ONE_HOUR_WEAK" : null,
+        priceAbove1hEma10 === false ? "PRICE_BELOW_1H_EMA10" : null,
+        structureState === "FAILURE" ? "SHORT_TERM_STRUCTURE_FAILURE" : null,
+        "W4_NOT_CONFIRMED",
+      ].filter(Boolean),
+    };
+  }
+
+  // ------------------------------------------------------------
+  // Default:
+  // No trend-vs-wave conflict requiring special handling.
+  // ------------------------------------------------------------
+  return {
+    state: "NO_TREND_WAVE_CONFLICT",
+    waveSuggestion:
+      minorPhase === "IN_W4" ? "POSSIBLE_W4" :
+      minorPhase === "IN_W3" ? "MINOR_W3_ACTIVE" :
+      "NONE",
+    trendConfirmation: "NO_SPECIAL_CONFLICT",
+    marketMeterBias: "NEUTRAL_OR_UNCONFIRMED",
+    oneHourScore,
+    fourHourScore,
+    dailyScore,
+    masterScore,
+    priceAboveDailyEma10,
+    priceAbove4hEma10,
+    priceAbove1hEma10,
+    trueW4Confirmed: false,
+    suppressW4Entries: false,
+    forceNoBlindShorts: false,
+    minorPhase,
+    minutePhase,
+    confirmedMinutePhase,
+    reasonCodes: [
+      ...reasonCodes,
+      "NO_TREND_WAVE_CONFLICT",
+    ],
+  };
+}
+
+function applyTrendVsWaveSafety(out, trendVsWave) {
+  if (!out || typeof out !== "object") return out;
+
+  const rawState = upper(out.state || out.type);
+  const w4SpecificEntry =
+    rawState === "A_TO_B_TRIGGER_LONG" ||
+    rawState === "W5_TRIGGER_LONG";
+
+  const forceNoBlindShorts = trendVsWave?.forceNoBlindShorts === true;
+  const suppressW4Entries = trendVsWave?.suppressW4Entries === true;
+
+  let next = {
+    ...out,
+    trendVsWave: trendVsWave || null,
+  };
+
+  if (next.allowShortEntry == null) {
+    next.allowShortEntry = next.allowShort === true;
+  }
+
+  if (forceNoBlindShorts) {
+    next = {
+      ...next,
+      allowShort: false,
+      allowShortEntry: false,
+      marketBias: next.marketBias
+        ? {
+            ...next.marketBias,
+            bias:
+              next.marketBias?.bias === "NEUTRAL"
+                ? "BULLISH_SUPPORTIVE_NO_BLIND_SHORTS"
+                : next.marketBias.bias,
+            blockShorts: true,
+            allowShorts: false,
+            reason:
+              next.marketBias?.reason === "NO_CLEAR_STRUCTURE"
+                ? "TREND_VS_WAVE_BLOCKS_BLIND_SHORTS"
+                : next.marketBias.reason,
+          }
+        : {
+            bias: "BULLISH_SUPPORTIVE_NO_BLIND_SHORTS",
+            blockShorts: true,
+            blockLongs: false,
+            allowLongs: false,
+            allowShorts: false,
+            reason: "TREND_VS_WAVE_BLOCKS_BLIND_SHORTS",
+          },
+    };
+
+    next.reasonCodes = [
+      ...(Array.isArray(next.reasonCodes) ? next.reasonCodes : []),
+      "TREND_VS_WAVE_NO_BLIND_SHORTS",
+    ];
+  }
+
+  if (forceNoBlindShorts && next.status === "ENTRY_SHORT") {
+    next = {
+      ...next,
+      active: true,
+      setupType: "SHORT_BLOCKED_BY_TREND_VS_WAVE",
+      type: "SHORT_BLOCKED_BY_TREND_VS_WAVE",
+      state: "SHORT_BLOCKED_BY_TREND_VS_WAVE",
+      status: "NO_SHORT",
+      readiness: "NO_TRADE",
+      direction: "NONE",
+      side: "SHORT",
+      allowShort: false,
+      allowShortEntry: false,
+      allowLongEntry: false,
+      triggerConfirmed: false,
+      needs: "WAIT_FOR_CONFIRMED_BREAKDOWN",
+      reasonCodes: [
+        ...(Array.isArray(next.reasonCodes) ? next.reasonCodes : []),
+        "SHORT_ENTRY_SUPPRESSED_TREND_STILL_SUPPORTED",
+      ],
+    };
+  }
+
+  if (suppressW4Entries && w4SpecificEntry) {
+    const originalState = rawState;
+
+    next = {
+      ...next,
+
+      // Public state remains Engine17-compatible.
+      type: "W4_ACTIVE_WAIT",
+      state: "W4_ACTIVE_WAIT",
+
+      // Preserve the real ABC signal as detail.
+      abcState: next.abcState || originalState,
+      abcType: next.abcType || next.type || originalState,
+      correctionLeg: next.correctionLeg || next.debug?.correctionLeg || null,
+      nextFocus:
+        next.nextFocus ||
+        next.debug?.nextFocus ||
+        "WAIT_FOR_TRUE_W4_CONFIRMATION_OR_W3_CONTINUATION",
+
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      confidence: Math.min(Number(next.confidence || 0), 40),
+      needs: "WAIT_FOR_TRUE_W4_CONFIRMATION_OR_W3_CONTINUATION",
+
+      reasonCodes: [
+        ...(Array.isArray(next.reasonCodes) ? next.reasonCodes : []),
+        "W4_ENTRY_SUPPRESSED_TREND_NOT_CONFIRMED",
+        "WAIT_FOR_TRUE_W4_CONFIRMATION_OR_W3_CONTINUATION",
+      ],
+    };
+  }
+
+  if (trendVsWave?.state === "LATE_W3_CONSOLIDATION") {
+    next = {
+      ...next,
+      needs:
+        next.needs === "WAIT_FOR_W5_TRIGGER" ||
+        next.needs === "ENTRY_ACTIVE" ||
+        next.needs === "WAIT_FOR_SETUP"
+          ? "WAIT_FOR_TRUE_W4_CONFIRMATION_OR_W3_CONTINUATION"
+          : next.needs,
+      reasonCodes: [
+        ...(Array.isArray(next.reasonCodes) ? next.reasonCodes : []),
+        "POSSIBLE_W4_BUT_TREND_STILL_SUPPORTED",
+      ],
+    };
+  }
+
+  return next;
+}
+
 function logEntryIfNeeded({
   symbol,
   strategyId,
@@ -563,7 +1138,6 @@ function detectCorrectionToImpulseLong({
     intermediatePhase,
     minorPhase,
     minutePhase,
-    confirmedMinutePhase,
   } = phases;
 
   const bullishHigherWaveContext = isBullishHigherWaveContext({
@@ -685,6 +1259,7 @@ function detectCorrectionToImpulseLong({
       side: "LONG",
       allowLongEntry: true,
       allowShort: false,
+      allowShortEntry: false,
       triggerConfirmed: true,
       triggerType: "BREAK_ABOVE_B_HIGH_OR_LOWER_HIGH",
       triggerLevel: round2(triggerLevel),
@@ -734,6 +1309,7 @@ function detectCorrectionToImpulseLong({
       side: "LONG",
       allowLongEntry: false,
       allowShort: false,
+      allowShortEntry: false,
       triggerConfirmed: false,
       triggerType: "WAIT_BREAK_ABOVE_B_HIGH_OR_LOWER_HIGH",
       triggerLevel: round2(triggerLevel),
@@ -783,6 +1359,7 @@ function detectCorrectionToImpulseLong({
     side: "NONE",
     allowLongEntry: false,
     allowShort: false,
+    allowShortEntry: false,
     triggerConfirmed: false,
     triggerType: `WAIT_${nextImpulse}_CONFIRMATION`,
     triggerLevel: round2(triggerLevel),
@@ -834,6 +1411,7 @@ function toCorrectionReturn(base, detection) {
     side: detection.side || "NONE",
     allowLongEntry: detection.allowLongEntry === true,
     allowShort: detection.allowShort === true,
+    allowShortEntry: detection.allowShort === true,
     triggerConfirmed: detection.triggerConfirmed === true,
     triggerType: detection.triggerType || null,
     entryTriggerLevel: detection.triggerLevel ?? null,
@@ -853,11 +1431,11 @@ function toCorrectionReturn(base, detection) {
     nextFocus: detection.nextFocus || detection.debug?.nextFocus || null,
     abcLevels: detection.abcLevels || null,
 
-    
     reasonCodes: Array.isArray(detection.reasonCodes) ? detection.reasonCodes : [],
     debug: detection.debug || {},
   };
 }
+
 function getMinuteABCLevels(engine2State) {
   const minute = engine2State?.minute || {};
 
@@ -897,7 +1475,6 @@ function detectMinuteW4ABC({
     intermediatePhase,
     minorPhase,
     minutePhase,
-    confirmedMinutePhase,
   } = phases;
 
   const bullishFinalContext = isBullishFinalImpulseContext({
@@ -1000,6 +1577,7 @@ function detectMinuteW4ABC({
       side: "NONE",
       allowLongEntry: false,
       allowShort: false,
+      allowShortEntry: false,
       triggerConfirmed: false,
       triggerType: "WAIT_FOR_A_LOW",
       triggerLevel: null,
@@ -1062,6 +1640,7 @@ function detectMinuteW4ABC({
         side: "LONG",
         allowLongEntry: true,
         allowShort: false,
+        allowShortEntry: false,
         triggerConfirmed: true,
         triggerType: aboveEma20
           ? "A_LOW_HELD_EMA10_RECLAIM_ABOVE_EMA20"
@@ -1114,6 +1693,7 @@ function detectMinuteW4ABC({
         side: "LONG",
         allowLongEntry: false,
         allowShort: false,
+        allowShortEntry: false,
         triggerConfirmed: false,
         triggerType: "WAIT_ABOVE_EMA20_OR_CONTINUATION_WATCH",
         triggerLevel: round2(e20 ?? e10),
@@ -1161,6 +1741,7 @@ function detectMinuteW4ABC({
       side: "NONE",
       allowLongEntry: false,
       allowShort: false,
+      allowShortEntry: false,
       triggerConfirmed: false,
       triggerType: "WAIT_FOR_B_BOUNCE",
       triggerLevel: round2(e10),
@@ -1217,6 +1798,7 @@ function detectMinuteW4ABC({
         side: "NONE",
         allowLongEntry: false,
         allowShort: false,
+        allowShortEntry: false,
         triggerConfirmed: false,
         triggerType: "B_HIGH_REJECTION_EMA_LOSS",
         triggerLevel: round2(bHigh),
@@ -1265,6 +1847,7 @@ function detectMinuteW4ABC({
       side: "NONE",
       allowLongEntry: false,
       allowShort: false,
+      allowShortEntry: false,
       triggerConfirmed: false,
       triggerType: "WAIT_FOR_C_LEG",
       triggerLevel: round2(bHigh),
@@ -1305,12 +1888,12 @@ function detectMinuteW4ABC({
   // Watch for W5 long trigger.
   // ============================================================
   if (hasALow && hasBHigh && hasCLow) {
-    const cLowHeld =
+    const cLowHeldNow =
       close !== null &&
       close >= cLow * 0.995;
 
     const w5Ready =
-      cLowHeld &&
+      cLowHeldNow &&
       reclaimedEma10 &&
       aboveEma20;
 
@@ -1330,6 +1913,7 @@ function detectMinuteW4ABC({
         side: "LONG",
         allowLongEntry: true,
         allowShort: false,
+        allowShortEntry: false,
         triggerConfirmed: true,
         triggerType: "BREAK_ABOVE_B_HIGH",
         triggerLevel: round2(bHigh),
@@ -1358,7 +1942,7 @@ function detectMinuteW4ABC({
           ema10: e10,
           ema20: e20,
           prevClose,
-          cLowHeld,
+          cLowHeld: cLowHeldNow,
           reclaimedEma10,
           aboveEma20,
           brokeBHigh,
@@ -1380,6 +1964,7 @@ function detectMinuteW4ABC({
         side: "LONG",
         allowLongEntry: false,
         allowShort: false,
+        allowShortEntry: false,
         triggerConfirmed: false,
         triggerType: "WAIT_BREAK_ABOVE_B_HIGH",
         triggerLevel: round2(bHigh),
@@ -1407,7 +1992,7 @@ function detectMinuteW4ABC({
           ema10: e10,
           ema20: e20,
           prevClose,
-          cLowHeld,
+          cLowHeld: cLowHeldNow,
           reclaimedEma10,
           aboveEma20,
           brokeBHigh,
@@ -1428,6 +2013,7 @@ function detectMinuteW4ABC({
       side: "NONE",
       allowLongEntry: false,
       allowShort: false,
+      allowShortEntry: false,
       triggerConfirmed: false,
       triggerType: "WAIT_W5_TRIGGER",
       triggerLevel: round2(bHigh),
@@ -1452,7 +2038,7 @@ function detectMinuteW4ABC({
         ema10: e10,
         ema20: e20,
         prevClose,
-        cLowHeld,
+        cLowHeld: cLowHeldNow,
         reclaimedEma10,
         aboveEma20,
         brokeBHigh,
@@ -1473,6 +2059,7 @@ function detectMinuteW4ABC({
     side: "NONE",
     allowLongEntry: false,
     allowShort: false,
+    allowShortEntry: false,
     triggerConfirmed: false,
     triggerType: "WAIT_W4_STRUCTURE",
     triggerLevel: null,
@@ -1571,7 +2158,7 @@ export function computeEngine22ScalpOpportunity({
 } = {}) {
   const base = {
     ok: true,
-    engine: "engine22.scalpOpportunity.v5.1",
+    engine: "engine22.scalpOpportunity.v5.2",
     active: false,
     mode: "OBSERVATION_ONLY",
     symbol,
@@ -1598,6 +2185,7 @@ export function computeEngine22ScalpOpportunity({
 
     allowLongEntry: false,
     allowShort: false,
+    allowShortEntry: false,
     triggerConfirmed: false,
     triggerType: null,
 
@@ -1615,6 +2203,7 @@ export function computeEngine22ScalpOpportunity({
     needs: "WAIT_FOR_SETUP",
 
     marketBias: null,
+    trendVsWave: null,
     quality: null,
     risk: null,
     management: null,
@@ -1643,7 +2232,6 @@ export function computeEngine22ScalpOpportunity({
     intermediatePhase,
     minorPhase,
     minutePhase,
-    confirmedMinutePhase,
   } = phases;
 
   const finalImpulseContext = isBullishFinalImpulseContext({
@@ -1683,8 +2271,21 @@ export function computeEngine22ScalpOpportunity({
     waveReaction: wr,
   } = getReactionInputs(reaction, waveReaction);
 
+  const trendVsWave = computeTrendVsWave({
+    engine2State,
+    engine16,
+    reaction: {
+      ...(reaction || {}),
+      structureState,
+    },
+    waveReaction: wr,
+    marketMind,
+  });
+
+  const finish = (out) => applyTrendVsWaveSafety(out, trendVsWave);
+
   if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
-    return {
+    return finish({
       ...base,
       marketBias,
       reasonCodes: ["NO_PRICE_AVAILABLE"],
@@ -1701,8 +2302,8 @@ export function computeEngine22ScalpOpportunity({
         structureState,
         hasWaveReaction: !!wr,
       },
-    };
-  } 
+    });
+  }
 
   // ============================================================
   // PHASE 1 + PHASE 2:
@@ -1724,7 +2325,9 @@ export function computeEngine22ScalpOpportunity({
       ema20,
     });
 
-    if (w2ToW3Long?.status === "ENTRY_LONG") {
+    const out = finish(toCorrectionReturn(base, w2ToW3Long));
+
+    if (out?.status === "ENTRY_LONG") {
       logEntryIfNeeded({
         symbol,
         strategyId,
@@ -1733,16 +2336,16 @@ export function computeEngine22ScalpOpportunity({
         status: "ENTRY_LONG",
         direction: "LONG",
         price: latestClose,
-        confidence: w2ToW3Long.confidence || 88,
+        confidence: out.confidence || 88,
         targetMove: base.targetMove,
-        invalidationLevel: w2ToW3Long.stopLevel ?? null,
+        invalidationLevel: out.invalidationLevel ?? null,
       });
     }
 
-    return toCorrectionReturn(base, w2ToW3Long);
+    return out;
   }
 
-   if (minutePhase === "IN_W4") {
+  if (minutePhase === "IN_W4") {
     const minuteW4ABCRaw = detectMinuteW4ABC({
       engine2State,
       engine16,
@@ -1753,23 +2356,24 @@ export function computeEngine22ScalpOpportunity({
     });
 
     const minuteW4ABC = normalizeW4ABCForEngine17(minuteW4ABCRaw);
+    const out = finish(toCorrectionReturn(base, minuteW4ABC));
 
-    if (minuteW4ABC?.status === "ENTRY_LONG") {
+    if (out?.status === "ENTRY_LONG") {
       logEntryIfNeeded({
         symbol,
         strategyId,
         tf,
-        type: minuteW4ABC.abcType || minuteW4ABC.type || minuteW4ABC.setupType || "MINUTE_W4_ABC_LONG",
+        type: out.abcType || out.type || out.setupType || "MINUTE_W4_ABC_LONG",
         status: "ENTRY_LONG",
         direction: "LONG",
         price: latestClose,
-        confidence: minuteW4ABC.confidence || 68,
+        confidence: out.confidence || 68,
         targetMove: base.targetMove,
-        invalidationLevel: minuteW4ABC.stopLevel ?? null,
+        invalidationLevel: out.invalidationLevel ?? null,
       });
     }
 
-    return toCorrectionReturn(base, minuteW4ABC);
+    return out;
   }
 
   // ============================================================
@@ -1792,7 +2396,7 @@ export function computeEngine22ScalpOpportunity({
     const reclaimed = ema10 !== null && latestClose > ema10;
 
     if (pulledBack && !reclaimed) {
-      return {
+      return finish({
         ...base,
         active: true,
         setupType: "DIP_BUY_CONTINUATION",
@@ -1804,6 +2408,7 @@ export function computeEngine22ScalpOpportunity({
         side: "LONG",
         allowLongEntry: false,
         allowShort: false,
+        allowShortEntry: false,
         marketBias,
         needs: "WAIT_FOR_EMA10_RECLAIM_OR_CONTINUATION_TRIGGER",
         reasonCodes: [
@@ -1825,7 +2430,7 @@ export function computeEngine22ScalpOpportunity({
           finalImpulseContext,
           bullishHigherWaveContext,
         },
-      };
+      });
     }
 
     if (continuationTriggerLong) {
@@ -1834,20 +2439,7 @@ export function computeEngine22ScalpOpportunity({
         minutePhase === "IN_W5" ? 72 :
         70;
 
-      logEntryIfNeeded({
-        symbol,
-        strategyId,
-        tf,
-        type: "DIP_BUY_CONTINUATION",
-        status: "ENTRY_LONG",
-        direction: "LONG",
-        price: latestClose,
-        confidence,
-        targetMove: base.targetMove,
-        invalidationLevel: ema20,
-      });
-
-      return {
+      const out = finish({
         ...base,
         active: true,
         setupType: "DIP_BUY_CONTINUATION",
@@ -1859,6 +2451,7 @@ export function computeEngine22ScalpOpportunity({
         side: "LONG",
         allowLongEntry: true,
         allowShort: false,
+        allowShortEntry: false,
         triggerConfirmed: true,
         triggerType: "CONTINUATION_TRIGGER_LONG",
         marketBias,
@@ -1884,7 +2477,24 @@ export function computeEngine22ScalpOpportunity({
           finalImpulseContext,
           bullishHigherWaveContext,
         },
-      };
+      });
+
+      if (out?.status === "ENTRY_LONG") {
+        logEntryIfNeeded({
+          symbol,
+          strategyId,
+          tf,
+          type: "DIP_BUY_CONTINUATION",
+          status: "ENTRY_LONG",
+          direction: "LONG",
+          price: latestClose,
+          confidence: out.confidence || confidence,
+          targetMove: base.targetMove,
+          invalidationLevel: ema20,
+        });
+      }
+
+      return out;
     }
   }
 
@@ -1897,7 +2507,7 @@ export function computeEngine22ScalpOpportunity({
     const holdsLow = latestClose >= exhaustionPrice;
 
     if (!holdsLow) {
-      return {
+      return finish({
         ...base,
         marketBias,
         reasonCodes: ["LONG_EXHAUSTION_LOW_FAILED"],
@@ -1911,7 +2521,7 @@ export function computeEngine22ScalpOpportunity({
           reactionScore,
           structureState,
         },
-      };
+      });
     }
 
     const quality = gradeReactionQuality({ side, reactionScore, waveReaction: wr });
@@ -1938,20 +2548,7 @@ export function computeEngine22ScalpOpportunity({
       )
     );
 
-    logEntryIfNeeded({
-      symbol,
-      strategyId,
-      tf,
-      type: "EXHAUSTION_BOUNCE_LONG",
-      status,
-      direction: "LONG",
-      price: latestClose,
-      confidence,
-      targetMove: base.targetMove,
-      invalidationLevel: exhaustionPrice,
-    });
-
-    return {
+    const out = finish({
       ...base,
       active: true,
       setupType: "EXHAUSTION_BOUNCE_LONG",
@@ -1963,6 +2560,7 @@ export function computeEngine22ScalpOpportunity({
       side,
       allowLongEntry: status === "ENTRY_LONG",
       allowShort: false,
+      allowShortEntry: false,
       marketBias,
 
       stop: "below exhaustion low",
@@ -2018,13 +2616,31 @@ export function computeEngine22ScalpOpportunity({
         engine3ReasonCodes,
         holdsLow,
       },
-    };
+    });
+
+    if (out?.status === "ENTRY_LONG") {
+      logEntryIfNeeded({
+        symbol,
+        strategyId,
+        tf,
+        type: "EXHAUSTION_BOUNCE_LONG",
+        status: "ENTRY_LONG",
+        direction: "LONG",
+        price: latestClose,
+        confidence: out.confidence || confidence,
+        targetMove: base.targetMove,
+        invalidationLevel: exhaustionPrice,
+      });
+    }
+
+    return out;
   }
 
   // ============================================================
   // SHORT: exhaustion rejection from high
   //
   // Shorts are blocked by default during bullish final impulse context.
+  // Trend-vs-wave can also block shorts while higher timeframe support remains strong.
   // ============================================================
 
   if (exhaustionTriggerShort && exhaustionPrice !== null) {
@@ -2032,7 +2648,7 @@ export function computeEngine22ScalpOpportunity({
     const failsHigh = latestClose <= exhaustionPrice;
 
     if (!failsHigh) {
-      return {
+      return finish({
         ...base,
         marketBias,
         reasonCodes: ["SHORT_EXHAUSTION_HIGH_FAILED"],
@@ -2046,11 +2662,11 @@ export function computeEngine22ScalpOpportunity({
           reactionScore,
           structureState,
         },
-      };
+      });
     }
 
     if (marketBias?.blockShorts === true || finalImpulseContext) {
-      return {
+      return finish({
         ...base,
         active: true,
         setupType: "SHORT_BLOCKED_BY_MARKET_BIAS",
@@ -2062,6 +2678,7 @@ export function computeEngine22ScalpOpportunity({
         side: "SHORT",
         allowLongEntry: false,
         allowShort: false,
+        allowShortEntry: false,
         marketBias,
         reasonCodes: [
           "SHORT_EXHAUSTION_TRIGGERED",
@@ -2079,7 +2696,7 @@ export function computeEngine22ScalpOpportunity({
           reactionScore,
           structureState,
         },
-      };
+      });
     }
 
     const quality = gradeReactionQuality({ side, reactionScore, waveReaction: wr });
@@ -2106,20 +2723,7 @@ export function computeEngine22ScalpOpportunity({
       )
     );
 
-    logEntryIfNeeded({
-      symbol,
-      strategyId,
-      tf,
-      type: "EXHAUSTION_REJECTION_SHORT",
-      status,
-      direction: "SHORT",
-      price: latestClose,
-      confidence,
-      targetMove: base.targetMove,
-      invalidationLevel: exhaustionPrice,
-    });
-
-    return {
+    const out = finish({
       ...base,
       active: true,
       setupType: "EXHAUSTION_REJECTION_SHORT",
@@ -2131,6 +2735,7 @@ export function computeEngine22ScalpOpportunity({
       side,
       allowLongEntry: false,
       allowShort: status === "ENTRY_SHORT",
+      allowShortEntry: status === "ENTRY_SHORT",
       marketBias,
 
       stop: "above exhaustion high",
@@ -2186,10 +2791,27 @@ export function computeEngine22ScalpOpportunity({
         engine3ReasonCodes,
         failsHigh,
       },
-    };
+    });
+
+    if (out?.status === "ENTRY_SHORT") {
+      logEntryIfNeeded({
+        symbol,
+        strategyId,
+        tf,
+        type: "EXHAUSTION_REJECTION_SHORT",
+        status: "ENTRY_SHORT",
+        direction: "SHORT",
+        price: latestClose,
+        confidence: out.confidence || confidence,
+        targetMove: base.targetMove,
+        invalidationLevel: exhaustionPrice,
+      });
+    }
+
+    return out;
   }
 
-  return {
+  return finish({
     ...base,
     marketBias,
     reasonCodes: ["NO_ENGINE22_SCALP_SETUP"],
@@ -2210,7 +2832,7 @@ export function computeEngine22ScalpOpportunity({
       finalImpulseContext,
       bullishHigherWaveContext,
     },
-  };
+  });
 }
 
 export default computeEngine22ScalpOpportunity;
