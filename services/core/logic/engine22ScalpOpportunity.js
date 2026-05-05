@@ -2184,11 +2184,15 @@ function detectW3DipBuyContinuation({
     Number(trendVsWave?.fourHourScore) >= 60 &&
     Number(trendVsWave?.dailyScore) >= 65;
 
-  const wave3Context =
-    minorPhase === "IN_W3" &&
-    (minutePhase === "IN_W3" || minutePhase === "IN_W5") &&
-    isImpulsePhase(primaryPhase) &&
-    isImpulsePhase(intermediatePhase);
+  const higherWaveOk =
+    isImpulsePhase(intermediatePhase) ||
+    isImpulsePhase(primaryPhase) ||
+    primaryPhase === "UNKNOWN";
+
+   const wave3Context =
+     minorPhase === "IN_W3" &&
+     (minutePhase === "IN_W3" || minutePhase === "IN_W5") &&
+     higherWaveOk;
 
   if (!higherTfSupported || !wave3Context) {
     return {
