@@ -731,6 +731,42 @@ def main():
         above200=bool(above200),
     )
 
+    # --- TIMING / LOCATION PENALTY ---
+    # Strong trend can still be bad timing if price is sitting at the 10 EMA
+    # or momentum is cooling during a pullback.
+    timing_penalty = 0.0
+    timing_reasons = []
+
+    ema10_distance_abs = abs(float(close_dist_pct))
+
+    if ema10_distance_abs <= 0.30:
+        timing_penalty += 8.0
+        timing_reasons.append("NEAR_4H_EMA10_DECISION_ZONE")
+
+    if close_dist_pct < 0:
+        timing_penalty += 4.0
+        timing_reasons.append("PRICE_BELOW_4H_EMA10")
+
+    if smi_series and sig_series and smi_val < sig_val:
+        timing_penalty += 6.0
+        timing_reasons.append("SMI_4H_MOMENTUM_COOLING")
+
+    # If market is still above 20/50 EMA, do not over-punish.
+    if above20 and above50:
+        timing_penalty = min(timing_penalty, 14.0)
+
+    score = clamp(float(score) - timing_penalty, 0.0, 100.0)
+
+    if score >= 60.0 and ema_sign > 0:
+        state = "bull"
+    elif score < 49.0 and ema_sign < 0:
+        state = "bear"
+    else:
+        state = "neutral"
+
+    comps["timingPenalty"] = round(-timing_penalty, 2)
+    comps["timingReasons"] = timing_reasons
+    
     updated_utc = now_utc_iso()
 
     metrics = {
