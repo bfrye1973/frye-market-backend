@@ -1,1877 +1,2838 @@
-// services/core/jobs/buildStrategySnapshot.js
-// Stable snapshot builder (SPY only)
+// services/core/logic/engine22ScalpOpportunity.js
+// Engine 22 — Scalp Opportunity Engine
+// V5.2: Minute wave-aware scalp execution + trend-vs-wave safety layer
 //
-// Phase 4 / Conscious Brain wiring:
-// - computes shared market regime from LIVE Market Meter endpoints
-// - passes market regime into Engine 16 directly
-// - passes market regime into Engine 6 permission body
-// - keeps old engine15 + engine15Decision flow intact
+// Core rules:
+// - Minute W3 = normal dip-buy scalps allowed
+// - Minute W5 = normal dip-buy scalps allowed
+// - Minute W2 = blind dip buys blocked
+// - Minute W4 = blind dip buys blocked
+// - W2 complete + W3 trigger = long entry allowed
+// - W4 complete + W5 trigger = long entry allowed ONLY when trend-vs-wave confirms W4 safety
 //
-// IMPORTANT:
-// - MASTER is display only and NOT used for regime
-// - direction comes from 30m + 1h
-// - strictness comes from 4h + EOD
+// Trend-vs-wave safety:
+// - Engine 2 wave suggestion alone is NOT confirmation.
+// - Minor W4 suggestion must be checked against Market Meter + EMA trend.
+// - If higher timeframe trend remains strong, Engine 22 should show LATE_W3_CONSOLIDATION,
+//   suppress W4-specific entries, and keep public state Engine17-compatible.
 //
-// PERFORMANCE / CORRECTNESS FIX:
-// - Engine 16 is only computed for intraday_scalp@10m
-// - minor_swing@1h and intermediate_long@4h get placeholder objects
-// - avoids fake 1h/4h fallback-to-30m Engine 16 usage
-//
-// NEW:
-// - skipped Engine 16 objects can now carry Engine 2 phase context
-// - this lets Intermediate Swing move WAIT -> PREP when Engine 2 reaches IN_C
+// Read-only. Does NOT affect Engine 15 / lifecycle / trades directly.
 
-import fs from "fs";
-import { computeConfluenceScore } from "../logic/confluenceScorer.js";
-import computeEngine15Readiness from "../logic/engine15StrategyReadiness.js";
-import { computeEngine15DecisionReferee } from "../logic/engine15DecisionReferee.js";
-import { computeMorningFib } from "../logic/engine16MorningFib.js";
-import { computeMarketRegime } from "../logic/marketRegime.js";
-import { updateSignalLock } from "../logic/signalLockStore.js";
-import { getExecutionState } from "../logic/execution/executionStateService.js";
-import { computeEngine22ScalpOpportunity } from "../logic/engine22ScalpOpportunity.js";
-
-/* -----------------------------
-   Absolute paths / constants
-------------------------------*/
-const DATA_DIR = "/opt/render/project/src/services/core/data";
-const SNAPSHOT_FILE = `${DATA_DIR}/strategy-snapshot.json`;
-const FIB_INPUT_FILE = `${DATA_DIR}/fib-input.csv`;
-
-const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
-
-const symbol = "SPY";
-
-const STRATEGIES = [
-  { strategyId: "intraday_scalp@10m", tf: "10m", degree: "minute", wave: "W1" },
-  { strategyId: "minor_swing@1h", tf: "1h", degree: "minor", wave: "W1" },
-  { strategyId: "intermediate_long@4h", tf: "4h", degree: "intermediate", wave: "W1" },
-];
-
-const ENGINE2_MAP = {
-  intraday_scalp: { degree: "minor", tf: "1h" },
-  minor_swing: { degree: "intermediate", tf: "1h" },
-  intermediate_long: { degree: "primary", tf: "1d" },
-};
-
-function nowIso() {
-  return new Date().toISOString();
-}
+import { logEngine22Alert } from "./engine22AlertLogger.js";
 
 function toNum(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
 }
 
-/* -----------------------------
-   Safe HTTP helpers
-------------------------------*/
-async function fetchJson(url, timeoutMs = 30000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+function validPrice(x) {
+  const n = toNum(x);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      signal: controller.signal,
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
+function round2(x) {
+  return Number.isFinite(x) ? Math.round(x * 100) / 100 : null;
+}
 
-    const text = await res.text();
+function safeBool(x) {
+  return x === true;
+}
 
-    try {
-      const json = JSON.parse(text);
-      return { ok: res.ok, status: res.status, json, text };
-    } catch {
-      return { ok: false, status: res.status, json: null, text };
-    }
-  } catch (err) {
-    return {
-      ok: false,
-      status: 0,
-      json: null,
-      text: String(err?.message || err),
-    };
-  } finally {
-    clearTimeout(timer);
+function normalizeScore(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function firstNumber(...xs) {
+  for (const x of xs) {
+    const n = Number(x);
+    if (Number.isFinite(n)) return n;
   }
+  return null;
 }
 
-async function postJson(url, body, timeoutMs = 30000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(body),
-      cache: "no-store",
-    });
-
-    const text = await res.text();
-
-    try {
-      const json = JSON.parse(text);
-      return { ok: res.ok, status: res.status, json, text };
-    } catch {
-      return { ok: false, status: res.status, json: null, text };
-    }
-  } catch (err) {
-    return {
-      ok: false,
-      status: 0,
-      json: null,
-      text: String(err?.message || err),
-    };
-  } finally {
-    clearTimeout(timer);
-  }
+function boolOrNull(x) {
+  if (x === true) return true;
+  if (x === false) return false;
+  return null;
 }
 
-/* -----------------------------
-   Live Market Meter (authoritative)
-------------------------------*/
-async function fetchLiveMarketMeter() {
-  const [intraday, m30, hourly, h4, eod] = await Promise.all([
-    fetchJson(`${CORE_BASE}/live/intraday`, 15000),
-    fetchJson(`${CORE_BASE}/live/30m`, 15000),
-    fetchJson(`${CORE_BASE}/live/hourly`, 15000),
-    fetchJson(`${CORE_BASE}/live/4h`, 15000),
-    fetchJson(`${CORE_BASE}/live/eod`, 15000),
-  ]);
-
-  const intradayJ = intraday?.json || {};
-  const m30J = m30?.json || {};
-  const hourlyJ = hourly?.json || {};
-  const h4J = h4?.json || {};
-  const eodJ = eod?.json || {};
-
-  return {
-    score10m:
-      toNum(intradayJ?.metrics?.overall_intraday_score) ??
-      toNum(intradayJ?.intraday?.overall10m?.score) ??
-      toNum(intradayJ?.engineLights?.["10m"]?.score),
-    state10m:
-      intradayJ?.metrics?.overall_intraday_state ??
-      intradayJ?.intraday?.overall10m?.state ??
-      intradayJ?.engineLights?.["10m"]?.state ??
-      null,
-
-    score30m:
-      toNum(m30J?.metrics?.overall_30m_score) ??
-      toNum(m30J?.thirtyMin?.overall30m?.score),
-    state30m:
-      m30J?.metrics?.overall_30m_state ??
-      m30J?.thirtyMin?.overall30m?.state ??
-      null,
-
-    score1h:
-      toNum(hourlyJ?.metrics?.overall_hourly_score) ??
-      toNum(hourlyJ?.hourly?.overall1h?.score),
-    state1h:
-      hourlyJ?.metrics?.overall_hourly_state ??
-      hourlyJ?.hourly?.overall1h?.state ??
-      null,
-
-    score4h:
-      toNum(h4J?.metrics?.trend_strength_4h_pct) ??
-      toNum(h4J?.fourHour?.overall4h?.score),
-    state4h:
-      h4J?.fourHour?.overall4h?.state ?? null,
-
-    scoreEOD:
-      toNum(eodJ?.metrics?.overall_eod_score) ??
-      toNum(eodJ?.daily?.overallEOD?.score),
-    stateEOD:
-      eodJ?.metrics?.overall_eod_state ??
-      eodJ?.daily?.overallEOD?.state ??
-      null,
-
-    raw: {
-      intraday: intradayJ,
-      m30: m30J,
-      hourly: hourlyJ,
-      h4: h4J,
-      eod: eodJ,
-    },
-
-    _src: "LIVE_10M_30M_1H_4H_EOD",
-  };
+function upper(x) {
+  return String(x || "").trim().toUpperCase();
 }
 
-/* -----------------------------
-   Momentum
-------------------------------*/
-function fallbackMomentum(sym) {
-  return {
-    ok: false,
-    symbol: sym,
-    smi10m: { k: null, d: null, direction: "UNKNOWN", cross: "NONE" },
-    smi1h: { k: null, d: null, direction: "UNKNOWN", cross: "NONE" },
-    alignment: "MIXED",
-    compression: { active: false, bars: 0, width: 0 },
-    momentumState: "UNKNOWN",
-  };
+function isImpulsePhase(x) {
+  return x === "IN_W3" || x === "IN_W5";
 }
 
-async function fetchMomentumContext(sym) {
-  const r = await fetchJson(`${CORE_BASE}/api/v1/momentum-context?symbol=${sym}`, 15000);
-  return r?.json || fallbackMomentum(sym);
+function isCorrectionPhase(x) {
+  return x === "IN_W2" || x === "IN_W4";
 }
 
-function fallbackEngine21Alignment(tf) {
-  return {
-    ok: false,
-    tf,
-    alignmentState: "NO_ALIGNMENT",
-    alignmentScore: 0,
-    bullishAligned: false,
-    bearishAligned: false,
-    bullishScore: 0,
-    bearishScore: 0,
-    components: {},
-    updatedAt: null,
-    error: "ENGINE21_UNAVAILABLE",
-  };
-}
-
-async function fetchEngine21Alignment(tf) {
-  const r = await fetchJson(
-    `${CORE_BASE}/api/v1/engine21-alignment?tf=${encodeURIComponent(tf)}`,
-    15000
+function getMinutePhase(engine2State) {
+  // Engine 2 confirmed:
+  // Use minute.phase first.
+  // Then minutePhase.
+  // Do NOT fallback to minorPhase for minute decisions.
+  return (
+    engine2State?.minute?.phase ||
+    engine2State?.minutePhase ||
+    "UNKNOWN"
   );
-
-  if (r?.ok && r?.json && typeof r.json === "object") {
-    return r.json;
-  }
-
-  return fallbackEngine21Alignment(tf);
 }
 
-/* -----------------------------
-   Engine 16
-------------------------------*/
-function fallbackEngine16(sym, tf = "30m", marketRegime = null) {
+function getWavePhases(engine2State) {
   return {
-    ok: false,
-    symbol: sym,
-    date: null,
-    timeframe: tf,
-    context: "NONE",
-    marketRegime: marketRegime || null,
-    anchors: {
-      premarketLow: null,
-      premarketHigh: null,
-      sessionHigh: null,
-      sessionLow: null,
-      anchorA: null,
-      anchorB: null,
-    },
-    fib: {
-      r382: null,
-      r500: null,
-      r618: null,
-      r786: null,
-    },
-    pullbackZone: { lo: null, hi: null },
-    secondaryZone: { lo: null, hi: null },
-    state: "NO_IMPULSE",
-    insidePrimaryZone: false,
-    insideSecondaryZone: false,
-    invalidated: false,
-    wickRejectionLong: false,
-    wickRejectionShort: false,
-    hasPulledBack: false,
-    breakoutReady: false,
-    breakdownReady: false,
-    strategyType: "NONE",
-    readinessLabel: "NO_SETUP",
-    exhaustionDetected: false,
-    exhaustionShort: false,
-    exhaustionLong: false,
-    exhaustionActive: false,
-    exhaustionBarTime: null,
-    exhaustionBarPrice: null,
-    meta: {
-      marketTz: "America/New_York",
-      impulseWindowMinutes: 90,
-      atrPeriod: 14,
-      atrMultiple: 1.2,
-    },
-    error: "ENGINE16_UNAVAILABLE",
+    primaryPhase:
+      engine2State?.primaryPhase ||
+      engine2State?.primary?.phase ||
+      "UNKNOWN",
+
+    intermediatePhase:
+      engine2State?.intermediatePhase ||
+      engine2State?.intermediate?.phase ||
+      "UNKNOWN",
+
+    minorPhase:
+      engine2State?.minorPhase ||
+      engine2State?.minor?.phase ||
+      "UNKNOWN",
+
+    minutePhase: getMinutePhase(engine2State),
+
+    confirmedMinutePhase:
+      engine2State?.minute?.confirmedPhase ||
+      "UNKNOWN",
   };
 }
 
-function buildSkippedWaveContext(engine2Context = null) {
-  const primaryPhase = engine2Context?.primary?.phase ?? "UNKNOWN";
-  const intermediatePhase = engine2Context?.intermediate?.phase ?? "UNKNOWN";
-  const minorPhase = engine2Context?.minor?.phase ?? "UNKNOWN";
-  const intermediateWaveMode = engine2Context?.intermediate?.waveMode ?? null;
-  const correctionDirection = engine2Context?.intermediate?.correctionDirection ?? null;
+function isBullishFinalImpulseContext({ primaryPhase, intermediatePhase, minorPhase }) {
+  return (
+    primaryPhase === "IN_W5" &&
+    intermediatePhase === "IN_W5" &&
+    minorPhase === "IN_W5"
+  );
+}
 
-  let macroBias = "NONE";
-  let waveState = "UNKNOWN";
-  let wavePrep = false;
-  let intermediateReadyForWave3 = false;
+function isBullishHigherWaveContext({ primaryPhase, intermediatePhase, minorPhase }) {
+  return (
+    isImpulsePhase(primaryPhase) &&
+    isImpulsePhase(intermediatePhase) &&
+    isImpulsePhase(minorPhase)
+  );
+}
 
-  if (
-    primaryPhase === "COMPLETE_W5" &&
-    ["IN_A", "IN_B", "IN_C"].includes(intermediatePhase)
-  ) {
-    if (correctionDirection === "UP") macroBias = "SHORT_PREFERENCE";
-    if (correctionDirection === "DOWN") macroBias = "LONG_PREFERENCE";
+function getReactionInputs(reaction, waveReactionFromArg) {
+  const waveReaction = waveReactionFromArg || reaction?.waveReaction || null;
+
+  return {
+    reactionScore: normalizeScore(reaction?.reactionScore),
+    structureState: reaction?.structureState || null,
+    reasonCodes: Array.isArray(reaction?.reasonCodes) ? reaction.reasonCodes : [],
+    waveReaction,
+  };
+}
+
+function gradeReactionQuality({ side, reactionScore, waveReaction }) {
+  const wr = waveReaction || {};
+  const evidence = Array.isArray(wr.evidence) ? wr.evidence : [];
+
+  const momentumFading = safeBool(wr.momentumFading);
+  const failedContinuation = safeBool(wr.failedContinuation);
+
+  let score = 0;
+  const reasons = [];
+
+  if (reactionScore >= 4) {
+    score += 20;
+    reasons.push("ENGINE3_REACTION_SCORE_OK");
   }
 
-  if (intermediatePhase === "IN_A") waveState = "EARLY_CORRECTION";
-  if (intermediatePhase === "IN_B") waveState = "MID_CORRECTION";
-  if (intermediatePhase === "IN_C") {
-    waveState = "FINAL_CORRECTION";
-    wavePrep = true;
-    intermediateReadyForWave3 = true;
+  if (momentumFading) {
+    score += 20;
+    reasons.push("MOMENTUM_FADING");
   }
 
-  if (["IN_W3", "IN_W5"].includes(intermediatePhase)) {
-    waveState = "TRENDING_IMPULSE";
+  if (side === "LONG") {
+    if (safeBool(wr.accumulationWarning)) {
+      score += 25;
+      reasons.push("ACCUMULATION_WARNING");
+    }
+    if (safeBool(wr.sellerAbsorption)) {
+      score += 25;
+      reasons.push("SELLER_ABSORPTION");
+    }
+    if (safeBool(wr.acceptedAtLows)) {
+      score += 10;
+      reasons.push("ACCEPTED_AT_LOWS");
+    }
+  }
+
+  if (side === "SHORT") {
+    if (safeBool(wr.distributionWarning)) {
+      score += 25;
+      reasons.push("DISTRIBUTION_WARNING");
+    }
+    if (safeBool(wr.buyerAbsorption)) {
+      score += 25;
+      reasons.push("BUYER_ABSORPTION");
+    }
+    if (safeBool(wr.acceptedAtHighs)) {
+      score += 10;
+      reasons.push("ACCEPTED_AT_HIGHS");
+    }
+    if (safeBool(wr.extensionRisk)) {
+      score += 10;
+      reasons.push("EXTENSION_RISK");
+    }
+  }
+
+  if (failedContinuation) {
+    score -= 20;
+    reasons.push("FAILED_CONTINUATION_RISK");
+  }
+
+  score = Math.max(0, Math.min(100, score));
+
+  const grade =
+    score >= 85 ? "A++" :
+    score >= 75 ? "A" :
+    score >= 60 ? "B" :
+    score >= 45 ? "C" :
+    "WEAK";
+
+  return {
+    score,
+    grade,
+    pass: score >= 60,
+    aPlusPlus: score >= 85,
+    reactionState: wr.reactionState || null,
+    reactionQualityScore: wr.reactionQualityScore ?? null,
+    traderMessage: wr.traderMessage || null,
+    evidence,
+    reasons,
+  };
+}
+
+function buildRiskPlan({ side, entry, exhaustionPrice, targetMove = 1 }) {
+  const entryPx = validPrice(entry);
+  const exPx = validPrice(exhaustionPrice);
+
+  if (!entryPx || !exPx) {
+    return {
+      pass: false,
+      grade: "INVALID",
+      reason: "MISSING_ENTRY_OR_STOP",
+      entry: round2(entryPx),
+      stop: round2(exPx),
+      target: null,
+      riskAmount: null,
+      rewardAmount: null,
+      riskReward: null,
+      minRequired: 2,
+      targetSource: "UNAVAILABLE",
+    };
+  }
+
+  const stop = exPx;
+  const riskAmount = Math.abs(entryPx - stop);
+
+  if (!Number.isFinite(riskAmount) || riskAmount <= 0) {
+    return {
+      pass: false,
+      grade: "INVALID",
+      reason: "INVALID_RISK",
+      entry: round2(entryPx),
+      stop: round2(stop),
+      target: null,
+      riskAmount: round2(riskAmount),
+      rewardAmount: null,
+      riskReward: null,
+      minRequired: 2,
+      targetSource: "UNAVAILABLE",
+    };
+  }
+
+  const rewardTarget = Math.max(Number(targetMove || 1), riskAmount * 2);
+  const target = side === "LONG" ? entryPx + rewardTarget : entryPx - rewardTarget;
+
+  const rewardAmount = Math.abs(target - entryPx);
+  const riskReward = rewardAmount / riskAmount;
+  const pass = riskReward >= 2;
+
+  return {
+    pass,
+    grade:
+      riskReward >= 3 ? "A++" :
+      riskReward >= 2 ? "A" :
+      riskReward >= 1.9 ? "NEAR_PASS" :
+      "FAIL",
+    reason: pass ? "RISK_REWARD_PASS" : "RISK_REWARD_BELOW_2R",
+    entry: round2(entryPx),
+    stop: round2(stop),
+    target: round2(target),
+    riskAmount: round2(riskAmount),
+    rewardAmount: round2(rewardAmount),
+    riskReward: round2(riskReward),
+    minRequired: 2,
+    targetSource: "BLUE_SKY_EXTENSION",
+    exitRule: side === "LONG" ? "CLOSE_BELOW_EMA10_10M" : "CLOSE_ABOVE_EMA10_10M",
+  };
+}
+
+function buildManagement({ side, latestClose, ema10 }) {
+  const close = validPrice(latestClose);
+  const ema = validPrice(ema10);
+
+  if (!close || !ema) {
+    return {
+      exitRule: side === "LONG" ? "CLOSE_BELOW_EMA10_10M" : "CLOSE_ABOVE_EMA10_10M",
+      ema10: round2(ema),
+      trendActive: false,
+      exitSignal: false,
+      reason: "EMA10_UNAVAILABLE",
+    };
+  }
+
+  if (side === "LONG") {
+    return {
+      exitRule: "CLOSE_BELOW_EMA10_10M",
+      ema10: round2(ema),
+      trendActive: close >= ema,
+      exitSignal: close < ema,
+      reason: close >= ema ? "LONG_RUNNER_ABOVE_EMA10" : "LONG_EXIT_BELOW_EMA10",
+    };
   }
 
   return {
+    exitRule: "CLOSE_ABOVE_EMA10_10M",
+    ema10: round2(ema),
+    trendActive: close <= ema,
+    exitSignal: close > ema,
+    reason: close <= ema ? "SHORT_RUNNER_BELOW_EMA10" : "SHORT_EXIT_ABOVE_EMA10",
+  };
+}
+
+function computeMarketBias({ engine2State, engine16, marketMind }) {
+  const phases = getWavePhases(engine2State);
+  const {
     primaryPhase,
     intermediatePhase,
     minorPhase,
-    intermediateWaveMode,
-    correctionDirection,
-    macroBias,
-    waveState,
-    wavePrep,
-    intermediateReadyForWave3,
-  };
-}
+    minutePhase,
+  } = phases;
 
-function skippedEngine16(sym, tf = null, marketRegime = null, engine2Context = null) {
-  const waveContext = buildSkippedWaveContext(engine2Context);
+  const finalImpulseContext = isBullishFinalImpulseContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+  });
+
+  const bullishHigherWaveContext = isBullishHigherWaveContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+  });
+
+  const minuteAllowsDipBuy =
+    minutePhase === "IN_W3" ||
+    minutePhase === "IN_W5";
+
+  const minuteBlocksDipBuy =
+    minutePhase === "IN_W2" ||
+    minutePhase === "IN_W4";
+
+  const hourlyClose = validPrice(engine16?.hourlyClose);
+  const ema10_1h = validPrice(engine16?.ema10_1h);
+
+  const score1h = toNum(
+    marketMind?.score1h ??
+    marketMind?.oneHourScore
+  );
+
+  const score4h = toNum(
+    marketMind?.score4h ??
+    marketMind?.fourHourScore
+  );
+
+  const scoreEOD = toNum(
+    marketMind?.scoreEOD ??
+    marketMind?.masterScore ??
+    marketMind?.eodScore
+  );
+
+  const longTrend =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    score1h !== null &&
+    score4h !== null &&
+    scoreEOD !== null &&
+    hourlyClose > ema10_1h &&
+    score1h > 55 &&
+    score4h > 58 &&
+    scoreEOD > 61;
+
+  const shortTrend =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    score1h !== null &&
+    score4h !== null &&
+    scoreEOD !== null &&
+    hourlyClose < ema10_1h &&
+    score1h < 55 &&
+    score4h < 58 &&
+    scoreEOD < 61;
+
+  if (bullishHigherWaveContext && minuteAllowsDipBuy && longTrend) {
+    return {
+      bias: "LONG_ONLY_DIP_BUY",
+      blockShorts: true,
+      blockLongs: false,
+      allowLongs: true,
+      allowShorts: false,
+      reason: "W3_W5_BULLISH_STRUCTURE",
+      inputs: {
+        ...phases,
+        hourlyClose: round2(hourlyClose),
+        ema10_1h: round2(ema10_1h),
+        score1h,
+        score4h,
+        scoreEOD,
+        minuteAllowsDipBuy,
+        minuteBlocksDipBuy,
+      },
+    };
+  }
+
+  if (finalImpulseContext && minuteBlocksDipBuy) {
+    return {
+      bias: "FINAL_IMPULSE_NO_SHORTS",
+      blockShorts: true,
+      blockLongs: true,
+      allowLongs: false,
+      allowShorts: false,
+      reason: "MINUTE_W2_W4_CORRECTION_INSIDE_FINAL_IMPULSE",
+      inputs: {
+        ...phases,
+        hourlyClose: round2(hourlyClose),
+        ema10_1h: round2(ema10_1h),
+        score1h,
+        score4h,
+        scoreEOD,
+        minuteAllowsDipBuy,
+        minuteBlocksDipBuy,
+      },
+    };
+  }
+
+  if (finalImpulseContext) {
+    return {
+      bias: "FINAL_IMPULSE_NO_SHORTS",
+      blockShorts: true,
+      blockLongs: false,
+      allowLongs: false,
+      allowShorts: false,
+      reason: "PRIMARY_INTERMEDIATE_MINOR_W5_BLOCK_SHORTS",
+      inputs: {
+        ...phases,
+        hourlyClose: round2(hourlyClose),
+        ema10_1h: round2(ema10_1h),
+        score1h,
+        score4h,
+        scoreEOD,
+        minuteAllowsDipBuy,
+        minuteBlocksDipBuy,
+      },
+    };
+  }
+
+  if (shortTrend && !finalImpulseContext) {
+    return {
+      bias: "SHORT_ONLY_RIP_SELL",
+      blockShorts: false,
+      blockLongs: true,
+      allowLongs: false,
+      allowShorts: true,
+      reason: "ALL_MAJOR_SCORES_WEAK_AND_1H_BELOW_EMA10",
+      inputs: {
+        ...phases,
+        hourlyClose: round2(hourlyClose),
+        ema10_1h: round2(ema10_1h),
+        score1h,
+        score4h,
+        scoreEOD,
+        minuteAllowsDipBuy,
+        minuteBlocksDipBuy,
+      },
+    };
+  }
 
   return {
-    ok: false,
-    skipped: true,
-    reason: "ENGINE16_NOT_ENABLED_FOR_THIS_STRATEGY",
-    symbol: sym,
-    timeframe: tf,
-    marketRegime: marketRegime || null,
-
-    // NEW: carry structure truth even when Engine16 is intentionally skipped
-    engine2Context: engine2Context || null,
-    waveContext,
-    waveState: waveContext.waveState,
-    wavePrep: waveContext.wavePrep,
-    macroBias: waveContext.macroBias,
-    primaryPhase: waveContext.primaryPhase,
-    intermediatePhase: waveContext.intermediatePhase,
-    minorPhase: waveContext.minorPhase,
-    intermediateWaveMode: waveContext.intermediateWaveMode,
-    correctionDirection: waveContext.correctionDirection,
+    bias: "NEUTRAL",
+    blockShorts: false,
+    blockLongs: false,
+    allowLongs: false,
+    allowShorts: false,
+    reason: "NO_CLEAR_STRUCTURE",
+    inputs: {
+      ...phases,
+      hourlyClose: round2(hourlyClose),
+      ema10_1h: round2(ema10_1h),
+      score1h,
+      score4h,
+      scoreEOD,
+      minuteAllowsDipBuy,
+      minuteBlocksDipBuy,
+    },
   };
 }
 
-function isEngine16EnabledForStrategy(strategyId) {
+// ============================================================
+// Trend-vs-wave safety layer
+// ============================================================
+
+function computePriceAboveDailyEma10({ engine16, marketMind }) {
+  const direct = boolOrNull(engine16?.priceAboveDailyEma10);
+  if (direct !== null) return direct;
+
+  const trendState = upper(
+    engine16?.trendState_daily ??
+    engine16?.trendStateDaily ??
+    engine16?.dailyTrendState ??
+    engine16?.trendState_1d
+  );
+
+  if (["LONG_ONLY", "BULL", "BULLISH", "UP", "GREEN"].includes(trendState)) return true;
+  if (["SHORT_ONLY", "BEAR", "BEARISH", "DOWN", "RED"].includes(trendState)) return false;
+
+  const closeDaily = firstNumber(
+    engine16?.dailyClose,
+    engine16?.closeDaily,
+    engine16?.close1d,
+    engine16?.eodClose,
+    marketMind?.raw?.eod?.daily?.close,
+    marketMind?.raw?.eod?.metrics?.close,
+    marketMind?.raw?.eod?.metrics?.last_close,
+    marketMind?.raw?.eod?.meta?.current_price,
+    marketMind?.raw?.eod?.currentPrice
+  );
+
+  const ema10Daily = firstNumber(
+    engine16?.ema10_daily,
+    engine16?.dailyEma10,
+    engine16?.ema10Daily,
+    engine16?.ema10_1d,
+    engine16?.eodEma10,
+    marketMind?.raw?.eod?.daily?.ema10,
+    marketMind?.raw?.eod?.metrics?.ema10,
+    marketMind?.raw?.eod?.metrics?.ema10_daily
+  );
+
+  if (closeDaily !== null && ema10Daily !== null) {
+    return closeDaily > ema10Daily;
+  }
+
+  return null;
+}
+
+function computePriceAbove4hEma10({ engine16 }) {
+  const direct = boolOrNull(engine16?.priceAbove4hEma10);
+  if (direct !== null) return direct;
+
+  const close4h = firstNumber(
+    engine16?.close4h,
+    engine16?.fourHourClose,
+    engine16?.close_4h
+  );
+
+  const ema10_4h = firstNumber(
+    engine16?.ema10_4h,
+    engine16?.fourHourEma10,
+    engine16?.ema10_4h_value
+  );
+
+  if (close4h !== null && ema10_4h !== null) {
+    return close4h > ema10_4h;
+  }
+
+  const trendState = upper(
+    engine16?.trendState_4h ??
+    engine16?.trendState4h ??
+    engine16?.fourHourTrendState
+  );
+
+  if (["LONG_ONLY", "BULL", "BULLISH", "UP", "GREEN"].includes(trendState)) return true;
+  if (["SHORT_ONLY", "BEAR", "BEARISH", "DOWN", "RED"].includes(trendState)) return false;
+
+  return null;
+}
+
+function computePriceAbove1hEma10({ engine16 }) {
+  const hourlyClose = validPrice(engine16?.hourlyClose);
+  const ema10_1h = validPrice(engine16?.ema10_1h);
+
+  if (hourlyClose !== null && ema10_1h !== null) {
+    return hourlyClose > ema10_1h;
+  }
+
+  const trendState = upper(
+    engine16?.trendState_1h ??
+    engine16?.trendState1h ??
+    engine16?.hourlyTrendState
+  );
+
+  if (["LONG_ONLY", "BULL", "BULLISH", "UP", "GREEN"].includes(trendState)) return true;
+  if (["SHORT_ONLY", "BEAR", "BEARISH", "DOWN", "RED"].includes(trendState)) return false;
+
+  return null;
+}
+
+function computeManualW4Confirmed(engine2State) {
   return (
-  strategyId === "intraday_scalp@10m" ||
-  strategyId === "minor_swing@1h"
- );
-}
-async function buildEngine16Direct(sym, tf = "30m", marketRegime = null, engine2Context = null) {
-  try {
-    return await computeMorningFib({
-      symbol: sym,
-      tf,
-      includeZones: true,
-      includeVolume: true,
-      marketRegime,
-      engine2Context,
-    });
-  } catch (err) {
-    return {
-      ...fallbackEngine16(sym, tf, marketRegime),
-      error: String(err?.message || err),
-    };
-  }
+    engine2State?.minute?.confirmedPhase === "IN_W4" ||
+    engine2State?.minute?.lastMark?.key === "W4"
+  );
 }
 
-/* -----------------------------
-   Permission helpers
-------------------------------*/
-function normalizeEngine5ForEngine6(confluenceJson) {
-  if (!confluenceJson || typeof confluenceJson !== "object") {
-    return { invalid: false, total: null, reasonCodes: [] };
-  }
+function getMarketScores(marketMind) {
+  const oneHourScore = firstNumber(
+    marketMind?.score1h,
+    marketMind?.oneHourScore,
+    marketMind?.raw?.hourly?.hourly?.overall1h?.score,
+    marketMind?.raw?.hourly?.metrics?.overall_hourly_score
+  );
 
-  const invalid = Boolean(confluenceJson.invalid);
-  const reasonCodes = Array.isArray(confluenceJson.reasonCodes)
-    ? confluenceJson.reasonCodes
-    : [];
+  const fourHourScore = firstNumber(
+    marketMind?.score4h,
+    marketMind?.fourHourScore,
+    marketMind?.raw?.h4?.fourHour?.overall4h?.score,
+    marketMind?.raw?.h4?.metrics?.trend_strength_4h_pct
+  );
 
-  const rawTotal =
-    Number(confluenceJson?.scores?.total) ||
-    Number(confluenceJson?.total);
+  const dailyScore = firstNumber(
+    marketMind?.scoreEOD,
+    marketMind?.eodScore,
+    marketMind?.raw?.eod?.daily?.overallEOD?.score,
+    marketMind?.raw?.eod?.metrics?.overall_eod_score
+  );
 
-  const total = Number.isFinite(rawTotal) ? rawTotal : null;
-
-  const label = confluenceJson?.scores?.label || confluenceJson?.label || null;
-  const flags = confluenceJson?.flags || null;
-  const compression = confluenceJson?.compression || null;
-  const bias = confluenceJson?.bias ?? null;
-
-  return { invalid, total, reasonCodes, label, flags, compression, bias };
-}
-
-function isInside(price, z) {
-  const p = Number(price);
-  const lo = Number(z?.lo);
-  const hi = Number(z?.hi);
-  if (!Number.isFinite(p) || !Number.isFinite(lo) || !Number.isFinite(hi)) return false;
-
-  const a = Math.min(lo, hi);
-  const b = Math.max(lo, hi);
-  return p >= a && p <= b;
-}
-
-function computeZoneTelemetryFromCtx(ctx) {
-  const price = Number(ctx?.meta?.current_price ?? ctx?.meta?.currentPrice);
-  const active = ctx?.active || {};
-
-  let zoneType = "UNKNOWN";
-  let activeZone = null;
-
-  if (active?.negotiated) {
-    zoneType = "NEGOTIATED";
-    activeZone = active.negotiated;
-  } else if (active?.institutional) {
-    zoneType = "INSTITUTIONAL";
-    activeZone = active.institutional;
-  } else if (active?.shelf) {
-    zoneType = "SHELF";
-    activeZone = active.shelf;
-  }
-
-  const withinZone = activeZone ? isInside(price, activeZone) : false;
-  return { zoneType, withinZone };
-}
-
-function buildZoneContext(engine1ContextJson, confluenceLocation = null) {
-  if (!engine1ContextJson || typeof engine1ContextJson !== "object") return null;
-
-  const { zoneType, withinZone } = computeZoneTelemetryFromCtx(engine1ContextJson);
+  const masterScore = firstNumber(
+    marketMind?.scoreMaster,
+    marketMind?.masterScore,
+    marketMind?.overallScore,
+    marketMind?.raw?.master?.score,
+    marketMind?.raw?.eod?.metrics?.masterScore,
+    marketMind?.raw?.eod?.daily?.masterScore
+  );
 
   return {
-    meta: engine1ContextJson.meta || null,
-    active: engine1ContextJson.active || null,
-    nearest: engine1ContextJson.nearest || null,
-    zoneType,
-    withinZone,
-    locationState: confluenceLocation?.state || null,
-    nearAllowedZone: confluenceLocation?.nearAllowedZone === true,
-    flags: engine1ContextJson.flags || null,
-    render: {
-      negotiated: Array.isArray(engine1ContextJson?.render?.negotiated)
-        ? engine1ContextJson.render.negotiated
-        : [],
-      institutional: Array.isArray(engine1ContextJson?.render?.institutional)
-        ? engine1ContextJson.render.institutional
-        : [],
-      shelves: Array.isArray(engine1ContextJson?.render?.shelves)
-        ? engine1ContextJson.render.shelves
-        : [],
-    },
+    oneHourScore,
+    fourHourScore,
+    dailyScore,
+    masterScore,
   };
 }
 
-/* -----------------------------
-   Confluence route-equivalent helpers
-------------------------------*/
-function containsPrice(z, price) {
-  if (!z || !Number.isFinite(price)) return false;
-  const lo = Number(z.lo);
-  const hi = Number(z.hi);
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return false;
-  return lo <= price && price <= hi;
-}
+function computeTrendVsWave({
+  engine2State,
+  engine16,
+  reaction,
+  waveReaction,
+  marketMind,
+}) {
+  const phases = getWavePhases(engine2State);
+  const {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    minutePhase,
+    confirmedMinutePhase,
+  } = phases;
 
-function pickActiveExecutionZone(engine1Context, price) {
-  const activeNegotiated = engine1Context?.active?.negotiated ?? null;
-  const activeShelf = engine1Context?.active?.shelf ?? null;
-  const activeInstitutional = engine1Context?.active?.institutional ?? null;
+  const wr = waveReaction || reaction?.waveReaction || {};
+  const { oneHourScore, fourHourScore, dailyScore, masterScore } = getMarketScores(marketMind);
 
-  const candidate = activeNegotiated || activeShelf || activeInstitutional || null;
+  const priceAboveDailyEma10 = computePriceAboveDailyEma10({ engine16, marketMind });
+  const priceAbove4hEma10 = computePriceAbove4hEma10({ engine16 });
+  const priceAbove1hEma10 = computePriceAbove1hEma10({ engine16 });
 
-  if (candidate && containsPrice(candidate, price)) return candidate;
-  return null;
-}
+  const manualW4Confirmed = computeManualW4Confirmed(engine2State);
 
-function modeFromStrategyId(strategyId) {
-  const s = String(strategyId || "").toLowerCase();
-  if (s.includes("intraday_scalp")) return "scalp";
-  if (s.includes("minor_swing")) return "swing";
-  if (s.includes("intermediate_long")) return "long";
-  return "swing";
-}
+  const distributionWarning =
+    reaction?.distributionWarning === true ||
+    wr?.distributionWarning === true;
 
-function volumeStateFromEngine4(engine4, zoneRef) {
-  if (!zoneRef) return "NO_ACTIVE_ZONE";
-  if (!engine4 || !engine4.flags) return "NO_SIGNAL";
+  const momentumFading =
+    reaction?.momentumFading === true ||
+    wr?.momentumFading === true;
 
-  const f = engine4.flags;
+  const failedContinuation =
+    reaction?.failedContinuation === true ||
+    wr?.failedContinuation === true;
 
-  if (f.liquidityTrap) return "TRAP_SUSPECTED";
-  if (engine4.volumeConfirmed && f.initiativeMoveConfirmed) return "INITIATIVE";
-  if (f.absorptionDetected) return "ABSORPTION";
-  if (f.distributionDetected) return "DISTRIBUTION";
-  if (f.volumeDivergence) return "DIVERGENCE";
-  if (f.pullbackContraction) return "PULLBACK_CONTRACTION";
-  if (f.reversalExpansion) return "REVERSAL_EXPANSION";
-  return "NEGOTIATING";
-}
+  const structureState = reaction?.structureState || null;
 
-function keepAliveNoZone(out) {
-  const rcs = Array.isArray(out?.reasonCodes) ? out.reasonCodes : [];
-  const noZoneOnly =
-    out?.invalid === true &&
-    rcs.length === 1 &&
-    rcs[0] === "NO_ZONE_NO_TRADE";
+  const fourHourSupportive = fourHourScore !== null && fourHourScore >= 60;
+  const dailyStrong = dailyScore !== null && dailyScore >= 65;
+  const masterSupportive = masterScore === null || masterScore >= 60;
 
-  if (noZoneOnly) {
-    out.invalid = false;
-    out.tradeReady = false;
-    out.flags = out.flags || {};
-    out.flags.tradeReady = false;
-    out.flags.withinZone = false;
-    out.reasonCodes = ["NOT_IN_ZONE_WAITING_FOR_SETUP"];
+  const fourHourWeak = fourHourScore !== null && fourHourScore < 50;
+  const oneHourWeak = oneHourScore !== null && oneHourScore < 50;
 
-    out.scores = out.scores || {};
-    out.scores.engine1 = 0;
-    out.scores.engine2 = 0;
-    out.scores.engine3 = 0;
-    out.scores.engine4 = 0;
-    out.scores.compression = 0;
-    out.scores.total = 0;
-    out.scores.label = "IGNORE";
-  }
+  const reasonCodes = [];
 
-  return out;
-}
+  if (masterScore === null) reasonCodes.push("MASTER_SCORE_UNAVAILABLE");
+  if (priceAboveDailyEma10 === null) reasonCodes.push("DAILY_EMA10_UNAVAILABLE_W4_NOT_CONFIRMED");
+  if (priceAbove4hEma10 === null) reasonCodes.push("FOUR_HOUR_EMA10_UNAVAILABLE");
 
-/* -----------------------------
-   Near allowed-zone display patch
-------------------------------*/
-const NEAR_ALLOWED_ZONE_WINDOW_PTS = 1.5;
-
-function distToZone(price, z) {
-  const p = toNum(price);
-  const lo = toNum(z?.lo);
-  const hi = toNum(z?.hi);
-  if (p == null || lo == null || hi == null) return null;
-
-  const a = Math.min(lo, hi);
-  const b = Math.max(lo, hi);
-
-  if (p >= a && p <= b) return 0;
-  return p < a ? a - p : p - b;
-}
-
-function nearestAllowedZone({ price, negotiated = [], institutional = [] }) {
-  let best = null;
-
-  const scan = (arr, zoneType) => {
-    const list = Array.isArray(arr) ? arr : [];
-    for (const z of list) {
-      const d = distToZone(price, z);
-      if (d == null) continue;
-      if (!best || d < best.distancePts) {
-        best = {
-          zoneType,
-          id: z?.id ?? null,
-          lo: z?.lo ?? null,
-          hi: z?.hi ?? null,
-          mid: z?.mid ?? null,
-          strength: z?.strength ?? null,
-          distancePts: d,
-        };
-      }
-    }
-  };
-
-  scan(negotiated, "NEGOTIATED");
-  scan(institutional, "INSTITUTIONAL");
-
-  return best;
-}
-
-function applyNearAllowedZoneDisplay({ confluence, ctx }) {
-  if (!confluence || typeof confluence !== "object") return confluence;
-
-  const price =
-    toNum(confluence?.price) ??
-    toNum(ctx?.meta?.current_price) ??
-    toNum(ctx?.meta?.currentPrice);
-
-  if (price == null) return confluence;
-
-  const loc = confluence.location || {};
-  const state = String(loc.state || "");
-
-  if (state !== "NOT_IN_ZONE") return confluence;
-
-  const negotiated = ctx?.render?.negotiated || [];
-  const institutional = ctx?.render?.institutional || [];
-
-  const nearest = nearestAllowedZone({ price, negotiated, institutional });
-
-  if (!nearest || !Number.isFinite(nearest.distancePts)) return confluence;
-
-  const near =
-    nearest.distancePts > 0 &&
-    nearest.distancePts <= NEAR_ALLOWED_ZONE_WINDOW_PTS;
-
-  if (!near) {
-    return {
-      ...confluence,
-      location: {
-        ...loc,
-        nearAllowedZone: false,
-        nearestAllowed: {
-          zoneType: nearest.zoneType,
-          zoneId: nearest.id,
-          lo: nearest.lo,
-          hi: nearest.hi,
-          distancePts: Number(nearest.distancePts.toFixed(2)),
-        },
-      },
-    };
-  }
-
-  return {
-    ...confluence,
-    location: {
-      ...loc,
-      state: "NEAR_ALLOWED_ZONE",
-      zoneType: nearest.zoneType,
-      zoneId: nearest.id,
-      nearAllowedZone: true,
-      nearestAllowed: {
-        zoneType: nearest.zoneType,
-        zoneId: nearest.zoneId,
-        lo: nearest.lo,
-        hi: nearest.hi,
-        distancePts: Number(nearest.distancePts.toFixed(2)),
-      },
-    },
-  };
-}
-
-/* -----------------------------
-   Engine 2 helpers
-------------------------------*/
-function bucketForStrategyId(strategyId) {
-  const id = String(strategyId || "");
-  if (id.startsWith("intraday_scalp")) return "intraday_scalp";
-  if (id.startsWith("minor_swing")) return "minor_swing";
-  if (id.startsWith("intermediate_long")) return "intermediate_long";
-  return null;
-}
-
-async function fetchFibLevels({ symbol, tf, degree, wave }) {
-  const u = new URL(`${CORE_BASE}/api/v1/fib-levels`);
-  u.searchParams.set("symbol", symbol);
-  u.searchParams.set("tf", tf);
-  u.searchParams.set("degree", degree);
-  u.searchParams.set("wave", wave);
-  const r = await fetchJson(u.toString(), 15000);
-  return r?.json || { ok: false };
-}
-
-async function fetchLastBarTimeSec({ symbol, tf }) {
-  const u = new URL(`${CORE_BASE}/api/v1/ohlc`);
-  u.searchParams.set("symbol", symbol);
-  u.searchParams.set("timeframe", tf);
-  u.searchParams.set("limit", "1");
-
-  const r = await fetchJson(u.toString(), 15000);
-  const j = r?.json;
-
-  const bar =
-    Array.isArray(j) ? j[0] :
-    Array.isArray(j?.bars) ? j.bars[0] :
-    Array.isArray(j?.data) ? j.data[0] :
-    null;
-
-  const t = Number(bar?.time ?? bar?.t ?? bar?.tSec);
-  return Number.isFinite(t) ? t : null;
-}
-
-function calcFibScore(payloadW1, payloadW4) {
-  const p =
-    payloadW1 && payloadW1.ok
-      ? payloadW1
-      : payloadW4 && payloadW4.ok
-        ? payloadW4
-        : null;
-
-  if (!p) return { fibScore: 0, invalidated: false, anchorTag: null };
-
-  const invalidated = !!p?.signals?.invalidated;
-  const anchorTag = p?.signals?.tag ?? null;
-
-  if (invalidated) return { fibScore: 0, invalidated: true, anchorTag };
-
-  let score = 0;
-  if (p?.signals?.inRetraceZone) score += 10;
-  if (p?.signals?.near50) score += 10;
-
-  return { fibScore: score, invalidated: false, anchorTag };
-}
-
-function isRealMark(m) {
-  if (!m || typeof m !== "object") return false;
-
-  const p = Number(m.p);
-  const tSec = m.tSec;
-
-  if (!Number.isFinite(p) || p <= 0) return false;
-  if (typeof tSec !== "number" || !Number.isFinite(tSec) || tSec <= 0) return false;
-
-  return true;
-}
-
-function computeWavePhaseFromMarks(waveMarks, lastBarTimeSec, currentPrice) {
-  const order = ["W1", "W2", "W3", "W4", "W5", "A", "B", "C"];
-  const marksPresent = [];
-
-  for (const k of order) {
-    if (isRealMark(waveMarks?.[k])) marksPresent.push(k);
-  }
-
+  // ------------------------------------------------------------
+  // Case 1:
+  // Engine 2 suggests Minor W4, but higher timeframe trend is still supportive.
+  // This is the original safety issue.
+  // ------------------------------------------------------------
   if (
-    !marksPresent.length ||
-    typeof lastBarTimeSec !== "number" ||
-    !Number.isFinite(lastBarTimeSec)
+    minorPhase === "IN_W4" &&
+    fourHourSupportive &&
+    dailyStrong &&
+    masterSupportive &&
+    priceAboveDailyEma10 === true
   ) {
     return {
-      phase: "UNKNOWN",
-      confirmedPhase: "UNKNOWN",
-      phaseReason: "NO_VALID_MARKS_OR_TIME",
-      lastMark: null,
-      nextMark: null,
-      marksPresent,
+      state: "LATE_W3_CONSOLIDATION",
+      waveSuggestion: "POSSIBLE_W4",
+      trendConfirmation: "W3_STILL_SUPPORTED",
+      marketMeterBias: "BULLISH_SUPPORTIVE",
+      oneHourScore,
+      fourHourScore,
+      dailyScore,
+      masterScore,
+      priceAboveDailyEma10,
+      priceAbove4hEma10,
+      priceAbove1hEma10,
+      trueW4Confirmed: false,
+      suppressW4Entries: true,
+      forceNoBlindShorts: true,
+      minorPhase,
+      minutePhase,
+      confirmedMinutePhase,
+      reasonCodes: [
+        "ENGINE2_POSSIBLE_W4",
+        "FOUR_HOUR_SCORE_SUPPORTIVE",
+        "DAILY_SCORE_STRONG",
+        masterScore === null ? "MASTER_SCORE_UNAVAILABLE" : "MASTER_SCORE_SUPPORTIVE",
+        "DAILY_EMA10_HOLDING",
+        "W4_NOT_CONFIRMED",
+      ],
     };
   }
 
-  let lastKey = null;
-  for (const k of order) {
-    const m = waveMarks?.[k];
-    if (!isRealMark(m)) continue;
-    if (m.tSec <= lastBarTimeSec) lastKey = k;
-  }
-
-  if (!lastKey) {
-    const nk = marksPresent[0] || null;
+  // ------------------------------------------------------------
+  // Case 2:
+  // Minor W4 is suggested and transition risk is rising, but not confirmed.
+  // 4H EMA loss / weak 4H is warning only unless daily EMA or manual W4 confirms.
+  // ------------------------------------------------------------
+  if (
+    minorPhase === "IN_W4" &&
+    (
+      fourHourWeak ||
+      priceAbove4hEma10 === false
+    ) &&
+    (
+      distributionWarning ||
+      momentumFading ||
+      failedContinuation
+    )
+  ) {
     return {
-      phase: "PRE_W1",
-      confirmedPhase: "PRE_W1",
-      phaseReason: "NO_MARK_REACHED_BY_TIME",
-      lastMark: null,
-      nextMark: nk ? { key: nk, ...waveMarks[nk] } : null,
-      marksPresent,
+      state: "W4_TRANSITION_WARNING",
+      waveSuggestion: "POSSIBLE_W4",
+      trendConfirmation: "TRANSITION_RISK_RISING_NOT_CONFIRMED",
+      marketMeterBias: "WEAKENING",
+      oneHourScore,
+      fourHourScore,
+      dailyScore,
+      masterScore,
+      priceAboveDailyEma10,
+      priceAbove4hEma10,
+      priceAbove1hEma10,
+      trueW4Confirmed: false,
+      suppressW4Entries: true,
+      forceNoBlindShorts: false,
+      minorPhase,
+      minutePhase,
+      confirmedMinutePhase,
+      reasonCodes: [
+        "ENGINE2_POSSIBLE_W4",
+        fourHourWeak ? "FOUR_HOUR_SCORE_WEAK" : "FOUR_HOUR_SCORE_NOT_WEAK",
+        priceAbove4hEma10 === false ? "FOUR_HOUR_EMA10_LOST" : "FOUR_HOUR_EMA10_NOT_CONFIRMED_LOST",
+        distributionWarning ? "DISTRIBUTION_WARNING" : null,
+        momentumFading ? "MOMENTUM_FADING" : null,
+        failedContinuation ? "FAILED_CONTINUATION" : null,
+        "W4_TRANSITION_WARNING_ONLY",
+        "W4_NOT_CONFIRMED",
+      ].filter(Boolean),
     };
   }
 
-  const lastIdx = order.indexOf(lastKey);
-  let nextKey = null;
-  for (let i = lastIdx + 1; i < order.length; i++) {
-    const k = order[i];
-    if (marksPresent.includes(k)) {
-      nextKey = k;
-      break;
-    }
+  // ------------------------------------------------------------
+  // Case 3:
+  // True W4 confirmation.
+  // Only daily EMA10 loss or manual official W4 mark confirms W4 in this version.
+  // Manual W4 is only considered when Minor phase is already suggesting W4.
+  // This prevents a completed Minute W4 inside Minor W3 from falsely confirming Minor W4.
+  // ------------------------------------------------------------
+  if (
+    minorPhase === "IN_W4" &&
+    (
+      priceAboveDailyEma10 === false ||
+      manualW4Confirmed === true
+    )
+  ) {
+    return {
+      state: "W4_CONFIRMED",
+      waveSuggestion: "CONFIRMED_W4",
+      trendConfirmation: priceAboveDailyEma10 === false
+        ? "DAILY_EMA10_LOST"
+        : "MANUAL_W4_CONFIRMED",
+      marketMeterBias: "CORRECTION_CONFIRMED",
+      oneHourScore,
+      fourHourScore,
+      dailyScore,
+      masterScore,
+      priceAboveDailyEma10,
+      priceAbove4hEma10,
+      priceAbove1hEma10,
+      trueW4Confirmed: true,
+      suppressW4Entries: false,
+      forceNoBlindShorts: false,
+      minorPhase,
+      minutePhase,
+      confirmedMinutePhase,
+      reasonCodes: [
+        "ENGINE2_MINOR_W4",
+        priceAboveDailyEma10 === false ? "DAILY_EMA10_LOST" : null,
+        manualW4Confirmed === true ? "MANUAL_W4_CONFIRMED" : null,
+        "W4_CONFIRMED",
+      ].filter(Boolean),
+    };
   }
 
-  let phase;
+  // ------------------------------------------------------------
+  // Case 4:
+  // Current live condition:
+  // Minor W3 still active + Minute W5 active + higher timeframe still strong,
+  // but 1H / structure is weak.
+  // This is not a W4 confirmation. It is a W3 continuation watch / warning.
+  // ------------------------------------------------------------
+  if (
+    minorPhase === "IN_W3" &&
+    minutePhase === "IN_W5" &&
+    fourHourSupportive &&
+    dailyStrong
+  ) {
+    const shortTermWeak =
+      oneHourWeak ||
+      priceAbove1hEma10 === false ||
+      structureState === "FAILURE";
 
-  if (lastKey === "W5") {
-    phase = "COMPLETE_W5";
-
-  } else if (lastKey === "W4") {
-    const w4Price = Number(waveMarks?.W4?.p);
-    const hasCurrentPrice =
-      typeof currentPrice === "number" && Number.isFinite(currentPrice);
-
-    if (hasCurrentPrice && Number.isFinite(w4Price) && currentPrice > w4Price) {
-      phase = "IN_W5";
-    } else {
-      phase = "IN_W5";
-    }
-
-  } else if (lastKey === "W3") {
-    phase = "IN_W4";
-
-  } else if (lastKey === "W2") {
-    phase = "IN_W3";
-
-  } else if (lastKey === "W1") {
-    phase = "IN_W2";
-
-  } else if (lastKey === "C") {
-    phase = "COMPLETE_C";
-
-  } else if (lastKey === "B") {
-    const bPrice = Number(waveMarks?.B?.p);
-    const hasCurrentPrice =
-      typeof currentPrice === "number" && Number.isFinite(currentPrice);
-
-    if (hasCurrentPrice && Number.isFinite(bPrice) && currentPrice > bPrice) {
-      phase = "IN_C";
-    } else {
-      phase = "IN_C";
-    }
-
-  } else if (lastKey === "A") {
-    phase = "IN_B";
-
-  } else {
-    phase = `IN_${lastKey}`;
+    return {
+      state: "W3_CONTINUATION_WATCH",
+      waveSuggestion: "MINOR_W3_STILL_ACTIVE",
+      trendConfirmation: shortTermWeak
+        ? "HIGHER_TIMEFRAME_SUPPORTED_BUT_SHORT_TERM_WEAK"
+        : "W3_STILL_SUPPORTED",
+      marketMeterBias: shortTermWeak
+        ? "MIXED_BULLISH_HIGHER_TIMEFRAME"
+        : "BULLISH_SUPPORTIVE",
+      oneHourScore,
+      fourHourScore,
+      dailyScore,
+      masterScore,
+      priceAboveDailyEma10,
+      priceAbove4hEma10,
+      priceAbove1hEma10,
+      trueW4Confirmed: false,
+      suppressW4Entries: false,
+      forceNoBlindShorts: true,
+      minorPhase,
+      minutePhase,
+      confirmedMinutePhase,
+      reasonCodes: [
+        "MINOR_W3_ACTIVE",
+        "MINUTE_W5_ACTIVE",
+        "FOUR_HOUR_SCORE_SUPPORTIVE",
+        "DAILY_SCORE_STRONG",
+        shortTermWeak ? "SHORT_TERM_WEAKNESS_PRESENT" : "SHORT_TERM_STILL_SUPPORTED",
+        oneHourWeak ? "ONE_HOUR_WEAK" : null,
+        priceAbove1hEma10 === false ? "PRICE_BELOW_1H_EMA10" : null,
+        structureState === "FAILURE" ? "SHORT_TERM_STRUCTURE_FAILURE" : null,
+        "W4_NOT_CONFIRMED",
+      ].filter(Boolean),
+    };
   }
 
-  let confirmedPhase;
-
-  if (lastKey === "W5") {
-    confirmedPhase = "COMPLETE_W5";
-  } else if (lastKey === "C") {
-    confirmedPhase = "IN_C";
-  } else {
-    confirmedPhase = `IN_${lastKey}`;
-  }
-
-  let phaseReason = "TIME_CONFIRMED_MARK";
-
-  if (lastKey === "W1") {
-    phaseReason = "W1_CONFIRMED_WAITING_FOR_W2";
-
-  } else if (lastKey === "W2") {
-    phaseReason = "W2_CONFIRMED_WAITING_FOR_W3";
-
-  } else if (lastKey === "W3") {
-    phaseReason = "W3_CONFIRMED_WAITING_FOR_W4";
-
-  } else if (lastKey === "W4") {
-    const w4Price = Number(waveMarks?.W4?.p);
-    const hasCurrentPrice =
-      typeof currentPrice === "number" && Number.isFinite(currentPrice);
-
-    if (hasCurrentPrice && Number.isFinite(w4Price) && currentPrice > w4Price) {
-      phaseReason = "PRICE_ABOVE_W4";
-    } else {
-      phaseReason = "W4_CONFIRMED_WAITING_FOR_W5";
-    }
-
-  } else if (lastKey === "A") {
-    phaseReason = "A_CONFIRMED_WAITING_FOR_B";
-
-  } else if (lastKey === "B") {
-    const bPrice = Number(waveMarks?.B?.p);
-    const hasCurrentPrice =
-      typeof currentPrice === "number" && Number.isFinite(currentPrice);
-
-    if (hasCurrentPrice && Number.isFinite(bPrice) && currentPrice > bPrice) {
-      phaseReason = "PRICE_ABOVE_B";
-    } else {
-      phaseReason = "B_CONFIRMED_WAITING_FOR_C";
-    }
-
-  } else if (lastKey === "C") {
-    phaseReason = "C_CONFIRMED_COMPLETE";
-  }
-
+  // ------------------------------------------------------------
+  // Default:
+  // No trend-vs-wave conflict requiring special handling.
+  // ------------------------------------------------------------
   return {
-    phase,
-    confirmedPhase,
-    phaseReason,
-    lastMark: { key: lastKey, ...waveMarks[lastKey] },
-    nextMark: nextKey ? { key: nextKey, ...waveMarks[nextKey] } : null,
-    marksPresent,
+    state: "NO_TREND_WAVE_CONFLICT",
+    waveSuggestion:
+      minorPhase === "IN_W4" ? "POSSIBLE_W4" :
+      minorPhase === "IN_W3" ? "MINOR_W3_ACTIVE" :
+      "NONE",
+    trendConfirmation: "NO_SPECIAL_CONFLICT",
+    marketMeterBias: "NEUTRAL_OR_UNCONFIRMED",
+    oneHourScore,
+    fourHourScore,
+    dailyScore,
+    masterScore,
+    priceAboveDailyEma10,
+    priceAbove4hEma10,
+    priceAbove1hEma10,
+    trueW4Confirmed: false,
+    suppressW4Entries: false,
+    forceNoBlindShorts: false,
+    minorPhase,
+    minutePhase,
+    confirmedMinutePhase,
+    reasonCodes: [
+      ...reasonCodes,
+      "NO_TREND_WAVE_CONFLICT",
+    ],
   };
 }
 
-function detectCInternalStructure(waveMarks, phase, currentPrice) {
-  if (phase !== "IN_C") return null;
+function applyTrendVsWaveSafety(out, trendVsWave) {
+  if (!out || typeof out !== "object") return out;
 
-  const markA = waveMarks?.A;
-  const markB = waveMarks?.B;
+  const rawState = upper(out.state || out.type);
+  const w4SpecificEntry =
+    rawState === "A_TO_B_TRIGGER_LONG" ||
+    rawState === "W5_TRIGGER_LONG";
 
-  if (!isRealMark(markA) || !isRealMark(markB)) return null;
+  const forceNoBlindShorts = trendVsWave?.forceNoBlindShorts === true;
+  const suppressW4Entries = trendVsWave?.suppressW4Entries === true;
 
-  const aPrice = Number(markA.p);
-  const bPrice = Number(markB.p);
-  const p = Number(currentPrice);
+  let next = {
+    ...out,
+    trendVsWave: trendVsWave || null,
+  };
 
-  if (!Number.isFinite(aPrice) || !Number.isFinite(bPrice)) return null;
-  if (!Number.isFinite(p)) return "FORMING";
+  if (next.allowShortEntry == null) {
+    next.allowShortEntry = next.allowShort === true;
+  }
 
-  if (p > aPrice) return "FORMING";
+  if (forceNoBlindShorts) {
+    next = {
+      ...next,
+      allowShort: false,
+      allowShortEntry: false,
+      marketBias: next.marketBias
+        ? {
+            ...next.marketBias,
+            bias:
+              next.marketBias?.bias === "NEUTRAL"
+                ? "BULLISH_SUPPORTIVE_NO_BLIND_SHORTS"
+                : next.marketBias.bias,
+            blockShorts: true,
+            allowShorts: false,
+            reason:
+              next.marketBias?.reason === "NO_CLEAR_STRUCTURE"
+                ? "TREND_VS_WAVE_BLOCKS_BLIND_SHORTS"
+                : next.marketBias.reason,
+          }
+        : {
+            bias: "BULLISH_SUPPORTIVE_NO_BLIND_SHORTS",
+            blockShorts: true,
+            blockLongs: false,
+            allowLongs: false,
+            allowShorts: false,
+            reason: "TREND_VS_WAVE_BLOCKS_BLIND_SHORTS",
+          },
+    };
 
-  return "FORMING";
+    next.reasonCodes = [
+      ...(Array.isArray(next.reasonCodes) ? next.reasonCodes : []),
+      "TREND_VS_WAVE_NO_BLIND_SHORTS",
+    ];
+  }
+
+  if (forceNoBlindShorts && next.status === "ENTRY_SHORT") {
+    next = {
+      ...next,
+      active: true,
+      setupType: "SHORT_BLOCKED_BY_TREND_VS_WAVE",
+      type: "SHORT_BLOCKED_BY_TREND_VS_WAVE",
+      state: "SHORT_BLOCKED_BY_TREND_VS_WAVE",
+      status: "NO_SHORT",
+      readiness: "NO_TRADE",
+      direction: "NONE",
+      side: "SHORT",
+      allowShort: false,
+      allowShortEntry: false,
+      allowLongEntry: false,
+      triggerConfirmed: false,
+      needs: "WAIT_FOR_CONFIRMED_BREAKDOWN",
+      reasonCodes: [
+        ...(Array.isArray(next.reasonCodes) ? next.reasonCodes : []),
+        "SHORT_ENTRY_SUPPRESSED_TREND_STILL_SUPPORTED",
+      ],
+    };
+  }
+
+  if (suppressW4Entries && w4SpecificEntry) {
+    const originalState = rawState;
+
+    next = {
+      ...next,
+
+      // Public state remains Engine17-compatible.
+      type: "W4_ACTIVE_WAIT",
+      state: "W4_ACTIVE_WAIT",
+
+      // Preserve the real ABC signal as detail.
+      abcState: next.abcState || originalState,
+      abcType: next.abcType || next.type || originalState,
+      correctionLeg: next.correctionLeg || next.debug?.correctionLeg || null,
+      nextFocus:
+        next.nextFocus ||
+        next.debug?.nextFocus ||
+        "WAIT_FOR_TRUE_W4_CONFIRMATION_OR_W3_CONTINUATION",
+
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      confidence: Math.min(Number(next.confidence || 0), 40),
+      needs: "WAIT_FOR_TRUE_W4_CONFIRMATION_OR_W3_CONTINUATION",
+
+      reasonCodes: [
+        ...(Array.isArray(next.reasonCodes) ? next.reasonCodes : []),
+        "W4_ENTRY_SUPPRESSED_TREND_NOT_CONFIRMED",
+        "WAIT_FOR_TRUE_W4_CONFIRMATION_OR_W3_CONTINUATION",
+      ],
+    };
+  }
+
+  if (trendVsWave?.state === "LATE_W3_CONSOLIDATION") {
+    next = {
+      ...next,
+      needs:
+        next.needs === "WAIT_FOR_W5_TRIGGER" ||
+        next.needs === "ENTRY_ACTIVE" ||
+        next.needs === "WAIT_FOR_SETUP"
+          ? "WAIT_FOR_TRUE_W4_CONFIRMATION_OR_W3_CONTINUATION"
+          : next.needs,
+      reasonCodes: [
+        ...(Array.isArray(next.reasonCodes) ? next.reasonCodes : []),
+        "POSSIBLE_W4_BUT_TREND_STILL_SUPPORTED",
+      ],
+    };
+  }
+
+  return next;
 }
 
-// 👇 ADD HERE (LINE ~831)
-function detectCExtensionZone(fib, currentPrice) {
-  if (!fib || typeof fib !== "object") return "NONE";
+function logEntryIfNeeded({
+  symbol,
+  strategyId,
+  tf,
+  type,
+  status,
+  direction,
+  price,
+  confidence,
+  targetMove,
+  invalidationLevel,
+}) {
+  if (status !== "ENTRY_LONG" && status !== "ENTRY_SHORT") return;
 
-  const r50 = Number(fib?.r500);
-  const r618 = Number(fib?.r618);
-  const p = Number(currentPrice);
-
-  if (!Number.isFinite(p)) return "NONE";
-
-  if (Number.isFinite(r618) && p > r618) return "ABOVE_618";
-  if (Number.isFinite(r50) && p > r50) return "ABOVE_50";
-
-  return "NONE";
+  logEngine22Alert({
+    symbol,
+    strategyId,
+    tf,
+    type,
+    status,
+    direction,
+    price,
+    confidence,
+    targetMove,
+    invalidationLevel,
+    triggeredAt: new Date().toISOString(),
+  });
 }
-readFibInputRows()
-getManualLevelRowsFor()
-attachManualLevelsToEngine2Block()
 
-async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
-  const [w1, w4, lastBarTimeSec] = await Promise.all([
-    fetchFibLevels({ symbol, tf, degree, wave: "W1" }).catch(() => ({ ok: false })),
-    fetchFibLevels({ symbol, tf, degree, wave: "W4" }).catch(() => ({ ok: false })),
-    fetchLastBarTimeSec({ symbol, tf }).catch(() => null),
-  ]);
+function getCorrectionLevels({ engine2State, setup }) {
+  const minute = engine2State?.minute || {};
 
-  const ok = !!(w1?.ok || w4?.ok);
+  if (setup === "W2_TO_W3_LONG") {
+    const w2Low =
+      validPrice(minute?.w2Low) ??
+      validPrice(minute?.cLow) ??
+      validPrice(minute?.supportLevel) ??
+      validPrice(minute?.invalidationLevel);
 
-  const { fibScore, invalidated, anchorTag } = calcFibScore(w1, w4);
+    const bHigh =
+      validPrice(minute?.bHigh) ??
+      validPrice(minute?.lowerHighLevel) ??
+      validPrice(minute?.continuationLevel);
 
-  const waveMarks =
-    (w1?.ok ? w1?.anchors?.waveMarks : null) ||
-    (w4?.ok ? w4?.anchors?.waveMarks : null) ||
+    return {
+      correctionLow: w2Low,
+      triggerLevel: bHigh,
+      correctionLowName: "w2Low",
+      triggerLevelName: "bHigh",
+    };
+  }
+
+  if (setup === "W4_TO_W5_LONG") {
+    const w4Low =
+      validPrice(minute?.w4Low) ??
+      (
+        minute?.lastMark?.key === "W4"
+          ? validPrice(minute?.lastMark?.p)
+          : null
+      ) ??
+      validPrice(minute?.cLow) ??
+      validPrice(minute?.supportLevel) ??
+      validPrice(minute?.invalidationLevel);
+
+    const bHigh =
+      validPrice(minute?.bHigh) ??
+      validPrice(minute?.lowerHighLevel) ??
+      validPrice(minute?.continuationLevel);
+
+    return {
+      correctionLow: w4Low,
+      triggerLevel: bHigh,
+      correctionLowName: "w4Low",
+      triggerLevelName: "bHigh",
+    };
+  }
+
+  return {
+    correctionLow: null,
+    triggerLevel: null,
+    correctionLowName: null,
+    triggerLevelName: null,
+  };
+}
+
+function detectCorrectionToImpulseLong({
+  setup,
+  engine2State,
+  engine16,
+  marketBias,
+  latestClose,
+  ema10,
+  ema20,
+}) {
+  const phases = getWavePhases(engine2State);
+  const {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    minutePhase,
+  } = phases;
+
+  const bullishHigherWaveContext = isBullishHigherWaveContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+  });
+
+  const requiredMinutePhase =
+    setup === "W2_TO_W3_LONG" ? "IN_W2" :
+    setup === "W4_TO_W5_LONG" ? "IN_W4" :
     null;
 
-  const { phase, confirmedPhase, phaseReason, lastMark, nextMark, marksPresent } = computeWavePhaseFromMarks(
-   waveMarks,
-   lastBarTimeSec,
-   currentPrice
- );
-  const fibSource = w1?.ok ? w1?.fib : w4?.ok ? w4?.fib : null;
+  const nextImpulse =
+    setup === "W2_TO_W3_LONG" ? "W3" :
+    setup === "W4_TO_W5_LONG" ? "W5" :
+    "UNKNOWN";
 
-  const cExtensionZone =
-    phase === "IN_C"
-      ? detectCExtensionZone(fibSource, currentPrice)
-      : "NONE";
-  
-   const cInternalStructure = detectCInternalStructure(
-    waveMarks,
-    phase,
-    currentPrice
-  );
- 
-  const cShortWatch =
-    cInternalStructure === "FORMING" &&
-    cExtensionZone === "ABOVE_618"; 
+  const readyState =
+    setup === "W2_TO_W3_LONG" ? "W3_READY" :
+    setup === "W4_TO_W5_LONG" ? "W5_READY" :
+    "READY";
 
-  const wave3Retrace = computeWave3RetraceMap({
-    waveMarks,
-    currentPrice,
-    phase,
-  });
-  
-  const waveMode =
-   ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
-   
-  const isCorrective = waveMode === "CORRECTIVE";
-  const isImpulse = waveMode === "IMPULSE";
-  const isFinalCorrectionLeg = phase === "IN_C";
+  const triggerState =
+    setup === "W2_TO_W3_LONG" ? "W3_TRIGGER_LONG" :
+    setup === "W4_TO_W5_LONG" ? "W5_TRIGGER_LONG" :
+    "TRIGGER_LONG";
 
-  let correctionDirection = null;
-  if (waveMode === "CORRECTIVE") {
-    correctionDirection = "UP";
-  }
+  const activeWaitType =
+    setup === "W2_TO_W3_LONG" ? "W2_ACTIVE_WAIT" :
+    setup === "W4_TO_W5_LONG" ? "W4_ACTIVE_WAIT" :
+    "CORRECTION_ACTIVE_WAIT";
 
-  return {
-    degree,
-    tf,
-    ok,
-    waveRequested: w4?.ok ? "W4" : w1?.ok ? "W1" : null,
-    fibScore,
-    invalidated,
-    phase,
-    confirmedPhase,
-    phaseReason,
-    cExtensionZone, 
-    lastMark,
-    nextMark,
-    marksPresent,
-    anchorTag: anchorTag ?? null,
-    waveMode,
-    isCorrective,
-    isImpulse,
-    isFinalCorrectionLeg,
-    correctionDirection,
-    cInternalStructure,
-    cShortWatch,
-    wave3Retrace, 
-  };
-}
-function getWaveMarkPrice(waveMarks, key) {
-  const p = Number(waveMarks?.[key]?.p);
-  return Number.isFinite(p) && p > 0 ? p : null;
-}
+  const waitNeed =
+    setup === "W2_TO_W3_LONG" ? "WAIT_FOR_W3_TRIGGER" :
+    setup === "W4_TO_W5_LONG" ? "WAIT_FOR_W5_TRIGGER" :
+    "WAIT_FOR_TRIGGER";
 
-function computeWave3RetraceMap({ waveMarks, currentPrice, phase }) {
-  const wave3Start = getWaveMarkPrice(waveMarks, "W2");
-  const wave3End = getWaveMarkPrice(waveMarks, "W3");
-  const price = Number(currentPrice);
-
-  if (!wave3Start || !wave3End || !Number.isFinite(price)) {
+  if (!requiredMinutePhase || minutePhase !== requiredMinutePhase) {
     return {
       active: false,
-      source: "MINUTE_W2_TO_W3",
-      reason: "MISSING_W2_W3_OR_PRICE",
-      wave3Start,
-      wave3End,
-      currentPrice: Number.isFinite(price) ? Number(price.toFixed(2)) : null,
-      levels: null,
-      zone: null,
-      timeline: {
-        label: "Wave 3 retracement map unavailable",
-        message: "Missing W2, W3, or current price.",
-      },
+      setupType: "NONE",
+      reasonCodes: ["NOT_REQUIRED_MINUTE_PHASE"],
     };
   }
 
-  const range = wave3End - wave3Start;
+  const {
+    correctionLow,
+    triggerLevel,
+    correctionLowName,
+    triggerLevelName,
+  } = getCorrectionLevels({ engine2State, setup });
 
-  if (!Number.isFinite(range) || range <= 0) {
-    return {
-      active: false,
-      source: "MINUTE_W2_TO_W3",
-      reason: "INVALID_WAVE3_RANGE",
-      wave3Start,
-      wave3End,
-      currentPrice: Number(price.toFixed(2)),
-      levels: null,
-      zone: null,
-      timeline: {
-        label: "Wave 3 retracement map invalid",
-        message: "Wave 3 start/end range is invalid.",
-      },
-    };
-  }
+  const close = validPrice(latestClose);
+  const e10 = validPrice(ema10);
+  const e20 = validPrice(ema20);
 
-  const levels = {
-    r236: wave3End - range * 0.236,
-    r382: wave3End - range * 0.382,
-    r500: wave3End - range * 0.5,
-    r618: wave3End - range * 0.618,
-    r786: wave3End - range * 0.786,
-  };
+  const prevClose =
+    validPrice(engine16?.previousClose) ??
+    validPrice(engine16?.prevClose) ??
+    null;
 
-  const roundLevels = Object.fromEntries(
-    Object.entries(levels).map(([k, v]) => [k, Number(v.toFixed(2))])
-  );
+  const correctionLowHeld =
+    correctionLow !== null &&
+    close !== null &&
+    close >= correctionLow * 0.995;
 
-  const zone50To618 = {
-    lo: Math.min(levels.r500, levels.r618),
-    hi: Math.max(levels.r500, levels.r618),
-  };
-
-  const inZone50To618 =
-    price >= zone50To618.lo &&
-    price <= zone50To618.hi;
-
-  const aboveZone =
-    price > zone50To618.hi;
-
-  const belowZone =
-    price < zone50To618.lo;
-
-  let zoneState = "NOT_IN_ZONE";
-  let message = "Price is not yet inside the 0.5–0.618 Wave 3 retracement zone. Wait for price action.";
-
-  if (inZone50To618) {
-    zoneState = "IN_50_618_ZONE";
-    message = "Price is inside the 0.5–0.618 Wave 3 retracement zone. Watch for Wave A low / B bounce. No trade yet.";
-  } else if (aboveZone) {
-    zoneState = "ABOVE_50_618_ZONE";
-    message = "Price is above the 0.5–0.618 Wave 3 retracement zone. Wave A may still be shallow or still forming.";
-  } else if (belowZone) {
-    zoneState = "BELOW_50_618_ZONE";
-    message = "Price has moved below the 0.5–0.618 Wave 3 retracement zone. Watch deeper W4 support such as 0.786.";
-  }
-
-  const active =
-    phase === "IN_W4" ||
-    phase === "IN_W2";
-
-  return {
-    active,
-    source: "MINUTE_W2_TO_W3",
-    reason: active ? "CORRECTION_PHASE_ACTIVE" : "NOT_IN_W2_W4",
-    wave3Start: Number(wave3Start.toFixed(2)),
-    wave3End: Number(wave3End.toFixed(2)),
-    currentPrice: Number(price.toFixed(2)),
-    range: Number(range.toFixed(2)),
-    levels: roundLevels,
-    zone: {
-      name: "WAVE_A_WATCH_ZONE_50_618",
-      state: zoneState,
-      lo: Number(zone50To618.lo.toFixed(2)),
-      hi: Number(zone50To618.hi.toFixed(2)),
-      inZone: inZone50To618,
-      aboveZone,
-      belowZone,
-    },
-    timeline: {
-      label:
-        phase === "IN_W4"
-          ? "Minute W4 active — watching Wave A pullback zone"
-          : phase === "IN_W2"
-          ? "Minute W2 active — watching correction pullback zone"
-          : "Wave 3 retracement map",
-      message,
-      nextFocus:
-        phase === "IN_W4"
-          ? "Wait for A low, B bounce, then W5 trigger structure."
-          : phase === "IN_W2"
-          ? "Wait for A low, B bounce, then W3 trigger structure."
-          : "No correction action needed.",
-    },
-  };
-}
-/* -----------------------------
-   Reaction / Volume
-------------------------------*/
-async function fetchReaction({ symbol, tf, strategyId, zoneId, zoneLo, zoneHi }) {
-  const u = new URL(`${CORE_BASE}/api/v1/reaction-score`);
-  u.searchParams.set("symbol", symbol);
-  u.searchParams.set("tf", tf);
-  u.searchParams.set("strategyId", strategyId);
-
-  if (zoneId) u.searchParams.set("zoneId", zoneId);
-  if (zoneLo != null) u.searchParams.set("lo", String(zoneLo));
-  if (zoneHi != null) u.searchParams.set("hi", String(zoneHi));
-
-  const r = await fetchJson(u.toString(), 30000);
-
-  if (r.ok && r.json) return r.json;
-
-  return {
-    ok: true,
-    invalid: false,
-    reactionScore: 0,
-    structureState: "HOLD",
-    reasonCodes: ["ENGINE3_UNAVAILABLE"],
-    zone: { id: zoneId, lo: zoneLo, hi: zoneHi },
-    armed: false,
-    stage: "IDLE",
-    mode: modeFromStrategyId(strategyId),
-    diagnostics: { error: r?.text || "ENGINE3_FETCH_FAILED" },
-  };
-}
-
-async function fetchVolume({ symbol, tf, zoneLo, zoneHi, mode }) {
-  if (zoneLo == null || zoneHi == null) {
-    return {
-      ok: true,
-      volumeScore: 0,
-      volumeConfirmed: false,
-      reasonCodes: ["NO_ACTIVE_ZONE"],
-      flags: {},
-      diagnostics: { note: "NO_ACTIVE_ZONE" },
-    };
-  }
-
-  const u = new URL(`${CORE_BASE}/api/v1/volume-behavior`);
-  u.searchParams.set("symbol", symbol);
-  u.searchParams.set("tf", tf);
-  u.searchParams.set("zoneLo", String(zoneLo));
-  u.searchParams.set("zoneHi", String(zoneHi));
-  if (mode) u.searchParams.set("mode", mode);
-
-  const r = await fetchJson(u.toString(), 30000);
-
-  if (r.ok && r.json) return r.json?.raw || r.json;
-
-  return {
-    ok: true,
-    volumeScore: 0,
-    volumeConfirmed: false,
-    reasonCodes: ["ENGINE4_UNAVAILABLE"],
-    flags: {},
-    diagnostics: { error: r?.text || "ENGINE4_FETCH_FAILED" },
-  };
-}
-
-/* -----------------------------
-   Build one strategy
-------------------------------*/
-async function processStrategy(
-  s,
-  momentum,
-  marketMind,
-  marketRegime,
-  engine16,
-  engine2State
-) {
-
-  const contextResp = await fetchJson(
-    `${CORE_BASE}/api/v1/engine5-context?symbol=${symbol}&tf=${s.tf}`,
-    30000
-  );
-
-  const engine1Context =
-    contextResp?.json ||
-    { ok: false, status: contextResp?.status || 0, error: contextResp?.text || "no_context" };
-
-  const price = Number(engine1Context?.meta?.current_price ?? NaN);
-  const strategyMode = modeFromStrategyId(s.strategyId);
-
-  let execZoneRef = Number.isFinite(price)
-    ? pickActiveExecutionZone(engine1Context, price)
-    : null;
-
-  let execZoneRefSource = "ACTIVE";
-
-  if (!execZoneRef && strategyMode === "scalp") {
-    const ns = engine1Context?.nearest?.shelf ?? null;
-    if (ns && ns.lo != null && ns.hi != null) {
-      execZoneRef = ns;
-      execZoneRefSource = "NEAREST_SHELF_SCALP_REF";
-    }
-  }
-
-  const zoneId = execZoneRef?.id ?? null;
-  const zoneLo = execZoneRef?.lo ?? null;
-  const zoneHi = execZoneRef?.hi ?? null;
-
-  const fib = await fetchFibLevels({
-    symbol,
-    tf: s.tf,
-    degree: s.degree,
-    wave: s.wave,
-  }).catch(() => ({
-    ok: false,
-    reason: "ENGINE2_UNAVAILABLE",
-    message: "builder_fib_fetch_failed",
-    meta: { symbol, tf: s.tf, degree: s.degree, wave: s.wave, generated_at_utc: null },
-    anchors: null,
-    signals: { invalidated: false, inRetraceZone: false, near50: false, tag: null },
-  }));
-
-  const reaction = await fetchReaction({
-    symbol,
-    tf: s.tf,
-    strategyId: s.strategyId,
-    zoneId,
-    zoneLo,
-    zoneHi,
-  });
-
-  const volume = await fetchVolume({
-    symbol,
-    tf: s.tf,
-    zoneLo,
-    zoneHi,
-    mode: strategyMode,
-  });
-
-  let confluence = computeConfluenceScore({
-    symbol,
-    tf: s.tf,
-    degree: s.degree,
-    wave: s.wave,
-    price: Number.isFinite(price) ? price : null,
-    engine1Context,
-    fib,
-    reaction,
-    volume,
-    strategyId: s.strategyId,
-    mode: strategyMode,
-    zoneRefOverride: execZoneRef
-      ? {
-          id: execZoneRef.id ?? null,
-          lo: execZoneRef.lo ?? null,
-          hi: execZoneRef.hi ?? null,
-          mid: execZoneRef.mid ?? null,
-          strength: execZoneRef.strength ?? null,
-          type: execZoneRef.type ?? null,
-          zoneType:
-            execZoneRefSource === "ACTIVE"
-              ? (
-                  engine1Context?.active?.negotiated ? "NEGOTIATED" :
-                  engine1Context?.active?.shelf ? "SHELF" :
-                  engine1Context?.active?.institutional ? "INSTITUTIONAL" :
-                  null
-                )
-              : "SHELF",
-        }
-      : null,
-    zoneRefSource: execZoneRefSource,
-  });
-
-  keepAliveNoZone(confluence);
-
-  confluence.strategyId = confluence.strategyId ?? s.strategyId;
-  confluence.mode = confluence.mode ?? strategyMode;
-  confluence.zoneRefSource = confluence.zoneRefSource ?? execZoneRefSource;
-  confluence.volumeState = confluence.volumeState ?? volumeStateFromEngine4(volume, execZoneRef);
-
-  confluence.engine2 = confluence.engine2 || {};
-  confluence.engine2.anchorTag = fib?.signals?.tag ?? null;
-  confluence.engine2.invalidated = fib?.signals?.invalidated ?? false;
-  confluence.engine2.inRetraceZone = fib?.signals?.inRetraceZone ?? false;
-  confluence.engine2.near50 = fib?.signals?.near50 ?? false;
-  confluence.engine2.request = { tf: s.tf, degree: s.degree, wave: s.wave };
-
-  confluence.context = confluence.context || {};
-  confluence.context.activeZone =
-    confluence.context.activeZone ||
-    (execZoneRef
-      ? {
-          id: execZoneRef.id ?? null,
-          zoneType:
-            execZoneRefSource === "ACTIVE"
-              ? (
-                  engine1Context?.active?.negotiated ? "NEGOTIATED" :
-                  engine1Context?.active?.shelf ? "SHELF" :
-                  engine1Context?.active?.institutional ? "INSTITUTIONAL" :
-                  null
-                )
-              : "SHELF",
-          lo: execZoneRef.lo ?? null,
-          hi: execZoneRef.hi ?? null,
-          mid: execZoneRef.mid ?? null,
-          strength: execZoneRef.strength ?? null,
-          source: execZoneRefSource,
-        }
-      : null);
-
-  confluence.context.fib = {
-    meta: fib?.meta ?? null,
-    anchors: fib?.anchors?.waveMarks ?? fib?.anchors ?? null,
-    signals: fib?.signals ?? null,
-  };
-
-  confluence.context.reaction = {
-  stage: reaction?.stage ?? "IDLE",
-  armed: reaction?.armed ?? false,
-  reactionScore: Number(reaction?.reactionScore ?? 0),
-  confirmed: reaction?.confirmed === true,
-  structureState: reaction?.structureState ?? "HOLD",
-  reasonCodes: Array.isArray(reaction?.reasonCodes) ? reaction.reasonCodes : [],
-  waveReaction: reaction?.waveReaction || null,
-};
-
-  confluence.context.volume = {
-    volumeScore: Number(volume?.volumeScore ?? 0),
-    volumeConfirmed: volume?.volumeConfirmed === true,
-    flags: volume?.flags ?? {},
-    state: confluence.volumeState,
-    reasonCodes: Array.isArray(volume?.reasonCodes) ? volume.reasonCodes : [],
-  };
-
-  confluence.context.engine1 = {
-    meta: engine1Context?.meta ?? null,
-    active: engine1Context?.active ?? null,
-    nearest: engine1Context?.nearest ?? null,
-    render: engine1Context?.render ?? null,
-  };
-
-  const patchedConfluence =
-    contextResp?.ok !== false && engine1Context
-      ? applyNearAllowedZoneDisplay({ confluence, ctx: engine1Context })
-      : confluence;
-
-  const zoneContext = buildZoneContext(
-    engine1Context,
-    patchedConfluence?.location || null
-  );
-
-  const permissionBody = {
-    symbol,
-    tf: s.tf,
-    strategyType:
-      patchedConfluence?.strategyType ||
-      engine16?.strategyType ||
-      "UNKNOWN",
-    engine5: normalizeEngine5ForEngine6(patchedConfluence),
-    marketMeter: null,
-    marketRegime,
-    zoneContext,
-    intent: { action: "NEW_ENTRY" },
-  };
-
-  const permissionResp = await postJson(
-    `${CORE_BASE}/api/v1/trade-permission`,
-    permissionBody,
-    30000
-  );
-
-  const permissionV2Body = {
-    symbol,
-    strategyId: s.strategyId,
-    market: marketMind,
-    setup: {
-      setupScore: Number(patchedConfluence?.scores?.total) || Number(patchedConfluence?.total) || 0,
-      label: patchedConfluence?.scores?.label || patchedConfluence?.label || "D",
-      invalid: Boolean(patchedConfluence?.invalid),
-    },
-  };
-
-  const permissionV2Resp = await postJson(
-    `${CORE_BASE}/api/v1/trade-permission-v2`,
-    permissionV2Body,
-    30000
-  );
-
-  const bucket = bucketForStrategyId(s.strategyId);
-  const map = bucket ? ENGINE2_MAP[bucket] : null;
-
-  let engine2 = null;
-  if (map) {
-    try {
-      engine2 = await buildEngine2Block({
-        symbol,
-        degree: map.degree,
-        tf: map.tf,
-      });
-    } catch {
-      engine2 = {
-        degree: map.degree,
-        tf: map.tf,
-        ok: false,
-        waveRequested: null,
-        fibScore: 0,
-        invalidated: false,
-        phase: "UNKNOWN",
-        lastMark: null,
-        nextMark: null,
-        marksPresent: [],
-        anchorTag: null,
-        error: "ENGINE2_ATTACH_FAILED",
-      };
-    }
-  }
-
-  const engine15Decision = computeEngine15DecisionReferee({
-    symbol,
-    strategyId: s.strategyId,
-    engine16,
-    engine5: patchedConfluence || null,
-    momentum,
-    permission:
-      permissionResp?.json ||
-      {
-        permission: "UNKNOWN",
-        sizeMultiplier: null,
-        reasonCodes: [],
-      },
-    engine3: patchedConfluence?.context?.reaction || null,
-    engine4: patchedConfluence?.context?.volume || null,
-    waveReaction: reaction?.waveReaction || null,
-    zoneContext,
-  });
-
- const lockedSignal = updateSignalLock({
-  symbol,
-  strategyId: s.strategyId,
-  signalEvent: engine15Decision?.signalEvent,
-});
-   
-  const engine15 = computeEngine15Readiness({
-    symbol,
-    strategyId: s.strategyId,
-    engine16,
-    engine3: patchedConfluence?.context?.reaction || null,
-    engine4: patchedConfluence?.context?.volume || null,
-    engine5: patchedConfluence || null,
-    engine15Decision: engine15Decision || null,
-  });
-
-  let executionBias = "NORMAL";
-
-  if (engine15?.readiness === "EXHAUSTION_READY") {
-    if (engine15?.direction === "SHORT") {
-      executionBias = "SHORT_PRIORITY";
-    } else if (engine15?.direction === "LONG") {
-      executionBias = "LONG_PRIORITY";
-    }
-  }
-     console.log("[E22 DEBUG]", {
-     strategyId: s.strategyId,
-     tf: s.tf,
-     condition: s.strategyId === "intraday_scalp@10m" && s.tf === "10m"
-   }); 
-    const engine22Scalp =
-      s.strategyId === "intraday_scalp@10m" && s.tf === "10m"
-        ? computeEngine22ScalpOpportunity({
-            symbol,
-            strategyId: s.strategyId,
-            tf: s.tf,
-            engine16,
-            reaction: patchedConfluence?.context?.reaction || null,
-            waveReaction: reaction?.waveReaction || null,
-            engine2State,
-            marketMind,
-          })
-        : null;
-  return {
-    strategyId: s.strategyId,
-    lockedSignal, 
-    tf: s.tf,
-    degree: s.degree,
-    wave: s.wave,
-    marketRegime,
-    confluence: patchedConfluence,
-    permission:
-      permissionResp?.json || { ok: false, status: permissionResp?.status || 0, error: permissionResp?.text || "no_permission" },
-    engine6v2:
-      permissionV2Resp?.json || {
-        ok: false,
-        status: permissionV2Resp?.status || 0,
-        error: permissionV2Resp?.text || "no_v2",
-      },
-    engine2,
-    engine16,
-    engine22Scalp,
-    engine15,
-    engine15Decision,
-    executionBias,
-    momentum,
-    context: engine1Context,
-  };
-}
-
-
-function parseCsvLine(line) {
-  return String(line || "")
-    .split(",")
-    .map((x) => x.trim());
-}
-
-function readFibInputRows() {
-  try {
-    if (!fs.existsSync(FIB_INPUT_FILE)) return [];
-
-    const text = fs.readFileSync(FIB_INPUT_FILE, "utf8");
-
-    return text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#"))
-      .slice(1)
-      .map((line) => {
-        const [symbol, degree, tf, wave, kind, datetime_az, price] =
-          parseCsvLine(line);
-
-        return {
-          symbol,
-          degree,
-          tf,
-          wave,
-          kind,
-          datetime_az,
-          price: Number(price),
-        };
-      });
-  } catch (err) {
-    console.warn("[Engine2] Failed reading fib-input.csv:", err?.message);
-    return [];
-  }
-}
-
-function getManualLevelRowsFor(args = {}) {
-  const { symbol, degree, tf } = args;
-
-  return readFibInputRows().filter((row) => {
-    return (
-      String(row.symbol || "").toUpperCase() === String(symbol || "").toUpperCase() &&
-      String(row.degree || "").toLowerCase() === String(degree || "").toLowerCase() &&
-      String(row.tf || "").toLowerCase() === String(tf || "").toLowerCase() &&
-      String(row.kind || "").toUpperCase() === "LEVEL"
-    );
-  });
-}
-
-function attachManualLevelsToEngine2Block(block, levelRows = []) {
-  if (!block || typeof block !== "object") return block;
-
-  const findLevel = (name) => {
-    const row = levelRows.find(
-      (r) => String(r.wave || "").toUpperCase() === name
+  const reclaimedEma10 =
+    close !== null &&
+    e10 !== null &&
+    (
+      prevClose !== null
+        ? prevClose <= e10 && close > e10
+        : close > e10
     );
 
-    const price = Number(row?.price);
-    return Number.isFinite(price) ? price : null;
-  };
+  const aboveEma20 =
+    close !== null &&
+    e20 !== null &&
+    close > e20;
 
-  const aLow = findLevel("A_LOW");
-  const bHigh = findLevel("B_HIGH");
-  const cLow = findLevel("C_LOW");
+  const brokeTriggerLevel =
+    close !== null &&
+    triggerLevel !== null &&
+    close > triggerLevel;
+
+  const missingLevels = [];
+  if (correctionLow === null) missingLevels.push(correctionLowName || "correctionLow");
+  if (triggerLevel === null) missingLevels.push(triggerLevelName || "triggerLevel");
+
+  const triggerConfirmed =
+    bullishHigherWaveContext &&
+    correctionLowHeld &&
+    reclaimedEma10 &&
+    aboveEma20 &&
+    brokeTriggerLevel;
+
+  const ready =
+    bullishHigherWaveContext &&
+    correctionLowHeld &&
+    reclaimedEma10 &&
+    aboveEma20 &&
+    !brokeTriggerLevel;
+
+  const confidenceBase =
+    setup === "W2_TO_W3_LONG" ? 88 :
+    setup === "W4_TO_W5_LONG" ? 76 :
+    70;
+
+  if (triggerConfirmed) {
+    return {
+      active: true,
+      setupType: setup,
+      type: setup,
+      state: triggerState,
+      status: "ENTRY_LONG",
+      readiness: "GO_LONG",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: true,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: true,
+      triggerType: "BREAK_ABOVE_B_HIGH_OR_LOWER_HIGH",
+      triggerLevel: round2(triggerLevel),
+      stopLevel: round2(correctionLow),
+      confidence: confidenceBase,
+      sizeMode: setup === "W2_TO_W3_LONG" ? "NORMAL" : "CAUTION",
+      needs: "ENTRY_ACTIVE",
+      marketBias,
+      reasonCodes: [
+        "BULLISH_HIGHER_WAVE_CONTEXT",
+        `${requiredMinutePhase}_ACTIVE`,
+        `${nextImpulse}_IMPULSE_TRIGGER`,
+        "CORRECTION_LOW_HELD",
+        "EMA10_RECLAIM",
+        "ABOVE_EMA20",
+        "BREAK_ABOVE_TRIGGER_LEVEL",
+        triggerState,
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        setup,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        correctionLow,
+        triggerLevel,
+        correctionLowHeld,
+        reclaimedEma10,
+        aboveEma20,
+        brokeTriggerLevel,
+        missingLevels,
+      },
+    };
+  }
+
+  if (ready) {
+    return {
+      active: true,
+      setupType: setup,
+      type: readyState,
+      state: readyState,
+      status: "WATCH",
+      readiness: "READY",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_BREAK_ABOVE_B_HIGH_OR_LOWER_HIGH",
+      triggerLevel: round2(triggerLevel),
+      stopLevel: round2(correctionLow),
+      confidence: Math.max(60, confidenceBase - 15),
+      sizeMode: setup === "W2_TO_W3_LONG" ? "NORMAL" : "CAUTION",
+      needs:
+        setup === "W2_TO_W3_LONG"
+          ? "WAIT_FOR_W3_TRIGGER"
+          : "WAIT_FOR_W5_TRIGGER",
+      marketBias,
+      reasonCodes: [
+        "BULLISH_HIGHER_WAVE_CONTEXT",
+        `${requiredMinutePhase}_ACTIVE`,
+        "CORRECTION_LOW_HELD",
+        "EMA10_RECLAIM",
+        "ABOVE_EMA20",
+        "WAIT_FOR_TRIGGER_LEVEL_BREAK",
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        setup,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        correctionLow,
+        triggerLevel,
+        correctionLowHeld,
+        reclaimedEma10,
+        aboveEma20,
+        brokeTriggerLevel,
+        missingLevels,
+      },
+    };
+  }
 
   return {
-    ...block,
+    active: true,
+    setupType: setup,
+    type: activeWaitType,
+    state: activeWaitType,
+    status: "WATCH",
+    readiness: "WATCH",
+    direction: "NONE",
+    side: "NONE",
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    triggerType: `WAIT_${nextImpulse}_CONFIRMATION`,
+    triggerLevel: round2(triggerLevel),
+    stopLevel: round2(correctionLow),
+    confidence: 0,
+    sizeMode: "NONE",
+    needs: waitNeed,
+    marketBias,
+    reasonCodes: [
+      `${requiredMinutePhase}_ACTIVE`,
+      "BLIND_DIP_BUY_BLOCKED",
+      "WAIT_FOR_CORRECTION_TO_IMPULSE_TRIGGER",
+      ...(bullishHigherWaveContext ? ["BULLISH_HIGHER_WAVE_CONTEXT"] : ["NO_BULLISH_HIGHER_WAVE_CONTEXT"]),
+      ...(missingLevels.length ? ["MISSING_CORRECTION_LEVELS"] : []),
+      "OBSERVATION_ONLY",
+    ],
+    debug: {
+      ...phases,
+      setup,
+      latestClose: close,
+      ema10: e10,
+      ema20: e20,
+      prevClose,
+      correctionLow,
+      triggerLevel,
+      correctionLowHeld,
+      reclaimedEma10,
+      aboveEma20,
+      brokeTriggerLevel,
+      missingLevels,
+      note:
+        missingLevels.length
+          ? "Waiting because Engine 2 has not provided correction low / B high yet."
+          : "Waiting for reclaim and trigger confirmation.",
+    },
+  };
+}
+
+function toCorrectionReturn(base, detection) {
+  return {
+    ...base,
+    active: detection.active === true,
+    setupType: detection.setupType || null,
+    type: detection.type || detection.state || "CORRECTION_ACTIVE_WAIT",
+    state: detection.state || detection.type || "CORRECTION_ACTIVE_WAIT",
+    status: detection.status || "WATCH",
+    readiness: detection.readiness || "WATCH",
+    direction: detection.direction || "NONE",
+    side: detection.side || "NONE",
+    allowLongEntry: detection.allowLongEntry === true,
+    allowShort: detection.allowShort === true,
+    allowShortEntry: detection.allowShort === true,
+    triggerConfirmed: detection.triggerConfirmed === true,
+    triggerType: detection.triggerType || null,
+    entryTriggerLevel: detection.triggerLevel ?? null,
+    invalidationLevel: detection.stopLevel ?? null,
+    stop:
+      detection.stopLevel != null
+        ? `below ${detection.stopLevel}`
+        : null,
+    confidence: detection.confidence || 0,
+    sizeMode: detection.sizeMode || "NONE",
+    needs: detection.needs || "WAIT_FOR_TRIGGER",
+    marketBias: detection.marketBias || base.marketBias || null,
+
+    abcState: detection.abcState || null,
+    abcType: detection.abcType || null,
+    correctionLeg: detection.correctionLeg || detection.debug?.correctionLeg || null,
+    nextFocus: detection.nextFocus || detection.debug?.nextFocus || null,
+    abcLevels: detection.abcLevels || null,
+
+    reasonCodes: Array.isArray(detection.reasonCodes) ? detection.reasonCodes : [],
+    debug: detection.debug || {},
+  };
+}
+
+function getMinuteABCLevels(engine2State) {
+  const minute = engine2State?.minute || {};
+
+  const aLow = validPrice(minute?.aLow);
+  const bHigh =
+    validPrice(minute?.bHigh) ??
+    validPrice(minute?.lowerHighLevel) ??
+    validPrice(minute?.continuationLevel);
+
+  const cLow = validPrice(minute?.cLow);
+  const w3High =
+    validPrice(minute?.w3High) ??
+    (minute?.lastMark?.key === "W3" ? validPrice(minute?.lastMark?.p) : null);
+
+  return {
     aLow,
     bHigh,
     cLow,
+    w3High,
     w4Low: cLow,
     lowerHighLevel: bHigh,
     continuationLevel: bHigh,
   };
 }
-async function buildEngine2State(symbol) {
-  const contextResp = await fetchJson(
-  `${CORE_BASE}/api/v1/engine5-context?symbol=${symbol}&tf=1h`,
-  30000
-);
 
-const engine1Context = contextResp?.json || {};
-const currentPrice = Number(engine1Context?.meta?.current_price ?? NaN);
+function detectMinuteW4ABC({
+  engine2State,
+  engine16,
+  marketBias,
+  latestClose,
+  ema10,
+  ema20,
+}) {
+  const phases = getWavePhases(engine2State);
+  const {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    minutePhase,
+  } = phases;
 
-const [primary, intermediate, minor, minute] = await Promise.all([
-  buildEngine2Block({ symbol, degree: "primary", tf: "1d", currentPrice }).catch(() => null),
-  buildEngine2Block({ symbol, degree: "intermediate", tf: "1h", currentPrice }).catch(() => null),
-  buildEngine2Block({ symbol, degree: "minor", tf: "1h", currentPrice }).catch(() => null),
-  buildEngine2Block({ symbol, degree: "minute", tf: "10m", currentPrice }).catch(() => null),
-]);
-
- const minuteLevelRows = getManualLevelRowsFor({
-   symbol,
-   degree: "minute",
-   tf: "10m",
- });
-
- const minuteWithLevels = attachManualLevelsToEngine2Block(
-   minute,
-   minuteLevelRows
- );
-
-let correctionDirection = null;
-
-if (intermediate?.waveMode === "CORRECTIVE") {
-  correctionDirection = "UP";
-}
-
-return {
-  primary,
-  intermediate,
-  minor,
-  minute: minuteWithLevels,
-
-  primaryPhase: primary?.phase ?? "UNKNOWN",
-  intermediatePhase: intermediate?.phase ?? "UNKNOWN",
-  minorPhase: minor?.phase ?? "UNKNOWN",
-  minutePhase: minuteWithLevels?.phase ?? "UNKNOWN",
-
-  intermediateWaveMode: intermediate?.waveMode ?? null,
-  correctionDirection,
-};
-}
-
-/* -----------------------------
-   Build snapshot
-------------------------------*/
-async function buildSnapshot() {
-  console.log("Starting strategy snapshot build...");
-
-  const momentum = await fetchMomentumContext(symbol);
-  const engine2State = await buildEngine2State(symbol);
-  console.log("Momentum fetched");
-
-  const [marketMind, engine21TenMin, engine21ThirtyMin] = await Promise.all([
-  fetchLiveMarketMeter(),
-  fetchEngine21Alignment("10m"),
-  fetchEngine21Alignment("30m"),
-]);
-
-console.log("Live Market Meter fetched");
-console.log("Engine21 alignment fetched");
-
-  const marketRegime = computeMarketRegime({
-    score10m: marketMind?.score10m,
-    score30m: marketMind?.score30m,
-    score1h: marketMind?.score1h,
-    score4h: marketMind?.score4h,
-    scoreEOD: marketMind?.scoreEOD,
-    state10m: marketMind?.state10m,
-    state30m: marketMind?.state30m,
-    state1h: marketMind?.state1h,
-    state4h: marketMind?.state4h,
-    stateEOD: marketMind?.stateEOD,
+  const bullishFinalContext = isBullishFinalImpulseContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
   });
 
-  console.log(
-    "Market regime computed:",
-    marketRegime?.regime,
-    marketRegime?.directionBias,
-    marketRegime?.strictness
-  );
-
-  const result = {
-  ok: true,
-  symbol,
-  now: nowIso(),
-  includeContext: true,
-  marketMind,
-  marketRegime,
-  momentum,
-  engine2State,
-  engine21Alignment: {
-    tenMin: engine21TenMin,
-    thirtyMin: engine21ThirtyMin,
-  },
-  engine16: null,
-  strategies: {},
-};
-
-  for (const s of STRATEGIES) {
-    let engine16ForStrategy = null;
-  try {
-  let engine2Context = {
-    primary: engine2State?.primary ?? null,
-    intermediate: engine2State?.intermediate ?? null,
-    minor: engine2State?.minor ?? null,
-  };
-
-  if (isEngine16EnabledForStrategy(s.strategyId)) {
-    engine16ForStrategy = await buildEngine16Direct(
-      symbol,
-      s.tf,
-      marketRegime,
-      engine2Context
-    );
-    console.log(`Engine16 built directly for ${s.strategyId} @ ${s.tf}`);
-  } else {
-    engine16ForStrategy = skippedEngine16(
-      symbol,
-      s.tf,
-      marketRegime,
-      engine2Context
-    );
-    console.log(`Engine16 skipped for ${s.strategyId} @ ${s.tf}`);
+  if (!bullishFinalContext || minutePhase !== "IN_W4") {
+    return {
+      active: false,
+      setupType: "NONE",
+      type: "NONE",
+      state: "NONE",
+      status: "NO_SCALP",
+      readiness: "WAIT",
+      reasonCodes: ["NOT_MINUTE_W4_CONTEXT"],
+    };
   }
 
-  const strategy = await processStrategy(
-  s,
-  momentum,
-  marketMind,
-  marketRegime,
-  engine16ForStrategy,
-  engine2State
-);
+  const close = validPrice(latestClose);
+  const e10 = validPrice(ema10);
+  const e20 = validPrice(ema20);
 
-  const executionState = getExecutionState(symbol, s.strategyId);
+  const prevClose =
+    validPrice(engine16?.previousClose) ??
+    validPrice(engine16?.prevClose) ??
+    null;
 
-  result.strategies[s.strategyId] = {
-    ...strategy,
-    executionState
-  };
-} catch (err) {
-  
-      result.strategies[s.strategyId] = {
-        strategyId: s.strategyId,
-        tf: s.tf,
-        degree: s.degree,
-        wave: s.wave,
-        marketRegime,
-        confluence: { ok: false, error: String(err?.message || err) },
-        permission: { ok: false, error: "builder_strategy_failed" },
-        engine6v2: { ok: false, error: "builder_strategy_failed" },
-        engine2: null,
-        engine16: engine16ForStrategy || fallbackEngine16(symbol, s.tf, marketRegime),
-        engine15: {
-          ok: false,
-          error: "builder_strategy_failed",
-          readiness: "NO_SETUP",
-          strategyType: "NONE",
-          direction: "NONE",
-          active: false,
-          freshEntryNow: false,
+  const continuationWatchLong = engine16?.continuationWatchLong === true;
+
+  const {
+    aLow,
+    bHigh,
+    cLow,
+    w3High,
+  } = getMinuteABCLevels(engine2State);
+
+  const hasALow = aLow !== null;
+  const hasBHigh = bHigh !== null;
+  const hasCLow = cLow !== null;
+
+  const aLowHeld =
+    hasALow &&
+    close !== null &&
+    close >= aLow * 0.995;
+
+  const cLowHeld =
+    hasCLow &&
+    close !== null &&
+    close >= cLow * 0.995;
+
+  const reclaimedEma10 =
+    close !== null &&
+    e10 !== null &&
+    (
+      prevClose !== null
+        ? prevClose <= e10 && close > e10
+        : close > e10
+    );
+
+  const aboveEma20 =
+    close !== null &&
+    e20 !== null &&
+    close > e20;
+
+  const belowEma10 =
+    close !== null &&
+    e10 !== null &&
+    close < e10;
+
+  const belowEma20 =
+    close !== null &&
+    e20 !== null &&
+    close < e20;
+
+  const brokeBHigh =
+    hasBHigh &&
+    close !== null &&
+    close > bHigh;
+
+  const rejectedBHigh =
+    hasBHigh &&
+    close !== null &&
+    close < bHigh;
+
+  // ============================================================
+  // STAGE 1:
+  // W4 active, but A low is not manually marked yet.
+  // ============================================================
+  if (!hasALow) {
+    return {
+      active: true,
+      setupType: "MINUTE_W4_ABC",
+      type: "W4_A_FORMING",
+      state: "W4_A_FORMING",
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_FOR_A_LOW",
+      triggerLevel: null,
+      stopLevel: null,
+      confidence: 0,
+      sizeMode: "NONE",
+      needs: "WAIT_FOR_A_LOW",
+      marketBias,
+      reasonCodes: [
+        "PRIMARY_W5",
+        "INTERMEDIATE_W5",
+        "MINOR_W5",
+        "MINUTE_W4_ACTIVE",
+        "WAIT_FOR_A_LOW",
+        "BLIND_DIP_BUY_BLOCKED",
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        w3High,
+        aLow,
+        bHigh,
+        cLow,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        correctionLeg: "IN_A",
+        nextFocus: "WAIT_FOR_A_LOW",
+      },
+    };
+  }
+
+  // ============================================================
+  // STAGE 2:
+  // A low exists, but B high is not marked yet.
+  // Allow structured A -> B long if confirmed.
+  // ============================================================
+  if (hasALow && !hasBHigh) {
+    const bBounceReady =
+      aLowHeld &&
+      reclaimedEma10;
+
+    const bBounceTrigger =
+      bBounceReady &&
+      (
+        aboveEma20 ||
+        continuationWatchLong
+      );
+
+    if (bBounceTrigger) {
+      return {
+        active: true,
+        setupType: "CORRECTION_A_TO_B_LONG",
+        type: "CORRECTION_A_TO_B_LONG",
+        state: "A_TO_B_TRIGGER_LONG",
+        status: "ENTRY_LONG",
+        readiness: "GO_LONG",
+        direction: "LONG",
+        side: "LONG",
+        allowLongEntry: true,
+        allowShort: false,
+        allowShortEntry: false,
+        triggerConfirmed: true,
+        triggerType: aboveEma20
+          ? "A_LOW_HELD_EMA10_RECLAIM_ABOVE_EMA20"
+          : "A_LOW_HELD_EMA10_RECLAIM_CONTINUATION_WATCH",
+        triggerLevel: round2(e10),
+        stopLevel: round2(aLow),
+        confidence: 68,
+        sizeMode: "REDUCED",
+        needs: "ENTRY_ACTIVE",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "A_LOW_MARKED",
+          "A_LOW_HELD",
+          "EMA10_RECLAIM",
+          aboveEma20 ? "ABOVE_EMA20" : "CONTINUATION_WATCH_LONG",
+          "A_TO_B_TRIGGER_LONG",
+          "REDUCED_SIZE_COUNTERTREND_BOUNCE",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          w3High,
+          aLow,
+          bHigh,
+          cLow,
+          latestClose: close,
+          ema10: e10,
+          ema20: e20,
+          prevClose,
+          aLowHeld,
+          reclaimedEma10,
+          aboveEma20,
+          continuationWatchLong,
+          correctionLeg: "IN_B",
+          nextFocus: "TRADE_B_BOUNCE_THEN_MARK_B_HIGH",
         },
-        engine15Decision: {
-          ok: false,
-          engine: "engine15.decisionReferee.v8.3",
-          error: "builder_strategy_failed",
-          strategyType: "NONE",
-          direction: "NONE",
-          readinessLabel: "WAIT",
-          executionBias: "NONE",
-          action: "NO_ACTION",
-          priority: 0,
-          entryStyle: "NONE",
-          reasonCodes: ["BUILDER_STRATEGY_FAILED"],
-          blockers: [String(err?.message || err)],
-          conflicts: [],
-          qualityGatePassed: false,
-          momentumGatePassed: false,
-          permissionGatePassed: false,
-          qualityScore: 0,
-          qualityGrade: "IGNORE",
-          qualityBand: "INVALID",
-          qualityBreakdown: {
-            engine1: 0,
-            engine2: 0,
-            engine3: 0,
-            engine4: 0,
-            compression: 0,
-          },
-          permission: "UNKNOWN",
-          sizeMultiplier: null,
-          lifecycle: {
-            lifecycleStage: "BUILDING",
-            isFreshSetup: false,
-            entryWindowOpen: false,
-            freshEntryNow: false,
-            signalPrice: null,
-            currentPrice: null,
-            barsSinceSignal: null,
-            moveFromSignalPts: null,
-            moveFromSignalAtr: null,
-            zonesInPath: [],
-            zonesHit: 0,
-            targetCount: 0,
-            targetProgress01: 0,
-            firstTargetHit: false,
-            secondTargetHit: false,
-            runnerActive: false,
-            setupCompleted: false,
-            edgeRemainingPct: 100,
-            nextFocus: "LOOK_FOR_NEXT_SETUP",
-          },
-          debug: {},
-        },
-        executionBias: "NORMAL",
-        momentum,
-        context: { ok: false, error: "builder_strategy_failed" },
       };
+    }
+
+    if (bBounceReady) {
+      return {
+        active: true,
+        setupType: "CORRECTION_A_TO_B_LONG",
+        type: "A_TO_B_READY",
+        state: "A_TO_B_READY",
+        status: "WATCH",
+        readiness: "READY",
+        direction: "LONG",
+        side: "LONG",
+        allowLongEntry: false,
+        allowShort: false,
+        allowShortEntry: false,
+        triggerConfirmed: false,
+        triggerType: "WAIT_ABOVE_EMA20_OR_CONTINUATION_WATCH",
+        triggerLevel: round2(e20 ?? e10),
+        stopLevel: round2(aLow),
+        confidence: 55,
+        sizeMode: "REDUCED",
+        needs: "WAIT_FOR_A_TO_B_TRIGGER",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "A_LOW_MARKED",
+          "A_LOW_HELD",
+          "EMA10_RECLAIM",
+          "WAIT_FOR_A_TO_B_CONFIRMATION",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          w3High,
+          aLow,
+          bHigh,
+          cLow,
+          latestClose: close,
+          ema10: e10,
+          ema20: e20,
+          prevClose,
+          aLowHeld,
+          reclaimedEma10,
+          aboveEma20,
+          continuationWatchLong,
+          correctionLeg: "IN_B",
+          nextFocus: "WAIT_FOR_B_BOUNCE_CONFIRMATION",
+        },
+      };
+    }
+
+    return {
+      active: true,
+      setupType: "MINUTE_W4_ABC",
+      type: "W4_A_LOW_ACTIVE",
+      state: "W4_A_LOW_ACTIVE",
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_FOR_B_BOUNCE",
+      triggerLevel: round2(e10),
+      stopLevel: round2(aLow),
+      confidence: 0,
+      sizeMode: "NONE",
+      needs: "WAIT_FOR_B_BOUNCE",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W4_ACTIVE",
+        "A_LOW_MARKED",
+        "WAIT_FOR_B_BOUNCE",
+        "BLIND_DIP_BUY_BLOCKED",
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        w3High,
+        aLow,
+        bHigh,
+        cLow,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        aLowHeld,
+        reclaimedEma10,
+        aboveEma20,
+        correctionLeg: "A_COMPLETE_WAIT_B",
+        nextFocus: "WAIT_FOR_B_BOUNCE",
+      },
+    };
+  }
+
+  // ============================================================
+  // STAGE 3:
+  // A and B exist, but C low not marked yet.
+  // Watch for C leg down.
+  // ============================================================
+  if (hasALow && hasBHigh && !hasCLow) {
+    const cLegStarting =
+      rejectedBHigh &&
+      (belowEma10 || belowEma20);
+
+    if (cLegStarting) {
+      return {
+        active: true,
+        setupType: "MINUTE_W4_ABC",
+        type: "W4_C_LEG_STARTING",
+        state: "W4_C_LEG_STARTING",
+        status: "WATCH",
+        readiness: "NO_TRADE",
+        direction: "NONE",
+        side: "NONE",
+        allowLongEntry: false,
+        allowShort: false,
+        allowShortEntry: false,
+        triggerConfirmed: false,
+        triggerType: "B_HIGH_REJECTION_EMA_LOSS",
+        triggerLevel: round2(bHigh),
+        stopLevel: null,
+        confidence: 0,
+        sizeMode: "NONE",
+        needs: "WAIT_FOR_C_LOW",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "A_LOW_MARKED",
+          "B_HIGH_MARKED",
+          "B_HIGH_REJECTED",
+          belowEma10 ? "BELOW_EMA10" : "BELOW_EMA20",
+          "C_LEG_STARTING",
+          "NO_LONG_DURING_C_LEG",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          w3High,
+          aLow,
+          bHigh,
+          cLow,
+          latestClose: close,
+          ema10: e10,
+          ema20: e20,
+          prevClose,
+          rejectedBHigh,
+          belowEma10,
+          belowEma20,
+          correctionLeg: "IN_C",
+          nextFocus: "WAIT_FOR_C_LOW",
+        },
+      };
+    }
+
+    return {
+      active: true,
+      setupType: "MINUTE_W4_ABC",
+      type: "W4_WAIT_C_LEG",
+      state: "W4_WAIT_C_LEG",
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_FOR_C_LEG",
+      triggerLevel: round2(bHigh),
+      stopLevel: null,
+      confidence: 0,
+      sizeMode: "NONE",
+      needs: "WAIT_FOR_C_LOW",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W4_ACTIVE",
+        "A_LOW_MARKED",
+        "B_HIGH_MARKED",
+        "WAIT_FOR_C_LEG",
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        w3High,
+        aLow,
+        bHigh,
+        cLow,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        rejectedBHigh,
+        belowEma10,
+        belowEma20,
+        correctionLeg: "B_COMPLETE_WAIT_C",
+        nextFocus: "WAIT_FOR_C_LOW",
+      },
+    };
+  }
+
+  // ============================================================
+  // STAGE 4:
+  // A, B, C all exist.
+  // Watch for W5 long trigger.
+  // ============================================================
+  if (hasALow && hasBHigh && hasCLow) {
+    const cLowHeldNow =
+      close !== null &&
+      close >= cLow * 0.995;
+
+    const w5Ready =
+      cLowHeldNow &&
+      reclaimedEma10 &&
+      aboveEma20;
+
+    const w5Trigger =
+      w5Ready &&
+      brokeBHigh;
+
+    if (w5Trigger) {
+      return {
+        active: true,
+        setupType: "W4_TO_W5_LONG",
+        type: "W4_TO_W5_LONG",
+        state: "W5_TRIGGER_LONG",
+        status: "ENTRY_LONG",
+        readiness: "GO_LONG",
+        direction: "LONG",
+        side: "LONG",
+        allowLongEntry: true,
+        allowShort: false,
+        allowShortEntry: false,
+        triggerConfirmed: true,
+        triggerType: "BREAK_ABOVE_B_HIGH",
+        triggerLevel: round2(bHigh),
+        stopLevel: round2(cLow),
+        confidence: 78,
+        sizeMode: "CAUTION",
+        needs: "ENTRY_ACTIVE",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "ABC_COMPLETE",
+          "C_LOW_HELD",
+          "EMA10_RECLAIM",
+          "ABOVE_EMA20",
+          "BREAK_ABOVE_B_HIGH",
+          "W5_TRIGGER_LONG",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          w3High,
+          aLow,
+          bHigh,
+          cLow,
+          latestClose: close,
+          ema10: e10,
+          ema20: e20,
+          prevClose,
+          cLowHeld: cLowHeldNow,
+          reclaimedEma10,
+          aboveEma20,
+          brokeBHigh,
+          correctionLeg: "ABC_COMPLETE",
+          nextFocus: "W5_ACTIVE",
+        },
+      };
+    }
+
+    if (w5Ready) {
+      return {
+        active: true,
+        setupType: "W4_TO_W5_LONG",
+        type: "W5_READY",
+        state: "W5_READY",
+        status: "WATCH",
+        readiness: "READY",
+        direction: "LONG",
+        side: "LONG",
+        allowLongEntry: false,
+        allowShort: false,
+        allowShortEntry: false,
+        triggerConfirmed: false,
+        triggerType: "WAIT_BREAK_ABOVE_B_HIGH",
+        triggerLevel: round2(bHigh),
+        stopLevel: round2(cLow),
+        confidence: 64,
+        sizeMode: "CAUTION",
+        needs: "WAIT_FOR_W5_TRIGGER",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "ABC_COMPLETE",
+          "C_LOW_HELD",
+          "EMA10_RECLAIM",
+          "ABOVE_EMA20",
+          "WAIT_FOR_B_HIGH_BREAK",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          w3High,
+          aLow,
+          bHigh,
+          cLow,
+          latestClose: close,
+          ema10: e10,
+          ema20: e20,
+          prevClose,
+          cLowHeld: cLowHeldNow,
+          reclaimedEma10,
+          aboveEma20,
+          brokeBHigh,
+          correctionLeg: "ABC_COMPLETE",
+          nextFocus: "BREAK_B_HIGH_FOR_W5",
+        },
+      };
+    }
+
+    return {
+      active: true,
+      setupType: "W4_TO_W5_LONG",
+      type: "W4_ABC_COMPLETE_WAIT_TRIGGER",
+      state: "W4_ABC_COMPLETE_WAIT_TRIGGER",
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_W5_TRIGGER",
+      triggerLevel: round2(bHigh),
+      stopLevel: round2(cLow),
+      confidence: 0,
+      sizeMode: "NONE",
+      needs: "WAIT_FOR_EMA_RECLAIM_AND_B_BREAK",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W4_ACTIVE",
+        "ABC_COMPLETE",
+        "WAIT_FOR_W5_TRIGGER",
+        "OBSERVATION_ONLY",
+      ],
+      debug: {
+        ...phases,
+        w3High,
+        aLow,
+        bHigh,
+        cLow,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        cLowHeld: cLowHeldNow,
+        reclaimedEma10,
+        aboveEma20,
+        brokeBHigh,
+        correctionLeg: "ABC_COMPLETE",
+        nextFocus: "WAIT_FOR_EMA_RECLAIM_AND_B_BREAK",
+      },
+    };
+  }
+
+  return {
+    active: true,
+    setupType: "MINUTE_W4_ABC",
+    type: "W4_ACTIVE_WAIT",
+    state: "W4_ACTIVE_WAIT",
+    status: "WATCH",
+    readiness: "WATCH",
+    direction: "NONE",
+    side: "NONE",
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    triggerType: "WAIT_W4_STRUCTURE",
+    triggerLevel: null,
+    stopLevel: null,
+    confidence: 0,
+    sizeMode: "NONE",
+    needs: "WAIT_FOR_W4_STRUCTURE",
+    marketBias,
+    reasonCodes: [
+      "MINUTE_W4_ACTIVE",
+      "WAIT_FOR_W4_STRUCTURE",
+      "OBSERVATION_ONLY",
+    ],
+    debug: {
+      ...phases,
+      w3High,
+      aLow,
+      bHigh,
+      cLow,
+      latestClose: close,
+      ema10: e10,
+      ema20: e20,
+      prevClose,
+      correctionLeg: "UNKNOWN",
+      nextFocus: "WAIT_FOR_W4_STRUCTURE",
+    },
+  };
+}
+
+function normalizeW4ABCForEngine17(detection) {
+  if (!detection || detection.active !== true) return detection;
+
+  const rawState = String(detection.state || detection.type || "").toUpperCase();
+
+  const isEntryState =
+    rawState === "A_TO_B_TRIGGER_LONG" ||
+    rawState === "W5_TRIGGER_LONG";
+
+  const isSupportedReadyState =
+    rawState === "W5_READY";
+
+  // Keep real entry signals and W5_READY as main states.
+  // Everything else stays W4_ACTIVE_WAIT so Engine 17 keeps the fib/timeline layout.
+  if (isEntryState || isSupportedReadyState) {
+    return {
+      ...detection,
+      abcState: rawState,
+      abcType: detection.type || rawState,
+      correctionLeg: detection.debug?.correctionLeg || null,
+      nextFocus: detection.debug?.nextFocus || null,
+      abcLevels: {
+        w3High: detection.debug?.w3High ?? null,
+        aLow: detection.debug?.aLow ?? null,
+        bHigh: detection.debug?.bHigh ?? null,
+        cLow: detection.debug?.cLow ?? null,
+      },
+    };
+  }
+
+  return {
+    ...detection,
+
+    // Engine 17 compatibility contract:
+    setupType: detection.setupType || "MINUTE_W4_ABC",
+    type: "W4_ACTIVE_WAIT",
+    state: "W4_ACTIVE_WAIT",
+
+    // Keep original ABC state as detail:
+    abcState: rawState || null,
+    abcType: detection.type || null,
+    correctionLeg: detection.debug?.correctionLeg || null,
+    nextFocus: detection.debug?.nextFocus || detection.needs || null,
+    abcLevels: {
+      w3High: detection.debug?.w3High ?? null,
+      aLow: detection.debug?.aLow ?? null,
+      bHigh: detection.debug?.bHigh ?? null,
+      cLow: detection.debug?.cLow ?? null,
+    },
+
+    reasonCodes: [
+      ...(Array.isArray(detection.reasonCodes) ? detection.reasonCodes : []),
+      "ENGINE17_COMPAT_STATE_W4_ACTIVE_WAIT",
+    ],
+  };
+}
+
+export function computeEngine22ScalpOpportunity({
+  symbol = "SPY",
+  strategyId = "intraday_scalp@10m",
+  tf = "10m",
+  engine16 = null,
+  reaction = null,
+  waveReaction = null,
+  engine2State = null,
+  marketMind = null,
+} = {}) {
+  const base = {
+    ok: true,
+    engine: "engine22.scalpOpportunity.v5.2",
+    active: false,
+    mode: "OBSERVATION_ONLY",
+    symbol,
+    strategyId,
+    tf,
+
+    supportedSetups: {
+      dipBuyContinuation: true,
+      exhaustionBounceLong: true,
+      exhaustionRejectionShort: true,
+      w2ToW3Long: true,
+      w4ToW5Long: true,
+      correctionAToBLong: true,
+      correctionBToCShort: false,
+    },
+
+    setupType: null,
+    type: "NONE",
+    state: "NONE",
+    status: "NO_SCALP",
+    readiness: "WAIT",
+    direction: "NONE",
+    side: "NONE",
+
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    triggerType: null,
+
+    targetMove: 1.0,
+    stop: null,
+    confidence: 0,
+    sizeMode: "NONE",
+
+    entryZone: null,
+    targetZone: null,
+    invalidationLevel: null,
+
+    entryTriggerLevel: null,
+    distanceToEntry: null,
+    needs: "WAIT_FOR_SETUP",
+
+    marketBias: null,
+    trendVsWave: null,
+    quality: null,
+    risk: null,
+    management: null,
+
+    reasonCodes: [],
+    debug: {},
+  };
+
+  if (strategyId !== "intraday_scalp@10m" || tf !== "10m") {
+    return {
+      ...base,
+      reasonCodes: ["ENGINE22_ONLY_ENABLED_FOR_INTRADAY_SCALP_10M"],
+    };
+  }
+
+  if (!engine16 || engine16.ok !== true) {
+    return {
+      ...base,
+      reasonCodes: ["ENGINE16_UNAVAILABLE"],
+    };
+  }
+
+  const phases = getWavePhases(engine2State);
+  const {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    minutePhase,
+  } = phases;
+
+  const finalImpulseContext = isBullishFinalImpulseContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+  });
+
+  const bullishHigherWaveContext = isBullishHigherWaveContext({
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+  });
+
+  const marketBias = computeMarketBias({
+    engine2State,
+    engine16,
+    marketMind,
+  });
+
+  const latestClose = validPrice(engine16.latestClose);
+  const ema10 = validPrice(engine16.ema10);
+  const ema20 = validPrice(engine16.ema20);
+
+  const continuationWatchLong = engine16?.continuationWatchLong === true;
+  const continuationTriggerLong = engine16?.continuationTriggerLong === true;
+
+  const exhaustionPrice = validPrice(engine16.exhaustionBarPrice);
+  const exhaustionTriggerLong = engine16.exhaustionTriggerLong === true;
+  const exhaustionTriggerShort = engine16.exhaustionTriggerShort === true;
+  const exhaustionActive = engine16.exhaustionActive === true;
+
+  const {
+    reactionScore,
+    structureState,
+    reasonCodes: engine3ReasonCodes,
+    waveReaction: wr,
+  } = getReactionInputs(reaction, waveReaction);
+
+  const trendVsWave = computeTrendVsWave({
+    engine2State,
+    engine16,
+    reaction: {
+      ...(reaction || {}),
+      structureState,
+    },
+    waveReaction: wr,
+    marketMind,
+  });
+
+  const finish = (out) => applyTrendVsWaveSafety(out, trendVsWave);
+
+  if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
+    return finish({
+      ...base,
+      marketBias,
+      reasonCodes: ["NO_PRICE_AVAILABLE"],
+      debug: {
+        ...phases,
+        latestClose,
+        ema10,
+        ema20,
+        exhaustionPrice,
+        exhaustionTriggerLong,
+        exhaustionTriggerShort,
+        exhaustionActive,
+        reactionScore,
+        structureState,
+        hasWaveReaction: !!wr,
+      },
+    });
+  }
+
+  // ============================================================
+  // PHASE 1 + PHASE 2:
+  // Minute W2/W4 correction logic.
+  //
+  // W2 and W4 block blind dip buys.
+  // If correction-to-impulse trigger fields are available, Engine 22 can
+  // promote W2 -> W3 or W4 -> W5.
+  // ============================================================
+
+  if (minutePhase === "IN_W2") {
+    const w2ToW3Long = detectCorrectionToImpulseLong({
+      setup: "W2_TO_W3_LONG",
+      engine2State,
+      engine16,
+      marketBias,
+      latestClose,
+      ema10,
+      ema20,
+    });
+
+    const out = finish(toCorrectionReturn(base, w2ToW3Long));
+
+    if (out?.status === "ENTRY_LONG") {
+      logEntryIfNeeded({
+        symbol,
+        strategyId,
+        tf,
+        type: "W2_TO_W3_LONG",
+        status: "ENTRY_LONG",
+        direction: "LONG",
+        price: latestClose,
+        confidence: out.confidence || 88,
+        targetMove: base.targetMove,
+        invalidationLevel: out.invalidationLevel ?? null,
+      });
+    }
+
+    return out;
+  }
+
+  if (minutePhase === "IN_W4") {
+    const minuteW4ABCRaw = detectMinuteW4ABC({
+      engine2State,
+      engine16,
+      marketBias,
+      latestClose,
+      ema10,
+      ema20,
+    });
+
+    const minuteW4ABC = normalizeW4ABCForEngine17(minuteW4ABCRaw);
+    const out = finish(toCorrectionReturn(base, minuteW4ABC));
+
+    if (out?.status === "ENTRY_LONG") {
+      logEntryIfNeeded({
+        symbol,
+        strategyId,
+        tf,
+        type: out.abcType || out.type || out.setupType || "MINUTE_W4_ABC_LONG",
+        status: "ENTRY_LONG",
+        direction: "LONG",
+        price: latestClose,
+        confidence: out.confidence || 68,
+        targetMove: base.targetMove,
+        invalidationLevel: out.invalidationLevel ?? null,
+      });
+    }
+
+    return out;
+  }
+
+  // ============================================================
+  // PHASE 3:
+  // Normal impulse dip-buy logic.
+  //
+  // Only allowed during Minute W3 or Minute W5.
+  // This prevents continuationTriggerLong from buying W2/W4 early.
+  // ============================================================
+
+  const minuteAllowsNormalDipBuy =
+    minutePhase === "IN_W3" ||
+    minutePhase === "IN_W5";
+
+  if (marketBias?.bias === "LONG_ONLY_DIP_BUY" && continuationWatchLong && minuteAllowsNormalDipBuy) {
+    const pulledBack =
+      (ema10 !== null && latestClose <= ema10) ||
+      (ema20 !== null && latestClose <= ema20);
+
+    const reclaimed = ema10 !== null && latestClose > ema10;
+
+    if (pulledBack && !reclaimed) {
+      return finish({
+        ...base,
+        active: true,
+        setupType: "DIP_BUY_CONTINUATION",
+        type: "DIP_BUY_WATCH",
+        state: "DIP_BUY_WATCH",
+        status: "WATCH_LONG",
+        readiness: "WATCH",
+        direction: "LONG",
+        side: "LONG",
+        allowLongEntry: false,
+        allowShort: false,
+        allowShortEntry: false,
+        marketBias,
+        needs: "WAIT_FOR_EMA10_RECLAIM_OR_CONTINUATION_TRIGGER",
+        reasonCodes: [
+          "LONG_ONLY_DIP_BUY_BIAS",
+          `${minutePhase}_ALLOWS_DIP_BUY`,
+          "DIP_PULLBACK_DETECTED",
+          "WAIT_FOR_RECLAIM",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          latestClose,
+          ema10,
+          ema20,
+          pulledBack,
+          reclaimed,
+          continuationWatchLong,
+          continuationTriggerLong,
+          finalImpulseContext,
+          bullishHigherWaveContext,
+        },
+      });
+    }
+
+    if (continuationTriggerLong) {
+      const confidence =
+        minutePhase === "IN_W3" ? 82 :
+        minutePhase === "IN_W5" ? 72 :
+        70;
+
+      const out = finish({
+        ...base,
+        active: true,
+        setupType: "DIP_BUY_CONTINUATION",
+        type: "DIP_BUY_CONTINUATION",
+        state: "DIP_BUY_CONTINUATION",
+        status: "ENTRY_LONG",
+        readiness: "GO_LONG",
+        direction: "LONG",
+        side: "LONG",
+        allowLongEntry: true,
+        allowShort: false,
+        allowShortEntry: false,
+        triggerConfirmed: true,
+        triggerType: "CONTINUATION_TRIGGER_LONG",
+        marketBias,
+        confidence,
+        sizeMode: minutePhase === "IN_W5" ? "CAUTION" : "NORMAL",
+        stop: "below EMA20 / last pullback low",
+        invalidationLevel: round2(ema20),
+        needs: "ENTRY_ACTIVE",
+        reasonCodes: [
+          "LONG_ONLY_DIP_BUY_BIAS",
+          `${minutePhase}_ALLOWS_DIP_BUY`,
+          "DIP_BUY_CONFIRMED",
+          "CONTINUATION_TRIGGER_LONG",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          latestClose,
+          ema10,
+          ema20,
+          continuationWatchLong,
+          continuationTriggerLong,
+          finalImpulseContext,
+          bullishHigherWaveContext,
+        },
+      });
+
+      if (out?.status === "ENTRY_LONG") {
+        logEntryIfNeeded({
+          symbol,
+          strategyId,
+          tf,
+          type: "DIP_BUY_CONTINUATION",
+          status: "ENTRY_LONG",
+          direction: "LONG",
+          price: latestClose,
+          confidence: out.confidence || confidence,
+          targetMove: base.targetMove,
+          invalidationLevel: ema20,
+        });
+      }
+
+      return out;
     }
   }
 
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(result, null, 2));
+  // ============================================================
+  // LONG: exhaustion bounce from low
+  // ============================================================
 
-  console.log("Strategy snapshot written:", SNAPSHOT_FILE);
+  if (exhaustionTriggerLong && exhaustionPrice !== null) {
+    const side = "LONG";
+    const holdsLow = latestClose >= exhaustionPrice;
+
+    if (!holdsLow) {
+      return finish({
+        ...base,
+        marketBias,
+        reasonCodes: ["LONG_EXHAUSTION_LOW_FAILED"],
+        debug: {
+          ...phases,
+          latestClose,
+          ema10,
+          ema20,
+          exhaustionPrice,
+          holdsLow,
+          reactionScore,
+          structureState,
+        },
+      });
+    }
+
+    const quality = gradeReactionQuality({ side, reactionScore, waveReaction: wr });
+    const risk = buildRiskPlan({
+      side,
+      entry: latestClose,
+      exhaustionPrice,
+      targetMove: base.targetMove,
+    });
+    const management = buildManagement({ side, latestClose, ema10 });
+
+    const qualityPass = quality.pass;
+    const riskPass = risk.pass;
+    const status = qualityPass && riskPass ? "ENTRY_LONG" : "PROBE_LONG";
+
+    const confidence = Math.min(
+      95,
+      Math.max(
+        50,
+        50 +
+          Math.round((quality.score || 0) * 0.3) +
+          (riskPass ? 10 : 0) +
+          (management.trendActive ? 5 : 0)
+      )
+    );
+
+    const out = finish({
+      ...base,
+      active: true,
+      setupType: "EXHAUSTION_BOUNCE_LONG",
+      type: "EXHAUSTION_BOUNCE_LONG",
+      state: "EXHAUSTION_BOUNCE_LONG",
+      status,
+      readiness: status === "ENTRY_LONG" ? "GO_LONG" : "PROBE",
+      direction: "LONG",
+      side,
+      allowLongEntry: status === "ENTRY_LONG",
+      allowShort: false,
+      allowShortEntry: false,
+      marketBias,
+
+      stop: "below exhaustion low",
+      confidence,
+
+      entryZone: {
+        lo: round2(exhaustionPrice),
+        hi: round2(latestClose),
+      },
+
+      targetZone: {
+        lo: round2(risk?.target),
+        hi: round2(risk?.target),
+      },
+
+      invalidationLevel: round2(exhaustionPrice),
+      entryTriggerLevel: null,
+      distanceToEntry: null,
+
+      needs:
+        status === "ENTRY_LONG"
+          ? "ENTRY_ACTIVE"
+          : !qualityPass
+          ? "BETTER_ENGINE3_REACTION_QUALITY"
+          : !riskPass
+          ? "BETTER_RISK_REWARD"
+          : "WAIT",
+
+      quality,
+      risk,
+      management,
+
+      reasonCodes: [
+        "LONG_EXHAUSTION_TRIGGERED",
+        "PRICE_HOLDING_EXHAUSTION_LOW",
+        qualityPass ? "ENGINE3_QUALITY_PASS" : "ENGINE3_QUALITY_WEAK",
+        riskPass ? "RISK_REWARD_PASS" : "RISK_REWARD_FAIL",
+        "EMA10_USED_FOR_MANAGEMENT_NOT_ENTRY",
+        "OBSERVATION_ONLY",
+      ],
+
+      debug: {
+        ...phases,
+        latestClose,
+        ema10,
+        ema20,
+        exhaustionPrice,
+        exhaustionTriggerLong,
+        exhaustionTriggerShort,
+        exhaustionActive,
+        reactionScore,
+        structureState,
+        engine3ReasonCodes,
+        holdsLow,
+      },
+    });
+
+    if (out?.status === "ENTRY_LONG") {
+      logEntryIfNeeded({
+        symbol,
+        strategyId,
+        tf,
+        type: "EXHAUSTION_BOUNCE_LONG",
+        status: "ENTRY_LONG",
+        direction: "LONG",
+        price: latestClose,
+        confidence: out.confidence || confidence,
+        targetMove: base.targetMove,
+        invalidationLevel: exhaustionPrice,
+      });
+    }
+
+    return out;
+  }
+
+  // ============================================================
+  // SHORT: exhaustion rejection from high
+  //
+  // Shorts are blocked by default during bullish final impulse context.
+  // Trend-vs-wave can also block shorts while higher timeframe support remains strong.
+  // ============================================================
+
+  if (exhaustionTriggerShort && exhaustionPrice !== null) {
+    const side = "SHORT";
+    const failsHigh = latestClose <= exhaustionPrice;
+
+    if (!failsHigh) {
+      return finish({
+        ...base,
+        marketBias,
+        reasonCodes: ["SHORT_EXHAUSTION_HIGH_FAILED"],
+        debug: {
+          ...phases,
+          latestClose,
+          ema10,
+          ema20,
+          exhaustionPrice,
+          failsHigh,
+          reactionScore,
+          structureState,
+        },
+      });
+    }
+
+    if (marketBias?.blockShorts === true || finalImpulseContext) {
+      return finish({
+        ...base,
+        active: true,
+        setupType: "SHORT_BLOCKED_BY_MARKET_BIAS",
+        type: "SHORT_BLOCKED_BY_MARKET_BIAS",
+        state: "FINAL_IMPULSE_NO_SHORTS",
+        status: "NO_SHORT",
+        readiness: "NO_TRADE",
+        direction: "NONE",
+        side: "SHORT",
+        allowLongEntry: false,
+        allowShort: false,
+        allowShortEntry: false,
+        marketBias,
+        reasonCodes: [
+          "SHORT_EXHAUSTION_TRIGGERED",
+          "SHORTS_BLOCKED_BY_W3_W5_LONG_BIAS",
+          finalImpulseContext ? "FINAL_IMPULSE_NO_SHORTS" : "MARKET_BIAS_BLOCKS_SHORTS",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...phases,
+          latestClose,
+          ema10,
+          ema20,
+          exhaustionPrice,
+          failsHigh,
+          reactionScore,
+          structureState,
+        },
+      });
+    }
+
+    const quality = gradeReactionQuality({ side, reactionScore, waveReaction: wr });
+    const risk = buildRiskPlan({
+      side,
+      entry: latestClose,
+      exhaustionPrice,
+      targetMove: base.targetMove,
+    });
+    const management = buildManagement({ side, latestClose, ema10 });
+
+    const qualityPass = quality.pass;
+    const riskPass = risk.pass;
+    const status = qualityPass && riskPass ? "ENTRY_SHORT" : "PROBE_SHORT";
+
+    const confidence = Math.min(
+      95,
+      Math.max(
+        50,
+        50 +
+          Math.round((quality.score || 0) * 0.3) +
+          (riskPass ? 10 : 0) +
+          (management.trendActive ? 5 : 0)
+      )
+    );
+
+    const out = finish({
+      ...base,
+      active: true,
+      setupType: "EXHAUSTION_REJECTION_SHORT",
+      type: "EXHAUSTION_REJECTION_SHORT",
+      state: "EXHAUSTION_REJECTION_SHORT",
+      status,
+      readiness: status === "ENTRY_SHORT" ? "GO_SHORT" : "PROBE",
+      direction: "SHORT",
+      side,
+      allowLongEntry: false,
+      allowShort: status === "ENTRY_SHORT",
+      allowShortEntry: status === "ENTRY_SHORT",
+      marketBias,
+
+      stop: "above exhaustion high",
+      confidence,
+
+      entryZone: {
+        lo: round2(latestClose),
+        hi: round2(exhaustionPrice),
+      },
+
+      targetZone: {
+        lo: round2(risk?.target),
+        hi: round2(risk?.target),
+      },
+
+      invalidationLevel: round2(exhaustionPrice),
+      entryTriggerLevel: null,
+      distanceToEntry: null,
+
+      needs:
+        status === "ENTRY_SHORT"
+          ? "ENTRY_ACTIVE"
+          : !qualityPass
+          ? "BETTER_ENGINE3_REACTION_QUALITY"
+          : !riskPass
+          ? "BETTER_RISK_REWARD"
+          : "WAIT",
+
+      quality,
+      risk,
+      management,
+
+      reasonCodes: [
+        "SHORT_EXHAUSTION_TRIGGERED",
+        "PRICE_FAILING_EXHAUSTION_HIGH",
+        qualityPass ? "ENGINE3_QUALITY_PASS" : "ENGINE3_QUALITY_WEAK",
+        riskPass ? "RISK_REWARD_PASS" : "RISK_REWARD_FAIL",
+        "EMA10_USED_FOR_MANAGEMENT_NOT_ENTRY",
+        "OBSERVATION_ONLY",
+      ],
+
+      debug: {
+        ...phases,
+        latestClose,
+        ema10,
+        ema20,
+        exhaustionPrice,
+        exhaustionTriggerLong,
+        exhaustionTriggerShort,
+        exhaustionActive,
+        reactionScore,
+        structureState,
+        engine3ReasonCodes,
+        failsHigh,
+      },
+    });
+
+    if (out?.status === "ENTRY_SHORT") {
+      logEntryIfNeeded({
+        symbol,
+        strategyId,
+        tf,
+        type: "EXHAUSTION_REJECTION_SHORT",
+        status: "ENTRY_SHORT",
+        direction: "SHORT",
+        price: latestClose,
+        confidence: out.confidence || confidence,
+        targetMove: base.targetMove,
+        invalidationLevel: exhaustionPrice,
+      });
+    }
+
+    return out;
+  }
+
+  return finish({
+    ...base,
+    marketBias,
+    reasonCodes: ["NO_ENGINE22_SCALP_SETUP"],
+    debug: {
+      ...phases,
+      latestClose,
+      ema10,
+      ema20,
+      exhaustionPrice,
+      exhaustionTriggerLong,
+      exhaustionTriggerShort,
+      exhaustionActive,
+      continuationWatchLong,
+      continuationTriggerLong,
+      reactionScore,
+      structureState,
+      hasWaveReaction: !!wr,
+      finalImpulseContext,
+      bullishHigherWaveContext,
+    },
+  });
 }
 
-/* -----------------------------
-   Run builder
-------------------------------*/
-buildSnapshot()
-  .then(() => {
-    console.log("Snapshot build completed successfully");
-  })
-  .catch((err) => {
-    console.error("Snapshot builder failed:", err);
-  });
+export default computeEngine22ScalpOpportunity;
