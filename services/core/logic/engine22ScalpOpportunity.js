@@ -2146,6 +2146,285 @@ function normalizeW4ABCForEngine17(detection) {
   };
 }
 
+function detectW3DipBuyContinuation({
+  engine2State,
+  engine16,
+  marketBias,
+  trendVsWave,
+  latestClose,
+  ema10,
+  ema20,
+}) {
+  const phases = getWavePhases(engine2State);
+  const {
+    primaryPhase,
+    intermediatePhase,
+    minorPhase,
+    minutePhase,
+  } = phases;
+
+  const close = validPrice(latestClose);
+  const e10 = validPrice(ema10);
+  const e20 = validPrice(ema20);
+
+  const prevClose =
+    validPrice(engine16?.previousClose) ??
+    validPrice(engine16?.prevClose) ??
+    null;
+
+  const continuationWatchLong = engine16?.continuationWatchLong === true;
+  const continuationTriggerLong = engine16?.continuationTriggerLong === true;
+
+  const structureState = String(engine16?.structureState || "").toUpperCase();
+
+  const higherTfSupported =
+    trendVsWave?.state === "W3_CONTINUATION_WATCH" &&
+    trendVsWave?.trueW4Confirmed !== true &&
+    trendVsWave?.priceAboveDailyEma10 === true &&
+    Number(trendVsWave?.fourHourScore) >= 60 &&
+    Number(trendVsWave?.dailyScore) >= 65;
+
+  const wave3Context =
+    minorPhase === "IN_W3" &&
+    (minutePhase === "IN_W3" || minutePhase === "IN_W5") &&
+    isImpulsePhase(primaryPhase) &&
+    isImpulsePhase(intermediatePhase);
+
+  if (!higherTfSupported || !wave3Context) {
+    return {
+      active: false,
+      setupType: "NONE",
+      state: "NONE",
+      reasonCodes: ["NOT_W3_DIP_BUY_CONTEXT"],
+    };
+  }
+
+  const pulledBackToEma =
+    close !== null &&
+    (
+      (e10 !== null && close <= e10 * 1.0015) ||
+      (e20 !== null && close <= e20 * 1.0015)
+    );
+
+  const shortTermHeavy =
+    trendVsWave?.priceAbove1hEma10 === false ||
+    Number(trendVsWave?.oneHourScore) < 50 ||
+    structureState === "FAILURE" ||
+    pulledBackToEma;
+
+  const reclaimedEma10 =
+    close !== null &&
+    e10 !== null &&
+    (
+      prevClose !== null
+        ? prevClose <= e10 && close > e10
+        : close > e10
+    );
+
+  const aboveEma20 =
+    close !== null &&
+    e20 !== null &&
+    close > e20;
+
+  const reclaimedBoth =
+    reclaimedEma10 &&
+    aboveEma20;
+
+  const dipBuyTrigger =
+    reclaimedBoth &&
+    continuationTriggerLong === true;
+
+  const dipBuyReady =
+    reclaimedBoth &&
+    continuationWatchLong === true &&
+    continuationTriggerLong !== true;
+
+  const reasonBase = [
+    "MINOR_W3_ACTIVE",
+    `${minutePhase}_ACTIVE`,
+    "HIGHER_TIMEFRAME_SUPPORTIVE",
+    "DAILY_EMA10_HOLDING",
+    "W4_NOT_CONFIRMED",
+    "NO_BLIND_SHORTS",
+    "OBSERVATION_ONLY",
+  ];
+
+  if (dipBuyTrigger) {
+    return {
+      active: true,
+      setupType: "W3_DIP_BUY_CONTINUATION",
+      type: "W3_DIP_BUY_CONTINUATION",
+      state: "W3_DIP_BUY_TRIGGER_LONG",
+      status: "ENTRY_LONG",
+      readiness: "GO_LONG",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: true,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: true,
+      triggerType: "W3_DIP_RECLAIM_CONTINUATION_TRIGGER",
+      confidence: minutePhase === "IN_W3" ? 84 : 74,
+      sizeMode: minutePhase === "IN_W5" ? "CAUTION" : "NORMAL",
+      stop: "below EMA20 / last pullback low",
+      invalidationLevel: round2(e20),
+      needs: "ENTRY_ACTIVE",
+      marketBias,
+      reasonCodes: [
+        ...reasonBase,
+        "W3_DIP_BUY_TRIGGER_LONG",
+        "EMA10_RECLAIM",
+        "ABOVE_EMA20",
+        "CONTINUATION_TRIGGER_LONG",
+      ],
+      debug: {
+        ...phases,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        pulledBackToEma,
+        shortTermHeavy,
+        reclaimedEma10,
+        aboveEma20,
+        continuationWatchLong,
+        continuationTriggerLong,
+        trendVsWave,
+      },
+    };
+  }
+
+  if (dipBuyReady) {
+    return {
+      active: true,
+      setupType: "W3_DIP_BUY_CONTINUATION",
+      type: "W3_DIP_BUY_READY",
+      state: "W3_DIP_BUY_READY",
+      status: "WATCH_LONG",
+      readiness: "READY",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_FOR_CONTINUATION_TRIGGER_LONG",
+      confidence: minutePhase === "IN_W3" ? 70 : 62,
+      sizeMode: minutePhase === "IN_W5" ? "CAUTION" : "NORMAL",
+      stop: "below EMA20 / last pullback low",
+      invalidationLevel: round2(e20),
+      needs: "WAIT_FOR_CONTINUATION_TRIGGER_LONG",
+      marketBias,
+      reasonCodes: [
+        ...reasonBase,
+        "W3_DIP_BUY_READY",
+        "EMA10_RECLAIM",
+        "ABOVE_EMA20",
+        "WAIT_FOR_CONTINUATION_TRIGGER",
+      ],
+      debug: {
+        ...phases,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        pulledBackToEma,
+        shortTermHeavy,
+        reclaimedEma10,
+        aboveEma20,
+        continuationWatchLong,
+        continuationTriggerLong,
+        trendVsWave,
+      },
+    };
+  }
+
+  if (shortTermHeavy || continuationWatchLong) {
+    return {
+      active: true,
+      setupType: "W3_DIP_BUY_CONTINUATION",
+      type: "W3_DIP_BUY_WATCH",
+      state: "W3_DIP_BUY_WATCH",
+      status: "WATCH_LONG",
+      readiness: "WATCH",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      triggerType: "WAIT_FOR_EMA_RECLAIM_AND_CONTINUATION_TRIGGER",
+      confidence: 0,
+      sizeMode: "NONE",
+      stop: null,
+      invalidationLevel: round2(e20),
+      needs: "WAIT_FOR_EMA_RECLAIM_AND_CONTINUATION_TRIGGER",
+      marketBias,
+      reasonCodes: [
+        ...reasonBase,
+        "W3_DIP_BUY_WATCH",
+        shortTermHeavy ? "SHORT_TERM_PULLBACK_ACTIVE" : "CONTINUATION_WATCH_LONG",
+        pulledBackToEma ? "PULLBACK_TO_EMA_ZONE" : null,
+        trendVsWave?.priceAbove1hEma10 === false ? "PRICE_BELOW_1H_EMA10" : null,
+      ].filter(Boolean),
+      debug: {
+        ...phases,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        prevClose,
+        pulledBackToEma,
+        shortTermHeavy,
+        reclaimedEma10,
+        aboveEma20,
+        continuationWatchLong,
+        continuationTriggerLong,
+        trendVsWave,
+      },
+    };
+  }
+
+  return {
+    active: true,
+    setupType: "W3_DIP_BUY_CONTINUATION",
+    type: "W3_CONTINUATION_ACTIVE",
+    state: "W3_CONTINUATION_ACTIVE",
+    status: "NO_SCALP",
+    readiness: "WAIT",
+    direction: "LONG",
+    side: "LONG",
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    triggerType: "WAIT_FOR_CONTROLLED_DIP",
+    confidence: 0,
+    sizeMode: "NONE",
+    needs: "WAIT_FOR_CONTROLLED_DIP",
+    marketBias,
+    reasonCodes: [
+      ...reasonBase,
+      "W3_CONTINUATION_ACTIVE",
+      "DO_NOT_CHASE",
+      "WAIT_FOR_DIP",
+    ],
+    debug: {
+      ...phases,
+      latestClose: close,
+      ema10: e10,
+      ema20: e20,
+      prevClose,
+      pulledBackToEma,
+      shortTermHeavy,
+      reclaimedEma10,
+      aboveEma20,
+      continuationWatchLong,
+      continuationTriggerLong,
+      trendVsWave,
+    },
+  };
+}
+
 export function computeEngine22ScalpOpportunity({
   symbol = "SPY",
   strategyId = "intraday_scalp@10m",
@@ -2499,6 +2778,51 @@ supportedSetups: {
     }
   }
 
+    // ============================================================
+  // PHASE 3B:
+  // Wave 3 dip-buy continuation logic.
+  //
+  // Purpose:
+  // When Minor W3 is still active and higher timeframe remains supportive,
+  // Engine 22 should not blindly short weakness.
+  // Instead, it watches for a controlled dip and only triggers long
+  // after EMA reclaim + continuation confirmation.
+  // ============================================================
+
+  const w3DipBuy = detectW3DipBuyContinuation({
+    engine2State,
+    engine16,
+    marketBias,
+    trendVsWave,
+    latestClose,
+    ema10,
+    ema20,
+  });
+
+  if (w3DipBuy?.active === true) {
+    const out = finish({
+      ...base,
+      ...w3DipBuy,
+    });
+
+    if (out?.status === "ENTRY_LONG") {
+      logEntryIfNeeded({
+        symbol,
+        strategyId,
+        tf,
+        type: "W3_DIP_BUY_CONTINUATION",
+        status: "ENTRY_LONG",
+        direction: "LONG",
+        price: latestClose,
+        confidence: out.confidence || 74,
+        targetMove: base.targetMove,
+        invalidationLevel: out.invalidationLevel ?? ema20,
+      });
+    }
+
+    return out;
+  }
+  
   // ============================================================
   // LONG: exhaustion bounce from low
   // ============================================================
