@@ -1,8 +1,7 @@
 name: dashboard-4h
 
-defaults:
-  run:
-    shell: bash
+on:
+  workflow_dispatch:
 
 jobs:
   build_and_publish_4h:
