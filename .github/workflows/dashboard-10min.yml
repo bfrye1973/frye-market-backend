@@ -1,6 +1,8 @@
 name: dashboard-10min (github-runner, debug-publish)
 
-
+on:
+  workflow_dispatch:
+  
 jobs:
   tenmin:
     name: Build & Publish Intraday (10m — debug)
