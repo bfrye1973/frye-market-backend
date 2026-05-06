@@ -1,11 +1,5 @@
 name: dashboard-hourly
 
-on:
-  workflow_dispatch: {}
-  schedule:
-    # Run every 40 minutes on weekdays (UTC). Rotation :00 → :40 → :20 → :00 …
-    - cron: "*/40 * * * 1-5"
-
 defaults:
   run:
     shell: bash
