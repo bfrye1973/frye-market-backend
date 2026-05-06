@@ -19,6 +19,7 @@
 // Read-only. Does NOT affect Engine 15 / lifecycle / trades directly.
 
 import { logEngine22Alert } from "./engine22AlertLogger.js";
+import { detectRunnerMode } from "./engine22RunnerMode.js";
 
 function toNum(x) {
   const n = Number(x);
@@ -2655,6 +2656,8 @@ supportedSetups: {
 
     marketBias: null,
     trendVsWave: null,
+    zoneAbsorption: null,
+    runnerMode: null,
     quality: null,
     risk: null,
     management: null,
@@ -2733,7 +2736,7 @@ supportedSetups: {
     marketMind,
   });
 
-  const finish = (out) => {
+const finish = (out) => {
   const withTrend = applyTrendVsWaveSafety(out, trendVsWave);
 
   const zoneAbsorption = detectNegotiatedZoneAbsorption({
@@ -2746,9 +2749,25 @@ supportedSetups: {
     structureState,
   });
 
+  const runnerMode = detectRunnerMode({
+    engine2State,
+    engine16,
+    marketMind,
+    trendVsWave,
+    zoneAbsorption,
+    engine22State: withTrend?.state,
+    engine22Setup: withTrend?.setupType,
+    engine22Status: withTrend?.status,
+    latestClose,
+    ema10,
+    ema20,
+    structureState,
+  });
+
   return {
     ...withTrend,
     zoneAbsorption,
+    runnerMode,
   };
 };
 
