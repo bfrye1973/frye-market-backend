@@ -2115,51 +2115,73 @@ function attachManualLevelsToEngine2Block(block, levelRows = []) {
 }
 async function buildEngine2State(symbol) {
   const contextResp = await fetchJson(
-  `${CORE_BASE}/api/v1/engine5-context?symbol=${symbol}&tf=1h`,
-  30000
-);
+    `${CORE_BASE}/api/v1/engine5-context?symbol=${symbol}&tf=1h`,
+    30000
+  );
 
-const engine1Context = contextResp?.json || {};
-const currentPrice = Number(engine1Context?.meta?.current_price ?? NaN);
+  const engine1Context = contextResp?.json || {};
+  const currentPrice = Number(engine1Context?.meta?.current_price ?? NaN);
 
-const [primary, intermediate, minor, minute] = await Promise.all([
-  buildEngine2Block({ symbol, degree: "primary", tf: "1d", currentPrice }).catch(() => null),
-  buildEngine2Block({ symbol, degree: "intermediate", tf: "1h", currentPrice }).catch(() => null),
-  buildEngine2Block({ symbol, degree: "minor", tf: "1h", currentPrice }).catch(() => null),
-  buildEngine2Block({ symbol, degree: "minute", tf: "10m", currentPrice }).catch(() => null),
-]);
+  const [primaryRaw, intermediateRaw, minorRaw, minuteRaw] = await Promise.all([
+    buildEngine2Block({ symbol, degree: "primary", tf: "1d", currentPrice }).catch(() => null),
+    buildEngine2Block({ symbol, degree: "intermediate", tf: "1h", currentPrice }).catch(() => null),
+    buildEngine2Block({ symbol, degree: "minor", tf: "1h", currentPrice }).catch(() => null),
+    buildEngine2Block({ symbol, degree: "minute", tf: "10m", currentPrice }).catch(() => null),
+  ]);
 
- const minuteLevelRows = getManualLevelRowsFor({
-   symbol,
-   degree: "minute",
-   tf: "10m",
- });
+  const minuteLevelRows = getManualLevelRowsFor({
+    symbol,
+    degree: "minute",
+    tf: "10m",
+  });
 
- const minuteWithLevels = attachManualLevelsToEngine2Block(
-   minute,
-   minuteLevelRows
- );
+  const minuteWithLevels = attachManualLevelsToEngine2Block(
+    minuteRaw,
+    minuteLevelRows
+  );
 
-let correctionDirection = null;
+  const primary = enrichEngine2BlockWithExtensions(primaryRaw);
+  const intermediate = enrichEngine2BlockWithExtensions(intermediateRaw);
+  const minor = enrichEngine2BlockWithExtensions(minorRaw);
+  const minute = enrichEngine2BlockWithExtensions(minuteWithLevels);
 
-if (intermediate?.waveMode === "CORRECTIVE") {
-  correctionDirection = "UP";
-}
+  const activeExtensions = {
+    scalp: pickActiveExtension(
+      minute?.waveExtension,
+      minor?.waveExtension
+    ),
+    swing: pickActiveExtension(
+      minor?.waveExtension,
+      intermediate?.waveExtension
+    ),
+    position: pickActiveExtension(
+      intermediate?.waveExtension,
+      primary?.waveExtension
+    ),
+  };
 
-return {
-  primary,
-  intermediate,
-  minor,
-  minute: minuteWithLevels,
+  let correctionDirection = null;
 
-  primaryPhase: primary?.phase ?? "UNKNOWN",
-  intermediatePhase: intermediate?.phase ?? "UNKNOWN",
-  minorPhase: minor?.phase ?? "UNKNOWN",
-  minutePhase: minuteWithLevels?.phase ?? "UNKNOWN",
+  if (intermediate?.waveMode === "CORRECTIVE") {
+    correctionDirection = "UP";
+  }
 
-  intermediateWaveMode: intermediate?.waveMode ?? null,
-  correctionDirection,
-};
+  return {
+    primary,
+    intermediate,
+    minor,
+    minute,
+
+    activeExtensions,
+
+    primaryPhase: primary?.phase ?? "UNKNOWN",
+    intermediatePhase: intermediate?.phase ?? "UNKNOWN",
+    minorPhase: minor?.phase ?? "UNKNOWN",
+    minutePhase: minute?.phase ?? "UNKNOWN",
+
+    intermediateWaveMode: intermediate?.waveMode ?? null,
+    correctionDirection,
+  };
 }
 
 /* -----------------------------
