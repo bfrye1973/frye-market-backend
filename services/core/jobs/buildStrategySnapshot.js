@@ -1022,6 +1022,13 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     cInternalStructure,
     cShortWatch,
     wave3Retrace, 
+
+    // Engine 2D:
+    // Expose full Elliott marks so forward extension maps can be built
+    // after manual LEVEL rows are attached.
+    waveMarks,
+
+    wave3Retrace, 
   };
 }
 function getWaveMarkPrice(waveMarks, key) {
