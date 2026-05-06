@@ -999,7 +999,7 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     correctionDirection = "UP";
   }
 
-  return {
+    return {
     degree,
     tf,
     ok,
@@ -1009,7 +1009,12 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     phase,
     confirmedPhase,
     phaseReason,
-    cExtensionZone, 
+
+    // Engine 2D diagnostic:
+    // Shows the latest candle time used by computeWavePhaseFromMarks().
+    lastBarTimeSec,
+
+    cExtensionZone,
     lastMark,
     nextMark,
     marksPresent,
@@ -1021,14 +1026,14 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     correctionDirection,
     cInternalStructure,
     cShortWatch,
-    wave3Retrace, 
+
+    // Existing pullback/retracement map.
+    wave3Retrace,
 
     // Engine 2D:
     // Expose full Elliott marks so forward extension maps can be built
     // after manual LEVEL rows are attached.
     waveMarks,
-
-    wave3Retrace, 
   };
 }
 function getWaveMarkPrice(waveMarks, key) {
