@@ -1,9 +1,8 @@
 name: dashboard-hourly
 
-defaults:
-  run:
-    shell: bash
-
+on:
+  workflow_dispatch:
+  
 jobs:
   build_and_publish_hourly:
     name: Build and Publish Hourly (1h valuation)
