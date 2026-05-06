@@ -1264,6 +1264,29 @@ function inactiveWaveExtension({
       lo: null,
       hi: null,
     },
+    targetZones: {
+      e1618: {
+        name: `${wave || "WAVE"}_EXTENSION_1618_ZONE`,
+        level: 1.618,
+        price: null,
+        lo: null,
+        hi: null,
+      },
+      e200: {
+        name: `${wave || "WAVE"}_EXTENSION_200_ZONE`,
+        level: 2.0,
+        price: null,
+        lo: null,
+        hi: null,
+      },
+      e2618: {
+        name: `${wave || "WAVE"}_EXTENSION_2618_ZONE`,
+        level: 2.618,
+        price: null,
+        lo: null,
+        hi: null,
+      },
+    },
     reason: reason || "INACTIVE",
   };
 }
@@ -1330,6 +1353,48 @@ function buildExtensionMap({
 
   const zoneBuffer = getExtensionZoneBuffer(degree);
   const e1618 = levels.e1618;
+  const e200 = levels.e200;
+  const e2618 = levels.e2618;
+
+  const makeTargetZone = ({ key, level, price }) => {
+    const p = Number(price);
+
+    if (!Number.isFinite(p)) {
+      return {
+        name: `${wave}_EXTENSION_${key}_ZONE`,
+        level,
+        price: null,
+        lo: null,
+        hi: null,
+      };
+    }
+
+    return {
+      name: `${wave}_EXTENSION_${key}_ZONE`,
+      level,
+      price: round2(p),
+      lo: round2(p - zoneBuffer),
+      hi: round2(p + zoneBuffer),
+    };
+  };
+
+  const targetZones = {
+    e1618: makeTargetZone({
+      key: "1618",
+      level: 1.618,
+      price: e1618,
+    }),
+    e200: makeTargetZone({
+      key: "200",
+      level: 2.0,
+      price: e200,
+    }),
+    e2618: makeTargetZone({
+      key: "2618",
+      level: 2.618,
+      price: e2618,
+    }),
+  };
 
   return {
     active: true,
@@ -1349,13 +1414,13 @@ function buildExtensionMap({
       projectionBaseKey: projectionBaseKey || null,
     },
     levels,
-    targetZone: {
-      name: `${wave}_EXTENSION_1618_ZONE`,
-      level: 1.618,
-      price: e1618,
-      lo: round2(e1618 - zoneBuffer),
-      hi: round2(e1618 + zoneBuffer),
-    },
+    // Default targetZone remains 1.618 for backward compatibility.
+    targetZone: targetZones.e1618,
+
+    // Engine 2D:
+    // Full forward runner target zones for Engine 22.
+    targetZones,
+
     reason,
   };
 }
