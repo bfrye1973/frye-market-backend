@@ -1191,7 +1191,12 @@ function round2(n) {
   const x = Number(n);
   return Number.isFinite(x) ? Number(x.toFixed(2)) : null;
 }
+function toPriceOrNull(x) {
+  if (x === null || x === undefined || x === "") return null;
 
+  const n = Number(x);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 function getExtensionZoneBuffer(degree) {
   const d = String(degree || "").toLowerCase();
 
@@ -1357,12 +1362,12 @@ function buildExtensionMap({
 
 function computeW2ToW3Extension({ degree, tf, phase, confirmedPhase, waveMarks, w1Payload }) {
   const w1Low =
-    toNum(w1Payload?.anchors?.low) ??
-    toNum(w1Payload?.anchors?.a);
+    toPriceOrNull(w1Payload?.anchors?.low) ??
+    toPriceOrNull(w1Payload?.anchors?.a);
 
   const w1High =
-    toNum(w1Payload?.anchors?.high) ??
-    toNum(w1Payload?.anchors?.b);
+    toPriceOrNull(w1Payload?.anchors?.high) ??
+    toPriceOrNull(w1Payload?.anchors?.b);
 
   const w2 = getWaveMarkPrice(waveMarks, "W2");
 
@@ -1402,8 +1407,8 @@ function computeW4ToW5Extension({ degree, tf, phase, confirmedPhase, waveMarks, 
   const w2 = getWaveMarkPrice(waveMarks, "W2");
   const w3 = getWaveMarkPrice(waveMarks, "W3");
 
-  const cLow = toNum(block?.cLow);
-  const w4Low = toNum(block?.w4Low);
+  const cLow = toPriceOrNull(block?.cLow);
+  const w4Low = toPriceOrNull(block?.w4Low);
   const markedW4 = getWaveMarkPrice(waveMarks, "W4");
 
   const projectionBase =
@@ -1513,7 +1518,7 @@ function computeWaveExtensionsForBlock(block) {
     active = w3;
   } else if (phase === "IN_W5" && w5?.active) {
     active = w5;
-  } else if (phase === "IN_W4" && toNum(block?.cLow) != null && w5?.active) {
+  } else if (phase === "IN_W4" && toPriceOrNull(block?.cLow) != null && w5?.active) {
     active = {
       ...w5,
       active: true,
