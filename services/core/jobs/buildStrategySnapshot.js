@@ -1056,44 +1056,7 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     w1Payload,
   };
 }
-   
-    return {
-    degree,
-    tf,
-    ok,
-    waveRequested: w4?.ok ? "W4" : w1?.ok ? "W1" : null,
-    fibScore,
-    invalidated,
-    phase,
-    confirmedPhase,
-    phaseReason,
-
-    // Engine 2D diagnostic:
-    // Shows the latest candle time used by computeWavePhaseFromMarks().
-    lastBarTimeSec,
-
-    cExtensionZone,
-    lastMark,
-    nextMark,
-    marksPresent,
-    anchorTag: anchorTag ?? null,
-    waveMode,
-    isCorrective,
-    isImpulse,
-    isFinalCorrectionLeg,
-    correctionDirection,
-    cInternalStructure,
-    cShortWatch,
-
-    // Existing pullback/retracement map.
-    wave3Retrace,
-
-    // Engine 2D:
-    // Expose full Elliott marks so forward extension maps can be built
-    // after manual LEVEL rows are attached.
-    waveMarks,
-  };
-}
+    
 function getWaveMarkPrice(waveMarks, key) {
   const p = Number(waveMarks?.[key]?.p);
   return Number.isFinite(p) && p > 0 ? p : null;
