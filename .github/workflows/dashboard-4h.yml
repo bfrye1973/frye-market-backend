@@ -52,8 +52,11 @@ jobs:
         run: |
           set -euo pipefail
           MODE="incremental"
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            MODE="${{ inputs.mode }}"
+            if [ -n "${{ inputs.mode }}" ]; then
+              MODE="${{ inputs.mode }}"
+            fi
           fi
           echo "MODE=$MODE" >> "$GITHUB_ENV"
           echo "::notice:: MODE=$MODE"
