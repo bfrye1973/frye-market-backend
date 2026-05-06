@@ -1162,6 +1162,295 @@ function computeWave3RetraceMap({ waveMarks, currentPrice, phase }) {
     },
   };
 }
+
+/* -----------------------------
+   Engine 2D forward wave extensions
+------------------------------*/
+function round2(n) {
+  const x = Number(n);
+  return Number.isFinite(x) ? Number(x.toFixed(2)) : null;
+}
+
+function getExtensionZoneBuffer(degree) {
+  const d = String(degree || "").toLowerCase();
+
+  if (d === "minute") return 0.5;
+  if (d === "minor") return 1.0;
+  if (d === "intermediate") return 2.0;
+  if (d === "primary") return 3.0;
+
+  return 1.0;
+}
+
+function inferExtensionDirection({ start, end, direction = null }) {
+  const explicit = String(direction || "").toUpperCase();
+
+  if (explicit === "BEARISH") return "BEARISH";
+  if (explicit === "BULLISH") return "BULLISH";
+
+  const s = Number(start);
+  const e = Number(end);
+
+  if (Number.isFinite(s) && Number.isFinite(e) && e < s) {
+    return "BEARISH";
+  }
+
+  return "BULLISH";
+}
+
+function inactiveWaveExtension({
+  degree,
+  tf,
+  wave,
+  phase,
+  confirmedPhase,
+  source,
+  reason,
+}) {
+  return {
+    active: false,
+    source: source || "UNKNOWN",
+    degree: degree || null,
+    tf: tf || null,
+    wave: wave || null,
+    phase: phase || "UNKNOWN",
+    confirmedPhase: confirmedPhase || "UNKNOWN",
+    anchors: {
+      start: null,
+      end: null,
+      projectionBase: null,
+      startKey: null,
+      endKey: null,
+      projectionBaseKey: null,
+    },
+    levels: {
+      e100: null,
+      e1168: null,
+      e1272: null,
+      e1618: null,
+      e200: null,
+      e2618: null,
+    },
+    targetZone: {
+      name: `${wave || "WAVE"}_EXTENSION_1618_ZONE`,
+      level: 1.618,
+      price: null,
+      lo: null,
+      hi: null,
+    },
+    reason: reason || "INACTIVE",
+  };
+}
+
+function buildExtensionMap({
+  degree,
+  tf,
+  wave,
+  source,
+  phase,
+  confirmedPhase,
+  start,
+  end,
+  projectionBase,
+  startKey,
+  endKey,
+  projectionBaseKey,
+  direction = null,
+  reason = "ACTIVE_EXTENSION",
+}) {
+  const s = Number(start);
+  const e = Number(end);
+  const base = Number(projectionBase);
+
+  if (!Number.isFinite(s) || !Number.isFinite(e) || !Number.isFinite(base)) {
+    return inactiveWaveExtension({
+      degree,
+      tf,
+      wave,
+      phase,
+      confirmedPhase,
+      source,
+      reason: "MISSING_EXTENSION_ANCHORS",
+    });
+  }
+
+  const range = Math.abs(e - s);
+
+  if (!Number.isFinite(range) || range <= 0) {
+    return inactiveWaveExtension({
+      degree,
+      tf,
+      wave,
+      phase,
+      confirmedPhase,
+      source,
+      reason: "INVALID_EXTENSION_RANGE",
+    });
+  }
+
+  const dir = inferExtensionDirection({ start: s, end: e, direction });
+  const sign = dir === "BEARISH" ? -1 : 1;
+
+  const calc = (fib) => round2(base + sign * range * fib);
+
+  const levels = {
+    e100: calc(1.0),
+    e1168: calc(1.168),
+    e1272: calc(1.272),
+    e1618: calc(1.618),
+    e200: calc(2.0),
+    e2618: calc(2.618),
+  };
+
+  const zoneBuffer = getExtensionZoneBuffer(degree);
+  const e1618 = levels.e1618;
+
+  return {
+    active: true,
+    source,
+    degree,
+    tf,
+    wave,
+    phase,
+    confirmedPhase,
+    direction: dir,
+    anchors: {
+      start: round2(s),
+      end: round2(e),
+      projectionBase: round2(base),
+      startKey: startKey || null,
+      endKey: endKey || null,
+      projectionBaseKey: projectionBaseKey || null,
+    },
+    levels,
+    targetZone: {
+      name: `${wave}_EXTENSION_1618_ZONE`,
+      level: 1.618,
+      price: e1618,
+      lo: round2(e1618 - zoneBuffer),
+      hi: round2(e1618 + zoneBuffer),
+    },
+    reason,
+  };
+}
+
+function computeW2ToW3Extension({ degree, tf, phase, confirmedPhase, waveMarks, w1Payload }) {
+  const w1Low =
+    toNum(w1Payload?.anchors?.low) ??
+    toNum(w1Payload?.anchors?.a);
+
+  const w1High =
+    toNum(w1Payload?.anchors?.high) ??
+    toNum(w1Payload?.anchors?.b);
+
+  const w2 = getWaveMarkPrice(waveMarks, "W2");
+
+  if (w1Low == null || w1High == null || w2 == null) {
+    return inactiveWaveExtension({
+      degree,
+      tf,
+      wave: "W3",
+      phase,
+      confirmedPhase,
+      source: "W2_TO_W3",
+      reason: "MISSING_W1_OR_W2",
+    });
+  }
+
+  return buildExtensionMap({
+    degree,
+    tf,
+    wave: "W3",
+    source: "W2_TO_W3",
+    phase,
+    confirmedPhase,
+    start: w1Low,
+    end: w1High,
+    projectionBase: w2,
+    startKey: "W1_LOW",
+    endKey: "W1_HIGH",
+    projectionBaseKey: "W2",
+    reason: phase === "IN_W3"
+      ? "ACTIVE_W3_EXTENSION"
+      : "W3_EXTENSION_AVAILABLE",
+  });
+}
+
+function computeW4ToW5Extension({ degree, tf, phase, confirmedPhase, waveMarks, block }) {
+  const w2 = getWaveMarkPrice(waveMarks, "W2");
+  const w3 = getWaveMarkPrice(waveMarks, "W3");
+
+  const cLow = toNum(block?.cLow);
+  const w4Low = toNum(block?.w4Low);
+  const markedW4 = getWaveMarkPrice(waveMarks, "W4");
+
+  const projectionBase =
+    cLow ??
+    w4Low ??
+    markedW4;
+
+  const projectionBaseKey =
+    cLow != null
+      ? "C_LOW"
+      : w4Low != null
+      ? "W4_LOW"
+      : markedW4 != null
+      ? "W4"
+      : null;
+
+  if (w2 == null || w3 == null) {
+    return inactiveWaveExtension({
+      degree,
+      tf,
+      wave: "W5",
+      phase,
+      confirmedPhase,
+      source: "W4_TO_W5",
+      reason: "MISSING_W2_OR_W3",
+    });
+  }
+
+  if (projectionBase == null) {
+    return inactiveWaveExtension({
+      degree,
+      tf,
+      wave: "W5",
+      phase,
+      confirmedPhase,
+      source: "W4_TO_W5",
+      reason: "MISSING_W4_LOW",
+    });
+  }
+
+  let reason = "W5_EXTENSION_AVAILABLE";
+
+  if (phase === "IN_W5") {
+    reason = "ACTIVE_W5_EXTENSION";
+  } else if (phase === "IN_W4" && cLow != null) {
+    reason = "PROJECTING_W5_FROM_C_LOW";
+  } else if (phase === "IN_W4" && w4Low != null) {
+    reason = "PROJECTING_W5_FROM_W4_LOW";
+  } else if (phase === "IN_W4" && markedW4 != null) {
+    reason = "PROJECTING_W5_FROM_MARKED_W4";
+  }
+
+  return buildExtensionMap({
+    degree,
+    tf,
+    wave: "W5",
+    source: "W4_TO_W5",
+    phase,
+    confirmedPhase,
+    start: w2,
+    end: w3,
+    projectionBase,
+    startKey: "W2",
+    endKey: "W3",
+    projectionBaseKey,
+    reason,
+  });
+}
+
 /* -----------------------------
    Reaction / Volume
 ------------------------------*/
