@@ -999,18 +999,6 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     correctionDirection = "UP";
   }
 
-  const waveMode =
-   ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
-   
-  const isCorrective = waveMode === "CORRECTIVE";
-  const isImpulse = waveMode === "IMPULSE";
-  const isFinalCorrectionLeg = phase === "IN_C";
-
-  let correctionDirection = null;
-  if (waveMode === "CORRECTIVE") {
-    correctionDirection = "UP";
-  }
-
   // Engine 2D:
   // Save the W1 anchor payload so W2 -> W3 forward extensions
   // can use W1 low/high projected from W2.
