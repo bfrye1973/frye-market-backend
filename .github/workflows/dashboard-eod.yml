@@ -1,23 +1,7 @@
 name: dashboard-eod
 
 on:
-  workflow_dispatch: {}
-  schedule:
-    # Arizona-aligned triggers (Mon–Fri)
-    # 1) 30 min before open (7:00 AM AZ = 14:00 UTC)
-    - cron: "0 14 * * 1-5"
-    # 2) 10 min after open (7:40 AM AZ = 14:40 UTC)
-    - cron: "40 14 * * 1-5"
-    # 3) Midday pulse (10:45 AM AZ = 17:45 UTC)
-    - cron: "45 17 * * 1-5"
-    # 4) 15 min before close (1:45 PM AZ = 20:45 UTC)
-    - cron: "45 20 * * 1-5"
-    # 5) 15 min after close (2:15 PM AZ = 21:15 UTC)
-    - cron: "15 21 * * 1-5"
-
-defaults:
-  run:
-    shell: bash
+  workflow_dispatch:
 
 jobs:
   build_and_publish_eod:
