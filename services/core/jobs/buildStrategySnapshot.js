@@ -999,6 +999,76 @@ async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
     correctionDirection = "UP";
   }
 
+  const waveMode =
+   ["IN_A", "IN_B", "IN_C"].includes(phase) ? "CORRECTIVE" : "IMPULSE";
+   
+  const isCorrective = waveMode === "CORRECTIVE";
+  const isImpulse = waveMode === "IMPULSE";
+  const isFinalCorrectionLeg = phase === "IN_C";
+
+  let correctionDirection = null;
+  if (waveMode === "CORRECTIVE") {
+    correctionDirection = "UP";
+  }
+
+  // Engine 2D:
+  // Save the W1 anchor payload so W2 -> W3 forward extensions
+  // can use W1 low/high projected from W2.
+  const w1Payload =
+    w1?.ok
+      ? {
+          ok: true,
+          anchors: {
+            low: toNum(w1?.anchors?.low),
+            high: toNum(w1?.anchors?.high),
+            a: toNum(w1?.anchors?.a),
+            b: toNum(w1?.anchors?.b),
+          },
+        }
+      : null;
+
+  return {
+    degree,
+    tf,
+    ok,
+    waveRequested: w4?.ok ? "W4" : w1?.ok ? "W1" : null,
+    fibScore,
+    invalidated,
+    phase,
+    confirmedPhase,
+    phaseReason,
+
+    // Engine 2D diagnostic:
+    // Shows the latest candle time used by computeWavePhaseFromMarks().
+    lastBarTimeSec,
+
+    cExtensionZone,
+    lastMark,
+    nextMark,
+    marksPresent,
+    anchorTag: anchorTag ?? null,
+    waveMode,
+    isCorrective,
+    isImpulse,
+    isFinalCorrectionLeg,
+    correctionDirection,
+    cInternalStructure,
+    cShortWatch,
+
+    // Existing pullback/retracement map.
+    wave3Retrace,
+
+    // Engine 2D:
+    // Expose full Elliott marks so forward extension maps can be built
+    // after manual LEVEL rows are attached.
+    waveMarks,
+
+    // Engine 2D:
+    // Expose W1 anchor payload for W2 -> W3 forward extensions.
+    w1Payload,
+  };
+}
+   
     return {
     degree,
     tf,
@@ -1370,9 +1440,10 @@ function computeW2ToW3Extension({ degree, tf, phase, confirmedPhase, waveMarks, 
     startKey: "W1_LOW",
     endKey: "W1_HIGH",
     projectionBaseKey: "W2",
-    reason: phase === "IN_W3"
-      ? "ACTIVE_W3_EXTENSION"
-      : "W3_EXTENSION_AVAILABLE",
+    reason:
+      phase === "IN_W3"
+        ? "ACTIVE_W3_EXTENSION"
+        : "W3_EXTENSION_AVAILABLE",
   });
 }
 
@@ -1448,6 +1519,113 @@ function computeW4ToW5Extension({ degree, tf, phase, confirmedPhase, waveMarks, 
     endKey: "W3",
     projectionBaseKey,
     reason,
+  });
+}
+
+function computeWaveExtensionsForBlock(block) {
+  const degree = block?.degree ?? null;
+  const tf = block?.tf ?? null;
+  const phase = block?.phase ?? "UNKNOWN";
+  const confirmedPhase = block?.confirmedPhase ?? "UNKNOWN";
+  const waveMarks = block?.waveMarks ?? null;
+  const w1Payload = block?.w1Payload ?? null;
+
+  const w3 = computeW2ToW3Extension({
+    degree,
+    tf,
+    phase,
+    confirmedPhase,
+    waveMarks,
+    w1Payload,
+  });
+
+  const w5 = computeW4ToW5Extension({
+    degree,
+    tf,
+    phase,
+    confirmedPhase,
+    waveMarks,
+    block,
+  });
+
+  let active = inactiveWaveExtension({
+    degree,
+    tf,
+    wave: null,
+    phase,
+    confirmedPhase,
+    source: "NO_ACTIVE_EXTENSION",
+    reason: "NO_ACTIVE_EXTENSION_FOR_PHASE",
+  });
+
+  if (phase === "IN_W3" && w3?.active) {
+    active = w3;
+  } else if (phase === "IN_W5" && w5?.active) {
+    active = w5;
+  } else if (phase === "IN_W4" && toNum(block?.cLow) != null && w5?.active) {
+    active = {
+      ...w5,
+      active: true,
+      reason: "PROJECTING_W5_FROM_C_LOW",
+    };
+  }
+
+  return {
+    w3,
+    w5,
+    active,
+  };
+}
+
+function enrichEngine2BlockWithExtensions(block) {
+  if (!block || typeof block !== "object") {
+    const fallback = inactiveWaveExtension({
+      degree: null,
+      tf: null,
+      wave: null,
+      phase: "UNKNOWN",
+      confirmedPhase: "UNKNOWN",
+      source: "ENGINE2_BLOCK_MISSING",
+      reason: "ENGINE2_BLOCK_MISSING",
+    });
+
+    return {
+      ok: false,
+      phase: "UNKNOWN",
+      confirmedPhase: "UNKNOWN",
+      waveExtensions: {
+        w3: fallback,
+        w5: fallback,
+        active: fallback,
+      },
+      waveExtension: fallback,
+    };
+  }
+
+  const waveExtensions = computeWaveExtensionsForBlock(block);
+
+  return {
+    ...block,
+    waveExtensions,
+    waveExtension: waveExtensions.active,
+  };
+}
+
+function pickActiveExtension(primaryChoice, fallbackChoice) {
+  if (primaryChoice?.active) return primaryChoice;
+
+  if (fallbackChoice) return fallbackChoice;
+
+  if (primaryChoice) return primaryChoice;
+
+  return inactiveWaveExtension({
+    degree: null,
+    tf: null,
+    wave: null,
+    phase: "UNKNOWN",
+    confirmedPhase: "UNKNOWN",
+    source: "NO_EXTENSION_AVAILABLE",
+    reason: "NO_EXTENSION_AVAILABLE",
   });
 }
 
