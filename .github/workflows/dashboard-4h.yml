@@ -1,20 +1,5 @@
 name: dashboard-4h
 
-on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: "baseline = full scan all symbols (slow). incremental = only update changed symbols (fast)."
-        required: true
-        default: "incremental"
-        type: choice
-        options:
-          - baseline
-          - incremental
-  schedule:
-    # Run incremental on a cadence (Mon–Fri). Adjust later if desired.
-    - cron: "10 */4 * * 1-5"
-
 defaults:
   run:
     shell: bash
