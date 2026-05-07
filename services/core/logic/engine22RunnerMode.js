@@ -10,6 +10,7 @@
 // - A++ option contract plan
 // - Profit 1 / Profit 2 / Profit 3 rules
 // - Stop-loss and trailing stop rules
+// - Engine 2D forward extension target interpretation
 //
 // Read-only. Does NOT execute trades.
 // Called by engine22ScalpOpportunity.js.
@@ -132,7 +133,7 @@ function buildProfitPlan({ contracts }) {
       waveExtension: 1.618,
       action: contracts >= 3 ? "SELL_1_OF_3" : "TAKE_SECOND_PARTIAL",
       rule:
-        "Take Profit 2 at the 1.618 wave extension.",
+        "Take Profit 2 at the 1.618 wave extension zone. This turns the trade into runner-only management, not an automatic bearish signal.",
     },
 
     profit3: {
@@ -154,6 +155,144 @@ function buildStopPlan({ stopCandidate }) {
     trailAfterProfit2: "TRAIL_FINAL_RUNNER_BY_30M_EMA10_CLOSE",
     invalidIf:
       "Price breaks below the last 30m low zone or runner closes below the 30m EMA10 after Profit 2.",
+  };
+}
+
+function formatZone(zone) {
+  if (!zone) return null;
+
+  return {
+    name: zone?.name || null,
+    level: Number.isFinite(Number(zone?.level)) ? Number(zone.level) : null,
+    price: round2(validPrice(zone?.price)),
+    lo: round2(validPrice(zone?.lo)),
+    hi: round2(validPrice(zone?.hi)),
+  };
+}
+
+function getScalpExtensionPlan({ engine2State, currentPrice }) {
+  const scalpExt = engine2State?.activeExtensions?.scalp || null;
+
+  const zone1618 =
+    scalpExt?.targetZones?.e1618 ||
+    scalpExt?.targetZone ||
+    null;
+
+  const zone200 = scalpExt?.targetZones?.e200 || null;
+  const zone2618 = scalpExt?.targetZones?.e2618 || null;
+
+  const price = validPrice(currentPrice);
+
+  const inZone = (zone) => {
+    if (!zone || price === null) return false;
+
+    const lo = validPrice(zone.lo);
+    const hi = validPrice(zone.hi);
+
+    if (lo === null || hi === null) return false;
+
+    return price >= Math.min(lo, hi) && price <= Math.max(lo, hi);
+  };
+
+  const aboveZone = (zone) => {
+    if (!zone || price === null) return false;
+
+    const lo = validPrice(zone.lo);
+    const targetPrice = validPrice(zone.price);
+    const cutoff = lo ?? targetPrice;
+
+    if (cutoff === null) return false;
+
+    return price >= cutoff;
+  };
+
+  const in1618Zone = inZone(zone1618);
+  const above1618 = aboveZone(zone1618);
+
+  const in200Zone = inZone(zone200);
+  const above200 = aboveZone(zone200);
+
+  const in2618Zone = inZone(zone2618);
+  const above2618 = aboveZone(zone2618);
+
+  let state = "BEFORE_1618";
+  let extensionMode = "BUILDING_TO_1618";
+  let entryQualityOverride = null;
+  let management = "HOLD_FOR_1618";
+  let reasonCode = "BEFORE_1618_EXTENSION_ZONE";
+  let noNewAPlusPlusEntry = false;
+  let runnerStillValidIf30mEma10Holds = false;
+  let watchForHeaviness = false;
+
+  if (above2618) {
+    state = "RUNNER_2618_FINAL_EXTENSION";
+    extensionMode = "FINAL_EXTENSION_ZONE";
+    entryQualityOverride = "EXTENDED";
+    management = "FINAL_PROFIT_ZONE_OR_EXIT_RUNNER";
+    reasonCode = "PRICE_AT_OR_ABOVE_2618_EXTENSION_ZONE";
+    noNewAPlusPlusEntry = true;
+    runnerStillValidIf30mEma10Holds = true;
+    watchForHeaviness = true;
+
+  } else if (above200) {
+    state = "RUNNER_200_PROFIT_ZONE";
+    extensionMode = "SECOND_EXTENSION_PROFIT_ZONE";
+    entryQualityOverride = "EXTENDED";
+    management = "TAKE_PROFIT_OR_TIGHT_TRAIL";
+    reasonCode = "PRICE_AT_OR_ABOVE_200_EXTENSION_ZONE";
+    noNewAPlusPlusEntry = true;
+    runnerStillValidIf30mEma10Holds = true;
+    watchForHeaviness = true;
+
+  } else if (above1618) {
+    state = "RUNNER_1618_PROFIT_ZONE";
+    extensionMode = "PROFIT_2_ZONE_RUNNER_ONLY";
+    entryQualityOverride = "EXTENDED";
+    management = "TAKE_PROFIT_2_OR_TRAIL_FINAL_RUNNER";
+    reasonCode = "PRICE_AT_OR_ABOVE_1618_EXTENSION_ZONE";
+    noNewAPlusPlusEntry = true;
+    runnerStillValidIf30mEma10Holds = true;
+    watchForHeaviness = false;
+  }
+
+  return {
+    active: scalpExt?.active === true,
+    source: scalpExt?.source || null,
+    degree: scalpExt?.degree || null,
+    tf: scalpExt?.tf || null,
+    wave: scalpExt?.wave || null,
+    phase: scalpExt?.phase || null,
+
+    state,
+    extensionMode,
+    management,
+    entryQualityOverride,
+    noNewAPlusPlusEntry,
+    runnerStillValidIf30mEma10Holds,
+    watchForHeaviness,
+    reasonCode,
+
+    currentPrice: round2(price),
+
+    zones: {
+      e1618: formatZone(zone1618),
+      e200: formatZone(zone200),
+      e2618: formatZone(zone2618),
+    },
+
+    flags: {
+      in1618Zone,
+      above1618,
+      in200Zone,
+      above200,
+      in2618Zone,
+      above2618,
+    },
+
+    rule:
+      above1618
+        ? "1.618 is a profit-management zone, not an automatic bearish signal. No new A++ entry; keep final runner only while 30m EMA10 holds."
+        : "Before 1.618, A++ runner entry can remain valid if all other filters align.",
   };
 }
 
@@ -282,14 +421,24 @@ export function detectRunnerMode({
     zoneAbsorption?.zoneLo
   );
 
+  const extensionPlan = getScalpExtensionPlan({
+    engine2State,
+    currentPrice: close,
+  });
+
+  const extendedPast1618 =
+    extensionPlan?.flags?.above1618 === true;
+
   const entryQuality =
-    runnerEnvironment &&
-    continuationLongActive &&
-    (
-      zoneBuyingActive ||
-      zoneAbsorption?.state === "NO_ACTIVE_NEGOTIATED_ZONE" ||
-      zoneAbsorption?.state === "NEGOTIATED_ZONE_DECISION_POINT"
-    )
+    extendedPast1618
+      ? "EXTENDED"
+      : runnerEnvironment &&
+        continuationLongActive &&
+        (
+          zoneBuyingActive ||
+          zoneAbsorption?.state === "NO_ACTIVE_NEGOTIATED_ZONE" ||
+          zoneAbsorption?.state === "NEGOTIATED_ZONE_DECISION_POINT"
+        )
       ? "A++"
       : runnerEnvironment
       ? "A"
@@ -321,6 +470,59 @@ export function detectRunnerMode({
     w4NotConfirmed ? "W4_NOT_CONFIRMED" : null,
   ].filter(Boolean);
 
+  if (runnerEnvironment && extendedPast1618) {
+    return {
+      active: true,
+      state: extensionPlan?.state || "RUNNER_1618_PROFIT_ZONE",
+      setup: "W3_W5_RUNNER_CONTINUATION",
+      entryQuality: "EXTENDED",
+      recommendedContracts: 0,
+      expiration: "NO_NEW_FULL_SIZE_ENTRY",
+      strikeStyle: "NO_NEW_FULL_SIZE_ENTRY",
+      pullbackExpectation: "EXTENDED_MOVE",
+      doNotWaitForDeepPullback: false,
+      doNotOpenNewFullSize: true,
+      runnerStillValidIf30mEma10Holds:
+        extensionPlan?.runnerStillValidIf30mEma10Holds === true,
+      watchForHeaviness:
+        extensionPlan?.watchForHeaviness === true,
+      preferredEntry: "NO_NEW_A_PLUS_PLUS_ENTRY_AT_EXTENSION",
+      management: extensionPlan?.management || "TAKE_PROFIT_2_OR_TRAIL_FINAL_RUNNER",
+      profitPlan,
+      stopPlan,
+      extensionPlan,
+      reasonCodes: [
+        ...reasonBase,
+        extensionPlan?.reasonCode || "PRICE_AT_OR_ABOVE_1618_EXTENSION_ZONE",
+        "A_PLUS_PLUS_ENTRY_DISABLED",
+        "RECOMMENDED_CONTRACTS_ZERO",
+        "PROFIT_MANAGEMENT_MODE",
+        "RUNNER_VALID_ONLY_IF_30M_EMA10_HOLDS",
+      ].filter(Boolean),
+      debug: {
+        ...phases,
+        latestClose: close,
+        ema10: e10,
+        ema20: e20,
+        oneHourScore,
+        fourHourScore,
+        dailyScore,
+        masterScore,
+        priceAboveDailyEma10,
+        priceAbove4hEma10,
+        priceAbove1hEma10,
+        priceAboveEma10,
+        priceAboveEma20,
+        continuationLongActive,
+        zoneBuyingActive,
+        zoneAbsorptionState: zoneAbsorption?.state || null,
+        structureState: structureUpper,
+        stopCandidate,
+        extensionPlan,
+      },
+    };
+  }
+
   if (runnerEnvironment && continuationLongActive) {
     return {
       active: true,
@@ -332,10 +534,14 @@ export function detectRunnerMode({
       strikeStyle: entryQuality === "A++" ? "ITM" : "USER_DISCRETION",
       pullbackExpectation: "SHALLOW_ONLY",
       doNotWaitForDeepPullback: true,
+      doNotOpenNewFullSize: false,
+      runnerStillValidIf30mEma10Holds: true,
+      watchForHeaviness: false,
       preferredEntry: "EMA10_HOLD_OR_MICRO_FLAG_BREAK_OR_CONTINUATION_TRIGGER",
       management: "TAKE_40_PERCENT_OR_NEXT_ZONE_THEN_TRAIL_30M_EMA10",
       profitPlan,
       stopPlan,
+      extensionPlan,
       reasonCodes: [
         ...reasonBase,
         "CONTINUATION_LONG_ACTIVE",
@@ -363,6 +569,7 @@ export function detectRunnerMode({
         zoneAbsorptionState: zoneAbsorption?.state || null,
         structureState: structureUpper,
         stopCandidate,
+        extensionPlan,
       },
     };
   }
@@ -378,10 +585,14 @@ export function detectRunnerMode({
       strikeStyle: "WAIT_FOR_TRIGGER",
       pullbackExpectation: "SHALLOW_ONLY",
       doNotWaitForDeepPullback: true,
+      doNotOpenNewFullSize: false,
+      runnerStillValidIf30mEma10Holds: true,
+      watchForHeaviness: false,
       preferredEntry: "EMA10_HOLD_OR_MICRO_FLAG_BREAK_OR_CONTINUATION_TRIGGER",
       management: "WAIT_FOR_ENTRY_THEN_USE_RUNNER_PLAN",
       profitPlan,
       stopPlan,
+      extensionPlan,
       reasonCodes: [
         ...reasonBase,
         "RUNNER_ENVIRONMENT_ACTIVE",
@@ -406,6 +617,7 @@ export function detectRunnerMode({
         zoneAbsorptionState: zoneAbsorption?.state || null,
         structureState: structureUpper,
         stopCandidate,
+        extensionPlan,
       },
     };
   }
@@ -420,10 +632,14 @@ export function detectRunnerMode({
     strikeStyle: "NONE",
     pullbackExpectation: "NORMAL",
     doNotWaitForDeepPullback: false,
+    doNotOpenNewFullSize: false,
+    runnerStillValidIf30mEma10Holds: false,
+    watchForHeaviness: false,
     preferredEntry: "NONE",
     management: "NO_RUNNER_MODE",
     profitPlan,
     stopPlan,
+    extensionPlan,
     reasonCodes: [
       "RUNNER_MODE_NOT_ACTIVE",
       ...reasonBase,
@@ -453,6 +669,7 @@ export function detectRunnerMode({
       zoneAbsorptionState: zoneAbsorption?.state || null,
       structureState: structureUpper,
       stopCandidate,
+      extensionPlan,
     },
   };
 }
