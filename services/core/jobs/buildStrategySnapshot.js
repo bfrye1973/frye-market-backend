@@ -2009,14 +2009,17 @@ async function processStrategy(
       executionBias = "LONG_PRIORITY";
     }
   }
-     console.log("[E22 DEBUG]", {
-     strategyId: s.strategyId,
-     tf: s.tf,
-     condition: s.strategyId === "intraday_scalp@10m" && s.tf === "10m"
-   }); 
-    const engine22Scalp =
-      s.strategyId === "intraday_scalp@10m" && s.tf === "10m"
-        ? computeEngine22ScalpOpportunity({
+      console.log("[E22 DEBUG]", {
+        strategyId: s.strategyId,
+        tf: s.tf,
+        condition: s.strategyId === "intraday_scalp@10m" && s.tf === "10m",
+      });
+
+      let engine22Scalp = null;
+
+      if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
+        try {
+          engine22Scalp = computeEngine22ScalpOpportunity({
             symbol,
             strategyId: s.strategyId,
             tf: s.tf,
@@ -2026,10 +2029,42 @@ async function processStrategy(
             engine2State,
             marketMind,
 
-           // Engine 1 negotiated-zone truth for Engine 22 zone absorption.
+            // Engine 1 negotiated-zone truth for Engine 22 zone absorption.
            engine1Context,
-         })
-       : null;
+         });
+       } catch (err) {
+         console.error("[E22 ERROR]", err);
+
+         engine22Scalp = {
+           ok: false,
+           engine: "engine22.scalpOpportunity.v5.2",
+           active: false,
+           mode: "OBSERVATION_ONLY",
+           symbol,
+           strategyId: s.strategyId,
+           tf: s.tf,
+           state: "ENGINE22_ERROR",
+           status: "NO_SCALP",
+           readiness: "WAIT",
+           setupType: "ENGINE22_ERROR",
+           type: "ENGINE22_ERROR",
+           direction: "NONE",
+           needs: "FIX_ENGINE22_ERROR",
+           allowLongEntry: false,
+           allowShort: false,
+           allowShortEntry: false,
+           triggerConfirmed: false,
+           trendVsWave: null,
+           zoneAbsorption: null,
+           runnerMode: null,
+           reasonCodes: ["ENGINE22_COMPUTE_FAILED"],
+           debug: {
+             error: String(err?.message || err),
+             stack: String(err?.stack || ""),
+           },
+         };
+       }
+     } 
   return {
     strategyId: s.strategyId,
     lockedSignal, 
