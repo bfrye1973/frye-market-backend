@@ -1477,18 +1477,18 @@ function computeW4ToW5Extension({ degree, tf, phase, confirmedPhase, waveMarks, 
   const markedW4 = getWaveMarkPrice(waveMarks, "W4");
 
   const projectionBase =
-    cLow ??
-    w4Low ??
-    markedW4;
+   markedW4 ??
+   cLow ??
+   w4Low;
 
-  const projectionBaseKey =
-    cLow != null
-      ? "C_LOW"
-      : w4Low != null
-      ? "W4_LOW"
-      : markedW4 != null
-      ? "W4"
-      : null;
+ const projectionBaseKey =
+   markedW4 != null
+     ? "MARK_W4"
+     : cLow != null
+     ? "C_LOW_LEVEL"
+     : w4Low != null
+     ? "W4_LOW_FIELD"
+     : null;
 
   if (w2 == null || w3 == null) {
     return inactiveWaveExtension({
