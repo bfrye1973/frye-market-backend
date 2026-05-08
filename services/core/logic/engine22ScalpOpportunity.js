@@ -1569,13 +1569,29 @@ function detectMinuteW4ABC({
   const trendState1h = upper(engine16?.trendState_1h);
 
   const {
-    oneHourScore,
-    fourHourScore,
-    dailyScore,
-    masterScore,
-  } = getMarketScores(marketMind);
+  oneHourScore,
+  fourHourScore,
+  dailyScore,
+  masterScore,
+} = getMarketScores(marketMind);
 
-  const marketFrontVeryStrong =
+const marketFrontStrong =
+  (
+    fourHourScore === null ||
+    fourHourScore >= 55
+  ) &&
+  (
+    dailyScore === null ||
+    dailyScore >= 65
+  ) &&
+  (
+    masterScore === null ||
+    masterScore >= 60
+  ) &&
+  trendState4h !== "SHORT_ONLY" &&
+  marketBias?.allowShorts !== true;
+
+const marketFrontVeryStrong =
     (
       fourHourScore === null ||
       fourHourScore >= 70
