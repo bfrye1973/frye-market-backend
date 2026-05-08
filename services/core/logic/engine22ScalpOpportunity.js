@@ -1575,21 +1575,17 @@ function detectMinuteW4ABC({
     masterScore,
   } = getMarketScores(marketMind);
 
-  const marketFrontStrong =
-    (
-      fourHourScore === null ||
-      fourHourScore >= 60
-    ) &&
-    (
-      dailyScore === null ||
-      dailyScore >= 65
-    ) &&
-    (
-      masterScore === null ||
-      masterScore >= 60
-    ) &&
-    trendState4h !== "SHORT_ONLY" &&
-    marketBias?.allowShorts !== true;
+  const marketFrontVeryStrong =
+  (
+    fourHourScore === null ||
+    fourHourScore >= 70
+  ) &&
+  (
+    dailyScore === null ||
+    dailyScore >= 75
+  ) &&
+  trendState4h !== "SHORT_ONLY" &&
+  marketBias?.allowShorts !== true;
 
   const marketFrontVeryStrong =
     (
