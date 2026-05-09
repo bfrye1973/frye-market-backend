@@ -1257,7 +1257,20 @@ function detectCorrectionToImpulseLong({
     validPrice(engine16?.prevClose) ??
     null;
 
-  const correctionLowHeld =
+  const hourlyClose = validPrice(engine16?.hourlyClose);
+  const ema10_1h = validPrice(engine16?.ema10_1h);
+
+  const oneHourAboveEma10 =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    hourlyClose > ema10_1h;
+
+  const oneHourBelowEma10 =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    hourlyClose < ema10_1h;
+
+   const correctionLowHeld =
     correctionLow !== null &&
     close !== null &&
     close >= correctionLow * 0.995;
@@ -1676,6 +1689,27 @@ const marketFrontVeryStrong =
     ) &&
     aboveEma20;
 
+  const tenMinLostSupport =
+    hasALow &&
+    aLowHeld &&
+    (
+      belowEma10 ||
+      belowEma20
+    );
+
+  const shallowPullbackTest =
+    hasALow &&
+    !hasCLow &&
+    marketFrontStrong &&
+    tenMinLostSupport &&
+    oneHourAboveEma10;
+
+  const cRiskReturning =
+    hasALow &&
+    !hasCLow &&
+    tenMinLostSupport &&
+    oneHourBelowEma10;
+
   const shallowContinuationWatch =
     hasALow &&
     !hasCLow &&
@@ -1841,6 +1875,138 @@ const marketFrontVeryStrong =
     }
 
     if (bBounceTrigger) {
+
+    if (cRiskReturning) {
+  return {
+    active: true,
+    setupType: "MINUTE_W4_ABC",
+    type: "W4_C_RISK_RETURNING",
+    state: "W4_C_RISK_RETURNING",
+    status: "WATCH",
+    readiness: "NO_TRADE",
+    direction: "NONE",
+    side: "NONE",
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    triggerType: "ONE_HOUR_EMA10_REJECTION_C_WAVE_RISK",
+    triggerLevel: round2(e10),
+    stopLevel: null,
+    confidence: 0,
+    sizeMode: "NONE",
+    needs: "WAIT_FOR_C_LOW",
+    marketBias,
+    reasonCodes: [
+      "MINUTE_W4_ACTIVE",
+      "A_LOW_MARKED",
+      "TEN_MIN_EMA_SUPPORT_LOST",
+      "ONE_HOUR_EMA10_LOST_OR_REJECTING",
+      "C_WAVE_RISK_RETURNING",
+      "WAIT_FOR_C_LOW",
+      "OBSERVATION_ONLY",
+    ],
+    debug: {
+      ...phases,
+      w3High,
+      aLow,
+      bHigh,
+      cLow,
+      latestClose: close,
+      ema10: e10,
+      ema20: e20,
+      prevClose,
+      hourlyClose,
+      ema10_1h,
+      oneHourAboveEma10,
+      oneHourBelowEma10,
+      aLowHeld,
+      reclaimedEma10,
+      aboveEma10,
+      aboveEma20,
+      belowEma10,
+      belowEma20,
+      tenMinLostSupport,
+      oneHourScore,
+      fourHourScore,
+      dailyScore,
+      masterScore,
+      marketFrontStrong,
+      marketFrontVeryStrong,
+      correctionLeg: "C_RISK_RETURNING",
+      nextFocus: "WAIT_FOR_C_LOW",
+    },
+  };
+}
+
+if (shallowPullbackTest) {
+  return {
+    active: true,
+    setupType: "W4_TO_W5_SHALLOW_CONTINUATION",
+    type: "W4_SHALLOW_PULLBACK_TEST",
+    state: "W4_SHALLOW_PULLBACK_TEST",
+    status: "WATCH",
+    readiness: "WATCH",
+    direction: "LONG",
+    side: "LONG",
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    triggerType: "TEN_MIN_PULLBACK_ONE_HOUR_STILL_SUPPORTIVE",
+    triggerLevel: round2(e10),
+    stopLevel: round2(aLow),
+    confidence: 45,
+    sizeMode: "NONE",
+    needs: "RECLAIM_10M_EMA_OR_WAIT_FOR_1H_C_WAVE_CONFIRMATION",
+    marketBias,
+    reasonCodes: [
+      "MINUTE_W4_ACTIVE",
+      "A_LOW_MARKED",
+      "A_LOW_HELD",
+      "TEN_MIN_EMA_SUPPORT_LOST",
+      "ONE_HOUR_EMA10_STILL_HOLDING",
+      "MARKET_FRONT_STRONG",
+      "SHALLOW_W4_PULLBACK_TEST",
+      "DO_NOT_FORCE_C_LOW_YET",
+      "OBSERVATION_ONLY",
+    ],
+    debug: {
+      ...phases,
+      w3High,
+      aLow,
+      bHigh,
+      cLow,
+      latestClose: close,
+      ema10: e10,
+      ema20: e20,
+      prevClose,
+      hourlyClose,
+      ema10_1h,
+      oneHourAboveEma10,
+      oneHourBelowEma10,
+      aLowHeld,
+      reclaimedEma10,
+      aboveEma10,
+      aboveEma20,
+      belowEma10,
+      belowEma20,
+      tenMinLostSupport,
+      continuationWatchLong,
+      continuationTriggerLong,
+      oneHourScore,
+      fourHourScore,
+      dailyScore,
+      masterScore,
+      marketFrontStrong,
+      marketFrontVeryStrong,
+      correctionLeg: "SHALLOW_PULLBACK_TEST",
+      nextFocus: "RECLAIM_10M_EMA_OR_1H_FAILS_TO_C_LOW",
+      note:
+        "10m support was lost, but 1H EMA10 is still holding. Engine 22 should not fully reset to C-low unless 1H fails.",
+    },
+  };
+} 
       return {
         active: true,
         setupType: "CORRECTION_A_TO_B_LONG",
