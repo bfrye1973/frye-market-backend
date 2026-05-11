@@ -1744,6 +1744,27 @@ function detectMinuteW4ABC({
       marketFrontVeryStrong
     );
 
+  const frontNotBearish =
+    trendState1h !== "SHORT_ONLY" &&
+    trendState4h !== "SHORT_ONLY" &&
+    marketBias?.allowShorts !== true &&
+    (
+      dailyScore === null ||
+      dailyScore >= 65
+    );
+
+  const shallowW5AlreadyActive =
+    hasALow &&
+    !hasCLow &&
+    close !== null &&
+    w3High !== null &&
+    close > w3High &&
+    aboveEma10 &&
+    aboveEma20 &&
+    oneHourAboveEma10 &&
+    continuationTriggerLong &&
+    frontNotBearish;
+  
   const commonDebug = {
     ...phases,
     w3High,
@@ -1967,7 +1988,51 @@ function detectMinuteW4ABC({
         },
       };
     }
-
+if (shallowW5AlreadyActive) {
+  return {
+    active: true,
+    setupType: "SHALLOW_W4_TO_W5_CONTINUATION",
+    type: "MINUTE_W5_ACTIVE_AFTER_SHALLOW_W4",
+    state: "MINUTE_W5_ACTIVE_AFTER_SHALLOW_W4",
+    status: "WATCH",
+    readiness: "READY",
+    direction: "LONG",
+    side: "LONG",
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    triggerType: "C_WAVE_FAILED_SHALLOW_W5_ACTIVE",
+    triggerLevel: round2(w3High),
+    stopLevel: round2(aLow),
+    confidence: 64,
+    sizeMode: "NO_CHASE",
+    needs: "W5_ACTIVE_AFTER_SHALLOW_W4_WAIT_FOR_DIP_OR_CLEAN_CONTINUATION",
+    marketBias,
+    reasonCodes: [
+      "MINUTE_W4_ACTIVE",
+      "A_LOW_MARKED",
+      "A_LOW_HELD",
+      "EMA10_20_RECLAIMED",
+      "ONE_HOUR_EMA10_HOLDING",
+      "PRICE_ABOVE_W3_HIGH",
+      "CONTINUATION_TRIGGER_LONG",
+      "C_WAVE_FAILED_TO_FORM",
+      "MINUTE_W5_ACTIVE_AFTER_SHALLOW_W4",
+      "DO_NOT_CHASE_EXTENSION",
+      "OBSERVATION_ONLY",
+    ],
+    debug: {
+      ...commonDebug,
+      frontNotBearish,
+      shallowW5AlreadyActive,
+      correctionLeg: "SHALLOW_W4_COMPLETE_W5_ACTIVE",
+      nextFocus: "WAIT_FOR_W5_DIP_BUY_OR_CLEAN_CONTINUATION",
+      note:
+        "Price reclaimed 10m EMA10/20, 1H EMA10 is holding, and price is above W3 high. Treat Minute W5 as active after shallow W4 unless 10m/1H fail.",
+    },
+  };
+}
     // Reduced-size B-bounce entry.
     if (bBounceTrigger) {
       return {
@@ -2493,7 +2558,8 @@ function normalizeW4ABCForEngine17(detection) {
     rawState === "W4_SHALLOW_CONTINUATION_WATCH" ||
     rawState === "W4_SHALLOW_PULLBACK_TEST" ||
     rawState === "W4_C_RISK_RETURNING" ||
-    rawState === "W5_CONTINUATION_WATCH";
+    rawState === "W5_CONTINUATION_WATCH" ||
+    rawState === "MINUTE_W5_ACTIVE_AFTER_SHALLOW_W4";
 
   if (isEntryState || isSupportedReadyState) {
     return {
