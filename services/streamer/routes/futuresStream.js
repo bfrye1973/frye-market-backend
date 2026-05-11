@@ -416,7 +416,7 @@ async function resolveFuturesContract(productCode) {
     resolvedSymbol: chosen.resolvedSymbol,
     source: "polygon_futures_snapshot",
     selectionRule:
-      "plain_non_spread_contract_highest_volume_then_nearest_settlement",
+      "plain_non_spread_contract_nearest_settlement_then_volume",
     needsInspection: !chosen.resolvedSymbol,
     selected: chosen.selected,
     candidateCount: chosen.candidates.length,
