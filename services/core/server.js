@@ -40,6 +40,7 @@ import { engine15AlertsRouter } from "./routes/engine15Alerts.js";
 import runShelvesJobRouter from "./routes/runShelvesJob.js";
 import engine21AlignmentRoute from "./routes/engine21Alignment.js";
 import executionStateRouter from "./routes/executionState.js";
+import futuresOhlcRouter from "./routes/futuresOhlc.js";
 
 // --- App setup ---
 const app = express();
@@ -118,6 +119,7 @@ app.get("/", (_req, res) => {
 
 // --- API routes ---
 app.use("/api/v1/ohlc", ohlcRouter);
+app.use("/api/v1/futures/ohlc", futuresOhlcRouter);
 app.use("/api/sectorcards-10m", sectorcards10mRouter);
 app.use("/live", liveRouter);
 
