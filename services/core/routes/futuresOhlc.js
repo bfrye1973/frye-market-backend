@@ -180,7 +180,8 @@ const sorted = [...validNonExpired].sort((a, b) => {
 
   if (aSettle !== bSettle) return aSettle - bSettle;
 
-  return Number(b.volume || 0) - Number(a.volume || 0);      
+  return Number(b.volume || 0) - Number(a.volume || 0);  
+});
 
   const selected = candidates[0] || null;
 
