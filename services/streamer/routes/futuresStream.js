@@ -307,13 +307,13 @@ function chooseResolvedContractFromSnapshot(json, productCode) {
   const validNonExpired = allCandidates.filter((c) => !c.isExpired);
 
   const sorted = [...validNonExpired].sort((a, b) => {
-    const volDiff = Number(b.volume || 0) - Number(a.volume || 0);
-    if (volDiff !== 0) return volDiff;
+  const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
+  const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
 
-    const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
-    const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
-    return aSettle - bSettle;
-  });
+  if (aSettle !== bSettle) return aSettle - bSettle;
+
+  return Number(b.volume || 0) - Number(a.volume || 0);
+});
 
   const selected = sorted[0] || null;
 
