@@ -172,13 +172,13 @@ async function resolveFuturesContract(productCode) {
     .filter(Boolean)
     .filter((c) => !c.isExpired)
     .sort((a, b) => {
-      const volDiff = Number(b.volume || 0) - Number(a.volume || 0);
-      if (volDiff !== 0) return volDiff;
 
-      const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
-      const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
-      return aSettle - bSettle;
-    });
+  const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
+  const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
+
+  if (aSettle !== bSettle) return aSettle - bSettle;
+
+  return Number(b.volume || 0) - Number(a.volume || 0);      
 
   const selected = candidates[0] || null;
 
