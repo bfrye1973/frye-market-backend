@@ -1,20 +1,16 @@
 // services/streamer/routes/futuresStream.js
 // Backend-2 — Futures stream/resolver routes
 //
-// Phase 1 purpose:
+// Phase 2:
 // - Resolve user-facing ES -> active Polygon futures contract like ESM6
-// - Inspect Polygon's real futures snapshot response safely
+// - Stream live ES futures trades from Polygon futures websocket
+// - Build 1m / higher timeframe candles from trades
+// - Keep frontend bar contract same as stock stream
 // - Do NOT touch stock /stream/agg
-// - Do NOT touch frontend yet
-//
-// Confirmed Polygon futures snapshot shape:
-// results[].details.ticker
-// results[].details.product_code
-// results[].details.settlement_date
-// results[].session.volume
-// results[].session.close
 
 import express from "express";
+import WebSocket from "ws";
+import { DateTime } from "luxon";
 
 const router = express.Router();
 export default router;
@@ -24,9 +20,14 @@ const POLYGON_REST_BASE =
   process.env.POLYGON_BASE_URL ||
   "https://api.polygon.io";
 
-const FUTURES_SNAPSHOT_PATH = "/futures/v1/snapshot";
+const POLY_FUTURES_WS_URL =
+  process.env.POLY_FUTURES_WS_URL ||
+  process.env.POLYGON_FUTURES_WS_URL ||
+  "wss://socket.polygon.io/futures";
 
-// Keep short while testing ES resolver.
+const FUTURES_SNAPSHOT_PATH = "/futures/v1/snapshot";
+const NY_ZONE = "America/New_York";
+
 const RESOLVE_CACHE_MS = Number(
   process.env.FUTURES_RESOLVE_CACHE_MS || 2 * 60 * 1000
 );
@@ -60,6 +61,13 @@ function toNum(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function toUnixSec(ts) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n > 1e12) return Math.floor(n / 1000);
+  return Math.floor(n);
+}
+
 function parseDateMs(v) {
   if (!v) return null;
 
@@ -74,6 +82,35 @@ function parseDateMs(v) {
 
   const ms = Date.parse(s);
   return Number.isFinite(ms) ? ms : null;
+}
+
+function normalizeMode(m) {
+  const s = String(m || "eth").toLowerCase().trim();
+  return s === "rth" ? "rth" : "eth";
+}
+
+function normalizeTfStr(tf) {
+  const t = String(tf || "1m").toLowerCase().trim();
+  if (t === "1d") return "1d";
+  if (t.endsWith("m")) return t;
+  if (t.endsWith("h")) return t;
+  return "1m";
+}
+
+function normalizeTfMin(tf) {
+  const t = normalizeTfStr(tf);
+  if (t === "1d") return 1440;
+  if (t.endsWith("h")) return Number(t.slice(0, -1)) * 60;
+  if (t.endsWith("m")) return Number(t.slice(0, -1));
+  return 1;
+}
+
+function labelTf(tfMin) {
+  return tfMin >= 1440
+    ? "1d"
+    : tfMin % 60 === 0
+      ? `${tfMin / 60}h`
+      : `${tfMin}m`;
 }
 
 function safeJsonShape(value) {
@@ -115,6 +152,68 @@ function safeJsonShape(value) {
 }
 
 /* -------------------------------------------------
+   SSE helpers
+-------------------------------------------------- */
+
+function sseHeaders(res) {
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+}
+
+function sseSend(res, obj) {
+  res.write(`data: ${JSON.stringify(obj)}\n\n`);
+}
+
+/* -------------------------------------------------
+   Session bucketing
+-------------------------------------------------- */
+
+function nyAnchors(unixSec) {
+  const ny = DateTime.fromSeconds(unixSec, { zone: NY_ZONE });
+  const dayStart = ny.startOf("day");
+  const open = dayStart.plus({ hours: 9, minutes: 30 });
+  const close = dayStart.plus({ hours: 16, minutes: 0 });
+
+  return {
+    dayStartSec: Math.floor(dayStart.toSeconds()),
+    openSec: Math.floor(open.toSeconds()),
+    closeSec: Math.floor(close.toSeconds()),
+  };
+}
+
+function bucketStartSecRth(unixSec, tfMin) {
+  const { dayStartSec, openSec, closeSec } = nyAnchors(unixSec);
+
+  if (tfMin >= 1440) return dayStartSec;
+  if (unixSec < openSec || unixSec >= closeSec) return null;
+
+  const size = tfMin * 60;
+  const idx = Math.floor((unixSec - openSec) / size);
+  const bucket = openSec + idx * size;
+
+  if (bucket >= closeSec) return null;
+  return bucket;
+}
+
+function bucketStartSecEth(unixSec, tfMin) {
+  if (tfMin >= 1440) {
+    const { dayStartSec } = nyAnchors(unixSec);
+    return dayStartSec;
+  }
+
+  const size = tfMin * 60;
+  return Math.floor(unixSec / size) * size;
+}
+
+function bucketStartSecByMode(unixSec, tfMin, mode) {
+  return mode === "rth"
+    ? bucketStartSecRth(unixSec, tfMin)
+    : bucketStartSecEth(unixSec, tfMin);
+}
+
+/* -------------------------------------------------
    Polygon ES ticker handling
 -------------------------------------------------- */
 
@@ -129,15 +228,6 @@ function isPlainFuturesTicker(ticker, productCode) {
   if (!t || !pc) return false;
   if (isSpreadTicker(t)) return false;
 
-  // Polygon futures snapshot currently returns short year format:
-  // ESM6, ESU6, ESZ6, ESH7
-  //
-  // We also allow 2-digit year format in case Polygon/support returns it later:
-  // ESM26, ESU26, ESZ26
-  //
-  // Futures month codes:
-  // F Jan, G Feb, H Mar, J Apr, K May, M Jun,
-  // N Jul, Q Aug, U Sep, V Oct, X Nov, Z Dec
   const re = new RegExp(`^${pc}[FGHJKMNQUVXZ]\\d{1,2}$`);
   return re.test(t);
 }
@@ -207,14 +297,6 @@ function chooseResolvedContractFromSnapshot(json, productCode) {
 
   const validNonExpired = allCandidates.filter((c) => !c.isExpired);
 
-  // For ES front-month trading, highest liquid plain contract is safest.
-  // This avoids Polygon's unsorted list where far contracts can appear first.
-  //
-  // Example from live Polygon data:
-  // ESM6 settlement 2026-06-18 volume 1,148,365
-  //
-  // We ignore spread contracts like ESM6-ESU6 because those are calendar spreads,
-  // not the outright ES contract we need for charting/trading signals.
   const sorted = [...validNonExpired].sort((a, b) => {
     const volDiff = Number(b.volume || 0) - Number(a.volume || 0);
     if (volDiff !== 0) return volDiff;
@@ -236,7 +318,7 @@ function chooseResolvedContractFromSnapshot(json, productCode) {
 }
 
 /* -------------------------------------------------
-   Polygon fetch
+   Polygon REST resolver
 -------------------------------------------------- */
 
 async function fetchFuturesSnapshot(productCode, apiKey) {
@@ -346,6 +428,102 @@ async function resolveFuturesContract(productCode) {
 }
 
 /* -------------------------------------------------
+   Trade -> candle builder
+-------------------------------------------------- */
+
+function getTradeSymbol(msg) {
+  return String(
+    msg?.sym ??
+      msg?.symbol ??
+      msg?.ticker ??
+      msg?.T ??
+      msg?.contract ??
+      ""
+  ).toUpperCase();
+}
+
+function getTradePrice(msg) {
+  return toNum(msg?.p) ?? toNum(msg?.price);
+}
+
+function getTradeSize(msg) {
+  return toNum(msg?.s) ?? toNum(msg?.size) ?? toNum(msg?.volume) ?? 0;
+}
+
+function getTradeTimestampSec(msg) {
+  return (
+    toUnixSec(msg?.t) ??
+    toUnixSec(msg?.timestamp) ??
+    toUnixSec(msg?.sip_timestamp) ??
+    toUnixSec(msg?.participant_timestamp) ??
+    toUnixSec(Date.now())
+  );
+}
+
+function applyTradeTo1m(cur, msg) {
+  const price = getTradePrice(msg);
+  const size = getTradeSize(msg);
+  const tSec = getTradeTimestampSec(msg);
+
+  if (!Number.isFinite(price) || !Number.isFinite(tSec) || tSec <= 0) {
+    return cur;
+  }
+
+  const minuteSec = Math.floor(tSec / 60) * 60;
+
+  if (!cur || cur.time < minuteSec) {
+    return {
+      time: minuteSec,
+      open: price,
+      high: price,
+      low: price,
+      close: price,
+      volume: Number.isFinite(size) ? size : 0,
+    };
+  }
+
+  const b = { ...cur };
+  b.high = Math.max(b.high, price);
+  b.low = Math.min(b.low, price);
+  b.close = price;
+  b.volume = Number(b.volume || 0) + Number(size || 0);
+  return b;
+}
+
+function updateAggFrom1m(lastAgg, bar1m, tfMin, mode) {
+  const bucket = bucketStartSecByMode(bar1m.time, tfMin, mode);
+  if (bucket === null) return { agg: lastAgg, changed: false };
+
+  if (tfMin === 1) return { agg: bar1m, changed: true };
+
+  if (!lastAgg || lastAgg.time < bucket) {
+    return {
+      agg: {
+        time: bucket,
+        open: bar1m.open,
+        high: bar1m.high,
+        low: bar1m.low,
+        close: bar1m.close,
+        volume: Number(bar1m.volume || 0),
+      },
+      changed: true,
+    };
+  }
+
+  if (lastAgg.time === bucket) {
+    const upd = { ...lastAgg };
+    upd.high = Math.max(upd.high, bar1m.high);
+    upd.low = Math.min(upd.low, bar1m.low);
+    upd.close = bar1m.close;
+    upd.volume = Number(upd.volume || 0) + Number(bar1m.volume || 0);
+
+    return { agg: upd, changed: true };
+  }
+
+  return { agg: lastAgg, changed: false };
+}
+
+/* -------------------------------------------------
    Routes
 -------------------------------------------------- */
 
@@ -353,7 +531,7 @@ router.get("/healthz", (_req, res) => {
   res.json({
     ok: true,
     service: "futures-stream",
-    phase: "resolver-only",
+    phase: "resolver-and-live-sse",
     ts: nowIso(),
   });
 });
@@ -373,6 +551,7 @@ router.get("/resolve", async (req, res) => {
     return res.json(result);
   } catch (err) {
     console.error("[futures.resolve] error:", err?.stack || err);
+
     return res.status(500).json({
       ok: false,
       error: "futures_resolve_exception",
@@ -382,19 +561,231 @@ router.get("/resolve", async (req, res) => {
   }
 });
 
-// Stub only. Do not wire chart to this until resolver is verified.
 router.get("/agg", async (req, res) => {
-  const symbol = cleanProductCode(req.query.symbol || "ES");
+  const apiKey = resolvePolygonKey();
 
-  return res.status(501).json({
-    ok: false,
-    error: "futures_stream_not_enabled_yet",
-    message:
-      "Phase 1 only: resolver is enabled. Verify /stream/futures/resolve first, then implement SSE /stream/futures/agg.",
+  if (!apiKey) {
+    return res.status(500).json({
+      ok: false,
+      error: "missing_polygon_api_key",
+      ts: nowIso(),
+    });
+  }
+
+  const symbol = cleanProductCode(req.query.symbol || "ES");
+  const tfStr = normalizeTfStr(req.query.tf || "1m");
+  const tfMin = normalizeTfMin(tfStr);
+  const tf = labelTf(tfMin);
+
+  // Futures default should be ETH/full electronic session.
+  // You can still request mode=rth for stock-market-hours-only filtering.
+  const mode = normalizeMode(req.query.mode || "eth");
+
+  const resolved = await resolveFuturesContract(symbol);
+
+  if (!resolved.ok || !resolved.resolvedSymbol) {
+    return res.status(500).json({
+      ok: false,
+      error: "could_not_resolve_futures_contract",
+      symbol,
+      resolver: resolved,
+      ts: nowIso(),
+    });
+  }
+
+  const resolvedSymbol = String(resolved.resolvedSymbol).toUpperCase();
+
+  sseHeaders(res);
+
+  let alive = true;
+
+  sseSend(res, {
+    ok: true,
+    type: "snapshot",
     symbol,
-    expectedNextTest: `/stream/futures/resolve?product_code=${encodeURIComponent(
-      symbol
-    )}`,
-    ts: nowIso(),
+    resolvedSymbol,
+    tf,
+    mode,
+    bars: [],
+    resolver: {
+      productCode: resolved.productCode,
+      resolvedSymbol: resolved.resolvedSymbol,
+      selected: resolved.selected,
+      selectionRule: resolved.selectionRule,
+      cached: resolved.cached || false,
+    },
+    note: "Phase 2 futures stream: live bars only. Historical ES candles will be added in Backend-1 Phase 3.",
+    updated_at_utc: nowIso(),
+  });
+
+  const ping = setInterval(() => {
+    if (alive) res.write(`:ping ${Date.now()}\n\n`);
+  }, 15000);
+
+  const diag = {
+    startedAt: nowIso(),
+    symbol,
+    resolvedSymbol,
+    tf,
+    tfMin,
+    mode,
+    wsUrl: POLY_FUTURES_WS_URL,
+    wsOpen: 0,
+    wsClose: 0,
+    wsError: 0,
+    status: [],
+    messagesSeen: 0,
+    tradesSeen: 0,
+    matchedTrades: 0,
+    unmatchedTrades: 0,
+    barsEmitted: 0,
+    lastEventType: null,
+    lastRawKeys: [],
+    lastRawSymbol: null,
+    lastPrice: null,
+    lastTradeAt: null,
+  };
+
+  const diagTimer = setInterval(() => {
+    if (!alive) return;
+    sseSend(res, { ok: true, type: "diag", diag });
+  }, 5000);
+
+  let lastEmitAt = 0;
+
+  function emitBar(bar) {
+    const now = Date.now();
+
+    // Do not spam browser with every tick.
+    if (now - lastEmitAt < 250) return;
+
+    lastEmitAt = now;
+    diag.barsEmitted += 1;
+
+    sseSend(res, {
+      ok: true,
+      type: "bar",
+      symbol,
+      resolvedSymbol,
+      tf,
+      mode,
+      bar,
+    });
+  }
+
+  const ws = new WebSocket(POLY_FUTURES_WS_URL);
+  let trade1m = null;
+  let aggBar = null;
+
+  ws.on("open", () => {
+    diag.wsOpen += 1;
+
+    ws.send(
+      JSON.stringify({
+        action: "auth",
+        params: apiKey,
+      })
+    );
+
+    ws.send(
+      JSON.stringify({
+        action: "subscribe",
+        params: `T.${resolvedSymbol}`,
+      })
+    );
+
+    sseSend(res, {
+      ok: true,
+      type: "diag",
+      diag: {
+        ...diag,
+        subscribed: `T.${resolvedSymbol}`,
+      },
+    });
+  });
+
+  ws.on("message", (buf) => {
+    let arr;
+
+    try {
+      arr = JSON.parse(buf.toString("utf8"));
+    } catch {
+      return;
+    }
+
+    if (!Array.isArray(arr)) arr = [arr];
+
+    for (const msg of arr) {
+      diag.messagesSeen += 1;
+      diag.lastEventType = msg?.ev || msg?.event || null;
+      diag.lastRawKeys = Object.keys(msg || {}).slice(0, 30);
+
+      const ev = msg?.ev || msg?.event;
+
+      if (ev === "status") {
+        const line = `${msg?.status || ""} ${msg?.message || ""}`.trim();
+        diag.status.push(line);
+        if (diag.status.length > 12) diag.status.shift();
+        continue;
+      }
+
+      // Expected futures trade event from Polygon support:
+      // subscribe params: T.ESM6
+      //
+      // We keep this slightly defensive in case futures payload fields
+      // are not exactly identical to stocks.
+      if (ev !== "T") continue;
+
+      diag.tradesSeen += 1;
+
+      const rawSym = getTradeSymbol(msg);
+      diag.lastRawSymbol = rawSym;
+
+      if (rawSym && rawSym !== resolvedSymbol) {
+        diag.unmatchedTrades += 1;
+        continue;
+      }
+
+      const price = getTradePrice(msg);
+      diag.lastPrice = price;
+      diag.lastTradeAt = nowIso();
+      diag.matchedTrades += 1;
+
+      trade1m = applyTradeTo1m(trade1m, msg);
+      if (!trade1m) continue;
+
+      const { agg, changed } = updateAggFrom1m(trade1m ? aggBar : null, trade1m, tfMin, mode);
+      aggBar = agg;
+
+      if (changed && aggBar) {
+        emitBar(aggBar);
+      }
+    }
+  });
+
+  ws.on("error", (err) => {
+    diag.wsError += 1;
+    diag.status.push(`ws_error ${String(err?.message || err)}`);
+    if (diag.status.length > 12) diag.status.shift();
+  });
+
+  ws.on("close", (code, reason) => {
+    diag.wsClose += 1;
+    diag.status.push(`ws_close ${code} ${String(reason || "")}`.trim());
+    if (diag.status.length > 12) diag.status.shift();
+  });
+
+  req.on("close", () => {
+    alive = false;
+    clearInterval(ping);
+    clearInterval(diagTimer);
+
+    try {
+      ws.close();
+    } catch {}
+
+    try {
+      res.end();
+    } catch {}
   });
 });
