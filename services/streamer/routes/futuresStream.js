@@ -64,8 +64,17 @@ function toNum(v) {
 function toUnixSec(ts) {
   const n = Number(ts);
   if (!Number.isFinite(n) || n <= 0) return null;
-  if (n > 1e12) return Math.floor(n / 1000);
-  return Math.floor(n);
+
+  // Polygon can send:
+  // seconds:      1778531640
+  // milliseconds: 1778531640000
+  // microseconds: 1778531640000000
+  // nanoseconds:  1778531640000000000
+  if (n > 1e17) return Math.floor(n / 1e9); // nanoseconds
+  if (n > 1e14) return Math.floor(n / 1e6); // microseconds
+  if (n > 1e12) return Math.floor(n / 1000); // milliseconds
+
+  return Math.floor(n); // seconds
 }
 
 function parseDateMs(v) {
@@ -460,6 +469,40 @@ function getTradeTimestampSec(msg) {
   );
 }
 
+function parseFuturesAM(msg) {
+  const rawSym = getTradeSymbol(msg);
+
+  const sSec = toUnixSec(
+    msg?.s ??
+      msg?.start_timestamp ??
+      msg?.timestamp ??
+      msg?.t
+  );
+
+  const o = toNum(msg?.o ?? msg?.open);
+  const h = toNum(msg?.h ?? msg?.high);
+  const l = toNum(msg?.l ?? msg?.low);
+  const c = toNum(msg?.c ?? msg?.close);
+  const v = toNum(msg?.v ?? msg?.volume) ?? 0;
+
+  if (!Number.isFinite(sSec)) return null;
+  if (![o, h, l, c].every(Number.isFinite)) return null;
+
+  const minuteSec = Math.floor(sSec / 60) * 60;
+
+  return {
+    symbol: rawSym,
+    bar: {
+      time: minuteSec,
+      open: o,
+      high: h,
+      low: l,
+      close: c,
+      volume: Number.isFinite(v) ? v : 0,
+    },
+  };
+}
+
 function applyTradeTo1m(cur, msg) {
   const price = getTradePrice(msg);
   const size = getTradeSize(msg);
@@ -635,6 +678,7 @@ router.get("/agg", async (req, res) => {
     wsError: 0,
     status: [],
     messagesSeen: 0,
+    amSeen: 0,
     tradesSeen: 0,
     matchedTrades: 0,
     unmatchedTrades: 0,
@@ -690,16 +734,16 @@ router.get("/agg", async (req, res) => {
     ws.send(
       JSON.stringify({
         action: "subscribe",
-        params: `T.${resolvedSymbol}`,
+        params: `AM.${resolvedSymbol},T.${resolvedSymbol}`,
       })
-    );
+    ); 
 
     sseSend(res, {
       ok: true,
       type: "diag",
       diag: {
         ...diag,
-        subscribed: `T.${resolvedSymbol}`,
+        subscribed: `AM.${resolvedSymbol},T.${resolvedSymbol}`,
       },
     });
   });
@@ -729,16 +773,17 @@ router.get("/agg", async (req, res) => {
         continue;
       }
 
-      // Expected futures trade event from Polygon support:
-      // subscribe params: T.ESM6
-      //
-      // We keep this slightly defensive in case futures payload fields
-      // are not exactly identical to stocks.
-      if (ev !== "T") continue;
+    // Expected futures events from Polygon:
+    // AM.ESM6 = official 1-minute candle
+    // T.ESM6  = live trade fallback
 
-      diag.tradesSeen += 1;
+    if (ev === "AM") {
+      diag.amSeen += 1;
 
-      const rawSym = getTradeSymbol(msg);
+      const parsed = parseFuturesAM(msg);
+      if (!parsed?.bar) continue;
+
+      const rawSym = String(parsed.symbol || "").toUpperCase();
       diag.lastRawSymbol = rawSym;
 
       if (rawSym && rawSym !== resolvedSymbol) {
@@ -746,23 +791,26 @@ router.get("/agg", async (req, res) => {
         continue;
       }
 
-      const price = getTradePrice(msg);
-      diag.lastPrice = price;
-      diag.lastTradeAt = nowIso();
-      diag.matchedTrades += 1;
+      const { agg, changed } = updateAggFrom1m(
+        aggBar,
+        parsed.bar,
+        tfMin,
+        mode
+     );
 
-      trade1m = applyTradeTo1m(trade1m, msg);
-      if (!trade1m) continue;
+     aggBar = agg;
+     trade1m = null;
 
-      const { agg, changed } = updateAggFrom1m(trade1m ? aggBar : null, trade1m, tfMin, mode);
-      aggBar = agg;
+     if (changed && aggBar) {
+       emitBar(aggBar);
+     }
 
-      if (changed && aggBar) {
-        emitBar(aggBar);
-      }
-    }
-  });
+     continue;
+   }
 
+   if (ev !== "T") continue;
+
+   diag.tradesSeen += 1;    
   ws.on("error", (err) => {
     diag.wsError += 1;
     diag.status.push(`ws_error ${String(err?.message || err)}`);
