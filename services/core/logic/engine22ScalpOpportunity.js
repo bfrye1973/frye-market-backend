@@ -2536,32 +2536,6 @@ function normalizeW4ABCForEngine17(detection) {
   };
 }
 
-  return {
-    ...detection,
-
-    // Engine 17 compatibility contract:
-    setupType: detection.setupType || "MINUTE_W4_ABC",
-    type: "W4_ACTIVE_WAIT",
-    state: "W4_ACTIVE_WAIT",
-
-    // Keep original ABC state as detail:
-    abcState: rawState || null,
-    abcType: detection.type || null,
-    correctionLeg: detection.debug?.correctionLeg || null,
-    nextFocus: detection.debug?.nextFocus || detection.needs || null,
-    abcLevels: {
-      w3High: detection.debug?.w3High ?? null,
-      aLow: detection.debug?.aLow ?? null,
-      bHigh: detection.debug?.bHigh ?? null,
-      cLow: detection.debug?.cLow ?? null,
-    },
-
-    reasonCodes: [
-      ...(Array.isArray(detection.reasonCodes) ? detection.reasonCodes : []),
-      "ENGINE17_COMPAT_STATE_W4_ACTIVE_WAIT",
-    ],
-  };
-}
 function detectNegotiatedZoneAbsorption({
   engine1Context,
   engine22State,
