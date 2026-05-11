@@ -2,6 +2,7 @@
 import express from "express";
 import streamRouter from "./routes/stream.js";
 import scalpRouter from "./routes/scalp.js";
+import futuresRouter from "./routes/futuresStream.js";
 import { startEngine5B } from "./engine5b/runner.js";
 
 
@@ -63,6 +64,11 @@ app.get("/healthz", (_req, res) => {
    Stream routes
 -------------------------------------------------- */
 app.use("/stream", streamRouter);
+
+/* -------------------------------------------------
+   Futures routes
+-------------------------------------------------- */
+app.use("/stream/futures", futuresRouter);
 
 /* -------------------------------------------------
    Engine 5B routes
