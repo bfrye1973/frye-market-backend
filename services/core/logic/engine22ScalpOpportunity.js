@@ -1548,11 +1548,13 @@ function detectMinuteW4ABC({
     minutePhase,
   } = phases;
 
-  const bullishFinalContext = isBullishFinalImpulseContext({
-    primaryPhase,
-    intermediatePhase,
-    minorPhase,
-  });
+  const bullishFinalContext =
+    primaryPhase === "IN_W5" &&
+    minorPhase === "IN_W5" &&
+    (
+      intermediatePhase === "IN_W5" ||
+      intermediatePhase === "UNKNOWN"
+    );
 
   if (!bullishFinalContext || minutePhase !== "IN_W4") {
     return {
