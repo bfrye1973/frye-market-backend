@@ -808,9 +808,41 @@ router.get("/agg", async (req, res) => {
      continue;
    }
 
-   if (ev !== "T") continue;
+      if (ev !== "T") continue;
 
-   diag.tradesSeen += 1;    
+      diag.tradesSeen += 1;
+
+      const rawSym = getTradeSymbol(msg);
+      diag.lastRawSymbol = rawSym;
+
+      if (rawSym && rawSym !== resolvedSymbol) {
+        diag.unmatchedTrades += 1;
+        continue;
+      }
+
+      const price = getTradePrice(msg);
+      diag.lastPrice = price;
+      diag.lastTradeAt = nowIso();
+      diag.matchedTrades += 1;
+
+      trade1m = applyTradeTo1m(trade1m, msg);
+      if (!trade1m) continue;
+
+      const { agg, changed } = updateAggFrom1m(
+        aggBar,
+        trade1m,
+        tfMin,
+        mode
+      );
+
+      aggBar = agg;
+
+      if (changed && aggBar) {
+        emitBar(aggBar);
+      }
+    }
+  });
+
   ws.on("error", (err) => {
     diag.wsError += 1;
     diag.status.push(`ws_error ${String(err?.message || err)}`);
