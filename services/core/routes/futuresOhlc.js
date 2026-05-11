@@ -8,6 +8,12 @@
 // - Fetch historical futures candles from Polygon futures aggs endpoint
 // - Return same chart bar shape as /api/v1/ohlc:
 //   { time, open, high, low, close, volume }
+//
+// Important:
+// - This route does NOT touch the existing stock /api/v1/ohlc route.
+// - This route uses Polygon/Massive futures endpoint:
+//   /futures/v1/aggs/{ticker}
+// - Polygon futures aggs return window_start in nanoseconds.
 
 import express from "express";
 
@@ -39,6 +45,9 @@ const TF_MAP = {
   "1d": "1day",
 };
 
+// Enough lookback to give the chart room.
+// We request only the latest `limit` bars using sort=desc,
+// then sort ascending before returning to chart.
 const DAYS_BY_TF = {
   "1m": 10,
   "5m": 20,
@@ -97,8 +106,11 @@ function isPlainFuturesTicker(ticker, productCode) {
   if (!t || !pc) return false;
   if (isSpreadTicker(t)) return false;
 
-  // Polygon futures uses short year format like ESM6.
-  // Also allow ESM26 if returned later.
+  // Polygon futures currently uses short-year format like:
+  // ESM6, ESU6, ESZ6
+  //
+  // Also allow 2-digit year format if Polygon changes later:
+  // ESM26, ESU26, ESZ26
   const re = new RegExp(`^${pc}[FGHJKMNQUVXZ]\\d{1,2}$`);
   return re.test(t);
 }
@@ -120,6 +132,7 @@ function normalizeCandidate(row, productCode) {
   const settlementDate = details.settlement_date || null;
   const settlementMs = parseDateMs(settlementDate);
   const volume = toNum(session.volume) ?? 0;
+  const close = toNum(session.close);
 
   const isExpired =
     settlementMs && Number.isFinite(settlementMs)
@@ -133,8 +146,27 @@ function normalizeCandidate(row, productCode) {
     settlementMs,
     isExpired,
     volume,
-    close: toNum(session.close),
+    close,
   };
+}
+
+async function readJsonResponse(response, label) {
+  const text = await response.text();
+
+  if (!text || !text.trim()) {
+    throw new Error(`${label} returned empty response`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `${label} returned non-JSON response. status=${response.status} preview=${text.slice(
+        0,
+        300
+      )}`
+    );
+  }
 }
 
 async function resolveFuturesContract(productCode) {
@@ -164,7 +196,7 @@ async function resolveFuturesContract(productCode) {
     throw new Error(`Polygon futures snapshot ${r.status} ${txt}`);
   }
 
-  const json = await r.json();
+  const json = await readJsonResponse(r, "Polygon futures snapshot");
   const results = Array.isArray(json?.results) ? json.results : [];
 
   const candidates = results
@@ -172,6 +204,10 @@ async function resolveFuturesContract(productCode) {
     .filter(Boolean)
     .filter((c) => !c.isExpired);
 
+  // IMPORTANT:
+  // Pick nearest valid plain contract first, then volume.
+  // This keeps ES on the current front contract like ESM6.
+  // Do NOT use highest volume first because far-out contracts can show stale/high volume.
   const sorted = [...candidates].sort((a, b) => {
     const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
     const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
@@ -191,7 +227,7 @@ async function resolveFuturesContract(productCode) {
     productCode,
     resolvedSymbol: selected.ticker,
     selected,
-    candidateCount: candidates.length,
+    candidateCount: sorted.length,
     checkedAt: nowIso(),
   };
 
@@ -208,11 +244,11 @@ function toUnixSecFromNs(v) {
   if (!Number.isFinite(n) || n <= 0) return null;
 
   // Futures aggs window_start is nanoseconds.
-  if (n > 1e17) return Math.floor(n / 1e9);
-  if (n > 1e14) return Math.floor(n / 1e6);
-  if (n > 1e12) return Math.floor(n / 1000);
+  if (n > 1e17) return Math.floor(n / 1e9); // ns
+  if (n > 1e14) return Math.floor(n / 1e6); // µs
+  if (n > 1e12) return Math.floor(n / 1000); // ms
 
-  return Math.floor(n);
+  return Math.floor(n); // sec
 }
 
 function normFuturesAgg(b) {
@@ -247,66 +283,50 @@ async function fetchFuturesAggs({
   }
 
   const base = String(POLYGON_REST_BASE || "").replace(/\/+$/, "");
-
-  let url = new URL(
+  const url = new URL(
     `${base}/futures/v1/aggs/${encodeURIComponent(resolvedSymbol)}`
   );
 
   url.searchParams.set("resolution", resolution);
   url.searchParams.set("window_start.gte", startDate);
   url.searchParams.set("window_start.lte", endDate);
-  url.searchParams.set("sort", "asc");
+
+  // Safer than paging:
+  // ask for newest bars first, then sort ascending for chart.
+  url.searchParams.set("sort", "desc");
   url.searchParams.set("limit", String(Math.min(limit, 50000)));
   url.searchParams.set("apiKey", POLY_KEY);
 
-  const out = [];
-  let hops = 0;
-  let nextUrl = url.toString();
+  const r = await fetch(url.toString(), {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
 
-  while (nextUrl) {
-    if (++hops > 60) break;
-
-    const r = await fetch(nextUrl, {
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-    });
-
-    if (!r.ok) {
-      const txt = await r.text().catch(() => "");
-      throw new Error(`Polygon futures aggs ${r.status} ${txt}`);
-    }
-
-    const data = await r.json();
-    const arr = Array.isArray(data?.results) ? data.results : [];
-
-    for (const b of arr) {
-      const nb = normFuturesAgg(b);
-      if (nb) out.push(nb);
-    }
-
-    if (!data?.next_url) {
-      nextUrl = null;
-    } else {
-      const u = new URL(data.next_url);
-      u.searchParams.set("apiKey", POLY_KEY);
-      nextUrl = u.toString();
-    }
+  if (!r.ok) {
+    const txt = await r.text().catch(() => "");
+    throw new Error(`Polygon futures aggs ${r.status} ${txt}`);
   }
 
-  out.sort((a, b) => a.time - b.time);
+  const data = await readJsonResponse(r, "Polygon futures aggs");
+  const arr = Array.isArray(data?.results) ? data.results : [];
+
+  const bars = arr
+    .map(normFuturesAgg)
+    .filter(Boolean)
+    .sort((a, b) => a.time - b.time);
 
   // De-dup by time
   const dedup = [];
   let last = -1;
 
-  for (const b of out) {
+  for (const b of bars) {
     if (b.time !== last) {
       dedup.push(b);
       last = b.time;
     }
   }
 
-  return dedup;
+  return dedup.length > limit ? dedup.slice(-limit) : dedup;
 }
 
 router.get("/", async (req, res) => {
@@ -336,12 +356,27 @@ router.get("/", async (req, res) => {
       limit,
     });
 
-    const trimmed = bars.length > limit ? bars.slice(-limit) : bars;
+    // Optional debug mode, never used by chart.
+    if (String(req.query.debug || "") === "1") {
+      return res.json({
+        ok: true,
+        productCode,
+        resolvedSymbol,
+        timeframe: tf,
+        resolution,
+        limit,
+        startDate,
+        endDate,
+        resolver,
+        count: bars.length,
+        bars,
+      });
+    }
 
     res.setHeader("Cache-Control", "no-store");
 
     // Return same simple array shape as /api/v1/ohlc
-    return res.json(trimmed);
+    return res.json(bars);
   } catch (e) {
     console.error("[/api/v1/futures/ohlc] error:", e?.stack || e);
 
