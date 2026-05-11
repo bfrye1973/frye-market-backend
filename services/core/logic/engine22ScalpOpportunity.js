@@ -1575,6 +1575,19 @@ function detectMinuteW4ABC({
     validPrice(engine16?.prevClose) ??
     null;
 
+  const hourlyClose = validPrice(engine16?.hourlyClose);
+  const ema10_1h = validPrice(engine16?.ema10_1h);
+
+  const oneHourAboveEma10 =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    hourlyClose > ema10_1h;
+
+  const oneHourBelowEma10 =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    hourlyClose < ema10_1h;
+
   const continuationWatchLong = engine16?.continuationWatchLong === true;
   const continuationTriggerLong = engine16?.continuationTriggerLong === true;
 
@@ -1582,29 +1595,29 @@ function detectMinuteW4ABC({
   const trendState1h = upper(engine16?.trendState_1h);
 
   const {
-  oneHourScore,
-  fourHourScore,
-  dailyScore,
-  masterScore,
-} = getMarketScores(marketMind);
+    oneHourScore,
+    fourHourScore,
+    dailyScore,
+    masterScore,
+  } = getMarketScores(marketMind);
 
-const marketFrontStrong =
-  (
-    fourHourScore === null ||
-    fourHourScore >= 55
-  ) &&
-  (
-    dailyScore === null ||
-    dailyScore >= 65
-  ) &&
-  (
-    masterScore === null ||
-    masterScore >= 60
-  ) &&
-  trendState4h !== "SHORT_ONLY" &&
-  marketBias?.allowShorts !== true;
+  const marketFrontStrong =
+    (
+      fourHourScore === null ||
+      fourHourScore >= 55
+    ) &&
+    (
+      dailyScore === null ||
+      dailyScore >= 65
+    ) &&
+    (
+      masterScore === null ||
+      masterScore >= 60
+    ) &&
+    trendState4h !== "SHORT_ONLY" &&
+    marketBias?.allowShorts !== true;
 
-const marketFrontVeryStrong =
+  const marketFrontVeryStrong =
     (
       fourHourScore === null ||
       fourHourScore >= 70
@@ -1655,10 +1668,6 @@ const marketFrontVeryStrong =
     close !== null &&
     e20 !== null &&
     close > e20;
-
-  const holdsEma10Ema20 =
-    aboveEma10 &&
-    aboveEma20;
 
   const belowEma10 =
     close !== null &&
@@ -1735,9 +1744,41 @@ const marketFrontVeryStrong =
       marketFrontVeryStrong
     );
 
+  const commonDebug = {
+    ...phases,
+    w3High,
+    aLow,
+    bHigh,
+    cLow,
+    latestClose: close,
+    ema10: e10,
+    ema20: e20,
+    prevClose,
+    hourlyClose,
+    ema10_1h,
+    oneHourAboveEma10,
+    oneHourBelowEma10,
+    aLowHeld,
+    cLowHeld,
+    reclaimedEma10,
+    aboveEma10,
+    aboveEma20,
+    belowEma10,
+    belowEma20,
+    tenMinLostSupport,
+    continuationWatchLong,
+    continuationTriggerLong,
+    oneHourScore,
+    fourHourScore,
+    dailyScore,
+    masterScore,
+    marketFrontStrong,
+    marketFrontVeryStrong,
+  };
+
   // ============================================================
   // STAGE 1:
-  // W4 active, but A low is not manually marked yet.
+  // Minute W4 active, but A low is not marked yet.
   // ============================================================
   if (!hasALow) {
     return {
@@ -1770,21 +1811,7 @@ const marketFrontVeryStrong =
         "OBSERVATION_ONLY",
       ],
       debug: {
-        ...phases,
-        w3High,
-        aLow,
-        bHigh,
-        cLow,
-        latestClose: close,
-        ema10: e10,
-        ema20: e20,
-        prevClose,
-        oneHourScore,
-        fourHourScore,
-        dailyScore,
-        masterScore,
-        marketFrontStrong,
-        marketFrontVeryStrong,
+        ...commonDebug,
         correctionLeg: "IN_A",
         nextFocus: "WAIT_FOR_A_LOW",
       },
@@ -1794,7 +1821,7 @@ const marketFrontVeryStrong =
   // ============================================================
   // STAGE 2:
   // A low exists, but B high is not marked yet.
-  // This is the B-bounce branch.
+  // This is the B-bounce / shallow continuation branch.
   // ============================================================
   if (hasALow && !hasBHigh) {
     const bBounceReady =
@@ -1811,6 +1838,8 @@ const marketFrontVeryStrong =
         continuationWatchLong
       );
 
+    // Strongest path first:
+    // 10m reclaimed + market front strong = shallow W4 continuation watch.
     if (shallowContinuationWatch) {
       return {
         active: true,
@@ -1830,7 +1859,7 @@ const marketFrontVeryStrong =
         stopLevel: round2(aLow),
         confidence: marketFrontVeryStrong ? 66 : 60,
         sizeMode: "REDUCED",
-        needs: "HOLD_EMA10_EMA20_AND_BREAK_B_BOUNCE_HIGH",
+        needs: "HOLD_10M_EMA_AND_WATCH_1H_FOR_C_WAVE_DECISION",
         marketBias,
         reasonCodes: [
           "MINUTE_W4_ACTIVE",
@@ -1840,32 +1869,13 @@ const marketFrontVeryStrong =
           "EMA10_RECLAIM_OR_HOLD",
           "ABOVE_EMA20",
           "MARKET_FRONT_STRONG",
+          oneHourAboveEma10 ? "ONE_HOUR_EMA10_HOLDING" : null,
           "C_LOW_NOT_MARKED",
           "SHALLOW_W4_CONTINUATION_WATCH",
           "OBSERVATION_ONLY",
-        ],
+        ].filter(Boolean),
         debug: {
-          ...phases,
-          w3High,
-          aLow,
-          bHigh,
-          cLow,
-          latestClose: close,
-          ema10: e10,
-          ema20: e20,
-          prevClose,
-          aLowHeld,
-          reclaimedEma10,
-          aboveEma10,
-          aboveEma20,
-          continuationWatchLong,
-          continuationTriggerLong,
-          oneHourScore,
-          fourHourScore,
-          dailyScore,
-          masterScore,
-          marketFrontStrong,
-          marketFrontVeryStrong,
+          ...commonDebug,
           correctionLeg: "IN_B_SHALLOW_CONTINUATION_WATCH",
           nextFocus: "MARK_B_HIGH_OR_BREAK_CONTINUATION_LEVEL",
           note:
@@ -1874,139 +1884,92 @@ const marketFrontVeryStrong =
       };
     }
 
-    if (bBounceTrigger) {
+    // 10m lost support, but 1H is still holding:
+    // Do not fully reset to C-low yet.
+    if (shallowPullbackTest) {
+      return {
+        active: true,
+        setupType: "W4_TO_W5_SHALLOW_CONTINUATION",
+        type: "W4_SHALLOW_PULLBACK_TEST",
+        state: "W4_SHALLOW_PULLBACK_TEST",
+        status: "WATCH",
+        readiness: "WATCH",
+        direction: "LONG",
+        side: "LONG",
+        allowLongEntry: false,
+        allowShort: false,
+        allowShortEntry: false,
+        triggerConfirmed: false,
+        triggerType: "TEN_MIN_PULLBACK_ONE_HOUR_STILL_SUPPORTIVE",
+        triggerLevel: round2(e10),
+        stopLevel: round2(aLow),
+        confidence: 45,
+        sizeMode: "NONE",
+        needs: "RECLAIM_10M_EMA_OR_WAIT_FOR_1H_C_WAVE_CONFIRMATION",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "A_LOW_MARKED",
+          "A_LOW_HELD",
+          "TEN_MIN_EMA_SUPPORT_LOST",
+          "ONE_HOUR_EMA10_STILL_HOLDING",
+          "MARKET_FRONT_STRONG",
+          "SHALLOW_W4_PULLBACK_TEST",
+          "DO_NOT_FORCE_C_LOW_YET",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...commonDebug,
+          correctionLeg: "SHALLOW_PULLBACK_TEST",
+          nextFocus: "RECLAIM_10M_EMA_OR_1H_FAILS_TO_C_LOW",
+          note:
+            "10m support was lost, but 1H EMA10 is still holding. Engine 22 should not fully reset to C-low unless 1H fails.",
+        },
+      };
+    }
 
+    // 10m lost support AND 1H lost/rejected EMA10:
+    // C-wave risk returns.
     if (cRiskReturning) {
-  return {
-    active: true,
-    setupType: "MINUTE_W4_ABC",
-    type: "W4_C_RISK_RETURNING",
-    state: "W4_C_RISK_RETURNING",
-    status: "WATCH",
-    readiness: "NO_TRADE",
-    direction: "NONE",
-    side: "NONE",
-    allowLongEntry: false,
-    allowShort: false,
-    allowShortEntry: false,
-    triggerConfirmed: false,
-    triggerType: "ONE_HOUR_EMA10_REJECTION_C_WAVE_RISK",
-    triggerLevel: round2(e10),
-    stopLevel: null,
-    confidence: 0,
-    sizeMode: "NONE",
-    needs: "WAIT_FOR_C_LOW",
-    marketBias,
-    reasonCodes: [
-      "MINUTE_W4_ACTIVE",
-      "A_LOW_MARKED",
-      "TEN_MIN_EMA_SUPPORT_LOST",
-      "ONE_HOUR_EMA10_LOST_OR_REJECTING",
-      "C_WAVE_RISK_RETURNING",
-      "WAIT_FOR_C_LOW",
-      "OBSERVATION_ONLY",
-    ],
-    debug: {
-      ...phases,
-      w3High,
-      aLow,
-      bHigh,
-      cLow,
-      latestClose: close,
-      ema10: e10,
-      ema20: e20,
-      prevClose,
-      hourlyClose,
-      ema10_1h,
-      oneHourAboveEma10,
-      oneHourBelowEma10,
-      aLowHeld,
-      reclaimedEma10,
-      aboveEma10,
-      aboveEma20,
-      belowEma10,
-      belowEma20,
-      tenMinLostSupport,
-      oneHourScore,
-      fourHourScore,
-      dailyScore,
-      masterScore,
-      marketFrontStrong,
-      marketFrontVeryStrong,
-      correctionLeg: "C_RISK_RETURNING",
-      nextFocus: "WAIT_FOR_C_LOW",
-    },
-  };
-}
+      return {
+        active: true,
+        setupType: "MINUTE_W4_ABC",
+        type: "W4_C_RISK_RETURNING",
+        state: "W4_C_RISK_RETURNING",
+        status: "WATCH",
+        readiness: "NO_TRADE",
+        direction: "NONE",
+        side: "NONE",
+        allowLongEntry: false,
+        allowShort: false,
+        allowShortEntry: false,
+        triggerConfirmed: false,
+        triggerType: "ONE_HOUR_EMA10_REJECTION_C_WAVE_RISK",
+        triggerLevel: round2(e10),
+        stopLevel: null,
+        confidence: 0,
+        sizeMode: "NONE",
+        needs: "WAIT_FOR_C_LOW",
+        marketBias,
+        reasonCodes: [
+          "MINUTE_W4_ACTIVE",
+          "A_LOW_MARKED",
+          "TEN_MIN_EMA_SUPPORT_LOST",
+          "ONE_HOUR_EMA10_LOST_OR_REJECTING",
+          "C_WAVE_RISK_RETURNING",
+          "WAIT_FOR_C_LOW",
+          "OBSERVATION_ONLY",
+        ],
+        debug: {
+          ...commonDebug,
+          correctionLeg: "C_RISK_RETURNING",
+          nextFocus: "WAIT_FOR_C_LOW",
+        },
+      };
+    }
 
-if (shallowPullbackTest) {
-  return {
-    active: true,
-    setupType: "W4_TO_W5_SHALLOW_CONTINUATION",
-    type: "W4_SHALLOW_PULLBACK_TEST",
-    state: "W4_SHALLOW_PULLBACK_TEST",
-    status: "WATCH",
-    readiness: "WATCH",
-    direction: "LONG",
-    side: "LONG",
-    allowLongEntry: false,
-    allowShort: false,
-    allowShortEntry: false,
-    triggerConfirmed: false,
-    triggerType: "TEN_MIN_PULLBACK_ONE_HOUR_STILL_SUPPORTIVE",
-    triggerLevel: round2(e10),
-    stopLevel: round2(aLow),
-    confidence: 45,
-    sizeMode: "NONE",
-    needs: "RECLAIM_10M_EMA_OR_WAIT_FOR_1H_C_WAVE_CONFIRMATION",
-    marketBias,
-    reasonCodes: [
-      "MINUTE_W4_ACTIVE",
-      "A_LOW_MARKED",
-      "A_LOW_HELD",
-      "TEN_MIN_EMA_SUPPORT_LOST",
-      "ONE_HOUR_EMA10_STILL_HOLDING",
-      "MARKET_FRONT_STRONG",
-      "SHALLOW_W4_PULLBACK_TEST",
-      "DO_NOT_FORCE_C_LOW_YET",
-      "OBSERVATION_ONLY",
-    ],
-    debug: {
-      ...phases,
-      w3High,
-      aLow,
-      bHigh,
-      cLow,
-      latestClose: close,
-      ema10: e10,
-      ema20: e20,
-      prevClose,
-      hourlyClose,
-      ema10_1h,
-      oneHourAboveEma10,
-      oneHourBelowEma10,
-      aLowHeld,
-      reclaimedEma10,
-      aboveEma10,
-      aboveEma20,
-      belowEma10,
-      belowEma20,
-      tenMinLostSupport,
-      continuationWatchLong,
-      continuationTriggerLong,
-      oneHourScore,
-      fourHourScore,
-      dailyScore,
-      masterScore,
-      marketFrontStrong,
-      marketFrontVeryStrong,
-      correctionLeg: "SHALLOW_PULLBACK_TEST",
-      nextFocus: "RECLAIM_10M_EMA_OR_1H_FAILS_TO_C_LOW",
-      note:
-        "10m support was lost, but 1H EMA10 is still holding. Engine 22 should not fully reset to C-low unless 1H fails.",
-    },
-  };
-} 
+    // Reduced-size B-bounce entry.
+    if (bBounceTrigger) {
       return {
         active: true,
         setupType: "CORRECTION_A_TO_B_LONG",
@@ -2035,38 +1998,20 @@ if (shallowPullbackTest) {
           "A_LOW_HELD",
           "EMA10_RECLAIM",
           aboveEma20 ? "ABOVE_EMA20" : "CONTINUATION_WATCH_LONG",
+          oneHourAboveEma10 ? "ONE_HOUR_EMA10_HOLDING" : null,
           "A_TO_B_TRIGGER_LONG",
           "REDUCED_SIZE_COUNTERTREND_BOUNCE",
           "OBSERVATION_ONLY",
-        ],
+        ].filter(Boolean),
         debug: {
-          ...phases,
-          w3High,
-          aLow,
-          bHigh,
-          cLow,
-          latestClose: close,
-          ema10: e10,
-          ema20: e20,
-          prevClose,
-          aLowHeld,
-          reclaimedEma10,
-          aboveEma10,
-          aboveEma20,
-          continuationWatchLong,
-          continuationTriggerLong,
-          oneHourScore,
-          fourHourScore,
-          dailyScore,
-          masterScore,
-          marketFrontStrong,
-          marketFrontVeryStrong,
+          ...commonDebug,
           correctionLeg: "IN_B",
           nextFocus: "TRADE_B_BOUNCE_THEN_MARK_B_HIGH",
         },
       };
     }
 
+    // B-bounce is starting but not yet confirmed.
     if (bBounceReady) {
       return {
         active: true,
@@ -2094,31 +2039,12 @@ if (shallowPullbackTest) {
           "A_LOW_HELD",
           "EMA10_RECLAIM_OR_HOLD",
           "B_BOUNCE_ACTIVE",
+          oneHourAboveEma10 ? "ONE_HOUR_EMA10_HOLDING" : null,
           "WAIT_FOR_A_TO_B_CONFIRMATION",
           "OBSERVATION_ONLY",
-        ],
+        ].filter(Boolean),
         debug: {
-          ...phases,
-          w3High,
-          aLow,
-          bHigh,
-          cLow,
-          latestClose: close,
-          ema10: e10,
-          ema20: e20,
-          prevClose,
-          aLowHeld,
-          reclaimedEma10,
-          aboveEma10,
-          aboveEma20,
-          continuationWatchLong,
-          continuationTriggerLong,
-          oneHourScore,
-          fourHourScore,
-          dailyScore,
-          masterScore,
-          marketFrontStrong,
-          marketFrontVeryStrong,
+          ...commonDebug,
           correctionLeg: "IN_B",
           nextFocus: "WAIT_FOR_B_BOUNCE_CONFIRMATION",
         },
@@ -2150,28 +2076,12 @@ if (shallowPullbackTest) {
         "A_LOW_MARKED",
         "WAIT_FOR_B_BOUNCE",
         "BLIND_DIP_BUY_BLOCKED",
+        oneHourAboveEma10 ? "ONE_HOUR_EMA10_HOLDING" : null,
+        oneHourBelowEma10 ? "ONE_HOUR_EMA10_LOST_OR_REJECTING" : null,
         "OBSERVATION_ONLY",
-      ],
+      ].filter(Boolean),
       debug: {
-        ...phases,
-        w3High,
-        aLow,
-        bHigh,
-        cLow,
-        latestClose: close,
-        ema10: e10,
-        ema20: e20,
-        prevClose,
-        aLowHeld,
-        reclaimedEma10,
-        aboveEma10,
-        aboveEma20,
-        oneHourScore,
-        fourHourScore,
-        dailyScore,
-        masterScore,
-        marketFrontStrong,
-        marketFrontVeryStrong,
+        ...commonDebug,
         correctionLeg: "A_COMPLETE_WAIT_B",
         nextFocus: "WAIT_FOR_B_BOUNCE",
       },
@@ -2181,9 +2091,7 @@ if (shallowPullbackTest) {
   // ============================================================
   // STAGE 3:
   // A and B exist, but C low not marked yet.
-  // New second branch:
-  // if B bounce is strong and market front is strong, do not force C low.
-  // Watch shallow W4 continuation / W5 trigger.
+  // Watch shallow W4 continuation or C-leg risk.
   // ============================================================
   if (hasALow && hasBHigh && !hasCLow) {
     const cLegStarting =
@@ -2217,29 +2125,14 @@ if (shallowPullbackTest) {
           "B_HIGH_MARKED",
           "B_HIGH_REJECTED",
           belowEma10 ? "BELOW_EMA10" : "BELOW_EMA20",
+          oneHourBelowEma10 ? "ONE_HOUR_EMA10_LOST_OR_REJECTING" : null,
           "C_LEG_STARTING",
           "NO_LONG_DURING_C_LEG",
           "OBSERVATION_ONLY",
-        ],
+        ].filter(Boolean),
         debug: {
-          ...phases,
-          w3High,
-          aLow,
-          bHigh,
-          cLow,
-          latestClose: close,
-          ema10: e10,
-          ema20: e20,
-          prevClose,
+          ...commonDebug,
           rejectedBHigh,
-          belowEma10,
-          belowEma20,
-          oneHourScore,
-          fourHourScore,
-          dailyScore,
-          masterScore,
-          marketFrontStrong,
-          marketFrontVeryStrong,
           correctionLeg: "IN_C",
           nextFocus: "WAIT_FOR_C_LOW",
         },
@@ -2276,33 +2169,14 @@ if (shallowPullbackTest) {
           "EMA10_20_HELD",
           "MARKET_FRONT_STRONG",
           "B_BOUNCE_HIGH_BROKEN",
+          oneHourAboveEma10 ? "ONE_HOUR_EMA10_HOLDING" : null,
           "SHALLOW_W4_CONFIRMED_BY_PRICE",
           "W5_SHALLOW_TRIGGER_LONG",
           "OBSERVATION_ONLY",
-        ],
+        ].filter(Boolean),
         debug: {
-          ...phases,
-          w3High,
-          aLow,
-          bHigh,
-          cLow,
-          latestClose: close,
-          ema10: e10,
-          ema20: e20,
-          prevClose,
-          aLowHeld,
-          reclaimedEma10,
-          aboveEma10,
-          aboveEma20,
+          ...commonDebug,
           brokeBHigh,
-          continuationWatchLong,
-          continuationTriggerLong,
-          oneHourScore,
-          fourHourScore,
-          dailyScore,
-          masterScore,
-          marketFrontStrong,
-          marketFrontVeryStrong,
           correctionLeg: "SHALLOW_W4_TO_W5_TRIGGER",
           nextFocus: "MANAGE_SHALLOW_W5_CONTINUATION",
           note:
@@ -2340,33 +2214,14 @@ if (shallowPullbackTest) {
           "B_BOUNCE_STRONG",
           "EMA10_20_HELD",
           "MARKET_FRONT_STRONG",
+          oneHourAboveEma10 ? "ONE_HOUR_EMA10_HOLDING" : null,
           "C_WAVE_MAY_FAIL_SHALLOW",
           "W5_CONTINUATION_WATCH",
           "OBSERVATION_ONLY",
-        ],
+        ].filter(Boolean),
         debug: {
-          ...phases,
-          w3High,
-          aLow,
-          bHigh,
-          cLow,
-          latestClose: close,
-          ema10: e10,
-          ema20: e20,
-          prevClose,
-          aLowHeld,
-          reclaimedEma10,
-          aboveEma10,
-          aboveEma20,
+          ...commonDebug,
           brokeBHigh,
-          continuationWatchLong,
-          continuationTriggerLong,
-          oneHourScore,
-          fourHourScore,
-          dailyScore,
-          masterScore,
-          marketFrontStrong,
-          marketFrontVeryStrong,
           correctionLeg: "SHALLOW_W4_CONTINUATION_WATCH",
           nextFocus: "BREAK_B_HIGH_FOR_W5",
           note:
@@ -2394,7 +2249,7 @@ if (shallowPullbackTest) {
         stopLevel: round2(aLow),
         confidence: 58,
         sizeMode: "REDUCED",
-        needs: "HOLD_EMA10_EMA20_OR_RESUME_WAIT_FOR_C_LOW",
+        needs: "HOLD_10M_EMA_OR_RESUME_WAIT_FOR_C_LOW",
         marketBias,
         reasonCodes: [
           "MINUTE_W4_ACTIVE",
@@ -2402,32 +2257,13 @@ if (shallowPullbackTest) {
           "B_HIGH_MARKED",
           "B_BOUNCE_ACTIVE",
           "EMA10_20_HELD",
+          oneHourAboveEma10 ? "ONE_HOUR_EMA10_HOLDING" : null,
           "WAIT_FOR_B_HIGH_BREAK_OR_C_LEG",
           "OBSERVATION_ONLY",
-        ],
+        ].filter(Boolean),
         debug: {
-          ...phases,
-          w3High,
-          aLow,
-          bHigh,
-          cLow,
-          latestClose: close,
-          ema10: e10,
-          ema20: e20,
-          prevClose,
-          aLowHeld,
-          reclaimedEma10,
-          aboveEma10,
-          aboveEma20,
+          ...commonDebug,
           brokeBHigh,
-          continuationWatchLong,
-          continuationTriggerLong,
-          oneHourScore,
-          fourHourScore,
-          dailyScore,
-          masterScore,
-          marketFrontStrong,
-          marketFrontVeryStrong,
           correctionLeg: "IN_B",
           nextFocus: "B_HIGH_BREAK_OR_C_LOW",
         },
@@ -2459,27 +2295,12 @@ if (shallowPullbackTest) {
         "A_LOW_MARKED",
         "B_HIGH_MARKED",
         "WAIT_FOR_C_LEG",
+        oneHourBelowEma10 ? "ONE_HOUR_EMA10_LOST_OR_REJECTING" : null,
         "OBSERVATION_ONLY",
-      ],
+      ].filter(Boolean),
       debug: {
-        ...phases,
-        w3High,
-        aLow,
-        bHigh,
-        cLow,
-        latestClose: close,
-        ema10: e10,
-        ema20: e20,
-        prevClose,
+        ...commonDebug,
         rejectedBHigh,
-        belowEma10,
-        belowEma20,
-        oneHourScore,
-        fourHourScore,
-        dailyScore,
-        masterScore,
-        marketFrontStrong,
-        marketFrontVeryStrong,
         correctionLeg: "B_COMPLETE_WAIT_C",
         nextFocus: "WAIT_FOR_C_LOW",
       },
@@ -2489,7 +2310,7 @@ if (shallowPullbackTest) {
   // ============================================================
   // STAGE 4:
   // A, B, C all exist.
-  // Watch for W5 long trigger.
+  // Watch for normal W5 long trigger.
   // ============================================================
   if (hasALow && hasBHigh && hasCLow) {
     const cLowHeldNow =
@@ -2533,29 +2354,14 @@ if (shallowPullbackTest) {
           "EMA10_RECLAIM",
           "ABOVE_EMA20",
           "BREAK_ABOVE_B_HIGH",
+          oneHourAboveEma10 ? "ONE_HOUR_EMA10_HOLDING" : null,
           "W5_TRIGGER_LONG",
           "OBSERVATION_ONLY",
-        ],
+        ].filter(Boolean),
         debug: {
-          ...phases,
-          w3High,
-          aLow,
-          bHigh,
-          cLow,
-          latestClose: close,
-          ema10: e10,
-          ema20: e20,
-          prevClose,
+          ...commonDebug,
           cLowHeld: cLowHeldNow,
-          reclaimedEma10,
-          aboveEma20,
           brokeBHigh,
-          oneHourScore,
-          fourHourScore,
-          dailyScore,
-          masterScore,
-          marketFrontStrong,
-          marketFrontVeryStrong,
           correctionLeg: "ABC_COMPLETE",
           nextFocus: "W5_ACTIVE",
         },
@@ -2589,29 +2395,14 @@ if (shallowPullbackTest) {
           "C_LOW_HELD",
           "EMA10_RECLAIM",
           "ABOVE_EMA20",
+          oneHourAboveEma10 ? "ONE_HOUR_EMA10_HOLDING" : null,
           "WAIT_FOR_B_HIGH_BREAK",
           "OBSERVATION_ONLY",
-        ],
+        ].filter(Boolean),
         debug: {
-          ...phases,
-          w3High,
-          aLow,
-          bHigh,
-          cLow,
-          latestClose: close,
-          ema10: e10,
-          ema20: e20,
-          prevClose,
+          ...commonDebug,
           cLowHeld: cLowHeldNow,
-          reclaimedEma10,
-          aboveEma20,
           brokeBHigh,
-          oneHourScore,
-          fourHourScore,
-          dailyScore,
-          masterScore,
-          marketFrontStrong,
-          marketFrontVeryStrong,
           correctionLeg: "ABC_COMPLETE",
           nextFocus: "BREAK_B_HIGH_FOR_W5",
         },
@@ -2645,25 +2436,9 @@ if (shallowPullbackTest) {
         "OBSERVATION_ONLY",
       ],
       debug: {
-        ...phases,
-        w3High,
-        aLow,
-        bHigh,
-        cLow,
-        latestClose: close,
-        ema10: e10,
-        ema20: e20,
-        prevClose,
+        ...commonDebug,
         cLowHeld: cLowHeldNow,
-        reclaimedEma10,
-        aboveEma20,
         brokeBHigh,
-        oneHourScore,
-        fourHourScore,
-        dailyScore,
-        masterScore,
-        marketFrontStrong,
-        marketFrontVeryStrong,
         correctionLeg: "ABC_COMPLETE",
         nextFocus: "WAIT_FOR_EMA_RECLAIM_AND_B_BREAK",
       },
@@ -2696,21 +2471,7 @@ if (shallowPullbackTest) {
       "OBSERVATION_ONLY",
     ],
     debug: {
-      ...phases,
-      w3High,
-      aLow,
-      bHigh,
-      cLow,
-      latestClose: close,
-      ema10: e10,
-      ema20: e20,
-      prevClose,
-      oneHourScore,
-      fourHourScore,
-      dailyScore,
-      masterScore,
-      marketFrontStrong,
-      marketFrontVeryStrong,
+      ...commonDebug,
       correctionLeg: "UNKNOWN",
       nextFocus: "WAIT_FOR_W4_STRUCTURE",
     },
@@ -2730,10 +2491,10 @@ function normalizeW4ABCForEngine17(detection) {
     rawState === "W5_READY" ||
     rawState === "W4_B_BOUNCE_ACTIVE" ||
     rawState === "W4_SHALLOW_CONTINUATION_WATCH" ||
+    rawState === "W4_SHALLOW_PULLBACK_TEST" ||
+    rawState === "W4_C_RISK_RETURNING" ||
     rawState === "W5_CONTINUATION_WATCH";
 
-  // Keep real entry signals and W5_READY as main states.
-  // Everything else stays W4_ACTIVE_WAIT so Engine 17 keeps the fib/timeline layout.
   if (isEntryState || isSupportedReadyState) {
     return {
       ...detection,
@@ -2749,6 +2510,31 @@ function normalizeW4ABCForEngine17(detection) {
       },
     };
   }
+
+  return {
+    ...detection,
+
+    setupType: detection.setupType || "MINUTE_W4_ABC",
+    type: "W4_ACTIVE_WAIT",
+    state: "W4_ACTIVE_WAIT",
+
+    abcState: rawState || null,
+    abcType: detection.type || null,
+    correctionLeg: detection.debug?.correctionLeg || null,
+    nextFocus: detection.debug?.nextFocus || detection.needs || null,
+    abcLevels: {
+      w3High: detection.debug?.w3High ?? null,
+      aLow: detection.debug?.aLow ?? null,
+      bHigh: detection.debug?.bHigh ?? null,
+      cLow: detection.debug?.cLow ?? null,
+    },
+
+    reasonCodes: [
+      ...(Array.isArray(detection.reasonCodes) ? detection.reasonCodes : []),
+      "ENGINE17_COMPAT_STATE_W4_ACTIVE_WAIT",
+    ],
+  };
+}
 
   return {
     ...detection,
