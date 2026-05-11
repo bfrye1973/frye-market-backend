@@ -2,10 +2,17 @@
 // Backend-2 — Futures stream/resolver routes
 //
 // Phase 1 purpose:
-// - Resolve user-facing ES -> active Polygon futures contract like ESM26
+// - Resolve user-facing ES -> active Polygon futures contract like ESM6
 // - Inspect Polygon's real futures snapshot response safely
 // - Do NOT touch stock /stream/agg
 // - Do NOT touch frontend yet
+//
+// Confirmed Polygon futures snapshot shape:
+// results[].details.ticker
+// results[].details.product_code
+// results[].details.settlement_date
+// results[].session.volume
+// results[].session.close
 
 import express from "express";
 
@@ -19,7 +26,11 @@ const POLYGON_REST_BASE =
 
 const FUTURES_SNAPSHOT_PATH = "/futures/v1/snapshot";
 
-const RESOLVE_CACHE_MS = Number(process.env.FUTURES_RESOLVE_CACHE_MS || 10 * 60 * 1000);
+// Keep short while testing ES resolver.
+const RESOLVE_CACHE_MS = Number(
+  process.env.FUTURES_RESOLVE_CACHE_MS || 2 * 60 * 1000
+);
+
 const resolveCache = new Map();
 
 /* -------------------------------------------------
@@ -42,6 +53,27 @@ function cleanProductCode(v) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function toNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseDateMs(v) {
+  if (!v) return null;
+
+  if (typeof v === "number") {
+    if (v > 1e12) return v;
+    if (v > 1e9) return v * 1000;
+    return null;
+  }
+
+  const s = String(v).trim();
+  if (!s) return null;
+
+  const ms = Date.parse(s);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 function safeJsonShape(value) {
@@ -78,249 +110,134 @@ function safeJsonShape(value) {
       out[k] = typeof v;
     }
   }
+
   return out;
 }
 
-function toNum(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+/* -------------------------------------------------
+   Polygon ES ticker handling
+-------------------------------------------------- */
+
+function isSpreadTicker(ticker) {
+  return String(ticker || "").includes("-");
 }
 
-function parseExpiryMs(v) {
-  if (!v) return null;
+function isPlainFuturesTicker(ticker, productCode) {
+  const t = String(ticker || "").trim().toUpperCase();
+  const pc = String(productCode || "").trim().toUpperCase();
 
-  // Accept yyyy-mm-dd, ISO strings, or unix timestamps.
-  if (typeof v === "number") {
-    if (v > 1e12) return v;
-    if (v > 1e9) return v * 1000;
-    return null;
-  }
+  if (!t || !pc) return false;
+  if (isSpreadTicker(t)) return false;
 
-  const s = String(v).trim();
-  if (!s) return null;
-
-  const ms = Date.parse(s);
-  return Number.isFinite(ms) ? ms : null;
-}
-
-function looksLikeFuturesTicker(v, productCode) {
-  const s = String(v || "").trim().toUpperCase();
-  if (!s) return false;
-
-  // ES quarterly examples:
-  // ESH26, ESM26, ESU26, ESZ26
+  // Polygon futures snapshot currently returns short year format:
+  // ESM6, ESU6, ESZ6, ESH7
   //
-  // Keep this product-code based so later NQ/YM/RTY can reuse it.
-  const pc = String(productCode || "").toUpperCase();
-  const re = new RegExp(`^${pc}[FGHJKMNQUVXZ]\\d{2}$`);
-  return re.test(s);
+  // We also allow 2-digit year format in case Polygon/support returns it later:
+  // ESM26, ESU26, ESZ26
+  //
+  // Futures month codes:
+  // F Jan, G Feb, H Mar, J Apr, K May, M Jun,
+  // N Jul, Q Aug, U Sep, V Oct, X Nov, Z Dec
+  const re = new RegExp(`^${pc}[FGHJKMNQUVXZ]\\d{1,2}$`);
+  return re.test(t);
 }
 
-function findTickerInObject(obj, productCode) {
-  if (!obj || typeof obj !== "object") return null;
-
-  const directFields = [
-    "ticker",
-    "symbol",
-    "contract",
-    "contract_ticker",
-    "contractTicker",
-    "root_ticker",
-    "rootTicker",
-    "name",
-  ];
-
-  for (const field of directFields) {
-    const val = obj[field];
-    if (looksLikeFuturesTicker(val, productCode)) {
-      return String(val).toUpperCase();
-    }
-  }
-
-  // Light nested scan — enough for unknown Polygon shape without being expensive.
-  const stack = [obj];
-  let scanned = 0;
-
-  while (stack.length && scanned < 150) {
-    const cur = stack.shift();
-    scanned += 1;
-
-    if (!cur || typeof cur !== "object") continue;
-
-    if (Array.isArray(cur)) {
-      for (const item of cur.slice(0, 50)) {
-        if (typeof item === "string" && looksLikeFuturesTicker(item, productCode)) {
-          return item.toUpperCase();
-        }
-        if (item && typeof item === "object") stack.push(item);
-      }
-      continue;
-    }
-
-    for (const val of Object.values(cur)) {
-      if (typeof val === "string" && looksLikeFuturesTicker(val, productCode)) {
-        return val.toUpperCase();
-      }
-      if (val && typeof val === "object") stack.push(val);
-    }
-  }
-
-  return null;
+function getContractYearHint(ticker) {
+  const t = String(ticker || "").trim().toUpperCase();
+  const m = t.match(/(\d{1,2})$/);
+  return m ? m[1] : null;
 }
 
-function collectCandidateObjects(json) {
-  const candidates = [];
+function normalizePolygonCandidate(row, productCode) {
+  if (!row || typeof row !== "object") return null;
 
-  function pushArray(arr, sourcePath) {
-    if (!Array.isArray(arr)) return;
-    for (const item of arr) {
-      if (item && typeof item === "object") {
-        candidates.push({ item, sourcePath });
-      }
-    }
-  }
+  const details = row.details || {};
+  const session = row.session || {};
 
-  // Known/common places APIs put arrays.
-  pushArray(json?.results, "results");
-  pushArray(json?.contracts, "contracts");
-  pushArray(json?.tickers, "tickers");
-  pushArray(json?.data, "data");
+  const ticker = String(details.ticker || "").trim().toUpperCase();
+  const rowProductCode = String(details.product_code || productCode || "")
+    .trim()
+    .toUpperCase();
 
-  pushArray(json?.results?.contracts, "results.contracts");
-  pushArray(json?.results?.tickers, "results.tickers");
-  pushArray(json?.results?.data, "results.data");
+  if (rowProductCode !== String(productCode).toUpperCase()) return null;
+  if (!isPlainFuturesTicker(ticker, productCode)) return null;
 
-  pushArray(json?.snapshot?.contracts, "snapshot.contracts");
-  pushArray(json?.snapshot?.tickers, "snapshot.tickers");
+  const settlementDate = details.settlement_date || null;
+  const settlementMs = parseDateMs(settlementDate);
+  const volume = toNum(session.volume) ?? 0;
+  const close = toNum(session.close);
+  const open = toNum(session.open);
+  const high = toNum(session.high);
+  const low = toNum(session.low);
 
-  // If none found, scan one level deeper.
-  if (!candidates.length && json && typeof json === "object") {
-    for (const [k, v] of Object.entries(json)) {
-      if (Array.isArray(v)) pushArray(v, k);
-      else if (v && typeof v === "object") {
-        for (const [k2, v2] of Object.entries(v)) {
-          if (Array.isArray(v2)) pushArray(v2, `${k}.${k2}`);
-        }
-      }
-    }
-  }
+  const now = Date.now();
+  const daysToSettlement =
+    settlementMs && settlementMs > 0
+      ? Math.round((settlementMs - now) / 86400000)
+      : null;
 
-  return candidates;
-}
-
-function normalizeCandidate(raw, productCode, sourcePath) {
-  const ticker = findTickerInObject(raw, productCode);
-  if (!ticker) return null;
-
-  const active =
-    raw.active ??
-    raw.is_active ??
-    raw.isActive ??
-    raw.trading ??
-    raw.is_trading ??
-    raw.isTrading ??
-    null;
-
-  const frontMonth =
-    raw.front_month ??
-    raw.frontMonth ??
-    raw.is_front_month ??
-    raw.isFrontMonth ??
-    raw.primary ??
-    raw.is_primary ??
-    raw.isPrimary ??
-    null;
-
-  const volume =
-    toNum(raw.volume) ??
-    toNum(raw.day?.v) ??
-    toNum(raw.day?.volume) ??
-    toNum(raw.session?.volume) ??
-    toNum(raw.latest?.volume) ??
-    0;
-
-  const openInterest =
-    toNum(raw.open_interest) ??
-    toNum(raw.openInterest) ??
-    toNum(raw.oi) ??
-    0;
-
-  const expirationRaw =
-    raw.expiration_date ??
-    raw.expirationDate ??
-    raw.expiration ??
-    raw.expiry ??
-    raw.last_trade_date ??
-    raw.lastTradeDate ??
-    raw.contract_expiration ??
-    null;
-
-  const expiryMs = parseExpiryMs(expirationRaw);
-
-  let score = 0;
-
-  if (active === true || active === "true" || active === 1) score += 100000;
-  if (frontMonth === true || frontMonth === "true" || frontMonth === 1) score += 50000;
-
-  // Prefer contracts that are not expired if we can see an expiry.
-  if (expiryMs && expiryMs > Date.now()) score += 10000;
-
-  // Prefer stronger liquidity.
-  score += Math.min(volume || 0, 100000);
-  score += Math.min(openInterest || 0, 50000) / 2;
-
-  // If expiry exists, prefer nearest future expiry after liquidity/active flags.
-  const daysToExpiry = expiryMs ? Math.max(0, (expiryMs - Date.now()) / 86400000) : null;
-  if (daysToExpiry !== null) {
-    score += Math.max(0, 5000 - daysToExpiry);
-  }
+  const isExpired =
+    settlementMs && Number.isFinite(settlementMs) ? settlementMs < now : false;
 
   return {
     ticker,
-    sourcePath,
-    score,
-    active,
-    frontMonth,
+    productCode: rowProductCode,
+    settlementDate,
+    settlementMs,
+    daysToSettlement,
+    isExpired,
     volume,
-    openInterest,
-    expiration: expirationRaw,
-    daysToExpiry,
-    rawKeys: Object.keys(raw || {}).slice(0, 40),
+    close,
+    open,
+    high,
+    low,
+    yearHint: getContractYearHint(ticker),
+    rawKeys: Object.keys(row).slice(0, 40),
+    detailKeys: Object.keys(details).slice(0, 40),
+    sessionKeys: Object.keys(session).slice(0, 40),
   };
 }
 
-function chooseResolvedContract(json, productCode) {
-  const rawObjects = collectCandidateObjects(json);
+function chooseResolvedContractFromSnapshot(json, productCode) {
+  const results = Array.isArray(json?.results) ? json.results : [];
 
-  const candidates = rawObjects
-    .map(({ item, sourcePath }) => normalizeCandidate(item, productCode, sourcePath))
+  const allCandidates = results
+    .map((row) => normalizePolygonCandidate(row, productCode))
     .filter(Boolean);
 
-  // Also handle case where the ticker is directly somewhere in the object,
-  // not inside an array.
-  const directTicker = findTickerInObject(json, productCode);
-  if (directTicker && !candidates.some((c) => c.ticker === directTicker)) {
-    candidates.push({
-      ticker: directTicker,
-      sourcePath: "direct_scan",
-      score: 1,
-      active: null,
-      frontMonth: null,
-      volume: 0,
-      openInterest: 0,
-      expiration: null,
-      daysToExpiry: null,
-      rawKeys: Object.keys(json || {}).slice(0, 40),
-    });
-  }
+  const validNonExpired = allCandidates.filter((c) => !c.isExpired);
 
-  candidates.sort((a, b) => b.score - a.score);
+  // For ES front-month trading, highest liquid plain contract is safest.
+  // This avoids Polygon's unsorted list where far contracts can appear first.
+  //
+  // Example from live Polygon data:
+  // ESM6 settlement 2026-06-18 volume 1,148,365
+  //
+  // We ignore spread contracts like ESM6-ESU6 because those are calendar spreads,
+  // not the outright ES contract we need for charting/trading signals.
+  const sorted = [...validNonExpired].sort((a, b) => {
+    const volDiff = Number(b.volume || 0) - Number(a.volume || 0);
+    if (volDiff !== 0) return volDiff;
+
+    const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
+    const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
+    return aSettle - bSettle;
+  });
+
+  const selected = sorted[0] || null;
 
   return {
-    resolvedSymbol: candidates[0]?.ticker || null,
-    candidates,
+    resolvedSymbol: selected?.ticker || null,
+    selected,
+    candidates: sorted,
+    allCandidateCount: allCandidates.length,
+    rawResultCount: results.length,
   };
 }
+
+/* -------------------------------------------------
+   Polygon fetch
+-------------------------------------------------- */
 
 async function fetchFuturesSnapshot(productCode, apiKey) {
   const base = String(POLYGON_REST_BASE || "").replace(/\/+$/, "");
@@ -356,6 +273,7 @@ async function fetchFuturesSnapshot(productCode, apiKey) {
 
 async function resolveFuturesContract(productCode) {
   const apiKey = resolvePolygonKey();
+
   if (!apiKey) {
     return {
       ok: false,
@@ -367,6 +285,7 @@ async function resolveFuturesContract(productCode) {
 
   const cacheKey = productCode;
   const cached = resolveCache.get(cacheKey);
+
   if (cached && Date.now() - cached.cachedAtMs < RESOLVE_CACHE_MS) {
     return {
       ...cached.value,
@@ -390,29 +309,39 @@ async function resolveFuturesContract(productCode) {
       cached: false,
     };
 
-    resolveCache.set(cacheKey, { cachedAtMs: Date.now(), value });
+    resolveCache.set(cacheKey, {
+      cachedAtMs: Date.now(),
+      value,
+    });
+
     return value;
   }
 
-  const { resolvedSymbol, candidates } = chooseResolvedContract(
-    fetched.json,
-    productCode
-  );
+  const chosen = chooseResolvedContractFromSnapshot(fetched.json, productCode);
 
   const value = {
     ok: true,
     productCode,
-    resolvedSymbol,
+    resolvedSymbol: chosen.resolvedSymbol,
     source: "polygon_futures_snapshot",
-    needsInspection: !resolvedSymbol,
-    candidateCount: candidates.length,
-    candidates: candidates.slice(0, 12),
+    selectionRule:
+      "plain_non_spread_contract_highest_volume_then_nearest_settlement",
+    needsInspection: !chosen.resolvedSymbol,
+    selected: chosen.selected,
+    candidateCount: chosen.candidates.length,
+    allCandidateCount: chosen.allCandidateCount,
+    rawResultCount: chosen.rawResultCount,
+    candidates: chosen.candidates.slice(0, 12),
     polygonShape: safeJsonShape(fetched.json),
     checkedAt: nowIso(),
     cached: false,
   };
 
-  resolveCache.set(cacheKey, { cachedAtMs: Date.now(), value });
+  resolveCache.set(cacheKey, {
+    cachedAtMs: Date.now(),
+    value,
+  });
+
   return value;
 }
 
@@ -424,6 +353,7 @@ router.get("/healthz", (_req, res) => {
   res.json({
     ok: true,
     service: "futures-stream",
+    phase: "resolver-only",
     ts: nowIso(),
   });
 });
@@ -462,7 +392,9 @@ router.get("/agg", async (req, res) => {
     message:
       "Phase 1 only: resolver is enabled. Verify /stream/futures/resolve first, then implement SSE /stream/futures/agg.",
     symbol,
-    expectedNextTest: `/stream/futures/resolve?product_code=${encodeURIComponent(symbol)}`,
+    expectedNextTest: `/stream/futures/resolve?product_code=${encodeURIComponent(
+      symbol
+    )}`,
     ts: nowIso(),
   });
 });
