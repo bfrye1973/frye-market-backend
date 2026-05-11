@@ -173,6 +173,8 @@ async function resolveFuturesContract(productCode) {
     .filter((c) => !c.isExpired)
     .sort((a, b) => {
 
+      
+const sorted = [...validNonExpired].sort((a, b) => {
   const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
   const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
 
