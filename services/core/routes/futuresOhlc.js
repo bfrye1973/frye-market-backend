@@ -170,20 +170,18 @@ async function resolveFuturesContract(productCode) {
   const candidates = results
     .map((row) => normalizeCandidate(row, productCode))
     .filter(Boolean)
-    .filter((c) => !c.isExpired)
-    .sort((a, b) => {
+    .filter((c) => !c.isExpired);
 
-      
-const sorted = [...validNonExpired].sort((a, b) => {
-  const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
-  const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
+  const sorted = [...candidates].sort((a, b) => {
+    const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
+    const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
 
-  if (aSettle !== bSettle) return aSettle - bSettle;
+    if (aSettle !== bSettle) return aSettle - bSettle;
 
-  return Number(b.volume || 0) - Number(a.volume || 0);  
-});
+    return Number(b.volume || 0) - Number(a.volume || 0);
+  });
 
-  const selected = candidates[0] || null;
+  const selected = sorted[0] || null;
 
   if (!selected?.ticker) {
     throw new Error(`Could not resolve futures contract for ${productCode}`);
