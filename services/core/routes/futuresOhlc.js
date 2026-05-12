@@ -14,6 +14,7 @@
 // - This route uses Polygon/Massive futures endpoint:
 //   /futures/v1/aggs/{ticker}
 // - Polygon futures aggs return window_start in nanoseconds.
+// - We fetch ASC over a controlled lookback window, then return the latest N bars ourselves.
 
 import express from "express";
 
@@ -45,18 +46,17 @@ const TF_MAP = {
   "1d": "1day",
 };
 
-// Enough lookback to give the chart room.
-// We request only the latest `limit` bars using sort=desc,
-// then sort ascending before returning to chart.
+// Keep futures requests controlled.
+// These are intentionally smaller than stock history to avoid pagination trouble.
 const DAYS_BY_TF = {
-  "1m": 10,
-  "5m": 20,
-  "10m": 45,
-  "15m": 60,
-  "30m": 90,
-  "1h": 180,
-  "4h": 365,
-  "1d": 365 * 5,
+  "1m": 3,
+  "5m": 7,
+  "10m": 14,
+  "15m": 21,
+  "30m": 45,
+  "1h": 90,
+  "4h": 240,
+  "1d": 365 * 3,
 };
 
 const RESOLVE_CACHE_MS = Number(
@@ -227,6 +227,7 @@ async function resolveFuturesContract(productCode) {
     productCode,
     resolvedSymbol: selected.ticker,
     selected,
+    selectionRule: "plain_non_spread_contract_nearest_settlement_then_volume",
     candidateCount: sorted.length,
     checkedAt: nowIso(),
   };
@@ -291,10 +292,11 @@ async function fetchFuturesAggs({
   url.searchParams.set("window_start.gte", startDate);
   url.searchParams.set("window_start.lte", endDate);
 
-  // Safer than paging:
-  // ask for newest bars first, then sort ascending for chart.
-  url.searchParams.set("sort", "desc");
-  url.searchParams.set("limit", String(Math.min(limit, 50000)));
+  // Use ASC and fetch a broad chunk.
+  // Polygon's desc behavior did not reliably return newest bars in our test.
+  // We control final "latest N" selection after sorting.
+  url.searchParams.set("sort", "asc");
+  url.searchParams.set("limit", "50000");
   url.searchParams.set("apiKey", POLY_KEY);
 
   const r = await fetch(url.toString(), {
@@ -326,6 +328,7 @@ async function fetchFuturesAggs({
     }
   }
 
+  // Return latest N bars.
   return dedup.length > limit ? dedup.slice(-limit) : dedup;
 }
 
@@ -369,6 +372,8 @@ router.get("/", async (req, res) => {
         endDate,
         resolver,
         count: bars.length,
+        firstBar: bars[0] || null,
+        lastBar: bars[bars.length - 1] || null,
         bars,
       });
     }
