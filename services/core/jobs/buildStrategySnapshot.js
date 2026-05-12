@@ -722,6 +722,26 @@ async function fetchLastBarTimeSec({ symbol, tf }) {
   return Number.isFinite(t) ? t : null;
 }
 
+async function fetchCurrentPriceForSymbol({ symbol, tf = "10m" }) {
+  const path = ohlcPathForSymbol(symbol);
+  const u = new URL(`${CORE_BASE}${path}`);
+  u.searchParams.set("symbol", symbol);
+  u.searchParams.set("timeframe", tf);
+  u.searchParams.set("limit", "1");
+
+  const r = await fetchJson(u.toString(), 15000);
+  const j = r?.json;
+
+  const bar =
+    Array.isArray(j) ? j[0] :
+    Array.isArray(j?.bars) ? j.bars[0] :
+    Array.isArray(j?.data) ? j.data[0] :
+    null;
+
+  const close = Number(bar?.close ?? bar?.c);
+  return Number.isFinite(close) ? close : null;
+} 
+
 function calcFibScore(payloadW1, payloadW4) {
   const p =
     payloadW1 && payloadW1.ok
@@ -2186,7 +2206,22 @@ async function buildEngine2State(symbol) {
   );
 
   const engine1Context = contextResp?.json || {};
-  const currentPrice = Number(engine1Context?.meta?.current_price ?? NaN);
+
+  const contextPrice = Number(engine1Context?.meta?.current_price ?? NaN);
+
+  const futuresPrice = isFuturesSymbol(symbol)
+    ? await fetchCurrentPriceForSymbol({
+        symbol,
+        tf: "10m",
+      }).catch(() => null)
+    : null;
+
+  const currentPrice =
+    futuresPrice != null
+      ? futuresPrice
+      : Number.isFinite(contextPrice)
+      ? contextPrice
+      : null;
 
   const [primaryRaw, intermediateRaw, minorRaw, minuteRaw] = await Promise.all([
     buildEngine2Block({ symbol, degree: "primary", tf: "1d", currentPrice }).catch(() => null),
