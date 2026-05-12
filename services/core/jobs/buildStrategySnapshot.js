@@ -1356,6 +1356,7 @@ function inactiveWaveExtension({
 }
 
 function buildExtensionMap({
+  symbol, 
   degree,
   tf,
   wave,
@@ -1404,8 +1405,8 @@ function buildExtensionMap({
   const dir = inferExtensionDirection({ start: s, end: e, direction });
   const sign = dir === "BEARISH" ? -1 : 1;
 
-  const calc = (fib) => round2(base + sign * range * fib);
-
+  const calc = (fib) => roundPriceForSymbol(base + sign * range * fib, symbol);
+   
   const levels = {
     e100: calc(1.0),
     e1168: calc(1.168),
@@ -1436,9 +1437,9 @@ function buildExtensionMap({
     return {
       name: `${wave}_EXTENSION_${key}_ZONE`,
       level,
-      price: round2(p),
-      lo: round2(p - zoneBuffer),
-      hi: round2(p + zoneBuffer),
+      price: roundPriceForSymbol(p, symbol),
+      lo: roundPriceForSymbol(p - zoneBuffer, symbol),
+      hi: roundPriceForSymbol(p + zoneBuffer, symbol),
     };
   };
 
@@ -1489,7 +1490,7 @@ function buildExtensionMap({
   };
 }
 
-function computeW2ToW3Extension({ degree, tf, phase, confirmedPhase, waveMarks, w1Payload }) {
+function computeW2ToW3Extension({ symbol, degree, tf, phase, confirmedPhase, waveMarks, w1Payload }) {
   const w1Low =
     toPriceOrNull(w1Payload?.anchors?.low) ??
     toPriceOrNull(w1Payload?.anchors?.a);
@@ -1513,6 +1514,7 @@ function computeW2ToW3Extension({ degree, tf, phase, confirmedPhase, waveMarks, 
   }
 
   return buildExtensionMap({
+    symbol,
     degree,
     tf,
     wave: "W3",
@@ -1532,7 +1534,7 @@ function computeW2ToW3Extension({ degree, tf, phase, confirmedPhase, waveMarks, 
   });
 }
 
-function computeW4ToW5Extension({ degree, tf, phase, confirmedPhase, waveMarks, block }) {
+function computeW4ToW5Extension({ symbol, degree, tf, phase, confirmedPhase, waveMarks, block }) {
   const w2 = getWaveMarkPrice(waveMarks, "W2");
   const w3 = getWaveMarkPrice(waveMarks, "W3");
 
@@ -1591,6 +1593,7 @@ function computeW4ToW5Extension({ degree, tf, phase, confirmedPhase, waveMarks, 
   }
 
   return buildExtensionMap({
+    symbol, 
     degree,
     tf,
     wave: "W5",
@@ -1608,6 +1611,7 @@ function computeW4ToW5Extension({ degree, tf, phase, confirmedPhase, waveMarks, 
 }
 
 function computeWaveExtensionsForBlock(block) {
+  const symbol = block?.symbol ?? null;
   const degree = block?.degree ?? null;
   const tf = block?.tf ?? null;
   const phase = block?.phase ?? "UNKNOWN";
@@ -1616,6 +1620,7 @@ function computeWaveExtensionsForBlock(block) {
   const w1Payload = block?.w1Payload ?? null;
 
   const w3 = computeW2ToW3Extension({
+    symbol,
     degree,
     tf,
     phase,
@@ -1625,6 +1630,7 @@ function computeWaveExtensionsForBlock(block) {
   });
 
   const w5 = computeW4ToW5Extension({
+    symbol,
     degree,
     tf,
     phase,
