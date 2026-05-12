@@ -41,6 +41,7 @@ import runShelvesJobRouter from "./routes/runShelvesJob.js";
 import engine21AlignmentRoute from "./routes/engine21Alignment.js";
 import executionStateRouter from "./routes/executionState.js";
 import futuresOhlcRouter from "./routes/futuresOhlc.js";
+import futuresMarketMeterRouter from "./routes/futuresMarketMeter.js";
 
 // --- App setup ---
 const app = express();
@@ -153,6 +154,8 @@ app.use("/api/v1", tradePermissionRouter);
 app.use("/api/v1", engine15AlertsRouter);
 app.use("/api/v1", engine21AlignmentRoute);
 app.use("/api/v1/execution-state", executionStateRouter);
+app.use("/api/v1/futures/market-meter", futuresMarketMeterRouter);
+
 
 // --- 404 / errors ---
 app.use((req, res) => {
