@@ -417,8 +417,8 @@ function cap30m(score, b) {
     cap = b.above50Raw ? 42.0 : 35.0;
   } else if (b.above10 && !b.above20) {
     cap = 46.0;
-  } else if (b.above10 && b.above20 && !b.above50Raw) {
-    cap = 49.0;
+  } else if (!b.above50Raw) {
+    cap = 44.0;
   } else if (b.above10 && b.above20 && b.above50Raw) {
     cap = near(b.close, b.e50, EMA50_RECLAIM_TOL_PCT) || b.emaGapPct < EMA_TREND_GAP_STRONG_PCT ? 49.0 : 58.0;
   }
@@ -446,8 +446,8 @@ function computeEs30m(tf, clean) {
   if (b.clean.length >= 2 && b.close > b.clean[b.clean.length - 2].close) accelBonus += 1.5;
   accelBonus = clamp(accelBonus, 0, 6);
 
-  score = cap30m(score, b);
   score = clamp(score + accelBonus, 0, 100);
+  score = cap30m(score, b);
 
   return finishLight(tf, clean, score, b, {
     formula: "ES_30M_SPY_STRUCTURE_TIER",
