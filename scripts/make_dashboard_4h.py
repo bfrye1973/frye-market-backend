@@ -779,7 +779,7 @@ def main():
     # If price is above 20 and 50 but below 10, keep score in bridge zone,
     # unless the raw structure score was already worse.
     if (not above10) and above20 and above50:
-        score = max(score, 58.0)
+      score = max(score, 52.0)
         timing_reasons.append("BRIDGE_FLOOR_ABOVE_20_50_BELOW_10")
     if score >= 60.0 and ema_sign > 0:
         state = "bull"
