@@ -731,32 +731,56 @@ def main():
         above200=bool(above200),
     )
 
-    # --- TIMING / LOCATION PENALTY ---
-    # Strong trend can still be bad timing if price is sitting at the 10 EMA
-    # or momentum is cooling during a pullback.
+    # --- 4H BRIDGE VALUATION ADJUSTMENT ---
+    # Goal:
+    # - 4H is a bridge valuation, not a scalp trigger.
+    # - Below 10 EMA = timing caution.
+    # - Above 20/50 EMA = larger structure still alive.
+    # - Do NOT crush the score into the 30s if price is only under EMA10.
     timing_penalty = 0.0
     timing_reasons = []
 
     ema10_distance_abs = abs(float(close_dist_pct))
 
+    # Near EMA10 is a decision zone, but not automatically bearish.
     if ema10_distance_abs <= 0.30:
-        timing_penalty += 8.0
+        timing_penalty += 3.0
         timing_reasons.append("NEAR_4H_EMA10_DECISION_ZONE")
 
+    # Below EMA10 is caution, but above 20/50 means bridge structure is still alive.
     if close_dist_pct < 0:
-        timing_penalty += 4.0
-        timing_reasons.append("PRICE_BELOW_4H_EMA10")
+        if above20 and above50:
+            timing_penalty += 3.0
+            timing_reasons.append("BELOW_4H_EMA10_BUT_ABOVE_20_50")
+        else:
+            timing_penalty += 6.0
+            timing_reasons.append("PRICE_BELOW_4H_EMA10")
 
+    # SMI cooling matters, but should not destroy a valid above-20/50 bridge.
     if smi_series and sig_series and smi_val < sig_val:
-        timing_penalty += 6.0
-        timing_reasons.append("SMI_4H_MOMENTUM_COOLING")
+        if above20 and above50:
+            timing_penalty += 3.0
+            timing_reasons.append("SMI_4H_COOLING_BRIDGE_STILL_ALIVE")
+        else:
+            timing_penalty += 6.0
+            timing_reasons.append("SMI_4H_MOMENTUM_COOLING")
 
-    # If market is still above 20/50 EMA, do not over-punish.
+    # Final safety cap:
+    # If still above 20/50, max penalty is 7.
+    # If below 20 or 50, max penalty is 14.
     if above20 and above50:
+        timing_penalty = min(timing_penalty, 7.0)
+    else:
         timing_penalty = min(timing_penalty, 14.0)
 
     score = clamp(float(score) - timing_penalty, 0.0, 100.0)
 
+    # Bridge valuation floor:
+    # If price is above 20 and 50 but below 10, keep score in bridge zone,
+    # unless the raw structure score was already worse.
+    if (not above10) and above20 and above50:
+        score = max(score, 58.0)
+        timing_reasons.append("BRIDGE_FLOOR_ABOVE_20_50_BELOW_10")
     if score >= 60.0 and ema_sign > 0:
         state = "bull"
     elif score < 49.0 and ema_sign < 0:
