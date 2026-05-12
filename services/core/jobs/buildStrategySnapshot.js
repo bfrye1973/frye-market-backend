@@ -40,7 +40,7 @@ const FIB_INPUT_FILE = `${DATA_DIR}/fib-input.csv`;
 
 const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
 
-const symbol = "SPY";
+const symbol = process.env.SYMBOL || "SPY";
 
 const STRATEGIES = [
   { strategyId: "intraday_scalp@10m", tf: "10m", degree: "minute", wave: "W1" },
