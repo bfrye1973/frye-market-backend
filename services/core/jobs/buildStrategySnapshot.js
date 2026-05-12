@@ -35,7 +35,13 @@ import { computeEngine22ScalpOpportunity } from "../logic/engine22ScalpOpportuni
    Absolute paths / constants
 ------------------------------*/
 const DATA_DIR = "/opt/render/project/src/services/core/data";
-const SNAPSHOT_FILE = `${DATA_DIR}/strategy-snapshot.json`;
+const SNAPSHOT_SYMBOL = String(process.env.SYMBOL || "SPY").toUpperCase();
+
+const SNAPSHOT_FILE =
+  SNAPSHOT_SYMBOL === "SPY"
+    ? `${DATA_DIR}/strategy-snapshot.json`
+    : `${DATA_DIR}/strategy-snapshot-${SNAPSHOT_SYMBOL.toLowerCase()}.json`;
+
 const FIB_INPUT_FILE = `${DATA_DIR}/fib-input.csv`;
 
 const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
