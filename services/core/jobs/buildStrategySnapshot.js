@@ -63,6 +63,15 @@ function toNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
+function isFuturesSymbol(sym) {
+  const s = String(sym || "").toUpperCase();
+  return ["ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K"].includes(s);
+}
+
+function ohlcPathForSymbol(sym) {
+  return isFuturesSymbol(sym) ? "/api/v1/futures/ohlc" : "/api/v1/ohlc";
+}
+
 /* -----------------------------
    Safe HTTP helpers
 ------------------------------*/
@@ -694,7 +703,8 @@ async function fetchFibLevels({ symbol, tf, degree, wave }) {
 }
 
 async function fetchLastBarTimeSec({ symbol, tf }) {
-  const u = new URL(`${CORE_BASE}/api/v1/ohlc`);
+  const path = ohlcPathForSymbol(symbol);
+  const u = new URL(`${CORE_BASE}${path}`);
   u.searchParams.set("symbol", symbol);
   u.searchParams.set("timeframe", tf);
   u.searchParams.set("limit", "1");
