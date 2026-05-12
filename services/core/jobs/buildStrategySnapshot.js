@@ -1221,6 +1221,34 @@ function round2(n) {
   const x = Number(n);
   return Number.isFinite(x) ? Number(x.toFixed(2)) : null;
 }
+
+function tickSizeForSymbol(sym) {
+  const s = String(sym || "").toUpperCase();
+
+  if (["ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K"].includes(s)) {
+    return 0.25;
+  }
+
+  return null;
+}
+
+function roundToTick(price, tick = 0.25) {
+  const n = Number(price);
+  if (!Number.isFinite(n)) return null;
+
+  return Number((Math.round(n / tick) * tick).toFixed(2));
+}
+
+function roundPriceForSymbol(price, sym) {
+  const tick = tickSizeForSymbol(sym);
+
+  if (tick) {
+    return roundToTick(price, tick);
+  }
+
+  return round2(price);
+}
+
 function toPriceOrNull(x) {
   if (x === null || x === undefined || x === "") return null;
 
