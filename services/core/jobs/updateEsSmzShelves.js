@@ -18,7 +18,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { computeShelves } from "../logic/smzShelvesScanner.js";
+import { computeShelves } from "../logic/esSmzShelvesScanner.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
