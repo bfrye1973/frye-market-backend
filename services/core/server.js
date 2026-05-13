@@ -12,6 +12,7 @@ import sectorcards10mRouter from "./routes/sectorcards-10m.js";
 
 import smzLevels from "./routes/smzLevels.js";
 import smzShelves from "./routes/smzShelves.js";
+import esSmzShelves from "./routes/esSmzShelves.js";
 import smzHierarchy from "./routes/smzHierarchy.js";
 
 import { engine5ContextRouter } from "./routes/engine5Context.js";
@@ -126,6 +127,7 @@ app.use("/live", liveRouter);
 
 app.use("/api/v1/smz-levels", smzLevels);
 app.use("/api/v1/smz-shelves", smzShelves);
+app.use("/api/v1/es-smz-shelves", esSmzShelves);
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 
 app.use("/api/trading", tradingRouter);
