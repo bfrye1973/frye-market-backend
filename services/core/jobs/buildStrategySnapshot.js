@@ -2330,7 +2330,7 @@ async function buildEngine2State(symbol) {
     intermediateWaveMode: intermediate?.waveMode ?? null,
     correctionDirection,
   };
-
+}
 /* -----------------------------
    Build snapshot
 ------------------------------*/
