@@ -104,6 +104,14 @@ function getWavePhases(engine2State) {
     confirmedMinutePhase:
       engine2State?.minute?.confirmedPhase ||
       "UNKNOWN",
+
+    microPhase:
+      engine2State?.micro?.phase ||
+      "UNKNOWN",
+
+    confirmedMicroPhase:
+      engine2State?.micro?.confirmedPhase ||
+      "UNKNOWN",
   };
 }
 
@@ -3823,6 +3831,8 @@ const finish = (out) => {
       hasWaveReaction: !!wr,
       finalImpulseContext,
       bullishHigherWaveContext,
+      micro: engine2State?.micro || null,
+      scalpExtension: engine2State?.activeExtensions?.scalp || null,
     },
   });
 }
