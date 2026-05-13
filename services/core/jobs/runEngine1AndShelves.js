@@ -40,7 +40,7 @@ async function main() {
 
     // ES Engine 1B
     run("Build ES Manual Structures from TXT", "./buildEsManualStructuresFromTxt.js");
-    run("Update ES SMZ Shelves (Engine 1B)", "./updateEsSmzShelves.js");
+    
 
     console.log("\n✅ [RUN] Engine 1 + Engine 1B Shelves complete.");
   } catch (err) {
