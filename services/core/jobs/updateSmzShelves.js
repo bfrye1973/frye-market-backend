@@ -12,7 +12,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { computeShelves } from "../logic/smzShelvesScanner.js";
+import { computeShelves } from "../logic/esSmzShelvesScanner.js";
 import { getBarsFromPolygonDeep } from "../../../api/providers/polygonBarsDeep.js";
 
 const __filename = fileURLToPath(import.meta.url);
