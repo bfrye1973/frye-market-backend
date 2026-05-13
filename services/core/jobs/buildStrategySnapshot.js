@@ -220,6 +220,97 @@ async function fetchLiveMarketMeter() {
   };
 }
 
+function firstNumber(...xs) {
+  for (const x of xs) {
+    const n = Number(x);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function pctDistance(price, ema) {
+  const p = Number(price);
+  const e = Number(ema);
+
+  if (!Number.isFinite(p) || !Number.isFinite(e) || e === 0) return null;
+
+  return Number((((p - e) / e) * 100).toFixed(2));
+}
+
+function pointDistance(price, ema) {
+  const p = Number(price);
+  const e = Number(ema);
+
+  if (!Number.isFinite(p) || !Number.isFinite(e)) return null;
+
+  return Number((p - e).toFixed(2));
+}
+
+function buildMarketMeterLayers(marketMind) {
+  const eodRaw = marketMind?.raw?.eod || {};
+
+  const close = firstNumber(
+    eodRaw?.daily?.close,
+    eodRaw?.daily?.lastClose,
+    eodRaw?.daily?.last_close,
+    eodRaw?.metrics?.close,
+    eodRaw?.metrics?.lastClose,
+    eodRaw?.metrics?.last_close,
+    eodRaw?.meta?.current_price,
+    eodRaw?.currentPrice,
+    eodRaw?.close
+  );
+
+  const ema10 = firstNumber(
+    eodRaw?.daily?.ema10,
+    eodRaw?.daily?.ema_10,
+    eodRaw?.daily?.ema10Daily,
+    eodRaw?.metrics?.ema10,
+    eodRaw?.metrics?.ema_10,
+    eodRaw?.metrics?.ema10_daily,
+    eodRaw?.ema10,
+    eodRaw?.ema10_daily
+  );
+
+  const distanceToEma10 = pointDistance(close, ema10);
+  const distanceToEma10Pct = pctDistance(close, ema10);
+
+  const aboveEma10 =
+    close !== null &&
+    ema10 !== null
+      ? close > ema10
+      : null;
+
+  return {
+    layers: {
+      eod: {
+        close,
+        ema10,
+        distanceToEma10,
+        distanceToEma10Pct,
+        aboveEma10,
+        trendState:
+          marketMind?.stateEOD ??
+          eodRaw?.metrics?.overall_eod_state ??
+          eodRaw?.daily?.overallEOD?.state ??
+          null,
+        score:
+          marketMind?.scoreEOD ??
+          eodRaw?.metrics?.overall_eod_score ??
+          eodRaw?.daily?.overallEOD?.score ??
+          null,
+        updatedAt:
+          eodRaw?.updated_at_utc ??
+          eodRaw?.updatedAt ??
+          eodRaw?.meta?.updated_at_utc ??
+          eodRaw?.meta?.updatedAt ??
+          null,
+      },
+    },
+    source: "LIVE_MARKET_METER",
+  };
+}
+
 /* -----------------------------
    Momentum
 ------------------------------*/
@@ -1791,6 +1882,7 @@ async function processStrategy(
   s,
   momentum,
   marketMind,
+  marketMeter,
   marketRegime,
   engine16,
   engine2State
@@ -2098,6 +2190,7 @@ async function processStrategy(
             waveReaction: reaction?.waveReaction || null,
             engine2State,
             marketMind,
+            marketMeter, 
 
             // Engine 1 negotiated-zone truth for Engine 22 zone absorption.
            engine1Context,
@@ -2377,12 +2470,15 @@ console.log("Engine21 alignment fetched");
     marketRegime?.strictness
   );
 
+  const marketMeter = buildMarketMeterLayers(marketMind);
+   
   const result = {
   ok: true,
   symbol,
   now: nowIso(),
   includeContext: true,
   marketMind,
+  marketMeter,
   marketRegime,
   momentum,
   engine2State,
@@ -2425,6 +2521,7 @@ console.log("Engine21 alignment fetched");
   s,
   momentum,
   marketMind,
+  marketMeter,
   marketRegime,
   engine16ForStrategy,
   engine2State
