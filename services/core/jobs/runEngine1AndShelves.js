@@ -1,8 +1,10 @@
 // services/core/jobs/runEngine1AndShelves.js
 // Runs:
-// 1) Build manual structures JSON from txt (easy input)
-// 2) Update SMZ Levels (Engine 1 job)
-// 3) Update Shelves (Engine 2 shelves job)
+// 1) Build SPY manual structures JSON from txt
+// 2) Update SPY SMZ Levels
+// 3) Update SPY Shelves
+// 4) Build ES manual structures JSON from txt
+// 5) Update ES Shelves
 //
 // Usage:
 // node jobs/runEngine1AndShelves.js
@@ -18,6 +20,7 @@ function run(label, relPath) {
   const scriptPath = path.resolve(__dirname, relPath);
 
   console.log(`\n[RUN] ${label}`);
+
   const r = spawnSync("node", [scriptPath], {
     stdio: "inherit",
     env: process.env,
@@ -30,11 +33,16 @@ function run(label, relPath) {
 
 async function main() {
   try {
-    run("Build Manual Structures from TXT", "./buildManualStructuresFromTxt.js");
-    run("Update SMZ Levels (Engine 1)", "./updateSmzLevels.js");
-    run("Update Shelves", "./updateSmzShelves.js");
+    // SPY Engine 1
+    run("Build SPY Manual Structures from TXT", "./buildManualStructuresFromTxt.js");
+    run("Update SPY SMZ Levels (Engine 1)", "./updateSmzLevels.js");
+    run("Update SPY Shelves", "./updateSmzShelves.js");
 
-    console.log("\n✅ [RUN] Engine 1 + Shelves complete.");
+    // ES Engine 1B
+    run("Build ES Manual Structures from TXT", "./buildEsManualStructuresFromTxt.js");
+    run("Update ES SMZ Shelves (Engine 1B)", "./updateEsSmzShelves.js");
+
+    console.log("\n✅ [RUN] Engine 1 + Engine 1B Shelves complete.");
   } catch (err) {
     console.error("\n❌ [RUN] FAILED:", err?.message || err);
     process.exitCode = 1;
