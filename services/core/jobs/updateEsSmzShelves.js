@@ -33,8 +33,8 @@ const SYMBOL = "ES";
 const DETECTION_TF = "30m";
 const CONFIRM_TF = "1h";
 
-const DAYS_30M = 180;
-const DAYS_1H = 365;
+const LIMIT_30M = 1000;
+const LIMIT_1H = 1000;
 
 // Keep same first-pass policy as SPY.
 const BAND_POINTS = 40;
@@ -67,8 +67,11 @@ function round2(x) {
 }
 
 function roundToTick(price, tick = ES_TICK_SIZE) {
+  if (price === null || price === undefined || price === "") return null;
+
   const n = Number(price);
   if (!Number.isFinite(n)) return null;
+
   return Number((Math.round(n / tick) * tick).toFixed(2));
 }
 
@@ -505,15 +508,14 @@ function normalizeShelfForEs(s, nowIso) {
   };
 }
 
-async function fetchFuturesBars(symbol, timeframe, days) {
+async function fetchFuturesBars(symbol, timeframe, limit = 1000) {
   const url =
     `${API_BASE_URL}/api/v1/futures/ohlc` +
     `?symbol=${encodeURIComponent(symbol)}` +
     `&timeframe=${encodeURIComponent(timeframe)}` +
-    `&limit=5000` +
-    `&days=${encodeURIComponent(days)}`;
+    `&limit=${encodeURIComponent(limit)}`;
 
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: "no-store" });
 
   if (!res.ok) {
     throw new Error(
@@ -523,25 +525,39 @@ async function fetchFuturesBars(symbol, timeframe, days) {
 
   const json = await res.json();
 
-  const rawBars =
-    Array.isArray(json?.bars)
+  const rawBars = Array.isArray(json)
+    ? json
+    : Array.isArray(json?.bars)
       ? json.bars
-      : Array.isArray(json?.data)
-        ? json.data
-        : Array.isArray(json?.results)
-          ? json.results
-          : [];
+      : [];
 
-  return normalizeBars(rawBars);
+  const bars = normalizeBars(rawBars);
+
+  console.log("[Engine1B ES] futures fetch", {
+    symbol,
+    timeframe,
+    limit,
+    rawType: Array.isArray(json) ? "array" : typeof json,
+    count: Array.isArray(json) ? json.length : json?.count,
+    barsLen: bars.length,
+    resolvedSymbol: json?.resolvedSymbol ?? null,
+    first: bars[0] ?? null,
+    last: bars[bars.length - 1] ?? null,
+  });
+
+  return bars;
 }
-
 async function main() {
   try {
     const [bars30m, bars1h] = await Promise.all([
-      fetchFuturesBars(SYMBOL, DETECTION_TF, DAYS_30M),
-      fetchFuturesBars(SYMBOL, CONFIRM_TF, DAYS_1H),
+      fetchFuturesBars(SYMBOL, DETECTION_TF, LIMIT_30M),
+      fetchFuturesBars(SYMBOL, CONFIRM_TF, LIMIT_1H),
     ]);
-
+    if (!bars30m.length || !bars1h.length) {
+      throw new Error(
+        `[Engine1B ES] Missing ES futures bars: 30m=${bars30m.length}, 1h=${bars1h.length}`
+      );
+    }
     const currentPriceRaw =
       lastFiniteClose(bars30m) ?? lastFiniteClose(bars1h);
 
