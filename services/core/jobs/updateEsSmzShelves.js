@@ -19,6 +19,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { computeShelves } from "../logic/esSmzShelvesScanner.js";
+import { fetchFuturesBars as fetchFuturesBarsFromProvider } from "../providers/futuresOhlcProvider.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,11 +53,6 @@ const SAME_TYPE_GAP_PTS = 0.75;
 
 const DEBUG_LEVELS_COUNT = 25;
 const ES_TICK_SIZE = 0.25;
-
-// Local backend route.
-// If needed, override with:
-// API_BASE_URL=https://your-render-url.onrender.com
-const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:10000";
 
 const isoNow = () => new Date().toISOString();
 
@@ -509,38 +505,23 @@ function normalizeShelfForEs(s, nowIso) {
 }
 
 async function fetchFuturesBars(symbol, timeframe, limit = 1000) {
-  const url =
-    `${API_BASE_URL}/api/v1/futures/ohlc` +
-    `?symbol=${encodeURIComponent(symbol)}` +
-    `&timeframe=${encodeURIComponent(timeframe)}` +
-    `&limit=${encodeURIComponent(limit)}`;
-
-  const res = await fetch(url, { cache: "no-store" });
-
-  if (!res.ok) {
-    throw new Error(
-      `[Engine1B ES] futures OHLC failed ${res.status} ${res.statusText} for ${symbol} ${timeframe}`
-    );
-  }
-
-  const json = await res.json();
-
-  const rawBars = Array.isArray(json)
-    ? json
-    : Array.isArray(json?.bars)
-      ? json.bars
-      : [];
-
-  const bars = normalizeBars(rawBars);
-
-  console.log("[Engine1B ES] futures fetch", {
+  const result = await fetchFuturesBarsFromProvider({
     symbol,
     timeframe,
     limit,
-    rawType: Array.isArray(json) ? "array" : typeof json,
-    count: Array.isArray(json) ? json.length : json?.count,
+  });
+
+  const bars = normalizeBars(result?.bars || []);
+
+  console.log("[Engine1B ES] provider futures fetch", {
+    symbol,
+    timeframe,
+    limit,
+    productCode: result?.productCode ?? null,
+    resolvedSymbol: result?.resolvedSymbol ?? null,
+    resolution: result?.resolution ?? null,
+    count: result?.count ?? null,
     barsLen: bars.length,
-    resolvedSymbol: json?.resolvedSymbol ?? null,
     first: bars[0] ?? null,
     last: bars[bars.length - 1] ?? null,
   });
