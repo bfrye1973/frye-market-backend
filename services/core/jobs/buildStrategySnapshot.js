@@ -2263,12 +2263,13 @@ async function buildEngine2State(symbol) {
       ? contextPrice
       : null;
 
-  const [primaryRaw, intermediateRaw, minorRaw, minuteRaw] = await Promise.all([
+  const [primaryRaw, intermediateRaw, minorRaw, minuteRaw, microRaw] = await Promise.all([
     buildEngine2Block({ symbol, degree: "primary", tf: "1d", currentPrice }).catch(() => null),
     buildEngine2Block({ symbol, degree: "intermediate", tf: "1h", currentPrice }).catch(() => null),
     buildEngine2Block({ symbol, degree: "minor", tf: "1h", currentPrice }).catch(() => null),
     buildEngine2Block({ symbol, degree: "minute", tf: "10m", currentPrice }).catch(() => null),
-  ]);
+    buildEngine2Block({ symbol, degree: "micro", tf: "10m", currentPrice }).catch(() => null),
+  ]); 
 
   const minuteLevelRows = getManualLevelRowsFor({
     symbol,
@@ -2276,20 +2277,25 @@ async function buildEngine2State(symbol) {
     tf: "10m",
   });
 
-  const minuteWithLevels = attachManualLevelsToEngine2Block(
-    minuteRaw,
-    minuteLevelRows
-  );
+  const microLevelRows = getManualLevelRowsFor({
+    symbol,
+    degree: "micro",
+    tf: "10m",
+  });
 
+   const microWithLevels = attachManualLevelsToEngine2Block(
+     microRaw,
+     microLevelRows
+  );
   const primary = enrichEngine2BlockWithExtensions(primaryRaw);
   const intermediate = enrichEngine2BlockWithExtensions(intermediateRaw);
   const minor = enrichEngine2BlockWithExtensions(minorRaw);
   const minute = enrichEngine2BlockWithExtensions(minuteWithLevels);
-
+  const micro = enrichEngine2BlockWithExtensions(microWithLevels);
   const activeExtensions = {
     scalp: pickActiveExtension(
-      minute?.waveExtension,
-      minor?.waveExtension
+      micro?.waveExtension,
+      pickActiveExtension(minute?.waveExtension, minor?.waveExtension)
     ),
     swing: pickActiveExtension(
       minor?.waveExtension,
@@ -2300,7 +2306,6 @@ async function buildEngine2State(symbol) {
       primary?.waveExtension
     ),
   };
-
   let correctionDirection = null;
 
   if (intermediate?.waveMode === "CORRECTIVE") {
@@ -2312,6 +2317,7 @@ async function buildEngine2State(symbol) {
     intermediate,
     minor,
     minute,
+    micro,
 
     activeExtensions,
 
