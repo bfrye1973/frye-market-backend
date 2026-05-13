@@ -2272,26 +2272,33 @@ async function buildEngine2State(symbol) {
   ]); 
 
   const minuteLevelRows = getManualLevelRowsFor({
-    symbol,
-    degree: "minute",
-    tf: "10m",
-  });
+  symbol,
+  degree: "minute",
+  tf: "10m",
+});
 
-  const microLevelRows = getManualLevelRowsFor({
-    symbol,
-    degree: "micro",
-    tf: "10m",
-  });
+const microLevelRows = getManualLevelRowsFor({
+  symbol,
+  degree: "micro",
+  tf: "10m",
+});
 
-   const microWithLevels = attachManualLevelsToEngine2Block(
-     microRaw,
-     microLevelRows
-  );
-  const primary = enrichEngine2BlockWithExtensions(primaryRaw);
-  const intermediate = enrichEngine2BlockWithExtensions(intermediateRaw);
-  const minor = enrichEngine2BlockWithExtensions(minorRaw);
-  const minute = enrichEngine2BlockWithExtensions(minuteWithLevels);
-  const micro = enrichEngine2BlockWithExtensions(microWithLevels);
+const minuteWithLevels = attachManualLevelsToEngine2Block(
+  minuteRaw,
+  minuteLevelRows
+);
+
+const microWithLevels = attachManualLevelsToEngine2Block(
+  microRaw,
+  microLevelRows
+);
+
+const primary = enrichEngine2BlockWithExtensions(primaryRaw);
+const intermediate = enrichEngine2BlockWithExtensions(intermediateRaw);
+const minor = enrichEngine2BlockWithExtensions(minorRaw);
+const minute = enrichEngine2BlockWithExtensions(minuteWithLevels);
+const micro = enrichEngine2BlockWithExtensions(microWithLevels);
+   
   const activeExtensions = {
     scalp: pickActiveExtension(
       micro?.waveExtension,
