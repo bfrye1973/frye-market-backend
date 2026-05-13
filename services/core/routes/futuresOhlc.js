@@ -348,8 +348,11 @@ router.get("/", async (req, res) => {
     const endMs = Date.now();
     const startMs = endMs - targetDays * 24 * 60 * 60 * 1000;
 
+    // Polygon futures aggs with date-only window_start.lte can cut off at
+    // midnight UTC. Add one extra UTC day so today's active futures session
+    // is included.
     const startDate = formatDateUTC(startMs);
-    const endDate = formatDateUTC(endMs);
+    const endDate = formatDateUTC(endMs + 24 * 60 * 60 * 1000);
 
     const bars = await fetchFuturesAggs({
       resolvedSymbol,
