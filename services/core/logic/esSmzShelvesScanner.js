@@ -235,7 +235,7 @@ function computeBehaviorOverWindow(bars, hi, lo, startIdx) {
 
   const accScore =
     0.35 * clamp(lowerTouchRate, 0, 1) +
-    0.25 * clamp(failedPushDown > 0 ? 1 : 0, 1) +
+    0.25 * clamp(failedPushDown > 0 ? 1 : 0, 0, 1) +
     0.20 * stallScore +
     0.20 * clamp(!sustainedClosesBelow ? 1 : 0, 0, 1);
 
