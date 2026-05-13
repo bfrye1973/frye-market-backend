@@ -3598,29 +3598,7 @@ supportedSetups: {
   };
 };
 
-  const runnerMode = detectRunnerMode({
-    engine2State,
-    engine16,
-    marketMind,
-    trendVsWave,
-    zoneAbsorption,
-    engine22State: withTrend?.state,
-    engine22Setup: withTrend?.setupType,
-    engine22Status: withTrend?.status,
-    latestClose,
-    ema10,
-    ema20,
-    structureState,
-  });
-
-  return {
-    ...withTrend,
-    zoneAbsorption,
-    runnerMode,
-  };
-};
-
-  if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
+   if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
     return finish({
       ...base,
       marketBias,
