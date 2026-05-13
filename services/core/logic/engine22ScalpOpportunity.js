@@ -3412,6 +3412,107 @@ function applyMicroContinuationPromotion(out, microContinuation) {
     },
   };
 }
+
+function buildDistanceLayer({ label, close, ema10, ema20 = null }) {
+  const c = validPrice(close);
+  const e10 = validPrice(ema10);
+  const e20 = validPrice(ema20);
+
+  const distanceToEma10 =
+    c !== null && e10 !== null
+      ? round2(c - e10)
+      : null;
+
+  const distanceToEma10Pct =
+    c !== null && e10 !== null && e10 !== 0
+      ? round2(((c - e10) / e10) * 100)
+      : null;
+
+  let state = "UNKNOWN";
+
+  if (c !== null && e10 !== null && c > e10) {
+    state = "ABOVE_EMA10";
+  }
+
+  if (c !== null && e10 !== null && c <= e10) {
+    state = "AT_OR_BELOW_EMA10";
+  }
+
+  if (c !== null && e20 !== null && c < e20) {
+    state = "BELOW_EMA20";
+  }
+
+  return {
+    label,
+    close: round2(c),
+    ema10: round2(e10),
+    ema20: round2(e20),
+    distanceToEma10,
+    distanceToEma10Pct,
+    state,
+  };
+}
+
+function buildRegimeLayers({ engine16, marketMeter, latestClose, ema10, ema20 }) {
+  const eod = marketMeter?.layers?.eod || null;
+
+  const tenMinute = buildDistanceLayer({
+    label: "10m Trigger Layer",
+    close: latestClose,
+    ema10,
+    ema20,
+  });
+
+  const oneHour = buildDistanceLayer({
+    label: "1H Pullback Layer",
+    close: engine16?.hourlyClose,
+    ema10: engine16?.ema10_1h,
+  });
+
+  const eodClose = validPrice(eod?.close);
+  const eodEma10 = validPrice(eod?.ema10);
+
+  const eodDistance =
+    eodClose !== null && eodEma10 !== null
+      ? round2(eodClose - eodEma10)
+      : null;
+
+  const eodDistancePct =
+    eodClose !== null && eodEma10 !== null && eodEma10 !== 0
+      ? round2(((eodClose - eodEma10) / eodEma10) * 100)
+      : null;
+
+  const aboveEma10 =
+    typeof eod?.aboveEma10 === "boolean"
+      ? eod.aboveEma10
+      : eodClose !== null && eodEma10 !== null
+      ? eodClose > eodEma10
+      : null;
+
+  return {
+    tenMinute,
+    oneHour,
+    eod: {
+      label: "EOD Regime Layer",
+      close: round2(eodClose),
+      ema10: round2(eodEma10),
+      distanceToEma10: eodDistance,
+      distanceToEma10Pct: eodDistancePct,
+      aboveEma10,
+      dipBuyPermission: aboveEma10 === true,
+      state:
+        aboveEma10 === true
+          ? "ABOVE_DAILY_EMA10"
+          : aboveEma10 === false
+          ? "BELOW_DAILY_EMA10"
+          : "UNKNOWN",
+      trendState: eod?.trendState ?? null,
+      score: eod?.score ?? null,
+      updatedAt: eod?.updatedAt ?? null,
+    },
+  };
+}
+
 export function computeEngine22ScalpOpportunity({
   symbol = "SPY",
   strategyId = "intraday_scalp@10m",
@@ -3421,6 +3522,7 @@ export function computeEngine22ScalpOpportunity({
   waveReaction = null,
   engine2State = null,
   marketMind = null,
+  marketMeter = null,
   engine1Context = null,
 } = {}) {
   
@@ -3472,6 +3574,7 @@ supportedSetups: {
     distanceToEntry: null,
     needs: "WAIT_FOR_SETUP",
 
+    marketBias: null,
     trendVsWave: null,
     microContinuation: null,
     zoneAbsorption: null,
@@ -3562,6 +3665,15 @@ supportedSetups: {
   ema10,
   ema20,
 });
+
+  const regimeLayers = buildRegimeLayers({
+  engine16,
+  marketMeter,
+  latestClose,
+  ema10,
+  ema20,
+});
+  
   const finish = (out) => {
   const withTrend = applyTrendVsWaveSafety(out, trendVsWave);
   const withMicro = applyMicroContinuationPromotion(withTrend, microContinuation);
@@ -3591,8 +3703,9 @@ supportedSetups: {
     structureState,
   });
 
-  return {
+    return {
     ...withMicro,
+    regimeLayers,
     zoneAbsorption,
     runnerMode,
   };
