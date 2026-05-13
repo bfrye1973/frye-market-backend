@@ -2325,11 +2325,11 @@ async function buildEngine2State(symbol) {
     intermediatePhase: intermediate?.phase ?? "UNKNOWN",
     minorPhase: minor?.phase ?? "UNKNOWN",
     minutePhase: minute?.phase ?? "UNKNOWN",
+    microPhase: micro?.phase ?? "UNKNOWN",
 
     intermediateWaveMode: intermediate?.waveMode ?? null,
     correctionDirection,
   };
-}
 
 /* -----------------------------
    Build snapshot
