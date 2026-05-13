@@ -3061,6 +3061,357 @@ function detectW3DipBuyContinuation({
   };
 }
 
+
+function isStrongEngine22State(out) {
+  if (!out || typeof out !== "object") return false;
+
+  const state = upper(out.state || out.type);
+  const status = upper(out.status);
+  const setupType = upper(out.setupType);
+
+  if (status === "ENTRY_LONG" || status === "ENTRY_SHORT") return true;
+  if (status === "NO_SHORT") return true;
+
+  return [
+    "NEGOTIATED_ZONE_LOST",
+    "NEGOTIATED_ZONE_REJECTION_WARNING",
+    "FINAL_IMPULSE_NO_SHORTS",
+    "SHORT_BLOCKED_BY_TREND_VS_WAVE",
+    "SHORT_BLOCKED_BY_MARKET_BIAS",
+    "EXHAUSTION_REJECTION_SHORT",
+    "EXHAUSTION_BOUNCE_LONG",
+    "DIP_BUY_CONTINUATION",
+    "W5_SHALLOW_TRIGGER_LONG",
+    "A_TO_B_TRIGGER_LONG",
+    "W5_TRIGGER_LONG",
+    "W3_DIP_BUY_TRIGGER_LONG",
+  ].includes(state) || [
+    "EXHAUSTION_REJECTION_SHORT",
+    "EXHAUSTION_BOUNCE_LONG",
+    "DIP_BUY_CONTINUATION",
+    "W3_DIP_BUY_CONTINUATION",
+    "W4_TO_W5_SHALLOW_CONTINUATION",
+    "SHORT_BLOCKED_BY_MARKET_BIAS",
+  ].includes(setupType);
+}
+
+function detectMicroW3ContinuationState({
+  engine2State,
+  engine16,
+  marketBias,
+  latestClose,
+  ema10,
+  ema20,
+}) {
+  const phases = getWavePhases(engine2State);
+
+  const close = validPrice(latestClose);
+  const e10 = validPrice(ema10);
+  const e20 = validPrice(ema20);
+
+  const prevClose =
+    validPrice(engine16?.previousClose) ??
+    validPrice(engine16?.prevClose) ??
+    null;
+
+  const hourlyClose = validPrice(engine16?.hourlyClose);
+  const ema10_1h = validPrice(engine16?.ema10_1h);
+
+  const continuationWatchLong = engine16?.continuationWatchLong === true;
+  const continuationTriggerLong = engine16?.continuationTriggerLong === true;
+
+  const micro = engine2State?.micro || null;
+  const scalpExtension = engine2State?.activeExtensions?.scalp || null;
+
+  const minutePhase = phases.minutePhase;
+  const microPhase = phases.microPhase;
+
+  const isMicroW3Context =
+    minutePhase === "IN_W5" &&
+    microPhase === "IN_W3";
+
+  const above10mEma10 =
+    close !== null &&
+    e10 !== null &&
+    close > e10;
+
+  const above10mEma20 =
+    close !== null &&
+    e20 !== null &&
+    close > e20;
+
+  const belowOrAt10mEma10 =
+    close !== null &&
+    e10 !== null &&
+    close <= e10;
+
+  const below10mEma20 =
+    close !== null &&
+    e20 !== null &&
+    close < e20;
+
+  const oneHourAboveEma10 =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    hourlyClose > ema10_1h;
+
+  const oneHourBelowEma10 =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    hourlyClose < ema10_1h;
+
+  const commonDebug = {
+    ...phases,
+    latestClose: close,
+    ema10: e10,
+    ema20: e20,
+    prevClose,
+    hourlyClose,
+    ema10_1h,
+    above10mEma10,
+    above10mEma20,
+    belowOrAt10mEma10,
+    below10mEma20,
+    oneHourAboveEma10,
+    oneHourBelowEma10,
+    continuationWatchLong,
+    continuationTriggerLong,
+    micro,
+    scalpExtension,
+    note:
+      "Micro W3 debounce v1 uses snapshot latestClose. TODO: upgrade to true two-closed-candle debounce once Engine 16 exposes recent completed 10m bars.",
+  };
+
+  if (!isMicroW3Context) {
+    return {
+      active: false,
+      state: "NO_MICRO_W3_CONTEXT",
+      reasonCodes: ["NOT_MICRO_W3_CONTEXT"],
+      debug: commonDebug,
+    };
+  }
+
+  // Real failure: 1H EMA10 lost.
+  if (oneHourBelowEma10) {
+    return {
+      active: true,
+      setupType: "MICRO_W3_INSIDE_MINUTE_W5",
+      type: "MICRO_W3_FAILED",
+      state: "MICRO_W3_FAILED",
+      status: "NO_TRADE",
+      readiness: "NO_TRADE",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      confidence: 0,
+      sizeMode: "NONE",
+      needs: "STAND_DOWN_1H_EMA10_LOST",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W5_ACTIVE",
+        "MICRO_W3_ACTIVE",
+        "ONE_HOUR_EMA10_LOST",
+        "MICRO_W3_FAILED",
+        "OBSERVATION_ONLY",
+      ],
+      debug: commonDebug,
+    };
+  }
+
+  // Stronger caution: 10m EMA20 lost.
+  if (below10mEma20) {
+    return {
+      active: true,
+      setupType: "MICRO_W3_INSIDE_MINUTE_W5",
+      type: "MICRO_W3_WEAKENING",
+      state: "MICRO_W3_WEAKENING",
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      confidence: continuationWatchLong ? 42 : 35,
+      sizeMode: "NONE",
+      needs: "WAIT_FOR_10M_EMA_RECLAIM",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W5_ACTIVE",
+        "MICRO_W3_ACTIVE",
+        "PRICE_BELOW_10M_EMA20",
+        "MICRO_W3_WEAKENING",
+        "OBSERVATION_ONLY",
+      ],
+      debug: commonDebug,
+    };
+  }
+
+  // Normal pullback test: EMA10 lost/touched, EMA20 still holding.
+  if (belowOrAt10mEma10 && above10mEma20) {
+    return {
+      active: true,
+      setupType: "MICRO_W3_INSIDE_MINUTE_W5",
+      type: "MICRO_W3_PULLBACK_TEST",
+      state: "MICRO_W3_PULLBACK_TEST",
+      status: "WATCH",
+      readiness: "READY",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      confidence: continuationWatchLong ? 60 : 55,
+      sizeMode: "CONTROLLED_DIP_ONLY",
+      needs: "HOLD_10M_EMA20_OR_RECLAIM_10M_EMA10",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W5_ACTIVE",
+        "MICRO_W3_ACTIVE",
+        "FIRST_10M_EMA10_TEST",
+        "PRICE_ABOVE_10M_EMA20",
+        oneHourAboveEma10 ? "ONE_HOUR_EMA10_HOLDING" : "ONE_HOUR_EMA10_NOT_CONFIRMED_LOST",
+        continuationWatchLong ? "CONTINUATION_WATCH_LONG" : null,
+        "MICRO_W3_PULLBACK_TEST",
+        "OBSERVATION_ONLY",
+      ].filter(Boolean),
+      debug: commonDebug,
+    };
+  }
+
+  // Healthy active continuation.
+  if (above10mEma10 && above10mEma20) {
+    return {
+      active: true,
+      setupType: "MICRO_W3_INSIDE_MINUTE_W5",
+      type: "MICRO_W3_ACTIVE",
+      state: "MICRO_W3_ACTIVE",
+      status: "WATCH",
+      readiness: "READY",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      confidence: continuationTriggerLong ? 72 : continuationWatchLong ? 68 : 65,
+      sizeMode: "CONTROLLED_DIP_ONLY",
+      needs: "BUY_CONTROLLED_DIPS_DO_NOT_CHASE",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W5_ACTIVE",
+        "MICRO_W3_ACTIVE",
+        "PRICE_ABOVE_10M_EMA10_20",
+        oneHourAboveEma10 ? "ONE_HOUR_EMA10_HOLDING" : "ONE_HOUR_EMA10_NOT_CONFIRMED_LOST",
+        continuationTriggerLong ? "CONTINUATION_TRIGGER_LONG" : null,
+        continuationWatchLong ? "CONTINUATION_WATCH_LONG" : null,
+        "BUY_CONTROLLED_DIPS_ONLY",
+        "OBSERVATION_ONLY",
+      ].filter(Boolean),
+      debug: commonDebug,
+    };
+  }
+
+  return {
+    active: true,
+    setupType: "MICRO_W3_INSIDE_MINUTE_W5",
+    type: "MICRO_W3_ACTIVE_WAIT",
+    state: "MICRO_W3_ACTIVE_WAIT",
+    status: "WATCH",
+    readiness: "WATCH",
+    direction: "LONG",
+    side: "LONG",
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    confidence: 0,
+    sizeMode: "NONE",
+    needs: "WAIT_FOR_MICRO_W3_STRUCTURE",
+    marketBias,
+    reasonCodes: [
+      "MINUTE_W5_ACTIVE",
+      "MICRO_W3_ACTIVE",
+      "WAIT_FOR_STRUCTURE",
+      "OBSERVATION_ONLY",
+    ],
+    debug: commonDebug,
+  };
+}
+
+function applyMicroContinuationPromotion(out, microContinuation) {
+  if (!out || typeof out !== "object") return out;
+
+  const micro =
+    microContinuation?.active === true
+      ? microContinuation
+      : null;
+
+  const withMicro = {
+    ...out,
+    microContinuation: micro,
+    debug: {
+      ...(out.debug || {}),
+      microContinuation: micro
+        ? {
+            state: micro.state,
+            status: micro.status,
+            readiness: micro.readiness,
+            needs: micro.needs,
+            confidence: micro.confidence,
+            reasonCodes: micro.reasonCodes,
+          }
+        : null,
+    },
+  };
+
+  if (!micro) return withMicro;
+
+  if (isStrongEngine22State(withMicro)) {
+    return withMicro;
+  }
+
+  return {
+    ...withMicro,
+    active: true,
+    setupType: micro.setupType,
+    type: micro.type,
+    state: micro.state,
+    status: micro.status,
+    readiness: micro.readiness,
+    direction: micro.direction,
+    side: micro.side,
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    confidence: micro.confidence,
+    sizeMode: micro.sizeMode,
+    needs: micro.needs,
+    marketBias: micro.marketBias || withMicro.marketBias,
+    reasonCodes: [
+      ...(Array.isArray(micro.reasonCodes) ? micro.reasonCodes : []),
+      "MICRO_W3_PROMOTED_TO_TOP_LEVEL",
+    ],
+    debug: {
+      ...(withMicro.debug || {}),
+      ...(micro.debug || {}),
+      microContinuation: {
+        state: micro.state,
+        status: micro.status,
+        readiness: micro.readiness,
+        needs: micro.needs,
+        confidence: micro.confidence,
+        reasonCodes: micro.reasonCodes,
+      },
+    },
+  };
+}
 export function computeEngine22ScalpOpportunity({
   symbol = "SPY",
   strategyId = "intraday_scalp@10m",
@@ -3121,8 +3472,8 @@ supportedSetups: {
     distanceToEntry: null,
     needs: "WAIT_FOR_SETUP",
 
-    marketBias: null,
     trendVsWave: null,
+    microContinuation: null,
     zoneAbsorption: null,
     runnerMode: null,
     quality: null,
@@ -3203,18 +3554,49 @@ supportedSetups: {
     marketMind,
   });
 
-const finish = (out) => {
+  const microContinuation = detectMicroW3ContinuationState({
+  engine2State,
+  engine16,
+  marketBias,
+  latestClose,
+  ema10,
+  ema20,
+});
+  const finish = (out) => {
   const withTrend = applyTrendVsWaveSafety(out, trendVsWave);
+  const withMicro = applyMicroContinuationPromotion(withTrend, microContinuation);
 
   const zoneAbsorption = detectNegotiatedZoneAbsorption({
     engine1Context,
-    engine22State: withTrend?.state,
-    engine22Setup: withTrend?.setupType,
-    engine22Status: withTrend?.status,
+    engine22State: withMicro?.state,
+    engine22Setup: withMicro?.setupType,
+    engine22Status: withMicro?.status,
     latestClose,
     ema10,
     structureState,
   });
+
+  const runnerMode = detectRunnerMode({
+    engine2State,
+    engine16,
+    marketMind,
+    trendVsWave,
+    zoneAbsorption,
+    engine22State: withMicro?.state,
+    engine22Setup: withMicro?.setupType,
+    engine22Status: withMicro?.status,
+    latestClose,
+    ema10,
+    ema20,
+    structureState,
+  });
+
+  return {
+    ...withMicro,
+    zoneAbsorption,
+    runnerMode,
+  };
+};
 
   const runnerMode = detectRunnerMode({
     engine2State,
