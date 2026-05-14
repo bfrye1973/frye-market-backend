@@ -456,18 +456,29 @@ def apply_structure_soft_cap(
 ) -> float:
     cap = 100.0
 
-    if above10 and (not above20) and (not above50) and (not above200):
-        cap = 46.0
-    elif above10 and (not above20) and (not above50) and above200:
-        cap = 50.0
+    # Strong bridge trend.
+    if above10 and above20 and above50:
+        cap = 78.0
+
+    # Constructive 4H pullback: below 10, but still holding 20/50.
+    elif (not above10) and above20 and above50:
+        cap = 64.0
+
+    # Still above 10/20 but below 50 = recovering, not full trend.
     elif above10 and above20 and (not above50):
-        cap = 56.0
-    elif above10 and above20 and above50 and (not above200):
-        cap = 63.0
-    elif (not above10) and (not above20) and (not above50) and above200:
-        cap = 42.0
-    elif (not above10) and (not above20) and above50 and above200:
+        cap = 58.0
+
+    # Mixed / weak reclaim.
+    elif above10 and (not above20):
         cap = 52.0
+
+    # Losing 10/20 but still above 50 = weakening bridge.
+    elif (not above10) and (not above20) and above50:
+        cap = 50.0
+
+    # Below 10/20/50 = bridge damage.
+    elif (not above10) and (not above20) and (not above50):
+        cap = 42.0
 
     return min(score, cap)
 
