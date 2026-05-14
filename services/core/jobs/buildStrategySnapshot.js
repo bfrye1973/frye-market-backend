@@ -361,6 +361,42 @@ async function fetchEngine21Alignment(tf) {
   return fallbackEngine21Alignment(tf);
 }
 
+async function fetchSpyReactionQuality(sym = "SPY", tf = "10m") {
+  const r = await fetchJson(
+    `${CORE_BASE}/api/v1/spy-reaction-quality?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(tf)}`,
+    15000
+  );
+
+  return r?.json || {
+    ok: false,
+    error: "SPY_REACTION_QUALITY_UNAVAILABLE",
+  };
+}
+
+async function fetchSpyReactionQuality(sym = "SPY", tf = "10m") {
+  const r = await fetchJson(
+    `${CORE_BASE}/api/v1/spy-reaction-quality?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(tf)}`,
+    15000
+  );
+
+  return r?.json || {
+    ok: false,
+    error: "SPY_REACTION_QUALITY_UNAVAILABLE",
+  };
+}
+
+async function fetchSpyVolumeBehavior(sym = "SPY", tf = "10m") {
+  const r = await fetchJson(
+    `${CORE_BASE}/api/v1/spy-volume-behavior?symbol=${encodeURIComponent(sym)}&tf=${encodeURIComponent(tf)}`,
+    15000
+  );
+
+  return r?.json || {
+    ok: false,
+    error: "SPY_VOLUME_BEHAVIOR_UNAVAILABLE",
+  };
+}
+
 /* -----------------------------
    Engine 16
 ------------------------------*/
