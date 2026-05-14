@@ -391,24 +391,22 @@ export function computeSpyTimelineVolume({
     highVolumeCandles >= 2 &&
     volumeTrend === "EXPANDING" &&
     priceDisplacementStrong;
-
-   if (
-     rangeCompression &&
-     state === "EXPANDING" &&
-     relativeVolume >= 1.25
-   ) {
-     participationState = "RANGE_COMPRESSION";
-     participationQuality = belowEma10 && belowEma20 ? "EMA_FAILURE_WATCH" : "DECISION_ZONE";
-   } else if (   
   
   if (
-    priceNearRecentHigh &&
-    state === "EXPANDING" &&
-    relativeVolume >= 1.25 &&
-    volumeTrend === "FADING" &&
-    aboveEma10 &&
-    aboveEma20
-  ) {
+  rangeCompression &&
+  state === "EXPANDING" &&
+  relativeVolume >= 1.25
+) {
+  participationState = "RANGE_COMPRESSION";
+  participationQuality = belowEma10 && belowEma20 ? "EMA_FAILURE_WATCH" : "DECISION_ZONE";
+} else if (
+  priceNearRecentHigh &&
+  state === "EXPANDING" &&
+  relativeVolume >= 1.25 &&
+  volumeTrend === "FADING" &&
+  aboveEma10 &&
+  aboveEma20
+) {
     participationState = "HIGH_LEVEL_GRIND";
     participationQuality = "CONTROLLED_EXPANSION";
   } else if (
