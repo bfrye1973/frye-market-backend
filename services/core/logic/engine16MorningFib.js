@@ -100,12 +100,12 @@ function normalizeBarsForEngine16(bars) {
   return Array.isArray(bars)
     ? bars
         .map((b) => ({
-          t: Number(b?.t),
-          o: Number(b?.o),
-          h: Number(b?.h),
-          l: Number(b?.l),
-          c: Number(b?.c),
-          v: Number(b?.v ?? 0),
+          t: Number(b?.t ?? b?.time),
+          o: Number(b?.o ?? b?.open),
+          h: Number(b?.h ?? b?.high),
+          l: Number(b?.l ?? b?.low),
+          c: Number(b?.c ?? b?.close),
+          v: Number(b?.v ?? b?.volume ?? 0),
         }))
         .filter(
           (b) =>
