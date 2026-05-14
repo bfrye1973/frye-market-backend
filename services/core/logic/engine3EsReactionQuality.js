@@ -10,12 +10,17 @@ function normRange(range) {
   };
 }
 
+function n(v) {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : null;
+}
+
 function distance(price, level) {
   return Math.abs(Number(price) - Number(level));
 }
 
-function clamp(n, lo = 0, hi = 100) {
-  return Math.max(lo, Math.min(hi, Math.round(n)));
+function clamp(num, lo = 0, hi = 100) {
+  return Math.max(lo, Math.min(hi, Math.round(Number(num) || 0)));
 }
 
 function zonePosition(price, zone) {
@@ -30,6 +35,272 @@ function zonePosition(price, zone) {
   return "MIDDLE_ZONE";
 }
 
+function avg(values) {
+  const clean = values.map(Number).filter(Number.isFinite);
+  if (!clean.length) return null;
+  return clean.reduce((a, b) => a + b, 0) / clean.length;
+}
+
+function candleParts(bar) {
+  const open = n(bar?.open ?? bar?.o);
+  const high = n(bar?.high ?? bar?.h);
+  const low = n(bar?.low ?? bar?.l);
+  const close = n(bar?.close ?? bar?.c);
+  const volume = n(bar?.volume ?? bar?.v);
+
+  const range = high != null && low != null ? Math.max(0, high - low) : 0;
+  const body = open != null && close != null ? Math.abs(close - open) : 0;
+
+  const green = open != null && close != null && close > open;
+  const red = open != null && close != null && close < open;
+
+  const closeNearHigh =
+    high != null && low != null && close != null && range > 0
+      ? (high - close) / range <= 0.25
+      : false;
+
+  const closeNearLow =
+    high != null && low != null && close != null && range > 0
+      ? (close - low) / range <= 0.25
+      : false;
+
+  const bodyPct = range > 0 ? body / range : 0;
+
+  return {
+    open,
+    high,
+    low,
+    close,
+    volume,
+    range,
+    body,
+    bodyPct,
+    green,
+    red,
+    closeNearHigh,
+    closeNearLow,
+  };
+}
+
+function computeImpulseIgnition({ candles = [], price } = {}) {
+  const bars = candles.slice(-40);
+  const recent = bars.slice(-4).map(candleParts);
+  const last = candleParts(bars[bars.length - 1] || {});
+  const close = n(last.close ?? price);
+
+  if (bars.length < 24 || recent.length < 4 || close == null) {
+    return {
+      active: false,
+      direction: null,
+      state: "NO_IMPULSE_IGNITION",
+      score: 0,
+      candlesInSequence: 0,
+      reason: "Not enough candle history for impulse ignition detection.",
+      evidence: ["INSUFFICIENT_CANDLES"],
+    };
+  }
+
+  const prior = bars.slice(0, -4).map(candleParts);
+  const priorRanges = prior.map((b) => b.range).filter(Number.isFinite);
+  const priorVolumes = prior.map((b) => b.volume).filter(Number.isFinite);
+
+  const avgRange20 = avg(priorRanges.slice(-20)) || 0;
+  const avgVol20 = avg(priorVolumes.slice(-20));
+
+  const greenCount = recent.filter((b) => b.green).length;
+  const redCount = recent.filter((b) => b.red).length;
+
+  const strongGreenCount = recent.filter(
+    (b) =>
+      b.green &&
+      b.bodyPct >= 0.55 &&
+      b.closeNearHigh &&
+      (avgRange20 <= 0 || b.range >= avgRange20 * 1.1)
+  ).length;
+
+  const strongRedCount = recent.filter(
+    (b) =>
+      b.red &&
+      b.bodyPct >= 0.55 &&
+      b.closeNearLow &&
+      (avgRange20 <= 0 || b.range >= avgRange20 * 1.1)
+  ).length;
+
+  const burstVolAvg = avg(recent.map((b) => b.volume).filter(Number.isFinite));
+  const volumeExpansion =
+    avgVol20 != null && burstVolAvg != null ? burstVolAvg >= avgVol20 * 1.35 : false;
+
+  const highVolumeCandles =
+    avgVol20 != null
+      ? recent.filter((b) => Number.isFinite(b.volume) && b.volume >= avgVol20 * 1.5).length
+      : 0;
+
+  const priorLows = prior.slice(-20).map((b) => b.low).filter(Number.isFinite);
+  const priorHighs = prior.slice(-20).map((b) => b.high).filter(Number.isFinite);
+
+  const recentLow = Math.min(...recent.map((b) => b.low).filter(Number.isFinite));
+  const recentHigh = Math.max(...recent.map((b) => b.high).filter(Number.isFinite));
+
+  const priorLow = priorLows.length ? Math.min(...priorLows) : null;
+  const priorHigh = priorHighs.length ? Math.max(...priorHighs) : null;
+
+  const offRecentLow =
+    priorLow != null && recentLow <= priorLow + Math.max(avgRange20 * 1.5, 2.0);
+
+  const offRecentHigh =
+    priorHigh != null && recentHigh >= priorHigh - Math.max(avgRange20 * 1.5, 2.0);
+
+  const higherCloses =
+    recent[3].close > recent[2].close &&
+    recent[2].close > recent[1].close;
+
+  const lowerCloses =
+    recent[3].close < recent[2].close &&
+    recent[2].close < recent[1].close;
+
+  let longScore = 0;
+  const longEvidence = [];
+
+  if (greenCount >= 3) {
+    longScore += 15;
+    longEvidence.push("THREE_OF_LAST_FOUR_GREEN");
+  }
+
+  if (strongGreenCount >= 2) {
+    longScore += 15;
+    longEvidence.push("STRONG_GREEN_BODY_SEQUENCE");
+  }
+
+  if (recent.filter((b) => b.closeNearHigh).length >= 3) {
+    longScore += 10;
+    longEvidence.push("CLOSES_NEAR_HIGHS");
+  }
+
+  if (offRecentLow) {
+    longScore += 15;
+    longEvidence.push("OFF_RECENT_LOW");
+  }
+
+  if (volumeExpansion) {
+    longScore += 15;
+    longEvidence.push("VOLUME_EXPANSION_1_35X");
+  }
+
+  if (highVolumeCandles >= 2) {
+    longScore += 10;
+    longEvidence.push("TWO_HIGH_VOLUME_CANDLES_1_5X");
+  }
+
+  if (higherCloses) {
+    longScore += 10;
+    longEvidence.push("HIGHER_CLOSE_SEQUENCE");
+  }
+
+  let shortScore = 0;
+  const shortEvidence = [];
+
+  if (redCount >= 3) {
+    shortScore += 15;
+    shortEvidence.push("THREE_OF_LAST_FOUR_RED");
+  }
+
+  if (strongRedCount >= 2) {
+    shortScore += 15;
+    shortEvidence.push("STRONG_RED_BODY_SEQUENCE");
+  }
+
+  if (recent.filter((b) => b.closeNearLow).length >= 3) {
+    shortScore += 10;
+    shortEvidence.push("CLOSES_NEAR_LOWS");
+  }
+
+  if (offRecentHigh) {
+    shortScore += 15;
+    shortEvidence.push("OFF_RECENT_HIGH");
+  }
+
+  if (volumeExpansion) {
+    shortScore += 15;
+    shortEvidence.push("VOLUME_EXPANSION_1_35X");
+  }
+
+  if (highVolumeCandles >= 2) {
+    shortScore += 10;
+    shortEvidence.push("TWO_HIGH_VOLUME_CANDLES_1_5X");
+  }
+
+  if (lowerCloses) {
+    shortScore += 10;
+    shortEvidence.push("LOWER_CLOSE_SEQUENCE");
+  }
+
+  const direction = longScore >= shortScore ? "LONG" : "SHORT";
+  const score = clamp(Math.max(longScore, shortScore));
+
+  if (score < 80) {
+    return {
+      active: false,
+      direction,
+      state: "NO_IMPULSE_IGNITION",
+      score,
+      candlesInSequence: direction === "LONG" ? greenCount : redCount,
+      reason: "Impulse conditions are not strong enough yet.",
+      evidence: direction === "LONG" ? longEvidence : shortEvidence,
+      debug: {
+        avgRange20,
+        avgVol20,
+        burstVolAvg,
+        volumeExpansion,
+        highVolumeCandles,
+        greenCount,
+        redCount,
+        strongGreenCount,
+        strongRedCount,
+      },
+    };
+  }
+
+  if (direction === "LONG") {
+    return {
+      active: true,
+      direction: "LONG",
+      state: "BULLISH_IMPULSE_IGNITION",
+      score,
+      candlesInSequence: greenCount,
+      reason: "Strong green displacement candles formed with volume expansion off a reaction low.",
+      evidence: longEvidence,
+      debug: {
+        avgRange20,
+        avgVol20,
+        burstVolAvg,
+        volumeExpansion,
+        highVolumeCandles,
+        greenCount,
+        strongGreenCount,
+      },
+    };
+  }
+
+  return {
+    active: true,
+    direction: "SHORT",
+    state: "BEARISH_IMPULSE_IGNITION",
+    score,
+    candlesInSequence: redCount,
+    reason: "Strong red displacement candles formed with volume expansion off a reaction high.",
+    evidence: shortEvidence,
+    debug: {
+      avgRange20,
+      avgVol20,
+      burstVolAvg,
+      volumeExpansion,
+      highVolumeCandles,
+      redCount,
+      strongRedCount,
+    },
+  };
+}
+
 export function computeEngine3EsReactionQuality({
   price,
   candles = [],
@@ -39,6 +310,11 @@ export function computeEngine3EsReactionQuality({
   const p = Number(price);
   const last = candles[candles.length - 1] || {};
   const close = Number(last.close ?? p);
+
+  const impulseIgnition = computeImpulseIgnition({
+    candles,
+    price: close,
+  });
 
   const manualZones = manualStructures
     .filter((z) => z?.symbol === "ES" && Array.isArray(z.priceRange))
@@ -85,6 +361,7 @@ export function computeEngine3EsReactionQuality({
         bias: "NEUTRAL",
         reason: "No ES zone context available.",
       },
+      impulseIgnition,
       evidence: ["NO_ES_ZONES_AVAILABLE"],
     };
   }
@@ -236,6 +513,7 @@ export function computeEngine3EsReactionQuality({
       bias,
       reason,
     },
+    impulseIgnition,
     price: close,
     evidence,
   };
