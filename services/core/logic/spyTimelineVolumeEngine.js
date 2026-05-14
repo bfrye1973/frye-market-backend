@@ -17,10 +17,6 @@ function avg(values) {
   return clean.reduce((a, b) => a + b, 0) / clean.length;
 }
 
-function candleBody(bar) {
-  return Math.abs(num(bar.close) - num(bar.open));
-}
-
 function candleRange(bar) {
   return Math.max(0, num(bar.high) - num(bar.low));
 }
@@ -69,7 +65,6 @@ function psychLevelContext(close) {
     };
   }
 
-  // SPY uses $5 levels as useful psychological / options-magnet areas.
   const psychLevel = Math.round(close / 5) * 5;
   const distanceToPsychLevelPct = (Math.abs(close - psychLevel) / close) * 100;
 
@@ -110,6 +105,157 @@ function scoreVolume({
   if (priceNearRecentHigh || priceNearRecentLow || rangeCompression) score += 1;
 
   return Math.max(0, Math.min(15, score));
+}
+
+function computeParticipationScore({
+  relativeVolume,
+  highVolumeCandles,
+  volumeTrend,
+  rangeExpansion,
+  direction,
+}) {
+  let score = 0;
+
+  if (relativeVolume >= 1.1) score += 15;
+  if (relativeVolume >= 1.35) score += 25;
+  if (relativeVolume >= 1.6) score += 15;
+
+  if (highVolumeCandles >= 1) score += 10;
+  if (highVolumeCandles >= 2) score += 15;
+
+  if (rangeExpansion) score += 15;
+  if (volumeTrend === "EXPANDING") score += 15;
+  if (volumeTrend === "STABLE") score += 5;
+
+  if (direction === "LONG" || direction === "SHORT") score += 5;
+
+  return Math.max(0, Math.min(100, score));
+}
+
+function inferBreakoutDirection({
+  greenCandles,
+  redCandles,
+  aboveEma10,
+  aboveEma20,
+  belowEma10,
+  belowEma20,
+  impulseWindow,
+}) {
+  const firstClose = impulseWindow?.[0]?.close;
+  const lastClose = impulseWindow?.[impulseWindow.length - 1]?.close;
+
+  const higherCloseSequence =
+    Number.isFinite(firstClose) &&
+    Number.isFinite(lastClose) &&
+    lastClose > firstClose;
+
+  const lowerCloseSequence =
+    Number.isFinite(firstClose) &&
+    Number.isFinite(lastClose) &&
+    lastClose < firstClose;
+
+  if (greenCandles >= 2 && aboveEma10 && aboveEma20 && higherCloseSequence) {
+    return "LONG";
+  }
+
+  if (redCandles >= 2 && belowEma10 && belowEma20 && lowerCloseSequence) {
+    return "SHORT";
+  }
+
+  return "NEUTRAL";
+}
+
+function buildBreakoutParticipation({
+  symbol,
+  tf,
+  avgVol20,
+  burstVolAvg,
+  relativeVolume,
+  highVolumeCandles,
+  priceDisplacementStrong,
+  volumeTrend,
+  direction,
+}) {
+  const rangeExpansion = priceDisplacementStrong;
+
+  const active =
+    relativeVolume >= 1.35 &&
+    highVolumeCandles >= 2 &&
+    rangeExpansion === true &&
+    ["EXPANDING", "STABLE"].includes(volumeTrend) &&
+    direction !== "NEUTRAL";
+
+  const confirmed =
+    relativeVolume >= 1.35 &&
+    highVolumeCandles >= 2 &&
+    rangeExpansion === true &&
+    volumeTrend === "EXPANDING" &&
+    direction !== "NEUTRAL";
+
+  const score = computeParticipationScore({
+    relativeVolume,
+    highVolumeCandles,
+    volumeTrend,
+    rangeExpansion,
+    direction,
+  });
+
+  let state = "NO_PARTICIPATION";
+  let participationQuality = "WEAK";
+
+  if (confirmed) {
+    state = "PARTICIPATION_CONFIRMED";
+    participationQuality = "CONFIRMED";
+  } else if (active) {
+    state = "PARTICIPATION_ACTIVE";
+    participationQuality = "ACTIVE";
+  } else if (
+    relativeVolume >= 1.35 &&
+    highVolumeCandles >= 2 &&
+    volumeTrend === "FADING"
+  ) {
+    state = "PARTICIPATION_FADING";
+    participationQuality = "FADING";
+  } else if (
+    relativeVolume >= 1.35 &&
+    highVolumeCandles >= 1 &&
+    !rangeExpansion
+  ) {
+    state = "HIGH_VOLUME_NO_PROGRESS";
+    participationQuality = "WARNING";
+  }
+
+  const evidence = [];
+
+  if (relativeVolume >= 1.35) evidence.push("BURST_VOLUME_ABOVE_1_35_AVG");
+  if (highVolumeCandles >= 2) evidence.push("TWO_HIGH_VOLUME_CANDLES");
+  if (rangeExpansion) evidence.push("RANGE_EXPANSION");
+  if (volumeTrend === "EXPANDING") evidence.push("VOLUME_EXPANDING_IN_BURST_WINDOW");
+  if (volumeTrend === "STABLE") evidence.push("VOLUME_STABLE_IN_BURST_WINDOW");
+  if (volumeTrend === "FADING") evidence.push("VOLUME_FADING_IN_BURST_WINDOW");
+  if (rangeExpansion && relativeVolume >= 1.35) {
+    evidence.push("PRICE_DISPLACEMENT_WITH_VOLUME");
+  }
+
+  return {
+    active,
+    confirmed,
+    direction,
+    state,
+    score,
+    maxScore: 100,
+    symbol,
+    tf,
+
+    relativeVolume: round2(relativeVolume),
+    burstVolAvg: round2(burstVolAvg),
+    avgVol20: round2(avgVol20),
+    highVolumeCandles,
+    rangeExpansion,
+    volumeTrend,
+    participationQuality,
+    evidence,
+  };
 }
 
 function inferDirection({
@@ -266,6 +412,24 @@ export function computeSpyTimelineVolume({
       participationQuality: "INSUFFICIENT_DATA",
       priceNearRecentHigh: false,
       priceNearRecentLow: false,
+      breakoutParticipation: {
+        active: false,
+        confirmed: false,
+        direction: "NEUTRAL",
+        state: "NO_PARTICIPATION",
+        score: 0,
+        maxScore: 100,
+        symbol,
+        tf,
+        relativeVolume: 0,
+        burstVolAvg: 0,
+        avgVol20: 0,
+        highVolumeCandles: 0,
+        rangeExpansion: false,
+        volumeTrend: "UNKNOWN",
+        participationQuality: "INSUFFICIENT_DATA",
+        evidence: ["INSUFFICIENT_BARS"],
+      },
       reasonCodes: ["INSUFFICIENT_BARS"],
       message: "Need at least 60 SPY candles for Engine 4 timeline volume context.",
       updatedAt,
@@ -361,12 +525,6 @@ export function computeSpyTimelineVolume({
   let participationState = state;
   let participationQuality = state === "EXPANDING" ? "EXPANDING" : "NORMAL";
 
-  // Order matters:
-  // 1. compressed range decision
-  // 2. high-level grind
-  // 3. confirmed breakout/breakdown expansion
-  // 4. softer auctioning near high
-  // 5. warning states
   if (
     rangeCompression &&
     state === "EXPANDING" &&
@@ -440,6 +598,28 @@ export function computeSpyTimelineVolume({
     rangeCompression,
   });
 
+  const breakoutDirection = inferBreakoutDirection({
+    greenCandles,
+    redCandles,
+    aboveEma10,
+    aboveEma20,
+    belowEma10,
+    belowEma20,
+    impulseWindow,
+  });
+
+  const breakoutParticipation = buildBreakoutParticipation({
+    symbol,
+    tf,
+    avgVol20,
+    burstVolAvg,
+    relativeVolume,
+    highVolumeCandles,
+    priceDisplacementStrong,
+    volumeTrend,
+    direction: breakoutDirection,
+  });
+
   const direction = inferDirection({
     participationState,
     volumeTrend,
@@ -466,6 +646,7 @@ export function computeSpyTimelineVolume({
   if (volumeExpansion) reasonCodes.push("BURST_VOLUME_ABOVE_1_35_AVG");
   if (highVolumeCandles >= 2) reasonCodes.push("TWO_OR_MORE_HIGH_VOLUME_CANDLES");
   if (volumeTrend === "EXPANDING") reasonCodes.push("VOLUME_EXPANDING_IN_BURST_WINDOW");
+  if (volumeTrend === "STABLE") reasonCodes.push("VOLUME_STABLE_IN_BURST_WINDOW");
   if (volumeTrend === "FADING") reasonCodes.push("VOLUME_FADING_IN_BURST_WINDOW");
 
   if (priceDisplacementStrong) reasonCodes.push("PRICE_DISPLACEMENT_STRONG");
@@ -487,6 +668,9 @@ export function computeSpyTimelineVolume({
   if (participationState === "BREAKDOWN_EXPANSION") reasonCodes.push("BREAKDOWN_EXPANSION");
   if (participationState === "DISTRIBUTION_WARNING") reasonCodes.push("DISTRIBUTION_WARNING");
   if (participationState === "ACCUMULATION_WARNING") reasonCodes.push("ACCUMULATION_WARNING");
+
+  if (breakoutParticipation.active) reasonCodes.push("BREAKOUT_PARTICIPATION_ACTIVE");
+  if (breakoutParticipation.confirmed) reasonCodes.push("BREAKOUT_PARTICIPATION_CONFIRMED");
 
   const message = buildMessage({
     participationState,
@@ -517,6 +701,8 @@ export function computeSpyTimelineVolume({
 
     participationState,
     participationQuality,
+
+    breakoutParticipation,
 
     priceNearRecentHigh,
     priceNearRecentLow,
