@@ -409,30 +409,33 @@ export function computeSpyTimelineVolume({
 ) {
     participationState = "HIGH_LEVEL_GRIND";
     participationQuality = "CONTROLLED_EXPANSION";
+
   } else if (
-    priceNearRecentHigh &&
-    state === "EXPANDING" &&
-    aboveEma10 &&
-    aboveEma20
-  ) {
-    participationState = "AUCTIONING_NEAR_HIGH";
-    participationQuality = "CONTROLLED_EXPANSION";
-  } else if (
-    confirmed &&
-    greenCandles >= 2 &&
-    aboveEma10 &&
-    aboveEma20
-  ) {
-    participationState = "BREAKOUT_EXPANSION";
-    participationQuality = "CONFIRMED_EXPANSION";
-  } else if (
-    confirmed &&
-    redCandles >= 2 &&
-    belowEma10 &&
-    belowEma20
-  ) {
-    participationState = "BREAKDOWN_EXPANSION";
-    participationQuality = "CONFIRMED_EXPANSION";
+  confirmed &&
+  greenCandles >= 2 &&
+  aboveEma10 &&
+  aboveEma20
+) {
+  participationState = "BREAKOUT_EXPANSION";
+  participationQuality = "CONFIRMED_EXPANSION";
+} else if (
+  confirmed &&
+  redCandles >= 2 &&
+  belowEma10 &&
+  belowEma20
+) {
+  participationState = "BREAKDOWN_EXPANSION";
+  participationQuality = "CONFIRMED_EXPANSION";
+} else if (
+  priceNearRecentHigh &&
+  state === "EXPANDING" &&
+  aboveEma10 &&
+  aboveEma20
+) {
+  participationState = "AUCTIONING_NEAR_HIGH";
+  participationQuality = "CONTROLLED_EXPANSION";
+}
+    
   } else if (
     priceNearRecentHigh &&
     redCandles >= 2 &&
