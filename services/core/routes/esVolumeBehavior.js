@@ -25,10 +25,11 @@ function getBaseUrl(req) {
 async function fetchEsFuturesBars(req, { symbol, tf, limit = 100 }) {
   const baseUrl = getBaseUrl(req);
   const url =
-    `${baseUrl}/api/v1/futures/ohlc` +
-    `?symbol=${encodeURIComponent(symbol)}` +
-    `&timeframe=${encodeURIComponent(tf)}` +
-    `&limit=${encodeURIComponent(limit)}`;
+  `${baseUrl}/api/v1/futures/ohlc` +
+  `?symbol=${encodeURIComponent(symbol)}` +
+  `&timeframe=${encodeURIComponent(tf)}` +
+  `&limit=${encodeURIComponent(limit)}` +
+  `&debug=1`;
 
   const response = await fetch(url);
 
