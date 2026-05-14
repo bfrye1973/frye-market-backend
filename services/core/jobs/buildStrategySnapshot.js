@@ -30,6 +30,7 @@ import { computeMarketRegime } from "../logic/marketRegime.js";
 import { updateSignalLock } from "../logic/signalLockStore.js";
 import { getExecutionState } from "../logic/execution/executionStateService.js";
 import { computeEngine22ScalpOpportunity } from "../logic/engine22ScalpOpportunity.js";
+import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.js";
 
 /* -----------------------------
    Absolute paths / constants
@@ -2441,10 +2442,30 @@ async function buildSnapshot() {
   const engine2State = await buildEngine2State(symbol);
   console.log("Momentum fetched");
 
-  const [marketMind, engine21TenMin, engine21ThirtyMin] = await Promise.all([
+  const [marketMind, engine21TenMin, engine21ThirtyMin, tenMinuteLayer] = await Promise.all([
   fetchLiveMarketMeter(),
   fetchEngine21Alignment("10m"),
   fetchEngine21Alignment("30m"),
+  buildTenMinuteLayer({
+    symbol,
+    coreBase: CORE_BASE,
+    fetchJson,
+    limit: 120,
+  }).catch((err) => ({
+    label: "10m Trigger Layer",
+    close: null,
+    ema10: null,
+    ema20: null,
+    distanceToEma10: null,
+    distanceToEma10Pct: null,
+    distanceToEma20: null,
+    distanceToEma20Pct: null,
+    state: "UNKNOWN",
+    lastBarTime: null,
+    barCount: 0,
+    source: "/api/v1/ohlc",
+    error: String(err?.message || err),
+  })),
 ]);
 
 console.log("Live Market Meter fetched");
@@ -2471,6 +2492,13 @@ console.log("Engine21 alignment fetched");
   );
 
   const marketMeter = buildMarketMeterLayers(marketMind);
+
+  marketMeter.layers = marketMeter.layers || {};
+  marketMeter.layers.tenMinute = {
+    ...tenMinuteLayer,
+    score: marketMind?.score10m ?? null,
+    trendState: marketMind?.state10m ?? null,
+  };
    
   const result = {
   ok: true,
