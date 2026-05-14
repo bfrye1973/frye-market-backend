@@ -3534,7 +3534,75 @@ function buildRegimeLayers({ engine16, marketMind, marketMeter, latestClose, ema
     },
   };
 }
+function buildBreakoutContext({ reactionContext, volumeContext, phases, regimeLayers }) {
+  const ignition = reactionContext?.breakoutIgnition || null;
+  const participation = volumeContext?.breakoutParticipation || null;
 
+  const ignitionActive = ignition?.active === true;
+  const participationActive = participation?.active === true;
+
+  const breakoutConfirmed = ignitionActive && participationActive;
+
+  let state = "POST_BREAKOUT_DIGESTION";
+  let label = "Post-Breakout Digestion";
+  let action = "WAIT_FOR_PULLBACK_OR_FRESH_IGNITION";
+  let summary =
+    "No fresh breakout ignition and no active volume participation. Wait for controlled pullback, EMA reclaim, or fresh ignition with participation.";
+  let chaseAllowed = false;
+
+  if (breakoutConfirmed) {
+    state = "BREAKOUT_IGNITION_CONFIRMED";
+    label = "Breakout Ignition Confirmed";
+    action = "WAIT_FOR_CONTROLLED_PULLBACK";
+    summary =
+      "Price ignition and volume participation both confirmed. Do not chase. Wait for controlled pullback or EMA10 hold.";
+    chaseAllowed = false;
+  } else if (ignitionActive && !participationActive) {
+    state = "PRICE_IGNITION_WITHOUT_PARTICIPATION";
+    label = "Price Ignition Without Participation";
+    action = "DO_NOT_CHASE";
+    summary =
+      "Price broke structure, but volume participation did not confirm. Treat as weak breakout or possible fakeout.";
+  } else if (!ignitionActive && participationActive) {
+    state = "PARTICIPATION_WITHOUT_PRICE_IGNITION";
+    label = "Participation Without Price Ignition";
+    action = "WAIT_FOR_STRUCTURE";
+    summary =
+      "Volume appeared, but price structure did not ignite. Wait for structure confirmation.";
+  }
+
+  return {
+    active: ignitionActive || participationActive || !!ignition || !!participation,
+    confirmed: breakoutConfirmed,
+    state,
+    label,
+    action,
+    summary,
+    chaseAllowed,
+    direction:
+      ignition?.direction ||
+      participation?.direction ||
+      reactionContext?.direction ||
+      volumeContext?.direction ||
+      "NEUTRAL",
+    ignition,
+    participation,
+    waveContext: {
+      primaryPhase: phases?.primaryPhase || "UNKNOWN",
+      intermediatePhase: phases?.intermediatePhase || "UNKNOWN",
+      minorPhase: phases?.minorPhase || "UNKNOWN",
+      minutePhase: phases?.minutePhase || "UNKNOWN",
+      confirmedMinutePhase: phases?.confirmedMinutePhase || "UNKNOWN",
+      microPhase: phases?.microPhase || "UNKNOWN",
+      confirmedMicroPhase: phases?.confirmedMicroPhase || "UNKNOWN",
+    },
+    regimeSnapshot: {
+      tenMinute: regimeLayers?.tenMinute || null,
+      oneHour: regimeLayers?.oneHour || null,
+      eod: regimeLayers?.eod || null,
+    },
+  };
+}
 export function computeEngine22ScalpOpportunity({
   symbol = "SPY",
   strategyId = "intraday_scalp@10m",
@@ -3546,6 +3614,8 @@ export function computeEngine22ScalpOpportunity({
   marketMind = null,
   marketMeter = null,
   engine1Context = null,
+  reactionContext = null,
+  volumeContext = null,
 } = {}) {
   
   const base = {
@@ -3599,6 +3669,9 @@ supportedSetups: {
     marketBias: null,
     trendVsWave: null,
     microContinuation: null,
+    reactionContext: null,
+    volumeContext: null,
+    breakoutContext: null,
     zoneAbsorption: null,
     runnerMode: null,
     quality: null,
@@ -3688,6 +3761,13 @@ supportedSetups: {
     ema20,
   });
 
+  const breakoutContext = buildBreakoutContext({
+    reactionContext,
+    volumeContext,
+    phases,
+    regimeLayers,
+  });
+
   const tenMinuteLayer = regimeLayers?.tenMinute || null;
 
   const effectiveLatestClose =
@@ -3737,13 +3817,15 @@ supportedSetups: {
     structureState,
   });
 
-    return {
-    ...withMicro,
-    regimeLayers,
-    zoneAbsorption,
-    runnerMode,
-  };
-};
+   return {
+       ...withMicro,
+       regimeLayers,
+       reactionContext,
+       volumeContext,
+       breakoutContext,
+       zoneAbsorption,
+       runnerMode,
+     };
 
    if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
     return finish({
