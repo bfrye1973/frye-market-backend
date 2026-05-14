@@ -16,16 +16,10 @@ function normalizeSymbol(symbol) {
 }
 
 function getBaseUrl(req) {
-  const envBase =
-    process.env.CORE_BASE_URL ||
-    process.env.PUBLIC_CORE_BASE_URL ||
-    process.env.RENDER_EXTERNAL_URL;
-
-  if (envBase) return envBase.replace(/\/$/, "");
-
-  const protocol = req.protocol || "http";
-  const host = req.get("host") || "127.0.0.1:10000";
-  return `${protocol}://${host}`;
+  // Engine 4B ES volume must call the local core API from inside Render.
+  // Do not use RENDER_EXTERNAL_URL here because internal self-fetches can fail
+  // or hit a public route/path with different behavior.
+  return "http://127.0.0.1:10000";
 }
 
 async function fetchEsFuturesBars(req, { symbol, tf, limit = 100 }) {
