@@ -44,6 +44,7 @@ import executionStateRouter from "./routes/executionState.js";
 import futuresOhlcRouter from "./routes/futuresOhlc.js";
 import futuresMarketMeterRouter from "./routes/futuresMarketMeter.js";
 import esReactionScore from "./routes/esReactionScore.js";
+import { esVolumeBehaviorRouter } from "./routes/esVolumeBehavior.js";
 
 // --- App setup ---
 const app = express();
@@ -138,6 +139,7 @@ app.use("/api/v1", engine5ContextRouter);
 app.use("/api/v1", fibLevelsRouter);
 app.use("/api/v1", reactionScoreRouter);
 app.use("/api/v1", volumeBehaviorRouter);
+app.use("/api/v1", esVolumeBehaviorRouter);
 app.use("/api/v1", confluenceScoreRouter);
 app.use("/api/v1", momentumContextRouter);
 app.use("/api/v1", dashboardSnapshotRouter);
