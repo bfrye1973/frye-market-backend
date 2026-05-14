@@ -43,6 +43,7 @@ import engine21AlignmentRoute from "./routes/engine21Alignment.js";
 import executionStateRouter from "./routes/executionState.js";
 import futuresOhlcRouter from "./routes/futuresOhlc.js";
 import futuresMarketMeterRouter from "./routes/futuresMarketMeter.js";
+import esReactionScore from "./routes/esReactionScore.js";
 
 // --- App setup ---
 const app = express();
@@ -128,6 +129,7 @@ app.use("/live", liveRouter);
 app.use("/api/v1/smz-levels", smzLevels);
 app.use("/api/v1/smz-shelves", smzShelves);
 app.use("/api/v1/es-smz-shelves", esSmzShelves);
+app.use("/api/v1/es-reaction-score", esReactionScore);
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 
 app.use("/api/trading", tradingRouter);
