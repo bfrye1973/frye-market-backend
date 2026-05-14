@@ -5,6 +5,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { computeEngine3EsReactionQuality } from "../logic/engine3EsReactionQuality.js";
+import { maybeSendImpulseIgnitionAlert } from "../logic/alerts/instantImpulseIgnitionPushover.js";
 
 const router = express.Router();
 
@@ -77,6 +78,21 @@ router.get("/", async (req, res) => {
       shelves: shelvesResp.levels || [],
     });
 
+    const lastCandle = candles[candles.length - 1] || {};
+    const lastCandleTime =
+      lastCandle.time ??
+      lastCandle.timestamp ??
+      lastCandle.t ??
+      null;
+
+    const impulseAlert = await maybeSendImpulseIgnitionAlert({
+      symbol,
+      tf,
+      price: result.price ?? price,
+      lastCandleTime,
+      impulseIgnition: result.impulseIgnition,
+    });
+    
     return res.json({
       ok: true,
       ...result,
@@ -91,6 +107,7 @@ router.get("/", async (req, res) => {
         manualZones: (manual.structures || []).length,
         shelves: (shelvesResp.levels || []).length,
         impulseIgnitionEnabled: true,
+        impulseAlert,
       },
     });
   } catch (err) {
