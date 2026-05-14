@@ -15,6 +15,16 @@ function avg(values) {
   return clean.reduce((a, b) => a + b, 0) / clean.length;
 }
 
+function maxFinite(values) {
+  const clean = values.map(Number).filter(Number.isFinite);
+  return clean.length ? Math.max(...clean) : null;
+}
+
+function minFinite(values) {
+  const clean = values.map(Number).filter(Number.isFinite);
+  return clean.length ? Math.min(...clean) : null;
+}
+
 function ema(values, length) {
   if (!values.length) return null;
   const k = 2 / (length + 1);
@@ -117,16 +127,20 @@ function computeImpulseIgnition({ bars = [] } = {}) {
       (avgRange20 <= 0 || b.range >= avgRange20 * 1.1)
   ).length;
 
-  const priorLow = Math.min(...prior.slice(-20).map((b) => b.low).filter(Number.isFinite));
-  const priorHigh = Math.max(...prior.slice(-20).map((b) => b.high).filter(Number.isFinite));
-  const recentLow = Math.min(...recent.map((b) => b.low).filter(Number.isFinite));
-  const recentHigh = Math.max(...recent.map((b) => b.high).filter(Number.isFinite));
+  const priorLow = minFinite(prior.slice(-20).map((b) => b.low));
+  const priorHigh = maxFinite(prior.slice(-20).map((b) => b.high));
+  const recentLow = minFinite(recent.map((b) => b.low));
+  const recentHigh = maxFinite(recent.map((b) => b.high));
 
   const offRecentLow =
-    Number.isFinite(priorLow) && recentLow <= priorLow + Math.max(avgRange20 * 1.5, 0.5);
+    Number.isFinite(priorLow) &&
+    Number.isFinite(recentLow) &&
+    recentLow <= priorLow + Math.max(avgRange20 * 1.5, 0.5);
 
   const offRecentHigh =
-    Number.isFinite(priorHigh) && recentHigh >= priorHigh - Math.max(avgRange20 * 1.5, 0.5);
+    Number.isFinite(priorHigh) &&
+    Number.isFinite(recentHigh) &&
+    recentHigh >= priorHigh - Math.max(avgRange20 * 1.5, 0.5);
 
   const higherCloses =
     recent[3].close > recent[2].close && recent[2].close > recent[1].close;
@@ -230,6 +244,266 @@ function computeImpulseIgnition({ bars = [] } = {}) {
       strongRedCount,
     },
   };
+}
+
+function computeBreakoutIgnition({
+  bars = [],
+  ema10,
+  ema20,
+  reclaimingEma10,
+  reclaimingEma20,
+  ema10Held,
+  ema20Held,
+  aboveEma10,
+  aboveEma20,
+  failedBreakdown,
+  failedBreakout,
+  higherLowHeld,
+  lowerHighRejected,
+  impulseIgnition,
+}) {
+  const recent = bars.slice(-4);
+  const priorRange = bars.slice(-14, -4);
+
+  if (bars.length < 30 || recent.length < 4 || priorRange.length < 5) {
+    return {
+      active: false,
+      direction: null,
+      type: "NONE",
+      state: "NO_BREAKOUT_IGNITION",
+      score: 0,
+      localRangeHigh: null,
+      localRangeLow: null,
+      breakoutClose: null,
+      breakdownClose: null,
+      ema10Reclaimed: false,
+      ema20Held: false,
+      reason: "Not enough candle history for breakout ignition detection.",
+      evidence: ["INSUFFICIENT_CANDLES"],
+    };
+  }
+
+  const last = bars[bars.length - 1];
+  const localRangeHigh = maxFinite(priorRange.map((b) => b.high));
+  const localRangeLow = minFinite(priorRange.map((b) => b.low));
+  const avgRange20 = avg(bars.slice(-24, -4).map((b) => b.range)) || 0;
+
+  const greenCount = recent.filter((b) => b.green).length;
+  const redCount = recent.filter((b) => b.red).length;
+
+  const strongGreenCount = recent.filter(
+    (b) =>
+      b.green &&
+      b.bodyPct >= 0.5 &&
+      b.closeNearHigh &&
+      (avgRange20 <= 0 || b.range >= avgRange20 * 1.05)
+  ).length;
+
+  const strongRedCount = recent.filter(
+    (b) =>
+      b.red &&
+      b.bodyPct >= 0.5 &&
+      b.closeNearLow &&
+      (avgRange20 <= 0 || b.range >= avgRange20 * 1.05)
+  ).length;
+
+  const higherCloseSequence =
+    recent[3].close > recent[2].close && recent[2].close > recent[1].close;
+
+  const lowerCloseSequence =
+    recent[3].close < recent[2].close && recent[2].close < recent[1].close;
+
+  const localRangeBreak =
+    Number.isFinite(localRangeHigh) && last.close > localRangeHigh;
+
+  const localRangeBreakdown =
+    Number.isFinite(localRangeLow) && last.close < localRangeLow;
+
+  const aboveLocalRangeBy =
+    localRangeBreak ? last.close - localRangeHigh : 0;
+
+  const belowLocalRangeBy =
+    localRangeBreakdown ? localRangeLow - last.close : 0;
+
+  const bullishReversalStart =
+    failedBreakdown || reclaimingEma10 || reclaimingEma20 || ema20Held;
+
+  const bearishReversalStart =
+    failedBreakout || ema10LostLike({ last, ema10 }) || lowerHighRejected;
+
+  const bullishContinuationBase =
+    aboveEma10 && aboveEma20 && higherLowHeld && (ema10Held || ema20Held);
+
+  const bearishContinuationBase =
+    last.close < ema10 && last.close < ema20 && lowerHighRejected;
+
+  let bullScore = 0;
+  const bullEvidence = [];
+
+  if (greenCount >= 3) {
+    bullScore += 12;
+    bullEvidence.push("THREE_OF_LAST_FOUR_GREEN");
+  }
+  if (strongGreenCount >= 2) {
+    bullScore += 14;
+    bullEvidence.push("STRONG_GREEN_BODY_SEQUENCE");
+  }
+  if (recent.filter((b) => b.closeNearHigh).length >= 3) {
+    bullScore += 10;
+    bullEvidence.push("CLOSES_NEAR_HIGHS");
+  }
+  if (higherCloseSequence) {
+    bullScore += 10;
+    bullEvidence.push("HIGHER_CLOSE_SEQUENCE");
+  }
+  if (localRangeBreak) {
+    bullScore += 22;
+    bullEvidence.push("LOCAL_RANGE_BREAK");
+  }
+  if (reclaimingEma10) {
+    bullScore += 10;
+    bullEvidence.push("EMA10_RECLAIMED");
+  }
+  if (reclaimingEma20) {
+    bullScore += 8;
+    bullEvidence.push("EMA20_RECLAIMED");
+  }
+  if (ema10Held) {
+    bullScore += 6;
+    bullEvidence.push("EMA10_HELD");
+  }
+  if (ema20Held) {
+    bullScore += 8;
+    bullEvidence.push("EMA20_HELD");
+  }
+  if (failedBreakdown) {
+    bullScore += 12;
+    bullEvidence.push("FAILED_BREAKDOWN_BASE");
+  }
+  if (impulseIgnition?.direction === "LONG" && impulseIgnition.score >= 50) {
+    bullScore += 8;
+    bullEvidence.push("BULLISH_IMPULSE_SUPPORT");
+  }
+
+  let bearScore = 0;
+  const bearEvidence = [];
+
+  if (redCount >= 3) {
+    bearScore += 12;
+    bearEvidence.push("THREE_OF_LAST_FOUR_RED");
+  }
+  if (strongRedCount >= 2) {
+    bearScore += 14;
+    bearEvidence.push("STRONG_RED_BODY_SEQUENCE");
+  }
+  if (recent.filter((b) => b.closeNearLow).length >= 3) {
+    bearScore += 10;
+    bearEvidence.push("CLOSES_NEAR_LOWS");
+  }
+  if (lowerCloseSequence) {
+    bearScore += 10;
+    bearEvidence.push("LOWER_CLOSE_SEQUENCE");
+  }
+  if (localRangeBreakdown) {
+    bearScore += 22;
+    bearEvidence.push("LOCAL_RANGE_BREAKDOWN");
+  }
+  if (failedBreakout) {
+    bearScore += 12;
+    bearEvidence.push("FAILED_BREAKOUT_BASE");
+  }
+  if (lowerHighRejected) {
+    bearScore += 8;
+    bearEvidence.push("LOWER_HIGH_REJECTED");
+  }
+  if (impulseIgnition?.direction === "SHORT" && impulseIgnition.score >= 50) {
+    bearScore += 8;
+    bearEvidence.push("BEARISH_IMPULSE_SUPPORT");
+  }
+
+  bullScore = clamp(bullScore);
+  bearScore = clamp(bearScore);
+
+  const dominant = bullScore >= bearScore ? "LONG" : "SHORT";
+  const score = Math.max(bullScore, bearScore);
+
+  if (dominant === "LONG") {
+    const type = bullishReversalStart
+      ? "REVERSAL_BREAKOUT"
+      : bullishContinuationBase
+        ? "CONTINUATION_BREAKOUT"
+        : "STRUCTURE_BREAKOUT";
+
+    return {
+      active: score >= 75 && localRangeBreak,
+      direction: "LONG",
+      type,
+      state: score >= 75 && localRangeBreak ? "BULLISH_BREAKOUT_IGNITION" : "NO_BREAKOUT_IGNITION",
+      score,
+      localRangeHigh,
+      localRangeLow,
+      breakoutClose: last.close,
+      breakdownClose: null,
+      breakoutDistance: aboveLocalRangeBy,
+      ema10Reclaimed: reclaimingEma10,
+      ema20Held,
+      reason:
+        score >= 75 && localRangeBreak
+          ? "Strong green displacement broke above the local range."
+          : "Bullish breakout ignition conditions are not complete yet.",
+      evidence: bullEvidence,
+      bullish: {
+        score: bullScore,
+        active: bullScore >= 75 && localRangeBreak,
+        evidence: bullEvidence,
+      },
+      bearish: {
+        score: bearScore,
+        active: bearScore >= 75 && localRangeBreakdown,
+        evidence: bearEvidence,
+      },
+    };
+  }
+
+  const type = bearishReversalStart
+    ? "REVERSAL_BREAKDOWN"
+    : bearishContinuationBase
+      ? "CONTINUATION_BREAKDOWN"
+      : "STRUCTURE_BREAKDOWN";
+
+  return {
+    active: score >= 75 && localRangeBreakdown,
+    direction: "SHORT",
+    type,
+    state: score >= 75 && localRangeBreakdown ? "BEARISH_BREAKOUT_IGNITION" : "NO_BREAKOUT_IGNITION",
+    score,
+    localRangeHigh,
+    localRangeLow,
+    breakoutClose: null,
+    breakdownClose: last.close,
+    breakoutDistance: belowLocalRangeBy,
+    ema10Reclaimed: false,
+    ema20Held: false,
+    reason:
+      score >= 75 && localRangeBreakdown
+        ? "Strong red displacement broke below the local range."
+        : "Bearish breakout ignition conditions are not complete yet.",
+    evidence: bearEvidence,
+    bullish: {
+      score: bullScore,
+      active: bullScore >= 75 && localRangeBreak,
+      evidence: bullEvidence,
+    },
+    bearish: {
+      score: bearScore,
+      active: bearScore >= 75 && localRangeBreakdown,
+      evidence: bearEvidence,
+    },
+  };
+}
+
+function ema10LostLike({ last, ema10 }) {
+  return Number.isFinite(ema10) && last.close < ema10;
 }
 
 function computeReversalSetup({
@@ -367,7 +641,7 @@ export function computeEngine3SpyReactionQualityTimeline({
       ok: true,
       symbol,
       tf,
-      engine: "engine3.reactionQuality.timeline.v2",
+      engine: "engine3.reactionQuality.timeline.v3",
       state: "NO_REACTION",
       quality: "WEAK",
       direction: "NEUTRAL",
@@ -380,6 +654,7 @@ export function computeEngine3SpyReactionQualityTimeline({
       contextAdjustedReaction: null,
       reversalSetup: null,
       impulseIgnition: null,
+      breakoutIgnition: null,
       reasonCodes: ["INSUFFICIENT_CANDLES"],
       message: "Not enough SPY candle history to score reaction quality.",
       updatedAt: now,
@@ -393,8 +668,8 @@ export function computeEngine3SpyReactionQualityTimeline({
 
   const priorLows = bars.slice(-12, -1).map((b) => b.low).filter(Number.isFinite);
   const priorHighs = bars.slice(-12, -1).map((b) => b.high).filter(Number.isFinite);
-  const recentLow = Math.min(...priorLows);
-  const recentHigh = Math.max(...priorHighs);
+  const recentLow = minFinite(priorLows);
+  const recentHigh = maxFinite(priorHighs);
 
   const aboveEma10 = close > ema10;
   const aboveEma20 = close > ema20;
@@ -443,6 +718,23 @@ export function computeEngine3SpyReactionQualityTimeline({
   const chaseRisk = extendedAwayFromEma && aboveEma10 && aboveEma20;
 
   const impulseIgnition = computeImpulseIgnition({ bars });
+
+  const breakoutIgnition = computeBreakoutIgnition({
+    bars,
+    ema10,
+    ema20,
+    reclaimingEma10,
+    reclaimingEma20,
+    ema10Held,
+    ema20Held,
+    aboveEma10,
+    aboveEma20,
+    failedBreakdown,
+    failedBreakout,
+    higherLowHeld,
+    lowerHighRejected,
+    impulseIgnition,
+  });
 
   const reversalSetup = computeReversalSetup({
     last,
@@ -570,7 +862,8 @@ export function computeEngine3SpyReactionQualityTimeline({
 
   const bullishStructureIntact = aboveEma10 && aboveEma20 && higherLowHeld;
   const priceNearRecentHigh =
-    Number.isFinite(recentHigh) && close >= recentHigh - Math.max((recentHigh - recentLow) * 0.25, 0.25);
+    Number.isFinite(recentHigh) && Number.isFinite(recentLow) &&
+    close >= recentHigh - Math.max((recentHigh - recentLow) * 0.25, 0.25);
 
   let finalState = localState;
   let finalDirection = localDirection;
@@ -612,6 +905,24 @@ export function computeEngine3SpyReactionQualityTimeline({
     adjustedReasons.push("BEARISH_IMPULSE_IGNITION");
   }
 
+  if (breakoutIgnition.active && breakoutIgnition.direction === "LONG") {
+    finalState = "BULLISH_BREAKOUT_IGNITION";
+    finalDirection = "LONG";
+    finalScore = Math.max(finalScore, breakoutIgnition.score);
+    finalReactionState = "BULLISH_REACTION";
+    finalReactionQuality = "BREAKOUT_IGNITION";
+    adjustedReasons.push("BULLISH_BREAKOUT_IGNITION");
+  }
+
+  if (breakoutIgnition.active && breakoutIgnition.direction === "SHORT") {
+    finalState = "BEARISH_BREAKOUT_IGNITION";
+    finalDirection = "SHORT";
+    finalScore = Math.max(finalScore, breakoutIgnition.score);
+    finalReactionState = "BEARISH_REACTION";
+    finalReactionQuality = "BREAKOUT_IGNITION";
+    adjustedReasons.push("BEARISH_BREAKOUT_IGNITION");
+  }
+
   finalScore = clamp(finalScore);
   const finalQuality = qualityFromScore(finalScore);
   const confirmed = finalScore >= 75;
@@ -632,31 +943,35 @@ export function computeEngine3SpyReactionQualityTimeline({
   const now = new Date().toISOString();
 
   const message =
-    finalState === "BULLISH_CONTINUATION_PAUSE"
-      ? "SPY showed local hesitation near highs, but bullish EMA and higher-low structure remain intact. Treat as a continuation pause, not a confirmed bearish reversal."
-      : finalState === "BULLISH_IMPULSE_IGNITION"
-        ? "SPY is showing bullish impulse ignition. A new impulse leg may be starting; watch for Wave 2 pullback or Wave 4 hold."
-        : finalState === "BEARISH_IMPULSE_IGNITION"
-          ? "SPY is showing bearish impulse ignition. A downside impulse leg may be starting; watch for bounce failure."
-          : finalState === "BUYERS_ABSORBING_DIP"
-            ? "SPY reacted cleanly from a controlled dip. Buyers held EMA structure and higher low support."
-            : finalState === "EMA_RECLAIM_REACTION"
-              ? "SPY is showing an EMA reclaim reaction. Buyers are regaining short-term control."
-              : finalState === "FAILED_BREAKDOWN_REACTION"
-                ? "SPY failed a breakdown and reclaimed support. Buyers are absorbing the dip."
-                : finalState === "BULLISH_CONTINUATION_REACTION"
-                  ? "SPY reaction supports bullish continuation above EMA10 and EMA20."
-                  : finalState === "FAILED_BREAKOUT_REACTION"
-                    ? "SPY failed a breakout attempt. Sellers are absorbing the bounce."
-                    : finalState === "EMA_REJECTION_REACTION"
-                      ? "SPY is showing EMA rejection risk. Long entries need caution."
-                      : "SPY reaction quality is not strong enough yet.";
+    finalState === "BULLISH_BREAKOUT_IGNITION"
+      ? "SPY is showing bullish breakout ignition. Strong price-action expansion broke the local range; Engine 22 should wait for controlled pullback / EMA10 hold."
+      : finalState === "BEARISH_BREAKOUT_IGNITION"
+        ? "SPY is showing bearish breakout ignition. Strong downside expansion broke local structure; Engine 22 should wait for bounce failure."
+        : finalState === "BULLISH_CONTINUATION_PAUSE"
+          ? "SPY showed local hesitation near highs, but bullish EMA and higher-low structure remain intact. Treat as a continuation pause, not a confirmed bearish reversal."
+          : finalState === "BULLISH_IMPULSE_IGNITION"
+            ? "SPY is showing bullish impulse ignition. A new impulse leg may be starting; watch for Wave 2 pullback or Wave 4 hold."
+            : finalState === "BEARISH_IMPULSE_IGNITION"
+              ? "SPY is showing bearish impulse ignition. A downside impulse leg may be starting; watch for bounce failure."
+              : finalState === "BUYERS_ABSORBING_DIP"
+                ? "SPY reacted cleanly from a controlled dip. Buyers held EMA structure and higher low support."
+                : finalState === "EMA_RECLAIM_REACTION"
+                  ? "SPY is showing an EMA reclaim reaction. Buyers are regaining short-term control."
+                  : finalState === "FAILED_BREAKDOWN_REACTION"
+                    ? "SPY failed a breakdown and reclaimed support. Buyers are absorbing the dip."
+                    : finalState === "BULLISH_CONTINUATION_REACTION"
+                      ? "SPY reaction supports bullish continuation above EMA10 and EMA20."
+                      : finalState === "FAILED_BREAKOUT_REACTION"
+                        ? "SPY failed a breakout attempt. Sellers are absorbing the bounce."
+                        : finalState === "EMA_REJECTION_REACTION"
+                          ? "SPY is showing EMA rejection risk. Long entries need caution."
+                          : "SPY reaction quality is not strong enough yet.";
 
   return {
     ok: true,
     symbol,
     tf,
-    engine: "engine3.reactionQuality.timeline.v2",
+    engine: "engine3.reactionQuality.timeline.v3",
 
     state: finalState,
     quality: finalQuality,
@@ -673,6 +988,7 @@ export function computeEngine3SpyReactionQualityTimeline({
     contextAdjustedReaction,
     reversalSetup,
     impulseIgnition,
+    breakoutIgnition,
 
     priceLocation: {
       close,
