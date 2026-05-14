@@ -201,6 +201,18 @@ function buildMessage({
   belowEma10,
   belowEma20,
 }) {
+  if (participationState === "RANGE_COMPRESSION") {
+  if (belowEma10 && belowEma20) {
+    return "Heavy volume is active inside a tight range, but price is below EMA10/EMA20. Watch for reclaim or downside expansion.";
+  }
+
+  if (aboveEma10 && aboveEma20) {
+    return "Heavy volume is active inside a tight range while price holds above EMA10/EMA20. Watch for breakout expansion.";
+  }
+
+  return "Heavy volume is active inside a tight range. This is a decision zone; wait for range break or EMA reclaim/failure.";
+}
+  
   if (participationState === "HIGH_LEVEL_GRIND") {
     return "Participation is expanding, but price is grinding near highs. Wait for breakout re-expansion or EMA failure.";
   }
@@ -342,8 +354,26 @@ export function computeSpyTimelineVolume({
   const distanceToRecentLowPct =
     close > 0 ? Math.abs(close - recentLow50) / close * 100 : 999;
 
-  const priceNearRecentHigh = distanceToRecentHighPct <= 0.25;
-  const priceNearRecentLow = distanceToRecentLowPct <= 0.25;
+  const rawPriceNearRecentHigh = distanceToRecentHighPct <= 0.25;
+  const rawPriceNearRecentLow = distanceToRecentLowPct <= 0.25;
+
+  // If SPY is close to both the 50-bar high and low, the range is compressed.
+  // Engine 22 should not see both high and low as active directional context.
+  const rangeCompression =
+    rawPriceNearRecentHigh &&
+    rawPriceNearRecentLow &&
+    recentHigh50 > recentLow50 &&
+    ((recentHigh50 - recentLow50) / close) * 100 <= 0.45;
+
+  const priceNearRecentHigh =
+    rawPriceNearRecentHigh &&
+    (!rawPriceNearRecentLow || distanceToRecentHighPct < distanceToRecentLowPct) &&
+    !rangeCompression;
+
+  const priceNearRecentLow =
+    rawPriceNearRecentLow &&
+    (!rawPriceNearRecentHigh || distanceToRecentLowPct < distanceToRecentHighPct) &&
+    !rangeCompression;
 
   const psych = psychLevelContext(close);
 
@@ -362,6 +392,15 @@ export function computeSpyTimelineVolume({
     volumeTrend === "EXPANDING" &&
     priceDisplacementStrong;
 
+   if (
+     rangeCompression &&
+     state === "EXPANDING" &&
+     relativeVolume >= 1.25
+   ) {
+     participationState = "RANGE_COMPRESSION";
+     participationQuality = belowEma10 && belowEma20 ? "EMA_FAILURE_WATCH" : "DECISION_ZONE";
+   } else if (   
+  
   if (
     priceNearRecentHigh &&
     state === "EXPANDING" &&
@@ -462,12 +501,14 @@ export function computeSpyTimelineVolume({
 
   if (priceNearRecentHigh) reasonCodes.push("PRICE_NEAR_RECENT_HIGH");
   if (priceNearRecentLow) reasonCodes.push("PRICE_NEAR_RECENT_LOW");
-
+  if (rangeCompression) reasonCodes.push("RANGE_COMPRESSION");
+  
   if (aboveEma10) reasonCodes.push("ABOVE_EMA10");
   if (aboveEma20) reasonCodes.push("ABOVE_EMA20");
   if (belowEma10) reasonCodes.push("BELOW_EMA10");
   if (belowEma20) reasonCodes.push("BELOW_EMA20");
 
+  if (participationState === "RANGE_COMPRESSION") reasonCodes.push("RANGE_COMPRESSION_VOLUME_EXPANSION");
   if (participationState === "HIGH_LEVEL_GRIND") reasonCodes.push("HIGH_LEVEL_GRIND");
   if (participationState === "AUCTIONING_NEAR_HIGH") reasonCodes.push("AUCTIONING_NEAR_HIGH");
   if (participationState === "BREAKOUT_EXPANSION") reasonCodes.push("BREAKOUT_EXPANSION");
@@ -536,15 +577,18 @@ export function computeSpyTimelineVolume({
       belowEma20,
     },
 
-    keyLevelContext: {
-      nearMajorHigh: priceNearRecentHigh,
-      recentHigh50: round2(recentHigh50),
-      distanceToRecentHighPct: round2(distanceToRecentHighPct),
-      nearRecentLow: priceNearRecentLow,
-      recentLow50: round2(recentLow50),
-      distanceToRecentLowPct: round2(distanceToRecentLowPct),
-      ...psych,
-    },
+   keyLevelContext: {
+     rangeCompression,
+     nearMajorHigh: priceNearRecentHigh,
+     recentHigh50: round2(recentHigh50),
+     distanceToRecentHighPct: round2(distanceToRecentHighPct),
+     rawPriceNearRecentHigh,
+     nearRecentLow: priceNearRecentLow,
+     recentLow50: round2(recentLow50),
+     distanceToRecentLowPct: round2(distanceToRecentLowPct),
+     rawPriceNearRecentLow,
+     ...psych,
+   },
 
     reasonCodes,
     message,
