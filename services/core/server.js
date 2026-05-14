@@ -46,6 +46,7 @@ import futuresOhlcRouter from "./routes/futuresOhlc.js";
 import futuresMarketMeterRouter from "./routes/futuresMarketMeter.js";
 import esReactionScore from "./routes/esReactionScore.js";
 import { esVolumeBehaviorRouter } from "./routes/esVolumeBehavior.js";
+import spyReactionQuality from "./routes/spyReactionQuality.js";
 
 // --- App setup ---
 const app = express();
@@ -163,6 +164,7 @@ app.use("/api/v1", engine15AlertsRouter);
 app.use("/api/v1", engine21AlignmentRoute);
 app.use("/api/v1/execution-state", executionStateRouter);
 app.use("/api/v1/futures/market-meter", futuresMarketMeterRouter);
+app.use("/api/v1/spy-reaction-quality", spyReactionQuality);
 
 
 // --- 404 / errors ---
