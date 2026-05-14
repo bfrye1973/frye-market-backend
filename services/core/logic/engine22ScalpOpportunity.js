@@ -3456,16 +3456,30 @@ function buildDistanceLayer({ label, close, ema10, ema20 = null }) {
 function buildRegimeLayers({ engine16, marketMind, marketMeter, latestClose, ema10, ema20 }) {
   const eod = marketMeter?.layers?.eod || null;
 
-  const tenMinute = {
-    ...buildDistanceLayer({
-      label: "10m Trigger Layer",
-      close: latestClose,
-      ema10,
-      ema20,
-    }),
-    score: marketMind?.score10m ?? null,
-    trendState: marketMind?.state10m ?? null,
-  };
+  const tenMinuteSource = marketMeter?.layers?.tenMinute || null;
+
+  const tenMinuteFromEngine16 = buildDistanceLayer({
+    label: "10m Trigger Layer",
+    close: latestClose,
+    ema10,
+    ema20,
+  });
+
+  const tenMinute =
+    tenMinuteSource?.close != null &&
+    tenMinuteSource?.ema10 != null &&
+    tenMinuteSource?.ema20 != null
+      ? {
+          ...tenMinuteSource,
+          score: tenMinuteSource?.score ?? marketMind?.score10m ?? null,
+          trendState: tenMinuteSource?.trendState ?? marketMind?.state10m ?? null,
+        }
+      : {
+          ...tenMinuteFromEngine16,
+          score: marketMind?.score10m ?? null,
+          trendState: marketMind?.state10m ?? null,
+          source: "engine16",
+        };
 
   const oneHour = {
     ...buildDistanceLayer({
@@ -3665,15 +3679,6 @@ supportedSetups: {
     marketMind,
   });
 
-  const microContinuation = detectMicroW3ContinuationState({
-  engine2State,
-  engine16,
-  marketBias,
-  latestClose,
-  ema10,
-  ema20,
-});
-
   const regimeLayers = buildRegimeLayers({
     engine16,
     marketMind,
@@ -3681,6 +3686,26 @@ supportedSetups: {
     latestClose,
     ema10,
     ema20,
+  });
+
+  const tenMinuteLayer = regimeLayers?.tenMinute || null;
+
+  const effectiveLatestClose =
+    validPrice(latestClose) ?? validPrice(tenMinuteLayer?.close);
+
+  const effectiveEma10 =
+    validPrice(ema10) ?? validPrice(tenMinuteLayer?.ema10);
+
+  const effectiveEma20 =
+    validPrice(ema20) ?? validPrice(tenMinuteLayer?.ema20);
+
+  const microContinuation = detectMicroW3ContinuationState({
+    engine2State,
+    engine16,
+    marketBias,
+    latestClose: effectiveLatestClose,
+    ema10: effectiveEma10,
+    ema20: effectiveEma20,
   });
   
   const finish = (out) => {
