@@ -3453,21 +3453,29 @@ function buildDistanceLayer({ label, close, ema10, ema20 = null }) {
   };
 }
 
-function buildRegimeLayers({ engine16, marketMeter, latestClose, ema10, ema20 }) {
+function buildRegimeLayers({ engine16, marketMind, marketMeter, latestClose, ema10, ema20 }) {
   const eod = marketMeter?.layers?.eod || null;
 
-  const tenMinute = buildDistanceLayer({
-    label: "10m Trigger Layer",
-    close: latestClose,
-    ema10,
-    ema20,
-  });
+  const tenMinute = {
+    ...buildDistanceLayer({
+      label: "10m Trigger Layer",
+      close: latestClose,
+      ema10,
+      ema20,
+    }),
+    score: marketMind?.score10m ?? null,
+    trendState: marketMind?.state10m ?? null,
+  };
 
-  const oneHour = buildDistanceLayer({
-    label: "1H Pullback Layer",
-    close: engine16?.hourlyClose,
-    ema10: engine16?.ema10_1h,
-  });
+  const oneHour = {
+    ...buildDistanceLayer({
+      label: "1H Pullback Layer",
+      close: engine16?.hourlyClose,
+      ema10: engine16?.ema10_1h,
+    }),
+    score: marketMind?.score1h ?? null,
+    trendState: marketMind?.state1h ?? engine16?.trendState_1h ?? null,
+  };
 
   const eodClose = validPrice(eod?.close);
   const eodEma10 = validPrice(eod?.ema10);
@@ -3667,12 +3675,13 @@ supportedSetups: {
 });
 
   const regimeLayers = buildRegimeLayers({
-  engine16,
-  marketMeter,
-  latestClose,
-  ema10,
-  ema20,
-});
+    engine16,
+    marketMind,
+    marketMeter,
+    latestClose,
+    ema10,
+    ema20,
+  });
   
   const finish = (out) => {
   const withTrend = applyTrendVsWaveSafety(out, trendVsWave);
