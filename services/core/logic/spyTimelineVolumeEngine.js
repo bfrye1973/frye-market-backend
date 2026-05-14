@@ -25,12 +25,6 @@ function candleRange(bar) {
   return Math.max(0, num(bar.high) - num(bar.low));
 }
 
-function bodyPct(bar) {
-  const range = candleRange(bar);
-  if (!range) return 0;
-  return candleBody(bar) / range;
-}
-
 function ema(values, length) {
   const clean = values.map(Number).filter(Number.isFinite);
   if (clean.length < length) return null;
@@ -46,7 +40,9 @@ function ema(values, length) {
 }
 
 function computeVolumeTrend(impulseWindow) {
-  if (!impulseWindow.length || impulseWindow.length < 3) return "UNKNOWN";
+  if (!Array.isArray(impulseWindow) || impulseWindow.length < 3) {
+    return "UNKNOWN";
+  }
 
   const vols = impulseWindow.map((b) => num(b.volume));
   const firstHalf = avg(vols.slice(0, 2));
@@ -64,76 +60,24 @@ function latestCandleDirection(bar) {
   return "FLAT";
 }
 
-function inferDirection({
-  participationState,
-  volumeTrend,
-  greenCandles,
-  redCandles,
-  aboveEma10,
-  aboveEma20,
-  belowEma10,
-  belowEma20,
-  priceNearRecentHigh,
-  priceNearRecentLow,
-  priceDisplacementStrong,
-}) {
-  if (
-    participationState === "HIGH_LEVEL_GRIND" ||
-    participationState === "AUCTIONING_NEAR_HIGH"
-  ) {
-    return "NEUTRAL";
+function psychLevelContext(close) {
+  if (!Number.isFinite(close) || close <= 0) {
+    return {
+      nearPsychLevel: false,
+      psychLevel: null,
+      distanceToPsychLevelPct: null,
+    };
   }
 
-  if (
-    priceNearRecentHigh &&
-    volumeTrend === "FADING" &&
-    aboveEma10 &&
-    aboveEma20
-  ) {
-    return "NEUTRAL";
-  }
+  // SPY uses $5 levels as useful psychological / options-magnet areas.
+  const psychLevel = Math.round(close / 5) * 5;
+  const distanceToPsychLevelPct = (Math.abs(close - psychLevel) / close) * 100;
 
-  if (
-    greenCandles >= 3 &&
-    aboveEma10 &&
-    aboveEma20 &&
-    priceDisplacementStrong
-  ) {
-    return "LONG";
-  }
-
-  if (
-    redCandles >= 3 &&
-    belowEma10 &&
-    belowEma20 &&
-    priceDisplacementStrong
-  ) {
-    return "SHORT";
-  }
-
-  if (
-    redCandles >= 2 &&
-    belowEma10 &&
-    volumeTrend === "EXPANDING" &&
-    priceDisplacementStrong
-  ) {
-    return "SHORT";
-  }
-
-  if (
-    greenCandles >= 2 &&
-    aboveEma10 &&
-    volumeTrend === "EXPANDING" &&
-    priceDisplacementStrong
-  ) {
-    return "LONG";
-  }
-
-  if (priceNearRecentLow && volumeTrend === "FADING") {
-    return "NEUTRAL";
-  }
-
-  return "NEUTRAL";
+  return {
+    nearPsychLevel: distanceToPsychLevelPct <= 0.15,
+    psychLevel,
+    distanceToPsychLevelPct: round2(distanceToPsychLevelPct),
+  };
 }
 
 function scoreVolume({
@@ -147,6 +91,7 @@ function scoreVolume({
   belowEma20,
   priceNearRecentHigh,
   priceNearRecentLow,
+  rangeCompression,
 }) {
   let score = 0;
 
@@ -162,57 +107,77 @@ function scoreVolume({
 
   if ((aboveEma10 && aboveEma20) || (belowEma10 && belowEma20)) score += 1;
 
-  if (priceNearRecentHigh || priceNearRecentLow) score += 1;
+  if (priceNearRecentHigh || priceNearRecentLow || rangeCompression) score += 1;
 
   return Math.max(0, Math.min(15, score));
 }
 
-function psychLevelContext(close) {
-  if (!Number.isFinite(close)) {
-    return {
-      nearPsychLevel: false,
-      psychLevel: null,
-      distanceToPsychLevelPct: null,
-    };
+function inferDirection({
+  participationState,
+  volumeTrend,
+  greenCandles,
+  redCandles,
+  aboveEma10,
+  aboveEma20,
+  belowEma10,
+  belowEma20,
+  priceDisplacementStrong,
+}) {
+  if (
+    participationState === "HIGH_LEVEL_GRIND" ||
+    participationState === "AUCTIONING_NEAR_HIGH" ||
+    participationState === "RANGE_COMPRESSION"
+  ) {
+    return "NEUTRAL";
   }
 
-  // SPY uses $5 levels as useful psychological/option magnet areas.
-  const psychLevel = Math.round(close / 5) * 5;
-  const distanceToPsychLevelPct = Math.abs(close - psychLevel) / close * 100;
+  if (
+    participationState === "BREAKOUT_EXPANSION" ||
+    (greenCandles >= 2 &&
+      aboveEma10 &&
+      aboveEma20 &&
+      volumeTrend === "EXPANDING" &&
+      priceDisplacementStrong)
+  ) {
+    return "LONG";
+  }
 
-  return {
-    nearPsychLevel: distanceToPsychLevelPct <= 0.15,
-    psychLevel,
-    distanceToPsychLevelPct: round2(distanceToPsychLevelPct),
-  };
+  if (
+    participationState === "BREAKDOWN_EXPANSION" ||
+    (redCandles >= 2 &&
+      belowEma10 &&
+      belowEma20 &&
+      volumeTrend === "EXPANDING" &&
+      priceDisplacementStrong)
+  ) {
+    return "SHORT";
+  }
+
+  return "NEUTRAL";
 }
 
 function buildMessage({
   participationState,
   state,
-  score,
   relativeVolume,
-  volumeTrend,
   confirmed,
-  priceNearRecentHigh,
-  priceNearRecentLow,
   aboveEma10,
   aboveEma20,
   belowEma10,
   belowEma20,
 }) {
   if (participationState === "RANGE_COMPRESSION") {
-  if (belowEma10 && belowEma20) {
-    return "Heavy volume is active inside a tight range, but price is below EMA10/EMA20. Watch for reclaim or downside expansion.";
+    if (belowEma10 && belowEma20) {
+      return "Heavy volume is active inside a tight range, but price is below EMA10/EMA20. Watch for reclaim or downside expansion.";
+    }
+
+    if (aboveEma10 && aboveEma20) {
+      return "Heavy volume is active inside a tight range while price holds above EMA10/EMA20. Watch for breakout expansion.";
+    }
+
+    return "Heavy volume is active inside a tight range. This is a decision zone; wait for range break or EMA reclaim/failure.";
   }
 
-  if (aboveEma10 && aboveEma20) {
-    return "Heavy volume is active inside a tight range while price holds above EMA10/EMA20. Watch for breakout expansion.";
-  }
-
-  return "Heavy volume is active inside a tight range. This is a decision zone; wait for range break or EMA reclaim/failure.";
-}
-  
   if (participationState === "HIGH_LEVEL_GRIND") {
     return "Participation is expanding, but price is grinding near highs. Wait for breakout re-expansion or EMA failure.";
   }
@@ -256,29 +221,32 @@ function buildMessage({
   return "Participation is normal. Wait for volume expansion or price confirmation.";
 }
 
+function normalizeBars(bars) {
+  if (!Array.isArray(bars)) return [];
+
+  return bars
+    .filter(
+      (b) =>
+        b &&
+        Number.isFinite(Number(b.close)) &&
+        Number.isFinite(Number(b.volume))
+    )
+    .map((b) => ({
+      time: b.time,
+      open: num(b.open),
+      high: num(b.high),
+      low: num(b.low),
+      close: num(b.close),
+      volume: num(b.volume),
+    }));
+}
+
 export function computeSpyTimelineVolume({
   symbol = "SPY",
   tf = "10m",
   bars = [],
 } = {}) {
-  const cleanBars = Array.isArray(bars)
-    ? bars
-        .filter(
-          (b) =>
-            b &&
-            Number.isFinite(Number(b.close)) &&
-            Number.isFinite(Number(b.volume))
-        )
-        .map((b) => ({
-          time: b.time,
-          open: num(b.open),
-          high: num(b.high),
-          low: num(b.low),
-          close: num(b.close),
-          volume: num(b.volume),
-        }))
-    : [];
-
+  const cleanBars = normalizeBars(bars);
   const updatedAt = new Date().toISOString();
 
   if (cleanBars.length < 60) {
@@ -333,7 +301,6 @@ export function computeSpyTimelineVolume({
   const burstRangeAvg = avg(impulseWindow.map(candleRange));
   const priceDisplacementValue =
     avgRange20 > 0 ? burstRangeAvg / avgRange20 : 0;
-
   const priceDisplacementStrong = priceDisplacementValue >= 1.05;
 
   const ema10 = ema(closes, 10);
@@ -349,21 +316,23 @@ export function computeSpyTimelineVolume({
   const recentLow50 = Math.min(...recent50.map((b) => b.low));
 
   const distanceToRecentHighPct =
-    close > 0 ? Math.abs(recentHigh50 - close) / close * 100 : 999;
+    close > 0 ? (Math.abs(recentHigh50 - close) / close) * 100 : 999;
 
   const distanceToRecentLowPct =
-    close > 0 ? Math.abs(close - recentLow50) / close * 100 : 999;
+    close > 0 ? (Math.abs(close - recentLow50) / close) * 100 : 999;
 
   const rawPriceNearRecentHigh = distanceToRecentHighPct <= 0.25;
   const rawPriceNearRecentLow = distanceToRecentLowPct <= 0.25;
 
-  // If SPY is close to both the 50-bar high and low, the range is compressed.
-  // Engine 22 should not see both high and low as active directional context.
+  const rangeWidthPct =
+    close > 0 && recentHigh50 > recentLow50
+      ? ((recentHigh50 - recentLow50) / close) * 100
+      : 999;
+
   const rangeCompression =
     rawPriceNearRecentHigh &&
     rawPriceNearRecentLow &&
-    recentHigh50 > recentLow50 &&
-    ((recentHigh50 - recentLow50) / close) * 100 <= 0.45;
+    rangeWidthPct <= 0.45;
 
   const priceNearRecentHigh =
     rawPriceNearRecentHigh &&
@@ -383,59 +352,62 @@ export function computeSpyTimelineVolume({
   if (relativeVolume < 0.85) state = "QUIET";
   if (volumeExpansion || relativeVolume >= 1.25) state = "EXPANDING";
 
-  let participationState = state;
-  let participationQuality = state === "EXPANDING" ? "EXPANDING" : "NORMAL";
-
   const confirmed =
     volumeExpansion &&
     highVolumeCandles >= 2 &&
     volumeTrend === "EXPANDING" &&
     priceDisplacementStrong;
-  
+
+  let participationState = state;
+  let participationQuality = state === "EXPANDING" ? "EXPANDING" : "NORMAL";
+
+  // Order matters:
+  // 1. compressed range decision
+  // 2. high-level grind
+  // 3. confirmed breakout/breakdown expansion
+  // 4. softer auctioning near high
+  // 5. warning states
   if (
-  rangeCompression &&
-  state === "EXPANDING" &&
-  relativeVolume >= 1.25
-) {
-  participationState = "RANGE_COMPRESSION";
-  participationQuality = belowEma10 && belowEma20 ? "EMA_FAILURE_WATCH" : "DECISION_ZONE";
-} else if (
-  priceNearRecentHigh &&
-  state === "EXPANDING" &&
-  relativeVolume >= 1.25 &&
-  volumeTrend === "FADING" &&
-  aboveEma10 &&
-  aboveEma20
-) {
+    rangeCompression &&
+    state === "EXPANDING" &&
+    relativeVolume >= 1.25
+  ) {
+    participationState = "RANGE_COMPRESSION";
+    participationQuality = belowEma10 && belowEma20 ? "EMA_FAILURE_WATCH" : "DECISION_ZONE";
+  } else if (
+    priceNearRecentHigh &&
+    state === "EXPANDING" &&
+    relativeVolume >= 1.25 &&
+    volumeTrend === "FADING" &&
+    aboveEma10 &&
+    aboveEma20
+  ) {
     participationState = "HIGH_LEVEL_GRIND";
     participationQuality = "CONTROLLED_EXPANSION";
-
   } else if (
-  confirmed &&
-  greenCandles >= 2 &&
-  aboveEma10 &&
-  aboveEma20
-) {
-  participationState = "BREAKOUT_EXPANSION";
-  participationQuality = "CONFIRMED_EXPANSION";
-} else if (
-  confirmed &&
-  redCandles >= 2 &&
-  belowEma10 &&
-  belowEma20
-) {
-  participationState = "BREAKDOWN_EXPANSION";
-  participationQuality = "CONFIRMED_EXPANSION";
-} else if (
-  priceNearRecentHigh &&
-  state === "EXPANDING" &&
-  aboveEma10 &&
-  aboveEma20
-) {
-  participationState = "AUCTIONING_NEAR_HIGH";
-  participationQuality = "CONTROLLED_EXPANSION";
-}
-    
+    confirmed &&
+    greenCandles >= 2 &&
+    aboveEma10 &&
+    aboveEma20
+  ) {
+    participationState = "BREAKOUT_EXPANSION";
+    participationQuality = "CONFIRMED_EXPANSION";
+  } else if (
+    confirmed &&
+    redCandles >= 2 &&
+    belowEma10 &&
+    belowEma20
+  ) {
+    participationState = "BREAKDOWN_EXPANSION";
+    participationQuality = "CONFIRMED_EXPANSION";
+  } else if (
+    priceNearRecentHigh &&
+    state === "EXPANDING" &&
+    aboveEma10 &&
+    aboveEma20
+  ) {
+    participationState = "AUCTIONING_NEAR_HIGH";
+    participationQuality = "CONTROLLED_EXPANSION";
   } else if (
     priceNearRecentHigh &&
     redCandles >= 2 &&
@@ -465,6 +437,7 @@ export function computeSpyTimelineVolume({
     belowEma20,
     priceNearRecentHigh,
     priceNearRecentLow,
+    rangeCompression,
   });
 
   const direction = inferDirection({
@@ -476,8 +449,6 @@ export function computeSpyTimelineVolume({
     aboveEma20,
     belowEma10,
     belowEma20,
-    priceNearRecentHigh,
-    priceNearRecentLow,
     priceDisplacementStrong,
   });
 
@@ -503,7 +474,7 @@ export function computeSpyTimelineVolume({
   if (priceNearRecentHigh) reasonCodes.push("PRICE_NEAR_RECENT_HIGH");
   if (priceNearRecentLow) reasonCodes.push("PRICE_NEAR_RECENT_LOW");
   if (rangeCompression) reasonCodes.push("RANGE_COMPRESSION");
-  
+
   if (aboveEma10) reasonCodes.push("ABOVE_EMA10");
   if (aboveEma20) reasonCodes.push("ABOVE_EMA20");
   if (belowEma10) reasonCodes.push("BELOW_EMA10");
@@ -520,12 +491,8 @@ export function computeSpyTimelineVolume({
   const message = buildMessage({
     participationState,
     state,
-    score,
     relativeVolume: round2(relativeVolume),
-    volumeTrend,
     confirmed,
-    priceNearRecentHigh,
-    priceNearRecentLow,
     aboveEma10,
     aboveEma20,
     belowEma10,
@@ -578,18 +545,19 @@ export function computeSpyTimelineVolume({
       belowEma20,
     },
 
-   keyLevelContext: {
-     rangeCompression,
-     nearMajorHigh: priceNearRecentHigh,
-     recentHigh50: round2(recentHigh50),
-     distanceToRecentHighPct: round2(distanceToRecentHighPct),
-     rawPriceNearRecentHigh,
-     nearRecentLow: priceNearRecentLow,
-     recentLow50: round2(recentLow50),
-     distanceToRecentLowPct: round2(distanceToRecentLowPct),
-     rawPriceNearRecentLow,
-     ...psych,
-   },
+    keyLevelContext: {
+      rangeCompression,
+      rangeWidthPct: round2(rangeWidthPct),
+      nearMajorHigh: priceNearRecentHigh,
+      recentHigh50: round2(recentHigh50),
+      distanceToRecentHighPct: round2(distanceToRecentHighPct),
+      rawPriceNearRecentHigh,
+      nearRecentLow: priceNearRecentLow,
+      recentLow50: round2(recentLow50),
+      distanceToRecentLowPct: round2(distanceToRecentLowPct),
+      rawPriceNearRecentLow,
+      ...psych,
+    },
 
     reasonCodes,
     message,
