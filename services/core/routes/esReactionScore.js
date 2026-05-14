@@ -3,12 +3,20 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { computeEngine3EsReactionQuality } from "../logic/engine3EsReactionQuality.js";
 
 const router = express.Router();
 
-const CORE_DIR = process.cwd();
-const MANUAL_STRUCTURES_FILE = path.join(CORE_DIR, "data", "es-smz-manual-structures.json");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CORE_DIR = path.resolve(__dirname, "..");
+
+const MANUAL_STRUCTURES_FILE = path.join(
+  CORE_DIR,
+  "data",
+  "es-smz-manual-structures.json"
+);
 
 function readJsonSafe(file, fallback) {
   try {
@@ -24,6 +32,15 @@ async function fetchJson(url) {
   return r.json();
 }
 
+function normalizeCandles(candlesResp) {
+  return (
+    candlesResp?.bars ||
+    candlesResp?.candles ||
+    candlesResp?.results ||
+    []
+  );
+}
+
 router.get("/", async (req, res) => {
   try {
     const symbol = String(req.query.symbol || "ES").toUpperCase();
@@ -33,15 +50,25 @@ router.get("/", async (req, res) => {
 
     const manual = readJsonSafe(MANUAL_STRUCTURES_FILE, { structures: [] });
 
-    const shelvesResp = await fetchJson(`${baseUrl}/api/v1/es-smz-shelves?symbol=${encodeURIComponent(symbol)}`);
-
-    const candlesResp = await fetchJson(
-      `${baseUrl}/api/v1/futures/ohlc?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(tf)}&limit=100`
+    const shelvesResp = await fetchJson(
+      `${baseUrl}/api/v1/es-smz-shelves?symbol=${encodeURIComponent(symbol)}`
     );
 
-    const candles = candlesResp.bars || [];
+    const candlesResp = await fetchJson(
+      `${baseUrl}/api/v1/futures/ohlc?symbol=${encodeURIComponent(
+        symbol
+      )}&timeframe=${encodeURIComponent(tf)}&limit=100&debug=1`
+    );
+
+    const candles = normalizeCandles(candlesResp);
     const last = candles[candles.length - 1] || {};
-    const price = Number(shelvesResp.current_price ?? last.close);
+
+    const price = Number(
+      shelvesResp.current_price ??
+        shelvesResp.price ??
+        last.close ??
+        last.c
+    );
 
     const result = computeEngine3EsReactionQuality({
       price,
@@ -55,10 +82,15 @@ router.get("/", async (req, res) => {
       ...result,
       meta: {
         tf,
-        resolvedSymbol: candlesResp.resolvedSymbol || null,
+        resolvedSymbol:
+          candlesResp.resolvedSymbol ||
+          candlesResp.resolved_symbol ||
+          candlesResp.symbol ||
+          null,
         candles: candles.length,
         manualZones: (manual.structures || []).length,
         shelves: (shelvesResp.levels || []).length,
+        impulseIgnitionEnabled: true,
       },
     });
   } catch (err) {
