@@ -96,24 +96,37 @@ function calculateEMA(values, length) {
   return round2(ema);
 }
 
-function normalizeBarsForEngine16(bars) {
-  return Array.isArray(bars)
-    ? bars
-        .map((b) => ({
-          t: Number(b?.t ?? b?.time),
-          o: Number(b?.o ?? b?.open),
-          h: Number(b?.h ?? b?.high),
-          l: Number(b?.l ?? b?.low),
-          c: Number(b?.c ?? b?.close),
-          v: Number(b?.v ?? b?.volume ?? 0),
-        }))
-        .filter(
-          (b) =>
-            Number.isFinite(b.t) &&
-            [b.o, b.h, b.l, b.c].every(Number.isFinite)
-        )
-        .sort((a, b) => a.t - b.t)
-    : [];
+function normalizeBarsForEngine16(payload) {
+  const list =
+    Array.isArray(payload) ? payload :
+    Array.isArray(payload?.bars) ? payload.bars :
+    Array.isArray(payload?.data) ? payload.data :
+    Array.isArray(payload?.results) ? payload.results :
+    [];
+
+  return list
+    .map((b) => {
+      const rawT = Number(b?.t ?? b?.time);
+      const t =
+        Number.isFinite(rawT) && rawT < 10_000_000_000
+          ? rawT * 1000
+          : rawT;
+
+      return {
+        t,
+        o: Number(b?.o ?? b?.open),
+        h: Number(b?.h ?? b?.high),
+        l: Number(b?.l ?? b?.low),
+        c: Number(b?.c ?? b?.close),
+        v: Number(b?.v ?? b?.volume ?? 0),
+      };
+    })
+    .filter(
+      (b) =>
+        Number.isFinite(b.t) &&
+        [b.o, b.h, b.l, b.c].every(Number.isFinite)
+    )
+    .sort((a, b) => a.t - b.t);
 }
 
 function getTfMs(tf) {
