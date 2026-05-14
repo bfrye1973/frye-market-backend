@@ -1922,7 +1922,9 @@ async function processStrategy(
   marketMeter,
   marketRegime,
   engine16,
-  engine2State
+  engine2State,
+  spyReactionQuality = null,
+  spyVolumeBehavior = null
 ) {
 
   const contextResp = await fetchJson(
@@ -2227,11 +2229,17 @@ async function processStrategy(
             waveReaction: reaction?.waveReaction || null,
             engine2State,
             marketMind,
-            marketMeter, 
+            marketMeter,
 
-            // Engine 1 negotiated-zone truth for Engine 22 zone absorption.
-           engine1Context,
-         });
+           // Engine 3 reaction-quality route for Engine 22 timeline.
+           reactionContext: spyReactionQuality?.engine3Reaction || spyReactionQuality || null,
+
+           // Engine 4 volume-participation route for Engine 22 timeline.
+          volumeContext: spyVolumeBehavior?.engine4Volume || spyVolumeBehavior || null,
+
+          // Engine 1 negotiated-zone truth for Engine 22 zone absorption.
+          engine1Context,
+        });
        } catch (err) {
          console.error("[E22 ERROR]", err);
 
@@ -2478,7 +2486,14 @@ async function buildSnapshot() {
   const engine2State = await buildEngine2State(symbol);
   console.log("Momentum fetched");
 
-  const [marketMind, engine21TenMin, engine21ThirtyMin, tenMinuteLayer] = await Promise.all([
+const [
+  marketMind,
+  engine21TenMin,
+  engine21ThirtyMin,
+  tenMinuteLayer,
+  spyReactionQuality,
+  spyVolumeBehavior,
+] = await Promise.all([
   fetchLiveMarketMeter(),
   fetchEngine21Alignment("10m"),
   fetchEngine21Alignment("30m"),
@@ -2502,8 +2517,17 @@ async function buildSnapshot() {
     source: "/api/v1/ohlc",
     error: String(err?.message || err),
   })),
+  fetchSpyReactionQuality(symbol, "10m").catch((err) => ({
+    ok: false,
+    error: "SPY_REACTION_QUALITY_FETCH_FAILED",
+    detail: String(err?.message || err),
+  })),
+  fetchSpyVolumeBehavior(symbol, "10m").catch((err) => ({
+    ok: false,
+    error: "SPY_VOLUME_BEHAVIOR_FETCH_FAILED",
+    detail: String(err?.message || err),
+  })),
 ]);
-
 console.log("Live Market Meter fetched");
 console.log("Engine21 alignment fetched");
 
@@ -2588,7 +2612,9 @@ console.log("Engine21 alignment fetched");
   marketMeter,
   marketRegime,
   engine16ForStrategy,
-  engine2State
+  engine2State,
+  spyReactionQuality,
+  spyVolumeBehavior
 );
 
   const executionState = getExecutionState(symbol, s.strategyId);
