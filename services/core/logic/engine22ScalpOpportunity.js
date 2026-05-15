@@ -3937,6 +3937,7 @@ supportedSetups: {
     marketBias: null,
     trendVsWave: null,
     microContinuation: null,
+    microW4Pullback: null,
     reactionContext: null,
     volumeContext: null,
     breakoutContext: null,
@@ -4055,16 +4056,26 @@ supportedSetups: {
     ema10: effectiveEma10,
     ema20: effectiveEma20,
   });
-  
+
+  const microW4Pullback = detectMicroW4PullbackState({
+  engine2State,
+  engine16,
+  marketBias,
+  latestClose: effectiveLatestClose,
+  ema10: effectiveEma10,
+  ema20: effectiveEma20,
+  regimeLayers,
+});
   const finish = (out) => {
   const withTrend = applyTrendVsWaveSafety(out, trendVsWave);
   const withMicro = applyMicroContinuationPromotion(withTrend, microContinuation);
+  const withMicroW4 = applyMicroW4PullbackPromotion(withMicro, microW4Pullback);  
 
   const zoneAbsorption = detectNegotiatedZoneAbsorption({
     engine1Context,
-    engine22State: withMicro?.state,
-    engine22Setup: withMicro?.setupType,
-    engine22Status: withMicro?.status,
+    engine22State: withMicroW4?.state,
+    engine22Setup: withMicroW4?.setupType,
+    engine22Status: withMicroW4?.status,
     latestClose,
     ema10,
     structureState,
@@ -4076,9 +4087,9 @@ supportedSetups: {
     marketMind,
     trendVsWave,
     zoneAbsorption,
-    engine22State: withMicro?.state,
-    engine22Setup: withMicro?.setupType,
-    engine22Status: withMicro?.status,
+    engine22State: withMicroW4?.state,
+    engine22Setup: withMicroW4?.setupType,
+    engine22Status: withMicroW4?.status,
     latestClose,
     ema10,
     ema20,
@@ -4086,15 +4097,16 @@ supportedSetups: {
   });
 
    return {
-       ...withMicro,
-       regimeLayers,
-       reactionContext,
-       volumeContext,
-       breakoutContext,
-       zoneAbsorption,
-       runnerMode,
-     };
-   };  
+    ...withMicroW4,
+    regimeLayers,
+    reactionContext,
+    volumeContext,
+    breakoutContext,
+    microW4Pullback: microW4Pullback?.active === true ? microW4Pullback : null,
+    zoneAbsorption,
+    runnerMode,
+  };
+};  
    if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
     return finish({
       ...base,
