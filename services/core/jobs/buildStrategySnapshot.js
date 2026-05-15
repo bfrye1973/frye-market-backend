@@ -2021,6 +2021,7 @@ function normalizeEsVolume(esJson) {
     esVolume: esJson,
   };
 }
+
 async function fetchVolume({ symbol, tf, zoneLo, zoneHi, mode }) {
   if (isFuturesSymbol(symbol)) {
     const u = new URL(`${CORE_BASE}/api/v1/es-volume-behavior`);
@@ -2042,15 +2043,24 @@ async function fetchVolume({ symbol, tf, zoneLo, zoneHi, mode }) {
   }
 
   if (zoneLo == null || zoneHi == null) {
+    return {
+      ok: true,
+      volumeScore: 0,
+      volumeConfirmed: false,
+      reasonCodes: ["NO_ACTIVE_ZONE"],
+      flags: {},
+      diagnostics: { note: "NO_ACTIVE_ZONE" },
+    };
+  }
 
-  const u = new URL(`${CORE_BASE}/api/v1/volume-behavior`);
-  u.searchParams.set("symbol", symbol);
-  u.searchParams.set("tf", tf);
-  u.searchParams.set("zoneLo", String(zoneLo));
-  u.searchParams.set("zoneHi", String(zoneHi));
-  if (mode) u.searchParams.set("mode", mode);
+  const stockUrl = new URL(`${CORE_BASE}/api/v1/volume-behavior`);
+  stockUrl.searchParams.set("symbol", symbol);
+  stockUrl.searchParams.set("tf", tf);
+  stockUrl.searchParams.set("zoneLo", String(zoneLo));
+  stockUrl.searchParams.set("zoneHi", String(zoneHi));
+  if (mode) stockUrl.searchParams.set("mode", mode);
 
-  const r = await fetchJson(u.toString(), 30000);
+  const r = await fetchJson(stockUrl.toString(), 30000);
 
   if (r.ok && r.json) return r.json?.raw || r.json;
 
