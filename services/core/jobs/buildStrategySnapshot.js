@@ -1968,8 +1968,6 @@ async function fetchReaction({ symbol, tf, strategyId, zoneId, zoneLo, zoneHi })
       diagnostics: { error: r?.text || "ES_ENGINE3_FETCH_FAILED" },
     };
   }
-
-  const u = new URL(`${CORE_BASE}/api/v1/reaction-score`);
    
   const u = new URL(`${CORE_BASE}/api/v1/reaction-score`);
   u.searchParams.set("symbol", symbol);
