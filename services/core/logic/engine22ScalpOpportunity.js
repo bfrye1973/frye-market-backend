@@ -3570,6 +3570,74 @@ function applyMicroContinuationPromotion(out, microContinuation) {
     },
   };
 
+  function applyMicroW4PullbackPromotion(out, microW4Pullback) {
+  if (!out || typeof out !== "object") return out;
+
+  const microW4 =
+    microW4Pullback?.active === true
+      ? microW4Pullback
+      : null;
+
+  const withMicroW4 = {
+    ...out,
+    microW4Pullback: microW4,
+    debug: {
+      ...(out.debug || {}),
+      microW4Pullback: microW4
+        ? {
+            state: microW4.state,
+            status: microW4.status,
+            readiness: microW4.readiness,
+            needs: microW4.needs,
+            confidence: microW4.confidence,
+            reasonCodes: microW4.reasonCodes,
+          }
+        : null,
+    },
+  };
+
+  if (!microW4) return withMicroW4;
+
+  if (isStrongEngine22State(withMicroW4)) {
+    return withMicroW4;
+  }
+
+  return {
+    ...withMicroW4,
+    active: true,
+    setupType: microW4.setupType,
+    type: microW4.type,
+    state: microW4.state,
+    status: microW4.status,
+    readiness: microW4.readiness,
+    direction: microW4.direction,
+    side: microW4.side,
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    confidence: microW4.confidence,
+    sizeMode: microW4.sizeMode,
+    needs: microW4.needs,
+    marketBias: microW4.marketBias || withMicroW4.marketBias,
+    reasonCodes: [
+      ...(Array.isArray(microW4.reasonCodes) ? microW4.reasonCodes : []),
+      "MICRO_W4_PROMOTED_TO_TOP_LEVEL",
+    ],
+    debug: {
+      ...(withMicroW4.debug || {}),
+      ...(microW4.debug || {}),
+      microW4Pullback: {
+        state: microW4.state,
+        status: microW4.status,
+        readiness: microW4.readiness,
+        needs: microW4.needs,
+        confidence: microW4.confidence,
+        reasonCodes: microW4.reasonCodes,
+      },
+    },
+  };
+}
   if (!micro) return withMicro;
 
   if (isStrongEngine22State(withMicro)) {
