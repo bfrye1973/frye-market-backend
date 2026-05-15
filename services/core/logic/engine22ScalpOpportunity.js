@@ -3544,6 +3544,7 @@ function detectMicroW4PullbackState({
     debug: commonDebug,
   };
 }
+
 function applyMicroContinuationPromotion(out, microContinuation) {
   if (!out || typeof out !== "object") return out;
 
@@ -3570,7 +3571,50 @@ function applyMicroContinuationPromotion(out, microContinuation) {
     },
   };
 
-  function applyMicroW4PullbackPromotion(out, microW4Pullback) {
+  if (!micro) return withMicro;
+
+  if (isStrongEngine22State(withMicro)) {
+    return withMicro;
+  }
+
+  return {
+    ...withMicro,
+    active: true,
+    setupType: micro.setupType,
+    type: micro.type,
+    state: micro.state,
+    status: micro.status,
+    readiness: micro.readiness,
+    direction: micro.direction,
+    side: micro.side,
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    confidence: micro.confidence,
+    sizeMode: micro.sizeMode,
+    needs: micro.needs,
+    marketBias: micro.marketBias || withMicro.marketBias,
+    reasonCodes: [
+      ...(Array.isArray(micro.reasonCodes) ? micro.reasonCodes : []),
+      "MICRO_W3_PROMOTED_TO_TOP_LEVEL",
+    ],
+    debug: {
+      ...(withMicro.debug || {}),
+      ...(micro.debug || {}),
+      microContinuation: {
+        state: micro.state,
+        status: micro.status,
+        readiness: micro.readiness,
+        needs: micro.needs,
+        confidence: micro.confidence,
+        reasonCodes: micro.reasonCodes,
+      },
+    },
+  };
+}
+
+function applyMicroW4PullbackPromotion(out, microW4Pullback) {
   if (!out || typeof out !== "object") return out;
 
   const microW4 =
@@ -3634,48 +3678,6 @@ function applyMicroContinuationPromotion(out, microContinuation) {
         needs: microW4.needs,
         confidence: microW4.confidence,
         reasonCodes: microW4.reasonCodes,
-      },
-    },
-  };
-}
-  if (!micro) return withMicro;
-
-  if (isStrongEngine22State(withMicro)) {
-    return withMicro;
-  }
-
-  return {
-    ...withMicro,
-    active: true,
-    setupType: micro.setupType,
-    type: micro.type,
-    state: micro.state,
-    status: micro.status,
-    readiness: micro.readiness,
-    direction: micro.direction,
-    side: micro.side,
-    allowLongEntry: false,
-    allowShort: false,
-    allowShortEntry: false,
-    triggerConfirmed: false,
-    confidence: micro.confidence,
-    sizeMode: micro.sizeMode,
-    needs: micro.needs,
-    marketBias: micro.marketBias || withMicro.marketBias,
-    reasonCodes: [
-      ...(Array.isArray(micro.reasonCodes) ? micro.reasonCodes : []),
-      "MICRO_W3_PROMOTED_TO_TOP_LEVEL",
-    ],
-    debug: {
-      ...(withMicro.debug || {}),
-      ...(micro.debug || {}),
-      microContinuation: {
-        state: micro.state,
-        status: micro.status,
-        readiness: micro.readiness,
-        needs: micro.needs,
-        confidence: micro.confidence,
-        reasonCodes: micro.reasonCodes,
       },
     },
   };
