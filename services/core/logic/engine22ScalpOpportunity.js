@@ -3343,7 +3343,207 @@ function detectMicroW3ContinuationState({
     debug: commonDebug,
   };
 }
+function detectMicroW4PullbackState({
+  engine2State,
+  engine16,
+  marketBias,
+  latestClose,
+  ema10,
+  ema20,
+  regimeLayers,
+}) {
+  const phases = getWavePhases(engine2State);
 
+  const close = validPrice(latestClose);
+  const e10 = validPrice(ema10);
+  const e20 = validPrice(ema20);
+
+  const hourlyClose = validPrice(engine16?.hourlyClose);
+  const ema10_1h = validPrice(engine16?.ema10_1h);
+
+  const tenMinute = regimeLayers?.tenMinute || null;
+  const oneHour = regimeLayers?.oneHour || null;
+  const eod = regimeLayers?.eod || null;
+
+  const minutePhase = phases.minutePhase;
+  const microPhase = phases.microPhase;
+  const confirmedMicroPhase = phases.confirmedMicroPhase;
+
+  const isMicroW4Context =
+    minutePhase === "IN_W5" &&
+    microPhase === "IN_W4";
+
+  const above10mEma10 =
+    close !== null &&
+    e10 !== null &&
+    close > e10;
+
+  const above10mEma20 =
+    close !== null &&
+    e20 !== null &&
+    close > e20;
+
+  const below10mEma20 =
+    close !== null &&
+    e20 !== null &&
+    close < e20;
+
+  const oneHourAboveEma10 =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    hourlyClose > ema10_1h;
+
+  const oneHourBelowEma10 =
+    hourlyClose !== null &&
+    ema10_1h !== null &&
+    hourlyClose < ema10_1h;
+
+  const commonDebug = {
+    ...phases,
+    latestClose: close,
+    ema10: e10,
+    ema20: e20,
+    hourlyClose,
+    ema10_1h,
+    above10mEma10,
+    above10mEma20,
+    below10mEma20,
+    oneHourAboveEma10,
+    oneHourBelowEma10,
+    tenMinute,
+    oneHour,
+    eod,
+    confirmedMicroPhase,
+    note:
+      "Micro W4 pullback workflow: Micro W3 completed; waiting for Micro W4 support/reclaim and possible Micro W5 trigger.",
+  };
+
+  if (!isMicroW4Context) {
+    return {
+      active: false,
+      state: "NO_MICRO_W4_CONTEXT",
+      reasonCodes: ["NOT_MICRO_W4_CONTEXT"],
+      debug: commonDebug,
+    };
+  }
+
+  if (oneHourBelowEma10 && below10mEma20) {
+    return {
+      active: true,
+      setupType: "MICRO_W4_PULLBACK_INSIDE_MINUTE_W5",
+      type: "MICRO_W4_PULLBACK_ACTIVE",
+      state: "MICRO_W4_PULLBACK_ACTIVE",
+      status: "WATCH",
+      readiness: "NO_TRADE",
+      direction: "NONE",
+      side: "NONE",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      confidence: 0,
+      sizeMode: "NONE",
+      needs: "WAIT_FOR_MICRO_W4_RECLAIM_OR_SUPPORT",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W5_ACTIVE",
+        "MICRO_W4_ACTIVE",
+        "CONFIRMED_MICRO_W3_COMPLETE",
+        "TEN_MIN_BELOW_EMA20",
+        "ONE_HOUR_EMA10_LOST",
+        "WAIT_FOR_MICRO_W5_TRIGGER",
+        "OBSERVATION_ONLY",
+      ],
+      debug: commonDebug,
+    };
+  }
+
+  if (above10mEma10 && !above10mEma20) {
+    return {
+      active: true,
+      setupType: "MICRO_W4_PULLBACK_INSIDE_MINUTE_W5",
+      type: "MICRO_W4_RECLAIM_WATCH",
+      state: "MICRO_W4_RECLAIM_WATCH",
+      status: "WATCH",
+      readiness: "WATCH",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      confidence: 40,
+      sizeMode: "NONE",
+      needs: "RECLAIM_10M_EMA20_AND_1H_EMA10",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W5_ACTIVE",
+        "MICRO_W4_ACTIVE",
+        "EMA10_RECLAIM_ATTEMPT",
+        "EMA20_NOT_RECLAIMED",
+        "WAIT_FOR_MICRO_W5_TRIGGER",
+        "OBSERVATION_ONLY",
+      ],
+      debug: commonDebug,
+    };
+  }
+
+  if (above10mEma10 && above10mEma20 && oneHourAboveEma10) {
+    return {
+      active: true,
+      setupType: "MICRO_W4_TO_W5_TRIGGER_WATCH",
+      type: "MICRO_W5_TRIGGER_PENDING",
+      state: "MICRO_W5_TRIGGER_PENDING",
+      status: "WATCH",
+      readiness: "READY",
+      direction: "LONG",
+      side: "LONG",
+      allowLongEntry: false,
+      allowShort: false,
+      allowShortEntry: false,
+      triggerConfirmed: false,
+      confidence: 62,
+      sizeMode: "CONTROLLED_DIP_ONLY",
+      needs: "WAIT_FOR_ENGINE3_REACTION_AND_ENGINE4_PARTICIPATION",
+      marketBias,
+      reasonCodes: [
+        "MINUTE_W5_ACTIVE",
+        "MICRO_W4_ACTIVE",
+        "TEN_MIN_RECLAIMED_EMA10_20",
+        "ONE_HOUR_EMA10_HOLDING",
+        "MICRO_W5_TRIGGER_PENDING",
+        "OBSERVATION_ONLY",
+      ],
+      debug: commonDebug,
+    };
+  }
+
+  return {
+    active: true,
+    setupType: "MICRO_W4_PULLBACK_INSIDE_MINUTE_W5",
+    type: "MICRO_W4_PULLBACK_ACTIVE",
+    state: "MICRO_W4_PULLBACK_ACTIVE",
+    status: "WATCH",
+    readiness: "WATCH",
+    direction: "NONE",
+    side: "NONE",
+    allowLongEntry: false,
+    allowShort: false,
+    allowShortEntry: false,
+    triggerConfirmed: false,
+    confidence: 0,
+    sizeMode: "NONE",
+    needs: "WAIT_FOR_MICRO_W4_STRUCTURE",
+    marketBias,
+    reasonCodes: [
+      "MINUTE_W5_ACTIVE",
+      "MICRO_W4_ACTIVE",
+      "WAIT_FOR_MICRO_W4_STRUCTURE",
+      "OBSERVATION_ONLY",
+    ],
+    debug: commonDebug,
+  };
+}
 function applyMicroContinuationPromotion(out, microContinuation) {
   if (!out || typeof out !== "object") return out;
 
