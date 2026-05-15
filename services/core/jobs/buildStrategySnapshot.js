@@ -78,6 +78,89 @@ function isFuturesSymbol(sym) {
 function ohlcPathForSymbol(sym) {
   return isFuturesSymbol(sym) ? "/api/v1/futures/ohlc" : "/api/v1/ohlc";
 }
+function normalizeEsEngine1Context(esJson) {
+  const levels = Array.isArray(esJson?.levels) ? esJson.levels : [];
+
+  const price = firstNumber(
+    esJson?.current_price,
+    esJson?.currentPrice,
+    esJson?.meta?.current_price,
+    esJson?.meta?.currentPrice,
+    esJson?.meta?.current_price_anchor,
+    esJson?.meta?.currentPriceAnchor
+  );
+
+  const shelves = levels.map((z) => {
+    const lo = Number(z?.lo);
+    const hi = Number(z?.hi);
+
+    let distancePts = null;
+
+    if (Number.isFinite(price) && Number.isFinite(lo) && Number.isFinite(hi)) {
+      const a = Math.min(lo, hi);
+      const b = Math.max(lo, hi);
+
+      if (price >= a && price <= b) {
+        distancePts = 0;
+      } else {
+        distancePts = price < a ? a - price : price - b;
+      }
+    }
+
+    return {
+      ...z,
+      id: z?.id ?? null,
+      type: z?.type ?? null,
+      lo: Number.isFinite(lo) ? lo : null,
+      hi: Number.isFinite(hi) ? hi : null,
+      mid: firstNumber(z?.mid, z?.price),
+      strength: firstNumber(z?.strength, z?.strength_raw),
+      confidence: firstNumber(z?.confidence),
+      distancePts:
+        Number.isFinite(distancePts) ? Number(distancePts.toFixed(2)) : null,
+      zoneType: "SHELF",
+      source: "ES_ENGINE_1B_SHELVES",
+    };
+  });
+
+  const sortedShelves = shelves
+    .filter((z) => Number.isFinite(Number(z?.distancePts)))
+    .sort((a, b) => Number(a.distancePts) - Number(b.distancePts));
+
+  const activeShelf =
+    sortedShelves.find((z) => Number(z.distancePts) === 0) || null;
+
+  const nearestShelf =
+    sortedShelves[0] || null;
+
+  return {
+    ok: esJson?.ok !== false,
+    symbol: "ES",
+    meta: {
+      ...(esJson?.meta || {}),
+      symbol: "ES",
+      current_price: Number.isFinite(price) ? price : null,
+      currentPrice: Number.isFinite(price) ? price : null,
+      source: "ES_ENGINE_1B_SHELVES",
+    },
+    active: {
+      negotiated: null,
+      institutional: null,
+      shelf: activeShelf,
+    },
+    nearest: {
+      shelf: nearestShelf,
+    },
+    render: {
+      negotiated: [],
+      institutional: [],
+      shelves,
+    },
+    flags: {
+      source: "ES_ENGINE_1B_SHELVES",
+    },
+  };
+} 
 
 /* -----------------------------
    Safe HTTP helpers
@@ -1839,7 +1922,55 @@ function pickActiveExtension(primaryChoice, fallbackChoice) {
 /* -----------------------------
    Reaction / Volume
 ------------------------------*/
+function normalizeEsReaction(esJson) {
+  const reaction = esJson?.reaction || {};
+
+  return {
+    ok: esJson?.ok !== false,
+    stage: "IDLE",
+    armed: false,
+    reactionScore: Number(reaction?.qualityScore ?? 0),
+    confirmed: false,
+    structureState:
+      reaction?.state ||
+      reaction?.position ||
+      "HOLD",
+    reasonCodes: [
+      "ES_REACTION_SCORE",
+      esJson?.zoneType ? `ZONE_TYPE_${String(esJson.zoneType).toUpperCase()}` : null,
+      reaction?.state ? String(reaction.state).toUpperCase() : null,
+    ].filter(Boolean),
+    waveReaction: null,
+    esReaction: esJson,
+  };
+}
+
 async function fetchReaction({ symbol, tf, strategyId, zoneId, zoneLo, zoneHi }) {
+  if (isFuturesSymbol(symbol)) {
+    const u = new URL(`${CORE_BASE}/api/v1/es-reaction-score`);
+    u.searchParams.set("symbol", symbol);
+    u.searchParams.set("tf", tf);
+
+    const r = await fetchJson(u.toString(), 30000);
+
+    if (r.ok && r.json) return normalizeEsReaction(r.json);
+
+    return {
+      ok: true,
+      invalid: false,
+      reactionScore: 0,
+      structureState: "HOLD",
+      reasonCodes: ["ES_ENGINE3_UNAVAILABLE"],
+      zone: { id: zoneId, lo: zoneLo, hi: zoneHi },
+      armed: false,
+      stage: "IDLE",
+      mode: modeFromStrategyId(strategyId),
+      diagnostics: { error: r?.text || "ES_ENGINE3_FETCH_FAILED" },
+    };
+  }
+
+  const u = new URL(`${CORE_BASE}/api/v1/reaction-score`);
+   
   const u = new URL(`${CORE_BASE}/api/v1/reaction-score`);
   u.searchParams.set("symbol", symbol);
   u.searchParams.set("tf", tf);
@@ -1867,17 +1998,52 @@ async function fetchReaction({ symbol, tf, strategyId, zoneId, zoneLo, zoneHi })
   };
 }
 
+function normalizeEsVolume(esJson) {
+  const v = esJson?.engine4EsVolume || esJson?.raw || esJson || {};
+
+  return {
+    ok: esJson?.ok !== false,
+    volumeScore: Number(v?.volumeScore ?? 0),
+    volumeConfirmed: v?.volumeConfirmed === true,
+    flags: {
+      volumeExpansion: v?.volumeExpansion === true,
+      absorptionRisk: v?.absorptionRisk === true,
+      climacticVolume: v?.climacticVolume === true,
+      highVolumeCandles: Number(v?.highVolumeCandles ?? 0),
+      relativeVolume: Number(v?.relativeVolume ?? 0),
+      volumeTrend: v?.volumeTrend || null,
+      participationState: v?.participationState || null,
+      participationQuality: v?.participationQuality || null,
+    },
+    state:
+      v?.participationState ||
+      v?.participationQuality ||
+      "NO_SIGNAL",
+    reasonCodes: Array.isArray(v?.reasonCodes) ? v.reasonCodes : [],
+    esVolume: esJson,
+  };
+}
 async function fetchVolume({ symbol, tf, zoneLo, zoneHi, mode }) {
-  if (zoneLo == null || zoneHi == null) {
+  if (isFuturesSymbol(symbol)) {
+    const u = new URL(`${CORE_BASE}/api/v1/es-volume-behavior`);
+    u.searchParams.set("symbol", symbol);
+    u.searchParams.set("tf", tf);
+
+    const r = await fetchJson(u.toString(), 30000);
+
+    if (r.ok && r.json) return normalizeEsVolume(r.json);
+
     return {
       ok: true,
       volumeScore: 0,
       volumeConfirmed: false,
-      reasonCodes: ["NO_ACTIVE_ZONE"],
+      reasonCodes: ["ES_ENGINE4_UNAVAILABLE"],
       flags: {},
-      diagnostics: { note: "NO_ACTIVE_ZONE" },
+      diagnostics: { error: r?.text || "ES_ENGINE4_FETCH_FAILED" },
     };
   }
+
+  if (zoneLo == null || zoneHi == null) {
 
   const u = new URL(`${CORE_BASE}/api/v1/volume-behavior`);
   u.searchParams.set("symbol", symbol);
@@ -1915,14 +2081,34 @@ async function processStrategy(
   spyVolumeBehavior = null
 ) {
 
-  const contextResp = await fetchJson(
+let contextResp = null;
+let engine1Context = null;
+
+if (isFuturesSymbol(symbol)) {
+  contextResp = await fetchJson(
+    `${CORE_BASE}/api/v1/es-smz-shelves?symbol=${encodeURIComponent(symbol)}`,
+    30000
+  );
+
+  engine1Context = normalizeEsEngine1Context(
+    contextResp?.json || {
+      ok: false,
+      symbol,
+      levels: [],
+      meta: {},
+      error: contextResp?.text || "no_es_context",
+    }
+  );
+} else {
+  contextResp = await fetchJson(
     `${CORE_BASE}/api/v1/engine5-context?symbol=${symbol}&tf=${s.tf}`,
     30000
   );
 
-  const engine1Context =
+  engine1Context =
     contextResp?.json ||
     { ok: false, status: contextResp?.status || 0, error: contextResp?.text || "no_context" };
+}
 
   const price = Number(engine1Context?.meta?.current_price ?? NaN);
   const strategyMode = modeFromStrategyId(s.strategyId);
