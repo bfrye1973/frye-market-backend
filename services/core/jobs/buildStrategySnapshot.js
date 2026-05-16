@@ -1002,6 +1002,7 @@ async function buildEma10Posture({ symbol, tf, label, limit = 120 }) {
   const lastBar = bars.length ? bars[bars.length - 1] : null;
   const close = lastBar ? barClose(lastBar) : null;
   const ema10 = calcEma(closes, 10);
+  const ema20 = calcEma(closes, 20);
 
   const distancePts =
     Number.isFinite(close) && Number.isFinite(ema10)
@@ -1013,6 +1014,20 @@ async function buildEma10Posture({ symbol, tf, label, limit = 120 }) {
       ? Number((((close - ema10) / ema10) * 100).toFixed(2))
       : null;
 
+const distanceToEma20 =
+  Number.isFinite(close) && Number.isFinite(ema20)
+    ? Number((close - ema20).toFixed(2))
+    : null;
+
+const distanceToEma20Pct =
+  Number.isFinite(close) && Number.isFinite(ema20) && ema20 !== 0
+    ? Number((((close - ema20) / ema20) * 100).toFixed(2))
+    : null;
+
+const aboveEma20 =
+  Number.isFinite(close) && Number.isFinite(ema20)
+    ? close > ema20
+    : null;
   let state = "UNKNOWN";
   let aboveEma10 = null;
 
