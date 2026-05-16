@@ -20,10 +20,6 @@ function round2(x) {
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
 }
 
-function upper(x) {
-  return String(x || "").trim().toUpperCase();
-}
-
 function getMarkPrice(block, key) {
   const p = toNum(block?.waveMarks?.[key]?.p);
   return p !== null && p > 0 ? p : null;
@@ -183,17 +179,112 @@ function classifyCZone({ cLow, levels, hardInvalidation, noOverlapLine }) {
   };
 }
 
-function buildReclaimLevels({ levels, noOverlapLine, bHigh }) {
-  return [
-    levels?.r786,
-    levels?.r618,
-    noOverlapLine,
-    levels?.r500,
-    levels?.r382,
-    bHigh,
-  ]
+function uniqueSortedPrices(xs = []) {
+  const seen = new Set();
+
+  return xs
     .map(round2)
-    .filter((x) => Number.isFinite(x));
+    .filter((x) => Number.isFinite(x))
+    .sort((a, b) => a - b)
+    .filter((x) => {
+      const key = String(x);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function formatPriceGroup(prices = []) {
+  return uniqueSortedPrices(prices)
+    .map((x) => x.toFixed(2))
+    .join("/");
+}
+
+function buildReclaimPlan({ levels, noOverlapLine, bHigh }) {
+  const r786 = round2(levels?.r786);
+  const r618 = round2(levels?.r618);
+  const r500 = round2(levels?.r500);
+  const r382 = round2(levels?.r382);
+  const w1High = round2(noOverlapLine);
+  const b = round2(bHigh);
+
+  const reclaimLevelDetails = [
+    {
+      key: "r786",
+      label: "78.6% retracement reclaim",
+      price: r786,
+      group: "FIRST_RECLAIM",
+    },
+    {
+      key: "r618",
+      label: "61.8% retracement reclaim",
+      price: r618,
+      group: "CLEAN_PATH_RECLAIM",
+    },
+    {
+      key: "w1High",
+      label: "Micro W1 high / no-overlap reclaim",
+      price: w1High,
+      group: "CLEAN_PATH_RECLAIM",
+    },
+    {
+      key: "r500",
+      label: "50% retracement reclaim",
+      price: r500,
+      group: "MID_RECLAIM",
+    },
+    {
+      key: "bHigh",
+      label: "B high reclaim",
+      price: b,
+      group: "STRUCTURE_RECLAIM",
+    },
+    {
+      key: "r382",
+      label: "38.2% retracement reclaim",
+      price: r382,
+      group: "STRUCTURE_RECLAIM",
+    },
+  ].filter((x) => Number.isFinite(x.price));
+
+  const reclaimLevels = uniqueSortedPrices(
+    reclaimLevelDetails.map((x) => x.price)
+  );
+
+  const reclaimLadder = [
+    {
+      group: "FIRST_RECLAIM",
+      label: "Reclaim 78.6%",
+      prices: uniqueSortedPrices([r786]),
+    },
+    {
+      group: "CLEAN_PATH_RECLAIM",
+      label: "Reclaim 61.8% / Micro W1 high",
+      prices: uniqueSortedPrices([r618, w1High]),
+    },
+    {
+      group: "MID_RECLAIM",
+      label: "Reclaim 50%",
+      prices: uniqueSortedPrices([r500]),
+    },
+    {
+      group: "STRUCTURE_RECLAIM",
+      label: "Reclaim B high / 38.2%",
+      prices: uniqueSortedPrices([b, r382]),
+    },
+  ].filter((x) => x.prices.length > 0);
+
+  const reclaimDisplay = reclaimLadder
+    .map((x) => formatPriceGroup(x.prices))
+    .filter(Boolean)
+    .join(" → ");
+
+  return {
+    reclaimLevels,
+    reclaimLadder,
+    reclaimDisplay,
+    reclaimLevelDetails,
+  };
 }
 
 export function analyzeAbcCorrection({
@@ -270,6 +361,7 @@ export function analyzeAbcCorrection({
   });
 
   const aLow = toNum(block?.aLow);
+
   const bHigh =
     toNum(block?.bHigh) ??
     toNum(block?.lowerHighLevel) ??
@@ -286,7 +378,7 @@ export function analyzeAbcCorrection({
     noOverlapLine,
   });
 
-  const reclaimLevels = buildReclaimLevels({
+  const reclaimPlan = buildReclaimPlan({
     levels: retrace.levels,
     noOverlapLine,
     bHigh,
@@ -345,7 +437,10 @@ export function analyzeAbcCorrection({
         cClass.topLikelyConfirmedForNow === true
       ),
 
-    reclaimLevels,
+    reclaimLevels: reclaimPlan.reclaimLevels,
+    reclaimLadder: reclaimPlan.reclaimLadder,
+    reclaimDisplay: reclaimPlan.reclaimDisplay,
+    reclaimLevelDetails: reclaimPlan.reclaimLevelDetails,
 
     needs:
       cClass.cleanW5PathDamaged === true
