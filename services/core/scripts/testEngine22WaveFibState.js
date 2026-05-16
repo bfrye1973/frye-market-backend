@@ -18,6 +18,7 @@ import path from "path";
 import { analyzeWaveStack } from "../logic/engine22/wave/analyzeWaveStack.js";
 
 const SNAPSHOT_FILE = path.resolve("./data/strategy-snapshot.json");
+const PROOF_PRICE = 748.17;
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 const CLUSTER_DEGREES = ["primary", "intermediate", "minor", "minute"];
@@ -219,6 +220,12 @@ function main() {
     currentPrice,
   });
 
+  const proofWaveFibState = analyzeWaveStack({
+    symbol,
+    engine2State,
+    currentPrice: PROOF_PRICE,
+  });
+  
   printHeader("ENGINE 22G WAVE/FIB STATE DIAGNOSTIC");
 
   console.log(
@@ -240,6 +247,26 @@ function main() {
     )
   );
 
+  printHeader("ENGINE 22G PROOF MODE @ 748.17");
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: proofWaveFibState.ok,
+        engine: proofWaveFibState.engine,
+        symbol: proofWaveFibState.symbol,
+        proofPrice: PROOF_PRICE,
+        stackBias: proofWaveFibState.stackBias,
+        activeTradingDegree: proofWaveFibState.activeTradingDegree,
+        activeSetup: proofWaveFibState.activeSetup,
+        chaseRisk: proofWaveFibState.chaseRisk,
+        chaseRiskDegree: proofWaveFibState.chaseRiskDegree,
+        summary: proofWaveFibState.summary,
+      },
+      null,
+      2
+    )
+  );
   printHeader("DEGREE STATE SUMMARY");
 
   for (const degree of DEGREE_ORDER) {
@@ -266,22 +293,22 @@ function main() {
   printHeader("EXPECTED SPY VALIDATIONS");
 
   const intermediateE1618 =
-    waveFibState.degrees?.intermediate?.fibProjection?.levels?.e1618;
+    proofWaveFibState.degrees?.intermediate?.fibProjection?.levels?.e1618;
 
   const minuteE100 =
-    waveFibState.degrees?.minute?.fibProjection?.levels?.e100;
+    proofWaveFibState.degrees?.minute?.fibProjection?.levels?.e100;
 
   const microState =
-    waveFibState.degrees?.micro?.state;
+    proofWaveFibState.degrees?.micro?.state;
 
   const microNext =
-    waveFibState.degrees?.micro?.nextExpectedWave;
+    proofWaveFibState.degrees?.micro?.nextExpectedWave;
 
   const stackBias =
-    waveFibState.stackBias;
+    proofWaveFibState.stackBias;
 
   const chaseRisk =
-    waveFibState.chaseRisk;
+    proofWaveFibState.chaseRisk;
 
   const checks = [
     {
