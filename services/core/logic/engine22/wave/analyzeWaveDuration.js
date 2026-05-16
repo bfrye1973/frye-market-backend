@@ -224,6 +224,14 @@ function classifyMaturity(elapsedHours, expected) {
 }
 
 function classifyBarMaturity(elapsedBars, expected) {
+  if (elapsedBars === null || elapsedBars === undefined || elapsedBars === "") {
+    return {
+      maturityStateByBars: "UNKNOWN",
+      timeRiskByBars: "UNKNOWN",
+      reason: "BARS_UNAVAILABLE",
+    };
+  }
+
   const bars = Number(elapsedBars);
 
   if (!Number.isFinite(bars) || bars < 0 || !expected) {
