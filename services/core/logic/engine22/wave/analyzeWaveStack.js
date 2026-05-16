@@ -9,6 +9,7 @@
 
 import { analyzeWaveDegree } from "./analyzeWaveDegree.js";
 import { analyzeMicroW4AbcRisk } from "./analyzeMicroW4AbcRisk.js";
+import { analyzeWaveDuration } from "./analyzeWaveDuration.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -282,7 +283,11 @@ export function analyzeWaveStack({
   regimeLayers = null,
   reactionContext = null,
   volumeContext = null,
+  snapshotNow = null,
+  currentTimeSec = null,
+  barsByTf = {},
 } = {}) {
+  
   if (!engine2State || typeof engine2State !== "object") {
     return {
       ok: false,
@@ -340,14 +345,20 @@ export function analyzeWaveStack({
           state: "NO_ACTIVE_MICRO_W4_RISK",
           reasonCodes: ["ACTIVE_SETUP_NOT_MICRO_W4_TO_W5"],
         };   
-  
-  const summary = buildPlainEnglishSummary({
+   const waveDuration = analyzeWaveDuration({
     symbol,
-    degrees,
-    stackBias,
-    chaseRisk,
-    activeTradingDegree,
+    engine2State,
+    snapshotNow,
+    currentTimeSec,
+    barsByTf,
   });
+   const summary = buildPlainEnglishSummary({
+     symbol,
+     degrees,
+     stackBias,
+     chaseRisk,
+     activeTradingDegree,
+   });
 
   const reasonCodes = [
     "ENGINE22_WAVE_FIB_STATE_BUILT",
@@ -372,6 +383,7 @@ export function analyzeWaveStack({
 
     degrees,
     microW4AbcRisk,
+    waveDuration,
 
     regimeContext: regimeLayers || null,
     
