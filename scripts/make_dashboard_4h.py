@@ -599,7 +599,7 @@ def main():
     risk_on_4h = round(pct(ro_score, ro_den), 2) if ro_den > 0 else 50.0
 
     # --- STRUCTURAL 4H SOURCE: native Polygon 240m completed candles ---
-    spy_4h_native = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H, keep_live=False)
+    spy_4h_native = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H, keep_live=True)
     source_used = "polygon_240m"
 
     # Fallback only if native 240m truly fails.
@@ -786,12 +786,20 @@ def main():
 
     score = clamp(float(score) - timing_penalty, 0.0, 100.0)
 
-    # Bridge valuation floor:
-    # If price is above 20 and 50 but below 10, keep score in bridge zone,
-    # unless the raw structure score was already worse.
-    if (not above10) and above20 and above50:
+    # --- 4H BRIDGE STRUCTURE FLOORS ---
+    # The 4H bridge should not collapse just because squeeze is high or SMI is cooling.
+    # EMA structure is the main bridge truth.
+    if above10 and above20 and above50:
+        score = max(score, 58.0)
+        timing_reasons.append("BRIDGE_FLOOR_ABOVE_10_20_50")
+
+    elif (not above10) and above20 and above50:
         score = max(score, 52.0)
         timing_reasons.append("BRIDGE_FLOOR_ABOVE_20_50_BELOW_10")
+
+    elif (not above10) and (not above20) and above50:
+        score = max(score, 45.0)
+        timing_reasons.append("BRIDGE_FLOOR_ABOVE_50_BELOW_10_20")
     if score >= 60.0 and ema_sign > 0:
         state = "bull"
     elif score < 49.0 and ema_sign < 0:
