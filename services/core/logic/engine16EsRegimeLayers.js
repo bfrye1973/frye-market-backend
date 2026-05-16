@@ -1,6 +1,5 @@
 cd /opt/render/project/src/services/core
 
-cat > logic/engine16EsRegimeLayers.js <<'EOF'
 // services/core/logic/engine16EsRegimeLayers.js
 // Engine 16ES — ES Regime Layers / Structure Truth Engine
 //
