@@ -4125,6 +4125,8 @@ supportedSetups: {
       waveFibState,
     },
   };
+};  
+
    if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
     return finish({
       ...base,
