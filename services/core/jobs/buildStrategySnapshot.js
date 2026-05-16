@@ -946,7 +946,156 @@ async function fetchCurrentPriceForSymbol({ symbol, tf = "10m" }) {
   const close = Number(bar?.close ?? bar?.c);
   return Number.isFinite(close) ? close : null;
 } 
+function calcEma(values = [], period = 10) {
+  const nums = values
+    .map((x) => Number(x))
+    .filter((x) => Number.isFinite(x));
 
+  if (nums.length < period) return null;
+
+  const k = 2 / (period + 1);
+
+  // Seed EMA with SMA of first period.
+  let ema =
+    nums.slice(0, period).reduce((sum, x) => sum + x, 0) / period;
+
+  for (let i = period; i < nums.length; i++) {
+    ema = nums[i] * k + ema * (1 - k);
+  }
+
+  return Number(ema.toFixed(2));
+}
+
+function normalizeOhlcBars(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.bars)) return payload.bars;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+}
+
+function barClose(bar) {
+  const close = Number(bar?.close ?? bar?.c);
+  return Number.isFinite(close) ? close : null;
+}
+
+function barTime(bar) {
+  const t = Number(bar?.time ?? bar?.t ?? bar?.tSec);
+  return Number.isFinite(t) ? t : null;
+}
+
+async function buildEma10Posture({ symbol, tf, label, limit = 120 }) {
+  const path = ohlcPathForSymbol(symbol);
+  const u = new URL(`${CORE_BASE}${path}`);
+
+  u.searchParams.set("symbol", symbol);
+  u.searchParams.set("timeframe", tf);
+  u.searchParams.set("limit", String(limit));
+
+  const r = await fetchJson(u.toString(), 15000);
+  const bars = normalizeOhlcBars(r?.json);
+
+  const closes = bars
+    .map(barClose)
+    .filter((x) => Number.isFinite(x));
+
+  const lastBar = bars.length ? bars[bars.length - 1] : null;
+  const close = lastBar ? barClose(lastBar) : null;
+  const ema10 = calcEma(closes, 10);
+
+  const distancePts =
+    Number.isFinite(close) && Number.isFinite(ema10)
+      ? Number((close - ema10).toFixed(2))
+      : null;
+
+  const distancePct =
+    Number.isFinite(close) && Number.isFinite(ema10) && ema10 !== 0
+      ? Number((((close - ema10) / ema10) * 100).toFixed(2))
+      : null;
+
+  let state = "UNKNOWN";
+  let aboveEma10 = null;
+
+  if (Number.isFinite(close) && Number.isFinite(ema10)) {
+    aboveEma10 = close > ema10;
+    state = close > ema10 ? "ABOVE_EMA10" : close < ema10 ? "BELOW_EMA10" : "AT_EMA10";
+  }
+
+  return {
+    ok: r?.ok === true && Number.isFinite(close) && Number.isFinite(ema10),
+    symbol,
+    tf,
+    label,
+    close: Number.isFinite(close) ? close : null,
+    ema10,
+    aboveEma10,
+    distancePts,
+    distancePct,
+    state,
+    lastBarTime: lastBar ? barTime(lastBar) : null,
+    barCount: bars.length,
+    source: path,
+    error:
+      r?.ok === true
+        ? null
+        : r?.text || "EMA10_POSTURE_FETCH_FAILED",
+  };
+}
+
+async function buildEmaPostureBlock(symbol) {
+  const [tenMinute, oneHour, daily] = await Promise.all([
+    buildEma10Posture({
+      symbol,
+      tf: "10m",
+      label: "10m EMA10 Trigger Layer",
+      limit: 120,
+    }).catch((err) => ({
+      ok: false,
+      symbol,
+      tf: "10m",
+      label: "10m EMA10 Trigger Layer",
+      state: "UNKNOWN",
+      error: String(err?.message || err),
+    })),
+
+    buildEma10Posture({
+      symbol,
+      tf: "1h",
+      label: "1H EMA10 Trend Layer",
+      limit: 120,
+    }).catch((err) => ({
+      ok: false,
+      symbol,
+      tf: "1h",
+      label: "1H EMA10 Trend Layer",
+      state: "UNKNOWN",
+      error: String(err?.message || err),
+    })),
+
+    buildEma10Posture({
+      symbol,
+      tf: "1d",
+      label: "Daily EMA10 Permission Layer",
+      limit: 120,
+    }).catch((err) => ({
+      ok: false,
+      symbol,
+      tf: "1d",
+      label: "Daily EMA10 Permission Layer",
+      state: "UNKNOWN",
+      error: String(err?.message || err),
+    })),
+  ]);
+
+  return {
+    symbol,
+    source: isFuturesSymbol(symbol)
+      ? "FUTURES_OHLC_EMA10_POSTURE"
+      : "STOCK_OHLC_EMA10_POSTURE",
+    tenMinute,
+    oneHour,
+    daily,
+  };
+}
 function calcFibScore(payloadW1, payloadW4) {
   const p =
     payloadW1 && payloadW1.ok
@@ -2673,13 +2822,17 @@ const [
   engine21TenMin,
   engine21ThirtyMin,
   tenMinuteLayer,
+  emaPosture,
   spyReactionQuality,
   spyVolumeBehavior,
 ] = await Promise.all([
   fetchLiveMarketMeter(),
+   
   fetchEngine21Alignment("10m"),
+   
   fetchEngine21Alignment("30m"),
-  buildTenMinuteLayer({
+   
+  buildTenMinuteLayer({   
     symbol,
     coreBase: CORE_BASE,
     fetchJson,
@@ -2698,6 +2851,28 @@ const [
     barCount: 0,
     source: "/api/v1/ohlc",
     error: String(err?.message || err),
+  })),
+   buildEmaPostureBlock(symbol).catch((err) => ({
+    symbol,
+    source: "EMA10_POSTURE_FAILED",
+    tenMinute: {
+      ok: false,
+      tf: "10m",
+      state: "UNKNOWN",
+      error: String(err?.message || err),
+    },
+    oneHour: {
+      ok: false,
+      tf: "1h",
+      state: "UNKNOWN",
+      error: String(err?.message || err),
+    },
+    daily: {
+      ok: false,
+      tf: "1d",
+      state: "UNKNOWN",
+      error: String(err?.message || err),
+    },
   })),
   fetchSpyReactionQuality(symbol, "10m").catch((err) => ({
     ok: false,
@@ -2741,7 +2916,10 @@ console.log("Engine21 alignment fetched");
     score: marketMind?.score10m ?? null,
     trendState: marketMind?.state10m ?? null,
   };
-   
+  marketMeter.layers.emaPosture = emaPosture;
+  marketMeter.layers.tenMinuteEma10 = emaPosture?.tenMinute || null;
+  marketMeter.layers.oneHourEma10 = emaPosture?.oneHour || null;
+  marketMeter.layers.dailyEma10 = emaPosture?.daily || null; 
   const result = {
   ok: true,
   symbol,
@@ -2749,6 +2927,8 @@ console.log("Engine21 alignment fetched");
   includeContext: true,
   marketMind,
   marketMeter,
+  emaPosture,
+  marketRegime,
   marketRegime,
   momentum,
   engine2State,
