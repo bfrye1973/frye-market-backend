@@ -1036,25 +1036,29 @@ const aboveEma20 =
     state = close > ema10 ? "ABOVE_EMA10" : close < ema10 ? "BELOW_EMA10" : "AT_EMA10";
   }
 
-  return {
-    ok: r?.ok === true && Number.isFinite(close) && Number.isFinite(ema10),
-    symbol,
-    tf,
-    label,
-    close: Number.isFinite(close) ? close : null,
-    ema10,
-    aboveEma10,
-    distancePts,
-    distancePct,
-    state,
-    lastBarTime: lastBar ? barTime(lastBar) : null,
-    barCount: bars.length,
-    source: path,
-    error:
-      r?.ok === true
-        ? null
-        : r?.text || "EMA10_POSTURE_FETCH_FAILED",
-  };
+return {
+  ok: r?.ok === true && Number.isFinite(close) && Number.isFinite(ema10),
+  symbol,
+  tf,
+  label,
+  close: Number.isFinite(close) ? close : null,
+  ema10,
+  ema20,
+  aboveEma10,
+  aboveEma20,
+  distancePts,
+  distancePct,
+  distanceToEma20,
+  distanceToEma20Pct,
+  state,
+  lastBarTime: lastBar ? barTime(lastBar) : null,
+  barCount: bars.length,
+  source: path,
+  error:
+    r?.ok === true
+      ? null
+      : r?.text || "EMA10_POSTURE_FETCH_FAILED",
+ };
 }
 
 async function buildEmaPostureBlock(symbol) {
@@ -2954,20 +2958,6 @@ console.log("Engine21 alignment fetched");
     score: marketMind?.score10m ?? null,
     trendState: marketMind?.state10m ?? null,
   };
-
-  if (emaPosture?.tenMinute && tenMinuteLayer) {
-    emaPosture.tenMinute = {
-      ...emaPosture.tenMinute,
-      ema20: tenMinuteLayer?.ema20 ?? null,
-      aboveEma20:
-        Number.isFinite(Number(emaPosture?.tenMinute?.close)) &&
-        Number.isFinite(Number(tenMinuteLayer?.ema20))
-          ? Number(emaPosture.tenMinute.close) > Number(tenMinuteLayer.ema20)
-          : null,
-      distanceToEma20: tenMinuteLayer?.distanceToEma20 ?? null,
-      distanceToEma20Pct: tenMinuteLayer?.distanceToEma20Pct ?? null,
-    };
-  }
 
   marketMeter.layers.emaPosture = emaPosture;
   marketMeter.layers.tenMinuteEma10 = emaPosture?.tenMinute || null;
