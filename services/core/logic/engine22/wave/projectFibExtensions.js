@@ -22,6 +22,8 @@ const DEFAULT_FIBS = [
 ];
 
 function toNum(x) {
+  if (x === null || x === undefined || x === "") return null;
+
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
 }
