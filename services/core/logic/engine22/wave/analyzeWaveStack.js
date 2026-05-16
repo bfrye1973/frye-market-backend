@@ -10,6 +10,7 @@
 import { analyzeWaveDegree } from "./analyzeWaveDegree.js";
 import { analyzeMicroW4AbcRisk } from "./analyzeMicroW4AbcRisk.js";
 import { analyzeWaveDuration } from "./analyzeWaveDuration.js";
+import { analyzeAbcCorrection } from "./analyzeAbcCorrection.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -352,6 +353,25 @@ export function analyzeWaveStack({
     currentTimeSec,
     barsByTf,
   });
+
+   const abcCorrection =
+    activeTradingDegree?.setup === "MICRO_W4_TO_W5"
+      ? analyzeAbcCorrection({
+          symbol,
+          degree: "micro",
+          correctionFor: "W4",
+          block: engine2State?.micro || null,
+          currentPrice,
+        })
+      : {
+          ok: true,
+          active: false,
+          symbol,
+          degree: null,
+          correctionFor: null,
+          state: "NO_ACTIVE_ABC_CORRECTION",
+          reasonCodes: ["ACTIVE_SETUP_NOT_MICRO_W4_TO_W5"],
+        }; 
    const summary = buildPlainEnglishSummary({
      symbol,
      degrees,
@@ -383,6 +403,7 @@ export function analyzeWaveStack({
 
     degrees,
     microW4AbcRisk,
+    abcCorrection,
     waveDuration,
 
     regimeContext: regimeLayers || null,
