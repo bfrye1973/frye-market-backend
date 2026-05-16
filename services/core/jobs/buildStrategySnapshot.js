@@ -26,6 +26,7 @@ import { computeConfluenceScore } from "../logic/confluenceScorer.js";
 import computeEngine15Readiness from "../logic/engine15StrategyReadiness.js";
 import { computeEngine15DecisionReferee } from "../logic/engine15DecisionReferee.js";
 import { computeMorningFib } from "../logic/engine16MorningFib.js";
+import { computeEngine16EsRegimeLayers } from "../logic/engine16EsRegimeLayers.js";
 import { computeMarketRegime } from "../logic/marketRegime.js";
 import { updateSignalLock } from "../logic/signalLockStore.js";
 import { getExecutionState } from "../logic/execution/executionStateService.js";
@@ -1042,7 +1043,7 @@ async function buildEma10Posture({ symbol, tf, label, limit = 120 }) {
 }
 
 async function buildEmaPostureBlock(symbol) {
-  const [tenMinute, oneHour, daily] = await Promise.all([
+  const [tenMinute, oneHour, fourHour, daily] = await Promise.all([
     buildEma10Posture({
       symbol,
       tf: "10m",
@@ -1069,8 +1070,20 @@ async function buildEmaPostureBlock(symbol) {
       label: "1H EMA10 Trend Layer",
       state: "UNKNOWN",
       error: String(err?.message || err),
-    })),
-
+    buildEma10Posture({
+      symbol,
+      tf: "4h",
+      label: "4H EMA10 Trend Layer",
+      limit: 120,
+    }).catch((err) => ({
+      ok: false,
+      symbol,
+      tf: "4h",
+      label: "4H EMA10 Trend Layer",
+      state: "UNKNOWN",
+      error: String(err?.message || err),
+    })),})),
+    
     buildEma10Posture({
       symbol,
       tf: "1d",
@@ -1093,6 +1106,7 @@ async function buildEmaPostureBlock(symbol) {
       : "STOCK_OHLC_EMA10_POSTURE",
     tenMinute,
     oneHour,
+    fourHour,
     daily,
   };
 }
@@ -2867,6 +2881,12 @@ const [
       state: "UNKNOWN",
       error: String(err?.message || err),
     },
+    fourHour: {
+      ok: false,
+      tf: "4h",
+      state: "UNKNOWN",
+      error: String(err?.message || err),
+    },
     daily: {
       ok: false,
       tf: "1d",
@@ -2916,9 +2936,25 @@ console.log("Engine21 alignment fetched");
     score: marketMind?.score10m ?? null,
     trendState: marketMind?.state10m ?? null,
   };
+
+  if (emaPosture?.tenMinute && tenMinuteLayer) {
+    emaPosture.tenMinute = {
+      ...emaPosture.tenMinute,
+      ema20: tenMinuteLayer?.ema20 ?? null,
+      aboveEma20:
+        Number.isFinite(Number(emaPosture?.tenMinute?.close)) &&
+        Number.isFinite(Number(tenMinuteLayer?.ema20))
+          ? Number(emaPosture.tenMinute.close) > Number(tenMinuteLayer.ema20)
+          : null,
+      distanceToEma20: tenMinuteLayer?.distanceToEma20 ?? null,
+      distanceToEma20Pct: tenMinuteLayer?.distanceToEma20Pct ?? null,
+    };
+  }
+
   marketMeter.layers.emaPosture = emaPosture;
   marketMeter.layers.tenMinuteEma10 = emaPosture?.tenMinute || null;
   marketMeter.layers.oneHourEma10 = emaPosture?.oneHour || null;
+  marketMeter.layers.fourHourEma10 = emaPosture?.fourHour || null;
   marketMeter.layers.dailyEma10 = emaPosture?.daily || null; 
   const result = {
   ok: true,
@@ -2949,13 +2985,35 @@ console.log("Engine21 alignment fetched");
     minor: engine2State?.minor ?? null,
   };
 
-  if (isEngine16EnabledForStrategy(s.strategyId)) {
+  if (isFuturesSymbol(symbol)) {
+    if (s.strategyId === "intraday_scalp@10m") {
+      engine16ForStrategy = await computeEngine16EsRegimeLayers({
+        symbol,
+        emaPosture,
+        engine2State,
+        reaction: null,
+        volume: null,
+      });
+
+      console.log(`Engine16ES regime layers built for ${s.strategyId} @ ${s.tf}`);
+    } else {
+      engine16ForStrategy = skippedEngine16(
+        symbol,
+        s.tf,
+        marketRegime,
+        engine2Context
+      );
+
+      console.log(`Engine16ES skipped for ${s.strategyId} @ ${s.tf}`);
+    }
+  } else if (isEngine16EnabledForStrategy(s.strategyId)) {
     engine16ForStrategy = await buildEngine16Direct(
       symbol,
       s.tf,
       marketRegime,
       engine2Context
     );
+
     console.log(`Engine16 built directly for ${s.strategyId} @ ${s.tf}`);
   } else {
     engine16ForStrategy = skippedEngine16(
@@ -2964,9 +3022,9 @@ console.log("Engine21 alignment fetched");
       marketRegime,
       engine2Context
     );
+
     console.log(`Engine16 skipped for ${s.strategyId} @ ${s.tf}`);
   }
-
   const strategy = await processStrategy(
   s,
   momentum,
