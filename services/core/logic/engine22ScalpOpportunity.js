@@ -20,6 +20,8 @@
 
 import { logEngine22Alert } from "./engine22AlertLogger.js";
 import { detectRunnerMode } from "./engine22RunnerMode.js";
+import { analyzeWaveStack } from "./engine22/wave/analyzeWaveStack.js";
+
 
 function toNum(x) {
   const n = Number(x);
@@ -3938,6 +3940,7 @@ supportedSetups: {
 
     marketBias: null,
     trendVsWave: null,
+    waveFibState: null,
     microContinuation: null,
     microW4Pullback: null,
     reactionContext: null,
@@ -4050,6 +4053,15 @@ supportedSetups: {
   const effectiveEma20 =
     validPrice(ema20) ?? validPrice(tenMinuteLayer?.ema20);
 
+  const waveFibState = analyzeWaveStack({
+    symbol,
+    engine2State,
+    currentPrice: effectiveLatestClose,
+    regimeLayers,
+    reactionContext,
+    volumeContext,
+  });
+
   const microContinuation = detectMicroW3ContinuationState({
     engine2State,
     engine16,
@@ -4104,11 +4116,15 @@ supportedSetups: {
     reactionContext,
     volumeContext,
     breakoutContext,
+    waveFibState,
     microW4Pullback: microW4Pullback?.active === true ? microW4Pullback : null,
     zoneAbsorption,
     runnerMode,
+    debug: {
+      ...(withMicroW4.debug || {}),
+      waveFibState,
+    },
   };
-};  
    if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
     return finish({
       ...base,
