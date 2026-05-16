@@ -1070,6 +1070,8 @@ async function buildEmaPostureBlock(symbol) {
       label: "1H EMA10 Trend Layer",
       state: "UNKNOWN",
       error: String(err?.message || err),
+    })),
+
     buildEma10Posture({
       symbol,
       tf: "4h",
@@ -1082,8 +1084,8 @@ async function buildEmaPostureBlock(symbol) {
       label: "4H EMA10 Trend Layer",
       state: "UNKNOWN",
       error: String(err?.message || err),
-    })),})),
-    
+    })),
+
     buildEma10Posture({
       symbol,
       tf: "1d",
@@ -1110,6 +1112,7 @@ async function buildEmaPostureBlock(symbol) {
     daily,
   };
 }
+
 function calcFibScore(payloadW1, payloadW4) {
   const p =
     payloadW1 && payloadW1.ok
