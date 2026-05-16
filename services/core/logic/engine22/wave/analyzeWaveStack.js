@@ -8,6 +8,7 @@
 // This is read-only intelligence. It does not create trades.
 
 import { analyzeWaveDegree } from "./analyzeWaveDegree.js";
+import { analyzeMicroW4AbcRisk } from "./analyzeMicroW4AbcRisk.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -322,6 +323,24 @@ export function analyzeWaveStack({
     chaseRisk,
   });
 
+  const microW4AbcRisk =
+    activeTradingDegree?.setup === "MICRO_W4_TO_W5"
+      ? analyzeMicroW4AbcRisk({
+          symbol,
+          engine2State,
+          currentPrice,
+          regimeLayers,
+          reactionContext,
+          volumeContext,
+        })
+      : {
+          ok: true,
+          active: false,
+          symbol,
+          state: "NO_ACTIVE_MICRO_W4_RISK",
+          reasonCodes: ["ACTIVE_SETUP_NOT_MICRO_W4_TO_W5"],
+        };   
+  
   const summary = buildPlainEnglishSummary({
     symbol,
     degrees,
@@ -352,8 +371,10 @@ export function analyzeWaveStack({
     chaseRiskDegree: chaseRisk.degree,
 
     degrees,
+    microW4AbcRisk,
 
     regimeContext: regimeLayers || null,
+    
     reactionContext: reactionContext || null,
     volumeContext: volumeContext || null,
 
