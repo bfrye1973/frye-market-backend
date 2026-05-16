@@ -25,6 +25,7 @@ import fs from "fs";
 import { computeConfluenceScore } from "../logic/confluenceScorer.js";
 import computeEngine15Readiness from "../logic/engine15StrategyReadiness.js";
 import { computeEngine15DecisionReferee } from "../logic/engine15DecisionReferee.js";
+import { buildEngine15EsDecision } from "../logic/engine15EsReadiness.js";
 import { computeMorningFib } from "../logic/engine16MorningFib.js";
 import { computeEngine16EsRegimeLayers } from "../logic/engine16EsRegimeLayers.js";
 import { computeMarketRegime } from "../logic/marketRegime.js";
@@ -2533,7 +2534,7 @@ if (isFuturesSymbol(symbol)) {
     }
   }
 
-  const engine15Decision = computeEngine15DecisionReferee({
+  const engine15BaseInputs = {
     symbol,
     strategyId: s.strategyId,
     engine16,
@@ -2550,7 +2551,30 @@ if (isFuturesSymbol(symbol)) {
     engine4: patchedConfluence?.context?.volume || null,
     waveReaction: reaction?.waveReaction || null,
     zoneContext,
-  });
+  };
+
+  const engine15Decision =
+    String(symbol || "").toUpperCase() === "ES" &&
+    s.strategyId === "intraday_scalp@10m"
+      ? buildEngine15EsDecision({
+          symbol,
+          strategyId: s.strategyId,
+          snapshotContext: {
+            emaPosture,
+            engine2State,
+            marketMind,
+            marketMeter,
+            marketRegime,
+          },
+          engine16,
+          engine5: patchedConfluence || null,
+          momentum,
+          permission: engine15BaseInputs.permission,
+          engine3: patchedConfluence?.context?.reaction || null,
+          engine4: patchedConfluence?.context?.volume || null,
+          zoneContext,
+        })
+      : computeEngine15DecisionReferee(engine15BaseInputs);
 
  const lockedSignal = updateSignalLock({
   symbol,
