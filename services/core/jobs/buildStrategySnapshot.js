@@ -2559,8 +2559,8 @@ if (isFuturesSymbol(symbol)) {
       ? buildEngine15EsDecision({
           symbol,
           strategyId: s.strategyId,
-          snapshotContext: {
-            emaPosture,
+           snapshotContext: {
+            emaPosture: marketMeter?.layers?.emaPosture || null,         
             engine2State,
             marketMind,
             marketMeter,
