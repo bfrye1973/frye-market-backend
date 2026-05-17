@@ -5,26 +5,28 @@ function clamp(value, min = 0, max = 100) {
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
-function valueAt(path, fallback = null) {
-  return path === undefined || path === null ? fallback : path;
+function isNum(value) {
+  return Number.isFinite(Number(value));
 }
 
 function scoreInverse(value, goodBelow, badAbove) {
-  if (!Number.isFinite(value)) return 50;
-  if (value <= goodBelow) return 100;
-  if (value >= badAbove) return 0;
-  return clamp(100 - ((value - goodBelow) / (badAbove - goodBelow)) * 100);
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 50;
+  if (n <= goodBelow) return 100;
+  if (n >= badAbove) return 0;
+  return clamp(100 - ((n - goodBelow) / (badAbove - goodBelow)) * 100);
 }
 
 function scoreDirect(value, badBelow, goodAbove) {
-  if (!Number.isFinite(value)) return 50;
-  if (value >= goodAbove) return 100;
-  if (value <= badBelow) return 0;
-  return clamp(((value - badBelow) / (goodAbove - badBelow)) * 100);
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 50;
+  if (n >= goodAbove) return 100;
+  if (n <= badBelow) return 0;
+  return clamp(((n - badBelow) / (goodAbove - badBelow)) * 100);
 }
 
 function avg(values) {
-  const nums = values.filter((v) => Number.isFinite(v));
+  const nums = values.map(Number).filter(Number.isFinite);
   if (!nums.length) return 50;
   return clamp(nums.reduce((sum, v) => sum + v, 0) / nums.length);
 }
@@ -33,16 +35,16 @@ function weightedAvg(items) {
   const valid = items.filter(
     (item) =>
       item &&
-      Number.isFinite(item.value) &&
-      Number.isFinite(item.weight) &&
-      item.weight > 0
+      Number.isFinite(Number(item.value)) &&
+      Number.isFinite(Number(item.weight)) &&
+      Number(item.weight) > 0
   );
 
   if (!valid.length) return 50;
 
-  const totalWeight = valid.reduce((sum, item) => sum + item.weight, 0);
+  const totalWeight = valid.reduce((sum, item) => sum + Number(item.weight), 0);
   const weightedSum = valid.reduce(
-    (sum, item) => sum + item.value * item.weight,
+    (sum, item) => sum + Number(item.value) * Number(item.weight),
     0
   );
 
@@ -80,15 +82,19 @@ function scoreLabor(macroData) {
   const continuingClaimsScore = scoreInverse(continuingClaims, 1700000, 2300000);
 
   const score = weightedAvg([
-  { value: unemploymentScore, weight: 0.4 },
-  { value: initialClaimsScore, weight: 0.35 },
-  { value: continuingClaimsScore, weight: 0.25 },
-]);
+    { value: unemploymentScore, weight: 0.4 },
+    { value: initialClaimsScore, weight: 0.35 },
+    { value: continuingClaimsScore, weight: 0.25 },
+  ]);
 
   const warnings = [];
-  if (unrate >= 4.8) warnings.push("Unemployment rate elevated");
-  if (initialClaims >= 275000) warnings.push("Initial claims rising into caution zone");
-  if (continuingClaims >= 2100000) warnings.push("Continuing claims elevated");
+  if (isNum(unrate) && Number(unrate) >= 4.8) warnings.push("Unemployment rate elevated");
+  if (isNum(initialClaims) && Number(initialClaims) >= 275000) {
+    warnings.push("Initial claims rising into caution zone");
+  }
+  if (isNum(continuingClaims) && Number(continuingClaims) >= 2100000) {
+    warnings.push("Continuing claims elevated");
+  }
 
   return {
     score,
@@ -115,15 +121,17 @@ function scoreCreditStress(macroData) {
   const hyScore = scoreInverse(highYieldSpread, 3.0, 6.0);
 
   const score = weightedAvg([
-  { value: nfciScore, weight: 0.35 },
-  { value: stlfsiScore, weight: 0.35 },
-  { value: hyScore, weight: 0.3 },
-]);
+    { value: nfciScore, weight: 0.35 },
+    { value: stlfsiScore, weight: 0.35 },
+    { value: hyScore, weight: 0.3 },
+  ]);
 
   const warnings = [];
-  if (nfci > 0) warnings.push("Financial conditions tightening");
-  if (stlfsi > 0.5) warnings.push("Financial stress elevated");
-  if (highYieldSpread > 4.5) warnings.push("High-yield credit spread widening");
+  if (isNum(nfci) && Number(nfci) > 0) warnings.push("Financial conditions tightening");
+  if (isNum(stlfsi) && Number(stlfsi) > 0.5) warnings.push("Financial stress elevated");
+  if (isNum(highYieldSpread) && Number(highYieldSpread) > 4.5) {
+    warnings.push("High-yield credit spread widening");
+  }
 
   return {
     score,
@@ -157,21 +165,28 @@ function scoreBondMarket(macroData) {
   const threeMonthCurveScore = scoreDirect(tenMinusThreeMonth, -1.0, 1.0);
 
   const score = weightedAvg([
-  { value: tenYearScore, weight: 0.3 },
-  { value: twoYearScore, weight: 0.25 },
-  { value: curveScore, weight: 0.25 },
-  { value: threeMonthCurveScore, weight: 0.2 },
-]);
+    { value: tenYearScore, weight: 0.3 },
+    { value: twoYearScore, weight: 0.25 },
+    { value: curveScore, weight: 0.25 },
+    { value: threeMonthCurveScore, weight: 0.2 },
+  ]);
 
   const warnings = [];
-  if (tenYear >= 4.75) warnings.push("10Y yield elevated");
-  if (twoYear >= 4.75) warnings.push("2Y yield elevated");
-  if (tenMinusTwo < 0) warnings.push("10Y-2Y curve inverted");
-  if (tenMinusThreeMonth < 0) warnings.push("10Y-3M curve inverted");
+  if (isNum(tenYear) && Number(tenYear) >= 4.5) warnings.push("10Y yield pressure elevated");
+  if (isNum(twoYear) && Number(twoYear) >= 4.25) warnings.push("2Y yield suggests Fed hawkish pressure");
+  if (isNum(tenMinusTwo) && Number(tenMinusTwo) < 0) warnings.push("10Y-2Y curve inverted");
+  if (isNum(tenMinusThreeMonth) && Number(tenMinusThreeMonth) < 0) {
+    warnings.push("10Y-3M curve inverted");
+  }
 
   return {
     score,
-    label: score >= 70 ? "BONDS_SUPPORTIVE" : score >= 50 ? "BONDS_MIXED" : "BONDS_PRESSURE",
+    label:
+      score >= 70
+        ? "BONDS_SUPPORTIVE"
+        : score >= 50
+          ? "BONDS_MIXED"
+          : "BONDS_PRESSURE",
     inputs: {
       tenYear,
       twoYear,
@@ -200,17 +215,23 @@ function scoreLiquidity(macroData) {
   const tgaScore = scoreInverse(tgaBalance, 500000, 1000000);
 
   const score = weightedAvg([
-  { value: fedBalanceSheetScore, weight: 0.2 },
-  { value: reverseRepoScore, weight: 0.15 },
-  { value: bankReservesScore, weight: 0.25 },
-  { value: m2Score, weight: 0.2 },
-  { value: tgaScore, weight: 0.2 },
-]);
+    { value: fedBalanceSheetScore, weight: 0.2 },
+    { value: reverseRepoScore, weight: 0.15 },
+    { value: bankReservesScore, weight: 0.25 },
+    { value: m2Score, weight: 0.2 },
+    { value: tgaScore, weight: 0.2 },
+  ]);
 
   const warnings = [];
-  if (tgaBalance >= 850000) warnings.push("TGA balance high, liquidity drain risk");
-  if (bankReserves < 2800000) warnings.push("Bank reserves low");
-  if (fedBalanceSheet < 6400000) warnings.push("Fed balance sheet liquidity declining");
+  if (isNum(tgaBalance) && Number(tgaBalance) >= 850000) {
+    warnings.push("TGA balance high, liquidity drain risk");
+  }
+  if (isNum(bankReserves) && Number(bankReserves) < 2800000) {
+    warnings.push("Bank reserves low");
+  }
+  if (isNum(fedBalanceSheet) && Number(fedBalanceSheet) < 6400000) {
+    warnings.push("Fed balance sheet liquidity declining");
+  }
 
   return {
     score,
@@ -240,14 +261,15 @@ function scoreInflation(macroData) {
   const cpi = getFredValue(macroData, "CPIAUCSL");
   const ppi = getFredValue(macroData, "PPIACO");
 
-  // First version uses index-level zones. Later we will upgrade to YoY/MoM rates.
+  // v0.2 still uses index-level pressure. Later we upgrade to YoY/MoM inflation rates.
   const cpiScore = scoreInverse(cpi, 315, 345);
   const ppiScore = scoreInverse(ppi, 260, 300);
 
   const score = weightedAvg([
-   { value: cpiScore, weight: 0.55 },
-   { value: ppiScore, weight: 0.45 },
- ]); 
+    { value: cpiScore, weight: 0.55 },
+    { value: ppiScore, weight: 0.45 },
+  ]);
+
   const warnings = [];
   if (score < 50) warnings.push("Inflation index pressure remains elevated");
 
@@ -278,12 +300,17 @@ function scoreMarketTrend(marketData) {
   function symbolTrendScore(item) {
     if (!item?.ok) return 50;
 
-    return avg([
-      boolScore(item.aboveEma10, 25, 0),
-      boolScore(item.aboveEma20, 25, 0),
-      boolScore(item.aboveEma50, 25, 0),
-      boolScore(item.aboveEma200, 25, 0),
-      scoreDirect(item.pctChange20d, -5, 5),
+    const emaScore =
+      boolScore(item.aboveEma10, 25, 0) +
+      boolScore(item.aboveEma20, 25, 0) +
+      boolScore(item.aboveEma50, 25, 0) +
+      boolScore(item.aboveEma200, 25, 0);
+
+    const momentumScore = scoreDirect(item.pctChange20d, -5, 5);
+
+    return weightedAvg([
+      { value: emaScore, weight: 0.7 },
+      { value: momentumScore, weight: 0.3 },
     ]);
   }
 
@@ -293,11 +320,11 @@ function scoreMarketTrend(marketData) {
   const diaScore = symbolTrendScore(dia);
 
   const score = weightedAvg([
-  { value: spyScore, weight: 0.35 },
-  { value: qqqScore, weight: 0.35 },
-  { value: iwmScore, weight: 0.15 },
-  { value: diaScore, weight: 0.15 },
-]);
+    { value: spyScore, weight: 0.35 },
+    { value: qqqScore, weight: 0.35 },
+    { value: iwmScore, weight: 0.15 },
+    { value: diaScore, weight: 0.15 },
+  ]);
 
   const warnings = [];
   if (iwm?.aboveEma10 === false || iwm?.aboveEma20 === false) {
@@ -339,13 +366,14 @@ function scoreVolatility(marketData) {
   ]);
 
   const changeScore = scoreInverse(uvxy?.pctChange20d, -10, 25);
+
   const score = weightedAvg([
-  { value: emaScore, weight: 0.65 },
-  { value: changeScore, weight: 0.35 },
-]);
+    { value: emaScore, weight: 0.65 },
+    { value: changeScore, weight: 0.35 },
+  ]);
 
   const warnings = [];
-  if (uvxy?.aboveEma10 === true || uvxy?.pctChange5d > 10) {
+  if (uvxy?.aboveEma10 === true || (isNum(uvxy?.pctChange5d) && uvxy.pctChange5d > 10)) {
     warnings.push("UVXY volatility pressure rising");
   }
 
@@ -375,24 +403,22 @@ function scoreSectorRotation(marketData) {
   function simpleSymbolScore(symbol) {
     const item = sector[symbol];
     if (!item?.ok) return 50;
-    return avg([
-      boolScore(item.aboveEma20, 100, 0),
-      boolScore(item.aboveEma50, 100, 0),
-      scoreDirect(item.pctChange20d, -5, 7),
+    return weightedAvg([
+      { value: boolScore(item.aboveEma20, 100, 0), weight: 0.35 },
+      { value: boolScore(item.aboveEma50, 100, 0), weight: 0.3 },
+      { value: scoreDirect(item.pctChange20d, -5, 7), weight: 0.35 },
     ]);
   }
 
   const riskOnScore = avg(riskOnSymbols.map(simpleSymbolScore));
   const defensiveScore = avg(defensiveSymbols.map(simpleSymbolScore));
-
-  // Risk-on leadership good. Defensive leadership is not bad by itself,
-  // but if defensive is stronger than risk-on, reduce the score.
   const spreadScore = clamp(50 + (riskOnScore - defensiveScore));
+
   const score = weightedAvg([
-  { value: riskOnScore, weight: 0.7 },
-  { value: spreadScore, weight: 0.3 },
-]);
-  
+    { value: riskOnScore, weight: 0.7 },
+    { value: spreadScore, weight: 0.3 },
+  ]);
+
   const warnings = [];
   if (riskOnScore < defensiveScore) {
     warnings.push("Defensive sectors outperforming risk-on sectors");
@@ -439,17 +465,23 @@ function scoreAiLeadership(marketData) {
 
   for (const symbol of leadershipSymbols) {
     const item = ai[symbol];
+
     if (!item?.ok) {
       symbolScores[symbol] = 50;
       continue;
     }
 
-    symbolScores[symbol] = avg([
-      boolScore(item.aboveEma10, 100, 0),
-      boolScore(item.aboveEma20, 100, 0),
-      boolScore(item.aboveEma50, 100, 0),
-      boolScore(item.aboveEma200, 100, 0),
-      scoreDirect(item.pctChange20d, -8, 12),
+    const emaScore =
+      boolScore(item.aboveEma10, 20, 0) +
+      boolScore(item.aboveEma20, 25, 0) +
+      boolScore(item.aboveEma50, 25, 0) +
+      boolScore(item.aboveEma200, 30, 0);
+
+    const momentumScore = scoreDirect(item.pctChange20d, -8, 12);
+
+    symbolScores[symbol] = weightedAvg([
+      { value: emaScore, weight: 0.7 },
+      { value: momentumScore, weight: 0.3 },
     ]);
   }
 
@@ -536,28 +568,200 @@ function scoreEventRisk(fmpData) {
   };
 }
 
+function scoreMacroPressure(macroData, marketData, components) {
+  const tenYear = getFredValue(macroData, "DGS10");
+  const twoYear = getFredValue(macroData, "DGS2");
+  const tenMinusTwo = getFredValue(macroData, "T10Y2Y");
+
+  const uso = getSymbol(marketData, "macroProxies", "USO");
+  const tlt = getSymbol(marketData, "macroProxies", "TLT");
+  const uup = getSymbol(marketData, "macroProxies", "UUP");
+
+  const spy = getSymbol(marketData, "marketTrend", "SPY");
+  const qqq = getSymbol(marketData, "marketTrend", "QQQ");
+  const iwm = getSymbol(marketData, "marketTrend", "IWM");
+
+  const ai = marketData?.quickRead?.aiLeadership || {};
+  const aiSymbols = ["NVDA", "MSFT", "AVGO", "AMD", "META", "GOOGL", "AMZN", "TSM", "ARM", "PLTR"];
+
+  const aiAbove20 = aiSymbols.filter((symbol) => ai[symbol]?.aboveEma20 === true).length;
+  const aiAbove50 = aiSymbols.filter((symbol) => ai[symbol]?.aboveEma50 === true).length;
+
+  const tenYearPressureScore = scoreInverse(tenYear, 4.25, 5.0);
+  const twoYearPressureScore = scoreInverse(twoYear, 4.0, 5.0);
+
+  const tltTrendScore = weightedAvg([
+    { value: boolScore(tlt?.aboveEma20, 100, 0), weight: 0.35 },
+    { value: boolScore(tlt?.aboveEma50, 100, 0), weight: 0.35 },
+    { value: scoreDirect(tlt?.pctChange20d, -8, 5), weight: 0.3 },
+  ]);
+
+  const oilPressureScore = weightedAvg([
+    { value: boolScore(uso?.aboveEma20, 30, 80), weight: 0.35 },
+    { value: boolScore(uso?.aboveEma50, 30, 80), weight: 0.25 },
+    { value: scoreInverse(uso?.pctChange20d, 2, 15), weight: 0.4 },
+  ]);
+
+  const dollarPressureScore = weightedAvg([
+    { value: boolScore(uup?.aboveEma20, 35, 75), weight: 0.4 },
+    { value: scoreInverse(uup?.pctChange20d, 1, 6), weight: 0.6 },
+  ]);
+
+  const smallCapParticipationScore = weightedAvg([
+    { value: boolScore(iwm?.aboveEma20, 100, 0), weight: 0.45 },
+    { value: boolScore(iwm?.aboveEma50, 100, 0), weight: 0.25 },
+    { value: scoreDirect(iwm?.pctChange20d, -5, 5), weight: 0.3 },
+  ]);
+
+  const aiBreadthScore = weightedAvg([
+    { value: scoreDirect(aiAbove20, 3, 8), weight: 0.6 },
+    { value: scoreDirect(aiAbove50, 3, 8), weight: 0.4 },
+  ]);
+
+  const narrowLeadershipScore = weightedAvg([
+    { value: smallCapParticipationScore, weight: 0.45 },
+    { value: aiBreadthScore, weight: 0.55 },
+  ]);
+
+  const inflationScore = components?.inflation?.score ?? 50;
+
+  const fedHawkishScore = weightedAvg([
+    { value: tenYearPressureScore, weight: 0.35 },
+    { value: twoYearPressureScore, weight: 0.3 },
+    { value: inflationScore, weight: 0.25 },
+    { value: scoreDirect(tenMinusTwo, -0.5, 0.75), weight: 0.1 },
+  ]);
+
+  const score = weightedAvg([
+    { value: tenYearPressureScore, weight: 0.15 },
+    { value: twoYearPressureScore, weight: 0.12 },
+    { value: tltTrendScore, weight: 0.16 },
+    { value: oilPressureScore, weight: 0.18 },
+    { value: dollarPressureScore, weight: 0.08 },
+    { value: narrowLeadershipScore, weight: 0.16 },
+    { value: fedHawkishScore, weight: 0.15 },
+  ]);
+
+  const warnings = [];
+
+  if (isNum(tenYear) && Number(tenYear) >= 4.5) {
+    warnings.push("10Y yield pressure elevated");
+  }
+
+  if (isNum(twoYear) && Number(twoYear) >= 4.25) {
+    warnings.push("2Y yield suggests Fed hawkish pressure");
+  }
+
+  if (tlt?.aboveEma20 === false && isNum(tlt?.pctChange20d) && Number(tlt.pctChange20d) < 0) {
+    warnings.push("TLT weak; bond market pressure rising");
+  }
+
+  if (uso?.aboveEma20 === true && isNum(uso?.pctChange20d) && Number(uso.pctChange20d) >= 5) {
+    warnings.push("Oil/energy strength may pressure CPI");
+  }
+
+  if ((components?.inflation?.score ?? 50) < 50 && uso?.aboveEma20 === true) {
+    warnings.push("Inflation pressure plus oil strength creates macro risk");
+  }
+
+  if (spy?.aboveEma20 === true && qqq?.aboveEma20 === true && iwm?.aboveEma20 === false) {
+    warnings.push("Market leadership narrow: SPY/QQQ holding while small caps lag");
+  }
+
+  if (aiAbove20 <= 5) {
+    warnings.push("AI leadership breadth is narrowing");
+  }
+
+  if (fedHawkishScore < 45) {
+    warnings.push("Fed hawkish / higher-for-longer risk elevated");
+  }
+
+  return {
+    score,
+    label:
+      score >= 75
+        ? "MACRO_PRESSURE_LOW"
+        : score >= 60
+          ? "MACRO_PRESSURE_MANAGEABLE"
+          : score >= 45
+            ? "MACRO_PRESSURE_ELEVATED"
+            : "MACRO_PRESSURE_HIGH",
+    inputs: {
+      tenYear,
+      twoYear,
+      tenMinusTwo,
+      USO: uso,
+      TLT: tlt,
+      UUP: uup,
+      SPY: spy,
+      QQQ: qqq,
+      IWM: iwm,
+      aiAbove20,
+      aiAbove50,
+      tenYearPressureScore,
+      twoYearPressureScore,
+      tltTrendScore,
+      oilPressureScore,
+      dollarPressureScore,
+      smallCapParticipationScore,
+      aiBreadthScore,
+      narrowLeadershipScore,
+      fedHawkishScore,
+    },
+    warnings,
+  };
+}
+
 function deriveRegime(score, components) {
-  if (score >= 80) return "STRONG_RISK_ON";
+  const macroPressureScore = components?.macroPressure?.score ?? 50;
+  const aiScore = components?.aiLeadership?.score ?? 50;
+  const inflationScore = components?.inflation?.score ?? 50;
+  const bondScore = components?.bondMarket?.score ?? 50;
+
+  if (score >= 80 && macroPressureScore >= 65) return "STRONG_RISK_ON";
+
+  if (score >= 68 && macroPressureScore < 60) {
+    return "AI_SUPPORTED_BULL_WITH_MACRO_PRESSURE";
+  }
+
   if (score >= 68) return "HEALTHY_RISK_ON";
+
+  if (score >= 55 && aiScore >= 65 && macroPressureScore < 55) {
+    return "AI_HOLDING_MARKET_UP";
+  }
+
   if (score >= 55) return "MIXED_BULLISH";
+
+  if (score >= 45 && (inflationScore < 50 || bondScore < 55)) {
+    return "NEUTRAL_CHOP_WITH_RATE_PRESSURE";
+  }
+
   if (score >= 45) return "NEUTRAL_CHOP";
   if (score >= 35) return "RISK_OFF_WARNING";
   return "MARKET_STRESS";
 }
 
 function deriveBias(score, components) {
-  if (score >= 68 && components.marketTrend?.score >= 65 && components.volatility?.score >= 60) {
+  const macroPressureScore = components?.macroPressure?.score ?? 50;
+  const marketTrendScore = components?.marketTrend?.score ?? 50;
+  const volatilityScore = components?.volatility?.score ?? 50;
+
+  if (
+    score >= 70 &&
+    marketTrendScore >= 65 &&
+    volatilityScore >= 60 &&
+    macroPressureScore >= 60
+  ) {
     return "LONG_FAVORED";
   }
 
-  if (score >= 55) return "SELECTIVE_LONGS";
-
+  if (score >= 60 && macroPressureScore >= 45) return "SELECTIVE_LONGS";
+  if (score >= 55) return "SELECTIVE_LONGS_MACRO_CAUTION";
   if (score >= 45) return "NEUTRAL_WAIT";
-
   return "DEFENSIVE";
 }
 
-function deriveRiskLevel(score, components) {
+function deriveRiskLevel(score) {
   if (score >= 75) return "LOW_TO_MODERATE";
   if (score >= 55) return "MODERATE";
   if (score >= 40) return "ELEVATED";
@@ -565,7 +769,9 @@ function deriveRiskLevel(score, components) {
 }
 
 function deriveTradePermission(score, bias, components) {
-  if (score >= 70 && bias === "LONG_FAVORED") {
+  const macroPressureScore = components?.macroPressure?.score ?? 50;
+
+  if (score >= 70 && bias === "LONG_FAVORED" && macroPressureScore >= 60) {
     return {
       longScalps: true,
       shortScalps: false,
@@ -576,7 +782,7 @@ function deriveTradePermission(score, bias, components) {
     };
   }
 
-  if (score >= 55) {
+  if (score >= 60 && macroPressureScore >= 50) {
     return {
       longScalps: true,
       shortScalps: false,
@@ -584,6 +790,17 @@ function deriveTradePermission(score, bias, components) {
       swingShorts: false,
       engine22Mode: "SELECTIVE_LONGS_REDUCED_SIZE",
       sizeMultiplier: 0.75,
+    };
+  }
+
+  if (score >= 55) {
+    return {
+      longScalps: true,
+      shortScalps: false,
+      swingLongs: false,
+      swingShorts: false,
+      engine22Mode: "LONGS_ALLOWED_MACRO_CAUTION_A_PLUS_ONLY",
+      sizeMultiplier: 0.5,
     };
   }
 
@@ -623,10 +840,9 @@ export function computeEngine25MarketHealth({
   const volatility = scoreVolatility(marketData);
   const sectorRotation = scoreSectorRotation(marketData);
   const aiLeadership = scoreAiLeadership(marketData);
-
   const eventRisk = scoreEventRisk(fmpData);
 
-  const components = {
+  const baseComponents = {
     labor,
     creditStress,
     bondMarket,
@@ -639,17 +855,25 @@ export function computeEngine25MarketHealth({
     eventRisk,
   };
 
+  const macroPressure = scoreMacroPressure(macroData, marketData, baseComponents);
+
+  const components = {
+    ...baseComponents,
+    macroPressure,
+  };
+
   const weights = {
-    labor: 0.08,
-    creditStress: 0.11,
-    bondMarket: 0.09,
-    liquidity: 0.1,
+    labor: 0.07,
+    creditStress: 0.1,
+    bondMarket: 0.08,
+    liquidity: 0.09,
     inflation: 0.08,
-    marketTrend: 0.18,
-    volatility: 0.11,
-    sectorRotation: 0.1,
-    aiLeadership: 0.1,
-    eventRisk: 0.05,
+    marketTrend: 0.16,
+    volatility: 0.1,
+    sectorRotation: 0.09,
+    aiLeadership: 0.09,
+    eventRisk: 0.04,
+    macroPressure: 0.1,
   };
 
   const score = clamp(
@@ -660,16 +884,17 @@ export function computeEngine25MarketHealth({
 
   const regime = deriveRegime(score, components);
   const bias = deriveBias(score, components);
-  const riskLevel = deriveRiskLevel(score, components);
+  const riskLevel = deriveRiskLevel(score);
   const tradePermission = deriveTradePermission(score, bias, components);
 
   const warnings = Object.values(components)
     .flatMap((component) => component.warnings || [])
-    .slice(0, 20);
+    .filter(Boolean)
+    .slice(0, 30);
 
   return {
     ok: true,
-    engine: "engine25.marketHealth.v0.1",
+    engine: "engine25.marketHealth.v0.2",
     updatedAt: new Date().toISOString(),
     score,
     regime,
@@ -682,12 +907,14 @@ export function computeEngine25MarketHealth({
     summary: {
       plainEnglish:
         score >= 70
-          ? "Market health is supportive. Long setups are favored, but event risk and weak pockets should still be respected."
-          : score >= 55
-            ? "Market health is mixed but constructive. Long setups are allowed with selectivity and reduced size."
-            : score >= 45
-              ? "Market health is choppy. Only A+ setups should be considered."
-              : "Market health is defensive. Reduce risk and avoid blind long exposure.",
+          ? "Market health is supportive, but macro pressure must still be watched. Long setups are favored only when bonds, oil, and volatility are not actively pressuring the tape."
+          : score >= 60
+            ? "Market health is constructive but fragile. AI leadership may support the market, but bond yields, oil, inflation, or Fed hawkish risk require reduced size."
+            : score >= 55
+              ? "Market health is mixed. Selective long setups are allowed, but macro pressure requires A+ quality only."
+              : score >= 45
+                ? "Market health is choppy. Only A+ setups should be considered."
+                : "Market health is defensive. Reduce risk and avoid blind long exposure.",
     },
   };
 }
