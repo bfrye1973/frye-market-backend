@@ -1,12 +1,16 @@
 // services/core/jobs/testEngine25DataFetch.js
 
-const fs = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-const {
+import {
   fetchEngine25FredBundle,
   fetchFiscalDataOperatingCashBalance,
-} = require("../logic/engine25DataSources");
+} from "../logic/engine25DataSources.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DATA_DIR = path.join(__dirname, "..", "data");
 const OUTPUT_FILE = path.join(DATA_DIR, "engine25-data-test.json");
@@ -144,7 +148,6 @@ async function main() {
     output.finishedAt = new Date().toISOString();
 
     ensureDataDir();
-
     fs.writeFileSync(OUTPUT_FILE, JSON.stringify(output, null, 2));
 
     console.log("\n========================================");
