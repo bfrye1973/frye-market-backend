@@ -51,7 +51,11 @@ export const ENGINE25_POLYGON_SYMBOLS = [
   // Volatility / macro proxies
   { symbol: "UVXY", label: "Leveraged VIX Futures ETF", component: "volatility" },
   { symbol: "TLT", label: "20+ Year Treasury Bond ETF", component: "bonds" },
-  { symbol: "UUP", label: "U.S. Dollar ETF", component: "commoditiesDollar" },
+  { symbol: "HYG", label: "High Yield Corporate Bond ETF", component: "creditFragility" },
+  { symbol: "JNK", label: "Junk Bond ETF", component: "creditFragility" },
+  { symbol: "LQD", label: "Investment Grade Corporate Bond ETF", component: "creditFragility" },
+  { symbol: "KRE", label: "Regional Bank ETF", component: "creditFragility" },  
+  { symbol: "UUP", label: "U.S. Dollar ETF", component: "commoditiesDollar" },  
   { symbol: "GLD", label: "Gold ETF", component: "commoditiesDollar" },
   { symbol: "USO", label: "Oil ETF", component: "commoditiesDollar" },
 
