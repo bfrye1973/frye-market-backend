@@ -464,19 +464,65 @@ function evaluateRow({ row, bars }) {
   const firstFutureBarIdx = findFirstFutureBarIndex(bars, timestamp);
 
   if (firstFutureBarIdx < 0 || entryPrice === null) {
-    return {
-      ...row,
-      outcomeReview: {
-        reviewedAt: nowIso(),
-        reviewer: "engine24.outcomeTracker.v1",
-        ok: false,
-        reviewStatus: "PENDING_NOT_ENOUGH_DATA",
-        reason: "Missing future bars or entry price.",
-        firstFutureBarIdx,
-        entryPrice,
+  return {
+    ...row,
+
+    outcomePending: true,
+    reviewStatus: "PENDING_NOT_ENOUGH_DATA",
+    outcomeTrackingEnabled: true,
+
+    outcomeReview: {
+      reviewedAt: nowIso(),
+      reviewer: "engine24.outcomeTracker.v1",
+      ok: false,
+      reviewStatus: "PENDING_NOT_ENOUGH_DATA",
+      reason:
+        firstFutureBarIdx < 0
+          ? "No future bars are available after the log timestamp yet."
+          : "Missing entry price.",
+
+      symbol,
+      strategyId,
+      tf: TF,
+
+      originalTimestamp: timestamp,
+      firstFutureBarIdx,
+      entryPrice,
+      topCandidate,
+      hardInvalidation,
+
+      decision,
+      direction,
+      setupType: row?.setupType ?? row?.tradeDecision?.setupType ?? null,
+      grade: row?.grade ?? row?.tradeDecision?.grade ?? null,
+
+      windows: {
+        plus3: { complete: false, reason: "PENDING_NOT_ENOUGH_FUTURE_BARS" },
+        plus6: { complete: false, reason: "PENDING_NOT_ENOUGH_FUTURE_BARS" },
+        plus12: { complete: false, reason: "PENDING_NOT_ENOUGH_FUTURE_BARS" },
+        plus18: { complete: false, reason: "PENDING_NOT_ENOUGH_FUTURE_BARS" },
+        plus36: { complete: false, reason: "PENDING_NOT_ENOUGH_FUTURE_BARS" },
       },
-    };
-  }
+
+      levelHits: null,
+
+      decisionQuality: {
+        outcomeLabel: "PENDING_NOT_ENOUGH_BARS",
+        waitWasCorrect: null,
+        explanation: "Not enough future bars are available to evaluate this decision yet.",
+      },
+
+      safety: {
+        readOnly: true,
+        originalLogModified: false,
+        liveTradingEnabled: false,
+        brokerCallsEnabled: false,
+        orderRoutingEnabled: false,
+        optionsExecutionEnabled: false,
+      },
+    },
+  };
+}
 
   const windows = {};
 
