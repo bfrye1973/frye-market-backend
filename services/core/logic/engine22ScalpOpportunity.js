@@ -4064,9 +4064,8 @@ supportedSetups: {
     volumeContext,
   });
 
- const timelineRead = buildTimelineRead({
+  const timelineRead = buildTimelineRead({
   waveFibState,
-  timelineRead, 
   regimeLayers,
   reactionContext,
   volumeContext,
