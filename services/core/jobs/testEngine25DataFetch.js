@@ -98,16 +98,26 @@ async function main() {
       pageSize: 5000,
     });
 
-    output.sources.fiscalData = {
-      ok: fiscalData.ok,
-      source: fiscalData.source,
-      dataset: fiscalData.dataset,
-      table: fiscalData.table,
-      endpoint: fiscalData.endpoint,
-      count: fiscalData.count,
-      validCount: fiscalData.validCount,
-      latest: fiscalData.latest,
-    };
+   output.sources.fiscalData = {
+     ok: fiscalData.ok,
+     source: fiscalData.source,
+     dataset: fiscalData.dataset,
+     table: fiscalData.table,
+     endpoint: fiscalData.endpoint,
+     recordStart: fiscalData.recordStart,
+     selectedAccountType:
+       fiscalData.selectedAccountType || fiscalData.latest?.account_type || null,
+     balanceField:
+       fiscalData.balanceField ||
+       (fiscalData.latest?.effective_balance === fiscalData.latest?.open_today_bal
+         ? "open_today_bal"
+         : "close_today_bal"),
+     count: fiscalData.count,
+     validCount: fiscalData.validCount,
+     latestRecordDate:
+       fiscalData.latestRecordDate || fiscalData.latest?.record_date || null,
+     latest: fiscalData.latest,
+   };
 
     console.log("FiscalData rows:", fiscalData.validCount);
 
