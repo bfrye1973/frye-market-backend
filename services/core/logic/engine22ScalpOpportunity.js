@@ -21,6 +21,8 @@
 import { logEngine22Alert } from "./engine22AlertLogger.js";
 import { detectRunnerMode } from "./engine22RunnerMode.js";
 import { analyzeWaveStack } from "./engine22/wave/analyzeWaveStack.js";
+import { buildTimelineRead } from "./engine22/wave/buildTimelineRead.js";
+
 
 
 function toNum(x) {
@@ -4062,6 +4064,14 @@ supportedSetups: {
     volumeContext,
   });
 
+ const timelineRead = buildTimelineRead({
+  waveFibState,
+  timelineRead, 
+  regimeLayers,
+  reactionContext,
+  volumeContext,
+  breakoutContext,
+});
   const microContinuation = detectMicroW3ContinuationState({
     engine2State,
     engine16,
@@ -4123,6 +4133,7 @@ supportedSetups: {
     debug: {
       ...(withMicroW4.debug || {}),
       waveFibState,
+      timelineRead,
     },
   };
 };  
