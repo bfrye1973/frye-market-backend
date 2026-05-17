@@ -153,37 +153,71 @@ export async function fetchEngine25FredBundle({
 export async function fetchFiscalDataOperatingCashBalance({
   pageSize = 5000,
   recordStart = "2015-01-01",
-  accountType = "Federal Reserve Account",
 } = {}) {
   const params = new URLSearchParams({
     "page[size]": String(pageSize),
     sort: "-record_date",
     format: "json",
-    filter: `record_date:gte:${recordStart},account_type:eq:${accountType}`,
+    filter: `record_date:gte:${recordStart}`,
   });
 
   const url = `${FISCALDATA_OPERATING_CASH_BALANCE_URL}?${params.toString()}`;
   const json = await fetchJson(url);
 
   const rows = Array.isArray(json.data)
-    ? json.data.map((row) => ({
-        record_date: row.record_date,
-        account_type: row.account_type || null,
-        close_today_bal: toNumber(row.close_today_bal),
-        open_today_bal: toNumber(row.open_today_bal),
-        raw: row,
-      }))
+    ? json.data.map((row) => {
+        const closeBal = toNumber(row.close_today_bal);
+        const openBal = toNumber(row.open_today_bal);
+
+        // Newer DTS rows put TGA values in open_today_bal.
+        // Older DTS rows used close_today_bal.
+        const effectiveBalance =
+          closeBal !== null && closeBal !== undefined ? closeBal : openBal;
+
+        return {
+          record_date: row.record_date,
+          account_type: row.account_type || null,
+          close_today_bal: closeBal,
+          open_today_bal: openBal,
+          effective_balance: effectiveBalance,
+          table_nm: row.table_nm || null,
+          sub_table_name: row.sub_table_name || null,
+          src_line_nbr: row.src_line_nbr || null,
+          raw: row,
+        };
+      })
     : [];
 
-  const validRows = rows.filter((row) => row.close_today_bal !== null);
+  // For current Engine 25 liquidity, use the TGA Closing Balance row.
+  const tgaClosingRows = rows.filter(
+    (row) =>
+      row.effective_balance !== null &&
+      String(row.account_type || "")
+        .toLowerCase()
+        .includes("treasury general account") &&
+      String(row.account_type || "")
+        .toLowerCase()
+        .includes("closing balance")
+  );
 
-  // Because we sort by -record_date, the first valid row is the newest.
+  // Fallback for older rows if exact TGA Closing Balance does not exist.
+  const validRows =
+    tgaClosingRows.length > 0
+      ? tgaClosingRows
+      : rows.filter((row) => row.effective_balance !== null);
+
+  // Newest row because API is sorted by -record_date.
   const latest = validRows[0] || null;
 
-  // Also keep chronological order for future scoring/backtesting.
+  // Keep chronological order for future scoring/backtesting.
   const chronologicalRows = [...validRows].sort((a, b) =>
     String(a.record_date).localeCompare(String(b.record_date))
   );
+
+  const latestRecordDate = latest?.record_date || null;
+  const latestDateRows = latestRecordDate
+    ? rows.filter((row) => row.record_date === latestRecordDate)
+    : [];
 
   return {
     ok: true,
@@ -192,11 +226,14 @@ export async function fetchFiscalDataOperatingCashBalance({
     table: "Operating Cash Balance",
     endpoint: "/v1/accounting/dts/operating_cash_balance",
     recordStart,
-    accountType,
+    selectedAccountType: latest?.account_type || null,
+    balanceField: latest?.close_today_bal !== null ? "close_today_bal" : "open_today_bal",
     sort: "-record_date",
     count: rows.length,
     validCount: validRows.length,
     latest,
+    latestRecordDate,
+    latestDateRows,
     rows: chronologicalRows,
   };
 }
