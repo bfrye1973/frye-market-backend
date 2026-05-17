@@ -157,7 +157,7 @@ export async function fetchFiscalDataOperatingCashBalance({
 } = {}) {
   const params = new URLSearchParams({
     "page[size]": String(pageSize),
-    sort: "record_date",
+    sort: "-record_date",
     format: "json",
     filter: `record_date:gte:${recordStart},account_type:eq:${accountType}`,
   });
@@ -176,7 +176,14 @@ export async function fetchFiscalDataOperatingCashBalance({
     : [];
 
   const validRows = rows.filter((row) => row.close_today_bal !== null);
-  const latest = validRows[validRows.length - 1] || null;
+
+  // Because we sort by -record_date, the first valid row is the newest.
+  const latest = validRows[0] || null;
+
+  // Also keep chronological order for future scoring/backtesting.
+  const chronologicalRows = [...validRows].sort((a, b) =>
+    String(a.record_date).localeCompare(String(b.record_date))
+  );
 
   return {
     ok: true,
@@ -186,9 +193,10 @@ export async function fetchFiscalDataOperatingCashBalance({
     endpoint: "/v1/accounting/dts/operating_cash_balance",
     recordStart,
     accountType,
+    sort: "-record_date",
     count: rows.length,
     validCount: validRows.length,
     latest,
-    rows,
+    rows: chronologicalRows,
   };
 }
