@@ -443,4 +443,6 @@ return {
   summary,
   reasonCodes,
 };
+}
+
 export default analyzeWaveStack;
