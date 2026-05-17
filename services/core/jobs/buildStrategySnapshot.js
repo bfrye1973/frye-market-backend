@@ -32,6 +32,7 @@ import { computeMarketRegime } from "../logic/marketRegime.js";
 import { updateSignalLock } from "../logic/signalLockStore.js";
 import { getExecutionState } from "../logic/execution/executionStateService.js";
 import { computeEngine22ScalpOpportunity } from "../logic/engine22ScalpOpportunity.js";
+import { buildEngine22WaveStrategy } from "../logic/engine22/wave/buildEngine22WaveStrategy.js";
 import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.js";
 
 /* -----------------------------
@@ -2608,6 +2609,7 @@ if (isFuturesSymbol(symbol)) {
       });
 
       let engine22Scalp = null;
+      let engine22WaveStrategy = null;
 
       if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
         try {
@@ -2662,9 +2664,44 @@ if (isFuturesSymbol(symbol)) {
              stack: String(err?.stack || ""),
            },
          };
-       }
-     } 
-  return {
+        }
+      }
+
+      if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
+        try {
+          engine22WaveStrategy = buildEngine22WaveStrategy({
+            symbol,
+            strategyId: s.strategyId,
+            tf: s.tf,
+            engine2State,
+            engine16,
+            marketMeter,
+            regimeLayers: engine22Scalp?.regimeLayers || null,
+            reactionContext: spyReactionQuality?.engine3Reaction || spyReactionQuality || null,
+            volumeContext: spyVolumeBehavior?.engine4Volume || spyVolumeBehavior || null,
+            breakoutContext: engine22Scalp?.breakoutContext || null,
+          });
+        } catch (err) {
+          console.error("[E22G ERROR]", err);
+
+          engine22WaveStrategy = {
+            ok: false,
+            engine: "engine22.waveStrategy.v1",
+            mode: "READ_ONLY",
+            symbol,
+            strategyId: s.strategyId,
+            tf: s.tf,
+            state: "ENGINE22G_ERROR",
+            reasonCodes: ["ENGINE22G_COMPUTE_FAILED"],
+            debug: {
+              error: String(err?.message || err),
+              stack: String(err?.stack || ""),
+            },
+          };
+        }
+      }
+
+   return {
     strategyId: s.strategyId,
     lockedSignal, 
     tf: s.tf,
@@ -2683,6 +2720,7 @@ if (isFuturesSymbol(symbol)) {
     engine2,
     engine16,
     engine22Scalp,
+    engine22WaveStrategy,
     engine15,
     engine15Decision,
     executionBias,
