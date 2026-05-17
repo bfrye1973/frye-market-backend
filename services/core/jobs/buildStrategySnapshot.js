@@ -34,6 +34,7 @@ import { getExecutionState } from "../logic/execution/executionStateService.js";
 import { computeEngine22ScalpOpportunity } from "../logic/engine22ScalpOpportunity.js";
 import { buildEngine22WaveStrategy } from "../logic/engine22/wave/buildEngine22WaveStrategy.js";
 import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.js";
+import { buildWaveTradeDecision } from "../logic/engine22/decisions/buildWaveTradeDecision.js";
 
 /* -----------------------------
    Absolute paths / constants
@@ -2681,6 +2682,17 @@ if (isFuturesSymbol(symbol)) {
             volumeContext: spyVolumeBehavior?.engine4Volume || spyVolumeBehavior || null,
             breakoutContext: engine22Scalp?.breakoutContext || null,
           });
+
+          engine22WaveStrategy.tradeDecision = buildWaveTradeDecision({
+            engine22WaveStrategy,
+            engine15,
+            engine16,
+            reactionContext: spyReactionQuality?.engine3Reaction || spyReactionQuality || null,
+            volumeContext: spyVolumeBehavior?.engine4Volume || spyVolumeBehavior || null,
+           symbol,
+           strategyId: s.strategyId,
+         });
+           
         } catch (err) {
           console.error("[E22G ERROR]", err);
 
