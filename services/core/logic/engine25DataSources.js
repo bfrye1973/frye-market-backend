@@ -56,6 +56,12 @@ async function fetchJson(url, options = {}) {
     );
   }
 
+  
+// 6dxLHZbIzwyQrMQaQIvB4lLDLlZOX2UC
+export const ENGINE25_POLYGON_SYMBOLS = [
+  ...
+];
+
   return json;
 }
 
