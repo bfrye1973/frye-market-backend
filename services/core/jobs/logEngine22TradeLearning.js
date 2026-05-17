@@ -203,6 +203,8 @@ function buildLearningLogEntry({ snapshot, strategy, symbol, strategyId }) {
     dedupeKey,
 
     outcomePending: true,
+    reviewStatus: "PENDING_REVIEW",
+    outcomeTrackingEnabled: false,
     labels: [],
     notes: null,
 
