@@ -11,6 +11,7 @@ import { analyzeWaveDegree } from "./analyzeWaveDegree.js";
 import { analyzeMicroW4AbcRisk } from "./analyzeMicroW4AbcRisk.js";
 import { analyzeWaveDuration } from "./analyzeWaveDuration.js";
 import { analyzeAbcCorrection } from "./analyzeAbcCorrection.js";
+import { buildTradeContextSummary } from "./buildTradeContextSummary.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -387,33 +388,59 @@ export function analyzeWaveStack({
     chaseRisk?.degree ? `CHASE_RISK_FROM_${chaseRisk.degree.toUpperCase()}` : null,
   ].filter(Boolean);
 
-  return {
-    ok: true,
-    engine: "engine22.waveFibState.v1",
-    symbol,
-    currentPrice: round2(currentPrice),
+  const partialWaveFibState = {
+  ok: true,
+  engine: "engine22.waveFibState.v1",
+  symbol,
+  currentPrice: round2(currentPrice),
 
-    stackBias,
-    activeTradingDegree: activeTradingDegree.degree,
-    activeSetup: activeTradingDegree.setup,
-    activeTradingDegreeReason: activeTradingDegree.reason,
+  stackBias,
+  activeTradingDegree: activeTradingDegree.degree,
+  activeSetup: activeTradingDegree.setup,
+  activeTradingDegreeReason: activeTradingDegree.reason,
 
-    chaseRisk: chaseRisk.risk,
-    chaseRiskDegree: chaseRisk.degree,
+  chaseRisk: chaseRisk.risk,
+  chaseRiskDegree: chaseRisk.degree,
 
-    degrees,
-    microW4AbcRisk,
-    abcCorrection,
-    waveDuration,
+  degrees,
+  microW4AbcRisk,
+  abcCorrection,
+  waveDuration,
 
-    regimeContext: regimeLayers || null,
-    
-    reactionContext: reactionContext || null,
-    volumeContext: volumeContext || null,
+  summary,
+  reasonCodes,
+};
 
-    summary,
-    reasonCodes,
-  };
-}
+const tradeContextSummary = buildTradeContextSummary({
+  waveFibState: partialWaveFibState,
+});
 
+return {
+  ok: true,
+  engine: "engine22.waveFibState.v1",
+  symbol,
+  currentPrice: round2(currentPrice),
+
+  stackBias,
+  activeTradingDegree: activeTradingDegree.degree,
+  activeSetup: activeTradingDegree.setup,
+  activeTradingDegreeReason: activeTradingDegree.reason,
+
+  chaseRisk: chaseRisk.risk,
+  chaseRiskDegree: chaseRisk.degree,
+
+  degrees,
+  microW4AbcRisk,
+  abcCorrection,
+  waveDuration,
+  tradeContextSummary,
+
+  regimeContext: regimeLayers || null,
+
+  reactionContext: reactionContext || null,
+  volumeContext: volumeContext || null,
+
+  summary,
+  reasonCodes,
+};
 export default analyzeWaveStack;
