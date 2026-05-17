@@ -150,11 +150,16 @@ export async function fetchEngine25FredBundle({
   };
 }
 
-export async function fetchFiscalDataOperatingCashBalance({ pageSize = 5000 } = {}) {
+export async function fetchFiscalDataOperatingCashBalance({
+  pageSize = 5000,
+  recordStart = "2015-01-01",
+  accountType = "Federal Reserve Account",
+} = {}) {
   const params = new URLSearchParams({
     "page[size]": String(pageSize),
     sort: "record_date",
     format: "json",
+    filter: `record_date:gte:${recordStart},account_type:eq:${accountType}`,
   });
 
   const url = `${FISCALDATA_OPERATING_CASH_BALANCE_URL}?${params.toString()}`;
@@ -179,6 +184,8 @@ export async function fetchFiscalDataOperatingCashBalance({ pageSize = 5000 } = 
     dataset: "Daily Treasury Statement",
     table: "Operating Cash Balance",
     endpoint: "/v1/accounting/dts/operating_cash_balance",
+    recordStart,
+    accountType,
     count: rows.length,
     validCount: validRows.length,
     latest,
