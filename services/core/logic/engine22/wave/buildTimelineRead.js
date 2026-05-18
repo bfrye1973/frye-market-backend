@@ -288,22 +288,6 @@ function buildEngine15Section(engine15) {
   };
 }
 
-function buildCommonSideSections({
-  engine15 = null,
-  regimeLayers = null,
-  reactionContext = null,
-  volumeContext = null,
-  waveDuration = null,
-}) {
-  return [
-    buildEngine15Section(engine15),
-    buildEngine16StructureSection(regimeLayers),
-    buildReactionSection(reactionContext),
-    buildVolumeSection(volumeContext),
-    buildDurationSection(waveDuration),
-  ];
-}
-
 function buildEngine16StructureSection(regimeLayers) {
   const layers = regimeLayers || {};
 
@@ -337,9 +321,60 @@ function buildEngine16StructureSection(regimeLayers) {
   };
 }
 
+function buildTargetClusterSection(targetClusterConfidence) {
+  if (
+    !targetClusterConfidence ||
+    typeof targetClusterConfidence !== "object" ||
+    targetClusterConfidence.active !== true
+  ) {
+    return null;
+  }
+
+  const score = Number(targetClusterConfidence.score);
+  const severity =
+    Number.isFinite(score) && score >= 80
+      ? "info"
+      : "neutral";
+
+  return {
+    title: "Target Cluster Confidence",
+    severity,
+    lines: lineList([
+      targetClusterConfidence.dashboardRead || null,
+      targetClusterConfidence.detailRead || null,
+      targetClusterConfidence.message || null,
+      targetClusterConfidence.activationState
+        ? `Activation: ${text(targetClusterConfidence.activationState)}`
+        : null,
+    ]),
+  };
+}
+
+function buildCommonSideSections({
+  engine15 = null,
+  regimeLayers = null,
+  reactionContext = null,
+  volumeContext = null,
+  waveDuration = null,
+}) {
+  return [
+    buildEngine15Section(engine15),
+    buildEngine16StructureSection(regimeLayers),
+    buildReactionSection(reactionContext),
+    buildVolumeSection(volumeContext),
+    buildDurationSection(waveDuration),
+  ];
+}
+
+function maybeTargetClusterSection(targetClusterConfidence) {
+  const section = buildTargetClusterSection(targetClusterConfidence);
+  return section ? [section] : [];
+}
+
 function buildDamagedAbcTimeline({
   waveFibState,
   tradeContextSummary,
+  targetClusterConfidence = null,
   regimeLayers,
   reactionContext,
   volumeContext,
@@ -381,6 +416,7 @@ function buildDamagedAbcTimeline({
         reads.nextClusterRead || null,
       ]),
     },
+    ...maybeTargetClusterSection(targetClusterConfidence),
     {
       title: "Micro W4 ABC Correction",
       severity: "danger",
@@ -430,12 +466,13 @@ function buildDamagedAbcTimeline({
   ];
 
   const sideSections = buildCommonSideSections({
-  engine15,
-  regimeLayers,
-  reactionContext,
-  volumeContext,
-  waveDuration: duration,
-});
+    engine15,
+    regimeLayers,
+    reactionContext,
+    volumeContext,
+    waveDuration: duration,
+  });
+
   return {
     ok: true,
     source: "engine22.timelineRead.v1",
@@ -474,6 +511,7 @@ function buildDamagedAbcTimeline({
 function buildDefaultTimeline({
   waveFibState,
   tradeContextSummary,
+  targetClusterConfidence = null,
   regimeLayers,
   reactionContext,
   volumeContext,
@@ -504,6 +542,7 @@ function buildDefaultTimeline({
           `Chase risk: ${text(waveFibState?.chaseRisk)}`,
         ]),
       },
+      ...maybeTargetClusterSection(targetClusterConfidence),
       ...buildRegimeSections(regimeLayers),
     ],
     sideSections: buildCommonSideSections({
@@ -528,6 +567,7 @@ function buildDefaultTimeline({
 export function buildTimelineRead({
   waveFibState = null,
   tradeContextSummary = null,
+  targetClusterConfidence = null,
   regimeLayers = null,
   reactionContext = null,
   volumeContext = null,
@@ -550,9 +590,7 @@ export function buildTimelineRead({
           lines: ["Wait for dashboard snapshot to populate."],
         },
       ],
-      sideSections: [
-        buildEngine15Section(engine15),
-      ],
+      sideSections: [buildEngine15Section(engine15)],
       action: "WAIT",
       needs: "WAVE_FIB_STATE_UNAVAILABLE",
       risk: {},
@@ -576,6 +614,7 @@ export function buildTimelineRead({
     return buildDamagedAbcTimeline({
       waveFibState,
       tradeContextSummary: summary,
+      targetClusterConfidence,
       regimeLayers,
       reactionContext,
       volumeContext,
@@ -587,6 +626,7 @@ export function buildTimelineRead({
   return buildDefaultTimeline({
     waveFibState,
     tradeContextSummary: summary,
+    targetClusterConfidence,
     regimeLayers,
     reactionContext,
     volumeContext,
