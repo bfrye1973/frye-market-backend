@@ -290,18 +290,51 @@ function buildEngine15Section(engine15) {
 
 function buildCommonSideSections({
   engine15 = null,
+  regimeLayers = null,
   reactionContext = null,
   volumeContext = null,
-  breakoutContext = null,
   waveDuration = null,
 }) {
   return [
     buildEngine15Section(engine15),
+    buildEngine16StructureSection(regimeLayers),
     buildReactionSection(reactionContext),
     buildVolumeSection(volumeContext),
-    buildBreakoutSection(breakoutContext),
     buildDurationSection(waveDuration),
   ];
+}
+
+function buildEngine16StructureSection(regimeLayers) {
+  const layers = regimeLayers || {};
+
+  const tenMinute = layers.tenMinute || layers.trigger10m || null;
+  const oneHour = layers.oneHour || layers.pullback1h || null;
+  const fourHour = layers.fourHour || layers.trend4h || null;
+  const eod = layers.eod || layers.regimeEod || null;
+
+  return {
+    title: "Engine 16 Structure",
+    severity: "neutral",
+    lines: lineList([
+      tenMinute
+        ? `10m: ${text(tenMinute.state || tenMinute.trendState || "UNKNOWN")} | Score ${tenMinute.score ?? "—"}`
+        : "10m: unavailable",
+
+      oneHour
+        ? `1H: ${text(oneHour.state || oneHour.trendState || "UNKNOWN")} | Score ${oneHour.score ?? "—"}`
+        : "1H: unavailable",
+
+      fourHour
+        ? `4H: ${text(fourHour.state || fourHour.trendState || "UNKNOWN")} | Score ${fourHour.score ?? "—"}`
+        : "4H: unavailable",
+
+      eod
+        ? `EOD: ${text(eod.state || eod.trendState || "UNKNOWN")} | Permission ${
+            eod.dipBuyPermission === true ? "ON" : "OFF"
+          }`
+        : "EOD: unavailable",
+    ]),
+  };
 }
 
 function buildDamagedAbcTimeline({
@@ -397,13 +430,12 @@ function buildDamagedAbcTimeline({
   ];
 
   const sideSections = buildCommonSideSections({
-    engine15,
-    reactionContext,
-    volumeContext,
-    breakoutContext,
-    waveDuration: duration,
-  });
-
+  engine15,
+  regimeLayers,
+  reactionContext,
+  volumeContext,
+  waveDuration: duration,
+});
   return {
     ok: true,
     source: "engine22.timelineRead.v1",
@@ -476,9 +508,9 @@ function buildDefaultTimeline({
     ],
     sideSections: buildCommonSideSections({
       engine15,
+      regimeLayers,
       reactionContext,
       volumeContext,
-      breakoutContext,
       waveDuration: waveFibState?.waveDuration,
     }),
     action: tradeContextSummary?.action || "WAIT",
