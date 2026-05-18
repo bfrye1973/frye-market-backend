@@ -1,22 +1,8 @@
 // services/core/logic/engine22/decisions/buildWaveTradeDecision.js
 // Engine 22G Paper Trade Decision Builder
-//
-// Purpose:
-// Convert the clean Engine 22G wave/fib read into a PAPER_ONLY trade decision.
-//
-// This file does NOT:
-// - place trades
-// - route orders
-// - call brokers
-// - choose option contracts
-// - execute live trades
-//
-// It only produces:
-// engine22WaveStrategy.tradeDecision
 
 function toNum(x) {
   if (x === null || x === undefined || x === "") return null;
-
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
 }
@@ -30,12 +16,20 @@ function upper(x) {
   return String(x || "").trim().toUpperCase();
 }
 
-function compact(arr = []) {
-  return arr.filter(Boolean);
-}
-
 function unique(arr = []) {
   return [...new Set(arr.filter(Boolean))];
+}
+
+function labelForDegree(degreeRaw) {
+  const degree = String(degreeRaw || "").trim().toLowerCase();
+
+  if (degree === "micro") return "Micro";
+  if (degree === "minute") return "Minute";
+  if (degree === "minor") return "Minor";
+  if (degree === "intermediate") return "Intermediate";
+  if (degree === "primary") return "Primary";
+
+  return "Wave";
 }
 
 function isEngine3Confirmed(reactionContext = null) {
@@ -111,14 +105,14 @@ function isShortSetup(activeSetup, directionRaw) {
 
 function buildNeeds({
   abcDamaged,
-  action,
+  reclaimNeeded,
   engine3Confirmed,
   engine4Confirmed,
   engine15Ready,
 } = {}) {
   const needs = [];
 
-  if (abcDamaged || action === "WAIT_FOR_RECLAIM" || action === "WATCH_FOR_RECLAIM") {
+  if (abcDamaged || reclaimNeeded) {
     needs.push("RECLAIM_LADDER");
   }
 
@@ -155,16 +149,9 @@ function buildTargets({ waveFibState = null } = {}) {
     null;
 
   return {
-    p1:
-      targetZones?.e1618 ??
-      defaultTarget ??
-      null,
-    p2:
-      targetZones?.e200 ??
-      null,
-    p3:
-      targetZones?.e2618 ??
-      null,
+    p1: targetZones?.e1618 ?? defaultTarget ?? null,
+    p2: targetZones?.e200 ?? null,
+    p3: targetZones?.e2618 ?? null,
     raw: {
       activeExtension,
       targetZones,
@@ -231,30 +218,48 @@ export function buildWaveTradeDecision({
   symbol = "SPY",
   strategyId = "intraday_scalp@10m",
 } = {}) {
-  const action = upper(engine22WaveStrategy?.action || "WAIT");
-  const mappedDecision = mapActionToDecision(action);
-
   const waveFibState = engine22WaveStrategy?.waveFibState || null;
+  const tradeContextSummary = engine22WaveStrategy?.tradeContextSummary || null;
+  const timelineRead = engine22WaveStrategy?.timelineRead || null;
   const abcCorrection = waveFibState?.abcCorrection || null;
+
+  const action = upper(
+    engine22WaveStrategy?.action ||
+      tradeContextSummary?.action ||
+      timelineRead?.action ||
+      "WAIT"
+  );
+
+  const mappedDecision = mapActionToDecision(action);
 
   const setupType =
     engine22WaveStrategy?.activeSetup ||
     waveFibState?.activeSetup ||
     "UNKNOWN";
 
+  const activeTradingDegree =
+    engine22WaveStrategy?.activeTradingDegree ||
+    waveFibState?.activeTradingDegree ||
+    null;
+
+  const degreeLabel = labelForDegree(activeTradingDegree);
+
   const topCandidate = round2(
     engine22WaveStrategy?.topCandidate ??
+      tradeContextSummary?.topCandidate ??
       waveFibState?.microW4AbcRisk?.topCandidate
   );
 
   const hardInvalidation = round2(
     engine22WaveStrategy?.hardInvalidation ??
+      tradeContextSummary?.hardInvalidation ??
       abcCorrection?.hardInvalidation ??
       waveFibState?.microW4AbcRisk?.hardInvalidation
   );
 
   const reclaimLadder =
     engine22WaveStrategy?.reclaimLadder ??
+    tradeContextSummary?.reclaimLadder ??
     abcCorrection?.reclaimDisplay ??
     null;
 
@@ -264,7 +269,7 @@ export function buildWaveTradeDecision({
     abcCorrection?.state === "ABC_C_LEG_DEEP_DAMAGED" ||
     abcCorrection?.cleanW5PathDamaged === true;
 
-  const microW5NeedsReclaim =
+  const reclaimNeeded =
     abcCorrection?.microW5NeedsReclaim === true ||
     action === "WAIT_FOR_RECLAIM" ||
     action === "WATCH_FOR_RECLAIM";
@@ -307,16 +312,20 @@ export function buildWaveTradeDecision({
     grade = "NO_TRADE";
     entryAllowed = false;
     chaseAllowed = false;
-    reason = "Micro W4 ABC is damaged. Micro W5 needs reclaim first.";
-    reasonCodes.push("MICRO_W4_ABC_DAMAGED", "NO_CHASE_LONG", "WAIT_FOR_RECLAIM");
+    reason = `${degreeLabel} W4 ABC is damaged. ${degreeLabel} W5 needs reclaim first.`;
+    reasonCodes.push(
+      activeTradingDegree === "micro" ? "MICRO_W4_ABC_DAMAGED" : "W4_ABC_DAMAGED",
+      "NO_CHASE_LONG",
+      "WAIT_FOR_RECLAIM"
+    );
 
-  } else if (microW5NeedsReclaim && !allConfirmationGatesPassed) {
+  } else if (reclaimNeeded && !allConfirmationGatesPassed) {
     decision = "WATCH";
     direction = "LONG";
     grade = "WATCH";
     entryAllowed = false;
     chaseAllowed = false;
-    reason = "Micro W5 reclaim is on watch, but confirmation gates are not complete.";
+    reason = `${degreeLabel} W4 reclaim is on watch, but confirmation gates are not complete.`;
     reasonCodes.push("WATCH_FOR_RECLAIM", "NO_CHASE_LONG");
 
   } else if (
@@ -362,7 +371,6 @@ export function buildWaveTradeDecision({
     reasonCodes.push("WAIT", "NO_CHASE_LONG");
   }
 
-  // Safety: no blind shorts in v1.
   if (direction === "SHORT" && !isShortSetup(setupType, direction)) {
     decision = "BLOCKED";
     direction = "NONE";
@@ -375,7 +383,7 @@ export function buildWaveTradeDecision({
 
   const needs = buildNeeds({
     abcDamaged,
-    action,
+    reclaimNeeded,
     engine3Confirmed,
     engine4Confirmed,
     engine15Ready,
@@ -435,12 +443,20 @@ export function buildWaveTradeDecision({
 
     context: {
       action,
-      bias: engine22WaveStrategy?.bias || null,
-      severity: engine22WaveStrategy?.severity || null,
-      activeTradingDegree: engine22WaveStrategy?.activeTradingDegree || null,
+      bias:
+        engine22WaveStrategy?.bias ??
+        tradeContextSummary?.bias ??
+        null,
+      severity:
+        engine22WaveStrategy?.severity ??
+        tradeContextSummary?.severity ??
+        timelineRead?.severity ??
+        null,
+      activeTradingDegree,
       abcCorrectionState: abcCorrection?.state || null,
       abcDamaged,
-      microW5NeedsReclaim,
+      reclaimNeeded,
+      microW5NeedsReclaim: reclaimNeeded,
       hardInvalidationBroken,
       engine15Readiness:
         engine15?.readinessLabel ??
