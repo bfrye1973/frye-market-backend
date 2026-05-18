@@ -159,12 +159,13 @@ export function buildTargetClusterConfidence({
     })),
 
     message:
-      `Primary and Intermediate 1.618 targets cluster near ${round2(lo)}–${round2(hi)}. ` +
+      `Higher-degree ${fibKey.replace("e", "")} targets cluster near ${round2(lo)}–${round2(hi)}. ` +
       `Cluster width is ${round2(widthPts)} pts / ${round2(widthPct)}%. ` +
-      `This creates ${label.replaceAll("_", " ").toLowerCase()}, conditional on W4 holding and reclaim confirmation.`,
+      `Score ${score}/100 = ${label.replaceAll("_", " ").toLowerCase()}. ` +
+      `This is conditional on W4 holding and reclaim confirmation.`,
 
-    dashboardRead:
-      `Wave 5 target cluster: ${round2(lo)}–${round2(hi)} | Score ${score}/100 | Conditional on W4 hold/reclaim.`,
+   dashboardRead:
+      `Wave target cluster: ${round2(lo)}–${round2(hi)} | Score ${score}/100 | Conditional on W4 hold/reclaim.`,
 
     needs: [
       "W4_HOLD_OR_W4_MARK",
