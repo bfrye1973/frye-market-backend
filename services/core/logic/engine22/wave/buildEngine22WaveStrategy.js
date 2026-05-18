@@ -21,6 +21,7 @@ import { buildTimelineRead } from "./buildTimelineRead.js";
 import { buildStockWaveContext } from "./adapters/buildStockWaveContext.js";
 import { buildFuturesWaveContext } from "./adapters/buildFuturesWaveContext.js";
 import { buildWaveTradeDecision } from "../decisions/buildWaveTradeDecision.js";
+import { buildTargetClusterConfidence } from "./buildTargetClusterConfidence.js";
 
 function toNum(x) {
   if (x === null || x === undefined || x === "") return null;
@@ -305,6 +306,12 @@ export function buildEngine22WaveStrategy(input = {}) {
       context,
     });
 
+  const targetClusterConfidence = buildTargetClusterConfidence({
+  symbol: context.symbol,
+  waveFibState,
+  fibKey: "e1618",
+});
+  
   const timelineRead = buildTimelineRead({
     waveFibState,
     tradeContextSummary,
@@ -320,7 +327,7 @@ export function buildEngine22WaveStrategy(input = {}) {
 
   const tradeDecision = buildTradeDecisionSafe({
     context,
-    waveFibState,
+    waveFibState,    
     tradeContextSummary,
     timelineRead,
   });
@@ -338,6 +345,7 @@ export function buildEngine22WaveStrategy(input = {}) {
 
     waveFibState,
     tradeContextSummary,
+    targetClusterConfidence,
     timelineRead,
     tradeDecision,
 
