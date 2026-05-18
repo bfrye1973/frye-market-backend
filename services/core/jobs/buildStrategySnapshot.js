@@ -2728,28 +2728,43 @@ if (isFuturesSymbol(symbol)) {
         }
       }
 
+     const engine15ForEngine22 =
+       String(symbol || "").toUpperCase() === "ES" &&
+       s.strategyId === "intraday_scalp@10m"
+         ? engine15Decision
+         : engine15;
+
+     const reactionContextForEngine22 =
+       String(symbol || "").toUpperCase() === "ES"
+        ? patchedConfluence?.context?.reaction || null
+        : spyReactionQuality?.engine3Reaction || spyReactionQuality || null;
+
+     const volumeContextForEngine22 =
+       String(symbol || "").toUpperCase() === "ES"
+        ? patchedConfluence?.context?.volume || null
+        : spyVolumeBehavior?.engine4Volume || spyVolumeBehavior || null;  
       if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
         try {
-          engine22WaveStrategy = buildEngine22WaveStrategy({
-            symbol,
-            strategyId: s.strategyId,
-            tf: s.tf,
-            engine2State,
-            engine15,
-            engine16,
-            marketMeter,
-            regimeLayers: engine22Scalp?.regimeLayers || null,
-            reactionContext: spyReactionQuality?.engine3Reaction || spyReactionQuality || null,
-            volumeContext: spyVolumeBehavior?.engine4Volume || spyVolumeBehavior || null,
-            breakoutContext: engine22Scalp?.breakoutContext || null,
-          });
+         engine22WaveStrategy = buildEngine22WaveStrategy({
+           symbol,
+           strategyId: s.strategyId,
+           tf: s.tf,
+           engine2State,
+           engine15: engine15ForEngine22,
+           engine16,
+           marketMeter,
+           regimeLayers: engine22Scalp?.regimeLayers || null,
+           reactionContext: reactionContextForEngine22,
+           volumeContext: volumeContextForEngine22,
+           breakoutContext: engine22Scalp?.breakoutContext || null,
+         }); 
 
-          engine22WaveStrategy.tradeDecision = buildWaveTradeDecision({
-            engine22WaveStrategy,
-            engine15,
-            engine16,
-            reactionContext: spyReactionQuality?.engine3Reaction || spyReactionQuality || null,
-            volumeContext: spyVolumeBehavior?.engine4Volume || spyVolumeBehavior || null,
+         engine22WaveStrategy.tradeDecision = buildWaveTradeDecision({
+           engine22WaveStrategy,
+           engine15: engine15ForEngine22,
+           engine16,
+           reactionContext: reactionContextForEngine22,
+           volumeContext: volumeContextForEngine22,
            symbol,
            strategyId: s.strategyId,
          });
