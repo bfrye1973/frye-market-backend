@@ -70,6 +70,65 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function isGoodTimelineRead(timelineRead) {
+  if (!timelineRead || typeof timelineRead !== "object") return false;
+
+  const headline = String(timelineRead.headline || "").trim();
+
+  if (!headline) return false;
+  if (headline === "Wave/Fib State unavailable") return false;
+  if (headline.includes("unavailable")) return false;
+
+  if (!Array.isArray(timelineRead.mainSections)) return false;
+  if (timelineRead.mainSections.length < 1) return false;
+
+  return true;
+}
+
+function loadPreviousSnapshotSafe() {
+  try {
+    if (!fs.existsSync(SNAPSHOT_FILE)) return null;
+    return JSON.parse(fs.readFileSync(SNAPSHOT_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function preserveLastGoodEngine22Timeline(result, previousSnapshot) {
+  if (!result?.strategies || !previousSnapshot?.strategies) return result;
+
+  for (const strategyId of Object.keys(result.strategies)) {
+    const nextStrategy = result.strategies[strategyId];
+    const prevStrategy = previousSnapshot.strategies?.[strategyId];
+
+    const nextWave = nextStrategy?.engine22WaveStrategy;
+    const prevWave = prevStrategy?.engine22WaveStrategy;
+
+    const nextTimeline = nextWave?.timelineRead;
+    const prevTimeline = prevWave?.timelineRead;
+
+    const nextGood = isGoodTimelineRead(nextTimeline);
+    const prevGood = isGoodTimelineRead(prevTimeline);
+
+    if (!nextGood && prevGood) {
+      result.strategies[strategyId] = {
+        ...nextStrategy,
+        engine22WaveStrategy: {
+          ...(prevWave || {}),
+          ...(nextWave || {}),
+          timelineRead: prevTimeline,
+          staleTimelineFallback: true,
+          staleTimelineFallbackReason:
+            "PRESERVED_LAST_GOOD_ENGINE22_TIMELINE_DURING_REBUILD",
+          staleTimelineFallbackAt: nowIso(),
+        },
+      };
+    }
+  }
+
+  return result;
+}
+
 function toNum(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
@@ -2925,6 +2984,8 @@ const micro = enrichEngine2BlockWithExtensions(microWithLevels);
 async function buildSnapshot() {
   console.log("Starting strategy snapshot build...");
 
+  const previousSnapshot = loadPreviousSnapshotSafe();
+
   const momentum = await fetchMomentumContext(symbol);
   const engine2State = await buildEngine2State(symbol);
   console.log("Momentum fetched");
@@ -3208,9 +3269,10 @@ console.log("Engine21 alignment fetched");
     }
   }
 
+  preserveLastGoodEngine22Timeline(result, previousSnapshot);
+
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(result, null, 2));
-
   console.log("Strategy snapshot written:", SNAPSHOT_FILE);
 }
 
