@@ -1,21 +1,5 @@
-cd /opt/render/project/src/services/core
-
-cat > logic/engine22/wave/adapters/buildFuturesWaveContext.js <<'EOF'
 // services/core/logic/engine22/wave/adapters/buildFuturesWaveContext.js
 // Engine 22G — Futures Wave Context Adapter
-//
-// Purpose:
-// Normalize futures-specific inputs before they enter the generic Engine 22G wave/fib core.
-//
-// This file should know about futures differences:
-// - ES tick size
-// - futures near-24h session profile
-// - Engine16ES regime layer names
-//
-// This file should NOT create trades.
-// This file should NOT route orders.
-// This file should NOT call brokers.
-// This file is read-only / paper-only context preparation.
 
 function toNum(x) {
   if (x === null || x === undefined || x === "") return null;
@@ -44,47 +28,42 @@ function normalizeFuturesRegimeLayers({ engine16 = null, regimeLayers = null, en
   const e16 = engine16?.regimeLayers || {};
   const e22 = engine22Scalp?.regimeLayers || {};
 
-  const tenMinute =
-    provided.tenMinute ||
-    provided.trigger10m ||
-    e16.tenMinute ||
-    e16.trigger10m ||
-    e22.tenMinute ||
-    e22.trigger10m ||
-    null;
-
-  const oneHour =
-    provided.oneHour ||
-    provided.pullback1h ||
-    e16.oneHour ||
-    e16.pullback1h ||
-    e22.oneHour ||
-    e22.pullback1h ||
-    null;
-
-  const fourHour =
-    provided.fourHour ||
-    provided.trend4h ||
-    e16.fourHour ||
-    e16.trend4h ||
-    e22.fourHour ||
-    e22.trend4h ||
-    null;
-
-  const eod =
-    provided.eod ||
-    provided.regimeEod ||
-    e16.eod ||
-    e16.regimeEod ||
-    e22.eod ||
-    e22.regimeEod ||
-    null;
-
   return {
-    tenMinute,
-    oneHour,
-    fourHour,
-    eod,
+    tenMinute:
+      provided.tenMinute ||
+      provided.trigger10m ||
+      e16.tenMinute ||
+      e16.trigger10m ||
+      e22.tenMinute ||
+      e22.trigger10m ||
+      null,
+
+    oneHour:
+      provided.oneHour ||
+      provided.pullback1h ||
+      e16.oneHour ||
+      e16.pullback1h ||
+      e22.oneHour ||
+      e22.pullback1h ||
+      null,
+
+    fourHour:
+      provided.fourHour ||
+      provided.trend4h ||
+      e16.fourHour ||
+      e16.trend4h ||
+      e22.fourHour ||
+      e22.trend4h ||
+      null,
+
+    eod:
+      provided.eod ||
+      provided.regimeEod ||
+      e16.eod ||
+      e16.regimeEod ||
+      e22.eod ||
+      e22.regimeEod ||
+      null,
   };
 }
 
@@ -191,4 +170,3 @@ export function buildFuturesWaveContext(input = {}) {
 }
 
 export default buildFuturesWaveContext;
-EOF
