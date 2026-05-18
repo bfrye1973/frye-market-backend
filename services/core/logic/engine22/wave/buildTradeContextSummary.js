@@ -261,6 +261,79 @@ function buildDamagedMicroSummary({ waveFibState, waveStack, clusters }) {
   };
 }
 
+function buildActiveW4PullbackSummary({ waveFibState, waveStack, clusters }) {
+  const activeDegree = waveFibState?.activeTradingDegree || "unknown";
+  const activeSetup = waveFibState?.activeSetup || "NO_SETUP";
+  const activeBlock = waveFibState?.degrees?.[activeDegree] || {};
+
+  const priorHigh =
+    activeBlock?.anchors?.w3 ??
+    activeBlock?.fibProjection?.anchors?.w3 ??
+    null;
+
+  const minuteMissing = waveFibState?.degrees?.minute?.phase === "UNKNOWN";
+  const microMissing = waveFibState?.degrees?.micro?.phase === "UNKNOWN";
+
+  const labelDegree = String(activeDegree).toUpperCase();
+
+  const summary =
+    `${waveStack.message}\n\n` +
+    `${labelDegree} W4 pullback is active after W3 completed${
+      priorHigh ? ` near ${fmt(priorHigh)}` : ""
+    }.\n\n` +
+    (minuteMissing || microMissing
+      ? `Minute/Micro execution waves are not marked yet.\n\n`
+      : "") +
+    `${clusters.nextCluster.message}\n\n` +
+    `This is not a clean long yet. Wait for reclaim and lower-timeframe confirmation.`;
+
+  return {
+    headline: `${labelDegree} W4 PULLBACK — WAIT FOR RECLAIM`,
+    subheadline:
+      "Higher wave structure is still active, but the current W4 pullback needs reclaim confirmation.",
+    bias: "BULLISH_BUT_PULLING_BACK",
+    action: "WAIT_FOR_RECLAIM",
+    direction: "NONE",
+    chaseAllowed: false,
+    severity: "warning",
+
+    topCandidate: round2(priorHigh),
+    hardInvalidation: null,
+    reclaimLadder: null,
+
+    firstCluster: clusters.firstCluster,
+    nextCluster: clusters.nextCluster,
+
+    abc: null,
+
+    reads: {
+      structureRead: waveStack.message,
+      activePullbackRead: `${labelDegree} W4 pullback is active after W3 completed${
+        priorHigh ? ` near ${fmt(priorHigh)}` : ""
+      }.`,
+      lowerWaveRead:
+        minuteMissing || microMissing
+          ? "Minute/Micro execution waves are not marked yet."
+          : "Lower execution waves are available.",
+      nextClusterRead: clusters.nextCluster.message,
+      actionRead:
+        "No chase long. Wait for reclaim and lower-timeframe confirmation.",
+    },
+
+    summary,
+
+    reasonCodes: [
+      "TRADE_CONTEXT_SUMMARY_BUILT",
+      "ACTIVE_W4_PULLBACK",
+      minuteMissing || microMissing
+        ? "LOWER_EXECUTION_WAVES_MISSING"
+        : "LOWER_EXECUTION_WAVES_AVAILABLE",
+      "WAIT_FOR_RECLAIM",
+      activeSetup,
+    ],
+  };
+}
+
 function buildDefaultSummary({ waveFibState, waveStack, clusters }) {
   return {
     headline: "WAVE/FIB STATE",
@@ -318,6 +391,22 @@ export function buildTradeContextSummary({ waveFibState = null } = {}) {
     return {
       ok: true,
       ...buildDamagedMicroSummary({
+        waveFibState,
+        waveStack,
+        clusters,
+      }),
+    };
+  }
+
+  const activeDegree = waveFibState?.activeTradingDegree || null;
+  const activePhase = activeDegree
+    ? waveFibState?.degrees?.[activeDegree]?.phase
+    : null;
+
+  if (activePhase === "IN_W4") {
+    return {
+      ok: true,
+      ...buildActiveW4PullbackSummary({
         waveFibState,
         waveStack,
         clusters,
