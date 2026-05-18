@@ -239,7 +239,9 @@ function buildTradeDecisionSafe({
       symbol: context.symbol,
       strategyId: context.strategyId,
       setupType: waveFibState?.activeSetup || "NO_SETUP",
-      reason: `Trade decision builder failed safely: ${err?.message || "unknown error"}`,
+      reason: `Trade decision builder failed safely: ${
+        err?.message || "unknown error"
+      }`,
       needs: ["TRADE_DECISION_REVIEW"],
       reasonCodes: ["TRADE_DECISION_SAFE_FALLBACK"],
     });
@@ -307,14 +309,15 @@ export function buildEngine22WaveStrategy(input = {}) {
     });
 
   const targetClusterConfidence = buildTargetClusterConfidence({
-  symbol: context.symbol,
-  waveFibState,
-  fibKey: "e1618",
-});
-  
+    symbol: context.symbol,
+    waveFibState,
+    fibKey: "e1618",
+  });
+
   const timelineRead = buildTimelineRead({
     waveFibState,
     tradeContextSummary,
+    targetClusterConfidence,
     regimeLayers: context.regimeLayers,
     reactionContext: context.reactionContext,
     volumeContext: context.volumeContext,
@@ -327,7 +330,7 @@ export function buildEngine22WaveStrategy(input = {}) {
 
   const tradeDecision = buildTradeDecisionSafe({
     context,
-    waveFibState,    
+    waveFibState,
     tradeContextSummary,
     timelineRead,
   });
@@ -389,4 +392,3 @@ export function buildEngine22WaveStrategy(input = {}) {
 }
 
 export default buildEngine22WaveStrategy;
-
