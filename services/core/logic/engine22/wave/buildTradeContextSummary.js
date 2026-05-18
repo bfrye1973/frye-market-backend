@@ -21,9 +21,13 @@ function round2(x) {
 
 function fmt(x, fallback = "—") {
   const n = Number(x);
-  return Number.isFinite(n) ? n.toFixed(2) : fallback;
+  return Number.isFinite(n) && n !== 0 ? n.toFixed(2) : fallback;
 }
 
+function validLevel(x) {
+  const n = Number(x);
+  return Number.isFinite(n) && n !== 0 ? n : null;
+}
 function text(value, fallback = "—") {
   if (value === null || value === undefined || value === "") return fallback;
   return String(value).replaceAll("_", " ");
@@ -65,8 +69,8 @@ function buildClusterSummary(waveFibState) {
   };
 
   const nextClusterValues = [primary1618, minor1618, intermediate2618]
-    .map(Number)
-    .filter(Number.isFinite);
+  .map(validLevel)
+  .filter((x) => x !== null);
 
   const nextClusterLo = nextClusterValues.length
     ? Math.min(...nextClusterValues)
@@ -107,11 +111,13 @@ function buildWaveStackSummary(waveFibState) {
   const minute = getPhase(waveFibState, "minute");
   const micro = getPhase(waveFibState, "micro");
 
-  const longTermBullish =
-    primary === "IN_W5" &&
-    intermediate === "IN_W5" &&
-    minor === "IN_W5" &&
-    minute === "IN_W5";
+ const higherW5Active =
+   primary === "IN_W5" &&
+   intermediate === "IN_W5";
+
+ const longTermBullish =
+   higherW5Active &&
+   (minor === "IN_W5" || minor === "IN_W4");
 
   return {
     primary,
@@ -126,8 +132,10 @@ function buildWaveStackSummary(waveFibState) {
       minute
     ).replace("IN ", "")} | Micro ${text(micro).replace("IN ", "")}`,
     message: longTermBullish
-      ? "Long-term structure is still bullish because Primary / Intermediate / Minor / Minute are in W5."
-      : "Long-term wave stack is mixed or not fully aligned.",
+  ? minor === "IN_W4"
+    ? "Higher wave structure is still bullish because Primary and Intermediate are in W5 while Minor W4 is forming."
+    : "Long-term structure is still bullish because Primary / Intermediate / Minor / Minute are in W5."
+  : "Long-term wave stack is mixed or not fully aligned.",
   };
 }
 
