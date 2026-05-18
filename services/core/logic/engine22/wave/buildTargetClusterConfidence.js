@@ -178,5 +178,15 @@ export function buildTargetClusterConfidence({
     reasonCodes: [
       "TARGET_CLUSTER_CONFIDENCE_BUILT",
       `${candidates.length}_VALID_TARGET_LEVELS`,
-      higherW5Active ? "PRIMARY_INTERMEDIATE_W5_ACTIVE" : "HIGHER_W5_NOT_FULLY_ALIGNED",
-      activeW4Pullback ? "ACTIVE
+      higherW5Active
+        ? "PRIMARY_INTERMEDIATE_W5_ACTIVE"
+        : "HIGHER_W5_NOT_FULLY_ALIGNED",
+      activeW4Pullback
+        ? "ACTIVE_W4_PULLBACK_CONDITIONAL"
+        : "NO_ACTIVE_W4_PULLBACK",
+      label,
+    ],
+  };
+}
+
+export default buildTargetClusterConfidence;
