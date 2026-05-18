@@ -24,49 +24,48 @@ function tickSizeForFutures(symbol) {
 }
 
 function normalizeFuturesRegimeLayers({ engine16 = null, regimeLayers = null, engine22Scalp = null } = {}) {
-  const provided = regimeLayers || {};
   const e16 = engine16?.regimeLayers || {};
+  const provided = regimeLayers || {};
   const e22 = engine22Scalp?.regimeLayers || {};
 
   return {
     tenMinute:
-      provided.tenMinute ||
-      provided.trigger10m ||
-      e16.tenMinute ||
       e16.trigger10m ||
-      e22.tenMinute ||
+      e16.tenMinute ||
+      provided.trigger10m ||
+      provided.tenMinute ||
       e22.trigger10m ||
+      e22.tenMinute ||
       null,
 
     oneHour:
-      provided.oneHour ||
-      provided.pullback1h ||
-      e16.oneHour ||
       e16.pullback1h ||
-      e22.oneHour ||
+      e16.oneHour ||
+      provided.pullback1h ||
+      provided.oneHour ||
       e22.pullback1h ||
+      e22.oneHour ||
       null,
 
     fourHour:
-      provided.fourHour ||
-      provided.trend4h ||
-      e16.fourHour ||
       e16.trend4h ||
-      e22.fourHour ||
+      e16.fourHour ||
+      provided.trend4h ||
+      provided.fourHour ||
       e22.trend4h ||
+      e22.fourHour ||
       null,
 
     eod:
-      provided.eod ||
-      provided.regimeEod ||
-      e16.eod ||
       e16.regimeEod ||
-      e22.eod ||
+      e16.eod ||
+      provided.regimeEod ||
+      provided.eod ||
       e22.regimeEod ||
+      e22.eod ||
       null,
   };
 }
-
 function pickCurrentPrice({
   currentPrice = null,
   engine16 = null,
