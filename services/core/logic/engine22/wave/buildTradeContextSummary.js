@@ -81,12 +81,12 @@ function buildClusterSummary(waveFibState) {
     : null;
 
   const nextCluster = {
-    label: "NEXT_MAJOR_W5_REACTION_CLUSTER",
-    lo: round2(nextClusterLo),
-    hi: round2(nextClusterHi),
-    primary1618: round2(primary1618),
-    minor1618: round2(minor1618),
-    intermediate2618: round2(intermediate2618),
+  label: "NEXT_MAJOR_W5_REACTION_CLUSTER",
+  lo: round2(nextClusterLo),
+  hi: round2(nextClusterHi),
+  primary1618: round2(validLevel(primary1618)),
+  minor1618: round2(validLevel(minor1618)),
+  intermediate2618: round2(validLevel(intermediate2618)),
     display:
       Number.isFinite(nextClusterLo) && Number.isFinite(nextClusterHi)
         ? `${fmt(nextClusterLo)}–${fmt(nextClusterHi)}`
