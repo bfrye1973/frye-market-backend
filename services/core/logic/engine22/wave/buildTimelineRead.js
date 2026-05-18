@@ -3,7 +3,7 @@
 //
 // Purpose:
 // Convert Engine 22 / Engine 22G read-only context into one frontend-ready timeline object.
-// This lets Engine 17 render engine22Scalp.timelineRead directly.
+// This lets Engine 17 render engine22WaveStrategy.timelineRead directly.
 // No trade decisions. No readiness changes. No live execution.
 
 function fmt(x, fallback = "—") {
@@ -74,7 +74,8 @@ function buildLayerSection(title, layer, fallback = `${title}: unavailable`) {
     title,
     severity:
       String(state).toUpperCase().includes("BELOW") ||
-      String(state).toUpperCase().includes("LOST")
+      String(state).toUpperCase().includes("LOST") ||
+      String(state).toUpperCase().includes("FAILING")
         ? "warning"
         : "neutral",
     lines: lineList(lines),
@@ -151,18 +152,23 @@ function buildVolumeSection(volumeContext) {
   const quality = volumeContext.quality || volumeContext.participationQuality || "UNKNOWN";
   const score = volumeContext.score ?? volumeContext.volumeScore ?? null;
   const maxScore = volumeContext.maxScore ?? 15;
-  const relVol = volumeContext.relativeVolume;
+  const relVol =
+    volumeContext.relativeVolume ??
+    volumeContext.flags?.relativeVolume ??
+    null;
+
+  const confirmed =
+    volumeContext.confirmed === true ||
+    volumeContext.volumeConfirmed === true;
 
   return {
     title: "Engine 4 Volume",
-    severity: volumeContext.confirmed === true ? "bullish" : "warning",
+    severity: confirmed === true ? "bullish" : "warning",
     lines: lineList([
       `${text(state)} — ${text(quality)}`,
       score != null ? `Score ${score}/${maxScore}` : null,
       relVol != null ? `Relative Volume: ${Number(relVol).toFixed(2)}x` : null,
-      volumeContext.confirmed === true
-        ? "Participation confirmed"
-        : "Participation not confirmed",
+      confirmed === true ? "Participation confirmed" : "Participation not confirmed",
       volumeContext.message || null,
     ]),
   };
@@ -198,13 +204,17 @@ function buildDurationSection(waveDuration) {
     };
   }
 
-  const micro = waveDuration?.degrees?.micro || {};
-  const barDuration = micro?.barDuration || {};
+  const activeDegree = waveDuration.activeDegree || "UNKNOWN";
+  const activeWave = waveDuration.activeWave || "UNKNOWN";
+  const activeBlock = waveDuration?.degrees?.[activeDegree] || {};
+  const barDuration = activeBlock?.barDuration || {};
 
   const barLine =
     barDuration.reason === "BARS_UNAVAILABLE"
       ? "Bar duration: waiting for bar feed"
-      : `Bar state: ${text(micro.maturityStateByBars)} / ${text(micro.timeRiskByBars)}`;
+      : `Bar state: ${text(activeBlock.maturityStateByBars)} / ${text(
+          activeBlock.timeRiskByBars
+        )}`;
 
   return {
     title: "Duration / Time Risk",
@@ -214,16 +224,84 @@ function buildDurationSection(waveDuration) {
         ? "warning"
         : "neutral",
     lines: lineList([
-      `Active duration: ${text(waveDuration.activeDegree)} ${text(waveDuration.activeWave)}`,
+      `Active duration: ${text(activeDegree)} ${text(activeWave)}`,
       `Clock state: ${text(waveDuration.activeMaturityState)} / ${text(
         waveDuration.activeTimeRisk
       )}`,
-      micro.elapsedHours != null
-        ? `Micro W4 has been active for ${Number(micro.elapsedHours).toFixed(2)} clock hours.`
+      activeBlock.elapsedHours != null
+        ? `${text(activeDegree)} ${text(activeWave)} has been active for ${Number(
+            activeBlock.elapsedHours
+          ).toFixed(2)} clock hours.`
         : null,
       barLine,
     ]),
   };
+}
+
+function buildEngine15Section(engine15) {
+  if (!engine15 || typeof engine15 !== "object") {
+    return {
+      title: "Engine 15 Readiness",
+      severity: "neutral",
+      lines: ["Engine 15 readiness unavailable"],
+    };
+  }
+
+  const readiness =
+    engine15.readinessLabel ||
+    engine15.readiness ||
+    "UNKNOWN";
+
+  const readinessUpper = String(readiness).toUpperCase();
+
+  const isReady =
+    readinessUpper === "READY" ||
+    readinessUpper === "PAPER_READY" ||
+    readinessUpper === "EXHAUSTION_READY";
+
+  const needs = Array.isArray(engine15.needs)
+    ? engine15.needs.slice(0, 5).join(" • ")
+    : engine15.needs || null;
+
+  const blockers = Array.isArray(engine15.blockers)
+    ? engine15.blockers.slice(0, 5).join(" • ")
+    : engine15.blockers || null;
+
+  const reasons = Array.isArray(engine15.reasonCodes)
+    ? engine15.reasonCodes.slice(0, 6).join(" • ")
+    : null;
+
+  return {
+    title: "Engine 15 Readiness",
+    severity: isReady ? "bullish" : "warning",
+    lines: lineList([
+      `Readiness: ${text(readiness)}`,
+      engine15.executionBias ? `Execution Bias: ${text(engine15.executionBias)}` : null,
+      engine15.action ? `Action: ${text(engine15.action)}` : null,
+      engine15.permission ? `Permission: ${text(engine15.permission)}` : null,
+      engine15.nextSetupType ? `Next Setup: ${text(engine15.nextSetupType)}` : null,
+      engine15.direction ? `Direction: ${text(engine15.direction)}` : null,
+      needs ? `Needs: ${text(needs)}` : null,
+      blockers ? `Blockers: ${text(blockers)}` : null,
+      reasons ? `Reasons: ${text(reasons)}` : null,
+    ]),
+  };
+}
+
+function buildCommonSideSections({
+  engine15 = null,
+  reactionContext = null,
+  volumeContext = null,
+  breakoutContext = null,
+  waveDuration = null,
+}) {
+  return [
+    buildEngine15Section(engine15),
+    buildReactionSection(reactionContext),
+    buildVolumeSection(volumeContext),
+    buildBreakoutSection(breakoutContext),
+    buildDurationSection(waveDuration),
+  ];
 }
 
 function buildDamagedAbcTimeline({
@@ -233,6 +311,7 @@ function buildDamagedAbcTimeline({
   reactionContext,
   volumeContext,
   breakoutContext,
+  engine15 = null,
 }) {
   const abc = waveFibState?.abcCorrection || {};
   const risk = waveFibState?.microW4AbcRisk || {};
@@ -317,12 +396,13 @@ function buildDamagedAbcTimeline({
     },
   ];
 
-  const sideSections = [
-    buildReactionSection(reactionContext),
-    buildVolumeSection(volumeContext),
-    buildBreakoutSection(breakoutContext),
-    buildDurationSection(duration),
-  ];
+  const sideSections = buildCommonSideSections({
+    engine15,
+    reactionContext,
+    volumeContext,
+    breakoutContext,
+    waveDuration: duration,
+  });
 
   return {
     ok: true,
@@ -366,6 +446,7 @@ function buildDefaultTimeline({
   reactionContext,
   volumeContext,
   breakoutContext,
+  engine15 = null,
 }) {
   const waveStack = buildWaveStack(waveFibState);
   const waveStackText = buildWaveStackText(waveStack);
@@ -393,12 +474,13 @@ function buildDefaultTimeline({
       },
       ...buildRegimeSections(regimeLayers),
     ],
-    sideSections: [
-      buildReactionSection(reactionContext),
-      buildVolumeSection(volumeContext),
-      buildBreakoutSection(breakoutContext),
-      buildDurationSection(waveFibState?.waveDuration),
-    ],
+    sideSections: buildCommonSideSections({
+      engine15,
+      reactionContext,
+      volumeContext,
+      breakoutContext,
+      waveDuration: waveFibState?.waveDuration,
+    }),
     action: tradeContextSummary?.action || "WAIT",
     needs: "WAIT_FOR_CONFIRMATION",
     risk: {
@@ -413,10 +495,12 @@ function buildDefaultTimeline({
 
 export function buildTimelineRead({
   waveFibState = null,
+  tradeContextSummary = null,
   regimeLayers = null,
   reactionContext = null,
   volumeContext = null,
   breakoutContext = null,
+  engine15 = null,
 } = {}) {
   if (!waveFibState || typeof waveFibState !== "object") {
     return {
@@ -434,7 +518,9 @@ export function buildTimelineRead({
           lines: ["Wait for dashboard snapshot to populate."],
         },
       ],
-      sideSections: [],
+      sideSections: [
+        buildEngine15Section(engine15),
+      ],
       action: "WAIT",
       needs: "WAVE_FIB_STATE_UNAVAILABLE",
       risk: {},
@@ -442,7 +528,7 @@ export function buildTimelineRead({
     };
   }
 
-  const tradeContextSummary = waveFibState?.tradeContextSummary || null;
+  const summary = tradeContextSummary || waveFibState?.tradeContextSummary || null;
   const abc = waveFibState?.abcCorrection || null;
   const risk = waveFibState?.microW4AbcRisk || null;
 
@@ -457,21 +543,23 @@ export function buildTimelineRead({
   if (isDamagedAbc || isDamagedRisk) {
     return buildDamagedAbcTimeline({
       waveFibState,
-      tradeContextSummary,
+      tradeContextSummary: summary,
       regimeLayers,
       reactionContext,
       volumeContext,
       breakoutContext,
+      engine15,
     });
   }
 
   return buildDefaultTimeline({
     waveFibState,
-    tradeContextSummary,
+    tradeContextSummary: summary,
     regimeLayers,
     reactionContext,
     volumeContext,
     breakoutContext,
+    engine15,
   });
 }
 
