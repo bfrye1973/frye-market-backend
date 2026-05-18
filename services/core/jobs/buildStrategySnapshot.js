@@ -2676,6 +2676,7 @@ if (isFuturesSymbol(symbol)) {
             strategyId: s.strategyId,
             tf: s.tf,
             engine2State,
+            engine15,
             engine16,
             marketMeter,
             regimeLayers: engine22Scalp?.regimeLayers || null,
