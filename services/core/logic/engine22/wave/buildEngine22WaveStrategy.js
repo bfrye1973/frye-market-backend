@@ -1,6 +1,3 @@
-cd /opt/render/project/src/services/core
-
-cat > logic/engine22/wave/buildEngine22WaveStrategy.js <<'EOF'
 // services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
 // Engine 22G — Clean Wave Strategy Wrapper
 //
@@ -384,4 +381,4 @@ export function buildEngine22WaveStrategy(input = {}) {
 }
 
 export default buildEngine22WaveStrategy;
-EOF
+
