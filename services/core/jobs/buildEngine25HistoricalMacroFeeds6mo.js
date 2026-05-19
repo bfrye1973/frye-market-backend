@@ -747,6 +747,8 @@ async function main() {
     console.log("\nReading base replay file:");
     console.log(REPLAY_BASE_FILE);
 
+    ensureReplayBaseFileExists();
+
     const baseReplay = readJsonFile(REPLAY_BASE_FILE);
     const replayRows = normalizeReplayRows(baseReplay);
 
