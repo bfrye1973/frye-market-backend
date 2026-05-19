@@ -1111,12 +1111,80 @@ function deriveEsPermission(score, regime, bias, riskLevel, components, tradePer
     notes,
   };
 }
+
+function normalizeEsTechnicalContext(esTechnicalContextData) {
+  const read = esTechnicalContextData?.technicalRead;
+
+  if (!esTechnicalContextData?.ok || !read) {
+    return null;
+  }
+
+  return {
+    ok: true,
+    engine: esTechnicalContextData.engine || "engine25.esTechnicalContext.v0.1",
+    state: read.state,
+    bias: read.bias,
+    permission: read.permission,
+    requiredAction: read.requiredAction,
+    sizeCap: read.sizeCap,
+    notes: read.notes || [],
+    rules: read.rules || {},
+    daily: esTechnicalContextData.daily || null,
+    fourHour: esTechnicalContextData.fourHour || null,
+    oneHour: esTechnicalContextData.oneHour || null,
+    tenMinute: esTechnicalContextData.tenMinute || null,
+  };
+}
+
+function applyEsTechnicalContextToPermission(esPermission, esTechnicalContext) {
+  if (!esTechnicalContext?.ok) {
+    return esPermission;
+  }
+
+  const technicalSizeCap = Number(esTechnicalContext.sizeCap);
+  const currentSize = Number(esPermission?.sizeMultiplier ?? 0.5);
+
+  const sizeMultiplier = Number.isFinite(technicalSizeCap)
+    ? Math.min(currentSize, technicalSizeCap)
+    : currentSize;
+
+  let mode = esPermission?.mode || "WAIT_FOR_CONFIRMATION";
+
+  if (esTechnicalContext.permission === "A_PLUS_LONGS_ONLY") {
+    if (mode.includes("MACRO_PRESSURE")) {
+      mode = "A_PLUS_LONGS_ONLY_MACRO_AND_TECHNICAL_PULLBACK";
+    } else if (!mode.includes("A_PLUS")) {
+      mode = "A_PLUS_LONGS_ONLY_TECHNICAL_PULLBACK";
+    }
+  }
+
+  if (esTechnicalContext.state === "DAILY_20EMA_SUPPORT_FAILING") {
+    mode = "NO_NORMAL_LONGS_DAILY_20EMA_FAILING";
+  }
+
+  const notes = [
+    ...(esPermission?.notes || []),
+    ...(esTechnicalContext.notes || []),
+  ];
+
+  return {
+    ...esPermission,
+    mode,
+    sizeMultiplier,
+    technicalState: esTechnicalContext.state,
+    requiredTechnicalAction: esTechnicalContext.requiredAction,
+    notes: [...new Set(notes)],
+  };
+}
+
 export function computeEngine25MarketHealth({
   macroData,
   marketData,
   fmpData = null,
   sectorHealthData = null,
+  esTechnicalContextData = null,
 } = {}) {
+  
   const labor = scoreLabor(macroData);
   const creditStress = scoreCreditStress(macroData);
   const bondMarket = scoreBondMarket(macroData);
@@ -1149,6 +1217,7 @@ export function computeEngine25MarketHealth({
 };
 
   const macroPressure = scoreMacroPressure(macroData, marketData, baseComponents);
+  const esTechnicalContext = normalizeEsTechnicalContext(esTechnicalContextData);
 
   const components = {
     ...baseComponents,
@@ -1182,13 +1251,19 @@ export function computeEngine25MarketHealth({
   const bias = deriveBias(score, components);
   const riskLevel = deriveRiskLevel(score);
   const tradePermission = deriveTradePermission(score, bias, components);
-  const esPermission = deriveEsPermission(
+
+  const baseEsPermission = deriveEsPermission(
     score,
     regime,
     bias,
     riskLevel,
     components,
     tradePermission
+  );
+
+  const esPermission = applyEsTechnicalContextToPermission(
+    baseEsPermission,
+    esTechnicalContext
   );
 
   const warnings = Object.values(components)
