@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import {
   ENGINE25_FRED_SERIES,
   fetchEngine25FredBundle,
+  fetchFiscalDataOperatingCashBalance,
 } from "../logic/engine25DataSources.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,10 +25,11 @@ const OUTPUT_FILE = path.join(
   "engine25-historical-macro-feeds-6mo.json"
 );
 
-const ENGINE_NAME = "engine25.historicalMacroFeeds.v0.2";
-const MODEL_TYPE = "FRED_ONLY_RAW_MAPPING_WITH_MACRO_SCORES";
+const ENGINE_NAME = "engine25.historicalMacroFeeds.v0.3";
+const MODEL_TYPE = "FRED_FISCALDATA_RAW_MAPPING_WITH_MACRO_SCORES";
 
 const FRED_OBSERVATION_START = "2015-01-01";
+const FISCALDATA_RECORD_START = "2015-01-01";
 
 const KEY_VALIDATION_SERIES = [
   "DGS10",
@@ -150,6 +152,43 @@ function cleanFredObservation(obs) {
   };
 }
 
+function cleanTgaRow(row) {
+  if (!row) {
+    return {
+      recordDate: null,
+      accountType: null,
+      balanceField: null,
+      effectiveBalance: null,
+      close_today_bal: null,
+      open_today_bal: null,
+      table_nm: null,
+      sub_table_name: null,
+      src_line_nbr: null,
+    };
+  }
+
+  return {
+    recordDate: row.record_date || null,
+    accountType: row.account_type || null,
+    balanceField:
+      row.close_today_bal !== null && row.close_today_bal !== undefined
+        ? "close_today_bal"
+        : "open_today_bal",
+    effectiveBalance: Number.isFinite(row.effective_balance)
+      ? row.effective_balance
+      : null,
+    close_today_bal: Number.isFinite(row.close_today_bal)
+      ? row.close_today_bal
+      : null,
+    open_today_bal: Number.isFinite(row.open_today_bal)
+      ? row.open_today_bal
+      : null,
+    table_nm: row.table_nm || null,
+    sub_table_name: row.sub_table_name || null,
+    src_line_nbr: row.src_line_nbr || null,
+  };
+}
+
 function buildSeriesLookup(fredBundle) {
   const lookup = {};
 
@@ -182,7 +221,39 @@ function buildSeriesLookup(fredBundle) {
   return lookup;
 }
 
-function findLatestObservationOnOrBefore(observations, replayDate) {
+function buildTgaLookup(fiscalDataBundle) {
+  const rows = Array.isArray(fiscalDataBundle?.rows)
+    ? fiscalDataBundle.rows
+        .filter(
+          (row) =>
+            row &&
+            typeof row.record_date === "string" &&
+            Number.isFinite(row.effective_balance)
+        )
+        .sort((a, b) => String(a.record_date).localeCompare(String(b.record_date)))
+    : [];
+
+  return {
+    ok: Boolean(fiscalDataBundle?.ok),
+    source: fiscalDataBundle?.source || "U.S. Treasury FiscalData",
+    dataset: fiscalDataBundle?.dataset || "Daily Treasury Statement",
+    endpoint: fiscalDataBundle?.endpoint || "/v1/accounting/dts/operating_cash_balance",
+    selectedAccountType:
+      fiscalDataBundle?.selectedAccountType ||
+      fiscalDataBundle?.latest?.account_type ||
+      "Treasury General Account (TGA) Closing Balance",
+    balanceField:
+      fiscalDataBundle?.balanceField ||
+      (fiscalDataBundle?.latest?.effective_balance === fiscalDataBundle?.latest?.open_today_bal
+        ? "open_today_bal"
+        : "close_today_bal"),
+    count: fiscalDataBundle?.count || 0,
+    validCount: rows.length,
+    rows,
+  };
+}
+
+function findLatestObservationOnOrBefore(observations, replayDate, dateKey = "date") {
   if (!Array.isArray(observations) || observations.length === 0 || !replayDate) {
     return null;
   }
@@ -194,8 +265,9 @@ function findLatestObservationOnOrBefore(observations, replayDate) {
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
     const obs = observations[mid];
+    const obsDate = obs?.[dateKey];
 
-    if (String(obs.date) <= String(replayDate)) {
+    if (String(obsDate) <= String(replayDate)) {
       best = obs;
       lo = mid + 1;
     } else {
@@ -213,7 +285,8 @@ function mapFredForReplayDate({ replayDate, seriesLookup }) {
     const block = seriesLookup[series.id];
     const latestObs = findLatestObservationOnOrBefore(
       block?.observations || [],
-      replayDate
+      replayDate,
+      "date"
     );
 
     fred[series.id] = {
@@ -224,6 +297,16 @@ function mapFredForReplayDate({ replayDate, seriesLookup }) {
   }
 
   return fred;
+}
+
+function mapTgaForReplayDate({ replayDate, tgaLookup }) {
+  const latestTga = findLatestObservationOnOrBefore(
+    tgaLookup?.rows || [],
+    replayDate,
+    "record_date"
+  );
+
+  return cleanTgaRow(latestTga);
 }
 
 function fredValue(fred, key) {
@@ -359,16 +442,12 @@ function scoreBondMarketFromFred(fred) {
   };
 }
 
-function scoreLiquidityFromFred(fred) {
+function scoreLiquidityFromFredAndTga(fred, tga) {
   const fedBalanceSheet = fredValue(fred, "WALCL");
   const reverseRepo = fredValue(fred, "RRPONTSYD");
   const bankReserves = fredValue(fred, "WRESBAL");
   const m2 = fredValue(fred, "M2SL");
-
-  // TGA is not included in this FRED-only v0.2 job.
-  // Keep this at null so the score uses current live weightedAvg behavior:
-  // null inputs are ignored instead of guessed.
-  const tgaBalance = null;
+  const tgaBalance = tga?.effectiveBalance ?? null;
 
   const fedBalanceSheetScore = scoreDirect(fedBalanceSheet, 6000000, 8000000);
   const reverseRepoScore = scoreInverse(reverseRepo, 100, 1200);
@@ -381,10 +460,13 @@ function scoreLiquidityFromFred(fred) {
     { value: reverseRepoScore, weight: 0.15 },
     { value: bankReservesScore, weight: 0.25 },
     { value: m2Score, weight: 0.2 },
-    // Do not include TGA weight until FiscalData historical mapping is added.
+    { value: tgaScore, weight: 0.2 },
   ]);
 
   const warnings = [];
+  if (isNum(tgaBalance) && Number(tgaBalance) >= 850000) {
+    warnings.push("TGA balance high, liquidity drain risk");
+  }
   if (isNum(bankReserves) && Number(bankReserves) < 2800000) {
     warnings.push("Bank reserves low");
   }
@@ -410,10 +492,12 @@ function scoreLiquidityFromFred(fred) {
       reverseRepoScore,
       bankReservesScore,
       m2Score,
-      tgaScore: null,
+      tgaScore,
+      tgaRecordDate: tga?.recordDate || null,
+      tgaAccountType: tga?.accountType || null,
+      tgaBalanceField: tga?.balanceField || null,
     },
     warnings,
-    limitation: "TGA FiscalData is not included in FRED-only v0.2 historical scoring.",
   };
 }
 
@@ -450,11 +534,11 @@ function scoreInflationFromFred(fred) {
   };
 }
 
-function buildMacroScores(fred) {
+function buildMacroScores(fred, tga) {
   const labor = scoreLaborFromFred(fred);
   const creditStress = scoreCreditStressFromFred(fred);
   const bondMarket = scoreBondMarketFromFred(fred);
-  const liquidity = scoreLiquidityFromFred(fred);
+  const liquidity = scoreLiquidityFromFredAndTga(fred, tga);
   const inflation = scoreInflationFromFred(fred);
 
   const macroScoreSummary = weightedAvg([
@@ -501,11 +585,25 @@ function validateNoFutureLeakage(rows) {
         String(mapped.observationDate) > String(replayDate)
       ) {
         leaks.push({
+          type: "FRED",
           date: replayDate,
           seriesId: series.id,
           observationDate: mapped.observationDate,
         });
       }
+    }
+
+    if (
+      row.fiscalData?.tga?.recordDate &&
+      replayDate &&
+      String(row.fiscalData.tga.recordDate) > String(replayDate)
+    ) {
+      leaks.push({
+        type: "FiscalData",
+        date: replayDate,
+        seriesId: "TGA",
+        observationDate: row.fiscalData.tga.recordDate,
+      });
     }
   }
 
@@ -530,6 +628,9 @@ function buildQuickValidation(rows) {
         bondMarket: row.macroScores?.bondMarket?.score ?? null,
         liquidity: row.macroScores?.liquidity?.score ?? null,
         inflation: row.macroScores?.inflation?.score ?? null,
+      },
+      fiscalData: {
+        tga: row.fiscalData?.tga || null,
       },
       fred: {},
       warnings: row.warnings || [],
@@ -593,6 +694,15 @@ async function main() {
         label: series.label,
         component: series.component,
       })),
+      fiscalData: {
+        source: "U.S. Treasury FiscalData",
+        dataset: "Daily Treasury Statement",
+        table: "Operating Cash Balance",
+        endpoint: "/v1/accounting/dts/operating_cash_balance",
+        selectedAccountType: "Treasury General Account (TGA) Closing Balance",
+        selectedBalance: "effective_balance",
+        recordStart: FISCALDATA_RECORD_START,
+      },
       replayBaseFile: "engine25-historical-replay-6mo.json",
       outputFile: "engine25-historical-macro-feeds-6mo.json",
       fredObservationStart: FRED_OBSERVATION_START,
@@ -600,12 +710,12 @@ async function main() {
         "Copied from services/core/logic/engine25MarketHealth.js without modifying live model.",
     },
     limitations: [
-      "This v0.2 version is FRED-only historical mapping plus macro component scoring.",
+      "This v0.3 version includes FRED plus FiscalData TGA historical mapping and macro component scoring.",
       "No FMP data is included yet.",
-      "No FiscalData TGA historical mapping is included yet, so liquidity scoring excludes TGA weight.",
       "No route or frontend is included.",
       "FRED observation dates are used as available-date approximation unless release-date metadata is added later.",
-      "Each replay date uses the latest FRED observation date on or before that replay date.",
+      "FiscalData record_date is used as the historical TGA date.",
+      "Each replay date uses the latest FRED/FiscalData observation date on or before that replay date.",
       "The working POLYGON_PROXY_ONLY replay file is not overwritten.",
     ],
     summary: {
@@ -613,6 +723,7 @@ async function main() {
       rowsWritten: 0,
       fredSeriesRequested: ENGINE25_FRED_SERIES.length,
       fredSeriesLoaded: 0,
+      fiscalDataRowsLoaded: 0,
       futureLeakCount: 0,
       scoreSummary: null,
     },
@@ -630,7 +741,7 @@ async function main() {
 
     console.log("========================================");
     console.log("Engine 25 Historical Macro Feeds");
-    console.log("FRED-only mapping + macro scores");
+    console.log("FRED + FiscalData TGA mapping + macro scores");
     console.log("========================================");
 
     console.log("\nReading base replay file:");
@@ -671,7 +782,20 @@ async function main() {
       fredBundle.seriesRequested
     );
 
+    console.log("\nFetching FiscalData TGA bundle...");
+    const fiscalDataBundle = await fetchFiscalDataOperatingCashBalance({
+      pageSize: 5000,
+      recordStart: FISCALDATA_RECORD_START,
+    });
+
+    console.log("FiscalData TGA rows:", fiscalDataBundle.validCount);
+
     const seriesLookup = buildSeriesLookup(fredBundle);
+    const tgaLookup = buildTgaLookup(fiscalDataBundle);
+
+    output.summary.fiscalDataRowsLoaded = tgaLookup.validCount;
+    output.source.fiscalData.selectedAccountType = tgaLookup.selectedAccountType;
+    output.source.fiscalData.balanceField = tgaLookup.balanceField;
 
     const rows = replayRows.map((row, index) => {
       const replayDate = getReplayDate(row);
@@ -685,13 +809,21 @@ async function main() {
         seriesLookup,
       });
 
-      const macro = buildMacroScores(fred);
+      const tga = mapTgaForReplayDate({
+        replayDate,
+        tgaLookup,
+      });
+
+      const macro = buildMacroScores(fred, tga);
 
       return {
         date: replayDate,
         time: getReplayTime(row),
         esClose: getEsClose(row),
         fred,
+        fiscalData: {
+          tga,
+        },
         macroScores: macro.macroScores,
         macroScoreSummary: macro.macroScoreSummary,
         warnings: macro.warnings,
@@ -737,6 +869,7 @@ async function main() {
           replayRowsLoaded: output.summary.replayRowsLoaded,
           rowsWritten: output.summary.rowsWritten,
           fredSeriesLoaded: output.summary.fredSeriesLoaded,
+          fiscalDataRowsLoaded: output.summary.fiscalDataRowsLoaded,
           futureLeakCount: output.summary.futureLeakCount,
           scoreSummary: output.summary.scoreSummary,
           firstRow: output.validation?.firstRow || null,
