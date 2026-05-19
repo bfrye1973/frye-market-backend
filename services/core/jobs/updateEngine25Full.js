@@ -473,6 +473,9 @@ async function main() {
   console.log("\n[Engine25Full] Computing market health...");
   runNodeJob("jobs/updateEngine25MarketHealth.js");
 
+  console.log("[Engine25Full] Building ES overlay...");
+  runNodeJob("jobs/buildEngine25EsOverlay.js");
+
   console.log("\n========================================");
   console.log("Engine 25 Full Update Complete");
   console.log("Wrote:");
@@ -483,6 +486,7 @@ async function main() {
   console.log("- data/engine25-es-technical-context.json");  
   console.log("- data/engine25-feed-validation.json");
   console.log("- data/engine25-market-health.json");
+  console.log("- data/engine25-es-overlay.json");
   console.log("========================================");
 }
 
