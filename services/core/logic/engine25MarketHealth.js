@@ -980,6 +980,97 @@ function deriveTradePermission(score, bias, components) {
     sizeMultiplier: 0.25,
   };
 }
+
+function deriveEsPermission(score, regime, bias, riskLevel, components, tradePermission) {
+  const creditFragilityScore = components?.creditFragility?.score ?? 50;
+  const macroPressureScore = components?.macroPressure?.score ?? 50;
+  const marketTrendScore = components?.marketTrend?.score ?? 50;
+  const aiLeadershipScore = components?.aiLeadership?.score ?? 50;
+  const volatilityScore = components?.volatility?.score ?? 50;
+
+  let esBias = "NEUTRAL_WAIT";
+  let esMode = "WAIT_FOR_CONFIRMATION";
+  let longScalps = false;
+  let shortScalps = false;
+  let sizeMultiplier = tradePermission?.sizeMultiplier ?? 0.5;
+
+  if (
+    score >= 60 &&
+    marketTrendScore >= 65 &&
+    volatilityScore >= 55 &&
+    aiLeadershipScore >= 55
+  ) {
+    esBias = "SELECTIVE_LONG";
+    esMode = "CONFIRMED_LONG_SCALPS_ONLY";
+    longScalps = true;
+    shortScalps = false;
+  }
+
+  if (creditFragilityScore < 45) {
+    esMode = "SELECTIVE_LONG_CREDIT_FRAGILITY_REDUCED_SIZE";
+    sizeMultiplier = Math.min(sizeMultiplier, 0.75);
+  }
+
+  if (macroPressureScore < 50) {
+    esMode = "A_PLUS_LONGS_ONLY_MACRO_PRESSURE";
+    sizeMultiplier = Math.min(sizeMultiplier, 0.5);
+  }
+
+  if (score < 55) {
+    esBias = "NEUTRAL_WAIT";
+    esMode = "A_PLUS_ONLY_OR_WAIT";
+    longScalps = true;
+    shortScalps = false;
+    sizeMultiplier = Math.min(sizeMultiplier, 0.5);
+  }
+
+  if (score < 45) {
+    esBias = "DEFENSIVE";
+    esMode = "DEFENSIVE_NO_BLIND_LONGS";
+    longScalps = false;
+    shortScalps = true;
+    sizeMultiplier = 0.25;
+  }
+
+  const notes = [];
+
+  if (longScalps) {
+    notes.push("ES long scalps are allowed only on confirmed reclaim, continuation, or clean pullback-to-support setups.");
+  }
+
+  if (!shortScalps) {
+    notes.push("No blind ES shorts while market trend, AI leadership, and volatility remain supportive.");
+  }
+
+  if (creditFragilityScore < 45) {
+    notes.push("Credit fragility is elevated; do not use full-size ES aggression.");
+    notes.push("Avoid weak small-cap, regional-bank, junk-credit, and lower-quality sympathy risk.");
+  }
+
+  if (macroPressureScore < 60) {
+    notes.push("Macro pressure is present; watch TLT, oil/USO, yields, and IWM before increasing ES size.");
+  }
+
+  if (regime === "AI_SUPPORTED_BULL_WITH_MACRO_PRESSURE") {
+    notes.push("AI/large-cap leadership supports ES, but fragile undercurrents require selective execution.");
+  }
+
+  return {
+    symbol: "ES",
+    instrumentType: "futures",
+    bias: esBias,
+    mode: esMode,
+    longScalps,
+    shortScalps,
+    swingLongs: tradePermission?.swingLongs ?? false,
+    swingShorts: tradePermission?.swingShorts ?? false,
+    sizeMultiplier,
+    riskLevel,
+    sourceRegime: regime,
+    sourceBias: bias,
+    notes,
+  };
+}
 export function computeEngine25MarketHealth({
   macroData,
   marketData,
@@ -1044,6 +1135,14 @@ export function computeEngine25MarketHealth({
   const bias = deriveBias(score, components);
   const riskLevel = deriveRiskLevel(score);
   const tradePermission = deriveTradePermission(score, bias, components);
+  const esPermission = deriveEsPermission(
+    score,
+    regime,
+    bias,
+    riskLevel,
+    components,
+    tradePermission
+  );
 
   const warnings = Object.values(components)
     .flatMap((component) => component.warnings || [])
@@ -1062,6 +1161,7 @@ export function computeEngine25MarketHealth({
     components,
     warnings,
     tradePermission,
+    esPermission, 
     summary: {
       plainEnglish:
         score >= 70
