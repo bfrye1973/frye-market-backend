@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
 import { buildEngine25SectorHealth } from "../logic/engine25SectorHealth.js";
+import { buildEngine25EsTechnicalContext } from "../logic/engine25EsTechnicalContext.js";
 
 import {
   fetchEngine25FredBundle,
@@ -22,6 +23,7 @@ const MACRO_FILE = path.join(DATA_DIR, "engine25-data-test.json");
 const MARKET_FILE = path.join(DATA_DIR, "engine25-market-feeds-test.json");
 const FMP_FILE = path.join(DATA_DIR, "engine25-fmp-feeds-test.json");
 const SECTOR_FILE = path.join(DATA_DIR, "engine25-sector-health-test.json");
+const ES_TECH_FILE = path.join(DATA_DIR, "engine25-es-technical-context.json");
 
 const FMP_BASE_URL = "https://financialmodelingprep.com/stable";
 
@@ -429,6 +431,20 @@ async function writeSectorHealthFile() {
   );
 }
 
+async function writeEsTechnicalContextFile() {
+  console.log("\n[Engine25Full] Fetching ES technical context...");
+
+  const esTechnicalContext = await buildEngine25EsTechnicalContext({
+    symbol: "ES",
+  });
+
+  fs.writeFileSync(ES_TECH_FILE, JSON.stringify(esTechnicalContext, null, 2));
+
+  console.log(
+    `[Engine25Full] ESTechnical OK=${esTechnicalContext.ok} | State ${esTechnicalContext.technicalRead.state} | Permission ${esTechnicalContext.technicalRead.permission} | SizeCap ${esTechnicalContext.technicalRead.sizeCap}`
+  );
+}
+
 function runNodeJob(jobPath) {
   execFileSync(process.execPath, [jobPath], {
     cwd: CORE_DIR,
@@ -449,6 +465,7 @@ async function main() {
   await writeMarketFile();
   await writeFmpFile();
   await writeSectorHealthFile();
+  await writeEsTechnicalContextFile(); 
 
   console.log("\n[Engine25Full] Validating feeds...");
   runNodeJob("jobs/validateEngine25Feeds.js");
@@ -463,6 +480,7 @@ async function main() {
   console.log("- data/engine25-market-feeds-test.json");
   console.log("- data/engine25-fmp-feeds-test.json");
   console.log("- data/engine25-sector-health-test.json");
+  console.log("- data/engine25-es-technical-context.json");  
   console.log("- data/engine25-feed-validation.json");
   console.log("- data/engine25-market-health.json");
   console.log("========================================");
