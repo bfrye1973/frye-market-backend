@@ -841,6 +841,46 @@ function scoreMacroPressure(macroData, marketData, components) {
   };
 }
 
+function scoreDistributionPressure(sectorHealthData) {
+  const block = sectorHealthData?.distributionPressure;
+
+  if (!block || block.score === undefined || block.score === null) {
+    return {
+      score: 50,
+      label: "DISTRIBUTION_PRESSURE_UNKNOWN",
+      inputs: {},
+      warnings: [],
+    };
+  }
+
+  return {
+    score: block.score,
+    label: block.label || "DISTRIBUTION_PRESSURE_UNKNOWN",
+    inputs: block.inputs || {},
+    warnings: block.warnings || [],
+  };
+}
+
+function scoreBreadthParticipation(sectorHealthData) {
+  const block = sectorHealthData?.breadthParticipation;
+
+  if (!block || block.score === undefined || block.score === null) {
+    return {
+      score: 50,
+      label: "BREADTH_PARTICIPATION_UNKNOWN",
+      inputs: {},
+      warnings: [],
+    };
+  }
+
+  return {
+    score: block.score,
+    label: block.label || "BREADTH_PARTICIPATION_UNKNOWN",
+    inputs: block.inputs || {},
+    warnings: block.warnings || [],
+  };
+}
+
 function deriveRegime(score, components) {
   const macroPressureScore = components?.macroPressure?.score ?? 50;
   const aiScore = components?.aiLeadership?.score ?? 50;
@@ -1075,6 +1115,7 @@ export function computeEngine25MarketHealth({
   macroData,
   marketData,
   fmpData = null,
+  sectorHealthData = null,
 } = {}) {
   const labor = scoreLabor(macroData);
   const creditStress = scoreCreditStress(macroData);
@@ -1087,6 +1128,8 @@ export function computeEngine25MarketHealth({
   const sectorRotation = scoreSectorRotation(marketData);
   const aiLeadership = scoreAiLeadership(marketData);
   const creditFragility = scoreCreditFragility(marketData);
+  const distributionPressure = scoreDistributionPressure(sectorHealthData);
+  const breadthParticipation = scoreBreadthParticipation(sectorHealthData);
   const eventRisk = scoreEventRisk(fmpData);
 
   const baseComponents = {
@@ -1100,6 +1143,8 @@ export function computeEngine25MarketHealth({
   volatility,
   sectorRotation,
   aiLeadership,
+  distributionPressure,
+  breadthParticipation,
   eventRisk,
 };
 
@@ -1111,18 +1156,20 @@ export function computeEngine25MarketHealth({
   };
 
   const weights = {
-  labor: 0.07,
-  creditStress: 0.08,
+  labor: 0.06,
+  creditStress: 0.07,
   creditFragility: 0.07,
-  bondMarket: 0.08,
-  liquidity: 0.08,
-  inflation: 0.08,
-  marketTrend: 0.15,
-  volatility: 0.1,
-  sectorRotation: 0.08,
-  aiLeadership: 0.09,
-  eventRisk: 0.04,
-  macroPressure: 0.08,
+  bondMarket: 0.07,
+  liquidity: 0.07,
+  inflation: 0.07,
+  marketTrend: 0.13,
+  volatility: 0.08,
+  sectorRotation: 0.07,
+  aiLeadership: 0.08,
+  distributionPressure: 0.09,
+  breadthParticipation: 0.07,
+  eventRisk: 0.03,
+  macroPressure: 0.07,
 };
 
   const score = clamp(
