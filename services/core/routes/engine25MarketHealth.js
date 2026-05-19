@@ -183,6 +183,7 @@ router.get("/engine25/market-health/summary", (_req, res) => {
     riskLevel: marketHealth.riskLevel,
     tradePermission: marketHealth.tradePermission || null,
     esPermission: marketHealth.esPermission || null,
+    esTechnicalContext: marketHealth.esTechnicalContext || null,
     componentScores: {
       labor: components.labor?.score ?? null,
       creditStress: components.creditStress?.score ?? null,
