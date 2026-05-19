@@ -15,6 +15,7 @@ const MACRO_FILE = path.join(DATA_DIR, "engine25-data-test.json");
 const MARKET_FILE = path.join(DATA_DIR, "engine25-market-feeds-test.json");
 const FMP_FILE = path.join(DATA_DIR, "engine25-fmp-feeds-test.json");
 const SECTOR_FILE = path.join(DATA_DIR, "engine25-sector-health-test.json");
+const ES_TECH_FILE = path.join(DATA_DIR, "engine25-es-technical-context.json");
 
 const OUTPUT_FILE = path.join(DATA_DIR, "engine25-market-health.json");
 
@@ -50,6 +51,7 @@ function main() {
     const macroData = readJsonSafe(MACRO_FILE, true);
     const marketData = readJsonSafe(MARKET_FILE, true);
     const sectorHealthData = readJsonSafe(SECTOR_FILE, false);
+    const ES_TECH_FILE = path.join(DATA_DIR, "engine25-es-technical-context.json");
     const fmpData = readJsonSafe(FMP_FILE, false);
     
     
@@ -59,6 +61,7 @@ function main() {
      marketData,
      fmpData,
      sectorHealthData,
+     esTechnicalContextData,
    });
 
     output.ok = result.ok;
