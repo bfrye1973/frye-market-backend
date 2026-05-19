@@ -24,8 +24,8 @@ const OUTPUT_FILE = path.join(
   "engine25-historical-macro-feeds-6mo.json"
 );
 
-const ENGINE_NAME = "engine25.historicalMacroFeeds.v0.1";
-const MODEL_TYPE = "FRED_ONLY_RAW_HISTORICAL_MAPPING";
+const ENGINE_NAME = "engine25.historicalMacroFeeds.v0.2";
+const MODEL_TYPE = "FRED_ONLY_RAW_MAPPING_WITH_MACRO_SCORES";
 
 const FRED_OBSERVATION_START = "2015-01-01";
 
@@ -53,13 +53,8 @@ function readJsonFile(filePath) {
 }
 
 function normalizeReplayRows(baseReplay) {
-  if (Array.isArray(baseReplay)) {
-    return baseReplay;
-  }
-
-  if (Array.isArray(baseReplay?.rows)) {
-    return baseReplay.rows;
-  }
+  if (Array.isArray(baseReplay)) return baseReplay;
+  if (Array.isArray(baseReplay?.rows)) return baseReplay.rows;
 
   throw new Error(
     "Base replay file does not contain a rows array or top-level array."
@@ -69,6 +64,51 @@ function normalizeReplayRows(baseReplay) {
 function safeNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function clamp(value, min = 0, max = 100) {
+  if (!Number.isFinite(value)) return 50;
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function isNum(value) {
+  return Number.isFinite(Number(value));
+}
+
+function scoreInverse(value, goodBelow, badAbove) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 50;
+  if (n <= goodBelow) return 100;
+  if (n >= badAbove) return 0;
+  return clamp(100 - ((n - goodBelow) / (badAbove - goodBelow)) * 100);
+}
+
+function scoreDirect(value, badBelow, goodAbove) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 50;
+  if (n >= goodAbove) return 100;
+  if (n <= badBelow) return 0;
+  return clamp(((n - badBelow) / (goodAbove - badBelow)) * 100);
+}
+
+function weightedAvg(items) {
+  const valid = items.filter(
+    (item) =>
+      item &&
+      Number.isFinite(Number(item.value)) &&
+      Number.isFinite(Number(item.weight)) &&
+      Number(item.weight) > 0
+  );
+
+  if (!valid.length) return 50;
+
+  const totalWeight = valid.reduce((sum, item) => sum + Number(item.weight), 0);
+  const weightedSum = valid.reduce(
+    (sum, item) => sum + Number(item.value) * Number(item.weight),
+    0
+  );
+
+  return clamp(weightedSum / totalWeight);
 }
 
 function getReplayDate(row) {
@@ -186,6 +226,266 @@ function mapFredForReplayDate({ replayDate, seriesLookup }) {
   return fred;
 }
 
+function fredValue(fred, key) {
+  return fred?.[key]?.value ?? null;
+}
+
+function scoreLaborFromFred(fred) {
+  const unrate = fredValue(fred, "UNRATE");
+  const initialClaims = fredValue(fred, "ICSA");
+  const continuingClaims = fredValue(fred, "CCSA");
+
+  const unemploymentScore = scoreInverse(unrate, 3.8, 5.5);
+  const initialClaimsScore = scoreInverse(initialClaims, 200000, 325000);
+  const continuingClaimsScore = scoreInverse(continuingClaims, 1700000, 2300000);
+
+  const score = weightedAvg([
+    { value: unemploymentScore, weight: 0.4 },
+    { value: initialClaimsScore, weight: 0.35 },
+    { value: continuingClaimsScore, weight: 0.25 },
+  ]);
+
+  const warnings = [];
+  if (isNum(unrate) && Number(unrate) >= 4.8) warnings.push("Unemployment rate elevated");
+  if (isNum(initialClaims) && Number(initialClaims) >= 275000) {
+    warnings.push("Initial claims rising into caution zone");
+  }
+  if (isNum(continuingClaims) && Number(continuingClaims) >= 2100000) {
+    warnings.push("Continuing claims elevated");
+  }
+
+  return {
+    score,
+    label: score >= 70 ? "LABOR_HEALTHY" : score >= 50 ? "LABOR_MIXED" : "LABOR_WEAK",
+    inputs: {
+      unemploymentRate: unrate,
+      initialClaims,
+      continuingClaims,
+      unemploymentScore,
+      initialClaimsScore,
+      continuingClaimsScore,
+    },
+    warnings,
+  };
+}
+
+function scoreCreditStressFromFred(fred) {
+  const nfci = fredValue(fred, "NFCI");
+  const stlfsi = fredValue(fred, "STLFSI4");
+  const highYieldSpread = fredValue(fred, "BAMLH0A0HYM2");
+
+  const nfciScore = scoreInverse(nfci, -0.5, 0.5);
+  const stlfsiScore = scoreInverse(stlfsi, -0.5, 1.0);
+  const hyScore = scoreInverse(highYieldSpread, 3.0, 6.0);
+
+  const score = weightedAvg([
+    { value: nfciScore, weight: 0.35 },
+    { value: stlfsiScore, weight: 0.35 },
+    { value: hyScore, weight: 0.3 },
+  ]);
+
+  const warnings = [];
+  if (isNum(nfci) && Number(nfci) > 0) warnings.push("Financial conditions tightening");
+  if (isNum(stlfsi) && Number(stlfsi) > 0.5) warnings.push("Financial stress elevated");
+  if (isNum(highYieldSpread) && Number(highYieldSpread) > 4.5) {
+    warnings.push("High-yield credit spread widening");
+  }
+
+  return {
+    score,
+    label:
+      score >= 75
+        ? "CREDIT_STRESS_LOW"
+        : score >= 50
+          ? "CREDIT_STRESS_NORMAL"
+          : "CREDIT_STRESS_HIGH",
+    inputs: {
+      nfci,
+      stlfsi,
+      highYieldSpread,
+      nfciScore,
+      stlfsiScore,
+      hyScore,
+    },
+    warnings,
+  };
+}
+
+function scoreBondMarketFromFred(fred) {
+  const tenYear = fredValue(fred, "DGS10");
+  const twoYear = fredValue(fred, "DGS2");
+  const tenMinusTwo = fredValue(fred, "T10Y2Y");
+  const tenMinusThreeMonth = fredValue(fred, "T10Y3M");
+
+  const tenYearScore = scoreInverse(tenYear, 3.75, 5.25);
+  const twoYearScore = scoreInverse(twoYear, 3.5, 5.25);
+  const curveScore = scoreDirect(tenMinusTwo, -0.75, 0.75);
+  const threeMonthCurveScore = scoreDirect(tenMinusThreeMonth, -1.0, 1.0);
+
+  const score = weightedAvg([
+    { value: tenYearScore, weight: 0.3 },
+    { value: twoYearScore, weight: 0.25 },
+    { value: curveScore, weight: 0.25 },
+    { value: threeMonthCurveScore, weight: 0.2 },
+  ]);
+
+  const warnings = [];
+  if (isNum(tenYear) && Number(tenYear) >= 4.5) warnings.push("10Y yield pressure elevated");
+  if (isNum(twoYear) && Number(twoYear) >= 4.25) warnings.push("2Y yield suggests Fed hawkish pressure");
+  if (isNum(tenMinusTwo) && Number(tenMinusTwo) < 0) warnings.push("10Y-2Y curve inverted");
+  if (isNum(tenMinusThreeMonth) && Number(tenMinusThreeMonth) < 0) {
+    warnings.push("10Y-3M curve inverted");
+  }
+
+  return {
+    score,
+    label:
+      score >= 70
+        ? "BONDS_SUPPORTIVE"
+        : score >= 50
+          ? "BONDS_MIXED"
+          : "BONDS_PRESSURE",
+    inputs: {
+      tenYear,
+      twoYear,
+      tenMinusTwo,
+      tenMinusThreeMonth,
+      tenYearScore,
+      twoYearScore,
+      curveScore,
+      threeMonthCurveScore,
+    },
+    warnings,
+  };
+}
+
+function scoreLiquidityFromFred(fred) {
+  const fedBalanceSheet = fredValue(fred, "WALCL");
+  const reverseRepo = fredValue(fred, "RRPONTSYD");
+  const bankReserves = fredValue(fred, "WRESBAL");
+  const m2 = fredValue(fred, "M2SL");
+
+  // TGA is not included in this FRED-only v0.2 job.
+  // Keep this at null so the score uses current live weightedAvg behavior:
+  // null inputs are ignored instead of guessed.
+  const tgaBalance = null;
+
+  const fedBalanceSheetScore = scoreDirect(fedBalanceSheet, 6000000, 8000000);
+  const reverseRepoScore = scoreInverse(reverseRepo, 100, 1200);
+  const bankReservesScore = scoreDirect(bankReserves, 2500000, 3600000);
+  const m2Score = scoreDirect(m2, 20000, 23500);
+  const tgaScore = scoreInverse(tgaBalance, 500000, 1000000);
+
+  const score = weightedAvg([
+    { value: fedBalanceSheetScore, weight: 0.2 },
+    { value: reverseRepoScore, weight: 0.15 },
+    { value: bankReservesScore, weight: 0.25 },
+    { value: m2Score, weight: 0.2 },
+    // Do not include TGA weight until FiscalData historical mapping is added.
+  ]);
+
+  const warnings = [];
+  if (isNum(bankReserves) && Number(bankReserves) < 2800000) {
+    warnings.push("Bank reserves low");
+  }
+  if (isNum(fedBalanceSheet) && Number(fedBalanceSheet) < 6400000) {
+    warnings.push("Fed balance sheet liquidity declining");
+  }
+
+  return {
+    score,
+    label:
+      score >= 70
+        ? "LIQUIDITY_SUPPORTIVE"
+        : score >= 50
+          ? "LIQUIDITY_MIXED"
+          : "LIQUIDITY_TIGHT",
+    inputs: {
+      fedBalanceSheet,
+      reverseRepo,
+      bankReserves,
+      m2,
+      tgaBalance,
+      fedBalanceSheetScore,
+      reverseRepoScore,
+      bankReservesScore,
+      m2Score,
+      tgaScore: null,
+    },
+    warnings,
+    limitation: "TGA FiscalData is not included in FRED-only v0.2 historical scoring.",
+  };
+}
+
+function scoreInflationFromFred(fred) {
+  const cpi = fredValue(fred, "CPIAUCSL");
+  const ppi = fredValue(fred, "PPIACO");
+
+  const cpiScore = scoreInverse(cpi, 315, 345);
+  const ppiScore = scoreInverse(ppi, 260, 300);
+
+  const score = weightedAvg([
+    { value: cpiScore, weight: 0.55 },
+    { value: ppiScore, weight: 0.45 },
+  ]);
+
+  const warnings = [];
+  if (score < 50) warnings.push("Inflation index pressure remains elevated");
+
+  return {
+    score,
+    label:
+      score >= 70
+        ? "INFLATION_COOLING"
+        : score >= 50
+          ? "INFLATION_MIXED"
+          : "INFLATION_PRESSURE",
+    inputs: {
+      cpi,
+      ppi,
+      cpiScore,
+      ppiScore,
+    },
+    warnings,
+  };
+}
+
+function buildMacroScores(fred) {
+  const labor = scoreLaborFromFred(fred);
+  const creditStress = scoreCreditStressFromFred(fred);
+  const bondMarket = scoreBondMarketFromFred(fred);
+  const liquidity = scoreLiquidityFromFred(fred);
+  const inflation = scoreInflationFromFred(fred);
+
+  const macroScoreSummary = weightedAvg([
+    { value: labor.score, weight: 0.2 },
+    { value: creditStress.score, weight: 0.25 },
+    { value: bondMarket.score, weight: 0.2 },
+    { value: liquidity.score, weight: 0.2 },
+    { value: inflation.score, weight: 0.15 },
+  ]);
+
+  const warnings = [
+    ...labor.warnings,
+    ...creditStress.warnings,
+    ...bondMarket.warnings,
+    ...liquidity.warnings,
+    ...inflation.warnings,
+  ];
+
+  return {
+    macroScores: {
+      labor,
+      creditStress,
+      bondMarket,
+      liquidity,
+      inflation,
+    },
+    macroScoreSummary,
+    warnings,
+  };
+}
+
 function validateNoFutureLeakage(rows) {
   const leaks = [];
 
@@ -223,7 +523,16 @@ function buildQuickValidation(rows) {
       date: row.date,
       time: row.time,
       esClose: row.esClose,
+      macroScoreSummary: row.macroScoreSummary,
+      macroScores: {
+        labor: row.macroScores?.labor?.score ?? null,
+        creditStress: row.macroScores?.creditStress?.score ?? null,
+        bondMarket: row.macroScores?.bondMarket?.score ?? null,
+        liquidity: row.macroScores?.liquidity?.score ?? null,
+        inflation: row.macroScores?.inflation?.score ?? null,
+      },
       fred: {},
+      warnings: row.warnings || [],
     };
 
     for (const id of KEY_VALIDATION_SERIES) {
@@ -237,6 +546,33 @@ function buildQuickValidation(rows) {
     firstRow: pick(firstRow),
     lastRow: pick(lastRow),
   };
+}
+
+function buildScoreSummary(rows) {
+  const scoreKeys = ["labor", "creditStress", "bondMarket", "liquidity", "inflation"];
+
+  const out = {
+    macroScoreSummaryAvg: null,
+    components: {},
+  };
+
+  function avgNumber(values) {
+    const nums = values.map(Number).filter(Number.isFinite);
+    if (!nums.length) return null;
+    return Number((nums.reduce((sum, v) => sum + v, 0) / nums.length).toFixed(3));
+  }
+
+  out.macroScoreSummaryAvg = avgNumber(rows.map((row) => row.macroScoreSummary));
+
+  for (const key of scoreKeys) {
+    out.components[key] = {
+      avg: avgNumber(rows.map((row) => row.macroScores?.[key]?.score)),
+      first: rows[0]?.macroScores?.[key]?.score ?? null,
+      last: rows[rows.length - 1]?.macroScores?.[key]?.score ?? null,
+    };
+  }
+
+  return out;
 }
 
 async function main() {
@@ -260,11 +596,14 @@ async function main() {
       replayBaseFile: "engine25-historical-replay-6mo.json",
       outputFile: "engine25-historical-macro-feeds-6mo.json",
       fredObservationStart: FRED_OBSERVATION_START,
+      scoringSource:
+        "Copied from services/core/logic/engine25MarketHealth.js without modifying live model.",
     },
     limitations: [
-      "This first version is raw FRED-only historical mapping.",
+      "This v0.2 version is FRED-only historical mapping plus macro component scoring.",
       "No FMP data is included yet.",
-      "No macro scoring is included yet.",
+      "No FiscalData TGA historical mapping is included yet, so liquidity scoring excludes TGA weight.",
+      "No route or frontend is included.",
       "FRED observation dates are used as available-date approximation unless release-date metadata is added later.",
       "Each replay date uses the latest FRED observation date on or before that replay date.",
       "The working POLYGON_PROXY_ONLY replay file is not overwritten.",
@@ -275,6 +614,7 @@ async function main() {
       fredSeriesRequested: ENGINE25_FRED_SERIES.length,
       fredSeriesLoaded: 0,
       futureLeakCount: 0,
+      scoreSummary: null,
     },
     validation: null,
     rows: [],
@@ -290,7 +630,7 @@ async function main() {
 
     console.log("========================================");
     console.log("Engine 25 Historical Macro Feeds");
-    console.log("FRED-only raw historical mapping");
+    console.log("FRED-only mapping + macro scores");
     console.log("========================================");
 
     console.log("\nReading base replay file:");
@@ -345,11 +685,16 @@ async function main() {
         seriesLookup,
       });
 
+      const macro = buildMacroScores(fred);
+
       return {
         date: replayDate,
         time: getReplayTime(row),
         esClose: getEsClose(row),
         fred,
+        macroScores: macro.macroScores,
+        macroScoreSummary: macro.macroScoreSummary,
+        warnings: macro.warnings,
       };
     });
 
@@ -357,6 +702,8 @@ async function main() {
 
     output.summary.rowsWritten = rows.length;
     output.summary.futureLeakCount = futureLeaks.length;
+    output.summary.scoreSummary = buildScoreSummary(rows);
+
     output.validation = {
       noFutureLeakage: futureLeaks.length === 0,
       futureLeaks,
@@ -377,6 +724,7 @@ async function main() {
     console.log("OK:", output.ok);
     console.log("Rows:", output.summary.rowsWritten);
     console.log("Future leaks:", output.summary.futureLeakCount);
+    console.log("Avg macro score:", output.summary.scoreSummary?.macroScoreSummaryAvg);
     console.log("Wrote:", OUTPUT_FILE);
     console.log("========================================");
 
@@ -390,8 +738,9 @@ async function main() {
           rowsWritten: output.summary.rowsWritten,
           fredSeriesLoaded: output.summary.fredSeriesLoaded,
           futureLeakCount: output.summary.futureLeakCount,
-          firstRowDate: output.validation?.firstRow?.date || null,
-          lastRowDate: output.validation?.lastRow?.date || null,
+          scoreSummary: output.summary.scoreSummary,
+          firstRow: output.validation?.firstRow || null,
+          lastRow: output.validation?.lastRow || null,
           outputFile: OUTPUT_FILE,
         },
         null,
