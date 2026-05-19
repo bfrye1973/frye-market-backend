@@ -568,6 +568,135 @@ function scoreEventRisk(fmpData) {
   };
 }
 
+function scoreCreditFragility(marketData) {
+  const credit = marketData?.quickRead?.creditFragility || {};
+  const marketTrend = marketData?.quickRead?.marketTrend || {};
+
+  const hyg = credit.HYG;
+  const jnk = credit.JNK;
+  const lqd = credit.LQD;
+  const kre = credit.KRE;
+  const iwm = marketTrend.IWM;
+
+  function bondFragilityScore(item) {
+    if (!item?.ok) return 50;
+
+    const trendScore = weightedAvg([
+      { value: boolScore(item.aboveEma10, 100, 0), weight: 0.2 },
+      { value: boolScore(item.aboveEma20, 100, 0), weight: 0.3 },
+      { value: boolScore(item.aboveEma50, 100, 0), weight: 0.25 },
+      { value: boolScore(item.aboveEma200, 100, 0), weight: 0.25 },
+    ]);
+
+    const momentumScore = weightedAvg([
+      { value: scoreDirect(item.pctChange5d, -3, 2), weight: 0.35 },
+      { value: scoreDirect(item.pctChange20d, -5, 3), weight: 0.45 },
+      { value: scoreDirect(item.pctChange50d, -8, 5), weight: 0.2 },
+    ]);
+
+    return weightedAvg([
+      { value: trendScore, weight: 0.65 },
+      { value: momentumScore, weight: 0.35 },
+    ]);
+  }
+
+  function equityFragilityScore(item) {
+    if (!item?.ok) return 50;
+
+    const trendScore = weightedAvg([
+      { value: boolScore(item.aboveEma10, 100, 0), weight: 0.2 },
+      { value: boolScore(item.aboveEma20, 100, 0), weight: 0.3 },
+      { value: boolScore(item.aboveEma50, 100, 0), weight: 0.25 },
+      { value: boolScore(item.aboveEma200, 100, 0), weight: 0.25 },
+    ]);
+
+    const momentumScore = weightedAvg([
+      { value: scoreDirect(item.pctChange5d, -5, 3), weight: 0.35 },
+      { value: scoreDirect(item.pctChange20d, -8, 5), weight: 0.45 },
+      { value: scoreDirect(item.pctChange50d, -12, 8), weight: 0.2 },
+    ]);
+
+    return weightedAvg([
+      { value: trendScore, weight: 0.65 },
+      { value: momentumScore, weight: 0.35 },
+    ]);
+  }
+
+  const hygScore = bondFragilityScore(hyg);
+  const jnkScore = bondFragilityScore(jnk);
+  const lqdScore = bondFragilityScore(lqd);
+  const kreScore = equityFragilityScore(kre);
+  const iwmScore = equityFragilityScore(iwm);
+
+  const score = weightedAvg([
+    { value: hygScore, weight: 0.25 },
+    { value: jnkScore, weight: 0.25 },
+    { value: lqdScore, weight: 0.15 },
+    { value: kreScore, weight: 0.2 },
+    { value: iwmScore, weight: 0.15 },
+  ]);
+
+  const warnings = [];
+
+  if (hyg?.aboveEma20 === false && hyg?.aboveEma50 === false) {
+    warnings.push("HYG below EMA20/EMA50; high-yield credit weakening");
+  }
+
+  if (jnk?.aboveEma20 === false && jnk?.aboveEma50 === false) {
+    warnings.push("JNK below EMA20/EMA50; junk-credit fragility rising");
+  }
+
+  if (lqd?.aboveEma20 === false && lqd?.aboveEma50 === false) {
+    warnings.push("LQD below EMA20/EMA50; investment-grade bonds under pressure");
+  }
+
+  if (kre?.aboveEma20 === false && kre?.aboveEma50 === false) {
+    warnings.push("KRE below EMA20/EMA50; regional bank pressure rising");
+  }
+
+  if (iwm?.aboveEma20 === false) {
+    warnings.push("IWM below EMA20; small-cap borrower/risk appetite weak");
+  }
+
+  let creditRegime = "CREDIT_SURFACE_STRONG";
+
+  if (score >= 75) {
+    creditRegime = "CREDIT_SURFACE_STRONG";
+  } else if (score >= 60) {
+    creditRegime = "CREDIT_SURFACE_OK_FRAGILITY_WATCH";
+  } else if (score >= 45) {
+    creditRegime = "STRONG_SURFACE_FRAGILE_UNDERNEATH";
+  } else {
+    creditRegime = "LOW_QUALITY_CREDIT_STRESS_RISING";
+  }
+
+  return {
+    score,
+    label:
+      score >= 75
+        ? "CREDIT_FRAGILITY_LOW"
+        : score >= 60
+          ? "CREDIT_FRAGILITY_WATCH"
+          : score >= 45
+            ? "CREDIT_FRAGILITY_ELEVATED"
+            : "CREDIT_FRAGILITY_HIGH",
+    creditRegime,
+    inputs: {
+      HYG: hyg,
+      JNK: jnk,
+      LQD: lqd,
+      KRE: kre,
+      IWM: iwm,
+      hygScore,
+      jnkScore,
+      lqdScore,
+      kreScore,
+      iwmScore,
+    },
+    warnings,
+  };
+}
+
 function scoreMacroPressure(macroData, marketData, components) {
   const tenYear = getFredValue(macroData, "DGS10");
   const twoYear = getFredValue(macroData, "DGS2");
@@ -840,20 +969,22 @@ export function computeEngine25MarketHealth({
   const volatility = scoreVolatility(marketData);
   const sectorRotation = scoreSectorRotation(marketData);
   const aiLeadership = scoreAiLeadership(marketData);
+  const creditFragility = scoreCreditFragility(marketData);
   const eventRisk = scoreEventRisk(fmpData);
 
   const baseComponents = {
-    labor,
-    creditStress,
-    bondMarket,
-    liquidity,
-    inflation,
-    marketTrend,
-    volatility,
-    sectorRotation,
-    aiLeadership,
-    eventRisk,
-  };
+  labor,
+  creditStress,
+  creditFragility,
+  bondMarket,
+  liquidity,
+  inflation,
+  marketTrend,
+  volatility,
+  sectorRotation,
+  aiLeadership,
+  eventRisk,
+};
 
   const macroPressure = scoreMacroPressure(macroData, marketData, baseComponents);
 
@@ -863,18 +994,19 @@ export function computeEngine25MarketHealth({
   };
 
   const weights = {
-    labor: 0.07,
-    creditStress: 0.1,
-    bondMarket: 0.08,
-    liquidity: 0.09,
-    inflation: 0.08,
-    marketTrend: 0.16,
-    volatility: 0.1,
-    sectorRotation: 0.09,
-    aiLeadership: 0.09,
-    eventRisk: 0.04,
-    macroPressure: 0.1,
-  };
+  labor: 0.07,
+  creditStress: 0.08,
+  creditFragility: 0.07,
+  bondMarket: 0.08,
+  liquidity: 0.08,
+  inflation: 0.08,
+  marketTrend: 0.15,
+  volatility: 0.1,
+  sectorRotation: 0.08,
+  aiLeadership: 0.09,
+  eventRisk: 0.04,
+  macroPressure: 0.08,
+};
 
   const score = clamp(
     Object.entries(weights).reduce((sum, [key, weight]) => {
