@@ -193,6 +193,8 @@ router.get("/engine25/market-health/summary", (_req, res) => {
       marketTrend: components.marketTrend?.score ?? null,
       volatility: components.volatility?.score ?? null,
       sectorRotation: components.sectorRotation?.score ?? null,
+      distributionPressure: components.distributionPressure?.score ?? null,
+      breadthParticipation: components.breadthParticipation?.score ?? null,
       aiLeadership: components.aiLeadership?.score ?? null,
       eventRisk: components.eventRisk?.score ?? null,
       macroPressure: components.macroPressure?.score ?? null,
