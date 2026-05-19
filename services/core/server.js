@@ -47,6 +47,7 @@ import futuresMarketMeterRouter from "./routes/futuresMarketMeter.js";
 import esReactionScore from "./routes/esReactionScore.js";
 import { esVolumeBehaviorRouter } from "./routes/esVolumeBehavior.js";
 import spyReactionQuality from "./routes/spyReactionQuality.js";
+import esSmzLevels from "./routes/esSmzLevels.js";
 
 // --- App setup ---
 const app = express();
@@ -128,10 +129,11 @@ app.use("/api/v1/ohlc", ohlcRouter);
 app.use("/api/v1/futures/ohlc", futuresOhlcRouter);
 app.use("/api/sectorcards-10m", sectorcards10mRouter);
 app.use("/live", liveRouter);
-
 app.use("/api/v1/smz-levels", smzLevels);
 app.use("/api/v1/smz-shelves", smzShelves);
 app.use("/api/v1/es-smz-shelves", esSmzShelves);
+app.use("/api/v1/es-smz-levels", esSmzLevels);
+
 app.use("/api/v1/es-reaction-score", esReactionScore);
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 
