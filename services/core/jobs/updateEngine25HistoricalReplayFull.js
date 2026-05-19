@@ -13,40 +13,46 @@ const DATA_DIR = path.join(CORE_DIR, "data");
 
 const PIPELINE_STEPS = [
   {
-    step: "1/6",
+    step: "1/7",
     label: "ES forward returns",
     job: "buildEngine25EsForwardReturns6mo.js",
     output: "engine25-es-price-forward-returns-6mo.json",
   },
   {
-    step: "2/6",
+    step: "2/7",
     label: "Daily technical replay",
     job: "buildEngine25EsReplayDailyTechnical6mo.js",
     output: "engine25-es-replay-daily-technical-6mo.json",
   },
   {
-    step: "3/6",
+    step: "3/7",
     label: "Setup replay",
     job: "buildEngine25EsReplaySetups6mo.js",
     output: "engine25-es-replay-setups-6mo.json",
   },
   {
-    step: "4/6",
+    step: "4/7",
     label: "Proxy scores",
     job: "buildEngine25EsReplayProxyScores6mo.js",
     output: "engine25-es-replay-proxy-scores-6mo.json",
   },
   {
-    step: "5/6",
+    step: "5/7",
     label: "Historical replay base",
     job: "buildEngine25HistoricalReplay6mo.js",
     output: "engine25-historical-replay-6mo.json",
   },
   {
-    step: "6/6",
+    step: "6/7",
     label: "Historical macro feeds",
     job: "buildEngine25HistoricalMacroFeeds6mo.js",
     output: "engine25-historical-macro-feeds-6mo.json",
+  },
+  {
+    step: "7/7",
+    label: "Historical replay macro merge",
+    job: "buildEngine25HistoricalReplayMacro6mo.js",
+    output: "engine25-historical-replay-macro-6mo.json",
   },
 ];
 
@@ -144,9 +150,7 @@ async function main() {
       const outputPath = path.join(DATA_DIR, pipelineStep.output);
       const stat = fs.statSync(outputPath);
 
-      console.log(
-        `- ${pipelineStep.output} (${formatBytes(stat.size)})`
-      );
+      console.log(`- ${pipelineStep.output} (${formatBytes(stat.size)})`);
     }
   } catch (err) {
     console.error("");
