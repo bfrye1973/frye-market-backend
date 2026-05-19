@@ -113,13 +113,13 @@ async function main() {
         UUP: summarizeSymbol(polygon, "UUP"),
         GLD: summarizeSymbol(polygon, "GLD"),
         USO: summarizeSymbol(polygon, "USO"),
+      }, 
       creditFragility: {
         HYG: summarizeSymbol(polygon, "HYG"),
         JNK: summarizeSymbol(polygon, "JNK"),
         LQD: summarizeSymbol(polygon, "LQD"),
         KRE: summarizeSymbol(polygon, "KRE"),
-      }, 
-      },
+      },      
       sectorRotation: {
         XLK: summarizeSymbol(polygon, "XLK"),
         XLY: summarizeSymbol(polygon, "XLY"),
