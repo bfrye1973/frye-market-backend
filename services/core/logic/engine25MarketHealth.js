@@ -874,17 +874,24 @@ function deriveBias(score, components) {
   const macroPressureScore = components?.macroPressure?.score ?? 50;
   const marketTrendScore = components?.marketTrend?.score ?? 50;
   const volatilityScore = components?.volatility?.score ?? 50;
+  const creditFragilityScore = components?.creditFragility?.score ?? 50;
 
+  // Full long bias is not allowed when underlying credit fragility is high.
   if (
     score >= 70 &&
     marketTrendScore >= 65 &&
     volatilityScore >= 60 &&
-    macroPressureScore >= 60
+    macroPressureScore >= 60 &&
+    creditFragilityScore >= 55
   ) {
     return "LONG_FAVORED";
   }
 
-  if (score >= 60 && macroPressureScore >= 45) return "SELECTIVE_LONGS";
+  if (score >= 60 && macroPressureScore >= 45) {
+    if (creditFragilityScore < 45) return "SELECTIVE_LONGS_CREDIT_FRAGILITY";
+    return "SELECTIVE_LONGS";
+  }
+
   if (score >= 55) return "SELECTIVE_LONGS_MACRO_CAUTION";
   if (score >= 45) return "NEUTRAL_WAIT";
   return "DEFENSIVE";
@@ -899,6 +906,26 @@ function deriveRiskLevel(score) {
 
 function deriveTradePermission(score, bias, components) {
   const macroPressureScore = components?.macroPressure?.score ?? 50;
+  const creditFragilityScore = components?.creditFragility?.score ?? 50;
+
+  // Credit fragility override:
+  // Public credit may look calm, but if HYG/JNK/LQD/KRE/IWM are weak,
+  // Engine 25 cannot allow full-size aggression.
+  if (creditFragilityScore < 45 && score >= 60) {
+    return {
+      longScalps: true,
+      shortScalps: false,
+      swingLongs: true,
+      swingShorts: false,
+      engine22Mode: "SELECTIVE_LONGS_CREDIT_FRAGILITY_REDUCED_SIZE",
+      sizeMultiplier: 0.75,
+      notes: [
+        "Public credit stress may be calm, but credit fragility is elevated underneath.",
+        "Avoid weak small caps, regional banks, junk-credit-sensitive names, and overleveraged stocks.",
+        "Prefer SPY/QQQ/AI leadership only."
+      ],
+    };
+  }
 
   if (score >= 70 && bias === "LONG_FAVORED" && macroPressureScore >= 60) {
     return {
@@ -953,7 +980,6 @@ function deriveTradePermission(score, bias, components) {
     sizeMultiplier: 0.25,
   };
 }
-
 export function computeEngine25MarketHealth({
   macroData,
   marketData,
