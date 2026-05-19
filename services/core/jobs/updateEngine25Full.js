@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
+import { buildEngine25SectorHealth } from "../logic/engine25SectorHealth.js";
 
 import {
   fetchEngine25FredBundle,
@@ -20,6 +21,7 @@ const DATA_DIR = path.join(CORE_DIR, "data");
 const MACRO_FILE = path.join(DATA_DIR, "engine25-data-test.json");
 const MARKET_FILE = path.join(DATA_DIR, "engine25-market-feeds-test.json");
 const FMP_FILE = path.join(DATA_DIR, "engine25-fmp-feeds-test.json");
+const SECTOR_FILE = path.join(DATA_DIR, "engine25-sector-health-test.json");
 
 const FMP_BASE_URL = "https://financialmodelingprep.com/stable";
 
@@ -415,6 +417,18 @@ async function writeFmpFile() {
   );
 }
 
+async function writeSectorHealthFile() {
+  console.log("\n[Engine25Full] Fetching sector health / distribution pressure...");
+
+  const sectorHealth = await buildEngine25SectorHealth();
+
+  fs.writeFileSync(SECTOR_FILE, JSON.stringify(sectorHealth, null, 2));
+
+  console.log(
+    `[Engine25Full] SectorHealth OK=${sectorHealth.ok} | Distribution ${sectorHealth.distributionPressure.score}/${sectorHealth.distributionPressure.label} | Breadth ${sectorHealth.breadthParticipation.score}/${sectorHealth.breadthParticipation.label}`
+  );
+}
+
 function runNodeJob(jobPath) {
   execFileSync(process.execPath, [jobPath], {
     cwd: CORE_DIR,
@@ -434,6 +448,7 @@ async function main() {
   await writeMacroFile();
   await writeMarketFile();
   await writeFmpFile();
+  await writeSectorHealthFile();
 
   console.log("\n[Engine25Full] Validating feeds...");
   runNodeJob("jobs/validateEngine25Feeds.js");
@@ -447,6 +462,7 @@ async function main() {
   console.log("- data/engine25-data-test.json");
   console.log("- data/engine25-market-feeds-test.json");
   console.log("- data/engine25-fmp-feeds-test.json");
+  console.log("- data/engine25-sector-health-test.json");
   console.log("- data/engine25-feed-validation.json");
   console.log("- data/engine25-market-health.json");
   console.log("========================================");
