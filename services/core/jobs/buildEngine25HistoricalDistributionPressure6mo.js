@@ -306,7 +306,7 @@ function scoreAiDistribution(row) {
   let above20Count = 0;
   let above50Count = 0;
   let validCount = 0;
-
+  
   for (const symbol of AI_SYMBOLS) {
     const item = getSymbol(row, "aiLeadership", symbol);
     const read = scoreSymbolDistribution(item, "equity");
