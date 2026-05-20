@@ -13,46 +13,76 @@ const DATA_DIR = path.join(CORE_DIR, "data");
 
 const PIPELINE_STEPS = [
   {
-    step: "1/7",
+    step: "1/12",
     label: "ES forward returns",
     job: "buildEngine25EsForwardReturns6mo.js",
     output: "engine25-es-price-forward-returns-6mo.json",
   },
   {
-    step: "2/7",
+    step: "2/12",
     label: "Daily technical replay",
     job: "buildEngine25EsReplayDailyTechnical6mo.js",
     output: "engine25-es-replay-daily-technical-6mo.json",
   },
   {
-    step: "3/7",
+    step: "3/12",
     label: "Setup replay",
     job: "buildEngine25EsReplaySetups6mo.js",
     output: "engine25-es-replay-setups-6mo.json",
   },
   {
-    step: "4/7",
+    step: "4/12",
     label: "Proxy scores",
     job: "buildEngine25EsReplayProxyScores6mo.js",
     output: "engine25-es-replay-proxy-scores-6mo.json",
   },
   {
-    step: "5/7",
+    step: "5/12",
     label: "Historical replay base",
     job: "buildEngine25HistoricalReplay6mo.js",
     output: "engine25-historical-replay-6mo.json",
   },
   {
-    step: "6/7",
+    step: "6/12",
     label: "Historical macro feeds",
     job: "buildEngine25HistoricalMacroFeeds6mo.js",
     output: "engine25-historical-macro-feeds-6mo.json",
   },
   {
-    step: "7/7",
+    step: "7/12",
     label: "Historical replay macro merge",
     job: "buildEngine25HistoricalReplayMacro6mo.js",
     output: "engine25-historical-replay-macro-6mo.json",
+  },
+  {
+    step: "8/12",
+    label: "Historical distribution pressure",
+    job: "buildEngine25HistoricalDistributionPressure6mo.js",
+    output: "engine25-historical-distribution-pressure-6mo.json",
+  },
+  {
+    step: "9/12",
+    label: "Historical replay macro + distribution merge",
+    job: "buildEngine25HistoricalReplayMacroDistribution6mo.js",
+    output: "engine25-historical-replay-macro-distribution-6mo.json",
+  },
+  {
+    step: "10/12",
+    label: "Historical breadth participation",
+    job: "buildEngine25HistoricalBreadthParticipation6mo.js",
+    output: "engine25-historical-breadth-participation-6mo.json",
+  },
+  {
+    step: "11/12",
+    label: "Historical replay macro + distribution + breadth merge",
+    job: "buildEngine25HistoricalReplayMacroDistributionBreadth6mo.js",
+    output: "engine25-historical-replay-macro-distribution-breadth-6mo.json",
+  },
+  {
+    step: "12/12",
+    label: "ES zone-aware plain-English read",
+    job: "buildEngine25EsZoneAwareRead.js",
+    output: "engine25-es-zone-aware-read.json",
   },
 ];
 
