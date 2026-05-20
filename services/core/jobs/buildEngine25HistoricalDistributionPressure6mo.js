@@ -125,8 +125,11 @@ function scoreSymbolDistribution(item, type = "equity") {
   if (!item?.ok) {
     return {
       score: 50,
-      warnings: ["Missing symbol data"],
-      details: {},
+      warnings: [],
+      details: {
+        symbol: null,
+        missing: true,
+      },
     };
   }
 
@@ -231,19 +234,13 @@ function scoreIndexDistribution(row) {
   return {
     score,
     label:
-  score >= 70
-    ? "DISTRIBUTION_PRESSURE_HIGH"
-    : score >= 50
-      ? "DISTRIBUTION_PRESSURE_ELEVATED"
-      : score >= 35 && (
-          creditDistribution.score >= 45 ||
-          indexDistribution.inputs?.IWM?.score >= 45 ||
-          aiDistribution.inputs?.breadthPressure >= 45
-        )
-        ? "DISTRIBUTION_PRESSURE_FRAGILE_UNDER_SURFACE"
-        : score >= 30
-          ? "DISTRIBUTION_PRESSURE_NORMAL"
-          : "DISTRIBUTION_PRESSURE_LOW",
+      score >= 70
+        ? "INDEX_DISTRIBUTION_HIGH"
+        : score >= 50
+          ? "INDEX_DISTRIBUTION_ELEVATED"
+          : score >= 30
+            ? "INDEX_DISTRIBUTION_NORMAL"
+            : "INDEX_DISTRIBUTION_LOW",
     inputs: symbolScores,
     warnings: [...new Set(warnings)],
   };
@@ -254,11 +251,7 @@ function scoreCreditDistribution(row) {
   const warnings = [];
 
   for (const symbol of CREDIT_SYMBOLS) {
-    const item =
-      symbol === "IWM"
-        ? getSymbol(row, "marketTrend", symbol)
-        : getSymbol(row, "creditFragility", symbol);
-
+    const item = getSymbol(row, "creditFragility", symbol);
     const read = scoreSymbolDistribution(item, "credit");
 
     symbolScores[symbol] = read;
@@ -306,7 +299,7 @@ function scoreAiDistribution(row) {
   let above20Count = 0;
   let above50Count = 0;
   let validCount = 0;
-  
+
   for (const symbol of AI_SYMBOLS) {
     const item = getSymbol(row, "aiLeadership", symbol);
     const read = scoreSymbolDistribution(item, "equity");
@@ -433,6 +426,14 @@ function buildDistributionPressure(row) {
     { value: sectorDistribution.score, weight: 0.2 },
   ]);
 
+  const fragileUnderSurface =
+    score >= 35 &&
+    (
+      creditDistribution.score >= 45 ||
+      indexDistribution.inputs?.IWM?.score >= 45 ||
+      aiDistribution.inputs?.breadthPressure >= 45
+    );
+
   const warnings = [
     ...indexDistribution.warnings,
     ...creditDistribution.warnings,
@@ -442,35 +443,26 @@ function buildDistributionPressure(row) {
 
   return {
     score,
-     label:
-       score >= 70
-       ? "DISTRIBUTION_PRESSURE_HIGH"
-       : score >= 50
-         ? "DISTRIBUTION_PRESSURE_ELEVATED"
-         : score >= 35 &&
-             (
-               creditDistribution.score >= 45 ||
-               indexDistribution.inputs?.IWM?.score >= 45 ||
-               aiDistribution.inputs?.breadthPressure >= 45
-             )
-           ? "DISTRIBUTION_PRESSURE_FRAGILE_UNDER_SURFACE"
-           : score >= 30
-             ? "DISTRIBUTION_PRESSURE_NORMAL"
-             : "DISTRIBUTION_PRESSURE_LOW", 
-  interpretation:
-    score >= 70
-      ? "Institutional selling pressure is high. Avoid blind longs and require strong reclaim confirmation."
-      : score >= 50
-        ? "Distribution pressure is elevated. Longs require A+ setup quality and reduced size."
-        : score >= 35 && (
-            creditDistribution.score >= 45 ||
-            indexDistribution.inputs?.IWM?.score >= 45 ||
-            aiDistribution.inputs?.breadthPressure >= 45
-          )
-          ? "Market is not in full distribution, but weak borrowers, small caps, credit ETFs, or AI breadth are showing pressure underneath. Longs remain selective and reduced size."
-          : score >= 30
-            ? "Distribution pressure is normal/mixed. Stay selective."
-            : "Distribution pressure is low. Market structure is not showing broad selling pressure.",
+    label:
+      score >= 70
+        ? "DISTRIBUTION_PRESSURE_HIGH"
+        : score >= 50
+          ? "DISTRIBUTION_PRESSURE_ELEVATED"
+          : fragileUnderSurface
+            ? "DISTRIBUTION_PRESSURE_FRAGILE_UNDER_SURFACE"
+            : score >= 30
+              ? "DISTRIBUTION_PRESSURE_NORMAL"
+              : "DISTRIBUTION_PRESSURE_LOW",
+    interpretation:
+      score >= 70
+        ? "Institutional selling pressure is high. Avoid blind longs and require strong reclaim confirmation."
+        : score >= 50
+          ? "Distribution pressure is elevated. Longs require A+ setup quality and reduced size."
+          : fragileUnderSurface
+            ? "Market is not in full distribution, but weak borrowers, small caps, credit ETFs, or AI breadth are showing pressure underneath. Longs remain selective and reduced size."
+            : score >= 30
+              ? "Distribution pressure is normal/mixed. Stay selective."
+              : "Distribution pressure is low. Market structure is not showing broad selling pressure.",
     components: {
       indexDistribution,
       creditDistribution,
@@ -524,9 +516,10 @@ async function main() {
       outputFile: "engine25-historical-distribution-pressure-6mo.json",
     },
     limitations: [
-      "v0.1 uses historical proxy scores and ETF trend/momentum data.",
+      "v0.2 uses historical proxy scores and ETF trend/momentum data.",
       "No raw volume distribution day calculation yet because proxy rows do not expose daily volume in the current sample.",
       "Higher distributionPressure score means more institutional selling pressure.",
+      "DISTRIBUTION_PRESSURE_FRAGILE_UNDER_SURFACE is used when score is moderate but credit, small caps, or AI breadth show hidden weakness.",
       "This job does not change live Engine 25 or frontend behavior.",
     ],
     summary: null,
@@ -537,7 +530,7 @@ async function main() {
   try {
     console.log("========================================");
     console.log("Engine 25 Historical Distribution Pressure");
-    console.log("Proxy-based v0.1");
+    console.log("Proxy-based v0.2");
     console.log("========================================");
 
     const proxy = readJsonFile(PROXY_FILE);
@@ -602,6 +595,8 @@ async function main() {
                 date: output.summary.firstRow.date,
                 score: output.summary.firstRow.distributionPressure.score,
                 label: output.summary.firstRow.distributionPressure.label,
+                interpretation:
+                  output.summary.firstRow.distributionPressure.interpretation,
                 warnings: output.summary.firstRow.distributionPressure.warnings,
               }
             : null,
@@ -610,6 +605,8 @@ async function main() {
                 date: output.summary.lastRow.date,
                 score: output.summary.lastRow.distributionPressure.score,
                 label: output.summary.lastRow.distributionPressure.label,
+                interpretation:
+                  output.summary.lastRow.distributionPressure.interpretation,
                 warnings: output.summary.lastRow.distributionPressure.warnings,
               }
             : null,
