@@ -442,14 +442,21 @@ function buildDistributionPressure(row) {
 
   return {
     score,
-    label:
-      score >= 70
-        ? "DISTRIBUTION_PRESSURE_HIGH"
-        : score >= 50
-          ? "DISTRIBUTION_PRESSURE_ELEVATED"
-          : score >= 30
-            ? "DISTRIBUTION_PRESSURE_NORMAL"
-            : "DISTRIBUTION_PRESSURE_LOW",
+     label:
+       score >= 70
+       ? "DISTRIBUTION_PRESSURE_HIGH"
+       : score >= 50
+         ? "DISTRIBUTION_PRESSURE_ELEVATED"
+         : score >= 35 &&
+             (
+               creditDistribution.score >= 45 ||
+               indexDistribution.inputs?.IWM?.score >= 45 ||
+               aiDistribution.inputs?.breadthPressure >= 45
+             )
+           ? "DISTRIBUTION_PRESSURE_FRAGILE_UNDER_SURFACE"
+           : score >= 30
+             ? "DISTRIBUTION_PRESSURE_NORMAL"
+             : "DISTRIBUTION_PRESSURE_LOW", 
   interpretation:
     score >= 70
       ? "Institutional selling pressure is high. Avoid blind longs and require strong reclaim confirmation."
