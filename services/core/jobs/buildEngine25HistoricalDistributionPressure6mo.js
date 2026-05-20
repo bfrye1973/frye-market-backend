@@ -1,0 +1,622 @@
+// services/core/jobs/buildEngine25HistoricalDistributionPressure6mo.js
+
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const DATA_DIR = path.join(__dirname, "..", "data");
+
+const PROXY_FILE = path.join(
+  DATA_DIR,
+  "engine25-es-replay-proxy-scores-6mo.json"
+);
+
+const OUTPUT_FILE = path.join(
+  DATA_DIR,
+  "engine25-historical-distribution-pressure-6mo.json"
+);
+
+const ENGINE_NAME = "engine25.historicalDistributionPressure.v0.1";
+const MODEL_TYPE = "HISTORICAL_DISTRIBUTION_PRESSURE_PROXY";
+
+const AI_SYMBOLS = [
+  "NVDA",
+  "MSFT",
+  "AVGO",
+  "AMD",
+  "META",
+  "GOOGL",
+  "AMZN",
+  "TSM",
+  "ARM",
+  "PLTR",
+];
+
+const INDEX_SYMBOLS = ["SPY", "QQQ", "IWM", "DIA"];
+const CREDIT_SYMBOLS = ["HYG", "JNK", "LQD", "KRE"];
+const RISK_ON_SECTORS = ["XLK", "XLY", "XLF", "XLI", "SMH", "IGV"];
+const DEFENSIVE_SECTORS = ["XLP", "XLU", "XLV"];
+
+function readJsonFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Missing required file: ${filePath}`);
+  }
+
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+function normalizeRows(block) {
+  if (Array.isArray(block)) return block;
+  if (Array.isArray(block?.rows)) return block.rows;
+  throw new Error("Proxy file does not contain rows.");
+}
+
+function safeNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function clamp(value, min = 0, max = 100) {
+  if (!Number.isFinite(value)) return 50;
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function avg(values) {
+  const nums = values.map(Number).filter(Number.isFinite);
+  if (!nums.length) return 50;
+  return clamp(nums.reduce((sum, value) => sum + value, 0) / nums.length);
+}
+
+function weightedAvg(items) {
+  const valid = items.filter(
+    (item) =>
+      item &&
+      Number.isFinite(Number(item.value)) &&
+      Number.isFinite(Number(item.weight)) &&
+      Number(item.weight) > 0
+  );
+
+  if (!valid.length) return 50;
+
+  const totalWeight = valid.reduce((sum, item) => sum + Number(item.weight), 0);
+  const weightedSum = valid.reduce(
+    (sum, item) => sum + Number(item.value) * Number(item.weight),
+    0
+  );
+
+  return clamp(weightedSum / totalWeight);
+}
+
+function boolPenalty(value, truePenalty = 20, falsePenalty = 0, unknownPenalty = 8) {
+  if (value === true) return truePenalty;
+  if (value === false) return falsePenalty;
+  return unknownPenalty;
+}
+
+function scoreDirectPressure(value, calmAbove, pressureBelow) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) return 50;
+  if (n >= calmAbove) return 0;
+  if (n <= pressureBelow) return 100;
+
+  return clamp(((calmAbove - n) / (calmAbove - pressureBelow)) * 100);
+}
+
+function getProxyInputs(row, blockName) {
+  return row?.proxyScores?.[blockName]?.inputs || {};
+}
+
+function getSymbol(row, blockName, symbol) {
+  const inputs = getProxyInputs(row, blockName);
+  return inputs?.[symbol] || null;
+}
+
+function scoreSymbolDistribution(item, type = "equity") {
+  if (!item?.ok) {
+    return {
+      score: 50,
+      warnings: ["Missing symbol data"],
+      details: {},
+    };
+  }
+
+  const aboveEma10 = item.aboveEma10;
+  const aboveEma20 = item.aboveEma20;
+  const aboveEma50 = item.aboveEma50;
+
+  const pctChange5d = safeNumber(item.pctChange5d);
+  const pctChange20d = safeNumber(item.pctChange20d);
+  const pctChange50d = safeNumber(item.pctChange50d);
+
+  const emaPressure = avg([
+    boolPenalty(aboveEma10 === false, 22, 0),
+    boolPenalty(aboveEma20 === false, 30, 0),
+    boolPenalty(aboveEma50 === false, 35, 0),
+  ]);
+
+  const momentumPressure =
+    type === "credit"
+      ? weightedAvg([
+          { value: scoreDirectPressure(pctChange5d, 0.25, -1.5), weight: 0.35 },
+          { value: scoreDirectPressure(pctChange20d, 0.5, -3.0), weight: 0.45 },
+          { value: scoreDirectPressure(pctChange50d, 1.0, -5.0), weight: 0.2 },
+        ])
+      : weightedAvg([
+          { value: scoreDirectPressure(pctChange5d, 1.0, -3.0), weight: 0.35 },
+          { value: scoreDirectPressure(pctChange20d, 2.0, -6.0), weight: 0.45 },
+          { value: scoreDirectPressure(pctChange50d, 4.0, -10.0), weight: 0.2 },
+        ]);
+
+  const score = weightedAvg([
+    { value: emaPressure, weight: 0.6 },
+    { value: momentumPressure, weight: 0.4 },
+  ]);
+
+  const warnings = [];
+
+  if (aboveEma20 === false && aboveEma50 === false) {
+    warnings.push(`${item.symbol} below EMA20/EMA50`);
+  } else if (aboveEma20 === false) {
+    warnings.push(`${item.symbol} below EMA20`);
+  }
+
+  if (Number.isFinite(pctChange20d) && pctChange20d < -3) {
+    warnings.push(`${item.symbol} 20d momentum negative`);
+  }
+
+  return {
+    score,
+    warnings,
+    details: {
+      symbol: item.symbol,
+      date: item.date,
+      close: item.close,
+      aboveEma10,
+      aboveEma20,
+      aboveEma50,
+      pctChange5d,
+      pctChange20d,
+      pctChange50d,
+      emaPressure,
+      momentumPressure,
+    },
+  };
+}
+
+function scoreIndexDistribution(row) {
+  const symbolScores = {};
+  const warnings = [];
+
+  for (const symbol of INDEX_SYMBOLS) {
+    const item = getSymbol(row, "marketTrend", symbol);
+    const read = scoreSymbolDistribution(item, "equity");
+
+    symbolScores[symbol] = read;
+    warnings.push(...read.warnings);
+  }
+
+  const score = weightedAvg([
+    { value: symbolScores.SPY?.score, weight: 0.35 },
+    { value: symbolScores.QQQ?.score, weight: 0.35 },
+    { value: symbolScores.IWM?.score, weight: 0.2 },
+    { value: symbolScores.DIA?.score, weight: 0.1 },
+  ]);
+
+  const spy = symbolScores.SPY?.details;
+  const qqq = symbolScores.QQQ?.details;
+  const iwm = symbolScores.IWM?.details;
+
+  if (spy?.aboveEma20 === false && qqq?.aboveEma20 === false) {
+    warnings.push("SPY and QQQ both below EMA20");
+  }
+
+  if (
+    Number.isFinite(iwm?.pctChange20d) &&
+    Number.isFinite(spy?.pctChange20d) &&
+    iwm.pctChange20d < spy.pctChange20d - 2
+  ) {
+    warnings.push("IWM underperforming SPY; small-cap participation weak");
+  }
+
+  return {
+    score,
+    label:
+      score >= 70
+        ? "INDEX_DISTRIBUTION_HIGH"
+        : score >= 50
+          ? "INDEX_DISTRIBUTION_ELEVATED"
+          : score >= 30
+            ? "INDEX_DISTRIBUTION_NORMAL"
+            : "INDEX_DISTRIBUTION_LOW",
+    inputs: symbolScores,
+    warnings: [...new Set(warnings)],
+  };
+}
+
+function scoreCreditDistribution(row) {
+  const symbolScores = {};
+  const warnings = [];
+
+  for (const symbol of CREDIT_SYMBOLS) {
+    const item =
+      symbol === "IWM"
+        ? getSymbol(row, "marketTrend", symbol)
+        : getSymbol(row, "creditFragility", symbol);
+
+    const read = scoreSymbolDistribution(item, "credit");
+
+    symbolScores[symbol] = read;
+    warnings.push(...read.warnings);
+  }
+
+  const score = weightedAvg([
+    { value: symbolScores.HYG?.score, weight: 0.3 },
+    { value: symbolScores.JNK?.score, weight: 0.3 },
+    { value: symbolScores.LQD?.score, weight: 0.2 },
+    { value: symbolScores.KRE?.score, weight: 0.2 },
+  ]);
+
+  if (symbolScores.HYG?.details?.aboveEma20 === false) {
+    warnings.push("HYG below EMA20; high-yield credit distribution pressure");
+  }
+
+  if (symbolScores.JNK?.details?.aboveEma20 === false) {
+    warnings.push("JNK below EMA20; junk credit weakening");
+  }
+
+  if (symbolScores.KRE?.details?.aboveEma20 === false) {
+    warnings.push("KRE below EMA20; regional bank pressure");
+  }
+
+  return {
+    score,
+    label:
+      score >= 70
+        ? "CREDIT_DISTRIBUTION_HIGH"
+        : score >= 50
+          ? "CREDIT_DISTRIBUTION_ELEVATED"
+          : score >= 30
+            ? "CREDIT_DISTRIBUTION_NORMAL"
+            : "CREDIT_DISTRIBUTION_LOW",
+    inputs: symbolScores,
+    warnings: [...new Set(warnings)],
+  };
+}
+
+function scoreAiDistribution(row) {
+  const symbolScores = {};
+  const warnings = [];
+
+  let above20Count = 0;
+  let above50Count = 0;
+  let validCount = 0;
+
+  for (const symbol of AI_SYMBOLS) {
+    const item = getSymbol(row, "aiLeadership", symbol);
+    const read = scoreSymbolDistribution(item, "equity");
+
+    symbolScores[symbol] = read;
+
+    if (item?.ok) {
+      validCount += 1;
+      if (item.aboveEma20 === true) above20Count += 1;
+      if (item.aboveEma50 === true) above50Count += 1;
+    }
+
+    warnings.push(...read.warnings);
+  }
+
+  const avgLeaderPressure = avg(Object.values(symbolScores).map((item) => item.score));
+
+  const breadthPressure =
+    validCount > 0
+      ? clamp(100 - ((above20Count / validCount) * 60 + (above50Count / validCount) * 40))
+      : 50;
+
+  const score = weightedAvg([
+    { value: avgLeaderPressure, weight: 0.65 },
+    { value: breadthPressure, weight: 0.35 },
+  ]);
+
+  if (above20Count <= 5) {
+    warnings.push("AI leadership breadth narrowing");
+  }
+
+  if (symbolScores.NVDA?.details?.aboveEma20 === false) {
+    warnings.push("NVDA below EMA20; AI leader weakening");
+  }
+
+  return {
+    score,
+    label:
+      score >= 70
+        ? "AI_DISTRIBUTION_HIGH"
+        : score >= 50
+          ? "AI_DISTRIBUTION_ELEVATED"
+          : score >= 30
+            ? "AI_DISTRIBUTION_NORMAL"
+            : "AI_DISTRIBUTION_LOW",
+    inputs: {
+      symbolScores,
+      validCount,
+      above20Count,
+      above50Count,
+      breadthPressure,
+      avgLeaderPressure,
+    },
+    warnings: [...new Set(warnings)],
+  };
+}
+
+function scoreSectorDistribution(row) {
+  const sectorInputs = getProxyInputs(row, "sectorRotation");
+  const warnings = [];
+
+  function sectorRead(symbol) {
+    return scoreSymbolDistribution(sectorInputs?.[symbol], "equity");
+  }
+
+  const riskOnScores = {};
+  const defensiveScores = {};
+
+  for (const symbol of RISK_ON_SECTORS) {
+    riskOnScores[symbol] = sectorRead(symbol);
+    warnings.push(...riskOnScores[symbol].warnings);
+  }
+
+  for (const symbol of DEFENSIVE_SECTORS) {
+    defensiveScores[symbol] = sectorRead(symbol);
+    warnings.push(...defensiveScores[symbol].warnings);
+  }
+
+  const riskOnPressure = avg(Object.values(riskOnScores).map((item) => item.score));
+  const defensivePressure = avg(Object.values(defensiveScores).map((item) => item.score));
+
+  const defensiveRotationPressure = clamp(50 + (riskOnPressure - defensivePressure));
+
+  const score = weightedAvg([
+    { value: riskOnPressure, weight: 0.75 },
+    { value: defensiveRotationPressure, weight: 0.25 },
+  ]);
+
+  if (riskOnPressure > defensivePressure + 10) {
+    warnings.push("Risk-on sectors weaker than defensive sectors");
+  }
+
+  return {
+    score,
+    label:
+      score >= 70
+        ? "SECTOR_DISTRIBUTION_HIGH"
+        : score >= 50
+          ? "SECTOR_DISTRIBUTION_ELEVATED"
+          : score >= 30
+            ? "SECTOR_DISTRIBUTION_NORMAL"
+            : "SECTOR_DISTRIBUTION_LOW",
+    inputs: {
+      riskOnScores,
+      defensiveScores,
+      riskOnPressure,
+      defensivePressure,
+      defensiveRotationPressure,
+    },
+    warnings: [...new Set(warnings)],
+  };
+}
+
+function buildDistributionPressure(row) {
+  const indexDistribution = scoreIndexDistribution(row);
+  const creditDistribution = scoreCreditDistribution(row);
+  const aiDistribution = scoreAiDistribution(row);
+  const sectorDistribution = scoreSectorDistribution(row);
+
+  const score = weightedAvg([
+    { value: indexDistribution.score, weight: 0.3 },
+    { value: creditDistribution.score, weight: 0.25 },
+    { value: aiDistribution.score, weight: 0.25 },
+    { value: sectorDistribution.score, weight: 0.2 },
+  ]);
+
+  const warnings = [
+    ...indexDistribution.warnings,
+    ...creditDistribution.warnings,
+    ...aiDistribution.warnings,
+    ...sectorDistribution.warnings,
+  ];
+
+  return {
+    score,
+    label:
+      score >= 70
+        ? "DISTRIBUTION_PRESSURE_HIGH"
+        : score >= 50
+          ? "DISTRIBUTION_PRESSURE_ELEVATED"
+          : score >= 30
+            ? "DISTRIBUTION_PRESSURE_NORMAL"
+            : "DISTRIBUTION_PRESSURE_LOW",
+    interpretation:
+      score >= 70
+        ? "Institutional selling pressure is high. Avoid blind longs and require strong reclaim confirmation."
+        : score >= 50
+          ? "Distribution pressure is elevated. Longs require A+ setup quality and reduced size."
+          : score >= 30
+            ? "Distribution pressure is normal/mixed. Stay selective."
+            : "Distribution pressure is low. Market structure is not showing broad selling pressure.",
+    components: {
+      indexDistribution,
+      creditDistribution,
+      aiDistribution,
+      sectorDistribution,
+    },
+    warnings: [...new Set(warnings)].slice(0, 25),
+  };
+}
+
+function buildSummary(rows) {
+  const byLabel = rows.reduce((acc, row) => {
+    const label = row.distributionPressure?.label || "UNKNOWN";
+    acc[label] = (acc[label] || 0) + 1;
+    return acc;
+  }, {});
+
+  const avgScore = (() => {
+    const nums = rows
+      .map((row) => safeNumber(row.distributionPressure?.score))
+      .filter(Number.isFinite);
+
+    if (!nums.length) return null;
+
+    return Number((nums.reduce((sum, value) => sum + value, 0) / nums.length).toFixed(3));
+  })();
+
+  return {
+    rows: rows.length,
+    avgDistributionPressureScore: avgScore,
+    byLabel,
+    firstRow: rows[0] || null,
+    lastRow: rows[rows.length - 1] || null,
+  };
+}
+
+async function main() {
+  const startedAt = new Date().toISOString();
+
+  const output = {
+    ok: false,
+    engine: ENGINE_NAME,
+    modelType: MODEL_TYPE,
+    symbol: "ES",
+    timeframe: "1d",
+    startedAt,
+    finishedAt: null,
+    generatedAtUtc: null,
+    source: {
+      proxyFile: "engine25-es-replay-proxy-scores-6mo.json",
+      outputFile: "engine25-historical-distribution-pressure-6mo.json",
+    },
+    limitations: [
+      "v0.1 uses historical proxy scores and ETF trend/momentum data.",
+      "No raw volume distribution day calculation yet because proxy rows do not expose daily volume in the current sample.",
+      "Higher distributionPressure score means more institutional selling pressure.",
+      "This job does not change live Engine 25 or frontend behavior.",
+    ],
+    summary: null,
+    rows: [],
+    errors: [],
+  };
+
+  try {
+    console.log("========================================");
+    console.log("Engine 25 Historical Distribution Pressure");
+    console.log("Proxy-based v0.1");
+    console.log("========================================");
+
+    const proxy = readJsonFile(PROXY_FILE);
+    const proxyRows = normalizeRows(proxy);
+
+    console.log("Proxy rows loaded:", proxyRows.length);
+
+    const rows = proxyRows.map((row) => {
+      const distributionPressure = buildDistributionPressure(row);
+
+      return {
+        date: row.date,
+        time: row.time,
+        symbol: "ES",
+        timeframe: "1d",
+        esOpen: row.esOpen,
+        esHigh: row.esHigh,
+        esLow: row.esLow,
+        esClose: row.esClose,
+        next1dReturnPct: row.next1dReturnPct,
+        next3dReturnPct: row.next3dReturnPct,
+        next5dReturnPct: row.next5dReturnPct,
+        maxDrawdownNext5dPct: row.maxDrawdownNext5dPct,
+        maxRunupNext5dPct: row.maxRunupNext5dPct,
+        outcome5d: row.outcome5d,
+        distributionPressure,
+      };
+    });
+
+    output.rows = rows;
+    output.summary = buildSummary(rows);
+    output.ok = rows.length > 0;
+    output.generatedAtUtc = new Date().toISOString();
+    output.finishedAt = output.generatedAtUtc;
+
+    ensureDataDir();
+    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(output, null, 2));
+
+    console.log("\n========================================");
+    console.log("Engine 25 Historical Distribution Pressure Complete");
+    console.log("OK:", output.ok);
+    console.log("Rows:", output.summary.rows);
+    console.log("Avg score:", output.summary.avgDistributionPressureScore);
+    console.log("By label:", output.summary.byLabel);
+    console.log("Wrote:", OUTPUT_FILE);
+    console.log("========================================");
+
+    console.log(
+      JSON.stringify(
+        {
+          ok: output.ok,
+          engine: output.engine,
+          modelType: output.modelType,
+          summary: {
+            rows: output.summary.rows,
+            avgDistributionPressureScore:
+              output.summary.avgDistributionPressureScore,
+            byLabel: output.summary.byLabel,
+          },
+          firstRow: output.summary.firstRow
+            ? {
+                date: output.summary.firstRow.date,
+                score: output.summary.firstRow.distributionPressure.score,
+                label: output.summary.firstRow.distributionPressure.label,
+                warnings: output.summary.firstRow.distributionPressure.warnings,
+              }
+            : null,
+          lastRow: output.summary.lastRow
+            ? {
+                date: output.summary.lastRow.date,
+                score: output.summary.lastRow.distributionPressure.score,
+                label: output.summary.lastRow.distributionPressure.label,
+                warnings: output.summary.lastRow.distributionPressure.warnings,
+              }
+            : null,
+          outputFile: OUTPUT_FILE,
+        },
+        null,
+        2
+      )
+    );
+  } catch (err) {
+    output.ok = false;
+    output.finishedAt = new Date().toISOString();
+    output.generatedAtUtc = output.finishedAt;
+    output.errors.push({
+      message: err.message,
+      stack: err.stack,
+    });
+
+    ensureDataDir();
+    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(output, null, 2));
+
+    console.error("Engine 25 Historical Distribution Pressure Failed:");
+    console.error(err);
+
+    process.exit(1);
+  }
+}
+
+main();
