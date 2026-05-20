@@ -19,8 +19,8 @@ const OUTPUT_FILE = path.join(
   "engine25-historical-distribution-pressure-6mo.json"
 );
 
-const ENGINE_NAME = "engine25.historicalDistributionPressure.v0.1";
-const MODEL_TYPE = "HISTORICAL_DISTRIBUTION_PRESSURE_PROXY";
+const ENGINE_NAME = "engine25.historicalDistributionPressure.v0.2";
+const MODEL_TYPE = "HISTORICAL_DISTRIBUTION_PRESSURE_PROXY_V0_2";
 
 const AI_SYMBOLS = [
   "NVDA",
@@ -231,13 +231,19 @@ function scoreIndexDistribution(row) {
   return {
     score,
     label:
-      score >= 70
-        ? "INDEX_DISTRIBUTION_HIGH"
-        : score >= 50
-          ? "INDEX_DISTRIBUTION_ELEVATED"
-          : score >= 30
-            ? "INDEX_DISTRIBUTION_NORMAL"
-            : "INDEX_DISTRIBUTION_LOW",
+  score >= 70
+    ? "DISTRIBUTION_PRESSURE_HIGH"
+    : score >= 50
+      ? "DISTRIBUTION_PRESSURE_ELEVATED"
+      : score >= 35 && (
+          creditDistribution.score >= 45 ||
+          indexDistribution.inputs?.IWM?.score >= 45 ||
+          aiDistribution.inputs?.breadthPressure >= 45
+        )
+        ? "DISTRIBUTION_PRESSURE_FRAGILE_UNDER_SURFACE"
+        : score >= 30
+          ? "DISTRIBUTION_PRESSURE_NORMAL"
+          : "DISTRIBUTION_PRESSURE_LOW",
     inputs: symbolScores,
     warnings: [...new Set(warnings)],
   };
@@ -444,11 +450,17 @@ function buildDistributionPressure(row) {
           : score >= 30
             ? "DISTRIBUTION_PRESSURE_NORMAL"
             : "DISTRIBUTION_PRESSURE_LOW",
-    interpretation:
-      score >= 70
-        ? "Institutional selling pressure is high. Avoid blind longs and require strong reclaim confirmation."
-        : score >= 50
-          ? "Distribution pressure is elevated. Longs require A+ setup quality and reduced size."
+  interpretation:
+    score >= 70
+      ? "Institutional selling pressure is high. Avoid blind longs and require strong reclaim confirmation."
+      : score >= 50
+        ? "Distribution pressure is elevated. Longs require A+ setup quality and reduced size."
+        : score >= 35 && (
+            creditDistribution.score >= 45 ||
+            indexDistribution.inputs?.IWM?.score >= 45 ||
+            aiDistribution.inputs?.breadthPressure >= 45
+          )
+          ? "Market is not in full distribution, but weak borrowers, small caps, credit ETFs, or AI breadth are showing pressure underneath. Longs remain selective and reduced size."
           : score >= 30
             ? "Distribution pressure is normal/mixed. Stay selective."
             : "Distribution pressure is low. Market structure is not showing broad selling pressure.",
