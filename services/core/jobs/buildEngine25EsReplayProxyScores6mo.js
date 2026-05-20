@@ -174,32 +174,62 @@ function pctChangeFromIndex(bars, index, lookback) {
   return round(((currentClose - pastClose) / pastClose) * 100, 3);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchStockDailyBars(symbol) {
   const url = `${BACKEND_BASE}/api/v1/ohlc?symbol=${symbol}&timeframe=1d&limit=${FETCH_LIMIT}`;
 
-  const res = await fetch(url);
-  const text = await res.text();
+  const maxAttempts = 4;
+  let lastError = null;
 
-  let json;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON for ${symbol}: ${text.slice(0, 300)}`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const res = await fetch(url);
+      const text = await res.text();
+
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new Error(
+          `Invalid JSON for ${symbol} on attempt ${attempt}: ${text.slice(0, 300)}`
+        );
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          `Fetch failed for ${symbol} HTTP ${res.status} on attempt ${attempt}: ${text.slice(0, 500)}`
+        );
+      }
+
+      if (!Array.isArray(json)) {
+        throw new Error(`${symbol} OHLC route did not return an array`);
+      }
+
+      return {
+        symbol,
+        url,
+        bars: json,
+        attempts: attempt,
+      };
+    } catch (err) {
+      lastError = err;
+
+      console.warn(
+        `[ProxyScores] ${symbol} fetch attempt ${attempt}/${maxAttempts} failed: ${err.message}`
+      );
+
+      if (attempt < maxAttempts) {
+        await sleep(1000 * attempt);
+      }
+    }
   }
 
-  if (!res.ok) {
-    throw new Error(`Fetch failed for ${symbol} HTTP ${res.status}: ${text.slice(0, 500)}`);
-  }
-
-  if (!Array.isArray(json)) {
-    throw new Error(`${symbol} OHLC route did not return an array`);
-  }
-
-  return {
-    symbol,
-    url,
-    bars: json,
-  };
+  throw new Error(
+    `Failed to fetch ${symbol} daily bars after ${maxAttempts} attempts. Last error: ${lastError?.message}`
+  );
 }
 
 function normalizeBar(bar) {
