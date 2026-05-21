@@ -2734,15 +2734,18 @@ if (isFuturesSymbol(symbol)) {
          ? engine15Decision
          : engine15;
 
-     const reactionContextForEngine22 =
-       String(symbol || "").toUpperCase() === "ES"
-        ? patchedConfluence?.context?.reaction || null
-        : spyReactionQuality?.engine3Reaction || spyReactionQuality || null;
+    const reactionContextForEngine22 =
+      patchedConfluence?.context?.reaction ||
+      spyReactionQuality?.engine3Reaction ||
+      spyReactionQuality ||
+      null;
 
-     const volumeContextForEngine22 =
-       String(symbol || "").toUpperCase() === "ES"
-        ? patchedConfluence?.context?.volume || null
-        : spyVolumeBehavior?.engine4Volume || spyVolumeBehavior || null;  
+    const volumeContextForEngine22 =
+      patchedConfluence?.context?.volume ||
+      spyVolumeBehavior?.engine4Volume ||
+      spyVolumeBehavior ||
+      null;
+   
       if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
         try {
          engine22WaveStrategy = buildEngine22WaveStrategy({
