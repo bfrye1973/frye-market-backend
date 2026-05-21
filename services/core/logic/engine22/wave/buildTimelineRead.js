@@ -163,26 +163,6 @@ function buildReactionSection(reactionContext) {
     ]),
   };
 }
-  const state = reactionContext.state || reactionContext.structureState || "UNKNOWN";
-  const quality = reactionContext.quality || reactionContext.reactionQuality || "UNKNOWN";
-  const score = reactionContext.score ?? reactionContext.reactionScore ?? null;
-  const direction = reactionContext.direction || "NEUTRAL";
-
-  return {
-    title: "Engine 3 Reaction",
-    severity:
-      String(quality).toUpperCase().includes("WEAK") ||
-      String(state).toUpperCase().includes("FAIL")
-        ? "warning"
-        : "neutral",
-    lines: lineList([
-      `${text(state)} — ${text(quality)}`,
-      score != null ? `Score ${score}/100` : null,
-      `Direction: ${text(direction)}`,
-      reactionContext.message || null,
-    ]),
-  };
-}
 
 function buildVolumeSection(volumeContext) {
   if (!volumeContext) {
