@@ -118,6 +118,51 @@ function buildReactionSection(reactionContext) {
     };
   }
 
+  const waveReaction = reactionContext.waveReaction || null;
+
+  const state =
+    waveReaction?.reactionState ||
+    reactionContext.state ||
+    reactionContext.structureState ||
+    "UNKNOWN";
+
+  const score =
+    waveReaction?.reactionQualityScore ??
+    reactionContext.score ??
+    reactionContext.reactionScore ??
+    null;
+
+  const quality =
+    waveReaction?.reactionQuality ||
+    reactionContext.quality ||
+    reactionContext.reactionQuality ||
+    (Number(score) >= 60 ? "HEALTHY" : "UNKNOWN");
+
+  const direction =
+    reactionContext.direction ||
+    waveReaction?.waveContextUsed?.executionBias ||
+    "NEUTRAL";
+
+  const message =
+    waveReaction?.traderMessage ||
+    reactionContext.message ||
+    null;
+
+  return {
+    title: "Engine 3 Reaction",
+    severity:
+      String(quality).toUpperCase().includes("WEAK") ||
+      String(state).toUpperCase().includes("FAIL")
+        ? "warning"
+        : "neutral",
+    lines: lineList([
+      `${text(state)} — ${text(quality)}`,
+      score != null ? `Score ${score}/100` : null,
+      `Direction: ${text(direction)}`,
+      message,
+    ]),
+  };
+}
   const state = reactionContext.state || reactionContext.structureState || "UNKNOWN";
   const quality = reactionContext.quality || reactionContext.reactionQuality || "UNKNOWN";
   const score = reactionContext.score ?? reactionContext.reactionScore ?? null;
