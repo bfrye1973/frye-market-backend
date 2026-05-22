@@ -626,12 +626,17 @@ def main():
     spy_1h_test = fetch_polygon_1h("SPY", key, lookback_days=FETCH_DAYS_4H)
     spy_4h_from_1h = build_4h_from_1h(spy_1h_test)
 
-    # Native structure arrays stay native 240m.
-    O = [b["open"] for b in spy_4h_native]
-    H = [b["high"] for b in spy_4h_native]
-    L = [b["low"] for b in spy_4h_native]
-    C = [b["close"] for b in spy_4h_native]
-    V = [b["volume"] for b in spy_4h_native]
+   # Responsive / TradingView-aligned 4H structure source.
+   # Native Polygon 240m is too misaligned for dashboard bridge scoring.
+   # Use 1H-built 4H candles for EMA, SMI, volatility, liquidity, and scoring.
+   spy_4h_structure = spy_4h_from_1h if len(spy_4h_from_1h) >= 25 else spy_4h_native
+   source_used = "polygon_60m_grouped_4h_structure" if len(spy_4h_from_1h) >= 25 else source_used
+
+   O = [b["open"] for b in spy_4h_structure]
+   H = [b["high"] for b in spy_4h_structure]
+   L = [b["low"] for b in spy_4h_structure]
+   C = [b["close"] for b in spy_4h_structure]
+   V = [b["volume"] for b in spy_4h_structure]
 
     e10 = ema_series(C, 10)[-1]
     e20 = ema_series(C, 20)[-1]
@@ -871,7 +876,7 @@ def main():
         "lux_psi_mode_4h": "stateful",
         "fetch_days_4h": int(FETCH_DAYS_4H),
         "source_used_4h": source_used,
-        "completed_4h_bars": int(len(spy_4h_native)),
+        "completed_4h_bars": int(len(spy_4h_structure)
     }
 
     fourHour = {
@@ -901,7 +906,7 @@ def main():
             "after_hours": False,
             "psi_mode_4h": "stateful_lux_1h_built_preferred",
             "fetch_days_4h": int(FETCH_DAYS_4H),
-            "completed_4h_bars": int(len(spy_4h_native)),
+            "completed_4h_bars": int(len(spy_4h_structure)
             "squeeze_source_4h": squeeze_source_4h,
         },
     }
@@ -912,7 +917,7 @@ def main():
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
     print(
-        f"[4h] score={score:.2f} state={state} source={source_used} bars={len(spy_4h_native)} "
+        f"[4h] score={score:.2f} state={state} source={source_used} bars={len(spy_4h_structure)} "
         f"psiMain={squeeze_psi_4h:.2f} psiNative={squeeze_psi_4h_native:.2f} "
         f"psi1h={squeeze_psi_4h_from_1h if squeeze_psi_4h_from_1h is not None else 'NA'} "
         f"emaPost={ema10_posture:.2f} mom={momentum_combo_4h:.2f} "
