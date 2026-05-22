@@ -6,11 +6,20 @@
 // Given W2, W3, and W4, calculate W5 extension targets.
 // This is read-only intelligence. It does not create trades.
 //
-// Bullish formula:
-// target = W4 + abs(W3 - W2) * fib
+// Frye Dashboard active W5 projection rule:
 //
-// Bearish formula:
-// target = W4 - abs(W3 - W2) * fib
+// Bullish W5:
+// target = W4 + abs(W3 - W4) * fib
+//
+// Bearish W5:
+// target = W4 - abs(W3 - W4) * fib
+//
+// This matches the user's Elliott/Fib workflow:
+// - Wave 5 targets are measured from Wave 4 low to Wave 3 high.
+// - 1.000 equals prior Wave 3 high.
+// - 1.618 is the active W5 extension target.
+// - Larger W2→W3 projections should be treated only as higher-degree stretch/context,
+//   not the active execution target.
 
 const DEFAULT_FIBS = [
   { key: "e100", label: "1.000", value: 1.0 },
@@ -53,13 +62,13 @@ function roundToTick(price, tickSize) {
   return Number((Math.round(p / t) * t).toFixed(2));
 }
 
-function normalizeDirection({ direction, w2, w3 }) {
+function normalizeDirection({ direction, w3, w4 }) {
   const explicit = String(direction || "").trim().toUpperCase();
 
   if (explicit === "BULLISH") return "BULLISH";
   if (explicit === "BEARISH") return "BEARISH";
 
-  const a = toNum(w2);
+  const a = toNum(w4);
   const b = toNum(w3);
 
   if (a !== null && b !== null && b < a) return "BEARISH";
@@ -77,7 +86,7 @@ function buildInvalidReturn({
 } = {}) {
   return {
     ok: false,
-    source: "W4_TO_W5",
+    source: "W4_TO_W5_ACTIVE_EXECUTION",
     symbol,
     direction,
     anchors: {
@@ -107,18 +116,18 @@ export function projectFibExtensions({
   const anchorW3 = toNum(w3);
   const anchorW4 = toNum(w4);
 
-  if (anchorW2 === null || anchorW3 === null || anchorW4 === null) {
+  if (anchorW3 === null || anchorW4 === null) {
     return buildInvalidReturn({
       symbol,
       direction,
       w2,
       w3,
       w4,
-      reason: "MISSING_W2_W3_W4_ANCHORS",
+      reason: "MISSING_W3_W4_ANCHORS",
     });
   }
 
-  const range = Math.abs(anchorW3 - anchorW2);
+  const range = Math.abs(anchorW3 - anchorW4);
 
   if (!Number.isFinite(range) || range <= 0) {
     return buildInvalidReturn({
@@ -127,14 +136,14 @@ export function projectFibExtensions({
       w2,
       w3,
       w4,
-      reason: "INVALID_W2_W3_RANGE",
+      reason: "INVALID_W3_W4_RANGE",
     });
   }
 
   const dir = normalizeDirection({
     direction,
-    w2: anchorW2,
     w3: anchorW3,
+    w4: anchorW4,
   });
 
   const sign = dir === "BEARISH" ? -1 : 1;
@@ -170,7 +179,7 @@ export function projectFibExtensions({
 
   return {
     ok: true,
-    source: "W4_TO_W5",
+    source: "W4_TO_W5_ACTIVE_EXECUTION",
     symbol,
     direction: dir,
     anchors: {
@@ -183,8 +192,8 @@ export function projectFibExtensions({
     levels,
     fibMeta,
     tickSize: effectiveTickSize,
-    reason: "W2_W3_W4_ANCHORS_VALID",
-    reasonCodes: ["W2_W3_W4_ANCHORS_VALID"],
+    reason: "W3_W4_ANCHORS_VALID_ACTIVE_W5_PROJECTION",
+    reasonCodes: ["W3_W4_ANCHORS_VALID_ACTIVE_W5_PROJECTION"],
   };
 }
 
