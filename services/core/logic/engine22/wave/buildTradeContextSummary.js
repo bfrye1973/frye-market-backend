@@ -28,6 +28,7 @@ function validLevel(x) {
   const n = Number(x);
   return Number.isFinite(n) && n !== 0 ? n : null;
 }
+
 function text(value, fallback = "—") {
   if (value === null || value === undefined || value === "") return fallback;
   return String(value).replaceAll("_", " ");
@@ -39,6 +40,10 @@ function getLevel(waveFibState, degree, key) {
 
 function getPhase(waveFibState, degree) {
   return waveFibState?.degrees?.[degree]?.phase ?? "UNKNOWN";
+}
+
+function labelDegree(degree) {
+  return String(degree || "wave").trim().toUpperCase();
 }
 
 function buildClusterSummary(waveFibState) {
@@ -53,14 +58,29 @@ function buildClusterSummary(waveFibState) {
   const minor1618 = getLevel(waveFibState, "minor", "e1618");
   const intermediate2618 = getLevel(waveFibState, "intermediate", "e2618");
 
+  const firstClusterValues = [primary1272, intermediate1618, microTop]
+    .map(validLevel)
+    .filter((x) => x !== null);
+
+  const firstClusterLo = firstClusterValues.length
+    ? Math.min(...firstClusterValues)
+    : null;
+
+  const firstClusterHi = firstClusterValues.length
+    ? Math.max(...firstClusterValues)
+    : null;
+
   const firstCluster = {
     label: "FIRST_MAJOR_REACTION_CLUSTER",
-    lo: round2(Math.min(...[primary1272, intermediate1618, microTop].map(Number).filter(Number.isFinite))),
-    hi: round2(Math.max(...[primary1272, intermediate1618, microTop].map(Number).filter(Number.isFinite))),
-    primary1272: round2(primary1272),
-    intermediate1618: round2(intermediate1618),
-    microTop: round2(microTop),
-    display: `745–750`,
+    lo: round2(firstClusterLo),
+    hi: round2(firstClusterHi),
+    primary1272: round2(validLevel(primary1272)),
+    intermediate1618: round2(validLevel(intermediate1618)),
+    microTop: round2(validLevel(microTop)),
+    display:
+      Number.isFinite(firstClusterLo) && Number.isFinite(firstClusterHi)
+        ? `${fmt(firstClusterLo)}–${fmt(firstClusterHi)}`
+        : "—",
     message: `First major W5 fib cluster was hit near 745–750: Primary 1.272 near ${fmt(
       primary1272
     )}, Intermediate 1.618 near ${fmt(intermediate1618)}, Micro W3 top candidate near ${fmt(
@@ -69,8 +89,8 @@ function buildClusterSummary(waveFibState) {
   };
 
   const nextClusterValues = [primary1618, minor1618, intermediate2618]
-  .map(validLevel)
-  .filter((x) => x !== null);
+    .map(validLevel)
+    .filter((x) => x !== null);
 
   const nextClusterLo = nextClusterValues.length
     ? Math.min(...nextClusterValues)
@@ -81,12 +101,12 @@ function buildClusterSummary(waveFibState) {
     : null;
 
   const nextCluster = {
-  label: "NEXT_MAJOR_W5_REACTION_CLUSTER",
-  lo: round2(nextClusterLo),
-  hi: round2(nextClusterHi),
-  primary1618: round2(validLevel(primary1618)),
-  minor1618: round2(validLevel(minor1618)),
-  intermediate2618: round2(validLevel(intermediate2618)),
+    label: "NEXT_MAJOR_W5_REACTION_CLUSTER",
+    lo: round2(nextClusterLo),
+    hi: round2(nextClusterHi),
+    primary1618: round2(validLevel(primary1618)),
+    minor1618: round2(validLevel(minor1618)),
+    intermediate2618: round2(validLevel(intermediate2618)),
     display:
       Number.isFinite(nextClusterLo) && Number.isFinite(nextClusterHi)
         ? `${fmt(nextClusterLo)}–${fmt(nextClusterHi)}`
@@ -111,13 +131,13 @@ function buildWaveStackSummary(waveFibState) {
   const minute = getPhase(waveFibState, "minute");
   const micro = getPhase(waveFibState, "micro");
 
- const higherW5Active =
-   primary === "IN_W5" &&
-   intermediate === "IN_W5";
+  const higherW5Active =
+    primary === "IN_W5" &&
+    intermediate === "IN_W5";
 
- const longTermBullish =
-   higherW5Active &&
-   (minor === "IN_W5" || minor === "IN_W4");
+  const longTermBullish =
+    higherW5Active &&
+    (minor === "IN_W5" || minor === "IN_W4");
 
   return {
     primary,
@@ -132,10 +152,10 @@ function buildWaveStackSummary(waveFibState) {
       minute
     ).replace("IN ", "")} | Micro ${text(micro).replace("IN ", "")}`,
     message: longTermBullish
-  ? minor === "IN_W4"
-    ? "Higher wave structure is still bullish because Primary and Intermediate are in W5 while Minor W4 is forming."
-    : "Long-term structure is still bullish because Primary / Intermediate / Minor / Minute are in W5."
-  : "Long-term wave stack is mixed or not fully aligned.",
+      ? minor === "IN_W4"
+        ? "Higher wave structure is still bullish because Primary and Intermediate are in W5 while Minor W4 is forming."
+        : "Long-term structure is still bullish because Primary / Intermediate / Minor / Minute are in W5."
+      : "Long-term wave stack is mixed or not fully aligned.",
   };
 }
 
@@ -282,11 +302,11 @@ function buildActiveW4PullbackSummary({ waveFibState, waveStack, clusters }) {
   const minuteMissing = waveFibState?.degrees?.minute?.phase === "UNKNOWN";
   const microMissing = waveFibState?.degrees?.micro?.phase === "UNKNOWN";
 
-  const labelDegree = String(activeDegree).toUpperCase();
+  const degreeLabel = labelDegree(activeDegree);
 
   const summary =
     `${waveStack.message}\n\n` +
-    `${labelDegree} W4 pullback is active after W3 completed${
+    `${degreeLabel} W4 pullback is active after W3 completed${
       priorHigh ? ` near ${fmt(priorHigh)}` : ""
     }.\n\n` +
     (minuteMissing || microMissing
@@ -296,7 +316,7 @@ function buildActiveW4PullbackSummary({ waveFibState, waveStack, clusters }) {
     `This is not a clean long yet. Wait for reclaim and lower-timeframe confirmation.`;
 
   return {
-    headline: `${labelDegree} W4 PULLBACK — WAIT FOR RECLAIM`,
+    headline: `${degreeLabel} W4 PULLBACK — WAIT FOR RECLAIM`,
     subheadline:
       "Higher wave structure is still active, but the current W4 pullback needs reclaim confirmation.",
     bias: "BULLISH_BUT_PULLING_BACK",
@@ -316,7 +336,7 @@ function buildActiveW4PullbackSummary({ waveFibState, waveStack, clusters }) {
 
     reads: {
       structureRead: waveStack.message,
-      activePullbackRead: `${labelDegree} W4 pullback is active after W3 completed${
+      activePullbackRead: `${degreeLabel} W4 pullback is active after W3 completed${
         priorHigh ? ` near ${fmt(priorHigh)}` : ""
       }.`,
       lowerWaveRead:
@@ -337,6 +357,96 @@ function buildActiveW4PullbackSummary({ waveFibState, waveStack, clusters }) {
         ? "LOWER_EXECUTION_WAVES_MISSING"
         : "LOWER_EXECUTION_WAVES_AVAILABLE",
       "WAIT_FOR_RECLAIM",
+      activeSetup,
+    ],
+  };
+}
+
+function buildActiveW5ExtensionSummary({ waveFibState, waveStack, clusters }) {
+  const activeDegree = waveFibState?.activeTradingDegree || "unknown";
+  const activeSetup = waveFibState?.activeSetup || "NO_SETUP";
+  const activeBlock = waveFibState?.degrees?.[activeDegree] || {};
+
+  const degreeLabel = labelDegree(activeDegree);
+
+  const extensionLevels = activeBlock?.fibProjection?.levels || {};
+  const e100 = validLevel(extensionLevels?.e100);
+  const e1272 = validLevel(extensionLevels?.e1272);
+  const e1618 = validLevel(extensionLevels?.e1618);
+
+  const microMissing = waveFibState?.degrees?.micro?.phase === "UNKNOWN";
+
+  const summary =
+    `${waveStack.message}\n\n` +
+    `${degreeLabel} W5 extension is active.\n\n` +
+    `Continuation is possible, but this is not a chase entry.\n\n` +
+    (e100 || e1272 || e1618
+      ? `Key ${degreeLabel} W5 extension levels: 1.000 near ${fmt(e100)}, 1.272 near ${fmt(
+          e1272
+        )}, 1.618 near ${fmt(e1618)}.\n\n`
+      : "") +
+    (microMissing
+      ? `Micro execution waves are not marked yet, so keep this as WATCH only.\n\n`
+      : "") +
+    `${clusters.nextCluster.message}\n\n` +
+    `Watch for controlled pullback, reclaim, or continuation trigger confirmation. Do not chase extended price.`;
+
+  return {
+    headline: `${degreeLabel} W5 EXTENSION ACTIVE — WATCH CONTINUATION`,
+    subheadline:
+      "W5 extension is active. Continuation is possible, but this is not a chase entry.",
+    bias: "BULLISH_CONTINUATION",
+    action: "WATCH",
+    direction: "LONG",
+    chaseAllowed: false,
+    severity: "info",
+
+    topCandidate: null,
+    hardInvalidation: null,
+    reclaimLadder: null,
+
+    firstCluster: clusters.firstCluster,
+    nextCluster: clusters.nextCluster,
+
+    activeExtension: {
+      degree: activeDegree,
+      setup: activeSetup,
+      e100: round2(e100),
+      e1272: round2(e1272),
+      e1618: round2(e1618),
+    },
+
+    abc: null,
+
+    reads: {
+      structureRead: waveStack.message,
+      activeExtensionRead: `${degreeLabel} W5 extension is active.`,
+      continuationRead:
+        "Continuation is possible, but this is not a chase entry.",
+      lowerWaveRead: microMissing
+        ? "Micro execution waves are not marked yet. Keep this as WATCH only."
+        : "Lower execution waves are available.",
+      nextClusterRead: clusters.nextCluster.message,
+      actionRead:
+        "Watch for controlled pullback, reclaim, or continuation trigger confirmation. Do not chase extended price.",
+    },
+
+    summary,
+
+    needs: [
+      "NO_CHASE_LONG",
+      "CONTROLLED_PULLBACK_OR_RECLAIM",
+      "ENGINE3_REACTION_CONFIRMATION",
+      "ENGINE4_PARTICIPATION_CONFIRMATION",
+      "ENGINE15_READY_OR_PAPER_READY",
+    ],
+
+    reasonCodes: [
+      "TRADE_CONTEXT_SUMMARY_BUILT",
+      "ACTIVE_W5_EXTENSION",
+      "BULLISH_CONTINUATION_WATCH",
+      microMissing ? "MICRO_EXECUTION_WAVES_MISSING" : "MICRO_EXECUTION_WAVES_AVAILABLE",
+      "NO_CHASE_LONG",
       activeSetup,
     ],
   };
@@ -411,10 +521,27 @@ export function buildTradeContextSummary({ waveFibState = null } = {}) {
     ? waveFibState?.degrees?.[activeDegree]?.phase
     : null;
 
+  const activeSetup = String(waveFibState?.activeSetup || "").toUpperCase();
+
+  const isW5Extension =
+    activeSetup.includes("W5_EXTENSION") ||
+    activeSetup.includes("W5_CONTINUATION");
+
   if (activePhase === "IN_W4") {
     return {
       ok: true,
       ...buildActiveW4PullbackSummary({
+        waveFibState,
+        waveStack,
+        clusters,
+      }),
+    };
+  }
+
+  if (isW5Extension) {
+    return {
+      ok: true,
+      ...buildActiveW5ExtensionSummary({
         waveFibState,
         waveStack,
         clusters,
