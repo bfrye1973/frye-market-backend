@@ -700,10 +700,18 @@ def main() -> None:
     spy_1h_test = fetch_polygon_1h("SPY", key, lookback_days=FETCH_DAYS_4H)
     spy_4h_from_1h = build_4h_from_1h(spy_1h_test)
 
-    # --- Active 4H structure source ---
-    if len(spy_4h_from_1h) >= STRUCTURE_MIN_1H_BUILT_BARS:
+     # --- Active 4H structure source ---
+    # Backend-2 1H is the confirmed live SPY source near real chart price.
+    # Polygon 60m/240m remains debug/reference only because it produced stale/bad SPY pricing.
+    backend2_1h_bars = fetch_backend2_10m("SPY", tf="1h", limit=B2_LIMIT, lookback_days=FETCH_DAYS_4H)
+    backend2_1h_4h = build_4h_from_1h(backend2_1h_bars)
+
+    if len(backend2_1h_4h) >= STRUCTURE_MIN_1H_BUILT_BARS:
+        spy_4h_structure = backend2_1h_4h
+        structure_source_4h = "backend2_1h_grouped_4h_structure"
+    elif len(spy_4h_from_1h) >= STRUCTURE_MIN_1H_BUILT_BARS:
         spy_4h_structure = spy_4h_from_1h
-        structure_source_4h = "polygon_60m_grouped_4h_structure"
+        structure_source_4h = "polygon_60m_grouped_4h_structure_fallback"
     else:
         spy_4h_structure = spy_4h_native
         structure_source_4h = native_source_used
@@ -777,8 +785,14 @@ def main() -> None:
     psi_1h = _psi_from_bars(spy_4h_from_1h)
     squeeze_psi_4h_from_1h = float(clamp(psi_1h, 0.0, 100.0)) if isinstance(psi_1h, (int, float)) else None
 
-    # Raw production PSI prefers 1H-built 4H because it is closer to the chart source.
-    if squeeze_psi_4h_from_1h is not None:
+     # Raw production PSI should match Backend-2 when Backend-2 is the active structure source.
+    psi_backend2 = _psi_from_bars(backend2_1h_4h)
+    squeeze_psi_4h_backend2 = float(clamp(psi_backend2, 0.0, 100.0)) if isinstance(psi_backend2, (int, float)) else None
+
+    if squeeze_psi_4h_backend2 is not None and structure_source_4h == "backend2_1h_grouped_4h_structure":
+        squeeze_psi_4h_raw = squeeze_psi_4h_backend2
+        squeeze_source_4h = "backend2_1h_grouped_4h"
+    elif squeeze_psi_4h_from_1h is not None:
         squeeze_psi_4h_raw = squeeze_psi_4h_from_1h
         squeeze_source_4h = "polygon_60m_grouped_4h"
     else:
@@ -951,6 +965,9 @@ def main() -> None:
         "from_1h_4h_bars": int(len(spy_4h_from_1h)),
         "polygon_1h_bars": int(len(spy_1h_test)),
         "source_used_4h_from_1h": "polygon_60m_grouped_4h",
+        "backend2_1h_bars": int(len(backend2_1h_bars)),
+        "backend2_1h_4h_bars": int(len(backend2_1h_4h)),
+        "squeeze_psi_4h_pct_backend2": round(float(squeeze_psi_4h_backend2), 2) if squeeze_psi_4h_backend2 is not None else None,
 
         "liquidity_4h": round(float(liquidity_4h), 2),
         "volatility_4h_pct": round(float(vol_pct), 3),
@@ -986,7 +1003,7 @@ def main() -> None:
     }
 
     out = {
-        "version": "r4h-v20-1h-built-structure-active-squeeze",
+        "version": "r4h-v21-backend2-1h-structure-active-squeeze",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
