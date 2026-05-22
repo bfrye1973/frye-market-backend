@@ -599,13 +599,13 @@ def build_active_squeeze_4h(
 
     if expansion_points >= 6:
         state = "VIOLENT_EXPANSION"
-        active = min(raw, 28.0)
+        active = min(raw, 65.0)
     elif expansion_points >= 4:
         state = "CONFIRMED_EXPANSION"
-        active = min(raw, 45.0)
+        active = min(raw, 88.0)
     elif expansion_points >= 3:
         state = "EARLY_RELEASE"
-        active = min(raw, 68.0)
+        active = min(raw, 92.0)
     else:
         state = "RAW_PSI_COMPRESSION_MEMORY"
         active = raw
