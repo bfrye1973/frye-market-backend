@@ -5,18 +5,15 @@ from __future__ import annotations
 
 """
 Ferrari Dashboard — make_dashboard_4h.py
-R19.0 — CLEAN 4H MARKET METER + 1H-BUILT 4H LUX PSI
+R20.0 — 1H-BUILT 4H STRUCTURE SOURCE + ACTIVE SQUEEZE
 
 LOCKED INTENT:
-- Native Polygon 240m remains the structural 4H source for EMA, SMI, volatility, liquidity, and scoring context.
-- 4H squeeze PSI uses TradingView-aligned 1H-built 4H candles when available.
-- Native 240m PSI remains available as a debug/reference field.
-- 10m-built 4H PSI remains available as a legacy/debug comparison field.
-- Keep existing output schema intact while adding clear source fields.
-- No persistence cache. No EMA override. No fake squeeze inflation.
+- Use 1H-built 4H candles as the active 4H structure source when at least 60 bars exist.
+- Active structure source drives EMA10/20/50, SMI, volatility, liquidity, score, state, and EMA booleans.
+- Native Polygon 240m remains debug/reference fallback only.
+- Preserve raw Lux PSI, but use an active/blended dashboard squeeze value when expansion is confirmed.
+- Keep existing output schema intact and add debug fields for source/squeeze validation.
 """
-
-
 
 import argparse
 import json
@@ -75,6 +72,7 @@ W_RISKON = 0.05
 
 PSI_WIN_4H = int(os.environ.get("PSI_WIN_4H", "STATEFUL")) if os.environ.get("PSI_WIN_4H", "").isdigit() else 0
 FETCH_DAYS_4H = int(os.environ.get("FETCH_DAYS_4H", "720"))
+STRUCTURE_MIN_1H_BUILT_BARS = int(os.environ.get("STRUCTURE_MIN_1H_BUILT_BARS", "60"))
 
 
 def now_utc_iso() -> str:
@@ -95,10 +93,19 @@ def pct(a: float, b: float) -> float:
         return 0.0
 
 
+def avg_last(vals: List[float], n: int) -> Optional[float]:
+    if not vals:
+        return None
+    chunk = vals[-int(n):]
+    if not chunk:
+        return None
+    return float(sum(chunk) / len(chunk))
+
+
 def fetch_json(url: str, timeout: int = 30) -> Any:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "make-dashboard/4h/r19", "Cache-Control": "no-store"},
+        headers={"User-Agent": "make-dashboard/4h/r20", "Cache-Control": "no-store"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -140,11 +147,9 @@ def _fetch_polygon_range(sym: str, key: str, lookback_days: int, url_template: s
 def fetch_polygon_4h(sym: str, key: str, lookback_days: int, keep_live: bool = False) -> List[dict]:
     out = _fetch_polygon_range(sym, key, lookback_days, POLY_4H_URL)
 
-    # Native 240m is used as completed structural 4H truth by default.
-    # The live/more responsive squeeze is handled by 1H-built 4H candles below.
     if out and not keep_live:
         now_ts = int(time.time())
-        last = out[-1]["time"]
+        last = int(out[-1]["time"])
         if (last // (4 * 3600)) == (now_ts // (4 * 3600)):
             out = out[:-1]
 
@@ -152,7 +157,6 @@ def fetch_polygon_4h(sym: str, key: str, lookback_days: int, keep_live: bool = F
 
 
 def fetch_polygon_1h(sym: str, key: str, lookback_days: int) -> List[dict]:
-    # Keep latest 1H bars available. This source is used for TradingView-aligned 4H squeeze.
     return _fetch_polygon_range(sym, key, lookback_days, POLY_1H_URL)
 
 
@@ -248,9 +252,7 @@ def fetch_backend2_10m(sym: str, tf: str = "10m", limit: int = 1200, lookback_da
 def build_4h_from_1h(bars1h: List[dict]) -> List[dict]:
     """
     Build synthetic 4H candles from Polygon 1H candles.
-
-    This is now the preferred source for 4H Lux PSI because it matched TradingView in testing.
-    It does NOT replace the native 240m source for EMA/SMI/volatility/liquidity structure.
+    Current grouping is UTC buckets: 00:00/04:00/08:00/12:00/16:00/20:00 UTC.
     """
     if not bars1h:
         return []
@@ -266,7 +268,6 @@ def build_4h_from_1h(bars1h: List[dict]) -> List[dict]:
     for k in sorted(buckets.keys()):
         grp = buckets[k]
         grp.sort(key=lambda x: x["time"])
-
         out.append(
             {
                 "time": int(grp[0]["time"]),
@@ -311,7 +312,7 @@ def build_4h_from_10m(bars10: List[dict], keep_live: bool = False) -> List[dict]
 
     if out and not keep_live:
         now_ts = int(time.time())
-        last = out[-1]["time"]
+        last = int(out[-1]["time"])
         if (last // (4 * 3600)) == (now_ts // (4 * 3600)):
             out = out[:-1]
 
@@ -341,17 +342,6 @@ def tr_series(H: List[float], L: List[float], C: List[float]) -> List[float]:
 
 
 def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20) -> Optional[float]:
-    """
-    LuxAlgo Squeeze Index logic.
-
-    Pine source:
-      var max = 0.
-      var min = 0.
-      max := nz(math.max(src, max - (max - src) / conv), src)
-      min := nz(math.min(src, min + (src - min) / conv), src)
-      diff = math.log(max - min)
-      psi = -50 * ta.correlation(diff, bar_index, length) + 50
-    """
     if not closes or len(closes) < max(5, length + 2):
         return None
 
@@ -363,12 +353,10 @@ def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20) -> O
     for src in map(float, closes):
         mx = max(src, mx - (mx - src) / conv)
         mn = min(src, mn + (src - mn) / conv)
-
         span = max(mx - mn, eps)
         diffs.append(math.log(span))
 
     win = diffs[-length:]
-
     if len(win) < length:
         return None
 
@@ -383,7 +371,6 @@ def lux_psi_stateful(closes: List[float], conv: int = 50, length: int = 20) -> O
 
     r = (num / den) if den != 0 else 0.0
     psi = -50.0 * r + 50.0
-
     return float(clamp(psi, 0.0, 100.0))
 
 
@@ -454,33 +441,35 @@ def apply_structure_soft_cap(
     above50: bool,
     above200: bool,
 ) -> float:
-    cap = 100.0
-
-    # Strong bridge trend.
     if above10 and above20 and above50:
-        cap = 78.0
+        return min(score, 80.0)
+    if (not above10) and above20 and above50:
+        return min(score, 64.0)
+    if above10 and above20 and (not above50):
+        return min(score, 58.0)
+    if above10 and (not above20):
+        return min(score, 52.0)
+    if (not above10) and (not above20) and above50:
+        return min(score, 50.0)
+    if (not above10) and (not above20) and (not above50):
+        return min(score, 42.0)
+    return min(score, 100.0)
 
-    # Constructive 4H pullback: below 10, but still holding 20/50.
-    elif (not above10) and above20 and above50:
-        cap = 64.0
 
-    # Still above 10/20 but below 50 = recovering, not full trend.
-    elif above10 and above20 and (not above50):
-        cap = 58.0
-
-    # Mixed / weak reclaim.
-    elif above10 and (not above20):
-        cap = 52.0
-
-    # Losing 10/20 but still above 50 = weakening bridge.
-    elif (not above10) and (not above20) and above50:
-        cap = 50.0
-
-    # Below 10/20/50 = bridge damage.
-    elif (not above10) and (not above20) and (not above50):
-        cap = 42.0
-
-    return min(score, cap)
+def apply_structure_hard_band(score: float, above10: bool, above20: bool, above50: bool) -> Tuple[float, str]:
+    if above10 and above20 and above50:
+        return clamp(score, 65.0, 80.0), "ABOVE_10_20_50"
+    if (not above10) and above20 and above50:
+        return clamp(score, 52.0, 64.0), "BELOW_10_ABOVE_20_50"
+    if (not above10) and (not above20) and above50:
+        return clamp(score, 45.0, 50.0), "BELOW_10_20_ABOVE_50"
+    if (not above10) and (not above20) and (not above50):
+        return clamp(score, 30.0, 42.0), "BELOW_10_20_50"
+    if above10 and above20 and (not above50):
+        return clamp(score, 50.0, 58.0), "ABOVE_10_20_BELOW_50"
+    if above10 and (not above20):
+        return clamp(score, 45.0, 52.0), "ABOVE_10_BELOW_20"
+    return clamp(score, 0.0, 100.0), "MIXED"
 
 
 def compute_overall_weighted(
@@ -519,14 +508,7 @@ def compute_overall_weighted(
     )
 
     score = clamp(score_raw, 0.0, 100.0)
-
-    score = apply_structure_soft_cap(
-        score=score,
-        above10=above10,
-        above20=above20,
-        above50=above50,
-        above200=above200,
-    )
+    score = apply_structure_soft_cap(score, above10, above20, above50, above200)
 
     state = "bull" if (ema_sign > 0 and score >= 60.0) else ("bear" if (ema_sign < 0 and score < 60.0) else "neutral")
 
@@ -551,7 +533,101 @@ def _psi_from_bars(bars: List[dict]) -> Optional[float]:
     return lux_psi_stateful(closes, conv=50, length=20)
 
 
-def main():
+def build_active_squeeze_4h(
+    raw_psi: float,
+    O: List[float],
+    H: List[float],
+    L: List[float],
+    C: List[float],
+    e10: float,
+    e20: float,
+    e50: float,
+    smi_val: float,
+    sig_val: float,
+) -> Tuple[float, str, dict]:
+    raw = clamp(raw_psi, 0.0, 100.0)
+
+    if len(C) < 25:
+        return raw, "RAW_ONLY_INSUFFICIENT_BARS", {"rawPsi": round(raw, 2)}
+
+    price = float(C[-1])
+    rng = [max(float(H[i]) - float(L[i]), 0.0) for i in range(len(C))]
+    trs = tr_series(H, L, C)
+
+    range3 = avg_last(rng, 3) or 0.0
+    range20 = avg_last(rng, 20) or 0.0
+    atr3 = avg_last(trs, 3) or 0.0
+    atr20 = avg_last(trs, 20) or 0.0
+
+    range_ratio = range3 / range20 if range20 > 0 else 1.0
+    atr_ratio = atr3 / atr20 if atr20 > 0 else 1.0
+
+    last_range = max(float(H[-1]) - float(L[-1]), 1e-9)
+    close_location = (float(C[-1]) - float(L[-1])) / last_range
+
+    ema_sep_10_20_pct = abs(float(e10) - float(e20)) / price * 100.0 if price > 0 else 0.0
+    ema_sep_20_50_pct = abs(float(e20) - float(e50)) / price * 100.0 if price > 0 else 0.0
+
+    bull_stack = price > e10 and e10 >= e20 and e20 >= e50
+    bear_stack = price < e10 and e10 <= e20 and e20 <= e50
+    close_strong = close_location >= 0.62
+    close_weak = close_location <= 0.38
+    smi_bull = smi_val >= sig_val or smi_val > 0
+    smi_bear = smi_val <= sig_val or smi_val < 0
+
+    expansion_points = 0
+    reasons: List[str] = []
+
+    if bull_stack or bear_stack:
+        expansion_points += 2
+        reasons.append("EMA_STACK_EXPANSION")
+    if range_ratio >= 1.15:
+        expansion_points += 1
+        reasons.append("RANGE_EXPANDING")
+    if atr_ratio >= 1.10:
+        expansion_points += 1
+        reasons.append("ATR_EXPANDING")
+    if ema_sep_10_20_pct >= 0.12 or ema_sep_20_50_pct >= 0.20:
+        expansion_points += 1
+        reasons.append("EMA_SEPARATION_EXPANDING")
+    if (bull_stack and close_strong) or (bear_stack and close_weak):
+        expansion_points += 1
+        reasons.append("STRONG_CLOSE_LOCATION")
+    if (bull_stack and smi_bull) or (bear_stack and smi_bear):
+        expansion_points += 1
+        reasons.append("SMI_CONFIRMS_EXPANSION")
+
+    if expansion_points >= 6:
+        state = "VIOLENT_EXPANSION"
+        active = min(raw, 28.0)
+    elif expansion_points >= 4:
+        state = "CONFIRMED_EXPANSION"
+        active = min(raw, 45.0)
+    elif expansion_points >= 3:
+        state = "EARLY_RELEASE"
+        active = min(raw, 68.0)
+    else:
+        state = "RAW_PSI_COMPRESSION_MEMORY"
+        active = raw
+
+    debug = {
+        "rawPsi": round(raw, 2),
+        "activePsi": round(float(active), 2),
+        "expansionPoints": int(expansion_points),
+        "reasons": reasons,
+        "rangeRatio3v20": round(float(range_ratio), 3),
+        "atrRatio3v20": round(float(atr_ratio), 3),
+        "closeLocation": round(float(close_location), 3),
+        "emaSep10_20Pct": round(float(ema_sep_10_20_pct), 4),
+        "emaSep20_50Pct": round(float(ema_sep_20_50_pct), 4),
+        "bullStack": bool(bull_stack),
+        "bearStack": bool(bear_stack),
+    }
+
+    return float(clamp(active, 0.0, 100.0)), state, debug
+
+
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True, help="data/outlook_source_4h.json")
     ap.add_argument("--out", required=True, help="data/outlook_4h.json")
@@ -569,7 +645,6 @@ def main():
     cards = src.get("sectorCards") or []
 
     NH = NL = UP = DN = 0.0
-
     for c in cards:
         NH += float(c.get("nh", 0))
         NL += float(c.get("nl", 0))
@@ -598,45 +673,52 @@ def main():
 
     risk_on_4h = round(pct(ro_score, ro_den), 2) if ro_den > 0 else 50.0
 
-    # --- STRUCTURAL 4H SOURCE: native Polygon 240m completed candles ---
+    # --- Native/reference 4H source ---
     spy_4h_native = fetch_polygon_4h("SPY", key, lookback_days=FETCH_DAYS_4H, keep_live=True)
-    source_used = "polygon_240m"
+    native_source_used = "polygon_240m"
 
-    # Fallback only if native 240m truly fails.
     if len(spy_4h_native) < 25:
         print("[warn] insufficient Polygon 240m bars; falling back to Backend-2 10m aggregation", flush=True)
         spy_10m = fetch_backend2_10m("SPY", tf=B2_TF, limit=B2_LIMIT, lookback_days=FETCH_DAYS_4H)
-        spy_4h_native = build_4h_from_10m(spy_10m, keep_live=False)
-        source_used = "backend2_10m_completed"
+        spy_4h_native = build_4h_from_10m(spy_10m, keep_live=True)
+        native_source_used = "backend2_10m_grouped_4h"
 
     if len(spy_4h_native) < 25:
         print("[warn] insufficient Backend-2 10m bars; falling back to Polygon 10m aggregation", flush=True)
         poly_10m = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
-        spy_4h_native = build_4h_from_10m(poly_10m, keep_live=False)
-        source_used = "polygon_10m_completed"
+        spy_4h_native = build_4h_from_10m(poly_10m, keep_live=True)
+        native_source_used = "polygon_10m_grouped_4h"
 
     if len(spy_4h_native) < 25:
         print("[fatal] insufficient SPY 4H bars even after all fallbacks", file=sys.stderr)
         sys.exit(2)
 
-    # --- DEBUG/PSI SOURCES ---
+    # --- Debug / alternate 4H sources ---
     spy_10m_test = fetch_polygon_10m("SPY", key, lookback_days=FETCH_DAYS_4H)
     spy_4h_from_10m = build_4h_from_10m(spy_10m_test, keep_live=True)
 
     spy_1h_test = fetch_polygon_1h("SPY", key, lookback_days=FETCH_DAYS_4H)
     spy_4h_from_1h = build_4h_from_1h(spy_1h_test)
 
-   # Responsive / TradingView-aligned 4H structure source.
-   # Native Polygon 240m is too misaligned for dashboard bridge scoring.
-   # Use 1H-built 4H candles for EMA, SMI, volatility, liquidity, and scoring.
-   spy_4h_structure = spy_4h_from_1h if len(spy_4h_from_1h) >= 25 else spy_4h_native
-   source_used = "polygon_60m_grouped_4h_structure" if len(spy_4h_from_1h) >= 25 else source_used
+    # --- Active 4H structure source ---
+    if len(spy_4h_from_1h) >= STRUCTURE_MIN_1H_BUILT_BARS:
+        spy_4h_structure = spy_4h_from_1h
+        structure_source_4h = "polygon_60m_grouped_4h_structure"
+    else:
+        spy_4h_structure = spy_4h_native
+        structure_source_4h = native_source_used
 
-   O = [b["open"] for b in spy_4h_structure]
-   H = [b["high"] for b in spy_4h_structure]
-   L = [b["low"] for b in spy_4h_structure]
-   C = [b["close"] for b in spy_4h_structure]
-   V = [b["volume"] for b in spy_4h_structure]
+    source_used = structure_source_4h
+
+    O = [float(b["open"]) for b in spy_4h_structure]
+    H = [float(b["high"]) for b in spy_4h_structure]
+    L = [float(b["low"]) for b in spy_4h_structure]
+    C = [float(b["close"]) for b in spy_4h_structure]
+    V = [float(b["volume"]) for b in spy_4h_structure]
+
+    if len(C) < 25:
+        print("[fatal] insufficient active SPY 4H structure bars", file=sys.stderr)
+        sys.exit(2)
 
     e10 = ema_series(C, 10)[-1]
     e20 = ema_series(C, 20)[-1]
@@ -649,17 +731,16 @@ def main():
     above50 = price > e50
     above200 = (price > e200) if e200 is not None else False
 
-    close_dist_pct = 0.0 if e10 == 0 else 100.0 * (float(C[-1]) - e10) / e10
-    body_mid = (float(O[-1]) + float(C[-1])) / 2.0
+    close_dist_pct = 0.0 if e10 == 0 else 100.0 * (price - e10) / e10
+    body_mid = (float(O[-1]) + price) / 2.0
     body_mid_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_mid - e10) / e10
-    body_top = max(float(O[-1]), float(C[-1]))
+    body_top = max(float(O[-1]), price)
     body_top_dist_pct = 0.0 if e10 == 0 else 100.0 * (body_top - e10) / e10
 
     RECLAIM_TOL_PCT = float(os.environ.get("EMA10_RECLAIM_TOL_PCT", "0.30"))
     wick_reclaimed = float(H[-1]) > float(e10)
 
     ema_dist_pct = body_mid_dist_pct
-
     if wick_reclaimed and close_dist_pct >= -RECLAIM_TOL_PCT:
         ema_dist_pct = max(body_mid_dist_pct, -0.10)
 
@@ -686,7 +767,7 @@ def main():
         elif smi_val < sig_val:
             smi_bonus = -SMI_BONUS_MAX
 
-    # --- PSI CALCULATIONS, KEPT SEPARATE ---
+    # --- PSI calculations, kept separate ---
     psi_native = _psi_from_bars(spy_4h_native)
     squeeze_psi_4h_native = float(clamp(psi_native, 0.0, 100.0)) if isinstance(psi_native, (int, float)) else 50.0
 
@@ -696,15 +777,27 @@ def main():
     psi_1h = _psi_from_bars(spy_4h_from_1h)
     squeeze_psi_4h_from_1h = float(clamp(psi_1h, 0.0, 100.0)) if isinstance(psi_1h, (int, float)) else None
 
-    # Production 4H squeeze:
-    # Prefer 1H-built 4H PSI because it matched TradingView during testing.
-    # Fall back to native 240m PSI if 1H data is unavailable.
+    # Raw production PSI prefers 1H-built 4H because it is closer to the chart source.
     if squeeze_psi_4h_from_1h is not None:
-        squeeze_psi_4h = squeeze_psi_4h_from_1h
+        squeeze_psi_4h_raw = squeeze_psi_4h_from_1h
         squeeze_source_4h = "polygon_60m_grouped_4h"
     else:
-        squeeze_psi_4h = squeeze_psi_4h_native
-        squeeze_source_4h = source_used
+        squeeze_psi_4h_raw = squeeze_psi_4h_native
+        squeeze_source_4h = native_source_used
+
+    # Active dashboard squeeze: raw Lux PSI plus fast expansion override.
+    squeeze_psi_4h, squeeze_expansion_state_4h, squeeze_expansion_debug_4h = build_active_squeeze_4h(
+        raw_psi=squeeze_psi_4h_raw,
+        O=O,
+        H=H,
+        L=L,
+        C=C,
+        e10=float(e10),
+        e20=float(e20),
+        e50=float(e50),
+        smi_val=float(smi_val),
+        sig_val=float(sig_val),
+    )
 
     squeeze_psi_4h = float(clamp(squeeze_psi_4h, 0.0, 100.0))
     squeeze_exp_4h = clamp(100.0 - squeeze_psi_4h, 0.0, 100.0)
@@ -747,23 +840,16 @@ def main():
         above200=bool(above200),
     )
 
-    # --- 4H BRIDGE VALUATION ADJUSTMENT ---
-    # Goal:
-    # - 4H is a bridge valuation, not a scalp trigger.
-    # - Below 10 EMA = timing caution.
-    # - Above 20/50 EMA = larger structure still alive.
-    # - Do NOT crush the score into the 30s if price is only under EMA10.
+    # --- 4H bridge valuation adjustment ---
     timing_penalty = 0.0
-    timing_reasons = []
+    timing_reasons: List[str] = []
 
     ema10_distance_abs = abs(float(close_dist_pct))
 
-    # Near EMA10 is a decision zone, but not automatically bearish.
     if ema10_distance_abs <= 0.30:
         timing_penalty += 3.0
         timing_reasons.append("NEAR_4H_EMA10_DECISION_ZONE")
 
-    # Below EMA10 is caution, but above 20/50 means bridge structure is still alive.
     if close_dist_pct < 0:
         if above20 and above50:
             timing_penalty += 3.0
@@ -772,7 +858,6 @@ def main():
             timing_penalty += 6.0
             timing_reasons.append("PRICE_BELOW_4H_EMA10")
 
-    # SMI cooling matters, but should not destroy a valid above-20/50 bridge.
     if smi_series and sig_series and smi_val < sig_val:
         if above20 and above50:
             timing_penalty += 3.0
@@ -781,9 +866,6 @@ def main():
             timing_penalty += 6.0
             timing_reasons.append("SMI_4H_MOMENTUM_COOLING")
 
-    # Final safety cap:
-    # If still above 20/50, max penalty is 7.
-    # If below 20 or 50, max penalty is 14.
     if above20 and above50:
         timing_penalty = min(timing_penalty, 7.0)
     else:
@@ -791,30 +873,26 @@ def main():
 
     score = clamp(float(score) - timing_penalty, 0.0, 100.0)
 
-    # --- 4H BRIDGE STRUCTURE FLOORS ---
-    # The 4H bridge should not collapse just because squeeze is high or SMI is cooling.
-    # EMA structure is the main bridge truth.
-    if above10 and above20 and above50:
-        score = max(score, 58.0)
-        timing_reasons.append("BRIDGE_FLOOR_ABOVE_10_20_50")
+    # --- Hard structural bridge band ---
+    score, bridge_structure_band_4h = apply_structure_hard_band(
+        score=float(score),
+        above10=bool(above10),
+        above20=bool(above20),
+        above50=bool(above50),
+    )
+    timing_reasons.append(f"BRIDGE_BAND_{bridge_structure_band_4h}")
 
-    elif (not above10) and above20 and above50:
-        score = max(score, 52.0)
-        timing_reasons.append("BRIDGE_FLOOR_ABOVE_20_50_BELOW_10")
-
-    elif (not above10) and (not above20) and above50:
-        score = max(score, 45.0)
-        timing_reasons.append("BRIDGE_FLOOR_ABOVE_50_BELOW_10_20")
-    if score >= 60.0 and ema_sign > 0:
+    if score >= 65.0 and above10 and above20 and above50:
         state = "bull"
-    elif score < 49.0 and ema_sign < 0:
+    elif score <= 42.0 and (not above10) and (not above20) and (not above50):
         state = "bear"
     else:
         state = "neutral"
 
     comps["timingPenalty"] = round(-timing_penalty, 2)
     comps["timingReasons"] = timing_reasons
-    
+    comps["bridgeStructureBand"] = bridge_structure_band_4h
+
     updated_utc = now_utc_iso()
 
     metrics = {
@@ -842,18 +920,27 @@ def main():
         "price_above_ema50_4h": bool(above50),
         "price_above_ema200_4h": bool(above200) if e200 is not None else None,
 
+        # Added aliases for easier debugging / Engine 25 reads.
+        "trend_price_4h": round(float(price), 4),
+        "above10_4h": bool(above10),
+        "above20_4h": bool(above20),
+        "above50_4h": bool(above50),
+
         "smi_4h": round(float(smi_val), 4),
         "smi_signal_4h": round(float(sig_val), 4),
         "smi_4h_pct": round(float(smi_pct), 2),
         "smi_bonus_pts": int(smi_bonus),
 
-        # Main/public squeeze fields use the production 4H squeeze source.
+        # Main/public squeeze fields use the active dashboard squeeze.
         "squeeze_psi_4h_pct": round(float(squeeze_psi_4h), 2),
         "squeeze_expansion_pct": round(float(squeeze_exp_4h), 2),
         "squeeze_pct": round(float(squeeze_psi_4h), 2),
         "squeeze_psi_4h": round(float(squeeze_psi_4h), 2),
         "squeeze_4h_pct": round(float(squeeze_exp_4h), 2),
         "squeeze_source_4h": squeeze_source_4h,
+        "squeeze_psi_4h_pct_raw": round(float(squeeze_psi_4h_raw), 2),
+        "squeeze_expansion_state_4h": squeeze_expansion_state_4h,
+        "squeeze_expansion_debug_4h": squeeze_expansion_debug_4h,
 
         # Debug/reference fields keep every source separated.
         "squeeze_psi_4h_pct_native": round(float(squeeze_psi_4h_native), 2),
@@ -873,10 +960,14 @@ def main():
         "riskOn_4h_pct": float(risk_on_4h),
 
         "psi_window_4h_bars": int(PSI_WIN_4H),
-        "lux_psi_mode_4h": "stateful",
+        "lux_psi_mode_4h": "stateful_raw_plus_active_expansion_blend",
         "fetch_days_4h": int(FETCH_DAYS_4H),
         "source_used_4h": source_used,
-        "completed_4h_bars": int(len(spy_4h_structure)
+        "native_source_used_4h": native_source_used,
+        "structure_source_4h": structure_source_4h,
+        "uses_live_4h_bar": True,
+        "bridge_structure_band_4h": bridge_structure_band_4h,
+        "completed_4h_bars": int(len(spy_4h_structure)),
     }
 
     fourHour = {
@@ -895,19 +986,28 @@ def main():
     }
 
     out = {
-        "version": "r4h-v19-clean-1h-built-psi",
+        "version": "r4h-v20-1h-built-structure-active-squeeze",
         "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "updated_at_utc": updated_utc,
         "metrics": metrics,
         "fourHour": fourHour,
         "sectorCards": cards,
+        "engineLights": {
+            "4h": {
+                "score": round(float(score), 2),
+                "state": state,
+                "lastChanged": updated_utc,
+            }
+        },
         "meta": {
             "cards_fresh": True,
             "after_hours": False,
-            "psi_mode_4h": "stateful_lux_1h_built_preferred",
+            "psi_mode_4h": "stateful_lux_raw_plus_active_expansion_blend",
             "fetch_days_4h": int(FETCH_DAYS_4H),
-            "completed_4h_bars": int(len(spy_4h_structure)
+            "completed_4h_bars": int(len(spy_4h_structure)),
+            "structure_source_4h": structure_source_4h,
             "squeeze_source_4h": squeeze_source_4h,
+            "uses_live_4h_bar": True,
         },
     }
 
@@ -918,12 +1018,13 @@ def main():
 
     print(
         f"[4h] score={score:.2f} state={state} source={source_used} bars={len(spy_4h_structure)} "
-        f"psiMain={squeeze_psi_4h:.2f} psiNative={squeeze_psi_4h_native:.2f} "
+        f"psiMain={squeeze_psi_4h:.2f} psiRaw={squeeze_psi_4h_raw:.2f} psiNative={squeeze_psi_4h_native:.2f} "
         f"psi1h={squeeze_psi_4h_from_1h if squeeze_psi_4h_from_1h is not None else 'NA'} "
+        f"squeezeState={squeeze_expansion_state_4h} "
         f"emaPost={ema10_posture:.2f} mom={momentum_combo_4h:.2f} "
         f"breadth={breadth_4h:.2f} exp={squeeze_exp_4h:.2f} "
         f"liq={liquidity_4h:.2f} volScaled={vol_scaled:.2f} riskOn={risk_on_4h:.2f} "
-        f"smiBonus={smi_bonus:+d} squeezeSource={squeeze_source_4h}",
+        f"smiBonus={smi_bonus:+d} structureSource={structure_source_4h} squeezeSource={squeeze_source_4h}",
         flush=True,
     )
 
@@ -934,3 +1035,4 @@ if __name__ == "__main__":
     except Exception as e:
         print("[4h-error]", e, file=sys.stderr)
         sys.exit(2)
+
