@@ -33,6 +33,7 @@ import { updateSignalLock } from "../logic/signalLockStore.js";
 import { getExecutionState } from "../logic/execution/executionStateService.js";
 import { computeEngine22ScalpOpportunity } from "../logic/engine22ScalpOpportunity.js";
 import { buildEngine22WaveStrategy } from "../logic/engine22/wave/buildEngine22WaveStrategy.js";
+import { interpretWaveEnvironment } from "../logic/engine23/interpretation/interpretWaveEnvironment.js";
 import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.js";
 import { buildWaveTradeDecision } from "../logic/engine22/decisions/buildWaveTradeDecision.js";
 
@@ -2671,6 +2672,7 @@ if (isFuturesSymbol(symbol)) {
 
       let engine22Scalp = null;
       let engine22WaveStrategy = null;
+      let engine23Interpretation = null; 
 
       if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
         try {
@@ -2792,6 +2794,46 @@ if (isFuturesSymbol(symbol)) {
         }
       }
 
+      if (
+        String(symbol || "").toUpperCase() === "ES" &&
+        s.strategyId === "intraday_scalp@10m" &&
+        s.tf === "10m"
+      ) {
+        try {
+          engine23Interpretation = interpretWaveEnvironment({
+            symbol,
+            price: Number.isFinite(price) ? price : null,
+            engine22WaveStrategy,
+          });
+        } catch (err) {
+          console.error("[E23 ERROR]", err);
+
+          engine23Interpretation = {
+            ok: false,
+            engine: "engine23.waveBehaviorInterpreter.v1",
+            mode: "READ_ONLY",
+            symbol,
+            environment: "UNKNOWN",
+            state: "W5_UNKNOWN",
+            health: "UNKNOWN",
+            directionBias: "NEUTRAL",
+            activeDegree: null,
+            higherDegreeContext: null,
+            chaseAllowed: false,
+            preferredEntry: "WAIT_FOR_ENGINE23_FIX",
+            activeTargets: null,
+            higherTargets: null,
+            needs: ["FIX_ENGINE23_ERROR"],
+            reasonCodes: ["ENGINE23_COMPUTE_FAILED"],
+            summary: "Engine 23 failed while reading Engine 22 wave behavior.",
+            debug: {
+              error: String(err?.message || err),
+              stack: String(err?.stack || ""),
+            },
+          };
+        }
+      }
+     
    return {
     strategyId: s.strategyId,
     lockedSignal, 
@@ -2812,6 +2854,7 @@ if (isFuturesSymbol(symbol)) {
     engine16,
     engine22Scalp,
     engine22WaveStrategy,
+    engine23Interpretation,
     engine15,
     engine15Decision,
     executionBias,
