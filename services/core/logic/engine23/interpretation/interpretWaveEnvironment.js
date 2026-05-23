@@ -27,6 +27,8 @@ const HEALTH = {
   UNKNOWN: "UNKNOWN",
 };
 
+const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
+
 function asNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
@@ -36,6 +38,19 @@ function roundToTick(value, tickSize = 0.25) {
   const n = asNumber(value);
   if (n === null) return null;
   return Math.round(n / tickSize) * tickSize;
+}
+
+function titleCase(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function cleanPhaseLabel(phase) {
+  return String(phase || "UNKNOWN")
+    .replace(/^IN_/, "")
+    .replace(/^COMPLETE_/, "COMPLETE_");
 }
 
 function getDegree(degrees, degreeName) {
@@ -66,17 +81,18 @@ function detectActiveDegree(engine22WaveStrategy, degrees) {
   const fromEngine22 = engine22WaveStrategy?.activeTradingDegree;
   if (fromEngine22 && degrees?.[fromEngine22]) return fromEngine22;
 
-  if (degrees?.minute?.fibProjection) return "minute";
-  if (degrees?.minor?.fibProjection) return "minor";
-  if (degrees?.micro?.fibProjection) return "micro";
+  if (degrees?.minute) return "minute";
+  if (degrees?.minor) return "minor";
+  if (degrees?.micro) return "micro";
 
   return null;
 }
 
 function detectHigherDegree(activeDegree, degrees) {
-  if (activeDegree === "micro" && degrees?.minute?.fibProjection) return "minute";
-  if (activeDegree === "minute" && degrees?.minor?.fibProjection) return "minor";
-  if (activeDegree === "minor" && degrees?.intermediate?.fibProjection) return "intermediate";
+  if (activeDegree === "micro" && degrees?.minute) return "minute";
+  if (activeDegree === "minute" && degrees?.minor) return "minor";
+  if (activeDegree === "minor" && degrees?.intermediate) return "intermediate";
+  if (activeDegree === "intermediate" && degrees?.primary) return "primary";
   return null;
 }
 
@@ -87,7 +103,10 @@ function buildTargetsForDegree(degreeName, degree) {
 
   return {
     degree: degreeName,
-    w3High: getWavePoint(degree, "w3") ?? getWavePoint(degree, "W3") ?? getFibLevel(degree, "e100"),
+    w3High:
+      getWavePoint(degree, "w3") ??
+      getWavePoint(degree, "W3") ??
+      getFibLevel(degree, "e100"),
     w4Low: getWavePoint(degree, "w4") ?? getWavePoint(degree, "W4"),
     e100: asNumber(levels.e100),
     e1168: asNumber(levels.e1168),
@@ -98,23 +117,39 @@ function buildTargetsForDegree(degreeName, degree) {
   };
 }
 
+function roundNumberFields(obj) {
+  if (!obj || typeof obj !== "object") return null;
+
+  return Object.fromEntries(
+    Object.entries(obj).map(([key, value]) => [
+      key,
+      typeof value === "number" ? roundToTick(value) : value,
+    ])
+  );
+}
+
 function hasActiveW5Context(engine22WaveStrategy) {
   const activeSetup = String(engine22WaveStrategy?.activeSetup || "").toUpperCase();
   const bias = String(engine22WaveStrategy?.bias || "").toUpperCase();
-  const action = String(engine22WaveStrategy?.action || "").toUpperCase();
 
   return (
     activeSetup.includes("W5") ||
     activeSetup.includes("WAVE_5") ||
     activeSetup.includes("EXTENSION") ||
-    bias.includes("CONTINUATION") ||
-    action.includes("WATCH")
+    bias.includes("CONTINUATION")
   );
+}
+
+function hasActiveW2ToW3Context(engine22WaveStrategy) {
+  const activeSetup = String(engine22WaveStrategy?.activeSetup || "").toUpperCase();
+  return activeSetup.includes("W2_TO_W3") || activeSetup.includes("MINUTE_W2");
 }
 
 function detectDirectionBias(engine22WaveStrategy) {
   const bias = String(engine22WaveStrategy?.bias || "").toUpperCase();
-  const decisionDirection = String(engine22WaveStrategy?.tradeDecision?.direction || "").toUpperCase();
+  const decisionDirection = String(
+    engine22WaveStrategy?.tradeDecision?.direction || ""
+  ).toUpperCase();
 
   if (decisionDirection === "LONG" || bias.includes("BULL")) return "LONG";
   if (decisionDirection === "SHORT" || bias.includes("BEAR")) return "SHORT";
@@ -124,8 +159,101 @@ function detectDirectionBias(engine22WaveStrategy) {
 
 function detectMissingMicroNeed(degrees) {
   const micro = getDegree(degrees, "micro");
-  if (!micro || !micro.fibProjection) return true;
+  if (!micro) return true;
   return false;
+}
+
+function buildPullbackTargetsFromFib(fib) {
+  const f = fib?.fib || fib?.levels || fib || {};
+
+  return {
+    degree: fib?.meta?.degree || "minute",
+    pullbackFor: "W2",
+    r382: asNumber(f.r382),
+    r500: asNumber(f.r500),
+    r618: asNumber(f.r618),
+    invalidation: asNumber(f.invalidation),
+    reference786: asNumber(f.reference_786 ?? f.r786),
+  };
+}
+
+function classifyW2PullbackEnvironment({ price, fib }) {
+  const currentPrice = asNumber(price);
+  const targets = buildPullbackTargetsFromFib(fib);
+
+  const r382 = asNumber(targets.r382);
+  const r618 = asNumber(targets.r618);
+  const invalidation = asNumber(targets.invalidation);
+  const reference786 = asNumber(targets.reference786);
+
+  const reasonCodes = ["MINUTE_W2_TO_W3_ACTIVE"];
+
+  if (!currentPrice || !r382 || !r618) {
+    return {
+      environment: "W2_PULLBACK",
+      state: W2_STATES.UNKNOWN,
+      health: HEALTH.UNKNOWN,
+      preferredEntry: "WAIT_FOR_W2_FIB_DATA",
+      pullbackTargets: targets,
+      reasonCodes: [...reasonCodes, "MISSING_W2_FIB_LEVELS"],
+    };
+  }
+
+  if (invalidation !== null && currentPrice <= invalidation) {
+    return {
+      environment: "W2_PULLBACK",
+      state: W2_STATES.INVALIDATED,
+      health: HEALTH.RISK,
+      preferredEntry: "WAIT_FOR_NEW_WAVE_STRUCTURE",
+      pullbackTargets: targets,
+      reasonCodes: [...reasonCodes, "PRICE_BELOW_W2_INVALIDATION"],
+    };
+  }
+
+  if (reference786 !== null && currentPrice <= reference786) {
+    return {
+      environment: "W2_PULLBACK",
+      state: W2_STATES.DEEP_PULLBACK_RISK,
+      health: HEALTH.RISK,
+      preferredEntry: "WAIT_FOR_STRONG_RECLAIM",
+      pullbackTargets: targets,
+      reasonCodes: [...reasonCodes, "PRICE_NEAR_DEEP_786_RETRACE"],
+    };
+  }
+
+  const lo = Math.min(r382, r618);
+  const hi = Math.max(r382, r618);
+
+  if (currentPrice >= lo && currentPrice <= hi) {
+    return {
+      environment: "W2_PULLBACK",
+      state: W2_STATES.PULLBACK_IN_ZONE,
+      health: HEALTH.CAUTION,
+      preferredEntry: "WATCH_W2_SUPPORT_REACTION",
+      pullbackTargets: targets,
+      reasonCodes: [...reasonCodes, "PRICE_INSIDE_W2_RETRACE_ZONE"],
+    };
+  }
+
+  if (currentPrice > hi) {
+    return {
+      environment: "W2_PULLBACK",
+      state: W2_STATES.PULLBACK_ABOVE_ZONE,
+      health: HEALTH.CAUTION,
+      preferredEntry: "WAIT_FOR_PULLBACK_OR_RECLAIM",
+      pullbackTargets: targets,
+      reasonCodes: [...reasonCodes, "PRICE_ABOVE_IDEAL_W2_RETRACE_ZONE"],
+    };
+  }
+
+  return {
+    environment: "W2_PULLBACK",
+    state: W2_STATES.DEEP_PULLBACK_RISK,
+    health: HEALTH.RISK,
+    preferredEntry: "WAIT_FOR_W2_STABILIZATION",
+    pullbackTargets: targets,
+    reasonCodes: [...reasonCodes, "PRICE_BELOW_IDEAL_W2_ZONE"],
+  };
 }
 
 function classifyW5Environment({
@@ -240,136 +368,6 @@ function classifyW5Environment({
   };
 }
 
-function hasActiveW2ToW3Context(engine22WaveStrategy) {
-  const activeSetup = String(engine22WaveStrategy?.activeSetup || "").toUpperCase();
-  return activeSetup.includes("W2_TO_W3") || activeSetup.includes("MINUTE_W2");
-}
-
-function buildPullbackTargetsFromFib(fib) {
-  const f = fib?.fib || fib?.levels || fib || {};
-
-  return {
-    degree: fib?.meta?.degree || "minute",
-    pullbackFor: "W2",
-    r382: asNumber(f.r382),
-    r500: asNumber(f.r500),
-    r618: asNumber(f.r618),
-    invalidation: asNumber(f.invalidation),
-    reference786: asNumber(f.reference_786 ?? f.r786),
-  };
-}
-
-function classifyW2PullbackEnvironment({ price, fib }) {
-  const currentPrice = asNumber(price);
-  const targets = buildPullbackTargetsFromFib(fib);
-
-  const r382 = asNumber(targets.r382);
-  const r618 = asNumber(targets.r618);
-  const invalidation = asNumber(targets.invalidation);
-  const reference786 = asNumber(targets.reference786);
-
-  const reasonCodes = ["MINUTE_W2_TO_W3_ACTIVE"];
-
-  if (!currentPrice || !r382 || !r618) {
-    return {
-      environment: "W2_PULLBACK",
-      state: W2_STATES.UNKNOWN,
-      health: HEALTH.UNKNOWN,
-      preferredEntry: "WAIT_FOR_W2_FIB_DATA",
-      pullbackTargets: targets,
-      reasonCodes: [...reasonCodes, "MISSING_W2_FIB_LEVELS"],
-    };
-  }
-
-  if (invalidation !== null && currentPrice <= invalidation) {
-    return {
-      environment: "W2_PULLBACK",
-      state: W2_STATES.INVALIDATED,
-      health: HEALTH.RISK,
-      preferredEntry: "WAIT_FOR_NEW_WAVE_STRUCTURE",
-      pullbackTargets: targets,
-      reasonCodes: [...reasonCodes, "PRICE_BELOW_W2_INVALIDATION"],
-    };
-  }
-
-  if (reference786 !== null && currentPrice <= reference786) {
-    return {
-      environment: "W2_PULLBACK",
-      state: W2_STATES.DEEP_PULLBACK_RISK,
-      health: HEALTH.RISK,
-      preferredEntry: "WAIT_FOR_STRONG_RECLAIM",
-      pullbackTargets: targets,
-      reasonCodes: [...reasonCodes, "PRICE_NEAR_DEEP_786_RETRACE"],
-    };
-  }
-
-  const lo = Math.min(r382, r618);
-  const hi = Math.max(r382, r618);
-
-  if (currentPrice >= lo && currentPrice <= hi) {
-    return {
-      environment: "W2_PULLBACK",
-      state: W2_STATES.PULLBACK_IN_ZONE,
-      health: HEALTH.CAUTION,
-      preferredEntry: "WATCH_W2_SUPPORT_REACTION",
-      pullbackTargets: targets,
-      reasonCodes: [...reasonCodes, "PRICE_INSIDE_W2_RETRACE_ZONE"],
-    };
-  }
-
-  if (currentPrice > hi) {
-    return {
-      environment: "W2_PULLBACK",
-      state: W2_STATES.PULLBACK_ABOVE_ZONE,
-      health: HEALTH.CAUTION,
-      preferredEntry: "WAIT_FOR_PULLBACK_OR_RECLAIM",
-      pullbackTargets: targets,
-      reasonCodes: [...reasonCodes, "PRICE_ABOVE_IDEAL_W2_RETRACE_ZONE"],
-    };
-  }
-
-  return {
-    environment: "W2_PULLBACK",
-    state: W2_STATES.DEEP_PULLBACK_RISK,
-    health: HEALTH.RISK,
-    preferredEntry: "WAIT_FOR_W2_STABILIZATION",
-    pullbackTargets: targets,
-    reasonCodes: [...reasonCodes, "PRICE_BELOW_IDEAL_W2_ZONE"],
-  };
-}
-
-function buildW2Summary({ symbol, classification }) {
-  const name = symbol || "ES";
-  const t = classification?.pullbackTargets || {};
-
-  if (classification.state === W2_STATES.PULLBACK_ABOVE_ZONE) {
-    return `${name} completed a smaller micro 1–5 into the Minute W1 high. Minute W2 pullback is active, but price is still above the ideal W2 retracement zone. Watch ${t.r382} / ${t.r500} / ${t.r618}; do not chase long until W2 stabilizes and Engine 15 confirms.`;
-  }
-
-  if (classification.state === W2_STATES.PULLBACK_IN_ZONE) {
-    return `${name} is inside the Minute W2 retracement zone. Watch reaction quality near ${t.r382} / ${t.r500} / ${t.r618}. A W3 attempt needs support, participation, and Engine 15 confirmation.`;
-  }
-
-  if (classification.state === W2_STATES.DEEP_PULLBACK_RISK) {
-    return `${name} is in a deeper Minute W2 pullback. Watch ${t.reference786} and invalidation near ${t.invalidation}. No chase long until structure reclaims.`;
-  }
-
-  if (classification.state === W2_STATES.INVALIDATED) {
-    return `${name} broke the Minute W2 invalidation area near ${t.invalidation}. Current W2-to-W3 setup is damaged until a new wave structure forms.`;
-  }
-
-  return `${name} is in Minute W2-to-W3 context, but Engine 23 needs clearer W2 fib data before giving a clean behavior read.`;
-}
-
-const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
-
-function titleCase(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (m) => m.toUpperCase());
-}
-
 function phaseForDegree({ degree, degrees, engine2State }) {
   return (
     degrees?.[degree]?.phase ||
@@ -448,7 +446,7 @@ function findHigherContext({ activeDegree, waveStack }) {
       return {
         degree,
         phase,
-        label: `${titleCase(degree)} ${phase.replace("IN_", "").replace("COMPLETE_", "Complete ")}`,
+        label: `${titleCase(degree)} ${cleanPhaseLabel(phase)}`,
       };
     }
   }
@@ -582,14 +580,13 @@ function buildHigherDegreeContext(higherDegreeName) {
   return `${higherDegreeName} W5 active`;
 }
 
-function buildSummary({
+function buildW5Summary({
   symbol,
   activeDegree,
   higherDegree,
   state,
   health,
   activeTargets,
-  higherTargets,
   missingMicro,
 }) {
   const name = symbol || "ES";
@@ -676,80 +673,66 @@ export function interpretWaveEnvironment(input = {}) {
   const missingMicro = detectMissingMicroNeed(degrees);
   const directionBias = detectDirectionBias(engine22WaveStrategy);
 
-  const w2ToW3ContextActive = hasActiveW2ToW3Context(engine22WaveStrategy);
-
-  if (w2ToW3ContextActive) {
-    const classification = classifyW2PullbackEnvironment({
+  if (hasActiveW2ToW3Context(engine22WaveStrategy)) {
+    const w2Classification = classifyW2PullbackEnvironment({
       price: currentPrice,
       fib,
     });
 
-  const roundedPullbackTargets = classification.pullbackTargets
-    ? Object.fromEntries(
-        Object.entries(classification.pullbackTargets).map(([key, value]) => [
-          key,
-          typeof value === "number" ? roundToTick(value) : value,
-        ])
-      )
-    : null;
+    const roundedPullbackTargets = roundNumberFields(w2Classification.pullbackTargets);
+    const roundedHigherTargets = roundNumberFields(higherTargets);
 
-  const roundedHigherTargets = higherTargets
-    ? Object.fromEntries(
-        Object.entries(higherTargets).map(([key, value]) => [
-          key,
-          typeof value === "number" ? roundToTick(value) : value,
-        ])
-      )
-    : null;
+    const multiDegreeContext = buildMultiDegreeContext({
+      symbol,
+      engine22WaveStrategy,
+      degrees,
+      engine2State,
+      activeDegree,
+      higherDegree,
+      pullbackTargets: roundedPullbackTargets,
+      higherTargets: roundedHigherTargets,
+    });
 
-  const multiDegreeContext = buildMultiDegreeContext({
-    symbol,
-    engine22WaveStrategy,
-    degrees,
-    engine2State,
-    activeDegree,
-    higherDegree,
-    pullbackTargets: roundedPullbackTargets,
-    higherTargets: roundedHigherTargets,
-  }); 
-    
-return {
-  ok: true,
-  engine: ENGINE_NAME,
-  mode: READ_ONLY_MODE,
-  symbol,
-  environment: classification.environment,
-  state: classification.state,
-  health: classification.health,
-  directionBias: "LONG",
-  activeDegree,
-  higherDegreeContext: buildHigherDegreeContext(higherDegree),
-  chaseAllowed: false,
-  preferredEntry: classification.preferredEntry,
-  activeTargets: roundedPullbackTargets,
-  higherTargets: roundedHigherTargets,
-  recentCompletion: multiDegreeContext.recentCompletion,
-  activeStructure: multiDegreeContext.activeStructure,
-  higherContext: multiDegreeContext.higherContext,
-  weaknessZones: multiDegreeContext.weaknessZones,
-  waveStack: multiDegreeContext.waveStack,
-  needs: buildNeeds({ missingMicro: false }),
-  reasonCodes: [...new Set([
-    "MICRO_COMPLETE_W5",
-    "MINUTE_W1_COMPLETE",
-    ...classification.reasonCodes,
-    "READ_ONLY_INTERPRETATION",
-    "NO_CHASE_EXTENSION",
-  ])],
-  summary: buildMultiDegreeSummary({
-    symbol,
-    multiDegreeContext,
-  }),
-};
+    return {
+      ok: true,
+      engine: ENGINE_NAME,
+      mode: READ_ONLY_MODE,
+      symbol,
+      environment: w2Classification.environment,
+      state: w2Classification.state,
+      health: w2Classification.health,
+      directionBias: "LONG",
+      activeDegree,
+      higherDegreeContext: buildHigherDegreeContext(higherDegree),
+      chaseAllowed: false,
+      preferredEntry: w2Classification.preferredEntry,
+      activeTargets: roundedPullbackTargets,
+      higherTargets: roundedHigherTargets,
+      recentCompletion: multiDegreeContext.recentCompletion,
+      activeStructure: multiDegreeContext.activeStructure,
+      higherContext: multiDegreeContext.higherContext,
+      weaknessZones: multiDegreeContext.weaknessZones,
+      waveStack: multiDegreeContext.waveStack,
+      needs: buildNeeds({ missingMicro: false }),
+      reasonCodes: [
+        ...new Set([
+          "MICRO_COMPLETE_W5",
+          "MINUTE_W1_COMPLETE",
+          ...w2Classification.reasonCodes,
+          "READ_ONLY_INTERPRETATION",
+          "NO_CHASE_EXTENSION",
+        ]),
+      ],
+      summary: buildMultiDegreeSummary({
+        symbol,
+        multiDegreeContext,
+      }),
+    };
+  }
 
-const w5ContextActive = hasActiveW5Context(engine22WaveStrategy);
+  const w5ContextActive = hasActiveW5Context(engine22WaveStrategy);
 
-  const classification = w5ContextActive
+  const w5Classification = w5ContextActive
     ? classifyW5Environment({
         price: currentPrice,
         activeTargets,
@@ -764,45 +747,27 @@ const w5ContextActive = hasActiveW5Context(engine22WaveStrategy);
         reasonCodes: ["ENGINE22_W5_CONTEXT_NOT_ACTIVE"],
       };
 
-  const needs = buildNeeds({ missingMicro });
-
   const reasonCodes = [
     ...(higherDegree ? ["HIGHER_DEGREE_W5_ACTIVE"] : []),
     ...(activeDegree ? [`${String(activeDegree).toUpperCase()}_W5_EXTENSION_ACTIVE`] : []),
-    ...classification.reasonCodes,
+    ...w5Classification.reasonCodes,
     "READ_ONLY_INTERPRETATION",
   ];
 
-  if (classification.chaseAllowed === false && !reasonCodes.includes("NO_CHASE_EXTENSION")) {
+  if (w5Classification.chaseAllowed === false && !reasonCodes.includes("NO_CHASE_EXTENSION")) {
     reasonCodes.push("NO_CHASE_EXTENSION");
   }
 
-  const roundedActiveTargets = activeTargets
-    ? Object.fromEntries(
-        Object.entries(activeTargets).map(([key, value]) => [
-          key,
-          typeof value === "number" ? roundToTick(value) : value,
-        ])
-      )
-    : null;
+  const roundedActiveTargets = roundNumberFields(activeTargets);
+  const roundedHigherTargets = roundNumberFields(higherTargets);
 
-  const roundedHigherTargets = higherTargets
-    ? Object.fromEntries(
-        Object.entries(higherTargets).map(([key, value]) => [
-          key,
-          typeof value === "number" ? roundToTick(value) : value,
-        ])
-      )
-    : null;
-
-  const summary = buildSummary({
+  const summary = buildW5Summary({
     symbol,
     activeDegree,
     higherDegree,
-    state: classification.state,
-    health: classification.health,
+    state: w5Classification.state,
+    health: w5Classification.health,
     activeTargets: roundedActiveTargets,
-    higherTargets: roundedHigherTargets,
     missingMicro,
   });
 
@@ -812,16 +777,16 @@ const w5ContextActive = hasActiveW5Context(engine22WaveStrategy);
     mode: READ_ONLY_MODE,
     symbol,
     environment: w5ContextActive ? "W5_EXTENSION" : "UNKNOWN",
-    state: classification.state,
-    health: classification.health,
+    state: w5Classification.state,
+    health: w5Classification.health,
     directionBias,
     activeDegree,
     higherDegreeContext: buildHigherDegreeContext(higherDegree),
     chaseAllowed: false,
-    preferredEntry: classification.preferredEntry,
+    preferredEntry: w5Classification.preferredEntry,
     activeTargets: roundedActiveTargets,
     higherTargets: roundedHigherTargets,
-    needs,
+    needs: buildNeeds({ missingMicro }),
     reasonCodes: [...new Set(reasonCodes)],
     summary,
   };
