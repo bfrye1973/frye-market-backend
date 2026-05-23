@@ -401,6 +401,66 @@ function parseActiveSetup(activeSetup) {
   };
 }
 
+function detectSetupFamily(engine22WaveStrategy) {
+  const topLevelSetup = engine22WaveStrategy?.activeSetup;
+  const fallbackSetup = engine22WaveStrategy?.waveFibState?.activeSetup;
+  const raw = String(topLevelSetup || fallbackSetup || "").toUpperCase();
+
+  const degreeMatch = raw.match(/(PRIMARY|INTERMEDIATE|MINOR|MINUTE|MICRO)/);
+  const degree = degreeMatch ? degreeMatch[1].toLowerCase() : null;
+
+  const isW2ToW3 =
+    raw.includes("W2_TO_W3") ||
+    (raw.includes("W2") && raw.includes("W3"));
+
+  const isW4ToW5 =
+    raw.includes("W4_TO_W5") ||
+    (raw.includes("W4") && raw.includes("W5"));
+
+  const isW5Extension =
+    raw.includes("W5_EXTENSION") ||
+    raw.includes("W5_CONTINUATION") ||
+    raw.includes("EXTENSION");
+
+  if (isW2ToW3) {
+    return {
+      raw: raw || null,
+      family: "W2_TO_W3",
+      degree,
+      fromWave: "W2",
+      toWave: "W3",
+    };
+  }
+
+  if (isW4ToW5) {
+    return {
+      raw: raw || null,
+      family: "W4_TO_W5",
+      degree,
+      fromWave: "W4",
+      toWave: "W5",
+    };
+  }
+
+  if (isW5Extension) {
+    return {
+      raw: raw || null,
+      family: "W5_EXTENSION",
+      degree,
+      fromWave: "W5",
+      toWave: null,
+    };
+  }
+
+  return {
+    raw: raw || null,
+    family: "UNKNOWN",
+    degree,
+    fromWave: null,
+    toWave: null,
+  };
+}
+
 function buildWaveStack({ degrees, engine2State }) {
   const out = {};
 
@@ -672,8 +732,12 @@ export function interpretWaveEnvironment(input = {}) {
 
   const missingMicro = detectMissingMicroNeed(degrees);
   const directionBias = detectDirectionBias(engine22WaveStrategy);
+  const setupFamily = detectSetupFamily(engine22WaveStrategy);
 
-  if (hasActiveW2ToW3Context(engine22WaveStrategy)) {
+  if (
+    setupFamily.family === "W2_TO_W3" ||
+    hasActiveW2ToW3Context(engine22WaveStrategy)
+  ) {
     const w2Classification = classifyW2PullbackEnvironment({
       price: currentPrice,
       fib,
@@ -730,7 +794,9 @@ export function interpretWaveEnvironment(input = {}) {
     };
   }
 
-  const w5ContextActive = hasActiveW5Context(engine22WaveStrategy);
+  const w5ContextActive =
+    setupFamily.family === "W5_EXTENSION" ||
+    hasActiveW5Context(engine22WaveStrategy);
 
   const w5Classification = w5ContextActive
     ? classifyW5Environment({
