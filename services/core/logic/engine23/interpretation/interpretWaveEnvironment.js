@@ -361,6 +361,208 @@ function buildW2Summary({ symbol, classification }) {
   return `${name} is in Minute W2-to-W3 context, but Engine 23 needs clearer W2 fib data before giving a clean behavior read.`;
 }
 
+const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
+
+function titleCase(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function phaseForDegree({ degree, degrees, engine2State }) {
+  return (
+    degrees?.[degree]?.phase ||
+    engine2State?.[degree]?.phase ||
+    engine2State?.[`${degree}Phase`] ||
+    "UNKNOWN"
+  );
+}
+
+function parseActiveSetup(activeSetup) {
+  const text = String(activeSetup || "").toUpperCase();
+
+  const m = text.match(/(PRIMARY|INTERMEDIATE|MINOR|MINUTE|MICRO)_W(\d)_TO_W(\d)/);
+
+  if (!m) {
+    return {
+      raw: text || null,
+      degree: null,
+      fromWave: null,
+      toWave: null,
+      type: "UNKNOWN",
+    };
+  }
+
+  return {
+    raw: text,
+    degree: m[1].toLowerCase(),
+    fromWave: `W${m[2]}`,
+    toWave: `W${m[3]}`,
+    type: `W${m[2]}_TO_W${m[3]}`,
+  };
+}
+
+function buildWaveStack({ degrees, engine2State }) {
+  const out = {};
+
+  for (const degree of DEGREE_ORDER) {
+    out[degree] = {
+      degree,
+      phase: phaseForDegree({ degree, degrees, engine2State }),
+    };
+  }
+
+  return out;
+}
+
+function findRecentCompletion(waveStack) {
+  const lowToHigh = ["micro", "minute", "minor", "intermediate", "primary"];
+
+  for (const degree of lowToHigh) {
+    const phase = String(waveStack?.[degree]?.phase || "").toUpperCase();
+
+    if (phase === "COMPLETE_W5") {
+      return {
+        degree,
+        wave: "W5",
+        phase,
+        meaning: `${titleCase(degree)} W5 completed; this may complete a larger impulse and start a pullback/digestion phase.`,
+      };
+    }
+  }
+
+  return null;
+}
+
+function findHigherContext({ activeDegree, waveStack }) {
+  const idx = DEGREE_ORDER.indexOf(activeDegree);
+
+  if (idx <= 0) return null;
+
+  for (let i = idx - 1; i >= 0; i--) {
+    const degree = DEGREE_ORDER[i];
+    const phase = String(waveStack?.[degree]?.phase || "").toUpperCase();
+
+    if (phase && phase !== "UNKNOWN") {
+      return {
+        degree,
+        phase,
+        label: `${titleCase(degree)} ${phase.replace("IN_", "").replace("COMPLETE_", "Complete ")}`,
+      };
+    }
+  }
+
+  return null;
+}
+
+function buildWeaknessZones({ higherTargets }) {
+  if (!higherTargets || typeof higherTargets !== "object") return [];
+
+  const zones = [];
+
+  if (higherTargets.e100 != null) {
+    zones.push({
+      label: "Prior Higher-Degree High / First Test",
+      level: higherTargets.e100,
+      meaning: "First area where continuation can stall or reject.",
+    });
+  }
+
+  if (higherTargets.e1168 != null || higherTargets.e1272 != null) {
+    zones.push({
+      label: "Early Extension Weakness Zone",
+      level:
+        higherTargets.e1168 != null && higherTargets.e1272 != null
+          ? `${higherTargets.e1168}–${higherTargets.e1272}`
+          : higherTargets.e1168 ?? higherTargets.e1272,
+      meaning: "Wave 5 can continue, but chase risk starts rising here.",
+    });
+  }
+
+  if (higherTargets.e1618 != null) {
+    zones.push({
+      label: "Major Exhaustion Zone",
+      level: higherTargets.e1618,
+      meaning: "Stronger Wave 5 exhaustion/reversal risk.",
+    });
+  }
+
+  if (higherTargets.e200 != null) {
+    zones.push({
+      label: "Very Stretched Extension",
+      level: higherTargets.e200,
+      meaning: "Very high chase risk; protect gains.",
+    });
+  }
+
+  return zones;
+}
+
+function buildMultiDegreeContext({
+  symbol,
+  engine22WaveStrategy,
+  degrees,
+  engine2State,
+  activeDegree,
+  higherDegree,
+  pullbackTargets,
+  higherTargets,
+}) {
+  const activeSetup = parseActiveSetup(engine22WaveStrategy?.activeSetup);
+  const waveStack = buildWaveStack({ degrees, engine2State });
+  const recentCompletion = findRecentCompletion(waveStack);
+  const higherContext = findHigherContext({
+    activeDegree: activeSetup.degree || activeDegree,
+    waveStack,
+  });
+
+  const weaknessZones = buildWeaknessZones({ higherTargets });
+
+  return {
+    symbol,
+    waveStack,
+    recentCompletion,
+    activeStructure: {
+      setup: activeSetup.raw,
+      degree: activeSetup.degree || activeDegree,
+      fromWave: activeSetup.fromWave,
+      toWave: activeSetup.toWave,
+      type: activeSetup.type,
+      read:
+        activeSetup.type === "W2_TO_W3"
+          ? `${titleCase(activeSetup.degree || activeDegree)} W2 pullback is forming before a possible W3 launch.`
+          : activeSetup.type === "W4_TO_W5"
+          ? `${titleCase(activeSetup.degree || activeDegree)} W4 pullback is forming before a possible W5 launch.`
+          : "Active wave setup is still forming.",
+    },
+    higherContext,
+    pullbackTargets,
+    weaknessZones,
+  };
+}
+
+function buildMultiDegreeSummary({ symbol, multiDegreeContext }) {
+  const name = symbol || "ES";
+  const recent = multiDegreeContext?.recentCompletion;
+  const active = multiDegreeContext?.activeStructure;
+  const higher = multiDegreeContext?.higherContext;
+  const t = multiDegreeContext?.pullbackTargets || {};
+  const weakness = multiDegreeContext?.weaknessZones || [];
+
+  const supportText =
+    t.r382 != null && t.r500 != null && t.r618 != null
+      ? `${t.r382} / ${t.r500} / ${t.r618}`
+      : "the active pullback fib zone";
+
+  const weakText =
+    weakness.length > 0
+      ? weakness.map((z) => z.level).join(" / ")
+      : "higher-degree extension zones";
+
+  return `${name} ${recent ? recent.meaning : "has a lower-degree impulse that may be completing."} ${active?.read || ""} ${higher ? `Higher context is ${higher.label}.` : ""} Watch pullback support at ${supportText}. Weakness/chase-risk zones begin near ${weakText}. Do not chase; wait for support, reclaim, and Engine 15 confirmation.`;
+}
+
 function buildNeeds({ missingMicro }) {
   const needs = [];
 
@@ -434,6 +636,7 @@ export function interpretWaveEnvironment(input = {}) {
     price,
     engine22WaveStrategy,
     fib,
+    engine2State = null,
   } = input;
 
   if (!engine22WaveStrategy || typeof engine22WaveStrategy !== "object") {
@@ -490,6 +693,26 @@ export function interpretWaveEnvironment(input = {}) {
       )
     : null;
 
+  const roundedHigherTargets = higherTargets
+    ? Object.fromEntries(
+        Object.entries(higherTargets).map(([key, value]) => [
+          key,
+          typeof value === "number" ? roundToTick(value) : value,
+        ])
+      )
+    : null;
+
+  const multiDegreeContext = buildMultiDegreeContext({
+    symbol,
+    engine22WaveStrategy,
+    degrees,
+    engine2State,
+    activeDegree,
+    higherDegree,
+    pullbackTargets: roundedPullbackTargets,
+    higherTargets: roundedHigherTargets,
+  }); 
+    
   return {
     ok: true,
     engine: ENGINE_NAME,
