@@ -2800,13 +2800,22 @@ if (isFuturesSymbol(symbol)) {
         s.tf === "10m"
       ) {
         try {
+
+           console.log("[E23 INPUT CHECK]", {
+             activeSetup: engine22WaveStrategy?.activeSetup,
+             activeTradingDegree: engine22WaveStrategy?.activeTradingDegree,
+             headline: engine22WaveStrategy?.headline,
+             action: engine22WaveStrategy?.action,
+             currentPrice: engine22WaveStrategy?.currentPrice,
+           });
+           
           engine23Interpretation = interpretWaveEnvironment({
             symbol,
             price: Number.isFinite(price) ? price : null,
             engine22WaveStrategy,
             fib,
           });
-           
+                      
         } catch (err) {
           console.error("[E23 ERROR]", err);
 
