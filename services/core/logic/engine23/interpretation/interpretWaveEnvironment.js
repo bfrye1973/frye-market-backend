@@ -713,38 +713,39 @@ export function interpretWaveEnvironment(input = {}) {
     higherTargets: roundedHigherTargets,
   }); 
     
-  return {
-    ok: true,
-    engine: ENGINE_NAME,
-    mode: READ_ONLY_MODE,
+return {
+  ok: true,
+  engine: ENGINE_NAME,
+  mode: READ_ONLY_MODE,
+  symbol,
+  environment: classification.environment,
+  state: classification.state,
+  health: classification.health,
+  directionBias: "LONG",
+  activeDegree,
+  higherDegreeContext: buildHigherDegreeContext(higherDegree),
+  chaseAllowed: false,
+  preferredEntry: classification.preferredEntry,
+  activeTargets: roundedPullbackTargets,
+  higherTargets: roundedHigherTargets,
+  recentCompletion: multiDegreeContext.recentCompletion,
+  activeStructure: multiDegreeContext.activeStructure,
+  higherContext: multiDegreeContext.higherContext,
+  weaknessZones: multiDegreeContext.weaknessZones,
+  waveStack: multiDegreeContext.waveStack,
+  needs: buildNeeds({ missingMicro: false }),
+  reasonCodes: [...new Set([
+    "MICRO_COMPLETE_W5",
+    "MINUTE_W1_COMPLETE",
+    ...classification.reasonCodes,
+    "READ_ONLY_INTERPRETATION",
+    "NO_CHASE_EXTENSION",
+  ])],
+  summary: buildMultiDegreeSummary({
     symbol,
-    environment: classification.environment,
-    state: classification.state,
-    health: classification.health,
-    directionBias: "LONG",
-    activeDegree,
-    higherDegreeContext: buildHigherDegreeContext(higherDegree),
-    chaseAllowed: false,
-    preferredEntry: classification.preferredEntry,
-    activeTargets: roundedPullbackTargets,
-    higherTargets: buildTargetsForDegree(higherDegree, higherDegreeData),
-    needs: buildNeeds({ missingMicro: false }),
-    reasonCodes: [...new Set([
-      "MICRO_COMPLETE_W5",
-      "MINUTE_W1_COMPLETE",
-      ...classification.reasonCodes,
-      "READ_ONLY_INTERPRETATION",
-      "NO_CHASE_EXTENSION",
-    ])],
-    summary: buildW2Summary({
-      symbol,
-      classification: {
-        ...classification,
-        pullbackTargets: roundedPullbackTargets,
-      },
-    }),
-  };
-}
+    multiDegreeContext,
+  }),
+};
 
 const w5ContextActive = hasActiveW5Context(engine22WaveStrategy);
 
