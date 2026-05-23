@@ -2862,6 +2862,7 @@ if (isFuturesSymbol(symbol)) {
         error: permissionV2Resp?.text || "no_v2",
       },
     engine2,
+    fibLevels: fib,
     engine16,
     engine22Scalp,
     engine22WaveStrategy,
@@ -3342,6 +3343,58 @@ console.log("Engine21 alignment fetched");
   }
 
   preserveLastGoodEngine22Timeline(result, previousSnapshot);
+
+  if (String(symbol || "").toUpperCase() === "ES") {
+    const scalp = result.strategies?.["intraday_scalp@10m"];
+
+    if (scalp?.engine22WaveStrategy) {
+      try {
+        console.log("[E23 FINAL INPUT CHECK]", {
+          activeSetup: scalp.engine22WaveStrategy?.activeSetup,
+          activeTradingDegree: scalp.engine22WaveStrategy?.activeTradingDegree,
+          headline: scalp.engine22WaveStrategy?.headline,
+          action: scalp.engine22WaveStrategy?.action,
+          currentPrice: scalp.engine22WaveStrategy?.currentPrice,
+        });
+
+        scalp.engine23Interpretation = interpretWaveEnvironment({
+          symbol,
+          price:
+            Number.isFinite(Number(scalp.engine22WaveStrategy?.currentPrice))
+              ? Number(scalp.engine22WaveStrategy.currentPrice)
+              : null,
+          engine22WaveStrategy: scalp.engine22WaveStrategy,
+          fib: scalp.fibLevels || null,
+        });
+      } catch (err) {
+        console.error("[E23 FINAL ERROR]", err);
+
+        scalp.engine23Interpretation = {
+          ok: false,
+          engine: "engine23.waveBehaviorInterpreter.v1",
+          mode: "READ_ONLY",
+          symbol,
+          environment: "UNKNOWN",
+          state: "W5_UNKNOWN",
+          health: "UNKNOWN",
+          directionBias: "NEUTRAL",
+          activeDegree: null,
+          higherDegreeContext: null,
+          chaseAllowed: false,
+          preferredEntry: "WAIT_FOR_ENGINE23_FINAL_FIX",
+          activeTargets: null,
+          higherTargets: null,
+          needs: ["FIX_ENGINE23_FINAL_ERROR"],
+          reasonCodes: ["ENGINE23_FINAL_COMPUTE_FAILED"],
+          summary: "Engine 23 failed while reading the final Engine 22 wave behavior.",
+          debug: {
+            error: String(err?.message || err),
+            stack: String(err?.stack || ""),
+          },
+        };
+      }
+    }
+  } 
 
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(result, null, 2));
