@@ -36,7 +36,14 @@ const API_BASE =
     ? String(process.env.FRYE_API_BASE).trim()
     : `http://127.0.0.1:${DEFAULT_PORT}`;
 
-const OHLC_PATH = "/api/v1/ohlc";
+function isFuturesSymbol(sym) {
+  const s = String(sym || "").toUpperCase();
+  return ["ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K"].includes(s);
+}
+
+function ohlcPathForSymbol(sym) {
+  return isFuturesSymbol(sym) ? "/api/v1/futures/ohlc" : "/api/v1/ohlc";
+}
 
 const DEFAULT_LIMIT = Number(process.env.FIB_OHLC_LIMIT || 600);
 const MODE = process.env.FIB_OHLC_MODE || "rth";
@@ -127,7 +134,7 @@ async function fetchOhlcBars({ symbol, tf }) {
   const cacheKey = `${symbol}__${tf}__${DEFAULT_LIMIT}__${MODE}`;
   if (barsCache.has(cacheKey)) return barsCache.get(cacheKey);
 
-  const url = new URL(`${API_BASE}${OHLC_PATH}`);
+  const url = new URL(`${API_BASE}${ohlcPathForSymbol(symbol)}`);
   url.searchParams.set("symbol", symbol);
   url.searchParams.set("tf", tf);
   url.searchParams.set("limit", String(DEFAULT_LIMIT));
