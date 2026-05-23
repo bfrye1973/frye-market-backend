@@ -2804,7 +2804,9 @@ if (isFuturesSymbol(symbol)) {
             symbol,
             price: Number.isFinite(price) ? price : null,
             engine22WaveStrategy,
+            fib,
           });
+           
         } catch (err) {
           console.error("[E23 ERROR]", err);
 
