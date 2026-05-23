@@ -3351,7 +3351,9 @@ console.log("Engine21 alignment fetched");
               : null,
           engine22WaveStrategy: scalp.engine22WaveStrategy,
           fib: scalp.fibLevels || null,
+          engine2State,
         });
+         
       } catch (err) {
         console.error("[E23 FINAL ERROR]", err);
 
