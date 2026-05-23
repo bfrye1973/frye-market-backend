@@ -2801,14 +2801,7 @@ if (isFuturesSymbol(symbol)) {
       ) {
         try {
 
-           console.log("[E23 INPUT CHECK]", {
-             activeSetup: engine22WaveStrategy?.activeSetup,
-             activeTradingDegree: engine22WaveStrategy?.activeTradingDegree,
-             headline: engine22WaveStrategy?.headline,
-             action: engine22WaveStrategy?.action,
-             currentPrice: engine22WaveStrategy?.currentPrice,
-           });
-           
+                  
           engine23Interpretation = interpretWaveEnvironment({
             symbol,
             price: Number.isFinite(price) ? price : null,
@@ -3349,14 +3342,7 @@ console.log("Engine21 alignment fetched");
 
     if (scalp?.engine22WaveStrategy) {
       try {
-        console.log("[E23 FINAL INPUT CHECK]", {
-          activeSetup: scalp.engine22WaveStrategy?.activeSetup,
-          activeTradingDegree: scalp.engine22WaveStrategy?.activeTradingDegree,
-          headline: scalp.engine22WaveStrategy?.headline,
-          action: scalp.engine22WaveStrategy?.action,
-          currentPrice: scalp.engine22WaveStrategy?.currentPrice,
-        });
-
+       
         scalp.engine23Interpretation = interpretWaveEnvironment({
           symbol,
           price:
