@@ -12,6 +12,14 @@ const W5_STATES = {
   UNKNOWN: "W5_UNKNOWN",
 };
 
+const W2_STATES = {
+  PULLBACK_ABOVE_ZONE: "W2_PULLBACK_ABOVE_ZONE",
+  PULLBACK_IN_ZONE: "W2_PULLBACK_IN_ZONE",
+  DEEP_PULLBACK_RISK: "W2_DEEP_PULLBACK_RISK",
+  INVALIDATED: "W2_INVALIDATED",
+  UNKNOWN: "W2_UNKNOWN",
+};
+
 const HEALTH = {
   HEALTHY: "HEALTHY",
   CAUTION: "CAUTION",
@@ -232,6 +240,127 @@ function classifyW5Environment({
   };
 }
 
+function hasActiveW2ToW3Context(engine22WaveStrategy) {
+  const activeSetup = String(engine22WaveStrategy?.activeSetup || "").toUpperCase();
+  return activeSetup.includes("W2_TO_W3") || activeSetup.includes("MINUTE_W2");
+}
+
+function buildPullbackTargetsFromFib(fib) {
+  const f = fib?.fib || fib?.levels || fib || {};
+
+  return {
+    degree: fib?.meta?.degree || "minute",
+    pullbackFor: "W2",
+    r382: asNumber(f.r382),
+    r500: asNumber(f.r500),
+    r618: asNumber(f.r618),
+    invalidation: asNumber(f.invalidation),
+    reference786: asNumber(f.reference_786 ?? f.r786),
+  };
+}
+
+function classifyW2PullbackEnvironment({ price, fib }) {
+  const currentPrice = asNumber(price);
+  const targets = buildPullbackTargetsFromFib(fib);
+
+  const r382 = asNumber(targets.r382);
+  const r618 = asNumber(targets.r618);
+  const invalidation = asNumber(targets.invalidation);
+  const reference786 = asNumber(targets.reference786);
+
+  const reasonCodes = ["MINUTE_W2_TO_W3_ACTIVE"];
+
+  if (!currentPrice || !r382 || !r618) {
+    return {
+      environment: "W2_PULLBACK",
+      state: W2_STATES.UNKNOWN,
+      health: HEALTH.UNKNOWN,
+      preferredEntry: "WAIT_FOR_W2_FIB_DATA",
+      pullbackTargets: targets,
+      reasonCodes: [...reasonCodes, "MISSING_W2_FIB_LEVELS"],
+    };
+  }
+
+  if (invalidation !== null && currentPrice <= invalidation) {
+    return {
+      environment: "W2_PULLBACK",
+      state: W2_STATES.INVALIDATED,
+      health: HEALTH.RISK,
+      preferredEntry: "WAIT_FOR_NEW_WAVE_STRUCTURE",
+      pullbackTargets: targets,
+      reasonCodes: [...reasonCodes, "PRICE_BELOW_W2_INVALIDATION"],
+    };
+  }
+
+  if (reference786 !== null && currentPrice <= reference786) {
+    return {
+      environment: "W2_PULLBACK",
+      state: W2_STATES.DEEP_PULLBACK_RISK,
+      health: HEALTH.RISK,
+      preferredEntry: "WAIT_FOR_STRONG_RECLAIM",
+      pullbackTargets: targets,
+      reasonCodes: [...reasonCodes, "PRICE_NEAR_DEEP_786_RETRACE"],
+    };
+  }
+
+  const lo = Math.min(r382, r618);
+  const hi = Math.max(r382, r618);
+
+  if (currentPrice >= lo && currentPrice <= hi) {
+    return {
+      environment: "W2_PULLBACK",
+      state: W2_STATES.PULLBACK_IN_ZONE,
+      health: HEALTH.CAUTION,
+      preferredEntry: "WATCH_W2_SUPPORT_REACTION",
+      pullbackTargets: targets,
+      reasonCodes: [...reasonCodes, "PRICE_INSIDE_W2_RETRACE_ZONE"],
+    };
+  }
+
+  if (currentPrice > hi) {
+    return {
+      environment: "W2_PULLBACK",
+      state: W2_STATES.PULLBACK_ABOVE_ZONE,
+      health: HEALTH.CAUTION,
+      preferredEntry: "WAIT_FOR_PULLBACK_OR_RECLAIM",
+      pullbackTargets: targets,
+      reasonCodes: [...reasonCodes, "PRICE_ABOVE_IDEAL_W2_RETRACE_ZONE"],
+    };
+  }
+
+  return {
+    environment: "W2_PULLBACK",
+    state: W2_STATES.DEEP_PULLBACK_RISK,
+    health: HEALTH.RISK,
+    preferredEntry: "WAIT_FOR_W2_STABILIZATION",
+    pullbackTargets: targets,
+    reasonCodes: [...reasonCodes, "PRICE_BELOW_IDEAL_W2_ZONE"],
+  };
+}
+
+function buildW2Summary({ symbol, classification }) {
+  const name = symbol || "ES";
+  const t = classification?.pullbackTargets || {};
+
+  if (classification.state === W2_STATES.PULLBACK_ABOVE_ZONE) {
+    return `${name} completed a smaller micro 1–5 into the Minute W1 high. Minute W2 pullback is active, but price is still above the ideal W2 retracement zone. Watch ${t.r382} / ${t.r500} / ${t.r618}; do not chase long until W2 stabilizes and Engine 15 confirms.`;
+  }
+
+  if (classification.state === W2_STATES.PULLBACK_IN_ZONE) {
+    return `${name} is inside the Minute W2 retracement zone. Watch reaction quality near ${t.r382} / ${t.r500} / ${t.r618}. A W3 attempt needs support, participation, and Engine 15 confirmation.`;
+  }
+
+  if (classification.state === W2_STATES.DEEP_PULLBACK_RISK) {
+    return `${name} is in a deeper Minute W2 pullback. Watch ${t.reference786} and invalidation near ${t.invalidation}. No chase long until structure reclaims.`;
+  }
+
+  if (classification.state === W2_STATES.INVALIDATED) {
+    return `${name} broke the Minute W2 invalidation area near ${t.invalidation}. Current W2-to-W3 setup is damaged until a new wave structure forms.`;
+  }
+
+  return `${name} is in Minute W2-to-W3 context, but Engine 23 needs clearer W2 fib data before giving a clean behavior read.`;
+}
+
 function buildNeeds({ missingMicro }) {
   const needs = [];
 
@@ -304,6 +433,7 @@ export function interpretWaveEnvironment(input = {}) {
     symbol = "ES",
     price,
     engine22WaveStrategy,
+    fib,
   } = input;
 
   if (!engine22WaveStrategy || typeof engine22WaveStrategy !== "object") {
@@ -343,7 +473,57 @@ export function interpretWaveEnvironment(input = {}) {
   const missingMicro = detectMissingMicroNeed(degrees);
   const directionBias = detectDirectionBias(engine22WaveStrategy);
 
-  const w5ContextActive = hasActiveW5Context(engine22WaveStrategy);
+  const w2ToW3ContextActive = hasActiveW2ToW3Context(engine22WaveStrategy);
+
+  if (w2ToW3ContextActive) {
+    const classification = classifyW2PullbackEnvironment({
+      price: currentPrice,
+      fib,
+    });
+
+  const roundedPullbackTargets = classification.pullbackTargets
+    ? Object.fromEntries(
+        Object.entries(classification.pullbackTargets).map(([key, value]) => [
+          key,
+          typeof value === "number" ? roundToTick(value) : value,
+        ])
+      )
+    : null;
+
+  return {
+    ok: true,
+    engine: ENGINE_NAME,
+    mode: READ_ONLY_MODE,
+    symbol,
+    environment: classification.environment,
+    state: classification.state,
+    health: classification.health,
+    directionBias: "LONG",
+    activeDegree,
+    higherDegreeContext: buildHigherDegreeContext(higherDegree),
+    chaseAllowed: false,
+    preferredEntry: classification.preferredEntry,
+    activeTargets: roundedPullbackTargets,
+    higherTargets: buildTargetsForDegree(higherDegree, higherDegreeData),
+    needs: buildNeeds({ missingMicro: false }),
+    reasonCodes: [...new Set([
+      "MICRO_COMPLETE_W5",
+      "MINUTE_W1_COMPLETE",
+      ...classification.reasonCodes,
+      "READ_ONLY_INTERPRETATION",
+      "NO_CHASE_EXTENSION",
+    ])],
+    summary: buildW2Summary({
+      symbol,
+      classification: {
+        ...classification,
+        pullbackTargets: roundedPullbackTargets,
+      },
+    }),
+  };
+}
+
+const w5ContextActive = hasActiveW5Context(engine22WaveStrategy);
 
   const classification = w5ContextActive
     ? classifyW5Environment({
