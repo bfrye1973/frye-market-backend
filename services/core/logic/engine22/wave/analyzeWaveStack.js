@@ -12,6 +12,7 @@ import { analyzeMicroW4AbcRisk } from "./analyzeMicroW4AbcRisk.js";
 import { analyzeWaveDuration } from "./analyzeWaveDuration.js";
 import { analyzeAbcCorrection } from "./analyzeAbcCorrection.js";
 import { buildTradeContextSummary } from "./buildTradeContextSummary.js";
+import { buildW4Levels } from "./buildW4Levels.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
