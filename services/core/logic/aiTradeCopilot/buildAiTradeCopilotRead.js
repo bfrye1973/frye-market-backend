@@ -26,6 +26,10 @@ function pretty(value, fallback = "Unknown") {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+function trimEndingPeriod(value) {
+  return String(value || "").trim().replace(/\.+$/, "");
+}
+
 function pickEsPrice({ strategy, engine23, engine22, marketMeter }) {
   return (
     asNumber(engine22?.currentPrice) ??
@@ -245,9 +249,89 @@ function buildSummary({
   const fourHourText = text(emaPosture?.fourHour?.state, "UNKNOWN");
   const dailyText = text(emaPosture?.daily?.state, "UNKNOWN");
 
+  const engine23Summary =
+    trimEndingPeriod(engine23?.summary) || "wave behavior read unavailable";
+
   return `${symbol} is in a read-only ${biasResult.bias} context at ${
     price ?? "unknown price"
-  }. Engine 23 says: ${engine23?.summary || "wave behavior read unavailable"}. Engine 15 decision is ${decisionText}, so this is not an automatic trade. Market regime is ${regimeText}. EMA posture: 10m ${tenMinText}, 1h ${oneHourText}, 4h ${fourHourText}, daily ${dailyText}. Watch support at ${supportText}; weakness/chase-risk zones begin near ${weaknessText}. Wait for the needed confirmations before acting.`;
+  }. Engine 23 says: ${engine23Summary}. Engine 15 decision is ${decisionText}, so this is not an automatic trade. Market regime is ${regimeText}. EMA posture: 10m ${tenMinText}, 1h ${oneHourText}, 4h ${fourHourText}, daily ${dailyText}. Watch support at ${supportText}; weakness/chase-risk zones begin near ${weaknessText}. Wait for the needed confirmations before acting.`;
+
+function buildAiReasoning({
+  engine15Decision,
+  engine23,
+  marketRegime,
+  emaPosture,
+  keyLevels,
+  biasResult,
+}) {
+  const env = String(engine23?.environment || "").toUpperCase();
+  const action = String(engine15Decision?.action || "").toUpperCase();
+  const direction = String(engine15Decision?.direction || "").toUpperCase();
+  const marketDir = String(marketRegime?.directionBias || "").toUpperCase();
+  const regime = String(marketRegime?.regime || "").toUpperCase();
+  const strictness = String(marketRegime?.strictness || "").toUpperCase();
+
+  const tenMin = String(emaPosture?.tenMinute?.state || "").toUpperCase();
+  const oneHour = String(emaPosture?.oneHour?.state || "").toUpperCase();
+
+  const lowerTfWeak =
+    tenMin.includes("BELOW") || oneHour.includes("BELOW");
+
+  const supportText =
+    keyLevels.support.length > 0
+      ? keyLevels.support.join(" / ")
+      : "active support zone unavailable";
+
+  const weaknessText =
+    keyLevels.weaknessZones.length > 0
+      ? keyLevels.weaknessZones.map((z) => z.level).filter(Boolean).join(" / ")
+      : "higher weakness zones unavailable";
+
+  const invalidationRead =
+    keyLevels.invalidation != null
+      ? `W2 setup is damaged if price loses ${keyLevels.invalidation}.`
+      : "Active invalidation level is unavailable.";
+
+  if (
+    env === "W2_PULLBACK" &&
+    action === "WATCH" &&
+    direction === "LONG" &&
+    (marketDir === "SHORT" || lowerTfWeak)
+  ) {
+    return {
+      read: "CONSTRUCTIVE_BUT_NOT_READY",
+      bestScenario: `Minute W2 support holds near ${supportText}, then 10m and 1h reclaim confirm a possible W3 attempt.`,
+      dangerScenario: `Price loses W2 support while market regime remains ${regime || "UNKNOWN"} / ${marketDir || "UNKNOWN"} / ${strictness || "UNKNOWN"} strictness.`,
+      confirmationNeeded: [
+        "10m reclaim EMA10/EMA20",
+        "1h stabilization or reclaim",
+        "Engine 4 participation confirmation",
+        "Engine 15 confirms readiness",
+      ],
+      avoid: [
+        `Do not chase into ${weaknessText}`,
+        "Do not long while 10m and 1h are weak without reclaim",
+        "Do not override Engine 15",
+      ],
+      invalidationRead,
+      confidenceNote:
+        "Confidence is MEDIUM_LOW because Engine 23 is constructive but market regime direction is SHORT and lower timeframes are weak.",
+    };
+  }
+
+  return {
+    read: "WAIT_FOR_CLEARER_ALIGNMENT",
+    bestScenario: "Engines align and Engine 15 confirms readiness.",
+    dangerScenario:
+      "Mixed engine state persists or price violates active invalidation.",
+    confirmationNeeded: buildNeeds({ engine15Decision, engine23 }),
+    avoid: [
+      "Do not override Engine 15",
+      "Do not chase without confirmation",
+    ],
+    invalidationRead,
+    confidenceNote: `AI reasoning is limited because the current setup is not fully aligned. Current bias is ${biasResult?.bias || "UNKNOWN"}.`,
+  };
 }
 
 export function buildAiTradeCopilotRead(input = {}) {
@@ -298,6 +382,15 @@ export function buildAiTradeCopilotRead(input = {}) {
     emaPosture,
   });
 
+  const aiReasoning = buildAiReasoning({
+    engine15Decision,
+    engine23,
+    marketRegime,
+    emaPosture,
+    keyLevels,
+    biasResult,
+  });
+
   return {
     ok: true,
     engine: ENGINE_NAME,
@@ -341,6 +434,7 @@ export function buildAiTradeCopilotRead(input = {}) {
     keyLevels,
     needs,
     warnings,
+    aiReasoning,
     reasonCodes: [
       "READ_ONLY_AI_COPILOT",
       biasResult.reason,
