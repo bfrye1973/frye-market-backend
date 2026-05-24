@@ -36,6 +36,7 @@ import { buildEngine22WaveStrategy } from "../logic/engine22/wave/buildEngine22W
 import { interpretWaveEnvironment } from "../logic/engine23/interpretation/interpretWaveEnvironment.js";
 import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.js";
 import { buildWaveTradeDecision } from "../logic/engine22/decisions/buildWaveTradeDecision.js";
+import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 
 
 /* -----------------------------
@@ -3353,6 +3354,13 @@ console.log("Engine21 alignment fetched");
           fib: scalp.fibLevels || null,
           engine2State,
         });
+
+        scalp.aiTradeCopilot = buildAiTradeCopilotRead({
+          symbol,
+          strategy: scalp,
+          marketRegime: result.marketRegime || null,
+          marketMeter: result.marketMeter || null,
+        });
          
       } catch (err) {
         console.error("[E23 FINAL ERROR]", err);
@@ -3380,6 +3388,21 @@ console.log("Engine21 alignment fetched");
             stack: String(err?.stack || ""),
           },
         };
+
+        scalp.aiTradeCopilot = {
+          ok: false,
+          engine: "aiTradeCopilot.v1",
+          mode: "READ_ONLY",
+          symbol,
+          headline: "AI Trade Copilot unavailable",
+          bias: "UNKNOWN",
+          action: "WAIT",
+          confidence: "LOW",
+          shouldChase: false,
+          reasonCodes: ["ENGINE23_FINAL_ERROR"],
+          summary:
+            "AI Trade Copilot could not run because the final Engine 23 interpretation failed.",
+        }; 
       }
     }
   } 
