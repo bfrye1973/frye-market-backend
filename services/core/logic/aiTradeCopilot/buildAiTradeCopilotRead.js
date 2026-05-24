@@ -1,3 +1,6 @@
+cd /opt/render/project/src/services/core
+
+cat > logic/aiTradeCopilot/buildAiTradeCopilotRead.js <<'EOF'
 // services/core/logic/aiTradeCopilot/buildAiTradeCopilotRead.js
 
 const ENGINE_NAME = "aiTradeCopilot.v1";
@@ -255,6 +258,7 @@ function buildSummary({
   return `${symbol} is in a read-only ${biasResult.bias} context at ${
     price ?? "unknown price"
   }. Engine 23 says: ${engine23Summary}. Engine 15 decision is ${decisionText}, so this is not an automatic trade. Market regime is ${regimeText}. EMA posture: 10m ${tenMinText}, 1h ${oneHourText}, 4h ${fourHourText}, daily ${dailyText}. Watch support at ${supportText}; weakness/chase-risk zones begin near ${weaknessText}. Wait for the needed confirmations before acting.`;
+}
 
 function buildAiReasoning({
   engine15Decision,
@@ -454,3 +458,4 @@ export function buildAiTradeCopilotRead(input = {}) {
 }
 
 export default buildAiTradeCopilotRead;
+EOF
