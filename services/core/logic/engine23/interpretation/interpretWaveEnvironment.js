@@ -856,6 +856,7 @@ export function interpretWaveEnvironment(input = {}) {
       ],
       reasonCodes: [
         "ENGINE22_ACTIVE_SETUP_W4_TO_W5",
+        "W4_LEVELS_NOT_EXPOSED_BY_ENGINE22",
         "LATE_CYCLE_W5_CONTEXT",
         "EXHAUSTION_AWARE",
         "NO_CHASE_LONG",
