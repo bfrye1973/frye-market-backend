@@ -802,6 +802,60 @@ export function interpretWaveEnvironment(input = {}) {
     };
   }
 
+  if (setupFamily.family === "W4_TO_W5") {
+    const roundedActiveTargets = roundNumberFields(activeTargets);
+    const roundedHigherTargets = roundNumberFields(higherTargets);
+
+    const multiDegreeContext = buildMultiDegreeContext({
+      symbol,
+      engine22WaveStrategy,
+      degrees,
+      engine2State,
+      activeDegree,
+      higherDegree,
+      pullbackTargets: null,
+      higherTargets: roundedHigherTargets,
+    });
+
+    return {
+      ok: true,
+      engine: ENGINE_NAME,
+      mode: READ_ONLY_MODE,
+      symbol,
+      environment: "W4_PULLBACK",
+      state: W4_STATES.RECLAIM_WATCH,
+      health: HEALTH.CAUTION,
+      directionBias: "LONG_AFTER_RECLAIM",
+      activeDegree,
+      higherDegreeContext: buildHigherDegreeContext(higherDegree),
+      chaseAllowed: false,
+      preferredEntry: "WAIT_FOR_W4_SUPPORT_OR_RECLAIM",
+      activeTargets: roundedActiveTargets,
+      higherTargets: roundedHigherTargets,
+      recentCompletion: multiDegreeContext.recentCompletion,
+      activeStructure: multiDegreeContext.activeStructure,
+      higherContext: multiDegreeContext.higherContext,
+      weaknessZones: multiDegreeContext.weaknessZones,
+      waveStack: multiDegreeContext.waveStack,
+      needs: [
+        "W4_SUPPORT_HOLD",
+        "RECLAIM_CONFIRMATION",
+        "NO_CHASE_EXTENSION",
+        "ENGINE15_READY_OR_PAPER_READY",
+        "ENGINE3_REACTION_CONFIRMATION",
+        "ENGINE4_PARTICIPATION_CONFIRMATION",
+      ],
+      reasonCodes: [
+        "ENGINE22_ACTIVE_SETUP_W4_TO_W5",
+        "LATE_CYCLE_W5_CONTEXT",
+        "EXHAUSTION_AWARE",
+        "NO_CHASE_LONG",
+        "READ_ONLY_INTERPRETATION",
+      ],
+      summary: `${symbol} ${titleCase(activeDegree)} W4 pullback is forming before a possible W5 launch. Higher-degree trend can still support continuation, but W5 is later-cycle and more exhaustion-sensitive. Watch W4 support/reclaim and do not chase into extension zones. Engine 15 remains the final readiness check.`,
+    };
+  }
+
   const w5ContextActive =
     setupFamily.family === "W5_EXTENSION" ||
     hasActiveW5Context(engine22WaveStrategy);
