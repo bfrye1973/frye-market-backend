@@ -803,7 +803,16 @@ export function interpretWaveEnvironment(input = {}) {
   }
 
   if (setupFamily.family === "W4_TO_W5") {
-    const roundedActiveTargets = roundNumberFields(activeTargets);
+    const rawW4Targets = {
+      degree: activeDegree,
+      pullbackFor: "W4",
+      support: null,
+      reclaim: null,
+      invalidation: null,
+      source: "ENGINE22_LEVELS_UNAVAILABLE",
+    };
+
+    const roundedActiveTargets = roundNumberFields(rawW4Targets);
     const roundedHigherTargets = roundNumberFields(higherTargets);
 
     const multiDegreeContext = buildMultiDegreeContext({
@@ -852,7 +861,7 @@ export function interpretWaveEnvironment(input = {}) {
         "NO_CHASE_LONG",
         "READ_ONLY_INTERPRETATION",
       ],
-      summary: `${symbol} ${titleCase(activeDegree)} W4 pullback is forming before a possible W5 launch. Higher-degree trend can still support continuation, but W5 is later-cycle and more exhaustion-sensitive. Watch W4 support/reclaim and do not chase into extension zones. Engine 15 remains the final readiness check.`,
+      summary: `${symbol} ${titleCase(activeDegree)} W4 pullback is forming before a possible W5 launch. Engine 23 is waiting for Engine 22 to expose W4 support, reclaim, and invalidation levels before labeling precise W4 trade zones. Higher-degree trend can still support continuation, but W5 is later-cycle and more exhaustion-sensitive. Do not chase into extension zones. Engine 15 remains the final readiness check.`,
     };
   }
 
