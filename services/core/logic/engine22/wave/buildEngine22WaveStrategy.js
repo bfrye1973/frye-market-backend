@@ -335,6 +335,13 @@ export function buildEngine22WaveStrategy(input = {}) {
     timelineRead,
   });
 
+  const activeDegree = waveFibState?.activeTradingDegree || null;
+
+  const w4Levels =
+    waveFibState?.w4Levels ||
+    (activeDegree ? waveFibState?.degrees?.[activeDegree]?.w4Levels : null) ||
+    null;
+
   return {
     ok: waveFibState?.ok === true,
     engine: "engine22.waveStrategy.v1",
@@ -347,6 +354,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     currentPrice: round2(context.currentPrice),
 
     waveFibState,
+    w4Levels, 
     tradeContextSummary,
     targetClusterConfidence,
     timelineRead,
