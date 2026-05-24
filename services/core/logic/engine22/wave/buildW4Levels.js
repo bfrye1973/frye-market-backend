@@ -1,6 +1,3 @@
-cd /opt/render/project/src/services/core
-
-cat > logic/engine22/wave/buildW4Levels.js <<'EOF'
 // services/core/logic/engine22/wave/buildW4Levels.js
 // Engine 22G — Official W4 Level Builder
 //
