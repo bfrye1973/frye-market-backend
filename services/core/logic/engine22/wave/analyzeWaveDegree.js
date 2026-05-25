@@ -268,6 +268,97 @@ function buildProjectionFromBlock({
   };
 }
 
+function buildW3ProjectionFromBlock({
+  symbol,
+  block,
+  direction,
+}) {
+  const anchors = getAnchorPrices(block);
+
+  if (anchors.w1 === null || anchors.w2 === null) {
+    return {
+      ok: false,
+      source: "W1_W2_TO_W3",
+      reason: "MISSING_W1_W2_ANCHORS",
+      anchors,
+      levels: null,
+      reasonCodes: ["MISSING_W1_W2_ANCHORS"],
+    };
+  }
+
+  const dir = upper(direction) === "BEARISH" ? "BEARISH" : "BULLISH";
+  const sign = dir === "BEARISH" ? -1 : 1;
+  const range = Math.abs(anchors.w1 - anchors.w2);
+
+  if (!Number.isFinite(range) || range <= 0) {
+    return {
+      ok: false,
+      source: "W1_W2_TO_W3",
+      reason: "INVALID_W1_W2_RANGE",
+      anchors,
+      levels: null,
+      reasonCodes: ["INVALID_W1_W2_RANGE"],
+    };
+  }
+
+  const tickSize = ["ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K"].includes(
+    String(symbol || "").toUpperCase()
+  )
+    ? 0.25
+    : null;
+
+  const roundToTick = (price) => {
+    const p = Number(price);
+    if (!Number.isFinite(p)) return null;
+    if (!Number.isFinite(tickSize) || tickSize <= 0) return round2(p);
+    return Number((Math.round(p / tickSize) * tickSize).toFixed(2));
+  };
+
+  const fibs = [
+    { key: "e100", label: "1.000", value: 1.0 },
+    { key: "e1272", label: "1.272", value: 1.272 },
+    { key: "e1618", label: "1.618", value: 1.618 },
+    { key: "e200", label: "2.000", value: 2.0 },
+    { key: "e2618", label: "2.618", value: 2.618 },
+  ];
+
+  const rawLevels = {};
+  const levels = {};
+  const fibMeta = {};
+
+  for (const fib of fibs) {
+    const raw = anchors.w2 + sign * range * fib.value;
+    rawLevels[fib.key] = raw;
+    levels[fib.key] = roundToTick(raw);
+    fibMeta[fib.key] = {
+      label: fib.label,
+      value: fib.value,
+    };
+  }
+
+  return {
+    ok: true,
+    source: "W1_W2_TO_W3_ACTIVE_EXECUTION",
+    symbol,
+    direction: dir,
+    anchors: {
+      w1: round2(anchors.w1),
+      w2: round2(anchors.w2),
+    },
+    range: round2(range),
+    rawLevels,
+    levels,
+    fibMeta,
+    tickSize,
+    reason: "W1_W2_ANCHORS_VALID_ACTIVE_W3_PROJECTION",
+    reasonCodes: ["W1_W2_ANCHORS_VALID_ACTIVE_W3_PROJECTION"],
+    anchorSource: {
+      w1: "MARK_W1",
+      w2: "MARK_W2",
+    },
+  };
+}
+
 export function analyzeWaveDegree({
   symbol = "SPY",
   degree = null,
@@ -311,25 +402,38 @@ export function analyzeWaveDegree({
     fibPressure: null,
   });
 
-  const shouldProjectW5 =
-    ["IN_W4", "IN_W5", "COMPLETE_W5"].includes(upper(phase)) ||
-    anchors.w4 !== null;
+  const phaseKey = upper(phase);
 
-  const fibProjection =
-    shouldProjectW5
-      ? buildProjectionFromBlock({
-          symbol,
-          block,
-          direction,
-        })
-      : {
-          ok: false,
-          source: "W4_TO_W5",
-          reason: "W5_PROJECTION_NOT_ACTIVE_FOR_PHASE",
-          anchors,
-          levels: null,
-          reasonCodes: ["W5_PROJECTION_NOT_ACTIVE_FOR_PHASE"],
-        };
+const shouldProjectW3 =
+  phaseKey === "IN_W3" &&
+  anchors.w1 !== null &&
+  anchors.w2 !== null &&
+  anchors.w3 === null;
+
+const shouldProjectW5 =
+  ["IN_W4", "IN_W5", "COMPLETE_W5"].includes(phaseKey) ||
+  anchors.w4 !== null;
+
+const fibProjection = shouldProjectW3
+  ? buildW3ProjectionFromBlock({
+      symbol,
+      block,
+      direction,
+    })
+  : shouldProjectW5
+  ? buildProjectionFromBlock({
+      symbol,
+      block,
+      direction,
+    })
+  : {
+      ok: false,
+      source: "NO_ACTIVE_FIB_PROJECTION",
+      reason: "FIB_PROJECTION_NOT_ACTIVE_FOR_PHASE",
+      anchors,
+      levels: null,
+      reasonCodes: ["FIB_PROJECTION_NOT_ACTIVE_FOR_PHASE"],
+    };
 
   const fibPressure =
     fibProjection?.ok === true
