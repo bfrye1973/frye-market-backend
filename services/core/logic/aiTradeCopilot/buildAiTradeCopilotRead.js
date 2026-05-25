@@ -1,6 +1,3 @@
-cd /opt/render/project/src/services/core
-
-cat > logic/aiTradeCopilot/buildAiTradeCopilotRead.js <<'EOF'
 // services/core/logic/aiTradeCopilot/buildAiTradeCopilotRead.js
 
 const ENGINE_NAME = "aiTradeCopilot.v1";
@@ -458,4 +455,4 @@ export function buildAiTradeCopilotRead(input = {}) {
 }
 
 export default buildAiTradeCopilotRead;
-EOF
+
