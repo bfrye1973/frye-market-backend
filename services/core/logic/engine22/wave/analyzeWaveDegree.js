@@ -9,6 +9,7 @@
 
 import { projectFibExtensions } from "./projectFibExtensions.js";
 import { analyzeFibPressure } from "./analyzeFibPressure.js";
+import { analyzeExtensionProgress } from "./analyzeExtensionProgress.js";
 
 function toNum(x) {
   if (x === null || x === undefined || x === "") return null;
@@ -366,6 +367,7 @@ export function analyzeWaveDegree({
   block = null,
   parentBlock = null,
   currentPrice = null,
+  barsByTf = {},
 } = {}) {
   if (!block || typeof block !== "object") {
     return {
@@ -435,7 +437,7 @@ const fibProjection = shouldProjectW3
       reasonCodes: ["FIB_PROJECTION_NOT_ACTIVE_FOR_PHASE"],
     };
 
-  const fibPressure =
+    const fibPressure =
     fibProjection?.ok === true
       ? analyzeFibPressure({
           currentPrice,
@@ -448,6 +450,28 @@ const fibProjection = shouldProjectW3
           extensionState: "UNKNOWN",
           chaseRisk: "UNKNOWN",
           expectedBehavior: "WAIT_FOR_VALID_PROJECTION",
+          reasonCodes: fibProjection?.reasonCodes || ["NO_VALID_FIB_PROJECTION"],
+        };
+
+  const extensionProgress =
+    fibProjection?.ok === true
+      ? analyzeExtensionProgress({
+          symbol,
+          degree,
+          phase,
+          direction: fibProjection.direction || direction,
+          currentPrice,
+          block,
+          fibProjection,
+          barsByTf,
+        })
+      : {
+          ok: false,
+          active: false,
+          symbol,
+          degree,
+          activeWave: null,
+          state: "NO_VALID_FIB_PROJECTION",
           reasonCodes: fibProjection?.reasonCodes || ["NO_VALID_FIB_PROJECTION"],
         };
 
@@ -493,6 +517,7 @@ const fibProjection = shouldProjectW3
 
     fibProjection,
     fibPressure,
+    extensionProgress,
 
     action: interpreted.action,
     nextExpectedWave: interpreted.nextExpectedWave,
