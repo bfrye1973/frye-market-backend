@@ -2765,11 +2765,11 @@ if (isFuturesSymbol(symbol)) {
            volumeContext: volumeContextForEngine22,
            breakoutContext: engine22Scalp?.breakoutContext || null,
            barsByTf: {
-             "10m": emaPosture?.tenMinute?.bars || [],
-              "1h": emaPosture?.oneHour?.bars || [],
-              "4h": emaPosture?.fourHour?.bars || [],
-              "1d": emaPosture?.daily?.bars || [],
-            }, 
+             "10m": marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+             "1h": marketMeter?.layers?.emaPosture?.oneHour?.bars || [],
+             "4h": marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
+             "1d": marketMeter?.layers?.emaPosture?.daily?.bars || [],
+           },
          }); 
 
          engine22WaveStrategy.tradeDecision = buildWaveTradeDecision({
