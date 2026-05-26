@@ -434,23 +434,35 @@ export function analyzeWaveStack({
     barsByTf,
   });
 
+  const activeDegreeName = activeTradingDegree?.degree || null;
+  const activeDegreeBlock = activeDegreeName ? engine2State?.[activeDegreeName] || null : null;
+  const activeDegreePhase = upper(activeDegreeBlock?.phase);
+  const activeDegreeConfirmedPhase = upper(activeDegreeBlock?.confirmedPhase);
+
+  const activeCorrectionFor =
+    activeDegreePhase === "IN_W4" && activeDegreeConfirmedPhase === "IN_W3"
+      ? "W4"
+      : activeDegreePhase === "IN_W2" && activeDegreeConfirmedPhase === "IN_W1"
+      ? "W2"
+      : null;
+
   const abcCorrection =
-    activeTradingDegree?.setup === "MICRO_W4_TO_W5"
+    activeDegreeName && activeCorrectionFor
       ? analyzeAbcCorrection({
           symbol,
-          degree: "micro",
-          correctionFor: "W4",
-          block: engine2State?.micro || null,
+          degree: activeDegreeName,
+          correctionFor: activeCorrectionFor,
+          block: activeDegreeBlock,
           currentPrice,
         })
       : {
           ok: true,
           active: false,
           symbol,
-          degree: null,
+          degree: activeDegreeName,
           correctionFor: null,
           state: "NO_ACTIVE_ABC_CORRECTION",
-          reasonCodes: ["ACTIVE_SETUP_NOT_MICRO_W4_TO_W5"],
+          reasonCodes: ["ACTIVE_SETUP_NOT_ACTIVE_CORRECTION_DEGREE"],
         };
 
   const summary = buildPlainEnglishSummary({
