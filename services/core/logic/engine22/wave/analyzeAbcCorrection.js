@@ -3,10 +3,14 @@
 //
 // Purpose:
 // Read-only ABC correction intelligence.
-// Uses manual A_LOW / B_HIGH / C_LOW levels when available.
-// Compares A/B/C against fib retracement levels from the prior impulse.
-// Does not create trades.
-// Does not change readiness/status/entries.
+// Manual A_LOW / B_HIGH / C_LOW levels remain truth when available.
+// If manual A/B/C marks are missing, this file can auto-detect a simple ABC
+// from the active degree's market bars.
+//
+// This does not create trades.
+// This does not change readiness/status/entries.
+// This does not call brokers.
+// This does not overwrite manual Engine 2 marks.
 
 function toNum(x) {
   if (x === null || x === undefined || x === "") return null;
@@ -15,14 +19,106 @@ function toNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
+function validPrice(x) {
+  const n = toNum(x);
+  return n !== null && n > 0 ? n : null;
+}
+
 function round2(x) {
   const n = Number(x);
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
 }
 
+function upper(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
 function getMarkPrice(block, key) {
   const p = toNum(block?.waveMarks?.[key]?.p);
   return p !== null && p > 0 ? p : null;
+}
+
+function getMarkTimeSec(block, key) {
+  const raw =
+    block?.waveMarks?.[key]?.tSec ??
+    block?.waveMarks?.[key]?.timeSec ??
+    null;
+
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function normalizeBarTime(bar) {
+  const raw =
+    bar?.timeSec ??
+    bar?.tSec ??
+    bar?.timestampSec ??
+    bar?.timestamp ??
+    bar?.time ??
+    bar?.t ??
+    null;
+
+  if (typeof raw === "number") {
+    return raw > 10_000_000_000 ? Math.floor(raw / 1000) : raw;
+  }
+
+  if (typeof raw === "string") {
+    const n = Number(raw);
+
+    if (Number.isFinite(n)) {
+      return n > 10_000_000_000 ? Math.floor(n / 1000) : n;
+    }
+
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) {
+      return Math.floor(parsed / 1000);
+    }
+  }
+
+  return null;
+}
+
+function normalizeBar(bar) {
+  if (!bar || typeof bar !== "object") return null;
+
+  const timeSec = normalizeBarTime(bar);
+  const high = toNum(bar.high ?? bar.h);
+  const low = toNum(bar.low ?? bar.l);
+  const close = toNum(bar.close ?? bar.c);
+
+  if (timeSec === null) return null;
+  if (high === null && low === null && close === null) return null;
+
+  return {
+    timeSec,
+    high: high ?? close,
+    low: low ?? close,
+    close,
+    raw: bar,
+  };
+}
+
+function degreeToTf(degree, fallback = null) {
+  const d = String(degree || "").toLowerCase();
+
+  if (d === "primary") return "1d";
+  if (d === "intermediate") return "1h";
+  if (d === "minor") return "1h";
+  if (d === "minute") return "10m";
+  if (d === "micro") return "10m";
+
+  return fallback || "10m";
+}
+
+function getBarsForDegree({ degree, block, barsByTf }) {
+  const tf = degreeToTf(degree, block?.tf || "10m");
+  const direct = barsByTf?.[tf];
+
+  if (Array.isArray(direct)) {
+    return direct.map(normalizeBar).filter(Boolean);
+  }
+
+  return [];
 }
 
 function buildRetracementLevels({ impulseStart, impulseEnd }) {
@@ -51,6 +147,169 @@ function buildRetracementLevels({ impulseStart, impulseEnd }) {
       r786: round2(end - range * 0.786),
     },
     reason: "IMPULSE_RANGE_VALID",
+  };
+}
+
+function detectAutoAbcFromBars({
+  symbol = "SPY",
+  degree = "minute",
+  correctionFor = "W4",
+  block = null,
+  barsByTf = {},
+  minMovePts = null,
+} = {}) {
+  const tf = degreeToTf(degree, block?.tf || "10m");
+  const bars = getBarsForDegree({ degree, block, barsByTf });
+
+  if (!bars.length) {
+    return {
+      ok: false,
+      used: false,
+      source: "AUTO_ABC_FROM_BARS",
+      tf,
+      reason: "NO_BARS_FOR_AUTO_ABC",
+      reasonCodes: ["NO_BARS_FOR_AUTO_ABC"],
+    };
+  }
+
+  const startKey = correctionFor === "W4" ? "W3" : "W1";
+  const startSec = getMarkTimeSec(block, startKey);
+
+  const afterStart = startSec
+    ? bars.filter((bar) => Number(bar.timeSec) >= Number(startSec))
+    : bars;
+
+  if (afterStart.length < 3) {
+    return {
+      ok: false,
+      used: false,
+      source: "AUTO_ABC_FROM_BARS",
+      tf,
+      reason: "NOT_ENOUGH_BARS_AFTER_CORRECTION_START",
+      reasonCodes: ["NOT_ENOUGH_BARS_AFTER_CORRECTION_START"],
+    };
+  }
+
+  const s = upper(symbol);
+  const requiredMove =
+    Number.isFinite(Number(minMovePts))
+      ? Number(minMovePts)
+      : s.startsWith("ES") || s.startsWith("MES")
+      ? 5
+      : s.startsWith("NQ") || s.startsWith("MNQ")
+      ? 15
+      : 1;
+
+  // Simple v1 ABC read:
+  // A = lowest low after correction starts.
+  // B = highest bounce after A.
+  // C = lowest low after B.
+  //
+  // This is intentionally read-only and conservative.
+  // Manual marks override this if present.
+  let aIdx = -1;
+  let aLow = null;
+
+  for (let i = 0; i < afterStart.length; i++) {
+    const low = validPrice(afterStart[i].low);
+    if (low === null) continue;
+
+    if (aLow === null || low < aLow) {
+      aLow = low;
+      aIdx = i;
+    }
+  }
+
+  if (aIdx < 0 || aLow === null) {
+    return {
+      ok: false,
+      used: false,
+      source: "AUTO_ABC_FROM_BARS",
+      tf,
+      reason: "AUTO_A_LOW_NOT_FOUND",
+      reasonCodes: ["AUTO_A_LOW_NOT_FOUND"],
+    };
+  }
+
+  let bIdx = -1;
+  let bHigh = null;
+
+  for (let i = aIdx + 1; i < afterStart.length; i++) {
+    const high = validPrice(afterStart[i].high);
+    if (high === null) continue;
+
+    if (bHigh === null || high > bHigh) {
+      bHigh = high;
+      bIdx = i;
+    }
+  }
+
+  let cIdx = -1;
+  let cLow = null;
+
+  if (bIdx >= 0) {
+    for (let i = bIdx + 1; i < afterStart.length; i++) {
+      const low = validPrice(afterStart[i].low);
+      if (low === null) continue;
+
+      if (cLow === null || low < cLow) {
+        cLow = low;
+        cIdx = i;
+      }
+    }
+  }
+
+  const aToBMove =
+    aLow !== null && bHigh !== null ? Math.abs(bHigh - aLow) : null;
+
+  const bToCMove =
+    bHigh !== null && cLow !== null ? Math.abs(bHigh - cLow) : null;
+
+  const hasMeaningfulB =
+    aToBMove !== null && aToBMove >= requiredMove;
+
+  const hasMeaningfulC =
+    bToCMove !== null && bToCMove >= requiredMove;
+
+  const abcStatus =
+    hasMeaningfulB && hasMeaningfulC
+      ? "AUTO_ABC_C_LEG_WORKING"
+      : hasMeaningfulB
+      ? "AUTO_A_AND_B_DETECTED_WAITING_FOR_C"
+      : "AUTO_A_DETECTED_WAITING_FOR_B";
+
+  return {
+    ok: true,
+    used: true,
+    source: "AUTO_ABC_FROM_BARS",
+    tf,
+    abcStatus,
+
+    aLow: round2(aLow),
+    bHigh: hasMeaningfulB ? round2(bHigh) : null,
+    cLow: hasMeaningfulC ? round2(cLow) : null,
+
+    bars: {
+      startKey,
+      startSec,
+      aTimeSec: aIdx >= 0 ? afterStart[aIdx]?.timeSec : null,
+      bTimeSec: bIdx >= 0 ? afterStart[bIdx]?.timeSec : null,
+      cTimeSec: cIdx >= 0 ? afterStart[cIdx]?.timeSec : null,
+    },
+
+    quality: {
+      requiredMovePts: requiredMove,
+      aToBMove: round2(aToBMove),
+      bToCMove: round2(bToCMove),
+      hasMeaningfulB,
+      hasMeaningfulC,
+    },
+
+    reasonCodes: [
+      "AUTO_ABC_FROM_BARS",
+      hasMeaningfulB ? "AUTO_B_HIGH_CONFIRMED" : "AUTO_B_HIGH_NOT_CONFIRMED",
+      hasMeaningfulC ? "AUTO_C_LOW_CONFIRMED" : "AUTO_C_LOW_NOT_CONFIRMED",
+    ],
   };
 }
 
@@ -184,7 +443,7 @@ function uniqueSortedPrices(xs = []) {
 
   return xs
     .map(round2)
-    .filter((x) => Number.isFinite(x))
+    .filter((x) => Number.isFinite(x) && x > 0)
     .sort((a, b) => a - b)
     .filter((x) => {
       const key = String(x);
@@ -223,7 +482,7 @@ function buildReclaimPlan({ levels, noOverlapLine, bHigh }) {
     },
     {
       key: "w1High",
-      label: "Micro W1 high / no-overlap reclaim",
+      label: "W1 high / no-overlap reclaim",
       price: w1High,
       group: "CLEAN_PATH_RECLAIM",
     },
@@ -245,7 +504,7 @@ function buildReclaimPlan({ levels, noOverlapLine, bHigh }) {
       price: r382,
       group: "STRUCTURE_RECLAIM",
     },
-  ].filter((x) => Number.isFinite(x.price));
+  ].filter((x) => Number.isFinite(x.price) && x.price > 0);
 
   const reclaimLevels = uniqueSortedPrices(
     reclaimLevelDetails.map((x) => x.price)
@@ -259,7 +518,7 @@ function buildReclaimPlan({ levels, noOverlapLine, bHigh }) {
     },
     {
       group: "CLEAN_PATH_RECLAIM",
-      label: "Reclaim 61.8% / Micro W1 high",
+      label: "Reclaim 61.8% / W1 high",
       prices: uniqueSortedPrices([r618, w1High]),
     },
     {
@@ -293,6 +552,7 @@ export function analyzeAbcCorrection({
   correctionFor = "W4",
   block = null,
   currentPrice = null,
+  barsByTf = {},
 } = {}) {
   if (!block || typeof block !== "object") {
     return {
@@ -360,16 +620,35 @@ export function analyzeAbcCorrection({
     impulseEnd,
   });
 
-  const aLow = toNum(block?.aLow);
+  const autoAbc = detectAutoAbcFromBars({
+    symbol,
+    degree,
+    correctionFor,
+    block,
+    barsByTf,
+  });
 
-  const bHigh =
-    toNum(block?.bHigh) ??
-    toNum(block?.lowerHighLevel) ??
-    toNum(block?.continuationLevel);
+  const manualALow = validPrice(block?.aLow);
 
-  const cLow =
-    toNum(block?.cLow) ??
-    toNum(block?.w4Low);
+  const manualBHigh =
+    validPrice(block?.bHigh) ??
+    validPrice(block?.lowerHighLevel) ??
+    validPrice(block?.continuationLevel);
+
+  const manualCLow =
+    validPrice(block?.cLow) ??
+    validPrice(block?.w4Low);
+
+  const aLow = manualALow ?? validPrice(autoAbc?.aLow);
+  const bHigh = manualBHigh ?? validPrice(autoAbc?.bHigh);
+  const cLow = manualCLow ?? validPrice(autoAbc?.cLow);
+
+  const abcSource =
+    manualALow !== null || manualBHigh !== null || manualCLow !== null
+      ? "MANUAL_ABC_MARKS"
+      : autoAbc?.used
+      ? "AUTO_ABC_FROM_BARS"
+      : "NO_ABC_MARKS";
 
   const cClass = classifyCZone({
     cLow,
@@ -404,6 +683,7 @@ export function analyzeAbcCorrection({
 
     state: cClass.state,
     abcStatus,
+    abcSource,
     cZone: cClass.cZone,
 
     currentPrice: round2(currentPrice),
@@ -415,6 +695,8 @@ export function analyzeAbcCorrection({
     },
 
     levels: retrace.levels,
+
+    autoAbc,
 
     abc: {
       aLow: round2(aLow),
@@ -461,10 +743,12 @@ export function analyzeAbcCorrection({
 
     reasonCodes: [
       "ABC_CORRECTION_ACTIVE",
+      abcSource,
       abcStatus,
       aLow !== null ? "A_LOW_MARKED" : "A_LOW_NOT_MARKED",
       bHigh !== null ? "B_HIGH_MARKED" : "B_HIGH_NOT_MARKED",
       cLow !== null ? "C_LOW_MARKED" : "C_LOW_NOT_MARKED",
+      ...(Array.isArray(autoAbc?.reasonCodes) ? autoAbc.reasonCodes : []),
       ...(Array.isArray(cClass.reasonCodes) ? cClass.reasonCodes : []),
     ],
   };
