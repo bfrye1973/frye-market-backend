@@ -1,7 +1,7 @@
 // services/core/routes/fibLevels.js
 // GET /api/v1/fib-levels?symbol=SPY&tf=1h&degree=minor&wave=W1|W4
-// Reads data/fib-levels.json first.
-// For ES, falls back to strategy-snapshot-es.json Engine 22 waveFibState.
+// Reads Engine 22 active wave/fib state first when a live active extension exists.
+// Falls back to data/fib-levels.json for legacy retracement outputs.
 
 import fs from "fs";
 import path from "path";
@@ -32,12 +32,46 @@ function toNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
+function getStrategyForTf(snapshot, tf) {
+  const strategies = snapshot?.strategies || {};
+
+  if (tf === "10m") {
+    return strategies["intraday_scalp@10m"] || null;
+  }
+
+  if (tf === "1h") {
+    return strategies["minor_swing@1h"] || strategies["intraday_scalp@10m"] || null;
+  }
+
+  if (tf === "4h") {
+    return strategies["intermediate_long@4h"] || strategies["intraday_scalp@10m"] || null;
+  }
+
+  return strategies["intraday_scalp@10m"] || null;
+}
+
+function buildExtensionFib({ levels }) {
+  if (!levels || typeof levels !== "object") return null;
+
+  const fib = {
+    e100: levels.e100 ?? null,
+    e1168: levels.e1168 ?? null,
+    e1272: levels.e1272 ?? null,
+    e1618: levels.e1618 ?? null,
+    e200: levels.e200 ?? null,
+    e2618: levels.e2618 ?? null,
+  };
+
+  const hasAny = Object.values(fib).some((v) => v !== null && v !== undefined);
+  return hasAny ? fib : null;
+}
+
 function buildSnapshotFallback({ symbol, tf, degree, wave }) {
   const snapshotFile = symbol === "ES" ? ES_SNAPSHOT_FILE : SPY_SNAPSHOT_FILE;
   const snapshot = readJsonSafe(snapshotFile);
   if (!snapshot) return null;
 
-  const strategy = snapshot?.strategies?.["intraday_scalp@10m"] || null;
+  const strategy = getStrategyForTf(snapshot, tf);
   const waveState = strategy?.engine22WaveStrategy?.waveFibState || null;
   const degreeBlock = waveState?.degrees?.[degree] || null;
   const engine2Degree = snapshot?.engine2State?.[degree] || null;
@@ -61,6 +95,9 @@ function buildSnapshotFallback({ symbol, tf, degree, wave }) {
   const anchorW3 = toNum(projectionAnchors?.w3) ?? w3;
   const anchorW4 = toNum(projectionAnchors?.w4) ?? w4;
 
+  const phase = String(degreeBlock?.phase || "").toUpperCase();
+  const state = String(degreeBlock?.state || "").toUpperCase();
+
   const meta = {
     schema: "fib-levels@3",
     source: "ENGINE22_WAVE_FIB_STATE_FALLBACK",
@@ -68,11 +105,54 @@ function buildSnapshotFallback({ symbol, tf, degree, wave }) {
     tf,
     degree,
     requestedWave: wave,
+    activeTradingDegree: waveState?.activeTradingDegree || null,
+    activePhase: phase,
+    activeState: state,
     generated_at_utc: new Date().toISOString(),
   };
 
+  const isActiveExtension =
+    levels &&
+    (phase === "IN_W3" ||
+      phase === "IN_W5" ||
+      state.includes("IMPULSE_EXPANSION") ||
+      state.includes("FINAL_IMPULSE"));
+
+  if (isActiveExtension) {
+    const activeWave =
+      phase === "IN_W3" ? "W3" : phase === "IN_W5" ? "W5" : "EXTENSION";
+
+    const fib = buildExtensionFib({ levels });
+    if (!fib) return null;
+
+    return {
+      ok: true,
+      symbol,
+      tf,
+      degree,
+      wave: activeWave,
+      anchorWave: wave,
+      source: fibProjection?.source || "ENGINE22_ACTIVE_EXTENSION",
+      meta,
+      anchors: {
+        waveMarks,
+        projectionAnchors,
+      },
+      fibProjection,
+      levels,
+      fib,
+      targetZone: {
+        level: levels.e200 != null ? 2.0 : 1.618,
+        price: levels.e200 ?? levels.e1618 ?? null,
+      },
+    };
+  }
+
   if (wave === "W4") {
     if (anchorW3 === null || anchorW4 === null || !levels) return null;
+
+    const fib = buildExtensionFib({ levels });
+    if (!fib) return null;
 
     return {
       ok: true,
@@ -92,14 +172,7 @@ function buildSnapshotFallback({ symbol, tf, degree, wave }) {
       },
       fibProjection,
       levels,
-      fib: {
-        e100: levels.e100 ?? null,
-        e1168: levels.e1168 ?? null,
-        e1272: levels.e1272 ?? null,
-        e1618: levels.e1618 ?? null,
-        e200: levels.e200 ?? null,
-        e2618: levels.e2618 ?? null,
-      },
+      fib,
       targetZone: {
         level: 1.618,
         price: levels.e1618 ?? null,
@@ -138,6 +211,29 @@ fibLevelsRouter.get("/fib-levels", (req, res) => {
     const degree = req.query.degree ? String(req.query.degree).toLowerCase() : null;
     const wave = req.query.wave ? String(req.query.wave).toUpperCase() : "W1";
 
+    const activeSnapshotFallback = degree
+      ? buildSnapshotFallback({ symbol, tf, degree, wave })
+      : null;
+
+    const activePhase = String(
+      activeSnapshotFallback?.meta?.activePhase || ""
+    ).toUpperCase();
+
+    const activeState = String(
+      activeSnapshotFallback?.meta?.activeState || ""
+    ).toUpperCase();
+
+    const isActiveExtension =
+      activeSnapshotFallback?.fib &&
+      (activePhase === "IN_W3" ||
+        activePhase === "IN_W5" ||
+        activeState.includes("IMPULSE_EXPANSION") ||
+        activeState.includes("FINAL_IMPULSE"));
+
+    if (symbol === "ES" && isActiveExtension) {
+      return res.json(activeSnapshotFallback);
+    }
+
     const raw = readJsonSafe(DATA_FILE);
     const items = Array.isArray(raw?.items) ? raw.items : [];
 
@@ -161,12 +257,8 @@ fibLevelsRouter.get("/fib-levels", (req, res) => {
       return res.json(chosen);
     }
 
-    const fallback = degree
-      ? buildSnapshotFallback({ symbol, tf, degree, wave })
-      : null;
-
-    if (fallback) {
-      return res.json(fallback);
+    if (activeSnapshotFallback) {
+      return res.json(activeSnapshotFallback);
     }
 
     return res.json({
