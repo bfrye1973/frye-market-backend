@@ -1125,6 +1125,7 @@ return {
       ? null
       : r?.text || "EMA10_POSTURE_FETCH_FAILED",
 };
+}
 
 async function buildEmaPostureBlock(symbol) {
   const [tenMinute, oneHour, fourHour, daily] = await Promise.all([
