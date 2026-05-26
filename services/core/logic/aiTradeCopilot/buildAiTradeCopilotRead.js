@@ -65,7 +65,70 @@ function getEmaPosture(marketMeter) {
   };
 }
 
-function buildBias({ engine15Decision, engine23, marketRegime, emaPosture }) {
+function getActiveDegreeState(engine22) {
+  const waveFibState = engine22?.waveFibState || null;
+  const activeDegree =
+    waveFibState?.activeTradingDegree ||
+    engine22?.activeTradingDegree ||
+    "minute";
+
+  const degreeState =
+    waveFibState?.degrees?.[activeDegree] ||
+    waveFibState?.degrees?.minute ||
+    null;
+
+  return {
+    waveFibState,
+    activeDegree,
+    degreeState,
+    extensionProgress: degreeState?.extensionProgress || null,
+    fibPressure: degreeState?.fibPressure || null,
+    fibProjection: degreeState?.fibProjection || null,
+  };
+}
+
+function hasPostExtensionPullback(extensionProgress) {
+  return String(extensionProgress?.state || "").toUpperCase() === "POST_EXTENSION_PULLBACK";
+}
+
+function hasExtensionTagged(extensionProgress) {
+  const state = String(extensionProgress?.state || "").toUpperCase();
+  return state === "POST_EXTENSION_PULLBACK" || state === "EXTENSION_TAGGED_ACTIVE";
+}
+
+function buildExtensionProgressRead({ activeDegree, extensionProgress }) {
+  if (!extensionProgress?.ok || !extensionProgress?.active) return null;
+
+  const degreeName = String(activeDegree || extensionProgress.degree || "degree").toUpperCase();
+  const activeWave = extensionProgress.activeWave || "extension";
+  const hit = extensionProgress.highestExtensionHit || "extension";
+  const hitPrice = extensionProgress.highestExtensionPrice;
+  const retraceZone = extensionProgress.currentRetraceZone;
+
+  if (hasPostExtensionPullback(extensionProgress)) {
+    return `${degreeName} ${activeWave} already tagged the ${hit} extension near ${
+      hitPrice ?? "unknown"
+    } and is now pulling back${
+      retraceZone?.label ? ` near the ${retraceZone.label} retrace zone` : ""
+    }.`;
+  }
+
+  if (hasExtensionTagged(extensionProgress)) {
+    return `${degreeName} ${activeWave} has tagged the ${hit} extension near ${
+      hitPrice ?? "unknown"
+    }. Monitor reaction versus continuation.`;
+  }
+
+  return extensionProgress.read || null;
+}
+
+function buildBias({
+  engine15Decision,
+  engine23,
+  marketRegime,
+  emaPosture,
+  extensionProgress,
+}) {
   const decisionAction = String(engine15Decision?.action || "").toUpperCase();
   const decisionDirection = String(engine15Decision?.direction || "").toUpperCase();
   const engine23Environment = String(engine23?.environment || "").toUpperCase();
@@ -75,6 +138,26 @@ function buildBias({ engine15Decision, engine23, marketRegime, emaPosture }) {
   const oneHourState = String(emaPosture?.oneHour?.state || "").toUpperCase();
   const fourHourState = String(emaPosture?.fourHour?.state || "").toUpperCase();
   const dailyState = String(emaPosture?.daily?.state || "").toUpperCase();
+
+  if (hasPostExtensionPullback(extensionProgress)) {
+    return {
+      bias: "PULLBACK_RETRACE_WATCH",
+      action: "WAIT_FOR_W4_SUPPORT_RECLAIM",
+      confidence: "MEDIUM",
+      reason:
+        "Engine 22 extension progress says the active impulse already tagged an extension and is now pulling back into retrace territory.",
+    };
+  }
+
+  if (hasExtensionTagged(extensionProgress)) {
+    return {
+      bias: "EXTENSION_TAGGED_NO_CHASE",
+      action: "WAIT_FOR_REACTION_OR_CONTROLLED_PULLBACK",
+      confidence: "MEDIUM",
+      reason:
+        "Engine 22 extension progress says price has tagged an extension level; chase risk is elevated until a controlled pullback or reclaim forms.",
+    };
+  }
 
   if (
     decisionAction === "WATCH" &&
@@ -135,13 +218,23 @@ function buildKeyLevels(engine23) {
   };
 }
 
-function buildNeeds({ engine15Decision, engine23 }) {
+function buildNeeds({ engine15Decision, engine23, extensionProgress }) {
   const needs = [];
 
   const engine23Needs = asArray(engine23?.needs);
   needs.push(...engine23Needs);
 
   const reasonCodes = asArray(engine15Decision?.reasonCodes);
+
+  if (hasPostExtensionPullback(extensionProgress)) {
+    needs.push("W4_SUPPORT_OR_RECLAIM_CONFIRMATION");
+    needs.push("ENGINE3_REACTION_CONFIRMATION");
+    needs.push("ENGINE4_PARTICIPATION_CONFIRMATION");
+  }
+
+  if (hasExtensionTagged(extensionProgress) && !hasPostExtensionPullback(extensionProgress)) {
+    needs.push("REACTION_OR_CONTROLLED_PULLBACK");
+  }
 
   if (reasonCodes.includes("TEN_MIN_BELOW_EMA10_EMA20_NO_TRIGGER")) {
     needs.push("10M_RECLAIM_EMA10_EMA20");
@@ -162,14 +255,28 @@ function buildNeeds({ engine15Decision, engine23 }) {
   return [...new Set(needs)];
 }
 
-function buildWarnings({ marketRegime, engine15Decision, engine23, emaPosture }) {
+function buildWarnings({
+  marketRegime,
+  engine15Decision,
+  engine23,
+  emaPosture,
+  extensionProgress,
+}) {
   const warnings = [];
 
   const marketDirection = String(marketRegime?.directionBias || "").toUpperCase();
   const strictness = String(marketRegime?.strictness || "").toUpperCase();
 
+  if (hasPostExtensionPullback(extensionProgress)) {
+    warnings.push("Active impulse already tagged an extension and is now pulling back; do not chase.");
+  }
+
+  if (hasExtensionTagged(extensionProgress)) {
+    warnings.push("Extension level has already been tagged; wait for reaction, support, or reclaim.");
+  }
+
   if (marketDirection === "SHORT") {
-    warnings.push("Market regime direction is short while Engine 23 is watching a long W2-to-W3 setup.");
+    warnings.push("Market regime direction is short while Engine 23 is watching a long wave setup.");
   }
 
   if (strictness === "HIGH") {
@@ -198,7 +305,15 @@ function buildWarnings({ marketRegime, engine15Decision, engine23, emaPosture })
   return [...new Set(warnings)];
 }
 
-function buildHeadline({ engine23, bias }) {
+function buildHeadline({ engine23, bias, extensionProgress }) {
+  if (hasPostExtensionPullback(extensionProgress)) {
+    return "W3 extension tagged — W4 pullback watch";
+  }
+
+  if (hasExtensionTagged(extensionProgress)) {
+    return "Extension tagged — no chase";
+  }
+
   if (engine23?.environment === "W2_PULLBACK") {
     return "Minute W2 pullback active — wait for support or reclaim";
   }
@@ -214,6 +329,29 @@ function buildHeadline({ engine23, bias }) {
   return pretty(bias, "No clear AI bot setup");
 }
 
+function buildExtensionSummary({ symbol, price, extensionProgress, engine15Decision, emaPosture }) {
+  const decisionText = `${text(engine15Decision?.action, "WAIT")} / ${text(
+    engine15Decision?.direction,
+    "NONE"
+  )}`;
+
+  const tenMinText = text(emaPosture?.tenMinute?.state, "UNKNOWN");
+  const oneHourText = text(emaPosture?.oneHour?.state, "UNKNOWN");
+  const fourHourText = text(emaPosture?.fourHour?.state, "UNKNOWN");
+  const dailyText = text(emaPosture?.daily?.state, "UNKNOWN");
+
+  const read = trimEndingPeriod(extensionProgress?.read);
+
+  const retraceZone = extensionProgress?.currentRetraceZone;
+  const retraceText = retraceZone?.label
+    ? `${retraceZone.label} near ${retraceZone.price}`
+    : "active retrace zone unavailable";
+
+  return `${symbol} is in a read-only pullback watch at ${
+    price ?? "unknown price"
+  }. ${read}. Current likely retrace area is ${retraceText}. Engine 15 decision is ${decisionText}, so this is not an automatic trade. EMA posture: 10m ${tenMinText}, 1h ${oneHourText}, 4h ${fourHourText}, daily ${dailyText}. Do not chase the completed extension; wait for W4 support, reclaim, Engine 3 reaction, Engine 4 participation, and Engine 15 readiness.`;
+}
+
 function buildSummary({
   symbol,
   price,
@@ -223,7 +361,18 @@ function buildSummary({
   emaPosture,
   biasResult,
   keyLevels,
+  extensionProgress,
 }) {
+  if (hasPostExtensionPullback(extensionProgress)) {
+    return buildExtensionSummary({
+      symbol,
+      price,
+      extensionProgress,
+      engine15Decision,
+      emaPosture,
+    });
+  }
+
   const supportText =
     keyLevels.support.length > 0
       ? keyLevels.support.join(" / ")
@@ -264,7 +413,34 @@ function buildAiReasoning({
   emaPosture,
   keyLevels,
   biasResult,
+  extensionProgress,
 }) {
+  if (hasPostExtensionPullback(extensionProgress)) {
+    return {
+      read: "POST_EXTENSION_PULLBACK_WATCH",
+      bestScenario:
+        "W4 pullback holds a clean retrace zone, lower timeframe reclaim confirms support, Engine 3 reaction improves, Engine 4 participation confirms, and Engine 15 moves from blocked/watch into readiness.",
+      dangerScenario:
+        "The pullback loses the key retrace zone without reclaim, turning the extension tag into a deeper correction or failed continuation.",
+      confirmationNeeded: [
+        "W4 support/retrace zone holds",
+        "10m reclaim or stabilization",
+        "Engine 3 reaction confirmation",
+        "Engine 4 participation confirmation",
+        "Engine 15 readiness",
+      ],
+      avoid: [
+        "Do not chase after extension tag",
+        "Do not force long while Engine 15 is blocked",
+        "Do not override permission controls",
+      ],
+      invalidationRead:
+        "Use the active W4 retrace zone and Engine 15/16 permission as the next decision boundary.",
+      confidenceNote:
+        "Confidence is MEDIUM because Engine 22 confirms a completed extension tag and pullback, but execution still requires support/reclaim and readiness confirmation.",
+    };
+  }
+
   const env = String(engine23?.environment || "").toUpperCase();
   const action = String(engine15Decision?.action || "").toUpperCase();
   const direction = String(engine15Decision?.direction || "").toUpperCase();
@@ -325,7 +501,7 @@ function buildAiReasoning({
     bestScenario: "Engines align and Engine 15 confirms readiness.",
     dangerScenario:
       "Mixed engine state persists or price violates active invalidation.",
-    confirmationNeeded: buildNeeds({ engine15Decision, engine23 }),
+    confirmationNeeded: buildNeeds({ engine15Decision, engine23, extensionProgress }),
     avoid: [
       "Do not override Engine 15",
       "Do not chase without confirmation",
@@ -347,6 +523,13 @@ export function buildAiTradeCopilotRead(input = {}) {
   const engine15Decision = strategy?.engine15Decision || null;
   const engine22 = strategy?.engine22WaveStrategy || null;
   const engine23 = strategy?.engine23Interpretation || null;
+
+  const {
+    activeDegree,
+    degreeState,
+    extensionProgress,
+    fibPressure,
+  } = getActiveDegreeState(engine22);
 
   const emaPosture = getEmaPosture(marketMeter);
   const price = pickEsPrice({ strategy, engine23, engine22, marketMeter });
@@ -372,15 +555,17 @@ export function buildAiTradeCopilotRead(input = {}) {
     engine23,
     marketRegime,
     emaPosture,
+    extensionProgress,
   });
 
   const keyLevels = buildKeyLevels(engine23);
-  const needs = buildNeeds({ engine15Decision, engine23 });
+  const needs = buildNeeds({ engine15Decision, engine23, extensionProgress });
   const warnings = buildWarnings({
     marketRegime,
     engine15Decision,
     engine23,
     emaPosture,
+    extensionProgress,
   });
 
   const aiReasoning = buildAiReasoning({
@@ -390,7 +575,19 @@ export function buildAiTradeCopilotRead(input = {}) {
     emaPosture,
     keyLevels,
     biasResult,
+    extensionProgress,
   });
+
+  const extensionRead = buildExtensionProgressRead({
+    activeDegree,
+    extensionProgress,
+  });
+
+  const setupRead =
+    extensionRead ||
+    extensionProgress?.read ||
+    engine23?.summary ||
+    null;
 
   return {
     ok: true,
@@ -400,19 +597,30 @@ export function buildAiTradeCopilotRead(input = {}) {
     headline: buildHeadline({
       engine23,
       bias: biasResult.bias,
+      extensionProgress,
     }),
     bias: biasResult.bias,
     action: biasResult.action,
     confidence: biasResult.confidence,
     shouldChase: false,
     price,
-    setupRead: engine23?.summary || null,
+    setupRead,
+
     engine15: {
       readiness: engine15?.readiness || null,
       action: engine15Decision?.action || null,
       direction: engine15Decision?.direction || null,
       readinessLabel: engine15Decision?.readinessLabel || null,
     },
+
+    engine22: {
+      activeDegree,
+      phase: degreeState?.phase || null,
+      state: degreeState?.state || null,
+      fibPressure: fibPressure || null,
+      extensionProgress: extensionProgress || null,
+    },
+
     engine23: {
       environment: engine23?.environment || null,
       state: engine23?.state || null,
@@ -421,26 +629,32 @@ export function buildAiTradeCopilotRead(input = {}) {
       recentCompletion: engine23?.recentCompletion || null,
       higherContext: engine23?.higherContext || null,
     },
+
     marketRegime: {
       regime: marketRegime?.regime || null,
       directionBias: marketRegime?.directionBias || null,
       strictness: marketRegime?.strictness || null,
     },
+
     emaPosture: {
       tenMinute: emaPosture?.tenMinute?.state || null,
       oneHour: emaPosture?.oneHour?.state || null,
       fourHour: emaPosture?.fourHour?.state || null,
       daily: emaPosture?.daily?.state || null,
     },
+
     keyLevels,
     needs,
     warnings,
     aiReasoning,
+
     reasonCodes: [
       "READ_ONLY_AI_COPILOT",
+      extensionProgress?.state ? `ENGINE22_${extensionProgress.state}` : null,
       biasResult.reason,
       ...asArray(engine15Decision?.reasonCodes).slice(0, 8),
-    ],
+    ].filter(Boolean),
+
     summary: buildSummary({
       symbol,
       price,
@@ -450,9 +664,9 @@ export function buildAiTradeCopilotRead(input = {}) {
       emaPosture,
       biasResult,
       keyLevels,
+      extensionProgress,
     }),
   };
 }
 
 export default buildAiTradeCopilotRead;
-
