@@ -12,6 +12,7 @@ import { analyzeMicroW4AbcRisk } from "./analyzeMicroW4AbcRisk.js";
 import { analyzeWaveDuration } from "./analyzeWaveDuration.js";
 import { analyzeAbcCorrection } from "./analyzeAbcCorrection.js";
 import { buildTradeContextSummary } from "./buildTradeContextSummary.js";
+import { buildW4Levels } from "./buildW4Levels.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -106,6 +107,63 @@ function findHighestFibPressureDegree(degrees = {}) {
   }
 
   return best;
+}
+
+function tickSizeForSymbol(symbol) {
+  const s = String(symbol || "").toUpperCase();
+
+  if (
+    s === "ES" ||
+    s.startsWith("ES") ||
+    s === "MES" ||
+    s.startsWith("MES") ||
+    s === "NQ" ||
+    s.startsWith("NQ") ||
+    s === "MNQ" ||
+    s.startsWith("MNQ")
+  ) {
+    return 0.25;
+  }
+
+  return null;
+}
+
+function attachW4LevelsToDegrees({ symbol, engine2State, degrees, currentPrice }) {
+  const tickSize = tickSizeForSymbol(symbol);
+
+  for (const degree of DEGREE_ORDER) {
+    const degreeState = degrees?.[degree];
+    const engine2Block = engine2State?.[degree] || null;
+
+    if (!degreeState?.ok || !engine2Block) continue;
+
+    const phase = upper(degreeState.phase);
+    const confirmedPhase = upper(degreeState.confirmedPhase);
+    const nextExpectedWave = upper(degreeState.nextExpectedWave);
+
+    const shouldBuildW4Levels =
+      phase === "IN_W4" ||
+      confirmedPhase === "IN_W3" ||
+      nextExpectedWave === "W5";
+
+    if (!shouldBuildW4Levels) continue;
+
+    const w4Levels = buildW4Levels({
+      symbol,
+      degree,
+      degreeState,
+      engine2Block,
+      currentPrice,
+      tickSize,
+    });
+
+    degrees[degree] = {
+      ...degreeState,
+      w4Levels,
+    };
+  }
+
+  return degrees;
 }
 
 function findActiveTradingDegree(degrees = {}) {
@@ -318,7 +376,7 @@ export function analyzeWaveStack({
     };
   }
 
-  const degrees = {};
+    let degrees = {};
 
   for (const degree of DEGREE_ORDER) {
     const parentDegree = PARENT_BY_DEGREE[degree];
@@ -335,6 +393,13 @@ export function analyzeWaveStack({
       barsByTf,
     });
   }
+
+  degrees = attachW4LevelsToDegrees({
+    symbol,
+    engine2State,
+    degrees,
+    currentPrice,
+  });
 
   const chaseRisk = strongestChaseRisk(degrees);
   const activeTradingDegree = findActiveTradingDegree(degrees);
