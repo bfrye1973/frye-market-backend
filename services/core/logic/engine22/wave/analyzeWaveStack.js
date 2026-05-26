@@ -454,6 +454,7 @@ export function analyzeWaveStack({
           correctionFor: activeCorrectionFor,
           block: activeDegreeBlock,
           currentPrice,
+          barsByTf,
         })
       : {
           ok: true,
