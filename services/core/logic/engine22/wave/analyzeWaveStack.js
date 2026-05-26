@@ -12,7 +12,6 @@ import { analyzeMicroW4AbcRisk } from "./analyzeMicroW4AbcRisk.js";
 import { analyzeWaveDuration } from "./analyzeWaveDuration.js";
 import { analyzeAbcCorrection } from "./analyzeAbcCorrection.js";
 import { buildTradeContextSummary } from "./buildTradeContextSummary.js";
-import { buildW4Levels } from "./buildW4Levels.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -201,7 +200,14 @@ function sentenceForDegree(degree, d) {
 
   const name = `${degree.charAt(0).toUpperCase()}${degree.slice(1)}`;
 
-  if (d.phase === "IN_W5" && d.fibPressure?.extensionState === "NEAR_1_618_REACTION_ZONE") {
+  if (d.extensionProgress?.state === "POST_EXTENSION_PULLBACK") {
+    return `${name} ${d.extensionProgress.activeWave} already tagged ${d.extensionProgress.highestExtensionHit} near ${d.extensionProgress.highestExtensionPrice} and is now pulling back.`;
+  }
+
+  if (
+    d.phase === "IN_W5" &&
+    d.fibPressure?.extensionState === "NEAR_1_618_REACTION_ZONE"
+  ) {
     return `${name} W5 is reacting near its 1.618 extension at ${d.fibPressure.nearestFibPrice}.`;
   }
 
@@ -235,7 +241,13 @@ function buildPlainEnglishSummary({
 
   const pressure = findHighestFibPressureDegree(degrees);
 
-  if (
+  const activeDegree = activeTradingDegree?.degree
+    ? degrees?.[activeTradingDegree.degree]
+    : null;
+
+  if (activeDegree?.extensionProgress?.state === "POST_EXTENSION_PULLBACK") {
+    parts.push(activeDegree.extensionProgress.read);
+  } else if (
     pressure &&
     pressure.degree &&
     pressure.extensionState === "NEAR_1_618_REACTION_ZONE"
@@ -290,7 +302,6 @@ export function analyzeWaveStack({
   currentTimeSec = null,
   barsByTf = {},
 } = {}) {
-  
   if (!engine2State || typeof engine2State !== "object") {
     return {
       ok: false,
@@ -321,6 +332,7 @@ export function analyzeWaveStack({
       block,
       parentBlock,
       currentPrice,
+      barsByTf,
     });
   }
 
@@ -347,8 +359,9 @@ export function analyzeWaveStack({
           symbol,
           state: "NO_ACTIVE_MICRO_W4_RISK",
           reasonCodes: ["ACTIVE_SETUP_NOT_MICRO_W4_TO_W5"],
-        };   
-   const waveDuration = analyzeWaveDuration({
+        };
+
+  const waveDuration = analyzeWaveDuration({
     symbol,
     engine2State,
     snapshotNow,
@@ -356,7 +369,7 @@ export function analyzeWaveStack({
     barsByTf,
   });
 
-   const abcCorrection =
+  const abcCorrection =
     activeTradingDegree?.setup === "MICRO_W4_TO_W5"
       ? analyzeAbcCorrection({
           symbol,
@@ -373,14 +386,15 @@ export function analyzeWaveStack({
           correctionFor: null,
           state: "NO_ACTIVE_ABC_CORRECTION",
           reasonCodes: ["ACTIVE_SETUP_NOT_MICRO_W4_TO_W5"],
-        }; 
-   const summary = buildPlainEnglishSummary({
-     symbol,
-     degrees,
-     stackBias,
-     chaseRisk,
-     activeTradingDegree,
-   });
+        };
+
+  const summary = buildPlainEnglishSummary({
+    symbol,
+    degrees,
+    stackBias,
+    chaseRisk,
+    activeTradingDegree,
+  });
 
   const reasonCodes = [
     "ENGINE22_WAVE_FIB_STATE_BUILT",
@@ -390,60 +404,60 @@ export function analyzeWaveStack({
   ].filter(Boolean);
 
   const partialWaveFibState = {
-  ok: true,
-  engine: "engine22.waveFibState.v1",
-  symbol,
-  currentPrice: round2(currentPrice),
+    ok: true,
+    engine: "engine22.waveFibState.v1",
+    symbol,
+    currentPrice: round2(currentPrice),
 
-  stackBias,
-  activeTradingDegree: activeTradingDegree.degree,
-  activeSetup: activeTradingDegree.setup,
-  activeTradingDegreeReason: activeTradingDegree.reason,
+    stackBias,
+    activeTradingDegree: activeTradingDegree.degree,
+    activeSetup: activeTradingDegree.setup,
+    activeTradingDegreeReason: activeTradingDegree.reason,
 
-  chaseRisk: chaseRisk.risk,
-  chaseRiskDegree: chaseRisk.degree,
+    chaseRisk: chaseRisk.risk,
+    chaseRiskDegree: chaseRisk.degree,
 
-  degrees,
-  microW4AbcRisk,
-  abcCorrection,
-  waveDuration,
+    degrees,
+    microW4AbcRisk,
+    abcCorrection,
+    waveDuration,
 
-  summary,
-  reasonCodes,
-};
+    summary,
+    reasonCodes,
+  };
 
-const tradeContextSummary = buildTradeContextSummary({
-  waveFibState: partialWaveFibState,
-});
+  const tradeContextSummary = buildTradeContextSummary({
+    waveFibState: partialWaveFibState,
+  });
 
-return {
-  ok: true,
-  engine: "engine22.waveFibState.v1",
-  symbol,
-  currentPrice: round2(currentPrice),
+  return {
+    ok: true,
+    engine: "engine22.waveFibState.v1",
+    symbol,
+    currentPrice: round2(currentPrice),
 
-  stackBias,
-  activeTradingDegree: activeTradingDegree.degree,
-  activeSetup: activeTradingDegree.setup,
-  activeTradingDegreeReason: activeTradingDegree.reason,
+    stackBias,
+    activeTradingDegree: activeTradingDegree.degree,
+    activeSetup: activeTradingDegree.setup,
+    activeTradingDegreeReason: activeTradingDegree.reason,
 
-  chaseRisk: chaseRisk.risk,
-  chaseRiskDegree: chaseRisk.degree,
+    chaseRisk: chaseRisk.risk,
+    chaseRiskDegree: chaseRisk.degree,
 
-  degrees,
-  microW4AbcRisk,
-  abcCorrection,
-  waveDuration,
-  tradeContextSummary,
+    degrees,
+    microW4AbcRisk,
+    abcCorrection,
+    waveDuration,
+    tradeContextSummary,
 
-  regimeContext: regimeLayers || null,
+    regimeContext: regimeLayers || null,
 
-  reactionContext: reactionContext || null,
-  volumeContext: volumeContext || null,
+    reactionContext: reactionContext || null,
+    volumeContext: volumeContext || null,
 
-  summary,
-  reasonCodes,
-};
+    summary,
+    reasonCodes,
+  };
 }
 
 export default analyzeWaveStack;
