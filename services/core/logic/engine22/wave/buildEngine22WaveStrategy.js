@@ -22,6 +22,7 @@ import { buildStockWaveContext } from "./adapters/buildStockWaveContext.js";
 import { buildFuturesWaveContext } from "./adapters/buildFuturesWaveContext.js";
 import { buildWaveTradeDecision } from "../decisions/buildWaveTradeDecision.js";
 import { buildTargetClusterConfidence } from "./buildTargetClusterConfidence.js";
+import { analyzeExtensionProgress } from "./analyzeExtensionProgress.js";
 
 function toNum(x) {
   if (x === null || x === undefined || x === "") return null;
