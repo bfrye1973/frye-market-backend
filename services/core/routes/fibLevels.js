@@ -135,9 +135,16 @@ function buildSnapshotFallback({ symbol, tf, degree, wave }) {
       source: fibProjection?.source || "ENGINE22_ACTIVE_EXTENSION",
       meta,
       anchors: {
+        low: projectionAnchors?.w2 ?? w2 ?? null,
+        high: projectionAnchors?.w1 ?? w1 ?? null,
+        w1: projectionAnchors?.w1 ?? w1 ?? null,
+        w2: projectionAnchors?.w2 ?? w2 ?? null,
+        w3: projectionAnchors?.w3 ?? w3 ?? null,
+        w4: projectionAnchors?.w4 ?? w4 ?? null,
         waveMarks,
         projectionAnchors,
-      },
+       },
+       
       fibProjection,
       levels,
       fib,
