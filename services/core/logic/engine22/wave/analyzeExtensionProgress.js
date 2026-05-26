@@ -162,16 +162,34 @@ function selectBarsForDegree({ degree, barsByTf }) {
   return allArrays[0].map(normalizeBar).filter(Boolean);
 }
 
-function reachedLevel({ extreme, level, direction }) {
+function hitTolerancePts(symbol) {
+  const s = String(symbol || "").toUpperCase();
+
+  if (s === "ES" || s.startsWith("ES") || s === "MES" || s.startsWith("MES")) {
+    return 1.0;
+  }
+
+  if (s === "NQ" || s.startsWith("NQ") || s === "MNQ" || s.startsWith("MNQ")) {
+    return 4.0;
+  }
+
+  return 0;
+}
+
+function reachedLevel({ extreme, level, direction, symbol }) {
   const e = toNum(extreme);
   const l = toNum(level);
 
   if (e === null || l === null) return false;
 
-  return direction === "BULLISH" ? e >= l : e <= l;
+  const tolerance = hitTolerancePts(symbol);
+
+  return direction === "BULLISH"
+    ? e >= l - tolerance
+    : e <= l + tolerance;
 }
 
-function findHitExtensions({ extremePrice, levels, direction }) {
+function findHitExtensions({ extremePrice, levels, direction, symbol }) {
   const hit = [];
   const notHitYet = [];
 
@@ -186,7 +204,7 @@ function findHitExtensions({ extremePrice, levels, direction }) {
       price: round2(price),
     };
 
-    if (reachedLevel({ extreme: extremePrice, level: price, direction })) {
+    if (reachedLevel({ extreme: extremePrice, level: price, direction, symbol })) {
       hit.push(row);
     } else {
       notHitYet.push(row);
@@ -398,6 +416,7 @@ export function analyzeExtensionProgress({
     extremePrice,
     levels,
     direction: dir,
+    symbol,
   });
 
   const pullbackFromExtremePts =
