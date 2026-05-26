@@ -1118,13 +1118,13 @@ return {
   state,
   lastBarTime: lastBar ? barTime(lastBar) : null,
   barCount: bars.length,
+  bars,
   source: path,
   error:
     r?.ok === true
       ? null
       : r?.text || "EMA10_POSTURE_FETCH_FAILED",
- };
-}
+};
 
 async function buildEmaPostureBlock(symbol) {
   const [tenMinute, oneHour, fourHour, daily] = await Promise.all([
@@ -2763,6 +2763,12 @@ if (isFuturesSymbol(symbol)) {
            reactionContext: reactionContextForEngine22,
            volumeContext: volumeContextForEngine22,
            breakoutContext: engine22Scalp?.breakoutContext || null,
+           barsByTf: {
+             "10m": emaPosture?.tenMinute?.bars || [],
+              "1h": emaPosture?.oneHour?.bars || [],
+              "4h": emaPosture?.fourHour?.bars || [],
+              "1d": emaPosture?.daily?.bars || [],
+            }, 
          }); 
 
          engine22WaveStrategy.tradeDecision = buildWaveTradeDecision({
