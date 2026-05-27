@@ -96,6 +96,147 @@ function loadPreviousSnapshotSafe() {
   }
 }
 
+function loadJsonFileSafe(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function computeEngine25FreshnessStatus(modelDate, updatedAt) {
+  if (!modelDate && !updatedAt) return "STALE";
+
+  const updatedMs = updatedAt ? Date.parse(updatedAt) : NaN;
+  if (Number.isFinite(updatedMs)) {
+    const ageHours = (Date.now() - updatedMs) / (1000 * 60 * 60);
+    if (ageHours <= 30) return "FRESH";
+    return "STALE";
+  }
+
+  if (modelDate) return "ONE_ROW_BEHIND_OK";
+  return "STALE";
+}
+
+function loadEngine25Context() {
+  const overlayFile = `${DATA_DIR}/engine25-composite-overlay-6mo.json`;
+  const zoneAwareFile = `${DATA_DIR}/engine25-es-zone-aware-read.json`;
+
+  const overlay = loadJsonFileSafe(overlayFile);
+  const zoneAware = loadJsonFileSafe(zoneAwareFile);
+
+  const rows = Array.isArray(overlay?.rows) ? overlay.rows : [];
+  const latest = rows.length ? rows[rows.length - 1] : null;
+
+  if (!latest) {
+    return {
+      ok: false,
+      source: "engine25-composite-overlay-6mo.json",
+      score: null,
+      regime: "UNKNOWN",
+      label: null,
+      bias: "UNKNOWN",
+      riskLevel: "UNKNOWN",
+      permission: null,
+      sizeMultiplier: null,
+      components: null,
+      macroAwareScore: null,
+      breadthParticipation: null,
+      distributionPressure: null,
+      marketTrend: null,
+      creditFragility: null,
+      aiLeadership: null,
+      esPermission: null,
+      tradePermission: null,
+      zoneAwareRead: zoneAware || null,
+      warnings: ["ENGINE25_CONTEXT_MISSING"],
+      summary: "Engine 25 composite overlay file not available.",
+      modelDate: null,
+      updatedAt: overlay?.generatedAtUtc || null,
+      freshnessStatus: "MISSING",
+    };
+  }
+
+  const components = latest.components || {};
+  const permissions = latest.permissions || {};
+  const updatedAt = overlay?.generatedAtUtc || overlay?.finishedAt || null;
+  const modelDate = latest.date || zoneAware?.context?.latestContextDate || null;
+
+  return {
+    ok: true,
+    source: "engine25-composite-overlay-6mo.json",
+    supplementalSource: zoneAware ? "engine25-es-zone-aware-read.json" : null,
+
+    score: latest.engine25CompositeScore ?? null,
+    regime: latest.overlayState ?? null,
+    label: latest.overlayLabel ?? null,
+    bias: latest.overlayState ?? null,
+    riskLevel: latest.overlayLabel ?? latest.overlayColor ?? null,
+
+    permission:
+      permissions.finalPermission ??
+      permissions.macroDistributionBreadthAware ??
+      permissions.macroDistributionAware ??
+      permissions.macroAware ??
+      zoneAware?.context?.finalPermission ??
+      null,
+
+    sizeMultiplier:
+      permissions.finalSize ??
+      zoneAware?.context?.finalSize ??
+      null,
+
+    components,
+    macroAwareScore: components.macroAwareScore ?? null,
+    breadthParticipation:
+      components.breadthParticipation ??
+      zoneAware?.context?.breadthParticipation ??
+      null,
+    distributionPressure:
+      components.distributionPressure ??
+      zoneAware?.context?.distributionPressure ??
+      null,
+    marketTrend: components.marketTrend ?? null,
+    creditFragility: components.creditFragility ?? null,
+    aiLeadership: components.aiLeadership ?? null,
+
+    esPermission: {
+      permission: zoneAware?.context?.finalPermission ?? permissions.finalPermission ?? null,
+      sizeMultiplier: zoneAware?.context?.finalSize ?? permissions.finalSize ?? null,
+      zoneState: zoneAware?.zoneState ?? null,
+      nearestZone: zoneAware?.nearestZone ?? null,
+    },
+
+    tradePermission: {
+      permission: permissions.finalPermission ?? null,
+      sizeMultiplier: permissions.finalSize ?? null,
+    },
+
+    zoneAwareRead: zoneAware
+      ? {
+          ok: zoneAware.ok === true,
+          generatedAtUtc: zoneAware.generatedAtUtc || null,
+          current: zoneAware.current || null,
+          context: zoneAware.context || null,
+          nearestZone: zoneAware.nearestZone || null,
+          zoneState: zoneAware.zoneState || null,
+          plainEnglish: zoneAware.plainEnglish || null,
+        }
+      : null,
+
+    warnings: Array.isArray(latest.warnings) ? latest.warnings : [],
+    summary:
+      zoneAware?.plainEnglish ||
+      latest.overlayInterpretation ||
+      null,
+
+    modelDate,
+    updatedAt,
+    freshnessStatus: computeEngine25FreshnessStatus(modelDate, updatedAt),
+  };
+}
+
 function preserveLastGoodEngine22Timeline(result, previousSnapshot) {
   if (!result?.strategies || !previousSnapshot?.strategies) return result;
 
