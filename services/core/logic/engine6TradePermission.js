@@ -181,27 +181,36 @@ export function computeTradePermission(input) {
   }
 
   if (!withinZone && !nearAllowedZone) {
-    if (strategyType === "CONTINUATION") {
-      reasons.push("REDUCE_CONTINUATION_OUTSIDE_ZONE");
-      return {
-        permission: "REDUCE",
-        sizeMultiplier: 0.5,
-        allowedTradeTypes: ["CONTINUATION"],
-        allowedZones: {
-          primary: ["ANY"],
-          secondary: [],
-        },
-        entryConstraints: baseConstraints(),
-        reasonCodes: reasons,
-        debug,
-      };
+    reasons.push("OUTSIDE_PREFERRED_ZONE_REQUIRES_CONFIRMATION");
+
+    if (strategyType === "CONTINUATION" || strategyType === "BREAKDOWN") {
+      reasons.push(`REDUCE_${strategyType}_OUTSIDE_ZONE`);
+      return reduce(reasons, debug, [strategyType]);
     }
 
-    reasons.push("OUT_OF_ALLOWED_ZONES");
-    return standDown(reasons, debug, {
-      primary: ALLOWED_ZONES_PRIMARY,
-      secondary: [],
-    });
+    // Phase 1 transition:
+    // Do not hard-block only because price is outside a negotiated/institutional zone.
+    // Engine 15 will decide if the setup is WATCH / READY / BLOCKED.
+    // Engine 6 preliminary should pass a cautious REDUCE so Engine 15 can evaluate.
+    reasons.push("REDUCE_OUTSIDE_ZONE_PRELIMINARY_ENGINE15_REVIEW");
+
+    return {
+      permission: "REDUCE",
+      sizeMultiplier: 0.5,
+      allowedTradeTypes: ["PULLBACK", "BREAKOUT", "CONTINUATION", "EXHAUSTION"],
+      allowedZones: {
+        primary: ["NEGOTIATED", "INSTITUTIONAL", "SHELF"],
+        secondary: ["NEAR_ALLOWED_ZONE", "OUTSIDE_ZONE_WITH_CONFIRMATION"],
+      },
+      entryConstraints: {
+        zonePreferred: true,
+        outsideZoneRequiresConfirmation: true,
+        noLateChaseOutsideZone: true,
+        requireHigherTFBiasAlignment: true,
+      },
+      reasonCodes: reasons,
+      debug,
+    };
   }
 
   if (zoneDegraded || liquidityFail || reactionFailed) {
