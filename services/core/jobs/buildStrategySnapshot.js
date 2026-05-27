@@ -766,6 +766,7 @@ function buildFinalPermissionFromEngine15({
   marketRegime,
   zoneContext,
   engine5Analytics,
+  engine25Context,
 }) {
   const preliminary =
     preliminaryPermission && typeof preliminaryPermission === "object"
@@ -841,6 +842,25 @@ function buildFinalPermissionFromEngine15({
           withinZone: zoneContext.withinZone === true,
           nearAllowedZone: zoneContext.nearAllowedZone === true,
           locationState: zoneContext.locationState || null,
+        }
+      : null,
+
+     engine25Context: engine25Context
+      ? {
+           ok: engine25Context.ok === true,
+           source: engine25Context.source || null,
+           score: engine25Context.score ?? null,
+           regime: engine25Context.regime ?? null,
+           label: engine25Context.label ?? null,
+           permission: engine25Context.permission ?? null,
+           sizeMultiplier: engine25Context.sizeMultiplier ?? null,
+           modelDate: engine25Context.modelDate ?? null,
+           updatedAt: engine25Context.updatedAt ?? null,
+           freshnessStatus: engine25Context.freshnessStatus ?? null,
+           warnings: Array.isArray(engine25Context.warnings)
+             ? engine25Context.warnings
+             : [],
+          summary: engine25Context.summary || null,
         }
       : null,
 
@@ -2846,6 +2866,7 @@ const zoneContext = buildZoneContext(
          marketRegime,
          zoneContext,
          engine5Analytics,
+         engine25Context,
        })
      : permissionPreliminary;
 
