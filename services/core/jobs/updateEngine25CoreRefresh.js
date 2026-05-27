@@ -59,6 +59,7 @@ const REQUIRED_FILES = [
   "engine25-historical-replay-macro-distribution-breadth-6mo.json",
   "engine25-composite-overlay-6mo.json",
   "engine25-es-zone-aware-read.json",
+  "strategy-snapshot-es.json",
 ];
 
 function nowIso() {
