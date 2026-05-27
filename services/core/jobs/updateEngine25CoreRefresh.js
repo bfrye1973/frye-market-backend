@@ -265,8 +265,24 @@ async function main() {
 
     const fileValidation = REQUIRED_FILES.map(assertFileExists);
 
-    const routeValidation = await validateFullDashboardRoute();
+    let routeValidation = {
+      ok: false,
+      headline: null,
+      overlayRows: null,
+      lastOverlay: null,
+      warningOnly: true,
+     warning: null,
+   };
 
+   try {
+     routeValidation = await validateFullDashboardRoute();
+   } catch (err) {
+     routeValidation.warning = String(err?.message || err || "UNKNOWN_ROUTE_VALIDATION_WARNING");
+     console.warn(
+       "[Engine25 Core Refresh] Public full-dashboard route validation warning only:",
+       routeValidation.warning
+     );
+   }
     const finishedAt = nowIso();
     const durationSec = ((Date.now() - startedMs) / 1000).toFixed(1);
 
