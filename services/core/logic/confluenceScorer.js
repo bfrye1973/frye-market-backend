@@ -13,7 +13,7 @@ function labelFromScore(total) {
   if (total >= 80) return "A";
   if (total >= 70) return "B";
   if (total >= 60) return "C";
-  return "IGNORE";
+  return "LOW";
 }
 
 function midpoint(lo, hi) {
