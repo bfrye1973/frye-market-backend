@@ -2735,9 +2735,15 @@ const zoneContext = buildZoneContext(
     marketRegime,
     zoneContext,
     intent: { action: "NEW_ENTRY" },
-  };
+    };
 
-const permissionPreliminary =
+  const permissionResp = await postJson(
+    `${CORE_BASE}/api/v1/trade-permission`,
+    permissionBody,
+    30000
+  );
+
+  const permissionPreliminary =
   permissionResp?.json || {
     ok: false,
     status: permissionResp?.status || 0,
