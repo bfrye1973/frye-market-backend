@@ -46,6 +46,13 @@ const STEPS = [
     label: "ES zone-aware read",
     job: "buildEngine25EsZoneAwareRead.js",
   },
+  {
+    label: "ES strategy snapshot with Engine 25 context",
+    job: "buildStrategySnapshot.js",
+    env: {
+      SYMBOL: "ES",
+    },
+  },
 ];
 
 const REQUIRED_FILES = [
@@ -114,11 +121,14 @@ function runStep(step, index) {
 
   const started = Date.now();
 
-  const result = spawnSync(process.execPath, [jobPath], {
-    cwd: CORE_DIR,
-    stdio: "inherit",
-    env: process.env,
-  });
+   const result = spawnSync(process.execPath, [jobPath], {
+     cwd: CORE_DIR,
+     stdio: "inherit",
+     env: {
+       ...process.env,
+       ...(step.env || {}),
+     },
+   });
 
   const durationSec = ((Date.now() - started) / 1000).toFixed(1);
 
