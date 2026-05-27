@@ -2682,7 +2682,8 @@ async function processStrategy(
   engine16,
   engine2State,
   spyReactionQuality = null,
-  spyVolumeBehavior = null
+  spyVolumeBehavior = null,
+  engine25Context = null
 ) {
 
 let contextResp = null;
@@ -3223,6 +3224,7 @@ const zoneContext = buildZoneContext(
     degree: s.degree,
     wave: s.wave,
     marketRegime,
+    engine25Context,
     confluence: patchedConfluence,
     analytics,
 
@@ -3640,7 +3642,8 @@ console.log("Engine21 alignment fetched");
   engine16ForStrategy,
   engine2State,
   spyReactionQuality,
-  spyVolumeBehavior
+  spyVolumeBehavior,
+  engine25Context
 );
 
   const executionState = getExecutionState(symbol, s.strategyId);
