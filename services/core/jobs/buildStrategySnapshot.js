@@ -3445,6 +3445,7 @@ async function buildSnapshot() {
   console.log("Starting strategy snapshot build...");
 
   const previousSnapshot = loadPreviousSnapshotSafe();
+  const engine25Context = loadEngine25Context();
 
   const momentum = await fetchMomentumContext(symbol);
   const engine2State = await buildEngine2State(symbol);
@@ -3570,7 +3571,7 @@ console.log("Engine21 alignment fetched");
   marketMeter,
   emaPosture,
   marketRegime,
-  marketRegime,
+  engine25Context,
   momentum,
   engine2State,
   engine21Alignment: {
