@@ -742,6 +742,190 @@ function computeZoneTelemetryFromCtx(ctx) {
   return { zoneType, withinZone };
 }
 
+function buildEngine5Analytics(confluenceJson) {
+  const score =
+    Number(confluenceJson?.scores?.total) ||
+    Number(confluenceJson?.total) ||
+    null;
+
+  return {
+    ...(confluenceJson || {}),
+    analyticsOnly: true,
+    engineRole: "INGREDIENTS_ONLY",
+    blockingAuthority: false,
+    score,
+    label: confluenceJson?.scores?.label || confluenceJson?.label || null,
+  };
+}
+
+function buildFinalPermissionFromEngine15({
+  symbol,
+  tf,
+  preliminaryPermission,
+  engine15Decision,
+  marketRegime,
+  zoneContext,
+  engine5Analytics,
+}) {
+  const preliminary =
+    preliminaryPermission && typeof preliminaryPermission === "object"
+      ? preliminaryPermission
+      : {
+          permission: "UNKNOWN",
+          sizeMultiplier: null,
+          reasonCodes: [],
+        };
+
+  const readiness = String(engine15Decision?.readinessLabel || "").toUpperCase();
+  const action = String(engine15Decision?.action || "").toUpperCase();
+  const strategyType = String(engine15Decision?.strategyType || "NONE").toUpperCase();
+  const direction = String(engine15Decision?.direction || "NONE").toUpperCase();
+
+  const baseReasonCodes = Array.isArray(preliminary.reasonCodes)
+    ? preliminary.reasonCodes
+    : [];
+
+  const engine15ReasonCodes = Array.isArray(engine15Decision?.reasonCodes)
+    ? engine15Decision.reasonCodes
+    : [];
+
+  const blockers = Array.isArray(engine15Decision?.blockers)
+    ? engine15Decision.blockers
+    : [];
+
+  const needs = Array.isArray(engine15Decision?.needs)
+    ? engine15Decision.needs
+    : [];
+
+  const final = {
+    ...preliminary,
+    engine: "engine6.finalFromEngine15.v1",
+    symbol,
+    tf,
+
+    engine15Authority: true,
+    engine5Authority: false,
+
+    strategyType,
+    direction,
+    readinessLabel: readiness || "UNKNOWN",
+    action: action || "UNKNOWN",
+    executionBias: engine15Decision?.executionBias || null,
+
+    executable: false,
+    watchOnly: false,
+
+    engine15Decision: {
+      strategyType,
+      direction,
+      action,
+      readinessLabel: readiness,
+      executionBias: engine15Decision?.executionBias || null,
+      qualityGatePassed: engine15Decision?.qualityGatePassed === true,
+      momentumGatePassed: engine15Decision?.momentumGatePassed === true,
+      permissionGatePassed: engine15Decision?.permissionGatePassed === true,
+      freshEntryNow: engine15Decision?.freshEntryNow === true,
+      qualityScore: engine15Decision?.qualityScore ?? null,
+      qualityGrade: engine15Decision?.qualityGrade ?? null,
+      qualityBand: engine15Decision?.qualityBand ?? null,
+      summary: engine15Decision?.summary || null,
+      blockers,
+      needs,
+      reasonCodes: engine15ReasonCodes,
+    },
+
+    marketRegime: marketRegime || null,
+    zoneContext: zoneContext
+      ? {
+          zoneType: zoneContext.zoneType || null,
+          withinZone: zoneContext.withinZone === true,
+          nearAllowedZone: zoneContext.nearAllowedZone === true,
+          locationState: zoneContext.locationState || null,
+        }
+      : null,
+
+    engine5Analytics: engine5Analytics
+      ? {
+          score: engine5Analytics.score ?? null,
+          label: engine5Analytics.label ?? null,
+          analyticsOnly: true,
+          blockingAuthority: false,
+        }
+      : null,
+  };
+
+  if (readiness === "BLOCKED" || readiness === "NO_SETUP" || action === "BLOCKED") {
+    return {
+      ...final,
+      permission: "STAND_DOWN",
+      sizeMultiplier: 0,
+      executable: false,
+      watchOnly: false,
+      reasonCodes: [
+        "ENGINE15_NOT_TRADABLE",
+        readiness ? `ENGINE15_${readiness}` : null,
+        ...baseReasonCodes,
+      ].filter(Boolean),
+    };
+  }
+
+  if (readiness === "WATCH" || action === "WATCH") {
+    return {
+      ...final,
+      permission: preliminary.permission === "STAND_DOWN" ? "STAND_DOWN" : "REDUCE",
+      sizeMultiplier:
+        preliminary.permission === "STAND_DOWN"
+          ? 0
+          : Number(preliminary.sizeMultiplier ?? 0.5),
+      executable: false,
+      watchOnly: true,
+      reasonCodes: [
+        "ENGINE15_WATCH_ONLY",
+        strategyType ? `${strategyType}_WATCH` : null,
+        "WAITING_FOR_CONFIRMATION",
+        ...baseReasonCodes,
+      ].filter(Boolean),
+    };
+  }
+
+  const readyLike =
+    readiness === "READY" ||
+    readiness === "CONFIRMED" ||
+    readiness === "TRIGGERED" ||
+    action === "ENTER_OK" ||
+    action === "REDUCE_OK";
+
+  if (readyLike) {
+    return {
+      ...final,
+      permission: preliminary.permission === "STAND_DOWN" ? "STAND_DOWN" : preliminary.permission || "REDUCE",
+      sizeMultiplier:
+        preliminary.permission === "STAND_DOWN"
+          ? 0
+          : Number(preliminary.sizeMultiplier ?? 0.5),
+      executable: preliminary.permission !== "STAND_DOWN",
+      watchOnly: false,
+      reasonCodes: [
+        "ENGINE15_READY_CONFIRMED",
+        ...baseReasonCodes,
+      ].filter(Boolean),
+    };
+  }
+
+  return {
+    ...final,
+    permission: "REDUCE",
+    sizeMultiplier: Number(preliminary.sizeMultiplier ?? 0.5),
+    executable: false,
+    watchOnly: true,
+    reasonCodes: [
+      "ENGINE15_UNCLEAR_DEFAULT_WATCH_ONLY",
+      readiness ? `ENGINE15_${readiness}` : null,
+      ...baseReasonCodes,
+    ].filter(Boolean),
+  };
+}
+
 function buildZoneContext(engine1ContextJson, confluenceLocation = null) {
   if (!engine1ContextJson || typeof engine1ContextJson !== "object") return null;
 
@@ -2523,12 +2707,18 @@ if (isFuturesSymbol(symbol)) {
     render: engine1Context?.render ?? null,
   };
 
-  const patchedConfluence =
-    contextResp?.ok !== false && engine1Context
-      ? applyNearAllowedZoneDisplay({ confluence, ctx: engine1Context })
-      : confluence;
+const patchedConfluence =
+  contextResp?.ok !== false && engine1Context
+    ? applyNearAllowedZoneDisplay({ confluence, ctx: engine1Context })
+    : confluence;
 
-  const zoneContext = buildZoneContext(
+const engine5Analytics = buildEngine5Analytics(patchedConfluence);
+
+const analytics = {
+  engine5: engine5Analytics,
+};
+
+const zoneContext = buildZoneContext(
     engine1Context,
     patchedConfluence?.location || null
   );
@@ -2547,11 +2737,12 @@ if (isFuturesSymbol(symbol)) {
     intent: { action: "NEW_ENTRY" },
   };
 
-  const permissionResp = await postJson(
-    `${CORE_BASE}/api/v1/trade-permission`,
-    permissionBody,
-    30000
-  );
+const permissionPreliminary =
+  permissionResp?.json || {
+    ok: false,
+    status: permissionResp?.status || 0,
+    error: permissionResp?.text || "no_permission",
+  };
 
   const permissionV2Body = {
     symbol,
@@ -2605,7 +2796,7 @@ if (isFuturesSymbol(symbol)) {
     engine16,
     engine5: patchedConfluence || null,
     momentum,
-    permission:
+    permission: permissionPreliminary,
       permissionResp?.json ||
       {
         permission: "UNKNOWN",
@@ -2640,6 +2831,23 @@ if (isFuturesSymbol(symbol)) {
           zoneContext,
         })
       : computeEngine15DecisionReferee(engine15BaseInputs);
+
+ const isEsIntradayScalp =
+  String(symbol || "").toUpperCase() === "ES" &&
+  s.strategyId === "intraday_scalp@10m";
+
+ const finalPermission =
+   isEsIntradayScalp
+     ? buildFinalPermissionFromEngine15({
+         symbol,
+         tf: s.tf,
+         preliminaryPermission: permissionPreliminary,
+         engine15Decision,
+         marketRegime,
+         zoneContext,
+         engine5Analytics,
+       })
+     : permissionPreliminary;
 
  const lockedSignal = updateSignalLock({
   symbol,
@@ -2854,14 +3062,30 @@ if (isFuturesSymbol(symbol)) {
     wave: s.wave,
     marketRegime,
     confluence: patchedConfluence,
-    permission:
-      permissionResp?.json || { ok: false, status: permissionResp?.status || 0, error: permissionResp?.text || "no_permission" },
+    analytics,
+
+    permissionPreliminary,
+
+    permission: finalPermission,
+
     engine6v2:
-      permissionV2Resp?.json || {
-        ok: false,
-        status: permissionV2Resp?.status || 0,
-        error: permissionV2Resp?.text || "no_v2",
-      },
+      isEsIntradayScalp
+        ? {
+            ...(permissionV2Resp?.json || {
+              ok: false,
+              status: permissionV2Resp?.status || 0,
+              error: permissionV2Resp?.text || "no_v2",
+            }),
+            experimental: true,
+            ignoredForES: true,
+            authority: false,
+            reason: "ENGINE6_V2_STALE_USES_ENGINE5_SCORE_NOT_ENGINE15",
+          }
+        : permissionV2Resp?.json || {
+            ok: false,
+            status: permissionV2Resp?.status || 0,
+            error: permissionV2Resp?.text || "no_v2",
+          },
     engine2,
     fibLevels: fib,
     engine16,
