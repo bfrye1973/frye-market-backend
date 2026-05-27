@@ -46,21 +46,13 @@ const STEPS = [
     label: "ES zone-aware read",
     job: "buildEngine25EsZoneAwareRead.js",
   },
-  {
-    label: "ES strategy snapshot with Engine 25 context",
-    job: "buildStrategySnapshot.js",
-    env: {
-      SYMBOL: "ES",
-    },
-  },
-];
+];  
 
-const REQUIRED_FILES = [
-  "engine25-historical-replay-macro-distribution-breadth-6mo.json",
-  "engine25-composite-overlay-6mo.json",
-  "engine25-es-zone-aware-read.json",
-  "strategy-snapshot-es.json",
-];
+ const REQUIRED_FILES = [
+   "engine25-historical-replay-macro-distribution-breadth-6mo.json",
+   "engine25-composite-overlay-6mo.json",
+   "engine25-es-zone-aware-read.json",
+ ];
 
 function nowIso() {
   return new Date().toISOString();
