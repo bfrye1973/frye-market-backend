@@ -321,7 +321,7 @@ export function computeConfluenceScore({
   mode,
   zoneRefOverride,   // ✅ provided by route
   zoneRefSource,     // ✅ provided by route (ACTIVE | NEAREST_SHELF_SCALP_REF)
-  weights = { e1: 0.60, e2: 0.15, e3: 0.10, e4: 0.15 },
+  weights = { e1: 0.20, e2: 0.20, e3: 0.25, e4: 0.25 },
   engine1WeakCapThreshold = 50,
   engine1WeakCapValue = 55,
 }) {
