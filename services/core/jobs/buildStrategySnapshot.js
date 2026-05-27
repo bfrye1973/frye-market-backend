@@ -2796,13 +2796,7 @@ const permissionPreliminary =
     engine16,
     engine5: patchedConfluence || null,
     momentum,
-    permission: permissionPreliminary,
-      permissionResp?.json ||
-      {
-        permission: "UNKNOWN",
-        sizeMultiplier: null,
-        reasonCodes: [],
-      },
+    permission: permissionPreliminary,      
     engine3: patchedConfluence?.context?.reaction || null,
     engine4: patchedConfluence?.context?.volume || null,
     waveReaction: reaction?.waveReaction || null,
