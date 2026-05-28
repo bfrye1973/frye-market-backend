@@ -7,8 +7,16 @@
 // Architecture:
 // - Adapters normalize market-specific input.
 // - Generic wave/fib core analyzes wave state.
-// - Summary/timeline builders create trader-facing reads.
-// - Trade decision builder creates PAPER_ONLY decision output.
+// - waveOpportunity is the PRE-ENGINE15 source of truth for W3/W5 opportunity.
+// - timelineRead is display/read layer.
+// - tradeDecision is post-Engine15 / PAPER_ONLY decision context.
+//
+// Locked role:
+// Engine 22 finds Elliott Wave W3/W5 opportunities.
+// Engine 15ES referees readiness.
+// Engine 6 permits.
+// Engine 7 sizes.
+// Engine 8 executes only if executable=true.
 //
 // This file should NOT become an ES monster file.
 // This file should NOT contain broker logic.
@@ -22,14 +30,7 @@ import { buildStockWaveContext } from "./adapters/buildStockWaveContext.js";
 import { buildFuturesWaveContext } from "./adapters/buildFuturesWaveContext.js";
 import { buildWaveTradeDecision } from "../decisions/buildWaveTradeDecision.js";
 import { buildTargetClusterConfidence } from "./buildTargetClusterConfidence.js";
-import { analyzeExtensionProgress } from "./analyzeExtensionProgress.js";
 import { buildWaveOpportunity } from "../opportunity/buildWaveOpportunity.js";
-
-function toNum(x) {
-  if (x === null || x === undefined || x === "") return null;
-  const n = Number(x);
-  return Number.isFinite(n) ? n : null;
-}
 
 function round2(x) {
   const n = Number(x);
@@ -149,6 +150,61 @@ function buildIncompleteTimelineRead({ symbol, reason }) {
   };
 }
 
+function buildIncompleteWaveOpportunity({
+  symbol,
+  strategyId,
+  currentPrice,
+  reason = "ENGINE2_WAVE_STATE_INCOMPLETE",
+} = {}) {
+  return {
+    ok: true,
+    engine: "engine22.waveOpportunity.v1",
+    symbol,
+    strategyId,
+    currentPrice: round2(currentPrice),
+    active: false,
+    setupFamily: "ELLIOTT_WAVE",
+    setupType: "NONE",
+    rawSetup: "NO_W3_W5_OPPORTUNITY",
+    degree: "unknown",
+    direction: "NONE",
+    readiness: "NO_SETUP",
+    timing: "UNKNOWN",
+    waveState: {
+      primary: "UNKNOWN",
+      intermediate: "UNKNOWN",
+      minor: "UNKNOWN",
+      minute: "UNKNOWN",
+      micro: "UNKNOWN",
+    },
+    entryZone: {
+      type: "NONE",
+      lo: null,
+      hi: null,
+      trigger: null,
+    },
+    invalidation: {
+      price: null,
+      reason: "No valid wave state available.",
+    },
+    targets: {
+      e100: null,
+      e1272: null,
+      e1618: null,
+      e200: null,
+      e2618: null,
+    },
+    chaseRisk: "UNKNOWN",
+    needs: ["ENGINE2_WAVE_MARKS"],
+    reasonCodes: [
+      "NO_W3_W5_OPPORTUNITY",
+      reason,
+    ],
+    summary:
+      "No valid Elliott Wave 3 or Wave 5 opportunity is available because Engine 2 wave/fib marks are incomplete.",
+  };
+}
+
 function buildIncompleteStrategy({
   symbol,
   strategyId,
@@ -166,6 +222,13 @@ function buildIncompleteStrategy({
     reason: `${symbol} Engine 2 wave/fib marks are incomplete.`,
     needs: ["ENGINE2_WAVE_MARKS"],
     reasonCodes: [reason],
+  });
+
+  const waveOpportunity = buildIncompleteWaveOpportunity({
+    symbol,
+    strategyId,
+    currentPrice,
+    reason,
   });
 
   return {
@@ -192,7 +255,14 @@ function buildIncompleteStrategy({
     reclaimLadder: null,
 
     waveFibState: null,
+    w4Levels: null,
     tradeContextSummary: null,
+    targetClusterConfidence: null,
+
+    // Pre-Engine15 source of truth.
+    waveOpportunity,
+
+    // Display / paper-only context.
     timelineRead,
     tradeDecision,
 
@@ -205,6 +275,7 @@ function buildTradeDecisionSafe({
   waveFibState,
   tradeContextSummary,
   timelineRead,
+  waveOpportunity,
 } = {}) {
   try {
     const decision = buildWaveTradeDecision({
@@ -214,6 +285,7 @@ function buildTradeDecisionSafe({
         waveFibState,
         tradeContextSummary,
         timelineRead,
+        waveOpportunity,
       },
       engine15: context.engine15,
       engine16: context.engine16,
@@ -240,7 +312,10 @@ function buildTradeDecisionSafe({
     return buildSafeTradeDecision({
       symbol: context.symbol,
       strategyId: context.strategyId,
-      setupType: waveFibState?.activeSetup || "NO_SETUP",
+      setupType:
+        waveOpportunity?.setupType ||
+        waveFibState?.activeSetup ||
+        "NO_SETUP",
       reason: `Trade decision builder failed safely: ${
         err?.message || "unknown error"
       }`,
@@ -252,11 +327,97 @@ function buildTradeDecisionSafe({
   return buildSafeTradeDecision({
     symbol: context.symbol,
     strategyId: context.strategyId,
-    setupType: waveFibState?.activeSetup || "NO_SETUP",
+    setupType:
+      waveOpportunity?.setupType ||
+      waveFibState?.activeSetup ||
+      "NO_SETUP",
     reason: "Wave strategy is read-only. Waiting for confirmation.",
     needs: ["ENGINE15_READY_OR_PAPER_READY"],
     reasonCodes: ["READ_ONLY_WAIT"],
   });
+}
+
+function getActiveW4Levels(waveFibState) {
+  const activeDegree = waveFibState?.activeTradingDegree || null;
+
+  return (
+    waveFibState?.w4Levels ||
+    (activeDegree ? waveFibState?.degrees?.[activeDegree]?.w4Levels : null) ||
+    null
+  );
+}
+
+function buildPreEngine15WaveOpportunity({
+  context,
+  waveFibState,
+  tradeContextSummary,
+  targetClusterConfidence,
+  w4Levels,
+} = {}) {
+  try {
+    return buildWaveOpportunity({
+      symbol: context.symbol,
+      strategyId: context.strategyId,
+      currentPrice: context.currentPrice,
+
+      // IMPORTANT:
+      // This is intentionally pre-Engine15 and must not use tradeDecision
+      // or timelineRead as source of truth.
+      engine22WaveStrategy: {
+        waveFibState,
+        tradeContextSummary,
+        targetClusterConfidence,
+        activeSetup: waveFibState?.activeSetup,
+        activeTradingDegree: waveFibState?.activeTradingDegree,
+        chaseRisk: waveFibState?.chaseRisk,
+        w4Levels,
+      },
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      engine: "engine22.waveOpportunity.v1",
+      symbol: context?.symbol || "ES",
+      strategyId: context?.strategyId || "intraday_scalp@10m",
+      currentPrice: round2(context?.currentPrice),
+      active: false,
+      setupFamily: "ELLIOTT_WAVE",
+      setupType: "NONE",
+      rawSetup: "WAVE_OPPORTUNITY_ERROR",
+      degree: "unknown",
+      direction: "NONE",
+      readiness: "NO_SETUP",
+      timing: "UNKNOWN",
+      waveState: {},
+      entryZone: {
+        type: "NONE",
+        lo: null,
+        hi: null,
+        trigger: null,
+      },
+      invalidation: {
+        price: null,
+        reason: "Wave opportunity builder failed.",
+      },
+      targets: {
+        e100: null,
+        e1272: null,
+        e1618: null,
+        e200: null,
+        e2618: null,
+      },
+      chaseRisk: "UNKNOWN",
+      needs: ["FIX_ENGINE22_WAVE_OPPORTUNITY"],
+      reasonCodes: ["ENGINE22_WAVE_OPPORTUNITY_ERROR"],
+      summary: `Engine 22 waveOpportunity failed safely: ${
+        err?.message || "unknown error"
+      }`,
+      debug: {
+        error: String(err?.message || err),
+        stack: String(err?.stack || ""),
+      },
+    };
+  }
 }
 
 export function buildEngine22WaveStrategy(input = {}) {
@@ -316,6 +477,21 @@ export function buildEngine22WaveStrategy(input = {}) {
     fibKey: "e1618",
   });
 
+  const w4Levels = getActiveW4Levels(waveFibState);
+
+  // PRE-ENGINE15 CONTRACT:
+  // This is the clean W3/W5 wave-opportunity source that Engine 15ES should consume.
+  // It must stay independent from tradeDecision and timelineRead.
+  const waveOpportunity = buildPreEngine15WaveOpportunity({
+    context,
+    waveFibState,
+    tradeContextSummary,
+    targetClusterConfidence,
+    w4Levels,
+  });
+
+  // DISPLAY LAYER:
+  // Timeline can use Engine15 for wording, but it is not the source of opportunity truth.
   const timelineRead = buildTimelineRead({
     waveFibState,
     tradeContextSummary,
@@ -330,34 +506,14 @@ export function buildEngine22WaveStrategy(input = {}) {
     sessionProfile: context.sessionProfile,
   });
 
+  // POST-ENGINE15 / PAPER-ONLY CONTEXT:
+  // This may look at Engine15 and confirmations, but it remains separate.
   const tradeDecision = buildTradeDecisionSafe({
     context,
     waveFibState,
     tradeContextSummary,
     timelineRead,
-  });
-
-  const activeDegree = waveFibState?.activeTradingDegree || null;
-
-  const w4Levels =
-    waveFibState?.w4Levels ||
-    (activeDegree ? waveFibState?.degrees?.[activeDegree]?.w4Levels : null) ||
-    null;
-
-  const waveOpportunity = buildWaveOpportunity({
-    symbol: context.symbol,
-    strategyId: context.strategyId,
-    currentPrice: context.currentPrice,
-    engine22WaveStrategy: {
-      waveFibState,
-      tradeContextSummary,
-      timelineRead,
-      tradeDecision,
-      activeSetup: waveFibState?.activeSetup,
-      activeTradingDegree: waveFibState?.activeTradingDegree,
-      chaseRisk: waveFibState?.chaseRisk,
-      w4Levels,
-    },
+    waveOpportunity,
   });
 
   return {
@@ -372,12 +528,16 @@ export function buildEngine22WaveStrategy(input = {}) {
     currentPrice: round2(context.currentPrice),
 
     waveFibState,
-    w4Levels, 
+    w4Levels,
     tradeContextSummary,
     targetClusterConfidence,
+
+    // Primary Engine 22 contract for Engine 15ES.
+    waveOpportunity,
+
+    // Secondary/read-only layers.
     timelineRead,
     tradeDecision,
-    waveOpportunity,
 
     headline: tradeContextSummary?.headline || timelineRead?.headline || null,
     bias: tradeContextSummary?.bias || null,
@@ -386,7 +546,7 @@ export function buildEngine22WaveStrategy(input = {}) {
 
     activeSetup: waveFibState?.activeSetup || null,
     activeTradingDegree: waveFibState?.activeTradingDegree || "unknown",
-    chaseRisk: waveFibState?.chaseRisk || null,
+    chaseRisk: waveFibState?.chaseRisk || waveOpportunity?.chaseRisk || null,
 
     topCandidate:
       tradeContextSummary?.topCandidate ??
@@ -406,10 +566,14 @@ export function buildEngine22WaveStrategy(input = {}) {
 
     reasonCodes: [
       "ENGINE22G_WAVE_STRATEGY_BUILT",
+      "ENGINE22_WAVE_OPPORTUNITY_PRE_ENGINE15",
       ...(Array.isArray(context?.reasonCodes) ? context.reasonCodes : []),
       ...(Array.isArray(waveFibState?.reasonCodes) ? waveFibState.reasonCodes : []),
       ...(Array.isArray(tradeContextSummary?.reasonCodes)
         ? tradeContextSummary.reasonCodes
+        : []),
+      ...(Array.isArray(waveOpportunity?.reasonCodes)
+        ? waveOpportunity.reasonCodes
         : []),
       ...(Array.isArray(tradeDecision?.reasonCodes)
         ? tradeDecision.reasonCodes
