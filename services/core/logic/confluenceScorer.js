@@ -286,6 +286,31 @@ function reactionPartForMode({ mode, reaction }) {
   const structureState = String(reaction?.structureState || "HOLD").toUpperCase();
   const reasonCodes = Array.isArray(reaction?.reasonCodes) ? reaction.reasonCodes : [];
 
+  const isEsReaction =
+    reasonCodes.includes("ES_REACTION_SCORE") ||
+    reaction?.esReaction != null;
+
+  if (isEsReaction) {
+    const rawScore = clamp(
+      Number(
+        reaction?.esReaction?.reaction?.qualityScore ??
+        reaction?.reactionScore ??
+        reaction?.score ??
+        0
+      ),
+      0,
+      100
+    );
+
+    if (structureState === "FAILURE") return 0;
+
+    // ES is score-first. Do not let stage: IDLE crush a valid ES reaction score.
+    if (rawScore >= 75) return 15;
+    if (rawScore >= 60) return 10;
+    if (rawScore >= 40) return 5;
+    return 0;
+  }
+
   if (reasonCodes.includes("NOT_IN_ZONE")) return 0;
   if (structureState === "FAILURE") return 0;
 
