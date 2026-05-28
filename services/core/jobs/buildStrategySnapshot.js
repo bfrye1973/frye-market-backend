@@ -3110,6 +3110,146 @@ const zoneContext = buildZoneContext(
     }
   }
 
+  let engine22Scalp = null;
+  let engine22WaveStrategy = null;
+  let engine23Interpretation = null;
+
+  const isEsIntradayScalp =
+    String(symbol || "").toUpperCase() === "ES" &&
+    s.strategyId === "intraday_scalp@10m";
+
+  if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
+    try {
+      engine22Scalp = computeEngine22ScalpOpportunity({
+        symbol,
+        strategyId: s.strategyId,
+        tf: s.tf,
+        engine16,
+        reaction: patchedConfluence?.context?.reaction || null,
+        waveReaction: reaction?.waveReaction || null,
+        engine2State,
+        marketMind,
+        marketMeter,
+
+        reactionContext:
+          patchedConfluence?.context?.reaction ||
+          spyReactionQuality?.engine3Reaction ||
+          spyReactionQuality ||
+          null,
+
+        volumeContext:
+          patchedConfluence?.context?.volume ||
+          spyVolumeBehavior?.engine4Volume ||
+          spyVolumeBehavior ||
+          null,
+
+        engine1Context,
+      });
+    } catch (err) {
+      console.error("[E22 PRE-ENGINE15 SCALP ERROR]", err);
+
+      engine22Scalp = {
+        ok: false,
+        engine: "engine22.scalpOpportunity.v5.2",
+        active: false,
+        mode: "OBSERVATION_ONLY",
+        symbol,
+        strategyId: s.strategyId,
+        tf: s.tf,
+        state: "ENGINE22_PRE_ENGINE15_ERROR",
+        status: "NO_SCALP",
+        readiness: "WAIT",
+        setupType: "ENGINE22_PRE_ENGINE15_ERROR",
+        type: "ENGINE22_PRE_ENGINE15_ERROR",
+        direction: "NONE",
+        needs: "FIX_ENGINE22_PRE_ENGINE15_ERROR",
+        allowLongEntry: false,
+        allowShort: false,
+        allowShortEntry: false,
+        triggerConfirmed: false,
+        reasonCodes: ["ENGINE22_PRE_ENGINE15_SCALP_FAILED"],
+        debug: {
+          error: String(err?.message || err),
+          stack: String(err?.stack || ""),
+        },
+      };
+    }
+
+    try {
+      engine22WaveStrategy = buildEngine22WaveStrategy({
+        symbol,
+        strategyId: s.strategyId,
+        tf: s.tf,
+        engine2State,
+
+        // IMPORTANT:
+        // Pre-Engine15 build. Engine 22 waveOpportunity must be independent
+        // from Engine 15. TradeDecision/timeline can be enriched later.
+        engine15: null,
+
+        engine16,
+        marketMeter,
+        regimeLayers: engine22Scalp?.regimeLayers || null,
+
+        reactionContext:
+          patchedConfluence?.context?.reaction ||
+          spyReactionQuality?.engine3Reaction ||
+          spyReactionQuality ||
+          null,
+
+        volumeContext:
+          patchedConfluence?.context?.volume ||
+          spyVolumeBehavior?.engine4Volume ||
+          spyVolumeBehavior ||
+          null,
+
+        breakoutContext: engine22Scalp?.breakoutContext || null,
+
+        barsByTf: {
+          "10m": marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+          "1h": marketMeter?.layers?.emaPosture?.oneHour?.bars || [],
+          "4h": marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
+          "1d": marketMeter?.layers?.emaPosture?.daily?.bars || [],
+        },
+      });
+    } catch (err) {
+      console.error("[E22 PRE-ENGINE15 WAVE ERROR]", err);
+
+      engine22WaveStrategy = {
+        ok: false,
+        engine: "engine22.waveStrategy.v1",
+        mode: "READ_ONLY",
+        symbol,
+        strategyId: s.strategyId,
+        tf: s.tf,
+        state: "ENGINE22_PRE_ENGINE15_WAVE_ERROR",
+        reasonCodes: ["ENGINE22_PRE_ENGINE15_WAVE_FAILED"],
+        waveOpportunity: {
+          ok: false,
+          engine: "engine22.waveOpportunity.v1",
+          symbol,
+          strategyId: s.strategyId,
+          active: false,
+          setupFamily: "ELLIOTT_WAVE",
+          setupType: "NONE",
+          rawSetup: "ENGINE22_PRE_ENGINE15_WAVE_ERROR",
+          degree: "unknown",
+          direction: "NONE",
+          readiness: "NO_SETUP",
+          timing: "UNKNOWN",
+          chaseRisk: "UNKNOWN",
+          needs: ["FIX_ENGINE22_PRE_ENGINE15_WAVE_ERROR"],
+          reasonCodes: ["ENGINE22_PRE_ENGINE15_WAVE_FAILED"],
+          summary: "Engine 22 pre-Engine15 waveOpportunity failed.",
+        },
+        debug: {
+          error: String(err?.message || err),
+          stack: String(err?.stack || ""),
+        },
+      };
+    }
+  } 
+
   // Engine 5 preliminary timing context.
   // This must exist before Engine 15ES runs.
   // Later, after Engine 22 / Engine 23 are built, the builder can enrich/replace
@@ -3150,12 +3290,16 @@ const zoneContext = buildZoneContext(
           symbol,
           strategyId: s.strategyId,
            snapshotContext: {
-            emaPosture: marketMeter?.layers?.emaPosture || null,         
-            engine2State,
-            marketMind,
-            marketMeter,
-            marketRegime,
-          },
+             emaPosture: marketMeter?.layers?.emaPosture || null,
+             engine2State,
+             marketMind,
+             marketMeter,
+             marketRegime,
+
+             // Pre-Engine15 wave opportunity from Engine 22.
+             engine22WaveStrategy,
+             waveOpportunity: engine22WaveStrategy?.waveOpportunity || null,
+           },
           engine16,
           engine5: patchedConfluence || null,
           momentum,
@@ -3166,10 +3310,7 @@ const zoneContext = buildZoneContext(
         })
       : computeEngine15DecisionReferee(engine15BaseInputs);
 
- const isEsIntradayScalp =
-  String(symbol || "").toUpperCase() === "ES" &&
-  s.strategyId === "intraday_scalp@10m";
-
+ 
  const finalPermission =
    isEsIntradayScalp
      ? buildFinalPermissionFromEngine15({
@@ -3214,10 +3355,6 @@ const zoneContext = buildZoneContext(
         tf: s.tf,
         condition: s.strategyId === "intraday_scalp@10m" && s.tf === "10m",
       });
-
-      let engine22Scalp = null;
-      let engine22WaveStrategy = null;
-      let engine23Interpretation = null; 
 
       if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
         try {
