@@ -3110,19 +3110,39 @@ const zoneContext = buildZoneContext(
     }
   }
 
+  // Engine 5 preliminary timing context.
+  // This must exist before Engine 15ES runs.
+  // Later, after Engine 22 / Engine 23 are built, the builder can enrich/replace
+  // patchedConfluence.timingContext for final display.
+  const preliminaryEngine5TimingContext = buildEngine5TimingContext({
+    confluence: patchedConfluence,
+    engine15Decision: null,
+    engine22WaveStrategy: null,
+    engine23Interpretation: null,
+    engine16,
+    permissionPreliminary,
+    marketRegime,
+    engine2State,
+  });
+
+  patchedConfluence.timingContext = preliminaryEngine5TimingContext;
+
+  if (analytics?.engine5) {
+    analytics.engine5.timingContext = preliminaryEngine5TimingContext;
+  }
+
   const engine15BaseInputs = {
     symbol,
     strategyId: s.strategyId,
     engine16,
     engine5: patchedConfluence || null,
     momentum,
-    permission: permissionPreliminary,      
+    permission: permissionPreliminary,
     engine3: patchedConfluence?.context?.reaction || null,
     engine4: patchedConfluence?.context?.volume || null,
     waveReaction: reaction?.waveReaction || null,
     zoneContext,
   };
-
   const engine15Decision =
     String(symbol || "").toUpperCase() === "ES" &&
     s.strategyId === "intraday_scalp@10m"
