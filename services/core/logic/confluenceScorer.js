@@ -126,15 +126,15 @@ function deriveVolumeState(volume) {
     f.relativeVolume ?? volume?.relativeVolume ?? 0
   );
 
-if (f.absorptionRisk === true) return "ABSORPTION_RISK";
-if (f.climacticVolume === true) return "CLIMACTIC_CAUTION";
+  if (f.absorptionRisk === true) return "ABSORPTION_RISK";
+  if (f.climacticVolume === true) return "CLIMACTIC_CAUTION";
 
-if (f.volumeExpansion === true || relativeVolume >= 1.2) {
-  if (volumeTrend === "FADING") return "HIGH_VOLUME_FADING";
-  if (participationQuality) return participationQuality;
-  if (participationState) return participationState;
-  return "HIGH_VOLUME_EXPANDING";
-}
+  if (f.volumeExpansion === true || relativeVolume >= 1.2) {
+    if (volumeTrend === "FADING") return "HIGH_VOLUME_FADING";
+    if (participationQuality) return participationQuality;
+    if (participationState) return participationState;
+    return "HIGH_VOLUME_EXPANDING";
+ }
   if (isTrue(f.liquidityTrap)) return "TRAP_SUSPECTED";
   if (isTrue(f.initiativeMoveConfirmed) && isTrue(volume?.volumeConfirmed)) return "INITIATIVE";
   if (isTrue(f.volumeDivergence)) return "DIVERGENCE";
