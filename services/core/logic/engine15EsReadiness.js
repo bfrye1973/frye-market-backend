@@ -2,25 +2,35 @@
 //
 // Engine 15ES — ES Futures Readiness Referee
 //
-// v1.1
+// v1.2
 // - ES-only readiness shell
 // - Does NOT place orders
 // - Does NOT replace Engine 16ES
 // - Does NOT use Engine 22 because ES Engine 22 strategy is not built yet
 // - Does NOT hard-code Elliott wave scenarios
-// - Reads ES snapshot truth:
-//   - emaPosture 10m / 1h / 4h / daily
-//   - Engine16ES regime layers
-//   - Engine3 reaction
-//   - Engine4 volume / participation
-//   - Engine6 permission
-//   - Engine2 extension context only
+//
+// Authority model:
+// - Engine 3 = raw reaction facts
+// - Engine 4 = raw volume / participation facts
+// - Engine 5 = normalized confluence + reaction / volume / timing verdicts
+// - Engine 15ES = final ES setup referee
+// - Engine 6 = final permission gate
+//
+// Main upgrade in v1.2:
+// - Engine 15ES now uses Engine 5 normalized component verdicts first:
+//   - engine5.components.engine3Reaction
+//   - engine5.components.engine4Volume
+//   - engine5.timingContext
+//   - engine5.analytics.engine5.timingContext
+// - Raw Engine 3 / Engine 4 remain fallback/debug only.
+// - Engine 5 timing context can say the move already happened, post-extension,
+//   late chase, or wait for pullback/reclaim. Engine 15ES must respect that.
 //
 // Main purpose:
 // Engine 15ES answers:
 // Is ES ready, watch-only, blocked, or waiting — and what exactly does the trader need next?
 
-const ENGINE = "engine15.esReadiness.v1.1";
+const ENGINE = "engine15.esReadiness.v1.2";
 const DEFAULT_STRATEGY_ID = "intraday_scalp@10m";
 const ES_TICK_SIZE = 0.25;
 
@@ -131,7 +141,11 @@ function getCurrentPrice({ emaPosture, engine16, zoneContext }) {
   );
 }
 
-function reactionConfirmed(reaction) {
+/* -----------------------------
+   Raw Engine 3 / Engine 4 fallbacks
+------------------------------*/
+
+function reactionConfirmedRaw(reaction) {
   if (!reaction || typeof reaction !== "object") return false;
 
   const score = toNum(reaction?.reactionScore ?? reaction?.score, 0);
@@ -151,25 +165,205 @@ function reactionConfirmed(reaction) {
   );
 }
 
-function volumeConfirmed(volume) {
+function volumeConfirmedRaw(volume) {
   if (!volume || typeof volume !== "object") return false;
 
   const score = toNum(volume?.volumeScore ?? volume?.score, 0);
   const state = safeUpper(volume?.state, "UNKNOWN");
   const participationState = safeUpper(volume?.flags?.participationState, "");
   const participationQuality = safeUpper(volume?.flags?.participationQuality, "");
-  const relativeVolume = toNum(volume?.flags?.relativeVolume ?? volume?.relativeVolume, 0);
+  const relativeVolume = toNum(
+    volume?.flags?.relativeVolume ?? volume?.relativeVolume,
+    0
+  );
+
+  const rawRisk =
+    volume?.flags?.absorptionRisk === true ||
+    volume?.flags?.climacticVolume === true ||
+    includesAny(participationQuality, ["ABSORPTION", "CLIMACTIC"]) ||
+    includesAny(state, ["ABSORPTION", "CLIMACTIC", "HIGH_VOLUME_FADING"]);
+
+  if (rawRisk) return false;
 
   return (
     volume.volumeConfirmed === true ||
     volume.confirmed === true ||
     score >= 7 ||
     relativeVolume >= 1.2 ||
-    includesAny(state, ["STRONG_PARTICIPATION", "PARTICIPATION_CONFIRMED", "EXPANSION", "IGNITION"]) ||
+    includesAny(state, [
+      "STRONG_PARTICIPATION",
+      "PARTICIPATION_CONFIRMED",
+      "EXPANSION",
+      "IGNITION",
+    ]) ||
     includesAny(participationState, ["STRONG", "CONFIRMED", "EXPANSION"]) ||
     includesAny(participationQuality, ["STRONG", "HIGH"])
   );
 }
+
+/* -----------------------------
+   Engine 5 normalized component readers
+------------------------------*/
+
+function getEngine5Reaction(engine5) {
+  return engine5?.components?.engine3Reaction || null;
+}
+
+function getEngine5Volume(engine5) {
+  return engine5?.components?.engine4Volume || null;
+}
+
+function getEngine5Timing(engine5) {
+  return (
+    engine5?.timingContext ||
+    engine5?.analytics?.engine5?.timingContext ||
+    null
+  );
+}
+
+function engine5Score(engine5) {
+  return (
+    toNum(engine5?.scores?.total) ??
+    toNum(engine5?.score) ??
+    toNum(engine5?.total) ??
+    null
+  );
+}
+
+function engine5Label(engine5) {
+  return (
+    engine5?.scores?.label ||
+    engine5?.label ||
+    null
+  );
+}
+
+function reactionConfirmedFromEngine5(engine5, rawEngine3 = null) {
+  const e5Reaction = getEngine5Reaction(engine5);
+
+  if (e5Reaction && typeof e5Reaction === "object") {
+    return (
+      e5Reaction.confirmed === true ||
+      e5Reaction.cleanReaction === true
+    );
+  }
+
+  return reactionConfirmedRaw(rawEngine3);
+}
+
+function reactionDirectionFromEngine5(engine5, rawEngine3 = null) {
+  const e5Reaction = getEngine5Reaction(engine5);
+
+  return safeUpper(
+    e5Reaction?.direction ??
+      rawEngine3?.direction ??
+      "NONE",
+    "NONE"
+  );
+}
+
+function reactionQualityFromEngine5(engine5, rawEngine3 = null) {
+  const e5Reaction = getEngine5Reaction(engine5);
+
+  return safeUpper(
+    e5Reaction?.quality ??
+      rawEngine3?.quality ??
+      "UNKNOWN",
+    "UNKNOWN"
+  );
+}
+
+function volumeConfirmedFromEngine5(engine5, rawEngine4 = null) {
+  const e5Volume = getEngine5Volume(engine5);
+
+  if (e5Volume && typeof e5Volume === "object") {
+    return (
+      e5Volume.cleanParticipation === true ||
+      e5Volume.confirmed === true
+    );
+  }
+
+  return volumeConfirmedRaw(rawEngine4);
+}
+
+function volumeRiskFromEngine5(engine5, rawEngine4 = null) {
+  const e5Volume = getEngine5Volume(engine5);
+
+  if (e5Volume && typeof e5Volume === "object") {
+    const quality = safeUpper(e5Volume.quality, "");
+    const state = safeUpper(e5Volume.state, "");
+    const participationState = safeUpper(e5Volume.participationState, "");
+    const participationQuality = safeUpper(e5Volume.participationQuality, "");
+
+    return (
+      e5Volume.absorptionRisk === true ||
+      e5Volume.climacticVolume === true ||
+      quality === "HIGH_VOLUME_FADING" ||
+      state === "HIGH_VOLUME_FADING" ||
+      includesAny(quality, ["ABSORPTION", "CLIMACTIC", "FADING"]) ||
+      includesAny(state, ["ABSORPTION", "CLIMACTIC", "FADING"]) ||
+      includesAny(participationState, ["ABSORPTION", "CLIMACTIC", "FADING"]) ||
+      includesAny(participationQuality, ["ABSORPTION", "CLIMACTIC", "FADING"])
+    );
+  }
+
+  const rawState = safeUpper(rawEngine4?.state, "");
+  const rawParticipationState = safeUpper(rawEngine4?.flags?.participationState, "");
+  const rawParticipationQuality = safeUpper(rawEngine4?.flags?.participationQuality, "");
+
+  return (
+    rawEngine4?.flags?.absorptionRisk === true ||
+    rawEngine4?.flags?.climacticVolume === true ||
+    includesAny(rawState, ["ABSORPTION", "CLIMACTIC", "FADING"]) ||
+    includesAny(rawParticipationState, ["ABSORPTION", "CLIMACTIC", "FADING"]) ||
+    includesAny(rawParticipationQuality, ["ABSORPTION", "CLIMACTIC", "FADING"])
+  );
+}
+
+function lateTimingFromEngine5(engine5) {
+  const e5Timing = getEngine5Timing(engine5);
+
+  if (!e5Timing || typeof e5Timing !== "object") return false;
+
+  return (
+    e5Timing.moveAlreadyHappened === true ||
+    e5Timing.noChaseContext === true ||
+    safeUpper(e5Timing.entryTiming, "") === "LATE_CHASE" ||
+    safeUpper(e5Timing.entryTiming, "") === "POST_EXTENSION" ||
+    safeUpper(e5Timing.chaseRisk, "") === "HIGH"
+  );
+}
+
+function timingActionFromEngine5(engine5) {
+  const e5Timing = getEngine5Timing(engine5);
+
+  return safeUpper(
+    e5Timing?.suggestedAction,
+    "NONE"
+  );
+}
+
+function timingEntryFromEngine5(engine5) {
+  const e5Timing = getEngine5Timing(engine5);
+
+  return safeUpper(
+    e5Timing?.entryTiming,
+    "UNKNOWN"
+  );
+}
+
+function timingChaseRiskFromEngine5(engine5) {
+  const e5Timing = getEngine5Timing(engine5);
+
+  return safeUpper(
+    e5Timing?.chaseRisk,
+    "UNKNOWN"
+  );
+}
+
+/* -----------------------------
+   Structure / extension helpers
+------------------------------*/
 
 function activeEngine2Extension(engine2State) {
   if (!engine2State || typeof engine2State !== "object") return false;
@@ -215,6 +409,10 @@ function tenMinuteLongTrigger({ tenMinute, engine16 }) {
     includesAny(triggerState, ["ABOVE_EMA10_EMA20", "RECLAIM", "LONG_TRIGGER"])
   );
 }
+
+/* -----------------------------
+   Output helpers
+------------------------------*/
 
 function buildLifecycle({
   currentPrice,
@@ -295,7 +493,7 @@ function buildBlockedDecision({
 
     needs: unique(needs?.length ? needs : ["RESOLVE_BLOCKERS"]),
     summary:
-      "ES Engine 15 is blocked because required ES readiness data or permission is not available.",
+      "ES Engine 15 is blocked because required ES readiness data, structure, or permission is not available.",
 
     qualityGatePassed: false,
     momentumGatePassed: false,
@@ -313,6 +511,8 @@ function buildBlockedDecision({
       tenMinuteTrigger: false,
       reactionConfirmed: false,
       volumeConfirmed: false,
+      volumeRisk: false,
+      lateTiming: false,
       extensionContext: false,
     },
 
@@ -339,6 +539,96 @@ function buildBlockedDecision({
 
     debug,
   };
+}
+
+function chooseNextSetupType({
+  readinessLabel,
+  lateTiming,
+  volumeOk,
+  volumeRisk,
+  reactionOk,
+  tenMinuteTrigger,
+}) {
+  if (readinessLabel === "READY") return "PAPER_READY_ONLY";
+  if (lateTiming) return "WAIT_FOR_PULLBACK_OR_RECLAIM";
+  if (!tenMinuteTrigger) return "WAIT_FOR_10M_RECLAIM";
+  if (!reactionOk) return "WAIT_FOR_ENGINE3_REACTION";
+  if (!volumeOk) return "WAIT_FOR_ENGINE4_CLEAN_PARTICIPATION";
+  if (volumeRisk) return "WAIT_FOR_VOLUME_RISK_CLEARANCE";
+  return "WAIT_FOR_CONFIRMATION";
+}
+
+function buildWatchSummary({
+  dailyAbove,
+  fourHourBelow,
+  oneHourBelow,
+  tenMinuteBelow10,
+  tenMinuteBelow20,
+  longTrigger,
+  reactionOk,
+  volumeOk,
+  volumeRisk,
+  lateTiming,
+  engine5Timing,
+  e5Reaction,
+  e5Volume,
+}) {
+  const parts = [];
+
+  if (dailyAbove) {
+    parts.push("Daily still allows long ES ideas");
+  } else {
+    parts.push("Daily does not yet provide clean long permission");
+  }
+
+  if (!fourHourBelow && !oneHourBelow) {
+    parts.push("4H and 1H are supportive");
+  } else if (fourHourBelow && oneHourBelow) {
+    parts.push("4H and 1H are still weak");
+  } else if (fourHourBelow) {
+    parts.push("4H is still weak");
+  } else if (oneHourBelow) {
+    parts.push("1H is still weak");
+  }
+
+  if (longTrigger && !tenMinuteBelow10 && !tenMinuteBelow20) {
+    parts.push("10m reclaim/trigger is present");
+  } else {
+    parts.push("10m still needs a clean EMA10/EMA20 reclaim");
+  }
+
+  if (reactionOk) {
+    const quality = safeUpper(e5Reaction?.quality, "");
+    const direction = safeUpper(e5Reaction?.direction, "");
+    const detail = [quality, direction].filter(Boolean).join(" ");
+    parts.push(detail ? `Engine 5 confirms reaction (${detail})` : "Engine 5 confirms reaction");
+  } else {
+    parts.push("reaction is not confirmed");
+  }
+
+  if (volumeOk && !volumeRisk) {
+    parts.push("volume participation is clean");
+  } else if (volumeRisk) {
+    const quality =
+      safeUpper(e5Volume?.quality, "") ||
+      safeUpper(e5Volume?.participationQuality, "") ||
+      "RISK";
+    parts.push(`volume is not clean because volume risk is present (${quality})`);
+  } else {
+    parts.push("volume participation is not confirmed");
+  }
+
+  if (lateTiming) {
+    const timing = safeUpper(engine5Timing?.entryTiming, "UNKNOWN");
+    const chaseRisk = safeUpper(engine5Timing?.chaseRisk, "UNKNOWN");
+    const suggested = safeUpper(engine5Timing?.suggestedAction, "WAIT_FOR_PULLBACK_OR_RECLAIM");
+
+    parts.push(
+      `Engine 5 timing says the move already happened / no chase (${timing}, chase risk ${chaseRisk}); suggested action is ${suggested}`
+    );
+  }
+
+  return `${parts.join(", ")}. No clean ES entry yet.`;
 }
 
 /**
@@ -429,11 +719,20 @@ export function buildEngine15EsDecision({
       engine16,
     });
 
-    const reactionOk = reactionConfirmed(engine3);
-    const volumeOk = volumeConfirmed(engine4);
+    const e5Reaction = getEngine5Reaction(engine5);
+    const e5Volume = getEngine5Volume(engine5);
+    const e5Timing = getEngine5Timing(engine5);
+
+    const reactionOk = reactionConfirmedFromEngine5(engine5, engine3);
+    const volumeOk = volumeConfirmedFromEngine5(engine5, engine4);
+    const volumeRisk = volumeRiskFromEngine5(engine5, engine4);
+    const lateTiming = lateTimingFromEngine5(engine5);
     const engine2Extension = activeEngine2Extension(engine2State);
 
-    // For v1, daily below EMA10 blocks LONG continuation only.
+    const e5Score = engine5Score(engine5);
+    const e5Label = engine5Label(engine5);
+
+    // For v1.2, daily below EMA10 blocks LONG continuation only.
     if (dailyBelow) {
       blockers.push("DAILY_BELOW_EMA10_LONG_CONTINUATION_BLOCKED");
       reasonCodes.push("DAILY_BELOW_EMA10_LONG_PERMISSION_REDUCED");
@@ -456,12 +755,22 @@ export function buildEngine15EsDecision({
         reasonCodes: Array.isArray(permission?.reasonCodes) ? permission.reasonCodes : [],
       },
       marketRegime,
-      reaction: {
+      engine5: {
+        score: e5Score,
+        label: e5Label,
+        reactionComponent: e5Reaction || null,
+        volumeComponent: e5Volume || null,
+        timingContext: e5Timing || null,
+        timingAction: timingActionFromEngine5(engine5),
+        timingEntry: timingEntryFromEngine5(engine5),
+        timingChaseRisk: timingChaseRiskFromEngine5(engine5),
+      },
+      reactionFallback: {
         score: toNum(engine3?.reactionScore ?? engine3?.score, null),
         confirmed: engine3?.confirmed === true,
         structureState: engine3?.structureState ?? engine3?.state ?? null,
       },
-      volume: {
+      volumeFallback: {
         score: toNum(engine4?.volumeScore ?? engine4?.score, null),
         confirmed: engine4?.volumeConfirmed === true || engine4?.confirmed === true,
         state: engine4?.state ?? null,
@@ -477,6 +786,8 @@ export function buildEngine15EsDecision({
         longTrigger,
         reactionOk,
         volumeOk,
+        volumeRisk,
+        lateTiming,
         engine2Extension,
       },
       engine22: {
@@ -535,10 +846,20 @@ export function buildEngine15EsDecision({
     }
 
     if (!volumeOk) {
-      needs.push("ENGINE4_PARTICIPATION");
-      reasonCodes.push("ENGINE4_PARTICIPATION_NOT_CONFIRMED");
+      needs.push("ENGINE4_CLEAN_PARTICIPATION");
+      reasonCodes.push("ENGINE4_CLEAN_PARTICIPATION_NOT_CONFIRMED");
     } else {
-      reasonCodes.push("ENGINE4_PARTICIPATION_CONFIRMED");
+      reasonCodes.push("ENGINE4_CLEAN_PARTICIPATION_CONFIRMED");
+    }
+
+    if (volumeRisk) {
+      needs.push("ENGINE4_VOLUME_RISK_CLEARANCE");
+      reasonCodes.push("ENGINE4_VOLUME_RISK_PRESENT");
+    }
+
+    if (lateTiming) {
+      needs.push("WAIT_FOR_PULLBACK_OR_RECLAIM");
+      reasonCodes.push("ENGINE5_TIMING_POST_EXTENSION_NO_CHASE");
     }
 
     if (pText === "REDUCE") {
@@ -564,6 +885,8 @@ export function buildEngine15EsDecision({
       longTrigger &&
       reactionOk &&
       volumeOk &&
+      !volumeRisk &&
+      !lateTiming &&
       permissionGatePassed(permission);
 
     let readinessLabel = "NO_SETUP";
@@ -590,18 +913,18 @@ export function buildEngine15EsDecision({
       strategyType = "CONTINUATION";
       priority = 80;
       entryStyle = "FUTURES_SCALP_CONFIRMATION";
-      qualityScore = 80;
+      qualityScore = Math.max(80, e5Score ?? 0);
       qualityGrade = "A";
       qualityBand = "READY";
       setupChain = [
         "DAILY_PERMISSION",
         "HTF_SUPPORT",
         "10M_TRIGGER",
-        "E3_E4_CONFIRMATION",
+        "E5_REACTION_VOLUME_TIMING_CONFIRMATION",
       ];
       nextSetupType = "PAPER_READY_ONLY";
       summary =
-        "ES has daily long permission, supportive 4H/1H posture, a 10m reclaim/trigger, and confirmation from reaction and participation. Paper-ready only; live execution is not enabled.";
+        "ES has daily long permission, supportive 4H/1H posture, a 10m reclaim/trigger, Engine 5 confirms clean reaction and clean volume participation, and Engine 5 timing does not show post-extension chase risk. Paper-ready only; live execution is not enabled.";
     } else if (dailyAbove) {
       readinessLabel = "WATCH";
       action = "WATCH";
@@ -609,18 +932,38 @@ export function buildEngine15EsDecision({
       executionBias = "LONG_WATCH_ONLY";
       strategyType = "CONTINUATION";
       priority = 45;
-      entryStyle = "WAIT_FOR_RECLAIM";
-      qualityScore = 45;
+      entryStyle = lateTiming ? "WAIT_FOR_PULLBACK_OR_RECLAIM" : "WAIT_FOR_RECLAIM";
+      qualityScore = e5Score ?? 45;
       qualityGrade = "CAUTION";
       qualityBand = "WATCH";
       setupChain = [
         "DAILY_LONG_PERMISSION",
-        "LOWER_TF_NOT_READY",
-        "WAIT_FOR_CONFIRMATION",
+        "LOWER_TF_OR_CONFIRMATION_NOT_READY",
+        "WAIT_FOR_ENGINE5_CONFIRMATION",
       ];
-      nextSetupType = "WAIT_FOR_10M_RECLAIM";
-      summary =
-        "Daily still allows long ES ideas, but 4H and 1H are below EMA10 and 10m is below EMA10/EMA20. Reaction is not confirmed and volume participation is weak. No clean ES long entry yet.";
+      nextSetupType = chooseNextSetupType({
+        readinessLabel,
+        lateTiming,
+        volumeOk,
+        volumeRisk,
+        reactionOk,
+        tenMinuteTrigger: longTrigger,
+      });
+      summary = buildWatchSummary({
+        dailyAbove,
+        fourHourBelow,
+        oneHourBelow,
+        tenMinuteBelow10,
+        tenMinuteBelow20,
+        longTrigger,
+        reactionOk,
+        volumeOk,
+        volumeRisk,
+        lateTiming,
+        engine5Timing: e5Timing,
+        e5Reaction,
+        e5Volume,
+      });
     } else {
       readinessLabel = "NO_SETUP";
       action = "NO_ACTION";
@@ -629,7 +972,7 @@ export function buildEngine15EsDecision({
       strategyType = "NONE";
       priority = 0;
       entryStyle = "NONE";
-      qualityScore = 0;
+      qualityScore = e5Score ?? 0;
       qualityGrade = "IGNORE";
       qualityBand = "INVALID";
       setupChain = ["NO_DAILY_LONG_PERMISSION"];
@@ -660,7 +1003,7 @@ export function buildEngine15EsDecision({
       needs: unique(needs),
       summary,
 
-      qualityGatePassed: reactionOk && volumeOk,
+      qualityGatePassed: reactionOk && volumeOk && !volumeRisk && !lateTiming,
       momentumGatePassed: longTrigger,
       permissionGatePassed: permissionGatePassed(permission),
 
@@ -668,6 +1011,8 @@ export function buildEngine15EsDecision({
       qualityGrade,
       qualityBand,
       qualityBreakdown: {
+        engine5Score: e5Score,
+        engine5Label: e5Label,
         dailyAboveEma10: dailyAbove,
         fourHourAboveEma10: !fourHourBelow,
         oneHourAboveEma10: !oneHourBelow,
@@ -675,7 +1020,15 @@ export function buildEngine15EsDecision({
         tenMinuteAboveEma20: !tenMinuteBelow20,
         tenMinuteTrigger: longTrigger,
         reactionConfirmed: reactionOk,
+        reactionDirection: reactionDirectionFromEngine5(engine5, engine3),
+        reactionQuality: reactionQualityFromEngine5(engine5, engine3),
         volumeConfirmed: volumeOk,
+        cleanVolumeParticipation: volumeOk && !volumeRisk,
+        volumeRisk,
+        lateTiming,
+        timingEntry: timingEntryFromEngine5(engine5),
+        timingChaseRisk: timingChaseRiskFromEngine5(engine5),
+        timingAction: timingActionFromEngine5(engine5),
         extensionContext: engine2Extension,
       },
 
