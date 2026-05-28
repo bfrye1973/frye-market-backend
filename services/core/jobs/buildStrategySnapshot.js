@@ -1087,6 +1087,104 @@ function buildFinalPermissionFromEngine15({
   };
 }
 
+function buildEngine5TimingContext({
+  confluence,
+  engine15Decision,
+  engine22WaveStrategy,
+  engine23Interpretation,
+}) {
+  const score = Number(confluence?.scores?.total ?? 0);
+  const reactionScore = Number(confluence?.scores?.engine3 ?? 0);
+  const volumeScore = Number(confluence?.scores?.engine4 ?? 0);
+
+  const readiness = String(engine15Decision?.readinessLabel || "").toUpperCase();
+  const action = String(engine15Decision?.action || "").toUpperCase();
+
+  const chaseAllowed = engine23Interpretation?.chaseAllowed;
+  const preferredEntry = String(engine23Interpretation?.preferredEntry || "").toUpperCase();
+  const environment = String(engine23Interpretation?.environment || "").toUpperCase();
+  const state = String(engine23Interpretation?.state || "").toUpperCase();
+
+  const waveState = String(engine22WaveStrategy?.state || "").toUpperCase();
+  const tradeDecisionAction = String(
+    engine22WaveStrategy?.tradeDecision?.action ||
+    engine22WaveStrategy?.tradeDecision?.decision ||
+    ""
+  ).toUpperCase();
+
+  const reasonCodes = [];
+
+  const strongIngredients =
+    score >= 70 ||
+    (reactionScore >= 10 && volumeScore >= 10);
+
+  const extensionContext =
+    environment.includes("EXTENSION") ||
+    state.includes("EXTENSION") ||
+    waveState.includes("EXTENSION");
+
+  const noChaseContext =
+    chaseAllowed === false ||
+    preferredEntry.includes("NO_CHASE") ||
+    preferredEntry.includes("WAIT") ||
+    tradeDecisionAction.includes("WAIT");
+
+  let entryTiming = "UNKNOWN";
+  let moveAlreadyHappened = false;
+  let chaseRisk = "UNKNOWN";
+  let suggestedAction = "WAIT_FOR_MORE_DATA";
+
+  if (extensionContext && noChaseContext) {
+    entryTiming = "POST_EXTENSION";
+    moveAlreadyHappened = true;
+    chaseRisk = "HIGH";
+    suggestedAction = "WAIT_FOR_PULLBACK_OR_RECLAIM";
+    reasonCodes.push("EXTENSION_ALREADY_TAGGED");
+    reasonCodes.push("NO_CHASE_CONTEXT");
+  } else if (strongIngredients && readiness === "READY" && action === "WATCH") {
+    entryTiming = "LATE_CHASE";
+    moveAlreadyHappened = true;
+    chaseRisk = "MODERATE_HIGH";
+    suggestedAction = "WAIT_FOR_CONTROLLED_PULLBACK";
+    reasonCodes.push("STRONG_INGREDIENTS_BUT_ACTION_WATCH");
+  } else if (strongIngredients && (readiness === "READY" || action === "ENTER_OK")) {
+    entryTiming = "TRIGGERING";
+    moveAlreadyHappened = false;
+    chaseRisk = "MODERATE";
+    suggestedAction = "WATCH_FOR_VALID_TRIGGER";
+    reasonCodes.push("STRONG_INGREDIENTS_READY_CONTEXT");
+  } else if (score >= 50) {
+    entryTiming = "CONFIRMED_MOVE";
+    moveAlreadyHappened = true;
+    chaseRisk = "MODERATE";
+    suggestedAction = "WAIT_FOR_CONFIRMATION_OR_PULLBACK";
+    reasonCodes.push("MODERATE_CONFLUENCE_CONFIRMED_MOVE");
+  } else {
+    entryTiming = "PRE_TRIGGER";
+    moveAlreadyHappened = false;
+    chaseRisk = "LOW_TO_MODERATE";
+    suggestedAction = "WAIT_FOR_SETUP_TO_BUILD";
+    reasonCodes.push("LOW_CONFLUENCE_PRE_TRIGGER");
+  }
+
+  return {
+    ok: true,
+    engine: "engine5.timingContext.v1",
+    entryTiming,
+    moveAlreadyHappened,
+    chaseRisk,
+    suggestedAction,
+    score,
+    reactionScore,
+    volumeScore,
+    readiness,
+    action,
+    extensionContext,
+    noChaseContext,
+    reasonCodes,
+  };
+}
+
 function buildZoneContext(engine1ContextJson, confluenceLocation = null) {
   if (!engine1ContextJson || typeof engine1ContextJson !== "object") return null;
 
@@ -3270,6 +3368,19 @@ const zoneContext = buildZoneContext(
           };
         }
       }
+
+   const engine5TimingContext = buildEngine5TimingContext({
+    confluence: patchedConfluence,
+    engine15Decision,
+    engine22WaveStrategy,
+    engine23Interpretation,
+  });
+
+  patchedConfluence.timingContext = engine5TimingContext;
+
+  if (analytics?.engine5) {
+    analytics.engine5.timingContext = engine5TimingContext;
+  }
      
    return {
     strategyId: s.strategyId,
