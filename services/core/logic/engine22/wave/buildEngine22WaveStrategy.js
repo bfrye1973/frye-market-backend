@@ -23,6 +23,7 @@ import { buildFuturesWaveContext } from "./adapters/buildFuturesWaveContext.js";
 import { buildWaveTradeDecision } from "../decisions/buildWaveTradeDecision.js";
 import { buildTargetClusterConfidence } from "./buildTargetClusterConfidence.js";
 import { analyzeExtensionProgress } from "./analyzeExtensionProgress.js";
+import { buildWaveOpportunity } from "../opportunity/buildWaveOpportunity.js";
 
 function toNum(x) {
   if (x === null || x === undefined || x === "") return null;
@@ -343,6 +344,22 @@ export function buildEngine22WaveStrategy(input = {}) {
     (activeDegree ? waveFibState?.degrees?.[activeDegree]?.w4Levels : null) ||
     null;
 
+  const waveOpportunity = buildWaveOpportunity({
+    symbol: context.symbol,
+    strategyId: context.strategyId,
+    currentPrice: context.currentPrice,
+    engine22WaveStrategy: {
+      waveFibState,
+      tradeContextSummary,
+      timelineRead,
+      tradeDecision,
+      activeSetup: waveFibState?.activeSetup,
+      activeTradingDegree: waveFibState?.activeTradingDegree,
+      chaseRisk: waveFibState?.chaseRisk,
+      w4Levels,
+    },
+  });
+
   return {
     ok: waveFibState?.ok === true,
     engine: "engine22.waveStrategy.v1",
@@ -360,6 +377,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     targetClusterConfidence,
     timelineRead,
     tradeDecision,
+    waveOpportunity,
 
     headline: tradeContextSummary?.headline || timelineRead?.headline || null,
     bias: tradeContextSummary?.bias || null,
