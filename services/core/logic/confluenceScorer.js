@@ -110,6 +110,31 @@ function deriveVolumeState(volume) {
   if (note.includes("NO_TOUCH_FOUND")) return "NO_TOUCH";
 
   const f = volume?.flags || {};
+  const participationState = String(
+    f.participationState || volume?.participationState || ""
+  ).toUpperCase();
+
+  const participationQuality = String(
+    f.participationQuality || volume?.participationQuality || ""
+  ).toUpperCase();
+
+  const volumeTrend = String(
+    f.volumeTrend || volume?.volumeTrend || ""
+  ).toUpperCase();
+
+  const relativeVolume = Number(
+    f.relativeVolume ?? volume?.relativeVolume ?? 0
+  );
+
+if (f.absorptionRisk === true) return "ABSORPTION_RISK";
+if (f.climacticVolume === true) return "CLIMACTIC_CAUTION";
+
+if (f.volumeExpansion === true || relativeVolume >= 1.2) {
+  if (volumeTrend === "FADING") return "HIGH_VOLUME_FADING";
+  if (participationQuality) return participationQuality;
+  if (participationState) return participationState;
+  return "HIGH_VOLUME_EXPANDING";
+}
   if (isTrue(f.liquidityTrap)) return "TRAP_SUSPECTED";
   if (isTrue(f.initiativeMoveConfirmed) && isTrue(volume?.volumeConfirmed)) return "INITIATIVE";
   if (isTrue(f.volumeDivergence)) return "DIVERGENCE";
