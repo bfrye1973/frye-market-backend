@@ -2521,22 +2521,76 @@ function pickActiveExtension(primaryChoice, fallbackChoice) {
 function normalizeEsReaction(esJson) {
   const reaction = esJson?.reaction || {};
 
+  const rawScore = Number(
+    reaction?.qualityScore ??
+    esJson?.qualityScore ??
+    esJson?.reactionScore ??
+    0
+  );
+
+  const state =
+    reaction?.state ||
+    reaction?.position ||
+    esJson?.state ||
+    "UNKNOWN";
+
+  const quality =
+    reaction?.quality ||
+    esJson?.quality ||
+    null;
+
+  const bias =
+    reaction?.bias ||
+    esJson?.bias ||
+    null;
+
+  const stateText = String(state || "").toUpperCase();
+  const biasText = String(bias || "").toUpperCase();
+
+  let direction = "NEUTRAL";
+
+  if (
+    biasText.includes("BULL") ||
+    stateText.includes("BREAKING_ABOVE") ||
+    stateText.includes("DEFENDING_LOWER") ||
+    stateText.includes("HELD_ACCUMULATION")
+  ) {
+    direction = "LONG";
+  } else if (
+    biasText.includes("BEAR") ||
+    stateText.includes("BREAKING_BELOW") ||
+    stateText.includes("REJECTING_UPPER")
+  ) {
+    direction = "SHORT";
+  }
+
+  const evidence = Array.isArray(esJson?.evidence) ? esJson.evidence : [];
+  const reasonCodes = [
+    "ES_REACTION_SCORE",
+    esJson?.zoneType ? `ZONE_TYPE_${String(esJson.zoneType).toUpperCase()}` : null,
+    stateText || null,
+    quality ? `QUALITY_${String(quality).toUpperCase()}` : null,
+    ...evidence,
+  ].filter(Boolean);
+
   return {
     ok: esJson?.ok !== false,
-    stage: "IDLE",
+    stage: reaction?.stage || "IDLE",
     armed: false,
-    reactionScore: Number(reaction?.qualityScore ?? 0),
-    confirmed: false,
-    structureState:
-      reaction?.state ||
-      reaction?.position ||
-      "HOLD",
-    reasonCodes: [
-      "ES_REACTION_SCORE",
-      esJson?.zoneType ? `ZONE_TYPE_${String(esJson.zoneType).toUpperCase()}` : null,
-      reaction?.state ? String(reaction.state).toUpperCase() : null,
-    ].filter(Boolean),
+
+    // ES score-first contract
+    reactionScore: Number.isFinite(rawScore) ? rawScore : 0,
+    confirmed: Number.isFinite(rawScore) ? rawScore >= 75 : false,
+
+    state,
+    structureState: state,
+    direction,
+    quality,
+
+    reasonCodes,
     waveReaction: null,
+
+    // Preserve full ES route for debug / future Engine 5 components
     esReaction: esJson,
   };
 }
