@@ -11,7 +11,7 @@ import {
   readJson,
   snapshotPath,
   eventsPath,
-  dayDir as replayDayDir, // ✅ NEW: use replayStore root resolver (REPLAY_DATA_DIR aware)
+  dayDir as replayDayDir,
 } from "../logic/replay/replayStore.js";
 
 import { buildReplaySnapshot } from "../logic/replay/snapshotBuilder.js";
@@ -26,7 +26,6 @@ const DATA_DIR = path.resolve(__dirname, "..", "data");
 const AZ_TZ = "America/Phoenix";
 
 function azParts(d = new Date()) {
-  // Returns { dateYmd: 'YYYY-MM-DD', timeHHMM: 'HHMM', timeHHMMSS: 'HHMMSS' } in AZ
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: AZ_TZ,
     year: "numeric",
@@ -45,6 +44,7 @@ function azParts(d = new Date()) {
   const h = get("hour");
   const m = get("minute");
   const s = get("second");
+
   return {
     dateYmd: `${Y}-${M}-${D}`,
     timeHHMM: `${h}${m}`,
@@ -53,7 +53,6 @@ function azParts(d = new Date()) {
 }
 
 function coreBase() {
-  // Prefer explicit CORE_BASE_URL. Otherwise use localhost.
   const p = Number(process.env.PORT) || 8080;
   return (
     process.env.CORE_BASE_URL ||
@@ -65,6 +64,7 @@ function coreBase() {
 async function jget(url, { timeoutMs = 8000 } = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const r = await fetch(url, {
       method: "GET",
@@ -72,13 +72,16 @@ async function jget(url, { timeoutMs = 8000 } = {}) {
       cache: "no-store",
       signal: controller.signal,
     });
+
     const text = await r.text().catch(() => "");
     let json = null;
+
     try {
       json = text ? JSON.parse(text) : null;
     } catch {
       json = null;
     }
+
     if (!r.ok) {
       const msg =
         json?.error ||
@@ -87,6 +90,7 @@ async function jget(url, { timeoutMs = 8000 } = {}) {
         `GET ${url} -> ${r.status}`;
       throw new Error(msg);
     }
+
     return json;
   } finally {
     clearTimeout(t);
@@ -97,18 +101,41 @@ function ensureDirSync(p) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
 }
 
-// ✅ FIXED: use replayStore’s dayDir() so REPLAY_DATA_DIR applies everywhere
 function dayPath(dataDir, dateYmd) {
   return replayDayDir(dataDir, dateYmd);
 }
 
 function goSnapshotFile(dataDir, dateYmd, timeHHMMSS) {
-  // e.g. HHMMSS_GO.json
   return path.join(dayPath(dataDir, dateYmd), `${timeHHMMSS}_GO.json`);
 }
 
 function goLedgerPath(dataDir, dateYmd) {
-  return path.join(dayPath(dataDir, dateYmd), `go-ledger.json`);
+  return path.join(dayPath(dataDir, dateYmd), "go-ledger.json");
+}
+
+function esReplayRoot(dataDir) {
+  return path.join(dayPath(dataDir, "__dummy__"), "..", "es");
+}
+
+function esReplayDayDir(dataDir, dateYmd) {
+  return path.join(esReplayRoot(dataDir), dateYmd);
+}
+
+function esReplaySnapshotPath(dataDir, dateYmd, timeHHMM) {
+  return path.join(esReplayDayDir(dataDir, dateYmd), `${timeHHMM}.json`);
+}
+
+function listEsReplayTimes(dataDir, dateYmd) {
+  const dir = esReplayDayDir(dataDir, dateYmd);
+  if (!fs.existsSync(dir)) return [];
+
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((f) => f.isFile())
+    .map((f) => f.name)
+    .filter((n) => /^\d{4}\.json$/.test(n))
+    .map((n) => n.replace(".json", ""))
+    .sort();
 }
 
 function clampInt(n, lo, hi) {
@@ -131,14 +158,7 @@ function safeNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * ✅ UPDATED: Engine score extraction mapping
- * Engine 5 confluence returns:
- *   decision.scores.engine1..engine4 and decision.scores.total, decision.scores.label
- * We also keep fallbacks for older e1/e2/e3/e4 shapes.
- */
 function summarizeEngineScores(snapshot) {
-  // Best-effort summary. Don’t crash if fields change.
   const d = snapshot?.decision || {};
   const scores = d?.scores || {};
   const ctx = d?.context || {};
@@ -146,7 +166,6 @@ function summarizeEngineScores(snapshot) {
   const total = safeNum(scores?.total);
   const label = scores?.label || null;
 
-  // ✅ Prefer canonical confluence keys first, then fallback keys
   const e1 =
     safeNum(scores?.engine1) ??
     safeNum(scores?.e1) ??
@@ -183,7 +202,6 @@ function summarizeEngineScores(snapshot) {
     safeNum(scores?.breakdown?.e4) ??
     null;
 
-  // fibScore usually lives on node.engine2 in dashboard-snapshot, but replay snapshot fib is full payload.
   const fibScore =
     safeNum(snapshot?.fib?.fibScore) ??
     safeNum(snapshot?.fib?.scores?.fibScore) ??
@@ -239,7 +257,7 @@ async function saveLedger(dataDir, dateYmd, ledger) {
   return file;
 }
 
-// ---------- existing read-only replay endpoints ----------
+// ---------- existing SPY replay read-only endpoints ----------
 router.get("/replay/dates", (req, res) => {
   const dates = listDates(DATA_DIR);
   res.json({ ok: true, dates });
@@ -252,6 +270,7 @@ router.get("/replay/times", (req, res) => {
       .status(400)
       .json({ ok: false, reason: "BAD_DATE", expected: "YYYY-MM-DD" });
   }
+
   const times = listTimes(DATA_DIR, date);
   res.json({ ok: true, date, times });
 });
@@ -259,56 +278,100 @@ router.get("/replay/times", (req, res) => {
 router.get("/replay/snapshot", (req, res) => {
   const date = String(req.query.date || "");
   const time = String(req.query.time || "");
+
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return res
       .status(400)
       .json({ ok: false, reason: "BAD_DATE", expected: "YYYY-MM-DD" });
   }
+
   if (!/^\d{4}$/.test(time)) {
     return res
       .status(400)
       .json({ ok: false, reason: "BAD_TIME", expected: "HHMM" });
   }
+
   const file = snapshotPath(DATA_DIR, date, time);
   const snap = readJson(file);
-  if (!snap)
+
+  if (!snap) {
     return res
       .status(404)
       .json({ ok: false, reason: "NOT_FOUND", date, time });
+  }
+
   res.json(snap);
 });
 
 router.get("/replay/events", (req, res) => {
   const date = String(req.query.date || "");
+
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return res
       .status(400)
       .json({ ok: false, reason: "BAD_DATE", expected: "YYYY-MM-DD" });
   }
+
   const file = eventsPath(DATA_DIR, date);
   const events = readJson(file);
+
   res.json({ ok: true, date, events: Array.isArray(events) ? events : [] });
 });
 
-// ---------- NEW: record GO snapshot + event ----------
-//
-// POST /api/v1/replay/record-go
-//
-// Body (minimal):
-// {
-//   "symbol": "SPY",
-//   "strategyId": "intraday_scalp@10m",
-//   "direction": "LONG",
-//   "triggerType": "PULLBACK_RECLAIM",
-//   "triggerLine": 682.30,
-//   "price": 682.25,
-//   "atUtc": "2026-02-12T22:33:10.525Z",
-//   "cooldownUntilMs": 1770935710000,
-//   "reasonCodes": ["PB_RECLAIM","E3_ARMED","E4_OK"]
-// }
-//
-// If fields are missing, we will attempt to fetch scalp-status for GO payload (for scalp strategy).
-//
+// ---------- ES replay read-only endpoints ----------
+router.get("/replay/es/times", (req, res) => {
+  const date = String(req.query.date || "");
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res
+      .status(400)
+      .json({ ok: false, reason: "BAD_DATE", expected: "YYYY-MM-DD" });
+  }
+
+  const times = listEsReplayTimes(DATA_DIR, date);
+
+  res.json({
+    ok: true,
+    symbol: "ES",
+    date,
+    times,
+  });
+});
+
+router.get("/replay/es/snapshot", (req, res) => {
+  const date = String(req.query.date || "");
+  const time = String(req.query.time || "");
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res
+      .status(400)
+      .json({ ok: false, reason: "BAD_DATE", expected: "YYYY-MM-DD" });
+  }
+
+  if (!/^\d{4}$/.test(time)) {
+    return res
+      .status(400)
+      .json({ ok: false, reason: "BAD_TIME", expected: "HHMM" });
+  }
+
+  const file = esReplaySnapshotPath(DATA_DIR, date, time);
+  const snap = readJson(file);
+
+  if (!snap) {
+    return res.status(404).json({
+      ok: false,
+      reason: "NOT_FOUND",
+      symbol: "ES",
+      date,
+      time,
+      file,
+    });
+  }
+
+  res.json(snap);
+});
+
+// ---------- record GO snapshot + event ----------
 router.post("/replay/record-go", async (req, res) => {
   try {
     const body = req.body || {};
@@ -317,25 +380,24 @@ router.post("/replay/record-go", async (req, res) => {
       body.strategyId || "intraday_scalp@10m"
     );
 
-    // Determine AZ day/time
     const { dateYmd, timeHHMM, timeHHMMSS } = azParts(new Date());
 
-    // ✅ FIXED: ensure day directory under replayStore root (REPLAY_DATA_DIR aware)
     const dayDirPath = dayPath(DATA_DIR, dateYmd);
     ensureDirSync(dayDirPath);
 
-    // Dedupe/rate limit
     const minIntervalSec = clampInt(
       process.env.REPLAY_GO_MIN_INTERVAL_SEC || 20,
       5,
       600
     );
+
     const ledger = await loadLedger(DATA_DIR, dateYmd);
     ledger.lastByStrategy = ledger.lastByStrategy || {};
 
     const nowMs = Date.now();
     const last = ledger.lastByStrategy[strategyId] || {};
     const lastSentMs = Number(last.lastSentMs || 0);
+
     if (lastSentMs && nowMs - lastSentMs < minIntervalSec * 1000) {
       return res.json({
         ok: true,
@@ -345,7 +407,6 @@ router.post("/replay/record-go", async (req, res) => {
       });
     }
 
-    // If no go payload provided, attempt to pull scalp-status (works for scalp)
     let go = {
       signal: true,
       direction: String(body.direction || "").toUpperCase() || null,
@@ -361,12 +422,13 @@ router.post("/replay/record-go", async (req, res) => {
     };
 
     if (!go.direction || !go.triggerType) {
-      // try to hydrate from scalp-status proxy if this is scalp strategy
       const cb = coreBase();
       const scalp = await jget(`${cb}/api/v1/scalp-status`, {
         timeoutMs: 8000,
       }).catch(() => null);
+
       const sg = scalp?.go || null;
+
       if (sg && sg.signal === true) {
         go = {
           signal: true,
@@ -386,10 +448,10 @@ router.post("/replay/record-go", async (req, res) => {
       }
     }
 
-    // Dedupe by go.atUtc (or fallback to HHMMSS) per strategy
     const goKey = `${symbol}|${strategyId}|${go.direction || "—"}|${
       go.atUtc || timeHHMMSS
     }`;
+
     if (last.lastGoKey && last.lastGoKey === goKey) {
       return res.json({
         ok: true,
@@ -399,15 +461,15 @@ router.post("/replay/record-go", async (req, res) => {
       });
     }
 
-    // Build snapshot (reuse snapshotBuilder)
     const cb = coreBase();
+
     const smzHierUrl =
       process.env.REPLAY_SMZ_HIER_URL || `${cb}/api/v1/smz-hierarchy`;
+
     const fibUrl =
       process.env.REPLAY_FIB_URL ||
       `${cb}/api/v1/fib-levels?symbol=${symbol}&tf=1h&degree=minor&wave=W1`;
 
-    // Decision source: default to confluence-score for scalp; can be overridden by env
     const decisionUrl =
       process.env.REPLAY_DECISION_URL ||
       `${cb}/api/v1/confluence-score?symbol=${encodeURIComponent(
@@ -421,13 +483,12 @@ router.post("/replay/record-go", async (req, res) => {
     const snapshot = await buildReplaySnapshot({
       dataDir: DATA_DIR,
       symbol,
-      smzHierarchyUrl: smzHierUrl,
+      smzHierarchyUrl,
       fibUrl,
       decisionUrl,
       permissionUrl,
     });
 
-    // Add meta (schema lock)
     snapshot.meta = {
       schemaVersion: 1,
       source: "GO_EVENT",
@@ -437,14 +498,11 @@ router.post("/replay/record-go", async (req, res) => {
       tradingDayAz: dateYmd,
     };
 
-    // Write GO snapshot file (HHMMSS_GO.json) ✅ FIXED ROOT
     const snapFile = goSnapshotFile(DATA_DIR, dateYmd, timeHHMMSS);
     await writeJsonAtomic(snapFile, snapshot);
 
-    // Summarize engine scores
     const summary = summarizeEngineScores(snapshot);
 
-    // Event record (locked contract + pointers)
     const event = {
       tsUtc: go.atUtc || new Date().toISOString(),
       type: "GO_SIGNAL",
@@ -470,18 +528,18 @@ router.post("/replay/record-go", async (req, res) => {
         zoneId: summary.refs?.zoneId || null,
       },
       snapshotFile: path.basename(snapFile),
-      timeHHMM, // useful for UI grouping
+      timeHHMM,
     };
 
     const appended = await appendEvent(DATA_DIR, dateYmd, event);
 
-    // Update ledger ✅ FIXED ROOT
     ledger.lastByStrategy[strategyId] = {
       lastGoKey: goKey,
       lastSentMs: nowMs,
       lastGoAtUtc: event.tsUtc,
       snapshotFile: event.snapshotFile,
     };
+
     const ledgerFile = await saveLedger(DATA_DIR, dateYmd, ledger);
 
     return res.json({
