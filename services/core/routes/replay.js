@@ -138,6 +138,189 @@ function listEsReplayTimes(dataDir, dateYmd) {
     .sort();
 }
 
+function pickStrategyNodeFromReplaySnapshot(snap) {
+  return (
+    snap?.strategy ||
+    snap?.snapshot?.strategies?.["intraday_scalp@10m"] ||
+    snap?.strategies?.["intraday_scalp@10m"] ||
+    {}
+  );
+}
+
+function pickWaveOpportunity(strategy) {
+  return (
+    strategy?.waveOpportunity ||
+    strategy?.engine22WaveStrategy?.waveOpportunity ||
+    null
+  );
+}
+
+function compactEngine5(strategy) {
+  const confluence = strategy?.confluence || null;
+  const engine5 = strategy?.engine5 || null;
+
+  const reaction =
+    confluence?.components?.engine3Reaction ||
+    engine5?.reactionComponent ||
+    null;
+
+  const volume =
+    confluence?.components?.engine4Volume ||
+    engine5?.volumeComponent ||
+    null;
+
+  const timing =
+    confluence?.timingContext ||
+    engine5?.timingContext ||
+    null;
+
+  return {
+    score: confluence?.score ?? engine5?.score ?? null,
+    label: confluence?.label ?? engine5?.label ?? null,
+
+    reactionConfirmed:
+      reaction?.confirmed ??
+      reaction?.cleanReaction ??
+      null,
+
+    reactionQuality:
+      reaction?.quality ??
+      reaction?.stage ??
+      reaction?.state ??
+      null,
+
+    volumeClean:
+      volume?.cleanParticipation ??
+      volume?.confirmed ??
+      null,
+
+    volumeQuality:
+      volume?.participationQuality ??
+      volume?.quality ??
+      volume?.state ??
+      null,
+
+    timingEntry:
+      timing?.entryTiming ??
+      engine5?.timingEntry ??
+      null,
+
+    chaseRisk:
+      timing?.chaseRisk ??
+      engine5?.timingChaseRisk ??
+      null,
+
+    suggestedAction:
+      timing?.suggestedAction ??
+      engine5?.timingAction ??
+      null,
+  };
+}
+
+function buildEsReplayDecisionSummary(snap, { date, time, file } = {}) {
+  const strategy = pickStrategyNodeFromReplaySnapshot(snap);
+  const wave = pickWaveOpportunity(strategy);
+  const engine16 = strategy?.engine16 || null;
+  const engine15 = strategy?.engine15Decision || null;
+  const permission = strategy?.permission || null;
+
+  const price =
+    wave?.currentPrice ??
+    strategy?.engine22WaveStrategy?.currentPrice ??
+    engine16?.regimeLayers?.trigger10m?.close ??
+    null;
+
+  const executable = permission?.executable === true;
+  const action = engine15?.action || engine15?.readinessLabel || "UNKNOWN";
+  const direction =
+    engine15?.direction ||
+    wave?.direction ||
+    engine16?.directionBias ||
+    null;
+
+  const headline = wave
+    ? `${String(wave.degree || "wave").toUpperCase()} ${wave.setupType || "W3/W5"} ${engine15?.readinessLabel || wave.readiness || "WATCH"}`
+    : "NO VALID W3/W5 OPPORTUNITY";
+
+  const reason =
+    engine15?.summary ||
+    wave?.summary ||
+    (executable
+      ? "Execution allowed."
+      : "No execution allowed from compact replay summary.");
+
+  return {
+    ok: true,
+    source: "es_replay_decision_summary.v1",
+    symbol: "ES",
+    date,
+    time,
+    file,
+    price,
+
+    decision: {
+      headline,
+      action,
+      direction,
+      executable,
+      reason,
+    },
+
+    engine16: {
+      readiness: engine16?.readiness ?? null,
+      setupPosture: engine16?.setupPosture ?? null,
+      directionBias: engine16?.directionBias ?? null,
+      needs: Array.isArray(engine16?.needs) ? engine16.needs : [],
+      reasonCodes: Array.isArray(engine16?.reasonCodes)
+        ? engine16.reasonCodes
+        : [],
+    },
+
+    waveOpportunity: {
+      active: wave?.active ?? null,
+      setupType: wave?.setupType ?? null,
+      rawSetup: wave?.rawSetup ?? null,
+      degree: wave?.degree ?? null,
+      direction: wave?.direction ?? null,
+      readiness: wave?.readiness ?? null,
+      timing: wave?.timing ?? null,
+      chaseRisk: wave?.chaseRisk ?? null,
+      currentPrice: wave?.currentPrice ?? null,
+      entryZone: wave?.entryZone ?? null,
+      invalidation: wave?.invalidation ?? null,
+      targets: wave?.targets ?? null,
+      needs: Array.isArray(wave?.needs) ? wave.needs : [],
+      summary: wave?.summary ?? null,
+    },
+
+    engine15: {
+      strategyType: engine15?.strategyType ?? null,
+      direction: engine15?.direction ?? null,
+      readinessLabel: engine15?.readinessLabel ?? null,
+      action: engine15?.action ?? null,
+      qualityScore: engine15?.qualityScore ?? null,
+      qualityBand: engine15?.qualityBand ?? null,
+      needs: Array.isArray(engine15?.needs) ? engine15.needs : [],
+      reasonCodes: Array.isArray(engine15?.reasonCodes)
+        ? engine15.reasonCodes
+        : [],
+      summary: engine15?.summary ?? null,
+    },
+
+    engine5: compactEngine5(strategy),
+
+    permission: {
+      permission: permission?.permission ?? null,
+      executable: permission?.executable ?? null,
+      watchOnly: permission?.watchOnly ?? null,
+      sizeMultiplier: permission?.sizeMultiplier ?? null,
+      reasonCodes: Array.isArray(permission?.reasonCodes)
+        ? permission.reasonCodes
+        : [],
+    },
+  };
+}
+
 function clampInt(n, lo, hi) {
   const x = Number(n);
   if (!Number.isFinite(x)) return lo;
@@ -369,6 +552,45 @@ router.get("/replay/es/snapshot", (req, res) => {
   }
 
   res.json(snap);
+});
+
+router.get("/replay/es/decision-summary", (req, res) => {
+  const date = String(req.query.date || "");
+  const time = String(req.query.time || "");
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res
+      .status(400)
+      .json({ ok: false, reason: "BAD_DATE", expected: "YYYY-MM-DD" });
+  }
+
+  if (!/^\d{4}$/.test(time)) {
+    return res
+      .status(400)
+      .json({ ok: false, reason: "BAD_TIME", expected: "HHMM" });
+  }
+
+  const file = esReplaySnapshotPath(DATA_DIR, date, time);
+  const snap = readJson(file);
+
+  if (!snap) {
+    return res.status(404).json({
+      ok: false,
+      reason: "NOT_FOUND",
+      symbol: "ES",
+      date,
+      time,
+      file,
+    });
+  }
+
+  const summary = buildEsReplayDecisionSummary(snap, {
+    date,
+    time,
+    file,
+  });
+
+  res.json(summary);
 });
 
 // ---------- record GO snapshot + event ----------
