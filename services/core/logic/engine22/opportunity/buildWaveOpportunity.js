@@ -14,6 +14,11 @@
 //
 // It only packages existing Engine 22 wave/fib state into:
 // engine22WaveStrategy.waveOpportunity
+//
+// Engine 22F addition:
+// - Adds conservative WATCH -> ARMING lifecycle detection for valid long W2→W3 / W4→W5 opportunities.
+// - Uses Engine16, Engine25, and marketRegime as read-only supportive context.
+// - Does NOT create READY, GO, ALLOW, executable, or trade permission.
 
 const DEGREES = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -248,6 +253,177 @@ function hasAnyTarget(targets = {}) {
   return Object.values(targets).some((value) => value !== null && value !== undefined);
 }
 
+function isEngine16Ready(engine16 = null) {
+  const readiness = upper(engine16?.readiness, "");
+  return readiness === "READY";
+}
+
+function isEngine25Supportive(engine25Context = null) {
+  const freshnessStatus = upper(engine25Context?.freshnessStatus, "");
+  const regime = upper(engine25Context?.regime, "");
+  const permission = upper(engine25Context?.permission, "");
+  const score = toNum(engine25Context?.score);
+
+  if (engine25Context?.ok !== true) return false;
+  if (freshnessStatus === "MISSING" || freshnessStatus === "STALE") return false;
+
+  return (
+    (score !== null && score >= 70) ||
+    regime.includes("RISK_ON") ||
+    regime.includes("CONSTRUCTIVE") ||
+    permission.includes("SELECTIVE_LONGS")
+  );
+}
+
+function isMarketRegimeSupportive(marketRegime = null) {
+  const directionBias = upper(marketRegime?.directionBias, "");
+  const strictness = upper(marketRegime?.strictness, "");
+
+  return (
+    ["LONG", "LONG_CAUTION"].includes(directionBias) &&
+    ["LOW", "MEDIUM"].includes(strictness)
+  );
+}
+
+function rawSetupBlocksArming(rawSetup) {
+  const raw = upper(rawSetup, "");
+
+  return (
+    raw.includes("W5_EXTENSION") ||
+    raw.includes("POST_EXTENSION") ||
+    raw.includes("NO_CHASE")
+  );
+}
+
+function buildSupportiveContext({
+  setupType,
+  direction,
+  timing,
+  chaseRisk,
+  rawSetup,
+  readiness,
+  engine16,
+  engine25Context,
+  marketRegime,
+} = {}) {
+  const blocked = [];
+
+  const engine16Ready = isEngine16Ready(engine16);
+  const engine25Supportive = isEngine25Supportive(engine25Context);
+  const marketRegimeSupportive = isMarketRegimeSupportive(marketRegime);
+
+  const engine25Score = toNum(engine25Context?.score);
+  const engine25Regime = cleanString(engine25Context?.regime, null);
+  const engine25Permission = cleanString(engine25Context?.permission, null);
+  const engine25FreshnessStatus = cleanString(engine25Context?.freshnessStatus, null);
+
+  const marketRegimeDirection = cleanString(marketRegime?.directionBias, null);
+  const marketRegimeStrictness = cleanString(marketRegime?.strictness, null);
+
+  if (!["W2_TO_W3", "W4_TO_W5"].includes(setupType)) {
+    blocked.push("ARMING_BLOCKED_NOT_W2_W3_OR_W4_W5");
+  }
+
+  if (direction !== "LONG") {
+    blocked.push("ARMING_BLOCKED_DIRECTION_NOT_LONG");
+  }
+
+  if (!["EARLY", "IDEAL"].includes(timing)) {
+    blocked.push("ARMING_BLOCKED_TIMING_NOT_EARLY_OR_IDEAL");
+  }
+
+  if (!["LOW", "MODERATE"].includes(chaseRisk)) {
+    blocked.push("ARMING_BLOCKED_CHASE_RISK_NOT_LOW_OR_MODERATE");
+  }
+
+  if (rawSetupBlocksArming(rawSetup)) {
+    blocked.push("ARMING_BLOCKED_EXTENSION_OR_NO_CHASE_RAW_SETUP");
+  }
+
+  if (readiness !== "WATCH") {
+    blocked.push("ARMING_BLOCKED_READINESS_NOT_WATCH");
+  }
+
+  if (!engine16Ready) {
+    blocked.push("ARMING_BLOCKED_ENGINE16_NOT_READY");
+  }
+
+  if (!engine25Supportive) {
+    blocked.push("ARMING_BLOCKED_ENGINE25_NOT_SUPPORTIVE");
+  }
+
+  if (!marketRegimeSupportive) {
+    blocked.push("ARMING_BLOCKED_MARKET_REGIME_NOT_SUPPORTIVE");
+  }
+
+  return {
+    engine16Ready,
+    engine25Supportive,
+    marketRegimeSupportive,
+
+    engine25Score,
+    engine25Regime,
+    engine25Permission,
+    engine25FreshnessStatus,
+
+    marketRegimeDirection,
+    marketRegimeStrictness,
+
+    armingAllowed: blocked.length === 0,
+    armingBlockedReasonCodes: blocked,
+  };
+}
+
+function applyArmingLifecycle({
+  baseReadiness,
+  setupType,
+  direction,
+  timing,
+  chaseRisk,
+  rawSetup,
+  engine16,
+  engine25Context,
+  marketRegime,
+} = {}) {
+  const supportiveContext = buildSupportiveContext({
+    setupType,
+    direction,
+    timing,
+    chaseRisk,
+    rawSetup,
+    readiness: baseReadiness,
+    engine16,
+    engine25Context,
+    marketRegime,
+  });
+
+  if (supportiveContext.armingAllowed) {
+    return {
+      readiness: "ARMING",
+      supportiveContext,
+      armingReasonCodes: [
+        `${setupType}_ARMING`,
+        "ENGINE16_READY",
+        "ENGINE25_SUPPORTIVE_CONTEXT",
+        "MARKET_REGIME_SUPPORTIVE_CONTEXT",
+        "PRE_EXTENSION_NOT_CHASE",
+      ],
+      armingNeeds: [
+        "WAITING_FOR_ENGINE15_REFEREE",
+        "WAITING_FOR_ENGINE4_PARTICIPATION",
+        "WAITING_FOR_ENGINE5_CONFIRMATION",
+      ],
+    };
+  }
+
+  return {
+    readiness: baseReadiness,
+    supportiveContext,
+    armingReasonCodes: [],
+    armingNeeds: [],
+  };
+}
+
 function buildNeeds({
   setupType,
   rawSetup,
@@ -255,12 +431,18 @@ function buildNeeds({
   tradeDecision,
   w4Levels,
   targets,
+  readiness,
+  armingNeeds = [],
 } = {}) {
   const needs = [];
 
   if (setupType === "NONE") {
     needs.push("VALID_W3_OR_W5_OPPORTUNITY");
     return needs;
+  }
+
+  if (readiness === "ARMING") {
+    needs.push(...armingNeeds);
   }
 
   if (timing === "LATE" || timing === "POST_EXTENSION" || upper(rawSetup, "").includes("W5_EXTENSION")) {
@@ -298,6 +480,7 @@ function buildReasonCodes({
   timing,
   readiness,
   chaseRisk,
+  armingReasonCodes = [],
 } = {}) {
   const codes = [];
 
@@ -313,11 +496,16 @@ function buildReasonCodes({
   codes.push(`READINESS_${upper(readiness, "UNKNOWN")}`);
   codes.push(`CHASE_RISK_${upper(chaseRisk, "UNKNOWN")}`);
 
+  if (readiness === "ARMING") {
+    codes.push("ENGINE22_ARMING_LIFECYCLE_ACTIVE");
+    codes.push(...armingReasonCodes);
+  }
+
   if (timing === "LATE" || timing === "POST_EXTENSION") {
     codes.push("NO_CHASE_LONG");
   }
 
-  return codes;
+  return [...new Set(codes)];
 }
 
 function buildSummary({
@@ -338,6 +526,16 @@ function buildSummary({
   const degreeLabel = String(degree || "unknown").toUpperCase();
   const nearestFibPrice = getNearestFibPrice(degreeState);
   const highestHit = getExtensionHit(degreeState?.extensionProgress);
+
+  if (readiness === "ARMING") {
+    if (setupType === "W4_TO_W5") {
+      return `${degreeLabel} W4→W5 opportunity is ARMING. Wave structure, Engine16, Engine25, and market regime are supportive, but this is not a trade signal. Wait for Engine 15 readiness, clean participation, and confirmation.`;
+    }
+
+    if (setupType === "W2_TO_W3") {
+      return `${degreeLabel} W2→W3 opportunity is ARMING. Wave structure, Engine16, Engine25, and market regime are supportive, but this is not a trade signal. Wait for Engine 15 readiness, clean participation, and confirmation.`;
+    }
+  }
 
   if (setupType === "W4_TO_W5" && upper(rawSetup, "").includes("W5_EXTENSION")) {
     const hitText =
@@ -364,6 +562,15 @@ export function buildWaveOpportunity({
   strategyId = "intraday_scalp@10m",
   currentPrice = null,
   engine22WaveStrategy = {},
+
+  // Engine 22F read-only supportive context.
+  // These can only upgrade WATCH -> ARMING.
+  // They must never create READY, GO, ALLOW, executable, or trade permission.
+  engine16 = null,
+  engine25Context = null,
+  marketRegime = null,
+  marketMeterContext = null,
+  engine5 = null,
 } = {}) {
   const waveFibState = engine22WaveStrategy?.waveFibState || null;
 
@@ -400,7 +607,7 @@ export function buildWaveOpportunity({
     degreeState,
   });
 
-  const readiness = buildReadiness({
+  const baseReadiness = buildReadiness({
     setupType,
     timing,
     degreeState,
@@ -413,6 +620,20 @@ export function buildWaveOpportunity({
     degreeState?.fibPressure?.chaseRisk
   );
 
+  const lifecycle = applyArmingLifecycle({
+    baseReadiness,
+    setupType,
+    direction,
+    timing,
+    chaseRisk,
+    rawSetup,
+    engine16,
+    engine25Context,
+    marketRegime,
+  });
+
+  const readiness = lifecycle.readiness;
+
   const tradeDecision = engine22WaveStrategy?.tradeDecision || {};
 
   const active = setupType !== "NONE";
@@ -424,6 +645,8 @@ export function buildWaveOpportunity({
     tradeDecision,
     w4Levels,
     targets,
+    readiness,
+    armingNeeds: lifecycle.armingNeeds,
   });
 
   const reasonCodes = buildReasonCodes({
@@ -433,6 +656,7 @@ export function buildWaveOpportunity({
     timing,
     readiness,
     chaseRisk,
+    armingReasonCodes: lifecycle.armingReasonCodes,
   });
 
   const summary = buildSummary({
@@ -486,6 +710,40 @@ export function buildWaveOpportunity({
     reasonCodes,
 
     summary,
+
+    // Diagnostic/read-only only.
+    // Engine 6 must not use this as final permission.
+    supportiveContext: lifecycle.supportiveContext,
+
+    // Reserved for future replay/outcome learning.
+    learningContext: {
+      engine: "engine22.waveOpportunityLearningContext.v1",
+      setupType,
+      direction,
+      timing,
+      readiness,
+      chaseRisk,
+      degree,
+      currentPrice: round2(currentPrice),
+      engine25Score: lifecycle.supportiveContext?.engine25Score ?? null,
+      engine25Regime: lifecycle.supportiveContext?.engine25Regime ?? null,
+      engine25Permission: lifecycle.supportiveContext?.engine25Permission ?? null,
+      marketRegimeDirection:
+        lifecycle.supportiveContext?.marketRegimeDirection ?? null,
+      marketRegimeStrictness:
+        lifecycle.supportiveContext?.marketRegimeStrictness ?? null,
+      engine16Ready: lifecycle.supportiveContext?.engine16Ready ?? false,
+      armingAllowed: lifecycle.supportiveContext?.armingAllowed ?? false,
+    },
+
+    // Kept available for diagnostics but not used for permission.
+    debugContextAvailable: {
+      engine16: engine16 ? true : false,
+      engine25Context: engine25Context ? true : false,
+      marketRegime: marketRegime ? true : false,
+      marketMeterContext: marketMeterContext ? true : false,
+      engine5: engine5 ? true : false,
+    },
   };
 }
 
