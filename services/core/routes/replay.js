@@ -156,53 +156,104 @@ function pickWaveOpportunity(strategy) {
 }
 
 function compactEngine5(strategy) {
-  const confluence = strategy?.confluence || null;
-  const engine5 = strategy?.engine5 || null;
+  const confluence = strategy?.confluence || {};
+  const engine5 = strategy?.engine5 || {};
+  const scores = confluence?.scores || {};
+  const timing = confluence?.timingContext || engine5?.timingContext || {};
 
-  const reaction =
-    confluence?.components?.engine3Reaction ||
-    engine5?.reactionComponent ||
+  const reactionComponent = confluence?.components?.engine3Reaction || {};
+  const volumeComponent = confluence?.components?.engine4Volume || {};
+  const reactionContext = confluence?.context?.reaction || {};
+  const volumeContext = confluence?.context?.volume || {};
+
+  const volumeRiskState =
+    volumeComponent?.state ??
+    volumeContext?.state ??
     null;
 
-  const volume =
-    confluence?.components?.engine4Volume ||
-    engine5?.volumeComponent ||
+  const volumeConfirmed =
+    volumeComponent?.confirmed ??
+    volumeContext?.volumeConfirmed ??
+    volumeContext?.confirmed ??
     null;
 
-  const timing =
-    confluence?.timingContext ||
-    engine5?.timingContext ||
-    null;
+  const volumeClean =
+    volumeComponent?.cleanParticipation ??
+    (
+      volumeConfirmed === true &&
+      !["CLIMACTIC_CAUTION", "HIGH_VOLUME_FADING", "ABSORPTION_RISK"].includes(
+        String(volumeRiskState || "").toUpperCase()
+      )
+    );
 
   return {
-    score: confluence?.score ?? engine5?.score ?? null,
-    label: confluence?.label ?? engine5?.label ?? null,
+    score:
+      confluence?.score ??
+      scores?.total ??
+      timing?.score ??
+      engine5?.score ??
+      null,
+
+    label:
+      confluence?.label ??
+      scores?.label ??
+      engine5?.label ??
+      null,
 
     reactionConfirmed:
-      reaction?.confirmed ??
-      reaction?.cleanReaction ??
+      reactionComponent?.confirmed ??
+      reactionContext?.confirmed ??
+      null,
+
+    reactionScore:
+      reactionComponent?.rawScore ??
+      reactionContext?.reactionScore ??
+      timing?.reactionScore ??
+      scores?.engine3 ??
       null,
 
     reactionQuality:
-      reaction?.quality ??
-      reaction?.stage ??
-      reaction?.state ??
+      reactionComponent?.quality ??
+      reactionContext?.quality ??
+      reactionContext?.structureState ??
+      reactionContext?.state ??
+      reactionContext?.stage ??
       null,
 
-    volumeClean:
-      volume?.cleanParticipation ??
-      volume?.confirmed ??
+    reactionState:
+      reactionComponent?.state ??
+      reactionComponent?.structureState ??
+      reactionContext?.structureState ??
+      reactionContext?.state ??
+      reactionContext?.stage ??
       null,
+
+    volumeConfirmed,
+    volumeClean,
+    volumeRiskState,
 
     volumeQuality:
-      volume?.participationQuality ??
-      volume?.quality ??
-      volume?.state ??
+      volumeComponent?.quality ??
+      volumeComponent?.participationQuality ??
+      volumeContext?.flags?.participationQuality ??
+      volumeContext?.quality ??
+      volumeContext?.state ??
+      null,
+
+    volumeScore:
+      volumeComponent?.rawScore ??
+      volumeContext?.volumeScore ??
+      timing?.volumeScore ??
+      scores?.engine4 ??
       null,
 
     timingEntry:
       timing?.entryTiming ??
       engine5?.timingEntry ??
+      null,
+
+    moveAlreadyHappened:
+      timing?.moveAlreadyHappened ??
       null,
 
     chaseRisk:
