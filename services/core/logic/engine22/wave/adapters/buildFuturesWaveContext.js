@@ -1,5 +1,15 @@
 // services/core/logic/engine22/wave/adapters/buildFuturesWaveContext.js
 // Engine 22G — Futures Wave Context Adapter
+//
+// Purpose:
+// Normalize futures-specific inputs for Engine 22 wave/fib strategy.
+//
+// Important:
+// This adapter does not make trade decisions.
+// It only carries backend-normalized context forward into Engine 22.
+//
+// Engine 22 may use this context to classify wave opportunity lifecycle,
+// but Engine 15ES and Engine 6 remain the final decision/permission gates.
 
 function toNum(x) {
   if (x === null || x === undefined || x === "") return null;
@@ -23,7 +33,11 @@ function tickSizeForFutures(symbol) {
   return 0.25;
 }
 
-function normalizeFuturesRegimeLayers({ engine16 = null, regimeLayers = null, engine22Scalp = null } = {}) {
+function normalizeFuturesRegimeLayers({
+  engine16 = null,
+  regimeLayers = null,
+  engine22Scalp = null,
+} = {}) {
   const e16 = engine16?.regimeLayers || {};
   const provided = regimeLayers || {};
   const e22 = engine22Scalp?.regimeLayers || {};
@@ -66,6 +80,7 @@ function normalizeFuturesRegimeLayers({ engine16 = null, regimeLayers = null, en
       null,
   };
 }
+
 function pickCurrentPrice({
   currentPrice = null,
   engine16 = null,
@@ -102,8 +117,18 @@ export function buildFuturesWaveContext(input = {}) {
     engine2State = null,
     engine15 = null,
     engine16 = null,
+
+    // Existing tactical/context inputs.
     marketMeter = null,
     engine22Scalp = null,
+
+    // Engine 22F pass-through context.
+    // These are read-only supportive/diagnostic inputs.
+    // They must not create trades, READY, ALLOW, or execution by themselves.
+    engine25Context = null,
+    marketRegime = null,
+    marketMeterContext = null,
+    engine5 = null,
 
     currentPrice = null,
     regimeLayers = null,
@@ -157,6 +182,13 @@ export function buildFuturesWaveContext(input = {}) {
 
     marketMeter,
     engine22Scalp,
+
+    // Engine 22F read-only supportive context.
+    engine25Context,
+    marketRegime,
+    marketMeterContext,
+    engine5,
+
     snapshotNow,
     currentTimeSec,
     barsByTf,
@@ -164,6 +196,8 @@ export function buildFuturesWaveContext(input = {}) {
     reasonCodes: [
       "FUTURES_WAVE_CONTEXT_BUILT",
       symbol === "ES" ? "ES_FUTURES_CONTEXT" : "GENERIC_FUTURES_CONTEXT",
+      engine25Context ? "ENGINE25_CONTEXT_AVAILABLE" : "ENGINE25_CONTEXT_MISSING",
+      marketRegime ? "MARKET_REGIME_CONTEXT_AVAILABLE" : "MARKET_REGIME_CONTEXT_MISSING",
     ],
   };
 }
