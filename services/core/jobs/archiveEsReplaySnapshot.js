@@ -21,7 +21,7 @@ const SOURCE_FILE = path.join(DATA_DIR, "strategy-snapshot-es.json");
 
 // Use same persistent root as Replay Mode.
 // REPLAY_DATA_DIR should be /var/data in Render.
-const REPLAY_DATA_DIR = (process.env.REPLAY_DATA_DIR || DATA_DIR).replace(/\/+$/, "");
+const REPLAY_DATA_DIR = (process.env.REPLAY_DATA_DIR || DATA_DIR).trim().replace(/\/+$/, "");
 const ES_REPLAY_ROOT = path.join(REPLAY_DATA_DIR, "replay", "es");
 
 function azParts(d = new Date()) {
