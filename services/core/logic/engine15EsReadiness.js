@@ -2,35 +2,33 @@
 //
 // Engine 15ES — ES Futures Readiness Referee
 //
-// v1.2
+// v1.3
 // - ES-only readiness shell
 // - Does NOT place orders
 // - Does NOT replace Engine 16ES
-// - Does NOT use Engine 22 because ES Engine 22 strategy is not built yet
 // - Does NOT hard-code Elliott wave scenarios
 //
 // Authority model:
+// - Engine 22 = Elliott Wave W3/W5 opportunity source
 // - Engine 3 = raw reaction facts
 // - Engine 4 = raw volume / participation facts
 // - Engine 5 = normalized confluence + reaction / volume / timing verdicts
 // - Engine 15ES = final ES setup referee
 // - Engine 6 = final permission gate
 //
-// Main upgrade in v1.2:
-// - Engine 15ES now uses Engine 5 normalized component verdicts first:
-//   - engine5.components.engine3Reaction
-//   - engine5.components.engine4Volume
-//   - engine5.timingContext
-//   - engine5.analytics.engine5.timingContext
-// - Raw Engine 3 / Engine 4 remain fallback/debug only.
-// - Engine 5 timing context can say the move already happened, post-extension,
-//   late chase, or wait for pullback/reclaim. Engine 15ES must respect that.
+// Main upgrade in v1.3:
+// - Engine 15ES now consumes Engine 22 waveOpportunity first:
+//   - snapshotContext.waveOpportunity
+//   - snapshotContext.engine22WaveStrategy?.waveOpportunity
+// - Engine 22 decides whether a valid W2→W3 or W4→W5 opportunity exists.
+// - Engine 15ES referees that opportunity using Engine 5 reaction / volume / timing.
+// - If Engine 22 says WATCH / LATE / EXTREME chase risk, Engine 15ES cannot upgrade to READY.
 //
 // Main purpose:
 // Engine 15ES answers:
 // Is ES ready, watch-only, blocked, or waiting — and what exactly does the trader need next?
 
-const ENGINE = "engine15.esReadiness.v1.2";
+const ENGINE = "engine15.esReadiness.v1.3";
 const DEFAULT_STRATEGY_ID = "intraday_scalp@10m";
 const ES_TICK_SIZE = 0.25;
 
@@ -131,14 +129,130 @@ function engine16Invalidated(engine16) {
   );
 }
 
-function getCurrentPrice({ emaPosture, engine16, zoneContext }) {
+function getCurrentPrice({ emaPosture, engine16, zoneContext, waveOpportunity }) {
   return (
+    toNum(waveOpportunity?.currentPrice) ??
     toNum(emaPosture?.tenMinute?.close) ??
     toNum(engine16?.regimeLayers?.trigger10m?.close) ??
     toNum(zoneContext?.meta?.current_price) ??
     toNum(zoneContext?.meta?.currentPrice) ??
     null
   );
+}
+
+/* -----------------------------
+   Engine 22 waveOpportunity readers
+------------------------------*/
+
+function getWaveOpportunity(snapshotContext) {
+  return (
+    snapshotContext?.waveOpportunity ||
+    snapshotContext?.engine22WaveStrategy?.waveOpportunity ||
+    null
+  );
+}
+
+function waveOpportunityExists(waveOpportunity) {
+  return !!(
+    waveOpportunity &&
+    typeof waveOpportunity === "object" &&
+    waveOpportunity.ok !== false
+  );
+}
+
+function waveOpportunityActive(waveOpportunity) {
+  return waveOpportunity?.active === true;
+}
+
+function waveSetupType(waveOpportunity) {
+  return safeUpper(waveOpportunity?.setupType, "NONE");
+}
+
+function waveReadiness(waveOpportunity) {
+  return safeUpper(waveOpportunity?.readiness, "NO_SETUP");
+}
+
+function waveTiming(waveOpportunity) {
+  return safeUpper(waveOpportunity?.timing, "UNKNOWN");
+}
+
+function waveChaseRisk(waveOpportunity) {
+  return safeUpper(waveOpportunity?.chaseRisk, "UNKNOWN");
+}
+
+function waveDirection(waveOpportunity) {
+  return safeUpper(waveOpportunity?.direction, "NONE");
+}
+
+function waveDegree(waveOpportunity) {
+  return safeUpper(waveOpportunity?.degree, "UNKNOWN");
+}
+
+function waveRawSetup(waveOpportunity) {
+  return safeUpper(waveOpportunity?.rawSetup, "UNKNOWN");
+}
+
+function hasValidW3W5Opportunity(waveOpportunity) {
+  if (!waveOpportunityExists(waveOpportunity)) return false;
+  if (!waveOpportunityActive(waveOpportunity)) return false;
+
+  const setupType = waveSetupType(waveOpportunity);
+
+  return setupType === "W2_TO_W3" || setupType === "W4_TO_W5";
+}
+
+function waveOpportunityInvalid(waveOpportunity) {
+  const readiness = waveReadiness(waveOpportunity);
+  const setupType = waveSetupType(waveOpportunity);
+  const rawSetup = waveRawSetup(waveOpportunity);
+
+  return (
+    readiness === "INVALID" ||
+    setupType === "INVALID" ||
+    rawSetup.includes("INVALID")
+  );
+}
+
+function waveOpportunityWatchOnly(waveOpportunity) {
+  const readiness = waveReadiness(waveOpportunity);
+  return readiness === "WATCH" || readiness === "NO_SETUP";
+}
+
+function waveOpportunityArming(waveOpportunity) {
+  return waveReadiness(waveOpportunity) === "ARMING";
+}
+
+function waveOpportunityReady(waveOpportunity) {
+  return waveReadiness(waveOpportunity) === "READY";
+}
+
+function waveOpportunityLate(waveOpportunity) {
+  const timing = waveTiming(waveOpportunity);
+  return timing === "LATE" || timing === "POST_EXTENSION";
+}
+
+function waveOpportunityHighChaseRisk(waveOpportunity) {
+  const risk = waveChaseRisk(waveOpportunity);
+  return risk === "HIGH" || risk === "EXTREME";
+}
+
+function waveNeedsPullbackOrReclaim(waveOpportunity) {
+  const needs = Array.isArray(waveOpportunity?.needs)
+    ? waveOpportunity.needs.map((x) => safeUpper(x))
+    : [];
+
+  return (
+    waveOpportunityLate(waveOpportunity) ||
+    waveOpportunityHighChaseRisk(waveOpportunity) ||
+    needs.includes("NO_CHASE_LONG") ||
+    needs.includes("CONTROLLED_PULLBACK_OR_RECLAIM")
+  );
+}
+
+function waveOpportunityReasonCodes(waveOpportunity) {
+  return Array.isArray(waveOpportunity?.reasonCodes)
+    ? waveOpportunity.reasonCodes
+    : [];
 }
 
 /* -----------------------------
@@ -503,6 +617,11 @@ function buildBlockedDecision({
     qualityGrade: "IGNORE",
     qualityBand: "INVALID",
     qualityBreakdown: {
+      waveOpportunityActive: false,
+      waveSetupType: "NONE",
+      waveReadiness: "NO_SETUP",
+      waveTiming: "UNKNOWN",
+      waveChaseRisk: "UNKNOWN",
       dailyAboveEma10: false,
       fourHourAboveEma10: false,
       oneHourAboveEma10: false,
@@ -543,6 +662,8 @@ function buildBlockedDecision({
 
 function chooseNextSetupType({
   readinessLabel,
+  waveNeedsReclaim,
+  waveOpportunity,
   lateTiming,
   volumeOk,
   volumeRisk,
@@ -550,15 +671,18 @@ function chooseNextSetupType({
   tenMinuteTrigger,
 }) {
   if (readinessLabel === "READY") return "PAPER_READY_ONLY";
-  if (lateTiming) return "WAIT_FOR_PULLBACK_OR_RECLAIM";
+  if (waveNeedsReclaim) return "WAIT_FOR_PULLBACK_OR_RECLAIM";
+  if (waveOpportunityWatchOnly(waveOpportunity)) return "WAIT_FOR_WAVE_OPPORTUNITY_ARMING";
   if (!tenMinuteTrigger) return "WAIT_FOR_10M_RECLAIM";
   if (!reactionOk) return "WAIT_FOR_ENGINE3_REACTION";
   if (!volumeOk) return "WAIT_FOR_ENGINE4_CLEAN_PARTICIPATION";
   if (volumeRisk) return "WAIT_FOR_VOLUME_RISK_CLEARANCE";
+  if (lateTiming) return "WAIT_FOR_PULLBACK_OR_RECLAIM";
   return "WAIT_FOR_CONFIRMATION";
 }
 
 function buildWatchSummary({
+  waveOpportunity,
   dailyAbove,
   fourHourBelow,
   oneHourBelow,
@@ -575,10 +699,24 @@ function buildWatchSummary({
 }) {
   const parts = [];
 
-  if (dailyAbove) {
-    parts.push("Daily still allows long ES ideas");
+  if (hasValidW3W5Opportunity(waveOpportunity)) {
+    parts.push(
+      `Engine 22 found a ${waveDegree(waveOpportunity)} ${waveSetupType(
+        waveOpportunity
+      )} Elliott Wave opportunity`
+    );
+
+    if (waveOpportunity?.summary) {
+      parts.push(waveOpportunity.summary);
+    }
   } else {
-    parts.push("Daily does not yet provide clean long permission");
+    parts.push("Engine 22 has not confirmed a valid W3/W5 opportunity");
+  }
+
+  if (dailyAbove) {
+    parts.push("daily still allows long ES ideas");
+  } else {
+    parts.push("daily does not yet provide clean long permission");
   }
 
   if (!fourHourBelow && !oneHourBelow) {
@@ -658,6 +796,7 @@ export function buildEngine15EsDecision({
     const emaPosture = snapshotContext?.emaPosture || {};
     const engine2State = snapshotContext?.engine2State || null;
     const marketRegime = snapshotContext?.marketRegime || null;
+    const waveOpportunity = getWaveOpportunity(snapshotContext);
 
     const tenMinute = emaPosture?.tenMinute || null;
     const oneHour = emaPosture?.oneHour || null;
@@ -668,6 +807,7 @@ export function buildEngine15EsDecision({
       emaPosture,
       engine16,
       zoneContext,
+      waveOpportunity,
     });
 
     const pText = permissionText(permission);
@@ -691,6 +831,52 @@ export function buildEngine15EsDecision({
     if (engine16Invalidated(engine16)) {
       blockers.push("ENGINE16_INVALIDATED");
       reasonCodes.push("ENGINE16_INVALIDATED");
+    }
+
+    const hasWaveOpportunity = hasValidW3W5Opportunity(waveOpportunity);
+    const waveInvalid = waveOpportunityInvalid(waveOpportunity);
+    const waveWatchOnly = waveOpportunityWatchOnly(waveOpportunity);
+    const waveArming = waveOpportunityArming(waveOpportunity);
+    const waveReady = waveOpportunityReady(waveOpportunity);
+    const waveLate = waveOpportunityLate(waveOpportunity);
+    const waveHighChase = waveOpportunityHighChaseRisk(waveOpportunity);
+    const waveNeedsReclaim = waveNeedsPullbackOrReclaim(waveOpportunity);
+
+    if (!waveOpportunityExists(waveOpportunity)) {
+      needs.push("ENGINE22_WAVE_OPPORTUNITY");
+      reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_MISSING");
+    } else if (!hasWaveOpportunity) {
+      needs.push("VALID_W3_OR_W5_OPPORTUNITY");
+      reasonCodes.push("NO_W3_W5_OPPORTUNITY");
+    } else {
+      reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_FOUND");
+      reasonCodes.push(`ENGINE22_${waveSetupType(waveOpportunity)}`);
+      reasonCodes.push(`ENGINE22_DEGREE_${waveDegree(waveOpportunity)}`);
+    }
+
+    if (waveInvalid) {
+      blockers.push("ENGINE22_WAVE_OPPORTUNITY_INVALID");
+      reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_INVALID");
+    }
+
+    if (waveWatchOnly) {
+      needs.push("ENGINE22_ARMING_OR_READY");
+      reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_WATCH");
+    }
+
+    if (waveLate) {
+      needs.push("WAIT_FOR_PULLBACK_OR_RECLAIM");
+      reasonCodes.push("ENGINE22_TIMING_LATE_NO_CHASE");
+    }
+
+    if (waveHighChase) {
+      needs.push("WAIT_FOR_PULLBACK_OR_RECLAIM");
+      reasonCodes.push(`ENGINE22_CHASE_RISK_${waveChaseRisk(waveOpportunity)}`);
+    }
+
+    if (waveNeedsReclaim) {
+      needs.push("WAIT_FOR_PULLBACK_OR_RECLAIM");
+      reasonCodes.push("ENGINE22_CONTROLLED_PULLBACK_OR_RECLAIM_REQUIRED");
     }
 
     const dailyAbove = layerAboveEma10(daily);
@@ -732,7 +918,7 @@ export function buildEngine15EsDecision({
     const e5Score = engine5Score(engine5);
     const e5Label = engine5Label(engine5);
 
-    // For v1.2, daily below EMA10 blocks LONG continuation only.
+    // Daily below EMA10 blocks LONG continuation only.
     if (dailyBelow) {
       blockers.push("DAILY_BELOW_EMA10_LONG_CONTINUATION_BLOCKED");
       reasonCodes.push("DAILY_BELOW_EMA10_LONG_PERMISSION_REDUCED");
@@ -755,6 +941,21 @@ export function buildEngine15EsDecision({
         reasonCodes: Array.isArray(permission?.reasonCodes) ? permission.reasonCodes : [],
       },
       marketRegime,
+      waveOpportunity: waveOpportunity || null,
+      engine22: {
+        ignored: false,
+        source: "snapshotContext.waveOpportunity",
+        active: waveOpportunityActive(waveOpportunity),
+        setupType: waveSetupType(waveOpportunity),
+        degree: waveDegree(waveOpportunity),
+        direction: waveDirection(waveOpportunity),
+        readiness: waveReadiness(waveOpportunity),
+        timing: waveTiming(waveOpportunity),
+        chaseRisk: waveChaseRisk(waveOpportunity),
+        needs: Array.isArray(waveOpportunity?.needs) ? waveOpportunity.needs : [],
+        reasonCodes: waveOpportunityReasonCodes(waveOpportunity),
+        summary: waveOpportunity?.summary || null,
+      },
       engine5: {
         score: e5Score,
         label: e5Label,
@@ -777,6 +978,14 @@ export function buildEngine15EsDecision({
         flags: engine4?.flags ?? null,
       },
       booleans: {
+        hasWaveOpportunity,
+        waveInvalid,
+        waveWatchOnly,
+        waveArming,
+        waveReady,
+        waveLate,
+        waveHighChase,
+        waveNeedsReclaim,
         dailyAbove,
         dailyBelow,
         fourHourBelow,
@@ -789,10 +998,6 @@ export function buildEngine15EsDecision({
         volumeRisk,
         lateTiming,
         engine2Extension,
-      },
-      engine22: {
-        ignored: true,
-        reason: "ES Engine 22 strategy has not been built yet.",
       },
     };
 
@@ -874,11 +1079,12 @@ export function buildEngine15EsDecision({
       reasonCodes.push("ENGINE2_ACTIVE_EXTENSION_CONTEXT");
     }
 
-    // Important: do not inspect existing engine22Scalp.
-    // The current ES snapshot may carry the SPY Engine 22 object.
-    reasonCodes.push("ENGINE22_ES_NOT_BUILT_YET");
-
     const ready =
+      hasWaveOpportunity &&
+      waveReady &&
+      !waveLate &&
+      !waveHighChase &&
+      !waveNeedsReclaim &&
       dailyAbove &&
       !fourHourBelow &&
       !oneHourBelow &&
@@ -888,6 +1094,17 @@ export function buildEngine15EsDecision({
       !volumeRisk &&
       !lateTiming &&
       permissionGatePassed(permission);
+
+    const arming =
+      hasWaveOpportunity &&
+      waveArming &&
+      dailyAbove &&
+      !fourHourBelow &&
+      !oneHourBelow &&
+      longTrigger &&
+      reactionOk &&
+      permissionGatePassed(permission) &&
+      !waveInvalid;
 
     let readinessLabel = "NO_SETUP";
     let action = "NO_ACTION";
@@ -908,15 +1125,18 @@ export function buildEngine15EsDecision({
 
       // No live ES execution yet. Keep this as watch/paper-safe.
       action = "WATCH";
-      direction = "LONG";
+      direction = waveDirection(waveOpportunity) || "LONG";
       executionBias = "LONG_PAPER_READY";
-      strategyType = "CONTINUATION";
+      strategyType = waveSetupType(waveOpportunity) === "W2_TO_W3"
+        ? "CONTINUATION"
+        : "CONTINUATION";
       priority = 80;
       entryStyle = "FUTURES_SCALP_CONFIRMATION";
       qualityScore = Math.max(80, e5Score ?? 0);
       qualityGrade = "A";
       qualityBand = "READY";
       setupChain = [
+        "ENGINE22_W3_W5_READY",
         "DAILY_PERMISSION",
         "HTF_SUPPORT",
         "10M_TRIGGER",
@@ -924,25 +1144,58 @@ export function buildEngine15EsDecision({
       ];
       nextSetupType = "PAPER_READY_ONLY";
       summary =
-        "ES has daily long permission, supportive 4H/1H posture, a 10m reclaim/trigger, Engine 5 confirms clean reaction and clean volume participation, and Engine 5 timing does not show post-extension chase risk. Paper-ready only; live execution is not enabled.";
-    } else if (dailyAbove) {
+        `${waveOpportunity?.summary || "Engine 22 confirms a valid W3/W5 opportunity."} Engine 5 confirms clean reaction and clean volume participation, timing is acceptable, and ES is paper-ready only. Live execution is not enabled.`;
+    } else if (arming) {
+      readinessLabel = "ARMING";
+      action = "WATCH";
+      direction = waveDirection(waveOpportunity) || "LONG";
+      executionBias = "LONG_ARMING";
+      strategyType = "CONTINUATION";
+      priority = 65;
+      entryStyle = "WAIT_FOR_FINAL_CONFIRMATION";
+      qualityScore = e5Score ?? 60;
+      qualityGrade = "WATCH";
+      qualityBand = "ARMING";
+      setupChain = [
+        "ENGINE22_W3_W5_ARMING",
+        "DAILY_LONG_PERMISSION",
+        "WAIT_FOR_ENGINE5_FINAL_CONFIRMATION",
+      ];
+      nextSetupType = chooseNextSetupType({
+        readinessLabel,
+        waveNeedsReclaim,
+        waveOpportunity,
+        lateTiming,
+        volumeOk,
+        volumeRisk,
+        reactionOk,
+        tenMinuteTrigger: longTrigger,
+      });
+      summary =
+        `${waveOpportunity?.summary || "Engine 22 has a W3/W5 opportunity arming."} Engine 15ES is holding this at ARMING until all confirmation gates align.`;
+    } else if (hasWaveOpportunity && dailyAbove) {
       readinessLabel = "WATCH";
       action = "WATCH";
-      direction = "LONG";
+      direction = waveDirection(waveOpportunity) || "LONG";
       executionBias = "LONG_WATCH_ONLY";
       strategyType = "CONTINUATION";
       priority = 45;
-      entryStyle = lateTiming ? "WAIT_FOR_PULLBACK_OR_RECLAIM" : "WAIT_FOR_RECLAIM";
+      entryStyle =
+        waveNeedsReclaim || lateTiming
+          ? "WAIT_FOR_PULLBACK_OR_RECLAIM"
+          : "WAIT_FOR_RECLAIM";
       qualityScore = e5Score ?? 45;
       qualityGrade = "CAUTION";
       qualityBand = "WATCH";
       setupChain = [
+        "ENGINE22_W3_W5_WATCH",
         "DAILY_LONG_PERMISSION",
-        "LOWER_TF_OR_CONFIRMATION_NOT_READY",
-        "WAIT_FOR_ENGINE5_CONFIRMATION",
+        "WAIT_FOR_ENGINE5_OR_WAVE_CONFIRMATION",
       ];
       nextSetupType = chooseNextSetupType({
         readinessLabel,
+        waveNeedsReclaim,
+        waveOpportunity,
         lateTiming,
         volumeOk,
         volumeRisk,
@@ -950,6 +1203,7 @@ export function buildEngine15EsDecision({
         tenMinuteTrigger: longTrigger,
       });
       summary = buildWatchSummary({
+        waveOpportunity,
         dailyAbove,
         fourHourBelow,
         oneHourBelow,
@@ -964,6 +1218,21 @@ export function buildEngine15EsDecision({
         e5Reaction,
         e5Volume,
       });
+    } else if (!hasWaveOpportunity) {
+      readinessLabel = "NO_SETUP";
+      action = "NO_ACTION";
+      direction = "NONE";
+      executionBias = "NONE";
+      strategyType = "NONE";
+      priority = 0;
+      entryStyle = "NONE";
+      qualityScore = e5Score ?? 0;
+      qualityGrade = "IGNORE";
+      qualityBand = "INVALID";
+      setupChain = ["NO_VALID_W3_W5_OPPORTUNITY"];
+      nextSetupType = "WAIT_FOR_ENGINE22_W3_W5_OPPORTUNITY";
+      summary =
+        "Engine 22 has not confirmed a valid Elliott Wave 3 or Wave 5 opportunity. Engine 15ES will not create a trade without a W3/W5 setup.";
     } else {
       readinessLabel = "NO_SETUP";
       action = "NO_ACTION";
@@ -1013,22 +1282,37 @@ export function buildEngine15EsDecision({
       qualityBreakdown: {
         engine5Score: e5Score,
         engine5Label: e5Label,
+
+        waveOpportunityActive: waveOpportunityActive(waveOpportunity),
+        waveSetupType: waveSetupType(waveOpportunity),
+        waveRawSetup: waveRawSetup(waveOpportunity),
+        waveDegree: waveDegree(waveOpportunity),
+        waveDirection: waveDirection(waveOpportunity),
+        waveReadiness: waveReadiness(waveOpportunity),
+        waveTiming: waveTiming(waveOpportunity),
+        waveChaseRisk: waveChaseRisk(waveOpportunity),
+        waveNeedsReclaim,
+
         dailyAboveEma10: dailyAbove,
         fourHourAboveEma10: !fourHourBelow,
         oneHourAboveEma10: !oneHourBelow,
         tenMinuteAboveEma10: !tenMinuteBelow10,
         tenMinuteAboveEma20: !tenMinuteBelow20,
         tenMinuteTrigger: longTrigger,
+
         reactionConfirmed: reactionOk,
         reactionDirection: reactionDirectionFromEngine5(engine5, engine3),
         reactionQuality: reactionQualityFromEngine5(engine5, engine3),
+
         volumeConfirmed: volumeOk,
         cleanVolumeParticipation: volumeOk && !volumeRisk,
         volumeRisk,
+
         lateTiming,
         timingEntry: timingEntryFromEngine5(engine5),
         timingChaseRisk: timingChaseRiskFromEngine5(engine5),
         timingAction: timingActionFromEngine5(engine5),
+
         extensionContext: engine2Extension,
       },
 
@@ -1127,6 +1411,7 @@ export function buildEngine15EsDecisionFromSnapshot(
   strategyId = DEFAULT_STRATEGY_ID
 ) {
   const scalp = esSnapshot?.strategies?.[strategyId] || null;
+  const engine22WaveStrategy = scalp?.engine22WaveStrategy || null;
 
   return buildEngine15EsDecision({
     symbol: esSnapshot?.symbol || "ES",
@@ -1137,6 +1422,8 @@ export function buildEngine15EsDecisionFromSnapshot(
       marketMind: esSnapshot?.marketMind || null,
       marketMeter: esSnapshot?.marketMeter || null,
       marketRegime: esSnapshot?.marketRegime || null,
+      engine22WaveStrategy,
+      waveOpportunity: engine22WaveStrategy?.waveOpportunity || null,
     },
     engine16: scalp?.engine16 || null,
     engine5: scalp?.confluence || null,
