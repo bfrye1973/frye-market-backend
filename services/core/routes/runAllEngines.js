@@ -18,8 +18,17 @@ const ENGINE1_RUNNER = path.resolve(CORE_DIR, "jobs/runEngine1AndShelves.js");
 // Step 2
 const JOB_SCRIPT_ALL = path.resolve(CORE_DIR, "jobs/runAllEngines.sh");
 
-// Step 3
-const REPLAY_SNAPSHOT_JOB = path.resolve(CORE_DIR, "jobs/writeReplaySnapshot.js");
+// Step 3A: Build ES strategy snapshot
+const ES_STRATEGY_SNAPSHOT_JOB = path.resolve(
+  CORE_DIR,
+  "jobs/buildStrategySnapshot.js"
+);
+
+// Step 3B: Archive slim ES replay snapshot
+const ES_REPLAY_ARCHIVE_JOB = path.resolve(
+  CORE_DIR,
+  "jobs/archiveEsReplaySnapshot.js"
+);
 
 // Prevent overlapping cron/manual runs
 let IS_RUNNING = false;
@@ -68,14 +77,17 @@ function logStepEnd(name, result, startedMs) {
   );
 }
 
-function runStep({ name, cmd, args, cwd }) {
+function runStep({ name, cmd, args, cwd, env = {} }) {
   return new Promise((resolve) => {
     const startedMs = Date.now();
     logStepStart(name);
 
     const child = spawn(cmd, args, {
       cwd,
-      env: process.env,
+      env: {
+        ...process.env,
+        ...env,
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -200,12 +212,27 @@ async function handle(req, res) {
     });
 
     // ---------------------------------
-    // STEP 3: Replay cadence snapshot
+    // STEP 3A: Build ES strategy snapshot
+    // This replaces old SPY replay cadence.
     // ---------------------------------
-    const step3 = await runStep({
-      name: "write_replay_snapshot",
+    const step3a = await runStep({
+      name: "build_es_strategy_snapshot",
       cmd: "node",
-      args: [REPLAY_SNAPSHOT_JOB],
+      args: [ES_STRATEGY_SNAPSHOT_JOB],
+      cwd: CORE_DIR,
+      env: {
+        SYMBOL: "ES",
+      },
+    });
+
+    // ---------------------------------
+    // STEP 3B: Archive slim ES replay snapshot
+    // Writes /var/data/replay/es/YYYY-MM-DD/HHMM.json
+    // ---------------------------------
+    const step3b = await runStep({
+      name: "archive_es_replay_snapshot",
+      cmd: "node",
+      args: [ES_REPLAY_ARCHIVE_JOB],
       cwd: CORE_DIR,
     });
 
@@ -219,8 +246,11 @@ async function handle(req, res) {
       "== STEP 2: bash jobs/runAllEngines.sh ==",
       step2.stdout,
       "",
-      "== STEP 3: node jobs/writeReplaySnapshot.js ==",
-      step3.stdout,
+      "== STEP 3A: SYMBOL=ES node jobs/buildStrategySnapshot.js ==",
+      step3a.stdout,
+      "",
+      "== STEP 3B: node jobs/archiveEsReplaySnapshot.js ==",
+      step3b.stdout,
     ].join("\n");
 
     const combinedStderr = [
@@ -230,12 +260,20 @@ async function handle(req, res) {
       "== STEP 2 STDERR ==",
       step2.stderr,
       "",
-      "== STEP 3 STDERR ==",
-      step3.stderr,
+      "== STEP 3A STDERR ==",
+      step3a.stderr,
+      "",
+      "== STEP 3B STDERR ==",
+      step3b.stderr,
     ].join("\n");
 
-    const ok = step2.code === 0 && step3.code === 0;
-    const code = step2.code !== 0 ? step2.code : step3.code;
+    const ok = step2.code === 0 && step3a.code === 0 && step3b.code === 0;
+    const code =
+      step2.code !== 0
+        ? step2.code
+        : step3a.code !== 0
+        ? step3a.code
+        : step3b.code;
 
     console.log(
       `[run-all-engines] REQUEST END @ ${endedAt} | ok=${ok} | totalElapsedMs=${totalElapsedMs}`
@@ -251,7 +289,8 @@ async function handle(req, res) {
         totalElapsedMs,
         engine1_and_shelves: step1.elapsedMs,
         runAllEngines_sh: step2.elapsedMs,
-        write_replay_snapshot: step3.elapsedMs,
+        build_es_strategy_snapshot: step3a.elapsedMs,
+        archive_es_replay_snapshot: step3b.elapsedMs,
       },
       steps: {
         engine1_and_shelves: {
@@ -266,11 +305,17 @@ async function handle(req, res) {
           endedAt: step2.endedAt,
           elapsedMs: step2.elapsedMs,
         },
-        write_replay_snapshot: {
-          code: step3.code,
-          startedAt: step3.startedAt,
-          endedAt: step3.endedAt,
-          elapsedMs: step3.elapsedMs,
+        build_es_strategy_snapshot: {
+          code: step3a.code,
+          startedAt: step3a.startedAt,
+          endedAt: step3a.endedAt,
+          elapsedMs: step3a.elapsedMs,
+        },
+        archive_es_replay_snapshot: {
+          code: step3b.code,
+          startedAt: step3b.startedAt,
+          endedAt: step3b.endedAt,
+          elapsedMs: step3b.elapsedMs,
         },
       },
       stdout: tail(combinedStdout),
