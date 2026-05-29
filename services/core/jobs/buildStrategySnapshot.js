@@ -3191,6 +3191,14 @@ const zoneContext = buildZoneContext(
         marketMeter,
         regimeLayers: engine22Scalp?.regimeLayers || null,
 
+       // Engine 22F read-only supportive context.
+       // Used only for WATCH -> ARMING lifecycle.
+       // Must not create READY, GO, ALLOW, or execution.
+       engine25Context,
+       marketRegime,
+       marketMeterContext: null,
+       engine5: engine5Analytics || patchedConfluence || null,
+
         reactionContext:
           patchedConfluence?.context?.reaction ||
           spyReactionQuality?.engine3Reaction ||
@@ -3441,6 +3449,14 @@ const zoneContext = buildZoneContext(
            engine16,
            marketMeter,
            regimeLayers: engine22Scalp?.regimeLayers || null,
+          // Engine 22F read-only supportive context.
+          // Used only for WATCH -> ARMING lifecycle.
+          // Must not create READY, GO, ALLOW, or execution.
+           engine25Context,
+           marketRegime,
+           marketMeterContext: null,
+           engine5: engine5Analytics || patchedConfluence || null,
+            
            reactionContext: reactionContextForEngine22,
            volumeContext: volumeContextForEngine22,
            breakoutContext: engine22Scalp?.breakoutContext || null,
