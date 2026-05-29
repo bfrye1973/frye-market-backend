@@ -196,10 +196,7 @@ function buildIncompleteWaveOpportunity({
     },
     chaseRisk: "UNKNOWN",
     needs: ["ENGINE2_WAVE_MARKS"],
-    reasonCodes: [
-      "NO_W3_W5_OPPORTUNITY",
-      reason,
-    ],
+    reasonCodes: ["NO_W3_W5_OPPORTUNITY", reason],
     summary:
       "No valid Elliott Wave 3 or Wave 5 opportunity is available because Engine 2 wave/fib marks are incomplete.",
   };
@@ -313,9 +310,7 @@ function buildTradeDecisionSafe({
       symbol: context.symbol,
       strategyId: context.strategyId,
       setupType:
-        waveOpportunity?.setupType ||
-        waveFibState?.activeSetup ||
-        "NO_SETUP",
+        waveOpportunity?.setupType || waveFibState?.activeSetup || "NO_SETUP",
       reason: `Trade decision builder failed safely: ${
         err?.message || "unknown error"
       }`,
@@ -328,9 +323,7 @@ function buildTradeDecisionSafe({
     symbol: context.symbol,
     strategyId: context.strategyId,
     setupType:
-      waveOpportunity?.setupType ||
-      waveFibState?.activeSetup ||
-      "NO_SETUP",
+      waveOpportunity?.setupType || waveFibState?.activeSetup || "NO_SETUP",
     reason: "Wave strategy is read-only. Waiting for confirmation.",
     needs: ["ENGINE15_READY_OR_PAPER_READY"],
     reasonCodes: ["READ_ONLY_WAIT"],
@@ -372,6 +365,15 @@ function buildPreEngine15WaveOpportunity({
         chaseRisk: waveFibState?.chaseRisk,
         w4Levels,
       },
+
+      // Engine 22F read-only supportive context.
+      // This context may upgrade WATCH -> ARMING only.
+      // It must never create READY, GO, ALLOW, or execution.
+      engine16: context.engine16,
+      engine25Context: context.engine25Context,
+      marketRegime: context.marketRegime,
+      marketMeterContext: context.marketMeterContext,
+      engine5: context.engine5,
     });
   } catch (err) {
     return {
@@ -542,7 +544,8 @@ export function buildEngine22WaveStrategy(input = {}) {
     headline: tradeContextSummary?.headline || timelineRead?.headline || null,
     bias: tradeContextSummary?.bias || null,
     action: tradeContextSummary?.action || timelineRead?.action || "WAIT",
-    severity: tradeContextSummary?.severity || timelineRead?.severity || "neutral",
+    severity:
+      tradeContextSummary?.severity || timelineRead?.severity || "neutral",
 
     activeSetup: waveFibState?.activeSetup || null,
     activeTradingDegree: waveFibState?.activeTradingDegree || "unknown",
@@ -568,7 +571,9 @@ export function buildEngine22WaveStrategy(input = {}) {
       "ENGINE22G_WAVE_STRATEGY_BUILT",
       "ENGINE22_WAVE_OPPORTUNITY_PRE_ENGINE15",
       ...(Array.isArray(context?.reasonCodes) ? context.reasonCodes : []),
-      ...(Array.isArray(waveFibState?.reasonCodes) ? waveFibState.reasonCodes : []),
+      ...(Array.isArray(waveFibState?.reasonCodes)
+        ? waveFibState.reasonCodes
+        : []),
       ...(Array.isArray(tradeContextSummary?.reasonCodes)
         ? tradeContextSummary.reasonCodes
         : []),
