@@ -3196,7 +3196,7 @@ const zoneContext = buildZoneContext(
        // Must not create READY, GO, ALLOW, or execution.
        engine25Context,
        marketRegime,
-       marketMeterContext: null,
+       marketMeterContext: marketMind || null,
        engine5: engine5Analytics || patchedConfluence || null,
 
         reactionContext:
@@ -3454,7 +3454,7 @@ const zoneContext = buildZoneContext(
           // Must not create READY, GO, ALLOW, or execution.
            engine25Context,
            marketRegime,
-           marketMeterContext: null,
+           marketMeterContext: marketMind || null, 
            engine5: engine5Analytics || patchedConfluence || null,
             
            reactionContext: reactionContextForEngine22,
