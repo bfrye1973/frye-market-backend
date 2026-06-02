@@ -15,9 +15,12 @@
 // It only packages existing Engine 22 wave/fib state into:
 // engine22WaveStrategy.waveOpportunity
 //
-// Engine 22F addition:
-// - Adds conservative WATCH -> ARMING lifecycle detection for valid long W2→W3 / W4→W5 opportunities.
-// - Uses Engine16, Engine25, and marketRegime as read-only supportive context.
+// Engine 22F additions:
+// - Conservative WATCH -> ARMING lifecycle detection for valid long W2→W3 / W4→W5 opportunities.
+// - Post-extension reclaim watch detection:
+//   POST_EXTENSION does not mean dead forever.
+//   It means no blind chase, but a controlled reclaim after pullback can be evaluated.
+// - Uses Engine16, Engine25, marketRegime, and marketMeterContext as read-only supportive context.
 // - Does NOT create READY, GO, ALLOW, executable, or trade permission.
 
 const DEGREES = ["primary", "intermediate", "minor", "minute", "micro"];
@@ -250,7 +253,9 @@ function buildInvalidation({ setupType, w4Levels }) {
 }
 
 function hasAnyTarget(targets = {}) {
-  return Object.values(targets).some((value) => value !== null && value !== undefined);
+  return Object.values(targets).some(
+    (value) => value !== null && value !== undefined
+  );
 }
 
 function isEngine16Ready(engine16 = null) {
@@ -265,7 +270,9 @@ function isEngine25Supportive(engine25Context = null) {
   const score = toNum(engine25Context?.score);
 
   if (engine25Context?.ok !== true) return false;
-  if (freshnessStatus === "MISSING" || freshnessStatus === "STALE") return false;
+  if (freshnessStatus === "MISSING" || freshnessStatus === "STALE") {
+    return false;
+  }
 
   return (
     (score !== null && score >= 70) ||
@@ -295,6 +302,56 @@ function rawSetupBlocksArming(rawSetup) {
   );
 }
 
+function isPostExtensionContext({
+  rawSetup,
+  timing,
+  baseReadiness,
+  degreeState,
+} = {}) {
+  const raw = upper(rawSetup, "");
+  const highestHit = getExtensionHit(degreeState?.extensionProgress);
+  const extensionState = upper(degreeState?.extensionProgress?.state, "");
+
+  return (
+    raw.includes("W5_EXTENSION") ||
+    raw.includes("POST_EXTENSION") ||
+    timing === "POST_EXTENSION" ||
+    timing === "LATE" ||
+    baseReadiness === "POST_EXTENSION" ||
+    extensionState === "POST_EXTENSION_PULLBACK" ||
+    (highestHit !== null && highestHit >= 1.272)
+  );
+}
+
+function pricePulledBackFromExtension({
+  currentPrice,
+  targets,
+  degreeState,
+} = {}) {
+  const price = toNum(currentPrice);
+  if (price === null) return false;
+
+  const e1618 = toNum(targets?.e1618);
+  const e200 = toNum(targets?.e200);
+  const nearestFibPrice = getNearestFibPrice(degreeState);
+  const highestHit = getExtensionHit(degreeState?.extensionProgress);
+
+  // Most important case: price tagged/approached extension, then pulled back
+  // below the 1.618 decision target. This matches the 10m reclaim pattern.
+  if (e1618 !== null && price <= e1618) return true;
+
+  // If the system detected a 2.0+ extension, a pullback under/near e200 is
+  // also a controlled post-extension watch, not a fresh chase.
+  if (highestHit !== null && highestHit >= 2 && e200 !== null && price <= e200) {
+    return true;
+  }
+
+  // Fallback to the engine's nearest fib pressure price if target levels are sparse.
+  if (nearestFibPrice !== null && price <= nearestFibPrice) return true;
+
+  return false;
+}
+
 function buildSupportiveContext({
   setupType,
   direction,
@@ -315,7 +372,10 @@ function buildSupportiveContext({
   const engine25Score = toNum(engine25Context?.score);
   const engine25Regime = cleanString(engine25Context?.regime, null);
   const engine25Permission = cleanString(engine25Context?.permission, null);
-  const engine25FreshnessStatus = cleanString(engine25Context?.freshnessStatus, null);
+  const engine25FreshnessStatus = cleanString(
+    engine25Context?.freshnessStatus,
+    null
+  );
 
   const marketRegimeDirection = cleanString(marketRegime?.directionBias, null);
   const marketRegimeStrictness = cleanString(marketRegime?.strictness, null);
@@ -374,13 +434,93 @@ function buildSupportiveContext({
   };
 }
 
-function applyArmingLifecycle({
-  baseReadiness,
+function buildPostExtensionReclaimContext({
   setupType,
   direction,
-  timing,
-  chaseRisk,
   rawSetup,
+  baseTiming,
+  baseReadiness,
+  baseChaseRisk,
+  currentPrice,
+  degreeState,
+  targets,
+  engine16,
+  engine25Context,
+  marketRegime,
+} = {}) {
+  const blocked = [];
+
+  const engine16Ready = isEngine16Ready(engine16);
+  const engine25Supportive = isEngine25Supportive(engine25Context);
+  const marketRegimeSupportive = isMarketRegimeSupportive(marketRegime);
+
+  const postExtensionContext = isPostExtensionContext({
+    rawSetup,
+    timing: baseTiming,
+    baseReadiness,
+    degreeState,
+  });
+
+  const pulledBackFromExtension = pricePulledBackFromExtension({
+    currentPrice,
+    targets,
+    degreeState,
+  });
+
+  if (!["W2_TO_W3", "W4_TO_W5"].includes(setupType)) {
+    blocked.push("POST_EXTENSION_RECLAIM_BLOCKED_NOT_W2_W3_OR_W4_W5");
+  }
+
+  if (direction !== "LONG") {
+    blocked.push("POST_EXTENSION_RECLAIM_BLOCKED_DIRECTION_NOT_LONG");
+  }
+
+  if (!postExtensionContext) {
+    blocked.push("POST_EXTENSION_RECLAIM_BLOCKED_NOT_POST_EXTENSION_CONTEXT");
+  }
+
+  if (!pulledBackFromExtension) {
+    blocked.push("POST_EXTENSION_RECLAIM_BLOCKED_NO_CONTROLLED_PULLBACK");
+  }
+
+  if (!engine16Ready) {
+    blocked.push("POST_EXTENSION_RECLAIM_BLOCKED_ENGINE16_NOT_READY");
+  }
+
+  if (!engine25Supportive) {
+    blocked.push("POST_EXTENSION_RECLAIM_BLOCKED_ENGINE25_NOT_SUPPORTIVE");
+  }
+
+  if (!marketRegimeSupportive) {
+    blocked.push("POST_EXTENSION_RECLAIM_BLOCKED_MARKET_REGIME_NOT_SUPPORTIVE");
+  }
+
+  return {
+    engine16Ready,
+    engine25Supportive,
+    marketRegimeSupportive,
+    postExtensionContext,
+    pulledBackFromExtension,
+    baseTiming,
+    baseReadiness,
+    baseChaseRisk,
+    currentPrice: round2(currentPrice),
+    armingAllowed: blocked.length === 0,
+    reclaimAllowed: blocked.length === 0,
+    reclaimBlockedReasonCodes: blocked,
+  };
+}
+
+function applyArmingLifecycle({
+  baseReadiness,
+  baseTiming,
+  baseChaseRisk,
+  setupType,
+  direction,
+  rawSetup,
+  currentPrice,
+  degreeState,
+  targets,
   engine16,
   engine25Context,
   marketRegime,
@@ -388,8 +528,8 @@ function applyArmingLifecycle({
   const supportiveContext = buildSupportiveContext({
     setupType,
     direction,
-    timing,
-    chaseRisk,
+    timing: baseTiming,
+    chaseRisk: baseChaseRisk,
     rawSetup,
     readiness: baseReadiness,
     engine16,
@@ -397,10 +537,59 @@ function applyArmingLifecycle({
     marketRegime,
   });
 
+  const reclaimContext = buildPostExtensionReclaimContext({
+    setupType,
+    direction,
+    rawSetup,
+    baseTiming,
+    baseReadiness,
+    baseChaseRisk,
+    currentPrice,
+    degreeState,
+    targets,
+    engine16,
+    engine25Context,
+    marketRegime,
+  });
+
+  // Priority 1:
+  // Post-extension reclaim watch.
+  // This is NOT READY and NOT execution.
+  // It simply tells Engine15 that post-extension is no longer "dead forever"
+  // if a controlled pullback/reclaim context has formed.
+  if (reclaimContext.reclaimAllowed) {
+    return {
+      readiness: "POST_EXTENSION_RECLAIM_WATCH",
+      timing: "RECLAIM_AFTER_EXTENSION",
+      chaseRisk: "MODERATE",
+      supportiveContext,
+      reclaimContext,
+      armingReasonCodes: [
+        "POST_EXTENSION_RECLAIM_WATCH",
+        "NO_BLIND_CHASE",
+        "CONTROLLED_PULLBACK_AFTER_EXTENSION",
+        "ENGINE16_READY",
+        "ENGINE25_SUPPORTIVE_CONTEXT",
+        "MARKET_REGIME_SUPPORTIVE_CONTEXT",
+      ],
+      armingNeeds: [
+        "CONTROLLED_RECLAIM_CONFIRMATION",
+        "WAITING_FOR_ENGINE15_REFEREE",
+        "WAITING_FOR_ENGINE5_CONFIRMATION",
+        "ENGINE4_VOLUME_RISK_CLEARANCE",
+      ],
+    };
+  }
+
+  // Priority 2:
+  // Fresh pre-extension arming.
   if (supportiveContext.armingAllowed) {
     return {
       readiness: "ARMING",
+      timing: baseTiming,
+      chaseRisk: baseChaseRisk,
       supportiveContext,
+      reclaimContext,
       armingReasonCodes: [
         `${setupType}_ARMING`,
         "ENGINE16_READY",
@@ -418,7 +607,10 @@ function applyArmingLifecycle({
 
   return {
     readiness: baseReadiness,
+    timing: baseTiming,
+    chaseRisk: baseChaseRisk,
     supportiveContext,
+    reclaimContext,
     armingReasonCodes: [],
     armingNeeds: [],
   };
@@ -441,11 +633,18 @@ function buildNeeds({
     return needs;
   }
 
-  if (readiness === "ARMING") {
+  if (readiness === "ARMING" || readiness === "POST_EXTENSION_RECLAIM_WATCH") {
     needs.push(...armingNeeds);
   }
 
-  if (timing === "LATE" || timing === "POST_EXTENSION" || upper(rawSetup, "").includes("W5_EXTENSION")) {
+  const isReclaimWatch = readiness === "POST_EXTENSION_RECLAIM_WATCH";
+
+  if (
+    !isReclaimWatch &&
+    (timing === "LATE" ||
+      timing === "POST_EXTENSION" ||
+      upper(rawSetup, "").includes("W5_EXTENSION"))
+  ) {
     needs.push("NO_CHASE_LONG");
     needs.push("CONTROLLED_PULLBACK_OR_RECLAIM");
   }
@@ -455,7 +654,11 @@ function buildNeeds({
   }
 
   if (setupType === "W4_TO_W5" && !w4Levels) {
-    needs.push("CONTROLLED_PULLBACK_OR_RECLAIM");
+    needs.push(
+      isReclaimWatch
+        ? "CONTROLLED_RECLAIM_CONFIRMATION"
+        : "CONTROLLED_PULLBACK_OR_RECLAIM"
+    );
   }
 
   if (!hasAnyTarget(targets)) {
@@ -501,7 +704,15 @@ function buildReasonCodes({
     codes.push(...armingReasonCodes);
   }
 
-  if (timing === "LATE" || timing === "POST_EXTENSION") {
+  if (readiness === "POST_EXTENSION_RECLAIM_WATCH") {
+    codes.push("ENGINE22_POST_EXTENSION_RECLAIM_WATCH");
+    codes.push(...armingReasonCodes);
+  }
+
+  if (
+    readiness !== "POST_EXTENSION_RECLAIM_WATCH" &&
+    (timing === "LATE" || timing === "POST_EXTENSION")
+  ) {
     codes.push("NO_CHASE_LONG");
   }
 
@@ -526,6 +737,10 @@ function buildSummary({
   const degreeLabel = String(degree || "unknown").toUpperCase();
   const nearestFibPrice = getNearestFibPrice(degreeState);
   const highestHit = getExtensionHit(degreeState?.extensionProgress);
+
+  if (readiness === "POST_EXTENSION_RECLAIM_WATCH") {
+    return `${degreeLabel} post-extension reclaim watch is active. The first extension already happened, so this is not a blind chase entry. Price has pulled back from extension and Engine16 / Engine25 / market regime support a controlled continuation watch. Wait for Engine15 readiness, Engine5 confirmation, and volume-risk clearance.`;
+  }
 
   if (readiness === "ARMING") {
     if (setupType === "W4_TO_W5") {
@@ -564,7 +779,7 @@ export function buildWaveOpportunity({
   engine22WaveStrategy = {},
 
   // Engine 22F read-only supportive context.
-  // These can only upgrade WATCH -> ARMING.
+  // These can only upgrade WATCH -> ARMING / POST_EXTENSION_RECLAIM_WATCH.
   // They must never create READY, GO, ALLOW, executable, or trade permission.
   engine16 = null,
   engine25Context = null,
@@ -601,7 +816,7 @@ export function buildWaveOpportunity({
   const entryZone = buildEntryZone({ setupType, w4Levels });
   const invalidation = buildInvalidation({ setupType, w4Levels });
 
-  const timing = buildTiming({
+  const baseTiming = buildTiming({
     setupType,
     rawSetup,
     degreeState,
@@ -609,12 +824,12 @@ export function buildWaveOpportunity({
 
   const baseReadiness = buildReadiness({
     setupType,
-    timing,
+    timing: baseTiming,
     degreeState,
     invalidation,
   });
 
-  const chaseRisk = normalizeChaseRisk(
+  const baseChaseRisk = normalizeChaseRisk(
     engine22WaveStrategy?.chaseRisk,
     waveFibState?.chaseRisk,
     degreeState?.fibPressure?.chaseRisk
@@ -622,17 +837,22 @@ export function buildWaveOpportunity({
 
   const lifecycle = applyArmingLifecycle({
     baseReadiness,
+    baseTiming,
+    baseChaseRisk,
     setupType,
     direction,
-    timing,
-    chaseRisk,
     rawSetup,
+    currentPrice,
+    degreeState,
+    targets,
     engine16,
     engine25Context,
     marketRegime,
   });
 
   const readiness = lifecycle.readiness;
+  const timing = lifecycle.timing;
+  const chaseRisk = lifecycle.chaseRisk;
 
   const tradeDecision = engine22WaveStrategy?.tradeDecision || {};
 
@@ -715,6 +935,10 @@ export function buildWaveOpportunity({
     // Engine 6 must not use this as final permission.
     supportiveContext: lifecycle.supportiveContext,
 
+    // Diagnostic/read-only only.
+    // Lets replay prove whether post-extension reclaim was allowed or blocked.
+    reclaimContext: lifecycle.reclaimContext,
+
     // Reserved for future replay/outcome learning.
     learningContext: {
       engine: "engine22.waveOpportunityLearningContext.v1",
@@ -734,6 +958,8 @@ export function buildWaveOpportunity({
         lifecycle.supportiveContext?.marketRegimeStrictness ?? null,
       engine16Ready: lifecycle.supportiveContext?.engine16Ready ?? false,
       armingAllowed: lifecycle.supportiveContext?.armingAllowed ?? false,
+      postExtensionReclaimAllowed:
+        lifecycle.reclaimContext?.reclaimAllowed ?? false,
     },
 
     // Kept available for diagnostics but not used for permission.
