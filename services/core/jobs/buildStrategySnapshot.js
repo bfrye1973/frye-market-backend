@@ -3511,6 +3511,13 @@ const zoneContext = buildZoneContext(
             price: Number.isFinite(price) ? price : null,
             engine22WaveStrategy,
             fib,
+            engine2State,
+            barsByTf: {
+              "10m": marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+              "1h": marketMeter?.layers?.emaPosture?.oneHour?.bars || [],
+              "4h": marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
+              "1d": marketMeter?.layers?.emaPosture?.daily?.bars || [],
+            },
           });
                       
         } catch (err) {
@@ -4083,11 +4090,17 @@ console.log("Engine21 alignment fetched");
           symbol,
           price:
             Number.isFinite(Number(scalp.engine22WaveStrategy?.currentPrice))
-              ? Number(scalp.engine22WaveStrategy.currentPrice)
-              : null,
+            ? Number(scalp.engine22WaveStrategy.currentPrice)
+            : null,
           engine22WaveStrategy: scalp.engine22WaveStrategy,
           fib: scalp.fibLevels || null,
           engine2State,
+          barsByTf: {
+            "10m": result.marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+            "1h": result.marketMeter?.layers?.emaPosture?.oneHour?.bars || [],
+            "4h": result.marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
+            "1d": result.marketMeter?.layers?.emaPosture?.daily?.bars || [],
+          },
         });
 
         scalp.aiTradeCopilot = buildAiTradeCopilotRead({
