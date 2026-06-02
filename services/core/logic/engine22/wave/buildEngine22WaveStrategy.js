@@ -17,7 +17,7 @@
 // Engine 6 permits.
 // Engine 7 sizes.
 // Engine 8 executes only if executable=true.
-//
+//6f
 // This file should NOT become an ES monster file.
 // This file should NOT contain broker logic.
 // This file should NOT route orders.
@@ -504,6 +504,13 @@ export function buildEngine22WaveStrategy(input = {}) {
     breakoutContext: context.breakoutContext,
     engine15: context.engine15,
     engine16: context.engine16,
+
+    // Engine 22F timeline context.
+    // Display/read-only only. Does not change readiness or permission.
+    engine25Context: context.engine25Context,
+    marketRegime: context.marketRegime,
+    marketMeterContext: context.marketMeterContext,
+
     marketType: context.marketType,
     sessionProfile: context.sessionProfile,
   });
