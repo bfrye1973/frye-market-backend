@@ -8,6 +8,9 @@ const W5_STATES = {
   RECLAIM_WATCH: "W5_RECLAIM_WATCH",
   CONTROLLED_PULLBACK: "W5_CONTROLLED_PULLBACK",
   EXHAUSTION_RISK: "W5_EXHAUSTION_RISK",
+  EXTENSION_DOUBLE_TOP_  
+  
+  REJECTION: "W5_EXTENSION_DOUBLE_TOP_REJECTION",
   FAILED_RECLAIM: "W5_FAILED_RECLAIM",
   UNKNOWN: "W5_UNKNOWN",
 };
@@ -253,6 +256,160 @@ function distanceToLevel(price, level) {
   if (p === null || n === null) return null;
 
   return Number((n - p).toFixed(2));
+}
+
+function getBarNumber(bar, keys = []) {
+  if (!bar || typeof bar !== "object") return null;
+
+  for (const key of keys) {
+    const n = asNumber(bar?.[key]);
+    if (n !== null) return n;
+  }
+
+  return null;
+}
+
+function getRecentBars10m({ barsByTf = {}, recentBars10m = null } = {}) {
+  const direct = Array.isArray(recentBars10m) ? recentBars10m : null;
+  if (direct && direct.length) return direct;
+
+  const fromMap =
+    barsByTf?.["10m"] ||
+    barsByTf?.tenMinute ||
+    barsByTf?.trigger10m ||
+    null;
+
+  return Array.isArray(fromMap) ? fromMap : [];
+}
+
+function detectExtensionDoubleTap({
+  barsByTf = {},
+  recentBars10m = null,
+  activeTargets = null,
+  currentPrice = null,
+  tolerancePts = 2,
+  lookbackBars = 60,
+} = {}) {
+  const bars = getRecentBars10m({ barsByTf, recentBars10m })
+    .slice(-lookbackBars)
+    .filter(Boolean);
+
+  const lastBar = bars.length ? bars[bars.length - 1] : null;
+  const lastClose =
+    getBarNumber(lastBar, ["close", "c"]) ??
+    asNumber(currentPrice);
+
+  const levels = [
+    {
+      key: "e200",
+      label: "2.000",
+      level: asNumber(activeTargets?.e200),
+    },
+    {
+      key: "e1618",
+      label: "1.618",
+      level: asNumber(activeTargets?.e1618),
+    },
+  ].filter((x) => x.level !== null);
+
+  if (!bars.length || !levels.length) {
+    return {
+      active: false,
+      pattern: "NONE",
+      reason: !bars.length ? "NO_10M_BARS" : "NO_EXTENSION_LEVELS",
+      barsChecked: bars.length,
+      checkedLevels: levels,
+    };
+  }
+
+  for (const levelInfo of levels) {
+    const level = levelInfo.level;
+    const clusters = [];
+    let currentCluster = null;
+
+    bars.forEach((bar, index) => {
+      const high = getBarNumber(bar, ["high", "h"]);
+      const close = getBarNumber(bar, ["close", "c"]);
+      const time = bar?.time ?? bar?.t ?? bar?.tSec ?? null;
+
+      if (high === null) return;
+
+      const touched = high >= level - tolerancePts;
+
+      if (!touched) return;
+
+      const shouldStartNewCluster =
+        !currentCluster ||
+        index - currentCluster.lastIndex > 2;
+
+      if (shouldStartNewCluster) {
+        currentCluster = {
+          firstIndex: index,
+          lastIndex: index,
+          firstTime: time,
+          lastTime: time,
+          maxHigh: high,
+          lastClose: close,
+          bars: 1,
+        };
+        clusters.push(currentCluster);
+      } else {
+        currentCluster.lastIndex = index;
+        currentCluster.lastTime = time;
+        currentCluster.maxHigh = Math.max(currentCluster.maxHigh, high);
+        currentCluster.lastClose = close;
+        currentCluster.bars += 1;
+      }
+    });
+
+    const touchCount = clusters.length;
+    const rejected =
+      touchCount >= 2 &&
+      lastClose !== null &&
+      lastClose < level - tolerancePts;
+
+    if (touchCount >= 2 && rejected) {
+      const lastCluster = clusters[clusters.length - 1];
+
+      return {
+        active: true,
+        pattern: "DOUBLE_TOP_EXTENSION_REJECTION",
+        levelKey: levelInfo.key,
+        levelLabel: levelInfo.label,
+        level: roundToTick(level),
+        tolerancePts,
+        touchCount,
+        rejected: true,
+        failedAcceptance: true,
+        lastClose: roundToTick(lastClose),
+        lastTouchHigh: roundToTick(lastCluster?.maxHigh),
+        firstTouchTime: clusters[0]?.firstTime ?? null,
+        lastTouchTime: lastCluster?.lastTime ?? null,
+        barsChecked: bars.length,
+        reasonCodes: [
+          `${String(levelInfo.key).toUpperCase()}_EXTENSION_TOUCHED_MULTIPLE_TIMES`,
+          "DOUBLE_TOP_EXTENSION_REJECTION",
+          "FAILED_ACCEPTANCE_ABOVE_EXTENSION",
+          "NO_CHASE_EXTENSION",
+        ],
+        read: `Price tagged the ${levelInfo.label} extension near ${roundToTick(
+          level
+        )} ${touchCount === 2 ? "twice" : `${touchCount} times`} and failed to accept above it.`,
+      };
+    }
+  }
+
+  return {
+    active: false,
+    pattern: "NONE",
+    reason: "NO_DOUBLE_TAP_EXTENSION_REJECTION",
+    barsChecked: bars.length,
+    checkedLevels: levels.map((x) => ({
+      levelKey: x.key,
+      levelLabel: x.label,
+      level: roundToTick(x.level),
+    })),
+  };
 }
 
 function buildHigherTargetZones(higherTargets) {
@@ -1183,8 +1340,17 @@ function buildW5Summary({
   health,
   activeTargets,
   missingMicro,
+  extensionTouchContext = null,
 }) {
   const name = symbol || "ES";
+
+  if (extensionTouchContext?.active === true) {
+    return `${name} tagged the ${extensionTouchContext.levelLabel} extension near ${extensionTouchContext.level} ${
+      extensionTouchContext.touchCount === 2
+        ? "twice"
+        : `${extensionTouchContext.touchCount} times`
+    } and failed to accept above it. This is a double-top extension rejection, not a healthy continuation read. Long continuation is damaged unless price reclaims ${extensionTouchContext.level} with strength. Watch downside confirmation only if Engine 15 and Engine 6 allow.`;
+  }
 
   if (!activeDegree || !activeTargets) {
     return `${name} does not have enough confirmed Engine 22 wave/fib data for Engine 23 to read the W5 environment.`;
@@ -1229,8 +1395,9 @@ export function interpretWaveEnvironment(input = {}) {
     engine22WaveStrategy,
     fib,
     engine2State = null,
+    barsByTf = {},
+    recentBars10m = null,
   } = input;
-
   if (!engine22WaveStrategy || typeof engine22WaveStrategy !== "object") {
     return {
       ok: false,
@@ -1268,7 +1435,14 @@ export function interpretWaveEnvironment(input = {}) {
   const roundedActiveTargets = roundNumberFields(activeTargets);
   const roundedHigherTargets = roundNumberFields(higherTargets);
 
-  const missingMicro = detectMissingMicroNeed(degrees);
+  const extensionTouchContext = detectExtensionDoubleTap({
+    barsByTf,
+    recentBars10m,
+    activeTargets: roundedActiveTargets,
+    currentPrice,
+  });
+
+  const missingMicro = detectMissingMicroNeed(degrees); 
   const directionBias = detectDirectionBias(engine22WaveStrategy);
   const setupFamily = detectSetupFamily(engine22WaveStrategy);
 
@@ -1483,14 +1657,35 @@ export function interpretWaveEnvironment(input = {}) {
     reasonCodes.push("NO_CHASE_EXTENSION");
   }
 
+  const finalW5State =
+    extensionTouchContext?.active === true
+      ? W5_STATES.EXTENSION_DOUBLE_TOP_REJECTION
+      : w5Classification.state;
+
+  const finalW5Health =
+    extensionTouchContext?.active === true
+      ? HEALTH.RISK
+      : w5Classification.health;
+
+  const finalPreferredEntry =
+    extensionTouchContext?.active === true
+      ? "WAIT_FOR_DOWNSIDE_CONFIRMATION_OR_EXTENSION_RECLAIM"
+      : w5Classification.preferredEntry;
+
+  const finalDirectionBias =
+    extensionTouchContext?.active === true
+      ? "LONG_DAMAGED_SHORT_WATCH"
+      : directionBias;
+
   const summary = buildW5Summary({
     symbol,
     activeDegree,
     higherDegree,
-    state: w5Classification.state,
-    health: w5Classification.health,
+    state: finalW5State,
+    health: finalW5Health,
     activeTargets: roundedActiveTargets,
     missingMicro,
+    extensionTouchContext,
   });
 
   return {
@@ -1499,17 +1694,23 @@ export function interpretWaveEnvironment(input = {}) {
     mode: READ_ONLY_MODE,
     symbol,
     environment: w5ContextActive ? "W5_EXTENSION" : "UNKNOWN",
-    state: w5Classification.state,
-    health: w5Classification.health,
-    directionBias,
+    state: finalW5State,
+    health: finalW5Health,
+    directionBias: finalDirectionBias,
     activeDegree,
     higherDegreeContext: buildHigherDegreeContext(higherDegree),
     chaseAllowed: false,
-    preferredEntry: w5Classification.preferredEntry,
+    preferredEntry: finalPreferredEntry,
     activeTargets: roundedActiveTargets,
     higherTargets: roundedHigherTargets,
+    extensionTouchContext,
     needs: buildNeeds({ missingMicro }),
-    reasonCodes: dedupe(reasonCodes),
+    reasonCodes: dedupe([
+      ...reasonCodes,
+      ...(Array.isArray(extensionTouchContext?.reasonCodes)
+        ? extensionTouchContext.reasonCodes
+        : []),
+    ]),
     summary,
   };
 }
