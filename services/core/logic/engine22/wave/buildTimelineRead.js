@@ -109,6 +109,166 @@ function buildRegimeSections(regimeLayers) {
   ];
 }
 
+function scoreLabel(score) {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return "unavailable";
+  if (n >= 75) return "strong";
+  if (n >= 65) return "supportive";
+  if (n >= 55) return "improving / neutral";
+  if (n >= 45) return "weak-neutral";
+  return "weak";
+}
+
+function getMarketMeterScore(marketMeterContext, key) {
+  const direct = Number(marketMeterContext?.[key]);
+  if (Number.isFinite(direct)) return direct;
+  return null;
+}
+
+function buildMarketMeterTacticalSection({
+  marketMeterContext = null,
+  marketRegime = null,
+  engine25Context = null,
+  waveFibState = null,
+  tradeContextSummary = null,
+} = {}) {
+  if (!marketMeterContext || typeof marketMeterContext !== "object") {
+    return {
+      title: "Market Meter / Tactical Context",
+      severity: "neutral",
+      lines: ["Market Meter tactical context unavailable."],
+    };
+  }
+
+  const score10m = getMarketMeterScore(marketMeterContext, "score10m");
+  const score30m = getMarketMeterScore(marketMeterContext, "score30m");
+  const score1h = getMarketMeterScore(marketMeterContext, "score1h");
+  const score4h = getMarketMeterScore(marketMeterContext, "score4h");
+  const scoreEOD = getMarketMeterScore(marketMeterContext, "scoreEOD");
+
+  const state10m = marketMeterContext?.state10m || null;
+  const state30m = marketMeterContext?.state30m || null;
+  const state1h = marketMeterContext?.state1h || null;
+  const state4h = marketMeterContext?.state4h || null;
+  const stateEOD = marketMeterContext?.stateEOD || null;
+
+  const sectorDirection =
+    marketMeterContext?.sectorDirection4h ??
+    marketMeterContext?.sectorDirection ??
+    null;
+
+  const riskOn4h = marketMeterContext?.riskOn4h ?? null;
+  const eodTradeGate = marketMeterContext?.eodTradeGate || null;
+  const eodInternalsWeak = marketMeterContext?.eodInternalsWeak === true;
+
+  const engine25Score = Number(engine25Context?.score);
+  const engine25Supportive =
+    Number.isFinite(engine25Score) && engine25Score >= 70;
+
+  const htfSupportive =
+    engine25Supportive ||
+    (Number.isFinite(scoreEOD) && scoreEOD >= 65) ||
+    (Number.isFinite(score4h) && score4h >= 65);
+
+  const shortTermWeak =
+    (Number.isFinite(score10m) && score10m < 60) ||
+    (Number.isFinite(score30m) && score30m < 60) ||
+    (Number.isFinite(score1h) && score1h < 60);
+
+  const chaseRisk = String(
+    waveFibState?.chaseRisk ||
+      tradeContextSummary?.chaseRisk ||
+      ""
+  ).toUpperCase();
+
+  const activeSetup = String(waveFibState?.activeSetup || "").toUpperCase();
+
+  const lateOrExtended =
+    chaseRisk === "EXTREME" ||
+    chaseRisk === "HIGH" ||
+    activeSetup.includes("EXTENSION");
+
+  let read =
+    "Market Meter context is mixed. Wait for clearer confirmation.";
+
+  if (htfSupportive && shortTermWeak && lateOrExtended) {
+    read =
+      "Higher timeframe still supports longs, but short-term trigger is weak and wave timing is late. No chase after extension. Wait for 10m/30m reclaim before re-arming.";
+  } else if (htfSupportive && shortTermWeak) {
+    read =
+      "Higher timeframe still supports longs, but short-term trigger is not clean yet. Wait for 10m/30m reclaim before arming.";
+  } else if (htfSupportive && !shortTermWeak) {
+    read =
+      "Higher timeframe and short-term Market Meter are supportive. Watch for Engine 15 confirmation.";
+  } else if (!htfSupportive && shortTermWeak) {
+    read =
+      "Short-term Market Meter is weak and higher-timeframe support is not enough. Stand down until structure improves.";
+  }
+
+  return {
+    title: "Market Meter / Tactical Context",
+    severity: shortTermWeak || lateOrExtended ? "warning" : "neutral",
+    lines: lineList([
+      engine25Context?.score != null
+        ? `Engine25: ${Number(engine25Context.score).toFixed(0)} — ${text(
+            engine25Context.regime
+          )}`
+        : null,
+
+      scoreEOD != null
+        ? `EOD: ${Number(scoreEOD).toFixed(1)} — ${scoreLabel(
+            scoreEOD
+          )}${stateEOD ? ` / ${text(stateEOD)}` : ""}`
+        : null,
+
+      score4h != null
+        ? `4H: ${Number(score4h).toFixed(1)} — ${scoreLabel(score4h)}${
+            state4h ? ` / ${text(state4h)}` : ""
+          }`
+        : null,
+
+      score1h != null
+        ? `1H: ${Number(score1h).toFixed(1)} — ${scoreLabel(score1h)}${
+            state1h ? ` / ${text(state1h)}` : ""
+          }`
+        : null,
+
+      score30m != null
+        ? `30m: ${Number(score30m).toFixed(1)} — ${scoreLabel(score30m)}${
+            state30m ? ` / ${text(state30m)}` : ""
+          }`
+        : null,
+
+      score10m != null
+        ? `10m: ${Number(score10m).toFixed(1)} — ${scoreLabel(score10m)}${
+            state10m ? ` / ${text(state10m)}` : ""
+          }`
+        : null,
+
+      sectorDirection != null
+        ? `Sector Direction: ${Number(sectorDirection).toFixed(1)} — ${scoreLabel(
+            sectorDirection
+          )}`
+        : null,
+
+      riskOn4h != null
+        ? `4H Risk-On: ${Number(riskOn4h).toFixed(1)} — ${scoreLabel(riskOn4h)}`
+        : null,
+
+      eodTradeGate ? `EOD Gate: ${text(eodTradeGate)}` : null,
+      eodInternalsWeak ? "EOD Internals: weak" : null,
+
+      marketRegime?.directionBias || marketRegime?.strictness
+        ? `Regime: ${text(marketRegime?.directionBias)} / ${text(
+            marketRegime?.strictness
+          )}`
+        : null,
+
+      `Read: ${read}`,
+    ]),
+  };
+}
+
 function buildReactionSection(reactionContext) {
   if (!reactionContext) {
     return {
@@ -542,6 +702,9 @@ function buildDefaultTimeline({
   volumeContext,
   breakoutContext,
   engine15 = null,
+  engine25Context = null,
+  marketRegime = null,
+  marketMeterContext = null,
 }) {
   const waveStack = buildWaveStack(waveFibState);
   const waveStackText = buildWaveStackText(waveStack);
@@ -568,6 +731,13 @@ function buildDefaultTimeline({
         ]),
       },
       ...maybeTargetClusterSection(targetClusterConfidence),
+      buildMarketMeterTacticalSection({
+        marketMeterContext,
+        marketRegime,
+        engine25Context,
+        waveFibState,
+        tradeContextSummary,
+      }),
       ...buildRegimeSections(regimeLayers),
     ],
     sideSections: buildCommonSideSections({
@@ -598,6 +768,9 @@ export function buildTimelineRead({
   volumeContext = null,
   breakoutContext = null,
   engine15 = null,
+  engine25Context = null,
+  marketRegime = null,
+  marketMeterContext = null,
 } = {}) {
   if (!waveFibState || typeof waveFibState !== "object") {
     return {
@@ -657,6 +830,9 @@ export function buildTimelineRead({
     volumeContext,
     breakoutContext,
     engine15,
+    engine25Context,
+    marketRegime,
+    marketMeterContext,
   });
 }
 
