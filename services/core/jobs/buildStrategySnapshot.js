@@ -899,6 +899,145 @@ function buildEngine5Analytics(confluenceJson) {
   };
 }
 
+function buildEngine25ModifierPreview(engine25Context) {
+  if (!engine25Context || typeof engine25Context !== "object") {
+    return {
+      applied: false,
+      mode: "PREVIEW_ONLY",
+      engine25Fresh: false,
+      score: null,
+      regime: null,
+      macroPermission: null,
+      wouldCapSizeTo: null,
+      requiredSetupQuality: null,
+      wouldAllowConfirmedLongs: false,
+      wouldBlockBlindLongs: true,
+      wouldBlockLateChase: true,
+      wouldRequireReclaim: true,
+      wouldDowngradePermission: false,
+      reasonCodes: [
+        "ENGINE25_CONTEXT_MISSING",
+        "PREVIEW_ONLY_NO_PERMISSION_CHANGE",
+      ],
+    };
+  }
+
+  const freshnessStatus = String(engine25Context?.freshnessStatus || "").toUpperCase();
+  const engine25Fresh =
+    freshnessStatus === "FRESH" ||
+    freshnessStatus === "ONE_ROW_BEHIND_OK";
+
+  const score = toNum(engine25Context?.score);
+  const regime = String(
+    engine25Context?.regime ||
+      engine25Context?.bias ||
+      "UNKNOWN"
+  ).toUpperCase();
+
+  const macroPermission = String(
+    engine25Context?.permission ||
+      engine25Context?.esPermission?.permission ||
+      engine25Context?.tradePermission?.permission ||
+      "UNKNOWN"
+  ).toUpperCase();
+
+  const summary = String(engine25Context?.summary || "").toUpperCase();
+
+  const wouldCapSizeTo =
+    toNum(engine25Context?.sizeMultiplier) ??
+    toNum(engine25Context?.esPermission?.sizeMultiplier) ??
+    toNum(engine25Context?.tradePermission?.sizeMultiplier) ??
+    (regime.includes("RISK_ON")
+      ? 1.0
+      : regime.includes("CONSTRUCTIVE")
+      ? 0.75
+      : regime.includes("DEFENSIVE") || regime.includes("RISK_OFF")
+      ? 0.5
+      : null);
+
+  const zoneAtRisk =
+    summary.includes("ZONE IS AT RISK") ||
+    summary.includes("BELOW INSTITUTIONAL SUPPORT") ||
+    summary.includes("RECLAIM");
+
+  const requiresAPlus =
+    summary.includes("A+ ONLY") ||
+    summary.includes("A PLUS ONLY") ||
+    macroPermission.includes("A_PLUS");
+
+  const requiredSetupQuality =
+    requiresAPlus
+      ? "A_PLUS_ONLY"
+      : zoneAtRisk
+      ? "A_ONLY"
+      : regime.includes("RISK_ON")
+      ? "B_OR_BETTER"
+      : regime.includes("CONSTRUCTIVE")
+      ? "A_OR_BETTER"
+      : regime.includes("DEFENSIVE") || regime.includes("RISK_OFF")
+      ? "A_PLUS_ONLY"
+      : "A_OR_BETTER";
+
+  const wouldAllowConfirmedLongs =
+    macroPermission.includes("CONFIRMED_LONGS_ALLOWED") ||
+    macroPermission.includes("SELECTIVE_LONGS");
+
+  const wouldDowngradePermission =
+    regime.includes("DEFENSIVE") ||
+    regime.includes("RISK_OFF");
+
+  const reasonCodes = [];
+
+  if (engine25Fresh) {
+    reasonCodes.push("ENGINE25_FRESH");
+  } else {
+    reasonCodes.push("ENGINE25_STALE_NO_UPGRADE");
+  }
+
+  if (regime && regime !== "UNKNOWN") {
+    reasonCodes.push(regime);
+  }
+
+  if (macroPermission && macroPermission !== "UNKNOWN") {
+    reasonCodes.push(`ENGINE25_${macroPermission}`);
+  }
+
+  if (wouldCapSizeTo != null) {
+    reasonCodes.push(
+      `ENGINE25_SIZE_CAP_PREVIEW_${String(wouldCapSizeTo).replace(".", "_")}`
+    );
+  }
+
+  if (zoneAtRisk) {
+    reasonCodes.push("ENGINE25_ZONE_AT_RISK_REQUIRES_RECLAIM");
+  }
+
+  if (requiredSetupQuality === "A_PLUS_ONLY") {
+    reasonCodes.push("ENGINE25_A_PLUS_ONLY_UNTIL_RECLAIM");
+  } else if (requiredSetupQuality === "A_ONLY") {
+    reasonCodes.push("ENGINE25_A_ONLY_UNTIL_RECLAIM");
+  }
+
+  reasonCodes.push("PREVIEW_ONLY_NO_PERMISSION_CHANGE");
+
+  return {
+    applied: false,
+    mode: "PREVIEW_ONLY",
+    engine25Fresh,
+    score,
+    regime,
+    macroPermission,
+    wouldCapSizeTo,
+    requiredSetupQuality,
+    wouldAllowConfirmedLongs,
+    wouldBlockBlindLongs: true,
+    wouldBlockLateChase: true,
+    wouldRequireReclaim: true,
+    wouldDowngradePermission,
+    reasonCodes,
+  };
+}
+
 function buildFinalPermissionFromEngine15({
   symbol,
   tf,
@@ -922,6 +1061,12 @@ function buildFinalPermissionFromEngine15({
   const action = String(engine15Decision?.action || "").toUpperCase();
   const strategyType = String(engine15Decision?.strategyType || "NONE").toUpperCase();
   const direction = String(engine15Decision?.direction || "NONE").toUpperCase();
+  const setupEligible =
+    engine15Decision?.freshEntryNow === true ||
+    ["READY", "CONFIRMED", "TRIGGERED"].includes(readiness) ||
+    ["ENTER_OK", "REDUCE_OK"].includes(action);
+
+  const engine25ModifierPreview = buildEngine25ModifierPreview(engine25Context);
 
   const baseReasonCodes = Array.isArray(preliminary.reasonCodes)
     ? preliminary.reasonCodes
@@ -956,6 +1101,8 @@ function buildFinalPermissionFromEngine15({
 
     executable: false,
     watchOnly: false,
+    setupEligible,
+    engine25ModifierPreview,
 
     engine15Decision: {
       strategyType,
