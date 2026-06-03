@@ -28,7 +28,7 @@
 // Engine 15ES answers:
 // Is ES ready, watch-only, blocked, or waiting — and what exactly does the trader need next?
 
-const ENGINE = "engine15.esReadiness.v1.3";
+const ENGINE = "engine15.esReadiness.v1.4";
 const DEFAULT_STRATEGY_ID = "intraday_scalp@10m";
 const ES_TICK_SIZE = 0.25;
 
@@ -253,6 +253,120 @@ function waveOpportunityReasonCodes(waveOpportunity) {
   return Array.isArray(waveOpportunity?.reasonCodes)
     ? waveOpportunity.reasonCodes
     : [];
+}
+
+/* -----------------------------
+   Engine 23 behavior / no-chase readers
+------------------------------*/
+
+function getEngine23Interpretation(snapshotContext) {
+  return snapshotContext?.engine23Interpretation || null;
+}
+
+function buildEngine23DamageContext(engine23Interpretation) {
+  const state = safeUpper(engine23Interpretation?.state, "");
+  const health = safeUpper(engine23Interpretation?.health, "");
+  const directionBias = safeUpper(engine23Interpretation?.directionBias, "");
+  const preferredEntry = safeUpper(engine23Interpretation?.preferredEntry, "");
+
+  const reasonCodes = Array.isArray(engine23Interpretation?.reasonCodes)
+    ? engine23Interpretation.reasonCodes
+    : [];
+
+  const reasonText = reasonCodes.map((x) => safeUpper(x, "")).join(" ");
+
+  const touch = engine23Interpretation?.extensionTouchContext || null;
+  const pattern = safeUpper(touch?.pattern, "");
+  const levelKey = touch?.levelKey ?? null;
+  const levelLabel = touch?.levelLabel ?? null;
+  const level = toNum(touch?.level, null);
+
+  const rejected =
+    touch?.rejected === true ||
+    reasonText.includes("DOUBLE_TOP_EXTENSION_REJECTION") ||
+    reasonText.includes("EXTENSION_REJECTION");
+
+  const failedAcceptance =
+    touch?.failedAcceptance === true ||
+    reasonText.includes("FAILED_ACCEPTANCE_ABOVE_EXTENSION");
+
+  const w5Rejection =
+    state.includes("W5_EXTENSION_DOUBLE_TOP_REJECTION") ||
+    state.includes("EXTENSION_REJECTION") ||
+    pattern === "DOUBLE_TOP_EXTENSION_REJECTION" ||
+    rejected ||
+    failedAcceptance;
+
+  const longDamaged =
+    directionBias.includes("LONG_DAMAGED") ||
+    directionBias.includes("SHORT_WATCH");
+
+  const noChase =
+    engine23Interpretation?.chaseAllowed === false ||
+    reasonText.includes("NO_CHASE_EXTENSION") ||
+    preferredEntry.includes("WAIT_FOR_DOWNSIDE_CONFIRMATION") ||
+    preferredEntry.includes("EXTENSION_RECLAIM");
+
+  const active =
+    engine23Interpretation &&
+    engine23Interpretation.ok !== false &&
+    (w5Rejection || longDamaged || noChase);
+
+  const damageReasonCodes = [];
+
+  if (w5Rejection) damageReasonCodes.push("ENGINE23_W5_EXTENSION_REJECTION");
+  if (longDamaged) damageReasonCodes.push("ENGINE23_LONG_DAMAGED_SHORT_WATCH");
+  if (noChase) damageReasonCodes.push("ENGINE23_NO_CHASE_EXTENSION");
+  if (failedAcceptance) damageReasonCodes.push("ENGINE23_FAILED_ACCEPTANCE_ABOVE_EXTENSION");
+  if (active) damageReasonCodes.push("WAIT_FOR_EXTENSION_RECLAIM_OR_DOWNSIDE_CONFIRMATION");
+
+  const damageNeeds = [];
+
+  if (w5Rejection || longDamaged || failedAcceptance) {
+    damageNeeds.push("EXTENSION_RECLAIM_REQUIRED_FOR_LONG");
+    damageNeeds.push("FRESH_DOWNSIDE_CONFIRMATION_REQUIRED_FOR_SHORT");
+  }
+
+  if (noChase) {
+    damageNeeds.push("NO_CHASE_EXTENSION");
+  }
+
+  const levelPhrase =
+    levelLabel && level != null
+      ? ` near the ${levelLabel} extension at ${level}`
+      : levelLabel
+      ? ` near the ${levelLabel} extension`
+      : level != null
+      ? ` near ${level}`
+      : "";
+
+  const summary = active
+    ? `Engine 23 shows a double-top W5 extension rejection${levelPhrase}. Long continuation is damaged. No long READY and no auto-short. Wait for extension reclaim with strength or fresh downside confirmation.`
+    : null;
+
+  return {
+    present: Boolean(engine23Interpretation),
+    active: Boolean(active),
+    w5Rejection,
+    longDamaged,
+    noChase,
+    rejected,
+    failedAcceptance,
+    state,
+    health,
+    directionBias,
+    chaseAllowed: engine23Interpretation?.chaseAllowed,
+    preferredEntry: engine23Interpretation?.preferredEntry || null,
+    pattern: touch?.pattern || null,
+    levelKey,
+    levelLabel,
+    level,
+    summary,
+    reasonCodes: damageReasonCodes,
+    needs: damageNeeds,
+    rawReasonCodes: reasonCodes,
+    rawSummary: engine23Interpretation?.summary || null,
+  };
 }
 
 /* -----------------------------
@@ -797,7 +911,8 @@ export function buildEngine15EsDecision({
     const engine2State = snapshotContext?.engine2State || null;
     const marketRegime = snapshotContext?.marketRegime || null;
     const waveOpportunity = getWaveOpportunity(snapshotContext);
-
+    const engine23Interpretation = getEngine23Interpretation(snapshotContext);
+    const engine23Damage = buildEngine23DamageContext(engine23Interpretation);
     const tenMinute = emaPosture?.tenMinute || null;
     const oneHour = emaPosture?.oneHour || null;
     const fourHour = emaPosture?.fourHour || null;
@@ -879,6 +994,11 @@ export function buildEngine15EsDecision({
       reasonCodes.push("ENGINE22_CONTROLLED_PULLBACK_OR_RECLAIM_REQUIRED");
     }
 
+    if (engine23Damage.active) {
+      reasonCodes.push(...engine23Damage.reasonCodes);
+      needs.push(...engine23Damage.needs);
+    }
+
     const dailyAbove = layerAboveEma10(daily);
     const dailyBelow = layerBelowEma10(daily);
 
@@ -956,6 +1076,25 @@ export function buildEngine15EsDecision({
         reasonCodes: waveOpportunityReasonCodes(waveOpportunity),
         summary: waveOpportunity?.summary || null,
       },
+
+      engine23: {
+        present: engine23Damage.present,
+        active: engine23Damage.active,
+        state: engine23Damage.state,
+        health: engine23Damage.health,
+        directionBias: engine23Damage.directionBias,
+        chaseAllowed: engine23Damage.chaseAllowed,
+        preferredEntry: engine23Damage.preferredEntry,
+        rejected: engine23Damage.rejected,
+        failedAcceptance: engine23Damage.failedAcceptance,
+        pattern: engine23Damage.pattern,
+        levelKey: engine23Damage.levelKey,
+        levelLabel: engine23Damage.levelLabel,
+        level: engine23Damage.level,
+        summary: engine23Damage.rawSummary || engine23Damage.summary,
+        reasonCodes: engine23Damage.rawReasonCodes,
+      }, 
+      
       engine5: {
         score: e5Score,
         label: e5Label,
@@ -998,7 +1137,10 @@ export function buildEngine15EsDecision({
         volumeRisk,
         lateTiming,
         engine2Extension,
-      },
+        engine23DamageActive: engine23Damage.active,
+        engine23W5Rejection: engine23Damage.w5Rejection,
+        engine23LongDamaged: engine23Damage.longDamaged,
+        engine23NoChase: engine23Damage.noChase, 
     };
 
     if (blockers.length > 0) {
@@ -1085,6 +1227,7 @@ export function buildEngine15EsDecision({
       !waveLate &&
       !waveHighChase &&
       !waveNeedsReclaim &&
+      !engine23Damage.active &&
       dailyAbove &&
       !fourHourBelow &&
       !oneHourBelow &&
@@ -1098,6 +1241,7 @@ export function buildEngine15EsDecision({
     const arming =
       hasWaveOpportunity &&
       waveArming &&
+      !engine23Damage.active &&
       dailyAbove &&
       !fourHourBelow &&
       !oneHourBelow &&
@@ -1177,11 +1321,15 @@ export function buildEngine15EsDecision({
       readinessLabel = "WATCH";
       action = "WATCH";
       direction = waveDirection(waveOpportunity) || "LONG";
-      executionBias = "LONG_WATCH_ONLY";
+      executionBias = engine23Damage.active
+        ? "LONG_DAMAGED_WATCH_ONLY"
+        : "LONG_WATCH_ONLY";
       strategyType = "CONTINUATION";
-      priority = 45;
+      priority = engine23Damage.active ? 40 : 45;
       entryStyle =
-        waveNeedsReclaim || lateTiming
+        engine23Damage.active
+          ? "WAIT_FOR_EXTENSION_RECLAIM_OR_DOWNSIDE_CONFIRMATION"
+          : waveNeedsReclaim || lateTiming
           ? "WAIT_FOR_PULLBACK_OR_RECLAIM"
           : "WAIT_FOR_RECLAIM";
       qualityScore = e5Score ?? 45;
@@ -1192,17 +1340,22 @@ export function buildEngine15EsDecision({
         "DAILY_LONG_PERMISSION",
         "WAIT_FOR_ENGINE5_OR_WAVE_CONFIRMATION",
       ];
-      nextSetupType = chooseNextSetupType({
-        readinessLabel,
-        waveNeedsReclaim,
-        waveOpportunity,
-        lateTiming,
-        volumeOk,
-        volumeRisk,
-        reactionOk,
-        tenMinuteTrigger: longTrigger,
-      });
-      summary = buildWatchSummary({
+      nextSetupType = engine23Damage.active
+        ? "WAIT_FOR_EXTENSION_RECLAIM_OR_DOWNSIDE_CONFIRMATION"
+        : chooseNextSetupType({
+            readinessLabel,
+            waveNeedsReclaim,
+            waveOpportunity,
+            lateTiming,
+            volumeOk,
+            volumeRisk,
+            reactionOk,
+            tenMinuteTrigger: longTrigger,
+          });
+
+      summary = engine23Damage.active
+        ? `${waveOpportunity?.summary || "Engine 22 found a valid W3/W5 opportunity."} ${engine23Damage.summary}`
+        : buildWatchSummary({
         waveOpportunity,
         dailyAbove,
         fourHourBelow,
@@ -1314,6 +1467,17 @@ export function buildEngine15EsDecision({
         timingAction: timingActionFromEngine5(engine5),
 
         extensionContext: engine2Extension,
+
+        engine23DamageActive: engine23Damage.active,
+        engine23State: engine23Damage.state,
+        engine23DirectionBias: engine23Damage.directionBias,
+        engine23W5Rejection: engine23Damage.w5Rejection,
+        engine23LongDamaged: engine23Damage.longDamaged,
+        engine23NoChase: engine23Damage.noChase,
+        engine23Rejected: engine23Damage.rejected,
+        engine23FailedAcceptance: engine23Damage.failedAcceptance,
+        engine23ExtensionLevelLabel: engine23Damage.levelLabel,
+        engine23ExtensionLevel: engine23Damage.level,
       },
 
       permission: pText,
@@ -1412,6 +1576,7 @@ export function buildEngine15EsDecisionFromSnapshot(
 ) {
   const scalp = esSnapshot?.strategies?.[strategyId] || null;
   const engine22WaveStrategy = scalp?.engine22WaveStrategy || null;
+  const engine23Interpretation = scalp?.engine23Interpretation || null;
 
   return buildEngine15EsDecision({
     symbol: esSnapshot?.symbol || "ES",
@@ -1424,6 +1589,7 @@ export function buildEngine15EsDecisionFromSnapshot(
       marketRegime: esSnapshot?.marketRegime || null,
       engine22WaveStrategy,
       waveOpportunity: engine22WaveStrategy?.waveOpportunity || null,
+      engine23Interpretation,
     },
     engine16: scalp?.engine16 || null,
     engine5: scalp?.confluence || null,
