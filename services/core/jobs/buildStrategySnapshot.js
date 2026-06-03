@@ -3258,6 +3258,55 @@ const zoneContext = buildZoneContext(
     }
   } 
 
+  // Engine 23 preliminary behavior context.
+  // IMPORTANT:
+  // This must run BEFORE Engine 15ES so Engine 15ES can consume
+  // behavior damage / no-chase / extension rejection context.
+  // Engine 23 is read-only here. It must not create executable shorts.
+  if (isEsIntradayScalp) {
+    try {
+      engine23Interpretation = interpretWaveEnvironment({
+        symbol,
+        price: Number.isFinite(price) ? price : null,
+        engine22WaveStrategy,
+        fib,
+        engine2State,
+        barsByTf: {
+          "10m": marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+          "1h": marketMeter?.layers?.emaPosture?.oneHour?.bars || [],
+          "4h": marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
+          "1d": marketMeter?.layers?.emaPosture?.daily?.bars || [],
+        },
+      });
+    } catch (err) {
+      console.error("[E23 PRE-ENGINE15 ERROR]", err);
+
+      engine23Interpretation = {
+        ok: false,
+        engine: "engine23.waveBehaviorInterpreter.v1",
+        mode: "READ_ONLY",
+        symbol,
+        environment: "UNKNOWN",
+        state: "W5_UNKNOWN",
+        health: "UNKNOWN",
+        directionBias: "NEUTRAL",
+        activeDegree: null,
+        higherDegreeContext: null,
+        chaseAllowed: false,
+        preferredEntry: "WAIT_FOR_ENGINE23_PRE_ENGINE15_FIX",
+        activeTargets: null,
+        higherTargets: null,
+        needs: ["FIX_ENGINE23_PRE_ENGINE15_ERROR"],
+        reasonCodes: ["ENGINE23_PRE_ENGINE15_COMPUTE_FAILED"],
+        summary: "Engine 23 failed while reading pre-Engine15 wave behavior.",
+        debug: {
+          error: String(err?.message || err),
+          stack: String(err?.stack || ""),
+        },
+      };
+    }
+  } 
+
   // Engine 5 preliminary timing context.
   // This must exist before Engine 15ES runs.
   // Later, after Engine 22 / Engine 23 are built, the builder can enrich/replace
@@ -3307,6 +3356,10 @@ const zoneContext = buildZoneContext(
              // Pre-Engine15 wave opportunity from Engine 22.
              engine22WaveStrategy,
              waveOpportunity: engine22WaveStrategy?.waveOpportunity || null,
+
+             // Pre-Engine15 Engine 23 behavior / no-chase context.
+             // This is downgrade/context only. It must not create shorts.
+             engine23Interpretation,
            },
           engine16,
           engine5: patchedConfluence || null,
