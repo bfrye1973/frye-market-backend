@@ -288,7 +288,7 @@ function detectExtensionDoubleTap({
   activeTargets = null,
   currentPrice = null,
   tolerancePts = 2,
-  lookbackBars = 60,
+  lookbackBars = 120,
 } = {}) {
   const bars = getRecentBars10m({ barsByTf, recentBars10m })
     .slice(-lookbackBars)
