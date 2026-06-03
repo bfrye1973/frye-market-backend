@@ -1140,7 +1140,8 @@ export function buildEngine15EsDecision({
         engine23DamageActive: engine23Damage.active,
         engine23W5Rejection: engine23Damage.w5Rejection,
         engine23LongDamaged: engine23Damage.longDamaged,
-        engine23NoChase: engine23Damage.noChase, 
+        engine23NoChase: engine23Damage.noChase,
+      },
     };
 
     if (blockers.length > 0) {
