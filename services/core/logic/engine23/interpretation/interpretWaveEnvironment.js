@@ -330,12 +330,12 @@ function detectExtensionDoubleTap({
     bars.forEach((bar, index) => {
       const high = getBarNumber(bar, ["high", "h"]);
       const close = getBarNumber(bar, ["close", "c"]);
+      const low = getBarNumber(bar, ["low", "l"]);
       const time = bar?.time ?? bar?.t ?? bar?.tSec ?? null;
 
       if (high === null) return;
 
       const touched = high >= level - tolerancePts;
-
       if (!touched) return;
 
       const shouldStartNewCluster =
@@ -349,6 +349,7 @@ function detectExtensionDoubleTap({
           firstTime: time,
           lastTime: time,
           maxHigh: high,
+          minLow: low,
           lastClose: close,
           bars: 1,
         };
@@ -357,19 +358,79 @@ function detectExtensionDoubleTap({
         currentCluster.lastIndex = index;
         currentCluster.lastTime = time;
         currentCluster.maxHigh = Math.max(currentCluster.maxHigh, high);
+        currentCluster.minLow =
+          currentCluster.minLow === null || currentCluster.minLow === undefined
+            ? low
+            : low === null || low === undefined
+            ? currentCluster.minLow
+            : Math.min(currentCluster.minLow, low);
         currentCluster.lastClose = close;
         currentCluster.bars += 1;
       }
     });
 
     const touchCount = clusters.length;
+
+    if (touchCount < 2) continue;
+
+    let firstSignal = null;
+
+    // First valid signal = after the second separate touch,
+    // price closes back below the extension by tolerance.
+    for (let i = clusters[1].lastIndex; i < bars.length; i += 1) {
+      const bar = bars[i];
+      const close = getBarNumber(bar, ["close", "c"]);
+      const high = getBarNumber(bar, ["high", "h"]);
+      const low = getBarNumber(bar, ["low", "l"]);
+      const time = bar?.time ?? bar?.t ?? bar?.tSec ?? null;
+
+      if (close === null) continue;
+
+      const failedAcceptance = close < level - tolerancePts;
+
+      if (failedAcceptance) {
+        firstSignal = {
+          index: i,
+          time,
+          close,
+          high,
+          low,
+          barsSince: bars.length - 1 - i,
+        };
+        break;
+      }
+    }
+
     const rejected =
-      touchCount >= 2 &&
+      firstSignal !== null &&
       lastClose !== null &&
       lastClose < level - tolerancePts;
 
-    if (touchCount >= 2 && rejected) {
+    if (rejected) {
       const lastCluster = clusters[clusters.length - 1];
+      const barsSinceFirstSignal = firstSignal?.barsSince ?? null;
+      const moveSinceFirstSignalPts =
+        firstSignal?.close !== null &&
+        firstSignal?.close !== undefined &&
+        lastClose !== null
+          ? Number((lastClose - firstSignal.close).toFixed(2))
+          : null;
+
+      let timing = "UNKNOWN";
+      if (barsSinceFirstSignal !== null) {
+        if (barsSinceFirstSignal <= 2) timing = "FRESH";
+        else if (barsSinceFirstSignal <= 5) timing = "DEVELOPING";
+        else timing = "LATE";
+      }
+
+      const timingRead =
+        timing === "FRESH"
+          ? "The rejection signal is fresh."
+          : timing === "DEVELOPING"
+          ? "The rejection is developing but no longer brand new."
+          : timing === "LATE"
+          ? "The rejection triggered earlier; avoid chasing late follow-through without fresh confirmation."
+          : "Rejection timing is unclear.";
 
       return {
         active: true,
@@ -381,20 +442,32 @@ function detectExtensionDoubleTap({
         touchCount,
         rejected: true,
         failedAcceptance: true,
+
         lastClose: roundToTick(lastClose),
         lastTouchHigh: roundToTick(lastCluster?.maxHigh),
+
         firstTouchTime: clusters[0]?.firstTime ?? null,
         lastTouchTime: lastCluster?.lastTime ?? null,
+
+        firstSignalTime: firstSignal?.time ?? null,
+        firstSignalPrice: roundToTick(firstSignal?.close),
+        firstSignalHigh: roundToTick(firstSignal?.high),
+        firstSignalLow: roundToTick(firstSignal?.low),
+        barsSinceFirstSignal,
+        moveSinceFirstSignalPts,
+        timing,
+
         barsChecked: bars.length,
         reasonCodes: [
           `${String(levelInfo.key).toUpperCase()}_EXTENSION_TOUCHED_MULTIPLE_TIMES`,
           "DOUBLE_TOP_EXTENSION_REJECTION",
           "FAILED_ACCEPTANCE_ABOVE_EXTENSION",
+          `EXTENSION_REJECTION_TIMING_${timing}`,
           "NO_CHASE_EXTENSION",
         ],
         read: `Price tagged the ${levelInfo.label} extension near ${roundToTick(
           level
-        )} ${touchCount === 2 ? "twice" : `${touchCount} times`} and failed to accept above it.`,
+        )} ${touchCount === 2 ? "twice" : `${touchCount} times`} and failed to accept above it. ${timingRead}`,
       };
     }
   }
@@ -1349,7 +1422,11 @@ function buildW5Summary({
       extensionTouchContext.touchCount === 2
         ? "twice"
         : `${extensionTouchContext.touchCount} times`
-    } and failed to accept above it. This is a double-top extension rejection, not a healthy continuation read. Long continuation is damaged unless price reclaims ${extensionTouchContext.level} with strength. Watch downside confirmation only if Engine 15 and Engine 6 allow.`;
+    } and failed to accept above it. This is a double-top extension rejection, not a healthy continuation read. Signal timing is ${extensionTouchContext.timing}. ${
+  extensionTouchContext.timing === "LATE"
+    ? "The first rejection triggered earlier, so avoid chasing late downside follow-through without fresh confirmation."
+    : "Watch for fresh downside confirmation or a strong reclaim."
+} Long continuation is damaged unless price reclaims ${extensionTouchContext.level} with strength.`;
   }
 
   if (!activeDegree || !activeTargets) {
