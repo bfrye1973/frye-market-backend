@@ -322,6 +322,24 @@ function detectExtensionDoubleTap({
     };
   }
 
+  function classifyTiming(barsSince) {
+    if (barsSince === null || barsSince === undefined) return "UNKNOWN";
+    if (barsSince <= 2) return "FRESH";
+    if (barsSince <= 5) return "DEVELOPING";
+    return "LATE";
+  }
+
+  function buildTimingRead(timing) {
+    if (timing === "FRESH") return "The rejection signal is fresh.";
+    if (timing === "DEVELOPING") {
+      return "The rejection is developing but no longer brand new.";
+    }
+    if (timing === "LATE") {
+      return "The rejection triggered earlier; avoid chasing late follow-through without fresh confirmation.";
+    }
+    return "Rejection timing is unclear.";
+  }
+
   for (const levelInfo of levels) {
     const level = levelInfo.level;
     const clusters = [];
@@ -373,42 +391,50 @@ function detectExtensionDoubleTap({
 
     if (touchCount < 2) continue;
 
-    let firstSignal = null;
+    const rejectionSignals = [];
 
-    // First valid signal = after the second separate touch,
-    // price closes back below the extension by tolerance.
-    for (let i = clusters[1].lastIndex; i < bars.length; i += 1) {
+    // Valid rejection signal:
+    // after the second separate extension touch exists,
+    // find candles that touched near the active extension level
+    // and then failed acceptance by closing back below tolerance.
+    for (let i = clusters[1].firstIndex; i < bars.length; i += 1) {
       const bar = bars[i];
       const close = getBarNumber(bar, ["close", "c"]);
       const high = getBarNumber(bar, ["high", "h"]);
       const low = getBarNumber(bar, ["low", "l"]);
       const time = bar?.time ?? bar?.t ?? bar?.tSec ?? null;
 
-      if (close === null) continue;
+      if (close === null || high === null) continue;
 
-      const failedAcceptance = close < level - tolerancePts;
+      const touchedNearLevel = high >= level - tolerancePts;
+      const failedAcceptance = touchedNearLevel && close < level - tolerancePts;
 
-      if (failedAcceptance) {
-        firstSignal = {
-          index: i,
-          time,
-          close,
-          high,
-          low,
-          barsSince: bars.length - 1 - i,
-        };
-        break;
-      }
+      if (!failedAcceptance) continue;
+
+      rejectionSignals.push({
+        index: i,
+        time,
+        close,
+        high,
+        low,
+        barsSince: bars.length - 1 - i,
+      });
     }
 
+    const firstSignal = rejectionSignals[0] || null;
+    const latestSignal = rejectionSignals[rejectionSignals.length - 1] || null;
+
     const rejected =
-      firstSignal !== null &&
+      latestSignal !== null &&
       lastClose !== null &&
       lastClose < level - tolerancePts;
 
     if (rejected) {
       const lastCluster = clusters[clusters.length - 1];
+
       const barsSinceFirstSignal = firstSignal?.barsSince ?? null;
+      const barsSinceLatestSignal = latestSignal?.barsSince ?? null;
+
       const moveSinceFirstSignalPts =
         firstSignal?.close !== null &&
         firstSignal?.close !== undefined &&
@@ -416,21 +442,16 @@ function detectExtensionDoubleTap({
           ? Number((lastClose - firstSignal.close).toFixed(2))
           : null;
 
-      let timing = "UNKNOWN";
-      if (barsSinceFirstSignal !== null) {
-        if (barsSinceFirstSignal <= 2) timing = "FRESH";
-        else if (barsSinceFirstSignal <= 5) timing = "DEVELOPING";
-        else timing = "LATE";
-      }
+      const moveSinceLatestSignalPts =
+        latestSignal?.close !== null &&
+        latestSignal?.close !== undefined &&
+        lastClose !== null
+          ? Number((lastClose - latestSignal.close).toFixed(2))
+          : null;
 
-      const timingRead =
-        timing === "FRESH"
-          ? "The rejection signal is fresh."
-          : timing === "DEVELOPING"
-          ? "The rejection is developing but no longer brand new."
-          : timing === "LATE"
-          ? "The rejection triggered earlier; avoid chasing late follow-through without fresh confirmation."
-          : "Rejection timing is unclear.";
+      const firstSignalTiming = classifyTiming(barsSinceFirstSignal);
+      const latestSignalTiming = classifyTiming(barsSinceLatestSignal);
+      const timingRead = buildTimingRead(latestSignalTiming);
 
       return {
         active: true,
@@ -440,6 +461,8 @@ function detectExtensionDoubleTap({
         level: roundToTick(level),
         tolerancePts,
         touchCount,
+        totalLookbackTouchCount: touchCount,
+        rejectionSignalCount: rejectionSignals.length,
         rejected: true,
         failedAcceptance: true,
 
@@ -455,19 +478,53 @@ function detectExtensionDoubleTap({
         firstSignalLow: roundToTick(firstSignal?.low),
         barsSinceFirstSignal,
         moveSinceFirstSignalPts,
-        timing,
+        firstSignalTiming,
+
+        latestSignalTime: latestSignal?.time ?? null,
+        latestSignalPrice: roundToTick(latestSignal?.close),
+        latestSignalHigh: roundToTick(latestSignal?.high),
+        latestSignalLow: roundToTick(latestSignal?.low),
+        barsSinceLatestSignal,
+        moveSinceLatestSignalPts,
+        latestSignalTiming,
+
+        // Backward-compatible aliases for current frontend reads.
+        timing: latestSignalTiming,
+        barsSinceSignal: barsSinceLatestSignal,
+        signalPrice: roundToTick(latestSignal?.close),
+
+        extensionRejectionTiming: {
+          first: {
+            time: firstSignal?.time ?? null,
+            price: roundToTick(firstSignal?.close),
+            high: roundToTick(firstSignal?.high),
+            low: roundToTick(firstSignal?.low),
+            barsSince: barsSinceFirstSignal,
+            movePts: moveSinceFirstSignalPts,
+            timing: firstSignalTiming,
+          },
+          latest: {
+            time: latestSignal?.time ?? null,
+            price: roundToTick(latestSignal?.close),
+            high: roundToTick(latestSignal?.high),
+            low: roundToTick(latestSignal?.low),
+            barsSince: barsSinceLatestSignal,
+            movePts: moveSinceLatestSignalPts,
+            timing: latestSignalTiming,
+          },
+        },
 
         barsChecked: bars.length,
         reasonCodes: [
           `${String(levelInfo.key).toUpperCase()}_EXTENSION_TOUCHED_MULTIPLE_TIMES`,
           "DOUBLE_TOP_EXTENSION_REJECTION",
           "FAILED_ACCEPTANCE_ABOVE_EXTENSION",
-          `EXTENSION_REJECTION_TIMING_${timing}`,
+          `EXTENSION_REJECTION_TIMING_${latestSignalTiming}`,
           "NO_CHASE_EXTENSION",
         ],
         read: `Price tagged the ${levelInfo.label} extension near ${roundToTick(
           level
-        )} ${touchCount === 2 ? "twice" : `${touchCount} times`} and failed to accept above it. ${timingRead}`,
+        )} ${touchCount === 2 ? "twice" : `${touchCount} times`} and failed to accept above it. Latest rejection timing is ${latestSignalTiming}. ${timingRead}`,
       };
     }
   }
