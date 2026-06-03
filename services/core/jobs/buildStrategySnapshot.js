@@ -922,12 +922,46 @@ function buildEngine25ModifierPreview(engine25Context) {
     };
   }
 
-  const freshnessStatus = String(engine25Context?.freshnessStatus || "").toUpperCase();
-  const engine25Fresh =
-    freshnessStatus === "FRESH" ||
-    freshnessStatus === "ONE_ROW_BEHIND_OK";
+const freshnessStatus = String(engine25Context?.freshnessStatus || "").toUpperCase();
+const engine25Fresh =
+  freshnessStatus === "FRESH" ||
+  freshnessStatus === "ONE_ROW_BEHIND_OK";
 
-  const score = toNum(engine25Context?.score);
+if (
+  engine25Context.ok !== true ||
+  freshnessStatus === "MISSING" ||
+  freshnessStatus === "STALE"
+) {
+  return {
+    applied: false,
+    mode: "PREVIEW_ONLY",
+    engine25Fresh: false,
+    score: null,
+    regime: engine25Context?.regime || null,
+    macroPermission: engine25Context?.permission || null,
+    wouldCapSizeTo: null,
+    requiredSetupQuality: null,
+    wouldAllowConfirmedLongs: false,
+    wouldBlockBlindLongs: true,
+    wouldBlockLateChase: true,
+    wouldRequireReclaim: true,
+    wouldDowngradePermission: false,
+    reasonCodes: [
+      freshnessStatus === "MISSING"
+        ? "ENGINE25_CONTEXT_MISSING"
+        : "ENGINE25_STALE_NO_UPGRADE",
+      "PREVIEW_ONLY_NO_PERMISSION_CHANGE",
+    ],
+  };
+}
+
+const numOrNull = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+const score = numOrNull(engine25Context?.score);
   const regime = String(
     engine25Context?.regime ||
       engine25Context?.bias ||
@@ -944,9 +978,9 @@ function buildEngine25ModifierPreview(engine25Context) {
   const summary = String(engine25Context?.summary || "").toUpperCase();
 
   const wouldCapSizeTo =
-    toNum(engine25Context?.sizeMultiplier) ??
-    toNum(engine25Context?.esPermission?.sizeMultiplier) ??
-    toNum(engine25Context?.tradePermission?.sizeMultiplier) ??
+    numOrNull(engine25Context?.sizeMultiplier) ??
+    numOrNull(engine25Context?.esPermission?.sizeMultiplier) ??
+    numOrNull(engine25Context?.tradePermission?.sizeMultiplier) ??
     (regime.includes("RISK_ON")
       ? 1.0
       : regime.includes("CONSTRUCTIVE")
