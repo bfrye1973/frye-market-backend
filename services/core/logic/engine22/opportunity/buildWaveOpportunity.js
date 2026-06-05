@@ -616,6 +616,75 @@ function applyArmingLifecycle({
   };
 }
 
+function isCompleteW5Degree(degreeState = null) {
+  return (
+    upper(degreeState?.phase, "") === "COMPLETE_W5" ||
+    upper(degreeState?.confirmedPhase, "") === "COMPLETE_W5" ||
+    upper(degreeState?.state, "") === "IMPULSE_COMPLETE"
+  );
+}
+
+function buildLowerDegreeCompletionGuard({
+  degree,
+  setupType,
+  rawSetup,
+  direction,
+  waveFibState,
+} = {}) {
+  const idx = DEGREES.indexOf(String(degree || "").toLowerCase());
+  if (idx < 0) return { active: false };
+
+  const raw = upper(rawSetup, "");
+  const degrees = waveFibState?.degrees || {};
+  const activeDegreeState = degrees?.[degree] || null;
+
+  const activeParentW5 =
+    upper(activeDegreeState?.phase, "") === "IN_W5" ||
+    raw.includes("W5_EXTENSION");
+
+  if (setupType !== "W4_TO_W5") return { active: false };
+  if (direction !== "LONG") return { active: false };
+  if (!activeParentW5) return { active: false };
+
+  const lowerDegrees = DEGREES.slice(idx + 1);
+  const immediateLower = lowerDegrees[0] || null;
+
+  const completedLowerDegrees = lowerDegrees.filter((d) =>
+    isCompleteW5Degree(degrees?.[d])
+  );
+
+  const immediateLowerComplete =
+    immediateLower && isCompleteW5Degree(degrees?.[immediateLower]);
+
+  if (!immediateLowerComplete) return { active: false };
+
+  return {
+    active: true,
+    completedLowerDegrees,
+    immediateLower,
+    reasonCodes: [
+      "PARENT_W5_CONTEXT_ONLY",
+      "LOWER_DEGREE_W5_COMPLETE",
+      `${upper(immediateLower)}_W5_COMPLETE`,
+      "TRADEABLE_LOWER_DEGREE_RESET_NEEDED",
+      "NO_PARENT_W5_LONG_CONTINUATION_AFTER_LOWER_DEGREE_COMPLETION",
+    ],
+    needs: [
+      "LOWER_DEGREE_RESET_NEEDED",
+      "WAIT_FOR_ABC_COMPLETION",
+      "WAIT_FOR_NEW_W2_OR_W4_SETUP",
+      "NO_NEW_LONG_FROM_PARENT_W5_CONTEXT",
+    ],
+    summary: `${upper(
+      degree
+    )} W5 remains parent context, but lower-degree W5 structure is complete (${completedLowerDegrees
+      .map((d) => upper(d))
+      .join(
+        ", "
+      )}). Engine 22 should not expose this as a fresh long continuation opportunity until a new lower-degree W2/W4 setup forms or the ABC correction completes.`,
+  };
+}
+
 function buildNeeds({
   setupType,
   rawSetup,
@@ -850,16 +919,33 @@ export function buildWaveOpportunity({
     marketRegime,
   });
 
-  const readiness = lifecycle.readiness;
-  const timing = lifecycle.timing;
-  const chaseRisk = lifecycle.chaseRisk;
+const lowerDegreeCompletionGuard = buildLowerDegreeCompletionGuard({
+  degree,
+  setupType,
+  rawSetup,
+  direction,
+  waveFibState,
+});
 
-  const tradeDecision = engine22WaveStrategy?.tradeDecision || {};
+const finalSetupType = lowerDegreeCompletionGuard.active ? "NONE" : setupType;
+const finalDirection = lowerDegreeCompletionGuard.active ? "NONE" : direction;
+const readiness = lowerDegreeCompletionGuard.active
+  ? "NO_SETUP"
+  : lifecycle.readiness;
+const timing = lowerDegreeCompletionGuard.active
+  ? "POST_EXTENSION"
+  : lifecycle.timing;
+const chaseRisk = lowerDegreeCompletionGuard.active
+  ? "EXTREME"
+  : lifecycle.chaseRisk;
 
-  const active = setupType !== "NONE";
+const tradeDecision = engine22WaveStrategy?.tradeDecision || {};
 
-  const needs = buildNeeds({
-    setupType,
+const active = finalSetupType !== "NONE";
+
+const needs = [
+  ...buildNeeds({
+    setupType: finalSetupType,
     rawSetup,
     timing,
     tradeDecision,
@@ -867,29 +953,40 @@ export function buildWaveOpportunity({
     targets,
     readiness,
     armingNeeds: lifecycle.armingNeeds,
-  });
+  }),
+  ...(lowerDegreeCompletionGuard.active
+    ? lowerDegreeCompletionGuard.needs
+    : []),
+].filter((v, i, arr) => v && arr.indexOf(v) === i);
 
-  const reasonCodes = buildReasonCodes({
-    setupType,
+const reasonCodes = [
+  ...buildReasonCodes({
+    setupType: finalSetupType,
     rawSetup,
     degree,
     timing,
     readiness,
     chaseRisk,
     armingReasonCodes: lifecycle.armingReasonCodes,
-  });
+  }),
+  ...(lowerDegreeCompletionGuard.active
+    ? lowerDegreeCompletionGuard.reasonCodes
+    : []),
+].filter((v, i, arr) => v && arr.indexOf(v) === i);
 
-  const summary = buildSummary({
-    symbol,
-    setupType,
-    degree,
-    rawSetup,
-    timing,
-    readiness,
-    degreeState,
-    targets,
-    chaseRisk,
-  });
+ const summary = lowerDegreeCompletionGuard.active
+   ? lowerDegreeCompletionGuard.summary
+   : buildSummary({
+       symbol,
+       setupType: finalSetupType,
+       degree,
+       rawSetup,
+       timing,
+       readiness,
+       degreeState,
+       targets,
+       chaseRisk,
+     }); 
 
   return {
     ok: true,
@@ -899,14 +996,16 @@ export function buildWaveOpportunity({
     currentPrice: round2(currentPrice),
 
     active,
-    setupFamily: active ? "ELLIOTT_WAVE" : "NONE",
+    setupFamily: active ? "ELLIOTT_WAVE" : "PARENT_CONTEXT_ONLY",
 
-    setupType,
+    setupType: finalSetupType,
     rawSetup,
 
     degree,
 
-    direction,
+    direction: finalDirection,
+    parentContextOnly: lowerDegreeCompletionGuard.active,
+    tradeableOpportunityBlocked: lowerDegreeCompletionGuard.active,
 
     readiness,
 
@@ -963,6 +1062,7 @@ export function buildWaveOpportunity({
     },
 
     // Kept available for diagnostics but not used for permission.
+    lowerDegreeCompletionGuard,
     debugContextAvailable: {
       engine16: engine16 ? true : false,
       engine25Context: engine25Context ? true : false,
