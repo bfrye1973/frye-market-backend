@@ -1,5 +1,6 @@
+```js
 // services/core/logic/engine22/opportunity/buildWaveOpportunity.js
-// Engine 22I — Wave Opportunity Contract Builder
+// Engine 22I / 22D — Wave Opportunity Contract Builder
 //
 // Purpose:
 // Build a clean read-only Elliott Wave opportunity contract for Engine 15ES.
@@ -15,13 +16,15 @@
 // It only packages existing Engine 22 wave/fib state into:
 // engine22WaveStrategy.waveOpportunity
 //
-// Engine 22F additions:
-// - Conservative WATCH -> ARMING lifecycle detection for valid long W2→W3 / W4→W5 opportunities.
-// - Post-extension reclaim watch detection:
-//   POST_EXTENSION does not mean dead forever.
-//   It means no blind chase, but a controlled reclaim after pullback can be evaluated.
-// - Uses Engine16, Engine25, marketRegime, and marketMeterContext as read-only supportive context.
-// - Does NOT create READY, GO, ALLOW, executable, or trade permission.
+// Current responsibilities:
+// - Normalize W2→W3 / W4→W5 opportunity families.
+// - Detect late / post-extension / no-chase conditions.
+// - Support WATCH -> ARMING only from backend-normalized context.
+// - Keep post-extension reclaim watch read-only.
+// - Block parent W5 from being treated as a fresh tradeable long when lower-degree W5s are complete.
+// - Expose post-W5 ABC correction map from manual A/B/C rows after lower-degree W5 completion.
+// - Keep Engine 15ES as final setup referee.
+// - Keep Engine 6 as final permission gate.
 
 const DEGREES = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -34,6 +37,12 @@ function toNum(x) {
 function round2(x) {
   const n = toNum(x);
   return n === null ? null : Number(n.toFixed(2));
+}
+
+function roundToTick(value, tickSize = 0.25) {
+  const n = toNum(value);
+  if (n === null) return null;
+  return Number((Math.round(n / tickSize) * tickSize).toFixed(2));
 }
 
 function cleanString(x, fallback = null) {
@@ -270,9 +279,7 @@ function isEngine25Supportive(engine25Context = null) {
   const score = toNum(engine25Context?.score);
 
   if (engine25Context?.ok !== true) return false;
-  if (freshnessStatus === "MISSING" || freshnessStatus === "STALE") {
-    return false;
-  }
+  if (freshnessStatus === "MISSING" || freshnessStatus === "STALE") return false;
 
   return (
     (score !== null && score >= 70) ||
@@ -336,17 +343,12 @@ function pricePulledBackFromExtension({
   const nearestFibPrice = getNearestFibPrice(degreeState);
   const highestHit = getExtensionHit(degreeState?.extensionProgress);
 
-  // Most important case: price tagged/approached extension, then pulled back
-  // below the 1.618 decision target. This matches the 10m reclaim pattern.
   if (e1618 !== null && price <= e1618) return true;
 
-  // If the system detected a 2.0+ extension, a pullback under/near e200 is
-  // also a controlled post-extension watch, not a fresh chase.
   if (highestHit !== null && highestHit >= 2 && e200 !== null && price <= e200) {
     return true;
   }
 
-  // Fallback to the engine's nearest fib pressure price if target levels are sparse.
   if (nearestFibPrice !== null && price <= nearestFibPrice) return true;
 
   return false;
@@ -552,11 +554,6 @@ function applyArmingLifecycle({
     marketRegime,
   });
 
-  // Priority 1:
-  // Post-extension reclaim watch.
-  // This is NOT READY and NOT execution.
-  // It simply tells Engine15 that post-extension is no longer "dead forever"
-  // if a controlled pullback/reclaim context has formed.
   if (reclaimContext.reclaimAllowed) {
     return {
       readiness: "POST_EXTENSION_RECLAIM_WATCH",
@@ -581,8 +578,6 @@ function applyArmingLifecycle({
     };
   }
 
-  // Priority 2:
-  // Fresh pre-extension arming.
   if (supportiveContext.armingAllowed) {
     return {
       readiness: "ARMING",
@@ -682,6 +677,105 @@ function buildLowerDegreeCompletionGuard({
       .join(
         ", "
       )}). Engine 22 should not expose this as a fresh long continuation opportunity until a new lower-degree W2/W4 setup forms or the ABC correction completes.`,
+  };
+}
+
+function buildPostW5AbcCorrectionMap({ symbol, waveFibState } = {}) {
+  const degrees = waveFibState?.degrees || {};
+
+  const candidateDegree =
+    ["micro", "minute", "minor"].find((degree) => {
+      const d = degrees?.[degree];
+      return (
+        isCompleteW5Degree(d) &&
+        toNum(d?.aLow) !== null &&
+        toNum(d?.bHigh) !== null &&
+        toNum(d?.aLow) > 0 &&
+        toNum(d?.bHigh) > 0
+      );
+    }) || null;
+
+  if (!candidateDegree) {
+    return {
+      ok: true,
+      active: false,
+      engine: "engine22.postW5AbcCorrection.v1",
+      state: "NO_POST_W5_ABC_MARKS",
+      reasonCodes: ["NO_COMPLETE_W5_DEGREE_WITH_A_B_MARKS"],
+    };
+  }
+
+  const d = degrees[candidateDegree];
+  const aLow = toNum(d?.aLow);
+  const bHigh = toNum(d?.bHigh);
+  const cLow = toNum(d?.cLow);
+
+  const range = Math.abs(bHigh - aLow);
+  const downsideFromB = (fib) => roundToTick(bHigh - range * fib);
+
+  return {
+    ok: true,
+    active: true,
+    engine: "engine22.postW5AbcCorrection.v1",
+    symbol,
+    degree: candidateDegree,
+    timeframe: d?.tf || null,
+    correctionFor: `${String(candidateDegree).toUpperCase()}_COMPLETE_W5`,
+    state: cLow !== null && cLow > 0 ? "ABC_COMPLETE" : "C_LEG_ACTIVE",
+
+    a: {
+      label: "A",
+      price: roundToTick(aLow),
+    },
+
+    b: {
+      label: "B",
+      price: roundToTick(bHigh),
+    },
+
+    c:
+      cLow !== null && cLow > 0
+        ? {
+            label: "C",
+            price: roundToTick(cLow),
+          }
+        : null,
+
+    range: roundToTick(range),
+
+    reclaimLevels: {
+      r382: roundToTick(aLow + range * 0.382),
+      r500: roundToTick(aLow + range * 0.5),
+      r618: roundToTick(aLow + range * 0.618),
+      r786: roundToTick(aLow + range * 0.786),
+    },
+
+    downsideTargets: {
+      c100: downsideFromB(1.0),
+      c1272: downsideFromB(1.272),
+      c1618: downsideFromB(1.618),
+      c200: downsideFromB(2.0),
+      c2618: downsideFromB(2.618),
+    },
+
+    needs: [
+      "C_LEG_CONFIRMATION",
+      "WAIT_FOR_ABC_COMPLETION",
+      "NO_NEW_LONG_UNTIL_RECLAIM_OR_NEW_W2_W4",
+    ],
+
+    reasonCodes: [
+      "POST_W5_ABC_MARKS_FOUND",
+      `${String(candidateDegree).toUpperCase()}_W5_COMPLETE`,
+      "A_B_MARKS_VALID",
+      cLow !== null && cLow > 0 ? "C_MARK_COMPLETE" : "C_LEG_PENDING",
+      "LOWER_DEGREE_W5_COMPLETE_CORRECTION_ACTIVE",
+    ],
+
+    summary:
+      cLow !== null && cLow > 0
+        ? `${String(candidateDegree).toUpperCase()} W5 is complete and ABC correction marks are complete.`
+        : `${String(candidateDegree).toUpperCase()} W5 is complete. A and B are marked; C leg is active/pending. Watch C downside targets and wait for ABC completion or a new lower-degree W2/W4 setup before re-arming longs.`,
   };
 }
 
@@ -796,7 +890,6 @@ function buildSummary({
   timing,
   readiness,
   degreeState,
-  targets,
   chaseRisk,
 } = {}) {
   if (setupType === "NONE") {
@@ -919,74 +1012,97 @@ export function buildWaveOpportunity({
     marketRegime,
   });
 
-const lowerDegreeCompletionGuard = buildLowerDegreeCompletionGuard({
-  degree,
-  setupType,
-  rawSetup,
-  direction,
-  waveFibState,
-});
-
-const finalSetupType = lowerDegreeCompletionGuard.active ? "NONE" : setupType;
-const finalDirection = lowerDegreeCompletionGuard.active ? "NONE" : direction;
-const readiness = lowerDegreeCompletionGuard.active
-  ? "NO_SETUP"
-  : lifecycle.readiness;
-const timing = lowerDegreeCompletionGuard.active
-  ? "POST_EXTENSION"
-  : lifecycle.timing;
-const chaseRisk = lowerDegreeCompletionGuard.active
-  ? "EXTREME"
-  : lifecycle.chaseRisk;
-
-const tradeDecision = engine22WaveStrategy?.tradeDecision || {};
-
-const active = finalSetupType !== "NONE";
-
-const needs = [
-  ...buildNeeds({
-    setupType: finalSetupType,
-    rawSetup,
-    timing,
-    tradeDecision,
-    w4Levels,
-    targets,
-    readiness,
-    armingNeeds: lifecycle.armingNeeds,
-  }),
-  ...(lowerDegreeCompletionGuard.active
-    ? lowerDegreeCompletionGuard.needs
-    : []),
-].filter((v, i, arr) => v && arr.indexOf(v) === i);
-
-const reasonCodes = [
-  ...buildReasonCodes({
-    setupType: finalSetupType,
-    rawSetup,
+  const lowerDegreeCompletionGuard = buildLowerDegreeCompletionGuard({
     degree,
-    timing,
-    readiness,
-    chaseRisk,
-    armingReasonCodes: lifecycle.armingReasonCodes,
-  }),
-  ...(lowerDegreeCompletionGuard.active
-    ? lowerDegreeCompletionGuard.reasonCodes
-    : []),
-].filter((v, i, arr) => v && arr.indexOf(v) === i);
+    setupType,
+    rawSetup,
+    direction,
+    waveFibState,
+  });
 
- const summary = lowerDegreeCompletionGuard.active
-   ? lowerDegreeCompletionGuard.summary
-   : buildSummary({
-       symbol,
-       setupType: finalSetupType,
-       degree,
-       rawSetup,
-       timing,
-       readiness,
-       degreeState,
-       targets,
-       chaseRisk,
-     }); 
+  const postW5AbcCorrection = lowerDegreeCompletionGuard.active
+    ? buildPostW5AbcCorrectionMap({
+        symbol,
+        waveFibState,
+      })
+    : {
+        ok: true,
+        active: false,
+        engine: "engine22.postW5AbcCorrection.v1",
+        state: "NOT_PARENT_CONTEXT_ONLY",
+        reasonCodes: ["LOWER_DEGREE_COMPLETION_GUARD_NOT_ACTIVE"],
+      };
+
+  const finalSetupType = lowerDegreeCompletionGuard.active ? "NONE" : setupType;
+  const finalDirection = lowerDegreeCompletionGuard.active ? "NONE" : direction;
+
+  const readiness = lowerDegreeCompletionGuard.active
+    ? "NO_SETUP"
+    : lifecycle.readiness;
+
+  const timing = lowerDegreeCompletionGuard.active
+    ? "POST_EXTENSION"
+    : lifecycle.timing;
+
+  const chaseRisk = lowerDegreeCompletionGuard.active
+    ? "EXTREME"
+    : lifecycle.chaseRisk;
+
+  const tradeDecision = engine22WaveStrategy?.tradeDecision || {};
+  const active = finalSetupType !== "NONE";
+
+  const needs = [
+    ...buildNeeds({
+      setupType: finalSetupType,
+      rawSetup,
+      timing,
+      tradeDecision,
+      w4Levels,
+      targets,
+      readiness,
+      armingNeeds: lifecycle.armingNeeds,
+    }),
+    ...(lowerDegreeCompletionGuard.active
+      ? lowerDegreeCompletionGuard.needs
+      : []),
+    ...(postW5AbcCorrection?.active && Array.isArray(postW5AbcCorrection?.needs)
+      ? postW5AbcCorrection.needs
+      : []),
+  ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+
+  const reasonCodes = [
+    ...buildReasonCodes({
+      setupType: finalSetupType,
+      rawSetup,
+      degree,
+      timing,
+      readiness,
+      chaseRisk,
+      armingReasonCodes: lifecycle.armingReasonCodes,
+    }),
+    ...(lowerDegreeCompletionGuard.active
+      ? lowerDegreeCompletionGuard.reasonCodes
+      : []),
+    ...(postW5AbcCorrection?.active && Array.isArray(postW5AbcCorrection?.reasonCodes)
+      ? postW5AbcCorrection.reasonCodes
+      : []),
+  ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+
+  const summary =
+    lowerDegreeCompletionGuard.active && postW5AbcCorrection?.active
+      ? `${lowerDegreeCompletionGuard.summary} ${postW5AbcCorrection.summary}`
+      : lowerDegreeCompletionGuard.active
+      ? lowerDegreeCompletionGuard.summary
+      : buildSummary({
+          symbol,
+          setupType: finalSetupType,
+          degree,
+          rawSetup,
+          timing,
+          readiness,
+          degreeState,
+          chaseRisk,
+        });
 
   return {
     ok: true,
@@ -1000,15 +1116,15 @@ const reasonCodes = [
 
     setupType: finalSetupType,
     rawSetup,
-
     degree,
-
     direction: finalDirection,
+
     parentContextOnly: lowerDegreeCompletionGuard.active,
     tradeableOpportunityBlocked: lowerDegreeCompletionGuard.active,
 
-    readiness,
+    abcCorrection: postW5AbcCorrection,
 
+    readiness,
     timing,
 
     waveState: buildWaveState(waveFibState),
@@ -1041,8 +1157,8 @@ const reasonCodes = [
     // Reserved for future replay/outcome learning.
     learningContext: {
       engine: "engine22.waveOpportunityLearningContext.v1",
-      setupType,
-      direction,
+      setupType: finalSetupType,
+      direction: finalDirection,
       timing,
       readiness,
       chaseRisk,
@@ -1059,10 +1175,16 @@ const reasonCodes = [
       armingAllowed: lifecycle.supportiveContext?.armingAllowed ?? false,
       postExtensionReclaimAllowed:
         lifecycle.reclaimContext?.reclaimAllowed ?? false,
+      parentContextOnly: lowerDegreeCompletionGuard.active,
+      tradeableOpportunityBlocked: lowerDegreeCompletionGuard.active,
+      abcCorrectionActive: postW5AbcCorrection?.active === true,
     },
 
-    // Kept available for diagnostics but not used for permission.
+    // Diagnostics only.
     lowerDegreeCompletionGuard,
+    postW5AbcCorrection,
+
+    // Kept available for diagnostics but not used for permission.
     debugContextAvailable: {
       engine16: engine16 ? true : false,
       engine25Context: engine25Context ? true : false,
@@ -1074,3 +1196,4 @@ const reasonCodes = [
 }
 
 export default buildWaveOpportunity;
+```
