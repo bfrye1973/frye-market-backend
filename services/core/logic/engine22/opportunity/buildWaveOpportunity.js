@@ -650,19 +650,38 @@ function buildLowerDegreeCompletionGuard({
   const immediateLowerComplete =
     immediateLower && isCompleteW5Degree(degrees?.[immediateLower]);
 
-  if (!immediateLowerComplete) return { active: false };
+  const lowerDegreeWithAbc =
+    lowerDegrees.find((d) => {
+      const x = degrees?.[d];
+      return (
+        isCompleteW5Degree(x) &&
+        toNum(x?.aLow) !== null &&
+        toNum(x?.bHigh) !== null &&
+        toNum(x?.aLow) > 0 &&
+        toNum(x?.bHigh) > 0
+      );
+    }) || null;
+
+  const enoughLowerDegreeCompletion =
+    immediateLowerComplete ||
+    completedLowerDegrees.length >= 2 ||
+    lowerDegreeWithAbc !== null;
+
+  if (!enoughLowerDegreeCompletion) return { active: false };
 
   return {
     active: true,
     completedLowerDegrees,
     immediateLower,
+    lowerDegreeWithAbc,
     reasonCodes: [
       "PARENT_W5_CONTEXT_ONLY",
       "LOWER_DEGREE_W5_COMPLETE",
-      `${upper(immediateLower)}_W5_COMPLETE`,
+      immediateLowerComplete ? `${upper(immediateLower)}_W5_COMPLETE` : null,
+      lowerDegreeWithAbc ? `${upper(lowerDegreeWithAbc)}_ABC_CORRECTION_MARKS_FOUND` : null,
       "TRADEABLE_LOWER_DEGREE_RESET_NEEDED",
       "NO_PARENT_W5_LONG_CONTINUATION_AFTER_LOWER_DEGREE_COMPLETION",
-    ],
+    ].filter(Boolean),
     needs: [
       "LOWER_DEGREE_RESET_NEEDED",
       "WAIT_FOR_ABC_COMPLETION",
