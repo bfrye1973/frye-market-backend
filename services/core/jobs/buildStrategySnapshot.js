@@ -3672,66 +3672,48 @@ const zoneContext = buildZoneContext(
       spyVolumeBehavior ||
       null;
    
-      if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
-        try {
-         engine22WaveStrategy = buildEngine22WaveStrategy({
-           symbol,
-           strategyId: s.strategyId,
-           tf: s.tf,
-           engine2State,
-           engine15: engine15ForEngine22,
-           engine16,
-           marketMeter,
-           regimeLayers: engine22Scalp?.regimeLayers || null,
-          // Engine 22F read-only supportive context.
-          // Used only for WATCH -> ARMING lifecycle.
-          // Must not create READY, GO, ALLOW, or execution.
-           engine25Context,
-           marketRegime,
-           marketMeterContext: marketMind || null, 
-           engine5: engine5Analytics || patchedConfluence || null,
-            
-           reactionContext: reactionContextForEngine22,
-           volumeContext: volumeContextForEngine22,
-           breakoutContext: engine22Scalp?.breakoutContext || null,
-           barsByTf: {
-             "10m": marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-             "1h": marketMeter?.layers?.emaPosture?.oneHour?.bars || [],
-             "4h": marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
-             "1d": marketMeter?.layers?.emaPosture?.daily?.bars || [],
-           },
-         }); 
+if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
+  try {
+    // Do NOT rebuild Engine 22 wave strategy here.
+    // The pre-Engine15 waveOpportunity is already built above and must remain source of truth.
+    // Only enrich post-Engine15 / paper-only tradeDecision.
+    if (engine22WaveStrategy && typeof engine22WaveStrategy === "object") {
+      engine22WaveStrategy.tradeDecision = buildWaveTradeDecision({
+        engine22WaveStrategy,
+        engine15: engine15ForEngine22,
+        engine16,
+        reactionContext: reactionContextForEngine22,
+        volumeContext: volumeContextForEngine22,
+        symbol,
+        strategyId: s.strategyId,
+      });
+    }
+  } catch (err) {
+    console.error("[E22G TRADE DECISION ERROR]", err);
 
-         engine22WaveStrategy.tradeDecision = buildWaveTradeDecision({
-           engine22WaveStrategy,
-           engine15: engine15ForEngine22,
-           engine16,
-           reactionContext: reactionContextForEngine22,
-           volumeContext: volumeContextForEngine22,
-           symbol,
-           strategyId: s.strategyId,
-         });
-           
-        } catch (err) {
-          console.error("[E22G ERROR]", err);
-
-          engine22WaveStrategy = {
-            ok: false,
-            engine: "engine22.waveStrategy.v1",
-            mode: "READ_ONLY",
-            symbol,
-            strategyId: s.strategyId,
-            tf: s.tf,
-            state: "ENGINE22G_ERROR",
-            reasonCodes: ["ENGINE22G_COMPUTE_FAILED"],
-            debug: {
-              error: String(err?.message || err),
-              stack: String(err?.stack || ""),
-            },
-          };
-        }
-      }
-
+    if (engine22WaveStrategy && typeof engine22WaveStrategy === "object") {
+      engine22WaveStrategy.tradeDecision = {
+        mode: "PAPER_ONLY",
+        engine: "engine22.tradeDecision.safeFallback.v1",
+        symbol,
+        strategyId: s.strategyId,
+        decision: "WAIT",
+        direction: "NONE",
+        setupType: engine22WaveStrategy?.waveOpportunity?.setupType || "NO_SETUP",
+        grade: "NO_TRADE",
+        entryAllowed: false,
+        chaseAllowed: false,
+        reason: "Trade decision enrichment failed safely.",
+        needs: ["TRADE_DECISION_REVIEW"],
+        reasonCodes: ["TRADE_DECISION_SAFE_FALLBACK"],
+        debug: {
+          error: String(err?.message || err),
+          stack: String(err?.stack || ""),
+        },
+      };
+    }
+  }
+}
       if (
         String(symbol || "").toUpperCase() === "ES" &&
         s.strategyId === "intraday_scalp@10m" &&
