@@ -13,6 +13,7 @@ import { analyzeWaveDuration } from "./analyzeWaveDuration.js";
 import { analyzeAbcCorrection } from "./analyzeAbcCorrection.js";
 import { buildTradeContextSummary } from "./buildTradeContextSummary.js";
 import { buildW4Levels } from "./buildW4Levels.js";
+import { classifyWaveLifecycle } from "./classifyWaveLifecycle.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -504,6 +505,17 @@ export function analyzeWaveStack({
     reasonCodes,
   };
 
+  const lifecycle = classifyWaveLifecycle({
+    symbol,
+    waveFibState: partialWaveFibState,
+    currentPrice,
+    engine16: regimeLayers,
+    engine25Context: null,
+    marketRegime: null,
+  });
+
+  partialWaveFibState.lifecycle = lifecycle;
+
   const tradeContextSummary = buildTradeContextSummary({
     waveFibState: partialWaveFibState,
   });
@@ -526,6 +538,7 @@ export function analyzeWaveStack({
     microW4AbcRisk,
     abcCorrection,
     waveDuration,
+    lifecycle,
     tradeContextSummary,
 
     regimeContext: regimeLayers || null,
