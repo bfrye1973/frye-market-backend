@@ -2,12 +2,15 @@
 // Engine 22L — Central Wave Lifecycle Classifier
 //
 // Purpose:
-// One source of truth for post-W5 lifecycle state.
+// One source of truth for wave lifecycle state.
 // This file decides:
+// - W2→W3 lifecycle
+// - W3 extension lifecycle
+// - W4 pullback lifecycle
+// - W4→W5 lifecycle
+// - W5 complete lifecycle
+// - post-W5 ABC lifecycle
 // - parent W5 context only
-// - lower-degree W5 completion
-// - post-W5 ABC correction active
-// - C-leg pending vs ABC complete
 // - whether parent W5 should be blocked as a fresh tradeable long
 //
 // This file is read-only.
@@ -74,6 +77,11 @@ function hasAbcMarks(degreeState = null) {
   const bHigh = toNum(degreeState?.bHigh);
 
   return aLow !== null && bHigh !== null && aLow > 0 && bHigh > 0;
+}
+
+function hasCMark(degreeState = null) {
+  const cLow = toNum(degreeState?.cLow);
+  return cLow !== null && cLow > 0;
 }
 
 function findParentW5Degrees(degrees = {}) {
@@ -185,6 +193,361 @@ function buildAbcCorrection({ symbol, degree, degreeState } = {}) {
   };
 }
 
+function getExtensionHit(degreeState = {}) {
+  return (
+    toNum(degreeState?.extensionProgress?.highestExtensionHit) ??
+    toNum(degreeState?.extensionProgress?.highestExtension) ??
+    toNum(degreeState?.extensionProgress?.extensionHit) ??
+    null
+  );
+}
+
+function hasW4Levels(degreeState = {}) {
+  return degreeState?.w4Levels && typeof degreeState.w4Levels === "object";
+}
+
+function hasFibProjection(degreeState = {}) {
+  return (
+    degreeState?.fibProjection &&
+    typeof degreeState.fibProjection === "object" &&
+    degreeState.fibProjection?.levels &&
+    typeof degreeState.fibProjection.levels === "object"
+  );
+}
+
+function classifyDegreeLifecycle({
+  degree,
+  degreeState = null,
+  isParentContextOnly = false,
+  isActiveCorrectionDegree = false,
+} = {}) {
+  if (!degreeState || degreeState?.ok === false) {
+    return {
+      ok: false,
+      degree,
+      lifecycleState: "UNKNOWN",
+      phase: "UNKNOWN",
+      confirmedPhase: "UNKNOWN",
+      nextExpectedWave: "UNKNOWN",
+      allowedSetupFamily: "NONE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: false,
+      reasonCodes: ["DEGREE_STATE_UNAVAILABLE"],
+    };
+  }
+
+  const phase = upper(degreeState?.phase);
+  const confirmedPhase = upper(degreeState?.confirmedPhase);
+  const nextExpectedWave = upper(degreeState?.nextExpectedWave);
+  const state = upper(degreeState?.state, "");
+
+  const extensionHit = getExtensionHit(degreeState);
+  const hasProjection = hasFibProjection(degreeState);
+  const w4LevelsAvailable = hasW4Levels(degreeState);
+
+  const completeW5 = isCompleteW5(degreeState);
+  const inW5 = isInW5(degreeState);
+  const abcMarks = hasAbcMarks(degreeState);
+  const cMarked = hasCMark(degreeState);
+
+  if (isParentContextOnly && inW5) {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "W5_PARENT_CONTEXT_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "NONE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: true,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W5 PARENT CONTEXT ACTIVE`,
+      summary:
+        "This W5 remains higher-degree context only because lower-degree W5 completion / ABC correction is active.",
+      needs: [
+        "WAIT_FOR_LOWER_DEGREE_RESET",
+        "WAIT_FOR_ABC_COMPLETION_OR_NEW_W2_W4_SETUP",
+      ],
+      reasonCodes: [
+        "W5_PARENT_CONTEXT_ACTIVE",
+        "BLOCKED_BY_LOWER_DEGREE_COMPLETION_OR_ABC",
+      ],
+    };
+  }
+
+  if (completeW5 && abcMarks && !cMarked) {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "POST_W5_ABC_C_LEG_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "NONE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: true,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W5 COMPLETE — ABC C LEG ACTIVE`,
+      summary:
+        "W5 is complete. A and B are marked. C leg is pending/active.",
+      needs: [
+        "WAIT_FOR_ABC_COMPLETION",
+        "WAIT_FOR_NEW_W2_OR_W4_SETUP",
+      ],
+      reasonCodes: [
+        "W5_COMPLETE",
+        "POST_W5_ABC_MARKS_FOUND",
+        "C_LEG_PENDING",
+      ],
+    };
+  }
+
+  if (completeW5 && abcMarks && cMarked) {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "POST_W5_ABC_COMPLETE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "WAIT_FOR_NEW_STRUCTURE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: true,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W5 COMPLETE — ABC COMPLETE`,
+      summary:
+        "W5 and ABC correction are complete. Wait for a new lower-degree W2/W4 setup before treating this as tradeable again.",
+      needs: ["WAIT_FOR_NEW_W2_OR_W4_SETUP"],
+      reasonCodes: [
+        "W5_COMPLETE",
+        "POST_W5_ABC_MARKS_FOUND",
+        "ABC_COMPLETE",
+      ],
+    };
+  }
+
+  if (completeW5) {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "W5_COMPLETE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "NONE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: true,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W5 COMPLETE`,
+      summary:
+        "W5 is complete. Do not treat this degree as a fresh continuation setup without a reset.",
+      needs: ["WAIT_FOR_NEW_W2_OR_W4_SETUP"],
+      reasonCodes: ["W5_COMPLETE"],
+    };
+  }
+
+  if (phase === "IN_W2") {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "W2_PULLBACK_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "W2_TO_W3",
+      tradeableCandidate: true,
+      tradeableOpportunityBlocked: false,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W2 PULLBACK ACTIVE`,
+      summary:
+        "W2 pullback is active. The next valid bullish structure is W2→W3 only after reclaim/confirmation.",
+      needs: [
+        "WAIT_FOR_W2_RECLAIM",
+        "ENGINE15_READY_OR_PAPER_READY",
+      ],
+      reasonCodes: ["W2_PULLBACK_ACTIVE", "NEXT_ALLOWED_W2_TO_W3"],
+    };
+  }
+
+  if (phase === "IN_W3") {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "W3_EXTENSION_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "W2_TO_W3",
+      tradeableCandidate: true,
+      tradeableOpportunityBlocked: false,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W3 EXTENSION ACTIVE`,
+      summary:
+        "W3 expansion is active. Do not chase late extension; wait for controlled setup/confirmation.",
+      needs: [
+        "NO_CHASE_LONG",
+        "WAIT_FOR_CONTROLLED_RECLAIM_OR_PULLBACK",
+      ],
+      reasonCodes: ["W3_EXTENSION_ACTIVE"],
+    };
+  }
+
+  if (
+    phase === "IN_W4" ||
+    confirmedPhase === "IN_W3" ||
+    nextExpectedWave === "W5"
+  ) {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "W4_PULLBACK_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "W4_TO_W5",
+      tradeableCandidate: true,
+      tradeableOpportunityBlocked: false,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W4 PULLBACK ACTIVE`,
+      summary:
+        "W4 pullback/reclaim structure is active. The next valid bullish structure is W4→W5 after confirmation.",
+      needs: [
+        "WAIT_FOR_W4_RECLAIM",
+        "ENGINE15_READY_OR_PAPER_READY",
+      ],
+      reasonCodes: ["W4_PULLBACK_ACTIVE", "NEXT_ALLOWED_W4_TO_W5"],
+    };
+  }
+
+  if (inW5) {
+    const lateExtension =
+      extensionHit !== null && extensionHit >= 1.272;
+
+    return {
+      ok: true,
+      degree,
+      lifecycleState: lateExtension
+        ? "W5_EXTENSION_LATE"
+        : "W5_EXTENSION_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "W4_TO_W5",
+      tradeableCandidate: true,
+      tradeableOpportunityBlocked: false,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: lateExtension
+        ? `${String(degree).toUpperCase()} W5 EXTENSION LATE`
+        : `${String(degree).toUpperCase()} W5 EXTENSION ACTIVE`,
+      summary: lateExtension
+        ? "W5 extension is late/post-extension. Do not chase; wait for controlled pullback/reclaim."
+        : "W5 extension is active after W4. Continuation is possible only with confirmation.",
+      needs: lateExtension
+        ? ["NO_CHASE_LONG", "CONTROLLED_PULLBACK_OR_RECLAIM"]
+        : ["WAIT_FOR_CONFIRMATION", "NO_BLIND_CHASE"],
+      reasonCodes: lateExtension
+        ? ["W5_EXTENSION_LATE", "NO_CHASE_LONG"]
+        : ["W5_EXTENSION_ACTIVE"],
+    };
+  }
+
+  if (state === "IMPULSE_COMPLETE") {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "IMPULSE_COMPLETE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "NONE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: true,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} IMPULSE COMPLETE`,
+      summary:
+        "Impulse is complete. Wait for reset or correction completion.",
+      needs: ["WAIT_FOR_NEW_STRUCTURE"],
+      reasonCodes: ["IMPULSE_COMPLETE"],
+    };
+  }
+
+  return {
+    ok: true,
+    degree,
+    lifecycleState: "UNKNOWN_OR_MIXED",
+    phase,
+    confirmedPhase,
+    nextExpectedWave,
+    allowedSetupFamily: "NONE",
+    tradeableCandidate: false,
+    tradeableOpportunityBlocked: false,
+    extensionHit,
+    hasFibProjection: hasProjection,
+    hasW4Levels: w4LevelsAvailable,
+    headline: `${String(degree).toUpperCase()} WAVE STATE MIXED`,
+    summary:
+      "This degree does not have a clean W2/W3/W4/W5 lifecycle state yet.",
+    needs: ["WAIT_FOR_CLEARER_WAVE_MARKS"],
+    reasonCodes: ["UNKNOWN_OR_MIXED_WAVE_LIFECYCLE"],
+  };
+}
+
+function buildDegreeLifecycle({
+  degrees = {},
+  parentContextOnly = false,
+  parentW5Degrees = [],
+  activeCorrectionDegree = null,
+} = {}) {
+  const out = {};
+
+  for (const degree of DEGREE_ORDER) {
+    out[degree] = classifyDegreeLifecycle({
+      degree,
+      degreeState: degrees?.[degree] || null,
+      isParentContextOnly:
+        parentContextOnly && parentW5Degrees.includes(degree),
+      isActiveCorrectionDegree: activeCorrectionDegree === degree,
+    });
+  }
+
+  return out;
+}
+
+function pickActiveDegreeLifecycle({ degreeLifecycle = {}, masterBlocked = false } = {}) {
+  if (masterBlocked) return null;
+
+  const searchOrder = ["micro", "minute", "minor", "intermediate", "primary"];
+
+  return (
+    searchOrder.find((degree) => {
+      const d = degreeLifecycle?.[degree];
+      return (
+        d?.tradeableCandidate === true &&
+        d?.tradeableOpportunityBlocked !== true
+      );
+    }) || null
+  );
+}
+
 export function classifyWaveLifecycle({
   symbol = "SPY",
   waveFibState = null,
@@ -216,6 +579,23 @@ export function classifyWaveLifecycle({
   const tradeableOpportunityBlocked =
     parentContextOnly || cLegActive || correctionActive;
 
+  const degreeLifecycle = buildDegreeLifecycle({
+    degrees,
+    parentContextOnly,
+    parentW5Degrees,
+    activeCorrectionDegree,
+  });
+
+  const activeDegreeLifecycle = pickActiveDegreeLifecycle({
+    degreeLifecycle,
+    masterBlocked: tradeableOpportunityBlocked,
+  });
+
+  const activeAllowedSetupFamily =
+    activeDegreeLifecycle && degreeLifecycle?.[activeDegreeLifecycle]
+      ? degreeLifecycle[activeDegreeLifecycle].allowedSetupFamily
+      : "NONE";
+
   const lifecycleState = cLegActive
     ? "ABC_C_LEG_ACTIVE"
     : correctionActive && abcCorrection?.state === "ABC_COMPLETE"
@@ -224,20 +604,32 @@ export function classifyWaveLifecycle({
     ? "PARENT_W5_CONTEXT_ONLY"
     : hasParentW5Context
     ? "PARENT_W5_ACTIVE"
+    : activeDegreeLifecycle
+    ? degreeLifecycle?.[activeDegreeLifecycle]?.lifecycleState ||
+      "NORMAL_WAVE_LIFECYCLE"
     : "NORMAL_WAVE_LIFECYCLE";
 
   const nextAllowedSetup = tradeableOpportunityBlocked
     ? "WAIT_FOR_ABC_COMPLETION_OR_NEW_W2_W4_SETUP"
+    : activeDegreeLifecycle
+    ? degreeLifecycle?.[activeDegreeLifecycle]?.allowedSetupFamily ||
+      "VALID_W2_W4_OR_PRE_EXTENSION_SETUP_REQUIRED"
     : "VALID_W2_W4_OR_PRE_EXTENSION_SETUP_REQUIRED";
 
   const headline = tradeableOpportunityBlocked
     ? "LOWER-DEGREE W5 COMPLETE — ABC CORRECTION WATCH"
+    : activeDegreeLifecycle
+    ? degreeLifecycle?.[activeDegreeLifecycle]?.headline ||
+      "WAVE LIFECYCLE ACTIVE"
     : hasParentW5Context
     ? "PARENT W5 CONTEXT ACTIVE"
     : "WAVE LIFECYCLE NORMAL";
 
   const summary = tradeableOpportunityBlocked
     ? `${symbol} has parent W5 context, but lower-degree W5 completion / ABC correction marks are active. Do not treat the parent W5 as a fresh long continuation. Wait for ABC completion or a new lower-degree W2/W4 setup.`
+    : activeDegreeLifecycle
+    ? degreeLifecycle?.[activeDegreeLifecycle]?.summary ||
+      `${symbol} lifecycle has an active wave setup candidate.`
     : `${symbol} lifecycle does not currently block a valid lower-degree W2/W4 setup.`;
 
   const needs = tradeableOpportunityBlocked
@@ -245,6 +637,10 @@ export function classifyWaveLifecycle({
         "WAIT_FOR_ABC_COMPLETION",
         "WAIT_FOR_NEW_W2_OR_W4_SETUP",
         "NO_NEW_LONG_FROM_PARENT_W5_CONTEXT",
+      ]
+    : activeDegreeLifecycle
+    ? degreeLifecycle?.[activeDegreeLifecycle]?.needs || [
+        "VALID_PRE_EXTENSION_W2_OR_W4_SETUP",
       ]
     : ["VALID_PRE_EXTENSION_W2_OR_W4_SETUP"];
 
@@ -257,11 +653,15 @@ export function classifyWaveLifecycle({
     tradeableOpportunityBlocked
       ? "NO_PARENT_W5_LONG_CONTINUATION_AFTER_LOWER_DEGREE_COMPLETION"
       : null,
+    activeDegreeLifecycle ? `ACTIVE_LIFECYCLE_DEGREE_${upper(activeDegreeLifecycle)}` : null,
+    activeAllowedSetupFamily !== "NONE"
+      ? `ACTIVE_ALLOWED_SETUP_${upper(activeAllowedSetupFamily)}`
+      : null,
   ].filter(Boolean);
 
   return {
     ok: true,
-    engine: "engine22.waveLifecycle.v1",
+    engine: "engine22.waveLifecycle.v2",
     symbol,
     currentPrice: roundToTick(currentPrice, tickSizeForSymbol(symbol)),
 
@@ -275,6 +675,10 @@ export function classifyWaveLifecycle({
 
     parentW5Degrees,
     completedW5Degrees,
+
+    degreeLifecycle,
+    activeDegreeLifecycle,
+    activeAllowedSetupFamily,
 
     abcCorrection,
 
