@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-const ENGINE = "engine25.esReplayProxyScores.v0.5";
+const ENGINE = "engine25.esReplayProxyScores.v0.6";
 const SYMBOL = "ES";
 const TIMEFRAME = "1d";
 const LOOKBACK_TRADING_DAYS = 126;
@@ -22,8 +22,10 @@ const DATA_DIR = path.join(CORE_DIR, "data");
 const SETUP_REPLAY_FILE = path.join(DATA_DIR, "engine25-es-replay-setups-6mo.json");
 const OUTPUT_FILE = path.join(DATA_DIR, "engine25-es-replay-proxy-scores-6mo.json");
 
-const MARKET_TREND_SYMBOLS = ["SPY", "QQQ", "IWM", "DIA"];
-const CREDIT_FRAGILITY_SYMBOLS = ["HYG", "JNK", "LQD", "KRE", "IWM"];
+// Task 1: add MDY for mid-cap participation.
+const MARKET_TREND_SYMBOLS = ["SPY", "QQQ", "IWM", "MDY", "DIA"];
+const CREDIT_FRAGILITY_SYMBOLS = ["HYG", "JNK", "LQD", "KRE", "IWM", "MDY"];
+
 const AI_LEADERSHIP_SYMBOLS = [
   "NVDA",
   "MSFT",
@@ -36,7 +38,8 @@ const AI_LEADERSHIP_SYMBOLS = [
   "ARM",
   "PLTR",
 ];
-const MACRO_PROXY_SYMBOLS = ["TLT", "USO", "UUP", "IWM"];
+
+const MACRO_PROXY_SYMBOLS = ["TLT", "USO", "UUP", "IWM", "MDY"];
 
 const ALL_SYMBOLS = [
   ...new Set([
@@ -174,6 +177,53 @@ function pctChangeFromIndex(bars, index, lookback) {
   return round(((currentClose - pastClose) / pastClose) * 100, 3);
 }
 
+function avgVolumeFromIndex(bars, index, lookback = 20) {
+  const start = Math.max(0, index - lookback);
+  const priorBars = bars.slice(start, index);
+  const volumes = priorBars
+    .map((bar) => toNumber(bar.volume, null))
+    .filter(Number.isFinite);
+
+  if (volumes.length < Math.min(lookback, 10)) return null;
+
+  return round(volumes.reduce((sum, v) => sum + v, 0) / volumes.length, 0);
+}
+
+function closeLocationPct(bar) {
+  const high = toNumber(bar?.high, null);
+  const low = toNumber(bar?.low, null);
+  const close = toNumber(bar?.close, null);
+
+  if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+    return null;
+  }
+
+  const range = high - low;
+  if (range <= 0) return 50;
+
+  return round(((close - low) / range) * 100, 2);
+}
+
+function rollingHighFromIndex(bars, index, lookback = 10) {
+  const start = Math.max(0, index - lookback);
+  const priorBars = bars.slice(start, index);
+  const highs = priorBars.map((bar) => toNumber(bar.high, null)).filter(Number.isFinite);
+
+  if (!highs.length) return null;
+
+  return Math.max(...highs);
+}
+
+function rollingLowFromIndex(bars, index, lookback = 10) {
+  const start = Math.max(0, index - lookback);
+  const priorBars = bars.slice(start, index);
+  const lows = priorBars.map((bar) => toNumber(bar.low, null)).filter(Number.isFinite);
+
+  if (!lows.length) return null;
+
+  return Math.min(...lows);
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -271,12 +321,79 @@ function buildSymbolMetrics(symbol, rawBars) {
     const ema50 = round(ema50Series[index], 2);
     const ema200 = round(ema200Series[index], 2);
 
+    const priorClose = index > 0 ? toNumber(bars[index - 1]?.close, null) : null;
+    const avgVolume20 = avgVolumeFromIndex(bars, index, 20);
+    const closeLoc = closeLocationPct(bar);
+
+    const prior10dHigh = rollingHighFromIndex(bars, index, 10);
+    const prior10dLow = rollingLowFromIndex(bars, index, 10);
+
+    const isDownDay =
+      Number.isFinite(priorClose) && Number.isFinite(bar.close)
+        ? bar.close < priorClose
+        : null;
+
+    const isHighVolumeDownDay =
+      isDownDay === true &&
+      Number.isFinite(bar.volume) &&
+      Number.isFinite(avgVolume20)
+        ? bar.volume > avgVolume20 * 1.1
+        : false;
+
+    const highVolumeWeakClose =
+      isHighVolumeDownDay === true &&
+      Number.isFinite(closeLoc) &&
+      closeLoc < 35;
+
+    const distributionDay =
+      isHighVolumeDownDay === true &&
+      Number.isFinite(closeLoc) &&
+      closeLoc < 45;
+
+    const making10dHigh =
+      Number.isFinite(prior10dHigh) && Number.isFinite(bar.close)
+        ? bar.close > prior10dHigh
+        : false;
+
+    const making10dLow =
+      Number.isFinite(prior10dLow) && Number.isFinite(bar.close)
+        ? bar.close < prior10dLow
+        : false;
+
+    const failedBreakout =
+      Number.isFinite(prior10dHigh) &&
+      Number.isFinite(bar.high) &&
+      Number.isFinite(bar.close)
+        ? bar.high > prior10dHigh && bar.close < prior10dHigh
+        : false;
+
     return {
       ok: true,
       symbol,
       date: bar.date,
       time: bar.time,
+
+      open: bar.open,
+      high: bar.high,
+      low: bar.low,
       close: bar.close,
+      volume: bar.volume,
+      priorClose,
+      avgVolume20,
+
+      closeLocationPct: closeLoc,
+      weakClosePct: closeLoc,
+      isDownDay,
+      isHighVolumeDownDay,
+      highVolumeWeakClose,
+      distributionDay,
+
+      prior10dHigh,
+      prior10dLow,
+      making10dHigh,
+      making10dLow,
+      failedBreakout,
+
       ema10,
       ema20,
       ema50,
@@ -329,31 +446,51 @@ function symbolTrendScore(item) {
 
   const momentumScore = scoreDirect(item.pctChange20d, -5, 5);
 
-  return weightedAvg([
-    { value: emaScore, weight: 0.7 },
-    { value: momentumScore, weight: 0.3 },
-  ]);
+  const distributionPenalty = item.distributionDay === true ? 10 : 0;
+
+  return clamp(
+    weightedAvg([
+      { value: emaScore, weight: 0.7 },
+      { value: momentumScore, weight: 0.3 },
+    ]) - distributionPenalty
+  );
 }
 
 function scoreMarketTrendForDate(symbols) {
   const spyScore = symbolTrendScore(symbols.SPY);
   const qqqScore = symbolTrendScore(symbols.QQQ);
   const iwmScore = symbolTrendScore(symbols.IWM);
+  const mdyScore = symbolTrendScore(symbols.MDY);
   const diaScore = symbolTrendScore(symbols.DIA);
 
+  const indexDistributionDays = ["SPY", "QQQ", "IWM", "MDY"].filter(
+    (symbol) => symbols[symbol]?.distributionDay === true
+  ).length;
+
   const score = weightedAvg([
-    { value: spyScore, weight: 0.35 },
-    { value: qqqScore, weight: 0.35 },
+    { value: spyScore, weight: 0.3 },
+    { value: qqqScore, weight: 0.3 },
     { value: iwmScore, weight: 0.15 },
-    { value: diaScore, weight: 0.15 },
+    { value: mdyScore, weight: 0.15 },
+    { value: diaScore, weight: 0.1 },
   ]);
 
   const warnings = [];
+
   if (symbols.IWM?.aboveEma10 === false || symbols.IWM?.aboveEma20 === false) {
     warnings.push("Small caps lagging short-term trend");
   }
+
+  if (symbols.MDY?.aboveEma10 === false || symbols.MDY?.aboveEma20 === false) {
+    warnings.push("Mid caps lagging short-term trend");
+  }
+
   if (symbols.SPY?.aboveEma20 === false) warnings.push("SPY below Daily EMA20");
   if (symbols.QQQ?.aboveEma20 === false) warnings.push("QQQ below Daily EMA20");
+
+  if (indexDistributionDays >= 2) {
+    warnings.push("Distribution days building across SPY/QQQ/IWM/MDY");
+  }
 
   return {
     score,
@@ -367,11 +504,14 @@ function scoreMarketTrendForDate(symbols) {
       SPY: symbols.SPY,
       QQQ: symbols.QQQ,
       IWM: symbols.IWM,
+      MDY: symbols.MDY,
       DIA: symbols.DIA,
       spyScore,
       qqqScore,
       iwmScore,
+      mdyScore,
       diaScore,
+      indexDistributionDays,
     },
     warnings,
   };
@@ -393,10 +533,14 @@ function bondFragilityScore(item) {
     { value: scoreDirect(item.pctChange50d, -8, 5), weight: 0.2 },
   ]);
 
-  return weightedAvg([
-    { value: trendScore, weight: 0.65 },
-    { value: momentumScore, weight: 0.35 },
-  ]);
+  const distributionPenalty = item.distributionDay === true ? 8 : 0;
+
+  return clamp(
+    weightedAvg([
+      { value: trendScore, weight: 0.65 },
+      { value: momentumScore, weight: 0.35 },
+    ]) - distributionPenalty
+  );
 }
 
 function equityFragilityScore(item) {
@@ -415,10 +559,14 @@ function equityFragilityScore(item) {
     { value: scoreDirect(item.pctChange50d, -12, 8), weight: 0.2 },
   ]);
 
-  return weightedAvg([
-    { value: trendScore, weight: 0.65 },
-    { value: momentumScore, weight: 0.35 },
-  ]);
+  const distributionPenalty = item.distributionDay === true ? 8 : 0;
+
+  return clamp(
+    weightedAvg([
+      { value: trendScore, weight: 0.65 },
+      { value: momentumScore, weight: 0.35 },
+    ]) - distributionPenalty
+  );
 }
 
 function scoreCreditFragilityForDate(symbols) {
@@ -427,30 +575,41 @@ function scoreCreditFragilityForDate(symbols) {
   const lqdScore = bondFragilityScore(symbols.LQD);
   const kreScore = equityFragilityScore(symbols.KRE);
   const iwmScore = equityFragilityScore(symbols.IWM);
+  const mdyScore = equityFragilityScore(symbols.MDY);
 
   const score = weightedAvg([
-    { value: hygScore, weight: 0.25 },
-    { value: jnkScore, weight: 0.25 },
-    { value: lqdScore, weight: 0.15 },
-    { value: kreScore, weight: 0.2 },
-    { value: iwmScore, weight: 0.15 },
+    { value: hygScore, weight: 0.22 },
+    { value: jnkScore, weight: 0.22 },
+    { value: lqdScore, weight: 0.14 },
+    { value: kreScore, weight: 0.18 },
+    { value: iwmScore, weight: 0.12 },
+    { value: mdyScore, weight: 0.12 },
   ]);
 
   const warnings = [];
+
   if (symbols.HYG?.aboveEma20 === false && symbols.HYG?.aboveEma50 === false) {
     warnings.push("HYG below EMA20/EMA50; high-yield credit weakening");
   }
+
   if (symbols.JNK?.aboveEma20 === false && symbols.JNK?.aboveEma50 === false) {
     warnings.push("JNK below EMA20/EMA50; junk-credit fragility rising");
   }
+
   if (symbols.LQD?.aboveEma20 === false && symbols.LQD?.aboveEma50 === false) {
     warnings.push("LQD below EMA20/EMA50; investment-grade bonds under pressure");
   }
+
   if (symbols.KRE?.aboveEma20 === false && symbols.KRE?.aboveEma50 === false) {
     warnings.push("KRE below EMA20/EMA50; regional bank pressure rising");
   }
+
   if (symbols.IWM?.aboveEma20 === false) {
     warnings.push("IWM below EMA20; small-cap borrower/risk appetite weak");
+  }
+
+  if (symbols.MDY?.aboveEma20 === false) {
+    warnings.push("MDY below EMA20; mid-cap risk appetite weak");
   }
 
   return {
@@ -469,11 +628,13 @@ function scoreCreditFragilityForDate(symbols) {
       LQD: symbols.LQD,
       KRE: symbols.KRE,
       IWM: symbols.IWM,
+      MDY: symbols.MDY,
       hygScore,
       jnkScore,
       lqdScore,
       kreScore,
       iwmScore,
+      mdyScore,
     },
     warnings,
   };
@@ -481,6 +642,18 @@ function scoreCreditFragilityForDate(symbols) {
 
 function scoreAiLeadershipForDate(symbols) {
   const symbolScores = {};
+  const validSymbols = AI_LEADERSHIP_SYMBOLS.filter((symbol) => symbols[symbol]?.ok);
+
+  let aiAboveEma10Count = 0;
+  let aiAboveEma20Count = 0;
+  let aiAboveEma50Count = 0;
+  let aiAboveEma200Count = 0;
+  let aiPositive20dCount = 0;
+  let aiMaking10dHighCount = 0;
+  let aiMaking10dLowCount = 0;
+  let aiHighVolumeDownDayCount = 0;
+  let aiWeakCloseCount = 0;
+  let aiFailedBreakoutCount = 0;
 
   for (const symbol of AI_LEADERSHIP_SYMBOLS) {
     const item = symbols[symbol];
@@ -490,6 +663,17 @@ function scoreAiLeadershipForDate(symbols) {
       continue;
     }
 
+    if (item.aboveEma10 === true) aiAboveEma10Count += 1;
+    if (item.aboveEma20 === true) aiAboveEma20Count += 1;
+    if (item.aboveEma50 === true) aiAboveEma50Count += 1;
+    if (item.aboveEma200 === true) aiAboveEma200Count += 1;
+    if (Number(item.pctChange20d) > 0) aiPositive20dCount += 1;
+    if (item.making10dHigh === true) aiMaking10dHighCount += 1;
+    if (item.making10dLow === true) aiMaking10dLowCount += 1;
+    if (item.isHighVolumeDownDay === true) aiHighVolumeDownDayCount += 1;
+    if (Number(item.closeLocationPct) < 35) aiWeakCloseCount += 1;
+    if (item.failedBreakout === true) aiFailedBreakoutCount += 1;
+
     const emaScore =
       boolScore(item.aboveEma10, 20, 0) +
       boolScore(item.aboveEma20, 25, 0) +
@@ -497,31 +681,65 @@ function scoreAiLeadershipForDate(symbols) {
       boolScore(item.aboveEma200, 30, 0);
 
     const momentumScore = scoreDirect(item.pctChange20d, -8, 12);
+    const distributionPenalty =
+      item.distributionDay === true || item.failedBreakout === true ? 10 : 0;
 
-    symbolScores[symbol] = weightedAvg([
-      { value: emaScore, weight: 0.7 },
-      { value: momentumScore, weight: 0.3 },
-    ]);
+    symbolScores[symbol] = clamp(
+      weightedAvg([
+        { value: emaScore, weight: 0.7 },
+        { value: momentumScore, weight: 0.3 },
+      ]) - distributionPenalty
+    );
   }
 
   const score = avg(Object.values(symbolScores));
+  const validCount = validSymbols.length;
+
+  const aiBreadthPct =
+    validCount > 0 ? round((aiAboveEma20Count / validCount) * 100, 2) : null;
+
+  const aiConcentrationRisk =
+    validCount > 0 && aiAboveEma20Count <= Math.max(3, Math.floor(validCount * 0.45));
 
   const warnings = [];
+
   if (symbolScores.NVDA < 60) warnings.push("NVDA leadership weakening");
   if (symbolScores.META < 40) warnings.push("META below major AI leadership trend");
   if (symbolScores.PLTR < 40) warnings.push("PLTR below major AI leadership trend");
+  if (aiConcentrationRisk) warnings.push("AI leadership supportive but narrow");
+  if (aiHighVolumeDownDayCount >= 3) warnings.push("AI leaders showing high-volume down days");
+  if (aiFailedBreakoutCount >= 2) warnings.push("AI leaders showing failed breakout pressure");
+
+  let label = "AI_LEADERSHIP_WEAK";
+  if (score >= 75 && aiAboveEma20Count >= 7 && aiHighVolumeDownDayCount <= 1) {
+    label = "AI_LEADERSHIP_BROAD";
+  } else if (score >= 60 && aiAboveEma20Count >= 5) {
+    label = "AI_LEADERSHIP_SUPPORTIVE_BUT_NARROW";
+  } else if (score >= 45) {
+    label = "AI_LEADERSHIP_FADING";
+  } else {
+    label = "AI_LEADERSHIP_DISTRIBUTING";
+  }
 
   return {
     score,
-    label:
-      score >= 75
-        ? "AI_LEADERSHIP_STRONG"
-        : score >= 55
-          ? "AI_LEADERSHIP_MIXED_SUPPORTIVE"
-          : "AI_LEADERSHIP_WEAK",
+    label,
     inputs: {
       symbolScores,
       symbols,
+      validCount,
+      aiAboveEma10Count,
+      aiAboveEma20Count,
+      aiAboveEma50Count,
+      aiAboveEma200Count,
+      aiPositive20dCount,
+      aiMaking10dHighCount,
+      aiMaking10dLowCount,
+      aiHighVolumeDownDayCount,
+      aiWeakCloseCount,
+      aiFailedBreakoutCount,
+      aiBreadthPct,
+      aiConcentrationRisk,
     },
     warnings,
   };
@@ -532,10 +750,14 @@ function scoreMacroPressureProxyForDate(symbols, aiLeadership) {
   const uso = symbols.USO;
   const uup = symbols.UUP;
   const iwm = symbols.IWM;
+  const mdy = symbols.MDY;
 
   const aiSymbols = AI_LEADERSHIP_SYMBOLS;
   const aiAbove20 = aiSymbols.filter((symbol) => symbols[symbol]?.aboveEma20 === true).length;
   const aiAbove50 = aiSymbols.filter((symbol) => symbols[symbol]?.aboveEma50 === true).length;
+  const aiHighVolumeDownDays = aiSymbols.filter(
+    (symbol) => symbols[symbol]?.isHighVolumeDownDay === true
+  ).length;
 
   const tltTrendScore = weightedAvg([
     { value: boolScore(tlt?.aboveEma20, 100, 0), weight: 0.35 },
@@ -560,35 +782,58 @@ function scoreMacroPressureProxyForDate(symbols, aiLeadership) {
     { value: scoreDirect(iwm?.pctChange20d, -5, 5), weight: 0.3 },
   ]);
 
+  const midCapParticipationScore = weightedAvg([
+    { value: boolScore(mdy?.aboveEma20, 100, 0), weight: 0.45 },
+    { value: boolScore(mdy?.aboveEma50, 100, 0), weight: 0.25 },
+    { value: scoreDirect(mdy?.pctChange20d, -5, 5), weight: 0.3 },
+  ]);
+
   const aiBreadthScore = weightedAvg([
     { value: scoreDirect(aiAbove20, 3, 8), weight: 0.6 },
     { value: scoreDirect(aiAbove50, 3, 8), weight: 0.4 },
   ]);
 
-  const narrowLeadershipScore = weightedAvg([
-    { value: smallCapParticipationScore, weight: 0.45 },
-    { value: aiBreadthScore, weight: 0.55 },
+  const broadParticipationScore = weightedAvg([
+    { value: smallCapParticipationScore, weight: 0.4 },
+    { value: midCapParticipationScore, weight: 0.25 },
+    { value: aiBreadthScore, weight: 0.35 },
   ]);
 
-  const score = weightedAvg([
-    { value: tltTrendScore, weight: 0.25 },
-    { value: oilPressureScore, weight: 0.25 },
-    { value: dollarPressureScore, weight: 0.15 },
-    { value: narrowLeadershipScore, weight: 0.35 },
-  ]);
+  const aiDistributionPenalty = clamp(aiHighVolumeDownDays * 8, 0, 24);
+
+  const score = clamp(
+    weightedAvg([
+      { value: tltTrendScore, weight: 0.25 },
+      { value: oilPressureScore, weight: 0.25 },
+      { value: dollarPressureScore, weight: 0.15 },
+      { value: broadParticipationScore, weight: 0.35 },
+    ]) - aiDistributionPenalty
+  );
 
   const warnings = [];
+
   if (tlt?.aboveEma20 === false && Number(tlt?.pctChange20d) < 0) {
     warnings.push("TLT weak; bond market pressure rising");
   }
+
   if (uso?.aboveEma20 === true && Number(uso?.pctChange20d) >= 5) {
     warnings.push("Oil/energy strength may pressure CPI");
   }
+
   if (aiAbove20 <= 5) {
     warnings.push("AI leadership breadth is narrowing");
   }
+
+  if (aiHighVolumeDownDays >= 3) {
+    warnings.push("AI leadership showing high-volume distribution pressure");
+  }
+
   if (iwm?.aboveEma20 === false) {
     warnings.push("Small caps lagging / narrow leadership risk");
+  }
+
+  if (mdy?.aboveEma20 === false) {
+    warnings.push("Mid caps lagging / broad participation risk");
   }
 
   return {
@@ -608,15 +853,19 @@ function scoreMacroPressureProxyForDate(symbols, aiLeadership) {
       USO: uso,
       UUP: uup,
       IWM: iwm,
+      MDY: mdy,
       aiAbove20,
       aiAbove50,
+      aiHighVolumeDownDays,
       aiLeadershipScore: aiLeadership?.score ?? null,
       tltTrendScore,
       oilPressureScore,
       dollarPressureScore,
       smallCapParticipationScore,
+      midCapParticipationScore,
       aiBreadthScore,
-      narrowLeadershipScore,
+      broadParticipationScore,
+      aiDistributionPenalty,
     },
     warnings,
   };
@@ -713,6 +962,7 @@ async function main() {
   console.log("========================================");
   console.log("Engine 25 ES Replay Proxy Scores Build");
   console.log("Market Trend + Credit Fragility + AI Leadership + Macro Proxy");
+  console.log("v0.6: MDY + volume/distribution fields + AI breadth counts");
   console.log("========================================");
 
   const setupReplay = readJsonSafe(SETUP_REPLAY_FILE, true);
@@ -745,11 +995,17 @@ async function main() {
   const summary = {
     ...setupReplay.summary,
     proxyComponents: {
-      marketTrend: "SPY/QQQ/IWM/DIA",
-      creditFragility: "HYG/JNK/LQD/KRE/IWM",
+      marketTrend: "SPY/QQQ/IWM/MDY/DIA",
+      creditFragility: "HYG/JNK/LQD/KRE/IWM/MDY",
       aiLeadership: AI_LEADERSHIP_SYMBOLS.join("/"),
-      macroPressureProxy: "TLT/USO/UUP/IWM/AI breadth only",
+      macroPressureProxy: "TLT/USO/UUP/IWM/MDY/AI breadth and AI distribution pressure",
     },
+    addedInV06: [
+      "MDY added to marketTrend, creditFragility, and macroPressureProxy.",
+      "Symbol metrics now preserve open/high/low/close/volume.",
+      "Symbol metrics now include avgVolume20, closeLocationPct, weakClosePct, isHighVolumeDownDay, highVolumeWeakClose, and distributionDay.",
+      "AI leadership now includes EMA breadth counts, 10-day high/low counts, high-volume down-day count, weak-close count, failed-breakout count, and concentration risk.",
+    ],
     limitations: [
       "Historical proxy replay does not include FRED yields/rates.",
       "Historical proxy replay does not include FiscalData liquidity.",
@@ -797,8 +1053,7 @@ async function main() {
         symbol: output.symbol,
         timeframe: output.timeframe,
         lookbackTradingDays: output.lookbackTradingDays,
-        constructive20PullbackProxyRead:
-          output.summary.constructive20PullbackProxyRead,
+        symbols: output.source.symbols,
         outputFile: OUTPUT_FILE,
       },
       null,
