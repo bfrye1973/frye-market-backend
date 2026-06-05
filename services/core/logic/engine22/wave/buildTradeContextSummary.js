@@ -452,6 +452,82 @@ function buildActiveW5ExtensionSummary({ waveFibState, waveStack, clusters }) {
   };
 }
 
+function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
+  const lifecycle = waveFibState?.lifecycle || {};
+  const abc = lifecycle?.abcCorrection || null;
+
+  const summary =
+    `${waveStack.message}\n\n` +
+    `${lifecycle.summary || "Lower-degree W5 completion / ABC correction is active."}\n\n` +
+    `This blocks fresh parent W5 continuation. Wait for ABC completion or a new lower-degree W2/W4 setup.`;
+
+  return {
+    headline:
+      lifecycle?.headline ||
+      "LOWER-DEGREE W5 COMPLETE — ABC CORRECTION WATCH",
+    subheadline:
+      "Parent W5 is context only. No fresh long from parent W5 while ABC correction is active.",
+    bias: "BULLISH_CONTEXT_ONLY",
+    action: "WAIT",
+    direction: "NONE",
+    chaseAllowed: false,
+    severity: "warning",
+
+    topCandidate: null,
+    hardInvalidation: null,
+    reclaimLadder: null,
+
+    firstCluster: clusters.firstCluster,
+    nextCluster: clusters.nextCluster,
+
+    lifecycleState: lifecycle?.lifecycleState || null,
+    parentContextOnly: lifecycle?.parentContextOnly === true,
+    tradeableOpportunityBlocked:
+      lifecycle?.tradeableOpportunityBlocked === true,
+    nextAllowedSetup: lifecycle?.nextAllowedSetup || null,
+
+    abcCorrection: abc,
+    abc: abc
+      ? {
+          degree: abc?.degree || null,
+          state: abc?.state || null,
+          a: abc?.a || null,
+          b: abc?.b || null,
+          c: abc?.c || null,
+          range: abc?.range ?? null,
+          reclaimLevels: abc?.reclaimLevels || null,
+          downsideTargets: abc?.downsideTargets || null,
+        }
+      : null,
+
+    reads: {
+      structureRead: waveStack.message,
+      lifecycleRead:
+        lifecycle?.summary ||
+        "Lower-degree W5 completion / ABC correction is active.",
+      abcRead: abc?.active
+        ? `${String(abc.degree || "lower").toUpperCase()} ABC correction is ${abc.state}.`
+        : "No active ABC correction map is available.",
+      actionRead:
+        "No new long from parent W5 context. Wait for ABC completion or a new lower-degree W2/W4 setup.",
+    },
+
+    summary,
+
+    needs:
+      lifecycle?.needs || [
+        "WAIT_FOR_ABC_COMPLETION",
+        "WAIT_FOR_NEW_W2_OR_W4_SETUP",
+        "NO_NEW_LONG_FROM_PARENT_W5_CONTEXT",
+      ],
+
+    reasonCodes: [
+      "TRADE_CONTEXT_SUMMARY_BUILT",
+      ...(lifecycle?.reasonCodes || []),
+    ],
+  };
+}
+
 function buildDefaultSummary({ waveFibState, waveStack, clusters }) {
   return {
     headline: "WAVE/FIB STATE",
@@ -493,6 +569,19 @@ export function buildTradeContextSummary({ waveFibState = null } = {}) {
 
   const waveStack = buildWaveStackSummary(waveFibState);
   const clusters = buildClusterSummary(waveFibState);
+
+  const lifecycle = waveFibState?.lifecycle || null;
+
+  if (lifecycle?.tradeableOpportunityBlocked === true) {
+    return {
+      ok: true,
+      ...buildLifecycleSummary({
+        waveFibState,
+        waveStack,
+        clusters,
+      }),
+    };
+  }
 
   const abc = waveFibState?.abcCorrection || null;
   const risk = waveFibState?.microW4AbcRisk || null;
