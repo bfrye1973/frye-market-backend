@@ -1,4 +1,3 @@
-```js
 // services/core/logic/engine22/opportunity/buildWaveOpportunity.js
 // Engine 22I / 22D — Wave Opportunity Contract Builder
 //
@@ -1196,4 +1195,4 @@ export function buildWaveOpportunity({
 }
 
 export default buildWaveOpportunity;
-```
+
