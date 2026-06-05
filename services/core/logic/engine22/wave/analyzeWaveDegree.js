@@ -504,20 +504,35 @@ const fibProjection = shouldProjectW3
     direction,
     currentPrice: round2(currentPrice),
 
-    anchors: {
-      w1: round2(anchors.w1),
-      w2: round2(anchors.w2),
-      w3: round2(anchors.w3),
-      w4: round2(anchors.w4),
-      w4Source: anchors.w4Source,
-      markedW4: round2(anchors.markedW4),
-      cLow: round2(anchors.cLow),
-      w4Low: round2(anchors.w4Low),
-    },
+anchors: {
+  w1: round2(anchors.w1),
+  w2: round2(anchors.w2),
+  w3: round2(anchors.w3),
+  w4: round2(anchors.w4),
+  w4Source: anchors.w4Source,
+  markedW4: round2(anchors.markedW4),
+  cLow: round2(anchors.cLow),
+  w4Low: round2(anchors.w4Low),
 
-    fibProjection,
-    fibPressure,
-    extensionProgress,
+  // Manual ABC correction levels, if supplied from fib-input.csv LEVEL rows.
+  aLow: round2(block?.aLow),
+  bHigh: round2(block?.bHigh),
+  manualCLow: round2(block?.cLow),
+},
+
+// Manual ABC correction levels copied through from Engine 2.
+// These are read-only context for post-W5 ABC correction mapping.
+aLow: round2(block?.aLow),
+bHigh: round2(block?.bHigh),
+cLow: round2(block?.cLow),
+w4Low: round2(block?.w4Low),
+lowerHighLevel: round2(block?.lowerHighLevel),
+continuationLevel: round2(block?.continuationLevel),
+abcMarks: block?.abcMarks || null,
+
+fibProjection,
+fibPressure,
+extensionProgress,
 
     action: interpreted.action,
     nextExpectedWave: interpreted.nextExpectedWave,
