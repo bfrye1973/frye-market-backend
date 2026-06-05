@@ -3885,11 +3885,19 @@ function getManualLevelRowsFor(args = {}) {
   const { symbol, degree, tf } = args;
 
   return readFibInputRows().filter((row) => {
+    const wave = String(row.wave || "").toUpperCase();
+    const kind = String(row.kind || "").toUpperCase();
+
+    const isLevelRow = kind === "LEVEL";
+    const isAbcRow =
+      wave === "ABC" &&
+      ["A", "B", "C"].includes(kind);
+
     return (
       String(row.symbol || "").toUpperCase() === String(symbol || "").toUpperCase() &&
       String(row.degree || "").toLowerCase() === String(degree || "").toLowerCase() &&
       String(row.tf || "").toLowerCase() === String(tf || "").toLowerCase() &&
-      String(row.kind || "").toUpperCase() === "LEVEL"
+      (isLevelRow || isAbcRow)
     );
   });
 }
@@ -3897,18 +3905,31 @@ function getManualLevelRowsFor(args = {}) {
 function attachManualLevelsToEngine2Block(block, levelRows = []) {
   if (!block || typeof block !== "object") return block;
 
-  const findLevel = (name) => {
-    const row = levelRows.find(
-      (r) => String(r.wave || "").toUpperCase() === name
-    );
+const findLevel = (...names) => {
+  const wanted = names.map((x) => String(x || "").toUpperCase());
 
-    const price = Number(row?.price);
-    return Number.isFinite(price) ? price : null;
-  };
+  const row = levelRows.find((r) => {
+    const wave = String(r.wave || "").toUpperCase();
+    const kind = String(r.kind || "").toUpperCase();
 
-  const aLow = findLevel("A_LOW");
-  const bHigh = findLevel("B_HIGH");
-  const cLow = findLevel("C_LOW");
+    // Existing format:
+    // ES,minute,10m,A_LOW,LEVEL,date,price
+    if (wanted.includes(wave)) return true;
+
+    // New preferred ABC format:
+    // ES,minute,10m,ABC,A,date,price
+    if (wave === "ABC" && wanted.includes(kind)) return true;
+
+    return false;
+  });
+
+  const price = Number(row?.price);
+  return Number.isFinite(price) && price > 0 ? price : null;
+};
+
+const aLow = findLevel("A_LOW", "A");
+const bHigh = findLevel("B_HIGH", "B");
+const cLow = findLevel("C_LOW", "C");
 
   return {
     ...block,
