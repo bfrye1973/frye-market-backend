@@ -448,6 +448,7 @@ function applyIntradayDamage(result, intradayProxyDamage) {
       shortScalps: true,
       swingLongs: false,
       swingShorts: true,
+      riskLevel: "HIGH",
       sizeMultiplier: Math.min(Number(result.esPermission?.sizeMultiplier ?? 0.5), 0.25),
       intradayDamageLabel: label,
       intradayDamageScore: damageScore,
