@@ -969,6 +969,155 @@ export function buildWaveOpportunity({
 } = {}) {
   const waveFibState = engine22WaveStrategy?.waveFibState || null;
 
+  const waveLifecycle = waveFibState?.lifecycle || null;
+
+  if (waveLifecycle?.tradeableOpportunityBlocked === true) {
+    const lifecycleAbc = waveLifecycle?.abcCorrection || null;
+
+    return {
+      ok: true,
+      engine: "engine22.waveOpportunity.v1",
+      source: "engine22.waveLifecycle.v1",
+
+      symbol: waveFibState?.symbol || symbol,
+      strategyId,
+      currentPrice: round2(currentPrice ?? waveFibState?.currentPrice),
+
+      active: false,
+      setupFamily: "PARENT_CONTEXT_ONLY",
+      setupType: "NONE",
+      rawSetup: "NONE",
+      degree: waveLifecycle?.activeCorrectionDegree || null,
+      direction: "NONE",
+
+      readiness: "NO_SETUP",
+      timing: "POST_W5_ABC_CORRECTION",
+      chaseRisk: "BLOCKED",
+
+      parentContextOnly: true,
+      tradeableOpportunityBlocked: true,
+      correctionActive: waveLifecycle?.correctionActive === true,
+      activeCorrectionDegree: waveLifecycle?.activeCorrectionDegree || null,
+      nextAllowedSetup:
+        waveLifecycle?.nextAllowedSetup ||
+        "WAIT_FOR_ABC_COMPLETION_OR_NEW_W2_W4_SETUP",
+
+      abcCorrection: lifecycleAbc,
+
+      waveState: buildWaveState(waveFibState),
+
+      entryZone: {
+        type: "NONE",
+        lo: null,
+        hi: null,
+        trigger: null,
+      },
+
+      invalidation: {
+        price: null,
+        reason:
+          "No fresh parent W5 long continuation while lower-degree W5 completion / ABC correction is active.",
+      },
+
+      targets: {
+        e100: null,
+        e1272: null,
+        e1618: null,
+        e200: null,
+        e2618: null,
+      },
+
+      needs:
+        waveLifecycle?.needs || [
+          "WAIT_FOR_ABC_COMPLETION",
+          "WAIT_FOR_NEW_W2_OR_W4_SETUP",
+          "NO_NEW_LONG_FROM_PARENT_W5_CONTEXT",
+        ],
+
+      reasonCodes:
+        waveLifecycle?.reasonCodes || [
+          "PARENT_W5_CONTEXT_ONLY",
+          "LOWER_DEGREE_W5_COMPLETE",
+          "POST_W5_ABC_MARKS_FOUND",
+          "NO_PARENT_W5_LONG_CONTINUATION_AFTER_LOWER_DEGREE_COMPLETION",
+        ],
+
+      headline:
+        waveLifecycle?.headline ||
+        "LOWER-DEGREE W5 COMPLETE — ABC CORRECTION WATCH",
+
+      summary:
+        waveLifecycle?.summary ||
+        "Parent W5 is context only. No fresh long opportunity until ABC completion or a new lower-degree W2/W4 setup.",
+
+      supportiveContext: {
+        engine16Ready: isEngine16Ready(engine16),
+        engine25Supportive: isEngine25Supportive(engine25Context),
+        marketRegimeSupportive: isMarketRegimeSupportive(marketRegime),
+        armingAllowed: false,
+        armingBlockedReasonCodes: [
+          "PARENT_W5_CONTEXT_ONLY",
+          "LOWER_DEGREE_W5_COMPLETE",
+          "POST_W5_ABC_MARKS_FOUND",
+          "NO_PARENT_W5_LONG_CONTINUATION_AFTER_LOWER_DEGREE_COMPLETION",
+        ],
+      },
+
+      reclaimContext: {
+        postExtensionContext: false,
+        pulledBackFromExtension: false,
+        armingAllowed: false,
+        reclaimAllowed: false,
+        reclaimBlockedReasonCodes: [
+          "PARENT_W5_CONTEXT_ONLY",
+          "WAIT_FOR_ABC_COMPLETION_OR_NEW_W2_W4_SETUP",
+        ],
+      },
+
+      learningContext: {
+        engine: "engine22.waveOpportunityLearningContext.v1",
+        setupType: "NONE",
+        direction: "NONE",
+        timing: "POST_W5_ABC_CORRECTION",
+        readiness: "NO_SETUP",
+        chaseRisk: "BLOCKED",
+        degree: waveLifecycle?.activeCorrectionDegree || null,
+        currentPrice: round2(currentPrice ?? waveFibState?.currentPrice),
+        engine16Ready: isEngine16Ready(engine16),
+        armingAllowed: false,
+        postExtensionReclaimAllowed: false,
+        parentContextOnly: true,
+        tradeableOpportunityBlocked: true,
+        abcCorrectionActive: lifecycleAbc?.active === true,
+      },
+
+      lowerDegreeCompletionGuard: {
+        active: true,
+        source: "engine22.waveLifecycle.v1",
+        reasonCodes: waveLifecycle?.reasonCodes || [],
+        needs: waveLifecycle?.needs || [],
+        summary: waveLifecycle?.summary || null,
+      },
+
+      postW5AbcCorrection: lifecycleAbc,
+
+      debug: {
+        lifecycleState: waveLifecycle?.lifecycleState || null,
+        lifecycleEngine: waveLifecycle?.engine || null,
+        abcCorrectionActive: lifecycleAbc?.active === true,
+        abcCorrectionState: lifecycleAbc?.state || null,
+      },
+
+      debugContextAvailable: {
+        engine16: engine16 ? true : false,
+        engine25Context: engine25Context ? true : false,
+        marketRegime: marketRegime ? true : false,
+        marketMeterContext: marketMeterContext ? true : false,
+        engine5: engine5 ? true : false,
+      },
+    };
+  }
+
   const degree = normalizeDegree(
     engine22WaveStrategy?.activeTradingDegree ||
       waveFibState?.activeTradingDegree
