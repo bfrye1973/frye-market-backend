@@ -223,6 +223,90 @@ function detectMissingMicroNeed(degrees) {
   return false;
 }
 
+function hasParentContextOnlyBlockedOpportunity(engine22WaveStrategy) {
+  const opportunity = engine22WaveStrategy?.waveOpportunity || null;
+
+  return (
+    opportunity?.parentContextOnly === true ||
+    opportunity?.tradeableOpportunityBlocked === true ||
+    String(opportunity?.setupFamily || "").toUpperCase() === "PARENT_CONTEXT_ONLY" ||
+    String(opportunity?.setupType || "").toUpperCase() === "NONE" ||
+    String(opportunity?.readiness || "").toUpperCase() === "NO_SETUP" ||
+    String(opportunity?.direction || "").toUpperCase() === "NONE"
+  );
+}
+
+function buildParentContextOnlyInterpretation({
+  symbol,
+  engine22WaveStrategy,
+  activeDegree,
+  higherDegree,
+  roundedActiveTargets,
+  roundedHigherTargets,
+  multiDegreeContext,
+}) {
+  const opportunity = engine22WaveStrategy?.waveOpportunity || {};
+  const guard = opportunity?.lowerDegreeCompletionGuard || {};
+
+  const completedLowerDegrees = Array.isArray(guard.completedLowerDegrees)
+    ? guard.completedLowerDegrees
+    : [];
+
+  const completedText = completedLowerDegrees.length
+    ? completedLowerDegrees.map((x) => String(x).toUpperCase()).join(", ")
+    : "lower-degree";
+
+  const summary =
+    opportunity?.summary ||
+    `${titleCase(activeDegree || "intermediate")} W5 remains parent context, but lower-degree W5 structure is complete (${completedText}). Current behavior is corrective, not a fresh W5 long. Wait for ABC completion or a new lower-degree W2/W4 setup before re-arming longs.`;
+
+  return {
+    ok: true,
+    engine: ENGINE_NAME,
+    mode: READ_ONLY_MODE,
+    symbol,
+    environment: "PARENT_CONTEXT_ONLY",
+    state: "LOWER_DEGREE_W5_COMPLETE_CORRECTION_WATCH",
+    health: HEALTH.CAUTION,
+    directionBias: "NONE",
+    activeDegree,
+    higherDegreeContext: buildHigherDegreeContext(higherDegree),
+    chaseAllowed: false,
+    preferredEntry: "WAIT_FOR_ABC_COMPLETION_OR_NEW_W2_W4_SETUP",
+    activeTargets: roundedActiveTargets,
+    higherTargets: roundedHigherTargets,
+    parentContextOnly: true,
+    tradeableOpportunityBlocked: true,
+    recentCompletion: multiDegreeContext?.recentCompletion || null,
+    activeStructure: {
+      ...(multiDegreeContext?.activeStructure || {}),
+      setup: opportunity?.rawSetup || engine22WaveStrategy?.activeSetup || null,
+      type: "PARENT_CONTEXT_ONLY",
+      read: "Parent W5 remains context only. Lower-degree tradeable W5 structure is complete.",
+    },
+    higherContext: multiDegreeContext?.higherContext || null,
+    weaknessZones: multiDegreeContext?.weaknessZones || [],
+    waveStack: multiDegreeContext?.waveStack || null,
+    needs: dedupe([
+      "LOWER_DEGREE_RESET_NEEDED",
+      "WAIT_FOR_ABC_COMPLETION",
+      "WAIT_FOR_NEW_W2_OR_W4_SETUP",
+      "NO_NEW_LONG_FROM_PARENT_W5_CONTEXT",
+      ...(Array.isArray(opportunity?.needs) ? opportunity.needs : []),
+    ]),
+    reasonCodes: dedupe([
+      "ENGINE22_PARENT_CONTEXT_ONLY",
+      "LOWER_DEGREE_W5_COMPLETE",
+      "TRADEABLE_OPPORTUNITY_BLOCKED",
+      "NO_NEW_LONG_FROM_PARENT_W5_CONTEXT",
+      "WAIT_FOR_ABC_COMPLETION",
+      "WAIT_FOR_NEW_LOWER_DEGREE_SETUP",
+      ...(Array.isArray(opportunity?.reasonCodes) ? opportunity.reasonCodes : []),
+    ]),
+    summary,
+  };
+}
+
 function buildPullbackTargetsFromFib(fib) {
   const f = fib?.fib || fib?.levels || fib || {};
 
@@ -1590,6 +1674,18 @@ export function interpretWaveEnvironment(input = {}) {
     pullbackTargets: null,
     higherTargets: roundedHigherTargets,
   });
+
+  if (hasParentContextOnlyBlockedOpportunity(engine22WaveStrategy)) {
+  return buildParentContextOnlyInterpretation({
+    symbol,
+    engine22WaveStrategy,
+    activeDegree,
+    higherDegree,
+    roundedActiveTargets,
+    roundedHigherTargets,
+    multiDegreeContext,
+  });
+}
 
   if (
     setupFamily.family === "W2_TO_W3" ||
