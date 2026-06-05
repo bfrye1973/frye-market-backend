@@ -224,9 +224,14 @@ function detectMissingMicroNeed(degrees) {
 }
 
 function hasParentContextOnlyBlockedOpportunity(engine22WaveStrategy) {
+  const lifecycle = engine22WaveStrategy?.waveFibState?.lifecycle || null;
   const opportunity = engine22WaveStrategy?.waveOpportunity || null;
 
   return (
+    lifecycle?.tradeableOpportunityBlocked === true ||
+    lifecycle?.parentContextOnly === true ||
+    lifecycle?.correctionActive === true ||
+    String(lifecycle?.lifecycleState || "").toUpperCase() === "ABC_C_LEG_ACTIVE" ||
     opportunity?.parentContextOnly === true ||
     opportunity?.tradeableOpportunityBlocked === true ||
     String(opportunity?.setupFamily || "").toUpperCase() === "PARENT_CONTEXT_ONLY" ||
@@ -245,11 +250,34 @@ function buildParentContextOnlyInterpretation({
   roundedHigherTargets,
   multiDegreeContext,
 }) {
+  const lifecycle = engine22WaveStrategy?.waveFibState?.lifecycle || null;
   const opportunity = engine22WaveStrategy?.waveOpportunity || {};
   const guard = opportunity?.lowerDegreeCompletionGuard || {};
 
+  const abcCorrection =
+    lifecycle?.abcCorrection ||
+    opportunity?.abcCorrection ||
+    null;
+
+  const lifecycleState =
+    lifecycle?.lifecycleState ||
+    (abcCorrection?.active === true ? "ABC_C_LEG_ACTIVE" : null);
+
+  const correctionActive =
+    lifecycle?.correctionActive === true ||
+    lifecycle?.abcCorrection?.active === true ||
+    opportunity?.abcCorrection?.active === true;
+
+  const activeCorrectionDegree =
+    lifecycle?.activeCorrectionDegree ||
+    lifecycle?.abcCorrection?.degree ||
+    opportunity?.abcCorrection?.degree ||
+    null;
+
   const completedLowerDegrees = Array.isArray(guard.completedLowerDegrees)
     ? guard.completedLowerDegrees
+    : Array.isArray(lifecycle?.completedW5Degrees)
+    ? lifecycle.completedW5Degrees
     : [];
 
   const completedText = completedLowerDegrees.length
@@ -257,6 +285,7 @@ function buildParentContextOnlyInterpretation({
     : "lower-degree";
 
   const summary =
+    lifecycle?.summary ||
     opportunity?.summary ||
     `${titleCase(activeDegree || "intermediate")} W5 remains parent context, but lower-degree W5 structure is complete (${completedText}). Current behavior is corrective, not a fresh W5 long. Wait for ABC completion or a new lower-degree W2/W4 setup before re-arming longs.`;
 
@@ -265,36 +294,51 @@ function buildParentContextOnlyInterpretation({
     engine: ENGINE_NAME,
     mode: READ_ONLY_MODE,
     symbol,
-    environment: "PARENT_CONTEXT_ONLY",
-    state: "LOWER_DEGREE_W5_COMPLETE_CORRECTION_WATCH",
+
+    environment: lifecycleState ? "WAVE_LIFECYCLE" : "PARENT_CONTEXT_ONLY",
+    state: lifecycleState || "LOWER_DEGREE_W5_COMPLETE_CORRECTION_WATCH",
     health: HEALTH.CAUTION,
     directionBias: "NONE",
+
     activeDegree,
     higherDegreeContext: buildHigherDegreeContext(higherDegree),
     chaseAllowed: false,
-    preferredEntry: "WAIT_FOR_ABC_COMPLETION_OR_NEW_W2_W4_SETUP",
+    preferredEntry:
+      lifecycle?.nextAllowedSetup ||
+      "WAIT_FOR_ABC_COMPLETION_OR_NEW_W2_W4_SETUP",
+
     activeTargets: roundedActiveTargets,
     higherTargets: roundedHigherTargets,
+
     parentContextOnly: true,
     tradeableOpportunityBlocked: true,
+    lifecycleState,
+    correctionActive,
+    activeCorrectionDegree,
+    abcCorrection,
+
     recentCompletion: multiDegreeContext?.recentCompletion || null,
     activeStructure: {
       ...(multiDegreeContext?.activeStructure || {}),
       setup: opportunity?.rawSetup || engine22WaveStrategy?.activeSetup || null,
       type: "PARENT_CONTEXT_ONLY",
-      read: "Parent W5 remains context only. Lower-degree tradeable W5 structure is complete.",
+      read: "Parent W5 remains context only. Lower-degree tradeable W5 structure is complete and correction behavior is active.",
     },
     higherContext: multiDegreeContext?.higherContext || null,
     weaknessZones: multiDegreeContext?.weaknessZones || [],
     waveStack: multiDegreeContext?.waveStack || null,
+
     needs: dedupe([
-      "LOWER_DEGREE_RESET_NEEDED",
+      ...(Array.isArray(lifecycle?.needs) ? lifecycle.needs : []),
       "WAIT_FOR_ABC_COMPLETION",
       "WAIT_FOR_NEW_W2_OR_W4_SETUP",
       "NO_NEW_LONG_FROM_PARENT_W5_CONTEXT",
       ...(Array.isArray(opportunity?.needs) ? opportunity.needs : []),
     ]),
+
     reasonCodes: dedupe([
+      ...(Array.isArray(lifecycle?.reasonCodes) ? lifecycle.reasonCodes : []),
+      "ENGINE22_WAVE_LIFECYCLE_CONSUMED",
       "ENGINE22_PARENT_CONTEXT_ONLY",
       "LOWER_DEGREE_W5_COMPLETE",
       "TRADEABLE_OPPORTUNITY_BLOCKED",
@@ -303,10 +347,10 @@ function buildParentContextOnlyInterpretation({
       "WAIT_FOR_NEW_LOWER_DEGREE_SETUP",
       ...(Array.isArray(opportunity?.reasonCodes) ? opportunity.reasonCodes : []),
     ]),
+
     summary,
   };
 }
-
 function buildPullbackTargetsFromFib(fib) {
   const f = fib?.fib || fib?.levels || fib || {};
 
