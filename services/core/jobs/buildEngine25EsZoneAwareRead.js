@@ -653,8 +653,21 @@ function buildZoneState({
       engine4VolumeContext?.absorptionRisk === true ||
       String(engine4VolumeContext?.absorptionRisk || "").toUpperCase().includes("HIGH_VOLUME_POOR_PROGRESS"));
 
-  const accumulationWatch =
-    engine3Constructive && !intradayDistributionActive;
+const engine3ShelfDefense =
+  engine3Constructive &&
+  engine3Reaction?.zoneSource === "ENGINE_1B_ES_SMZ_SHELVES" &&
+  engine3Reaction?.zoneType === "accumulation";
+
+const secondaryShelfDefense =
+  engine3ShelfDefense &&
+  belowInstitutional &&
+  nearestShelf?.inside === true;
+
+const accumulationWatch =
+  engine3Constructive &&
+  !secondaryShelfDefense &&
+  !belowInstitutional &&
+  !intradayDistributionActive;
 
   const distributionRejection =
     engine3Risk || highVolumeRejectionProvisional || intradayDistributionActive;
@@ -718,6 +731,11 @@ function buildZoneState({
 
   if (nearestShelf?.inside) {
     reasonCodes.push(`PRICE_INSIDE_AUTO_${String(nearestShelf.type || "SHELF").toUpperCase()}_SHELF`);
+  }
+
+  if (secondaryShelfDefense) {
+    reasonCodes.push("SECONDARY_AUTO_SHELF_DEFENSE_ACTIVE");
+    reasonCodes.push("MANUAL_INSTITUTIONAL_ZONE_PRIORITY_STILL_CONTROLS");
   }
 
   requiredConfirmation.push("Engine 3 must show reclaim / defense / acceptance improving.");
@@ -849,6 +867,15 @@ function buildZoneState({
       source: accumulationWatch ? "ENGINE3_CONSTRUCTIVE_REACTION" : null,
       stable: true,
     },
+
+    secondaryShelfDefense: {
+      value: secondaryShelfDefense,
+      source: secondaryShelfDefense
+        ? "ENGINE3_CONSTRUCTIVE_REACTION_ON_AUTO_ACCUMULATION_SHELF"
+        : null,
+      stable: true,
+      note: "Secondary auto-shelf defense does not override higher-priority manual institutional support risk.",
+    }, 
 
     distributionRejection: {
       value: distributionRejection,
