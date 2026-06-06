@@ -14,13 +14,18 @@ const PROXY_FILE = path.join(
   "engine25-es-replay-proxy-scores-6mo.json"
 );
 
+const ES_DAILY_TECHNICAL_FILE = path.join(
+  DATA_DIR,
+  "engine25-es-replay-daily-technical-6mo.json"
+);
+
 const OUTPUT_FILE = path.join(
   DATA_DIR,
   "engine25-historical-distribution-pressure-6mo.json"
 );
 
-const ENGINE_NAME = "engine25.historicalDistributionPressure.v0.3";
-const MODEL_TYPE = "HISTORICAL_DISTRIBUTION_PRESSURE_PROXY_VOLUME_V0_3";
+const ENGINE_NAME = "engine25.historicalDistributionPressure.v0.4";
+const MODEL_TYPE = "HISTORICAL_DISTRIBUTION_PRESSURE_PROXY_VOLUME_ES_VOLUME_V0_4";
 
 const AI_SYMBOLS = [
   "NVDA",
@@ -54,10 +59,10 @@ function ensureDataDir() {
   }
 }
 
-function normalizeRows(block) {
+function normalizeRows(block, label = "input") {
   if (Array.isArray(block)) return block;
   if (Array.isArray(block?.rows)) return block.rows;
-  throw new Error("Proxy file does not contain rows.");
+  throw new Error(`${label} file does not contain rows.`);
 }
 
 function safeNumber(value) {
@@ -112,6 +117,18 @@ function scoreDirectPressure(value, calmAbove, pressureBelow) {
   return clamp(((calmAbove - n) / (calmAbove - pressureBelow)) * 100);
 }
 
+function indexRowsByDate(rows) {
+  const map = new Map();
+
+  for (const row of rows || []) {
+    if (row?.date) {
+      map.set(row.date, row);
+    }
+  }
+
+  return map;
+}
+
 function getProxyInputs(row, blockName) {
   return row?.proxyScores?.[blockName]?.inputs || {};
 }
@@ -119,17 +136,13 @@ function getProxyInputs(row, blockName) {
 function getSymbol(row, blockName, symbol) {
   const inputs = getProxyInputs(row, blockName);
 
-  // Normal blocks store symbols directly:
-  // proxyScores.marketTrend.inputs.SPY
-  // proxyScores.creditFragility.inputs.HYG
   if (inputs?.[symbol]) return inputs[symbol];
 
-  // AI leadership stores symbols nested:
-  // proxyScores.aiLeadership.inputs.symbols.NVDA
   if (inputs?.symbols?.[symbol]) return inputs.symbols[symbol];
 
-  // Some future blocks may store symbolScores/details nested.
-  if (inputs?.symbolScores?.[symbol]?.details) return inputs.symbolScores[symbol].details;
+  if (inputs?.symbolScores?.[symbol]?.details) {
+    return inputs.symbolScores[symbol].details;
+  }
 
   return null;
 }
@@ -255,6 +268,111 @@ function scoreSymbolDistribution(item, type = "equity") {
       volumePressure,
       weakClosePressure,
     },
+  };
+}
+
+function scoreEsVolumeDistribution(row, esTechnicalRow) {
+  const read =
+    esTechnicalRow?.esVolumeDistribution ||
+    esTechnicalRow?.daily?.esVolumeDistribution ||
+    null;
+
+  if (!read) {
+    return {
+      score: 50,
+      label: "ES_VOLUME_DISTRIBUTION_UNKNOWN",
+      inputs: {
+        date: row.date,
+        missing: true,
+      },
+      warnings: [],
+    };
+  }
+
+  const state = read.state || "ES_VOLUME_UNKNOWN";
+  const volumeVsAvg20Pct = safeNumber(read.volumeVsAvg20Pct);
+  const closeLocationPct = safeNumber(read.closeLocationPct);
+
+  let score = 15;
+
+  if (read.volumeExpansionIntoSelloff === true) {
+    score = 95;
+  } else if (read.highVolumeWeakClose === true) {
+    score = 88;
+  } else if (read.isHighVolumeDownDay === true) {
+    score = 72;
+  } else if (read.weakClose === true) {
+    score = 58;
+  } else if (read.sellingPressureFading === true) {
+    score = 25;
+  } else if (read.volumeFadeNearSupport === true) {
+    score = 30;
+  }
+
+  if (Number.isFinite(volumeVsAvg20Pct) && volumeVsAvg20Pct >= 50) {
+    score = Math.max(score, 80);
+  }
+
+  if (Number.isFinite(closeLocationPct) && closeLocationPct <= 10) {
+    score = Math.max(score, 70);
+  }
+
+  score = clamp(score);
+
+  const warnings = [...(Array.isArray(read.warnings) ? read.warnings : [])];
+
+  if (read.volumeExpansionIntoSelloff === true) {
+    warnings.push("ES confirms volume expansion into selloff");
+  }
+
+  if (read.highVolumeWeakClose === true) {
+    warnings.push("ES confirms high-volume weak close");
+  }
+
+  if (Number.isFinite(volumeVsAvg20Pct) && volumeVsAvg20Pct >= 50) {
+    warnings.push(`ES volume ${volumeVsAvg20Pct}% above 20-day average`);
+  }
+
+  if (Number.isFinite(closeLocationPct) && closeLocationPct <= 10) {
+    warnings.push("ES closed near the low of its daily range");
+  }
+
+  return {
+    score,
+    label:
+      score >= 85
+        ? "ES_VOLUME_DISTRIBUTION_HIGH"
+        : score >= 65
+          ? "ES_VOLUME_DISTRIBUTION_ELEVATED"
+          : score >= 45
+            ? "ES_VOLUME_DISTRIBUTION_WATCH"
+            : "ES_VOLUME_DISTRIBUTION_LOW",
+    inputs: {
+      date: row.date,
+      esTechnicalDate: esTechnicalRow?.date || null,
+      esClose: esTechnicalRow?.esClose ?? row.esClose ?? null,
+      technicalState:
+        esTechnicalRow?.daily?.technicalState ||
+        row?.daily?.technicalState ||
+        null,
+      state,
+      volume: safeNumber(read.volume),
+      avgVolume20: safeNumber(read.avgVolume20),
+      volumeVsAvg20Pct,
+      priorClose: safeNumber(read.priorClose),
+      closeLocationPct,
+      weakClosePct: safeNumber(read.weakClosePct),
+      isDownDay: read.isDownDay,
+      weakClose: read.weakClose,
+      isHighVolumeDownDay: read.isHighVolumeDownDay,
+      highVolumeWeakClose: read.highVolumeWeakClose,
+      volumeExpansionIntoSelloff: read.volumeExpansionIntoSelloff,
+      sellingPressureFading: read.sellingPressureFading,
+      volumeFadeNearSupport: read.volumeFadeNearSupport,
+      nearCoreSupport: read.nearCoreSupport,
+      rawWarnings: read.warnings || [],
+    },
+    warnings: [...new Set(warnings)],
   };
 }
 
@@ -569,22 +687,25 @@ function scoreSectorDistribution(row) {
   };
 }
 
-function buildDistributionPressure(row) {
+function buildDistributionPressure(row, esTechnicalRow) {
+  const esVolumeDistribution = scoreEsVolumeDistribution(row, esTechnicalRow);
   const indexDistribution = scoreIndexDistribution(row);
   const creditDistribution = scoreCreditDistribution(row);
   const aiDistribution = scoreAiDistribution(row);
   const sectorDistribution = scoreSectorDistribution(row);
 
   const score = weightedAvg([
-    { value: indexDistribution.score, weight: 0.34 },
-    { value: creditDistribution.score, weight: 0.24 },
-    { value: aiDistribution.score, weight: 0.28 },
-    { value: sectorDistribution.score, weight: 0.14 },
+    { value: esVolumeDistribution.score, weight: 0.24 },
+    { value: indexDistribution.score, weight: 0.26 },
+    { value: creditDistribution.score, weight: 0.18 },
+    { value: aiDistribution.score, weight: 0.24 },
+    { value: sectorDistribution.score, weight: 0.08 },
   ]);
 
   const fragileUnderSurface =
     score >= 35 &&
     (
+      esVolumeDistribution.score >= 55 ||
       creditDistribution.score >= 45 ||
       indexDistribution.inputs?.symbolScores?.IWM?.score >= 45 ||
       indexDistribution.inputs?.symbolScores?.MDY?.score >= 45 ||
@@ -593,6 +714,7 @@ function buildDistributionPressure(row) {
     );
 
   const warnings = [
+    ...esVolumeDistribution.warnings,
     ...indexDistribution.warnings,
     ...creditDistribution.warnings,
     ...aiDistribution.warnings,
@@ -613,27 +735,36 @@ function buildDistributionPressure(row) {
               : "DISTRIBUTION_PRESSURE_LOW",
     interpretation:
       score >= 70
-        ? "Institutional selling pressure is high. Avoid blind longs and require strong reclaim confirmation."
+        ? "Institutional selling pressure is high. ES volume, index ETFs, credit, or AI leadership confirm distribution. Avoid blind longs and require strong reclaim confirmation."
         : score >= 50
-          ? "Distribution pressure is elevated. Longs require A+ setup quality and reduced size."
+          ? "Distribution pressure is elevated. ES volume or market internals show selling pressure. Longs require A+ setup quality and reduced size."
           : fragileUnderSurface
-            ? "Market is not in full distribution, but credit, small caps, mid caps, volume distribution, or AI breadth are showing pressure underneath. Longs remain selective and reduced size."
+            ? "Market is not in full distribution, but ES volume, credit, small caps, mid caps, or AI breadth are showing pressure underneath. Longs remain selective and reduced size."
             : score >= 30
               ? "Distribution pressure is normal/mixed. Stay selective."
               : "Distribution pressure is low. Market structure is not showing broad selling pressure.",
     components: {
+      esVolumeDistribution,
       indexDistribution,
       creditDistribution,
       aiDistribution,
       sectorDistribution,
     },
-    warnings: [...new Set(warnings)].slice(0, 30),
+    warnings: [...new Set(warnings)].slice(0, 35),
   };
 }
 
 function buildSummary(rows) {
   const byLabel = rows.reduce((acc, row) => {
     const label = row.distributionPressure?.label || "UNKNOWN";
+    acc[label] = (acc[label] || 0) + 1;
+    return acc;
+  }, {});
+
+  const byEsVolumeLabel = rows.reduce((acc, row) => {
+    const label =
+      row.distributionPressure?.components?.esVolumeDistribution?.label ||
+      "ES_VOLUME_DISTRIBUTION_UNKNOWN";
     acc[label] = (acc[label] || 0) + 1;
     return acc;
   }, {});
@@ -652,6 +783,7 @@ function buildSummary(rows) {
     rows: rows.length,
     avgDistributionPressureScore: avgScore,
     byLabel,
+    byEsVolumeLabel,
     firstRow: rows[0] || null,
     lastRow: rows[rows.length - 1] || null,
   };
@@ -671,12 +803,13 @@ async function main() {
     generatedAtUtc: null,
     source: {
       proxyFile: "engine25-es-replay-proxy-scores-6mo.json",
+      esDailyTechnicalFile: "engine25-es-replay-daily-technical-6mo.json",
       outputFile: "engine25-historical-distribution-pressure-6mo.json",
     },
     limitations: [
-      "v0.3 uses historical proxy scores, ETF trend/momentum data, MDY mid-cap participation, and raw volume-derived distribution-day fields.",
+      "v0.4 uses historical proxy scores, ETF trend/momentum data, MDY mid-cap participation, ETF volume distribution-day fields, AI basket distribution, credit pressure, and ES volume distribution.",
       "Higher distributionPressure score means more institutional selling pressure.",
-      "DISTRIBUTION_PRESSURE_FRAGILE_UNDER_SURFACE is used when score is moderate but credit, small caps, mid caps, volume distribution, or AI breadth show hidden weakness.",
+      "DISTRIBUTION_PRESSURE_FRAGILE_UNDER_SURFACE is used when score is moderate but ES volume, credit, small caps, mid caps, or AI breadth show hidden weakness.",
       "This job does not change live Engine 25 or frontend behavior.",
     ],
     summary: null,
@@ -687,16 +820,29 @@ async function main() {
   try {
     console.log("========================================");
     console.log("Engine 25 Historical Distribution Pressure");
-    console.log("Proxy + MDY + Volume v0.3");
+    console.log("Proxy + MDY + ETF Volume + AI + ES Volume v0.4");
     console.log("========================================");
 
     const proxy = readJsonFile(PROXY_FILE);
-    const proxyRows = normalizeRows(proxy);
+    const proxyRows = normalizeRows(proxy, "Proxy");
+
+    const esDailyTechnical = readJsonFile(ES_DAILY_TECHNICAL_FILE);
+    const esDailyRows = normalizeRows(esDailyTechnical, "ES daily technical");
+    const esDailyByDate = indexRowsByDate(esDailyRows);
 
     console.log("Proxy rows loaded:", proxyRows.length);
+    console.log("ES daily technical rows loaded:", esDailyRows.length);
+
+    const missingEsVolumeDates = [];
 
     const rows = proxyRows.map((row) => {
-      const distributionPressure = buildDistributionPressure(row);
+      const esTechnicalRow = esDailyByDate.get(row.date) || null;
+
+      if (!esTechnicalRow) {
+        missingEsVolumeDates.push(row.date);
+      }
+
+      const distributionPressure = buildDistributionPressure(row, esTechnicalRow);
 
       return {
         date: row.date,
@@ -707,6 +853,9 @@ async function main() {
         esHigh: row.esHigh,
         esLow: row.esLow,
         esClose: row.esClose,
+        esVolume: esTechnicalRow?.esVolume ?? null,
+        esVolumeDistribution:
+          distributionPressure.components?.esVolumeDistribution || null,
         next1dReturnPct: row.next1dReturnPct,
         next3dReturnPct: row.next3dReturnPct,
         next5dReturnPct: row.next5dReturnPct,
@@ -718,7 +867,11 @@ async function main() {
     });
 
     output.rows = rows;
-    output.summary = buildSummary(rows);
+    output.summary = {
+      ...buildSummary(rows),
+      missingEsVolumeDates,
+      missingEsVolumeCount: missingEsVolumeDates.length,
+    };
     output.ok = rows.length > 0;
     output.generatedAtUtc = new Date().toISOString();
     output.finishedAt = output.generatedAtUtc;
@@ -732,6 +885,8 @@ async function main() {
     console.log("Rows:", output.summary.rows);
     console.log("Avg score:", output.summary.avgDistributionPressureScore);
     console.log("By label:", output.summary.byLabel);
+    console.log("By ES volume label:", output.summary.byEsVolumeLabel);
+    console.log("Missing ES volume rows:", output.summary.missingEsVolumeCount);
     console.log("Wrote:", OUTPUT_FILE);
     console.log("========================================");
 
@@ -746,12 +901,16 @@ async function main() {
             avgDistributionPressureScore:
               output.summary.avgDistributionPressureScore,
             byLabel: output.summary.byLabel,
+            byEsVolumeLabel: output.summary.byEsVolumeLabel,
+            missingEsVolumeCount: output.summary.missingEsVolumeCount,
           },
           firstRow: output.summary.firstRow
             ? {
                 date: output.summary.firstRow.date,
                 score: output.summary.firstRow.distributionPressure.score,
                 label: output.summary.firstRow.distributionPressure.label,
+                esVolumeLabel:
+                  output.summary.firstRow.distributionPressure.components?.esVolumeDistribution?.label,
                 interpretation:
                   output.summary.firstRow.distributionPressure.interpretation,
                 warnings: output.summary.firstRow.distributionPressure.warnings,
@@ -762,6 +921,8 @@ async function main() {
                 date: output.summary.lastRow.date,
                 score: output.summary.lastRow.distributionPressure.score,
                 label: output.summary.lastRow.distributionPressure.label,
+                esVolumeLabel:
+                  output.summary.lastRow.distributionPressure.components?.esVolumeDistribution?.label,
                 interpretation:
                   output.summary.lastRow.distributionPressure.interpretation,
                 warnings: output.summary.lastRow.distributionPressure.warnings,
