@@ -118,7 +118,20 @@ function getProxyInputs(row, blockName) {
 
 function getSymbol(row, blockName, symbol) {
   const inputs = getProxyInputs(row, blockName);
-  return inputs?.[symbol] || null;
+
+  // Normal blocks store symbols directly:
+  // proxyScores.marketTrend.inputs.SPY
+  // proxyScores.creditFragility.inputs.HYG
+  if (inputs?.[symbol]) return inputs[symbol];
+
+  // AI leadership stores symbols nested:
+  // proxyScores.aiLeadership.inputs.symbols.NVDA
+  if (inputs?.symbols?.[symbol]) return inputs.symbols[symbol];
+
+  // Some future blocks may store symbolScores/details nested.
+  if (inputs?.symbolScores?.[symbol]?.details) return inputs.symbolScores[symbol].details;
+
+  return null;
 }
 
 function getAiInputs(row) {
