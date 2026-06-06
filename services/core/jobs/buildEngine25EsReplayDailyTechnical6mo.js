@@ -4,11 +4,11 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-const ENGINE = "engine25.esReplayDailyTechnical.v0.3";
+const ENGINE = "engine25.esReplayDailyTechnical.v0.4";
 const SYMBOL = "ES";
 const TIMEFRAME = "1d";
 const LOOKBACK_TRADING_DAYS = 126;
-const FETCH_LIMIT = 180;
+const FETCH_LIMIT = 220;
 
 const BACKEND_BASE =
   process.env.BACKEND_BASE || "https://frye-market-backend-1.onrender.com";
@@ -81,6 +81,33 @@ function ema(values, length) {
   }
 
   return output;
+}
+
+function avgFromBars(bars, index, field, lookback = 20) {
+  const start = Math.max(0, index - lookback);
+  const priorBars = bars.slice(start, index);
+  const values = priorBars
+    .map((bar) => toNumber(bar?.[field], null))
+    .filter(Number.isFinite);
+
+  if (values.length < Math.min(lookback, 10)) return null;
+
+  return round(values.reduce((sum, value) => sum + value, 0) / values.length, 0);
+}
+
+function closeLocationPct(bar) {
+  const high = toNumber(bar?.high, null);
+  const low = toNumber(bar?.low, null);
+  const close = toNumber(bar?.close, null);
+
+  if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+    return null;
+  }
+
+  const range = high - low;
+  if (range <= 0) return 50;
+
+  return round(((close - low) / range) * 100, 2);
 }
 
 function maxDrawdownPctFromClose(currentClose, futureBars) {
@@ -172,6 +199,137 @@ function deriveDailyTechnicalState({
   return "DAILY_MIXED";
 }
 
+function deriveEsVolumeDistributionState({
+  isHighVolumeDownDay,
+  highVolumeWeakClose,
+  volumeExpansionIntoSelloff,
+  sellingPressureFading,
+  volumeFadeNearSupport,
+  weakClose,
+}) {
+  if (volumeExpansionIntoSelloff) return "ES_VOLUME_EXPANSION_SELLOFF";
+  if (highVolumeWeakClose) return "ES_HIGH_VOLUME_WEAK_CLOSE_DISTRIBUTION";
+  if (isHighVolumeDownDay) return "ES_HIGH_VOLUME_DISTRIBUTION";
+  if (weakClose) return "ES_WEAK_CLOSE_DISTRIBUTION";
+  if (sellingPressureFading) return "SELLING_PRESSURE_FADING";
+  if (volumeFadeNearSupport) return "VOLUME_FADE_NEAR_SUPPORT";
+  return "ES_VOLUME_NORMAL";
+}
+
+function buildEsVolumeRead({
+  bars,
+  index,
+  bar,
+  priorBar,
+  dailyTechnicalState,
+  aboveEma20,
+  aboveEma50,
+}) {
+  const volume = toNumber(bar.volume, null);
+  const priorClose = toNumber(priorBar?.close, null);
+  const avgVolume20 = avgFromBars(bars, index, "volume", 20);
+  const closeLoc = closeLocationPct(bar);
+
+  const isDownDay =
+    Number.isFinite(priorClose) && Number.isFinite(bar.close)
+      ? bar.close < priorClose
+      : null;
+
+  const weakClose = Number.isFinite(closeLoc) ? closeLoc < 35 : false;
+
+  const isHighVolumeDownDay =
+    isDownDay === true &&
+    Number.isFinite(volume) &&
+    Number.isFinite(avgVolume20)
+      ? volume > avgVolume20 * 1.1
+      : false;
+
+  const highVolumeWeakClose =
+    isHighVolumeDownDay === true && weakClose === true;
+
+  const volumeExpansionIntoSelloff =
+    isDownDay === true &&
+    Number.isFinite(volume) &&
+    Number.isFinite(avgVolume20) &&
+    Number.isFinite(closeLoc)
+      ? volume > avgVolume20 * 1.2 && closeLoc < 45
+      : false;
+
+  const nearCoreSupport =
+    dailyTechnicalState === "DAILY_TESTING_50EMA_SUPPORT" ||
+    dailyTechnicalState === "DAILY_BELOW_CORE_SUPPORT" ||
+    aboveEma20 === false ||
+    aboveEma50 === false;
+
+  const sellingPressureFading =
+    isDownDay === true &&
+    Number.isFinite(volume) &&
+    Number.isFinite(avgVolume20) &&
+    Number.isFinite(closeLoc)
+      ? volume < avgVolume20 && closeLoc > 40
+      : false;
+
+  const volumeFadeNearSupport =
+    nearCoreSupport === true &&
+    Number.isFinite(volume) &&
+    Number.isFinite(avgVolume20)
+      ? volume < avgVolume20
+      : false;
+
+  const volumeVsAvg20Pct =
+    Number.isFinite(volume) && Number.isFinite(avgVolume20) && avgVolume20 > 0
+      ? round(((volume - avgVolume20) / avgVolume20) * 100, 2)
+      : null;
+
+  const state = deriveEsVolumeDistributionState({
+    isHighVolumeDownDay,
+    highVolumeWeakClose,
+    volumeExpansionIntoSelloff,
+    sellingPressureFading,
+    volumeFadeNearSupport,
+    weakClose,
+  });
+
+  const warnings = [];
+
+  if (volumeExpansionIntoSelloff) {
+    warnings.push("ES volume expanded into selloff with weak close");
+  } else if (highVolumeWeakClose) {
+    warnings.push("ES high-volume weak close distribution");
+  } else if (isHighVolumeDownDay) {
+    warnings.push("ES high-volume down day");
+  } else if (weakClose) {
+    warnings.push("ES weak close location");
+  }
+
+  if (sellingPressureFading) {
+    warnings.push("ES selling pressure fading");
+  }
+
+  if (volumeFadeNearSupport) {
+    warnings.push("ES volume fading near core support");
+  }
+
+  return {
+    state,
+    volume,
+    avgVolume20,
+    volumeVsAvg20Pct,
+    priorClose,
+    closeLocationPct: closeLoc,
+    weakClosePct: closeLoc,
+    isDownDay,
+    weakClose,
+    isHighVolumeDownDay,
+    highVolumeWeakClose,
+    volumeExpansionIntoSelloff,
+    sellingPressureFading,
+    volumeFadeNearSupport,
+    nearCoreSupport,
+    warnings,
+  };
+}
+
 async function fetchEsDailyBars() {
   const res = await fetch(ES_DAILY_URL);
   const text = await res.text();
@@ -242,14 +400,9 @@ function buildReplayRows(allBars) {
     const ema20 = round(ema20Series[globalIndex], 2);
     const ema50 = round(ema50Series[globalIndex], 2);
 
-    const aboveEma10 =
-      ema10 === null ? null : bar.close > ema10;
-
-    const aboveEma20 =
-      ema20 === null ? null : bar.close > ema20;
-
-    const aboveEma50 =
-      ema50 === null ? null : bar.close > ema50;
+    const aboveEma10 = ema10 === null ? null : bar.close > ema10;
+    const aboveEma20 = ema20 === null ? null : bar.close > ema20;
+    const aboveEma50 = ema50 === null ? null : bar.close > ema50;
 
     const distanceToEma20Pct =
       ema20 === null ? null : roundPct(((bar.close - ema20) / bar.close) * 100);
@@ -260,6 +413,18 @@ function buildReplayRows(allBars) {
       ema20,
       ema50,
       aboveEma10,
+      aboveEma20,
+      aboveEma50,
+    });
+
+    const priorBar = normalized[globalIndex - 1] || null;
+
+    const esVolumeDistribution = buildEsVolumeRead({
+      bars: normalized,
+      index: globalIndex,
+      bar,
+      priorBar,
+      dailyTechnicalState,
       aboveEma20,
       aboveEma50,
     });
@@ -297,9 +462,11 @@ function buildReplayRows(allBars) {
       esHigh: bar.high,
       esLow: bar.low,
       esClose: bar.close,
+      esVolume: bar.volume,
 
       daily: {
         close: bar.close,
+        volume: bar.volume,
         ema10,
         ema20,
         ema50,
@@ -308,7 +475,10 @@ function buildReplayRows(allBars) {
         aboveEma50,
         distanceToEma20Pct,
         technicalState: dailyTechnicalState,
+        esVolumeDistribution,
       },
+
+      esVolumeDistribution,
 
       next1dReturnPct,
       next3dReturnPct,
@@ -322,10 +492,14 @@ function buildReplayRows(allBars) {
 
 function buildSummary(rows) {
   const technicalStateCounts = {};
+  const esVolumeStateCounts = {};
 
   for (const row of rows) {
     const state = row.daily?.technicalState || "UNKNOWN";
     technicalStateCounts[state] = (technicalStateCounts[state] || 0) + 1;
+
+    const volumeState = row.esVolumeDistribution?.state || "UNKNOWN";
+    esVolumeStateCounts[volumeState] = (esVolumeStateCounts[volumeState] || 0) + 1;
   }
 
   return {
@@ -335,6 +509,7 @@ function buildSummary(rows) {
     mixedCount: rows.filter((row) => row.outcome5d === "MIXED").length,
     pendingCount: rows.filter((row) => row.outcome5d === "PENDING").length,
     technicalStateCounts,
+    esVolumeStateCounts,
   };
 }
 
@@ -343,7 +518,7 @@ async function main() {
 
   console.log("========================================");
   console.log("Engine 25 ES Replay Daily Technical Build");
-  console.log("ES price truth + daily technical states only");
+  console.log("ES price truth + daily technical + ES volume distribution v0.4");
   console.log("========================================");
 
   const allBars = await fetchEsDailyBars();
@@ -377,6 +552,7 @@ async function main() {
   console.log("Mixed:", summary.mixedCount);
   console.log("Pending:", summary.pendingCount);
   console.log("Technical States:", JSON.stringify(summary.technicalStateCounts));
+  console.log("ES Volume States:", JSON.stringify(summary.esVolumeStateCounts));
   console.log("First Date:", rows[0]?.date || null);
   console.log("Last Date:", rows[rows.length - 1]?.date || null);
   console.log("Wrote:", OUTPUT_FILE);
