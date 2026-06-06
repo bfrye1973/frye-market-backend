@@ -105,8 +105,77 @@ function loadJsonFileSafe(filePath) {
   }
 }
 
+function getPhoenixDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Phoenix",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(date);
+
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return {
+    ymd: `${map.year}-${map.month}-${map.day}`,
+    weekday: map.weekday,
+  };
+}
+
+function ymdToUtcDate(ymd) {
+  if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(String(ymd))) return null;
+  return new Date(`${ymd}T00:00:00Z`);
+}
+
+function addDaysYmd(ymd, days) {
+  const date = ymdToUtcDate(ymd);
+  if (!date) return null;
+
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function getLastCompletedMarketEodDate(now = new Date()) {
+  const { ymd, weekday } = getPhoenixDateParts(now);
+
+  // Weekend handling:
+  // Saturday -> Friday
+  // Sunday   -> Friday
+  if (weekday === "Sat") return addDaysYmd(ymd, -1);
+  if (weekday === "Sun") return addDaysYmd(ymd, -2);
+
+  // During normal weekdays, before the cash session completes,
+  // the latest completed EOD is the prior trading day.
+  const phoenixHour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Phoenix",
+      hour: "2-digit",
+      hour12: false,
+    }).format(now)
+  );
+
+  // Conservative cutoff: before 14:00 Phoenix, use prior trading day.
+  // This avoids marking Engine 25 stale before EOD data has a chance to exist.
+  if (Number.isFinite(phoenixHour) && phoenixHour < 14) {
+    if (weekday === "Mon") return addDaysYmd(ymd, -3);
+    return addDaysYmd(ymd, -1);
+  }
+
+  return ymd;
+}
+
 function computeEngine25FreshnessStatus(modelDate, updatedAt) {
   if (!modelDate && !updatedAt) return "STALE";
+
+  const requiredEodDate = getLastCompletedMarketEodDate();
+
+  if (modelDate && requiredEodDate && modelDate >= requiredEodDate) {
+    return "FRESH";
+  }
+
+  if (modelDate && requiredEodDate) {
+    return "WAITING_FOR_LATEST_EOD_ROW";
+  }
 
   const updatedMs = updatedAt ? Date.parse(updatedAt) : NaN;
   if (Number.isFinite(updatedMs)) {
@@ -118,7 +187,6 @@ function computeEngine25FreshnessStatus(modelDate, updatedAt) {
   if (modelDate) return "ONE_ROW_BEHIND_OK";
   return "STALE";
 }
-
 function loadEngine25Context() {
   const overlayFile = `${DATA_DIR}/engine25-composite-overlay-6mo.json`;
   const zoneAwareFile = `${DATA_DIR}/engine25-es-zone-aware-read.json`;
@@ -161,7 +229,16 @@ function loadEngine25Context() {
   const components = latest.components || {};
   const permissions = latest.permissions || {};
   const updatedAt = overlay?.generatedAtUtc || overlay?.finishedAt || null;
-  const modelDate = latest.date || zoneAware?.context?.latestContextDate || null;
+  const modelDate =
+    latest.latestEodDate ||
+    latest.cashProxyDate ||
+    latest.date ||
+    zoneAware?.context?.latestContextDate ||
+    null;
+
+  const esSessionDate = latest.esSessionDate || latest.date || null;
+  const cashProxyDate = latest.cashProxyDate || latest.latestEodDate || modelDate;
+  const requiredEodDate = getLastCompletedMarketEodDate();
 
   return {
     ok: true,
@@ -232,6 +309,10 @@ function loadEngine25Context() {
       null,
 
     modelDate,
+    latestEodDate: modelDate,
+    esSessionDate,
+    cashProxyDate,
+    requiredEodDate,
     updatedAt,
     freshnessStatus: computeEngine25FreshnessStatus(modelDate, updatedAt),
   };
