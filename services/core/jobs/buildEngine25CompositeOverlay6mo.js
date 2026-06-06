@@ -132,7 +132,53 @@ function deriveOverlayState(score) {
   };
 }
 
+function getNestedDate(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? value
+    : null;
+}
+
+function resolveEodDates(row) {
+  const esSessionDate = getNestedDate(row?.date);
+
+  const qqqDistributionDate = getNestedDate(
+    row?.distributionPressure?.components?.indexDistribution?.inputs?.symbolScores?.QQQ?.details?.date
+  );
+
+  const spyDistributionDate = getNestedDate(
+    row?.distributionPressure?.components?.indexDistribution?.inputs?.symbolScores?.SPY?.details?.date
+  );
+
+  const qqqBreadthDate = getNestedDate(
+    row?.breadthParticipation?.components?.indexParticipation?.inputs?.symbolScores?.QQQ?.details?.date
+  );
+
+  const spyBreadthDate = getNestedDate(
+    row?.breadthParticipation?.components?.indexParticipation?.inputs?.symbolScores?.SPY?.details?.date
+  );
+
+  const cashProxyDate =
+    qqqDistributionDate ||
+    spyDistributionDate ||
+    qqqBreadthDate ||
+    spyBreadthDate ||
+    esSessionDate;
+
+  const dateAlignment =
+    cashProxyDate && esSessionDate && cashProxyDate !== esSessionDate
+      ? "CASH_PROXY_EOD_DIFFERS_FROM_ES_SESSION"
+      : "ES_SESSION_AND_CASH_PROXY_MATCH";
+
+  return {
+    esSessionDate,
+    cashProxyDate,
+    latestEodDate: cashProxyDate,
+    dateAlignment,
+  };
+}
+
 function buildOverlayRow(row) {
+  const eodDates = resolveEodDates(row);
   const macroAwareScore = safeNumber(row.engine25HistoricalScoreMacroAware, 50);
 
   const distributionPressure = safeNumber(
@@ -165,7 +211,11 @@ function buildOverlayRow(row) {
   const overlay = deriveOverlayState(engine25CompositeScore);
 
   return {
-    date: row.date,
+    date: eodDates.latestEodDate,
+    esSessionDate: eodDates.esSessionDate,
+    cashProxyDate: eodDates.cashProxyDate,
+    latestEodDate: eodDates.latestEodDate,
+    dateAlignment: eodDates.dateAlignment,
     time: row.time,
 
     symbol: "ES",
