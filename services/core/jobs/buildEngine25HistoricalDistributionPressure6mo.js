@@ -19,8 +19,8 @@ const OUTPUT_FILE = path.join(
   "engine25-historical-distribution-pressure-6mo.json"
 );
 
-const ENGINE_NAME = "engine25.historicalDistributionPressure.v0.2";
-const MODEL_TYPE = "HISTORICAL_DISTRIBUTION_PRESSURE_PROXY_V0_2";
+const ENGINE_NAME = "engine25.historicalDistributionPressure.v0.3";
+const MODEL_TYPE = "HISTORICAL_DISTRIBUTION_PRESSURE_PROXY_VOLUME_V0_3";
 
 const AI_SYMBOLS = [
   "NVDA",
@@ -35,7 +35,7 @@ const AI_SYMBOLS = [
   "PLTR",
 ];
 
-const INDEX_SYMBOLS = ["SPY", "QQQ", "IWM", "DIA"];
+const INDEX_SYMBOLS = ["SPY", "QQQ", "IWM", "MDY", "DIA"];
 const CREDIT_SYMBOLS = ["HYG", "JNK", "LQD", "KRE"];
 const RISK_ON_SECTORS = ["XLK", "XLY", "XLF", "XLI", "SMH", "IGV"];
 const DEFENSIVE_SECTORS = ["XLP", "XLU", "XLV"];
@@ -121,6 +121,10 @@ function getSymbol(row, blockName, symbol) {
   return inputs?.[symbol] || null;
 }
 
+function getAiInputs(row) {
+  return getProxyInputs(row, "aiLeadership");
+}
+
 function scoreSymbolDistribution(item, type = "equity") {
   if (!item?.ok) {
     return {
@@ -141,6 +145,15 @@ function scoreSymbolDistribution(item, type = "equity") {
   const pctChange20d = safeNumber(item.pctChange20d);
   const pctChange50d = safeNumber(item.pctChange50d);
 
+  const volume = safeNumber(item.volume);
+  const avgVolume20 = safeNumber(item.avgVolume20);
+  const closeLocationPct = safeNumber(item.closeLocationPct);
+  const weakClosePct = safeNumber(item.weakClosePct);
+  const isHighVolumeDownDay = item.isHighVolumeDownDay === true;
+  const highVolumeWeakClose = item.highVolumeWeakClose === true;
+  const distributionDay = item.distributionDay === true;
+  const failedBreakout = item.failedBreakout === true;
+
   const emaPressure = avg([
     boolPenalty(aboveEma10 === false, 22, 0),
     boolPenalty(aboveEma20 === false, 30, 0),
@@ -160,9 +173,23 @@ function scoreSymbolDistribution(item, type = "equity") {
           { value: scoreDirectPressure(pctChange50d, 4.0, -10.0), weight: 0.2 },
         ]);
 
+  const volumePressure = weightedAvg([
+    { value: boolPenalty(isHighVolumeDownDay, 45, 0, 10), weight: 0.35 },
+    { value: boolPenalty(highVolumeWeakClose, 65, 0, 10), weight: 0.35 },
+    { value: boolPenalty(distributionDay, 55, 0, 10), weight: 0.2 },
+    { value: boolPenalty(failedBreakout, 35, 0, 5), weight: 0.1 },
+  ]);
+
+  const weakClosePressure =
+    Number.isFinite(closeLocationPct)
+      ? scoreDirectPressure(closeLocationPct, 65, 20)
+      : 50;
+
   const score = weightedAvg([
-    { value: emaPressure, weight: 0.6 },
-    { value: momentumPressure, weight: 0.4 },
+    { value: emaPressure, weight: 0.42 },
+    { value: momentumPressure, weight: 0.28 },
+    { value: volumePressure, weight: 0.2 },
+    { value: weakClosePressure, weight: 0.1 },
   ]);
 
   const warnings = [];
@@ -177,6 +204,18 @@ function scoreSymbolDistribution(item, type = "equity") {
     warnings.push(`${item.symbol} 20d momentum negative`);
   }
 
+  if (distributionDay) {
+    warnings.push(`${item.symbol} distribution day`);
+  }
+
+  if (highVolumeWeakClose) {
+    warnings.push(`${item.symbol} high-volume weak close`);
+  }
+
+  if (Number.isFinite(closeLocationPct) && closeLocationPct < 35) {
+    warnings.push(`${item.symbol} weak close location`);
+  }
+
   return {
     score,
     warnings,
@@ -184,6 +223,14 @@ function scoreSymbolDistribution(item, type = "equity") {
       symbol: item.symbol,
       date: item.date,
       close: item.close,
+      volume,
+      avgVolume20,
+      closeLocationPct,
+      weakClosePct,
+      isHighVolumeDownDay,
+      highVolumeWeakClose,
+      distributionDay,
+      failedBreakout,
       aboveEma10,
       aboveEma20,
       aboveEma50,
@@ -192,6 +239,8 @@ function scoreSymbolDistribution(item, type = "equity") {
       pctChange50d,
       emaPressure,
       momentumPressure,
+      volumePressure,
+      weakClosePressure,
     },
   };
 }
@@ -208,16 +257,38 @@ function scoreIndexDistribution(row) {
     warnings.push(...read.warnings);
   }
 
+  const indexDistributionDays = ["SPY", "QQQ", "IWM", "MDY"].filter(
+    (symbol) => symbolScores[symbol]?.details?.distributionDay === true
+  ).length;
+
+  const indexHighVolumeWeakCloseCount = ["SPY", "QQQ", "IWM", "MDY"].filter(
+    (symbol) => symbolScores[symbol]?.details?.highVolumeWeakClose === true
+  ).length;
+
+  const indexWeakCloseCount = ["SPY", "QQQ", "IWM", "MDY"].filter((symbol) => {
+    const closeLocationPct = symbolScores[symbol]?.details?.closeLocationPct;
+    return Number.isFinite(closeLocationPct) && closeLocationPct < 35;
+  }).length;
+
+  const indexVolumePressure = clamp(
+    indexDistributionDays * 18 +
+      indexHighVolumeWeakCloseCount * 22 +
+      indexWeakCloseCount * 8
+  );
+
   const score = weightedAvg([
-    { value: symbolScores.SPY?.score, weight: 0.35 },
-    { value: symbolScores.QQQ?.score, weight: 0.35 },
-    { value: symbolScores.IWM?.score, weight: 0.2 },
-    { value: symbolScores.DIA?.score, weight: 0.1 },
+    { value: symbolScores.SPY?.score, weight: 0.3 },
+    { value: symbolScores.QQQ?.score, weight: 0.3 },
+    { value: symbolScores.IWM?.score, weight: 0.16 },
+    { value: symbolScores.MDY?.score, weight: 0.16 },
+    { value: symbolScores.DIA?.score, weight: 0.08 },
+    { value: indexVolumePressure, weight: 0.22 },
   ]);
 
   const spy = symbolScores.SPY?.details;
   const qqq = symbolScores.QQQ?.details;
   const iwm = symbolScores.IWM?.details;
+  const mdy = symbolScores.MDY?.details;
 
   if (spy?.aboveEma20 === false && qqq?.aboveEma20 === false) {
     warnings.push("SPY and QQQ both below EMA20");
@@ -231,6 +302,22 @@ function scoreIndexDistribution(row) {
     warnings.push("IWM underperforming SPY; small-cap participation weak");
   }
 
+  if (
+    Number.isFinite(mdy?.pctChange20d) &&
+    Number.isFinite(spy?.pctChange20d) &&
+    mdy.pctChange20d < spy.pctChange20d - 2
+  ) {
+    warnings.push("MDY underperforming SPY; mid-cap participation weak");
+  }
+
+  if (indexDistributionDays >= 2) {
+    warnings.push("Distribution days building across SPY/QQQ/IWM/MDY");
+  }
+
+  if (indexHighVolumeWeakCloseCount >= 2) {
+    warnings.push("High-volume weak closes building across index ETFs");
+  }
+
   return {
     score,
     label:
@@ -241,7 +328,13 @@ function scoreIndexDistribution(row) {
           : score >= 30
             ? "INDEX_DISTRIBUTION_NORMAL"
             : "INDEX_DISTRIBUTION_LOW",
-    inputs: symbolScores,
+    inputs: {
+      symbolScores,
+      indexDistributionDays,
+      indexHighVolumeWeakCloseCount,
+      indexWeakCloseCount,
+      indexVolumePressure,
+    },
     warnings: [...new Set(warnings)],
   };
 }
@@ -293,12 +386,17 @@ function scoreCreditDistribution(row) {
 }
 
 function scoreAiDistribution(row) {
+  const aiInputs = getAiInputs(row);
   const symbolScores = {};
   const warnings = [];
 
   let above20Count = 0;
   let above50Count = 0;
   let validCount = 0;
+  let highVolumeDownDayCount = safeNumber(aiInputs.aiHighVolumeDownDayCount);
+  let weakCloseCount = safeNumber(aiInputs.aiWeakCloseCount);
+  let failedBreakoutCount = safeNumber(aiInputs.aiFailedBreakoutCount);
+  let aiBreadthPct = safeNumber(aiInputs.aiBreadthPct);
 
   for (const symbol of AI_SYMBOLS) {
     const item = getSymbol(row, "aiLeadership", symbol);
@@ -315,6 +413,29 @@ function scoreAiDistribution(row) {
     warnings.push(...read.warnings);
   }
 
+  if (!Number.isFinite(highVolumeDownDayCount)) {
+    highVolumeDownDayCount = AI_SYMBOLS.filter(
+      (symbol) => symbolScores[symbol]?.details?.isHighVolumeDownDay === true
+    ).length;
+  }
+
+  if (!Number.isFinite(weakCloseCount)) {
+    weakCloseCount = AI_SYMBOLS.filter((symbol) => {
+      const closeLocationPct = symbolScores[symbol]?.details?.closeLocationPct;
+      return Number.isFinite(closeLocationPct) && closeLocationPct < 35;
+    }).length;
+  }
+
+  if (!Number.isFinite(failedBreakoutCount)) {
+    failedBreakoutCount = AI_SYMBOLS.filter(
+      (symbol) => symbolScores[symbol]?.details?.failedBreakout === true
+    ).length;
+  }
+
+  if (!Number.isFinite(aiBreadthPct) && validCount > 0) {
+    aiBreadthPct = Number(((above20Count / validCount) * 100).toFixed(2));
+  }
+
   const avgLeaderPressure = avg(Object.values(symbolScores).map((item) => item.score));
 
   const breadthPressure =
@@ -322,13 +443,30 @@ function scoreAiDistribution(row) {
       ? clamp(100 - ((above20Count / validCount) * 60 + (above50Count / validCount) * 40))
       : 50;
 
+  const aiVolumeDistributionPressure = clamp(
+    highVolumeDownDayCount * 10 + weakCloseCount * 7 + failedBreakoutCount * 8
+  );
+
   const score = weightedAvg([
-    { value: avgLeaderPressure, weight: 0.65 },
-    { value: breadthPressure, weight: 0.35 },
+    { value: avgLeaderPressure, weight: 0.5 },
+    { value: breadthPressure, weight: 0.25 },
+    { value: aiVolumeDistributionPressure, weight: 0.25 },
   ]);
 
   if (above20Count <= 5) {
     warnings.push("AI leadership breadth narrowing");
+  }
+
+  if (highVolumeDownDayCount >= 3) {
+    warnings.push("AI leadership high-volume down days building");
+  }
+
+  if (weakCloseCount >= 4) {
+    warnings.push("AI leadership weak closes building");
+  }
+
+  if (failedBreakoutCount >= 2) {
+    warnings.push("AI leadership failed breakouts building");
   }
 
   if (symbolScores.NVDA?.details?.aboveEma20 === false) {
@@ -350,7 +488,12 @@ function scoreAiDistribution(row) {
       validCount,
       above20Count,
       above50Count,
+      aiBreadthPct,
+      highVolumeDownDayCount,
+      weakCloseCount,
+      failedBreakoutCount,
       breadthPressure,
+      aiVolumeDistributionPressure,
       avgLeaderPressure,
     },
     warnings: [...new Set(warnings)],
@@ -420,18 +563,20 @@ function buildDistributionPressure(row) {
   const sectorDistribution = scoreSectorDistribution(row);
 
   const score = weightedAvg([
-    { value: indexDistribution.score, weight: 0.3 },
-    { value: creditDistribution.score, weight: 0.25 },
-    { value: aiDistribution.score, weight: 0.25 },
-    { value: sectorDistribution.score, weight: 0.2 },
+    { value: indexDistribution.score, weight: 0.34 },
+    { value: creditDistribution.score, weight: 0.24 },
+    { value: aiDistribution.score, weight: 0.28 },
+    { value: sectorDistribution.score, weight: 0.14 },
   ]);
 
   const fragileUnderSurface =
     score >= 35 &&
     (
       creditDistribution.score >= 45 ||
-      indexDistribution.inputs?.IWM?.score >= 45 ||
-      aiDistribution.inputs?.breadthPressure >= 45
+      indexDistribution.inputs?.symbolScores?.IWM?.score >= 45 ||
+      indexDistribution.inputs?.symbolScores?.MDY?.score >= 45 ||
+      aiDistribution.inputs?.breadthPressure >= 45 ||
+      aiDistribution.inputs?.aiVolumeDistributionPressure >= 35
     );
 
   const warnings = [
@@ -459,7 +604,7 @@ function buildDistributionPressure(row) {
         : score >= 50
           ? "Distribution pressure is elevated. Longs require A+ setup quality and reduced size."
           : fragileUnderSurface
-            ? "Market is not in full distribution, but weak borrowers, small caps, credit ETFs, or AI breadth are showing pressure underneath. Longs remain selective and reduced size."
+            ? "Market is not in full distribution, but credit, small caps, mid caps, volume distribution, or AI breadth are showing pressure underneath. Longs remain selective and reduced size."
             : score >= 30
               ? "Distribution pressure is normal/mixed. Stay selective."
               : "Distribution pressure is low. Market structure is not showing broad selling pressure.",
@@ -469,7 +614,7 @@ function buildDistributionPressure(row) {
       aiDistribution,
       sectorDistribution,
     },
-    warnings: [...new Set(warnings)].slice(0, 25),
+    warnings: [...new Set(warnings)].slice(0, 30),
   };
 }
 
@@ -516,10 +661,9 @@ async function main() {
       outputFile: "engine25-historical-distribution-pressure-6mo.json",
     },
     limitations: [
-      "v0.2 uses historical proxy scores and ETF trend/momentum data.",
-      "No raw volume distribution day calculation yet because proxy rows do not expose daily volume in the current sample.",
+      "v0.3 uses historical proxy scores, ETF trend/momentum data, MDY mid-cap participation, and raw volume-derived distribution-day fields.",
       "Higher distributionPressure score means more institutional selling pressure.",
-      "DISTRIBUTION_PRESSURE_FRAGILE_UNDER_SURFACE is used when score is moderate but credit, small caps, or AI breadth show hidden weakness.",
+      "DISTRIBUTION_PRESSURE_FRAGILE_UNDER_SURFACE is used when score is moderate but credit, small caps, mid caps, volume distribution, or AI breadth show hidden weakness.",
       "This job does not change live Engine 25 or frontend behavior.",
     ],
     summary: null,
@@ -530,7 +674,7 @@ async function main() {
   try {
     console.log("========================================");
     console.log("Engine 25 Historical Distribution Pressure");
-    console.log("Proxy-based v0.2");
+    console.log("Proxy + MDY + Volume v0.3");
     console.log("========================================");
 
     const proxy = readJsonFile(PROXY_FILE);
