@@ -415,23 +415,79 @@ function buildSymbolMetrics(symbol, rawBars) {
   };
 }
 
-function findMetricOnOrBeforeDate(symbolMetrics, date) {
-  const metrics = symbolMetrics?.metrics || [];
-  let selected = null;
+function daysBetweenYmd(a, b) {
+  if (!a || !b) return null;
 
-  for (const metric of metrics) {
-    if (metric.date && metric.date <= date) {
-      selected = metric;
-    } else if (metric.date && metric.date > date) {
-      break;
+  const aMs = Date.parse(`${a}T00:00:00Z`);
+  const bMs = Date.parse(`${b}T00:00:00Z`);
+
+  if (!Number.isFinite(aMs) || !Number.isFinite(bMs)) return null;
+
+  return Math.round((bMs - aMs) / (24 * 60 * 60 * 1000));
+}
+
+function findMetricForEsSessionDate(symbolMetrics, esDate) {
+  const metrics = symbolMetrics?.metrics || [];
+
+  if (!metrics.length) {
+    return {
+      ok: false,
+      symbol: symbolMetrics?.symbol || null,
+      date: esDate,
+      esDate,
+      proxyDateUsed: null,
+      proxyDateOffsetDays: null,
+      dateAlignment: "NO_METRICS",
+      error: "No metrics available",
+    };
+  }
+
+  const exact = metrics.find((metric) => metric.date === esDate) || null;
+
+  const nextCashSession =
+    metrics.find((metric) => {
+      const diff = daysBetweenYmd(esDate, metric.date);
+      return Number.isFinite(diff) && diff >= 1 && diff <= 3;
+    }) || null;
+
+  let selected = nextCashSession || exact || null;
+
+  if (!selected) {
+    for (const metric of metrics) {
+      if (metric.date && metric.date <= esDate) {
+        selected = metric;
+      } else if (metric.date && metric.date > esDate) {
+        break;
+      }
     }
   }
 
-  return selected || {
-    ok: false,
-    symbol: symbolMetrics?.symbol || null,
-    date,
-    error: "No metric available on or before date",
+  if (!selected) {
+    return {
+      ok: false,
+      symbol: symbolMetrics?.symbol || null,
+      date: esDate,
+      esDate,
+      proxyDateUsed: null,
+      proxyDateOffsetDays: null,
+      dateAlignment: "NO_METRIC_ON_OR_BEFORE_ES_DATE",
+      error: "No metric available for ES session date",
+    };
+  }
+
+  const offset = daysBetweenYmd(esDate, selected.date);
+
+  return {
+    ...selected,
+    esDate,
+    proxyDateUsed: selected.date,
+    proxyDateOffsetDays: offset,
+    dateAlignment:
+      offset === 0
+        ? "EXACT_ES_DATE"
+        : offset > 0
+          ? "NEXT_CASH_SESSION_FOR_ES_FUTURES_DATE"
+          : "PRIOR_CASH_SESSION_FALLBACK",
   };
 }
 
@@ -876,7 +932,7 @@ function scoreProxyComponentsForRow(row, symbolMetricMap) {
 
   const symbols = {};
   for (const symbol of ALL_SYMBOLS) {
-    symbols[symbol] = findMetricOnOrBeforeDate(symbolMetricMap[symbol], date);
+    symbols[symbol] = findMetricForEsSessionDate(symbolMetricMap[symbol], date);
   }
 
   const marketTrend = scoreMarketTrendForDate(symbols);
