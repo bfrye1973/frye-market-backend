@@ -22,6 +22,11 @@ const ZONE_READ_FILE = path.join(
   "engine25-es-zone-aware-read.json"
 );
 
+const MARKET_HEALTH_FILE = path.join(
+  DATA_DIR,
+  "engine25-market-health.json"
+);
+
 function readJsonFile(filePath) {
   if (!fs.existsSync(filePath)) return null;
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -183,7 +188,10 @@ function buildUnderTheHoodComparison({ current, oneDayAgo, threeDaysAgo }) {
   ];
 
   const esChange = diff(c.esClose, d1.esClose);
-  const compositeChange = diff(c.engine25CompositeScore, d1.engine25CompositeScore);
+  const compositeChange = diff(
+    c.engine25CompositeScore,
+    d1.engine25CompositeScore
+  );
   const breadthChange = diff(
     c.components?.breadthParticipation,
     d1.components?.breadthParticipation
@@ -233,10 +241,59 @@ function buildUnderTheHoodComparison({ current, oneDayAgo, threeDaysAgo }) {
   };
 }
 
+function buildLiveMarketHealthSummary(marketHealth) {
+  if (!marketHealth) return null;
+
+  return {
+    score: marketHealth.score ?? null,
+    regime: marketHealth.regime ?? null,
+    bias: marketHealth.bias ?? null,
+    riskLevel: marketHealth.riskLevel ?? null,
+    updatedAt: marketHealth.updatedAt || marketHealth.generatedAtUtc || null,
+  };
+}
+
+function buildDeskNote({ zoneRead, underTheHood, current, intradayProxyDamage, liveEsPermission }) {
+  const intradayLabel = intradayProxyDamage?.label || null;
+  const liveMode = liveEsPermission?.mode || null;
+
+  if (intradayLabel === "INTRADAY_DISTRIBUTION_ACTIVE") {
+    return [
+      "Engine 25 daily/EOD read is risk-off and the live intraday layer confirms active distribution.",
+      liveMode
+        ? `Live ES permission: ${normalizePermission(liveMode)}.`
+        : null,
+      "Normal ES longs should stay blocked until reclaim, seller exhaustion, or a separate Engine 22 / Engine 6 confirmation appears.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  if (intradayLabel === "INTRADAY_DAMAGE_ELEVATED") {
+    return [
+      "Engine 25 daily/EOD read is available, but intraday damage is elevated.",
+      liveMode
+        ? `Live ES permission: ${normalizePermission(liveMode)}.`
+        : null,
+      "Require A+ confirmation before improving ES long permission.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return (
+    zoneRead?.plainEnglish ||
+    underTheHood?.interpretation ||
+    current?.overlayInterpretation ||
+    "Engine 25 market-health read is available."
+  );
+}
+
 router.get("/engine25/full-dashboard", (_req, res) => {
   try {
     const composite = readJsonFile(COMPOSITE_FILE);
     const zoneRead = readJsonFile(ZONE_READ_FILE);
+    const marketHealth = readJsonFile(MARKET_HEALTH_FILE);
 
     if (!composite) {
       return res.status(404).json({
@@ -267,42 +324,81 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       threeDaysAgo,
     });
 
+    const intradayProxyDamage = marketHealth?.intradayProxyDamage || null;
+    const liveEsPermission = marketHealth?.esPermission || null;
+    const liveTradePermission = marketHealth?.tradePermission || null;
+    const liveMarketHealth = buildLiveMarketHealthSummary(marketHealth);
+
     const headline = {
       score: current.engine25CompositeScore,
       state: current.overlayState,
       label: current.overlayLabel,
       color: current.overlayColor,
-      date: current.date,
+
+      // Daily / EOD date contract
+      date: current.latestEodDate || current.cashProxyDate || current.date,
+      latestEodDate: current.latestEodDate || current.cashProxyDate || current.date,
+      cashProxyDate: current.cashProxyDate || current.latestEodDate || current.date,
+      esSessionDate: current.esSessionDate || current.date,
+      dateAlignment: current.dateAlignment || null,
+
       esClose: current.esClose,
+
+      // Daily / EOD permission
       permission: current.permissions?.finalPermission || null,
       permissionText: normalizePermission(current.permissions?.finalPermission),
       size: current.permissions?.finalSize ?? null,
+
+      // Live / intraday permission summary
+      livePermission: liveEsPermission?.mode || liveTradePermission?.engine22Mode || null,
+      livePermissionText: normalizePermission(
+        liveEsPermission?.mode || liveTradePermission?.engine22Mode
+      ),
+      liveSize:
+        liveEsPermission?.sizeMultiplier ??
+        liveTradePermission?.sizeMultiplier ??
+        null,
+
       interpretation: current.overlayInterpretation,
     };
 
-    const deskNote =
-      zoneRead?.plainEnglish ||
-      underTheHood.interpretation ||
-      current.overlayInterpretation ||
-      "Engine 25 market-health read is available.";
+    const deskNote = buildDeskNote({
+      zoneRead,
+      underTheHood,
+      current,
+      intradayProxyDamage,
+      liveEsPermission,
+    });
 
     return res.json({
       ok: true,
-      engine: "engine25.fullDashboard.v0.1",
+      engine: "engine25.fullDashboard.v0.2",
       modelType: "ENGINE25_FULL_DASHBOARD_VIEW",
       generatedAtUtc: new Date().toISOString(),
       source: {
         compositeFile: "engine25-composite-overlay-6mo.json",
         zoneReadFile: "engine25-es-zone-aware-read.json",
+        marketHealthFile: "engine25-market-health.json",
       },
+
+      // Daily / EOD read
       headline,
       componentBreakdown,
       underTheHood,
+
+      // Live / intraday read
+      intradayProxyDamage,
+      liveEsPermission,
+      liveTradePermission,
+      liveMarketHealth,
+
       zoneRead: zoneRead || null,
+
       overlay: {
         summary: composite.summary || null,
         rows,
       },
+
       deskNote,
     });
   } catch (err) {
