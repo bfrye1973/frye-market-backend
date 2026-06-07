@@ -24,12 +24,22 @@ const STEPS = [
     name: "engine25_es_zone_aware_read",
     job: "buildEngine25EsZoneAwareRead.js",
   },
+  {
+    name: "engine25_sector_card_proxy_breadth",
+    job: "snapshotEngine25SectorCardBreadth.js",
+  },
+  {
+    name: "engine25_zone_classification",
+    job: "buildEngine25ZoneClassification.js",
+  },
 ];
 
 const REQUIRED_FILES = [
   "engine25-historical-replay-macro-distribution-breadth-6mo.json",
   "engine25-composite-overlay-6mo.json",
   "engine25-es-zone-aware-read.json",
+  "engine25-sector-card-breadth-snapshots.json",
+  "engine25-zone-classification.json",
 ];
 
 let IS_RUNNING = false;
