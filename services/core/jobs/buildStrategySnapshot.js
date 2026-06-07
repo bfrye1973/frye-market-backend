@@ -3381,6 +3381,22 @@ const zoneContext = buildZoneContext(
     s.strategyId === "intraday_scalp@10m";
 
   if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
+    // Engine 22 Lifecycle source-of-truth handoff:
+    // Build the FULL Engine 2 state here and pass that same object into
+    // both the legacy scalp compatibility read and the new wave strategy.
+    //
+    // Do not rely on the per-strategy Engine 2 block named `engine2`.
+    // Engine 22 lifecycle needs the full degree stack:
+    // primary / intermediate / minor / minute / micro.
+    let engine22Engine2State = null;
+
+    try {
+      engine22Engine2State = await buildEngine2State(symbol);
+    } catch (err) {
+      console.error("[E22 ENGINE2 STATE BUILD ERROR]", err);
+      engine22Engine2State = null;
+    }
+
     try {
       engine22Scalp = computeEngine22ScalpOpportunity({
         symbol,
@@ -3389,7 +3405,7 @@ const zoneContext = buildZoneContext(
         engine16,
         reaction: patchedConfluence?.context?.reaction || null,
         waveReaction: reaction?.waveReaction || null,
-        engine2State,
+        engine2State: engine22Engine2State,
         marketMind,
         marketMeter,
 
@@ -3442,7 +3458,7 @@ const zoneContext = buildZoneContext(
         symbol,
         strategyId: s.strategyId,
         tf: s.tf,
-        engine2State,
+        engine2State: engine22Engine2State,
 
         // IMPORTANT:
         // Pre-Engine15 build. Engine 22 waveOpportunity must be independent
@@ -3453,13 +3469,13 @@ const zoneContext = buildZoneContext(
         marketMeter,
         regimeLayers: engine22Scalp?.regimeLayers || null,
 
-       // Engine 22F read-only supportive context.
-       // Used only for WATCH -> ARMING lifecycle.
-       // Must not create READY, GO, ALLOW, or execution.
-       engine25Context,
-       marketRegime,
-       marketMeterContext: marketMind || null,
-       engine5: engine5Analytics || patchedConfluence || null,
+        // Engine 22F read-only supportive context.
+        // Used only for WATCH -> ARMING lifecycle.
+        // Must not create READY, GO, ALLOW, or execution.
+        engine25Context,
+        marketRegime,
+        marketMeterContext: marketMind || null,
+        engine5: engine5Analytics || patchedConfluence || null,
 
         reactionContext:
           patchedConfluence?.context?.reaction ||
