@@ -3392,8 +3392,6 @@ const zoneContext = buildZoneContext(
         engine2State,
         marketMind,
         marketMeter,
-        marketRegime,
-        engine25Context,
 
         reactionContext:
           patchedConfluence?.context?.reaction ||
@@ -3692,9 +3690,7 @@ const zoneContext = buildZoneContext(
             waveReaction: reaction?.waveReaction || null,
             engine2State,
             marketMind,
-            marketMeter, 
-            marketRegime,
-            engine25Context,
+            marketMeter,
 
            // Engine 3 reaction-quality route for Engine 22 timeline.
            reactionContext: spyReactionQuality?.engine3Reaction || spyReactionQuality || null,
