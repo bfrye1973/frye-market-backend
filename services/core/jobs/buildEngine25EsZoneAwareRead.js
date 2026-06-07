@@ -449,9 +449,77 @@ function computeShortTermRead(bars) {
 }
 
 function getLatestContext(contextFile) {
-  const context = readJsonFile(contextFile);
-  const rows = normalizeRows(context, "Macro + distribution + breadth replay");
-  return rows[rows.length - 1] || null;
+  const context = readJsonFileOptional(contextFile);
+
+  if (context) {
+    try {
+      const rows = normalizeRows(context, "Macro + distribution + breadth replay");
+      const latest = rows[rows.length - 1] || null;
+
+      if (latest) {
+        return {
+          ...latest,
+          contextSource: "HISTORICAL_REPLAY_MACRO_DISTRIBUTION_BREADTH",
+        };
+      }
+    } catch {
+      // fall through to live fallback
+    }
+  }
+
+  const marketHealth = readJsonFileOptional(MARKET_HEALTH_FILE);
+
+  return {
+    date:
+      marketHealth?.latestEodDate ||
+      marketHealth?.modelDate ||
+      marketHealth?.date ||
+      new Date().toISOString().slice(0, 10),
+
+    engine25HistoricalScoreMacroAware:
+      marketHealth?.score ??
+      marketHealth?.components?.macroAwareScore ??
+      null,
+
+    distributionPressure: {
+      score:
+        marketHealth?.components?.distributionPressure ??
+        marketHealth?.distributionPressure?.score ??
+        null,
+      label:
+        marketHealth?.distributionPressure?.label ||
+        "DISTRIBUTION_PRESSURE_LIVE_FALLBACK",
+      interpretation:
+        "Historical replay file was unavailable, so Engine 25G used live market-health fallback context.",
+    },
+
+    breadthParticipation: {
+      score:
+        marketHealth?.components?.breadthParticipation ??
+        marketHealth?.breadthParticipation?.score ??
+        null,
+      label:
+        marketHealth?.breadthParticipation?.label ||
+        "BREADTH_PARTICIPATION_LIVE_FALLBACK",
+      interpretation:
+        "Historical replay file was unavailable, so Engine 25G used live market-health fallback context.",
+    },
+
+    historicalEsPermissionMacroDistributionBreadthAware:
+      marketHealth?.esPermission?.mode ||
+      marketHealth?.permission ||
+      "A_PLUS_ONLY_LIVE_FALLBACK",
+
+    macroDistributionBreadthAwareSizeMultiplier:
+      marketHealth?.esPermission?.sizeMultiplier ??
+      marketHealth?.sizeMultiplier ??
+      null,
+
+    contextSource: "LIVE_MARKET_HEALTH_FALLBACK",
+    warnings: [
+      "Historical macro/distribution/breadth replay file missing. Used live Engine 25 market-health fallback.",
+    ],
+  };
 }
 
 function getLatestDailyTechnical() {
@@ -1196,7 +1264,9 @@ async function main() {
 
     output.context = {
       latestContextDate: latestContext?.date || null,
-      macroAwareScore: latestContext?.engine25HistoricalScoreMacroAware ?? null,
+      contextSource: latestContext?.contextSource || null,
+      warnings: latestContext?.warnings || [],
+      macroAwareScore: latestContext?.engine25HistoricalScoreMacroAware ?? null, 
       distributionPressure: latestContext?.distributionPressure
         ? {
             score: latestContext.distributionPressure.score,
