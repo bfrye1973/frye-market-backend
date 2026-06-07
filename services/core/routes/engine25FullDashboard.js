@@ -32,6 +32,11 @@ const SECTOR_BREADTH_FILE = path.join(
   "engine25-sector-card-breadth-snapshots.json"
 );
 
+const ZONE_CLASSIFICATION_FILE = path.join(
+  DATA_DIR,
+  "engine25-zone-classification.json"
+);
+
 function readJsonFile(filePath) {
   if (!fs.existsSync(filePath)) return null;
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -442,6 +447,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const zoneRead = readJsonFile(ZONE_READ_FILE);
     const marketHealth = readJsonFile(MARKET_HEALTH_FILE);
     const sectorBreadthRaw = readJsonFile(SECTOR_BREADTH_FILE);
+    const zoneClassification = readJsonFile(ZONE_CLASSIFICATION_FILE);
 
     if (!composite) {
       return res.status(404).json({
@@ -534,11 +540,12 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       engine: "engine25.fullDashboard.v0.3",
       modelType: "ENGINE25_FULL_DASHBOARD_VIEW",
       generatedAtUtc: new Date().toISOString(),
-      source: {
+      source: {       
         compositeFile: "engine25-composite-overlay-6mo.json",
         zoneReadFile: "engine25-es-zone-aware-read.json",
         marketHealthFile: "engine25-market-health.json",
         sectorBreadthFile: "engine25-sector-card-breadth-snapshots.json",
+        zoneClassificationFile: "engine25-zone-classification.json",
       },
 
       headline,
@@ -554,6 +561,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       zoneDecisionRead,
 
       sectorBreadth,
+      zoneClassification: zoneClassification || null,
 
       overlay: {
         summary: composite.summary || null,
