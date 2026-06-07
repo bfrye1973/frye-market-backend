@@ -473,9 +473,6 @@ async function main() {
   console.log("\n[Engine25Full] Computing market health...");
   runNodeJob("jobs/updateEngine25MarketHealth.js");
 
-  console.log("\n[Engine25Full] Building ES zone-aware read...");
-  runNodeJob("jobs/buildEngine25EsZoneAwareRead.js");
-
   console.log("\n[Engine25Full] Snapshotting sector-card proxy breadth...");
   runNodeJob("jobs/snapshotEngine25SectorCardBreadth.js");
 
@@ -495,7 +492,6 @@ async function main() {
   console.log("- data/engine25-es-technical-context.json");  
   console.log("- data/engine25-feed-validation.json");
   console.log("- data/engine25-market-health.json");
-  console.log("- data/engine25-es-zone-aware-read.json");
   console.log("- data/engine25-sector-card-breadth-snapshots.json");
   console.log("- data/engine25-zone-classification.json");
   console.log("- data/engine25-es-overlay.json");  
