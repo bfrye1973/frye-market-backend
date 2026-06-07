@@ -473,6 +473,9 @@ async function main() {
   console.log("\n[Engine25Full] Computing market health...");
   runNodeJob("jobs/updateEngine25MarketHealth.js");
 
+  console.log("\n[Engine25Full] Building ES zone-aware read...");
+  runNodeJob("jobs/buildEngine25EsZoneAwareRead.js");
+
   console.log("\n[Engine25Full] Snapshotting sector-card proxy breadth...");
   runNodeJob("jobs/snapshotEngine25SectorCardBreadth.js");
 
