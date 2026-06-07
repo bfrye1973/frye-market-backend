@@ -3887,6 +3887,8 @@ export function computeEngine22ScalpOpportunity({
   engine2State = null,
   marketMind = null,
   marketMeter = null,
+  marketRegime = null,
+  engine25Context = null,
   engine1Context = null,
   reactionContext = null,
   volumeContext = null,
@@ -4062,6 +4064,8 @@ supportedSetups: {
     regimeLayers,
     reactionContext,
     volumeContext,
+    engine25Context,
+    marketRegime,
   });
 
   const timelineRead = buildTimelineRead({
