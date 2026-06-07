@@ -130,6 +130,69 @@ function buildComponentBreakdown(row) {
   ];
 }
 
+function buildLiveComponentBreakdown(marketHealth) {
+  const components = marketHealth?.components || {};
+
+  return [
+    {
+      key: "labor",
+      label: "Labor",
+      score: safeNumber(components.labor),
+      color: scoreColor(components.labor),
+      direction: "higher_is_better",
+    },
+    {
+      key: "creditStress",
+      label: "Credit Stress",
+      score: safeNumber(components.creditStress),
+      color: scoreColor(components.creditStress),
+      direction: "higher_is_better",
+    },
+    {
+      key: "creditFragility",
+      label: "Credit Fragility",
+      score: safeNumber(components.creditFragility),
+      color: scoreColor(components.creditFragility),
+      direction: "higher_is_better",
+    },
+    {
+      key: "liquidity",
+      label: "Liquidity",
+      score: safeNumber(components.liquidity),
+      color: scoreColor(components.liquidity),
+      direction: "higher_is_better",
+    },
+    {
+      key: "marketTrend",
+      label: "Market Trend",
+      score: safeNumber(components.marketTrend),
+      color: scoreColor(components.marketTrend),
+      direction: "higher_is_better",
+    },
+    {
+      key: "distributionPressure",
+      label: "Distribution Pressure",
+      score: safeNumber(components.distributionPressure),
+      color: scoreColor(components.distributionPressure, true),
+      direction: "lower_is_better",
+    },
+    {
+      key: "breadthParticipation",
+      label: "Breadth Participation",
+      score: safeNumber(components.breadthParticipation),
+      color: scoreColor(components.breadthParticipation),
+      direction: "higher_is_better",
+    },
+    {
+      key: "aiLeadership",
+      label: "AI Leadership",
+      score: safeNumber(components.aiLeadership),
+      color: scoreColor(components.aiLeadership),
+      direction: "higher_is_better",
+    },
+  ];
+}
+
 function pickComparisonRow(rows, offsetFromEnd) {
   if (!Array.isArray(rows) || !rows.length) return null;
   return rows[Math.max(0, rows.length - 1 - offsetFromEnd)] || null;
@@ -251,6 +314,47 @@ function buildUnderTheHoodComparison({ current, oneDayAgo, threeDaysAgo }) {
   };
 }
 
+function buildLiveFallbackUnderTheHood(marketHealth) {
+  return {
+    rows: [
+      {
+        label: "Live Score",
+        current: marketHealth?.score ?? null,
+        oneDayAgo: null,
+        oneDayChange: null,
+        threeDaysAgo: null,
+        threeDayChange: null,
+      },
+      {
+        label: "Live Regime",
+        current: marketHealth?.regime || null,
+        oneDayAgo: null,
+        oneDayChange: null,
+        threeDaysAgo: null,
+        threeDayChange: null,
+      },
+      {
+        label: "Live Bias",
+        current: marketHealth?.bias || null,
+        oneDayAgo: null,
+        oneDayChange: null,
+        threeDaysAgo: null,
+        threeDayChange: null,
+      },
+      {
+        label: "Live Risk Level",
+        current: marketHealth?.riskLevel || null,
+        oneDayAgo: null,
+        oneDayChange: null,
+        threeDaysAgo: null,
+        threeDayChange: null,
+      },
+    ],
+    interpretation:
+      "Daily composite overlay is unavailable, so Engine 25 is using live market-health fallback data for the dashboard headline.",
+  };
+}
+
 function buildLiveMarketHealthSummary(marketHealth) {
   if (!marketHealth) return null;
 
@@ -294,7 +398,9 @@ function buildSectorBreadthSummary(raw) {
     historicalSectorCardBreadthAvailable:
       raw?.historicalSectorCardBreadthAvailable === true,
     disabledReason:
-      raw?.disabledReason || latest.disabledReason || "NO_HISTORICAL_SECTOR_CARD_SNAPSHOTS",
+      raw?.disabledReason ||
+      latest.disabledReason ||
+      "NO_HISTORICAL_SECTOR_CARD_SNAPSHOTS",
     sourceType: raw?.sourceType || latest.sourceType || "sectorCardProxyBreadth",
     latest,
     tactical1h: latest.tactical1h || null,
@@ -441,6 +547,70 @@ function buildDeskNote({
   return parts.filter(Boolean).join(" ");
 }
 
+function buildFallbackHeadline({
+  marketHealth,
+  liveEsPermission,
+  liveTradePermission,
+  sectorBreadth,
+  zoneDecisionRead,
+}) {
+  const livePermission =
+    liveEsPermission?.mode || liveTradePermission?.engine22Mode || null;
+
+  return {
+    score: marketHealth?.score ?? null,
+    state: marketHealth?.regime || "LIVE_MARKET_HEALTH_FALLBACK",
+    label: marketHealth?.bias || marketHealth?.riskLevel || "Live market health fallback",
+    color: scoreColor(marketHealth?.score),
+
+    date:
+      marketHealth?.latestEodDate ||
+      marketHealth?.date ||
+      marketHealth?.updatedAt ||
+      marketHealth?.generatedAtUtc ||
+      null,
+    latestEodDate: marketHealth?.latestEodDate || marketHealth?.date || null,
+    cashProxyDate: marketHealth?.cashProxyDate || marketHealth?.date || null,
+    esSessionDate: marketHealth?.esSessionDate || marketHealth?.date || null,
+    requiredEodDate: marketHealth?.requiredEodDate || null,
+    dateAlignment: marketHealth?.dateAlignment || "COMPOSITE_OVERLAY_MISSING",
+
+    esClose:
+      marketHealth?.esClose ||
+      marketHealth?.esTechnicalContext?.latestClose ||
+      null,
+
+    permission:
+      livePermission || marketHealth?.permission || marketHealth?.bias || null,
+    permissionText: normalizePermission(
+      livePermission || marketHealth?.permission || marketHealth?.bias
+    ),
+    size:
+      liveEsPermission?.sizeMultiplier ??
+      liveTradePermission?.sizeMultiplier ??
+      marketHealth?.sizeMultiplier ??
+      null,
+
+    livePermission,
+    livePermissionText: normalizePermission(livePermission),
+    liveSize:
+      liveEsPermission?.sizeMultiplier ??
+      liveTradePermission?.sizeMultiplier ??
+      null,
+
+    sectorBreadthLabel: sectorBreadth?.combinedRead?.label || null,
+    sectorBreadthScore: sectorBreadth?.combinedRead?.score ?? null,
+    sectorBreadthPermissionImpact:
+      sectorBreadth?.combinedRead?.permissionImpact || null,
+
+    zoneState: zoneDecisionRead.label,
+    zonePermission: zoneDecisionRead.permission,
+
+    interpretation:
+      "Daily composite overlay is unavailable. Engine 25 is using live market-health fallback while preserving sector breadth, zone classification, and zone-aware context.",
+  };
+}
+
 router.get("/engine25/full-dashboard", (_req, res) => {
   try {
     const composite = readJsonFile(COMPOSITE_FILE);
@@ -449,34 +619,12 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const sectorBreadthRaw = readJsonFile(SECTOR_BREADTH_FILE);
     const zoneClassification = readJsonFile(ZONE_CLASSIFICATION_FILE);
 
-    if (!composite) {
-      return res.status(404).json({
-        ok: false,
-        error: "missing_engine25_composite_overlay",
-        message:
-          "Missing engine25-composite-overlay-6mo.json. Run Engine 25 full pipeline first.",
-      });
-    }
+    const rows = Array.isArray(composite?.rows) ? composite.rows : [];
+    const dailyCompositeAvailable = Boolean(composite && rows.length);
 
-    const rows = Array.isArray(composite.rows) ? composite.rows : [];
-
-    if (!rows.length) {
-      return res.status(404).json({
-        ok: false,
-        error: "empty_engine25_composite_overlay",
-      });
-    }
-
-    const current = pickComparisonRow(rows, 0);
-    const oneDayAgo = pickComparisonRow(rows, 1);
-    const threeDaysAgo = pickComparisonRow(rows, 3);
-
-    const componentBreakdown = buildComponentBreakdown(current);
-    const underTheHood = buildUnderTheHoodComparison({
-      current,
-      oneDayAgo,
-      threeDaysAgo,
-    });
+    const current = dailyCompositeAvailable ? pickComparisonRow(rows, 0) : null;
+    const oneDayAgo = dailyCompositeAvailable ? pickComparisonRow(rows, 1) : null;
+    const threeDaysAgo = dailyCompositeAvailable ? pickComparisonRow(rows, 3) : null;
 
     const intradayProxyDamage = marketHealth?.intradayProxyDamage || null;
     const liveEsPermission = marketHealth?.esPermission || null;
@@ -486,45 +634,67 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const sectorBreadth = buildSectorBreadthSummary(sectorBreadthRaw);
     const zoneDecisionRead = buildZoneDecisionRead(zoneRead);
 
-    const headline = {
-      score: current.engine25CompositeScore,
-      state: current.overlayState,
-      label: current.overlayLabel,
-      color: current.overlayColor,
+    const componentBreakdown = dailyCompositeAvailable
+      ? buildComponentBreakdown(current)
+      : buildLiveComponentBreakdown(marketHealth);
 
-      date: current.latestEodDate || current.cashProxyDate || current.date,
-      latestEodDate: current.latestEodDate || current.cashProxyDate || current.date,
-      cashProxyDate: current.cashProxyDate || current.latestEodDate || current.date,
-      esSessionDate: current.esSessionDate || current.date,
-      requiredEodDate: current.requiredEodDate || null,
-      dateAlignment: current.dateAlignment || null,
+    const underTheHood = dailyCompositeAvailable
+      ? buildUnderTheHoodComparison({
+          current,
+          oneDayAgo,
+          threeDaysAgo,
+        })
+      : buildLiveFallbackUnderTheHood(marketHealth);
 
-      esClose: current.esClose,
+    const headline = dailyCompositeAvailable
+      ? {
+          score: current.engine25CompositeScore,
+          state: current.overlayState,
+          label: current.overlayLabel,
+          color: current.overlayColor,
 
-      permission: current.permissions?.finalPermission || null,
-      permissionText: normalizePermission(current.permissions?.finalPermission),
-      size: current.permissions?.finalSize ?? null,
+          date: current.latestEodDate || current.cashProxyDate || current.date,
+          latestEodDate:
+            current.latestEodDate || current.cashProxyDate || current.date,
+          cashProxyDate:
+            current.cashProxyDate || current.latestEodDate || current.date,
+          esSessionDate: current.esSessionDate || current.date,
+          requiredEodDate: current.requiredEodDate || null,
+          dateAlignment: current.dateAlignment || null,
 
-      livePermission:
-        liveEsPermission?.mode || liveTradePermission?.engine22Mode || null,
-      livePermissionText: normalizePermission(
-        liveEsPermission?.mode || liveTradePermission?.engine22Mode
-      ),
-      liveSize:
-        liveEsPermission?.sizeMultiplier ??
-        liveTradePermission?.sizeMultiplier ??
-        null,
+          esClose: current.esClose,
 
-      sectorBreadthLabel: sectorBreadth?.combinedRead?.label || null,
-      sectorBreadthScore: sectorBreadth?.combinedRead?.score ?? null,
-      sectorBreadthPermissionImpact:
-        sectorBreadth?.combinedRead?.permissionImpact || null,
+          permission: current.permissions?.finalPermission || null,
+          permissionText: normalizePermission(current.permissions?.finalPermission),
+          size: current.permissions?.finalSize ?? null,
 
-      zoneState: zoneDecisionRead.label,
-      zonePermission: zoneDecisionRead.permission,
+          livePermission:
+            liveEsPermission?.mode || liveTradePermission?.engine22Mode || null,
+          livePermissionText: normalizePermission(
+            liveEsPermission?.mode || liveTradePermission?.engine22Mode
+          ),
+          liveSize:
+            liveEsPermission?.sizeMultiplier ??
+            liveTradePermission?.sizeMultiplier ??
+            null,
 
-      interpretation: current.overlayInterpretation,
-    };
+          sectorBreadthLabel: sectorBreadth?.combinedRead?.label || null,
+          sectorBreadthScore: sectorBreadth?.combinedRead?.score ?? null,
+          sectorBreadthPermissionImpact:
+            sectorBreadth?.combinedRead?.permissionImpact || null,
+
+          zoneState: zoneDecisionRead.label,
+          zonePermission: zoneDecisionRead.permission,
+
+          interpretation: current.overlayInterpretation,
+        }
+      : buildFallbackHeadline({
+          marketHealth,
+          liveEsPermission,
+          liveTradePermission,
+          sectorBreadth,
+          zoneDecisionRead,
+        });
 
     const deskNote = buildDeskNote({
       zoneRead,
@@ -537,10 +707,19 @@ router.get("/engine25/full-dashboard", (_req, res) => {
 
     return res.json({
       ok: true,
-      engine: "engine25.fullDashboard.v0.3",
+      engine: "engine25.fullDashboard.v0.4",
       modelType: "ENGINE25_FULL_DASHBOARD_VIEW",
       generatedAtUtc: new Date().toISOString(),
-      source: {       
+
+      dailyCompositeAvailable,
+      compositeFallbackActive: !dailyCompositeAvailable,
+      compositeFallbackReason: dailyCompositeAvailable
+        ? null
+        : composite
+          ? "EMPTY_ENGINE25_COMPOSITE_OVERLAY"
+          : "MISSING_ENGINE25_COMPOSITE_OVERLAY",
+
+      source: {
         compositeFile: "engine25-composite-overlay-6mo.json",
         zoneReadFile: "engine25-es-zone-aware-read.json",
         marketHealthFile: "engine25-market-health.json",
@@ -564,8 +743,9 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       zoneClassification: zoneClassification || null,
 
       overlay: {
-        summary: composite.summary || null,
-        rows,
+        available: dailyCompositeAvailable,
+        summary: dailyCompositeAvailable ? composite.summary || null : null,
+        rows: dailyCompositeAvailable ? rows : [],
       },
 
       deskNote,
