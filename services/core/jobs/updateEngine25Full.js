@@ -476,6 +476,9 @@ async function main() {
   console.log("\n[Engine25Full] Snapshotting sector-card proxy breadth...");
   runNodeJob("jobs/snapshotEngine25SectorCardBreadth.js");
 
+  console.log("\n[Engine25Full] Building zone accumulation/distribution classification...");
+  runNodeJob("jobs/buildEngine25ZoneClassification.js");
+
   console.log("[Engine25Full] Building ES overlay...");
   runNodeJob("jobs/buildEngine25EsOverlay.js");
 
@@ -490,7 +493,8 @@ async function main() {
   console.log("- data/engine25-feed-validation.json");
   console.log("- data/engine25-market-health.json");
   console.log("- data/engine25-sector-card-breadth-snapshots.json");
-  console.log("- data/engine25-es-overlay.json");
+  console.log("- data/engine25-zone-classification.json");
+  console.log("- data/engine25-es-overlay.json");  
   console.log("========================================");
 }
 
