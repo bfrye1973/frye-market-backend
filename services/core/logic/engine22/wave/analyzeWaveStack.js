@@ -357,8 +357,6 @@ export function analyzeWaveStack({
   regimeLayers = null,
   reactionContext = null,
   volumeContext = null,
-  engine25Context = null,
-  marketRegime = null,
   snapshotNow = null,
   currentTimeSec = null,
   barsByTf = {},
@@ -512,8 +510,8 @@ export function analyzeWaveStack({
     waveFibState: partialWaveFibState,
     currentPrice,
     engine16: regimeLayers,
-    engine25Context,
-    marketRegime,
+    engine25Context: null,
+    marketRegime: null,
   });
 
   partialWaveFibState.lifecycle = lifecycle;
