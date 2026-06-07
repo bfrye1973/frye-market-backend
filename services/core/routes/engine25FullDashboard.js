@@ -27,6 +27,11 @@ const MARKET_HEALTH_FILE = path.join(
   "engine25-market-health.json"
 );
 
+const SECTOR_BREADTH_FILE = path.join(
+  DATA_DIR,
+  "engine25-sector-card-breadth-snapshots.json"
+);
+
 function readJsonFile(filePath) {
   if (!fs.existsSync(filePath)) return null;
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -253,40 +258,182 @@ function buildLiveMarketHealthSummary(marketHealth) {
   };
 }
 
-function buildDeskNote({ zoneRead, underTheHood, current, intradayProxyDamage, liveEsPermission }) {
+function buildSectorBreadthSummary(raw) {
+  const latest = raw?.latest || null;
+
+  if (!latest) {
+    return {
+      available: false,
+      sourceFile: "engine25-sector-card-breadth-snapshots.json",
+      historicalSectorCardBreadthAvailable: false,
+      disabledReason: "NO_HISTORICAL_SECTOR_CARD_SNAPSHOTS",
+      latest: null,
+      tactical1h: null,
+      regime4h: null,
+      combinedRead: {
+        available: false,
+        score: null,
+        label: "SECTOR_CARD_BREADTH_UNAVAILABLE",
+        permissionImpact: "NO_IMPACT_DATA_UNAVAILABLE",
+        reasonCodes: ["NO_SECTOR_CARD_BREADTH_SNAPSHOT"],
+      },
+    };
+  }
+
+  return {
+    available: true,
+    sourceFile: "engine25-sector-card-breadth-snapshots.json",
+    engine: raw?.engine || null,
+    latestSnapshotDate: raw?.latestSnapshotDate || latest.date || null,
+    latestSnapshotKey: raw?.latestSnapshotKey || latest.snapshotKey || null,
+    historicalSectorCardBreadthAvailable:
+      raw?.historicalSectorCardBreadthAvailable === true,
+    disabledReason:
+      raw?.disabledReason || latest.disabledReason || "NO_HISTORICAL_SECTOR_CARD_SNAPSHOTS",
+    sourceType: raw?.sourceType || latest.sourceType || "sectorCardProxyBreadth",
+    latest,
+    tactical1h: latest.tactical1h || null,
+    regime4h: latest.regime4h || null,
+    combinedRead: latest.combinedRead || null,
+  };
+}
+
+function buildZoneDecisionRead(zoneRead) {
+  const zs = zoneRead?.zoneState || null;
+
+  if (!zs) {
+    return {
+      available: false,
+      label: "ZONE_READ_UNAVAILABLE",
+      permission: "UNKNOWN",
+      priorityRead: "No zone-aware read is available yet.",
+      nextConfirmation: [],
+    };
+  }
+
+  const nextConfirmation = [];
+
+  if (zs.failureInstitutional !== null && zs.failureInstitutional !== undefined) {
+    nextConfirmation.push({
+      label: "Reclaim institutional floor",
+      level: zs.failureInstitutional,
+      note: "First repair level after losing manual institutional value.",
+    });
+  }
+
+  if (zs.reclaimNegotiated !== null && zs.reclaimNegotiated !== undefined) {
+    nextConfirmation.push({
+      label: "Reclaim negotiated value",
+      level: zs.reclaimNegotiated,
+      note: "Better signal that value is being accepted again.",
+    });
+  }
+
+  if (zs.reclaimInstitutional !== null && zs.reclaimInstitutional !== undefined) {
+    nextConfirmation.push({
+      label: "Reclaim institutional high",
+      level: zs.reclaimInstitutional,
+      note: "Stronger confirmation above the manual institutional zone.",
+    });
+  }
+
+  nextConfirmation.push({
+    label: "Engine 6 final permission",
+    level: null,
+    note: "Engine 25 is context only. Engine 6 remains final trade referee.",
+  });
+
+  let priorityRead = "Engine 25 is reading current zone context.";
+
+  if (zs.secondaryShelfDefense?.value === true) {
+    priorityRead =
+      "Manual institutional zone controls. Auto accumulation shelf defense is secondary and does not override manual zone risk.";
+  } else if (zs.accumulationWatch?.value === true) {
+    priorityRead =
+      "Engine 3 reaction is constructive enough for accumulation watch, but reclaim confirmation is still required.";
+  } else if (zs.state === "INSTITUTIONAL_SUPPORT_AT_RISK") {
+    priorityRead =
+      "ES is below manual institutional support. No blind longs until value is reclaimed.";
+  } else if (zs.state === "FAILED_RECLAIM_WEAK_CLOSE") {
+    priorityRead =
+      "Engine 25 has a provisional failed-reclaim / weak-close read. Treat longs as blocked until reclaim.";
+  }
+
+  return {
+    available: true,
+    label: zs.state || "UNKNOWN",
+    permission: zs.permission || "UNKNOWN",
+    tone: zs.tone || null,
+    priorityRead,
+    nextConfirmation,
+    secondaryShelfDefense: zs.secondaryShelfDefense || null,
+    accumulationWatch: zs.accumulationWatch || null,
+    failedReclaim: zs.failedReclaim || null,
+    weakClose: zs.weakClose || null,
+    highVolumeRejection: zs.highVolumeRejection || null,
+    zoneAwareVolumeAvailable: zs.zoneAwareVolumeAvailable === true,
+    zoneAwareVolumeSource: zs.zoneAwareVolumeSource || null,
+    engine3Reaction: zs.engine3Reaction || null,
+    engine4VolumeContext: zs.engine4VolumeContext || null,
+    reasonCodes: Array.isArray(zs.reasonCodes) ? zs.reasonCodes : [],
+  };
+}
+
+function buildDeskNote({
+  zoneRead,
+  sectorBreadth,
+  underTheHood,
+  current,
+  intradayProxyDamage,
+  liveEsPermission,
+}) {
   const intradayLabel = intradayProxyDamage?.label || null;
   const liveMode = liveEsPermission?.mode || null;
+  const sectorCombined = sectorBreadth?.combinedRead || null;
+  const sectorImpact = sectorCombined?.permissionImpact || null;
+
+  const parts = [];
 
   if (intradayLabel === "INTRADAY_DISTRIBUTION_ACTIVE") {
-    return [
-      "Engine 25 daily/EOD read is risk-off and the live intraday layer confirms active distribution.",
-      liveMode
-        ? `Live ES permission: ${normalizePermission(liveMode)}.`
-        : null,
-      "Normal ES longs should stay blocked until reclaim, seller exhaustion, or a separate Engine 22 / Engine 6 confirmation appears.",
-    ]
-      .filter(Boolean)
-      .join(" ");
+    parts.push(
+      "Engine 25 daily/EOD read is risk-off and the live intraday layer confirms active distribution."
+    );
+
+    if (liveMode) {
+      parts.push(`Live ES permission: ${normalizePermission(liveMode)}.`);
+    }
+
+    parts.push(
+      "Normal ES longs should stay blocked until reclaim, seller exhaustion, or a separate Engine 22 / Engine 6 confirmation appears."
+    );
+  } else if (intradayLabel === "INTRADAY_DAMAGE_ELEVATED") {
+    parts.push(
+      "Engine 25 daily/EOD read is available, but intraday damage is elevated."
+    );
+
+    if (liveMode) {
+      parts.push(`Live ES permission: ${normalizePermission(liveMode)}.`);
+    }
+
+    parts.push("Require A+ confirmation before improving ES long permission.");
+  } else {
+    parts.push(
+      zoneRead?.plainEnglish ||
+        underTheHood?.interpretation ||
+        current?.overlayInterpretation ||
+        "Engine 25 market-health read is available."
+    );
   }
 
-  if (intradayLabel === "INTRADAY_DAMAGE_ELEVATED") {
-    return [
-      "Engine 25 daily/EOD read is available, but intraday damage is elevated.",
-      liveMode
-        ? `Live ES permission: ${normalizePermission(liveMode)}.`
-        : null,
-      "Require A+ confirmation before improving ES long permission.",
-    ]
-      .filter(Boolean)
-      .join(" ");
+  if (sectorCombined?.available) {
+    parts.push(
+      `Sector breadth read: ${normalizePermission(
+        sectorCombined.label
+      )}. Permission impact: ${normalizePermission(sectorImpact)}.`
+    );
   }
 
-  return (
-    zoneRead?.plainEnglish ||
-    underTheHood?.interpretation ||
-    current?.overlayInterpretation ||
-    "Engine 25 market-health read is available."
-  );
+  return parts.filter(Boolean).join(" ");
 }
 
 router.get("/engine25/full-dashboard", (_req, res) => {
@@ -294,6 +441,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const composite = readJsonFile(COMPOSITE_FILE);
     const zoneRead = readJsonFile(ZONE_READ_FILE);
     const marketHealth = readJsonFile(MARKET_HEALTH_FILE);
+    const sectorBreadthRaw = readJsonFile(SECTOR_BREADTH_FILE);
 
     if (!composite) {
       return res.status(404).json({
@@ -329,28 +477,30 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const liveTradePermission = marketHealth?.tradePermission || null;
     const liveMarketHealth = buildLiveMarketHealthSummary(marketHealth);
 
+    const sectorBreadth = buildSectorBreadthSummary(sectorBreadthRaw);
+    const zoneDecisionRead = buildZoneDecisionRead(zoneRead);
+
     const headline = {
       score: current.engine25CompositeScore,
       state: current.overlayState,
       label: current.overlayLabel,
       color: current.overlayColor,
 
-      // Daily / EOD date contract
       date: current.latestEodDate || current.cashProxyDate || current.date,
       latestEodDate: current.latestEodDate || current.cashProxyDate || current.date,
       cashProxyDate: current.cashProxyDate || current.latestEodDate || current.date,
       esSessionDate: current.esSessionDate || current.date,
+      requiredEodDate: current.requiredEodDate || null,
       dateAlignment: current.dateAlignment || null,
 
       esClose: current.esClose,
 
-      // Daily / EOD permission
       permission: current.permissions?.finalPermission || null,
       permissionText: normalizePermission(current.permissions?.finalPermission),
       size: current.permissions?.finalSize ?? null,
 
-      // Live / intraday permission summary
-      livePermission: liveEsPermission?.mode || liveTradePermission?.engine22Mode || null,
+      livePermission:
+        liveEsPermission?.mode || liveTradePermission?.engine22Mode || null,
       livePermissionText: normalizePermission(
         liveEsPermission?.mode || liveTradePermission?.engine22Mode
       ),
@@ -359,11 +509,20 @@ router.get("/engine25/full-dashboard", (_req, res) => {
         liveTradePermission?.sizeMultiplier ??
         null,
 
+      sectorBreadthLabel: sectorBreadth?.combinedRead?.label || null,
+      sectorBreadthScore: sectorBreadth?.combinedRead?.score ?? null,
+      sectorBreadthPermissionImpact:
+        sectorBreadth?.combinedRead?.permissionImpact || null,
+
+      zoneState: zoneDecisionRead.label,
+      zonePermission: zoneDecisionRead.permission,
+
       interpretation: current.overlayInterpretation,
     };
 
     const deskNote = buildDeskNote({
       zoneRead,
+      sectorBreadth,
       underTheHood,
       current,
       intradayProxyDamage,
@@ -372,27 +531,29 @@ router.get("/engine25/full-dashboard", (_req, res) => {
 
     return res.json({
       ok: true,
-      engine: "engine25.fullDashboard.v0.2",
+      engine: "engine25.fullDashboard.v0.3",
       modelType: "ENGINE25_FULL_DASHBOARD_VIEW",
       generatedAtUtc: new Date().toISOString(),
       source: {
         compositeFile: "engine25-composite-overlay-6mo.json",
         zoneReadFile: "engine25-es-zone-aware-read.json",
         marketHealthFile: "engine25-market-health.json",
+        sectorBreadthFile: "engine25-sector-card-breadth-snapshots.json",
       },
 
-      // Daily / EOD read
       headline,
       componentBreakdown,
       underTheHood,
 
-      // Live / intraday read
       intradayProxyDamage,
       liveEsPermission,
       liveTradePermission,
       liveMarketHealth,
 
       zoneRead: zoneRead || null,
+      zoneDecisionRead,
+
+      sectorBreadth,
 
       overlay: {
         summary: composite.summary || null,
