@@ -269,11 +269,86 @@ function findLatestSwingHighAfterTime({ bars = [], afterSec = null } = {}) {
   return latest;
 }
 
+function classifyAbcUpBStructure({
+  originLow = null,
+  waveAHigh = null,
+  bCandidateLow = null,
+} = {}) {
+  const origin = toNum(originLow);
+  const aHigh = toNum(waveAHigh);
+  const bLow = toNum(bCandidateLow);
+
+  if (origin === null || aHigh === null || bLow === null || aHigh <= origin) {
+    return {
+      bRetracePct: null,
+      bRetraceRatio: null,
+      correctionType: "B_PULLBACK_PENDING",
+      correctionFamily: "UNKNOWN",
+      quality: "PENDING",
+      reasonCodes: ["ABC_UP_B_RETRACE_UNAVAILABLE"],
+    };
+  }
+
+  const range = aHigh - origin;
+  const retraceRatio = (aHigh - bLow) / range;
+  const retracePct = Number((retraceRatio * 100).toFixed(1));
+
+  let correctionType = "B_PULLBACK_PENDING";
+  let correctionFamily = "UNKNOWN";
+  let quality = "PENDING";
+
+  if (retracePct < 38.2) {
+    correctionType = "SHALLOW_B_PULLBACK";
+    correctionFamily = "SHALLOW_ZIGZAG_OR_STRONG_BOUNCE";
+    quality = "CONSTRUCTIVE";
+  } else if (retracePct < 61.8) {
+    correctionType = "NORMAL_B_PULLBACK";
+    correctionFamily = "NORMAL_ZIGZAG_OR_SIMPLE_ABC";
+    quality = "CONSTRUCTIVE";
+  } else if (retracePct < 78.6) {
+    correctionType = "DEEP_B_PULLBACK";
+    correctionFamily = "DEEP_ZIGZAG_OR_COMPLEX_ABC";
+    quality = "CAUTION";
+  } else if (retracePct < 100) {
+    correctionType = "VERY_DEEP_B_PULLBACK";
+    correctionFamily = "FLAT_CANDIDATE";
+    quality = "CAUTION";
+  } else if (retracePct < 105) {
+    correctionType = "B_ORIGIN_UNDERCUT";
+    correctionFamily = "FLAT_OR_UNDERCUT_B";
+    quality = "LOWER_QUALITY_UNTIL_RECLAIM";
+  } else if (retracePct <= 138) {
+    correctionType = "EXPANDED_FLAT_CANDIDATE";
+    correctionFamily = "EXPANDED_FLAT";
+    quality = "LOWER_QUALITY_UNTIL_RECLAIM";
+  } else {
+    correctionType = "EXTREME_EXPANDED_B_OR_STRUCTURE_REVIEW";
+    correctionFamily = "EXTREME_EXPANDED_OR_NEW_STRUCTURE";
+    quality = "STRUCTURE_REVIEW";
+  }
+
+  return {
+    bRetracePct: retracePct,
+    bRetraceRatio: Number(retraceRatio.toFixed(4)),
+    correctionType,
+    correctionFamily,
+    quality,
+    reasonCodes: [
+      "ABC_UP_B_RETRACE_CLASSIFIED",
+      correctionType,
+      correctionFamily,
+      quality,
+    ],
+  };
+}
+
 /* =========================
    ABC_UP post-reset map
 ========================= */
 
 function buildAbcUpPriceAction({
+  originLow = null,
+  waveAHigh = null,
   currentPrice,
   latestClose = null,
   bCandidateLow = null,
@@ -285,12 +360,19 @@ function buildAbcUpPriceAction({
   scanStartSec = null,
   scanStartTime = null,
 } = {}) {
+  const origin = toNum(originLow);
   const price = toNum(currentPrice);
   const close = toNum(latestClose) ?? price;
   const bLow = toNum(bCandidateLow);
   const zoneLo = toNum(preferredBZone?.lo);
   const zoneHi = toNum(preferredBZone?.hi);
   const deepSupport = toNum(deepBSupport);
+
+  const bStructure = classifyAbcUpBStructure({
+    originLow,
+    waveAHigh,
+    bCandidateLow,
+  });
 
   const touchedPreferredBZone =
     bLow !== null &&
@@ -308,22 +390,75 @@ function buildAbcUpPriceAction({
     deepSupport !== null &&
     bLow >= deepSupport;
 
-  const lostDeepBSupport =
+  const tradedBelowDeepBSupport =
     bLow !== null &&
     deepSupport !== null &&
     bLow < deepSupport;
+
+  const undercutOrigin =
+    bLow !== null &&
+    origin !== null &&
+    bLow < origin;
+
+  const reclaimedOrigin =
+    close !== null &&
+    origin !== null &&
+    close > origin;
+
+  const reclaimedDeepBSupport =
+    close !== null &&
+    deepSupport !== null &&
+    close > deepSupport;
 
   const reclaimedPreferredBZone =
     close !== null &&
     zoneHi !== null &&
     close > zoneHi;
 
+  const correctionType = bStructure.correctionType;
+
   let status = "WAITING_FOR_B_PULLBACK";
   let read = "Waiting for B pullback into the preferred B zone.";
 
-  if (lostDeepBSupport) {
-    status = "B_PULLBACK_DEEP_SUPPORT_LOST";
-    read = "Price traded below deep B support. ABC_UP bounce structure needs review.";
+  if (bLow === null) {
+    status = "WAITING_FOR_B_PULLBACK";
+    read = "Waiting for B pullback into the preferred B zone.";
+  } else if (
+    correctionType === "EXPANDED_FLAT_CANDIDATE" ||
+    correctionType === "B_ORIGIN_UNDERCUT" ||
+    correctionType === "EXTREME_EXPANDED_B_OR_STRUCTURE_REVIEW"
+  ) {
+    if (reclaimedPreferredBZone) {
+      status = "EXPANDED_B_UNDERCUT_PREFERRED_ZONE_RECLAIMING";
+      read =
+        "Wave B undercut the origin and is now reclaiming the preferred B zone. Expanded-flat C-up watch improves, but still requires confirmation.";
+    } else if (reclaimedDeepBSupport) {
+      status = "EXPANDED_B_UNDERCUT_DEEP_SUPPORT_RECLAIMING";
+      read =
+        "Wave B undercut the origin and reclaimed deep B support. Structure is improving, but preferred B zone reclaim is still needed.";
+    } else if (reclaimedOrigin) {
+      status = "EXPANDED_B_UNDERCUT_ORIGIN_RECLAIMING";
+      read =
+        "Wave B undercut the origin and reclaimed the origin area. This can still be expanded-flat behavior, but quality remains lower until 7415 and the preferred B zone reclaim.";
+    } else {
+      status = "EXPANDED_B_UNDERCUT_WAIT_FOR_RECLAIM";
+      read =
+        "Wave B undercut the origin. This can still be expanded-flat behavior, but it needs reclaim before C-up can be trusted.";
+    }
+  } else if (tradedBelowDeepBSupport) {
+    if (reclaimedPreferredBZone) {
+      status = "EXTENDED_B_PULLBACK_PREFERRED_ZONE_RECLAIMING";
+      read =
+        "Wave B extended below the deep zone and reclaimed the preferred B zone. C-up watch improves, but confirmation is still required.";
+    } else if (reclaimedDeepBSupport) {
+      status = "EXTENDED_B_PULLBACK_DEEP_SUPPORT_RECLAIMING";
+      read =
+        "Wave B extended below the deep zone and reclaimed deep B support. Wait for preferred B zone reclaim.";
+    } else {
+      status = "EXTENDED_B_PULLBACK_WAIT_FOR_RECLAIM";
+      read =
+        "Wave B extended below the deep B zone. This is not an automatic failure. Wait for reclaim confirmation.";
+    }
   } else if (tradedBelowPreferredBZone && heldDeepBSupport) {
     status = reclaimedPreferredBZone
       ? "B_PULLBACK_DEEP_TEST_RECLAIMING"
@@ -348,30 +483,48 @@ function buildAbcUpPriceAction({
     bCandidateLow: bLow,
     bCandidateTime,
     bSource,
+
+    bRetracePct: bStructure.bRetracePct,
+    bRetraceRatio: bStructure.bRetraceRatio,
+    correctionType: bStructure.correctionType,
+    correctionFamily: bStructure.correctionFamily,
+    correctionQuality: bStructure.quality,
+
     preferredBZone,
     deepBSupport,
+    originLow: origin,
+
     scanStartSec,
     scanStartTime,
     barsScanned,
+
     touchedPreferredBZone,
     tradedBelowPreferredBZone,
     heldDeepBSupport,
-    lostDeepBSupport,
+    tradedBelowDeepBSupport,
+    undercutOrigin,
+    reclaimedOrigin,
+    reclaimedDeepBSupport,
     reclaimedPreferredBZone,
+
     status,
     read,
+
     reasonCodes: [
       bLow !== null ? "ABC_UP_B_CANDIDATE_FOUND" : null,
       touchedPreferredBZone ? "ABC_UP_B_ZONE_TOUCHED" : null,
       tradedBelowPreferredBZone ? "ABC_UP_BELOW_PREFERRED_B_ZONE" : null,
       heldDeepBSupport ? "ABC_UP_DEEP_SUPPORT_HOLDING" : null,
-      lostDeepBSupport ? "ABC_UP_DEEP_SUPPORT_LOST" : null,
+      tradedBelowDeepBSupport ? "ABC_UP_EXTENDED_BELOW_DEEP_B_ZONE" : null,
+      undercutOrigin ? "ABC_UP_B_UNDERCUT_ORIGIN" : null,
+      reclaimedOrigin ? "ABC_UP_ORIGIN_RECLAIMING" : null,
+      reclaimedDeepBSupport ? "ABC_UP_DEEP_SUPPORT_RECLAIMING" : null,
       reclaimedPreferredBZone ? "ABC_UP_PREFERRED_B_ZONE_RECLAIMING" : null,
       bSource,
+      ...(Array.isArray(bStructure.reasonCodes) ? bStructure.reasonCodes : []),
     ].filter(Boolean),
   };
 }
-
 function buildPostAbcBounceMap({
   symbol,
   degree = "minute",
@@ -502,6 +655,8 @@ function buildPostAbcBounceMap({
       : bars.slice(-80);
 
   const priceAction = buildAbcUpPriceAction({
+    originLow,
+    waveAHigh: aHigh,
     currentPrice,
     latestClose,
     bCandidateLow: effectiveBLow,
@@ -566,6 +721,13 @@ function buildPostAbcBounceMap({
 
     preferredBZone,
     deepBSupport: r786,
+
+    bRetracePct: priceAction?.bRetracePct ?? null,
+    bRetraceRatio: priceAction?.bRetraceRatio ?? null,
+    correctionType: priceAction?.correctionType || null,
+    correctionFamily: priceAction?.correctionFamily || null,
+    correctionQuality: priceAction?.correctionQuality || null,
+
     bPullbackStatus,
     priceAction,
     read: priceAction?.read || null,
