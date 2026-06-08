@@ -3986,31 +3986,68 @@ function getManualLevelRowsFor(args = {}) {
 function attachManualLevelsToEngine2Block(block, levelRows = []) {
   if (!block || typeof block !== "object") return block;
 
-const findLevel = (...names) => {
-  const wanted = names.map((x) => String(x || "").toUpperCase());
+  const findLevel = (...names) => {
+    const wanted = names.map((x) => String(x || "").toUpperCase());
 
-  const row = levelRows.find((r) => {
-    const wave = String(r.wave || "").toUpperCase();
-    const kind = String(r.kind || "").toUpperCase();
+    const row = levelRows.find((r) => {
+      const wave = String(r.wave || "").toUpperCase();
+      const kind = String(r.kind || "").toUpperCase();
 
-    // Existing format:
-    // ES,minute,10m,A_LOW,LEVEL,date,price
-    if (wanted.includes(wave)) return true;
+      // Existing format:
+      // ES,minute,10m,A_LOW,LEVEL,date,price
+      if (wanted.includes(wave)) return true;
 
-    // New preferred ABC format:
-    // ES,minute,10m,ABC,A,date,price
-    if (wave === "ABC" && wanted.includes(kind)) return true;
+      // New preferred ABC format:
+      // ES,minute,10m,ABC,A,date,price
+      if (wave === "ABC" && wanted.includes(kind)) return true;
 
-    return false;
-  });
+      return false;
+    });
 
-  const price = Number(row?.price);
-  return Number.isFinite(price) && price > 0 ? price : null;
-};
+    const price = Number(row?.price);
+    return Number.isFinite(price) && price > 0 ? price : null;
+  };
 
-const aLow = findLevel("A_LOW", "A");
-const bHigh = findLevel("B_HIGH", "B");
-const cLow = findLevel("C_LOW", "C");
+  const findAbcUpMark = (kindName) => {
+    const wantedKind = String(kindName || "").toUpperCase();
+
+    const row = levelRows.find((r) => {
+      const wave = String(r.wave || "").toUpperCase();
+      const kind = String(r.kind || "").toUpperCase();
+
+      return wave === "ABC_UP" && kind === wantedKind;
+    });
+
+    const price = Number(row?.price);
+
+    return {
+      price: Number.isFinite(price) && price > 0 ? price : null,
+      time: row?.datetime_az || null,
+    };
+  };
+
+  const aLow = findLevel("A_LOW", "A");
+  const bHigh = findLevel("B_HIGH", "B");
+  const cLow = findLevel("C_LOW", "C");
+
+  const originLow = findAbcUpMark("ORIGIN_LOW");
+  const aHigh = findAbcUpMark("A_HIGH");
+  const bLow = findAbcUpMark("B_LOW");
+  const cHigh = findAbcUpMark("C_HIGH");
+
+  const abcUpMarks = {
+    originLow: originLow.price,
+    originTime: originLow.time,
+
+    aHigh: aHigh.price,
+    aTime: aHigh.time,
+
+    bLow: bLow.price,
+    bTime: bLow.time,
+
+    cHigh: cHigh.price,
+    cTime: cHigh.time,
+  };
 
   return {
     ...block,
@@ -4020,8 +4057,10 @@ const cLow = findLevel("C_LOW", "C");
     w4Low: cLow,
     lowerHighLevel: bHigh,
     continuationLevel: bHigh,
+    abcUpMarks,
   };
 }
+
 async function buildEngine2State(symbol) {
   const contextResp = await fetchJson(
     `${CORE_BASE}/api/v1/engine5-context?symbol=${symbol}&tf=1h`,
