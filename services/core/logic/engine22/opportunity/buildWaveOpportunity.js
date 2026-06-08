@@ -973,6 +973,159 @@ export function buildWaveOpportunity({
 
   if (waveLifecycle?.tradeableOpportunityBlocked === true) {
     const lifecycleAbc = waveLifecycle?.abcCorrection || null;
+    const postAbcReset = waveLifecycle?.postAbcReset || null;
+    const postAbcState = upper(postAbcReset?.state, "");
+
+    if (postAbcState === "POST_ABC_W2_BOUNCE_WATCH") {
+      return {
+        ok: true,
+        engine: "engine22.waveOpportunity.v1",
+        source: "engine22.waveLifecycle.v2",
+
+        symbol: waveFibState?.symbol || symbol,
+        strategyId,
+        currentPrice: round2(currentPrice ?? waveFibState?.currentPrice),
+
+        active: false,
+        setupFamily: "POST_ABC_RESET",
+        setupType: "POST_ABC_W2_BOUNCE_WATCH",
+        rawSetup: "POST_ABC_W2_BOUNCE_WATCH",
+        degree: waveLifecycle?.activeCorrectionDegree || null,
+        direction: "NONE",
+
+        readiness: "WATCH",
+        timing: "POST_ABC_RESET",
+        chaseRisk: "BLOCKED",
+
+        paperSignalCandidate: true,
+        signalType: "POST_ABC_W2_BOUNCE_WATCH",
+
+        parentContextOnly: waveLifecycle?.parentContextOnly === true,
+        tradeableOpportunityBlocked: true,
+        correctionActive: waveLifecycle?.correctionActive === true,
+        activeCorrectionDegree: waveLifecycle?.activeCorrectionDegree || null,
+        nextAllowedSetup:
+          waveLifecycle?.nextAllowedSetup ||
+          "WAIT_FOR_7400_HOLD_AND_RECLAIM",
+
+        postAbcReset,
+        abcCorrection: lifecycleAbc,
+
+        waveState: buildWaveState(waveFibState),
+
+        entryZone: {
+          type: "NONE",
+          lo: null,
+          hi: null,
+          trigger: null,
+        },
+
+        invalidation: {
+          price: round2(postAbcReset?.cLow ?? lifecycleAbc?.c?.price),
+          reason:
+            "Marked C low is the invalidation reference for the post-ABC Wave 2 bounce watch.",
+        },
+
+        targets: {
+          e100: null,
+          e1272: null,
+          e1618: null,
+          e200: null,
+          e2618: null,
+        },
+
+        needs:
+          postAbcReset?.needs || [
+            "7400_SUPPORT_HOLD",
+            "RECLAIM_CONFIRMATION_REQUIRED",
+            "ENGINE15_READY",
+            "ENGINE6_FINAL_PERMISSION",
+          ],
+
+        reasonCodes: [
+          ...(waveLifecycle?.reasonCodes || []),
+          ...(postAbcReset?.reasonCodes || []),
+          "POST_ABC_RESET_WATCH_ONLY",
+          "NO_AUTOMATIC_LONG",
+        ],
+
+        headline:
+          waveLifecycle?.headline ||
+          "POST ABC COMPLETE — WATCH WAVE 2 BOUNCE",
+
+        summary:
+          "ABC is complete into institutional support. Watching for Wave 2 bounce only after hold/reclaim confirmation.",
+
+        supportiveContext: {
+          engine16Ready: isEngine16Ready(engine16),
+          engine25Supportive: isEngine25Supportive(engine25Context),
+          marketRegimeSupportive: isMarketRegimeSupportive(marketRegime),
+          armingAllowed: false,
+          armingBlockedReasonCodes: [
+            "POST_ABC_W2_BOUNCE_WATCH",
+            "RECLAIM_CONFIRMATION_REQUIRED",
+            "ENGINE15_AND_ENGINE6_STILL_REQUIRED",
+          ],
+        },
+
+        reclaimContext: {
+          postExtensionContext: false,
+          pulledBackFromExtension: false,
+          armingAllowed: false,
+          reclaimAllowed: false,
+          reclaimLevel: null,
+          reclaimBlockedReasonCodes: [
+            "RECLAIM_CONFIRMATION_REQUIRED",
+            "POST_ABC_W2_BOUNCE_ARMING_NOT_CONFIRMED",
+          ],
+        },
+
+        learningContext: {
+          engine: "engine22.waveOpportunityLearningContext.v1",
+          setupType: "POST_ABC_W2_BOUNCE_WATCH",
+          direction: "NONE",
+          timing: "POST_ABC_RESET",
+          readiness: "WATCH",
+          chaseRisk: "BLOCKED",
+          degree: waveLifecycle?.activeCorrectionDegree || null,
+          currentPrice: round2(currentPrice ?? waveFibState?.currentPrice),
+          engine16Ready: isEngine16Ready(engine16),
+          armingAllowed: false,
+          postExtensionReclaimAllowed: false,
+          parentContextOnly: waveLifecycle?.parentContextOnly === true,
+          tradeableOpportunityBlocked: true,
+          abcCorrectionActive: lifecycleAbc?.active === true,
+          paperSignalCandidate: true,
+          signalType: "POST_ABC_W2_BOUNCE_WATCH",
+        },
+
+        lowerDegreeCompletionGuard: {
+          active: true,
+          source: "engine22.waveLifecycle.v2",
+          reasonCodes: waveLifecycle?.reasonCodes || [],
+          needs: waveLifecycle?.needs || [],
+          summary: waveLifecycle?.summary || null,
+        },
+
+        postW5AbcCorrection: lifecycleAbc,
+
+        debug: {
+          lifecycleState: waveLifecycle?.lifecycleState || null,
+          lifecycleEngine: waveLifecycle?.engine || null,
+          postAbcResetState: postAbcReset?.state || null,
+          abcCorrectionActive: lifecycleAbc?.active === true,
+          abcCorrectionState: lifecycleAbc?.state || null,
+        },
+
+        debugContextAvailable: {
+          engine16: engine16 ? true : false,
+          engine25Context: engine25Context ? true : false,
+          marketRegime: marketRegime ? true : false,
+          marketMeterContext: marketMeterContext ? true : false,
+          engine5: engine5 ? true : false,
+        },
+      };
+    }
 
     return {
       ok: true,
