@@ -64,12 +64,123 @@ const s = String(symbol || "").trim().toUpperCase();
 return s === "ES" || s.startsWith("ES") || s === "MES" || s.startsWith("MES");
 }
 
+function buildPostAbcBounceMap({ symbol, abcUpMarks = null } = {}) {
+  const tickSize = tickSizeForSymbol(symbol);
+
+  const originLow = toNum(abcUpMarks?.originLow);
+  const aHigh = toNum(abcUpMarks?.aHigh);
+  const bLow = toNum(abcUpMarks?.bLow);
+  const cHigh = toNum(abcUpMarks?.cHigh);
+
+  const originTime = abcUpMarks?.originTime || null;
+  const aTime = abcUpMarks?.aTime || null;
+  const bTime = abcUpMarks?.bTime || null;
+  const cTime = abcUpMarks?.cTime || null;
+
+  if (originLow === null || originLow <= 0 || aHigh === null || aHigh <= 0) {
+    return {
+      active: false,
+      state: "ABC_UP_MARKS_UNAVAILABLE",
+
+      originLow: originLow !== null ? roundToTick(originLow, tickSize) : null,
+      originTime,
+
+      waveAHigh: aHigh !== null ? roundToTick(aHigh, tickSize) : null,
+      aTime,
+
+      waveBLow: bLow !== null ? roundToTick(bLow, tickSize) : null,
+      bTime,
+
+      waveCHigh: cHigh !== null ? roundToTick(cHigh, tickSize) : null,
+      cTime,
+
+      range: null,
+      bPullbackLevels: null,
+      preferredBZone: null,
+      deepBSupport: null,
+      bPullbackStatus: "ORIGIN_LOW_AND_A_HIGH_REQUIRED",
+
+      reasonCodes: ["ABC_UP_ORIGIN_LOW_AND_A_HIGH_REQUIRED"],
+    };
+  }
+
+  const range = Math.abs(aHigh - originLow);
+
+  const pullbackFromAHigh = (fib) =>
+    roundToTick(aHigh - range * fib, tickSize);
+
+  const r236 = pullbackFromAHigh(0.236);
+  const r382 = pullbackFromAHigh(0.382);
+  const r500 = pullbackFromAHigh(0.5);
+  const r618 = pullbackFromAHigh(0.618);
+  const r786 = pullbackFromAHigh(0.786);
+
+  const bMarked = bLow !== null && bLow > 0;
+  const cMarked = cHigh !== null && cHigh > 0;
+
+  const state = !bMarked
+    ? "A_UP_MARKED_WAITING_FOR_B_PULLBACK"
+    : !cMarked
+    ? "B_PULLBACK_MARKED_WAITING_FOR_C_UP"
+    : "ABC_UP_COMPLETE";
+
+  const bPullbackStatus = !bMarked
+    ? "WAITING_FOR_B_PULLBACK"
+    : !cMarked
+    ? "B_PULLBACK_MARKED"
+    : "ABC_UP_COMPLETE";
+
+  return {
+    active: true,
+    state,
+
+    originLow: roundToTick(originLow, tickSize),
+    originTime,
+
+    waveAHigh: roundToTick(aHigh, tickSize),
+    aTime,
+
+    waveBLow: bMarked ? roundToTick(bLow, tickSize) : null,
+    bTime: bMarked ? bTime : null,
+
+    waveCHigh: cMarked ? roundToTick(cHigh, tickSize) : null,
+    cTime: cMarked ? cTime : null,
+
+    range: roundToTick(range, tickSize),
+
+    bPullbackLevels: {
+      r236,
+      r382,
+      r500,
+      r618,
+      r786,
+    },
+
+    preferredBZone: {
+      lo: r618,
+      hi: r500,
+    },
+
+    deepBSupport: r786,
+    bPullbackStatus,
+
+    reasonCodes: [
+      "POST_ABC_BOUNCE_MARKS_FOUND",
+      "ABC_UP_A_HIGH_MARKED",
+      bMarked ? "ABC_UP_B_LOW_MARKED" : "ABC_UP_WAITING_FOR_B_PULLBACK",
+      cMarked ? "ABC_UP_C_HIGH_MARKED" : "ABC_UP_C_HIGH_PENDING",
+    ],
+  };
+}
+
 function classifyPostAbcReset({
-symbol,
-currentPrice,
-abcCorrection,
+  symbol,
+  currentPrice,
+  abcCorrection,
+  abcUpMarks = null,
 } = {}) {
-const tickSize = tickSizeForSymbol(symbol);
+  const tickSize = tickSizeForSymbol(symbol);
+  const abcUp = buildPostAbcBounceMap({ symbol, abcUpMarks });
 const price = toNum(currentPrice);
 const cLow = toNum(abcCorrection?.c?.price);
 const abcState = upper(abcCorrection?.state, "");
@@ -77,6 +188,7 @@ const abcState = upper(abcCorrection?.state, "");
 if (abcState !== "ABC_COMPLETE" || cLow === null || cLow <= 0) {
 return {
 active: false,
+abcUp,
 state: "POST_ABC_RESET_UNAVAILABLE",
 supportLevel: null,
 watchZoneLow: null,
@@ -782,17 +894,20 @@ const lifecycleState = cLegActive
 : "NORMAL_WAVE_LIFECYCLE";
 
 const postAbcReset =
-lifecycleState === "POST_W5_ABC_COMPLETE"
-? classifyPostAbcReset({
-symbol,
-currentPrice,
-abcCorrection,
-})
-: {
-active: false,
-state: "NOT_POST_W5_ABC_COMPLETE",
-reasonCodes: ["POST_ABC_RESET_NOT_APPLICABLE"],
-};
+  lifecycleState === "POST_W5_ABC_COMPLETE"
+    ? classifyPostAbcReset({
+        symbol,
+        currentPrice,
+        abcCorrection,
+        abcUpMarks: activeCorrectionDegree
+          ? degrees?.[activeCorrectionDegree]?.abcUpMarks || null
+          : null,
+      })
+    : {
+        active: false,
+        state: "NOT_POST_W5_ABC_COMPLETE",
+        reasonCodes: ["POST_ABC_RESET_NOT_APPLICABLE"],
+      };
 
 const postAbcWatchActive =
 postAbcReset?.state === "POST_ABC_W2_BOUNCE_WATCH";
