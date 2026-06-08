@@ -540,6 +540,7 @@ export function analyzeWaveStack({
     symbol,
     waveFibState: partialWaveFibState,
     currentPrice,
+    barsByTf,
     engine16: regimeLayers,
     engine25Context: null,
     marketRegime: null,
