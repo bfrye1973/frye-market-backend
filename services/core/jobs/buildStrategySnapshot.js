@@ -2130,9 +2130,6 @@ function detectCExtensionZone(fib, currentPrice) {
 
   return "NONE";
 }
-readFibInputRows()
-getManualLevelRowsFor()
-attachManualLevelsToEngine2Block()
 
 async function buildEngine2Block({ symbol, degree, tf, currentPrice = null }) {
   const [w1, w4, lastBarTimeSec] = await Promise.all([
