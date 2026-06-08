@@ -1,1533 +1,1479 @@
-// src/pages/rows/RowChart/overlays/Engine17DecisionTimeline.jsx
+// services/core/logic/engine22/wave/classifyWaveLifecycle.js
+// Engine 22L — Central Wave Lifecycle Classifier
+//
+// Purpose:
+// One source of truth for wave lifecycle state.
+// This file decides:
+// - W2→W3 lifecycle
+// - W3 extension lifecycle
+// - W4 pullback lifecycle
+// - W4→W5 lifecycle
+// - W5 complete lifecycle
+// - post-W5 ABC lifecycle
+// - post-ABC reset / Wave 2 bounce watch lifecycle
+// - parent W5 context only
+// - whether parent W5 should be blocked as a fresh tradeable long
+//
+// This file is read-only.
+// It does not execute trades.
+// It does not create shorts.
+// It does not change Engine 6 permission.
+// It does not consume Engine 25 market context for wave lifecycle decisions.
 
-import React from "react";
+const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
-/* =========================
-   Visual System
-========================= */
+function toNum(x) {
+  if (x === null || x === undefined || x === "") return null;
 
-const TIMELINE_FONT =
-  '"Trebuchet MS", "Lucida Grande", "Segoe UI", Arial, sans-serif';
-
-const FONT_REGULAR = 400;
-const FONT_MEDIUM = 400;
-
-const CARD_BG = "rgba(6,10,20,0.94)";
-const CARD_BG_STRONG = "rgba(6,10,20,0.96)";
-const SOFT_TEXT = "#dbeafe";
-const MAIN_TEXT = "#f8fafc";
-const MUTED_TEXT = "#94a3b8";
-
-/* =========================
-   Formatters
-========================= */
-
-function asArray(value) {
-  return Array.isArray(value) ? value.filter(Boolean) : [];
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
 }
 
-function formatText(value, fallback = "—") {
-  if (value == null || value === "") return fallback;
-  return String(value).replaceAll("_", " ");
+function upper(x, fallback = "UNKNOWN") {
+  return String(x || fallback).trim().toUpperCase();
 }
 
-function formatUpper(value, fallback = "—") {
-  if (value == null || value === "") return fallback;
-  return String(value).toUpperCase().replaceAll("_", " ");
-}
-
-function formatNumber(value, digits = 2, fallback = "—") {
-  const n = Number(value);
-  return Number.isFinite(n) ? n.toFixed(digits) : fallback;
-}
-
-function formatScore(value, fallback = "—") {
-  const n = Number(value);
-  return Number.isFinite(n) ? Math.round(n).toString() : fallback;
-}
-
-function formatBool(value, fallback = "—") {
-  if (value === true) return "YES";
-  if (value === false) return "NO";
-  return fallback;
-}
-
-function titleCase(value, fallback = "—") {
-  if (value == null || value === "") return fallback;
-
-  return String(value)
-    .replaceAll("_", " ")
-    .toLowerCase()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function compactJoin(parts, separator = " | ") {
-  return parts.filter(Boolean).join(separator);
-}
-
-function severityColor(severity) {
-  if (severity === "danger") return "#fb7185";
-  if (severity === "warning") return "#fbbf24";
-  if (severity === "bullish") return "#22c55e";
-  if (severity === "purple") return "#c084fc";
-  if (severity === "blue") return "#38bdf8";
-  if (severity === "teal") return "#2dd4bf";
-  return "#cbd5e1";
-}
-
-function severityBorder(severity) {
-  if (severity === "danger") return "rgba(244,63,94,0.62)";
-  if (severity === "warning") return "rgba(251,191,36,0.58)";
-  if (severity === "bullish") return "rgba(34,197,94,0.46)";
-  if (severity === "purple") return "rgba(192,132,252,0.48)";
-  if (severity === "blue") return "rgba(56,189,248,0.48)";
-  if (severity === "teal") return "rgba(45,212,191,0.48)";
-  return "rgba(148,163,184,0.34)";
-}
-
-function severityBackground(severity) {
-  if (severity === "danger") return "rgba(127,29,29,0.15)";
-  if (severity === "warning") return "rgba(113,63,18,0.14)";
-  if (severity === "bullish") return "rgba(20,83,45,0.13)";
-  if (severity === "purple") return "rgba(88,28,135,0.13)";
-  if (severity === "blue") return "rgba(12,74,110,0.13)";
-  if (severity === "teal") return "rgba(19,78,74,0.13)";
-  return "rgba(15,23,42,0.42)";
-}
-
-/* =========================
-   Data selectors
-========================= */
-
-function getFib(overlayData) {
-  return overlayData?.fib || overlayData || {};
-}
-
-function getStrategyRoot(fib) {
-  return fib?.strategy || fib || {};
-}
-
-function getEngine22WaveStrategy(fib) {
-  const root = getStrategyRoot(fib);
-
-  return (
-    root?.engine22WaveStrategy ||
-    fib?.engine22WaveStrategy ||
-    root?.engine22 ||
-    null
-  );
-}
-
-function getWaveOpportunity(fib) {
-  const waveStrategy = getEngine22WaveStrategy(fib);
-
-  return (
-    waveStrategy?.waveOpportunity ||
-    fib?.waveOpportunity ||
-    getStrategyRoot(fib)?.waveOpportunity ||
-    null
-  );
-}
-
-function getBackendTimelineRead(fib) {
-  return getEngine22WaveStrategy(fib)?.timelineRead || null;
-}
-
-function getBackendTradeContextSummary(fib) {
-  return getEngine22WaveStrategy(fib)?.tradeContextSummary || null;
-}
-
-function getBackendTimelineSection(fib, title) {
-  const sections = getBackendTimelineRead(fib)?.mainSections;
-
-  if (!Array.isArray(sections)) return null;
-
-  return (
-    sections.find(
-      (section) => String(section?.title || "").trim() === title
-    ) || null
-  );
-}
-
-function getEngine15Decision(fib) {
-  const root = getStrategyRoot(fib);
-
-  return (
-    root?.engine15Decision ||
-    fib?.engine15Decision ||
-    root?.engine15ES ||
-    null
-  );
-}
-
-function getFinalPermission(fib) {
-  const root = getStrategyRoot(fib);
-
-  return root?.permission || fib?.permission || root?.finalPermission || null;
-}
-
-function getConfluence(fib) {
-  const root = getStrategyRoot(fib);
-
-  return (
-    root?.confluence ||
-    fib?.confluence ||
-    root?.engine5 ||
-    fib?.engine5 ||
-    null
-  );
-}
-
-function getEngine5Reaction(fib) {
-  return getConfluence(fib)?.components?.engine3Reaction || null;
-}
-
-function getEngine5Volume(fib) {
-  return getConfluence(fib)?.components?.engine4Volume || null;
-}
-
-function getEngine5Timing(fib) {
-  const confluence = getConfluence(fib);
-
-  return (
-    confluence?.timingContext ||
-    confluence?.analytics?.engine5?.timingContext ||
-    fib?.timingContext ||
-    null
-  );
-}
-
-function getTargets(waveOpportunity) {
-  const targets = waveOpportunity?.targets || {};
-
-  return [
-    ["1.000", targets.e100],
-    ["1.272", targets.e1272],
-    ["1.618", targets.e1618],
-    ["2.000", targets.e200],
-    ["2.618", targets.e2618],
-  ].filter(([, price]) => price != null);
-}
-
-function isWatchState(value) {
-  const v = String(value || "").toUpperCase();
-  return ["WATCH", "NEAR", "PREP", "ARMING", "POST_EXTENSION"].includes(v);
-}
-
-function isReadyState(value) {
-  const v = String(value || "").toUpperCase();
-  return ["READY", "CONFIRMED", "TRIGGERED"].includes(v);
-}
-
-function isDangerChase(value) {
-  const v = String(value || "").toUpperCase();
-  return v === "HIGH" || v === "EXTREME";
-}
-
-/* =========================
-   Fallback headline builders
-========================= */
-
-function buildFallbackHeadline({ waveOpportunity, engine15 }) {
-  const degree = titleCase(waveOpportunity?.degree, "Wave");
-  const setup = formatUpper(waveOpportunity?.setupType, "W3/W5");
-  const readiness = formatUpper(
-    engine15?.readinessLabel || waveOpportunity?.readiness,
-    "WATCH"
-  );
-  const chaseRisk = formatUpper(waveOpportunity?.chaseRisk, "");
-  const timing = formatUpper(waveOpportunity?.timing, "");
-
-  if (isDangerChase(chaseRisk)) {
-    return `${degree} ${setup} ${readiness} — NO CHASE`;
-  }
-
-  if (timing.includes("POST")) {
-    return `${degree} ${setup} ${readiness} — POST EXTENSION`;
-  }
-
-  return `${degree} ${setup} ${readiness}`;
-}
-
-function buildFallbackSubheadline({ waveOpportunity, engine15 }) {
-  if (waveOpportunity?.summary) return waveOpportunity.summary;
-  if (engine15?.summary) return engine15.summary;
-
-  return "Waiting for a valid Wave 3 / Wave 5 opportunity and final confirmation.";
-}
-
-function buildBadges({ waveOpportunity, engine15, permission }) {
-  const badges = [];
-
-  badges.push({
-    label: waveOpportunity?.symbol || engine15?.symbol || "ES",
-    severity: "blue",
-  });
-
-  if (waveOpportunity?.degree) {
-    badges.push({
-      label: `${titleCase(waveOpportunity.degree)} Degree`,
-      severity: "neutral",
-    });
-  }
-
-  if (waveOpportunity?.direction || engine15?.direction) {
-    const direction = waveOpportunity?.direction || engine15?.direction;
-
-    badges.push({
-      label: formatUpper(direction),
-      severity:
-        String(direction).toUpperCase() === "LONG" ? "bullish" : "danger",
-    });
-  }
-
-  if (engine15?.readinessLabel || waveOpportunity?.readiness) {
-    const readiness = engine15?.readinessLabel || waveOpportunity?.readiness;
-
-    badges.push({
-      label: formatUpper(readiness),
-      severity: isReadyState(readiness) ? "bullish" : "warning",
-    });
-  }
-
-  if (waveOpportunity?.timing) {
-    badges.push({
-      label: formatUpper(waveOpportunity.timing),
-      severity:
-        String(waveOpportunity.timing).toUpperCase().includes("POST") ||
-        String(waveOpportunity.timing).toUpperCase().includes("LATE")
-          ? "warning"
-          : "neutral",
-    });
-  }
-
-  if (waveOpportunity?.chaseRisk) {
-    badges.push({
-      label: `${formatUpper(waveOpportunity.chaseRisk)} CHASE RISK`,
-      severity: isDangerChase(waveOpportunity.chaseRisk)
-        ? "danger"
-        : "warning",
-    });
-  }
-
-  if (permission?.permission) {
-    badges.push({
-      label: `PERMISSION ${formatUpper(permission.permission)}`,
-      severity:
-        String(permission.permission).toUpperCase() === "ALLOW"
-          ? "bullish"
-          : String(permission.permission).toUpperCase() === "REDUCE"
-          ? "purple"
-          : "danger",
-    });
-  }
-
-  return badges;
-}
-
-/* =========================
-   Shared section builders
-========================= */
-
-function buildBackendTimelineSection(section) {
-  if (!section) return null;
-
-  const lines = Array.isArray(section.lines)
-    ? section.lines.filter(Boolean)
-    : [];
-
-  if (!lines.length) return null;
-
-  return {
-    number: 0,
-    icon: "◷",
-    title: section.title || "Context",
-    severity: section.severity || "blue",
-    fields: [],
-    lines,
-  };
-}
-
-function buildWaveOpportunitySection(waveOpportunity) {
-  if (!waveOpportunity) {
-    return {
-      number: 1,
-      icon: "〽",
-      title: "Wave Opportunity — Engine 22",
-      severity: "warning",
-      fields: [],
-      lines: [
-        "Engine 22 waveOpportunity is unavailable.",
-        "Waiting for a valid Wave 3 / Wave 5 setup.",
-      ],
-    };
-  }
-
-  const targetsText = getTargets(waveOpportunity)
-    .map(([level, price]) => `${level}: ${formatNumber(price)}`)
-    .join("  |  ");
-
-  return {
-    number: 1,
-    icon: "〽",
-    title: "Wave Opportunity — Engine 22",
-    severity: isDangerChase(waveOpportunity.chaseRisk)
-      ? "warning"
-      : "bullish",
-    fields: [
-      ["Setup", formatUpper(waveOpportunity.setupType, "NONE")],
-      ["Raw Setup", formatUpper(waveOpportunity.rawSetup, "—")],
-      ["Degree", titleCase(waveOpportunity.degree, "—")],
-      ["Direction", formatUpper(waveOpportunity.direction, "NONE")],
-      ["Readiness", formatUpper(waveOpportunity.readiness, "UNKNOWN")],
-      ["Timing", formatUpper(waveOpportunity.timing, "UNKNOWN")],
-      ["Chase Risk", formatUpper(waveOpportunity.chaseRisk, "UNKNOWN")],
-      ["Targets", targetsText || "—"],
-    ],
-    lines: [
-      waveOpportunity.summary
-        ? `Summary: ${waveOpportunity.summary}`
-        : "Summary: Waiting for Engine 22 wave opportunity summary.",
-    ],
-  };
-}
-
-function buildPostAbcBounceSection(tradeContextSummary) {
-  const abcUp = tradeContextSummary?.abcUp || null;
-  const reads = tradeContextSummary?.reads || {};
+function tickSizeForSymbol(symbol) {
+  const s = String(symbol || "").toUpperCase();
 
   if (
-    String(abcUp?.state || "").toUpperCase() !==
-    "A_UP_MARKED_WAITING_FOR_B_PULLBACK"
+    s === "ES" ||
+    s.startsWith("ES") ||
+    s === "MES" ||
+    s.startsWith("MES") ||
+    s === "NQ" ||
+    s.startsWith("NQ") ||
+    s === "MNQ" ||
+    s.startsWith("MNQ")
   ) {
-    return null;
+    return 0.25;
   }
 
-  const preferredBZone = abcUp?.preferredBZone || null;
-  const preferredBZoneText =
-    preferredBZone?.lo != null && preferredBZone?.hi != null
-      ? `${formatNumber(preferredBZone.lo)}–${formatNumber(preferredBZone.hi)}`
-      : "—";
+  return 0.01;
+}
 
-  const bLow =
-    abcUp.effectiveWaveBLow ??
-    abcUp.autoWaveBLow ??
-    abcUp.waveBLow ??
+function roundToTick(value, tickSize = 0.01) {
+  const n = toNum(value);
+  if (n === null) return null;
+
+  return Number((Math.round(n / tickSize) * tickSize).toFixed(2));
+}
+
+function isEsLikeSymbol(symbol) {
+  const s = String(symbol || "").trim().toUpperCase();
+  return s === "ES" || s.startsWith("ES") || s === "MES" || s.startsWith("MES");
+}
+
+/* =========================
+   Candle helpers
+========================= */
+
+function parseManualTimeSec(value) {
+  if (!value) return null;
+
+  const raw = String(value).trim();
+  const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+  const parsed = Date.parse(normalized);
+
+  if (Number.isFinite(parsed)) {
+    return Math.floor(parsed / 1000);
+  }
+
+  return null;
+}
+
+function normalizeBarTime(bar) {
+  const raw =
+    bar?.timeSec ??
+    bar?.tSec ??
+    bar?.timestampSec ??
+    bar?.timestamp ??
+    bar?.time ??
+    bar?.t ??
     null;
 
+  if (typeof raw === "number") {
+    return raw > 10_000_000_000 ? Math.floor(raw / 1000) : raw;
+  }
+
+  if (typeof raw === "string") {
+    const n = Number(raw);
+
+    if (Number.isFinite(n)) {
+      return n > 10_000_000_000 ? Math.floor(n / 1000) : n;
+    }
+
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) {
+      return Math.floor(parsed / 1000);
+    }
+  }
+
+  return null;
+}
+
+function normalizeBar(bar) {
+  if (!bar || typeof bar !== "object") return null;
+
+  const timeSec = normalizeBarTime(bar);
+  const high = toNum(bar.high ?? bar.h);
+  const low = toNum(bar.low ?? bar.l);
+  const close = toNum(bar.close ?? bar.c);
+
+  if (timeSec === null) return null;
+  if (high === null && low === null && close === null) return null;
+
   return {
-    number: 2,
-    icon: "〽",
-    title: "Post-ABC Bounce Map — Engine 22",
-    severity: "warning",
-    fields: [
-      ["State", formatUpper(abcUp.state)],
-      [
-        "A Up",
-        `${formatNumber(abcUp.originLow)} → ${formatNumber(abcUp.waveAHigh)}`,
-      ],
-      ["B Low", formatNumber(bLow)],
-      ["Preferred B Zone", preferredBZoneText],
-      ["Deep B Support", formatNumber(abcUp.deepBSupport)],
-      ["B Status", formatUpper(abcUp.bPullbackStatus, "WAITING")],
-    ],
-    lines: [
-      reads.abcUpRead || null,
-      reads.bPullbackRead || null,
-      abcUp.read || null,
-      reads.actionRead ||
-        "No chase. No execution. Wait for B pullback hold and reclaim confirmation.",
+    timeSec,
+    high: high ?? close,
+    low: low ?? close,
+    close,
+    raw: bar,
+  };
+}
+
+function degreeToTf(degree, fallback = null) {
+  const d = String(degree || "").toLowerCase();
+
+  if (d === "primary") return "1d";
+  if (d === "intermediate") return "1h";
+  if (d === "minor") return "1h";
+  if (d === "minute") return "10m";
+  if (d === "micro") return "10m";
+
+  return fallback || "10m";
+}
+
+function getBarsForDegree({ degree, barsByTf, fallbackTf = "10m" } = {}) {
+  const tf = degreeToTf(degree, fallbackTf);
+  const direct = barsByTf?.[tf];
+
+  if (Array.isArray(direct)) {
+    return direct.map(normalizeBar).filter(Boolean);
+  }
+
+  return [];
+}
+
+function formatTimeSec(timeSec) {
+  const n = Number(timeSec);
+  if (!Number.isFinite(n) || n <= 0) return null;
+
+  return new Date(n * 1000).toISOString();
+}
+
+function findLatestAnchorTouch({
+  bars = [],
+  anchorPrice = null,
+  afterSec = null,
+  direction = "HIGH",
+  tolerance = 0.5,
+} = {}) {
+  const anchor = toNum(anchorPrice);
+  if (anchor === null || !Array.isArray(bars) || !bars.length) return null;
+
+  const dir = upper(direction, "HIGH");
+
+  const scopedBars =
+    afterSec !== null
+      ? bars.filter((bar) => Number(bar.timeSec) >= Number(afterSec))
+      : bars;
+
+  let latest = null;
+
+  for (const bar of scopedBars) {
+    const high = toNum(bar.high);
+    const low = toNum(bar.low);
+
+    const touched =
+      dir === "LOW"
+        ? low !== null && low <= anchor + tolerance
+        : high !== null && high >= anchor - tolerance;
+
+    if (touched) {
+      latest = {
+        price: anchor,
+        timeSec: bar.timeSec,
+        time: formatTimeSec(bar.timeSec),
+        source: dir === "LOW" ? "AUTO_ANCHOR_LOW_TOUCH" : "AUTO_ANCHOR_HIGH_TOUCH",
+      };
+    }
+  }
+
+  return latest;
+}
+
+function findLatestSwingLowAfterTime({ bars = [], afterSec = null } = {}) {
+  if (!Array.isArray(bars) || bars.length < 3) return null;
+
+  const scopedBars =
+    afterSec !== null
+      ? bars.filter((bar) => Number(bar.timeSec) >= Number(afterSec))
+      : bars;
+
+  if (scopedBars.length < 3) return null;
+
+  let latest = null;
+
+  for (let i = 1; i < scopedBars.length - 1; i++) {
+    const prevLow = toNum(scopedBars[i - 1]?.low);
+    const low = toNum(scopedBars[i]?.low);
+    const nextLow = toNum(scopedBars[i + 1]?.low);
+
+    if (prevLow === null || low === null || nextLow === null) continue;
+
+    if (low <= prevLow && low <= nextLow) {
+      latest = {
+        price: low,
+        timeSec: scopedBars[i].timeSec,
+        time: formatTimeSec(scopedBars[i].timeSec),
+        close: scopedBars[i].close,
+        source: "AUTO_CANDLE_SWING_LOW",
+      };
+    }
+  }
+
+  return latest;
+}
+
+function findLatestSwingHighAfterTime({ bars = [], afterSec = null } = {}) {
+  if (!Array.isArray(bars) || bars.length < 3) return null;
+
+  const scopedBars =
+    afterSec !== null
+      ? bars.filter((bar) => Number(bar.timeSec) >= Number(afterSec))
+      : bars;
+
+  if (scopedBars.length < 3) return null;
+
+  let latest = null;
+
+  for (let i = 1; i < scopedBars.length - 1; i++) {
+    const prevHigh = toNum(scopedBars[i - 1]?.high);
+    const high = toNum(scopedBars[i]?.high);
+    const nextHigh = toNum(scopedBars[i + 1]?.high);
+
+    if (prevHigh === null || high === null || nextHigh === null) continue;
+
+    if (high >= prevHigh && high >= nextHigh) {
+      latest = {
+        price: high,
+        timeSec: scopedBars[i].timeSec,
+        time: formatTimeSec(scopedBars[i].timeSec),
+        close: scopedBars[i].close,
+        source: "AUTO_CANDLE_SWING_HIGH",
+      };
+    }
+  }
+
+  return latest;
+}
+
+/* =========================
+   ABC_UP post-reset map
+========================= */
+
+function buildAbcUpPriceAction({
+  currentPrice,
+  latestClose = null,
+  bCandidateLow = null,
+  bCandidateTime = null,
+  bSource = "PENDING",
+  preferredBZone = null,
+  deepBSupport = null,
+  barsScanned = 0,
+  scanStartSec = null,
+  scanStartTime = null,
+} = {}) {
+  const price = toNum(currentPrice);
+  const close = toNum(latestClose) ?? price;
+  const bLow = toNum(bCandidateLow);
+  const zoneLo = toNum(preferredBZone?.lo);
+  const zoneHi = toNum(preferredBZone?.hi);
+  const deepSupport = toNum(deepBSupport);
+
+  const touchedPreferredBZone =
+    bLow !== null &&
+    zoneLo !== null &&
+    zoneHi !== null &&
+    bLow <= zoneHi;
+
+  const tradedBelowPreferredBZone =
+    bLow !== null &&
+    zoneLo !== null &&
+    bLow < zoneLo;
+
+  const heldDeepBSupport =
+    bLow !== null &&
+    deepSupport !== null &&
+    bLow >= deepSupport;
+
+  const lostDeepBSupport =
+    bLow !== null &&
+    deepSupport !== null &&
+    bLow < deepSupport;
+
+  const reclaimedPreferredBZone =
+    close !== null &&
+    zoneHi !== null &&
+    close > zoneHi;
+
+  let status = "WAITING_FOR_B_PULLBACK";
+  let read = "Waiting for B pullback into the preferred B zone.";
+
+  if (lostDeepBSupport) {
+    status = "B_PULLBACK_DEEP_SUPPORT_LOST";
+    read = "Price traded below deep B support. ABC_UP bounce structure needs review.";
+  } else if (tradedBelowPreferredBZone && heldDeepBSupport) {
+    status = reclaimedPreferredBZone
+      ? "B_PULLBACK_DEEP_TEST_RECLAIMING"
+      : "B_PULLBACK_DEEP_SUPPORT_TEST";
+
+    read = reclaimedPreferredBZone
+      ? "Price traded below the preferred B zone, held above deep B support, and is reclaiming the B zone."
+      : "Price traded below the preferred B zone but is still holding above deep B support.";
+  } else if (touchedPreferredBZone) {
+    status = reclaimedPreferredBZone
+      ? "B_PULLBACK_PREFERRED_ZONE_RECLAIMING"
+      : "B_PULLBACK_REACHED_PREFERRED_ZONE";
+
+    read = reclaimedPreferredBZone
+      ? "Price pulled into the preferred B zone and is reclaiming."
+      : "Price pulled into the preferred B zone. Waiting for hold/reclaim confirmation.";
+  }
+
+  return {
+    currentPrice: price,
+    latestClose: close,
+    bCandidateLow: bLow,
+    bCandidateTime,
+    bSource,
+    preferredBZone,
+    deepBSupport,
+    scanStartSec,
+    scanStartTime,
+    barsScanned,
+    touchedPreferredBZone,
+    tradedBelowPreferredBZone,
+    heldDeepBSupport,
+    lostDeepBSupport,
+    reclaimedPreferredBZone,
+    status,
+    read,
+    reasonCodes: [
+      bLow !== null ? "ABC_UP_B_CANDIDATE_FOUND" : null,
+      touchedPreferredBZone ? "ABC_UP_B_ZONE_TOUCHED" : null,
+      tradedBelowPreferredBZone ? "ABC_UP_BELOW_PREFERRED_B_ZONE" : null,
+      heldDeepBSupport ? "ABC_UP_DEEP_SUPPORT_HOLDING" : null,
+      lostDeepBSupport ? "ABC_UP_DEEP_SUPPORT_LOST" : null,
+      reclaimedPreferredBZone ? "ABC_UP_PREFERRED_B_ZONE_RECLAIMING" : null,
+      bSource,
     ].filter(Boolean),
   };
 }
 
-function buildEngine15Section(engine15) {
-  if (!engine15) {
+function buildPostAbcBounceMap({
+  symbol,
+  degree = "minute",
+  currentPrice = null,
+  abcUpMarks = null,
+  barsByTf = {},
+} = {}) {
+  const tickSize = tickSizeForSymbol(symbol);
+
+  const originLow = toNum(abcUpMarks?.originLow);
+  const aHigh = toNum(abcUpMarks?.aHigh);
+  const manualBLow = toNum(abcUpMarks?.bLow);
+  const manualCHigh = toNum(abcUpMarks?.cHigh);
+
+  const originTime = abcUpMarks?.originTime || null;
+  const aTime = abcUpMarks?.aTime || null;
+  const bTime = abcUpMarks?.bTime || null;
+  const cTime = abcUpMarks?.cTime || null;
+
+  if (originLow === null || originLow <= 0 || aHigh === null || aHigh <= 0) {
     return {
-      number: 3,
-      icon: "▣",
-      title: "Setup Readiness — Engine 15ES",
-      severity: "warning",
-      fields: [],
-      lines: ["Engine 15ES decision unavailable."],
+      active: false,
+      state: "ABC_UP_MARKS_UNAVAILABLE",
+
+      originLow: originLow !== null ? roundToTick(originLow, tickSize) : null,
+      originTime,
+
+      waveAHigh: aHigh !== null ? roundToTick(aHigh, tickSize) : null,
+      aTime,
+
+      waveBLow: manualBLow !== null ? roundToTick(manualBLow, tickSize) : null,
+      bTime,
+
+      waveCHigh: manualCHigh !== null ? roundToTick(manualCHigh, tickSize) : null,
+      cTime,
+
+      autoWaveBLow: null,
+      autoBTime: null,
+      effectiveWaveBLow: null,
+      effectiveBTime: null,
+      bSource: "PENDING",
+
+      range: null,
+      bPullbackLevels: null,
+      preferredBZone: null,
+      deepBSupport: null,
+      bPullbackStatus: "ORIGIN_LOW_AND_A_HIGH_REQUIRED",
+      priceAction: null,
+      read: null,
+
+      reasonCodes: ["ABC_UP_ORIGIN_LOW_AND_A_HIGH_REQUIRED"],
     };
   }
 
-  const next =
-    engine15.nextSetupType ||
-    engine15.lifecycle?.nextFocus ||
-    "WAIT_FOR_CONFIRMATION";
+  const range = Math.abs(aHigh - originLow);
 
-  const needs = asArray(engine15.needs)
-    .map((need) => formatText(need))
-    .join(", ");
+  const pullbackFromAHigh = (fib) =>
+    roundToTick(aHigh - range * fib, tickSize);
 
-  return {
-    number: 3,
-    icon: "▣",
-    title: "Setup Readiness — Engine 15ES",
-    severity: isReadyState(engine15.readinessLabel)
-      ? "bullish"
-      : isWatchState(engine15.readinessLabel)
-      ? "blue"
-      : "warning",
-    fields: [
-      ["Readiness", formatUpper(engine15.readinessLabel, "UNKNOWN")],
-      ["Strategy", formatUpper(engine15.strategyType, "NONE")],
-      ["Direction", formatUpper(engine15.direction, "NONE")],
-      ["Action", formatUpper(engine15.action, "WATCH")],
-      [
-        "Quality",
-        `${formatScore(engine15.qualityScore)} / ${formatUpper(
-          engine15.qualityGrade || engine15.qualityBand,
-          "—"
-        )}`,
-      ],
-      ["Next", formatUpper(next)],
-    ],
-    lines: needs ? [`Needs: ${needs}`] : ["Needs: waiting for confirmation."],
+  const r236 = pullbackFromAHigh(0.236);
+  const r382 = pullbackFromAHigh(0.382);
+  const r500 = pullbackFromAHigh(0.5);
+  const r618 = pullbackFromAHigh(0.618);
+  const r786 = pullbackFromAHigh(0.786);
+
+  const preferredBZone = {
+    lo: r618,
+    hi: r500,
   };
-}
 
-function buildEngine5Section(fib) {
-  const reaction = getEngine5Reaction(fib);
-  const volume = getEngine5Volume(fib);
-  const timing = getEngine5Timing(fib);
+  const bars = getBarsForDegree({
+    degree,
+    barsByTf,
+    fallbackTf: "10m",
+  });
 
-  const reactionText = reaction
-    ? compactJoin(
-        [
-          formatText(reaction.quality, "UNKNOWN"),
-          formatText(reaction.direction, ""),
-          reaction.confirmed || reaction.cleanReaction
-            ? "confirmed"
-            : "not confirmed",
-        ],
-        " / "
-      )
-    : "Unavailable";
+  const originSec = parseManualTimeSec(originTime);
+  const manualASec = parseManualTimeSec(aTime);
 
-  const volumeText = volume
-    ? compactJoin(
-        [
-          formatText(volume.quality || volume.participationQuality, "UNKNOWN"),
-          volume.cleanParticipation
-            ? "clean participation"
-            : "clean participation not confirmed",
-        ],
-        " / "
-      )
-    : "Unavailable";
+  const aTouch = findLatestAnchorTouch({
+    bars,
+    anchorPrice: aHigh,
+    afterSec: null,
+    direction: "HIGH",
+    tolerance: tickSize * 2,
+  });
 
-  const timingText = timing
-    ? compactJoin(
-        [
-          formatText(timing.entryTiming, "UNKNOWN"),
-          timing.chaseRisk ? `chase risk ${formatText(timing.chaseRisk)}` : null,
-          timing.suggestedAction ? formatText(timing.suggestedAction) : null,
-        ],
-        " / "
-      )
-    : "Unavailable";
+  const effectiveASec = aTouch?.timeSec ?? manualASec ?? originSec ?? null;
+  const effectiveATime = aTouch?.time ?? aTime ?? null;
 
-  const hasWarning =
-    volume?.cleanParticipation === false ||
-    timing?.moveAlreadyHappened === true ||
-    timing?.noChaseContext === true ||
-    isDangerChase(timing?.chaseRisk);
+  const autoB =
+    manualBLow === null && effectiveASec !== null
+      ? findLatestSwingLowAfterTime({
+          bars,
+          afterSec: effectiveASec,
+        })
+      : null;
 
-  return {
-    number: 4,
-    icon: "⚗",
-    title: "Ingredients — Engine 5",
-    severity: hasWarning ? "purple" : "neutral",
-    ingredientCards: [
-      {
-        label: "Reaction",
-        value: reactionText,
-        good: reaction?.confirmed === true || reaction?.cleanReaction === true,
-      },
-      {
-        label: "Volume",
-        value: volumeText,
-        good: volume?.cleanParticipation === true,
-      },
-      {
-        label: "Timing",
-        value: timingText,
-        good:
-          timing &&
-          timing.moveAlreadyHappened !== true &&
-          timing.noChaseContext !== true &&
-          !isDangerChase(timing.chaseRisk),
-      },
-    ],
-  };
-}
+  const effectiveBLow = manualBLow !== null ? manualBLow : toNum(autoB?.price);
+  const effectiveBTime = manualBLow !== null ? bTime : autoB?.time || null;
+  const effectiveBSec =
+    manualBLow !== null ? parseManualTimeSec(bTime) : autoB?.timeSec ?? null;
 
-function buildPermissionSection(permission, engine15) {
-  if (!permission) {
-    return {
-      number: 5,
-      icon: "⬟",
-      title: "Final Permission — Engine 6",
-      severity: "warning",
-      fields: [],
-      lines: ["Engine 6 final permission unavailable."],
-    };
-  }
+  const bSource =
+    manualBLow !== null
+      ? "MANUAL_ABC_UP_B_LOW"
+      : effectiveBLow !== null
+      ? "AUTO_CANDLE_SWING_LOW"
+      : "PENDING";
 
-  const executable = permission.executable === true;
-  const watchOnly = permission.watchOnly === true;
+  const manualBMarked = manualBLow !== null && manualBLow > 0;
+  const cMarked = manualCHigh !== null && manualCHigh > 0;
 
-  let permissionLine = "Engine 6 does not allow execution yet.";
+  const state = manualBMarked
+    ? cMarked
+      ? "ABC_UP_COMPLETE"
+      : "B_PULLBACK_MARKED_WAITING_FOR_C_UP"
+    : "A_UP_MARKED_WAITING_FOR_B_PULLBACK";
 
-  if (executable) {
-    permissionLine =
-      "Engine 6 allows execution because setup and permission gates passed.";
-  } else if (
-    String(permission.permission || "").toUpperCase() === "REDUCE" &&
-    watchOnly
-  ) {
-    permissionLine =
-      "REDUCE — watch only, no execution. Engine 15ES is WATCH, not READY.";
-  } else if (watchOnly) {
-    permissionLine =
-      "Engine 6 will not allow execution because this is watch only.";
-  }
+  const latestClose =
+    bars.length && bars[bars.length - 1]?.close != null
+      ? bars[bars.length - 1].close
+      : currentPrice;
+
+  const scanBars =
+    effectiveASec !== null
+      ? bars.filter((bar) => Number(bar.timeSec) >= Number(effectiveASec))
+      : bars.slice(-80);
+
+  const priceAction = buildAbcUpPriceAction({
+    currentPrice,
+    latestClose,
+    bCandidateLow: effectiveBLow,
+    bCandidateTime: effectiveBTime,
+    bSource,
+    preferredBZone,
+    deepBSupport: r786,
+    barsScanned: scanBars.length,
+    scanStartSec: effectiveASec,
+    scanStartTime: effectiveATime,
+  });
+
+  const preliminaryBStatus = manualBMarked
+    ? cMarked
+      ? "ABC_UP_COMPLETE"
+      : "B_PULLBACK_MARKED_WAITING_FOR_C_UP"
+    : "WAITING_FOR_B_PULLBACK";
+
+  const bPullbackStatus =
+    effectiveBLow !== null && priceAction?.status
+      ? priceAction.status
+      : preliminaryBStatus;
 
   return {
-    number: 5,
-    icon: "⬟",
-    title: "Final Permission — Engine 6",
-    severity: executable ? "bullish" : "purple",
-    fields: [
-      ["Permission", formatUpper(permission.permission, "UNKNOWN")],
-      ["Executable", formatBool(permission.executable)],
-      ["Watch Only", formatBool(permission.watchOnly)],
-      [
-        "Strategy Type",
-        formatUpper(permission.strategyType || engine15?.strategyType, "NONE"),
-      ],
-      [
-        "Direction",
-        formatUpper(permission.direction || engine15?.direction, "NONE"),
-      ],
-      [
-        "Authority",
-        permission.engine15Authority === true
-          ? "Engine 15"
-          : permission.engine5Authority === true
-          ? "Engine 5"
-          : "—",
-      ],
-    ],
-    lines: [
-      permissionLine,
-      asArray(permission.reasonCodes).length
-        ? `Reasons: ${asArray(permission.reasonCodes).map(formatText).join(", ")}`
+    active: true,
+    state,
+
+    originLow: roundToTick(originLow, tickSize),
+    originTime,
+
+    waveAHigh: roundToTick(aHigh, tickSize),
+    aTime,
+    effectiveATime,
+    effectiveASec,
+    aSource: aTouch ? "AUTO_A_HIGH_TOUCH" : "MANUAL_ORIGIN_TIME_FALLBACK",
+
+    waveBLow: manualBMarked ? roundToTick(manualBLow, tickSize) : null,
+    bTime: manualBMarked ? bTime : null,
+    autoWaveBLow:
+      !manualBMarked && effectiveBLow !== null
+        ? roundToTick(effectiveBLow, tickSize)
         : null,
-    ].filter(Boolean),
+    autoBTime: !manualBMarked ? effectiveBTime : null,
+    effectiveWaveBLow:
+      effectiveBLow !== null ? roundToTick(effectiveBLow, tickSize) : null,
+    effectiveBTime,
+    effectiveBSec,
+    bSource,
+
+    waveCHigh: cMarked ? roundToTick(manualCHigh, tickSize) : null,
+    cTime: cMarked ? cTime : null,
+
+    range: roundToTick(range, tickSize),
+
+    bPullbackLevels: {
+      r236,
+      r382,
+      r500,
+      r618,
+      r786,
+    },
+
+    preferredBZone,
+    deepBSupport: r786,
+    bPullbackStatus,
+    priceAction,
+    read: priceAction?.read || null,
+
+    reasonCodes: [
+      "POST_ABC_BOUNCE_MARKS_FOUND",
+      "ABC_UP_A_HIGH_MARKED",
+      manualBMarked ? "ABC_UP_B_LOW_MARKED" : "ABC_UP_B_LOW_AUTO_OR_PENDING",
+      cMarked ? "ABC_UP_C_HIGH_MARKED" : "ABC_UP_C_HIGH_PENDING",
+      bSource,
+      ...(Array.isArray(priceAction?.reasonCodes)
+        ? priceAction.reasonCodes
+        : []),
+    ],
   };
 }
 
-function buildNextStepsSection({
-  waveOpportunity,
-  engine15,
-  permission,
-  fib,
-  tradeContextSummary = null,
-}) {
-  const actionLevels = [];
-  const steps = [];
+/* =========================
+   Post-ABC reset lifecycle
+========================= */
 
-  const waveNeeds = asArray(waveOpportunity?.needs);
-  const engine15Needs = asArray(engine15?.needs);
-  const permissionReasons = asArray(permission?.reasonCodes);
-  const volume = getEngine5Volume(fib);
-  const timing = getEngine5Timing(fib);
-  const abcUp = tradeContextSummary?.abcUp || null;
+function classifyPostAbcReset({
+  symbol,
+  currentPrice,
+  abcCorrection,
+  abcUpMarks = null,
+  activeCorrectionDegree = null,
+  barsByTf = {},
+} = {}) {
+  const tickSize = tickSizeForSymbol(symbol);
+  const abcUp = buildPostAbcBounceMap({
+    symbol,
+    degree: activeCorrectionDegree || "minute",
+    currentPrice,
+    abcUpMarks,
+    barsByTf,
+  });
 
-  const engine16 = fib?.engine16 || {};
-  const trigger10m = engine16?.regimeLayers?.trigger10m || {};
-  const currentPrice = waveOpportunity?.currentPrice || trigger10m?.close || null;
+  const price = toNum(currentPrice);
+  const cLow = toNum(abcCorrection?.c?.price);
+  const abcState = upper(abcCorrection?.state, "");
 
-  if (currentPrice != null) {
-    actionLevels.push(`Current price: ${formatNumber(currentPrice)}`);
+  if (abcState !== "ABC_COMPLETE" || cLow === null || cLow <= 0) {
+    return {
+      active: false,
+      abcUp,
+      state: "POST_ABC_RESET_UNAVAILABLE",
+      supportLevel: null,
+      watchZoneLow: null,
+      watchZoneHigh: null,
+      cLow: cLow !== null ? roundToTick(cLow, tickSize) : null,
+      currentPrice: roundToTick(price, tickSize),
+      supportStatus: "ABC_COMPLETE_WITH_C_LOW_REQUIRED",
+      nextExpectedMove: "UNKNOWN",
+      preferredEntry: null,
+      paperSignalCandidate: false,
+      signalType: null,
+      tradeableOpportunityBlocked: true,
+      reclaimLevel: null,
+      needs: ["ABC_COMPLETE_WITH_C_LOW_REQUIRED"],
+      reasonCodes: ["POST_ABC_RESET_UNAVAILABLE"],
+    };
+  }
+
+  const roundedPrice = roundToTick(price, tickSize);
+  const roundedCLow = roundToTick(cLow, tickSize);
+
+  if (!isEsLikeSymbol(symbol)) {
+    return {
+      active: true,
+      abcUp,
+      state: "POST_ABC_RESET_WAIT",
+      supportLevel: null,
+      watchZoneLow: null,
+      watchZoneHigh: null,
+      cLow: roundedCLow,
+      currentPrice: roundedPrice,
+      supportStatus: "NON_ES_GENERIC_POST_ABC_RESET",
+      nextExpectedMove: "WAIT_FOR_NEW_STRUCTURE",
+      preferredEntry: "WAIT_FOR_NEW_W1_OR_W2_STRUCTURE",
+      paperSignalCandidate: false,
+      signalType: null,
+      tradeableOpportunityBlocked: true,
+      reclaimLevel: null,
+      needs: [
+        "WAIT_FOR_NEW_W1_OR_W2_STRUCTURE",
+        "RECLAIM_CONFIRMATION_REQUIRED",
+      ],
+      reasonCodes: [
+        "POST_W5_ABC_COMPLETE",
+        "ABC_COMPLETE",
+        "NON_ES_POST_ABC_RESET_WAIT",
+      ],
+    };
+  }
+
+  const supportLevel = 7400;
+  const watchZoneHigh = 7425;
+
+  if (price === null) {
+    return {
+      active: true,
+      abcUp,
+      state: "POST_ABC_RESET_WAIT",
+      supportLevel,
+      watchZoneLow: roundedCLow,
+      watchZoneHigh,
+      cLow: roundedCLow,
+      currentPrice: null,
+      supportStatus: "PRICE_UNAVAILABLE",
+      nextExpectedMove: "WAVE_2_BOUNCE_UP",
+      preferredEntry: "WAIT_FOR_7400_HOLD_AND_RECLAIM",
+      paperSignalCandidate: false,
+      signalType: null,
+      tradeableOpportunityBlocked: true,
+      reclaimLevel: null,
+      needs: [
+        "CURRENT_PRICE_REQUIRED",
+        "7400_SUPPORT_HOLD",
+        "RECLAIM_CONFIRMATION_REQUIRED",
+      ],
+      reasonCodes: [
+        "POST_W5_ABC_COMPLETE",
+        "ABC_COMPLETE",
+        "PRICE_UNAVAILABLE",
+      ],
+    };
+  }
+
+  if (price < cLow) {
+    return {
+      active: true,
+      abcUp,
+      state: "POST_ABC_LOW_FAILED",
+      supportLevel,
+      watchZoneLow: roundedCLow,
+      watchZoneHigh,
+      cLow: roundedCLow,
+      currentPrice: roundedPrice,
+      supportStatus: "C_LOW_FAILED",
+      nextExpectedMove: "C_LEG_OR_WAVE_1_DOWN_EXTENDING",
+      preferredEntry: "WAIT_FOR_LOWER_SUPPORT",
+      paperSignalCandidate: false,
+      signalType: null,
+      tradeableOpportunityBlocked: true,
+      reclaimLevel: null,
+      needs: [
+        "WAIT_FOR_LOWER_SUPPORT",
+        "WAIT_FOR_NEW_STRUCTURE",
+        "NO_WAVE_2_BOUNCE_SIGNAL",
+      ],
+      reasonCodes: [
+        "POST_W5_ABC_COMPLETE",
+        "ABC_COMPLETE",
+        "C_LOW_FAILED",
+        "POST_ABC_LOW_FAILED",
+      ],
+    };
+  }
+
+  const inSupportBand = price >= cLow && price <= watchZoneHigh;
+
+  const supportStatus =
+    price < supportLevel
+      ? "WARNING_BELOW_7400_ABOVE_C_LOW"
+      : inSupportBand
+      ? "IN_7400_SUPPORT_HOLD_TEST"
+      : "SUPPORT_HELD_WAITING_FOR_RECLAIM_CONFIRMATION";
+
+  return {
+    active: true,
+    abcUp,
+    state: "POST_ABC_W2_BOUNCE_WATCH",
+    supportLevel,
+    watchZoneLow: roundedCLow,
+    watchZoneHigh,
+    cLow: roundedCLow,
+    currentPrice: roundedPrice,
+    supportStatus,
+    nextExpectedMove: "WAVE_2_BOUNCE_UP",
+    preferredEntry: "WAIT_FOR_7400_HOLD_AND_RECLAIM",
+    paperSignalCandidate: true,
+    signalType: "POST_ABC_W2_BOUNCE_WATCH",
+    tradeableOpportunityBlocked: true,
+    reclaimLevel: null,
+    needs: [
+      "7400_SUPPORT_HOLD",
+      "RECLAIM_CONFIRMATION_REQUIRED",
+      "ENGINE15_READY",
+      "ENGINE6_FINAL_PERMISSION",
+    ],
+    reasonCodes: [
+      "POST_W5_ABC_COMPLETE",
+      "ABC_COMPLETE",
+      "C_LOW_MARKED",
+      supportStatus,
+      "INSTITUTIONAL_SUPPORT_TEST",
+      "WAIT_FOR_W2_BOUNCE_CONFIRMATION",
+    ],
+  };
+}
+
+/* =========================
+   Core lifecycle helpers
+========================= */
+
+function isInW5(degreeState = null) {
+  return (
+    upper(degreeState?.phase, "") === "IN_W5" ||
+    upper(degreeState?.confirmedPhase, "") === "IN_W5"
+  );
+}
+
+function isCompleteW5(degreeState = null) {
+  return (
+    upper(degreeState?.phase, "") === "COMPLETE_W5" ||
+    upper(degreeState?.confirmedPhase, "") === "COMPLETE_W5" ||
+    upper(degreeState?.state, "") === "IMPULSE_COMPLETE"
+  );
+}
+
+function hasAbcMarks(degreeState = null) {
+  const aLow = toNum(degreeState?.aLow);
+  const bHigh = toNum(degreeState?.bHigh);
+
+  return aLow !== null && bHigh !== null && aLow > 0 && bHigh > 0;
+}
+
+function hasCMark(degreeState = null) {
+  const cLow = toNum(degreeState?.cLow);
+  return cLow !== null && cLow > 0;
+}
+
+function findParentW5Degrees(degrees = {}) {
+  return DEGREE_ORDER.filter((degree) => isInW5(degrees?.[degree]));
+}
+
+function findCompletedW5Degrees(degrees = {}) {
+  return DEGREE_ORDER.filter((degree) => isCompleteW5(degrees?.[degree]));
+}
+
+function findActiveAbcDegree(degrees = {}) {
+  const searchOrder = ["intermediate", "minor", "minute", "micro"];
+
+  return (
+    searchOrder.find((degree) => {
+      const d = degrees?.[degree];
+      return isCompleteW5(d) && hasAbcMarks(d);
+    }) || null
+  );
+}
+
+function buildAbcCorrection({ symbol, degree, degreeState } = {}) {
+  if (!degree || !degreeState) {
+    return {
+      ok: true,
+      active: false,
+      engine: "engine22.waveLifecycle.abc.v1",
+      state: "NO_POST_W5_ABC_MARKS",
+      reasonCodes: ["NO_COMPLETE_W5_DEGREE_WITH_A_B_MARKS"],
+    };
+  }
+
+  const tickSize = tickSizeForSymbol(symbol);
+
+  const aLow = toNum(degreeState?.aLow);
+  const bHigh = toNum(degreeState?.bHigh);
+  const cLow = toNum(degreeState?.cLow);
+
+  if (aLow === null || bHigh === null || aLow <= 0 || bHigh <= 0) {
+    return {
+      ok: true,
+      active: false,
+      engine: "engine22.waveLifecycle.abc.v1",
+      state: "NO_POST_W5_ABC_MARKS",
+      reasonCodes: ["NO_VALID_A_B_MARKS"],
+    };
+  }
+
+  const range = Math.abs(bHigh - aLow);
+
+  const reclaimFromA = (fib) => roundToTick(aLow + range * fib, tickSize);
+  const downsideFromB = (fib) => roundToTick(bHigh - range * fib, tickSize);
+
+  const cMarked = cLow !== null && cLow > 0;
+
+  return {
+    ok: true,
+    active: true,
+    engine: "engine22.waveLifecycle.abc.v1",
+    symbol,
+    degree,
+    timeframe: degreeState?.tf || null,
+    correctionFor: `${String(degree).toUpperCase()}_COMPLETE_W5`,
+    state: cMarked ? "ABC_COMPLETE" : "C_LEG_ACTIVE",
+
+    a: {
+      label: "A",
+      price: roundToTick(aLow, tickSize),
+    },
+
+    b: {
+      label: "B",
+      price: roundToTick(bHigh, tickSize),
+    },
+
+    c: cMarked
+      ? {
+          label: "C",
+          price: roundToTick(cLow, tickSize),
+        }
+      : null,
+
+    range: roundToTick(range, tickSize),
+
+    reclaimLevels: {
+      r382: reclaimFromA(0.382),
+      r500: reclaimFromA(0.5),
+      r618: reclaimFromA(0.618),
+      r786: reclaimFromA(0.786),
+    },
+
+    downsideTargets: {
+      c100: downsideFromB(1),
+      c1272: downsideFromB(1.272),
+      c1618: downsideFromB(1.618),
+      c200: downsideFromB(2),
+      c2618: downsideFromB(2.618),
+    },
+
+    reasonCodes: [
+      "POST_W5_ABC_MARKS_FOUND",
+      cMarked ? "ABC_COMPLETE" : "C_LEG_PENDING",
+    ],
+  };
+}
+
+function getExtensionHit(degreeState = {}) {
+  return (
+    toNum(degreeState?.extensionProgress?.highestExtensionHit) ??
+    toNum(degreeState?.extensionProgress?.highestExtension) ??
+    toNum(degreeState?.extensionProgress?.extensionHit) ??
+    null
+  );
+}
+
+function hasW4Levels(degreeState = {}) {
+  return degreeState?.w4Levels && typeof degreeState.w4Levels === "object";
+}
+
+function hasFibProjection(degreeState = {}) {
+  return (
+    degreeState?.fibProjection &&
+    typeof degreeState.fibProjection === "object" &&
+    degreeState.fibProjection?.levels &&
+    typeof degreeState.fibProjection.levels === "object"
+  );
+}
+
+function classifyDegreeLifecycle({
+  degree,
+  degreeState = null,
+  isParentContextOnly = false,
+} = {}) {
+  if (!degreeState || degreeState?.ok === false) {
+    return {
+      ok: false,
+      degree,
+      lifecycleState: "UNKNOWN",
+      phase: "UNKNOWN",
+      confirmedPhase: "UNKNOWN",
+      nextExpectedWave: "UNKNOWN",
+      allowedSetupFamily: "NONE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: false,
+      reasonCodes: ["DEGREE_STATE_UNAVAILABLE"],
+    };
+  }
+
+  const phase = upper(degreeState?.phase);
+  const confirmedPhase = upper(degreeState?.confirmedPhase);
+  const nextExpectedWave = upper(degreeState?.nextExpectedWave);
+  const state = upper(degreeState?.state, "");
+
+  const extensionHit = getExtensionHit(degreeState);
+  const hasProjection = hasFibProjection(degreeState);
+  const w4LevelsAvailable = hasW4Levels(degreeState);
+
+  const completeW5 = isCompleteW5(degreeState);
+  const inW5 = isInW5(degreeState);
+  const abcMarks = hasAbcMarks(degreeState);
+  const cMarked = hasCMark(degreeState);
+
+  if (isParentContextOnly && inW5) {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "W5_PARENT_CONTEXT_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "NONE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: true,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W5 PARENT CONTEXT ACTIVE`,
+      summary:
+        "This W5 remains higher-degree context only because lower-degree W5 completion / ABC correction is active.",
+      needs: [
+        "WAIT_FOR_LOWER_DEGREE_RESET",
+        "WAIT_FOR_ABC_COMPLETION_OR_NEW_W2_W4_SETUP",
+      ],
+      reasonCodes: [
+        "W5_PARENT_CONTEXT_ACTIVE",
+        "BLOCKED_BY_LOWER_DEGREE_COMPLETION_OR_ABC",
+      ],
+    };
+  }
+
+  if (completeW5 && abcMarks && !cMarked) {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "POST_W5_ABC_C_LEG_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "NONE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: true,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W5 COMPLETE — ABC C LEG ACTIVE`,
+      summary:
+        "W5 is complete. A and B are marked. C leg is pending/active.",
+      needs: [
+        "WAIT_FOR_ABC_COMPLETION",
+        "WAIT_FOR_NEW_W2_OR_W4_SETUP",
+      ],
+      reasonCodes: [
+        "W5_COMPLETE",
+        "POST_W5_ABC_MARKS_FOUND",
+        "C_LEG_PENDING",
+      ],
+    };
+  }
+
+  if (completeW5 && abcMarks && cMarked) {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "POST_W5_ABC_COMPLETE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "WAIT_FOR_NEW_STRUCTURE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: true,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W5 COMPLETE — ABC COMPLETE`,
+      summary:
+        "W5 and ABC correction are complete. Wait for a new lower-degree W2/W4 setup before treating this as tradeable again.",
+      needs: ["WAIT_FOR_NEW_W2_OR_W4_SETUP"],
+      reasonCodes: [
+        "W5_COMPLETE",
+        "POST_W5_ABC_MARKS_FOUND",
+        "ABC_COMPLETE",
+      ],
+    };
+  }
+
+  if (completeW5) {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "W5_COMPLETE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "NONE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: true,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W5 COMPLETE`,
+      summary:
+        "W5 is complete. Do not treat this degree as a fresh continuation setup without a reset.",
+      needs: ["WAIT_FOR_NEW_W2_OR_W4_SETUP"],
+      reasonCodes: ["W5_COMPLETE"],
+    };
+  }
+
+  if (phase === "IN_W2") {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "W2_PULLBACK_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "W2_TO_W3",
+      tradeableCandidate: true,
+      tradeableOpportunityBlocked: false,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W2 PULLBACK ACTIVE`,
+      summary:
+        "W2 pullback is active. The next valid bullish structure is W2→W3 only after reclaim/confirmation.",
+      needs: [
+        "WAIT_FOR_W2_RECLAIM",
+        "ENGINE15_READY_OR_PAPER_READY",
+      ],
+      reasonCodes: ["W2_PULLBACK_ACTIVE", "NEXT_ALLOWED_W2_TO_W3"],
+    };
+  }
+
+  if (phase === "IN_W3") {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "W3_EXTENSION_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "W2_TO_W3",
+      tradeableCandidate: true,
+      tradeableOpportunityBlocked: false,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W3 EXTENSION ACTIVE`,
+      summary:
+        "W3 expansion is active. Do not chase late extension; wait for controlled setup/confirmation.",
+      needs: [
+        "NO_CHASE_LONG",
+        "WAIT_FOR_CONTROLLED_RECLAIM_OR_PULLBACK",
+      ],
+      reasonCodes: ["W3_EXTENSION_ACTIVE"],
+    };
   }
 
   if (
-    String(abcUp?.state || "").toUpperCase() ===
-    "A_UP_MARKED_WAITING_FOR_B_PULLBACK"
+    phase === "IN_W4" ||
+    confirmedPhase === "IN_W3" ||
+    nextExpectedWave === "W5"
   ) {
-    const bLow =
-      abcUp.effectiveWaveBLow ??
-      abcUp.autoWaveBLow ??
-      abcUp.waveBLow ??
-      null;
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "W4_PULLBACK_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "W4_TO_W5",
+      tradeableCandidate: true,
+      tradeableOpportunityBlocked: false,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} W4 PULLBACK ACTIVE`,
+      summary:
+        "W4 pullback/reclaim structure is active. The next valid bullish structure is W4→W5 after confirmation.",
+      needs: [
+        "WAIT_FOR_W4_RECLAIM",
+        "ENGINE15_READY_OR_PAPER_READY",
+      ],
+      reasonCodes: ["W4_PULLBACK_ACTIVE", "NEXT_ALLOWED_W4_TO_W5"],
+    };
+  }
 
-    if (abcUp?.waveAHigh != null) {
-      actionLevels.push(`A high: ${formatNumber(abcUp.waveAHigh)}`);
-    }
+  if (inW5) {
+    const lateExtension = extensionHit !== null && extensionHit >= 1.272;
 
-    if (bLow != null) {
-      actionLevels.push(`B low: ${formatNumber(bLow)}`);
-    }
+    return {
+      ok: true,
+      degree,
+      lifecycleState: lateExtension
+        ? "W5_EXTENSION_LATE"
+        : "W5_EXTENSION_ACTIVE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "W4_TO_W5",
+      tradeableCandidate: true,
+      tradeableOpportunityBlocked: false,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: lateExtension
+        ? `${String(degree).toUpperCase()} W5 EXTENSION LATE`
+        : `${String(degree).toUpperCase()} W5 EXTENSION ACTIVE`,
+      summary: lateExtension
+        ? "W5 extension is late/post-extension. Do not chase; wait for controlled pullback/reclaim."
+        : "W5 extension is active after W4. Continuation is possible only with confirmation.",
+      needs: lateExtension
+        ? ["NO_CHASE_LONG", "CONTROLLED_PULLBACK_OR_RECLAIM"]
+        : ["WAIT_FOR_CONFIRMATION", "NO_BLIND_CHASE"],
+      reasonCodes: lateExtension
+        ? ["W5_EXTENSION_LATE", "NO_CHASE_LONG"]
+        : ["W5_EXTENSION_ACTIVE"],
+    };
+  }
 
-    if (abcUp?.preferredBZone?.lo != null && abcUp?.preferredBZone?.hi != null) {
-      actionLevels.push(
-        `Preferred B zone: ${formatNumber(
-          abcUp.preferredBZone.lo
-        )}–${formatNumber(abcUp.preferredBZone.hi)}`
+  if (state === "IMPULSE_COMPLETE") {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "IMPULSE_COMPLETE",
+      phase,
+      confirmedPhase,
+      nextExpectedWave,
+      allowedSetupFamily: "NONE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: true,
+      extensionHit,
+      hasFibProjection: hasProjection,
+      hasW4Levels: w4LevelsAvailable,
+      headline: `${String(degree).toUpperCase()} IMPULSE COMPLETE`,
+      summary:
+        "Impulse is complete. Wait for reset or correction completion.",
+      needs: ["WAIT_FOR_NEW_STRUCTURE"],
+      reasonCodes: ["IMPULSE_COMPLETE"],
+    };
+  }
+
+  return {
+    ok: true,
+    degree,
+    lifecycleState: "UNKNOWN_OR_MIXED",
+    phase,
+    confirmedPhase,
+    nextExpectedWave,
+    allowedSetupFamily: "NONE",
+    tradeableCandidate: false,
+    tradeableOpportunityBlocked: false,
+    extensionHit,
+    hasFibProjection: hasProjection,
+    hasW4Levels: w4LevelsAvailable,
+    headline: `${String(degree).toUpperCase()} WAVE STATE MIXED`,
+    summary:
+      "This degree does not have a clean W2/W3/W4/W5 lifecycle state yet.",
+    needs: ["WAIT_FOR_CLEARER_WAVE_MARKS"],
+    reasonCodes: ["UNKNOWN_OR_MIXED_WAVE_LIFECYCLE"],
+  };
+}
+
+function buildDegreeLifecycle({
+  degrees = {},
+  parentContextOnly = false,
+  parentW5Degrees = [],
+  activeCorrectionDegree = null,
+} = {}) {
+  const out = {};
+
+  for (const degree of DEGREE_ORDER) {
+    out[degree] = classifyDegreeLifecycle({
+      degree,
+      degreeState: degrees?.[degree] || null,
+      isParentContextOnly:
+        parentContextOnly && parentW5Degrees.includes(degree),
+      isActiveCorrectionDegree: activeCorrectionDegree === degree,
+    });
+  }
+
+  return out;
+}
+
+function pickActiveDegreeLifecycle({ degreeLifecycle = {}, masterBlocked = false } = {}) {
+  if (masterBlocked) return null;
+
+  const searchOrder = ["micro", "minute", "minor", "intermediate", "primary"];
+
+  return (
+    searchOrder.find((degree) => {
+      const d = degreeLifecycle?.[degree];
+      return (
+        d?.tradeableCandidate === true &&
+        d?.tradeableOpportunityBlocked !== true
       );
-    }
-
-    if (abcUp?.deepBSupport != null) {
-      actionLevels.push(`Deep B support: ${formatNumber(abcUp.deepBSupport)}`);
-    }
-
-    steps.push("Wait for B pullback hold and reclaim");
-    steps.push("No chase and no execution");
-  }
-
-  if (
-    trigger10m?.ema10 != null &&
-    trigger10m?.ema20 != null &&
-    String(abcUp?.state || "").toUpperCase() !==
-      "A_UP_MARKED_WAITING_FOR_B_PULLBACK"
-  ) {
-    actionLevels.push(
-      `10m reclaim zone: ${formatNumber(trigger10m.ema10)} → ${formatNumber(
-        trigger10m.ema20
-      )}`
-    );
-  }
-
-  if (
-    waveNeeds.some((need) => String(need).toUpperCase().includes("NO_CHASE")) ||
-    isDangerChase(waveOpportunity?.chaseRisk)
-  ) {
-    steps.push("Do not chase the current W5 extension");
-  }
-
-  if (
-    waveNeeds.some((need) => String(need).toUpperCase().includes("PULLBACK")) ||
-    engine15Needs.some((need) => String(need).toUpperCase().includes("PULLBACK")) ||
-    timing?.suggestedAction
-  ) {
-    steps.push("Wait for controlled pullback or reclaim");
-  }
-
-  if (
-    engine15Needs.some((need) => String(need).toUpperCase().includes("10M")) ||
-    permissionReasons.some((reason) =>
-      String(reason).toUpperCase().includes("RECLAIM")
-    )
-  ) {
-    steps.push("Need 10m EMA10/EMA20 reclaim");
-  }
-
-  if (
-    engine15Needs.some((need) => String(need).toUpperCase().includes("ENGINE3")) ||
-    engine15?.qualityBreakdown?.reactionConfirmed === false
-  ) {
-    steps.push("Need Engine 3 reaction confirmation");
-  }
-
-  if (
-    engine15Needs.some((need) => String(need).toUpperCase().includes("ENGINE4")) ||
-    volume?.cleanParticipation === false
-  ) {
-    steps.push("Need Engine 4 clean participation");
-  }
-
-  if (!isReadyState(engine15?.readinessLabel)) {
-    steps.push("Engine 15ES must upgrade from WATCH to READY");
-  }
-
-  if (!actionLevels.length && !steps.length) {
-    steps.push("Wait for the next valid Wave 3 or Wave 5 opportunity");
-  }
-
-  return {
-    number: 6,
-    icon: "✓",
-    title: "Next Action Levels",
-    severity: "teal",
-    checklist: [...actionLevels, ...steps].slice(0, 8),
-  };
-}
-
-/* =========================
-   Market Context builders
-========================= */
-
-function buildEngine3ContextSection(fib) {
-  const reaction = getEngine5Reaction(fib);
-
-  if (!reaction) {
-    return {
-      number: 0,
-      icon: "③",
-      title: "Engine 3 Current State",
-      severity: "neutral",
-      fields: [],
-      lines: ["Engine 3 reaction context unavailable."],
-    };
-  }
-
-  const quality =
-    reaction.quality ||
-    reaction.reactionQuality ||
-    reaction.state ||
-    "UNKNOWN";
-
-  const direction =
-    reaction.direction ||
-    reaction.executionBias ||
-    reaction.bias ||
-    "NEUTRAL";
-
-  const confirmed =
-    reaction.confirmed === true ||
-    reaction.cleanReaction === true ||
-    reaction.reactionConfirmed === true;
-
-  return {
-    number: 0,
-    icon: "③",
-    title: "Engine 3 Current State",
-    severity: confirmed ? "bullish" : "warning",
-    fields: [
-      ["Reaction", formatUpper(quality, "UNKNOWN")],
-      ["Direction", formatUpper(direction, "NEUTRAL")],
-      ["Confirmed", formatBool(confirmed)],
-      ["Score", formatScore(reaction.score || reaction.reactionScore)],
-    ],
-    lines: [
-      reaction.message ||
-        reaction.traderMessage ||
-        (confirmed
-          ? "Engine 3 reaction is confirmed."
-          : "Engine 3 reaction is not confirmed yet."),
-    ].filter(Boolean),
-  };
-}
-
-function buildEngine4ContextSection(fib) {
-  const volume = getEngine5Volume(fib);
-
-  if (!volume) {
-    return {
-      number: 0,
-      icon: "④",
-      title: "Engine 4 Current State",
-      severity: "neutral",
-      fields: [],
-      lines: ["Engine 4 volume / participation context unavailable."],
-    };
-  }
-
-  const quality =
-    volume.quality ||
-    volume.participationQuality ||
-    volume.state ||
-    "UNKNOWN";
-
-  const direction =
-    volume.direction ||
-    volume.participationDirection ||
-    "NEUTRAL";
-
-  const confirmed =
-    volume.confirmed === true ||
-    volume.volumeConfirmed === true ||
-    volume.cleanParticipation === true;
-
-  return {
-    number: 0,
-    icon: "④",
-    title: "Engine 4 Current State",
-    severity: confirmed ? "bullish" : "warning",
-    fields: [
-      ["Volume", formatUpper(quality, "UNKNOWN")],
-      ["Direction", formatUpper(direction, "NEUTRAL")],
-      ["Confirmed", formatBool(confirmed)],
-      ["Score", formatScore(volume.score || volume.volumeScore)],
-    ],
-    lines: [
-      volume.message ||
-        volume.traderMessage ||
-        (confirmed
-          ? "Engine 4 participation is confirmed."
-          : "Engine 4 participation is not confirmed yet."),
-    ].filter(Boolean),
-  };
-}
-
-function buildCurrentFibExtensionsSection(waveOpportunity) {
-  const targets = getTargets(waveOpportunity);
-
-  if (!targets.length) {
-    return {
-      number: 0,
-      icon: "⑸",
-      title: "Current Fib Extensions To Watch",
-      severity: "neutral",
-      fields: [],
-      lines: ["No active fib extension targets are available."],
-    };
-  }
-
-  return {
-    number: 0,
-    icon: "⑸",
-    title: "Current Fib Extensions To Watch",
-    severity: "blue",
-    fields: targets.map(([level, price]) => [level, formatNumber(price)]),
-    lines: [
-      "Use these only as target / reaction zones. They are not entry signals by themselves.",
-    ],
-  };
-}
-
-/* =========================
-   Normalize timeline data
-========================= */
-
-function normalizeTimelineData({ overlayData }) {
-  if (!overlayData?.ok) {
-    return {
-      show: false,
-    };
-  }
-
-  const fib = getFib(overlayData);
-  const waveOpportunity = getWaveOpportunity(fib);
-  const engine15 = getEngine15Decision(fib);
-  const permission = getFinalPermission(fib);
-  const backendTimelineRead = getBackendTimelineRead(fib);
-  const tradeContextSummary = getBackendTradeContextSummary(fib);
-
-  const postAbcBounceSection = buildPostAbcBounceSection(tradeContextSummary);
-
-  const targetClusterSection = getBackendTimelineSection(
-    fib,
-    "Target Cluster Confidence"
+    }) || null
   );
+}
 
-  const marketMeterSection = getBackendTimelineSection(
-    fib,
-    "Market Meter / Tactical Context"
-  );
+export function classifyWaveLifecycle({
+  symbol = "SPY",
+  waveFibState = null,
+  currentPrice = null,
+  barsByTf = {},
+  engine16 = null,
+  engine25Context = null,
+  marketRegime = null,
+} = {}) {
+  const degrees = waveFibState?.degrees || {};
 
-  const headline =
-    backendTimelineRead?.headline ||
-    tradeContextSummary?.headline ||
-    buildFallbackHeadline({ waveOpportunity, engine15 });
+  const parentW5Degrees = findParentW5Degrees(degrees);
+  const completedW5Degrees = findCompletedW5Degrees(degrees);
+  const activeCorrectionDegree = findActiveAbcDegree(degrees);
 
-  const subheadline =
-    backendTimelineRead?.subheadline ||
-    tradeContextSummary?.subheadline ||
-    buildFallbackSubheadline({ waveOpportunity, engine15 });
+  const abcCorrection = buildAbcCorrection({
+    symbol,
+    degree: activeCorrectionDegree,
+    degreeState: activeCorrectionDegree ? degrees?.[activeCorrectionDegree] : null,
+  });
 
-  const badges = buildBadges({ waveOpportunity, engine15, permission });
+  const hasParentW5Context = parentW5Degrees.length > 0;
+  const hasLowerDegreeW5Complete = completedW5Degrees.length > 0;
+  const correctionActive = abcCorrection?.active === true;
+  const cLegActive = correctionActive && abcCorrection?.state === "C_LEG_ACTIVE";
 
-  const sections = [
-    buildWaveOpportunitySection(waveOpportunity),
-    postAbcBounceSection,
-    buildEngine15Section(engine15),
-    buildEngine5Section(fib),
-    buildPermissionSection(permission, engine15),
-    buildNextStepsSection({
-      waveOpportunity,
-      engine15,
-      permission,
-      fib,
-      tradeContextSummary,
-    }),
-  ]
-    .filter(Boolean)
-    .map((section, idx) => ({
-      ...section,
-      number: idx + 1,
-    }));
+  const parentContextOnly =
+    hasParentW5Context && (hasLowerDegreeW5Complete || correctionActive);
 
-  const contextSections = [
-    buildBackendTimelineSection(targetClusterSection),
-    buildBackendTimelineSection(marketMeterSection),
-    buildEngine3ContextSection(fib),
-    buildEngine4ContextSection(fib),
-    buildCurrentFibExtensionsSection(waveOpportunity),
-  ]
-    .filter(Boolean)
-    .map((section, idx) => ({
-      ...section,
-      number: idx + 1,
-    }));
+  const tradeableOpportunityBlocked =
+    parentContextOnly || cLegActive || correctionActive;
 
-  const severity =
-    backendTimelineRead?.severity ||
-    tradeContextSummary?.severity ||
-    (permission?.executable === true
-      ? "bullish"
-      : waveOpportunity?.chaseRisk === "EXTREME" ||
-        waveOpportunity?.timing === "POST_EXTENSION"
-      ? "warning"
-      : isWatchState(engine15?.readinessLabel)
-      ? "warning"
-      : "neutral");
+  const degreeLifecycle = buildDegreeLifecycle({
+    degrees,
+    parentContextOnly,
+    parentW5Degrees,
+    activeCorrectionDegree,
+  });
+
+  const activeDegreeLifecycle = pickActiveDegreeLifecycle({
+    degreeLifecycle,
+    masterBlocked: tradeableOpportunityBlocked,
+  });
+
+  const activeAllowedSetupFamily =
+    activeDegreeLifecycle && degreeLifecycle?.[activeDegreeLifecycle]
+      ? degreeLifecycle[activeDegreeLifecycle].allowedSetupFamily
+      : "NONE";
+
+  const lifecycleState = cLegActive
+    ? "ABC_C_LEG_ACTIVE"
+    : correctionActive && abcCorrection?.state === "ABC_COMPLETE"
+    ? "POST_W5_ABC_COMPLETE"
+    : parentContextOnly
+    ? "PARENT_W5_CONTEXT_ONLY"
+    : hasParentW5Context
+    ? "PARENT_W5_ACTIVE"
+    : activeDegreeLifecycle
+    ? degreeLifecycle?.[activeDegreeLifecycle]?.lifecycleState ||
+      "NORMAL_WAVE_LIFECYCLE"
+    : "NORMAL_WAVE_LIFECYCLE";
+
+  const postAbcReset =
+    lifecycleState === "POST_W5_ABC_COMPLETE"
+      ? classifyPostAbcReset({
+          symbol,
+          currentPrice,
+          abcCorrection,
+          abcUpMarks: activeCorrectionDegree
+            ? degrees?.[activeCorrectionDegree]?.abcUpMarks || null
+            : null,
+          activeCorrectionDegree,
+          barsByTf,
+        })
+      : {
+          active: false,
+          state: "NOT_POST_W5_ABC_COMPLETE",
+          reasonCodes: ["POST_ABC_RESET_NOT_APPLICABLE"],
+        };
+
+  const postAbcWatchActive =
+    postAbcReset?.state === "POST_ABC_W2_BOUNCE_WATCH";
+
+  const postAbcLowFailed =
+    postAbcReset?.state === "POST_ABC_LOW_FAILED";
+
+  const nextAllowedSetup = postAbcWatchActive
+    ? "WAIT_FOR_7400_HOLD_AND_RECLAIM"
+    : postAbcLowFailed
+    ? "WAIT_FOR_LOWER_SUPPORT_OR_NEW_STRUCTURE"
+    : tradeableOpportunityBlocked
+    ? "WAIT_FOR_ABC_COMPLETION_OR_NEW_W2_W4_SETUP"
+    : activeDegreeLifecycle
+    ? degreeLifecycle?.[activeDegreeLifecycle]?.allowedSetupFamily ||
+      "VALID_W2_W4_OR_PRE_EXTENSION_SETUP_REQUIRED"
+    : "VALID_W2_W4_OR_PRE_EXTENSION_SETUP_REQUIRED";
+
+  const headline = postAbcWatchActive
+    ? "POST ABC COMPLETE — WATCH WAVE 2 BOUNCE"
+    : postAbcLowFailed
+    ? "POST ABC LOW FAILED — WAIT FOR LOWER SUPPORT"
+    : tradeableOpportunityBlocked
+    ? "LOWER-DEGREE W5 COMPLETE — ABC CORRECTION WATCH"
+    : activeDegreeLifecycle
+    ? degreeLifecycle?.[activeDegreeLifecycle]?.headline ||
+      "WAVE LIFECYCLE ACTIVE"
+    : hasParentW5Context
+    ? "PARENT W5 CONTEXT ACTIVE"
+    : "WAVE LIFECYCLE NORMAL";
+
+  const summary = postAbcWatchActive
+    ? `${symbol} W5 and ABC correction are complete. Price is testing/holding the 7400 institutional support area above the marked C low. If support holds, the next expected move is a Wave 2 bounce. No automatic long. Wait for reclaim confirmation and Engine 6 permission.`
+    : postAbcLowFailed
+    ? `${symbol} lost the marked C low after ABC completion. The C leg or Wave 1 down may be extending. No Wave 2 bounce signal is active. Wait for lower support or new structure.`
+    : tradeableOpportunityBlocked
+    ? `${symbol} has parent W5 context, but lower-degree W5 completion / ABC correction marks are active. Do not treat the parent W5 as a fresh long continuation. Wait for ABC completion or a new lower-degree W2/W4 setup.`
+    : activeDegreeLifecycle
+    ? degreeLifecycle?.[activeDegreeLifecycle]?.summary ||
+      `${symbol} lifecycle has an active wave setup candidate.`
+    : `${symbol} lifecycle does not currently block a valid lower-degree W2/W4 setup.`;
+
+  const needs =
+    postAbcReset?.active === true && Array.isArray(postAbcReset?.needs)
+      ? postAbcReset.needs
+      : tradeableOpportunityBlocked
+      ? [
+          "WAIT_FOR_ABC_COMPLETION",
+          "WAIT_FOR_NEW_W2_OR_W4_SETUP",
+          "NO_NEW_LONG_FROM_PARENT_W5_CONTEXT",
+        ]
+      : activeDegreeLifecycle
+      ? degreeLifecycle?.[activeDegreeLifecycle]?.needs || [
+          "VALID_PRE_EXTENSION_W2_OR_W4_SETUP",
+        ]
+      : ["VALID_PRE_EXTENSION_W2_OR_W4_SETUP"];
+
+  const action = postAbcWatchActive
+    ? "WAIT_FOR_7400_HOLD_AND_RECLAIM"
+    : postAbcLowFailed
+    ? "WAIT_FOR_LOWER_SUPPORT"
+    : "WAIT";
+
+  const bias = postAbcWatchActive
+    ? "RESET_BOUNCE_WATCH"
+    : postAbcLowFailed
+    ? "RESET_FAILED"
+    : tradeableOpportunityBlocked
+    ? "CONTEXT_ONLY"
+    : "WAVE_SETUP_CONTEXT";
+
+  const reasonCodes = [
+    "ENGINE22_WAVE_LIFECYCLE_BUILT",
+    parentContextOnly ? "PARENT_W5_CONTEXT_ONLY" : null,
+    hasLowerDegreeW5Complete ? "LOWER_DEGREE_W5_COMPLETE" : null,
+    correctionActive ? "POST_W5_ABC_MARKS_FOUND" : null,
+    cLegActive ? "C_LEG_PENDING" : null,
+    postAbcReset?.state || null,
+    tradeableOpportunityBlocked
+      ? "NO_PARENT_W5_LONG_CONTINUATION_AFTER_LOWER_DEGREE_COMPLETION"
+      : null,
+    activeDegreeLifecycle ? `ACTIVE_LIFECYCLE_DEGREE_${upper(activeDegreeLifecycle)}` : null,
+    activeAllowedSetupFamily !== "NONE"
+      ? `ACTIVE_ALLOWED_SETUP_${upper(activeAllowedSetupFamily)}`
+      : null,
+  ].filter(Boolean);
 
   return {
-    show: true,
-    severity,
+    ok: true,
+    engine: "engine22.waveLifecycle.v2",
+    symbol,
+    currentPrice: roundToTick(currentPrice, tickSizeForSymbol(symbol)),
+
+    lifecycleState,
+
+    parentContextOnly,
+    tradeableOpportunityBlocked,
+
+    correctionActive,
+    activeCorrectionDegree,
+
+    parentW5Degrees,
+    completedW5Degrees,
+
+    degreeLifecycle,
+    activeDegreeLifecycle,
+    activeAllowedSetupFamily,
+
+    abcCorrection,
+    postAbcReset,
+
+    nextExpectedMove:
+      postAbcReset?.nextExpectedMove ||
+      (lifecycleState === "POST_W5_ABC_COMPLETE"
+        ? "WAIT_FOR_NEW_STRUCTURE"
+        : null),
+
+    preferredEntry:
+      postAbcReset?.preferredEntry ||
+      (lifecycleState === "POST_W5_ABC_COMPLETE"
+        ? "WAIT_FOR_NEW_W1_AND_RECLAIM"
+        : null),
+
+    nextAllowedSetup,
     headline,
-    subheadline,
-    badges,
-    sections,
-    contextSections,
-    footer: permission?.executable === true ? "EXECUTION ELIGIBLE" : "WATCH",
+    summary,
+    needs,
+    reasonCodes,
+
+    action,
+    bias,
+    direction: "NONE",
+
+    context: {
+      engine16Ready: upper(engine16?.readiness, "") === "READY",
+      engine25ContextProvided: engine25Context != null,
+      marketRegimeProvided: marketRegime != null,
+    },
   };
 }
 
-/* =========================
-   Shared styles
-========================= */
-
-const shellTextStyle = {
-  fontFamily: TIMELINE_FONT,
-  WebkitFontSmoothing: "antialiased",
-  MozOsxFontSmoothing: "grayscale",
-  textRendering: "geometricPrecision",
-};
-
-const smallCapsStyle = {
-  textTransform: "uppercase",
-  letterSpacing: "0.045em",
-};
-
-/* =========================
-   UI Components
-========================= */
-
-function Badge({ label, severity = "neutral" }) {
-  if (!label) return null;
-
-  return (
-    <span
-      style={{
-        ...shellTextStyle,
-        ...smallCapsStyle,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        border: `1px solid ${severityBorder(severity)}`,
-        background: severityBackground(severity),
-        color: severityColor(severity),
-        borderRadius: 8,
-        padding: "5px 10px",
-        fontSize: 13,
-        fontWeight: FONT_REGULAR,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
-function FieldGrid({ fields }) {
-  const safeFields = asArray(fields);
-
-  if (!safeFields.length) return null;
-
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-        gap: "9px 15px",
-        marginTop: 7,
-      }}
-    >
-      {safeFields.map(([label, value], idx) => (
-        <div key={`${label}-${idx}`}>
-          <div
-            style={{
-              ...shellTextStyle,
-              ...smallCapsStyle,
-              color: MUTED_TEXT,
-              fontSize: 13,
-              fontWeight: FONT_REGULAR,
-              marginBottom: 3,
-            }}
-          >
-            {label}
-          </div>
-          <div
-            style={{
-              ...shellTextStyle,
-              color: MAIN_TEXT,
-              fontSize: 16,
-              fontWeight: FONT_REGULAR,
-              lineHeight: 1.35,
-              whiteSpace: "pre-line",
-            }}
-          >
-            {value}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function IngredientCards({ cards }) {
-  const safeCards = asArray(cards);
-
-  if (!safeCards.length) return null;
-
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-        gap: 10,
-        marginTop: 7,
-      }}
-    >
-      {safeCards.map((card, idx) => (
-        <div
-          key={`${card.label}-${idx}`}
-          style={{
-            borderLeft: `3px solid ${card.good ? "#22c55e" : "#f59e0b"}`,
-            background: "rgba(15,23,42,0.48)",
-            borderRadius: 8,
-            padding: "9px 10px",
-          }}
-        >
-          <div
-            style={{
-              ...shellTextStyle,
-              ...smallCapsStyle,
-              color: "#cbd5e1",
-              fontSize: 13,
-              fontWeight: FONT_REGULAR,
-              marginBottom: 3,
-            }}
-          >
-            {card.label}
-          </div>
-          <div
-            style={{
-              ...shellTextStyle,
-              color: card.good ? "#86efac" : "#fed7aa",
-              fontSize: 15,
-              fontWeight: FONT_REGULAR,
-              lineHeight: 1.35,
-            }}
-          >
-            {card.value}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Checklist({ items }) {
-  const safeItems = asArray(items);
-
-  if (!safeItems.length) return null;
-
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-        gap: "9px 20px",
-        marginTop: 7,
-      }}
-    >
-      {safeItems.map((item, idx) => (
-        <div
-          key={`${item}-${idx}`}
-          style={{
-            ...shellTextStyle,
-            display: "grid",
-            gridTemplateColumns: "22px 1fr",
-            alignItems: "center",
-            gap: 8,
-            color: SOFT_TEXT,
-            fontSize: 15,
-            fontWeight: FONT_REGULAR,
-            lineHeight: 1.35,
-          }}
-        >
-          <div
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: 6,
-              border: "1px solid rgba(45,212,191,0.85)",
-              color: "#2dd4bf",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 12,
-              fontWeight: FONT_MEDIUM,
-            }}
-          >
-            {idx + 1}
-          </div>
-          <div>{item}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TimelineSection({ section }) {
-  if (!section) return null;
-
-  return (
-    <div
-      style={{
-        border: `1px solid ${severityBorder(section.severity)}`,
-        background: severityBackground(section.severity),
-        borderRadius: 12,
-        padding: "12px 13px",
-        textAlign: "left",
-        position: "relative",
-      }}
-    >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "38px 1fr",
-          gap: 10,
-          alignItems: "start",
-        }}
-      >
-        <div
-          style={{
-            ...shellTextStyle,
-            width: 30,
-            height: 30,
-            borderRadius: "50%",
-            border: `1px solid ${severityBorder(section.severity)}`,
-            color: severityColor(section.severity),
-            background: "rgba(2,6,23,0.72)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: FONT_MEDIUM,
-            fontSize: 15,
-            boxShadow: `0 0 16px ${severityBorder(section.severity)}`,
-          }}
-        >
-          {section.number}
-        </div>
-
-        <div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: 6,
-            }}
-          >
-            <span
-              style={{
-                ...shellTextStyle,
-                color: severityColor(section.severity),
-                fontSize: 19,
-                fontWeight: FONT_MEDIUM,
-              }}
-            >
-              {section.icon}
-            </span>
-            <div
-              style={{
-                ...shellTextStyle,
-                color: severityColor(section.severity),
-                fontSize: 19,
-                fontWeight: FONT_MEDIUM,
-                letterSpacing: "0.01em",
-              }}
-            >
-              {section.title}
-            </div>
-          </div>
-
-          <FieldGrid fields={section.fields} />
-          <IngredientCards cards={section.ingredientCards} />
-          <Checklist items={section.checklist} />
-
-          {asArray(section.lines).length > 0 && (
-            <div
-              style={{
-                ...shellTextStyle,
-                display: "grid",
-                gap: 5,
-                marginTop: 8,
-                color: SOFT_TEXT,
-                fontSize: 15,
-                lineHeight: 1.5,
-                fontWeight: FONT_REGULAR,
-              }}
-            >
-              {asArray(section.lines).map((line, idx) => (
-                <div key={`${line}-${idx}`}>{line}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MinimalStatusStrip({ timeline }) {
-  return (
-    <div
-      style={{
-        ...shellTextStyle,
-        position: "absolute",
-        top: 88,
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 108,
-        width: 760,
-        maxWidth: "44%",
-        border: "1px solid rgba(148,163,184,0.20)",
-        borderRadius: 10,
-        background: "rgba(6,10,20,0.70)",
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr 1fr",
-        gap: 0,
-        color: "#cbd5e1",
-        pointerEvents: "none",
-        backdropFilter: "blur(4px)",
-      }}
-    >
-      <div style={stripCellStyle}>
-        <span style={stripLabelStyle}>Market Bias</span>
-        <span style={{ ...stripValueStyle, color: "#22c55e" }}>↗ LONG</span>
-      </div>
-      <div style={stripCellStyle}>
-        <span style={stripLabelStyle}>Setup</span>
-        <span style={{ ...stripValueStyle, color: "#fbbf24" }}>◉ WATCH</span>
-      </div>
-      <div style={stripCellStyle}>
-        <span style={stripLabelStyle}>Permission</span>
-        <span style={{ ...stripValueStyle, color: "#c084fc" }}>⬟ REDUCE</span>
-      </div>
-    </div>
-  );
-}
-
-const stripCellStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 10,
-  padding: "10px 12px",
-  borderRight: "1px solid rgba(148,163,184,0.14)",
-};
-
-const stripLabelStyle = {
-  ...shellTextStyle,
-  ...smallCapsStyle,
-  color: MUTED_TEXT,
-  fontSize: 13,
-  fontWeight: FONT_REGULAR,
-};
-
-const stripValueStyle = {
-  ...shellTextStyle,
-  ...smallCapsStyle,
-  fontSize: 14,
-  fontWeight: FONT_MEDIUM,
-};
-
-function TimelineMainCard({ timeline }) {
-  return (
-    <div
-      style={{
-        ...shellTextStyle,
-        position: "absolute",
-        top: 138,
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 109,
-        width: 760,
-        maxWidth: "44%",
-        maxHeight: "calc(100vh - 165px)",
-        overflowY: "auto",
-        borderRadius: 15,
-        border: `1px solid ${severityBorder(timeline.severity)}`,
-        background: CARD_BG_STRONG,
-        padding: "18px 19px",
-        color: "#e5e7eb",
-        pointerEvents: "none",
-        backdropFilter: "blur(5px)",
-        boxShadow: "0 12px 34px rgba(0,0,0,0.34)",
-        textAlign: "center",
-      }}
-    >
-      <div
-        style={{
-          ...shellTextStyle,
-          fontSize: 30,
-          fontWeight: FONT_MEDIUM,
-          color: "#fbbf24",
-          letterSpacing: "0.01em",
-          marginBottom: 7,
-          lineHeight: 1.2,
-          textTransform: "none",
-        }}
-      >
-        {timeline.headline}
-      </div>
-
-      {timeline.subheadline && (
-        <div
-          style={{
-            ...shellTextStyle,
-            color: "#e2e8f0",
-            fontSize: 16,
-            lineHeight: 1.5,
-            fontWeight: FONT_REGULAR,
-            maxWidth: 710,
-            margin: "0 auto 11px",
-          }}
-        >
-          {timeline.subheadline}
-        </div>
-      )}
-
-      {asArray(timeline.badges).length > 0 && (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 8,
-            justifyContent: "center",
-            marginBottom: 13,
-          }}
-        >
-          {timeline.badges.map((badge, idx) => (
-            <Badge
-              key={`${badge.label}-${idx}`}
-              label={badge.label}
-              severity={badge.severity}
-            />
-          ))}
-        </div>
-      )}
-
-      <div style={{ display: "grid", gap: 9 }}>
-        {asArray(timeline.sections).map((section, idx) => (
-          <TimelineSection
-            key={`${section.title || "section"}-${idx}`}
-            section={section}
-          />
-        ))}
-      </div>
-
-      {timeline.footer && (
-        <div
-          style={{
-            ...shellTextStyle,
-            ...smallCapsStyle,
-            marginTop: 10,
-            paddingTop: 8,
-            borderTop: "1px solid rgba(148,163,184,0.25)",
-            color: MUTED_TEXT,
-            fontWeight: FONT_MEDIUM,
-            fontSize: 13,
-            letterSpacing: "0.08em",
-          }}
-        >
-          {timeline.footer}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ContextTimelinePanel({ sections }) {
-  const safeSections = asArray(sections);
-
-  if (!safeSections.length) return null;
-
-  return (
-    <div
-      style={{
-        ...shellTextStyle,
-        position: "absolute",
-        top: 138,
-        right: "calc(50% + 430px)",
-        width: 430,
-        maxWidth: "28%",
-        maxHeight: "calc(100vh - 165px)",
-        overflowY: "auto",
-        zIndex: 108,
-        border: "1px solid rgba(148,163,184,0.35)",
-        borderRadius: 15,
-        background: CARD_BG,
-        padding: "14px 14px",
-        color: "#e5e7eb",
-        pointerEvents: "none",
-        boxShadow: "0 10px 28px rgba(0,0,0,0.32)",
-        backdropFilter: "blur(5px)",
-      }}
-    >
-      <div
-        style={{
-          ...shellTextStyle,
-          ...smallCapsStyle,
-          color: MAIN_TEXT,
-          fontWeight: FONT_MEDIUM,
-          fontSize: 18,
-          marginBottom: 12,
-        }}
-      >
-        Market Context
-      </div>
-
-      <div style={{ display: "grid", gap: 9 }}>
-        {safeSections.map((section, idx) => (
-          <TimelineSection
-            key={`${section.title || "context"}-${idx}`}
-            section={section}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* =========================
-   Main export
-========================= */
-
-export default function Engine17DecisionTimeline({
-  overlayData,
-  visible = true,
-  chartMode = "SCALP",
-}) {
-  const timeline = normalizeTimelineData({ overlayData, chartMode });
-
-  if (!visible || !timeline?.show) return null;
-
-  return (
-    <>
-      <MinimalStatusStrip timeline={timeline} />
-      <ContextTimelinePanel sections={timeline.contextSections} />
-      <TimelineMainCard timeline={timeline} />
-    </>
-  );
-}
+export default classifyWaveLifecycle;
