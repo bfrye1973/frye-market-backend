@@ -157,9 +157,29 @@ function buildAbcUpPriceAction({
     fallbackTf: "10m",
   });
 
-  const startMs = aTime ? Date.parse(aTime) : originTime ? Date.parse(originTime) : NaN;
-  const startSec = Number.isFinite(startMs) ? Math.floor(startMs / 1000) : null;
+  const parseManualTimeSec = (value) => {
+    if (!value) return null;
 
+    const raw = String(value).trim();
+
+    const normalized = raw.includes("T")
+      ? raw
+      : raw.replace(" ", "T");
+
+    const parsed = Date.parse(normalized);
+
+    if (Number.isFinite(parsed)) {
+      return Math.floor(parsed / 1000);
+    }
+
+    return null;
+  };
+
+  const startSec =
+    parseManualTimeSec(aTime) ??
+    parseManualTimeSec(originTime) ??
+    null; 
+ 
   const scanBars =
     startSec !== null
       ? bars.filter((bar) => Number(bar.timeSec) >= Number(startSec))
@@ -226,6 +246,8 @@ function buildAbcUpPriceAction({
 
   return {
     tf: degreeToTf(degree, "10m"),
+    scanStartSec: startSec,
+    scanStartTime: aTime || originTime || null,
     barsScanned: scanBars.length,
     currentPrice: price,
     latestClose,
