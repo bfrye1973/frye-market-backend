@@ -70,6 +70,13 @@ ES,minute,10m,ABC,A,2026-06-03 05:20,7544.25
 ES,minute,10m,ABC,B,2026-06-03 07:00,7613.75
 ES,minute,10m,ABC,C,2026-06-05 13:16,7365.00
 
+# Post-ABC Wave 2 bounce structure
+# Wave 1 down low / bounce origin and Wave A up high
+ES,minute,10m,POST_ABC_BOUNCE,ORIGIN_LOW,2026-06-07 14:30,7381.00
+ES,minute,10m,POST_ABC_BOUNCE,A_HIGH,2026-06-08 06:00,7470.00
+ES,minute,10m,POST_ABC_BOUNCE,B_LOW,,
+ES,minute,10m,POST_ABC_BOUNCE,C_HIGH,,
+
 ES,micro,10m,W1,LOW,2026-05-19 16:50,7363.50
 ES,micro,10m,W1,HIGH,2026-05-21 02:30,7464.50
 
