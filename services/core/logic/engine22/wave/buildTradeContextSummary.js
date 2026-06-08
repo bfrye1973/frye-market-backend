@@ -455,6 +455,168 @@ function buildActiveW5ExtensionSummary({ waveFibState, waveStack, clusters }) {
 function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
   const lifecycle = waveFibState?.lifecycle || {};
   const abc = lifecycle?.abcCorrection || null;
+  const postAbcReset = lifecycle?.postAbcReset || null;
+  const postAbcState = String(postAbcReset?.state || "").toUpperCase();
+
+  if (postAbcState === "POST_ABC_W2_BOUNCE_WATCH") {
+    const supportLevel = postAbcReset?.supportLevel ?? 7400;
+    const cLow = postAbcReset?.cLow ?? abc?.c?.price ?? null;
+    const currentPrice =
+      postAbcReset?.currentPrice ?? waveFibState?.currentPrice ?? null;
+
+    const summary =
+      `${waveStack.message}\n\n` +
+      `W5 and ABC correction are complete.\n\n` +
+      `Price is testing/holding the ${fmt(
+        supportLevel
+      )} institutional support area above the marked C low near ${fmt(
+        cLow
+      )}.\n\n` +
+      `If support holds, the next expected move is a Wave 2 bounce.\n\n` +
+      `This is not a fresh W3 long and not a W5 continuation long.\n\n` +
+      `No automatic long. Wait for reclaim confirmation, Engine 15 readiness, and Engine 6 final permission.`;
+
+    return {
+      headline: "POST ABC COMPLETE — WATCH WAVE 2 BOUNCE",
+      subheadline:
+        "ABC is complete into institutional support. Watching for Wave 2 bounce only after hold/reclaim confirmation.",
+      bias: "RESET_BOUNCE_WATCH",
+      action: "WAIT_FOR_7400_HOLD_AND_RECLAIM",
+      direction: "NONE",
+      chaseAllowed: false,
+      severity: "warning",
+
+      topCandidate: null,
+      hardInvalidation: round2(cLow),
+      reclaimLadder: null,
+
+      firstCluster: clusters.firstCluster,
+      nextCluster: clusters.nextCluster,
+
+      lifecycleState: lifecycle?.lifecycleState || null,
+      postAbcReset,
+      parentContextOnly: lifecycle?.parentContextOnly === true,
+      tradeableOpportunityBlocked:
+        lifecycle?.tradeableOpportunityBlocked === true,
+      nextAllowedSetup: lifecycle?.nextAllowedSetup || null,
+
+      abcCorrection: abc,
+      abc: abc
+        ? {
+            degree: abc?.degree || null,
+            state: abc?.state || null,
+            a: abc?.a || null,
+            b: abc?.b || null,
+            c: abc?.c || null,
+            range: abc?.range ?? null,
+            reclaimLevels: abc?.reclaimLevels || null,
+            downsideTargets: abc?.downsideTargets || null,
+          }
+        : null,
+
+      reads: {
+        structureRead: waveStack.message,
+        lifecycleRead:
+          "W5 and ABC correction are complete. Price is testing/holding institutional support.",
+        supportRead: `Current price ${fmt(
+          currentPrice
+        )} is being evaluated against support near ${fmt(
+          supportLevel
+        )} and C low near ${fmt(cLow)}.`,
+        nextMoveRead:
+          "If support holds, the next expected move is a Wave 2 bounce.",
+        actionRead:
+          "No automatic long. Wait for 7400 hold/reclaim confirmation and Engine 6 permission.",
+      },
+
+      summary,
+
+      needs:
+        postAbcReset?.needs || [
+          "7400_SUPPORT_HOLD",
+          "RECLAIM_CONFIRMATION_REQUIRED",
+          "ENGINE15_READY",
+          "ENGINE6_FINAL_PERMISSION",
+        ],
+
+      reasonCodes: [
+        "TRADE_CONTEXT_SUMMARY_BUILT",
+        ...(lifecycle?.reasonCodes || []),
+        ...(postAbcReset?.reasonCodes || []),
+      ],
+    };
+  }
+
+  if (postAbcState === "POST_ABC_LOW_FAILED") {
+    const cLow = postAbcReset?.cLow ?? abc?.c?.price ?? null;
+
+    return {
+      headline: "POST ABC LOW FAILED — WAIT FOR LOWER SUPPORT",
+      subheadline:
+        "The marked C low failed. No Wave 2 bounce watch is active.",
+      bias: "RESET_FAILED",
+      action: "WAIT_FOR_LOWER_SUPPORT",
+      direction: "NONE",
+      chaseAllowed: false,
+      severity: "danger",
+
+      topCandidate: null,
+      hardInvalidation: round2(cLow),
+      reclaimLadder: null,
+
+      firstCluster: clusters.firstCluster,
+      nextCluster: clusters.nextCluster,
+
+      lifecycleState: lifecycle?.lifecycleState || null,
+      postAbcReset,
+      parentContextOnly: lifecycle?.parentContextOnly === true,
+      tradeableOpportunityBlocked:
+        lifecycle?.tradeableOpportunityBlocked === true,
+      nextAllowedSetup: lifecycle?.nextAllowedSetup || null,
+
+      abcCorrection: abc,
+      abc: abc
+        ? {
+            degree: abc?.degree || null,
+            state: abc?.state || null,
+            a: abc?.a || null,
+            b: abc?.b || null,
+            c: abc?.c || null,
+            range: abc?.range ?? null,
+            reclaimLevels: abc?.reclaimLevels || null,
+            downsideTargets: abc?.downsideTargets || null,
+          }
+        : null,
+
+      reads: {
+        structureRead: waveStack.message,
+        lifecycleRead:
+          "W5 and ABC correction are complete, but the marked C low has failed.",
+        actionRead:
+          "No Wave 2 bounce watch. Wait for lower support or new structure.",
+      },
+
+      summary:
+        `${waveStack.message}\n\n` +
+        `W5 and ABC correction are complete, but price lost the marked C low near ${fmt(
+          cLow
+        )}.\n\n` +
+        `This means the C leg or Wave 1 down may be extending. No Wave 2 bounce signal is active.`,
+
+      needs:
+        postAbcReset?.needs || [
+          "WAIT_FOR_LOWER_SUPPORT",
+          "WAIT_FOR_NEW_STRUCTURE",
+          "NO_WAVE_2_BOUNCE_SIGNAL",
+        ],
+
+      reasonCodes: [
+        "TRADE_CONTEXT_SUMMARY_BUILT",
+        ...(lifecycle?.reasonCodes || []),
+        ...(postAbcReset?.reasonCodes || []),
+      ],
+    };
+  }
 
   const summary =
     `${waveStack.message}\n\n` +
@@ -481,6 +643,7 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
     nextCluster: clusters.nextCluster,
 
     lifecycleState: lifecycle?.lifecycleState || null,
+    postAbcReset,
     parentContextOnly: lifecycle?.parentContextOnly === true,
     tradeableOpportunityBlocked:
       lifecycle?.tradeableOpportunityBlocked === true,
@@ -524,6 +687,7 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
     reasonCodes: [
       "TRADE_CONTEXT_SUMMARY_BUILT",
       ...(lifecycle?.reasonCodes || []),
+      ...(postAbcReset?.reasonCodes || []),
     ],
   };
 }
