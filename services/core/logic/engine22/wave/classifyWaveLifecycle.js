@@ -323,7 +323,6 @@ timeframe: degreeState?.tf || null,
 correctionFor: `${String(degree).toUpperCase()}_COMPLETE_W5`,
 state: cMarked ? "ABC_COMPLETE" : "C_LEG_ACTIVE",
 
-```
 a: {
   label: "A",
   price: roundToTick(aLow, tickSize),
@@ -362,7 +361,6 @@ reasonCodes: [
   "POST_W5_ABC_MARKS_FOUND",
   cMarked ? "ABC_COMPLETE" : "C_LEG_PENDING",
 ],
-```
 
 };
 }
@@ -612,7 +610,6 @@ if (inW5) {
 const lateExtension =
 extensionHit !== null && extensionHit >= 1.272;
 
-```
 return {
   ok: true,
   degree,
@@ -641,8 +638,6 @@ return {
     ? ["W5_EXTENSION_LATE", "NO_CHASE_LONG"]
     : ["W5_EXTENSION_ACTIVE"],
 };
-```
-
 }
 
 if (state === "IMPULSE_COMPLETE") {
@@ -891,7 +886,6 @@ engine: "engine22.waveLifecycle.v2",
 symbol,
 currentPrice: roundToTick(currentPrice, tickSizeForSymbol(symbol)),
 
-```
 lifecycleState,
 
 parentContextOnly,
@@ -937,8 +931,6 @@ context: {
   engine25ContextProvided: engine25Context != null,
   marketRegimeProvided: marketRegime != null,
 },
-```
-
 };
 }
 
