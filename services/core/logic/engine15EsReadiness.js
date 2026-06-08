@@ -28,7 +28,7 @@
 // Engine 15ES answers:
 // Is ES ready, watch-only, blocked, or waiting — and what exactly does the trader need next?
 
-const ENGINE = "engine15.esReadiness.v1.4";
+const ENGINE = "engine15.esReadiness.v1.5";
 const DEFAULT_STRATEGY_ID = "intraday_scalp@10m";
 const ES_TICK_SIZE = 0.25;
 
@@ -253,6 +253,16 @@ function waveOpportunityReasonCodes(waveOpportunity) {
   return Array.isArray(waveOpportunity?.reasonCodes)
     ? waveOpportunity.reasonCodes
     : [];
+}
+
+function isPostAbcW2BounceWatch(waveOpportunity) {
+  return (
+    waveSetupType(waveOpportunity) === "POST_ABC_W2_BOUNCE_WATCH" &&
+    waveReadiness(waveOpportunity) === "WATCH" &&
+    waveDirection(waveOpportunity) === "NONE" &&
+    waveOpportunity?.active === false &&
+    waveOpportunity?.paperSignalCandidate === true
+  );
 }
 
 /* -----------------------------
@@ -774,6 +784,112 @@ function buildBlockedDecision({
   };
 }
 
+function buildPostAbcW2BounceWatchDecision({
+  symbol,
+  strategyId,
+  permission,
+  currentPrice,
+  waveOpportunity,
+  dailyBelow,
+  debug,
+}) {
+  const pText = permissionText(permission);
+
+  const reasonCodes = [
+    "ENGINE15_POST_ABC_BOUNCE_WATCH",
+    "ENGINE22_POST_ABC_W2_BOUNCE_WATCH",
+    "WATCH_ONLY",
+    "NO_EXECUTION",
+    "WAIT_FOR_RECLAIM_CONFIRMATION",
+  ];
+
+  if (dailyBelow) {
+    reasonCodes.push("DAILY_BELOW_EMA10_BOUNCE_CAUTION");
+  }
+
+  const needs = [
+    "7400_SUPPORT_HOLD",
+    "RECLAIM_CONFIRMATION_REQUIRED",
+    "ENGINE22_POST_ABC_BOUNCE_ARMING_REQUIRED",
+    "ENGINE6_FINAL_PERMISSION_REQUIRED",
+  ];
+
+  return {
+    ok: true,
+    engine: ENGINE,
+    symbol,
+    strategyId,
+
+    strategyType: "POST_ABC_W2_BOUNCE_WATCH",
+    direction: "NONE",
+    readinessLabel: "WATCH",
+    executionBias: "NONE",
+    action: "WAIT_FOR_RECLAIM_CONFIRMATION",
+    priority: 20,
+    entryStyle: "WATCH_ONLY_RECLAIM_CONFIRMATION",
+    active: false,
+    freshEntryNow: false,
+
+    reasonCodes: unique(reasonCodes),
+    blockers: [],
+    conflicts: [],
+
+    needs: unique(needs),
+    summary:
+      waveOpportunity?.summary ||
+      "POST ABC W2 BOUNCE WATCH — WAIT FOR RECLAIM. This is watch-only and not executable.",
+
+    qualityGatePassed: false,
+    momentumGatePassed: false,
+    permissionGatePassed: permissionGatePassed(permission),
+
+    qualityScore: 0,
+    qualityGrade: "WATCH",
+    qualityBand: "WATCH_ONLY",
+    qualityBreakdown: {
+      waveOpportunityActive: waveOpportunityActive(waveOpportunity),
+      waveSetupType: waveSetupType(waveOpportunity),
+      waveRawSetup: waveRawSetup(waveOpportunity),
+      waveDegree: waveDegree(waveOpportunity),
+      waveDirection: waveDirection(waveOpportunity),
+      waveReadiness: waveReadiness(waveOpportunity),
+      waveTiming: waveTiming(waveOpportunity),
+      waveChaseRisk: waveChaseRisk(waveOpportunity),
+      postAbcW2BounceWatch: true,
+      dailyBelowEma10BounceCaution: Boolean(dailyBelow),
+      executionAllowed: false,
+    },
+
+    permission: pText,
+    sizeMultiplier: toNum(permission?.sizeMultiplier, null),
+
+    setupChain: [
+      "ENGINE22_POST_ABC_W2_BOUNCE_WATCH",
+      "WATCH_ONLY",
+      "WAIT_FOR_RECLAIM_CONFIRMATION",
+      "ENGINE6_FINAL_PERMISSION_REQUIRED",
+    ],
+    nextSetupType: "WAIT_FOR_POST_ABC_BOUNCE_ARMING",
+    primaryExhaustionTF: null,
+
+    signalEvent: buildSignalEvent(),
+
+    lifecycle: buildLifecycle({
+      currentPrice,
+      nextFocus: "WAIT_FOR_RECLAIM_CONFIRMATION",
+      lifecycleStage: "WATCH",
+    }),
+
+    futures: {
+      tickSize: ES_TICK_SIZE,
+      liveExecutionEnabled: false,
+      paperOnly: true,
+    },
+
+    debug,
+  };
+}
+
 function chooseNextSetupType({
   readinessLabel,
   waveNeedsReclaim,
@@ -949,6 +1065,7 @@ export function buildEngine15EsDecision({
     }
 
     const hasWaveOpportunity = hasValidW3W5Opportunity(waveOpportunity);
+    const postAbcW2BounceWatch = isPostAbcW2BounceWatch(waveOpportunity);
     const waveInvalid = waveOpportunityInvalid(waveOpportunity);
     const waveWatchOnly = waveOpportunityWatchOnly(waveOpportunity);
     const waveArming = waveOpportunityArming(waveOpportunity);
@@ -957,28 +1074,33 @@ export function buildEngine15EsDecision({
     const waveHighChase = waveOpportunityHighChaseRisk(waveOpportunity);
     const waveNeedsReclaim = waveNeedsPullbackOrReclaim(waveOpportunity);
 
-    if (!waveOpportunityExists(waveOpportunity)) {
-      needs.push("ENGINE22_WAVE_OPPORTUNITY");
-      reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_MISSING");
-    } else if (!hasWaveOpportunity) {
-      needs.push("VALID_W3_OR_W5_OPPORTUNITY");
-      reasonCodes.push("NO_W3_W5_OPPORTUNITY");
-    } else {
-      reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_FOUND");
-      reasonCodes.push(`ENGINE22_${waveSetupType(waveOpportunity)}`);
-      reasonCodes.push(`ENGINE22_DEGREE_${waveDegree(waveOpportunity)}`);
-    }
+   if (!waveOpportunityExists(waveOpportunity)) {
+     needs.push("ENGINE22_WAVE_OPPORTUNITY");
+     reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_MISSING");
+   } else if (postAbcW2BounceWatch) {
+     reasonCodes.push("ENGINE15_POST_ABC_BOUNCE_WATCH");
+     reasonCodes.push("ENGINE22_POST_ABC_W2_BOUNCE_WATCH");
+     reasonCodes.push("WATCH_ONLY");
+     reasonCodes.push("NO_EXECUTION");
+     reasonCodes.push("WAIT_FOR_RECLAIM_CONFIRMATION");
+   } else if (!hasWaveOpportunity) {
+     needs.push("VALID_W3_OR_W5_OPPORTUNITY");
+     reasonCodes.push("NO_W3_W5_OPPORTUNITY");
+   } else {
+     reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_FOUND");
+     reasonCodes.push(`ENGINE22_${waveSetupType(waveOpportunity)}`);
+     reasonCodes.push(`ENGINE22_DEGREE_${waveDegree(waveOpportunity)}`);
+   }
 
     if (waveInvalid) {
       blockers.push("ENGINE22_WAVE_OPPORTUNITY_INVALID");
       reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_INVALID");
     }
 
-    if (waveWatchOnly) {
+    if (waveWatchOnly && !postAbcW2BounceWatch) {
       needs.push("ENGINE22_ARMING_OR_READY");
       reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_WATCH");
     }
-
     if (waveLate) {
       needs.push("WAIT_FOR_PULLBACK_OR_RECLAIM");
       reasonCodes.push("ENGINE22_TIMING_LATE_NO_CHASE");
@@ -1039,10 +1161,16 @@ export function buildEngine15EsDecision({
     const e5Label = engine5Label(engine5);
 
     // Daily below EMA10 blocks LONG continuation only.
+    // POST_ABC_W2_BOUNCE_WATCH is not a long-continuation setup yet,
+    // so daily-below-EMA10 is caution only for that state.
     if (dailyBelow) {
-      blockers.push("DAILY_BELOW_EMA10_LONG_CONTINUATION_BLOCKED");
-      reasonCodes.push("DAILY_BELOW_EMA10_LONG_PERMISSION_REDUCED");
-    }
+      if (postAbcW2BounceWatch) {
+        reasonCodes.push("DAILY_BELOW_EMA10_BOUNCE_CAUTION");
+     } else {
+       blockers.push("DAILY_BELOW_EMA10_LONG_CONTINUATION_BLOCKED");
+       reasonCodes.push("DAILY_BELOW_EMA10_LONG_PERMISSION_REDUCED");
+     }
+   }
 
     const debug = {
       currentPrice,
@@ -1118,6 +1246,7 @@ export function buildEngine15EsDecision({
       },
       booleans: {
         hasWaveOpportunity,
+        postAbcW2BounceWatch,
         waveInvalid,
         waveWatchOnly,
         waveArming,
@@ -1157,7 +1286,19 @@ export function buildEngine15EsDecision({
       });
     }
 
-    // Context reason codes and next needs.
+    if (postAbcW2BounceWatch) {
+      return buildPostAbcW2BounceWatchDecision({
+        symbol: sym,
+        strategyId,
+        permission,
+        currentPrice,
+        waveOpportunity,
+        dailyBelow,
+        debug,
+      });
+    }
+
+// Context reason codes and next needs.
     if (dailyAbove) {
       reasonCodes.push("DAILY_ABOVE_EMA10_LONG_PERMISSION");
     } else {
