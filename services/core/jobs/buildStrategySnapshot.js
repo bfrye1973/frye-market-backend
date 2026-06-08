@@ -3966,19 +3966,19 @@ function getManualLevelRowsFor(args = {}) {
 
     const isLevelRow = kind === "LEVEL";
 
-    const isAbcRow =
+    const isAbcDownRow =
       wave === "ABC" &&
       ["A", "B", "C"].includes(kind);
 
-    const isPostAbcBounceRow =
-      wave === "POST_ABC_BOUNCE" &&
+    const isAbcUpRow =
+      wave === "ABC_UP" &&
       ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
 
     return (
       String(row.symbol || "").toUpperCase() === String(symbol || "").toUpperCase() &&
       String(row.degree || "").toLowerCase() === String(degree || "").toLowerCase() &&
       String(row.tf || "").toLowerCase() === String(tf || "").toLowerCase() &&
-      (isLevelRow || isAbcRow || isPostAbcBounceRow)
+      (isLevelRow || isAbcDownRow || isAbcUpRow)
     );
   });
 }
