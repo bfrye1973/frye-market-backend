@@ -181,163 +181,169 @@ function classifyPostAbcReset({
 } = {}) {
   const tickSize = tickSizeForSymbol(symbol);
   const abcUp = buildPostAbcBounceMap({ symbol, abcUpMarks });
-const price = toNum(currentPrice);
-const cLow = toNum(abcCorrection?.c?.price);
-const abcState = upper(abcCorrection?.state, "");
 
-if (abcState !== "ABC_COMPLETE" || cLow === null || cLow <= 0) {
-return {
-active: false,
-abcUp,
-state: "POST_ABC_RESET_UNAVAILABLE",
-supportLevel: null,
-watchZoneLow: null,
-watchZoneHigh: null,
-cLow: cLow !== null ? roundToTick(cLow, tickSize) : null,
-currentPrice: roundToTick(price, tickSize),
-supportStatus: "ABC_COMPLETE_WITH_C_LOW_REQUIRED",
-nextExpectedMove: "UNKNOWN",
-preferredEntry: null,
-paperSignalCandidate: false,
-signalType: null,
-tradeableOpportunityBlocked: true,
-reclaimLevel: null,
-needs: ["ABC_COMPLETE_WITH_C_LOW_REQUIRED"],
-reasonCodes: ["POST_ABC_RESET_UNAVAILABLE"],
-};
-}
+  const price = toNum(currentPrice);
+  const cLow = toNum(abcCorrection?.c?.price);
+  const abcState = upper(abcCorrection?.state, "");
 
-const roundedPrice = roundToTick(price, tickSize);
-const roundedCLow = roundToTick(cLow, tickSize);
+  if (abcState !== "ABC_COMPLETE" || cLow === null || cLow <= 0) {
+    return {
+      active: false,
+      abcUp,
+      state: "POST_ABC_RESET_UNAVAILABLE",
+      supportLevel: null,
+      watchZoneLow: null,
+      watchZoneHigh: null,
+      cLow: cLow !== null ? roundToTick(cLow, tickSize) : null,
+      currentPrice: roundToTick(price, tickSize),
+      supportStatus: "ABC_COMPLETE_WITH_C_LOW_REQUIRED",
+      nextExpectedMove: "UNKNOWN",
+      preferredEntry: null,
+      paperSignalCandidate: false,
+      signalType: null,
+      tradeableOpportunityBlocked: true,
+      reclaimLevel: null,
+      needs: ["ABC_COMPLETE_WITH_C_LOW_REQUIRED"],
+      reasonCodes: ["POST_ABC_RESET_UNAVAILABLE"],
+    };
+  }
 
-if (!isEsLikeSymbol(symbol)) {
-return {
-active: true,
-state: "POST_ABC_RESET_WAIT",
-supportLevel: null,
-watchZoneLow: null,
-watchZoneHigh: null,
-cLow: roundedCLow,
-currentPrice: roundedPrice,
-supportStatus: "NON_ES_GENERIC_POST_ABC_RESET",
-nextExpectedMove: "WAIT_FOR_NEW_STRUCTURE",
-preferredEntry: "WAIT_FOR_NEW_W1_OR_W2_STRUCTURE",
-paperSignalCandidate: false,
-signalType: null,
-tradeableOpportunityBlocked: true,
-reclaimLevel: null,
-needs: [
-"WAIT_FOR_NEW_W1_OR_W2_STRUCTURE",
-"RECLAIM_CONFIRMATION_REQUIRED",
-],
-reasonCodes: [
-"POST_W5_ABC_COMPLETE",
-"ABC_COMPLETE",
-"NON_ES_POST_ABC_RESET_WAIT",
-],
-};
-}
+  const roundedPrice = roundToTick(price, tickSize);
+  const roundedCLow = roundToTick(cLow, tickSize);
 
-const supportLevel = 7400;
-const watchZoneHigh = 7425;
+  if (!isEsLikeSymbol(symbol)) {
+    return {
+      active: true,
+      abcUp,
+      state: "POST_ABC_RESET_WAIT",
+      supportLevel: null,
+      watchZoneLow: null,
+      watchZoneHigh: null,
+      cLow: roundedCLow,
+      currentPrice: roundedPrice,
+      supportStatus: "NON_ES_GENERIC_POST_ABC_RESET",
+      nextExpectedMove: "WAIT_FOR_NEW_STRUCTURE",
+      preferredEntry: "WAIT_FOR_NEW_W1_OR_W2_STRUCTURE",
+      paperSignalCandidate: false,
+      signalType: null,
+      tradeableOpportunityBlocked: true,
+      reclaimLevel: null,
+      needs: [
+        "WAIT_FOR_NEW_W1_OR_W2_STRUCTURE",
+        "RECLAIM_CONFIRMATION_REQUIRED",
+      ],
+      reasonCodes: [
+        "POST_W5_ABC_COMPLETE",
+        "ABC_COMPLETE",
+        "NON_ES_POST_ABC_RESET_WAIT",
+      ],
+    };
+  }
 
-if (price === null) {
-return {
-active: true,
-state: "POST_ABC_RESET_WAIT",
-supportLevel,
-watchZoneLow: roundedCLow,
-watchZoneHigh,
-cLow: roundedCLow,
-currentPrice: null,
-supportStatus: "PRICE_UNAVAILABLE",
-nextExpectedMove: "WAVE_2_BOUNCE_UP",
-preferredEntry: "WAIT_FOR_7400_HOLD_AND_RECLAIM",
-paperSignalCandidate: false,
-signalType: null,
-tradeableOpportunityBlocked: true,
-reclaimLevel: null,
-needs: [
-"CURRENT_PRICE_REQUIRED",
-"7400_SUPPORT_HOLD",
-"RECLAIM_CONFIRMATION_REQUIRED",
-],
-reasonCodes: [
-"POST_W5_ABC_COMPLETE",
-"ABC_COMPLETE",
-"PRICE_UNAVAILABLE",
-],
-};
-}
+  const supportLevel = 7400;
+  const watchZoneHigh = 7425;
 
-if (price < cLow) {
-return {
-active: true,
-state: "POST_ABC_LOW_FAILED",
-supportLevel,
-watchZoneLow: roundedCLow,
-watchZoneHigh,
-cLow: roundedCLow,
-currentPrice: roundedPrice,
-supportStatus: "C_LOW_FAILED",
-nextExpectedMove: "C_LEG_OR_WAVE_1_DOWN_EXTENDING",
-preferredEntry: "WAIT_FOR_LOWER_SUPPORT",
-paperSignalCandidate: false,
-signalType: null,
-tradeableOpportunityBlocked: true,
-reclaimLevel: null,
-needs: [
-"WAIT_FOR_LOWER_SUPPORT",
-"WAIT_FOR_NEW_STRUCTURE",
-"NO_WAVE_2_BOUNCE_SIGNAL",
-],
-reasonCodes: [
-"POST_W5_ABC_COMPLETE",
-"ABC_COMPLETE",
-"C_LOW_FAILED",
-"POST_ABC_LOW_FAILED",
-],
-};
-}
+  if (price === null) {
+    return {
+      active: true,
+      abcUp,
+      state: "POST_ABC_RESET_WAIT",
+      supportLevel,
+      watchZoneLow: roundedCLow,
+      watchZoneHigh,
+      cLow: roundedCLow,
+      currentPrice: null,
+      supportStatus: "PRICE_UNAVAILABLE",
+      nextExpectedMove: "WAVE_2_BOUNCE_UP",
+      preferredEntry: "WAIT_FOR_7400_HOLD_AND_RECLAIM",
+      paperSignalCandidate: false,
+      signalType: null,
+      tradeableOpportunityBlocked: true,
+      reclaimLevel: null,
+      needs: [
+        "CURRENT_PRICE_REQUIRED",
+        "7400_SUPPORT_HOLD",
+        "RECLAIM_CONFIRMATION_REQUIRED",
+      ],
+      reasonCodes: [
+        "POST_W5_ABC_COMPLETE",
+        "ABC_COMPLETE",
+        "PRICE_UNAVAILABLE",
+      ],
+    };
+  }
 
-const inSupportBand = price >= cLow && price <= watchZoneHigh;
-const supportStatus =
-price < supportLevel
-? "WARNING_BELOW_7400_ABOVE_C_LOW"
-: inSupportBand
-? "IN_7400_SUPPORT_HOLD_TEST"
-: "SUPPORT_HELD_WAITING_FOR_RECLAIM_CONFIRMATION";
+  if (price < cLow) {
+    return {
+      active: true,
+      abcUp,
+      state: "POST_ABC_LOW_FAILED",
+      supportLevel,
+      watchZoneLow: roundedCLow,
+      watchZoneHigh,
+      cLow: roundedCLow,
+      currentPrice: roundedPrice,
+      supportStatus: "C_LOW_FAILED",
+      nextExpectedMove: "C_LEG_OR_WAVE_1_DOWN_EXTENDING",
+      preferredEntry: "WAIT_FOR_LOWER_SUPPORT",
+      paperSignalCandidate: false,
+      signalType: null,
+      tradeableOpportunityBlocked: true,
+      reclaimLevel: null,
+      needs: [
+        "WAIT_FOR_LOWER_SUPPORT",
+        "WAIT_FOR_NEW_STRUCTURE",
+        "NO_WAVE_2_BOUNCE_SIGNAL",
+      ],
+      reasonCodes: [
+        "POST_W5_ABC_COMPLETE",
+        "ABC_COMPLETE",
+        "C_LOW_FAILED",
+        "POST_ABC_LOW_FAILED",
+      ],
+    };
+  }
 
-return {
-active: true,
-state: "POST_ABC_W2_BOUNCE_WATCH",
-supportLevel,
-watchZoneLow: roundedCLow,
-watchZoneHigh,
-cLow: roundedCLow,
-currentPrice: roundedPrice,
-supportStatus,
-nextExpectedMove: "WAVE_2_BOUNCE_UP",
-preferredEntry: "WAIT_FOR_7400_HOLD_AND_RECLAIM",
-paperSignalCandidate: true,
-signalType: "POST_ABC_W2_BOUNCE_WATCH",
-tradeableOpportunityBlocked: true,
-reclaimLevel: null,
-needs: [
-"7400_SUPPORT_HOLD",
-"RECLAIM_CONFIRMATION_REQUIRED",
-"ENGINE15_READY",
-"ENGINE6_FINAL_PERMISSION",
-],
-reasonCodes: [
-"POST_W5_ABC_COMPLETE",
-"ABC_COMPLETE",
-"C_LOW_MARKED",
-supportStatus,
-"INSTITUTIONAL_SUPPORT_TEST",
-"WAIT_FOR_W2_BOUNCE_CONFIRMATION",
-],
-};
+  const inSupportBand = price >= cLow && price <= watchZoneHigh;
+
+  const supportStatus =
+    price < supportLevel
+      ? "WARNING_BELOW_7400_ABOVE_C_LOW"
+      : inSupportBand
+      ? "IN_7400_SUPPORT_HOLD_TEST"
+      : "SUPPORT_HELD_WAITING_FOR_RECLAIM_CONFIRMATION";
+
+  return {
+    active: true,
+    abcUp,
+    state: "POST_ABC_W2_BOUNCE_WATCH",
+    supportLevel,
+    watchZoneLow: roundedCLow,
+    watchZoneHigh,
+    cLow: roundedCLow,
+    currentPrice: roundedPrice,
+    supportStatus,
+    nextExpectedMove: "WAVE_2_BOUNCE_UP",
+    preferredEntry: "WAIT_FOR_7400_HOLD_AND_RECLAIM",
+    paperSignalCandidate: true,
+    signalType: "POST_ABC_W2_BOUNCE_WATCH",
+    tradeableOpportunityBlocked: true,
+    reclaimLevel: null,
+    needs: [
+      "7400_SUPPORT_HOLD",
+      "RECLAIM_CONFIRMATION_REQUIRED",
+      "ENGINE15_READY",
+      "ENGINE6_FINAL_PERMISSION",
+    ],
+    reasonCodes: [
+      "POST_W5_ABC_COMPLETE",
+      "ABC_COMPLETE",
+      "C_LOW_MARKED",
+      supportStatus,
+      "INSTITUTIONAL_SUPPORT_TEST",
+      "WAIT_FOR_W2_BOUNCE_CONFIRMATION",
+    ],
+  };
 }
 
 function isInW5(degreeState = null) {
