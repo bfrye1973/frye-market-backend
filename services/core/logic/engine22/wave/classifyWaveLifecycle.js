@@ -64,7 +64,198 @@ const s = String(symbol || "").trim().toUpperCase();
 return s === "ES" || s.startsWith("ES") || s === "MES" || s.startsWith("MES");
 }
 
-function buildPostAbcBounceMap({ symbol, abcUpMarks = null } = {}) {
+function normalizeBarTime(bar) {
+  const raw =
+    bar?.timeSec ??
+    bar?.tSec ??
+    bar?.timestampSec ??
+    bar?.timestamp ??
+    bar?.time ??
+    bar?.t ??
+    null;
+
+  if (typeof raw === "number") {
+    return raw > 10_000_000_000 ? Math.floor(raw / 1000) : raw;
+  }
+
+  if (typeof raw === "string") {
+    const n = Number(raw);
+
+    if (Number.isFinite(n)) {
+      return n > 10_000_000_000 ? Math.floor(n / 1000) : n;
+    }
+
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) {
+      return Math.floor(parsed / 1000);
+    }
+  }
+
+  return null;
+}
+
+function normalizeBar(bar) {
+  if (!bar || typeof bar !== "object") return null;
+
+  const timeSec = normalizeBarTime(bar);
+  const high = toNum(bar.high ?? bar.h);
+  const low = toNum(bar.low ?? bar.l);
+  const close = toNum(bar.close ?? bar.c);
+
+  if (timeSec === null) return null;
+  if (high === null && low === null && close === null) return null;
+
+  return {
+    timeSec,
+    high: high ?? close,
+    low: low ?? close,
+    close,
+    raw: bar,
+  };
+}
+
+function degreeToTf(degree, fallback = null) {
+  const d = String(degree || "").toLowerCase();
+
+  if (d === "primary") return "1d";
+  if (d === "intermediate") return "1h";
+  if (d === "minor") return "1h";
+  if (d === "minute") return "10m";
+  if (d === "micro") return "10m";
+
+  return fallback || "10m";
+}
+
+function getBarsForDegree({ degree, barsByTf, fallbackTf = "10m" } = {}) {
+  const tf = degreeToTf(degree, fallbackTf);
+  const direct = barsByTf?.[tf];
+
+  if (Array.isArray(direct)) {
+    return direct.map(normalizeBar).filter(Boolean);
+  }
+
+  return [];
+}
+
+function buildAbcUpPriceAction({
+  degree,
+  currentPrice,
+  barsByTf = {},
+  originTime = null,
+  aTime = null,
+  preferredBZone = null,
+  deepBSupport = null,
+} = {}) {
+  const price = toNum(currentPrice);
+  const zoneLo = toNum(preferredBZone?.lo);
+  const zoneHi = toNum(preferredBZone?.hi);
+  const deepSupport = toNum(deepBSupport);
+
+  const bars = getBarsForDegree({
+    degree,
+    barsByTf,
+    fallbackTf: "10m",
+  });
+
+  const startMs = aTime ? Date.parse(aTime) : originTime ? Date.parse(originTime) : NaN;
+  const startSec = Number.isFinite(startMs) ? Math.floor(startMs / 1000) : null;
+
+  const scanBars =
+    startSec !== null
+      ? bars.filter((bar) => Number(bar.timeSec) >= Number(startSec))
+      : bars.slice(-80);
+
+  const lows = scanBars
+    .map((bar) => toNum(bar.low))
+    .filter((low) => low !== null && low > 0);
+
+  const closes = scanBars
+    .map((bar) => toNum(bar.close))
+    .filter((close) => close !== null && close > 0);
+
+  const recentLow = lows.length ? Math.min(...lows) : null;
+  const latestClose = closes.length ? closes[closes.length - 1] : price;
+
+  const touchedPreferredBZone =
+    recentLow !== null &&
+    zoneLo !== null &&
+    zoneHi !== null &&
+    recentLow <= zoneHi;
+
+  const tradedBelowPreferredBZone =
+    recentLow !== null &&
+    zoneLo !== null &&
+    recentLow < zoneLo;
+
+  const heldDeepBSupport =
+    recentLow !== null &&
+    deepSupport !== null &&
+    recentLow >= deepSupport;
+
+  const lostDeepBSupport =
+    recentLow !== null &&
+    deepSupport !== null &&
+    recentLow < deepSupport;
+
+  const reclaimedPreferredBZone =
+    latestClose !== null &&
+    zoneHi !== null &&
+    latestClose > zoneHi;
+
+  let status = "WAITING_FOR_B_PULLBACK";
+  let read = "Waiting for B pullback into the preferred B zone.";
+
+  if (lostDeepBSupport) {
+    status = "B_PULLBACK_DEEP_SUPPORT_LOST";
+    read = "Price traded below deep B support. ABC_UP bounce structure needs review.";
+  } else if (tradedBelowPreferredBZone && heldDeepBSupport) {
+    status = reclaimedPreferredBZone
+      ? "B_PULLBACK_DEEP_TEST_RECLAIMING"
+      : "B_PULLBACK_DEEP_SUPPORT_TEST";
+    read = reclaimedPreferredBZone
+      ? "Price traded below the preferred B zone, held above deep B support, and is reclaiming the B zone."
+      : "Price traded below the preferred B zone but is still holding above deep B support.";
+  } else if (touchedPreferredBZone) {
+    status = reclaimedPreferredBZone
+      ? "B_PULLBACK_PREFERRED_ZONE_RECLAIMING"
+      : "B_PULLBACK_REACHED_PREFERRED_ZONE";
+    read = reclaimedPreferredBZone
+      ? "Price pulled into the preferred B zone and is reclaiming."
+      : "Price pulled into the preferred B zone. Waiting for hold/reclaim confirmation.";
+  }
+
+  return {
+    tf: degreeToTf(degree, "10m"),
+    barsScanned: scanBars.length,
+    currentPrice: price,
+    latestClose,
+    recentLow,
+    preferredBZone,
+    deepBSupport,
+    touchedPreferredBZone,
+    tradedBelowPreferredBZone,
+    heldDeepBSupport,
+    lostDeepBSupport,
+    reclaimedPreferredBZone,
+    status,
+    read,
+    reasonCodes: [
+      touchedPreferredBZone ? "ABC_UP_B_ZONE_TOUCHED" : null,
+      tradedBelowPreferredBZone ? "ABC_UP_BELOW_PREFERRED_B_ZONE" : null,
+      heldDeepBSupport ? "ABC_UP_DEEP_SUPPORT_HOLDING" : null,
+      lostDeepBSupport ? "ABC_UP_DEEP_SUPPORT_LOST" : null,
+      reclaimedPreferredBZone ? "ABC_UP_PREFERRED_B_ZONE_RECLAIMING" : null,
+    ].filter(Boolean),
+  };
+}
+
+function buildPostAbcBounceMap({
+  symbol,
+  degree = "minute",
+  currentPrice = null,
+  abcUpMarks = null,
+  barsByTf = {},
+} = {}) {
   const tickSize = tickSizeForSymbol(symbol);
 
   const originLow = toNum(abcUpMarks?.originLow);
@@ -99,6 +290,8 @@ function buildPostAbcBounceMap({ symbol, abcUpMarks = null } = {}) {
       preferredBZone: null,
       deepBSupport: null,
       bPullbackStatus: "ORIGIN_LOW_AND_A_HIGH_REQUIRED",
+      priceAction: null,
+      read: null,
 
       reasonCodes: ["ABC_UP_ORIGIN_LOW_AND_A_HIGH_REQUIRED"],
     };
@@ -124,11 +317,31 @@ function buildPostAbcBounceMap({ symbol, abcUpMarks = null } = {}) {
     ? "B_PULLBACK_MARKED_WAITING_FOR_C_UP"
     : "ABC_UP_COMPLETE";
 
-  const bPullbackStatus = !bMarked
+  const preliminaryBStatus = !bMarked
     ? "WAITING_FOR_B_PULLBACK"
     : !cMarked
     ? "B_PULLBACK_MARKED"
     : "ABC_UP_COMPLETE";
+
+  const preferredBZone = {
+    lo: r618,
+    hi: r500,
+  };
+
+  const priceAction = buildAbcUpPriceAction({
+    degree,
+    currentPrice,
+    barsByTf,
+    originTime,
+    aTime,
+    preferredBZone,
+    deepBSupport: r786,
+  });
+
+  const bPullbackStatus =
+    !bMarked && priceAction?.status
+      ? priceAction.status
+      : preliminaryBStatus;
 
   return {
     active: true,
@@ -156,31 +369,39 @@ function buildPostAbcBounceMap({ symbol, abcUpMarks = null } = {}) {
       r786,
     },
 
-    preferredBZone: {
-      lo: r618,
-      hi: r500,
-    },
-
+    preferredBZone,
     deepBSupport: r786,
     bPullbackStatus,
+    priceAction,
+    read: priceAction?.read || null,
 
     reasonCodes: [
       "POST_ABC_BOUNCE_MARKS_FOUND",
       "ABC_UP_A_HIGH_MARKED",
       bMarked ? "ABC_UP_B_LOW_MARKED" : "ABC_UP_WAITING_FOR_B_PULLBACK",
       cMarked ? "ABC_UP_C_HIGH_MARKED" : "ABC_UP_C_HIGH_PENDING",
+      ...(Array.isArray(priceAction?.reasonCodes)
+        ? priceAction.reasonCodes
+        : []),
     ],
   };
 }
-
 function classifyPostAbcReset({
   symbol,
   currentPrice,
   abcCorrection,
   abcUpMarks = null,
+  activeCorrectionDegree = null,
+  barsByTf = {},
 } = {}) {
   const tickSize = tickSizeForSymbol(symbol);
-  const abcUp = buildPostAbcBounceMap({ symbol, abcUpMarks });
+  const abcUp = buildPostAbcBounceMap({
+    symbol,
+    degree: activeCorrectionDegree || "minute",
+    currentPrice,
+    abcUpMarks,
+    barsByTf,
+  });
 
   const price = toNum(currentPrice);
   const cLow = toNum(abcCorrection?.c?.price);
@@ -842,6 +1063,7 @@ export function classifyWaveLifecycle({
 symbol = "SPY",
 waveFibState = null,
 currentPrice = null,
+barsByTf = {},
 engine16 = null,
 engine25Context = null,
 marketRegime = null,
@@ -908,6 +1130,8 @@ const postAbcReset =
         abcUpMarks: activeCorrectionDegree
           ? degrees?.[activeCorrectionDegree]?.abcUpMarks || null
           : null,
+        activeCorrectionDegree,
+        barsByTf,
       })
     : {
         active: false,
