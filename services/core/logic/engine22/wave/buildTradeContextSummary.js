@@ -458,11 +458,134 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
   const postAbcReset = lifecycle?.postAbcReset || null;
   const postAbcState = String(postAbcReset?.state || "").toUpperCase();
 
-  if (postAbcState === "POST_ABC_W2_BOUNCE_WATCH") {
+    if (postAbcState === "POST_ABC_W2_BOUNCE_WATCH") {
     const supportLevel = postAbcReset?.supportLevel ?? 7400;
     const cLow = postAbcReset?.cLow ?? abc?.c?.price ?? null;
     const currentPrice =
       postAbcReset?.currentPrice ?? waveFibState?.currentPrice ?? null;
+
+    const abcUp = postAbcReset?.abcUp || null;
+    const abcUpState = String(abcUp?.state || "").toUpperCase();
+
+    const hasAUpMarked =
+      abcUpState === "A_UP_MARKED_WAITING_FOR_B_PULLBACK";
+
+    const originLow = abcUp?.originLow ?? null;
+    const waveAHigh = abcUp?.waveAHigh ?? null;
+    const preferredBZone = abcUp?.preferredBZone || null;
+    const deepBSupport = abcUp?.deepBSupport ?? null;
+
+    if (hasAUpMarked) {
+      const bZoneDisplay =
+        preferredBZone?.lo != null && preferredBZone?.hi != null
+          ? `${fmt(preferredBZone.lo)}–${fmt(preferredBZone.hi)}`
+          : "—";
+
+      const summary =
+        `${waveStack.message}\n\n` +
+        `W5 and ABC correction are complete.\n\n` +
+        `A up is marked from ${fmt(originLow)} to ${fmt(waveAHigh)}.\n\n` +
+        `Engine 22 is waiting for B pullback.\n\n` +
+        `Preferred B zone is ${bZoneDisplay}.\n\n` +
+        `Deep B support is ${fmt(deepBSupport)}.\n\n` +
+        `No chase. No execution.\n\n` +
+        `Wait for B pullback hold and reclaim confirmation.`;
+
+      return {
+        headline: "POST ABC COMPLETE — A UP MARKED, WAIT FOR B PULLBACK",
+        subheadline:
+          "A-up is marked after ABC completion. Waiting for B pullback hold and reclaim confirmation.",
+        bias: "RESET_BOUNCE_WATCH",
+        action: "WAIT_FOR_B_PULLBACK_HOLD_AND_RECLAIM",
+        direction: "NONE",
+        chaseAllowed: false,
+        severity: "warning",
+
+        topCandidate: round2(waveAHigh),
+        hardInvalidation: round2(cLow),
+        reclaimLadder: null,
+
+        firstCluster: clusters.firstCluster,
+        nextCluster: clusters.nextCluster,
+
+        lifecycleState: lifecycle?.lifecycleState || null,
+        postAbcReset,
+        parentContextOnly: lifecycle?.parentContextOnly === true,
+        tradeableOpportunityBlocked:
+          lifecycle?.tradeableOpportunityBlocked === true,
+        nextAllowedSetup: lifecycle?.nextAllowedSetup || null,
+
+        abcCorrection: abc,
+        abc: abc
+          ? {
+              degree: abc?.degree || null,
+              state: abc?.state || null,
+              a: abc?.a || null,
+              b: abc?.b || null,
+              c: abc?.c || null,
+              range: abc?.range ?? null,
+              reclaimLevels: abc?.reclaimLevels || null,
+              downsideTargets: abc?.downsideTargets || null,
+            }
+          : null,
+
+        abcUp: {
+          state: abcUp?.state || null,
+          originLow: round2(originLow),
+          originTime: abcUp?.originTime || null,
+          waveAHigh: round2(waveAHigh),
+          aTime: abcUp?.aTime || null,
+          waveBLow: round2(abcUp?.waveBLow),
+          bTime: abcUp?.bTime || null,
+          waveCHigh: round2(abcUp?.waveCHigh),
+          cTime: abcUp?.cTime || null,
+          range: round2(abcUp?.range),
+          bPullbackLevels: abcUp?.bPullbackLevels || null,
+          preferredBZone: abcUp?.preferredBZone || null,
+          deepBSupport: round2(deepBSupport),
+          bPullbackStatus: abcUp?.bPullbackStatus || null,
+        },
+
+        reads: {
+          structureRead: waveStack.message,
+          lifecycleRead:
+            "W5 and ABC correction are complete. A-up is marked and Engine 22 is waiting for B pullback.",
+          abcUpRead: `A up is marked from ${fmt(originLow)} to ${fmt(
+            waveAHigh
+          )}.`,
+          bPullbackRead: `Preferred B zone is ${bZoneDisplay}. Deep B support is ${fmt(
+            deepBSupport
+          )}.`,
+          supportRead: `Current price ${fmt(
+            currentPrice
+          )} is being evaluated against support near ${fmt(
+            supportLevel
+          )} and C low near ${fmt(cLow)}.`,
+          actionRead:
+            "No chase. No execution. Wait for B pullback hold and reclaim confirmation.",
+        },
+
+        summary,
+
+        needs:
+          postAbcReset?.needs || [
+            "7400_SUPPORT_HOLD",
+            "RECLAIM_CONFIRMATION_REQUIRED",
+            "ENGINE15_READY",
+            "ENGINE6_FINAL_PERMISSION",
+          ],
+
+        reasonCodes: [
+          "TRADE_CONTEXT_SUMMARY_BUILT",
+          "POST_ABC_A_UP_MARKED_WAITING_FOR_B_PULLBACK",
+          "NO_CHASE_LONG",
+          "NO_EXECUTION",
+          ...(lifecycle?.reasonCodes || []),
+          ...(postAbcReset?.reasonCodes || []),
+          ...(abcUp?.reasonCodes || []),
+        ],
+      };
+    }
 
     const summary =
       `${waveStack.message}\n\n` +
