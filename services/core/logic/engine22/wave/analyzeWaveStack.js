@@ -167,6 +167,32 @@ function attachW4LevelsToDegrees({ symbol, engine2State, degrees, currentPrice }
   return degrees;
 }
 
+function attachRawManualMarksToDegrees({ engine2State, degrees } = {}) {
+  if (!engine2State || typeof engine2State !== "object") return degrees;
+  if (!degrees || typeof degrees !== "object") return degrees;
+
+  for (const degree of DEGREE_ORDER) {
+    const degreeState = degrees?.[degree];
+    const engine2Block = engine2State?.[degree] || null;
+
+    if (!degreeState || !engine2Block) continue;
+
+    const abcUpMarks =
+      engine2Block?.abcUpMarks && typeof engine2Block.abcUpMarks === "object"
+        ? engine2Block.abcUpMarks
+        : null;
+
+    if (!abcUpMarks) continue;
+
+    degrees[degree] = {
+      ...degreeState,
+      abcUpMarks,
+    };
+  }
+
+  return degrees;
+}
+
 function findActiveTradingDegree(degrees = {}) {
   // Prefer the lowest-degree active pullback because that is where entry timing later happens.
   for (const degree of ["micro", "minute", "minor", "intermediate", "primary"]) {
@@ -400,6 +426,11 @@ export function analyzeWaveStack({
     engine2State,
     degrees,
     currentPrice,
+  });
+
+  degrees = attachRawManualMarksToDegrees({
+    engine2State,
+    degrees,
   });
 
   const chaseRisk = strongestChaseRisk(degrees);
