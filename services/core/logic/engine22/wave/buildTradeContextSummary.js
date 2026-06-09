@@ -474,6 +474,11 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
     const waveAHigh = abcUp?.waveAHigh ?? null;
     const preferredBZone = abcUp?.preferredBZone || null;
     const deepBSupport = abcUp?.deepBSupport ?? null;
+    const effectiveWaveBLow =
+      abcUp?.effectiveWaveBLow ??
+      abcUp?.autoWaveBLow ??
+      abcUp?.waveBLow ??
+      null; 
 
     if (hasAUpMarked) {
       const bZoneDisplay =
@@ -531,19 +536,64 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
 
         abcUp: {
           state: abcUp?.state || null,
+
           originLow: round2(originLow),
           originTime: abcUp?.originTime || null,
+
           waveAHigh: round2(waveAHigh),
           aTime: abcUp?.aTime || null,
-          waveBLow: validLevel(abcUp?.waveBLow) !== null ? round2(abcUp?.waveBLow) : null,
+
+          waveBLow:
+            validLevel(abcUp?.waveBLow) !== null
+              ? round2(abcUp?.waveBLow)
+              : null,
           bTime: abcUp?.bTime || null,
-          waveCHigh: validLevel(abcUp?.waveCHigh) !== null ? round2(abcUp?.waveCHigh) : null,
+
+          autoWaveBLow:
+            validLevel(abcUp?.autoWaveBLow) !== null
+              ? round2(abcUp?.autoWaveBLow)
+              : null,
+          autoBTime: abcUp?.autoBTime || null,
+
+          effectiveWaveBLow:
+            validLevel(abcUp?.effectiveWaveBLow) !== null
+              ? round2(abcUp?.effectiveWaveBLow)
+              : validLevel(abcUp?.autoWaveBLow) !== null
+              ? round2(abcUp?.autoWaveBLow)
+              : validLevel(abcUp?.waveBLow) !== null
+              ? round2(abcUp?.waveBLow)
+              : null,
+          effectiveBTime:
+            abcUp?.effectiveBTime ||
+            abcUp?.autoBTime ||
+            abcUp?.bTime ||
+            null,
+          effectiveBSec: abcUp?.effectiveBSec ?? null,
+          bSource: abcUp?.bSource || null,
+
+          waveCHigh:
+            validLevel(abcUp?.waveCHigh) !== null
+              ? round2(abcUp?.waveCHigh)
+              : null,
           cTime: abcUp?.cTime || null,
+
           range: round2(abcUp?.range),
+
           bPullbackLevels: abcUp?.bPullbackLevels || null,
+          cUpTargets: abcUp?.cUpTargets || null,
+
           preferredBZone: abcUp?.preferredBZone || null,
           deepBSupport: round2(deepBSupport),
+
+          bRetracePct: abcUp?.bRetracePct ?? null,
+          bRetraceRatio: abcUp?.bRetraceRatio ?? null,
+          correctionType: abcUp?.correctionType || null,
+          correctionFamily: abcUp?.correctionFamily || null,
+          correctionQuality: abcUp?.correctionQuality || null,
+
           bPullbackStatus: abcUp?.bPullbackStatus || null,
+          priceAction: abcUp?.priceAction || null,
+          read: abcUp?.read || null,
         },
 
         reads: {
