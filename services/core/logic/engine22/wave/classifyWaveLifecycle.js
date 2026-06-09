@@ -1628,6 +1628,7 @@ export function classifyWaveLifecycle({
   engine16 = null,
   engine25Context = null,
   marketRegime = null,
+  marketMeterContext = null,
 } = {}) {
   const degrees = waveFibState?.degrees || {};
 
@@ -1836,6 +1837,18 @@ export function classifyWaveLifecycle({
       engine16Ready: upper(engine16?.readiness, "") === "READY",
       engine25ContextProvided: engine25Context != null,
       marketRegimeProvided: marketRegime != null,
+      marketMeterContextProvided: marketMeterContext != null,
+
+      marketMeter: marketMeterContext
+        ? {
+            score30m: toNum(marketMeterContext?.score30m),
+            score4h: toNum(marketMeterContext?.score4h),
+            scoreEOD: toNum(marketMeterContext?.scoreEOD),
+            state30m: marketMeterContext?.state30m || null,
+            state4h: marketMeterContext?.state4h || null,
+            stateEOD: marketMeterContext?.stateEOD || null,
+          }
+        : null,
     },
   };
 }
