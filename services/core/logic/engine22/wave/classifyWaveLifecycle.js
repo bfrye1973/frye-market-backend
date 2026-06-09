@@ -694,9 +694,9 @@ function buildCUpProgress({
       reached618 ? "ABC_UP_C_REACHED_0618" : null,
       reached100 ? "ABC_UP_C_REACHED_1000" : null,
       highestTargetHit
-      fastUpsideMove?.active ? "ABC_UP_FAST_C_UP_SPIKE_DETECTED" : null,
         ? `ABC_UP_HIGHEST_TARGET_${String(highestTargetHit).toUpperCase()}`
         : null,
+      fastUpsideMove?.active ? "ABC_UP_FAST_C_UP_SPIKE_DETECTED" : null,
       belowOrigin ? "ABC_UP_CURRENT_PRICE_BELOW_ORIGIN" : null,
       belowStructuralB ? "ABC_UP_CURRENT_PRICE_BELOW_STRUCTURAL_B" : null,
       state,
