@@ -1118,6 +1118,17 @@ function buildPostAbcBounceMap({
       ? bars.filter((bar) => Number(bar.timeSec) >= Number(effectiveASec))
       : bars.slice(-80);
 
+  const cUpTargets =
+    effectiveBLow !== null
+      ? {
+          c100: roundToTick(effectiveBLow + range * 1, tickSize),
+          c1272: roundToTick(effectiveBLow + range * 1.272, tickSize),
+          c1618: roundToTick(effectiveBLow + range * 1.618, tickSize),
+          c200: roundToTick(effectiveBLow + range * 2, tickSize),
+          c2618: roundToTick(effectiveBLow + range * 2.618, tickSize),
+        }
+      : null;  
+
   const cUpProgress =
     effectiveBLow !== null
       ? buildCUpProgress({
