@@ -486,22 +486,109 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
           ? `${fmt(preferredBZone.lo)}–${fmt(preferredBZone.hi)}`
           : "—";
 
+      const bStatus = String(abcUp?.bPullbackStatus || "").toUpperCase();
+      const correctionType = String(abcUp?.correctionType || "").toUpperCase();
+      const correctionQuality = String(abcUp?.correctionQuality || "").toUpperCase();
+
+      const cUpTargets = abcUp?.cUpTargets || null;
+      const cUpTargetDisplay = cUpTargets
+        ? [
+            ["C 1.000", cUpTargets.c100],
+            ["C 1.272", cUpTargets.c1272],
+            ["C 1.618", cUpTargets.c1618],
+            ["C 2.000", cUpTargets.c200],
+            ["C 2.618", cUpTargets.c2618],
+          ]
+            .filter(([, price]) => price != null)
+            .map(([label, price]) => `${label}: ${fmt(price)}`)
+            .join(" | ")
+        : "—";
+
+      const hasEffectiveB = validLevel(effectiveWaveBLow) !== null;
+
+      let headline = "POST ABC COMPLETE — A UP MARKED, WAIT FOR B PULLBACK";
+      let subheadline =
+        "A-up is marked after ABC completion. Waiting for B pullback hold and reclaim confirmation.";
+      let action = "WAIT_FOR_B_PULLBACK_HOLD_AND_RECLAIM";
+      let lifecycleRead =
+        "W5 and ABC correction are complete. A-up is marked and Engine 22 is waiting for B pullback.";
+      let actionRead =
+        "No chase. No execution. Wait for B pullback hold and reclaim confirmation.";
+
+      if (
+        bStatus === "EXPANDED_B_UNDERCUT_PREFERRED_ZONE_RECLAIMING" ||
+        bStatus === "EXPANDED_B_UNDERCUT_DEEP_SUPPORT_RECLAIMING"
+      ) {
+        headline = "POST ABC COMPLETE — EXPANDED B RECLAIMING, C-UP WATCH";
+        subheadline =
+          "Structural B undercut the origin and is reclaiming. C-up watch improves, but this remains WATCH only.";
+        action = "WAIT_FOR_EXPANDED_B_RECLAIM_CONFIRMATION";
+        lifecycleRead =
+          "W5 and ABC correction are complete. Structural B undercut the origin and is reclaiming.";
+        actionRead =
+          "No chase. No execution. Wait for reclaim confirmation and Engine 6 permission.";
+      } else if (bStatus === "EXPANDED_B_UNDERCUT_ORIGIN_RECLAIMING") {
+        headline = "POST ABC COMPLETE — EXPANDED B UNDERCUT, WAIT FOR RECLAIM";
+        subheadline =
+          "Structural B undercut the origin and reclaimed the origin area. Preferred B zone reclaim is still needed.";
+        action = "WAIT_FOR_EXPANDED_B_PREFERRED_ZONE_RECLAIM";
+        lifecycleRead =
+          "W5 and ABC correction are complete. Structural B undercut the origin and reclaimed the origin area.";
+        actionRead =
+          "No chase. No execution. Wait for preferred B zone reclaim confirmation.";
+      } else if (String(bStatus).includes("C_UP_ATTEMPT_ACTIVE")) {
+        headline = "POST ABC COMPLETE — C-UP ATTEMPT ACTIVE";
+        subheadline =
+          "Structural B is marked and price is above the preferred B zone. C-up attempt is active, but not executable.";
+        action = "WATCH_C_UP_ATTEMPT_WAIT_FOR_CONFIRMATION";
+        lifecycleRead =
+          "W5 and ABC correction are complete. Structural B is marked and C-up attempt is active.";
+        actionRead =
+          "No chase. No execution. Watch C-up targets, but wait for confirmation and Engine 6 permission.";
+      } else if (bStatus === "B_PULLBACK_REACHED_PREFERRED_ZONE") {
+        headline = "POST ABC COMPLETE — B ZONE TOUCHED, WAIT FOR RECLAIM";
+        subheadline =
+          "A-up is marked and B has reached the preferred B zone. Waiting for hold/reclaim confirmation.";
+        action = "WAIT_FOR_B_ZONE_HOLD_AND_RECLAIM";
+        lifecycleRead =
+          "W5 and ABC correction are complete. B has reached the preferred B zone.";
+        actionRead =
+          "No chase. No execution. Wait for B-zone hold and reclaim confirmation.";
+      } else if (hasEffectiveB) {
+        headline =
+          correctionType === "EXPANDED_FLAT_CANDIDATE"
+            ? "POST ABC COMPLETE — EXPANDED B MARKED, C-UP WATCH"
+            : "POST ABC COMPLETE — STRUCTURAL B MARKED, C-UP WATCH";
+        subheadline =
+          "Structural B is marked automatically. Watching for C-up behavior, but this remains WATCH only.";
+        action = "WATCH_C_UP_WAIT_FOR_RECLAIM_CONFIRMATION";
+        lifecycleRead =
+          "W5 and ABC correction are complete. Structural B is marked automatically.";
+        actionRead =
+          "No chase. No execution. Wait for reclaim confirmation and Engine 6 permission.";
+      }
+
       const summary =
         `${waveStack.message}\n\n` +
         `W5 and ABC correction are complete.\n\n` +
         `A up is marked from ${fmt(originLow)} to ${fmt(waveAHigh)}.\n\n` +
-        `Engine 22 is waiting for B pullback.\n\n` +
+        `Structural B low: ${fmt(effectiveWaveBLow)}.\n\n` +
+        `B retrace: ${
+          abcUp?.bRetracePct != null ? `${abcUp.bRetracePct}%` : "—"
+        }.\n\n` +
+        `Correction type: ${text(abcUp?.correctionType)}.\n\n` +
+        `Correction quality: ${text(correctionQuality)}.\n\n` +
         `Preferred B zone is ${bZoneDisplay}.\n\n` +
         `Deep B support is ${fmt(deepBSupport)}.\n\n` +
+        `C-up targets: ${cUpTargetDisplay}.\n\n` +
         `No chase. No execution.\n\n` +
-        `Wait for B pullback hold and reclaim confirmation.`;
+        `${actionRead}`;
 
       return {
-        headline: "POST ABC COMPLETE — A UP MARKED, WAIT FOR B PULLBACK",
-        subheadline:
-          "A-up is marked after ABC completion. Waiting for B pullback hold and reclaim confirmation.",
+        headline,
+        subheadline,
         bias: "RESET_BOUNCE_WATCH",
-        action: "WAIT_FOR_B_PULLBACK_HOLD_AND_RECLAIM",
+        action,
         direction: "NONE",
         chaseAllowed: false,
         severity: "warning",
@@ -598,23 +685,21 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
 
         reads: {
           structureRead: waveStack.message,
-          lifecycleRead:
-            "W5 and ABC correction are complete. A-up is marked and Engine 22 is waiting for B pullback.",
+          lifecycleRead,
           abcUpRead: `A up is marked from ${fmt(originLow)} to ${fmt(
             waveAHigh
-          )}.`,
+          )}. Structural B low is ${fmt(effectiveWaveBLow)}.`,
           bPullbackRead: `Preferred B zone is ${bZoneDisplay}. Deep B support is ${fmt(
             deepBSupport
-          )}.`,
+          )}. B status: ${text(abcUp?.bPullbackStatus)}.`,
+          cUpTargetsRead: `C-up targets: ${cUpTargetDisplay}.`,
           supportRead: `Current price ${fmt(
             currentPrice
           )} is being evaluated against support near ${fmt(
             supportLevel
           )} and C low near ${fmt(cLow)}.`,
-          actionRead:
-            "No chase. No execution. Wait for B pullback hold and reclaim confirmation.",
+          actionRead,
         },
-
         summary,
 
         needs:
@@ -627,7 +712,9 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
 
         reasonCodes: [
           "TRADE_CONTEXT_SUMMARY_BUILT",
-          "POST_ABC_A_UP_MARKED_WAITING_FOR_B_PULLBACK",
+          hasEffectiveB
+            ? "POST_ABC_STRUCTURAL_B_MARKED_C_UP_WATCH"
+            : "POST_ABC_A_UP_MARKED_WAITING_FOR_B_PULLBACK",
           "NO_CHASE_LONG",
           "NO_EXECUTION",
           ...(lifecycle?.reasonCodes || []),
