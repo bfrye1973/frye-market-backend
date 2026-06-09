@@ -506,6 +506,26 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
 
       const hasEffectiveB = validLevel(effectiveWaveBLow) !== null;
 
+      const cUpProgress = abcUp?.cUpProgress || null;
+      const marketContextRisk = abcUp?.marketContextRisk || null;
+
+      const cUpProgressState = String(cUpProgress?.state || "").toUpperCase();
+      const marketRiskState = String(marketContextRisk?.state || "").toUpperCase();
+
+      const w3DownRiskActive =
+        cUpProgressState === "W2_BOUNCE_FAILED_POSSIBLE_W3_DOWN_STARTED" ||
+        marketRiskState.includes("POSSIBLE_W3_DOWN") ||
+        marketRiskState.includes("W2_FAILED");
+
+      const cUpExtensionHit =
+        cUpProgress?.reached100 === true ||
+        ["c100", "c1272", "c1618", "c200", "c2618"].includes(
+        String(cUpProgress?.highestTargetHit || "")
+      );
+
+      const fastCUpSpike =
+        cUpProgress?.fastUpsideMove?.active === true;
+
       let headline = "POST ABC COMPLETE — A UP MARKED, WAIT FOR B PULLBACK";
       let subheadline =
         "A-up is marked after ABC completion. Waiting for B pullback hold and reclaim confirmation.";
@@ -515,7 +535,16 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
       let actionRead =
         "No chase. No execution. Wait for B pullback hold and reclaim confirmation.";
 
-      if (
+      if (w3DownRiskActive) {
+        headline = "W2 BOUNCE FAILED — POSSIBLE W3 DOWN STARTED";
+        subheadline =
+          "Weak dashboard plus fast C-up spike into extension targets failed below origin / structural B. Read-only W3 down risk warning.";
+        action = "WAIT_FOR_W3_DOWN_CONFIRMATION_OR_RECLAIM";
+        lifecycleRead =
+          "Post-ABC Wave 2 bounce matured into C-up extension, then failed below origin / structural B.";
+        actionRead =
+          "No automatic short. No execution. Treat as possible W3 down risk; wait for confirmed structure or reclaim.";
+      } else if (
         bStatus === "EXPANDED_B_UNDERCUT_PREFERRED_ZONE_RECLAIMING" ||
         bStatus === "EXPANDED_B_UNDERCUT_DEEP_SUPPORT_RECLAIMING"
       ) {
@@ -568,21 +597,40 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
           "No chase. No execution. Wait for reclaim confirmation and Engine 6 permission.";
       }
 
-      const summary =
-        `${waveStack.message}\n\n` +
-        `W5 and ABC correction are complete.\n\n` +
-        `A up is marked from ${fmt(originLow)} to ${fmt(waveAHigh)}.\n\n` +
-        `Structural B low: ${fmt(effectiveWaveBLow)}.\n\n` +
-        `B retrace: ${
-          abcUp?.bRetracePct != null ? `${abcUp.bRetracePct}%` : "—"
-        }.\n\n` +
-        `Correction type: ${text(abcUp?.correctionType)}.\n\n` +
-        `Correction quality: ${text(correctionQuality)}.\n\n` +
-        `Preferred B zone is ${bZoneDisplay}.\n\n` +
-        `Deep B support is ${fmt(deepBSupport)}.\n\n` +
-        `C-up targets: ${cUpTargetDisplay}.\n\n` +
-        `No chase. No execution.\n\n` +
-        `${actionRead}`;
+ const cUpProgressDisplay = cUpProgress
+  ? `C-up progress: ${text(cUpProgress.state)}. Highest high after B: ${fmt(
+      cUpProgress.highestHighAfterB
+    )}. Highest target hit: ${text(cUpProgress.highestTargetHit)}.`
+  : "C-up progress unavailable.";
+
+const marketRiskDisplay = marketContextRisk?.active
+  ? `Market context risk: ${text(marketContextRisk.state)}. ${marketContextRisk.read || ""}`
+  : "Market context risk: none active.";
+
+const fastSpikeDisplay = fastCUpSpike
+  ? `Fast C-up spike: ${fmt(cUpProgress?.fastUpsideMove?.movePts)} points in ${fmt(
+      cUpProgress?.fastUpsideMove?.bars
+    )} bars.`
+  : "Fast C-up spike: not active.";
+
+const summary =
+  `${waveStack.message}\n\n` +
+  `W5 and ABC correction are complete.\n\n` +
+  `A up is marked from ${fmt(originLow)} to ${fmt(waveAHigh)}.\n\n` +
+  `Structural B low: ${fmt(effectiveWaveBLow)}.\n\n` +
+  `B retrace: ${
+    abcUp?.bRetracePct != null ? `${abcUp.bRetracePct}%` : "—"
+  }.\n\n` +
+  `Correction type: ${text(abcUp?.correctionType)}.\n\n` +
+  `Correction quality: ${text(correctionQuality)}.\n\n` +
+  `Preferred B zone is ${bZoneDisplay}.\n\n` +
+  `Deep B support is ${fmt(deepBSupport)}.\n\n` +
+  `C-up targets: ${cUpTargetDisplay}.\n\n` +
+  `${cUpProgressDisplay}\n\n` +
+  `${fastSpikeDisplay}\n\n` +
+  `${marketRiskDisplay}\n\n` +
+  `No chase. No execution.\n\n` +
+  `${actionRead}`; 
 
       return {
         headline,
@@ -668,6 +716,9 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
 
           bPullbackLevels: abcUp?.bPullbackLevels || null,
           cUpTargets: abcUp?.cUpTargets || null,
+          cUpProgress: abcUp?.cUpProgress || null,
+          marketContextRisk: abcUp?.marketContextRisk || null,
+          bCompletion: abcUp?.bCompletion || null,
 
           preferredBZone: abcUp?.preferredBZone || null,
           deepBSupport: round2(deepBSupport),
@@ -693,6 +744,8 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
             deepBSupport
           )}. B status: ${text(abcUp?.bPullbackStatus)}.`,
           cUpTargetsRead: `C-up targets: ${cUpTargetDisplay}.`,
+          cUpProgressRead: cUpProgress?.read || cUpProgressDisplay,
+          marketContextRiskRead: marketContextRisk?.read || marketRiskDisplay,
           supportRead: `Current price ${fmt(
             currentPrice
           )} is being evaluated against support near ${fmt(
@@ -712,10 +765,15 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
 
         reasonCodes: [
           "TRADE_CONTEXT_SUMMARY_BUILT",
-          hasEffectiveB
+          w3DownRiskActive
+            ? "POST_ABC_W2_BOUNCE_FAILED_POSSIBLE_W3_DOWN_STARTED"
+            : hasEffectiveB
             ? "POST_ABC_STRUCTURAL_B_MARKED_C_UP_WATCH"
             : "POST_ABC_A_UP_MARKED_WAITING_FOR_B_PULLBACK",
-          "NO_CHASE_LONG",
+         cUpExtensionHit ? "POST_ABC_C_UP_EXTENSION_HIT" : null,
+         fastCUpSpike ? "POST_ABC_FAST_C_UP_SPIKE_DETECTED" : null,
+         marketContextRisk?.active ? "POST_ABC_WEAK_MARKET_C_UP_RISK_ACTIVE" : null,
+         "NO_CHASE_LONG",
           "NO_EXECUTION",
           ...(lifecycle?.reasonCodes || []),
           ...(postAbcReset?.reasonCodes || []),
