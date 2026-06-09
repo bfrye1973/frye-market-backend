@@ -464,6 +464,12 @@ export function buildEngine22WaveStrategy(input = {}) {
     snapshotNow: context.snapshotNow,
     currentTimeSec: context.currentTimeSec,
     barsByTf: context.barsByTf,
+
+    // Engine 22D lifecycle context bridge.
+    // Read-only only. Does not create trades, shorts, permission, or execution.
+    marketMeterContext: context.marketMeterContext,
+    marketRegime: context.marketRegime,
+    engine25Context: context.engine25Context,
   });
 
   const tradeContextSummary =
