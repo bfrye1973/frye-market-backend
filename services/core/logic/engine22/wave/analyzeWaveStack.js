@@ -386,6 +386,12 @@ export function analyzeWaveStack({
   snapshotNow = null,
   currentTimeSec = null,
   barsByTf = {},
+
+  // Engine 22D lifecycle context bridge.
+  // Read-only only. Used for lifecycle warnings, not permission or execution.
+  marketMeterContext = null,
+  marketRegime = null,
+  engine25Context = null,
 } = {}) {
   if (!engine2State || typeof engine2State !== "object") {
     return {
@@ -542,8 +548,12 @@ export function analyzeWaveStack({
     currentPrice,
     barsByTf,
     engine16: regimeLayers,
-    engine25Context: null,
-    marketRegime: null,
+
+    // Engine 22D lifecycle context bridge.
+    // Read-only only. Does not create trades, shorts, permission, or execution.
+    engine25Context,
+    marketRegime,
+    marketMeterContext,
   });
 
   partialWaveFibState.lifecycle = lifecycle;
@@ -574,6 +584,9 @@ export function analyzeWaveStack({
     tradeContextSummary,
 
     regimeContext: regimeLayers || null,
+    marketRegime: marketRegime || null,
+    marketMeterContext: marketMeterContext || null,
+    engine25Context: engine25Context || null,
 
     reactionContext: reactionContext || null,
     volumeContext: volumeContext || null,
