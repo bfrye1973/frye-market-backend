@@ -236,6 +236,135 @@ function findLatestSwingLowAfterTime({ bars = [], afterSec = null } = {}) {
   return latest;
 }
 
+function findSwingLowsAfterTime({ bars = [], afterSec = null } = {}) {
+  if (!Array.isArray(bars) || bars.length < 3) return [];
+
+  const scopedBars =
+    afterSec !== null
+      ? bars.filter((bar) => Number(bar.timeSec) >= Number(afterSec))
+      : bars;
+
+  if (scopedBars.length < 3) return [];
+
+  const lows = [];
+
+  for (let i = 1; i < scopedBars.length - 1; i++) {
+    const prevLow = toNum(scopedBars[i - 1]?.low);
+    const low = toNum(scopedBars[i]?.low);
+    const nextLow = toNum(scopedBars[i + 1]?.low);
+
+    if (prevLow === null || low === null || nextLow === null) continue;
+
+    if (low <= prevLow && low <= nextLow) {
+      lows.push({
+        price: low,
+        timeSec: scopedBars[i].timeSec,
+        time: formatTimeSec(scopedBars[i].timeSec),
+        close: scopedBars[i].close,
+        source: "AUTO_CANDLE_SWING_LOW",
+      });
+    }
+  }
+
+  return lows;
+}
+
+function findLowestLowAfterTime({ bars = [], afterSec = null } = {}) {
+  if (!Array.isArray(bars) || !bars.length) return null;
+
+  const scopedBars =
+    afterSec !== null
+      ? bars.filter((bar) => Number(bar.timeSec) >= Number(afterSec))
+      : bars;
+
+  let lowest = null;
+
+  for (const bar of scopedBars) {
+    const low = toNum(bar?.low);
+    if (low === null) continue;
+
+    if (!lowest || low < lowest.price) {
+      lowest = {
+        price: low,
+        timeSec: bar.timeSec,
+        time: formatTimeSec(bar.timeSec),
+        close: bar.close,
+        source: "AUTO_LOWEST_LOW_AFTER_A_FALLBACK",
+      };
+    }
+  }
+
+  return lowest;
+}
+
+function pickLowestCandidate(candidates = [], source = "AUTO_STRUCTURAL_B_LOW") {
+  if (!Array.isArray(candidates) || !candidates.length) return null;
+
+  return candidates.reduce((best, item) => {
+    if (!best || toNum(item?.price) < toNum(best?.price)) {
+      return {
+        ...item,
+        source,
+      };
+    }
+
+    return best;
+  }, null);
+}
+
+function findStructuralBLowAfterA({
+  bars = [],
+  afterSec = null,
+  originLow = null,
+  preferredBZone = null,
+} = {}) {
+  const origin = toNum(originLow);
+  const preferredLo = toNum(preferredBZone?.lo);
+
+  const swingLows = findSwingLowsAfterTime({
+    bars,
+    afterSec,
+  });
+
+  const undercutOriginLows =
+    origin !== null
+      ? swingLows.filter((item) => toNum(item?.price) !== null && toNum(item.price) < origin)
+      : [];
+
+  const selectedUndercut = pickLowestCandidate(
+    undercutOriginLows,
+    "AUTO_STRUCTURAL_B_UNDERCUT_ORIGIN"
+  );
+
+  if (selectedUndercut) return selectedUndercut;
+
+  const belowPreferredLows =
+    preferredLo !== null
+      ? swingLows.filter(
+          (item) => toNum(item?.price) !== null && toNum(item.price) < preferredLo
+        )
+      : [];
+
+  const selectedBelowPreferred = pickLowestCandidate(
+    belowPreferredLows,
+    "AUTO_STRUCTURAL_B_BELOW_PREFERRED_B_ZONE"
+  );
+
+  if (selectedBelowPreferred) return selectedBelowPreferred;
+
+  if (swingLows.length) {
+    return {
+      ...swingLows[swingLows.length - 1],
+      source: "AUTO_CANDLE_SWING_LOW",
+    };
+  }
+
+  return findLowestLowAfterTime({
+    bars,
+    afterSec,
+  });
+}
+
 function findLatestSwingHighAfterTime({ bars = [], afterSec = null } = {}) {
   if (!Array.isArray(bars) || bars.length < 3) return null;
 
@@ -662,15 +791,17 @@ function buildPostAbcBounceMap({
   // IMPORTANT:
   // For ABC_UP, manual A_HIGH is the structural A anchor.
   // Do not keep moving scan start to the latest A-high retouch,
-  // or Engine 22 will forget the already-detected B pullback.
-  const effectiveASec = manualASec ?? aTouch?.timeSec ?? originSec ?? null;
-  const effectiveATime = aTime ?? aTouch?.time ?? null;
+  // or Engine 22 will forget the already-detected structural B pullback.
+  const effectiveASec = manualASec ?? originSec ?? null;
+  const effectiveATime = aTime || originTime || null;
 
   const autoB =
     manualBLow === null && effectiveASec !== null
-      ? findLatestSwingLowAfterTime({
+      ? findStructuralBLowAfterA({
           bars,
           afterSec: effectiveASec,
+          originLow,
+          preferredBZone,
         })
       : null;
 
@@ -753,7 +884,14 @@ function buildPostAbcBounceMap({
     aTime,
     effectiveATime,
     effectiveASec,
-    aSource: aTouch ? "AUTO_A_HIGH_TOUCH" : "MANUAL_ORIGIN_TIME_FALLBACK",
+    aSource:
+      manualASec !== null
+        ? "MANUAL_ABC_UP_A_HIGH"
+        : originSec !== null
+        ? "MANUAL_ABC_UP_ORIGIN_TIME_FALLBACK"
+        : aTouch
+        ? "AUTO_A_HIGH_TOUCH_DIAGNOSTIC_ONLY"
+        : "A_HIGH_TIME_UNAVAILABLE",
 
     waveBLow: manualBMarked ? roundToTick(manualBLow, tickSize) : null,
     bTime: manualBMarked ? bTime : null,
