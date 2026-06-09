@@ -1059,11 +1059,44 @@ function buildPostAbcBounceMap({
   const effectiveBSec =
     manualBLow !== null ? parseManualTimeSec(bTime) : autoB?.timeSec ?? null;
 
+  const bCompletion =
+    manualBLow !== null
+      ? {
+          completed: true,
+          status: "B_COMPLETE_MANUAL",
+          completedLevel: originLow,
+          completedTimeSec: parseManualTimeSec(bTime),
+          completedTime: bTime || null,
+          completedClose: manualBLow,
+          read: "Wave B is manually marked.",
+          reasonCodes: ["ABC_UP_B_LOW_MANUAL_MARK"],
+        }
+      : autoB?.bCompletion || {
+          completed: false,
+          status:
+            effectiveBLow !== null
+              ? "B_CANDIDATE_MARKED_WAITING_FOR_ORIGIN_RECLAIM"
+              : "B_PENDING",
+          completedLevel: originLow,
+          completedTimeSec: null,
+          completedTime: null,
+          completedClose: null,
+          read:
+            effectiveBLow !== null
+              ? "Wave B candidate is marked, but origin reclaim has not confirmed B completion yet."
+              : "Waiting for Wave B candidate.",
+          reasonCodes: [
+            effectiveBLow !== null
+              ? "ABC_UP_B_CANDIDATE_WAITING_FOR_ORIGIN_RECLAIM"
+              : "ABC_UP_B_PENDING",
+          ],
+        };
+
   const bSource =
     manualBLow !== null
       ? "MANUAL_ABC_UP_B_LOW"
       : effectiveBLow !== null
-      ? "AUTO_CANDLE_SWING_LOW"
+      ? autoB?.source || "AUTO_CANDLE_SWING_LOW"
       : "PENDING";
 
   const manualBMarked = manualBLow !== null && manualBLow > 0;
@@ -1085,16 +1118,23 @@ function buildPostAbcBounceMap({
       ? bars.filter((bar) => Number(bar.timeSec) >= Number(effectiveASec))
       : bars.slice(-80);
 
-  const cUpTargets =
+  const cUpProgress =
     effectiveBLow !== null
-      ? {
-          c100: roundToTick(effectiveBLow + range * 1, tickSize),
-          c1272: roundToTick(effectiveBLow + range * 1.272, tickSize),
-          c1618: roundToTick(effectiveBLow + range * 1.618, tickSize),
-          c200: roundToTick(effectiveBLow + range * 2, tickSize),
-          c2618: roundToTick(effectiveBLow + range * 2.618, tickSize),
-        }
-      : null;
+      ? buildCUpProgress({
+          bars,
+          afterSec: effectiveBSec,
+          bLow: effectiveBLow,
+          originLow,
+          range,
+          cUpTargets,
+          currentPrice,
+          tickSize,
+        })
+      : {
+          active: false,
+          state: "C_UP_PROGRESS_PENDING_B",
+          reasonCodes: ["ABC_UP_B_REQUIRED_FOR_C_UP_PROGRESS"],
+        };
 
   const priceAction = buildAbcUpPriceAction({
     originLow,
@@ -1154,6 +1194,7 @@ function buildPostAbcBounceMap({
     effectiveBTime,
     effectiveBSec,
     bSource,
+    bCompletion,
 
     waveCHigh: cMarked ? roundToTick(manualCHigh, tickSize) : null,
     cTime: cMarked ? cTime : null,
@@ -1169,6 +1210,7 @@ function buildPostAbcBounceMap({
     },
 
     cUpTargets,
+    cUpProgress,
 
     preferredBZone,
     deepBSupport: r786,
@@ -1188,7 +1230,13 @@ function buildPostAbcBounceMap({
       "ABC_UP_A_HIGH_MARKED",
       manualBMarked ? "ABC_UP_B_LOW_MARKED" : "ABC_UP_B_LOW_AUTO_OR_PENDING",
       cMarked ? "ABC_UP_C_HIGH_MARKED" : "ABC_UP_C_HIGH_PENDING",
-      bSource,
+      bSource,           
+      ...(Array.isArray(bCompletion?.reasonCodes)
+        ? bCompletion.reasonCodes
+        : []),
+      ...(Array.isArray(cUpProgress?.reasonCodes)
+        ? cUpProgress.reasonCodes
+        : []),
       ...(Array.isArray(priceAction?.reasonCodes)
         ? priceAction.reasonCodes
         : []),
