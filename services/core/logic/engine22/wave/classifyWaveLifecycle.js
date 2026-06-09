@@ -1032,8 +1032,7 @@ function buildPostAbcBounceMap({
   // or Engine 22 will forget the already-detected structural B pullback.
   const effectiveASec = manualASec ?? originSec ?? null;
   const effectiveATime = aTime || originTime || null;
-
-  const autoB =
+  
   const completedStructuralB =
     manualBLow === null && effectiveASec !== null
       ? findFirstCompletedStructuralBLowAfterA({
