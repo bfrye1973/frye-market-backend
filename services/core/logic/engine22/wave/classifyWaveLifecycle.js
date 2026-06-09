@@ -475,6 +475,53 @@ function buildAbcUpPriceAction({
     read = reclaimedPreferredBZone
       ? "Price pulled into the preferred B zone and is reclaiming."
       : "Price pulled into the preferred B zone. Waiting for hold/reclaim confirmation.";
+  } else if (
+    correctionType === "SHALLOW_B_PULLBACK" ||
+    correctionType === "NORMAL_B_PULLBACK" ||
+    correctionType === "DEEP_B_PULLBACK" ||
+    correctionType === "VERY_DEEP_B_PULLBACK"
+  ) {
+    if (reclaimedPreferredBZone) {
+      status = `${correctionType}_C_UP_ATTEMPT_ACTIVE`;
+      read =
+        "Wave B candidate is marked and price is above the preferred B zone. C-up attempt is active, but confirmation is still required.";
+    } else if (reclaimedDeepBSupport) {
+      status = `${correctionType}_DEEP_SUPPORT_RECLAIMING`;
+      read =
+        "Wave B candidate is marked and price reclaimed deep B support. Preferred B zone reclaim is still needed.";
+    } else if (reclaimedOrigin) {
+      status = `${correctionType}_ORIGIN_RECLAIMING`;
+      read =
+        "Wave B candidate is marked and price reclaimed the origin area. Deep support and preferred B zone reclaim are still needed.";
+    } else {
+      status = `${correctionType}_WAIT_FOR_RECLAIM`;
+      read =
+        "Wave B candidate is marked. Wait for reclaim confirmation before trusting C-up.";
+    }
+  }
+  else if (
+    correctionType === "SHALLOW_B_PULLBACK" ||
+    correctionType === "NORMAL_B_PULLBACK" ||
+    correctionType === "DEEP_B_PULLBACK" ||
+    correctionType === "VERY_DEEP_B_PULLBACK"
+  ) {
+    if (reclaimedPreferredBZone) {
+      status = `${correctionType}_C_UP_ATTEMPT_ACTIVE`;
+      read =
+        "Wave B candidate is marked and price is above the preferred B zone. C-up attempt is active, but confirmation is still required.";
+    } else if (reclaimedDeepBSupport) {
+      status = `${correctionType}_DEEP_SUPPORT_RECLAIMING`;
+      read =
+        "Wave B candidate is marked and price reclaimed deep B support. Preferred B zone reclaim is still needed.";
+    } else if (reclaimedOrigin) {
+      status = `${correctionType}_ORIGIN_RECLAIMING`;
+      read =
+        "Wave B candidate is marked and price reclaimed the origin area. Deep support and preferred B zone reclaim are still needed.";
+    } else {
+      status = `${correctionType}_WAIT_FOR_RECLAIM`;
+      read =
+        "Wave B candidate is marked. Wait for reclaim confirmation before trusting C-up.";
+    }
   }
 
   return {
