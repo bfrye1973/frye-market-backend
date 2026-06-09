@@ -485,7 +485,13 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
     const waveAHigh = abcUp?.waveAHigh ?? null;
     const preferredBZone = abcUp?.preferredBZone || null;
     const deepBSupport = abcUp?.deepBSupport ?? null;
-if (w3DownRiskActive) {
+    const effectiveWaveBLow =
+      abcUp?.effectiveWaveBLow ??
+      abcUp?.autoWaveBLow ??
+      abcUp?.waveBLow ??
+      null;
+
+   if (w3DownRiskActive) {
   return {
     headline: "W2 BOUNCE FAILED — POSSIBLE W3 DOWN STARTED",
     subheadline:
