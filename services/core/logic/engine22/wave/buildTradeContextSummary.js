@@ -467,6 +467,17 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
     const abcUp = postAbcReset?.abcUp || null;
     const abcUpState = String(abcUp?.state || "").toUpperCase();
 
+    const cUpProgress = abcUp?.cUpProgress || null;
+    const marketContextRisk = abcUp?.marketContextRisk || null;
+
+    const cUpProgressState = String(cUpProgress?.state || "").toUpperCase();
+    const marketRiskState = String(marketContextRisk?.state || "").toUpperCase();
+
+    const w3DownRiskActive =
+      cUpProgressState === "W2_BOUNCE_FAILED_POSSIBLE_W3_DOWN_STARTED" ||
+      marketRiskState.includes("POSSIBLE_W3_DOWN") ||
+      marketRiskState.includes("W2_FAILED");
+
     const hasAUpMarked =
       abcUpState === "A_UP_MARKED_WAITING_FOR_B_PULLBACK";
 
@@ -474,11 +485,105 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
     const waveAHigh = abcUp?.waveAHigh ?? null;
     const preferredBZone = abcUp?.preferredBZone || null;
     const deepBSupport = abcUp?.deepBSupport ?? null;
-    const effectiveWaveBLow =
-      abcUp?.effectiveWaveBLow ??
-      abcUp?.autoWaveBLow ??
-      abcUp?.waveBLow ??
-      null; 
+if (w3DownRiskActive) {
+  return {
+    headline: "W2 BOUNCE FAILED — POSSIBLE W3 DOWN STARTED",
+    subheadline:
+      "Weak dashboard plus fast C-up spike into extension targets failed below origin / structural B. Read-only W3 down risk warning.",
+    bias: "RESET_FAILED",
+    action: "WAIT_FOR_W3_DOWN_CONFIRMATION_OR_RECLAIM",
+    direction: "NONE",
+    chaseAllowed: false,
+    severity: "danger",
+
+    topCandidate: round2(cUpProgress?.highestHighAfterB),
+    hardInvalidation: round2(effectiveWaveBLow),
+    reclaimLadder: null,
+
+    firstCluster: clusters.firstCluster,
+    nextCluster: clusters.nextCluster,
+
+    lifecycleState: lifecycle?.lifecycleState || null,
+    postAbcReset,
+    parentContextOnly: lifecycle?.parentContextOnly === true,
+    tradeableOpportunityBlocked:
+      lifecycle?.tradeableOpportunityBlocked === true,
+    nextAllowedSetup: lifecycle?.nextAllowedSetup || null,
+
+    abcCorrection: abc,
+    abc: abc
+      ? {
+          degree: abc?.degree || null,
+          state: abc?.state || null,
+          a: abc?.a || null,
+          b: abc?.b || null,
+          c: abc?.c || null,
+          range: abc?.range ?? null,
+          reclaimLevels: abc?.reclaimLevels || null,
+          downsideTargets: abc?.downsideTargets || null,
+        }
+      : null,
+
+    abcUp: {
+      state: abcUp?.state || null,
+      originLow: round2(abcUp?.originLow),
+      originTime: abcUp?.originTime || null,
+      waveAHigh: round2(abcUp?.waveAHigh),
+      aTime: abcUp?.aTime || null,
+      waveBLow: round2(abcUp?.waveBLow),
+      bTime: abcUp?.bTime || null,
+      effectiveWaveBLow: round2(effectiveWaveBLow),
+      effectiveBTime: abcUp?.effectiveBTime || null,
+      effectiveBSec: abcUp?.effectiveBSec ?? null,
+      bSource: abcUp?.bSource || null,
+      bCompletion: abcUp?.bCompletion || null,
+      cUpTargets: abcUp?.cUpTargets || null,
+      cUpProgress,
+      marketContextRisk,
+      bPullbackStatus: abcUp?.bPullbackStatus || null,
+      priceAction: abcUp?.priceAction || null,
+      read: abcUp?.read || null,
+    },
+
+    reads: {
+      structureRead: waveStack.message,
+      lifecycleRead:
+        "Post-ABC Wave 2 bounce matured into C-up extension, then failed below origin / structural B.",
+      cUpProgressRead:
+        cUpProgress?.read ||
+        "C-up progressed after B and then failed below structural support.",
+      marketContextRiskRead:
+        marketContextRisk?.read ||
+        "Weak dashboard context increased W2 completion / W3 down risk.",
+      actionRead:
+        "No automatic short. No execution. Treat as possible W3 down risk; wait for confirmed structure or reclaim.",
+    },
+
+    summary:
+      `${waveStack.message}\n\n` +
+      `W5 and ABC correction are complete.\n\n` +
+      `Structural B low: ${fmt(effectiveWaveBLow)}.\n\n` +
+      `C-up high after B: ${fmt(cUpProgress?.highestHighAfterB)}.\n\n` +
+      `Highest C target hit: ${text(cUpProgress?.highestTargetHit)}.\n\n` +
+      `${cUpProgress?.read || ""}\n\n` +
+      `${marketContextRisk?.read || ""}\n\n` +
+      `No chase. No execution.`,
+
+    needs: [
+      "WAIT_FOR_W3_DOWN_CONFIRMATION_OR_RECLAIM",
+      "NO_AUTOMATIC_SHORT",
+      "NO_EXECUTION",
+    ],
+
+    reasonCodes: [
+      "TRADE_CONTEXT_SUMMARY_BUILT",
+      "POST_ABC_W2_BOUNCE_FAILED_POSSIBLE_W3_DOWN_STARTED",
+      ...(lifecycle?.reasonCodes || []),
+      ...(postAbcReset?.reasonCodes || []),
+      ...(abcUp?.reasonCodes || []),
+    ],
+  };
+}
 
     if (hasAUpMarked) {
       const bZoneDisplay =
