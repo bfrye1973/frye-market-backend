@@ -659,8 +659,12 @@ function buildPostAbcBounceMap({
     tolerance: tickSize * 2,
   });
 
-  const effectiveASec = aTouch?.timeSec ?? manualASec ?? originSec ?? null;
-  const effectiveATime = aTouch?.time ?? aTime ?? null;
+  // IMPORTANT:
+  // For ABC_UP, manual A_HIGH is the structural A anchor.
+  // Do not keep moving scan start to the latest A-high retouch,
+  // or Engine 22 will forget the already-detected B pullback.
+  const effectiveASec = manualASec ?? aTouch?.timeSec ?? originSec ?? null;
+  const effectiveATime = aTime ?? aTouch?.time ?? null;
 
   const autoB =
     manualBLow === null && effectiveASec !== null
