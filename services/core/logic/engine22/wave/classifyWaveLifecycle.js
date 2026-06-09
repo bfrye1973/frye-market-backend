@@ -447,6 +447,97 @@ function findFirstCompletedStructuralBLowAfterA({
   return null;
 }
 
+function buildFastUpsideMove({
+  bars = [],
+  maxBars = 6,
+  minPts = 35,
+  tickSize = 0.25,
+} = {}) {
+  if (!Array.isArray(bars) || bars.length < 2) {
+    return {
+      active: false,
+      state: "FAST_UPSIDE_MOVE_UNAVAILABLE",
+      movePts: null,
+      bars: null,
+      read: "Not enough bars to measure fast C-up movement.",
+    };
+  }
+
+  let best = null;
+
+  for (let i = 0; i < bars.length - 1; i++) {
+    const startBar = bars[i];
+    const startLow =
+      toNum(startBar?.low) ??
+      toNum(startBar?.close);
+
+    if (startLow === null) continue;
+
+    const endIdx = Math.min(bars.length - 1, i + maxBars);
+    const window = bars.slice(i, endIdx + 1);
+
+    let high = null;
+    let highBar = null;
+
+    for (const bar of window) {
+      const h = toNum(bar?.high);
+      if (h === null) continue;
+
+      if (high === null || h > high) {
+        high = h;
+        highBar = bar;
+      }
+    }
+
+    if (high === null) continue;
+
+    const movePts = high - startLow;
+
+    if (!best || movePts > best.movePts) {
+      best = {
+        movePts,
+        bars: window.length,
+        startPrice: startLow,
+        startTimeSec: startBar.timeSec,
+        startTime: formatTimeSec(startBar.timeSec),
+        highPrice: high,
+        highTimeSec: highBar?.timeSec ?? null,
+        highTime: formatTimeSec(highBar?.timeSec),
+      };
+    }
+  }
+
+  if (!best) {
+    return {
+      active: false,
+      state: "FAST_UPSIDE_MOVE_UNAVAILABLE",
+      movePts: null,
+      bars: null,
+      read: "Fast upside move could not be measured.",
+    };
+  }
+
+  const active = best.movePts >= minPts;
+
+  return {
+    active,
+    state: active
+      ? "FAST_C_UP_SPIKE_DETECTED"
+      : "NO_FAST_C_UP_SPIKE",
+    movePts: roundToTick(best.movePts, tickSize),
+    bars: best.bars,
+    startPrice: roundToTick(best.startPrice, tickSize),
+    startTimeSec: best.startTimeSec,
+    startTime: best.startTime,
+    highPrice: roundToTick(best.highPrice, tickSize),
+    highTimeSec: best.highTimeSec,
+    highTime: best.highTime,
+    read: active
+      ? `Fast C-up spike detected: ${roundToTick(best.movePts, tickSize)} points in ${best.bars} bars.`
+      : `No fast C-up spike detected. Best move was ${roundToTick(best.movePts, tickSize)} points in ${best.bars} bars.`,
+  };
+}
+
 function buildCUpProgress({
   bars = [],
   afterSec = null,
@@ -530,6 +621,13 @@ function buildCUpProgress({
     toNum(cUpTargets?.c100) !== null &&
     highestHigh >= toNum(cUpTargets.c100);
 
+  const fastUpsideMove = buildFastUpsideMove({
+    bars: scopedBars,
+    maxBars: 6,
+    minPts: 35,
+    tickSize,
+  });
+
   const belowOrigin = price !== null && origin !== null && price < origin;
   const belowStructuralB = price !== null && base !== null && price < base;
 
@@ -581,6 +679,8 @@ function buildCUpProgress({
     reached50,
     reached618,
     reached100,
+    fastUpsideMove,
+    
 
     currentPrice: price !== null ? roundToTick(price, tickSize) : null,
     belowOrigin,
@@ -594,10 +694,132 @@ function buildCUpProgress({
       reached618 ? "ABC_UP_C_REACHED_0618" : null,
       reached100 ? "ABC_UP_C_REACHED_1000" : null,
       highestTargetHit
+      fastUpsideMove?.active ? "ABC_UP_FAST_C_UP_SPIKE_DETECTED" : null,
         ? `ABC_UP_HIGHEST_TARGET_${String(highestTargetHit).toUpperCase()}`
         : null,
       belowOrigin ? "ABC_UP_CURRENT_PRICE_BELOW_ORIGIN" : null,
       belowStructuralB ? "ABC_UP_CURRENT_PRICE_BELOW_STRUCTURAL_B" : null,
+      state,
+    ].filter(Boolean),
+  };
+}
+
+function buildAbcUpMarketContextRisk({
+  marketMeterContext = null,
+  cUpProgress = null,
+  currentPrice = null,
+  originLow = null,
+  bLow = null,
+} = {}) {
+  const masterScore =
+    toNum(marketMeterContext?.masterScore) ??
+    toNum(marketMeterContext?.scoreMaster) ??
+    toNum(marketMeterContext?.master);
+
+  const score30m = toNum(marketMeterContext?.score30m);
+  const score4h = toNum(marketMeterContext?.score4h);
+  const scoreEOD = toNum(marketMeterContext?.scoreEOD);
+
+  const masterProxyValues = [score30m, score4h, scoreEOD].filter(
+    (x) => x !== null
+  );
+
+  const masterProxyScore =
+    masterScore !== null
+      ? masterScore
+      : masterProxyValues.length
+      ? Number(
+          (
+            masterProxyValues.reduce((sum, x) => sum + x, 0) /
+            masterProxyValues.length
+          ).toFixed(2)
+        )
+      : null;
+
+  const eodWeak = scoreEOD !== null && scoreEOD < 48;
+  const masterWeak = masterProxyScore !== null && masterProxyScore < 48;
+
+  const dashboardWeak = eodWeak && masterWeak;
+
+  const extensionHit =
+    cUpProgress?.reached618 === true ||
+    cUpProgress?.reached100 === true ||
+    ["c100", "c1272", "c1618", "c200", "c2618"].includes(
+      String(cUpProgress?.highestTargetHit || "")
+    );
+
+  const fastSpike = cUpProgress?.fastUpsideMove?.active === true;
+  const belowOrigin = cUpProgress?.belowOrigin === true;
+  const belowStructuralB = cUpProgress?.belowStructuralB === true;
+
+  let state = "NO_MARKET_CONTEXT_C_UP_RISK";
+  let risk = "NONE";
+  let read = "No weak-dashboard C-up risk is active.";
+
+  if (dashboardWeak && fastSpike && extensionHit && belowStructuralB) {
+    state = "WEAK_MARKET_FAST_C_UP_EXTENSION_W2_FAILED_POSSIBLE_W3_DOWN";
+    risk = "HIGH";
+    read =
+      "Dashboard was weak while price spiked fast into C-up extension targets, then price failed below the structural B low. Treat this as possible Wave 2 completion into Wave 3 down risk.";
+  } else if (dashboardWeak && extensionHit && belowStructuralB) {
+    state = "WEAK_MARKET_C_UP_EXTENSION_W2_FAILED_POSSIBLE_W3_DOWN";
+    risk = "HIGH";
+    read =
+      "Dashboard was weak while C-up reached extension targets, then price failed below structural B. Possible Wave 3 down risk is active.";
+  } else if (dashboardWeak && fastSpike && extensionHit) {
+    state = "WEAK_MARKET_FAST_C_UP_EXTENSION_MATURITY_RISK";
+    risk = "ELEVATED";
+    read =
+      "Dashboard is weak while price is spiking fast into C-up extension targets. Treat the rally as countertrend Wave 2 / C-up maturity risk.";
+  } else if (dashboardWeak && extensionHit) {
+    state = "WEAK_MARKET_C_UP_EXTENSION_MATURITY_RISK";
+    risk = "ELEVATED";
+    read =
+      "Dashboard is weak while C-up is reaching extension targets. Watch for Wave 2 completion / Wave 3 down risk.";
+  } else if (dashboardWeak && belowOrigin) {
+    state = "WEAK_MARKET_ORIGIN_LOST_AFTER_C_UP";
+    risk = "ELEVATED";
+    read =
+      "Dashboard is weak and price is below origin after C-up progress. Watch for Wave 2 failure / Wave 3 down risk.";
+  }
+
+  return {
+    active: state !== "NO_MARKET_CONTEXT_C_UP_RISK",
+    state,
+    risk,
+
+    masterScore,
+    masterProxyScore,
+    score30m,
+    score4h,
+    scoreEOD,
+    state30m: marketMeterContext?.state30m || null,
+    state4h: marketMeterContext?.state4h || null,
+    stateEOD: marketMeterContext?.stateEOD || null,
+
+    dashboardWeak,
+    eodWeak,
+    masterWeak,
+    extensionHit,
+    fastSpike,
+    belowOrigin,
+    belowStructuralB,
+
+    currentPrice: toNum(currentPrice),
+    originLow: toNum(originLow),
+    bLow: toNum(bLow),
+
+    read,
+
+    reasonCodes: [
+      "ABC_UP_MARKET_CONTEXT_RISK_BUILT",
+      dashboardWeak ? "DASHBOARD_WEAK_UNDER_48" : null,
+      eodWeak ? "EOD_WEAK_UNDER_48" : null,
+      masterWeak ? "MASTER_OR_PROXY_WEAK_UNDER_48" : null,
+      fastSpike ? "FAST_C_UP_SPIKE_IN_WEAK_DASHBOARD" : null,
+      extensionHit ? "C_UP_EXTENSION_HIT_IN_WEAK_DASHBOARD" : null,
+      belowOrigin ? "PRICE_BELOW_ORIGIN_AFTER_C_UP" : null,
+      belowStructuralB ? "PRICE_BELOW_STRUCTURAL_B_AFTER_C_UP" : null,
       state,
     ].filter(Boolean),
   };
@@ -945,6 +1167,7 @@ function buildPostAbcBounceMap({
   currentPrice = null,
   abcUpMarks = null,
   barsByTf = {},
+  marketMeterContext = null,
 } = {}) {
   const tickSize = tickSizeForSymbol(symbol);
 
@@ -1147,6 +1370,14 @@ function buildPostAbcBounceMap({
           reasonCodes: ["ABC_UP_B_REQUIRED_FOR_C_UP_PROGRESS"],
         };
 
+  const marketContextRisk = buildAbcUpMarketContextRisk({
+    marketMeterContext,
+    cUpProgress,
+    currentPrice,
+    originLow,
+    bLow: effectiveBLow,
+  });  
+
   const priceAction = buildAbcUpPriceAction({
     originLow,
     waveAHigh: aHigh,
@@ -1222,6 +1453,7 @@ function buildPostAbcBounceMap({
 
     cUpTargets,
     cUpProgress,
+    marketContextRisk,
 
     preferredBZone,
     deepBSupport: r786,
@@ -1248,6 +1480,9 @@ function buildPostAbcBounceMap({
       ...(Array.isArray(cUpProgress?.reasonCodes)
         ? cUpProgress.reasonCodes
         : []),
+      ...(Array.isArray(marketContextRisk?.reasonCodes)
+        ? marketContextRisk.reasonCodes
+        : []),
       ...(Array.isArray(priceAction?.reasonCodes)
         ? priceAction.reasonCodes
         : []),
@@ -1266,6 +1501,7 @@ function classifyPostAbcReset({
   abcUpMarks = null,
   activeCorrectionDegree = null,
   barsByTf = {},
+  marketMeterContext = null,
 } = {}) {
   const tickSize = tickSizeForSymbol(symbol);
   const abcUp = buildPostAbcBounceMap({
@@ -1274,6 +1510,7 @@ function classifyPostAbcReset({
     currentPrice,
     abcUpMarks,
     barsByTf,
+    marketMeterContext,
   });
 
   const price = toNum(currentPrice);
@@ -2002,6 +2239,7 @@ export function classifyWaveLifecycle({
             : null,
           activeCorrectionDegree,
           barsByTf,
+          marketMeterContext,
         })
       : {
           active: false,
