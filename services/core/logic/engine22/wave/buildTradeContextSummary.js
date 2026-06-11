@@ -469,11 +469,18 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
 
     const cUpProgress = abcUp?.cUpProgress || null;
     const marketContextRisk = abcUp?.marketContextRisk || null;
+    const wave3Down = postAbcReset?.wave3Down || null;
+    const wave3DownState = String(wave3Down?.state || "").toUpperCase();
+
+    const wave3DownLifecycleActive =
+      wave3DownState === "W3_DOWN_CONFIRMATION_WATCH" ||
+      wave3DownState === "POSSIBLE_W3_DOWN_STARTED";
 
     const cUpProgressState = String(cUpProgress?.state || "").toUpperCase();
     const marketRiskState = String(marketContextRisk?.state || "").toUpperCase();
 
     const w3DownRiskActive =
+      wave3DownLifecycleActive ||
       cUpProgressState === "W2_BOUNCE_FAILED_POSSIBLE_W3_DOWN_STARTED" ||
       marketRiskState.includes("POSSIBLE_W3_DOWN") ||
       marketRiskState.includes("W2_FAILED");
@@ -491,12 +498,12 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
       abcUp?.waveBLow ??
       null;
 
-   if (w3DownRiskActive) {
+if (w3DownRiskActive) {
   return {
-    headline: "W2 BOUNCE FAILED — POSSIBLE W3 DOWN STARTED",
+    headline: "W2/C BOUNCE FAILED — W3 DOWN WATCH",
     subheadline:
-      "Weak dashboard plus fast C-up spike into extension targets failed below origin / structural B. Read-only W3 down risk warning.",
-    bias: "RESET_FAILED",
+      "ABC_UP completed at the marked C high, then price failed below origin and structural B. Read-only Wave 3 down watch.",
+    bias: "RESET_FAILED_W3_DOWN_WATCH",
     action: "WAIT_FOR_W3_DOWN_CONFIRMATION_OR_RECLAIM",
     direction: "NONE",
     chaseAllowed: false,
@@ -529,6 +536,7 @@ function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
           downsideTargets: abc?.downsideTargets || null,
         }
       : null,
+    wave3Down,
 
     abcUp: {
       state: abcUp?.state || null,
