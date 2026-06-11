@@ -978,6 +978,126 @@ const summary =
 
   if (postAbcState === "POST_ABC_LOW_FAILED") {
     const cLow = postAbcReset?.cLow ?? abc?.c?.price ?? null;
+    const abcUp = postAbcReset?.abcUp || null;
+    const wave3Down = postAbcReset?.wave3Down || null;
+    const wave3DownState = String(wave3Down?.state || "").toUpperCase();
+
+    if (
+      wave3DownState === "W3_DOWN_CONFIRMATION_WATCH" ||
+      wave3DownState === "POSSIBLE_W3_DOWN_STARTED"
+    ) {
+      return {
+        headline: "W2/C BOUNCE FAILED — W3 DOWN WATCH",
+        subheadline:
+          "ABC_UP completed at the marked C high, then price failed below origin and structural B. Read-only Wave 3 down watch.",
+        bias: "RESET_FAILED_W3_DOWN_WATCH",
+        action: "WAIT_FOR_W3_DOWN_CONFIRMATION_OR_RECLAIM",
+        direction: "NONE",
+        chaseAllowed: false,
+        severity: "danger",
+
+        topCandidate: round2(wave3Down?.waveCHigh ?? abcUp?.waveCHigh),
+        hardInvalidation: round2(
+          wave3Down?.structuralBLow ?? abcUp?.effectiveWaveBLow ?? cLow
+        ),
+        reclaimLadder: null,
+
+        firstCluster: clusters.firstCluster,
+        nextCluster: clusters.nextCluster,
+
+        lifecycleState: lifecycle?.lifecycleState || null,
+        postAbcReset,
+        parentContextOnly: lifecycle?.parentContextOnly === true,
+        tradeableOpportunityBlocked:
+          lifecycle?.tradeableOpportunityBlocked === true,
+        nextAllowedSetup: lifecycle?.nextAllowedSetup || null,
+
+        abcCorrection: abc,
+        abc: abc
+          ? {
+              degree: abc?.degree || null,
+              state: abc?.state || null,
+              a: abc?.a || null,
+              b: abc?.b || null,
+              c: abc?.c || null,
+              range: abc?.range ?? null,
+              reclaimLevels: abc?.reclaimLevels || null,
+              downsideTargets: abc?.downsideTargets || null,
+            }
+          : null,
+
+        abcUp: abcUp
+          ? {
+              state: abcUp?.state || null,
+              originLow: round2(abcUp?.originLow),
+              originTime: abcUp?.originTime || null,
+              waveAHigh: round2(abcUp?.waveAHigh),
+              aTime: abcUp?.aTime || null,
+              waveBLow: round2(abcUp?.waveBLow),
+              bTime: abcUp?.bTime || null,
+              effectiveWaveBLow: round2(abcUp?.effectiveWaveBLow),
+              effectiveBTime: abcUp?.effectiveBTime || null,
+              effectiveBSec: abcUp?.effectiveBSec ?? null,
+              bSource: abcUp?.bSource || null,
+              bCompletion: abcUp?.bCompletion || null,
+              waveCHigh: round2(abcUp?.waveCHigh),
+              cTime: abcUp?.cTime || null,
+              cUpTargets: abcUp?.cUpTargets || null,
+              cUpProgress: abcUp?.cUpProgress || null,
+              marketContextRisk: abcUp?.marketContextRisk || null,
+              bPullbackStatus: abcUp?.bPullbackStatus || null,
+              priceAction: abcUp?.priceAction || null,
+              read: abcUp?.read || null,
+            }
+          : null,
+
+        wave3Down,
+
+        reads: {
+          structureRead: waveStack.message,
+          lifecycleRead:
+            "ABC_UP completed at the marked C high, then price failed below origin and structural B.",
+          wave3DownRead:
+            wave3Down?.read ||
+            "Treat this as Wave 3 down watch. Read-only only.",
+          actionRead:
+            "No automatic short. No execution. Wait for W3 down confirmation structure or reclaim.",
+        },
+
+        summary:
+          `${waveStack.message}\n\n` +
+          `ABC_UP / W2 bounce completed at the marked C high near ${fmt(
+            wave3Down?.waveCHigh ?? abcUp?.waveCHigh
+          )}.\n\n` +
+          `Price later failed below origin ${fmt(
+            wave3Down?.originLow ?? abcUp?.originLow
+          )} and structural B ${fmt(
+            wave3Down?.structuralBLow ?? abcUp?.effectiveWaveBLow
+          )}.\n\n` +
+          `${wave3Down?.read || ""}\n\n` +
+          `No automatic short. No execution.`,
+
+        needs: [
+          "WAIT_FOR_W3_DOWN_CONFIRMATION_OR_RECLAIM",
+          "NO_AUTOMATIC_SHORT",
+          "NO_EXECUTION",
+        ],
+
+        reasonCodes: [
+          "TRADE_CONTEXT_SUMMARY_BUILT",
+          "POST_ABC_LOW_FAILED",
+          "W3_DOWN_CONFIRMATION_WATCH",
+          "READ_ONLY",
+          "NO_AUTOMATIC_SHORT",
+          "NO_EXECUTION",
+          ...(lifecycle?.reasonCodes || []),
+          ...(postAbcReset?.reasonCodes || []),
+          ...(Array.isArray(wave3Down?.reasonCodes)
+            ? wave3Down.reasonCodes
+            : []),
+        ],
+      };
+    }
 
     return {
       headline: "POST ABC LOW FAILED — WAIT FOR LOWER SUPPORT",
@@ -1046,7 +1166,6 @@ const summary =
       ],
     };
   }
-
   const summary =
     `${waveStack.message}\n\n` +
     `${lifecycle.summary || "Lower-degree W5 completion / ABC correction is active."}\n\n` +
