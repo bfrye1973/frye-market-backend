@@ -236,8 +236,6 @@ action: "WAIT_FOR_RECLAIM",
 direction: "NONE",
 chaseAllowed: false,
 severity: "danger",
-
-```
 topCandidate: round2(topCandidate),
 hardInvalidation: round2(hardInvalidation),
 reclaimLadder: reclaimDisplay,
