@@ -57,10 +57,10 @@ function classifyPostAbcReset({
   });
 
   const wave3Down = buildWave3DownLifecycle({
-  symbol,
-  currentPrice,
-  abcUp,
-});
+    symbol,
+    currentPrice,
+    abcUp,
+  });
 
   const price = toNum(currentPrice);
   const cLow = toNum(abcCorrection?.c?.price);
@@ -96,6 +96,7 @@ function classifyPostAbcReset({
     return {
       active: true,
       abcUp,
+      wave3Down,
       state: "POST_ABC_RESET_WAIT",
       supportLevel: null,
       watchZoneLow: null,
@@ -128,6 +129,7 @@ function classifyPostAbcReset({
     return {
       active: true,
       abcUp,
+      wave3Down,
       state: "POST_ABC_RESET_WAIT",
       supportLevel,
       watchZoneLow: roundedCLow,
@@ -158,6 +160,7 @@ function classifyPostAbcReset({
     return {
       active: true,
       abcUp,
+      wave3Down,
       state: "POST_ABC_LOW_FAILED",
       supportLevel,
       watchZoneLow: roundedCLow,
@@ -197,6 +200,7 @@ function classifyPostAbcReset({
   return {
     active: true,
     abcUp,
+    wave3Down,
     state: "POST_ABC_W2_BOUNCE_WATCH",
     supportLevel,
     watchZoneLow: roundedCLow,
