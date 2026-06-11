@@ -30,6 +30,7 @@ import {
 
 import { buildPostAbcBounceMap } from "./lifecycle/abcUpLifecycle.js";
 import { buildWave3DownLifecycle } from "./lifecycle/wave3DownLifecycle.js";
+import { buildDownImpulseLifecycle } from "./lifecycle/downImpulseLifecycle.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -62,6 +63,14 @@ function classifyPostAbcReset({
     abcUp,
   });
 
+ const downImpulse = buildDownImpulseLifecycle({
+  symbol,
+  degree: activeCorrectionDegree || "minor",
+  currentPrice,
+  abcUp,
+  downImpulseMarks: null,
+}); 
+
   const price = toNum(currentPrice);
   const cLow = toNum(abcCorrection?.c?.price);
   const abcState = upper(abcCorrection?.state, "");
@@ -71,6 +80,7 @@ function classifyPostAbcReset({
       active: false,
       abcUp,
       wave3Down,
+      downImpulse,
       state: "POST_ABC_RESET_UNAVAILABLE",
       supportLevel: null,
       watchZoneLow: null,
@@ -97,6 +107,7 @@ function classifyPostAbcReset({
       active: true,
       abcUp,
       wave3Down,
+      downImpulse,
       state: "POST_ABC_RESET_WAIT",
       supportLevel: null,
       watchZoneLow: null,
@@ -130,6 +141,7 @@ function classifyPostAbcReset({
       active: true,
       abcUp,
       wave3Down,
+      downImpulse,
       state: "POST_ABC_RESET_WAIT",
       supportLevel,
       watchZoneLow: roundedCLow,
@@ -161,6 +173,7 @@ function classifyPostAbcReset({
       active: true,
       abcUp,
       wave3Down,
+      downImpulse,
       state: "POST_ABC_LOW_FAILED",
       supportLevel,
       watchZoneLow: roundedCLow,
@@ -201,6 +214,7 @@ function classifyPostAbcReset({
     active: true,
     abcUp,
     wave3Down,
+    downImpulse,
     state: "POST_ABC_W2_BOUNCE_WATCH",
     supportLevel,
     watchZoneLow: roundedCLow,
