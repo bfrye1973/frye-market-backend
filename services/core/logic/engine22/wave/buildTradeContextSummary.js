@@ -237,7 +237,6 @@ direction: "NONE",
 chaseAllowed: false,
 severity: "danger",
 
-```
 topCandidate: round2(topCandidate),
 hardInvalidation: round2(hardInvalidation),
 reclaimLadder: reclaimDisplay,
@@ -338,7 +337,6 @@ direction: "NONE",
 chaseAllowed: false,
 severity: "warning",
 
-```
 topCandidate: round2(priorHigh),
 hardInvalidation: null,
 reclaimLadder: null,
@@ -373,8 +371,6 @@ reasonCodes: [
   "WAIT_FOR_RECLAIM",
   activeSetup,
 ],
-```
-
 };
 }
 
@@ -417,7 +413,6 @@ direction: "LONG",
 chaseAllowed: false,
 severity: "info",
 
-```
 topCandidate: null,
 hardInvalidation: null,
 reclaimLadder: null,
@@ -468,8 +463,6 @@ reasonCodes: [
   "NO_CHASE_LONG",
   activeSetup,
 ],
-```
-
 };
 }
 
@@ -505,7 +498,6 @@ direction: "NONE",
 chaseAllowed: false,
 severity: "danger",
 
-```
 topCandidate: round2(waveCHigh),
 hardInvalidation: round2(structuralBLow ?? cLow),
 reclaimLadder: null,
@@ -647,8 +639,6 @@ reasonCodes: [
     ? wave3Down.reasonCodes
     : []),
 ],
-```
-
 };
 }
 
@@ -680,7 +670,6 @@ const cLow = postAbcReset?.cLow ?? abc?.c?.price ?? null;
 const currentPrice =
 postAbcReset?.currentPrice ?? waveFibState?.currentPrice ?? null;
 
-```
 const abcUpState = String(abcUp?.state || "").toUpperCase();
 
 const cUpProgress = abcUp?.cUpProgress || null;
@@ -1109,14 +1098,12 @@ return {
     ...(postAbcReset?.reasonCodes || []),
   ],
 };
-```
-
 }
 
 if (postAbcState === "POST_ABC_LOW_FAILED") {
 const cLow = postAbcReset?.cLow ?? abc?.c?.price ?? null;
 
-```
+
 return {
   headline: "POST ABC LOW FAILED — WAIT FOR LOWER SUPPORT",
   subheadline:
@@ -1183,8 +1170,6 @@ return {
     ...(postAbcReset?.reasonCodes || []),
   ],
 };
-```
-
 }
 
 const summary =
@@ -1204,7 +1189,6 @@ direction: "NONE",
 chaseAllowed: false,
 severity: "warning",
 
-```
 topCandidate: null,
 hardInvalidation: null,
 reclaimLadder: null,
@@ -1259,8 +1243,6 @@ reasonCodes: [
   ...(lifecycle?.reasonCodes || []),
   ...(postAbcReset?.reasonCodes || []),
 ],
-```
-
 };
 }
 
