@@ -29,6 +29,7 @@ import {
 } from "./lifecycle/lifecycleUtils.js";
 
 import { buildPostAbcBounceMap } from "./lifecycle/abcUpLifecycle.js";
+import { buildWave3DownLifecycle } from "./lifecycle/wave3DownLifecycle.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -55,6 +56,12 @@ function classifyPostAbcReset({
     marketMeterContext,
   });
 
+  const wave3Down = buildWave3DownLifecycle({
+  symbol,
+  currentPrice,
+  abcUp,
+});
+
   const price = toNum(currentPrice);
   const cLow = toNum(abcCorrection?.c?.price);
   const abcState = upper(abcCorrection?.state, "");
@@ -63,6 +70,7 @@ function classifyPostAbcReset({
     return {
       active: false,
       abcUp,
+      wave3Down,
       state: "POST_ABC_RESET_UNAVAILABLE",
       supportLevel: null,
       watchZoneLow: null,
