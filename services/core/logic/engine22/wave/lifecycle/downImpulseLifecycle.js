@@ -47,7 +47,7 @@ return {
 w1Low: toNum(marks.w1Low ?? marks.W1_LOW ?? marks?.w1?.low ?? marks?.w1?.price),
 w1Time: marks.w1Time ?? marks.W1_TIME ?? marks?.w1?.time ?? null,
 
-```
+
 w2High: toNum(marks.w2High ?? marks.W2_HIGH ?? marks?.w2?.high ?? marks?.w2?.price),
 w2Time: marks.w2Time ?? marks.W2_TIME ?? marks?.w2?.time ?? null,
 
@@ -59,8 +59,6 @@ w4Time: marks.w4Time ?? marks.W4_TIME ?? marks?.w4?.time ?? null,
 
 w5Low: toNum(marks.w5Low ?? marks.W5_LOW ?? marks?.w5?.low ?? marks?.w5?.price),
 w5Time: marks.w5Time ?? marks.W5_TIME ?? marks?.w5?.time ?? null,
-```
-
 };
 }
 
@@ -131,7 +129,6 @@ direction: "NONE",
 tradeableOpportunityBlocked: true,
 noExecution: true,
 
-```
   degree,
   abcUpComplete,
   manualCMarked,
@@ -169,8 +166,6 @@ noExecution: true,
     "DIRECTION_NONE",
   ],
 };
-```
-
 }
 
 if (!impulseStarted) {
@@ -182,7 +177,6 @@ direction: "NONE",
 tradeableOpportunityBlocked: true,
 noExecution: true,
 
-```
   degree,
   abcUpComplete,
   manualCMarked,
@@ -220,8 +214,6 @@ noExecution: true,
     "DIRECTION_NONE",
   ],
 };
-```
-
 }
 
 let state = "DOWN_IMPULSE_IN_PROGRESS";
@@ -254,7 +246,6 @@ direction: "NONE",
 tradeableOpportunityBlocked: true,
 noExecution: true,
 
-```
 degree,
 abcUpComplete,
 manualCMarked,
@@ -313,7 +304,5 @@ reasonCodes: [
   "NO_EXECUTION",
   "DIRECTION_NONE",
 ].filter(Boolean),
-```
-
 };
 }
