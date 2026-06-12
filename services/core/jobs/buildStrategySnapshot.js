@@ -3974,11 +3974,27 @@ function getManualLevelRowsFor(args = {}) {
       wave === "ABC_UP" &&
       ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
 
+    const isDownImpulseRow =
+      wave === "W3_DOWN" &&
+      ["W1_LOW", "W2_HIGH", "W3_LOW", "W4_HIGH", "W5_LOW"].includes(kind);
+
+    const symbolMatches =
+      String(row.symbol || "").toUpperCase() ===
+      String(symbol || "").toUpperCase();
+
+    const degreeMatches =
+      String(row.degree || "").toLowerCase() ===
+      String(degree || "").toLowerCase();
+
+    const tfMatches =
+      !tf ||
+      String(row.tf || "").toLowerCase() === String(tf || "").toLowerCase();
+
     return (
-      String(row.symbol || "").toUpperCase() === String(symbol || "").toUpperCase() &&
-      String(row.degree || "").toLowerCase() === String(degree || "").toLowerCase() &&
-      String(row.tf || "").toLowerCase() === String(tf || "").toLowerCase() &&
-      (isLevelRow || isAbcDownRow || isAbcUpRow)
+      symbolMatches &&
+      degreeMatches &&
+      tfMatches &&
+      (isLevelRow || isAbcDownRow || isAbcUpRow || isDownImpulseRow)
     );
   });
 }
@@ -4026,6 +4042,24 @@ function attachManualLevelsToEngine2Block(block, levelRows = []) {
     };
   };
 
+  const findDownImpulseMark = (kindName) => {
+    const wantedKind = String(kindName || "").toUpperCase();
+
+    const row = levelRows.find((r) => {
+      const wave = String(r.wave || "").toUpperCase();
+      const kind = String(r.kind || "").toUpperCase();
+
+      return wave === "W3_DOWN" && kind === wantedKind;
+    });
+
+    const price = Number(row?.price);
+
+    return {
+      price: Number.isFinite(price) && price > 0 ? price : null,
+      time: row?.datetime_az || null,
+    };
+  }; 
+
   const aLow = findLevel("A_LOW", "A");
   const bHigh = findLevel("B_HIGH", "B");
   const cLow = findLevel("C_LOW", "C");
@@ -4034,6 +4068,11 @@ function attachManualLevelsToEngine2Block(block, levelRows = []) {
   const aHigh = findAbcUpMark("A_HIGH");
   const bLow = findAbcUpMark("B_LOW");
   const cHigh = findAbcUpMark("C_HIGH");
+  const downW1Low = findDownImpulseMark("W1_LOW");
+  const downW2High = findDownImpulseMark("W2_HIGH");
+  const downW3Low = findDownImpulseMark("W3_LOW");
+  const downW4High = findDownImpulseMark("W4_HIGH");
+  const downW5Low = findDownImpulseMark("W5_LOW");
 
   const abcUpMarks = {
     originLow: originLow.price,
@@ -4049,6 +4088,23 @@ function attachManualLevelsToEngine2Block(block, levelRows = []) {
     cTime: cHigh.time,
   };
 
+  const downImpulseMarks = {
+    w1Low: downW1Low.price,
+    w1Time: downW1Low.time,
+
+    w2High: downW2High.price,
+    w2Time: downW2High.time,
+
+    w3Low: downW3Low.price,
+    w3Time: downW3Low.time,
+
+    w4High: downW4High.price,
+    w4Time: downW4High.time,
+
+    w5Low: downW5Low.price,
+    w5Time: downW5Low.time,
+  };
+
   return {
     ...block,
     aLow,
@@ -4058,6 +4114,7 @@ function attachManualLevelsToEngine2Block(block, levelRows = []) {
     lowerHighLevel: bHigh,
     continuationLevel: bHigh,
     abcUpMarks,
+    downImpulseMarks,
   };
 }
 
@@ -4093,33 +4150,43 @@ async function buildEngine2State(symbol) {
     buildEngine2Block({ symbol, degree: "micro", tf: "10m", currentPrice }).catch(() => null),
   ]); 
 
+  const minorLevelRows = getManualLevelRowsFor({
+    symbol,
+    degree: "minor",
+  });
+
   const minuteLevelRows = getManualLevelRowsFor({
-  symbol,
-  degree: "minute",
-  tf: "10m",
-});
+    symbol,
+    degree: "minute",
+    tf: "10m",
+  });
 
-const microLevelRows = getManualLevelRowsFor({
-  symbol,
-  degree: "micro",
-  tf: "10m",
-});
+  const microLevelRows = getManualLevelRowsFor({
+    symbol,
+    degree: "micro",
+    tf: "10m",
+  });
 
-const minuteWithLevels = attachManualLevelsToEngine2Block(
-  minuteRaw,
-  minuteLevelRows
-);
+  const minorWithLevels = attachManualLevelsToEngine2Block(
+    minorRaw,
+    minorLevelRows
+  );
 
-const microWithLevels = attachManualLevelsToEngine2Block(
-  microRaw,
-  microLevelRows
-);
+  const minuteWithLevels = attachManualLevelsToEngine2Block(
+    minuteRaw,
+    minuteLevelRows
+  );
 
-const primary = enrichEngine2BlockWithExtensions(primaryRaw);
-const intermediate = enrichEngine2BlockWithExtensions(intermediateRaw);
-const minor = enrichEngine2BlockWithExtensions(minorRaw);
-const minute = enrichEngine2BlockWithExtensions(minuteWithLevels);
-const micro = enrichEngine2BlockWithExtensions(microWithLevels);
+  const microWithLevels = attachManualLevelsToEngine2Block(
+    microRaw,
+    microLevelRows
+  );
+
+  const primary = enrichEngine2BlockWithExtensions(primaryRaw);
+  const intermediate = enrichEngine2BlockWithExtensions(intermediateRaw);
+  const minor = enrichEngine2BlockWithExtensions(minorWithLevels);
+  const minute = enrichEngine2BlockWithExtensions(minuteWithLevels);
+  const micro = enrichEngine2BlockWithExtensions(microWithLevels);
    
   const activeExtensions = {
     scalp: pickActiveExtension(
