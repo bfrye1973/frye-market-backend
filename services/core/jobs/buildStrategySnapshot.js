@@ -3921,8 +3921,6 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
   };
 }
 
-
-f
 async function buildEngine2State(symbol) {
   const contextResp = await fetchJson(
     `${CORE_BASE}/api/v1/engine5-context?symbol=${symbol}&tf=1h`,
