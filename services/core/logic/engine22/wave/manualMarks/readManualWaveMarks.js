@@ -27,7 +27,6 @@ function readFibInputRows(filePath = DEFAULT_FIB_INPUT_FILE) {
 try {
 if (!fs.existsSync(filePath)) return [];
 
-```
 const text = fs.readFileSync(filePath, "utf8");
 
 return text
@@ -49,7 +48,6 @@ return text
       price: Number(price),
     };
   });
-```
 
 } catch (err) {
 console.warn(
@@ -57,10 +55,7 @@ console.warn(
 err?.message
 );
 
-```
 return [];
-```
-
 }
 }
 
@@ -76,7 +71,6 @@ return readFibInputRows(filePath).filter((row) => {
 const wave = String(row.wave || "").toUpperCase();
 const kind = String(row.kind || "").toUpperCase();
 
-```
 const isLevelRow = kind === "LEVEL";
 
 const isAbcDownRow =
@@ -119,8 +113,6 @@ return (
     isPostW5BounceRow
   )
 );
-```
-
 });
 }
 
@@ -130,7 +122,6 @@ if (!block || typeof block !== "object") return block;
 const findLevel = (...names) => {
 const wanted = names.map((x) => String(x || "").toUpperCase());
 
-```
 const row = levelRows.find((r) => {
   const wave = String(r.wave || "").toUpperCase();
   const kind = String(r.kind || "").toUpperCase();
@@ -142,15 +133,12 @@ const row = levelRows.find((r) => {
 });
 
 return toPriceOrNull(row?.price);
-```
-
 };
 
 const findFamilyMark = (familyName, kindName) => {
 const wantedFamily = String(familyName || "").toUpperCase();
 const wantedKind = String(kindName || "").toUpperCase();
 
-```
 const row = levelRows.find((r) => {
   const wave = String(r.wave || "").toUpperCase();
   const kind = String(r.kind || "").toUpperCase();
@@ -164,8 +152,7 @@ return {
   price: toPriceOrNull(row?.price),
   time: row?.datetime_az || null,
 };
-```
-
+  
 };
 
 const findAbcUpMark = (kindName) => {
@@ -204,7 +191,6 @@ const abcUpMarks = {
 originLow: originLow.price,
 originTime: originLow.time,
 
-```
 aHigh: aHigh.price,
 aTime: aHigh.time,
 
@@ -213,15 +199,12 @@ bTime: bLow.time,
 
 cHigh: cHigh.price,
 cTime: cHigh.time,
-```
-
 };
 
 const downImpulseMarks = {
 w1Low: downW1Low.price,
 w1Time: downW1Low.time,
 
-```
 w2High: downW2High.price,
 w2Time: downW2High.time,
 
@@ -233,15 +216,12 @@ w4Time: downW4High.time,
 
 w5Low: downW5Low.price,
 w5Time: downW5Low.time,
-```
-
 };
 
 const postW5BounceMarks = {
 originLow: postW5OriginLow.price,
 originTime: postW5OriginLow.time,
 
-```
 aHigh: postW5AHigh.price,
 aTime: postW5AHigh.time,
 
@@ -250,8 +230,6 @@ bTime: postW5BLow.time,
 
 cHigh: postW5CHigh.price,
 cTime: postW5CHigh.time,
-```
-
 };
 
 return {
