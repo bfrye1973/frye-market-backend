@@ -84,6 +84,154 @@ function buildSafetyObject() {
   };
 }
 
+function getPostMinor5DownImpulse(waveFibState = null) {
+  const downImpulse =
+    waveFibState?.lifecycle?.postAbcReset?.downImpulse || null;
+
+  const state = String(downImpulse?.state || "").toUpperCase();
+
+  if (
+    state === "POST_MINOR_5_CORRECTIVE_BOUNCE_WATCH" ||
+    state === "MINOR_DOWN_IMPULSE_COMPLETE_AT_LOW"
+  ) {
+    return downImpulse;
+  }
+
+  return null;
+}
+
+function buildPostMinor5CorrectiveBounceOpportunity({
+  baseOpportunity = null,
+  context,
+  waveFibState,
+  tradeContextSummary,
+  downImpulse,
+} = {}) {
+  const currentPrice =
+    downImpulse?.currentPrice ??
+    context?.currentPrice ??
+    waveFibState?.currentPrice ??
+    null;
+
+  const completedLow =
+    downImpulse?.completedLow ??
+    downImpulse?.marks?.w5Low ??
+    null;
+
+  const waveCHigh =
+    downImpulse?.waveCHigh ??
+    waveFibState?.lifecycle?.postAbcReset?.abcUp?.waveCHigh ??
+    null;
+
+  const originLow =
+    downImpulse?.originLow ??
+    waveFibState?.lifecycle?.postAbcReset?.abcUp?.originLow ??
+    null;
+
+  const structuralBLow =
+    downImpulse?.structuralBLow ??
+    waveFibState?.lifecycle?.postAbcReset?.abcUp?.effectiveWaveBLow ??
+    null;
+
+  return {
+    ...(baseOpportunity || {}),
+    ok: true,
+    engine: "engine22.waveOpportunity.v1",
+    symbol: context?.symbol || baseOpportunity?.symbol || "ES",
+    strategyId:
+      context?.strategyId ||
+      baseOpportunity?.strategyId ||
+      "intraday_scalp@10m",
+    currentPrice: round2(currentPrice),
+
+    active: false,
+    setupFamily: "ELLIOTT_WAVE",
+    setupType: "POST_MINOR_5_CORRECTIVE_BOUNCE_WATCH",
+    rawSetup: "POST_MINOR_5_CORRECTIVE_BOUNCE_WATCH",
+    degree: "minor",
+    direction: "NONE",
+    readiness: "WATCH",
+    timing: "POST_IMPULSE_BOUNCE_WATCH",
+    chaseRisk: "HIGH",
+
+    entryZone: {
+      type: "NONE",
+      lo: null,
+      hi: null,
+      trigger: null,
+    },
+
+    invalidation: {
+      price: round2(completedLow),
+      reason:
+        "If price loses the completed Minor W5 low again, the corrective bounce watch fails and downside continuation risk returns.",
+    },
+
+    targets: {
+      e100: null,
+      e1272: null,
+      e1618: null,
+      e200: null,
+      e2618: null,
+    },
+
+    completedImpulse: {
+      degree: "minor",
+      completedLow: round2(completedLow),
+      completedTime: downImpulse?.completedTime || null,
+      waveCHigh: round2(waveCHigh),
+      originLow: round2(originLow),
+      structuralBLow: round2(structuralBLow),
+      currentPrice: round2(currentPrice),
+      reclaimedOrigin: downImpulse?.reclaimedOrigin === true,
+      reclaimedStructuralB: downImpulse?.reclaimedStructuralB === true,
+      reclaimedWaveCHigh: downImpulse?.reclaimedWaveCHigh === true,
+      belowWaveCHigh: downImpulse?.belowWaveCHigh === true,
+    },
+
+    bothPaths: {
+      correctiveBouncePath:
+        "If price holds above the completed Minor W5 low, watch corrective A/B/C bounce or reclaim-test structure.",
+      failurePath:
+        "If price loses the completed Minor W5 low, the bounce watch fails and downside continuation risk returns.",
+      reclaimPath:
+        "If price reclaims the prior C/W2 high, the higher-timeframe decision shifts upward and the completed-down impulse read may need reassessment.",
+    },
+
+    needs: [
+      "WATCH_CORRECTIVE_BOUNCE_STRUCTURE",
+      "WAIT_FOR_HTF_DECISION",
+      "HOLD_ABOVE_COMPLETED_W5_LOW",
+      "RECLAIM_TEST_REQUIRED",
+      "NO_AUTOMATIC_LONG",
+      "NO_AUTOMATIC_SHORT",
+      "NO_EXECUTION",
+    ],
+
+    reasonCodes: [
+      "POST_MINOR_5_CORRECTIVE_BOUNCE_WATCH",
+      "MINOR_5_DOWN_COMPLETE",
+      "BOTH_PATHS_TRACKED",
+      "READ_ONLY",
+      "NO_AUTOMATIC_LONG",
+      "NO_AUTOMATIC_SHORT",
+      "NO_EXECUTION",
+      ...(Array.isArray(baseOpportunity?.reasonCodes)
+        ? baseOpportunity.reasonCodes
+        : []),
+      ...(Array.isArray(tradeContextSummary?.reasonCodes)
+        ? tradeContextSummary.reasonCodes
+        : []),
+      ...(Array.isArray(downImpulse?.reasonCodes)
+        ? downImpulse.reasonCodes
+        : []),
+    ],
+
+    summary:
+      "Minor 5 down is complete. Current rally is a corrective bounce / reclaim test. Watch both paths: reclaim continuation toward higher-timeframe decision, or bounce failure back below the completed W5 low.",
+  };
+}
+
 function buildSafeTradeDecision({
   symbol,
   strategyId = "intraday_scalp@10m",
@@ -490,13 +638,26 @@ export function buildEngine22WaveStrategy(input = {}) {
   // PRE-ENGINE15 CONTRACT:
   // This is the clean W3/W5 wave-opportunity source that Engine 15ES should consume.
   // It must stay independent from tradeDecision and timelineRead.
-  const waveOpportunity = buildPreEngine15WaveOpportunity({
+  let waveOpportunity = buildPreEngine15WaveOpportunity({
     context,
     waveFibState,
     tradeContextSummary,
     targetClusterConfidence,
     w4Levels,
   });
+
+const postMinor5DownImpulse = getPostMinor5DownImpulse(waveFibState);
+
+if (postMinor5DownImpulse) {
+  waveOpportunity = buildPostMinor5CorrectiveBounceOpportunity({
+    baseOpportunity: waveOpportunity,
+    context,
+    waveFibState,
+    tradeContextSummary,
+    downImpulse: postMinor5DownImpulse,
+  });
+}
+
 
   // DISPLAY LAYER:
   // Timeline can use Engine15 for wording, but it is not the source of opportunity truth.
