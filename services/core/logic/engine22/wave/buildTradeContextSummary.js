@@ -295,8 +295,6 @@ reasonCodes: [
   "MICRO_W5_REQUIRES_RECLAIM",
   "NO_CHASE_LONG",
 ],
-```
-
 };
 }
 
