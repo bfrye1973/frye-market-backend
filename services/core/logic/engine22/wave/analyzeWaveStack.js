@@ -182,11 +182,18 @@ function attachRawManualMarksToDegrees({ engine2State, degrees } = {}) {
         ? engine2Block.abcUpMarks
         : null;
 
-    if (!abcUpMarks) continue;
+    const downImpulseMarks =
+      engine2Block?.downImpulseMarks &&
+      typeof engine2Block.downImpulseMarks === "object"
+        ? engine2Block.downImpulseMarks
+        : null;
+
+    if (!abcUpMarks && !downImpulseMarks) continue;
 
     degrees[degree] = {
       ...degreeState,
-      abcUpMarks,
+      ...(abcUpMarks ? { abcUpMarks } : {}),
+      ...(downImpulseMarks ? { downImpulseMarks } : {}),
     };
   }
 
