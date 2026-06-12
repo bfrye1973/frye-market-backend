@@ -37,6 +37,10 @@ import { interpretWaveEnvironment } from "../logic/engine23/interpretation/inter
 import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.js";
 import { buildWaveTradeDecision } from "../logic/engine22/decisions/buildWaveTradeDecision.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
+import {
+  getManualLevelRowsFor,
+  attachManualLevelsToEngine2Block,
+} from "../logic/engine22/wave/manualMarks/readManualWaveMarks.js";
 
 
 /* -----------------------------
@@ -49,8 +53,6 @@ const SNAPSHOT_FILE =
   SNAPSHOT_SYMBOL === "SPY"
     ? `${DATA_DIR}/strategy-snapshot.json`
     : `${DATA_DIR}/strategy-snapshot-${SNAPSHOT_SYMBOL.toLowerCase()}.json`;
-
-const FIB_INPUT_FILE = `${DATA_DIR}/fib-input.csv`;
 
 const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
 
@@ -3920,204 +3922,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
 }
 
 
-function parseCsvLine(line) {
-  return String(line || "")
-    .split(",")
-    .map((x) => x.trim());
-}
-
-function readFibInputRows() {
-  try {
-    if (!fs.existsSync(FIB_INPUT_FILE)) return [];
-
-    const text = fs.readFileSync(FIB_INPUT_FILE, "utf8");
-
-    return text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#"))
-      .slice(1)
-      .map((line) => {
-        const [symbol, degree, tf, wave, kind, datetime_az, price] =
-          parseCsvLine(line);
-
-        return {
-          symbol,
-          degree,
-          tf,
-          wave,
-          kind,
-          datetime_az,
-          price: Number(price),
-        };
-      });
-  } catch (err) {
-    console.warn("[Engine2] Failed reading fib-input.csv:", err?.message);
-    return [];
-  }
-}
-
-function getManualLevelRowsFor(args = {}) {
-  const { symbol, degree, tf } = args;
-
-  return readFibInputRows().filter((row) => {
-    const wave = String(row.wave || "").toUpperCase();
-    const kind = String(row.kind || "").toUpperCase();
-
-    const isLevelRow = kind === "LEVEL";
-
-    const isAbcDownRow =
-      wave === "ABC" &&
-      ["A", "B", "C"].includes(kind);
-
-    const isAbcUpRow =
-      wave === "ABC_UP" &&
-      ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
-
-    const isDownImpulseRow =
-      wave === "W3_DOWN" &&
-      ["W1_LOW", "W2_HIGH", "W3_LOW", "W4_HIGH", "W5_LOW"].includes(kind);
-
-    const symbolMatches =
-      String(row.symbol || "").toUpperCase() ===
-      String(symbol || "").toUpperCase();
-
-    const degreeMatches =
-      String(row.degree || "").toLowerCase() ===
-      String(degree || "").toLowerCase();
-
-    const tfMatches =
-      !tf ||
-      String(row.tf || "").toLowerCase() === String(tf || "").toLowerCase();
-
-    return (
-      symbolMatches &&
-      degreeMatches &&
-      tfMatches &&
-      (isLevelRow || isAbcDownRow || isAbcUpRow || isDownImpulseRow)
-    );
-  });
-}
-
-function attachManualLevelsToEngine2Block(block, levelRows = []) {
-  if (!block || typeof block !== "object") return block;
-
-  const findLevel = (...names) => {
-    const wanted = names.map((x) => String(x || "").toUpperCase());
-
-    const row = levelRows.find((r) => {
-      const wave = String(r.wave || "").toUpperCase();
-      const kind = String(r.kind || "").toUpperCase();
-
-      // Existing format:
-      // ES,minute,10m,A_LOW,LEVEL,date,price
-      if (wanted.includes(wave)) return true;
-
-      // New preferred ABC format:
-      // ES,minute,10m,ABC,A,date,price
-      if (wave === "ABC" && wanted.includes(kind)) return true;
-
-      return false;
-    });
-
-    const price = Number(row?.price);
-    return Number.isFinite(price) && price > 0 ? price : null;
-  };
-
-  const findAbcUpMark = (kindName) => {
-    const wantedKind = String(kindName || "").toUpperCase();
-
-    const row = levelRows.find((r) => {
-      const wave = String(r.wave || "").toUpperCase();
-      const kind = String(r.kind || "").toUpperCase();
-
-      return wave === "ABC_UP" && kind === wantedKind;
-    });
-
-    const price = Number(row?.price);
-
-    return {
-      price: Number.isFinite(price) && price > 0 ? price : null,
-      time: row?.datetime_az || null,
-    };
-  };
-
-  const findDownImpulseMark = (kindName) => {
-    const wantedKind = String(kindName || "").toUpperCase();
-
-    const row = levelRows.find((r) => {
-      const wave = String(r.wave || "").toUpperCase();
-      const kind = String(r.kind || "").toUpperCase();
-
-      return wave === "W3_DOWN" && kind === wantedKind;
-    });
-
-    const price = Number(row?.price);
-
-    return {
-      price: Number.isFinite(price) && price > 0 ? price : null,
-      time: row?.datetime_az || null,
-    };
-  }; 
-
-  const aLow = findLevel("A_LOW", "A");
-  const bHigh = findLevel("B_HIGH", "B");
-  const cLow = findLevel("C_LOW", "C");
-
-  const originLow = findAbcUpMark("ORIGIN_LOW");
-  const aHigh = findAbcUpMark("A_HIGH");
-  const bLow = findAbcUpMark("B_LOW");
-  const cHigh = findAbcUpMark("C_HIGH");
-  const downW1Low = findDownImpulseMark("W1_LOW");
-  const downW2High = findDownImpulseMark("W2_HIGH");
-  const downW3Low = findDownImpulseMark("W3_LOW");
-  const downW4High = findDownImpulseMark("W4_HIGH");
-  const downW5Low = findDownImpulseMark("W5_LOW");
-
-  const abcUpMarks = {
-    originLow: originLow.price,
-    originTime: originLow.time,
-
-    aHigh: aHigh.price,
-    aTime: aHigh.time,
-
-    bLow: bLow.price,
-    bTime: bLow.time,
-
-    cHigh: cHigh.price,
-    cTime: cHigh.time,
-  };
-
-  const downImpulseMarks = {
-    w1Low: downW1Low.price,
-    w1Time: downW1Low.time,
-
-    w2High: downW2High.price,
-    w2Time: downW2High.time,
-
-    w3Low: downW3Low.price,
-    w3Time: downW3Low.time,
-
-    w4High: downW4High.price,
-    w4Time: downW4High.time,
-
-    w5Low: downW5Low.price,
-    w5Time: downW5Low.time,
-  };
-
-  return {
-    ...block,
-    aLow,
-    bHigh,
-    cLow,
-    w4Low: cLow,
-    lowerHighLevel: bHigh,
-    continuationLevel: bHigh,
-    abcUpMarks,
-    downImpulseMarks,
-  };
-}
-
+f
 async function buildEngine2State(symbol) {
   const contextResp = await fetchJson(
     `${CORE_BASE}/api/v1/engine5-context?symbol=${symbol}&tf=1h`,
