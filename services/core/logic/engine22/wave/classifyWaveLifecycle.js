@@ -31,6 +31,7 @@ import {
 import { buildPostAbcBounceMap } from "./lifecycle/abcUpLifecycle.js";
 import { buildWave3DownLifecycle } from "./lifecycle/wave3DownLifecycle.js";
 import { buildDownImpulseLifecycle } from "./lifecycle/downImpulseLifecycle.js";
+import { buildPostDownImpulseBounceLifecycle } from "./lifecycle/postDownImpulseBounceLifecycle.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -45,6 +46,7 @@ function classifyPostAbcReset({
   abcUpMarks = null,
   downImpulseMarks = null,
   downImpulseDegree = "minor",
+  postW5BounceMarks = null,
   activeCorrectionDegree = null,
   barsByTf = {},
   marketMeterContext = null,
@@ -73,6 +75,14 @@ function classifyPostAbcReset({
   downImpulseMarks,
 });
 
+const postDownImpulseBounce = buildPostDownImpulseBounceLifecycle({
+  symbol,
+  degree: downImpulseDegree || "minor",
+  currentPrice,
+  downImpulse,
+  postW5BounceMarks,
+});
+
   const price = toNum(currentPrice);
   const cLow = toNum(abcCorrection?.c?.price);
   const abcState = upper(abcCorrection?.state, "");
@@ -83,6 +93,7 @@ function classifyPostAbcReset({
       abcUp,
       wave3Down,
       downImpulse,
+      postDownImpulseBounce,      
       state: "POST_ABC_RESET_UNAVAILABLE",
       supportLevel: null,
       watchZoneLow: null,
@@ -110,6 +121,7 @@ function classifyPostAbcReset({
       abcUp,
       wave3Down,
       downImpulse,
+      postDownImpulseBounce,
       state: "POST_ABC_RESET_WAIT",
       supportLevel: null,
       watchZoneLow: null,
@@ -144,6 +156,7 @@ function classifyPostAbcReset({
       abcUp,
       wave3Down,
       downImpulse,
+      postDownImpulseBounce,
       state: "POST_ABC_RESET_WAIT",
       supportLevel,
       watchZoneLow: roundedCLow,
@@ -176,6 +189,7 @@ function classifyPostAbcReset({
       abcUp,
       wave3Down,
       downImpulse,
+      postDownImpulseBounce,
       state: "POST_ABC_LOW_FAILED",
       supportLevel,
       watchZoneLow: roundedCLow,
@@ -217,6 +231,7 @@ function classifyPostAbcReset({
     abcUp,
     wave3Down,
     downImpulse,
+    postDownImpulseBounce,
     state: "POST_ABC_W2_BOUNCE_WATCH",
     supportLevel,
     watchZoneLow: roundedCLow,
@@ -816,6 +831,10 @@ export function classifyWaveLifecycle({
             : degrees?.minute?.downImpulseMarks
             ? "minute"
             : "minor",
+          postW5BounceMarks:
+            degrees?.minor?.postW5BounceMarks ||
+            degrees?.minute?.postW5BounceMarks ||
+            null,
           activeCorrectionDegree,
           barsByTf,
           marketMeterContext,
