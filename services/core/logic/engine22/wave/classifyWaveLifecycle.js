@@ -43,6 +43,8 @@ function classifyPostAbcReset({
   currentPrice,
   abcCorrection,
   abcUpMarks = null,
+  downImpulseMarks = null,
+  downImpulseDegree = "minor",
   activeCorrectionDegree = null,
   barsByTf = {},
   marketMeterContext = null,
