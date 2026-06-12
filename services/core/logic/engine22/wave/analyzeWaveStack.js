@@ -187,13 +187,20 @@ function attachRawManualMarksToDegrees({ engine2State, degrees } = {}) {
       typeof engine2Block.downImpulseMarks === "object"
         ? engine2Block.downImpulseMarks
         : null;
+    const postW5BounceMarks =
+      engine2Block?.postW5BounceMarks &&
+      typeof engine2Block.postW5BounceMarks === "object"
+        ? engine2Block.postW5BounceMarks
+        : null;
+    
 
-    if (!abcUpMarks && !downImpulseMarks) continue;
+    if (!abcUpMarks && !downImpulseMarks && !postW5BounceMarks) continue;
 
     degrees[degree] = {
       ...degreeState,
       ...(abcUpMarks ? { abcUpMarks } : {}),
       ...(downImpulseMarks ? { downImpulseMarks } : {}),
+      ...(postW5BounceMarks ? { postW5BounceMarks } : {}), 
     };
   }
 
