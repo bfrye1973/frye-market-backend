@@ -47,12 +47,21 @@ return String(degree || "wave").trim().toUpperCase();
 }
 
 function isW3DownLifecycleActive(wave3Down = null) {
-const state = String(wave3Down?.state || "").toUpperCase();
+  const state = String(wave3Down?.state || "").toUpperCase();
 
-return (
-state === "W3_DOWN_CONFIRMATION_WATCH" ||
-state === "POSSIBLE_W3_DOWN_STARTED"
-);
+  return (
+    state === "W3_DOWN_CONFIRMATION_WATCH" ||
+    state === "POSSIBLE_W3_DOWN_STARTED"
+  );
+}
+
+function isCompletedDownImpulseBounceWatch(downImpulse = null) {
+  const state = String(downImpulse?.state || "").toUpperCase();
+
+  return (
+    state === "POST_MINOR_5_CORRECTIVE_BOUNCE_WATCH" ||
+    state === "MINOR_DOWN_IMPULSE_COMPLETE_AT_LOW"
+  );
 }
 
 function buildClusterSummary(waveFibState) {
@@ -635,6 +644,130 @@ reasonCodes: [
 ],
 };
 }
+
+function buildCompletedDownImpulseSummary({
+  waveFibState,
+  waveStack,
+  clusters,
+  lifecycle,
+  postAbcReset,
+  abc,
+  abcUp,
+  wave3Down,
+  downImpulse,
+}) {
+  const completedLow = downImpulse?.completedLow ?? downImpulse?.marks?.w5Low ?? null;
+  const completedTime = downImpulse?.completedTime ?? downImpulse?.marks?.w5Time ?? null;
+  const waveCHigh = downImpulse?.waveCHigh ?? abcUp?.waveCHigh ?? null;
+  const originLow = downImpulse?.originLow ?? abcUp?.originLow ?? null;
+  const structuralBLow =
+    downImpulse?.structuralBLow ?? abcUp?.effectiveWaveBLow ?? null;
+  const currentPrice =
+    downImpulse?.currentPrice ??
+    postAbcReset?.currentPrice ??
+    waveFibState?.currentPrice ??
+    null;
+
+  return {
+    headline: "MINOR 5 DOWN COMPLETE — CORRECTIVE BOUNCE / HTF DECISION WATCH",
+    subheadline:
+      "Minor downside impulse completed at the marked W5 low. Current rally is a corrective bounce / reclaim test, not an automatic long.",
+    bias: "POST_MINOR_5_CORRECTIVE_BOUNCE_WATCH",
+    action: "WATCH_CORRECTIVE_BOUNCE_RECLAIM_TEST",
+    direction: "NONE",
+    chaseAllowed: false,
+    severity: "warning",
+
+    topCandidate: round2(waveCHigh),
+    hardInvalidation: round2(completedLow),
+    reclaimLadder: null,
+
+    firstCluster: clusters.firstCluster,
+    nextCluster: clusters.nextCluster,
+
+    lifecycleState: lifecycle?.lifecycleState || null,
+    postAbcReset,
+    parentContextOnly: lifecycle?.parentContextOnly === true,
+    tradeableOpportunityBlocked:
+      lifecycle?.tradeableOpportunityBlocked === true,
+    nextAllowedSetup: lifecycle?.nextAllowedSetup || null,
+
+    abcCorrection: abc,
+    abc: abc
+      ? {
+          degree: abc?.degree || null,
+          state: abc?.state || null,
+          a: abc?.a || null,
+          b: abc?.b || null,
+          c: abc?.c || null,
+          range: abc?.range ?? null,
+          reclaimLevels: abc?.reclaimLevels || null,
+          downsideTargets: abc?.downsideTargets || null,
+        }
+      : null,
+
+    abcUp,
+    wave3Down,
+    downImpulse,
+
+    reads: {
+      structureRead: waveStack.message,
+      lifecycleRead:
+        "Minor downside impulse completed at the marked W5 low.",
+      completedImpulseRead: `Minor W5 down completed at ${fmt(
+        completedLow
+      )}${completedTime ? ` on ${completedTime}` : ""}.`,
+      bounceRead:
+        "Current rally is treated as corrective bounce / reclaim test, not a fresh automatic long.",
+      supportRead: `Current price ${fmt(
+        currentPrice
+      )} is above completed W5 low ${fmt(
+        completedLow
+      )} and below prior C/W2 high ${fmt(waveCHigh)}.`,
+      reclaimRead: `Important reclaim references are origin ${fmt(
+        originLow
+      )}, structural B ${fmt(structuralBLow)}, and prior C/W2 high ${fmt(
+        waveCHigh
+      )}.`,
+      actionRead:
+        "No automatic long. No automatic short. No execution. Watch for corrective A/B/C bounce structure or higher-timeframe decision.",
+    },
+
+    summary:
+      `${waveStack.message}\n\n` +
+      `Minor downside impulse completed at the marked W5 low near ${fmt(
+        completedLow
+      )}${completedTime ? ` on ${completedTime}` : ""}.\n\n` +
+      `The current rally is treated as a corrective bounce / reclaim test, not a fresh automatic long.\n\n` +
+      `Reclaim references: origin ${fmt(originLow)}, structural B ${fmt(
+        structuralBLow
+      )}, prior C/W2 high ${fmt(waveCHigh)}.\n\n` +
+      `No automatic long. No automatic short. No execution.`,
+
+    needs: [
+      "WATCH_CORRECTIVE_BOUNCE_STRUCTURE",
+      "WAIT_FOR_HTF_DECISION",
+      "NO_AUTOMATIC_LONG",
+      "NO_AUTOMATIC_SHORT",
+      "NO_EXECUTION",
+    ],
+
+    reasonCodes: [
+      "TRADE_CONTEXT_SUMMARY_BUILT",
+      "MINOR_5_DOWN_COMPLETE",
+      "POST_MINOR_5_CORRECTIVE_BOUNCE_WATCH",
+      "READ_ONLY",
+      "NO_AUTOMATIC_LONG",
+      "NO_AUTOMATIC_SHORT",
+      "NO_EXECUTION",
+      ...(lifecycle?.reasonCodes || []),
+      ...(postAbcReset?.reasonCodes || []),
+      ...(Array.isArray(downImpulse?.reasonCodes)
+        ? downImpulse.reasonCodes
+        : []),
+    ],
+  };
+}
 function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
 const lifecycle = waveFibState?.lifecycle || {};
 const abc = lifecycle?.abcCorrection || null;
@@ -643,6 +776,21 @@ const postAbcState = String(postAbcReset?.state || "").toUpperCase();
 
 const abcUp = postAbcReset?.abcUp || null;
 const wave3Down = postAbcReset?.wave3Down || null;
+const downImpulse = postAbcReset?.downImpulse || null; 
+
+if (isCompletedDownImpulseBounceWatch(downImpulse)) {
+  return buildCompletedDownImpulseSummary({
+    waveFibState,
+    waveStack,
+    clusters,
+    lifecycle,
+    postAbcReset,
+    abc,
+    abcUp,
+    wave3Down,
+    downImpulse,
+  });
+}
 
 if (isW3DownLifecycleActive(wave3Down)) {
 return buildW3DownWatchSummary({
