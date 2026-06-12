@@ -1,7 +1,7 @@
 {
   "version": "5m-deltas-r12.8",
-  "deltasUpdatedAt": "2026-06-12T16:20:51.172907+00:00",
-  "sourceUpdatedAt": "2026-06-12T16:14:01Z",
+  "deltasUpdatedAt": "2026-06-12T16:25:53.144230+00:00",
+  "sourceUpdatedAt": "2026-06-12T16:20:00Z",
   "deltas": {
     "sectors": {
       "Information Technology": {
@@ -14,7 +14,7 @@
         "netTilt": 0.0
       },
       "Communication Services": {
-        "netTilt": -27.31
+        "netTilt": -32.12
       },
       "Real Estate": {
         "netTilt": -28.3
@@ -23,10 +23,10 @@
         "netTilt": -4.95
       },
       "Consumer Staples": {
-        "netTilt": -19.62
+        "netTilt": -29.16
       },
       "Consumer Discretionary": {
-        "netTilt": -32.11
+        "netTilt": -31.76
       },
       "Financials": {
         "netTilt": -35.61
