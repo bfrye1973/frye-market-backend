@@ -65,11 +65,11 @@ function classifyPostAbcReset({
 
  const downImpulse = buildDownImpulseLifecycle({
   symbol,
-  degree: activeCorrectionDegree || "minor",
+  degree: downImpulseDegree || "minor",
   currentPrice,
   abcUp,
-  downImpulseMarks: null,
-}); 
+  downImpulseMarks,
+});
 
   const price = toNum(currentPrice);
   const cLow = toNum(abcCorrection?.c?.price);
@@ -805,6 +805,15 @@ export function classifyWaveLifecycle({
           abcUpMarks: activeCorrectionDegree
             ? degrees?.[activeCorrectionDegree]?.abcUpMarks || null
             : null,
+          downImpulseMarks:
+            degrees?.minor?.downImpulseMarks ||
+            degrees?.minute?.downImpulseMarks ||
+            null,
+          downImpulseDegree: degrees?.minor?.downImpulseMarks
+            ? "minor"
+            : degrees?.minute?.downImpulseMarks
+            ? "minute"
+            : "minor",
           activeCorrectionDegree,
           barsByTf,
           marketMeterContext,
