@@ -4,7 +4,7 @@
 // GET /api/v1/futures/ohlc?symbol=ES&timeframe=1m&limit=1500
 //
 // Purpose:
-// - Resolve user-facing ES -> active Polygon futures contract like ESM6
+// - Resolve user-facing ES -> active Polygon futures contract like ESM6 / ESU6
 // - Fetch historical futures candles from Polygon futures aggs endpoint
 // - Return same chart bar shape as /api/v1/ohlc:
 //   { time, open, high, low, close, volume }
@@ -15,6 +15,12 @@
 //   /futures/v1/aggs/{ticker}
 // - Polygon futures aggs return window_start in nanoseconds.
 // - We fetch ASC over a controlled lookback window, then return the latest N bars ourselves.
+//
+// Rollover safety:
+// - Supports env override:
+//   ES_CONTRACT_OVERRIDE=ESU6
+//   FUTURES_ES_CONTRACT_OVERRIDE=ESU6
+//   FUTURES_NQ_CONTRACT_OVERRIDE=NQU6
 
 import express from "express";
 
@@ -34,7 +40,6 @@ const POLYGON_REST_BASE =
 
 const FUTURES_SNAPSHOT_PATH = "/futures/v1/snapshot";
 
-// Dashboard TF -> Polygon futures resolution
 const TF_MAP = {
   "1m": "1min",
   "5m": "5min",
@@ -46,8 +51,6 @@ const TF_MAP = {
   "1d": "1day",
 };
 
-// Keep futures requests controlled.
-// These are intentionally smaller than stock history to avoid pagination trouble.
 const DAYS_BY_TF = {
   "1m": 3,
   "5m": 7,
@@ -72,6 +75,24 @@ function nowIso() {
 function cleanProductCode(v) {
   const s = String(v || "ES").trim().toUpperCase();
   return s || "ES";
+}
+
+function getContractOverride(productCode) {
+  const cleanCode = cleanProductCode(productCode);
+
+  if (cleanCode === "ES") {
+    return String(
+      process.env.ES_CONTRACT_OVERRIDE ||
+        process.env.FUTURES_ES_CONTRACT_OVERRIDE ||
+        ""
+    )
+      .trim()
+      .toUpperCase();
+  }
+
+  return String(process.env[`FUTURES_${cleanCode}_CONTRACT_OVERRIDE`] || "")
+    .trim()
+    .toUpperCase();
 }
 
 function clampInt(n, lo, hi, fallback) {
@@ -106,11 +127,6 @@ function isPlainFuturesTicker(ticker, productCode) {
   if (!t || !pc) return false;
   if (isSpreadTicker(t)) return false;
 
-  // Polygon futures currently uses short-year format like:
-  // ESM6, ESU6, ESZ6
-  //
-  // Also allow 2-digit year format if Polygon changes later:
-  // ESM26, ESU26, ESZ26
   const re = new RegExp(`^${pc}[FGHJKMNQUVXZ]\\d{1,2}$`);
   return re.test(t);
 }
@@ -170,11 +186,36 @@ async function readJsonResponse(response, label) {
 }
 
 async function resolveFuturesContract(productCode) {
+  const cleanCode = cleanProductCode(productCode);
+  const contractOverride = getContractOverride(cleanCode);
+
+  if (contractOverride) {
+    const value = {
+      productCode: cleanCode,
+      resolvedSymbol: contractOverride,
+      selected: {
+        ticker: contractOverride,
+        productCode: cleanCode,
+        source: "env_override",
+      },
+      selectionRule: "env_contract_override",
+      candidateCount: 0,
+      checkedAt: nowIso(),
+    };
+
+    resolveCache.set(cleanCode, {
+      cachedAtMs: Date.now(),
+      value,
+    });
+
+    return value;
+  }
+
   if (!POLY_KEY) {
     throw new Error("Missing Polygon API key");
   }
 
-  const cacheKey = productCode;
+  const cacheKey = cleanCode;
   const cached = resolveCache.get(cacheKey);
 
   if (cached && Date.now() - cached.cachedAtMs < RESOLVE_CACHE_MS) {
@@ -183,7 +224,7 @@ async function resolveFuturesContract(productCode) {
 
   const base = String(POLYGON_REST_BASE || "").replace(/\/+$/, "");
   const url = new URL(`${base}${FUTURES_SNAPSHOT_PATH}`);
-  url.searchParams.set("product_code", productCode);
+  url.searchParams.set("product_code", cleanCode);
   url.searchParams.set("apiKey", POLY_KEY);
 
   const r = await fetch(url.toString(), {
@@ -200,14 +241,10 @@ async function resolveFuturesContract(productCode) {
   const results = Array.isArray(json?.results) ? json.results : [];
 
   const candidates = results
-    .map((row) => normalizeCandidate(row, productCode))
+    .map((row) => normalizeCandidate(row, cleanCode))
     .filter(Boolean)
     .filter((c) => !c.isExpired);
 
-  // IMPORTANT:
-  // Pick nearest valid plain contract first, then volume.
-  // This keeps ES on the current front contract like ESM6.
-  // Do NOT use highest volume first because far-out contracts can show stale/high volume.
   const sorted = [...candidates].sort((a, b) => {
     const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
     const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
@@ -220,11 +257,11 @@ async function resolveFuturesContract(productCode) {
   const selected = sorted[0] || null;
 
   if (!selected?.ticker) {
-    throw new Error(`Could not resolve futures contract for ${productCode}`);
+    throw new Error(`Could not resolve futures contract for ${cleanCode}`);
   }
 
   const value = {
-    productCode,
+    productCode: cleanCode,
     resolvedSymbol: selected.ticker,
     selected,
     selectionRule: "plain_non_spread_contract_nearest_settlement_then_volume",
@@ -244,12 +281,11 @@ function toUnixSecFromNs(v) {
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) return null;
 
-  // Futures aggs window_start is nanoseconds.
-  if (n > 1e17) return Math.floor(n / 1e9); // ns
-  if (n > 1e14) return Math.floor(n / 1e6); // µs
-  if (n > 1e12) return Math.floor(n / 1000); // ms
+  if (n > 1e17) return Math.floor(n / 1e9);
+  if (n > 1e14) return Math.floor(n / 1e6);
+  if (n > 1e12) return Math.floor(n / 1000);
 
-  return Math.floor(n); // sec
+  return Math.floor(n);
 }
 
 function normFuturesAgg(b) {
@@ -291,10 +327,6 @@ async function fetchFuturesAggs({
   url.searchParams.set("resolution", resolution);
   url.searchParams.set("window_start.gte", startDate);
   url.searchParams.set("window_start.lte", endDate);
-
-  // Use ASC and fetch a broad chunk.
-  // Polygon's desc behavior did not reliably return newest bars in our test.
-  // We control final "latest N" selection after sorting.
   url.searchParams.set("sort", "asc");
   url.searchParams.set("limit", "50000");
   url.searchParams.set("apiKey", POLY_KEY);
@@ -317,7 +349,6 @@ async function fetchFuturesAggs({
     .filter(Boolean)
     .sort((a, b) => a.time - b.time);
 
-  // De-dup by time
   const dedup = [];
   let last = -1;
 
@@ -328,7 +359,6 @@ async function fetchFuturesAggs({
     }
   }
 
-  // Return latest N bars.
   return dedup.length > limit ? dedup.slice(-limit) : dedup;
 }
 
@@ -348,9 +378,6 @@ router.get("/", async (req, res) => {
     const endMs = Date.now();
     const startMs = endMs - targetDays * 24 * 60 * 60 * 1000;
 
-    // Polygon futures aggs with date-only window_start.lte can cut off at
-    // midnight UTC. Add one extra UTC day so today's active futures session
-    // is included.
     const startDate = formatDateUTC(startMs);
     const endDate = formatDateUTC(endMs + 24 * 60 * 60 * 1000);
 
@@ -362,7 +389,6 @@ router.get("/", async (req, res) => {
       limit,
     });
 
-    // Optional debug mode, never used by chart.
     if (String(req.query.debug || "") === "1") {
       return res.json({
         ok: true,
@@ -383,7 +409,6 @@ router.get("/", async (req, res) => {
 
     res.setHeader("Cache-Control", "no-store");
 
-    // Return same simple array shape as /api/v1/ohlc
     return res.json(bars);
   } catch (e) {
     console.error("[/api/v1/futures/ohlc] error:", e?.stack || e);
