@@ -2,11 +2,20 @@
 // Backend-2 — Futures stream/resolver routes
 //
 // Phase 2:
-// - Resolve user-facing ES -> active Polygon futures contract like ESM6
+// - Resolve user-facing ES -> active Polygon futures contract like ESM6 / ESU6
 // - Stream live ES futures trades from Polygon futures websocket
 // - Build 1m / higher timeframe candles from trades
 // - Keep frontend bar contract same as stock stream
 // - Do NOT touch stock /stream/agg
+//
+// Rollover safety:
+// - Supports env override:
+//   ES_CONTRACT_OVERRIDE=ESU6
+//   FUTURES_ES_CONTRACT_OVERRIDE=ESU6
+//   FUTURES_NQ_CONTRACT_OVERRIDE=NQU6
+//
+// This lets us force ES to the correct active rolled contract without
+// manually adjusting price.
 
 import express from "express";
 import WebSocket from "ws";
@@ -52,6 +61,24 @@ function cleanProductCode(v) {
   return s || "ES";
 }
 
+function getContractOverride(productCode) {
+  const cleanCode = cleanProductCode(productCode);
+
+  if (cleanCode === "ES") {
+    return String(
+      process.env.ES_CONTRACT_OVERRIDE ||
+        process.env.FUTURES_ES_CONTRACT_OVERRIDE ||
+        ""
+    )
+      .trim()
+      .toUpperCase();
+  }
+
+  return String(process.env[`FUTURES_${cleanCode}_CONTRACT_OVERRIDE`] || "")
+    .trim()
+    .toUpperCase();
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -70,11 +97,11 @@ function toUnixSec(ts) {
   // milliseconds: 1778531640000
   // microseconds: 1778531640000000
   // nanoseconds:  1778531640000000000
-  if (n > 1e17) return Math.floor(n / 1e9); // nanoseconds
-  if (n > 1e14) return Math.floor(n / 1e6); // microseconds
-  if (n > 1e12) return Math.floor(n / 1000); // milliseconds
+  if (n > 1e17) return Math.floor(n / 1e9);
+  if (n > 1e14) return Math.floor(n / 1e6);
+  if (n > 1e12) return Math.floor(n / 1000);
 
-  return Math.floor(n); // seconds
+  return Math.floor(n);
 }
 
 function parseDateMs(v) {
@@ -307,13 +334,13 @@ function chooseResolvedContractFromSnapshot(json, productCode) {
   const validNonExpired = allCandidates.filter((c) => !c.isExpired);
 
   const sorted = [...validNonExpired].sort((a, b) => {
-  const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
-  const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
+    const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
+    const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
 
-  if (aSettle !== bSettle) return aSettle - bSettle;
+    if (aSettle !== bSettle) return aSettle - bSettle;
 
-  return Number(b.volume || 0) - Number(a.volume || 0);
-});
+    return Number(b.volume || 0) - Number(a.volume || 0);
+  });
 
   const selected = sorted[0] || null;
 
@@ -363,18 +390,51 @@ async function fetchFuturesSnapshot(productCode, apiKey) {
 }
 
 async function resolveFuturesContract(productCode) {
+  const cleanCode = cleanProductCode(productCode);
+  const contractOverride = getContractOverride(cleanCode);
+
+  if (contractOverride) {
+    const value = {
+      ok: true,
+      productCode: cleanCode,
+      resolvedSymbol: contractOverride,
+      source: "env_override",
+      selectionRule: "env_contract_override",
+      needsInspection: false,
+      selected: {
+        ticker: contractOverride,
+        productCode: cleanCode,
+        source: "env_override",
+      },
+      candidateCount: 0,
+      allCandidateCount: 0,
+      rawResultCount: 0,
+      candidates: [],
+      polygonShape: null,
+      checkedAt: nowIso(),
+      cached: false,
+    };
+
+    resolveCache.set(cleanCode, {
+      cachedAtMs: Date.now(),
+      value,
+    });
+
+    return value;
+  }
+
   const apiKey = resolvePolygonKey();
 
   if (!apiKey) {
     return {
       ok: false,
       error: "missing_polygon_api_key",
-      productCode,
+      productCode: cleanCode,
       checkedAt: nowIso(),
     };
   }
 
-  const cacheKey = productCode;
+  const cacheKey = cleanCode;
   const cached = resolveCache.get(cacheKey);
 
   if (cached && Date.now() - cached.cachedAtMs < RESOLVE_CACHE_MS) {
@@ -385,13 +445,13 @@ async function resolveFuturesContract(productCode) {
     };
   }
 
-  const fetched = await fetchFuturesSnapshot(productCode, apiKey);
+  const fetched = await fetchFuturesSnapshot(cleanCode, apiKey);
 
   if (!fetched.ok) {
     const value = {
       ok: false,
       error: "polygon_futures_snapshot_failed",
-      productCode,
+      productCode: cleanCode,
       status: fetched.status,
       statusText: fetched.statusText,
       polygonPreview: fetched.textPreview,
@@ -408,15 +468,14 @@ async function resolveFuturesContract(productCode) {
     return value;
   }
 
-  const chosen = chooseResolvedContractFromSnapshot(fetched.json, productCode);
+  const chosen = chooseResolvedContractFromSnapshot(fetched.json, cleanCode);
 
   const value = {
     ok: true,
-    productCode,
+    productCode: cleanCode,
     resolvedSymbol: chosen.resolvedSymbol,
     source: "polygon_futures_snapshot",
-    selectionRule:
-      "plain_non_spread_contract_nearest_settlement_then_volume",
+    selectionRule: "plain_non_spread_contract_nearest_settlement_then_volume",
     needsInspection: !chosen.resolvedSymbol,
     selected: chosen.selected,
     candidateCount: chosen.candidates.length,
@@ -473,10 +532,7 @@ function parseFuturesAM(msg) {
   const rawSym = getTradeSymbol(msg);
 
   const sSec = toUnixSec(
-    msg?.s ??
-      msg?.start_timestamp ??
-      msg?.timestamp ??
-      msg?.t
+    msg?.s ?? msg?.start_timestamp ?? msg?.timestamp ?? msg?.t
   );
 
   const o = toNum(msg?.o ?? msg?.open);
@@ -620,8 +676,6 @@ router.get("/agg", async (req, res) => {
   const tfMin = normalizeTfMin(tfStr);
   const tf = labelTf(tfMin);
 
-  // Futures default should be ETH/full electronic session.
-  // You can still request mode=rth for stock-market-hours-only filtering.
   const mode = normalizeMode(req.query.mode || "eth");
 
   const resolved = await resolveFuturesContract(symbol);
@@ -657,7 +711,7 @@ router.get("/agg", async (req, res) => {
       selectionRule: resolved.selectionRule,
       cached: resolved.cached || false,
     },
-    note: "Phase 2 futures stream: live bars only. Historical ES candles will be added in Backend-1 Phase 3.",
+    note: "Futures stream: live bars only. Historical ES candles come from Backend-1 /api/v1/futures/ohlc.",
     updated_at_utc: nowIso(),
   });
 
@@ -700,7 +754,6 @@ router.get("/agg", async (req, res) => {
   function emitBar(bar) {
     const now = Date.now();
 
-    // Do not spam browser with every tick.
     if (now - lastEmitAt < 250) return;
 
     lastEmitAt = now;
@@ -736,7 +789,7 @@ router.get("/agg", async (req, res) => {
         action: "subscribe",
         params: `AM.${resolvedSymbol},T.${resolvedSymbol}`,
       })
-    ); 
+    );
 
     sseSend(res, {
       ok: true,
@@ -773,40 +826,36 @@ router.get("/agg", async (req, res) => {
         continue;
       }
 
-    // Expected futures events from Polygon:
-    // AM.ESM6 = official 1-minute candle
-    // T.ESM6  = live trade fallback
+      if (ev === "AM") {
+        diag.amSeen += 1;
 
-    if (ev === "AM") {
-      diag.amSeen += 1;
+        const parsed = parseFuturesAM(msg);
+        if (!parsed?.bar) continue;
 
-      const parsed = parseFuturesAM(msg);
-      if (!parsed?.bar) continue;
+        const rawSym = String(parsed.symbol || "").toUpperCase();
+        diag.lastRawSymbol = rawSym;
 
-      const rawSym = String(parsed.symbol || "").toUpperCase();
-      diag.lastRawSymbol = rawSym;
+        if (rawSym && rawSym !== resolvedSymbol) {
+          diag.unmatchedTrades += 1;
+          continue;
+        }
 
-      if (rawSym && rawSym !== resolvedSymbol) {
-        diag.unmatchedTrades += 1;
+        const { agg, changed } = updateAggFrom1m(
+          aggBar,
+          parsed.bar,
+          tfMin,
+          mode
+        );
+
+        aggBar = agg;
+        trade1m = null;
+
+        if (changed && aggBar) {
+          emitBar(aggBar);
+        }
+
         continue;
       }
-
-      const { agg, changed } = updateAggFrom1m(
-        aggBar,
-        parsed.bar,
-        tfMin,
-        mode
-     );
-
-     aggBar = agg;
-     trade1m = null;
-
-     if (changed && aggBar) {
-       emitBar(aggBar);
-     }
-
-     continue;
-   }
 
       if (ev !== "T") continue;
 
