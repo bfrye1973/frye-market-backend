@@ -4902,6 +4902,5 @@ const waveOpportunityMirror =
     },
   });
 }
-}
 
 export default computeEngine22ScalpOpportunity;
