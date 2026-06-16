@@ -89,6 +89,10 @@ const isPostW5BounceRow =
   wave === "POST_W5_BOUNCE" &&
   ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
 
+const isPossibleW5UpRow =
+  wave === "POSSIBLE_W5_UP" &&
+  ["ORIGIN_LOW", "W1_HIGH", "W2_LOW", "W3_HIGH", "W4_LOW", "W5_HIGH"].includes(kind);
+
 const symbolMatches =
   String(row.symbol || "").toUpperCase() ===
   String(symbol || "").toUpperCase();
@@ -110,7 +114,8 @@ return (
     isAbcDownRow ||
     isAbcUpRow ||
     isDownImpulseRow ||
-    isPostW5BounceRow
+    isPostW5BounceRow ||
+    isPossibleW5UpRow    
   )
 );
 });
@@ -167,6 +172,10 @@ const findPostW5BounceMark = (kindName) => {
 return findFamilyMark("POST_W5_BOUNCE", kindName);
 };
 
+const findPossibleW5UpMark = (kindName) => {
+  return findFamilyMark("POSSIBLE_W5_UP", kindName);
+};
+
 const aLow = findLevel("A_LOW", "A");
 const bHigh = findLevel("B_HIGH", "B");
 const cLow = findLevel("C_LOW", "C");
@@ -187,6 +196,13 @@ const postW5AHigh = findPostW5BounceMark("A_HIGH");
 const postW5BLow = findPostW5BounceMark("B_LOW");
 const postW5CHigh = findPostW5BounceMark("C_HIGH");
 
+const possibleW5OriginLow = findPossibleW5UpMark("ORIGIN_LOW");
+const possibleW5W1High = findPossibleW5UpMark("W1_HIGH");
+const possibleW5W2Low = findPossibleW5UpMark("W2_LOW");
+const possibleW5W3High = findPossibleW5UpMark("W3_HIGH");
+const possibleW5W4Low = findPossibleW5UpMark("W4_LOW");
+const possibleW5W5High = findPossibleW5UpMark("W5_HIGH");
+  
 const abcUpMarks = {
 originLow: originLow.price,
 originTime: originLow.time,
@@ -232,6 +248,26 @@ cHigh: postW5CHigh.price,
 cTime: postW5CHigh.time,
 };
 
+const possibleW5UpMarks = {
+  originLow: possibleW5OriginLow.price,
+  originTime: possibleW5OriginLow.time,
+
+  w1High: possibleW5W1High.price,
+  w1Time: possibleW5W1High.time,
+
+  w2Low: possibleW5W2Low.price,
+  w2Time: possibleW5W2Low.time,
+
+  w3High: possibleW5W3High.price,
+  w3Time: possibleW5W3High.time,
+
+  w4Low: possibleW5W4Low.price,
+  w4Time: possibleW5W4Low.time,
+
+  w5High: possibleW5W5High.price,
+  w5Time: possibleW5W5High.time,
+}; 
+
 return {
 ...block,
 aLow,
@@ -243,5 +279,6 @@ continuationLevel: bHigh,
 abcUpMarks,
 downImpulseMarks,
 postW5BounceMarks,
+possibleW5UpMarks,
 };
 }
