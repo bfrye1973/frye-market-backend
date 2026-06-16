@@ -3083,6 +3083,190 @@ async function fetchVolume({ symbol, tf, zoneLo, zoneHi, mode }) {
   };
 }
 
+function buildEngine22CurrentLifecycleStateContract(engine22WaveStrategy) {
+  const lifecycle = engine22WaveStrategy?.waveFibState?.lifecycle || null;
+  const postAbcReset = lifecycle?.postAbcReset || null;
+  const possibleW5Up = postAbcReset?.possibleW5Up || null;
+  const postDownImpulseBounce = postAbcReset?.postDownImpulseBounce || null;
+  const waveOpportunity = engine22WaveStrategy?.waveOpportunity || null;
+
+  if (
+    possibleW5Up?.w5Complete === true ||
+    possibleW5Up?.state === "POSSIBLE_MINOR_W5_UP_COMPLETE_POST_W5_PULLBACK_WATCH"
+  ) {
+    return {
+      key: "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+      headline:
+        engine22WaveStrategy?.tradeContextSummary?.headline ||
+        engine22WaveStrategy?.timelineRead?.headline ||
+        "POSSIBLE MINOR W5 UP COMPLETE — WATCH PULLBACK ENTRY ZONES",
+      sourcePath: "waveFibState.lifecycle.postAbcReset.possibleW5Up",
+      priority: 1,
+
+      action: "WATCH_POST_W5_PULLBACK_ENTRY_ZONES",
+      direction: "NONE",
+      active: false,
+      readOnly: true,
+      noExecution: true,
+      tradeableOpportunityBlocked: true,
+
+      currentPrice: possibleW5Up?.currentPrice ?? null,
+      pullbackLevelsFromW5: possibleW5Up?.pullbackLevelsFromW5 ?? null,
+      entryZones: possibleW5Up?.entryZones ?? null,
+      priceProgress: possibleW5Up?.priceProgress ?? null,
+
+      needs: possibleW5Up?.needs ?? [],
+      reasonCodes: [
+        "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
+        "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+        "READ_ONLY",
+        "NO_EXECUTION",
+        "DIRECTION_NONE",
+      ],
+    };
+  }
+
+  if (
+    postDownImpulseBounce?.possibleW5UpReclassification === true ||
+    postDownImpulseBounce?.state ===
+      "POST_MINOR_5_BOUNCE_EXCEEDED_C2618_POSSIBLE_W5_UP"
+  ) {
+    return {
+      key: "POSSIBLE_W5_UP_RECLASSIFICATION_WATCH",
+      headline:
+        postDownImpulseBounce?.headline ||
+        engine22WaveStrategy?.tradeContextSummary?.headline ||
+        "C 2.618 EXCEEDED — POSSIBLE WAVE 5 UP WATCH",
+      sourcePath: "waveFibState.lifecycle.postAbcReset.postDownImpulseBounce",
+      priority: 2,
+
+      action: postDownImpulseBounce?.action || "WAIT_FOR_CONFIRMATION",
+      direction: "NONE",
+      active: false,
+      readOnly: true,
+      noExecution: true,
+      tradeableOpportunityBlocked: true,
+
+      currentPrice: postDownImpulseBounce?.currentPrice ?? null,
+      reasonCodes: [
+        "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
+        "POSSIBLE_W5_UP_RECLASSIFICATION_WATCH",
+        "READ_ONLY",
+        "NO_EXECUTION",
+        "DIRECTION_NONE",
+      ],
+    };
+  }
+
+  if (postAbcReset?.state === "POST_ABC_W2_BOUNCE_WATCH") {
+    return {
+      key: "POST_ABC_W2_BOUNCE_WATCH",
+      headline:
+        postAbcReset?.headline ||
+        engine22WaveStrategy?.tradeContextSummary?.headline ||
+        "POST ABC COMPLETE — WATCH WAVE 2 BOUNCE",
+      sourcePath: "waveFibState.lifecycle.postAbcReset",
+      priority: 3,
+
+      action: postAbcReset?.action || "WAIT_FOR_RECLAIM_CONFIRMATION",
+      direction: "NONE",
+      active: false,
+      readOnly: true,
+      noExecution: true,
+      tradeableOpportunityBlocked: true,
+
+      currentPrice: postAbcReset?.currentPrice ?? null,
+      reasonCodes: [
+        "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
+        "POST_ABC_W2_BOUNCE_WATCH",
+        "READ_ONLY",
+        "NO_EXECUTION",
+        "DIRECTION_NONE",
+      ],
+    };
+  }
+
+  return {
+    key:
+      waveOpportunity?.setupType ||
+      engine22WaveStrategy?.state ||
+      "UNKNOWN_ENGINE22_LIFECYCLE_STATE",
+    headline:
+      engine22WaveStrategy?.tradeContextSummary?.headline ||
+      engine22WaveStrategy?.headline ||
+      "Engine 22 lifecycle state unavailable",
+    sourcePath: "waveOpportunity",
+    priority: 99,
+
+    action:
+      engine22WaveStrategy?.tradeContextSummary?.action ||
+      waveOpportunity?.action ||
+      null,
+    direction: waveOpportunity?.direction || "NONE",
+    active: waveOpportunity?.active === true,
+    readOnly: true,
+    noExecution: true,
+    tradeableOpportunityBlocked: true,
+
+    reasonCodes: [
+      "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
+      "FALLBACK_WAVE_OPPORTUNITY_STATE",
+      "READ_ONLY",
+      "NO_EXECUTION",
+    ],
+  };
+}
+
+function applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy) {
+  if (!engine22WaveStrategy || typeof engine22WaveStrategy !== "object") {
+    return engine22WaveStrategy;
+  }
+
+  const currentLifecycleState =
+    buildEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
+
+  const shouldMirrorW5Complete =
+    currentLifecycleState?.key === "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH";
+
+  const waveOpportunity = shouldMirrorW5Complete
+    ? {
+        ...(engine22WaveStrategy.waveOpportunity || {}),
+        setupType: "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+        readiness: "WATCH",
+        direction: "NONE",
+        active: false,
+        noExecution: true,
+        tradeableOpportunityBlocked: true,
+      }
+    : engine22WaveStrategy.waveOpportunity || null;
+
+  return {
+    ...engine22WaveStrategy,
+
+    currentLifecycleState,
+
+    ...(shouldMirrorW5Complete
+      ? {
+          setupType: "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+          readiness: "WATCH",
+          direction: "NONE",
+          active: false,
+          noExecution: true,
+          tradeableOpportunityBlocked: true,
+        }
+      : {}),
+
+    waveOpportunity,
+
+    reasonCodes: [
+      ...(Array.isArray(engine22WaveStrategy.reasonCodes)
+        ? engine22WaveStrategy.reasonCodes
+        : []),
+      "ENGINE22_CURRENT_LIFECYCLE_STATE_CONTRACT_APPLIED",
+    ],
+  };
+}
+
 /* -----------------------------
    Build one strategy
 ------------------------------*/
@@ -3497,6 +3681,9 @@ const zoneContext = buildZoneContext(
           "1d": marketMeter?.layers?.emaPosture?.daily?.bars || [],
         },
       });
+
+      engine22WaveStrategy =
+        applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
     } catch (err) {
       console.error("[E22 PRE-ENGINE15 WAVE ERROR]", err);
 
@@ -3783,6 +3970,9 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
         symbol,
         strategyId: s.strategyId,
       });
+
+      engine22WaveStrategy =
+        applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
     }
   } catch (err) {
     console.error("[E22G TRADE DECISION ERROR]", err);
