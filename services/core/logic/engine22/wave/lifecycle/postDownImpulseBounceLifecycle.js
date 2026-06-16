@@ -374,6 +374,25 @@ export function buildPostDownImpulseBounceLifecycle({
     cHigh: waveCHigh,
     cUpTargets,
   });
+  
+  const c200 = validPrice(cUpTargets?.c200);
+  const c2618 = validPrice(cUpTargets?.c2618);
+
+  const c200Exceeded =
+    price !== null &&
+    c200 !== null &&
+    price >= c200;
+
+  const c2618Exceeded =
+    price !== null &&
+    c2618 !== null &&
+    price >= c2618;
+
+  const possibleW5UpReclassification =
+    waveCHigh === null &&
+    c2618Exceeded === true &&
+    cProgress?.aboveAHigh === true;
+  
 
   let state = "POST_MINOR_5_BOUNCE_WAITING_FOR_A";
   let nextExpectedStructure = "WAIT_FOR_A_HIGH";
@@ -413,6 +432,18 @@ export function buildPostDownImpulseBounceLifecycle({
     price !== null &&
     originLow !== null &&
     price < originLow;
+
+  if (possibleW5UpReclassification) {
+  state = "POST_MINOR_5_BOUNCE_EXCEEDED_C2618_POSSIBLE_W5_UP";
+  nextExpectedStructure = "WAIT_FOR_PULLBACK_RECLAIM_TO_CONFIRM_W5_UP";
+  read =
+    "Post-Minor-5 corrective bounce exceeded the C 2.618 target without a marked C high. Treat as possible Wave 5 up reclassification / bullish continuation watch. No chase. Wait for controlled pullback or reclaim confirmation.";
+} else if (c200Exceeded && waveCHigh === null) {
+  state = "POST_MINOR_5_BOUNCE_EXCEEDED_C200_C_LEG_EXTENDED";
+  nextExpectedStructure = "WATCH_C_UP_MATURITY_OR_W5_UP_RECLASSIFICATION";
+  read =
+    "Post-Minor-5 corrective bounce exceeded the C 2.000 target. C-up is extended and mature. Watch for either C-leg exhaustion or possible Wave 5 up reclassification.";
+}  
 
   if (failedBounce) {
     state = "POST_MINOR_5_BOUNCE_FAILED_BELOW_ORIGIN";
@@ -462,6 +493,10 @@ export function buildPostDownImpulseBounceLifecycle({
 
     cProgress,
 
+    c200Exceeded,
+    c2618Exceeded,
+    possibleW5UpReclassification,
+
     failedBounce,
     nextExpectedStructure,
     read,
@@ -482,7 +517,12 @@ export function buildPostDownImpulseBounceLifecycle({
       bClassification.status,
       bClassification.correctionType,
       cProgress.highestTargetHit
-        ? `C_UP_TARGET_HIT_${String(cProgress.highestTargetHit).toUpperCase()}`
+       ? `C_UP_TARGET_HIT_${String(cProgress.highestTargetHit).toUpperCase()}`
+       : null,
+      c200Exceeded ? "C_UP_EXCEEDED_C200" : null,
+      c2618Exceeded ? "C_UP_EXCEEDED_C2618" : null,
+      possibleW5UpReclassification
+        ? "POSSIBLE_W5_UP_RECLASSIFICATION"
         : null,
       failedBounce ? "POST_W5_BOUNCE_FAILED" : null,
       "READ_ONLY",
