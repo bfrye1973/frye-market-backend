@@ -1,9 +1,9 @@
 // services/core/logic/engine22/wave/lifecycle/possibleW5UpLifecycle.js
-// Engine 22 — Possible Minor Wave 5 up lifecycle
+// Engine 22 — Possible Minor W5 up lifecycle
 //
 // Purpose:
-// After a post-Minor-5 corrective bounce exceeds normal C-up targets,
-// reclassify the move as a possible Minor Wave 5 up watch.
+// Read the manually marked POSSIBLE_W5_UP structure after a likely Wave 4 low.
+// When W5_HIGH is marked, calculate post-W5 pullback levels for entry planning.
 // This is read-only.
 // It does not create trades.
 // It does not allow longs.
@@ -58,7 +58,7 @@ function roundPrice(value, symbol = "ES") {
   return tick ? roundToTick(value, tick) : round2(value);
 }
 
-function buildEmptyRetraceLevels() {
+function emptyLevels() {
   return {
     r236: null,
     r382: null,
@@ -68,108 +68,108 @@ function buildEmptyRetraceLevels() {
   };
 }
 
-function buildEmptyTargets() {
-  return {
-    w5EqW1: null,
-    w5_1272_W1: null,
-    w5_1618_W1: null,
-    w5_0618_W1ToW3: null,
-    w5_1000_W1ToW3: null,
-  };
-}
+function buildPullbackLevelsFromW5({ symbol, w4Low, w5High }) {
+  const low = validPrice(w4Low);
+  const high = validPrice(w5High);
 
-function buildRetraceDownFromHigh({ symbol, low, high }) {
-  const origin = validPrice(low);
-  const top = validPrice(high);
-
-  if (origin === null || top === null || top <= origin) {
-    return buildEmptyRetraceLevels();
+  if (low === null || high === null || high <= low) {
+    return emptyLevels();
   }
 
-  const range = top - origin;
+  const range = high - low;
 
   return {
-    r236: roundPrice(top - range * 0.236, symbol),
-    r382: roundPrice(top - range * 0.382, symbol),
-    r500: roundPrice(top - range * 0.5, symbol),
-    r618: roundPrice(top - range * 0.618, symbol),
-    r786: roundPrice(top - range * 0.786, symbol),
+    r236: roundPrice(high - range * 0.236, symbol),
+    r382: roundPrice(high - range * 0.382, symbol),
+    r500: roundPrice(high - range * 0.5, symbol),
+    r618: roundPrice(high - range * 0.618, symbol),
+    r786: roundPrice(high - range * 0.786, symbol),
   };
 }
 
-function buildW5UpTargets({
-  symbol,
-  originLow,
-  w1High,
-  w2Low,
-  w3High,
-  w4Low,
-}) {
+function buildFullMovePullbackLevels({ symbol, originLow, w5High }) {
   const origin = validPrice(originLow);
-  const oneHigh = validPrice(w1High);
-  const twoLow = validPrice(w2Low);
-  const threeHigh = validPrice(w3High);
-  const fourLow = validPrice(w4Low);
+  const high = validPrice(w5High);
 
-  if (origin === null || oneHigh === null) {
-    return buildEmptyTargets();
+  if (origin === null || high === null || high <= origin) {
+    return emptyLevels();
   }
 
-  const w1Range = oneHigh - origin;
-
-  if (!Number.isFinite(w1Range) || w1Range <= 0) {
-    return buildEmptyTargets();
-  }
-
-  const base = fourLow ?? twoLow ?? origin;
-
-  const oneToThreeRange =
-    origin !== null && threeHigh !== null && threeHigh > origin
-      ? threeHigh - origin
-      : null;
+  const range = high - origin;
 
   return {
-    w5EqW1: roundPrice(base + w1Range * 1.0, symbol),
-    w5_1272_W1: roundPrice(base + w1Range * 1.272, symbol),
-    w5_1618_W1: roundPrice(base + w1Range * 1.618, symbol),
-    w5_0618_W1ToW3:
-      oneToThreeRange !== null
-        ? roundPrice(base + oneToThreeRange * 0.618, symbol)
-        : null,
-    w5_1000_W1ToW3:
-      oneToThreeRange !== null
-        ? roundPrice(base + oneToThreeRange * 1.0, symbol)
-        : null,
+    r236: roundPrice(high - range * 0.236, symbol),
+    r382: roundPrice(high - range * 0.382, symbol),
+    r500: roundPrice(high - range * 0.5, symbol),
+    r618: roundPrice(high - range * 0.618, symbol),
+    r786: roundPrice(high - range * 0.786, symbol),
   };
 }
 
-function classifyTargetProgress({ currentPrice, w5High, targets }) {
+function buildUpsideProgress({ currentPrice, w5High }) {
   const price = validPrice(currentPrice);
   const high = validPrice(w5High);
-  const activeHigh = high ?? price;
-
-  const targetEntries = [
-    ["w5EqW1", targets?.w5EqW1],
-    ["w5_1272_W1", targets?.w5_1272_W1],
-    ["w5_1618_W1", targets?.w5_1618_W1],
-    ["w5_0618_W1ToW3", targets?.w5_0618_W1ToW3],
-    ["w5_1000_W1ToW3", targets?.w5_1000_W1ToW3],
-  ];
-
-  let highestTargetHit = null;
-
-  if (activeHigh !== null) {
-    for (const [key, target] of targetEntries) {
-      const t = validPrice(target);
-      if (t !== null && activeHigh >= t) highestTargetHit = key;
-    }
-  }
 
   return {
-    price,
-    activeHigh,
-    highestTargetHit,
-    reachedTarget: highestTargetHit !== null,
+    currentPrice: round2(price),
+    w5High: round2(high),
+    belowW5High:
+      price !== null && high !== null
+        ? price < high
+        : null,
+    atOrAboveW5High:
+      price !== null && high !== null
+        ? price >= high
+        : null,
+    pointsOffHigh:
+      price !== null && high !== null
+        ? round2(high - price)
+        : null,
+  };
+}
+
+function buildEntryZones(pullbackLevels = {}) {
+  const r236 = validPrice(pullbackLevels?.r236);
+  const r382 = validPrice(pullbackLevels?.r382);
+  const r500 = validPrice(pullbackLevels?.r500);
+  const r618 = validPrice(pullbackLevels?.r618);
+  const r786 = validPrice(pullbackLevels?.r786);
+
+  return {
+    shallowTrendPullback:
+      r236 !== null && r382 !== null
+        ? {
+            label: "SHALLOW_TREND_PULLBACK",
+            lo: Math.min(r236, r382),
+            hi: Math.max(r236, r382),
+          }
+        : null,
+
+    standardPullback:
+      r382 !== null && r500 !== null
+        ? {
+            label: "STANDARD_PULLBACK_ENTRY_ZONE",
+            lo: Math.min(r382, r500),
+            hi: Math.max(r382, r500),
+          }
+        : null,
+
+    deeperSupport:
+      r500 !== null && r618 !== null
+        ? {
+            label: "DEEPER_SUPPORT_ENTRY_ZONE",
+            lo: Math.min(r500, r618),
+            hi: Math.max(r500, r618),
+          }
+        : null,
+
+    failureWarning:
+      r786 !== null
+        ? {
+            label: "FAILURE_WARNING_BELOW_786",
+            level: r786,
+          }
+        : null,
   };
 }
 
@@ -181,13 +181,25 @@ function emptyRead({ symbol, currentPrice, reason }) {
     direction: "NONE",
     tradeableOpportunityBlocked: true,
     noExecution: true,
+
     symbol,
     degree: "minor",
     currentPrice: round2(currentPrice),
     reason,
-    read: "Possible Wave 5 up marks are unavailable.",
-    w5UpTargets: buildEmptyTargets(),
-    postW5DownFibLevels: buildEmptyRetraceLevels(),
+
+    originLow: null,
+    w1High: null,
+    w2Low: null,
+    w3High: null,
+    w4Low: null,
+    w5High: null,
+
+    pullbackLevelsFromW5: emptyLevels(),
+    fullMovePullbackLevels: emptyLevels(),
+    entryZones: buildEntryZones(emptyLevels()),
+
+    nextExpectedStructure: "WAIT_FOR_POSSIBLE_W5_UP_MARKS",
+    read: "Possible W5 up marks are unavailable.",
     reasonCodes: [
       "POSSIBLE_W5_UP_LIFECYCLE_BUILT",
       reason,
@@ -203,22 +215,8 @@ export function buildPossibleW5UpLifecycle({
   degree = "minor",
   currentPrice = null,
   possibleW5UpMarks = null,
-  postDownImpulseBounce = null,
 } = {}) {
   const price = validPrice(currentPrice);
-
-  const reclassificationActive =
-    postDownImpulseBounce?.possibleW5UpReclassification === true ||
-    String(postDownImpulseBounce?.state || "").toUpperCase() ===
-      "POST_MINOR_5_BOUNCE_EXCEEDED_C2618_POSSIBLE_W5_UP";
-
-  if (!reclassificationActive) {
-    return emptyRead({
-      symbol,
-      currentPrice: price,
-      reason: "POSSIBLE_W5_UP_RECLASSIFICATION_NOT_ACTIVE",
-    });
-  }
 
   if (!possibleW5UpMarks || typeof possibleW5UpMarks !== "object") {
     return emptyRead({
@@ -246,52 +244,73 @@ export function buildPossibleW5UpLifecycle({
   const w5High = validPrice(possibleW5UpMarks.w5High);
   const w5Time = possibleW5UpMarks.w5Time || null;
 
-  const provisionalW5High = w5High ?? price;
+  const hasOrigin = originLow !== null;
+  const hasW1 = w1High !== null;
+  const hasW2 = w2Low !== null;
+  const hasW3 = w3High !== null;
+  const hasW4 = w4Low !== null;
+  const hasW5 = w5High !== null;
 
-  const w5UpTargets = buildW5UpTargets({
+  let state = "POSSIBLE_MINOR_W5_UP_MARKS_INCOMPLETE";
+  let nextExpectedStructure = "WAIT_FOR_W5_UP_MARKS";
+  let read =
+    "Possible Minor W5 up marks are incomplete. Read-only watch.";
+
+  if (hasOrigin && hasW1 && !hasW2) {
+    state = "POSSIBLE_MINOR_W5_UP_W1_MARKED_WAITING_FOR_W2";
+    nextExpectedStructure = "WAIT_FOR_W2_LOW";
+    read =
+      "Possible Minor W5 up has origin and W1 high marked. Waiting for W2 low.";
+  } else if (hasOrigin && hasW1 && hasW2 && !hasW3) {
+    state = "POSSIBLE_MINOR_W5_UP_W2_MARKED_WAITING_FOR_W3";
+    nextExpectedStructure = "WAIT_FOR_W3_HIGH";
+    read =
+      "Possible Minor W5 up has W1 and W2 marked. Waiting for W3 high.";
+  } else if (hasOrigin && hasW1 && hasW2 && hasW3 && !hasW4) {
+    state = "POSSIBLE_MINOR_W5_UP_W3_MARKED_WAITING_FOR_W4";
+    nextExpectedStructure = "WAIT_FOR_W4_LOW";
+    read =
+      "Possible Minor W5 up has W3 high marked. Waiting for W4 pullback low.";
+  } else if (hasOrigin && hasW1 && hasW2 && hasW3 && hasW4 && !hasW5) {
+    state = "POSSIBLE_MINOR_W5_UP_W4_MARKED_W5_ACTIVE";
+    nextExpectedStructure = "WAIT_FOR_W5_HIGH";
+    read =
+      "Possible Minor W5 up has W4 low marked. W5 up is active. Waiting for W5 high.";
+  } else if (hasOrigin && hasW1 && hasW2 && hasW3 && hasW4 && hasW5) {
+    state = "POSSIBLE_MINOR_W5_UP_COMPLETE_POST_W5_PULLBACK_WATCH";
+    nextExpectedStructure = "WATCH_POST_W5_PULLBACK_ENTRY_ZONES";
+    read =
+      "Possible Minor W5 up is marked complete. Watch pullback fib levels off the W5 high for reaction / entry zones.";
+  }
+
+  const pullbackLevelsFromW5 = buildPullbackLevelsFromW5({
+    symbol,
+    w4Low,
+    w5High,
+  });
+
+  const fullMovePullbackLevels = buildFullMovePullbackLevels({
     symbol,
     originLow,
-    w1High,
-    w2Low,
-    w3High,
-    w4Low,
+    w5High,
   });
 
-  const targetProgress = classifyTargetProgress({
+  const entryZones = buildEntryZones(pullbackLevelsFromW5);
+
+  const rangeW4ToW5 =
+    w4Low !== null && w5High !== null && w5High > w4Low
+      ? roundPrice(w5High - w4Low, symbol)
+      : null;
+
+  const rangeOriginToW5 =
+    originLow !== null && w5High !== null && w5High > originLow
+      ? roundPrice(w5High - originLow, symbol)
+      : null;
+
+  const priceProgress = buildUpsideProgress({
     currentPrice: price,
     w5High,
-    targets: w5UpTargets,
   });
-
-  const postW5DownFibLevels = buildRetraceDownFromHigh({
-    symbol,
-    low: originLow,
-    high: provisionalW5High,
-  });
-
-  const w5Marked = w5High !== null;
-
-  let state = "POSSIBLE_MINOR_W5_UP_ACTIVE";
-  let nextExpectedStructure = "WAIT_FOR_W5_COMPLETION_OR_PULLBACK_RECLAIM";
-  let read =
-    "Wave 4 low may be complete. Current move is treated as possible Minor Wave 5 up. Read-only watch only.";
-
-  if (originLow === null) {
-    state = "POSSIBLE_W5_UP_ORIGIN_MISSING";
-    nextExpectedStructure = "MARK_W4_LOW_ORIGIN";
-    read =
-      "Possible Wave 5 up reclassification is active, but the Wave 4 low / origin is missing.";
-  } else if (w5Marked) {
-    state = "POSSIBLE_MINOR_W5_UP_HIGH_MARKED_WATCH_PULLBACK";
-    nextExpectedStructure = "WATCH_POST_W5_PULLBACK_LEVELS";
-    read =
-      "Possible Minor Wave 5 up has a marked high. Watch expected downside retracement levels off the Wave 5 high. Read-only watch only.";
-  } else if (w3High !== null && w4Low !== null) {
-    state = "POSSIBLE_MINOR_W5_UP_W4_MARKED_W5_ACTIVE";
-    nextExpectedStructure = "WATCH_W5_UP_TARGETS";
-    read =
-      "Possible Minor Wave 5 up has W3 high and W4 low marked. Watching W5 up targets. No chase.";
-  }
 
   return {
     active: false,
@@ -323,24 +342,23 @@ export function buildPossibleW5UpLifecycle({
     w5High: roundPrice(w5High, symbol),
     w5Time,
 
-    provisionalW5High: roundPrice(provisionalW5High, symbol),
+    rangeW4ToW5,
+    rangeOriginToW5,
 
-    rangeFromOriginToW5:
-      originLow !== null && provisionalW5High !== null
-        ? roundPrice(provisionalW5High - originLow, symbol)
-        : null,
+    pullbackLevelsFromW5,
+    fullMovePullbackLevels,
+    entryZones,
+    priceProgress,
 
-    w5Marked,
-    w5UpTargets,
-    targetProgress,
-    postW5DownFibLevels,
-
+    w5Complete: hasW5,
     nextExpectedStructure,
     read,
 
     needs: [
-      "WAIT_FOR_W5_COMPLETION_OR_PULLBACK_RECLAIM",
-      "NO_CHASE_LONG",
+      hasW5
+        ? "WATCH_POST_W5_PULLBACK_ENTRY_ZONES"
+        : "WAIT_FOR_W5_HIGH_MARK",
+      "NO_CHASE",
       "NO_AUTOMATIC_LONG",
       "NO_AUTOMATIC_SHORT",
       "NO_EXECUTION",
@@ -348,12 +366,14 @@ export function buildPossibleW5UpLifecycle({
 
     reasonCodes: [
       "POSSIBLE_W5_UP_LIFECYCLE_BUILT",
-      "POSSIBLE_W5_UP_RECLASSIFICATION_ACTIVE",
       state,
-      w5Marked ? "W5_HIGH_MARKED" : "W5_HIGH_NOT_MARKED",
-      targetProgress.highestTargetHit
-        ? `W5_UP_TARGET_HIT_${String(targetProgress.highestTargetHit).toUpperCase()}`
-        : null,
+      hasOrigin ? "POSSIBLE_W5_UP_ORIGIN_MARKED" : "POSSIBLE_W5_UP_ORIGIN_MISSING",
+      hasW1 ? "POSSIBLE_W5_UP_W1_MARKED" : null,
+      hasW2 ? "POSSIBLE_W5_UP_W2_MARKED" : null,
+      hasW3 ? "POSSIBLE_W5_UP_W3_MARKED" : null,
+      hasW4 ? "POSSIBLE_W5_UP_W4_MARKED" : null,
+      hasW5 ? "POSSIBLE_W5_UP_W5_MARKED_COMPLETE" : null,
+      hasW5 ? "POST_W5_PULLBACK_LEVELS_AVAILABLE" : null,
       "READ_ONLY",
       "NO_EXECUTION",
       "DIRECTION_NONE",
