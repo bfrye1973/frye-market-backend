@@ -28,7 +28,7 @@
 // Engine 15ES answers:
 // Is ES ready, watch-only, blocked, or waiting — and what exactly does the trader need next?
 
-const ENGINE = "engine15.esReadiness.v1.5";
+const ENGINE = "engine15.esReadiness.v1.6";
 const DEFAULT_STRATEGY_ID = "intraday_scalp@10m";
 const ES_TICK_SIZE = 0.25;
 
@@ -129,8 +129,17 @@ function engine16Invalidated(engine16) {
   );
 }
 
-function getCurrentPrice({ emaPosture, engine16, zoneContext, waveOpportunity }) {
+function getCurrentPrice({
+  emaPosture,
+  engine16,
+  zoneContext,
+  waveOpportunity,
+  currentLifecycleState = null,
+  possibleW5Up = null,
+}) {
   return (
+    toNum(currentLifecycleState?.currentPrice) ??
+    toNum(possibleW5Up?.currentPrice) ??
     toNum(waveOpportunity?.currentPrice) ??
     toNum(emaPosture?.tenMinute?.close) ??
     toNum(engine16?.regimeLayers?.trigger10m?.close) ??
@@ -143,6 +152,25 @@ function getCurrentPrice({ emaPosture, engine16, zoneContext, waveOpportunity })
 /* -----------------------------
    Engine 22 waveOpportunity readers
 ------------------------------*/
+
+function getEngine22WaveStrategy(snapshotContext) {
+  return snapshotContext?.engine22WaveStrategy || null;
+}
+
+function getCurrentLifecycleState(engine22WaveStrategy) {
+  return engine22WaveStrategy?.currentLifecycleState || null;
+}
+
+function getPossibleW5Up(engine22WaveStrategy) {
+  return (
+    engine22WaveStrategy?.waveFibState?.lifecycle?.postAbcReset?.possibleW5Up ||
+    null
+  );
+}
+
+function lifecycleKey(currentLifecycleState) {
+  return safeUpper(currentLifecycleState?.key, "NONE");
+}
 
 function getWaveOpportunity(snapshotContext) {
   return (
@@ -262,6 +290,20 @@ function isPostAbcW2BounceWatch(waveOpportunity) {
     waveDirection(waveOpportunity) === "NONE" &&
     waveOpportunity?.active === false &&
     waveOpportunity?.paperSignalCandidate === true
+  );
+}
+
+function isPossibleW5UpCompletePullbackWatch({
+  currentLifecycleState,
+  possibleW5Up,
+  waveOpportunity,
+}) {
+  return (
+    lifecycleKey(currentLifecycleState) === "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH" ||
+    possibleW5Up?.w5Complete === true ||
+    safeUpper(possibleW5Up?.state, "") ===
+      "POSSIBLE_MINOR_W5_UP_COMPLETE_POST_W5_PULLBACK_WATCH" ||
+    waveSetupType(waveOpportunity) === "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH"
   );
 }
 
@@ -890,6 +932,151 @@ function buildPostAbcW2BounceWatchDecision({
   };
 }
 
+function buildPossibleW5UpCompletePullbackWatchDecision({
+  symbol,
+  strategyId,
+  permission,
+  currentPrice,
+  currentLifecycleState,
+  possibleW5Up,
+  waveOpportunity,
+  debug,
+}) {
+  const pText = permissionText(permission);
+
+  const pullbackLevelsFromW5 =
+    currentLifecycleState?.pullbackLevelsFromW5 ??
+    possibleW5Up?.pullbackLevelsFromW5 ??
+    null;
+
+  const entryZones =
+    currentLifecycleState?.entryZones ??
+    possibleW5Up?.entryZones ??
+    null;
+
+  const priceProgress =
+    currentLifecycleState?.priceProgress ??
+    possibleW5Up?.priceProgress ??
+    null;
+
+  const w5Complete =
+    currentLifecycleState?.w5Complete === true ||
+    possibleW5Up?.w5Complete === true;
+
+  const noExecution =
+    currentLifecycleState?.noExecution === true ||
+    possibleW5Up?.noExecution === true;
+
+  const tradeableOpportunityBlocked =
+    currentLifecycleState?.tradeableOpportunityBlocked === true ||
+    possibleW5Up?.tradeableOpportunityBlocked === true;
+
+  return {
+    ok: true,
+    engine: ENGINE,
+    symbol,
+    strategyId,
+
+    strategyType: "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+    direction: "NONE",
+    readinessLabel: "WATCH",
+    executionBias: "NONE",
+    action: "WAIT_FOR_POST_W5_PULLBACK_REACTION_OR_RECLAIM",
+    priority: 25,
+    entryStyle: "WATCH_ONLY_POST_W5_PULLBACK_REACTION",
+    active: false,
+    freshEntryNow: false,
+
+    reasonCodes: unique([
+      "ENGINE15_POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+      "ENGINE22_CURRENT_LIFECYCLE_STATE_CONSUMED",
+      "ENGINE22_POSSIBLE_W5_UP_COMPLETE",
+      "WATCH_ONLY",
+      "NO_EXECUTION",
+      "NO_CHASE",
+      "WAIT_FOR_POST_W5_PULLBACK_REACTION",
+    ]),
+
+    blockers: [],
+    conflicts: [],
+
+    needs: unique([
+      "WATCH_PULLBACK_ZONE_REACTION",
+      "WAIT_FOR_RECLAIM_CONFIRMATION",
+      "ENGINE3_REACTION_CONFIRMATION",
+      "ENGINE4_PARTICIPATION_CONFIRMATION",
+      "ENGINE6_FINAL_PERMISSION_REQUIRED",
+    ]),
+
+    summary:
+      currentLifecycleState?.summary ||
+      possibleW5Up?.summary ||
+      waveOpportunity?.summary ||
+      "Possible Minor W5 up is marked complete. Engine 15ES is watch-only while price pulls back into Engine 22 zones and waits for Engine 3 reaction, Engine 4 participation, and Engine 6 final permission.",
+
+    qualityGatePassed: false,
+    momentumGatePassed: false,
+    permissionGatePassed: false,
+
+    qualityScore: 0,
+    qualityGrade: "WATCH",
+    qualityBand: "WATCH_ONLY",
+
+    qualityBreakdown: {
+      engine22CurrentLifecycleKey: currentLifecycleState?.key || null,
+      possibleW5UpCompletePullbackWatch: true,
+      w5Complete,
+      currentPrice:
+        toNum(currentLifecycleState?.currentPrice, null) ??
+        toNum(possibleW5Up?.currentPrice, null) ??
+        toNum(currentPrice, null),
+      noExecution,
+      tradeableOpportunityBlocked,
+      executionAllowed: false,
+      pullbackLevelsFromW5,
+      entryZones,
+      priceProgress,
+    },
+
+    permission: pText,
+    sizeMultiplier: toNum(permission?.sizeMultiplier, null),
+
+    setupChain: [
+      "ENGINE22_CURRENT_LIFECYCLE_STATE",
+      "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+      "WATCH_ONLY",
+      "WAIT_FOR_POST_W5_PULLBACK_REACTION",
+      "ENGINE3_REACTION_CONFIRMATION",
+      "ENGINE4_PARTICIPATION_CONFIRMATION",
+      "ENGINE6_FINAL_PERMISSION_REQUIRED",
+    ],
+
+    nextSetupType: "WAIT_FOR_POST_W5_PULLBACK_REACTION_OR_RECLAIM",
+    primaryExhaustionTF: null,
+
+    signalEvent: buildSignalEvent(),
+
+    lifecycle: buildLifecycle({
+      currentPrice,
+      nextFocus: "WAIT_FOR_POST_W5_PULLBACK_REACTION_OR_RECLAIM",
+      lifecycleStage: "WATCH",
+    }),
+
+    futures: {
+      tickSize: ES_TICK_SIZE,
+      liveExecutionEnabled: false,
+      paperOnly: true,
+    },
+
+    engine22CurrentLifecycleState: currentLifecycleState || null,
+    pullbackLevelsFromW5,
+    entryZones,
+    priceProgress,
+
+    debug,
+  };
+}
+
 function chooseNextSetupType({
   readinessLabel,
   waveNeedsReclaim,
@@ -1026,7 +1213,12 @@ export function buildEngine15EsDecision({
     const emaPosture = snapshotContext?.emaPosture || {};
     const engine2State = snapshotContext?.engine2State || null;
     const marketRegime = snapshotContext?.marketRegime || null;
+
+    const engine22WaveStrategy = getEngine22WaveStrategy(snapshotContext);
+    const currentLifecycleState = getCurrentLifecycleState(engine22WaveStrategy);
+    const possibleW5Up = getPossibleW5Up(engine22WaveStrategy);
     const waveOpportunity = getWaveOpportunity(snapshotContext);
+
     const engine23Interpretation = getEngine23Interpretation(snapshotContext);
     const engine23Damage = buildEngine23DamageContext(engine23Interpretation);
     const tenMinute = emaPosture?.tenMinute || null;
@@ -1039,8 +1231,9 @@ export function buildEngine15EsDecision({
       engine16,
       zoneContext,
       waveOpportunity,
+      currentLifecycleState,
+      possibleW5Up,
     });
-
     const pText = permissionText(permission);
 
     // Critical data checks.
@@ -1066,6 +1259,14 @@ export function buildEngine15EsDecision({
 
     const hasWaveOpportunity = hasValidW3W5Opportunity(waveOpportunity);
     const postAbcW2BounceWatch = isPostAbcW2BounceWatch(waveOpportunity);
+
+    const possibleW5UpCompletePullbackWatch =
+      isPossibleW5UpCompletePullbackWatch({
+        currentLifecycleState,
+        possibleW5Up,
+        waveOpportunity,
+     });
+
     const waveInvalid = waveOpportunityInvalid(waveOpportunity);
     const waveWatchOnly = waveOpportunityWatchOnly(waveOpportunity);
     const waveArming = waveOpportunityArming(waveOpportunity);
@@ -1074,30 +1275,42 @@ export function buildEngine15EsDecision({
     const waveHighChase = waveOpportunityHighChaseRisk(waveOpportunity);
     const waveNeedsReclaim = waveNeedsPullbackOrReclaim(waveOpportunity);
 
-   if (!waveOpportunityExists(waveOpportunity)) {
-     needs.push("ENGINE22_WAVE_OPPORTUNITY");
-     reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_MISSING");
-   } else if (postAbcW2BounceWatch) {
-     reasonCodes.push("ENGINE15_POST_ABC_BOUNCE_WATCH");
-     reasonCodes.push("ENGINE22_POST_ABC_W2_BOUNCE_WATCH");
-     reasonCodes.push("WATCH_ONLY");
-     reasonCodes.push("NO_EXECUTION");
-     reasonCodes.push("WAIT_FOR_RECLAIM_CONFIRMATION");
-   } else if (!hasWaveOpportunity) {
-     needs.push("VALID_W3_OR_W5_OPPORTUNITY");
-     reasonCodes.push("NO_W3_W5_OPPORTUNITY");
-   } else {
-     reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_FOUND");
-     reasonCodes.push(`ENGINE22_${waveSetupType(waveOpportunity)}`);
-     reasonCodes.push(`ENGINE22_DEGREE_${waveDegree(waveOpportunity)}`);
-   }
+if (possibleW5UpCompletePullbackWatch) {
+  reasonCodes.push("ENGINE15_POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH");
+  reasonCodes.push("ENGINE22_CURRENT_LIFECYCLE_STATE_CONSUMED");
+  reasonCodes.push("ENGINE22_POSSIBLE_W5_UP_COMPLETE");
+  reasonCodes.push("WATCH_ONLY");
+  reasonCodes.push("NO_EXECUTION");
+  reasonCodes.push("NO_CHASE");
+  reasonCodes.push("WAIT_FOR_POST_W5_PULLBACK_REACTION");
+} else if (!waveOpportunityExists(waveOpportunity)) {
+  needs.push("ENGINE22_WAVE_OPPORTUNITY");
+  reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_MISSING");
+} else if (postAbcW2BounceWatch) {
+  reasonCodes.push("ENGINE15_POST_ABC_BOUNCE_WATCH");
+  reasonCodes.push("ENGINE22_POST_ABC_W2_BOUNCE_WATCH");
+  reasonCodes.push("WATCH_ONLY");
+  reasonCodes.push("NO_EXECUTION");
+  reasonCodes.push("WAIT_FOR_RECLAIM_CONFIRMATION");
+} else if (!hasWaveOpportunity) {
+  needs.push("VALID_W3_OR_W5_OPPORTUNITY");
+  reasonCodes.push("NO_W3_W5_OPPORTUNITY");
+} else {
+  reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_FOUND");
+  reasonCodes.push(`ENGINE22_${waveSetupType(waveOpportunity)}`);
+  reasonCodes.push(`ENGINE22_DEGREE_${waveDegree(waveOpportunity)}`);
+}
 
     if (waveInvalid) {
       blockers.push("ENGINE22_WAVE_OPPORTUNITY_INVALID");
       reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_INVALID");
     }
 
-    if (waveWatchOnly && !postAbcW2BounceWatch) {
+    if (
+      waveWatchOnly &&
+      !postAbcW2BounceWatch &&
+      !possibleW5UpCompletePullbackWatch
+    ) {
       needs.push("ENGINE22_ARMING_OR_READY");
       reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_WATCH");
     }
@@ -1166,11 +1379,13 @@ export function buildEngine15EsDecision({
     if (dailyBelow) {
       if (postAbcW2BounceWatch) {
         reasonCodes.push("DAILY_BELOW_EMA10_BOUNCE_CAUTION");
-     } else {
-       blockers.push("DAILY_BELOW_EMA10_LONG_CONTINUATION_BLOCKED");
-       reasonCodes.push("DAILY_BELOW_EMA10_LONG_PERMISSION_REDUCED");
-     }
-   }
+      } else if (possibleW5UpCompletePullbackWatch) {
+        reasonCodes.push("DAILY_BELOW_EMA10_POST_W5_PULLBACK_CAUTION");
+      } else {
+        blockers.push("DAILY_BELOW_EMA10_LONG_CONTINUATION_BLOCKED");
+        reasonCodes.push("DAILY_BELOW_EMA10_LONG_PERMISSION_REDUCED");
+      }
+    }
 
     const debug = {
       currentPrice,
@@ -1192,7 +1407,9 @@ export function buildEngine15EsDecision({
       waveOpportunity: waveOpportunity || null,
       engine22: {
         ignored: false,
-        source: "snapshotContext.waveOpportunity",
+        source: currentLifecycleState
+          ? "snapshotContext.engine22WaveStrategy.currentLifecycleState"
+          : "snapshotContext.waveOpportunity",
         active: waveOpportunityActive(waveOpportunity),
         setupType: waveSetupType(waveOpportunity),
         degree: waveDegree(waveOpportunity),
@@ -1247,6 +1464,7 @@ export function buildEngine15EsDecision({
       booleans: {
         hasWaveOpportunity,
         postAbcW2BounceWatch,
+        possibleW5UpCompletePullbackWatch,
         waveInvalid,
         waveWatchOnly,
         waveArming,
@@ -1273,30 +1491,43 @@ export function buildEngine15EsDecision({
       },
     };
 
-    if (blockers.length > 0) {
-      return buildBlockedDecision({
-        symbol: sym,
-        strategyId,
-        permission,
-        currentPrice,
-        blockers,
-        reasonCodes: reasonCodes.length ? reasonCodes : ["ES_READINESS_BLOCKED"],
-        needs,
-        debug,
-      });
-    }
+if (blockers.length > 0) {
+  return buildBlockedDecision({
+    symbol: sym,
+    strategyId,
+    permission,
+    currentPrice,
+    blockers,
+    reasonCodes: reasonCodes.length ? reasonCodes : ["ES_READINESS_BLOCKED"],
+    needs,
+    debug,
+  });
+}
 
-    if (postAbcW2BounceWatch) {
-      return buildPostAbcW2BounceWatchDecision({
-        symbol: sym,
-        strategyId,
-        permission,
-        currentPrice,
-        waveOpportunity,
-        dailyBelow,
-        debug,
-      });
-    }
+if (possibleW5UpCompletePullbackWatch) {
+  return buildPossibleW5UpCompletePullbackWatchDecision({
+    symbol: sym,
+    strategyId,
+    permission,
+    currentPrice,
+    currentLifecycleState,
+    possibleW5Up,
+    waveOpportunity,
+    debug,
+  });
+}
+
+if (postAbcW2BounceWatch) {
+  return buildPostAbcW2BounceWatchDecision({
+    symbol: sym,
+    strategyId,
+    permission,
+    currentPrice,
+    waveOpportunity,
+    dailyBelow,
+    debug,
+  });
+}
 
 // Context reason codes and next needs.
     if (dailyAbove) {
