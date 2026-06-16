@@ -4901,5 +4901,6 @@ return {
     },
   });
 }
+}
 
 export default computeEngine22ScalpOpportunity;
