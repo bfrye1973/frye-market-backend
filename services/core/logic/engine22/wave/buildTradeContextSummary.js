@@ -768,6 +768,121 @@ function buildCompletedDownImpulseSummary({
     ],
   };
 }
+
+function buildPossibleW5UpReclassificationSummary({
+  waveFibState,
+  waveStack,
+  clusters,
+  lifecycle,
+  postAbcReset,
+  abc,
+  abcUp,
+  wave3Down,
+  downImpulse,
+  postDownImpulseBounce,
+}) {
+  const currentPrice =
+    postDownImpulseBounce?.currentPrice ??
+    postAbcReset?.currentPrice ??
+    waveFibState?.currentPrice ??
+    null;
+
+  const originLow = postDownImpulseBounce?.originLow ?? null;
+  const waveAHigh = postDownImpulseBounce?.waveAHigh ?? null;
+  const waveBLow = postDownImpulseBounce?.waveBLow ?? null;
+
+  const cUpTargets = postDownImpulseBounce?.cUpTargets || {};
+  const highestTargetHit =
+    postDownImpulseBounce?.cProgress?.highestTargetHit || null;
+
+  return {
+    headline: "C 2.618 EXCEEDED — POSSIBLE WAVE 5 UP WATCH",
+    subheadline:
+      "Post-Minor-5 corrective bounce exceeded the C 2.618 target. Treat as possible Wave 5 up reclassification / bullish continuation watch.",
+    bias: "POSSIBLE_W5_UP_RECLASSIFICATION",
+    action: "WAIT_FOR_PULLBACK_RECLAIM_TO_CONFIRM_W5_UP",
+    direction: "NONE",
+    chaseAllowed: false,
+    severity: "warning",
+
+    topCandidate: round2(currentPrice),
+    hardInvalidation: round2(originLow),
+    reclaimLadder: null,
+
+    firstCluster: clusters.firstCluster,
+    nextCluster: clusters.nextCluster,
+
+    lifecycleState: lifecycle?.lifecycleState || null,
+    postAbcReset,
+    parentContextOnly: lifecycle?.parentContextOnly === true,
+    tradeableOpportunityBlocked:
+      lifecycle?.tradeableOpportunityBlocked === true,
+    nextAllowedSetup: "WAIT_FOR_PULLBACK_RECLAIM_TO_CONFIRM_W5_UP",
+
+    abcCorrection: abc,
+    abcUp,
+    wave3Down,
+    downImpulse,
+    postDownImpulseBounce,
+
+    reads: {
+      structureRead: waveStack.message,
+      lifecycleRead:
+        "Post-Minor-5 corrective bounce exceeded the C 2.618 target.",
+      bounceStructureRead: `Origin ${fmt(originLow)}, A high ${fmt(
+        waveAHigh
+      )}, B low ${fmt(waveBLow)}.`,
+      cTargetRead: `C-up targets: C 1.000 ${fmt(
+        cUpTargets?.c100
+      )}, C 1.272 ${fmt(cUpTargets?.c1272)}, C 1.618 ${fmt(
+        cUpTargets?.c1618
+      )}, C 2.000 ${fmt(cUpTargets?.c200)}, C 2.618 ${fmt(
+        cUpTargets?.c2618
+      )}.`,
+      currentTargetHitRead: `Current target hit: ${String(
+        highestTargetHit || "none"
+      ).toUpperCase()}.`,
+      actionRead:
+        "No chase. No automatic long. No automatic short. No execution. Wait for controlled pullback or reclaim confirmation.",
+    },
+
+    summary:
+      `${waveStack.message}\n\n` +
+      `Post-Minor-5 corrective bounce exceeded the C 2.618 target near ${fmt(
+        cUpTargets?.c2618
+      )}.\n\n` +
+      `Current price is ${fmt(
+        currentPrice
+      )}. This may be upgrading into possible Wave 5 up / bullish continuation watch.\n\n` +
+      `No chase. Wait for controlled pullback or reclaim confirmation.\n\n` +
+      `No automatic long. No automatic short. No execution.`,
+
+    needs: [
+      "WAIT_FOR_PULLBACK_RECLAIM_TO_CONFIRM_W5_UP",
+      "NO_CHASE",
+      "NO_AUTOMATIC_LONG",
+      "NO_AUTOMATIC_SHORT",
+      "NO_EXECUTION",
+    ],
+
+    reasonCodes: [
+      "TRADE_CONTEXT_SUMMARY_BUILT",
+      "C_2618_EXCEEDED",
+      "POSSIBLE_W5_UP_RECLASSIFICATION",
+      "READ_ONLY",
+      "NO_CHASE",
+      "NO_AUTOMATIC_LONG",
+      "NO_AUTOMATIC_SHORT",
+      "NO_EXECUTION",
+      ...(lifecycle?.reasonCodes || []),
+      ...(postAbcReset?.reasonCodes || []),
+      ...(Array.isArray(postDownImpulseBounce?.reasonCodes)
+        ? postDownImpulseBounce.reasonCodes
+        : []),
+    ],
+  };
+}
+
 function buildLifecycleSummary({ waveFibState, waveStack, clusters }) {
 const lifecycle = waveFibState?.lifecycle || {};
 const abc = lifecycle?.abcCorrection || null;
@@ -777,6 +892,28 @@ const postAbcState = String(postAbcReset?.state || "").toUpperCase();
 const abcUp = postAbcReset?.abcUp || null;
 const wave3Down = postAbcReset?.wave3Down || null;
 const downImpulse = postAbcReset?.downImpulse || null; 
+
+const postDownImpulseBounce =
+  postAbcReset?.postDownImpulseBounce || null;
+
+if (
+  postDownImpulseBounce?.possibleW5UpReclassification === true ||
+  String(postDownImpulseBounce?.state || "").toUpperCase() ===
+    "POST_MINOR_5_BOUNCE_EXCEEDED_C2618_POSSIBLE_W5_UP"
+) {
+  return buildPossibleW5UpReclassificationSummary({
+    waveFibState,
+    waveStack,
+    clusters,
+    lifecycle,
+    postAbcReset,
+    abc,
+    abcUp,
+    wave3Down,
+    downImpulse,
+    postDownImpulseBounce,
+  });
+} 
 
 if (isCompletedDownImpulseBounceWatch(downImpulse)) {
   return buildCompletedDownImpulseSummary({
