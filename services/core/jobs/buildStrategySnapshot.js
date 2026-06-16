@@ -3615,6 +3615,322 @@ function attachEngine22PullbackReactionToConfluence({
   return patchedConfluence;
 }
 
+function buildEngine22PullbackParticipation({
+  engine22WaveStrategy,
+  volumeContext,
+  bars = [],
+} = {}) {
+  const current = engine22WaveStrategy?.currentLifecycleState || null;
+
+  if (current?.key !== "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH") {
+    return null;
+  }
+
+  const last = barPartsForPullbackReaction(bars[bars.length - 1] || {});
+
+  const currentPrice =
+    toNum(current?.currentPrice) ??
+    last.close ??
+    null;
+
+  const pullbackLevelsFromW5 = current?.pullbackLevelsFromW5 || null;
+  const entryZones = current?.entryZones || null;
+  const priceProgress = current?.priceProgress || null;
+
+  const zoneEntries = Object.entries(entryZones || {})
+    .map(([name, zone]) => normalizePullbackZone(name, zone))
+    .filter(Boolean);
+
+  const barTouchedZone = (zone) =>
+    last.low != null &&
+    last.high != null &&
+    last.low <= zone.hi &&
+    last.high >= zone.lo;
+
+  const priceInsideZone = (zone) =>
+    currentPrice != null &&
+    currentPrice >= zone.lo &&
+    currentPrice <= zone.hi;
+
+  const touchedZone =
+    zoneEntries
+      .filter((zone) => barTouchedZone(zone) || priceInsideZone(zone))
+      .sort((a, b) => {
+        const amid = (a.lo + a.hi) / 2;
+        const bmid = (b.lo + b.hi) / 2;
+        const da = Math.abs(Number(currentPrice ?? amid) - amid);
+        const db = Math.abs(Number(currentPrice ?? bmid) - bmid);
+        return da - db;
+      })[0] || null;
+
+  const flags = volumeContext?.flags || {};
+  const volumeReasonCodes = Array.isArray(volumeContext?.reasonCodes)
+    ? volumeContext.reasonCodes
+    : [];
+
+  const volumeScore = Number(volumeContext?.volumeScore ?? 0);
+  const volumeConfirmed = volumeContext?.volumeConfirmed === true;
+
+  const highVolumeCandles = Number(flags?.highVolumeCandles ?? 0);
+  const relativeVolume = Number(flags?.relativeVolume ?? 0);
+  const volumeTrend = flags?.volumeTrend || null;
+  const participationQuality = flags?.participationQuality || null;
+
+  const volumeExpansion =
+    flags?.volumeExpansion === true ||
+    volumeReasonCodes.includes("BURST_VOLUME_ABOVE_1_35_AVG") ||
+    volumeScore >= 10 ||
+    relativeVolume >= 1.35;
+
+  const absorptionRisk = flags?.absorptionRisk === true;
+  const climacticVolume = flags?.climacticVolume === true;
+
+  const baseReasonCodes = [
+    "ENGINE4_ENGINE22_PULLBACK_PARTICIPATION_CONTEXT",
+    "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+    "NO_PERMISSION_CREATED",
+    "NO_EXECUTION",
+  ];
+
+  const neutralBase = {
+    active: true,
+    engine: "engine4.engine22PullbackParticipation.v1",
+    source: "engine22WaveStrategy.currentLifecycleState",
+    lifecycleKey: current.key,
+
+    participationState: "NO_SIGNAL",
+    volumeState: "NO_SIGNAL",
+    confirmed: false,
+    direction: "NEUTRAL",
+
+    currentPrice,
+    pullbackLevelsFromW5,
+    entryZones,
+    priceProgress,
+
+    touchedZone: null,
+
+    volumeScore,
+    volumeConfirmed,
+    volumeExpansion,
+    highVolumeCandles,
+    relativeVolume: Number.isFinite(relativeVolume) ? relativeVolume : 0,
+    volumeTrend,
+    participationQuality,
+
+    highVolumeDefense: false,
+    lowVolumeBounce: false,
+    highVolumeRejection: false,
+    participationConfirmed: false,
+
+    absorptionRisk,
+    climacticVolume,
+
+    reasonCodes: [
+      ...baseReasonCodes,
+      "WAITING_FOR_PULLBACK_ZONE_PARTICIPATION",
+    ],
+  };
+
+  if (!touchedZone) {
+    return neutralBase;
+  }
+
+  const referenceLo = touchedZone.lo;
+  const referenceHi = touchedZone.hi;
+
+  const lastOpen = last.open;
+  const lastClose = last.close;
+  const lastLow = last.low;
+  const lastHigh = last.high;
+
+  const greenCandle =
+    lastOpen != null &&
+    lastClose != null &&
+    lastClose > lastOpen;
+
+  const redCandle =
+    lastOpen != null &&
+    lastClose != null &&
+    lastClose < lastOpen;
+
+  const defended =
+    lastLow != null &&
+    lastClose != null &&
+    referenceLo != null &&
+    referenceHi != null &&
+    lastLow <= referenceHi &&
+    lastClose >= referenceLo;
+
+  const closeBelowZone =
+    lastClose != null &&
+    referenceLo != null &&
+    lastClose < referenceLo;
+
+  const rejectedFromZone =
+    touchedZone &&
+    redCandle &&
+    lastHigh != null &&
+    referenceLo != null &&
+    referenceHi != null &&
+    lastHigh >= referenceLo &&
+    lastClose != null &&
+    lastClose < referenceLo;
+
+  const highVolumeDefense =
+    defended &&
+    greenCandle &&
+    (
+      volumeConfirmed ||
+      volumeExpansion ||
+      highVolumeCandles >= 2 ||
+      volumeScore >= 10
+    );
+
+  const lowVolumeBounce =
+    defended &&
+    greenCandle &&
+    !highVolumeDefense &&
+    volumeScore < 8;
+
+  const highVolumeRejection =
+    (closeBelowZone || rejectedFromZone) &&
+    (
+      volumeExpansion ||
+      highVolumeCandles >= 2 ||
+      volumeScore >= 10 ||
+      absorptionRisk ||
+      climacticVolume
+    );
+
+  const participationConfirmed =
+    highVolumeDefense ||
+    (
+      volumeConfirmed &&
+      defended &&
+      !highVolumeRejection
+    );
+
+  let participationState = "PARTICIPATION_NOT_CONFIRMED";
+  let volumeState = "PARTICIPATION_NOT_CONFIRMED";
+  let confirmed = false;
+  let direction = "NEUTRAL";
+
+  const reasonCodes = [
+    ...baseReasonCodes,
+    `TOUCHED_${String(touchedZone.name || "PULLBACK_ZONE").toUpperCase()}`,
+  ];
+
+  if (highVolumeDefense) {
+    participationState = "HIGH_VOLUME_DEFENSE";
+    volumeState = "PARTICIPATION_CONFIRMED";
+    confirmed = true;
+    direction = "LONG";
+    reasonCodes.push("HIGH_VOLUME_DEFENSE");
+    reasonCodes.push("PULLBACK_ZONE_DEFENDED_WITH_PARTICIPATION");
+  } else if (participationConfirmed) {
+    participationState = "PARTICIPATION_CONFIRMED";
+    volumeState = "PARTICIPATION_CONFIRMED";
+    confirmed = true;
+    direction = "LONG";
+    reasonCodes.push("PARTICIPATION_CONFIRMED");
+  } else if (lowVolumeBounce) {
+    participationState = "LOW_VOLUME_BOUNCE";
+    volumeState = "LOW_VOLUME_BOUNCE";
+    confirmed = false;
+    direction = "LONG";
+    reasonCodes.push("LOW_VOLUME_BOUNCE");
+    reasonCodes.push("PARTICIPATION_NOT_CONFIRMED");
+  } else if (highVolumeRejection) {
+    participationState = "HIGH_VOLUME_REJECTION";
+    volumeState = "HIGH_VOLUME_REJECTION";
+    confirmed = false;
+    direction = "SHORT";
+    reasonCodes.push("HIGH_VOLUME_REJECTION");
+    reasonCodes.push("PARTICIPATION_NOT_CONFIRMED");
+  } else if (volumeScore > 0 || relativeVolume > 0) {
+    participationState = "WEAK_PARTICIPATION";
+    volumeState = "WEAK_PARTICIPATION";
+    confirmed = false;
+    direction = "NEUTRAL";
+    reasonCodes.push("WEAK_PARTICIPATION");
+    reasonCodes.push("PARTICIPATION_NOT_CONFIRMED");
+  } else {
+    participationState = "PARTICIPATION_NOT_CONFIRMED";
+    volumeState = "PARTICIPATION_NOT_CONFIRMED";
+    confirmed = false;
+    direction = "NEUTRAL";
+    reasonCodes.push("PARTICIPATION_NOT_CONFIRMED");
+  }
+
+  return {
+    active: true,
+    engine: "engine4.engine22PullbackParticipation.v1",
+    source: "engine22WaveStrategy.currentLifecycleState",
+    lifecycleKey: current.key,
+
+    participationState,
+    volumeState,
+    confirmed,
+    direction,
+
+    currentPrice,
+    pullbackLevelsFromW5,
+    entryZones,
+    priceProgress,
+
+    touchedZone: {
+      name: touchedZone.name,
+      lo: touchedZone.lo,
+      hi: touchedZone.hi,
+    },
+
+    volumeScore,
+    volumeConfirmed,
+    volumeExpansion,
+    highVolumeCandles,
+    relativeVolume: Number.isFinite(relativeVolume) ? relativeVolume : 0,
+    volumeTrend,
+    participationQuality,
+
+    highVolumeDefense,
+    lowVolumeBounce,
+    highVolumeRejection,
+    participationConfirmed,
+
+    absorptionRisk,
+    climacticVolume,
+
+    lastCandle: last,
+
+    reasonCodes,
+  };
+}
+
+function attachEngine22PullbackParticipationToConfluence({
+  patchedConfluence,
+  engine22WaveStrategy,
+  bars = [],
+}) {
+  const volumeContext = patchedConfluence?.context?.volume || null;
+
+  const pullbackParticipation = buildEngine22PullbackParticipation({
+    engine22WaveStrategy,
+    volumeContext,
+    bars,
+  });
+
+  if (!pullbackParticipation) return patchedConfluence;
+
+  patchedConfluence.context = patchedConfluence.context || {};
+  patchedConfluence.context.volume = {
+    ...(patchedConfluence.context.volume || {}),
+    engine22PullbackParticipation: pullbackParticipation,
+  };
+
+  return patchedConfluence;
+}
+
 /* -----------------------------
    Build one strategy
 ------------------------------*/
@@ -4037,6 +4353,11 @@ const zoneContext = buildZoneContext(
         engine22WaveStrategy,
         bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
       });
+      attachEngine22PullbackParticipationToConfluence({
+        patchedConfluence,
+        engine22WaveStrategy,
+        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+      });
     } catch (err) {
       console.error("[E22 PRE-ENGINE15 WAVE ERROR]", err);
 
@@ -4328,6 +4649,11 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
       engine22WaveStrategy =
         applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
      attachEngine22PullbackReactionToConfluence({
+       patchedConfluence,
+       engine22WaveStrategy,
+       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+     }); 
+     attachEngine22PullbackParticipationToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
