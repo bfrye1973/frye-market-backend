@@ -3877,6 +3877,132 @@ function buildBreakoutContext({ reactionContext, volumeContext, phases, regimeLa
     },
   };
 }
+
+function buildCurrentLifecycleState({ engine22WaveStrategy }) {
+  const lifecycle = engine22WaveStrategy?.waveFibState?.lifecycle || null;
+  const postAbcReset = lifecycle?.postAbcReset || null;
+  const possibleW5Up = postAbcReset?.possibleW5Up || null;
+  const postDownImpulseBounce = postAbcReset?.postDownImpulseBounce || null;
+  const waveOpportunity = engine22WaveStrategy?.waveOpportunity || engine22WaveStrategy || null;
+
+  if (
+    possibleW5Up?.w5Complete === true ||
+    possibleW5Up?.state === "POSSIBLE_MINOR_W5_UP_COMPLETE_POST_W5_PULLBACK_WATCH"
+  ) {
+    return {
+      key: "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+      headline: "POSSIBLE MINOR W5 UP COMPLETE — WATCH PULLBACK ENTRY ZONES",
+      sourcePath: "waveFibState.lifecycle.postAbcReset.possibleW5Up",
+      priority: 1,
+
+      action: "WATCH_POST_W5_PULLBACK_ENTRY_ZONES",
+      direction: "NONE",
+      active: false,
+      readOnly: true,
+      noExecution: true,
+      tradeableOpportunityBlocked: true,
+
+      currentPrice: possibleW5Up?.currentPrice ?? null,
+      pullbackLevelsFromW5: possibleW5Up?.pullbackLevelsFromW5 ?? null,
+      entryZones: possibleW5Up?.entryZones ?? null,
+      priceProgress: possibleW5Up?.priceProgress ?? null,
+
+      needs: possibleW5Up?.needs ?? [],
+      reasonCodes: [
+        "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
+        "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+        "READ_ONLY",
+        "NO_EXECUTION",
+        "DIRECTION_NONE",
+      ],
+    };
+  }
+
+  if (
+    postDownImpulseBounce?.possibleW5UpReclassification === true ||
+    postDownImpulseBounce?.state === "POST_MINOR_5_BOUNCE_EXCEEDED_C2618_POSSIBLE_W5_UP"
+  ) {
+    return {
+      key: "POSSIBLE_W5_UP_RECLASSIFICATION_WATCH",
+      headline:
+        postDownImpulseBounce?.headline ??
+        "C 2.618 EXCEEDED — POSSIBLE WAVE 5 UP WATCH",
+      sourcePath: "waveFibState.lifecycle.postAbcReset.postDownImpulseBounce",
+      priority: 2,
+
+      action: postDownImpulseBounce?.action ?? "WAIT_FOR_CONFIRMATION",
+      direction: "NONE",
+      active: false,
+      readOnly: true,
+      noExecution: true,
+      tradeableOpportunityBlocked: true,
+
+      currentPrice: postDownImpulseBounce?.currentPrice ?? null,
+      reasonCodes: [
+        "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
+        "POSSIBLE_W5_UP_RECLASSIFICATION_WATCH",
+        "READ_ONLY",
+        "NO_EXECUTION",
+        "DIRECTION_NONE",
+      ],
+    };
+  }
+
+  if (postAbcReset?.state === "POST_ABC_W2_BOUNCE_WATCH") {
+    return {
+      key: "POST_ABC_W2_BOUNCE_WATCH",
+      headline:
+        postAbcReset?.headline ??
+        "POST ABC COMPLETE — WATCH WAVE 2 BOUNCE",
+      sourcePath: "waveFibState.lifecycle.postAbcReset",
+      priority: 3,
+
+      action: postAbcReset?.action ?? "WAIT_FOR_RECLAIM_CONFIRMATION",
+      direction: "NONE",
+      active: false,
+      readOnly: true,
+      noExecution: true,
+      tradeableOpportunityBlocked: true,
+
+      currentPrice: postAbcReset?.currentPrice ?? null,
+      reasonCodes: [
+        "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
+        "POST_ABC_W2_BOUNCE_WATCH",
+        "READ_ONLY",
+        "NO_EXECUTION",
+        "DIRECTION_NONE",
+      ],
+    };
+  }
+
+  return {
+    key:
+      waveOpportunity?.setupType ??
+      waveOpportunity?.state ??
+      lifecycle?.state ??
+      "UNKNOWN_ENGINE22_LIFECYCLE_STATE",
+    headline:
+      engine22WaveStrategy?.headline ??
+      waveOpportunity?.headline ??
+      "Engine 22 lifecycle state unavailable",
+    sourcePath: "waveOpportunity",
+    priority: 99,
+
+    action: waveOpportunity?.action ?? null,
+    direction: waveOpportunity?.direction ?? "NONE",
+    active: waveOpportunity?.active === true,
+    readOnly: true,
+    noExecution: true,
+    tradeableOpportunityBlocked: true,
+
+    reasonCodes: [
+      "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
+      "FALLBACK_WAVE_OPPORTUNITY_STATE",
+      "READ_ONLY",
+      "NO_EXECUTION",
+    ],
+  };
+}
 export function computeEngine22ScalpOpportunity({
   symbol = "SPY",
   strategyId = "intraday_scalp@10m",
@@ -4119,23 +4245,63 @@ supportedSetups: {
     structureState,
   });
 
-   return {
-    ...withMicroW4,
-    regimeLayers,
-    reactionContext,
-    volumeContext,
-    breakoutContext,
+const engine22WaveStrategyDraft = {
+  ...withMicroW4,
+  regimeLayers,
+  reactionContext,
+  volumeContext,
+  breakoutContext,
+  waveFibState,
+  timelineRead,
+  microW4Pullback: microW4Pullback?.active === true ? microW4Pullback : null,
+  zoneAbsorption,
+  runnerMode,
+};
+
+const currentLifecycleState = buildCurrentLifecycleState({
+  engine22WaveStrategy: engine22WaveStrategyDraft,
+});
+
+const waveOpportunityMirror =
+  currentLifecycleState?.key === "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH"
+    ? {
+        setupType: "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+        readiness: "WATCH",
+        direction: "NONE",
+        active: false,
+        noExecution: true,
+        tradeableOpportunityBlocked: true,
+      }
+    : null;
+
+return {
+  ...engine22WaveStrategyDraft,
+
+  currentLifecycleState,
+
+  // Compatibility mirror for older downstream engines.
+  // currentLifecycleState is the real source of truth.
+  waveOpportunity: waveOpportunityMirror,
+
+  ...(waveOpportunityMirror
+    ? {
+        setupType: waveOpportunityMirror.setupType,
+        readiness: waveOpportunityMirror.readiness,
+        direction: waveOpportunityMirror.direction,
+        active: waveOpportunityMirror.active,
+        noExecution: waveOpportunityMirror.noExecution,
+        tradeableOpportunityBlocked:
+          waveOpportunityMirror.tradeableOpportunityBlocked,
+      }
+    : {}),
+
+  debug: {
+    ...(withMicroW4.debug || {}),
     waveFibState,
-    microW4Pullback: microW4Pullback?.active === true ? microW4Pullback : null,
-    zoneAbsorption,
-    runnerMode,
-    debug: {
-      ...(withMicroW4.debug || {}),
-      waveFibState,
-      timelineRead,
-    },
-  };
-};  
+    timelineRead,
+    currentLifecycleState,
+  },
+}; 
 
    if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
     return finish({
