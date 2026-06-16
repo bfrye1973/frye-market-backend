@@ -4274,34 +4274,35 @@ const waveOpportunityMirror =
       }
     : null;
 
-return {
-  ...engine22WaveStrategyDraft,
+    return {
+      ...engine22WaveStrategyDraft,
 
-  currentLifecycleState,
+      currentLifecycleState,
 
-  // Compatibility mirror for older downstream engines.
-  // currentLifecycleState is the real source of truth.
-  waveOpportunity: waveOpportunityMirror,
+      // Compatibility mirror for older downstream engines.
+      // currentLifecycleState is the real source of truth.
+      waveOpportunity: waveOpportunityMirror,
 
-  ...(waveOpportunityMirror
-    ? {
-        setupType: waveOpportunityMirror.setupType,
-        readiness: waveOpportunityMirror.readiness,
-        direction: waveOpportunityMirror.direction,
-        active: waveOpportunityMirror.active,
-        noExecution: waveOpportunityMirror.noExecution,
-        tradeableOpportunityBlocked:
-          waveOpportunityMirror.tradeableOpportunityBlocked,
-      }
-    : {}),
+     ...(waveOpportunityMirror
+        ? {
+            setupType: waveOpportunityMirror.setupType,
+            readiness: waveOpportunityMirror.readiness,
+            direction: waveOpportunityMirror.direction,
+            active: waveOpportunityMirror.active,
+            noExecution: waveOpportunityMirror.noExecution,
+            tradeableOpportunityBlocked:
+              waveOpportunityMirror.tradeableOpportunityBlocked,
+          }
+        : {}),
 
-  debug: {
-    ...(withMicroW4.debug || {}),
-    waveFibState,
-    timelineRead,
-    currentLifecycleState,
-  },
-}; 
+      debug: {
+        ...(withMicroW4.debug || {}),
+        waveFibState,
+        timelineRead,
+        currentLifecycleState,
+      },
+    }; 
+  };
 
    if (!latestClose && minutePhase !== "IN_W2" && minutePhase !== "IN_W4") {
     return finish({
