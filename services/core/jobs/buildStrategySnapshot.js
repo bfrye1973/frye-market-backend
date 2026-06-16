@@ -3318,6 +3318,303 @@ function applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy) {
   };
 }
 
+function barPartsForPullbackReaction(bar) {
+  const open = toNum(bar?.open ?? bar?.o);
+  const high = toNum(bar?.high ?? bar?.h);
+  const low = toNum(bar?.low ?? bar?.l);
+  const close = toNum(bar?.close ?? bar?.c);
+  const time = bar?.time ?? bar?.t ?? bar?.tSec ?? null;
+
+  return { open, high, low, close, time };
+}
+
+function normalizePullbackZone(name, zone) {
+  if (!zone) return null;
+
+  if (Array.isArray(zone)) {
+    const a = toNum(zone[0]);
+    const b = toNum(zone[1]);
+    if (a == null || b == null) return null;
+
+    return {
+      name,
+      lo: Math.min(a, b),
+      hi: Math.max(a, b),
+    };
+  }
+
+  const lo = toNum(zone?.lo ?? zone?.low ?? zone?.from);
+  const hi = toNum(zone?.hi ?? zone?.high ?? zone?.to);
+
+  if (lo == null || hi == null) return null;
+
+  return {
+    name,
+    lo: Math.min(lo, hi),
+    hi: Math.max(lo, hi),
+  };
+}
+
+function buildEngine22PullbackReaction({
+  engine22WaveStrategy,
+  bars = [],
+} = {}) {
+  const current = engine22WaveStrategy?.currentLifecycleState || null;
+
+  if (current?.key !== "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH") {
+    return null;
+  }
+
+  const last = barPartsForPullbackReaction(bars[bars.length - 1] || {});
+  const prev = barPartsForPullbackReaction(bars[bars.length - 2] || {});
+
+  const currentPrice =
+    toNum(current?.currentPrice) ??
+    last.close ??
+    null;
+
+  const pullbackLevelsFromW5 = current?.pullbackLevelsFromW5 || null;
+  const entryZones = current?.entryZones || null;
+  const priceProgress = current?.priceProgress || null;
+
+  const reasonCodes = [
+    "ENGINE3_ENGINE22_PULLBACK_REACTION_CONTEXT",
+    "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+    "NO_PERMISSION_CREATED",
+    "NO_EXECUTION",
+  ];
+
+  const levelEntries = Object.entries(pullbackLevelsFromW5 || {})
+    .map(([name, value]) => ({
+      name,
+      value: toNum(value),
+    }))
+    .filter((x) => x.value != null);
+
+  const zoneEntries = Object.entries(entryZones || {})
+    .map(([name, zone]) => normalizePullbackZone(name, zone))
+    .filter(Boolean);
+
+  const barTouchedLevel = (level) =>
+    last.low != null &&
+    last.high != null &&
+    last.low <= level.value &&
+    last.high >= level.value;
+
+  const priceNearLevel = (level) =>
+    currentPrice != null &&
+    Math.abs(currentPrice - level.value) <= 0.5;
+
+  const touchedLevel =
+    levelEntries
+      .filter((level) => barTouchedLevel(level) || priceNearLevel(level))
+      .sort((a, b) => {
+        const da = Math.abs(Number(currentPrice ?? a.value) - a.value);
+        const db = Math.abs(Number(currentPrice ?? b.value) - b.value);
+        return da - db;
+      })[0] || null;
+
+  const barTouchedZone = (zone) =>
+    last.low != null &&
+    last.high != null &&
+    last.low <= zone.hi &&
+    last.high >= zone.lo;
+
+  const priceInsideZone = (zone) =>
+    currentPrice != null &&
+    currentPrice >= zone.lo &&
+    currentPrice <= zone.hi;
+
+  const touchedZone =
+    zoneEntries
+      .filter((zone) => barTouchedZone(zone) || priceInsideZone(zone))
+      .sort((a, b) => {
+        const amid = (a.lo + a.hi) / 2;
+        const bmid = (b.lo + b.hi) / 2;
+        const da = Math.abs(Number(currentPrice ?? amid) - amid);
+        const db = Math.abs(Number(currentPrice ?? bmid) - bmid);
+        return da - db;
+      })[0] || null;
+
+  if (!touchedLevel && !touchedZone) {
+    return {
+      active: true,
+      engine: "engine3.engine22PullbackReaction.v1",
+      source: "engine22WaveStrategy.currentLifecycleState",
+      lifecycleKey: current.key,
+
+      reactionState: "PENDING",
+      reaction: "NO_REACTION_YET",
+      confirmed: false,
+      direction: "NEUTRAL",
+
+      currentPrice,
+      pullbackLevelsFromW5,
+      entryZones,
+      priceProgress,
+
+      touchedLevel: null,
+      touchedZone: null,
+
+      defended: false,
+      reclaimed: false,
+      failedReclaim: false,
+      closeBelowLevel: false,
+      priorCandleHighReclaimed: false,
+
+      reasonCodes: [
+        ...reasonCodes,
+        "WAITING_FOR_PULLBACK_ZONE_REACTION",
+      ],
+    };
+  }
+
+  const referenceLo =
+    touchedZone?.lo ??
+    touchedLevel?.value ??
+    null;
+
+  const referenceHi =
+    touchedZone?.hi ??
+    touchedLevel?.value ??
+    null;
+
+  const closeBelowLevel =
+    last.close != null &&
+    referenceLo != null &&
+    last.close < referenceLo;
+
+  const defended =
+    last.close != null &&
+    referenceLo != null &&
+    referenceHi != null &&
+    last.low != null &&
+    last.low <= referenceHi &&
+    last.close >= referenceLo;
+
+  const reclaimed =
+    last.low != null &&
+    last.close != null &&
+    referenceLo != null &&
+    last.low < referenceLo &&
+    last.close >= referenceLo;
+
+  const priorCandleHighReclaimed =
+    prev.high != null &&
+    last.close != null &&
+    last.close > prev.high;
+
+  const failedReclaim =
+    touchedZone || touchedLevel
+      ? (
+          prev.high != null &&
+          last.high != null &&
+          last.close != null &&
+          last.high <= prev.high &&
+          last.close < prev.high &&
+          !priorCandleHighReclaimed
+        )
+      : false;
+
+  let reactionState = "LEVEL_TOUCHED";
+  let reaction = "LEVEL_TOUCHED";
+  let confirmed = false;
+  let direction = "NEUTRAL";
+
+  if (closeBelowLevel) {
+    reactionState = "CLOSE_BELOW_LEVEL";
+    reaction = "CLOSE_BELOW_LEVEL";
+    reasonCodes.push("CLOSE_BELOW_PULLBACK_LEVEL");
+  } else if (failedReclaim) {
+    reactionState = "FAILED_RECLAIM";
+    reaction = "FAILED_RECLAIM";
+    reasonCodes.push("FAILED_TO_RECLAIM_PRIOR_CANDLE_HIGH");
+  } else if (reclaimed) {
+    reactionState = "WICK_BELOW_AND_RECLAIM";
+    reaction = "WICK_BELOW_AND_RECLAIM";
+    direction = "LONG";
+    reasonCodes.push("WICK_BELOW_LEVEL_AND_RECLAIMED");
+  } else if (defended && priorCandleHighReclaimed) {
+    reactionState = "GOOD_REACTION";
+    reaction = "GOOD_REACTION";
+    confirmed = true;
+    direction = "LONG";
+    reasonCodes.push("LEVEL_DEFENDED");
+    reasonCodes.push("PRIOR_CANDLE_HIGH_RECLAIMED");
+  } else if (defended) {
+    reactionState = "LEVEL_DEFENDED";
+    reaction = "LEVEL_DEFENDED";
+    direction = "LONG";
+    reasonCodes.push("LEVEL_DEFENDED");
+  } else {
+    reasonCodes.push("LEVEL_TOUCHED_WAITING_FOR_REACTION");
+  }
+
+  return {
+    active: true,
+    engine: "engine3.engine22PullbackReaction.v1",
+    source: "engine22WaveStrategy.currentLifecycleState",
+    lifecycleKey: current.key,
+
+    reactionState,
+    reaction,
+    confirmed,
+    direction,
+
+    currentPrice,
+    pullbackLevelsFromW5,
+    entryZones,
+    priceProgress,
+
+    touchedLevel: touchedLevel
+      ? {
+          name: touchedLevel.name,
+          value: touchedLevel.value,
+        }
+      : null,
+
+    touchedZone: touchedZone
+      ? {
+          name: touchedZone.name,
+          lo: touchedZone.lo,
+          hi: touchedZone.hi,
+        }
+      : null,
+
+    defended,
+    reclaimed,
+    failedReclaim,
+    closeBelowLevel,
+    priorCandleHighReclaimed,
+
+    lastCandle: last,
+    priorCandle: prev,
+
+    reasonCodes,
+  };
+}
+
+function attachEngine22PullbackReactionToConfluence({
+  patchedConfluence,
+  engine22WaveStrategy,
+  bars = [],
+}) {
+  const pullbackReaction = buildEngine22PullbackReaction({
+    engine22WaveStrategy,
+    bars,
+  });
+
+  if (!pullbackReaction) return patchedConfluence;
+
+  patchedConfluence.context = patchedConfluence.context || {};
+  patchedConfluence.context.reaction = {
+    ...(patchedConfluence.context.reaction || {}),
+    engine22PullbackReaction: pullbackReaction,
+  };
+
+  return patchedConfluence;
+}
+
 /* -----------------------------
    Build one strategy
 ------------------------------*/
@@ -3735,6 +4032,11 @@ const zoneContext = buildZoneContext(
 
       engine22WaveStrategy =
         applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
+      attachEngine22PullbackReactionToConfluence({
+        patchedConfluence,
+        engine22WaveStrategy,
+        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+      });
     } catch (err) {
       console.error("[E22 PRE-ENGINE15 WAVE ERROR]", err);
 
@@ -4025,6 +4327,11 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
 
       engine22WaveStrategy =
         applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
+     attachEngine22PullbackReactionToConfluence({
+       patchedConfluence,
+       engine22WaveStrategy,
+       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+     }); 
     }
   } catch (err) {
     console.error("[E22G TRADE DECISION ERROR]", err);
