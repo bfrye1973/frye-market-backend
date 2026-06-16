@@ -769,6 +769,146 @@ function buildCompletedDownImpulseSummary({
   };
 }
 
+function buildPossibleW5UpCompleteSummary({
+  waveFibState,
+  waveStack,
+  clusters,
+  lifecycle,
+  postAbcReset,
+  abc,
+  abcUp,
+  wave3Down,
+  downImpulse,
+  postDownImpulseBounce,
+  possibleW5Up,
+}) {
+  const currentPrice =
+    possibleW5Up?.currentPrice ??
+    postAbcReset?.currentPrice ??
+    waveFibState?.currentPrice ??
+    null;
+
+  const pullbackLevels = possibleW5Up?.pullbackLevelsFromW5 || {};
+  const fullMovePullbackLevels = possibleW5Up?.fullMovePullbackLevels || {};
+  const entryZones = possibleW5Up?.entryZones || {};
+
+  return {
+    headline: "POSSIBLE MINOR W5 UP COMPLETE — WATCH PULLBACK ENTRY ZONES",
+    subheadline:
+      "Possible Minor W5 up is marked complete. Watch pullback fib levels off the W5 high for reaction / entry zones.",
+    bias: "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+    action: "WATCH_POST_W5_PULLBACK_ENTRY_ZONES",
+    direction: "NONE",
+    chaseAllowed: false,
+    severity: "warning",
+
+    topCandidate: round2(possibleW5Up?.w5High),
+    hardInvalidation: round2(possibleW5Up?.pullbackLevelsFromW5?.r786),
+    reclaimLadder: null,
+
+    firstCluster: clusters.firstCluster,
+    nextCluster: clusters.nextCluster,
+
+    lifecycleState: lifecycle?.lifecycleState || null,
+    postAbcReset,
+    parentContextOnly: lifecycle?.parentContextOnly === true,
+    tradeableOpportunityBlocked:
+      lifecycle?.tradeableOpportunityBlocked === true,
+    nextAllowedSetup: "WATCH_POST_W5_PULLBACK_ENTRY_ZONES",
+
+    abcCorrection: abc,
+    abcUp,
+    wave3Down,
+    downImpulse,
+    postDownImpulseBounce,
+    possibleW5Up,
+
+    reads: {
+      structureRead: waveStack.message,
+      lifecycleRead:
+        "Possible Minor W5 up is marked complete. Watch pullback fib levels off the W5 high.",
+      waveMarksRead:
+        `Origin ${fmt(possibleW5Up?.originLow)}, W1 ${fmt(
+          possibleW5Up?.w1High
+        )}, W2 ${fmt(possibleW5Up?.w2Low)}, W3 ${fmt(
+          possibleW5Up?.w3High
+        )}, W4 ${fmt(possibleW5Up?.w4Low)}, W5 ${fmt(
+          possibleW5Up?.w5High
+        )}.`,
+      pullbackRead:
+        `Pullback levels from W4→W5: 23.6 ${fmt(
+          pullbackLevels?.r236
+        )}, 38.2 ${fmt(pullbackLevels?.r382)}, 50.0 ${fmt(
+          pullbackLevels?.r500
+        )}, 61.8 ${fmt(pullbackLevels?.r618)}, 78.6 ${fmt(
+          pullbackLevels?.r786
+        )}.`,
+      entryZoneRead:
+        `Entry zones: shallow ${fmt(
+          entryZones?.shallowTrendPullback?.lo
+        )}–${fmt(entryZones?.shallowTrendPullback?.hi)}, standard ${fmt(
+          entryZones?.standardPullback?.lo
+        )}–${fmt(entryZones?.standardPullback?.hi)}, deeper ${fmt(
+          entryZones?.deeperSupport?.lo
+        )}–${fmt(entryZones?.deeperSupport?.hi)}.`,
+      fullMovePullbackRead:
+        `Full move pullback levels from origin→W5: 23.6 ${fmt(
+          fullMovePullbackLevels?.r236
+        )}, 38.2 ${fmt(fullMovePullbackLevels?.r382)}, 50.0 ${fmt(
+          fullMovePullbackLevels?.r500
+        )}, 61.8 ${fmt(fullMovePullbackLevels?.r618)}, 78.6 ${fmt(
+          fullMovePullbackLevels?.r786
+        )}.`,
+      actionRead:
+        "No chase. No automatic long. No automatic short. No execution. Watch for pullback reaction / reclaim before entry planning.",
+    },
+
+    summary:
+      `${waveStack.message}\n\n` +
+      `Possible Minor W5 up is marked complete at ${fmt(
+        possibleW5Up?.w5High
+      )}.\n\n` +
+      `Current price is ${fmt(currentPrice)}. Price is ${fmt(
+        possibleW5Up?.priceProgress?.pointsOffHigh
+      )} points off the marked W5 high.\n\n` +
+      `Primary pullback levels from W4 ${fmt(
+        possibleW5Up?.w4Low
+      )} to W5 ${fmt(possibleW5Up?.w5High)}:\n` +
+      `23.6 = ${fmt(pullbackLevels?.r236)}\n` +
+      `38.2 = ${fmt(pullbackLevels?.r382)}\n` +
+      `50.0 = ${fmt(pullbackLevels?.r500)}\n` +
+      `61.8 = ${fmt(pullbackLevels?.r618)}\n` +
+      `78.6 = ${fmt(pullbackLevels?.r786)}\n\n` +
+      `No chase. Watch for pullback reaction / reclaim before entry planning.\n\n` +
+      `No automatic long. No automatic short. No execution.`,
+
+    needs: [
+      "WATCH_POST_W5_PULLBACK_ENTRY_ZONES",
+      "WAIT_FOR_PULLBACK_REACTION_OR_RECLAIM",
+      "NO_CHASE",
+      "NO_AUTOMATIC_LONG",
+      "NO_AUTOMATIC_SHORT",
+      "NO_EXECUTION",
+    ],
+
+    reasonCodes: [
+      "TRADE_CONTEXT_SUMMARY_BUILT",
+      "POSSIBLE_MINOR_W5_UP_COMPLETE",
+      "POST_W5_PULLBACK_ENTRY_ZONES",
+      "READ_ONLY",
+      "NO_CHASE",
+      "NO_AUTOMATIC_LONG",
+      "NO_AUTOMATIC_SHORT",
+      "NO_EXECUTION",
+      ...(lifecycle?.reasonCodes || []),
+      ...(postAbcReset?.reasonCodes || []),
+      ...(Array.isArray(possibleW5Up?.reasonCodes)
+        ? possibleW5Up.reasonCodes
+        : []),
+    ],
+  };
+}
+
 function buildPossibleW5UpReclassificationSummary({
   waveFibState,
   waveStack,
@@ -895,6 +1035,29 @@ const downImpulse = postAbcReset?.downImpulse || null;
 
 const postDownImpulseBounce =
   postAbcReset?.postDownImpulseBounce || null;
+
+const possibleW5Up =
+  postAbcReset?.possibleW5Up || null;
+
+if (
+  possibleW5Up?.w5Complete === true ||
+  String(possibleW5Up?.state || "").toUpperCase() ===
+    "POSSIBLE_MINOR_W5_UP_COMPLETE_POST_W5_PULLBACK_WATCH"
+) {
+  return buildPossibleW5UpCompleteSummary({
+    waveFibState,
+    waveStack,
+    clusters,
+    lifecycle,
+    postAbcReset,
+    abc,
+    abcUp,
+    wave3Down,
+    downImpulse,
+    postDownImpulseBounce,
+    possibleW5Up,
+  });
+}  
 
 if (
   postDownImpulseBounce?.possibleW5UpReclassification === true ||
