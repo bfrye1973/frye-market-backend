@@ -1164,6 +1164,7 @@ function buildFinalPermissionFromEngine15({
   zoneContext,
   engine5Analytics,
   engine25Context,
+  engine22WaveStrategy,
 }) {
   const preliminary =
     preliminaryPermission && typeof preliminaryPermission === "object"
@@ -1174,16 +1175,31 @@ function buildFinalPermissionFromEngine15({
           reasonCodes: [],
         };
 
-  const readiness = String(engine15Decision?.readinessLabel || "").toUpperCase();
-  const action = String(engine15Decision?.action || "").toUpperCase();
-  const strategyType = String(engine15Decision?.strategyType || "NONE").toUpperCase();
-  const direction = String(engine15Decision?.direction || "NONE").toUpperCase();
-  const setupEligible =
-    engine15Decision?.freshEntryNow === true ||
-    ["READY", "CONFIRMED", "TRIGGERED"].includes(readiness) ||
-    ["ENTER_OK", "REDUCE_OK"].includes(action);
+const readiness = String(engine15Decision?.readinessLabel || "").toUpperCase();
+const action = String(engine15Decision?.action || "").toUpperCase();
+const strategyType = String(engine15Decision?.strategyType || "NONE").toUpperCase();
+const direction = String(engine15Decision?.direction || "NONE").toUpperCase();
 
-  const engine25ModifierPreview = buildEngine25ModifierPreview(engine25Context);
+const currentLifecycleState =
+  engine22WaveStrategy?.currentLifecycleState ||
+  engine15Decision?.engine22CurrentLifecycleState ||
+  engine15Decision?.currentLifecycleState ||
+  null;
+
+const isPossibleW5UpCompletePullbackWatch =
+  currentLifecycleState?.key === "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH" ||
+  strategyType === "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH";
+
+const setupEligible =
+  isPossibleW5UpCompletePullbackWatch
+    ? false
+    : (
+        engine15Decision?.freshEntryNow === true ||
+        ["READY", "CONFIRMED", "TRIGGERED"].includes(readiness) ||
+        ["ENTER_OK", "REDUCE_OK"].includes(action)
+      );
+
+const engine25ModifierPreview = buildEngine25ModifierPreview(engine25Context);
 
   const baseReasonCodes = Array.isArray(preliminary.reasonCodes)
     ? preliminary.reasonCodes
@@ -1220,6 +1236,8 @@ function buildFinalPermissionFromEngine15({
     watchOnly: false,
     setupEligible,
     engine25ModifierPreview,
+
+    engine22CurrentLifecycleState: currentLifecycleState,
 
     engine15Decision: {
       strategyType,
@@ -1278,6 +1296,39 @@ function buildFinalPermissionFromEngine15({
         }
       : null,
   };
+
+  if (isPossibleW5UpCompletePullbackWatch) {
+    return {
+      ...final,
+      permission:
+        preliminary.permission === "STAND_DOWN"
+          ? "STAND_DOWN"
+          : "REDUCE",
+      sizeMultiplier:
+        preliminary.permission === "STAND_DOWN"
+          ? 0
+          : Number(preliminary.sizeMultiplier ?? 0.5),
+      executable: false,
+      watchOnly: true,
+      setupEligible: false,
+      direction: "NONE",
+      reasonCodes: [
+        "ENGINE6_POSSIBLE_W5_UP_COMPLETE_WATCH_ONLY",
+        currentLifecycleState ? "ENGINE22_CURRENT_LIFECYCLE_STATE_CONSUMED" : null,
+        "ENGINE22_POSSIBLE_W5_UP_COMPLETE",
+        "ENGINE15_WATCH_ONLY",
+        "POSSIBLE_W5_UP_COMPLETE_WAITING_FOR_PULLBACK_REACTION",
+        "WAIT_FOR_POST_W5_PULLBACK_REACTION",
+        "ENGINE3_REACTION_REQUIRED",
+        "ENGINE4_PARTICIPATION_REQUIRED",
+        "NO_CHASE",
+        "NO_EXECUTION",
+        "DIRECTION_NONE",
+        ...baseReasonCodes,
+      ].filter(Boolean),
+      engine22CurrentLifecycleState: currentLifecycleState,
+    };
+  }
 
   if (readiness === "BLOCKED" || readiness === "NO_SETUP" || action === "BLOCKED") {
     return {
@@ -3836,19 +3887,20 @@ const zoneContext = buildZoneContext(
       : computeEngine15DecisionReferee(engine15BaseInputs);
 
  
- const finalPermission =
-   isEsIntradayScalp
-     ? buildFinalPermissionFromEngine15({
-         symbol,
-         tf: s.tf,
-         preliminaryPermission: permissionPreliminary,
-         engine15Decision,
-         marketRegime,
-         zoneContext,
-         engine5Analytics,
-         engine25Context,
-       })
-     : permissionPreliminary;
+   const finalPermission =
+     isEsIntradayScalp
+       ? buildFinalPermissionFromEngine15({
+           symbol,
+           tf: s.tf,
+           preliminaryPermission: permissionPreliminary,
+           engine15Decision,
+           marketRegime,
+           zoneContext,
+           engine5Analytics,
+           engine25Context,
+           engine22WaveStrategy,
+         })
+       : permissionPreliminary;
 
  const lockedSignal = updateSignalLock({
   symbol,
