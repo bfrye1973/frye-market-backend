@@ -1,284 +1,352 @@
+```js
 import fs from "fs";
 
 const DEFAULT_FIB_INPUT_FILE =
-"/opt/render/project/src/services/core/data/fib-input.csv";
+  "/opt/render/project/src/services/core/data/fib-input.csv";
 
 function parseCsvLine(line) {
-return String(line || "")
-.split(",")
-.map((x) => x.trim());
+  return String(line || "")
+    .split(",")
+    .map((x) => x.trim());
 }
 
 function toPriceOrNull(value) {
-if (value === null || value === undefined || value === "") return null;
+  if (value === null || value === undefined || value === "") return null;
 
-const n = Number(value);
-return Number.isFinite(n) && n > 0 ? n : null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function makeEmptyMark() {
-return {
-price: null,
-time: null,
-};
+  return {
+    price: null,
+    time: null,
+  };
+}
+
+function datetimeAzToSec(datetimeAz) {
+  const raw = String(datetimeAz || "").trim();
+  if (!raw) return null;
+
+  // fib-input.csv times are Arizona-local chart times.
+  // Arizona is MST year-round, UTC-07:00.
+  const normalized = raw.includes("T")
+    ? raw
+    : raw.replace(" ", "T");
+
+  const withSeconds =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)
+      ? `${normalized}:00`
+      : normalized;
+
+  const ms = Date.parse(`${withSeconds}-07:00`);
+  if (!Number.isFinite(ms)) return null;
+
+  return Math.floor(ms / 1000);
 }
 
 function readFibInputRows(filePath = DEFAULT_FIB_INPUT_FILE) {
-try {
-if (!fs.existsSync(filePath)) return [];
+  try {
+    if (!fs.existsSync(filePath)) return [];
 
-const text = fs.readFileSync(filePath, "utf8");
+    const text = fs.readFileSync(filePath, "utf8");
 
-return text
-  .split(/\r?\n/)
-  .map((line) => line.trim())
-  .filter((line) => line && !line.startsWith("#"))
-  .slice(1)
-  .map((line) => {
-    const [symbol, degree, tf, wave, kind, datetime_az, price] =
-      parseCsvLine(line);
+    return text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+      .slice(1)
+      .map((line) => {
+        const [symbol, degree, tf, wave, kind, datetime_az, price] =
+          parseCsvLine(line);
 
-    return {
-      symbol,
-      degree,
-      tf,
-      wave,
-      kind,
-      datetime_az,
-      price: Number(price),
-    };
-  });
+        return {
+          symbol,
+          degree,
+          tf,
+          wave,
+          kind,
+          datetime_az,
+          price: Number(price),
+        };
+      });
+  } catch (err) {
+    console.warn(
+      "[Engine22 ManualMarks] Failed reading fib-input.csv:",
+      err?.message
+    );
 
-} catch (err) {
-console.warn(
-"[Engine22 ManualMarks] Failed reading fib-input.csv:",
-err?.message
-);
-
-return [];
-}
+    return [];
+  }
 }
 
 export function getManualLevelRowsFor(args = {}) {
-const {
-symbol,
-degree,
-tf,
-filePath = DEFAULT_FIB_INPUT_FILE,
-} = args;
+  const {
+    symbol,
+    degree,
+    tf,
+    filePath = DEFAULT_FIB_INPUT_FILE,
+  } = args;
 
-return readFibInputRows(filePath).filter((row) => {
-const wave = String(row.wave || "").toUpperCase();
-const kind = String(row.kind || "").toUpperCase();
+  return readFibInputRows(filePath).filter((row) => {
+    const wave = String(row.wave || "").toUpperCase();
+    const kind = String(row.kind || "").toUpperCase();
 
-const isLevelRow = kind === "LEVEL";
+    const isLevelRow = kind === "LEVEL";
 
-const isAbcDownRow =
-  wave === "ABC" &&
-  ["A", "B", "C"].includes(kind);
+    const isManualWaveMarkRow =
+      wave === "MARK" &&
+      ["W1", "W2", "W3", "W4", "W5"].includes(kind);
 
-const isAbcUpRow =
-  wave === "ABC_UP" &&
-  ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
+    const isAbcDownRow =
+      wave === "ABC" &&
+      ["A", "B", "C"].includes(kind);
 
-const isDownImpulseRow =
-  wave === "W3_DOWN" &&
-  ["W1_LOW", "W2_HIGH", "W3_LOW", "W4_HIGH", "W5_LOW"].includes(kind);
+    const isAbcUpRow =
+      wave === "ABC_UP" &&
+      ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
 
-const isPostW5BounceRow =
-  wave === "POST_W5_BOUNCE" &&
-  ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
+    const isDownImpulseRow =
+      wave === "W3_DOWN" &&
+      ["W1_LOW", "W2_HIGH", "W3_LOW", "W4_HIGH", "W5_LOW"].includes(kind);
 
-const isPossibleW5UpRow =
-  wave === "POSSIBLE_W5_UP" &&
-  ["ORIGIN_LOW", "W1_HIGH", "W2_LOW", "W3_HIGH", "W4_LOW", "W5_HIGH"].includes(kind);
+    const isPostW5BounceRow =
+      wave === "POST_W5_BOUNCE" &&
+      ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
 
-const symbolMatches =
-  String(row.symbol || "").toUpperCase() ===
-  String(symbol || "").toUpperCase();
+    const isPossibleW5UpRow =
+      wave === "POSSIBLE_W5_UP" &&
+      ["ORIGIN_LOW", "W1_HIGH", "W2_LOW", "W3_HIGH", "W4_LOW", "W5_HIGH"].includes(kind);
 
-const degreeMatches =
-  String(row.degree || "").toLowerCase() ===
-  String(degree || "").toLowerCase();
+    const symbolMatches =
+      String(row.symbol || "").toUpperCase() ===
+      String(symbol || "").toUpperCase();
 
-const tfMatches =
-  !tf ||
-  String(row.tf || "").toLowerCase() === String(tf || "").toLowerCase();
+    const degreeMatches =
+      String(row.degree || "").toLowerCase() ===
+      String(degree || "").toLowerCase();
 
-return (
-  symbolMatches &&
-  degreeMatches &&
-  tfMatches &&
-  (
-    isLevelRow ||
-    isAbcDownRow ||
-    isAbcUpRow ||
-    isDownImpulseRow ||
-    isPostW5BounceRow ||
-    isPossibleW5UpRow    
-  )
-);
-});
+    const tfMatches =
+      !tf ||
+      String(row.tf || "").toLowerCase() === String(tf || "").toLowerCase();
+
+    return (
+      symbolMatches &&
+      degreeMatches &&
+      tfMatches &&
+      (
+        isLevelRow ||
+        isManualWaveMarkRow ||
+        isAbcDownRow ||
+        isAbcUpRow ||
+        isDownImpulseRow ||
+        isPostW5BounceRow ||
+        isPossibleW5UpRow
+      )
+    );
+  });
 }
 
 export function attachManualLevelsToEngine2Block(block, levelRows = []) {
-if (!block || typeof block !== "object") return block;
+  if (!block || typeof block !== "object") return block;
 
-const findLevel = (...names) => {
-const wanted = names.map((x) => String(x || "").toUpperCase());
+  const findLevel = (...names) => {
+    const wanted = names.map((x) => String(x || "").toUpperCase());
 
-const row = levelRows.find((r) => {
-  const wave = String(r.wave || "").toUpperCase();
-  const kind = String(r.kind || "").toUpperCase();
+    const row = levelRows.find((r) => {
+      const wave = String(r.wave || "").toUpperCase();
+      const kind = String(r.kind || "").toUpperCase();
 
-  if (wanted.includes(wave)) return true;
-  if (wave === "ABC" && wanted.includes(kind)) return true;
+      if (wanted.includes(wave)) return true;
+      if (wave === "ABC" && wanted.includes(kind)) return true;
 
-  return false;
-});
+      return false;
+    });
 
-return toPriceOrNull(row?.price);
-};
+    return toPriceOrNull(row?.price);
+  };
 
-const findFamilyMark = (familyName, kindName) => {
-const wantedFamily = String(familyName || "").toUpperCase();
-const wantedKind = String(kindName || "").toUpperCase();
+  const findFamilyMark = (familyName, kindName) => {
+    const wantedFamily = String(familyName || "").toUpperCase();
+    const wantedKind = String(kindName || "").toUpperCase();
 
-const row = levelRows.find((r) => {
-  const wave = String(r.wave || "").toUpperCase();
-  const kind = String(r.kind || "").toUpperCase();
+    const row = levelRows.find((r) => {
+      const wave = String(r.wave || "").toUpperCase();
+      const kind = String(r.kind || "").toUpperCase();
 
-  return wave === wantedFamily && kind === wantedKind;
-});
+      return wave === wantedFamily && kind === wantedKind;
+    });
 
-if (!row) return makeEmptyMark();
+    if (!row) return makeEmptyMark();
 
-return {
-  price: toPriceOrNull(row?.price),
-  time: row?.datetime_az || null,
-};
-  
-};
+    return {
+      price: toPriceOrNull(row?.price),
+      time: row?.datetime_az || null,
+    };
+  };
 
-const findAbcUpMark = (kindName) => {
-return findFamilyMark("ABC_UP", kindName);
-};
+  const findManualWaveMark = (kindName) => {
+    return findFamilyMark("MARK", kindName);
+  };
 
-const findDownImpulseMark = (kindName) => {
-return findFamilyMark("W3_DOWN", kindName);
-};
+  const toWaveMark = (mark) => {
+    if (!mark || mark.price == null) return null;
 
-const findPostW5BounceMark = (kindName) => {
-return findFamilyMark("POST_W5_BOUNCE", kindName);
-};
+    return {
+      p: mark.price,
+      t: mark.time || null,
+      tSec: datetimeAzToSec(mark.time),
+    };
+  };
 
-const findPossibleW5UpMark = (kindName) => {
-  return findFamilyMark("POSSIBLE_W5_UP", kindName);
-};
+  const manualWaveMarks = {
+    W1: toWaveMark(findManualWaveMark("W1")),
+    W2: toWaveMark(findManualWaveMark("W2")),
+    W3: toWaveMark(findManualWaveMark("W3")),
+    W4: toWaveMark(findManualWaveMark("W4")),
+    W5: toWaveMark(findManualWaveMark("W5")),
+  };
 
-const aLow = findLevel("A_LOW", "A");
-const bHigh = findLevel("B_HIGH", "B");
-const cLow = findLevel("C_LOW", "C");
+  const cleanedManualWaveMarks = Object.fromEntries(
+    Object.entries(manualWaveMarks).filter(([, value]) => value)
+  );
 
-const originLow = findAbcUpMark("ORIGIN_LOW");
-const aHigh = findAbcUpMark("A_HIGH");
-const bLow = findAbcUpMark("B_LOW");
-const cHigh = findAbcUpMark("C_HIGH");
+  const hasManualWaveMarks =
+    Object.keys(cleanedManualWaveMarks).length > 0;
 
-const downW1Low = findDownImpulseMark("W1_LOW");
-const downW2High = findDownImpulseMark("W2_HIGH");
-const downW3Low = findDownImpulseMark("W3_LOW");
-const downW4High = findDownImpulseMark("W4_HIGH");
-const downW5Low = findDownImpulseMark("W5_LOW");
+  const findAbcUpMark = (kindName) => {
+    return findFamilyMark("ABC_UP", kindName);
+  };
 
-const postW5OriginLow = findPostW5BounceMark("ORIGIN_LOW");
-const postW5AHigh = findPostW5BounceMark("A_HIGH");
-const postW5BLow = findPostW5BounceMark("B_LOW");
-const postW5CHigh = findPostW5BounceMark("C_HIGH");
+  const findDownImpulseMark = (kindName) => {
+    return findFamilyMark("W3_DOWN", kindName);
+  };
 
-const possibleW5OriginLow = findPossibleW5UpMark("ORIGIN_LOW");
-const possibleW5W1High = findPossibleW5UpMark("W1_HIGH");
-const possibleW5W2Low = findPossibleW5UpMark("W2_LOW");
-const possibleW5W3High = findPossibleW5UpMark("W3_HIGH");
-const possibleW5W4Low = findPossibleW5UpMark("W4_LOW");
-const possibleW5W5High = findPossibleW5UpMark("W5_HIGH");
-  
-const abcUpMarks = {
-originLow: originLow.price,
-originTime: originLow.time,
+  const findPostW5BounceMark = (kindName) => {
+    return findFamilyMark("POST_W5_BOUNCE", kindName);
+  };
 
-aHigh: aHigh.price,
-aTime: aHigh.time,
+  const findPossibleW5UpMark = (kindName) => {
+    return findFamilyMark("POSSIBLE_W5_UP", kindName);
+  };
 
-bLow: bLow.price,
-bTime: bLow.time,
+  const aLow = findLevel("A_LOW", "A");
+  const bHigh = findLevel("B_HIGH", "B");
+  const cLow = findLevel("C_LOW", "C");
 
-cHigh: cHigh.price,
-cTime: cHigh.time,
-};
+  const originLow = findAbcUpMark("ORIGIN_LOW");
+  const aHigh = findAbcUpMark("A_HIGH");
+  const bLow = findAbcUpMark("B_LOW");
+  const cHigh = findAbcUpMark("C_HIGH");
 
-const downImpulseMarks = {
-w1Low: downW1Low.price,
-w1Time: downW1Low.time,
+  const downW1Low = findDownImpulseMark("W1_LOW");
+  const downW2High = findDownImpulseMark("W2_HIGH");
+  const downW3Low = findDownImpulseMark("W3_LOW");
+  const downW4High = findDownImpulseMark("W4_HIGH");
+  const downW5Low = findDownImpulseMark("W5_LOW");
 
-w2High: downW2High.price,
-w2Time: downW2High.time,
+  const postW5OriginLow = findPostW5BounceMark("ORIGIN_LOW");
+  const postW5AHigh = findPostW5BounceMark("A_HIGH");
+  const postW5BLow = findPostW5BounceMark("B_LOW");
+  const postW5CHigh = findPostW5BounceMark("C_HIGH");
 
-w3Low: downW3Low.price,
-w3Time: downW3Low.time,
+  const possibleW5OriginLow = findPossibleW5UpMark("ORIGIN_LOW");
+  const possibleW5W1High = findPossibleW5UpMark("W1_HIGH");
+  const possibleW5W2Low = findPossibleW5UpMark("W2_LOW");
+  const possibleW5W3High = findPossibleW5UpMark("W3_HIGH");
+  const possibleW5W4Low = findPossibleW5UpMark("W4_LOW");
+  const possibleW5W5High = findPossibleW5UpMark("W5_HIGH");
 
-w4High: downW4High.price,
-w4Time: downW4High.time,
+  const abcUpMarks = {
+    originLow: originLow.price,
+    originTime: originLow.time,
 
-w5Low: downW5Low.price,
-w5Time: downW5Low.time,
-};
+    aHigh: aHigh.price,
+    aTime: aHigh.time,
 
-const postW5BounceMarks = {
-originLow: postW5OriginLow.price,
-originTime: postW5OriginLow.time,
+    bLow: bLow.price,
+    bTime: bLow.time,
 
-aHigh: postW5AHigh.price,
-aTime: postW5AHigh.time,
+    cHigh: cHigh.price,
+    cTime: cHigh.time,
+  };
 
-bLow: postW5BLow.price,
-bTime: postW5BLow.time,
+  const downImpulseMarks = {
+    w1Low: downW1Low.price,
+    w1Time: downW1Low.time,
 
-cHigh: postW5CHigh.price,
-cTime: postW5CHigh.time,
-};
+    w2High: downW2High.price,
+    w2Time: downW2High.time,
 
-const possibleW5UpMarks = {
-  originLow: possibleW5OriginLow.price,
-  originTime: possibleW5OriginLow.time,
+    w3Low: downW3Low.price,
+    w3Time: downW3Low.time,
 
-  w1High: possibleW5W1High.price,
-  w1Time: possibleW5W1High.time,
+    w4High: downW4High.price,
+    w4Time: downW4High.time,
 
-  w2Low: possibleW5W2Low.price,
-  w2Time: possibleW5W2Low.time,
+    w5Low: downW5Low.price,
+    w5Time: downW5Low.time,
+  };
 
-  w3High: possibleW5W3High.price,
-  w3Time: possibleW5W3High.time,
+  const postW5BounceMarks = {
+    originLow: postW5OriginLow.price,
+    originTime: postW5OriginLow.time,
 
-  w4Low: possibleW5W4Low.price,
-  w4Time: possibleW5W4Low.time,
+    aHigh: postW5AHigh.price,
+    aTime: postW5AHigh.time,
 
-  w5High: possibleW5W5High.price,
-  w5Time: possibleW5W5High.time,
-}; 
+    bLow: postW5BLow.price,
+    bTime: postW5BLow.time,
 
-return {
-...block,
-aLow,
-bHigh,
-cLow,
-w4Low: cLow,
-lowerHighLevel: bHigh,
-continuationLevel: bHigh,
-abcUpMarks,
-downImpulseMarks,
-postW5BounceMarks,
-possibleW5UpMarks,
-};
+    cHigh: postW5CHigh.price,
+    cTime: postW5CHigh.time,
+  };
+
+  const possibleW5UpMarks = {
+    originLow: possibleW5OriginLow.price,
+    originTime: possibleW5OriginLow.time,
+
+    w1High: possibleW5W1High.price,
+    w1Time: possibleW5W1High.time,
+
+    w2Low: possibleW5W2Low.price,
+    w2Time: possibleW5W2Low.time,
+
+    w3High: possibleW5W3High.price,
+    w3Time: possibleW5W3High.time,
+
+    w4Low: possibleW5W4Low.price,
+    w4Time: possibleW5W4Low.time,
+
+    w5High: possibleW5W5High.price,
+    w5Time: possibleW5W5High.time,
+  };
+
+  return {
+    ...block,
+
+    // Normal manual MARK rows:
+    // ES,intermediate,1h,MARK,W1,...
+    // ES,intermediate,1h,MARK,W2,...
+    // These become Engine 2 waveMarks so phase can advance.
+    waveMarks: hasManualWaveMarks
+      ? {
+          ...(block.waveMarks || {}),
+          ...cleanedManualWaveMarks,
+        }
+      : block.waveMarks,
+
+    aLow,
+    bHigh,
+    cLow,
+    w4Low: cLow,
+    lowerHighLevel: bHigh,
+    continuationLevel: bHigh,
+
+    abcUpMarks,
+    downImpulseMarks,
+    postW5BounceMarks,
+    possibleW5UpMarks,
+  };
 }
+```
