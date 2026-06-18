@@ -1,4 +1,3 @@
-```js
 import fs from "fs";
 
 const DEFAULT_FIB_INPUT_FILE =
@@ -346,4 +345,3 @@ export function attachManualLevelsToEngine2Block(block, levelRows = []) {
     possibleW5UpMarks,
   };
 }
-```
