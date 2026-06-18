@@ -4828,6 +4828,12 @@ async function buildEngine2State(symbol) {
     buildEngine2Block({ symbol, degree: "micro", tf: "10m", currentPrice }).catch(() => null),
   ]); 
 
+  const intermediateLevelRows = getManualLevelRowsFor({
+    symbol,
+    degree: "intermediate",
+    tf: "1h",
+  });
+
   const minorLevelRows = getManualLevelRowsFor({
     symbol,
     degree: "minor",
@@ -4845,6 +4851,11 @@ async function buildEngine2State(symbol) {
     tf: "10m",
   });
 
+  const intermediateWithLevels = attachManualLevelsToEngine2Block(
+    intermediateRaw,
+    intermediateLevelRows
+  );
+
   const minorWithLevels = attachManualLevelsToEngine2Block(
     minorRaw,
     minorLevelRows
@@ -4861,7 +4872,7 @@ async function buildEngine2State(symbol) {
   );
 
   const primary = enrichEngine2BlockWithExtensions(primaryRaw);
-  const intermediate = enrichEngine2BlockWithExtensions(intermediateRaw);
+  const intermediate = enrichEngine2BlockWithExtensions(intermediateWithLevels);
   const minor = enrichEngine2BlockWithExtensions(minorWithLevels);
   const minute = enrichEngine2BlockWithExtensions(minuteWithLevels);
   const micro = enrichEngine2BlockWithExtensions(microWithLevels);
