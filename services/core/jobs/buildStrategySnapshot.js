@@ -4831,7 +4831,6 @@ async function buildEngine2State(symbol) {
   const intermediateLevelRows = getManualLevelRowsFor({
     symbol,
     degree: "intermediate",
-    tf: "1h",
   });
 
   const minorLevelRows = getManualLevelRowsFor({
