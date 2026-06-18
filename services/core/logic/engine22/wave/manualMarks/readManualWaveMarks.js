@@ -28,23 +28,20 @@ function datetimeAzToSec(datetimeAz) {
   const raw = String(datetimeAz || "").trim();
   if (!raw) return null;
 
-  // fib-input.csv times are Arizona-local chart times.
-  // Arizona is MST year-round, UTC-07:00.
   const normalized = raw.includes("T")
     ? raw
     : raw.replace(" ", "T");
 
   const withSeconds =
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)
-      ? `${normalized}:00`
+      ? normalized + ":00"
       : normalized;
 
-  const ms = Date.parse(`${withSeconds}-07:00`);
+  const ms = Date.parse(withSeconds + "-07:00");
   if (!Number.isFinite(ms)) return null;
 
   return Math.floor(ms / 1000);
 }
-
 function readFibInputRows(filePath = DEFAULT_FIB_INPUT_FILE) {
   try {
     if (!fs.existsSync(filePath)) return [];
