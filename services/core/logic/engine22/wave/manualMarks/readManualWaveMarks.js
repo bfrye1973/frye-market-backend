@@ -315,6 +315,54 @@ export function attachManualLevelsToEngine2Block(block, levelRows = []) {
   const hasManualWaveMarks =
     Object.keys(cleanedManualWaveMarks).length > 0;
 
+const buildManualWavePhase = () => {
+  const order = ["W1", "W2", "W3", "W4", "W5"];
+  const marksPresent = order.filter((key) => cleanedManualWaveMarks[key]);
+
+  if (!marksPresent.length) {
+    return {
+      phase: block.phase ?? "UNKNOWN",
+      confirmedPhase: block.confirmedPhase ?? "UNKNOWN",
+      lastMark: block.lastMark ?? null,
+      nextMark: block.nextMark ?? null,
+      marksPresent: block.marksPresent ?? [],
+    };
+  }
+
+  const lastKey = marksPresent[marksPresent.length - 1];
+  const last = cleanedManualWaveMarks[lastKey];
+
+  const phaseByLastKey = {
+    W1: "IN_W2",
+    W2: "IN_W3",
+    W3: "IN_W4",
+    W4: "IN_W5",
+    W5: "COMPLETE_W5",
+  };
+
+  const confirmedPhaseByLastKey = {
+    W1: "IN_W1",
+    W2: "IN_W2",
+    W3: "IN_W3",
+    W4: "IN_W4",
+    W5: "COMPLETE_W5",
+  };
+
+  return {
+    phase: phaseByLastKey[lastKey] || "UNKNOWN",
+    confirmedPhase: confirmedPhaseByLastKey[lastKey] || "UNKNOWN",
+    phaseReason: `ACTIVE_WAVE_STATE_${lastKey}_MARKED`,
+    lastMark: {
+      key: lastKey,
+      ...last,
+    },
+    nextMark: null,
+    marksPresent,
+  };
+};
+
+const manualWavePhase = buildManualWavePhase();
+
   const findAbcUpMark = (kindName) => {
     return findFamilyMark("ABC_UP", kindName);
   };
@@ -429,6 +477,17 @@ export function attachManualLevelsToEngine2Block(block, levelRows = []) {
 waveMarks: hasManualWaveMarks
   ? cleanedManualWaveMarks
   : block.waveMarks,
+
+...(hasManualWaveMarks
+  ? {
+      phase: manualWavePhase.phase,
+      confirmedPhase: manualWavePhase.confirmedPhase,
+      phaseReason: manualWavePhase.phaseReason,
+      lastMark: manualWavePhase.lastMark,
+      nextMark: manualWavePhase.nextMark,
+      marksPresent: manualWavePhase.marksPresent,
+    }
+  : {}),
 
     aLow,
     bHigh,
