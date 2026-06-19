@@ -3273,6 +3273,15 @@ function applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy) {
     return engine22WaveStrategy;
   }
 
+  // Engine 22 wave strategy owns currentLifecycleState.
+  // Snapshot builder should only transport it, not override it.
+  if (
+    engine22WaveStrategy.currentLifecycleState &&
+    typeof engine22WaveStrategy.currentLifecycleState === "object"
+  ) {
+    return engine22WaveStrategy;
+  }
+
   const currentLifecycleState =
     buildEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
 
