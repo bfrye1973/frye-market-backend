@@ -31,6 +31,7 @@ import { buildFuturesWaveContext } from "./adapters/buildFuturesWaveContext.js";
 import { buildWaveTradeDecision } from "../decisions/buildWaveTradeDecision.js";
 import { buildTargetClusterConfidence } from "./buildTargetClusterConfidence.js";
 import { buildWaveOpportunity } from "../opportunity/buildWaveOpportunity.js";
+import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLifecycleState.js";
 
 function round2(x) {
   const n = Number(x);
@@ -627,6 +628,8 @@ export function buildEngine22WaveStrategy(input = {}) {
       context,
     });
 
+  const currentLifecycleState = resolveCurrentLifecycleState({ waveFibState });
+
   const targetClusterConfidence = buildTargetClusterConfidence({
     symbol: context.symbol,
     waveFibState,
@@ -646,18 +649,40 @@ export function buildEngine22WaveStrategy(input = {}) {
     w4Levels,
   });
 
-const postMinor5DownImpulse = getPostMinor5DownImpulse(waveFibState);
+  const postMinor5DownImpulse = getPostMinor5DownImpulse(waveFibState);
 
-if (postMinor5DownImpulse) {
-  waveOpportunity = buildPostMinor5CorrectiveBounceOpportunity({
-    baseOpportunity: waveOpportunity,
-    context,
-    waveFibState,
-    tradeContextSummary,
-    downImpulse: postMinor5DownImpulse,
-  });
-}
+  if (postMinor5DownImpulse) {
+    waveOpportunity = buildPostMinor5CorrectiveBounceOpportunity({
+      baseOpportunity: waveOpportunity,
+      context,
+      waveFibState,
+      tradeContextSummary,
+      downImpulse: postMinor5DownImpulse,
+    });
+  }
 
+  if (
+    currentLifecycleState?.key ===
+    "INTERMEDIATE_W3_MINOR_MINUTE_W3_CONTINUATION_WATCH"
+  ) {
+    waveOpportunity = {
+      ...(waveOpportunity || {}),
+      setupType: "INTERMEDIATE_W3_MINOR_MINUTE_W3_CONTINUATION_WATCH",
+      readiness: "WATCH",
+      direction: "LONG",
+      active: false,
+      noExecution: true,
+      tradeableOpportunityBlocked: true,
+      timing: "W3_CONTINUATION_WATCH",
+      needs: currentLifecycleState.needs,
+      reasonCodes: [
+        ...(Array.isArray(waveOpportunity?.reasonCodes)
+          ? waveOpportunity.reasonCodes
+          : []),
+        "ENGINE22_CURRENT_LIFECYCLE_STATE_MIRRORED_TO_WAVE_OPPORTUNITY",
+      ],
+    };
+  }
 
   // DISPLAY LAYER:
   // Timeline can use Engine15 for wording, but it is not the source of opportunity truth.
@@ -715,9 +740,21 @@ if (postMinor5DownImpulse) {
     timelineRead,
     tradeDecision,
 
-    headline: tradeContextSummary?.headline || timelineRead?.headline || null,
-    bias: tradeContextSummary?.bias || null,
-    action: tradeContextSummary?.action || timelineRead?.action || "WAIT",
+    // Canonical Engine 22 lifecycle state.
+    // Downstream engines should consume this instead of stale display text.
+    currentLifecycleState,
+
+    headline:
+      currentLifecycleState?.headline ||
+      tradeContextSummary?.headline ||
+      timelineRead?.headline ||
+      null,
+    bias: currentLifecycleState?.bias || tradeContextSummary?.bias || null,
+    action:
+      currentLifecycleState?.action ||
+      tradeContextSummary?.action ||
+      timelineRead?.action ||
+      "WAIT",
     severity:
       tradeContextSummary?.severity || timelineRead?.severity || "neutral",
 
