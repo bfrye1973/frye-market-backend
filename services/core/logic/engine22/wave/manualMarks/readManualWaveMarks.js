@@ -3,6 +3,9 @@ import fs from "fs";
 const DEFAULT_FIB_INPUT_FILE =
   "/opt/render/project/src/services/core/data/fib-input.csv";
 
+const DEFAULT_ACTIVE_WAVE_STATE_FILE =
+  "/opt/render/project/src/services/core/data/waves/active/active-wave-state-es.json";
+
 function parseCsvLine(line) {
   return String(line || "")
     .split(",")
@@ -41,6 +44,7 @@ function datetimeAzToSec(datetimeAz) {
 
   return Math.floor(ms / 1000);
 }
+
 function readFibInputRows(filePath = DEFAULT_FIB_INPUT_FILE) {
   try {
     if (!fs.existsSync(filePath)) return [];
@@ -64,6 +68,7 @@ function readFibInputRows(filePath = DEFAULT_FIB_INPUT_FILE) {
           kind,
           datetime_az,
           price: Number(price),
+          source: "fib-input.csv",
         };
       });
   } catch (err) {
@@ -76,71 +81,171 @@ function readFibInputRows(filePath = DEFAULT_FIB_INPUT_FILE) {
   }
 }
 
+function readActiveWaveStateRows({
+  symbol,
+  degree,
+  tf,
+  filePath = DEFAULT_ACTIVE_WAVE_STATE_FILE,
+} = {}) {
+  try {
+    if (!fs.existsSync(filePath)) return [];
+
+    const json = JSON.parse(fs.readFileSync(filePath, "utf8"));
+
+    const symbolMatches =
+      String(json?.symbol || "").toUpperCase() ===
+      String(symbol || "").toUpperCase();
+
+    if (!symbolMatches) return [];
+
+    const degreeKey = String(degree || "").toLowerCase();
+    const structure = json?.activeStructures?.[degreeKey] || null;
+
+    if (!structure || typeof structure !== "object") return [];
+
+    const tfMatches =
+      !tf ||
+      String(structure?.tf || "").toLowerCase() ===
+        String(tf || "").toLowerCase();
+
+    if (!tfMatches) return [];
+
+    const marks = structure?.marks || {};
+    const rows = [];
+
+    for (const key of ["W1", "W2", "W3", "W4", "W5"]) {
+      const mark = marks?.[key];
+      const price = toPriceOrNull(mark?.price);
+      const time = mark?.time || null;
+
+      if (price == null || !time) continue;
+
+      rows.push({
+        symbol: json.symbol,
+        degree: degreeKey,
+        tf: structure.tf || tf || null,
+        wave: "MARK",
+        kind: key,
+        datetime_az: time,
+        price,
+        source: "active-wave-state",
+        direction: structure.direction || null,
+        updatedAt: json.updatedAt || null,
+      });
+    }
+
+    return rows;
+  } catch (err) {
+    console.warn(
+      "[Engine22 ManualMarks] Failed reading active-wave-state-es.json:",
+      err?.message
+    );
+
+    return [];
+  }
+}
+
+function rowMatchesRequest(row, { symbol, degree, tf }) {
+  const symbolMatches =
+    String(row.symbol || "").toUpperCase() ===
+    String(symbol || "").toUpperCase();
+
+  const degreeMatches =
+    String(row.degree || "").toLowerCase() ===
+    String(degree || "").toLowerCase();
+
+  const tfMatches =
+    !tf ||
+    String(row.tf || "").toLowerCase() === String(tf || "").toLowerCase();
+
+  return symbolMatches && degreeMatches && tfMatches;
+}
+
+function isSupportedManualRow(row) {
+  const wave = String(row.wave || "").toUpperCase();
+  const kind = String(row.kind || "").toUpperCase();
+
+  const isLevelRow = kind === "LEVEL";
+
+  const isManualWaveMarkRow =
+    wave === "MARK" &&
+    ["W1", "W2", "W3", "W4", "W5"].includes(kind);
+
+  const isAbcDownRow =
+    wave === "ABC" &&
+    ["A", "B", "C"].includes(kind);
+
+  const isAbcUpRow =
+    wave === "ABC_UP" &&
+    ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
+
+  const isDownImpulseRow =
+    wave === "W3_DOWN" &&
+    ["W1_LOW", "W2_HIGH", "W3_LOW", "W4_HIGH", "W5_LOW"].includes(kind);
+
+  const isPostW5BounceRow =
+    wave === "POST_W5_BOUNCE" &&
+    ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
+
+  const isPossibleW5UpRow =
+    wave === "POSSIBLE_W5_UP" &&
+    ["ORIGIN_LOW", "W1_HIGH", "W2_LOW", "W3_HIGH", "W4_LOW", "W5_HIGH"].includes(kind);
+
+  return (
+    isLevelRow ||
+    isManualWaveMarkRow ||
+    isAbcDownRow ||
+    isAbcUpRow ||
+    isDownImpulseRow ||
+    isPostW5BounceRow ||
+    isPossibleW5UpRow
+  );
+}
+
+function isNormalWaveMarkRow(row) {
+  const wave = String(row.wave || "").toUpperCase();
+  const kind = String(row.kind || "").toUpperCase();
+
+  return (
+    wave === "MARK" &&
+    ["W1", "W2", "W3", "W4", "W5"].includes(kind)
+  );
+}
+
 export function getManualLevelRowsFor(args = {}) {
   const {
     symbol,
     degree,
     tf,
     filePath = DEFAULT_FIB_INPUT_FILE,
+    activeFilePath = DEFAULT_ACTIVE_WAVE_STATE_FILE,
   } = args;
 
-  return readFibInputRows(filePath).filter((row) => {
-    const wave = String(row.wave || "").toUpperCase();
-    const kind = String(row.kind || "").toUpperCase();
-
-    const isLevelRow = kind === "LEVEL";
-
-    const isManualWaveMarkRow =
-      wave === "MARK" &&
-      ["W1", "W2", "W3", "W4", "W5"].includes(kind);
-
-    const isAbcDownRow =
-      wave === "ABC" &&
-      ["A", "B", "C"].includes(kind);
-
-    const isAbcUpRow =
-      wave === "ABC_UP" &&
-      ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
-
-    const isDownImpulseRow =
-      wave === "W3_DOWN" &&
-      ["W1_LOW", "W2_HIGH", "W3_LOW", "W4_HIGH", "W5_LOW"].includes(kind);
-
-    const isPostW5BounceRow =
-      wave === "POST_W5_BOUNCE" &&
-      ["ORIGIN_LOW", "A_HIGH", "B_LOW", "C_HIGH"].includes(kind);
-
-    const isPossibleW5UpRow =
-      wave === "POSSIBLE_W5_UP" &&
-      ["ORIGIN_LOW", "W1_HIGH", "W2_LOW", "W3_HIGH", "W4_LOW", "W5_HIGH"].includes(kind);
-
-    const symbolMatches =
-      String(row.symbol || "").toUpperCase() ===
-      String(symbol || "").toUpperCase();
-
-    const degreeMatches =
-      String(row.degree || "").toLowerCase() ===
-      String(degree || "").toLowerCase();
-
-    const tfMatches =
-      !tf ||
-      String(row.tf || "").toLowerCase() === String(tf || "").toLowerCase();
-
-    return (
-      symbolMatches &&
-      degreeMatches &&
-      tfMatches &&
-      (
-        isLevelRow ||
-        isManualWaveMarkRow ||
-        isAbcDownRow ||
-        isAbcUpRow ||
-        isDownImpulseRow ||
-        isPostW5BounceRow ||
-        isPossibleW5UpRow
-      )
-    );
+  const activeRows = readActiveWaveStateRows({
+    symbol,
+    degree,
+    tf,
+    filePath: activeFilePath,
   });
+
+  const hasActiveWaveStructure = activeRows.length > 0;
+
+  const csvRows = readFibInputRows(filePath)
+    .filter((row) => rowMatchesRequest(row, { symbol, degree, tf }))
+    .filter(isSupportedManualRow)
+    .filter((row) => {
+      if (!hasActiveWaveStructure) return true;
+
+      // If active-wave-state provides W1/W2/etc for this degree,
+      // old CSV MARK rows for that degree become historical only.
+      // Keep ABC / ABC_UP / W3_DOWN / POST_W5_BOUNCE / POSSIBLE_W5_UP rows.
+      return !isNormalWaveMarkRow(row);
+    });
+
+  return [
+    ...activeRows,
+    ...csvRows,
+  ];
 }
 
 export function attachManualLevelsToEngine2Block(block, levelRows = []) {
@@ -321,10 +426,6 @@ export function attachManualLevelsToEngine2Block(block, levelRows = []) {
   return {
     ...block,
 
-    // Normal manual MARK rows:
-    // ES,intermediate,1h,MARK,W1,...
-    // ES,intermediate,1h,MARK,W2,...
-    // These become Engine 2 waveMarks so phase can advance.
     waveMarks: hasManualWaveMarks
       ? {
           ...(block.waveMarks || {}),
