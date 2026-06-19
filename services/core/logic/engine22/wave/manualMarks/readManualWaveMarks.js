@@ -426,12 +426,9 @@ export function attachManualLevelsToEngine2Block(block, levelRows = []) {
   return {
     ...block,
 
-    waveMarks: hasManualWaveMarks
-      ? {
-          ...(block.waveMarks || {}),
-          ...cleanedManualWaveMarks,
-        }
-      : block.waveMarks,
+waveMarks: hasManualWaveMarks
+  ? cleanedManualWaveMarks
+  : block.waveMarks,
 
     aLow,
     bHigh,
