@@ -2,33 +2,37 @@
 //
 // Engine 15ES — ES Futures Readiness Referee
 //
-// v1.3
+// v1.7
 // - ES-only readiness shell
 // - Does NOT place orders
 // - Does NOT replace Engine 16ES
 // - Does NOT hard-code Elliott wave scenarios
 //
 // Authority model:
-// - Engine 22 = Elliott Wave W3/W5 opportunity source
+// - Engine 22 = Elliott Wave lifecycle / currentLifecycleState source
 // - Engine 3 = raw reaction facts
 // - Engine 4 = raw volume / participation facts
 // - Engine 5 = normalized confluence + reaction / volume / timing verdicts
-// - Engine 15ES = final ES setup referee
+// - Engine 15ES = final ES setup readiness translator / referee
 // - Engine 6 = final permission gate
 //
-// Main upgrade in v1.3:
-// - Engine 15ES now consumes Engine 22 waveOpportunity first:
-//   - snapshotContext.waveOpportunity
-//   - snapshotContext.engine22WaveStrategy?.waveOpportunity
-// - Engine 22 decides whether a valid W2→W3 or W4→W5 opportunity exists.
-// - Engine 15ES referees that opportunity using Engine 5 reaction / volume / timing.
-// - If Engine 22 says WATCH / LATE / EXTREME chase risk, Engine 15ES cannot upgrade to READY.
+// Main upgrade in v1.7:
+// - Engine 15ES now consumes Engine 22 canonical currentLifecycleState generically.
+// - Engine 22 owns the complete downstream-safe currentLifecycleState contract.
+// - Engine 15ES no longer needs one custom branch for every new Engine 22 lifecycle key.
+// - If Engine 22 says readOnly / noExecution / tradeableOpportunityBlocked / WATCH,
+//   Engine 15ES translates it into a safe WATCH-only state.
+// - Engine 15ES still owns confirmation awareness:
+//   Engine 3 reaction, Engine 4 participation, Engine 5 timing/quality, Engine 6 permission.
+// - Engine 15ES does NOT execute.
+// - Engine 15ES does NOT create automatic LONG or SHORT permission.
+// - Engine 15ES does NOT bypass Engine 6.
 //
 // Main purpose:
 // Engine 15ES answers:
 // Is ES ready, watch-only, blocked, or waiting — and what exactly does the trader need next?
 
-const ENGINE = "engine15.esReadiness.v1.6";
+const ENGINE = "engine15.esReadiness.v1.7";
 const DEFAULT_STRATEGY_ID = "intraday_scalp@10m";
 const ES_TICK_SIZE = 0.25;
 
@@ -150,7 +154,7 @@ function getCurrentPrice({
 }
 
 /* -----------------------------
-   Engine 22 waveOpportunity readers
+   Engine 22 current lifecycle readers
 ------------------------------*/
 
 function getEngine22WaveStrategy(snapshotContext) {
@@ -171,6 +175,48 @@ function getPossibleW5Up(engine22WaveStrategy) {
 function lifecycleKey(currentLifecycleState) {
   return safeUpper(currentLifecycleState?.key, "NONE");
 }
+
+function currentLifecycleReadiness(currentLifecycleState) {
+  return safeUpper(currentLifecycleState?.readiness, "WATCH");
+}
+
+function currentLifecycleDirection(currentLifecycleState) {
+  return safeUpper(currentLifecycleState?.direction, "NONE");
+}
+
+function currentLifecycleExecutionBias(currentLifecycleState) {
+  const explicit = safeUpper(currentLifecycleState?.executionBias, "");
+  if (explicit) return explicit;
+
+  const direction = currentLifecycleDirection(currentLifecycleState);
+  if (direction === "LONG") return "LONG";
+  if (direction === "SHORT") return "SHORT";
+  return "NONE";
+}
+
+function currentLifecycleIsWatchOnly(currentLifecycleState) {
+  if (!currentLifecycleState || typeof currentLifecycleState !== "object") {
+    return false;
+  }
+
+  return (
+    currentLifecycleState.readOnly === true ||
+    currentLifecycleState.noExecution === true ||
+    currentLifecycleState.tradeableOpportunityBlocked === true ||
+    currentLifecycleReadiness(currentLifecycleState) === "WATCH"
+  );
+}
+
+function currentLifecycleAction(currentLifecycleState) {
+  return safeUpper(
+    currentLifecycleState?.action,
+    "WAIT_FOR_CONFIRMATION"
+  );
+}
+
+/* -----------------------------
+   Engine 22 waveOpportunity fallback readers
+------------------------------*/
 
 function getWaveOpportunity(snapshotContext) {
   return (
@@ -642,6 +688,59 @@ function timingChaseRiskFromEngine5(engine5) {
 }
 
 /* -----------------------------
+   Engine 15 generic confirmation helpers
+------------------------------*/
+
+function engine3ConfirmedForCurrentLifecycle(engine3, engine5) {
+  return reactionConfirmedFromEngine5(engine5, engine3);
+}
+
+function engine4ConfirmedForCurrentLifecycle(engine4, engine5) {
+  return volumeConfirmedFromEngine5(engine5, engine4);
+}
+
+function buildEngine15NeedsFromCurrentLifecycleState({
+  current,
+  engine3,
+  engine4,
+  engine5,
+  permission,
+}) {
+  const baseNeeds = Array.isArray(current?.needs) ? current.needs : [];
+  const needs = [...baseNeeds];
+
+  const engine3Ok = engine3ConfirmedForCurrentLifecycle(engine3, engine5);
+  const engine4Ok = engine4ConfirmedForCurrentLifecycle(engine4, engine5);
+  const permissionOk = permissionGatePassed(permission);
+
+  if (!engine3Ok) needs.push("ENGINE3_REACTION_CONFIRMATION");
+  if (!engine4Ok) needs.push("ENGINE4_PARTICIPATION_CONFIRMATION");
+  if (!permissionOk) needs.push("ENGINE6_FINAL_PERMISSION_REQUIRED");
+
+  return unique(needs);
+}
+
+function buildEngine15BlockersFromCurrentLifecycleState({
+  current,
+  engine3,
+  engine4,
+  engine5,
+  permission,
+}) {
+  const blockers = Array.isArray(current?.blockers) ? [...current.blockers] : [];
+
+  const engine3Ok = engine3ConfirmedForCurrentLifecycle(engine3, engine5);
+  const engine4Ok = engine4ConfirmedForCurrentLifecycle(engine4, engine5);
+  const permissionOk = permissionGatePassed(permission);
+
+  if (!engine3Ok) blockers.push("ENGINE3_REACTION_NOT_CONFIRMED");
+  if (!engine4Ok) blockers.push("ENGINE4_PARTICIPATION_NOT_CONFIRMED");
+  if (!permissionOk) blockers.push("ENGINE6_FINAL_PERMISSION_REQUIRED");
+
+  return unique(blockers);
+}
+
+/* -----------------------------
    Structure / extension helpers
 ------------------------------*/
 
@@ -765,6 +864,7 @@ function buildBlockedDecision({
     action: "BLOCKED",
     priority: 0,
     entryStyle: "NONE",
+    active: false,
     freshEntryNow: false,
 
     reasonCodes: unique(reasonCodes),
@@ -1077,6 +1177,153 @@ function buildPossibleW5UpCompletePullbackWatchDecision({
   };
 }
 
+function buildEngine15FromEngine22CurrentLifecycleState({
+  symbol,
+  strategyId,
+  permission,
+  currentPrice,
+  current,
+  engine3,
+  engine4,
+  engine5,
+  debug,
+}) {
+  if (!current || typeof current !== "object") return null;
+
+  const key = lifecycleKey(current);
+  if (!key || key === "NONE" || key === "UNKNOWN_ENGINE22_STATE") return null;
+
+  const watchOnly = currentLifecycleIsWatchOnly(current);
+  if (!watchOnly) return null;
+
+  const direction = currentLifecycleDirection(current);
+  const executionBias = currentLifecycleExecutionBias(current);
+  const rawReadiness = currentLifecycleReadiness(current);
+  const readinessLabel = rawReadiness === "READY" ? "WATCH" : rawReadiness;
+
+  const action = currentLifecycleAction(current);
+
+  const needs = buildEngine15NeedsFromCurrentLifecycleState({
+    current,
+    engine3,
+    engine4,
+    engine5,
+    permission,
+  });
+
+  const blockers = buildEngine15BlockersFromCurrentLifecycleState({
+    current,
+    engine3,
+    engine4,
+    engine5,
+    permission,
+  });
+
+  const currentReasonCodes = Array.isArray(current.reasonCodes)
+    ? current.reasonCodes
+    : [];
+
+  const reasonCodes = unique([
+    "ENGINE15_RECOGNIZED_ENGINE22_CURRENT_LIFECYCLE_STATE",
+    key,
+    "WATCH_ONLY",
+    "NO_EXECUTION",
+    ...currentReasonCodes,
+  ]);
+
+  return {
+    ok: true,
+    engine: ENGINE,
+    symbol,
+    strategyId,
+
+    strategyType: key,
+    direction,
+    readinessLabel,
+    executionBias,
+    action,
+    priority: 30,
+    entryStyle: "ENGINE22_CURRENT_LIFECYCLE_WATCH_ONLY",
+    active: false,
+    freshEntryNow: false,
+
+    executable: false,
+    noExecution: true,
+    tradeableOpportunityBlocked: true,
+    setupEligible: false,
+
+    paperTradeCandidate: current.paperTradeCandidate === true,
+    paperTradeAllowedOnlyAfterConfirmation:
+      current.paperTradeAllowedOnlyAfterConfirmation === true,
+
+    reasonCodes,
+    blockers,
+    conflicts: [],
+
+    needs,
+
+    summary:
+      current.summary ||
+      current.headline ||
+      "Engine 15ES is watching Engine 22 current lifecycle state and waiting for confirmation.",
+
+    qualityGatePassed: false,
+    momentumGatePassed: false,
+    permissionGatePassed: false,
+
+    qualityScore: 0,
+    qualityGrade: "WATCH",
+    qualityBand: "WATCH_ONLY",
+
+    qualityBreakdown: {
+      engine22CurrentLifecycleKey: key,
+      engine22CurrentLifecycleAdapter: true,
+      direction,
+      executionBias,
+      readOnly: current.readOnly === true,
+      noExecution: true,
+      tradeableOpportunityBlocked: true,
+      paperTradeCandidate: current.paperTradeCandidate === true,
+      paperTradeAllowedOnlyAfterConfirmation:
+        current.paperTradeAllowedOnlyAfterConfirmation === true,
+      executionAllowed: false,
+    },
+
+    permission: permissionText(permission),
+    sizeMultiplier: toNum(permission?.sizeMultiplier, null),
+
+    setupChain: unique([
+      "ENGINE22_CURRENT_LIFECYCLE_STATE",
+      key,
+      "WATCH_ONLY",
+      "ENGINE3_REACTION_CONFIRMATION",
+      "ENGINE4_PARTICIPATION_CONFIRMATION",
+      "ENGINE6_FINAL_PERMISSION_REQUIRED",
+    ]),
+
+    nextSetupType: action,
+    primaryExhaustionTF: null,
+
+    signalEvent: buildSignalEvent(),
+
+    lifecycle: buildLifecycle({
+      currentPrice,
+      nextFocus: action,
+      lifecycleStage: "WATCH",
+    }),
+
+    futures: {
+      tickSize: ES_TICK_SIZE,
+      liveExecutionEnabled: false,
+      paperOnly: true,
+    },
+
+    engine22CurrentLifecycleState: current,
+
+    debug,
+  };
+}
+
 function chooseNextSetupType({
   readinessLabel,
   waveNeedsReclaim,
@@ -1186,6 +1433,30 @@ function buildWatchSummary({
   return `${parts.join(", ")}. No clean ES entry yet.`;
 }
 
+    parts.push("volume participation is clean");
+  } else if (volumeRisk) {
+    const quality =
+      safeUpper(e5Volume?.quality, "") ||
+      safeUpper(e5Volume?.participationQuality, "") ||
+      "RISK";
+    parts.push(`volume is not clean because volume risk is present (${quality})`);
+  } else {
+    parts.push("volume participation is not confirmed");
+  }
+
+  if (lateTiming) {
+    const timing = safeUpper(engine5Timing?.entryTiming, "UNKNOWN");
+    const chaseRisk = safeUpper(engine5Timing?.chaseRisk, "UNKNOWN");
+    const suggested = safeUpper(engine5Timing?.suggestedAction, "WAIT_FOR_PULLBACK_OR_RECLAIM");
+
+    parts.push(
+      `Engine 5 timing says the move already happened / no chase (${timing}, chase risk ${chaseRisk}); suggested action is ${suggested}`
+    );
+  }
+
+  return `${parts.join(", ")}. No clean ES entry yet.`;
+}
+
 /**
  * Build ES Engine 15 decision from direct strategy-builder inputs.
  *
@@ -1234,6 +1505,7 @@ export function buildEngine15EsDecision({
       currentLifecycleState,
       possibleW5Up,
     });
+
     const pText = permissionText(permission);
 
     // Critical data checks.
@@ -1265,7 +1537,7 @@ export function buildEngine15EsDecision({
         currentLifecycleState,
         possibleW5Up,
         waveOpportunity,
-     });
+      });
 
     const waveInvalid = waveOpportunityInvalid(waveOpportunity);
     const waveWatchOnly = waveOpportunityWatchOnly(waveOpportunity);
@@ -1274,32 +1546,34 @@ export function buildEngine15EsDecision({
     const waveLate = waveOpportunityLate(waveOpportunity);
     const waveHighChase = waveOpportunityHighChaseRisk(waveOpportunity);
     const waveNeedsReclaim = waveNeedsPullbackOrReclaim(waveOpportunity);
+    const currentLifecycleWatchOnly =
+      currentLifecycleIsWatchOnly(currentLifecycleState);
 
-if (possibleW5UpCompletePullbackWatch) {
-  reasonCodes.push("ENGINE15_POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH");
-  reasonCodes.push("ENGINE22_CURRENT_LIFECYCLE_STATE_CONSUMED");
-  reasonCodes.push("ENGINE22_POSSIBLE_W5_UP_COMPLETE");
-  reasonCodes.push("WATCH_ONLY");
-  reasonCodes.push("NO_EXECUTION");
-  reasonCodes.push("NO_CHASE");
-  reasonCodes.push("WAIT_FOR_POST_W5_PULLBACK_REACTION");
-} else if (!waveOpportunityExists(waveOpportunity)) {
-  needs.push("ENGINE22_WAVE_OPPORTUNITY");
-  reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_MISSING");
-} else if (postAbcW2BounceWatch) {
-  reasonCodes.push("ENGINE15_POST_ABC_BOUNCE_WATCH");
-  reasonCodes.push("ENGINE22_POST_ABC_W2_BOUNCE_WATCH");
-  reasonCodes.push("WATCH_ONLY");
-  reasonCodes.push("NO_EXECUTION");
-  reasonCodes.push("WAIT_FOR_RECLAIM_CONFIRMATION");
-} else if (!hasWaveOpportunity) {
-  needs.push("VALID_W3_OR_W5_OPPORTUNITY");
-  reasonCodes.push("NO_W3_W5_OPPORTUNITY");
-} else {
-  reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_FOUND");
-  reasonCodes.push(`ENGINE22_${waveSetupType(waveOpportunity)}`);
-  reasonCodes.push(`ENGINE22_DEGREE_${waveDegree(waveOpportunity)}`);
-}
+    if (possibleW5UpCompletePullbackWatch) {
+      reasonCodes.push("ENGINE15_POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH");
+      reasonCodes.push("ENGINE22_CURRENT_LIFECYCLE_STATE_CONSUMED");
+      reasonCodes.push("ENGINE22_POSSIBLE_W5_UP_COMPLETE");
+      reasonCodes.push("WATCH_ONLY");
+      reasonCodes.push("NO_EXECUTION");
+      reasonCodes.push("NO_CHASE");
+      reasonCodes.push("WAIT_FOR_POST_W5_PULLBACK_REACTION");
+    } else if (!waveOpportunityExists(waveOpportunity)) {
+      needs.push("ENGINE22_WAVE_OPPORTUNITY");
+      reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_MISSING");
+    } else if (postAbcW2BounceWatch) {
+      reasonCodes.push("ENGINE15_POST_ABC_BOUNCE_WATCH");
+      reasonCodes.push("ENGINE22_POST_ABC_W2_BOUNCE_WATCH");
+      reasonCodes.push("WATCH_ONLY");
+      reasonCodes.push("NO_EXECUTION");
+      reasonCodes.push("WAIT_FOR_RECLAIM_CONFIRMATION");
+    } else if (!hasWaveOpportunity && !currentLifecycleWatchOnly) {
+      needs.push("VALID_W3_OR_W5_OPPORTUNITY");
+      reasonCodes.push("NO_W3_W5_OPPORTUNITY");
+    } else if (!currentLifecycleWatchOnly) {
+      reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_FOUND");
+      reasonCodes.push(`ENGINE22_${waveSetupType(waveOpportunity)}`);
+      reasonCodes.push(`ENGINE22_DEGREE_${waveDegree(waveOpportunity)}`);
+    }
 
     if (waveInvalid) {
       blockers.push("ENGINE22_WAVE_OPPORTUNITY_INVALID");
@@ -1309,11 +1583,13 @@ if (possibleW5UpCompletePullbackWatch) {
     if (
       waveWatchOnly &&
       !postAbcW2BounceWatch &&
-      !possibleW5UpCompletePullbackWatch
+      !possibleW5UpCompletePullbackWatch &&
+      !currentLifecycleWatchOnly
     ) {
       needs.push("ENGINE22_ARMING_OR_READY");
       reasonCodes.push("ENGINE22_WAVE_OPPORTUNITY_WATCH");
     }
+
     if (waveLate) {
       needs.push("WAIT_FOR_PULLBACK_OR_RECLAIM");
       reasonCodes.push("ENGINE22_TIMING_LATE_NO_CHASE");
@@ -1374,13 +1650,15 @@ if (possibleW5UpCompletePullbackWatch) {
     const e5Label = engine5Label(engine5);
 
     // Daily below EMA10 blocks LONG continuation only.
-    // POST_ABC_W2_BOUNCE_WATCH is not a long-continuation setup yet,
-    // so daily-below-EMA10 is caution only for that state.
+    // Engine 22 currentLifecycleState watch-only states are not executable,
+    // so daily-below-EMA10 is caution only for those states.
     if (dailyBelow) {
       if (postAbcW2BounceWatch) {
         reasonCodes.push("DAILY_BELOW_EMA10_BOUNCE_CAUTION");
       } else if (possibleW5UpCompletePullbackWatch) {
         reasonCodes.push("DAILY_BELOW_EMA10_POST_W5_PULLBACK_CAUTION");
+      } else if (currentLifecycleWatchOnly) {
+        reasonCodes.push("DAILY_BELOW_EMA10_CURRENT_LIFECYCLE_WATCH_CAUTION");
       } else {
         blockers.push("DAILY_BELOW_EMA10_LONG_CONTINUATION_BLOCKED");
         reasonCodes.push("DAILY_BELOW_EMA10_LONG_PERMISSION_REDUCED");
@@ -1417,12 +1695,54 @@ if (possibleW5UpCompletePullbackWatch) {
         readiness: waveReadiness(waveOpportunity),
         timing: waveTiming(waveOpportunity),
         chaseRisk: waveChaseRisk(waveOpportunity),
-        needs: Array.isArray(waveOpportunity?.needs) ? waveOpportunity.needs : [],
-        reasonCodes: waveOpportunityReasonCodes(waveOpportunity),
-        summary: waveOpportunity?.summary || null,
+        needs: Array.isArray(currentLifecycleState?.needs)
+          ? currentLifecycleState.needs
+          : Array.isArray(waveOpportunity?.needs)
+          ? waveOpportunity.needs
+          : [],
+        reasonCodes: Array.isArray(currentLifecycleState?.reasonCodes)
+          ? currentLifecycleState.reasonCodes
+          : waveOpportunityReasonCodes(waveOpportunity),
+        summary:
+          currentLifecycleState?.summary ||
+          currentLifecycleState?.headline ||
+          waveOpportunity?.summary ||
+          null,
+        currentLifecycleState: currentLifecycleState
+          ? {
+              key: currentLifecycleState?.key || null,
+              headline: currentLifecycleState?.headline || null,
+              summary: currentLifecycleState?.summary || null,
+              action: currentLifecycleState?.action || null,
+              direction: currentLifecycleState?.direction || null,
+              bias: currentLifecycleState?.bias || null,
+              executionBias: currentLifecycleState?.executionBias || null,
+              readiness: currentLifecycleState?.readiness || null,
+              setupEligible: currentLifecycleState?.setupEligible === true,
+              active: currentLifecycleState?.active === true,
+              readOnly: currentLifecycleState?.readOnly === true,
+              noExecution: currentLifecycleState?.noExecution === true,
+              tradeableOpportunityBlocked:
+                currentLifecycleState?.tradeableOpportunityBlocked === true,
+              paperTradeCandidate:
+                currentLifecycleState?.paperTradeCandidate === true,
+              paperTradeAllowedOnlyAfterConfirmation:
+                currentLifecycleState?.paperTradeAllowedOnlyAfterConfirmation === true,
+              needs: Array.isArray(currentLifecycleState?.needs)
+                ? currentLifecycleState.needs
+                : [],
+              blockers: Array.isArray(currentLifecycleState?.blockers)
+                ? currentLifecycleState.blockers
+                : [],
+              reasonCodes: Array.isArray(currentLifecycleState?.reasonCodes)
+                ? currentLifecycleState.reasonCodes
+                : [],
+              data: currentLifecycleState?.data || null,
+            }
+          : null,
       },
 
-      engine23: {
+            engine23: {
         present: engine23Damage.present,
         active: engine23Damage.active,
         state: engine23Damage.state,
@@ -1438,8 +1758,8 @@ if (possibleW5UpCompletePullbackWatch) {
         level: engine23Damage.level,
         summary: engine23Damage.rawSummary || engine23Damage.summary,
         reasonCodes: engine23Damage.rawReasonCodes,
-      }, 
-      
+      },
+
       engine5: {
         score: e5Score,
         label: e5Label,
@@ -1465,6 +1785,7 @@ if (possibleW5UpCompletePullbackWatch) {
         hasWaveOpportunity,
         postAbcW2BounceWatch,
         possibleW5UpCompletePullbackWatch,
+        currentLifecycleWatchOnly,
         waveInvalid,
         waveWatchOnly,
         waveArming,
@@ -1491,45 +1812,61 @@ if (possibleW5UpCompletePullbackWatch) {
       },
     };
 
-if (blockers.length > 0) {
-  return buildBlockedDecision({
-    symbol: sym,
-    strategyId,
-    permission,
-    currentPrice,
-    blockers,
-    reasonCodes: reasonCodes.length ? reasonCodes : ["ES_READINESS_BLOCKED"],
-    needs,
-    debug,
-  });
-}
+    if (blockers.length > 0) {
+      return buildBlockedDecision({
+        symbol: sym,
+        strategyId,
+        permission,
+        currentPrice,
+        blockers,
+        reasonCodes: reasonCodes.length ? reasonCodes : ["ES_READINESS_BLOCKED"],
+        needs,
+        debug,
+      });
+    }
 
-if (possibleW5UpCompletePullbackWatch) {
-  return buildPossibleW5UpCompletePullbackWatchDecision({
-    symbol: sym,
-    strategyId,
-    permission,
-    currentPrice,
-    currentLifecycleState,
-    possibleW5Up,
-    waveOpportunity,
-    debug,
-  });
-}
+    const fromCurrentLifecycle = buildEngine15FromEngine22CurrentLifecycleState({
+      symbol: sym,
+      strategyId,
+      permission,
+      currentPrice,
+      current: currentLifecycleState,
+      engine3,
+      engine4,
+      engine5,
+      debug,
+    });
 
-if (postAbcW2BounceWatch) {
-  return buildPostAbcW2BounceWatchDecision({
-    symbol: sym,
-    strategyId,
-    permission,
-    currentPrice,
-    waveOpportunity,
-    dailyBelow,
-    debug,
-  });
-}
+    if (fromCurrentLifecycle) {
+      return fromCurrentLifecycle;
+    }
 
-// Context reason codes and next needs.
+    if (possibleW5UpCompletePullbackWatch) {
+      return buildPossibleW5UpCompletePullbackWatchDecision({
+        symbol: sym,
+        strategyId,
+        permission,
+        currentPrice,
+        currentLifecycleState,
+        possibleW5Up,
+        waveOpportunity,
+        debug,
+      });
+    }
+
+    if (postAbcW2BounceWatch) {
+      return buildPostAbcW2BounceWatchDecision({
+        symbol: sym,
+        strategyId,
+        permission,
+        currentPrice,
+        waveOpportunity,
+        dailyBelow,
+        debug,
+      });
+    }
+
+    // Context reason codes and next needs.
     if (dailyAbove) {
       reasonCodes.push("DAILY_ABOVE_EMA10_LONG_PERMISSION");
     } else {
@@ -1729,21 +2066,21 @@ if (postAbcW2BounceWatch) {
       summary = engine23Damage.active
         ? `${waveOpportunity?.summary || "Engine 22 found a valid W3/W5 opportunity."} ${engine23Damage.summary}`
         : buildWatchSummary({
-        waveOpportunity,
-        dailyAbove,
-        fourHourBelow,
-        oneHourBelow,
-        tenMinuteBelow10,
-        tenMinuteBelow20,
-        longTrigger,
-        reactionOk,
-        volumeOk,
-        volumeRisk,
-        lateTiming,
-        engine5Timing: e5Timing,
-        e5Reaction,
-        e5Volume,
-      });
+            waveOpportunity,
+            dailyAbove,
+            fourHourBelow,
+            oneHourBelow,
+            tenMinuteBelow10,
+            tenMinuteBelow20,
+            longTrigger,
+            reactionOk,
+            volumeOk,
+            volumeRisk,
+            lateTiming,
+            engine5Timing: e5Timing,
+            e5Reaction,
+            e5Volume,
+          });
     } else if (!hasWaveOpportunity) {
       readinessLabel = "NO_SETUP";
       action = "NO_ACTION";
@@ -1789,6 +2126,7 @@ if (postAbcW2BounceWatch) {
       action,
       priority,
       entryStyle,
+      active: false,
       freshEntryNow: false,
 
       reasonCodes: unique(reasonCodes),
@@ -1890,6 +2228,7 @@ if (postAbcW2BounceWatch) {
       action: "BLOCKED",
       priority: 0,
       entryStyle: "NONE",
+      active: false,
       freshEntryNow: false,
 
       reasonCodes: ["ENGINE15_ES_ERROR"],
