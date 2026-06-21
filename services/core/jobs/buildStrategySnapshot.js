@@ -3625,6 +3625,36 @@ function attachEngine22PullbackReactionToConfluence({
   return patchedConfluence;
 }
 
+function attachEngine22LifecycleReactionToConfluence({
+  patchedConfluence,
+  engine22WaveStrategy,
+  bars = [],
+}) {
+  const lifecycleReaction = buildEngine22LifecycleReaction({
+    currentLifecycleState: engine22WaveStrategy?.currentLifecycleState || null,
+    bars,
+    currentPrice:
+      engine22WaveStrategy?.currentLifecycleState?.confirmationContext?.reference?.currentPrice ??
+      engine22WaveStrategy?.currentLifecycleState?.currentPrice ??
+      null,
+    reactionContext: patchedConfluence?.context?.reaction || null,
+  });
+
+  patchedConfluence.context = patchedConfluence.context || {};
+  patchedConfluence.context.reaction = {
+    ...(patchedConfluence.context.reaction || {}),
+
+    engine22LifecycleReaction: lifecycleReaction,
+
+    // Temporary compatibility for frontend / old consumers.
+    engine22PullbackReaction:
+      patchedConfluence?.context?.reaction?.engine22PullbackReaction ||
+      lifecycleReaction,
+  };
+
+  return patchedConfluence;
+}
+
 function buildEngine22LifecycleParticipation({
   engine22WaveStrategy,
   volumeContext,
