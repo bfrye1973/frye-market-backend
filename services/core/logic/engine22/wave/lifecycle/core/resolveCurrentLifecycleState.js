@@ -64,6 +64,47 @@ export function resolveCurrentLifecycleState({ waveFibState } = {}) {
     paperTradeCandidate: true,
     paperTradeAllowedOnlyAfterConfirmation: true,
 
+    confirmationContext: {
+      active: true,
+      mode: "CONTROLLED_PULLBACK_OR_RECLAIM",
+      direction: "LONG",
+
+      reactionRequired: true,
+      reactionFocus: "CONTROLLED_PULLBACK_OR_RECLAIM",
+
+      participationRequired: true,
+      participationFocus: "VOLUME_ON_RECLAIM",
+
+      reference: {
+        currentPrice: waveFibState?.currentPrice ?? null,
+        triggerLevels: null,
+        zones: null,
+        priceProgress: {
+          intermediate:
+            waveFibState?.degrees?.intermediate?.extensionProgress || null,
+          minor: waveFibState?.degrees?.minor?.extensionProgress || null,
+          minute: waveFibState?.degrees?.minute?.extensionProgress || null,
+        },
+        emaContext: waveFibState?.emaContext || null,
+      },
+
+      noExecution: true,
+      noPermissionCreated: true,
+      noChase: true,
+
+      reasonCodes: [
+        "ENGINE22_CONFIRMATION_CONTEXT",
+        "INTERMEDIATE_W3_MINOR_MINUTE_W3_CONTINUATION_WATCH",
+        "CONTROLLED_PULLBACK_OR_RECLAIM",
+        "LONG_BIAS",
+        "REACTION_REQUIRED",
+        "PARTICIPATION_REQUIRED",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+        "NO_CHASE",
+      ],
+    },
+
     intermediate: {
       phase: intermediate?.phase || null,
       confirmedPhase: intermediate?.confirmedPhase || null,
