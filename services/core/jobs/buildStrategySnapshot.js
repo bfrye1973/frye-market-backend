@@ -3624,53 +3624,23 @@ function attachEngine22PullbackReactionToConfluence({
   return patchedConfluence;
 }
 
-function buildEngine22PullbackParticipation({
+function buildEngine22LifecycleParticipation({
   engine22WaveStrategy,
   volumeContext,
   bars = [],
 } = {}) {
-  const current = engine22WaveStrategy?.currentLifecycleState || null;
+  const currentLifecycleState =
+    engine22WaveStrategy?.currentLifecycleState || null;
 
-  if (current?.key !== "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH") {
+  const confirmation =
+    currentLifecycleState?.confirmationContext || null;
+
+  if (confirmation?.participationRequired !== true) {
     return null;
   }
 
   const last = barPartsForPullbackReaction(bars[bars.length - 1] || {});
-
-  const currentPrice =
-    toNum(current?.currentPrice) ??
-    last.close ??
-    null;
-
-  const pullbackLevelsFromW5 = current?.pullbackLevelsFromW5 || null;
-  const entryZones = current?.entryZones || null;
-  const priceProgress = current?.priceProgress || null;
-
-  const zoneEntries = Object.entries(entryZones || {})
-    .map(([name, zone]) => normalizePullbackZone(name, zone))
-    .filter(Boolean);
-
-  const barTouchedZone = (zone) =>
-    last.low != null &&
-    last.high != null &&
-    last.low <= zone.hi &&
-    last.high >= zone.lo;
-
-  const priceInsideZone = (zone) =>
-    currentPrice != null &&
-    currentPrice >= zone.lo &&
-    currentPrice <= zone.hi;
-
-  const touchedZone =
-    zoneEntries
-      .filter((zone) => barTouchedZone(zone) || priceInsideZone(zone))
-      .sort((a, b) => {
-        const amid = (a.lo + a.hi) / 2;
-        const bmid = (b.lo + b.hi) / 2;
-        const da = Math.abs(Number(currentPrice ?? amid) - amid);
-        const db = Math.abs(Number(currentPrice ?? bmid) - bmid);
-        return da - db;
-      })[0] || null;
+  const prev = barPartsForPullbackReaction(bars[bars.length - 2] || {});
 
   const flags = volumeContext?.flags || {};
   const volumeReasonCodes = Array.isArray(volumeContext?.reasonCodes)
@@ -3683,7 +3653,6 @@ function buildEngine22PullbackParticipation({
   const highVolumeCandles = Number(flags?.highVolumeCandles ?? 0);
   const relativeVolume = Number(flags?.relativeVolume ?? 0);
   const volumeTrend = flags?.volumeTrend || null;
-  const participationQuality = flags?.participationQuality || null;
 
   const volumeExpansion =
     flags?.volumeExpansion === true ||
@@ -3694,228 +3663,253 @@ function buildEngine22PullbackParticipation({
   const absorptionRisk = flags?.absorptionRisk === true;
   const climacticVolume = flags?.climacticVolume === true;
 
-  const baseReasonCodes = [
-    "ENGINE4_ENGINE22_PULLBACK_PARTICIPATION_CONTEXT",
-    "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
-    "NO_PERMISSION_CREATED",
-    "NO_EXECUTION",
-  ];
-
-  const neutralBase = {
-    active: true,
-    engine: "engine4.engine22PullbackParticipation.v1",
-    source: "engine22WaveStrategy.currentLifecycleState",
-    lifecycleKey: current.key,
-
-    participationState: "NO_SIGNAL",
-    volumeState: "NO_SIGNAL",
-    confirmed: false,
-    direction: "NEUTRAL",
-
-    currentPrice,
-    pullbackLevelsFromW5,
-    entryZones,
-    priceProgress,
-
-    touchedZone: null,
-
-    volumeScore,
-    volumeConfirmed,
-    volumeExpansion,
-    highVolumeCandles,
-    relativeVolume: Number.isFinite(relativeVolume) ? relativeVolume : 0,
-    volumeTrend,
-    participationQuality,
-
-    highVolumeDefense: false,
-    lowVolumeBounce: false,
-    highVolumeRejection: false,
-    participationConfirmed: false,
-
-    absorptionRisk,
-    climacticVolume,
-
-    reasonCodes: [
-      ...baseReasonCodes,
-      "WAITING_FOR_PULLBACK_ZONE_PARTICIPATION",
-    ],
-  };
-
-  if (!touchedZone) {
-    return neutralBase;
-  }
-
-  const referenceLo = touchedZone.lo;
-  const referenceHi = touchedZone.hi;
-
-  const lastOpen = last.open;
-  const lastClose = last.close;
-  const lastLow = last.low;
-  const lastHigh = last.high;
-
   const greenCandle =
-    lastOpen != null &&
-    lastClose != null &&
-    lastClose > lastOpen;
+    last.open != null &&
+    last.close != null &&
+    last.close > last.open;
 
   const redCandle =
-    lastOpen != null &&
-    lastClose != null &&
-    lastClose < lastOpen;
+    last.open != null &&
+    last.close != null &&
+    last.close < last.open;
 
-  const defended =
-    lastLow != null &&
-    lastClose != null &&
-    referenceLo != null &&
-    referenceHi != null &&
-    lastLow <= referenceHi &&
-    lastClose >= referenceLo;
+  const higherClose =
+    prev.close != null &&
+    last.close != null &&
+    last.close > prev.close;
 
-  const closeBelowZone =
-    lastClose != null &&
-    referenceLo != null &&
-    lastClose < referenceLo;
+  const lowerClose =
+    prev.close != null &&
+    last.close != null &&
+    last.close < prev.close;
 
-  const rejectedFromZone =
-    touchedZone &&
-    redCandle &&
-    lastHigh != null &&
-    referenceLo != null &&
-    referenceHi != null &&
-    lastHigh >= referenceLo &&
-    lastClose != null &&
-    lastClose < referenceLo;
+  const priorHighReclaimed =
+    prev.high != null &&
+    last.close != null &&
+    last.close > prev.high;
 
-  const highVolumeDefense =
-    defended &&
+  const reclaimLike =
     greenCandle &&
+    (
+      higherClose ||
+      priorHighReclaimed
+    );
+
+  const volumeRisk =
+    absorptionRisk ||
+    climacticVolume ||
+    (
+      redCandle &&
+      lowerClose &&
+      (
+        volumeExpansion ||
+        highVolumeCandles >= 2 ||
+        volumeScore >= 10 ||
+        relativeVolume >= 1.35
+      )
+    );
+
+  const cleanParticipation =
+    !volumeRisk &&
+    volumeTrend !== "FADING" &&
     (
       volumeConfirmed ||
       volumeExpansion ||
       highVolumeCandles >= 2 ||
-      volumeScore >= 10
-    );
-
-  const lowVolumeBounce =
-    defended &&
-    greenCandle &&
-    !highVolumeDefense &&
-    volumeScore < 8;
-
-  const highVolumeRejection =
-    (closeBelowZone || rejectedFromZone) &&
-    (
-      volumeExpansion ||
-      highVolumeCandles >= 2 ||
       volumeScore >= 10 ||
-      absorptionRisk ||
-      climacticVolume
+      relativeVolume >= 1.35
     );
 
-  const participationConfirmed =
-    highVolumeDefense ||
-    (
-      volumeConfirmed &&
-      defended &&
-      !highVolumeRejection
-    );
+  const participationFocus = String(
+    confirmation?.participationFocus || "UNKNOWN"
+  ).toUpperCase();
 
-  let participationState = "PARTICIPATION_NOT_CONFIRMED";
-  let volumeState = "PARTICIPATION_NOT_CONFIRMED";
+  let focusSatisfied = false;
+  const focusReasonCodes = [];
+
+  if (participationFocus === "VOLUME_ON_RECLAIM") {
+    focusSatisfied = reclaimLike && cleanParticipation;
+    focusReasonCodes.push("FOCUS_VOLUME_ON_RECLAIM");
+
+    if (reclaimLike) {
+      focusReasonCodes.push("RECLAIM_LIKE_PRICE_ACTION");
+    } else {
+      focusReasonCodes.push("RECLAIM_PRICE_ACTION_NOT_CONFIRMED");
+    }
+  } else if (participationFocus === "VOLUME_ON_PULLBACK_DEFENSE") {
+    focusSatisfied =
+      cleanParticipation &&
+      greenCandle &&
+      (
+        higherClose ||
+        priorHighReclaimed ||
+        last.close >= last.open
+      );
+
+    focusReasonCodes.push("FOCUS_VOLUME_ON_PULLBACK_DEFENSE");
+
+    if (focusSatisfied) {
+      focusReasonCodes.push("PULLBACK_DEFENSE_WITH_PARTICIPATION");
+    } else {
+      focusReasonCodes.push("PULLBACK_DEFENSE_PARTICIPATION_NOT_CONFIRMED");
+    }
+  } else if (participationFocus === "CLEAN_EXPANSION") {
+    focusSatisfied = cleanParticipation;
+    focusReasonCodes.push("FOCUS_CLEAN_EXPANSION");
+  } else if (participationFocus === "NO_FADING_VOLUME") {
+    focusSatisfied =
+      volumeTrend !== "FADING" &&
+      relativeVolume >= 1.0 &&
+      !volumeRisk;
+
+    focusReasonCodes.push("FOCUS_NO_FADING_VOLUME");
+  } else if (participationFocus === "NO_ABSORPTION_RISK") {
+    focusSatisfied = !absorptionRisk && !climacticVolume;
+    focusReasonCodes.push("FOCUS_NO_ABSORPTION_RISK");
+  } else {
+    focusSatisfied = cleanParticipation;
+    focusReasonCodes.push("FOCUS_GENERIC_PARTICIPATION");
+  }
+
+  let participationState = "WEAK";
+  let participationQuality = "WEAK";
   let confirmed = false;
   let direction = "NEUTRAL";
 
-  const reasonCodes = [
-    ...baseReasonCodes,
-    `TOUCHED_${String(touchedZone.name || "PULLBACK_ZONE").toUpperCase()}`,
-  ];
-
-  if (highVolumeDefense) {
-    participationState = "HIGH_VOLUME_DEFENSE";
-    volumeState = "PARTICIPATION_CONFIRMED";
-    confirmed = true;
-    direction = "LONG";
-    reasonCodes.push("HIGH_VOLUME_DEFENSE");
-    reasonCodes.push("PULLBACK_ZONE_DEFENDED_WITH_PARTICIPATION");
-  } else if (participationConfirmed) {
-    participationState = "PARTICIPATION_CONFIRMED";
-    volumeState = "PARTICIPATION_CONFIRMED";
-    confirmed = true;
-    direction = "LONG";
-    reasonCodes.push("PARTICIPATION_CONFIRMED");
-  } else if (lowVolumeBounce) {
-    participationState = "LOW_VOLUME_BOUNCE";
-    volumeState = "LOW_VOLUME_BOUNCE";
-    confirmed = false;
-    direction = "LONG";
-    reasonCodes.push("LOW_VOLUME_BOUNCE");
-    reasonCodes.push("PARTICIPATION_NOT_CONFIRMED");
-  } else if (highVolumeRejection) {
-    participationState = "HIGH_VOLUME_REJECTION";
-    volumeState = "HIGH_VOLUME_REJECTION";
-    confirmed = false;
-    direction = "SHORT";
-    reasonCodes.push("HIGH_VOLUME_REJECTION");
-    reasonCodes.push("PARTICIPATION_NOT_CONFIRMED");
-  } else if (volumeScore > 0 || relativeVolume > 0) {
-    participationState = "WEAK_PARTICIPATION";
-    volumeState = "WEAK_PARTICIPATION";
+  if (volumeRisk) {
+    participationState = "RISK";
+    participationQuality = "RISK";
     confirmed = false;
     direction = "NEUTRAL";
-    reasonCodes.push("WEAK_PARTICIPATION");
-    reasonCodes.push("PARTICIPATION_NOT_CONFIRMED");
-  } else {
-    participationState = "PARTICIPATION_NOT_CONFIRMED";
-    volumeState = "PARTICIPATION_NOT_CONFIRMED";
+  } else if (focusSatisfied && volumeConfirmed) {
+    participationState = "CONFIRMED";
+    participationQuality = "CLEAN";
+    confirmed = true;
+    direction = confirmation?.direction || "NEUTRAL";
+  } else if (focusSatisfied) {
+    participationState = "EXPANDING";
+    participationQuality = "CLEAN";
+    confirmed = true;
+    direction = confirmation?.direction || "NEUTRAL";
+  } else if (
+    reclaimLike &&
+    (
+      relativeVolume >= 1.0 ||
+      volumeScore >= 5 ||
+      highVolumeCandles >= 1
+    )
+  ) {
+    participationState = "MIXED";
+    participationQuality = "MIXED";
     confirmed = false;
     direction = "NEUTRAL";
-    reasonCodes.push("PARTICIPATION_NOT_CONFIRMED");
+  } else if (volumeTrend === "FADING") {
+    participationState = "WEAK";
+    participationQuality = "WEAK";
+    confirmed = false;
+    direction = "NEUTRAL";
   }
 
-  return {
-    active: true,
-    engine: "engine4.engine22PullbackParticipation.v1",
-    source: "engine22WaveStrategy.currentLifecycleState",
-    lifecycleKey: current.key,
+  const reasonCodes = [
+    "ENGINE4_READ_ENGINE22_CONFIRMATION_CONTEXT",
+    "PARTICIPATION_REQUIRED",
+    currentLifecycleState?.key || null,
+    confirmation?.mode || null,
+    participationFocus ? `PARTICIPATION_FOCUS_${participationFocus}` : null,
 
-    participationState,
-    volumeState,
-    confirmed,
+    volumeExpansion ? "VOLUME_EXPANSION" : "VOLUME_EXPANSION_NOT_CONFIRMED",
+    volumeConfirmed ? "VOLUME_CONFIRMED" : "VOLUME_NOT_CONFIRMED",
+    volumeTrend ? `VOLUME_TREND_${String(volumeTrend).toUpperCase()}` : null,
+
+    absorptionRisk ? "ABSORPTION_RISK" : null,
+    climacticVolume ? "CLIMACTIC_VOLUME" : null,
+    volumeRisk ? "VOLUME_RISK_PRESENT" : null,
+
+    focusSatisfied
+      ? "PARTICIPATION_FOCUS_CONFIRMED"
+      : "PARTICIPATION_FOCUS_NOT_CONFIRMED",
+
+    confirmed
+      ? "ENGINE4_PARTICIPATION_CONFIRMATION"
+      : "ENGINE4_PARTICIPATION_NOT_CONFIRMED",
+
+    confirmation?.noExecution === true ? "NO_EXECUTION" : null,
+    confirmation?.noPermissionCreated === true ? "NO_PERMISSION_CREATED" : null,
+    confirmation?.noChase === true ? "NO_CHASE" : null,
+
+    ...focusReasonCodes,
+  ].filter(Boolean);
+
+  return {
+    active: confirmation?.participationRequired === true,
+    engine: "engine4.engine22LifecycleParticipation.v1",
+    source: "engine22WaveStrategy.currentLifecycleState.confirmationContext",
+
+    lifecycleKey: currentLifecycleState?.key || null,
+    mode: confirmation?.mode || null,
     direction,
 
-    currentPrice,
-    pullbackLevelsFromW5,
-    entryZones,
-    priceProgress,
+    participationFocus: confirmation?.participationFocus || null,
+    participationState,
+    participationQuality,
+    volumeState: participationState,
+    volumeRisk,
+    confirmed,
 
-    touchedZone: {
-      name: touchedZone.name,
-      lo: touchedZone.lo,
-      hi: touchedZone.hi,
-    },
+    currentPrice:
+      toNum(confirmation?.reference?.currentPrice) ??
+      toNum(currentLifecycleState?.currentPrice) ??
+      last.close ??
+      null,
+
+    reference: confirmation?.reference || {},
 
     volumeScore,
     volumeConfirmed,
-    volumeExpansion,
-    highVolumeCandles,
     relativeVolume: Number.isFinite(relativeVolume) ? relativeVolume : 0,
     volumeTrend,
-    participationQuality,
-
-    highVolumeDefense,
-    lowVolumeBounce,
-    highVolumeRejection,
-    participationConfirmed,
-
+    highVolumeCandles,
+    volumeExpansion,
     absorptionRisk,
     climacticVolume,
 
+    focusSatisfied,
+    cleanParticipation,
+    reclaimLike,
+
+    noPermissionCreated: true,
+    noExecution: true,
+
     lastCandle: last,
+    priorCandle: prev,
 
     reasonCodes,
   };
 }
 
+function attachEngine22LifecycleParticipationToConfluence({
+  patchedConfluence,
+  engine22WaveStrategy,
+  bars = [],
+}) {
+  const volumeContext = patchedConfluence?.context?.volume || null;
+
+  const lifecycleParticipation = buildEngine22LifecycleParticipation({
+    engine22WaveStrategy,
+    volumeContext,
+    bars,
+  });
+
+  if (!lifecycleParticipation) return patchedConfluence;
+
+  patchedConfluence.context = patchedConfluence.context || {};
+  patchedConfluence.context.volume = {
+    ...(patchedConfluence.context.volume || {}),
+    engine22LifecycleParticipation: lifecycleParticipation,
+  };
+
+  return patchedConfluence;
+}
 function attachEngine22PullbackParticipationToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
