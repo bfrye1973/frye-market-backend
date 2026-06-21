@@ -4329,17 +4329,18 @@ const zoneContext = buildZoneContext(
       engine22WaveStrategy =
         applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
 
-     attachEngine22PullbackReactionToConfluence({
-       patchedConfluence,
-       engine22WaveStrategy,
-       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-     });
+      attachEngine22PullbackReactionToConfluence({
+        patchedConfluence,
+        engine22WaveStrategy,
+        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+      });
 
-     attachEngine22LifecycleParticipationToConfluence({
-       patchedConfluence,
-       engine22WaveStrategy,
-       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-     });
+      attachEngine22LifecycleParticipationToConfluence({
+        patchedConfluence,
+        engine22WaveStrategy,
+        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+      });
+    }
     } catch (err) {
       console.error("[E22 PRE-ENGINE15 WAVE ERROR]", err);
 
