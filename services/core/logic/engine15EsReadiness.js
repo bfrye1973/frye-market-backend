@@ -1432,31 +1432,7 @@ function buildWatchSummary({
 
   return `${parts.join(", ")}. No clean ES entry yet.`;
 }
-
-    parts.push("volume participation is clean");
-  } else if (volumeRisk) {
-    const quality =
-      safeUpper(e5Volume?.quality, "") ||
-      safeUpper(e5Volume?.participationQuality, "") ||
-      "RISK";
-    parts.push(`volume is not clean because volume risk is present (${quality})`);
-  } else {
-    parts.push("volume participation is not confirmed");
-  }
-
-  if (lateTiming) {
-    const timing = safeUpper(engine5Timing?.entryTiming, "UNKNOWN");
-    const chaseRisk = safeUpper(engine5Timing?.chaseRisk, "UNKNOWN");
-    const suggested = safeUpper(engine5Timing?.suggestedAction, "WAIT_FOR_PULLBACK_OR_RECLAIM");
-
-    parts.push(
-      `Engine 5 timing says the move already happened / no chase (${timing}, chase risk ${chaseRisk}); suggested action is ${suggested}`
-    );
-  }
-
-  return `${parts.join(", ")}. No clean ES entry yet.`;
-}
-
+  
 /**
  * Build ES Engine 15 decision from direct strategy-builder inputs.
  *
