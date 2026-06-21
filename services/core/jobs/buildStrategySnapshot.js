@@ -3910,29 +3910,7 @@ function attachEngine22LifecycleParticipationToConfluence({
 
   return patchedConfluence;
 }
-function attachEngine22LifecycleParticipationToConfluence({
-  patchedConfluence,
-  engine22WaveStrategy,
-  bars = [],
-}) {
-  const volumeContext = patchedConfluence?.context?.volume || null;
 
-  const lifecycleParticipation = buildEngine22LifecycleParticipation({
-    engine22WaveStrategy,
-    volumeContext,
-    bars,
-  });
-
-  if (!lifecycleParticipation) return patchedConfluence;
-
-  patchedConfluence.context = patchedConfluence.context || {};
-  patchedConfluence.context.volume = {
-    ...(patchedConfluence.context.volume || {}),
-    engine22LifecycleParticipation: lifecycleParticipation,
-  };
-
-  return patchedConfluence;
-}
 /* -----------------------------
    Build one strategy
 ------------------------------*/
