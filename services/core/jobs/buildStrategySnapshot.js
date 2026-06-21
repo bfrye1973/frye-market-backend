@@ -36,6 +36,7 @@ import { buildEngine22WaveStrategy } from "../logic/engine22/wave/buildEngine22W
 import { interpretWaveEnvironment } from "../logic/engine23/interpretation/interpretWaveEnvironment.js";
 import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.js";
 import { buildWaveTradeDecision } from "../logic/engine22/decisions/buildWaveTradeDecision.js";
+import { buildEngine22LifecycleReaction } from "../logic/engine3/engine22LifecycleReaction.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import {
   getManualLevelRowsFor,
