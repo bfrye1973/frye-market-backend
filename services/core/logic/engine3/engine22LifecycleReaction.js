@@ -155,10 +155,8 @@ function buildBaseResult({
 
     reasonCodes: uniqueReasonCodes([
       ...reasonCodes,
-      confirmation?.noPermissionCreated === true
-        ? "NO_PERMISSION_CREATED"
-        : "NO_PERMISSION_CREATED",
-      confirmation?.noExecution === true ? "NO_EXECUTION" : "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+      "NO_EXECUTION",
     ]),
   };
 }
@@ -357,14 +355,6 @@ function buildBarFacts({
         last.low < referenceLevel &&
         last.close >= referenceLevel;
 
-  const failedReclaim =
-    prev.high != null &&
-    last.high != null &&
-    last.close != null &&
-    last.high <= prev.high &&
-    last.close < prev.high &&
-    !priorCandleHighReclaimed;
-
   const ema10 = toNum(reference.ema10 ?? reference.emaContext?.ema10);
   const ema20 = toNum(reference.ema20 ?? reference.emaContext?.ema20);
 
@@ -400,6 +390,25 @@ function buildBarFacts({
       last.close > ema20
     );
 
+  const attemptedReferenceReaction =
+    nearLevel ||
+    touchedLevel ||
+    touchedZone ||
+    priceInsideZone ||
+    closeAboveReference ||
+    wickBelowAndReclaim ||
+    emaHeld ||
+    emaReclaimed;
+
+  const failedReclaim =
+    attemptedReferenceReaction &&
+    prev.high != null &&
+    last.high != null &&
+    last.close != null &&
+    last.high <= prev.high &&
+    last.close < prev.high &&
+    !priorCandleHighReclaimed;
+
   return {
     last,
     prev,
@@ -422,6 +431,7 @@ function buildBarFacts({
 
     zoneDefended,
     wickBelowAndReclaim,
+    attemptedReferenceReaction,
     failedReclaim,
 
     ema10,
@@ -450,6 +460,7 @@ function debugPayload({ facts, extraDebug = null, reactionContext = null } = {})
 
     zoneDefended: facts.zoneDefended,
     wickBelowAndReclaim: facts.wickBelowAndReclaim,
+    attemptedReferenceReaction: facts.attemptedReferenceReaction,
     failedReclaim: facts.failedReclaim,
 
     emaHeld: facts.emaHeld,
@@ -524,7 +535,10 @@ function evaluateZoneDefenseLong({ facts, reasonCodes }) {
     };
   }
 
-  if (facts.closeBelowReference || facts.priorCandleLowLost) {
+  if (
+    facts.attemptedReferenceReaction &&
+    (facts.closeBelowReference || facts.priorCandleLowLost)
+  ) {
     return {
       reactionState: "FAILED",
       reactionQuality: "WEAK",
@@ -1019,10 +1033,6 @@ export function buildEngine22LifecycleReaction({
     });
   }
 
-  // Current Engine 3 implementation is intentionally LONG-safe.
-  // Do not allow a future SHORT lifecycle to get confirmed by bullish reclaim logic.
-  // Engine 22 can later extend confirmationContext and Engine 3 can add a mirrored
-  // short evaluator safely.
   if (direction === "SHORT") {
     return directionUnsupportedResult({
       currentLifecycleState,
