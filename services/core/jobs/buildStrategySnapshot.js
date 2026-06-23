@@ -3626,10 +3626,10 @@ function attachEngine22PullbackReactionToConfluence({
 }
 
 function attachEngine22LifecycleReactionToConfluence({
-  patchedConfluence,
-  engine22WaveStrategy,
-  bars = [],
-}) {
+  patchedConfluence.context.reaction = {
+  ...(patchedConfluence.context.reaction || {}),
+  engine22LifecycleReaction: lifecycleReaction,
+};
   const lifecycleReaction = buildEngine22LifecycleReaction({
     currentLifecycleState: engine22WaveStrategy?.currentLifecycleState || null,
     bars,
@@ -4359,11 +4359,16 @@ const zoneContext = buildZoneContext(
 
       engine22WaveStrategy =
         applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
-     attachEngine22PullbackReactionToConfluence({
-       patchedConfluence,
-       engine22WaveStrategy,
-       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-     }); 
+      attachEngine22PullbackReactionToConfluence({
+        patchedConfluence,
+        engine22WaveStrategy,
+        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+      }); 
+      attachEngine22LifecycleReactionToConfluence({
+        patchedConfluence,
+        engine22WaveStrategy,
+        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+      });
       attachEngine22LifecycleParticipationToConfluence({
         patchedConfluence,
         engine22WaveStrategy,
@@ -4664,6 +4669,11 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
        engine22WaveStrategy,
        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
      }); 
+     attachEngine22LifecycleReactionToConfluence({
+       patchedConfluence,
+       engine22WaveStrategy,
+       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+     });
      attachEngine22LifecycleParticipationToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
