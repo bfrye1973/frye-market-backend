@@ -3626,10 +3626,10 @@ function attachEngine22PullbackReactionToConfluence({
 }
 
 function attachEngine22LifecycleReactionToConfluence({
-  patchedConfluence.context.reaction = {
-  ...(patchedConfluence.context.reaction || {}),
-  engine22LifecycleReaction: lifecycleReaction,
-};
+  patchedConfluence,
+  engine22WaveStrategy,
+  bars = [],
+}) {
   const lifecycleReaction = buildEngine22LifecycleReaction({
     currentLifecycleState: engine22WaveStrategy?.currentLifecycleState || null,
     bars,
@@ -3643,13 +3643,7 @@ function attachEngine22LifecycleReactionToConfluence({
   patchedConfluence.context = patchedConfluence.context || {};
   patchedConfluence.context.reaction = {
     ...(patchedConfluence.context.reaction || {}),
-
     engine22LifecycleReaction: lifecycleReaction,
-
-    // Temporary compatibility for frontend / old consumers.
-    engine22PullbackReaction:
-      patchedConfluence?.context?.reaction?.engine22PullbackReaction ||
-      lifecycleReaction,
   };
 
   return patchedConfluence;
