@@ -30,9 +30,7 @@ function datetimeAzToSec(datetimeAz) {
   const raw = String(datetimeAz || "").trim();
   if (!raw) return null;
 
-  const normalized = raw.includes("T")
-    ? raw
-    : raw.replace(" ", "T");
+  const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
 
   const withSeconds =
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)
@@ -81,6 +79,54 @@ function readFibInputRows(filePath = DEFAULT_FIB_INPUT_FILE) {
   }
 }
 
+function readActiveWaveStateJson(filePath = DEFAULT_ACTIVE_WAVE_STATE_FILE) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (err) {
+    console.warn(
+      "[Engine22 ManualMarks] Failed reading active-wave-state-es.json:",
+      err?.message
+    );
+
+    return null;
+  }
+}
+
+export function getActiveWaveStateMeta({
+  symbol,
+  filePath = DEFAULT_ACTIVE_WAVE_STATE_FILE,
+} = {}) {
+  const json = readActiveWaveStateJson(filePath);
+
+  if (!json || typeof json !== "object") return null;
+
+  const symbolMatches =
+    String(json?.symbol || "").toUpperCase() ===
+    String(symbol || "").toUpperCase();
+
+  if (!symbolMatches) return null;
+
+  const activeStructures =
+    json?.activeStructures && typeof json.activeStructures === "object"
+      ? json.activeStructures
+      : {};
+
+  const activeDegreeKeys = Object.keys(activeStructures)
+    .map((key) => String(key || "").toLowerCase())
+    .filter(Boolean);
+
+  return {
+    symbol: json.symbol || symbol || null,
+    updatedAt: json.updatedAt || null,
+    source: "active-wave-state-es.json",
+    activeDegreeKeys,
+    historicalAllowedAsCurrent: false,
+    hasActiveStateForSymbol: true,
+  };
+}
+
 function readActiveWaveStateRows({
   symbol,
   degree,
@@ -88,9 +134,8 @@ function readActiveWaveStateRows({
   filePath = DEFAULT_ACTIVE_WAVE_STATE_FILE,
 } = {}) {
   try {
-    if (!fs.existsSync(filePath)) return [];
-
-    const json = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const json = readActiveWaveStateJson(filePath);
+    if (!json || typeof json !== "object") return [];
 
     const symbolMatches =
       String(json?.symbol || "").toUpperCase() ===
@@ -137,7 +182,7 @@ function readActiveWaveStateRows({
     return rows;
   } catch (err) {
     console.warn(
-      "[Engine22 ManualMarks] Failed reading active-wave-state-es.json:",
+      "[Engine22 ManualMarks] Failed reading active-wave-state-es.json rows:",
       err?.message
     );
 
@@ -168,12 +213,9 @@ function isSupportedManualRow(row) {
   const isLevelRow = kind === "LEVEL";
 
   const isManualWaveMarkRow =
-    wave === "MARK" &&
-    ["W1", "W2", "W3", "W4", "W5"].includes(kind);
+    wave === "MARK" && ["W1", "W2", "W3", "W4", "W5"].includes(kind);
 
-  const isAbcDownRow =
-    wave === "ABC" &&
-    ["A", "B", "C"].includes(kind);
+  const isAbcDownRow = wave === "ABC" && ["A", "B", "C"].includes(kind);
 
   const isAbcUpRow =
     wave === "ABC_UP" &&
@@ -189,7 +231,14 @@ function isSupportedManualRow(row) {
 
   const isPossibleW5UpRow =
     wave === "POSSIBLE_W5_UP" &&
-    ["ORIGIN_LOW", "W1_HIGH", "W2_LOW", "W3_HIGH", "W4_LOW", "W5_HIGH"].includes(kind);
+    [
+      "ORIGIN_LOW",
+      "W1_HIGH",
+      "W2_LOW",
+      "W3_HIGH",
+      "W4_LOW",
+      "W5_HIGH",
+    ].includes(kind);
 
   return (
     isLevelRow ||
@@ -206,10 +255,7 @@ function isNormalWaveMarkRow(row) {
   const wave = String(row.wave || "").toUpperCase();
   const kind = String(row.kind || "").toUpperCase();
 
-  return (
-    wave === "MARK" &&
-    ["W1", "W2", "W3", "W4", "W5"].includes(kind)
-  );
+  return wave === "MARK" && ["W1", "W2", "W3", "W4", "W5"].includes(kind);
 }
 
 export function getManualLevelRowsFor(args = {}) {
@@ -220,6 +266,32 @@ export function getManualLevelRowsFor(args = {}) {
     filePath = DEFAULT_FIB_INPUT_FILE,
     activeFilePath = DEFAULT_ACTIVE_WAVE_STATE_FILE,
   } = args;
+
+  const activeStateMeta = getActiveWaveStateMeta({
+    symbol,
+    filePath: activeFilePath,
+  });
+
+  const degreeKey = String(degree || "").toLowerCase();
+
+  const hasActiveStateForSymbol =
+    activeStateMeta?.hasActiveStateForSymbol === true;
+
+  const activeDegreeKeys = Array.isArray(activeStateMeta?.activeDegreeKeys)
+    ? activeStateMeta.activeDegreeKeys
+    : null;
+
+  const degreeIsActive =
+    !hasActiveStateForSymbol ||
+    !activeDegreeKeys ||
+    activeDegreeKeys.includes(degreeKey);
+
+  // Long-term active source-of-truth rule:
+  // If active-wave-state-es.json exists for this symbol and this degree is omitted,
+  // historical CSV rows for that degree are archive/context only, not current marks.
+  if (!degreeIsActive) {
+    return [];
+  }
 
   const activeRows = readActiveWaveStateRows({
     symbol,
@@ -238,14 +310,12 @@ export function getManualLevelRowsFor(args = {}) {
 
       // If active-wave-state provides W1/W2/etc for this degree,
       // old CSV MARK rows for that degree become historical only.
-      // Keep ABC / ABC_UP / W3_DOWN / POST_W5_BOUNCE / POSSIBLE_W5_UP rows.
+      // Keep ABC / ABC_UP / W3_DOWN / POST_W5_BOUNCE / POSSIBLE_W5_UP rows
+      // only for the same active degree.
       return !isNormalWaveMarkRow(row);
     });
 
-  return [
-    ...activeRows,
-    ...csvRows,
-  ];
+  return [...activeRows, ...csvRows];
 }
 
 export function attachManualLevelsToEngine2Block(block, levelRows = []) {
@@ -312,56 +382,55 @@ export function attachManualLevelsToEngine2Block(block, levelRows = []) {
     Object.entries(manualWaveMarks).filter(([, value]) => value)
   );
 
-  const hasManualWaveMarks =
-    Object.keys(cleanedManualWaveMarks).length > 0;
+  const hasManualWaveMarks = Object.keys(cleanedManualWaveMarks).length > 0;
 
-const buildManualWavePhase = () => {
-  const order = ["W1", "W2", "W3", "W4", "W5"];
-  const marksPresent = order.filter((key) => cleanedManualWaveMarks[key]);
+  const buildManualWavePhase = () => {
+    const order = ["W1", "W2", "W3", "W4", "W5"];
+    const marksPresent = order.filter((key) => cleanedManualWaveMarks[key]);
 
-  if (!marksPresent.length) {
-    return {
-      phase: block.phase ?? "UNKNOWN",
-      confirmedPhase: block.confirmedPhase ?? "UNKNOWN",
-      lastMark: block.lastMark ?? null,
-      nextMark: block.nextMark ?? null,
-      marksPresent: block.marksPresent ?? [],
+    if (!marksPresent.length) {
+      return {
+        phase: block.phase ?? "UNKNOWN",
+        confirmedPhase: block.confirmedPhase ?? "UNKNOWN",
+        lastMark: block.lastMark ?? null,
+        nextMark: block.nextMark ?? null,
+        marksPresent: block.marksPresent ?? [],
+      };
+    }
+
+    const lastKey = marksPresent[marksPresent.length - 1];
+    const last = cleanedManualWaveMarks[lastKey];
+
+    const phaseByLastKey = {
+      W1: "IN_W2",
+      W2: "IN_W3",
+      W3: "IN_W4",
+      W4: "IN_W5",
+      W5: "COMPLETE_W5",
     };
-  }
 
-  const lastKey = marksPresent[marksPresent.length - 1];
-  const last = cleanedManualWaveMarks[lastKey];
+    const confirmedPhaseByLastKey = {
+      W1: "IN_W1",
+      W2: "IN_W2",
+      W3: "IN_W3",
+      W4: "IN_W4",
+      W5: "COMPLETE_W5",
+    };
 
-  const phaseByLastKey = {
-    W1: "IN_W2",
-    W2: "IN_W3",
-    W3: "IN_W4",
-    W4: "IN_W5",
-    W5: "COMPLETE_W5",
+    return {
+      phase: phaseByLastKey[lastKey] || "UNKNOWN",
+      confirmedPhase: confirmedPhaseByLastKey[lastKey] || "UNKNOWN",
+      phaseReason: `ACTIVE_WAVE_STATE_${lastKey}_MARKED`,
+      lastMark: {
+        key: lastKey,
+        ...last,
+      },
+      nextMark: null,
+      marksPresent,
+    };
   };
 
-  const confirmedPhaseByLastKey = {
-    W1: "IN_W1",
-    W2: "IN_W2",
-    W3: "IN_W3",
-    W4: "IN_W4",
-    W5: "COMPLETE_W5",
-  };
-
-  return {
-    phase: phaseByLastKey[lastKey] || "UNKNOWN",
-    confirmedPhase: confirmedPhaseByLastKey[lastKey] || "UNKNOWN",
-    phaseReason: `ACTIVE_WAVE_STATE_${lastKey}_MARKED`,
-    lastMark: {
-      key: lastKey,
-      ...last,
-    },
-    nextMark: null,
-    marksPresent,
-  };
-};
-
-const manualWavePhase = buildManualWavePhase();
+  const manualWavePhase = buildManualWavePhase();
 
   const findAbcUpMark = (kindName) => {
     return findFamilyMark("ABC_UP", kindName);
@@ -474,20 +543,18 @@ const manualWavePhase = buildManualWavePhase();
   return {
     ...block,
 
-waveMarks: hasManualWaveMarks
-  ? cleanedManualWaveMarks
-  : block.waveMarks,
+    waveMarks: hasManualWaveMarks ? cleanedManualWaveMarks : block.waveMarks,
 
-...(hasManualWaveMarks
-  ? {
-      phase: manualWavePhase.phase,
-      confirmedPhase: manualWavePhase.confirmedPhase,
-      phaseReason: manualWavePhase.phaseReason,
-      lastMark: manualWavePhase.lastMark,
-      nextMark: manualWavePhase.nextMark,
-      marksPresent: manualWavePhase.marksPresent,
-    }
-  : {}),
+    ...(hasManualWaveMarks
+      ? {
+          phase: manualWavePhase.phase,
+          confirmedPhase: manualWavePhase.confirmedPhase,
+          phaseReason: manualWavePhase.phaseReason,
+          lastMark: manualWavePhase.lastMark,
+          nextMark: manualWavePhase.nextMark,
+          marksPresent: manualWavePhase.marksPresent,
+        }
+      : {}),
 
     aLow,
     bHigh,
