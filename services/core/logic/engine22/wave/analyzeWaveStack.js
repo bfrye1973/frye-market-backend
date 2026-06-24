@@ -1,4 +1,3 @@
-```js
 // services/core/logic/engine22/wave/analyzeWaveStack.js
 // Engine 22G — Generic Wave/Fib State Engine
 // File 4: analyzeWaveStack.js
@@ -777,4 +776,3 @@ export function analyzeWaveStack({
 }
 
 export default analyzeWaveStack;
-```
