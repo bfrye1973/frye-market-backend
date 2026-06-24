@@ -30,6 +30,11 @@
             "FINAL_C_DOWN_SWEEP_RISK_BELOW_PRIOR_W2_CANDIDATE",
             "WAIT_FOR_C_LOW_REACTION_OR_RECLAIM",
             "NO_CHASE_AFTER_B_WAVE_RALLY"
+            "C_DOWN_LIQUIDITY_SWEEP_DETECTED",
+            "VIOLENT_RECLAIM_FROM_C_LOW",
+            "POSSIBLE_W2_C_LOW_REACTION",
+            "WAIT_FOR_RECLAIM_HOLD_OR_CONTROLLED_PULLBACK",
+            "DO_NOT_CHASE_VERTICAL_RECLAIM"
           ],
           "replaces": {
             "price": 7473,
