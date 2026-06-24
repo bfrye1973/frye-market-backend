@@ -676,7 +676,10 @@ export function buildEngine22WaveStrategy(input = {}) {
       direction: currentLifecycleState.direction || "LONG",
       active: false,
       noExecution: true,
-      tradeableOpportunityBlocked: true,
+      tradeableOpportunityBlocked:
+        currentLifecycleState.tradeableOpportunityBlocked === true,
+      executionBlocked: currentLifecycleState.executionBlocked === true,
+      confirmationRequired: currentLifecycleState.confirmationRequired === true,
       timing: isIntermediateLaunchWatch
         ? "W3_LAUNCH_WATCH"
         : "W3_CONTINUATION_WATCH",
