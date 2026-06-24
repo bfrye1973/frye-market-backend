@@ -132,13 +132,19 @@ export function resolveCurrentLifecycleState({ waveFibState } = {}) {
 
       active: false,
       readOnly: true,
-      noExecution: true,
-      tradeableOpportunityBlocked: true,
 
+      readiness: "WATCH",
+      direction: "LONG",
+      bias: "BULLISH_W3_LAUNCH_WATCH",
+
+      noExecution: true,
+      executionBlocked: true,
+
+      confirmationRequired: true,
       paperTradeCandidate: true,
       paperTradeAllowedOnlyAfterConfirmation: true,
 
-      readiness: "WATCH",
+      tradeableOpportunityBlocked: false,
       setupEligible: false,
       executionBias: "LONG",
 
