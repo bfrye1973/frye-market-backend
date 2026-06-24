@@ -661,27 +661,30 @@ export function buildEngine22WaveStrategy(input = {}) {
     });
   }
 
-  if (
-    currentLifecycleState?.key ===
-    "INTERMEDIATE_W3_MINOR_MINUTE_W3_CONTINUATION_WATCH"
-  ) {
+  if (currentLifecycleState?.key) {
+    const isIntermediateLaunchWatch =
+      currentLifecycleState.key === "INTERMEDIATE_W2_COMPLETE_W3_LAUNCH_WATCH";
+
     waveOpportunity = {
       ...(waveOpportunity || {}),
       setupFamily: "ELLIOTT_WAVE",
-      setupType: "INTERMEDIATE_W3_MINOR_MINUTE_W3_CONTINUATION_WATCH",
-      rawSetup: "INTERMEDIATE_W3_MINOR_MINUTE_W3_CONTINUATION_WATCH",
-      degree: "intermediate",
-      tacticalDegree: "minor/minute",
-      readiness: "WATCH",
-      direction: "LONG",
+      setupType: currentLifecycleState.key,
+      rawSetup: currentLifecycleState.key,
+      degree: currentLifecycleState.degree || "intermediate",
+      tacticalDegree: currentLifecycleState.tacticalDegree || "minor/minute",
+      readiness: currentLifecycleState.readiness || "WATCH",
+      direction: currentLifecycleState.direction || "LONG",
       active: false,
       noExecution: true,
       tradeableOpportunityBlocked: true,
-      timing: "W3_CONTINUATION_WATCH",
+      timing: isIntermediateLaunchWatch
+        ? "W3_LAUNCH_WATCH"
+        : "W3_CONTINUATION_WATCH",
       chaseRisk: "BLOCKED",
       needs: currentLifecycleState.needs,
-      summary:
-        "Intermediate W3 is active with Minor and Minute W3 continuation context. This is a bullish paper-trade candidate watch only. No chase, no automatic long, no execution. Wait for controlled pullback or reclaim confirmation plus Engine 3, Engine 4, Engine 15, and Engine 6 confirmation.",
+      summary: isIntermediateLaunchWatch
+        ? "Intermediate W2 is marked complete at the active wave-state low. Watch for W3 launch, reclaim, or controlled pullback confirmation. Minor and Minute structures are not yet re-formed. No chase, no automatic long, no execution."
+        : "Intermediate W3 is active with Minor and Minute W3 continuation context. This is a bullish paper-trade candidate watch only. No chase, no automatic long, no execution. Wait for controlled pullback or reclaim confirmation plus Engine 3, Engine 4, Engine 15, and Engine 6 confirmation.",
       reasonCodes: [
         ...(Array.isArray(waveOpportunity?.reasonCodes)
           ? waveOpportunity.reasonCodes
@@ -690,7 +693,6 @@ export function buildEngine22WaveStrategy(input = {}) {
       ],
     };
   }
-
   // DISPLAY LAYER:
   // Timeline can use Engine15 for wording, but it is not the source of opportunity truth.
   const timelineReadBase = buildTimelineRead({
@@ -714,26 +716,26 @@ export function buildEngine22WaveStrategy(input = {}) {
     sessionProfile: context.sessionProfile,
   });
 
-  const timelineRead =
-    currentLifecycleState?.key ===
-    "INTERMEDIATE_W3_MINOR_MINUTE_W3_CONTINUATION_WATCH"
-      ? {
-          ...(timelineReadBase || {}),
-          headline: currentLifecycleState.headline,
-          subheadline:
-            "Intermediate W3 is active with Minor and Minute W3 continuation context. This is a bullish continuation watch only — no chase, no automatic execution.",
-          action: currentLifecycleState.action,
-          bias: currentLifecycleState.bias,
-          direction: currentLifecycleState.direction,
-          needs: currentLifecycleState.needs,
-          reasonCodes: [
-            ...(Array.isArray(timelineReadBase?.reasonCodes)
-              ? timelineReadBase.reasonCodes
-              : []),
-            "ENGINE22_CURRENT_LIFECYCLE_STATE_MIRRORED_TO_TIMELINE_READ",
-          ],
-        }
-      : timelineReadBase;
+  const timelineRead = currentLifecycleState?.key
+    ? {
+        ...(timelineReadBase || {}),
+        headline: currentLifecycleState.headline,
+        subheadline:
+          currentLifecycleState.key === "INTERMEDIATE_W2_COMPLETE_W3_LAUNCH_WATCH"
+            ? "Intermediate W2 is marked complete from active wave state. Watch for W3 launch / reclaim confirmation. Minor and Minute structures are not yet re-formed."
+            : "Intermediate W3 is active with Minor and Minute W3 continuation context. This is a bullish continuation watch only — no chase, no automatic execution.",
+        action: currentLifecycleState.action,
+        bias: currentLifecycleState.bias,
+        direction: currentLifecycleState.direction,
+        needs: currentLifecycleState.needs,
+        reasonCodes: [
+          ...(Array.isArray(timelineReadBase?.reasonCodes)
+            ? timelineReadBase.reasonCodes
+            : []),
+          "ENGINE22_CURRENT_LIFECYCLE_STATE_MIRRORED_TO_TIMELINE_READ",
+        ],
+      }
+    : timelineReadBase;
   // POST-ENGINE15 / PAPER-ONLY CONTEXT:
   // This may look at Engine15 and confirmations, but it remains separate.
   const tradeDecision = buildTradeDecisionSafe({
