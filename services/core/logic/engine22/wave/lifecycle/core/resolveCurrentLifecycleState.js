@@ -10,6 +10,12 @@
 // - No execution.
 // - No Engine 6 permission changes.
 // - Paper-trade candidate context only.
+//
+// Engine 22 Learning / Wave Mark Maturity addition:
+// - currentLifecycleState must respect waveFibState.markMaturity.
+// - If W2 is only CANDIDATE, do NOT call it W2 complete / W3 launch.
+// - Sideways B-wave chop, quick-pop trap, and final C-down risk keep W2 in maturity watch.
+// - C-low sweep / violent reclaim can upgrade to C-low reaction watch, but still no chase.
 
 function readDegreeLifecycle(waveFibState, degree) {
   return waveFibState?.lifecycle?.degreeLifecycle?.[degree] || null;
@@ -21,6 +27,10 @@ function readDegreeState(waveFibState, degree) {
 
 function normalizeDegreeKey(degree) {
   return String(degree || "").trim().toLowerCase();
+}
+
+function upper(value) {
+  return String(value || "").trim().toUpperCase();
 }
 
 function getActiveDegreeKeys(waveFibState = null) {
@@ -43,11 +53,96 @@ function isActiveDegree(waveFibState = null, degree = "") {
   return keys.includes(normalizeDegreeKey(degree));
 }
 
+function readCurrentMarkMaturity(waveFibState = null) {
+  return waveFibState?.markMaturity?.current || null;
+}
+
+function getReasonCodes(markMaturity = null) {
+  return Array.isArray(markMaturity?.reasonCodes)
+    ? markMaturity.reasonCodes.map((code) => upper(code)).filter(Boolean)
+    : [];
+}
+
+function getBasisCodes(markMaturity = null) {
+  return Array.isArray(markMaturity?.basis)
+    ? markMaturity.basis.map((code) => upper(code)).filter(Boolean)
+    : [];
+}
+
+function hasCode(markMaturity = null, code = "") {
+  const wanted = upper(code);
+  if (!wanted) return false;
+
+  return (
+    getReasonCodes(markMaturity).includes(wanted) ||
+    getBasisCodes(markMaturity).includes(wanted)
+  );
+}
+
+function isIntermediateW2Candidate(markMaturity = null) {
+  return (
+    upper(markMaturity?.degree) === "INTERMEDIATE" &&
+    upper(markMaturity?.wave) === "W2" &&
+    upper(markMaturity?.status) === "CANDIDATE"
+  );
+}
+
+function hasFinalCDownRisk(markMaturity = null) {
+  return (
+    hasCode(markMaturity, "W2_STILL_FORMING") ||
+    hasCode(markMaturity, "FINAL_C_DOWN_SWEEP_RISK_BELOW_PRIOR_W2_CANDIDATE") ||
+    hasCode(markMaturity, "POSSIBLE_B_WAVE_LIQUIDITY_RALLY_AFTER_W2_CANDIDATE") ||
+    hasCode(markMaturity, "B_WAVE_SIDEWAYS_CONSOLIDATION") ||
+    hasCode(markMaturity, "B_WAVE_EMA10_CHOP_NOT_W3_LAUNCH") ||
+    hasCode(markMaturity, "B_WAVE_QUICK_POP_LIQUIDITY_TRAP")
+  );
+}
+
+function hasCLowReactionEvidence(markMaturity = null) {
+  return (
+    hasCode(markMaturity, "C_DOWN_LIQUIDITY_SWEEP_DETECTED") ||
+    hasCode(markMaturity, "VIOLENT_RECLAIM_FROM_C_LOW") ||
+    hasCode(markMaturity, "POSSIBLE_W2_C_LOW_REACTION") ||
+    hasCode(markMaturity, "WAIT_FOR_RECLAIM_HOLD_OR_CONTROLLED_PULLBACK")
+  );
+}
+
+function buildMarkMaturitySummary(markMaturity = null) {
+  if (!markMaturity || typeof markMaturity !== "object") return null;
+
+  return {
+    symbol: markMaturity.symbol || null,
+    degree: markMaturity.degree || null,
+    wave: markMaturity.wave || null,
+    price: markMaturity.price ?? null,
+    time: markMaturity.time || null,
+
+    status: markMaturity.status || null,
+    confidence: markMaturity.confidence || null,
+    score: markMaturity.score ?? null,
+
+    basis: Array.isArray(markMaturity.basis) ? markMaturity.basis : [],
+
+    supersededPreviousMark: markMaturity.supersededPreviousMark === true,
+    previousMark: markMaturity.previousMark || null,
+
+    confirmationRequired: markMaturity.confirmationRequired !== false,
+    noExecution: true,
+    noPermissionCreated: true,
+    noChase: true,
+
+    reasonCodes: Array.isArray(markMaturity.reasonCodes)
+      ? markMaturity.reasonCodes
+      : [],
+  };
+}
+
 function buildConfirmationContext({
   waveFibState,
   key,
   mode = "CONTROLLED_PULLBACK_OR_RECLAIM",
   direction = "LONG",
+  extraReasonCodes = [],
 } = {}) {
   return {
     active: true,
@@ -55,7 +150,7 @@ function buildConfirmationContext({
     direction,
 
     reactionRequired: true,
-    reactionFocus: "CONTROLLED_PULLBACK_OR_RECLAIM",
+    reactionFocus: mode,
 
     participationRequired: true,
     participationFocus: "VOLUME_ON_RECLAIM",
@@ -87,7 +182,168 @@ function buildConfirmationContext({
       "NO_EXECUTION",
       "NO_PERMISSION_CREATED",
       "NO_CHASE",
-    ],
+      ...extraReasonCodes,
+    ].filter(Boolean),
+  };
+}
+
+function buildCommonDegreeSnapshot({ intermediate, minor, minute } = {}) {
+  return {
+    intermediate: {
+      phase: intermediate?.phase || null,
+      confirmedPhase: intermediate?.confirmedPhase || null,
+      targets: intermediate?.fibProjection?.levels || null,
+      extensionProgress: intermediate?.extensionProgress || null,
+    },
+
+    minor: {
+      phase: minor?.phase || null,
+      confirmedPhase: minor?.confirmedPhase || null,
+      targets: minor?.fibProjection?.levels || null,
+      extensionProgress: minor?.extensionProgress || null,
+      inactiveDegree: minor?.inactiveDegree === true,
+    },
+
+    minute: {
+      phase: minute?.phase || null,
+      confirmedPhase: minute?.confirmedPhase || null,
+      targets: minute?.fibProjection?.levels || null,
+      extensionProgress: minute?.extensionProgress || null,
+      inactiveDegree: minute?.inactiveDegree === true,
+    },
+  };
+}
+
+function buildIntermediateW2StillFormingState({
+  waveFibState,
+  markMaturity,
+  intermediate,
+  minor,
+  minute,
+} = {}) {
+  const cLowReaction = hasCLowReactionEvidence(markMaturity);
+
+  const key = cLowReaction
+    ? "INTERMEDIATE_W2_C_LOW_REACTION_DETECTED_RECLAIM_WATCH"
+    : "INTERMEDIATE_W1_COMPLETE_W2_STILL_FORMING_FINAL_C_DOWN_WATCH";
+
+  const headline = cLowReaction
+    ? "INTERMEDIATE W2 C-LOW REACTION DETECTED — WATCH RECLAIM / CONTROLLED PULLBACK"
+    : "INTERMEDIATE W1 COMPLETE — W2 STILL FORMING / FINAL C-DOWN WATCH";
+
+  const action = cLowReaction
+    ? "WAIT_FOR_RECLAIM_HOLD_OR_CONTROLLED_PULLBACK_CONFIRMATION"
+    : "WAIT_FOR_C_LOW_REACTION_OR_RECLAIM";
+
+  const mode = cLowReaction
+    ? "C_LOW_REACTION_RECLAIM_OR_CONTROLLED_PULLBACK"
+    : "FINAL_C_DOWN_C_LOW_REACTION_OR_RECLAIM";
+
+  const maturitySummary = buildMarkMaturitySummary(markMaturity);
+
+  const extraReasonCodes = [
+    ...(Array.isArray(maturitySummary?.reasonCodes)
+      ? maturitySummary.reasonCodes
+      : []),
+    cLowReaction
+      ? "C_LOW_REACTION_DETECTED_CONFIRMATION_REQUIRED"
+      : "W2_STILL_FORMING_FINAL_C_DOWN_WATCH",
+    "MARK_MATURITY_BLOCKED_W3_LAUNCH_WORDING",
+  ];
+
+  return {
+    key,
+    headline,
+    sourcePath: "waveFibState.markMaturity.current",
+    priority: 0,
+
+    degree: "intermediate",
+    wave: "W2",
+    tacticalDegree: "minor/minute",
+    tacticalWave: "NOT_YET_FORMED",
+
+    action,
+    direction: "LONG",
+    bias: cLowReaction
+      ? "BULLISH_W2_C_LOW_REACTION_WATCH"
+      : "BULLISH_W2_MATURITY_WATCH",
+
+    active: false,
+    readOnly: true,
+
+    readiness: "WATCH",
+
+    noExecution: true,
+    executionBlocked: true,
+
+    confirmationRequired: true,
+    paperTradeCandidate: true,
+    paperTradeAllowedOnlyAfterConfirmation: true,
+
+    tradeableOpportunityBlocked: false,
+    setupEligible: false,
+    executionBias: "LONG",
+
+    activeDegreeKeys: waveFibState?.activeDegreeKeys || null,
+    markMaturity: maturitySummary,
+
+    confirmationContext: buildConfirmationContext({
+      waveFibState,
+      key,
+      mode,
+      direction: "LONG",
+      extraReasonCodes,
+    }),
+
+    ...buildCommonDegreeSnapshot({
+      intermediate,
+      minor,
+      minute,
+    }),
+
+    needs: cLowReaction
+      ? [
+          "NO_CHASE",
+          "DO_NOT_CHASE_VERTICAL_RECLAIM",
+          "WAIT_FOR_RECLAIM_HOLD_OR_CONTROLLED_PULLBACK",
+          "ENGINE3_REACTION_CONFIRMATION",
+          "ENGINE4_PARTICIPATION_CONFIRMATION",
+          "ENGINE15_READY_REQUIRED",
+          "ENGINE6_FINAL_PERMISSION_REQUIRED",
+        ]
+      : [
+          "NO_CHASE",
+          "WAIT_FOR_C_LOW_REACTION_OR_RECLAIM",
+          "W2_STILL_FORMING",
+          "B_WAVE_SIDEWAYS_ACTION_NOT_W3",
+          "FINAL_C_DOWN_MAY_STILL_BE_ACTIVE",
+          "ENGINE3_REACTION_CONFIRMATION",
+          "ENGINE4_PARTICIPATION_CONFIRMATION",
+          "ENGINE15_READY_REQUIRED",
+          "ENGINE6_FINAL_PERMISSION_REQUIRED",
+        ],
+
+    reasonCodes: [
+      "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
+      "ACTIVE_WAVE_STATE_DEGREES_ENFORCED",
+      "INTERMEDIATE_ACTIVE",
+      "MINOR_INACTIVE_NOT_IN_ACTIVE_WAVE_STATE",
+      "MINUTE_INACTIVE_NOT_IN_ACTIVE_WAVE_STATE",
+      "INTERMEDIATE_W2_CANDIDATE",
+      cLowReaction
+        ? "INTERMEDIATE_W2_C_LOW_REACTION_DETECTED"
+        : "INTERMEDIATE_W2_STILL_FORMING",
+      hasFinalCDownRisk(markMaturity)
+        ? "B_WAVE_OR_FINAL_C_DOWN_RISK_PRESENT"
+        : null,
+      "MARK_MATURITY_PREVENTED_W3_LAUNCH_PROMOTION",
+      "PAPER_TRADE_CANDIDATE_ONLY",
+      "NO_EXECUTION",
+      "NO_CHASE",
+      ...(Array.isArray(maturitySummary?.reasonCodes)
+        ? maturitySummary.reasonCodes
+        : []),
+    ].filter(Boolean),
   };
 }
 
@@ -107,6 +363,22 @@ export function resolveCurrentLifecycleState({ waveFibState } = {}) {
     isActiveDegree(waveFibState, "intermediate") &&
     !isActiveDegree(waveFibState, "minor") &&
     !isActiveDegree(waveFibState, "minute");
+
+  const markMaturity = readCurrentMarkMaturity(waveFibState);
+
+  if (
+    onlyIntermediateActive &&
+    intermediateLifecycle?.lifecycleState === "W3_EXTENSION_ACTIVE" &&
+    isIntermediateW2Candidate(markMaturity)
+  ) {
+    return buildIntermediateW2StillFormingState({
+      waveFibState,
+      markMaturity,
+      intermediate,
+      minor,
+      minute,
+    });
+  }
 
   if (
     onlyIntermediateActive &&
@@ -134,8 +406,6 @@ export function resolveCurrentLifecycleState({ waveFibState } = {}) {
       readOnly: true,
 
       readiness: "WATCH",
-      direction: "LONG",
-      bias: "BULLISH_W3_LAUNCH_WATCH",
 
       noExecution: true,
       executionBlocked: true,
@@ -149,32 +419,23 @@ export function resolveCurrentLifecycleState({ waveFibState } = {}) {
       executionBias: "LONG",
 
       activeDegreeKeys: waveFibState?.activeDegreeKeys || null,
+      markMaturity: buildMarkMaturitySummary(markMaturity),
 
       confirmationContext: buildConfirmationContext({
         waveFibState,
         key,
         mode: "CONTROLLED_PULLBACK_OR_RECLAIM",
         direction: "LONG",
+        extraReasonCodes: Array.isArray(markMaturity?.reasonCodes)
+          ? markMaturity.reasonCodes
+          : [],
       }),
 
-      intermediate: {
-        phase: intermediate?.phase || null,
-        confirmedPhase: intermediate?.confirmedPhase || null,
-        targets: intermediate?.fibProjection?.levels || null,
-        extensionProgress: intermediate?.extensionProgress || null,
-      },
-
-      minor: {
-        phase: minor?.phase || null,
-        confirmedPhase: minor?.confirmedPhase || null,
-        inactiveDegree: minor?.inactiveDegree === true,
-      },
-
-      minute: {
-        phase: minute?.phase || null,
-        confirmedPhase: minute?.confirmedPhase || null,
-        inactiveDegree: minute?.inactiveDegree === true,
-      },
+      ...buildCommonDegreeSnapshot({
+        intermediate,
+        minor,
+        minute,
+      }),
 
       needs: [
         "NO_CHASE",
@@ -212,6 +473,7 @@ export function resolveCurrentLifecycleState({ waveFibState } = {}) {
   }
 
   const key = "INTERMEDIATE_W3_MINOR_MINUTE_W3_CONTINUATION_WATCH";
+  const nestedMarkMaturity = buildMarkMaturitySummary(markMaturity);
 
   return {
     key,
@@ -237,33 +499,23 @@ export function resolveCurrentLifecycleState({ waveFibState } = {}) {
     paperTradeCandidate: true,
     paperTradeAllowedOnlyAfterConfirmation: true,
 
+    markMaturity: nestedMarkMaturity,
+
     confirmationContext: buildConfirmationContext({
       waveFibState,
       key,
       mode: "CONTROLLED_PULLBACK_OR_RECLAIM",
       direction: "LONG",
+      extraReasonCodes: Array.isArray(nestedMarkMaturity?.reasonCodes)
+        ? nestedMarkMaturity.reasonCodes
+        : [],
     }),
 
-    intermediate: {
-      phase: intermediate?.phase || null,
-      confirmedPhase: intermediate?.confirmedPhase || null,
-      targets: intermediate?.fibProjection?.levels || null,
-      extensionProgress: intermediate?.extensionProgress || null,
-    },
-
-    minor: {
-      phase: minor?.phase || null,
-      confirmedPhase: minor?.confirmedPhase || null,
-      targets: minor?.fibProjection?.levels || null,
-      extensionProgress: minor?.extensionProgress || null,
-    },
-
-    minute: {
-      phase: minute?.phase || null,
-      confirmedPhase: minute?.confirmedPhase || null,
-      targets: minute?.fibProjection?.levels || null,
-      extensionProgress: minute?.extensionProgress || null,
-    },
+    ...buildCommonDegreeSnapshot({
+      intermediate,
+      minor,
+      minute,
+    }),
 
     needs: [
       "NO_CHASE",
