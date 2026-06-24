@@ -453,6 +453,37 @@ function classifyDegreeLifecycle({
     };
   }
 
+  if (
+    degreeState?.inactiveDegree === true ||
+    degreeState?.lifecycleBlockedAsCurrent === true
+  ) {
+    return {
+      ok: true,
+      degree,
+      lifecycleState: "INACTIVE_DEGREE_NOT_IN_ACTIVE_WAVE_STATE",
+      phase: "UNKNOWN",
+      confirmedPhase: "UNKNOWN",
+      nextExpectedWave: "UNKNOWN",
+      allowedSetupFamily: "NONE",
+      tradeableCandidate: false,
+      tradeableOpportunityBlocked: true,
+      active: false,
+      readOnly: true,
+      noExecution: true,
+      inactiveDegree: true,
+      lifecycleBlockedAsCurrent: true,
+      headline: `${String(degree).toUpperCase()} INACTIVE — NOT IN ACTIVE WAVE STATE`,
+      summary:
+        "This degree is historical/context only because active-wave-state-es.json does not include it as an active structure.",
+      needs: ["WAIT_FOR_ACTIVE_WAVE_STATE_MARKS"],
+      reasonCodes: [
+        "DEGREE_NOT_IN_ACTIVE_WAVE_STATE",
+        "HISTORICAL_DEGREE_BLOCKED_AS_CURRENT",
+        "NO_EXECUTION",
+      ],
+    };
+  }
+
   const phase = upper(degreeState?.phase);
   const confirmedPhase = upper(degreeState?.confirmedPhase);
   const nextExpectedWave = upper(degreeState?.nextExpectedWave);
