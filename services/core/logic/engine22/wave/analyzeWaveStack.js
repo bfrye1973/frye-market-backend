@@ -1,3 +1,4 @@
+```js
 // services/core/logic/engine22/wave/analyzeWaveStack.js
 // Engine 22G — Generic Wave/Fib State Engine
 // File 4: analyzeWaveStack.js
@@ -6,6 +7,13 @@
 // Run analyzeWaveDegree() across primary, intermediate, minor, minute, and micro.
 // Then summarize the total wave/fib stack.
 // This is read-only intelligence. It does not create trades.
+//
+// Engine 22 Learning / Wave Mark Maturity addition:
+// - Reads active-wave-state metadata.
+// - Builds runtime markMaturity.
+// - Does NOT mutate active JSON.
+// - Does NOT create execution permission.
+// - Exposes markMaturity inside waveFibState so lifecycle/resolver can use it.
 
 import { analyzeWaveDegree } from "./analyzeWaveDegree.js";
 import { analyzeMicroW4AbcRisk } from "./analyzeMicroW4AbcRisk.js";
@@ -15,6 +23,7 @@ import { buildTradeContextSummary } from "./buildTradeContextSummary.js";
 import { buildW4Levels } from "./buildW4Levels.js";
 import { classifyWaveLifecycle } from "./classifyWaveLifecycle.js";
 import { getActiveWaveStateMeta } from "./manualMarks/readManualWaveMarks.js";
+import { validateWaveMarkMaturity } from "./revision/validateWaveMarkMaturity.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -78,6 +87,35 @@ function applyActiveDegreeFilter({ degrees = {}, activeDegreeKeys = null } = {})
   }
 
   return out;
+}
+
+function getActiveStructuresFromMeta(activeStructuresSource = null) {
+  if (!activeStructuresSource || typeof activeStructuresSource !== "object") {
+    return {};
+  }
+
+  if (
+    activeStructuresSource.activeStructures &&
+    typeof activeStructuresSource.activeStructures === "object"
+  ) {
+    return activeStructuresSource.activeStructures;
+  }
+
+  if (
+    activeStructuresSource.raw?.activeStructures &&
+    typeof activeStructuresSource.raw.activeStructures === "object"
+  ) {
+    return activeStructuresSource.raw.activeStructures;
+  }
+
+  if (
+    activeStructuresSource.state?.activeStructures &&
+    typeof activeStructuresSource.state.activeStructures === "object"
+  ) {
+    return activeStructuresSource.state.activeStructures;
+  }
+
+  return {};
 }
 
 function toNum(x) {
@@ -494,6 +532,7 @@ export function analyzeWaveStack({
       currentPrice: round2(currentPrice),
       activeDegreeKeys: null,
       activeStructuresSource: null,
+      markMaturity: null,
       stackBias: "UNKNOWN",
       activeTradingDegree: null,
       activeSetup: "NONE",
@@ -511,6 +550,14 @@ export function analyzeWaveStack({
   )
     ? activeStructuresSource.activeDegreeKeys
     : null;
+
+  const activeStructuresForMaturity =
+    getActiveStructuresFromMeta(activeStructuresSource);
+
+  const markMaturity = validateWaveMarkMaturity({
+    symbol,
+    activeStructures: activeStructuresForMaturity,
+  });
 
   let degrees = {};
 
@@ -652,6 +699,7 @@ export function analyzeWaveStack({
 
     activeDegreeKeys,
     activeStructuresSource,
+    markMaturity,
 
     stackBias,
     activeTradingDegree: activeTradingDegree.degree,
@@ -698,6 +746,7 @@ export function analyzeWaveStack({
 
     activeDegreeKeys,
     activeStructuresSource,
+    markMaturity,
 
     stackBias,
     activeTradingDegree: activeTradingDegree.degree,
@@ -728,3 +777,4 @@ export function analyzeWaveStack({
 }
 
 export default analyzeWaveStack;
+```
