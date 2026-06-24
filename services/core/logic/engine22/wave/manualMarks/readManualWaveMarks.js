@@ -121,7 +121,16 @@ export function getActiveWaveStateMeta({
     symbol: json.symbol || symbol || null,
     updatedAt: json.updatedAt || null,
     source: "active-wave-state-es.json",
+
     activeDegreeKeys,
+    activeStructures,
+
+    // Keep the raw active wave state available for Engine 22 learning /
+    // mark maturity logic. This is read-only. Snapshot builds must not
+    // mutate active-wave-state-es.json.
+    raw: json,
+    state: json,
+
     historicalAllowedAsCurrent: false,
     hasActiveStateForSymbol: true,
   };
