@@ -1,6 +1,6 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-06-23 13:30",
+  "updatedAt": "2026-06-24 13:30",
   "activeStructures": {
     "intermediate": {
       "tf": "1h",
@@ -8,11 +8,35 @@
       "marks": {
         "W1": {
           "price": 7648,
-          "time": "2026-06-15 09:00"
+          "time": "2026-06-15 09:00",
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "INTERMEDIATE_W1_IMPULSE_COMPLETED"
+          ]
         },
         "W2": {
           "price": 7415.25,
-          "time": "2026-06-23 13:30"
+          "time": "2026-06-23 13:30",
+          "status": "CANDIDATE",
+          "confidence": "MEDIUM",
+          "basis": [
+            "W2_STILL_FORMING",
+            "A_DOWN_COMPLETED",
+            "B_WAVE_SIDEWAYS_CONSOLIDATION",
+            "B_WAVE_EMA10_CHOP_NOT_W3_LAUNCH",
+            "B_WAVE_QUICK_POP_LIQUIDITY_TRAP",
+            "POSSIBLE_B_WAVE_LIQUIDITY_RALLY_AFTER_W2_CANDIDATE",
+            "FINAL_C_DOWN_SWEEP_RISK_BELOW_PRIOR_W2_CANDIDATE",
+            "WAIT_FOR_C_LOW_REACTION_OR_RECLAIM",
+            "NO_CHASE_AFTER_B_WAVE_RALLY"
+          ],
+          "replaces": {
+            "price": 7473,
+            "time": "2026-06-17 12:30",
+            "status": "SUPERSEDED",
+            "reason": "EARLY_W2_MARK_SUPERSEDED_BY_DEEPER_ABC_STRUCTURE"
+          }
         }
       }
     }
