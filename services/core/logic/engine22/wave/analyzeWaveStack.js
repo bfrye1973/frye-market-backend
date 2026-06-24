@@ -14,6 +14,7 @@ import { analyzeAbcCorrection } from "./analyzeAbcCorrection.js";
 import { buildTradeContextSummary } from "./buildTradeContextSummary.js";
 import { buildW4Levels } from "./buildW4Levels.js";
 import { classifyWaveLifecycle } from "./classifyWaveLifecycle.js";
+import { getActiveWaveStateMeta } from "./manualMarks/readManualWaveMarks.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -24,6 +25,60 @@ const PARENT_BY_DEGREE = {
   minute: "minor",
   micro: "minute",
 };
+
+function normalizeDegreeKey(degree) {
+  return String(degree || "").trim().toLowerCase();
+}
+
+function isDegreeActiveByMeta(activeDegreeKeys, degree) {
+  if (!Array.isArray(activeDegreeKeys)) return true;
+
+  return activeDegreeKeys.includes(normalizeDegreeKey(degree));
+}
+
+function buildInactiveDegreeState(degree, existing = null) {
+  return {
+    ...(existing || {}),
+    ok: true,
+    active: false,
+    degree,
+    phase: "UNKNOWN",
+    confirmedPhase: "UNKNOWN",
+    phaseReason: "DEGREE_NOT_IN_ACTIVE_WAVE_STATE",
+    lastMark: null,
+    nextMark: null,
+    marksPresent: [],
+    fibProjection: null,
+    fibPressure: null,
+    extensionProgress: null,
+    w4Levels: null,
+    abcUpMarks: null,
+    downImpulseMarks: null,
+    postW5BounceMarks: null,
+    possibleW5UpMarks: null,
+    inactiveDegree: true,
+    lifecycleBlockedAsCurrent: true,
+    reasonCodes: [
+      ...(Array.isArray(existing?.reasonCodes) ? existing.reasonCodes : []),
+      "DEGREE_NOT_IN_ACTIVE_WAVE_STATE",
+      "HISTORICAL_DEGREE_BLOCKED_AS_CURRENT",
+    ],
+  };
+}
+
+function applyActiveDegreeFilter({ degrees = {}, activeDegreeKeys = null } = {}) {
+  if (!Array.isArray(activeDegreeKeys)) return degrees;
+
+  const out = { ...(degrees || {}) };
+
+  for (const degree of DEGREE_ORDER) {
+    if (isDegreeActiveByMeta(activeDegreeKeys, degree)) continue;
+
+    out[degree] = buildInactiveDegreeState(degree, out?.[degree] || null);
+  }
+
+  return out;
+}
 
 function toNum(x) {
   if (x === null || x === undefined || x === "") return null;
@@ -129,7 +184,12 @@ function tickSizeForSymbol(symbol) {
   return null;
 }
 
-function attachW4LevelsToDegrees({ symbol, engine2State, degrees, currentPrice }) {
+function attachW4LevelsToDegrees({
+  symbol,
+  engine2State,
+  degrees,
+  currentPrice,
+}) {
   const tickSize = tickSizeForSymbol(symbol);
 
   for (const degree of DEGREE_ORDER) {
@@ -187,25 +247,33 @@ function attachRawManualMarksToDegrees({ engine2State, degrees } = {}) {
       typeof engine2Block.downImpulseMarks === "object"
         ? engine2Block.downImpulseMarks
         : null;
+
     const postW5BounceMarks =
       engine2Block?.postW5BounceMarks &&
       typeof engine2Block.postW5BounceMarks === "object"
         ? engine2Block.postW5BounceMarks
         : null;
+
     const possibleW5UpMarks =
       engine2Block?.possibleW5UpMarks &&
       typeof engine2Block.possibleW5UpMarks === "object"
         ? engine2Block.possibleW5UpMarks
         : null;
-    
 
-    if (!abcUpMarks && !downImpulseMarks && !postW5BounceMarks && !possibleW5UpMarks) continue;
+    if (
+      !abcUpMarks &&
+      !downImpulseMarks &&
+      !postW5BounceMarks &&
+      !possibleW5UpMarks
+    ) {
+      continue;
+    }
 
     degrees[degree] = {
       ...degreeState,
       ...(abcUpMarks ? { abcUpMarks } : {}),
       ...(downImpulseMarks ? { downImpulseMarks } : {}),
-      ...(postW5BounceMarks ? { postW5BounceMarks } : {}), 
+      ...(postW5BounceMarks ? { postW5BounceMarks } : {}),
       ...(possibleW5UpMarks ? { possibleW5UpMarks } : {}),
     };
   }
@@ -273,8 +341,7 @@ function buildStackBias({ degrees, chaseRisk }) {
     minor?.phase === "IN_W5";
 
   const lowerPullback =
-    isPullbackPhase(minute?.phase) ||
-    isPullbackPhase(micro?.phase);
+    isPullbackPhase(minute?.phase) || isPullbackPhase(micro?.phase);
 
   const highRisk =
     chaseRisk?.risk === "HIGH" ||
@@ -302,6 +369,7 @@ function buildStackBias({ degrees, chaseRisk }) {
 
 function sentenceForDegree(degree, d) {
   if (!d || d.ok !== true) return null;
+  if (d.inactiveDegree === true) return null;
 
   const name = `${degree.charAt(0).toUpperCase()}${degree.slice(1)}`;
 
@@ -364,7 +432,10 @@ function buildPlainEnglishSummary({
       `${symbol} reacted near ${degreeName} W5 1.618 around ${pressure.nearestFibPrice}.`
     );
   } else {
-    const intermediateSentence = sentenceForDegree("intermediate", degrees?.intermediate);
+    const intermediateSentence = sentenceForDegree(
+      "intermediate",
+      degrees?.intermediate
+    );
     if (intermediateSentence) parts.push(intermediateSentence);
   }
 
@@ -380,7 +451,9 @@ function buildPlainEnglishSummary({
   ) {
     parts.push("Higher trend remains bullish, but chase risk is high.");
   } else if (stackBias === "BULLISH_PULLBACK_INSIDE_HIGHER_IMPULSE") {
-    parts.push("Higher trend remains bullish while the lower degree is pulling back.");
+    parts.push(
+      "Higher trend remains bullish while the lower degree is pulling back."
+    );
   }
 
   if (activeTradingDegree?.degree && activeTradingDegree?.setup) {
@@ -419,6 +492,8 @@ export function analyzeWaveStack({
       engine: "engine22.waveFibState.v1",
       symbol,
       currentPrice: round2(currentPrice),
+      activeDegreeKeys: null,
+      activeStructuresSource: null,
       stackBias: "UNKNOWN",
       activeTradingDegree: null,
       activeSetup: "NONE",
@@ -429,12 +504,22 @@ export function analyzeWaveStack({
     };
   }
 
-    let degrees = {};
+  const activeStructuresSource = getActiveWaveStateMeta({ symbol });
+
+  const activeDegreeKeys = Array.isArray(
+    activeStructuresSource?.activeDegreeKeys
+  )
+    ? activeStructuresSource.activeDegreeKeys
+    : null;
+
+  let degrees = {};
 
   for (const degree of DEGREE_ORDER) {
     const parentDegree = PARENT_BY_DEGREE[degree];
     const block = engine2State?.[degree] || null;
-    const parentBlock = parentDegree ? engine2State?.[parentDegree] || null : null;
+    const parentBlock = parentDegree
+      ? engine2State?.[parentDegree] || null
+      : null;
 
     degrees[degree] = analyzeWaveDegree({
       symbol,
@@ -457,6 +542,11 @@ export function analyzeWaveStack({
   degrees = attachRawManualMarksToDegrees({
     engine2State,
     degrees,
+  });
+
+  degrees = applyActiveDegreeFilter({
+    degrees,
+    activeDegreeKeys,
   });
 
   const chaseRisk = strongestChaseRisk(degrees);
@@ -493,7 +583,9 @@ export function analyzeWaveStack({
   });
 
   const activeDegreeName = activeTradingDegree?.degree || null;
-  const activeDegreeBlock = activeDegreeName ? engine2State?.[activeDegreeName] || null : null;
+  const activeDegreeBlock = activeDegreeName
+    ? engine2State?.[activeDegreeName] || null
+    : null;
   const activeDegreePhase = upper(activeDegreeBlock?.phase);
   const activeDegreeConfirmedPhase = upper(activeDegreeBlock?.confirmedPhase);
 
@@ -536,7 +628,20 @@ export function analyzeWaveStack({
     "ENGINE22_WAVE_FIB_STATE_BUILT",
     stackBias,
     activeTradingDegree?.reason || null,
-    chaseRisk?.degree ? `CHASE_RISK_FROM_${chaseRisk.degree.toUpperCase()}` : null,
+    chaseRisk?.degree
+      ? `CHASE_RISK_FROM_${chaseRisk.degree.toUpperCase()}`
+      : null,
+    ...(Array.isArray(activeDegreeKeys)
+      ? [
+          "ACTIVE_WAVE_STATE_DEGREES_ENFORCED",
+          ...DEGREE_ORDER.filter(
+            (degree) => !isDegreeActiveByMeta(activeDegreeKeys, degree)
+          ).map(
+            (degree) =>
+              `${degree.toUpperCase()}_INACTIVE_NOT_IN_ACTIVE_WAVE_STATE`
+          ),
+        ]
+      : []),
   ].filter(Boolean);
 
   const partialWaveFibState = {
@@ -544,6 +649,9 @@ export function analyzeWaveStack({
     engine: "engine22.waveFibState.v1",
     symbol,
     currentPrice: round2(currentPrice),
+
+    activeDegreeKeys,
+    activeStructuresSource,
 
     stackBias,
     activeTradingDegree: activeTradingDegree.degree,
@@ -587,6 +695,9 @@ export function analyzeWaveStack({
     engine: "engine22.waveFibState.v1",
     symbol,
     currentPrice: round2(currentPrice),
+
+    activeDegreeKeys,
+    activeStructuresSource,
 
     stackBias,
     activeTradingDegree: activeTradingDegree.degree,
