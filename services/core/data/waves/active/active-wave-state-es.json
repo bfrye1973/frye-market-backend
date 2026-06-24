@@ -1,29 +1,19 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-06-19 09:30",
+  "updatedAt": "2026-06-23 13:30",
   "activeStructures": {
     "intermediate": {
       "tf": "1h",
       "direction": "UP",
       "marks": {
-        "W1": { "price": 7648, "time": "2026-06-15 09:00" },
-        "W2": { "price": 7473, "time": "2026-06-17 12:30" }
-      }
-    },
-    "minor": {
-      "tf": "1h",
-      "direction": "UP",
-      "marks": {
-        "W1": { "price": 7581.5, "time": "2026-06-18 01:30" },
-        "W2": { "price": 7525, "time": "2026-06-18 10:50" }
-      }
-    },
-    "minute": {
-      "tf": "10m",
-      "direction": "UP",
-      "marks": {
-        "W1": { "price": 7562.5, "time": "2026-06-19 02:00" },
-        "W2": { "price": 7536.75, "time": "2026-06-19 05:40" }
+        "W1": {
+          "price": 7648,
+          "time": "2026-06-15 09:00"
+        },
+        "W2": {
+          "price": 7415.25,
+          "time": "2026-06-23 13:30"
+        }
       }
     }
   }
