@@ -1249,8 +1249,9 @@ function buildEngine15FromEngine22CurrentLifecycleState({
 
     executable: false,
     noExecution: true,
-    tradeableOpportunityBlocked: true,
-    setupEligible: false,
+    tradeableOpportunityBlocked:
+      current.tradeableOpportunityBlocked === true,
+    setupEligible: current.setupEligible === true,
 
     paperTradeCandidate: current.paperTradeCandidate === true,
     paperTradeAllowedOnlyAfterConfirmation:
@@ -1282,7 +1283,8 @@ function buildEngine15FromEngine22CurrentLifecycleState({
       executionBias,
       readOnly: current.readOnly === true,
       noExecution: true,
-      tradeableOpportunityBlocked: true,
+      tradeableOpportunityBlocked:
+        current.tradeableOpportunityBlocked === true,
       paperTradeCandidate: current.paperTradeCandidate === true,
       paperTradeAllowedOnlyAfterConfirmation:
         current.paperTradeAllowedOnlyAfterConfirmation === true,
@@ -1494,15 +1496,32 @@ export function buildEngine15EsDecision({
     if (!permission) blockers.push("MISSING_PERMISSION");
     if (currentPrice == null) blockers.push("MISSING_CURRENT_PRICE");
 
+    const preliminaryCurrentLifecycleWatchOnly =
+      currentLifecycleIsWatchOnly(currentLifecycleState);
+
     // Hard permission / structure blockers.
+    // Important:
+    // Engine 22 currentLifecycleState watch-only states are not execution requests.
+    // Do not hard-block Engine 15 just because preliminary Engine 6 permission is
+    // STAND_DOWN / BLOCKED. Engine 15 must first translate Engine 22 WATCH into
+    // a safe WATCH-only readiness decision, then Engine 6 can remain no-execution.
     if (permissionBlocked(permission)) {
-      blockers.push("PERMISSION_BLOCKED");
-      reasonCodes.push("PERMISSION_BLOCKED");
+      if (preliminaryCurrentLifecycleWatchOnly) {
+        reasonCodes.push("PERMISSION_BLOCKED_PRELIMINARY_CURRENT_LIFECYCLE_WATCH_ONLY");
+        reasonCodes.push("ENGINE15_WILL_TRANSLATE_ENGINE22_WATCH_ONLY_BEFORE_ENGINE6_FINAL");
+      } else {
+        blockers.push("PERMISSION_BLOCKED");
+        reasonCodes.push("PERMISSION_BLOCKED");
+      }
     }
 
     if (engine16Invalidated(engine16)) {
-      blockers.push("ENGINE16_INVALIDATED");
-      reasonCodes.push("ENGINE16_INVALIDATED");
+      if (preliminaryCurrentLifecycleWatchOnly) {
+        reasonCodes.push("ENGINE16_INVALIDATED_CURRENT_LIFECYCLE_WATCH_CAUTION");
+      } else {
+        blockers.push("ENGINE16_INVALIDATED");
+        reasonCodes.push("ENGINE16_INVALIDATED");
+      }
     }
 
     const hasWaveOpportunity = hasValidW3W5Opportunity(waveOpportunity);
