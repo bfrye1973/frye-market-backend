@@ -22,6 +22,7 @@ const SUPPORTED_REACTION_FOCUS = new Set([
   "SUPPORT_DEFENSE",
   "RECLAIM",
   "CONTROLLED_PULLBACK_OR_RECLAIM",
+  "C_LOW_REACTION_RECLAIM_OR_CONTROLLED_PULLBACK",
   "HIGHER_LOW_HOLD",
   "EMA10_EMA20_RECLAIM",
   "LOCAL_RANGE_BREAK",
@@ -747,6 +748,156 @@ function evaluateControlledPullbackOrReclaimLong({ facts, reasonCodes }) {
   };
 }
 
+function evaluateCLowReactionReclaimOrControlledPullbackLong({
+  facts,
+  reference,
+  reasonCodes,
+}) {
+  const intermediateProgress = reference?.priceProgress?.intermediate || null;
+
+  const anchorPrice = toNum(intermediateProgress?.anchorPrice);
+  const r786 = toNum(intermediateProgress?.retraceLevels?.levels?.r786);
+  const r618 = toNum(intermediateProgress?.retraceLevels?.levels?.r618);
+
+  const currentPrice = facts.price;
+  const lastClose = facts.last.close;
+  const lastLow = facts.last.low;
+
+  const cLowReference = anchorPrice;
+  const reclaimReference =
+    r786 ?? facts.referenceLevel ?? facts.priceProgressReference?.price ?? null;
+
+  const controlledPullbackReference = r618 ?? reclaimReference;
+
+  const nearCLow =
+    cLowReference != null &&
+    currentPrice != null &&
+    Math.abs(currentPrice - cLowReference) <= 8;
+
+  const sweptCLowAndReclaimed =
+    cLowReference != null &&
+    lastLow != null &&
+    lastClose != null &&
+    lastLow <= cLowReference &&
+    lastClose >= cLowReference;
+
+  const reclaimStarted =
+    reclaimReference != null &&
+    lastClose != null &&
+    lastClose >= reclaimReference;
+
+  const controlledPullbackHolding =
+    controlledPullbackReference != null &&
+    lastLow != null &&
+    lastClose != null &&
+    lastLow <= controlledPullbackReference &&
+    lastClose >= cLowReference;
+
+  const cleanReclaimConfirmed =
+    reclaimStarted && facts.priorCandleHighReclaimed === true;
+
+  const cLowFailed =
+    cLowReference != null &&
+    lastClose != null &&
+    lastClose < cLowReference - 15;
+
+  if (cleanReclaimConfirmed) {
+    return {
+      reactionState: "CONFIRMED",
+      reactionQuality: "STRONG",
+      confirmed: true,
+      reasonCodes: [
+        ...reasonCodes,
+        "C_LOW_REACTION_MODE_SUPPORTED",
+        "RECLAIM_HOLD_CONFIRMED",
+        "PRIOR_CANDLE_HIGH_RECLAIMED",
+        "ENGINE3_REACTION_CONFIRMED",
+      ],
+    };
+  }
+
+  if (sweptCLowAndReclaimed) {
+    return {
+      reactionState: "GOOD",
+      reactionQuality: "GOOD",
+      confirmed: false,
+      reasonCodes: [
+        ...reasonCodes,
+        "C_LOW_REACTION_MODE_SUPPORTED",
+        "C_LOW_SWEEP_AND_RECLAIM_DETECTED",
+        "WAITING_FOR_RECLAIM_HOLD_CONFIRMATION",
+      ],
+    };
+  }
+
+  if (controlledPullbackHolding) {
+    return {
+      reactionState: "GOOD",
+      reactionQuality: "GOOD",
+      confirmed: false,
+      reasonCodes: [
+        ...reasonCodes,
+        "C_LOW_REACTION_MODE_SUPPORTED",
+        "CONTROLLED_PULLBACK_HOLDING_ABOVE_C_LOW",
+        "WAITING_FOR_PRIOR_CANDLE_HIGH_RECLAIM",
+      ],
+    };
+  }
+
+  if (reclaimStarted) {
+    return {
+      reactionState: "MIXED",
+      reactionQuality: "MIXED",
+      confirmed: false,
+      reasonCodes: [
+        ...reasonCodes,
+        "C_LOW_REACTION_MODE_SUPPORTED",
+        "RECLAIM_STARTED",
+        "WAITING_FOR_RECLAIM_HOLD_CONFIRMATION",
+      ],
+    };
+  }
+
+  if (nearCLow) {
+    return {
+      reactionState: "TESTING_C_LOW_REACTION",
+      reactionQuality: "WEAK",
+      confirmed: false,
+      reasonCodes: [
+        ...reasonCodes,
+        "C_LOW_REACTION_MODE_SUPPORTED",
+        "PRICE_TESTING_W2_CANDIDATE_LOW",
+        "RECLAIM_NOT_CONFIRMED",
+      ],
+    };
+  }
+
+  if (cLowFailed) {
+    return {
+      reactionState: "FAILED",
+      reactionQuality: "WEAK",
+      confirmed: false,
+      reasonCodes: [
+        ...reasonCodes,
+        "C_LOW_REACTION_MODE_SUPPORTED",
+        "C_LOW_FAILED",
+        "RECLAIM_NOT_CONFIRMED",
+      ],
+    };
+  }
+
+  return {
+    reactionState: "NO_SIGNAL",
+    reactionQuality: "WEAK",
+    confirmed: false,
+    reasonCodes: [
+      ...reasonCodes,
+      "C_LOW_REACTION_MODE_SUPPORTED",
+      "WAITING_FOR_C_LOW_REACTION_RECLAIM_OR_CONTROLLED_PULLBACK",
+    ],
+  };
+}
+
 function evaluateHigherLowHoldLong({ facts, reasonCodes }) {
   if (facts.prev.low == null || facts.last.low == null) {
     return {
@@ -934,6 +1085,14 @@ function evaluateLongReaction({
 
   if (reactionFocus === "CONTROLLED_PULLBACK_OR_RECLAIM") {
     return evaluateControlledPullbackOrReclaimLong({ facts, reasonCodes });
+  }
+
+  if (reactionFocus === "C_LOW_REACTION_RECLAIM_OR_CONTROLLED_PULLBACK") {
+    return evaluateCLowReactionReclaimOrControlledPullbackLong({
+      facts,
+      reference,
+      reasonCodes,
+    });
   }
 
   if (reactionFocus === "HIGHER_LOW_HOLD") {
