@@ -137,6 +137,172 @@ function buildMarkMaturitySummary(markMaturity = null) {
   };
 }
 
+function readEngine25ZoneContext(waveFibState = null) {
+  const engine25 = waveFibState?.engine25Context || null;
+
+  const zoneState =
+    engine25?.esPermission?.zoneState ||
+    engine25?.zoneAwareRead?.zoneState ||
+    null;
+
+  const nearestZone =
+    engine25?.esPermission?.nearestZone ||
+    engine25?.zoneAwareRead?.nearestZone ||
+    null;
+
+  const activeShelf =
+    waveFibState?.context?.active?.shelf ||
+    waveFibState?.zoneContext?.active?.shelf ||
+    waveFibState?.zones?.active?.shelf ||
+    null;
+
+  return {
+    engine25,
+    zoneState,
+    nearestZone,
+    activeShelf,
+  };
+}
+
+function buildZoneReferenceFromEngine25(waveFibState = null) {
+  const { zoneState, nearestZone, activeShelf } =
+    readEngine25ZoneContext(waveFibState);
+
+  const institutional = nearestZone?.institutional || null;
+  const negotiated = nearestZone?.negotiated || null;
+
+  const zones = {
+    state: zoneState?.state || null,
+    tone: zoneState?.tone || null,
+    permission: zoneState?.permission || null,
+
+    insideInstitutional: zoneState?.insideInstitutional === true,
+    insideNegotiated: zoneState?.insideNegotiated === true,
+    aboveNegotiated: zoneState?.aboveNegotiated === true,
+    aboveInstitutional: zoneState?.aboveInstitutional === true,
+
+    reclaimNegotiated: zoneState?.reclaimNegotiated ?? null,
+    reclaimInstitutional: zoneState?.reclaimInstitutional ?? null,
+    failureInstitutional: zoneState?.failureInstitutional ?? null,
+    lowerShelf: zoneState?.lowerShelf ?? null,
+
+    institutional: institutional
+      ? {
+          lo: institutional.lo ?? null,
+          hi: institutional.hi ?? null,
+          mid: institutional.mid ?? null,
+          raw: institutional.raw || null,
+          active: zoneState?.insideInstitutional === true,
+        }
+      : null,
+
+    negotiated: negotiated
+      ? {
+          lo: negotiated.lo ?? null,
+          hi: negotiated.hi ?? null,
+          mid: negotiated.mid ?? null,
+          raw: negotiated.raw || null,
+          active:
+            zoneState?.insideNegotiated === true ||
+            zoneState?.aboveNegotiated === true,
+        }
+      : null,
+
+    shelf: activeShelf
+      ? {
+          lo: activeShelf.lo ?? null,
+          hi: activeShelf.hi ?? null,
+          mid: activeShelf.mid ?? null,
+          type: activeShelf.type || null,
+          strength: activeShelf.strength ?? null,
+          active: activeShelf.active === true,
+          source: activeShelf.source || null,
+        }
+      : null,
+
+    reasonCodes: Array.isArray(zoneState?.reasonCodes)
+      ? zoneState.reasonCodes
+      : [],
+  };
+
+  const hasZone =
+    zones.insideInstitutional ||
+    zones.insideNegotiated ||
+    zones.aboveNegotiated ||
+    Boolean(zones.institutional) ||
+    Boolean(zones.negotiated) ||
+    Boolean(zones.shelf);
+
+  return hasZone ? zones : null;
+}
+
+function isMajorInstitutionalWatchZoneActive(waveFibState = null) {
+  const zones = buildZoneReferenceFromEngine25(waveFibState);
+
+  if (!zones) return false;
+
+  return (
+    zones.insideInstitutional === true ||
+    zones.insideNegotiated === true ||
+    zones.aboveNegotiated === true ||
+    Boolean(zones.shelf?.active)
+  );
+}
+
+function isNegotiatedValueReclaimAttempt(waveFibState = null) {
+  const zones = buildZoneReferenceFromEngine25(waveFibState);
+  const currentPrice = Number(waveFibState?.currentPrice);
+
+  if (!zones || !Number.isFinite(currentPrice)) return false;
+
+  const reclaimNegotiated = Number(zones.reclaimNegotiated);
+  const reclaimInstitutional = Number(zones.reclaimInstitutional);
+
+  const reclaimedNegotiated =
+    Number.isFinite(reclaimNegotiated) && currentPrice >= reclaimNegotiated;
+
+  const nearInstitutionalReclaim =
+    Number.isFinite(reclaimInstitutional) &&
+    Math.abs(currentPrice - reclaimInstitutional) <= 10;
+
+  return (
+    zones.insideInstitutional === true &&
+    (zones.aboveNegotiated === true ||
+      reclaimedNegotiated ||
+      nearInstitutionalReclaim)
+  );
+}
+
+function getHighAlertZoneReasonCodes(waveFibState = null) {
+  const zones = buildZoneReferenceFromEngine25(waveFibState);
+
+  if (!zones) return [];
+
+  const codes = ["MAJOR_WATCH_ZONE_ACTIVE"];
+
+  if (zones.insideInstitutional) {
+    codes.push("PRICE_INSIDE_MANUAL_INSTITUTIONAL_ZONE");
+  }
+
+  if (zones.insideNegotiated) {
+    codes.push("PRICE_INSIDE_NEGOTIATED_VALUE");
+  }
+
+  if (zones.aboveNegotiated) {
+    codes.push("NEGOTIATED_VALUE_RECLAIM_ATTEMPT");
+  }
+
+  if (zones.shelf?.active) {
+    codes.push("PRICE_INSIDE_AUTO_ACCUMULATION_SHELF");
+  }
+
+  if (isNegotiatedValueReclaimAttempt(waveFibState)) {
+    codes.push("HIGH_ALERT_NEGOTIATED_VALUE_RECLAIM_WATCH");
+  }
+
+  return codes;
+}
+
 function buildConfirmationContext({
   waveFibState,
   key,
@@ -157,8 +323,18 @@ function buildConfirmationContext({
 
     reference: {
       currentPrice: waveFibState?.currentPrice ?? null,
-      triggerLevels: null,
-      zones: null,
+      triggerLevels: {
+        reclaimNegotiated:
+          buildZoneReferenceFromEngine25(waveFibState)?.reclaimNegotiated ??
+          null,
+        reclaimInstitutional:
+          buildZoneReferenceFromEngine25(waveFibState)?.reclaimInstitutional ??
+          null,
+        failureInstitutional:
+          buildZoneReferenceFromEngine25(waveFibState)?.failureInstitutional ??
+          null,
+      },
+      zones: buildZoneReferenceFromEngine25(waveFibState),
       priceProgress: {
         intermediate:
           waveFibState?.degrees?.intermediate?.extensionProgress || null,
@@ -222,12 +398,22 @@ function buildIntermediateW2StillFormingState({
   minute,
 } = {}) {
   const cLowReaction = hasCLowReactionEvidence(markMaturity);
+  const majorWatchZoneActive = isMajorInstitutionalWatchZoneActive(waveFibState);
+  const negotiatedReclaimAttempt =
+    isNegotiatedValueReclaimAttempt(waveFibState);
 
-  const key = cLowReaction
+  const highAlertWatch =
+    cLowReaction && majorWatchZoneActive && negotiatedReclaimAttempt;
+
+  const key = highAlertWatch
+    ? "INTERMEDIATE_W2_C_LOW_REACTION_HIGH_ALERT_NEGOTIATED_RECLAIM_WATCH"
+    : cLowReaction
     ? "INTERMEDIATE_W2_C_LOW_REACTION_DETECTED_RECLAIM_WATCH"
     : "INTERMEDIATE_W1_COMPLETE_W2_STILL_FORMING_FINAL_C_DOWN_WATCH";
 
-  const headline = cLowReaction
+  const headline = highAlertWatch
+    ? "INTERMEDIATE W2 C-LOW REACTION — HIGH ALERT NEGOTIATED VALUE RECLAIM WATCH"
+    : cLowReaction
     ? "INTERMEDIATE W2 C-LOW REACTION DETECTED — WATCH RECLAIM / CONTROLLED PULLBACK"
     : "INTERMEDIATE W1 COMPLETE — W2 STILL FORMING / FINAL C-DOWN WATCH";
 
@@ -248,7 +434,9 @@ function buildIntermediateW2StillFormingState({
     cLowReaction
       ? "C_LOW_REACTION_DETECTED_CONFIRMATION_REQUIRED"
       : "W2_STILL_FORMING_FINAL_C_DOWN_WATCH",
-    "MARK_MATURITY_BLOCKED_W3_LAUNCH_WORDING",
+    "MARK_MATURITY_PREVENTED_W3_LAUNCH_PROMOTION",
+     highAlertWatch ? "HIGH_ALERT_WATCH" : null,
+     ...getHighAlertZoneReasonCodes(waveFibState), 
   ];
 
   return {
@@ -272,6 +460,7 @@ function buildIntermediateW2StillFormingState({
     readOnly: true,
 
     readiness: "WATCH",
+    alertLevel: highAlertWatch ? "HIGH_ALERT_WATCH" : "WATCH",
 
     noExecution: true,
     executionBlocked: true,
@@ -286,6 +475,7 @@ function buildIntermediateW2StillFormingState({
 
     activeDegreeKeys: waveFibState?.activeDegreeKeys || null,
     markMaturity: maturitySummary,
+    zoneContext: buildZoneReferenceFromEngine25(waveFibState),
 
     confirmationContext: buildConfirmationContext({
       waveFibState,
