@@ -193,17 +193,95 @@ function computeEngine25FreshnessStatus(modelDate, updatedAt) {
 function loadEngine25Context() {
   const overlayFile = `${DATA_DIR}/engine25-composite-overlay-6mo.json`;
   const zoneAwareFile = `${DATA_DIR}/engine25-es-zone-aware-read.json`;
+  const marketHealthFile = `${DATA_DIR}/engine25-market-health.json`;
+  const zoneClassificationFile = `${DATA_DIR}/engine25-zone-classification.json`;
+  const sectorBreadthFile = `${DATA_DIR}/engine25-sector-card-breadth-snapshots.json`;
 
   const overlay = loadJsonFileSafe(overlayFile);
   const zoneAware = loadJsonFileSafe(zoneAwareFile);
+  const marketHealth = loadJsonFileSafe(marketHealthFile);
+  const zoneClassification = loadJsonFileSafe(zoneClassificationFile);
+  const sectorBreadth = loadJsonFileSafe(sectorBreadthFile);
 
   const rows = Array.isArray(overlay?.rows) ? overlay.rows : [];
   const latest = rows.length ? rows[rows.length - 1] : null;
 
-  if (!latest) {
+  const permissions = latest?.permissions || {};
+  const components = latest?.components || marketHealth?.components || {};
+
+  const updatedAt =
+    overlay?.generatedAtUtc ||
+    overlay?.finishedAt ||
+    zoneAware?.generatedAtUtc ||
+    marketHealth?.updatedAt ||
+    marketHealth?.generatedAtUtc ||
+    null;
+
+  const modelDate =
+    latest?.latestEodDate ||
+    latest?.cashProxyDate ||
+    latest?.date ||
+    zoneAware?.context?.latestContextDate ||
+    marketHealth?.modelDate ||
+    marketHealth?.latestEodDate ||
+    null;
+
+  const esSessionDate =
+    latest?.esSessionDate ||
+    latest?.date ||
+    zoneAware?.context?.esSessionDate ||
+    null;
+
+  const cashProxyDate =
+    latest?.cashProxyDate ||
+    latest?.latestEodDate ||
+    modelDate;
+
+  const requiredEodDate = getLastCompletedMarketEodDate();
+
+  const finalPermission =
+    permissions.finalPermission ??
+    permissions.macroDistributionBreadthAware ??
+    permissions.macroDistributionAware ??
+    permissions.macroAware ??
+    zoneAware?.context?.finalPermission ??
+    marketHealth?.finalPermission ??
+    marketHealth?.permission ??
+    null;
+
+  const finalSize =
+    permissions.finalSize ??
+    zoneAware?.context?.finalSize ??
+    marketHealth?.finalSize ??
+    marketHealth?.sizeMultiplier ??
+    null;
+
+  const score =
+    latest?.engine25CompositeScore ??
+    marketHealth?.score ??
+    marketHealth?.engine25Score ??
+    null;
+
+  const regime =
+    latest?.overlayState ??
+    marketHealth?.regime ??
+    marketHealth?.bias ??
+    "UNKNOWN";
+
+  const label =
+    latest?.overlayLabel ??
+    marketHealth?.label ??
+    marketHealth?.riskLevel ??
+    null;
+
+  const hasZoneAware = zoneAware && typeof zoneAware === "object";
+  const hasMarketHealth = marketHealth && typeof marketHealth === "object";
+  const hasComposite = latest && typeof latest === "object";
+
+  if (!hasComposite && !hasZoneAware && !hasMarketHealth) {
     return {
       ok: false,
-      source: "engine25-composite-overlay-6mo.json",
+      source: "engine25-context-files",
       score: null,
       regime: "UNKNOWN",
       label: null,
@@ -220,80 +298,87 @@ function loadEngine25Context() {
       aiLeadership: null,
       esPermission: null,
       tradePermission: null,
-      zoneAwareRead: zoneAware || null,
+      zoneAwareRead: null,
+      marketHealth: null,
+      zoneClassification: null,
+      sectorBreadth: null,
+      dailyCompositeAvailable: false,
+      compositeFallbackActive: false,
       warnings: ["ENGINE25_CONTEXT_MISSING"],
-      summary: "Engine 25 composite overlay file not available.",
+      summary: "Engine 25 context files are not available.",
       modelDate: null,
-      updatedAt: overlay?.generatedAtUtc || null,
+      updatedAt: null,
       freshnessStatus: "MISSING",
     };
   }
 
-  const components = latest.components || {};
-  const permissions = latest.permissions || {};
-  const updatedAt = overlay?.generatedAtUtc || overlay?.finishedAt || null;
-  const modelDate =
-    latest.latestEodDate ||
-    latest.cashProxyDate ||
-    latest.date ||
-    zoneAware?.context?.latestContextDate ||
-    null;
-
-  const esSessionDate = latest.esSessionDate || latest.date || null;
-  const cashProxyDate = latest.cashProxyDate || latest.latestEodDate || modelDate;
-  const requiredEodDate = getLastCompletedMarketEodDate();
+  const warnings = [
+    ...(Array.isArray(latest?.warnings) ? latest.warnings : []),
+    ...(!hasComposite ? ["ENGINE25_COMPOSITE_OVERLAY_MISSING_FALLBACK_ACTIVE"] : []),
+    ...(!hasZoneAware ? ["ENGINE25_ZONE_AWARE_READ_MISSING"] : []),
+  ];
 
   return {
     ok: true,
-    source: "engine25-composite-overlay-6mo.json",
-    supplementalSource: zoneAware ? "engine25-es-zone-aware-read.json" : null,
+    source: hasComposite
+      ? "engine25-composite-overlay-6mo.json"
+      : "engine25-live-file-fallback",
+    supplementalSource: hasZoneAware ? "engine25-es-zone-aware-read.json" : null,
 
-    score: latest.engine25CompositeScore ?? null,
-    regime: latest.overlayState ?? null,
-    label: latest.overlayLabel ?? null,
-    bias: latest.overlayState ?? null,
-    riskLevel: latest.overlayLabel ?? latest.overlayColor ?? null,
+    dailyCompositeAvailable: hasComposite,
+    compositeFallbackActive: !hasComposite && (hasZoneAware || hasMarketHealth),
 
-    permission:
-      permissions.finalPermission ??
-      permissions.macroDistributionBreadthAware ??
-      permissions.macroDistributionAware ??
-      permissions.macroAware ??
-      zoneAware?.context?.finalPermission ??
-      null,
+    score,
+    regime,
+    label,
+    bias: regime,
+    riskLevel: label ?? marketHealth?.riskLevel ?? null,
 
-    sizeMultiplier:
-      permissions.finalSize ??
-      zoneAware?.context?.finalSize ??
-      null,
+    permission: finalPermission,
+    sizeMultiplier: finalSize,
 
     components,
-    macroAwareScore: components.macroAwareScore ?? null,
+    macroAwareScore:
+      components?.macroAwareScore ??
+      marketHealth?.macroAwareScore ??
+      null,
     breadthParticipation:
-      components.breadthParticipation ??
+      components?.breadthParticipation ??
       zoneAware?.context?.breadthParticipation ??
+      marketHealth?.breadthParticipation ??
       null,
     distributionPressure:
-      components.distributionPressure ??
+      components?.distributionPressure ??
       zoneAware?.context?.distributionPressure ??
+      marketHealth?.distributionPressure ??
       null,
-    marketTrend: components.marketTrend ?? null,
-    creditFragility: components.creditFragility ?? null,
-    aiLeadership: components.aiLeadership ?? null,
+    marketTrend:
+      components?.marketTrend ??
+      marketHealth?.marketTrend ??
+      null,
+    creditFragility:
+      components?.creditFragility ??
+      marketHealth?.creditFragility ??
+      null,
+    aiLeadership:
+      components?.aiLeadership ??
+      marketHealth?.aiLeadership ??
+      null,
 
     esPermission: {
-      permission: zoneAware?.context?.finalPermission ?? permissions.finalPermission ?? null,
-      sizeMultiplier: zoneAware?.context?.finalSize ?? permissions.finalSize ?? null,
+      permission: zoneAware?.context?.finalPermission ?? finalPermission,
+      sizeMultiplier: zoneAware?.context?.finalSize ?? finalSize,
       zoneState: zoneAware?.zoneState ?? null,
       nearestZone: zoneAware?.nearestZone ?? null,
+      zoneClassification: zoneClassification || null,
     },
 
     tradePermission: {
-      permission: permissions.finalPermission ?? null,
-      sizeMultiplier: permissions.finalSize ?? null,
+      permission: finalPermission,
+      sizeMultiplier: finalSize,
     },
 
-    zoneAwareRead: zoneAware
+    zoneAwareRead: hasZoneAware
       ? {
           ok: zoneAware.ok === true,
           generatedAtUtc: zoneAware.generatedAtUtc || null,
@@ -305,10 +390,15 @@ function loadEngine25Context() {
         }
       : null,
 
-    warnings: Array.isArray(latest.warnings) ? latest.warnings : [],
+    marketHealth: hasMarketHealth ? marketHealth : null,
+    zoneClassification: zoneClassification || null,
+    sectorBreadth: sectorBreadth || null,
+
+    warnings,
     summary:
       zoneAware?.plainEnglish ||
-      latest.overlayInterpretation ||
+      latest?.overlayInterpretation ||
+      marketHealth?.summary ||
       null,
 
     modelDate,
@@ -317,10 +407,12 @@ function loadEngine25Context() {
     cashProxyDate,
     requiredEodDate,
     updatedAt,
-    freshnessStatus: computeEngine25FreshnessStatus(modelDate, updatedAt),
+    freshnessStatus:
+      hasZoneAware && !modelDate
+        ? "FRESH"
+        : computeEngine25FreshnessStatus(modelDate, updatedAt),
   };
 }
-
 function preserveLastGoodEngine22Timeline(result, previousSnapshot) {
   if (!result?.strategies || !previousSnapshot?.strategies) return result;
 
