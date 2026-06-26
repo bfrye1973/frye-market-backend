@@ -38,6 +38,7 @@ import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.j
 import { buildWaveTradeDecision } from "../logic/engine22/decisions/buildWaveTradeDecision.js";
 import { buildEngine22LifecycleReaction } from "../logic/engine3/engine22LifecycleReaction.js";
 import { attachCurrentLevelActionToConfluence } from "../logic/priceAction/currentLevelAction.js";
+import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import {
   getManualLevelRowsFor,
@@ -4467,6 +4468,15 @@ attachCurrentLevelActionToConfluence({
   bars30m: [],
 });
 
+engine22WaveStrategy = {
+  ...engine22WaveStrategy,
+  currentLifecycleState: enrichCurrentLifecycleWithLivePriceAction({
+    currentLifecycleState: engine22WaveStrategy?.currentLifecycleState || null,
+    currentLevelAction:
+      patchedConfluence?.context?.reaction?.currentLevelAction || null,
+  }),
+};
+
 attachEngine22LifecycleParticipationToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
@@ -4779,12 +4789,22 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
        engine1Context,
        bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
        bars30m: [],
-     });      
-     attachEngine22LifecycleParticipationToConfluence({
-       patchedConfluence,
-       engine22WaveStrategy,
-       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-     }); 
+     });
+
+     engine22WaveStrategy = {
+       ...engine22WaveStrategy,
+       currentLifecycleState: enrichCurrentLifecycleWithLivePriceAction({
+         currentLifecycleState: engine22WaveStrategy?.currentLifecycleState || null,
+         currentLevelAction:
+           patchedConfluence?.context?.reaction?.currentLevelAction || null,
+      }),
+    };
+
+    attachEngine22LifecycleParticipationToConfluence({
+      patchedConfluence,
+      engine22WaveStrategy,
+      bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+    }); 
     }
   } catch (err) {
     console.error("[E22G TRADE DECISION ERROR]", err);
