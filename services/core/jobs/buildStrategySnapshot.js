@@ -37,6 +37,7 @@ import { interpretWaveEnvironment } from "../logic/engine23/interpretation/inter
 import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.js";
 import { buildWaveTradeDecision } from "../logic/engine22/decisions/buildWaveTradeDecision.js";
 import { buildEngine22LifecycleReaction } from "../logic/engine3/engine22LifecycleReaction.js";
+import { attachCurrentLevelActionToConfluence } from "../logic/priceAction/currentLevelAction.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import {
   getManualLevelRowsFor,
@@ -4445,21 +4446,32 @@ const zoneContext = buildZoneContext(
 
       engine22WaveStrategy =
         applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
-      attachEngine22PullbackReactionToConfluence({
-        patchedConfluence,
-        engine22WaveStrategy,
-        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-      }); 
-      attachEngine22LifecycleReactionToConfluence({
-        patchedConfluence,
-        engine22WaveStrategy,
-        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-      });
-      attachEngine22LifecycleParticipationToConfluence({
-        patchedConfluence,
-        engine22WaveStrategy,
-        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-      });
+attachEngine22PullbackReactionToConfluence({
+  patchedConfluence,
+  engine22WaveStrategy,
+  bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+});
+
+attachEngine22LifecycleReactionToConfluence({
+  patchedConfluence,
+  engine22WaveStrategy,
+  bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+});
+
+attachCurrentLevelActionToConfluence({
+  patchedConfluence,
+  engine22WaveStrategy,
+  engine25Context,
+  engine1Context,
+  bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+  bars30m: [],
+});
+
+attachEngine22LifecycleParticipationToConfluence({
+  patchedConfluence,
+  engine22WaveStrategy,
+  bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+});
     } catch (err) {
       console.error("[E22 PRE-ENGINE15 WAVE ERROR]", err);
 
