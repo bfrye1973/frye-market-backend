@@ -220,6 +220,9 @@ function buildZoneReferenceFromEngine25(waveFibState = null) {
         }
       : null,
 
+    engine3Reaction: zoneState?.engine3Reaction || null,
+    engine4VolumeContext: zoneState?.engine4VolumeContext || null,
+
     reasonCodes: Array.isArray(zoneState?.reasonCodes)
       ? zoneState.reasonCodes
       : [],
@@ -270,6 +273,80 @@ function isNegotiatedValueReclaimAttempt(waveFibState = null) {
     (zones.aboveNegotiated === true ||
       reclaimedNegotiated ||
       nearInstitutionalReclaim)
+  );
+}
+
+function isCLowIgnitionWatch(waveFibState = null, markMaturity = null) {
+  const zones = buildZoneReferenceFromEngine25(waveFibState);
+  const currentPrice = Number(waveFibState?.currentPrice);
+
+  if (!zones || !Number.isFinite(currentPrice)) return false;
+
+  const failureInstitutional = Number(zones.failureInstitutional);
+  const reclaimNegotiated = Number(zones.reclaimNegotiated);
+
+  const safelyAboveFailure =
+    Number.isFinite(failureInstitutional)
+      ? currentPrice > failureInstitutional
+      : true;
+
+  const closeToNegotiatedReclaim =
+    Number.isFinite(reclaimNegotiated)
+      ? currentPrice >= reclaimNegotiated - 20
+      : true;
+
+  const engine3Reaction = zones?.engine3Reaction || null;
+
+  const engine3State = String(
+    engine3Reaction?.state ||
+      engine3Reaction?.reactionState ||
+      ""
+  ).toUpperCase();
+
+  const engine3Bias = String(engine3Reaction?.bias || "").toUpperCase();
+  const engine3Quality = String(engine3Reaction?.quality || "").toUpperCase();
+  const engine3Score = Number(engine3Reaction?.qualityScore);
+
+  const engine3AcceptingValue =
+    engine3State.includes("ACCEPTING_VALUE") ||
+    engine3State.includes("RECLAIM") ||
+    engine3State.includes("DEFENSE") ||
+    engine3Bias.includes("BULLISH") ||
+    engine3Quality === "GOOD" ||
+    engine3Quality === "FAIR" ||
+    (Number.isFinite(engine3Score) && engine3Score >= 70);
+
+  const cLowEvidence =
+    hasCLowReactionEvidence(markMaturity) ||
+    hasCode(markMaturity, "C_DOWN_LIQUIDITY_SWEEP_DETECTED") ||
+    hasCode(markMaturity, "VIOLENT_RECLAIM_FROM_C_LOW") ||
+    hasCode(markMaturity, "POSSIBLE_W2_C_LOW_REACTION");
+
+  const insideManualValue =
+    zones.insideInstitutional === true ||
+    zones.insideNegotiated === true;
+
+  const zonePermission = String(zones.permission || "").toUpperCase();
+  const zoneState = String(zones.state || "").toUpperCase();
+
+  const reclaimWatchContext =
+    zonePermission.includes("RECLAIM") ||
+    zoneState.includes("RECLAIM") ||
+    zoneState.includes("ACCUMULATION") ||
+    zoneState.includes("WATCH");
+
+  const notBroken =
+    safelyAboveFailure &&
+    zones.belowInstitutional !== true &&
+    zoneState !== "INSTITUTIONAL_SUPPORT_BROKEN";
+
+  return (
+    cLowEvidence &&
+    insideManualValue &&
+    closeToNegotiatedReclaim &&
+    engine3AcceptingValue &&
+    reclaimWatchContext &&
+    notBroken
   );
 }
 
@@ -402,17 +479,28 @@ function buildIntermediateW2StillFormingState({
   const negotiatedReclaimAttempt =
     isNegotiatedValueReclaimAttempt(waveFibState);
 
+  const cLowIgnitionWatch = isCLowIgnitionWatch(
+    waveFibState,
+    markMaturity
+  );
+
   const highAlertWatch =
-    cLowReaction && majorWatchZoneActive && negotiatedReclaimAttempt;
+    cLowReaction &&
+    majorWatchZoneActive &&
+    (negotiatedReclaimAttempt || cLowIgnitionWatch);
 
   const key = highAlertWatch
-    ? "INTERMEDIATE_W2_C_LOW_REACTION_HIGH_ALERT_NEGOTIATED_RECLAIM_WATCH"
+    ? cLowIgnitionWatch && !negotiatedReclaimAttempt
+      ? "INTERMEDIATE_W2_C_LOW_REACTION_HIGH_ALERT_POSSIBLE_W3_IGNITION_WATCH"
+      : "INTERMEDIATE_W2_C_LOW_REACTION_HIGH_ALERT_NEGOTIATED_RECLAIM_WATCH"
     : cLowReaction
     ? "INTERMEDIATE_W2_C_LOW_REACTION_DETECTED_RECLAIM_WATCH"
     : "INTERMEDIATE_W1_COMPLETE_W2_STILL_FORMING_FINAL_C_DOWN_WATCH";
 
   const headline = highAlertWatch
-    ? "INTERMEDIATE W2 C-LOW REACTION — HIGH ALERT NEGOTIATED VALUE RECLAIM WATCH"
+    ? cLowIgnitionWatch && !negotiatedReclaimAttempt
+      ? "INTERMEDIATE W2 C-LOW REACTION — HIGH ALERT POSSIBLE W3 IGNITION WATCH"
+      : "INTERMEDIATE W2 C-LOW REACTION — HIGH ALERT NEGOTIATED VALUE RECLAIM WATCH"
     : cLowReaction
     ? "INTERMEDIATE W2 C-LOW REACTION DETECTED — WATCH RECLAIM / CONTROLLED PULLBACK"
     : "INTERMEDIATE W1 COMPLETE — W2 STILL FORMING / FINAL C-DOWN WATCH";
@@ -435,8 +523,14 @@ function buildIntermediateW2StillFormingState({
       ? "C_LOW_REACTION_DETECTED_CONFIRMATION_REQUIRED"
       : "W2_STILL_FORMING_FINAL_C_DOWN_WATCH",
     "MARK_MATURITY_PREVENTED_W3_LAUNCH_PROMOTION",
-     highAlertWatch ? "HIGH_ALERT_WATCH" : null,
-     ...getHighAlertZoneReasonCodes(waveFibState), 
+    highAlertWatch ? "HIGH_ALERT_WATCH" : null,
+    cLowIgnitionWatch ? "C_LOW_TARGET_BOX_REACTION" : null,
+    cLowIgnitionWatch ? "FAST_RECLAIM_FROM_W2_C_LOW" : null,
+    cLowIgnitionWatch ? "POSSIBLE_W3_IGNITION_BEHAVIOR" : null,
+    cLowIgnitionWatch && !negotiatedReclaimAttempt
+      ? "STILL_NEEDS_NEGOTIATED_RECLAIM"
+      : null,
+    ...getHighAlertZoneReasonCodes(waveFibState),
   ];
 
   return {
