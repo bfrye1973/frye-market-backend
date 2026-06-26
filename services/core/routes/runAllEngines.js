@@ -117,14 +117,17 @@ child.on("error", (err) => {
   if (settled) return;
   settled = true;
 
-  const result = {
-    code: 999,
-    stdout,
-    stderr: `${stderr}\n${err?.stack || err?.message || String(err)}`,
-    startedAt: new Date(startedMs).toISOString(),
-    endedAt: nowIso(),
-    elapsedMs: elapsedMs(startedMs),
-  };
+const result = {
+  code: 999,
+  stdout,
+  stderr:
+    String(stderr || "") +
+    "\n" +
+    String(err?.stack || err?.message || err || ""),
+  startedAt: new Date(startedMs).toISOString(),
+  endedAt: nowIso(),
+  elapsedMs: elapsedMs(startedMs),
+};
 
   logStepEnd(name, result, startedMs);
   resolve(result);
