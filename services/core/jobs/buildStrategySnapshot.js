@@ -4772,6 +4772,14 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
        engine22WaveStrategy,
        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
      });
+     attachCurrentLevelActionToConfluence({
+       patchedConfluence,
+       engine22WaveStrategy,
+       engine25Context,
+       engine1Context,
+       bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+       bars30m: [],
+     });      
      attachEngine22LifecycleParticipationToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
