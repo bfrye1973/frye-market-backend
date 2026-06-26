@@ -19,9 +19,6 @@ const ENGINE1_RUNNER = path.resolve(CORE_DIR, "jobs/runEngine1AndShelves.js");
 const JOB_SCRIPT_ALL = path.resolve(CORE_DIR, "jobs/runAllEngines.sh");
 
 // Step 3A: Refresh live/hourly Engine 25 context
-// IMPORTANT:
-// This must run before ES strategy snapshot so Engine 22 receives live
-// Engine 25 zone context on every Render pod.
 const ENGINE25_FULL_REFRESH_JOB = path.resolve(
 CORE_DIR,
 "jobs/updateEngine25Full.js"
@@ -47,7 +44,7 @@ let IS_RUNNING = false;
 // ------------------------------
 function checkToken(req) {
 const expected = process.env.ENGINE_CRON_TOKEN;
-if (!expected) return { ok: true }; // dev / no token configured
+if (!expected) return { ok: true };
 
 const got =
 req.header("X-ENGINE-CRON-TOKEN") ||
@@ -77,12 +74,19 @@ return String(str || "").slice(-max);
 }
 
 function logStepStart(name) {
-console.log(`[run-all-engines] START ${name} @ ${nowIso()}`);
+console.log("[run-all-engines] START " + name + " @ " + nowIso());
 }
 
 function logStepEnd(name, result, startedMs) {
 console.log(
-`[run-all-engines] END ${name} @ ${nowIso()} | code=${result.code} | elapsedMs=${elapsedMs(startedMs)}`
+"[run-all-engines] END " +
+name +
+" @ " +
+nowIso() +
+" | code=" +
+result.code +
+" | elapsedMs=" +
+elapsedMs(startedMs)
 );
 }
 
@@ -117,17 +121,17 @@ child.on("error", (err) => {
   if (settled) return;
   settled = true;
 
-const result = {
-  code: 999,
-  stdout,
-  stderr:
-    String(stderr || "") +
-    "\n" +
-    String(err?.stack || err?.message || err || ""),
-  startedAt: new Date(startedMs).toISOString(),
-  endedAt: nowIso(),
-  elapsedMs: elapsedMs(startedMs),
-};
+  const result = {
+    code: 999,
+    stdout,
+    stderr:
+      String(stderr || "") +
+      "\n" +
+      String(err?.stack || err?.message || err || ""),
+    startedAt: new Date(startedMs).toISOString(),
+    endedAt: nowIso(),
+    elapsedMs: elapsedMs(startedMs),
+  };
 
   logStepEnd(name, result, startedMs);
   resolve(result);
@@ -181,7 +185,7 @@ IS_RUNNING = true;
 const routeStartedMs = Date.now();
 const startedAt = nowIso();
 
-console.log(`[run-all-engines] REQUEST START @ ${startedAt}`);
+console.log("[run-all-engines] REQUEST START @ " + startedAt);
 
 try {
 // ---------------------------------
@@ -200,7 +204,8 @@ if (step1.code !== 0) {
   const totalElapsedMs = elapsedMs(routeStartedMs);
 
   console.error(
-    `[run-all-engines] FAIL engine1_and_shelves | totalElapsedMs=${totalElapsedMs}`
+    "[run-all-engines] FAIL engine1_and_shelves | totalElapsedMs=" +
+      totalElapsedMs
   );
 
   return res.json({
@@ -231,16 +236,7 @@ const step2 = await runStep({
 
 // ---------------------------------
 // STEP 3A: Refresh live/hourly Engine 25 context
-//
-// This generates/refreshes:
-// - data/engine25-market-health.json
-// - data/engine25-es-zone-aware-read.json
-// - data/engine25-sector-card-breadth-snapshots.json
-// - data/engine25-zone-classification.json
-// - data/engine25-es-overlay.json
-//
-// Engine 22 reads these through buildStrategySnapshot.js.
-// This prevents zoneContext from going null on fresh Render pods.
+// Must run before ES strategy snapshot.
 // ---------------------------------
 const step3a = await runStep({
   name: "update_engine25_full_live",
@@ -256,7 +252,6 @@ const step3a = await runStep({
 
 // ---------------------------------
 // STEP 3B: Build ES strategy snapshot
-// This replaces old SPY replay cadence.
 // ---------------------------------
 const step3b = await runStep({
   name: "build_es_strategy_snapshot",
@@ -273,7 +268,6 @@ const step3b = await runStep({
 
 // ---------------------------------
 // STEP 3C: Archive slim ES replay snapshot
-// Writes /var/data/replay/es/YYYY-MM-DD/HHMM.json
 // ---------------------------------
 const step3c = await runStep({
   name: "archive_es_replay_snapshot",
@@ -335,7 +329,12 @@ const code =
     : step3c.code;
 
 console.log(
-  `[run-all-engines] REQUEST END @ ${endedAt} | ok=${ok} | totalElapsedMs=${totalElapsedMs}`
+  "[run-all-engines] REQUEST END @ " +
+    endedAt +
+    " | ok=" +
+    ok +
+    " | totalElapsedMs=" +
+    totalElapsedMs
 );
 
 return res.json({
@@ -395,7 +394,10 @@ const totalElapsedMs = elapsedMs(routeStartedMs);
 
 ```
 console.error(
-  `[run-all-engines] UNHANDLED ERROR @ ${endedAt} | totalElapsedMs=${totalElapsedMs}`
+  "[run-all-engines] UNHANDLED ERROR @ " +
+    endedAt +
+    " | totalElapsedMs=" +
+    totalElapsedMs
 );
 console.error(err?.stack || err?.message || String(err));
 
@@ -410,7 +412,7 @@ return res.status(500).json({
 
 } finally {
 IS_RUNNING = false;
-console.log(`[run-all-engines] LOCK RELEASED @ ${nowIso()}`);
+console.log("[run-all-engines] LOCK RELEASED @ " + nowIso());
 }
 }
 
