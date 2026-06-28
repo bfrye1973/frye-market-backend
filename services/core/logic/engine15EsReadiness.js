@@ -899,6 +899,7 @@ function readPaperRiskModel({
   const failureInstitutional = roundToEsTick(
     firstValidPriceLevel([triggerLevels?.failureInstitutional])
   );
+
   const zoneLowerBoundary = firstZoneLowerBoundary(zones);
 
   const paperReactionReferenceMinus2 =
@@ -911,46 +912,61 @@ function readPaperRiskModel({
       ? roundToEsTick(toNum(currentLevelAction?.referenceLevel, null) - 2)
       : null;
 
-  let stopLevel = null;
-  let stopSource = null;
+  const candidates = [
+    {
+      stopLevel: failureInstitutional,
+      stopSource: "ENGINE22_FAILURE_INSTITUTIONAL",
+    },
+    {
+      stopLevel: zoneLowerBoundary,
+      stopSource: "ENGINE22_ZONE_LOWER_BOUNDARY",
+    },
+    {
+      stopLevel: paperReactionReferenceMinus2,
+      stopSource: "ENGINE3_PAPER_REACTION_REFERENCE_MINUS_2",
+    },
+    {
+      stopLevel: currentLevelReferenceMinus2,
+      stopSource: "CURRENT_LEVEL_ACTION_REFERENCE_MINUS_2",
+    },
+  ];
 
-  if (failureInstitutional != null) {
-    stopLevel = failureInstitutional;
-    stopSource = "ENGINE22_FAILURE_INSTITUTIONAL";
-  } else if (zoneLowerBoundary != null) {
-    stopLevel = zoneLowerBoundary;
-    stopSource = "ENGINE22_ZONE_LOWER_BOUNDARY";
-  } else if (paperReactionReferenceMinus2 != null) {
-    stopLevel = paperReactionReferenceMinus2;
-    stopSource = "ENGINE3_PAPER_REACTION_REFERENCE_MINUS_2";
-  } else if (currentLevelReferenceMinus2 != null) {
-    stopLevel = currentLevelReferenceMinus2;
-    stopSource = "CURRENT_LEVEL_ACTION_REFERENCE_MINUS_2";
+  const rejectedStopSources = [];
+
+  for (const candidate of candidates) {
+    const stopLevel = toNum(candidate.stopLevel, null);
+
+    if (stopLevel == null) continue;
+
+    if (stopLevel <= 0) {
+      rejectedStopSources.push(`${candidate.stopSource}_ZERO_OR_NEGATIVE`);
+      continue;
+    }
+
+    if (currentNum != null && stopLevel >= currentNum) {
+      rejectedStopSources.push(`${candidate.stopSource}_ABOVE_OR_AT_CURRENT_PRICE`);
+      continue;
+    }
+
+    return {
+      stopLevel,
+      invalidationLevel: stopLevel,
+      stopDefined: true,
+      stopSource: candidate.stopSource,
+      rejectedStopSources,
+    };
   }
 
-if (
-  stopLevel != null &&
-  (stopLevel <= 0 || (currentNum != null && stopLevel >= currentNum))
-) {
   return {
     stopLevel: null,
     invalidationLevel: null,
     stopDefined: false,
     stopSource: null,
     invalidStopReason:
-      stopLevel <= 0
-        ? "INVALID_STOP_ZERO_OR_NEGATIVE"
-        : "INVALID_STOP_ABOVE_OR_AT_CURRENT_PRICE",
-  };
-}
-
-  const stopDefined = stopLevel != null;
-
-  return {
-    stopLevel,
-    invalidationLevel: stopLevel,
-    stopDefined,
-    stopSource,
+      rejectedStopSources.length > 0
+        ? "NO_VALID_STOP_AFTER_REJECTING_BAD_SOURCES"
+        : null,
+    rejectedStopSources,
   };
 }
 function paperDirectionFromCurrent(current) {
