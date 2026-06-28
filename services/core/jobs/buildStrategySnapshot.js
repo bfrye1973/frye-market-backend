@@ -39,6 +39,8 @@ import { buildWaveTradeDecision } from "../logic/engine22/decisions/buildWaveTra
 import { buildEngine22LifecycleReaction } from "../logic/engine3/engine22LifecycleReaction.js";
 import { attachCurrentLevelActionToConfluence } from "../logic/priceAction/currentLevelAction.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
+import { buildEngine26PaperTradePlan } from "../logic/engine26/paperTradePlanner.js";
+import { listTrades } from "../logic/journal/tradeJournalStore.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import {
   getManualLevelRowsFor,
@@ -4649,6 +4651,83 @@ attachEngine22LifecycleParticipationToConfluence({
          })
        : permissionPreliminary;
 
+let engine26PaperTradePlan = null;
+let engine26PaperTradeTicket = null;
+let engine26PaperTradeExecution = null;
+
+if (isEsIntradayScalp) {
+  try {
+    let openPaperTrades = [];
+
+    try {
+      const openPaperResp = await listTrades({
+        symbol,
+        strategyId: s.strategyId,
+        status: "OPEN",
+        accountMode: "PAPER",
+      });
+
+      openPaperTrades = Array.isArray(openPaperResp?.trades)
+        ? openPaperResp.trades
+        : [];
+    } catch (err) {
+      console.error("[E26 OPEN PAPER TRADE CHECK ERROR]", err);
+
+      openPaperTrades = [];
+    }
+
+    const engine26 = buildEngine26PaperTradePlan({
+      symbol,
+      strategyId: s.strategyId,
+      tf: s.tf,
+      permission: finalPermission,
+      engine22WaveStrategy,
+      engine25Context,
+      confluence: patchedConfluence,
+      engine15Decision,
+      openPaperTrades,
+    });
+
+    engine26PaperTradePlan = engine26.engine26PaperTradePlan || null;
+    engine26PaperTradeTicket = engine26.engine26PaperTradeTicket || null;
+
+    // V1 planner-only. Do not call Engine 8 from snapshot builder.
+    engine26PaperTradeExecution = null;
+  } catch (err) {
+    console.error("[E26 PAPER TRADE PLANNER ERROR]", err);
+
+    engine26PaperTradePlan = {
+      active: false,
+      engine: "engine26.paperTradePlanner.v1",
+      mode: "PAPER_ONLY",
+      researchOnly: true,
+      symbol,
+      strategyId: s.strategyId,
+      tf: s.tf,
+      allowed: false,
+      status: "NO_PAPER_TRADE",
+      blockers: ["ENGINE26_PLANNER_FAILED"],
+      reasonCodes: [
+        "ENGINE26_PLANNER_FAILED",
+        "NO_REAL_EXECUTION",
+        "NO_ENGINE8_CALL_IN_SNAPSHOT_BUILD",
+      ],
+      debug: {
+        error: String(err?.message || err),
+        stack: String(err?.stack || ""),
+      },
+      noRealExecution: true,
+      realExecutionAllowed: false,
+      brokerExecutionAllowed: false,
+      schwabExecutionAllowed: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    engine26PaperTradeTicket = null;
+    engine26PaperTradeExecution = null;
+  }
+}
+
  const lockedSignal = updateSignalLock({
   symbol,
   strategyId: s.strategyId,
@@ -4910,6 +4989,10 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
     permissionPreliminary,
 
     permission: finalPermission,
+
+    engine26PaperTradePlan,
+    engine26PaperTradeTicket,
+    engine26PaperTradeExecution,
 
     engine6v2:
       isEsIntradayScalp
