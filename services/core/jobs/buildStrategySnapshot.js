@@ -1253,8 +1253,227 @@ const score = numOrNull(engine25Context?.score);
   };
 }
 
+function buildEngine6PaperPermission({
+  symbol,
+  strategyId,
+  confluence,
+  engine15Decision,
+  engine22WaveStrategy,
+  engine25Context,
+}) {
+  const paperReaction =
+    confluence?.context?.reaction?.paperScalpReaction || null;
+
+  const paperParticipation =
+    confluence?.context?.volume?.engine22LifecycleParticipation
+      ?.paperScalpParticipation || null;
+
+  const paperReadiness =
+    engine15Decision?.paperScalpReadiness || null;
+
+  const currentLifecycleState =
+    engine22WaveStrategy?.currentLifecycleState || null;
+
+  const paperShortResearchEnabled = false;
+
+  const reactionAllowed = paperReaction?.allowed === true;
+  const participationAllowed = paperParticipation?.allowed === true;
+  const participationHardBlocked = paperParticipation?.hardBlocked === true;
+  const readinessAllowed = paperReadiness?.allowed === true;
+
+  const engine25HardBlocked =
+    engine25Context?.ok === true &&
+    (
+      String(engine25Context?.regime || "").toUpperCase().includes("RISK_OFF") ||
+      String(engine25Context?.permission || "").toUpperCase().includes("NO_TRADE") ||
+      String(engine25Context?.permission || "").toUpperCase().includes("STAND_DOWN")
+    );
+
+  const lifecyclePaperCandidate =
+    currentLifecycleState?.paperTradeCandidate === true ||
+    engine22WaveStrategy?.paperTradeCandidate === true ||
+    engine22WaveStrategy?.waveOpportunity?.paperTradeCandidate === true ||
+    paperReadiness?.paperTradeCandidate === true ||
+    paperReadiness?.active === true ||
+    paperReaction?.active === true ||
+    paperParticipation?.active === true;
+
+  const directionRaw =
+    paperReadiness?.direction ||
+    paperParticipation?.intendedDirection ||
+    paperParticipation?.direction ||
+    engine15Decision?.direction ||
+    engine22WaveStrategy?.waveOpportunity?.direction ||
+    paperReaction?.direction ||
+    currentLifecycleState?.direction ||
+    "NONE";
+
+  const direction = String(directionRaw || "NONE").toUpperCase();
+
+  const setupType =
+    paperReadiness?.setupType ||
+    engine15Decision?.strategyType ||
+    engine22WaveStrategy?.waveOpportunity?.setupType ||
+    paperReaction?.setupType ||
+    currentLifecycleState?.key ||
+    "UNKNOWN_PAPER_SCALP_SETUP";
+
+  const grade =
+    paperReadiness?.grade ||
+    paperParticipation?.grade ||
+    paperReaction?.quality ||
+    "D";
+
+  const targetPoints =
+    Number(paperReadiness?.targetPoints) ||
+    Number(engine22WaveStrategy?.waveOpportunity?.targetPoints) ||
+    10;
+
+  const blockers = [];
+  const warnings = [];
+  const reasonCodes = [
+    "PAPER_ONLY_RESEARCH_LANE",
+    "REAL_EXECUTION_REMAINS_BLOCKED",
+    "ENGINE6_FINAL_PAPER_PERMISSION",
+  ];
+
+  if (!lifecyclePaperCandidate) {
+    blockers.push("ENGINE22_PAPER_TRADE_CANDIDATE_NOT_ACTIVE");
+  }
+
+  if (!readinessAllowed) {
+    blockers.push("ENGINE15_PAPER_READINESS_NOT_ALLOWED");
+  }
+
+  if (!reactionAllowed) {
+    blockers.push("ENGINE3_PAPER_REACTION_NOT_ALLOWED");
+  }
+
+  if (!participationAllowed) {
+    blockers.push("ENGINE4_PAPER_PARTICIPATION_NOT_ALLOWED");
+  }
+
+  if (participationHardBlocked) {
+    blockers.push("ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED");
+  }
+
+  if (engine25HardBlocked) {
+    blockers.push("ENGINE25_HARD_RISK_BLOCK");
+  }
+
+  if (!direction || direction === "NONE" || direction === "NEUTRAL") {
+    blockers.push("PAPER_DIRECTION_MISSING");
+  }
+
+  if (direction === "SHORT" && !paperShortResearchEnabled) {
+    blockers.push("PAPER_SHORT_RESEARCH_DISABLED_V1");
+  }
+
+  if (!Number.isFinite(targetPoints) || targetPoints < 8) {
+    blockers.push("PAPER_TARGET_PATH_MISSING_OR_TOO_SMALL");
+  }
+
+  if (Array.isArray(paperReaction?.blockers)) {
+    blockers.push(...paperReaction.blockers);
+  }
+
+  if (Array.isArray(paperParticipation?.blockers)) {
+    blockers.push(...paperParticipation.blockers);
+  }
+
+  if (Array.isArray(paperReadiness?.blockers)) {
+    blockers.push(...paperReadiness.blockers);
+  }
+
+  if (Array.isArray(paperReaction?.reasonCodes)) {
+    reasonCodes.push(...paperReaction.reasonCodes);
+  }
+
+  if (Array.isArray(paperParticipation?.reasonCodes)) {
+    reasonCodes.push(...paperParticipation.reasonCodes);
+  }
+
+  if (Array.isArray(paperReadiness?.reasonCodes)) {
+    reasonCodes.push(...paperReadiness.reasonCodes);
+  }
+
+  if (paperParticipation?.risk) {
+    reasonCodes.push(String(paperParticipation.risk).toUpperCase());
+  }
+
+  if (paperParticipation?.participationQuality) {
+    reasonCodes.push(
+      `ENGINE4_${String(paperParticipation.participationQuality).toUpperCase()}_PARTICIPATION`
+    );
+  }
+
+  if (Number(paperParticipation?.relativeVolume) > 0 && Number(paperParticipation?.relativeVolume) < 0.75) {
+    reasonCodes.push("RELATIVE_VOLUME_TOO_LOW");
+  }
+
+  if (String(paperParticipation?.volumeTrend || "").toUpperCase() === "FADING") {
+    reasonCodes.push("WAIT_FOR_RECLAIM_VOLUME");
+  }
+
+  reasonCodes.push("REQUIRES_ENGINE8_PAPER");
+  reasonCodes.push("REQUIRES_ENGINE10_JOURNAL");
+
+  const uniqueBlockers = [...new Set(blockers.filter(Boolean))];
+  const uniqueWarnings = [...new Set(warnings.filter(Boolean))];
+  const uniqueReasonCodes = [...new Set(reasonCodes.filter(Boolean))];
+
+  const allowed =
+    uniqueBlockers.length === 0 &&
+    lifecyclePaperCandidate &&
+    readinessAllowed &&
+    reactionAllowed &&
+    participationAllowed &&
+    participationHardBlocked !== true &&
+    engine25HardBlocked !== true &&
+    direction === "LONG";
+
+  const decision = allowed ? "PAPER_ALLOW" : "PAPER_STAND_DOWN";
+
+  return {
+    active: true,
+    mode: "PAPER_ONLY",
+    decision,
+    allowed,
+
+    realExecutionAllowed: false,
+    executable: false,
+    brokerExecutionAllowed: false,
+    schwabExecutionAllowed: false,
+
+    requiresEngine8Paper: true,
+    requiresEngine10Journal: true,
+
+    symbol,
+    strategyId,
+    setupFamily: "IMBALANCE_TO_IMBALANCE_SCALP",
+    setupType,
+    direction,
+
+    targetPoints: Number.isFinite(targetPoints) ? targetPoints : 10,
+    exitModel: "THREE_BLOCKS",
+
+    grade,
+    source: "ENGINE6_PAPER_PERMISSION",
+
+    paperShortResearchEnabled,
+    paperShortAllowed: direction === "SHORT" && paperShortResearchEnabled,
+
+    duplicateCheckRequired: true,
+
+    blockers: uniqueBlockers,
+    warnings: uniqueWarnings,
+    reasonCodes: uniqueReasonCodes,
+  };
+}
+
 function buildFinalPermissionFromEngine15({
   symbol,
+  strategyId,
   tf,
   preliminaryPermission,
   engine15Decision,
@@ -1263,6 +1482,7 @@ function buildFinalPermissionFromEngine15({
   engine5Analytics,
   engine25Context,
   engine22WaveStrategy,
+  confluence,
 }) {
   const preliminary =
     preliminaryPermission && typeof preliminaryPermission === "object"
@@ -1298,6 +1518,15 @@ const setupEligible =
       );
 
 const engine25ModifierPreview = buildEngine25ModifierPreview(engine25Context);
+const engine6PaperPermission = buildEngine6PaperPermission({
+  symbol,
+  strategyId,
+  confluence,
+  engine15Decision,
+  engine22WaveStrategy,
+  engine25Context,
+});
+  
 
   const baseReasonCodes = Array.isArray(preliminary.reasonCodes)
     ? preliminary.reasonCodes
@@ -1334,7 +1563,7 @@ const engine25ModifierPreview = buildEngine25ModifierPreview(engine25Context);
     watchOnly: false,
     setupEligible,
     engine25ModifierPreview,
-
+    paper: engine6PaperPermission,
     engine22CurrentLifecycleState: currentLifecycleState,
 
     engine15Decision: {
@@ -4910,20 +5139,22 @@ attachEngine22LifecycleParticipationToConfluence({
       : computeEngine15DecisionReferee(engine15BaseInputs);
 
  
-   const finalPermission =
-     isEsIntradayScalp
-       ? buildFinalPermissionFromEngine15({
-           symbol,
-           tf: s.tf,
-           preliminaryPermission: permissionPreliminary,
-           engine15Decision,
-           marketRegime,
-           zoneContext,
-           engine5Analytics,
-           engine25Context,
-           engine22WaveStrategy,
-         })
-       : permissionPreliminary;
+const finalPermission =
+  isEsIntradayScalp
+    ? buildFinalPermissionFromEngine15({
+        symbol,
+        strategyId: s.strategyId,
+        tf: s.tf,
+        preliminaryPermission: permissionPreliminary,
+        engine15Decision,
+        marketRegime,
+        zoneContext,
+        engine5Analytics,
+        engine25Context,
+        engine22WaveStrategy,
+        confluence: patchedConfluence,
+      })
+    : permissionPreliminary;
 
 let engine26PaperTradePlan = null;
 let engine26PaperTradeTicket = null;
