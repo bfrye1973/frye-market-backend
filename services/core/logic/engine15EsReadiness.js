@@ -32,7 +32,7 @@
 // Engine 15ES answers:
 // Is ES ready, watch-only, blocked, or waiting — and what exactly does the trader need next?
 
-const ENGINE = "engine15.esReadiness.v1.7";
+const ENGINE = "engine15.esReadiness.v1.8";
 const DEFAULT_STRATEGY_ID = "intraday_scalp@10m";
 const ES_TICK_SIZE = 0.25;
 
@@ -779,6 +779,14 @@ function firstFiniteNumber(values = []) {
   return null;
 }
 
+function firstValidPriceLevel(values = []) {
+  for (const value of values) {
+    const n = toNum(value, null);
+    if (n != null && n > 0) return n;
+  }
+  return null;
+}
+
 function roundToEsTick(value) {
   const n = toNum(value, null);
   if (n == null) return null;
@@ -819,7 +827,7 @@ function firstZoneLowerBoundary(zones) {
     Object.values(zones).forEach(collect);
   }
 
-  return roundToEsTick(firstFiniteNumber(candidates));
+  return roundToEsTick(firstValidPriceLevel(candidates));
 }
 
 function readPaperTargetModel({ current, waveOpportunity, currentPrice }) {
@@ -888,7 +896,9 @@ function readPaperRiskModel({
     current?.data?.confirmationContext?.reference?.zones ||
     null;
 
-  const failureInstitutional = roundToEsTick(triggerLevels?.failureInstitutional);
+  const failureInstitutional = roundToEsTick(
+    firstValidPriceLevel([triggerLevels?.failureInstitutional])
+  );
   const zoneLowerBoundary = firstZoneLowerBoundary(zones);
 
   const paperReactionReferenceMinus2 =
