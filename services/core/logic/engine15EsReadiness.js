@@ -16,7 +16,7 @@
 // - Engine 15ES = final ES setup readiness translator / referee
 // - Engine 6 = final permission gate
 //
-// Main upgrade in v1.7:
+// Main upgrade in v1.8:
 // - Engine 15ES now consumes Engine 22 canonical currentLifecycleState generically.
 // - Engine 22 owns the complete downstream-safe currentLifecycleState contract.
 // - Engine 15ES no longer needs one custom branch for every new Engine 22 lifecycle key.
@@ -741,6 +741,450 @@ function buildEngine15BlockersFromCurrentLifecycleState({
 }
 
 /* -----------------------------
+   Engine 15 PAPER_ONLY scalp readiness
+------------------------------*/
+
+function getPaperScalpReaction({ engine3, engine5 }) {
+  return (
+    engine3?.paperScalpReaction ||
+    engine5?.context?.reaction?.paperScalpReaction ||
+    engine5?.components?.engine3Reaction?.paperScalpReaction ||
+    null
+  );
+}
+
+function getPaperScalpParticipation({ engine4, engine5 }) {
+  return (
+    engine4?.engine22LifecycleParticipation?.paperScalpParticipation ||
+    engine5?.context?.volume?.engine22LifecycleParticipation?.paperScalpParticipation ||
+    engine5?.components?.engine4Volume?.engine22LifecycleParticipation?.paperScalpParticipation ||
+    null
+  );
+}
+
+function firstFiniteNumber(values = []) {
+  for (const value of values) {
+    const n = toNum(value, null);
+    if (n != null) return n;
+  }
+  return null;
+}
+
+function readPaperTargetModel({ current, waveOpportunity }) {
+  const availablePoints = firstFiniteNumber([
+    current?.targetModel?.availablePoints,
+    current?.paperScalpTarget?.availablePoints,
+    current?.pathToTarget?.availablePoints,
+    current?.data?.targetModel?.availablePoints,
+    current?.data?.pathToTarget?.availablePoints,
+    waveOpportunity?.targetModel?.availablePoints,
+    waveOpportunity?.paperScalpTarget?.availablePoints,
+    waveOpportunity?.pathToTarget?.availablePoints,
+  ]);
+
+  const targetLevel = firstFiniteNumber([
+    current?.targetModel?.targetLevel,
+    current?.paperScalpTarget?.targetLevel,
+    current?.pathToTarget?.targetLevel,
+    current?.data?.targetModel?.targetLevel,
+    current?.data?.pathToTarget?.targetLevel,
+    waveOpportunity?.targetModel?.targetLevel,
+    waveOpportunity?.paperScalpTarget?.targetLevel,
+    waveOpportunity?.pathToTarget?.targetLevel,
+  ]);
+
+  const targetType =
+    current?.targetModel?.targetType ||
+    current?.paperScalpTarget?.targetType ||
+    current?.pathToTarget?.targetType ||
+    current?.data?.targetModel?.targetType ||
+    current?.data?.pathToTarget?.targetType ||
+    waveOpportunity?.targetModel?.targetType ||
+    waveOpportunity?.paperScalpTarget?.targetType ||
+    waveOpportunity?.pathToTarget?.targetType ||
+    null;
+
+  return {
+    desiredPoints: 10,
+    minAcceptablePoints: 8,
+    availablePoints,
+    targetLevel,
+    targetType,
+    targetPathRequired: true,
+  };
+}
+
+function readPaperRiskModel({ current, waveOpportunity, paperReaction }) {
+  const stopLevel = firstFiniteNumber([
+    current?.riskModel?.stopLevel,
+    current?.paperScalpRisk?.stopLevel,
+    current?.invalidationLevel,
+    current?.stopLevel,
+    current?.data?.riskModel?.stopLevel,
+    current?.data?.paperScalpRisk?.stopLevel,
+    current?.data?.invalidationLevel,
+    waveOpportunity?.riskModel?.stopLevel,
+    waveOpportunity?.paperScalpRisk?.stopLevel,
+    waveOpportunity?.invalidationLevel,
+    waveOpportunity?.stopLevel,
+    paperReaction?.riskModel?.stopLevel,
+    paperReaction?.stopLevel,
+    paperReaction?.invalidationLevel,
+  ]);
+
+  const invalidationLevel = firstFiniteNumber([
+    current?.riskModel?.invalidationLevel,
+    current?.paperScalpRisk?.invalidationLevel,
+    current?.invalidationLevel,
+    current?.stopLevel,
+    current?.data?.riskModel?.invalidationLevel,
+    current?.data?.paperScalpRisk?.invalidationLevel,
+    current?.data?.invalidationLevel,
+    waveOpportunity?.riskModel?.invalidationLevel,
+    waveOpportunity?.paperScalpRisk?.invalidationLevel,
+    waveOpportunity?.invalidationLevel,
+    waveOpportunity?.stopLevel,
+    paperReaction?.riskModel?.invalidationLevel,
+    paperReaction?.invalidationLevel,
+    paperReaction?.stopLevel,
+  ]);
+
+  const stopDefined = stopLevel != null || invalidationLevel != null;
+
+  return {
+    stopLevel,
+    invalidationLevel,
+    stopDefined,
+  };
+}
+
+function paperDirectionFromCurrent(current) {
+  const direction = currentLifecycleDirection(current);
+  return direction || "NONE";
+}
+
+function paperScalpLateChaseBlocked({ current, engine5 }) {
+  const timing = safeUpper(
+    current?.paperScalpReadiness?.timing ??
+      current?.paperScalpTiming ??
+      current?.timing ??
+      "",
+    ""
+  );
+
+  const chaseRisk = safeUpper(
+    current?.paperScalpReadiness?.chaseRisk ??
+      current?.paperScalpChaseRisk ??
+      current?.chaseRisk ??
+      "",
+    ""
+  );
+
+  const engine5Timing = getEngine5Timing(engine5);
+  const e5EntryTiming = safeUpper(engine5Timing?.entryTiming, "");
+  const e5ChaseRisk = safeUpper(engine5Timing?.chaseRisk, "");
+
+  return (
+    timing === "LATE_CHASE" ||
+    timing === "TOO_LATE" ||
+    chaseRisk === "LATE_CHASE" ||
+    e5EntryTiming === "LATE_CHASE" ||
+    e5EntryTiming === "TOO_LATE" ||
+    e5ChaseRisk === "EXTREME"
+  );
+}
+
+function buildDefaultPaperScalpReadiness({
+  symbol,
+  strategyId,
+  current,
+  direction,
+  setupType,
+}) {
+  return {
+    active: true,
+    engine: "engine15.paperScalpReadiness.v1",
+    mode: "PAPER_ONLY",
+    strategyId,
+    instrument: symbol,
+
+    allowed: false,
+    grade: "D",
+    score: 0,
+
+    direction,
+    setupType,
+
+    freshness: "WAIT_FOR_CONFIRMATION",
+    timing: "WATCH",
+    chaseRisk: "CAUTION",
+
+    realExecutionAllowed: false,
+    requiresEngine6PaperApproval: true,
+
+    targetModel: {
+      desiredPoints: 10,
+      minAcceptablePoints: 8,
+      availablePoints: null,
+      targetLevel: null,
+      targetType: null,
+      targetPathRequired: true,
+    },
+
+    riskModel: {
+      stopLevel: null,
+      invalidationLevel: null,
+      stopDefined: false,
+    },
+
+    confirmations: {
+      engine22Context: Boolean(current),
+      engine3PaperReaction: false,
+      engine4PaperParticipation: false,
+      engine25Context: true,
+      engine6PaperApprovalRequired: true,
+    },
+
+    blockers: [],
+    warnings: [],
+    reasonCodes: [
+      "PAPER_ONLY_RESEARCH_LANE",
+      "ENGINE15_PAPER_SCALP_READINESS",
+      "REAL_EXECUTION_REMAINS_BLOCKED",
+      "ENGINE6_FINAL_PAPER_APPROVAL_REQUIRED",
+    ],
+  };
+}
+
+function buildPaperScalpReadiness({
+  symbol,
+  strategyId,
+  current,
+  waveOpportunity,
+  currentPrice,
+  engine3,
+  engine4,
+  engine5,
+}) {
+  const setupType = lifecycleKey(current);
+  const direction = paperDirectionFromCurrent(current);
+
+  const paper = buildDefaultPaperScalpReadiness({
+    symbol,
+    strategyId,
+    current,
+    direction,
+    setupType,
+  });
+
+  const blockers = [];
+  const warnings = [];
+  const reasonCodes = [...paper.reasonCodes];
+
+  const paperReaction = getPaperScalpReaction({ engine3, engine5 });
+  const paperParticipation = getPaperScalpParticipation({ engine4, engine5 });
+
+  const targetModel = readPaperTargetModel({
+    current,
+    waveOpportunity,
+  });
+
+  const riskModel = readPaperRiskModel({
+    current,
+    waveOpportunity,
+    paperReaction,
+  });
+
+  const engine22Context = Boolean(current && setupType && setupType !== "NONE");
+  const engine22PaperCandidate =
+    current?.paperTradeCandidate === true ||
+    waveOpportunity?.paperTradeCandidate === true;
+
+  const engine3Allowed = paperReaction?.allowed === true;
+  const engine3Blocked =
+    paperReaction?.allowed === false &&
+    Array.isArray(paperReaction?.blockers) &&
+    paperReaction.blockers.length > 0;
+
+  const engine4Allowed = paperParticipation?.allowed === true;
+  const engine4HardBlocked = paperParticipation?.hardBlocked === true;
+
+  const lateChase = paperScalpLateChaseBlocked({
+    current,
+    engine5,
+  });
+
+  const currentPriceExists = toNum(currentPrice, null) != null;
+  const availablePoints = toNum(targetModel.availablePoints, null);
+  const targetPathDefined = availablePoints != null;
+  const targetPathEnough = availablePoints != null && availablePoints >= 8;
+  const targetPathCaution = availablePoints != null && availablePoints >= 6 && availablePoints < 8;
+
+  if (!engine22Context) blockers.push("MISSING_ENGINE22_CONTEXT");
+  if (!currentPriceExists) blockers.push("MISSING_CURRENT_PRICE");
+
+  if (!engine22PaperCandidate) {
+    blockers.push("ENGINE22_PAPER_TRADE_CANDIDATE_NOT_PRESENT");
+  } else {
+    reasonCodes.push("ENGINE22_PAPER_TRADE_CANDIDATE");
+  }
+
+  if (direction === "SHORT") {
+    blockers.push("PAPER_SHORTS_DISABLED_V1");
+  } else if (direction !== "LONG") {
+    blockers.push("PAPER_DIRECTION_NOT_LONG");
+  }
+
+  if (!engine3Allowed) {
+    blockers.push(
+      engine3Blocked
+        ? "ENGINE3_PAPER_REACTION_BLOCKED"
+        : "ENGINE3_PAPER_REACTION_NOT_ALLOWED"
+    );
+    reasonCodes.push("ENGINE3_PAPER_REACTION_NOT_ALLOWED");
+  } else {
+    reasonCodes.push("ENGINE3_PAPER_REACTION_ALLOWED");
+  }
+
+  if (engine4HardBlocked) {
+    blockers.push("ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED");
+    reasonCodes.push("ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED");
+  } else if (!engine4Allowed) {
+    blockers.push("ENGINE4_PAPER_PARTICIPATION_NOT_ALLOWED");
+    warnings.push("WAIT_FOR_RECLAIM_VOLUME");
+    reasonCodes.push("ENGINE4_PAPER_PARTICIPATION_NOT_ALLOWED");
+  } else {
+    reasonCodes.push("ENGINE4_PAPER_PARTICIPATION_ALLOWED");
+  }
+
+  if (lateChase) {
+    blockers.push("LATE_CHASE_AFTER_VERTICAL_CANDLE");
+    reasonCodes.push("LATE_CHASE_AFTER_VERTICAL_CANDLE");
+  }
+
+  if (!riskModel.stopDefined) {
+    blockers.push("NO_DEFINED_STOP_OR_INVALIDATION");
+    reasonCodes.push("NO_DEFINED_STOP_OR_INVALIDATION");
+  } else {
+    reasonCodes.push("STOP_DEFINED");
+  }
+
+  if (!targetPathDefined) {
+    blockers.push("MISSING_TARGET_PATH");
+    reasonCodes.push("MISSING_TARGET_PATH");
+  } else if (!targetPathEnough && !targetPathCaution) {
+    blockers.push("NO_CLEAN_PATH_TO_TARGET");
+    reasonCodes.push("NO_CLEAN_PATH_TO_TARGET");
+  } else if (targetPathCaution) {
+    warnings.push("TARGET_PATH_BELOW_PREFERRED_8_POINTS");
+    reasonCodes.push("TARGET_PATH_CAUTION");
+  } else {
+    reasonCodes.push("TARGET_PATH_DEFINED_OR_PREVIEW");
+  }
+
+  const hardBlocked = blockers.some((blocker) =>
+    [
+      "MISSING_ENGINE22_CONTEXT",
+      "MISSING_CURRENT_PRICE",
+      "ENGINE22_PAPER_TRADE_CANDIDATE_NOT_PRESENT",
+      "PAPER_SHORTS_DISABLED_V1",
+      "PAPER_DIRECTION_NOT_LONG",
+      "ENGINE3_PAPER_REACTION_BLOCKED",
+      "ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED",
+      "LATE_CHASE_AFTER_VERTICAL_CANDLE",
+      "NO_DEFINED_STOP_OR_INVALIDATION",
+      "MISSING_TARGET_PATH",
+      "NO_CLEAN_PATH_TO_TARGET",
+    ].includes(blocker)
+  );
+
+  const allowed =
+    !hardBlocked &&
+    engine3Allowed &&
+    engine4Allowed &&
+    engine22PaperCandidate &&
+    direction === "LONG" &&
+    riskModel.stopDefined &&
+    targetPathEnough &&
+    currentPriceExists;
+
+  let grade = "D";
+  let score = 0;
+  let freshness = "WAIT_FOR_CONFIRMATION";
+  let timing = "WATCH";
+  let chaseRisk = "CAUTION";
+
+  if (allowed) {
+    grade = "A";
+    score = 85;
+    freshness = "FRESH_ENOUGH_FOR_PAPER";
+    timing = "EARLY_OR_MID_MOVE";
+    chaseRisk = "ACCEPTABLE_FOR_PAPER";
+  } else if (
+    engine22PaperCandidate &&
+    engine3Allowed &&
+    !engine4HardBlocked &&
+    riskModel.stopDefined &&
+    (targetPathEnough || targetPathCaution) &&
+    currentPriceExists
+  ) {
+    grade = "C";
+    score = 55;
+    freshness = "FRESH_ENOUGH_FOR_PAPER";
+    timing = "CONTROLLED_RECLAIM_WATCH";
+    chaseRisk = "CAUTION";
+    reasonCodes.push("PAPER_ONLY_GRADE_C");
+  } else if (engine22PaperCandidate && engine3Allowed) {
+    grade = "D";
+    score = 35;
+    freshness = "WAIT_FOR_CONFIRMATION";
+    timing = "WATCH";
+    chaseRisk = "CAUTION";
+  }
+
+  if (allowed) {
+    reasonCodes.push("ENGINE15_PAPER_SCALP_ALLOWED");
+  } else {
+    reasonCodes.push("ENGINE15_PAPER_SCALP_NOT_ALLOWED");
+  }
+
+  return {
+    ...paper,
+
+    allowed,
+    grade,
+    score,
+
+    direction,
+    setupType,
+
+    freshness,
+    timing,
+    chaseRisk,
+
+    targetModel: {
+      ...paper.targetModel,
+      ...targetModel,
+      targetType: targetModel.targetType || "IMBALANCE_TO_IMBALANCE",
+    },
+
+    riskModel,
+
+    confirmations: {
+      engine22Context,
+      engine3PaperReaction: engine3Allowed,
+      engine4PaperParticipation: engine4Allowed,
+      engine25Context: true,
+      engine6PaperApprovalRequired: true,
+    },
+
+    blockers: unique(blockers),
+    warnings: unique(warnings),
+    reasonCodes: unique(reasonCodes),
+  };
+}
+
+/* -----------------------------
    Structure / extension helpers
 ------------------------------*/
 
@@ -1071,6 +1515,17 @@ function buildPossibleW5UpCompletePullbackWatchDecision({
     currentLifecycleState?.tradeableOpportunityBlocked === true ||
     possibleW5Up?.tradeableOpportunityBlocked === true;
 
+  const paperScalpReadiness = buildPaperScalpReadiness({
+    symbol,
+    strategyId,
+    current: currentLifecycleState,
+    waveOpportunity,
+    currentPrice,
+    engine3: null,
+    engine4: null,
+    engine5: null,
+  });
+
   return {
     ok: true,
     engine: ENGINE,
@@ -1086,6 +1541,7 @@ function buildPossibleW5UpCompletePullbackWatchDecision({
     entryStyle: "WATCH_ONLY_POST_W5_PULLBACK_REACTION",
     active: false,
     freshEntryNow: false,
+    paperScalpReadiness,
 
     reasonCodes: unique([
       "ENGINE15_POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
@@ -1219,6 +1675,17 @@ function buildEngine15FromEngine22CurrentLifecycleState({
     permission,
   });
 
+const paperScalpReadiness = buildPaperScalpReadiness({
+  symbol,
+  strategyId,
+  current,
+  waveOpportunity: null,
+  currentPrice,
+  engine3,
+  engine4,
+  engine5,
+});
+
   const currentReasonCodes = Array.isArray(current.reasonCodes)
     ? current.reasonCodes
     : [];
@@ -1256,6 +1723,8 @@ function buildEngine15FromEngine22CurrentLifecycleState({
     paperTradeCandidate: current.paperTradeCandidate === true,
     paperTradeAllowedOnlyAfterConfirmation:
       current.paperTradeAllowedOnlyAfterConfirmation === true,
+
+   paperScalpReadiness, 
 
     reasonCodes,
     blockers,
