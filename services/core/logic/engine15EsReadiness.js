@@ -928,15 +928,21 @@ function readPaperRiskModel({
     stopSource = "CURRENT_LEVEL_ACTION_REFERENCE_MINUS_2";
   }
 
-  if (currentNum != null && stopLevel != null && stopLevel >= currentNum) {
-    return {
-      stopLevel: null,
-      invalidationLevel: null,
-      stopDefined: false,
-      stopSource: null,
-      invalidStopReason: "INVALID_STOP_ABOVE_OR_AT_CURRENT_PRICE",
-    };
-  }
+if (
+  stopLevel != null &&
+  (stopLevel <= 0 || (currentNum != null && stopLevel >= currentNum))
+) {
+  return {
+    stopLevel: null,
+    invalidationLevel: null,
+    stopDefined: false,
+    stopSource: null,
+    invalidStopReason:
+      stopLevel <= 0
+        ? "INVALID_STOP_ZERO_OR_NEGATIVE"
+        : "INVALID_STOP_ABOVE_OR_AT_CURRENT_PRICE",
+  };
+}
 
   const stopDefined = stopLevel != null;
 
@@ -1833,8 +1839,8 @@ const paperScalpReadiness = buildPaperScalpReadiness({
     noExecution: true,
     tradeableOpportunityBlocked:
       current.tradeableOpportunityBlocked === true,
-    setupEligible: current.setupEligible === true,
-
+    setupEligible: false,
+    
     paperTradeCandidate: current.paperTradeCandidate === true,
     paperTradeAllowedOnlyAfterConfirmation:
       current.paperTradeAllowedOnlyAfterConfirmation === true,
