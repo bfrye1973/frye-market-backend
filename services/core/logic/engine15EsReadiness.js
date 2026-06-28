@@ -762,6 +762,15 @@ function getPaperScalpParticipation({ engine4, engine5 }) {
   );
 }
 
+function getCurrentLevelAction({ engine3, engine5 }) {
+  return (
+    engine3?.currentLevelAction ||
+    engine5?.context?.reaction?.currentLevelAction ||
+    engine5?.components?.engine3Reaction?.currentLevelAction ||
+    null
+  );
+}
+
 function firstFiniteNumber(values = []) {
   for (const value of values) {
     const n = toNum(value, null);
@@ -770,39 +779,85 @@ function firstFiniteNumber(values = []) {
   return null;
 }
 
-function readPaperTargetModel({ current, waveOpportunity }) {
-  const availablePoints = firstFiniteNumber([
-    current?.targetModel?.availablePoints,
-    current?.paperScalpTarget?.availablePoints,
-    current?.pathToTarget?.availablePoints,
-    current?.data?.targetModel?.availablePoints,
-    current?.data?.pathToTarget?.availablePoints,
-    waveOpportunity?.targetModel?.availablePoints,
-    waveOpportunity?.paperScalpTarget?.availablePoints,
-    waveOpportunity?.pathToTarget?.availablePoints,
-  ]);
+function roundToEsTick(value) {
+  const n = toNum(value, null);
+  if (n == null) return null;
+  return Math.round(n / ES_TICK_SIZE) * ES_TICK_SIZE;
+}
 
-  const targetLevel = firstFiniteNumber([
-    current?.targetModel?.targetLevel,
-    current?.paperScalpTarget?.targetLevel,
-    current?.pathToTarget?.targetLevel,
-    current?.data?.targetModel?.targetLevel,
-    current?.data?.pathToTarget?.targetLevel,
-    waveOpportunity?.targetModel?.targetLevel,
-    waveOpportunity?.paperScalpTarget?.targetLevel,
-    waveOpportunity?.pathToTarget?.targetLevel,
-  ]);
+function pointsBetween(targetLevel, currentPrice) {
+  const target = toNum(targetLevel, null);
+  const current = toNum(currentPrice, null);
+  if (target == null || current == null) return null;
+  return Number((target - current).toFixed(2));
+}
 
-  const targetType =
-    current?.targetModel?.targetType ||
-    current?.paperScalpTarget?.targetType ||
-    current?.pathToTarget?.targetType ||
-    current?.data?.targetModel?.targetType ||
-    current?.data?.pathToTarget?.targetType ||
-    waveOpportunity?.targetModel?.targetType ||
-    waveOpportunity?.paperScalpTarget?.targetType ||
-    waveOpportunity?.pathToTarget?.targetType ||
-    null;
+function firstZoneLowerBoundary(zones) {
+  if (!zones) return null;
+
+  const candidates = [];
+
+  const collect = (zone) => {
+    if (!zone || typeof zone !== "object") return;
+
+    candidates.push(
+      zone.lo,
+      zone.low,
+      zone.lower,
+      zone.lowerBound,
+      zone.lowerBoundary,
+      zone.bottom,
+      zone.min,
+      zone.from
+    );
+  };
+
+  if (Array.isArray(zones)) {
+    zones.forEach(collect);
+  } else if (typeof zones === "object") {
+    collect(zones);
+    Object.values(zones).forEach(collect);
+  }
+
+  return roundToEsTick(firstFiniteNumber(candidates));
+}
+
+function readPaperTargetModel({ current, waveOpportunity, currentPrice }) {
+  const currentNum = toNum(currentPrice, null);
+  const triggerLevels =
+    current?.confirmationContext?.reference?.triggerLevels ||
+    current?.data?.confirmationContext?.reference?.triggerLevels ||
+    {};
+
+  const reclaimNegotiated = roundToEsTick(triggerLevels?.reclaimNegotiated);
+  const reclaimInstitutional = roundToEsTick(triggerLevels?.reclaimInstitutional);
+
+  const intermediateE100 = roundToEsTick(
+    current?.intermediate?.targets?.e100 ??
+      current?.data?.intermediate?.targets?.e100 ??
+      waveOpportunity?.intermediate?.targets?.e100
+  );
+
+  let targetLevel = null;
+  let targetSource = null;
+  let targetType = "IMBALANCE_TO_IMBALANCE";
+
+  if (currentNum != null && reclaimNegotiated != null && reclaimNegotiated > currentNum) {
+    targetLevel = reclaimNegotiated;
+    targetSource = "ENGINE22_RECLAIM_NEGOTIATED";
+  } else if (currentNum != null && reclaimInstitutional != null && reclaimInstitutional > currentNum) {
+    targetLevel = reclaimInstitutional;
+    targetSource = "ENGINE22_RECLAIM_INSTITUTIONAL";
+  } else if (currentNum != null && intermediateE100 != null && intermediateE100 > currentNum) {
+    targetLevel = intermediateE100;
+    targetSource = "ENGINE22_INTERMEDIATE_E100";
+  } else if (currentNum != null) {
+    targetLevel = roundToEsTick(currentNum + 10);
+    targetSource = "PAPER_PLANNER_10_POINT_FALLBACK";
+    targetType = "PAPER_PLANNER_10_POINT_FALLBACK";
+  }
+
+  const availablePoints = pointsBetween(targetLevel, currentNum);
 
   return {
     desiredPoints: 10,
@@ -810,54 +865,78 @@ function readPaperTargetModel({ current, waveOpportunity }) {
     availablePoints,
     targetLevel,
     targetType,
+    targetSource,
     targetPathRequired: true,
   };
 }
+function readPaperRiskModel({
+  current,
+  waveOpportunity,
+  paperReaction,
+  currentLevelAction,
+  currentPrice,
+}) {
+  const currentNum = toNum(currentPrice, null);
 
-function readPaperRiskModel({ current, waveOpportunity, paperReaction }) {
-  const stopLevel = firstFiniteNumber([
-    current?.riskModel?.stopLevel,
-    current?.paperScalpRisk?.stopLevel,
-    current?.invalidationLevel,
-    current?.stopLevel,
-    current?.data?.riskModel?.stopLevel,
-    current?.data?.paperScalpRisk?.stopLevel,
-    current?.data?.invalidationLevel,
-    waveOpportunity?.riskModel?.stopLevel,
-    waveOpportunity?.paperScalpRisk?.stopLevel,
-    waveOpportunity?.invalidationLevel,
-    waveOpportunity?.stopLevel,
-    paperReaction?.riskModel?.stopLevel,
-    paperReaction?.stopLevel,
-    paperReaction?.invalidationLevel,
-  ]);
+  const triggerLevels =
+    current?.confirmationContext?.reference?.triggerLevels ||
+    current?.data?.confirmationContext?.reference?.triggerLevels ||
+    {};
 
-  const invalidationLevel = firstFiniteNumber([
-    current?.riskModel?.invalidationLevel,
-    current?.paperScalpRisk?.invalidationLevel,
-    current?.invalidationLevel,
-    current?.stopLevel,
-    current?.data?.riskModel?.invalidationLevel,
-    current?.data?.paperScalpRisk?.invalidationLevel,
-    current?.data?.invalidationLevel,
-    waveOpportunity?.riskModel?.invalidationLevel,
-    waveOpportunity?.paperScalpRisk?.invalidationLevel,
-    waveOpportunity?.invalidationLevel,
-    waveOpportunity?.stopLevel,
-    paperReaction?.riskModel?.invalidationLevel,
-    paperReaction?.invalidationLevel,
-    paperReaction?.stopLevel,
-  ]);
+  const zones =
+    current?.confirmationContext?.reference?.zones ||
+    current?.data?.confirmationContext?.reference?.zones ||
+    null;
 
-  const stopDefined = stopLevel != null || invalidationLevel != null;
+  const failureInstitutional = roundToEsTick(triggerLevels?.failureInstitutional);
+  const zoneLowerBoundary = firstZoneLowerBoundary(zones);
+
+  const paperReactionReferenceMinus2 =
+    toNum(paperReaction?.referenceLevel, null) != null
+      ? roundToEsTick(toNum(paperReaction?.referenceLevel, null) - 2)
+      : null;
+
+  const currentLevelReferenceMinus2 =
+    toNum(currentLevelAction?.referenceLevel, null) != null
+      ? roundToEsTick(toNum(currentLevelAction?.referenceLevel, null) - 2)
+      : null;
+
+  let stopLevel = null;
+  let stopSource = null;
+
+  if (failureInstitutional != null) {
+    stopLevel = failureInstitutional;
+    stopSource = "ENGINE22_FAILURE_INSTITUTIONAL";
+  } else if (zoneLowerBoundary != null) {
+    stopLevel = zoneLowerBoundary;
+    stopSource = "ENGINE22_ZONE_LOWER_BOUNDARY";
+  } else if (paperReactionReferenceMinus2 != null) {
+    stopLevel = paperReactionReferenceMinus2;
+    stopSource = "ENGINE3_PAPER_REACTION_REFERENCE_MINUS_2";
+  } else if (currentLevelReferenceMinus2 != null) {
+    stopLevel = currentLevelReferenceMinus2;
+    stopSource = "CURRENT_LEVEL_ACTION_REFERENCE_MINUS_2";
+  }
+
+  if (currentNum != null && stopLevel != null && stopLevel >= currentNum) {
+    return {
+      stopLevel: null,
+      invalidationLevel: null,
+      stopDefined: false,
+      stopSource: null,
+      invalidStopReason: "INVALID_STOP_ABOVE_OR_AT_CURRENT_PRICE",
+    };
+  }
+
+  const stopDefined = stopLevel != null;
 
   return {
     stopLevel,
-    invalidationLevel,
+    invalidationLevel: stopLevel,
     stopDefined,
+    stopSource,
   };
 }
-
 function paperDirectionFromCurrent(current) {
   const direction = currentLifecycleDirection(current);
   return direction || "NONE";
@@ -903,7 +982,7 @@ function buildDefaultPaperScalpReadiness({
 }) {
   return {
     active: true,
-    engine: "engine15.paperScalpReadiness.v1",
+    engine: "engine15.paperScalpReadiness.v1.1",
     mode: "PAPER_ONLY",
     strategyId,
     instrument: symbol,
@@ -983,16 +1062,20 @@ function buildPaperScalpReadiness({
 
   const paperReaction = getPaperScalpReaction({ engine3, engine5 });
   const paperParticipation = getPaperScalpParticipation({ engine4, engine5 });
+  const currentLevelAction = getCurrentLevelAction({ engine3, engine5 });
 
   const targetModel = readPaperTargetModel({
     current,
     waveOpportunity,
+    currentPrice,
   });
 
   const riskModel = readPaperRiskModel({
     current,
     waveOpportunity,
     paperReaction,
+    currentLevelAction,
+    currentPrice,
   });
 
   const engine22Context = Boolean(current && setupType && setupType !== "NONE");
@@ -1063,24 +1146,45 @@ function buildPaperScalpReadiness({
   }
 
   if (!riskModel.stopDefined) {
-    blockers.push("NO_DEFINED_STOP_OR_INVALIDATION");
-    reasonCodes.push("NO_DEFINED_STOP_OR_INVALIDATION");
-  } else {
-    reasonCodes.push("STOP_DEFINED");
+  blockers.push("NO_DEFINED_STOP_OR_INVALIDATION");
+  reasonCodes.push("NO_DEFINED_STOP_OR_INVALIDATION");
+
+  if (riskModel.invalidStopReason) {
+    blockers.push(riskModel.invalidStopReason);
+    reasonCodes.push(riskModel.invalidStopReason);
+  }
+} else {
+  reasonCodes.push("STOP_DEFINED");
+  if (riskModel.stopSource) {
+    reasonCodes.push(`STOP_FROM_${riskModel.stopSource}`);
+  }
+}
+
+if (!targetPathDefined) {
+  blockers.push("MISSING_TARGET_PATH");
+  reasonCodes.push("MISSING_TARGET_PATH");
+} else if (!targetPathEnough && !targetPathCaution) {
+  blockers.push("NO_CLEAN_PATH_TO_TARGET");
+  reasonCodes.push("NO_CLEAN_PATH_TO_TARGET");
+} else if (targetPathCaution) {
+  warnings.push("TARGET_PATH_BELOW_PREFERRED_8_POINTS");
+  reasonCodes.push("TARGET_PATH_CAUTION");
+
+  if (targetModel.targetSource) {
+    reasonCodes.push(`TARGET_FROM_${targetModel.targetSource}`);
+  }
+} else {
+  reasonCodes.push("TARGET_PATH_DEFINED_OR_PREVIEW");
+
+  if (targetModel.targetSource) {
+    reasonCodes.push(`TARGET_FROM_${targetModel.targetSource}`);
   }
 
-  if (!targetPathDefined) {
-    blockers.push("MISSING_TARGET_PATH");
-    reasonCodes.push("MISSING_TARGET_PATH");
-  } else if (!targetPathEnough && !targetPathCaution) {
-    blockers.push("NO_CLEAN_PATH_TO_TARGET");
-    reasonCodes.push("NO_CLEAN_PATH_TO_TARGET");
-  } else if (targetPathCaution) {
-    warnings.push("TARGET_PATH_BELOW_PREFERRED_8_POINTS");
-    reasonCodes.push("TARGET_PATH_CAUTION");
-  } else {
-    reasonCodes.push("TARGET_PATH_DEFINED_OR_PREVIEW");
+  if (targetModel.targetSource === "PAPER_PLANNER_10_POINT_FALLBACK") {
+    warnings.push("PAPER_TARGET_PLANNER_FALLBACK_USED");
+    reasonCodes.push("PAPER_TARGET_PLANNER_FALLBACK_USED");
   }
+}
 
   const hardBlocked = blockers.some((blocker) =>
     [
@@ -1162,11 +1266,12 @@ function buildPaperScalpReadiness({
     timing,
     chaseRisk,
 
-    targetModel: {
-      ...paper.targetModel,
-      ...targetModel,
-      targetType: targetModel.targetType || "IMBALANCE_TO_IMBALANCE",
-    },
+  targetModel: {
+    ...paper.targetModel,
+    ...targetModel,
+    targetType: targetModel.targetType || "IMBALANCE_TO_IMBALANCE",
+    targetSource: targetModel.targetSource || null,
+  },
 
     riskModel,
 
