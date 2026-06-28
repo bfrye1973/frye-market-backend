@@ -3746,6 +3746,248 @@ function attachEngine22LifecycleReactionToConfluence({
   return patchedConfluence;
 }
 
+function buildPaperScalpParticipation({
+  confirmationDirection,
+  participationFocus,
+  participationState,
+  participationQuality,
+  strictParticipationConfirmed,
+  volumeScore,
+  volumeConfirmed,
+  relativeVolume,
+  volumeTrend,
+  highVolumeCandles,
+  volumeExpansion,
+  absorptionRisk,
+  climacticVolume,
+  volumeRisk,
+  focusSatisfied,
+  reclaimLike,
+  cleanParticipation,
+  greenCandle,
+  redCandle,
+  higherClose,
+  lowerClose,
+} = {}) {
+  const intendedDirection = String(confirmationDirection || "NEUTRAL").toUpperCase();
+  const focus = String(participationFocus || "UNKNOWN").toUpperCase();
+  const state = String(participationState || "WEAK").toUpperCase();
+  const quality = String(participationQuality || "WEAK").toUpperCase();
+  const trend = String(volumeTrend || "UNKNOWN").toUpperCase();
+
+  const score = Number(volumeScore);
+  const relVol = Number(relativeVolume);
+  const hvCandles = Number(highVolumeCandles);
+
+  const safeScore = Number.isFinite(score) ? score : 0;
+  const safeRelVol = Number.isFinite(relVol) ? relVol : 0;
+  const safeHighVolumeCandles = Number.isFinite(hvCandles) ? hvCandles : 0;
+
+  const strongRedVolumeAgainstLong =
+    intendedDirection === "LONG" &&
+    redCandle === true &&
+    lowerClose === true &&
+    (
+      volumeExpansion === true ||
+      safeHighVolumeCandles >= 2 ||
+      safeScore >= 10 ||
+      safeRelVol >= 1.35
+    );
+
+  const strongGreenRejectionAgainstShort =
+    intendedDirection === "SHORT" &&
+    greenCandle === true &&
+    higherClose === true &&
+    (
+      volumeExpansion === true ||
+      safeHighVolumeCandles >= 2 ||
+      safeScore >= 10 ||
+      safeRelVol >= 1.35
+    );
+
+  const failedReclaimWithVolume =
+    focus === "VOLUME_ON_RECLAIM" &&
+    reclaimLike !== true &&
+    (redCandle === true || lowerClose === true) &&
+    (
+      volumeExpansion === true ||
+      safeHighVolumeCandles >= 2 ||
+      safeScore >= 10 ||
+      safeRelVol >= 1.35
+    );
+
+  const highVolumeNoProgressAgainstTrade =
+    focusSatisfied !== true &&
+    (
+      volumeExpansion === true ||
+      safeHighVolumeCandles >= 2 ||
+      safeScore >= 10 ||
+      safeRelVol >= 1.35
+    ) &&
+    (
+      trend === "FADING" ||
+      failedReclaimWithVolume
+    );
+
+  const absorptionRiskAgainstTrade =
+    absorptionRisk === true &&
+    focusSatisfied !== true;
+
+  const climacticAgainstTrade =
+    climacticVolume === true &&
+    focusSatisfied !== true;
+
+  const hardBlocked =
+    volumeRisk === true ||
+    strongRedVolumeAgainstLong ||
+    strongGreenRejectionAgainstShort ||
+    failedReclaimWithVolume ||
+    highVolumeNoProgressAgainstTrade ||
+    absorptionRiskAgainstTrade ||
+    climacticAgainstTrade;
+
+  const weakFading =
+    state === "WEAK" &&
+    (
+      trend === "FADING" ||
+      safeRelVol < 0.75
+    );
+
+  const weakImproving =
+    state === "WEAK" &&
+    reclaimLike === true &&
+    trend !== "FADING" &&
+    safeRelVol >= 0.8 &&
+    hardBlocked !== true;
+
+  const mixedAcceptable =
+    state === "MIXED" &&
+    hardBlocked !== true;
+
+  const expandingAcceptable =
+    state === "EXPANDING" &&
+    hardBlocked !== true;
+
+  const confirmedAcceptable =
+    strictParticipationConfirmed === true ||
+    state === "CONFIRMED" ||
+    volumeConfirmed === true;
+
+  let allowed = false;
+  let grade = "D";
+  let risk = "WAIT_FOR_PARTICIPATION";
+  let downgradeOnly = false;
+
+  const reasonCodes = [
+    "PAPER_ONLY_RESEARCH_LANE",
+    "ENGINE4_PAPER_SCALP_PARTICIPATION_READ",
+    "NO_REAL_EXECUTION_PERMISSION_CREATED",
+  ];
+
+  if (hardBlocked) {
+    allowed = false;
+    grade = "F";
+    risk = "DANGEROUS_PARTICIPATION";
+    downgradeOnly = false;
+
+    reasonCodes.push("PAPER_TRADE_BLOCKED_BY_ENGINE4");
+
+    if (volumeRisk) reasonCodes.push("VOLUME_RISK_PRESENT");
+    if (strongRedVolumeAgainstLong) reasonCodes.push("STRONG_RED_VOLUME_AGAINST_LONG");
+    if (strongGreenRejectionAgainstShort) reasonCodes.push("STRONG_GREEN_REJECTION_AGAINST_SHORT");
+    if (failedReclaimWithVolume) reasonCodes.push("FAILED_RECLAIM_WITH_VOLUME");
+    if (highVolumeNoProgressAgainstTrade) reasonCodes.push("HIGH_VOLUME_NO_PROGRESS_AGAINST_TRADE");
+    if (absorptionRiskAgainstTrade) reasonCodes.push("ABSORPTION_RISK_AGAINST_TRADE");
+    if (climacticAgainstTrade) reasonCodes.push("CLIMACTIC_AGAINST_TRADE");
+  } else if (confirmedAcceptable) {
+    allowed = true;
+    grade = "A";
+    risk = "CLEAN_FOR_PAPER";
+    downgradeOnly = false;
+
+    reasonCodes.push("STRICT_PARTICIPATION_CONFIRMED");
+    reasonCodes.push("PAPER_ALLOWED_ENGINE4_A_GRADE");
+  } else if (expandingAcceptable) {
+    allowed = true;
+    grade = "B";
+    risk = "ACCEPTABLE_FOR_PAPER";
+    downgradeOnly = true;
+
+    reasonCodes.push("EXPANDING_PARTICIPATION_ACCEPTABLE_FOR_PAPER");
+    reasonCodes.push("ENGINE4_STRICT_CONFIRMATION_NOT_REQUIRED_FOR_PAPER");
+  } else if (mixedAcceptable) {
+    allowed = true;
+    grade = "C";
+    risk = "MIXED_PARTICIPATION_REQUIRES_STRONG_ENGINE3";
+    downgradeOnly = true;
+
+    reasonCodes.push("MIXED_PARTICIPATION_ACCEPTABLE_FOR_PAPER");
+    reasonCodes.push("ENGINE3_REACTION_REQUIRED_FOR_PAPER");
+  } else if (weakImproving) {
+    allowed = true;
+    grade = "C";
+    risk = "THIN_PARTICIPATION_PAPER_ONLY";
+    downgradeOnly = true;
+
+    reasonCodes.push("WEAK_BUT_IMPROVING_PARTICIPATION");
+    reasonCodes.push("RECLAIM_LIKE_PRICE_ACTION_DETECTED");
+  } else if (weakFading) {
+    allowed = false;
+    grade = "D";
+    risk = "WAIT_FOR_PARTICIPATION";
+    downgradeOnly = false;
+
+    reasonCodes.push("WEAK_FADING_PARTICIPATION");
+    reasonCodes.push("RELATIVE_VOLUME_TOO_LOW");
+    reasonCodes.push("WAIT_FOR_RECLAIM_VOLUME");
+  } else {
+    allowed = false;
+    grade = "D";
+    risk = "WAIT_FOR_PARTICIPATION";
+    downgradeOnly = false;
+
+    reasonCodes.push("PARTICIPATION_NOT_READY_FOR_PAPER");
+  }
+
+  return {
+    active: true,
+    engine: "engine4.paperScalpParticipation.v1",
+    mode: "PAPER_ONLY",
+
+    allowed,
+    hardBlocked,
+    downgradeOnly,
+
+    grade,
+    risk,
+
+    intendedDirection,
+    direction: allowed ? intendedDirection : "NEUTRAL",
+
+    participationState: state,
+    participationQuality: quality,
+
+    volumeScore: safeScore,
+    relativeVolume: safeRelVol,
+    volumeTrend: trend,
+    highVolumeCandles: safeHighVolumeCandles,
+    volumeExpansion: volumeExpansion === true,
+    volumeConfirmed: volumeConfirmed === true,
+
+    strictParticipationConfirmed: strictParticipationConfirmed === true,
+
+    focusSatisfied: focusSatisfied === true,
+    reclaimLike: reclaimLike === true,
+    cleanParticipation: cleanParticipation === true,
+
+    noRealExecutionPermissionCreated: true,
+    noPermissionCreated: true,
+    noExecution: true,
+
+    reasonCodes,
+  };
+}
+
 function buildEngine22LifecycleParticipation({
   engine22WaveStrategy,
   volumeContext,
@@ -3932,6 +4174,30 @@ function buildEngine22LifecycleParticipation({
     direction = "NEUTRAL";
   }
 
+  const paperScalpParticipation = buildPaperScalpParticipation({
+    confirmationDirection: confirmation?.direction,
+    participationFocus,
+    participationState,
+    participationQuality,
+    strictParticipationConfirmed: confirmed,
+    volumeScore,
+    volumeConfirmed,
+    relativeVolume,
+    volumeTrend,
+    highVolumeCandles,
+    volumeExpansion,
+    absorptionRisk,
+    climacticVolume,
+    volumeRisk,
+    focusSatisfied,
+    reclaimLike,
+    cleanParticipation,
+    greenCandle,
+    redCandle,
+    higherClose,
+    lowerClose,
+  });
+
   const reasonCodes = [
     "ENGINE4_READ_ENGINE22_CONFIRMATION_CONTEXT",
     "PARTICIPATION_REQUIRED",
@@ -3977,6 +4243,7 @@ function buildEngine22LifecycleParticipation({
     volumeState: participationState,
     volumeRisk,
     confirmed,
+    paperScalpParticipation,
 
     currentPrice:
       toNum(confirmation?.reference?.currentPrice) ??
