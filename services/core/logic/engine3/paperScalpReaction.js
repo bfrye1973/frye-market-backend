@@ -3,7 +3,8 @@
 // Engine 3 PAPER_ONLY scalp reaction advisory.
 //
 // Contract:
-// - Reads currentLevelAction.
+// - Reads engine3FastImbalanceReaction first when active.
+// - Falls back to currentLevelAction.
 // - Creates paper-only advisory only.
 // - Does not create real permission.
 // - Does not create real execution.
@@ -16,7 +17,12 @@
 // confluence.context.reaction.paperScalpReaction
 
 const ENGINE = "engine3.paperScalpReaction.v1";
-const SOURCE = "confluence.context.reaction.currentLevelAction";
+
+const SOURCE_CURRENT_LEVEL =
+  "confluence.context.reaction.currentLevelAction";
+
+const SOURCE_FAST_IMBALANCE =
+  "confluence.context.reaction.engine3FastImbalanceReaction";
 
 const TARGET_MODEL = {
   instrument: "ES",
@@ -47,14 +53,13 @@ const PAPER_SHORT_RESEARCH_STATES = new Set([
 const BLOCKED_STATES = new Set([
   "NO_SIGNAL",
   "NO_REFERENCE_LEVEL",
+  "NO_FAST_IMBALANCE",
+  "NO_FAST_IMBALANCE_WATCH",
   "INSUFFICIENT_CANDLES",
   "CHOP_INSIDE_VALUE",
 ]);
 
-const GOOD_QUALITY = new Set([
-  "GOOD",
-  "STRONG",
-]);
+const GOOD_QUALITY = new Set(["GOOD", "STRONG"]);
 
 function safeUpper(value, fallback = "NONE") {
   const text = String(value || "").trim();
@@ -81,9 +86,35 @@ function getEngine22Direction(engine22WaveStrategy) {
   );
 }
 
-function setupTypeForState(state, direction) {
+function isFastReactionActive(fastImbalanceReaction) {
+  return (
+    fastImbalanceReaction &&
+    typeof fastImbalanceReaction === "object" &&
+    fastImbalanceReaction.active === true &&
+    fastImbalanceReaction.fastMode === true
+  );
+}
+
+function setupTypeForState(state, direction, fastMode = false) {
   const s = safeUpper(state);
   const d = safeUpper(direction, "NONE");
+
+  if (fastMode === true && d === "LONG") {
+    if (s === "WICK_BELOW_AND_RECLAIM") return "FAST_SWEEP_RECLAIM_LONG";
+    if (s === "DIP_BOUGHT_FAST") return "FAST_SWEEP_RECLAIM_LONG";
+    if (s === "SELLERS_TRAPPED") return "FAST_SWEEP_RECLAIM_LONG";
+    if (s === "RECLAIMED_LEVEL") return "FAST_RECLAIMED_IMBALANCE_LONG";
+    if (s === "HELD_LEVEL") return "FAST_HELD_IMBALANCE_LONG";
+    if (s === "ACCEPTING_VALUE") return "FAST_ACCEPTING_IMBALANCE_LONG";
+    if (s === "BREAKOUT_HOLDING") return "FAST_BREAKOUT_HOLDING_LONG";
+  }
+
+  if (fastMode === true && d === "SHORT") {
+    if (s === "FAILED_RECLAIM") return "FAST_FAILED_RECLAIM_SHORT_RESEARCH";
+    if (s === "REJECTING_VALUE") return "FAST_REJECTING_IMBALANCE_SHORT_RESEARCH";
+    if (s === "BREAKOUT_FAILING") return "FAST_BREAKOUT_FAILING_SHORT_RESEARCH";
+    if (s === "LOST_LEVEL") return "FAST_LOST_IMBALANCE_SHORT_RESEARCH";
+  }
 
   if (d === "LONG") {
     if (s === "WICK_BELOW_AND_RECLAIM") return "SWEEP_RECLAIM_LONG";
@@ -106,25 +137,40 @@ function setupTypeForState(state, direction) {
 }
 
 function buildBasePaperScalpReaction({
+  source = SOURCE_CURRENT_LEVEL,
+  reactionInput = null,
   currentLevelAction = null,
+  fastImbalanceReaction = null,
   engine22WaveStrategy = null,
   allowed = false,
   direction = "NONE",
   setupType = "NONE",
   blockers = [],
   reasonCodes = [],
+  fastMode = false,
 } = {}) {
-  const state = safeUpper(currentLevelAction?.state, "NO_SIGNAL");
-  const quality = safeUpper(currentLevelAction?.quality, "WEAK");
+  const state = safeUpper(reactionInput?.state, "NO_SIGNAL");
+  const quality = safeUpper(reactionInput?.quality, "WEAK");
+
+  const imbalance = fastMode === true
+    ? fastImbalanceReaction?.imbalance || reactionInput?.imbalance || null
+    : null;
 
   return {
     active: true,
     engine: ENGINE,
-    source: SOURCE,
+    source,
 
     allowed: allowed === true,
     mode: "PAPER_ONLY",
     researchOnly: true,
+
+    fastMode: fastMode === true,
+    earlySignal:
+      fastMode === true
+        ? fastImbalanceReaction?.earlySignal === true ||
+          reactionInput?.earlySignal === true
+        : false,
 
     direction,
     quality,
@@ -133,13 +179,19 @@ function buildBasePaperScalpReaction({
 
     targetModel: TARGET_MODEL,
 
-    currentPrice: toNum(currentLevelAction?.currentPrice),
-    referenceLevel: toNum(currentLevelAction?.referenceLevel),
-    referenceType: currentLevelAction?.referenceType || null,
-    referenceLabel: currentLevelAction?.referenceLabel || null,
-    distancePts: toNum(currentLevelAction?.distancePts),
+    currentPrice: toNum(reactionInput?.currentPrice),
+    referenceLevel: toNum(reactionInput?.referenceLevel),
+    referenceType: reactionInput?.referenceType || null,
+    referenceLabel: reactionInput?.referenceLabel || null,
+    distancePts:
+      fastMode === true
+        ? toNum(imbalance?.distancePts)
+        : toNum(reactionInput?.distancePts),
+
+    imbalance,
 
     currentLevelAction: currentLevelAction || null,
+    fastImbalanceReaction: fastImbalanceReaction || null,
 
     lifecycleKey:
       engine22WaveStrategy?.currentLifecycleState?.key || null,
@@ -157,6 +209,7 @@ function buildBasePaperScalpReaction({
     reasonCodes: uniqueReasonCodes([
       "PAPER_ONLY_RESEARCH_LANE",
       "ENGINE3_PAPER_SCALP_REACTION",
+      fastMode === true ? "ENGINE3_FAST_IMBALANCE_REACTION_CONSUMED" : null,
       allowed === true
         ? "ENGINE3_PAPER_SCALP_REACTION_ALLOWED"
         : "ENGINE3_PAPER_SCALP_REACTION_NOT_ALLOWED",
@@ -168,9 +221,12 @@ function buildBasePaperScalpReaction({
   };
 }
 
-function buildMissingCurrentLevelAction({ engine22WaveStrategy } = {}) {
+function buildMissingReaction({ engine22WaveStrategy } = {}) {
   return buildBasePaperScalpReaction({
+    source: SOURCE_CURRENT_LEVEL,
+    reactionInput: null,
     currentLevelAction: null,
+    fastImbalanceReaction: null,
     engine22WaveStrategy,
     allowed: false,
     direction: "NONE",
@@ -183,25 +239,34 @@ function buildMissingCurrentLevelAction({ engine22WaveStrategy } = {}) {
   });
 }
 
-export function buildPaperScalpReaction({
+function evaluateReactionForPaper({
+  reactionInput,
   currentLevelAction = null,
+  fastImbalanceReaction = null,
   engine22WaveStrategy = null,
   paperShortResearchEnabled = false,
-} = {}) {
-  if (!currentLevelAction || typeof currentLevelAction !== "object") {
-    return buildMissingCurrentLevelAction({ engine22WaveStrategy });
-  }
+  fastMode = false,
+}) {
+  const source =
+    fastMode === true ? SOURCE_FAST_IMBALANCE : SOURCE_CURRENT_LEVEL;
 
-  const state = safeUpper(currentLevelAction.state, "NO_SIGNAL");
-  const quality = safeUpper(currentLevelAction.quality, "WEAK");
-  const actionDirection = safeUpper(currentLevelAction.direction, "NEUTRAL");
+  const state = safeUpper(reactionInput?.state, "NO_SIGNAL");
+  const quality = safeUpper(reactionInput?.quality, "WEAK");
+  const actionDirection = safeUpper(reactionInput?.direction, "NEUTRAL");
   const engine22Direction = getEngine22Direction(engine22WaveStrategy);
 
   const blockers = [];
   const reasonCodes = [
-    `CURRENT_LEVEL_ACTION_STATE_${state}`,
-    `CURRENT_LEVEL_ACTION_QUALITY_${quality}`,
-    `CURRENT_LEVEL_ACTION_DIRECTION_${actionDirection}`,
+    fastMode === true ? "FAST_IMBALANCE_WATCH" : null,
+    fastMode === true
+      ? `FAST_IMBALANCE_STATE_${state}`
+      : `CURRENT_LEVEL_ACTION_STATE_${state}`,
+    fastMode === true
+      ? `FAST_IMBALANCE_QUALITY_${quality}`
+      : `CURRENT_LEVEL_ACTION_QUALITY_${quality}`,
+    fastMode === true
+      ? `FAST_IMBALANCE_DIRECTION_${actionDirection}`
+      : `CURRENT_LEVEL_ACTION_DIRECTION_${actionDirection}`,
     engine22Direction ? `ENGINE22_DIRECTION_${engine22Direction}` : null,
   ];
 
@@ -213,16 +278,32 @@ export function buildPaperScalpReaction({
   }
 
   if (BLOCKED_STATES.has(state)) {
-    blockers.push("CURRENT_LEVEL_ACTION_STATE_BLOCKED_FOR_PAPER");
-    reasonCodes.push("CURRENT_LEVEL_ACTION_STATE_BLOCKED_FOR_PAPER");
+    blockers.push(
+      fastMode === true
+        ? "FAST_IMBALANCE_STATE_BLOCKED_FOR_PAPER"
+        : "CURRENT_LEVEL_ACTION_STATE_BLOCKED_FOR_PAPER"
+    );
+    reasonCodes.push(
+      fastMode === true
+        ? "FAST_IMBALANCE_STATE_BLOCKED_FOR_PAPER"
+        : "CURRENT_LEVEL_ACTION_STATE_BLOCKED_FOR_PAPER"
+    );
   }
 
   if (
-    currentLevelAction.noExecution !== true ||
-    currentLevelAction.noPermissionCreated !== true
+    reactionInput?.noExecution !== true ||
+    reactionInput?.noPermissionCreated !== true
   ) {
-    blockers.push("CURRENT_LEVEL_ACTION_SAFETY_FLAGS_MISSING");
-    reasonCodes.push("CURRENT_LEVEL_ACTION_SAFETY_FLAGS_MISSING");
+    blockers.push(
+      fastMode === true
+        ? "FAST_IMBALANCE_SAFETY_FLAGS_MISSING"
+        : "CURRENT_LEVEL_ACTION_SAFETY_FLAGS_MISSING"
+    );
+    reasonCodes.push(
+      fastMode === true
+        ? "FAST_IMBALANCE_SAFETY_FLAGS_MISSING"
+        : "CURRENT_LEVEL_ACTION_SAFETY_FLAGS_MISSING"
+    );
   }
 
   const isLongAllowedState = PAPER_LONG_ALLOWED_STATES.has(state);
@@ -235,14 +316,26 @@ export function buildPaperScalpReaction({
 
   if (isLongAllowedState) {
     direction = "LONG";
-    setupType = setupTypeForState(state, direction);
+    setupType = setupTypeForState(state, direction, fastMode);
 
     if (actionDirection !== "LONG") {
-      blockers.push("CURRENT_LEVEL_ACTION_DIRECTION_NOT_LONG");
-      reasonCodes.push("CURRENT_LEVEL_ACTION_DIRECTION_NOT_LONG");
+      blockers.push(
+        fastMode === true
+          ? "FAST_IMBALANCE_DIRECTION_NOT_LONG"
+          : "CURRENT_LEVEL_ACTION_DIRECTION_NOT_LONG"
+      );
+      reasonCodes.push(
+        fastMode === true
+          ? "FAST_IMBALANCE_DIRECTION_NOT_LONG"
+          : "CURRENT_LEVEL_ACTION_DIRECTION_NOT_LONG"
+      );
     }
 
-    if (engine22Direction && engine22Direction !== "NONE" && engine22Direction !== "LONG") {
+    if (
+      engine22Direction &&
+      engine22Direction !== "NONE" &&
+      engine22Direction !== "LONG"
+    ) {
       blockers.push("ENGINE22_DIRECTION_CONFLICTS_WITH_LONG_PAPER_SCALP");
       reasonCodes.push("ENGINE22_DIRECTION_CONFLICT");
     }
@@ -250,25 +343,36 @@ export function buildPaperScalpReaction({
     allowed = blockers.length === 0;
   } else if (isLongConditionalState) {
     direction = "LONG";
-    setupType = setupTypeForState(state, direction);
+    setupType = setupTypeForState(state, direction, fastMode);
 
-    // Conditional states need stronger evidence in v1.
     if (quality !== "STRONG") {
       blockers.push("CONDITIONAL_LONG_REQUIRES_STRONG_QUALITY");
       reasonCodes.push("CONDITIONAL_LONG_REQUIRES_STRONG_QUALITY");
     }
 
-    if (currentLevelAction.confirmed !== true) {
+    if (reactionInput?.confirmed !== true) {
       blockers.push("CONDITIONAL_LONG_REQUIRES_CONFIRMED_CURRENT_ACTION");
       reasonCodes.push("CONDITIONAL_LONG_REQUIRES_CONFIRMED_CURRENT_ACTION");
     }
 
     if (actionDirection !== "LONG") {
-      blockers.push("CURRENT_LEVEL_ACTION_DIRECTION_NOT_LONG");
-      reasonCodes.push("CURRENT_LEVEL_ACTION_DIRECTION_NOT_LONG");
+      blockers.push(
+        fastMode === true
+          ? "FAST_IMBALANCE_DIRECTION_NOT_LONG"
+          : "CURRENT_LEVEL_ACTION_DIRECTION_NOT_LONG"
+      );
+      reasonCodes.push(
+        fastMode === true
+          ? "FAST_IMBALANCE_DIRECTION_NOT_LONG"
+          : "CURRENT_LEVEL_ACTION_DIRECTION_NOT_LONG"
+      );
     }
 
-    if (engine22Direction && engine22Direction !== "NONE" && engine22Direction !== "LONG") {
+    if (
+      engine22Direction &&
+      engine22Direction !== "NONE" &&
+      engine22Direction !== "LONG"
+    ) {
       blockers.push("ENGINE22_DIRECTION_CONFLICTS_WITH_LONG_PAPER_SCALP");
       reasonCodes.push("ENGINE22_DIRECTION_CONFLICT");
     }
@@ -276,7 +380,9 @@ export function buildPaperScalpReaction({
     allowed = blockers.length === 0;
   } else if (isShortResearchState) {
     direction = "SHORT";
-    setupType = setupTypeForState(state, direction);
+    setupType = setupTypeForState(state, direction, fastMode);
+
+    reasonCodes.push(setupType);
 
     if (paperShortResearchEnabled !== true) {
       blockers.push("PAPER_SHORT_RESEARCH_DISABLED_V1");
@@ -284,14 +390,30 @@ export function buildPaperScalpReaction({
     }
 
     if (actionDirection !== "SHORT") {
-      blockers.push("CURRENT_LEVEL_ACTION_DIRECTION_NOT_SHORT");
-      reasonCodes.push("CURRENT_LEVEL_ACTION_DIRECTION_NOT_SHORT");
+      blockers.push(
+        fastMode === true
+          ? "FAST_IMBALANCE_DIRECTION_NOT_SHORT"
+          : "CURRENT_LEVEL_ACTION_DIRECTION_NOT_SHORT"
+      );
+      reasonCodes.push(
+        fastMode === true
+          ? "FAST_IMBALANCE_DIRECTION_NOT_SHORT"
+          : "CURRENT_LEVEL_ACTION_DIRECTION_NOT_SHORT"
+      );
     }
 
     allowed = blockers.length === 0;
   } else {
-    blockers.push("CURRENT_LEVEL_ACTION_STATE_NOT_PAPER_ACTIONABLE");
-    reasonCodes.push("CURRENT_LEVEL_ACTION_STATE_NOT_PAPER_ACTIONABLE");
+    blockers.push(
+      fastMode === true
+        ? "FAST_IMBALANCE_STATE_NOT_PAPER_ACTIONABLE"
+        : "CURRENT_LEVEL_ACTION_STATE_NOT_PAPER_ACTIONABLE"
+    );
+    reasonCodes.push(
+      fastMode === true
+        ? "FAST_IMBALANCE_STATE_NOT_PAPER_ACTIONABLE"
+        : "CURRENT_LEVEL_ACTION_STATE_NOT_PAPER_ACTIONABLE"
+    );
   }
 
   if (!allowed) {
@@ -301,13 +423,43 @@ export function buildPaperScalpReaction({
   }
 
   return buildBasePaperScalpReaction({
+    source,
+    reactionInput,
     currentLevelAction,
+    fastImbalanceReaction,
     engine22WaveStrategy,
     allowed,
     direction,
     setupType,
     blockers,
     reasonCodes,
+    fastMode,
+  });
+}
+
+export function buildPaperScalpReaction({
+  currentLevelAction = null,
+  fastImbalanceReaction = null,
+  engine22WaveStrategy = null,
+  paperShortResearchEnabled = false,
+} = {}) {
+  const useFastReaction = isFastReactionActive(fastImbalanceReaction);
+
+  const reactionInput = useFastReaction
+    ? fastImbalanceReaction
+    : currentLevelAction;
+
+  if (!reactionInput || typeof reactionInput !== "object") {
+    return buildMissingReaction({ engine22WaveStrategy });
+  }
+
+  return evaluateReactionForPaper({
+    reactionInput,
+    currentLevelAction,
+    fastImbalanceReaction: useFastReaction ? fastImbalanceReaction : null,
+    engine22WaveStrategy,
+    paperShortResearchEnabled,
+    fastMode: useFastReaction,
   });
 }
 
@@ -319,8 +471,12 @@ export function attachPaperScalpReactionToConfluence({
   const currentLevelAction =
     patchedConfluence?.context?.reaction?.currentLevelAction || null;
 
+  const fastImbalanceReaction =
+    patchedConfluence?.context?.reaction?.engine3FastImbalanceReaction || null;
+
   const paperScalpReaction = buildPaperScalpReaction({
     currentLevelAction,
+    fastImbalanceReaction,
     engine22WaveStrategy,
     paperShortResearchEnabled,
   });
