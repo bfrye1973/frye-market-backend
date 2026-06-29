@@ -4864,7 +4864,7 @@ function buildEngine4FastImbalanceParticipation({
     direction = "NEUTRAL";
 
     blockers.push("FAST_IMBALANCE_PARTICIPATION_NOT_CONFIRMED");
-    reasonCodes.push("LOW_RELATIVE_VOLUME_FAST_MODE_BACKGROUND");
+    reasonCodes.push("WEAK_FADING_PARTICIPATION");
     reasonCodes.push("PARTICIPATION_NOT_READY_FOR_PAPER");
   } else if (relativeVolume < 0.9) {
     allowed = false;
@@ -4876,7 +4876,7 @@ function buildEngine4FastImbalanceParticipation({
     direction = "NEUTRAL";
 
     blockers.push("FAST_IMBALANCE_PARTICIPATION_NOT_CONFIRMED");
-    reasonCodes.push("WEAK_FADING_PARTICIPATION");
+    reasonCodes.push("LOW_RELATIVE_VOLUME_FAST_MODE_BACKGROUND");
     reasonCodes.push("PARTICIPATION_NOT_READY_FOR_PAPER");
   } else {
     allowed = false;
