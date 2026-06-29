@@ -71,6 +71,11 @@ function toNum(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function validPrice(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function uniqueReasonCodes(reasonCodes = []) {
   return [...new Set(reasonCodes.filter(Boolean))];
 }
@@ -92,6 +97,33 @@ function isFastReactionActive(fastImbalanceReaction) {
     typeof fastImbalanceReaction === "object" &&
     fastImbalanceReaction.active === true &&
     fastImbalanceReaction.fastMode === true
+  );
+}
+
+function resolvePaperCurrentPrice({
+  fastMode = false,
+  reactionInput = null,
+  fastImbalanceReaction = null,
+  currentLevelAction = null,
+} = {}) {
+  if (fastMode === true) {
+    return (
+      validPrice(fastImbalanceReaction?.currentPrice) ??
+      validPrice(fastImbalanceReaction?.lastCandle?.close) ??
+      validPrice(reactionInput?.currentPrice) ??
+      validPrice(reactionInput?.lastCandle?.close) ??
+      validPrice(currentLevelAction?.currentPrice) ??
+      validPrice(currentLevelAction?.lastCandle?.close) ??
+      null
+    );
+  }
+
+  return (
+    validPrice(currentLevelAction?.currentPrice) ??
+    validPrice(currentLevelAction?.lastCandle?.close) ??
+    validPrice(reactionInput?.currentPrice) ??
+    validPrice(reactionInput?.lastCandle?.close) ??
+    null
   );
 }
 
@@ -179,7 +211,12 @@ function buildBasePaperScalpReaction({
 
     targetModel: TARGET_MODEL,
 
-    currentPrice: toNum(reactionInput?.currentPrice),
+    currentPrice: resolvePaperCurrentPrice({
+      fastMode,
+      reactionInput,
+      fastImbalanceReaction,
+      currentLevelAction,
+    }),
     referenceLevel: toNum(reactionInput?.referenceLevel),
     referenceType: reactionInput?.referenceType || null,
     referenceLabel: reactionInput?.referenceLabel || null,
