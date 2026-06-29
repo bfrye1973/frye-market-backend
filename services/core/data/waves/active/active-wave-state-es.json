@@ -1,10 +1,14 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-06-24 13:30",
+  "updatedAt": "2026-06-28 13:30",
+  "schema": "active-wave-state-es@v2",
   "activeStructures": {
     "intermediate": {
       "tf": "1h",
       "direction": "UP",
+      "active": true,
+      "activeWave": "W3",
+      "currentRead": "INTERMEDIATE_W3_ACTIVE",
       "marks": {
         "W1": {
           "price": 7648,
@@ -32,35 +36,44 @@
             "status": "SUPERSEDED",
             "reason": "PRIOR_W2_CANDIDATE_SUPERSEDED_BY_DEEPER_7360_C_LOW"
           }
-        }   
-        "minute": {
-          "tf": "10m",
-          "direction": "UP",
-          "marks": {
-            "W1": {
-              "low": {
-                "price": 7360,
-                "time": "2026-06-26 06:30"
-              },
-              "high": {
-                "price": 7459.75,
-                "time": "2026-06-26 08:30"
-              },
-              "status": "CONFIRMED"
-            },
-            "W2": {
-              "price": 7369.25,
-              "time": "2026-06-26 13:00",
-              "status": "CONFIRMED"
-            },
-            "W3": {
-              "price": 7500,
-              "time": "2026-06-28 12:00",
-              "status": "CANDIDATE_COMPLETE",
-              "basis": [
-                "MINUTE_W3_IMPULSE_COMPLETED_NEAR_7500",
-                "WATCH_MINUTE_W4_PULLBACK"
-              ]
-            }
-          }
         }
+      }
+    },
+    "minute": {
+      "tf": "10m",
+      "direction": "UP",
+      "active": true,
+      "parentDegree": "intermediate",
+      "parentWave": "W3",
+      "activeWave": "W4",
+      "currentRead": "MINUTE_W3_COMPLETE_W4_PULLBACK_WATCH",
+      "marks": {
+        "W1": {
+          "low": {
+            "price": 7360,
+            "time": "2026-06-26 06:30"
+          },
+          "high": {
+            "price": 7459.75,
+            "time": "2026-06-26 08:30"
+          },
+          "status": "CONFIRMED"
+        },
+        "W2": {
+          "price": 7369.25,
+          "time": "2026-06-26 13:00",
+          "status": "CONFIRMED"
+        },
+        "W3": {
+          "price": 7500,
+          "time": "2026-06-28 12:00",
+          "status": "CANDIDATE_COMPLETE",
+          "basis": [
+            "MINUTE_W3_IMPULSE_COMPLETED_NEAR_7500",
+            "WATCH_MINUTE_W4_PULLBACK"
+          ]
+        }
+      }
+    }
+  }
+}
