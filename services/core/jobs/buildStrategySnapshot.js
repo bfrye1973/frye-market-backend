@@ -5416,11 +5416,6 @@ attachEngine22LifecycleReactionToConfluence({
   bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
 });
 
-attachEngine4FastImbalanceParticipationToConfluence({
-  patchedConfluence,
-  bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-});     
-
 attachCurrentLevelActionToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
@@ -5434,6 +5429,11 @@ attachFastImbalanceReactionToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
   bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+});
+
+attachEngine4FastImbalanceParticipationToConfluence({
+  patchedConfluence,
+  bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
 });
 
 attachPaperScalpReactionToConfluence({
@@ -5835,10 +5835,6 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
        engine22WaveStrategy,
        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
      });
-     attachEngine4FastImbalanceParticipationToConfluence({
-       patchedConfluence,
-       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-     });
      attachCurrentLevelActionToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
@@ -5852,6 +5848,11 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
        patchedConfluence,
        engine22WaveStrategy,
        bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+     });
+
+     attachEngine4FastImbalanceParticipationToConfluence({
+       patchedConfluence,
+       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
      });
 
      attachPaperScalpReactionToConfluence({
