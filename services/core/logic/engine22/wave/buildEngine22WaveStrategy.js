@@ -878,6 +878,184 @@ function buildLifecycleViews({
   };
 }
 
+function buildLifecycleContextForEngine26({
+  lifecycleViews,
+  currentLifecycleState,
+} = {}) {
+  const longTerm = lifecycleViews?.longTerm || null;
+  const intraday = lifecycleViews?.intradayScalp || null;
+
+  const longTermFib = longTerm?.fibMap || {};
+  const intradayFib = intraday?.fibMap || {};
+  const intradayAnchors = intraday?.anchors || {};
+
+  const preferredW4Zone = intradayFib?.preferredW4Zone || null;
+
+  return {
+    source: "engine22.lifecycleContext.v1",
+    purpose: "COMPACT_CONTEXT_FOR_ENGINE26_IMBALANCE_WATCH",
+    noExecution: true,
+    noPermissionCreated: true,
+
+    longTermLifecycle: longTerm
+      ? {
+          active: true,
+          key: longTerm.key || "INTERMEDIATE_W3_ACTIVE",
+          lifecycle: longTerm.key || "INTERMEDIATE_W3_ACTIVE",
+          activeWave: "INTERMEDIATE_W3",
+          activeDegree: longTerm.activeDegree || "intermediate",
+          direction: longTerm.direction || "LONG",
+          purpose: "HIGHER_TIMEFRAME_CONTEXT_ONLY",
+
+          currentPrice: longTerm?.anchors?.currentPrice ?? null,
+          w1High: longTerm?.anchors?.w1High ?? null,
+          w2Low: longTerm?.anchors?.w2Low ?? null,
+
+          nextTarget: longTermFib?.nextTarget ?? null,
+          higherTargets: Array.isArray(longTermFib?.higherTargets)
+            ? longTermFib.higherTargets
+            : [],
+
+          noExecution: true,
+          noPermissionCreated: true,
+
+          summary:
+            longTerm.summary ||
+            "Intermediate W3 is active. This is higher-timeframe context only, not a standalone scalp trigger.",
+
+          reasonCodes: [
+            "ENGINE22_LONG_TERM_LIFECYCLE_CONTEXT",
+            "HIGHER_TIMEFRAME_CONTEXT_ONLY",
+            "NO_EXECUTION",
+            "NO_PERMISSION_CREATED",
+          ],
+        }
+      : {
+          active: false,
+          key: "NO_LONG_TERM_LIFECYCLE_CONTEXT",
+          lifecycle: "NO_LONG_TERM_LIFECYCLE_CONTEXT",
+          activeWave: null,
+          direction: "NONE",
+          purpose: "HIGHER_TIMEFRAME_CONTEXT_ONLY",
+          noExecution: true,
+          noPermissionCreated: true,
+          reasonCodes: ["ENGINE22_LONG_TERM_LIFECYCLE_CONTEXT_MISSING"],
+        },
+
+    intradayScalpLifecycle: intraday
+      ? {
+          active: true,
+          key: "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
+          lifecycle: "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
+          sourceKey:
+            intraday.key ||
+            currentLifecycleState?.key ||
+            "MINUTE_W3_COMPLETE_W4_PULLBACK_WATCH",
+
+          activeWave: "MINUTE_W4",
+          activeDegree: intraday.activeDegree || "minute",
+          parentWave: "INTERMEDIATE_W3",
+          parentDegree: intraday.parentDegree || "intermediate",
+
+          direction: intraday.direction || "LONG_AFTER_CONFIRMATION",
+          action:
+            currentLifecycleState?.action ||
+            "WAIT_FOR_RECLAIM_HOLD_OR_CONTROLLED_PULLBACK_CONFIRMATION",
+
+          currentPrice: intradayAnchors.currentPrice ?? null,
+          w3High: intradayAnchors.w3High ?? null,
+
+          preferredW4Zone: preferredW4Zone
+            ? {
+                lo: preferredW4Zone.lo ?? null,
+                hi: preferredW4Zone.hi ?? null,
+                label:
+                  preferredW4Zone.label ||
+                  "0.5–0.618 Minute W4 pullback zone",
+              }
+            : null,
+
+          pullbackLevels: intradayFib?.pullbackLevels || null,
+          invalidation: intradayFib?.invalidationLevel ?? null,
+          ifW4HoldsNextTargets:
+            intradayFib?.ifW4HoldsNextTargets || null,
+
+          noChase: true,
+          noExecution: true,
+          noPermissionCreated: true,
+
+          requiresEngine3Confirmation: true,
+          requiresEngine4Participation: true,
+          requiresEngine15Readiness: true,
+          requiresEngine6Permission: true,
+
+          engine26Use: {
+            allowedAsContext: true,
+            labelForTopImbalance:
+              "TOP_IMBALANCE_ACTIVE_MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
+            labelForLowerImbalance: "W4_PULLBACK_SUPPORT_TEST",
+            topImbalanceContext: [
+              "TOP_IMBALANCE_ACTIVE",
+              "INTERMEDIATE_W3_CONTEXT",
+              "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
+              "DO_NOT_CHASE_LONG",
+              "WATCH_7500_ACCEPTANCE_OR_REJECTION",
+            ],
+            lowerImbalanceContext: [
+              "BOTTOM_IMBALANCE_ACTIVE",
+              "W4_PULLBACK_SUPPORT_TEST",
+              "WATCH_SWEEP_RECLAIM_OR_SUPPORT_FAILURE",
+              "DIRECTION_NOT_ASSUMED",
+            ],
+            directionAssumption: "NONE_UNTIL_ENGINE3_ENGINE4_CONFIRM",
+            ticketAuthority: "ENGINE6_PAPER_ALLOW_REQUIRED",
+          },
+
+          summary:
+            intraday.summary ||
+            "Minute W3 may be complete and Minute W4 pullback is being watched. Do not chase vertical price. Wait for controlled pullback, reclaim hold, Engine 3/4 confirmation, Engine 15 readiness, and Engine 6 permission.",
+
+          reasonCodes: [
+            "ENGINE22_INTRADAY_SCALP_LIFECYCLE_CONTEXT",
+            "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
+            "ENGINE26_CONTEXT_ONLY",
+            "NO_CHASE",
+            "NO_EXECUTION",
+            "NO_PERMISSION_CREATED",
+            "ENGINE6_PAPER_ALLOW_REQUIRED",
+          ],
+        }
+      : {
+          active: false,
+          key: "NO_INTRADAY_SCALP_LIFECYCLE_CONTEXT",
+          lifecycle: "NO_INTRADAY_SCALP_LIFECYCLE_CONTEXT",
+          activeWave: null,
+          parentWave: null,
+          direction: "NONE",
+          noExecution: true,
+          noPermissionCreated: true,
+          reasonCodes: ["ENGINE22_INTRADAY_SCALP_LIFECYCLE_CONTEXT_MISSING"],
+        },
+
+    relationship: {
+      engine22Role: "WAVE_CONTEXT_ONLY",
+      engine26Role: "MANUAL_IMBALANCE_ALARM_AND_SCALP_COORDINATOR",
+      directionAuthority: "ENGINE3_ENGINE4_FAST_READS",
+      readinessAuthority: "ENGINE15",
+      permissionAuthority: "ENGINE6",
+      ticketRule: "NO_ENGINE26_TICKET_UNTIL_ENGINE6_PAPER_ALLOW",
+    },
+
+    reasonCodes: [
+      "ENGINE22_LIFECYCLE_CONTEXT_FOR_ENGINE26_BUILT",
+      "LONG_TERM_AND_INTRADAY_SCALP_SPLIT",
+      "ENGINE22_CONTEXT_ONLY",
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+    ],
+  };
+}
+
 function buildPreEngine15WaveOpportunity({
   context,
   waveFibState,
@@ -1095,6 +1273,11 @@ export function buildEngine22WaveStrategy(input = {}) {
     currentLifecycleState,
     waveOpportunity,
   });
+
+  const lifecycleContext = buildLifecycleContextForEngine26({
+    lifecycleViews,
+    currentLifecycleState,
+  });
   const timelineReadBase = buildTimelineRead({
     waveFibState,
     tradeContextSummary,
@@ -1120,6 +1303,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     ? {
         ...(timelineReadBase || {}),
         lifecycleViews,
+        lifecycleContext,
         headline: currentLifecycleState.headline,
         subheadline:
           currentLifecycleState.key === "INTERMEDIATE_W2_COMPLETE_W3_LAUNCH_WATCH"
@@ -1171,6 +1355,7 @@ export function buildEngine22WaveStrategy(input = {}) {
 
     // Secondary/read-only layers.
     lifecycleViews,
+    lifecycleContext,
     timelineRead,
     tradeDecision,
 
