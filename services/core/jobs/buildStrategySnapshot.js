@@ -4987,6 +4987,349 @@ function attachEngine4FastImbalanceParticipationToConfluence({
   return patchedConfluence;
 }
 
+function buildEngine4CurrentScalpParticipation({
+  patchedConfluence,
+  bars = [],
+} = {}) {
+  const reactionContext = patchedConfluence?.context?.reaction || null;
+  const volumeContext = patchedConfluence?.context?.volume || null;
+
+  const fastReaction =
+    reactionContext?.engine3FastImbalanceReaction || null;
+
+  const paperReaction =
+    reactionContext?.paperScalpReaction || null;
+
+  const currentLevelAction =
+    reactionContext?.currentLevelAction ||
+    paperReaction?.currentLevelAction ||
+    null;
+
+  const sourceReaction =
+    fastReaction?.active === true
+      ? fastReaction
+      : paperReaction?.active === true
+      ? paperReaction
+      : currentLevelAction?.active === true
+      ? currentLevelAction
+      : null;
+
+  const sourceName =
+    fastReaction?.active === true
+      ? "confluence.context.reaction.engine3FastImbalanceReaction"
+      : paperReaction?.active === true
+      ? "confluence.context.reaction.paperScalpReaction"
+      : currentLevelAction?.active === true
+      ? "confluence.context.reaction.currentLevelAction"
+      : "marketMeter.layers.emaPosture.tenMinute.bars";
+
+  const lastRaw =
+    sourceReaction?.lastCandle ||
+    sourceReaction?.currentLevelAction?.lastCandle ||
+    currentLevelAction?.lastCandle ||
+    bars[bars.length - 1] ||
+    {};
+
+  const prevRaw =
+    sourceReaction?.priorCandle ||
+    sourceReaction?.currentLevelAction?.priorCandle ||
+    currentLevelAction?.priorCandle ||
+    bars[bars.length - 2] ||
+    {};
+
+  const last = barPartsForPullbackReaction(lastRaw);
+  const prev = barPartsForPullbackReaction(prevRaw);
+
+  const flags = volumeContext?.flags || {};
+  const volumeReasonCodes = Array.isArray(volumeContext?.reasonCodes)
+    ? volumeContext.reasonCodes
+    : [];
+
+  const volumeScore = Number(volumeContext?.volumeScore ?? 0);
+  const volumeConfirmed = volumeContext?.volumeConfirmed === true;
+
+  const relativeVolume = Number(flags?.relativeVolume ?? 0);
+  const highVolumeCandles = Number(flags?.highVolumeCandles ?? 0);
+  const volumeTrend = flags?.volumeTrend || null;
+
+  const currentBarVolume = last.volume ?? null;
+  const priorBarVolume = prev.volume ?? null;
+
+  const currentVsPriorVolumeRatio =
+    currentBarVolume != null &&
+    priorBarVolume != null &&
+    Number(priorBarVolume) > 0
+      ? Number((Number(currentBarVolume) / Number(priorBarVolume)).toFixed(2))
+      : null;
+
+  const volumeIncreasing =
+    currentBarVolume != null &&
+    priorBarVolume != null
+      ? Number(currentBarVolume) > Number(priorBarVolume)
+      : false;
+
+  const volumeExpansion =
+    flags?.volumeExpansion === true ||
+    volumeReasonCodes.includes("BURST_VOLUME_ABOVE_1_35_AVG") ||
+    volumeScore >= 10 ||
+    relativeVolume >= 1.35 ||
+    currentVsPriorVolumeRatio >= 1.25;
+
+  const absorptionRisk = flags?.absorptionRisk === true;
+  const climacticRisk = flags?.climacticVolume === true;
+
+  const intendedDirection = String(
+    sourceReaction?.direction ||
+      paperReaction?.direction ||
+      currentLevelAction?.direction ||
+      "NEUTRAL"
+  ).toUpperCase();
+
+  const reactionState = String(
+    sourceReaction?.state ||
+      currentLevelAction?.state ||
+      "NO_SCALP_REACTION"
+  ).toUpperCase();
+
+  const reactionQuality = String(
+    sourceReaction?.quality ||
+      currentLevelAction?.quality ||
+      "WEAK"
+  ).toUpperCase();
+
+  const currentPrice =
+    toNum(sourceReaction?.currentPrice) ||
+    toNum(currentLevelAction?.currentPrice) ||
+    last.close ||
+    null;
+
+  const greenCandle =
+    last.open != null &&
+    last.close != null &&
+    last.close > last.open;
+
+  const redCandle =
+    last.open != null &&
+    last.close != null &&
+    last.close < last.open;
+
+  const higherClose =
+    prev.close != null &&
+    last.close != null &&
+    last.close > prev.close;
+
+  const lowerClose =
+    prev.close != null &&
+    last.close != null &&
+    last.close < prev.close;
+
+  const supportsDirection =
+    intendedDirection === "LONG"
+      ? greenCandle && (higherClose || reactionState.includes("ACCEPTING") || reactionState.includes("RECLAIM"))
+      : intendedDirection === "SHORT"
+      ? redCandle && (lowerClose || reactionState.includes("REJECTING") || reactionState.includes("FAILING") || reactionState.includes("LOST"))
+      : false;
+
+  const againstDirection =
+    intendedDirection === "LONG"
+      ? redCandle && lowerClose
+      : intendedDirection === "SHORT"
+      ? greenCandle && higherClose
+      : false;
+
+  const participationImproving =
+    volumeIncreasing === true ||
+    volumeExpansion === true ||
+    currentVsPriorVolumeRatio >= 1.15 ||
+    relativeVolume >= 1.0 ||
+    highVolumeCandles >= 1;
+
+  const highVolumeNoProgress =
+    volumeExpansion === true &&
+    supportsDirection !== true;
+
+  const hardBlocked =
+    absorptionRisk === true ||
+    climacticRisk === true ||
+    highVolumeNoProgress === true ||
+    (
+      againstDirection === true &&
+      (
+        volumeExpansion === true ||
+        currentVsPriorVolumeRatio >= 1.25 ||
+        relativeVolume >= 1.25 ||
+        highVolumeCandles >= 1
+      )
+    );
+
+  let allowed = false;
+  let downgradeOnly = true;
+  let participationState = "WAIT_FOR_PARTICIPATION";
+  let participationQuality = "WEAK";
+  let grade = "D";
+  let risk = "WAIT_FOR_PARTICIPATION";
+  let direction = "NEUTRAL";
+
+  const blockers = [];
+  const reasonCodes = [
+    "PAPER_ONLY_RESEARCH_LANE",
+    "ENGINE4_CURRENT_SCALP_PARTICIPATION",
+    "CURRENT_SCALP_VOLUME_READ",
+    "NO_REAL_PERMISSION_CREATED",
+    "NO_EXECUTION",
+    "ENGINE6_FINAL_PAPER_APPROVAL_REQUIRED",
+  ];
+
+  if (hardBlocked) {
+    allowed = false;
+    downgradeOnly = false;
+    participationState = "CURRENT_SCALP_VOLUME_RISK";
+    participationQuality = "RISK";
+    grade = "F";
+    risk = "DANGEROUS_PARTICIPATION";
+    direction = "NEUTRAL";
+
+    blockers.push("ENGINE4_CURRENT_SCALP_VOLUME_HARD_BLOCKED");
+    reasonCodes.push("CURRENT_SCALP_VOLUME_RISK_PRESENT");
+
+    if (absorptionRisk) reasonCodes.push("ABSORPTION_RISK");
+    if (climacticRisk) reasonCodes.push("CLIMACTIC_RISK");
+    if (highVolumeNoProgress) reasonCodes.push("HIGH_VOLUME_NO_PROGRESS");
+    if (againstDirection) reasonCodes.push("VOLUME_AGAINST_TRADE_DIRECTION");
+  } else if (
+    supportsDirection &&
+    participationImproving &&
+    ["GOOD", "STRONG"].includes(reactionQuality)
+  ) {
+    allowed = true;
+    downgradeOnly = true;
+    participationState = "CURRENT_SCALP_PARTICIPATION_OK";
+    participationQuality = "MIXED";
+    grade = reactionQuality === "STRONG" ? "B" : "C";
+    risk = "ACCEPTABLE_FOR_PAPER_REVIEW";
+    direction = intendedDirection;
+
+    reasonCodes.push("CURRENT_SCALP_PARTICIPATION_SUPPORTS_DIRECTION");
+    reasonCodes.push("PARTICIPATION_IMPROVING");
+  } else if (supportsDirection) {
+    allowed = false;
+    downgradeOnly = true;
+    participationState = "PRICE_ACTION_OK_VOLUME_NOT_READY";
+    participationQuality = "WEAK";
+    grade = "D";
+    risk = "WAIT_FOR_PARTICIPATION";
+    direction = "NEUTRAL";
+
+    blockers.push("ENGINE4_CURRENT_SCALP_PARTICIPATION_NOT_CONFIRMED");
+    reasonCodes.push("PRICE_ACTION_SUPPORTS_DIRECTION");
+    reasonCodes.push("VOLUME_NOT_READY");
+  } else if (currentVsPriorVolumeRatio != null && currentVsPriorVolumeRatio < 0.9) {
+    allowed = false;
+    downgradeOnly = true;
+    participationState = "WEAK_LOW_VOLUME_PARTICIPATION";
+    participationQuality = "WEAK";
+    grade = "D";
+    risk = "WAIT_FOR_PARTICIPATION";
+    direction = "NEUTRAL";
+
+    blockers.push("ENGINE4_CURRENT_SCALP_PARTICIPATION_NOT_CONFIRMED");
+    reasonCodes.push("CURRENT_VOLUME_BELOW_PRIOR_VOLUME");
+  } else {
+    allowed = false;
+    downgradeOnly = true;
+    participationState = "NO_CURRENT_SCALP_PARTICIPATION";
+    participationQuality = "WEAK";
+    grade = "D";
+    risk = "WAIT_FOR_PARTICIPATION";
+    direction = "NEUTRAL";
+
+    blockers.push("ENGINE4_CURRENT_SCALP_PARTICIPATION_NOT_CONFIRMED");
+    reasonCodes.push("PARTICIPATION_NOT_READY_FOR_PAPER");
+  }
+
+  return {
+    active: true,
+    engine: "engine4.currentScalpParticipation.v1",
+    mode: "CURRENT_SCALP_VOLUME",
+    paperOnly: true,
+    researchOnly: true,
+
+    source: sourceName,
+
+    allowed,
+    hardBlocked,
+    downgradeOnly,
+
+    intendedDirection,
+    direction,
+
+    participationState,
+    participationQuality,
+    grade,
+    risk,
+
+    currentPrice,
+
+    currentBarVolume,
+    priorBarVolume,
+    currentVsPriorVolumeRatio,
+    volumeIncreasing,
+
+    volumeScore,
+    relativeVolume: Number.isFinite(relativeVolume) ? relativeVolume : 0,
+    volumeTrend,
+    highVolumeCandles,
+    volumeExpansion,
+    volumeConfirmed,
+
+    fastImbalanceActive: fastReaction?.active === true,
+    paperScalpActive: paperReaction?.active === true,
+    currentLevelActionActive: currentLevelAction?.active === true,
+
+    reactionState,
+    reactionQuality,
+    reactionDirection: intendedDirection,
+
+    supportsDirection,
+    againstDirection,
+    participationImproving,
+    highVolumeNoProgress,
+    absorptionRisk,
+    climacticRisk,
+
+    lastCandle: last,
+    priorCandle: prev,
+
+    requiresEngine6PaperApproval: true,
+    noRealPermissionCreated: true,
+    noPermissionCreated: true,
+    noExecution: true,
+
+    blockers,
+    reasonCodes,
+  };
+}
+
+function attachEngine4CurrentScalpParticipationToConfluence({
+  patchedConfluence,
+  bars = [],
+}) {
+  const currentScalpParticipation = buildEngine4CurrentScalpParticipation({
+    patchedConfluence,
+    bars,
+  });
+
+  if (!currentScalpParticipation) return patchedConfluence;
+
+  patchedConfluence.context = patchedConfluence.context || {};
+  patchedConfluence.context.volume = {
+    ...(patchedConfluence.context.volume || {}),
+    engine4CurrentScalpParticipation: currentScalpParticipation,
+  };
+
+  return patchedConfluence;
+}
+
 /* -----------------------------
    Build one strategy
 ------------------------------*/
@@ -5441,6 +5784,10 @@ attachPaperScalpReactionToConfluence({
   engine22WaveStrategy,
   paperShortResearchEnabled: false,
 });
+attachEngine4CurrentScalpParticipationToConfluence({
+  patchedConfluence,
+  bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+});      
 
 engine22WaveStrategy = {
   ...engine22WaveStrategy,
@@ -5860,6 +6207,10 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
        engine22WaveStrategy,
        paperShortResearchEnabled: false,
      });
+     attachEngine4CurrentScalpParticipationToConfluence({
+       patchedConfluence,
+       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+     }); 
      engine22WaveStrategy = {
        ...engine22WaveStrategy,
        currentLifecycleState: enrichCurrentLifecycleWithLivePriceAction({
