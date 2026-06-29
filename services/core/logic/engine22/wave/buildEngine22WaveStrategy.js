@@ -489,6 +489,376 @@ function getActiveW4Levels(waveFibState) {
   );
 }
 
+function markPrice(mark) {
+  const direct = Number(mark?.price ?? mark?.p);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const high = Number(mark?.high?.price ?? mark?.high?.p);
+  if (Number.isFinite(high) && high > 0) return high;
+
+  const low = Number(mark?.low?.price ?? mark?.low?.p);
+  if (Number.isFinite(low) && low > 0) return low;
+
+  return null;
+}
+
+function markTime(mark) {
+  return (
+    mark?.time ??
+    mark?.t ??
+    mark?.high?.time ??
+    mark?.low?.time ??
+    null
+  );
+}
+
+function calcBullishExtensions({ base, range }) {
+  const b = Number(base);
+  const r = Number(range);
+
+  if (!Number.isFinite(b) || !Number.isFinite(r) || r <= 0) {
+    return {
+      e100: null,
+      e1272: null,
+      e1618: null,
+      e200: null,
+      e2618: null,
+    };
+  }
+
+  return {
+    e100: round2(b + r * 1.0),
+    e1272: round2(b + r * 1.272),
+    e1618: round2(b + r * 1.618),
+    e200: round2(b + r * 2.0),
+    e2618: round2(b + r * 2.618),
+  };
+}
+
+function calcRetracementsFromHigh({ start, high }) {
+  const s = Number(start);
+  const h = Number(high);
+
+  if (!Number.isFinite(s) || !Number.isFinite(h) || h <= s) {
+    return {
+      r236: null,
+      r382: null,
+      r500: null,
+      r618: null,
+      r786: null,
+    };
+  }
+
+  const range = h - s;
+
+  return {
+    r236: round2(h - range * 0.236),
+    r382: round2(h - range * 0.382),
+    r500: round2(h - range * 0.5),
+    r618: round2(h - range * 0.618),
+    r786: round2(h - range * 0.786),
+  };
+}
+
+function firstNonNull(...values) {
+  for (const value of values) {
+    if (value !== null && value !== undefined) return value;
+  }
+  return null;
+}
+
+function getActiveStructuresFromWaveFibState(waveFibState, engine2State) {
+  return (
+    waveFibState?.activeStructures ||
+    waveFibState?.activeWaveState?.activeStructures ||
+    engine2State?.activeStructures ||
+    {}
+  );
+}
+
+function buildIntermediateLongTermLifecycleView({
+  context,
+  waveFibState,
+  currentLifecycleState,
+}) {
+  const structures = getActiveStructuresFromWaveFibState(
+    waveFibState,
+    context?.engine2State
+  );
+
+  const intermediate =
+    structures?.intermediate ||
+    context?.engine2State?.intermediate ||
+    null;
+
+  const marks = intermediate?.marks || intermediate?.waveMarks || {};
+
+  const w1High = firstNonNull(
+    markPrice(marks?.W1),
+    markPrice(intermediate?.marks?.W1),
+    markPrice(context?.engine2State?.intermediate?.waveMarks?.W1)
+  );
+
+  const w2Low = firstNonNull(
+    markPrice(marks?.W2),
+    markPrice(intermediate?.marks?.W2),
+    markPrice(context?.engine2State?.intermediate?.waveMarks?.W2)
+  );
+
+  const currentPrice = round2(
+    context?.currentPrice ??
+      waveFibState?.currentPrice ??
+      currentLifecycleState?.currentPrice
+  );
+
+  const range =
+    Number.isFinite(Number(w1High)) && Number.isFinite(Number(w2Low))
+      ? Math.abs(Number(w1High) - Number(w2Low))
+      : null;
+
+  const levels =
+    range && w2Low
+      ? calcBullishExtensions({
+          base: w2Low,
+          range,
+        })
+      : {
+          e100: null,
+          e1272: null,
+          e1618: null,
+          e200: null,
+          e2618: null,
+        };
+
+  const nextTarget =
+    Object.values(levels).find(
+      (level) =>
+        Number.isFinite(Number(level)) &&
+        Number.isFinite(Number(currentPrice)) &&
+        Number(level) > Number(currentPrice)
+    ) ?? null;
+
+  return {
+    key: "INTERMEDIATE_W3_ACTIVE",
+    label: "Intermediate W3 active",
+    source: "engine22.lifecycleViews.longTerm",
+    activeDegree: "intermediate",
+    activeWave:
+      intermediate?.activeWave ||
+      waveFibState?.activeStructures?.intermediate?.activeWave ||
+      "W3",
+    direction: "LONG",
+    contextOnly: true,
+    noExecution: true,
+
+    anchors: {
+      w1High: round2(w1High),
+      w1Time: markTime(marks?.W1),
+      w2Low: round2(w2Low),
+      w2Time: markTime(marks?.W2),
+      currentPrice,
+    },
+
+    fibMap: {
+      source: "INTERMEDIATE_W2_TO_W3_EXTENSION",
+      purpose: "Higher-timeframe destination map. Not an intraday entry signal.",
+      anchorHigh: round2(w1High),
+      projectionBase: round2(w2Low),
+      range: round2(range),
+      levels,
+      nextTarget,
+      higherTargets: Object.values(levels).filter(
+        (level) =>
+          Number.isFinite(Number(level)) &&
+          Number.isFinite(Number(currentPrice)) &&
+          Number(level) > Number(currentPrice)
+      ),
+    },
+
+    status: "CONTEXT_ONLY",
+    summary:
+      "Intermediate W3 is active. This is the higher-timeframe bullish context and target roadmap, not a standalone scalp trigger.",
+    reasonCodes: [
+      "ENGINE22_LIFECYCLE_VIEW_LONG_TERM_BUILT",
+      "INTERMEDIATE_W3_ACTIVE_CONTEXT",
+      "NO_EXECUTION",
+    ],
+  };
+}
+
+function buildMinuteIntradayScalpLifecycleView({
+  context,
+  waveFibState,
+  currentLifecycleState,
+  waveOpportunity,
+}) {
+  const structures = getActiveStructuresFromWaveFibState(
+    waveFibState,
+    context?.engine2State
+  );
+
+  const minute =
+    structures?.minute ||
+    context?.engine2State?.minute ||
+    null;
+
+  const marks = minute?.marks || minute?.waveMarks || {};
+
+  const w1Low = firstNonNull(
+    markPrice(marks?.W1?.low),
+    markPrice(context?.engine2State?.minute?.waveMarks?.W1)
+  );
+
+  const w1High = firstNonNull(
+    markPrice(marks?.W1?.high),
+    markPrice(context?.engine2State?.minute?.waveMarks?.W1)
+  );
+
+  const w2Low = firstNonNull(
+    markPrice(marks?.W2),
+    markPrice(context?.engine2State?.minute?.waveMarks?.W2)
+  );
+
+  const w3High = firstNonNull(
+    markPrice(marks?.W3),
+    markPrice(context?.engine2State?.minute?.waveMarks?.W3)
+  );
+
+  const currentPrice = round2(
+    context?.currentPrice ??
+      waveFibState?.currentPrice ??
+      currentLifecycleState?.currentPrice
+  );
+
+  const pullbackLevels = calcRetracementsFromHigh({
+    start: w2Low,
+    high: w3High,
+  });
+
+  const preferredW4Zone =
+    Number.isFinite(Number(pullbackLevels.r500)) &&
+    Number.isFinite(Number(pullbackLevels.r618))
+      ? {
+          label: "0.5–0.618 Minute W4 pullback zone",
+          lo: Math.min(pullbackLevels.r500, pullbackLevels.r618),
+          hi: Math.max(pullbackLevels.r500, pullbackLevels.r618),
+        }
+      : null;
+
+  const triggerLevels =
+    currentLifecycleState?.confirmationContext?.reference || {};
+
+  return {
+    key:
+      currentLifecycleState?.key ||
+      "MINUTE_W3_COMPLETE_W4_PULLBACK_WATCH",
+    label:
+      currentLifecycleState?.headline ||
+      "Minute W4 pullback — wait for reclaim",
+    source: "engine22.lifecycleViews.intradayScalp",
+
+    activeDegree: "minute",
+    activeWave:
+      minute?.activeWave ||
+      waveFibState?.activeStructures?.minute?.activeWave ||
+      "W4",
+    parentDegree: minute?.parentDegree || "intermediate",
+    parentWave: minute?.parentWave || "W3",
+
+    direction: "LONG_AFTER_CONFIRMATION",
+    paperScalpContext: true,
+    noChase: true,
+    noExecution: true,
+
+    anchors: {
+      w1Low: round2(w1Low),
+      w1High: round2(w1High),
+      w2Low: round2(w2Low),
+      w3High: round2(w3High),
+      w3Time: markTime(marks?.W3),
+      currentPrice,
+    },
+
+    fibMap: {
+      source: "MINUTE_W3_RETRACE_FOR_W4",
+      purpose:
+        "Intraday paper-scalp location map. Watch these W4 pullback / reclaim levels; not an entry signal by itself.",
+      wave3Start: round2(w2Low),
+      wave3High: round2(w3High),
+      currentPrice,
+      pullbackLevels,
+      preferredW4Zone,
+      reclaimLevels: {
+        reclaimLevel: round2(triggerLevels?.reclaimLevel),
+        triggerLevel: round2(triggerLevels?.triggerLevel),
+        priorCandleHigh: round2(triggerLevels?.priorCandleHigh),
+        localRangeHigh: round2(triggerLevels?.localRangeHigh),
+      },
+      invalidationLevel: round2(
+        triggerLevels?.invalidationLevel ??
+          w2Low
+      ),
+      ifW4HoldsNextTargets: {
+        source: "WAVE_OPPORTUNITY_TARGETS_IF_AVAILABLE",
+        e100: round2(waveOpportunity?.targets?.e100),
+        e1272: round2(waveOpportunity?.targets?.e1272),
+        e1618: round2(waveOpportunity?.targets?.e1618),
+        e200: round2(waveOpportunity?.targets?.e200),
+        e2618: round2(waveOpportunity?.targets?.e2618),
+      },
+    },
+
+    playbookContext: {
+      topImbalanceLabel: "MINUTE_W3_TOP_POSSIBLE",
+      pullbackLabel: "WATCH_W4_PULLBACK",
+      chaseLabel: "LONG_CHASE_BLOCKED",
+      permissionRequired: "ENGINE6_PAPER_ALLOW_REQUIRED",
+    },
+
+    status: "WATCH_ONLY",
+    summary:
+      "Minute W3 may be complete and Minute W4 pullback is being watched. Do not chase vertical price. Wait for controlled pullback, reclaim hold, Engine 3/4 confirmation, Engine 15 readiness, and Engine 6 paper permission.",
+    reasonCodes: [
+      "ENGINE22_LIFECYCLE_VIEW_INTRADAY_SCALP_BUILT",
+      "MINUTE_W4_PULLBACK_WATCH",
+      "NO_CHASE",
+      "NO_EXECUTION",
+    ],
+  };
+}
+
+function buildLifecycleViews({
+  context,
+  waveFibState,
+  currentLifecycleState,
+  waveOpportunity,
+}) {
+  const longTerm = buildIntermediateLongTermLifecycleView({
+    context,
+    waveFibState,
+    currentLifecycleState,
+  });
+
+  const intradayScalp = buildMinuteIntradayScalpLifecycleView({
+    context,
+    waveFibState,
+    currentLifecycleState,
+    waveOpportunity,
+  });
+
+  return {
+    source: "engine22.lifecycleViews.v1",
+    longTerm,
+    intradayScalp,
+    reasonCodes: [
+      "ENGINE22_LIFECYCLE_VIEWS_BUILT",
+      "LONG_TERM_AND_INTRADAY_SCALP_SPLIT",
+      "FIB_MAPS_ATTACHED_TO_EACH_LIFECYCLE",
+      "NO_EXECUTION",
+    ],
+  };
+}
+
 function buildPreEngine15WaveOpportunity({
   context,
   waveFibState,
@@ -570,6 +940,8 @@ function buildPreEngine15WaveOpportunity({
     };
   }
 }
+
+
 
 export function buildEngine22WaveStrategy(input = {}) {
   const symbol = normalizeSymbol(input?.symbol || "SPY");
@@ -698,6 +1070,12 @@ export function buildEngine22WaveStrategy(input = {}) {
   }
   // DISPLAY LAYER:
   // Timeline can use Engine15 for wording, but it is not the source of opportunity truth.
+  const lifecycleViews = buildLifecycleViews({
+    context,
+    waveFibState,
+    currentLifecycleState,
+    waveOpportunity,
+  });
   const timelineReadBase = buildTimelineRead({
     waveFibState,
     tradeContextSummary,
@@ -722,6 +1100,7 @@ export function buildEngine22WaveStrategy(input = {}) {
   const timelineRead = currentLifecycleState?.key
     ? {
         ...(timelineReadBase || {}),
+        lifecycleViews,
         headline: currentLifecycleState.headline,
         subheadline:
           currentLifecycleState.key === "INTERMEDIATE_W2_COMPLETE_W3_LAUNCH_WATCH"
@@ -738,7 +1117,10 @@ export function buildEngine22WaveStrategy(input = {}) {
           "ENGINE22_CURRENT_LIFECYCLE_STATE_MIRRORED_TO_TIMELINE_READ",
         ],
       }
-    : timelineReadBase;
+     : {
+        ...(timelineReadBase || {}),
+        lifecycleViews,
+      };
   // POST-ENGINE15 / PAPER-ONLY CONTEXT:
   // This may look at Engine15 and confirmations, but it remains separate.
   const tradeDecision = buildTradeDecisionSafe({
@@ -769,6 +1151,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     waveOpportunity,
 
     // Secondary/read-only layers.
+    lifecycleViews,
     timelineRead,
     tradeDecision,
 
