@@ -3702,8 +3702,21 @@ function buildEngine22PullbackReaction({
     return null;
   }
 
-  const last = barPartsForPullbackReaction(bars[bars.length - 1] || {});
-  const prev = barPartsForPullbackReaction(bars[bars.length - 2] || {});
+const fastLastCandle = fastReaction?.lastCandle || null;
+const fastPriorCandle = fastReaction?.priorCandle || null;
+
+const last = barPartsForPullbackReaction(
+  fastLastCandle || bars[bars.length - 1] || {}
+);
+
+const prev = barPartsForPullbackReaction(
+  fastPriorCandle || bars[bars.length - 2] || {}
+);
+
+const usedFastReactionCandles =
+  fastLastCandle != null || fastPriorCandle != null;
+
+const usedTenMinuteFallback = usedFastReactionCandles !== true;
 
   const currentPrice =
     toNum(current?.currentPrice) ??
@@ -4842,10 +4855,22 @@ function buildEngine4FastImbalanceParticipation({
     blockers.push("FAST_IMBALANCE_PARTICIPATION_NOT_CONFIRMED");
     reasonCodes.push("ENGINE3_HELD_LEVEL_CONDITIONAL");
     reasonCodes.push("WAIT_FOR_RECLAIM_VOLUME");
-  } else if (volumeTrend === "FADING" || relativeVolume < 0.9) {
+  } else if (volumeTrend === "FADING") {
     allowed = false;
     downgradeOnly = false;
     participationState = "WEAK_FADING_PARTICIPATION";
+    participationQuality = "WEAK";
+    grade = "D";
+    risk = "WAIT_FOR_PARTICIPATION";
+    direction = "NEUTRAL";
+
+    blockers.push("FAST_IMBALANCE_PARTICIPATION_NOT_CONFIRMED");
+    reasonCodes.push("LOW_RELATIVE_VOLUME_FAST_MODE_BACKGROUND");
+    reasonCodes.push("PARTICIPATION_NOT_READY_FOR_PAPER");
+  } else if (relativeVolume < 0.9) {
+    allowed = false;
+    downgradeOnly = true;
+    participationState = "WEAK_LOW_VOLUME_PARTICIPATION";
     participationQuality = "WEAK";
     grade = "D";
     risk = "WAIT_FOR_PARTICIPATION";
@@ -4909,7 +4934,17 @@ function buildEngine4FastImbalanceParticipation({
 
     currentBarVolume: last.volume ?? null,
     priorBarVolume: prev.volume ?? null,
+    currentVsPriorVolumeRatio:
+      last.volume != null && prev.volume != null && Number(prev.volume) > 0
+        ? Number((Number(last.volume) / Number(prev.volume)).toFixed(2))
+        : null,
+    volumeIncreasing:
+      last.volume != null && prev.volume != null
+        ? Number(last.volume) > Number(prev.volume)
+        : false,
     recentBarsUsed: Array.isArray(bars) ? bars.length : null,
+    usedFastReactionCandles,
+    usedTenMinuteFallback,
 
     fastReactionState,
     fastReactionQuality,
