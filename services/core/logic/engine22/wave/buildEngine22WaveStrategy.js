@@ -562,7 +562,16 @@ function calcRetracementsFromHigh({ start, high }) {
 
 function firstNonNull(...values) {
   for (const value of values) {
-    if (value !== null && value !== undefined) return value;
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+    if (
+      value !== null &&
+      value !== undefined &&
+      value !== "" &&
+      typeof value !== "number"
+    ) {
+      return value;
+    }
   }
   return null;
 }
@@ -706,11 +715,21 @@ function buildMinuteIntradayScalpLifecycleView({
 
   const w1Low = firstNonNull(
     markPrice(marks?.W1?.low),
+    round2(marks?.W1?.low?.price),
+    round2(marks?.W1?.low?.p),
+    markPrice(context?.engine2State?.activeStructures?.minute?.marks?.W1?.low),
+    round2(context?.engine2State?.activeStructures?.minute?.marks?.W1?.low?.price),
+    markPrice(context?.engine2State?.minute?.waveMarks?.W1?.low),
     markPrice(context?.engine2State?.minute?.waveMarks?.W1)
   );
 
   const w1High = firstNonNull(
     markPrice(marks?.W1?.high),
+    round2(marks?.W1?.high?.price),
+    round2(marks?.W1?.high?.p),
+    markPrice(context?.engine2State?.activeStructures?.minute?.marks?.W1?.high),
+    round2(context?.engine2State?.activeStructures?.minute?.marks?.W1?.high?.price),
+    markPrice(context?.engine2State?.minute?.waveMarks?.W1?.high),
     markPrice(context?.engine2State?.minute?.waveMarks?.W1)
   );
 
