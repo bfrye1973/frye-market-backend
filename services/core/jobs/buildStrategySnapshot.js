@@ -4530,6 +4530,429 @@ function attachEngine22LifecycleParticipationToConfluence({
   return patchedConfluence;
 }
 
+function buildEngine4FastImbalanceParticipation({
+  patchedConfluence,
+  bars = [],
+} = {}) {
+  const reactionContext = patchedConfluence?.context?.reaction || null;
+  const volumeContext = patchedConfluence?.context?.volume || null;
+
+  const fastReaction =
+    reactionContext?.engine3FastImbalanceReaction || null;
+
+  if (!fastReaction || fastReaction.active !== true) {
+    return null;
+  }
+
+  const last = barPartsForPullbackReaction(bars[bars.length - 1] || {});
+  const prev = barPartsForPullbackReaction(bars[bars.length - 2] || {});
+
+  const flags = volumeContext?.flags || {};
+  const volumeReasonCodes = Array.isArray(volumeContext?.reasonCodes)
+    ? volumeContext.reasonCodes
+    : [];
+
+  const volumeScore = Number(volumeContext?.volumeScore ?? 0);
+  const volumeConfirmed = volumeContext?.volumeConfirmed === true;
+
+  const relativeVolume = Number(flags?.relativeVolume ?? 0);
+  const highVolumeCandles = Number(flags?.highVolumeCandles ?? 0);
+  const volumeTrend = flags?.volumeTrend || null;
+
+  const volumeExpansion =
+    flags?.volumeExpansion === true ||
+    volumeReasonCodes.includes("BURST_VOLUME_ABOVE_1_35_AVG") ||
+    volumeScore >= 10 ||
+    relativeVolume >= 1.35;
+
+  const absorptionRisk = flags?.absorptionRisk === true;
+  const climacticRisk = flags?.climacticVolume === true;
+
+  const intendedDirection = String(
+    fastReaction.direction || fastReaction.fastReactionDirection || "NEUTRAL"
+  ).toUpperCase();
+
+  const fastReactionState = String(
+    fastReaction.state || fastReaction.fastReactionState || "UNKNOWN"
+  ).toUpperCase();
+
+  const fastReactionQuality = String(
+    fastReaction.quality || fastReaction.fastReactionQuality || "UNKNOWN"
+  ).toUpperCase();
+
+  const currentPrice = toNum(
+    fastReaction.currentPrice ??
+      fastReaction.current ??
+      fastReaction.price ??
+      fastReaction.imbalance?.currentPrice
+  );
+
+  const rawImbalance =
+    fastReaction.imbalance ||
+    fastReaction.zone ||
+    fastReaction.activeImbalance ||
+    null;
+
+  const imbalanceLo = toNum(rawImbalance?.lo);
+  const imbalanceHi = toNum(rawImbalance?.hi);
+  const imbalanceMid =
+    toNum(rawImbalance?.mid) ??
+    (
+      imbalanceLo != null && imbalanceHi != null
+        ? Number(((imbalanceLo + imbalanceHi) / 2).toFixed(2))
+        : null
+    );
+
+  const insideImbalance =
+    fastReaction.insideImbalance === true ||
+    fastReaction.inside === true ||
+    (
+      currentPrice != null &&
+      imbalanceLo != null &&
+      imbalanceHi != null &&
+      currentPrice >= Math.min(imbalanceLo, imbalanceHi) &&
+      currentPrice <= Math.max(imbalanceLo, imbalanceHi)
+    );
+
+  const nearImbalance =
+    insideImbalance ||
+    fastReaction.nearImbalance === true ||
+    fastReaction.near === true;
+
+  const distancePts =
+    insideImbalance
+      ? 0
+      : currentPrice != null && imbalanceLo != null && imbalanceHi != null
+      ? currentPrice < Math.min(imbalanceLo, imbalanceHi)
+        ? Number((Math.min(imbalanceLo, imbalanceHi) - currentPrice).toFixed(2))
+        : Number((currentPrice - Math.max(imbalanceLo, imbalanceHi)).toFixed(2))
+      : null;
+
+  const greenCandle =
+    last.open != null &&
+    last.close != null &&
+    last.close > last.open;
+
+  const redCandle =
+    last.open != null &&
+    last.close != null &&
+    last.close < last.open;
+
+  const higherClose =
+    prev.close != null &&
+    last.close != null &&
+    last.close > prev.close;
+
+  const lowerClose =
+    prev.close != null &&
+    last.close != null &&
+    last.close < prev.close;
+
+  const priorHighReclaimed =
+    prev.high != null &&
+    last.close != null &&
+    last.close > prev.high;
+
+  const reclaimLike =
+    greenCandle &&
+    (
+      higherClose ||
+      priorHighReclaimed ||
+      fastReactionState.includes("RECLAIM") ||
+      fastReactionState.includes("BREAKING_ABOVE")
+    );
+
+  const supportsFastReactionDirection =
+    intendedDirection === "LONG"
+      ? (
+          greenCandle &&
+          (higherClose || priorHighReclaimed || fastReactionState === "HELD_LEVEL")
+        )
+      : intendedDirection === "SHORT"
+      ? (
+          redCandle &&
+          lowerClose
+        )
+      : false;
+
+  const participationImproving =
+    volumeTrend === "EXPANDING" ||
+    relativeVolume >= 1.25 ||
+    volumeExpansion === true ||
+    highVolumeCandles >= 1;
+
+  const reclaimVolumeConfirmed =
+    intendedDirection === "LONG" &&
+    reclaimLike &&
+    participationImproving &&
+    volumeTrend !== "FADING" &&
+    absorptionRisk !== true &&
+    climacticRisk !== true;
+
+  const holdVolumeConfirmed =
+    intendedDirection === "LONG" &&
+    fastReactionState === "HELD_LEVEL" &&
+    insideImbalance &&
+    fastReactionQuality === "STRONG" &&
+    participationImproving &&
+    volumeTrend !== "FADING" &&
+    absorptionRisk !== true &&
+    climacticRisk !== true;
+
+  const rejectionVolumeConfirmed =
+    intendedDirection === "SHORT" &&
+    redCandle &&
+    lowerClose &&
+    participationImproving &&
+    volumeTrend !== "FADING";
+
+  const strongRedVolumeAgainstLong =
+    intendedDirection === "LONG" &&
+    redCandle &&
+    lowerClose &&
+    (
+      volumeExpansion ||
+      highVolumeCandles >= 2 ||
+      volumeScore >= 10 ||
+      relativeVolume >= 1.35
+    );
+
+  const strongGreenRejectionAgainstShort =
+    intendedDirection === "SHORT" &&
+    greenCandle &&
+    higherClose &&
+    (
+      volumeExpansion ||
+      highVolumeCandles >= 2 ||
+      volumeScore >= 10 ||
+      relativeVolume >= 1.35
+    );
+
+  const highVolumeNoProgress =
+    (
+      volumeExpansion ||
+      highVolumeCandles >= 2 ||
+      volumeScore >= 10 ||
+      relativeVolume >= 1.35
+    ) &&
+    supportsFastReactionDirection !== true &&
+    reclaimVolumeConfirmed !== true &&
+    holdVolumeConfirmed !== true;
+
+  const absorptionRiskAgainstTrade =
+    absorptionRisk === true &&
+    supportsFastReactionDirection !== true;
+
+  const climacticAgainstTrade =
+    climacticRisk === true &&
+    supportsFastReactionDirection !== true;
+
+  const hardBlocked =
+    strongRedVolumeAgainstLong ||
+    strongGreenRejectionAgainstShort ||
+    highVolumeNoProgress ||
+    absorptionRiskAgainstTrade ||
+    climacticAgainstTrade;
+
+  let allowed = false;
+  let downgradeOnly = true;
+  let participationState = "NO_FAST_IMBALANCE_PARTICIPATION";
+  let participationQuality = "WEAK";
+  let grade = "D";
+  let risk = "WAIT_FOR_PARTICIPATION";
+  let direction = "NEUTRAL";
+
+  const blockers = [];
+  const reasonCodes = [
+    "PAPER_ONLY_RESEARCH_LANE",
+    "ENGINE4_FAST_IMBALANCE_PARTICIPATION",
+    "FAST_IMBALANCE_WATCH",
+    "ENGINE3_FAST_REACTION_CONSUMED",
+    "NO_REAL_PERMISSION_CREATED",
+    "NO_EXECUTION",
+    "ENGINE6_FINAL_PAPER_APPROVAL_REQUIRED",
+  ];
+
+  if (hardBlocked) {
+    allowed = false;
+    downgradeOnly = false;
+    participationState = "VOLUME_RISK_PRESENT";
+    participationQuality = "RISK";
+    grade = "F";
+    risk = "DANGEROUS_PARTICIPATION";
+    direction = "NEUTRAL";
+
+    blockers.push("FAST_IMBALANCE_PARTICIPATION_HARD_BLOCKED");
+    reasonCodes.push("PAPER_TRADE_BLOCKED_BY_ENGINE4");
+
+    if (strongRedVolumeAgainstLong) reasonCodes.push("STRONG_RED_VOLUME_AGAINST_LONG");
+    if (strongGreenRejectionAgainstShort) reasonCodes.push("STRONG_GREEN_REJECTION_AGAINST_SHORT");
+    if (highVolumeNoProgress) reasonCodes.push("HIGH_VOLUME_NO_PROGRESS_AGAINST_TRADE");
+    if (absorptionRiskAgainstTrade) reasonCodes.push("ABSORPTION_RISK_AGAINST_TRADE");
+    if (climacticAgainstTrade) reasonCodes.push("CLIMACTIC_AGAINST_TRADE");
+  } else if (reclaimVolumeConfirmed) {
+    allowed = true;
+    downgradeOnly = false;
+    participationState = "RECLAIM_VOLUME_CONFIRMED";
+    participationQuality = "CLEAN";
+    grade = "A";
+    risk = "ACCEPTABLE_FOR_FAST_PAPER";
+    direction = intendedDirection;
+
+    reasonCodes.push("RECLAIM_VOLUME_CONFIRMED");
+    reasonCodes.push("FAST_IMBALANCE_PAPER_ALLOWED");
+  } else if (holdVolumeConfirmed) {
+    allowed = true;
+    downgradeOnly = true;
+    participationState = "PULLBACK_HOLD_VOLUME_OK";
+    participationQuality = "CLEAN";
+    grade = "B";
+    risk = "ACCEPTABLE_FOR_FAST_PAPER";
+    direction = intendedDirection;
+
+    reasonCodes.push("PULLBACK_HOLD_VOLUME_OK");
+    reasonCodes.push("FAST_IMBALANCE_PAPER_ALLOWED");
+  } else if (
+    participationImproving &&
+    supportsFastReactionDirection &&
+    fastReactionQuality === "STRONG"
+  ) {
+    allowed = true;
+    downgradeOnly = true;
+    participationState = "PARTICIPATION_IMPROVING";
+    participationQuality = "MIXED";
+    grade = "B";
+    risk = "ACCEPTABLE_FOR_FAST_PAPER";
+    direction = intendedDirection;
+
+    reasonCodes.push("PARTICIPATION_IMPROVING");
+    reasonCodes.push("FAST_IMBALANCE_PAPER_ALLOWED");
+  } else if (
+    fastReactionState === "HELD_LEVEL" &&
+    fastReactionQuality === "GOOD"
+  ) {
+    allowed = false;
+    downgradeOnly = true;
+    participationState = "LOW_VOLUME_HOLD";
+    participationQuality = "MIXED";
+    grade = "D";
+    risk = "WAIT_FOR_PARTICIPATION";
+    direction = "NEUTRAL";
+
+    blockers.push("FAST_IMBALANCE_PARTICIPATION_NOT_CONFIRMED");
+    reasonCodes.push("ENGINE3_HELD_LEVEL_CONDITIONAL");
+    reasonCodes.push("WAIT_FOR_RECLAIM_VOLUME");
+  } else if (volumeTrend === "FADING" || relativeVolume < 0.9) {
+    allowed = false;
+    downgradeOnly = false;
+    participationState = "WEAK_FADING_PARTICIPATION";
+    participationQuality = "WEAK";
+    grade = "D";
+    risk = "WAIT_FOR_PARTICIPATION";
+    direction = "NEUTRAL";
+
+    blockers.push("FAST_IMBALANCE_PARTICIPATION_NOT_CONFIRMED");
+    reasonCodes.push("WEAK_FADING_PARTICIPATION");
+    reasonCodes.push("PARTICIPATION_NOT_READY_FOR_PAPER");
+  } else {
+    allowed = false;
+    downgradeOnly = true;
+    participationState = "NO_FAST_IMBALANCE_PARTICIPATION";
+    participationQuality = "WEAK";
+    grade = "D";
+    risk = "WAIT_FOR_PARTICIPATION";
+    direction = "NEUTRAL";
+
+    blockers.push("FAST_IMBALANCE_PARTICIPATION_NOT_CONFIRMED");
+    reasonCodes.push("PARTICIPATION_NOT_READY_FOR_PAPER");
+  }
+
+  return {
+    active: true,
+    engine: "engine4.fastImbalanceParticipation.v1",
+    mode: "FAST_IMBALANCE_WATCH",
+    fastMode: true,
+    paperOnly: true,
+    researchOnly: true,
+
+    source: "confluence.context.reaction.engine3FastImbalanceReaction",
+
+    allowed,
+    hardBlocked,
+    downgradeOnly,
+
+    intendedDirection,
+    direction,
+
+    participationState,
+    participationQuality,
+    grade,
+    risk,
+
+    currentPrice,
+
+    imbalance: {
+      lo: imbalanceLo,
+      hi: imbalanceHi,
+      mid: imbalanceMid,
+      distancePts,
+      near: nearImbalance,
+      inside: insideImbalance,
+    },
+
+    volumeScore,
+    relativeVolume: Number.isFinite(relativeVolume) ? relativeVolume : 0,
+    volumeTrend,
+    highVolumeCandles,
+    volumeExpansion,
+    volumeConfirmed,
+
+    currentBarVolume: last.volume ?? null,
+    priorBarVolume: prev.volume ?? null,
+    recentBarsUsed: Array.isArray(bars) ? bars.length : null,
+
+    fastReactionState,
+    fastReactionQuality,
+    fastReactionDirection: intendedDirection,
+
+    supportsFastReactionDirection,
+    participationImproving,
+    reclaimVolumeConfirmed,
+    rejectionVolumeConfirmed,
+    highVolumeNoProgress,
+    absorptionRisk,
+    climacticRisk,
+
+    requiresEngine6PaperApproval: true,
+    noRealPermissionCreated: true,
+    noPermissionCreated: true,
+    noExecution: true,
+
+    blockers,
+    reasonCodes,
+  };
+}
+
+function attachEngine4FastImbalanceParticipationToConfluence({
+  patchedConfluence,
+  bars = [],
+}) {
+  const fastImbalanceParticipation = buildEngine4FastImbalanceParticipation({
+    patchedConfluence,
+    bars,
+  });
+
+  if (!fastImbalanceParticipation) return patchedConfluence;
+
+  patchedConfluence.context = patchedConfluence.context || {};
+  patchedConfluence.context.volume = {
+    ...(patchedConfluence.context.volume || {}),
+    engine4FastImbalanceParticipation: fastImbalanceParticipation,
+  };
+
+  return patchedConfluence;
+}
+
 /* -----------------------------
    Build one strategy
 ------------------------------*/
@@ -4959,6 +5382,11 @@ attachEngine22LifecycleReactionToConfluence({
   bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
 });
 
+attachEngine4FastImbalanceParticipationToConfluence({
+  patchedConfluence,
+  bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+});     
+
 attachCurrentLevelActionToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
@@ -5371,6 +5799,10 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
      attachEngine22LifecycleReactionToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
+       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+     });
+     attachEngine4FastImbalanceParticipationToConfluence({
+       patchedConfluence,
        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
      });
      attachCurrentLevelActionToConfluence({
