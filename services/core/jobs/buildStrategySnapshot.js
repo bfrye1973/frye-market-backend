@@ -5123,19 +5123,33 @@ function buildEngine4CurrentScalpParticipation({
     last.close != null &&
     last.close < prev.close;
 
-  const supportsDirection =
-    intendedDirection === "LONG"
-      ? greenCandle && (higherClose || reactionState.includes("ACCEPTING") || reactionState.includes("RECLAIM"))
-      : intendedDirection === "SHORT"
-      ? redCandle && (lowerClose || reactionState.includes("REJECTING") || reactionState.includes("FAILING") || reactionState.includes("LOST"))
-      : false;
+const longSupportingState =
+  reactionState.includes("ACCEPTING") ||
+  reactionState.includes("RECLAIM") ||
+  reactionState.includes("HELD") ||
+  reactionState.includes("DIP_BOUGHT") ||
+  reactionState.includes("SELLERS_TRAPPED");
 
-  const againstDirection =
-    intendedDirection === "LONG"
-      ? redCandle && lowerClose
-      : intendedDirection === "SHORT"
-      ? greenCandle && higherClose
-      : false;
+const shortSupportingState =
+  reactionState.includes("REJECTING") ||
+  reactionState.includes("FAILING") ||
+  reactionState.includes("FAILED_RECLAIM") ||
+  reactionState.includes("LOST") ||
+  reactionState.includes("BREAKOUT_FAILING");
+
+const supportsDirection =
+  intendedDirection === "LONG"
+    ? longSupportingState || (greenCandle && higherClose)
+    : intendedDirection === "SHORT"
+    ? shortSupportingState || (redCandle && lowerClose)
+    : false;
+
+const againstDirection =
+  intendedDirection === "LONG"
+    ? redCandle && lowerClose && !longSupportingState
+    : intendedDirection === "SHORT"
+    ? greenCandle && higherClose && !shortSupportingState
+    : false;
 
   const participationImproving =
     volumeIncreasing === true ||
