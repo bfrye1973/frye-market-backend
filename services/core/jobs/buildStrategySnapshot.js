@@ -459,6 +459,11 @@ function toNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
+function validPrice(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function isFuturesSymbol(sym) {
   const s = String(sym || "").toUpperCase();
   return ["ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K"].includes(s);
@@ -3706,8 +3711,16 @@ function buildEngine22PullbackReaction({
   const last = barPartsForPullbackReaction(bars[bars.length - 1] || {});
   const prev = barPartsForPullbackReaction(bars[bars.length - 2] || {});
   const currentPrice =
-    toNum(current?.currentPrice) ??
-    last.close ??
+    validPrice(sourceReaction?.currentPrice) ??
+    validPrice(sourceReaction?.fastImbalanceReaction?.currentPrice) ??
+    validPrice(sourceReaction?.fastImbalanceReaction?.lastCandle?.close) ??
+    validPrice(sourceReaction?.currentLevelAction?.currentPrice) ??
+    validPrice(sourceReaction?.currentLevelAction?.lastCandle?.close) ??
+    validPrice(currentLevelAction?.currentPrice) ??
+    validPrice(currentLevelAction?.lastCandle?.close) ??
+    validPrice(last.close) ??
+    validPrice(patchedConfluence?.price) ??
+    validPrice(patchedConfluence?.currentPrice) ??
     null;
 
   const pullbackLevelsFromW5 = current?.pullbackLevelsFromW5 || null;
@@ -4592,12 +4605,15 @@ function buildEngine4FastImbalanceParticipation({
     fastReaction.quality || fastReaction.fastReactionQuality || "UNKNOWN"
   ).toUpperCase();
 
-  const currentPrice = toNum(
-    fastReaction.currentPrice ??
-      fastReaction.current ??
-      fastReaction.price ??
-      fastReaction.imbalance?.currentPrice
-  );
+  const currentPrice =
+    validPrice(fastReaction?.currentPrice) ??
+    validPrice(fastReaction?.lastCandle?.close) ??
+    validPrice(fastReaction?.current) ??
+    validPrice(fastReaction?.price) ??
+    validPrice(fastReaction?.imbalance?.currentPrice) ??
+    validPrice(patchedConfluence?.price) ??
+    validPrice(patchedConfluence?.currentPrice) ??
+    null;
 
   const rawImbalance =
     fastReaction.imbalance ||
