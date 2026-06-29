@@ -38,6 +38,7 @@ import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.j
 import { buildWaveTradeDecision } from "../logic/engine22/decisions/buildWaveTradeDecision.js";
 import { buildEngine22LifecycleReaction } from "../logic/engine3/engine22LifecycleReaction.js";
 import { attachPaperScalpReactionToConfluence } from "../logic/engine3/paperScalpReaction.js";
+import { attachFastImbalanceReactionToConfluence } from "../logic/engine3/fastImbalanceReaction.js";
 import { attachCurrentLevelActionToConfluence } from "../logic/priceAction/currentLevelAction.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { buildEngine26PaperTradePlan } from "../logic/engine26/paperTradePlanner.js";
@@ -4967,11 +4968,17 @@ attachCurrentLevelActionToConfluence({
   bars30m: [],
 });
 
+attachFastImbalanceReactionToConfluence({
+  patchedConfluence,
+  engine22WaveStrategy,
+  bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+});
+
 attachPaperScalpReactionToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
   paperShortResearchEnabled: false,
-});            
+});
 
 engine22WaveStrategy = {
   ...engine22WaveStrategy,
@@ -5374,12 +5381,18 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
        bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
        bars30m: [],
      });
+
+     attachFastImbalanceReactionToConfluence({
+       patchedConfluence,
+       engine22WaveStrategy,
+       bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+     });
+
      attachPaperScalpReactionToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
        paperShortResearchEnabled: false,
-     }); 
-
+     });
      engine22WaveStrategy = {
        ...engine22WaveStrategy,
        currentLifecycleState: enrichCurrentLifecycleWithLivePriceAction({
