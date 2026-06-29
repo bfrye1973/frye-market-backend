@@ -3702,22 +3702,8 @@ function buildEngine22PullbackReaction({
     return null;
   }
 
-const fastLastCandle = fastReaction?.lastCandle || null;
-const fastPriorCandle = fastReaction?.priorCandle || null;
-
-const last = barPartsForPullbackReaction(
-  fastLastCandle || bars[bars.length - 1] || {}
-);
-
-const prev = barPartsForPullbackReaction(
-  fastPriorCandle || bars[bars.length - 2] || {}
-);
-
-const usedFastReactionCandles =
-  fastLastCandle != null || fastPriorCandle != null;
-
-const usedTenMinuteFallback = usedFastReactionCandles !== true;
-
+  const last = barPartsForPullbackReaction(bars[bars.length - 1] || {});
+  const prev = barPartsForPullbackReaction(bars[bars.length - 2] || {});
   const currentPrice =
     toNum(current?.currentPrice) ??
     last.close ??
@@ -4246,22 +4232,8 @@ function buildEngine22LifecycleParticipation({
     return null;
   }
 
-  const fastLastCandle = fastReaction?.lastCandle || null;
-  const fastPriorCandle = fastReaction?.priorCandle || null;
-
-  const last = barPartsForPullbackReaction(
-    fastLastCandle || bars[bars.length - 1] || {}
-  );
-
-  const prev = barPartsForPullbackReaction(
-    fastPriorCandle || bars[bars.length - 2] || {}
-  );
-
-  const usedFastReactionCandles =
-    fastLastCandle != null || fastPriorCandle != null;
-
-  const usedTenMinuteFallback = usedFastReactionCandles !== true;
-
+  const last = barPartsForPullbackReaction(bars[bars.length - 1] || {});
+  const prev = barPartsForPullbackReaction(bars[bars.length - 2] || {});
   const flags = volumeContext?.flags || {};
   const volumeReasonCodes = Array.isArray(volumeContext?.reasonCodes)
     ? volumeContext.reasonCodes
@@ -4570,8 +4542,21 @@ function buildEngine4FastImbalanceParticipation({
     return null;
   }
 
-  const last = barPartsForPullbackReaction(bars[bars.length - 1] || {});
-  const prev = barPartsForPullbackReaction(bars[bars.length - 2] || {});
+  const fastLastCandle = fastReaction?.lastCandle || null;
+  const fastPriorCandle = fastReaction?.priorCandle || null;
+
+  const last = barPartsForPullbackReaction(
+    fastLastCandle || bars[bars.length - 1] || {}
+  );
+
+  const prev = barPartsForPullbackReaction(
+    fastPriorCandle || bars[bars.length - 2] || {}
+  );
+
+  const usedFastReactionCandles =
+    fastLastCandle != null || fastPriorCandle != null;
+
+  const usedTenMinuteFallback = usedFastReactionCandles !== true;
 
   const flags = volumeContext?.flags || {};
   const volumeReasonCodes = Array.isArray(volumeContext?.reasonCodes)
