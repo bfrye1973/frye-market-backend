@@ -44,6 +44,11 @@ function toNum(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function validPrice(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function round2(value) {
   const n = Number(value);
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
@@ -527,16 +532,19 @@ export function buildFastImbalanceReaction({
   bars10m = [],
   currentPrice = null,
   engine26FastWatch = null,
+  confluence = null,
 } = {}) {
   const bars = Array.isArray(bars10m) ? bars10m.map(normalizeBar) : [];
   const last = bars[bars.length - 1] || null;
   const prev = bars[bars.length - 2] || null;
 
-  const price =
-    toNum(currentPrice) ??
-    toNum(engine26FastWatch?.currentPrice) ??
-    last?.close ??
-    null;
+const price =
+  validPrice(currentPrice) ??
+  validPrice(last?.close) ??
+  validPrice(confluence?.price) ??
+  validPrice(confluence?.currentPrice) ??
+  validPrice(engine26FastWatch?.currentPrice) ??
+  null;
 
   const manualZonesRead = readManualImbalanceZones();
 
@@ -692,13 +700,14 @@ export function attachFastImbalanceReactionToConfluence({
     engine22WaveStrategy?.currentLifecycleState?.currentPrice ??
     null;
 
-  const fastImbalanceReaction = buildFastImbalanceReaction({
-    symbol: engine22WaveStrategy?.symbol || "ES",
-    tf: engine22WaveStrategy?.tf || "10m",
-    bars10m,
-    currentPrice,
-    engine26FastWatch,
-  });
+const fastImbalanceReaction = buildFastImbalanceReaction({
+  symbol: engine22WaveStrategy?.symbol || "ES",
+  tf: engine22WaveStrategy?.tf || "10m",
+  bars10m,
+  currentPrice,
+  engine26FastWatch,
+  confluence: patchedConfluence,
+});
 
   patchedConfluence.context = patchedConfluence.context || {};
   patchedConfluence.context.reaction = {
