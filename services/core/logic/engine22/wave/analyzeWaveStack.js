@@ -690,15 +690,22 @@ export function analyzeWaveStack({
       : []),
   ].filter(Boolean);
 
-  const partialWaveFibState = {
-    ok: true,
-    engine: "engine22.waveFibState.v1",
-    symbol,
-    currentPrice: round2(currentPrice),
+const partialWaveFibState = {
+  ok: true,
+  engine: "engine22.waveFibState.v1",
+  symbol,
+  currentPrice: round2(currentPrice),
 
-    activeDegreeKeys,
-    activeStructuresSource,
-    markMaturity,
+  activeDegreeKeys,
+  activeStructuresSource,
+
+  // Engine 22 lifecycle views / dashboard contract:
+  // expose normalized active structures directly so downstream readers
+  // do not need to know the active-wave-state file wrapper shape.
+  activeStructures: activeStructuresForMaturity,
+  activeWaveState: activeStructuresSource || null,
+
+  markMaturity,
 
     stackBias,
     activeTradingDegree: activeTradingDegree.degree,
@@ -737,15 +744,22 @@ export function analyzeWaveStack({
     waveFibState: partialWaveFibState,
   });
 
-  return {
-    ok: true,
-    engine: "engine22.waveFibState.v1",
-    symbol,
-    currentPrice: round2(currentPrice),
+return {
+  ok: true,
+  engine: "engine22.waveFibState.v1",
+  symbol,
+  currentPrice: round2(currentPrice),
 
-    activeDegreeKeys,
-    activeStructuresSource,
-    markMaturity,
+  activeDegreeKeys,
+  activeStructuresSource,
+
+  // Engine 22 lifecycle views / dashboard contract:
+  // expose normalized active structures directly so downstream readers
+  // do not need to know the active-wave-state file wrapper shape.
+  activeStructures: activeStructuresForMaturity,
+  activeWaveState: activeStructuresSource || null,
+
+  markMaturity,
 
     stackBias,
     activeTradingDegree: activeTradingDegree.degree,
