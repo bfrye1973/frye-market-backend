@@ -3660,9 +3660,10 @@ function barPartsForPullbackReaction(bar) {
   const high = toNum(bar?.high ?? bar?.h);
   const low = toNum(bar?.low ?? bar?.l);
   const close = toNum(bar?.close ?? bar?.c);
+  const volume = toNum(bar?.volume ?? bar?.v);
   const time = bar?.time ?? bar?.t ?? bar?.tSec ?? null;
 
-  return { open, high, low, close, time };
+  return { open, high, low, close, volume, time };
 }
 
 function normalizePullbackZone(name, zone) {
