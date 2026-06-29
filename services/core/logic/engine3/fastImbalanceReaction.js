@@ -22,7 +22,7 @@ const SOURCE = "ENGINE26_IMBALANCE_WATCH";
 const DATA_DIR = "/opt/render/project/src/services/core/data";
 const MANUAL_ZONES_FILE = `${DATA_DIR}/es-smz-manual-zones.txt`;
 
-const FAST_WATCH_BUFFER_PTS = 6;
+const FAST_WATCH_BUFFER_PTS = 12;
 
 const DEFAULT_LEVEL_ACTION = {
   heldLevel: false,
