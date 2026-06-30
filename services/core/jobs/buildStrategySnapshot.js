@@ -1829,21 +1829,41 @@ const engine6PaperPermission = buildEngine6PaperPermission({
         }
       : null,
 
-     engine25Context: engine25Context
+    engine25Context: engine25Context
       ? {
-           ok: engine25Context.ok === true,
-           source: engine25Context.source || null,
-           score: engine25Context.score ?? null,
-           regime: engine25Context.regime ?? null,
-           label: engine25Context.label ?? null,
-           permission: engine25Context.permission ?? null,
-           sizeMultiplier: engine25Context.sizeMultiplier ?? null,
-           modelDate: engine25Context.modelDate ?? null,
-           updatedAt: engine25Context.updatedAt ?? null,
-           freshnessStatus: engine25Context.freshnessStatus ?? null,
-           warnings: Array.isArray(engine25Context.warnings)
-             ? engine25Context.warnings
-             : [],
+          ok: engine25Context.ok === true,
+          engine: engine25Context.engine ?? null,
+          source: engine25Context.source || null,
+          canonicalSource: engine25Context.canonicalSource ?? null,
+          canonicalContext: engine25Context.canonicalContext === true,
+
+          score: engine25Context.score ?? null,
+          regime: engine25Context.regime ?? null,
+          label: engine25Context.label ?? null,
+          permission: engine25Context.permission ?? null,
+          sizeMultiplier: engine25Context.sizeMultiplier ?? null,
+
+          modelDate: engine25Context.modelDate ?? null,
+          updatedAt: engine25Context.updatedAt ?? null,
+          freshnessStatus: engine25Context.freshnessStatus ?? null,
+
+          hardBlock: engine25Context.hardBlock === true,
+          noBlindLongs: engine25Context.noBlindLongs === true,
+          noBlindShorts: engine25Context.noBlindShorts !== false,
+          requireReclaim: engine25Context.requireReclaim === true,
+          requiredSetupQuality: engine25Context.requiredSetupQuality ?? null,
+
+          flags: engine25Context.flags ?? null,
+          quality: engine25Context.quality ?? null,
+          esPermission: engine25Context.esPermission ?? null,
+
+          warnings: Array.isArray(engine25Context.warnings)
+            ? engine25Context.warnings
+            : [],
+          reasonCodes: Array.isArray(engine25Context.reasonCodes)
+            ? engine25Context.reasonCodes
+            : [],
+
           summary: engine25Context.summary || null,
         }
       : null,
