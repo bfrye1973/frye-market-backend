@@ -910,6 +910,7 @@ export function buildEngine26PaperTradePlan({
       : "NO_PAPER_TRADE";
 
     return {
+      engine26ImbalanceWatch,
       engine26PaperTradePlan: makeNoTrade({
         symbol: normalizedSymbol,
         strategyId: normalizedStrategyId,
@@ -1073,7 +1074,7 @@ export function buildEngine26PaperTradePlan({
  return {
    engine26ImbalanceWatch,
    engine26PaperTradePlan: plan,
-   engine26PaperTradeTicket: null,
+   engine26PaperTradeTicket: ticket,
    engine26PaperTradeExecution: null,
  };
 }
