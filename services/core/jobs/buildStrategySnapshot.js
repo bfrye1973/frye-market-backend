@@ -6043,7 +6043,7 @@ if (isEsIntradayScalp) {
     engine26ImbalanceWatch = engine26.engine26ImbalanceWatch || null;
     engine26PaperTradePlan = engine26.engine26PaperTradePlan || null;
     engine26PaperTradeTicket = engine26.engine26PaperTradeTicket || null;
-    
+
     // V1 planner-only. Do not call Engine 8 from snapshot builder.
     engine26PaperTradeExecution = null;
   } catch (err) {
