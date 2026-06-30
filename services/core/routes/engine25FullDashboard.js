@@ -36,7 +36,10 @@ const ZONE_CLASSIFICATION_FILE = path.join(
   DATA_DIR,
   "engine25-zone-classification.json"
 );
-
+const ENGINE25_CONTEXT_FILE = path.join(
+  DATA_DIR,
+  "engine25-context.json"
+);
 function readJsonFile(filePath) {
   if (!fs.existsSync(filePath)) return null;
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -618,6 +621,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const marketHealth = readJsonFile(MARKET_HEALTH_FILE);
     const sectorBreadthRaw = readJsonFile(SECTOR_BREADTH_FILE);
     const zoneClassification = readJsonFile(ZONE_CLASSIFICATION_FILE);
+    const engine25Context = readJsonFile(ENGINE25_CONTEXT_FILE);
 
     const rows = Array.isArray(composite?.rows) ? composite.rows : [];
     const dailyCompositeAvailable = Boolean(composite && rows.length);
@@ -725,8 +729,8 @@ router.get("/engine25/full-dashboard", (_req, res) => {
         marketHealthFile: "engine25-market-health.json",
         sectorBreadthFile: "engine25-sector-card-breadth-snapshots.json",
         zoneClassificationFile: "engine25-zone-classification.json",
+        engine25ContextFile: "engine25-context.json",
       },
-
       headline,
       componentBreakdown,
       underTheHood,
@@ -741,6 +745,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
 
       sectorBreadth,
       zoneClassification: zoneClassification || null,
+      engine25Context: engine25Context || null,
 
       overlay: {
         available: dailyCompositeAvailable,
