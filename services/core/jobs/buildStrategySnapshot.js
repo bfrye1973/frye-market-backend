@@ -1275,14 +1275,26 @@ const score = numOrNull(engine25Context?.score);
     summary.includes("BELOW INSTITUTIONAL SUPPORT") ||
     summary.includes("RECLAIM");
 
+  const canonicalRequiredSetupQuality = String(
+    engine25Context?.requiredSetupQuality || ""
+  ).toUpperCase();
+
   const requiresAPlus =
+    canonicalRequiredSetupQuality === "A_PLUS_ONLY" ||
     summary.includes("A+ ONLY") ||
     summary.includes("A PLUS ONLY") ||
+    summary.includes("A_PLUS_ONLY") ||
     macroPermission.includes("A_PLUS");
 
-  const requiredSetupQuality =
+  const derivedRequiredSetupQuality =
     requiresAPlus
       ? "A_PLUS_ONLY"
+      : canonicalRequiredSetupQuality === "A_ONLY"
+      ? "A_ONLY"
+      : canonicalRequiredSetupQuality === "A_OR_BETTER"
+      ? "A_OR_BETTER"
+      : canonicalRequiredSetupQuality === "B_OR_BETTER"
+      ? "B_OR_BETTER"
       : zoneAtRisk
       ? "A_ONLY"
       : regime.includes("RISK_ON")
@@ -1292,6 +1304,9 @@ const score = numOrNull(engine25Context?.score);
       : regime.includes("DEFENSIVE") || regime.includes("RISK_OFF")
       ? "A_PLUS_ONLY"
       : "A_OR_BETTER";
+
+  const requiredSetupQuality =
+    canonicalRequiredSetupQuality || derivedRequiredSetupQuality;
 
   const wouldAllowConfirmedLongs =
     macroPermission.includes("CONFIRMED_LONGS_ALLOWED") ||
