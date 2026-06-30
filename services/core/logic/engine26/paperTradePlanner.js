@@ -1070,10 +1070,10 @@ export function buildEngine26PaperTradePlan({
     createdAt: nowIso(),
   };
 
-return {
-  engine26ImbalanceWatch,
-  engine26PaperTradePlan: makeNoTrade(...),
-  engine26PaperTradeTicket: null,
-  engine26PaperTradeExecution: null,
-};
+ return {
+   engine26ImbalanceWatch,
+   engine26PaperTradePlan: plan,
+   engine26PaperTradeTicket: null,
+   engine26PaperTradeExecution: null,
+ };
 }
