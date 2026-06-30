@@ -485,6 +485,8 @@ async function main() {
   console.log("[Engine25Full] Building ES overlay...");
   runNodeJob("jobs/buildEngine25EsOverlay.js");
 
+  console.log("\n[Engine25Full] Building canonical Engine 25 context...");
+  runNodeJob("jobs/buildEngine25Context.js");
   console.log("\n========================================");
   console.log("Engine 25 Full Update Complete");
   console.log("Wrote:");
@@ -498,7 +500,8 @@ async function main() {
   console.log("- data/engine25-es-zone-aware-read.json");  
   console.log("- data/engine25-sector-card-breadth-snapshots.json");
   console.log("- data/engine25-zone-classification.json");
-  console.log("- data/engine25-es-overlay.json");  
+  console.log("- data/engine25-es-overlay.json");
+  console.log("- data/engine25-context.json");
   console.log("========================================");
 }
 
