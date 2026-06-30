@@ -1270,9 +1270,31 @@ function buildEngine6PaperPermission({
   const paperReaction =
     confluence?.context?.reaction?.paperScalpReaction || null;
 
-  const paperParticipation =
+  const fastImbalanceParticipation =
+    confluence?.context?.volume?.engine4FastImbalanceParticipation || null;
+
+  const currentScalpParticipation =
+    confluence?.context?.volume?.engine4CurrentScalpParticipation || null;
+
+  const lifecyclePaperParticipation =
     confluence?.context?.volume?.engine22LifecycleParticipation
       ?.paperScalpParticipation || null;
+
+  const paperParticipation =
+    fastImbalanceParticipation?.active === true
+      ? fastImbalanceParticipation
+      : currentScalpParticipation?.active === true
+      ? currentScalpParticipation
+      : lifecyclePaperParticipation;
+
+  const paperParticipationSource =
+    fastImbalanceParticipation?.active === true
+      ? "engine4FastImbalanceParticipation"
+      : currentScalpParticipation?.active === true
+      ? "engine4CurrentScalpParticipation"
+      : lifecyclePaperParticipation
+      ? "engine22LifecycleParticipation.paperScalpParticipation"
+      : "NONE";
 
   const paperReadiness =
     engine15Decision?.paperScalpReadiness || null;
@@ -1283,10 +1305,57 @@ function buildEngine6PaperPermission({
   const paperShortResearchEnabled = false;
 
   const reactionAllowed = paperReaction?.allowed === true;
-  const participationAllowed = paperParticipation?.allowed === true;
-  const participationHardBlocked = paperParticipation?.hardBlocked === true;
-  const readinessAllowed = paperReadiness?.allowed === true;
+  const reactionActive = paperReaction?.active === true;
 
+  const participationAllowed = paperParticipation?.allowed === true;
+  const participationActive = paperParticipation?.active === true;
+  const participationHardBlocked = paperParticipation?.hardBlocked === true;
+
+  const readinessAllowed = paperReadiness?.allowed === true;
+  const readinessActive =
+    paperReadiness?.active === true ||
+    String(engine15Decision?.readinessLabel || "").toUpperCase() === "WATCH";
+
+  const participationState = String(
+    paperParticipation?.state ||
+      paperParticipation?.participationState ||
+      ""
+  ).toUpperCase();
+
+  const participationRisk = String(
+    paperParticipation?.risk || ""
+  ).toUpperCase();
+
+  const participationDirection = String(
+    paperParticipation?.intendedDirection ||
+      paperParticipation?.direction ||
+      ""
+  ).toUpperCase();
+
+  const fastParticipationWaiting =
+    participationActive === true &&
+    participationAllowed !== true &&
+    participationHardBlocked !== true &&
+    (
+      participationState.includes("PRICE_ACTION_OK_VOLUME_NOT_READY") ||
+      participationState.includes("WAIT_FOR_PARTICIPATION") ||
+      participationState.includes("WEAK_LOW_VOLUME_PARTICIPATION") ||
+      participationState.includes("WEAK_FADING_PARTICIPATION") ||
+      participationState.includes("LOW_VOLUME_HOLD") ||
+      participationState.includes("NO_FAST_IMBALANCE_PARTICIPATION") ||
+      participationState.includes("NO_CURRENT_SCALP_PARTICIPATION") ||
+      participationRisk.includes("WAIT_FOR_PARTICIPATION")
+    );
+
+  const fastPaperWatchCandidate =
+    reactionActive === true &&
+    participationActive === true &&
+    participationHardBlocked !== true &&
+    readinessActive === true &&
+    (
+      paperParticipationSource === "engine4FastImbalanceParticipation" ||
+      paperParticipationSource === "engine4CurrentScalpParticipation"
+    );
   const engine25HardBlocked =
     engine25Context?.ok === true &&
     (
@@ -1301,16 +1370,17 @@ function buildEngine6PaperPermission({
     engine22WaveStrategy?.waveOpportunity?.paperTradeCandidate === true ||
     paperReadiness?.paperTradeCandidate === true ||
     paperReadiness?.active === true ||
-    paperReaction?.active === true ||
-    paperParticipation?.active === true;
+    reactionActive === true ||
+    participationActive === true;
 
   const directionRaw =
     paperReadiness?.direction ||
+    paperReaction?.direction ||
     paperParticipation?.intendedDirection ||
     paperParticipation?.direction ||
+    participationDirection ||
     engine15Decision?.direction ||
     engine22WaveStrategy?.waveOpportunity?.direction ||
-    paperReaction?.direction ||
     currentLifecycleState?.direction ||
     "NONE";
 
@@ -1355,8 +1425,12 @@ function buildEngine6PaperPermission({
     blockers.push("ENGINE3_PAPER_REACTION_NOT_ALLOWED");
   }
 
-  if (!participationAllowed) {
+  if (!participationAllowed && !fastParticipationWaiting) {
     blockers.push("ENGINE4_PAPER_PARTICIPATION_NOT_ALLOWED");
+  }
+
+  if (fastParticipationWaiting) {
+    warnings.push("ENGINE4_FAST_PARTICIPATION_WAITING");
   }
 
   if (participationHardBlocked) {
@@ -1403,6 +1477,20 @@ function buildEngine6PaperPermission({
     reasonCodes.push(...paperReadiness.reasonCodes);
   }
 
+  if (paperParticipationSource && paperParticipationSource !== "NONE") {
+    reasonCodes.push(
+      `ENGINE6_PAPER_PARTICIPATION_SOURCE_${paperParticipationSource.toUpperCase()}`
+    );
+  }
+
+  if (fastPaperWatchCandidate) {
+    reasonCodes.push("ENGINE6_FAST_PAPER_WATCH_CANDIDATE");
+  }
+
+  if (fastParticipationWaiting) {
+    reasonCodes.push("ENGINE4_FAST_PARTICIPATION_WAITING");
+  }
+
   if (paperParticipation?.risk) {
     reasonCodes.push(String(paperParticipation.risk).toUpperCase());
   }
@@ -1438,7 +1526,24 @@ function buildEngine6PaperPermission({
     engine25HardBlocked !== true &&
     direction === "LONG";
 
-  const decision = allowed ? "PAPER_ALLOW" : "PAPER_STAND_DOWN";
+  const watchFast =
+    allowed !== true &&
+    fastPaperWatchCandidate === true &&
+    lifecyclePaperCandidate === true &&
+    reactionActive === true &&
+    direction === "LONG" &&
+    participationHardBlocked !== true &&
+    engine25HardBlocked !== true &&
+    !uniqueBlockers.includes("PAPER_DIRECTION_MISSING") &&
+    !uniqueBlockers.includes("PAPER_SHORT_RESEARCH_DISABLED_V1") &&
+    !uniqueBlockers.includes("ENGINE25_HARD_RISK_BLOCK");
+
+  const decision =
+    allowed
+      ? "PAPER_ALLOW"
+      : watchFast
+      ? "PAPER_WATCH_FAST"
+      : "PAPER_STAND_DOWN";
 
   return {
     active: true,
@@ -1465,6 +1570,20 @@ function buildEngine6PaperPermission({
 
     grade,
     source: "ENGINE6_PAPER_PERMISSION",
+
+    paperParticipationSource,
+    fastPaperWatchCandidate,
+    fastParticipationWaiting,
+
+    engine3PaperReactionActive: reactionActive,
+    engine3PaperReactionAllowed: reactionAllowed,
+
+    engine4PaperParticipationActive: participationActive,
+    engine4PaperParticipationAllowed: participationAllowed,
+    engine4PaperParticipationHardBlocked: participationHardBlocked,
+
+    engine15PaperReadinessActive: readinessActive,
+    engine15PaperReadinessAllowed: readinessAllowed,
 
     paperShortResearchEnabled,
     paperShortAllowed: direction === "SHORT" && paperShortResearchEnabled,
