@@ -304,32 +304,53 @@ function buildFlags({
   finalPermissionImpact,
   finalZoneState,
 }) {
+  const finalImpactText = upper(finalPermissionImpact);
+  const permissionText = upper(permission);
+  const zoneStateText = upper(zoneState);
+  const sectorImpactText = upper(sectorPermissionImpact);
+  const finalZoneStateText = upper(finalZoneState);
+
+  const watchOnly =
+    finalImpactText.includes("WATCH_ONLY") ||
+    permissionText.includes("WATCH_ONLY");
+
+  const noAccumulationSignal =
+    zoneStateText.includes("NO_ACCUMULATION_SIGNAL");
+
   const hardBlock =
     freshnessStatus === "MISSING" ||
     (freshnessStatus === "STALE" && !hasTrustedLiveFallback) ||
-    includesToken(permission, "NO_TRADE") ||
-    includesToken(permission, "STAND_DOWN") ||
-    includesToken(finalZoneState, "DISTRIBUTION_ACTIVE");
+    permissionText.includes("NO_TRADE") ||
+    permissionText.includes("STAND_DOWN") ||
+    finalZoneStateText.includes("DISTRIBUTION_ACTIVE");
 
   const noBlindLongs =
-    includesToken(permission, "NO_BLIND_LONGS") ||
-    zoneState === "INSTITUTIONAL_SUPPORT_AT_RISK" ||
-    sectorPermissionImpact === "NO_BLIND_LONGS_OR_A_PLUS_ONLY" ||
-    includesToken(finalPermissionImpact, "NO_BLIND_LONGS");
+    permissionText.includes("NO_BLIND_LONGS") ||
+    zoneStateText.includes("INSTITUTIONAL_SUPPORT_AT_RISK") ||
+    noAccumulationSignal ||
+    watchOnly ||
+    sectorImpactText.includes("NO_BLIND_LONGS_OR_A_PLUS_ONLY") ||
+    finalImpactText.includes("NO_BLIND_LONGS");
 
   const noBlindShorts = true;
 
   const requireReclaim =
-    zoneState === "INSTITUTIONAL_SUPPORT_AT_RISK" ||
-    includesToken(finalPermissionImpact, "RECLAIM") ||
-    includesToken(permission, "A_PLUS_ONLY");
+    zoneStateText.includes("INSTITUTIONAL_SUPPORT_AT_RISK") ||
+    noAccumulationSignal ||
+    watchOnly ||
+    finalImpactText.includes("RECLAIM") ||
+    permissionText.includes("A_PLUS_ONLY");
 
-  const requiredSetupQuality = includesToken(permission, "A_PLUS")
-    ? "A_PLUS_ONLY"
-    : includesToken(permission, "A_ONLY")
-      ? "A_ONLY"
-      : noBlindLongs || requireReclaim
-        ? "A_PLUS_ONLY"
+  const qualityText = `${permissionText} ${finalImpactText} ${sectorImpactText}`;
+
+  const requiredSetupQuality =
+    qualityText.includes("A_PLUS") ||
+    watchOnly ||
+    noBlindLongs ||
+    requireReclaim
+      ? "A_PLUS_ONLY"
+      : qualityText.includes("A_ONLY")
+        ? "A_ONLY"
         : "B_OR_BETTER";
 
   return {
@@ -340,7 +361,6 @@ function buildFlags({
     requiredSetupQuality,
   };
 }
-
 function buildSummary({ label, permission, flags }) {
   if (flags.hardBlock) {
     return `${label || "Engine 25"}: hard block active. Permission: ${
