@@ -197,6 +197,100 @@ function computeEngine25FreshnessStatus(modelDate, updatedAt) {
   return "STALE";
 }
 function loadEngine25Context() {
+  const canonicalFile = `${DATA_DIR}/engine25-context.json`;
+  const canonical = loadJsonFileSafe(canonicalFile);
+
+  if (canonical && typeof canonical === "object" && canonical.ok === true) {
+    const freshnessStatus =
+      canonical.freshnessStatus ||
+      canonical?.freshness?.status ||
+      null;
+
+    const modelDate =
+      canonical.modelDate ||
+      canonical?.freshness?.modelDate ||
+      null;
+
+    const updatedAt =
+      canonical.updatedAt ||
+      canonical?.freshness?.updatedAt ||
+      null;
+
+    return {
+      ...canonical,
+
+      source: canonical.source || "engine25-context.json",
+      canonicalSource: "engine25-context.json",
+      canonicalContext: true,
+
+      freshnessStatus,
+      modelDate,
+      updatedAt,
+
+      score: canonical.score ?? null,
+      regime: canonical.regime ?? "UNKNOWN",
+      label: canonical.label ?? null,
+      bias: canonical.bias ?? canonical.regime ?? "UNKNOWN",
+      riskLevel: canonical.riskLevel ?? canonical.label ?? null,
+
+      permission: canonical.permission ?? null,
+      sizeMultiplier: canonical.sizeMultiplier ?? null,
+
+      components: canonical.components ?? null,
+      macroAwareScore:
+        canonical?.components?.macroAwareScore ??
+        canonical.macroAwareScore ??
+        null,
+      breadthParticipation:
+        canonical?.components?.breadthParticipation ??
+        canonical.breadthParticipation ??
+        null,
+      distributionPressure:
+        canonical?.components?.distributionPressure ??
+        canonical.distributionPressure ??
+        null,
+      marketTrend:
+        canonical?.components?.marketTrend ??
+        canonical.marketTrend ??
+        null,
+      creditFragility:
+        canonical?.components?.creditFragility ??
+        canonical.creditFragility ??
+        null,
+      aiLeadership:
+        canonical?.components?.aiLeadership ??
+        canonical.aiLeadership ??
+        null,
+
+      esPermission: canonical.esPermission || {
+        permission: canonical.permission ?? null,
+        sizeMultiplier: canonical.sizeMultiplier ?? null,
+        zoneState: canonical.zoneState ?? null,
+        nearestZone: canonical.nearestZone ?? null,
+      },
+
+      tradePermission: canonical.tradePermission || {
+        permission: canonical.permission ?? null,
+        sizeMultiplier: canonical.sizeMultiplier ?? null,
+      },
+
+      warnings: Array.isArray(canonical.warnings)
+        ? canonical.warnings
+        : [],
+
+      reasonCodes: Array.isArray(canonical.reasonCodes)
+        ? canonical.reasonCodes
+        : [],
+
+      summary: canonical.summary || null,
+
+      hardBlock: canonical.hardBlock === true,
+      noBlindLongs: canonical.noBlindLongs === true,
+      noBlindShorts: canonical.noBlindShorts !== false,
+      requireReclaim: canonical.requireReclaim === true,
+      requiredSetupQuality: canonical.requiredSetupQuality || null,
+    };
+  }
   const overlayFile = `${DATA_DIR}/engine25-composite-overlay-6mo.json`;
   const zoneAwareFile = `${DATA_DIR}/engine25-es-zone-aware-read.json`;
   const marketHealthFile = `${DATA_DIR}/engine25-market-health.json`;
