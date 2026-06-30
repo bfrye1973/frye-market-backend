@@ -6002,6 +6002,7 @@ const finalPermission =
       })
     : permissionPreliminary;
 
+let engine26ImbalanceWatch = null;
 let engine26PaperTradePlan = null;
 let engine26PaperTradeTicket = null;
 let engine26PaperTradeExecution = null;
@@ -6039,9 +6040,10 @@ if (isEsIntradayScalp) {
       openPaperTrades,
     });
 
+    engine26ImbalanceWatch = engine26.engine26ImbalanceWatch || null;
     engine26PaperTradePlan = engine26.engine26PaperTradePlan || null;
     engine26PaperTradeTicket = engine26.engine26PaperTradeTicket || null;
-
+    
     // V1 planner-only. Do not call Engine 8 from snapshot builder.
     engine26PaperTradeExecution = null;
   } catch (err) {
@@ -6360,7 +6362,8 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
     permissionPreliminary,
 
     permission: finalPermission,
-
+     
+    engine26ImbalanceWatch,
     engine26PaperTradePlan,
     engine26PaperTradeTicket,
     engine26PaperTradeExecution,
