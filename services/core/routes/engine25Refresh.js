@@ -32,6 +32,10 @@ const STEPS = [
     name: "engine25_zone_classification",
     job: "buildEngine25ZoneClassification.js",
   },
+  {
+    name: "engine25_context",
+    job: "buildEngine25Context.js",
+  },
 ];
 
 const REQUIRED_FILES = [
@@ -40,6 +44,7 @@ const REQUIRED_FILES = [
   "engine25-es-zone-aware-read.json",
   "engine25-sector-card-breadth-snapshots.json",
   "engine25-zone-classification.json",
+  "engine25-context.json",
 ];
 
 let IS_RUNNING = false;
