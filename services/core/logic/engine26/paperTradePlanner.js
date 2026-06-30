@@ -51,6 +51,257 @@ function getEngine8Allowlist() {
     .filter(Boolean);
 }
 
+function buildEngine26ImbalanceWatch({
+  symbol,
+  strategyId,
+  tf,
+  permission,
+  engine22WaveStrategy,
+  confluence,
+  engine15Decision,
+}) {
+  const fastReaction =
+    confluence?.context?.reaction?.engine3FastImbalanceReaction || null;
+
+  const paperReaction =
+    confluence?.context?.reaction?.paperScalpReaction || null;
+
+  const fastParticipation =
+    confluence?.context?.volume?.engine4FastImbalanceParticipation || null;
+
+  const paperReadiness =
+    engine15Decision?.paperScalpReadiness || null;
+
+  const paperPermission = permission?.paper || null;
+
+  const lifecycleContext =
+    engine22WaveStrategy?.lifecycleContext || null;
+
+  const longTermLifecycle =
+    lifecycleContext?.longTermLifecycle || null;
+
+  const intradayScalpLifecycle =
+    lifecycleContext?.intradayScalpLifecycle || null;
+
+  const engine26Use =
+    intradayScalpLifecycle?.engine26Use || null;
+
+  const currentPrice =
+    toNum(fastReaction?.currentPrice) ||
+    toNum(paperReaction?.currentPrice) ||
+    toNum(paperReadiness?.currentPrice) ||
+    toNum(engine15Decision?.debug?.currentPrice) ||
+    toNum(confluence?.price) ||
+    null;
+
+  const imbalance = fastReaction?.imbalance || null;
+
+  const active =
+    fastReaction?.active === true &&
+    imbalance &&
+    (imbalance.inside === true || imbalance.near === true);
+
+  const isTopImbalance =
+    active &&
+    intradayScalpLifecycle?.key === "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM" &&
+    toNum(imbalance?.hi) != null &&
+    currentPrice != null &&
+    currentPrice >= Number(imbalance.mid ?? imbalance.lo ?? 0);
+
+  const isLowerImbalance =
+    active &&
+    !isTopImbalance;
+
+  const labels = [];
+
+  if (isTopImbalance && Array.isArray(engine26Use?.topImbalanceContext)) {
+    labels.push(...engine26Use.topImbalanceContext);
+  } else if (isLowerImbalance && Array.isArray(engine26Use?.lowerImbalanceContext)) {
+    labels.push(...engine26Use.lowerImbalanceContext);
+  } else if (active) {
+    labels.push("MANUAL_IMBALANCE_ACTIVE");
+    labels.push("DIRECTION_NOT_ASSUMED");
+  } else {
+    labels.push("NO_ACTIVE_MANUAL_IMBALANCE");
+  }
+
+  const engine3State = paperReaction?.state || fastReaction?.state || null;
+  const engine3Direction = paperReaction?.direction || fastReaction?.direction || null;
+  const engine3Quality = paperReaction?.quality || fastReaction?.quality || null;
+
+  const engine4State =
+    fastParticipation?.participationState ||
+    confluence?.context?.volume?.engine22LifecycleParticipation
+      ?.paperScalpParticipation?.participationState ||
+    null;
+
+  const engine4Allowed =
+    fastParticipation?.allowed === true ||
+    confluence?.context?.volume?.engine22LifecycleParticipation
+      ?.paperScalpParticipation?.allowed === true;
+
+  let status = "NO_ACTIVE_IMBALANCE_WATCH";
+
+  if (active) {
+    status = "WATCH_ONLY_WAIT_FOR_CONFIRMATION";
+
+    if (paperPermission?.decision === "PAPER_ALLOW" && paperPermission?.allowed === true) {
+      status = "READY_FOR_ENGINE26_TICKET";
+    } else if (isTopImbalance) {
+      status = "TOP_IMBALANCE_ACTIVE_WAIT_FOR_7500_ACCEPTANCE_OR_REJECTION";
+    } else if (isLowerImbalance) {
+      status = "LOWER_IMBALANCE_ACTIVE_WAIT_FOR_SWEEP_RECLAIM_OR_SUPPORT_FAILURE";
+    }
+  }
+
+  return {
+    active,
+    engine: "engine26.imbalanceWatch.v1",
+    mode: active ? "FAST_IMBALANCE_WATCH" : "NORMAL_SCAN",
+    paperOnly: true,
+    researchOnly: true,
+
+    symbol: safeUpper(symbol),
+    strategyId,
+    tf,
+
+    currentPrice,
+
+    activeImbalance: imbalance
+      ? {
+          id: imbalance.id || null,
+          source: imbalance.source || "es-smz-manual-zones.txt",
+          side: imbalance.side || "GREEN",
+          zoneType: imbalance.zoneType || "MANUAL_IMBALANCE",
+          lo: toNum(imbalance.lo),
+          hi: toNum(imbalance.hi),
+          mid: toNum(imbalance.mid),
+          distancePts: toNum(imbalance.distancePts),
+          inside: imbalance.inside === true,
+          near: imbalance.near === true,
+          raw: imbalance.raw || null,
+        }
+      : null,
+
+    alarmAllEngines: active,
+    directionAssumption:
+      engine26Use?.directionAssumption || "NONE_UNTIL_ENGINE3_ENGINE4_CONFIRM",
+
+    waveContext: lifecycleContext
+      ? {
+          source: lifecycleContext.source || "engine22.lifecycleContext.v1",
+          purpose: lifecycleContext.purpose || null,
+
+          longTermLifecycle: longTermLifecycle
+            ? {
+                key: longTermLifecycle.key || longTermLifecycle.lifecycle || null,
+                activeWave: longTermLifecycle.activeWave || null,
+                activeDegree: longTermLifecycle.activeDegree || null,
+                direction: longTermLifecycle.direction || null,
+                purpose: longTermLifecycle.purpose || "HIGHER_TIMEFRAME_CONTEXT_ONLY",
+                nextTarget: longTermLifecycle.nextTarget ?? null,
+                higherTargets: longTermLifecycle.higherTargets || [],
+                noExecution: longTermLifecycle.noExecution === true,
+                noPermissionCreated:
+                  longTermLifecycle.noPermissionCreated === true,
+              }
+            : null,
+
+          intradayScalpLifecycle: intradayScalpLifecycle
+            ? {
+                key: intradayScalpLifecycle.key || intradayScalpLifecycle.lifecycle || null,
+                activeWave: intradayScalpLifecycle.activeWave || null,
+                activeDegree: intradayScalpLifecycle.activeDegree || null,
+                parentWave: intradayScalpLifecycle.parentWave || null,
+                parentDegree: intradayScalpLifecycle.parentDegree || null,
+                direction: intradayScalpLifecycle.direction || null,
+                action: intradayScalpLifecycle.action || null,
+                currentPrice: intradayScalpLifecycle.currentPrice ?? null,
+                w3High: intradayScalpLifecycle.w3High ?? null,
+                preferredW4Zone:
+                  intradayScalpLifecycle.preferredW4Zone || null,
+                pullbackLevels:
+                  intradayScalpLifecycle.pullbackLevels || null,
+                invalidation:
+                  intradayScalpLifecycle.invalidation ?? null,
+                noChase: intradayScalpLifecycle.noChase === true,
+                noExecution: intradayScalpLifecycle.noExecution === true,
+                noPermissionCreated:
+                  intradayScalpLifecycle.noPermissionCreated === true,
+              }
+            : null,
+
+          relationship: lifecycleContext.relationship || null,
+        }
+      : null,
+
+    labels: [...new Set(labels.filter(Boolean))],
+
+    playbookWatch: {
+      topImbalance: isTopImbalance
+        ? "WATCH_7500_ACCEPTANCE_OR_REJECTION"
+        : null,
+      lowerImbalance: isLowerImbalance
+        ? "WATCH_SWEEP_RECLAIM_OR_SUPPORT_FAILURE"
+        : null,
+      selectedSetup:
+        paperPermission?.decision === "PAPER_ALLOW" && paperPermission?.allowed === true
+          ? paperPermission?.setupType || null
+          : null,
+    },
+
+    fastReads: {
+      engine3: {
+        active: fastReaction?.active === true,
+        state: engine3State,
+        quality: engine3Quality,
+        direction: engine3Direction,
+        paperAllowed: paperReaction?.allowed === true,
+        blockers: Array.isArray(paperReaction?.blockers)
+          ? paperReaction.blockers
+          : [],
+      },
+      engine4: {
+        active: fastParticipation?.active === true,
+        state: engine4State,
+        quality: fastParticipation?.participationQuality || null,
+        allowed: engine4Allowed,
+        risk: fastParticipation?.risk || null,
+        currentBarVolume: fastParticipation?.currentBarVolume ?? null,
+        priorBarVolume: fastParticipation?.priorBarVolume ?? null,
+        volumeRatio: fastParticipation?.currentVsPriorVolumeRatio ?? null,
+        blockers: Array.isArray(fastParticipation?.blockers)
+          ? fastParticipation.blockers
+          : [],
+      },
+    },
+
+    permission: {
+      engine15Allowed: paperReadiness?.allowed === true,
+      engine6Decision: paperPermission?.decision || null,
+      engine6Allowed: paperPermission?.allowed === true,
+      ticketReady:
+        paperPermission?.decision === "PAPER_ALLOW" &&
+        paperPermission?.allowed === true,
+    },
+
+    status,
+
+    noExecution: true,
+    noPermissionCreated: true,
+
+    reasonCodes: [
+      "ENGINE26_MANUAL_IMBALANCE_WATCH",
+      active ? "MANUAL_IMBALANCE_ALARM_ACTIVE" : "NO_ACTIVE_MANUAL_IMBALANCE",
+      lifecycleContext ? "ENGINE22_LIFECYCLE_CONTEXT_ATTACHED" : "ENGINE22_LIFECYCLE_CONTEXT_MISSING",
+      isTopImbalance ? "TOP_IMBALANCE_ACTIVE" : null,
+      isLowerImbalance ? "LOWER_IMBALANCE_ACTIVE" : null,
+      "DIRECTION_NOT_ASSUMED",
+      "NO_ENGINE26_TICKET_UNTIL_ENGINE6_PAPER_ALLOW",
+    ].filter(Boolean),
+  };
+}
+
 function makeNoTrade({
   symbol,
   strategyId,
@@ -493,6 +744,16 @@ export function buildEngine26PaperTradePlan({
     engine25Context,
   });
 
+  const engine26ImbalanceWatch = buildEngine26ImbalanceWatch({
+    symbol: normalizedSymbol,
+    strategyId: normalizedStrategyId,
+    tf: normalizedTf,
+    permission,
+    engine22WaveStrategy,
+    confluence,
+    engine15Decision,
+  });
+
   const blockers = [];
   const warnings = [];
   const reasonCodes = [
@@ -809,9 +1070,10 @@ export function buildEngine26PaperTradePlan({
     createdAt: nowIso(),
   };
 
-  return {
-    engine26PaperTradePlan: plan,
-    engine26PaperTradeTicket: ticket,
-    engine26PaperTradeExecution: null,
-  };
+return {
+  engine26ImbalanceWatch,
+  engine26PaperTradePlan: makeNoTrade(...),
+  engine26PaperTradeTicket: null,
+  engine26PaperTradeExecution: null,
+};
 }
