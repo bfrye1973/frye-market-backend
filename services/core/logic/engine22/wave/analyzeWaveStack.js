@@ -23,6 +23,7 @@ import { buildW4Levels } from "./buildW4Levels.js";
 import { classifyWaveLifecycle } from "./classifyWaveLifecycle.js";
 import { getActiveWaveStateMeta } from "./manualMarks/readManualWaveMarks.js";
 import { validateWaveMarkMaturity } from "./revision/validateWaveMarkMaturity.js";
+import { attachAbcCorrectionModelsToActiveStructures } from "./corrections/buildAbcCorrectionModel.js";
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
 
@@ -550,12 +551,22 @@ export function analyzeWaveStack({
     ? activeStructuresSource.activeDegreeKeys
     : null;
 
-  const activeStructuresForMaturity =
+  const activeStructuresFromMeta =
     getActiveStructuresFromMeta(activeStructuresSource);
+
+  const activeStructuresWithCorrections =
+    attachAbcCorrectionModelsToActiveStructures({
+      symbol,
+      activeStructures: activeStructuresFromMeta,
+      currentPrice,
+      maContext: null,
+      institutionalZones: null,
+      engine3Reference: reactionContext?.currentLevelAction || null,
+    });
 
   const markMaturity = validateWaveMarkMaturity({
     symbol,
-    activeStructures: activeStructuresForMaturity,
+    activeStructures: activeStructuresWithCorrections,
   });
 
   let degrees = {};
@@ -702,7 +713,7 @@ const partialWaveFibState = {
   // Engine 22 lifecycle views / dashboard contract:
   // expose normalized active structures directly so downstream readers
   // do not need to know the active-wave-state file wrapper shape.
-  activeStructures: activeStructuresForMaturity,
+  activeStructures: activeStructuresWithCorrections,
   activeWaveState: activeStructuresSource || null,
 
   markMaturity,
@@ -756,7 +767,7 @@ return {
   // Engine 22 lifecycle views / dashboard contract:
   // expose normalized active structures directly so downstream readers
   // do not need to know the active-wave-state file wrapper shape.
-  activeStructures: activeStructuresForMaturity,
+  activeStructures: activeStructuresWithCorrections,
   activeWaveState: activeStructuresSource || null,
 
   markMaturity,
