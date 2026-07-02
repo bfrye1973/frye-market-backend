@@ -11,6 +11,8 @@
 
 const DEGREE_ORDER = ["subminute", "minute", "minor", "intermediate", "primary"];
 
+const WAVE_MARK_KEYS = ["W1", "W2", "W3", "W4", "W5", "A", "B", "C"];
+
 const DEFAULT_TF_BY_DEGREE = {
   subminute: "10m",
   minute: "10m",
@@ -43,6 +45,7 @@ function round2(value) {
   const n = Number(value);
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
 }
+
 function normalizeDegree(value) {
   const s = String(value || "").trim().toLowerCase();
 
@@ -60,15 +63,29 @@ function normalizeDegree(value) {
 function normalizeWave(value) {
   const s = upper(value);
 
-  if (["W1", "W2", "W3", "W4", "W5", "A", "B", "C"].includes(s)) {
-    return s;
-  }
+  if (WAVE_MARK_KEYS.includes(s)) return s;
 
   if (s.includes("WAVE_1") || s.includes("W1")) return "W1";
   if (s.includes("WAVE_2") || s.includes("W2")) return "W2";
   if (s.includes("WAVE_3") || s.includes("W3")) return "W3";
   if (s.includes("WAVE_4") || s.includes("W4")) return "W4";
   if (s.includes("WAVE_5") || s.includes("W5")) return "W5";
+
+  if (s === "A" || s.includes("A_LEG") || s.includes("WAVE_A")) return "A";
+  if (s === "B" || s.includes("B_LEG") || s.includes("WAVE_B")) return "B";
+  if (s === "C" || s.includes("C_LEG") || s.includes("WAVE_C")) return "C";
+
+  return null;
+}
+
+function normalizeParentWave(value) {
+  const raw = String(value || "").trim();
+  const normalized = normalizeWave(raw);
+  if (normalized) return normalized;
+
+  // Preserve useful structural parent labels like W5_COMPLETE.
+  const s = upper(raw);
+  if (s) return s;
 
   return null;
 }
@@ -87,9 +104,9 @@ function inferDirection(structure = {}) {
   if (["DOWN", "BEARISH", "SHORT"].includes(s)) return "DOWN";
 
   const activeWave = normalizeWave(structure.activeWave || structure.wave);
-  if (["W1", "W3", "W5", "A", "C"].includes(activeWave)) {
-    return "UP";
-  }
+
+  if (["W1", "W3", "W5"].includes(activeWave)) return "UP";
+  if (["A", "C"].includes(activeWave)) return "DOWN";
 
   return "NEUTRAL";
 }
@@ -107,6 +124,7 @@ function inferStage(structure = {}) {
   if (s.includes("COMPLETE")) return "COMPLETE";
   if (s.includes("WATCH")) return "WATCH";
   if (s.includes("ACTIVE")) return "ACTIVE";
+  if (s.includes("PROJECTED")) return "PROJECTED";
   if (s.includes("INVALID")) return "INVALIDATED";
 
   if (structure.active === true || structure.isActive === true) return "ACTIVE";
@@ -144,7 +162,11 @@ function getMarkTime(mark) {
   );
 }
 
-function normalizeOneMark({ mark, maturityInfo, fallbackSource = "activeStructures" }) {
+function normalizeOneMark({
+  mark,
+  maturityInfo,
+  fallbackSource = "activeStructures",
+}) {
   if (!mark && !maturityInfo) return null;
 
   const status =
@@ -160,6 +182,8 @@ function normalizeOneMark({ mark, maturityInfo, fallbackSource = "activeStructur
     mark?.supersededPreviousMark === true ||
     upper(status) === "SUPERSEDED";
 
+  const replaces = maturityInfo?.replaces || mark?.replaces || null;
+
   return {
     price: round2(
       maturityInfo?.price ??
@@ -168,18 +192,21 @@ function normalizeOneMark({ mark, maturityInfo, fallbackSource = "activeStructur
         mark?.value ??
         getMarkPrice(mark)
     ),
+
     time:
       maturityInfo?.time ||
       maturityInfo?.timestamp ||
       getMarkTime(mark),
 
     status,
+
     confidence:
       maturityInfo?.confidence ??
       mark?.confidence ??
       null,
 
     maturity: maturityInfo?.maturity || status || "UNKNOWN",
+
     confirmed:
       maturityInfo?.confirmed === true ||
       mark?.confirmed === true ||
@@ -190,6 +217,7 @@ function normalizeOneMark({ mark, maturityInfo, fallbackSource = "activeStructur
     previousMark:
       maturityInfo?.previousMark ||
       mark?.previousMark ||
+      replaces ||
       null,
 
     source:
@@ -212,15 +240,9 @@ function normalizeOneMark({ mark, maturityInfo, fallbackSource = "activeStructur
 }
 
 function normalizeMarks({ marks = {}, maturityByWave = {} }) {
-  const out = {
-    W1: null,
-    W2: null,
-    W3: null,
-    W4: null,
-    W5: null,
-  };
+  const out = {};
 
-  for (const wave of Object.keys(out)) {
+  for (const wave of WAVE_MARK_KEYS) {
     out[wave] = normalizeOneMark({
       mark: marks?.[wave] || marks?.[wave.toLowerCase()] || null,
       maturityInfo:
@@ -243,13 +265,94 @@ function inferActiveWave(structure = {}, marks = {}) {
 
   if (explicit) return explicit;
 
-  const waves = ["W5", "W4", "W3", "W2", "W1"];
+  const waves = ["C", "B", "A", "W5", "W4", "W3", "W2", "W1"];
 
   for (const wave of waves) {
     if (marks?.[wave]) return wave;
   }
 
   return null;
+}
+
+function buildEmptyMarks() {
+  return WAVE_MARK_KEYS.reduce((acc, wave) => {
+    acc[wave] = null;
+    return acc;
+  }, {});
+}
+
+function normalizeCorrectionModel({ structure, marks }) {
+  const correction = structure?.correction || null;
+
+  if (!correction || typeof correction !== "object") return null;
+
+  const correctionMarks = normalizeMarks({
+    marks: correction?.marks || {},
+    maturityByWave: {},
+  });
+
+  const mergedManualMarks = {
+    A: marks?.A || correctionMarks?.A || null,
+    B: marks?.B || correctionMarks?.B || null,
+    C: marks?.C || correctionMarks?.C || null,
+  };
+
+  const manualMarksPresent =
+    mergedManualMarks.A !== null ||
+    mergedManualMarks.B !== null ||
+    mergedManualMarks.C !== null;
+
+  return {
+    type: correction.type || "ABC_DOWN",
+    active: correction.active === true,
+    direction: correction.direction || "DOWN",
+    parentCompletedWave:
+      correction.parentCompletedWave ||
+      correction.parentWave ||
+      structure?.parentWave ||
+      null,
+
+    stage:
+      correction.stage ||
+      correction.currentStage ||
+      "INACTIVE",
+
+    currentRead:
+      correction.currentRead ||
+      null,
+
+    fibAnchors: correction.fibAnchors || null,
+
+    aLeg:
+      correction.aLeg ||
+      correctionMarks.A ||
+      mergedManualMarks.A ||
+      null,
+
+    bLeg:
+      correction.bLeg ||
+      correctionMarks.B ||
+      mergedManualMarks.B ||
+      null,
+
+    cLeg:
+      correction.cLeg ||
+      correctionMarks.C ||
+      mergedManualMarks.C ||
+      null,
+
+    manualMarks: mergedManualMarks,
+    manualMarksPresent,
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    reasonCodes: [
+      "ENGINE22_CORRECTION_MODEL_NORMALIZED",
+      ...(Array.isArray(correction.reasonCodes) ? correction.reasonCodes : []),
+    ],
+  };
 }
 
 function buildInactiveDegreeState(degree) {
@@ -272,13 +375,8 @@ function buildInactiveDegreeState(degree) {
     noPermissionCreated: true,
     paperTradeCandidate: false,
 
-    marks: {
-      W1: null,
-      W2: null,
-      W3: null,
-      W4: null,
-      W5: null,
-    },
+    marks: buildEmptyMarks(),
+    correctionModel: null,
 
     warnings: [],
     reasonCodes: ["NO_ACTIVE_MARKS_OR_CONTEXT"],
@@ -293,6 +391,7 @@ function buildActiveDegreeState({
   currentPrice,
 }) {
   const rawMarks = structure?.marks || structure?.waveMarks || {};
+
   const marks = normalizeMarks({
     marks: rawMarks,
     maturityByWave,
@@ -307,9 +406,10 @@ function buildActiveDegreeState({
     FALLBACK_PARENT_BY_DEGREE[degree] ||
     null;
 
-  const parentWave = normalizeWave(structure?.parentWave) || null;
+  const parentWave = normalizeParentWave(structure?.parentWave);
 
   const label = titleCase(degree);
+
   const headline =
     structure?.headline ||
     structure?.label ||
@@ -323,18 +423,35 @@ function buildActiveDegreeState({
       ? "TRACK_EXTENSION_DO_NOT_CHASE"
       : activeWave === "W5"
       ? "CONTINUATION_LEG_ACTIVE_DO_NOT_CHASE"
+      : ["A", "B", "C"].includes(activeWave)
+      ? "TRACK_ABC_CORRECTION_DO_NOT_CHASE"
       : "TRACK_STRUCTURE_DO_NOT_CHASE");
+
+  const currentRead =
+    structure?.currentRead ||
+    (activeWave
+      ? `${upper(degree)}_${activeWave}_${stage}`
+      : `${upper(degree)}_${stage}`);
+
+  const correctionModel = normalizeCorrectionModel({
+    structure,
+    marks,
+  });
 
   return {
     degree,
-    tf: structure?.tf || structure?.timeframe || tf || DEFAULT_TF_BY_DEGREE[degree] || null,
+    tf:
+      structure?.tf ||
+      structure?.timeframe ||
+      tf ||
+      DEFAULT_TF_BY_DEGREE[degree] ||
+      null,
+
     active: true,
     direction,
     activeWave,
     stage,
-    currentRead: activeWave
-      ? `${upper(degree)}_${activeWave}_${stage}`
-      : `${upper(degree)}_${stage}`,
+    currentRead,
 
     headline,
     action,
@@ -347,11 +464,14 @@ function buildActiveDegreeState({
     paperTradeCandidate: false,
 
     marks,
+    correctionModel,
 
     warnings: Array.isArray(structure?.warnings) ? structure.warnings : [],
+
     reasonCodes: [
       "ENGINE22_DEGREE_STATE_BUILT",
       `${upper(degree)}_DEGREE_STATE_BUILT`,
+      ...(correctionModel ? ["ENGINE22_DEGREE_CORRECTION_MODEL_ATTACHED"] : []),
       ...(Array.isArray(structure?.reasonCodes) ? structure.reasonCodes : []),
     ],
 
@@ -398,8 +518,10 @@ export function buildDegreeStates({
       structure.activeWave ||
       structure.currentWave ||
       structure.wave ||
+      structure.activeLeg ||
       structure.marks ||
-      structure.waveMarks;
+      structure.waveMarks ||
+      structure.correction;
 
     if (!activeFlag) {
       out[degree] = buildInactiveDegreeState(degree);
