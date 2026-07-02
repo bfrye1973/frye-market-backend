@@ -1,178 +1,224 @@
 {
-"symbol": "ES",
-"updatedAt": "2026-07-02 06:10",
-"schema": "active-wave-state-es@v3",
-"activeStructures": {
-"intermediate": {
-"tf": "1h",
-"direction": "UP",
-"active": true,
-"activeWave": "W3",
-"currentRead": "INTERMEDIATE_W3_ACTIVE",
-"marks": {
-"W1": {
-"price": 7648,
-"time": "2026-06-15 09:00",
-"status": "CONFIRMED",
-"confidence": "HIGH",
-"basis": [
-"INTERMEDIATE_W1_IMPULSE_COMPLETED"
-]
-},
-"W2": {
-"price": 7360,
-"time": "2026-06-26 06:30",
-"status": "CONFIRMED",
-"confidence": "HIGH",
-"basis": [
-"INTERMEDIATE_W2_SUPERSEDED_PRIOR_7415_CANDIDATE",
-"DEEPER_C_LOW_COMPLETED",
-"VIOLENT_RECLAIM_FROM_7360",
-"INTERMEDIATE_W3_LAUNCH_CONFIRMED_BY_LOWER_DEGREE_IMPULSE"
-],
-"replaces": {
-"price": 7415.25,
-"time": "2026-06-23 13:30",
-"status": "SUPERSEDED",
-"reason": "PRIOR_W2_CANDIDATE_SUPERSEDED_BY_DEEPER_7360_C_LOW"
-}
-},
-"W3": {
-"price": null,
-"time": null,
-"status": "ACTIVE",
-"confidence": "HIGH",
-"basis": [
-"INTERMEDIATE_W3_ACTIVE_AFTER_CONFIRMED_W2_LOW",
-"MINUTE_W4_COMPLETED_AT_7506",
-"MINUTE_W5_OR_CONTINUATION_LEG_ACTIVE",
-"SUBMINUTE_W1_AND_W2_PRESENT",
-"WATCH_SUBMINUTE_W3_LAUNCH_OR_RECLAIM"
-]
-}
-}
-},
-"minute": {
-"tf": "10m",
-"direction": "UP",
-"active": true,
-"parentDegree": "intermediate",
-"parentWave": "W3",
-"activeWave": "W5",
-"currentRead": "MINUTE_W4_COMPLETE_W5_ACTIVE",
-"marks": {
-"W1": {
-"low": {
-"price": 7360,
-"time": "2026-06-26 06:30"
-},
-"high": {
-"price": 7459.75,
-"time": "2026-06-26 08:30"
-},
-"status": "CONFIRMED",
-"confidence": "HIGH",
-"basis": [
-"MINUTE_W1_STARTED_FROM_INTERMEDIATE_W2_LOW",
-"MINUTE_W1_HIGH_CONFIRMED_AT_7459_75"
-]
-},
-"W2": {
-"price": 7369.25,
-"time": "2026-06-26 13:00",
-"status": "CONFIRMED",
-"confidence": "HIGH",
-"basis": [
-"MINUTE_W2_PULLBACK_CONFIRMED",
-"HELD_ABOVE_INTERMEDIATE_W2_LOW"
-]
-},
-"W3": {
-"price": 7500,
-"time": "2026-06-28 12:00",
-"status": "CONFIRMED",
-"confidence": "HIGH",
-"basis": [
-"MINUTE_W3_IMPULSE_COMPLETED_NEAR_7500",
-"FOLLOWED_BY_MINUTE_W4_PULLBACK",
-"MINUTE_W3_NO_LONGER_ACTIVE"
-]
-},
-"W4": {
-"price": 7506,
-"time": "2026-07-01 05:00",
-"status": "CONFIRMED",
-"confidence": "HIGH",
-"basis": [
-"MINUTE_W4_PULLBACK_COMPLETED_AT_7506",
-"HELD_ABOVE_MINUTE_W3_BASE_STRUCTURE",
-"SUBSEQUENT_SUBMINUTE_W1_IMPULSE_CONFIRMED"
-]
-},
-"W5": {
-"price": null,
-"time": null,
-"status": "ACTIVE",
-"confidence": "MEDIUM",
-"basis": [
-"MINUTE_W5_OR_CONTINUATION_LEG_ACTIVE_AFTER_W4_LOW",
-"SUBMINUTE_W1_COMPLETED_AT_7579",
-"SUBMINUTE_W2_COMPLETED_AT_7520_25",
-"WATCH_SUBMINUTE_W3_LAUNCH_OR_RECLAIM_CONFIRMATION",
-"DO_NOT_CHASE_VERTICAL_EXTENSION"
-]
-}
-}
-},
-"subminute": {
-"tf": "10m",
-"direction": "UP",
-"active": true,
-"parentDegree": "minute",
-"parentWave": "W5",
-"activeWave": "W3",
-"currentRead": "SUBMINUTE_W2_COMPLETE_W3_LAUNCH_WATCH",
-"marks": {
-"W1": {
-"low": {
-"price": 7506,
-"time": "2026-07-01 05:00"
-},
-"high": {
-"price": 7579,
-"time": "2026-07-01 09:00"
-},
-"status": "CONFIRMED",
-"confidence": "HIGH",
-"basis": [
-"SUBMINUTE_W1_STARTED_FROM_MINUTE_W4_LOW",
-"SUBMINUTE_W1_IMPULSE_COMPLETED_AT_7579"
-]
-},
-"W2": {
-"price": 7520.25,
-"time": "2026-07-02 00:00",
-"status": "CONFIRMED",
-"confidence": "MEDIUM",
-"basis": [
-"SUBMINUTE_W2_PULLBACK_COMPLETED_AT_7520_25",
-"HELD_ABOVE_MINUTE_W4_LOW",
-"WATCH_RECLAIM_AND_SUBMINUTE_W3_LAUNCH"
-]
-},
-"W3": {
-"price": null,
-"time": null,
-"status": "WATCH",
-"confidence": "MEDIUM",
-"basis": [
-"SUBMINUTE_W3_LAUNCH_WATCH",
-"WAIT_FOR_RECLAIM_HOLD_OR_CONTROLLED_PULLBACK_CONFIRMATION",
-"PAPER_SCALP_CAN_WATCH_IMBALANCE_TO_IMBALANCE_REACTIONS",
-"NO_REAL_EXECUTION_PERMISSION_CREATED"
-]
-}
-}
-}
-}
+  "symbol": "ES",
+  "updatedAt": "2026-07-02 10:57",
+  "schema": "active-wave-state-es@v3",
+  "activeStructures": {
+    "intermediate": {
+      "tf": "1h",
+      "direction": "UP",
+      "active": true,
+      "activeWave": "W3",
+      "currentRead": "INTERMEDIATE_W3_ACTIVE_POST_MINUTE_W5_CORRECTION",
+      "headline": "Intermediate W3 active — post-Minute-W5 correction in progress",
+      "action": "HIGHER_TIMEFRAME_BULLISH_CONTEXT_WAIT_FOR_ABC_TO_FINISH",
+      "marks": {
+        "W1": {
+          "price": 7648,
+          "time": "2026-06-15 09:00",
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "INTERMEDIATE_W1_IMPULSE_COMPLETED"
+          ]
+        },
+        "W2": {
+          "price": 7360,
+          "time": "2026-06-26 06:30",
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "INTERMEDIATE_W2_SUPERSEDED_PRIOR_7415_CANDIDATE",
+            "DEEPER_C_LOW_COMPLETED",
+            "VIOLENT_RECLAIM_FROM_7360",
+            "INTERMEDIATE_W3_LAUNCH_CONFIRMED_BY_LOWER_DEGREE_IMPULSE"
+          ],
+          "replaces": {
+            "price": 7415.25,
+            "time": "2026-06-23 13:30",
+            "status": "SUPERSEDED",
+            "reason": "PRIOR_W2_CANDIDATE_SUPERSEDED_BY_DEEPER_7360_C_LOW"
+          }
+        },
+        "W3": {
+          "price": null,
+          "time": null,
+          "status": "ACTIVE",
+          "confidence": "HIGH",
+          "basis": [
+            "INTERMEDIATE_W3_ACTIVE_AFTER_CONFIRMED_W2_LOW",
+            "MINUTE_W5_COMPLETED_AT_7595",
+            "POST_MINUTE_W5_ABC_CORRECTION_ACTIVE",
+            "INTERMEDIATE_PARENT_TREND_REMAINS_UP",
+            "WAIT_FOR_CORRECTION_TO_COMPLETE_BEFORE_NEW_CONTINUATION_ENTRY"
+          ]
+        }
+      }
+    },
+    "minute": {
+      "tf": "10m",
+      "direction": "UP",
+      "active": true,
+      "parentDegree": "intermediate",
+      "parentWave": "W3",
+      "activeWave": "W5",
+      "stage": "COMPLETE",
+      "currentRead": "MINUTE_W5_COMPLETE_POST_W5_ABC_CORRECTION_ACTIVE",
+      "headline": "Minute W5 complete at 7595",
+      "action": "WAIT_FOR_ABC_CORRECTION_TO_FINISH",
+      "marks": {
+        "W1": {
+          "low": {
+            "price": 7360,
+            "time": "2026-06-26 06:30"
+          },
+          "high": {
+            "price": 7459.75,
+            "time": "2026-06-26 08:30"
+          },
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "MINUTE_W1_STARTED_FROM_INTERMEDIATE_W2_LOW",
+            "MINUTE_W1_HIGH_CONFIRMED_AT_7459_75"
+          ]
+        },
+        "W2": {
+          "price": 7369.25,
+          "time": "2026-06-26 13:00",
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "MINUTE_W2_PULLBACK_CONFIRMED",
+            "HELD_ABOVE_INTERMEDIATE_W2_LOW"
+          ]
+        },
+        "W3": {
+          "price": 7500,
+          "time": "2026-06-28 12:00",
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "MINUTE_W3_IMPULSE_COMPLETED_NEAR_7500",
+            "FOLLOWED_BY_MINUTE_W4_PULLBACK",
+            "MINUTE_W3_NO_LONGER_ACTIVE"
+          ]
+        },
+        "W4": {
+          "price": 7506,
+          "time": "2026-07-01 05:00",
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "MINUTE_W4_PULLBACK_COMPLETED_AT_7506",
+            "HELD_ABOVE_MINUTE_W3_BASE_STRUCTURE",
+            "SUBSEQUENT_SUBMINUTE_W1_IMPULSE_CONFIRMED"
+          ]
+        },
+        "W5": {
+          "price": 7595,
+          "time": "2026-07-02 07:00",
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "MINUTE_W5_COMPLETED_AT_7595",
+            "FIVE_WAVE_MINUTE_SEQUENCE_COMPLETE_FROM_7360",
+            "POST_W5_ABC_CORRECTION_STARTED",
+            "DO_NOT_CHASE_LONG_AFTER_COMPLETED_W5"
+          ]
+        }
+      },
+      "correction": {
+        "type": "ABC",
+        "direction": "DOWN",
+        "active": true,
+        "stage": "A_LEG_ACTIVE_OR_RECENTLY_MARKED",
+        "currentRead": "POST_MINUTE_W5_ABC_CORRECTION_DOWN_ACTIVE",
+        "parentWave": "MINUTE_W5_COMPLETE",
+        "marks": {
+          "A": {
+            "price": 7485.5,
+            "time": "2026-07-02 12:39",
+            "status": "WATCH",
+            "confidence": "MEDIUM",
+            "basis": [
+              "FIRST_SHARP_DROP_AFTER_7595_W5_HIGH",
+              "POSSIBLE_A_LEG_LOW",
+              "WAIT_FOR_B_BOUNCE_CONFIRMATION"
+            ]
+          },
+          "B": {
+            "price": null,
+            "time": null,
+            "status": "PROJECTED",
+            "confidence": "LOW",
+            "basis": [
+              "WATCH_B_BOUNCE_TOWARD_7531_TO_7557_AREA",
+              "B_NOT_CONFIRMED_YET"
+            ]
+          },
+          "C": {
+            "price": null,
+            "time": null,
+            "status": "PROJECTED",
+            "confidence": "LOW",
+            "basis": [
+              "WATCH_C_LEG_DOWN_IF_B_BOUNCE_FAILS",
+              "POSSIBLE_C_TARGET_AROUND_7452_50",
+              "C_NOT_CONFIRMED_YET"
+            ]
+          }
+        }
+      }
+    },
+    "subminute": {
+      "tf": "10m",
+      "direction": "DOWN",
+      "active": true,
+      "parentDegree": "minute",
+      "parentWave": "W5_COMPLETE",
+      "activeWave": "A",
+      "stage": "ACTIVE",
+      "currentRead": "SUBMINUTE_A_LEG_ACTIVE_POST_MINUTE_W5",
+      "headline": "Subminute A leg active after Minute W5 complete",
+      "action": "WATCH_B_BOUNCE_THEN_C_LEG_DO_NOT_CHASE",
+      "marks": {
+        "A": {
+          "price": 7485.5,
+          "time": "2026-07-02 12:39",
+          "status": "WATCH",
+          "confidence": "MEDIUM",
+          "basis": [
+            "SUBMINUTE_A_LEG_STARTED_FROM_7595_MINUTE_W5_HIGH",
+            "SHARP_DROP_INTO_7485_50_AREA",
+            "WAIT_FOR_B_BOUNCE_CONFIRMATION"
+          ]
+        },
+        "B": {
+          "price": null,
+          "time": null,
+          "status": "PROJECTED",
+          "confidence": "LOW",
+          "basis": [
+            "WATCH_B_BOUNCE",
+            "B_NOT_CONFIRMED_YET"
+          ]
+        },
+        "C": {
+          "price": null,
+          "time": null,
+          "status": "PROJECTED",
+          "confidence": "LOW",
+          "basis": [
+            "WATCH_C_LEG_DOWN_AFTER_B_BOUNCE",
+            "C_NOT_CONFIRMED_YET"
+          ]
+        }
+      },
+      "replaces": {
+        "activeWave": "W3",
+        "currentRead": "SUBMINUTE_W2_COMPLETE_W3_LAUNCH_WATCH",
+        "reason": "Minute W5 completed at 7595; lower-degree W3 launch watch is no longer the active structure."
+      }
+    }
+  }
 }
