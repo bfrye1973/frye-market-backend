@@ -323,6 +323,12 @@ function normalizeCorrectionModel({ structure, marks }) {
 
     fibAnchors: correction.fibAnchors || null,
 
+    parentImpulseFib: correction.parentImpulseFib || null,
+    abcInternalFib: correction.abcInternalFib || null,
+    aReactionZone: correction.aReactionZone || null,
+    bBounceZone: correction.bBounceZone || null,
+    cProjectionZone: correction.cProjectionZone || null,
+
     levels: correction.levels || null,
 
     aLeg:
