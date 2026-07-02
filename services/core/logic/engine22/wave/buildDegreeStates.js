@@ -38,10 +38,11 @@ function titleCase(value) {
 }
 
 function round2(value) {
+  if (value === null || value === undefined || value === "") return null;
+
   const n = Number(value);
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
 }
-
 function normalizeDegree(value) {
   const s = String(value || "").trim().toLowerCase();
 
