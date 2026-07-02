@@ -323,6 +323,8 @@ function normalizeCorrectionModel({ structure, marks }) {
 
     fibAnchors: correction.fibAnchors || null,
 
+    levels: correction.levels || null,
+
     aLeg:
       correction.aLeg ||
       correctionMarks.A ||
