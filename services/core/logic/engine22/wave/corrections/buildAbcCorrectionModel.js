@@ -4,11 +4,11 @@
 // Purpose:
 // Train Engine 22 on reusable ABC-down correction structure after a completed impulse up.
 //
-// User rule:
-// After completed impulse up:
-// - A down usually reacts near the 0.50 retracement.
-// - B up usually bounces into moving averages / institutional zones.
-// - C down often bottoms near the 0.382 retracement.
+// Correct long-term model:
+// - parentImpulseFib = full completed impulse context.
+// - abcInternalFib = internal A-leg retracement map used for B bounce.
+// - B bounce watches internal A-leg 0.382 / 0.500 / 0.618 plus confluence.
+// - C projection is separate from parent impulse fib.
 //
 // Safety:
 // This is structural watch logic only.
@@ -17,7 +17,14 @@
 // It does NOT create Engine 15 readiness.
 // It does NOT call Engine 8.
 
-const DEGREE_ORDER = ["subminute", "minute", "minor", "intermediate", "primary", "micro"];
+const DEGREE_ORDER = [
+  "subminute",
+  "minute",
+  "minor",
+  "intermediate",
+  "primary",
+  "micro",
+];
 
 function upper(value) {
   return String(value || "").trim().toUpperCase();
@@ -25,12 +32,14 @@ function upper(value) {
 
 function round2(value) {
   if (value === null || value === undefined || value === "") return null;
+
   const n = Number(value);
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
 }
 
 function toNum(value) {
   if (value === null || value === undefined || value === "") return null;
+
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -91,15 +100,12 @@ function normalizeManualMark(mark = null) {
 function inferImpulseStart(structure = {}) {
   const marks = structure?.marks || structure?.waveMarks || {};
 
-  // Best case: W1 has a low/high object. The impulse starts at W1.low.
   const w1Low = toNum(marks?.W1?.low?.price ?? marks?.W1?.low?.p);
   if (w1Low !== null) return w1Low;
 
-  // Some structures store W1 as a direct price.
   const w1Direct = getMarkPrice(marks?.W1);
   if (w1Direct !== null) return w1Direct;
 
-  // Fallbacks if the structure is incomplete.
   const w2 = getMarkPrice(marks?.W2);
   if (w2 !== null) return w2;
 
@@ -109,7 +115,10 @@ function inferImpulseStart(structure = {}) {
 function inferCompletedHigh(structure = {}, parentCompletedWave = "W5") {
   const marks = structure?.marks || structure?.waveMarks || {};
 
-  const wave = upper(parentCompletedWave).includes("W5") ? "W5" : parentCompletedWave;
+  const wave = upper(parentCompletedWave).includes("W5")
+    ? "W5"
+    : parentCompletedWave;
+
   const direct = getMarkPrice(marks?.[wave]);
   if (direct !== null) return direct;
 
@@ -119,58 +128,84 @@ function inferCompletedHigh(structure = {}, parentCompletedWave = "W5") {
   return null;
 }
 
-function buildRetracementLevels({ impulseStart, impulseHigh }) {
-  const start = toNum(impulseStart);
+function buildParentImpulseFib({ impulseStart, impulseHigh }) {
+  const low = toNum(impulseStart);
   const high = toNum(impulseHigh);
 
-  if (start === null || high === null || high <= start) {
+  if (low === null || high === null || high <= low) {
     return {
-      ok: false,
-      impulseStart: round2(start),
-      impulseHigh: round2(high),
+      valid: false,
+      purpose: "FULL_PARENT_IMPULSE_CORRECTION_CONTEXT",
+      anchorLow: round2(low),
+      anchorHigh: round2(high),
       range: null,
+      r236: null,
       r382: null,
       r500: null,
-      reasonCodes: ["ABC_FIB_ANCHORS_INVALID"],
+      r618: null,
+      r786: null,
+      reasonCodes: ["PARENT_IMPULSE_FIB_ANCHORS_INVALID"],
     };
   }
 
-  const range = high - start;
+  const range = high - low;
 
   return {
-    ok: true,
-    impulseStart: round2(start),
-    impulseHigh: round2(high),
+    valid: true,
+    purpose: "FULL_PARENT_IMPULSE_CORRECTION_CONTEXT",
+    anchorLow: round2(low),
+    anchorHigh: round2(high),
     range: round2(range),
 
-    // User-trained ABC-down model:
-    // A reacts near 0.50.
-    // C often bottoms near 0.382.
+    // Retracement down from completed impulse high.
+    r236: round2(high - range * 0.236),
     r382: round2(high - range * 0.382),
     r500: round2(high - range * 0.5),
+    r618: round2(high - range * 0.618),
+    r786: round2(high - range * 0.786),
 
-    reasonCodes: ["ABC_FIB_ANCHORS_VALID"],
+    reasonCodes: ["PARENT_IMPULSE_FIB_ANCHORS_VALID"],
   };
 }
 
-function chooseStage({ manualA, manualB, manualC, currentPrice, levels }) {
-  const cConfirmed = manualC?.confirmed === true;
-  const bConfirmed = manualB?.confirmed === true;
-  const aPresent = manualA !== null;
-  const bPresent = manualB !== null;
-  const cPresent = manualC !== null;
+function buildAbcInternalFib({ impulseHigh, aLegLow }) {
+  const high = toNum(impulseHigh);
+  const low = toNum(aLegLow);
 
-  if (cConfirmed) return "ABC_COMPLETE_WATCH";
-  if (cPresent && upper(manualC?.status) !== "PROJECTED") return "C_WATCH";
-  if (bConfirmed || (bPresent && upper(manualB?.status) !== "PROJECTED")) return "C_WATCH";
-  if (aPresent) return "B_WATCH";
+  if (high === null || low === null || high <= low) {
+    return {
+      valid: false,
+      purpose: "B_BOUNCE_RETRACEMENT_OF_A_LEG",
+      anchorHigh: round2(high),
+      anchorLow: round2(low),
+      range: null,
+      r236: null,
+      r382: null,
+      r500: null,
+      r618: null,
+      r786: null,
+      reasonCodes: ["ABC_INTERNAL_FIB_ANCHORS_INVALID_OR_A_MISSING"],
+    };
+  }
 
-  const px = toNum(currentPrice);
-  const r500 = toNum(levels?.r500);
+  const range = high - low;
 
-  if (px !== null && r500 !== null && px <= r500) return "A_REACTION_WATCH";
+  return {
+    valid: true,
+    purpose: "B_BOUNCE_RETRACEMENT_OF_A_LEG",
+    anchorHigh: round2(high),
+    anchorLow: round2(low),
+    range: round2(range),
 
-  return "A_WATCH";
+    // B bounce retraces upward from A low toward W5 high.
+    r236: round2(low + range * 0.236),
+    r382: round2(low + range * 0.382),
+    r500: round2(low + range * 0.5),
+    r618: round2(low + range * 0.618),
+    r786: round2(low + range * 0.786),
+
+    reasonCodes: ["ABC_INTERNAL_FIB_ANCHORS_VALID"],
+  };
 }
 
 function normalizeZoneList(listLike) {
@@ -194,18 +229,26 @@ function normalizeZoneList(listLike) {
     .filter(Boolean);
 }
 
-function buildBZoneContext({
+function buildConfluenceContext({
   maContext = null,
   institutionalZones = null,
   engine3Reference = null,
 } = {}) {
-  const manualZones = normalizeZoneList(institutionalZones?.manual || institutionalZones);
-  const shelfZones = normalizeZoneList(institutionalZones?.shelves || institutionalZones?.autoShelves);
+  const manualZones = normalizeZoneList(
+    institutionalZones?.manual || institutionalZones
+  );
+
+  const shelfZones = normalizeZoneList(
+    institutionalZones?.shelves || institutionalZones?.autoShelves
+  );
+
   const imbalanceZones = normalizeZoneList(
     institutionalZones?.imbalances || institutionalZones?.imbalanceZones
   );
 
-  const maZones = normalizeZoneList(maContext?.zones || maContext?.clusters || maContext);
+  const maZones = normalizeZoneList(
+    maContext?.zones || maContext?.clusters || maContext
+  );
 
   const engine3Zones = normalizeZoneList(engine3Reference);
 
@@ -217,21 +260,207 @@ function buildBZoneContext({
     ...engine3Zones.map((z) => ({ ...z, priority: 4 })),
   ].sort((a, b) => Number(a.priority || 99) - Number(b.priority || 99));
 
-  if (!zones.length) {
-    return {
-      available: false,
-      watchType: "B_BOUNCE_WATCH_NO_ZONE_CONTEXT",
-      zones: [],
-      reasonCodes: ["B_BOUNCE_WATCH_NO_ZONE_CONTEXT"],
-    };
-  }
+  return {
+    available: zones.length > 0,
+    movingAverages: maZones,
+    institutionalZones: [...manualZones, ...shelfZones, ...imbalanceZones],
+    engine3ReferenceLevels: engine3Zones,
+    zones,
+    reasonCodes: zones.length
+      ? ["ABC_CONFLUENCE_CONTEXT_AVAILABLE"]
+      : ["ABC_CONFLUENCE_CONTEXT_UNAVAILABLE"],
+  };
+}
+
+function buildAReactionZone({ parentImpulseFib, manualA }) {
+  return {
+    source: "PARENT_IMPULSE_CONTEXT_PLUS_MANUAL_A",
+    status: manualA ? manualA.status : "PROJECTED",
+    manualMarkPresent: manualA !== null,
+
+    parentFibContext: {
+      r382: parentImpulseFib?.r382 ?? null,
+      r500: parentImpulseFib?.r500 ?? null,
+      r618: parentImpulseFib?.r618 ?? null,
+    },
+
+    preferredContext: {
+      label: "A_REACTION_PARENT_CONTEXT",
+      watchNear: parentImpulseFib?.r500 ?? null,
+      note:
+        "A often reacts into parent impulse retracement context, but parent 0.50 is not a hard rule.",
+    },
+
+    manualA: manualA || null,
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    reasonCodes: [
+      "A_REACTION_ZONE_PARENT_IMPULSE_CONTEXT",
+      ...(manualA ? ["MANUAL_A_MARK_USED"] : ["NO_MANUAL_A_MARK"]),
+    ],
+  };
+}
+
+function buildBBounceZone({ abcInternalFib, confluenceContext, manualB }) {
+  const fibBand =
+    abcInternalFib?.valid === true
+      ? {
+          r382: abcInternalFib.r382,
+          r500: abcInternalFib.r500,
+          r618: abcInternalFib.r618,
+        }
+      : {
+          r382: null,
+          r500: null,
+          r618: null,
+        };
+
+  const preferredBand =
+    abcInternalFib?.valid === true
+      ? {
+          low: Math.min(
+            Number(abcInternalFib.r382),
+            Number(abcInternalFib.r618)
+          ),
+          high: Math.max(
+            Number(abcInternalFib.r382),
+            Number(abcInternalFib.r618)
+          ),
+          source: "R382_R618_INTERNAL_A_LEG_RETRACEMENT",
+        }
+      : {
+          low: null,
+          high: null,
+          source: "ABC_INTERNAL_FIB_UNAVAILABLE",
+        };
 
   return {
-    available: true,
-    watchType: "B_BOUNCE_ZONE_MA_OR_INSTITUTIONAL",
-    zones,
-    reasonCodes: ["B_BOUNCE_ZONE_CONTEXT_AVAILABLE"],
+    source: "ABC_INTERNAL_A_LEG_RETRACEMENT_PLUS_CONFLUENCE",
+    status: manualB ? manualB.status : "PROJECTED",
+    manualMarkPresent: manualB !== null,
+
+    fibBand,
+    preferredBand,
+
+    confluence: {
+      movingAverages: confluenceContext.movingAverages,
+      institutionalZones: confluenceContext.institutionalZones,
+      engine3ReferenceLevels: confluenceContext.engine3ReferenceLevels,
+    },
+
+    manualB: manualB || null,
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    reasonCodes: [
+      abcInternalFib?.valid
+        ? "B_BOUNCE_INTERNAL_FIB_BAND_AVAILABLE"
+        : "B_BOUNCE_INTERNAL_FIB_BAND_UNAVAILABLE",
+      confluenceContext.available
+        ? "B_BOUNCE_CONFLUENCE_CONTEXT_AVAILABLE"
+        : "B_BOUNCE_WATCH_NO_ZONE_CONTEXT",
+      ...(manualB ? ["MANUAL_B_MARK_USED"] : ["NO_MANUAL_B_MARK"]),
+    ],
   };
+}
+
+function buildCProjectionZone({
+  parentImpulseFib,
+  abcInternalFib,
+  manualA,
+  manualB,
+  manualC,
+}) {
+  const aHigh = toNum(abcInternalFib?.anchorHigh);
+  const aLow = toNum(abcInternalFib?.anchorLow);
+  const bHigh = toNum(manualB?.price);
+
+  const aLength =
+    aHigh !== null && aLow !== null && aHigh > aLow ? aHigh - aLow : null;
+
+  const c100 =
+    bHigh !== null && aLength !== null ? round2(bHigh - aLength) : null;
+
+  const c1272 =
+    bHigh !== null && aLength !== null ? round2(bHigh - aLength * 1.272) : null;
+
+  const c1618 =
+    bHigh !== null && aLength !== null ? round2(bHigh - aLength * 1.618) : null;
+
+  return {
+    source: "A_LENGTH_PROJECTION_FROM_B_HIGH_PLUS_PARENT_CONTEXT",
+    status: manualC ? manualC.status : "PROJECTED",
+    manualMarkPresent: manualC !== null,
+
+    projectionFromB:
+      bHigh !== null && aLength !== null
+        ? {
+            bHigh: round2(bHigh),
+            aLength: round2(aLength),
+            c100,
+            c1272,
+            c1618,
+          }
+        : {
+            bHigh: round2(bHigh),
+            aLength: round2(aLength),
+            c100: null,
+            c1272: null,
+            c1618: null,
+            reason: "MANUAL_B_REQUIRED_FOR_C_PROJECTION",
+          },
+
+    parentFibConfluence: {
+      r382: parentImpulseFib?.r382 ?? null,
+      r500: parentImpulseFib?.r500 ?? null,
+      r618: parentImpulseFib?.r618 ?? null,
+    },
+
+    manualA: manualA || null,
+    manualB: manualB || null,
+    manualC: manualC || null,
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    reasonCodes: [
+      bHigh !== null
+        ? "C_PROJECTION_FROM_MANUAL_B_AVAILABLE"
+        : "C_PROJECTION_WAITING_FOR_B_MARK",
+      "C_PROJECTION_SEPARATED_FROM_PARENT_FIB",
+      ...(manualC ? ["MANUAL_C_MARK_USED"] : ["NO_MANUAL_C_MARK"]),
+    ],
+  };
+}
+
+function chooseStage({ manualA, manualB, manualC, currentPrice, parentImpulseFib }) {
+  const cConfirmed = manualC?.confirmed === true;
+  const bConfirmed = manualB?.confirmed === true;
+  const aPresent = manualA !== null;
+  const bPresent = manualB !== null;
+  const cPresent = manualC !== null;
+
+  if (cConfirmed) return "ABC_COMPLETE_WATCH";
+  if (cPresent && upper(manualC?.status) !== "PROJECTED") return "C_WATCH";
+  if (bConfirmed || (bPresent && upper(manualB?.status) !== "PROJECTED")) {
+    return "C_WATCH";
+  }
+  if (aPresent) return "B_WATCH";
+
+  const px = toNum(currentPrice);
+  const parentR500 = toNum(parentImpulseFib?.r500);
+
+  if (px !== null && parentR500 !== null && px <= parentR500) {
+    return "A_REACTION_WATCH";
+  }
+
+  return "A_WATCH";
 }
 
 export function buildAbcCorrectionModel({
@@ -262,15 +491,39 @@ export function buildAbcCorrectionModel({
   const manualB = normalizeManualMark(manualMarks?.B || manualMarks?.b || null);
   const manualC = normalizeManualMark(manualMarks?.C || manualMarks?.c || null);
 
-  const levels = buildRetracementLevels({
+  const parentImpulseFib = buildParentImpulseFib({
     impulseStart,
     impulseHigh,
   });
 
-  const bZoneContext = buildBZoneContext({
+  const abcInternalFib = buildAbcInternalFib({
+    impulseHigh,
+    aLegLow: manualA?.price ?? null,
+  });
+
+  const confluenceContext = buildConfluenceContext({
     maContext,
     institutionalZones,
     engine3Reference,
+  });
+
+  const aReactionZone = buildAReactionZone({
+    parentImpulseFib,
+    manualA,
+  });
+
+  const bBounceZone = buildBBounceZone({
+    abcInternalFib,
+    confluenceContext,
+    manualB,
+  });
+
+  const cProjectionZone = buildCProjectionZone({
+    parentImpulseFib,
+    abcInternalFib,
+    manualA,
+    manualB,
+    manualC,
   });
 
   const stage =
@@ -280,7 +533,7 @@ export function buildAbcCorrectionModel({
       manualB,
       manualC,
       currentPrice,
-      levels,
+      parentImpulseFib,
     });
 
   return {
@@ -296,67 +549,78 @@ export function buildAbcCorrectionModel({
       existingCorrection?.currentRead ||
       `${upper(degree)}_ABC_DOWN_${stage}`,
 
+    parentImpulseFib,
+    abcInternalFib,
+
+    aReactionZone,
+    bBounceZone,
+    cProjectionZone,
+
+    // Keep these aliases for existing display contracts.
     fibAnchors: {
-      impulseStart: levels.impulseStart,
-      impulseHigh: levels.impulseHigh,
-      range: levels.range,
+      impulseStart: parentImpulseFib.anchorLow,
+      impulseHigh: parentImpulseFib.anchorHigh,
+      range: parentImpulseFib.range,
       retracementSource: "IMPULSE_START_LOW_TO_COMPLETED_IMPULSE_HIGH",
-      valid: levels.ok === true,
+      valid: parentImpulseFib.valid === true,
     },
 
-    levels: {
-      aReactionFib: "0.50",
-      aReactionPrice: levels.r500,
-      cCompletionFib: "0.382",
-      cCompletionPrice: levels.r382,
-    },
+    // Deprecated. Kept temporarily so older frontend/debug jq does not break.
+    levels: null,
 
     aLeg: manualA || {
-      price: levels.r500,
+      price: parentImpulseFib.r500,
       time: null,
       status: "PROJECTED",
-      confidence: levels.ok ? "MODEL" : "LOW",
+      confidence: parentImpulseFib.valid ? "MODEL" : "LOW",
       maturity: "PROJECTED",
       confirmed: false,
-      source: "ABC_MODEL_FIB_050",
+      source: "ABC_MODEL_PARENT_IMPULSE_CONTEXT",
       basis: [
-        "A_DOWN_USUALLY_REACTS_NEAR_050_RETRACEMENT",
+        "A_DOWN_REACTS_IN_PARENT_IMPULSE_RETRACEMENT_CONTEXT",
+        "PARENT_050_IS_CONTEXT_NOT_HARD_RULE",
         "STRUCTURAL_WATCH_ONLY",
       ],
-      reasonCodes: ["A_REACTION_ZONE_NEAR_050"],
+      reasonCodes: ["A_REACTION_ZONE_PARENT_IMPULSE_CONTEXT"],
     },
 
     bLeg: manualB || {
       price: null,
       time: null,
       status: "PROJECTED",
-      confidence: bZoneContext.available ? "MODEL_WITH_ZONE_CONTEXT" : "LOW",
+      confidence: abcInternalFib.valid
+        ? "MODEL_INTERNAL_FIB_WITH_CONFLUENCE"
+        : "LOW",
       maturity: "PROJECTED",
       confirmed: false,
-      source: bZoneContext.available
-        ? "MA_OR_INSTITUTIONAL_ZONE_CONTEXT"
-        : "ABC_MODEL_NO_B_ZONE_CONTEXT",
-      zones: bZoneContext.zones,
+      source: "ABC_INTERNAL_A_LEG_RETRACEMENT",
+      fibBand: bBounceZone.fibBand,
+      preferredBand: bBounceZone.preferredBand,
+      zones: confluenceContext.zones,
       basis: [
-        "B_UP_USUALLY_BOUNCES_INTO_MOVING_AVERAGES_OR_INSTITUTIONAL_ZONES",
+        "B_UP_RETRACES_THE_A_LEG_USING_INTERNAL_ABC_FIBS",
+        "WATCH_0382_050_0618_PLUS_MA_OR_INSTITUTIONAL_CONFLUENCE",
         "STRUCTURAL_WATCH_ONLY",
       ],
-      reasonCodes: [bZoneContext.watchType],
+      reasonCodes: bBounceZone.reasonCodes,
     },
 
     cLeg: manualC || {
-      price: levels.r382,
+      price: null,
       time: null,
       status: "PROJECTED",
-      confidence: levels.ok ? "MODEL" : "LOW",
+      confidence: "LOW",
       maturity: "PROJECTED",
       confirmed: false,
-      source: "ABC_MODEL_FIB_0382",
+      source: "ABC_C_PROJECTION_PENDING_B_MARK",
+      projectionFromB: cProjectionZone.projectionFromB,
+      parentFibConfluence: cProjectionZone.parentFibConfluence,
       basis: [
-        "C_DOWN_OFTEN_BOTTOMS_NEAR_0382_RETRACEMENT",
+        "C_DOWN_PROJECTS_FROM_B_HIGH_USING_A_LEG_LENGTH",
+        "PARENT_IMPULSE_FIBS_AND_INSTITUTIONAL_ZONES_ARE_CONFLUENCE",
         "STRUCTURAL_WATCH_ONLY",
       ],
-      reasonCodes: ["C_COMPLETION_ZONE_NEAR_0382"],
+      reasonCodes: cProjectionZone.reasonCodes,
     },
 
     manualMarks: {
@@ -374,13 +638,18 @@ export function buildAbcCorrectionModel({
     reasonCodes: [
       "ENGINE22_ABC_CORRECTION_MODEL_BUILT",
       "ABC_DOWN_AFTER_COMPLETED_IMPULSE_UP",
-      "A_REACTION_ZONE_NEAR_050",
-      bZoneContext.watchType,
-      "C_COMPLETION_ZONE_NEAR_0382",
+      "PARENT_IMPULSE_FIB_CONTEXT_BUILT",
+      parentImpulseFib.valid
+        ? "PARENT_IMPULSE_FIB_ANCHORS_VALID"
+        : "PARENT_IMPULSE_FIB_ANCHORS_INVALID",
+      abcInternalFib.valid
+        ? "ABC_INTERNAL_FIB_ANCHORS_VALID"
+        : "ABC_INTERNAL_FIB_WAITING_FOR_A_LOW",
+      "B_BOUNCE_USES_INTERNAL_A_LEG_RETRACEMENT",
+      "C_PROJECTION_SEPARATE_FROM_PARENT_FIB",
       "STRUCTURAL_WATCH_ONLY",
       "NO_EXECUTION",
       "NO_PERMISSION_CREATED",
-      ...(Array.isArray(levels.reasonCodes) ? levels.reasonCodes : []),
       ...(Array.isArray(existingCorrection?.reasonCodes)
         ? existingCorrection.reasonCodes
         : []),
