@@ -32,6 +32,7 @@ import { buildWaveTradeDecision } from "../decisions/buildWaveTradeDecision.js";
 import { buildTargetClusterConfidence } from "./buildTargetClusterConfidence.js";
 import { buildWaveOpportunity } from "../opportunity/buildWaveOpportunity.js";
 import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLifecycleState.js";
+import { buildDegreeStates } from "./buildDegreeStates.js";
 
 function round2(x) {
   const n = Number(x);
@@ -1198,6 +1199,14 @@ export function buildEngine22WaveStrategy(input = {}) {
     });
 
   const currentLifecycleState = resolveCurrentLifecycleState({ waveFibState });
+  const degreeStates = buildDegreeStates({
+  waveFibState,
+  activeStructures: waveFibState?.activeStructures,
+  markMaturity: waveFibState?.markMaturity,
+  symbol: context.symbol,
+  tf: context.tf,
+  currentPrice: context.currentPrice,
+});
 
   const targetClusterConfidence = buildTargetClusterConfidence({
     symbol: context.symbol,
@@ -1346,6 +1355,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     currentPrice: round2(context.currentPrice),
 
     waveFibState,
+    degreeStates,
     w4Levels,
     tradeContextSummary,
     targetClusterConfidence,
