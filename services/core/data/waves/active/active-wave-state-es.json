@@ -183,7 +183,7 @@
       "action": "WATCH_B_BOUNCE_THEN_C_LEG_DO_NOT_CHASE",
       "marks": {
         "A": {
-          "price": 7485.5,
+          "price": 7479.75,
           "time": "2026-07-02 12:39",
           "status": "WATCH",
           "confidence": "MEDIUM",
