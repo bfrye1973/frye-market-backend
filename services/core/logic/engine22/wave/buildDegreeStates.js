@@ -507,6 +507,7 @@ function buildInactiveDegreeState(degree) {
     paperTradeCandidate: false,
 
     marks: buildEmptyMarks(),
+    targetModel: null,
     correctionModel: null,
     correctionModels: null,
 
@@ -597,16 +598,24 @@ function buildActiveDegreeState({
 
     marks,
 
-    // Preferred compact display model.
-    correctionModel,
-
-    // Full wrapper with alternate paths.
-    correctionModels:
-      structure?.correction?.models && typeof structure.correction.models === "object"
-        ? structure.correction
+    // Extension / retracement display model.
+    // Used by Primary, Intermediate, and Minor cards.
+    // This is display-only structural context.
+    targetModel:
+      structure?.targetModel && typeof structure.targetModel === "object"
+        ? structure.targetModel
         : null,
 
-    warnings: Array.isArray(structure?.warnings) ? structure.warnings : [],
+     // Preferred compact display model.
+     correctionModel,
+
+     // Full wrapper with alternate paths.
+     correctionModels:
+       structure?.correction?.models && typeof structure.correction.models === "object"
+         ? structure.correction
+         : null,
+
+     warnings: Array.isArray(structure?.warnings) ? structure.warnings : [],
 
     reasonCodes: [
       "ENGINE22_DEGREE_STATE_BUILT",
