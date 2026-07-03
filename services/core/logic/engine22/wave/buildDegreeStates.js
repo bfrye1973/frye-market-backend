@@ -11,7 +11,10 @@
 
 const DEGREE_ORDER = ["subminute", "minute", "minor", "intermediate", "primary"];
 
-const WAVE_MARK_KEYS = ["W1", "W2", "W3", "W4", "W5", "A", "B", "C"];
+// Supports impulse marks and corrective marks.
+// A/B/C = normal correction
+// A/B/C/D/E = triangle correction
+const WAVE_MARK_KEYS = ["W1", "W2", "W3", "W4", "W5", "A", "B", "C", "D", "E"];
 
 const DEFAULT_TF_BY_DEGREE = {
   subminute: "10m",
@@ -74,6 +77,8 @@ function normalizeWave(value) {
   if (s === "A" || s.includes("A_LEG") || s.includes("WAVE_A")) return "A";
   if (s === "B" || s.includes("B_LEG") || s.includes("WAVE_B")) return "B";
   if (s === "C" || s.includes("C_LEG") || s.includes("WAVE_C")) return "C";
+  if (s === "D" || s.includes("D_LEG") || s.includes("WAVE_D")) return "D";
+  if (s === "E" || s.includes("E_LEG") || s.includes("WAVE_E")) return "E";
 
   return null;
 }
@@ -102,11 +107,13 @@ function inferDirection(structure = {}) {
 
   if (["UP", "BULLISH", "LONG"].includes(s)) return "UP";
   if (["DOWN", "BEARISH", "SHORT"].includes(s)) return "DOWN";
+  if (["SIDEWAYS", "NEUTRAL", "COMPRESSION"].includes(s)) return "NEUTRAL";
 
   const activeWave = normalizeWave(structure.activeWave || structure.wave);
 
   if (["W1", "W3", "W5"].includes(activeWave)) return "UP";
   if (["A", "C"].includes(activeWave)) return "DOWN";
+  if (["B", "D", "E"].includes(activeWave)) return "NEUTRAL";
 
   return "NEUTRAL";
 }
@@ -265,7 +272,7 @@ function inferActiveWave(structure = {}, marks = {}) {
 
   if (explicit) return explicit;
 
-  const waves = ["C", "B", "A", "W5", "W4", "W3", "W2", "W1"];
+  const waves = ["E", "D", "C", "B", "A", "W5", "W4", "W3", "W2", "W1"];
 
   for (const wave of waves) {
     if (marks?.[wave]) return wave;
@@ -287,70 +294,184 @@ function normalizeCorrectionModel({ structure, marks }) {
   if (!correction || typeof correction !== "object") return null;
 
   const correctionMarks = normalizeMarks({
-    marks: correction?.marks || {},
+    marks:
+      correction?.marks ||
+      correction?.preferredModel?.marks ||
+      correction?.models?.abcdeTriangle?.marks ||
+      correction?.models?.abcDown?.manualMarks ||
+      {},
     maturityByWave: {},
   });
 
+  const preferredModel =
+    correction?.preferredModel && typeof correction.preferredModel === "object"
+      ? correction.preferredModel
+      : null;
+
+  const modelSource = preferredModel || correction;
+
   const mergedManualMarks = {
-    A: marks?.A || correctionMarks?.A || null,
-    B: marks?.B || correctionMarks?.B || null,
-    C: marks?.C || correctionMarks?.C || null,
+    A:
+      marks?.A ||
+      correctionMarks?.A ||
+      modelSource?.manualMarks?.A ||
+      modelSource?.marks?.A ||
+      null,
+    B:
+      marks?.B ||
+      correctionMarks?.B ||
+      modelSource?.manualMarks?.B ||
+      modelSource?.marks?.B ||
+      null,
+    C:
+      marks?.C ||
+      correctionMarks?.C ||
+      modelSource?.manualMarks?.C ||
+      modelSource?.marks?.C ||
+      null,
+    D:
+      marks?.D ||
+      correctionMarks?.D ||
+      modelSource?.marks?.D ||
+      null,
+    E:
+      marks?.E ||
+      correctionMarks?.E ||
+      modelSource?.marks?.E ||
+      null,
   };
 
   const manualMarksPresent =
     mergedManualMarks.A !== null ||
     mergedManualMarks.B !== null ||
-    mergedManualMarks.C !== null;
+    mergedManualMarks.C !== null ||
+    mergedManualMarks.D !== null ||
+    mergedManualMarks.E !== null;
+
+  const fullWrapper =
+    correction?.models && typeof correction.models === "object"
+      ? correction
+      : null;
 
   return {
-    type: correction.type || "ABC_DOWN",
-    active: correction.active === true,
-    direction: correction.direction || "DOWN",
+    type:
+      modelSource.type ||
+      correction.preferredType ||
+      correction.type ||
+      "ABC_DOWN",
+
+    active: modelSource.active === true || correction.active === true,
+
+    direction:
+      modelSource.direction ||
+      correction.direction ||
+      "DOWN",
+
     parentCompletedWave:
+      modelSource.parentCompletedWave ||
       correction.parentCompletedWave ||
       correction.parentWave ||
       structure?.parentWave ||
       null,
 
     stage:
+      modelSource.stage ||
       correction.stage ||
       correction.currentStage ||
       "INACTIVE",
 
     currentRead:
+      modelSource.currentRead ||
       correction.currentRead ||
       null,
 
-    fibAnchors: correction.fibAnchors || null,
+    preferredType:
+      correction.preferredType ||
+      modelSource.preferredType ||
+      modelSource.type ||
+      null,
 
-    parentImpulseFib: correction.parentImpulseFib || null,
-    abcInternalFib: correction.abcInternalFib || null,
-    aReactionZone: correction.aReactionZone || null,
-    bBounceZone: correction.bBounceZone || null,
-    cProjectionZone: correction.cProjectionZone || null,
+    fibAnchors:
+      modelSource.fibAnchors ||
+      correction.fibAnchors ||
+      null,
 
-    levels: correction.levels || null,
+    parentImpulseFib:
+      modelSource.parentImpulseFib ||
+      correction.parentImpulseFib ||
+      null,
+
+    abcInternalFib:
+      modelSource.abcInternalFib ||
+      correction.abcInternalFib ||
+      null,
+
+    aReactionZone:
+      modelSource.aReactionZone ||
+      correction.aReactionZone ||
+      null,
+
+    bBounceZone:
+      modelSource.bBounceZone ||
+      correction.bBounceZone ||
+      null,
+
+    cProjectionZone:
+      modelSource.cProjectionZone ||
+      correction.cProjectionZone ||
+      null,
+
+    upperTrendline:
+      modelSource.upperTrendline ||
+      null,
+
+    lowerTrendline:
+      modelSource.lowerTrendline ||
+      null,
+
+    breakoutRules:
+      modelSource.breakoutRules ||
+      null,
+
+    invalidationRules:
+      Array.isArray(modelSource.invalidationRules)
+        ? modelSource.invalidationRules
+        : [],
+
+    levels:
+      modelSource.levels ||
+      correction.levels ||
+      null,
 
     aLeg:
+      modelSource.aLeg ||
       correction.aLeg ||
       correctionMarks.A ||
       mergedManualMarks.A ||
       null,
 
     bLeg:
+      modelSource.bLeg ||
       correction.bLeg ||
       correctionMarks.B ||
       mergedManualMarks.B ||
       null,
 
     cLeg:
+      modelSource.cLeg ||
       correction.cLeg ||
       correctionMarks.C ||
       mergedManualMarks.C ||
       null,
 
+    marks:
+      modelSource.marks ||
+      null,
+
     manualMarks: mergedManualMarks,
     manualMarksPresent,
+
+    correctionModels: fullWrapper,
 
     noExecution: true,
     noPermissionCreated: true,
@@ -358,6 +479,8 @@ function normalizeCorrectionModel({ structure, marks }) {
 
     reasonCodes: [
       "ENGINE22_CORRECTION_MODEL_NORMALIZED",
+      ...(preferredModel ? ["ENGINE22_PREFERRED_CORRECTION_MODEL_SELECTED"] : []),
+      ...(Array.isArray(modelSource.reasonCodes) ? modelSource.reasonCodes : []),
       ...(Array.isArray(correction.reasonCodes) ? correction.reasonCodes : []),
     ],
   };
@@ -385,6 +508,7 @@ function buildInactiveDegreeState(degree) {
 
     marks: buildEmptyMarks(),
     correctionModel: null,
+    correctionModels: null,
 
     warnings: [],
     reasonCodes: ["NO_ACTIVE_MARKS_OR_CONTEXT"],
@@ -431,8 +555,8 @@ function buildActiveDegreeState({
       ? "TRACK_EXTENSION_DO_NOT_CHASE"
       : activeWave === "W5"
       ? "CONTINUATION_LEG_ACTIVE_DO_NOT_CHASE"
-      : ["A", "B", "C"].includes(activeWave)
-      ? "TRACK_ABC_CORRECTION_DO_NOT_CHASE"
+      : ["A", "B", "C", "D", "E"].includes(activeWave)
+      ? "TRACK_CORRECTION_STRUCTURE_DO_NOT_CHASE"
       : "TRACK_STRUCTURE_DO_NOT_CHASE");
 
   const currentRead =
@@ -472,7 +596,15 @@ function buildActiveDegreeState({
     paperTradeCandidate: false,
 
     marks,
+
+    // Preferred compact display model.
     correctionModel,
+
+    // Full wrapper with alternate paths.
+    correctionModels:
+      structure?.correction?.models && typeof structure.correction.models === "object"
+        ? structure.correction
+        : null,
 
     warnings: Array.isArray(structure?.warnings) ? structure.warnings : [],
 
@@ -480,6 +612,9 @@ function buildActiveDegreeState({
       "ENGINE22_DEGREE_STATE_BUILT",
       `${upper(degree)}_DEGREE_STATE_BUILT`,
       ...(correctionModel ? ["ENGINE22_DEGREE_CORRECTION_MODEL_ATTACHED"] : []),
+      ...(structure?.correction?.models
+        ? ["ENGINE22_DEGREE_CORRECTION_MODELS_WRAPPER_ATTACHED"]
+        : []),
       ...(Array.isArray(structure?.reasonCodes) ? structure.reasonCodes : []),
     ],
 
