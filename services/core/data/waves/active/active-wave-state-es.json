@@ -90,10 +90,33 @@
           "e200": 10022,
           "e2618": 11517.56
         },
+        "displayLevels": [
+          {
+            "label": "1.000",
+            "price": 7602
+          },
+          {
+            "label": "1.272",
+            "price": 8260.24
+          },
+          {
+            "label": "1.618",
+            "price": 9097.56
+          },
+          {
+            "label": "2.000",
+            "price": 10022
+          },
+          {
+            "label": "2.618",
+            "price": 11517.56
+          }
+        ],
         "nextTarget": 7602,
-        "summary": "Primary W5 is active from 5182. First major extension target is 7602, then 8260, 9098, and 10022.",
+        "summary": "Primary W5 is active from 5182. Full extension ladder: 7602, 8260.24, 9097.56, 10022, 11517.56.",
         "reasonCodes": [
           "PRIMARY_W5_EXTENSION_MODEL_BUILT",
+          "PRIMARY_W5_FULL_EXTENSION_LADDER_ATTACHED",
           "PRIMARY_W5_1000_EXTENSION_NEAR_CURRENT_PRICE",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
@@ -105,6 +128,7 @@
       "reasonCodes": [
         "PRIMARY_W5_ACTIVE",
         "PRIMARY_TARGET_MODEL_ATTACHED",
+        "PRIMARY_FULL_EXTENSION_LADDER_ATTACHED",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
@@ -175,10 +199,33 @@
           "e200": 10332,
           "e2618": 11544.25
         },
+        "displayLevels": [
+          {
+            "label": "1.000",
+            "price": 8369.5
+          },
+          {
+            "label": "1.272",
+            "price": 8903.3
+          },
+          {
+            "label": "1.618",
+            "price": 9582.33
+          },
+          {
+            "label": "2.000",
+            "price": 10332
+          },
+          {
+            "label": "2.618",
+            "price": 11544.25
+          }
+        ],
         "nextTarget": 8369.5,
-        "summary": "Intermediate W3 is active from 6407. Next major target is 8369.50, then 8903.30, 9582.33, and 10332.",
+        "summary": "Intermediate W3 is active from 6407. Full extension ladder: 8369.50, 8903.30, 9582.33, 10332, 11544.25.",
         "reasonCodes": [
           "INTERMEDIATE_W3_EXTENSION_MODEL_BUILT",
+          "INTERMEDIATE_W3_FULL_EXTENSION_LADDER_ATTACHED",
           "INTERMEDIATE_W3_ACTIVE",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
@@ -190,6 +237,7 @@
       "reasonCodes": [
         "INTERMEDIATE_W3_ACTIVE",
         "INTERMEDIATE_TARGET_MODEL_ATTACHED",
+        "INTERMEDIATE_FULL_EXTENSION_LADDER_ATTACHED",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
@@ -254,9 +302,32 @@
           "r618": 6911.78,
           "r786": 6699.38
         },
-        "summary": "Minor W2 is active. 7450–7480 is local triangle support / bounce watch. True Minor W2 fibs are 7394, 7209, 7061, and 6912 if the correction expands lower.",
+        "displayLevels": [
+          {
+            "label": "0.236",
+            "price": 7394.05
+          },
+          {
+            "label": "0.382",
+            "price": 7209.73
+          },
+          {
+            "label": "0.500",
+            "price": 7060.75
+          },
+          {
+            "label": "0.618",
+            "price": 6911.78
+          },
+          {
+            "label": "0.786",
+            "price": 6699.38
+          }
+        ],
+        "summary": "Minor W2 is active. 7450–7480 is local triangle support / bounce watch. Full Minor W2 retracement ladder: 7394.05, 7209.73, 7060.75, 6911.78, 6699.38.",
         "reasonCodes": [
           "MINOR_W2_RETRACEMENT_MODEL_BUILT",
+          "MINOR_W2_FULL_RETRACEMENT_LADDER_ATTACHED",
           "LOCAL_SUPPORT_7450_7480_WATCH",
           "TRUE_MINOR_W2_FIBS_LOWER_THAN_LOCAL_SUPPORT",
           "NO_EXECUTION",
@@ -400,6 +471,7 @@
         "MINOR_W1_COMPLETE",
         "MINOR_W2_CORRECTION_ACTIVE",
         "MINOR_CORRECTION_PREFERRED_ABCDE_TRIANGLE",
+        "MINOR_W2_FULL_RETRACEMENT_LADDER_ATTACHED",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
