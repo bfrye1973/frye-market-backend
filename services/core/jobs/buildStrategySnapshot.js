@@ -3947,6 +3947,7 @@ function normalizePullbackZone(name, zone) {
 }
 
 function buildEngine22PullbackReaction({
+  patchedConfluence = null,
   engine22WaveStrategy,
   bars = [],
 } = {}) {
@@ -3956,8 +3957,44 @@ function buildEngine22PullbackReaction({
     return null;
   }
 
-  const last = barPartsForPullbackReaction(bars[bars.length - 1] || {});
-  const prev = barPartsForPullbackReaction(bars[bars.length - 2] || {});
+  const reactionContext = patchedConfluence?.context?.reaction || null;
+
+  const fastReaction =
+    reactionContext?.engine3FastImbalanceReaction || null;
+
+  const paperReaction =
+    reactionContext?.paperScalpReaction || null;
+
+  const currentLevelAction =
+    reactionContext?.currentLevelAction ||
+    paperReaction?.currentLevelAction ||
+    null;
+
+  const sourceReaction =
+    fastReaction?.active === true
+      ? fastReaction
+      : paperReaction?.active === true
+      ? paperReaction
+      : currentLevelAction?.active === true
+      ? currentLevelAction
+      : null;
+
+  const last = barPartsForPullbackReaction(
+    sourceReaction?.lastCandle ||
+      sourceReaction?.currentLevelAction?.lastCandle ||
+      currentLevelAction?.lastCandle ||
+      bars[bars.length - 1] ||
+      {}
+  );
+
+  const prev = barPartsForPullbackReaction(
+    sourceReaction?.priorCandle ||
+      sourceReaction?.currentLevelAction?.priorCandle ||
+      currentLevelAction?.priorCandle ||
+      bars[bars.length - 2] ||
+      {}
+  );
+
   const currentPrice =
     validPrice(sourceReaction?.currentPrice) ??
     validPrice(sourceReaction?.fastImbalanceReaction?.currentPrice) ??
@@ -4039,6 +4076,7 @@ function buildEngine22PullbackReaction({
       active: true,
       engine: "engine3.engine22PullbackReaction.v1",
       source: "engine22WaveStrategy.currentLifecycleState",
+      sourceReactionUsed: sourceReaction ? true : false,
       lifecycleKey: current.key,
 
       reactionState: "PENDING",
@@ -4152,6 +4190,7 @@ function buildEngine22PullbackReaction({
     active: true,
     engine: "engine3.engine22PullbackReaction.v1",
     source: "engine22WaveStrategy.currentLifecycleState",
+    sourceReactionUsed: sourceReaction ? true : false,
     lifecycleKey: current.key,
 
     reactionState,
@@ -4191,13 +4230,13 @@ function buildEngine22PullbackReaction({
     reasonCodes,
   };
 }
-
 function attachEngine22PullbackReactionToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
   bars = [],
 }) {
   const pullbackReaction = buildEngine22PullbackReaction({
+    patchedConfluence,
     engine22WaveStrategy,
     bars,
   });
