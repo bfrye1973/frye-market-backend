@@ -477,129 +477,136 @@
         "NO_PERMISSION_CREATED"
       ]
     },
-    "minute": {
-      "tf": "10m",
-      "direction": "UP",
-      "active": true,
-      "parentDegree": "minor",
-      "parentWave": "W2",
-      "activeWave": "W5",
-      "stage": "COMPLETE",
-      "currentRead": "MINUTE_W5_COMPLETE_WITHIN_MINOR_W2_CORRECTION",
-      "headline": "Minute W5 complete near 7595 inside Minor W2 correction",
-      "action": "WATCH_LOWER_DEGREE_CORRECTION_STRUCTURE",
-      "marks": {
-        "W1": {
-          "low": {
-            "price": 7360,
-            "time": "2026-06-26 06:30"
-          },
-          "high": {
-            "price": 7459.75,
-            "time": "2026-06-26 08:30"
-          },
-          "status": "CONFIRMED",
-          "confidence": "HIGH",
-          "basis": [
-            "MINUTE_W1_STARTED_FROM_LOCAL_LOW",
-            "MINUTE_W1_HIGH_CONFIRMED_AT_7459_75"
-          ]
-        },
-        "W2": {
-          "price": 7369.25,
-          "time": "2026-06-26 13:00",
-          "status": "CONFIRMED",
-          "confidence": "HIGH",
-          "basis": [
-            "MINUTE_W2_PULLBACK_CONFIRMED",
-            "HELD_ABOVE_LOCAL_LOW"
-          ]
-        },
-        "W3": {
-          "price": 7500,
-          "time": "2026-06-28 12:00",
-          "status": "CONFIRMED",
-          "confidence": "HIGH",
-          "basis": [
-            "MINUTE_W3_IMPULSE_COMPLETED_NEAR_7500",
-            "FOLLOWED_BY_MINUTE_W4_PULLBACK"
-          ]
-        },
-        "W4": {
-          "price": 7506,
-          "time": "2026-07-01 05:00",
-          "status": "CONFIRMED",
-          "confidence": "HIGH",
-          "basis": [
-            "MINUTE_W4_PULLBACK_COMPLETED_AT_7506",
-            "SUBSEQUENT_FINAL_PUSH_COMPLETED"
-          ]
-        },
-        "W5": {
-          "price": 7595,
-          "time": "2026-07-02 07:00",
-          "status": "CONFIRMED",
-          "confidence": "HIGH",
-          "basis": [
-            "MINUTE_W5_COMPLETED_NEAR_7595",
-            "POST_W5_LOCAL_CORRECTION_STARTED",
-            "DO_NOT_CHASE_LONG_AFTER_COMPLETED_W5"
-          ]
-        }
+"minute": {
+  "tf": "10m",
+  "direction": "DOWN",
+  "active": true,
+  "parentDegree": "minor",
+  "parentWave": "E",
+  "activeWave": "E",
+  "stage": "WATCH",
+  "currentRead": "MINUTE_INTERNAL_ABC_FOR_MINOR_E_WATCH",
+  "headline": "Minute ABC is tracking internal Minor E leg",
+  "action": "WATCH_MINUTE_C_DOWN_TO_COMPLETE_MINOR_E",
+  "marks": {
+    "W1": {
+      "low": {
+        "price": 7360,
+        "time": "2026-06-26 06:30"
       },
-      "correction": {
-        "type": "ABC",
-        "direction": "DOWN",
-        "active": true,
-        "preferredType": "ABC_DOWN",
-        "stage": "A_LEG_ACTIVE_OR_RECENTLY_MARKED",
-        "currentRead": "POST_MINUTE_W5_LOCAL_ABC_DOWN_ACTIVE",
-        "parentWave": "MINUTE_W5_COMPLETE",
-        "marks": {
-          "A": {
-            "price": 7479.75,
-            "time": "2026-07-02 12:39",
-            "status": "WATCH",
-            "confidence": "MEDIUM",
-            "basis": [
-              "FIRST_SHARP_DROP_AFTER_7595_W5_HIGH",
-              "LOCAL_A_LEG_LOW_AT_7479_75",
-              "WAIT_FOR_B_BOUNCE_CONFIRMATION"
-            ]
-          },
-          "B": {
-            "price": null,
-            "time": null,
-            "status": "PROJECTED",
-            "confidence": "LOW",
-            "basis": [
-              "WATCH_B_BOUNCE_TOWARD_7523_7536_7550_AREA",
-              "B_NOT_CONFIRMED_YET"
-            ]
-          },
-          "C": {
-            "price": null,
-            "time": null,
-            "status": "PROJECTED",
-            "confidence": "LOW",
-            "basis": [
-              "WATCH_C_LEG_DOWN_IF_B_BOUNCE_FAILS",
-              "C_NOT_CONFIRMED_YET"
-            ]
-          }
-        }
+      "high": {
+        "price": 7459.75,
+        "time": "2026-06-26 08:30"
       },
-      "noExecution": true,
-      "noPermissionCreated": true,
-      "watchOnly": true,
-      "reasonCodes": [
-        "MINUTE_W5_COMPLETE",
-        "LOCAL_ABC_DOWN_ACTIVE",
-        "STRUCTURAL_CONTEXT_ONLY",
-        "NO_EXECUTION",
-        "NO_PERMISSION_CREATED"
+      "status": "CONFIRMED",
+      "confidence": "HIGH",
+      "basis": [
+        "MINUTE_W1_STARTED_FROM_LOCAL_LOW",
+        "MINUTE_W1_HIGH_CONFIRMED_AT_7459_75"
       ]
     },
+    "W2": {
+      "price": 7369.25,
+      "time": "2026-06-26 13:00",
+      "status": "CONFIRMED",
+      "confidence": "HIGH",
+      "basis": [
+        "MINUTE_W2_PULLBACK_CONFIRMED",
+        "HELD_ABOVE_LOCAL_LOW"
+      ]
+    },
+    "W3": {
+      "price": 7500,
+      "time": "2026-06-28 12:00",
+      "status": "CONFIRMED",
+      "confidence": "HIGH",
+      "basis": [
+        "MINUTE_W3_IMPULSE_COMPLETED_NEAR_7500",
+        "FOLLOWED_BY_MINUTE_W4_PULLBACK"
+      ]
+    },
+    "W4": {
+      "price": 7506,
+      "time": "2026-07-01 05:00",
+      "status": "CONFIRMED",
+      "confidence": "HIGH",
+      "basis": [
+        "MINUTE_W4_PULLBACK_COMPLETED_AT_7506",
+        "SUBSEQUENT_FINAL_PUSH_COMPLETED"
+      ]
+    },
+    "W5": {
+      "price": 7595,
+      "time": "2026-07-02 07:00",
+      "status": "CONFIRMED",
+      "confidence": "HIGH",
+      "basis": [
+        "MINUTE_W5_COMPLETED_NEAR_7595",
+        "POST_W5_LOCAL_CORRECTION_STARTED",
+        "DO_NOT_CHASE_LONG_AFTER_COMPLETED_W5",
+        "W5_HISTORY_RETAINED_BUT_ACTIVE_READ_IS_MINOR_E_INTERNAL_ABC"
+      ]
+    }
+  },
+  "correction": {
+    "type": "ABC",
+    "direction": "DOWN",
+    "active": true,
+    "preferredType": "ABC_DOWN",
+    "stage": "B_MARKED_C_DOWN_WATCH_TO_COMPLETE_MINOR_E",
+    "currentRead": "MINUTE_A_DOWN_B_UP_MARKED_C_DOWN_WATCH_FOR_MINOR_E",
+    "parentWave": "MINOR_E_LEG",
+    "purpose": "INTERNAL_ABC_TO_COMPLETE_MINOR_E",
+    "marks": {
+      "A": {
+        "price": 7480.5,
+        "time": "2026-07-02 11:00",
+        "status": "CONFIRMED",
+        "confidence": "HIGH",
+        "basis": [
+          "MINUTE_A_DOWN_COMPLETED_FROM_7595_W5_HIGH",
+          "A_LOW_MARKED_AT_7480_50",
+          "INTERNAL_A_LEG_OF_MINOR_E_PATH"
+        ]
+      },
+      "B": {
+        "price": 7561.75,
+        "time": "2026-07-03 07:30",
+        "status": "WATCH",
+        "confidence": "MEDIUM",
+        "basis": [
+          "MINUTE_B_UP_MARKED_AFTER_A_DOWN",
+          "B_BOUNCE_HIGH_MARKED_AT_7561_75",
+          "WATCH_MINUTE_C_DOWN_TO_COMPLETE_MINOR_E"
+        ]
+      },
+      "C": {
+        "price": null,
+        "time": null,
+        "status": "PROJECTED",
+        "confidence": "LOW",
+        "basis": [
+          "WATCH_C_LEG_DOWN_AFTER_B_MARK",
+          "MINUTE_C_DOWN_EXPECTED_TO_COMPLETE_MINOR_E",
+          "C_NOT_CONFIRMED_YET"
+        ]
+      }
+    }
+  },
+  "noExecution": true,
+  "noPermissionCreated": true,
+  "watchOnly": true,
+  "reasonCodes": [
+    "MINUTE_W5_COMPLETE_HISTORY_RETAINED",
+    "MINUTE_NOW_TRACKING_INTERNAL_ABC_FOR_MINOR_E",
+    "MINUTE_A_DOWN_CONFIRMED",
+    "MINUTE_B_UP_MARKED",
+    "WATCH_MINUTE_C_DOWN_TO_COMPLETE_MINOR_E",
+    "STRUCTURAL_CONTEXT_ONLY",
+    "NO_EXECUTION",
+    "NO_PERMISSION_CREATED"
+  ]
+}
     "subminute": {
       "tf": "10m",
       "direction": "SIDEWAYS_TO_DOWN",
