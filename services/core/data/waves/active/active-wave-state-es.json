@@ -1,6 +1,6 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-07-02 15:30",
+  "updatedAt": "2026-07-03 11:15",
   "schema": "active-wave-state-es@v3",
   "activeDegreeKeys": [
     "primary",
@@ -606,39 +606,38 @@
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
       ]
-    } 
-
+    },
     "subminute": {
       "tf": "10m",
-      "direction": "SIDEWAYS_TO_DOWN",
+      "direction": "DOWN",
       "active": true,
       "parentDegree": "minute",
-      "parentWave": "W5_COMPLETE",
-      "activeWave": "B",
+      "parentWave": "MINOR_E_INTERNAL_ABC",
+      "activeWave": "C",
       "stage": "WATCH",
-      "currentRead": "SUBMINUTE_B_BOUNCE_WATCH_AFTER_A_DOWN",
-      "headline": "Subminute B bounce watch after A down",
-      "action": "WATCH_B_BOUNCE_AND_TRIANGLE_E_SUPPORT",
+      "currentRead": "SUBMINUTE_C_DOWN_WATCH_AFTER_MINUTE_B_MARKED",
+      "headline": "Subminute C-down watch after Minute B marked",
+      "action": "WATCH_REJECTION_AND_C_DOWN_PARTICIPATION",
       "marks": {
         "A": {
-          "price": 7479.75,
-          "time": "2026-07-02 12:39",
-          "status": "WATCH",
-          "confidence": "MEDIUM",
+          "price": 7480.5,
+          "time": "2026-07-02 11:00",
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
           "basis": [
-            "SUBMINUTE_A_LEG_DOWN_AT_7479_75",
-            "WATCH_B_BOUNCE_RETRACEMENT",
-            "WATCH_TRIANGLE_E_SUPPORT"
+            "SUBMINUTE_A_DOWN_ALIGNED_WITH_MINUTE_A",
+            "A_LOW_MARKED_AT_7480_50"
           ]
         },
         "B": {
-          "price": null,
-          "time": null,
-          "status": "PROJECTED",
-          "confidence": "LOW",
+          "price": 7561.75,
+          "time": "2026-07-03 07:30",
+          "status": "WATCH",
+          "confidence": "MEDIUM",
           "basis": [
-            "B_BOUNCE_ACTIVE_OR_PROJECTED",
-            "WATCH_7523_7536_7550_AREA"
+            "SUBMINUTE_B_UP_ALIGNED_WITH_MINUTE_B",
+            "B_HIGH_MARKED_AT_7561_75",
+            "WATCH_REJECTION_FOR_C_DOWN"
           ]
         },
         "C": {
@@ -647,33 +646,26 @@
           "status": "PROJECTED",
           "confidence": "LOW",
           "basis": [
-            "C_LEG_NOT_CONFIRMED",
-            "ABC_DOWN_ALTERNATE_IF_SUPPORT_BREAKS"
+            "SUBMINUTE_C_DOWN_PROJECTED",
+            "TACTICAL_TIMING_FOR_MINUTE_C_DOWN",
+            "NO_EXECUTION_PERMISSION_CREATED"
           ]
         },
         "D": null,
-        "E": {
-          "price": null,
-          "time": null,
-          "status": "PROJECTED",
-          "confidence": "LOW",
-          "basis": [
-            "TRIANGLE_E_LEG_WATCH",
-            "LOCAL_SUPPORT_7450_7480_WATCH"
-          ]
-        }
+        "E": null
       },
       "replaces": {
-        "activeWave": "A",
-        "currentRead": "SUBMINUTE_A_LEG_ACTIVE_POST_MINUTE_W5",
-        "reason": "A leg down is marked at 7479.75. Current lower-degree focus is B bounce / triangle E watch."
+        "activeWave": "B",
+        "currentRead": "SUBMINUTE_B_BOUNCE_WATCH_AFTER_A_DOWN",
+        "reason": "Minute B has now been marked at 7561.75. Current lower-degree focus is C-down watch."
       },
       "noExecution": true,
       "noPermissionCreated": true,
       "watchOnly": true,
       "reasonCodes": [
-        "SUBMINUTE_B_BOUNCE_WATCH",
-        "TRIANGLE_E_SUPPORT_WATCH",
+        "SUBMINUTE_C_DOWN_WATCH",
+        "TACTICAL_TIMING_FOR_MINUTE_C_DOWN",
+        "MINUTE_B_MARKED",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
       ]
