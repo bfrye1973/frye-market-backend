@@ -1,5 +1,7 @@
 // services/core/logic/engine26/paperTradePlanner.js
 
+import { deriveEngine22StructuralPlaybook } from "./deriveEngine22StructuralPlaybook.js";
+
 const ENGINE = "engine26.paperTradePlanner.v1";
 const MODE = "PAPER_ONLY";
 const STRATEGY_ID = "intraday_scalp@10m";
@@ -101,6 +103,31 @@ function buildEngine26ImbalanceWatch({
     imbalance &&
     (imbalance.inside === true || imbalance.near === true);
 
+  const normalizedActiveImbalance = imbalance
+    ? {
+        id: imbalance.id || null,
+        source: imbalance.source || "es-smz-manual-zones.txt",
+        side: imbalance.side || "GREEN",
+        zoneType: imbalance.zoneType || "MANUAL_IMBALANCE",
+        lo: toNum(imbalance.lo),
+        hi: toNum(imbalance.hi),
+        mid: toNum(imbalance.mid),
+        distancePts: toNum(imbalance.distancePts),
+        inside: imbalance.inside === true,
+        near: imbalance.near === true,
+        raw: imbalance.raw || null,
+      }
+    : null;
+
+  const structuralPlaybook = deriveEngine22StructuralPlaybook({
+    symbol: safeUpper(symbol),
+    strategyId,
+    tf,
+    currentPrice,
+    activeImbalance: normalizedActiveImbalance,
+    engine22WaveStrategy,
+  });
+
   const isTopImbalance =
     active &&
     intradayScalpLifecycle?.key === "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM" &&
@@ -143,13 +170,16 @@ function buildEngine26ImbalanceWatch({
   let status = "NO_ACTIVE_IMBALANCE_WATCH";
 
   if (active) {
-    status = "WATCH_ONLY_WAIT_FOR_CONFIRMATION";
+    status =
+      structuralPlaybook?.status ||
+      structuralPlaybook?.template ||
+      "WATCH_ONLY_WAIT_FOR_CONFIRMATION";
 
     if (paperPermission?.decision === "PAPER_ALLOW" && paperPermission?.allowed === true) {
       status = "READY_FOR_ENGINE26_TICKET";
-    } else if (isTopImbalance) {
-      status = "TOP_IMBALANCE_ACTIVE_WAIT_FOR_7500_ACCEPTANCE_OR_REJECTION";
-    } else if (isLowerImbalance) {
+    } else if (!structuralPlaybook?.status && isTopImbalance) {
+      status = "TOP_IMBALANCE_ACTIVE_WAIT_FOR_ACCEPTANCE_OR_REJECTION";
+    } else if (!structuralPlaybook?.status && isLowerImbalance) {
       status = "LOWER_IMBALANCE_ACTIVE_WAIT_FOR_SWEEP_RECLAIM_OR_SUPPORT_FAILURE";
     }
   }
@@ -167,25 +197,29 @@ function buildEngine26ImbalanceWatch({
 
     currentPrice,
 
-    activeImbalance: imbalance
-      ? {
-          id: imbalance.id || null,
-          source: imbalance.source || "es-smz-manual-zones.txt",
-          side: imbalance.side || "GREEN",
-          zoneType: imbalance.zoneType || "MANUAL_IMBALANCE",
-          lo: toNum(imbalance.lo),
-          hi: toNum(imbalance.hi),
-          mid: toNum(imbalance.mid),
-          distancePts: toNum(imbalance.distancePts),
-          inside: imbalance.inside === true,
-          near: imbalance.near === true,
-          raw: imbalance.raw || null,
-        }
-      : null,
+    activeImbalance: normalizedActiveImbalance,
 
     alarmAllEngines: active,
     directionAssumption:
       engine26Use?.directionAssumption || "NONE_UNTIL_ENGINE3_ENGINE4_CONFIRM",
+
+    engine22ReadFirst: true,
+
+    structuralPlaybook,
+    activeImbalanceRole:
+      structuralPlaybook?.activeImbalanceRole || "NEUTRAL_MANUAL_IMBALANCE",
+    structuralTemplate:
+      structuralPlaybook?.template || "NEUTRAL_MANUAL_IMBALANCE_WATCH",
+    structuralBias:
+      structuralPlaybook?.structuralBias || "NEUTRAL",
+    preferredAction:
+      structuralPlaybook?.preferredAction || null,
+    preferredDirection:
+      structuralPlaybook?.preferredDirection || "NONE",
+    doNotChaseLong:
+      structuralPlaybook?.doNotChaseLong === true,
+    shortResearchOnly:
+      structuralPlaybook?.shortResearchOnly === true,
 
     waveContext: lifecycleContext
       ? {
@@ -238,8 +272,19 @@ function buildEngine26ImbalanceWatch({
     labels: [...new Set(labels.filter(Boolean))],
 
     playbookWatch: {
+      structuralTemplate:
+        structuralPlaybook?.template || "NEUTRAL_MANUAL_IMBALANCE_WATCH",
+      activeImbalanceRole:
+        structuralPlaybook?.activeImbalanceRole || "NEUTRAL_MANUAL_IMBALANCE",
+      primaryScenario:
+        structuralPlaybook?.primaryScenario || null,
+      preferredAction:
+        structuralPlaybook?.preferredAction || null,
+      confirmationNeeds:
+        structuralPlaybook?.confirmationNeeds || [],
+
       topImbalance: isTopImbalance
-        ? "WATCH_7500_ACCEPTANCE_OR_REJECTION"
+        ? "WATCH_ACCEPTANCE_OR_REJECTION"
         : null,
       lowerImbalance: isLowerImbalance
         ? "WATCH_SWEEP_RECLAIM_OR_SUPPORT_FAILURE"
@@ -294,6 +339,13 @@ function buildEngine26ImbalanceWatch({
       "ENGINE26_MANUAL_IMBALANCE_WATCH",
       active ? "MANUAL_IMBALANCE_ALARM_ACTIVE" : "NO_ACTIVE_MANUAL_IMBALANCE",
       lifecycleContext ? "ENGINE22_LIFECYCLE_CONTEXT_ATTACHED" : "ENGINE22_LIFECYCLE_CONTEXT_MISSING",
+      structuralPlaybook?.template
+        ? `STRUCTURAL_PLAYBOOK_${structuralPlaybook.template}`
+        : "STRUCTURAL_PLAYBOOK_MISSING",
+      structuralPlaybook?.activeImbalanceRole
+        ? `IMBALANCE_ROLE_${structuralPlaybook.activeImbalanceRole}`
+        : "IMBALANCE_ROLE_UNKNOWN",
+      "ENGINE22_READ_FIRST",
       isTopImbalance ? "TOP_IMBALANCE_ACTIVE" : null,
       isLowerImbalance ? "LOWER_IMBALANCE_ACTIVE" : null,
       "DIRECTION_NOT_ASSUMED",
