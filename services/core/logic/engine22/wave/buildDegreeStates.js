@@ -9,6 +9,8 @@
 // This is NOT Engine 15 readiness.
 // This is a structural display/contract layer only.
 
+import { attachNestedCorrectionContexts } from "./corrections/buildNestedCorrectionContext.js";
+
 const DEGREE_ORDER = ["subminute", "minute", "minor", "intermediate", "primary"];
 
 // Supports impulse marks and corrective marks.
@@ -689,7 +691,7 @@ export function buildDegreeStates({
     });
   }
 
-  return out;
+  return attachNestedCorrectionContexts(out);
 }
 
 export default buildDegreeStates;
