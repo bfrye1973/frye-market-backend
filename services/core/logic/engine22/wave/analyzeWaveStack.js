@@ -23,6 +23,7 @@ import { buildW4Levels } from "./buildW4Levels.js";
 import { classifyWaveLifecycle } from "./classifyWaveLifecycle.js";
 import { getActiveWaveStateMeta } from "./manualMarks/readManualWaveMarks.js";
 import { validateWaveMarkMaturity } from "./revision/validateWaveMarkMaturity.js";
+import { attachTargetModelsToActiveStructures } from "./targets/buildWaveTargetModel.js";
 import { attachCorrectionModelsToActiveStructures } from "./corrections/buildCorrectionModels.js";
 
 
@@ -555,10 +556,17 @@ export function analyzeWaveStack({
 const activeStructuresFromMeta =
   getActiveStructuresFromMeta(activeStructuresSource);
 
+const activeStructuresWithTargets =
+  attachTargetModelsToActiveStructures({
+    symbol,
+    activeStructures: activeStructuresFromMeta,
+    currentPrice,
+  });
+
 const activeStructuresWithCorrections =
   attachCorrectionModelsToActiveStructures({
     symbol,
-    activeStructures: activeStructuresFromMeta,
+    activeStructures: activeStructuresWithTargets,
     currentPrice,
     maContext: null,
     institutionalZones: null,
