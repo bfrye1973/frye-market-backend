@@ -409,16 +409,34 @@ export function buildWaveTargetModel({
     });
   }
 
-  const activeWave = upper(
-    structure.activeWave ||
-      structure.currentWave ||
-      structure.wave ||
-      structure.activeLeg
-  );
+const activeWave = upper(
+  structure.activeWave ||
+    structure.currentWave ||
+    structure.wave ||
+    structure.activeLeg
+);
 
-  const marks = structure?.marks || structure?.waveMarks || {};
-  const manualFallback = chooseManualTargetFallback(structure);
+const stage = upper(
+  structure.stage ||
+    structure.status ||
+    structure.state ||
+    structure.lifecycle ||
+    ""
+);
 
+const marks = structure?.marks || structure?.waveMarks || {};
+const manualFallback = chooseManualTargetFallback(structure);
+
+if (stage === "COMPLETE" || stage.includes("COMPLETE")) {
+  return invalidTargetModel({
+    symbol,
+    degree,
+    activeWave,
+    modelType: "COMPLETED_WAVE_NO_FRESH_TARGET_LADDER",
+    reason: "TARGET_MODEL_SKIPPED_COMPLETED_WAVE",
+    manualFallback: null,
+  });
+}
   if (manualFallback?.override === true) {
     return {
       ...manualFallback,
