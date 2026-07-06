@@ -743,6 +743,131 @@ function buildEngine15BlockersFromCurrentLifecycleState({
 /* -----------------------------
    Engine 15 PAPER_ONLY scalp readiness
 ------------------------------*/
+function getEngine26StructuralContext(snapshotContext) {
+  return snapshotContext?.engine26StructuralContext || null;
+}
+
+function isEngine26ShortStructuralWatch(engine26StructuralContext) {
+  if (!engine26StructuralContext || typeof engine26StructuralContext !== "object") {
+    return false;
+  }
+
+  const preferredDirection = safeUpper(
+    engine26StructuralContext.preferredDirection,
+    ""
+  );
+
+  return (
+    engine26StructuralContext.active === true &&
+    preferredDirection === "SHORT_WATCH_ONLY" &&
+    engine26StructuralContext.shortResearchOnly === true &&
+    engine26StructuralContext.doNotChaseLong === true
+  );
+}
+
+function buildShortStructuralWatchReadiness({
+  symbol,
+  strategyId,
+  current,
+  currentPrice,
+  engine26StructuralContext,
+}) {
+  const levels = engine26StructuralContext?.levels || {};
+  const targetPathPreview = Array.isArray(engine26StructuralContext?.targetPathPreview)
+    ? engine26StructuralContext.targetPathPreview
+    : [];
+
+  return {
+    active: true,
+    engine: "engine15.paperScalpReadiness.v1.2",
+    mode: "PAPER_ONLY",
+    readiness: "SHORT_STRUCTURAL_WATCH",
+    source: "engine26StructuralContext",
+
+    strategyId,
+    instrument: symbol,
+
+    allowed: false,
+    grade: "D",
+    score: 0,
+
+    direction: "SHORT",
+    setupType:
+      engine26StructuralContext?.template ||
+      engine26StructuralContext?.status ||
+      lifecycleKey(current),
+    setupRole: engine26StructuralContext?.activeImbalanceRole || null,
+    structuralBias: engine26StructuralContext?.structuralBias || null,
+
+    shortResearchOnly: true,
+    doNotChaseLong: engine26StructuralContext?.doNotChaseLong === true,
+
+    freshness: "WAIT_FOR_CONFIRMATION",
+    timing: "WATCH",
+    chaseRisk: "NO_CHASE_LONG_STRUCTURAL_SHORT_WATCH",
+
+    realExecutionAllowed: false,
+    noExecution: true,
+    noPermissionCreated: true,
+    requiresEngine6PaperApproval: true,
+
+    currentPrice: toNum(currentPrice, null),
+
+    riskModel: {
+      mode: "PREVIEW_ONLY",
+      stopPreview: "ABOVE_B_HIGH_OR_FAILED_ACCEPTANCE_HIGH",
+      bHigh: toNum(levels?.bHigh, null),
+      invalidationPreview: engine26StructuralContext?.invalidation || null,
+      stopDefined: false,
+      stopRequiredBeforeAllow: true,
+      stopSource: "ENGINE26_STRUCTURAL_CONTEXT_PREVIEW",
+    },
+
+    targetModel: {
+      mode: "PREVIEW_ONLY",
+      targetPathPreview,
+      cleanPathPreview: targetPathPreview.length > 0,
+      targetPathRequiredBeforeAllow: true,
+      targetSource: "ENGINE26_STRUCTURAL_CONTEXT_C_DOWN_PATH",
+      levels,
+    },
+
+    confirmations: {
+      engine22Context: true,
+      engine26StructuralContext: true,
+      engine3PaperReaction: false,
+      engine4PaperParticipation: false,
+      engine25Context: true,
+      engine6PaperApprovalRequired: true,
+    },
+
+    blockers: [
+      "SHORT_RESEARCH_ONLY_NO_PAPER_ALLOW",
+      "ENGINE15_SHORT_READINESS_NOT_FULLY_BUILT",
+      "ENGINE6_FINAL_PERMISSION_REQUIRED",
+    ],
+
+    warnings: [],
+
+    reasonCodes: unique([
+      "PAPER_ONLY_RESEARCH_LANE",
+      "ENGINE15_READ_ENGINE26_STRUCTURAL_CONTEXT",
+      "SHORT_STRUCTURAL_WATCH",
+      engine26StructuralContext?.status,
+      engine26StructuralContext?.template,
+      engine26StructuralContext?.activeImbalanceRole,
+      "SHORT_RESEARCH_ONLY",
+      "DO_NOT_CHASE_LONG",
+      "NO_PAPER_ALLOW",
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+      "ENGINE6_FINAL_PAPER_APPROVAL_REQUIRED",
+      ...(Array.isArray(engine26StructuralContext?.reasonCodes)
+        ? engine26StructuralContext.reasonCodes
+        : []),
+    ]),
+  };
+}
 
 function getPaperScalpReaction({ engine3, engine5 }) {
   return (
@@ -1076,9 +1201,19 @@ function buildPaperScalpReadiness({
   engine3,
   engine4,
   engine5,
+  engine26StructuralContext = null,
 }) {
   const setupType = lifecycleKey(current);
   const direction = paperDirectionFromCurrent(current);
+  if (isEngine26ShortStructuralWatch(engine26StructuralContext)) {
+    return buildShortStructuralWatchReadiness({
+      symbol,
+      strategyId,
+      current,
+      currentPrice,
+      engine26StructuralContext,
+    });
+  }
 
   const paper = buildDefaultPaperScalpReadiness({
     symbol,
@@ -1779,6 +1914,7 @@ function buildEngine15FromEngine22CurrentLifecycleState({
   engine3,
   engine4,
   engine5,
+  engine26StructuralContext = null,
   debug,
 }) {
   if (!current || typeof current !== "object") return null;
@@ -1821,8 +1957,8 @@ const paperScalpReadiness = buildPaperScalpReadiness({
   engine3,
   engine4,
   engine5,
+  engine26StructuralContext,
 });
-
   const currentReasonCodes = Array.isArray(current.reasonCodes)
     ? current.reasonCodes
     : [];
@@ -2073,6 +2209,7 @@ export function buildEngine15EsDecision({
     const currentLifecycleState = getCurrentLifecycleState(engine22WaveStrategy);
     const possibleW5Up = getPossibleW5Up(engine22WaveStrategy);
     const waveOpportunity = getWaveOpportunity(snapshotContext);
+    const engine26StructuralContext = getEngine26StructuralContext(snapshotContext);
 
     const engine23Interpretation = getEngine23Interpretation(snapshotContext);
     const engine23Damage = buildEngine23DamageContext(engine23Interpretation);
@@ -2343,6 +2480,30 @@ export function buildEngine15EsDecision({
           : null,
       },
 
+      engine26StructuralContext: engine26StructuralContext
+        ? {
+            active: engine26StructuralContext.active === true,
+            engine: engine26StructuralContext.engine || null,
+            status: engine26StructuralContext.status || null,
+            template: engine26StructuralContext.template || null,
+            activeImbalanceRole:
+              engine26StructuralContext.activeImbalanceRole || null,
+            structuralBias: engine26StructuralContext.structuralBias || null,
+            preferredDirection:
+              engine26StructuralContext.preferredDirection || null,
+            preferredAction:
+              engine26StructuralContext.preferredAction || null,
+            doNotChaseLong:
+              engine26StructuralContext.doNotChaseLong === true,
+            shortResearchOnly:
+              engine26StructuralContext.shortResearchOnly === true,
+            watchOnly: engine26StructuralContext.watchOnly === true,
+            noExecution: engine26StructuralContext.noExecution === true,
+            noPermissionCreated:
+              engine26StructuralContext.noPermissionCreated === true,
+          }
+        : null,
+
             engine23: {
         present: engine23Damage.present,
         active: engine23Damage.active,
@@ -2435,6 +2596,7 @@ export function buildEngine15EsDecision({
       engine3,
       engine4,
       engine5,
+      engine26StructuralContext,
       debug,
     });
 
