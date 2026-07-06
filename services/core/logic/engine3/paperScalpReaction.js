@@ -16,6 +16,8 @@
 // Output path:
 // confluence.context.reaction.paperScalpReaction
 
+import { buildEngine22DegreeWaveContext } from "./engine22DegreeWaveContext.js";
+
 const ENGINE = "engine3.paperScalpReaction.v1";
 
 const SOURCE_CURRENT_LEVEL =
@@ -235,6 +237,11 @@ function buildBasePaperScalpReaction({
 
     engine22Direction: getEngine22Direction(engine22WaveStrategy),
 
+    waveContext: buildEngine22DegreeWaveContext({
+      engine22WaveStrategy,
+      reactionState: state,
+      reactionDirection: direction,
+    }),
     requiresEngine6PaperApproval: true,
     realExecutionAuthority: false,
     noRealPermissionCreated: true,
