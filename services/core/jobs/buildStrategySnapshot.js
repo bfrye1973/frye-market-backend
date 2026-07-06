@@ -6467,7 +6467,6 @@ const finalPermission =
     : permissionPreliminary;
 
 let engine26ImbalanceWatch = null;
-let engine26StructuralContext = null;
 let engine26PaperTradePlan = null;
 let engine26PaperTradeTicket = null;
 let engine26PaperTradeExecution = null;
