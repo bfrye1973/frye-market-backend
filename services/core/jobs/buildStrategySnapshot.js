@@ -6422,6 +6422,7 @@ const finalPermission =
     : permissionPreliminary;
 
 let engine26ImbalanceWatch = null;
+let engine26StructuralContext = null;
 let engine26PaperTradePlan = null;
 let engine26PaperTradeTicket = null;
 let engine26PaperTradeExecution = null;
@@ -6460,9 +6461,9 @@ if (isEsIntradayScalp) {
     });
 
     engine26ImbalanceWatch = engine26.engine26ImbalanceWatch || null;
+    engine26StructuralContext = engine26.engine26StructuralContext || null;
     engine26PaperTradePlan = engine26.engine26PaperTradePlan || null;
     engine26PaperTradeTicket = engine26.engine26PaperTradeTicket || null;
-
     // V1 planner-only. Do not call Engine 8 from snapshot builder.
     engine26PaperTradeExecution = null;
   } catch (err) {
@@ -6494,7 +6495,8 @@ if (isEsIntradayScalp) {
       schwabExecutionAllowed: false,
       createdAt: new Date().toISOString(),
     };
-
+    
+    engine26StructuralContext = null;
     engine26PaperTradeTicket = null;
     engine26PaperTradeExecution = null;
   }
@@ -6783,6 +6785,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
     permission: finalPermission,
      
     engine26ImbalanceWatch,
+    engine26StructuralContext,
     engine26PaperTradePlan,
     engine26PaperTradeTicket,
     engine26PaperTradeExecution,
