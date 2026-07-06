@@ -809,6 +809,343 @@ function hasCleanTargetPath({ direction, entryPrice, targetPrice, engine15Decisi
   return false;
 }
 
+function getStructuralLevel(structuralContext, key) {
+  const value = structuralContext?.levels?.[key];
+  const n = toNum(value);
+  return n == null ? null : roundToTick(n);
+}
+
+function buildEngine7SizingPreviewV1({ permission, confluence, engine15Decision }) {
+  const engine6Paper = permission?.paper || null;
+
+  const totalScore =
+    toNum(confluence?.scores?.total) ??
+    toNum(confluence?.total) ??
+    toNum(engine15Decision?.qualityScore) ??
+    null;
+
+  return {
+    active: true,
+    engine: "engine7.positionSizing.v1.preview",
+    mode: "R_ONLY_PREVIEW",
+    source: "ENGINE7_V1_CONTRACT",
+
+    engine6Permission: engine6Paper?.decision || permission?.permission || null,
+    engine6Allowed: engine6Paper?.allowed === true,
+    engine6SizeMultiplier:
+      toNum(engine6Paper?.sizeMultiplier) ??
+      toNum(permission?.sizeMultiplier) ??
+      null,
+
+    totalScore,
+    baseLabel: null,
+    baseR: null,
+    finalR: null,
+    band: null,
+    allowed: false,
+
+    note:
+      "Engine 7 v1 currently sizes in R from Engine 6 permission, Engine 5 score, and market regime. It does not yet size from entry/stop/target geometry.",
+
+    futureUpgrade:
+      "Engine 7 v2 can later convert entry/stop/target geometry into contracts, dollar risk, and dollar reward.",
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    reasonCodes: [
+      "ENGINE7_V1_R_ONLY_PREVIEW",
+      "NO_ENTRY_STOP_TARGET_SIZING_IN_ENGINE7_V1",
+      "ENGINE6_FINAL_PERMISSION_REQUIRED",
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+    ],
+  };
+}
+
+function buildEngine26TradePlanPreview({
+  symbol,
+  strategyId,
+  tf,
+  permission,
+  engine22WaveStrategy,
+  engine25Context,
+  confluence,
+  engine15Decision,
+  engine26ImbalanceWatch,
+  engine26StructuralContext,
+}) {
+  const paper = permission?.paper || null;
+
+  const currentPrice = getCurrentPrice({
+    permission,
+    engine15Decision,
+    engine22WaveStrategy,
+    confluence,
+  });
+
+  const direction = getDirection({
+    permission,
+    engine15Decision,
+    engine22WaveStrategy,
+  });
+
+  const setupType = getSetupType({
+    permission,
+    engine15Decision,
+    engine22WaveStrategy,
+  });
+
+  const activeImbalance = engine26ImbalanceWatch?.activeImbalance || null;
+
+  const zoneLo = roundToTick(activeImbalance?.lo);
+  const zoneHi = roundToTick(activeImbalance?.hi);
+  const zoneMid = roundToTick(activeImbalance?.mid);
+
+  const bHigh = getStructuralLevel(engine26StructuralContext, "bHigh");
+  const c100 = getStructuralLevel(engine26StructuralContext, "c100");
+  const c1272 = getStructuralLevel(engine26StructuralContext, "c1272");
+  const c1618 = getStructuralLevel(engine26StructuralContext, "c1618");
+
+  const aLow =
+    roundToTick(
+      engine22WaveStrategy?.degreeStates?.minute?.correctionModel?.manualMarks?.A?.price
+    ) ??
+    roundToTick(
+      engine22WaveStrategy?.waveFibState?.markMaturity?.byDegree?.minute
+        ?.correction?.resolvedMarks?.A?.price
+    ) ??
+    null;
+
+  const oldB =
+    engine22WaveStrategy?.waveFibState?.markMaturity?.byDegree?.minute
+      ?.correction?.resolvedMarks?.B?.previousCandidates?.[0] || null;
+
+  const confirmationGate =
+    direction === "SHORT"
+      ? {
+          label: "C-down confirmation watch",
+          level: 7555,
+          rule:
+            "Below / failed reclaim near 7555 starts stronger C-down confirmation watch.",
+          required: true,
+        }
+      : direction === "LONG"
+      ? {
+          label: "Long reclaim confirmation watch",
+          level: zoneMid,
+          rule:
+            "Long requires reclaim / hold above the active zone with Engine 3 and Engine 4 confirmation.",
+          required: true,
+        }
+      : {
+          label: "Direction confirmation watch",
+          level: null,
+          rule: "Direction not assumed until Engine 3 / Engine 4 confirm.",
+          required: true,
+        };
+
+  const entryIdea =
+    direction === "SHORT"
+      ? {
+          label: "Failed acceptance below negotiated zone",
+          preferredArea:
+            zoneLo != null
+              ? `Below ${zoneLo} / failed reclaim under B-zone`
+              : "Below failed acceptance of active zone",
+          referencePrice: zoneLo,
+          description:
+            "Short research only if price fails acceptance and starts moving down out of the negotiated zone.",
+        }
+      : direction === "LONG"
+      ? {
+          label: "Reclaim / hold above negotiated zone",
+          preferredArea:
+            zoneHi != null
+              ? `Above ${zoneHi} reclaim / hold`
+              : "Above active zone reclaim / hold",
+          referencePrice: zoneHi,
+          description:
+            "Long research only if price reclaims and holds with participation.",
+        }
+      : {
+          label: "No entry idea yet",
+          preferredArea: null,
+          referencePrice: null,
+          description: "Direction not assumed.",
+        };
+
+  const stopIdea =
+    direction === "SHORT"
+      ? {
+          label: "Above negotiated zone / B-zone invalidation",
+          price: zoneHi != null ? roundToTick(zoneHi + TICK_SIZE_ES) : bHigh,
+          description:
+            "Stop idea sits just outside / above the negotiated zone or B-zone.",
+        }
+      : direction === "LONG"
+      ? {
+          label: "Below negotiated zone invalidation",
+          price: zoneLo != null ? roundToTick(zoneLo - TICK_SIZE_ES) : null,
+          description:
+            "Stop idea sits just outside / below the negotiated zone.",
+        }
+      : {
+          label: "No stop idea yet",
+          price: null,
+          description: "Stop requires direction and active trade map.",
+        };
+
+  const scalpGoal = {
+    minPoints: 15,
+    maxPoints: 30,
+    description:
+      "Brian's current paper scalp goal is 15–30 ES points, not a home-run trade.",
+  };
+
+  const targetMap =
+    direction === "SHORT"
+      ? {
+          firstReaction: c100,
+          aLowBreak: aLow,
+          preferredCPressure: c1272,
+          stretchC: c1618,
+          labels: {
+            firstReaction: "C100 / first reaction",
+            aLowBreak: "A-low break / proof C is working",
+            preferredCPressure: "C1272 / preferred C pressure",
+            stretchC: "C1618 / stretch C",
+          },
+        }
+      : {
+          firstReaction: null,
+          aLowBreak: null,
+          preferredCPressure: null,
+          stretchC: null,
+          labels: {},
+        };
+
+  const geometryPreview = {
+    mode: "PREVIEW_ONLY",
+    direction,
+    entryReference: entryIdea.referencePrice,
+    stopReference: stopIdea.price,
+    targetReference: targetMap.firstReaction,
+    riskPoints:
+      direction === "SHORT" && entryIdea.referencePrice != null && stopIdea.price != null
+        ? roundPts(stopIdea.price - entryIdea.referencePrice)
+        : direction === "LONG" && entryIdea.referencePrice != null && stopIdea.price != null
+        ? roundPts(entryIdea.referencePrice - stopIdea.price)
+        : null,
+    rewardPoints:
+      direction === "SHORT" && entryIdea.referencePrice != null && targetMap.firstReaction != null
+        ? roundPts(entryIdea.referencePrice - targetMap.firstReaction)
+        : direction === "LONG" && entryIdea.referencePrice != null && targetMap.firstReaction != null
+        ? roundPts(targetMap.firstReaction - entryIdea.referencePrice)
+        : null,
+  };
+
+  geometryPreview.riskReward =
+    geometryPreview.riskPoints != null &&
+    geometryPreview.riskPoints > 0 &&
+    geometryPreview.rewardPoints != null
+      ? Number((geometryPreview.rewardPoints / geometryPreview.riskPoints).toFixed(2))
+      : null;
+
+  const engine7Sizing = buildEngine7SizingPreviewV1({
+    permission,
+    confluence,
+    engine15Decision,
+  });
+
+  const paperAllowed = paper?.allowed === true && paper?.decision === "PAPER_ALLOW";
+
+  return {
+    active: engine26ImbalanceWatch?.active === true,
+    engine: "engine26.tradePlanPreview.v1",
+    mode: "PREVIEW_ONLY",
+    paperOnly: true,
+    researchOnly: true,
+
+    symbol: safeUpper(symbol),
+    strategyId,
+    tf,
+
+    alarm: {
+      active: engine26ImbalanceWatch?.alarmAllEngines === true,
+      zoneLo,
+      zoneHi,
+      zoneMid,
+      currentPrice,
+      inside: activeImbalance?.inside === true,
+      near: activeImbalance?.near === true,
+      label:
+        engine26ImbalanceWatch?.alarmAllEngines === true
+          ? "ALARM_ZONE_ACTIVE"
+          : "NO_ACTIVE_ALARM_ZONE",
+    },
+
+    structure: {
+      setupType,
+      scenario:
+        engine26StructuralContext?.template ||
+        engine26ImbalanceWatch?.structuralTemplate ||
+        null,
+      direction,
+      shortResearchOnly: engine26ImbalanceWatch?.shortResearchOnly === true,
+      doNotChaseLong: engine26ImbalanceWatch?.doNotChaseLong === true,
+      oldB: oldB
+        ? {
+            price: oldB.price ?? null,
+            status: oldB.status || "SUPERSEDED",
+            reason: oldB.reason || null,
+          }
+        : null,
+      activeB: {
+        price: bHigh,
+        status:
+          engine22WaveStrategy?.waveFibState?.markMaturity?.byDegree?.minute
+            ?.correction?.resolvedMarks?.B?.status || null,
+      },
+    },
+
+    entryIdea,
+    stopIdea,
+    confirmationGate,
+    scalpGoal,
+    targetMap,
+    geometryPreview,
+    engine7Sizing,
+
+    permissionState: {
+      engine15Readiness: engine15Decision?.readinessLabel || null,
+      engine15Action: engine15Decision?.action || null,
+      engine6Decision: paper?.decision || null,
+      engine6Allowed: paper?.allowed === true,
+      paperAllowed,
+      ticketAllowed: paperAllowed,
+      status: paperAllowed ? "PAPER_PERMISSION_READY" : "WATCH_ONLY_NO_PERMISSION",
+    },
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    reasonCodes: [
+      "ENGINE26_TRADE_PLAN_PREVIEW_BUILT",
+      "PREVIEW_ONLY",
+      direction === "SHORT" ? "SHORT_RESEARCH_TRADE_MAP" : null,
+      "ENGINE7_V1_R_ONLY_SIZE_READ_ATTACHED",
+      "ENGINE6_FINAL_PERMISSION_REQUIRED",
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+    ].filter(Boolean),
+
+    createdAt: nowIso(),
+  };
+}
+
 function buildPaperExitPlan({ direction, entryPrice }) {
   const sign = direction === "SHORT" ? -1 : 1;
 
@@ -997,6 +1334,18 @@ export function buildEngine26PaperTradePlan({
 
   const engine26StructuralContext =
     buildEngine26StructuralContext(engine26ImbalanceWatch);
+  const engine26TradePlanPreview = buildEngine26TradePlanPreview({
+  symbol: normalizedSymbol,
+  strategyId: normalizedStrategyId,
+  tf: normalizedTf,
+  permission,
+  engine22WaveStrategy,
+  engine25Context,
+  confluence,
+  engine15Decision,
+  engine26ImbalanceWatch,
+  engine26StructuralContext,
+});
 
   const blockers = [];
   const warnings = [];
@@ -1156,6 +1505,7 @@ export function buildEngine26PaperTradePlan({
     return {
       engine26ImbalanceWatch,
       engine26StructuralContext,
+      engine26TradePlanPreview,
       engine26PaperTradePlan: makeNoTrade({
         symbol: normalizedSymbol,
         strategyId: normalizedStrategyId,
@@ -1319,8 +1669,9 @@ export function buildEngine26PaperTradePlan({
   return {
    engine26ImbalanceWatch,
    engine26StructuralContext,
+   engine26TradePlanPreview,
    engine26PaperTradePlan: plan,
    engine26PaperTradeTicket: ticket,
    engine26PaperTradeExecution: null,
- };
+  };
 }
