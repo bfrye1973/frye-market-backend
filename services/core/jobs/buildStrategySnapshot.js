@@ -44,6 +44,7 @@ import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wav
 import {
   buildEngine26ImbalanceWatch,
   buildEngine26PaperTradePlan,
+  buildEngine26StructuralContext,
 } from "../logic/engine26/paperTradePlanner.js";
 import { listTrades } from "../logic/journal/tradeJournalStore.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
@@ -6341,6 +6342,30 @@ attachEngine22LifecycleParticipationToConfluence({
     analytics.engine5.timingContext = preliminaryEngine5TimingContext;
   }
 
+let engine26PrePermissionWatch = null;
+let engine26StructuralContext = null;
+
+if (isEsIntradayScalp) {
+  try {
+    engine26PrePermissionWatch = buildEngine26ImbalanceWatch({
+      symbol,
+      strategyId: s.strategyId,
+      tf: s.tf,
+      permission: null,
+      engine22WaveStrategy,
+      confluence: patchedConfluence,
+      engine15Decision: null,
+    });
+
+    engine26StructuralContext =
+      buildEngine26StructuralContext(engine26PrePermissionWatch);
+  } catch (err) {
+    console.error("[E26 PRE-ENGINE15 STRUCTURAL CONTEXT ERROR]", err);
+    engine26PrePermissionWatch = null;
+    engine26StructuralContext = null;
+  }
+}
+
   const engine15BaseInputs = {
     symbol,
     strategyId: s.strategyId,
@@ -6374,6 +6399,25 @@ attachEngine22LifecycleParticipationToConfluence({
              // This is downgrade/context only. It must not create shorts.
              engine23Interpretation,
            },
+          snapshotContext: {
+            emaPosture: marketMeter?.layers?.emaPosture || null,
+            engine2State,
+            marketMind,
+            marketMeter,
+            marketRegime,
+
+            // Pre-Engine15 wave opportunity from Engine 22.
+            engine22WaveStrategy,
+            waveOpportunity: engine22WaveStrategy?.waveOpportunity || null,
+
+            // Pre-Engine15 Engine 23 behavior / no-chase context.
+            // This is downgrade/context only. It must not create shorts.
+            engine23Interpretation,
+
+            // Pre-Engine15 Engine 26 structural context.
+            // Canonical source for short structural watch / no-chase-long context.
+            engine26StructuralContext,
+          }, 
           engine16,
           engine5: patchedConfluence || null,
           momentum,
@@ -6383,8 +6427,6 @@ attachEngine22LifecycleParticipationToConfluence({
           zoneContext,
         })
       : computeEngine15DecisionReferee(engine15BaseInputs);
-let engine26PrePermissionWatch = null;
-
 if (isEsIntradayScalp) {
   try {
     engine26PrePermissionWatch = buildEngine26ImbalanceWatch({
@@ -6396,9 +6438,12 @@ if (isEsIntradayScalp) {
       confluence: patchedConfluence,
       engine15Decision,
     });
+
+    engine26StructuralContext =
+      buildEngine26StructuralContext(engine26PrePermissionWatch) ||
+      engine26StructuralContext;
   } catch (err) {
     console.error("[E26 PRE-PERMISSION WATCH ERROR]", err);
-    engine26PrePermissionWatch = null;
   }
 }
 
