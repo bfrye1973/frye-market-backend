@@ -1765,10 +1765,8 @@ function buildEngine6PaperPermission({
     strategyId,
     setupFamily: "IMBALANCE_TO_IMBALANCE_SCALP",
     setupType,
-    direction:
-      shortResearchWatch === true || structuralFastWatch === true
-        ? "SHORT"
-        : direction,
+    
+    direction:     
       shortResearchWatch === true || structuralFastWatch === true
         ? "SHORT"
         : direction,
