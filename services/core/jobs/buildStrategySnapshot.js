@@ -1712,6 +1712,24 @@ function buildEngine6PaperPermission({
     engine26ShortWatchOnly === true &&
     engine26DoNotChaseLong === true &&
     engine26ShortResearchOnly === true &&
+    engine25HardBlocked !== true;
+
+  if (structuralFastWatch) {
+    reasonCodes.push("ENGINE6_STRUCTURAL_FAST_WATCH");
+    reasonCodes.push("ENGINE26_SHORT_WATCH_ONLY");
+    reasonCodes.push("ENGINE26_DO_NOT_CHASE_LONG");
+    reasonCodes.push("ENGINE26_C_DOWN_WATCH");
+    reasonCodes.push("WATCH_ONLY_NO_PAPER_ALLOW");
+    reasonCodes.push("NO_TICKET");
+    reasonCodes.push("NO_EXECUTION");
+  }
+  
+  const structuralFastWatch =
+    allowed !== true &&
+    shortResearchWatch !== true &&
+    engine26ShortWatchOnly === true &&
+    engine26DoNotChaseLong === true &&
+    engine26ShortResearchOnly === true &&
     engine25HardBlocked !== true &&
     !uniqueBlockers.includes("ENGINE25_HARD_RISK_BLOCK");
   if (shortResearchWatch) {
@@ -1764,6 +1782,9 @@ function buildEngine6PaperPermission({
     setupFamily: "IMBALANCE_TO_IMBALANCE_SCALP",
     setupType,
     direction:
+      shortResearchWatch === true || structuralFastWatch === true
+        ? "SHORT"
+        : direction,
       shortResearchWatch === true || structuralFastWatch === true
         ? "SHORT"
         : direction,
