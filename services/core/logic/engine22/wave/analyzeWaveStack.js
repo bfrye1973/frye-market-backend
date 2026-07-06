@@ -580,6 +580,65 @@ const markMaturity = validateWaveMarkMaturity({
   barsByTf,
 });
 
+function applyResolvedCorrectionMarksToActiveStructures({
+  activeStructures = {},
+  markMaturity = null,
+} = {}) {
+  if (!activeStructures || typeof activeStructures !== "object") {
+    return activeStructures;
+  }
+
+  const byDegree = markMaturity?.byDegree || {};
+  const out = { ...activeStructures };
+
+  for (const [degree, structure] of Object.entries(activeStructures)) {
+    const resolvedMarks =
+      byDegree?.[degree]?.correction?.resolvedMarks || null;
+
+    if (!resolvedMarks || !structure?.correction) continue;
+
+    const currentMarks =
+      structure.correction?.marks && typeof structure.correction.marks === "object"
+        ? structure.correction.marks
+        : {};
+
+    out[degree] = {
+      ...structure,
+      correction: {
+        ...structure.correction,
+        resolvedMarks,
+        marks: {
+          ...currentMarks,
+          ...Object.fromEntries(
+            Object.entries(resolvedMarks).filter(([, value]) => value !== null)
+          ),
+        },
+        noExecution: true,
+        noPermissionCreated: true,
+        watchOnly: true,
+      },
+    };
+  }
+
+  return out;
+}
+
+const activeStructuresWithResolvedCorrectionMarks =
+  applyResolvedCorrectionMarksToActiveStructures({
+    activeStructures: activeStructuresWithCorrections,
+    markMaturity,
+  });
+
+const activeStructuresWithMatureCorrections =
+  attachCorrectionModelsToActiveStructures({
+    symbol,
+    activeStructures: activeStructuresWithResolvedCorrectionMarks,
+    currentPrice,
+    maContext: null,
+    institutionalZones: null,
+    engine3Reference: reactionContext?.currentLevelAction || null,
+  }); 
+
 
   let degrees = {};
 
@@ -725,9 +784,9 @@ const partialWaveFibState = {
   // Engine 22 lifecycle views / dashboard contract:
   // expose normalized active structures directly so downstream readers
   // do not need to know the active-wave-state file wrapper shape.
-  activeStructures: activeStructuresWithCorrections,
+  activeStructures: activeStructuresWithMatureCorrections,
   activeWaveState: activeStructuresSource || null,
-
+  
   markMaturity,
 
     stackBias,
@@ -779,7 +838,7 @@ return {
   // Engine 22 lifecycle views / dashboard contract:
   // expose normalized active structures directly so downstream readers
   // do not need to know the active-wave-state file wrapper shape.
-  activeStructures: activeStructuresWithCorrections,
+  activeStructures: activeStructuresWithMatureCorrections,
   activeWaveState: activeStructuresSource || null,
 
   markMaturity,
