@@ -15,6 +15,7 @@
 // confluence.context.reaction.engine3FastImbalanceReaction
 
 import fs from "fs";
+import { buildEngine22DegreeWaveContext } from "./engine22DegreeWaveContext.js";
 
 const ENGINE = "engine3.fastImbalanceReaction.v1";
 const SOURCE = "ENGINE26_IMBALANCE_WATCH";
@@ -533,6 +534,7 @@ export function buildFastImbalanceReaction({
   currentPrice = null,
   engine26FastWatch = null,
   confluence = null,
+  engine22WaveStrategy = null,
 } = {}) {
   const bars = Array.isArray(bars10m) ? bars10m.map(normalizeBar) : [];
   const last = bars[bars.length - 1] || null;
@@ -645,6 +647,12 @@ const price =
     direction,
     confirmed,
 
+    waveContext: buildEngine22DegreeWaveContext({
+      engine22WaveStrategy,
+      reactionState: state,
+      reactionDirection: direction,
+    }),
+
     currentPrice: price,
 
     imbalance: {
@@ -707,6 +715,7 @@ const fastImbalanceReaction = buildFastImbalanceReaction({
   currentPrice,
   engine26FastWatch,
   confluence: patchedConfluence,
+  engine22WaveStrategy,
 });
 
   patchedConfluence.context = patchedConfluence.context || {};
