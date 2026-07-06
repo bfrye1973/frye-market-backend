@@ -41,7 +41,10 @@ import { attachPaperScalpReactionToConfluence } from "../logic/engine3/paperScal
 import { attachFastImbalanceReactionToConfluence } from "../logic/engine3/fastImbalanceReaction.js";
 import { attachCurrentLevelActionToConfluence } from "../logic/priceAction/currentLevelAction.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
-import { buildEngine26PaperTradePlan } from "../logic/engine26/paperTradePlanner.js";
+import {
+  buildEngine26ImbalanceWatch,
+  buildEngine26PaperTradePlan,
+} from "../logic/engine26/paperTradePlanner.js";
 import { listTrades } from "../logic/journal/tradeJournalStore.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import {
@@ -1375,6 +1378,7 @@ function buildEngine6PaperPermission({
   engine15Decision,
   engine22WaveStrategy,
   engine25Context,
+  engine26ImbalanceWatch = null,
 }) {
   const paperReaction =
     confluence?.context?.reaction?.paperScalpReaction || null;
@@ -1412,6 +1416,32 @@ function buildEngine6PaperPermission({
     engine22WaveStrategy?.currentLifecycleState || null;
 
   const paperShortResearchEnabled = false;
+
+  const engine26PreferredDirection = String(
+    engine26ImbalanceWatch?.preferredDirection || ""
+  ).toUpperCase();
+
+  const engine26Status = String(
+    engine26ImbalanceWatch?.status || ""
+  ).toUpperCase();
+
+  const engine26Template = String(
+    engine26ImbalanceWatch?.structuralTemplate ||
+      engine26ImbalanceWatch?.structuralPlaybook?.template ||
+      ""
+  ).toUpperCase();
+
+  const engine26ShortWatchOnly =
+    engine26PreferredDirection === "SHORT_WATCH_ONLY" ||
+    engine26ImbalanceWatch?.shortResearchOnly === true ||
+    engine26Status.includes("C_DOWN_WATCH") ||
+    engine26Template.includes("ABC_DOWN");
+
+  const engine26DoNotChaseLong =
+    engine26ImbalanceWatch?.doNotChaseLong === true;
+
+  const engine26ShortResearchOnly =
+    engine26ImbalanceWatch?.shortResearchOnly === true;
 
   const reactionAllowed = paperReaction?.allowed === true;
   const reactionActive = paperReaction?.active === true;
@@ -1596,6 +1626,16 @@ function buildEngine6PaperPermission({
     reasonCodes.push("ENGINE6_FAST_PAPER_WATCH_CANDIDATE");
   }
 
+  if (shortResearchWatch) {
+    reasonCodes.push("ENGINE6_SHORT_RESEARCH_WATCH");
+    reasonCodes.push("ENGINE26_SHORT_WATCH_ONLY");
+    reasonCodes.push("ENGINE26_DO_NOT_CHASE_LONG");
+    reasonCodes.push("ENGINE26_SHORT_RESEARCH_ONLY");
+    reasonCodes.push("ENGINE3_SHORT_REJECTION_OR_FAILED_ACCEPTANCE");
+    reasonCodes.push("SHORT_RESEARCH_ONLY_NO_PAPER_ALLOW");
+    reasonCodes.push("ENGINE15_SHORT_READINESS_NOT_BUILT");
+  }  
+
   if (fastParticipationWaiting) {
     reasonCodes.push("ENGINE4_FAST_PARTICIPATION_WAITING");
   }
@@ -1646,10 +1686,42 @@ function buildEngine6PaperPermission({
     !uniqueBlockers.includes("PAPER_DIRECTION_MISSING") &&
     !uniqueBlockers.includes("PAPER_SHORT_RESEARCH_DISABLED_V1") &&
     !uniqueBlockers.includes("ENGINE25_HARD_RISK_BLOCK");
+  const shortReactionState = String(
+    paperReaction?.state ||
+      paperReaction?.fastReactionState ||
+      ""
+  ).toUpperCase();
+
+  const shortReactionDirection = String(
+    paperReaction?.direction ||
+      ""
+  ).toUpperCase();
+
+  const engine3ShortRejection =
+    shortReactionDirection === "SHORT" &&
+    (
+      shortReactionState.includes("BREAKOUT_FAILING") ||
+      shortReactionState.includes("REJECTING") ||
+      shortReactionState.includes("LOST") ||
+      shortReactionState.includes("FAILED_RECLAIM")
+    );
+
+  const shortResearchWatch =
+    allowed !== true &&
+    engine26ShortWatchOnly === true &&
+    engine26DoNotChaseLong === true &&
+    engine26ShortResearchOnly === true &&
+    engine3ShortRejection === true &&
+    participationHardBlocked !== true &&
+    engine25HardBlocked !== true &&
+    !uniqueBlockers.includes("ENGINE25_HARD_RISK_BLOCK") &&
+    !uniqueBlockers.includes("ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED");
 
   const decision =
     allowed
       ? "PAPER_ALLOW"
+      : shortResearchWatch
+      ? "PAPER_SHORT_RESEARCH_WATCH"
       : watchFast
       ? "PAPER_WATCH_FAST"
       : "PAPER_STAND_DOWN";
@@ -1694,8 +1766,14 @@ function buildEngine6PaperPermission({
     engine15PaperReadinessActive: readinessActive,
     engine15PaperReadinessAllowed: readinessAllowed,
 
-    paperShortResearchEnabled,
-    paperShortAllowed: direction === "SHORT" && paperShortResearchEnabled,
+    paperShortResearchEnabled:
+      paperShortResearchEnabled || shortResearchWatch === true,
+    paperShortAllowed: false,
+    shortResearchOnly: shortResearchWatch === true,
+    shortResearchWatch: shortResearchWatch === true,
+    engine26ShortWatchOnly,
+    engine26DoNotChaseLong,
+    engine26ShortResearchOnly,
 
     duplicateCheckRequired: true,
 
@@ -1717,6 +1795,7 @@ function buildFinalPermissionFromEngine15({
   engine25Context,
   engine22WaveStrategy,
   confluence,
+  engine26ImbalanceWatch = null,
 }) {
   const preliminary =
     preliminaryPermission && typeof preliminaryPermission === "object"
@@ -1759,6 +1838,7 @@ const engine6PaperPermission = buildEngine6PaperPermission({
   engine15Decision,
   engine22WaveStrategy,
   engine25Context,
+  engine26ImbalanceWatch,
 });
   
 
@@ -6270,6 +6350,24 @@ attachEngine22LifecycleParticipationToConfluence({
           zoneContext,
         })
       : computeEngine15DecisionReferee(engine15BaseInputs);
+let engine26PrePermissionWatch = null;
+
+if (isEsIntradayScalp) {
+  try {
+    engine26PrePermissionWatch = buildEngine26ImbalanceWatch({
+      symbol,
+      strategyId: s.strategyId,
+      tf: s.tf,
+      permission: null,
+      engine22WaveStrategy,
+      confluence: patchedConfluence,
+      engine15Decision,
+    });
+  } catch (err) {
+    console.error("[E26 PRE-PERMISSION WATCH ERROR]", err);
+    engine26PrePermissionWatch = null;
+  }
+}
 
  
 const finalPermission =
@@ -6286,6 +6384,7 @@ const finalPermission =
         engine25Context,
         engine22WaveStrategy,
         confluence: patchedConfluence,
+        engine26ImbalanceWatch: engine26PrePermissionWatch,
       })
     : permissionPreliminary;
 
