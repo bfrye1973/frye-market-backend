@@ -1706,24 +1706,7 @@ function buildEngine6PaperPermission({
     engine25HardBlocked !== true &&
     !uniqueBlockers.includes("ENGINE25_HARD_RISK_BLOCK") &&
     !uniqueBlockers.includes("ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED");
-  const structuralFastWatch =
-    allowed !== true &&
-    shortResearchWatch !== true &&
-    engine26ShortWatchOnly === true &&
-    engine26DoNotChaseLong === true &&
-    engine26ShortResearchOnly === true &&
-    engine25HardBlocked !== true;
 
-  if (structuralFastWatch) {
-    reasonCodes.push("ENGINE6_STRUCTURAL_FAST_WATCH");
-    reasonCodes.push("ENGINE26_SHORT_WATCH_ONLY");
-    reasonCodes.push("ENGINE26_DO_NOT_CHASE_LONG");
-    reasonCodes.push("ENGINE26_C_DOWN_WATCH");
-    reasonCodes.push("WATCH_ONLY_NO_PAPER_ALLOW");
-    reasonCodes.push("NO_TICKET");
-    reasonCodes.push("NO_EXECUTION");
-  }
-  
   const structuralFastWatch =
     allowed !== true &&
     shortResearchWatch !== true &&
@@ -1732,6 +1715,7 @@ function buildEngine6PaperPermission({
     engine26ShortResearchOnly === true &&
     engine25HardBlocked !== true &&
     !uniqueBlockers.includes("ENGINE25_HARD_RISK_BLOCK");
+
   if (shortResearchWatch) {
     reasonCodes.push("ENGINE6_SHORT_RESEARCH_WATCH");
     reasonCodes.push("ENGINE26_SHORT_WATCH_ONLY");
@@ -1741,6 +1725,7 @@ function buildEngine6PaperPermission({
     reasonCodes.push("SHORT_RESEARCH_ONLY_NO_PAPER_ALLOW");
     reasonCodes.push("ENGINE15_SHORT_READINESS_NOT_BUILT");
   }
+
   if (structuralFastWatch) {
     reasonCodes.push("ENGINE6_STRUCTURAL_FAST_WATCH");
     reasonCodes.push("ENGINE26_SHORT_WATCH_ONLY");
@@ -1751,7 +1736,6 @@ function buildEngine6PaperPermission({
     reasonCodes.push("NO_TICKET");
     reasonCodes.push("NO_EXECUTION");
   }
-
   const decision =
     allowed
       ? "PAPER_ALLOW"
