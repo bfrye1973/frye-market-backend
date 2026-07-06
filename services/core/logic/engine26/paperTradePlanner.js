@@ -354,6 +354,195 @@ export function buildEngine26ImbalanceWatch({
   };
 }
 
+export function buildEngine26StructuralContext(engine26ImbalanceWatch = null) {
+  const structuralPlaybook =
+    engine26ImbalanceWatch?.structuralPlaybook || null;
+
+  if (!structuralPlaybook || typeof structuralPlaybook !== "object") {
+    return null;
+  }
+
+  const watchLevels = structuralPlaybook.watchLevels || {};
+  const triggerMap = structuralPlaybook.triggerMap || {};
+
+  const bHigh =
+    watchLevels?.manualB?.price ??
+    watchLevels?.bLeg?.price ??
+    watchLevels?.cProjection?.bHigh ??
+    triggerMap?.bHigh ??
+    null;
+
+  const bR618 =
+    triggerMap?.firstWarning ??
+    watchLevels?.bBounceFibBand?.r618 ??
+    watchLevels?.bBounceBand?.hi ??
+    null;
+
+  const bMid =
+    triggerMap?.bBounceMid ??
+    watchLevels?.bBounceFibBand?.r500 ??
+    null;
+
+  const bLow =
+    triggerMap?.bBounceLower ??
+    watchLevels?.bBounceFibBand?.r382 ??
+    watchLevels?.bBounceBand?.lo ??
+    null;
+
+  const parentR382 =
+    triggerMap?.parentR382 ??
+    watchLevels?.parentFibConfluence?.r382 ??
+    null;
+
+  const parentR500 =
+    triggerMap?.parentR500 ??
+    watchLevels?.parentFibConfluence?.r500 ??
+    null;
+
+  const parentR618 =
+    triggerMap?.parentR618 ??
+    watchLevels?.parentFibConfluence?.r618 ??
+    null;
+
+  const c100 =
+    triggerMap?.c100 ??
+    watchLevels?.cProjection?.c100 ??
+    null;
+
+  const c1272 =
+    triggerMap?.c1272 ??
+    watchLevels?.cProjection?.c1272 ??
+    null;
+
+  const c1618 =
+    triggerMap?.c1618 ??
+    watchLevels?.cProjection?.c1618 ??
+    null;
+
+  const targetPathPreview = [
+    bR618,
+    bMid,
+    bLow,
+    parentR382,
+    parentR500,
+    parentR618,
+    c100,
+    c1272,
+    c1618,
+  ].filter((x) => x != null);
+
+  return {
+    active: structuralPlaybook.active === true,
+    engine: "engine26.structuralContext.v1",
+    source: "engine26.structuralContext.fromEngine22Playbook.v1",
+    mode: "WATCH_ONLY",
+
+    symbol:
+      structuralPlaybook.symbol ||
+      engine26ImbalanceWatch?.symbol ||
+      "ES",
+
+    strategyId:
+      structuralPlaybook.strategyId ||
+      engine26ImbalanceWatch?.strategyId ||
+      "intraday_scalp@10m",
+
+    tf:
+      structuralPlaybook.tf ||
+      engine26ImbalanceWatch?.tf ||
+      "10m",
+
+    engine22ReadFirst: true,
+
+    status: structuralPlaybook.status || engine26ImbalanceWatch?.status || null,
+    template:
+      structuralPlaybook.template ||
+      engine26ImbalanceWatch?.structuralTemplate ||
+      null,
+    activeImbalanceRole:
+      structuralPlaybook.activeImbalanceRole ||
+      engine26ImbalanceWatch?.activeImbalanceRole ||
+      null,
+
+    structuralBias:
+      structuralPlaybook.structuralBias ||
+      engine26ImbalanceWatch?.structuralBias ||
+      null,
+
+    preferredDirection:
+      structuralPlaybook.preferredDirection ||
+      engine26ImbalanceWatch?.preferredDirection ||
+      null,
+
+    preferredAction:
+      structuralPlaybook.preferredAction ||
+      engine26ImbalanceWatch?.preferredAction ||
+      null,
+
+    doNotChaseLong:
+      structuralPlaybook.doNotChaseLong === true ||
+      engine26ImbalanceWatch?.doNotChaseLong === true,
+
+    shortResearchOnly:
+      structuralPlaybook.shortResearchOnly === true ||
+      engine26ImbalanceWatch?.shortResearchOnly === true,
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    levels: {
+      bHigh,
+      bR618,
+      bMid,
+      bLow,
+
+      parentR382,
+      parentR500,
+      parentR618,
+
+      c100,
+      c1272,
+      c1618,
+    },
+
+    targetPathPreview,
+
+    confirmationNeeds: Array.isArray(structuralPlaybook.confirmationNeeds)
+      ? structuralPlaybook.confirmationNeeds
+      : [],
+
+    invalidation: structuralPlaybook.invalidation || null,
+
+    sourceRefs: {
+      engine22DegreeStates: true,
+      engine22NestedCorrectionContext: true,
+      engine22CorrectionModel: true,
+      engine26ImbalanceClassifier: true,
+      manualImbalance: true,
+    },
+
+    reasonCodes: [
+      "ENGINE26_STRUCTURAL_CONTEXT_BUILT",
+      "ENGINE22_READ_FIRST",
+      structuralPlaybook.template
+        ? `TEMPLATE_${structuralPlaybook.template}`
+        : null,
+      structuralPlaybook.activeImbalanceRole || null,
+      structuralPlaybook.structuralBias || null,
+      structuralPlaybook.doNotChaseLong === true
+        ? "DO_NOT_CHASE_LONG"
+        : null,
+      structuralPlaybook.shortResearchOnly === true
+        ? "SHORT_RESEARCH_ONLY"
+        : null,
+      "WATCH_ONLY",
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+    ].filter(Boolean),
+  };
+}
+
 function makeNoTrade({
   symbol,
   strategyId,
@@ -806,6 +995,9 @@ export function buildEngine26PaperTradePlan({
     engine15Decision,
   });
 
+  const engine26StructuralContext =
+    buildEngine26StructuralContext(engine26ImbalanceWatch);
+
   const blockers = [];
   const warnings = [];
   const reasonCodes = [
@@ -963,6 +1155,7 @@ export function buildEngine26PaperTradePlan({
 
     return {
       engine26ImbalanceWatch,
+      engine26StructuralContext,
       engine26PaperTradePlan: makeNoTrade({
         symbol: normalizedSymbol,
         strategyId: normalizedStrategyId,
@@ -1123,8 +1316,9 @@ export function buildEngine26PaperTradePlan({
     createdAt: nowIso(),
   };
 
- return {
+  return {
    engine26ImbalanceWatch,
+   engine26StructuralContext,
    engine26PaperTradePlan: plan,
    engine26PaperTradeTicket: ticket,
    engine26PaperTradeExecution: null,
