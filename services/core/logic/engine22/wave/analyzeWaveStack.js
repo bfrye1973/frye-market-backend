@@ -576,6 +576,8 @@ const activeStructuresWithCorrections =
 const markMaturity = validateWaveMarkMaturity({
   symbol,
   activeStructures: activeStructuresWithCorrections,
+  currentPrice,
+  barsByTf,
 });
 
 
