@@ -6296,6 +6296,7 @@ attachPaperScalpReactionToConfluence({
   engine22WaveStrategy,
   paperShortResearchEnabled: false,
 });
+
 attachEngine4CurrentScalpParticipationToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
