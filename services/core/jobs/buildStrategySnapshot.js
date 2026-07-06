@@ -6788,8 +6788,9 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
      });
      attachEngine4CurrentScalpParticipationToConfluence({
        patchedConfluence,
+       engine22WaveStrategy,
        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-     }); 
+     });
      engine22WaveStrategy = {
        ...engine22WaveStrategy,
        currentLifecycleState: enrichCurrentLifecycleWithLivePriceAction({
