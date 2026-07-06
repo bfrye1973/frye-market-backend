@@ -562,6 +562,71 @@ function validPrice(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function buildEngine4WaveContextFromDegreeStates(engine22WaveStrategy) {
+  const degreeStates = engine22WaveStrategy?.degreeStates || null;
+
+  if (!degreeStates || typeof degreeStates !== "object") {
+    const currentLifecycleState =
+      engine22WaveStrategy?.currentLifecycleState || null;
+
+    return {
+      available: false,
+      source: "engine22WaveStrategy.currentLifecycleState",
+      fallbackLifecycleKey: currentLifecycleState?.key || null,
+      fallbackHeadline: currentLifecycleState?.headline || null,
+      reasonCodes: ["ENGINE22_DEGREE_STATES_MISSING_FALLBACK_LIFECYCLE_USED"],
+    };
+  }
+
+  const minor = degreeStates.minor || null;
+  const minute = degreeStates.minute || null;
+  const subminute = degreeStates.subminute || null;
+
+  return {
+    available: true,
+    source: "engine22WaveStrategy.degreeStates",
+
+    minor: {
+      headline: minor?.headline || null,
+      activeWave: minor?.activeWave || null,
+      stage: minor?.stage || null,
+      direction: minor?.direction || null,
+      correctionType: minor?.correctionModel?.type || null,
+      correctionStage: minor?.correctionModel?.stage || null,
+      preferredType: minor?.correctionModels?.preferredType || null,
+      localSupportWatch: minor?.targetModel?.localSupportWatch || null,
+    },
+
+    minute: {
+      headline: minute?.headline || null,
+      action: minute?.action || null,
+      activeWave: minute?.activeWave || null,
+      stage: minute?.stage || null,
+      direction: minute?.direction || null,
+      correctionType: minute?.correctionModel?.type || null,
+      correctionStage: minute?.correctionModel?.stage || null,
+      nestedPurpose: minute?.nestedCorrectionContext?.childPurpose || null,
+      currentRead: minute?.nestedCorrectionContext?.currentRead || null,
+      nextExpected: minute?.nestedCorrectionContext?.nextExpected || null,
+    },
+
+    subminute: {
+      headline: subminute?.headline || null,
+      action: subminute?.action || null,
+      activeWave: subminute?.activeWave || null,
+      stage: subminute?.stage || null,
+      direction: subminute?.direction || null,
+      correctionType: subminute?.correctionModel?.type || null,
+      correctionStage: subminute?.correctionModel?.stage || null,
+      nestedPurpose: subminute?.nestedCorrectionContext?.childPurpose || null,
+      currentRead: subminute?.nestedCorrectionContext?.currentRead || null,
+      nextExpected: subminute?.nestedCorrectionContext?.nextExpected || null,
+    },
+
+    reasonCodes: ["ENGINE22_DEGREE_STATES_CONSUMED_BY_ENGINE4"],
+  };
+}
+
 function isFuturesSymbol(sym) {
   const s = String(sym || "").toUpperCase();
   return ["ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K"].includes(s);
@@ -4945,10 +5010,12 @@ function attachEngine22LifecycleParticipationToConfluence({
 
 function buildEngine4FastImbalanceParticipation({
   patchedConfluence,
+  engine22WaveStrategy = null,
   bars = [],
 } = {}) {
   const reactionContext = patchedConfluence?.context?.reaction || null;
   const volumeContext = patchedConfluence?.context?.volume || null;
+  const waveContext = buildEngine4WaveContextFromDegreeStates(engine22WaveStrategy);
 
   const fastReaction =
     reactionContext?.engine3FastImbalanceReaction || null;
@@ -5317,7 +5384,7 @@ function buildEngine4FastImbalanceParticipation({
     researchOnly: true,
 
     source: "confluence.context.reaction.engine3FastImbalanceReaction",
-
+    waveContext,
     allowed,
     hardBlocked,
     downgradeOnly,
@@ -5386,12 +5453,14 @@ function buildEngine4FastImbalanceParticipation({
 
 function attachEngine4FastImbalanceParticipationToConfluence({
   patchedConfluence,
+  engine22WaveStrategy = null,
   bars = [],
 }) {
-  const fastImbalanceParticipation = buildEngine4FastImbalanceParticipation({
-    patchedConfluence,
-    bars,
-  });
+ const fastImbalanceParticipation = buildEngine4FastImbalanceParticipation({
+   patchedConfluence,
+   engine22WaveStrategy,
+   bars,
+ });
 
   if (!fastImbalanceParticipation) return patchedConfluence;
 
@@ -5406,10 +5475,12 @@ function attachEngine4FastImbalanceParticipationToConfluence({
 
 function buildEngine4CurrentScalpParticipation({
   patchedConfluence,
+  engine22WaveStrategy = null,
   bars = [],
 } = {}) {
   const reactionContext = patchedConfluence?.context?.reaction || null;
   const volumeContext = patchedConfluence?.context?.volume || null;
+  const waveContext = buildEngine4WaveContextFromDegreeStates(engine22WaveStrategy);
 
   const fastReaction =
     reactionContext?.engine3FastImbalanceReaction || null;
@@ -5515,9 +5586,16 @@ function buildEngine4CurrentScalpParticipation({
   ).toUpperCase();
 
   const currentPrice =
-    toNum(sourceReaction?.currentPrice) ||
-    toNum(currentLevelAction?.currentPrice) ||
-    last.close ||
+    validPrice(sourceReaction?.currentPrice) ??
+    validPrice(sourceReaction?.fastImbalanceReaction?.currentPrice) ??
+    validPrice(sourceReaction?.fastImbalanceReaction?.lastCandle?.close) ??
+    validPrice(sourceReaction?.currentLevelAction?.currentPrice) ??
+    validPrice(sourceReaction?.currentLevelAction?.lastCandle?.close) ??
+    validPrice(currentLevelAction?.currentPrice) ??
+    validPrice(currentLevelAction?.lastCandle?.close) ??
+    validPrice(last.close) ??
+    validPrice(patchedConfluence?.price) ??
+    validPrice(patchedConfluence?.currentPrice) ??
     null;
 
   const greenCandle =
@@ -5686,7 +5764,7 @@ const againstDirection =
     researchOnly: true,
 
     source: sourceName,
-
+    waveContext,
     allowed,
     hardBlocked,
     downgradeOnly,
@@ -5743,10 +5821,12 @@ const againstDirection =
 
 function attachEngine4CurrentScalpParticipationToConfluence({
   patchedConfluence,
+  engine22WaveStrategy = null,
   bars = [],
 }) {
   const currentScalpParticipation = buildEngine4CurrentScalpParticipation({
     patchedConfluence,
+    engine22WaveStrategy,
     bars,
   });
 
@@ -6207,6 +6287,7 @@ attachFastImbalanceReactionToConfluence({
 
 attachEngine4FastImbalanceParticipationToConfluence({
   patchedConfluence,
+  engine22WaveStrategy,
   bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
 });
 
@@ -6217,8 +6298,9 @@ attachPaperScalpReactionToConfluence({
 });
 attachEngine4CurrentScalpParticipationToConfluence({
   patchedConfluence,
+  engine22WaveStrategy,
   bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-});      
+});
 
 engine22WaveStrategy = {
   ...engine22WaveStrategy,
