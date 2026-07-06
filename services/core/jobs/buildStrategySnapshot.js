@@ -1626,16 +1626,6 @@ function buildEngine6PaperPermission({
     reasonCodes.push("ENGINE6_FAST_PAPER_WATCH_CANDIDATE");
   }
 
-  if (shortResearchWatch) {
-    reasonCodes.push("ENGINE6_SHORT_RESEARCH_WATCH");
-    reasonCodes.push("ENGINE26_SHORT_WATCH_ONLY");
-    reasonCodes.push("ENGINE26_DO_NOT_CHASE_LONG");
-    reasonCodes.push("ENGINE26_SHORT_RESEARCH_ONLY");
-    reasonCodes.push("ENGINE3_SHORT_REJECTION_OR_FAILED_ACCEPTANCE");
-    reasonCodes.push("SHORT_RESEARCH_ONLY_NO_PAPER_ALLOW");
-    reasonCodes.push("ENGINE15_SHORT_READINESS_NOT_BUILT");
-  }  
-
   if (fastParticipationWaiting) {
     reasonCodes.push("ENGINE4_FAST_PARTICIPATION_WAITING");
   }
@@ -1716,6 +1706,15 @@ function buildEngine6PaperPermission({
     engine25HardBlocked !== true &&
     !uniqueBlockers.includes("ENGINE25_HARD_RISK_BLOCK") &&
     !uniqueBlockers.includes("ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED");
+  if (shortResearchWatch) {
+    reasonCodes.push("ENGINE6_SHORT_RESEARCH_WATCH");
+    reasonCodes.push("ENGINE26_SHORT_WATCH_ONLY");
+    reasonCodes.push("ENGINE26_DO_NOT_CHASE_LONG");
+    reasonCodes.push("ENGINE26_SHORT_RESEARCH_ONLY");
+    reasonCodes.push("ENGINE3_SHORT_REJECTION_OR_FAILED_ACCEPTANCE");
+    reasonCodes.push("SHORT_RESEARCH_ONLY_NO_PAPER_ALLOW");
+    reasonCodes.push("ENGINE15_SHORT_READINESS_NOT_BUILT");
+  }
 
   const decision =
     allowed
