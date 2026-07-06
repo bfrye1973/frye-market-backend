@@ -6779,9 +6779,9 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
 
      attachEngine4FastImbalanceParticipationToConfluence({
        patchedConfluence,
+       engine22WaveStrategy,
        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
      });
-
      attachPaperScalpReactionToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
