@@ -6553,6 +6553,7 @@ let engine26ImbalanceWatch = null;
 let engine26PaperTradePlan = null;
 let engine26PaperTradeTicket = null;
 let engine26PaperTradeExecution = null;
+let engine26TradePlanPreview = null;
 
 if (isEsIntradayScalp) {
   try {
@@ -6591,6 +6592,7 @@ if (isEsIntradayScalp) {
     engine26StructuralContext = engine26.engine26StructuralContext || null;
     engine26PaperTradePlan = engine26.engine26PaperTradePlan || null;
     engine26PaperTradeTicket = engine26.engine26PaperTradeTicket || null;
+    engine26TradePlanPreview = engine26.engine26TradePlanPreview || null;
     // V1 planner-only. Do not call Engine 8 from snapshot builder.
     engine26PaperTradeExecution = null;
   } catch (err) {
@@ -6914,6 +6916,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
      
     engine26ImbalanceWatch,
     engine26StructuralContext,
+    engine26TradePlanPreview,
     engine26PaperTradePlan,
     engine26PaperTradeTicket,
     engine26PaperTradeExecution,
