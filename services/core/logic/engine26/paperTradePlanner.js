@@ -53,7 +53,7 @@ function getEngine8Allowlist() {
     .filter(Boolean);
 }
 
-function buildEngine26ImbalanceWatch({
+export function buildEngine26ImbalanceWatch({
   symbol,
   strategyId,
   tf,
