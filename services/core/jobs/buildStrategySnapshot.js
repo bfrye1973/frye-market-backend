@@ -5528,6 +5528,21 @@ function buildEngine4FastImbalanceParticipation({
     if (highVolumeNoProgress) reasonCodes.push("HIGH_VOLUME_NO_PROGRESS_AGAINST_TRADE");
     if (absorptionRiskAgainstTrade) reasonCodes.push("ABSORPTION_RISK_AGAINST_TRADE");
     if (climacticAgainstTrade) reasonCodes.push("CLIMACTIC_AGAINST_TRADE");
+  } else if (rejectionVolumeConfirmed) {
+    allowed = true;
+    downgradeOnly = true;
+    participationState = "SHORT_REJECTION_VOLUME_CONFIRMED";
+    participationQuality = "MIXED";
+    grade = "B";
+    risk = climacticRisk === true
+      ? "CLIMACTIC_BUT_DIRECTIONAL_PAPER_ONLY"
+      : "ACCEPTABLE_FOR_FAST_PAPER";
+    direction = intendedDirection;
+
+    reasonCodes.push("SHORT_REJECTION_VOLUME_CONFIRMED");
+    reasonCodes.push("FAST_REJECTION_VOLUME_CONFIRMED");
+    reasonCodes.push("ENGINE3_SHORT_REJECTION_CONFIRMED_BY_FAST_VOLUME");
+    reasonCodes.push("PAPER_ONLY_ENGINE6_STILL_DECIDES");
   } else if (reclaimVolumeConfirmed) {
     allowed = true;
     downgradeOnly = false;
