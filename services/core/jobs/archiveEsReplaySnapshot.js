@@ -218,8 +218,9 @@ function buildSlimEsReplaySnapshot(source, parts) {
       permission: strategy?.permission ?? null,
       permissionPreliminary: strategy?.permissionPreliminary ?? null,
 
-      confluence: slimConfluence(strategy?.confluence ?? null),
+      engine26ReplayMarker: strategy?.engine26ReplayMarker ?? null,
 
+      confluence: slimConfluence(strategy?.confluence ?? null),
       zones: slimZones(strategy),
 
       momentum: strategy?.momentum ?? source?.momentum ?? null,
