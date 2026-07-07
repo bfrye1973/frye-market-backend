@@ -38,6 +38,317 @@ function safeString(value) {
   return String(value || "").trim();
 }
 
+function barOpen(bar) {
+  return toNum(bar?.open ?? bar?.o);
+}
+
+function barHigh(bar) {
+  return toNum(bar?.high ?? bar?.h);
+}
+
+function barLow(bar) {
+  return toNum(bar?.low ?? bar?.l);
+}
+
+function barClose(bar) {
+  return toNum(bar?.close ?? bar?.c);
+}
+
+function barTime(bar) {
+  return bar?.time ?? bar?.t ?? bar?.tSec ?? null;
+}
+
+function closeLocationPct({ high, low, close }) {
+  const h = toNum(high);
+  const l = toNum(low);
+  const c = toNum(close);
+
+  if (h == null || l == null || c == null || h === l) return null;
+
+  return Number((((c - l) / (h - l)) * 100).toFixed(2));
+}
+
+function candleColor(bar) {
+  const o = barOpen(bar);
+  const c = barClose(bar);
+
+  if (o == null || c == null) return "UNKNOWN";
+  if (c > o) return "GREEN";
+  if (c < o) return "RED";
+  return "DOJI";
+}
+
+function bodyLo(bar) {
+  const o = barOpen(bar);
+  const c = barClose(bar);
+
+  if (o == null || c == null) return null;
+  return Math.min(o, c);
+}
+
+function bodyHi(bar) {
+  const o = barOpen(bar);
+  const c = barClose(bar);
+
+  if (o == null || c == null) return null;
+  return Math.max(o, c);
+}
+
+function buildEngine26DailyCandleContext({
+  symbol,
+  strategyId,
+  dailyBars = [],
+  engine26StructuralContext = null,
+} = {}) {
+  const bars = Array.isArray(dailyBars) ? dailyBars.filter(Boolean) : [];
+
+  if (bars.length < 2) {
+    return {
+      active: false,
+      engine: "engine26.dailyCandleContext.v1",
+      source: "marketMeter.layers.emaPosture.daily.bars",
+      symbol: safeUpper(symbol || "ES"),
+      strategyId: strategyId || STRATEGY_ID,
+      timeframe: "1D",
+      pattern: "DAILY_CONTEXT_UNAVAILABLE",
+      biasForNextSession: "UNKNOWN",
+      supportsEngine26Direction: false,
+      message: "Daily candle context unavailable because fewer than two daily bars were provided.",
+      noExecution: true,
+      noPermissionCreated: true,
+      reasonCodes: [
+        "ENGINE26_DAILY_CANDLE_CONTEXT_UNAVAILABLE",
+        "MISSING_TWO_DAILY_BARS",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+      ],
+    };
+  }
+
+  const prior = bars[bars.length - 2];
+  const last = bars[bars.length - 1];
+
+  const priorOpen = barOpen(prior);
+  const priorHigh = barHigh(prior);
+  const priorLow = barLow(prior);
+  const priorClose = barClose(prior);
+
+  const lastOpen = barOpen(last);
+  const lastHigh = barHigh(last);
+  const lastLow = barLow(last);
+  const lastClose = barClose(last);
+
+  const priorColor = candleColor(prior);
+  const lastColor = candleColor(last);
+
+  const priorBodyLo = bodyLo(prior);
+  const priorBodyHi = bodyHi(prior);
+  const lastBodyLo = bodyLo(last);
+  const lastBodyHi = bodyHi(last);
+
+  const lastCloseLocationPct = closeLocationPct({
+    high: lastHigh,
+    low: lastLow,
+    close: lastClose,
+  });
+
+  const bearishEngulfing =
+    priorColor === "GREEN" &&
+    lastColor === "RED" &&
+    lastBodyHi != null &&
+    lastBodyLo != null &&
+    priorBodyHi != null &&
+    priorBodyLo != null &&
+    lastBodyHi >= priorBodyHi &&
+    lastBodyLo <= priorBodyLo;
+
+  const bullishEngulfing =
+    priorColor === "RED" &&
+    lastColor === "GREEN" &&
+    lastBodyHi != null &&
+    lastBodyLo != null &&
+    priorBodyHi != null &&
+    priorBodyLo != null &&
+    lastBodyHi >= priorBodyHi &&
+    lastBodyLo <= priorBodyLo;
+
+  const outsideDay =
+    lastHigh != null &&
+    lastLow != null &&
+    priorHigh != null &&
+    priorLow != null &&
+    lastHigh > priorHigh &&
+    lastLow < priorLow;
+
+  const insideDay =
+    lastHigh != null &&
+    lastLow != null &&
+    priorHigh != null &&
+    priorLow != null &&
+    lastHigh <= priorHigh &&
+    lastLow >= priorLow;
+
+  const weakCloseNearLow =
+    lastColor === "RED" &&
+    lastCloseLocationPct != null &&
+    lastCloseLocationPct <= 35;
+
+  const strongCloseNearHigh =
+    lastColor === "GREEN" &&
+    lastCloseLocationPct != null &&
+    lastCloseLocationPct >= 65;
+
+  const structuralDirection = safeUpper(
+    engine26StructuralContext?.preferredDirection ||
+      engine26StructuralContext?.direction ||
+      ""
+  );
+
+  const structuralStatus = safeUpper(engine26StructuralContext?.status || "");
+  const structuralBias = safeUpper(engine26StructuralContext?.structuralBias || "");
+
+  const engine26ShortWatch =
+    structuralDirection.includes("SHORT") ||
+    structuralStatus.includes("C_DOWN") ||
+    structuralBias.includes("C_DOWN") ||
+    engine26StructuralContext?.shortResearchOnly === true;
+
+  const engine26LongWatch =
+    structuralDirection.includes("LONG") ||
+    structuralBias.includes("LONG");
+
+  let pattern = "DAILY_NEUTRAL";
+  let biasForNextSession = "NEUTRAL_WAIT";
+  let confidence = "LOW";
+  let message =
+    "Daily candle is neutral. Use intraday Engine 3 / Engine 4 confirmation.";
+
+  const reasonCodes = [
+    "ENGINE26_DAILY_CANDLE_CONTEXT_BUILT",
+    "DAILY_CONTEXT_ONLY",
+    "NO_EXECUTION",
+    "NO_PERMISSION_CREATED",
+  ];
+
+  if (bearishEngulfing) {
+    pattern = "BEARISH_ENGULFING_REJECTION";
+    biasForNextSession = "SHORT_WATCH";
+    confidence = outsideDay ? "HIGH" : "MODERATE";
+    message =
+      "Daily bearish engulfing detected. Next session favors short-watch on failed acceptance or level loss.";
+    reasonCodes.push("DAILY_BEARISH_ENGULFING_REJECTION");
+  } else if (bullishEngulfing) {
+    pattern = "BULLISH_ENGULFING_RECLAIM";
+    biasForNextSession = "LONG_WATCH";
+    confidence = outsideDay ? "HIGH" : "MODERATE";
+    message =
+      "Daily bullish engulfing detected. Next session favors long-watch on reclaim / hold.";
+    reasonCodes.push("DAILY_BULLISH_ENGULFING_RECLAIM");
+  } else if (weakCloseNearLow) {
+    pattern = "DAILY_WEAK_CLOSE_NEAR_LOW";
+    biasForNextSession = "SHORT_WATCH";
+    confidence = "MODERATE";
+    message =
+      "Daily candle closed weak near the low. Next session should respect downside risk.";
+    reasonCodes.push("DAILY_WEAK_CLOSE_NEAR_LOW");
+  } else if (strongCloseNearHigh) {
+    pattern = "DAILY_STRONG_CLOSE_NEAR_HIGH";
+    biasForNextSession = "LONG_WATCH";
+    confidence = "MODERATE";
+    message =
+      "Daily candle closed strong near the high. Next session should respect upside continuation risk.";
+    reasonCodes.push("DAILY_STRONG_CLOSE_NEAR_HIGH");
+  } else if (insideDay) {
+    pattern = "DAILY_INSIDE_DAY";
+    biasForNextSession = "BREAKOUT_OR_FAILED_BREAKOUT_WATCH";
+    confidence = "LOW";
+    message =
+      "Daily inside day detected. Next session should watch range break or failed breakout.";
+    reasonCodes.push("DAILY_INSIDE_DAY");
+  } else if (outsideDay) {
+    pattern = "DAILY_OUTSIDE_DAY";
+    biasForNextSession = "REVERSAL_OR_CONTINUATION_WATCH";
+    confidence = "MODERATE";
+    message =
+      "Daily outside day detected. Next session needs confirmation before direction is trusted.";
+    reasonCodes.push("DAILY_OUTSIDE_DAY");
+  }
+
+  const supportsEngine26Direction =
+    (biasForNextSession === "SHORT_WATCH" && engine26ShortWatch) ||
+    (biasForNextSession === "LONG_WATCH" && engine26LongWatch);
+
+  if (supportsEngine26Direction) {
+    reasonCodes.push("DAILY_CONTEXT_SUPPORTS_ENGINE26_DIRECTION");
+
+    if (biasForNextSession === "SHORT_WATCH") {
+      reasonCodes.push("DAILY_CONTEXT_SUPPORTS_SHORT_WATCH");
+    }
+
+    if (biasForNextSession === "LONG_WATCH") {
+      reasonCodes.push("DAILY_CONTEXT_SUPPORTS_LONG_WATCH");
+    }
+  }
+
+  return {
+    active: true,
+    engine: "engine26.dailyCandleContext.v1",
+    source: "marketMeter.layers.emaPosture.daily.bars",
+
+    symbol: safeUpper(symbol || "ES"),
+    strategyId: strategyId || STRATEGY_ID,
+    timeframe: "1D",
+
+    pattern,
+    biasForNextSession,
+    confidence,
+    supportsEngine26Direction,
+
+    priorCandle: {
+      time: barTime(prior),
+      open: priorOpen,
+      high: priorHigh,
+      low: priorLow,
+      close: priorClose,
+      color: priorColor,
+    },
+
+    lastCandle: {
+      time: barTime(last),
+      open: lastOpen,
+      high: lastHigh,
+      low: lastLow,
+      close: lastClose,
+      color: lastColor,
+      closeLocationPct: lastCloseLocationPct,
+    },
+
+    engulfing: {
+      bearish: bearishEngulfing,
+      bullish: bullishEngulfing,
+    },
+
+    insideDay,
+    outsideDay,
+    weakCloseNearLow,
+    strongCloseNearHigh,
+
+    engine26Alignment: {
+      structuralDirection,
+      structuralStatus,
+      structuralBias,
+      engine26ShortWatch,
+      engine26LongWatch,
+    },
+
+    message,
+
+    noExecution: true,
+    noPermissionCreated: true,
+    reasonCodes,
+  };
+}
+
 function sanitizeKeyPart(value) {
   return String(value || "UNKNOWN")
     .trim()
@@ -875,6 +1186,7 @@ function buildEngine26TradePlanPreview({
   engine15Decision,
   engine26ImbalanceWatch,
   engine26StructuralContext,
+  dailyCandleContext = null,
 }) {
   const paper = permission?.paper || null;
 
@@ -1085,6 +1397,8 @@ function buildEngine26TradePlanPreview({
           ? "ALARM_ZONE_ACTIVE"
           : "NO_ACTIVE_ALARM_ZONE",
     },
+
+    dailyCandleContext,
 
     structure: {
       setupType,
@@ -1307,6 +1621,7 @@ export function buildEngine26PaperTradePlan({
   confluence,
   engine15Decision,
   openPaperTrades = [],
+  dailyBars = [],
 }) {
   const normalizedSymbol = safeUpper(symbol);
   const normalizedStrategyId = safeString(strategyId);
@@ -1332,8 +1647,31 @@ export function buildEngine26PaperTradePlan({
     engine15Decision,
   });
 
-  const engine26StructuralContext =
+  let engine26StructuralContext =
     buildEngine26StructuralContext(engine26ImbalanceWatch);
+
+  const dailyCandleContext = buildEngine26DailyCandleContext({
+    symbol: normalizedSymbol,
+    strategyId: normalizedStrategyId,
+    dailyBars,
+    engine26StructuralContext,
+  });
+
+  if (engine26StructuralContext && typeof engine26StructuralContext === "object") {
+    engine26StructuralContext = {
+      ...engine26StructuralContext,
+      dailyCandleContext,
+      reasonCodes: [
+        ...(Array.isArray(engine26StructuralContext.reasonCodes)
+          ? engine26StructuralContext.reasonCodes
+          : []),
+        ...(Array.isArray(dailyCandleContext?.reasonCodes)
+          ? dailyCandleContext.reasonCodes
+          : []),
+      ].filter(Boolean),
+    };
+  }
+
   const engine26TradePlanPreview = buildEngine26TradePlanPreview({
   symbol: normalizedSymbol,
   strategyId: normalizedStrategyId,
@@ -1345,6 +1683,7 @@ export function buildEngine26PaperTradePlan({
   engine15Decision,
   engine26ImbalanceWatch,
   engine26StructuralContext,
+  dailyCandleContext,
 });
 
   const blockers = [];
