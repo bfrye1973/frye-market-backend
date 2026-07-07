@@ -85,6 +85,248 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function getPhoenixReplayParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Phoenix",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const get = (type) =>
+    parts.find((part) => part.type === type)?.value || "";
+
+  const year = get("year");
+  const month = get("month");
+  const day = get("day");
+  const hour = get("hour");
+  const minute = get("minute");
+
+  return {
+    dateYmd: `${year}-${month}-${day}`,
+    timeHHMM: `${hour}${minute}`,
+  };
+}
+
+function firstArrayItems(value, limit = 5) {
+  return Array.isArray(value) ? value.filter(Boolean).slice(0, limit) : [];
+}
+
+function buildEngine26ReplayMarker({
+  symbol,
+  strategyId,
+  engine26ImbalanceWatch,
+  engine26StructuralContext,
+  engine26PaperTradeTicket,
+  engine26PaperTradeExecution,
+  permission,
+  confluence,
+  engine15Decision,
+}) {
+  const structural = engine26StructuralContext || null;
+  const paper = permission?.paper || null;
+
+  if (structural?.active !== true) return null;
+
+  const paperDecision = String(paper?.decision || "").toUpperCase();
+  const status = String(structural?.status || "").toUpperCase();
+
+  const importantPaperDecisions = new Set([
+    "STRUCTURAL_FAST_WATCH",
+    "PAPER_SHORT_RESEARCH_WATCH",
+    "PAPER_WATCH_FAST",
+    "PAPER_ALLOW",
+  ]);
+
+  const shouldCreate =
+    structural?.shortResearchOnly === true ||
+    status.includes("WATCH") ||
+    importantPaperDecisions.has(paperDecision) ||
+    engine26PaperTradeTicket != null;
+
+  if (!shouldCreate) return null;
+
+  const markerType =
+    engine26PaperTradeTicket != null || paperDecision === "PAPER_ALLOW"
+      ? "ENGINE26_PAPER_TRADE_PREVIEW"
+      : structural?.watchOnly === true
+      ? "ENGINE26_STRUCTURAL_WATCH"
+      : engine26ImbalanceWatch?.active === true
+      ? "ENGINE26_IMBALANCE_WATCH"
+      : "ENGINE26_STRUCTURAL_WATCH";
+
+  const replayParts = getPhoenixReplayParts();
+  const replayPath = `/var/data/replay/es/${replayParts.dateYmd}/${replayParts.timeHHMM}.json`;
+
+  const activeImbalance = engine26ImbalanceWatch?.activeImbalance || null;
+
+  const paperReaction =
+    confluence?.context?.reaction?.paperScalpReaction ||
+    confluence?.context?.reaction?.engine3FastImbalanceReaction ||
+    null;
+
+  const fastParticipation =
+    confluence?.context?.volume?.engine4FastImbalanceParticipation || null;
+
+  const paperReadiness = engine15Decision?.paperScalpReadiness || null;
+
+  const currentPrice =
+    Number(engine26ImbalanceWatch?.currentPrice) ||
+    Number(confluence?.price) ||
+    null;
+
+  const direction =
+    structural?.preferredDirection ||
+    paper?.direction ||
+    null;
+
+  const setupType =
+    structural?.template ||
+    engine26ImbalanceWatch?.structuralTemplate ||
+    null;
+
+  const engine15Blockers = firstArrayItems(
+    paperReadiness?.blockers ||
+      engine15Decision?.blockers,
+    5
+  );
+
+  const engine6Blockers = firstArrayItems(paper?.blockers, 8);
+
+  const dedupeKey = [
+    symbol,
+    replayParts.dateYmd,
+    replayParts.timeHHMM,
+    markerType,
+    structural?.status || "UNKNOWN_STATUS",
+    paperDecision || "UNKNOWN_ENGINE6_DECISION",
+  ].join("|");
+
+  return {
+    active: true,
+    engine: "engine26.replayMarker.v1",
+    mode: "REPLAY_POINTER_ONLY",
+
+    markerType,
+
+    symbol,
+    strategyId,
+
+    dateYmd: replayParts.dateYmd,
+    timeHHMM: replayParts.timeHHMM,
+    replayApiTime: replayParts.timeHHMM,
+    replayPath,
+
+    createdAt: nowIso(),
+
+    currentPrice,
+
+    direction,
+    status: structural?.status || null,
+    template: structural?.template || null,
+    setupType,
+    preferredAction: structural?.preferredAction || null,
+
+    activeImbalanceRole: structural?.activeImbalanceRole || null,
+    structuralBias: structural?.structuralBias || null,
+
+    shortResearchOnly: structural?.shortResearchOnly === true,
+    doNotChaseLong: structural?.doNotChaseLong === true,
+    watchOnly: structural?.watchOnly === true,
+    noExecution: true,
+    noPermissionCreated: true,
+
+    levels: structural?.levels || null,
+    targetPathPreview: structural?.targetPathPreview || null,
+    invalidation: structural?.invalidation || null,
+    confirmationNeeds: Array.isArray(structural?.confirmationNeeds)
+      ? structural.confirmationNeeds
+      : [],
+
+    zone: {
+      zoneLo: activeImbalance?.lo ?? null,
+      zoneHi: activeImbalance?.hi ?? null,
+      zoneMid: activeImbalance?.mid ?? null,
+      insideZone: activeImbalance?.inside === true,
+      nearZone: activeImbalance?.near === true,
+    },
+
+    engine3: {
+      state: paperReaction?.state || null,
+      quality: paperReaction?.quality || null,
+      direction: paperReaction?.direction || null,
+      allowed: paperReaction?.allowed === true,
+    },
+
+    engine4: {
+      state:
+        fastParticipation?.participationState ||
+        fastParticipation?.state ||
+        null,
+      quality:
+        fastParticipation?.participationQuality ||
+        fastParticipation?.quality ||
+        null,
+      intendedDirection:
+        fastParticipation?.intendedDirection ||
+        fastParticipation?.direction ||
+        null,
+      allowed: fastParticipation?.allowed === true,
+      hardBlocked: fastParticipation?.hardBlocked === true,
+    },
+
+    engine15: {
+      readiness:
+        paperReadiness?.readiness ||
+        paperReadiness?.readinessLabel ||
+        engine15Decision?.readinessLabel ||
+        null,
+      direction:
+        paperReadiness?.direction ||
+        engine15Decision?.direction ||
+        null,
+      allowed: paperReadiness?.allowed === true,
+      blockersSummary: engine15Blockers,
+    },
+
+    engine6: {
+      decision: paper?.decision || null,
+      allowed: paper?.allowed === true,
+      direction: paper?.direction || null,
+      structuralWatchOnly: paper?.structuralWatchOnly === true,
+      shortResearchWatch: paper?.shortResearchWatch === true,
+      paperShortAllowed: paper?.paperShortAllowed === true,
+      blockersSummary: engine6Blockers,
+    },
+
+    ticket: {
+      created: engine26PaperTradeTicket != null,
+    },
+
+    execution: {
+      created: engine26PaperTradeExecution != null,
+    },
+
+    reasonCodes: [
+      "ENGINE26_REPLAY_MARKER_CREATED",
+      "REPLAY_POINTER_ONLY",
+      markerType,
+      structural?.active === true
+        ? "ENGINE26_STRUCTURAL_CONTEXT_ACTIVE"
+        : null,
+      paperDecision ? `ENGINE6_${paperDecision}` : null,
+      ...(Array.isArray(structural?.reasonCodes)
+        ? structural.reasonCodes
+        : []),
+    ].filter(Boolean),
+
+    dedupeKey,
+  };
+}
+
 function isGoodTimelineRead(timelineRead) {
   if (!timelineRead || typeof timelineRead !== "object") return false;
 
@@ -6554,6 +6796,7 @@ let engine26PaperTradePlan = null;
 let engine26PaperTradeTicket = null;
 let engine26PaperTradeExecution = null;
 let engine26TradePlanPreview = null;
+let engine26ReplayMarker = null;
 
 if (isEsIntradayScalp) {
   try {
@@ -6595,6 +6838,17 @@ if (isEsIntradayScalp) {
     engine26TradePlanPreview = engine26.engine26TradePlanPreview || null;
     // V1 planner-only. Do not call Engine 8 from snapshot builder.
     engine26PaperTradeExecution = null;
+    engine26ReplayMarker = buildEngine26ReplayMarker({
+      symbol,
+      strategyId: s.strategyId,
+      engine26ImbalanceWatch,
+      engine26StructuralContext,
+      engine26PaperTradeTicket,
+      engine26PaperTradeExecution,
+      permission: finalPermission,
+      confluence: patchedConfluence,
+      engine15Decision,
+    });
   } catch (err) {
     console.error("[E26 PAPER TRADE PLANNER ERROR]", err);
 
@@ -6920,6 +7174,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
     engine26PaperTradePlan,
     engine26PaperTradeTicket,
     engine26PaperTradeExecution,
+    engine26ReplayMarker,
 
     engine6v2:
       isEsIntradayScalp
