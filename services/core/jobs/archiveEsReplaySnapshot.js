@@ -4,6 +4,12 @@
 //
 // This job does NOT recompute history.
 // It only archives the latest stored ES strategy snapshot.
+//
+// Engine 26 Replay Marker V2:
+// - If strategy.engine26ReplayMarker exists, append one compact line to:
+//   /var/data/replay/es/markers/engine26-replay-markers.jsonl
+// - This creates a searchable bookmark list for Engine 26 watch / research moments.
+// - This does NOT create permission, execution, Engine 8 calls, Schwab calls, or journal entries.
 
 import fs from "fs";
 import path from "path";
@@ -23,6 +29,11 @@ const SOURCE_FILE = path.join(DATA_DIR, "strategy-snapshot-es.json");
 // REPLAY_DATA_DIR should be /var/data in Render.
 const REPLAY_DATA_DIR = (process.env.REPLAY_DATA_DIR || DATA_DIR).trim().replace(/\/+$/, "");
 const ES_REPLAY_ROOT = path.join(REPLAY_DATA_DIR, "replay", "es");
+const ES_REPLAY_MARKER_DIR = path.join(ES_REPLAY_ROOT, "markers");
+const ENGINE26_MARKER_INDEX_FILE = path.join(
+  ES_REPLAY_MARKER_DIR,
+  "engine26-replay-markers.jsonl"
+);
 
 function azParts(d = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -80,6 +91,10 @@ function firstNumber(...values) {
     if (Number.isFinite(n)) return n;
   }
   return null;
+}
+
+function firstArrayItems(value, limit = 8) {
+  return Array.isArray(value) ? value.filter(Boolean).slice(0, limit) : [];
 }
 
 function slimEngine25(engine25Context) {
@@ -144,9 +159,15 @@ function slimZones(strategy) {
     active: ctx.active ?? null,
     nearest: ctx.nearest ?? null,
     render: {
-      negotiated: Array.isArray(ctx.render?.negotiated) ? ctx.render.negotiated : [],
-      institutional: Array.isArray(ctx.render?.institutional) ? ctx.render.institutional : [],
-      shelves: Array.isArray(ctx.render?.shelves) ? ctx.render.shelves : [],
+      negotiated: Array.isArray(ctx.render?.negotiated)
+        ? ctx.render.negotiated
+        : [],
+      institutional: Array.isArray(ctx.render?.institutional)
+        ? ctx.render.institutional
+        : [],
+      shelves: Array.isArray(ctx.render?.shelves)
+        ? ctx.render.shelves
+        : [],
     },
   };
 }
@@ -196,7 +217,9 @@ function buildSlimEsReplaySnapshot(source, parts) {
       stateEOD: source?.marketMind?.stateEOD ?? null,
     },
 
-    engine25Context: slimEngine25(source?.engine25Context ?? strategy?.engine25Context ?? null),
+    engine25Context: slimEngine25(
+      source?.engine25Context ?? strategy?.engine25Context ?? null
+    ),
 
     strategy: {
       strategyId: "intraday_scalp@10m",
@@ -228,6 +251,129 @@ function buildSlimEsReplaySnapshot(source, parts) {
       engine23Interpretation: strategy?.engine23Interpretation ?? null,
       aiTradeCopilot: strategy?.aiTradeCopilot ?? null,
     },
+  };
+}
+
+function markerIndexEntryFromReplaySnapshot(replaySnapshot, outFile) {
+  const marker = replaySnapshot?.strategy?.engine26ReplayMarker || null;
+
+  if (!marker || marker.active !== true) return null;
+
+  return {
+    schema: "engine26-replay-marker-index@v1",
+
+    symbol: marker.symbol || replaySnapshot?.symbol || "ES",
+    strategyId: marker.strategyId || "intraday_scalp@10m",
+
+    dateYmd: marker.dateYmd || replaySnapshot?.dateYmd || null,
+    timeHHMM: marker.timeHHMM || replaySnapshot?.timeHHMM || null,
+    replayApiTime:
+      marker.replayApiTime ||
+      marker.timeHHMM ||
+      replaySnapshot?.timeHHMM ||
+      null,
+
+    azTime: replaySnapshot?.azTime || null,
+    generatedAtUtc: replaySnapshot?.generatedAtUtc || null,
+    indexedAtUtc: new Date().toISOString(),
+
+    markerType: marker.markerType || null,
+    status: marker.status || null,
+    template: marker.template || null,
+    setupType: marker.setupType || null,
+    direction: marker.direction || null,
+    preferredAction: marker.preferredAction || null,
+
+    currentPrice: marker.currentPrice ?? replaySnapshot?.currentPrice ?? null,
+
+    activeImbalanceRole: marker.activeImbalanceRole || null,
+    structuralBias: marker.structuralBias || null,
+
+    shortResearchOnly: marker.shortResearchOnly === true,
+    doNotChaseLong: marker.doNotChaseLong === true,
+    watchOnly: marker.watchOnly === true,
+
+    zone: marker.zone || null,
+
+    engine3: marker.engine3 || null,
+    engine4: marker.engine4 || null,
+    engine15: marker.engine15 || null,
+    engine6: marker.engine6 || null,
+
+    engine6Decision: marker.engine6?.decision || null,
+    engine6Allowed: marker.engine6?.allowed === true,
+    engine4State: marker.engine4?.state || null,
+    engine4Allowed: marker.engine4?.allowed === true,
+    engine4HardBlocked: marker.engine4?.hardBlocked === true,
+    engine3State: marker.engine3?.state || null,
+    engine3Direction: marker.engine3?.direction || null,
+    engine15Readiness: marker.engine15?.readiness || null,
+
+    ticketCreated: marker.ticket?.created === true,
+    executionCreated: marker.execution?.created === true,
+
+    replayPath: marker.replayPath || outFile,
+    replayFile: outFile,
+
+    dedupeKey:
+      marker.dedupeKey ||
+      [
+        marker.symbol || "ES",
+        marker.dateYmd || replaySnapshot?.dateYmd || "UNKNOWN_DATE",
+        marker.timeHHMM || replaySnapshot?.timeHHMM || "UNKNOWN_TIME",
+        marker.markerType || "UNKNOWN_MARKER",
+        marker.status || "UNKNOWN_STATUS",
+        marker.engine6?.decision || "UNKNOWN_ENGINE6_DECISION",
+      ].join("|"),
+
+    reasonCodes: firstArrayItems(marker.reasonCodes, 20),
+  };
+}
+
+function appendJsonl(file, obj) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, `${JSON.stringify(obj)}\n`);
+}
+
+function markerIndexHasDedupeKey(file, dedupeKey) {
+  if (!dedupeKey || !fs.existsSync(file)) return false;
+
+  try {
+    const text = fs.readFileSync(file, "utf8");
+    return text.includes(`"dedupeKey":"${dedupeKey}"`);
+  } catch {
+    return false;
+  }
+}
+
+function appendEngine26MarkerIndexIfNeeded(replaySnapshot, outFile) {
+  const entry = markerIndexEntryFromReplaySnapshot(replaySnapshot, outFile);
+
+  if (!entry) {
+    return {
+      markerIndexed: false,
+      markerIndexFile: ENGINE26_MARKER_INDEX_FILE,
+      markerIndexReason: "NO_ACTIVE_ENGINE26_REPLAY_MARKER",
+      markerDedupeKey: null,
+    };
+  }
+
+  if (markerIndexHasDedupeKey(ENGINE26_MARKER_INDEX_FILE, entry.dedupeKey)) {
+    return {
+      markerIndexed: false,
+      markerIndexFile: ENGINE26_MARKER_INDEX_FILE,
+      markerIndexReason: "DUPLICATE_MARKER_DEDUPE_KEY",
+      markerDedupeKey: entry.dedupeKey,
+    };
+  }
+
+  appendJsonl(ENGINE26_MARKER_INDEX_FILE, entry);
+
+  return {
+    markerIndexed: true,
+    markerIndexFile: ENGINE26_MARKER_INDEX_FILE,
+    markerIndexReason: "ENGINE26_REPLAY_MARKER_INDEXED",
+    markerDedupeKey: entry.dedupeKey,
   };
 }
 
@@ -265,6 +411,11 @@ function main() {
 
   writeJsonAtomic(outFile, replaySnapshot);
 
+  const markerIndexResult = appendEngine26MarkerIndexIfNeeded(
+    replaySnapshot,
+    outFile
+  );
+
   console.log(
     JSON.stringify(
       {
@@ -275,6 +426,7 @@ function main() {
         timeHHMM: parts.timeHHMM,
         file: outFile,
         bytes: fs.statSync(outFile).size,
+
         hasWaveOpportunity:
           replaySnapshot.strategy?.waveOpportunity != null,
         hasEngine16:
@@ -283,6 +435,14 @@ function main() {
           replaySnapshot.engine25Context != null,
         hasEngine15Decision:
           replaySnapshot.strategy?.engine15Decision != null,
+
+        hasEngine26ReplayMarker:
+          replaySnapshot.strategy?.engine26ReplayMarker != null,
+
+        markerIndexed: markerIndexResult.markerIndexed,
+        markerIndexFile: markerIndexResult.markerIndexFile,
+        markerIndexReason: markerIndexResult.markerIndexReason,
+        markerDedupeKey: markerIndexResult.markerDedupeKey,
       },
       null,
       2
