@@ -246,6 +246,8 @@ function buildEngine26ReplayMarker({
       ? structural.confirmationNeeds
       : [],
 
+    dailyCandleContext: structural?.dailyCandleContext || null,
+
     zone: {
       zoneLo: activeImbalance?.lo ?? null,
       zoneHi: activeImbalance?.hi ?? null,
@@ -6884,6 +6886,7 @@ if (isEsIntradayScalp) {
       confluence: patchedConfluence,
       engine15Decision,
       openPaperTrades,
+      dailyBars: marketMeter?.layers?.emaPosture?.daily?.bars || [],
     });
 
     engine26ImbalanceWatch = engine26.engine26ImbalanceWatch || null;
