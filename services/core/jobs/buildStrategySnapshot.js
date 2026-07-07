@@ -5899,9 +5899,32 @@ const againstDirection =
     volumeExpansion === true &&
     supportsDirection !== true;
 
+  const shortRejectionState =
+    reactionState.includes("BREAKOUT_FAILING") ||
+    reactionState.includes("REJECTING") ||
+    reactionState.includes("FAILED_RECLAIM") ||
+    reactionState.includes("LOST");
+
+  const shortDirectionalClimax =
+    intendedDirection === "SHORT" &&
+    shortRejectionState === true &&
+    supportsDirection === true &&
+    againstDirection !== true &&
+    volumeExpansion === true &&
+    (
+      volumeConfirmed === true ||
+      relativeVolume >= 1.35 ||
+      currentVsPriorVolumeRatio >= 1.5
+    ) &&
+    absorptionRisk !== true;
+
+  const climacticHardBlock =
+    climacticRisk === true &&
+    shortDirectionalClimax !== true;
+
   const hardBlocked =
     absorptionRisk === true ||
-    climacticRisk === true ||
+    climacticHardBlock === true ||
     highVolumeNoProgress === true ||
     (
       againstDirection === true &&
@@ -5912,7 +5935,6 @@ const againstDirection =
         highVolumeCandles >= 1
       )
     );
-
   let allowed = false;
   let downgradeOnly = true;
   let participationState = "WAIT_FOR_PARTICIPATION";
@@ -5947,6 +5969,21 @@ const againstDirection =
     if (climacticRisk) reasonCodes.push("CLIMACTIC_RISK");
     if (highVolumeNoProgress) reasonCodes.push("HIGH_VOLUME_NO_PROGRESS");
     if (againstDirection) reasonCodes.push("VOLUME_AGAINST_TRADE_DIRECTION");
+  } else if (shortDirectionalClimax) {
+    allowed = true;
+    downgradeOnly = true;
+    participationState = "SHORT_REJECTION_VOLUME_CONFIRMED";
+    participationQuality = "MIXED";
+    grade = "B";
+    risk = climacticRisk === true
+      ? "CLIMACTIC_BUT_DIRECTIONAL_PAPER_ONLY"
+      : "ACCEPTABLE_FOR_PAPER_REVIEW";
+    direction = intendedDirection;
+
+    reasonCodes.push("SHORT_REJECTION_VOLUME_CONFIRMED");
+    reasonCodes.push("CLIMACTIC_VOLUME_DIRECTIONALLY_CONFIRMED");
+    reasonCodes.push("ENGINE3_SHORT_REJECTION_CONFIRMED_BY_VOLUME");
+    reasonCodes.push("PAPER_ONLY_ENGINE6_STILL_DECIDES");
   } else if (
     supportsDirection &&
     participationImproving &&
@@ -6045,6 +6082,9 @@ const againstDirection =
     againstDirection,
     participationImproving,
     highVolumeNoProgress,
+    shortRejectionState,
+    shortDirectionalClimax,
+    climacticHardBlock,
     absorptionRisk,
     climacticRisk,
 
