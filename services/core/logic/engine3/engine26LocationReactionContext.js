@@ -1,4 +1,10 @@
 // services/core/logic/engine3/engine26LocationReactionContext.js
+//
+// Engine 3 helper for reading Engine 26 structural location context.
+// Purpose:
+// - Align Engine 3 price-action interpretation with Engine 26's active short-watch zone.
+// - Does not create permission.
+// - Does not create execution.
 
 function safeUpper(value, fallback = "NONE") {
   const text = String(value || "").trim();
@@ -59,14 +65,14 @@ export function buildEngine26LocationReactionContext({
   const priceLocation = safeUpper(locationContext.priceLocation);
   const desiredTrigger = safeUpper(locationContext.desiredTrigger);
 
-  const insideShortZoneAcceptanceTest =
-    locationRead === "INSIDE_SHORT_WATCH_ZONE_ACCEPTANCE_TEST" &&
-    priceLocation === "INSIDE_ZONE";
-
   const handoffRule = safeUpper(
     locationContext?.handoff?.engine3ShouldTreatInsideShortZoneAs,
     "NONE"
   );
+
+  const insideShortZoneAcceptanceTest =
+    locationRead === "INSIDE_SHORT_WATCH_ZONE_ACCEPTANCE_TEST" &&
+    priceLocation === "INSIDE_ZONE";
 
   const longBounceInsideShortZone =
     insideShortZoneAcceptanceTest &&
