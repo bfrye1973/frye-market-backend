@@ -2150,16 +2150,7 @@ export function buildEngine26PaperTradePlan({
           : []),
       ].filter(Boolean),
     };
-  }
-        ...(Array.isArray(engine26StructuralContext.reasonCodes)
-          ? engine26StructuralContext.reasonCodes
-          : []),
-        ...(Array.isArray(dailyCandleContext?.reasonCodes)
-          ? dailyCandleContext.reasonCodes
-          : []),
-      ].filter(Boolean),
-    };
-  }
+  }        
 
    const engine26TradePlanPreview = buildEngine26TradePlanPreview({
      symbol: normalizedSymbol,
