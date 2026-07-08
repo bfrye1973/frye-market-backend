@@ -6654,7 +6654,6 @@ attachPaperScalpReactionToConfluence({
 attachEngine4CurrentScalpParticipationToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
-  engine26StructuralContext,
   bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
 });
 
