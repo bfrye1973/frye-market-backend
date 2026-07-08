@@ -6655,7 +6655,6 @@ attachCurrentLevelActionToConfluence({
 attachFastImbalanceReactionToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
-  engine26StructuralContext,
   bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
 });
 
@@ -7164,6 +7163,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
        patchedConfluence,
        engine22WaveStrategy,
        engine26StructuralContext,
+       paperShortResearchEnabled: false,
        bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
      });
 
