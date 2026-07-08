@@ -434,6 +434,385 @@ function buildEngine26DailyCandleContext({
   };
 }
 
+function getReactionCandlesForLocation(confluence) {
+  const reactionContext = confluence?.context?.reaction || null;
+
+  const fastReaction = reactionContext?.engine3FastImbalanceReaction || null;
+  const paperReaction = reactionContext?.paperScalpReaction || null;
+  const currentLevelAction = reactionContext?.currentLevelAction || null;
+
+  const source =
+    fastReaction?.active === true
+      ? fastReaction
+      : paperReaction?.active === true
+      ? paperReaction
+      : currentLevelAction?.active === true
+      ? currentLevelAction
+      : null;
+
+  return {
+    sourceName:
+      fastReaction?.active === true
+        ? "engine3FastImbalanceReaction"
+        : paperReaction?.active === true
+        ? "paperScalpReaction"
+        : currentLevelAction?.active === true
+        ? "currentLevelAction"
+        : "NONE",
+
+    lastCandle:
+      source?.lastCandle ||
+      source?.currentLevelAction?.lastCandle ||
+      currentLevelAction?.lastCandle ||
+      null,
+
+    priorCandle:
+      source?.priorCandle ||
+      source?.currentLevelAction?.priorCandle ||
+      currentLevelAction?.priorCandle ||
+      null,
+
+    reactionState:
+      source?.state ||
+      currentLevelAction?.state ||
+      null,
+
+    reactionQuality:
+      source?.quality ||
+      currentLevelAction?.quality ||
+      null,
+
+    reactionDirection:
+      source?.direction ||
+      currentLevelAction?.direction ||
+      null,
+  };
+}
+
+function classifyPriceVsZone({ currentPrice, zoneLo, zoneHi, nearBufferPts = 2 }) {
+  const price = toNum(currentPrice);
+  const lo = toNum(zoneLo);
+  const hi = toNum(zoneHi);
+
+  if (price == null || lo == null || hi == null) {
+    return {
+      priceLocation: "UNKNOWN",
+      distanceToZonePts: null,
+      insideZone: false,
+      aboveZone: false,
+      belowZone: false,
+      nearZone: false,
+    };
+  }
+
+  const low = Math.min(lo, hi);
+  const high = Math.max(lo, hi);
+
+  if (price >= low && price <= high) {
+    return {
+      priceLocation: "INSIDE_ZONE",
+      distanceToZonePts: 0,
+      insideZone: true,
+      aboveZone: false,
+      belowZone: false,
+      nearZone: true,
+    };
+  }
+
+  if (price > high) {
+    const distanceToZonePts = roundPts(price - high);
+
+    return {
+      priceLocation:
+        distanceToZonePts <= nearBufferPts ? "NEAR_ABOVE_ZONE" : "ABOVE_ZONE",
+      distanceToZonePts,
+      insideZone: false,
+      aboveZone: true,
+      belowZone: false,
+      nearZone: distanceToZonePts <= nearBufferPts,
+    };
+  }
+
+  const distanceToZonePts = roundPts(low - price);
+
+  return {
+    priceLocation:
+      distanceToZonePts <= nearBufferPts ? "NEAR_BELOW_ZONE" : "BELOW_ZONE",
+    distanceToZonePts,
+    insideZone: false,
+    aboveZone: false,
+    belowZone: true,
+    nearZone: distanceToZonePts <= nearBufferPts,
+  };
+}
+
+function buildEngine26LocationContext({
+  symbol,
+  strategyId,
+  tf,
+  engine26ImbalanceWatch,
+  engine26StructuralContext,
+  confluence,
+}) {
+  const activeImbalance = engine26ImbalanceWatch?.activeImbalance || null;
+
+  const currentPrice =
+    roundToTick(
+      engine26ImbalanceWatch?.currentPrice ??
+        confluence?.price ??
+        confluence?.currentPrice
+    ) ?? null;
+
+  const zoneLo = roundToTick(activeImbalance?.lo);
+  const zoneHi = roundToTick(activeImbalance?.hi);
+  const zoneMid =
+    roundToTick(activeImbalance?.mid) ??
+    (zoneLo != null && zoneHi != null
+      ? roundToTick((zoneLo + zoneHi) / 2)
+      : null);
+
+  const zoneRole =
+    engine26StructuralContext?.activeImbalanceRole ||
+    engine26ImbalanceWatch?.activeImbalanceRole ||
+    null;
+
+  const setupBias =
+    engine26StructuralContext?.preferredDirection ||
+    engine26ImbalanceWatch?.preferredDirection ||
+    "NONE";
+
+  const preferredAction =
+    engine26StructuralContext?.preferredAction ||
+    engine26ImbalanceWatch?.preferredAction ||
+    null;
+
+  const structuralStatus =
+    engine26StructuralContext?.status ||
+    engine26ImbalanceWatch?.status ||
+    null;
+
+  const structuralBias =
+    engine26StructuralContext?.structuralBias ||
+    engine26ImbalanceWatch?.structuralBias ||
+    null;
+
+  const isShortWatch =
+    safeUpper(setupBias).includes("SHORT") ||
+    safeUpper(structuralStatus).includes("C_DOWN") ||
+    safeUpper(structuralBias).includes("C_DOWN") ||
+    engine26StructuralContext?.shortResearchOnly === true;
+
+  const isLongWatch =
+    safeUpper(setupBias).includes("LONG") ||
+    safeUpper(structuralBias).includes("LONG");
+
+  const zoneClassification = classifyPriceVsZone({
+    currentPrice,
+    zoneLo,
+    zoneHi,
+    nearBufferPts: 2,
+  });
+
+  const { lastCandle, priorCandle, sourceName, reactionState, reactionQuality, reactionDirection } =
+    getReactionCandlesForLocation(confluence);
+
+  const lastClose = roundToTick(barClose(lastCandle));
+  const priorClose = roundToTick(barClose(priorCandle));
+
+  const priorZone = classifyPriceVsZone({
+    currentPrice: priorClose,
+    zoneLo,
+    zoneHi,
+    nearBufferPts: 2,
+  });
+
+  const lastZone = classifyPriceVsZone({
+    currentPrice: lastClose,
+    zoneLo,
+    zoneHi,
+    nearBufferPts: 2,
+  });
+
+  const pulledBackIntoZoneFromBelow =
+    priorZone.belowZone === true && lastZone.insideZone === true;
+
+  const pulledBackIntoZoneFromAbove =
+    priorZone.aboveZone === true && lastZone.insideZone === true;
+
+  const failedBelowZone =
+    priorZone.insideZone === true && lastZone.belowZone === true;
+
+  const reclaimedAboveZone =
+    priorZone.insideZone === true && lastZone.aboveZone === true;
+
+  let locationRead = "NO_ACTIVE_ENGINE26_ZONE";
+  let tacticalMeaning = "No active Engine 26 location context.";
+  let desiredTrigger = preferredAction || "WAIT_FOR_CONFIRMATION";
+  let shortTriggerLevel = zoneLo;
+  let longReclaimLevel = zoneHi;
+  let invalidationLevel = null;
+
+  const reasonCodes = [
+    "ENGINE26_LOCATION_CONTEXT_BUILT",
+    "LOCATION_CONTEXT_ONLY",
+    "NO_EXECUTION",
+    "NO_PERMISSION_CREATED",
+  ];
+
+  if (activeImbalance && currentPrice != null) {
+    if (isShortWatch && zoneClassification.insideZone) {
+      locationRead = pulledBackIntoZoneFromBelow
+        ? "PULLBACK_BACK_INTO_SHORT_WATCH_ZONE"
+        : pulledBackIntoZoneFromAbove
+        ? "REJECTED_DOWN_BACK_INTO_SHORT_WATCH_ZONE"
+        : "INSIDE_SHORT_WATCH_ZONE_ACCEPTANCE_TEST";
+
+      tacticalMeaning =
+        "Price is inside the Engine 26 short-watch zone. This is an acceptance test, not long permission.";
+
+      desiredTrigger = "FAILED_ACCEPTANCE_OR_LEVEL_LOSS";
+      shortTriggerLevel = zoneLo;
+      invalidationLevel = zoneHi;
+
+      reasonCodes.push("PRICE_INSIDE_ENGINE26_SHORT_WATCH_ZONE");
+      reasonCodes.push("ACCEPTANCE_TEST_NOT_LONG_PERMISSION");
+
+      if (pulledBackIntoZoneFromBelow) {
+        reasonCodes.push("PULLBACK_BACK_INTO_SHORT_WATCH_ZONE");
+      }
+    } else if (isShortWatch && zoneClassification.belowZone) {
+      locationRead = failedBelowZone
+        ? "FAILED_ACCEPTANCE_BELOW_SHORT_WATCH_ZONE"
+        : "BELOW_SHORT_WATCH_ZONE_CONTINUATION_AREA";
+
+      tacticalMeaning =
+        "Price is below the Engine 26 short-watch zone. Watch whether sellers maintain control or price reclaims.";
+
+      desiredTrigger = "SELLERS_HOLD_BELOW_ZONE_OR_FAILED_RECLAIM";
+      shortTriggerLevel = zoneLo;
+      invalidationLevel = zoneHi;
+
+      reasonCodes.push("PRICE_BELOW_ENGINE26_SHORT_WATCH_ZONE");
+
+      if (failedBelowZone) {
+        reasonCodes.push("FAILED_ACCEPTANCE_BELOW_ZONE");
+      }
+    } else if (isShortWatch && zoneClassification.aboveZone) {
+      locationRead = reclaimedAboveZone
+        ? "SHORT_WATCH_RECLAIM_INVALIDATION_RISK"
+        : "ABOVE_SHORT_WATCH_ZONE";
+
+      tacticalMeaning =
+        "Price is above the Engine 26 short-watch zone. Short watch weakens unless price fails back into the zone.";
+
+      desiredTrigger = "WAIT_FOR_REJECTION_BACK_INTO_ZONE";
+      shortTriggerLevel = zoneLo;
+      invalidationLevel = zoneHi;
+
+      reasonCodes.push("PRICE_ABOVE_ENGINE26_SHORT_WATCH_ZONE");
+      reasonCodes.push("SHORT_WATCH_INVALIDATION_RISK");
+    } else if (isLongWatch && zoneClassification.insideZone) {
+      locationRead = "INSIDE_LONG_WATCH_ZONE_ACCEPTANCE_TEST";
+      tacticalMeaning =
+        "Price is inside the Engine 26 long-watch zone. Watch for reclaim / hold with participation.";
+
+      desiredTrigger = "RECLAIM_OR_HOLD_ABOVE_ZONE";
+      longReclaimLevel = zoneHi;
+      invalidationLevel = zoneLo;
+
+      reasonCodes.push("PRICE_INSIDE_ENGINE26_LONG_WATCH_ZONE");
+    } else {
+      locationRead = `${zoneClassification.priceLocation}_ENGINE26_ZONE`;
+      tacticalMeaning =
+        "Price is near an Engine 26 zone. Use Engine 3 / Engine 4 confirmation before any paper review.";
+
+      reasonCodes.push(zoneClassification.priceLocation);
+    }
+  }
+
+  return {
+    active: activeImbalance != null && currentPrice != null,
+    engine: "engine26.locationContext.v1",
+    source: "engine26.activeImbalance.currentPrice",
+
+    symbol: safeUpper(symbol || "ES"),
+    strategyId: strategyId || STRATEGY_ID,
+    tf: tf || "10m",
+
+    currentPrice,
+
+    zone: {
+      id: activeImbalance?.id || null,
+      source: activeImbalance?.source || null,
+      zoneType: activeImbalance?.zoneType || null,
+      side: activeImbalance?.side || null,
+      lo: zoneLo,
+      hi: zoneHi,
+      mid: zoneMid,
+      inside: zoneClassification.insideZone,
+      near: zoneClassification.nearZone,
+      above: zoneClassification.aboveZone,
+      below: zoneClassification.belowZone,
+      distancePts: zoneClassification.distanceToZonePts,
+    },
+
+    priceLocation: zoneClassification.priceLocation,
+    locationRead,
+    tacticalMeaning,
+
+    zoneRole,
+    setupBias,
+    structuralStatus,
+    structuralBias,
+    preferredAction,
+
+    isShortWatch,
+    isLongWatch,
+
+    desiredTrigger,
+    shortTriggerLevel,
+    longReclaimLevel,
+    invalidationLevel,
+
+    recentBehavior: {
+      source: sourceName,
+      reactionState,
+      reactionQuality,
+      reactionDirection,
+
+      priorClose,
+      lastClose,
+
+      priorPriceLocation: priorZone.priceLocation,
+      lastPriceLocation: lastZone.priceLocation,
+
+      pulledBackIntoZoneFromBelow,
+      pulledBackIntoZoneFromAbove,
+      failedBelowZone,
+      reclaimedAboveZone,
+    },
+
+    handoff: {
+      engine3ShouldTreatInsideShortZoneAs:
+        isShortWatch && zoneClassification.insideZone
+          ? "ACCEPTANCE_TEST_NOT_LONG_PERMISSION"
+          : null,
+
+      engine4ShouldTreatInsideShortZoneAs:
+        isShortWatch && zoneClassification.insideZone
+          ? "WAIT_FOR_DIRECTIONAL_PARTICIPATION"
+          : null,
+
+      engine6FinalPermissionRequired: true,
+    },
+
+    noExecution: true,
+    noPermissionCreated: true,
+
+    reasonCodes,
+  };
+}
+
 
 function sanitizeKeyPart(value) {
   return String(value || "UNKNOWN")
@@ -1273,6 +1652,7 @@ function buildEngine26TradePlanPreview({
   engine26ImbalanceWatch,
   engine26StructuralContext,
   dailyCandleContext = null,
+  locationContext = null,
 }) {
   const paper = permission?.paper || null;
 
@@ -1485,6 +1865,7 @@ function buildEngine26TradePlanPreview({
     },
 
     dailyCandleContext,
+    locationContext,
 
     structure: {
       setupType,
@@ -1743,11 +2124,33 @@ export function buildEngine26PaperTradePlan({
     engine26StructuralContext,
   });
 
+  const locationContext = buildEngine26LocationContext({
+    symbol: normalizedSymbol,
+    strategyId: normalizedStrategyId,
+    tf: normalizedTf,
+    engine26ImbalanceWatch,
+    engine26StructuralContext,
+    confluence,
+  });
+
   if (engine26StructuralContext && typeof engine26StructuralContext === "object") {
     engine26StructuralContext = {
       ...engine26StructuralContext,
       dailyCandleContext,
+      locationContext,
       reasonCodes: [
+        ...(Array.isArray(engine26StructuralContext.reasonCodes)
+          ? engine26StructuralContext.reasonCodes
+          : []),
+        ...(Array.isArray(dailyCandleContext?.reasonCodes)
+          ? dailyCandleContext.reasonCodes
+          : []),
+        ...(Array.isArray(locationContext?.reasonCodes)
+          ? locationContext.reasonCodes
+          : []),
+      ].filter(Boolean),
+    };
+  }
         ...(Array.isArray(engine26StructuralContext.reasonCodes)
           ? engine26StructuralContext.reasonCodes
           : []),
@@ -1758,19 +2161,20 @@ export function buildEngine26PaperTradePlan({
     };
   }
 
-  const engine26TradePlanPreview = buildEngine26TradePlanPreview({
-  symbol: normalizedSymbol,
-  strategyId: normalizedStrategyId,
-  tf: normalizedTf,
-  permission,
-  engine22WaveStrategy,
-  engine25Context,
-  confluence,
-  engine15Decision,
-  engine26ImbalanceWatch,
-  engine26StructuralContext,
-  dailyCandleContext,
-});
+   const engine26TradePlanPreview = buildEngine26TradePlanPreview({
+     symbol: normalizedSymbol,
+     strategyId: normalizedStrategyId,
+     tf: normalizedTf,
+     permission,
+     engine22WaveStrategy,
+     engine25Context,
+     confluence,
+     engine15Decision,
+     engine26ImbalanceWatch,
+     engine26StructuralContext,
+     dailyCandleContext,
+     locationContext,
+   });
 
   const blockers = [];
   const warnings = [];
