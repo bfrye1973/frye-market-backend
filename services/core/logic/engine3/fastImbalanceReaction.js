@@ -7,6 +7,8 @@
 // - Designed for Engine 26 FAST_IMBALANCE_WATCH.
 // - Reads manual ES imbalance zones from data/es-smz-manual-zones.txt.
 // - Reads latest 10m candle behavior around the active imbalance.
+// - Consumes Engine 22 degreeStates wave context.
+// - Consumes Engine 26 structural locationContext.
 // - Does NOT create permission.
 // - Does NOT create execution.
 // - Does NOT set READY, freshEntryNow, executable, or broker actions.
@@ -16,6 +18,7 @@
 
 import fs from "fs";
 import { buildEngine22DegreeWaveContext } from "./engine22DegreeWaveContext.js";
+import { buildEngine26LocationReactionContext } from "./engine26LocationReactionContext.js";
 
 const ENGINE = "engine3.fastImbalanceReaction.v1";
 const SOURCE = "ENGINE26_IMBALANCE_WATCH";
@@ -84,7 +87,9 @@ function normalizeZone(lo, hi) {
 }
 
 function parseRange(text) {
-  const match = String(text || "").match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/);
+  const match = String(text || "").match(
+    /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/
+  );
 
   if (!match) return null;
 
@@ -128,8 +133,14 @@ function readManualImbalanceZones() {
 
       const [leftPart, rightPartRaw = ""] = raw.split("|");
       const mainZone = parseRange(leftPart);
-      const negMatch = String(rightPartRaw || "").match(/NEG\s+(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/i);
-      const negZone = negMatch ? normalizeZone(negMatch[1], negMatch[2]) : null;
+
+      const negMatch = String(rightPartRaw || "").match(
+        /NEG\s+(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/i
+      );
+
+      const negZone = negMatch
+        ? normalizeZone(negMatch[1], negMatch[2])
+        : null;
 
       if (!mainZone && !negZone) return null;
 
@@ -214,9 +225,20 @@ function classifyQuality(state) {
       "LOST_LEVEL",
       "BREAKOUT_FAILING",
       "CHOP_INSIDE_VALUE",
+      "INSIDE_SHORT_WATCH_ZONE_ACCEPTANCE_TEST",
+      "SHORT_WATCH_RECLAIM_INVALIDATION_RISK",
     ].includes(state)
   ) {
     return "MIXED";
+  }
+
+  if (
+    [
+      "FAILED_ACCEPTANCE_SHORT",
+      "LOST_SHORT_TRIGGER_LEVEL",
+    ].includes(state)
+  ) {
+    return "GOOD";
   }
 
   return "WEAK";
@@ -225,11 +247,11 @@ function classifyQuality(state) {
 function classifyDirection(state) {
   if (
     [
+      "HELD_LEVEL",
+      "RECLAIMED_LEVEL",
       "WICK_BELOW_AND_RECLAIM",
       "DIP_BOUGHT_FAST",
       "SELLERS_TRAPPED",
-      "RECLAIMED_LEVEL",
-      "HELD_LEVEL",
       "ACCEPTING_VALUE",
       "BREAKOUT_HOLDING",
     ].includes(state)
@@ -239,10 +261,12 @@ function classifyDirection(state) {
 
   if (
     [
+      "LOST_LEVEL",
       "FAILED_RECLAIM",
       "REJECTING_VALUE",
-      "LOST_LEVEL",
       "BREAKOUT_FAILING",
+      "FAILED_ACCEPTANCE_SHORT",
+      "LOST_SHORT_TRIGGER_LEVEL",
     ].includes(state)
   ) {
     return "SHORT";
@@ -253,11 +277,11 @@ function classifyDirection(state) {
 
 function classifyConfirmed(state) {
   return [
+    "HELD_LEVEL",
+    "RECLAIMED_LEVEL",
     "WICK_BELOW_AND_RECLAIM",
     "DIP_BOUGHT_FAST",
     "SELLERS_TRAPPED",
-    "RECLAIMED_LEVEL",
-    "HELD_LEVEL",
     "ACCEPTING_VALUE",
     "BREAKOUT_HOLDING",
   ].includes(state);
@@ -289,13 +313,9 @@ function evaluateFastImbalanceAction({ imbalance, last, prev, currentPrice }) {
     mid: imbalance.mid,
   };
 
-  const price = toNum(currentPrice) ?? last.close ?? null;
-
   const lastInside = isInsideZone(zone, last.close);
   const prevInside = isInsideZone(zone, prev.close);
 
-  const lastAbove = last.close != null && last.close > zone.hi;
-  const lastBelow = last.close != null && last.close < zone.lo;
   const prevAbove = prev.close != null && prev.close > zone.hi;
   const prevBelow = prev.close != null && prev.close < zone.lo;
 
@@ -475,6 +495,49 @@ function evaluateFastImbalanceAction({ imbalance, last, prev, currentPrice }) {
   };
 }
 
+function buildWaveContext({ engine22WaveStrategy, state, direction }) {
+  return buildEngine22DegreeWaveContext({
+    engine22WaveStrategy,
+    reactionState: state,
+    reactionDirection: direction,
+  });
+}
+
+function applyEngine26LocationContext({
+  engine26StructuralContext,
+  state,
+  quality,
+  direction,
+  confirmed,
+  price,
+  last,
+}) {
+  const engine26LocationContext = buildEngine26LocationReactionContext({
+    engine26StructuralContext,
+    reactionInput: {
+      state,
+      quality,
+      direction,
+      confirmed,
+      currentPrice: price,
+      lastCandle: last,
+      noPermissionCreated: true,
+      noExecution: true,
+    },
+  });
+
+  return {
+    state: engine26LocationContext?.state || state,
+    quality: engine26LocationContext?.quality || quality,
+    direction: engine26LocationContext?.direction || direction,
+    confirmed:
+      engine26LocationContext?.confirmed != null
+        ? engine26LocationContext.confirmed
+        : confirmed,
+    engine26LocationContext,
+  };
+}
+
 function makeInactiveResult({
   symbol,
   tf,
@@ -484,7 +547,23 @@ function makeInactiveResult({
   imbalance = null,
   lastCandle = null,
   priorCandle = null,
+  engine22WaveStrategy = null,
+  engine26StructuralContext = null,
 }) {
+  const quality = "WEAK";
+  const direction = "NEUTRAL";
+  const confirmed = false;
+
+  const locationAdjusted = applyEngine26LocationContext({
+    engine26StructuralContext,
+    state,
+    quality,
+    direction,
+    confirmed,
+    price: currentPrice,
+    last: lastCandle,
+  });
+
   return {
     active: false,
     engine: ENGINE,
@@ -501,10 +580,18 @@ function makeInactiveResult({
     candleClosed: false,
     earlySignal: false,
 
-    state,
-    quality: "WEAK",
-    direction: "NEUTRAL",
-    confirmed: false,
+    state: locationAdjusted.state,
+    quality: locationAdjusted.quality,
+    direction: locationAdjusted.direction,
+    confirmed: locationAdjusted.confirmed,
+
+    waveContext: buildWaveContext({
+      engine22WaveStrategy,
+      state: locationAdjusted.state,
+      direction: locationAdjusted.direction,
+    }),
+
+    engine26LocationContext: locationAdjusted.engine26LocationContext,
 
     currentPrice: currentPrice ?? null,
     imbalance,
@@ -515,11 +602,12 @@ function makeInactiveResult({
     noPermissionCreated: true,
     noExecution: true,
 
-    lastCandle,
-    priorCandle,
+    lastCandle: lastCandle || null,
+    priorCandle: priorCandle || null,
 
     reasonCodes: uniqueReasonCodes([
       ...reasonCodes,
+      ...(locationAdjusted.engine26LocationContext?.reasonCodes || []),
       "NO_PERMISSION_CREATED",
       "NO_EXECUTION",
       "ENGINE6_FINAL_PAPER_APPROVAL_REQUIRED",
@@ -535,18 +623,19 @@ export function buildFastImbalanceReaction({
   engine26FastWatch = null,
   confluence = null,
   engine22WaveStrategy = null,
+  engine26StructuralContext = null,
 } = {}) {
   const bars = Array.isArray(bars10m) ? bars10m.map(normalizeBar) : [];
   const last = bars[bars.length - 1] || null;
   const prev = bars[bars.length - 2] || null;
 
-const price =
-  validPrice(currentPrice) ??
-  validPrice(last?.close) ??
-  validPrice(confluence?.price) ??
-  validPrice(confluence?.currentPrice) ??
-  validPrice(engine26FastWatch?.currentPrice) ??
-  null;
+  const price =
+    validPrice(currentPrice) ??
+    validPrice(last?.close) ??
+    validPrice(confluence?.price) ??
+    validPrice(confluence?.currentPrice) ??
+    validPrice(engine26FastWatch?.currentPrice) ??
+    null;
 
   const manualZonesRead = readManualImbalanceZones();
 
@@ -558,6 +647,8 @@ const price =
       state: "NO_MANUAL_IMBALANCE_ZONES",
       lastCandle: last,
       priorCandle: prev,
+      engine22WaveStrategy,
+      engine26StructuralContext,
       reasonCodes: manualZonesRead.reasonCodes,
     });
   }
@@ -576,6 +667,8 @@ const price =
       imbalance: activeImbalance || null,
       lastCandle: last,
       priorCandle: prev,
+      engine22WaveStrategy,
+      engine26StructuralContext,
       reasonCodes: [
         "PRICE_NOT_NEAR_MANUAL_IMBALANCE",
         ...manualZonesRead.reasonCodes,
@@ -592,6 +685,8 @@ const price =
       imbalance: activeImbalance,
       lastCandle: last,
       priorCandle: prev,
+      engine22WaveStrategy,
+      engine26StructuralContext,
       reasonCodes: [
         "INSUFFICIENT_CANDLES",
         ...manualZonesRead.reasonCodes,
@@ -606,10 +701,25 @@ const price =
     currentPrice: price,
   });
 
-  const state = evaluation.state || "NO_SIGNAL";
-  const quality = classifyQuality(state);
-  const direction = classifyDirection(state);
-  const confirmed = classifyConfirmed(state);
+  const rawState = evaluation.state || "NO_SIGNAL";
+  const rawQuality = classifyQuality(rawState);
+  const rawDirection = classifyDirection(rawState);
+  const rawConfirmed = classifyConfirmed(rawState);
+
+  const locationAdjusted = applyEngine26LocationContext({
+    engine26StructuralContext,
+    state: rawState,
+    quality: rawQuality,
+    direction: rawDirection,
+    confirmed: rawConfirmed,
+    price,
+    last,
+  });
+
+  const state = locationAdjusted.state;
+  const quality = locationAdjusted.quality;
+  const direction = locationAdjusted.direction;
+  const confirmed = locationAdjusted.confirmed;
 
   const earlySignal =
     [
@@ -624,6 +734,10 @@ const price =
       "HELD_LEVEL",
       "ACCEPTING_VALUE",
       "BREAKOUT_HOLDING",
+      "FAILED_ACCEPTANCE_SHORT",
+      "LOST_SHORT_TRIGGER_LEVEL",
+      "INSIDE_SHORT_WATCH_ZONE_ACCEPTANCE_TEST",
+      "SHORT_WATCH_RECLAIM_INVALIDATION_RISK",
     ].includes(state);
 
   return {
@@ -643,15 +757,20 @@ const price =
     earlySignal,
 
     state,
+    rawState,
     quality,
+    rawQuality,
     direction,
+    rawDirection,
     confirmed,
 
-    waveContext: buildEngine22DegreeWaveContext({
+    waveContext: buildWaveContext({
       engine22WaveStrategy,
-      reactionState: state,
-      reactionDirection: direction,
+      state,
+      direction,
     }),
+
+    engine26LocationContext: locationAdjusted.engine26LocationContext,
 
     currentPrice: price,
 
@@ -689,6 +808,7 @@ const price =
       "MANUAL_IMBALANCE_ZONE_ACTIVE",
       ...(manualZonesRead.reasonCodes || []),
       ...(evaluation.reasonCodes || []),
+      ...(locationAdjusted.engine26LocationContext?.reasonCodes || []),
       earlySignal ? "EARLY_FAST_IMBALANCE_SIGNAL" : null,
       "NO_PERMISSION_CREATED",
       "NO_EXECUTION",
@@ -702,21 +822,23 @@ export function attachFastImbalanceReactionToConfluence({
   engine22WaveStrategy = null,
   bars10m = [],
   engine26FastWatch = null,
+  engine26StructuralContext = null,
 }) {
   const currentPrice =
     engine22WaveStrategy?.currentLifecycleState?.confirmationContext?.reference?.currentPrice ??
     engine22WaveStrategy?.currentLifecycleState?.currentPrice ??
     null;
 
-const fastImbalanceReaction = buildFastImbalanceReaction({
-  symbol: engine22WaveStrategy?.symbol || "ES",
-  tf: engine22WaveStrategy?.tf || "10m",
-  bars10m,
-  currentPrice,
-  engine26FastWatch,
-  confluence: patchedConfluence,
-  engine22WaveStrategy,
-});
+  const fastImbalanceReaction = buildFastImbalanceReaction({
+    symbol: engine22WaveStrategy?.symbol || "ES",
+    tf: engine22WaveStrategy?.tf || "10m",
+    bars10m,
+    currentPrice,
+    engine26FastWatch,
+    confluence: patchedConfluence,
+    engine22WaveStrategy,
+    engine26StructuralContext,
+  });
 
   patchedConfluence.context = patchedConfluence.context || {};
   patchedConfluence.context.reaction = {
