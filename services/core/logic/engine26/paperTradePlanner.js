@@ -813,6 +813,248 @@ function buildEngine26LocationContext({
   };
 }
 
+function classifyControlLevelState({
+  currentPrice,
+  bearControlLevel,
+  bullRecoveryLevel,
+  nearBufferPts = 2,
+}) {
+  const price = toNum(currentPrice);
+  const bear = toNum(bearControlLevel);
+  const bull = toNum(bullRecoveryLevel);
+
+  if (price == null || bear == null || bull == null) {
+    return {
+      currentControlState: "CONTROL_LEVEL_STATE_UNKNOWN",
+      betweenLevels: false,
+      belowBearControl: false,
+      aboveBullRecovery: false,
+      nearBearControl: false,
+      nearBullRecovery: false,
+      distanceToBearControl: null,
+      distanceToBullRecovery: null,
+    };
+  }
+
+  const distanceToBearControl = roundPts(price - bear);
+  const distanceToBullRecovery = roundPts(price - bull);
+
+  const nearBearControl = Math.abs(price - bear) <= nearBufferPts;
+  const nearBullRecovery = Math.abs(price - bull) <= nearBufferPts;
+
+  const belowBearControl = price < bear;
+  const aboveBullRecovery = price > bull;
+  const betweenLevels = price >= bear && price <= bull;
+
+  let currentControlState = "BETWEEN_CONTROL_LEVELS_DECISION_ZONE";
+
+  if (belowBearControl) {
+    currentControlState = nearBearControl
+      ? "TESTING_BEAR_CONTROL_LEVEL_FROM_BELOW"
+      : "BELOW_BEAR_CONTROL_LEVEL";
+  } else if (aboveBullRecovery) {
+    currentControlState = nearBullRecovery
+      ? "TESTING_BULL_RECOVERY_LEVEL_FROM_ABOVE"
+      : "ABOVE_BULL_RECOVERY_LEVEL";
+  } else if (nearBearControl) {
+    currentControlState = "TESTING_BEAR_CONTROL_LEVEL_FROM_ABOVE";
+  } else if (nearBullRecovery) {
+    currentControlState = "TESTING_BULL_RECOVERY_LEVEL_FROM_BELOW";
+  }
+
+  return {
+    currentControlState,
+    betweenLevels,
+    belowBearControl,
+    aboveBullRecovery,
+    nearBearControl,
+    nearBullRecovery,
+    distanceToBearControl,
+    distanceToBullRecovery,
+  };
+}
+
+function buildEngine26ControlLevelContext({
+  symbol,
+  strategyId,
+  tf,
+  engine26StructuralContext,
+  locationContext,
+  confluence,
+}) {
+  const currentPrice =
+    roundToTick(
+      locationContext?.currentPrice ??
+        confluence?.context?.reaction?.engine3FastImbalanceReaction?.currentPrice ??
+        confluence?.context?.reaction?.paperScalpReaction?.currentPrice ??
+        confluence?.context?.reaction?.currentLevelAction?.currentPrice ??
+        confluence?.price ??
+        confluence?.currentPrice
+    ) ?? null;
+
+  // V1 tactical controls. Long-term these can be fed from manual levels,
+  // Engine 22, Engine 25, or env/config.
+  const bearControlLevel =
+    roundToTick(process.env.ENGINE26_ES_BEAR_CONTROL_LEVEL) ?? 7500;
+
+  const bullRecoveryLevel =
+    roundToTick(process.env.ENGINE26_ES_BULL_RECOVERY_LEVEL) ?? 7560;
+
+  const nextDownTargets = [
+    7476,
+    7459.5,
+    7432,
+  ];
+
+  const nextUpTargets = [
+    7575,
+    7591.5,
+    7605,
+  ];
+
+  const control = classifyControlLevelState({
+    currentPrice,
+    bearControlLevel,
+    bullRecoveryLevel,
+    nearBufferPts: 2,
+  });
+
+  const locationRead = safeUpper(locationContext?.locationRead || "");
+  const recentReactionState = safeUpper(
+    locationContext?.recentBehavior?.reactionState ||
+      confluence?.context?.reaction?.engine3FastImbalanceReaction?.state ||
+      confluence?.context?.reaction?.paperScalpReaction?.state ||
+      confluence?.context?.reaction?.currentLevelAction?.state ||
+      ""
+  );
+
+  const recentReactionDirection = safeUpper(
+    locationContext?.recentBehavior?.reactionDirection ||
+      confluence?.context?.reaction?.engine3FastImbalanceReaction?.direction ||
+      confluence?.context?.reaction?.paperScalpReaction?.direction ||
+      confluence?.context?.reaction?.currentLevelAction?.direction ||
+      ""
+  );
+
+  const bearishReaction =
+    recentReactionDirection === "SHORT" &&
+    (
+      recentReactionState.includes("BREAKOUT_FAILING") ||
+      recentReactionState.includes("FAILED_RECLAIM") ||
+      recentReactionState.includes("LOST") ||
+      recentReactionState.includes("REJECTING")
+    );
+
+  const bullishReaction =
+    recentReactionDirection === "LONG" &&
+    (
+      recentReactionState.includes("HELD") ||
+      recentReactionState.includes("RECLAIM") ||
+      recentReactionState.includes("ACCEPTING")
+    );
+
+  const bearControlRejecting =
+    (control.belowBearControl || control.nearBearControl) &&
+    bearishReaction === true;
+
+  const bullRecoveryHolding =
+    (control.aboveBullRecovery || control.nearBullRecovery) &&
+    bullishReaction === true;
+
+  let currentInstruction =
+    "WAIT_FOR_7500_REJECTION_OR_7560_RECLAIM_HOLD";
+
+  if (bearControlRejecting) {
+    currentInstruction =
+      "7500_REJECTING_BEAR_CONTROL_ACTIVE_WATCH_LOWER_TARGETS";
+  } else if (bullRecoveryHolding) {
+    currentInstruction =
+      "7560_RECLAIM_HOLD_SHORT_WATCH_WEAKENING";
+  } else if (control.betweenLevels) {
+    currentInstruction =
+      "BETWEEN_7500_AND_7560_DECISION_ZONE_NO_CLEAN_PERMISSION";
+  } else if (control.belowBearControl) {
+    currentInstruction =
+      "BELOW_7500_WATCH_FAILED_RECLAIM_OR_SELLER_CONTROL";
+  } else if (control.aboveBullRecovery) {
+    currentInstruction =
+      "ABOVE_7560_WATCH_HOLD_OR_FAILED_RECLAIM";
+  }
+
+  const reasonCodes = [
+    "ENGINE26_CONTROL_LEVEL_CONTEXT_BUILT",
+    "CONTROL_LEVEL_MAP_ONLY",
+    "BEAR_CONTROL_LEVEL_7500",
+    "BULL_RECOVERY_LEVEL_7560",
+    control.currentControlState,
+    currentInstruction,
+    bearControlRejecting ? "BEAR_CONTROL_REJECTING" : null,
+    bullRecoveryHolding ? "BULL_RECOVERY_HOLDING" : null,
+    locationRead ? `LOCATION_${locationRead}` : null,
+    "NO_EXECUTION",
+    "NO_PERMISSION_CREATED",
+  ].filter(Boolean);
+
+  return {
+    active: currentPrice != null,
+    engine: "engine26.controlLevelContext.v1",
+    mode: "CONTROL_LEVEL_MAP",
+
+    symbol: safeUpper(symbol || "ES"),
+    strategyId: strategyId || STRATEGY_ID,
+    tf: tf || "10m",
+
+    currentPrice,
+
+    bearControlLevel,
+    bullRecoveryLevel,
+
+    ...control,
+
+    bearControlRejecting,
+    bullRecoveryHolding,
+
+    bearishPath: {
+      active: true,
+      condition: "PRICE_BELOW_7500_AND_FAILED_RECLAIM",
+      meaning: "7500 acting as resistance favors lower price action.",
+      trigger: "FAILED_RECLAIM_7500_OR_LOST_7500",
+      invalidation: "RECLAIM_AND_HOLD_ABOVE_7560",
+      nextTargets: nextDownTargets,
+      engine3Needs: "FAILED_RECLAIM_OR_LOST_LEVEL_SHORT",
+      engine4Needs: "SELLER_PARTICIPATION_OR_SHORT_REJECTION_VOLUME",
+    },
+
+    bullishPath: {
+      active: true,
+      condition: "PRICE_ABOVE_7560_AND_HOLD",
+      meaning: "7560 holding as support weakens short watch and favors recovery.",
+      trigger: "RECLAIM_AND_HOLD_7560",
+      invalidation: "FAILED_RECLAIM_OR_LOSS_BACK_UNDER_7500",
+      nextTargets: nextUpTargets,
+      engine3Needs: "RECLAIM_AND_HOLD_LONG",
+      engine4Needs: "BUYER_PARTICIPATION_EXPANDING",
+    },
+
+    currentInstruction,
+
+    engineInstructions: {
+      engine3:
+        "Do not call price between 7500 and 7560 clean permission. Watch failed reclaim at 7500 or reclaim/hold at 7560.",
+      engine4:
+        "Confirm participation only after price chooses a side: seller participation below/rejecting 7500, buyer participation above/holding 7560.",
+      engine15:
+        "Check risk/target path after one side confirms.",
+      engine6:
+        "Remain final permission referee. No paper allow without Engine 3, Engine 4, and Engine 15 alignment.",
+    },
+
+    noExecution: true,
+    noPermissionCreated: true,
+
+    reasonCodes,
+  };
+}
 
 function sanitizeKeyPart(value) {
   return String(value || "UNKNOWN")
@@ -1653,6 +1895,7 @@ function buildEngine26TradePlanPreview({
   engine26StructuralContext,
   dailyCandleContext = null,
   locationContext = null,
+  controlLevelContext = null,
 }) {
   const paper = permission?.paper || null;
 
@@ -2133,11 +2376,21 @@ export function buildEngine26PaperTradePlan({
     confluence,
   });
 
+  const controlLevelContext = buildEngine26ControlLevelContext({
+    symbol: normalizedSymbol,
+    strategyId: normalizedStrategyId,
+    tf: normalizedTf,
+    engine26StructuralContext,
+    locationContext,
+    confluence,
+  });
+
   if (engine26StructuralContext && typeof engine26StructuralContext === "object") {
     engine26StructuralContext = {
       ...engine26StructuralContext,
       dailyCandleContext,
       locationContext,
+      controlLevelContext,
       reasonCodes: [
         ...(Array.isArray(engine26StructuralContext.reasonCodes)
           ? engine26StructuralContext.reasonCodes
@@ -2147,6 +2400,9 @@ export function buildEngine26PaperTradePlan({
           : []),
         ...(Array.isArray(locationContext?.reasonCodes)
           ? locationContext.reasonCodes
+          : []),
+         ...(Array.isArray(controlLevelContext?.reasonCodes)
+          ? controlLevelContext.reasonCodes
           : []),
       ].filter(Boolean),
     };
@@ -2165,6 +2421,7 @@ export function buildEngine26PaperTradePlan({
      engine26StructuralContext,
      dailyCandleContext,
      locationContext,
+     controlLevelContext,
    });
 
   const blockers = [];
