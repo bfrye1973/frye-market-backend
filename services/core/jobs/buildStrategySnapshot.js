@@ -248,6 +248,7 @@ function buildEngine26ReplayMarker({
 
     dailyCandleContext: structural?.dailyCandleContext || null,
     locationContext: structural?.locationContext || null,
+    controlLevelContext: structural?.controlLevelContext || null,
 
     zone: {
       zoneLo: activeImbalance?.lo ?? null,
