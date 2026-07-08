@@ -5947,13 +5947,16 @@ const againstDirection =
     ) &&
     absorptionRisk !== true;
   const reclaimedAboveShortInvalidation =
-    insideShortWatchZoneAcceptanceTest === true &&
+    locationContext?.active === true &&
+    locationContext?.locationRead === "SHORT_WATCH_RECLAIM_INVALIDATION_RISK" &&
+    locationContext?.recentBehavior?.reclaimedAboveZone === true &&
     intendedDirection === "LONG" &&
     locationInvalidationLevel != null &&
     currentPrice != null &&
     currentPrice > locationInvalidationLevel &&
     supportsDirection === true &&
-    participationImproving === true;
+    againstDirection !== true &&
+    absorptionRisk !== true;
 
   const longBounceInsideShortWatchZone =
     insideShortWatchZoneAcceptanceTest === true &&
@@ -5962,7 +5965,8 @@ const againstDirection =
 
   const climacticHardBlock =
     climacticRisk === true &&
-    shortDirectionalClimax !== true;
+    shortDirectionalClimax !== true &&
+    reclaimedAboveShortInvalidation !== true;
 
   const hardBlocked =
     absorptionRisk === true ||
@@ -6031,6 +6035,20 @@ const againstDirection =
     if (locationInvalidationLevel != null) {
       reasonCodes.push("SHORT_INVALIDATION_LEVEL_DEFINED");
     }
+  } else if (reclaimedAboveShortInvalidation) {
+    allowed = false;
+    downgradeOnly = true;
+    participationState = "BUYER_RECLAIM_ABOVE_SHORT_INVALIDATION";
+    participationQuality = "MIXED";
+    grade = "C";
+    risk = "SHORT_WATCH_INVALIDATION_WAIT_FOR_HOLD";
+    direction = "NEUTRAL";
+
+    blockers.push("ENGINE26_SHORT_WATCH_RECLAIM_INVALIDATION_RISK");
+    reasonCodes.push("ENGINE26_LOCATION_CONTEXT_CONSUMED");
+    reasonCodes.push("BUYER_RECLAIM_ABOVE_SHORT_INVALIDATION");
+    reasonCodes.push("SHORT_WATCH_WEAKENING_WAIT_FOR_HOLD");
+    reasonCodes.push("CLIMACTIC_VOLUME_NOT_HARD_BLOCKED_DIRECTIONAL_RECLAIM");
   } else if (shortDirectionalClimax) {
     allowed = true;
     downgradeOnly = true;
