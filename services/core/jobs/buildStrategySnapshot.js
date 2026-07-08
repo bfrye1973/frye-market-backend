@@ -6655,6 +6655,7 @@ attachCurrentLevelActionToConfluence({
 attachFastImbalanceReactionToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
+  engine26StructuralContext,
   bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
 });
 
@@ -7162,6 +7163,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
      attachFastImbalanceReactionToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
+       engine26StructuralContext,
        bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
      });
 
@@ -7173,6 +7175,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
      attachPaperScalpReactionToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
+       engine26StructuralContext,
        paperShortResearchEnabled: false,
      });
      attachEngine4CurrentScalpParticipationToConfluence({
