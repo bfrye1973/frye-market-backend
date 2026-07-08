@@ -102,7 +102,13 @@ function buildEngine26DailyCandleContext({
 } = {}) {
   const bars = Array.isArray(dailyBars) ? dailyBars.filter(Boolean) : [];
 
-  if (bars.length < 2) {
+  // Important:
+  // During the live session, bars[bars.length - 1] is usually the forming daily candle.
+  // For next-day bias we must use completed candles only:
+  // priorCompleted = bars[bars.length - 3]
+  // lastCompleted  = bars[bars.length - 2]
+  // formingDaily   = bars[bars.length - 1]
+  if (bars.length < 3) {
     return {
       active: false,
       engine: "engine26.dailyCandleContext.v1",
@@ -111,22 +117,25 @@ function buildEngine26DailyCandleContext({
       strategyId: strategyId || STRATEGY_ID,
       timeframe: "1D",
       pattern: "DAILY_CONTEXT_UNAVAILABLE",
+      completedPattern: "DAILY_CONTEXT_UNAVAILABLE",
       biasForNextSession: "UNKNOWN",
       supportsEngine26Direction: false,
-      message: "Daily candle context unavailable because fewer than two daily bars were provided.",
+      message:
+        "Daily candle context unavailable because fewer than three daily bars were provided. Need prior completed, last completed, and forming daily candle.",
       noExecution: true,
       noPermissionCreated: true,
       reasonCodes: [
         "ENGINE26_DAILY_CANDLE_CONTEXT_UNAVAILABLE",
-        "MISSING_TWO_DAILY_BARS",
+        "MISSING_THREE_DAILY_BARS",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED",
       ],
     };
   }
 
-  const prior = bars[bars.length - 2];
-  const last = bars[bars.length - 1];
+  const prior = bars[bars.length - 3];
+  const last = bars[bars.length - 2];
+  const forming = bars[bars.length - 1];
 
   const priorOpen = barOpen(prior);
   const priorHigh = barHigh(prior);
@@ -138,8 +147,14 @@ function buildEngine26DailyCandleContext({
   const lastLow = barLow(last);
   const lastClose = barClose(last);
 
+  const formingOpen = barOpen(forming);
+  const formingHigh = barHigh(forming);
+  const formingLow = barLow(forming);
+  const formingClose = barClose(forming);
+
   const priorColor = candleColor(prior);
   const lastColor = candleColor(last);
+  const formingColor = candleColor(forming);
 
   const priorBodyLo = bodyLo(prior);
   const priorBodyHi = bodyHi(prior);
@@ -150,6 +165,12 @@ function buildEngine26DailyCandleContext({
     high: lastHigh,
     low: lastLow,
     close: lastClose,
+  });
+
+  const formingCloseLocationPct = closeLocationPct({
+    high: formingHigh,
+    low: formingLow,
+    close: formingClose,
   });
 
   const bearishEngulfing =
@@ -198,6 +219,16 @@ function buildEngine26DailyCandleContext({
     lastCloseLocationPct != null &&
     lastCloseLocationPct >= 65;
 
+  const formingStrongBounce =
+    formingColor === "GREEN" &&
+    formingCloseLocationPct != null &&
+    formingCloseLocationPct >= 65;
+
+  const formingWeakReject =
+    formingColor === "RED" &&
+    formingCloseLocationPct != null &&
+    formingCloseLocationPct <= 35;
+
   const structuralDirection = safeUpper(
     engine26StructuralContext?.preferredDirection ||
       engine26StructuralContext?.direction ||
@@ -221,10 +252,12 @@ function buildEngine26DailyCandleContext({
   let biasForNextSession = "NEUTRAL_WAIT";
   let confidence = "LOW";
   let message =
-    "Daily candle is neutral. Use intraday Engine 3 / Engine 4 confirmation.";
+    "Completed daily candle is neutral. Use intraday Engine 3 / Engine 4 confirmation.";
 
   const reasonCodes = [
     "ENGINE26_DAILY_CANDLE_CONTEXT_BUILT",
+    "COMPLETED_DAILY_CANDLES_USED_FOR_NEXT_SESSION_BIAS",
+    "FORMING_DAILY_CANDLE_CONTEXT_ONLY",
     "DAILY_CONTEXT_ONLY",
     "NO_EXECUTION",
     "NO_PERMISSION_CREATED",
@@ -235,42 +268,42 @@ function buildEngine26DailyCandleContext({
     biasForNextSession = "SHORT_WATCH";
     confidence = outsideDay ? "HIGH" : "MODERATE";
     message =
-      "Daily bearish engulfing detected. Next session favors short-watch on failed acceptance or level loss.";
+      "Last completed daily candle was a bearish engulfing rejection. Next session favors short-watch on failed acceptance or level loss.";
     reasonCodes.push("DAILY_BEARISH_ENGULFING_REJECTION");
   } else if (bullishEngulfing) {
     pattern = "BULLISH_ENGULFING_RECLAIM";
     biasForNextSession = "LONG_WATCH";
     confidence = outsideDay ? "HIGH" : "MODERATE";
     message =
-      "Daily bullish engulfing detected. Next session favors long-watch on reclaim / hold.";
+      "Last completed daily candle was a bullish engulfing reclaim. Next session favors long-watch on reclaim / hold.";
     reasonCodes.push("DAILY_BULLISH_ENGULFING_RECLAIM");
   } else if (weakCloseNearLow) {
     pattern = "DAILY_WEAK_CLOSE_NEAR_LOW";
     biasForNextSession = "SHORT_WATCH";
     confidence = "MODERATE";
     message =
-      "Daily candle closed weak near the low. Next session should respect downside risk.";
+      "Last completed daily candle closed weak near the low. Next session should respect downside risk.";
     reasonCodes.push("DAILY_WEAK_CLOSE_NEAR_LOW");
   } else if (strongCloseNearHigh) {
     pattern = "DAILY_STRONG_CLOSE_NEAR_HIGH";
     biasForNextSession = "LONG_WATCH";
     confidence = "MODERATE";
     message =
-      "Daily candle closed strong near the high. Next session should respect upside continuation risk.";
+      "Last completed daily candle closed strong near the high. Next session should respect upside continuation risk.";
     reasonCodes.push("DAILY_STRONG_CLOSE_NEAR_HIGH");
   } else if (insideDay) {
     pattern = "DAILY_INSIDE_DAY";
     biasForNextSession = "BREAKOUT_OR_FAILED_BREAKOUT_WATCH";
     confidence = "LOW";
     message =
-      "Daily inside day detected. Next session should watch range break or failed breakout.";
+      "Last completed daily candle was an inside day. Next session should watch range break or failed breakout.";
     reasonCodes.push("DAILY_INSIDE_DAY");
   } else if (outsideDay) {
     pattern = "DAILY_OUTSIDE_DAY";
     biasForNextSession = "REVERSAL_OR_CONTINUATION_WATCH";
     confidence = "MODERATE";
     message =
-      "Daily outside day detected. Next session needs confirmation before direction is trusted.";
+      "Last completed daily candle was an outside day. Next session needs confirmation before direction is trusted.";
     reasonCodes.push("DAILY_OUTSIDE_DAY");
   }
 
@@ -290,6 +323,14 @@ function buildEngine26DailyCandleContext({
     }
   }
 
+  if (formingStrongBounce) {
+    reasonCodes.push("FORMING_DAILY_GREEN_BOUNCE_CONTEXT_ONLY");
+  }
+
+  if (formingWeakReject) {
+    reasonCodes.push("FORMING_DAILY_WEAK_REJECTION_CONTEXT_ONLY");
+  }
+
   return {
     active: true,
     engine: "engine26.dailyCandleContext.v1",
@@ -299,11 +340,33 @@ function buildEngine26DailyCandleContext({
     strategyId: strategyId || STRATEGY_ID,
     timeframe: "1D",
 
+    // Backward-compatible main fields now represent completed daily candles only.
     pattern,
+    completedPattern: pattern,
     biasForNextSession,
     confidence,
     supportsEngine26Direction,
 
+    priorCompletedCandle: {
+      time: barTime(prior),
+      open: priorOpen,
+      high: priorHigh,
+      low: priorLow,
+      close: priorClose,
+      color: priorColor,
+    },
+
+    lastCompletedCandle: {
+      time: barTime(last),
+      open: lastOpen,
+      high: lastHigh,
+      low: lastLow,
+      close: lastClose,
+      color: lastColor,
+      closeLocationPct: lastCloseLocationPct,
+    },
+
+    // Keep these old field names for compatibility.
     priorCandle: {
       time: barTime(prior),
       open: priorOpen,
@@ -321,6 +384,28 @@ function buildEngine26DailyCandleContext({
       close: lastClose,
       color: lastColor,
       closeLocationPct: lastCloseLocationPct,
+      completed: true,
+    },
+
+    formingDailyCandle: {
+      time: barTime(forming),
+      open: formingOpen,
+      high: formingHigh,
+      low: formingLow,
+      close: formingClose,
+      color: formingColor,
+      closeLocationPct: formingCloseLocationPct,
+      completed: false,
+      contextOnly: true,
+    },
+
+    formingDailyContext: {
+      color: formingColor,
+      strongBounce: formingStrongBounce,
+      weakReject: formingWeakReject,
+      closeLocationPct: formingCloseLocationPct,
+      note:
+        "Forming daily candle is context only and does not override completed daily next-session bias.",
     },
 
     engulfing: {
@@ -348,6 +433,7 @@ function buildEngine26DailyCandleContext({
     reasonCodes,
   };
 }
+
 
 function sanitizeKeyPart(value) {
   return String(value || "UNKNOWN")
