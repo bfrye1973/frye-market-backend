@@ -5,6 +5,7 @@
 // Contract:
 // - Reads engine3FastImbalanceReaction first when active.
 // - Falls back to currentLevelAction.
+// - Consumes Engine 26 locationContext when available.
 // - Creates paper-only advisory only.
 // - Does not create real permission.
 // - Does not create real execution.
@@ -17,6 +18,7 @@
 // confluence.context.reaction.paperScalpReaction
 
 import { buildEngine22DegreeWaveContext } from "./engine22DegreeWaveContext.js";
+import { buildEngine26LocationReactionContext } from "./engine26LocationReactionContext.js";
 
 const ENGINE = "engine3.paperScalpReaction.v1";
 
@@ -50,6 +52,8 @@ const PAPER_SHORT_RESEARCH_STATES = new Set([
   "REJECTING_VALUE",
   "BREAKOUT_FAILING",
   "LOST_LEVEL",
+  "FAILED_ACCEPTANCE_SHORT",
+  "LOST_SHORT_TRIGGER_LEVEL",
 ]);
 
 const BLOCKED_STATES = new Set([
@@ -57,6 +61,8 @@ const BLOCKED_STATES = new Set([
   "NO_REFERENCE_LEVEL",
   "NO_FAST_IMBALANCE",
   "NO_FAST_IMBALANCE_WATCH",
+  "INSIDE_SHORT_WATCH_ZONE_ACCEPTANCE_TEST",
+  "SHORT_WATCH_RECLAIM_INVALIDATION_RISK",
   "INSUFFICIENT_CANDLES",
   "CHOP_INSIDE_VALUE",
 ]);
@@ -133,6 +139,14 @@ function setupTypeForState(state, direction, fastMode = false) {
   const s = safeUpper(state);
   const d = safeUpper(direction, "NONE");
 
+  if (s === "INSIDE_SHORT_WATCH_ZONE_ACCEPTANCE_TEST") {
+    return "INSIDE_SHORT_WATCH_ZONE_ACCEPTANCE_TEST";
+  }
+
+  if (s === "SHORT_WATCH_RECLAIM_INVALIDATION_RISK") {
+    return "SHORT_WATCH_RECLAIM_INVALIDATION_RISK";
+  }
+
   if (fastMode === true && d === "LONG") {
     if (s === "WICK_BELOW_AND_RECLAIM") return "FAST_SWEEP_RECLAIM_LONG";
     if (s === "DIP_BOUGHT_FAST") return "FAST_SWEEP_RECLAIM_LONG";
@@ -148,6 +162,8 @@ function setupTypeForState(state, direction, fastMode = false) {
     if (s === "REJECTING_VALUE") return "FAST_REJECTING_IMBALANCE_SHORT_RESEARCH";
     if (s === "BREAKOUT_FAILING") return "FAST_BREAKOUT_FAILING_SHORT_RESEARCH";
     if (s === "LOST_LEVEL") return "FAST_LOST_IMBALANCE_SHORT_RESEARCH";
+    if (s === "FAILED_ACCEPTANCE_SHORT") return "FAST_FAILED_ACCEPTANCE_SHORT_RESEARCH";
+    if (s === "LOST_SHORT_TRIGGER_LEVEL") return "FAST_LOST_SHORT_TRIGGER_LEVEL_RESEARCH";
   }
 
   if (d === "LONG") {
@@ -165,6 +181,8 @@ function setupTypeForState(state, direction, fastMode = false) {
     if (s === "REJECTING_VALUE") return "REJECTING_VALUE_SHORT_RESEARCH";
     if (s === "BREAKOUT_FAILING") return "BREAKOUT_FAILING_SHORT_RESEARCH";
     if (s === "LOST_LEVEL") return "LOST_LEVEL_SHORT_RESEARCH";
+    if (s === "FAILED_ACCEPTANCE_SHORT") return "FAILED_ACCEPTANCE_SHORT_RESEARCH";
+    if (s === "LOST_SHORT_TRIGGER_LEVEL") return "LOST_SHORT_TRIGGER_LEVEL_RESEARCH";
   }
 
   return "NONE";
@@ -176,6 +194,7 @@ function buildBasePaperScalpReaction({
   currentLevelAction = null,
   fastImbalanceReaction = null,
   engine22WaveStrategy = null,
+  engine26LocationContext = null,
   allowed = false,
   direction = "NONE",
   setupType = "NONE",
@@ -186,9 +205,10 @@ function buildBasePaperScalpReaction({
   const state = safeUpper(reactionInput?.state, "NO_SIGNAL");
   const quality = safeUpper(reactionInput?.quality, "WEAK");
 
-  const imbalance = fastMode === true
-    ? fastImbalanceReaction?.imbalance || reactionInput?.imbalance || null
-    : null;
+  const imbalance =
+    fastMode === true
+      ? fastImbalanceReaction?.imbalance || reactionInput?.imbalance || null
+      : null;
 
   return {
     active: true,
@@ -231,6 +251,7 @@ function buildBasePaperScalpReaction({
 
     currentLevelAction: currentLevelAction || null,
     fastImbalanceReaction: fastImbalanceReaction || null,
+    engine26LocationContext: engine26LocationContext || null,
 
     lifecycleKey:
       engine22WaveStrategy?.currentLifecycleState?.key || null,
@@ -242,6 +263,7 @@ function buildBasePaperScalpReaction({
       reactionState: state,
       reactionDirection: direction,
     }),
+
     requiresEngine6PaperApproval: true,
     realExecutionAuthority: false,
     noRealPermissionCreated: true,
@@ -254,6 +276,9 @@ function buildBasePaperScalpReaction({
       "PAPER_ONLY_RESEARCH_LANE",
       "ENGINE3_PAPER_SCALP_REACTION",
       fastMode === true ? "ENGINE3_FAST_IMBALANCE_REACTION_CONSUMED" : null,
+      engine26LocationContext?.active === true
+        ? "ENGINE26_LOCATION_CONTEXT_CONSUMED"
+        : null,
       allowed === true
         ? "ENGINE3_PAPER_SCALP_REACTION_ALLOWED"
         : "ENGINE3_PAPER_SCALP_REACTION_NOT_ALLOWED",
@@ -288,15 +313,32 @@ function evaluateReactionForPaper({
   currentLevelAction = null,
   fastImbalanceReaction = null,
   engine22WaveStrategy = null,
+  engine26StructuralContext = null,
   paperShortResearchEnabled = false,
   fastMode = false,
 }) {
   const source =
     fastMode === true ? SOURCE_FAST_IMBALANCE : SOURCE_CURRENT_LEVEL;
 
-  const state = safeUpper(reactionInput?.state, "NO_SIGNAL");
-  const quality = safeUpper(reactionInput?.quality, "WEAK");
-  const actionDirection = safeUpper(reactionInput?.direction, "NEUTRAL");
+  const rawState = safeUpper(reactionInput?.state, "NO_SIGNAL");
+  const rawQuality = safeUpper(reactionInput?.quality, "WEAK");
+  const rawActionDirection = safeUpper(reactionInput?.direction, "NEUTRAL");
+
+  const engine26LocationContext = buildEngine26LocationReactionContext({
+    engine26StructuralContext,
+    reactionInput: {
+      ...reactionInput,
+      state: rawState,
+      quality: rawQuality,
+      direction: rawActionDirection,
+    },
+  });
+
+  const state = engine26LocationContext?.state || rawState;
+  const quality = engine26LocationContext?.quality || rawQuality;
+  const actionDirection =
+    engine26LocationContext?.direction || rawActionDirection;
+
   const engine22Direction = getEngine22Direction(engine22WaveStrategy);
 
   const blockers = [];
@@ -312,6 +354,7 @@ function evaluateReactionForPaper({
       ? `FAST_IMBALANCE_DIRECTION_${actionDirection}`
       : `CURRENT_LEVEL_ACTION_DIRECTION_${actionDirection}`,
     engine22Direction ? `ENGINE22_DIRECTION_${engine22Direction}` : null,
+    ...(engine26LocationContext?.reasonCodes || []),
   ];
 
   const qualityAllowed = GOOD_QUALITY.has(quality);
@@ -448,6 +491,9 @@ function evaluateReactionForPaper({
 
     allowed = blockers.length === 0;
   } else {
+    setupType = setupTypeForState(state, actionDirection, fastMode);
+    direction = actionDirection;
+
     blockers.push(
       fastMode === true
         ? "FAST_IMBALANCE_STATE_NOT_PAPER_ACTIONABLE"
@@ -460,6 +506,16 @@ function evaluateReactionForPaper({
     );
   }
 
+  if (engine26LocationContext?.forceAllowedFalse === true) {
+    allowed = false;
+
+    if (engine26LocationContext.blocker) {
+      blockers.push(engine26LocationContext.blocker);
+    }
+
+    reasonCodes.push("ENGINE26_LOCATION_FORCED_PAPER_NOT_ALLOWED");
+  }
+
   if (!allowed) {
     reasonCodes.push("PAPER_SCALP_NOT_ALLOWED");
   } else {
@@ -468,10 +524,16 @@ function evaluateReactionForPaper({
 
   return buildBasePaperScalpReaction({
     source,
-    reactionInput,
+    reactionInput: {
+      ...reactionInput,
+      state,
+      quality,
+      direction: actionDirection,
+    },
     currentLevelAction,
     fastImbalanceReaction,
     engine22WaveStrategy,
+    engine26LocationContext,
     allowed,
     direction,
     setupType,
@@ -485,6 +547,7 @@ export function buildPaperScalpReaction({
   currentLevelAction = null,
   fastImbalanceReaction = null,
   engine22WaveStrategy = null,
+  engine26StructuralContext = null,
   paperShortResearchEnabled = false,
 } = {}) {
   const useFastReaction = isFastReactionActive(fastImbalanceReaction);
@@ -502,6 +565,7 @@ export function buildPaperScalpReaction({
     currentLevelAction,
     fastImbalanceReaction: useFastReaction ? fastImbalanceReaction : null,
     engine22WaveStrategy,
+    engine26StructuralContext,
     paperShortResearchEnabled,
     fastMode: useFastReaction,
   });
@@ -510,6 +574,7 @@ export function buildPaperScalpReaction({
 export function attachPaperScalpReactionToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
+  engine26StructuralContext = null,
   paperShortResearchEnabled = false,
 }) {
   const currentLevelAction =
@@ -522,6 +587,7 @@ export function attachPaperScalpReactionToConfluence({
     currentLevelAction,
     fastImbalanceReaction,
     engine22WaveStrategy,
+    engine26StructuralContext,
     paperShortResearchEnabled,
   });
 
