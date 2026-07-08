@@ -5966,6 +5966,7 @@ const againstDirection =
   const climacticHardBlock =
     climacticRisk === true &&
     shortDirectionalClimax !== true &&
+    longBounceInsideShortWatchZone !== true &&
     reclaimedAboveShortInvalidation !== true;
 
   const hardBlocked =
