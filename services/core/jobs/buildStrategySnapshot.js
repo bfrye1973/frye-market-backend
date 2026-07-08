@@ -5736,11 +5736,22 @@ function attachEngine4FastImbalanceParticipationToConfluence({
 function buildEngine4CurrentScalpParticipation({
   patchedConfluence,
   engine22WaveStrategy = null,
+  engine26StructuralContext = null,
   bars = [],
 } = {}) {
   const reactionContext = patchedConfluence?.context?.reaction || null;
   const volumeContext = patchedConfluence?.context?.volume || null;
   const waveContext = buildEngine4WaveContextFromDegreeStates(engine22WaveStrategy);
+  const locationContext = engine26StructuralContext?.locationContext || null;
+
+  const insideShortWatchZoneAcceptanceTest =
+    locationContext?.active === true &&
+    locationContext?.locationRead === "INSIDE_SHORT_WATCH_ZONE_ACCEPTANCE_TEST" &&
+    locationContext?.handoff?.engine4ShouldTreatInsideShortZoneAs ===
+      "WAIT_FOR_DIRECTIONAL_PARTICIPATION";
+
+  const shortTriggerLevel = validPrice(locationContext?.shortTriggerLevel);
+  const locationInvalidationLevel = validPrice(locationContext?.invalidationLevel);
 
   const fastReaction =
     reactionContext?.engine3FastImbalanceReaction || null;
@@ -5935,6 +5946,19 @@ const againstDirection =
       currentVsPriorVolumeRatio >= 1.5
     ) &&
     absorptionRisk !== true;
+  const reclaimedAboveShortInvalidation =
+    insideShortWatchZoneAcceptanceTest === true &&
+    intendedDirection === "LONG" &&
+    locationInvalidationLevel != null &&
+    currentPrice != null &&
+    currentPrice > locationInvalidationLevel &&
+    supportsDirection === true &&
+    participationImproving === true;
+
+  const longBounceInsideShortWatchZone =
+    insideShortWatchZoneAcceptanceTest === true &&
+    intendedDirection === "LONG" &&
+    reclaimedAboveShortInvalidation !== true;  
 
   const climacticHardBlock =
     climacticRisk === true &&
@@ -5987,6 +6011,26 @@ const againstDirection =
     if (climacticRisk) reasonCodes.push("CLIMACTIC_RISK");
     if (highVolumeNoProgress) reasonCodes.push("HIGH_VOLUME_NO_PROGRESS");
     if (againstDirection) reasonCodes.push("VOLUME_AGAINST_TRADE_DIRECTION");
+  } else if (longBounceInsideShortWatchZone) {
+    allowed = false;
+    downgradeOnly = true;
+    participationState = "INSIDE_SHORT_WATCH_ZONE_ACCEPTANCE_TEST";
+    participationQuality = "MIXED";
+    grade = "D";
+    risk = "WAIT_FOR_DIRECTIONAL_PARTICIPATION";
+    direction = "NEUTRAL";
+
+    blockers.push("ENGINE26_SHORT_WATCH_ZONE_ACCEPTANCE_TEST");
+    reasonCodes.push("ENGINE26_LOCATION_CONTEXT_CONSUMED");
+    reasonCodes.push("INSIDE_SHORT_WATCH_ZONE_ACCEPTANCE_TEST");
+    reasonCodes.push("BOUNCE_INSIDE_SHORT_WATCH_ZONE_NOT_LONG_PERMISSION");
+    reasonCodes.push("WAIT_FOR_FAILED_ACCEPTANCE_OR_LEVEL_LOSS");
+    if (shortTriggerLevel != null) {
+      reasonCodes.push("SHORT_TRIGGER_LEVEL_DEFINED");
+    }
+    if (locationInvalidationLevel != null) {
+      reasonCodes.push("SHORT_INVALIDATION_LEVEL_DEFINED");
+    }
   } else if (shortDirectionalClimax) {
     allowed = true;
     downgradeOnly = true;
@@ -6103,6 +6147,14 @@ const againstDirection =
     shortRejectionState,
     shortDirectionalClimax,
     climacticHardBlock,
+
+    locationContext,
+    insideShortWatchZoneAcceptanceTest,
+    shortTriggerLevel,
+    locationInvalidationLevel,
+    reclaimedAboveShortInvalidation,
+    longBounceInsideShortWatchZone,
+
     absorptionRisk,
     climacticRisk,
 
@@ -6122,11 +6174,13 @@ const againstDirection =
 function attachEngine4CurrentScalpParticipationToConfluence({
   patchedConfluence,
   engine22WaveStrategy = null,
+  engine26StructuralContext = null,
   bars = [],
 }) {
   const currentScalpParticipation = buildEngine4CurrentScalpParticipation({
     patchedConfluence,
     engine22WaveStrategy,
+    engine26StructuralContext,
     bars,
   });
 
@@ -6600,6 +6654,7 @@ attachPaperScalpReactionToConfluence({
 attachEngine4CurrentScalpParticipationToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
+  engine26StructuralContext,
   bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
 });
 
