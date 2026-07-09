@@ -75,7 +75,15 @@ function directionFromSide(side) {
   return null;
 }
 
-function directionFromTicket(ticket, order) {
+function directionFromTicket(ticket, order, result = null) {
+  const direct =
+    toUpper(order?.direction) ||
+    toUpper(result?.direction) ||
+    toUpper(ticket?.direction) ||
+    toUpper(ticket?.sourceSignal?.direction);
+
+  if (direct === "LONG" || direct === "SHORT") return direct;
+
   const bias = String(ticket?.engine5?.bias || "").trim().toLowerCase();
   if (bias === "long") return "LONG";
   if (bias === "short") return "SHORT";
@@ -495,7 +503,7 @@ export async function createTradeJournalEntryFromEngine8Fill({
   const eventTime = getEventTime(order, result);
   const qty = getEntryQty(order, result, ticket);
   const price = getExecutionPrice(order, result, ticket);
-  const direction = directionFromTicket(ticket, order);
+  const direction = directionFromTicket(ticket, order, result);
   const timeframe = strategyTimeframe(strategyId, order?.timeframe || ticket?.timeframe);
   const accountMode = accountModeFromTicket(ticket, order);
   const assetType = toUpper(order?.assetType || ticket?.assetType || "EQUITY");
