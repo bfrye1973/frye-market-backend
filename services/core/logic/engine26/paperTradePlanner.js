@@ -1833,6 +1833,253 @@ function getStructuralLevel(structuralContext, key) {
   return n == null ? null : roundToTick(n);
 }
 
+function buildEngine26PaperTrialCandidate({
+  symbol,
+  strategyId,
+  tf,
+  currentPrice,
+  zoneLo,
+  zoneHi,
+  confluence,
+  engine26StructuralContext,
+  locationContext,
+  controlLevelContext,
+}) {
+  const price = roundToTick(currentPrice);
+  const lo = roundToTick(zoneLo);
+  const hi = roundToTick(zoneHi);
+
+  const fastReaction =
+    confluence?.context?.reaction?.engine3FastImbalanceReaction || null;
+
+  const fastParticipation =
+    confluence?.context?.volume?.engine4FastImbalanceParticipation || null;
+
+  const engine3State = safeUpper(fastReaction?.state);
+  const engine3Direction = safeUpper(fastReaction?.direction);
+  const engine3Quality = safeUpper(fastReaction?.quality);
+
+  const engine4State = safeUpper(fastParticipation?.participationState);
+  const engine4Direction = safeUpper(
+    fastParticipation?.intendedDirection ||
+      fastParticipation?.direction ||
+      fastParticipation?.tradeDirection
+  );
+
+  const engine4Allowed = fastParticipation?.allowed === true;
+  const engine4HardBlocked = fastParticipation?.hardBlocked === true;
+
+  const structuralStatus = safeUpper(engine26StructuralContext?.status);
+  const structuralTemplate = safeUpper(engine26StructuralContext?.template);
+
+  const bullRecoveryLevel =
+    roundToTick(controlLevelContext?.bullRecoveryLevel) ?? 7560;
+
+  const bearControlLevel =
+    roundToTick(controlLevelContext?.bearControlLevel) ?? 7500;
+
+  const shortTriggerLevel =
+    roundToTick(locationContext?.shortTriggerLevel) ??
+    lo ??
+    7540.75;
+
+  const isPostEReaction =
+    structuralStatus.includes("POST_E_REACTION") ||
+    structuralTemplate.includes("TRIANGLE_RESOLUTION_DECISION");
+
+  const engine3ShortConfirmed =
+    engine3Direction === "SHORT" &&
+    (
+      engine3State.includes("LOST") ||
+      engine3State.includes("REJECTING") ||
+      engine3State.includes("BREAKOUT_FAILING") ||
+      engine3State.includes("FAILED_RECLAIM")
+    );
+
+  const engine4ShortConfirmed =
+    engine4Allowed === true &&
+    engine4HardBlocked === false &&
+    (
+      engine4State.includes("SHORT_REJECTION_VOLUME_CONFIRMED") ||
+      engine4State.includes("SELLER") ||
+      engine4State.includes("REJECTION")
+    );
+
+  const priceLostShortTrigger =
+    price != null &&
+    shortTriggerLevel != null &&
+    price <= shortTriggerLevel;
+
+  const active =
+    isPostEReaction &&
+    engine3ShortConfirmed &&
+    engine4ShortConfirmed &&
+    priceLostShortTrigger;
+
+  if (!active) {
+    return {
+      active: false,
+      engine: "engine26.paperTrialCandidate.v1",
+      mode: "PAPER_LIMIT_PREVIEW_ONLY",
+      reasonCodes: [
+        "ENGINE26_PAPER_TRIAL_NOT_ACTIVE",
+        isPostEReaction ? "POST_E_REACTION_CONTEXT_PRESENT" : "POST_E_REACTION_CONTEXT_MISSING",
+        engine3ShortConfirmed ? "ENGINE3_SHORT_CONFIRMED" : "ENGINE3_SHORT_NOT_CONFIRMED",
+        engine4ShortConfirmed ? "ENGINE4_SHORT_CONFIRMED" : "ENGINE4_SHORT_NOT_CONFIRMED",
+        priceLostShortTrigger ? "PRICE_LOST_SHORT_TRIGGER" : "PRICE_NOT_BELOW_SHORT_TRIGGER",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+      ],
+    };
+  }
+
+  const limitPrice =
+    lo != null
+      ? roundToTick(lo + 5)
+      : roundToTick(price + 8.75);
+
+  const stopPrice =
+    bullRecoveryLevel != null
+      ? roundToTick(bullRecoveryLevel + 4.25)
+      : hi != null
+      ? roundToTick(hi + 1)
+      : roundToTick(limitPrice + 18);
+
+  const target1 = shortTriggerLevel;
+  const target2 = 7520;
+  const target3 = 7515;
+  const target4 = bearControlLevel;
+
+  const riskPoints =
+    stopPrice != null && limitPrice != null
+      ? roundPts(stopPrice - limitPrice)
+      : null;
+
+  const rewardPoints =
+    limitPrice != null && target2 != null
+      ? roundPts(limitPrice - target2)
+      : null;
+
+  const riskReward =
+    riskPoints != null && riskPoints > 0 && rewardPoints != null
+      ? Number((rewardPoints / riskPoints).toFixed(2))
+      : null;
+
+  return {
+    active: true,
+    engine: "engine26.paperTrialCandidate.v1",
+    mode: "PAPER_LIMIT_PREVIEW_ONLY",
+    paperOnly: true,
+    researchOnly: true,
+
+    symbol: safeUpper(symbol || "ES"),
+    strategyId: strategyId || STRATEGY_ID,
+    tf: tf || "10m",
+
+    status: "TAKE_PAPER_TRADE_LIMIT_PULLBACK_ONLY",
+    setupType: "FAILED_7560_RECLAIM_SHORT_PAPER_TRIAL",
+    direction: "SHORT",
+
+    instruction:
+      "Paper trial candidate only. Use limit pullback entry; do not chase the flush low.",
+
+    limitOrderPreview: {
+      side: "SELL",
+      orderType: "LIMIT",
+      limitPrice,
+      currentPrice: price,
+      reason:
+        "Failed 7560 reclaim confirmed by Engine 3 lost level and Engine 4 short rejection volume. Enter only on pullback toward breakdown area.",
+    },
+
+    entryIdea: {
+      label: "TAKE PAPER TRADE — limit pullback only",
+      preferredArea:
+        limitPrice != null
+          ? `SELL LIMIT near ${limitPrice} after failed 7560 reclaim`
+          : "SELL LIMIT on pullback after failed reclaim",
+      referencePrice: limitPrice,
+      description:
+        "Paper-only short trial. Do not chase the low; wait for pullback toward the breakdown area.",
+    },
+
+    stopIdea: {
+      label: "Above failed 7560 reclaim / trap high",
+      price: stopPrice,
+      description:
+        "Preview stop above failed reclaim area. Research only; no broker order.",
+    },
+
+    confirmationGate: {
+      label: "Failed 7560 reclaim short confirmed",
+      level: shortTriggerLevel,
+      rule:
+        "Engine 3 lost level SHORT and Engine 4 short rejection volume confirmed after price lost the short trigger.",
+      required: false,
+    },
+
+    targetMap: {
+      firstReaction: target1,
+      aLowBreak: null,
+      preferredCPressure: target2,
+      stretchC: target3,
+      bearControl: target4,
+      labels: {
+        firstReaction: "Short trigger retest / first reaction",
+        preferredCPressure: "7520 pressure target",
+        stretchC: "7515 stretch target",
+        bearControl: "7500 bear control",
+      },
+    },
+
+    geometryPreview: {
+      mode: "PAPER_LIMIT_PREVIEW_ONLY",
+      direction: "SHORT",
+      entryReference: limitPrice,
+      stopReference: stopPrice,
+      targetReference: target2,
+      riskPoints,
+      rewardPoints,
+      riskReward,
+    },
+
+    evidence: {
+      engine3State,
+      engine3Direction,
+      engine3Quality,
+      engine4State,
+      engine4Direction,
+      engine4Allowed,
+      engine4HardBlocked,
+      currentPrice: price,
+      shortTriggerLevel,
+      bullRecoveryLevel,
+      bearControlLevel,
+    },
+
+    noExecution: true,
+    noPermissionCreated: true,
+    noBrokerOrder: true,
+    realExecutionAllowed: false,
+    brokerExecutionAllowed: false,
+    schwabExecutionAllowed: false,
+
+    reasonCodes: [
+      "ENGINE26_PAPER_TRIAL_CANDIDATE",
+      "TAKE_PAPER_TRADE_LIMIT_PULLBACK_ONLY",
+      "FAILED_7560_RECLAIM_SHORT",
+      "ENGINE3_SHORT_CONFIRMED",
+      "ENGINE4_SHORT_REJECTION_VOLUME_CONFIRMED",
+      "PRICE_LOST_SHORT_TRIGGER",
+      "LIMIT_PULLBACK_ENTRY_NOT_CHASE",
+      "PAPER_ONLY_RESEARCH",
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+      "NO_BROKER_ORDER",
+    ],
+  };
+}
+
 function buildEngine7SizingPreviewV1({ permission, confluence, engine15Decision }) {
   const engine6Paper = permission?.paper || null;
 
@@ -2074,6 +2321,41 @@ function buildEngine26TradePlanPreview({
       ? Number((geometryPreview.rewardPoints / geometryPreview.riskPoints).toFixed(2))
       : null;
 
+  const paperTrialCandidate = buildEngine26PaperTrialCandidate({
+    symbol,
+    strategyId,
+    tf,
+    currentPrice,
+    zoneLo,
+    zoneHi,
+    confluence,
+    engine26StructuralContext,
+    locationContext,
+    controlLevelContext,
+  });
+
+  const displayEntryIdea =
+    paperTrialCandidate?.active === true ? paperTrialCandidate.entryIdea : entryIdea;
+
+  const displayStopIdea =
+    paperTrialCandidate?.active === true ? paperTrialCandidate.stopIdea : stopIdea;
+
+  const displayConfirmationGate =
+    paperTrialCandidate?.active === true
+      ? paperTrialCandidate.confirmationGate
+      : confirmationGate;
+
+  const displayTargetMap =
+    paperTrialCandidate?.active === true ? paperTrialCandidate.targetMap : targetMap;
+
+  const displayGeometryPreview =
+    paperTrialCandidate?.active === true
+      ? paperTrialCandidate.geometryPreview
+      : geometryPreview;
+
+  const displayDirection =
+    paperTrialCandidate?.active === true ? "SHORT" : direction;
+
   const engine7Sizing = buildEngine7SizingPreviewV1({
     permission,
     confluence,
@@ -2116,7 +2398,7 @@ function buildEngine26TradePlanPreview({
         engine26StructuralContext?.template ||
         engine26ImbalanceWatch?.structuralTemplate ||
         null,
-      direction,
+      direction: displayDirection,
       shortResearchOnly: engine26ImbalanceWatch?.shortResearchOnly === true,
       doNotChaseLong: engine26ImbalanceWatch?.doNotChaseLong === true,
       oldB: oldB
@@ -2134,12 +2416,14 @@ function buildEngine26TradePlanPreview({
       },
     },
 
-    entryIdea,
-    stopIdea,
-    confirmationGate,
+    paperTrialCandidate,
+
+    entryIdea: displayEntryIdea,
+    stopIdea: displayStopIdea,
+    confirmationGate: displayConfirmationGate,
     scalpGoal,
-    targetMap,
-    geometryPreview,
+    targetMap: displayTargetMap,
+    geometryPreview: displayGeometryPreview,
     engine7Sizing,
 
     permissionState: {
@@ -2149,7 +2433,12 @@ function buildEngine26TradePlanPreview({
       engine6Allowed: paper?.allowed === true,
       paperAllowed,
       ticketAllowed: paperAllowed,
-      status: paperAllowed ? "PAPER_PERMISSION_READY" : "WATCH_ONLY_NO_PERMISSION",
+      status:
+        paperTrialCandidate?.active === true
+          ? "PAPER_TRIAL_CANDIDATE_LIMIT_PULLBACK"
+          : paperAllowed
+          ? "PAPER_PERMISSION_READY"
+          : "WATCH_ONLY_NO_PERMISSION",
     },
 
     noExecution: true,
@@ -2159,7 +2448,13 @@ function buildEngine26TradePlanPreview({
     reasonCodes: [
       "ENGINE26_TRADE_PLAN_PREVIEW_BUILT",
       "PREVIEW_ONLY",
-      direction === "SHORT" ? "SHORT_RESEARCH_TRADE_MAP" : null,
+      displayDirection === "SHORT" ? "SHORT_RESEARCH_TRADE_MAP" : null,
+      paperTrialCandidate?.active === true
+        ? "ENGINE26_PAPER_TRIAL_CANDIDATE"
+        : null,
+      paperTrialCandidate?.active === true
+        ? "TAKE_PAPER_TRADE_LIMIT_PULLBACK_ONLY"
+        : null,
       "ENGINE7_V1_R_ONLY_SIZE_READ_ATTACHED",
       "ENGINE6_FINAL_PERMISSION_REQUIRED",
       "NO_EXECUTION",
@@ -2409,6 +2704,8 @@ export function buildEngine26PaperTradePlan({
   }        
 
    const engine26TradePlanPreview = buildEngine26TradePlanPreview({
+    const engine26PaperTrialCandidate =
+      engine26TradePlanPreview?.paperTrialCandidate || null;
      symbol: normalizedSymbol,
      strategyId: normalizedStrategyId,
      tf: normalizedTf,
@@ -2583,6 +2880,7 @@ export function buildEngine26PaperTradePlan({
       engine26ImbalanceWatch,
       engine26StructuralContext,
       engine26TradePlanPreview,
+      engine26PaperTrialCandidate,
       engine26PaperTradePlan: makeNoTrade({
         symbol: normalizedSymbol,
         strategyId: normalizedStrategyId,
@@ -2747,6 +3045,7 @@ export function buildEngine26PaperTradePlan({
    engine26ImbalanceWatch,
    engine26StructuralContext,
    engine26TradePlanPreview,
+   engine26PaperTrialCandidate,
    engine26PaperTradePlan: plan,
    engine26PaperTradeTicket: ticket,
    engine26PaperTradeExecution: null,
