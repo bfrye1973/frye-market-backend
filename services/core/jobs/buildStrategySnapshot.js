@@ -7670,12 +7670,20 @@ console.log("Engine21 alignment fetched");
   engine25Context
 );
 
-  const executionState = getExecutionState(symbol, s.strategyId);
+const executionSymbol =
+  strategy?.symbol ||
+  strategy?.instrument ||
+  strategy?.underlyingSymbol ||
+  strategy?.confluence?.context?.symbol ||
+  strategy?.confluence?.context?.instrument ||
+  (String(s.strategyId || "") === "intraday_scalp@10m" ? "ES" : symbol);
 
-  result.strategies[s.strategyId] = {
-    ...strategy,
-    executionState
-  };
+const executionState = getExecutionState(executionSymbol, s.strategyId);
+
+result.strategies[s.strategyId] = {
+  ...strategy,
+  executionState,
+};
 } catch (err) {
   
       result.strategies[s.strategyId] = {
