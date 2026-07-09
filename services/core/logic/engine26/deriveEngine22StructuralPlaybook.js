@@ -449,6 +449,124 @@ function classifyAbcUpBPullback({
   };
 }
 
+function classifyPostEReactionDecisionWatch({
+  symbol,
+  strategyId,
+  tf,
+  currentPrice,
+  activeImbalance,
+  degreeStates,
+  minor,
+  minute,
+  subminute,
+}) {
+  return {
+    active: true,
+    engine: ENGINE,
+    source: "engine22WaveStrategy.degreeStates",
+    engine22ReadFirst: true,
+
+    symbol,
+    strategyId,
+    tf,
+    currentPrice: round2(currentPrice),
+    activeImbalance: activeImbalance || null,
+
+    template: "TRIANGLE_RESOLUTION_DECISION_WATCH",
+    status: "POST_E_REACTION_WATCH",
+    activeImbalanceRole: "POST_E_REACTION_DECISION_ZONE",
+    structuralBias: "TRIANGLE_RESOLUTION_DECISION",
+    preferredDirection: "NONE_WAIT_FOR_7560_RECLAIM_OR_7500_FAILURE",
+    primaryScenario: "MINOR_E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION",
+    preferredAction: "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+
+    doNotChaseLong: true,
+    shortResearchOnly: false,
+
+    engine22Structure: {
+      minor: {
+        stage: minor?.stage || null,
+        currentRead: minor?.currentRead || null,
+        action: minor?.action || null,
+      },
+      minute: {
+        stage: minute?.stage || null,
+        currentRead: minute?.currentRead || null,
+        action: minute?.action || null,
+      },
+      subminute: {
+        stage: subminute?.stage || null,
+        currentRead: subminute?.currentRead || null,
+        action: subminute?.action || null,
+      },
+      nestedCorrectionContext: minute?.nestedCorrectionContext || null,
+    },
+
+    decisionMap: {
+      active: true,
+      mode: "POST_E_TRIANGLE_RESOLUTION",
+      bullPath: {
+        level: 7560,
+        condition: "HOLD_OR_RECLAIM",
+        label: "BULL_RECOVERY_WATCH",
+      },
+      bearPath: {
+        level: 7500,
+        condition: "FAIL_OR_BECOME_RESISTANCE",
+        label: "BEAR_CONTINUATION_WATCH",
+      },
+      noDirectionAssumption: true,
+      noExecution: true,
+      noPermissionCreated: true,
+    },
+
+    watchLevels: {
+      decisionZone: {
+        lo: 7500,
+        hi: 7560,
+        label: "POST_E_TRIANGLE_RESOLUTION_DECISION_ZONE",
+      },
+      bullRecoveryLevel: 7560,
+      bearControlLevel: 7500,
+    },
+
+    confirmationNeeds: [
+      "ENGINE3_RECLAIM_7560_OR_FAILED_RECLAIM_7500_REQUIRED",
+      "ENGINE4_DIRECTIONAL_PARTICIPATION_REQUIRED",
+      "ENGINE15_RISK_AND_TARGET_PATH_AFTER_DIRECTION_CONFIRMS",
+      "ENGINE6_FINAL_PERMISSION_REQUIRED",
+    ],
+
+    invalidation: {
+      retiresOldCDownWatchBecause: [
+        "MINOR_E_COMPLETED_CANDIDATE",
+        "MINUTE_C_DOWN_POST_COMPLETION_REACTION",
+        "SUBMINUTE_C_DOWN_RETIRED",
+      ],
+    },
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    reasonCodes: [
+      "ENGINE26_STRUCTURAL_PLAYBOOK_BUILT",
+      "ENGINE22_READ_FIRST",
+      "TEMPLATE_TRIANGLE_RESOLUTION_DECISION_WATCH",
+      "OLD_C_DOWN_MAP_RETIRED",
+      "MINOR_E_COMPLETED_CANDIDATE",
+      "POST_E_REACTION_WATCH",
+      "DIRECTION_NOT_ASSUMED",
+      "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+      "ENGINE3_ENGINE4_CONFIRMATION_REQUIRED",
+      "ENGINE15_REQUIRED",
+      "ENGINE6_FINAL_PERMISSION_REQUIRED",
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+    ],
+  };
+}
+
 function classifyTriangleECompletion({
   symbol,
   strategyId,
@@ -922,6 +1040,14 @@ export function deriveEngine22StructuralPlaybook({
   const minorRead = upper(minor?.currentRead);
   const minuteRead = upper(minute?.currentRead);
   const subminuteRead = upper(subminute?.currentRead);
+  const minorStage = upper(minor?.stage);
+  const minorCorrectionStage = upper(
+    minor?.correctionModel?.stage ||
+      minor?.correction?.stage ||
+      minor?.stage
+  );
+  const minuteStage = upper(minute?.stage);
+  const subminuteStage = upper(subminute?.stage);
 
   const minuteNested = minute?.nestedCorrectionContext || null;
   const childPurpose = upper(minuteNested?.childPurpose);
@@ -957,6 +1083,18 @@ export function deriveEngine22StructuralPlaybook({
     minute,
     subminute,
   };
+
+  const isPostECompletionReaction =
+    hasText(minorRead, "E_COMPLETED_CANDIDATE") ||
+    hasText(minorRead, "TRIANGLE_RESOLUTION") ||
+    hasText(minorCorrectionStage, "E_COMPLETED_CANDIDATE") ||
+    hasText(minorCorrectionStage, "TRIANGLE_RESOLUTION") ||
+    hasText(minuteRead, "POST_E_REACTION") ||
+    hasText(minuteRead, "COMPLETED_POST_E_REACTION") ||
+    hasText(minuteRead, "C_DOWN_COMPLETED") ||
+    hasText(subminuteRead, "C_DOWN_RETIRED") ||
+    hasText(subminuteRead, "WAIT_FOR_NEW_STRUCTURE") ||
+    hasText(subminuteStage, "COMPLETE");
 
   const isAbcDownCWatch =
     minuteModelType === "ABC_DOWN" ||
@@ -1005,7 +1143,11 @@ export function deriveEngine22StructuralPlaybook({
   // 1. Nested ABC down/up must beat generic triangle labels because it is the tactical timing path.
   // 2. E completion comes after because it describes the parent goal.
   // 3. Impulse/pullback/exhaustion templates follow.
-  if (isAbcDownCWatch && minuteModel) {
+  if (isPostECompletionReaction) {
+    playbook = classifyPostEReactionDecisionWatch({
+      ...common,
+    });
+  } else if (isAbcDownCWatch && minuteModel) {
     playbook = classifyAbcDownBMarked({
       ...common,
       model: minuteModel,
@@ -1042,6 +1184,7 @@ export function deriveEngine22StructuralPlaybook({
     parserDebug: {
       minuteModelType,
       minorModelType,
+      isPostECompletionReaction,
       parentCorrectionType,
       parentActiveLeg,
       childPurpose,
