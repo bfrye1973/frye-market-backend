@@ -505,7 +505,7 @@ function buildTradeGeometry(input = {}) {
   };
 }
 
-module.exports = {
+export {
   DEFAULT_INSTRUMENT,
   DEFAULT_TICK_SIZE,
   DEFAULT_POINT_VALUE,
