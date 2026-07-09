@@ -1,6 +1,6 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-07-03 11:15",
+  "updatedAt": "2026-07-06 13:30",
   "schema": "active-wave-state-es@v3",
   "activeDegreeKeys": [
     "primary",
@@ -245,15 +245,15 @@
     },
     "minor": {
       "tf": "1h",
-      "direction": "DOWN",
+      "direction": "SIDEWAYS_DECISION",
       "active": true,
       "parentDegree": "intermediate",
       "parentWave": "W3",
       "activeWave": "W2",
-      "stage": "ACTIVE",
-      "currentRead": "MINOR_W1_COMPLETE_W2_CORRECTION_ACTIVE",
-      "headline": "Minor W1 complete at 7692 — Minor W2 correction active",
-      "action": "WATCH_MINOR_W2_CORRECTION_AND_TRIANGLE_RESOLUTION",
+      "stage": "E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH",
+      "currentRead": "MINOR_W2_E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH",
+      "headline": "Minor W2 E completed candidate \u2014 triangle resolution watch",
+      "action": "WATCH_7560_SUPPORT_HOLD_OR_7500_RESISTANCE_FAILURE",
       "marks": {
         "W1": {
           "low": {
@@ -324,7 +324,7 @@
             "price": 6699.38
           }
         ],
-        "summary": "Minor W2 is active. 7450–7480 is local triangle support / bounce watch. Full Minor W2 retracement ladder: 7394.05, 7209.73, 7060.75, 6911.78, 6699.38.",
+        "summary": "Minor W2 is active. 7450\u20137480 is local triangle support / bounce watch. Full Minor W2 retracement ladder: 7394.05, 7209.73, 7060.75, 6911.78, 6699.38.",
         "reasonCodes": [
           "MINOR_W2_RETRACEMENT_MODEL_BUILT",
           "MINOR_W2_FULL_RETRACEMENT_LADDER_ATTACHED",
@@ -338,9 +338,9 @@
         "active": true,
         "type": "CORRECTION_MULTI_MODEL",
         "preferredType": "ABCDE_TRIANGLE",
-        "direction": "SIDEWAYS_TO_DOWN",
-        "stage": "E_WATCH",
-        "currentRead": "MINOR_W2_ABCDE_TRIANGLE_CANDIDATE_E_WATCH",
+        "direction": "SIDEWAYS_DECISION",
+        "stage": "E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH",
+        "currentRead": "MINOR_W2_ABCDE_TRIANGLE_E_COMPLETED_CANDIDATE_RESOLUTION_WATCH",
         "parentWave": "MINOR_W1_COMPLETE",
         "marks": {
           "A": {
@@ -388,21 +388,23 @@
             ]
           },
           "E": {
-            "price": null,
-            "time": null,
-            "status": "PROJECTED",
-            "confidence": "LOW",
+            "price": 7449.75,
+            "time": "2026-07-06 06:00",
+            "status": "CANDIDATE",
+            "confidence": "MEDIUM",
             "basis": [
-              "E_LEG_PROJECTED_OR_PENDING",
-              "WATCH_LOCAL_SUPPORT_7450_7480",
-              "TRIANGLE_RESOLUTION_NOT_CONFIRMED"
-            ]
+              "E_LEG_REACHED_LOWER_TRIANGLE_REACTION_AREA",
+              "PRICE_BOUNCED_BACK_INTO_TRIANGLE_RANGE",
+              "WAITING_FOR_TRIANGLE_RESOLUTION_CONFIRMATION",
+              "WATCH_7560_SUPPORT_OR_7500_RESISTANCE"
+            ],
+            "maturity": "COMPLETED_CANDIDATE"
           }
         },
         "triangle": {
           "active": true,
-          "stage": "E_WATCH",
-          "currentRead": "MINOR_W2_ABCDE_TRIANGLE_E_WATCH",
+          "stage": "E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH",
+          "currentRead": "MINOR_W2_ABCDE_TRIANGLE_E_COMPLETED_CANDIDATE_RESOLUTION_WATCH",
           "marks": {
             "A": {
               "price": 7300.75,
@@ -441,14 +443,17 @@
               ]
             },
             "E": {
-              "price": null,
-              "time": null,
-              "status": "PROJECTED",
-              "confidence": "LOW",
+              "price": 7449.75,
+              "time": "2026-07-06 06:00",
+              "status": "CANDIDATE",
+              "confidence": "MEDIUM",
               "basis": [
-                "E_LEG_PROJECTED_OR_PENDING",
-                "WATCH_LOCAL_SUPPORT_7450_7480"
-              ]
+                "E_LEG_REACHED_LOWER_TRIANGLE_REACTION_AREA",
+                "PRICE_BOUNCED_BACK_INTO_TRIANGLE_RANGE",
+                "WAITING_FOR_TRIANGLE_RESOLUTION_CONFIRMATION",
+                "WATCH_7560_SUPPORT_OR_7500_RESISTANCE"
+              ],
+              "maturity": "COMPLETED_CANDIDATE"
             }
           }
         },
@@ -458,11 +463,31 @@
         "reasonCodes": [
           "MINOR_W2_CORRECTION_MULTI_MODEL",
           "PREFERRED_ABCDE_TRIANGLE",
-          "ABC_DOWN_ALTERNATE_IF_SUPPORT_BREAKS",
-          "LOCAL_SUPPORT_7450_7480_WATCH",
+          "MINOR_E_COMPLETED_CANDIDATE",
+          "POST_E_REACTION_WATCH",
+          "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
-        ]
+        ],
+        "postCompletionState": "POST_E_REACTION_WATCH",
+        "decisionWatch": {
+          "active": true,
+          "source": "BRIAN_CHART_REVIEW_POST_E_REACTION",
+          "state": "TRIANGLE_RESOLUTION_DECISION_WATCH",
+          "supportHoldLevel": 7560,
+          "bearControlLevel": 7500,
+          "bullPath": "If 7560 holds/reclaims as support, watch triangle resolution / recovery path upward.",
+          "bearPath": "If 7500 fails or becomes resistance, watch downside continuation / lower support test.",
+          "noExecution": true,
+          "noPermissionCreated": true,
+          "watchOnly": true,
+          "reasonCodes": [
+            "MINOR_E_COMPLETED_CANDIDATE",
+            "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+            "NO_EXECUTION",
+            "NO_PERMISSION_CREATED"
+          ]
+        }
       },
       "noExecution": true,
       "noPermissionCreated": true,
@@ -470,24 +495,43 @@
       "reasonCodes": [
         "MINOR_W1_COMPLETE",
         "MINOR_W2_CORRECTION_ACTIVE",
-        "MINOR_CORRECTION_PREFERRED_ABCDE_TRIANGLE",
-        "MINOR_W2_FULL_RETRACEMENT_LADDER_ATTACHED",
+        "MINOR_E_COMPLETED_CANDIDATE",
+        "TRIANGLE_RESOLUTION_DECISION_WATCH",
+        "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
-      ]
+      ],
+      "decisionWatch": {
+        "active": true,
+        "source": "BRIAN_CHART_REVIEW_POST_E_REACTION",
+        "state": "TRIANGLE_RESOLUTION_DECISION_WATCH",
+        "supportHoldLevel": 7560,
+        "bearControlLevel": 7500,
+        "bullPath": "If 7560 holds/reclaims as support, watch triangle resolution / recovery path upward.",
+        "bearPath": "If 7500 fails or becomes resistance, watch downside continuation / lower support test.",
+        "noExecution": true,
+        "noPermissionCreated": true,
+        "watchOnly": true,
+        "reasonCodes": [
+          "MINOR_E_COMPLETED_CANDIDATE",
+          "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED"
+        ]
+      }
     },
     "minute": {
       "tf": "10m",
-      "direction": "DOWN",
+      "direction": "NEUTRAL",
       "active": true,
       "parentDegree": "minor",
-      "parentWave": "E",
+      "parentWave": "MINOR_E_COMPLETED_CANDIDATE",
       "activeWave": "E",
-      "stage": "WATCH",
-      "currentRead": "MINUTE_INTERNAL_ABC_FOR_MINOR_E_WATCH",
-      "headline": "Minute ABC is tracking internal Minor E leg",
-      "action": "WATCH_MINUTE_C_DOWN_TO_COMPLETE_MINOR_E",
+      "stage": "POST_C_DOWN_REACTION_WATCH",
+      "currentRead": "MINUTE_C_DOWN_COMPLETED_POST_E_REACTION_WATCH",
+      "headline": "Minute C-down completed candidate \u2014 post-E reaction watch",
+      "action": "WATCH_7560_SUPPORT_HOLD_OR_7500_RESISTANCE_FAILURE",
       "marks": {
         "W1": {
           "low": {
@@ -551,12 +595,12 @@
       "correction": {
         "type": "ABC",
         "direction": "DOWN",
-        "active": true,
+        "active": false,
         "preferredType": "ABC_DOWN",
-        "stage": "B_MARKED_C_DOWN_WATCH_TO_COMPLETE_MINOR_E",
-        "currentRead": "MINUTE_A_DOWN_B_UP_MARKED_C_DOWN_WATCH_FOR_MINOR_E",
+        "stage": "C_COMPLETED_POST_E_REACTION_WATCH",
+        "currentRead": "MINUTE_C_DOWN_COMPLETED_POST_E_REACTION_WATCH",
         "parentWave": "MINOR_E_LEG",
-        "purpose": "INTERNAL_ABC_TO_COMPLETE_MINOR_E",
+        "purpose": "COMPLETED_INTERNAL_ABC_FOR_MINOR_E_HISTORY",
         "marks": {
           "A": {
             "price": 7480.5,
@@ -581,16 +625,39 @@
             ]
           },
           "C": {
-            "price": null,
-            "time": null,
-            "status": "PROJECTED",
-            "confidence": "LOW",
+            "price": 7449.75,
+            "time": "2026-07-06 06:00",
+            "status": "CANDIDATE",
+            "confidence": "MEDIUM",
             "basis": [
-              "WATCH_C_LEG_DOWN_AFTER_B_MARK",
-              "MINUTE_C_DOWN_EXPECTED_TO_COMPLETE_MINOR_E",
-              "C_NOT_CONFIRMED_YET"
-            ]
+              "MINUTE_C_DOWN_REACHED_MINOR_E_REACTION_AREA",
+              "PRICE_BOUNCED_AFTER_C_DOWN",
+              "OLD_C_DOWN_WATCH_RETIRED_FROM_ACTIVE_STATUS",
+              "WAITING_FOR_7560_SUPPORT_OR_7500_RESISTANCE"
+            ],
+            "maturity": "COMPLETED_CANDIDATE"
           }
+        },
+        "postCompletionState": "POST_E_REACTION_WATCH",
+        "retiredFromActiveWatch": true,
+        "replacedBy": "MINOR_E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH",
+        "decisionWatch": {
+          "active": true,
+          "source": "BRIAN_CHART_REVIEW_POST_E_REACTION",
+          "state": "TRIANGLE_RESOLUTION_DECISION_WATCH",
+          "supportHoldLevel": 7560,
+          "bearControlLevel": 7500,
+          "bullPath": "If 7560 holds/reclaims as support, watch triangle resolution / recovery path upward.",
+          "bearPath": "If 7500 fails or becomes resistance, watch downside continuation / lower support test.",
+          "noExecution": true,
+          "noPermissionCreated": true,
+          "watchOnly": true,
+          "reasonCodes": [
+            "MINOR_E_COMPLETED_CANDIDATE",
+            "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+            "NO_EXECUTION",
+            "NO_PERMISSION_CREATED"
+          ]
         }
       },
       "noExecution": true,
@@ -598,26 +665,44 @@
       "watchOnly": true,
       "reasonCodes": [
         "MINUTE_W5_COMPLETE_HISTORY_RETAINED",
-        "MINUTE_NOW_TRACKING_INTERNAL_ABC_FOR_MINOR_E",
-        "MINUTE_A_DOWN_CONFIRMED",
-        "MINUTE_B_UP_MARKED",
-        "WATCH_MINUTE_C_DOWN_TO_COMPLETE_MINOR_E",
+        "MINUTE_INTERNAL_ABC_FOR_MINOR_E_COMPLETED_CANDIDATE",
+        "MINUTE_C_DOWN_COMPLETED_POST_E_REACTION_WATCH",
+        "OLD_C_DOWN_WATCH_RETIRED_FROM_ACTIVE_STATUS",
+        "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
-      ]
+      ],
+      "decisionWatch": {
+        "active": true,
+        "source": "BRIAN_CHART_REVIEW_POST_E_REACTION",
+        "state": "TRIANGLE_RESOLUTION_DECISION_WATCH",
+        "supportHoldLevel": 7560,
+        "bearControlLevel": 7500,
+        "bullPath": "If 7560 holds/reclaims as support, watch triangle resolution / recovery path upward.",
+        "bearPath": "If 7500 fails or becomes resistance, watch downside continuation / lower support test.",
+        "noExecution": true,
+        "noPermissionCreated": true,
+        "watchOnly": true,
+        "reasonCodes": [
+          "MINOR_E_COMPLETED_CANDIDATE",
+          "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED"
+        ]
+      }
     },
     "subminute": {
       "tf": "10m",
-      "direction": "DOWN",
+      "direction": "NEUTRAL",
       "active": true,
       "parentDegree": "minute",
-      "parentWave": "MINOR_E_INTERNAL_ABC",
+      "parentWave": "MINOR_E_COMPLETED_CANDIDATE_POST_REACTION",
       "activeWave": "C",
-      "stage": "WATCH",
-      "currentRead": "SUBMINUTE_C_DOWN_WATCH_AFTER_MINUTE_B_MARKED",
-      "headline": "Subminute C-down watch after Minute B marked",
-      "action": "WATCH_REJECTION_AND_C_DOWN_PARTICIPATION",
+      "stage": "COMPLETED_CANDIDATE",
+      "currentRead": "SUBMINUTE_C_DOWN_RETIRED_WAIT_FOR_NEW_STRUCTURE",
+      "headline": "Subminute C-down completed candidate \u2014 waiting for new structure",
+      "action": "WAIT_FOR_7560_SUPPORT_OR_7500_RESISTANCE",
       "marks": {
         "A": {
           "price": 7480.5,
@@ -641,34 +726,54 @@
           ]
         },
         "C": {
-          "price": null,
-          "time": null,
-          "status": "PROJECTED",
-          "confidence": "LOW",
+          "price": 7449.75,
+          "time": "2026-07-06 06:00",
+          "status": "CANDIDATE",
+          "confidence": "MEDIUM",
           "basis": [
-            "SUBMINUTE_C_DOWN_PROJECTED",
-            "TACTICAL_TIMING_FOR_MINUTE_C_DOWN",
-            "NO_EXECUTION_PERMISSION_CREATED"
-          ]
+            "SUBMINUTE_C_DOWN_REACHED_MINOR_E_REACTION_AREA",
+            "OLD_SUBMINUTE_C_DOWN_WATCH_RETIRED",
+            "WAIT_FOR_NEW_STRUCTURE"
+          ],
+          "maturity": "COMPLETED_CANDIDATE"
         },
         "D": null,
         "E": null
       },
       "replaces": {
-        "activeWave": "B",
-        "currentRead": "SUBMINUTE_B_BOUNCE_WATCH_AFTER_A_DOWN",
-        "reason": "Minute B has now been marked at 7561.75. Current lower-degree focus is C-down watch."
+        "activeWave": "C",
+        "currentRead": "SUBMINUTE_C_DOWN_WATCH_AFTER_MINUTE_B_MARKED",
+        "reason": "Prior subminute C-down watch completed candidate and is retired from active watch."
       },
       "noExecution": true,
       "noPermissionCreated": true,
       "watchOnly": true,
       "reasonCodes": [
-        "SUBMINUTE_C_DOWN_WATCH",
-        "TACTICAL_TIMING_FOR_MINUTE_C_DOWN",
-        "MINUTE_B_MARKED",
+        "SUBMINUTE_C_DOWN_COMPLETED_CANDIDATE",
+        "OLD_C_DOWN_WATCH_RETIRED_FROM_ACTIVE_STATUS",
+        "WAIT_FOR_NEW_STRUCTURE",
+        "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
-      ]
+      ],
+      "decisionWatch": {
+        "active": true,
+        "source": "BRIAN_CHART_REVIEW_POST_E_REACTION",
+        "state": "TRIANGLE_RESOLUTION_DECISION_WATCH",
+        "supportHoldLevel": 7560,
+        "bearControlLevel": 7500,
+        "bullPath": "If 7560 holds/reclaims as support, watch triangle resolution / recovery path upward.",
+        "bearPath": "If 7500 fails or becomes resistance, watch downside continuation / lower support test.",
+        "noExecution": true,
+        "noPermissionCreated": true,
+        "watchOnly": true,
+        "reasonCodes": [
+          "MINOR_E_COMPLETED_CANDIDATE",
+          "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED"
+        ]
+      }
     }
   }
 }
