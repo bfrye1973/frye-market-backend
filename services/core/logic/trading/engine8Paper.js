@@ -18,7 +18,7 @@ const EXEC_FILE = path.resolve(DATA_DIR, "paper-executions.json");
 
 // ---- Config (env-based, safe defaults) ----
 function cfg() {
-  const allowlist = (process.env.ENGINE8_ALLOWLIST || "SPY,QQQ")
+  const allowlist = (process.env.ENGINE8_ALLOWLIST || "SPY,QQQ,ES")
     .split(",")
     .map((s) => s.trim().toUpperCase())
     .filter(Boolean);
@@ -210,9 +210,16 @@ function normalizeSide(ticket) {
     return "BUY_TO_OPEN";
   }
 
+  if (
+    assetType === "FUTURES" &&
+    intent === "ENTRY" &&
+    (direction === "LONG" || direction === "SHORT")
+  ) {
+    return direction === "LONG" ? "BUY" : "SELL";
+  }
+
   return "";
 }
-
 function normalizeAction(ticket, side) {
   const explicit = String(ticket?.action || "").trim().toUpperCase();
   if (explicit) return explicit;
@@ -229,9 +236,16 @@ function normalizeAction(ticket, side) {
     return "NEW_ENTRY";
   }
 
+  if (
+    assetType === "FUTURES" &&
+    intent === "ENTRY" &&
+    (direction === "LONG" || direction === "SHORT")
+  ) {
+    return "NEW_ENTRY";
+  }
+
   return isExitSide(side) ? "EXIT" : "NEW_ENTRY";
 }
-
 function normalizeQty(ticket) {
   const assetType = normalizeAssetType(ticket);
   const intent = normalizeIntent(ticket);
@@ -245,9 +259,16 @@ function normalizeQty(ticket) {
     return clampQty(ticket?.contracts ?? ticket?.qty ?? 3);
   }
 
+  if (
+    assetType === "FUTURES" &&
+    intent === "ENTRY" &&
+    (direction === "LONG" || direction === "SHORT")
+  ) {
+    return clampQty(ticket?.contracts ?? ticket?.qty);
+  }
+
   return clampQty(ticket?.qty);
 }
-
 // -------------------- Public API --------------------
 
 export async function getTradingStatus() {
@@ -466,8 +487,33 @@ export async function executeTradeTicket(ticket) {
     };
   }
 
-  const fillPrice =
-    assetType === "OPTION" ? option?.midPrice ?? null : intendedMid;
+const futuresEntryPrice =
+  assetType === "FUTURES" ? toNumberOrNull(ticket?.entry?.price) : null;
+
+if (
+  assetType === "FUTURES" &&
+  intent === "ENTRY" &&
+  (direction === "LONG" || direction === "SHORT") &&
+  (futuresEntryPrice == null || futuresEntryPrice <= 0)
+) {
+  return {
+    ok: false,
+    rejected: true,
+    reason: "MISSING_FUTURES_ENTRY_PRICE",
+    message:
+      "ES futures paper entry requires entry.price so avgPrice is non-null.",
+    idempotencyKey,
+    symbol,
+    strategyId,
+  };
+}
+
+const fillPrice =
+  assetType === "OPTION"
+    ? option?.midPrice ?? null
+    : assetType === "FUTURES"
+      ? futuresEntryPrice
+      : intendedMid;
 
   const filledAt = nowIso();
 
@@ -492,7 +538,11 @@ export async function executeTradeTicket(ticket) {
     engine7: ticket?.engine7 || null,
     engine5: ticket?.engine5 || null,
     signalEvent: ticket?.signalEvent || null,
-    option,
+    entry: ticket?.entry || null,
+    targets: Array.isArray(ticket?.targets) ? ticket.targets : [],
+    blocks: Array.isArray(ticket?.blocks) ? ticket.blocks : [],
+    sourceSignal: ticket?.sourceSignal || null,
+    option: assetType === "OPTION" ? option : null,
     status: "filled",
     filledQty: qty,
     avgPrice: fillPrice,
@@ -518,8 +568,13 @@ export async function executeTradeTicket(ticket) {
     avgPrice: fillPrice,
     assetType: order.assetType,
     option,
+    entry: ticket?.entry || null,
+    targets: Array.isArray(ticket?.targets) ? ticket.targets : [],
+    blocks: Array.isArray(ticket?.blocks) ? ticket.blocks : [],
+    ourceSignal: ticket?.sourceSignal || null,
+    option: assetType === "OPTION" ? option : null,
     signalEvent: ticket?.signalEvent || null,
-    status: "filled",
+    status: "filled",    
   });
   writeJson(EXEC_FILE, executions);
 
@@ -534,7 +589,11 @@ export async function executeTradeTicket(ticket) {
     idempotencyKey,
     paper: true,
     assetType: order.assetType,
-    option,
+    entry: ticket?.entry || null,
+    targets: Array.isArray(ticket?.targets) ? ticket.targets : [],
+    blocks: Array.isArray(ticket?.blocks) ? ticket.blocks : [],
+    sourceSignal: ticket?.sourceSignal || null,
+    option: assetType === "OPTION" ? option : null,
     filledAt,
   };
 
