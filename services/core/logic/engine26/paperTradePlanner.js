@@ -2703,23 +2703,24 @@ export function buildEngine26PaperTradePlan({
     };
   }        
 
-   const engine26TradePlanPreview = buildEngine26TradePlanPreview({
-    const engine26PaperTrialCandidate =
-      engine26TradePlanPreview?.paperTrialCandidate || null;
-     symbol: normalizedSymbol,
-     strategyId: normalizedStrategyId,
-     tf: normalizedTf,
-     permission,
-     engine22WaveStrategy,
-     engine25Context,
-     confluence,
-     engine15Decision,
-     engine26ImbalanceWatch,
-     engine26StructuralContext,
-     dailyCandleContext,
-     locationContext,
-     controlLevelContext,
-   });
+  const engine26TradePlanPreview = buildEngine26TradePlanPreview({
+    symbol: normalizedSymbol,
+    strategyId: normalizedStrategyId,
+    tf: normalizedTf,
+    permission,
+    engine22WaveStrategy,
+    engine25Context,
+    confluence,
+    engine15Decision,
+    engine26ImbalanceWatch,
+    engine26StructuralContext,
+    dailyCandleContext,
+    locationContext,
+    controlLevelContext,
+  });
+
+  const engine26PaperTrialCandidate =
+    engine26TradePlanPreview?.paperTrialCandidate || null;
 
   const blockers = [];
   const warnings = [];
