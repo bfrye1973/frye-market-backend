@@ -1,4 +1,6 @@
+"use strict";
 
+/**
  * Engine 26 Trade Geometry Reader
  *
  * Purpose:
