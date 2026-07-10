@@ -1,6 +1,6 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-07-06 13:30",
+  "updatedAt": "2026-07-10 12:00",
   "schema": "active-wave-state-es@v3",
   "activeDegreeKeys": [
     "primary",
@@ -181,7 +181,8 @@
           "basis": [
             "INTERMEDIATE_W3_ACTIVE_AFTER_CONFIRMED_W2_LOW",
             "MINOR_W1_COMPLETED_WITHIN_INTERMEDIATE_W3",
-            "MINOR_W2_CORRECTION_ACTIVE",
+            "MINOR_W2_COMPLETED_AT_7297",
+            "MINOR_W3_ACTIVE_FROM_7297",
             "INTERMEDIATE_PARENT_TREND_REMAINS_UP"
           ]
         }
@@ -236,6 +237,7 @@
       "watchOnly": true,
       "reasonCodes": [
         "INTERMEDIATE_W3_ACTIVE",
+        "MINOR_W3_ACTIVE_INSIDE_INTERMEDIATE_W3",
         "INTERMEDIATE_TARGET_MODEL_ATTACHED",
         "INTERMEDIATE_FULL_EXTENSION_LADDER_ATTACHED",
         "STRUCTURAL_CONTEXT_ONLY",
@@ -245,15 +247,15 @@
     },
     "minor": {
       "tf": "1h",
-      "direction": "SIDEWAYS_DECISION",
+      "direction": "UP",
       "active": true,
       "parentDegree": "intermediate",
       "parentWave": "W3",
-      "activeWave": "W2",
-      "stage": "E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH",
-      "currentRead": "MINOR_W2_E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH",
-      "headline": "Minor W2 E completed candidate \u2014 triangle resolution watch",
-      "action": "WATCH_7560_SUPPORT_HOLD_OR_7500_RESISTANCE_FAILURE",
+      "activeWave": "W3",
+      "stage": "ACTIVE",
+      "currentRead": "MINOR_W3_ACTIVE_FROM_7297_AFTER_MINOR_W2_COMPLETE",
+      "headline": "Minor W3 active from 7297 after completed Minor W2",
+      "action": "WATCH_MINOR_W3_CONTINUATION_7600_SUPPORT_HOLD",
       "marks": {
         "W1": {
           "low": {
@@ -261,7 +263,7 @@
             "time": "2026-03-31"
           },
           "high": {
-            "price": 7692,
+            "price": 7692.0,
             "time": "2026-07-02"
           },
           "status": "CONFIRMED",
@@ -273,507 +275,373 @@
           ]
         },
         "W2": {
+          "price": 7297.0,
+          "time": "2026-06-10 16:00",
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "MINOR_W2_COMPLETED_AT_7297",
+            "MINOR_W3_STARTED_FROM_7297",
+            "PRICE_RECLAIMED_UPPER_STRUCTURE_AFTER_W2_LOW"
+          ]
+        },
+        "W3": {
           "price": null,
           "time": null,
           "status": "ACTIVE",
-          "confidence": "MEDIUM",
+          "confidence": "MEDIUM_HIGH",
           "basis": [
-            "MINOR_W2_CORRECTION_ACTIVE_AFTER_MINOR_W1_COMPLETE",
-            "CURRENT_STRUCTURE_IS_SIDEWAYS_COMPRESSION",
-            "ABCDE_TRIANGLE_PREFERRED_CURRENTLY",
-            "ABC_DOWN_REMAINS_ALTERNATE_IF_SUPPORT_BREAKS"
+            "MINOR_W3_ACTIVE_AFTER_CONFIRMED_MINOR_W2_LOW",
+            "MINUTE_3_BREAKOUT_CANDIDATE_ACTIVE_INSIDE_MINOR_W3",
+            "WATCH_7600_SUPPORT_HOLD",
+            "WATCH_7645_AND_7692_CONFIRMATION_LEVELS"
           ]
         }
       },
       "targetModel": {
-        "source": "MINOR_W2_RETRACEMENT_FROM_MINOR_W1",
+        "source": "MINOR_W3_EXTENSION_FROM_MINOR_W2_LOW",
         "anchorLow": 6429.5,
-        "anchorHigh": 7692,
+        "anchorHigh": 7692.0,
+        "projectionBase": 7297.0,
         "range": 1262.5,
-        "localSupportWatch": {
-          "lo": 7450,
-          "hi": 7480,
-          "label": "LOCAL_TRIANGLE_SUPPORT_BOUNCE_WATCH"
-        },
         "levels": {
-          "r236": 7394.05,
-          "r382": 7209.73,
-          "r500": 7060.75,
-          "r618": 6911.78,
-          "r786": 6699.38
+          "e100": 8559.5,
+          "e1272": 8903.0,
+          "e1618": 9339.75,
+          "e200": 9822.0,
+          "e2618": 10602.25
         },
         "displayLevels": [
           {
-            "label": "0.236",
-            "price": 7394.05
+            "label": "1.000",
+            "price": 8559.5
           },
           {
-            "label": "0.382",
-            "price": 7209.73
+            "label": "1.272",
+            "price": 8903.0
           },
           {
-            "label": "0.500",
-            "price": 7060.75
+            "label": "1.618",
+            "price": 9339.75
           },
           {
-            "label": "0.618",
-            "price": 6911.78
+            "label": "2.000",
+            "price": 9822.0
           },
           {
-            "label": "0.786",
-            "price": 6699.38
+            "label": "2.618",
+            "price": 10602.25
           }
         ],
-        "summary": "Minor W2 is active. 7450\u20137480 is local triangle support / bounce watch. Full Minor W2 retracement ladder: 7394.05, 7209.73, 7060.75, 6911.78, 6699.38.",
+        "nextTarget": 8559.5,
+        "summary": "Minor W3 is active from 7297.0. Full extension ladder: 8559.5, 8903.0, 9339.75, 9822.0, 10602.25.",
         "reasonCodes": [
-          "MINOR_W2_RETRACEMENT_MODEL_BUILT",
-          "MINOR_W2_FULL_RETRACEMENT_LADDER_ATTACHED",
-          "LOCAL_SUPPORT_7450_7480_WATCH",
-          "TRUE_MINOR_W2_FIBS_LOWER_THAN_LOCAL_SUPPORT",
+          "MINOR_W3_EXTENSION_MODEL_BUILT",
+          "MINOR_W3_FULL_EXTENSION_LADDER_ATTACHED",
+          "MINOR_W3_ACTIVE",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
       },
-      "correction": {
+      "decisionWatch": {
         "active": true,
-        "type": "CORRECTION_MULTI_MODEL",
-        "preferredType": "ABCDE_TRIANGLE",
-        "direction": "SIDEWAYS_DECISION",
-        "stage": "E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH",
-        "currentRead": "MINOR_W2_ABCDE_TRIANGLE_E_COMPLETED_CANDIDATE_RESOLUTION_WATCH",
-        "parentWave": "MINOR_W1_COMPLETE",
-        "marks": {
-          "A": {
-            "price": 7300.75,
-            "time": "2026-06-10 15:00",
-            "status": "WATCH",
-            "confidence": "MEDIUM",
-            "basis": [
-              "TRIANGLE_A_MARKED_AT_7300_75",
-              "LOWER_TRIANGLE_ANCHOR",
-              "STRUCTURAL_TRIANGLE_CANDIDATE"
-            ]
-          },
-          "B": {
-            "price": 7644.5,
-            "time": "2026-06-15 09:00",
-            "status": "WATCH",
-            "confidence": "MEDIUM",
-            "basis": [
-              "TRIANGLE_B_MARKED_AT_7644_50",
-              "UPPER_TRIANGLE_ANCHOR",
-              "B_D_RESISTANCE_LINE_START"
-            ]
-          },
-          "C": {
-            "price": 7371.75,
-            "time": "2026-06-26 12:00",
-            "status": "WATCH",
-            "confidence": "MEDIUM",
-            "basis": [
-              "TRIANGLE_C_MARKED_AT_7371_75",
-              "LOWER_TRIANGLE_ANCHOR",
-              "A_C_SUPPORT_LINE"
-            ]
-          },
-          "D": {
-            "price": 7593,
-            "time": "2026-07-02 06:00",
-            "status": "WATCH",
-            "confidence": "MEDIUM",
-            "basis": [
-              "TRIANGLE_D_MARKED_AT_7593",
-              "UPPER_TRIANGLE_ANCHOR",
-              "B_D_RESISTANCE_LINE"
-            ]
-          },
-          "E": {
-            "price": 7449.75,
-            "time": "2026-07-06 06:00",
-            "status": "CANDIDATE",
-            "confidence": "MEDIUM",
-            "basis": [
-              "E_LEG_REACHED_LOWER_TRIANGLE_REACTION_AREA",
-              "PRICE_BOUNCED_BACK_INTO_TRIANGLE_RANGE",
-              "WAITING_FOR_TRIANGLE_RESOLUTION_CONFIRMATION",
-              "WATCH_7560_SUPPORT_OR_7500_RESISTANCE"
-            ],
-            "maturity": "COMPLETED_CANDIDATE"
-          }
-        },
-        "triangle": {
-          "active": true,
-          "stage": "E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH",
-          "currentRead": "MINOR_W2_ABCDE_TRIANGLE_E_COMPLETED_CANDIDATE_RESOLUTION_WATCH",
-          "marks": {
-            "A": {
-              "price": 7300.75,
-              "time": "2026-06-10 15:00",
-              "status": "WATCH",
-              "confidence": "MEDIUM",
-              "basis": [
-                "TRIANGLE_A_MARKED_AT_7300_75"
-              ]
-            },
-            "B": {
-              "price": 7644.5,
-              "time": "2026-06-15 09:00",
-              "status": "WATCH",
-              "confidence": "MEDIUM",
-              "basis": [
-                "TRIANGLE_B_MARKED_AT_7644_50"
-              ]
-            },
-            "C": {
-              "price": 7371.75,
-              "time": "2026-06-26 12:00",
-              "status": "WATCH",
-              "confidence": "MEDIUM",
-              "basis": [
-                "TRIANGLE_C_MARKED_AT_7371_75"
-              ]
-            },
-            "D": {
-              "price": 7593,
-              "time": "2026-07-02 06:00",
-              "status": "WATCH",
-              "confidence": "MEDIUM",
-              "basis": [
-                "TRIANGLE_D_MARKED_AT_7593"
-              ]
-            },
-            "E": {
-              "price": 7449.75,
-              "time": "2026-07-06 06:00",
-              "status": "CANDIDATE",
-              "confidence": "MEDIUM",
-              "basis": [
-                "E_LEG_REACHED_LOWER_TRIANGLE_REACTION_AREA",
-                "PRICE_BOUNCED_BACK_INTO_TRIANGLE_RANGE",
-                "WAITING_FOR_TRIANGLE_RESOLUTION_CONFIRMATION",
-                "WATCH_7560_SUPPORT_OR_7500_RESISTANCE"
-              ],
-              "maturity": "COMPLETED_CANDIDATE"
-            }
-          }
-        },
+        "source": "BRIAN_UPDATED_MINOR_W3_COUNT",
+        "state": "MINOR_W3_CONTINUATION_DECISION_WATCH",
+        "supportHoldLevel": 7600,
+        "warningLevel": 7560,
+        "subminuteInvalidation": 7466.25,
+        "minuteInvalidation": 7365,
+        "minorInvalidation": 7297,
+        "confirmationLevels": [
+          7645,
+          7692
+        ],
+        "bullPath": "If 7600 holds as support and price accepts above 7645/7692, Minor W3 continuation is favored.",
+        "bearPath": "If 7600 fails, then 7560 is warning. Losing 7466.25 weakens subminute W3; losing 7365 forces Minute count review; losing 7297 invalidates Minor W3 from W2.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
-          "MINOR_W2_CORRECTION_MULTI_MODEL",
-          "PREFERRED_ABCDE_TRIANGLE",
-          "MINOR_E_COMPLETED_CANDIDATE",
-          "POST_E_REACTION_WATCH",
-          "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+          "MINOR_W3_ACTIVE",
+          "WATCH_7600_SUPPORT_HOLD",
+          "WATCH_7645_7692_CONFIRMATION",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
-        ],
-        "postCompletionState": "POST_E_REACTION_WATCH",
-        "decisionWatch": {
-          "active": true,
-          "source": "BRIAN_CHART_REVIEW_POST_E_REACTION",
-          "state": "TRIANGLE_RESOLUTION_DECISION_WATCH",
-          "supportHoldLevel": 7560,
-          "bearControlLevel": 7500,
-          "bullPath": "If 7560 holds/reclaims as support, watch triangle resolution / recovery path upward.",
-          "bearPath": "If 7500 fails or becomes resistance, watch downside continuation / lower support test.",
-          "noExecution": true,
-          "noPermissionCreated": true,
-          "watchOnly": true,
-          "reasonCodes": [
-            "MINOR_E_COMPLETED_CANDIDATE",
-            "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
-            "NO_EXECUTION",
-            "NO_PERMISSION_CREATED"
-          ]
-        }
+        ]
       },
       "noExecution": true,
       "noPermissionCreated": true,
       "watchOnly": true,
       "reasonCodes": [
-        "MINOR_W1_COMPLETE",
-        "MINOR_W2_CORRECTION_ACTIVE",
-        "MINOR_E_COMPLETED_CANDIDATE",
-        "TRIANGLE_RESOLUTION_DECISION_WATCH",
-        "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+        "MINOR_W3_ACTIVE",
+        "MINOR_W2_CONFIRMED_AT_7297",
+        "MINUTE_3_BREAKOUT_CANDIDATE_ACTIVE",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
-      ],
-      "decisionWatch": {
-        "active": true,
-        "source": "BRIAN_CHART_REVIEW_POST_E_REACTION",
-        "state": "TRIANGLE_RESOLUTION_DECISION_WATCH",
-        "supportHoldLevel": 7560,
-        "bearControlLevel": 7500,
-        "bullPath": "If 7560 holds/reclaims as support, watch triangle resolution / recovery path upward.",
-        "bearPath": "If 7500 fails or becomes resistance, watch downside continuation / lower support test.",
-        "noExecution": true,
-        "noPermissionCreated": true,
-        "watchOnly": true,
-        "reasonCodes": [
-          "MINOR_E_COMPLETED_CANDIDATE",
-          "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
-          "NO_EXECUTION",
-          "NO_PERMISSION_CREATED"
-        ]
-      }
+      ]
     },
     "minute": {
       "tf": "10m",
-      "direction": "NEUTRAL",
+      "direction": "UP",
       "active": true,
       "parentDegree": "minor",
-      "parentWave": "MINOR_E_COMPLETED_CANDIDATE",
-      "activeWave": "E",
-      "stage": "POST_C_DOWN_REACTION_WATCH",
-      "currentRead": "MINUTE_C_DOWN_COMPLETED_POST_E_REACTION_WATCH",
-      "headline": "Minute C-down completed candidate \u2014 post-E reaction watch",
-      "action": "WATCH_7560_SUPPORT_HOLD_OR_7500_RESISTANCE_FAILURE",
+      "parentWave": "W3",
+      "activeWave": "W3",
+      "stage": "BREAKOUT_CANDIDATE",
+      "currentRead": "MINUTE_W3_BREAKOUT_CANDIDATE_FROM_7365_AFTER_MINUTE_W2",
+      "headline": "Minute W3 breakout candidate active from 7365 after completed Minute W2",
+      "action": "WATCH_7600_SUPPORT_HOLD_AND_7645_BREAK_HOLD",
       "marks": {
         "W1": {
           "low": {
-            "price": 7360,
-            "time": "2026-06-26 06:30"
+            "price": 7334.25,
+            "time": "2026-06-11 12:00"
           },
           "high": {
-            "price": 7459.75,
-            "time": "2026-06-26 08:30"
+            "price": 7645.0,
+            "time": "2026-06-15 09:00"
           },
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "MINUTE_W1_STARTED_FROM_LOCAL_LOW",
-            "MINUTE_W1_HIGH_CONFIRMED_AT_7459_75"
+            "MINUTE_W1_LOW_7334_25_ON_2026_06_11_1200",
+            "MINUTE_W1_HIGH_7645_ON_2026_06_15_0900",
+            "MINUTE_W1_INSIDE_MINOR_W3"
           ]
         },
         "W2": {
-          "price": 7369.25,
-          "time": "2026-06-26 13:00",
+          "price": 7365.0,
+          "time": "2026-06-25 19:00",
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "MINUTE_W2_PULLBACK_CONFIRMED",
-            "HELD_ABOVE_LOCAL_LOW"
+            "MINUTE_W2_COMPLETED_AT_7365",
+            "MINUTE_W3_STARTED_FROM_7365",
+            "HELD_ABOVE_MINOR_W2_LOW_7297"
           ]
         },
         "W3": {
-          "price": 7500,
-          "time": "2026-06-28 12:00",
-          "status": "CONFIRMED",
-          "confidence": "HIGH",
+          "price": null,
+          "time": null,
+          "status": "ACTIVE_CANDIDATE",
+          "confidence": "MEDIUM",
           "basis": [
-            "MINUTE_W3_IMPULSE_COMPLETED_NEAR_7500",
-            "FOLLOWED_BY_MINUTE_W4_PULLBACK"
-          ]
-        },
-        "W4": {
-          "price": 7506,
-          "time": "2026-07-01 05:00",
-          "status": "CONFIRMED",
-          "confidence": "HIGH",
-          "basis": [
-            "MINUTE_W4_PULLBACK_COMPLETED_AT_7506",
-            "SUBSEQUENT_FINAL_PUSH_COMPLETED"
-          ]
-        },
-        "W5": {
-          "price": 7595,
-          "time": "2026-07-02 07:00",
-          "status": "CONFIRMED",
-          "confidence": "HIGH",
-          "basis": [
-            "MINUTE_W5_COMPLETED_NEAR_7595",
-            "POST_W5_LOCAL_CORRECTION_STARTED",
-            "DO_NOT_CHASE_LONG_AFTER_COMPLETED_W5",
-            "W5_HISTORY_RETAINED_BUT_ACTIVE_READ_IS_MINOR_E_INTERNAL_ABC"
+            "MINUTE_W3_BREAKOUT_CANDIDATE_AFTER_MINUTE_W2_7365",
+            "SUBMINUTE_3_ACTIVE_FROM_7466_25",
+            "WATCH_7600_SUPPORT_HOLD",
+            "WATCH_7645_BREAK_HOLD_FOR_STRONGER_CONFIRMATION"
           ]
         }
       },
-      "correction": {
-        "type": "ABC",
-        "direction": "DOWN",
-        "active": false,
-        "preferredType": "ABC_DOWN",
-        "stage": "C_COMPLETED_POST_E_REACTION_WATCH",
-        "currentRead": "MINUTE_C_DOWN_COMPLETED_POST_E_REACTION_WATCH",
-        "parentWave": "MINOR_E_LEG",
-        "purpose": "COMPLETED_INTERNAL_ABC_FOR_MINOR_E_HISTORY",
-        "marks": {
-          "A": {
-            "price": 7480.5,
-            "time": "2026-07-02 11:00",
-            "status": "CONFIRMED",
-            "confidence": "HIGH",
-            "basis": [
-              "MINUTE_A_DOWN_COMPLETED_FROM_7595_W5_HIGH",
-              "A_LOW_MARKED_AT_7480_50",
-              "INTERNAL_A_LEG_OF_MINOR_E_PATH"
-            ]
-          },
-          "B": {
-            "price": 7561.75,
-            "time": "2026-07-03 07:30",
-            "status": "WATCH",
-            "confidence": "MEDIUM",
-            "basis": [
-              "MINUTE_B_UP_MARKED_AFTER_A_DOWN",
-              "B_BOUNCE_HIGH_MARKED_AT_7561_75",
-              "WATCH_MINUTE_C_DOWN_TO_COMPLETE_MINOR_E"
-            ]
-          },
-          "C": {
-            "price": 7449.75,
-            "time": "2026-07-06 06:00",
-            "status": "CANDIDATE",
-            "confidence": "MEDIUM",
-            "basis": [
-              "MINUTE_C_DOWN_REACHED_MINOR_E_REACTION_AREA",
-              "PRICE_BOUNCED_AFTER_C_DOWN",
-              "OLD_C_DOWN_WATCH_RETIRED_FROM_ACTIVE_STATUS",
-              "WAITING_FOR_7560_SUPPORT_OR_7500_RESISTANCE"
-            ],
-            "maturity": "COMPLETED_CANDIDATE"
-          }
+      "targetModel": {
+        "source": "MINUTE_W3_EXTENSION_FROM_MINUTE_W2_LOW",
+        "anchorLow": 7334.25,
+        "anchorHigh": 7645.0,
+        "projectionBase": 7365.0,
+        "range": 310.75,
+        "levels": {
+          "e100": 7675.75,
+          "e1272": 7760.25,
+          "e1618": 7867.75,
+          "e200": 7986.5,
+          "e2618": 8178.5
         },
-        "postCompletionState": "POST_E_REACTION_WATCH",
-        "retiredFromActiveWatch": true,
-        "replacedBy": "MINOR_E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH",
-        "decisionWatch": {
-          "active": true,
-          "source": "BRIAN_CHART_REVIEW_POST_E_REACTION",
-          "state": "TRIANGLE_RESOLUTION_DECISION_WATCH",
-          "supportHoldLevel": 7560,
-          "bearControlLevel": 7500,
-          "bullPath": "If 7560 holds/reclaims as support, watch triangle resolution / recovery path upward.",
-          "bearPath": "If 7500 fails or becomes resistance, watch downside continuation / lower support test.",
-          "noExecution": true,
-          "noPermissionCreated": true,
-          "watchOnly": true,
-          "reasonCodes": [
-            "MINOR_E_COMPLETED_CANDIDATE",
-            "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
-            "NO_EXECUTION",
-            "NO_PERMISSION_CREATED"
-          ]
-        }
+        "displayLevels": [
+          {
+            "label": "1.000",
+            "price": 7675.75
+          },
+          {
+            "label": "1.272",
+            "price": 7760.25
+          },
+          {
+            "label": "1.618",
+            "price": 7867.75
+          },
+          {
+            "label": "2.000",
+            "price": 7986.5
+          },
+          {
+            "label": "2.618",
+            "price": 8178.5
+          }
+        ],
+        "nextTarget": 7675.75,
+        "summary": "Minute W3 breakout candidate is active from 7365.0. Full extension ladder: 7675.75, 7760.25, 7867.75, 7986.5, 8178.5.",
+        "reasonCodes": [
+          "MINUTE_W3_EXTENSION_MODEL_BUILT",
+          "MINUTE_W3_FULL_EXTENSION_LADDER_ATTACHED",
+          "MINUTE_W3_BREAKOUT_CANDIDATE",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED"
+        ]
+      },
+      "decisionWatch": {
+        "active": true,
+        "source": "BRIAN_UPDATED_MINOR_W3_COUNT",
+        "state": "MINUTE_W3_BREAKOUT_DECISION_WATCH",
+        "supportHoldLevel": 7600,
+        "warningLevel": 7560,
+        "minuteInvalidation": 7365.0,
+        "confirmationLevels": [
+          7645,
+          7692
+        ],
+        "bullPath": "If 7600 holds and price breaks/holds 7645, Minute W3 confirmation improves.",
+        "bearPath": "If 7600 and 7560 fail, watch subminute failure and Minute W2 review.",
+        "noExecution": true,
+        "noPermissionCreated": true,
+        "watchOnly": true,
+        "reasonCodes": [
+          "MINUTE_W3_BREAKOUT_CANDIDATE",
+          "WATCH_7600_SUPPORT_HOLD",
+          "WATCH_7645_CONFIRMATION",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED"
+        ]
       },
       "noExecution": true,
       "noPermissionCreated": true,
       "watchOnly": true,
       "reasonCodes": [
-        "MINUTE_W5_COMPLETE_HISTORY_RETAINED",
-        "MINUTE_INTERNAL_ABC_FOR_MINOR_E_COMPLETED_CANDIDATE",
-        "MINUTE_C_DOWN_COMPLETED_POST_E_REACTION_WATCH",
-        "OLD_C_DOWN_WATCH_RETIRED_FROM_ACTIVE_STATUS",
-        "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+        "MINUTE_W3_BREAKOUT_CANDIDATE",
+        "MINUTE_W2_CONFIRMED_AT_7365",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
-      ],
+      ]
+    },
+    "subminute": {
+      "tf": "10m",
+      "direction": "UP",
+      "active": true,
+      "parentDegree": "minute",
+      "parentWave": "W3",
+      "activeWave": "W3",
+      "stage": "ACTIVE_CANDIDATE",
+      "currentRead": "SUBMINUTE_W3_ACTIVE_CANDIDATE_FROM_7466_25_AFTER_SUBMINUTE_W2",
+      "headline": "Subminute W3 active candidate from 7466.25 after completed Subminute W2",
+      "action": "WATCH_7600_SUPPORT_HOLD_AND_7602_RECLAIM_ACCEPTANCE",
+      "marks": {
+        "W1": {
+          "low": {
+            "price": 7378.25,
+            "time": "2026-06-26 11:00"
+          },
+          "high": {
+            "price": 7602.0,
+            "time": "2026-07-06 11:00"
+          },
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "SUBMINUTE_W1_LOW_7378_25_ON_2026_06_26_1100",
+            "SUBMINUTE_W1_HIGH_7602_ON_2026_07_06_1100",
+            "SUBMINUTE_W1_INSIDE_MINUTE_W3"
+          ]
+        },
+        "W2": {
+          "price": 7466.25,
+          "time": "2026-07-08 15:00",
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "SUBMINUTE_W2_COMPLETED_AT_7466_25",
+            "SUBMINUTE_W3_STARTED_FROM_7466_25",
+            "HELD_ABOVE_MINUTE_W2_LOW_7365"
+          ]
+        },
+        "W3": {
+          "price": null,
+          "time": null,
+          "status": "ACTIVE_CANDIDATE",
+          "confidence": "MEDIUM",
+          "basis": [
+            "SUBMINUTE_W3_ACTIVE_CANDIDATE_AFTER_SUBMINUTE_W2_7466_25",
+            "PRICE_RECLAIMED_7600_AREA",
+            "WATCH_7600_SUPPORT_HOLD",
+            "WATCH_7602_RECLAIM_ACCEPTANCE"
+          ]
+        }
+      },
+      "targetModel": {
+        "source": "SUBMINUTE_W3_EXTENSION_FROM_SUBMINUTE_W2_LOW",
+        "anchorLow": 7378.25,
+        "anchorHigh": 7602.0,
+        "projectionBase": 7466.25,
+        "range": 223.75,
+        "levels": {
+          "e100": 7690.0,
+          "e1272": 7750.75,
+          "e1618": 7828.25,
+          "e200": 7913.75,
+          "e2618": 8052.0
+        },
+        "displayLevels": [
+          {
+            "label": "1.000",
+            "price": 7690.0
+          },
+          {
+            "label": "1.272",
+            "price": 7750.75
+          },
+          {
+            "label": "1.618",
+            "price": 7828.25
+          },
+          {
+            "label": "2.000",
+            "price": 7913.75
+          },
+          {
+            "label": "2.618",
+            "price": 8052.0
+          }
+        ],
+        "nextTarget": 7690.0,
+        "summary": "Subminute W3 active candidate is active from 7466.25. Full extension ladder: 7690.0, 7750.75, 7828.25, 7913.75, 8052.0.",
+        "reasonCodes": [
+          "SUBMINUTE_W3_EXTENSION_MODEL_BUILT",
+          "SUBMINUTE_W3_FULL_EXTENSION_LADDER_ATTACHED",
+          "SUBMINUTE_W3_ACTIVE_CANDIDATE",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED"
+        ]
+      },
       "decisionWatch": {
         "active": true,
-        "source": "BRIAN_CHART_REVIEW_POST_E_REACTION",
-        "state": "TRIANGLE_RESOLUTION_DECISION_WATCH",
-        "supportHoldLevel": 7560,
-        "bearControlLevel": 7500,
-        "bullPath": "If 7560 holds/reclaims as support, watch triangle resolution / recovery path upward.",
-        "bearPath": "If 7500 fails or becomes resistance, watch downside continuation / lower support test.",
+        "source": "BRIAN_UPDATED_SUBMINUTE_W3_COUNT",
+        "state": "SUBMINUTE_W3_BREAKOUT_DECISION_WATCH",
+        "supportHoldLevel": 7600,
+        "reclaimLevel": 7602,
+        "subminuteInvalidation": 7466.25,
+        "minuteInvalidation": 7365,
+        "bullPath": "If 7600/7602 holds as support, subminute W3 continuation is favored.",
+        "bearPath": "If 7600 fails and price loses 7466.25, subminute W3 candidate fails and Minute W3 requires review.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
-          "MINOR_E_COMPLETED_CANDIDATE",
-          "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+          "SUBMINUTE_W3_ACTIVE_CANDIDATE",
+          "WATCH_7600_7602_SUPPORT_HOLD",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
-      }
-    },
-    "subminute": {
-      "tf": "10m",
-      "direction": "NEUTRAL",
-      "active": true,
-      "parentDegree": "minute",
-      "parentWave": "MINOR_E_COMPLETED_CANDIDATE_POST_REACTION",
-      "activeWave": "C",
-      "stage": "COMPLETED_CANDIDATE",
-      "currentRead": "SUBMINUTE_C_DOWN_RETIRED_WAIT_FOR_NEW_STRUCTURE",
-      "headline": "Subminute C-down completed candidate \u2014 waiting for new structure",
-      "action": "WAIT_FOR_7560_SUPPORT_OR_7500_RESISTANCE",
-      "marks": {
-        "A": {
-          "price": 7480.5,
-          "time": "2026-07-02 11:00",
-          "status": "CONFIRMED",
-          "confidence": "HIGH",
-          "basis": [
-            "SUBMINUTE_A_DOWN_ALIGNED_WITH_MINUTE_A",
-            "A_LOW_MARKED_AT_7480_50"
-          ]
-        },
-        "B": {
-          "price": 7561.75,
-          "time": "2026-07-03 07:30",
-          "status": "WATCH",
-          "confidence": "MEDIUM",
-          "basis": [
-            "SUBMINUTE_B_UP_ALIGNED_WITH_MINUTE_B",
-            "B_HIGH_MARKED_AT_7561_75",
-            "WATCH_REJECTION_FOR_C_DOWN"
-          ]
-        },
-        "C": {
-          "price": 7449.75,
-          "time": "2026-07-06 06:00",
-          "status": "CANDIDATE",
-          "confidence": "MEDIUM",
-          "basis": [
-            "SUBMINUTE_C_DOWN_REACHED_MINOR_E_REACTION_AREA",
-            "OLD_SUBMINUTE_C_DOWN_WATCH_RETIRED",
-            "WAIT_FOR_NEW_STRUCTURE"
-          ],
-          "maturity": "COMPLETED_CANDIDATE"
-        },
-        "D": null,
-        "E": null
-      },
-      "replaces": {
-        "activeWave": "C",
-        "currentRead": "SUBMINUTE_C_DOWN_WATCH_AFTER_MINUTE_B_MARKED",
-        "reason": "Prior subminute C-down watch completed candidate and is retired from active watch."
       },
       "noExecution": true,
       "noPermissionCreated": true,
       "watchOnly": true,
       "reasonCodes": [
-        "SUBMINUTE_C_DOWN_COMPLETED_CANDIDATE",
-        "OLD_C_DOWN_WATCH_RETIRED_FROM_ACTIVE_STATUS",
-        "WAIT_FOR_NEW_STRUCTURE",
-        "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
+        "SUBMINUTE_W3_ACTIVE_CANDIDATE",
+        "SUBMINUTE_W2_CONFIRMED_AT_7466_25",
+        "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
-      ],
-      "decisionWatch": {
-        "active": true,
-        "source": "BRIAN_CHART_REVIEW_POST_E_REACTION",
-        "state": "TRIANGLE_RESOLUTION_DECISION_WATCH",
-        "supportHoldLevel": 7560,
-        "bearControlLevel": 7500,
-        "bullPath": "If 7560 holds/reclaims as support, watch triangle resolution / recovery path upward.",
-        "bearPath": "If 7500 fails or becomes resistance, watch downside continuation / lower support test.",
-        "noExecution": true,
-        "noPermissionCreated": true,
-        "watchOnly": true,
-        "reasonCodes": [
-          "MINOR_E_COMPLETED_CANDIDATE",
-          "WATCH_7560_SUPPORT_OR_7500_RESISTANCE",
-          "NO_EXECUTION",
-          "NO_PERMISSION_CREATED"
-        ]
-      }
+      ]
     }
   }
 }
