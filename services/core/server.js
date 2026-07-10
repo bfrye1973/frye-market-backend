@@ -29,6 +29,7 @@ import marketNarratorAIRouter from "./routes/marketNarratorAI.js";
 import drawingsRouter from "./routes/drawings.js";
 import optionsScalpRouter from "./routes/optionsScalp.js";
 import tradingRouter from "./routes/trading.js";
+import schwabAuthRouter from "./routes/schwabAuth.js";
 import { momentumContextRouter } from "./routes/momentumContext.js";
 import scalpLabRouter from "./routes/scalpLab.js";
 
@@ -94,6 +95,7 @@ app.use((req, res, next) => {
         "X-Requested-With",
         "X-Idempotency-Key",
         "X-ENGINE-CRON-TOKEN",
+        "X-Engine8-Admin-Secret",
       ].join(", ")
   );
 
@@ -145,6 +147,7 @@ app.use("/api/v1/es-reaction-score", esReactionScore);
 app.use("/api/v1/smz-hierarchy", smzHierarchy);
 
 app.use("/api/trading", tradingRouter);
+app.use("/api/auth/schwab", schwabAuthRouter);
 
 app.use("/api/v1", engine5ContextRouter);
 app.use("/api/v1", fibLevelsRouter);
