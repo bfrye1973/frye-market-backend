@@ -1,8 +1,3 @@
-cd /opt/render/project/src
-
-mkdir -p services/core/logic/trading/schwab
-
-cat > services/core/logic/trading/schwab/schwabConfig.js <<'EOF'
 // services/core/logic/trading/schwab/schwabConfig.js
 // Engine 8 — Schwab configuration
 //
