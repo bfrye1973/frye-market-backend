@@ -1,5 +1,6 @@
 // services/core/routes/schwabAuth.js
-// Engine 8 — Schwab readiness and OAuth routes.
+// Engine 8 — Schwab readiness, OAuth, account discovery,
+// and manual account selection routes.
 //
 // Phase 1 only.
 // No order-building or order-placement routes exist here.
@@ -27,6 +28,14 @@ import {
   getSchwabAccountNumbers,
 } from "../logic/trading/schwab/schwabClient.js";
 
+import {
+  getSafeSelectedSchwabAccountStatus,
+} from "../logic/trading/schwab/schwabAccountStore.js";
+
+import {
+  selectSchwabAccountByIndex,
+} from "../logic/trading/schwab/schwabAccountSelection.js";
+
 const router = express.Router();
 
 function nowIso() {
@@ -39,7 +48,7 @@ function safeErrorMessage(error) {
   );
 
   // Do not return authorization codes, tokens, secrets,
-  // request headers, or full broker responses.
+  // account hashes, request headers, or full broker responses.
   return message.slice(0, 500);
 }
 
@@ -86,17 +95,21 @@ router.get("/readiness", async (_req, res) => {
     const configSummary = getSafeSchwabConfigSummary();
     const validation = validateSchwabPhase1Config();
     const tokenStatus = getSafeTokenStatus();
+    const selectedAccountStatus =
+      getSafeSelectedSchwabAccountStatus();
 
     const hasRefreshToken =
       tokenStatus.hasRefreshToken === true &&
       tokenStatus.refreshTokenExpired !== true;
 
-    const hasAccountHash = false;
+    const hasAccountHash =
+      selectedAccountStatus.selectedAccountPresent === true;
 
     const canReadAccounts =
       validation.ok &&
       hasRefreshToken;
 
+    // Phase 1 never places orders.
     const canPlaceOrders = false;
 
     return res.json({
@@ -136,6 +149,16 @@ router.get("/readiness", async (_req, res) => {
         tokenStatus.refreshExpiresAt,
 
       hasAccountHash,
+
+      selectedAccountPresent:
+        selectedAccountStatus.selectedAccountPresent,
+      selectedMaskedAccountNumber:
+        selectedAccountStatus.maskedAccountNumber,
+      selectedAccountReadable:
+        selectedAccountStatus.readable,
+      selectedAccountError:
+        selectedAccountStatus.error,
+
       canReadAccounts,
 
       liveTradingEnabled:
@@ -150,8 +173,10 @@ router.get("/readiness", async (_req, res) => {
       canPlaceOrders,
       willPlaceOrder: false,
 
-      phase1ConfigValid: validation.ok,
-      reasonCodes: validation.reasonCodes,
+      phase1ConfigValid:
+        validation.ok,
+      reasonCodes:
+        validation.reasonCodes,
 
       tokenStatusError:
         tokenStatus.error || null,
@@ -163,7 +188,9 @@ router.get("/readiness", async (_req, res) => {
       ok: false,
       rejected: true,
       reason: "SCHWAB_READINESS_FAILED",
-      reasonCodes: ["SCHWAB_READINESS_FAILED"],
+      reasonCodes: [
+        "SCHWAB_READINESS_FAILED",
+      ],
       message: safeErrorMessage(error),
       canPlaceOrders: false,
       willPlaceOrder: false,
@@ -197,7 +224,8 @@ router.get(
         });
       }
 
-      const result = buildSchwabLoginUrl();
+      const result =
+        buildSchwabLoginUrl();
 
       return res.json(result);
     } catch (error) {
@@ -359,7 +387,8 @@ router.get(
         broker: "SCHWAB",
         accountCount:
           result.accountCount,
-        accounts: safeAccounts,
+        accounts:
+          safeAccounts,
         readOnly: true,
         canPlaceOrders: false,
         willPlaceOrder: false,
@@ -381,10 +410,57 @@ router.get(
           reasonCodes: [
             "SCHWAB_ACCOUNTS_REQUEST_FAILED",
           ],
-          message: safeErrorMessage(error),
+          message:
+            safeErrorMessage(error),
           canPlaceOrders: false,
           willPlaceOrder: false,
         });
+    }
+  }
+);
+
+/**
+ * POST /api/auth/schwab/select-account
+ *
+ * Manually selects one Schwab account by index.
+ * Requires X-Engine8-Admin-Secret.
+ *
+ * Raw account hash is encrypted and never returned.
+ */
+router.post(
+  "/select-account",
+  requireEngine8Admin,
+  async (req, res) => {
+    try {
+      const result =
+        await selectSchwabAccountByIndex({
+          accountIndex:
+            req.body?.accountIndex,
+          expectedMaskedAccountNumber:
+            req.body?.expectedMaskedAccountNumber,
+          selectedBy:
+            "BRIAN",
+        });
+
+      return res
+        .status(
+          result.rejected ? 409 : 200
+        )
+        .json(result);
+    } catch (error) {
+      return res.status(502).json({
+        ok: false,
+        rejected: true,
+        reason:
+          "SCHWAB_ACCOUNT_SELECTION_FAILED",
+        reasonCodes: [
+          "SCHWAB_ACCOUNT_SELECTION_FAILED",
+        ],
+        message:
+          safeErrorMessage(error),
+        canPlaceOrders: false,
+        willPlaceOrder: false,
+      });
     }
   }
 );
