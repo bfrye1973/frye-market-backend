@@ -1849,9 +1849,7 @@ const direction = pickUsableDirection(
   engine15Decision?.direction,
   engine22WaveStrategy?.waveOpportunity?.direction,
   currentLifecycleState?.direction
-);
-
-  const direction = String(directionRaw || "NONE").toUpperCase();
+); 
 
   const setupType =
     paperReaction?.setupType ||
