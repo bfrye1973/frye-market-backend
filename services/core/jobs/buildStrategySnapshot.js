@@ -48,6 +48,7 @@ import {
 } from "../logic/engine26/paperTradePlanner.js";
 import { listTrades } from "../logic/journal/tradeJournalStore.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
+import { buildEngine27Strategies } from "../logic/engine27/buildEngine27Strategies.js";
 import {
   getManualLevelRowsFor,
   attachManualLevelsToEngine2Block,
@@ -7863,6 +7864,13 @@ result.strategies[s.strategyId] = {
   }
 
   preserveLastGoodEngine22Timeline(result, previousSnapshot);
+
+  // Engine 27 — five independent read-only strategy decisions.
+  // Reads completed Engine 22, Engine 3, Engine 4, Engine 6, and Engine 26 context.
+  // Does not create permission, sizing, tickets, execution, or journal records.
+  result.engine27Strategies = buildEngine27Strategies({
+    snapshot: result,
+  });
 
   if (String(symbol || "").toUpperCase() === "ES") {
     const scalp = result.strategies?.["intraday_scalp@10m"];
