@@ -139,6 +139,7 @@ function buildEngine26ReplayMarker({
     "PAPER_SHORT_RESEARCH_WATCH",
     "PAPER_WATCH_FAST",
     "PAPER_ALLOW",
+    "FAST_INTRADAY_PAPER_ALLOW",
   ]);
 
   const shouldCreate =
@@ -2196,7 +2197,7 @@ const allowed =
 
     blockers: uniqueBlockers,
     warnings: uniqueWarnings,
-    reasonCodes: uniqueReasonCodes,
+    reasonCodes: [...new Set(reasonCodes.filter(Boolean))],
   };
 }
 
