@@ -1985,6 +1985,8 @@ const direction = pickUsableDirection(
   const uniqueWarnings = [...new Set(warnings.filter(Boolean))];
   const uniqueReasonCodes = [...new Set(reasonCodes.filter(Boolean))];
 
+  
+
 const engine26IntradayCandidate =
   engine26ImbalanceWatch?.active === true ||
   engine26ImbalanceWatch?.structuralContext?.active === true ||
@@ -2022,6 +2024,17 @@ const standardPaperAllow =
 const allowed =
   fastIntradayPaperAllow === true ||
   standardPaperAllow === true;
+
+  if (fastIntradayPaperAllow) {
+  reasonCodes.push("FAST_INTRADAY_PAPER_ALLOW");
+  reasonCodes.push("ENGINE6_INTRADAY_PAPER_LANE");
+  reasonCodes.push("ENGINE15_BYPASSED_FOR_FAST_INTRADAY_PAPER");
+  reasonCodes.push("ENGINE26_INTRADAY_CANDIDATE_CONFIRMED");
+  reasonCodes.push("ENGINE3_REACTION_ACTIVE");
+  reasonCodes.push("ENGINE4_NOT_HARD_BLOCKED");
+  reasonCodes.push("ENGINE25_NOT_HARD_BLOCKED");
+  reasonCodes.push("PAPER_ONLY_NO_REAL_EXECUTION");
+}
 
   const watchFast =
     allowed !== true &&
@@ -2095,7 +2108,9 @@ const allowed =
     reasonCodes.push("NO_EXECUTION");
   }
   const decision =
-    allowed
+    fastIntradayPaperAllow
+      ? "FAST_INTRADAY_PAPER_ALLOW"
+      : allowed
       ? "PAPER_ALLOW"
       : shortResearchWatch
       ? "PAPER_SHORT_RESEARCH_WATCH"
@@ -2110,6 +2125,11 @@ const allowed =
     mode: "PAPER_ONLY",
     decision,
     allowed,
+
+    intradayPaperLane: fastIntradayPaperAllow === true,
+    engine15Bypassed: fastIntradayPaperAllow === true,
+    standardPaperAllow: standardPaperAllow === true,
+    fastIntradayPaperAllow: fastIntradayPaperAllow === true,
 
     realExecutionAllowed: false,
     executable: false,
@@ -2152,8 +2172,14 @@ const allowed =
     paperShortResearchEnabled:
       paperShortResearchEnabled ||
       shortResearchWatch === true ||
-      structuralFastWatch === true,
-    paperShortAllowed: false,
+      structuralFastWatch === true ||
+      (fastIntradayPaperAllow === true && direction === "SHORT"),
+
+    paperShortAllowed:
+      fastIntradayPaperAllow === true && direction === "SHORT",
+
+    paperLongAllowed:
+      fastIntradayPaperAllow === true && direction === "LONG",
 
     structuralWatchOnly: structuralFastWatch === true,
     fastWatch: structuralFastWatch === true || watchFast === true,
