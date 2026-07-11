@@ -1856,8 +1856,14 @@ function hasCleanTargetPath({
     return false;
   }
 
-  if (entryPrice == null || targetPrice == null) return false;
-
+  if (
+    entryPrice == null ||
+    targetPrice == null ||
+    entryPrice <= 0 ||
+    targetPrice <= 0
+  ) {
+    return false;
+  }
   if (direction === "LONG") return targetPrice > entryPrice;
   if (direction === "SHORT") return targetPrice < entryPrice;
 
@@ -2907,7 +2913,9 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
 
   const normalTargetIsValid =
     entryPrice != null &&
+    entryPrice > 0 &&
     targetPrice != null &&
+    targetPrice > 0 &&
     (
       (direction === "LONG" && targetPrice > entryPrice) ||
       (direction === "SHORT" && targetPrice < entryPrice)
