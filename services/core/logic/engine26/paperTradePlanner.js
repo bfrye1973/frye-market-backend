@@ -1645,16 +1645,34 @@ function getCurrentPrice({
   engine22WaveStrategy,
   confluence,
 }) {
-  return roundToTick(
-    permission?.paper?.currentPrice ??
-      engine15Decision?.paperScalpReadiness?.currentPrice ??
-      engine15Decision?.currentPrice ??
-      engine22WaveStrategy?.currentLifecycleState?.confirmationContext?.reference
-        ?.currentPrice ??
-      engine22WaveStrategy?.currentLifecycleState?.currentPrice ??
-      getCurrentLevelAction(confluence)?.currentPrice ??
-      confluence?.price
-  );
+  const candidates = [
+    permission?.paper?.currentPrice,
+
+    confluence?.context?.reaction?.engine3FastImbalanceReaction?.currentPrice,
+    confluence?.context?.reaction?.paperScalpReaction?.currentPrice,
+    confluence?.context?.reaction?.currentLevelAction?.currentPrice,
+
+    engine15Decision?.paperScalpReadiness?.currentPrice,
+    engine15Decision?.currentPrice,
+
+    engine22WaveStrategy?.currentLifecycleState?.confirmationContext?.reference
+      ?.currentPrice,
+
+    engine22WaveStrategy?.currentLifecycleState?.currentPrice,
+
+    confluence?.price,
+    confluence?.currentPrice,
+  ];
+
+  for (const candidate of candidates) {
+    const price = toNum(candidate);
+
+    if (price != null && price > 0) {
+      return roundToTick(price);
+    }
+  }
+
+  return null;
 }
 
 function getDirection({ permission, engine15Decision, engine22WaveStrategy }) {
@@ -2849,7 +2867,11 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
 
   const entryPrice = roundToTick(currentPrice);
 
-  if (entryPrice == null) blockers.push("MISSING_CURRENT_PRICE");
+  if (entryPrice == null) {
+    blockers.push("MISSING_CURRENT_PRICE");
+  } else if (entryPrice < 1000) {
+    blockers.push("INVALID_ES_CURRENT_PRICE");
+  }
 
   let stopPrice = getStopPrice({
     direction,
@@ -2875,7 +2897,9 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
 
   const normalStopIsValid =
     entryPrice != null &&
+    entryPrice > 0 &&
     stopPrice != null &&
+    stopPrice > 0 &&
     (
       (direction === "LONG" && stopPrice < entryPrice) ||
       (direction === "SHORT" && stopPrice > entryPrice)
