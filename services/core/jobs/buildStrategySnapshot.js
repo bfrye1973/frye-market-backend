@@ -1727,7 +1727,11 @@ function buildEngine6PaperPermission({
   const currentLifecycleState =
     engine22WaveStrategy?.currentLifecycleState || null;
 
-  const paperShortResearchEnabled = false;
+  const isFastIntradayPaperLane =
+    String(symbol || "").toUpperCase() === "ES" &&
+    strategyId === "intraday_scalp@10m";
+
+  const paperShortResearchEnabled = isFastIntradayPaperLane;
 
   const engine26PreferredDirection = String(
     engine26ImbalanceWatch?.preferredDirection || ""
@@ -1824,24 +1828,38 @@ function buildEngine6PaperPermission({
     reactionActive === true ||
     participationActive === true;
 
-  const directionRaw =
-    paperReadiness?.direction ||
-    paperReaction?.direction ||
-    paperParticipation?.intendedDirection ||
-    paperParticipation?.direction ||
-    participationDirection ||
-    engine15Decision?.direction ||
-    engine22WaveStrategy?.waveOpportunity?.direction ||
-    currentLifecycleState?.direction ||
-    "NONE";
+const pickUsableDirection = (...values) => {
+  for (const value of values) {
+    const v = String(value || "").toUpperCase();
+    if (v && v !== "NONE" && v !== "NEUTRAL" && v !== "UNKNOWN") {
+      return v;
+    }
+  }
+
+  return "NONE";
+};
+
+const direction = pickUsableDirection(
+  paperReaction?.direction,
+  paperParticipation?.intendedDirection,
+  paperParticipation?.direction,
+  participationDirection,
+  paperReadiness?.direction,
+  engine15Decision?.direction,
+  engine22WaveStrategy?.waveOpportunity?.direction,
+  currentLifecycleState?.direction
+);
 
   const direction = String(directionRaw || "NONE").toUpperCase();
 
   const setupType =
+    paperReaction?.setupType ||
+    engine26ImbalanceWatch?.structuralTemplate ||
+    engine26ImbalanceWatch?.structuralPlaybook?.template ||
+    engine26ImbalanceWatch?.status ||
     paperReadiness?.setupType ||
     engine15Decision?.strategyType ||
     engine22WaveStrategy?.waveOpportunity?.setupType ||
-    paperReaction?.setupType ||
     currentLifecycleState?.key ||
     "UNKNOWN_PAPER_SCALP_SETUP";
 
@@ -1967,15 +1985,43 @@ function buildEngine6PaperPermission({
   const uniqueWarnings = [...new Set(warnings.filter(Boolean))];
   const uniqueReasonCodes = [...new Set(reasonCodes.filter(Boolean))];
 
-  const allowed =
-    uniqueBlockers.length === 0 &&
-    lifecyclePaperCandidate &&
-    readinessAllowed &&
-    reactionAllowed &&
-    participationAllowed &&
-    participationHardBlocked !== true &&
-    engine25HardBlocked !== true &&
-    direction === "LONG";
+const engine26IntradayCandidate =
+  engine26ImbalanceWatch?.active === true ||
+  engine26ImbalanceWatch?.structuralContext?.active === true ||
+  engine26Status.includes("WATCH") ||
+  engine26Template.includes("ABC_DOWN") ||
+  engine26Template.includes("BOUNCE") ||
+  engine26PreferredDirection.includes("WATCH") ||
+  engine26PreferredDirection === "LONG" ||
+  engine26PreferredDirection === "SHORT" ||
+  engine26PreferredDirection === "SHORT_WATCH_ONLY";
+
+const fastIntradayPaperAllow =
+  isFastIntradayPaperLane === true &&
+  engine26IntradayCandidate === true &&
+  lifecyclePaperCandidate === true &&
+  reactionActive === true &&
+  participationActive === true &&
+  participationHardBlocked !== true &&
+  engine25HardBlocked !== true &&
+  direction !== "NONE" &&
+  direction !== "NEUTRAL" &&
+  Number.isFinite(targetPoints) &&
+  targetPoints >= 8;
+
+const standardPaperAllow =
+  uniqueBlockers.length === 0 &&
+  lifecyclePaperCandidate &&
+  readinessAllowed &&
+  reactionAllowed &&
+  participationAllowed &&
+  participationHardBlocked !== true &&
+  engine25HardBlocked !== true &&
+  direction === "LONG";
+
+const allowed =
+  fastIntradayPaperAllow === true ||
+  standardPaperAllow === true;
 
   const watchFast =
     allowed !== true &&
