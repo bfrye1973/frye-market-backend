@@ -2366,7 +2366,11 @@ function buildEngine26TradePlanPreview({
     engine15Decision,
   });
 
-  const paperAllowed = paper?.allowed === true && paper?.decision === "PAPER_ALLOW";
+  const paperDecision = safeUpper(paper?.decision);
+
+  const paperAllowed =
+    paper?.allowed === true &&
+    ["PAPER_ALLOW", "FAST_INTRADAY_PAPER_ALLOW"].includes(paperDecision);
 
   return {
     active: engine26ImbalanceWatch?.active === true,
@@ -2638,6 +2642,18 @@ export function buildEngine26PaperTradePlan({
 
   const paper = permission?.paper || null;
 
+  const plannerPaperDecision = safeUpper(paper?.decision);
+
+  const isFastIntradayPaperAllow =
+    normalizedSymbol === SYMBOL &&
+    normalizedStrategyId === STRATEGY_ID &&
+    plannerPaperDecision === "FAST_INTRADAY_PAPER_ALLOW" &&
+    paper?.allowed === true;
+
+  const isPaperTradeAllowedDecision =
+    paper?.allowed === true &&
+    ["PAPER_ALLOW", "FAST_INTRADAY_PAPER_ALLOW"].includes(plannerPaperDecision);
+
   const engineContext = buildEngineContext({
     engine22WaveStrategy,
     confluence,
@@ -2740,35 +2756,41 @@ export function buildEngine26PaperTradePlan({
     blockers.push("STRATEGY_NOT_INTRADAY_SCALP_10M");
   }
 
-  if (!paper || typeof paper !== "object") {
-    blockers.push("MISSING_PERMISSION_PAPER");
-  } else {
-    if (paper.allowed !== true) blockers.push("PAPER_PERMISSION_NOT_ALLOWED");
-    if (paper.mode !== MODE) blockers.push("PAPER_PERMISSION_NOT_PAPER_ONLY");
-    if (paper.decision !== "PAPER_ALLOW") {
-      if (paper.decision === "PAPER_REDUCE") {
-        warnings.push("PAPER_REDUCE_NO_TICKET_IN_V1");
-      }
-      blockers.push("PAPER_PERMISSION_NOT_ALLOWED");
+if (!paper || typeof paper !== "object") {
+  blockers.push("MISSING_PERMISSION_PAPER");
+} else {
+  if (paper.allowed !== true) blockers.push("PAPER_PERMISSION_NOT_ALLOWED");
+  if (paper.mode !== MODE) blockers.push("PAPER_PERMISSION_NOT_PAPER_ONLY");
+
+  if (!isPaperTradeAllowedDecision) {
+    if (paper.decision === "PAPER_REDUCE") {
+      warnings.push("PAPER_REDUCE_NO_TICKET_IN_V1");
     }
-    if (paper.realExecutionAllowed !== false) {
-      blockers.push("PAPER_PERMISSION_REAL_EXECUTION_TRUE");
-    }
-    if (paper.requiresEngine8Paper !== true) {
-      blockers.push("PAPER_PERMISSION_MISSING_ENGINE8_REQUIREMENT");
-    }
-    if (paper.requiresEngine10Journal !== true) {
-      blockers.push("PAPER_PERMISSION_MISSING_ENGINE10_REQUIREMENT");
-    }
+    blockers.push("PAPER_PERMISSION_NOT_ALLOWED");
   }
+
+  if (paper.realExecutionAllowed !== false) {
+    blockers.push("PAPER_PERMISSION_REAL_EXECUTION_TRUE");
+  }
+  if (paper.requiresEngine8Paper !== true) {
+    blockers.push("PAPER_PERMISSION_MISSING_ENGINE8_REQUIREMENT");
+  }
+  if (paper.requiresEngine10Journal !== true) {
+    blockers.push("PAPER_PERMISSION_MISSING_ENGINE10_REQUIREMENT");
+  }
+}
 
   if (!engine22WaveStrategy?.currentLifecycleState) {
     blockers.push("MISSING_ENGINE22_CONTEXT");
   }
 
-  if (!engine15Decision?.paperScalpReadiness) {
-    blockers.push("MISSING_ENGINE15_PAPER_READINESS");
-  }
+if (!engine15Decision?.paperScalpReadiness && !isFastIntradayPaperAllow) {
+  blockers.push("MISSING_ENGINE15_PAPER_READINESS");
+}
+
+if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
+  warnings.push("ENGINE15_BYPASSED_FOR_FAST_INTRADAY_PAPER");
+}
 
   const direction = getDirection({
     permission,
