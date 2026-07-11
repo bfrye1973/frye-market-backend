@@ -2487,12 +2487,16 @@ function buildEngine26TradePlanPreview({
   };
 }
 
-function buildPaperExitPlan({ direction, entryPrice }) {
+function buildPaperExitPlan({
+  direction,
+  entryPrice,
+  targetPoints = 10,
+}) {
   const sign = direction === "SHORT" ? -1 : 1;
 
-  const block1Target = roundToTick(entryPrice + sign * 3.5);
-  const block2Target = roundToTick(entryPrice + sign * 6.5);
-  const block3Target = roundToTick(entryPrice + sign * 10);
+  const p1Points = roundPts(targetPoints * 0.5);
+  const p2Points = roundPts(targetPoints);
+  const p3Points = roundPts(targetPoints * 1.5);
 
   return {
     source: "paperExitPlanV0",
@@ -2500,21 +2504,23 @@ function buildPaperExitPlan({ direction, entryPrice }) {
     engine9Compatible: true,
     futureOwner: "Engine 9",
     exitModel: "THREE_BLOCKS",
-    targetPoints: 10,
+    targetPoints,
 
     block1: {
-      targetPrice: block1Target,
-      targetPts: 3.5,
+      targetPrice: roundToTick(entryPrice + sign * p1Points),
+      targetPts: p1Points,
       sizePct: 33,
     },
+
     block2: {
-      targetPrice: block2Target,
-      targetPts: 6.5,
+      targetPrice: roundToTick(entryPrice + sign * p2Points),
+      targetPts: p2Points,
       sizePct: 33,
     },
+
     block3: {
-      targetPrice: block3Target,
-      targetPts: 10,
+      targetPrice: roundToTick(entryPrice + sign * p3Points),
+      targetPts: p3Points,
       sizePct: 34,
     },
   };
@@ -2845,16 +2851,14 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
 
   if (entryPrice == null) blockers.push("MISSING_CURRENT_PRICE");
 
-  const stopPrice = getStopPrice({
+  let stopPrice = getStopPrice({
     direction,
     engine15Decision,
     confluence,
     engine25Context,
   });
 
-  if (stopPrice == null) blockers.push("NO_DEFINED_STOP_OR_INVALIDATION");
-
-  const targetPrice = getTargetPrice({
+  let targetPrice = getTargetPrice({
     direction,
     entryPrice,
     engine15Decision,
@@ -2862,6 +2866,60 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
     engine22WaveStrategy,
     engine25Context,
   });
+
+  const fastStopDistancePoints =
+    toNum(paper?.fastStopDistancePoints) ?? 6.5;
+
+  const fastTargetPoints =
+    toNum(paper?.targetPoints) ?? 10;
+
+  const normalStopIsValid =
+    entryPrice != null &&
+    stopPrice != null &&
+    (
+      (direction === "LONG" && stopPrice < entryPrice) ||
+      (direction === "SHORT" && stopPrice > entryPrice)
+    );
+
+  const normalTargetIsValid =
+    entryPrice != null &&
+    targetPrice != null &&
+    (
+      (direction === "LONG" && targetPrice > entryPrice) ||
+      (direction === "SHORT" && targetPrice < entryPrice)
+    );
+
+  let fastFallbackGeometryUsed = false;
+
+  if (
+    isFastIntradayPaperAllow &&
+    entryPrice != null &&
+    ["LONG", "SHORT"].includes(direction)
+  ) {
+    if (!normalStopIsValid) {
+      stopPrice =
+        direction === "LONG"
+          ? roundToTick(entryPrice - fastStopDistancePoints)
+          : roundToTick(entryPrice + fastStopDistancePoints);
+
+      fastFallbackGeometryUsed = true;
+      warnings.push("FAST_INTRADAY_FALLBACK_STOP_USED");
+    }
+
+    if (!normalTargetIsValid) {
+      targetPrice =
+        direction === "LONG"
+          ? roundToTick(entryPrice + fastTargetPoints)
+          : roundToTick(entryPrice - fastTargetPoints);
+
+      fastFallbackGeometryUsed = true;
+      warnings.push("FAST_INTRADAY_FALLBACK_TARGET_USED");
+    }
+  }
+
+  if (stopPrice == null) {
+    blockers.push("NO_DEFINED_STOP_OR_INVALIDATION");
+  }
 
   const cleanTargetPath = hasCleanTargetPath({
     direction,
@@ -2871,7 +2929,19 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
     ignoreEngine15TargetBlockers: isFastIntradayPaperAllow,
   });
 
-  if (!cleanTargetPath) blockers.push("NO_CLEAN_PATH_TO_TARGET");
+  if (!cleanTargetPath) {
+    if (isFastIntradayPaperAllow) {
+      warnings.push("NO_CLEAN_NEGOTIATED_ZONE_PATH");
+      warnings.push("FAST_INTRADAY_FALLBACK_GEOMETRY_USED");
+      reasonCodes.push("NO_CLEAN_PATH_TO_TARGET_WARNING_ONLY");
+    } else {
+      blockers.push("NO_CLEAN_PATH_TO_TARGET");
+    }
+  }
+
+  if (fastFallbackGeometryUsed) {
+    reasonCodes.push("FAST_INTRADAY_FALLBACK_GEOMETRY_USED");
+  }
 
   const zoneId = getZoneId({
     engine25Context,
@@ -2954,6 +3024,10 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
   const paperExitPlan = buildPaperExitPlan({
     direction,
     entryPrice,
+    targetPoints:
+      isFastIntradayPaperAllow
+        ? toNum(paper?.targetPoints) ?? 10
+        : 10,
   });
 
   const barTime = getBarTime({ confluence });
@@ -2979,8 +3053,19 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
 
   const ticket = {
     idempotencyKey,
+
     paper: true,
+    paperOnly: true,
+    researchOnly: true,
+    plannerOnly: true,
     mode: MODE,
+
+    intradayPaperLane: isFastIntradayPaperAllow,
+    engine15Bypassed: isFastIntradayPaperAllow,
+
+    geometrySource: fastFallbackGeometryUsed
+      ? "FAST_INTRADAY_FALLBACK_GEOMETRY"
+      : "ENGINE26_NORMAL_GEOMETRY",
 
     symbol: normalizedSymbol,
     strategyId: normalizedStrategyId,
@@ -3033,21 +3118,34 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
     engine: ENGINE,
     mode: MODE,
     researchOnly: true,
+    paperOnly: true,
+    plannerOnly: true,
 
     symbol: normalizedSymbol,
     strategyId: normalizedStrategyId,
     tf: normalizedTf,
 
     allowed: true,
-    status: "READY_TO_PAPER_EXECUTE",
+
+    status: isFastIntradayPaperAllow
+      ? "FAST_INTRADAY_PAPER_TICKET_READY"
+      : "READY_TO_PAPER_EXECUTE",
+
+    intradayPaperLane: isFastIntradayPaperAllow,
+    engine15Bypassed: isFastIntradayPaperAllow,
+
+    geometrySource: fastFallbackGeometryUsed
+      ? "FAST_INTRADAY_FALLBACK_GEOMETRY"
+      : "ENGINE26_NORMAL_GEOMETRY",
 
     setupFamily: "IMBALANCE_TO_IMBALANCE_SCALP",
     setupType,
     direction,
-
     currentPrice: entryPrice,
     entryPrice,
-    entryTrigger: "ENGINE6_PAPER_PERMISSION_APPROVED",
+    entryTrigger: isFastIntradayPaperAllow
+      ? "ENGINE6_FAST_INTRADAY_PAPER_ALLOW"
+      : "ENGINE6_PAPER_PERMISSION_APPROVED",
 
     stopPrice,
     invalidationLevel: stopPrice,
