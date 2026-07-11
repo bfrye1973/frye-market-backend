@@ -1811,15 +1811,30 @@ function getTargetPrice({
   return null;
 }
 
-function hasCleanTargetPath({ direction, entryPrice, targetPrice, engine15Decision }) {
+function hasCleanTargetPath({
+  direction,
+  entryPrice,
+  targetPrice,
+  engine15Decision,
+  ignoreEngine15TargetBlockers = false,
+}) {
   const targetModel = engine15Decision?.paperScalpReadiness?.targetModel || {};
   const blockers = Array.isArray(engine15Decision?.paperScalpReadiness?.blockers)
     ? engine15Decision.paperScalpReadiness.blockers
     : [];
 
-  if (blockers.includes("NO_CLEAN_PATH_TO_TARGET")) return false;
+  if (
+    ignoreEngine15TargetBlockers !== true &&
+    blockers.includes("NO_CLEAN_PATH_TO_TARGET")
+  ) {
+    return false;
+  }
 
-  if (targetModel?.targetPathRequired === true && targetModel?.targetLevel == null) {
+  if (
+    ignoreEngine15TargetBlockers !== true &&
+    targetModel?.targetPathRequired === true &&
+    targetModel?.targetLevel == null
+  ) {
     return false;
   }
 
@@ -1830,7 +1845,6 @@ function hasCleanTargetPath({ direction, entryPrice, targetPrice, engine15Decisi
 
   return false;
 }
-
 function getStructuralLevel(structuralContext, key) {
   const value = structuralContext?.levels?.[key];
   const n = toNum(value);
@@ -2854,6 +2868,7 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
     entryPrice,
     targetPrice,
     engine15Decision,
+    ignoreEngine15TargetBlockers: isFastIntradayPaperAllow,
   });
 
   if (!cleanTargetPath) blockers.push("NO_CLEAN_PATH_TO_TARGET");
