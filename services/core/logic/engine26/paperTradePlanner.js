@@ -1094,6 +1094,12 @@ export function buildEngine26ImbalanceWatch({
 
   const paperPermission = permission?.paper || null;
 
+  const paperDecision = safeUpper(paperPermission?.decision);
+
+  const engine6PaperReady =
+    paperPermission?.allowed === true &&
+    ["PAPER_ALLOW", "FAST_INTRADAY_PAPER_ALLOW"].includes(paperDecision);
+
   const lifecycleContext =
     engine22WaveStrategy?.lifecycleContext || null;
 
@@ -1193,8 +1199,8 @@ export function buildEngine26ImbalanceWatch({
       structuralPlaybook?.template ||
       "WATCH_ONLY_WAIT_FOR_CONFIRMATION";
 
-    if (paperPermission?.decision === "PAPER_ALLOW" && paperPermission?.allowed === true) {
-      status = "READY_FOR_ENGINE26_TICKET";
+   if (engine6PaperReady) {
+     status = "READY_FOR_ENGINE26_TICKET";
     } else if (!structuralPlaybook?.status && isTopImbalance) {
       status = "TOP_IMBALANCE_ACTIVE_WAIT_FOR_ACCEPTANCE_OR_REJECTION";
     } else if (!structuralPlaybook?.status && isLowerImbalance) {
@@ -1308,7 +1314,7 @@ export function buildEngine26ImbalanceWatch({
         ? "WATCH_SWEEP_RECLAIM_OR_SUPPORT_FAILURE"
         : null,
       selectedSetup:
-        paperPermission?.decision === "PAPER_ALLOW" && paperPermission?.allowed === true
+        engine6PaperReady
           ? paperPermission?.setupType || null
           : null,
     },
@@ -1343,9 +1349,7 @@ export function buildEngine26ImbalanceWatch({
       engine15Allowed: paperReadiness?.allowed === true,
       engine6Decision: paperPermission?.decision || null,
       engine6Allowed: paperPermission?.allowed === true,
-      ticketReady:
-        paperPermission?.decision === "PAPER_ALLOW" &&
-        paperPermission?.allowed === true,
+      ticketReady: engine6PaperReady,
     },
 
     status,
