@@ -2035,6 +2035,32 @@ const allowed =
   reasonCodes.push("PAPER_ONLY_NO_REAL_EXECUTION");
 }
 
+const fastIntradayBypassedBlockers = fastIntradayPaperAllow
+  ? uniqueBlockers.filter((blocker) =>
+      [
+        "ENGINE15_PAPER_READINESS_NOT_ALLOWED",
+        "ENGINE3_PAPER_REACTION_NOT_ALLOWED",
+        "ENGINE3_PAPER_REACTION_NOT_GOOD_OR_STRONG",
+        "PAPER_SHORT_RESEARCH_DISABLED_V1",
+      ].includes(blocker)
+    )
+  : [];
+
+const finalBlockers = fastIntradayPaperAllow
+  ? uniqueBlockers.filter(
+      (blocker) => !fastIntradayBypassedBlockers.includes(blocker)
+    )
+  : uniqueBlockers;
+
+const finalWarnings = [
+  ...uniqueWarnings,
+  ...fastIntradayBypassedBlockers.map((blocker) => `BYPASSED_${blocker}`),
+];
+
+if (fastIntradayBypassedBlockers.length) {
+  reasonCodes.push("FAST_INTRADAY_STANDARD_BLOCKERS_BYPASSED");
+}
+
   const watchFast =
     allowed !== true &&
     fastPaperWatchCandidate === true &&
@@ -2193,8 +2219,8 @@ const allowed =
 
     duplicateCheckRequired: true,
 
-    blockers: uniqueBlockers,
-    warnings: uniqueWarnings,
+    blockers: finalBlockers,
+    warnings: [...new Set(finalWarnings.filter(Boolean))],
     reasonCodes: [...new Set(reasonCodes.filter(Boolean))],
   };
 }
