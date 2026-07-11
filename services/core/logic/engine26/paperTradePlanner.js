@@ -2751,6 +2751,13 @@ export function buildEngine26PaperTradePlan({
     "NO_REAL_EXECUTION",
   ];
 
+  if (isFastIntradayPaperAllow) {
+  reasonCodes.push("ENGINE26_CONSUMED_FAST_INTRADAY_PAPER_ALLOW");
+  reasonCodes.push("ENGINE15_NOT_REQUIRED_FOR_FAST_INTRADAY_PAPER");
+  reasonCodes.push("ENGINE8_NOT_CALLED_PLANNER_ONLY");
+  reasonCodes.push("PAPER_TICKET_ONLY_NO_REAL_EXECUTION");
+}
+
   if (normalizedSymbol !== SYMBOL) blockers.push("SYMBOL_NOT_ES");
   if (normalizedStrategyId !== STRATEGY_ID) {
     blockers.push("STRATEGY_NOT_INTRADAY_SCALP_10M");
@@ -2869,8 +2876,13 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
   if (duplicateOpen) blockers.push("DUPLICATE_PAPER_TRADE_OPEN");
 
   const allowlist = getEngine8Allowlist();
-  if (!allowlist.includes(normalizedSymbol)) {
+
+  if (!allowlist.includes(normalizedSymbol) && !isFastIntradayPaperAllow) {
     blockers.push("ENGINE8_ES_NOT_ALLOWLISTED");
+  }
+
+  if (!allowlist.includes(normalizedSymbol) && isFastIntradayPaperAllow) {
+    warnings.push("ENGINE8_ALLOWLIST_BYPASSED_FOR_PLANNER_ONLY_FAST_INTRADAY_PAPER");
   }
 
   const hasContractMismatch =
