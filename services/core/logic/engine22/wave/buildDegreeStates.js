@@ -766,4 +766,3 @@ export function buildDegreeStates({
 }
 
 export default buildDegreeStates;
-print(str(path))
