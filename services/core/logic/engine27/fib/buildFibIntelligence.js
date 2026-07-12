@@ -1,25 +1,29 @@
 // services/core/logic/engine27/fib/buildFibIntelligence.js
 // Engine 27B — Fibonacci Intelligence
 //
-// Consumes only:
+// Canonical inputs:
 // - engine27WaveIntelligence
 // - engine22WaveStrategy.degreeStates
 //
-// Owns only:
-// - anchor validation
+// Engine 27B owns:
+// - anchor normalization
 // - retracement ladders
 // - extension ladders
-// - completed / next / remaining Fibonacci objectives
+// - current Fib position
+// - completed Fib levels
+// - next Fib objective
+// - remaining Fib objectives
+// - validation against Engine 22 reference levels
 //
-// Does not create:
+// Engine 27B does not own:
 // - decisions
 // - alignment
 // - confidence
 // - permission
+// - sizing
 // - geometry
-// - tickets
 // - execution
-// - dashboard output
+// - dashboard presentation
 
 const DEGREE_KEYS = [
   "subminute",
@@ -56,21 +60,11 @@ function isObject(value) {
   );
 }
 
-function upper(value) {
-  return String(value ?? "")
-    .trim()
-    .toUpperCase();
-}
-
 function unique(values) {
-  return [
-    ...new Set(
-      values.filter(Boolean)
-    ),
-  ];
+  return [...new Set(values.filter(Boolean))];
 }
 
-function toFiniteNumber(value) {
+function toNumber(value) {
   if (
     value === null ||
     value === undefined ||
@@ -86,9 +80,8 @@ function toFiniteNumber(value) {
     : null;
 }
 
-function toPositivePrice(value) {
-  const number =
-    toFiniteNumber(value);
+function toPrice(value) {
+  const number = toNumber(value);
 
   return (
     number !== null &&
@@ -102,8 +95,7 @@ function roundToTick(
   value,
   tick = ES_TICK_SIZE
 ) {
-  const number =
-    toFiniteNumber(value);
+  const number = toNumber(value);
 
   if (number === null) {
     return null;
@@ -111,29 +103,24 @@ function roundToTick(
 
   return Number(
     (
-      Math.round(
-        number / tick
-      ) * tick
+      Math.round(number / tick) *
+      tick
     ).toFixed(2)
   );
 }
 
 function roundDistance(value) {
-  const number =
-    toFiniteNumber(value);
+  const number = toNumber(value);
 
-  if (number === null) {
-    return null;
-  }
-
-  return Number(
-    number.toFixed(2)
-  );
+  return number === null
+    ? null
+    : Number(number.toFixed(2));
 }
 
 function normalizeWave(value) {
-  const text =
-    upper(value);
+  const wave = String(value || "")
+    .trim()
+    .toUpperCase();
 
   if (
     [
@@ -147,17 +134,18 @@ function normalizeWave(value) {
       "C",
       "D",
       "E",
-    ].includes(text)
+    ].includes(wave)
   ) {
-    return text;
+    return wave;
   }
 
   return "UNKNOWN";
 }
 
 function normalizeDirection(value) {
-  const text =
-    upper(value);
+  const direction = String(value || "")
+    .trim()
+    .toUpperCase();
 
   if (
     [
@@ -166,7 +154,7 @@ function normalizeDirection(value) {
       "BULLISH",
       "BULL",
       "BUY",
-    ].includes(text)
+    ].includes(direction)
   ) {
     return "BULLISH";
   }
@@ -178,7 +166,7 @@ function normalizeDirection(value) {
       "BEARISH",
       "BEAR",
       "SELL",
-    ].includes(text)
+    ].includes(direction)
   ) {
     return "BEARISH";
   }
@@ -187,10 +175,10 @@ function normalizeDirection(value) {
 }
 
 function readMarkPrice(mark) {
-  if (
-    toPositivePrice(mark) !== null
-  ) {
-    return toPositivePrice(mark);
+  const direct = toPrice(mark);
+
+  if (direct !== null) {
+    return direct;
   }
 
   if (!isObject(mark)) {
@@ -205,12 +193,8 @@ function readMarkPrice(mark) {
     mark.close,
   ];
 
-  for (
-    const candidate
-    of candidates
-  ) {
-    const price =
-      toPositivePrice(candidate);
+  for (const candidate of candidates) {
+    const price = toPrice(candidate);
 
     if (price !== null) {
       return price;
@@ -220,7 +204,7 @@ function readMarkPrice(mark) {
   return null;
 }
 
-function readNamedPrice(
+function readFirstPrice(
   source,
   keys
 ) {
@@ -228,10 +212,7 @@ function readNamedPrice(
     return null;
   }
 
-  for (
-    const key
-    of keys
-  ) {
+  for (const key of keys) {
     const price =
       readMarkPrice(
         source[key]
@@ -252,46 +233,73 @@ function resolveAnchorSource(
     return {
       source: null,
       sourcePath: null,
+      sourceType: null,
     };
   }
 
   const candidates = [
     {
       source:
+        degreeState
+          ?.targetModel
+          ?.anchorModel,
+
+      sourcePath:
+        "degreeState.targetModel.anchorModel",
+
+      sourceType:
+        "TARGET_MODEL_ANCHOR_MODEL",
+    },
+
+    {
+      source:
         degreeState.confirmedAnchors,
+
       sourcePath:
         "degreeState.confirmedAnchors",
+
+      sourceType:
+        "CONFIRMED_ANCHORS",
     },
+
     {
       source:
         degreeState.anchors,
+
       sourcePath:
         "degreeState.anchors",
+
+      sourceType:
+        "ANCHORS",
     },
+
     {
       source:
         degreeState.waveMarks,
+
       sourcePath:
         "degreeState.waveMarks",
+
+      sourceType:
+        "WAVE_MARKS",
     },
+
     {
       source:
-        degreeState.structure
+        degreeState
+          ?.structure
           ?.waveMarks,
+
       sourcePath:
         "degreeState.structure.waveMarks",
+
+      sourceType:
+        "STRUCTURE_WAVE_MARKS",
     },
   ];
 
-  for (
-    const candidate
-    of candidates
-  ) {
-    if (
-      isObject(
-        candidate.source
-      )
-    ) {
+  for (const candidate of candidates) {
+    if (isObject(candidate.source)) {
       return candidate;
     }
   }
@@ -299,119 +307,47 @@ function resolveAnchorSource(
   return {
     source: null,
     sourcePath: null,
+    sourceType: null,
   };
 }
 
-function unwrapWaveMarks(source) {
-  if (!isObject(source)) {
-    return {};
-  }
-
-  if (
-    isObject(
-      source.waveMarks
-    )
-  ) {
-    return source.waveMarks;
-  }
-
-  return source;
-}
-
-function explicitAnchorValue(
+function resolveGenericAnchors({
   source,
-  keys
-) {
-  return readNamedPrice(
-    source,
-    keys
-  );
-}
-
-function markPrice(
-  marks,
-  wave
-) {
-  return readNamedPrice(
-    marks,
-    [
-      wave,
-      wave.toLowerCase(),
-      `wave${wave.replace("W", "")}`,
-      `Wave${wave.replace("W", "")}`,
-    ]
-  );
-}
-
-function inferDirection(
-  {
-    explicitDirection,
-    waveStart,
-    waveEnd,
-  }
-) {
-  const normalized =
-    normalizeDirection(
-      explicitDirection
-    );
-
-  if (
-    normalized !== "UNKNOWN"
-  ) {
-    return normalized;
-  }
-
-  if (
-    waveStart !== null &&
-    waveEnd !== null
-  ) {
-    if (
-      waveEnd > waveStart
-    ) {
-      return "BULLISH";
-    }
-
-    if (
-      waveEnd < waveStart
-    ) {
-      return "BEARISH";
-    }
-  }
-
-  return "UNKNOWN";
-}
-
-function buildAnchorContract({
   currentWave,
-  source,
-  sourcePath,
-  waveDirection,
 }) {
   const marks =
-    unwrapWaveMarks(source);
+    isObject(source.waveMarks)
+      ? source.waveMarks
+      : source;
 
   let waveStart =
-    explicitAnchorValue(
+    readFirstPrice(
       source,
       [
         "waveStart",
+        "impulseStart",
         "start",
         "anchorStart",
+        "low",
+        "a",
       ]
     );
 
   let waveEnd =
-    explicitAnchorValue(
+    readFirstPrice(
       source,
       [
         "waveEnd",
+        "impulseEnd",
         "end",
         "anchorEnd",
+        "high",
+        "b",
       ]
     );
 
   let projectionBase =
-    explicitAnchorValue(
+    readFirstPrice(
       source,
       [
         "projectionBase",
@@ -420,154 +356,122 @@ function buildAnchorContract({
       ]
     );
 
-  let startKey = null;
-  let endKey = null;
-  let projectionBaseKey =
-    projectionBase !== null
-      ? "projectionBase"
-      : null;
-
   if (
-    currentWave === "W2"
+    currentWave === "W3" &&
+    projectionBase === null
   ) {
-    waveStart =
-      waveStart ??
-      explicitAnchorValue(
-        source,
-        [
-          "w1Low",
-          "W1_LOW",
-          "low",
-          "a",
-        ]
+    projectionBase =
+      readMarkPrice(
+        marks?.W2
       );
-
-    waveEnd =
-      waveEnd ??
-      explicitAnchorValue(
-        source,
-        [
-          "w1High",
-          "W1_HIGH",
-          "high",
-          "b",
-        ]
-      );
-
-    startKey = "W1_START";
-    endKey = "W1_END";
   }
 
-  if (
-    currentWave === "W3"
-  ) {
+  if (currentWave === "W4") {
     waveStart =
       waveStart ??
-      explicitAnchorValue(
-        source,
-        [
-          "w1Low",
-          "W1_LOW",
-          "low",
-          "a",
-        ]
+      readMarkPrice(
+        marks?.W2
       );
 
     waveEnd =
       waveEnd ??
-      explicitAnchorValue(
-        source,
-        [
-          "w1High",
-          "W1_HIGH",
-          "high",
-          "b",
-        ]
+      readMarkPrice(
+        marks?.W3
+      );
+  }
+
+  if (currentWave === "W5") {
+    waveStart =
+      waveStart ??
+      readMarkPrice(
+        marks?.W2
+      );
+
+    waveEnd =
+      waveEnd ??
+      readMarkPrice(
+        marks?.W3
       );
 
     projectionBase =
       projectionBase ??
-      markPrice(
-        marks,
-        "W2"
+      readMarkPrice(
+        marks?.W4
       );
-
-    startKey = "W1_START";
-    endKey = "W1_END";
-
-    if (
-      projectionBase !== null &&
-      projectionBaseKey === null
-    ) {
-      projectionBaseKey = "W2";
-    }
   }
 
+  return {
+    waveStart,
+    waveEnd,
+    projectionBase,
+    suppliedWaveLength:
+      readFirstPrice(
+        source,
+        [
+          "waveLength",
+          "range",
+          "length",
+        ]
+      ),
+  };
+}
+
+function buildAnchorContract({
+  source,
+  sourcePath,
+  sourceType,
+  currentWave,
+  directionInput,
+}) {
+  let waveStart = null;
+  let waveEnd = null;
+  let projectionBase = null;
+  let suppliedWaveLength = null;
+
   if (
-    currentWave === "W4"
+    sourceType ===
+    "TARGET_MODEL_ANCHOR_MODEL"
   ) {
     waveStart =
-      waveStart ??
-      markPrice(
-        marks,
-        "W2"
+      toPrice(
+        source.impulseStart
       );
 
     waveEnd =
-      waveEnd ??
-      markPrice(
-        marks,
-        "W3"
-      );
-
-    startKey = "W2";
-    endKey = "W3";
-  }
-
-  if (
-    currentWave === "W5"
-  ) {
-    waveStart =
-      waveStart ??
-      markPrice(
-        marks,
-        "W2"
-      );
-
-    waveEnd =
-      waveEnd ??
-      markPrice(
-        marks,
-        "W3"
+      toPrice(
+        source.impulseEnd
       );
 
     projectionBase =
-      projectionBase ??
-      markPrice(
-        marks,
-        "W4"
+      toPrice(
+        source.projectionBase
       );
 
-    startKey = "W2";
-    endKey = "W3";
+    suppliedWaveLength =
+      toPrice(
+        source.range
+      );
+  } else {
+    const generic =
+      resolveGenericAnchors({
+        source,
+        currentWave,
+      });
 
-    if (
-      projectionBase !== null &&
-      projectionBaseKey === null
-    ) {
-      projectionBaseKey = "W4";
-    }
+    waveStart =
+      generic.waveStart;
+
+    waveEnd =
+      generic.waveEnd;
+
+    projectionBase =
+      generic.projectionBase;
+
+    suppliedWaveLength =
+      generic.suppliedWaveLength;
   }
 
-  const direction =
-    inferDirection({
-      explicitDirection:
-        waveDirection,
-      waveStart,
-      waveEnd,
-    });
-
-  const waveLength =
+  const calculatedWaveLength =
     (
       waveStart !== null &&
       waveEnd !== null
@@ -578,19 +482,37 @@ function buildAnchorContract({
         )
       : null;
 
+  const waveLength =
+    suppliedWaveLength ??
+    calculatedWaveLength;
+
+  let direction =
+    normalizeDirection(
+      directionInput
+    );
+
+  if (
+    direction === "UNKNOWN" &&
+    waveStart !== null &&
+    waveEnd !== null
+  ) {
+    direction =
+      waveEnd > waveStart
+        ? "BULLISH"
+        : waveEnd < waveStart
+        ? "BEARISH"
+        : "UNKNOWN";
+  }
+
   return {
     waveStart:
       waveStart !== null
-        ? roundToTick(
-            waveStart
-          )
+        ? roundToTick(waveStart)
         : null,
 
     waveEnd:
       waveEnd !== null
-        ? roundToTick(
-            waveEnd
-          )
+        ? roundToTick(waveEnd)
         : null,
 
     projectionBase:
@@ -601,8 +523,7 @@ function buildAnchorContract({
         : null,
 
     waveLength:
-      waveLength !== null &&
-      waveLength > 0
+      waveLength !== null
         ? roundToTick(
             waveLength
           )
@@ -614,14 +535,35 @@ function buildAnchorContract({
       sourcePath,
 
     timestamp:
-      source?.timestamp ??
-      source?.updatedAt ??
-      source?.confirmedAt ??
+      source.timestamp ??
+      source.updatedAt ??
+      source.confirmedAt ??
       null,
 
-    startKey,
-    endKey,
-    projectionBaseKey,
+    startKey:
+      sourceType ===
+      "TARGET_MODEL_ANCHOR_MODEL"
+        ? "impulseStart"
+        : "waveStart",
+
+    endKey:
+      sourceType ===
+      "TARGET_MODEL_ANCHOR_MODEL"
+        ? "impulseEnd"
+        : "waveEnd",
+
+    projectionBaseKey:
+      "projectionBase",
+
+    waveLengthKey:
+      suppliedWaveLength !== null
+        ? (
+            sourceType ===
+            "TARGET_MODEL_ANCHOR_MODEL"
+              ? "range"
+              : "waveLength"
+          )
+        : "calculatedRange",
   };
 }
 
@@ -678,21 +620,13 @@ function levelStatus({
     return "UNKNOWN";
   }
 
-  if (
-    direction === "BULLISH"
-  ) {
-    return (
-      currentPrice >=
-      targetPrice
-    )
+  if (direction === "BULLISH") {
+    return currentPrice >= targetPrice
       ? "REACHED"
       : "NOT_REACHED";
   }
 
-  return (
-    currentPrice <=
-    targetPrice
-  )
+  return currentPrice <= targetPrice
     ? "REACHED"
     : "NOT_REACHED";
 }
@@ -713,6 +647,7 @@ function buildFibLevel({
   return {
     label,
     ratio,
+
     price:
       targetPrice,
 
@@ -752,31 +687,14 @@ function buildRetracements({
   anchors,
   currentPrice,
 }) {
-  const output = {};
-
-  const start =
-    toFiniteNumber(
-      anchors.waveStart
-    );
-
-  const end =
-    toFiniteNumber(
-      anchors.waveEnd
-    );
-
-  const length =
-    toFiniteNumber(
-      anchors.waveLength
-    );
+  const retracements = {};
 
   if (
-    start === null ||
-    end === null ||
-    length === null ||
-    length <= 0 ||
+    anchors.waveEnd === null ||
+    anchors.waveLength === null ||
     anchors.direction === "UNKNOWN"
   ) {
-    return output;
+    return retracements;
   }
 
   for (
@@ -790,29 +708,35 @@ function buildRetracements({
   ) {
     const rawPrice =
       anchors.direction === "BULLISH"
-        ? end -
-          length * ratio
-        : end +
-          length * ratio;
+        ? anchors.waveEnd -
+          anchors.waveLength *
+          ratio
+        : anchors.waveEnd +
+          anchors.waveLength *
+          ratio;
 
-    output[label] =
+    retracements[label] =
       buildFibLevel({
         degreeKey,
         currentWave,
         label,
         ratio,
-        price: rawPrice,
+        price:
+          rawPrice,
         currentPrice,
+
         direction:
-          anchors.direction === "BULLISH"
+          anchors.direction ===
+          "BULLISH"
             ? "BEARISH"
             : "BULLISH",
+
         ladderType:
           "RETRACEMENT",
       });
   }
 
-  return output;
+  return retracements;
 }
 
 function buildExtensions({
@@ -821,29 +745,19 @@ function buildExtensions({
   anchors,
   currentPrice,
 }) {
-  const output = {};
-
-  const base =
-    toFiniteNumber(
-      anchors.projectionBase
-    );
-
-  const length =
-    toFiniteNumber(
-      anchors.waveLength
-    );
+  const extensions = {};
 
   if (
-    base === null ||
-    length === null ||
-    length <= 0 ||
+    anchors.projectionBase === null ||
+    anchors.waveLength === null ||
     anchors.direction === "UNKNOWN"
   ) {
-    return output;
+    return extensions;
   }
 
   const sign =
-    anchors.direction === "BEARISH"
+    anchors.direction ===
+    "BEARISH"
       ? -1
       : 1;
 
@@ -856,17 +770,20 @@ function buildExtensions({
       EXTENSION_RATIOS
     )
   ) {
-    output[label] =
+    const rawPrice =
+      anchors.projectionBase +
+      sign *
+      anchors.waveLength *
+      ratio;
+
+    extensions[label] =
       buildFibLevel({
         degreeKey,
         currentWave,
         label,
         ratio,
         price:
-          base +
-          sign *
-          length *
-          ratio,
+          rawPrice,
         currentPrice,
         direction:
           anchors.direction,
@@ -875,19 +792,17 @@ function buildExtensions({
       });
   }
 
-  return output;
+  return extensions;
 }
 
-function activeLadderType(
+function getActiveLadderType(
   currentWave
 ) {
   if (
     [
       "W2",
       "W4",
-    ].includes(
-      currentWave
-    )
+    ].includes(currentWave)
   ) {
     return "RETRACEMENT";
   }
@@ -897,40 +812,9 @@ function activeLadderType(
       "W3",
       "W5",
       "C",
-    ].includes(
-      currentWave
-    )
+    ].includes(currentWave)
   ) {
     return "EXTENSION";
-  }
-
-  return "UNKNOWN";
-}
-
-function objectiveDirection({
-  ladderType,
-  anchors,
-}) {
-  if (
-    ladderType === "EXTENSION"
-  ) {
-    return anchors.direction;
-  }
-
-  if (
-    ladderType === "RETRACEMENT"
-  ) {
-    if (
-      anchors.direction === "BULLISH"
-    ) {
-      return "BEARISH";
-    }
-
-    if (
-      anchors.direction === "BEARISH"
-    ) {
-      return "BULLISH";
-    }
   }
 
   return "UNKNOWN";
@@ -941,7 +825,8 @@ function orderedLevels(
   ladderType
 ) {
   const labels =
-    ladderType === "RETRACEMENT"
+    ladderType ===
+    "RETRACEMENT"
       ? Object.keys(
           RETRACEMENT_RATIOS
         )
@@ -958,11 +843,10 @@ function orderedLevels(
     .filter(Boolean);
 }
 
-function deriveCurrentObjective({
+function buildCurrentObjective({
   currentPrice,
   ladder,
   ladderType,
-  direction,
 }) {
   const levels =
     orderedLevels(
@@ -970,9 +854,7 @@ function deriveCurrentObjective({
       ladderType
     );
 
-  if (
-    levels.length === 0
-  ) {
+  if (!levels.length) {
     return {
       currentFib: {
         lastCompleted:
@@ -982,52 +864,35 @@ function deriveCurrentObjective({
       },
 
       completedFibLevels: [],
-
-      nextFib:
-        "UNKNOWN",
-
-      nextPrice:
-        null,
-
-      distance:
-        null,
-
+      nextFib: "UNKNOWN",
+      nextPrice: null,
+      distance: null,
       remainingTargets: [],
     };
   }
 
-  if (
-    currentPrice === null ||
-    direction === "UNKNOWN"
-  ) {
+  if (currentPrice === null) {
     return {
       currentFib: {
         lastCompleted:
           "UNKNOWN",
         next:
-          levels[0]?.label ||
-          "UNKNOWN",
+          levels[0].label,
       },
 
       completedFibLevels: [],
-
       nextFib:
-        levels[0]?.label ||
-        "UNKNOWN",
-
+        levels[0].label,
       nextPrice:
-        levels[0]?.price ??
-        null,
-
+        levels[0].price,
       distance:
         null,
-
       remainingTargets:
         levels.slice(1),
     };
   }
 
-  const completed =
+  const completedFibLevels =
     levels.filter(
       (level) =>
         level.status ===
@@ -1041,7 +906,7 @@ function deriveCurrentObjective({
         "REACHED"
     );
 
-  const next =
+  const nextLevel =
     nextIndex >= 0
       ? levels[nextIndex]
       : null;
@@ -1049,29 +914,28 @@ function deriveCurrentObjective({
   return {
     currentFib: {
       lastCompleted:
-        completed[
-          completed.length - 1
+        completedFibLevels[
+          completedFibLevels.length - 1
         ]?.label ||
         "NONE",
 
       next:
-        next?.label ||
+        nextLevel?.label ||
         "COMPLETE",
     },
 
-    completedFibLevels:
-      completed,
+    completedFibLevels,
 
     nextFib:
-      next?.label ||
+      nextLevel?.label ||
       "COMPLETE",
 
     nextPrice:
-      next?.price ??
+      nextLevel?.price ??
       null,
 
     distance:
-      next?.distance ??
+      nextLevel?.distance ??
       null,
 
     remainingTargets:
@@ -1083,12 +947,10 @@ function deriveCurrentObjective({
   };
 }
 
-function expectedCorrectionFor(
-  {
-    degreeKey,
-    currentWave,
-  }
-) {
+function expectedCorrectionFor({
+  degreeKey,
+  currentWave,
+}) {
   const degreeLabel =
     degreeKey.charAt(0).toUpperCase() +
     degreeKey.slice(1);
@@ -1132,12 +994,9 @@ function expectedCorrectionFor(
 
   return (
     map[currentWave] || {
-      nextWave:
-        "UNKNOWN",
-      type:
-        "UNKNOWN",
-      description:
-        "UNKNOWN",
+      nextWave: "UNKNOWN",
+      type: "UNKNOWN",
+      description: "UNKNOWN",
     }
   );
 }
@@ -1150,31 +1009,161 @@ function resolveCurrentPrice({
   const candidates = [
     engine27WaveIntelligence
       ?.currentPrice,
+
     waveIntelligence
       ?.currentPrice,
+
     degreeState
       ?.currentPrice,
   ];
 
-  for (
-    const candidate
-    of candidates
-  ) {
-    const price =
-      toPositivePrice(
-        candidate
-      );
+  for (const candidate of candidates) {
+    const price = toPrice(candidate);
 
-    if (
-      price !== null
-    ) {
-      return roundToTick(
-        price
-      );
+    if (price !== null) {
+      return roundToTick(price);
     }
   }
 
   return null;
+}
+
+function getEngine22ReferencePrice(
+  referenceLevels,
+  label
+) {
+  if (!isObject(referenceLevels)) {
+    return null;
+  }
+
+  const direct =
+    toPrice(
+      referenceLevels[label]
+    );
+
+  if (direct !== null) {
+    return roundToTick(direct);
+  }
+
+  const numericLabels = {
+    e100: "1.000",
+    e1168: "1.168",
+    e1272: "1.272",
+    e1618: "1.618",
+    e200: "2.000",
+    e2618: "2.618",
+  };
+
+  const numericLabel =
+    numericLabels[label];
+
+  if (!numericLabel) {
+    return null;
+  }
+
+  const numericPrice =
+    toPrice(
+      referenceLevels[
+        numericLabel
+      ]
+    );
+
+  return numericPrice !== null
+    ? roundToTick(
+        numericPrice
+      )
+    : null;
+}
+
+function buildValidation({
+  extensions,
+  referenceLevels,
+}) {
+  const differences = [];
+
+  if (!isObject(referenceLevels)) {
+    return {
+      source:
+        "degreeState.targetModel.levels",
+
+      available:
+        false,
+
+      matches:
+        true,
+
+      differences,
+    };
+  }
+
+  for (
+    const label
+    of Object.keys(
+      EXTENSION_RATIOS
+    )
+  ) {
+    const engine27Price =
+      toPrice(
+        extensions?.[
+          label
+        ]?.price
+      );
+
+    const engine22Price =
+      getEngine22ReferencePrice(
+        referenceLevels,
+        label
+      );
+
+    if (
+      engine27Price === null ||
+      engine22Price === null
+    ) {
+      continue;
+    }
+
+    const differencePoints =
+      roundDistance(
+        Math.abs(
+          engine27Price -
+          engine22Price
+        )
+      );
+
+    if (
+      differencePoints >
+      ES_TICK_SIZE
+    ) {
+      differences.push({
+        label,
+
+        engine27Price:
+          roundToTick(
+            engine27Price
+          ),
+
+        engine22Price:
+          roundToTick(
+            engine22Price
+          ),
+
+        differencePoints,
+      });
+    }
+  }
+
+  return {
+    source:
+      "degreeState.targetModel.levels",
+
+    available:
+      true,
+
+    matches:
+      differences.length === 0,
+
+    differences,
+  };
 }
 
 function unknownDegreeResult({
@@ -1202,10 +1191,10 @@ function unknownDegreeResult({
       startKey: null,
       endKey: null,
       projectionBaseKey: null,
+      waveLengthKey: null,
     },
 
     retracements: {},
-
     extensions: {},
 
     activeLadder:
@@ -1219,16 +1208,9 @@ function unknownDegreeResult({
     },
 
     completedFibLevels: [],
-
-    nextFib:
-      "UNKNOWN",
-
-    nextPrice:
-      null,
-
-    distance:
-      null,
-
+    nextFib: "UNKNOWN",
+    nextPrice: null,
+    distance: null,
     remainingTargets: [],
 
     expectedCorrection:
@@ -1236,6 +1218,19 @@ function unknownDegreeResult({
         degreeKey,
         currentWave,
       }),
+
+    validation: {
+      source:
+        "degreeState.targetModel.levels",
+
+      available:
+        false,
+
+      matches:
+        true,
+
+      differences: [],
+    },
 
     reasonCodes:
       unique([
@@ -1267,6 +1262,7 @@ function buildDegreeFibIntelligence({
   const {
     source,
     sourcePath,
+    sourceType,
   } =
     resolveAnchorSource(
       degreeState
@@ -1277,6 +1273,7 @@ function buildDegreeFibIntelligence({
       degreeKey,
       currentWave,
       currentPrice,
+
       reasonCodes: [
         "ENGINE27_FIB_ANCHOR_SOURCE_UNAVAILABLE",
       ],
@@ -1285,10 +1282,12 @@ function buildDegreeFibIntelligence({
 
   const anchors =
     buildAnchorContract({
-      currentWave,
       source,
       sourcePath,
-      waveDirection:
+      sourceType,
+      currentWave,
+
+      directionInput:
         waveIntelligence
           ?.currentLegDirection ??
         waveIntelligence
@@ -1313,32 +1312,37 @@ function buildDegreeFibIntelligence({
       currentPrice,
     });
 
-  const ladderType =
-    activeLadderType(
+  const activeLadder =
+    getActiveLadderType(
       currentWave
     );
 
-  const ladder =
-    ladderType ===
+  const activeLevels =
+    activeLadder ===
     "RETRACEMENT"
       ? retracements
-      : ladderType ===
+      : activeLadder ===
         "EXTENSION"
       ? extensions
       : {};
 
-  const direction =
-    objectiveDirection({
-      ladderType,
-      anchors,
+  const objective =
+    buildCurrentObjective({
+      currentPrice,
+      ladder:
+        activeLevels,
+      ladderType:
+        activeLadder,
     });
 
-  const objective =
-    deriveCurrentObjective({
-      currentPrice,
-      ladder,
-      ladderType,
-      direction,
+  const validation =
+    buildValidation({
+      extensions,
+
+      referenceLevels:
+        degreeState
+          ?.targetModel
+          ?.levels,
     });
 
   const anchorsComplete =
@@ -1351,7 +1355,7 @@ function buildDegreeFibIntelligence({
 
   const activeLadderAvailable =
     Object.keys(
-      ladder
+      activeLevels
     ).length > 0;
 
   return {
@@ -1368,8 +1372,7 @@ function buildDegreeFibIntelligence({
 
     extensions,
 
-    activeLadder:
-      ladderType,
+    activeLadder,
 
     ...objective,
 
@@ -1379,11 +1382,18 @@ function buildDegreeFibIntelligence({
         currentWave,
       }),
 
+    validation,
+
     reasonCodes:
       unique([
         anchorsComplete
           ? "ENGINE27_FIB_ANCHORS_COMPLETE"
           : "ENGINE27_FIB_UNKNOWN",
+
+        sourceType ===
+        "TARGET_MODEL_ANCHOR_MODEL"
+          ? "ENGINE27_FIB_ENGINE22_ANCHOR_MODEL_CONSUMED"
+          : null,
 
         projectionComplete
           ? "ENGINE27_FIB_PROJECTION_BASE_AVAILABLE"
@@ -1409,6 +1419,15 @@ function buildDegreeFibIntelligence({
             "COMPLETE"
         )
           ? "ENGINE27_FIB_NEXT_OBJECTIVE"
+          : null,
+
+        (
+          validation.available ===
+            true &&
+          validation.matches ===
+            false
+        )
+          ? "ENGINE27_FIB_ENGINE22_VALIDATION_MISMATCH"
           : null,
       ]),
   };
@@ -1439,11 +1458,10 @@ export function buildFibIntelligence({
     of DEGREE_KEYS
   ) {
     try {
-      output[
-        degreeKey
-      ] =
+      output[degreeKey] =
         buildDegreeFibIntelligence({
           degreeKey,
+
           waveIntelligence:
             waves[
               degreeKey
@@ -1459,19 +1477,40 @@ export function buildFibIntelligence({
           engine27WaveIntelligence:
             waves,
         });
-        } catch {
-      output[degreeKey] = unknownDegreeResult({
-        degreeKey,
-        currentWave: normalizeWave(waves[degreeKey]?.currentWave),
+    } catch {
+      output[degreeKey] =
+        unknownDegreeResult({
+          degreeKey,
 
-        currentPrice: resolveCurrentPrice({
-          engine27WaveIntelligence: waves,
-          waveIntelligence: waves[degreeKey] || null,
-          degreeState: states[degreeKey] || null,
-        }),
+          currentWave:
+            normalizeWave(
+              waves[
+                degreeKey
+              ]?.currentWave
+            ),
 
-        reasonCodes: ["ENGINE27_FIB_SAFE_FALLBACK"],
-      });
+          currentPrice:
+            resolveCurrentPrice({
+              engine27WaveIntelligence:
+                waves,
+
+              waveIntelligence:
+                waves[
+                  degreeKey
+                ] ||
+                null,
+
+              degreeState:
+                states[
+                  degreeKey
+                ] ||
+                null,
+            }),
+
+          reasonCodes: [
+            "ENGINE27_FIB_SAFE_FALLBACK",
+          ],
+        });
     }
   }
 
