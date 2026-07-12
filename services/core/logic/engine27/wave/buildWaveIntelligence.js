@@ -1,6 +1,25 @@
-// services/core/logic/engine27/wave/buildWaveIntelligence.js
-// Engine 27A — Wave Intelligence
-// Consumes only engine22WaveStrategy.degreeStates.
+// services/core/logic/engine27/fib/buildFibIntelligence.js
+// Engine 27B — Fibonacci Intelligence
+//
+// Consumes only:
+// - engine27WaveIntelligence
+// - engine22WaveStrategy.degreeStates
+//
+// Owns only:
+// - anchor validation
+// - retracement ladders
+// - extension ladders
+// - completed / next / remaining Fibonacci objectives
+//
+// Does not create:
+// - decisions
+// - alignment
+// - confidence
+// - permission
+// - geometry
+// - tickets
+// - execution
+// - dashboard output
 
 const DEGREE_KEYS = [
   "subminute",
@@ -10,62 +29,24 @@ const DEGREE_KEYS = [
   "primary",
 ];
 
-const DEGREE_LABELS = {
-  subminute: "Subminute",
-  minute: "Minute",
-  minor: "Minor",
-  intermediate: "Intermediate",
-  primary: "Primary",
+const RETRACEMENT_RATIOS = {
+  r236: 0.236,
+  r382: 0.382,
+  r500: 0.5,
+  r618: 0.618,
+  r786: 0.786,
 };
 
-const PARENT_DEGREES = {
-  subminute: "minute",
-  minute: "minor",
-  minor: "intermediate",
-  intermediate: "primary",
-  primary: null,
+const EXTENSION_RATIOS = {
+  e100: 1.0,
+  e1168: 1.168,
+  e1272: 1.272,
+  e1618: 1.618,
+  e200: 2.0,
+  e2618: 2.618,
 };
 
-const PREVIOUS_WAVE = {
-  W1: "C",
-  W2: "W1",
-  W3: "W2",
-  W4: "W3",
-  W5: "W4",
-  A: "W5",
-  B: "A",
-  C: "B",
-  D: "C",
-  E: "D",
-  UNKNOWN: "UNKNOWN",
-};
-
-const NEXT_WAVE = {
-  W1: "W2",
-  W2: "W3",
-  W3: "W4",
-  W4: "W5",
-  W5: "A",
-  A: "B",
-  B: "C",
-  C: "W1",
-  D: "E",
-  E: "UNKNOWN",
-  UNKNOWN: "UNKNOWN",
-};
-
-const VALID_WAVES = new Set([
-  "W1",
-  "W2",
-  "W3",
-  "W4",
-  "W5",
-  "A",
-  "B",
-  "C",
-  "D",
-  "E",
-]);
+const ES_TICK_SIZE = 0.25;
 
 function isObject(value) {
   return (
@@ -89,998 +70,1412 @@ function unique(values) {
   ];
 }
 
-function normalizeWave(value) {
-  const text = upper(value);
-
-  if (!text) {
-    return "UNKNOWN";
-  }
-
-  if (VALID_WAVES.has(text)) {
-    return text;
-  }
-
-  const impulseMatch = text.match(
-    /(?:^|[^A-Z0-9])W(?:AVE)?[\s_-]*([1-5])(?:$|[^A-Z0-9])/
-  );
-
-  if (impulseMatch) {
-    return `W${impulseMatch[1]}`;
-  }
-
-  const correctionMatch = text.match(
-    /(?:^|[^A-Z0-9])(?:WAVE[\s_-]*)?([A-E])(?:$|[^A-Z0-9])/
-  );
-
-  if (correctionMatch) {
-    return correctionMatch[1];
-  }
-
-  return "UNKNOWN";
-}
-
-function resolveCurrentWave(state) {
-  if (!isObject(state)) {
-    return "UNKNOWN";
-  }
-
-  const candidates = [
-    state.activeWave,
-    state.currentWave,
-    state.wave,
-    state.lifecycle?.currentWave,
-    state.currentRead,
-  ];
-
-  for (const candidate of candidates) {
-    const normalized =
-      normalizeWave(candidate);
-
-    if (normalized !== "UNKNOWN") {
-      return normalized;
-    }
-  }
-
-  return "UNKNOWN";
-}
-
-function isTriangleState(state) {
-  if (!isObject(state)) {
-    return false;
-  }
-
-  const candidates = [
-    state.correctionType,
-    state.correctionModel?.type,
-    state.correctionModel?.preferredType,
-    state.correctionModels?.type,
-    state.correctionModels?.preferredType,
-    state.lifecycle?.correctionType,
-    state.lifecycle?.modelType,
-    state.nestedCorrectionContext
-      ?.correctionType,
-    state.nestedCorrectionContext
-      ?.parentCorrectionType,
-    state.headline,
-    state.currentRead,
-  ];
-
-  return candidates.some((value) => {
-    const text = upper(value);
-
-    return (
-      text.includes("TRIANGLE") ||
-      text.includes("ABCDE")
-    );
-  });
-}
-
-function resolveNextWave(
-  currentWave,
-  state
-) {
+function toFiniteNumber(value) {
   if (
-    currentWave === "C" &&
-    isTriangleState(state)
+    value === null ||
+    value === undefined ||
+    value === ""
   ) {
-    return "D";
+    return null;
   }
+
+  const number = Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : null;
+}
+
+function toPositivePrice(value) {
+  const number =
+    toFiniteNumber(value);
 
   return (
-    NEXT_WAVE[currentWave] ||
-    "UNKNOWN"
-  );
+    number !== null &&
+    number > 0
+  )
+    ? number
+    : null;
 }
 
-function normalizeTradeDirection(
+function roundToTick(
   value,
-  {
-    allowUpDown = true,
-  } = {}
+  tick = ES_TICK_SIZE
 ) {
-  const text = upper(value);
+  const number =
+    toFiniteNumber(value);
 
-  if (!text) {
+  if (number === null) {
     return null;
   }
 
-  const longPattern =
-    /(?:^|[^A-Z0-9])(LONG|BULLISH|BULL|BUY)(?:$|[^A-Z0-9])/;
-
-  const shortPattern =
-    /(?:^|[^A-Z0-9])(SHORT|BEARISH|BEAR|SELL)(?:$|[^A-Z0-9])/;
-
-  const neutralPattern =
-    /(?:^|[^A-Z0-9])(NEUTRAL|SIDEWAYS|NONE|UNKNOWN|WAIT)(?:$|[^A-Z0-9])/;
-
-  if (
-    longPattern.test(text) ||
+  return Number(
     (
-      allowUpDown &&
-      /(?:^|[^A-Z0-9])UP(?:$|[^A-Z0-9])/.test(
-        text
-      )
-    )
-  ) {
-    return "LONG";
-  }
-
-  if (
-    shortPattern.test(text) ||
-    (
-      allowUpDown &&
-      /(?:^|[^A-Z0-9])DOWN(?:$|[^A-Z0-9])/.test(
-        text
-      )
-    )
-  ) {
-    return "SHORT";
-  }
-
-  if (neutralPattern.test(text)) {
-    return "NEUTRAL";
-  }
-
-  return null;
+      Math.round(
+        number / tick
+      ) * tick
+    ).toFixed(2)
+  );
 }
 
-function normalizeLegDirection(value) {
-  const text = upper(value);
+function roundDistance(value) {
+  const number =
+    toFiniteNumber(value);
 
-  if (!text) {
+  if (number === null) {
     return null;
   }
 
-  const tokens = text.match(
-    /LONG|SHORT|BULLISH|BEARISH|BULL|BEAR|BUY|SELL|\bUP\b|\bDOWN\b|NEUTRAL|SIDEWAYS|NONE|UNKNOWN/g
-  );
-
-  if (!tokens?.length) {
-    return null;
-  }
-
-  const token =
-    tokens[tokens.length - 1];
-
-  if (
-    [
-      "LONG",
-      "BULLISH",
-      "BULL",
-      "BUY",
-      "UP",
-    ].includes(token)
-  ) {
-    return "UP";
-  }
-
-  if (
-    [
-      "SHORT",
-      "BEARISH",
-      "BEAR",
-      "SELL",
-      "DOWN",
-    ].includes(token)
-  ) {
-    return "DOWN";
-  }
-
-  return "NEUTRAL";
-}
-
-function firstNormalized(
-  candidates,
-  normalizer,
-  fallback
-) {
-  for (const candidate of candidates) {
-    const normalized =
-      normalizer(candidate);
-
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return fallback;
-}
-
-function resolveStructuralDirection(
-  state
-) {
-  if (!isObject(state)) {
-    return "NEUTRAL";
-  }
-
-  return firstNormalized(
-    [
-      state.structuralDirection,
-      state.structureDirection,
-      state.lifecycle
-        ?.structuralDirection,
-      state.lifecycle
-        ?.structureDirection,
-      state.trendDirection,
-      state.trendBias,
-      state.biasDirection,
-      state.bias,
-      state.direction,
-    ],
-    (value) =>
-      normalizeTradeDirection(
-        value,
-        {
-          allowUpDown: true,
-        }
-      ),
-    "NEUTRAL"
+  return Number(
+    number.toFixed(2)
   );
 }
 
-function resolveCurrentLegDirection(
-  state
-) {
-  if (!isObject(state)) {
-    return "NEUTRAL";
-  }
-
-  const explicit =
-    firstNormalized(
-      [
-        state.currentLegDirection,
-        state.legDirection,
-        state.activeLegDirection,
-        state.currentDirection,
-        state.lifecycle
-          ?.currentLegDirection,
-        state.lifecycle
-          ?.legDirection,
-        state.lifecycle
-          ?.currentDirection,
-        state.nestedCorrectionContext
-          ?.currentLegDirection,
-        state.nestedCorrectionContext
-          ?.currentDirection,
-        state.nestedCorrectionContext
-          ?.currentChildDirection,
-        state.correctionModel
-          ?.currentLegDirection,
-        state.correctionModel
-          ?.direction,
-      ],
-      normalizeLegDirection,
-      null
-    );
-
-  if (explicit) {
-    return explicit;
-  }
-
-  return (
-    normalizeLegDirection(
-      state.direction
-    ) ||
-    "NEUTRAL"
-  );
-}
-
-function resolveNextExpectedDirection(
-  state
-) {
-  if (!isObject(state)) {
-    return "NEUTRAL";
-  }
-
-  return firstNormalized(
-    [
-      state.nextExpectedDirection,
-      state.nextDirection,
-      state.lifecycle
-        ?.nextExpectedDirection,
-      state.lifecycle
-        ?.nextDirection,
-      state.nestedCorrectionContext
-        ?.nextExpectedDirection,
-      state.nestedCorrectionContext
-        ?.nextDirection,
-      state.nestedCorrectionContext
-        ?.nextExpected,
-      state.nestedCorrectionContext
-        ?.expectedPath,
-    ],
-    normalizeLegDirection,
-    "NEUTRAL"
-  );
-}
-
-function resolvePreferredTradeDirection(
-  state,
-  structuralDirection
-) {
-  if (!isObject(state)) {
-    return "NEUTRAL";
-  }
-
-  return firstNormalized(
-    [
-      state.preferredTradeDirection,
-      state.tradeDirection,
-      state.preferredDirection,
-      state.lifecycle
-        ?.preferredTradeDirection,
-      state.lifecycle
-        ?.preferredDirection,
-      structuralDirection,
-    ],
-    (value) =>
-      normalizeTradeDirection(value),
-    "NEUTRAL"
-  );
-}
-
-function collectStageText(state) {
-  return [
-    state?.stage,
-    state?.status,
-    state?.state,
-    state?.lifecycle?.stage,
-    state?.lifecycle?.status,
-    state?.activeWave,
-    state?.currentWave,
-  ].map(upper);
-}
-
-function resolveStage(
-  state,
-  hasWave
-) {
-  if (!isObject(state)) {
-    return "WATCH";
-  }
-
-  const stageValues =
-    collectStageText(state);
-
-  const hasText = (pattern) =>
-    stageValues.some((value) =>
-      pattern.test(value)
-    );
-
-  const invalidated =
-    state.invalidated === true ||
-    state.isInvalidated === true ||
-    state.lifecycle
-      ?.invalidated === true ||
-    hasText(/INVALID/);
-
-  if (invalidated) {
-    return "INVALIDATED";
-  }
-
-  const complete =
-    state.complete === true ||
-    state.completed === true ||
-    state.isComplete === true ||
-    state.lifecycle?.complete === true ||
-    state.lifecycle
-      ?.completed === true ||
-    hasText(/COMPLETE|COMPLETED/);
-
-  if (complete) {
-    return "COMPLETE";
-  }
-
-  const active =
-    state.active === true ||
-    state.isActive === true ||
-    state.lifecycle?.active === true ||
-    hasText(
-      /(?:^|[^A-Z0-9])ACTIVE(?:$|[^A-Z0-9])/
-    );
-
-  if (
-    active &&
-    hasWave
-  ) {
-    return "ACTIVE";
-  }
-
-  const watch =
-    state.watch === true ||
-    state.watchOnly === true ||
-    state.lifecycle?.watch === true ||
-    hasText(/WATCH/);
-
-  if (watch) {
-    return "WATCH";
-  }
-
-  const projected =
-    state.projected === true ||
-    state.isProjected === true ||
-    state.lifecycle
-      ?.projected === true ||
-    hasText(/PROJECTED/);
-
-  if (projected) {
-    return "PROJECTED";
-  }
-
-  return "WATCH";
-}
-
-function normalizeMaturity(value) {
-  const text = upper(value);
-
-  if (!text) {
-    return null;
-  }
-
-  if (text.includes("INVALID")) {
-    return "INVALIDATED";
-  }
-
-  if (
-    text.includes("COMPLETE") ||
-    text.includes("COMPLETED")
-  ) {
-    return "COMPLETE";
-  }
-
-  if (
-    /(?:^|[^A-Z0-9])EARLY(?:$|[^A-Z0-9])/.test(
-      text
-    ) ||
-    text.includes("FORMING") ||
-    text.includes("STARTING")
-  ) {
-    return "EARLY";
-  }
-
-  if (
-    /(?:^|[^A-Z0-9])MID(?:$|[^A-Z0-9])/.test(
-      text
-    ) ||
-    text.includes("MIDDLE") ||
-    text.includes("DEVELOPING") ||
-    text.includes("IN_PROGRESS") ||
-    text.includes("IN PROGRESS")
-  ) {
-    return "MID";
-  }
-
-  if (
-    /(?:^|[^A-Z0-9])LATE(?:$|[^A-Z0-9])/.test(
-      text
-    ) ||
-    text.includes("MATURE") ||
-    text.includes("EXTENDED") ||
-    text.includes("EXHAUST") ||
-    text.includes("NEAR_COMPLETE") ||
-    text.includes("NEAR COMPLETE") ||
-    text.includes("COMPLETING")
-  ) {
-    return "LATE";
-  }
-
-  if (
-    text === "UNKNOWN" ||
-    text === "NONE"
-  ) {
-    return "UNKNOWN";
-  }
-
-  return null;
-}
-
-function resolveMaturity({
-  state,
-  currentWave,
-  stage,
-}) {
-  if (stage === "INVALIDATED") {
-    return "INVALIDATED";
-  }
-
-  if (stage === "COMPLETE") {
-    return "COMPLETE";
-  }
-
-  if (currentWave === "UNKNOWN") {
-    return "UNKNOWN";
-  }
-
-  const waveState =
-    state?.waveStates?.[
-      currentWave
-    ] ||
-    state?.waves?.[
-      currentWave
-    ] ||
-    state?.marks?.[
-      currentWave
-    ] ||
-    state?.activeWaveState ||
-    null;
-
-  return firstNormalized(
-    [
-      state?.maturity,
-      state?.waveMaturity,
-      state?.lifecycle?.maturity,
-      state?.lifecycle
-        ?.waveMaturity,
-      waveState?.maturity,
-      waveState?.waveMaturity,
-      waveState?.status,
-      waveState?.stage,
-      state?.correctionModel
-        ?.maturity,
-      state?.correctionModel?.stage,
-    ],
-    normalizeMaturity,
-    "UNKNOWN"
-  );
-}
-
-function waveText(wave) {
-  if (/^W[1-5]$/.test(wave)) {
-    return `Wave ${wave.slice(1)}`;
-  }
-
-  if (
-    [
-      "A",
-      "B",
-      "C",
-      "D",
-      "E",
-    ].includes(wave)
-  ) {
-    return `Wave ${wave}`;
-  }
-
-  return "an unknown wave";
-}
-
-function stageText(stage) {
-  const labels = {
-    ACTIVE: "Active",
-    WATCH: "Watch",
-    PROJECTED: "Projected",
-    COMPLETE: "Complete",
-    INVALIDATED: "Invalidated",
-  };
-
-  return labels[stage] || stage;
-}
-
-function buildHeadline({
-  degree,
-  currentWave,
-  stage,
-  unavailable,
-}) {
-  if (unavailable) {
-    return `${degree} Wave State Unavailable`;
-  }
-
-  return `${degree} ${currentWave} ${stageText(
-    stage
-  )}`;
-}
-
-function buildCurrentRead({
-  degree,
-  currentWave,
-  currentLegDirection,
-  stage,
-  unavailable,
-}) {
-  if (unavailable) {
-    return `${degree} wave state is unavailable.`;
-  }
-
-  const wave =
-    waveText(currentWave);
-
-  if (stage === "INVALIDATED") {
-    return `${degree} ${wave} is invalidated.`;
-  }
-
-  if (stage === "COMPLETE") {
-    return `${degree} ${wave} is complete.`;
-  }
-
-  if (stage === "PROJECTED") {
-    return `${degree} ${wave} is projected.`;
-  }
-
-  if (stage === "WATCH") {
-    return `${degree} ${wave} is on watch.`;
-  }
-
-  if (
-    currentLegDirection === "UP"
-  ) {
-    return `${degree} is currently advancing in ${wave}.`;
-  }
-
-  if (
-    currentLegDirection === "DOWN"
-  ) {
-    return `${degree} is currently declining in ${wave}.`;
-  }
-
-  return `${degree} is currently in ${wave}.`;
-}
-
-function buildAction({
-  currentWave,
-  nextExpectedWave,
-  stage,
-  unavailable,
-}) {
-  if (unavailable) {
-    return "WAIT_FOR_ENGINE22_STATE";
-  }
-
-  if (stage === "INVALIDATED") {
-    return "WAIT_FOR_NEW_ENGINE22_STRUCTURE";
-  }
-
-  if (stage === "COMPLETE") {
-    if (currentWave === "E") {
-      return "WAIT_FOR_TRIANGLE_RESOLUTION";
-    }
-
-    if (
-      nextExpectedWave ===
-      "UNKNOWN"
-    ) {
-      return "WAIT_FOR_ENGINE22_CONFIRMATION";
-    }
-
-    return `WATCH_FOR_${nextExpectedWave}`;
-  }
-
-  if (stage === "PROJECTED") {
-    return `WATCH_PROJECTED_${currentWave}`;
-  }
-
-  if (stage === "WATCH") {
-    return `WATCH_${currentWave}`;
-  }
-
-  if (
-    [
-      "W2",
-      "W4",
-    ].includes(currentWave)
-  ) {
-    return `WAIT_FOR_${currentWave}_COMPLETION`;
-  }
+function normalizeWave(value) {
+  const text =
+    upper(value);
 
   if (
     [
       "W1",
+      "W2",
       "W3",
+      "W4",
       "W5",
-    ].includes(currentWave)
-  ) {
-    return "TRACK_CONTINUATION";
-  }
-
-  if (
-    [
       "A",
       "B",
       "C",
       "D",
       "E",
-    ].includes(currentWave)
+    ].includes(text)
   ) {
-    return "TRACK_CORRECTION";
+    return text;
   }
 
-  return "TRACK_STRUCTURE";
+  return "UNKNOWN";
 }
 
-function buildReasonCodes({
-  degreeKey,
-  currentWave,
-  structuralDirection,
-  currentLegDirection,
-  nextExpectedWave,
-  nextExpectedDirection,
-  preferredTradeDirection,
-  stage,
-  maturity,
-  active,
-  invalidated,
-  unavailable,
-}) {
-  return unique([
-    unavailable
-      ? "ENGINE27_WAVE_STATE_UNAVAILABLE"
-      : null,
+function normalizeDirection(value) {
+  const text =
+    upper(value);
 
-    `ENGINE27_DEGREE_${degreeKey.toUpperCase()}`,
+  if (
+    [
+      "UP",
+      "LONG",
+      "BULLISH",
+      "BULL",
+      "BUY",
+    ].includes(text)
+  ) {
+    return "BULLISH";
+  }
 
-    `ENGINE27_WAVE_${currentWave}`,
+  if (
+    [
+      "DOWN",
+      "SHORT",
+      "BEARISH",
+      "BEAR",
+      "SELL",
+    ].includes(text)
+  ) {
+    return "BEARISH";
+  }
 
-    `ENGINE27_STAGE_${stage}`,
-
-    `ENGINE27_DIRECTION_${structuralDirection}`,
-
-    `ENGINE27_CURRENT_LEG_${currentLegDirection}`,
-
-    `ENGINE27_NEXT_${nextExpectedWave}`,
-
-    `ENGINE27_NEXT_DIRECTION_${nextExpectedDirection}`,
-
-    `ENGINE27_PREFERRED_${preferredTradeDirection}`,
-
-    `ENGINE27_MATURITY_${maturity}`,
-
-    active
-      ? "ENGINE27_WAVE_ACTIVE"
-      : "ENGINE27_WAVE_INACTIVE",
-
-    invalidated
-      ? "ENGINE27_WAVE_INVALIDATED"
-      : null,
-  ]);
+  return "UNKNOWN";
 }
 
-function buildDegreeIntelligence(
-  degreeKey,
-  state
+function readMarkPrice(mark) {
+  if (
+    toPositivePrice(mark) !== null
+  ) {
+    return toPositivePrice(mark);
+  }
+
+  if (!isObject(mark)) {
+    return null;
+  }
+
+  const candidates = [
+    mark.price,
+    mark.p,
+    mark.value,
+    mark.level,
+    mark.close,
+  ];
+
+  for (
+    const candidate
+    of candidates
+  ) {
+    const price =
+      toPositivePrice(candidate);
+
+    if (price !== null) {
+      return price;
+    }
+  }
+
+  return null;
+}
+
+function readNamedPrice(
+  source,
+  keys
 ) {
-  const degree =
-    DEGREE_LABELS[degreeKey];
+  if (!isObject(source)) {
+    return null;
+  }
 
-  const currentWave =
-    resolveCurrentWave(state);
+  for (
+    const key
+    of keys
+  ) {
+    const price =
+      readMarkPrice(
+        source[key]
+      );
 
-  const hasWave =
-    currentWave !== "UNKNOWN";
+    if (price !== null) {
+      return price;
+    }
+  }
 
-  const unavailable =
-    !isObject(state) ||
-    !hasWave;
+  return null;
+}
 
-  const stage =
-    resolveStage(
-      state,
-      hasWave
+function resolveAnchorSource(
+  degreeState
+) {
+  if (!isObject(degreeState)) {
+    return {
+      source: null,
+      sourcePath: null,
+    };
+  }
+
+  const candidates = [
+    {
+      source:
+        degreeState.confirmedAnchors,
+      sourcePath:
+        "degreeState.confirmedAnchors",
+    },
+    {
+      source:
+        degreeState.anchors,
+      sourcePath:
+        "degreeState.anchors",
+    },
+    {
+      source:
+        degreeState.waveMarks,
+      sourcePath:
+        "degreeState.waveMarks",
+    },
+    {
+      source:
+        degreeState.structure
+          ?.waveMarks,
+      sourcePath:
+        "degreeState.structure.waveMarks",
+    },
+  ];
+
+  for (
+    const candidate
+    of candidates
+  ) {
+    if (
+      isObject(
+        candidate.source
+      )
+    ) {
+      return candidate;
+    }
+  }
+
+  return {
+    source: null,
+    sourcePath: null,
+  };
+}
+
+function unwrapWaveMarks(source) {
+  if (!isObject(source)) {
+    return {};
+  }
+
+  if (
+    isObject(
+      source.waveMarks
+    )
+  ) {
+    return source.waveMarks;
+  }
+
+  return source;
+}
+
+function explicitAnchorValue(
+  source,
+  keys
+) {
+  return readNamedPrice(
+    source,
+    keys
+  );
+}
+
+function markPrice(
+  marks,
+  wave
+) {
+  return readNamedPrice(
+    marks,
+    [
+      wave,
+      wave.toLowerCase(),
+      `wave${wave.replace("W", "")}`,
+      `Wave${wave.replace("W", "")}`,
+    ]
+  );
+}
+
+function inferDirection(
+  {
+    explicitDirection,
+    waveStart,
+    waveEnd,
+  }
+) {
+  const normalized =
+    normalizeDirection(
+      explicitDirection
     );
 
-  const invalidated =
-    stage === "INVALIDATED";
+  if (
+    normalized !== "UNKNOWN"
+  ) {
+    return normalized;
+  }
 
-  const active =
-    stage === "ACTIVE" &&
-    hasWave &&
-    !invalidated;
+  if (
+    waveStart !== null &&
+    waveEnd !== null
+  ) {
+    if (
+      waveEnd > waveStart
+    ) {
+      return "BULLISH";
+    }
 
-  const structuralDirection =
-    resolveStructuralDirection(
-      state
+    if (
+      waveEnd < waveStart
+    ) {
+      return "BEARISH";
+    }
+  }
+
+  return "UNKNOWN";
+}
+
+function buildAnchorContract({
+  currentWave,
+  source,
+  sourcePath,
+  waveDirection,
+}) {
+  const marks =
+    unwrapWaveMarks(source);
+
+  let waveStart =
+    explicitAnchorValue(
+      source,
+      [
+        "waveStart",
+        "start",
+        "anchorStart",
+      ]
     );
 
-  const currentLegDirection =
-    resolveCurrentLegDirection(
-      state
+  let waveEnd =
+    explicitAnchorValue(
+      source,
+      [
+        "waveEnd",
+        "end",
+        "anchorEnd",
+      ]
     );
 
-  const nextExpectedWave =
-    resolveNextWave(
-      currentWave,
-      state
+  let projectionBase =
+    explicitAnchorValue(
+      source,
+      [
+        "projectionBase",
+        "base",
+        "projection",
+      ]
     );
 
-  const nextExpectedDirection =
-    resolveNextExpectedDirection(
-      state
-    );
+  let startKey = null;
+  let endKey = null;
+  let projectionBaseKey =
+    projectionBase !== null
+      ? "projectionBase"
+      : null;
 
-  const preferredTradeDirection =
-    resolvePreferredTradeDirection(
-      state,
-      structuralDirection
-    );
+  if (
+    currentWave === "W2"
+  ) {
+    waveStart =
+      waveStart ??
+      explicitAnchorValue(
+        source,
+        [
+          "w1Low",
+          "W1_LOW",
+          "low",
+          "a",
+        ]
+      );
 
-  const maturity =
-    resolveMaturity({
-      state,
-      currentWave,
-      stage,
+    waveEnd =
+      waveEnd ??
+      explicitAnchorValue(
+        source,
+        [
+          "w1High",
+          "W1_HIGH",
+          "high",
+          "b",
+        ]
+      );
+
+    startKey = "W1_START";
+    endKey = "W1_END";
+  }
+
+  if (
+    currentWave === "W3"
+  ) {
+    waveStart =
+      waveStart ??
+      explicitAnchorValue(
+        source,
+        [
+          "w1Low",
+          "W1_LOW",
+          "low",
+          "a",
+        ]
+      );
+
+    waveEnd =
+      waveEnd ??
+      explicitAnchorValue(
+        source,
+        [
+          "w1High",
+          "W1_HIGH",
+          "high",
+          "b",
+        ]
+      );
+
+    projectionBase =
+      projectionBase ??
+      markPrice(
+        marks,
+        "W2"
+      );
+
+    startKey = "W1_START";
+    endKey = "W1_END";
+
+    if (
+      projectionBase !== null &&
+      projectionBaseKey === null
+    ) {
+      projectionBaseKey = "W2";
+    }
+  }
+
+  if (
+    currentWave === "W4"
+  ) {
+    waveStart =
+      waveStart ??
+      markPrice(
+        marks,
+        "W2"
+      );
+
+    waveEnd =
+      waveEnd ??
+      markPrice(
+        marks,
+        "W3"
+      );
+
+    startKey = "W2";
+    endKey = "W3";
+  }
+
+  if (
+    currentWave === "W5"
+  ) {
+    waveStart =
+      waveStart ??
+      markPrice(
+        marks,
+        "W2"
+      );
+
+    waveEnd =
+      waveEnd ??
+      markPrice(
+        marks,
+        "W3"
+      );
+
+    projectionBase =
+      projectionBase ??
+      markPrice(
+        marks,
+        "W4"
+      );
+
+    startKey = "W2";
+    endKey = "W3";
+
+    if (
+      projectionBase !== null &&
+      projectionBaseKey === null
+    ) {
+      projectionBaseKey = "W4";
+    }
+  }
+
+  const direction =
+    inferDirection({
+      explicitDirection:
+        waveDirection,
+      waveStart,
+      waveEnd,
     });
 
-  const parentKey =
-    PARENT_DEGREES[
-      degreeKey
-    ];
+  const waveLength =
+    (
+      waveStart !== null &&
+      waveEnd !== null
+    )
+      ? Math.abs(
+          waveEnd -
+          waveStart
+        )
+      : null;
 
-  const output = {
-    degree,
-
-    currentWave,
-
-    previousWave:
-      PREVIOUS_WAVE[
-        currentWave
-      ] ||
-      "UNKNOWN",
-
-    nextExpectedWave,
-
-    structuralDirection,
-
-    currentLegDirection,
-
-    nextExpectedDirection,
-
-    preferredTradeDirection,
-
-    stage,
-
-    maturity,
-
-    active,
-
-    invalidated,
-
-    parentDegree:
-      parentKey
-        ? DEGREE_LABELS[
-            parentKey
-          ]
+  return {
+    waveStart:
+      waveStart !== null
+        ? roundToTick(
+            waveStart
+          )
         : null,
 
-    parentWave: null,
+    waveEnd:
+      waveEnd !== null
+        ? roundToTick(
+            waveEnd
+          )
+        : null,
 
-    currentRead:
-      buildCurrentRead({
-        degree,
-        currentWave,
-        currentLegDirection,
-        stage,
-        unavailable,
-      }),
+    projectionBase:
+      projectionBase !== null
+        ? roundToTick(
+            projectionBase
+          )
+        : null,
 
-    action:
-      buildAction({
-        currentWave,
-        nextExpectedWave,
-        stage,
-        unavailable,
-      }),
+    waveLength:
+      waveLength !== null &&
+      waveLength > 0
+        ? roundToTick(
+            waveLength
+          )
+        : null,
 
-    headline:
-      buildHeadline({
-        degree,
-        currentWave,
-        stage,
-        unavailable,
-      }),
+    direction,
 
-    reasonCodes: [],
+    source:
+      sourcePath,
+
+    timestamp:
+      source?.timestamp ??
+      source?.updatedAt ??
+      source?.confirmedAt ??
+      null,
+
+    startKey,
+    endKey,
+    projectionBaseKey,
   };
+}
 
-  output.reasonCodes =
-    buildReasonCodes({
-      degreeKey,
-      currentWave,
-      structuralDirection,
-      currentLegDirection,
-      nextExpectedWave,
-      nextExpectedDirection,
-      preferredTradeDirection,
-      stage,
-      maturity,
-      active,
-      invalidated,
-      unavailable,
-    });
+function purposeForLevel({
+  degreeKey,
+  currentWave,
+  label,
+  ladderType,
+}) {
+  const degree =
+    degreeKey.toUpperCase();
+
+  if (
+    currentWave === "W3" &&
+    ladderType === "EXTENSION"
+  ) {
+    return `${degree}_W3_OBJECTIVE`;
+  }
+
+  if (
+    currentWave === "W5" &&
+    ladderType === "EXTENSION"
+  ) {
+    return `${degree}_W5_OBJECTIVE`;
+  }
+
+  if (
+    currentWave === "W2" &&
+    ladderType === "RETRACEMENT"
+  ) {
+    return `${degree}_W2_PULLBACK_OBJECTIVE`;
+  }
+
+  if (
+    currentWave === "W4" &&
+    ladderType === "RETRACEMENT"
+  ) {
+    return `${degree}_W4_PULLBACK_OBJECTIVE`;
+  }
+
+  return `${degree}_${currentWave}_${label}_REFERENCE`;
+}
+
+function levelStatus({
+  currentPrice,
+  targetPrice,
+  direction,
+}) {
+  if (
+    currentPrice === null ||
+    targetPrice === null ||
+    direction === "UNKNOWN"
+  ) {
+    return "UNKNOWN";
+  }
+
+  if (
+    direction === "BULLISH"
+  ) {
+    return (
+      currentPrice >=
+      targetPrice
+    )
+      ? "REACHED"
+      : "NOT_REACHED";
+  }
+
+  return (
+    currentPrice <=
+    targetPrice
+  )
+    ? "REACHED"
+    : "NOT_REACHED";
+}
+
+function buildFibLevel({
+  degreeKey,
+  currentWave,
+  label,
+  ratio,
+  price,
+  currentPrice,
+  direction,
+  ladderType,
+}) {
+  const targetPrice =
+    roundToTick(price);
+
+  return {
+    label,
+    ratio,
+    price:
+      targetPrice,
+
+    status:
+      levelStatus({
+        currentPrice,
+        targetPrice,
+        direction,
+      }),
+
+    purpose:
+      purposeForLevel({
+        degreeKey,
+        currentWave,
+        label,
+        ladderType,
+      }),
+
+    distance:
+      (
+        currentPrice !== null &&
+        targetPrice !== null
+      )
+        ? roundDistance(
+            Math.abs(
+              targetPrice -
+              currentPrice
+            )
+          )
+        : null,
+  };
+}
+
+function buildRetracements({
+  degreeKey,
+  currentWave,
+  anchors,
+  currentPrice,
+}) {
+  const output = {};
+
+  const start =
+    toFiniteNumber(
+      anchors.waveStart
+    );
+
+  const end =
+    toFiniteNumber(
+      anchors.waveEnd
+    );
+
+  const length =
+    toFiniteNumber(
+      anchors.waveLength
+    );
+
+  if (
+    start === null ||
+    end === null ||
+    length === null ||
+    length <= 0 ||
+    anchors.direction === "UNKNOWN"
+  ) {
+    return output;
+  }
+
+  for (
+    const [
+      label,
+      ratio,
+    ]
+    of Object.entries(
+      RETRACEMENT_RATIOS
+    )
+  ) {
+    const rawPrice =
+      anchors.direction === "BULLISH"
+        ? end -
+          length * ratio
+        : end +
+          length * ratio;
+
+    output[label] =
+      buildFibLevel({
+        degreeKey,
+        currentWave,
+        label,
+        ratio,
+        price: rawPrice,
+        currentPrice,
+        direction:
+          anchors.direction === "BULLISH"
+            ? "BEARISH"
+            : "BULLISH",
+        ladderType:
+          "RETRACEMENT",
+      });
+  }
 
   return output;
 }
 
-export function buildWaveIntelligence({
+function buildExtensions({
+  degreeKey,
+  currentWave,
+  anchors,
+  currentPrice,
+}) {
+  const output = {};
+
+  const base =
+    toFiniteNumber(
+      anchors.projectionBase
+    );
+
+  const length =
+    toFiniteNumber(
+      anchors.waveLength
+    );
+
+  if (
+    base === null ||
+    length === null ||
+    length <= 0 ||
+    anchors.direction === "UNKNOWN"
+  ) {
+    return output;
+  }
+
+  const sign =
+    anchors.direction === "BEARISH"
+      ? -1
+      : 1;
+
+  for (
+    const [
+      label,
+      ratio,
+    ]
+    of Object.entries(
+      EXTENSION_RATIOS
+    )
+  ) {
+    output[label] =
+      buildFibLevel({
+        degreeKey,
+        currentWave,
+        label,
+        ratio,
+        price:
+          base +
+          sign *
+          length *
+          ratio,
+        currentPrice,
+        direction:
+          anchors.direction,
+        ladderType:
+          "EXTENSION",
+      });
+  }
+
+  return output;
+}
+
+function activeLadderType(
+  currentWave
+) {
+  if (
+    [
+      "W2",
+      "W4",
+    ].includes(
+      currentWave
+    )
+  ) {
+    return "RETRACEMENT";
+  }
+
+  if (
+    [
+      "W3",
+      "W5",
+      "C",
+    ].includes(
+      currentWave
+    )
+  ) {
+    return "EXTENSION";
+  }
+
+  return "UNKNOWN";
+}
+
+function objectiveDirection({
+  ladderType,
+  anchors,
+}) {
+  if (
+    ladderType === "EXTENSION"
+  ) {
+    return anchors.direction;
+  }
+
+  if (
+    ladderType === "RETRACEMENT"
+  ) {
+    if (
+      anchors.direction === "BULLISH"
+    ) {
+      return "BEARISH";
+    }
+
+    if (
+      anchors.direction === "BEARISH"
+    ) {
+      return "BULLISH";
+    }
+  }
+
+  return "UNKNOWN";
+}
+
+function orderedLevels(
+  ladder,
+  ladderType
+) {
+  const labels =
+    ladderType === "RETRACEMENT"
+      ? Object.keys(
+          RETRACEMENT_RATIOS
+        )
+      : Object.keys(
+          EXTENSION_RATIOS
+        );
+
+  return labels
+    .map(
+      (label) =>
+        ladder?.[label] ||
+        null
+    )
+    .filter(Boolean);
+}
+
+function deriveCurrentObjective({
+  currentPrice,
+  ladder,
+  ladderType,
+  direction,
+}) {
+  const levels =
+    orderedLevels(
+      ladder,
+      ladderType
+    );
+
+  if (
+    levels.length === 0
+  ) {
+    return {
+      currentFib: {
+        lastCompleted:
+          "UNKNOWN",
+        next:
+          "UNKNOWN",
+      },
+
+      completedFibLevels: [],
+
+      nextFib:
+        "UNKNOWN",
+
+      nextPrice:
+        null,
+
+      distance:
+        null,
+
+      remainingTargets: [],
+    };
+  }
+
+  if (
+    currentPrice === null ||
+    direction === "UNKNOWN"
+  ) {
+    return {
+      currentFib: {
+        lastCompleted:
+          "UNKNOWN",
+        next:
+          levels[0]?.label ||
+          "UNKNOWN",
+      },
+
+      completedFibLevels: [],
+
+      nextFib:
+        levels[0]?.label ||
+        "UNKNOWN",
+
+      nextPrice:
+        levels[0]?.price ??
+        null,
+
+      distance:
+        null,
+
+      remainingTargets:
+        levels.slice(1),
+    };
+  }
+
+  const completed =
+    levels.filter(
+      (level) =>
+        level.status ===
+        "REACHED"
+    );
+
+  const nextIndex =
+    levels.findIndex(
+      (level) =>
+        level.status !==
+        "REACHED"
+    );
+
+  const next =
+    nextIndex >= 0
+      ? levels[nextIndex]
+      : null;
+
+  return {
+    currentFib: {
+      lastCompleted:
+        completed[
+          completed.length - 1
+        ]?.label ||
+        "NONE",
+
+      next:
+        next?.label ||
+        "COMPLETE",
+    },
+
+    completedFibLevels:
+      completed,
+
+    nextFib:
+      next?.label ||
+      "COMPLETE",
+
+    nextPrice:
+      next?.price ??
+      null,
+
+    distance:
+      next?.distance ??
+      null,
+
+    remainingTargets:
+      nextIndex >= 0
+        ? levels.slice(
+            nextIndex + 1
+          )
+        : [],
+  };
+}
+
+function expectedCorrectionFor(
+  {
+    degreeKey,
+    currentWave,
+  }
+) {
+  const degreeLabel =
+    degreeKey.charAt(0).toUpperCase() +
+    degreeKey.slice(1);
+
+  const map = {
+    W1: {
+      nextWave: "W2",
+      type: "RETRACEMENT",
+      description:
+        `${degreeLabel} W2 Pullback`,
+    },
+
+    W2: {
+      nextWave: "W3",
+      type: "EXTENSION",
+      description:
+        `${degreeLabel} W3 Advance`,
+    },
+
+    W3: {
+      nextWave: "W4",
+      type: "RETRACEMENT",
+      description:
+        `${degreeLabel} W4 Pullback`,
+    },
+
+    W4: {
+      nextWave: "W5",
+      type: "EXTENSION",
+      description:
+        `${degreeLabel} W5 Advance`,
+    },
+
+    W5: {
+      nextWave: "A",
+      type: "CORRECTION",
+      description:
+        `${degreeLabel} Wave A Correction`,
+    },
+  };
+
+  return (
+    map[currentWave] || {
+      nextWave:
+        "UNKNOWN",
+      type:
+        "UNKNOWN",
+      description:
+        "UNKNOWN",
+    }
+  );
+}
+
+function resolveCurrentPrice({
+  engine27WaveIntelligence,
+  waveIntelligence,
+  degreeState,
+}) {
+  const candidates = [
+    engine27WaveIntelligence
+      ?.currentPrice,
+    waveIntelligence
+      ?.currentPrice,
+    degreeState
+      ?.currentPrice,
+  ];
+
+  for (
+    const candidate
+    of candidates
+  ) {
+    const price =
+      toPositivePrice(
+        candidate
+      );
+
+    if (
+      price !== null
+    ) {
+      return roundToTick(
+        price
+      );
+    }
+  }
+
+  return null;
+}
+
+function unknownDegreeResult({
+  degreeKey,
+  currentWave = "UNKNOWN",
+  currentPrice = null,
+  reasonCodes = [],
+}) {
+  return {
+    degree:
+      degreeKey,
+
+    currentWave,
+
+    currentPrice,
+
+    anchors: {
+      waveStart: null,
+      waveEnd: null,
+      projectionBase: null,
+      waveLength: null,
+      direction: "UNKNOWN",
+      source: null,
+      timestamp: null,
+      startKey: null,
+      endKey: null,
+      projectionBaseKey: null,
+    },
+
+    retracements: {},
+
+    extensions: {},
+
+    activeLadder:
+      "UNKNOWN",
+
+    currentFib: {
+      lastCompleted:
+        "UNKNOWN",
+      next:
+        "UNKNOWN",
+    },
+
+    completedFibLevels: [],
+
+    nextFib:
+      "UNKNOWN",
+
+    nextPrice:
+      null,
+
+    distance:
+      null,
+
+    remainingTargets: [],
+
+    expectedCorrection:
+      expectedCorrectionFor({
+        degreeKey,
+        currentWave,
+      }),
+
+    reasonCodes:
+      unique([
+        "ENGINE27_FIB_UNKNOWN",
+        ...reasonCodes,
+      ]),
+  };
+}
+
+function buildDegreeFibIntelligence({
+  degreeKey,
+  waveIntelligence,
+  degreeState,
+  engine27WaveIntelligence,
+}) {
+  const currentWave =
+    normalizeWave(
+      waveIntelligence
+        ?.currentWave
+    );
+
+  const currentPrice =
+    resolveCurrentPrice({
+      engine27WaveIntelligence,
+      waveIntelligence,
+      degreeState,
+    });
+
+  const {
+    source,
+    sourcePath,
+  } =
+    resolveAnchorSource(
+      degreeState
+    );
+
+  if (!source) {
+    return unknownDegreeResult({
+      degreeKey,
+      currentWave,
+      currentPrice,
+      reasonCodes: [
+        "ENGINE27_FIB_ANCHOR_SOURCE_UNAVAILABLE",
+      ],
+    });
+  }
+
+  const anchors =
+    buildAnchorContract({
+      currentWave,
+      source,
+      sourcePath,
+      waveDirection:
+        waveIntelligence
+          ?.currentLegDirection ??
+        waveIntelligence
+          ?.structuralDirection ??
+        degreeState
+          ?.direction,
+    });
+
+  const retracements =
+    buildRetracements({
+      degreeKey,
+      currentWave,
+      anchors,
+      currentPrice,
+    });
+
+  const extensions =
+    buildExtensions({
+      degreeKey,
+      currentWave,
+      anchors,
+      currentPrice,
+    });
+
+  const ladderType =
+    activeLadderType(
+      currentWave
+    );
+
+  const ladder =
+    ladderType ===
+    "RETRACEMENT"
+      ? retracements
+      : ladderType ===
+        "EXTENSION"
+      ? extensions
+      : {};
+
+  const direction =
+    objectiveDirection({
+      ladderType,
+      anchors,
+    });
+
+  const objective =
+    deriveCurrentObjective({
+      currentPrice,
+      ladder,
+      ladderType,
+      direction,
+    });
+
+  const anchorsComplete =
+    anchors.waveStart !== null &&
+    anchors.waveEnd !== null &&
+    anchors.waveLength !== null;
+
+  const projectionComplete =
+    anchors.projectionBase !== null;
+
+  const activeLadderAvailable =
+    Object.keys(
+      ladder
+    ).length > 0;
+
+  return {
+    degree:
+      degreeKey,
+
+    currentWave,
+
+    currentPrice,
+
+    anchors,
+
+    retracements,
+
+    extensions,
+
+    activeLadder:
+      ladderType,
+
+    ...objective,
+
+    expectedCorrection:
+      expectedCorrectionFor({
+        degreeKey,
+        currentWave,
+      }),
+
+    reasonCodes:
+      unique([
+        anchorsComplete
+          ? "ENGINE27_FIB_ANCHORS_COMPLETE"
+          : "ENGINE27_FIB_UNKNOWN",
+
+        projectionComplete
+          ? "ENGINE27_FIB_PROJECTION_BASE_AVAILABLE"
+          : null,
+
+        currentPrice === null
+          ? "ENGINE27_FIB_CURRENT_PRICE_UNAVAILABLE"
+          : null,
+
+        activeLadderAvailable
+          ? "ENGINE27_FIB_READY"
+          : "ENGINE27_FIB_UNKNOWN",
+
+        objective.nextFib !==
+        "UNKNOWN"
+          ? "ENGINE27_FIB_CURRENT_TARGET"
+          : null,
+
+        (
+          objective.nextFib !==
+            "UNKNOWN" &&
+          objective.nextFib !==
+            "COMPLETE"
+        )
+          ? "ENGINE27_FIB_NEXT_OBJECTIVE"
+          : null,
+      ]),
+  };
+}
+
+export function buildFibIntelligence({
+  engine27WaveIntelligence,
   degreeStates,
 } = {}) {
+  const waves =
+    isObject(
+      engine27WaveIntelligence
+    )
+      ? engine27WaveIntelligence
+      : {};
+
   const states =
-    isObject(degreeStates)
+    isObject(
+      degreeStates
+    )
       ? degreeStates
       : {};
 
-  const engine27WaveIntelligence =
-    {};
+  const output = {};
 
   for (
     const degreeKey
     of DEGREE_KEYS
   ) {
-    engine27WaveIntelligence[
-      degreeKey
-    ] =
-      buildDegreeIntelligence(
+    try {
+      output[
+        degreeKey
+      ] =
+        buildDegreeFibIntelligence({
+          degreeKey,
+          waveIntelligence:
+            waves[
+              degreeKey
+            ] ||
+            null,
+
+          degreeState:
+            states[
+              degreeKey
+            ] ||
+            null,
+
+          engine27WaveIntelligence:
+            waves,
+        });
+        } catch {
+      output[degreeKey] = unknownDegreeResult({
         degreeKey,
-        states[
-          degreeKey
-        ] ||
-          null
-      );
-  }
+        currentWave: normalizeWave(waves[degreeKey]?.currentWave),
 
-  for (
-    const degreeKey
-    of DEGREE_KEYS
-  ) {
-    const parentKey =
-      PARENT_DEGREES[
-        degreeKey
-      ];
+        currentPrice: resolveCurrentPrice({
+          engine27WaveIntelligence: waves,
+          waveIntelligence: waves[degreeKey] || null,
+          degreeState: states[degreeKey] || null,
+        }),
 
-    if (!parentKey) {
-      engine27WaveIntelligence[
-        degreeKey
-      ].parentDegree = null;
-
-      engine27WaveIntelligence[
-        degreeKey
-      ].parentWave = null;
-
-      continue;
+        reasonCodes: ["ENGINE27_FIB_SAFE_FALLBACK"],
+      });
     }
-
-    const parentWave =
-      engine27WaveIntelligence[
-        parentKey
-      ]?.currentWave ||
-      "UNKNOWN";
-
-    engine27WaveIntelligence[
-      degreeKey
-    ].parentWave =
-      parentWave;
-
-    engine27WaveIntelligence[
-      degreeKey
-    ].reasonCodes =
-      unique([
-        ...engine27WaveIntelligence[
-          degreeKey
-        ].reasonCodes,
-
-        `ENGINE27_PARENT_${parentKey.toUpperCase()}_${parentWave}`,
-      ]);
   }
 
-  return engine27WaveIntelligence;
+  return output;
 }
 
-export default buildWaveIntelligence;
+export default buildFibIntelligence;
