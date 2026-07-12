@@ -16,12 +16,13 @@ import {
   buildWaveIntelligence,
 } from "./wave/buildWaveIntelligence.js";
 
+import {
+  buildFibIntelligence,
+} from "./fib/buildFibIntelligence.js";
+
 function barsForTimeframe(snapshot, timeframe) {
   const posture =
-    snapshot
-      ?.marketMeter
-      ?.layers
-      ?.emaPosture ||
+    snapshot?.marketMeter?.layers?.emaPosture ||
     snapshot?.emaPosture ||
     {};
 
@@ -46,14 +47,9 @@ function barsForTimeframe(snapshot, timeframe) {
 
 function getDegreeStates(snapshot) {
   return (
-    snapshot
-      ?.strategies
-      ?.[
-        "intraday_scalp@10m"
-      ]
+    snapshot?.strategies?.["intraday_scalp@10m"]
       ?.engine22WaveStrategy
-      ?.degreeStates ||
-    {}
+      ?.degreeStates || {}
   );
 }
 
@@ -86,18 +82,42 @@ export function buildEngine27Strategies({
       degreeStates,
     });
 
+  /*
+   * Engine 27B — Fibonacci Intelligence
+   *
+   * Reads only:
+   * - engine27WaveIntelligence
+   * - engine22WaveStrategy.degreeStates
+   *
+   * Does not create:
+   * - trade decisions
+   * - alignment
+   * - confidence
+   * - permission
+   * - sizing
+   * - geometry
+   * - tickets
+   * - execution
+   * - dashboard output
+   */
+  const engine27FibIntelligence =
+    buildFibIntelligence({
+      engine27WaveIntelligence,
+      degreeStates,
+    });
+
   const decisions = {};
 
   for (const lane of lanes) {
     const sourceStrategy =
-      snapshot
-        ?.strategies
-        ?.[lane.sourceStrategyId] ||
-      null;
+      snapshot?.strategies?.[
+        lane.sourceStrategyId
+      ] || null;
 
     const degreeState =
-      degreeStates?.[lane.degree] ||
-      null;
+      degreeStates?.[
+        lane.degree
+      ] || null;
 
     const triggerBars =
       barsForTimeframe(
@@ -138,32 +158,33 @@ export function buildEngine27Strategies({
     engine:
       "engine27.multiStrategyDecision.v1",
 
-    mode: "READ_ONLY",
+    mode:
+      "READ_ONLY",
 
     symbol:
-      snapshot?.symbol || null,
+      snapshot?.symbol ||
+      null,
 
     builtAt:
       new Date().toISOString(),
 
     /*
      * Engine 27A canonical output.
-     *
-     * Contains:
-     * subminute
-     * minute
-     * minor
-     * intermediate
-     * primary
      */
     engine27WaveIntelligence,
+
+    /*
+     * Engine 27B canonical output.
+     */
+    engine27FibIntelligence,
 
     laneCount:
       lanes.length,
 
     laneOrder:
       lanes.map(
-        (lane) => lane.laneId
+        (lane) =>
+          lane.laneId
       ),
 
     lanes,
@@ -178,6 +199,7 @@ export function buildEngine27Strategies({
 
     reasonCodes: [
       "ENGINE27_WAVE_INTELLIGENCE_BUILT",
+      "ENGINE27_FIB_INTELLIGENCE_BUILT",
       "ENGINE27_FIVE_INDEPENDENT_STRATEGIES_BUILT",
       "READ_ONLY",
       "NO_PERMISSION_CREATED",
