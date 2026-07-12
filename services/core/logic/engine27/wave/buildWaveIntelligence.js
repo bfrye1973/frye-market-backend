@@ -313,29 +313,30 @@ function resolveStructuralDirection(
     return "NEUTRAL";
   }
 
-  const explicit =
-    firstNormalized(
-      [
-        state.structuralDirection,
-        state.structureDirection,
-        state.lifecycle
-          ?.structuralDirection,
-        state.lifecycle
-          ?.structureDirection,
-        state.trendDirection,
-        state.trendBias,
-        state.biasDirection,
-        state.bias,
-      ],
-      (value) =>
-        normalizeTradeDirection(value),
-      null
-    );
-
-  if (explicit) {
-    return explicit;
-  }
-
+  return firstNormalized(
+    [
+      state.structuralDirection,
+      state.structureDirection,
+      state.lifecycle
+        ?.structuralDirection,
+      state.lifecycle
+        ?.structureDirection,
+      state.trendDirection,
+      state.trendBias,
+      state.biasDirection,
+      state.bias,
+      state.direction,
+    ],
+    (value) =>
+      normalizeTradeDirection(
+        value,
+        {
+          allowUpDown: true,
+        }
+      ),
+    "NEUTRAL"
+  );
+}
   /*
    * The generic Engine 22 direction
    * field is accepted for structural
