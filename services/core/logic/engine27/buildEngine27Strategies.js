@@ -24,6 +24,10 @@ import {
   buildMultiDegreeAlignment,
 } from "./alignment/buildMultiDegreeAlignment.js";
 
+import {
+  buildMarketStory,
+} from "./story/buildMarketStory.js";
+
 function barsForTimeframe(snapshot, timeframe) {
   const posture =
     snapshot?.marketMeter?.layers?.emaPosture ||
@@ -136,6 +140,34 @@ export function buildEngine27Strategies({
       engine27FibIntelligence,
     });
 
+  /*
+   * Engine 27D — Market Story
+   *
+   * Reads only:
+   * - engine27WaveIntelligence
+   * - engine27FibIntelligence
+   * - engine27Alignment
+   *
+   * Creates only:
+   * - concise market-structure narrative
+   *
+   * Does not create:
+   * - trade decisions
+   * - permission
+   * - sizing
+   * - geometry
+   * - tickets
+   * - execution
+   * - alerts
+   * - dashboard output
+   */
+  const engine27MarketStory =
+    buildMarketStory({
+      engine27WaveIntelligence,
+      engine27FibIntelligence,
+      engine27Alignment,
+    });
+
   const decisions = {};
 
   for (const lane of lanes) {
@@ -213,6 +245,11 @@ export function buildEngine27Strategies({
      */
     engine27Alignment,
 
+    /*
+     * Engine 27D canonical output.
+     */
+    engine27MarketStory,
+
     laneCount:
       lanes.length,
 
@@ -236,6 +273,7 @@ export function buildEngine27Strategies({
       "ENGINE27_WAVE_INTELLIGENCE_BUILT",
       "ENGINE27_FIB_INTELLIGENCE_BUILT",
       "ENGINE27_ALIGNMENT_BUILT",
+      "ENGINE27_MARKET_STORY_BUILT",
       "ENGINE27_FIVE_INDEPENDENT_STRATEGIES_BUILT",
       "READ_ONLY",
       "NO_PERMISSION_CREATED",
