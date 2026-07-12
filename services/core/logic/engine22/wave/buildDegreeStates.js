@@ -8,6 +8,11 @@
 // This is NOT Engine 6 permission.
 // This is NOT Engine 15 readiness.
 // This is a structural display/contract layer only.
+//
+// Engine 27 contract repair:
+// - Preserve real Engine 22 stage names instead of flattening everything to ACTIVE.
+// - Publish previousWave, previousWaveMark, and nextExpectedWave for each degree.
+// - Keep existing correction display behavior intact.
 
 import { attachNestedCorrectionContexts } from "./corrections/buildNestedCorrectionContext.js";
 
@@ -17,56 +22,9 @@ const DEGREE_ORDER = ["subminute", "minute", "minor", "intermediate", "primary"]
 // A/B/C = normal correction
 // A/B/C/D/E = triangle correction
 const WAVE_MARK_KEYS = ["W1", "W2", "W3", "W4", "W5", "A", "B", "C", "D", "E"];
+
 const IMPULSE_SEQUENCE = ["W1", "W2", "W3", "W4", "W5"];
 const CORRECTION_SEQUENCE = ["A", "B", "C", "D", "E"];
-
-function sequenceForWave(wave) {
-  const w = normalizeWave(wave);
-
-  if (IMPULSE_SEQUENCE.includes(w)) return IMPULSE_SEQUENCE;
-  if (CORRECTION_SEQUENCE.includes(w)) return CORRECTION_SEQUENCE;
-
-  return [];
-}
-
-function previousWaveFor(activeWave) {
-  const wave = normalizeWave(activeWave);
-  const sequence = sequenceForWave(wave);
-  const index = sequence.indexOf(wave);
-
-  if (index <= 0) return null;
-
-  return sequence[index - 1];
-}
-
-function nextExpectedWaveFor(activeWave, stage = null) {
-  const wave = normalizeWave(activeWave);
-  const sequence = sequenceForWave(wave);
-  const index = sequence.indexOf(wave);
-
-  if (index < 0) return null;
-
-  if (wave === "W5") {
-    return "POST_W5_CORRECTION_OR_COMPLETION_WATCH";
-  }
-
-  if (wave === "E") {
-    return "TRIANGLE_RESOLUTION_WATCH";
-  }
-
-  return sequence[index + 1] || null;
-}
-
-function getMarkSummary(mark) {
-  if (!mark || typeof mark !== "object") return null;
-
-  return {
-    price: getMarkPrice(mark),
-    time: getMarkTime(mark),
-    status: mark.status || mark.maturity || null,
-    confidence: mark.confidence || null,
-  };
-}
 
 const DEFAULT_TF_BY_DEGREE = {
   subminute: "10m",
@@ -135,6 +93,43 @@ function normalizeWave(value) {
   return null;
 }
 
+function sequenceForWave(wave) {
+  const w = normalizeWave(wave);
+
+  if (IMPULSE_SEQUENCE.includes(w)) return IMPULSE_SEQUENCE;
+  if (CORRECTION_SEQUENCE.includes(w)) return CORRECTION_SEQUENCE;
+
+  return [];
+}
+
+function previousWaveFor(activeWave) {
+  const wave = normalizeWave(activeWave);
+  const sequence = sequenceForWave(wave);
+  const index = sequence.indexOf(wave);
+
+  if (index <= 0) return null;
+
+  return sequence[index - 1];
+}
+
+function nextExpectedWaveFor(activeWave) {
+  const wave = normalizeWave(activeWave);
+  const sequence = sequenceForWave(wave);
+  const index = sequence.indexOf(wave);
+
+  if (index < 0) return null;
+
+  if (wave === "W5") {
+    return "POST_W5_CORRECTION_OR_COMPLETION_WATCH";
+  }
+
+  if (wave === "E") {
+    return "TRIANGLE_RESOLUTION_WATCH";
+  }
+
+  return sequence[index + 1] || null;
+}
+
 function normalizeParentWave(value) {
   const raw = String(value || "").trim();
   const normalized = normalizeWave(raw);
@@ -159,7 +154,9 @@ function inferDirection(structure = {}) {
 
   if (["UP", "BULLISH", "LONG"].includes(s)) return "UP";
   if (["DOWN", "BEARISH", "SHORT"].includes(s)) return "DOWN";
-  if (["SIDEWAYS", "NEUTRAL", "COMPRESSION"].includes(s)) return "NEUTRAL";
+  if (["SIDEWAYS", "NEUTRAL", "COMPRESSION", "SIDEWAYS_DECISION"].includes(s)) {
+    return "NEUTRAL";
+  }
 
   const activeWave = normalizeWave(structure.activeWave || structure.wave);
 
@@ -180,12 +177,9 @@ function inferStage(structure = {}) {
 
   const s = upper(raw);
 
-  // Engine 27 needs the real stage, not a flattened ACTIVE label.
-  // Preserve custom Engine 22 stages such as:
-  // BREAKOUT_CANDIDATE
-  // ACTIVE_CANDIDATE
-  // E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH
-  // POST_C_DOWN_REACTION_WATCH
+  // Preserve real Engine 22 stages for Engine 27:
+  // ACTIVE, BREAKOUT_CANDIDATE, ACTIVE_CANDIDATE, WATCH,
+  // E_COMPLETED_CANDIDATE_TRIANGLE_RESOLUTION_WATCH, etc.
   if (s) return s;
 
   if (structure.active === true || structure.isActive === true) return "ACTIVE";
@@ -221,6 +215,17 @@ function getMarkTime(mark) {
     mark.low?.t ||
     null
   );
+}
+
+function getMarkSummary(mark) {
+  if (!mark || typeof mark !== "object") return null;
+
+  return {
+    price: getMarkPrice(mark),
+    time: getMarkTime(mark),
+    status: mark.status || mark.maturity || null,
+    confidence: mark.confidence || null,
+  };
 }
 
 function normalizeOneMark({
@@ -592,7 +597,7 @@ function buildActiveDegreeState({
   const direction = inferDirection(structure);
 
   const previousWave = previousWaveFor(activeWave);
-  const nextExpectedWave = nextExpectedWaveFor(activeWave, stage);
+  const nextExpectedWave = nextExpectedWaveFor(activeWave);
 
   const previousWaveMark =
     previousWave && marks?.[previousWave]
@@ -761,3 +766,4 @@ export function buildDegreeStates({
 }
 
 export default buildDegreeStates;
+print(str(path))
