@@ -1,3 +1,5 @@
+// services/core/logic/engine27/buildEngine27Strategies.js
+
 import {
   getEngine27StrategyLanes,
 } from "./strategyLaneRegistry.js";
@@ -9,6 +11,10 @@ import {
 import {
   buildEngine27StrategyDecision,
 } from "./buildStrategyDecision.js";
+
+import {
+  buildWaveIntelligence,
+} from "./wave/buildWaveIntelligence.js";
 
 function barsForTimeframe(snapshot, timeframe) {
   const posture =
@@ -60,6 +66,26 @@ export function buildEngine27Strategies({
   const degreeStates =
     getDegreeStates(snapshot);
 
+  /*
+   * Engine 27A — Wave Intelligence
+   *
+   * Reads only:
+   * engine22WaveStrategy.degreeStates
+   *
+   * Does not create:
+   * - Fibonacci projections
+   * - trade permission
+   * - sizing
+   * - geometry
+   * - tickets
+   * - execution
+   * - journal records
+   */
+  const engine27WaveIntelligence =
+    buildWaveIntelligence({
+      degreeStates,
+    });
+
   const decisions = {};
 
   for (const lane of lanes) {
@@ -108,8 +134,10 @@ export function buildEngine27Strategies({
 
   return {
     active: true,
+
     engine:
       "engine27.multiStrategyDecision.v1",
+
     mode: "READ_ONLY",
 
     symbol:
@@ -117,6 +145,18 @@ export function buildEngine27Strategies({
 
     builtAt:
       new Date().toISOString(),
+
+    /*
+     * Engine 27A canonical output.
+     *
+     * Contains:
+     * subminute
+     * minute
+     * minor
+     * intermediate
+     * primary
+     */
+    engine27WaveIntelligence,
 
     laneCount:
       lanes.length,
@@ -127,6 +167,7 @@ export function buildEngine27Strategies({
       ),
 
     lanes,
+
     decisions,
 
     noPermissionCreated: true,
@@ -136,6 +177,7 @@ export function buildEngine27Strategies({
     noJournalWrite: true,
 
     reasonCodes: [
+      "ENGINE27_WAVE_INTELLIGENCE_BUILT",
       "ENGINE27_FIVE_INDEPENDENT_STRATEGIES_BUILT",
       "READ_ONLY",
       "NO_PERMISSION_CREATED",
