@@ -313,45 +313,27 @@ function resolveStructuralDirection(
     return "NEUTRAL";
   }
 
-  const explicit =
-    firstNormalized(
-      [
-        state.structuralDirection,
-        state.structureDirection,
-        state.lifecycle
-          ?.structuralDirection,
-        state.lifecycle
-          ?.structureDirection,
-        state.trendDirection,
-        state.trendBias,
-        state.biasDirection,
-        state.bias,
-      ],
-      (value) =>
-        normalizeTradeDirection(value),
-      null
-    );
-
-  if (explicit) {
-    return explicit;
-  }
-
-  /*
-   * The generic Engine 22 direction
-   * field is accepted for structural
-   * direction only when it clearly says
-   * LONG, SHORT, BULLISH, or BEARISH.
-   *
-   * Generic UP or DOWN is treated as
-   * current-leg direction instead.
-   */
-  return (
-    normalizeTradeDirection(
+  return firstNormalized(
+    [
+      state.structuralDirection,
+      state.structureDirection,
+      state.lifecycle
+        ?.structuralDirection,
+      state.lifecycle
+        ?.structureDirection,
+      state.trendDirection,
+      state.trendBias,
+      state.biasDirection,
+      state.bias,
       state.direction,
-      {
-        allowUpDown: false,
-      }
-    ) ||
+    ],
+    (value) =>
+      normalizeTradeDirection(
+        value,
+        {
+          allowUpDown: true,
+        }
+      ),
     "NEUTRAL"
   );
 }
