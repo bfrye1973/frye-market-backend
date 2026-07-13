@@ -28,6 +28,10 @@ import {
   buildMarketStory,
 } from "./story/buildMarketStory.js";
 
+import {
+  buildTraderDecision,
+} from "./decision/buildTraderDecision.js";
+
 function barsForTimeframe(snapshot, timeframe) {
   const posture =
     snapshot?.marketMeter?.layers?.emaPosture ||
@@ -168,6 +172,20 @@ export function buildEngine27Strategies({
       engine27Alignment,
     });
 
+  /*
+   * Existing Engine 27 Alpha lane decisions.
+   *
+   * These decisions normalize approved downstream context from:
+   * - Engine 3 reaction
+   * - Engine 4 participation
+   * - Engine 6 permission
+   * - Engine 26 planner status
+   * - higher-timeframe wick context
+   * - price proximity
+   *
+   * Engine 27E consumes these completed decisions and does not read
+   * those upstream engines directly.
+   */
   const decisions = {};
 
   for (const lane of lanes) {
@@ -214,6 +232,39 @@ export function buildEngine27Strategies({
       });
   }
 
+  /*
+   * Engine 27E — Trader Decision
+   *
+   * Reads only:
+   * - engine27WaveIntelligence
+   * - engine27FibIntelligence
+   * - engine27Alignment
+   * - engine27MarketStory
+   * - existing Engine 27 Alpha lane decisions
+   *
+   * Creates only:
+   * - normalized per-lane decision state
+   * - readiness fields
+   * - actionable waiting conditions
+   * - read-only trader guidance
+   *
+   * Does not create:
+   * - permission
+   * - sizing
+   * - geometry
+   * - tickets
+   * - execution
+   * - journal records
+   */
+  const engine27TraderDecision =
+    buildTraderDecision({
+      engine27WaveIntelligence,
+      engine27FibIntelligence,
+      engine27Alignment,
+      engine27MarketStory,
+      alphaDecisions: decisions,
+    });
+
   return {
     active: true,
 
@@ -250,6 +301,11 @@ export function buildEngine27Strategies({
      */
     engine27MarketStory,
 
+    /*
+     * Engine 27E canonical output.
+     */
+    engine27TraderDecision,
+
     laneCount:
       lanes.length,
 
@@ -274,6 +330,7 @@ export function buildEngine27Strategies({
       "ENGINE27_FIB_INTELLIGENCE_BUILT",
       "ENGINE27_ALIGNMENT_BUILT",
       "ENGINE27_MARKET_STORY_BUILT",
+      "ENGINE27_TRADER_DECISION_BUILT",
       "ENGINE27_FIVE_INDEPENDENT_STRATEGIES_BUILT",
       "READ_ONLY",
       "NO_PERMISSION_CREATED",
