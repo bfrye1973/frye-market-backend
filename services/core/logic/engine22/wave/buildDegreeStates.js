@@ -217,6 +217,17 @@ function getMarkTime(mark) {
   );
 }
 
+function getMarkSummary(mark) {
+  if (!mark || typeof mark !== "object") return null;
+
+  return {
+    price: getMarkPrice(mark),
+    time: getMarkTime(mark),
+    status: mark.status || mark.maturity || null,
+    confidence: mark.confidence || null,
+  };
+}
+
 function normalizeInternalStructure(structure = {}) {
   const internal = structure?.internalStructure;
 
