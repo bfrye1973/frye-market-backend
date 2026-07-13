@@ -217,14 +217,50 @@ function getMarkTime(mark) {
   );
 }
 
-function getMarkSummary(mark) {
-  if (!mark || typeof mark !== "object") return null;
+function normalizeInternalStructure(structure = {}) {
+  const internal = structure?.internalStructure;
+
+  if (!internal || typeof internal !== "object") return null;
 
   return {
-    price: getMarkPrice(mark),
-    time: getMarkTime(mark),
-    status: mark.status || mark.maturity || null,
-    confidence: mark.confidence || null,
+    active: internal.active === true,
+
+    parentDegree: internal.parentDegree || null,
+    parentWave: normalizeWave(internal.parentWave) || internal.parentWave || null,
+
+    previousInternalWave: internal.previousInternalWave || null,
+    currentInternalWave: internal.currentInternalWave || null,
+    nextExpectedInternalWave: internal.nextExpectedInternalWave || null,
+
+    internalLegDirection: upper(internal.internalLegDirection || "UNKNOWN"),
+    parentWaveDirection: upper(internal.parentWaveDirection || "UNKNOWN"),
+
+    classification: upper(internal.classification || "UNKNOWN"),
+
+    parentWaveStillValid: internal.parentWaveStillValid === true,
+    parentWaveComplete: internal.parentWaveComplete === true,
+    parentTransitionPossible: internal.parentTransitionPossible === true,
+
+    transitionRisk: upper(internal.transitionRisk || "UNKNOWN"),
+
+    invalidationLevel: round2(internal.invalidationLevel),
+    invalidationBreached: internal.invalidationBreached === true,
+
+    supportLevel: round2(internal.supportLevel),
+    retracementZone: internal.retracementZone || null,
+
+    evidence:
+      internal.evidence && typeof internal.evidence === "object"
+        ? internal.evidence
+        : {},
+
+    reasonCodes: Array.isArray(internal.reasonCodes)
+      ? internal.reasonCodes
+      : [],
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
   };
 }
 
@@ -558,6 +594,7 @@ function buildInactiveDegreeState(degree) {
     previousWave: null,
     previousWaveMark: null,
     nextExpectedWave: null,
+    internalStructure: null,
     currentRead: `${upper(degree)}_NO_ACTIVE_MARKS_OR_CONTEXT`,
     headline: `${label} degree context unavailable`,
     action: "NO_ACTION",
@@ -603,6 +640,7 @@ function buildActiveDegreeState({
     previousWave && marks?.[previousWave]
       ? getMarkSummary(marks[previousWave])
       : null;
+  const internalStructure = normalizeInternalStructure(structure);
 
   const parentDegree =
     normalizeDegree(structure?.parentDegree) ||
@@ -657,6 +695,7 @@ function buildActiveDegreeState({
     previousWave,
     previousWaveMark,
     nextExpectedWave,
+    internalStructure,
     currentRead,
 
     headline,
