@@ -233,6 +233,50 @@ function buildDegreeRead(
       toNumber(
         fibRecord?.currentPrice
       ),
+
+    internalWave:
+      waveRecord?.internalWave ??
+      null,
+
+    previousInternalWave:
+      waveRecord?.previousInternalWave ??
+      null,
+
+    nextExpectedInternalWave:
+      waveRecord?.nextExpectedInternalWave ??
+      null,
+
+    pullbackClassification:
+      waveRecord?.pullbackClassification ??
+      null,
+
+    parentWaveStillValid:
+      waveRecord?.parentWaveStillValid ??
+      null,
+
+    parentWaveComplete:
+      waveRecord?.parentWaveComplete ??
+      null,
+
+    parentTransitionPossible:
+      waveRecord?.parentTransitionPossible ??
+      null,
+
+    transitionRisk:
+      waveRecord?.transitionRisk ??
+      null,
+
+    invalidationLevel:
+      waveRecord?.invalidationLevel ??
+      null,
+
+    invalidationBreached:
+      waveRecord?.invalidationBreached ??
+      null,
+
+    supportLevel:
+      waveRecord?.supportLevel ??
+      null,
   };
 }
 
@@ -492,6 +536,70 @@ function buildDirectionalGroups(
   return result;
 }
 
+function isHealthyInternalPullback(
+  parentRead,
+  childRead
+) {
+  if (
+    !parentRead?.usable ||
+    !childRead?.usable
+  ) {
+    return false;
+  }
+
+  const parentDirection =
+    parentRead
+      .preferredTradeDirection;
+
+  const childDirection =
+    childRead
+      .preferredTradeDirection;
+
+  return (
+    childRead
+      .pullbackClassification ===
+      "INTERNAL_PULLBACK" &&
+
+    childRead
+      .parentWaveStillValid ===
+      true &&
+
+    childRead
+      .parentWaveComplete !==
+      true &&
+
+    childRead
+      .parentTransitionPossible !==
+      true &&
+
+    childRead
+      .invalidationBreached !==
+      true &&
+
+    [
+      "LONG",
+      "SHORT",
+    ].includes(
+      parentDirection
+    ) &&
+
+    childDirection ===
+      parentDirection &&
+
+    [
+      "LONG",
+      "SHORT",
+    ].includes(
+      childRead
+        .currentLegDirection
+    ) &&
+
+    childRead
+      .currentLegDirection !==
+      childDirection
+  );
+}
+
 function parentChildStatus(
   parentRead,
   childRead
@@ -536,6 +644,37 @@ function parentChildStatus(
   }
 
   if (
+    childRead
+      .invalidationBreached ===
+      true
+  ) {
+    return "CONFLICTS_WITH_PARENT";
+  }
+
+  if (
+    isHealthyInternalPullback(
+      parentRead,
+      childRead
+    )
+  ) {
+    return "PULLS_BACK_INSIDE_PARENT";
+  }
+
+  if (
+    childRead
+      .parentWaveComplete ===
+      true ||
+    childRead
+      .parentTransitionPossible ===
+      true
+  ) {
+    return childDirection ===
+      parentDirection
+      ? "UNKNOWN"
+      : "CONFLICTS_WITH_PARENT";
+  }
+
+  if (
     childDirection ===
       parentDirection &&
     childRead
@@ -567,6 +706,16 @@ function buildWaveStageCompatibility(
     ]
     of PARENT_CHILD_PAIRS
   ) {
+    const parentRead =
+      degreeReads[
+        parent
+      ];
+
+    const childRead =
+      degreeReads[
+        child
+      ];
+
     output[key] = {
       parent,
 
@@ -574,13 +723,39 @@ function buildWaveStageCompatibility(
 
       status:
         parentChildStatus(
-          degreeReads[
-            parent
-          ],
-          degreeReads[
-            child
-          ]
+          parentRead,
+          childRead
         ),
+
+      pullbackClassification:
+        childRead
+          ?.pullbackClassification ??
+        null,
+
+      parentWaveStillValid:
+        childRead
+          ?.parentWaveStillValid ??
+        null,
+
+      parentWaveComplete:
+        childRead
+          ?.parentWaveComplete ??
+        null,
+
+      parentTransitionPossible:
+        childRead
+          ?.parentTransitionPossible ??
+        null,
+
+      transitionRisk:
+        childRead
+          ?.transitionRisk ??
+        null,
+
+      invalidationBreached:
+        childRead
+          ?.invalidationBreached ??
+        null,
     };
   }
 
@@ -639,6 +814,28 @@ function buildLowerDegreeWarnings(
 ) {
   const warnings = [];
 
+  const subminuteRead =
+    degreeReads
+      .subminute;
+
+  const minuteRead =
+    degreeReads
+      .minute;
+
+  const subminuteInternalPullback =
+    isHealthyInternalPullback(
+      minuteRead,
+      subminuteRead
+    );
+
+  if (
+    subminuteInternalPullback
+  ) {
+    warnings.push(
+      "SUBMINUTE_INTERNAL_PULLBACK"
+    );
+  }
+
   const primaryDirection =
     degreeReads
       .primary
@@ -690,12 +887,18 @@ function buildLowerDegreeWarnings(
         ?.currentLegDirection !==
         higherDirection;
 
+    const canonicalInternalPullback =
+      degree ===
+        "subminute" &&
+      subminuteInternalPullback;
+
     if (
       higherDegreesAgree &&
       read?.usable &&
       read
         .preferredTradeDirection ===
         higherDirection &&
+      !canonicalInternalPullback &&
       (
         pullbackWave ||
         legOpposes
@@ -709,28 +912,35 @@ function buildLowerDegreeWarnings(
 
   const tacticalCompatibility = [
     compatibility
-      .intermediateToMinor
-      ?.status,
+      .intermediateToMinor,
 
     compatibility
-      .minorToMinute
-      ?.status,
+      .minorToMinute,
 
     compatibility
-      .minuteToSubminute
-      ?.status,
+      .minuteToSubminute,
   ];
 
   const weakeningCount =
     tacticalCompatibility
       .filter(
-        (status) =>
-          [
+        (item) => {
+          if (
+            !item ||
+            item
+              .pullbackClassification ===
+              "INTERNAL_PULLBACK"
+          ) {
+            return false;
+          }
+
+          return [
             "PULLS_BACK_INSIDE_PARENT",
             "CONFLICTS_WITH_PARENT",
           ].includes(
-            status
-          )
+            item.status
+          );
+        }
       )
       .length;
 
@@ -1411,7 +1621,9 @@ function buildReasonCodes({
     ).some(
       (item) =>
         item.status ===
-        "PULLS_BACK_INSIDE_PARENT"
+          "PULLS_BACK_INSIDE_PARENT" &&
+        item.pullbackClassification !==
+          "INTERNAL_PULLBACK"
     )
   ) {
     codes.push(
@@ -1420,6 +1632,9 @@ function buildReasonCodes({
   }
 
   const warningCodeMap = {
+    SUBMINUTE_INTERNAL_PULLBACK:
+      "ENGINE27_SUBMINUTE_INTERNAL_PULLBACK",
+
     LOWER_DEGREES_WEAKENING:
       "ENGINE27_LOWER_DEGREES_WEAKENING",
 
