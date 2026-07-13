@@ -404,6 +404,7 @@ function resolveGenericAnchors({
     waveStart,
     waveEnd,
     projectionBase,
+
     suppliedWaveLength:
       readFirstPrice(
         source,
@@ -881,12 +882,16 @@ function buildCurrentObjective({
       },
 
       completedFibLevels: [],
+
       nextFib:
         levels[0].label,
+
       nextPrice:
         levels[0].price,
+
       distance:
         null,
+
       remainingTargets:
         levels.slice(1),
     };
@@ -1166,6 +1171,125 @@ function buildValidation({
   };
 }
 
+function firstValidProjectionDirection(
+  candidates
+) {
+  for (const candidate of candidates) {
+    const normalized =
+      normalizeDirection(candidate);
+
+    if (normalized !== "UNKNOWN") {
+      return normalized;
+    }
+  }
+
+  return "UNKNOWN";
+}
+
+function resolveProjectionDirection({
+  waveIntelligence,
+  degreeState,
+}) {
+  const internalStructure =
+    waveIntelligence?.internalStructure ||
+    degreeState?.internalStructure ||
+    null;
+
+  const pullbackClassification =
+    waveIntelligence?.pullbackClassification ??
+    internalStructure?.pullbackClassification ??
+    internalStructure?.classification ??
+    degreeState?.pullbackClassification ??
+    null;
+
+  const parentWaveStillValid =
+    waveIntelligence?.parentWaveStillValid ??
+    internalStructure?.parentWaveStillValid ??
+    degreeState?.parentWaveStillValid ??
+    null;
+
+  const invalidationBreached =
+    waveIntelligence?.invalidationBreached ??
+    internalStructure?.invalidationBreached ??
+    degreeState?.invalidationBreached ??
+    false;
+
+  const parentWaveDirection =
+    waveIntelligence?.parentWaveDirection ??
+    internalStructure?.parentWaveDirection ??
+    degreeState?.parentWaveDirection ??
+    null;
+
+  const validInternalPullback =
+    String(
+      pullbackClassification ||
+      ""
+    ).toUpperCase() ===
+      "INTERNAL_PULLBACK" &&
+    parentWaveStillValid === true &&
+    invalidationBreached !== true;
+
+  const direction =
+    validInternalPullback
+      ? firstValidProjectionDirection([
+          parentWaveDirection,
+          waveIntelligence
+            ?.preferredTradeDirection,
+          waveIntelligence
+            ?.structuralDirection,
+          degreeState
+            ?.direction,
+        ])
+      : firstValidProjectionDirection([
+          waveIntelligence
+            ?.preferredTradeDirection,
+          waveIntelligence
+            ?.structuralDirection,
+          degreeState
+            ?.direction,
+          parentWaveDirection,
+        ]);
+
+  return {
+    direction,
+
+    validInternalPullback,
+
+    pullbackClassification:
+      pullbackClassification ||
+      "NONE",
+
+    parentWaveStillValid:
+      parentWaveStillValid === true,
+
+    invalidationBreached:
+      invalidationBreached === true,
+
+    source:
+      validInternalPullback &&
+      normalizeDirection(
+        parentWaveDirection
+      ) !== "UNKNOWN"
+        ? "PARENT_WAVE_DIRECTION"
+        : normalizeDirection(
+            waveIntelligence
+              ?.preferredTradeDirection
+          ) !== "UNKNOWN"
+        ? "PREFERRED_TRADE_DIRECTION"
+        : normalizeDirection(
+            waveIntelligence
+              ?.structuralDirection
+          ) !== "UNKNOWN"
+        ? "STRUCTURAL_DIRECTION"
+        : normalizeDirection(
+            degreeState
+              ?.direction
+          ) !== "UNKNOWN"
+        ? "ENGINE22_DEGREE_DIRECTION"
+        : "ANCHOR_INFERENCE",
+  };
+}
+
 function unknownDegreeResult({
   degreeKey,
   currentWave = "UNKNOWN",
@@ -1280,6 +1404,12 @@ function buildDegreeFibIntelligence({
     });
   }
 
+  const projectionDirection =
+    resolveProjectionDirection({
+      waveIntelligence,
+      degreeState,
+    });
+
   const anchors =
     buildAnchorContract({
       source,
@@ -1288,12 +1418,8 @@ function buildDegreeFibIntelligence({
       currentWave,
 
       directionInput:
-        waveIntelligence
-          ?.currentLegDirection ??
-        waveIntelligence
-          ?.structuralDirection ??
-        degreeState
-          ?.direction,
+        projectionDirection
+          .direction,
     });
 
   const retracements =
@@ -1397,6 +1523,17 @@ function buildDegreeFibIntelligence({
 
         projectionComplete
           ? "ENGINE27_FIB_PROJECTION_BASE_AVAILABLE"
+          : null,
+
+        projectionDirection
+          .validInternalPullback
+          ? "ENGINE27_FIB_INTERNAL_PULLBACK_PARENT_DIRECTION_USED"
+          : null,
+
+        projectionDirection
+          .source ===
+        "PARENT_WAVE_DIRECTION"
+          ? "ENGINE27_FIB_PARENT_WAVE_DIRECTION_SOURCE"
           : null,
 
         currentPrice === null
