@@ -641,7 +641,52 @@
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
-      ]
+      ],
+      "internalStructure": {
+        "active": true,
+        "source": "BRIAN_CHART_REVIEW_SUB_OF_SUB_W3_INTERNAL_IV",
+        "parentDegree": "subminute",
+        "parentWave": "W3",
+        "previousInternalWave": "iii",
+        "currentInternalWave": "iv",
+        "nextExpectedInternalWave": "v",
+        "internalLegDirection": "DOWN",
+        "parentWaveDirection": "LONG",
+        "classification": "INTERNAL_PULLBACK",
+        "parentWaveStillValid": true,
+        "parentWaveComplete": false,
+        "parentTransitionPossible": false,
+        "transitionRisk": "MODERATE",
+        "invalidationLevel": 7466.25,
+        "invalidationBreached": false,
+        "supportLevel": 7600,
+        "reclaimLevel": 7602,
+        "retracementZone": null,
+        "internalReference": {
+          "parentWaveStart": 7466.25,
+          "parentWaveStartApprox": 7471,
+          "internalWaveIIIHighApprox": 7628,
+          "hardPullbackReferenceApprox": 7630,
+          "chartRead": "SUB_OF_SUB_INTERNAL_IV_PULLBACK_INSIDE_SUBMINUTE_W3"
+        },
+        "evidence": {
+          "internalImpulseSequencePresent": true,
+          "correctiveOverlapPresent": true,
+          "parentOriginHeld": true,
+          "parentInvalidationHeld": true,
+          "higherDegreeSupportive": true
+        },
+        "noExecution": true,
+        "noPermissionCreated": true,
+        "watchOnly": true,
+        "reasonCodes": [
+          "ENGINE22_INTERNAL_WAVE_IV_CANDIDATE",
+          "ENGINE22_PARENT_W3_STILL_VALID",
+          "ENGINE22_INTERNAL_WAVE_V_STILL_POSSIBLE",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED"
+        ]
+      }
     }
   }
 }
