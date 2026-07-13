@@ -385,14 +385,47 @@ function resolveCurrentLegDirection(
   );
 }
 
+function deriveNextExpectedDirection({
+  currentWave,
+  structuralDirection,
+}) {
+  const bullishImpulse = {
+    W1: "DOWN",
+    W2: "UP",
+    W3: "DOWN",
+    W4: "UP",
+    W5: "DOWN",
+  };
+
+  const bearishImpulse = {
+    W1: "UP",
+    W2: "DOWN",
+    W3: "UP",
+    W4: "DOWN",
+    W5: "UP",
+  };
+
+  if (structuralDirection === "LONG") {
+    return bullishImpulse[currentWave] || "NEUTRAL";
+  }
+
+  if (structuralDirection === "SHORT") {
+    return bearishImpulse[currentWave] || "NEUTRAL";
+  }
+
+  return "NEUTRAL";
+}
+
 function resolveNextExpectedDirection(
-  state
+  state,
+  currentWave,
+  structuralDirection
 ) {
   if (!isObject(state)) {
     return "NEUTRAL";
   }
 
-  return firstNormalized(
+  const explicit = firstNormalized(
     [
       state.nextExpectedDirection,
       state.nextDirection,
@@ -410,8 +443,17 @@ function resolveNextExpectedDirection(
         ?.expectedPath,
     ],
     normalizeLegDirection,
-    "NEUTRAL"
+    null
   );
+
+  if (explicit) {
+    return explicit;
+  }
+
+  return deriveNextExpectedDirection({
+    currentWave,
+    structuralDirection,
+  });
 }
 
 function resolvePreferredTradeDirection(
@@ -903,9 +945,10 @@ function buildDegreeIntelligence(
 
   const nextExpectedDirection =
     resolveNextExpectedDirection(
-      state
+      state,
+      currentWave,
+      structuralDirection
     );
-
   const preferredTradeDirection =
     resolvePreferredTradeDirection(
       state,
@@ -954,11 +997,7 @@ function buildDegreeIntelligence(
     invalidated,
 
     parentDegree:
-      parentKey
-        ? DEGREE_LABELS[
-            parentKey
-          ]
-        : null,
+      parentKey || null,
 
     parentWave: null,
 
