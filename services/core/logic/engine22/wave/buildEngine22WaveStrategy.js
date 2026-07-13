@@ -75,6 +75,19 @@ function hasUsableWaveState(engine2State) {
   });
 }
 
+function allowActiveWaveStateFallback(context = {}) {
+  const symbol = normalizeSymbol(context?.symbol || "SPY");
+  const strategyId = String(context?.strategyId || "").trim();
+
+  // ES active-wave-state is now the manager-approved canonical structural source
+  // when Engine 2 runtime marks are temporarily incomplete.
+  // This lets analyzeWaveStack load active-wave-state-es.json and still publish
+  // waveFibState.activeStructures -> degreeStates.
+  if (!isFuturesSymbol(symbol, context?.marketType)) return false;
+
+  return strategyId === "intraday_scalp@10m";
+}
+
 function buildSafetyObject() {
   return {
     liveTradingEnabled: false,
@@ -1161,8 +1174,19 @@ export function buildEngine22WaveStrategy(input = {}) {
         });
 
   const usableWaveState = hasUsableWaveState(context.engine2State);
+  const activeWaveStateFallbackAllowed = allowActiveWaveStateFallback(context);
 
-  if (!usableWaveState) {
+  const engine2FallbackReasonCodes = [];
+
+  if (!usableWaveState && activeWaveStateFallbackAllowed) {
+    engine2FallbackReasonCodes.push(
+      "ENGINE2_WAVE_STATE_INCOMPLETE",
+      "ACTIVE_WAVE_STATE_FALLBACK_ALLOWED",
+      "ENGINE22_ACTIVE_WAVE_STATE_FALLBACK_USED"
+    );
+  }
+
+  if (!usableWaveState && !activeWaveStateFallbackAllowed) {
     return buildIncompleteStrategy({
       symbol: context.symbol,
       strategyId: context.strategyId,
@@ -1410,6 +1434,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     reasonCodes: [
       "ENGINE22G_WAVE_STRATEGY_BUILT",
       "ENGINE22_WAVE_OPPORTUNITY_PRE_ENGINE15",
+      ...engine2FallbackReasonCodes,
       ...(Array.isArray(context?.reasonCodes) ? context.reasonCodes : []),
       ...(Array.isArray(waveFibState?.reasonCodes)
         ? waveFibState.reasonCodes
