@@ -67,6 +67,14 @@ const VALID_WAVES = new Set([
   "E",
 ]);
 
+const VALID_INTERNAL_WAVES = new Set([
+  "i",
+  "ii",
+  "iii",
+  "iv",
+  "v",
+]);
+
 function isObject(value) {
   return (
     value !== null &&
@@ -81,12 +89,40 @@ function upper(value) {
     .toUpperCase();
 }
 
+function lower(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
 function unique(values) {
   return [
     ...new Set(
       values.filter(Boolean)
     ),
   ];
+}
+
+function numberOrNull(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const number = Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : null;
+}
+
+function booleanOrNull(value) {
+  return typeof value === "boolean"
+    ? value
+    : null;
 }
 
 function normalizeWave(value) {
@@ -117,6 +153,97 @@ function normalizeWave(value) {
   }
 
   return "UNKNOWN";
+}
+
+function normalizeInternalWave(value) {
+  const text = lower(value);
+
+  if (!text) {
+    return "UNKNOWN";
+  }
+
+  if (VALID_INTERNAL_WAVES.has(text)) {
+    return text;
+  }
+
+  const romanMatch = text.match(
+    /(?:^|[^a-z0-9])(i{1,3}|iv|v)(?:$|[^a-z0-9])/
+  );
+
+  if (
+    romanMatch &&
+    VALID_INTERNAL_WAVES.has(
+      romanMatch[1]
+    )
+  ) {
+    return romanMatch[1];
+  }
+
+  return "UNKNOWN";
+}
+
+function normalizePullbackClassification(
+  value
+) {
+  const text = upper(value);
+
+  if (!text) {
+    return "NONE";
+  }
+
+  if (
+    text.includes(
+      "INTERNAL_PULLBACK"
+    ) ||
+    (
+      text.includes("INTERNAL") &&
+      text.includes("PULLBACK")
+    )
+  ) {
+    return "INTERNAL_PULLBACK";
+  }
+
+  if (
+    text === "NONE" ||
+    text === "UNKNOWN"
+  ) {
+    return "NONE";
+  }
+
+  return text.replace(
+    /[^A-Z0-9]+/g,
+    "_"
+  );
+}
+
+function normalizeTransitionRisk(
+  value
+) {
+  const text = upper(value);
+
+  if (!text) {
+    return "UNKNOWN";
+  }
+
+  const allowed = new Set([
+    "LOW",
+    "MODERATE",
+    "HIGH",
+    "VERY_HIGH",
+    "UNKNOWN",
+  ]);
+
+  return allowed.has(text)
+    ? text
+    : "UNKNOWN";
+}
+
+function getInternalStructure(state) {
+  return isObject(
+    state?.internalStructure
+  )
+    ? state.internalStructure
+    : null;
 }
 
 function resolveCurrentWave(state) {
@@ -313,8 +440,13 @@ function resolveStructuralDirection(
     return "NEUTRAL";
   }
 
+  const internalStructure =
+    getInternalStructure(state);
+
   return firstNormalized(
     [
+      internalStructure
+        ?.parentWaveDirection,
       state.structuralDirection,
       state.structureDirection,
       state.lifecycle
@@ -345,9 +477,14 @@ function resolveCurrentLegDirection(
     return "NEUTRAL";
   }
 
+  const internalStructure =
+    getInternalStructure(state);
+
   const explicit =
     firstNormalized(
       [
+        internalStructure
+          ?.internalLegDirection,
         state.currentLegDirection,
         state.legDirection,
         state.activeLegDirection,
@@ -405,12 +542,22 @@ function deriveNextExpectedDirection({
     W5: "UP",
   };
 
-  if (structuralDirection === "LONG") {
-    return bullishImpulse[currentWave] || "NEUTRAL";
+  if (
+    structuralDirection === "LONG"
+  ) {
+    return (
+      bullishImpulse[currentWave] ||
+      "NEUTRAL"
+    );
   }
 
-  if (structuralDirection === "SHORT") {
-    return bearishImpulse[currentWave] || "NEUTRAL";
+  if (
+    structuralDirection === "SHORT"
+  ) {
+    return (
+      bearishImpulse[currentWave] ||
+      "NEUTRAL"
+    );
   }
 
   return "NEUTRAL";
@@ -501,6 +648,9 @@ function resolveStage(
     return "WATCH";
   }
 
+  const internalStructure =
+    getInternalStructure(state);
+
   const stageValues =
     collectStageText(state);
 
@@ -510,6 +660,8 @@ function resolveStage(
     );
 
   const invalidated =
+    internalStructure
+      ?.invalidationBreached === true ||
     state.invalidated === true ||
     state.isInvalidated === true ||
     state.lifecycle
@@ -521,6 +673,8 @@ function resolveStage(
   }
 
   const complete =
+    internalStructure
+      ?.parentWaveComplete === true ||
     state.complete === true ||
     state.completed === true ||
     state.isComplete === true ||
@@ -686,6 +840,132 @@ function resolveMaturity({
   );
 }
 
+function buildInternalStructureRead(
+  state
+) {
+  const internalStructure =
+    getInternalStructure(state);
+
+  if (!internalStructure) {
+    return {
+      active: false,
+
+      internalWave: "UNKNOWN",
+      previousInternalWave:
+        "UNKNOWN",
+      nextExpectedInternalWave:
+        "UNKNOWN",
+
+      pullbackClassification:
+        "NONE",
+
+      parentWaveStillValid:
+        null,
+      parentWaveComplete:
+        null,
+      parentTransitionPossible:
+        null,
+
+      transitionRisk:
+        "UNKNOWN",
+
+      invalidationLevel:
+        null,
+      invalidationBreached:
+        false,
+
+      supportLevel:
+        null,
+    };
+  }
+
+  return {
+    active:
+      internalStructure.active === true,
+
+    internalWave:
+      normalizeInternalWave(
+        internalStructure
+          .currentInternalWave
+      ),
+
+    previousInternalWave:
+      normalizeInternalWave(
+        internalStructure
+          .previousInternalWave
+      ),
+
+    nextExpectedInternalWave:
+      normalizeInternalWave(
+        internalStructure
+          .nextExpectedInternalWave
+      ),
+
+    pullbackClassification:
+      normalizePullbackClassification(
+        internalStructure
+          .classification
+      ),
+
+    parentWaveStillValid:
+      booleanOrNull(
+        internalStructure
+          .parentWaveStillValid
+      ),
+
+    parentWaveComplete:
+      booleanOrNull(
+        internalStructure
+          .parentWaveComplete
+      ),
+
+    parentTransitionPossible:
+      booleanOrNull(
+        internalStructure
+          .parentTransitionPossible
+      ),
+
+    transitionRisk:
+      normalizeTransitionRisk(
+        internalStructure
+          .transitionRisk
+      ),
+
+    invalidationLevel:
+      numberOrNull(
+        internalStructure
+          .invalidationLevel
+      ),
+
+    invalidationBreached:
+      internalStructure
+        .invalidationBreached === true,
+
+    supportLevel:
+      numberOrNull(
+        internalStructure
+          .supportLevel
+      ),
+  };
+}
+
+function isActiveValidInternalPullback(
+  internalRead
+) {
+  return (
+    internalRead?.active === true &&
+    internalRead
+      ?.pullbackClassification ===
+      "INTERNAL_PULLBACK" &&
+    internalRead
+      ?.parentWaveStillValid === true &&
+    internalRead
+      ?.parentWaveComplete !== true &&
+    internalRead
+      ?.invalidationBreached !== true
+  );
+}
+
 function waveText(wave) {
   if (/^W[1-5]$/.test(wave)) {
     return `Wave ${wave.slice(1)}`;
@@ -723,9 +1003,18 @@ function buildHeadline({
   currentWave,
   stage,
   unavailable,
+  internalRead,
 }) {
   if (unavailable) {
     return `${degree} Wave State Unavailable`;
+  }
+
+  if (
+    isActiveValidInternalPullback(
+      internalRead
+    )
+  ) {
+    return `${degree} ${currentWave} Internal Pullback`;
   }
 
   return `${degree} ${currentWave} ${stageText(
@@ -739,9 +1028,37 @@ function buildCurrentRead({
   currentLegDirection,
   stage,
   unavailable,
+  internalRead,
 }) {
   if (unavailable) {
     return `${degree} wave state is unavailable.`;
+  }
+
+  if (
+    isActiveValidInternalPullback(
+      internalRead
+    )
+  ) {
+    const currentInternalWave =
+      internalRead.internalWave;
+
+    const nextInternalWave =
+      internalRead
+        .nextExpectedInternalWave;
+
+    const currentText =
+      currentInternalWave !==
+      "UNKNOWN"
+        ? `internal wave ${currentInternalWave}`
+        : "an internal wave";
+
+    const nextText =
+      nextInternalWave !==
+      "UNKNOWN"
+        ? `Internal wave ${nextInternalWave} remains possible`
+        : "The next internal wave remains possible";
+
+    return `${degree} remains in ${currentWave} while ${currentText} pulls back. ${nextText} if support holds.`;
   }
 
   const wave =
@@ -783,6 +1100,7 @@ function buildAction({
   nextExpectedWave,
   stage,
   unavailable,
+  internalRead,
 }) {
   if (unavailable) {
     return "WAIT_FOR_ENGINE22_STATE";
@@ -790,6 +1108,14 @@ function buildAction({
 
   if (stage === "INVALIDATED") {
     return "WAIT_FOR_NEW_ENGINE22_STRUCTURE";
+  }
+
+  if (
+    isActiveValidInternalPullback(
+      internalRead
+    )
+  ) {
+    return "WAIT_FOR_INTERNAL_PULLBACK_COMPLETION";
   }
 
   if (stage === "COMPLETE") {
@@ -862,6 +1188,7 @@ function buildReasonCodes({
   active,
   invalidated,
   unavailable,
+  internalRead,
 }) {
   return unique([
     unavailable
@@ -893,6 +1220,67 @@ function buildReasonCodes({
     invalidated
       ? "ENGINE27_WAVE_INVALIDATED"
       : null,
+
+    internalRead?.active === true
+      ? "ENGINE27_INTERNAL_STRUCTURE_ACTIVE"
+      : null,
+
+    internalRead?.internalWave !==
+    "UNKNOWN"
+      ? `ENGINE27_INTERNAL_WAVE_${upper(
+          internalRead.internalWave
+        )}`
+      : null,
+
+    internalRead
+      ?.previousInternalWave !==
+    "UNKNOWN"
+      ? `ENGINE27_PREVIOUS_INTERNAL_WAVE_${upper(
+          internalRead
+            .previousInternalWave
+        )}`
+      : null,
+
+    internalRead
+      ?.nextExpectedInternalWave !==
+    "UNKNOWN"
+      ? `ENGINE27_NEXT_INTERNAL_WAVE_${upper(
+          internalRead
+            .nextExpectedInternalWave
+        )}`
+      : null,
+
+    internalRead
+      ?.pullbackClassification !==
+    "NONE"
+      ? `ENGINE27_${internalRead.pullbackClassification}`
+      : null,
+
+    internalRead
+      ?.parentWaveStillValid === true
+      ? "ENGINE27_PARENT_WAVE_STILL_VALID"
+      : null,
+
+    internalRead
+      ?.parentWaveComplete === true
+      ? "ENGINE27_PARENT_WAVE_COMPLETE"
+      : null,
+
+    internalRead
+      ?.parentTransitionPossible === true
+      ? "ENGINE27_PARENT_TRANSITION_POSSIBLE"
+      : null,
+
+    internalRead
+      ?.invalidationBreached === true
+      ? "ENGINE27_INTERNAL_INVALIDATION_BREACHED"
+      : null,
+
+    internalRead
+      ?.transitionRisk !==
+    "UNKNOWN"
+      ? `ENGINE27_TRANSITION_RISK_${internalRead.transitionRisk}`
+      : null,
   ]);
 }
 
@@ -912,6 +1300,11 @@ function buildDegreeIntelligence(
   const unavailable =
     !isObject(state) ||
     !hasWave;
+
+  const internalRead =
+    buildInternalStructureRead(
+      state
+    );
 
   const stage =
     resolveStage(
@@ -949,6 +1342,7 @@ function buildDegreeIntelligence(
       currentWave,
       structuralDirection
     );
+
   const preferredTradeDirection =
     resolvePreferredTradeDirection(
       state,
@@ -1001,6 +1395,49 @@ function buildDegreeIntelligence(
 
     parentWave: null,
 
+    internalWave:
+      internalRead.internalWave,
+
+    previousInternalWave:
+      internalRead
+        .previousInternalWave,
+
+    nextExpectedInternalWave:
+      internalRead
+        .nextExpectedInternalWave,
+
+    pullbackClassification:
+      internalRead
+        .pullbackClassification,
+
+    parentWaveStillValid:
+      internalRead
+        .parentWaveStillValid,
+
+    parentWaveComplete:
+      internalRead
+        .parentWaveComplete,
+
+    parentTransitionPossible:
+      internalRead
+        .parentTransitionPossible,
+
+    transitionRisk:
+      internalRead
+        .transitionRisk,
+
+    invalidationLevel:
+      internalRead
+        .invalidationLevel,
+
+    invalidationBreached:
+      internalRead
+        .invalidationBreached,
+
+    supportLevel:
+      internalRead
+        .supportLevel,
+
     currentRead:
       buildCurrentRead({
         degree,
@@ -1008,6 +1445,7 @@ function buildDegreeIntelligence(
         currentLegDirection,
         stage,
         unavailable,
+        internalRead,
       }),
 
     action:
@@ -1016,6 +1454,7 @@ function buildDegreeIntelligence(
         nextExpectedWave,
         stage,
         unavailable,
+        internalRead,
       }),
 
     headline:
@@ -1024,6 +1463,7 @@ function buildDegreeIntelligence(
         currentWave,
         stage,
         unavailable,
+        internalRead,
       }),
 
     reasonCodes: [],
@@ -1043,6 +1483,7 @@ function buildDegreeIntelligence(
       active,
       invalidated,
       unavailable,
+      internalRead,
     });
 
   return output;
