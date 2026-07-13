@@ -46,96 +46,72 @@ const LANE_REGISTRY = {
   subminute: {
     laneId: "subminute",
     degree: "subminute",
-    strategyId:
-      "subminute_scalp@10m",
+    strategyId: "subminute_scalp@10m",
     displayName: "Subminute",
   },
 
   minute: {
     laneId: "minute",
     degree: "minute",
-    strategyId:
-      "intraday_scalp@10m",
+    strategyId: "intraday_scalp@10m",
     displayName: "Minute",
   },
 
   minor: {
     laneId: "minor",
     degree: "minor",
-    strategyId:
-      "minor_swing@1h",
+    strategyId: "minor_swing@1h",
     displayName: "Minor",
   },
 
   intermediate: {
     laneId: "intermediate",
     degree: "intermediate",
-    strategyId:
-      "intermediate_long@4h",
+    strategyId: "intermediate_long@4h",
     displayName: "Intermediate",
   },
 
   primary: {
     laneId: "primary",
     degree: "primary",
-    strategyId:
-      "primary_position@1d",
+    strategyId: "primary_position@1d",
     displayName: "Primary",
   },
 };
 
 const PARENT_COMPATIBILITY_PATHS = {
-  subminute:
-    "minuteToSubminute",
-
-  minute:
-    "minorToMinute",
-
-  minor:
-    "intermediateToMinor",
-
-  intermediate:
-    "primaryToIntermediate",
-
-  primary:
-    null,
+  subminute: "minuteToSubminute",
+  minute: "minorToMinute",
+  minor: "intermediateToMinor",
+  intermediate: "primaryToIntermediate",
+  primary: null,
 };
 
-const VALID_DIRECTIONS =
-  new Set([
-    "LONG",
-    "SHORT",
-    "NEUTRAL",
-  ]);
+const VALID_WAVES = new Set([
+  "W1",
+  "W2",
+  "W3",
+  "W4",
+  "W5",
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "UNKNOWN",
+]);
 
-const VALID_WAVES =
-  new Set([
-    "W1",
-    "W2",
-    "W3",
-    "W4",
-    "W5",
-    "A",
-    "B",
-    "C",
-    "D",
-    "E",
-    "UNKNOWN",
-  ]);
+const VALID_PARENT_COMPATIBILITY = new Set([
+  "CONFIRMS_PARENT",
+  "PULLS_BACK_INSIDE_PARENT",
+  "CONFLICTS_WITH_PARENT",
+  "UNKNOWN",
+]);
 
-const VALID_PARENT_COMPATIBILITY =
-  new Set([
-    "CONFIRMS_PARENT",
-    "PULLS_BACK_INSIDE_PARENT",
-    "CONFLICTS_WITH_PARENT",
-    "UNKNOWN",
-  ]);
-
-const ALLOWED_PERMISSION_DECISIONS =
-  new Set([
-    "FAST_INTRADAY_PAPER_ALLOW",
-    "PAPER_ALLOW",
-  ]);
+const ALLOWED_PERMISSION_DECISIONS = new Set([
+  "FAST_INTRADAY_PAPER_ALLOW",
+  "PAPER_ALLOW",
+]);
 
 const OPPORTUNITY_PRIORITY = [
   "TRIGGERED",
@@ -178,17 +154,21 @@ function toNumber(value) {
     return null;
   }
 
-  const number =
-    Number(value);
+  const number = Number(value);
 
   return Number.isFinite(number)
     ? number
     : null;
 }
 
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
 function normalizeDirection(value) {
-  const direction =
-    upper(value);
+  const direction = upper(value);
 
   if (
     [
@@ -218,19 +198,45 @@ function normalizeDirection(value) {
 }
 
 function normalizeWave(value) {
-  const wave =
-    upper(value);
+  const wave = upper(value);
 
-  return VALID_WAVES.has(
-    wave
-  )
+  return VALID_WAVES.has(wave)
     ? wave
     : "UNKNOWN";
 }
 
+function normalizeInternalWave(value) {
+  const wave = String(value ?? "")
+    .trim();
+
+  if (!wave) {
+    return "UNKNOWN";
+  }
+
+  const normalized = wave.toLowerCase();
+
+  if (
+    [
+      "i",
+      "ii",
+      "iii",
+      "iv",
+      "v",
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+    ].includes(normalized)
+  ) {
+    return normalized;
+  }
+
+  return "UNKNOWN";
+}
+
 function normalizeProximity(value) {
-  const proximity =
-    upper(value);
+  const proximity = upper(value);
 
   if (
     [
@@ -246,19 +252,10 @@ function normalizeProximity(value) {
   return "UNKNOWN";
 }
 
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
-
 function defaultCurrentFib() {
   return {
-    lastCompleted:
-      "UNKNOWN",
-
-    next:
-      "UNKNOWN",
+    lastCompleted: "UNKNOWN",
+    next: "UNKNOWN",
   };
 }
 
@@ -278,12 +275,95 @@ function normalizeCurrentFib(value) {
   };
 }
 
+function isValidInternalPullback(wave) {
+  return (
+    upper(
+      wave?.pullbackClassification
+    ) === "INTERNAL_PULLBACK" &&
+    wave?.parentWaveStillValid === true &&
+    wave?.parentWaveComplete !== true &&
+    wave?.parentTransitionPossible !== true &&
+    wave?.invalidationBreached !== true &&
+    wave?.invalidated !== true
+  );
+}
+
 function resolveDirection({
   degree,
   alpha,
   wave,
   alignment,
 }) {
+  /*
+   * A valid nested internal pullback preserves the parent
+   * continuation direction.
+   *
+   * Example:
+   * - Parent Subminute W3 = LONG
+   * - Internal wave iv leg = DOWN
+   * - Engine 3 tactical reaction = SHORT
+   *
+   * Engine 27E must remain LONG because the SHORT reaction is
+   * occurring inside a still-valid internal correction.
+   */
+  if (
+    isValidInternalPullback(
+      wave
+    )
+  ) {
+    const parentDirection =
+      normalizeDirection(
+        wave?.parentWaveDirection
+      );
+
+    if (
+      [
+        "LONG",
+        "SHORT",
+      ].includes(
+        parentDirection
+      )
+    ) {
+      return parentDirection;
+    }
+
+    const preferredDirection =
+      normalizeDirection(
+        wave?.preferredTradeDirection
+      );
+
+    if (
+      [
+        "LONG",
+        "SHORT",
+      ].includes(
+        preferredDirection
+      )
+    ) {
+      return preferredDirection;
+    }
+
+    const structuralDirection =
+      normalizeDirection(
+        wave?.structuralDirection
+      );
+
+    if (
+      [
+        "LONG",
+        "SHORT",
+      ].includes(
+        structuralDirection
+      )
+    ) {
+      return structuralDirection;
+    }
+  }
+
+  /*
+   * Outside a valid internal pullback, fast tactical lanes may
+   * temporarily follow the approved Alpha reaction direction.
+   */
   if (
     FAST_LANES.has(
       degree
@@ -312,7 +392,7 @@ function resolveDirection({
     normalizeDirection(
       wave
         ?.preferredTradeDirection
-  );
+    );
 
   if (
     [
@@ -373,13 +453,12 @@ function resolveParentCompatibility({
     return "UNKNOWN";
   }
 
-  const status =
-    upper(
-      alignment
-        ?.waveStageCompatibility
-        ?.[path]
-        ?.status
-    );
+  const status = upper(
+    alignment
+      ?.waveStageCompatibility
+      ?.[path]
+      ?.status
+  );
 
   return VALID_PARENT_COMPATIBILITY.has(
     status
@@ -432,8 +511,7 @@ function resolveHigherTimeframeConflict({
     return (
       alpha
         ?.higherTimeframeContext
-        ?.conflictsWithLong ===
-      true
+        ?.conflictsWithLong === true
     );
   }
 
@@ -443,8 +521,7 @@ function resolveHigherTimeframeConflict({
     return (
       alpha
         ?.higherTimeframeContext
-        ?.conflictsWithShort ===
-      true
+        ?.conflictsWithShort === true
     );
   }
 
@@ -457,18 +534,15 @@ function resolvePermissionReady(alpha) {
       ?.permissionContext ||
     {};
 
-  const decision =
-    upper(
-      permission
-        .engine6Decision
-    );
+  const decision = upper(
+    permission.engine6Decision
+  );
 
   return (
     ALLOWED_PERMISSION_DECISIONS.has(
       decision
     ) &&
-    permission
-      .engine6Allowed ===
+    permission.engine6Allowed ===
       true
   );
 }
@@ -494,8 +568,7 @@ function resolvePlannerReady({
       "FAST_INTRADAY_PAPER_TICKET_READY" &&
     alpha
       ?.plannerContext
-      ?.ready ===
-      true
+      ?.ready === true
   );
 }
 
@@ -509,6 +582,8 @@ function resolveInvalidated({
     ) ===
       "INVALIDATED" ||
     wave?.invalidated ===
+      true ||
+    wave?.invalidationBreached ===
       true ||
     upper(
       wave?.stage
@@ -631,10 +706,19 @@ function buildWaitingFor({
 }) {
   const waitingFor = [];
 
-  if (
+  const currentWave =
     normalizeWave(
       wave?.currentWave
-    ) === "UNKNOWN"
+    );
+
+  const validInternalPullback =
+    isValidInternalPullback(
+      wave
+    );
+
+  if (
+    currentWave ===
+    "UNKNOWN"
   ) {
     waitingFor.push(
       "ENGINE27_INTELLIGENCE_INPUT"
@@ -642,12 +726,17 @@ function buildWaitingFor({
   }
 
   if (
+    validInternalPullback
+  ) {
+    waitingFor.push(
+      "INTERNAL_PULLBACK_COMPLETION"
+    );
+  } else if (
     readiness
       .structureReady !==
       true &&
-    normalizeWave(
-      wave?.currentWave
-    ) !== "UNKNOWN" &&
+    currentWave !==
+      "UNKNOWN" &&
     readiness
       .invalidated !==
       true
@@ -687,7 +776,7 @@ function buildWaitingFor({
   } else if (
     readiness
       .participationReady !==
-    true
+      true
   ) {
     waitingFor.push(
       "ENGINE4_PARTICIPATION"
@@ -744,12 +833,8 @@ function buildWaitingFor({
     );
   }
 
-  const currentWave =
-    normalizeWave(
-      wave?.currentWave
-    );
-
   if (
+    !validInternalPullback &&
     [
       "W2",
       "W4",
@@ -776,15 +861,9 @@ function countMajorMissing({
   higherTimeframeConflict,
 }) {
   const checks = [
-    readiness
-      .reactionReady,
-
-    readiness
-      .participationReady,
-
-    readiness
-      .permissionReady,
-
+    readiness.reactionReady,
+    readiness.participationReady,
+    readiness.permissionReady,
     !higherTimeframeConflict,
   ];
 
@@ -794,8 +873,7 @@ function countMajorMissing({
     )
   ) {
     checks.push(
-      readiness
-        .plannerReady
+      readiness.plannerReady
     );
   }
 
@@ -814,8 +892,7 @@ function determineDecisionState({
   higherTimeframeConflict,
 }) {
   if (
-    readiness
-      .invalidated ===
+    readiness.invalidated ===
     true
   ) {
     return "INVALIDATED";
@@ -840,6 +917,23 @@ function determineDecisionState({
     alpha?.active !== true
   ) {
     return "IDLE";
+  }
+
+  /*
+   * A valid internal pullback remains SETTING_UP regardless of:
+   * - price being at an active level
+   * - permission already being allowed
+   * - planner geometry already being ready
+   *
+   * The parent continuation setup cannot become READY until the
+   * internal pullback has completed.
+   */
+  if (
+    isValidInternalPullback(
+      wave
+    )
+  ) {
+    return "SETTING_UP";
   }
 
   if (
@@ -891,7 +985,7 @@ function determineDecisionState({
 
   if (
     alphaDecision ===
-      "WATCH"
+    "WATCH"
   ) {
     return "APPROACHING";
   }
@@ -904,8 +998,7 @@ function buildBlockers({
   readiness,
 }) {
   return unique([
-    readiness
-      .invalidated
+    readiness.invalidated
       ? "STRATEGY_INVALIDATED"
       : null,
 
@@ -921,6 +1014,7 @@ function buildBlockers({
 function buildWarnings({
   degree,
   alpha,
+  wave,
   alignment,
   parentCompatibility,
   higherTimeframeConflict,
@@ -933,6 +1027,16 @@ function buildWarnings({
     );
 
   const warnings = [];
+
+  if (
+    isValidInternalPullback(
+      wave
+    )
+  ) {
+    warnings.push(
+      "INTERNAL_PULLBACK_ACTIVE"
+    );
+  }
 
   if (
     parentCompatibility ===
@@ -986,8 +1090,7 @@ function buildWarnings({
     FAST_LANES.has(
       degree
     ) &&
-    readiness
-      .plannerReady !==
+    readiness.plannerReady !==
       true
   ) {
     warnings.push(
@@ -996,8 +1099,7 @@ function buildWarnings({
   }
 
   if (
-    readiness
-      .permissionReady !==
+    readiness.permissionReady !==
       true
   ) {
     warnings.push(
@@ -1029,6 +1131,7 @@ function buildRecommendedAction({
   decisionState,
   proximity,
   readiness,
+  wave,
   currentWave,
   geometryToolRecommended,
 }) {
@@ -1046,6 +1149,16 @@ function buildRecommendedAction({
     "IDLE"
   ) {
     return "NO_ACTION";
+  }
+
+  if (
+    isValidInternalPullback(
+      wave
+    )
+  ) {
+    return (
+      "WAIT_FOR_PULLBACK_COMPLETION"
+    );
   }
 
   if (
@@ -1077,6 +1190,14 @@ function buildRecommendedAction({
     "APPROACHING"
   ) {
     if (
+      readiness
+        .reactionReady !==
+      true
+    ) {
+      return "WATCH_REACTION";
+    }
+
+    if (
       proximity ===
       "APPROACHING"
     ) {
@@ -1085,7 +1206,9 @@ function buildRecommendedAction({
       );
     }
 
-    return "WATCH_REACTION";
+    return (
+      "MONITOR_STRUCTURE"
+    );
   }
 
   if (
@@ -1146,7 +1269,9 @@ function buildRecommendedAction({
       );
     }
 
-    return "PREPARE_GEOMETRY";
+    return (
+      "PREPARE_GEOMETRY"
+    );
   }
 
   if (
@@ -1165,6 +1290,7 @@ function buildReasonCodes({
   degree,
   decisionState,
   direction,
+  wave,
   readiness,
   parentCompatibility,
   higherDegreeSupport,
@@ -1178,26 +1304,34 @@ function buildReasonCodes({
 
     `ENGINE27_TRADER_DIRECTION_${direction}`,
 
-    readiness
-      .reactionReady !==
+    isValidInternalPullback(
+      wave
+    )
+      ? "ENGINE27_TRADER_INTERNAL_PULLBACK_ACTIVE"
+      : null,
+
+    isValidInternalPullback(
+      wave
+    )
+      ? "ENGINE27_TRADER_WAITING_FOR_INTERNAL_PULLBACK_COMPLETION"
+      : null,
+
+    readiness.reactionReady !==
       true
       ? "ENGINE27_TRADER_REACTION_MISSING"
       : null,
 
-    readiness
-      .participationReady !==
+    readiness.participationReady !==
       true
       ? "ENGINE27_TRADER_PARTICIPATION_MISSING"
       : null,
 
-    readiness
-      .permissionReady !==
+    readiness.permissionReady !==
       true
       ? "ENGINE27_TRADER_PERMISSION_MISSING"
       : null,
 
-    readiness
-      .plannerReady ===
+    readiness.plannerReady ===
       true
       ? "ENGINE27_TRADER_PLANNER_READY"
       : null,
@@ -1205,6 +1339,11 @@ function buildReasonCodes({
     parentCompatibility ===
       "CONFLICTS_WITH_PARENT"
       ? "ENGINE27_TRADER_PARENT_CONFLICT"
+      : null,
+
+    parentCompatibility ===
+      "PULLS_BACK_INSIDE_PARENT"
+      ? "ENGINE27_TRADER_PULLBACK_INSIDE_PARENT"
       : null,
 
     higherDegreeSupport
@@ -1221,8 +1360,7 @@ function buildReasonCodes({
       ? "ENGINE27_TRADER_PRIMARY_W5_WARNING"
       : null,
 
-    readiness
-      .invalidated
+    readiness.invalidated
       ? "ENGINE27_TRADER_INVALIDATED"
       : null,
   ]);
@@ -1239,11 +1377,9 @@ function safeUnavailableLane(
   return {
     active: false,
 
-    engine:
-      ENGINE_NAME,
+    engine: ENGINE_NAME,
 
-    mode:
-      "READ_ONLY",
+    mode: "READ_ONLY",
 
     laneId:
       registry.laneId,
@@ -1268,6 +1404,39 @@ function safeUnavailableLane(
 
     nextExpectedWave:
       "UNKNOWN",
+
+    internalWave:
+      "UNKNOWN",
+
+    previousInternalWave:
+      "UNKNOWN",
+
+    nextExpectedInternalWave:
+      "UNKNOWN",
+
+    pullbackClassification:
+      "UNKNOWN",
+
+    parentWaveStillValid:
+      null,
+
+    parentWaveComplete:
+      null,
+
+    parentTransitionPossible:
+      null,
+
+    transitionRisk:
+      "UNKNOWN",
+
+    invalidationLevel:
+      null,
+
+    invalidationBreached:
+      false,
+
+    supportLevel:
+      null,
 
     currentPrice:
       null,
@@ -1450,6 +1619,27 @@ function buildLaneDecision({
       wave.nextExpectedWave
     );
 
+  const internalWave =
+    normalizeInternalWave(
+      wave.internalWave
+    );
+
+  const previousInternalWave =
+    normalizeInternalWave(
+      wave.previousInternalWave
+    );
+
+  const nextExpectedInternalWave =
+    normalizeInternalWave(
+      wave.nextExpectedInternalWave
+    );
+
+  const pullbackClassification =
+    upper(
+      wave.pullbackClassification
+    ) ||
+    "UNKNOWN";
+
   const currentPrice =
     toNumber(
       fib?.currentPrice
@@ -1534,6 +1724,7 @@ function buildLaneDecision({
     buildWarnings({
       degree,
       alpha,
+      wave,
       alignment,
       parentCompatibility,
       higherTimeframeConflict,
@@ -1550,12 +1741,13 @@ function buildLaneDecision({
     ].includes(
       decisionState
     ) &&
-    readiness
-      .invalidated !==
+    readiness.invalidated !==
       true &&
-    readiness
-      .reactionReady ===
-      true;
+    readiness.reactionReady ===
+      true &&
+    !isValidInternalPullback(
+      wave
+    );
 
   const recommendedAction =
     buildRecommendedAction({
@@ -1563,6 +1755,7 @@ function buildLaneDecision({
       decisionState,
       proximity,
       readiness,
+      wave,
       currentWave,
       geometryToolRecommended,
     });
@@ -1580,11 +1773,9 @@ function buildLaneDecision({
   return {
     active: true,
 
-    engine:
-      ENGINE_NAME,
+    engine: ENGINE_NAME,
 
-    mode:
-      "READ_ONLY",
+    mode: "READ_ONLY",
 
     laneId:
       alpha.laneId ||
@@ -1609,6 +1800,46 @@ function buildLaneDecision({
     currentWave,
 
     nextExpectedWave,
+
+    internalWave,
+
+    previousInternalWave,
+
+    nextExpectedInternalWave,
+
+    pullbackClassification,
+
+    parentWaveStillValid:
+      wave.parentWaveStillValid ??
+      null,
+
+    parentWaveComplete:
+      wave.parentWaveComplete ??
+      null,
+
+    parentTransitionPossible:
+      wave.parentTransitionPossible ??
+      null,
+
+    transitionRisk:
+      upper(
+        wave.transitionRisk
+      ) ||
+      "UNKNOWN",
+
+    invalidationLevel:
+      toNumber(
+        wave.invalidationLevel
+      ),
+
+    invalidationBreached:
+      wave.invalidationBreached ===
+      true,
+
+    supportLevel:
+      toNumber(
+        wave.supportLevel
+      ),
 
     currentPrice,
 
@@ -1740,6 +1971,7 @@ function buildLaneDecision({
         degree,
         decisionState,
         direction,
+        wave,
         readiness,
         parentCompatibility,
         higherDegreeSupport,
@@ -1990,11 +2222,9 @@ export function buildTraderDecision({
   return {
     active,
 
-    engine:
-      ENGINE_NAME,
+    engine: ENGINE_NAME,
 
-    mode:
-      "READ_ONLY",
+    mode: "READ_ONLY",
 
     laneOrder: [
       ...LANE_ORDER,
