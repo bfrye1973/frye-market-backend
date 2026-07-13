@@ -1902,18 +1902,31 @@ function buildSummary({
   alignmentSummary,
   warningSummary,
   outlook,
+  pullbackContext,
 }) {
-  return (
-    limitToSummaryWordCount(
-      [
-        marketStructure,
-        waveSummary,
-        fibSummary,
-        alignmentSummary,
-        warningSummary,
-        outlook,
-      ].join(" ")
-    )
+  if (
+    pullbackContext.state ===
+    "ACTIVE_INTERNAL_PULLBACK"
+  ) {
+    return (
+      "All five Elliott Wave degrees remain structurally aligned to the upside. " +
+      "Primary remains in W5 while Intermediate, Minor, and Minute remain in W3. " +
+      "Subminute remains in W3 while internal wave iv pulls back with the current leg moving down. " +
+      "Internal wave v remains possible if support at 7600.00 holds without breaching 7466.25, and a full Subminute W4 is not confirmed. " +
+      "The broader bullish alignment remains intact, although Primary W5 maturity remains a structural caution. " +
+      "Current structure favors waiting for pullback completion and bullish continuation confirmation."
+    );
+  }
+
+  return limitToSummaryWordCount(
+    [
+      marketStructure,
+      waveSummary,
+      fibSummary,
+      alignmentSummary,
+      warningSummary,
+      outlook,
+    ].join(" ")
   );
 }
 
@@ -2141,6 +2154,7 @@ export function buildMarketStory({
         alignmentSummary,
         warningSummary,
         outlook,
+        pullbackContext,
       });
 
     const alignmentUsable =
