@@ -3230,6 +3230,19 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
   const plan = {
     active: true,
     engine: ENGINE,
+
+    candidateId,
+    zoneId,
+
+     setupType:
+      identitySetupType ??
+      setupType,
+     
+    snapshotTime:
+      identitySnapshotTime,
+
+    candidateIdentityPreserved:
+      Boolean(candidateId && zoneId),
     mode: MODE,
     researchOnly: true,
     paperOnly: true,
@@ -3253,7 +3266,6 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
       : "ENGINE26_NORMAL_GEOMETRY",
 
     setupFamily: "IMBALANCE_TO_IMBALANCE_SCALP",
-    setupType,
     direction,
     currentPrice: entryPrice,
     entryPrice,
