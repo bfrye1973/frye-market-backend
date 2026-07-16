@@ -75,6 +75,10 @@ import {
 import {
   buildEngine7FinalPositionSizing,
 } from "../logic/engine7/v2/buildFinalPositionSizing.js";
+import {
+  buildEngine8CanonicalPaperAdapter,
+} from "../logic/trading/engine8CanonicalPaperAdapter.js";
+
 
 
 /* -----------------------------
@@ -8721,6 +8725,37 @@ scalp.engine7PositionSizing =
     
   }
 }    
+
+scalp.engine8PaperOrder =
+  buildEngine8CanonicalPaperAdapter({
+    engine6PaperPermission:
+      scalp.permission?.paper || null,
+
+    engine9OfficialManagementPlan:
+      scalp.engine9OfficialManagementPlan || null,
+
+    engine7PositionSizing:
+      scalp.engine7PositionSizing || null,
+
+    duplicateState: {
+      candidateAlreadyOrdered: false,
+      idempotencyKeyAlreadyUsed: false,
+      openTradeForStrategy: false,
+      activeTradeIdExists: false,
+      orderExistsForPlanId: false,
+      acceptanceTradeCompleted: false,
+      newPaperOrdersAllowed: true,
+    },
+
+    paperExecutionEnabled:
+      process.env.ENGINE8_PAPER_ONLY === "1",
+
+    liveTradingEnabled:
+      process.env.ENGINE8_LIVE_TRADING_ENABLED === "1",
+
+    allowLiveFutures:
+      process.env.ENGINE8_ALLOW_LIVE_FUTURES === "1",
+  });
 
   if (String(symbol || "").toUpperCase() === "ES") {
     const scalp = result.strategies?.["intraday_scalp@10m"];
