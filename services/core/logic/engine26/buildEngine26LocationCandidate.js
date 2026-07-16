@@ -1217,8 +1217,13 @@ export function buildEngine26LocationCandidate({
       engine22WaveStrategy
     );
 
+  /*
+   * Engine 26 owns the canonical zone identity.
+   *
+   * Raw source IDs such as ES_MANUAL_IMBALANCE_7 remain available at:
+   * location.upstreamId
+   */
   const zoneId =
-    selectedZone.upstreamId ||
     stableHash("E26Z", [
       normalizedSymbol,
       selectedZone.source,
@@ -1387,7 +1392,11 @@ export function buildEngine26LocationCandidate({
 
     candidateAlternatives:
       allZones
-        .slice(1, 4)
+        .filter(
+          (zone) =>
+            zone !== selectedZone
+        )
+        .slice(0, 4)
         .map((zone) => ({
           source:
             zone.source,
@@ -1423,6 +1432,14 @@ export function buildEngine26LocationCandidate({
     reasonCodes: [
       "ENGINE26A_LOCATION_DISCOVERY_COMPLETE",
       "REACTION_INDEPENDENT_LOCATION_SELECTION",
+
+      manualImbalanceInventory?.ok === true
+        ? "ENGINE26A_MANUAL_IMBALANCE_INVENTORY_AVAILABLE"
+        : "ENGINE26A_MANUAL_IMBALANCE_INVENTORY_UNAVAILABLE",
+
+      authorizationEligibleZones.length > 0
+        ? "ENGINE26A_IN_RANGE_ELIGIBILITY_APPLIED_BEFORE_RANKING"
+        : "ENGINE26A_NO_IN_RANGE_LOCATION_DISTANT_FALLBACK",
 
       `ENGINE26A_SOURCE_${selectedZone.source}`,
 
