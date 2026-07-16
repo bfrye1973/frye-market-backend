@@ -2447,6 +2447,7 @@ export function buildTraderDecision({
   engine27Alignment,
   engine27MarketStory,
   alphaDecisions,
+  pipelineContext = null,
 } = {}) {
   const waves =
     isObject(
@@ -2517,6 +2518,11 @@ export function buildTraderDecision({
               degree
             ] ||
             null,
+
+          pipelineContext:
+            FAST_LANES.has(degree)
+              ? pipelineContext
+              : null,
         });
     } catch {
       decisions[
