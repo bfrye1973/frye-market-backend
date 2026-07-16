@@ -232,6 +232,49 @@ export function buildEngine27Strategies({
       });
   }
 
+  const intradayPaperStrategy =
+    snapshot?.strategies?.[
+      "intraday_scalp@10m"
+    ] || null;
+
+  const pipelineContext =
+    intradayPaperStrategy
+      ? {
+          engine26LocationCandidate:
+            intradayPaperStrategy
+              .engine26LocationCandidate ||
+            null,
+
+          engine3AuthorizedReaction:
+            intradayPaperStrategy
+              .confluence
+              ?.context
+              ?.reaction
+              ?.paperScalpReaction ||
+            null,
+
+          engine4AuthorizedParticipation:
+            intradayPaperStrategy
+              .analytics
+              ?.engine5
+              ?.context
+              ?.volume
+              ?.engine4AuthorizedReactionParticipation ||
+            null,
+
+          engine6Permission:
+            intradayPaperStrategy
+              .permission
+              ?.paper ||
+            null,
+
+          engine26Planner:
+            intradayPaperStrategy
+              .engine26PaperTradePlan ||
+            null,
+        }
+      : null;
+
   /*
    * Engine 27E — Trader Decision
    *
@@ -263,8 +306,8 @@ export function buildEngine27Strategies({
       engine27Alignment,
       engine27MarketStory,
       alphaDecisions: decisions,
+      pipelineContext,
     });
-
   return {
     active: true,
 
