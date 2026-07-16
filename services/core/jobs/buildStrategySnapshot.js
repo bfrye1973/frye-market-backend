@@ -7741,6 +7741,8 @@ if (isEsIntradayScalp) {
     engine26PaperTradeTicket = engine26.engine26PaperTradeTicket || null;
     engine26TradePlanPreview = engine26.engine26TradePlanPreview || null;
     engine26TradePlanPreview = engine26.engine26TradePlanPreview || null;
+    engine26ProposedGeometry =
+      engine26.engine26ProposedGeometry || null;
     // V1 planner-only. Do not call Engine 8 from snapshot builder.
     engine26PaperTradeExecution = null;
     engine26ReplayMarker = buildEngine26ReplayMarker({
