@@ -2171,6 +2171,132 @@ function buildEngine7SizingPreviewV1({ permission, confluence, engine15Decision 
   };
 }
 
+function buildEngine26ProposedGeometry({
+  symbol,
+  strategyId,
+  engine26TradePlanPreview,
+  candidateId = null,
+  zoneId = null,
+  snapshotTime = null,
+}) {
+  const preview = engine26TradePlanPreview || null;
+  const geometry = preview?.geometryPreview || null;
+
+  const direction =
+    preview?.structure?.direction ||
+    preview?.direction ||
+    null;
+
+  const setupType =
+    preview?.structure?.setupType ||
+    preview?.setupType ||
+    null;
+
+  const proposedEntryPrice =
+    toNum(geometry?.entryReference);
+
+  const proposedStopPrice =
+    toNum(geometry?.stopReference);
+
+  const proposedStopDistancePoints =
+    toNum(geometry?.riskPoints);
+
+  const rawTargetMap =
+    preview?.targetMap ?? null;
+
+  const proposedTargets =
+    Array.isArray(rawTargetMap)
+      ? rawTargetMap
+      : [];
+
+  const directionValid =
+    direction === "LONG" || direction === "SHORT";
+
+  const geometryDirectionallyValid =
+    proposedEntryPrice != null &&
+    proposedEntryPrice > 0 &&
+    proposedStopPrice != null &&
+    proposedStopPrice > 0 &&
+    proposedStopDistancePoints != null &&
+    proposedStopDistancePoints > 0 &&
+    (
+      (direction === "LONG" &&
+        proposedStopPrice < proposedEntryPrice) ||
+      (direction === "SHORT" &&
+        proposedStopPrice > proposedEntryPrice)
+    );
+
+  const identityComplete =
+    Boolean(candidateId) &&
+    Boolean(zoneId) &&
+    Boolean(strategyId) &&
+    Boolean(symbol) &&
+    Boolean(snapshotTime);
+
+  const active =
+    identityComplete &&
+    directionValid &&
+    geometryDirectionallyValid;
+
+  const warnings = [];
+
+  if (!candidateId) warnings.push("CANDIDATE_ID_UNAVAILABLE");
+  if (!zoneId) warnings.push("ZONE_ID_UNAVAILABLE");
+  if (!snapshotTime) warnings.push("SNAPSHOT_TIME_UNAVAILABLE");
+  if (!directionValid) warnings.push("DIRECTION_UNAVAILABLE");
+  if (!geometryDirectionallyValid) {
+    warnings.push("PROPOSED_GEOMETRY_INVALID");
+  }
+  if (proposedTargets.length === 0) {
+    warnings.push("PROPOSED_TARGETS_UNAVAILABLE");
+  }
+
+  return {
+    active,
+
+    engine: "engine26B.proposedGeometry.v1",
+    contractVersion: "engine26.proposedGeometry.v1",
+
+    candidateId,
+    zoneId,
+    strategyId,
+    symbol,
+    direction,
+    setupType,
+
+    proposedEntryPrice,
+    proposedStopPrice,
+    proposedStopDistancePoints,
+    proposedTargets,
+
+    candidateStatus:
+      candidateId ? "ACTIVE" : "IDENTITY_UNAVAILABLE",
+
+    lifecycleStatus:
+      active
+        ? "PROPOSED_GEOMETRY_AVAILABLE"
+        : geometry
+        ? "PROPOSED_GEOMETRY_PARTIAL"
+        : "PROPOSED_GEOMETRY_UNAVAILABLE",
+
+    proposalOnly: true,
+    plannerOnly: true,
+    official: false,
+    officialPlanOwner: "ENGINE9",
+
+    nonExecutable: true,
+    noPermissionCreated: true,
+    noOrderCreated: true,
+    noExecution: true,
+
+    candidateIdentityPreserved: identityComplete,
+    snapshotTime,
+
+    warnings,
+    reasonCodes: [],
+  };
+}
+
 function buildEngine26TradePlanPreview({
   symbol,
   strategyId,
@@ -2814,6 +2940,33 @@ export function buildEngine26PaperTradePlan({
     controlLevelContext,
   });
 
+  const engine26ProposedGeometry =
+    buildEngine26ProposedGeometry({
+      symbol: normalizedSymbol,
+      strategyId: normalizedStrategyId,
+      engine26TradePlanPreview,
+
+      candidateId:
+        engine26TradePlanPreview?.candidateId ??
+        engine26StructuralContext?.candidateId ??
+        engine26ImbalanceWatch?.candidateId ??
+        null,
+
+      zoneId:
+        engine26TradePlanPreview?.zoneId ??
+        engine26StructuralContext?.zoneId ??
+        engine26StructuralContext?.locationContext?.zone?.id ??
+        engine26ImbalanceWatch?.activeImbalance?.id ??
+        null,
+
+      snapshotTime:
+        engine26TradePlanPreview?.snapshotTime ??
+        engine26StructuralContext?.snapshotTime ??
+        engine26ImbalanceWatch?.snapshotTime ??
+        engine26TradePlanPreview?.createdAt ??
+        null,
+    });
+
   const engine26PaperTrialCandidate =
     engine26TradePlanPreview?.paperTrialCandidate || null;
 
@@ -3085,6 +3238,7 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
       engine26ImbalanceWatch,
       engine26StructuralContext,
       engine26TradePlanPreview,
+      engine26ProposedGeometry,
       engine26PaperTrialCandidate,
       engine26PaperTradePlan: {
         ...makeNoTrade({
