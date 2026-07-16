@@ -41,11 +41,6 @@ import { attachPaperScalpReactionToConfluence } from "../logic/engine3/paperScal
 import { attachFastImbalanceReactionToConfluence } from "../logic/engine3/fastImbalanceReaction.js";
 import { attachCurrentLevelActionToConfluence } from "../logic/priceAction/currentLevelAction.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
-import {
-  buildEngine26ImbalanceWatch,
-  buildEngine26PaperTradePlan,
-  buildEngine26StructuralContext,
-} from "../logic/engine26/paperTradePlanner.js";
 import { listTrades } from "../logic/journal/tradeJournalStore.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import { buildEngine27Strategies } from "../logic/engine27/buildEngine27Strategies.js";
