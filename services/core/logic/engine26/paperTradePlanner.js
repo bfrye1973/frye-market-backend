@@ -2686,6 +2686,37 @@ export function buildEngine26PaperTradePlan({
 
   const paper = permission?.paper || null;
 
+  const candidateId =
+    paper?.candidateId ??
+    permission?.candidateId ??
+    null;
+
+  const authorizedZoneId =
+    paper?.zoneId ??
+    permission?.zoneId ??
+    null;
+
+  const identityStrategyId =
+    paper?.strategyId ??
+    permission?.strategyId ??
+    normalizedStrategyId;
+
+  const identitySymbol =
+    paper?.symbol ??
+    permission?.symbol ??
+    normalizedSymbol;
+
+  const identitySetupType =
+    paper?.setupType ??
+    permission?.setupType ??
+    null;
+
+  const identitySnapshotTime =
+    paper?.snapshotTime ??
+    permission?.snapshotTime ??
+    null;
+  
+
   const plannerPaperDecision = safeUpper(paper?.decision);
 
   const isFastIntradayPaperAllow =
@@ -2975,11 +3006,17 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
     reasonCodes.push("FAST_INTRADAY_FALLBACK_GEOMETRY_USED");
   }
 
-  const zoneId = getZoneId({
+  const plannerDerivedZoneId = getZoneId({
     engine25Context,
     confluence,
     engine22WaveStrategy,
   });
+
+  // Engine 26A owns the authorized zone identity.
+  // Keep the legacy planner-derived zone only as fallback.
+  const zoneId =
+    authorizedZoneId ??
+    plannerDerivedZoneId;
 
   const duplicateOpen = isDuplicateOpenTrade({
     openPaperTrades,
@@ -3022,7 +3059,19 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
   }
 
   const baseContext = {
-    setupType,
+    candidateId,
+    zoneId,
+
+    strategyId: identityStrategyId,
+    symbol: identitySymbol,
+
+    setupType:
+      identitySetupType ??
+      setupType,
+
+    snapshotTime:
+      identitySnapshotTime,
+
     direction,
     engineContext,
   };
@@ -3037,16 +3086,31 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
       engine26StructuralContext,
       engine26TradePlanPreview,
       engine26PaperTrialCandidate,
-      engine26PaperTradePlan: makeNoTrade({
-        symbol: normalizedSymbol,
-        strategyId: normalizedStrategyId,
-        tf: normalizedTf,
-        status,
-        blockers,
-        warnings,
-        reasonCodes: [...reasonCodes, ...blockers],
-        context: baseContext,
-      }),
+      engine26PaperTradePlan: {
+        ...makeNoTrade({
+          symbol: normalizedSymbol,
+          strategyId: normalizedStrategyId,
+          tf: normalizedTf,
+          status,
+          blockers,
+          warnings,
+          reasonCodes: [...reasonCodes, ...blockers],
+          context: baseContext,
+        }),
+
+        candidateId,
+        zoneId,
+
+        setupType:
+          identitySetupType ??
+          setupType,
+
+        snapshotTime:
+          identitySnapshotTime,
+
+        candidateIdentityPreserved:
+          Boolean(candidateId && zoneId),
+      },
       engine26PaperTradeTicket: null,
       engine26PaperTradeExecution: null,
     };
@@ -3085,6 +3149,19 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
 
   const ticket = {
     idempotencyKey,
+
+    candidateId,
+    zoneId,
+
+    setupType:
+      identitySetupType ??
+      setupType,
+
+    snapshotTime:
+      identitySnapshotTime,
+
+    candidateIdentityPreserved:
+      Boolean(candidateId && zoneId),
 
     paper: true,
     paperOnly: true,
@@ -3131,9 +3208,14 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
     engine7: sizing,
 
     signalEvent: {
-      setupFamily: "IMBALANCE_TO_IMBALANCE_SCALP",
-      setupType,
+      candidateId,
       zoneId,
+
+      setupFamily: "IMBALANCE_TO_IMBALANCE_SCALP",
+
+      setupType:
+        identitySetupType ??
+        setupType,
       signalPrice: entryPrice,
       direction,
       source: ENGINE,
