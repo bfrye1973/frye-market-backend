@@ -62,6 +62,13 @@ import {
 import {
   preserveEngine6CandidateIdentity,
 } from "../logic/engine6/preserveCandidateIdentity.js";
+import {
+  buildEngine7ProposedSizingPreview,
+} from "../logic/engine7/v2/buildProposedSizingPreview.js";
+
+import {
+  ES_PAPER_RISK_CONFIG,
+} from "../config/paperRiskConfig.js";
 
 
 
@@ -7700,6 +7707,7 @@ let engine26PaperTradeExecution = null;
 let engine26TradePlanPreview = null;
 let engine26ReplayMarker = null;
 let engine26ProposedGeometry = null; 
+let engine7SizingPreview = null;
 
 if (isEsIntradayScalp) {
   try {
@@ -7748,6 +7756,23 @@ if (isEsIntradayScalp) {
     engine26TradePlanPreview = engine26.engine26TradePlanPreview || null;
     engine26ProposedGeometry =
       engine26.engine26ProposedGeometry || null;
+    engine7SizingPreview =
+      buildEngine7ProposedSizingPreview({
+        engine26ProposedGeometry,
+
+    engine6PaperPermission:
+      finalPermission?.paper || null,
+
+    engine27MinuteReadiness: null,
+
+    riskConfig:
+      ES_PAPER_RISK_CONFIG,
+
+    snapshotTime:
+      engine26ProposedGeometry?.snapshotTime ||
+      result?.now ||
+      nowIso(),
+  });
     // V1 planner-only. Do not call Engine 8 from snapshot builder.
     engine26PaperTradeExecution = null;
     engine26ReplayMarker = buildEngine26ReplayMarker({
@@ -8098,6 +8123,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
     engine26PaperTradePlan,
     engine26PaperTradeTicket,
     engine26ProposedGeometry,
+    engine7SizingPreview,
     engine26PaperTradeExecution,
     engine26ReplayMarker,
 
