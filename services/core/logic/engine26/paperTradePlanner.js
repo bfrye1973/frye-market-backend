@@ -2985,31 +2985,87 @@ export function buildEngine26PaperTradePlan({
 
   const engine26ProposedGeometry =
     buildEngine26ProposedGeometry({
-      symbol: normalizedSymbol,
-      strategyId: normalizedStrategyId,
+      symbol:
+        authorizedCandidate?.symbol ??
+        normalizedSymbol,
+
+      strategyId:
+        authorizedCandidate?.strategyId ??
+        normalizedStrategyId,
+
       engine26TradePlanPreview,
 
+      /*
+       * Do not attach candidate identity unless the planner raw zone
+       * matches the Engine 26A candidate's upstream source identity.
+       */
       candidateId:
-        engine26TradePlanPreview?.candidateId ??
-        engine26StructuralContext?.candidateId ??
-        engine26ImbalanceWatch?.candidateId ??
-        null,
+        candidateMatchesPlannerZone
+          ? authorizedCandidate.candidateId
+          : null,
 
       zoneId:
-        engine26TradePlanPreview?.zoneId ??
-        engine26StructuralContext?.zoneId ??
-        engine26StructuralContext?.locationContext?.zone?.id ??
-        engine26ImbalanceWatch?.activeImbalance?.id ??
-        null,
+        candidateMatchesPlannerZone
+          ? authorizedCandidate.zoneId
+          : null,
 
       snapshotTime:
-        engine26TradePlanPreview?.snapshotTime ??
-        engine26StructuralContext?.snapshotTime ??
-        engine26ImbalanceWatch?.snapshotTime ??
-        engine26TradePlanPreview?.createdAt ??
-        null,
+        candidateMatchesPlannerZone
+          ? authorizedCandidate.snapshotTime
+          : null,
+
+      candidateDirection:
+        candidateMatchesPlannerZone
+          ? authorizedCandidate.directionBias
+          : null,
+
+      candidateSetupType:
+        candidateMatchesPlannerZone
+          ? authorizedCandidate.setupType
+          : null,
     });
 
+  engine26ProposedGeometry.reasonCodes =
+    candidateMatchesPlannerZone
+      ? [
+          "ENGINE26A_CANDIDATE_IDENTITY_CONSUMED",
+          "ENGINE26A_ENGINE26B_UPSTREAM_ZONE_MATCH",
+          "ENGINE26A_SETUP_IDENTITY_PRESERVED",
+          "ENGINE26A_SNAPSHOT_IDENTITY_PRESERVED",
+        ]
+      : [
+          "ENGINE26A_ENGINE26B_IDENTITY_NOT_PROVEN",
+        ];
+
+  if (!candidateMatchesPlannerZone) {
+    engine26ProposedGeometry.warnings = [
+      ...new Set([
+        ...(Array.isArray(
+          engine26ProposedGeometry.warnings
+        )
+          ? engine26ProposedGeometry.warnings
+          : []),
+
+        authorizedCandidate?.active !== true
+          ? "ENGINE26A_CANDIDATE_NOT_ACTIVE"
+          : null,
+
+        !authorizedUpstreamId
+          ? "ENGINE26A_UPSTREAM_ZONE_ID_UNAVAILABLE"
+          : null,
+
+        !plannerUpstreamId
+          ? "ENGINE26B_PLANNER_ZONE_ID_UNAVAILABLE"
+          : null,
+
+        authorizedUpstreamId &&
+        plannerUpstreamId &&
+        authorizedUpstreamId !== plannerUpstreamId
+          ? "ENGINE26A_ENGINE26B_ZONE_MISMATCH"
+          : null,
+      ].filter(Boolean)),
+    ];
+  }
   const engine26PaperTrialCandidate =
     engine26TradePlanPreview?.paperTrialCandidate || null;
 
@@ -3516,13 +3572,14 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
     createdAt: nowIso(),
   };
 
-  return {
+ return {
    engine26ImbalanceWatch,
    engine26StructuralContext,
    engine26TradePlanPreview,
+   engine26ProposedGeometry,
    engine26PaperTrialCandidate,
    engine26PaperTradePlan: plan,
    engine26PaperTradeTicket: ticket,
    engine26PaperTradeExecution: null,
-  };
+ };
 }
