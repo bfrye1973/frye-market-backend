@@ -72,7 +72,9 @@ import {
 import {
   buildEngine9OfficialManagementPlan,
 } from "../logic/engine9/v1/buildOfficialManagementPlan.js";
-
+import {
+  buildEngine7FinalPositionSizing,
+} from "../logic/engine7/v2/buildFinalPositionSizing.js";
 
 
 /* -----------------------------
@@ -7711,6 +7713,7 @@ let engine26TradePlanPreview = null;
 let engine26ReplayMarker = null;
 let engine26ProposedGeometry = null; 
 let engine7SizingPreview = null;
+let engine7PositionSizing = null; 
 
 if (isEsIntradayScalp) {
   try {
@@ -8667,33 +8670,57 @@ if (
           nowIso(),
       });
 
-    scalp.engine9OfficialManagementPlan =
-      buildEngine9OfficialManagementPlan({
-        engine26ProposedGeometry:
-          scalp.engine26ProposedGeometry ||
-          null,
+scalp.engine9OfficialManagementPlan =
+  buildEngine9OfficialManagementPlan({
+    engine26ProposedGeometry:
+      scalp.engine26ProposedGeometry || null,
 
-        engine7SizingPreview:
-          scalp.engine7SizingPreview ||
-          null,
+    engine7SizingPreview:
+      scalp.engine7SizingPreview || null,
 
-        engine6PaperPermission:
-          scalp.permission?.paper ||
-          null,
+    engine6PaperPermission:
+      scalp.permission?.paper || null,
 
-        engine27MinuteDecision,
+    engine27MinuteDecision,
 
-        engine27MinuteFib,
+    engine27MinuteFib,
 
-        snapshotTime:
-          scalp
-            .engine26ProposedGeometry
-            ?.snapshotTime ||
-          result?.now ||
-          nowIso(),
-      });
+    snapshotTime:
+      scalp.engine26ProposedGeometry?.snapshotTime ||
+      result?.now ||
+      nowIso(),
+  });
+
+scalp.engine7PositionSizing =
+  buildEngine7FinalPositionSizing({
+    engine6PaperPermission:
+      scalp.permission?.paper || null,
+
+    engine27MinuteReadiness:
+      engine27MinuteDecision || null,
+
+    engine9OfficialManagementPlan:
+      scalp.engine9OfficialManagementPlan || null,
+
+    riskConfig:
+      ES_PAPER_RISK_CONFIG,
+
+    tradeState: {
+      duplicateBlocked: false,
+      candidateAlreadySized: false,
+      candidateAlreadyOrdered: false,
+      openTradeForStrategy: false,
+      idempotencyKeyAlreadyUsed: false,
+    },
+
+    snapshotTime:
+      scalp.engine9OfficialManagementPlan?.snapshotTime ||
+      result?.now ||
+      nowIso(),
+  });
+    
   }
-}
+}    
 
   if (String(symbol || "").toUpperCase() === "ES") {
     const scalp = result.strategies?.["intraday_scalp@10m"];
