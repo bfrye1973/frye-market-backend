@@ -6772,6 +6772,7 @@ attachEngine4FastImbalanceParticipationToConfluence({
 attachPaperScalpReactionToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
+  engine26ReactionHandoff,
   paperShortResearchEnabled: isEsIntradayScalp,
 });
 
@@ -7434,6 +7435,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
      attachPaperScalpReactionToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
+       engine26ReactionHandoff,
        engine26StructuralContext,
        paperShortResearchEnabled: isEsIntradayScalp,
      });
