@@ -2212,9 +2212,83 @@ function buildEngine26ProposedGeometry({
   const rawTargetMap =
     preview?.targetMap ?? null;
 
+  /*
+   * Normalize both supported Engine 26 preview target formats:
+   *
+   * 1. Array targets
+   * 2. Legacy targetMap object:
+   *    {
+   *      firstReaction,
+   *      aLowBreak,
+   *      preferredCPressure,
+   *      stretchC,
+   *      labels
+   *    }
+   *
+   * This is transport normalization only. No targets are recalculated.
+   */
   const proposedTargets =
     Array.isArray(rawTargetMap)
       ? rawTargetMap
+          .map((target, index) => {
+            const price =
+              toNum(target?.price) ??
+              toNum(target);
+
+            if (price == null) {
+              return null;
+            }
+
+            return {
+              targetId:
+                safeString(target?.targetId) ||
+                `T${index + 1}`,
+
+              sequence:
+                Number.isInteger(target?.sequence)
+                  ? target.sequence
+                  : index + 1,
+
+              price:
+                roundToTick(price),
+
+              label:
+                target?.label || null,
+            };
+          })
+          .filter(Boolean)
+      : rawTargetMap &&
+        typeof rawTargetMap === "object"
+      ? Object.entries(rawTargetMap)
+          .filter(
+            ([key]) =>
+              key !== "labels"
+          )
+          .map(([targetId, value], index) => {
+            const price =
+              toNum(value?.price) ??
+              toNum(value);
+
+            if (price == null) {
+              return null;
+            }
+
+            return {
+              targetId,
+
+              sequence:
+                index + 1,
+
+              price:
+                roundToTick(price),
+
+              label:
+                rawTargetMap?.labels?.[targetId] ??
+                value?.label ??
+                null,
+            };
+          })
+          .filter(Boolean)
       : [];
 
   const directionValid =
