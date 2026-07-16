@@ -63,6 +63,13 @@ function sameValue(left, right) {
   return a === b;
 }
 
+function exactIdentityMatch(left, right) {
+  const a = safeString(left);
+  const b = safeString(right);
+
+  return Boolean(a && b && a === b);
+}
+
 function directionallyValidPrice({
   direction,
   entryPrice,
@@ -643,38 +650,55 @@ export function buildEngine9OfficialManagementPlan({
       ?.readiness
       ?.invalidated !== true;
 
-  const engine27IdentityMatches =
-    sameValue(
-      candidateId,
-      engine27MinuteDecision
-        ?.candidateId
-    ) &&
-    sameValue(
-      zoneId,
-      engine27MinuteDecision
-        ?.zoneId
-    ) &&
-    sameValue(
-      strategyId,
-      engine27MinuteDecision
-        ?.strategyId
-    ) &&
-    sameValue(
-      symbol,
-      engine27MinuteDecision
-        ?.symbol
-    ) &&
-    sameValue(
-      direction,
-      engine27MinuteDecision
-        ?.direction
-    ) &&
-    engine27MinuteDecision
-      ?.pipelineIdentity
-      ?.complete === true &&
-    engine27MinuteDecision
-      ?.pipelineIdentity
-      ?.consistent === true;
+  const engine27CoreIdentityMatched =
+  exactIdentityMatch(
+    candidateId,
+    engine27MinuteDecision?.candidateId
+  ) &&
+  exactIdentityMatch(
+    zoneId,
+    engine27MinuteDecision?.zoneId
+  ) &&
+  exactIdentityMatch(
+    strategyId,
+    engine27MinuteDecision?.strategyId
+  ) &&
+  exactIdentityMatch(
+    symbol,
+    engine27MinuteDecision?.symbol
+  ) &&
+  exactIdentityMatch(
+    setupType,
+    engine27MinuteDecision?.setupType
+  ) &&
+  exactIdentityMatch(
+    identitySnapshotTime,
+    engine27MinuteDecision?.snapshotTime
+  ) &&
+  engine27MinuteDecision
+    ?.pipelineIdentity
+    ?.complete === true &&
+  engine27MinuteDecision
+    ?.pipelineIdentity
+    ?.consistent === true;
+
+const currentTraderDirection =
+  safeUpper(
+    engine27MinuteDecision?.direction
+  );
+
+const directionConflict =
+  engine27CoreIdentityMatched === true &&
+  ["LONG", "SHORT"].includes(direction) &&
+  ["LONG", "SHORT"].includes(
+    currentTraderDirection
+  ) &&
+  direction !== currentTraderDirection;
+
+const engine27DirectionMatched =
+  engine27CoreIdentityMatched === true &&
+  directionConflict !== true &&
+  direction === currentTraderDirection;
 
   const sizingIdentityMatches =
     sameValue(
@@ -787,7 +811,9 @@ export function buildEngine9OfficialManagementPlan({
     stopDirectionValid &&
     stopDistanceValid &&
     targetsReady &&
-    engine27IdentityMatches &&
+    engine27CoreIdentityMatched &&
+    engine27DirectionMatched &&
+    directionConflict !== true &&
     sizingIdentityMatches &&
     sizingPreviewReady &&
     permissionReady &&
@@ -804,11 +830,16 @@ export function buildEngine9OfficialManagementPlan({
     planStatus =
       "WAITING_FOR_CANDIDATE_IDENTITY";
   } else if (
-    !engine27IdentityMatches ||
-    !sizingIdentityMatches
-  ) {
-    planStatus =
-      "IDENTITY_MISMATCH";
+  !engine27CoreIdentityMatched ||
+  !sizingIdentityMatches
+) {
+  planStatus =
+    "IDENTITY_MISMATCH";
+} else if (
+  directionConflict
+) {
+  planStatus =
+    "DIRECTION_CONFLICT";
   } else if (
     entryPrice == null ||
     entryPrice <= 0
@@ -872,9 +903,17 @@ export function buildEngine9OfficialManagementPlan({
       ? "ENGINE27B_MINUTE_TARGETS_SELECTED"
       : "VALID_TARGETS_REQUIRED",
 
-    engine27IdentityMatches
-      ? "ENGINE27_IDENTITY_MATCHED"
-      : "ENGINE27_IDENTITY_MISMATCH",
+    engine27CoreIdentityMatched
+      ? "ENGINE27_CORE_IDENTITY_MATCHED"
+      : "ENGINE27_CORE_IDENTITY_MISMATCH",
+
+    directionConflict
+      ? "PIPELINE_DIRECTION_CONFLICT"
+      : null,
+
+    engine27DirectionMatched
+      ? "ENGINE27_DIRECTION_MATCHED"
+       : null,
 
     sizingIdentityMatches
       ? "ENGINE7A_IDENTITY_MATCHED"
@@ -984,7 +1023,17 @@ export function buildEngine9OfficialManagementPlan({
       engine7SizingPreviewAvailable:
         sizingPreviewReady,
 
-      engine27IdentityMatches,
+      coreIdentityMatched:
+        engine27CoreIdentityMatched,
+
+      directionConflict,
+
+      candidateDirection:
+        direction,
+
+      currentTraderDirection,
+
+      engine27DirectionMatched,
       engine7IdentityMatches:
         sizingIdentityMatches,
 
@@ -1045,11 +1094,16 @@ export function buildEngine9OfficialManagementPlan({
       planStatus ===
       "IDENTITY_MISMATCH"
         ? [
-            "PIPELINE_IDENTITY_MISMATCH",
+           "PIPELINE_IDENTITY_MISMATCH",
+          ]
+        : planStatus ===
+          "DIRECTION_CONFLICT"
+        ? [
+           "PIPELINE_DIRECTION_CONFLICT",
           ]
         : invalidated
         ? [
-            "ENGINE27_SETUP_INVALIDATED",
+           "ENGINE27_SETUP_INVALIDATED",
           ]
         : [],
 
