@@ -20,6 +20,9 @@
 // journal result, or broker instruction.
 
 import { createHash } from "node:crypto";
+import {
+  readEngine26ManualImbalanceZones,
+} from "./readManualImbalanceZones.js";
 
 const DEFAULT_TICK_SIZE = 0.25;
 const DEFAULT_MONITORING_RANGE_POINTS = 25;
@@ -284,6 +287,67 @@ function pointZone({
     priority,
     tickSize,
   });
+}
+
+function collectEngine26ManualImbalanceZones(
+  manualImbalanceInventory,
+  tickSize
+) {
+  const zones = Array.isArray(
+    manualImbalanceInventory?.zones
+  )
+    ? manualImbalanceInventory.zones
+    : [];
+
+  const candidates = [];
+
+  zones.forEach((zone, index) => {
+    if (!zone || typeof zone !== "object") {
+      return;
+    }
+
+    if (zone.invalidated === true) {
+      return;
+    }
+
+    if (zone.expired === true) {
+      return;
+    }
+
+    if (
+      zone.active === false &&
+      zone.invalidated !== false
+    ) {
+      return;
+    }
+
+    const normalized = normalizeZone({
+      zone,
+
+      source:
+        "ENGINE26_MANUAL_IMBALANCE",
+
+      sourcePath:
+        `manualImbalanceInventory.zones[${index}]`,
+
+      defaultType:
+        "MANUAL_IMBALANCE",
+
+      defaultTimeframe:
+        "10m",
+
+      priority:
+        120,
+
+      tickSize,
+    });
+
+    if (normalized) {
+      candidates.push(normalized);
+    }
+  });
+
+  return candidates;
 }
 
 function collectEngine1Zones(
@@ -1021,7 +1085,15 @@ export function buildEngine26LocationCandidate({
     });
   }
 
+  const manualImbalanceInventory =
+    readEngine26ManualImbalanceZones();
+
   const allZones = dedupeZones([
+    ...collectEngine26ManualImbalanceZones(
+      manualImbalanceInventory,
+      tickSize
+    ),
+
     ...collectEngine1Zones(
       engine1Context,
       tickSize
@@ -1094,8 +1166,24 @@ export function buildEngine26LocationCandidate({
       );
     });
 
+  /*
+   * Authorization eligibility must be applied before ranking.
+   *
+   * An out-of-range structural objective may remain informational,
+   * but it cannot defeat a valid location inside the monitoring range.
+   */
+  const authorizationEligibleZones =
+    allZones.filter(
+      (zone) =>
+        zone.distancePoints !== null &&
+        zone.distancePoints <=
+          safeMonitoringRange
+    );
+
   const selectedZone =
-    allZones[0] || null;
+    authorizationEligibleZones[0] ||
+    allZones[0] ||
+    null;
 
   if (!selectedZone) {
     return makeWaitingCandidate({
