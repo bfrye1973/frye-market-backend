@@ -167,6 +167,197 @@ function safeArray(value) {
     : [];
 }
 
+function normalizeIdentityValue(value) {
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+
+function buildPipelineIdentity({
+  engine26LocationCandidate = null,
+  engine26Planner = null,
+  engine3AuthorizedReaction = null,
+  engine4AuthorizedParticipation = null,
+  engine6Permission = null,
+} = {}) {
+  const candidateIds = [
+    engine26LocationCandidate?.candidateId,
+    engine26Planner?.candidateId,
+    engine3AuthorizedReaction?.candidateId,
+    engine4AuthorizedParticipation?.candidateId,
+    engine6Permission?.candidateId,
+  ]
+    .map(normalizeIdentityValue)
+    .filter(Boolean);
+
+  const zoneIds = [
+    engine26LocationCandidate?.zoneId,
+    engine26Planner?.zoneId,
+    engine3AuthorizedReaction?.zoneId,
+    engine4AuthorizedParticipation?.zoneId,
+    engine6Permission?.zoneId,
+  ]
+    .map(normalizeIdentityValue)
+    .filter(Boolean);
+
+  const candidateId =
+    candidateIds[0] ?? null;
+
+  const zoneId =
+    zoneIds[0] ?? null;
+
+  const candidateIdConsistent =
+    candidateIds.length <= 1 ||
+    candidateIds.every(
+      (value) => value === candidateId
+    );
+
+  const zoneIdConsistent =
+    zoneIds.length <= 1 ||
+    zoneIds.every(
+      (value) => value === zoneId
+    );
+
+  return {
+    candidateId,
+    zoneId,
+
+    strategyId:
+      normalizeIdentityValue(
+        engine26LocationCandidate?.strategyId ??
+        engine26Planner?.strategyId ??
+        engine3AuthorizedReaction?.strategyId ??
+        engine4AuthorizedParticipation?.strategyId ??
+        engine6Permission?.strategyId
+      ),
+
+    symbol:
+      normalizeIdentityValue(
+        engine26LocationCandidate?.symbol ??
+        engine26Planner?.symbol ??
+        engine3AuthorizedReaction?.symbol ??
+        engine4AuthorizedParticipation?.symbol ??
+        engine6Permission?.symbol
+      ),
+
+    setupType:
+      normalizeIdentityValue(
+        engine26LocationCandidate?.setupType ??
+        engine26Planner?.setupType ??
+        engine3AuthorizedReaction?.setupType ??
+        engine4AuthorizedParticipation?.setupType ??
+        engine6Permission?.setupType
+      ),
+
+    snapshotTime:
+      normalizeIdentityValue(
+        engine26LocationCandidate?.snapshotTime ??
+        engine26Planner?.snapshotTime ??
+        engine3AuthorizedReaction?.snapshotTime ??
+        engine4AuthorizedParticipation?.snapshotTime ??
+        engine6Permission?.snapshotTime
+      ),
+
+    candidateIdConsistent,
+    zoneIdConsistent,
+
+    consistent:
+      candidateIdConsistent &&
+      zoneIdConsistent,
+
+    complete:
+      Boolean(
+        candidateId &&
+        zoneId
+      ),
+  };
+}
+
+function buildExplicitPipelineReadiness({
+  engine26Planner = null,
+  engine3AuthorizedReaction = null,
+  engine4AuthorizedParticipation = null,
+  engine6Permission = null,
+} = {}) {
+  const engine3State =
+    upper(
+      engine3AuthorizedReaction
+        ?.authorizedReactionState
+    );
+
+  const engine4Status =
+    upper(
+      engine4AuthorizedParticipation
+        ?.status
+    );
+
+  const engine6Decision =
+    upper(
+      engine6Permission?.decision
+    );
+
+  const plannerStatus =
+    upper(
+      engine26Planner?.status
+    );
+
+  return {
+    available:
+      Boolean(
+        engine3AuthorizedReaction ||
+        engine4AuthorizedParticipation ||
+        engine6Permission ||
+        engine26Planner
+      ),
+
+    reactionReady:
+      engine3AuthorizedReaction
+        ?.authorized === true &&
+      engine3AuthorizedReaction
+        ?.allowed === true &&
+      engine3State ===
+        "REACTION_CONFIRMED",
+
+    participationReady:
+      engine4AuthorizedParticipation
+        ?.allowed === true &&
+      engine4AuthorizedParticipation
+        ?.confirmed === true &&
+      engine4AuthorizedParticipation
+        ?.hardBlocked !== true &&
+      engine4Status ===
+        "PARTICIPATION_CONFIRMED",
+
+    permissionReady:
+      engine6Permission
+        ?.allowed === true &&
+      ALLOWED_PERMISSION_DECISIONS.has(
+        engine6Decision
+      ),
+
+    plannerReady:
+      engine26Planner
+        ?.active === true &&
+      [
+        "FAST_INTRADAY_PAPER_TICKET_READY",
+        "READY_TO_PAPER_EXECUTE",
+      ].includes(
+        plannerStatus
+      ),
+
+    engine3State:
+      engine3State || null,
+
+    engine4Status:
+      engine4Status || null,
+
+    engine6Decision:
+      engine6Decision || null,
+
+    plannerStatus:
+      plannerStatus || null,
+  };
+}
+
 function normalizeDirection(value) {
   const direction = upper(value);
 
@@ -1581,6 +1772,7 @@ function buildLaneDecision({
   alignment,
   story,
   alpha,
+  pipelineContext = null,
 }) {
   if (
     !isObject(alpha) ||
@@ -1685,13 +1877,84 @@ function buildLaneDecision({
       alpha,
     });
 
-  const readiness =
+  const legacyReadiness =
     buildReadiness({
       degree,
       alpha,
       wave,
       direction,
       proximity,
+    });
+
+  const explicitPipelineReadiness =
+    buildExplicitPipelineReadiness({
+      engine26Planner:
+        pipelineContext?.engine26Planner ||
+        null,
+
+      engine3AuthorizedReaction:
+        pipelineContext
+          ?.engine3AuthorizedReaction ||
+        null,
+
+      engine4AuthorizedParticipation:
+        pipelineContext
+          ?.engine4AuthorizedParticipation ||
+        null,
+
+      engine6Permission:
+        pipelineContext?.engine6Permission ||
+        null,
+    });
+
+  const readiness =
+    FAST_LANES.has(degree) &&
+    explicitPipelineReadiness.available
+      ? {
+          ...legacyReadiness,
+
+          reactionReady:
+            explicitPipelineReadiness
+              .reactionReady,
+
+          participationReady:
+            explicitPipelineReadiness
+              .participationReady,
+
+          permissionReady:
+            explicitPipelineReadiness
+              .permissionReady,
+
+          plannerReady:
+            explicitPipelineReadiness
+              .plannerReady,
+        }
+      : legacyReadiness;
+
+  const pipelineIdentity =
+    buildPipelineIdentity({
+      engine26LocationCandidate:
+        pipelineContext
+          ?.engine26LocationCandidate ||
+        null,
+
+      engine26Planner:
+        pipelineContext?.engine26Planner ||
+        null,
+
+      engine3AuthorizedReaction:
+        pipelineContext
+          ?.engine3AuthorizedReaction ||
+        null,
+
+      engine4AuthorizedParticipation:
+        pipelineContext
+          ?.engine4AuthorizedParticipation ||
+        null,
+
+      engine6Permission:
+        pipelineContext?.engine6Permission ||
+        null,
     });
 
   const decisionState =
@@ -1792,6 +2055,37 @@ function buildLaneDecision({
     displayName:
       alpha.displayName ||
       registry.displayName,
+
+    candidateId:
+      pipelineIdentity.candidateId,
+
+    zoneId:
+      pipelineIdentity.zoneId,
+
+    symbol:
+      pipelineIdentity.symbol,
+
+    setupType:
+      pipelineIdentity.setupType,
+
+    snapshotTime:
+      pipelineIdentity.snapshotTime,
+
+    pipelineIdentity: {
+      complete:
+        pipelineIdentity.complete,
+
+      consistent:
+        pipelineIdentity.consistent,
+
+      candidateIdConsistent:
+        pipelineIdentity
+          .candidateIdConsistent,
+
+      zoneIdConsistent:
+        pipelineIdentity
+          .zoneIdConsistent,
+    },
 
     decisionState,
 
@@ -1894,9 +2188,77 @@ function buildLaneDecision({
 
     paperPipeline: {
       available:
+        explicitPipelineReadiness.available
+          ? true
+          : plannerContext
+              .available === true,
+
+      explicitAuthorizedInputs:
+        explicitPipelineReadiness.available,
+
+      engine3State:
+        explicitPipelineReadiness
+          .engine3State,
+
+      engine4Status:
+        explicitPipelineReadiness
+          .engine4Status,
+
+      engine6Decision:
+        explicitPipelineReadiness
+          .engine6Decision ??
+        permissionContext
+          .engine6Decision ??
+        null,
+
+      engine6Allowed:
+        explicitPipelineReadiness.available
+          ? explicitPipelineReadiness
+              .permissionReady
+          : permissionContext
+              .engine6Allowed === true,
+
+      plannerStatus:
+        explicitPipelineReadiness
+          .plannerStatus ??
         plannerContext
-          .available ===
-        true,
+          .status ??
+        null,
+
+      plannerReady:
+        readiness.plannerReady,
+
+      reactionReady:
+        readiness.reactionReady,
+
+      participationReady:
+        readiness.participationReady,
+
+      permissionReady:
+        readiness.permissionReady,
+
+      identityComplete:
+        pipelineIdentity.complete,
+
+      identityConsistent:
+        pipelineIdentity.consistent,
+
+      paperOnly:
+        permissionContext
+          .paperOnly === true,
+
+      realExecutionAllowed:
+        permissionContext
+          .realExecutionAllowed === true,
+
+      brokerExecutionAllowed:
+        permissionContext
+          .brokerExecutionAllowed === true,
+
+      schwabExecutionAllowed:
+        permissionContext
+          .schwabExecutionAllowed === true,
+    },
 
       engine6Decision:
         permissionContext
