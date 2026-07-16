@@ -69,6 +69,9 @@ import {
 import {
   ES_PAPER_RISK_CONFIG,
 } from "../config/paperRiskConfig.js";
+import {
+  buildEngine9OfficialManagementPlan,
+} from "../logic/engine9/v1/buildOfficialManagementPlan.js";
 
 
 
@@ -8587,6 +8590,110 @@ result.strategies[s.strategyId] = {
   result.engine27Strategies = buildEngine27Strategies({
     snapshot: result,
   });
+  /*
+ * Engine 9 — Official Management Plan
+ *
+ * Runs after Engine 27E so it can read the final Minute readiness
+ * and the validated Minute Fibonacci target ladder.
+ *
+ * Engine 9:
+ * - validates official entry / stop / targets
+ * - preserves candidate identity
+ * - creates planId
+ * - remains non-executing
+ *
+ * Engine 9 does not:
+ * - create permission
+ * - create quantity
+ * - create tradeId
+ * - create idempotencyKey
+ * - create orders
+ * - call Engine 8
+ */
+if (
+  String(symbol || "").toUpperCase() === "ES"
+) {
+  const scalp =
+    result.strategies?.[
+      "intraday_scalp@10m"
+    ] || null;
+
+  if (scalp) {
+    const engine27MinuteDecision =
+      result
+        ?.engine27Strategies
+        ?.engine27TraderDecision
+        ?.decisions
+        ?.minute ||
+      null;
+
+    const engine27MinuteFib =
+      result
+        ?.engine27Strategies
+        ?.engine27FibIntelligence
+        ?.minute ||
+      null;
+
+    /*
+     * Rebuild Engine 7A once after Engine 27E exists.
+     *
+     * The earlier per-strategy pass currently supplies:
+     * engine27MinuteReadiness: null
+     *
+     * This second deterministic build replaces it with the completed
+     * Engine 27E Minute readiness object.
+     */
+    scalp.engine7SizingPreview =
+      buildEngine7ProposedSizingPreview({
+        engine26ProposedGeometry:
+          scalp.engine26ProposedGeometry ||
+          null,
+
+        engine6PaperPermission:
+          scalp.permission?.paper ||
+          null,
+
+        engine27MinuteReadiness:
+          engine27MinuteDecision,
+
+        riskConfig:
+          ES_PAPER_RISK_CONFIG,
+
+        snapshotTime:
+          scalp
+            .engine26ProposedGeometry
+            ?.snapshotTime ||
+          result?.now ||
+          nowIso(),
+      });
+
+    scalp.engine9OfficialManagementPlan =
+      buildEngine9OfficialManagementPlan({
+        engine26ProposedGeometry:
+          scalp.engine26ProposedGeometry ||
+          null,
+
+        engine7SizingPreview:
+          scalp.engine7SizingPreview ||
+          null,
+
+        engine6PaperPermission:
+          scalp.permission?.paper ||
+          null,
+
+        engine27MinuteDecision,
+
+        engine27MinuteFib,
+
+        snapshotTime:
+          scalp
+            .engine26ProposedGeometry
+            ?.snapshotTime ||
+          result?.now ||
+          nowIso(),
+      });
+  }
+}
 
   if (String(symbol || "").toUpperCase() === "ES") {
     const scalp = result.strategies?.["intraday_scalp@10m"];
