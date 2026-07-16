@@ -7466,7 +7466,6 @@ if (isEsIntradayScalp) {
     patchedConfluence,
     engine22WaveStrategy,
     engine26ReactionHandoff,
-    engine26StructuralContext,
     paperShortResearchEnabled: isEsIntradayScalp,
   });
 
