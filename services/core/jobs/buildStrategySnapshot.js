@@ -53,6 +53,14 @@ import {
   getManualLevelRowsFor,
   attachManualLevelsToEngine2Block,
 } from "../logic/engine22/wave/manualMarks/readManualWaveMarks.js";
+import {
+  buildEngine26ImbalanceWatch,
+  buildEngine26PaperTradePlan,
+  buildEngine26StructuralContext,
+} from "../logic/engine26/paperTradePlanner.js";
+import {
+  buildEngine26A,
+} from "../logic/engine26/buildEngine26LocationCandidate.js";
 
 
 /* -----------------------------
@@ -6605,6 +6613,9 @@ const zoneContext = buildZoneContext(
   let engine22WaveStrategy = null;
   let engine23Interpretation = null;
 
+  let engine26LocationCandidate = null;
+  let engine26ReactionHandoff = null;
+
   const isEsIntradayScalp =
     String(symbol || "").toUpperCase() === "ES" &&
     s.strategyId === "intraday_scalp@10m";
@@ -6826,6 +6837,145 @@ attachEngine22LifecycleParticipationToConfluence({
       };
     }
   } 
+
+  /*
+   * Engine 26A — reaction-independent location discovery.
+   *
+   * This runs after Engine 22 structure exists and before the later
+   * Engine 26 planner/permission stages.
+   *
+   * Engine 26A must not consume:
+   * - Engine 3 reaction
+   * - Engine 4 participation
+   * - Engine 6 permission
+   * - Engine 15 readiness
+   */
+  if (isEsIntradayScalp) {
+    try {
+      const engine26A = buildEngine26A({
+        symbol,
+
+        strategyId: s.strategyId,
+
+        timeframe: s.tf,
+
+        currentPrice:
+          validPrice(price) ??
+          validPrice(patchedConfluence?.price) ??
+          validPrice(
+            engine1Context?.meta?.current_price
+          ) ??
+          validPrice(
+            engine1Context?.meta?.currentPrice
+          ) ??
+          null,
+
+        snapshotTime: nowIso(),
+
+        engine22WaveStrategy,
+
+        engine25Context,
+
+        engine1Context,
+
+        tickSize: 0.25,
+      });
+
+      engine26LocationCandidate =
+        engine26A?.engine26LocationCandidate ||
+        null;
+
+      engine26ReactionHandoff =
+        engine26A?.engine26ReactionHandoff ||
+        null;
+    } catch (err) {
+      console.error(
+        "[ENGINE26A LOCATION DISCOVERY ERROR]",
+        err
+      );
+
+      engine26LocationCandidate = {
+        active: false,
+        engine: "engine26.locationCandidate.v1",
+        status: "WAITING_FOR_LOCATION",
+
+        candidateId: null,
+        zoneId: null,
+
+        symbol,
+        strategyId: s.strategyId,
+        timeframe: s.tf,
+
+        currentPrice:
+          validPrice(price) ??
+          validPrice(patchedConfluence?.price) ??
+          null,
+
+        snapshotTime: nowIso(),
+
+        directionBias: "NEUTRAL",
+        setupType: null,
+
+        location: null,
+
+        triggerLevel: null,
+        acceptanceBoundary: null,
+        reclaimBoundary: null,
+        locationInvalidationBoundary: null,
+
+        expectedReactions: [],
+
+        reasonCodes: [
+          "ENGINE26A_LOCATION_DISCOVERY_FAILED",
+        ],
+
+        warnings: [
+          String(err?.message || err),
+        ],
+
+        noPermissionCreated: true,
+        noExecution: true,
+      };
+
+      engine26ReactionHandoff = {
+        active: false,
+        engine: "engine26.reactionHandoff.v1",
+        status: "WAITING_FOR_LOCATION",
+
+        candidateId: null,
+        zoneId: null,
+
+        symbol,
+        strategyId: s.strategyId,
+        timeframe: s.tf,
+
+        snapshotTime:
+          engine26LocationCandidate.snapshotTime,
+
+        tradeDirectionBias: "NEUTRAL",
+        expectedReactionDirection: "NEUTRAL",
+        setupType: null,
+
+        expectedReactions: [],
+        zone: null,
+
+        triggerLevel: null,
+        acceptanceBoundary: null,
+        reclaimBoundary: null,
+        locationInvalidationBoundary: null,
+
+        authorizeEngine3Evaluation: false,
+
+        reasonCodes: [
+          "ENGINE26A_LOCATION_DISCOVERY_FAILED",
+          "WAITING_FOR_ENGINE26_LOCATION",
+        ],
+
+        noPermissionCreated: true,
+        noExecution: true,
+      };
+    }
+  }
 
   // Engine 23 preliminary behavior context.
   // IMPORTANT:
@@ -7403,6 +7553,9 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
 
     permission: finalPermission,
      
+    engine26LocationCandidate,
+    engine26ReactionHandoff,
+
     engine26ImbalanceWatch,
     engine26StructuralContext,
     engine26TradePlanPreview,
