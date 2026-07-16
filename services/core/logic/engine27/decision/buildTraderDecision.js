@@ -2480,11 +2480,10 @@ export function buildTraderDecision({
             ] ||
             null,
 
-          pipelineContext:
-            FAST_LANES.has(degree)
+           pipelineContext:
+            degree === "minute"
               ? pipelineContext
               : null,
-        });
     } catch {
       decisions[
         degree
