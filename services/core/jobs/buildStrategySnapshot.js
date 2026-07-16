@@ -6857,11 +6857,19 @@ attachEngine22LifecycleParticipationToConfluence({
         currentPrice:
           validPrice(price) ??
           validPrice(patchedConfluence?.price) ??
+          validPrice(patchedConfluence?.currentPrice) ??
           validPrice(
             engine1Context?.meta?.current_price
           ) ??
           validPrice(
             engine1Context?.meta?.currentPrice
+          ) ??
+          validPrice(
+            marketMeter?.layers?.emaPosture
+              ?.tenMinute?.close
+          ) ??
+          validPrice(
+            marketMeter?.layers?.tenMinute?.close
           ) ??
           null,
 
@@ -6904,8 +6912,15 @@ attachEngine22LifecycleParticipationToConfluence({
         currentPrice:
           validPrice(price) ??
           validPrice(patchedConfluence?.price) ??
+          validPrice(patchedConfluence?.currentPrice) ??
+          validPrice(
+            marketMeter?.layers?.emaPosture
+              ?.tenMinute?.close
+          ) ??
+          validPrice(
+            marketMeter?.layers?.tenMinute?.close
+          ) ??
           null,
-
         snapshotTime: nowIso(),
 
         directionBias: "NEUTRAL",
