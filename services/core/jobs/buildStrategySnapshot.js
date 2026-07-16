@@ -8722,9 +8722,6 @@ scalp.engine7PositionSizing =
       result?.now ||
       nowIso(),
   });
-    
-  }
-}    
 
 scalp.engine8PaperOrder =
   buildEngine8CanonicalPaperAdapter({
@@ -8756,7 +8753,8 @@ scalp.engine8PaperOrder =
     allowLiveFutures:
       process.env.ENGINE8_ALLOW_LIVE_FUTURES === "1",
   });
-
+  }
+}
   if (String(symbol || "").toUpperCase() === "ES") {
     const scalp = result.strategies?.["intraday_scalp@10m"];
 
