@@ -56,6 +56,10 @@ import {
 import {
   buildEngine26A,
 } from "../logic/engine26/buildEngine26LocationCandidate.js";
+import {
+  attachEngine4AuthorizedReactionParticipation,
+} from "../logic/engine4/authorizedReactionParticipation.js";
+
 
 
 /* -----------------------------
@@ -6796,6 +6800,9 @@ attachEngine22LifecycleParticipationToConfluence({
   engine22WaveStrategy,
   bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
 });
+attachEngine4AuthorizedReactionParticipation({
+  patchedConfluence,
+});      
     } catch (err) {
       console.error("[E22 PRE-ENGINE15 WAVE ERROR]", err);
 
@@ -7459,6 +7466,10 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
       engine22WaveStrategy,
       bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
     }); 
+    attachEngine4AuthorizedReactionParticipation({
+      patchedConfluence,
+    });
+      
     }
   } catch (err) {
     console.error("[E22G TRADE DECISION ERROR]", err);
