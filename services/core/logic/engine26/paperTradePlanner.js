@@ -2178,16 +2178,24 @@ function buildEngine26ProposedGeometry({
   candidateId = null,
   zoneId = null,
   snapshotTime = null,
+  candidateDirection = null,
+  candidateSetupType = null,
 }) {
   const preview = engine26TradePlanPreview || null;
   const geometry = preview?.geometryPreview || null;
 
+  /*
+   * Engine 26A owns candidate direction and setup identity.
+   * Planner preview remains fallback-only for compatibility.
+   */
   const direction =
+    candidateDirection ||
     preview?.structure?.direction ||
     preview?.direction ||
     null;
 
   const setupType =
+    candidateSetupType ||
     preview?.structure?.setupType ||
     preview?.setupType ||
     null;
@@ -2803,6 +2811,10 @@ export function buildEngine26PaperTradePlan({
   engine25Context,
   confluence,
   engine15Decision,
+
+  // Canonical Engine 26A selected-location identity.
+  engine26LocationCandidate = null,
+
   openPaperTrades = [],
   dailyBars = [],
 }) {
@@ -2872,6 +2884,37 @@ export function buildEngine26PaperTradePlan({
     confluence,
     engine15Decision,
   });
+
+  /*
+   * Engine 26A is the authoritative selected-location identity.
+   *
+   * Engine 26B may use the planner-side raw imbalance for geometry only
+   * when that raw source belongs to the exact Engine 26A candidate.
+   */
+  const authorizedCandidate =
+    engine26LocationCandidate &&
+    typeof engine26LocationCandidate === "object"
+      ? engine26LocationCandidate
+      : null;
+
+  const authorizedUpstreamId =
+    safeString(
+      authorizedCandidate?.location?.upstreamId
+    );
+
+  const plannerUpstreamId =
+    safeString(
+      engine26ImbalanceWatch?.activeImbalance?.id
+    );
+
+  const candidateMatchesPlannerZone =
+    authorizedCandidate?.active === true &&
+    Boolean(authorizedCandidate?.candidateId) &&
+    Boolean(authorizedCandidate?.zoneId) &&
+    Boolean(authorizedCandidate?.snapshotTime) &&
+    Boolean(authorizedUpstreamId) &&
+    Boolean(plannerUpstreamId) &&
+    authorizedUpstreamId === plannerUpstreamId;
 
   let engine26StructuralContext =
     buildEngine26StructuralContext(engine26ImbalanceWatch);
