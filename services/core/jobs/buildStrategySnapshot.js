@@ -1703,9 +1703,19 @@ function buildEngine6PaperPermission({
   engine22WaveStrategy,
   engine25Context,
   engine26ImbalanceWatch = null,
+
+  // New explicit authorized inputs.
+  engine3AuthorizedReaction = null,
+  engine4AuthorizedParticipation = null,
 }) {
-  const paperReaction =
+  const legacyPaperReaction =
     confluence?.context?.reaction?.paperScalpReaction || null;
+
+  const paperReaction =
+    engine3AuthorizedReaction &&
+    typeof engine3AuthorizedReaction === "object"
+      ? engine3AuthorizedReaction
+      : legacyPaperReaction;
 
   const fastImbalanceParticipation =
     confluence?.context?.volume?.engine4FastImbalanceParticipation || null;
@@ -1717,15 +1727,26 @@ function buildEngine6PaperPermission({
     confluence?.context?.volume?.engine22LifecycleParticipation
       ?.paperScalpParticipation || null;
 
+  const explicitAuthorizedParticipation =
+    engine4AuthorizedParticipation &&
+    typeof engine4AuthorizedParticipation === "object"
+      ? engine4AuthorizedParticipation
+      : null;
+
   const paperParticipation =
-    fastImbalanceParticipation?.active === true
-      ? fastImbalanceParticipation
-      : currentScalpParticipation?.active === true
-      ? currentScalpParticipation
-      : lifecyclePaperParticipation;
+    explicitAuthorizedParticipation ||
+    (
+      fastImbalanceParticipation?.active === true
+        ? fastImbalanceParticipation
+        : currentScalpParticipation?.active === true
+        ? currentScalpParticipation
+        : lifecyclePaperParticipation
+    );
 
   const paperParticipationSource =
-    fastImbalanceParticipation?.active === true
+    explicitAuthorizedParticipation
+      ? "engine4AuthorizedReactionParticipation"
+      : fastImbalanceParticipation?.active === true
       ? "engine4FastImbalanceParticipation"
       : currentScalpParticipation?.active === true
       ? "engine4CurrentScalpParticipation"
@@ -1743,7 +1764,8 @@ function buildEngine6PaperPermission({
     String(symbol || "").toUpperCase() === "ES" &&
     strategyId === "intraday_scalp@10m";
 
-  const paperShortResearchEnabled = isFastIntradayPaperLane;
+  const paperShortResearchEnabled =
+    isFastIntradayPaperLane;
 
   const engine26PreferredDirection = String(
     engine26ImbalanceWatch?.preferredDirection || ""
@@ -1771,21 +1793,76 @@ function buildEngine6PaperPermission({
   const engine26ShortResearchOnly =
     engine26ImbalanceWatch?.shortResearchOnly === true;
 
-  const reactionAllowed = paperReaction?.allowed === true;
-  const reactionActive = paperReaction?.active === true;
+  const usingAuthorizedReaction =
+    explicitAuthorizedParticipation != null ||
+    (
+      paperReaction?.authorized === true &&
+      paperReaction?.candidateId != null &&
+      paperReaction?.zoneId != null
+    );
 
-  const participationAllowed = paperParticipation?.allowed === true;
-  const participationActive = paperParticipation?.active === true;
-  const participationHardBlocked = paperParticipation?.hardBlocked === true;
+  const authorizedReactionState = String(
+    paperReaction?.authorizedReactionState || ""
+  ).toUpperCase();
 
-  const readinessAllowed = paperReadiness?.allowed === true;
+  const reactionConfirmed =
+    usingAuthorizedReaction
+      ? (
+          paperReaction?.authorized === true &&
+          paperReaction?.authorizeEngine3Evaluation === true &&
+          authorizedReactionState === "REACTION_CONFIRMED" &&
+          paperReaction?.allowed === true
+        )
+      : paperReaction?.allowed === true;
+
+  const reactionAllowed =
+    reactionConfirmed === true;
+
+  const reactionActive =
+    paperReaction?.active === true;
+
+  const authorizedParticipationStatus = String(
+    paperParticipation?.status || ""
+  ).toUpperCase();
+
+  const participationWaitingForEngine3 =
+    authorizedParticipationStatus ===
+    "WAITING_FOR_ENGINE3_REACTION";
+
+  const participationConfirmed =
+    explicitAuthorizedParticipation
+      ? (
+          explicitAuthorizedParticipation.active === true &&
+          explicitAuthorizedParticipation.confirmed === true &&
+          explicitAuthorizedParticipation.allowed === true &&
+          explicitAuthorizedParticipation.hardBlocked !== true &&
+          authorizedParticipationStatus ===
+            "PARTICIPATION_CONFIRMED"
+        )
+      : paperParticipation?.allowed === true;
+
+  const participationAllowed =
+    participationConfirmed === true;
+
+  const participationActive =
+    paperParticipation?.active === true;
+
+  const participationHardBlocked =
+    paperParticipation?.hardBlocked === true;
+
+  const readinessAllowed =
+    paperReadiness?.allowed === true;
+
   const readinessActive =
     paperReadiness?.active === true ||
-    String(engine15Decision?.readinessLabel || "").toUpperCase() === "WATCH";
+    String(
+      engine15Decision?.readinessLabel || ""
+    ).toUpperCase() === "WATCH";
 
   const participationState = String(
     paperParticipation?.state ||
       paperParticipation?.participationState ||
+      paperParticipation?.status ||
       ""
   ).toUpperCase();
 
@@ -1804,14 +1881,34 @@ function buildEngine6PaperPermission({
     participationAllowed !== true &&
     participationHardBlocked !== true &&
     (
-      participationState.includes("PRICE_ACTION_OK_VOLUME_NOT_READY") ||
-      participationState.includes("WAIT_FOR_PARTICIPATION") ||
-      participationState.includes("WEAK_LOW_VOLUME_PARTICIPATION") ||
-      participationState.includes("WEAK_FADING_PARTICIPATION") ||
-      participationState.includes("LOW_VOLUME_HOLD") ||
-      participationState.includes("NO_FAST_IMBALANCE_PARTICIPATION") ||
-      participationState.includes("NO_CURRENT_SCALP_PARTICIPATION") ||
-      participationRisk.includes("WAIT_FOR_PARTICIPATION")
+      participationWaitingForEngine3 ||
+      participationState.includes(
+        "PRICE_ACTION_OK_VOLUME_NOT_READY"
+      ) ||
+      participationState.includes(
+        "WAIT_FOR_PARTICIPATION"
+      ) ||
+      participationState.includes(
+        "WEAK_LOW_VOLUME_PARTICIPATION"
+      ) ||
+      participationState.includes(
+        "WEAK_FADING_PARTICIPATION"
+      ) ||
+      participationState.includes(
+        "LOW_VOLUME_HOLD"
+      ) ||
+      participationState.includes(
+        "NO_FAST_IMBALANCE_PARTICIPATION"
+      ) ||
+      participationState.includes(
+        "NO_CURRENT_SCALP_PARTICIPATION"
+      ) ||
+      participationState.includes(
+        "PARTICIPATION_DEVELOPING"
+      ) ||
+      participationRisk.includes(
+        "WAIT_FOR_PARTICIPATION"
+      )
     );
 
   const fastPaperWatchCandidate =
@@ -1820,15 +1917,32 @@ function buildEngine6PaperPermission({
     participationHardBlocked !== true &&
     readinessActive === true &&
     (
-      paperParticipationSource === "engine4FastImbalanceParticipation" ||
-      paperParticipationSource === "engine4CurrentScalpParticipation"
+      paperParticipationSource ===
+        "engine4AuthorizedReactionParticipation" ||
+      paperParticipationSource ===
+        "engine4FastImbalanceParticipation" ||
+      paperParticipationSource ===
+        "engine4CurrentScalpParticipation"
     );
+
   const engine25HardBlocked =
     engine25Context?.ok === true &&
     (
-      String(engine25Context?.regime || "").toUpperCase().includes("RISK_OFF") ||
-      String(engine25Context?.permission || "").toUpperCase().includes("NO_TRADE") ||
-      String(engine25Context?.permission || "").toUpperCase().includes("STAND_DOWN")
+      String(
+        engine25Context?.regime || ""
+      )
+        .toUpperCase()
+        .includes("RISK_OFF") ||
+      String(
+        engine25Context?.permission || ""
+      )
+        .toUpperCase()
+        .includes("NO_TRADE") ||
+      String(
+        engine25Context?.permission || ""
+      )
+        .toUpperCase()
+        .includes("STAND_DOWN")
     );
 
   const lifecyclePaperCandidate =
@@ -1840,27 +1954,36 @@ function buildEngine6PaperPermission({
     reactionActive === true ||
     participationActive === true;
 
-const pickUsableDirection = (...values) => {
-  for (const value of values) {
-    const v = String(value || "").toUpperCase();
-    if (v && v !== "NONE" && v !== "NEUTRAL" && v !== "UNKNOWN") {
-      return v;
+  const pickUsableDirection = (...values) => {
+    for (const value of values) {
+      const normalized =
+        String(value || "").toUpperCase();
+
+      if (
+        normalized &&
+        normalized !== "NONE" &&
+        normalized !== "NEUTRAL" &&
+        normalized !== "UNKNOWN"
+      ) {
+        return normalized;
+      }
     }
-  }
 
-  return "NONE";
-};
+    return "NONE";
+  };
 
-const direction = pickUsableDirection(
-  paperReaction?.direction,
-  paperParticipation?.intendedDirection,
-  paperParticipation?.direction,
-  participationDirection,
-  paperReadiness?.direction,
-  engine15Decision?.direction,
-  engine22WaveStrategy?.waveOpportunity?.direction,
-  currentLifecycleState?.direction
-); 
+  const direction =
+    pickUsableDirection(
+      paperReaction?.direction,
+      paperReaction?.tradeDirectionBias,
+      paperParticipation?.intendedDirection,
+      paperParticipation?.direction,
+      participationDirection,
+      paperReadiness?.direction,
+      engine15Decision?.direction,
+      engine22WaveStrategy?.waveOpportunity?.direction,
+      currentLifecycleState?.direction
+    );
 
   const setupType =
     paperReaction?.setupType ||
@@ -1881,196 +2004,389 @@ const direction = pickUsableDirection(
 
   const targetPoints =
     Number(paperReadiness?.targetPoints) ||
-    Number(engine22WaveStrategy?.waveOpportunity?.targetPoints) ||
+    Number(
+      engine22WaveStrategy?.waveOpportunity?.targetPoints
+    ) ||
     10;
 
   const blockers = [];
   const warnings = [];
+
   const reasonCodes = [
     "PAPER_ONLY_RESEARCH_LANE",
     "REAL_EXECUTION_REMAINS_BLOCKED",
     "ENGINE6_FINAL_PAPER_PERMISSION",
+    usingAuthorizedReaction
+      ? "ENGINE6_AUTHORIZED_ENGINE3_INPUT"
+      : "ENGINE6_LEGACY_ENGINE3_INPUT",
+    explicitAuthorizedParticipation
+      ? "ENGINE6_AUTHORIZED_ENGINE4_INPUT"
+      : "ENGINE6_LEGACY_ENGINE4_INPUT",
   ];
 
   if (!lifecyclePaperCandidate) {
-    blockers.push("ENGINE22_PAPER_TRADE_CANDIDATE_NOT_ACTIVE");
+    blockers.push(
+      "ENGINE22_PAPER_TRADE_CANDIDATE_NOT_ACTIVE"
+    );
   }
 
   if (!readinessAllowed) {
-    blockers.push("ENGINE15_PAPER_READINESS_NOT_ALLOWED");
+    blockers.push(
+      "ENGINE15_PAPER_READINESS_NOT_ALLOWED"
+    );
   }
 
   if (!reactionAllowed) {
-    blockers.push("ENGINE3_PAPER_REACTION_NOT_ALLOWED");
+    blockers.push(
+      "ENGINE3_PAPER_REACTION_NOT_ALLOWED"
+    );
   }
 
-  if (!participationAllowed && !fastParticipationWaiting) {
-    blockers.push("ENGINE4_PAPER_PARTICIPATION_NOT_ALLOWED");
+  if (
+    usingAuthorizedReaction &&
+    authorizedReactionState ===
+      "REACTION_FAILED"
+  ) {
+    blockers.push(
+      "ENGINE3_AUTHORIZED_REACTION_FAILED"
+    );
+  }
+
+  if (
+    usingAuthorizedReaction &&
+    authorizedReactionState ===
+      "REACTION_INVALIDATED"
+  ) {
+    blockers.push(
+      "ENGINE3_AUTHORIZED_REACTION_INVALIDATED"
+    );
+  }
+
+  if (
+    !participationAllowed &&
+    !fastParticipationWaiting
+  ) {
+    blockers.push(
+      "ENGINE4_PAPER_PARTICIPATION_NOT_ALLOWED"
+    );
+  }
+
+  if (participationWaitingForEngine3) {
+    blockers.push(
+      "ENGINE4_WAITING_FOR_ENGINE3_REACTION"
+    );
   }
 
   if (fastParticipationWaiting) {
-    warnings.push("ENGINE4_FAST_PARTICIPATION_WAITING");
+    warnings.push(
+      "ENGINE4_FAST_PARTICIPATION_WAITING"
+    );
   }
 
   if (participationHardBlocked) {
-    blockers.push("ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED");
+    blockers.push(
+      "ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED"
+    );
   }
 
   if (engine25HardBlocked) {
-    blockers.push("ENGINE25_HARD_RISK_BLOCK");
+    blockers.push(
+      "ENGINE25_HARD_RISK_BLOCK"
+    );
   }
 
-  if (!direction || direction === "NONE" || direction === "NEUTRAL") {
-    blockers.push("PAPER_DIRECTION_MISSING");
+  if (
+    !direction ||
+    direction === "NONE" ||
+    direction === "NEUTRAL"
+  ) {
+    blockers.push(
+      "PAPER_DIRECTION_MISSING"
+    );
   }
 
-  if (direction === "SHORT" && !paperShortResearchEnabled) {
-    blockers.push("PAPER_SHORT_RESEARCH_DISABLED_V1");
+  if (
+    direction === "SHORT" &&
+    !paperShortResearchEnabled
+  ) {
+    blockers.push(
+      "PAPER_SHORT_RESEARCH_DISABLED_V1"
+    );
   }
 
-  if (!Number.isFinite(targetPoints) || targetPoints < 8) {
-    blockers.push("PAPER_TARGET_PATH_MISSING_OR_TOO_SMALL");
+  if (
+    !Number.isFinite(targetPoints) ||
+    targetPoints < 8
+  ) {
+    blockers.push(
+      "PAPER_TARGET_PATH_MISSING_OR_TOO_SMALL"
+    );
   }
 
-  if (Array.isArray(paperReaction?.blockers)) {
-    blockers.push(...paperReaction.blockers);
+  if (
+    Array.isArray(
+      paperReaction?.blockers
+    )
+  ) {
+    blockers.push(
+      ...paperReaction.blockers
+    );
   }
 
-  if (Array.isArray(paperParticipation?.blockers)) {
-    blockers.push(...paperParticipation.blockers);
+  if (
+    Array.isArray(
+      paperParticipation?.blockers
+    )
+  ) {
+    blockers.push(
+      ...paperParticipation.blockers
+    );
   }
 
-  if (Array.isArray(paperReadiness?.blockers)) {
-    blockers.push(...paperReadiness.blockers);
+  if (
+    Array.isArray(
+      paperReadiness?.blockers
+    )
+  ) {
+    blockers.push(
+      ...paperReadiness.blockers
+    );
   }
 
-  if (Array.isArray(paperReaction?.reasonCodes)) {
-    reasonCodes.push(...paperReaction.reasonCodes);
+  if (
+    Array.isArray(
+      paperReaction?.reasonCodes
+    )
+  ) {
+    reasonCodes.push(
+      ...paperReaction.reasonCodes
+    );
   }
 
-  if (Array.isArray(paperParticipation?.reasonCodes)) {
-    reasonCodes.push(...paperParticipation.reasonCodes);
+  if (
+    Array.isArray(
+      paperParticipation?.reasonCodes
+    )
+  ) {
+    reasonCodes.push(
+      ...paperParticipation.reasonCodes
+    );
   }
 
-  if (Array.isArray(paperReadiness?.reasonCodes)) {
-    reasonCodes.push(...paperReadiness.reasonCodes);
+  if (
+    Array.isArray(
+      paperReadiness?.reasonCodes
+    )
+  ) {
+    reasonCodes.push(
+      ...paperReadiness.reasonCodes
+    );
   }
 
-  if (paperParticipationSource && paperParticipationSource !== "NONE") {
+  if (
+    paperParticipationSource &&
+    paperParticipationSource !== "NONE"
+  ) {
     reasonCodes.push(
       `ENGINE6_PAPER_PARTICIPATION_SOURCE_${paperParticipationSource.toUpperCase()}`
     );
   }
 
   if (fastPaperWatchCandidate) {
-    reasonCodes.push("ENGINE6_FAST_PAPER_WATCH_CANDIDATE");
-  }
-
-  if (fastParticipationWaiting) {
-    reasonCodes.push("ENGINE4_FAST_PARTICIPATION_WAITING");
-  }
-
-  if (paperParticipation?.risk) {
-    reasonCodes.push(String(paperParticipation.risk).toUpperCase());
-  }
-
-  if (paperParticipation?.participationQuality) {
     reasonCodes.push(
-      `ENGINE4_${String(paperParticipation.participationQuality).toUpperCase()}_PARTICIPATION`
+      "ENGINE6_FAST_PAPER_WATCH_CANDIDATE"
     );
   }
 
-  if (Number(paperParticipation?.relativeVolume) > 0 && Number(paperParticipation?.relativeVolume) < 0.75) {
-    reasonCodes.push("RELATIVE_VOLUME_TOO_LOW");
+  if (fastParticipationWaiting) {
+    reasonCodes.push(
+      "ENGINE4_FAST_PARTICIPATION_WAITING"
+    );
   }
 
-  if (String(paperParticipation?.volumeTrend || "").toUpperCase() === "FADING") {
-    reasonCodes.push("WAIT_FOR_RECLAIM_VOLUME");
+  if (paperParticipation?.risk) {
+    reasonCodes.push(
+      String(
+        paperParticipation.risk
+      ).toUpperCase()
+    );
   }
 
-  reasonCodes.push("REQUIRES_ENGINE8_PAPER");
-  reasonCodes.push("REQUIRES_ENGINE10_JOURNAL");
+  if (
+    paperParticipation
+      ?.participationQuality
+  ) {
+    reasonCodes.push(
+      `ENGINE4_${String(
+        paperParticipation
+          .participationQuality
+      ).toUpperCase()}_PARTICIPATION`
+    );
+  }
 
-  const uniqueBlockers = [...new Set(blockers.filter(Boolean))];
-  const uniqueWarnings = [...new Set(warnings.filter(Boolean))];
-  const uniqueReasonCodes = [...new Set(reasonCodes.filter(Boolean))];
+  if (
+    Number(
+      paperParticipation?.relativeVolume
+    ) > 0 &&
+    Number(
+      paperParticipation?.relativeVolume
+    ) < 0.75
+  ) {
+    reasonCodes.push(
+      "RELATIVE_VOLUME_TOO_LOW"
+    );
+  }
 
-  
+  if (
+    String(
+      paperParticipation?.volumeTrend || ""
+    ).toUpperCase() === "FADING"
+  ) {
+    reasonCodes.push(
+      "WAIT_FOR_RECLAIM_VOLUME"
+    );
+  }
 
-const engine26IntradayCandidate =
-  engine26ImbalanceWatch?.active === true ||
-  engine26ImbalanceWatch?.structuralContext?.active === true ||
-  engine26Status.includes("WATCH") ||
-  engine26Template.includes("ABC_DOWN") ||
-  engine26Template.includes("BOUNCE") ||
-  engine26PreferredDirection.includes("WATCH") ||
-  engine26PreferredDirection === "LONG" ||
-  engine26PreferredDirection === "SHORT" ||
-  engine26PreferredDirection === "SHORT_WATCH_ONLY";
+  reasonCodes.push(
+    "REQUIRES_ENGINE8_PAPER"
+  );
 
-const fastIntradayPaperAllow =
-  isFastIntradayPaperLane === true &&
-  engine26IntradayCandidate === true &&
-  lifecyclePaperCandidate === true &&
-  reactionActive === true &&
-  participationActive === true &&
-  participationHardBlocked !== true &&
-  engine25HardBlocked !== true &&
-  direction !== "NONE" &&
-  direction !== "NEUTRAL" &&
-  Number.isFinite(targetPoints) &&
-  targetPoints >= 8;
+  reasonCodes.push(
+    "REQUIRES_ENGINE10_JOURNAL"
+  );
 
-const standardPaperAllow =
-  uniqueBlockers.length === 0 &&
-  lifecyclePaperCandidate &&
-  readinessAllowed &&
-  reactionAllowed &&
-  participationAllowed &&
-  participationHardBlocked !== true &&
-  engine25HardBlocked !== true &&
-  direction === "LONG";
+  const uniqueBlockers = [
+    ...new Set(
+      blockers.filter(Boolean)
+    ),
+  ];
 
-const allowed =
-  fastIntradayPaperAllow === true ||
-  standardPaperAllow === true;
+  const uniqueWarnings = [
+    ...new Set(
+      warnings.filter(Boolean)
+    ),
+  ];
+
+  const engine26IntradayCandidate =
+    engine26ImbalanceWatch?.active === true ||
+    engine26ImbalanceWatch
+      ?.structuralContext
+      ?.active === true ||
+    engine26Status.includes("WATCH") ||
+    engine26Template.includes("ABC_DOWN") ||
+    engine26Template.includes("BOUNCE") ||
+    engine26PreferredDirection.includes("WATCH") ||
+    engine26PreferredDirection === "LONG" ||
+    engine26PreferredDirection === "SHORT" ||
+    engine26PreferredDirection ===
+      "SHORT_WATCH_ONLY";
+
+  const fastIntradayPaperAllow =
+    isFastIntradayPaperLane === true &&
+    engine26IntradayCandidate === true &&
+    lifecyclePaperCandidate === true &&
+
+    // Authorized Engine 3 must now be confirmed.
+    reactionActive === true &&
+    reactionAllowed === true &&
+
+    // Authorized Engine 4 must now be confirmed.
+    participationActive === true &&
+    participationAllowed === true &&
+    participationWaitingForEngine3 !== true &&
+    participationHardBlocked !== true &&
+
+    engine25HardBlocked !== true &&
+    direction !== "NONE" &&
+    direction !== "NEUTRAL" &&
+    Number.isFinite(targetPoints) &&
+    targetPoints >= 8;
+
+  const standardPaperAllow =
+    uniqueBlockers.length === 0 &&
+    lifecyclePaperCandidate &&
+    readinessAllowed &&
+    reactionAllowed &&
+    participationAllowed &&
+    participationHardBlocked !== true &&
+    engine25HardBlocked !== true &&
+    direction === "LONG";
+
+  const allowed =
+    fastIntradayPaperAllow === true ||
+    standardPaperAllow === true;
 
   if (fastIntradayPaperAllow) {
-  reasonCodes.push("FAST_INTRADAY_PAPER_ALLOW");
-  reasonCodes.push("ENGINE6_INTRADAY_PAPER_LANE");
-  reasonCodes.push("ENGINE15_BYPASSED_FOR_FAST_INTRADAY_PAPER");
-  reasonCodes.push("ENGINE26_INTRADAY_CANDIDATE_CONFIRMED");
-  reasonCodes.push("ENGINE3_REACTION_ACTIVE");
-  reasonCodes.push("ENGINE4_NOT_HARD_BLOCKED");
-  reasonCodes.push("ENGINE25_NOT_HARD_BLOCKED");
-  reasonCodes.push("PAPER_ONLY_NO_REAL_EXECUTION");
-}
+    reasonCodes.push(
+      "FAST_INTRADAY_PAPER_ALLOW"
+    );
 
-const fastIntradayBypassedBlockers = fastIntradayPaperAllow
-  ? uniqueBlockers.filter((blocker) =>
-      [
-        "ENGINE15_PAPER_READINESS_NOT_ALLOWED",
-        "ENGINE3_PAPER_REACTION_NOT_ALLOWED",
-        "ENGINE3_PAPER_REACTION_NOT_GOOD_OR_STRONG",
-        "PAPER_SHORT_RESEARCH_DISABLED_V1",
-      ].includes(blocker)
-    )
-  : [];
+    reasonCodes.push(
+      "ENGINE6_INTRADAY_PAPER_LANE"
+    );
 
-const finalBlockers = fastIntradayPaperAllow
-  ? uniqueBlockers.filter(
-      (blocker) => !fastIntradayBypassedBlockers.includes(blocker)
-    )
-  : uniqueBlockers;
+    reasonCodes.push(
+      "ENGINE15_BYPASSED_FOR_FAST_INTRADAY_PAPER"
+    );
 
-const finalWarnings = [
-  ...uniqueWarnings,
-  ...fastIntradayBypassedBlockers.map((blocker) => `BYPASSED_${blocker}`),
-];
+    reasonCodes.push(
+      "ENGINE26_INTRADAY_CANDIDATE_CONFIRMED"
+    );
 
-if (fastIntradayBypassedBlockers.length) {
-  reasonCodes.push("FAST_INTRADAY_STANDARD_BLOCKERS_BYPASSED");
-}
+    reasonCodes.push(
+      "ENGINE3_AUTHORIZED_REACTION_CONFIRMED"
+    );
+
+    reasonCodes.push(
+      "ENGINE4_AUTHORIZED_PARTICIPATION_CONFIRMED"
+    );
+
+    reasonCodes.push(
+      "ENGINE25_NOT_HARD_BLOCKED"
+    );
+
+    reasonCodes.push(
+      "PAPER_ONLY_NO_REAL_EXECUTION"
+    );
+  }
+
+  const fastIntradayBypassedBlockers =
+    fastIntradayPaperAllow
+      ? uniqueBlockers.filter(
+          (blocker) =>
+            [
+              "ENGINE15_PAPER_READINESS_NOT_ALLOWED",
+              "PAPER_SHORT_RESEARCH_DISABLED_V1",
+            ].includes(blocker)
+        )
+      : [];
+
+  const finalBlockers =
+    fastIntradayPaperAllow
+      ? uniqueBlockers.filter(
+          (blocker) =>
+            !fastIntradayBypassedBlockers.includes(
+              blocker
+            )
+        )
+      : uniqueBlockers;
+
+  const finalWarnings = [
+    ...uniqueWarnings,
+
+    ...fastIntradayBypassedBlockers.map(
+      (blocker) =>
+        `BYPASSED_${blocker}`
+    ),
+  ];
+
+  if (
+    fastIntradayBypassedBlockers.length
+  ) {
+    reasonCodes.push(
+      "FAST_INTRADAY_STANDARD_BLOCKERS_BYPASSED"
+    );
+  }
 
   const watchFast =
     allowed !== true &&
@@ -2080,27 +2396,43 @@ if (fastIntradayBypassedBlockers.length) {
     direction === "LONG" &&
     participationHardBlocked !== true &&
     engine25HardBlocked !== true &&
-    !uniqueBlockers.includes("PAPER_DIRECTION_MISSING") &&
-    !uniqueBlockers.includes("PAPER_SHORT_RESEARCH_DISABLED_V1") &&
-    !uniqueBlockers.includes("ENGINE25_HARD_RISK_BLOCK");
-  const shortReactionState = String(
-    paperReaction?.state ||
-      paperReaction?.fastReactionState ||
-      ""
-  ).toUpperCase();
+    !uniqueBlockers.includes(
+      "PAPER_DIRECTION_MISSING"
+    ) &&
+    !uniqueBlockers.includes(
+      "PAPER_SHORT_RESEARCH_DISABLED_V1"
+    ) &&
+    !uniqueBlockers.includes(
+      "ENGINE25_HARD_RISK_BLOCK"
+    );
 
-  const shortReactionDirection = String(
-    paperReaction?.direction ||
-      ""
-  ).toUpperCase();
+  const shortReactionState =
+    String(
+      paperReaction?.state ||
+        paperReaction?.fastReactionState ||
+        ""
+    ).toUpperCase();
+
+  const shortReactionDirection =
+    String(
+      paperReaction?.direction || ""
+    ).toUpperCase();
 
   const engine3ShortRejection =
     shortReactionDirection === "SHORT" &&
     (
-      shortReactionState.includes("BREAKOUT_FAILING") ||
-      shortReactionState.includes("REJECTING") ||
-      shortReactionState.includes("LOST") ||
-      shortReactionState.includes("FAILED_RECLAIM")
+      shortReactionState.includes(
+        "BREAKOUT_FAILING"
+      ) ||
+      shortReactionState.includes(
+        "REJECTING"
+      ) ||
+      shortReactionState.includes(
+        "LOST"
+      ) ||
+      shortReactionState.includes(
+        "FAILED_RECLAIM"
+      )
     );
 
   const shortResearchWatch =
@@ -2111,8 +2443,12 @@ if (fastIntradayBypassedBlockers.length) {
     engine3ShortRejection === true &&
     participationHardBlocked !== true &&
     engine25HardBlocked !== true &&
-    !uniqueBlockers.includes("ENGINE25_HARD_RISK_BLOCK") &&
-    !uniqueBlockers.includes("ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED");
+    !uniqueBlockers.includes(
+      "ENGINE25_HARD_RISK_BLOCK"
+    ) &&
+    !uniqueBlockers.includes(
+      "ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED"
+    );
 
   const structuralFastWatch =
     allowed !== true &&
@@ -2121,28 +2457,74 @@ if (fastIntradayBypassedBlockers.length) {
     engine26DoNotChaseLong === true &&
     engine26ShortResearchOnly === true &&
     engine25HardBlocked !== true &&
-    !uniqueBlockers.includes("ENGINE25_HARD_RISK_BLOCK");
+    !uniqueBlockers.includes(
+      "ENGINE25_HARD_RISK_BLOCK"
+    );
 
   if (shortResearchWatch) {
-    reasonCodes.push("ENGINE6_SHORT_RESEARCH_WATCH");
-    reasonCodes.push("ENGINE26_SHORT_WATCH_ONLY");
-    reasonCodes.push("ENGINE26_DO_NOT_CHASE_LONG");
-    reasonCodes.push("ENGINE26_SHORT_RESEARCH_ONLY");
-    reasonCodes.push("ENGINE3_SHORT_REJECTION_OR_FAILED_ACCEPTANCE");
-    reasonCodes.push("SHORT_RESEARCH_ONLY_NO_PAPER_ALLOW");
-    reasonCodes.push("ENGINE15_SHORT_READINESS_NOT_BUILT");
+    reasonCodes.push(
+      "ENGINE6_SHORT_RESEARCH_WATCH"
+    );
+
+    reasonCodes.push(
+      "ENGINE26_SHORT_WATCH_ONLY"
+    );
+
+    reasonCodes.push(
+      "ENGINE26_DO_NOT_CHASE_LONG"
+    );
+
+    reasonCodes.push(
+      "ENGINE26_SHORT_RESEARCH_ONLY"
+    );
+
+    reasonCodes.push(
+      "ENGINE3_SHORT_REJECTION_OR_FAILED_ACCEPTANCE"
+    );
+
+    reasonCodes.push(
+      "SHORT_RESEARCH_ONLY_NO_PAPER_ALLOW"
+    );
+
+    reasonCodes.push(
+      "ENGINE15_SHORT_READINESS_NOT_BUILT"
+    );
   }
 
   if (structuralFastWatch) {
-    reasonCodes.push("ENGINE6_STRUCTURAL_FAST_WATCH");
-    reasonCodes.push("ENGINE26_SHORT_WATCH_ONLY");
-    reasonCodes.push("ENGINE26_DO_NOT_CHASE_LONG");
-    reasonCodes.push("ENGINE26_SHORT_RESEARCH_ONLY");
-    reasonCodes.push("ENGINE26_C_DOWN_WATCH");
-    reasonCodes.push("WATCH_ONLY_NO_PAPER_ALLOW");
-    reasonCodes.push("NO_TICKET");
-    reasonCodes.push("NO_EXECUTION");
+    reasonCodes.push(
+      "ENGINE6_STRUCTURAL_FAST_WATCH"
+    );
+
+    reasonCodes.push(
+      "ENGINE26_SHORT_WATCH_ONLY"
+    );
+
+    reasonCodes.push(
+      "ENGINE26_DO_NOT_CHASE_LONG"
+    );
+
+    reasonCodes.push(
+      "ENGINE26_SHORT_RESEARCH_ONLY"
+    );
+
+    reasonCodes.push(
+      "ENGINE26_C_DOWN_WATCH"
+    );
+
+    reasonCodes.push(
+      "WATCH_ONLY_NO_PAPER_ALLOW"
+    );
+
+    reasonCodes.push(
+      "NO_TICKET"
+    );
+
+    reasonCodes.push(
+      "NO_EXECUTION"
+    );
   }
+
   const decision =
     fastIntradayPaperAllow
       ? "FAST_INTRADAY_PAPER_ALLOW"
@@ -2162,10 +2544,17 @@ if (fastIntradayBypassedBlockers.length) {
     decision,
     allowed,
 
-    intradayPaperLane: fastIntradayPaperAllow === true,
-    engine15Bypassed: fastIntradayPaperAllow === true,
-    standardPaperAllow: standardPaperAllow === true,
-    fastIntradayPaperAllow: fastIntradayPaperAllow === true,
+    intradayPaperLane:
+      fastIntradayPaperAllow === true,
+
+    engine15Bypassed:
+      fastIntradayPaperAllow === true,
+
+    standardPaperAllow:
+      standardPaperAllow === true,
+
+    fastIntradayPaperAllow:
+      fastIntradayPaperAllow === true,
 
     realExecutionAllowed: false,
     executable: false,
@@ -2177,65 +2566,129 @@ if (fastIntradayBypassedBlockers.length) {
 
     symbol,
     strategyId,
-    setupFamily: "IMBALANCE_TO_IMBALANCE_SCALP",
+
+    setupFamily:
+      "IMBALANCE_TO_IMBALANCE_SCALP",
+
     setupType,
-    
-    direction:     
-      shortResearchWatch === true || structuralFastWatch === true
+
+    direction:
+      shortResearchWatch === true ||
+      structuralFastWatch === true
         ? "SHORT"
         : direction,
 
-    targetPoints: Number.isFinite(targetPoints) ? targetPoints : 10,
+    targetPoints:
+      Number.isFinite(targetPoints)
+        ? targetPoints
+        : 10,
+
     exitModel: "THREE_BLOCKS",
 
     grade,
-    source: "ENGINE6_PAPER_PERMISSION",
+
+    source:
+      "ENGINE6_PAPER_PERMISSION",
 
     paperParticipationSource,
     fastPaperWatchCandidate,
     fastParticipationWaiting,
 
-    engine3PaperReactionActive: reactionActive,
-    engine3PaperReactionAllowed: reactionAllowed,
+    authorizedEngine3Input:
+      usingAuthorizedReaction,
 
-    engine4PaperParticipationActive: participationActive,
-    engine4PaperParticipationAllowed: participationAllowed,
-    engine4PaperParticipationHardBlocked: participationHardBlocked,
+    authorizedEngine3State:
+      authorizedReactionState || null,
 
-    engine15PaperReadinessActive: readinessActive,
-    engine15PaperReadinessAllowed: readinessAllowed,
+    authorizedEngine4Input:
+      explicitAuthorizedParticipation != null,
+
+    authorizedEngine4Status:
+      authorizedParticipationStatus || null,
+
+    engine3PaperReactionActive:
+      reactionActive,
+
+    engine3PaperReactionAllowed:
+      reactionAllowed,
+
+    engine4PaperParticipationActive:
+      participationActive,
+
+    engine4PaperParticipationAllowed:
+      participationAllowed,
+
+    engine4PaperParticipationHardBlocked:
+      participationHardBlocked,
+
+    engine15PaperReadinessActive:
+      readinessActive,
+
+    engine15PaperReadinessAllowed:
+      readinessAllowed,
 
     paperShortResearchEnabled:
       paperShortResearchEnabled ||
       shortResearchWatch === true ||
       structuralFastWatch === true ||
-      (fastIntradayPaperAllow === true && direction === "SHORT"),
+      (
+        fastIntradayPaperAllow === true &&
+        direction === "SHORT"
+      ),
 
     paperShortAllowed:
-      fastIntradayPaperAllow === true && direction === "SHORT",
+      fastIntradayPaperAllow === true &&
+      direction === "SHORT",
 
     paperLongAllowed:
-      fastIntradayPaperAllow === true && direction === "LONG",
+      fastIntradayPaperAllow === true &&
+      direction === "LONG",
 
-    structuralWatchOnly: structuralFastWatch === true,
-    fastWatch: structuralFastWatch === true || watchFast === true,
+    structuralWatchOnly:
+      structuralFastWatch === true,
+
+    fastWatch:
+      structuralFastWatch === true ||
+      watchFast === true,
 
     shortResearchOnly:
-      shortResearchWatch === true || structuralFastWatch === true,
-    shortResearchWatch: shortResearchWatch === true,
+      shortResearchWatch === true ||
+      structuralFastWatch === true,
+
+    shortResearchWatch:
+      shortResearchWatch === true,
 
     engine26ShortWatchOnly,
     engine26DoNotChaseLong,
     engine26ShortResearchOnly,
 
+    candidateId:
+      paperReaction?.candidateId ??
+      paperParticipation?.candidateId ??
+      null,
+
+    zoneId:
+      paperReaction?.zoneId ??
+      paperParticipation?.zoneId ??
+      null,
+
     duplicateCheckRequired: true,
 
     blockers: finalBlockers,
-    warnings: [...new Set(finalWarnings.filter(Boolean))],
-    reasonCodes: [...new Set(reasonCodes.filter(Boolean))],
+
+    warnings: [
+      ...new Set(
+        finalWarnings.filter(Boolean)
+      ),
+    ],
+
+    reasonCodes: [
+      ...new Set(
+        reasonCodes.filter(Boolean)
+      ),
+    ],
   };
 }
-
 function buildFinalPermissionFromEngine15({
   symbol,
   strategyId,
