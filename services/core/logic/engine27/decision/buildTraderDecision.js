@@ -2480,10 +2480,11 @@ export function buildTraderDecision({
             ] ||
             null,
 
-           pipelineContext:
+          pipelineContext:
             degree === "minute"
               ? pipelineContext
               : null,
+        });
     } catch {
       decisions[
         degree
