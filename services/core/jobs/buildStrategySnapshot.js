@@ -59,6 +59,9 @@ import {
 import {
   attachEngine4AuthorizedReactionParticipation,
 } from "../logic/engine4/authorizedReactionParticipation.js";
+import {
+  preserveEngine6CandidateIdentity,
+} from "../logic/engine6/preserveCandidateIdentity.js";
 
 
 
@@ -7171,7 +7174,7 @@ if (isEsIntradayScalp) {
 }
 
  
-const finalPermission =
+const finalPermissionRaw =
   isEsIntradayScalp
     ? buildFinalPermissionFromEngine15({
         symbol,
@@ -7188,6 +7191,23 @@ const finalPermission =
         engine26ImbalanceWatch: engine26PrePermissionWatch,
       })
     : permissionPreliminary;
+
+const finalPermission =
+  isEsIntradayScalp
+    ? preserveEngine6CandidateIdentity({
+        permission: finalPermissionRaw,
+
+        engine26LocationCandidate,
+
+        engine3AuthorizedReaction:
+          patchedConfluence?.context?.reaction
+            ?.paperScalpReaction || null,
+
+        engine4AuthorizedParticipation:
+          patchedConfluence?.context?.volume
+            ?.engine4AuthorizedReactionParticipation || null,
+      })
+    : finalPermissionRaw;
 
 let engine26ImbalanceWatch = null;
 let engine26PaperTradePlan = null;
