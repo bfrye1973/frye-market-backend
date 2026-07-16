@@ -7731,8 +7731,13 @@ if (isEsIntradayScalp) {
       engine25Context,
       confluence: patchedConfluence,
       engine15Decision,
+
+      // Engine 26A is the authoritative selected-location identity.
+      engine26LocationCandidate,
+
       openPaperTrades,
-      dailyBars: marketMeter?.layers?.emaPosture?.daily?.bars || [],
+      dailyBars:
+        marketMeter?.layers?.emaPosture?.daily?.bars || [],
     });
 
     engine26ImbalanceWatch = engine26.engine26ImbalanceWatch || null;
