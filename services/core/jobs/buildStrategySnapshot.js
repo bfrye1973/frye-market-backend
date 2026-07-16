@@ -2702,6 +2702,8 @@ function buildFinalPermissionFromEngine15({
   engine22WaveStrategy,
   confluence,
   engine26ImbalanceWatch = null,
+  engine3AuthorizedReaction = null,
+  engine4AuthorizedParticipation = null,
 }) {
   const preliminary =
     preliminaryPermission && typeof preliminaryPermission === "object"
@@ -2745,6 +2747,8 @@ const engine6PaperPermission = buildEngine6PaperPermission({
   engine22WaveStrategy,
   engine25Context,
   engine26ImbalanceWatch,
+  engine3AuthorizedReaction,
+  engine4AuthorizedParticipation,
 });
   
 
@@ -7451,6 +7455,26 @@ attachEngine4AuthorizedReactionParticipation({
     }
   }
 
+/*
+ * Build the explicit authorized Engine 3 and Engine 4 contracts
+ * after Engine 26A exists and before Engine 6 calculates permission.
+ *
+ * Existing Engine 3/4 algorithms and thresholds remain unchanged.
+ */
+if (isEsIntradayScalp) {
+  attachPaperScalpReactionToConfluence({
+    patchedConfluence,
+    engine22WaveStrategy,
+    engine26ReactionHandoff,
+    engine26StructuralContext,
+    paperShortResearchEnabled: isEsIntradayScalp,
+  });
+
+  attachEngine4AuthorizedReactionParticipation({
+    patchedConfluence,
+  });
+}
+
   // Engine 23 preliminary behavior context.
   // IMPORTANT:
   // This must run BEFORE Engine 15ES so Engine 15ES can consume
@@ -7642,6 +7666,14 @@ const finalPermissionRaw =
         engine22WaveStrategy,
         confluence: patchedConfluence,
         engine26ImbalanceWatch: engine26PrePermissionWatch,
+
+        engine3AuthorizedReaction:
+          patchedConfluence?.context?.reaction
+            ?.paperScalpReaction || null,
+
+        engine4AuthorizedParticipation:
+          patchedConfluence?.context?.volume
+            ?.engine4AuthorizedReactionParticipation || null,
       })
     : permissionPreliminary;
 
