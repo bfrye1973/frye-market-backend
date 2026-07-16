@@ -2260,46 +2260,7 @@ function buildLaneDecision({
           .schwabExecutionAllowed === true,
     },
 
-      engine6Decision:
-        permissionContext
-          .engine6Decision ??
-        null,
-
-      engine6Allowed:
-        permissionContext
-          .engine6Allowed ===
-        true,
-
-      plannerStatus:
-        plannerContext
-          .status ??
-        null,
-
-      plannerReady:
-        readiness
-          .plannerReady,
-
-      paperOnly:
-        permissionContext
-          .paperOnly ===
-        true,
-
-      realExecutionAllowed:
-        permissionContext
-          .realExecutionAllowed ===
-        true,
-
-      brokerExecutionAllowed:
-        permissionContext
-          .brokerExecutionAllowed ===
-        true,
-
-      schwabExecutionAllowed:
-        permissionContext
-          .schwabExecutionAllowed ===
-        true,
-    },
-
+      
     marketStoryContext: {
       headline:
         story?.headline ||
