@@ -78,6 +78,9 @@ import {
 import {
   buildEngine8CanonicalPaperAdapter,
 } from "../logic/trading/engine8CanonicalPaperAdapter.js";
+import {
+  getEngine8DuplicateState,
+} from "../logic/trading/engine8DuplicateState.js";
 
 
 
@@ -8723,6 +8726,30 @@ scalp.engine7PositionSizing =
       nowIso(),
   });
 
+const engine8DuplicateState =
+  getEngine8DuplicateState({
+    strategyId:
+      scalp.engine9OfficialManagementPlan
+        ?.strategyId ||
+      scalp.engine7PositionSizing
+        ?.strategyId ||
+      s.strategyId,
+
+    candidateId:
+      scalp.engine9OfficialManagementPlan
+        ?.candidateId ||
+      scalp.engine7PositionSizing
+        ?.candidateId ||
+      null,
+
+    planId:
+      scalp.engine9OfficialManagementPlan
+        ?.planId ||
+      scalp.engine7PositionSizing
+        ?.planId ||
+      null,
+  });
+
 scalp.engine8PaperOrder =
   buildEngine8CanonicalPaperAdapter({
     engine6PaperPermission:
@@ -8734,15 +8761,8 @@ scalp.engine8PaperOrder =
     engine7PositionSizing:
       scalp.engine7PositionSizing || null,
 
-    duplicateState: {
-      candidateAlreadyOrdered: false,
-      idempotencyKeyAlreadyUsed: false,
-      openTradeForStrategy: false,
-      activeTradeIdExists: false,
-      orderExistsForPlanId: false,
-      acceptanceTradeCompleted: false,
-      newPaperOrdersAllowed: true,
-    },
+    duplicateState:
+      engine8DuplicateState,
 
     paperExecutionEnabled:
       process.env.ENGINE8_PAPER_ONLY === "1",
@@ -8753,8 +8773,6 @@ scalp.engine8PaperOrder =
     allowLiveFutures:
       process.env.ENGINE8_ALLOW_LIVE_FUTURES === "1",
   });
-  }
-}
   if (String(symbol || "").toUpperCase() === "ES") {
     const scalp = result.strategies?.["intraday_scalp@10m"];
 
