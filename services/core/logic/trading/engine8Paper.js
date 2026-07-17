@@ -602,23 +602,50 @@ const fillPrice =
   ledger[idempotencyKey] = result;
   writeJson(LEDGER_FILE, ledger);
 
-  try {
-    if (action === "NEW_ENTRY") {
+try {
+  let journalResult = null;
+
+  if (action === "NEW_ENTRY") {
+    journalResult =
       await createTradeJournalEntryFromEngine8Fill({
         ticket,
         order,
         result,
       });
-    } else if (action === "REDUCE" || action === "EXIT") {
+  } else if (action === "REDUCE" || action === "EXIT") {
+    journalResult =
       await applyEngine8ExecutionToJournal({
         ticket,
         order,
         result,
       });
-    }
-  } catch (err) {
-    console.error("[engine8->journal] journal sync failed:", err?.stack || err);
   }
+
+  if (journalResult?.tradeId) {
+    result.tradeId = journalResult.tradeId;
+  }
+
+  if (journalResult) {
+    result.journal = {
+      ok: journalResult?.ok === true,
+      tradeId: journalResult?.tradeId || null,
+      duplicate: journalResult?.duplicate === true,
+      created: journalResult?.created === true,
+      updated: journalResult?.updated === true,
+    };
+  }
+} catch (err) {
+  console.error(
+    "[engine8->journal] journal sync failed:",
+    err?.stack || err
+  );
+
+  result.journal = {
+    ok: false,
+    tradeId: null,
+    error: "JOURNAL_SYNC_FAILED",
+  };
+}
 
   return result;
 }
