@@ -452,7 +452,9 @@ export async function executeTradeTicket(ticket) {
     }
   }
 
-  const orderId = makePaperOrderId();
+  const orderId =
+  String(ticket?.orderId || "").trim() ||
+  makePaperOrderId();
   const orderType = String(ticket?.orderType || "MARKET").toUpperCase();
   const timeInForce = String(ticket?.timeInForce || "DAY").toUpperCase();
 
