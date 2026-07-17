@@ -31,8 +31,10 @@ import crypto from "crypto";
 import {
   buildCanonicalEngine8IdempotencyKey,
   getEngine8DuplicateState,
+  recordEngine8ExecutionLink,
+  markEngine8JournalPending,
+  markEngine8JournalResolved,
 } from "./engine8DuplicateState.js";
-
 import {
   executeTradeTicket,
 } from "./engine8Paper.js";
@@ -1228,6 +1230,140 @@ function resolveJournalState(
   };
 }
 
+function persistEngine8LifecycleState({
+  prepared,
+  executionResult,
+  journalState,
+  filled,
+  status,
+}) {
+  const common = {
+    executionId:
+      prepared?.executionId,
+
+    orderId:
+      executionResult?.orderId ||
+      prepared?.orderId ||
+      null,
+
+    idempotencyKey:
+      executionResult?.idempotencyKey ||
+      prepared?.idempotencyKey ||
+      null,
+
+    tradeId:
+      journalState?.tradeId ||
+      null,
+
+    planId:
+      prepared?.planId ||
+      null,
+
+    candidateId:
+      prepared?.candidateId ||
+      null,
+
+    zoneId:
+      prepared?.zoneId ||
+      null,
+
+    strategyId:
+      prepared?.strategyId ||
+      null,
+
+    symbol:
+      prepared?.symbol ||
+      null,
+
+    direction:
+      prepared?.direction ||
+      null,
+
+    setupType:
+      prepared?.setupType ||
+      null,
+
+    snapshotTime:
+      prepared?.snapshotTime ||
+      null,
+
+    action:
+      "NEW_ENTRY",
+
+    status:
+      status || null,
+  };
+
+  try {
+    if (
+      filled === true &&
+      journalState?.journalCompleted === true &&
+      journalState?.tradeId
+    ) {
+      return markEngine8JournalResolved({
+        ...common,
+
+        journalStatus:
+          journalState?.journal?.status ||
+          journalState?.journal?.trade?.status ||
+          "OPEN",
+
+        remainingQty:
+          journalState?.journal?.remainingQty ??
+          journalState?.journal?.trade?.qty?.remainingQty ??
+          null,
+      });
+    }
+
+    if (
+      filled === true &&
+      journalState?.journalPending === true
+    ) {
+      return markEngine8JournalPending({
+        ...common,
+      });
+    }
+
+    return recordEngine8ExecutionLink({
+      ...common,
+
+      executionSuccessful:
+        executionResult?.ok === true,
+
+      orderCreated:
+        filled === true,
+
+      fillCreated:
+        filled === true,
+
+      journalCompleted:
+        false,
+
+      journalPending:
+        false,
+
+      journalStatus:
+        null,
+
+      remainingQty:
+        null,
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      written: false,
+      error:
+        "ENGINE8_LIFECYCLE_STATE_WRITE_FAILED",
+
+      detail:
+        String(
+          error?.message ||
+          error
+        ),
+    };
+  }
+}
+
 export async function executeEngine8PaperOrder({
   engine8PaperOrder,
 } = {}) {
@@ -1374,6 +1510,15 @@ export async function executeEngine8PaperOrder({
     status =
       "PAPER_ORDER_REJECTED";
   }
+
+  const lifecycleStateWrite =
+    persistEngine8LifecycleState({
+      prepared,
+      executionResult,
+      journalState,
+      filled,
+      status,
+    });
 
   const reasonCodes = [
     ...prepared.reasonCodes,
