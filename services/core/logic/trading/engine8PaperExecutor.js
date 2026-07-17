@@ -1554,6 +1554,23 @@ export async function executeEngine8PaperOrder({
     );
   }
 
+  if (
+    lifecycleStateWrite?.ok === true &&
+    lifecycleStateWrite?.written === true
+  ) {
+    reasonCodes.push(
+      "ENGINE8_EXECUTION_STATE_PERSISTED"
+    );
+  }
+
+  if (
+    lifecycleStateWrite?.ok !== true
+  ) {
+    reasonCodes.push(
+      "ENGINE8_EXECUTION_STATE_WRITE_FAILED"
+    );
+  }
+
   return {
     ...prepared,
 
@@ -1637,6 +1654,8 @@ export async function executeEngine8PaperOrder({
     journal:
       journalState
         .journal,
+
+    lifecycleStateWrite,
 
     ticket,
 
