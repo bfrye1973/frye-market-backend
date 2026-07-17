@@ -8776,9 +8776,6 @@ const engine8DuplicateState =
   }
 }
 
-if (String(symbol || "").toUpperCase() === "ES") {
-  const scalp =
-    result.strategies?.["intraday_scalp@10m"];
   if (String(symbol || "").toUpperCase() === "ES") {
     const scalp = result.strategies?.["intraday_scalp@10m"];
 
