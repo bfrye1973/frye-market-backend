@@ -17,6 +17,10 @@ import {
   buildCanonicalEngine8IdempotencyKey,
   getEngine8DuplicateState,
 } from "./engine8DuplicateState.js";
+import {
+  executeTradeTicket,
+} from "./engine8Paper.js";
+
 
 function nowIso() {
   return new Date().toISOString();
@@ -275,6 +279,250 @@ export async function prepareEngine8PaperExecution({
   };
 }
 
+function buildCanonicalPaperTicket({
+  engine8PaperOrder,
+  preparedExecution,
+}) {
+  const direction = upper(
+    engine8PaperOrder?.direction
+  );
+
+  const side =
+    direction === "LONG"
+      ? "BUY"
+      : direction === "SHORT"
+        ? "SELL_SHORT"
+        : null;
+
+  const targets =
+    Array.isArray(
+      engine8PaperOrder?.officialTargets
+    )
+      ? engine8PaperOrder.officialTargets
+      : [];
+
+  const firstTarget =
+    targets.find(
+      (target) =>
+        Number.isFinite(
+          Number(target?.price)
+        )
+    ) || null;
+
+  return {
+    executionId:
+      preparedExecution.executionId,
+
+    orderId:
+      preparedExecution.orderId,
+
+    idempotencyKey:
+      preparedExecution.idempotencyKey,
+
+    paper: true,
+    symbol: engine8PaperOrder.symbol,
+    strategyId:
+      engine8PaperOrder.strategyId,
+
+    timeframe:
+      String(
+        engine8PaperOrder.strategyId || ""
+      ).split("@")[1] || "",
+
+    assetType: "FUTURES",
+    action: "NEW_ENTRY",
+    intent: "ENTRY",
+    direction,
+    side,
+
+    qty:
+      Number(
+        engine8PaperOrder.finalContracts
+      ),
+
+    orderType: "LIMIT",
+    timeInForce: "DAY",
+
+    entry: {
+      price:
+        Number(
+          engine8PaperOrder
+            .officialEntryPrice
+        ),
+    },
+
+    stop: {
+      price:
+        Number(
+          engine8PaperOrder
+            .officialStopPrice
+        ),
+    },
+
+    takeProfit: firstTarget
+      ? {
+          targetId:
+            firstTarget.targetId || null,
+          price:
+            Number(firstTarget.price),
+        }
+      : null,
+
+    targets,
+
+    blocks:
+      Array.isArray(
+        engine8PaperOrder
+          ?.threeBlockManagement
+          ?.blocks
+      )
+        ? engine8PaperOrder
+            .threeBlockManagement.blocks
+        : [],
+
+    sourceSignal: {
+      engine: "engine8",
+      planId:
+        engine8PaperOrder.planId,
+      candidateId:
+        engine8PaperOrder.candidateId,
+      zoneId:
+        engine8PaperOrder.zoneId,
+      setupType:
+        engine8PaperOrder.setupType,
+      direction,
+      snapshotTime:
+        engine8PaperOrder.snapshotTime,
+    },
+
+    engine6: {
+      permission:
+        engine8PaperOrder?.engine6
+          ?.allowed === true
+          ? "ALLOW"
+          : "UNKNOWN",
+      decision:
+        engine8PaperOrder?.engine6
+          ?.decision || null,
+    },
+
+    engine7: {
+      status:
+        engine8PaperOrder?.engine7B
+          ?.status || null,
+      finalContracts:
+        Number(
+          engine8PaperOrder
+            .finalContracts
+        ),
+    },
+
+    engine9: {
+      planId:
+        engine8PaperOrder.planId,
+      planStatus:
+        engine8PaperOrder?.engine9
+          ?.planStatus || null,
+      managementReady:
+        engine8PaperOrder?.engine9
+          ?.managementReady === true,
+    },
+  };
+}
+
+export async function executeEngine8PaperOrder({
+  engine8PaperOrder,
+} = {}) {
+  const prepared =
+    await prepareEngine8PaperExecution({
+      engine8PaperOrder,
+    });
+
+  if (
+    prepared.status !==
+      "READY_FOR_PAPER_EXECUTION_CALL" ||
+    prepared.ok !== true
+  ) {
+    return prepared;
+  }
+
+  const ticket =
+    buildCanonicalPaperTicket({
+      engine8PaperOrder,
+      preparedExecution: prepared,
+    });
+
+  if (
+    !ticket.side ||
+    !Number.isInteger(ticket.qty) ||
+    ticket.qty <= 0
+  ) {
+    return reject(
+      {
+        ...prepared,
+        ticket,
+      },
+      "REJECTED_INVALID_EXECUTION_TICKET",
+      "INVALID_SIDE_OR_QTY",
+      "NO_ORDER_CREATED"
+    );
+  }
+
+  const executionResult =
+    await executeTradeTicket(ticket);
+
+  const filled =
+    executionResult?.ok === true &&
+    upper(executionResult?.status) ===
+      "FILLED";
+
+  const journalCompleted =
+    executionResult?.journal?.ok ===
+      true &&
+    Boolean(executionResult?.tradeId);
+
+  return {
+    ...prepared,
+
+    status: filled
+      ? "PAPER_ORDER_FILLED"
+      : executionResult?.duplicate === true
+        ? "DUPLICATE_ORDER_RETURNED"
+        : "PAPER_ORDER_REJECTED",
+
+    ok: executionResult?.ok === true,
+    rejected:
+      executionResult?.rejected === true,
+
+    orderCreated: filled,
+    fillCreated: filled,
+    journalCompleted,
+
+    executionId:
+      prepared.executionId,
+
+    idempotencyKey:
+      prepared.idempotencyKey,
+
+    orderId:
+      executionResult?.orderId ||
+      prepared.orderId,
+
+    tradeId:
+      executionResult?.tradeId || null,
+
+    ticket,
+    executionResult,
+
+    noBrokerOrder: true,
+    noSchwabCall: true,
+
+    executedAt: nowIso(),
+    evaluatedAt: nowIso(),
+  };
+}
+
 export default {
-  prepareEngine8PaperExecution,
+  prepareEngine8PaperExecution, 
+  executeEngine8PaperOrder,
 };
