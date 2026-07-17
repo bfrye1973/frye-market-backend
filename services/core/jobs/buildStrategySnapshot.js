@@ -8750,29 +8750,35 @@ const engine8DuplicateState =
       null,
   });
 
-scalp.engine8PaperOrder =
-  buildEngine8CanonicalPaperAdapter({
-    engine6PaperPermission:
-      scalp.permission?.paper || null,
+  scalp.engine8PaperOrder =
+    buildEngine8CanonicalPaperAdapter({
+      engine6PaperPermission:
+        scalp.permission?.paper || null,
 
-    engine9OfficialManagementPlan:
-      scalp.engine9OfficialManagementPlan || null,
+      engine9OfficialManagementPlan:
+        scalp.engine9OfficialManagementPlan || null,
 
-    engine7PositionSizing:
-      scalp.engine7PositionSizing || null,
+      engine7PositionSizing:
+        scalp.engine7PositionSizing || null,
 
-    duplicateState:
-      engine8DuplicateState,
+      duplicateState:
+        engine8DuplicateState,
 
-    paperExecutionEnabled:
-      process.env.ENGINE8_PAPER_ONLY === "1",
+      paperExecutionEnabled:
+        process.env.ENGINE8_PAPER_ONLY === "1",
 
-    liveTradingEnabled:
-      process.env.ENGINE8_LIVE_TRADING_ENABLED === "1",
+      liveTradingEnabled:
+        process.env.ENGINE8_LIVE_TRADING_ENABLED === "1",
 
-    allowLiveFutures:
-      process.env.ENGINE8_ALLOW_LIVE_FUTURES === "1",
-  });
+      allowLiveFutures:
+        process.env.ENGINE8_ALLOW_LIVE_FUTURES === "1",
+    });
+  }
+}
+
+if (String(symbol || "").toUpperCase() === "ES") {
+  const scalp =
+    result.strategies?.["intraday_scalp@10m"];
   if (String(symbol || "").toUpperCase() === "ES") {
     const scalp = result.strategies?.["intraday_scalp@10m"];
 
