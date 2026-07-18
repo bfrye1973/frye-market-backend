@@ -626,13 +626,42 @@ try {
   }
 
   if (journalResult) {
-    result.journal = {
-      ok: journalResult?.ok === true,
-      tradeId: journalResult?.tradeId || null,
-      duplicate: journalResult?.duplicate === true,
-      created: journalResult?.created === true,
-      updated: journalResult?.updated === true,
-    };
+    const journalCompleted =
+      journalResult?.ok === true &&
+      Boolean(
+        journalResult?.tradeId
+      );
+
+  result.journal = {
+    ok:
+      journalResult?.ok === true,
+
+  tradeId:
+    journalResult?.tradeId ||
+    null,
+
+  duplicate:
+    journalResult?.duplicate ===
+    true,
+
+  created:
+    journalResult?.created ===
+    true,
+
+  updated:
+    journalResult?.updated ===
+    true,
+
+  status:
+    journalResult?.status ||
+    null,
+
+  remainingQty:
+    journalResult?.remainingQty ??
+    null,
+
+  journalCompleted,
+};
   }
 } catch (err) {
   console.error(
@@ -643,6 +672,9 @@ try {
   result.journal = {
     ok: false,
     tradeId: null,
+    status: null,
+    remainingQty: null,
+    journalCompleted: false,
     error: "JOURNAL_SYNC_FAILED",
   };
 }
