@@ -50,6 +50,187 @@ function safeNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function componentScore(component) {
+  return safeNumber(component?.score ?? component);
+}
+
+function normalizeStressItem(key, label, input) {
+  const raw = input && typeof input === "object" ? input : {};
+  const value = safeNumber(raw.value ?? raw.latestValue ?? raw.close ?? input);
+  const close = safeNumber(raw.close);
+  const priorValue = safeNumber(raw.priorValue ?? raw.previousValue);
+  const change = safeNumber(
+    raw.change ??
+      (Number.isFinite(value) && Number.isFinite(priorValue)
+        ? value - priorValue
+        : null)
+  );
+
+  const available =
+    Number.isFinite(value) ||
+    Number.isFinite(close) ||
+    Number.isFinite(safeNumber(raw.pctChange5d)) ||
+    Number.isFinite(safeNumber(raw.pctChange20d)) ||
+    Number.isFinite(safeNumber(raw.pctChange50d));
+
+  return {
+    key,
+    label,
+    available,
+    value,
+    close,
+    priorValue,
+    change,
+    observationDate:
+      raw.observationDate || raw.date || raw.updatedAt || raw.generatedAtUtc || null,
+    aboveEma10: typeof raw.aboveEma10 === "boolean" ? raw.aboveEma10 : null,
+    aboveEma20: typeof raw.aboveEma20 === "boolean" ? raw.aboveEma20 : null,
+    aboveEma50: typeof raw.aboveEma50 === "boolean" ? raw.aboveEma50 : null,
+    aboveEma200: typeof raw.aboveEma200 === "boolean" ? raw.aboveEma200 : null,
+    pctChange5d: safeNumber(raw.pctChange5d),
+    pctChange20d: safeNumber(raw.pctChange20d),
+    pctChange50d: safeNumber(raw.pctChange50d),
+    state: raw.state || raw.status || (available ? "WATCH" : "UNAVAILABLE"),
+    read:
+      raw.read ||
+      raw.interpretation ||
+      (available
+        ? "Existing Engine 25 observation available."
+        : "Latest observation unavailable."),
+  };
+}
+
+function buildCreditStressDetail(marketHealth) {
+  const components = marketHealth?.components || {};
+
+  const creditFragility = components.creditFragility || {};
+  const creditStress = components.creditStress || {};
+  const bondMarket = components.bondMarket || {};
+  const liquidity = components.liquidity || {};
+  const tlt = components.macroPressure?.inputs?.TLT || null;
+
+  const creditInputs = creditFragility.inputs || {};
+  const creditStressInputs = creditStress.inputs || {};
+  const bondInputs = bondMarket.inputs || {};
+  const liquidityInputs = liquidity.inputs || {};
+
+  const creditEtfItems = [
+    normalizeStressItem("HYG", "High Yield Corporate Bond ETF", creditInputs.HYG),
+    normalizeStressItem("JNK", "Junk Bond ETF", creditInputs.JNK),
+    normalizeStressItem("LQD", "Investment Grade Corporate Bond ETF", creditInputs.LQD),
+    normalizeStressItem("KRE", "Regional Bank ETF", creditInputs.KRE),
+    normalizeStressItem("IWM", "Small Caps / Risk Appetite Proxy", creditInputs.IWM),
+  ];
+
+  const macroStressItems = [
+    normalizeStressItem("BAMLH0A0HYM2", "High Yield Credit Spread", creditStressInputs.BAMLH0A0HYM2),
+    normalizeStressItem("NFCI", "Chicago Fed National Financial Conditions Index", creditStressInputs.NFCI),
+    normalizeStressItem("STLFSI4", "St. Louis Fed Financial Stress Index", creditStressInputs.STLFSI4),
+  ];
+
+  const ratesCurveItems = [
+    normalizeStressItem("DGS10", "10-Year Treasury Rate", bondInputs.DGS10),
+    normalizeStressItem("DGS2", "2-Year Treasury Rate", bondInputs.DGS2),
+    normalizeStressItem("T10Y2Y", "10Y minus 2Y Yield Spread", bondInputs.T10Y2Y),
+    normalizeStressItem("T10Y3M", "10Y minus 3M Yield Spread", bondInputs.T10Y3M),
+    normalizeStressItem("TLT", "20+ Year Treasury Bond ETF", tlt),
+  ];
+
+  const liquidityItems = [
+    normalizeStressItem("WRESBAL", "Bank Reserves", liquidityInputs.WRESBAL),
+    normalizeStressItem("RRPONTSYD", "Reverse Repo", liquidityInputs.RRPONTSYD),
+    normalizeStressItem("WALCL", "Fed Balance Sheet", liquidityInputs.WALCL),
+    normalizeStressItem("M2SL", "M2 Money Supply", liquidityInputs.M2SL),
+  ];
+
+  const scores = {
+    creditFragility: componentScore(creditFragility),
+    creditStress: componentScore(creditStress),
+    bondMarket: componentScore(bondMarket),
+    liquidity: componentScore(liquidity),
+  };
+
+  const creditFragilityWeak =
+    Number.isFinite(scores.creditFragility) && scores.creditFragility < 50;
+  const systemicStressLow =
+    Number.isFinite(scores.creditStress) && scores.creditStress >= 70;
+
+  const displayLabel =
+    creditFragilityWeak && systemicStressLow
+      ? "CREDIT_FRAGILITY_WITHOUT_SYSTEMIC_STRESS"
+      : "CREDIT_RATES_LIQUIDITY_MIXED";
+
+  const interpretation =
+    displayLabel === "CREDIT_FRAGILITY_WITHOUT_SYSTEMIC_STRESS"
+      ? "Market credit proxies are fragile, but broader macro financial stress is not confirming systemic stress."
+      : "Credit, rates, and liquidity are mixed. Use the available observations without assuming direction when comparison data is unavailable.";
+
+  const byKey = Object.fromEntries(
+    [...creditEtfItems, ...macroStressItems, ...ratesCurveItems, ...liquidityItems].map(
+      (item) => [item.key, item]
+    )
+  );
+
+  const up = (key) => Number.isFinite(byKey[key]?.change) && byKey[key].change > 0;
+  const down = (key) => Number.isFinite(byKey[key]?.change) && byKey[key].change < 0;
+
+  const warningFlags = {
+    bondsSellingOff: (up("DGS10") || up("DGS2")) && down("TLT"),
+    creditSpreadsWidening: up("BAMLH0A0HYM2"),
+    financialStressRising: up("NFCI") || up("STLFSI4"),
+    banksBreakingDown:
+      byKey.KRE?.aboveEma20 === false ||
+      byKey.KRE?.aboveEma50 === false ||
+      down("KRE"),
+    liquidityDeteriorating:
+      down("WRESBAL") || down("WALCL") || down("M2SL"),
+  };
+
+  const reasonCodes = [];
+  if (creditFragilityWeak) reasonCodes.push("CREDIT_ETF_FRAGILITY_WEAK");
+  if (systemicStressLow) reasonCodes.push("SYSTEMIC_CREDIT_STRESS_LOW");
+  if (warningFlags.bondsSellingOff) reasonCodes.push("TREASURY_BOND_SELLOFF_CONFIRMED");
+  if (warningFlags.creditSpreadsWidening) reasonCodes.push("HIGH_YIELD_SPREAD_WIDENING");
+  if (warningFlags.financialStressRising) reasonCodes.push("FINANCIAL_STRESS_RISING");
+  if (warningFlags.banksBreakingDown) reasonCodes.push("REGIONAL_BANKS_WEAKENING");
+  if (warningFlags.liquidityDeteriorating) reasonCodes.push("LIQUIDITY_BACKDROP_DETERIORATING");
+
+  return {
+    available:
+      Object.values(scores).some(Number.isFinite) ||
+      [...creditEtfItems, ...macroStressItems, ...ratesCurveItems, ...liquidityItems].some(
+        (item) => item.available
+      ),
+    displayLabel,
+    interpretation,
+    scores,
+    groups: {
+      creditEtfFragility: {
+        label: "Credit ETF Fragility",
+        score: scores.creditFragility,
+        items: creditEtfItems,
+      },
+      macroCreditStress: {
+        label: "Macro Credit Stress",
+        score: scores.creditStress,
+        items: macroStressItems,
+      },
+      ratesCurvePressure: {
+        label: "Rates / Yield Curve Pressure",
+        score: scores.bondMarket,
+        items: ratesCurveItems,
+      },
+      liquidityBackdrop: {
+        label: "Liquidity Backdrop",
+        score: scores.liquidity,
+        items: liquidityItems,
+      },
+    },
+    warningFlags,
+    reasonCodes,
+  };
+}
+
 function diff(current, prior) {
   const c = safeNumber(current);
   const p = safeNumber(prior);
@@ -140,57 +321,64 @@ function buildLiveComponentBreakdown(marketHealth) {
     {
       key: "labor",
       label: "Labor",
-      score: safeNumber(components.labor),
-      color: scoreColor(components.labor),
+      score: componentScore(components.labor),
+      color: scoreColor(componentScore(components.labor)),
       direction: "higher_is_better",
     },
     {
       key: "creditStress",
       label: "Credit Stress",
-      score: safeNumber(components.creditStress),
-      color: scoreColor(components.creditStress),
+      score: componentScore(components.creditStress),
+      color: scoreColor(componentScore(components.creditStress)),
       direction: "higher_is_better",
     },
     {
       key: "creditFragility",
       label: "Credit Fragility",
-      score: safeNumber(components.creditFragility),
-      color: scoreColor(components.creditFragility),
+      score: componentScore(components.creditFragility),
+      color: scoreColor(componentScore(components.creditFragility)),
+      direction: "higher_is_better",
+    },
+    {
+      key: "bondMarket",
+      label: "Bond Market",
+      score: componentScore(components.bondMarket),
+      color: scoreColor(componentScore(components.bondMarket)),
       direction: "higher_is_better",
     },
     {
       key: "liquidity",
       label: "Liquidity",
-      score: safeNumber(components.liquidity),
-      color: scoreColor(components.liquidity),
+      score: componentScore(components.liquidity),
+      color: scoreColor(componentScore(components.liquidity)),
       direction: "higher_is_better",
     },
     {
       key: "marketTrend",
       label: "Market Trend",
-      score: safeNumber(components.marketTrend),
-      color: scoreColor(components.marketTrend),
+      score: componentScore(components.marketTrend),
+      color: scoreColor(componentScore(components.marketTrend)),
       direction: "higher_is_better",
     },
     {
       key: "distributionPressure",
       label: "Distribution Pressure",
-      score: safeNumber(components.distributionPressure),
-      color: scoreColor(components.distributionPressure, true),
+      score: componentScore(components.distributionPressure),
+      color: scoreColor(componentScore(components.distributionPressure), true),
       direction: "lower_is_better",
     },
     {
       key: "breadthParticipation",
       label: "Breadth Participation",
-      score: safeNumber(components.breadthParticipation),
-      color: scoreColor(components.breadthParticipation),
+      score: componentScore(components.breadthParticipation),
+      color: scoreColor(componentScore(components.breadthParticipation)),
       direction: "higher_is_better",
     },
     {
       key: "aiLeadership",
       label: "AI Leadership",
-      score: safeNumber(components.aiLeadership),
-      color: scoreColor(components.aiLeadership),
+      score: componentScore(components.aiLeadership),
+      color: scoreColor(componentScore(components.aiLeadership)),
       direction: "higher_is_better",
     },
   ];
@@ -637,6 +825,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
 
     const sectorBreadth = buildSectorBreadthSummary(sectorBreadthRaw);
     const zoneDecisionRead = buildZoneDecisionRead(zoneRead);
+    const creditStressDetail = buildCreditStressDetail(marketHealth);
 
     const componentBreakdown = dailyCompositeAvailable
       ? buildComponentBreakdown(current)
@@ -711,7 +900,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
 
     return res.json({
       ok: true,
-      engine: "engine25.fullDashboard.v0.4",
+      engine: "engine25.fullDashboard.v0.5",
       modelType: "ENGINE25_FULL_DASHBOARD_VIEW",
       generatedAtUtc: new Date().toISOString(),
 
@@ -734,6 +923,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       headline,
       componentBreakdown,
       underTheHood,
+      creditStressDetail,
 
       intradayProxyDamage,
       liveEsPermission,
