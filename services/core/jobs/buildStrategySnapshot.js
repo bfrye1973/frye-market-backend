@@ -7783,7 +7783,6 @@ if (isEsIntradayScalp) {
 
     snapshotTime:
       engine26ProposedGeometry?.snapshotTime ||
-      result?.now ||
       nowIso(),
   });
     // V1 planner-only. Do not call Engine 8 from snapshot builder.
