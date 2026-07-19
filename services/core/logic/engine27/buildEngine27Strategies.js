@@ -237,43 +237,55 @@ export function buildEngine27Strategies({
       "intraday_scalp@10m"
     ] || null;
 
-  const pipelineContext =
-    intradayPaperStrategy
+  const buildPipelineContext = (strategy) =>
+    strategy
       ? {
           engine26LocationCandidate:
-            intradayPaperStrategy
-              .engine26LocationCandidate ||
+            strategy.engine26LocationCandidate ||
             null,
 
           engine3AuthorizedReaction:
-            intradayPaperStrategy
-              .confluence
+            strategy.confluence
               ?.context
               ?.reaction
               ?.paperScalpReaction ||
             null,
 
           engine4AuthorizedParticipation:
-            intradayPaperStrategy
-              .analytics
-              ?.engine5
+            strategy.confluence
               ?.context
               ?.volume
               ?.engine4AuthorizedReactionParticipation ||
             null,
 
           engine6Permission:
-            intradayPaperStrategy
-              .permission
+            strategy.permission
               ?.paper ||
             null,
 
           engine26Planner:
-            intradayPaperStrategy
-              .engine26PaperTradePlan ||
+            strategy.engine26ProposedGeometry ||
+            strategy.engine26PaperTradePlan ||
             null,
         }
       : null;
+
+  const pipelineContext =
+    buildPipelineContext(
+      intradayPaperStrategy
+    );
+
+  const pipelineContextByLane = {
+    subminute:
+      buildPipelineContext(
+        snapshot?.strategies?.[
+          "subminute_scalp@10m"
+        ] || null
+      ),
+
+    minute:
+      pipelineContext,
+  };
 
   /*
    * Engine 27E — Trader Decision
@@ -307,6 +319,7 @@ export function buildEngine27Strategies({
       engine27MarketStory,
       alphaDecisions: decisions,
       pipelineContext,
+      pipelineContextByLane,
     });
   return {
     active: true,

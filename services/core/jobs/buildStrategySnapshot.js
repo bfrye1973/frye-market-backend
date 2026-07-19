@@ -100,12 +100,14 @@ const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
 const symbol = process.env.SYMBOL || "SPY";
 
 const STRATEGIES = [
+  { strategyId: "subminute_scalp@10m", tf: "10m", degree: "subminute", wave: "W1" },
   { strategyId: "intraday_scalp@10m", tf: "10m", degree: "minute", wave: "W1" },
   { strategyId: "minor_swing@1h", tf: "1h", degree: "minor", wave: "W1" },
   { strategyId: "intermediate_long@4h", tf: "4h", degree: "intermediate", wave: "W1" },
 ];
 
 const ENGINE2_MAP = {
+  subminute_scalp: { degree: "minute", tf: "1h" },
   intraday_scalp: { degree: "minor", tf: "1h" },
   minor_swing: { degree: "intermediate", tf: "1h" },
   intermediate_long: { degree: "primary", tf: "1d" },
@@ -1428,6 +1430,7 @@ function skippedEngine16(sym, tf = null, marketRegime = null, engine2Context = n
 
 function isEngine16EnabledForStrategy(strategyId) {
   return (
+  strategyId === "subminute_scalp@10m" ||
   strategyId === "intraday_scalp@10m" ||
   strategyId === "minor_swing@1h"
  );
@@ -3142,7 +3145,10 @@ function pickActiveExecutionZone(engine1Context, price) {
 
 function modeFromStrategyId(strategyId) {
   const s = String(strategyId || "").toLowerCase();
-  if (s.includes("intraday_scalp")) return "scalp";
+  if (
+    s.includes("subminute_scalp") ||
+    s.includes("intraday_scalp")
+  ) return "scalp";
   if (s.includes("minor_swing")) return "swing";
   if (s.includes("intermediate_long")) return "long";
   return "swing";
@@ -3305,6 +3311,7 @@ function applyNearAllowedZoneDisplay({ confluence, ctx }) {
 ------------------------------*/
 function bucketForStrategyId(strategyId) {
   const id = String(strategyId || "");
+  if (id.startsWith("subminute_scalp")) return "subminute_scalp";
   if (id.startsWith("intraday_scalp")) return "intraday_scalp";
   if (id.startsWith("minor_swing")) return "minor_swing";
   if (id.startsWith("intermediate_long")) return "intermediate_long";
@@ -7094,6 +7101,10 @@ const zoneContext = buildZoneContext(
   let engine26LocationCandidate = null;
   let engine26ReactionHandoff = null;
 
+  const isEsSubminuteScalp =
+    String(symbol || "").toUpperCase() === "ES" &&
+    s.strategyId === "subminute_scalp@10m";
+
   const isEsIntradayScalp =
     String(symbol || "").toUpperCase() === "ES" &&
     s.strategyId === "intraday_scalp@10m";
@@ -8444,7 +8455,10 @@ console.log("Engine21 alignment fetched");
   };
 
   if (isFuturesSymbol(symbol)) {
-    if (s.strategyId === "intraday_scalp@10m") {
+    if (
+      s.strategyId === "subminute_scalp@10m" ||
+      s.strategyId === "intraday_scalp@10m"
+    ) {
       engine16ForStrategy = await computeEngine16EsRegimeLayers({
         symbol,
         emaPosture,
@@ -8591,6 +8605,170 @@ result.strategies[s.strategyId] = {
     }
   }
 
+  // Subminute read-only Engine 26A.
+  // Reuses the canonical Minute Engine 22 wave model,
+  // but creates independent Subminute candidate and zone identity.
+  if (String(symbol || "").toUpperCase() === "ES") {
+    const subminute =
+      result.strategies?.["subminute_scalp@10m"] || null;
+
+    const minute =
+      result.strategies?.["intraday_scalp@10m"] || null;
+
+    if (subminute && minute?.engine22WaveStrategy) {
+      const engine26A = buildEngine26A({
+        symbol,
+        strategyId: "subminute_scalp@10m",
+        timeframe: "10m",
+
+        currentPrice:
+          validPrice(subminute?.confluence?.price) ??
+          validPrice(subminute?.context?.meta?.current_price) ??
+          validPrice(minute?.engine26LocationCandidate?.currentPrice) ??
+          null,
+
+        snapshotTime: result?.now || nowIso(),
+
+        engine22WaveStrategy:
+          minute.engine22WaveStrategy,
+
+        engine25Context:
+          subminute.engine25Context || result.engine25Context || null,
+
+        engine1Context:
+          subminute.context || null,
+
+        tickSize: 0.25,
+
+        zoneIdentityScope:
+          "subminute_scalp@10m",
+      });
+
+      subminute.engine22SharedWaveSource = {
+        mode: "READ_ONLY_SHARED_SOURCE",
+        sourceStrategyId: "intraday_scalp@10m",
+        selectedDegree: "subminute",
+        strategyId: "subminute_scalp@10m",
+        noExecution: true,
+      };
+
+      subminute.engine26LocationCandidate =
+        engine26A?.engine26LocationCandidate || null;
+
+      subminute.engine26ReactionHandoff =
+        engine26A?.engine26ReactionHandoff || null;
+
+      attachPaperScalpReactionToConfluence({
+        patchedConfluence:
+          subminute.confluence,
+        engine22WaveStrategy:
+          minute.engine22WaveStrategy,
+        engine26ReactionHandoff:
+          subminute.engine26ReactionHandoff,
+        engine26StructuralContext:
+          null,
+        paperShortResearchEnabled:
+          true,
+      });
+
+      attachEngine4AuthorizedReactionParticipation({
+        patchedConfluence:
+          subminute.confluence,
+      });
+
+      const subminutePaperPermission =
+        buildEngine6PaperPermission({
+          symbol,
+          strategyId:
+            "subminute_scalp@10m",
+          confluence:
+            subminute.confluence,
+          engine15Decision:
+            null,
+          engine22WaveStrategy:
+            minute.engine22WaveStrategy,
+          engine25Context:
+            subminute.engine25Context ||
+            result.engine25Context ||
+            null,
+          engine26ImbalanceWatch:
+            null,
+          engine3AuthorizedReaction:
+            subminute.confluence
+              ?.context
+              ?.reaction
+              ?.paperScalpReaction ||
+            null,
+          engine4AuthorizedParticipation:
+            subminute.confluence
+              ?.context
+              ?.volume
+              ?.engine4AuthorizedReactionParticipation ||
+            null,
+        });
+
+      subminute.permission = {
+        ...(subminute.permission || {}),
+        paper: {
+          ...subminutePaperPermission,
+          executable: false,
+          realExecutionAllowed: false,
+          brokerExecutionAllowed: false,
+          schwabExecutionAllowed: false,
+          subminuteReadOnlyPhase: true,
+        },
+      };
+
+      const subminuteEngine26 =
+        buildEngine26PaperTradePlan({
+          symbol,
+          strategyId:
+            "subminute_scalp@10m",
+          tf:
+            "10m",
+          permission:
+            subminute.permission,
+          engine22WaveStrategy:
+            minute.engine22WaveStrategy,
+          engine25Context:
+            subminute.engine25Context ||
+            result.engine25Context ||
+            null,
+          confluence:
+            subminute.confluence,
+          engine15Decision:
+            null,
+          engine26LocationCandidate:
+            subminute.engine26LocationCandidate,
+          openPaperTrades:
+            [],
+          dailyBars:
+            result.marketMeter
+              ?.layers
+              ?.emaPosture
+              ?.daily
+              ?.bars ||
+            [],
+        });
+
+      subminute.engine26ImbalanceWatch =
+        subminuteEngine26?.engine26ImbalanceWatch || null;
+
+      subminute.engine26StructuralContext =
+        subminuteEngine26?.engine26StructuralContext || null;
+
+      subminute.engine26TradePlanPreview =
+        subminuteEngine26?.engine26TradePlanPreview || null;
+
+      subminute.engine26ProposedGeometry =
+        subminuteEngine26?.engine26ProposedGeometry || null;
+
+      subminute.engine26PaperTradePlan = null;
+      subminute.engine26PaperTradeTicket = null;
+      subminute.engine26PaperTradeExecution = null;
+    }
+  }
+
   preserveLastGoodEngine22Timeline(result, previousSnapshot);
 
   // Engine 27 — five independent read-only strategy decisions.
@@ -8599,6 +8777,52 @@ result.strategies[s.strategyId] = {
   result.engine27Strategies = buildEngine27Strategies({
     snapshot: result,
   });
+  // Subminute Engine 7A read-only sizing preview.
+  if (String(symbol || "").toUpperCase() === "ES") {
+    const subminute =
+      result.strategies?.["subminute_scalp@10m"] || null;
+
+    const subminuteDecision =
+      result.engine27Strategies
+        ?.engine27TraderDecision
+        ?.decisions
+        ?.subminute ||
+      null;
+
+    if (subminute) {
+      subminute.engine7SizingPreview =
+        buildEngine7ProposedSizingPreview({
+          engine26ProposedGeometry:
+            subminute.engine26ProposedGeometry || null,
+
+          engine6PaperPermission:
+            subminute.permission?.paper || null,
+
+          engine27MinuteReadiness:
+            subminuteDecision,
+
+          riskConfig:
+            ES_PAPER_RISK_CONFIG,
+
+          snapshotTime:
+            subminute.engine26LocationCandidate
+              ?.snapshotTime ||
+            result?.now ||
+            nowIso(),
+        });
+
+      subminute.engine7SizingPreview = {
+        ...(subminute.engine7SizingPreview || {}),
+        executable: false,
+        executableSizing: false,
+        finalContracts: 0,
+        subminuteReadOnlyPhase: true,
+        noOrderAuthority: true,
+        noFinalSizingAuthority: true,
+      };
+    }
+  }
+
   /*
  * Engine 9 — Official Management Plan
  *

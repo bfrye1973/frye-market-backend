@@ -1031,6 +1031,8 @@ export function buildEngine26LocationCandidate({
       .ENGINE26A_MONITORING_RANGE_POINTS ??
       DEFAULT_MONITORING_RANGE_POINTS
   ),
+
+  zoneIdentityScope = null,
 } = {}) {
   const normalizedSymbol =
     String(symbol || "").toUpperCase();
@@ -1223,15 +1225,21 @@ export function buildEngine26LocationCandidate({
    * Raw source IDs such as ES_MANUAL_IMBALANCE_7 remain available at:
    * location.upstreamId
    */
+  const zoneIdParts = [
+    normalizedSymbol,
+    selectedZone.source,
+    selectedZone.type,
+    selectedZone.timeframe,
+    selectedZone.lo,
+    selectedZone.hi,
+  ];
+
+  if (zoneIdentityScope) {
+    zoneIdParts.splice(1, 0, zoneIdentityScope);
+  }
+
   const zoneId =
-    stableHash("E26Z", [
-      normalizedSymbol,
-      selectedZone.source,
-      selectedZone.type,
-      selectedZone.timeframe,
-      selectedZone.lo,
-      selectedZone.hi,
-    ]);
+    stableHash("E26Z", zoneIdParts);
 
   const candidateId =
     stableHash("E26C", [

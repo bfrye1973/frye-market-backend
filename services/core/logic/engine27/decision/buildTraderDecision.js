@@ -2409,6 +2409,7 @@ export function buildTraderDecision({
   engine27MarketStory,
   alphaDecisions,
   pipelineContext = null,
+  pipelineContextByLane = null,
 } = {}) {
   const waves =
     isObject(
@@ -2481,8 +2482,10 @@ export function buildTraderDecision({
             null,
 
           pipelineContext:
-            degree === "minute"
-              ? pipelineContext
+            degree === "subminute"
+              ? pipelineContextByLane?.subminute || null
+              : degree === "minute"
+              ? pipelineContextByLane?.minute || pipelineContext
               : null,
         });
     } catch {
