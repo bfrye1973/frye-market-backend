@@ -312,3 +312,89 @@ test("builder does not mutate input", () => {
 
   assert.deepEqual(fixture, before);
 });
+
+
+test("Engine 26A owns candidateId and zoneId over conflicting strategy copies", () => {
+  const fixture = baseFixture();
+  fixture.strategy.candidateId = "STRATEGY-CANDIDATE";
+  fixture.strategy.zoneId = "STRATEGY-ZONE";
+
+  const timeline = buildStrategyTimeline(fixture);
+
+  assert.equal(timeline.candidateId, "C1");
+  assert.equal(timeline.zoneId, "Z1");
+  assert.ok(timeline.blockers.includes("CANDIDATE_ID_MISMATCH"));
+  assert.ok(timeline.blockers.includes("ZONE_ID_MISMATCH"));
+});
+
+test("temporary NEUTRAL direction does not create an identity blocker", () => {
+  const fixture = baseFixture();
+  fixture.engine3.direction = "NEUTRAL";
+  fixture.engine4.direction = "NEUTRAL";
+
+  const timeline = buildStrategyTimeline(fixture);
+
+  assert.equal(timeline.direction, "LONG");
+  assert.ok(!timeline.blockers.includes("DIRECTION_MISMATCH"));
+  assert.ok(!timeline.stages.some((stage) => stage.reasonCodes.includes("DIRECTION_MISMATCH")));
+});
+
+test("identity mismatches are blockers but are not duplicated into warnings", () => {
+  const fixture = baseFixture();
+  fixture.engine3.candidateId = "OTHER";
+
+  const timeline = buildStrategyTimeline(fixture);
+
+  assert.ok(timeline.blockers.includes("CANDIDATE_ID_MISMATCH"));
+  assert.ok(!timeline.warnings.includes("CANDIDATE_ID_MISMATCH"));
+});
+
+test("active LOCATION_DETECTED remains ACTIVE when boundaries are unknown", () => {
+  const fixture = baseFixture();
+  delete fixture.engine26A.zoneLow;
+  delete fixture.engine26A.zoneHigh;
+  delete fixture.engine26A.zoneMid;
+  delete fixture.engine26A.priceLocation;
+
+  const timeline = buildStrategyTimeline(fixture);
+  const location = timeline.stages.find((stage) => stage.id === "location");
+
+  assert.equal(timeline.location.priceLocation, "UNKNOWN");
+  assert.equal(location.status, "ACTIVE");
+});
+
+test("Engine 27E permissionReady cannot override Engine 6 allowed false", () => {
+  const fixture = baseFixture();
+  fixture.engine27E.readiness.permissionReady = true;
+  fixture.engine6.allowed = false;
+  fixture.engine6.decision = "FAST_INTRADAY_PAPER_ALLOW";
+
+  const timeline = buildStrategyTimeline(fixture);
+  const permission = timeline.stages.find((stage) => stage.id === "permission");
+
+  assert.equal(permission.status, "WAITING");
+});
+
+test("noExecution is true whenever Engine 8 executable is false", () => {
+  const fixture = baseFixture();
+  fixture.engine8.executable = false;
+  fixture.engine8.noExecution = false;
+
+  const timeline = buildStrategyTimeline(fixture);
+
+  assert.equal(timeline.executable, false);
+  assert.equal(timeline.noExecution, true);
+});
+
+test("zone identity mismatch is exposed independently", () => {
+  const fixture = baseFixture();
+  fixture.engine4.zoneId = "OTHER-ZONE";
+
+  const timeline = buildStrategyTimeline(fixture);
+  const participation = timeline.stages.find((stage) => stage.id === "participation");
+
+  assert.equal(participation.status, "BLOCKED");
+  assert.ok(participation.reasonCodes.includes("ZONE_ID_MISMATCH"));
+  assert.ok(timeline.blockers.includes("ZONE_ID_MISMATCH"));
+  assert.ok(!timeline.blockers.includes("CANDIDATE_ID_MISMATCH"));
+});
