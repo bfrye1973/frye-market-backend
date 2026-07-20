@@ -81,7 +81,7 @@ import {
 import {
   getEngine8DuplicateState,
 } from "../logic/trading/engine8DuplicateState.js";
-
+import { buildStrategyTimeline } from "../logic/engine27/timeline/buildStrategyTimeline.js";
 
 
 /* -----------------------------
@@ -8772,6 +8772,103 @@ const engine8DuplicateState =
       allowLiveFutures:
         process.env.ENGINE8_ALLOW_LIVE_FUTURES === "1",
     });
+
+const minuteDecision =
+  result.engine27Strategies
+    ?.engine27TraderDecision
+    ?.decisions
+    ?.minute ||
+  null;
+
+scalp.strategyTimeline =
+  buildStrategyTimeline({
+    laneId: "minute",
+    strategyId: "intraday_scalp@10m",
+
+    strategy: scalp,
+
+    engine22:
+      scalp.engine22WaveStrategy
+        ?.degreeStates
+        ?.minute ||
+      null,
+
+    engine26A:
+      scalp.engine26LocationCandidate ||
+      null,
+
+    engine3:
+      scalp.confluence
+        ?.context
+        ?.reaction
+        ?.engine3FastImbalanceReaction ||
+      null,
+
+    engine4:
+      scalp.confluence
+        ?.context
+        ?.volume
+        ?.engine4FastImbalanceParticipation ||
+      null,
+
+    engine6:
+      scalp.permission?.paper ||
+      null,
+
+    engine26B:
+      scalp.engine26ProposedGeometry ||
+      null,
+
+    engine27A:
+      result.engine27Strategies
+        ?.engine27WaveIntelligence
+        ?.minute ||
+      null,
+
+    engine27B:
+      result.engine27Strategies
+        ?.engine27FibIntelligence
+        ?.minute ||
+      null,
+
+    engine27E:
+      minuteDecision,
+
+    engine7A:
+      scalp.engine7SizingPreview ||
+      null,
+
+    engine9:
+      scalp.engine9OfficialManagementPlan ||
+      null,
+
+    engine7B:
+      scalp.engine7PositionSizing ||
+      null,
+
+    engine8:
+      scalp.engine8PaperOrder ||
+      null,
+
+    engine10: null,
+
+    currentPrice:
+      scalp.engine26LocationCandidate
+        ?.currentPrice ??
+      minuteDecision?.currentPrice ??
+      result.engine27Strategies
+        ?.engine27FibIntelligence
+        ?.minute
+        ?.currentPrice ??
+      null,
+
+    snapshotTime:
+      scalp.engine26LocationCandidate
+        ?.snapshotTime ??
+      minuteDecision?.snapshotTime ??
+      result.now ??
+      null,
+  });
   }
 }
 
