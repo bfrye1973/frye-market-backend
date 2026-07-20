@@ -33,7 +33,6 @@ const IDENTITY_FIELDS = [
   "zoneId",
   "strategyId",
   "symbol",
-  "direction",
 ];
 
 function isObject(value) {
@@ -160,8 +159,10 @@ function buildIdentity({
   snapshotTime,
 }) {
   const sources = [
-    { name: "STRATEGY", value: strategy },
+    // Engine 26A is the canonical owner of candidateId and zoneId.
+    // Strategy and downstream objects are fallback/validation sources only.
     { name: "ENGINE26A", value: engine26A },
+    { name: "STRATEGY", value: strategy },
     { name: "ENGINE27E", value: engine27E },
     { name: "ENGINE26B", value: engine26B },
     { name: "ENGINE7A", value: engine7A },
@@ -414,8 +415,12 @@ function buildLocationStage({ engine26A, identity, location }) {
   }
 
   const active = engine26A.active === true;
+  const engine26AStatus = upper(engine26A?.status);
+  const explicitLocationDetected =
+    active && engine26AStatus === "LOCATION_DETECTED";
+
   const status = active
-    ? location.priceLocation === "INSIDE_ZONE"
+    ? explicitLocationDetected || location.priceLocation === "INSIDE_ZONE"
       ? STATUS.ACTIVE
       : STATUS.WATCHING
     : STATUS.WAITING;
@@ -633,8 +638,9 @@ function buildPermissionStage({ engine6, engine27E, identity }) {
 
   const decision = upper(engine6?.decision);
   const ready =
-    engine27E?.readiness?.permissionReady === true ||
-    (engine6?.allowed === true && APPROVED_PERMISSION_DECISIONS.has(decision));
+    engine6?.allowed === true &&
+    APPROVED_PERMISSION_DECISIONS.has(decision) &&
+    engine27E?.readiness?.permissionReady === true;
 
   return stageBase({
     id: "permission",
@@ -1188,10 +1194,7 @@ export function buildStrategyTimeline({
   });
 
   const executable = engine8?.executable === true;
-  const noExecution =
-    typeof engine8?.noExecution === "boolean"
-      ? engine8.noExecution
-      : executable !== true;
+  const noExecution = !executable;
 
   return {
     laneId: identity.laneId,
@@ -1205,9 +1208,11 @@ export function buildStrategyTimeline({
     zoneId: identity.zoneId,
     symbol: identity.symbol,
     direction:
-      identity.direction ??
       normalizeDirection(engine27E?.direction) ??
       normalizeDirection(engine27A?.preferredTradeDirection) ??
+      normalizeDirection(engine27A?.structuralDirection) ??
+      normalizeDirection(engine26B?.direction) ??
+      identity.direction ??
       null,
     setupType: identity.setupType,
 
@@ -1228,7 +1233,6 @@ export function buildStrategyTimeline({
     ]),
     warnings: unique([
       ...safeArray(engine27E?.warnings),
-      ...identity.mismatchCodes,
       ...unavailableWarnings,
       engine6?.paperOnly === true || engine6?.mode === "PAPER_ONLY" ? "PAPER_ONLY" : null,
       engine6?.realExecutionAllowed === false ? "REAL_EXECUTION_DISABLED" : null,
