@@ -35,6 +35,7 @@ import scalpLabRouter from "./routes/scalpLab.js";
 
 import runAllEnginesRouter from "./routes/runAllEngines.js";
 import { fibLevelsRouter } from "./routes/fibLevels.js";
+import { activeWaveStateRouter } from "./routes/activeWaveState.js";
 import { tradePermissionRouter } from "./routes/tradePermission.js";
 import { morningFibRouter } from "./routes/morningFib.js";
 import chartOverlayRouter from "./routes/chartOverlay.js";
@@ -151,6 +152,7 @@ app.use("/api/auth/schwab", schwabAuthRouter);
 
 app.use("/api/v1", engine5ContextRouter);
 app.use("/api/v1", fibLevelsRouter);
+app.use("/api/v1", activeWaveStateRouter);
 app.use("/api/v1", reactionScoreRouter);
 app.use("/api/v1", volumeBehaviorRouter);
 app.use("/api/v1", spyVolumeBehaviorRouter);
@@ -184,7 +186,6 @@ app.use("/api/v1/execution-state", executionStateRouter);
 app.use("/api/v1", engine26ManualHardSignalRouter);
 app.use("/api/v1/futures/market-meter", futuresMarketMeterRouter);
 app.use("/api/v1/spy-reaction-quality", spyReactionQuality);
-
 
 // --- 404 / errors ---
 app.use((req, res) => {
@@ -278,6 +279,7 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/v1/smz-shelves");
   console.log("- /api/v1/smz-hierarchy");
   console.log("- /api/v1/fib-levels");
+  console.log("- /api/v1/waves/active  ✅ Engine 2B active wave state");
   console.log("- /api/v1/confluence-score");
   console.log("- /api/v1/dashboard-snapshot");
   console.log("- /api/v1/run-all-engines   ✅ cron trigger");
