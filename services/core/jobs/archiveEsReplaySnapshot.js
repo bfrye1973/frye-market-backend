@@ -1,15 +1,18 @@
 // services/core/jobs/archiveEsReplaySnapshot.js
-// Archives a slim ES replay snapshot from data/strategy-snapshot-es.json
-// Writes to persistent replay storage: /var/data/replay/es/YYYY-MM-DD/HHMM.json
+// Engine 12 canonical multi-strategy ES Replay writer.
 //
-// This job does NOT recompute history.
-// It only archives the latest stored ES strategy snapshot.
+// Source:
+//   services/core/data/strategy-snapshot-es.json
 //
-// Engine 26 Replay Marker V2:
-// - If strategy.engine26ReplayMarker exists, append one compact line to:
-//   /var/data/replay/es/markers/engine26-replay-markers.jsonl
-// - This creates a searchable bookmark list for Engine 26 watch / research moments.
-// - This does NOT create permission, execution, Engine 8 calls, Schwab calls, or journal entries.
+// Durable output:
+//   /var/data/replay/es/YYYY-MM-DD/HHMM.json
+//
+// Contract:
+// - Records all canonical strategy lanes from one completed snapshot build.
+// - Does not calculate, rename, rebuild, approve, execute, or journal anything.
+// - Never rewrites an existing replay file.
+// - Leaves all legacy reduced replay files unchanged.
+// - Continues the existing Engine 26 marker index during the ownership transition.
 
 import fs from "fs";
 import path from "path";
@@ -17,25 +20,60 @@ import { fileURLToPath } from "url";
 
 const AZ_TZ = "America/Phoenix";
 
+const REPLAY_SCHEMA = "engine12.multiStrategyReplay.v1";
+const REPLAY_CONTRACT = "CANONICAL_MULTI_STRATEGY_REPLAY";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const CORE_DIR = path.resolve(__dirname, "..");
 const DATA_DIR = path.resolve(CORE_DIR, "data");
-
 const SOURCE_FILE = path.join(DATA_DIR, "strategy-snapshot-es.json");
 
-// Use same persistent root as Replay Mode.
-// REPLAY_DATA_DIR should be /var/data in Render.
-const REPLAY_DATA_DIR = (process.env.REPLAY_DATA_DIR || DATA_DIR).trim().replace(/\/+$/, "");
-const ES_REPLAY_ROOT = path.join(REPLAY_DATA_DIR, "replay", "es");
-const ES_REPLAY_MARKER_DIR = path.join(ES_REPLAY_ROOT, "markers");
+// Render production:
+//   REPLAY_DATA_DIR=/var/data
+//
+// Local fallback:
+//   services/core/data
+const REPLAY_DATA_DIR = String(
+  process.env.REPLAY_DATA_DIR || DATA_DIR
+)
+  .trim()
+  .replace(/\/+$/, "");
+
+const ES_REPLAY_ROOT = path.join(
+  REPLAY_DATA_DIR,
+  "replay",
+  "es"
+);
+
+const ES_REPLAY_MARKER_DIR = path.join(
+  ES_REPLAY_ROOT,
+  "markers"
+);
+
 const ENGINE26_MARKER_INDEX_FILE = path.join(
   ES_REPLAY_MARKER_DIR,
   "engine26-replay-markers.jsonl"
 );
 
-function azParts(d = new Date()) {
+const CANONICAL_STRATEGY_IDS = Object.freeze([
+  "subminute_scalp@10m",
+  "intraday_scalp@10m",
+  "minor_swing@1h",
+  "intermediate_swing@4h",
+  "primary_position@1d",
+]);
+
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function azParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: AZ_TZ,
     year: "numeric",
@@ -45,150 +83,204 @@ function azParts(d = new Date()) {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-  }).formatToParts(d);
+  }).formatToParts(date);
 
-  const get = (t) => parts.find((p) => p.type === t)?.value || "";
+  const get = (type) =>
+    parts.find((part) => part.type === type)?.value || "";
 
-  const Y = get("year");
-  const M = get("month");
-  const D = get("day");
-  const h = get("hour");
-  const m = get("minute");
-  const s = get("second");
+  const year = get("year");
+  const month = get("month");
+  const day = get("day");
+  const hour = get("hour");
+  const minute = get("minute");
+  const second = get("second");
 
   return {
-    dateYmd: `${Y}-${M}-${D}`,
-    timeHHMM: `${h}${m}`,
-    timeHHMMSS: `${h}${m}${s}`,
-    azTime: `${Y}-${M}-${D} ${h}:${m}:${s}`,
+    dateYmd: `${year}-${month}-${day}`,
+    timeHHMM: `${hour}${minute}`,
+    timeHHMMSS: `${hour}${minute}${second}`,
+    azTime: `${year}-${month}-${day} ${hour}:${minute}:${second}`,
   };
 }
 
 function readJsonSafe(file) {
   try {
-    if (!fs.existsSync(file)) return null;
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch (err) {
+    if (!fs.existsSync(file)) {
+      return {
+        ok: false,
+        error: "SOURCE_FILE_NOT_FOUND",
+        file,
+      };
+    }
+
+    const parsed = JSON.parse(
+      fs.readFileSync(file, "utf8")
+    );
+
+    if (!isObject(parsed)) {
+      return {
+        ok: false,
+        error: "SOURCE_JSON_NOT_OBJECT",
+        file,
+      };
+    }
+
+    return parsed;
+  } catch (error) {
     return {
       ok: false,
       error: "READ_JSON_FAILED",
       file,
-      detail: String(err?.message || err),
+      detail: String(error?.message || error),
     };
   }
 }
 
-function writeJsonAtomic(file, obj) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
-  fs.renameSync(tmp, file);
-}
+function firstFiniteNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
 
-function firstNumber(...values) {
-  for (const v of values) {
-    const n = Number(v);
-    if (Number.isFinite(n)) return n;
+    if (Number.isFinite(number)) {
+      return number;
+    }
   }
+
   return null;
 }
 
-function firstArrayItems(value, limit = 8) {
-  return Array.isArray(value) ? value.filter(Boolean).slice(0, limit) : [];
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (
+      typeof value === "string" &&
+      value.trim() !== ""
+    ) {
+      return value.trim();
+    }
+  }
+
+  return null;
 }
 
-function slimEngine25(engine25Context) {
-  if (!engine25Context || typeof engine25Context !== "object") return null;
-
-  return {
-    ok: engine25Context.ok === true,
-    score: engine25Context.score ?? null,
-    regime: engine25Context.regime ?? null,
-    label: engine25Context.label ?? null,
-    permission: engine25Context.permission ?? null,
-    sizeMultiplier: engine25Context.sizeMultiplier ?? null,
-    esPermission: engine25Context.esPermission ?? null,
-    tradePermission: engine25Context.tradePermission ?? null,
-    freshnessStatus: engine25Context.freshnessStatus ?? null,
-    modelDate: engine25Context.modelDate ?? null,
-    updatedAt: engine25Context.updatedAt ?? null,
-    warnings: Array.isArray(engine25Context.warnings)
-      ? engine25Context.warnings
-      : [],
-    summary: engine25Context.summary ?? null,
-  };
+function firstArrayItems(value, limit = 20) {
+  return Array.isArray(value)
+    ? value.filter(Boolean).slice(0, limit)
+    : [];
 }
 
-function slimConfluence(confluence) {
-  if (!confluence || typeof confluence !== "object") return null;
+function getStrategy(
+  strategies,
+  strategyId
+) {
+  const strategy = strategies?.[strategyId];
 
-  return {
-    ok: confluence.ok ?? null,
-    invalid: confluence.invalid ?? null,
-    tradeReady: confluence.tradeReady ?? null,
-    bias: confluence.bias ?? null,
-    price: confluence.price ?? null,
-
-    location: confluence.location ?? null,
-
-    scores: confluence.scores ?? null,
-    flags: confluence.flags ?? null,
-
-    timingContext: confluence.timingContext ?? null,
-
-    context: {
-      activeZone: confluence.context?.activeZone ?? null,
-      reaction: confluence.context?.reaction ?? null,
-      volume: confluence.context?.volume ?? null,
-      fib: confluence.context?.fib ?? null,
-      engine1: {
-        meta: confluence.context?.engine1?.meta ?? null,
-        active: confluence.context?.engine1?.active ?? null,
-        nearest: confluence.context?.engine1?.nearest ?? null,
-      },
-    },
-  };
+  return isObject(strategy)
+    ? strategy
+    : null;
 }
 
-function slimZones(strategy) {
-  const ctx = strategy?.context || null;
-  if (!ctx || typeof ctx !== "object") return null;
-
-  return {
-    meta: ctx.meta ?? null,
-    active: ctx.active ?? null,
-    nearest: ctx.nearest ?? null,
-    render: {
-      negotiated: Array.isArray(ctx.render?.negotiated)
-        ? ctx.render.negotiated
-        : [],
-      institutional: Array.isArray(ctx.render?.institutional)
-        ? ctx.render.institutional
-        : [],
-      shelves: Array.isArray(ctx.render?.shelves)
-        ? ctx.render.shelves
-        : [],
-    },
-  };
+function getMinuteStrategy(strategies) {
+  return getStrategy(
+    strategies,
+    "intraday_scalp@10m"
+  );
 }
 
-function buildSlimEsReplaySnapshot(source, parts) {
-  const strategy = source?.strategies?.["intraday_scalp@10m"] || {};
+function determineCurrentPrice(
+  source,
+  strategies
+) {
+  const minute = getMinuteStrategy(strategies);
 
-  const price = firstNumber(
-    strategy?.confluence?.price,
-    strategy?.context?.meta?.current_price,
-    strategy?.context?.meta?.currentPrice,
-    strategy?.engine22WaveStrategy?.currentPrice,
-    strategy?.engine16?.regimeLayers?.trigger10m?.close
+  return firstFiniteNumber(
+    source?.currentPrice,
+    source?.price,
+
+    minute?.currentPrice,
+    minute?.price,
+
+    minute?.engine26LocationCandidate?.currentPrice,
+    minute?.engine27TraderDecision?.currentPrice,
+    minute?.engine27IntradayDecision?.currentPrice,
+
+    minute?.confluence?.price,
+    minute?.context?.meta?.current_price,
+    minute?.context?.meta?.currentPrice,
+
+    minute?.engine22WaveStrategy?.currentPrice,
+    minute?.engine16?.regimeLayers?.trigger10m?.close
+  );
+}
+
+function determineSnapshotTime(
+  source,
+  strategies,
+  generatedAtUtc
+) {
+  const minute = getMinuteStrategy(strategies);
+
+  return firstNonEmptyString(
+    source?.snapshotTime,
+    source?.generatedAtUtc,
+    source?.now,
+    source?.updatedAt,
+
+    minute?.snapshotTime,
+    minute?.strategyTimeline?.snapshotTime,
+    minute?.engine8PaperOrder?.snapshotTime,
+    minute?.engine9OfficialManagementPlan?.snapshotTime,
+    minute?.engine26LocationCandidate?.snapshotTime,
+
+    generatedAtUtc
+  );
+}
+
+function buildCanonicalStrategies(source) {
+  const sourceStrategies = isObject(source?.strategies)
+    ? source.strategies
+    : {};
+
+  // Copy exactly what the canonical build emitted.
+  // JSON serialization below creates the immutable recorded value.
+  //
+  // Do not:
+  // - construct missing strategies
+  // - calculate strategyTimeline
+  // - substitute Minute fields into Subminute
+  // - manufacture null objects
+  return sourceStrategies;
+}
+
+function buildCanonicalReplaySnapshot(
+  source,
+  parts
+) {
+  const generatedAtUtc = new Date().toISOString();
+  const strategies = buildCanonicalStrategies(source);
+  const currentPrice = determineCurrentPrice(
+    source,
+    strategies
   );
 
-  const generatedAtUtc = new Date().toISOString();
+  const snapshotTime = determineSnapshotTime(
+    source,
+    strategies,
+    generatedAtUtc
+  );
 
   return {
     ok: true,
-    schema: "es-replay-snapshot@v1",
-    symbol: "ES",
+
+    schema: REPLAY_SCHEMA,
+    replayContract: REPLAY_CONTRACT,
+    immutable: true,
+
+    symbol:
+      firstNonEmptyString(
+        source?.symbol,
+        "ES"
+      ) || "ES",
+
+    snapshotTime,
 
     dateYmd: parts.dateYmd,
     timeHHMM: parts.timeHHMM,
@@ -200,208 +292,548 @@ function buildSlimEsReplaySnapshot(source, parts) {
 
     sourceFile: "data/strategy-snapshot-es.json",
 
-    price,
-    currentPrice: price,
-
-    marketRegime: source?.marketRegime ?? null,
-    marketMeter: {
-      score10m: source?.marketMind?.score10m ?? null,
-      score30m: source?.marketMind?.score30m ?? null,
-      score1h: source?.marketMind?.score1h ?? null,
-      score4h: source?.marketMind?.score4h ?? null,
-      scoreEOD: source?.marketMind?.scoreEOD ?? null,
-      state10m: source?.marketMind?.state10m ?? null,
-      state30m: source?.marketMind?.state30m ?? null,
-      state1h: source?.marketMind?.state1h ?? null,
-      state4h: source?.marketMind?.state4h ?? null,
-      stateEOD: source?.marketMind?.stateEOD ?? null,
+    sourceSnapshot: {
+      schema: source?.schema ?? null,
+      generatedAtUtc:
+        source?.generatedAtUtc ?? null,
+      snapshotTime:
+        source?.snapshotTime ?? null,
+      dateYmd:
+        source?.dateYmd ?? null,
+      timeHHMM:
+        source?.timeHHMM ?? null,
+      symbol:
+        source?.symbol ?? "ES",
     },
 
-    engine25Context: slimEngine25(
-      source?.engine25Context ?? strategy?.engine25Context ?? null
-    ),
+    currentPrice,
+    price: currentPrice,
 
-    strategy: {
-      strategyId: "intraday_scalp@10m",
-      tf: strategy?.tf ?? "10m",
-      degree: strategy?.degree ?? "minute",
-      wave: strategy?.wave ?? "W1",
+    marketRegime:
+      source?.marketRegime ?? null,
 
-      executionBias: strategy?.executionBias ?? null,
+    marketMeter:
+      source?.marketMeter ??
+      source?.marketMind ??
+      null,
 
-      engine22WaveStrategy: strategy?.engine22WaveStrategy ?? null,
-      waveOpportunity: strategy?.engine22WaveStrategy?.waveOpportunity ?? null,
+    engine25Context:
+      source?.engine25Context ??
+      null,
 
-      engine16: strategy?.engine16 ?? null,
-      regimeLayers: strategy?.engine16?.regimeLayers ?? null,
-
-      engine15: strategy?.engine15 ?? null,
-      engine15Decision: strategy?.engine15Decision ?? null,
-
-      permission: strategy?.permission ?? null,
-      permissionPreliminary: strategy?.permissionPreliminary ?? null,
-
-      engine26ReplayMarker: strategy?.engine26ReplayMarker ?? null,
-
-      confluence: slimConfluence(strategy?.confluence ?? null),
-      zones: slimZones(strategy),
-
-      momentum: strategy?.momentum ?? source?.momentum ?? null,
-
-      engine23Interpretation: strategy?.engine23Interpretation ?? null,
-      aiTradeCopilot: strategy?.aiTradeCopilot ?? null,
-    },
+    // Canonical contract:
+    // preserve every emitted strategy lane from one build.
+    strategies,
   };
 }
 
-function markerIndexEntryFromReplaySnapshot(replaySnapshot, outFile) {
-  const marker = replaySnapshot?.strategy?.engine26ReplayMarker || null;
+function canonicalLaneEvidence(
+  replaySnapshot
+) {
+  const strategies = replaySnapshot?.strategies || {};
 
-  if (!marker || marker.active !== true) return null;
+  return Object.fromEntries(
+    CANONICAL_STRATEGY_IDS.map((strategyId) => {
+      const strategy = getStrategy(
+        strategies,
+        strategyId
+      );
+
+      return [
+        strategyId,
+        {
+          present: strategy !== null,
+
+          laneId:
+            strategy?.laneId ?? null,
+
+          strategyId:
+            strategy?.strategyId ??
+            strategyId,
+
+          strategyTimelineType:
+            strategy?.strategyTimeline === null
+              ? "null"
+              : typeof strategy?.strategyTimeline,
+
+          engine8PaperOrderType:
+            strategy?.engine8PaperOrder === null
+              ? "null"
+              : typeof strategy?.engine8PaperOrder,
+        },
+      ];
+    })
+  );
+}
+
+function getEngine26ReplayMarker(
+  replaySnapshot
+) {
+  return (
+    replaySnapshot
+      ?.strategies
+      ?.["intraday_scalp@10m"]
+      ?.engine26ReplayMarker ??
+    null
+  );
+}
+
+function markerIndexEntryFromReplaySnapshot(
+  replaySnapshot,
+  outFile
+) {
+  const marker = getEngine26ReplayMarker(
+    replaySnapshot
+  );
+
+  if (
+    !isObject(marker) ||
+    marker.active !== true
+  ) {
+    return null;
+  }
 
   return {
-    schema: "engine26-replay-marker-index@v1",
+    schema:
+      "engine26-replay-marker-index@v1",
 
-    symbol: marker.symbol || replaySnapshot?.symbol || "ES",
-    strategyId: marker.strategyId || "intraday_scalp@10m",
+    replaySchema:
+      replaySnapshot?.schema ?? null,
 
-    dateYmd: marker.dateYmd || replaySnapshot?.dateYmd || null,
-    timeHHMM: marker.timeHHMM || replaySnapshot?.timeHHMM || null,
+    replayContract:
+      replaySnapshot?.replayContract ?? null,
+
+    symbol:
+      marker.symbol ||
+      replaySnapshot?.symbol ||
+      "ES",
+
+    strategyId:
+      marker.strategyId ||
+      "intraday_scalp@10m",
+
+    dateYmd:
+      marker.dateYmd ||
+      replaySnapshot?.dateYmd ||
+      null,
+
+    timeHHMM:
+      marker.timeHHMM ||
+      replaySnapshot?.timeHHMM ||
+      null,
+
     replayApiTime:
       marker.replayApiTime ||
       marker.timeHHMM ||
       replaySnapshot?.timeHHMM ||
       null,
 
-    azTime: replaySnapshot?.azTime || null,
-    generatedAtUtc: replaySnapshot?.generatedAtUtc || null,
-    indexedAtUtc: new Date().toISOString(),
+    snapshotTime:
+      replaySnapshot?.snapshotTime ||
+      null,
 
-    markerType: marker.markerType || null,
-    status: marker.status || null,
-    template: marker.template || null,
-    setupType: marker.setupType || null,
-    direction: marker.direction || null,
-    preferredAction: marker.preferredAction || null,
+    azTime:
+      replaySnapshot?.azTime ||
+      null,
 
-    currentPrice: marker.currentPrice ?? replaySnapshot?.currentPrice ?? null,
+    generatedAtUtc:
+      replaySnapshot?.generatedAtUtc ||
+      null,
 
-    activeImbalanceRole: marker.activeImbalanceRole || null,
-    structuralBias: marker.structuralBias || null,
+    indexedAtUtc:
+      new Date().toISOString(),
 
-    shortResearchOnly: marker.shortResearchOnly === true,
-    doNotChaseLong: marker.doNotChaseLong === true,
-    watchOnly: marker.watchOnly === true,
+    markerType:
+      marker.markerType || null,
 
-    zone: marker.zone || null,
+    status:
+      marker.status || null,
 
-    engine3: marker.engine3 || null,
-    engine4: marker.engine4 || null,
-    engine15: marker.engine15 || null,
-    engine6: marker.engine6 || null,
+    template:
+      marker.template || null,
 
-    engine6Decision: marker.engine6?.decision || null,
-    engine6Allowed: marker.engine6?.allowed === true,
-    engine4State: marker.engine4?.state || null,
-    engine4Allowed: marker.engine4?.allowed === true,
-    engine4HardBlocked: marker.engine4?.hardBlocked === true,
-    engine3State: marker.engine3?.state || null,
-    engine3Direction: marker.engine3?.direction || null,
-    engine15Readiness: marker.engine15?.readiness || null,
+    setupType:
+      marker.setupType || null,
 
-    ticketCreated: marker.ticket?.created === true,
-    executionCreated: marker.execution?.created === true,
+    direction:
+      marker.direction || null,
 
-    replayPath: marker.replayPath || outFile,
-    replayFile: outFile,
+    preferredAction:
+      marker.preferredAction || null,
+
+    currentPrice:
+      marker.currentPrice ??
+      replaySnapshot?.currentPrice ??
+      null,
+
+    activeImbalanceRole:
+      marker.activeImbalanceRole || null,
+
+    structuralBias:
+      marker.structuralBias || null,
+
+    shortResearchOnly:
+      marker.shortResearchOnly === true,
+
+    doNotChaseLong:
+      marker.doNotChaseLong === true,
+
+    watchOnly:
+      marker.watchOnly === true,
+
+    zone:
+      marker.zone || null,
+
+    engine3:
+      marker.engine3 || null,
+
+    engine4:
+      marker.engine4 || null,
+
+    engine15:
+      marker.engine15 || null,
+
+    engine6:
+      marker.engine6 || null,
+
+    engine6Decision:
+      marker.engine6?.decision || null,
+
+    engine6Allowed:
+      marker.engine6?.allowed === true,
+
+    engine4State:
+      marker.engine4?.state || null,
+
+    engine4Allowed:
+      marker.engine4?.allowed === true,
+
+    engine4HardBlocked:
+      marker.engine4?.hardBlocked === true,
+
+    engine3State:
+      marker.engine3?.state || null,
+
+    engine3Direction:
+      marker.engine3?.direction || null,
+
+    engine15Readiness:
+      marker.engine15?.readiness || null,
+
+    ticketCreated:
+      marker.ticket?.created === true,
+
+    executionCreated:
+      marker.execution?.created === true,
+
+    replayPath:
+      marker.replayPath || outFile,
+
+    replayFile:
+      outFile,
 
     dedupeKey:
       marker.dedupeKey ||
       [
         marker.symbol || "ES",
-        marker.dateYmd || replaySnapshot?.dateYmd || "UNKNOWN_DATE",
-        marker.timeHHMM || replaySnapshot?.timeHHMM || "UNKNOWN_TIME",
-        marker.markerType || "UNKNOWN_MARKER",
-        marker.status || "UNKNOWN_STATUS",
-        marker.engine6?.decision || "UNKNOWN_ENGINE6_DECISION",
+        marker.dateYmd ||
+          replaySnapshot?.dateYmd ||
+          "UNKNOWN_DATE",
+        marker.timeHHMM ||
+          replaySnapshot?.timeHHMM ||
+          "UNKNOWN_TIME",
+        marker.markerType ||
+          "UNKNOWN_MARKER",
+        marker.status ||
+          "UNKNOWN_STATUS",
+        marker.engine6?.decision ||
+          "UNKNOWN_ENGINE6_DECISION",
       ].join("|"),
 
-    reasonCodes: firstArrayItems(marker.reasonCodes, 20),
+    reasonCodes:
+      firstArrayItems(
+        marker.reasonCodes,
+        20
+      ),
   };
 }
 
-function appendJsonl(file, obj) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, `${JSON.stringify(obj)}\n`);
+function appendJsonl(
+  file,
+  object
+) {
+  fs.mkdirSync(
+    path.dirname(file),
+    { recursive: true }
+  );
+
+  fs.appendFileSync(
+    file,
+    `${JSON.stringify(object)}\n`,
+    "utf8"
+  );
 }
 
-function markerIndexHasDedupeKey(file, dedupeKey) {
-  if (!dedupeKey || !fs.existsSync(file)) return false;
+function markerIndexHasDedupeKey(
+  file,
+  dedupeKey
+) {
+  if (
+    !dedupeKey ||
+    !fs.existsSync(file)
+  ) {
+    return false;
+  }
 
   try {
-    const text = fs.readFileSync(file, "utf8");
-    return text.includes(`"dedupeKey":"${dedupeKey}"`);
+    const text = fs.readFileSync(
+      file,
+      "utf8"
+    );
+
+    return text.includes(
+      `"dedupeKey":"${dedupeKey}"`
+    );
   } catch {
     return false;
   }
 }
 
-function appendEngine26MarkerIndexIfNeeded(replaySnapshot, outFile) {
-  const entry = markerIndexEntryFromReplaySnapshot(replaySnapshot, outFile);
+function appendEngine26MarkerIndexIfNeeded(
+  replaySnapshot,
+  outFile
+) {
+  const entry =
+    markerIndexEntryFromReplaySnapshot(
+      replaySnapshot,
+      outFile
+    );
 
   if (!entry) {
     return {
       markerIndexed: false,
-      markerIndexFile: ENGINE26_MARKER_INDEX_FILE,
-      markerIndexReason: "NO_ACTIVE_ENGINE26_REPLAY_MARKER",
+      markerIndexFile:
+        ENGINE26_MARKER_INDEX_FILE,
+      markerIndexReason:
+        "NO_ACTIVE_ENGINE26_REPLAY_MARKER",
       markerDedupeKey: null,
     };
   }
 
-  if (markerIndexHasDedupeKey(ENGINE26_MARKER_INDEX_FILE, entry.dedupeKey)) {
+  if (
+    markerIndexHasDedupeKey(
+      ENGINE26_MARKER_INDEX_FILE,
+      entry.dedupeKey
+    )
+  ) {
     return {
       markerIndexed: false,
-      markerIndexFile: ENGINE26_MARKER_INDEX_FILE,
-      markerIndexReason: "DUPLICATE_MARKER_DEDUPE_KEY",
-      markerDedupeKey: entry.dedupeKey,
+      markerIndexFile:
+        ENGINE26_MARKER_INDEX_FILE,
+      markerIndexReason:
+        "DUPLICATE_MARKER_DEDUPE_KEY",
+      markerDedupeKey:
+        entry.dedupeKey,
     };
   }
 
-  appendJsonl(ENGINE26_MARKER_INDEX_FILE, entry);
+  appendJsonl(
+    ENGINE26_MARKER_INDEX_FILE,
+    entry
+  );
 
   return {
     markerIndexed: true,
-    markerIndexFile: ENGINE26_MARKER_INDEX_FILE,
-    markerIndexReason: "ENGINE26_REPLAY_MARKER_INDEXED",
-    markerDedupeKey: entry.dedupeKey,
+    markerIndexFile:
+      ENGINE26_MARKER_INDEX_FILE,
+    markerIndexReason:
+      "ENGINE26_REPLAY_MARKER_INDEXED",
+    markerDedupeKey:
+      entry.dedupeKey,
+  };
+}
+
+function writeJsonAtomicNoOverwrite(
+  file,
+  object
+) {
+  fs.mkdirSync(
+    path.dirname(file),
+    { recursive: true }
+  );
+
+  if (fs.existsSync(file)) {
+    return {
+      written: false,
+      reason:
+        "DUPLICATE_REPLAY_BLOCKED",
+      file,
+    };
+  }
+
+  const temporaryFile = [
+    file,
+    ".tmp.",
+    process.pid,
+    ".",
+    Date.now(),
+  ].join("");
+
+  try {
+    fs.writeFileSync(
+      temporaryFile,
+      JSON.stringify(object, null, 2),
+      {
+        encoding: "utf8",
+        flag: "wx",
+      }
+    );
+
+    // An atomic hard-link claim prevents replacement of an
+    // existing final path. linkSync throws EEXIST when another
+    // process already claimed this timestamp.
+    fs.linkSync(
+      temporaryFile,
+      file
+    );
+
+    fs.unlinkSync(
+      temporaryFile
+    );
+
+    return {
+      written: true,
+      reason:
+        "CANONICAL_REPLAY_WRITTEN",
+      file,
+    };
+  } catch (error) {
+    try {
+      if (
+        fs.existsSync(temporaryFile)
+      ) {
+        fs.unlinkSync(
+          temporaryFile
+        );
+      }
+    } catch {
+      // Cleanup failure must not replace the original error.
+    }
+
+    if (
+      error?.code === "EEXIST"
+    ) {
+      return {
+        written: false,
+        reason:
+          "DUPLICATE_REPLAY_BLOCKED",
+        file,
+      };
+    }
+
+    throw error;
+  }
+}
+
+function validateCanonicalSource(
+  source
+) {
+  if (!isObject(source)) {
+    return {
+      ok: false,
+      reason:
+        "SOURCE_SNAPSHOT_NOT_OBJECT",
+    };
+  }
+
+  if (!isObject(source.strategies)) {
+    return {
+      ok: false,
+      reason:
+        "SOURCE_STRATEGIES_MISSING",
+    };
+  }
+
+  return {
+    ok: true,
+    reason:
+      "CANONICAL_SOURCE_VALID",
   };
 }
 
 function main() {
-  const parts = azParts(new Date());
+  const parts = azParts(
+    new Date()
+  );
 
-  const source = readJsonSafe(SOURCE_FILE);
+  const source =
+    readJsonSafe(SOURCE_FILE);
 
-  if (!source || source.ok === false) {
+  if (
+    !source ||
+    source.ok === false
+  ) {
     console.log(
       JSON.stringify(
         {
           ok: false,
+          replayWritten: false,
           skipped: true,
-          reason: "ES_STRATEGY_SNAPSHOT_MISSING_OR_INVALID",
-          sourceFile: SOURCE_FILE,
-          dateYmd: parts.dateYmd,
-          timeHHMM: parts.timeHHMM,
-          detail: source?.detail || source?.error || null,
+          reason:
+            "ES_STRATEGY_SNAPSHOT_MISSING_OR_INVALID",
+          sourceFile:
+            SOURCE_FILE,
+          dateYmd:
+            parts.dateYmd,
+          timeHHMM:
+            parts.timeHHMM,
+          detail:
+            source?.detail ||
+            source?.error ||
+            null,
         },
         null,
         2
       )
     );
+
+    process.exitCode = 1;
     return;
   }
 
-  const replaySnapshot = buildSlimEsReplaySnapshot(source, parts);
+  const validation =
+    validateCanonicalSource(source);
+
+  if (!validation.ok) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: false,
+          replayWritten: false,
+          skipped: true,
+          reason:
+            validation.reason,
+          sourceFile:
+            SOURCE_FILE,
+          dateYmd:
+            parts.dateYmd,
+          timeHHMM:
+            parts.timeHHMM,
+        },
+        null,
+        2
+      )
+    );
+
+    process.exitCode = 1;
+    return;
+  }
+
+  const replaySnapshot =
+    buildCanonicalReplaySnapshot(
+      source,
+      parts
+    );
 
   const outFile = path.join(
     ES_REPLAY_ROOT,
@@ -409,40 +841,125 @@ function main() {
     `${parts.timeHHMM}.json`
   );
 
-  writeJsonAtomic(outFile, replaySnapshot);
+  const writeResult =
+    writeJsonAtomicNoOverwrite(
+      outFile,
+      replaySnapshot
+    );
 
-  const markerIndexResult = appendEngine26MarkerIndexIfNeeded(
-    replaySnapshot,
-    outFile
-  );
+  if (!writeResult.written) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          replayWritten: false,
+          skipped: true,
+          reason:
+            writeResult.reason,
+
+          schema:
+            REPLAY_SCHEMA,
+
+          replayContract:
+            REPLAY_CONTRACT,
+
+          symbol:
+            replaySnapshot.symbol,
+
+          dateYmd:
+            parts.dateYmd,
+
+          timeHHMM:
+            parts.timeHHMM,
+
+          file:
+            outFile,
+
+          existingFilePreserved:
+            true,
+
+          markerIndexed:
+            false,
+
+          markerIndexReason:
+            "REPLAY_NOT_WRITTEN",
+        },
+        null,
+        2
+      )
+    );
+
+    return;
+  }
+
+  const markerIndexResult =
+    appendEngine26MarkerIndexIfNeeded(
+      replaySnapshot,
+      outFile
+    );
+
+  const laneEvidence =
+    canonicalLaneEvidence(
+      replaySnapshot
+    );
 
   console.log(
     JSON.stringify(
       {
         ok: true,
-        schema: replaySnapshot.schema,
-        symbol: "ES",
-        dateYmd: parts.dateYmd,
-        timeHHMM: parts.timeHHMM,
-        file: outFile,
-        bytes: fs.statSync(outFile).size,
+        replayWritten: true,
 
-        hasWaveOpportunity:
-          replaySnapshot.strategy?.waveOpportunity != null,
-        hasEngine16:
-          replaySnapshot.strategy?.engine16 != null,
-        hasEngine25:
-          replaySnapshot.engine25Context != null,
-        hasEngine15Decision:
-          replaySnapshot.strategy?.engine15Decision != null,
+        schema:
+          replaySnapshot.schema,
 
-        hasEngine26ReplayMarker:
-          replaySnapshot.strategy?.engine26ReplayMarker != null,
+        replayContract:
+          replaySnapshot.replayContract,
 
-        markerIndexed: markerIndexResult.markerIndexed,
-        markerIndexFile: markerIndexResult.markerIndexFile,
-        markerIndexReason: markerIndexResult.markerIndexReason,
-        markerDedupeKey: markerIndexResult.markerDedupeKey,
+        immutable:
+          replaySnapshot.immutable === true,
+
+        symbol:
+          replaySnapshot.symbol,
+
+        snapshotTime:
+          replaySnapshot.snapshotTime,
+
+        dateYmd:
+          parts.dateYmd,
+
+        timeHHMM:
+          parts.timeHHMM,
+
+        file:
+          outFile,
+
+        bytes:
+          fs.statSync(outFile).size,
+
+        strategyCount:
+          Object.keys(
+            replaySnapshot.strategies
+          ).length,
+
+        strategyIds:
+          Object.keys(
+            replaySnapshot.strategies
+          ),
+
+        canonicalLaneEvidence:
+          laneEvidence,
+
+        markerIndexed:
+          markerIndexResult.markerIndexed,
+
+        markerIndexFile:
+          markerIndexResult.markerIndexFile,
+
+        markerIndexReason:
+          markerIndexResult.markerIndexReason,
+
+        markerDedupeKey:
+          markerIndexResult.markerDedupeKey,
       },
       null,
       2
@@ -450,4 +967,27 @@ function main() {
   );
 }
 
-main();
+try {
+  main();
+} catch (error) {
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        replayWritten: false,
+        errorCode:
+          "REPLAY_WRITE_FAILED",
+        sourceFile:
+          SOURCE_FILE,
+        replayRoot:
+          ES_REPLAY_ROOT,
+        retryable: true,
+        detail:
+          String(
+            error?.message || error
+          ),
+      },
+      null,
+      2
+    )
+  );
