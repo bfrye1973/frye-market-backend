@@ -8867,6 +8867,123 @@ result.strategies[s.strategyId] = {
   // Does not create permission, sizing, tickets, execution, or journal records.
   result.engine27Strategies = buildEngine27Strategies({
     snapshot: result,
+/*
+ * Engine 8 — Subminute canonical execution state.
+ *
+ * Read-only attachment only.
+ *
+ * This block:
+ * - consumes only Subminute-owned contracts
+ * - preserves current Engine 26 / Engine 6 identity
+ * - does not create Engine 7 or Engine 9 readiness
+ * - does not create IDs, orders, fills, journal entries, or broker calls
+ * - does not change the Engine 27 lifecycle
+ */
+if (
+  String(symbol || "").toUpperCase() === "ES"
+) {
+  const subminute =
+    result.strategies?.[
+      "subminute_scalp@10m"
+    ] || null;
+
+  if (subminute) {
+    const subminuteEngine6Permission =
+      subminute.engine6Permission ||
+      null;
+
+    const subminuteEngine9Plan =
+      subminute
+        .engine9OfficialManagementPlan ||
+      null;
+
+    const subminuteEngine7Sizing =
+      subminute.engine7PositionSizing ||
+      null;
+
+    const subminuteStrategyId =
+      subminute.strategyId ||
+      subminuteEngine6Permission
+        ?.strategyId ||
+      "subminute_scalp@10m";
+
+    const subminuteCandidateId =
+      subminuteEngine9Plan
+        ?.candidateId ||
+      subminuteEngine7Sizing
+        ?.candidateId ||
+      subminuteEngine6Permission
+        ?.candidateId ||
+      subminuteEngine6Permission
+        ?.identity
+        ?.candidateId ||
+      subminute
+        ?.engine26LocationCandidate
+        ?.candidateId ||
+      null;
+
+    const subminuteZoneId =
+      subminuteEngine9Plan
+        ?.zoneId ||
+      subminuteEngine7Sizing
+        ?.zoneId ||
+      subminuteEngine6Permission
+        ?.zoneId ||
+      subminuteEngine6Permission
+        ?.identity
+        ?.zoneId ||
+      subminute
+        ?.engine26LocationCandidate
+        ?.zoneId ||
+      null;
+
+    const subminutePlanId =
+      subminuteEngine9Plan?.planId ||
+      subminuteEngine7Sizing?.planId ||
+      null;
+
+    const subminuteDuplicateState =
+      getEngine8DuplicateState({
+        strategyId:
+          subminuteStrategyId,
+
+        candidateId:
+          subminuteCandidateId,
+
+        planId:
+          subminutePlanId,
+      });
+
+    subminute.engine8PaperOrder =
+      buildEngine8CanonicalPaperAdapter({
+        engine6PaperPermission:
+          subminuteEngine6Permission,
+
+        engine9OfficialManagementPlan:
+          subminuteEngine9Plan,
+
+        engine7PositionSizing:
+          subminuteEngine7Sizing,
+
+        duplicateState:
+          subminuteDuplicateState,
+
+        paperExecutionEnabled:
+          process.env
+            .ENGINE8_PAPER_ONLY === "1",
+
+        liveTradingEnabled:
+          process.env
+            .ENGINE8_LIVE_TRADING_ENABLED ===
+          "1",
+
+        allowLiveFutures:
+          process.env
+            .ENGINE8_ALLOW_LIVE_FUTURES ===
+          "1",
+      });
+  }
+}
   });
   /*
  * Engine 9 — Official Management Plan
