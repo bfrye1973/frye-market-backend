@@ -2522,6 +2522,57 @@ function buildEngine26TradePlanPreview({
       "Brian's current paper scalp goal is 15–30 ES points, not a home-run trade.",
   };
 
+  /*
+   * Minute LONG target source.
+   *
+   * Engine 22 owns the Minute W3 extension ladder.
+   * Engine 26 only transports valid targets above the proposed LONG entry.
+   */
+  const minuteLongTargetLevels = Array.isArray(
+    engine22WaveStrategy
+      ?.degreeStates
+      ?.minute
+      ?.targetModel
+      ?.displayLevels
+  )
+    ? engine22WaveStrategy
+        .degreeStates
+        .minute
+        .targetModel
+        .displayLevels
+        .map((target) => ({
+          label:
+            safeString(target?.label) ||
+            null,
+
+          price:
+            roundToTick(target?.price),
+        }))
+        .filter(
+          (target) =>
+            target.price != null &&
+            entryIdea.referencePrice != null &&
+            target.price >
+              entryIdea.referencePrice
+        )
+        .sort(
+          (a, b) =>
+            a.price - b.price
+        )
+    : [];
+
+  const minuteLongTarget1 =
+    minuteLongTargetLevels[0] ||
+    null;
+
+  const minuteLongTarget2 =
+    minuteLongTargetLevels[1] ||
+    null;
+
+  const minuteLongTarget3 =
+    minuteLongTargetLevels[2] ||
+    null;
+
   const targetMap =
     direction === "SHORT"
       ? {
@@ -2529,18 +2580,54 @@ function buildEngine26TradePlanPreview({
           aLowBreak: aLow,
           preferredCPressure: c1272,
           stretchC: c1618,
+
           labels: {
-            firstReaction: "C100 / first reaction",
-            aLowBreak: "A-low break / proof C is working",
-            preferredCPressure: "C1272 / preferred C pressure",
-            stretchC: "C1618 / stretch C",
+            firstReaction:
+              "C100 / first reaction",
+
+            aLowBreak:
+              "A-low break / proof C is working",
+
+            preferredCPressure:
+              "C1272 / preferred C pressure",
+
+            stretchC:
+              "C1618 / stretch C",
+          },
+        }
+      : direction === "LONG"
+      ? {
+          firstReaction:
+            minuteLongTarget1?.price ??
+            null,
+
+          preferredW3Extension:
+            minuteLongTarget2?.price ??
+            null,
+
+          stretchW3Extension:
+            minuteLongTarget3?.price ??
+            null,
+
+          labels: {
+            firstReaction:
+              minuteLongTarget1
+                ? `Minute W3 ${minuteLongTarget1.label || "first extension"}`
+                : null,
+
+            preferredW3Extension:
+              minuteLongTarget2
+                ? `Minute W3 ${minuteLongTarget2.label || "preferred extension"}`
+                : null,
+
+            stretchW3Extension:
+              minuteLongTarget3
+                ? `Minute W3 ${minuteLongTarget3.label || "stretch extension"}`
+                : null,
           },
         }
       : {
           firstReaction: null,
-          aLowBreak: null,
-          preferredCPressure: null,
-          stretchC: null,
           labels: {},
         };
 
