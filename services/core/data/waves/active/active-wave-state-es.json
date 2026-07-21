@@ -1,6 +1,6 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-07-10 12:00",
+  "updatedAt": "2026-07-21 14:00",
   "schema": "active-wave-state-es@v3",
   "activeDegreeKeys": [
     "primary",
@@ -181,8 +181,8 @@
           "basis": [
             "INTERMEDIATE_W3_ACTIVE_AFTER_CONFIRMED_W2_LOW",
             "MINOR_W1_COMPLETED_WITHIN_INTERMEDIATE_W3",
-            "MINOR_W2_COMPLETED_AT_7297",
-            "MINOR_W3_ACTIVE_FROM_7297",
+            "MINOR_W2_COMPLETED_AT_7359_75",
+            "MINOR_W3_ACTIVE_FROM_7359_75",
             "INTERMEDIATE_PARENT_TREND_REMAINS_UP"
           ]
         }
@@ -253,8 +253,8 @@
       "parentWave": "W3",
       "activeWave": "W3",
       "stage": "ACTIVE",
-      "currentRead": "MINOR_W3_ACTIVE_FROM_7297_AFTER_MINOR_W2_COMPLETE",
-      "headline": "Minor W3 active from 7297 after completed Minor W2",
+      "currentRead": "MINOR_W3_ACTIVE_FROM_7359_75_AFTER_MINOR_W2_COMPLETE",
+      "headline": "Minor W3 active from 7359.75 after completed Minor W2",
       "action": "WATCH_MINOR_W3_CONTINUATION_7600_SUPPORT_HOLD",
       "marks": {
         "W1": {
@@ -275,13 +275,13 @@
           ]
         },
         "W2": {
-          "price": 7297.0,
-          "time": "2026-06-10 16:00",
+          "price": 7359.75,
+          "time": "2026-06-25 18:00",
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "MINOR_W2_COMPLETED_AT_7297",
-            "MINOR_W3_STARTED_FROM_7297",
+            "MINOR_W2_COMPLETED_AT_7359_75_ON_2026_06_25_1800",
+            "MINOR_W3_STARTED_FROM_7359_75",
             "PRICE_RECLAIMED_UPPER_STRUCTURE_AFTER_W2_LOW"
           ]
         },
@@ -291,10 +291,10 @@
           "status": "ACTIVE",
           "confidence": "MEDIUM_HIGH",
           "basis": [
-            "MINOR_W3_ACTIVE_AFTER_CONFIRMED_MINOR_W2_LOW",
-            "MINUTE_3_BREAKOUT_CANDIDATE_ACTIVE_INSIDE_MINOR_W3",
-            "WATCH_7600_SUPPORT_HOLD",
-            "WATCH_7645_AND_7692_CONFIRMATION_LEVELS"
+            "MINOR_W3_ACTIVE_AFTER_CONFIRMED_MINOR_W2_LOW_7359_75",
+            "MINUTE_W3_BREAKOUT_CANDIDATE_ACTIVE_INSIDE_MINOR_W3",
+            "WATCH_7530_SUPPORT_HOLD",
+            "WATCH_7634_25_AND_7692_CONFIRMATION_LEVELS"
           ]
         }
       },
@@ -302,39 +302,39 @@
         "source": "MINOR_W3_EXTENSION_FROM_MINOR_W2_LOW",
         "anchorLow": 6429.5,
         "anchorHigh": 7692.0,
-        "projectionBase": 7297.0,
+        "projectionBase": 7359.75,
         "range": 1262.5,
         "levels": {
-          "e100": 8559.5,
-          "e1272": 8903.0,
-          "e1618": 9339.75,
-          "e200": 9822.0,
-          "e2618": 10602.25
+          "e100": 8622.25,
+          "e1272": 8965.75,
+          "e1618": 9402.5,
+          "e200": 9884.75,
+          "e2618": 10665.0
         },
         "displayLevels": [
           {
             "label": "1.000",
-            "price": 8559.5
+            "price": 8622.25
           },
           {
             "label": "1.272",
-            "price": 8903.0
+            "price": 8965.75
           },
           {
             "label": "1.618",
-            "price": 9339.75
+            "price": 9402.5
           },
           {
             "label": "2.000",
-            "price": 9822.0
+            "price": 9884.75
           },
           {
             "label": "2.618",
-            "price": 10602.25
+            "price": 10665.0
           }
         ],
-        "nextTarget": 8559.5,
-        "summary": "Minor W3 is active from 7297.0. Full extension ladder: 8559.5, 8903.0, 9339.75, 9822.0, 10602.25.",
+        "nextTarget": 8622.25,
+        "summary": "Minor W3 is active from 7359.75. Full extension ladder: 8622.25, 8965.75, 9402.5, 9884.75, 10665.0.",
         "reasonCodes": [
           "MINOR_W3_EXTENSION_MODEL_BUILT",
           "MINOR_W3_FULL_EXTENSION_LADDER_ATTACHED",
@@ -347,24 +347,24 @@
         "active": true,
         "source": "BRIAN_UPDATED_MINOR_W3_COUNT",
         "state": "MINOR_W3_CONTINUATION_DECISION_WATCH",
-        "supportHoldLevel": 7600,
-        "warningLevel": 7560,
-        "subminuteInvalidation": 7466.25,
-        "minuteInvalidation": 7365,
-        "minorInvalidation": 7297,
+        "supportHoldLevel": 7530,
+        "warningLevel": 7504.25,
+        "subminuteInvalidation": 7504.25,
+        "minuteInvalidation": 7472.5,
+        "minorInvalidation": 7359.75,
         "confirmationLevels": [
-          7645,
+          7634.25,
           7692
         ],
-        "bullPath": "If 7600 holds as support and price accepts above 7645/7692, Minor W3 continuation is favored.",
-        "bearPath": "If 7600 fails, then 7560 is warning. Losing 7466.25 weakens subminute W3; losing 7365 forces Minute count review; losing 7297 invalidates Minor W3 from W2.",
+        "bullPath": "If 7530 holds as support and price accepts above 7634.25/7692, Minor W3 continuation is favored.",
+        "bearPath": "If 7530 fails, then 7504.25 is warning/subminute invalidation. Losing 7472.50 forces Minute count review; losing 7359.75 invalidates Minor W3 from W2.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
           "MINOR_W3_ACTIVE",
-          "WATCH_7600_SUPPORT_HOLD",
-          "WATCH_7645_7692_CONFIRMATION",
+          "WATCH_7530_SUPPORT_HOLD",
+          "WATCH_7634_25_7692_CONFIRMATION",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
@@ -374,8 +374,8 @@
       "watchOnly": true,
       "reasonCodes": [
         "MINOR_W3_ACTIVE",
-        "MINOR_W2_CONFIRMED_AT_7297",
-        "MINUTE_3_BREAKOUT_CANDIDATE_ACTIVE",
+        "MINOR_W2_CONFIRMED_AT_7359_75",
+        "MINUTE_W3_BREAKOUT_CANDIDATE_ACTIVE",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
@@ -389,36 +389,36 @@
       "parentWave": "W3",
       "activeWave": "W3",
       "stage": "BREAKOUT_CANDIDATE",
-      "currentRead": "MINUTE_W3_BREAKOUT_CANDIDATE_FROM_7365_AFTER_MINUTE_W2",
-      "headline": "Minute W3 breakout candidate active from 7365 after completed Minute W2",
-      "action": "WATCH_7600_SUPPORT_HOLD_AND_7645_BREAK_HOLD",
+      "currentRead": "MINUTE_W3_BREAKOUT_CANDIDATE_FROM_7472_50_AFTER_MINUTE_W2",
+      "headline": "Minute W3 breakout candidate active from 7472.50 after completed Minute W2",
+      "action": "WATCH_7530_SUPPORT_HOLD_AND_7634_25_BREAK_HOLD",
       "marks": {
         "W1": {
           "low": {
-            "price": 7334.25,
-            "time": "2026-06-11 12:00"
+            "price": 7367.25,
+            "time": "2026-06-26 11:00"
           },
           "high": {
-            "price": 7645.0,
-            "time": "2026-06-15 09:00"
+            "price": 7634.25,
+            "time": "2026-07-15 18:00"
           },
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "MINUTE_W1_LOW_7334_25_ON_2026_06_11_1200",
-            "MINUTE_W1_HIGH_7645_ON_2026_06_15_0900",
+            "MINUTE_W1_LOW_7367_25_ON_2026_06_26_1100",
+            "MINUTE_W1_HIGH_7634_25_ON_2026_07_15_1800",
             "MINUTE_W1_INSIDE_MINOR_W3"
           ]
         },
         "W2": {
-          "price": 7365.0,
-          "time": "2026-06-25 19:00",
+          "price": 7472.5,
+          "time": "2026-07-20 15:00",
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "MINUTE_W2_COMPLETED_AT_7365",
-            "MINUTE_W3_STARTED_FROM_7365",
-            "HELD_ABOVE_MINOR_W2_LOW_7297"
+            "MINUTE_W2_COMPLETED_AT_7472_50_ON_2026_07_20_1500",
+            "MINUTE_W3_STARTED_FROM_7472_50",
+            "HELD_ABOVE_MINOR_W2_LOW_7359_75"
           ]
         },
         "W3": {
@@ -427,50 +427,50 @@
           "status": "ACTIVE_CANDIDATE",
           "confidence": "MEDIUM",
           "basis": [
-            "MINUTE_W3_BREAKOUT_CANDIDATE_AFTER_MINUTE_W2_7365",
-            "SUBMINUTE_3_ACTIVE_FROM_7466_25",
-            "WATCH_7600_SUPPORT_HOLD",
-            "WATCH_7645_BREAK_HOLD_FOR_STRONGER_CONFIRMATION"
+            "MINUTE_W3_BREAKOUT_CANDIDATE_AFTER_MINUTE_W2_7472_50",
+            "SUBMINUTE_W3_ACTIVE_FROM_7504_25",
+            "WATCH_7530_SUPPORT_HOLD",
+            "WATCH_7634_25_BREAK_HOLD_FOR_STRONGER_CONFIRMATION"
           ]
         }
       },
       "targetModel": {
         "source": "MINUTE_W3_EXTENSION_FROM_MINUTE_W2_LOW",
-        "anchorLow": 7334.25,
-        "anchorHigh": 7645.0,
-        "projectionBase": 7365.0,
-        "range": 310.75,
+        "anchorLow": 7367.25,
+        "anchorHigh": 7634.25,
+        "projectionBase": 7472.5,
+        "range": 267.0,
         "levels": {
-          "e100": 7675.75,
-          "e1272": 7760.25,
-          "e1618": 7867.75,
-          "e200": 7986.5,
-          "e2618": 8178.5
+          "e100": 7739.5,
+          "e1272": 7812.0,
+          "e1618": 7904.5,
+          "e200": 8006.5,
+          "e2618": 8171.5
         },
         "displayLevels": [
           {
             "label": "1.000",
-            "price": 7675.75
+            "price": 7739.5
           },
           {
             "label": "1.272",
-            "price": 7760.25
+            "price": 7812.0
           },
           {
             "label": "1.618",
-            "price": 7867.75
+            "price": 7904.5
           },
           {
             "label": "2.000",
-            "price": 7986.5
+            "price": 8006.5
           },
           {
             "label": "2.618",
-            "price": 8178.5
+            "price": 8171.5
           }
         ],
-        "nextTarget": 7675.75,
-        "summary": "Minute W3 breakout candidate is active from 7365.0. Full extension ladder: 7675.75, 7760.25, 7867.75, 7986.5, 8178.5.",
+        "nextTarget": 7739.5,
+        "summary": "Minute W3 breakout candidate is active from 7472.50. Full extension ladder: 7739.5, 7812.0, 7904.5, 8006.5, 8171.5.",
         "reasonCodes": [
           "MINUTE_W3_EXTENSION_MODEL_BUILT",
           "MINUTE_W3_FULL_EXTENSION_LADDER_ATTACHED",
@@ -481,24 +481,24 @@
       },
       "decisionWatch": {
         "active": true,
-        "source": "BRIAN_UPDATED_MINOR_W3_COUNT",
+        "source": "BRIAN_UPDATED_MINUTE_W3_COUNT",
         "state": "MINUTE_W3_BREAKOUT_DECISION_WATCH",
-        "supportHoldLevel": 7600,
-        "warningLevel": 7560,
-        "minuteInvalidation": 7365.0,
+        "supportHoldLevel": 7530,
+        "warningLevel": 7504.25,
+        "minuteInvalidation": 7472.5,
         "confirmationLevels": [
-          7645,
+          7634.25,
           7692
         ],
-        "bullPath": "If 7600 holds and price breaks/holds 7645, Minute W3 confirmation improves.",
-        "bearPath": "If 7600 and 7560 fail, watch subminute failure and Minute W2 review.",
+        "bullPath": "If 7530 holds and price breaks/holds 7634.25, Minute W3 confirmation improves.",
+        "bearPath": "If 7530 and 7504.25 fail, watch subminute failure and Minute W2 review at 7472.50.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
           "MINUTE_W3_BREAKOUT_CANDIDATE",
-          "WATCH_7600_SUPPORT_HOLD",
-          "WATCH_7645_CONFIRMATION",
+          "WATCH_7530_SUPPORT_HOLD",
+          "WATCH_7634_25_CONFIRMATION",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
@@ -508,7 +508,7 @@
       "watchOnly": true,
       "reasonCodes": [
         "MINUTE_W3_BREAKOUT_CANDIDATE",
-        "MINUTE_W2_CONFIRMED_AT_7365",
+        "MINUTE_W2_CONFIRMED_AT_7472_50",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
@@ -522,36 +522,36 @@
       "parentWave": "W3",
       "activeWave": "W3",
       "stage": "ACTIVE_CANDIDATE",
-      "currentRead": "SUBMINUTE_W3_ACTIVE_CANDIDATE_FROM_7466_25_AFTER_SUBMINUTE_W2",
-      "headline": "Subminute W3 active candidate from 7466.25 after completed Subminute W2",
-      "action": "WATCH_7600_SUPPORT_HOLD_AND_7602_RECLAIM_ACCEPTANCE",
+      "currentRead": "SUBMINUTE_W3_ACTIVE_CANDIDATE_FROM_7504_25_AFTER_SUBMINUTE_W2",
+      "headline": "Subminute W3 active candidate from 7504.25 after completed Subminute W2",
+      "action": "WATCH_7530_SUPPORT_HOLD_AND_RECLAIM_ACCEPTANCE",
       "marks": {
         "W1": {
           "low": {
-            "price": 7378.25,
-            "time": "2026-06-26 11:00"
+            "price": 7474.5,
+            "time": "2026-07-20 16:00"
           },
           "high": {
-            "price": 7602.0,
-            "time": "2026-07-06 11:00"
+            "price": 7530.0,
+            "time": "2026-07-20 23:00"
           },
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "SUBMINUTE_W1_LOW_7378_25_ON_2026_06_26_1100",
-            "SUBMINUTE_W1_HIGH_7602_ON_2026_07_06_1100",
+            "SUBMINUTE_W1_LOW_7474_50_ON_2026_07_20_1600",
+            "SUBMINUTE_W1_HIGH_7530_ON_2026_07_20_2300",
             "SUBMINUTE_W1_INSIDE_MINUTE_W3"
           ]
         },
         "W2": {
-          "price": 7466.25,
-          "time": "2026-07-08 15:00",
+          "price": 7504.25,
+          "time": "2026-07-21 06:00",
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "SUBMINUTE_W2_COMPLETED_AT_7466_25",
-            "SUBMINUTE_W3_STARTED_FROM_7466_25",
-            "HELD_ABOVE_MINUTE_W2_LOW_7365"
+            "SUBMINUTE_W2_COMPLETED_AT_7504_25_ON_2026_07_21_0600",
+            "SUBMINUTE_W3_STARTED_FROM_7504_25",
+            "HELD_ABOVE_MINUTE_W2_LOW_7472_50"
           ]
         },
         "W3": {
@@ -560,50 +560,50 @@
           "status": "ACTIVE_CANDIDATE",
           "confidence": "MEDIUM",
           "basis": [
-            "SUBMINUTE_W3_ACTIVE_CANDIDATE_AFTER_SUBMINUTE_W2_7466_25",
-            "PRICE_RECLAIMED_7600_AREA",
-            "WATCH_7600_SUPPORT_HOLD",
-            "WATCH_7602_RECLAIM_ACCEPTANCE"
+            "SUBMINUTE_W3_ACTIVE_CANDIDATE_AFTER_SUBMINUTE_W2_7504_25",
+            "PRICE_RECLAIMED_7530_AREA",
+            "WATCH_7530_SUPPORT_HOLD",
+            "WATCH_7530_RECLAIM_ACCEPTANCE"
           ]
         }
       },
       "targetModel": {
         "source": "SUBMINUTE_W3_EXTENSION_FROM_SUBMINUTE_W2_LOW",
-        "anchorLow": 7378.25,
-        "anchorHigh": 7602.0,
-        "projectionBase": 7466.25,
-        "range": 223.75,
+        "anchorLow": 7474.5,
+        "anchorHigh": 7530.0,
+        "projectionBase": 7504.25,
+        "range": 55.5,
         "levels": {
-          "e100": 7690.0,
-          "e1272": 7750.75,
-          "e1618": 7828.25,
-          "e200": 7913.75,
-          "e2618": 8052.0
+          "e100": 7559.75,
+          "e1272": 7574.75,
+          "e1618": 7594.0,
+          "e200": 7615.25,
+          "e2618": 7649.5
         },
         "displayLevels": [
           {
             "label": "1.000",
-            "price": 7690.0
+            "price": 7559.75
           },
           {
             "label": "1.272",
-            "price": 7750.75
+            "price": 7574.75
           },
           {
             "label": "1.618",
-            "price": 7828.25
+            "price": 7594.0
           },
           {
             "label": "2.000",
-            "price": 7913.75
+            "price": 7615.25
           },
           {
             "label": "2.618",
-            "price": 8052.0
+            "price": 7649.5
           }
         ],
-        "nextTarget": 7690.0,
-        "summary": "Subminute W3 active candidate is active from 7466.25. Full extension ladder: 7690.0, 7750.75, 7828.25, 7913.75, 8052.0.",
+        "nextTarget": 7559.75,
+        "summary": "Subminute W3 active candidate is active from 7504.25. Full extension ladder: 7559.75, 7574.75, 7594.0, 7615.25, 7649.5.",
         "reasonCodes": [
           "SUBMINUTE_W3_EXTENSION_MODEL_BUILT",
           "SUBMINUTE_W3_FULL_EXTENSION_LADDER_ATTACHED",
@@ -616,18 +616,18 @@
         "active": true,
         "source": "BRIAN_UPDATED_SUBMINUTE_W3_COUNT",
         "state": "SUBMINUTE_W3_BREAKOUT_DECISION_WATCH",
-        "supportHoldLevel": 7600,
-        "reclaimLevel": 7602,
-        "subminuteInvalidation": 7466.25,
-        "minuteInvalidation": 7365,
-        "bullPath": "If 7600/7602 holds as support, subminute W3 continuation is favored.",
-        "bearPath": "If 7600 fails and price loses 7466.25, subminute W3 candidate fails and Minute W3 requires review.",
+        "supportHoldLevel": 7530,
+        "reclaimLevel": 7530,
+        "subminuteInvalidation": 7504.25,
+        "minuteInvalidation": 7472.5,
+        "bullPath": "If 7530 holds as support, subminute W3 continuation is favored.",
+        "bearPath": "If 7530 fails and price loses 7504.25, the subminute W3 candidate fails; losing 7472.50 forces Minute W3 review.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
           "SUBMINUTE_W3_ACTIVE_CANDIDATE",
-          "WATCH_7600_7602_SUPPORT_HOLD",
+          "WATCH_7530_SUPPORT_HOLD",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
@@ -637,14 +637,14 @@
       "watchOnly": true,
       "reasonCodes": [
         "SUBMINUTE_W3_ACTIVE_CANDIDATE",
-        "SUBMINUTE_W2_CONFIRMED_AT_7466_25",
+        "SUBMINUTE_W2_CONFIRMED_AT_7504_25",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
       ],
       "internalStructure": {
         "active": true,
-        "source": "BRIAN_CHART_REVIEW_SUB_OF_SUB_W3_INTERNAL_IV",
+        "source": "BRIAN_UPDATED_SUBMINUTE_W3_COUNT",
         "parentDegree": "subminute",
         "parentWave": "W3",
         "previousInternalWave": "iii",
@@ -657,14 +657,14 @@
         "parentWaveComplete": false,
         "parentTransitionPossible": false,
         "transitionRisk": "MODERATE",
-        "invalidationLevel": 7466.25,
+        "invalidationLevel": 7504.25,
         "invalidationBreached": false,
-        "supportLevel": 7600,
-        "reclaimLevel": 7602,
+        "supportLevel": 7530,
+        "reclaimLevel": 7530,
         "retracementZone": null,
         "internalReference": {
-          "parentWaveStart": 7466.25,
-          "parentWaveStartApprox": 7471,
+          "parentWaveStart": 7504.25,
+          "parentWaveStartApprox": 7504.25,
           "internalWaveIIIHighApprox": 7628,
           "hardPullbackReferenceApprox": 7630,
           "chartRead": "SUB_OF_SUB_INTERNAL_IV_PULLBACK_INSIDE_SUBMINUTE_W3"
