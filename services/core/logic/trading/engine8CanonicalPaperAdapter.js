@@ -148,16 +148,54 @@ function compareFields({
   return mismatches;
 }
 
-function copyIdentity(engine9) {
+function copyIdentity(engine9, engine6) {
   return {
-    planId: engine9?.planId ?? null,
-    candidateId: engine9?.candidateId ?? null,
-    zoneId: engine9?.zoneId ?? null,
-    strategyId: engine9?.strategyId ?? null,
-    symbol: engine9?.symbol ?? null,
-    direction: engine9?.direction ?? null,
-    setupType: engine9?.setupType ?? null,
-    snapshotTime: engine9?.snapshotTime ?? null,
+    laneId:
+      engine9?.laneId ??
+      engine6?.laneId ??
+      null,
+
+    planId:
+      engine9?.planId ??
+      null,
+
+    candidateId:
+      engine9?.candidateId ??
+      engine6?.candidateId ??
+      engine6?.identity?.candidateId ??
+      null,
+
+    zoneId:
+      engine9?.zoneId ??
+      engine6?.zoneId ??
+      engine6?.identity?.zoneId ??
+      null,
+
+    strategyId:
+      engine9?.strategyId ??
+      engine6?.strategyId ??
+      engine6?.identity?.strategyId ??
+      null,
+
+    symbol:
+      engine9?.symbol ??
+      engine6?.symbol ??
+      null,
+
+    direction:
+      engine9?.direction ??
+      engine6?.direction ??
+      null,
+
+    setupType:
+      engine9?.setupType ??
+      engine6?.setupType ??
+      null,
+
+    snapshotTime:
+      engine9?.snapshotTime ??
+      engine6?.snapshotTime ??
+      null,
   };
 }
 
@@ -184,7 +222,8 @@ function buildBaseOutput({
   paperExecutionEnabled,
   duplicateState,
 }) {
-  const identity = copyIdentity(engine9);
+  const identity =
+    copyIdentity(engine9, engine6);
 
   return {
     active: true,
@@ -192,8 +231,17 @@ function buildBaseOutput({
     contractVersion: CONTRACT_VERSION,
     mode: "PAPER_ONLY_READ_ONLY_ADAPTER",
 
-    status: "BLOCKED",
+    status: "WAITING",
     executable: false,
+    noExecution: true,
+
+    submitted: false,
+    working: false,
+    partiallyFilled: false,
+    filled: false,
+    rejected: false,
+    safetyBlocked: false,
+
     orderCreated: false,
     duplicateBlocked: false,
 
@@ -306,20 +354,39 @@ function buildBaseOutput({
   };
 }
 
-function finish(output, {
-  status,
-  blocker = null,
-  blockers = [],
-  warnings = [],
-  reasonCodes = [],
-  executable = false,
-  duplicateBlocked = false,
-}) {
+function finish(
+  output,
+  {
+    status,
+    blocker = null,
+    blockers = [],
+    warnings = [],
+    reasonCodes = [],
+    executable = false,
+    duplicateBlocked = false,
+    rejected = false,
+    safetyBlocked = false,
+  }
+) {
   return {
     ...output,
 
     status,
     executable,
+    noExecution:
+      executable !== true,
+
+    submitted: false,
+    working: false,
+    partiallyFilled: false,
+    filled: false,
+
+    rejected:
+      rejected === true,
+
+    safetyBlocked:
+      safetyBlocked === true,
+
     orderCreated: false,
     duplicateBlocked,
 
@@ -551,6 +618,8 @@ export function buildEngine8CanonicalPaperAdapter({
   ) {
     return finish(output, {
       status: "PAPER_ORDER_REJECTED",
+      rejected: true,
+      safetyBlocked: true,
       blocker: "LIVE_EXECUTION_SAFETY_VIOLATION",
       reasonCodes: [
         liveTradingEnabled
@@ -589,16 +658,26 @@ export function buildEngine8CanonicalPaperAdapter({
     engine6?.direction
   );
 
-  if (engine6Decision === "PAPER_STAND_DOWN") {
-    return finish(output, {
-      status: "PAPER_ORDER_REJECTED",
-      blocker: "ENGINE6_PAPER_STAND_DOWN",
-      reasonCodes: [
-        "ENGINE6_REJECTED_PAPER_ENTRY",
-        "NO_ORDER_CREATED",
-      ],
-    });
-  }
+if (engine6Decision === "PAPER_STAND_DOWN") {
+  return finish(output, {
+    status:
+      "WAITING_FOR_ENGINE6_PERMISSION",
+
+    blocker:
+      "ENGINE6_PAPER_STAND_DOWN",
+
+    reasonCodes: [
+      "ENGINE6_PERMISSION_DENIED",
+      "ENGINE6_PAPER_STAND_DOWN",
+      "WATCH_ONLY_CONFIRMATION_REQUIRED",
+      "NO_ORDER_CREATED",
+    ],
+
+    executable: false,
+    rejected: false,
+    safetyBlocked: false,
+  });
+}
 
   if (
     !engine6Direction ||
