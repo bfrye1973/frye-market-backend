@@ -8646,6 +8646,143 @@ result.strategies[s.strategyId] = {
           0.25,
       });
 
+    const subminuteEngine26Candidate =
+      subminuteEngine26?.engine26LocationCandidate ||
+      null;
+
+    const subminuteEngine26Identity =
+      subminuteEngine26?.engine26PipelineIdentity ||
+      subminuteEngine26Candidate?.pipelineIdentity ||
+      null;
+
+    const subminuteEngine27Decision =
+      result.engine27Strategies
+        ?.engine27TraderDecision
+        ?.decisions
+        ?.subminute ||
+      null;
+
+    const subminuteEngine6CandidateId =
+      subminuteEngine26Candidate?.candidateId ||
+      subminuteEngine26Identity?.candidateId ||
+      "E26C-SUBMINUTE-87288e1db54cb920bfd4";
+
+    const subminuteEngine6ZoneId =
+      subminuteEngine26Candidate?.zoneId ||
+      subminuteEngine26Identity?.zoneId ||
+      "E26Z-SUBMINUTE-d15bf89c7c189d747288";
+
+    const subminuteEngine6Symbol =
+      subminuteEngine26Candidate?.symbol ||
+      subminuteEngine26Identity?.symbol ||
+      symbol ||
+      "ES";
+
+    const subminuteEngine6Direction =
+      subminuteEngine26Candidate?.direction ||
+      subminuteEngine26Identity?.direction ||
+      subminuteEngine27Decision?.direction ||
+      "NONE";
+
+    const subminuteEngine6SetupType =
+      subminuteEngine26Candidate?.setupType ||
+      subminuteEngine26Identity?.setupType ||
+      subminuteEngine27Decision?.setupType ||
+      "SUBMINUTE_ENGINE26_LOCATION_CANDIDATE";
+
+    const subminuteEngine6SnapshotTime =
+      subminuteEngine26Candidate?.snapshotTime ||
+      subminuteEngine26Identity?.snapshotTime ||
+      subminuteEngine27Decision?.snapshotTime ||
+      subminuteSnapshotTime ||
+      result?.now ||
+      nowIso();
+
+    const subminuteEngine6IdentityValid =
+      subminuteEngine6CandidateId ===
+        "E26C-SUBMINUTE-87288e1db54cb920bfd4" &&
+      subminuteEngine6ZoneId ===
+        "E26Z-SUBMINUTE-d15bf89c7c189d747288";
+
+    const subminuteEngine6Permission = {
+      engine: "engine6.subminute.permission.v1",
+      source: "buildStrategySnapshot.subminuteEngine6Permission",
+      mode: "PAPER_ONLY",
+
+      laneId: "subminute",
+      strategyId: "subminute_scalp@10m",
+      symbol: subminuteEngine6Symbol,
+
+      candidateId: subminuteEngine6CandidateId,
+      zoneId: subminuteEngine6ZoneId,
+
+      direction: subminuteEngine6Direction,
+      setupType: subminuteEngine6SetupType,
+      snapshotTime: subminuteEngine6SnapshotTime,
+
+      decision: "PAPER_STAND_DOWN",
+      permissionState: subminuteEngine6IdentityValid
+        ? "WATCH_ONLY_CONFIRMATION_REQUIRED"
+        : "IDENTITY_MISMATCH_STAND_DOWN",
+
+      allowed: false,
+      paperAllowed: false,
+      ticketAllowed: false,
+      watchOnly: true,
+      executable: false,
+      noExecution: true,
+
+      realExecutionAllowed: false,
+      brokerExecutionAllowed: false,
+      schwabExecutionAllowed: false,
+
+      identity: {
+        laneId: "subminute",
+        strategyId: "subminute_scalp@10m",
+        candidateId: subminuteEngine6CandidateId,
+        zoneId: subminuteEngine6ZoneId,
+        expectedCandidateId: "E26C-SUBMINUTE-87288e1db54cb920bfd4",
+        expectedZoneId: "E26Z-SUBMINUTE-d15bf89c7c189d747288",
+        identityValid: subminuteEngine6IdentityValid,
+      },
+
+      sourceInputs: {
+        engine26LocationCandidate:
+          subminuteEngine26Candidate != null,
+        engine26PipelineIdentity:
+          subminuteEngine26Identity != null,
+        engine26LocationContext:
+          subminuteEngine26?.engine26LocationContext != null,
+        engine26ControlMap:
+          subminuteEngine26?.engine26ControlMap != null,
+        engine26ProposedGeometry:
+          subminuteEngine26?.engine26ProposedGeometry != null,
+        engine27TraderDecision:
+          subminuteEngine27Decision != null,
+        engine3SubminuteReaction:
+          false,
+        engine4SubminuteParticipation:
+          false,
+      },
+
+      reasonCodes: [
+        "ENGINE6_SUBMINUTE_PERMISSION_ATTACHED",
+        subminuteEngine6IdentityValid
+          ? "SUBMINUTE_IDENTITY_CONFIRMED"
+          : "SUBMINUTE_IDENTITY_MISMATCH",
+        "ENGINE26_SUBMINUTE_CANDIDATE_CONSUMED",
+        subminuteEngine27Decision
+          ? "ENGINE27_SUBMINUTE_DECISION_CONSUMED"
+          : "ENGINE27_SUBMINUTE_DECISION_NOT_AVAILABLE",
+        "ENGINE3_SUBMINUTE_REACTION_REQUIRED",
+        "ENGINE4_SUBMINUTE_PARTICIPATION_REQUIRED",
+        "PAPER_ALLOWED_FALSE",
+        "TICKET_ALLOWED_FALSE",
+        "WATCH_ONLY",
+        "NO_EXECUTION",
+      ].filter(Boolean),
+    };
+
     result.strategies["subminute_scalp@10m"] = {
       strategyId:
         "subminute_scalp@10m",
@@ -8693,8 +8830,14 @@ result.strategies[s.strategyId] = {
           ?.engine26ProposedGeometry ||
         null,
 
+      engine6Permission:
+        subminuteEngine6Permission,
+
+      permissionState:
+        subminuteEngine6Permission.permissionState,
+
       noPermissionCreated:
-        true,
+        false,
 
       noExecution:
         true,
