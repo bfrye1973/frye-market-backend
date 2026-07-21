@@ -8700,14 +8700,20 @@ result.strategies[s.strategyId] = {
 
     const subminuteEngine6IdentityValid =
       subminuteEngine26Candidate != null &&
-      subminuteEngine6CandidateId ===
-        "E26C-SUBMINUTE-87288e1db54cb920bfd4" &&
-      subminuteEngine6ZoneId ===
-        "E26Z-SUBMINUTE-d15bf89c7c189d747288" &&
+      subminuteEngine6CandidateId != null &&
+      subminuteEngine6ZoneId != null &&
       subminuteEngine26Candidate?.candidateId ===
         subminuteEngine6CandidateId &&
       subminuteEngine26Candidate?.zoneId ===
-        subminuteEngine6ZoneId;
+        subminuteEngine6ZoneId &&
+      (
+        subminuteEngine26Identity?.candidateId == null ||
+        subminuteEngine26Identity.candidateId === subminuteEngine6CandidateId
+      ) &&
+      (
+        subminuteEngine26Identity?.zoneId == null ||
+        subminuteEngine26Identity.zoneId === subminuteEngine6ZoneId
+      );
     const subminuteEngine6Permission = {
       engine: "engine6.subminute.permission.v1",
       source: "buildStrategySnapshot.subminuteEngine6Permission",
@@ -8745,8 +8751,14 @@ result.strategies[s.strategyId] = {
         strategyId: "subminute_scalp@10m",
         candidateId: subminuteEngine6CandidateId,
         zoneId: subminuteEngine6ZoneId,
-        expectedCandidateId: "E26C-SUBMINUTE-87288e1db54cb920bfd4",
-        expectedZoneId: "E26Z-SUBMINUTE-d15bf89c7c189d747288",
+        engine26CandidateId:
+          subminuteEngine26Candidate?.candidateId || null,
+        engine26ZoneId:
+          subminuteEngine26Candidate?.zoneId || null,
+        pipelineCandidateId:
+          subminuteEngine26Identity?.candidateId || null,
+        pipelineZoneId:
+          subminuteEngine26Identity?.zoneId || null,
         identityValid: subminuteEngine6IdentityValid,
       },
 
