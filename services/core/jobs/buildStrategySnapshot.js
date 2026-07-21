@@ -9116,9 +9116,10 @@ const engine8DuplicateState =
     strategyId:
       scalp.engine9OfficialManagementPlan
         ?.strategyId ||
-      scalp.engine7PositionSizing
-        ?.strategyId ||
-      s.strategyId,
+     scalp.engine7PositionSizing
+       ?.strategyId ||
+     scalp.strategyId ||
+     "intraday_scalp@10m",
 
     candidateId:
       scalp.engine9OfficialManagementPlan
