@@ -57,6 +57,9 @@ import {
   buildEngine26A,
 } from "../logic/engine26/buildEngine26LocationCandidate.js";
 import {
+  buildSubminuteEngine26,
+} from "../logic/engine26/subminute/buildSubminuteEngine26.js";
+import {
   attachEngine4AuthorizedReactionParticipation,
 } from "../logic/engine4/authorizedReactionParticipation.js";
 import {
@@ -8589,6 +8592,113 @@ result.strategies[s.strategyId] = {
         context: { ok: false, error: "builder_strategy_failed" },
       };
     }
+  }
+
+  /*
+   * Engine 26 Subminute lane.
+   *
+   * Builds a genuine Subminute-owned Engine 26 contract.
+   * Does not copy Minute candidate, zone, control map, or geometry.
+   */
+  if (String(symbol || "").toUpperCase() === "ES") {
+    const minuteStrategy =
+      result.strategies?.["intraday_scalp@10m"] || null;
+
+    const subminuteSnapshotTime =
+      result?.now ||
+      nowIso();
+
+    const subminuteCurrentPrice =
+      validPrice(
+        result?.marketMeter?.layers?.emaPosture
+          ?.tenMinute?.close
+      ) ??
+      validPrice(
+        result?.marketMeter?.layers?.tenMinute?.close
+      ) ??
+      validPrice(
+        minuteStrategy?.context?.meta?.current_price
+      ) ??
+      validPrice(
+        minuteStrategy?.context?.meta?.currentPrice
+      ) ??
+      null;
+
+    const subminuteEngine26 =
+      buildSubminuteEngine26({
+        symbol,
+
+        currentPrice:
+          subminuteCurrentPrice,
+
+        snapshotTime:
+          subminuteSnapshotTime,
+
+        engine22WaveStrategy:
+          minuteStrategy?.engine22WaveStrategy ||
+          null,
+
+        engine1Context:
+          minuteStrategy?.context ||
+          null,
+
+        tickSize:
+          0.25,
+      });
+
+    result.strategies["subminute_scalp@10m"] = {
+      strategyId:
+        "subminute_scalp@10m",
+
+      laneId:
+        "subminute",
+
+      tf:
+        "10m",
+
+      triggerTimeframe:
+        "10m",
+
+      contextTimeframe:
+        "1h",
+
+      engine15Required:
+        false,
+
+      engine15Bypassed:
+        true,
+
+      engine26LocationCandidate:
+        subminuteEngine26
+          ?.engine26LocationCandidate ||
+        null,
+
+      engine26PipelineIdentity:
+        subminuteEngine26
+          ?.engine26PipelineIdentity ||
+        null,
+
+      engine26LocationContext:
+        subminuteEngine26
+          ?.engine26LocationContext ||
+        null,
+
+      engine26ControlMap:
+        subminuteEngine26
+          ?.engine26ControlMap ||
+        null,
+
+      engine26ProposedGeometry:
+        subminuteEngine26
+          ?.engine26ProposedGeometry ||
+        null,
+
+      noPermissionCreated:
+        true,
+
+      noExecution:
+        true,
+    };
   }
 
   preserveLastGoodEngine22Timeline(result, previousSnapshot);
