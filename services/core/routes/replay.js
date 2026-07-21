@@ -1,4 +1,9 @@
 // services/core/routes/replay.js
+// Engine 12 Replay reader contract:
+// - Full ES snapshot endpoint returns the stored replay object faithfully.
+// - Optional strategyId filtering preserves the canonical strategy key.
+// - Legacy reduced replay files remain unchanged and are never upgraded.
+// - Contract classification is exposed through X-Replay-* response headers.
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -136,6 +141,185 @@ function listEsReplayTimes(dataDir, dateYmd) {
     .filter((n) => /^\d{4}\.json$/.test(n))
     .map((n) => n.replace(".json", ""))
     .sort();
+}
+
+function classifyEsReplaySnapshot(snap) {
+  if (
+    snap?.schema === "engine12.multiStrategyReplay.v1" &&
+    snap?.replayContract === "CANONICAL_MULTI_STRATEGY_REPLAY" &&
+    snap?.strategies &&
+    typeof snap.strategies === "object" &&
+    !Array.isArray(snap.strategies)
+  ) {
+    return {
+      replayContract: "CANONICAL_MULTI_STRATEGY_REPLAY",
+      replaySchema: snap.schema,
+      completeness: "CANONICAL",
+      strategyIds: Object.keys(snap.strategies),
+    };
+  }
+
+  if (
+    snap?.schema === "es-replay-snapshot@v1" ||
+    (
+      snap?.strategy &&
+      typeof snap.strategy === "object" &&
+      !Array.isArray(snap.strategy)
+    )
+  ) {
+    return {
+      replayContract: "LEGACY_REDUCED_REPLAY",
+      replaySchema: snap?.schema || null,
+      completeness: "LEGACY_INCOMPLETE",
+      strategyIds: [
+        snap?.strategy?.strategyId ||
+          "intraday_scalp@10m",
+      ],
+    };
+  }
+
+  if (
+    snap?.strategies &&
+    typeof snap.strategies === "object" &&
+    !Array.isArray(snap.strategies)
+  ) {
+    return {
+      replayContract: "UNVERSIONED_MULTI_STRATEGY_REPLAY",
+      replaySchema: snap?.schema || null,
+      completeness: "UNVERSIONED",
+      strategyIds: Object.keys(snap.strategies),
+    };
+  }
+
+  return {
+    replayContract: "UNKNOWN_REPLAY_CONTRACT",
+    replaySchema: snap?.schema || null,
+    completeness: "UNKNOWN",
+    strategyIds: [],
+  };
+}
+
+function setEsReplayContractHeaders(res, classification) {
+  res.set(
+    "X-Replay-Contract",
+    classification.replayContract
+  );
+
+  res.set(
+    "X-Replay-Completeness",
+    classification.completeness
+  );
+
+  if (classification.replaySchema) {
+    res.set(
+      "X-Replay-Schema",
+      classification.replaySchema
+    );
+  }
+}
+
+function selectStrategyFromReplaySnapshot(
+  snap,
+  strategyId
+) {
+  const requestedStrategyId = String(
+    strategyId || ""
+  ).trim();
+
+  if (!requestedStrategyId) {
+    return {
+      ok: true,
+      filtered: false,
+      snapshot: snap,
+    };
+  }
+
+  const classification =
+    classifyEsReplaySnapshot(snap);
+
+  if (
+    classification.replayContract ===
+      "CANONICAL_MULTI_STRATEGY_REPLAY" ||
+    classification.replayContract ===
+      "UNVERSIONED_MULTI_STRATEGY_REPLAY"
+  ) {
+    const strategy =
+      snap?.strategies?.[requestedStrategyId];
+
+    if (
+      !strategy ||
+      typeof strategy !== "object" ||
+      Array.isArray(strategy)
+    ) {
+      return {
+        ok: false,
+        status: 404,
+        reason: "STRATEGY_NOT_FOUND_IN_REPLAY",
+        replayContract:
+          classification.replayContract,
+        strategyId: requestedStrategyId,
+        availableStrategyIds:
+          classification.strategyIds,
+      };
+    }
+
+    // Faithful selection: keep the recorded root metadata and
+    // preserve the selected strategy under its original canonical key.
+    return {
+      ok: true,
+      filtered: true,
+      snapshot: {
+        ...snap,
+        strategies: {
+          [requestedStrategyId]: strategy,
+        },
+      },
+    };
+  }
+
+  if (
+    classification.replayContract ===
+    "LEGACY_REDUCED_REPLAY"
+  ) {
+    const legacyStrategyId =
+      snap?.strategy?.strategyId ||
+      "intraday_scalp@10m";
+
+    if (
+      requestedStrategyId !== legacyStrategyId
+    ) {
+      return {
+        ok: false,
+        status: 409,
+        reason:
+          "LEGACY_REPLAY_STRATEGY_UNAVAILABLE",
+        replayContract:
+          classification.replayContract,
+        strategyId: requestedStrategyId,
+        availableStrategyIds: [
+          legacyStrategyId,
+        ],
+      };
+    }
+
+    // Do not normalize or upgrade a legacy file.
+    return {
+      ok: true,
+      filtered: false,
+      snapshot: snap,
+    };
+  }
+
+  return {
+    ok: false,
+    status: 409,
+    reason: "UNKNOWN_REPLAY_CONTRACT",
+    replayContract:
+      classification.replayContract,
+    strategyId: requestedStrategyId,
+    availableStrategyIds:
+      classification.strategyIds,
+  };
 }
 
 function pickStrategyNodeFromReplaySnapshot(snap) {
@@ -575,6 +759,9 @@ router.get("/replay/es/times", (req, res) => {
 router.get("/replay/es/snapshot", (req, res) => {
   const date = String(req.query.date || "");
   const time = String(req.query.time || "");
+  const strategyId = String(
+    req.query.strategyId || ""
+  ).trim();
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return res
@@ -602,7 +789,43 @@ router.get("/replay/es/snapshot", (req, res) => {
     });
   }
 
-  res.json(snap);
+  const classification =
+    classifyEsReplaySnapshot(snap);
+
+  setEsReplayContractHeaders(
+    res,
+    classification
+  );
+
+  const selection =
+    selectStrategyFromReplaySnapshot(
+      snap,
+      strategyId
+    );
+
+  if (!selection.ok) {
+    return res
+      .status(selection.status || 409)
+      .json({
+        ok: false,
+        reason: selection.reason,
+        symbol: "ES",
+        date,
+        time,
+        file,
+        strategyId:
+          selection.strategyId,
+        replayContract:
+          selection.replayContract,
+        availableStrategyIds:
+          selection.availableStrategyIds,
+      });
+  }
+
+  // With no strategyId filter, this is the exact stored object.
+  // With a filter, this is a faithful root-preserving selection
+  // containing only the requested canonical strategy key.
+  return res.json(selection.snapshot);
 });
 
 router.get("/replay/es/decision-summary", (req, res) => {
@@ -634,6 +857,14 @@ router.get("/replay/es/decision-summary", (req, res) => {
       file,
     });
   }
+
+  const classification =
+    classifyEsReplaySnapshot(snap);
+
+  setEsReplayContractHeaders(
+    res,
+    classification
+  );
 
   const summary = buildEsReplayDecisionSummary(snap, {
     date,
