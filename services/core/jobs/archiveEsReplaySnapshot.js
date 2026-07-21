@@ -991,3 +991,5 @@ try {
       2
     )
   );
+    process.exitCode = 1;
+}
