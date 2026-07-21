@@ -74,97 +74,23 @@ export function buildEngine27Strategies({
   const degreeStates =
     getDegreeStates(snapshot);
 
-  /*
-   * Engine 27A — Wave Intelligence
-   *
-   * Reads only:
-   * engine22WaveStrategy.degreeStates
-   *
-   * Does not create:
-   * - Fibonacci projections
-   * - trade permission
-   * - sizing
-   * - geometry
-   * - tickets
-   * - execution
-   * - journal records
-   */
   const engine27WaveIntelligence =
     buildWaveIntelligence({
       degreeStates,
     });
 
-  /*
-   * Engine 27B — Fibonacci Intelligence
-   *
-   * Reads only:
-   * - engine27WaveIntelligence
-   * - engine22WaveStrategy.degreeStates
-   *
-   * Does not create:
-   * - trade decisions
-   * - alignment
-   * - confidence
-   * - permission
-   * - sizing
-   * - geometry
-   * - tickets
-   * - execution
-   * - dashboard output
-   */
   const engine27FibIntelligence =
     buildFibIntelligence({
       engine27WaveIntelligence,
       degreeStates,
     });
 
-  /*
-   * Engine 27C — Multi-Degree Alignment
-   *
-   * Reads only:
-   * - engine27WaveIntelligence
-   * - engine27FibIntelligence
-   *
-   * Does not create:
-   * - wave intelligence
-   * - Fibonacci calculations
-   * - trade decisions
-   * - permission
-   * - sizing
-   * - geometry
-   * - tickets
-   * - execution
-   * - market-story prose
-   * - alerts
-   * - dashboard output
-   */
   const engine27Alignment =
     buildMultiDegreeAlignment({
       engine27WaveIntelligence,
       engine27FibIntelligence,
     });
 
-  /*
-   * Engine 27D — Market Story
-   *
-   * Reads only:
-   * - engine27WaveIntelligence
-   * - engine27FibIntelligence
-   * - engine27Alignment
-   *
-   * Creates only:
-   * - concise market-structure narrative
-   *
-   * Does not create:
-   * - trade decisions
-   * - permission
-   * - sizing
-   * - geometry
-   * - tickets
-   * - execution
-   * - alerts
-   * - dashboard output
-   */
   const engine27MarketStory =
     buildMarketStory({
       engine27WaveIntelligence,
@@ -172,20 +98,6 @@ export function buildEngine27Strategies({
       engine27Alignment,
     });
 
-  /*
-   * Existing Engine 27 Alpha lane decisions.
-   *
-   * These decisions normalize approved downstream context from:
-   * - Engine 3 reaction
-   * - Engine 4 participation
-   * - Engine 6 permission
-   * - Engine 26 planner status
-   * - higher-timeframe wick context
-   * - price proximity
-   *
-   * Engine 27E consumes these completed decisions and does not read
-   * those upstream engines directly.
-   */
   const decisions = {};
 
   for (const lane of lanes) {
@@ -232,6 +144,11 @@ export function buildEngine27Strategies({
       });
   }
 
+  /*
+   * Existing Minute pipeline context.
+   *
+   * This remains unchanged and is passed only to the Minute lane.
+   */
   const intradayPaperStrategy =
     snapshot?.strategies?.[
       "intraday_scalp@10m"
@@ -276,29 +193,50 @@ export function buildEngine27Strategies({
       : null;
 
   /*
-   * Engine 27E — Trader Decision
+   * Authorized Subminute Engine 26 context.
    *
    * Reads only:
-   * - engine27WaveIntelligence
-   * - engine27FibIntelligence
-   * - engine27Alignment
-   * - engine27MarketStory
-   * - existing Engine 27 Alpha lane decisions
+   * strategies["subminute_scalp@10m"]
    *
-   * Creates only:
-   * - normalized per-lane decision state
-   * - readiness fields
-   * - actionable waiting conditions
-   * - read-only trader guidance
-   *
-   * Does not create:
-   * - permission
-   * - sizing
-   * - geometry
-   * - tickets
-   * - execution
-   * - journal records
+   * No Minute fallback.
+   * No search for alternate geometry.
+   * No strategyTimeline attachment.
    */
+  const subminuteStrategy =
+    snapshot?.strategies?.[
+      "subminute_scalp@10m"
+    ] || null;
+
+  const subminutePipelineContext =
+    subminuteStrategy
+      ? {
+          engine26LocationCandidate:
+            subminuteStrategy
+              .engine26LocationCandidate ||
+            null,
+
+          engine26PipelineIdentity:
+            subminuteStrategy
+              .engine26PipelineIdentity ||
+            null,
+
+          engine26LocationContext:
+            subminuteStrategy
+              .engine26LocationContext ||
+            null,
+
+          engine26ControlMap:
+            subminuteStrategy
+              .engine26ControlMap ||
+            null,
+
+          engine26ProposedGeometry:
+            subminuteStrategy
+              .engine26ProposedGeometry ||
+            null,
+        }
+      : null;
+
   const engine27TraderDecision =
     buildTraderDecision({
       engine27WaveIntelligence,
@@ -307,7 +245,9 @@ export function buildEngine27Strategies({
       engine27MarketStory,
       alphaDecisions: decisions,
       pipelineContext,
+      subminutePipelineContext,
     });
+
   return {
     active: true,
 
@@ -324,29 +264,10 @@ export function buildEngine27Strategies({
     builtAt:
       new Date().toISOString(),
 
-    /*
-     * Engine 27A canonical output.
-     */
     engine27WaveIntelligence,
-
-    /*
-     * Engine 27B canonical output.
-     */
     engine27FibIntelligence,
-
-    /*
-     * Engine 27C canonical output.
-     */
     engine27Alignment,
-
-    /*
-     * Engine 27D canonical output.
-     */
     engine27MarketStory,
-
-    /*
-     * Engine 27E canonical output.
-     */
     engine27TraderDecision,
 
     laneCount:
@@ -381,5 +302,3 @@ export function buildEngine27Strategies({
     ],
   };
 }
-
-export default buildEngine27Strategies;
