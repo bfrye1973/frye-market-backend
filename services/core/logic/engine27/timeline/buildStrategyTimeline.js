@@ -528,3 +528,4 @@ test("Minute defaults remain unchanged", () => {
   assert.equal(timeline.strategyId, "intraday_scalp@10m");
   assert.deepEqual(timeline.stages.map((stage) => stage.id), STAGE_ORDER);
 });
+
