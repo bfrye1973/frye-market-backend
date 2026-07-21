@@ -7361,6 +7361,9 @@ attachEngine4AuthorizedReactionParticipation({
           validPrice(
             marketMeter?.layers?.tenMinute?.close
           ) ??
+          validPrice(
+            engine26DirectCurrentPrice
+          ) ??
           null,
 
         snapshotTime: nowIso(),
@@ -7409,6 +7412,9 @@ attachEngine4AuthorizedReactionParticipation({
           ) ??
           validPrice(
             marketMeter?.layers?.tenMinute?.close
+          ) ??
+          validPrice(
+            engine26DirectCurrentPrice
           ) ??
           null,
         snapshotTime: nowIso(),
@@ -7483,6 +7489,19 @@ attachEngine4AuthorizedReactionParticipation({
  *
  * Existing Engine 3/4 algorithms and thresholds remain unchanged.
  */
+  /*
+   * Direct futures price fallback for Engine 26A.
+   *
+   * Engine 1 and market-meter price fields may occasionally be null
+   * even while the canonical futures OHLC endpoint is healthy.
+   */
+  const engine26DirectCurrentPrice =
+    isEsIntradayScalp
+      ? await fetchCurrentPriceForSymbol({
+          symbol,
+          tf: "10m",
+        }).catch(() => null)
+      : null; 
 if (isEsIntradayScalp) {
   attachPaperScalpReactionToConfluence({
     patchedConfluence,
