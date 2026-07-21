@@ -174,36 +174,91 @@ function normalizeIdentityValue(value) {
 
 function buildPipelineIdentity({
   engine26LocationCandidate = null,
+  engine26PipelineIdentity = null,
+  engine26LocationContext = null,
+  engine26ControlMap = null,
+  engine26ProposedGeometry = null,
   engine26Planner = null,
   engine3AuthorizedReaction = null,
   engine4AuthorizedParticipation = null,
   engine6Permission = null,
 } = {}) {
-  const candidateIds = [
-    engine26LocationCandidate?.candidateId,
-    engine26Planner?.candidateId,
-    engine3AuthorizedReaction?.candidateId,
-    engine4AuthorizedParticipation?.candidateId,
-    engine6Permission?.candidateId,
-  ]
-    .map(normalizeIdentityValue)
+  const identitySources = [
+    engine26PipelineIdentity,
+    engine26LocationCandidate?.pipelineIdentity,
+    engine26LocationCandidate,
+    engine26LocationContext,
+    engine26ControlMap,
+    engine26ProposedGeometry,
+    engine26Planner,
+    engine3AuthorizedReaction,
+    engine4AuthorizedParticipation,
+    engine6Permission,
+  ].filter(isObject);
+
+  const candidateIds = identitySources
+    .map((source) =>
+      normalizeIdentityValue(
+        source?.candidateId
+      )
+    )
     .filter(Boolean);
 
-  const zoneIds = [
-    engine26LocationCandidate?.zoneId,
-    engine26Planner?.zoneId,
-    engine3AuthorizedReaction?.zoneId,
-    engine4AuthorizedParticipation?.zoneId,
-    engine6Permission?.zoneId,
-  ]
-    .map(normalizeIdentityValue)
+  const zoneIds = identitySources
+    .map((source) =>
+      normalizeIdentityValue(
+        source?.zoneId
+      )
+    )
+    .filter(Boolean);
+
+  const laneIds = identitySources
+    .map((source) =>
+      normalizeIdentityValue(
+        source?.laneId
+      )
+    )
+    .filter(Boolean);
+
+  const strategyIds = identitySources
+    .map((source) =>
+      normalizeIdentityValue(
+        source?.strategyId
+      )
+    )
     .filter(Boolean);
 
   const candidateId =
-    candidateIds[0] ?? null;
+    normalizeIdentityValue(
+      engine26PipelineIdentity
+        ?.candidateId
+    ) ??
+    candidateIds[0] ??
+    null;
 
   const zoneId =
-    zoneIds[0] ?? null;
+    normalizeIdentityValue(
+      engine26PipelineIdentity
+        ?.zoneId
+    ) ??
+    zoneIds[0] ??
+    null;
+
+  const laneId =
+    normalizeIdentityValue(
+      engine26PipelineIdentity
+        ?.laneId
+    ) ??
+    laneIds[0] ??
+    null;
+
+  const strategyId =
+    normalizeIdentityValue(
+      engine26PipelineIdentity
+        ?.strategyId
+    ) ??
+    strategyIds[0] ??
+    null;
 
   const candidateIdConsistent =
     candidateIds.length <= 1 ||
@@ -217,22 +272,53 @@ function buildPipelineIdentity({
       (value) => value === zoneId
     );
 
+  const laneIdConsistent =
+    laneIds.length <= 1 ||
+    laneIds.every(
+      (value) => value === laneId
+    );
+
+  const strategyIdConsistent =
+    strategyIds.length <= 1 ||
+    strategyIds.every(
+      (value) => value === strategyId
+    );
+
+  const consistent =
+    candidateIdConsistent &&
+    zoneIdConsistent &&
+    laneIdConsistent &&
+    strategyIdConsistent;
+
+  const complete =
+    Boolean(
+      candidateId &&
+      zoneId &&
+      laneId &&
+      strategyId &&
+      consistent &&
+      (
+        engine26PipelineIdentity
+          ?.complete === true ||
+        engine26LocationCandidate
+          ?.pipelineIdentity
+          ?.complete === true
+      )
+    );
+
   return {
     candidateId,
     zoneId,
-
-    strategyId:
-      normalizeIdentityValue(
-        engine26LocationCandidate?.strategyId ??
-        engine26Planner?.strategyId ??
-        engine3AuthorizedReaction?.strategyId ??
-        engine4AuthorizedParticipation?.strategyId ??
-        engine6Permission?.strategyId
-      ),
+    laneId,
+    strategyId,
 
     symbol:
       normalizeIdentityValue(
+        engine26PipelineIdentity?.symbol ??
         engine26LocationCandidate?.symbol ??
+        engine26LocationContext?.symbol ??
+        engine26ControlMap?.symbol ??
+        engine26ProposedGeometry?.symbol ??
         engine26Planner?.symbol ??
         engine3AuthorizedReaction?.symbol ??
         engine4AuthorizedParticipation?.symbol ??
@@ -241,7 +327,9 @@ function buildPipelineIdentity({
 
     setupType:
       normalizeIdentityValue(
+        engine26PipelineIdentity?.setupType ??
         engine26LocationCandidate?.setupType ??
+        engine26ProposedGeometry?.setupType ??
         engine26Planner?.setupType ??
         engine3AuthorizedReaction?.setupType ??
         engine4AuthorizedParticipation?.setupType ??
@@ -250,7 +338,11 @@ function buildPipelineIdentity({
 
     snapshotTime:
       normalizeIdentityValue(
+        engine26PipelineIdentity?.snapshotTime ??
         engine26LocationCandidate?.snapshotTime ??
+        engine26LocationContext?.snapshotTime ??
+        engine26ControlMap?.snapshotTime ??
+        engine26ProposedGeometry?.snapshotTime ??
         engine26Planner?.snapshotTime ??
         engine3AuthorizedReaction?.snapshotTime ??
         engine4AuthorizedParticipation?.snapshotTime ??
@@ -259,17 +351,70 @@ function buildPipelineIdentity({
 
     candidateIdConsistent,
     zoneIdConsistent,
-
-    consistent:
-      candidateIdConsistent &&
-      zoneIdConsistent,
-
-    complete:
-      Boolean(
-        candidateId &&
-        zoneId
-      ),
+    laneIdConsistent,
+    strategyIdConsistent,
+    consistent,
+    complete,
   };
+}
+
+function isValidSubminuteProposedGeometry({
+  engine26ProposedGeometry = null,
+  pipelineIdentity = null,
+} = {}) {
+  if (
+    !isObject(
+      engine26ProposedGeometry
+    ) ||
+    !isObject(
+      pipelineIdentity
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    pipelineIdentity.complete ===
+      true &&
+    pipelineIdentity.consistent ===
+      true &&
+    pipelineIdentity.laneId ===
+      "subminute" &&
+    pipelineIdentity.strategyId ===
+      "subminute_scalp@10m" &&
+    engine26ProposedGeometry
+      .laneId ===
+      pipelineIdentity.laneId &&
+    engine26ProposedGeometry
+      .strategyId ===
+      pipelineIdentity.strategyId &&
+    engine26ProposedGeometry
+      .candidateId ===
+      pipelineIdentity.candidateId &&
+    engine26ProposedGeometry
+      .zoneId ===
+      pipelineIdentity.zoneId &&
+    engine26ProposedGeometry
+      .active === true &&
+    upper(
+      engine26ProposedGeometry
+        .lifecycleStatus
+    ) ===
+      "PROPOSED_GEOMETRY_AVAILABLE" &&
+    engine26ProposedGeometry
+      .candidateIdentityPreserved ===
+      true &&
+    engine26ProposedGeometry
+      .proposalOnly === true &&
+    engine26ProposedGeometry
+      .plannerOnly === true &&
+    engine26ProposedGeometry
+      .official !== true &&
+    engine26ProposedGeometry
+      .nonExecutable === true &&
+    engine26ProposedGeometry
+      .noExecution === true
+  );
 }
 
 function buildExplicitPipelineReadiness({
@@ -1210,6 +1355,7 @@ function buildWarnings({
   parentCompatibility,
   higherTimeframeConflict,
   readiness,
+  subminuteGeometryReady = false,
 }) {
   const alignmentWarnings =
     safeArray(
@@ -1282,7 +1428,11 @@ function buildWarnings({
       degree
     ) &&
     readiness.plannerReady !==
-      true
+      true &&
+    !(
+      degree === "subminute" &&
+      subminuteGeometryReady === true
+    )
   ) {
     warnings.push(
       "ENGINE26_PLANNER_UNAVAILABLE"
@@ -1773,6 +1923,7 @@ function buildLaneDecision({
   story,
   alpha,
   pipelineContext = null,
+  subminutePipelineContext = null,
 }) {
   if (
     !isObject(alpha) ||
@@ -1907,55 +2058,104 @@ function buildLaneDecision({
         null,
     });
 
+  const pipelineIdentity =
+    degree === "subminute"
+      ? buildPipelineIdentity({
+          engine26LocationCandidate:
+            subminutePipelineContext
+              ?.engine26LocationCandidate ||
+            null,
+
+          engine26PipelineIdentity:
+            subminutePipelineContext
+              ?.engine26PipelineIdentity ||
+            null,
+
+          engine26LocationContext:
+            subminutePipelineContext
+              ?.engine26LocationContext ||
+            null,
+
+          engine26ControlMap:
+            subminutePipelineContext
+              ?.engine26ControlMap ||
+            null,
+
+          engine26ProposedGeometry:
+            subminutePipelineContext
+              ?.engine26ProposedGeometry ||
+            null,
+        })
+      : buildPipelineIdentity({
+          engine26LocationCandidate:
+            pipelineContext
+              ?.engine26LocationCandidate ||
+            null,
+
+          engine26Planner:
+            pipelineContext
+              ?.engine26Planner ||
+            null,
+
+          engine3AuthorizedReaction:
+            pipelineContext
+              ?.engine3AuthorizedReaction ||
+            null,
+
+          engine4AuthorizedParticipation:
+            pipelineContext
+              ?.engine4AuthorizedParticipation ||
+            null,
+
+          engine6Permission:
+            pipelineContext
+              ?.engine6Permission ||
+            null,
+        });
+
+  const subminuteGeometryReady =
+    degree === "subminute" &&
+    isValidSubminuteProposedGeometry({
+      engine26ProposedGeometry:
+        subminutePipelineContext
+          ?.engine26ProposedGeometry ||
+        null,
+
+      pipelineIdentity,
+    });
+
   const readiness =
-    FAST_LANES.has(degree) &&
-    explicitPipelineReadiness.available
+    degree === "subminute"
       ? {
           ...legacyReadiness,
 
-          reactionReady:
-            explicitPipelineReadiness
-              .reactionReady,
-
-          participationReady:
-            explicitPipelineReadiness
-              .participationReady,
-
-          permissionReady:
-            explicitPipelineReadiness
-              .permissionReady,
-
           plannerReady:
-            explicitPipelineReadiness
-              .plannerReady,
+            subminuteGeometryReady,
         }
-      : legacyReadiness;
+      : (
+          FAST_LANES.has(degree) &&
+          explicitPipelineReadiness.available
+            ? {
+                ...legacyReadiness,
 
-  const pipelineIdentity =
-    buildPipelineIdentity({
-      engine26LocationCandidate:
-        pipelineContext
-          ?.engine26LocationCandidate ||
-        null,
+                reactionReady:
+                  explicitPipelineReadiness
+                    .reactionReady,
 
-      engine26Planner:
-        pipelineContext?.engine26Planner ||
-        null,
+                participationReady:
+                  explicitPipelineReadiness
+                    .participationReady,
 
-      engine3AuthorizedReaction:
-        pipelineContext
-          ?.engine3AuthorizedReaction ||
-        null,
+                permissionReady:
+                  explicitPipelineReadiness
+                    .permissionReady,
 
-      engine4AuthorizedParticipation:
-        pipelineContext
-          ?.engine4AuthorizedParticipation ||
-        null,
-
-      engine6Permission:
-        pipelineContext?.engine6Permission ||
-        null,
-    });
+                plannerReady:
+                  explicitPipelineReadiness
+                    .plannerReady,
+              }
+            : legacyReadiness
+        );
 
   const decisionState =
     determineDecisionState({
@@ -1992,6 +2192,7 @@ function buildLaneDecision({
       parentCompatibility,
       higherTimeframeConflict,
       readiness,
+      subminuteGeometryReady,
     });
 
   const geometryToolRecommended =
@@ -2072,6 +2273,18 @@ function buildLaneDecision({
       pipelineIdentity.snapshotTime,
 
     pipelineIdentity: {
+      laneId:
+        pipelineIdentity.laneId,
+
+      strategyId:
+        pipelineIdentity.strategyId,
+
+      candidateId:
+        pipelineIdentity.candidateId,
+
+      zoneId:
+        pipelineIdentity.zoneId,
+
       complete:
         pipelineIdentity.complete,
 
@@ -2085,6 +2298,14 @@ function buildLaneDecision({
       zoneIdConsistent:
         pipelineIdentity
           .zoneIdConsistent,
+
+      laneIdConsistent:
+        pipelineIdentity
+          .laneIdConsistent,
+
+      strategyIdConsistent:
+        pipelineIdentity
+          .strategyIdConsistent,
     },
 
     decisionState,
@@ -2188,13 +2409,32 @@ function buildLaneDecision({
 
     paperPipeline: {
       available:
-        explicitPipelineReadiness.available
-          ? true
-          : plannerContext
-              .available === true,
+        degree === "subminute"
+          ? Boolean(
+              subminutePipelineContext
+                ?.engine26LocationCandidate ||
+              subminutePipelineContext
+                ?.engine26PipelineIdentity ||
+              subminutePipelineContext
+                ?.engine26LocationContext ||
+              subminutePipelineContext
+                ?.engine26ControlMap ||
+              subminutePipelineContext
+                ?.engine26ProposedGeometry
+            )
+          : (
+              explicitPipelineReadiness.available
+                ? true
+                : plannerContext
+                    .available === true
+            ),
 
       explicitAuthorizedInputs:
-        explicitPipelineReadiness.available,
+        degree === "subminute"
+          ? Boolean(
+              subminutePipelineContext
+            )
+          : explicitPipelineReadiness.available,
 
       engine3State:
         explicitPipelineReadiness
@@ -2212,18 +2452,32 @@ function buildLaneDecision({
         null,
 
       engine6Allowed:
-        explicitPipelineReadiness.available
-          ? explicitPipelineReadiness
-              .permissionReady
-          : permissionContext
-              .engine6Allowed === true,
+        degree === "subminute"
+          ? permissionContext
+              .engine6Allowed === true
+          : (
+              explicitPipelineReadiness.available
+                ? explicitPipelineReadiness
+                    .permissionReady
+                : permissionContext
+                    .engine6Allowed === true
+            ),
 
       plannerStatus:
-        explicitPipelineReadiness
-          .plannerStatus ??
-        plannerContext
-          .status ??
-        null,
+        degree === "subminute"
+          ? (
+              subminutePipelineContext
+                ?.engine26ProposedGeometry
+                ?.lifecycleStatus ??
+              null
+            )
+          : (
+              explicitPipelineReadiness
+                .plannerStatus ??
+              plannerContext
+                .status ??
+              null
+            ),
 
       plannerReady:
         readiness.plannerReady,
@@ -2242,6 +2496,8 @@ function buildLaneDecision({
 
       identityConsistent:
         pipelineIdentity.consistent,
+
+      executable: false,
 
       paperOnly:
         permissionContext
@@ -2409,6 +2665,7 @@ export function buildTraderDecision({
   engine27MarketStory,
   alphaDecisions,
   pipelineContext = null,
+  subminutePipelineContext = null,
 } = {}) {
   const waves =
     isObject(
@@ -2483,6 +2740,11 @@ export function buildTraderDecision({
           pipelineContext:
             degree === "minute"
               ? pipelineContext
+              : null,
+
+          subminutePipelineContext:
+            degree === "subminute"
+              ? subminutePipelineContext
               : null,
         });
     } catch {
@@ -2599,5 +2861,3 @@ export function buildTraderDecision({
       }),
   };
 }
-
-export default buildTraderDecision;
