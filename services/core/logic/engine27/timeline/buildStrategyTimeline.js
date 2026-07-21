@@ -31,6 +31,7 @@ const APPROVED_PERMISSION_DECISIONS = new Set([
 const IDENTITY_FIELDS = [
   "candidateId",
   "zoneId",
+  "laneId",
   "strategyId",
   "symbol",
 ];
@@ -98,18 +99,29 @@ function cloneReadiness(value) {
   );
 }
 
-function emptyStage(id, label, sourceEngine, reasonCode) {
+function laneDisplayName(identity) {
+  const laneId = textOrNull(identity?.laneId);
+  if (!laneId) return "Strategy";
+  return laneId.charAt(0).toUpperCase() + laneId.slice(1);
+}
+
+function emptyStage(id, label, sourceEngine, reasonCode, identity) {
+  const displayName = laneDisplayName(identity);
+
   return {
     id,
     label,
     status: STATUS.WAITING,
     headline: `${label} data unavailable`,
-    detail: `${sourceEngine} has not published a usable Minute output.`,
+    detail: `${sourceEngine} has not published a usable ${displayName} output.`,
     sourceEngine,
     reasonCodes: [reasonCode],
     updatedAt: null,
-    candidateId: null,
-    zoneId: null,
+    laneId: identity?.laneId ?? null,
+    strategyId: identity?.strategyId ?? null,
+    candidateId: identity?.candidateId ?? null,
+    zoneId: identity?.zoneId ?? null,
+    symbol: identity?.symbol ?? null,
   };
 }
 
@@ -129,6 +141,7 @@ function readIdentity(source) {
 
   return {
     candidateId: textOrNull(source.candidateId),
+    laneId: textOrNull(source.laneId),
     zoneId: textOrNull(source.zoneId),
     strategyId: textOrNull(source.strategyId),
     symbol: textOrNull(source.symbol),
@@ -193,6 +206,7 @@ function buildIdentity({
     for (const field of [
       "candidateId",
       "zoneId",
+      "laneId",
       "strategyId",
       "symbol",
       "direction",
@@ -257,14 +271,17 @@ function stageBase({ id, label, status, headline, detail, sourceEngine, reasonCo
     sourceEngine,
     reasonCodes: unique(reasonCodes),
     updatedAt: sourceTimestamp(source),
+    laneId: identity?.laneId ?? null,
+    strategyId: identity?.strategyId ?? null,
     candidateId: identity?.candidateId ?? null,
     zoneId: identity?.zoneId ?? null,
+    symbol: identity?.symbol ?? null,
   };
 }
 
 function buildStructureStage({ engine22, engine27A, identity }) {
   if (!isObject(engine22) && !isObject(engine27A)) {
-    return emptyStage("structure", "Structure", "ENGINE22", "ENGINE22_OUTPUT_UNAVAILABLE");
+    return emptyStage("structure", "Structure", "ENGINE22", "ENGINE22_OUTPUT_UNAVAILABLE", identity);
   }
 
   const invalidated =
@@ -280,8 +297,8 @@ function buildStructureStage({ engine22, engine27A, identity }) {
       id: "structure",
       label: "Structure",
       status: STATUS.INVALIDATED,
-      headline: "Minute structure invalidated",
-      detail: "Engine 22 or Engine 27A reports that the Minute structure is no longer valid.",
+      headline: `${laneDisplayName(identity)} structure invalidated`,
+      detail: `Engine 22 or Engine 27A reports that the ${laneDisplayName(identity)} structure is no longer valid.`,
       sourceEngine: "ENGINE22",
       reasonCodes: ["MINUTE_STRUCTURE_INVALIDATED"],
       source: engine22 ?? engine27A,
@@ -297,11 +314,11 @@ function buildStructureStage({ engine22, engine27A, identity }) {
     label: "Structure",
     status: active ? STATUS.ACTIVE : STATUS.WAITING,
     headline: active
-      ? `Minute ${currentWave ?? "structure"} remains active`
-      : "Waiting for a valid Minute structure",
+      ? `${laneDisplayName(identity)} ${currentWave ?? "structure"} remains active`
+      : `Waiting for a valid ${laneDisplayName(identity)} structure`,
     detail: active
-      ? engine27A?.currentRead ?? engine27A?.headline ?? engine22?.headline ?? "The parent Minute structure remains valid and is still developing."
-      : "Engine 22 has not published an active Minute structure.",
+      ? engine27A?.currentRead ?? engine27A?.headline ?? engine22?.headline ?? `The parent ${laneDisplayName(identity)} structure remains valid and is still developing.`
+      : `Engine 22 has not published an active ${laneDisplayName(identity)} structure.`,
     sourceEngine: "ENGINE22",
     reasonCodes: active
       ? ["MINUTE_STRUCTURE_ACTIVE", "STRUCTURE_NOT_INVALIDATED"]
@@ -378,7 +395,7 @@ function buildLocation({ engine26A, identity, currentPrice }) {
 
 function buildLocationStage({ engine26A, identity, location }) {
   if (!isObject(engine26A)) {
-    return emptyStage("location", "Location", "ENGINE26A", "ENGINE26A_OUTPUT_UNAVAILABLE");
+    return emptyStage("location", "Location", "ENGINE26A", "ENGINE26A_OUTPUT_UNAVAILABLE", identity);
   }
 
   const mismatches = stageIdentityMismatch(identity, engine26A);
@@ -388,7 +405,7 @@ function buildLocationStage({ engine26A, identity, location }) {
       label: "Location",
       status: STATUS.BLOCKED,
       headline: "Location identity mismatch",
-      detail: "Engine 26A location identity conflicts with the canonical Minute identity.",
+      detail: `Engine 26A location identity conflicts with the canonical ${laneDisplayName(identity)} identity.`,
       sourceEngine: "ENGINE26A",
       reasonCodes: mismatches,
       source: engine26A,
@@ -406,7 +423,7 @@ function buildLocationStage({ engine26A, identity, location }) {
       label: "Location",
       status: STATUS.INVALIDATED,
       headline: "Authorized location invalidated",
-      detail: "Engine 26A reports that the selected Minute location is no longer valid.",
+      detail: `Engine 26A reports that the selected ${laneDisplayName(identity)} location is no longer valid.`,
       sourceEngine: "ENGINE26A",
       reasonCodes: ["ENGINE26_LOCATION_INVALIDATED"],
       source: engine26A,
@@ -433,8 +450,8 @@ function buildLocationStage({ engine26A, identity, location }) {
       location.priceLocation === "INSIDE_ZONE"
         ? "Price is inside the authorized zone"
         : active
-        ? "Authorized Minute location is active"
-        : "Waiting for an authorized Minute location",
+        ? `Authorized ${laneDisplayName(identity)} location is active`
+        : `Waiting for an authorized ${laneDisplayName(identity)} location`,
     detail:
       location.priceLocation === "UNKNOWN"
         ? "Engine 26A detected a location, but normalized zone boundaries or price location are unavailable."
@@ -450,7 +467,7 @@ function buildLocationStage({ engine26A, identity, location }) {
 
 function buildReactionStage({ engine3, engine26A, engine27E, identity }) {
   if (!isObject(engine3)) {
-    return emptyStage("reaction", "Reaction", "ENGINE3", "ENGINE3_OUTPUT_UNAVAILABLE");
+    return emptyStage("reaction", "Reaction", "ENGINE3", "ENGINE3_OUTPUT_UNAVAILABLE", identity);
   }
 
   const mismatches = stageIdentityMismatch(identity, engine3);
@@ -460,7 +477,7 @@ function buildReactionStage({ engine3, engine26A, engine27E, identity }) {
       label: "Reaction",
       status: STATUS.BLOCKED,
       headline: "Reaction identity mismatch",
-      detail: "Engine 3 reaction identity conflicts with the canonical Minute identity.",
+      detail: `Engine 3 reaction identity conflicts with the canonical ${laneDisplayName(identity)} identity.`,
       sourceEngine: "ENGINE3",
       reasonCodes: mismatches,
       source: engine3,
@@ -474,7 +491,7 @@ function buildReactionStage({ engine3, engine26A, engine27E, identity }) {
       label: "Reaction",
       status: STATUS.WAITING,
       headline: "Waiting for Engine 26A location",
-      detail: "Engine 3 cannot validate the Minute reaction until an authorized location exists.",
+      detail: `Engine 3 cannot validate the ${laneDisplayName(identity)} reaction until an authorized location exists.`,
       sourceEngine: "ENGINE3",
       reasonCodes: ["WAITING_FOR_ENGINE26_LOCATION"],
       source: engine3,
@@ -496,7 +513,7 @@ function buildReactionStage({ engine3, engine26A, engine27E, identity }) {
         ? STATUS.INVALIDATED
         : STATUS.BLOCKED,
       headline: "Directional reaction failed",
-      detail: "Engine 3 explicitly rejected or invalidated the authorized Minute reaction.",
+      detail: `Engine 3 explicitly rejected or invalidated the authorized ${laneDisplayName(identity)} reaction.`,
       sourceEngine: "ENGINE3",
       reasonCodes: ["ENGINE3_REACTION_BLOCKED"],
       source: engine3,
@@ -530,7 +547,7 @@ function buildReactionStage({ engine3, engine26A, engine27E, identity }) {
 
 function buildParticipationStage({ engine4, engine3, engine27E, identity }) {
   if (!isObject(engine4)) {
-    return emptyStage("participation", "Participation", "ENGINE4", "ENGINE4_OUTPUT_UNAVAILABLE");
+    return emptyStage("participation", "Participation", "ENGINE4", "ENGINE4_OUTPUT_UNAVAILABLE", identity);
   }
 
   const mismatches = stageIdentityMismatch(identity, engine4);
@@ -540,7 +557,7 @@ function buildParticipationStage({ engine4, engine3, engine27E, identity }) {
       label: "Participation",
       status: STATUS.BLOCKED,
       headline: "Participation identity mismatch",
-      detail: "Engine 4 participation identity conflicts with the canonical Minute identity.",
+      detail: `Engine 4 participation identity conflicts with the canonical ${laneDisplayName(identity)} identity.`,
       sourceEngine: "ENGINE4",
       reasonCodes: mismatches,
       source: engine4,
@@ -580,7 +597,7 @@ function buildParticipationStage({ engine4, engine3, engine27E, identity }) {
       ? "Watching for supporting participation"
       : "Waiting for Engine 3 reaction",
     detail: ready
-      ? "Engine 27E confirms that Engine 4 participation satisfies the Minute contract."
+      ? `Engine 27E confirms that Engine 4 participation satisfies the ${laneDisplayName(identity)} contract.`
       : `Engine 4 state: ${textOrNull(engine4?.status ?? engine4?.participationState ?? engine4?.state) ?? "PENDING"}.`,
     sourceEngine: "ENGINE4",
     reasonCodes: ready
@@ -604,7 +621,7 @@ function permissionDenied(engine6) {
 
 function buildPermissionStage({ engine6, engine27E, identity }) {
   if (!isObject(engine6)) {
-    return emptyStage("permission", "Permission", "ENGINE6", "ENGINE6_OUTPUT_UNAVAILABLE");
+    return emptyStage("permission", "Permission", "ENGINE6", "ENGINE6_OUTPUT_UNAVAILABLE", identity);
   }
 
   const mismatches = stageIdentityMismatch(identity, engine6);
@@ -614,7 +631,7 @@ function buildPermissionStage({ engine6, engine27E, identity }) {
       label: "Permission",
       status: STATUS.BLOCKED,
       headline: "Permission identity mismatch",
-      detail: "Engine 6 permission identity conflicts with the canonical Minute identity.",
+      detail: `Engine 6 permission identity conflicts with the canonical ${laneDisplayName(identity)} identity.`,
       sourceEngine: "ENGINE6",
       reasonCodes: mismatches,
       source: engine6,
@@ -663,7 +680,7 @@ function hasTargets(value) {
 
 function buildGeometryStage({ engine26B, engine27E, identity }) {
   if (!isObject(engine26B)) {
-    return emptyStage("geometry", "Geometry", "ENGINE26B", "ENGINE26B_OUTPUT_UNAVAILABLE");
+    return emptyStage("geometry", "Geometry", "ENGINE26B", "ENGINE26B_OUTPUT_UNAVAILABLE", identity);
   }
 
   const mismatches = stageIdentityMismatch(identity, engine26B);
@@ -673,7 +690,7 @@ function buildGeometryStage({ engine26B, engine27E, identity }) {
       label: "Geometry",
       status: STATUS.BLOCKED,
       headline: "Geometry identity mismatch",
-      detail: "Engine 26B geometry identity conflicts with the canonical Minute identity.",
+      detail: `Engine 26B geometry identity conflicts with the canonical ${laneDisplayName(identity)} identity.`,
       sourceEngine: "ENGINE26B",
       reasonCodes: mismatches,
       source: engine26B,
@@ -743,7 +760,7 @@ function sizingFailure(source) {
 
 function buildSizingStage({ engine7A, engine7B, identity }) {
   if (!isObject(engine7A) && !isObject(engine7B)) {
-    return emptyStage("sizing", "Sizing", "ENGINE7A", "ENGINE7_SIZING_OUTPUT_UNAVAILABLE");
+    return emptyStage("sizing", "Sizing", "ENGINE7A", "ENGINE7_SIZING_OUTPUT_UNAVAILABLE", identity);
   }
 
   const mismatches = unique([
@@ -757,7 +774,7 @@ function buildSizingStage({ engine7A, engine7B, identity }) {
       label: "Sizing",
       status: STATUS.BLOCKED,
       headline: "Sizing identity mismatch",
-      detail: "Engine 7 sizing identity conflicts with the canonical Minute identity.",
+      detail: `Engine 7 sizing identity conflicts with the canonical ${laneDisplayName(identity)} identity.`,
       sourceEngine: "ENGINE7B",
       reasonCodes: mismatches,
       source: engine7B ?? engine7A,
@@ -819,7 +836,7 @@ function buildSizingStage({ engine7A, engine7B, identity }) {
     label: "Sizing",
     status: STATUS.WAITING,
     headline: "Waiting for sizing",
-    detail: "Neither preliminary nor final Minute sizing is available.",
+    detail: `Neither preliminary nor final ${laneDisplayName(identity)} sizing is available.`,
     sourceEngine: "ENGINE7A",
     reasonCodes: ["ENGINE7_SIZING_PENDING"],
     source: engine7B ?? engine7A,
@@ -829,7 +846,7 @@ function buildSizingStage({ engine7A, engine7B, identity }) {
 
 function buildManagementStage({ engine9, identity }) {
   if (!isObject(engine9)) {
-    return emptyStage("management", "Management Plan", "ENGINE9", "ENGINE9_OUTPUT_UNAVAILABLE");
+    return emptyStage("management", "Management Plan", "ENGINE9", "ENGINE9_OUTPUT_UNAVAILABLE", identity);
   }
 
   const mismatches = stageIdentityMismatch(identity, engine9);
@@ -839,7 +856,7 @@ function buildManagementStage({ engine9, identity }) {
       label: "Management Plan",
       status: STATUS.BLOCKED,
       headline: "Management-plan identity mismatch",
-      detail: "Engine 9 management identity conflicts with the canonical Minute identity.",
+      detail: `Engine 9 management identity conflicts with the canonical ${laneDisplayName(identity)} identity.`,
       sourceEngine: "ENGINE9",
       reasonCodes: mismatches,
       source: engine9,
@@ -925,7 +942,7 @@ function executionStatus(engine8) {
 
 function buildExecutionStage({ engine8, identity }) {
   if (!isObject(engine8)) {
-    return emptyStage("execution", "Execution", "ENGINE8", "ENGINE8_OUTPUT_UNAVAILABLE");
+    return emptyStage("execution", "Execution", "ENGINE8", "ENGINE8_OUTPUT_UNAVAILABLE", identity);
   }
 
   const mismatches = stageIdentityMismatch(identity, engine8);
@@ -935,7 +952,7 @@ function buildExecutionStage({ engine8, identity }) {
       label: "Execution",
       status: STATUS.BLOCKED,
       headline: "Execution identity mismatch",
-      detail: "Engine 8 execution identity conflicts with the canonical Minute identity.",
+      detail: `Engine 8 execution identity conflicts with the canonical ${laneDisplayName(identity)} identity.`,
       sourceEngine: "ENGINE8",
       reasonCodes: mismatches,
       source: engine8,
@@ -982,7 +999,7 @@ function buildJournalStage({ engine10, identity }) {
       label: "Journal",
       status: STATUS.WAITING,
       headline: "No trade event to record",
-      detail: "Engine 10 has not published a Minute lifecycle object.",
+      detail: `Engine 10 has not published a ${laneDisplayName(identity)} lifecycle object.`,
       sourceEngine: "ENGINE10",
       reasonCodes: ["ENGINE10_OUTPUT_UNAVAILABLE", "NO_EXECUTION_EVENT"],
       source: null,
@@ -997,7 +1014,7 @@ function buildJournalStage({ engine10, identity }) {
       label: "Journal",
       status: STATUS.BLOCKED,
       headline: "Journal identity mismatch",
-      detail: "Engine 10 lifecycle identity conflicts with the canonical Minute identity.",
+      detail: `Engine 10 lifecycle identity conflicts with the canonical ${laneDisplayName(identity)} identity.`,
       sourceEngine: "ENGINE10",
       reasonCodes: mismatches,
       source: engine10,
@@ -1199,7 +1216,7 @@ export function buildStrategyTimeline({
   return {
     laneId: identity.laneId,
     strategyId: identity.strategyId,
-    displayName: "Minute",
+    displayName: laneDisplayName(identity),
     triggerTimeframe: "10m",
     contextTimeframe: "1h",
     snapshotTime: normalizedSnapshotTime,
