@@ -8665,12 +8665,12 @@ result.strategies[s.strategyId] = {
     const subminuteEngine6CandidateId =
       subminuteEngine26Candidate?.candidateId ||
       subminuteEngine26Identity?.candidateId ||
-      "E26C-SUBMINUTE-87288e1db54cb920bfd4";
+      null;
 
     const subminuteEngine6ZoneId =
       subminuteEngine26Candidate?.zoneId ||
       subminuteEngine26Identity?.zoneId ||
-      "E26Z-SUBMINUTE-d15bf89c7c189d747288";
+      null;
 
     const subminuteEngine6Symbol =
       subminuteEngine26Candidate?.symbol ||
@@ -8699,11 +8699,15 @@ result.strategies[s.strategyId] = {
       nowIso();
 
     const subminuteEngine6IdentityValid =
+      subminuteEngine26Candidate != null &&
       subminuteEngine6CandidateId ===
         "E26C-SUBMINUTE-87288e1db54cb920bfd4" &&
       subminuteEngine6ZoneId ===
-        "E26Z-SUBMINUTE-d15bf89c7c189d747288";
-
+        "E26Z-SUBMINUTE-d15bf89c7c189d747288" &&
+      subminuteEngine26Candidate?.candidateId ===
+        subminuteEngine6CandidateId &&
+      subminuteEngine26Candidate?.zoneId ===
+        subminuteEngine6ZoneId;
     const subminuteEngine6Permission = {
       engine: "engine6.subminute.permission.v1",
       source: "buildStrategySnapshot.subminuteEngine6Permission",
