@@ -8866,7 +8866,9 @@ result.strategies[s.strategyId] = {
   // Reads completed Engine 22, Engine 3, Engine 4, Engine 6, and Engine 26 context.
   // Does not create permission, sizing, tickets, execution, or journal records.
   result.engine27Strategies = buildEngine27Strategies({
-    snapshot: result,
+  snapshot: result,
+});
+
 /*
  * Engine 8 — Subminute canonical execution state.
  *
