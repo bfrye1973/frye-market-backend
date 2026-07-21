@@ -9141,6 +9141,184 @@ scalp.strategyTimeline =
   }
 }
 
+/*
+ * Engine 27G — Canonical Subminute Strategy Timeline
+ *
+ * Uses only explicit Subminute-owned contracts.
+ * No Minute candidate, zone, permission, geometry, sizing,
+ * management, execution, or journal fallback is allowed.
+ */
+if (String(symbol || "").toUpperCase() === "ES") {
+  const subminuteStrategy =
+    result.strategies?.["subminute_scalp@10m"] ||
+    null;
+
+  const minuteStrategy =
+    result.strategies?.["intraday_scalp@10m"] ||
+    null;
+
+  const subminuteDecision =
+    result.engine27Strategies
+      ?.engine27TraderDecision
+      ?.decisions
+      ?.subminute ||
+    null;
+
+  if (subminuteStrategy) {
+    subminuteStrategy.strategyTimeline =
+      buildStrategyTimeline({
+        laneId: "subminute",
+        strategyId: "subminute_scalp@10m",
+
+        strategy: subminuteStrategy,
+
+        /*
+         * Engine 22 owns the five-degree structure under the existing
+         * Engine 22 wave strategy. Only the explicit Subminute degree
+         * object is provided here.
+         */
+        engine22:
+          minuteStrategy
+            ?.engine22WaveStrategy
+            ?.degreeStates
+            ?.subminute ||
+          null,
+
+        /*
+         * Genuine Subminute-owned Engine 26A candidate/location.
+         */
+        engine26A:
+          subminuteStrategy
+            ?.engine26LocationCandidate ||
+          null,
+
+        /*
+         * Use only explicitly attached Subminute Engine 3 output.
+         * No Minute confluence fallback.
+         */
+        engine3:
+          subminuteStrategy
+            ?.engine3Reaction ||
+          subminuteStrategy
+            ?.engine3AuthorizedReaction ||
+          null,
+
+        /*
+         * Use only explicitly attached Subminute Engine 4 output.
+         * No Minute confluence fallback.
+         */
+        engine4:
+          subminuteStrategy
+            ?.engine4Participation ||
+          subminuteStrategy
+            ?.engine4AuthorizedParticipation ||
+          null,
+
+        /*
+         * Genuine Subminute-owned Engine 6 permission.
+         */
+        engine6:
+          subminuteStrategy
+            ?.engine6Permission ||
+          null,
+
+        /*
+         * Genuine Subminute-owned Engine 26B proposed geometry.
+         */
+        engine26B:
+          subminuteStrategy
+            ?.engine26ProposedGeometry ||
+          null,
+
+        /*
+         * Engine 27 lane-owned read-only intelligence.
+         */
+        engine27A:
+          result.engine27Strategies
+            ?.engine27WaveIntelligence
+            ?.subminute ||
+          null,
+
+        engine27B:
+          result.engine27Strategies
+            ?.engine27FibIntelligence
+            ?.subminute ||
+          null,
+
+        engine27E:
+          subminuteDecision,
+
+        /*
+         * Downstream contracts remain unavailable unless explicitly
+         * attached to the Subminute strategy node.
+         */
+        engine7A:
+          subminuteStrategy
+            ?.engine7SizingPreview ||
+          null,
+
+        engine9:
+          subminuteStrategy
+            ?.engine9OfficialManagementPlan ||
+          null,
+
+        engine7B:
+          subminuteStrategy
+            ?.engine7PositionSizing ||
+          null,
+
+        /*
+         * Engine 8 alone owns top-level executability.
+         */
+        engine8:
+          subminuteStrategy
+            ?.engine8PaperOrder ||
+          null,
+
+        engine10:
+          subminuteStrategy
+            ?.engine10Lifecycle ||
+          subminuteStrategy
+            ?.engine10Journal ||
+          null,
+
+        currentPrice:
+          subminuteStrategy
+            ?.engine26LocationCandidate
+            ?.currentPrice ??
+          subminuteDecision
+            ?.currentPrice ??
+          result.engine27Strategies
+            ?.engine27FibIntelligence
+            ?.subminute
+            ?.currentPrice ??
+          null,
+
+        symbol:
+          subminuteStrategy
+            ?.engine26LocationCandidate
+            ?.symbol ||
+          subminuteStrategy
+            ?.engine26PipelineIdentity
+            ?.symbol ||
+          symbol ||
+          "ES",
+
+        snapshotTime:
+          subminuteStrategy
+            ?.engine26LocationCandidate
+            ?.snapshotTime ??
+          subminuteStrategy
+            ?.engine26PipelineIdentity
+            ?.snapshotTime ??
+          subminuteDecision
+            ?.snapshotTime ??
+          result.now ??
+          null,
+      });
+  }
+}
+
   if (String(symbol || "").toUpperCase() === "ES") {
     const scalp = result.strategies?.["intraday_scalp@10m"];
 
