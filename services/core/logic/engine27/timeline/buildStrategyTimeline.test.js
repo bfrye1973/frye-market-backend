@@ -398,3 +398,133 @@ test("zone identity mismatch is exposed independently", () => {
   assert.ok(timeline.blockers.includes("ZONE_ID_MISMATCH"));
   assert.ok(!timeline.blockers.includes("CANDIDATE_ID_MISMATCH"));
 });
+test("Subminute uses the same canonical ten-stage contract without Minute fallback", () => {
+  const fixture = baseFixture();
+  const candidateId = "E26C-SUBMINUTE-87288e1db54cb920bfd4";
+  const zoneId = "E26Z-SUBMINUTE-d15bf89c7c189d747288";
+
+  fixture.laneId = "subminute";
+  fixture.strategyId = "subminute_scalp@10m";
+  fixture.strategy = {
+    laneId: "subminute",
+    strategyId: "subminute_scalp@10m",
+    snapshotTime: fixture.snapshotTime,
+  };
+
+  for (const key of [
+    "engine26A",
+    "engine3",
+    "engine4",
+    "engine6",
+    "engine26B",
+    "engine27E",
+    "engine7A",
+    "engine9",
+    "engine7B",
+    "engine8",
+  ]) {
+    fixture[key] = {
+      ...fixture[key],
+      laneId: "subminute",
+      strategyId: "subminute_scalp@10m",
+      candidateId,
+      zoneId,
+      symbol: "ES",
+    };
+  }
+
+  fixture.engine27A = {
+    ...fixture.engine27A,
+    laneId: "subminute",
+    strategyId: "subminute_scalp@10m",
+  };
+  fixture.engine27B = {
+    ...fixture.engine27B,
+    laneId: "subminute",
+    strategyId: "subminute_scalp@10m",
+  };
+
+  const timeline = buildStrategyTimeline(fixture);
+
+  assert.equal(timeline.displayName, "Subminute");
+  assert.equal(timeline.laneId, "subminute");
+  assert.equal(timeline.strategyId, "subminute_scalp@10m");
+  assert.equal(timeline.candidateId, candidateId);
+  assert.equal(timeline.zoneId, zoneId);
+  assert.deepEqual(timeline.stages.map((stage) => stage.id), STAGE_ORDER);
+  assert.equal(timeline.stages.length, 10);
+
+  for (const stage of timeline.stages) {
+    assert.equal(stage.laneId, "subminute");
+    assert.equal(stage.strategyId, "subminute_scalp@10m");
+    assert.equal(stage.candidateId, candidateId);
+    assert.equal(stage.zoneId, zoneId);
+    assert.equal(stage.symbol, "ES");
+    assert.ok(VALID_STATUSES.has(stage.status));
+  }
+
+  assert.equal(timeline.executable, false);
+  assert.equal(timeline.noExecution, true);
+});
+
+test("missing Subminute downstream contracts remain honest WAITING stages", () => {
+  const timeline = buildStrategyTimeline({
+    laneId: "subminute",
+    strategyId: "subminute_scalp@10m",
+    symbol: "ES",
+    strategy: {
+      laneId: "subminute",
+      strategyId: "subminute_scalp@10m",
+      symbol: "ES",
+    },
+    engine26A: {
+      active: true,
+      status: "LOCATION_DETECTED",
+      laneId: "subminute",
+      strategyId: "subminute_scalp@10m",
+      candidateId: "SUB-C1",
+      zoneId: "SUB-Z1",
+      symbol: "ES",
+    },
+  });
+
+  assert.equal(timeline.stages.length, 10);
+  assert.deepEqual(timeline.stages.map((stage) => stage.id), STAGE_ORDER);
+
+  for (const stage of timeline.stages) {
+    assert.ok(stage);
+    assert.ok(VALID_STATUSES.has(stage.status));
+    assert.equal(stage.laneId, "subminute");
+    assert.equal(stage.strategyId, "subminute_scalp@10m");
+    assert.equal(stage.candidateId, "SUB-C1");
+    assert.equal(stage.zoneId, "SUB-Z1");
+  }
+
+  assert.equal(
+    timeline.stages.find((stage) => stage.id === "permission").status,
+    "WAITING"
+  );
+  assert.equal(
+    timeline.stages.find((stage) => stage.id === "management").status,
+    "WAITING"
+  );
+  assert.equal(
+    timeline.stages.find((stage) => stage.id === "execution").status,
+    "WAITING"
+  );
+  assert.equal(
+    timeline.stages.find((stage) => stage.id === "journal").status,
+    "WAITING"
+  );
+  assert.equal(timeline.executable, false);
+  assert.equal(timeline.noExecution, true);
+});
+
+test("Minute defaults remain unchanged", () => {
+  const timeline = buildStrategyTimeline(baseFixture());
+
+  assert.equal(timeline.displayName, "Minute");
+  assert.equal(timeline.laneId, "minute");
+  assert.equal(timeline.strategyId, "intraday_scalp@10m");
+  assert.deepEqual(timeline.stages.map((stage) => stage.id), STAGE_ORDER);
+});
