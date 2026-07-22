@@ -1,6 +1,6 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-07-21 14:30",
+  "updatedAt": "2026-07-22 14:45",
   "schema": "active-wave-state-es@v3",
   "activeDegreeKeys": [
     "primary",
@@ -529,27 +529,27 @@
         "W1": {
           "low": {
             "price": 7474.0,
-            "time": "2026-06-20 17:00"
+            "time": "2026-07-20 17:00"
           },
           "high": {
             "price": 7553.25,
-            "time": "2026-06-21 09:50"
+            "time": "2026-07-21 09:50"
           },
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "SUBMINUTE_W1_LOW_7474_ON_2026_06_20_1700",
-            "SUBMINUTE_W1_HIGH_7553_25_ON_2026_06_21_0950",
+            "SUBMINUTE_W1_LOW_7474_ON_2026_07_20_1700",
+            "SUBMINUTE_W1_HIGH_7553_25_ON_2026_07_21_0950",
             "SUBMINUTE_W1_INSIDE_MINUTE_W3"
           ]
         },
         "W2": {
           "price": 7514.0,
-          "time": "2026-06-22 06:00",
+          "time": "2026-07-22 06:00",
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "SUBMINUTE_W2_COMPLETED_AT_7514_ON_2026_06_22_0600",
+            "SUBMINUTE_W2_COMPLETED_AT_7514_ON_2026_07_22_0600",
             "SUBMINUTE_W3_STARTED_FROM_7514",
             "HELD_ABOVE_MINUTE_W2_LOW_7472_50"
           ]
@@ -689,4 +689,3 @@
       }
     }
   }
-}
