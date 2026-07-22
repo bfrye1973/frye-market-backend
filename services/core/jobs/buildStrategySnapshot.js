@@ -7403,17 +7403,7 @@ attachEngine4AuthorizedReactionParticipation({
 
         tickSize: 0.25,
       });
-
-      engine26LocationCandidate =
-        engine26A?.engine26LocationCandidate ||
-        null;
-
-      engine26ReactionHandoff =
-        engine26A?.engine26ReactionHandoff ||
-        null;
-      engine26GeometryHandoff =
-        engine26A?.engine26GeometryHandoff ||
-        null;
+     
     } catch (err) {
       console.error(
         "[ENGINE26A LOCATION DISCOVERY ERROR]",
@@ -8167,6 +8157,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
      
     engine26LocationCandidate,
     engine26ReactionHandoff,
+    engine26GeometryHandoff,
 
     engine26ImbalanceWatch,
     engine26StructuralContext,
