@@ -46,6 +46,10 @@ function readJsonFile(filePath) {
 }
 
 function safeNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -123,24 +127,72 @@ function buildCreditStressDetail(marketHealth) {
   ];
 
   const macroStressItems = [
-    normalizeStressItem("BAMLH0A0HYM2", "High Yield Credit Spread", creditStressInputs.BAMLH0A0HYM2),
-    normalizeStressItem("NFCI", "Chicago Fed National Financial Conditions Index", creditStressInputs.NFCI),
-    normalizeStressItem("STLFSI4", "St. Louis Fed Financial Stress Index", creditStressInputs.STLFSI4),
+    normalizeStressItem(
+      "BAMLH0A0HYM2",
+      "High Yield Credit Spread",
+      creditStressInputs.highYieldSpread
+    ),
+    normalizeStressItem(
+      "NFCI",
+      "Chicago Fed National Financial Conditions Index",
+      creditStressInputs.nfci
+    ),
+    normalizeStressItem(
+      "STLFSI4",
+      "St. Louis Fed Financial Stress Index",
+      creditStressInputs.stlfsi
+    ),
   ];
 
   const ratesCurveItems = [
-    normalizeStressItem("DGS10", "10-Year Treasury Rate", bondInputs.DGS10),
-    normalizeStressItem("DGS2", "2-Year Treasury Rate", bondInputs.DGS2),
-    normalizeStressItem("T10Y2Y", "10Y minus 2Y Yield Spread", bondInputs.T10Y2Y),
-    normalizeStressItem("T10Y3M", "10Y minus 3M Yield Spread", bondInputs.T10Y3M),
-    normalizeStressItem("TLT", "20+ Year Treasury Bond ETF", tlt),
+    normalizeStressItem(
+      "DGS10",
+      "10-Year Treasury Rate",
+      bondInputs.tenYear
+    ),
+    normalizeStressItem(
+      "DGS2",
+      "2-Year Treasury Rate",
+      bondInputs.twoYear
+    ),
+    normalizeStressItem(
+      "T10Y2Y",
+      "10Y minus 2Y Yield Spread",
+      bondInputs.tenMinusTwo
+    ),
+    normalizeStressItem(
+      "T10Y3M",
+      "10Y minus 3M Yield Spread",
+      bondInputs.tenMinusThreeMonth
+    ),
+    normalizeStressItem(
+      "TLT",
+      "20+ Year Treasury Bond ETF",
+      tlt
+    ),
   ];
 
   const liquidityItems = [
-    normalizeStressItem("WRESBAL", "Bank Reserves", liquidityInputs.WRESBAL),
-    normalizeStressItem("RRPONTSYD", "Reverse Repo", liquidityInputs.RRPONTSYD),
-    normalizeStressItem("WALCL", "Fed Balance Sheet", liquidityInputs.WALCL),
-    normalizeStressItem("M2SL", "M2 Money Supply", liquidityInputs.M2SL),
+    normalizeStressItem(
+      "WRESBAL",
+      "Bank Reserves",
+      liquidityInputs.bankReserves
+    ),
+    normalizeStressItem(
+      "RRPONTSYD",
+      "Reverse Repo",
+      liquidityInputs.reverseRepo
+    ),
+    normalizeStressItem(
+      "WALCL",
+      "Fed Balance Sheet",
+      liquidityInputs.fedBalanceSheet
+    ),
+    normalizeStressItem(
+      "M2SL",
+      "M2 Money Supply",
+      liquidityInputs.m2
+    ),
   ];
 
   const scores = {
