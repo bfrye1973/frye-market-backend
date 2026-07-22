@@ -1018,6 +1018,10 @@ function buildWaitingHandoff(
     zoneId:
       candidate?.zoneId ?? null,
 
+    laneId:
+      candidate?.laneId ??
+      "minute",
+
     symbol:
       candidate?.symbol ?? null,
 
@@ -1040,6 +1044,43 @@ function buildWaitingHandoff(
 
     setupType:
       candidate?.setupType ?? null,
+
+    setupClass:
+      candidate?.setupClass ?? null,
+
+    setupGrade:
+      candidate?.setupGrade ?? null,
+
+    identitySetupKey:
+      candidate?.identitySetupKey ?? null,
+
+    candidateIdentityVersion:
+      candidate?.candidateIdentityVersion ??
+      null,
+
+    entryZone:
+      candidate?.entryZone ?? null,
+
+    targetZone:
+      candidate?.targetZone ?? null,
+
+    sweepFacts:
+      candidate?.sweepFacts ?? null,
+
+    lowerWickFacts:
+      candidate?.lowerWickFacts ?? null,
+
+    reclaimFacts:
+      candidate?.reclaimFacts ?? null,
+
+    postReclaimFacts:
+      candidate?.postReclaimFacts ?? null,
+
+    invalidationFacts:
+      candidate?.invalidationFacts ?? null,
+
+    zoneMemorySummary:
+      candidate?.zoneMemorySummary ?? null,
 
     expectedReactions:
       candidate?.expectedReactions ?? [],
@@ -1900,6 +1941,10 @@ export function buildEngine26ReactionHandoff({
 
     zoneId:
       candidate.zoneId,
+
+    laneId:
+      candidate.laneId ??
+      "minute",
 
     symbol:
       candidate.symbol,
