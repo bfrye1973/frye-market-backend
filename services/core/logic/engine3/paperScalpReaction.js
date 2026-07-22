@@ -527,6 +527,16 @@ function buildBasePaperScalpReaction({
     authorizeEngine3Evaluation:
       engine26LocationContext
         ?.authorizeEngine3Evaluation === true,
+evaluationAuthorized:
+  engine26LocationContext
+    ?.authorizeEngine3Evaluation === true,
+
+reactionConfirmed:
+  engine26LocationContext?.confirmed === true &&
+  engine26LocationContext?.state === "REACTION_CONFIRMED",
+
+reactionState:
+  engine26LocationContext?.state || state,
 
     targetModel: TARGET_MODEL,
 
