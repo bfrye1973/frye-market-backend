@@ -1,6 +1,6 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-07-21 14:00",
+  "updatedAt": "2026-07-21 14:30",
   "schema": "active-wave-state-es@v3",
   "activeDegreeKeys": [
     "primary",
@@ -181,8 +181,8 @@
           "basis": [
             "INTERMEDIATE_W3_ACTIVE_AFTER_CONFIRMED_W2_LOW",
             "MINOR_W1_COMPLETED_WITHIN_INTERMEDIATE_W3",
-            "MINOR_W2_COMPLETED_AT_7359_75",
-            "MINOR_W3_ACTIVE_FROM_7359_75",
+            "MINOR_W2_COMPLETED_AT_7366_50",
+            "MINOR_W3_ACTIVE_FROM_7366_50",
             "INTERMEDIATE_PARENT_TREND_REMAINS_UP"
           ]
         }
@@ -253,35 +253,35 @@
       "parentWave": "W3",
       "activeWave": "W3",
       "stage": "ACTIVE",
-      "currentRead": "MINOR_W3_ACTIVE_FROM_7359_75_AFTER_MINOR_W2_COMPLETE",
-      "headline": "Minor W3 active from 7359.75 after completed Minor W2",
-      "action": "WATCH_MINOR_W3_CONTINUATION_7600_SUPPORT_HOLD",
+      "currentRead": "MINOR_W3_ACTIVE_FROM_7366_50_AFTER_MINOR_W2_COMPLETE",
+      "headline": "Minor W3 active from 7366.50 after completed Minor W2",
+      "action": "WATCH_MINOR_W3_CONTINUATION_AND_7694_75_CONFIRMATION",
       "marks": {
         "W1": {
           "low": {
-            "price": 6429.5,
-            "time": "2026-03-31"
+            "price": 6423.5,
+            "time": "2026-03-30 16:00"
           },
           "high": {
-            "price": 7692.0,
-            "time": "2026-07-02"
+            "price": 7694.75,
+            "time": "2026-06-01 11:00"
           },
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "MINOR_W1_STARTED_FROM_6429_50",
-            "MINOR_W1_COMPLETED_AT_7692",
+            "MINOR_W1_LOW_6423_50_ON_2026_03_30_1600",
+            "MINOR_W1_HIGH_7694_75_ON_2026_06_01_1100",
             "MINOR_W1_INSIDE_INTERMEDIATE_W3"
           ]
         },
         "W2": {
-          "price": 7359.75,
-          "time": "2026-06-25 18:00",
+          "price": 7366.5,
+          "time": "2026-06-26 06:00",
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "MINOR_W2_COMPLETED_AT_7359_75_ON_2026_06_25_1800",
-            "MINOR_W3_STARTED_FROM_7359_75",
+            "MINOR_W2_COMPLETED_AT_7366_50_ON_2026_06_26_0600",
+            "MINOR_W3_STARTED_FROM_7366_50",
             "PRICE_RECLAIMED_UPPER_STRUCTURE_AFTER_W2_LOW"
           ]
         },
@@ -291,50 +291,50 @@
           "status": "ACTIVE",
           "confidence": "MEDIUM_HIGH",
           "basis": [
-            "MINOR_W3_ACTIVE_AFTER_CONFIRMED_MINOR_W2_LOW_7359_75",
+            "MINOR_W3_ACTIVE_AFTER_CONFIRMED_MINOR_W2_LOW_7366_50",
             "MINUTE_W3_BREAKOUT_CANDIDATE_ACTIVE_INSIDE_MINOR_W3",
             "WATCH_7530_SUPPORT_HOLD",
-            "WATCH_7634_25_AND_7692_CONFIRMATION_LEVELS"
+            "WATCH_7634_25_AND_7694_75_CONFIRMATION_LEVELS"
           ]
         }
       },
       "targetModel": {
         "source": "MINOR_W3_EXTENSION_FROM_MINOR_W2_LOW",
-        "anchorLow": 6429.5,
-        "anchorHigh": 7692.0,
-        "projectionBase": 7359.75,
-        "range": 1262.5,
+        "anchorLow": 6423.5,
+        "anchorHigh": 7694.75,
+        "projectionBase": 7366.5,
+        "range": 1271.25,
         "levels": {
-          "e100": 8622.25,
-          "e1272": 8965.75,
-          "e1618": 9402.5,
-          "e200": 9884.75,
-          "e2618": 10665.0
+          "e100": 8637.75,
+          "e1272": 8983.5,
+          "e1618": 9423.5,
+          "e200": 9909.0,
+          "e2618": 10694.75
         },
         "displayLevels": [
           {
             "label": "1.000",
-            "price": 8622.25
+            "price": 8637.75
           },
           {
             "label": "1.272",
-            "price": 8965.75
+            "price": 8983.5
           },
           {
             "label": "1.618",
-            "price": 9402.5
+            "price": 9423.5
           },
           {
             "label": "2.000",
-            "price": 9884.75
+            "price": 9909.0
           },
           {
             "label": "2.618",
-            "price": 10665.0
+            "price": 10694.75
           }
         ],
-        "nextTarget": 8622.25,
-        "summary": "Minor W3 is active from 7359.75. Full extension ladder: 8622.25, 8965.75, 9402.5, 9884.75, 10665.0.",
+        "nextTarget": 8637.75,
+        "summary": "Minor W3 is active from 7366.50. Full extension ladder: 8637.75, 8983.5, 9423.5, 9909.0, 10694.75.",
         "reasonCodes": [
           "MINOR_W3_EXTENSION_MODEL_BUILT",
           "MINOR_W3_FULL_EXTENSION_LADDER_ATTACHED",
@@ -351,20 +351,20 @@
         "warningLevel": 7504.25,
         "subminuteInvalidation": 7504.25,
         "minuteInvalidation": 7472.5,
-        "minorInvalidation": 7359.75,
+        "minorInvalidation": 7366.5,
         "confirmationLevels": [
           7634.25,
-          7692
+          7694.75
         ],
-        "bullPath": "If 7530 holds as support and price accepts above 7634.25/7692, Minor W3 continuation is favored.",
-        "bearPath": "If 7530 fails, then 7504.25 is warning/subminute invalidation. Losing 7472.50 forces Minute count review; losing 7359.75 invalidates Minor W3 from W2.",
+        "bullPath": "If 7530 holds as support and price accepts above 7634.25/7694.75, Minor W3 continuation is favored.",
+        "bearPath": "If 7530 fails, then 7504.25 is warning/subminute invalidation. Losing 7472.50 forces Minute count review; losing 7366.50 invalidates Minor W3 from W2.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
           "MINOR_W3_ACTIVE",
           "WATCH_7530_SUPPORT_HOLD",
-          "WATCH_7634_25_7692_CONFIRMATION",
+          "WATCH_7634_25_7694_75_CONFIRMATION",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
@@ -374,7 +374,7 @@
       "watchOnly": true,
       "reasonCodes": [
         "MINOR_W3_ACTIVE",
-        "MINOR_W2_CONFIRMED_AT_7359_75",
+        "MINOR_W2_CONFIRMED_AT_7366_50",
         "MINUTE_W3_BREAKOUT_CANDIDATE_ACTIVE",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
