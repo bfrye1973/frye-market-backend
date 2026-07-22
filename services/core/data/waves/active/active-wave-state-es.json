@@ -522,35 +522,35 @@
       "parentWave": "W3",
       "activeWave": "W3",
       "stage": "ACTIVE_CANDIDATE",
-      "currentRead": "SUBMINUTE_W3_ACTIVE_CANDIDATE_FROM_7504_25_AFTER_SUBMINUTE_W2",
-      "headline": "Subminute W3 active candidate from 7504.25 after completed Subminute W2",
-      "action": "WATCH_7530_SUPPORT_HOLD_AND_RECLAIM_ACCEPTANCE",
+      "currentRead": "SUBMINUTE_W3_ACTIVE_CANDIDATE_FROM_7514_AFTER_SUBMINUTE_W2",
+      "headline": "Subminute W3 active candidate from 7514 after completed Subminute W2",
+      "action": "WATCH_7530_SUPPORT_HOLD_AND_7553_25_RECLAIM_ACCEPTANCE",
       "marks": {
         "W1": {
           "low": {
-            "price": 7474.5,
-            "time": "2026-07-20 16:00"
+            "price": 7474.0,
+            "time": "2026-06-20 17:00"
           },
           "high": {
-            "price": 7530.0,
-            "time": "2026-07-20 23:00"
+            "price": 7553.25,
+            "time": "2026-06-21 09:50"
           },
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "SUBMINUTE_W1_LOW_7474_50_ON_2026_07_20_1600",
-            "SUBMINUTE_W1_HIGH_7530_ON_2026_07_20_2300",
+            "SUBMINUTE_W1_LOW_7474_ON_2026_06_20_1700",
+            "SUBMINUTE_W1_HIGH_7553_25_ON_2026_06_21_0950",
             "SUBMINUTE_W1_INSIDE_MINUTE_W3"
           ]
         },
         "W2": {
-          "price": 7504.25,
-          "time": "2026-07-21 06:00",
+          "price": 7514.0,
+          "time": "2026-06-22 06:00",
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "SUBMINUTE_W2_COMPLETED_AT_7504_25_ON_2026_07_21_0600",
-            "SUBMINUTE_W3_STARTED_FROM_7504_25",
+            "SUBMINUTE_W2_COMPLETED_AT_7514_ON_2026_06_22_0600",
+            "SUBMINUTE_W3_STARTED_FROM_7514",
             "HELD_ABOVE_MINUTE_W2_LOW_7472_50"
           ]
         },
@@ -560,50 +560,49 @@
           "status": "ACTIVE_CANDIDATE",
           "confidence": "MEDIUM",
           "basis": [
-            "SUBMINUTE_W3_ACTIVE_CANDIDATE_AFTER_SUBMINUTE_W2_7504_25",
-            "PRICE_RECLAIMED_7530_AREA",
+            "SUBMINUTE_W3_ACTIVE_CANDIDATE_AFTER_SUBMINUTE_W2_7514",
             "WATCH_7530_SUPPORT_HOLD",
-            "WATCH_7530_RECLAIM_ACCEPTANCE"
+            "WATCH_7553_25_RECLAIM_ACCEPTANCE"
           ]
         }
       },
       "targetModel": {
         "source": "SUBMINUTE_W3_EXTENSION_FROM_SUBMINUTE_W2_LOW",
-        "anchorLow": 7474.5,
-        "anchorHigh": 7530.0,
-        "projectionBase": 7504.25,
-        "range": 55.5,
+        "anchorLow": 7474.0,
+        "anchorHigh": 7553.25,
+        "projectionBase": 7514.0,
+        "range": 79.25,
         "levels": {
-          "e100": 7559.75,
-          "e1272": 7574.75,
-          "e1618": 7594.0,
-          "e200": 7615.25,
-          "e2618": 7649.5
+          "e100": 7593.25,
+          "e1272": 7614.75,
+          "e1618": 7642.25,
+          "e200": 7672.5,
+          "e2618": 7721.5
         },
         "displayLevels": [
           {
             "label": "1.000",
-            "price": 7559.75
+            "price": 7593.25
           },
           {
             "label": "1.272",
-            "price": 7574.75
+            "price": 7614.75
           },
           {
             "label": "1.618",
-            "price": 7594.0
+            "price": 7642.25
           },
           {
             "label": "2.000",
-            "price": 7615.25
+            "price": 7672.5
           },
           {
             "label": "2.618",
-            "price": 7649.5
+            "price": 7721.5
           }
         ],
-        "nextTarget": 7559.75,
-        "summary": "Subminute W3 active candidate is active from 7504.25. Full extension ladder: 7559.75, 7574.75, 7594.0, 7615.25, 7649.5.",
+        "nextTarget": 7593.25,
+        "summary": "Subminute W3 active candidate is active from 7514. Full extension ladder: 7593.25, 7614.75, 7642.25, 7672.5, 7721.5.",
         "reasonCodes": [
           "SUBMINUTE_W3_EXTENSION_MODEL_BUILT",
           "SUBMINUTE_W3_FULL_EXTENSION_LADDER_ATTACHED",
@@ -616,18 +615,19 @@
         "active": true,
         "source": "BRIAN_UPDATED_SUBMINUTE_W3_COUNT",
         "state": "SUBMINUTE_W3_BREAKOUT_DECISION_WATCH",
-        "supportHoldLevel": 7530,
-        "reclaimLevel": 7530,
-        "subminuteInvalidation": 7504.25,
+        "supportHoldLevel": 7530.0,
+        "reclaimLevel": 7553.25,
+        "subminuteInvalidation": 7514.0,
         "minuteInvalidation": 7472.5,
-        "bullPath": "If 7530 holds as support, subminute W3 continuation is favored.",
-        "bearPath": "If 7530 fails and price loses 7504.25, the subminute W3 candidate fails; losing 7472.50 forces Minute W3 review.",
+        "bullPath": "If 7530 holds as support and price reclaims/accepts above 7553.25, subminute W3 continuation is favored.",
+        "bearPath": "If 7530 fails and price loses 7514, the subminute W3 candidate fails; losing 7472.50 forces Minute W3 review.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
           "SUBMINUTE_W3_ACTIVE_CANDIDATE",
           "WATCH_7530_SUPPORT_HOLD",
+          "WATCH_7553_25_RECLAIM_ACCEPTANCE",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
@@ -637,7 +637,7 @@
       "watchOnly": true,
       "reasonCodes": [
         "SUBMINUTE_W3_ACTIVE_CANDIDATE",
-        "SUBMINUTE_W2_CONFIRMED_AT_7504_25",
+        "SUBMINUTE_W2_CONFIRMED_AT_7514",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
@@ -657,17 +657,17 @@
         "parentWaveComplete": false,
         "parentTransitionPossible": false,
         "transitionRisk": "MODERATE",
-        "invalidationLevel": 7504.25,
+        "invalidationLevel": 7514.0,
         "invalidationBreached": false,
-        "supportLevel": 7530,
-        "reclaimLevel": 7530,
+        "supportLevel": 7530.0,
+        "reclaimLevel": 7553.25,
         "retracementZone": null,
         "internalReference": {
-          "parentWaveStart": 7504.25,
-          "parentWaveStartApprox": 7504.25,
+          "parentWaveStart": 7514.0,
+          "parentWaveStartApprox": 7514.0,
           "internalWaveIIIHighApprox": 7628,
           "hardPullbackReferenceApprox": 7630,
-          "chartRead": "SUB_OF_SUB_INTERNAL_IV_PULLBACK_INSIDE_SUBMINUTE_W3"
+          "chartRead": "SUB_OF_SUB_INTERNAL_IV_PULLBACK_INSIDE_SUBMINUTE_W3_FROM_7514"
         },
         "evidence": {
           "internalImpulseSequencePresent": true,
