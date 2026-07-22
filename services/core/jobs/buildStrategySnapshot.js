@@ -7490,7 +7490,7 @@ attachEngine4AuthorizedReactionParticipation({
  * after Engine 26A exists and before Engine 6 calculates permission.
  *
  * Existing Engine 3/4 algorithms and thresholds remain unchanged.
-  
+ */
 if (isEsIntradayScalp) {
   attachPaperScalpReactionToConfluence({
     patchedConfluence,
