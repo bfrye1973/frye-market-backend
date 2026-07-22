@@ -7246,10 +7246,10 @@ attachCurrentLevelActionToConfluence({
   bars30m: [],
 });
 
-attachFastImbalanceReactionToConfluence({
+attachPaperScalpReactionToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
-  bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+  paperShortResearchEnabled: false,
 });
 
 attachEngine4FastImbalanceParticipationToConfluence({
@@ -7577,6 +7577,7 @@ if (isEsIntradayScalp) {
 
 let engine26PrePermissionWatch = null;
 let engine26StructuralContext = null;
+let engine26ReactionHandoff = null;
 
 if (isEsIntradayScalp) {
   try {
@@ -7775,6 +7776,11 @@ if (isEsIntradayScalp) {
 
     engine26ImbalanceWatch = engine26.engine26ImbalanceWatch || null;
     engine26StructuralContext = engine26.engine26StructuralContext || null;
+    engine26ReactionHandoff =
+      engine26?.engine26ReactionHandoff ||
+      engine26StructuralContext?.engine26ReactionHandoff ||
+      engine26StructuralContext?.reactionHandoff ||
+      null;
     engine26PaperTradePlan = engine26.engine26PaperTradePlan || null;
     engine26PaperTradeTicket = engine26.engine26PaperTradeTicket || null;
     engine26TradePlanPreview = engine26.engine26TradePlanPreview || null;
@@ -7992,7 +7998,6 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
        patchedConfluence,
        engine22WaveStrategy,
        engine26StructuralContext,
-       paperShortResearchEnabled: isEsIntradayScalp,
        bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
      });
 
