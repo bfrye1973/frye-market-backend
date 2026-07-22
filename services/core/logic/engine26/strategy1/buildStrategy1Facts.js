@@ -82,9 +82,7 @@ export function buildStrategy1Facts({
   const sweeps = bars.filter((bar) => bar.low < low);
   const completedSweeps = sweeps.filter((bar) => bar.completed);
   const invalidationBreaches = bars.filter((bar) => bar.low < invalidationBoundary);
-  const completedInvalidations = bars.filter(
-    (bar) => bar.completed && bar.close < invalidationBoundary
-  );
+  
 
   const wickRows = bars.map((bar) => {
     const bodySize = Math.abs(bar.close - bar.open);
@@ -148,6 +146,25 @@ export function buildStrategy1Facts({
   const afterLatestReclaim = latestReclaimIndex >= 0
     ? bars.slice(latestReclaimIndex + 1)
     : [];
+
+  /*
+   * A prior historical close below the boundary must not invalidate a
+   * later sweep/reclaim lifecycle.
+   *
+   * Invalidation becomes eligible only after the latest factual reclaim.
+   * Historical pre-reclaim breaches remain measurements only.
+   */
+  const invalidationEligibleBars =
+    latestReclaimIndex >= 0
+      ? bars.slice(latestReclaimIndex + 1)
+      : [];
+
+  const completedInvalidations =
+    invalidationEligibleBars.filter(
+      (bar) =>
+        bar.completed &&
+        bar.close < invalidationBoundary
+    );
 
   const latestSweep = sweeps[sweeps.length - 1] || null;
   const completedInvalidation = completedInvalidations[0] || null;
