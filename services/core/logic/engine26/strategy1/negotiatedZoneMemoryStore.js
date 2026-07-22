@@ -4,7 +4,7 @@ import path from "node:path";
 export const MEMORY_SCHEMA = "engine26.negotiatedZoneMemory.v1";
 export const DEFAULT_MEMORY_PATH =
   process.env.ENGINE26_NEGOTIATED_ZONE_MEMORY_PATH ||
-  "/var/data/engine26/negotiated-zone-memory.json";
+  "/opt/render/project/src/services/core/data/engine26/negotiated-zone-memory.json"
 
 function emptyStore() {
   return {
