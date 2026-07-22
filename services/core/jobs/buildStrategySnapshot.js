@@ -7258,13 +7258,6 @@ attachEngine4FastImbalanceParticipationToConfluence({
   bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
 });
 
-attachPaperScalpReactionToConfluence({
-  patchedConfluence,
-  engine22WaveStrategy,
-  engine26ReactionHandoff,
-  paperShortResearchEnabled: isEsIntradayScalp,
-});
-
 attachEngine4CurrentScalpParticipationToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
@@ -7497,6 +7490,7 @@ if (isEsIntradayScalp) {
     patchedConfluence,
     engine22WaveStrategy,
     engine26ReactionHandoff,
+    engine26StructuralContext,
     paperShortResearchEnabled: isEsIntradayScalp,
   });
 
@@ -7577,7 +7571,7 @@ if (isEsIntradayScalp) {
 
 let engine26PrePermissionWatch = null;
 let engine26StructuralContext = null;
-let engine26ReactionHandoff = null;
+
 
 if (isEsIntradayScalp) {
   try {
