@@ -23,6 +23,21 @@ import { createHash } from "node:crypto";
 import {
   readEngine26ManualImbalanceZones,
 } from "./readManualImbalanceZones.js";
+import {
+  resolveEngine26Strategy1Identity,
+  STRATEGY1_SETUP_CLASS,
+} from "./strategy1/resolveStrategy1Identity.js";
+import { buildStrategy1Facts } from "./strategy1/buildStrategy1Facts.js";
+import {
+  readNegotiatedZoneMemory,
+  writeNegotiatedZoneMemory,
+  DEFAULT_MEMORY_PATH,
+} from "./strategy1/negotiatedZoneMemoryStore.js";
+import {
+  buildStrategy1MemoryKey,
+  updateNegotiatedZoneMemory,
+  retirePriorMemoryRecord,
+} from "./strategy1/updateNegotiatedZoneMemory.js";
 
 const DEFAULT_TICK_SIZE = 0.25;
 const DEFAULT_MONITORING_RANGE_POINTS = 25;
@@ -348,6 +363,64 @@ function collectEngine26ManualImbalanceZones(
   });
 
   return candidates;
+}
+
+function collectEngine26ManualNegotiatedZones(
+  manualImbalanceInventory,
+  tickSize
+) {
+  const zones = Array.isArray(manualImbalanceInventory?.negotiatedZones)
+    ? manualImbalanceInventory.negotiatedZones
+    : [];
+
+  return zones
+    .map((zone, index) =>
+      normalizeZone({
+        zone,
+        source: "ENGINE26_MANUAL_NEGOTIATED",
+        sourcePath:
+          zone?.sourcePath ||
+          `manualImbalanceInventory.negotiatedZones[${index}]`,
+        defaultType: "NEGOTIATED",
+        defaultTimeframe: "10m",
+        priority: 126,
+        tickSize,
+      })
+    )
+    .filter(Boolean);
+}
+
+function isApprovedNegotiatedZone(zone) {
+  return (
+    (zone?.source === "ENGINE1" && zone?.type === "NEGOTIATED") ||
+    (zone?.source === "ENGINE26_MANUAL_NEGOTIATED" && zone?.type === "NEGOTIATED")
+  );
+}
+
+function buildCanonicalZoneId(symbol, zone) {
+  return stableHash("E26Z", [
+    symbol,
+    zone?.source,
+    zone?.type,
+    zone?.timeframe,
+    zone?.lo,
+    zone?.hi,
+  ]);
+}
+
+function selectLongTargetZone({ negotiatedZones, entryZone }) {
+  if (!entryZone) return null;
+
+  return [...negotiatedZones]
+    .filter((zone) => zone !== entryZone)
+    .filter((zone) => zone.lo > entryZone.hi)
+    .sort((a, b) => {
+      if (a.lo !== b.lo) return a.lo - b.lo;
+      if (a.hi !== b.hi) return a.hi - b.hi;
+      const sourceCompare = String(a.source || "").localeCompare(String(b.source || ""));
+      if (sourceCompare !== 0) return sourceCompare;
+      return String(a.upstreamId || "").localeCompare(String(b.upstreamId || ""));
+    })[0] || null;
 }
 
 function collectEngine1Zones(
@@ -1018,6 +1091,10 @@ export function buildEngine26LocationCandidate({
   engine22WaveStrategy = null,
   engine25Context = null,
   engine1Context = null,
+  previousLocationCandidate = null,
+  bars10m = [],
+  memoryFilePath = DEFAULT_MEMORY_PATH,
+  persistMemory = true,
   tickSize = DEFAULT_TICK_SIZE,
 
   activationRangePoints = Number(
@@ -1089,6 +1166,11 @@ export function buildEngine26LocationCandidate({
     readEngine26ManualImbalanceZones();
 
   const allZones = dedupeZones([
+    ...collectEngine26ManualNegotiatedZones(
+      manualImbalanceInventory,
+      tickSize
+    ),
+
     ...collectEngine26ManualImbalanceZones(
       manualImbalanceInventory,
       tickSize
@@ -1224,16 +1306,27 @@ export function buildEngine26LocationCandidate({
    * location.upstreamId
    */
   const zoneId =
-    stableHash("E26Z", [
+    buildCanonicalZoneId(
       normalizedSymbol,
-      selectedZone.source,
-      selectedZone.type,
-      selectedZone.timeframe,
-      selectedZone.lo,
-      selectedZone.hi,
-    ]);
+      selectedZone
+    );
+
+  const strategy1Eligible =
+    isApprovedNegotiatedZone(selectedZone);
+
+  const strategyIdentity =
+    strategy1Eligible
+      ? resolveEngine26Strategy1Identity({
+          symbol: normalizedSymbol,
+          strategyId: normalizedStrategyId,
+          zoneId,
+          directionBias,
+          previousLocationCandidate,
+        })
+      : null;
 
   const candidateId =
+    strategyIdentity?.candidateId ||
     stableHash("E26C", [
       normalizedSymbol,
       normalizedStrategyId,
@@ -1263,13 +1356,157 @@ export function buildEngine26LocationCandidate({
       tickSize,
     });
 
+  const approvedNegotiatedZones =
+    allZones.filter(isApprovedNegotiatedZone);
+
+  const targetSelectedZone =
+    strategy1Eligible && directionBias === "LONG"
+      ? selectLongTargetZone({
+          negotiatedZones: approvedNegotiatedZones,
+          entryZone: selectedZone,
+        })
+      : null;
+
+  const entryZone = strategy1Eligible
+    ? {
+        id: zoneId,
+        zoneId,
+        upstreamId: selectedZone.upstreamId,
+        source: selectedZone.source,
+        sourcePath: selectedZone.sourcePath,
+        type: selectedZone.type,
+        timeframe: selectedZone.timeframe,
+        low: selectedZone.lo,
+        high: selectedZone.hi,
+        midline: selectedZone.mid,
+      }
+    : null;
+
+  const targetZone = targetSelectedZone
+    ? {
+        id: buildCanonicalZoneId(normalizedSymbol, targetSelectedZone),
+        zoneId: buildCanonicalZoneId(normalizedSymbol, targetSelectedZone),
+        upstreamId: targetSelectedZone.upstreamId,
+        source: targetSelectedZone.source,
+        sourcePath: targetSelectedZone.sourcePath,
+        type: targetSelectedZone.type,
+        timeframe: targetSelectedZone.timeframe,
+        low: targetSelectedZone.lo,
+        high: targetSelectedZone.hi,
+        midline: targetSelectedZone.mid,
+      }
+    : null;
+
+  const strategyFacts = strategy1Eligible
+    ? buildStrategy1Facts({
+        bars10m,
+        entryZone,
+        locationInvalidationBoundary:
+          boundaries.locationInvalidationBoundary,
+      })
+    : null;
+
+  const invalidated =
+    strategyFacts?.invalidationFacts
+      ?.completedCloseInvalidationConfirmed === true;
+
+  const candidateActive = active && !invalidated;
+  const candidateStatus = invalidated ? "INVALIDATED" : status;
+
+  let zoneMemorySummary = null;
+  let memoryWarnings = [];
+
+  if (strategy1Eligible) {
+    const memoryRead = readNegotiatedZoneMemory({
+      filePath: memoryFilePath,
+    });
+
+    const memoryKey = buildStrategy1MemoryKey({
+      laneId: "minute",
+      symbol: normalizedSymbol,
+      strategyId: normalizedStrategyId,
+      zoneId,
+    });
+
+    const memoryCandidate = {
+      laneId: "minute",
+      symbol: normalizedSymbol,
+      strategyId: normalizedStrategyId,
+      zoneId,
+      candidateId,
+      candidateIdentityVersion:
+        strategyIdentity?.candidateIdentityVersion || null,
+      identityAdoptedFromLegacy:
+        strategyIdentity?.identityAdoptedFromLegacy === true,
+      legacyCandidateId:
+        strategyIdentity?.legacyCandidateId || null,
+    };
+
+    let memoryUpdate = updateNegotiatedZoneMemory({
+      store: memoryRead.store,
+      memoryKey,
+      candidate: memoryCandidate,
+      facts: strategyFacts,
+      snapshotTime,
+    });
+
+    const priorZoneId = previousLocationCandidate?.zoneId || null;
+    if (priorZoneId && priorZoneId !== zoneId) {
+      const priorMemoryKey = buildStrategy1MemoryKey({
+        laneId: "minute",
+        symbol: normalizedSymbol,
+        strategyId: normalizedStrategyId,
+        zoneId: priorZoneId,
+      });
+      memoryUpdate = {
+        ...memoryUpdate,
+        store: retirePriorMemoryRecord({
+          store: memoryUpdate.store,
+          priorMemoryKey,
+          retiredAt: snapshotTime,
+        }),
+      };
+    }
+
+    if (persistMemory) {
+      const memoryWrite = writeNegotiatedZoneMemory({
+        filePath: memoryFilePath,
+        store: memoryUpdate.store,
+        malformedSource: memoryRead.malformed === true,
+      });
+      memoryWarnings = [
+        ...(memoryRead.warnings || []),
+        ...(memoryWrite.warnings || []),
+      ];
+    } else {
+      memoryWarnings = memoryRead.warnings || [];
+    }
+
+    const record = memoryUpdate.record;
+    zoneMemorySummary = {
+      memoryKey,
+      lifecycleStatus: record.lifecycleStatus,
+      candidateFirstSeenAt: record.candidateFirstSeenAt,
+      firstInteractionAt: record.firstInteractionAt,
+      lastInteractionAt: record.lastInteractionAt,
+      lastSeenAt: record.lastSeenAt,
+      interactionCount: record.interactionCount,
+      originalCandidateId: record.originalCandidateId,
+      currentCandidateId: record.currentCandidateId,
+      candidateIdentityVersion: record.candidateIdentityVersion,
+      identityAdoptedFromLegacy: record.identityAdoptedFromLegacy,
+      invalidatedAt: record.invalidatedAt,
+      retiredAt: record.retiredAt,
+    };
+  }
+
   return {
-    active,
+    active: candidateActive,
 
     engine:
-      "engine26.locationCandidate.v1",
+      "engine26.locationCandidate.v2",
 
-    status,
+    status: candidateStatus,
 
     candidateId,
     zoneId,
@@ -1293,6 +1530,53 @@ export function buildEngine26LocationCandidate({
 
     directionBias,
     setupType,
+
+    laneId: "minute",
+
+    setupClass:
+      strategyIdentity?.setupClass || null,
+    setupGrade:
+      strategyIdentity?.setupGrade || null,
+    identitySetupKey:
+      strategyIdentity?.identitySetupKey || null,
+    candidateIdentityVersion:
+      strategyIdentity?.candidateIdentityVersion || null,
+    identityAdoptedFromLegacy:
+      strategyIdentity?.identityAdoptedFromLegacy === true,
+    legacyCandidateId:
+      strategyIdentity?.legacyCandidateId || null,
+
+    strategyEligibility: {
+      setupClass: STRATEGY1_SETUP_CLASS,
+      eligible: strategy1Eligible,
+      reasonCodes: strategy1Eligible
+        ? ["SELECTED_LOCATION_APPROVED_NEGOTIATED_ZONE"]
+        : ["SELECTED_LOCATION_NOT_APPROVED_NEGOTIATED_ZONE"],
+    },
+
+    entryZone,
+    entryZoneLow: entryZone?.low ?? null,
+    entryZoneHigh: entryZone?.high ?? null,
+    entryZoneMidline: entryZone?.midline ?? null,
+
+    targetZone,
+    targetZoneStatus: targetZone
+      ? "TARGET_ZONE_AVAILABLE"
+      : "TARGET_ZONE_UNAVAILABLE",
+    targetZoneReasonCodes: targetZone
+      ? ["NEXT_NEGOTIATED_ZONE_ABOVE_ENTRY_SELECTED"]
+      : ["NEXT_NEGOTIATED_ZONE_ABOVE_ENTRY_UNAVAILABLE"],
+
+    sweepFacts: strategyFacts?.sweepFacts || null,
+    lowerWickFacts: strategyFacts?.lowerWickFacts || null,
+    reclaimFacts: strategyFacts?.reclaimFacts || null,
+    postReclaimFacts: strategyFacts?.postReclaimFacts || null,
+    invalidationFacts: strategyFacts?.invalidationFacts || null,
+    zoneMemorySummary,
+    invalidatedAt:
+      invalidated
+        ? strategyFacts?.invalidationFacts?.invalidationTime || snapshotTime
+        : null,
 
     location: {
       source:
@@ -1449,20 +1733,108 @@ export function buildEngine26LocationCandidate({
         ? "ENGINE26A_DIRECTION_BIAS_NEUTRAL"
         : `ENGINE26A_DIRECTION_${directionBias}`,
 
-      active
+      candidateActive
         ? "ENGINE26A_CANDIDATE_WITHIN_MONITORING_RANGE"
+        : invalidated
+        ? "ENGINE26A_CANDIDATE_INVALIDATED_BY_COMPLETED_CLOSE"
         : "ENGINE26A_CANDIDATE_OUTSIDE_MONITORING_RANGE",
+
+      ...(strategyIdentity?.reasonCodes || []),
+      strategy1Eligible
+        ? "ENGINE26_STRATEGY1_CLASSIFICATION_ATTACHED"
+        : "ENGINE26_STRATEGY1_NOT_ELIGIBLE",
     ],
 
-    warnings:
-      directionBias === "NEUTRAL"
-        ? [
-            "ENGINE26A_DIRECTION_BIAS_NOT_RESOLVED",
-          ]
-        : [],
+    warnings: [
+      ...(directionBias === "NEUTRAL"
+        ? ["ENGINE26A_DIRECTION_BIAS_NOT_RESOLVED"]
+        : []),
+      ...(strategyFacts?.warnings || []),
+      ...memoryWarnings,
+    ],
 
     noPermissionCreated: true,
     noExecution: true,
+  };
+}
+
+export function buildEngine26AWaitingContract({
+  symbol = null,
+  strategyId = null,
+  timeframe = null,
+  currentPrice = null,
+  snapshotTime = new Date().toISOString(),
+  reasonCode = "ENGINE26A_WAITING",
+  warnings = [],
+} = {}) {
+  const engine26LocationCandidate = makeWaitingCandidate({
+    symbol,
+    strategyId,
+    timeframe,
+    currentPrice,
+    snapshotTime,
+    reasonCode,
+  });
+
+  Object.assign(engine26LocationCandidate, {
+    laneId: "minute",
+    setupClass: null,
+    setupGrade: null,
+    identitySetupKey: null,
+    candidateIdentityVersion: null,
+    identityAdoptedFromLegacy: false,
+    legacyCandidateId: null,
+    strategyEligibility: {
+      setupClass: STRATEGY1_SETUP_CLASS,
+      eligible: false,
+      reasonCodes: [reasonCode],
+    },
+    entryZone: null,
+    entryZoneLow: null,
+    entryZoneHigh: null,
+    entryZoneMidline: null,
+    targetZone: null,
+    targetZoneStatus: "TARGET_ZONE_UNAVAILABLE",
+    targetZoneReasonCodes: [reasonCode],
+    sweepFacts: null,
+    lowerWickFacts: null,
+    reclaimFacts: null,
+    postReclaimFacts: null,
+    invalidationFacts: null,
+    zoneMemorySummary: null,
+    invalidatedAt: null,
+    warnings: [...warnings],
+  });
+
+  const engine26ReactionHandoff = buildWaitingHandoff(
+    engine26LocationCandidate,
+    reasonCode
+  );
+
+  const engine26GeometryHandoff = {
+    active: false,
+    engine: "engine26.geometryHandoff.v1",
+    laneId: "minute",
+    strategyId,
+    candidateId: null,
+    zoneId: null,
+    setupClass: null,
+    setupGrade: null,
+    identitySetupKey: null,
+    candidateIdentityVersion: null,
+    entryZone: null,
+    targetZone: null,
+    locationInvalidationBoundary: null,
+    snapshotTime,
+    noPermissionCreated: true,
+    noExecution: true,
+    reasonCodes: [reasonCode],
+  };
+
+  return {
+    engine26LocationCandidate,
+    engine26ReactionHandoff,
+    engine26GeometryHandoff,
   };
 }
 
@@ -1550,6 +1922,20 @@ export function buildEngine26ReactionHandoff({
 
     setupType:
       candidate.setupType,
+
+    setupClass: candidate.setupClass ?? null,
+    setupGrade: candidate.setupGrade ?? null,
+    identitySetupKey: candidate.identitySetupKey ?? null,
+    candidateIdentityVersion:
+      candidate.candidateIdentityVersion ?? null,
+    entryZone: candidate.entryZone ?? null,
+    targetZone: candidate.targetZone ?? null,
+    sweepFacts: candidate.sweepFacts ?? null,
+    lowerWickFacts: candidate.lowerWickFacts ?? null,
+    reclaimFacts: candidate.reclaimFacts ?? null,
+    postReclaimFacts: candidate.postReclaimFacts ?? null,
+    invalidationFacts: candidate.invalidationFacts ?? null,
+    zoneMemorySummary: candidate.zoneMemorySummary ?? null,
 
     expectedReactions:
       candidate.expectedReactions,
@@ -1640,9 +2026,38 @@ export function buildEngine26A(
         input.snapshotTime,
     });
 
+  const engine26GeometryHandoff = {
+    active:
+      engine26LocationCandidate?.active === true &&
+      engine26LocationCandidate?.strategyEligibility?.eligible === true,
+    engine: "engine26.geometryHandoff.v1",
+    laneId: "minute",
+    strategyId: engine26LocationCandidate?.strategyId ?? null,
+    candidateId: engine26LocationCandidate?.candidateId ?? null,
+    zoneId: engine26LocationCandidate?.zoneId ?? null,
+    setupClass: engine26LocationCandidate?.setupClass ?? null,
+    setupGrade: engine26LocationCandidate?.setupGrade ?? null,
+    identitySetupKey:
+      engine26LocationCandidate?.identitySetupKey ?? null,
+    candidateIdentityVersion:
+      engine26LocationCandidate?.candidateIdentityVersion ?? null,
+    entryZone: engine26LocationCandidate?.entryZone ?? null,
+    targetZone: engine26LocationCandidate?.targetZone ?? null,
+    locationInvalidationBoundary:
+      engine26LocationCandidate?.locationInvalidationBoundary ?? null,
+    snapshotTime: engine26LocationCandidate?.snapshotTime ?? null,
+    noPermissionCreated: true,
+    noExecution: true,
+    reasonCodes:
+      engine26LocationCandidate?.strategyEligibility?.eligible === true
+        ? ["ENGINE26_STRATEGY1_GEOMETRY_HANDOFF_AVAILABLE"]
+        : ["ENGINE26_STRATEGY1_GEOMETRY_HANDOFF_UNAVAILABLE"],
+  };
+
   return {
     engine26LocationCandidate,
     engine26ReactionHandoff,
+    engine26GeometryHandoff,
   };
 }
 
