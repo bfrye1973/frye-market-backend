@@ -7381,11 +7381,25 @@ attachEngine4AuthorizedReactionParticipation({
 
         snapshotTime: nowIso(),
 
-        engine22WaveStrategy,
+         engine22WaveStrategy,
 
         engine25Context,
 
         engine1Context,
+
+        previousLocationCandidate:
+          previousSnapshot
+            ?.strategies
+            ?.[s.strategyId]
+            ?.engine26LocationCandidate ||
+          null,
+
+        bars10m:
+          marketMeter
+            ?.layers
+            ?.emaPosture
+            ?.tenMinute
+            ?.bars || [],
 
         tickSize: 0.25,
       });
@@ -7396,6 +7410,9 @@ attachEngine4AuthorizedReactionParticipation({
 
       engine26ReactionHandoff =
         engine26A?.engine26ReactionHandoff ||
+        null;
+      engine26GeometryHandoff =
+        engine26A?.engine26GeometryHandoff ||
         null;
     } catch (err) {
       console.error(
