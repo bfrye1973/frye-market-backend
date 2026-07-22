@@ -7099,7 +7099,8 @@ const zoneContext = buildZoneContext(
   let engine26LocationCandidate = null;
   let engine26ReactionHandoff = null;
   let engine26GeometryHandoff = null;
-
+  let engine26PrePermissionWatch = null;
+  let engine26StructuralContext = null;
   const isEsIntradayScalp =
     String(symbol || "").toUpperCase() === "ES" &&
     s.strategyId === "intraday_scalp@10m";
@@ -7568,10 +7569,6 @@ if (isEsIntradayScalp) {
   if (analytics?.engine5) {
     analytics.engine5.timingContext = preliminaryEngine5TimingContext;
   }
-
-let engine26PrePermissionWatch = null;
-let engine26StructuralContext = null;
-
 
 if (isEsIntradayScalp) {
   try {
