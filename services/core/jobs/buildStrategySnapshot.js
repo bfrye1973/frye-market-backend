@@ -55,6 +55,7 @@ import {
 } from "../logic/engine26/paperTradePlanner.js";
 import {
   buildEngine26A,
+  buildEngine26AWaitingContract,
 } from "../logic/engine26/buildEngine26LocationCandidate.js";
 import {
   buildSubminuteEngine26,
@@ -7096,6 +7097,7 @@ const zoneContext = buildZoneContext(
 
   let engine26LocationCandidate = null;
   let engine26ReactionHandoff = null;
+  let engine26GeometryHandoff = null;
 
   const isEsIntradayScalp =
     String(symbol || "").toUpperCase() === "ES" &&
@@ -7324,6 +7326,17 @@ attachEngine4AuthorizedReactionParticipation({
   } 
 
   /*
+   * Direct futures price fallback for Engine 26A.
+   */
+  const engine26DirectCurrentPrice =
+    isEsIntradayScalp
+      ? await fetchCurrentPriceForSymbol({
+          symbol,
+          tf: "10m",
+        }).catch(() => null)
+      : null;
+
+  /*
    * Engine 26A — reaction-independent location discovery.
    *
    * This runs after Engine 22 structure exists and before the later
@@ -7488,20 +7501,7 @@ attachEngine4AuthorizedReactionParticipation({
  * after Engine 26A exists and before Engine 6 calculates permission.
  *
  * Existing Engine 3/4 algorithms and thresholds remain unchanged.
- */
-  /*
-   * Direct futures price fallback for Engine 26A.
-   *
-   * Engine 1 and market-meter price fields may occasionally be null
-   * even while the canonical futures OHLC endpoint is healthy.
-   */
-  const engine26DirectCurrentPrice =
-    isEsIntradayScalp
-      ? await fetchCurrentPriceForSymbol({
-          symbol,
-          tf: "10m",
-        }).catch(() => null)
-      : null; 
+  
 if (isEsIntradayScalp) {
   attachPaperScalpReactionToConfluence({
     patchedConfluence,
