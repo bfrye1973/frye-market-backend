@@ -6816,7 +6816,8 @@ async function processStrategy(
   engine2State,
   spyReactionQuality = null,
   spyVolumeBehavior = null,
-  engine25Context = null
+  engine25Context = null,
+  previousSnapshot = null
 ) {
 
 let contextResp = null;
@@ -8505,7 +8506,8 @@ console.log("Engine21 alignment fetched");
   engine2State,
   spyReactionQuality,
   spyVolumeBehavior,
-  engine25Context
+  engine25Context,
+  previousSnapshot
 );
 
 const executionSymbol =
