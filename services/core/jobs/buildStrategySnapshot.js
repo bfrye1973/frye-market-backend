@@ -7774,6 +7774,7 @@ if (isEsIntradayScalp) {
       engine26?.engine26ReactionHandoff ||
       engine26StructuralContext?.engine26ReactionHandoff ||
       engine26StructuralContext?.reactionHandoff ||
+      engine26ReactionHandoff ||
       null;
     engine26PaperTradePlan = engine26.engine26PaperTradePlan || null;
     engine26PaperTradeTicket = engine26.engine26PaperTradeTicket || null;
