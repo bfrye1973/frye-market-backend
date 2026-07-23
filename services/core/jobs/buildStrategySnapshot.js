@@ -7819,23 +7819,26 @@ if (isEsIntradayScalp) {
       openPaperTrades = [];
     }
 
-    const engine26 = buildEngine26PaperTradePlan({
-      symbol,
-      strategyId: s.strategyId,
-      tf: s.tf,
-      permission: finalPermission,
-      engine22WaveStrategy,
-      engine25Context,
-      confluence: patchedConfluence,
-      engine15Decision,
+const engine26 = buildEngine26PaperTradePlan({
+  symbol,
+  strategyId: s.strategyId,
+  tf: s.tf,
+  permission: finalPermission,
+  engine22WaveStrategy,
+  engine25Context,
+  confluence: patchedConfluence,
+  engine15Decision,
 
-      // Engine 26A is the authoritative selected-location identity.
-      engine26LocationCandidate,
+  // Engine 26A is the authoritative selected-location identity.
+  engine26LocationCandidate,
 
-      openPaperTrades,
-      dailyBars:
-        marketMeter?.layers?.emaPosture?.daily?.bars || [],
-    });
+  // Engine 26A is the authoritative Strategy 1 geometry source.
+  engine26GeometryHandoff,
+
+  openPaperTrades,
+  dailyBars:
+    marketMeter?.layers?.emaPosture?.daily?.bars || [],
+});
 
     engine26ImbalanceWatch = engine26.engine26ImbalanceWatch || null;
     engine26StructuralContext = engine26.engine26StructuralContext || null;
