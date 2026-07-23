@@ -189,6 +189,11 @@ export function buildEngine27Strategies({
             intradayPaperStrategy
               .engine26PaperTradePlan ||
             null,
+
+          engine26ProposedGeometry:
+            intradayPaperStrategy
+              .engine26ProposedGeometry ||
+            null,
         }
       : null;
 
@@ -302,3 +307,5 @@ export function buildEngine27Strategies({
     ],
   };
 }
+
+export default buildEngine27Strategies;
