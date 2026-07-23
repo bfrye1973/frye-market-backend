@@ -13,6 +13,14 @@
 //
 // It only verifies and preserves identity from Engine 26A, Engine 3,
 // and Engine 4 after Engine 6 has completed its normal calculation.
+//
+// Phase 4 identity propagation:
+// - laneId is preserved with authority order:
+//   Engine 26A -> Engine 3 -> Engine 4
+// - Engine 26A remains canonical.
+// - Conflicting lane IDs fail safely by marking identity inconsistent
+//   and adding explicit reason codes.
+// - Permission decisions and allowed flags are not changed.
 
 const ENGINE = "engine6.candidateIdentity.v1";
 
@@ -23,6 +31,9 @@ function normalizeText(value) {
 
 function identityFromEngine26(candidate) {
   return {
+    laneId:
+      normalizeText(candidate?.laneId),
+
     candidateId:
       normalizeText(candidate?.candidateId),
 
@@ -50,6 +61,9 @@ function identityFromEngine26(candidate) {
 
 function identityFromEngine3(reaction) {
   return {
+    laneId:
+      normalizeText(reaction?.laneId),
+
     candidateId:
       normalizeText(reaction?.candidateId),
 
@@ -75,6 +89,9 @@ function identityFromEngine3(reaction) {
 
 function identityFromEngine4(participation) {
   return {
+    laneId:
+      normalizeText(participation?.laneId),
+
     candidateId:
       normalizeText(participation?.candidateId),
 
@@ -146,6 +163,13 @@ export function preserveEngine6CandidateIdentity({
       engine4AuthorizedParticipation
     );
 
+  const laneIdConsistent =
+    sameValueOrMissing(
+      engine26Identity.laneId,
+      engine3Identity.laneId,
+      engine4Identity.laneId
+    );
+
   const candidateIdConsistent =
     sameValueOrMissing(
       engine26Identity.candidateId,
@@ -175,12 +199,20 @@ export function preserveEngine6CandidateIdentity({
     );
 
   const identityConsistent =
+    laneIdConsistent &&
     candidateIdConsistent &&
     zoneIdConsistent &&
     strategyIdConsistent &&
     symbolConsistent;
 
   const identity = {
+    // Authority order:
+    // Engine 26A -> Engine 3 -> Engine 4
+    laneId:
+      engine26Identity.laneId ??
+      engine3Identity.laneId ??
+      engine4Identity.laneId,
+
     candidateId:
       engine26Identity.candidateId ??
       engine3Identity.candidateId ??
@@ -234,6 +266,7 @@ export function preserveEngine6CandidateIdentity({
     consistent:
       identityConsistent,
 
+    laneIdConsistent,
     candidateIdConsistent,
     zoneIdConsistent,
     strategyIdConsistent,
@@ -246,6 +279,14 @@ export function preserveEngine6CandidateIdentity({
     },
 
     reasonCodes: unique([
+      identity.laneId
+        ? "LANE_ID_PRESERVED"
+        : "LANE_ID_MISSING",
+
+      laneIdConsistent
+        ? "LANE_ID_CONSISTENT"
+        : "LANE_ID_MISMATCH",
+
       identity.candidateId
         ? "CANDIDATE_ID_PRESERVED"
         : "CANDIDATE_ID_MISSING",
@@ -258,6 +299,10 @@ export function preserveEngine6CandidateIdentity({
         ? "PIPELINE_IDENTITY_CONSISTENT"
         : "PIPELINE_IDENTITY_MISMATCH",
 
+      laneIdConsistent
+        ? null
+        : "ENGINE26A_LANE_ID_REMAINS_CANONICAL",
+
       "ENGINE6_PERMISSION_DECISION_UNCHANGED",
       "NO_EXECUTION_CREATED",
     ]),
@@ -265,6 +310,10 @@ export function preserveEngine6CandidateIdentity({
 
   return {
     ...permission,
+
+    laneId:
+      permission.laneId ??
+      identity.laneId,
 
     candidateId:
       identity.candidateId,
@@ -294,6 +343,10 @@ export function preserveEngine6CandidateIdentity({
       ? {
           paper: {
             ...existingPaper,
+
+            laneId:
+              existingPaper.laneId ??
+              identity.laneId,
 
             candidateId:
               identity.candidateId,
