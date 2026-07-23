@@ -3622,6 +3622,11 @@ const engine26ProposedGeometry =
           : null,
     });
 
+const isStrategy1ProposedGeometry =
+  engine26ProposedGeometry?.geometryContractVersion ===
+  "engine26b.strategy1.v1";
+
+if (!isStrategy1ProposedGeometry) {
   engine26ProposedGeometry.reasonCodes =
     candidateMatchesPlannerZone
       ? [
@@ -3663,6 +3668,7 @@ const engine26ProposedGeometry =
       ].filter(Boolean)),
     ];
   }
+}
   const engine26PaperTrialCandidate =
     engine26TradePlanPreview?.paperTrialCandidate || null;
 
