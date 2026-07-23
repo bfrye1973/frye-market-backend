@@ -648,12 +648,24 @@ function buildMissingReaction({
   engine26ReactionHandoff = null,
   engine26StructuralContext = null,
 } = {}) {
-  const engine26LocationContext =
-    buildEngine26LocationReactionContext({
-      engine26ReactionHandoff,
-      engine26StructuralContext,
-      reactionInput: null,
-    });
+const engine26LocationContextRaw =
+  buildEngine26LocationReactionContext({
+    engine26ReactionHandoff,
+    engine26StructuralContext,
+    reactionInput: null,
+  });
+
+const engine26LocationContext =
+  engine26LocationContextRaw &&
+  typeof engine26LocationContextRaw === "object"
+    ? {
+        ...engine26LocationContextRaw,
+        laneId:
+          engine26LocationContextRaw?.laneId ??
+          engine26ReactionHandoff?.laneId ??
+          null,
+      }
+    : engine26LocationContextRaw;
 
   const waitingForEngine26 =
     engine26LocationContext?.state ===
@@ -737,18 +749,30 @@ function evaluateReactionForPaper({
     "NEUTRAL"
   );
 
-  const engine26LocationContext =
-    buildEngine26LocationReactionContext({
-      engine26ReactionHandoff,
-      engine26StructuralContext,
+const engine26LocationContextRaw =
+  buildEngine26LocationReactionContext({
+    engine26ReactionHandoff,
+    engine26StructuralContext,
 
-      reactionInput: {
-        ...reactionInput,
-        state: rawState,
-        quality: rawQuality,
-        direction: rawActionDirection,
-      },
-    });
+    reactionInput: {
+      ...reactionInput,
+      state: rawState,
+      quality: rawQuality,
+      direction: rawActionDirection,
+    },
+  });
+
+const engine26LocationContext =
+  engine26LocationContextRaw &&
+  typeof engine26LocationContextRaw === "object"
+    ? {
+        ...engine26LocationContextRaw,
+        laneId:
+          engine26LocationContextRaw?.laneId ??
+          engine26ReactionHandoff?.laneId ??
+          null,
+      }
+    : engine26LocationContextRaw;
 
   /*
    * Preserve the observed reaction state for existing Engine 3/6 behavior.
