@@ -880,6 +880,18 @@ function getPaperScalpReaction({ engine3, engine5 }) {
 
 function getPaperScalpParticipation({ engine4, engine5 }) {
   return (
+    engine4?.engine4AuthorizedReactionParticipation ||
+    engine5?.context?.volume?.engine4AuthorizedReactionParticipation ||
+    engine5?.components?.engine4Volume?.engine4AuthorizedReactionParticipation ||
+
+    engine4?.engine4FastImbalanceParticipation ||
+    engine5?.context?.volume?.engine4FastImbalanceParticipation ||
+    engine5?.components?.engine4Volume?.engine4FastImbalanceParticipation ||
+
+    engine4?.engine4CurrentScalpParticipation ||
+    engine5?.context?.volume?.engine4CurrentScalpParticipation ||
+    engine5?.components?.engine4Volume?.engine4CurrentScalpParticipation ||
+
     engine4?.engine22LifecycleParticipation?.paperScalpParticipation ||
     engine5?.context?.volume?.engine22LifecycleParticipation?.paperScalpParticipation ||
     engine5?.components?.engine4Volume?.engine22LifecycleParticipation?.paperScalpParticipation ||
