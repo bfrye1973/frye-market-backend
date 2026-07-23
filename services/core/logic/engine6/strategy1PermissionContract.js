@@ -51,6 +51,83 @@ function allPresentAndSame(...values) {
   return populated.every((value) => value === populated[0]);
 }
 
+function metadataMatchOrMissing({
+  ownerValue,
+  engine3Value,
+  engine4Value,
+  fieldName,
+}) {
+  const blockers = [];
+  const reasonCodes = [];
+
+  if (!ownerValue) {
+    blockers.push(`ENGINE26A_${fieldName}_MISSING`);
+    return {
+      valid: false,
+      blockers,
+      reasonCodes,
+    };
+  }
+
+  if (!engine3Value) {
+    reasonCodes.push(`ENGINE3_${fieldName}_NOT_REPEATED`);
+  } else if (engine3Value !== ownerValue) {
+    blockers.push(`ENGINE3_${fieldName}_CONFLICT`);
+  }
+
+  if (!engine4Value) {
+    reasonCodes.push(`ENGINE4_${fieldName}_NOT_REPEATED`);
+  } else if (engine4Value !== ownerValue) {
+    blockers.push(`ENGINE4_${fieldName}_CONFLICT`);
+  }
+
+  reasonCodes.push("ENGINE26A_CANONICAL_SETUP_IDENTITY_USED");
+
+  return {
+    valid: blockers.length === 0,
+    blockers,
+    reasonCodes,
+  };
+}
+
+function versionMatchOrMissing({
+  ownerValue,
+  engine3Value,
+  engine4Value,
+}) {
+  const blockers = [];
+  const reasonCodes = [];
+
+  if (!compatibleVersion(ownerValue)) {
+    blockers.push("ENGINE26A_CANDIDATE_IDENTITY_VERSION_INCOMPATIBLE");
+    return {
+      valid: false,
+      blockers,
+      reasonCodes,
+    };
+  }
+
+  if (!engine3Value) {
+    reasonCodes.push("ENGINE3_CANDIDATE_IDENTITY_VERSION_NOT_REPEATED");
+  } else if (!compatibleVersion(engine3Value) || engine3Value !== ownerValue) {
+    blockers.push("ENGINE3_CANDIDATE_IDENTITY_VERSION_CONFLICT");
+  }
+
+  if (!engine4Value) {
+    reasonCodes.push("ENGINE4_CANDIDATE_IDENTITY_VERSION_NOT_REPEATED");
+  } else if (!compatibleVersion(engine4Value) || engine4Value !== ownerValue) {
+    blockers.push("ENGINE4_CANDIDATE_IDENTITY_VERSION_CONFLICT");
+  }
+
+  reasonCodes.push("ENGINE26A_CANONICAL_SETUP_IDENTITY_USED");
+
+  return {
+    valid: blockers.length === 0,
+    blockers,
+    reasonCodes,
+  };
+}
+
 function compatibleVersion(value) {
   const v = text(value);
   return Boolean(v && v.startsWith(COMPATIBLE_IDENTITY_PREFIX));
@@ -326,31 +403,72 @@ export function evaluateEngine6Strategy1Phase4Contract({
 
   if (!zoneIdMatches) blockers.push("ZONE_ID_MISMATCH");
 
-  const setupClassMatches =
-    allPresentAndSame(e26.setupClass, e3.setupClass, e4.setupClass) &&
-    e26.setupClass === REQUIRED_SETUP_CLASS;
+const setupClassCheck =
+  metadataMatchOrMissing({
+    ownerValue: e26.setupClass,
+    engine3Value: e3.setupClass,
+    engine4Value: e4.setupClass,
+    fieldName: "SETUP_CLASS",
+  });
 
-  if (!setupClassMatches) blockers.push("SETUP_CLASS_MISMATCH");
+const setupClassMatches =
+  e26.setupClass === REQUIRED_SETUP_CLASS &&
+  setupClassCheck.valid === true;
 
-  const identitySetupKeyMatches =
-    allPresentAndSame(
-      e26.identitySetupKey,
-      e3.identitySetupKey,
-      e4.identitySetupKey
-    );
+if (!setupClassMatches) {
+  blockers.push(
+    ...setupClassCheck.blockers,
+    "SETUP_CLASS_MISMATCH"
+  );
+}
 
-  if (!identitySetupKeyMatches) blockers.push("IDENTITY_SETUP_KEY_MISMATCH");
+reasonCodes.push(
+  ...setupClassCheck.reasonCodes
+);
 
-  const candidateIdentityVersionCompatible =
-    allCompatibleVersions(
-      e26.candidateIdentityVersion,
-      e3.candidateIdentityVersion,
-      e4.candidateIdentityVersion
-    );
+const identitySetupKeyCheck =
+  metadataMatchOrMissing({
+    ownerValue: e26.identitySetupKey,
+    engine3Value: e3.identitySetupKey,
+    engine4Value: e4.identitySetupKey,
+    fieldName: "IDENTITY_SETUP_KEY",
+  });
 
-  if (!candidateIdentityVersionCompatible) {
-    blockers.push("CANDIDATE_IDENTITY_VERSION_INCOMPATIBLE");
-  }
+const identitySetupKeyMatches =
+  e26.identitySetupKey === REQUIRED_SETUP_CLASS &&
+  identitySetupKeyCheck.valid === true;
+
+if (!identitySetupKeyMatches) {
+  blockers.push(
+    ...identitySetupKeyCheck.blockers,
+    "IDENTITY_SETUP_KEY_MISMATCH"
+  );
+}
+
+reasonCodes.push(
+  ...identitySetupKeyCheck.reasonCodes
+);
+
+const candidateIdentityVersionCheck =
+  versionMatchOrMissing({
+    ownerValue: e26.candidateIdentityVersion,
+    engine3Value: e3.candidateIdentityVersion,
+    engine4Value: e4.candidateIdentityVersion,
+  });
+
+const candidateIdentityVersionCompatible =
+  candidateIdentityVersionCheck.valid === true;
+
+if (!candidateIdentityVersionCompatible) {
+  blockers.push(
+    ...candidateIdentityVersionCheck.blockers,
+    "CANDIDATE_IDENTITY_VERSION_INCOMPATIBLE"
+  );
+}
+
+reasonCodes.push(
+  ...candidateIdentityVersionCheck.reasonCodes
+);
 
   if (e26.candidateInvalidated) blockers.push("CANDIDATE_INVALIDATED");
   if (e26.locationInvalidated) blockers.push("LOCATION_INVALIDATED");
