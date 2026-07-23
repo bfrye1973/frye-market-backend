@@ -162,6 +162,11 @@ export function buildEngine27Strategies({
               .engine26LocationCandidate ||
             null,
 
+          strategySymbol:
+            intradayPaperStrategy
+              .symbol ||
+            null,
+
           engine3AuthorizedReaction:
             intradayPaperStrategy
               .confluence
