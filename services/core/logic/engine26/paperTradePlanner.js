@@ -2976,6 +2976,9 @@ export function buildEngine26PaperTradePlan({
   // Canonical Engine 26A selected-location identity.
   engine26LocationCandidate = null,
 
+  // Canonical Engine 26A factual geometry handoff.
+  engine26GeometryHandoff = null,
+
   openPaperTrades = [],
   dailyBars = [],
 }) {
