@@ -62,7 +62,7 @@ import {
 } from "../logic/engine26/subminute/buildSubminuteEngine26.js";
 import {
   attachEngine4AuthorizedReactionParticipation,
-} from "../logic/engine4/authorizedReactionParticipation.js";
+} from "../logic/engine4/buildAuthorizedReactionParticipation.js";
 import {
   preserveEngine6CandidateIdentity,
 } from "../logic/engine6/preserveCandidateIdentity.js";
@@ -7497,8 +7497,9 @@ if (isEsIntradayScalp) {
 
   attachEngine4AuthorizedReactionParticipation({
     patchedConfluence,
+    engine26LocationCandidate,
+    engine26ReactionHandoff,
   });
-}
 
   // Engine 23 preliminary behavior context.
   // IMPORTANT:
@@ -8027,7 +8028,9 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
     }); 
     attachEngine4AuthorizedReactionParticipation({
       patchedConfluence,
-    });
+      engine26LocationCandidate,
+      engine26ReactionHandoff,
+    });      
       
     }
   } catch (err) {
