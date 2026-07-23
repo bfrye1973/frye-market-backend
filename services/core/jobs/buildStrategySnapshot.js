@@ -2792,6 +2792,7 @@ function buildFinalPermissionFromEngine15({
   engine22WaveStrategy,
   confluence,
   engine26ImbalanceWatch = null,
+  engine26LocationCandidate = null,
   engine3AuthorizedReaction = null,
   engine4AuthorizedParticipation = null,
 }) {
@@ -2837,6 +2838,7 @@ const engine6PaperPermission = buildEngine6PaperPermission({
   engine22WaveStrategy,
   engine25Context,
   engine26ImbalanceWatch,
+  engine26LocationCandidate,
   engine3AuthorizedReaction,
   engine4AuthorizedParticipation,
 });
@@ -7757,6 +7759,7 @@ const finalPermissionRaw =
         engine22WaveStrategy,
         confluence: patchedConfluence,
         engine26ImbalanceWatch: engine26PrePermissionWatch,
+        engine26LocationCandidate,
 
         engine3AuthorizedReaction:
           patchedConfluence?.context?.reaction
