@@ -67,6 +67,9 @@ import {
   preserveEngine6CandidateIdentity,
 } from "../logic/engine6/preserveCandidateIdentity.js";
 import {
+  evaluateEngine6Strategy1Phase4Contract,
+} from "../logic/engine6/strategy1PermissionContract.js";
+import {
   buildEngine7ProposedSizingPreview,
 } from "../logic/engine7/v2/buildProposedSizingPreview.js";
 
@@ -1726,6 +1729,7 @@ function buildEngine6PaperPermission({
   engine22WaveStrategy,
   engine25Context,
   engine26ImbalanceWatch = null,
+  engine26LocationCandidate = null,
 
   // New explicit authorized inputs.
   engine3AuthorizedReaction = null,
@@ -2032,6 +2036,18 @@ function buildEngine6PaperPermission({
     ) ||
     10;
 
+  const strategy1Phase4Contract =
+    evaluateEngine6Strategy1Phase4Contract({
+      symbol,
+      strategyId,
+      engine26LocationCandidate,
+      engine3Reaction: paperReaction,
+      engine4Participation: explicitAuthorizedParticipation,
+      engine26ImbalanceWatch,
+      confluence,
+      direction,
+    });
+
   const blockers = [];
   const warnings = [];
 
@@ -2046,6 +2062,12 @@ function buildEngine6PaperPermission({
       ? "ENGINE6_AUTHORIZED_ENGINE4_INPUT"
       : "ENGINE6_LEGACY_ENGINE4_INPUT",
   ];
+
+  if (strategy1Phase4Contract?.applies === true) {
+    reasonCodes.push(
+      ...strategy1Phase4Contract.reasonCodes
+    );
+  }
 
   if (!lifecyclePaperCandidate) {
     blockers.push(
@@ -2278,6 +2300,19 @@ function buildEngine6PaperPermission({
     "REQUIRES_ENGINE10_JOURNAL"
   );
 
+  if (
+    strategy1Phase4Contract?.applies === true &&
+    strategy1Phase4Contract.allowed !== true
+  ) {
+    blockers.push(
+      ...strategy1Phase4Contract.blockers
+    );
+
+    warnings.push(
+      ...strategy1Phase4Contract.warnings
+    );
+  }
+
   const uniqueBlockers = [
     ...new Set(
       blockers.filter(Boolean)
@@ -2306,6 +2341,7 @@ function buildEngine6PaperPermission({
 
   const fastIntradayPaperAllow =
     isFastIntradayPaperLane === true &&
+    strategy1Phase4Contract?.allowed === true &&
     engine26IntradayCandidate === true &&
     lifecyclePaperCandidate === true &&
 
@@ -2567,6 +2603,27 @@ function buildEngine6PaperPermission({
     decision,
     allowed,
 
+    permissionState:
+      fastIntradayPaperAllow === true
+        ? "FAST_INTRADAY_PAPER_ALLOW"
+        : strategy1Phase4Contract?.permissionState ||
+          decision,
+
+    paperAllowed:
+      allowed === true,
+
+    planningAllowed:
+      allowed === true,
+
+    ticketAllowed:
+      false,
+
+    strategy1Phase4Contract,
+
+    midlineTrigger:
+      strategy1Phase4Contract?.midlineTrigger ||
+      null,
+
     intradayPaperLane:
       fastIntradayPaperAllow === true,
 
@@ -2583,6 +2640,16 @@ function buildEngine6PaperPermission({
     executable: false,
     brokerExecutionAllowed: false,
     schwabExecutionAllowed: false,
+
+    paperOnlySafety: {
+      active: true,
+      planningOnly: true,
+      realExecutionAllowed: false,
+      executable: false,
+      brokerExecutionAllowed: false,
+      schwabExecutionAllowed: false,
+      engine8ExecutionAuthorityRequired: true,
+    },
 
     requiresEngine8Paper: true,
     requiresEngine10Journal: true,
