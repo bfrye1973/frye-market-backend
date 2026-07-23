@@ -21,6 +21,30 @@ const ES_SYMBOL = "ES";
 const ES_TICK_SIZE = 0.25;
 const ES_DOLLARS_PER_POINT = 50;
 
+const STRATEGY1_SETUP_CLASS =
+  "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION";
+const STRATEGY1_LANE_ID = "minute";
+const STRATEGY1_STRATEGY_ID = "intraday_scalp@10m";
+const STRATEGY1_REQUESTED_CONTRACTS = 3;
+
+const STRATEGY1_ALLOCATION = Object.freeze([
+  Object.freeze({
+    contractBlock: 1,
+    contracts: 1,
+    purpose: "TARGET_1_ZONE_TOUCH",
+  }),
+  Object.freeze({
+    contractBlock: 2,
+    contracts: 1,
+    purpose: "TARGET_2_ZONE_MIDLINE",
+  }),
+  Object.freeze({
+    contractBlock: 3,
+    contracts: 1,
+    purpose: "ENGINE9_RUNNER_HANDOFF",
+  }),
+]);
+
 function toNumber(value) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -106,13 +130,21 @@ function normalizeEngine6Permission(engine6Permission) {
   return {
     decision: decision || null,
     allowed,
+    explicitAllowed: source?.allowed === true,
     sizeMultiplier,
+    planningAllowed: source?.planningAllowed === true,
+    laneId: source?.laneId ?? null,
     candidateId: source?.candidateId ?? null,
     zoneId: source?.zoneId ?? null,
     strategyId: source?.strategyId ?? null,
     symbol: source?.symbol ?? null,
     direction: source?.direction ?? null,
     setupType: source?.setupType ?? null,
+    setupClass: source?.setupClass ?? null,
+    setupGrade: source?.setupGrade ?? null,
+    identitySetupKey: source?.identitySetupKey ?? null,
+    candidateIdentityVersion:
+      source?.candidateIdentityVersion ?? null,
     snapshotTime: source?.snapshotTime ?? null,
     reasonCodes: Array.isArray(source?.reasonCodes)
       ? source.reasonCodes
@@ -143,16 +175,402 @@ function normalizeEngine27Readiness(engine27Readiness) {
   return {
     decisionState: decisionState || null,
     ready,
+    reactionReady: source?.reactionReady === true,
+    participationReady: source?.participationReady === true,
+    permissionReady: source?.permissionReady === true,
+    plannerReady: source?.plannerReady === true,
+    invalidated: source?.invalidated === true,
+    laneId: source?.laneId ?? null,
     candidateId: source?.candidateId ?? null,
     zoneId: source?.zoneId ?? null,
     strategyId: source?.strategyId ?? null,
     symbol: source?.symbol ?? null,
     direction: source?.direction ?? null,
     setupType: source?.setupType ?? null,
+    setupClass: source?.setupClass ?? null,
+    setupGrade: source?.setupGrade ?? null,
+    identitySetupKey: source?.identitySetupKey ?? null,
+    candidateIdentityVersion:
+      source?.candidateIdentityVersion ?? null,
     snapshotTime: source?.snapshotTime ?? null,
     reasonCodes: Array.isArray(source?.reasonCodes)
       ? source.reasonCodes
       : [],
+  };
+}
+
+
+function normalizeIdentityValue(value) {
+  if (value === null || value === undefined) return null;
+  return String(value);
+}
+
+function strategy1Identity(source = {}) {
+  return {
+    laneId: normalizeIdentityValue(source?.laneId),
+    strategyId: normalizeIdentityValue(source?.strategyId),
+    candidateId: normalizeIdentityValue(source?.candidateId),
+    zoneId: normalizeIdentityValue(source?.zoneId),
+    symbol: normalizeIdentityValue(source?.symbol),
+    setupClass: normalizeIdentityValue(source?.setupClass),
+    setupGrade: normalizeIdentityValue(source?.setupGrade),
+    identitySetupKey:
+      normalizeIdentityValue(source?.identitySetupKey),
+    candidateIdentityVersion:
+      normalizeIdentityValue(source?.candidateIdentityVersion),
+  };
+}
+
+function compareStrategy1Identity(reference, candidate, sourceLabel) {
+  const fields = [
+    "laneId",
+    "strategyId",
+    "candidateId",
+    "zoneId",
+    "symbol",
+    "setupClass",
+    "setupGrade",
+    "identitySetupKey",
+    "candidateIdentityVersion",
+  ];
+
+  const mismatches = [];
+
+  for (const field of fields) {
+    if (reference[field] == null) {
+      mismatches.push(`ENGINE26B_${field.toUpperCase()}_MISSING`);
+      continue;
+    }
+
+    if (candidate[field] == null) {
+      mismatches.push(`${sourceLabel}_${field.toUpperCase()}_MISSING`);
+      continue;
+    }
+
+    if (reference[field] !== candidate[field]) {
+      mismatches.push(`${sourceLabel}_${field.toUpperCase()}_MISMATCH`);
+    }
+  }
+
+  return mismatches;
+}
+
+function strategy1TargetPurpose(target) {
+  return safeUpper(
+    target?.purpose ??
+      target?.role ??
+      target?.targetPurpose ??
+      target?.targetType
+  );
+}
+
+function buildStrategy1Targets(rawTargets) {
+  const targets = Array.isArray(rawTargets)
+    ? rawTargets.filter(Boolean)
+    : [];
+
+  const target1 = targets[0] || null;
+  const target2 = targets[1] || null;
+  const target3 = targets[2] || null;
+
+  return {
+    targets,
+    target1,
+    target2,
+    target3,
+    target1Price: toNumber(target1?.price ?? target1),
+    target2Price: toNumber(target2?.price ?? target2),
+    target3Purpose: strategy1TargetPurpose(target3),
+    target3Price:
+      target3 && Object.prototype.hasOwnProperty.call(target3, "price")
+        ? target3.price
+        : undefined,
+  };
+}
+
+function buildStrategy1Phase7Preview({
+  geometry,
+  engine6,
+  engine27,
+  riskConfig,
+  snapshotTime,
+}) {
+  const base = makeBaseOutput({
+    geometry,
+    engine6,
+    engine27,
+    snapshotTime,
+  });
+
+  const identity = strategy1Identity(geometry);
+  const engine6Identity = strategy1Identity(engine6);
+  const engine27Identity = strategy1Identity(engine27);
+
+  const identityReasons = [
+    ...compareStrategy1Identity(identity, engine6Identity, "ENGINE6"),
+    ...compareStrategy1Identity(identity, engine27Identity, "ENGINE27E"),
+  ];
+
+  if (identity.laneId !== STRATEGY1_LANE_ID) {
+    identityReasons.push("ENGINE7A_STRATEGY1_LANE_MISMATCH");
+  }
+
+  if (identity.strategyId !== STRATEGY1_STRATEGY_ID) {
+    identityReasons.push("ENGINE7A_STRATEGY1_STRATEGY_MISMATCH");
+  }
+
+  if (identity.setupClass !== STRATEGY1_SETUP_CLASS) {
+    identityReasons.push("ENGINE7A_STRATEGY1_SETUP_CLASS_MISMATCH");
+  }
+
+  const riskValidation = validateRiskConfig(riskConfig);
+  const entryPrice = toNumber(geometry?.proposedEntryPrice);
+  const stopPrice = toNumber(geometry?.proposedStopPrice);
+  const providedStopDistance =
+    toNumber(geometry?.proposedStopDistancePoints);
+  const calculatedStopDistance =
+    entryPrice != null && stopPrice != null
+      ? round2(Math.abs(entryPrice - stopPrice))
+      : null;
+  const stopDistanceDifference =
+    calculatedStopDistance != null && providedStopDistance != null
+      ? round2(Math.abs(calculatedStopDistance - providedStopDistance))
+      : null;
+
+  const targetRead = buildStrategy1Targets(
+    geometry?.proposedTargets
+  );
+
+  const engine6Ready =
+    engine6.decision === "FAST_INTRADAY_PAPER_ALLOW" &&
+    engine6.explicitAllowed === true &&
+    engine6.planningAllowed === true;
+
+  const geometryReady =
+    geometry?.geometryReady === true;
+
+  const geometryValid =
+    isPositiveNumber(entryPrice) &&
+    isPositiveNumber(stopPrice) &&
+    stopPrice < entryPrice &&
+    isPositiveNumber(providedStopDistance) &&
+    stopDistanceDifference != null &&
+    stopDistanceDifference <= ES_TICK_SIZE;
+
+  const target1Ready =
+    isPositiveNumber(targetRead.target1Price);
+  const target2Ready =
+    isPositiveNumber(targetRead.target2Price);
+  const runnerReady =
+    targetRead.target3Purpose === "ENGINE9_RUNNER_HANDOFF" &&
+    targetRead.target3Price === null &&
+    geometry?.runnerHandoffRequired === true;
+
+  const engine27Ready =
+    engine27.reactionReady === true &&
+    engine27.participationReady === true &&
+    engine27.permissionReady === true &&
+    engine27.plannerReady === true &&
+    engine27.invalidated !== true;
+
+  const config = riskValidation.config;
+  const rawRiskPerContract =
+    riskValidation.valid && calculatedStopDistance != null
+      ? round2(calculatedStopDistance * config.dollarsPerPoint)
+      : null;
+  const slippageRisk =
+    riskValidation.valid
+      ? round2(
+          config.estimatedSlippagePointsPerSide *
+            2 *
+            config.dollarsPerPoint
+        )
+      : null;
+  const riskPerContract =
+    rawRiskPerContract != null && slippageRisk != null
+      ? round2(
+          rawRiskPerContract +
+            slippageRisk +
+            config.commissionDollarsPerContractRoundTrip
+        )
+      : null;
+  const uncappedSupported =
+    riskPerContract != null && riskPerContract > 0
+      ? Math.floor(config.riskBudgetDollars / riskPerContract)
+      : 0;
+  const riskSupportedContracts = riskValidation.valid
+    ? Math.max(0, Math.min(uncappedSupported, config.maximumContracts))
+    : 0;
+  const proposedContracts = Math.min(
+    STRATEGY1_REQUESTED_CONTRACTS,
+    riskSupportedContracts
+  );
+  const riskLimited =
+    riskValidation.valid &&
+    riskSupportedContracts < STRATEGY1_REQUESTED_CONTRACTS;
+
+  const invalidated =
+    engine27.invalidated === true ||
+    safeUpper(geometry?.candidateStatus).includes("INVALIDATED") ||
+    safeUpper(geometry?.lifecycleStatus).includes("INVALIDATED");
+
+  const blockers = unique([
+    ...identityReasons,
+    !engine6Ready ? "ENGINE6_PLANNING_PERMISSION_REQUIRED" : null,
+    !geometryReady ? "ENGINE26B_GEOMETRY_READY_REQUIRED" : null,
+    !geometryValid ? "ENGINE26B_GEOMETRY_INVALID" : null,
+    !target1Ready ? "ENGINE26B_TARGET1_REQUIRED" : null,
+    !target2Ready ? "ENGINE26B_TARGET2_REQUIRED" : null,
+    !runnerReady ? "ENGINE26B_RUNNER_HANDOFF_REQUIRED" : null,
+    !engine27.reactionReady ? "ENGINE27E_REACTION_READY_REQUIRED" : null,
+    !engine27.participationReady ? "ENGINE27E_PARTICIPATION_READY_REQUIRED" : null,
+    !engine27.permissionReady ? "ENGINE27E_PERMISSION_READY_REQUIRED" : null,
+    !engine27.plannerReady ? "ENGINE27E_PLANNER_READY_REQUIRED" : null,
+    invalidated ? "ENGINE27E_CANDIDATE_INVALIDATED" : null,
+    !riskValidation.valid ? riskValidation.status : null,
+    riskLimited ? "ENGINE7A_RISK_SUPPORTS_FEWER_THAN_THREE" : null,
+  ]);
+
+  const threeContractPlanQualified =
+    blockers.length === 0 &&
+    riskSupportedContracts >= STRATEGY1_REQUESTED_CONTRACTS;
+  const sizingReady = threeContractPlanQualified;
+
+  let sizingState = "WAITING_FOR_UPSTREAM";
+  let status = "STRATEGY1_PRELIMINARY_SIZING_WAITING";
+
+  if (invalidated) {
+    sizingState = "INVALIDATED";
+    status = "CANDIDATE_INVALIDATED";
+  } else if (identityReasons.length > 0) {
+    sizingState = "IDENTITY_MISMATCH";
+    status = "PROPOSED_GEOMETRY_IDENTITY_MISMATCH";
+  } else if (!riskValidation.valid) {
+    sizingState = "RISK_EVIDENCE_UNAVAILABLE";
+    status = riskValidation.status;
+  } else if (riskLimited) {
+    sizingState = "RISK_LIMITED";
+    status = "STRATEGY1_RISK_LIMITED";
+  } else if (sizingReady) {
+    sizingState = "THREE_CONTRACT_PREVIEW_READY";
+    status = "STRATEGY1_THREE_CONTRACT_PREVIEW_READY";
+  }
+
+  return {
+    ...base,
+    active: true,
+
+    laneId: identity.laneId,
+    strategyId: identity.strategyId,
+    candidateId: identity.candidateId,
+    zoneId: identity.zoneId,
+    symbol: identity.symbol,
+    setupClass: identity.setupClass,
+    setupGrade: identity.setupGrade,
+    identitySetupKey: identity.identitySetupKey,
+    candidateIdentityVersion:
+      identity.candidateIdentityVersion,
+
+    proposedEntryPrice: entryPrice,
+    proposedStopPrice: stopPrice,
+    proposedStopDistancePoints: providedStopDistance,
+    providedStopDistancePoints: providedStopDistance,
+    calculatedStopDistancePoints: calculatedStopDistance,
+    stopDistanceDifferencePoints: stopDistanceDifference,
+    proposedTargets: targetRead.targets,
+    runnerHandoffRequired:
+      geometry?.runnerHandoffRequired === true,
+
+    engine6Permission: engine6.decision,
+    engine6Allowed: engine6.explicitAllowed === true,
+    engine6PlanningAllowed:
+      engine6.planningAllowed === true,
+
+    reactionReady: engine27.reactionReady === true,
+    participationReady:
+      engine27.participationReady === true,
+    permissionReady:
+      engine27.permissionReady === true,
+    plannerReady: engine27.plannerReady === true,
+    invalidated,
+
+    geometryReady,
+    target1Ready,
+    target2Ready,
+    runnerHandoffReady: runnerReady,
+
+    riskBudgetDollars:
+      config?.riskBudgetDollars ?? null,
+    dollarsPerPoint:
+      config?.dollarsPerPoint ?? ES_DOLLARS_PER_POINT,
+    minimumContracts:
+      config?.minimumContracts ?? null,
+    maximumContracts:
+      config?.maximumContracts ?? null,
+    rawRiskPerContract,
+    estimatedSlippageRiskPerContract: slippageRisk,
+    commissionDollarsPerContractRoundTrip:
+      config?.commissionDollarsPerContractRoundTrip ?? null,
+    estimatedRiskPerContract: riskPerContract,
+
+    threeContractPlanRequested: true,
+    requestedContracts: STRATEGY1_REQUESTED_CONTRACTS,
+    threeContractPlanQualified,
+    riskSupportedContracts,
+    proposedContracts,
+    estimatedContracts: proposedContracts,
+    estimatedRiskDollars:
+      riskPerContract == null
+        ? 0
+        : round2(proposedContracts * riskPerContract),
+    riskLimited,
+
+    allocation: STRATEGY1_ALLOCATION.map((block) => ({
+      ...block,
+    })),
+    totalContracts:
+      sizingReady ? STRATEGY1_REQUESTED_CONTRACTS : proposedContracts,
+    target1Contracts: sizingReady ? 1 : 0,
+    target2Contracts: sizingReady ? 1 : 0,
+    runnerContracts: sizingReady ? 1 : 0,
+
+    sizingReady,
+    sizingState,
+    sizingPreviewAvailable:
+      riskValidation.valid && geometryValid,
+    allowedPreview: sizingReady,
+
+    executableSizing: false,
+    nonExecutable: true,
+    noPermissionCreated: true,
+    noOfficialPlanCreated: true,
+    noManagementCreated: true,
+    noRunnerTargetCreated: true,
+    noOrderCreated: true,
+    noFillCreated: true,
+    noJournalEventCreated: true,
+    noBrokerOrder: true,
+    noExecution: true,
+
+    status,
+    blockers,
+    warnings: [],
+    reasonCodes: unique([
+      "ENGINE7A_STRATEGY1_PHASE7_APPLIED",
+      engine6Ready ? "ENGINE6_PLANNING_PERMISSION_READY" : null,
+      geometryReady ? "ENGINE26B_GEOMETRY_READY" : null,
+      engine27Ready ? "ENGINE27E_FULLY_READY" : null,
+      runnerReady ? "ENGINE9_RUNNER_HANDOFF_PRESERVED" : null,
+      sizingReady ? "ENGINE7A_THREE_CONTRACT_PREVIEW_READY" : null,
+      riskLimited ? "ENGINE7A_THREE_CONTRACT_PLAN_RISK_LIMITED" : null,
+      ...riskValidation.reasonCodes,
+      ...blockers,
+      "ENGINE7A_PRELIMINARY_SIZING_ONLY",
+      "NO_PERMISSION_CREATED",
+      "NO_MANAGEMENT_CREATED",
+      "NO_ORDER_CREATED",
+      "NO_EXECUTION",
+    ]),
   };
 }
 
@@ -536,6 +954,19 @@ export function buildEngine7ProposedSizingPreview({
         "ENGINE7A_PROPOSED_GEOMETRY_MISSING",
       ],
     };
+  }
+
+  if (
+    safeUpper(geometry?.setupClass) ===
+    STRATEGY1_SETUP_CLASS
+  ) {
+    return buildStrategy1Phase7Preview({
+      geometry,
+      engine6,
+      engine27,
+      riskConfig,
+      snapshotTime,
+    });
   }
 
   const candidateStatus =
