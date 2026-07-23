@@ -7500,6 +7500,7 @@ if (isEsIntradayScalp) {
     engine26LocationCandidate,
     engine26ReactionHandoff,
   });
+}
 
   // Engine 23 preliminary behavior context.
   // IMPORTANT:
