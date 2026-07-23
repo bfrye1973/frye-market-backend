@@ -193,6 +193,7 @@ function normalizeIdentityValue(value) {
 
 function buildPipelineIdentity({
   engine26LocationCandidate = null,
+  strategySymbol = null,
   engine26PipelineIdentity = null,
   engine26LocationContext = null,
   engine26ControlMap = null,
@@ -335,6 +336,7 @@ function buildPipelineIdentity({
       normalizeIdentityValue(
         engine26PipelineIdentity?.symbol ??
         engine26LocationCandidate?.symbol ??
+        strategySymbol ??
         engine26LocationContext?.symbol ??
         engine26ControlMap?.symbol ??
         engine26ProposedGeometry?.symbol ??
@@ -570,6 +572,7 @@ function identityFieldMatches({
 
 function buildStrategy1Identity({
   engine26LocationCandidate = null,
+  strategySymbol = null,
   engine3AuthorizedReaction = null,
   engine4AuthorizedParticipation = null,
   engine6Permission = null,
@@ -663,6 +666,12 @@ function buildStrategy1Identity({
   return {
     ...canonical,
 
+    symbol:
+      normalizeIdentityValue(
+        candidate?.symbol ??
+        strategySymbol
+      ),
+
     setupGrade:
       normalizeStrategy1IdentityValue(
         candidate?.setupGrade
@@ -739,6 +748,7 @@ function isValidStrategy1Geometry(
 
 function buildStrategy1Readiness({
   engine26LocationCandidate = null,
+  strategySymbol = null,
   engine3AuthorizedReaction = null,
   engine4AuthorizedParticipation = null,
   engine6Permission = null,
@@ -747,6 +757,7 @@ function buildStrategy1Readiness({
   const identity =
     buildStrategy1Identity({
       engine26LocationCandidate,
+      strategySymbol,
       engine3AuthorizedReaction,
       engine4AuthorizedParticipation,
       engine6Permission,
@@ -2472,6 +2483,11 @@ function buildLaneDecision({
               ?.engine26LocationCandidate ||
             null,
 
+          strategySymbol:
+            pipelineContext
+              ?.strategySymbol ||
+            null,
+
           engine26ProposedGeometry:
             pipelineContext
               ?.engine26ProposedGeometry ||
@@ -2515,6 +2531,11 @@ function buildLaneDecision({
           engine26LocationCandidate:
             pipelineContext
               ?.engine26LocationCandidate ||
+            null,
+
+          strategySymbol:
+            pipelineContext
+              ?.strategySymbol ||
             null,
 
           engine3AuthorizedReaction:
@@ -2794,6 +2815,12 @@ function buildLaneDecision({
       pipelineIdentity.snapshotTime,
 
     pipelineIdentity: {
+      symbol:
+        publicPipelineIdentity
+          .symbol ??
+        pipelineIdentity.symbol ??
+        null,
+
       laneId:
         publicPipelineIdentity
           .laneId ??
