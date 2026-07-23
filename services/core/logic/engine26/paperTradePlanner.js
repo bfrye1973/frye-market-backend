@@ -2293,8 +2293,16 @@ function buildEngine26Strategy1ProposedGeometry({
   const identityMatches =
     Boolean(candidate) &&
     Boolean(handoff) &&
+    Boolean(laneId) &&
+    Boolean(resolvedStrategyId) &&
     Boolean(candidateId) &&
     Boolean(zoneId) &&
+    Boolean(resolvedSymbol) &&
+    Boolean(setupClass) &&
+    Boolean(setupGrade) &&
+    Boolean(identitySetupKey) &&
+    Boolean(candidateIdentityVersion) &&
+    Boolean(snapshotTime) &&
     candidateId === handoff?.candidateId &&
     zoneId === handoff?.zoneId &&
     laneId === handoff?.laneId &&
@@ -2395,8 +2403,10 @@ function buildEngine26Strategy1ProposedGeometry({
   const proposedStopDistancePoints =
     geometryReady
       ? roundPts(
-          proposedEntryPrice -
-          proposedStopPrice
+          Math.abs(
+            proposedEntryPrice -
+            proposedStopPrice
+          )
         )
       : null;
 
@@ -2469,6 +2479,20 @@ function buildEngine26Strategy1ProposedGeometry({
     },
   ];
 
+const runnerTarget =
+  proposedTargets.find(
+    (target) =>
+      target?.targetId ===
+      "TARGET_3_ENGINE9_RUNNER"
+  ) || null;
+
+const runnerHandoffRequired =
+  geometryReady === true &&
+  runnerTarget?.purpose ===
+    "ENGINE9_RUNNER_HANDOFF" &&
+  runnerTarget?.price === null &&
+  runnerTarget?.runnerHandoffRequired === true;
+
   return {
     active: geometryReady,
     geometryReady,
@@ -2517,6 +2541,7 @@ function buildEngine26Strategy1ProposedGeometry({
     target3Status:
       "ENGINE9_RUNNER_HANDOFF",
     target3Price: null,
+    runnerHandoffRequired,
 
     candidateStatus:
       candidateInvalidated
