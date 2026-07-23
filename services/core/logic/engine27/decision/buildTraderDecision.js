@@ -123,6 +123,25 @@ const OPPORTUNITY_PRIORITY = [
   "IDLE",
 ];
 
+const STRATEGY1_SETUP_CLASS =
+  "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION";
+
+const STRATEGY1_LANE_ID =
+  "minute";
+
+const STRATEGY1_STRATEGY_ID =
+  "intraday_scalp@10m";
+
+const STRATEGY1_IDENTITY_FIELDS = [
+  "laneId",
+  "strategyId",
+  "candidateId",
+  "zoneId",
+  "setupClass",
+  "identitySetupKey",
+  "candidateIdentityVersion",
+];
+
 function isObject(value) {
   return (
     value !== null &&
@@ -500,6 +519,367 @@ function buildExplicitPipelineReadiness({
 
     plannerStatus:
       plannerStatus || null,
+  };
+}
+
+function normalizeStrategy1IdentityValue(value) {
+  return normalizeIdentityValue(value);
+}
+
+function isStrategy1Candidate(candidate) {
+  return (
+    isObject(candidate) &&
+    normalizeStrategy1IdentityValue(
+      candidate.laneId
+    ) === STRATEGY1_LANE_ID &&
+    normalizeStrategy1IdentityValue(
+      candidate.strategyId
+    ) === STRATEGY1_STRATEGY_ID &&
+    upper(
+      candidate.setupClass
+    ) === STRATEGY1_SETUP_CLASS
+  );
+}
+
+function identityFieldMatches({
+  source,
+  field,
+  canonicalValue,
+}) {
+  if (!isObject(source)) {
+    return false;
+  }
+
+  const sourceValue =
+    normalizeStrategy1IdentityValue(
+      source[field]
+    );
+
+  /*
+   * Engine 3 and Engine 6 do not currently repeat every descriptive
+   * Strategy 1 identity field. Missing optional repetitions do not
+   * create or repair identity. Any value that is present must match
+   * the canonical Engine 26A candidate exactly.
+   */
+  if (sourceValue === null) {
+    return true;
+  }
+
+  return sourceValue === canonicalValue;
+}
+
+function buildStrategy1Identity({
+  engine26LocationCandidate = null,
+  engine3AuthorizedReaction = null,
+  engine4AuthorizedParticipation = null,
+  engine6Permission = null,
+  engine26ProposedGeometry = null,
+} = {}) {
+  const candidate =
+    isObject(engine26LocationCandidate)
+      ? engine26LocationCandidate
+      : null;
+
+  const canonical = Object.fromEntries(
+    STRATEGY1_IDENTITY_FIELDS.map(
+      (field) => [
+        field,
+        normalizeStrategy1IdentityValue(
+          candidate?.[field]
+        ),
+      ]
+    )
+  );
+
+  const canonicalComplete =
+    isStrategy1Candidate(candidate) &&
+    STRATEGY1_IDENTITY_FIELDS.every(
+      (field) => Boolean(canonical[field])
+    );
+
+  const requiredContracts = {
+    engine26LocationCandidate:
+      candidate,
+    engine3AuthorizedReaction,
+    engine4AuthorizedParticipation,
+    engine6Permission,
+    engine26ProposedGeometry,
+  };
+
+  const contractsPresent =
+    Object.values(requiredContracts).every(
+      isObject
+    );
+
+  const contractMatches = {};
+
+  for (
+    const [name, source]
+    of Object.entries(requiredContracts)
+  ) {
+    contractMatches[name] =
+      isObject(source) &&
+      STRATEGY1_IDENTITY_FIELDS.every(
+        (field) =>
+          identityFieldMatches({
+            source,
+            field,
+            canonicalValue:
+              canonical[field],
+          })
+      );
+  }
+
+  const fieldConsistent =
+    Object.fromEntries(
+      STRATEGY1_IDENTITY_FIELDS.map(
+        (field) => [
+          field,
+          Object.values(
+            requiredContracts
+          ).every(
+            (source) =>
+              identityFieldMatches({
+                source,
+                field,
+                canonicalValue:
+                  canonical[field],
+              })
+          ),
+        ]
+      )
+    );
+
+  const consistent =
+    canonicalComplete &&
+    contractsPresent &&
+    Object.values(
+      contractMatches
+    ).every(Boolean) &&
+    Object.values(
+      fieldConsistent
+    ).every(Boolean);
+
+  return {
+    ...canonical,
+
+    setupGrade:
+      normalizeStrategy1IdentityValue(
+        candidate?.setupGrade
+      ),
+
+    complete:
+      canonicalComplete &&
+      contractsPresent,
+
+    consistent,
+
+    contractsPresent,
+
+    contractMatches,
+    fieldConsistent,
+  };
+}
+
+function isNumericPrice(value) {
+  const number = Number(value);
+
+  return (
+    Number.isFinite(number) &&
+    number > 0
+  );
+}
+
+function isValidStrategy1Geometry(
+  geometry
+) {
+  if (!isObject(geometry)) {
+    return false;
+  }
+
+  const targets =
+    Array.isArray(
+      geometry.proposedTargets
+    )
+      ? geometry.proposedTargets
+      : [];
+
+  const target1 = targets[0];
+  const target2 = targets[1];
+  const target3 = targets[2];
+
+  return (
+    geometry.active === true &&
+    upper(
+      geometry.lifecycleStatus
+    ) ===
+      "PROPOSED_GEOMETRY_AVAILABLE" &&
+    isNumericPrice(
+      geometry.proposedEntryPrice
+    ) &&
+    isNumericPrice(
+      geometry.proposedStopPrice
+    ) &&
+    isNumericPrice(
+      target1?.price
+    ) &&
+    isNumericPrice(
+      target2?.price
+    ) &&
+    target3?.price === null &&
+    upper(
+      target3?.purpose
+    ) ===
+      "ENGINE9_RUNNER_HANDOFF" &&
+    target3
+      ?.runnerHandoffRequired ===
+      true
+  );
+}
+
+function buildStrategy1Readiness({
+  engine26LocationCandidate = null,
+  engine3AuthorizedReaction = null,
+  engine4AuthorizedParticipation = null,
+  engine6Permission = null,
+  engine26ProposedGeometry = null,
+} = {}) {
+  const identity =
+    buildStrategy1Identity({
+      engine26LocationCandidate,
+      engine3AuthorizedReaction,
+      engine4AuthorizedParticipation,
+      engine6Permission,
+      engine26ProposedGeometry,
+    });
+
+  const invalidated =
+    engine26LocationCandidate
+      ?.invalidated === true;
+
+  const identityReady =
+    identity.complete === true &&
+    identity.consistent === true;
+
+  const reactionReady =
+    identityReady &&
+    invalidated !== true &&
+    engine3AuthorizedReaction
+      ?.reactionConfirmed === true;
+
+  const participationReady =
+    identityReady &&
+    invalidated !== true &&
+    engine4AuthorizedParticipation
+      ?.participationConfirmed ===
+      true &&
+    engine4AuthorizedParticipation
+      ?.hardBlocked !== true;
+
+  const permissionReady =
+    identityReady &&
+    invalidated !== true &&
+    upper(
+      engine6Permission?.decision
+    ) ===
+      "FAST_INTRADAY_PAPER_ALLOW" &&
+    engine6Permission?.allowed ===
+      true &&
+    engine6Permission
+      ?.planningAllowed === true;
+
+  const geometryReady =
+    isValidStrategy1Geometry(
+      engine26ProposedGeometry
+    );
+
+  const plannerReady =
+    identityReady &&
+    invalidated !== true &&
+    geometryReady;
+
+  return {
+    available:
+      Boolean(
+        engine26LocationCandidate ||
+        engine3AuthorizedReaction ||
+        engine4AuthorizedParticipation ||
+        engine6Permission ||
+        engine26ProposedGeometry
+      ),
+
+    applies:
+      [
+        engine26LocationCandidate,
+        engine3AuthorizedReaction,
+        engine4AuthorizedParticipation,
+        engine6Permission,
+        engine26ProposedGeometry,
+      ].some(
+        (source) =>
+          isObject(source) &&
+          (
+            upper(
+              source.setupClass
+            ) ===
+              STRATEGY1_SETUP_CLASS ||
+            upper(
+              source.identitySetupKey
+            ) ===
+              STRATEGY1_SETUP_CLASS
+          )
+      ),
+
+    identity,
+
+    reactionReady,
+    participationReady,
+    permissionReady,
+    plannerReady,
+    invalidated,
+
+    geometryReady,
+
+    reactionState:
+      upper(
+        engine3AuthorizedReaction
+          ?.reactionState
+      ) || null,
+
+    authorizedReactionState:
+      upper(
+        engine3AuthorizedReaction
+          ?.authorizedReactionState
+      ) || null,
+
+    participationState:
+      upper(
+        engine4AuthorizedParticipation
+          ?.participationState
+      ) || null,
+
+    hardBlocked:
+      engine4AuthorizedParticipation
+        ?.hardBlocked === true,
+
+    engine6Decision:
+      upper(
+        engine6Permission?.decision
+      ) || null,
+
+    allowed:
+      engine6Permission?.allowed ===
+      true,
+
+    planningAllowed:
+      engine6Permission
+        ?.planningAllowed === true,
+
+    plannerStatus:
+      upper(
+        engine26ProposedGeometry
+          ?.lifecycleStatus
+      ) || null,
   };
 }
 
@@ -2092,6 +2472,11 @@ function buildLaneDecision({
               ?.engine26LocationCandidate ||
             null,
 
+          engine26ProposedGeometry:
+            pipelineContext
+              ?.engine26ProposedGeometry ||
+            null,
+
           engine26Planner:
             pipelineContext
               ?.engine26Planner ||
@@ -2124,6 +2509,36 @@ function buildLaneDecision({
       pipelineIdentity,
     });
 
+  const strategy1Readiness =
+    degree === "minute"
+      ? buildStrategy1Readiness({
+          engine26LocationCandidate:
+            pipelineContext
+              ?.engine26LocationCandidate ||
+            null,
+
+          engine3AuthorizedReaction:
+            pipelineContext
+              ?.engine3AuthorizedReaction ||
+            null,
+
+          engine4AuthorizedParticipation:
+            pipelineContext
+              ?.engine4AuthorizedParticipation ||
+            null,
+
+          engine6Permission:
+            pipelineContext
+              ?.engine6Permission ||
+            null,
+
+          engine26ProposedGeometry:
+            pipelineContext
+              ?.engine26ProposedGeometry ||
+            null,
+        })
+      : null;
+
   const readiness =
     degree === "subminute"
       ? {
@@ -2133,28 +2548,70 @@ function buildLaneDecision({
             subminuteGeometryReady,
         }
       : (
-          FAST_LANES.has(degree) &&
-          explicitPipelineReadiness.available
-            ? {
-                ...legacyReadiness,
+          degree === "minute" &&
+          strategy1Readiness
+            ?.applies === true
+            ? (() => {
+                const invalidated =
+                  legacyReadiness
+                    .invalidated === true ||
+                  strategy1Readiness
+                    .invalidated === true;
 
-                reactionReady:
-                  explicitPipelineReadiness
-                    .reactionReady,
+                return {
+                  ...legacyReadiness,
 
-                participationReady:
-                  explicitPipelineReadiness
-                    .participationReady,
+                  reactionReady:
+                    invalidated
+                      ? false
+                      : strategy1Readiness
+                          .reactionReady,
 
-                permissionReady:
-                  explicitPipelineReadiness
-                    .permissionReady,
+                  participationReady:
+                    invalidated
+                      ? false
+                      : strategy1Readiness
+                          .participationReady,
 
-                plannerReady:
-                  explicitPipelineReadiness
-                    .plannerReady,
-              }
-            : legacyReadiness
+                  permissionReady:
+                    invalidated
+                      ? false
+                      : strategy1Readiness
+                          .permissionReady,
+
+                  plannerReady:
+                    invalidated
+                      ? false
+                      : strategy1Readiness
+                          .plannerReady,
+
+                  invalidated,
+                };
+              })()
+            : (
+                FAST_LANES.has(degree) &&
+                explicitPipelineReadiness.available
+                  ? {
+                      ...legacyReadiness,
+
+                      reactionReady:
+                        explicitPipelineReadiness
+                          .reactionReady,
+
+                      participationReady:
+                        explicitPipelineReadiness
+                          .participationReady,
+
+                      permissionReady:
+                        explicitPipelineReadiness
+                          .permissionReady,
+
+                      plannerReady:
+                        explicitPipelineReadiness
+                          .plannerReady,
+                    }
+                  : legacyReadiness
+              )
         );
 
   const decisionState =
@@ -2177,6 +2634,21 @@ function buildLaneDecision({
       higherTimeframeConflict,
     });
 
+  if (
+    strategy1Readiness
+      ?.applies === true &&
+    (
+      strategy1Readiness
+        .identity.complete !== true ||
+      strategy1Readiness
+        .identity.consistent !== true
+    )
+  ) {
+    waitingFor.unshift(
+      "ENGINE26_PIPELINE_IDENTITY_MATCH"
+    );
+  }
+
   const blockers =
     buildBlockers({
       alpha,
@@ -2194,6 +2666,21 @@ function buildLaneDecision({
       readiness,
       subminuteGeometryReady,
     });
+
+  if (
+    strategy1Readiness
+      ?.applies === true &&
+    (
+      strategy1Readiness
+        .identity.complete !== true ||
+      strategy1Readiness
+        .identity.consistent !== true
+    )
+  ) {
+    warnings.push(
+      "ENGINE26_PIPELINE_IDENTITY_MISMATCH"
+    );
+  }
 
   const geometryToolRecommended =
     alpha
@@ -2234,6 +2721,13 @@ function buildLaneDecision({
       .plannerContext ||
     {};
 
+  const publicPipelineIdentity =
+    strategy1Readiness
+      ?.applies === true
+      ? strategy1Readiness
+          .identity
+      : pipelineIdentity;
+
   return {
     active: true,
 
@@ -2258,13 +2752,40 @@ function buildLaneDecision({
       registry.displayName,
 
     candidateId:
-      pipelineIdentity.candidateId,
+      publicPipelineIdentity
+        .candidateId ??
+      null,
 
     zoneId:
-      pipelineIdentity.zoneId,
+      publicPipelineIdentity
+        .zoneId ??
+      null,
+
+    setupClass:
+      publicPipelineIdentity
+        .setupClass ??
+      null,
+
+    setupGrade:
+      publicPipelineIdentity
+        .setupGrade ??
+      null,
+
+    identitySetupKey:
+      publicPipelineIdentity
+        .identitySetupKey ??
+      null,
+
+    candidateIdentityVersion:
+      publicPipelineIdentity
+        .candidateIdentityVersion ??
+      null,
 
     symbol:
-      pipelineIdentity.symbol,
+      publicPipelineIdentity
+        .symbol ??
+      pipelineIdentity.symbol ??
+      null,
 
     setupType:
       pipelineIdentity.setupType,
@@ -2274,38 +2795,84 @@ function buildLaneDecision({
 
     pipelineIdentity: {
       laneId:
-        pipelineIdentity.laneId,
+        publicPipelineIdentity
+          .laneId ??
+        null,
 
       strategyId:
-        pipelineIdentity.strategyId,
+        publicPipelineIdentity
+          .strategyId ??
+        null,
 
       candidateId:
-        pipelineIdentity.candidateId,
+        publicPipelineIdentity
+          .candidateId ??
+        null,
 
       zoneId:
-        pipelineIdentity.zoneId,
+        publicPipelineIdentity
+          .zoneId ??
+        null,
+
+      setupClass:
+        publicPipelineIdentity
+          .setupClass ??
+        null,
+
+      identitySetupKey:
+        publicPipelineIdentity
+          .identitySetupKey ??
+        null,
+
+      candidateIdentityVersion:
+        publicPipelineIdentity
+          .candidateIdentityVersion ??
+        null,
 
       complete:
-        pipelineIdentity.complete,
+        publicPipelineIdentity
+          .complete === true,
 
       consistent:
-        pipelineIdentity.consistent,
+        publicPipelineIdentity
+          .consistent === true,
 
       candidateIdConsistent:
-        pipelineIdentity
-          .candidateIdConsistent,
+        publicPipelineIdentity
+          .candidateIdConsistent ??
+        publicPipelineIdentity
+          .fieldConsistent
+          ?.candidateId ??
+        false,
 
       zoneIdConsistent:
-        pipelineIdentity
-          .zoneIdConsistent,
+        publicPipelineIdentity
+          .zoneIdConsistent ??
+        publicPipelineIdentity
+          .fieldConsistent
+          ?.zoneId ??
+        false,
 
       laneIdConsistent:
-        pipelineIdentity
-          .laneIdConsistent,
+        publicPipelineIdentity
+          .laneIdConsistent ??
+        publicPipelineIdentity
+          .fieldConsistent
+          ?.laneId ??
+        false,
 
       strategyIdConsistent:
-        pipelineIdentity
-          .strategyIdConsistent,
+        publicPipelineIdentity
+          .strategyIdConsistent ??
+        publicPipelineIdentity
+          .fieldConsistent
+          ?.strategyId ??
+        false,
+
+      contractMatches:
+        publicPipelineIdentity
+          .contractMatches ??
+        null,
     },
 
     decisionState,
@@ -2437,31 +3004,62 @@ function buildLaneDecision({
           : explicitPipelineReadiness.available,
 
       engine3State:
-        explicitPipelineReadiness
-          .engine3State,
+        strategy1Readiness
+          ?.applies === true
+          ? (
+              strategy1Readiness
+                .authorizedReactionState ??
+              strategy1Readiness
+                .reactionState
+            )
+          : explicitPipelineReadiness
+              .engine3State,
 
       engine4Status:
-        explicitPipelineReadiness
-          .engine4Status,
+        strategy1Readiness
+          ?.applies === true
+          ? strategy1Readiness
+              .participationState
+          : explicitPipelineReadiness
+              .engine4Status,
 
       engine6Decision:
-        explicitPipelineReadiness
-          .engine6Decision ??
-        permissionContext
-          .engine6Decision ??
-        null,
+        strategy1Readiness
+          ?.applies === true
+          ? strategy1Readiness
+              .engine6Decision
+          : (
+              explicitPipelineReadiness
+                .engine6Decision ??
+              permissionContext
+                .engine6Decision ??
+              null
+            ),
 
       engine6Allowed:
         degree === "subminute"
           ? permissionContext
               .engine6Allowed === true
           : (
-              explicitPipelineReadiness.available
-                ? explicitPipelineReadiness
-                    .permissionReady
-                : permissionContext
-                    .engine6Allowed === true
+              strategy1Readiness
+                ?.applies === true
+                ? strategy1Readiness
+                    .allowed
+                : (
+                    explicitPipelineReadiness.available
+                      ? explicitPipelineReadiness
+                          .permissionReady
+                      : permissionContext
+                          .engine6Allowed === true
+                  )
             ),
+
+      planningAllowed:
+        strategy1Readiness
+          ?.applies === true
+          ? strategy1Readiness
+              .planningAllowed
+          : null,
 
       plannerStatus:
         degree === "subminute"
@@ -2472,11 +3070,17 @@ function buildLaneDecision({
               null
             )
           : (
-              explicitPipelineReadiness
-                .plannerStatus ??
-              plannerContext
-                .status ??
-              null
+              strategy1Readiness
+                ?.applies === true
+                ? strategy1Readiness
+                    .plannerStatus
+                : (
+                    explicitPipelineReadiness
+                      .plannerStatus ??
+                    plannerContext
+                      .status ??
+                    null
+                  )
             ),
 
       plannerReady:
@@ -2492,10 +3096,12 @@ function buildLaneDecision({
         readiness.permissionReady,
 
       identityComplete:
-        pipelineIdentity.complete,
+        publicPipelineIdentity
+          .complete === true,
 
       identityConsistent:
-        pipelineIdentity.consistent,
+        publicPipelineIdentity
+          .consistent === true,
 
       executable: false,
 
@@ -2546,17 +3152,40 @@ function buildLaneDecision({
       true,
 
     reasonCodes:
-      buildReasonCodes({
-        degree,
-        decisionState,
-        direction,
-        wave,
-        readiness,
-        parentCompatibility,
-        higherDegreeSupport,
-        higherTimeframeConflict,
-        warnings,
-      }),
+      unique([
+        ...buildReasonCodes({
+          degree,
+          decisionState,
+          direction,
+          wave,
+          readiness,
+          parentCompatibility,
+          higherDegreeSupport,
+          higherTimeframeConflict,
+          warnings,
+        }),
+
+        strategy1Readiness
+          ?.applies === true &&
+        strategy1Readiness
+          .identity.consistent === true
+          ? "ENGINE27_TRADER_STRATEGY1_IDENTITY_MATCHED"
+          : null,
+
+        strategy1Readiness
+          ?.applies === true &&
+        strategy1Readiness
+          .identity.consistent !== true
+          ? "ENGINE27_TRADER_STRATEGY1_IDENTITY_MISMATCH"
+          : null,
+
+        strategy1Readiness
+          ?.applies === true &&
+        strategy1Readiness
+          .geometryReady === true
+          ? "ENGINE27_TRADER_ENGINE9_RUNNER_HANDOFF_ACCEPTED"
+          : null,
+      ]),
   };
 }
 
@@ -2861,3 +3490,5 @@ export function buildTraderDecision({
       }),
   };
 }
+
+export default buildTraderDecision;
