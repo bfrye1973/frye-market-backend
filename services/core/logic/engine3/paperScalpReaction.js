@@ -493,6 +493,9 @@ function buildBasePaperScalpReaction({
     zoneId:
       engine26LocationContext?.zoneId ?? null,
 
+    laneId:
+      engine26LocationContext?.laneId ?? null,
+
     strategyId:
       engine26LocationContext?.strategyId ?? null,
 
