@@ -9124,29 +9124,53 @@ if (
      * This second deterministic build replaces it with the completed
      * Engine 27E Minute readiness object.
      */
-    scalp.engine7SizingPreview =
-      buildEngine7ProposedSizingPreview({
-        engine26ProposedGeometry:
-          scalp.engine26ProposedGeometry ||
-          null,
+const engine26BMinuteGeometry =
+  scalp.engine26ProposedGeometry ||
+  null;
 
-        engine6PaperPermission:
-          scalp.permission?.paper ||
-          null,
+const engine6MinutePaperPermission =
+  scalp.permission?.paper ||
+  null;
 
-        engine27MinuteReadiness:
-          engine27MinuteDecision,
+const engine27EMinuteReadiness =
+  engine27MinuteDecision ||
+  null;
 
-        riskConfig:
-          ES_PAPER_RISK_CONFIG,
+/*
+ * Engine 7A Phase 7 consumes only the canonical Minute contracts:
+ *
+ * Engine 6:
+ * strategies["intraday_scalp@10m"].permission.paper
+ *
+ * Engine 26B:
+ * strategies["intraday_scalp@10m"].engine26ProposedGeometry
+ *
+ * Engine 27E:
+ * engine27Strategies.engine27TraderDecision.decisions.minute
+ *
+ * Engine 7A performs no identity repair and creates no management
+ * or execution authority.
+ */
+scalp.engine7SizingPreview =
+  buildEngine7ProposedSizingPreview({
+    engine26ProposedGeometry:
+      engine26BMinuteGeometry,
 
-        snapshotTime:
-          scalp
-            .engine26ProposedGeometry
-            ?.snapshotTime ||
-          result?.now ||
-          nowIso(),
-      });
+    engine6PaperPermission:
+      engine6MinutePaperPermission,
+
+    engine27MinuteReadiness:
+      engine27EMinuteReadiness,
+
+    riskConfig:
+      ES_PAPER_RISK_CONFIG,
+
+    snapshotTime:
+      engine26BMinuteGeometry
+        ?.snapshotTime ||
+      result?.now ||
+      nowIso(),
+  });
 
 scalp.engine9OfficialManagementPlan =
   buildEngine9OfficialManagementPlan({
