@@ -598,3 +598,85 @@ test("testing publication mutates no inputs and creates no downstream authority"
   assert.equal(output.tradeId, null);
   assert.equal(output.idempotencyKey, null);
 });
+
+test("identity mismatch publishes the complete dual contract without qualifying testing", () => {
+  setDataCollectionFlag("1");
+  const output = build({
+    permissionOverride: { candidateId: "OTHER-CANDIDATE" },
+  });
+
+  assert.equal(output.status, "PROPOSED_GEOMETRY_IDENTITY_MISMATCH");
+  assert.equal(output.testingDataCollectionMode, true);
+  assert.equal(output.testingRiskOverrideApplied, false);
+  assert.equal(output.paperTestingContracts, 0);
+  assert.equal(output.testingThreeContractPlanQualified, false);
+  assert.equal(output.productionRiskBudgetDollars, 1000);
+  assert.equal(typeof output.productionRiskSupportedContracts, "number");
+  assert.equal(typeof output.productionEstimatedRiskDollars, "number");
+  assert.equal(output.productionThreeContractPlanQualified, false);
+  assert.equal(typeof output.productionRiskLimited, "boolean");
+  assert.deepEqual(output.threeContractAllocation, {
+    block1Contracts: 0,
+    block1Purpose: "TARGET_1_ZONE_TOUCH",
+    block2Contracts: 0,
+    block2Purpose: "TARGET_2_ZONE_MIDLINE",
+    block3Contracts: 0,
+    block3Purpose: "ENGINE9_RUNNER_HANDOFF",
+    totalContracts: 0,
+  });
+});
+
+const earlyPublicationCases = [
+  ["missing candidateId", { geometryOverride: { candidateId: null } }, "ENGINE26B_CANDIDATEID_MISSING"],
+  ["missing zoneId", { geometryOverride: { zoneId: null } }, "ENGINE26B_ZONEID_MISSING"],
+  ["missing snapshot time", { geometryOverride: { snapshotTime: null } }, "ENGINE26B_SNAPSHOT_TIME_MISSING"],
+  ["candidate identity not preserved", { geometryOverride: { candidateIdentityPreserved: false } }, "ENGINE26B_CANDIDATE_IDENTITY_NOT_PRESERVED"],
+  [
+    "missing setupClass on the canonical Minute Strategy 1 path",
+    {
+      geometryOverride: { setupClass: null },
+      permissionOverride: { setupClass: null },
+      readinessOverride: { setupClass: null },
+    },
+    "ENGINE7A_STRATEGY1_SETUP_CLASS_MISMATCH",
+  ],
+  [
+    "incomplete geometry on the canonical Strategy 1 path",
+    {
+      geometryOverride: {
+        geometryReady: false,
+        proposedEntryPrice: null,
+        proposedStopPrice: null,
+        proposedStopDistancePoints: null,
+        proposedTargets: [],
+      },
+    },
+    "ENGINE26B_GEOMETRY_READY_REQUIRED",
+  ],
+];
+
+for (const [name, args, blocker] of earlyPublicationCases) {
+  test(`${name} still publishes the complete data-collection envelope`, () => {
+    setDataCollectionFlag("1");
+    const output = build(args);
+
+    assert.equal(output.testingDataCollectionMode, true);
+    assert.equal(output.testingRiskOverrideApplied, false);
+    assert.equal(output.paperTestingContracts, 0);
+    assert.equal(output.testingThreeContractPlanQualified, false);
+    assert.equal("productionRiskBudgetDollars" in output, true);
+    assert.equal("productionRiskSupportedContracts" in output, true);
+    assert.equal("productionEstimatedRiskDollars" in output, true);
+    assert.equal("productionThreeContractPlanQualified" in output, true);
+    assert.equal("productionRiskLimited" in output, true);
+    assert.equal("threeContractAllocation" in output, true);
+    assert.equal(output.threeContractAllocation.block1Contracts, 0);
+    assert.equal(output.threeContractAllocation.block2Contracts, 0);
+    assert.equal(output.threeContractAllocation.block3Contracts, 0);
+    assert.equal(output.threeContractAllocation.totalContracts, 0);
+    assert.equal(output.blockers.includes(blocker), true, `${blocker} missing`);
+    assert.equal(output.sizingReady, false);
+    assert.equal(output.executableSizing, false);
+    assert.equal(output.noExecution, true);
+  });
+}
