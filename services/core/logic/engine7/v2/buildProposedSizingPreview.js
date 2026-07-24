@@ -528,6 +528,17 @@ function buildStrategy1Phase7Preview({
     allocation: STRATEGY1_ALLOCATION.map((block) => ({
       ...block,
     })),
+
+    threeContractAllocation: {  
+      block1Contracts:
+        threeContractPlanQualified ? 1 : 0,
+
+      block2Contracts:
+        threeContractPlanQualified ? 1 : 0,
+
+      block3Contracts:
+        threeContractPlanQualified ? 1 : 0,
+    },
     totalContracts:
       sizingReady ? STRATEGY1_REQUESTED_CONTRACTS : proposedContracts,
     target1Contracts: sizingReady ? 1 : 0,
