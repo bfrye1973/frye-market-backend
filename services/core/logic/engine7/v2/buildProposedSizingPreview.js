@@ -45,6 +45,20 @@ const STRATEGY1_ALLOCATION = Object.freeze([
   }),
 ]);
 
+const STRATEGY1_THREE_CONTRACT_ALLOCATION = Object.freeze({
+  block1Contracts: 1,
+  block1Purpose: "TARGET_1_ZONE_TOUCH",
+  block2Contracts: 1,
+  block2Purpose: "TARGET_2_ZONE_MIDLINE",
+  block3Contracts: 1,
+  block3Purpose: "ENGINE9_RUNNER_HANDOFF",
+  totalContracts: 3,
+});
+
+function isStrategy1PaperDataCollectionEnabled() {
+  return process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION === "1";
+}
+
 function toNumber(value) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -306,6 +320,12 @@ function buildStrategy1Phase7Preview({
   const engine6Identity = strategy1Identity(engine6);
   const engine27Identity = strategy1Identity(engine27);
 
+  const testingDataCollectionMode =
+    isStrategy1PaperDataCollectionEnabled() &&
+    identity.laneId === STRATEGY1_LANE_ID &&
+    identity.strategyId === STRATEGY1_STRATEGY_ID &&
+    identity.setupClass === STRATEGY1_SETUP_CLASS;
+
   const identityReasons = [
     ...compareStrategy1Identity(identity, engine6Identity, "ENGINE6"),
     ...compareStrategy1Identity(identity, engine27Identity, "ENGINE27E"),
@@ -413,6 +433,33 @@ function buildStrategy1Phase7Preview({
     engine27.invalidated === true ||
     safeUpper(geometry?.candidateStatus).includes("INVALIDATED") ||
     safeUpper(geometry?.lifecycleStatus).includes("INVALIDATED");
+
+  const nonRiskGatesPass =
+    identityReasons.length === 0 &&
+    identity.laneId === STRATEGY1_LANE_ID &&
+    identity.strategyId === STRATEGY1_STRATEGY_ID &&
+    identity.setupClass === STRATEGY1_SETUP_CLASS &&
+    invalidated !== true &&
+    engine6Ready === true &&
+    geometryReady === true &&
+    geometryValid === true &&
+    target1Ready === true &&
+    target2Ready === true &&
+    runnerReady === true &&
+    engine27Ready === true;
+
+  const testingThreeContractPlanQualified =
+    testingDataCollectionMode === true &&
+    riskValidation.valid === true &&
+    nonRiskGatesPass === true;
+
+  const paperTestingContracts =
+    testingThreeContractPlanQualified
+      ? STRATEGY1_REQUESTED_CONTRACTS
+      : 0;
+
+  const testingRiskOverrideApplied =
+    testingThreeContractPlanQualified === true;
 
   const blockers = unique([
     ...identityReasons,
@@ -525,9 +572,30 @@ function buildStrategy1Phase7Preview({
         : round2(proposedContracts * riskPerContract),
     riskLimited,
 
+    productionRiskBudgetDollars:
+      config?.riskBudgetDollars ?? null,
+    productionRiskSupportedContracts:
+      riskSupportedContracts,
+    productionEstimatedRiskDollars:
+      riskPerContract == null
+        ? 0
+        : round2(proposedContracts * riskPerContract),
+    productionThreeContractPlanQualified:
+      threeContractPlanQualified,
+    productionRiskLimited:
+      riskLimited,
+
+    testingDataCollectionMode,
+    paperTestingContracts,
+    testingThreeContractPlanQualified,
+    testingRiskOverrideApplied,
+
     allocation: STRATEGY1_ALLOCATION.map((block) => ({
       ...block,
     })),
+    threeContractAllocation: {
+      ...STRATEGY1_THREE_CONTRACT_ALLOCATION,
+    },
     totalContracts:
       sizingReady ? STRATEGY1_REQUESTED_CONTRACTS : proposedContracts,
     target1Contracts: sizingReady ? 1 : 0,
@@ -563,6 +631,15 @@ function buildStrategy1Phase7Preview({
       runnerReady ? "ENGINE9_RUNNER_HANDOFF_PRESERVED" : null,
       sizingReady ? "ENGINE7A_THREE_CONTRACT_PREVIEW_READY" : null,
       riskLimited ? "ENGINE7A_THREE_CONTRACT_PLAN_RISK_LIMITED" : null,
+      testingDataCollectionMode
+        ? "ENGINE7A_PAPER_DATA_COLLECTION_MODE_ACTIVE"
+        : "ENGINE7A_PAPER_DATA_COLLECTION_MODE_OFF",
+      testingThreeContractPlanQualified
+        ? "ENGINE7A_TESTING_THREE_CONTRACT_PLAN_QUALIFIED"
+        : null,
+      testingRiskOverrideApplied
+        ? "ENGINE7A_TESTING_RISK_OVERRIDE_APPLIED"
+        : null,
       ...riskValidation.reasonCodes,
       ...blockers,
       "ENGINE7A_PRELIMINARY_SIZING_ONLY",
