@@ -498,7 +498,7 @@ function buildWaitingFor({
   ]);
 }
 
-export function buildEngine9OfficialManagementPlan({
+function buildLegacyEngine9OfficialManagementPlan({
   engine26ProposedGeometry = null,
   engine7SizingPreview = null,
   engine6PaperPermission = null,
@@ -1134,6 +1134,576 @@ const engine27DirectionMatched =
     generatedAt:
       new Date().toISOString(),
   };
+}
+
+
+const STRATEGY1_IDENTITY = Object.freeze({
+  laneId: "minute",
+  strategyId: "intraday_scalp@10m",
+  setupClass: "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
+  symbol: "ES",
+});
+
+const APPROVED_MINUTE_RUNNER_LABELS = Object.freeze([
+  "e100",
+  "e1168",
+  "e1272",
+  "e1618",
+  "e200",
+  "e2618",
+]);
+
+const REQUIRED_IDENTITY_FIELDS = Object.freeze([
+  "laneId",
+  "strategyId",
+  "candidateId",
+  "zoneId",
+  "symbol",
+  "setupClass",
+  "setupGrade",
+  "identitySetupKey",
+  "candidateIdentityVersion",
+]);
+
+function isStrategy1Phase8AInput(engine26LocationCandidate) {
+  return (
+    engine26LocationCandidate?.laneId === STRATEGY1_IDENTITY.laneId &&
+    engine26LocationCandidate?.strategyId === STRATEGY1_IDENTITY.strategyId &&
+    engine26LocationCandidate?.setupClass === STRATEGY1_IDENTITY.setupClass &&
+    engine26LocationCandidate?.symbol === STRATEGY1_IDENTITY.symbol
+  );
+}
+
+function copyIdentity(source) {
+  return Object.fromEntries(
+    REQUIRED_IDENTITY_FIELDS.map((field) => [field, source?.[field] ?? null])
+  );
+}
+
+function identityComplete(identity) {
+  return REQUIRED_IDENTITY_FIELDS.every((field) => {
+    const value = identity?.[field];
+    return value !== null && value !== undefined && String(value).trim() !== "";
+  });
+}
+
+function identityMatches(reference, source) {
+  return REQUIRED_IDENTITY_FIELDS.every(
+    (field) => exactIdentityMatch(reference?.[field], source?.[field])
+  );
+}
+
+function targetPrice(target) {
+  return toNumber(target?.price ?? target?.targetPrice);
+}
+
+function targetPurpose(target) {
+  return safeUpper(target?.purpose ?? target?.sourcePurpose);
+}
+
+function findTargetByPurpose(targets, purpose) {
+  if (!Array.isArray(targets)) return null;
+  const expected = safeUpper(purpose);
+  return targets.find((target) => targetPurpose(target) === expected) || null;
+}
+
+function findTargetBySequence(targets, sequence) {
+  if (!Array.isArray(targets)) return null;
+  return targets.find((target) => Number(target?.sequence) === sequence) || null;
+}
+
+function resolveStrategy1Targets(rawTargets) {
+  const target1 =
+    findTargetByPurpose(rawTargets, "TARGET_1_ZONE_TOUCH") ||
+    findTargetByPurpose(rawTargets, "TARGET_1") ||
+    findTargetBySequence(rawTargets, 1) ||
+    rawTargets?.[0] ||
+    null;
+
+  const target2 =
+    findTargetByPurpose(rawTargets, "TARGET_2_ZONE_MIDLINE") ||
+    findTargetByPurpose(rawTargets, "TARGET_2") ||
+    findTargetBySequence(rawTargets, 2) ||
+    rawTargets?.[1] ||
+    null;
+
+  const runnerHandoff =
+    findTargetByPurpose(rawTargets, "ENGINE9_RUNNER_HANDOFF") ||
+    null;
+
+  return { target1, target2, runnerHandoff };
+}
+
+function validRunnerHandoff(target) {
+  return (
+    targetPurpose(target) === "ENGINE9_RUNNER_HANDOFF" &&
+    target?.price === null &&
+    target?.runnerHandoffRequired === true
+  );
+}
+
+function selectMinuteRunnerTarget({ minuteFib, target2Price }) {
+  if (
+    minuteFib?.degree !== "minute" ||
+    safeUpper(minuteFib?.activeLadder) !== "EXTENSION" ||
+    minuteFib?.validation?.available !== true ||
+    minuteFib?.validation?.matches !== true ||
+    target2Price == null
+  ) {
+    return null;
+  }
+
+  for (const label of APPROVED_MINUTE_RUNNER_LABELS) {
+    const level = minuteFib?.extensions?.[label] || null;
+    const price = toNumber(level?.price);
+    if (price != null && price > target2Price) {
+      return {
+        label,
+        price: round2(price),
+        purpose: level?.purpose ?? null,
+        source: "ENGINE27B_MINUTE_EXTENSION",
+      };
+    }
+  }
+
+  return null;
+}
+
+function readThreeContractAllocation(engine7SizingPreview) {
+  const allocation =
+    engine7SizingPreview?.threeContractAllocation ||
+    engine7SizingPreview?.preliminaryAllocation ||
+    engine7SizingPreview?.contractAllocation ||
+    null;
+
+  const block1 = toNumber(
+    allocation?.block1Contracts ?? allocation?.BLOCK_1 ?? allocation?.block1
+  );
+  const block2 = toNumber(
+    allocation?.block2Contracts ?? allocation?.BLOCK_2 ?? allocation?.block2
+  );
+  const block3 = toNumber(
+    allocation?.block3Contracts ?? allocation?.BLOCK_3 ?? allocation?.block3
+  );
+
+  return { block1, block2, block3 };
+}
+
+function buildStrategy1OfficialTargets({
+  entryPrice,
+  stopDistancePoints,
+  target1Price,
+  target2Price,
+  runnerTarget,
+}) {
+  const definitions = [
+    {
+      targetId: "T1",
+      sequence: 1,
+      price: target1Price,
+      contracts: 1,
+      allocationPct: 33,
+      role: "FIRST_SCALE",
+      purpose: "TARGET_1_ZONE_TOUCH",
+      source: "ENGINE26A_TARGET_ZONE_LOW",
+      sourceTargetId: "TARGET_1",
+    },
+    {
+      targetId: "T2",
+      sequence: 2,
+      price: target2Price,
+      contracts: 1,
+      allocationPct: 33,
+      role: "SECOND_SCALE",
+      purpose: "TARGET_2_ZONE_MIDLINE",
+      source: "ENGINE26A_TARGET_ZONE_MIDLINE",
+      sourceTargetId: "TARGET_2",
+    },
+    {
+      targetId: "T3",
+      sequence: 3,
+      price: runnerTarget?.price ?? null,
+      contracts: 1,
+      allocationPct: 34,
+      role: "RUNNER_OBJECTIVE",
+      purpose: "ENGINE9_RUNNER",
+      source: runnerTarget?.source ?? "ENGINE27B_MINUTE_EXTENSION",
+      sourceTargetId: runnerTarget?.label ?? null,
+    },
+  ];
+
+  return definitions.map((target) => {
+    const distancePoints =
+      target.price == null
+        ? null
+        : round2(target.price - entryPrice);
+
+    const rMultiple =
+      distancePoints != null && stopDistancePoints > 0
+        ? round2(distancePoints / stopDistancePoints)
+        : null;
+
+    return {
+      targetId: target.targetId,
+      sequence: target.sequence,
+      sourceTargetId: target.sourceTargetId,
+      price: target.price,
+      targetPrice: target.price,
+      contracts: target.contracts,
+      distancePoints,
+      rMultiple,
+      allocationPct: target.allocationPct,
+      role: target.role,
+      purpose: target.purpose,
+      source: target.source,
+      sourcePurpose: target.purpose,
+      sourceLabel: target.sourceTargetId,
+      status: target.price == null ? "UNAVAILABLE" : "PLANNED",
+      reasonCodes: [],
+    };
+  });
+}
+
+function buildStrategy1Phase8APlan({
+  engine26LocationCandidate,
+  engine26ProposedGeometry,
+  engine7SizingPreview,
+  engine6PaperPermission,
+  engine27MinuteDecision,
+  engine27MinuteFib,
+  snapshotTime,
+}) {
+  const candidate = engine26LocationCandidate;
+  const geometry = engine26ProposedGeometry;
+  const referenceIdentity = copyIdentity(candidate);
+  const geometryIdentity = copyIdentity(geometry);
+  const sizingIdentity = copyIdentity(engine7SizingPreview);
+  const traderIdentity = copyIdentity(engine27MinuteDecision);
+
+  const blockers = [];
+  const reasonCodes = [
+    "ENGINE9_STRATEGY1_PHASE8A",
+    "OPENING_MANAGEMENT_PLAN_ONLY",
+    "NO_DYNAMIC_MANAGEMENT",
+    "NO_PERMISSION_CREATED",
+    "NO_SIZING_CREATED",
+    "NO_EXECUTION_AUTHORITY",
+    "NO_ORDER_CREATED",
+    "NO_FILL_CREATED",
+    "NO_JOURNAL_WRITE",
+  ];
+
+  const requiredIdentityCorrect =
+    referenceIdentity.laneId === STRATEGY1_IDENTITY.laneId &&
+    referenceIdentity.strategyId === STRATEGY1_IDENTITY.strategyId &&
+    referenceIdentity.setupClass === STRATEGY1_IDENTITY.setupClass &&
+    referenceIdentity.symbol === STRATEGY1_IDENTITY.symbol;
+
+  const completeIdentity = identityComplete(referenceIdentity);
+  const geometryIdentityMatched = completeIdentity && identityMatches(referenceIdentity, geometryIdentity);
+  const sizingIdentityMatched = completeIdentity && identityMatches(referenceIdentity, sizingIdentity);
+  const traderIdentityMatched = completeIdentity && identityMatches(referenceIdentity, traderIdentity);
+  const identityAgreement =
+    requiredIdentityCorrect &&
+    completeIdentity &&
+    geometryIdentityMatched &&
+    sizingIdentityMatched &&
+    traderIdentityMatched;
+
+  if (!identityAgreement) blockers.push("PIPELINE_IDENTITY_MISMATCH");
+
+  const entryPrice = toNumber(geometry?.proposedEntryPrice);
+  const stopPrice = toNumber(geometry?.proposedStopPrice);
+  const stopDistancePoints =
+    entryPrice != null && stopPrice != null
+      ? round2(Math.abs(entryPrice - stopPrice))
+      : null;
+
+  const entryValid = entryPrice != null && entryPrice > 0;
+  const stopValid =
+    stopPrice != null &&
+    stopPrice > 0 &&
+    referenceIdentity?.direction !== "SHORT" &&
+    stopPrice < entryPrice;
+
+  if (!entryValid) blockers.push("INVALID_ENTRY_GEOMETRY");
+  if (!stopValid) blockers.push("INVALID_STOP_GEOMETRY");
+
+  if (geometry?.geometryReady !== true) {
+    blockers.push("ENGINE26B_GEOMETRY_INCOMPLETE");
+  }
+
+  const targetZone = candidate?.targetZone || null;
+  const targetZoneLow = toNumber(targetZone?.low);
+  const targetZoneMidline = toNumber(targetZone?.midline);
+  if (targetZoneLow == null || targetZoneMidline == null) {
+    blockers.push("TARGET_ZONE_UNAVAILABLE");
+  }
+
+  const { target1, target2, runnerHandoff } = resolveStrategy1Targets(
+    geometry?.proposedTargets
+  );
+  const target1Price = targetPrice(target1);
+  const target2Price = targetPrice(target2);
+
+  if (target1Price == null) blockers.push("TARGET_1_MISSING");
+  if (target2Price == null) blockers.push("TARGET_2_MISSING");
+
+  if (
+    target1Price != null &&
+    targetZoneLow != null &&
+    target1Price !== targetZoneLow
+  ) {
+    blockers.push("TARGET_1_CHANGED");
+  }
+
+  if (
+    target2Price != null &&
+    targetZoneMidline != null &&
+    target2Price !== targetZoneMidline
+  ) {
+    blockers.push("TARGET_2_CHANGED");
+  }
+
+  if (!validRunnerHandoff(runnerHandoff)) {
+    blockers.push("ENGINE26B_RUNNER_HANDOFF_MISSING");
+  }
+
+  const allocation = readThreeContractAllocation(engine7SizingPreview);
+  const threeContractPlanQualified =
+    engine7SizingPreview?.threeContractPlanQualified === true;
+  const allocationValid =
+    allocation.block1 === 1 &&
+    allocation.block2 === 1 &&
+    allocation.block3 === 1;
+
+  if (!threeContractPlanQualified) {
+    blockers.push("ENGINE7A_THREE_CONTRACT_PLAN_NOT_QUALIFIED");
+  }
+  if (!allocationValid) blockers.push("ENGINE7A_ALLOCATION_INVALID");
+
+  const planningAllowed = engine6PaperPermission?.planningAllowed === true;
+  if (!planningAllowed) blockers.push("ENGINE6_PLANNING_PERMISSION_REQUIRED");
+
+  const readiness = engine27MinuteDecision?.readiness || {};
+  const invalidated = readiness.invalidated === true;
+  if (invalidated) blockers.push("CANDIDATE_INVALIDATED");
+  if (readiness.reactionReady !== true) blockers.push("ENGINE27_REACTION_NOT_READY");
+  if (readiness.participationReady !== true) blockers.push("ENGINE27_PARTICIPATION_NOT_READY");
+  if (readiness.permissionReady !== true) blockers.push("ENGINE27_PERMISSION_NOT_READY");
+  if (readiness.plannerReady !== true) blockers.push("ENGINE27_PLANNER_NOT_READY");
+
+  const runnerTarget = selectMinuteRunnerTarget({
+    minuteFib: engine27MinuteFib,
+    target2Price: targetZoneMidline,
+  });
+  const runnerTargetPrice = runnerTarget?.price ?? null;
+  const runnerTargetStatus = runnerTarget
+    ? "RUNNER_TARGET_SELECTED"
+    : "RUNNER_TARGET_UNAVAILABLE";
+  if (!runnerTarget) blockers.push("RUNNER_TARGET_UNAVAILABLE");
+
+  const officialTargets = buildStrategy1OfficialTargets({
+    entryPrice,
+    stopDistancePoints,
+    target1Price: targetZoneLow,
+    target2Price: targetZoneMidline,
+    runnerTarget,
+  });
+
+  const openingManagementPlan = {
+    planType: "OPENING_OFFICIAL_MANAGEMENT_PLAN",
+    contracts: 3,
+    officialEntryPrice: entryPrice,
+    officialStopPrice: stopPrice,
+    sharedProtectiveStopPrice: stopPrice,
+    blocks: [
+      {
+        blockId: "BLOCK_1",
+        contractId: "CONTRACT_1",
+        contracts: 1,
+        purpose: "TARGET_1_ZONE_TOUCH",
+        targetId: "T1",
+        targetPrice: targetZoneLow,
+      },
+      {
+        blockId: "BLOCK_2",
+        contractId: "CONTRACT_2",
+        contracts: 1,
+        purpose: "TARGET_2_ZONE_MIDLINE",
+        targetId: "T2",
+        targetPrice: targetZoneMidline,
+      },
+      {
+        blockId: "BLOCK_3",
+        contractId: "CONTRACT_3",
+        contracts: 1,
+        purpose: "ENGINE9_RUNNER",
+        targetId: "T3",
+        targetPrice: runnerTargetPrice,
+      },
+    ],
+    totalContracts: 3,
+    allocationValid,
+    frozenAtOpening: false,
+    dynamicManagementImplemented: false,
+  };
+
+  const threeBlockManagement = {
+    enabled: officialTargets.every((target) => target.price != null),
+    allocationMode: "EXACT_CONTRACTS",
+    totalContracts: 3,
+    totalAllocationPct: 100,
+    blocks: openingManagementPlan.blocks.map((block, index) => ({
+      ...block,
+      allocationPct: TARGET_ALLOCATIONS[index],
+      exitAtTargetId: block.targetId,
+      afterExitAction:
+        index === 0
+          ? "MOVE_STOP_TO_BREAKEVEN"
+          : index === 1
+          ? "ARM_RUNNER_MANAGEMENT"
+          : "CLOSE_REMAINDER",
+      status: block.targetPrice == null ? "UNAVAILABLE" : "PLANNED",
+    })),
+    status: allocationValid
+      ? "THREE_BLOCK_PLAN_AVAILABLE"
+      : "WAITING_FOR_EXACT_THREE_CONTRACT_ALLOCATION",
+  };
+
+  const runnerPlan = {
+    enabled: runnerTarget != null,
+    blockId: "BLOCK_3",
+    contracts: 1,
+    allocationPct: 34,
+    purpose: "ENGINE9_RUNNER",
+    runnerTargetPrice,
+    runnerTargetStatus,
+    targetSource: runnerTarget?.source ?? "ENGINE27B_MINUTE_EXTENSION",
+    sourceTargetId: runnerTarget?.label ?? null,
+    activationCondition: {
+      type: "TARGET_FILLED",
+      targetId: "T2",
+    },
+    initialProtection: {
+      type: "BREAKEVEN_OR_BETTER",
+      referencePrice: entryPrice,
+    },
+    trailing: {
+      enabled: false,
+      type: "NOT_CONFIGURED",
+      value: null,
+    },
+    dynamicManagementImplemented: false,
+    status: runnerTargetStatus,
+  };
+
+  const uniqueBlockers = unique(blockers);
+  const managementReady = uniqueBlockers.length === 0;
+
+  let planStatus = "OFFICIAL_PLAN_READY";
+  if (!identityAgreement) planStatus = "IDENTITY_MISMATCH";
+  else if (invalidated) planStatus = "MANAGEMENT_BLOCKED";
+  else if (!entryValid) planStatus = "INVALID_ENTRY_GEOMETRY";
+  else if (!stopValid) planStatus = "INVALID_STOP_GEOMETRY";
+  else if (!runnerTarget) planStatus = "WAITING_FOR_RUNNER_TARGET";
+  else if (!managementReady) planStatus = "WAITING_FOR_UPSTREAM_CONFIRMATION";
+
+  const planId =
+    identityAgreement && entryValid && stopValid && runnerTarget
+      ? buildPlanId({
+          candidateId: referenceIdentity.candidateId,
+          zoneId: referenceIdentity.zoneId,
+          strategyId: referenceIdentity.strategyId,
+          direction: "LONG",
+          entryPrice,
+          stopPrice,
+          targets: officialTargets,
+        })
+      : null;
+
+  return {
+    active: candidate != null,
+    engine: ENGINE,
+    contractVersion: CONTRACT_VERSION,
+    phase: "PHASE_8A",
+    mode: "PAPER_MANAGEMENT_PLAN",
+    planId,
+    ...referenceIdentity,
+    direction: candidate?.direction ?? geometry?.direction ?? null,
+    snapshotTime: candidate?.snapshotTime ?? geometry?.snapshotTime ?? snapshotTime ?? null,
+    tradeId: null,
+    idempotencyKey: null,
+    orderId: null,
+    planStatus,
+    managementReady,
+    official: managementReady,
+    geometryValidated: entryValid && stopValid,
+    openingManagementPlan,
+    officialEntryPrice: entryPrice,
+    officialStopPrice: stopPrice,
+    officialStopDistancePoints: stopDistancePoints,
+    officialTargets,
+    threeBlockManagement,
+    runnerPlan,
+    runnerTargetPrice,
+    runnerTargetStatus,
+    targetSource: runnerTarget?.source ?? "NONE",
+    identityValidation: {
+      requiredIdentityCorrect,
+      completeIdentity,
+      geometryIdentityMatched,
+      sizingIdentityMatched,
+      traderIdentityMatched,
+      completeIdentityAgreement: identityAgreement,
+    },
+    upstreamState: {
+      planningAllowed,
+      geometryReady: geometry?.geometryReady === true,
+      reactionReady: readiness.reactionReady === true,
+      participationReady: readiness.participationReady === true,
+      permissionReady: readiness.permissionReady === true,
+      plannerReady: readiness.plannerReady === true,
+      invalidated,
+      threeContractPlanQualified,
+      allocation,
+      allocationValid,
+      runnerHandoffAccepted: validRunnerHandoff(runnerHandoff),
+    },
+    blockers: uniqueBlockers,
+    warnings: [],
+    reasonCodes: unique([
+      ...reasonCodes,
+      identityAgreement ? "PIPELINE_IDENTITY_MATCHED" : "PIPELINE_IDENTITY_MISMATCH",
+      validRunnerHandoff(runnerHandoff)
+        ? "ENGINE26B_NULL_RUNNER_HANDOFF_ACCEPTED"
+        : "ENGINE26B_RUNNER_HANDOFF_REQUIRED",
+      target1Price === targetZoneLow ? "TARGET_1_PRESERVED" : null,
+      target2Price === targetZoneMidline ? "TARGET_2_PRESERVED" : null,
+      runnerTarget ? "ENGINE27B_MINUTE_RUNNER_SELECTED" : "RUNNER_TARGET_UNAVAILABLE",
+      allocationValid ? "ENGINE7A_EXACT_1_1_1_ALLOCATION" : "ENGINE7A_ALLOCATION_INVALID",
+      managementReady ? "ENGINE9_OFFICIAL_PLAN_READY" : "ENGINE9_MANAGEMENT_NOT_READY",
+    ]),
+    noPermissionCreated: true,
+    noSizingCreated: true,
+    noQuantityCreated: true,
+    noTradeCreated: true,
+    noOrderCreated: true,
+    noBrokerOrder: true,
+    noExecution: true,
+    noJournalWrite: true,
+    dynamicManagementImplemented: false,
+    phase8BImplemented: false,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export function buildEngine9OfficialManagementPlan(inputs = {}) {
+  if (isStrategy1Phase8AInput(inputs.engine26LocationCandidate)) {
+    return buildStrategy1Phase8APlan(inputs);
+  }
+
+  return buildLegacyEngine9OfficialManagementPlan(inputs);
 }
 
 export default buildEngine9OfficialManagementPlan;
