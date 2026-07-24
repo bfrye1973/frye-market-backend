@@ -9177,6 +9177,9 @@ scalp.engine9OfficialManagementPlan =
     engine26ProposedGeometry:
       scalp.engine26ProposedGeometry || null,
 
+    engine26LocationCandidate:
+      scalp.engine26LocationCandidate || null,
+
     engine7SizingPreview:
       scalp.engine7SizingPreview || null,
 
@@ -9192,6 +9195,8 @@ scalp.engine9OfficialManagementPlan =
       result?.now ||
       nowIso(),
   });
+
+    
 
 scalp.engine7PositionSizing =
   buildEngine7FinalPositionSizing({
