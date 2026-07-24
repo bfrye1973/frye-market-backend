@@ -59,6 +59,75 @@ function isStrategy1PaperDataCollectionEnabled() {
   return process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION === "1";
 }
 
+function collectExplicitIdentityValues(sources, field) {
+  return sources
+    .map((source) => normalizeIdentityValue(source?.[field]))
+    .filter((value) => value != null);
+}
+
+function strategy1ScopeSources({ geometry, engine6, engine27 }) {
+  return [geometry, engine6, engine27].filter(
+    (source) => source && typeof source === "object"
+  );
+}
+
+function hasOnlyCompatibleStrategy1ScopeValues(sources) {
+  const strategyIds = collectExplicitIdentityValues(
+    sources,
+    "strategyId"
+  );
+  const laneIds = collectExplicitIdentityValues(sources, "laneId");
+  const setupClasses = collectExplicitIdentityValues(
+    sources,
+    "setupClass"
+  );
+
+  return (
+    strategyIds.includes(STRATEGY1_STRATEGY_ID) &&
+    strategyIds.every(
+      (value) => value === STRATEGY1_STRATEGY_ID
+    ) &&
+    laneIds.every((value) => value === STRATEGY1_LANE_ID) &&
+    setupClasses.every(
+      (value) => value === STRATEGY1_SETUP_CLASS
+    )
+  );
+}
+
+function shouldPublishStrategy1Contract({
+  geometry,
+  engine6,
+  engine27,
+}) {
+  if (
+    safeUpper(geometry?.setupClass) ===
+    STRATEGY1_SETUP_CLASS
+  ) {
+    return true;
+  }
+
+  if (!isStrategy1PaperDataCollectionEnabled()) {
+    return false;
+  }
+
+  return hasOnlyCompatibleStrategy1ScopeValues(
+    strategy1ScopeSources({ geometry, engine6, engine27 })
+  );
+}
+
+function isStrategy1TestingPublicationScope({
+  geometry,
+  engine6,
+  engine27,
+}) {
+  return (
+    isStrategy1PaperDataCollectionEnabled() &&
+    hasOnlyCompatibleStrategy1ScopeValues(
+      strategy1ScopeSources({ geometry, engine6, engine27 })
+    )
+  );
+}
+
 function toNumber(value) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -321,15 +390,26 @@ function buildStrategy1Phase7Preview({
   const engine27Identity = strategy1Identity(engine27);
 
   const testingDataCollectionMode =
-    isStrategy1PaperDataCollectionEnabled() &&
-    identity.laneId === STRATEGY1_LANE_ID &&
-    identity.strategyId === STRATEGY1_STRATEGY_ID &&
-    identity.setupClass === STRATEGY1_SETUP_CLASS;
+    isStrategy1TestingPublicationScope({
+      geometry,
+      engine6,
+      engine27,
+    });
 
   const identityReasons = [
     ...compareStrategy1Identity(identity, engine6Identity, "ENGINE6"),
     ...compareStrategy1Identity(identity, engine27Identity, "ENGINE27E"),
   ];
+
+  if (!geometry?.snapshotTime) {
+    identityReasons.push("ENGINE26B_SNAPSHOT_TIME_MISSING");
+  }
+
+  if (geometry?.candidateIdentityPreserved !== true) {
+    identityReasons.push(
+      "ENGINE26B_CANDIDATE_IDENTITY_NOT_PRESERVED"
+    );
+  }
 
   if (identity.laneId !== STRATEGY1_LANE_ID) {
     identityReasons.push("ENGINE7A_STRATEGY1_LANE_MISMATCH");
@@ -595,6 +675,16 @@ function buildStrategy1Phase7Preview({
     })),
     threeContractAllocation: {
       ...STRATEGY1_THREE_CONTRACT_ALLOCATION,
+      block1Contracts:
+        testingThreeContractPlanQualified ? 1 : 0,
+      block2Contracts:
+        testingThreeContractPlanQualified ? 1 : 0,
+      block3Contracts:
+        testingThreeContractPlanQualified ? 1 : 0,
+      totalContracts:
+        testingThreeContractPlanQualified
+          ? STRATEGY1_REQUESTED_CONTRACTS
+          : 0,
     },
     totalContracts:
       sizingReady ? STRATEGY1_REQUESTED_CONTRACTS : proposedContracts,
@@ -1034,8 +1124,11 @@ export function buildEngine7ProposedSizingPreview({
   }
 
   if (
-    safeUpper(geometry?.setupClass) ===
-    STRATEGY1_SETUP_CLASS
+    shouldPublishStrategy1Contract({
+      geometry,
+      engine6,
+      engine27,
+    })
   ) {
     return buildStrategy1Phase7Preview({
       geometry,
