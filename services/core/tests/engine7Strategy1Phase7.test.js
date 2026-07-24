@@ -1,6 +1,28 @@
-import test from "node:test";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { buildEngine7ProposedSizingPreview } from "../logic/engine7/v2/buildProposedSizingPreview.js";
+
+const ORIGINAL_DATA_COLLECTION_FLAG =
+  process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION;
+
+afterEach(() => {
+  if (ORIGINAL_DATA_COLLECTION_FLAG === undefined) {
+    delete process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION;
+  } else {
+    process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION =
+      ORIGINAL_DATA_COLLECTION_FLAG;
+  }
+});
+
+function setDataCollectionFlag(value) {
+  if (value === undefined) {
+    delete process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION;
+    return;
+  }
+
+  process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION = String(value);
+}
+
 
 const IDENTITY = Object.freeze({
   laneId: "minute",
@@ -266,6 +288,313 @@ test("creates no permission, geometry, management, execution, order, fill, journ
   assert.equal(output.noBrokerOrder, true);
   assert.equal(output.noExecution, true);
   assert.equal(output.executableSizing, false);
+  assert.equal(output.tradeId, null);
+  assert.equal(output.idempotencyKey, null);
+});
+
+
+test("paper data-collection flag missing defaults off", () => {
+  setDataCollectionFlag(undefined);
+  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
+
+  assert.equal(output.testingDataCollectionMode, false);
+  assert.equal(output.paperTestingContracts, 0);
+  assert.equal(output.testingThreeContractPlanQualified, false);
+  assert.equal(output.testingRiskOverrideApplied, false);
+});
+
+test("paper data-collection flag 0 remains off", () => {
+  setDataCollectionFlag("0");
+  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
+
+  assert.equal(output.testingDataCollectionMode, false);
+  assert.equal(output.paperTestingContracts, 0);
+  assert.equal(output.testingThreeContractPlanQualified, false);
+  assert.equal(output.testingRiskOverrideApplied, false);
+});
+
+test("paper data-collection flag 1 activates only exact Minute Strategy 1", () => {
+  setDataCollectionFlag("1");
+  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
+
+  assert.equal(output.testingDataCollectionMode, true);
+  assert.equal(output.paperTestingContracts, 3);
+  assert.equal(output.testingThreeContractPlanQualified, true);
+  assert.equal(output.testingRiskOverrideApplied, true);
+});
+
+test("production aliases mirror the unchanged production risk output", () => {
+  setDataCollectionFlag("1");
+  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
+
+  assert.equal(output.productionRiskBudgetDollars, output.riskBudgetDollars);
+  assert.equal(
+    output.productionRiskSupportedContracts,
+    output.riskSupportedContracts
+  );
+  assert.equal(
+    output.productionEstimatedRiskDollars,
+    output.estimatedRiskDollars
+  );
+  assert.equal(
+    output.productionThreeContractPlanQualified,
+    output.threeContractPlanQualified
+  );
+  assert.equal(output.productionRiskLimited, output.riskLimited);
+});
+
+test("testing mode permits exactly three when production dollar risk supports fewer than three", () => {
+  setDataCollectionFlag("1");
+  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
+
+  assert.equal(output.riskSupportedContracts, 1);
+  assert.equal(output.proposedContracts, 1);
+  assert.equal(output.threeContractPlanQualified, false);
+  assert.equal(output.riskLimited, true);
+
+  assert.equal(output.paperTestingContracts, 3);
+  assert.equal(output.testingThreeContractPlanQualified, true);
+  assert.equal(output.testingRiskOverrideApplied, true);
+});
+
+test("testing mode may bypass the production maximum-contract cap only", () => {
+  setDataCollectionFlag("1");
+  const output = build({
+    riskOverride: {
+      riskBudgetDollars: 5000,
+      maximumContracts: 1,
+    },
+  });
+
+  assert.equal(output.riskSupportedContracts, 1);
+  assert.equal(output.proposedContracts, 1);
+  assert.equal(output.threeContractPlanQualified, false);
+  assert.equal(output.productionRiskLimited, true);
+
+  assert.equal(output.paperTestingContracts, 3);
+  assert.equal(output.testingThreeContractPlanQualified, true);
+  assert.equal(output.testingRiskOverrideApplied, true);
+});
+
+test("testing mode does not alter any existing production sizing field", () => {
+  setDataCollectionFlag("0");
+  const productionOnly = build({ riskOverride: { riskBudgetDollars: 250 } });
+
+  setDataCollectionFlag("1");
+  const withTesting = build({ riskOverride: { riskBudgetDollars: 250 } });
+
+  const fields = [
+    "riskBudgetDollars",
+    "riskSupportedContracts",
+    "estimatedRiskDollars",
+    "requestedContracts",
+    "proposedContracts",
+    "threeContractPlanQualified",
+    "riskLimited",
+    "sizingReady",
+    "sizingState",
+    "status",
+  ];
+
+  for (const field of fields) {
+    assert.deepEqual(withTesting[field], productionOnly[field], field);
+  }
+});
+
+test("testing mode cannot bypass identity mismatch", () => {
+  setDataCollectionFlag("1");
+  const output = build({
+    permissionOverride: { candidateId: "OTHER-CANDIDATE" },
+    riskOverride: { riskBudgetDollars: 250 },
+  });
+
+  assert.equal(output.testingDataCollectionMode, true);
+  assert.equal(output.paperTestingContracts, 0);
+  assert.equal(output.testingThreeContractPlanQualified, false);
+  assert.equal(output.testingRiskOverrideApplied, false);
+  assert.equal(output.blockers.includes("ENGINE6_CANDIDATEID_MISMATCH"), true);
+});
+
+test("testing mode cannot bypass invalidation", () => {
+  setDataCollectionFlag("1");
+  const output = build({
+    readinessOverride: { invalidated: true },
+    riskOverride: { riskBudgetDollars: 250 },
+  });
+
+  assert.equal(output.paperTestingContracts, 0);
+  assert.equal(output.testingThreeContractPlanQualified, false);
+  assert.equal(output.blockers.includes("ENGINE27E_CANDIDATE_INVALIDATED"), true);
+});
+
+test("testing mode cannot bypass Engine 6 planning permission", () => {
+  setDataCollectionFlag("1");
+  const output = build({
+    permissionOverride: { planningAllowed: false },
+    riskOverride: { riskBudgetDollars: 250 },
+  });
+
+  assert.equal(output.paperTestingContracts, 0);
+  assert.equal(output.testingThreeContractPlanQualified, false);
+  assert.equal(output.blockers.includes("ENGINE6_PLANNING_PERMISSION_REQUIRED"), true);
+});
+
+test("testing mode cannot bypass Engine 26B geometry readiness", () => {
+  setDataCollectionFlag("1");
+  const output = build({
+    geometryOverride: { geometryReady: false },
+    riskOverride: { riskBudgetDollars: 250 },
+  });
+
+  assert.equal(output.paperTestingContracts, 0);
+  assert.equal(output.testingThreeContractPlanQualified, false);
+  assert.equal(output.blockers.includes("ENGINE26B_GEOMETRY_READY_REQUIRED"), true);
+});
+
+test("testing mode cannot bypass Engine 27E readiness", () => {
+  setDataCollectionFlag("1");
+  const output = build({
+    readinessOverride: { plannerReady: false },
+    riskOverride: { riskBudgetDollars: 250 },
+  });
+
+  assert.equal(output.paperTestingContracts, 0);
+  assert.equal(output.testingThreeContractPlanQualified, false);
+  assert.equal(output.blockers.includes("ENGINE27E_PLANNER_READY_REQUIRED"), true);
+});
+
+test("testing mode cannot bypass malformed targets or runner handoff", () => {
+  setDataCollectionFlag("1");
+  const output = build({
+    geometryOverride: {
+      proposedTargets: [
+        { price: 6004, purpose: "TARGET_1_ZONE_TOUCH" },
+        { price: null, purpose: "TARGET_2_ZONE_MIDLINE" },
+        { price: 6010, purpose: "ENGINE9_RUNNER_HANDOFF" },
+      ],
+    },
+    riskOverride: { riskBudgetDollars: 250 },
+  });
+
+  assert.equal(output.paperTestingContracts, 0);
+  assert.equal(output.testingThreeContractPlanQualified, false);
+  assert.equal(output.blockers.includes("ENGINE26B_TARGET2_REQUIRED"), true);
+  assert.equal(output.blockers.includes("ENGINE26B_RUNNER_HANDOFF_REQUIRED"), true);
+});
+
+test("allocation and compatibility object remain exactly 1 plus 1 plus 1", () => {
+  setDataCollectionFlag("1");
+  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
+
+  assert.deepEqual(output.allocation, [
+    { contractBlock: 1, contracts: 1, purpose: "TARGET_1_ZONE_TOUCH" },
+    { contractBlock: 2, contracts: 1, purpose: "TARGET_2_ZONE_MIDLINE" },
+    { contractBlock: 3, contracts: 1, purpose: "ENGINE9_RUNNER_HANDOFF" },
+  ]);
+
+  assert.deepEqual(output.threeContractAllocation, {
+    block1Contracts: 1,
+    block1Purpose: "TARGET_1_ZONE_TOUCH",
+    block2Contracts: 1,
+    block2Purpose: "TARGET_2_ZONE_MIDLINE",
+    block3Contracts: 1,
+    block3Purpose: "ENGINE9_RUNNER_HANDOFF",
+    totalContracts: 3,
+  });
+
+  assert.equal(output.proposedTargets[2].price, null);
+});
+
+test("flag off restores production control immediately", () => {
+  setDataCollectionFlag("1");
+  const testing = build({ riskOverride: { riskBudgetDollars: 250 } });
+  assert.equal(testing.paperTestingContracts, 3);
+
+  setDataCollectionFlag("0");
+  const production = build({ riskOverride: { riskBudgetDollars: 250 } });
+
+  assert.equal(production.testingDataCollectionMode, false);
+  assert.equal(production.paperTestingContracts, 0);
+  assert.equal(production.testingThreeContractPlanQualified, false);
+  assert.equal(production.testingRiskOverrideApplied, false);
+  assert.equal(production.proposedContracts, 1);
+  assert.equal(production.threeContractPlanQualified, false);
+});
+
+test("flag 1 never affects Subminute or other strategies", () => {
+  setDataCollectionFlag("1");
+
+  const subminute = buildEngine7ProposedSizingPreview({
+    engine26ProposedGeometry: {
+      ...geometry(),
+      laneId: "subminute",
+      strategyId: "subminute_scalp@10m",
+      setupClass: "SUBMINUTE_W3_CONTINUATION",
+      setupType: "SUBMINUTE_W3_CONTINUATION",
+    },
+    engine6PaperPermission: null,
+    engine27MinuteReadiness: null,
+    riskConfig: risk(),
+  });
+
+  const otherStrategy = buildEngine7ProposedSizingPreview({
+    engine26ProposedGeometry: {
+      candidateId: "OTHER-C",
+      zoneId: "OTHER-Z",
+      strategyId: "minor_swing@1h",
+      symbol: "ES",
+      direction: "LONG",
+      setupType: "OTHER_SETUP",
+      setupClass: "OTHER_SETUP",
+      snapshotTime: "2026-07-23T12:00:00.000Z",
+      candidateIdentityPreserved: true,
+      proposedEntryPrice: 6000,
+      proposedStopPrice: 5998,
+      proposedStopDistancePoints: 2,
+      proposedTargets: [{ price: 6004 }],
+    },
+    engine6PaperPermission: { decision: "PAPER_ALLOW", allowed: true },
+    engine27MinuteReadiness: { decisionState: "READY", ready: true },
+    riskConfig: risk(),
+  });
+
+  for (const output of [subminute, otherStrategy]) {
+    assert.equal(output.testingDataCollectionMode, undefined);
+    assert.equal(output.paperTestingContracts, undefined);
+    assert.equal(output.testingThreeContractPlanQualified, undefined);
+    assert.equal(output.testingRiskOverrideApplied, undefined);
+    assert.equal(output.threeContractAllocation, undefined);
+  }
+});
+
+test("testing publication mutates no inputs and creates no downstream authority", () => {
+  setDataCollectionFlag("1");
+
+  const g = geometry();
+  const p = permission();
+  const r = readiness();
+  const c = risk({ riskBudgetDollars: 250 });
+  const before = JSON.stringify({ g, p, r, c });
+
+  const output = buildEngine7ProposedSizingPreview({
+    engine26ProposedGeometry: g,
+    engine6PaperPermission: p,
+    engine27MinuteReadiness: r,
+    riskConfig: c,
+  });
+
+  assert.equal(JSON.stringify({ g, p, r, c }), before);
+  assert.equal(output.paperTestingContracts, 3);
+  assert.equal(output.executableSizing, false);
+  assert.equal(output.noPermissionCreated, true);
+  assert.equal(output.noOfficialPlanCreated, true);
+  assert.equal(output.noManagementCreated, true);
+  assert.equal(output.noRunnerTargetCreated, true);
+  assert.equal(output.noOrderCreated, true);
+  assert.equal(output.noFillCreated, true);
+  assert.equal(output.noJournalEventCreated, true);
+  assert.equal(output.noBrokerOrder, true);
+  assert.equal(output.noExecution, true);
   assert.equal(output.tradeId, null);
   assert.equal(output.idempotencyKey, null);
 });
