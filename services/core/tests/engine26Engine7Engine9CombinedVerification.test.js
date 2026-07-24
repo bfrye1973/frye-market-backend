@@ -218,6 +218,44 @@ test("combined Strategy 1 pipeline becomes ready without execution authority", (
 
   const plan = buildEngine9Plan(geometry, sizing);
 
+console.log(
+  "\n=== COMBINED ENGINE 9 RESULT ==="
+);
+
+console.dir(
+  {
+    planStatus:
+      plan?.planStatus,
+
+    managementReady:
+      plan?.managementReady,
+
+    blockers:
+      plan?.blockers,
+
+    waitingFor:
+      plan?.waitingFor,
+
+    reasonCodes:
+      plan?.reasonCodes,
+
+    warnings:
+      plan?.warnings,
+
+    upstreamState:
+      plan?.upstreamState,
+
+    officialTargets:
+      plan?.officialTargets,
+
+    openingManagementPlan:
+      plan?.openingManagementPlan,
+  },
+  {
+    depth: null,
+  }
+);
+
   assert.equal(plan.managementReady, true);
   assert.equal(plan.planStatus, "OFFICIAL_PLAN_READY");
   assert.equal(plan.officialTargets[0].price, 7504);
