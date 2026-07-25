@@ -1470,19 +1470,65 @@ function buildStrategy1Phase8APlan({
   }
 
   const allocation = readThreeContractAllocation(engine7SizingPreview);
-  const threeContractPlanQualified =
-    engine7SizingPreview?.threeContractPlanQualified === true;
+  const threeContractAllocation = {
+    block1Contracts: allocation.block1,
+    block2Contracts: allocation.block2,
+    block3Contracts: allocation.block3,
+  };
   const allocationValid =
     allocation.block1 === 1 &&
     allocation.block2 === 1 &&
     allocation.block3 === 1;
 
-  if (!threeContractPlanQualified) {
-    blockers.push("ENGINE7A_THREE_CONTRACT_PLAN_NOT_QUALIFIED");
-  }
-  if (!allocationValid) blockers.push("ENGINE7A_ALLOCATION_INVALID");
+  // Preserve Engine 7A production-risk truth exactly. Engine 9 does not
+  // reinterpret, recalculate, or convert these values into approval.
+  const productionRiskBudgetDollars =
+    toNumber(engine7SizingPreview?.productionRiskBudgetDollars);
+  const productionRiskSupportedContracts =
+    toNumber(engine7SizingPreview?.productionRiskSupportedContracts);
+  const productionEstimatedRiskDollars =
+    toNumber(engine7SizingPreview?.productionEstimatedRiskDollars);
+  const productionThreeContractPlanQualified =
+    engine7SizingPreview?.productionThreeContractPlanQualified === true
+      ? true
+      : engine7SizingPreview?.productionThreeContractPlanQualified === false
+      ? false
+      : null;
+  const productionRiskLimited =
+    engine7SizingPreview?.productionRiskLimited === true
+      ? true
+      : engine7SizingPreview?.productionRiskLimited === false
+      ? false
+      : null;
 
-  const planningAllowed = engine6PaperPermission?.planningAllowed === true;
+  // Testing qualification is explicit and may never be inferred from the
+  // requested size, allocation shape, environment, or production-risk state.
+  const testingDataCollectionMode =
+    engine7SizingPreview?.testingDataCollectionMode === true;
+  const testingRiskOverrideApplied =
+    engine7SizingPreview?.testingRiskOverrideApplied === true;
+  const paperTestingContracts =
+    toNumber(engine7SizingPreview?.paperTestingContracts);
+  const testingThreeContractPlanQualified =
+    engine7SizingPreview?.testingThreeContractPlanQualified === true;
+
+  const explicitTestingContractValid =
+    testingDataCollectionMode &&
+    testingRiskOverrideApplied &&
+    testingThreeContractPlanQualified &&
+    paperTestingContracts === 3 &&
+    allocationValid;
+
+  const productionAllocationContractValid =
+    productionThreeContractPlanQualified &&
+    allocationValid;
+
+  const engine6Decision = safeUpper(engine6PaperPermission?.decision);
+  const planningAllowed =
+    engine6PaperPermission?.planningAllowed === true &&
+    engine6PaperPermission?.allowed === true &&
+    VALID_PERMISSION_DECISIONS.has(engine6Decision);
+
   if (!planningAllowed) blockers.push("ENGINE6_PLANNING_PERMISSION_REQUIRED");
 
   const readiness = engine27MinuteDecision?.readiness || {};
@@ -1598,8 +1644,48 @@ function buildStrategy1Phase8APlan({
     status: runnerTargetStatus,
   };
 
-  const uniqueBlockers = unique(blockers);
-  const managementReady = uniqueBlockers.length === 0;
+  // Non-risk gates are the existing identity, geometry, permission,
+  // readiness, target, runner, and invalidation gates. Testing may bypass
+  // only production risk/contract limits, never these gates.
+  const nonRiskBlockers = unique(blockers);
+  const nonRiskGatesPassed = nonRiskBlockers.length === 0;
+
+  const testingAllocationAccepted =
+    explicitTestingContractValid &&
+    nonRiskGatesPassed;
+
+  const productionAllocationAccepted =
+    testingAllocationAccepted !== true &&
+    productionAllocationContractValid &&
+    nonRiskGatesPassed;
+
+  const allocationQualificationSource =
+    testingAllocationAccepted
+      ? "ENGINE7A_TESTING_DATA_COLLECTION"
+      : productionAllocationAccepted
+      ? "ENGINE7A_PRODUCTION_RISK_APPROVAL"
+      : null;
+
+  const qualificationBlockers = [];
+  if (!allocationValid) {
+    qualificationBlockers.push("ENGINE7A_ALLOCATION_INVALID");
+  }
+  if (
+    !explicitTestingContractValid &&
+    !productionAllocationContractValid
+  ) {
+    qualificationBlockers.push(
+      "ENGINE7A_THREE_CONTRACT_PLAN_NOT_QUALIFIED"
+    );
+  }
+
+  const uniqueBlockers = unique([
+    ...nonRiskBlockers,
+    ...qualificationBlockers,
+  ]);
+  const managementReady =
+    allocationQualificationSource != null &&
+    uniqueBlockers.length === 0;
 
   let planStatus = "OFFICIAL_PLAN_READY";
   if (!identityAgreement) planStatus = "IDENTITY_MISMATCH";
@@ -1665,11 +1751,30 @@ function buildStrategy1Phase8APlan({
       permissionReady: readiness.permissionReady === true,
       plannerReady: readiness.plannerReady === true,
       invalidated,
-      threeContractPlanQualified,
+      engine6Decision,
       allocation,
       allocationValid,
+      testingContractValid: explicitTestingContractValid,
+      productionAllocationContractValid,
+      testingAllocationAccepted,
+      productionAllocationAccepted,
+      allocationQualificationSource,
       runnerHandoffAccepted: validRunnerHandoff(runnerHandoff),
     },
+    testingDataCollectionMode,
+    testingRiskOverrideApplied,
+    paperTestingContracts,
+    testingThreeContractPlanQualified,
+    testingAllocationAccepted,
+    threeContractAllocation,
+    allocationQualificationSource,
+
+    productionRiskBudgetDollars,
+    productionRiskSupportedContracts,
+    productionEstimatedRiskDollars,
+    productionThreeContractPlanQualified,
+    productionRiskLimited,
+
     blockers: uniqueBlockers,
     warnings: [],
     reasonCodes: unique([
@@ -1682,6 +1787,13 @@ function buildStrategy1Phase8APlan({
       target2Price === targetZoneMidline ? "TARGET_2_PRESERVED" : null,
       runnerTarget ? "ENGINE27B_MINUTE_RUNNER_SELECTED" : "RUNNER_TARGET_UNAVAILABLE",
       allocationValid ? "ENGINE7A_EXACT_1_1_1_ALLOCATION" : "ENGINE7A_ALLOCATION_INVALID",
+      testingAllocationAccepted
+        ? "ENGINE7A_TESTING_ALLOCATION_ACCEPTED"
+        : "ENGINE7A_TESTING_ALLOCATION_NOT_ACCEPTED",
+      productionAllocationAccepted
+        ? "ENGINE7A_PRODUCTION_ALLOCATION_ACCEPTED"
+        : null,
+      allocationQualificationSource,
       managementReady ? "ENGINE9_OFFICIAL_PLAN_READY" : "ENGINE9_MANAGEMENT_NOT_READY",
     ]),
     noPermissionCreated: true,
