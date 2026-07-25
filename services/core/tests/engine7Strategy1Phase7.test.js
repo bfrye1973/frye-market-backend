@@ -171,8 +171,6 @@ const waitingCases = [
   ["candidate invalidation", { readinessOverride: { invalidated: true } }, "ENGINE27E_CANDIDATE_INVALIDATED"],
   ["candidate identity match", { permissionOverride: { candidateId: "OTHER" } }, "ENGINE6_CANDIDATEID_MISMATCH"],
   ["zone identity match", { readinessOverride: { zoneId: "OTHER" } }, "ENGINE27E_ZONEID_MISMATCH"],
-  ["lane identity match", { geometryOverride: { laneId: "subminute" }, permissionOverride: { laneId: "subminute" }, readinessOverride: { laneId: "subminute" } }, "ENGINE7A_STRATEGY1_LANE_MISMATCH"],
-  ["strategy identity match", { geometryOverride: { strategyId: "other" }, permissionOverride: { strategyId: "other" }, readinessOverride: { strategyId: "other" } }, "ENGINE7A_STRATEGY1_STRATEGY_MISMATCH"],
   ["valid entry and stop", { geometryOverride: { proposedStopPrice: 6001 } }, "ENGINE26B_GEOMETRY_INVALID"],
   ["Target 1", { geometryOverride: { proposedTargets: [{ price: null }, { price: 6006 }, { price: null, purpose: "ENGINE9_RUNNER_HANDOFF" }] } }, "ENGINE26B_TARGET1_REQUIRED"],
   ["Target 2", { geometryOverride: { proposedTargets: [{ price: 6004 }, { price: null }, { price: null, purpose: "ENGINE9_RUNNER_HANDOFF" }] } }, "ENGINE26B_TARGET2_REQUIRED"],
@@ -235,6 +233,22 @@ test("legacy non-Strategy-1 sizing schema remains unchanged", () => {
   assert.equal(output.threeContractPlanRequested, undefined);
   assert.equal(output.proposedContracts, undefined);
   assert.equal(output.allocation, undefined);
+
+  for (const field of [
+    "testingDataCollectionMode",
+    "testingRiskOverrideApplied",
+    "paperTestingContracts",
+    "testingThreeContractPlanQualified",
+    "threeContractAllocation",
+    "productionRiskBudgetDollars",
+    "productionRiskSupportedContracts",
+    "productionEstimatedRiskDollars",
+    "productionThreeContractPlanQualified",
+    "productionRiskLimited",
+  ]) {
+    assert.equal(output[field], undefined, field);
+  }
+
   assert.equal(output.estimatedContracts > 0, true);
   assert.equal(output.nonExecutable, true);
 });
@@ -255,6 +269,22 @@ test("Subminute input remains on the legacy path and is not converted to Strateg
 
   assert.equal(output.threeContractPlanRequested, undefined);
   assert.equal(output.allocation, undefined);
+
+  for (const field of [
+    "testingDataCollectionMode",
+    "testingRiskOverrideApplied",
+    "paperTestingContracts",
+    "testingThreeContractPlanQualified",
+    "threeContractAllocation",
+    "productionRiskBudgetDollars",
+    "productionRiskSupportedContracts",
+    "productionEstimatedRiskDollars",
+    "productionThreeContractPlanQualified",
+    "productionRiskLimited",
+  ]) {
+    assert.equal(output[field], undefined, field);
+  }
+
   assert.equal(output.nonExecutable, true);
 });
 
@@ -626,20 +656,38 @@ test("identity mismatch publishes the complete dual contract without qualifying 
   });
 });
 
+test("missing setupClass does not receive the Strategy 1 extension schema", () => {
+  setDataCollectionFlag("1");
+
+  const output = build({
+    geometryOverride: { setupClass: null },
+    permissionOverride: { setupClass: null },
+    readinessOverride: { setupClass: null },
+  });
+
+  for (const field of [
+    "testingDataCollectionMode",
+    "testingRiskOverrideApplied",
+    "paperTestingContracts",
+    "testingThreeContractPlanQualified",
+    "threeContractAllocation",
+    "productionRiskBudgetDollars",
+    "productionRiskSupportedContracts",
+    "productionEstimatedRiskDollars",
+    "productionThreeContractPlanQualified",
+    "productionRiskLimited",
+  ]) {
+    assert.equal(output[field], undefined, field);
+  }
+
+  assert.equal(output.nonExecutable, true);
+});
+
 const earlyPublicationCases = [
   ["missing candidateId", { geometryOverride: { candidateId: null } }, "ENGINE26B_CANDIDATEID_MISSING"],
   ["missing zoneId", { geometryOverride: { zoneId: null } }, "ENGINE26B_ZONEID_MISSING"],
   ["missing snapshot time", { geometryOverride: { snapshotTime: null } }, "ENGINE26B_SNAPSHOT_TIME_MISSING"],
   ["candidate identity not preserved", { geometryOverride: { candidateIdentityPreserved: false } }, "ENGINE26B_CANDIDATE_IDENTITY_NOT_PRESERVED"],
-  [
-    "missing setupClass on the canonical Minute Strategy 1 path",
-    {
-      geometryOverride: { setupClass: null },
-      permissionOverride: { setupClass: null },
-      readinessOverride: { setupClass: null },
-    },
-    "ENGINE7A_STRATEGY1_SETUP_CLASS_MISMATCH",
-  ],
   [
     "incomplete geometry on the canonical Strategy 1 path",
     {
