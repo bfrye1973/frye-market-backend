@@ -69,7 +69,18 @@ function makeInputs(overrides = {}) {
     engine7SizingPreview: {
       ...identity,
       direction: "LONG",
-      threeContractPlanQualified: true,
+
+      productionRiskBudgetDollars: 150,
+      productionRiskSupportedContracts: 2,
+      productionEstimatedRiskDollars: 180,
+      productionThreeContractPlanQualified: false,
+      productionRiskLimited: true,
+
+      testingDataCollectionMode: true,
+      testingRiskOverrideApplied: true,
+      paperTestingContracts: 3,
+      testingThreeContractPlanQualified: true,
+
       threeContractAllocation: {
         block1Contracts: 1,
         block2Contracts: 1,
@@ -78,6 +89,8 @@ function makeInputs(overrides = {}) {
     },
     engine6PaperPermission: {
       planningAllowed: true,
+      allowed: true,
+      decision: "FAST_INTRADAY_PAPER_ALLOW",
     },
     engine27MinuteDecision: {
       ...identity,
@@ -162,25 +175,21 @@ test("does not invent a runner target when no approved target qualifies", () => 
 
 test("requires an exact qualified 1 + 1 + 1 Engine 7A allocation", () => {
   const ready = build();
-  assert.deepEqual(ready.upstreamState.allocation, {
-    block1: 1,
-    block2: 1,
-    block3: 1,
+  assert.deepEqual(ready.threeContractAllocation, {
+    block1Contracts: 1,
+    block2Contracts: 1,
+    block3Contracts: 1,
   });
   assert.equal(ready.upstreamState.allocationValid, true);
 
-  const missing = build({
-    engine7SizingPreview: {
-      ...IDENTITY,
-      direction: "LONG",
-      threeContractPlanQualified: true,
-    },
-  });
+  const missingInputs = makeInputs();
+  delete missingInputs.engine7SizingPreview.threeContractAllocation;
+  const missing = buildEngine9OfficialManagementPlan(missingInputs);
   assert.equal(missing.managementReady, false);
   assert.ok(missing.blockers.includes("ENGINE7A_ALLOCATION_INVALID"));
 
   const unqualifiedInputs = makeInputs();
-  unqualifiedInputs.engine7SizingPreview.threeContractPlanQualified = false;
+  unqualifiedInputs.engine7SizingPreview.testingThreeContractPlanQualified = false;
   const unqualified = buildEngine9OfficialManagementPlan(unqualifiedInputs);
   assert.equal(unqualified.managementReady, false);
   assert.ok(
@@ -282,4 +291,111 @@ test("ready fixture publishes the official non-executable opening plan", () => {
     plan.openingManagementPlan.blocks.map((block) => block.contracts),
     [1, 1, 1]
   );
+});
+
+
+test("valid explicit testing path qualifies allocation and preserves production risk truth", () => {
+  const plan = build();
+  assert.equal(plan.testingDataCollectionMode, true);
+  assert.equal(plan.testingRiskOverrideApplied, true);
+  assert.equal(plan.paperTestingContracts, 3);
+  assert.equal(plan.testingThreeContractPlanQualified, true);
+  assert.equal(plan.testingAllocationAccepted, true);
+  assert.equal(
+    plan.allocationQualificationSource,
+    "ENGINE7A_TESTING_DATA_COLLECTION"
+  );
+  assert.equal(plan.productionRiskBudgetDollars, 150);
+  assert.equal(plan.productionRiskSupportedContracts, 2);
+  assert.equal(plan.productionEstimatedRiskDollars, 180);
+  assert.equal(plan.productionThreeContractPlanQualified, false);
+  assert.equal(plan.productionRiskLimited, true);
+  assert.equal(plan.productionRiskApproved, undefined);
+  assert.equal(plan.managementReady, true);
+});
+
+test("testing mode off falls back to valid production qualification", () => {
+  const inputs = makeInputs();
+  inputs.engine7SizingPreview.testingDataCollectionMode = false;
+  inputs.engine7SizingPreview.testingRiskOverrideApplied = false;
+  inputs.engine7SizingPreview.testingThreeContractPlanQualified = false;
+  inputs.engine7SizingPreview.paperTestingContracts = 0;
+  inputs.engine7SizingPreview.productionThreeContractPlanQualified = true;
+
+  const plan = buildEngine9OfficialManagementPlan(inputs);
+  assert.equal(plan.testingAllocationAccepted, false);
+  assert.equal(
+    plan.allocationQualificationSource,
+    "ENGINE7A_PRODUCTION_RISK_APPROVAL"
+  );
+  assert.equal(plan.managementReady, true);
+});
+
+test("missing or invalid testing evidence does not block valid production qualification", () => {
+  const inputs = makeInputs();
+  delete inputs.engine7SizingPreview.testingRiskOverrideApplied;
+  inputs.engine7SizingPreview.productionThreeContractPlanQualified = true;
+
+  const plan = buildEngine9OfficialManagementPlan(inputs);
+  assert.equal(plan.testingAllocationAccepted, false);
+  assert.equal(
+    plan.allocationQualificationSource,
+    "ENGINE7A_PRODUCTION_RISK_APPROVAL"
+  );
+  assert.equal(plan.managementReady, true);
+});
+
+test("neither testing nor production qualification remains waiting", () => {
+  const inputs = makeInputs();
+  inputs.engine7SizingPreview.testingThreeContractPlanQualified = false;
+  inputs.engine7SizingPreview.productionThreeContractPlanQualified = false;
+
+  const plan = buildEngine9OfficialManagementPlan(inputs);
+  assert.equal(plan.testingAllocationAccepted, false);
+  assert.equal(plan.allocationQualificationSource, null);
+  assert.equal(plan.managementReady, false);
+  assert.equal(plan.official, false);
+  assert.ok(
+    plan.blockers.includes("ENGINE7A_THREE_CONTRACT_PLAN_NOT_QUALIFIED")
+  );
+});
+
+test("testing and production evidence are never blended", () => {
+  const inputs = makeInputs();
+  inputs.engine7SizingPreview.testingDataCollectionMode = true;
+  inputs.engine7SizingPreview.testingRiskOverrideApplied = false;
+  inputs.engine7SizingPreview.testingThreeContractPlanQualified = true;
+  inputs.engine7SizingPreview.paperTestingContracts = 3;
+  inputs.engine7SizingPreview.productionThreeContractPlanQualified = false;
+
+  const plan = buildEngine9OfficialManagementPlan(inputs);
+  assert.equal(plan.testingAllocationAccepted, false);
+  assert.equal(plan.allocationQualificationSource, null);
+  assert.equal(plan.managementReady, false);
+});
+
+test("all non-risk gate failures block both testing and production paths", () => {
+  const mutations = [
+    (inputs) => { inputs.engine6PaperPermission.allowed = false; },
+    (inputs) => { inputs.engine26ProposedGeometry.geometryReady = false; },
+    (inputs) => { inputs.engine27MinuteDecision.readiness.reactionReady = false; },
+    (inputs) => { inputs.engine27MinuteDecision.readiness.participationReady = false; },
+    (inputs) => { inputs.engine27MinuteDecision.readiness.permissionReady = false; },
+    (inputs) => { inputs.engine27MinuteDecision.readiness.plannerReady = false; },
+    (inputs) => {
+      for (const level of Object.values(inputs.engine27MinuteFib.extensions)) {
+        level.price = 7605;
+      }
+    },
+  ];
+
+  for (const mutate of mutations) {
+    const inputs = makeInputs();
+    inputs.engine7SizingPreview.productionThreeContractPlanQualified = true;
+    mutate(inputs);
+    const plan = buildEngine9OfficialManagementPlan(inputs);
+    assert.equal(plan.testingAllocationAccepted, false);
+    assert.equal(plan.allocationQualificationSource, null);
+    assert.equal(plan.managementReady, false);
+  }
 });
