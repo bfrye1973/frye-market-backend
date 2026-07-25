@@ -138,7 +138,7 @@ function buildEngine7Sizing(engine26ProposedGeometry) {
     },
     riskConfig: {
       instrument: "ES",
-      riskBudgetDollars: 1000,
+      riskBudgetDollars: 250,
       dollarsPerPoint: 50,
       minimumContracts: 1,
       maximumContracts: 5,
@@ -157,6 +157,12 @@ function buildEngine9Plan(engine26ProposedGeometry, engine7SizingPreview) {
     engine26ProposedGeometry,
     engine7SizingPreview,
     engine6PaperPermission: {
+      ...IDENTITY,
+      direction: "LONG",
+      setupType: SETUP,
+      snapshotTime: "2026-07-24T12:00:00.000Z",
+      decision: "FAST_INTRADAY_PAPER_ALLOW",
+      allowed: true,
       planningAllowed: true,
     },
     engine27MinuteDecision: {
@@ -179,10 +185,6 @@ function buildEngine9Plan(engine26ProposedGeometry, engine7SizingPreview) {
       },
       extensions: {
         e100: { price: 7511.25 },
-        e1168: { price: 7525 },
-        e1272: { price: 7550 },
-        e1618: { price: 7600 },
-        e200: { price: 7650 },
         e2618: { price: 7739.5 },
       },
     },
@@ -208,56 +210,36 @@ test("combined Strategy 1 pipeline becomes ready without execution authority", (
 
   const sizing = buildEngine7Sizing(geometry);
 
-  assert.equal(sizing.threeContractPlanQualified, true);
-  assert.equal(sizing.proposedContracts, 3);
-  assert.deepEqual(sizing.allocation, [
-    { contractBlock: 1, contracts: 1, purpose: "TARGET_1_ZONE_TOUCH" },
-    { contractBlock: 2, contracts: 1, purpose: "TARGET_2_ZONE_MIDLINE" },
-    { contractBlock: 3, contracts: 1, purpose: "ENGINE9_RUNNER_HANDOFF" },
-  ]);
+  assert.equal(sizing.productionThreeContractPlanQualified, false);
+  assert.equal(sizing.productionRiskLimited, true);
+  assert.equal(sizing.testingDataCollectionMode, true);
+  assert.equal(sizing.testingRiskOverrideApplied, true);
+  assert.equal(sizing.paperTestingContracts, 3);
+  assert.equal(sizing.testingThreeContractPlanQualified, true);
+  assert.deepEqual(sizing.threeContractAllocation, {
+    block1Contracts: 1,
+    block1Purpose: "TARGET_1_ZONE_TOUCH",
+    block2Contracts: 1,
+    block2Purpose: "TARGET_2_ZONE_MIDLINE",
+    block3Contracts: 1,
+    block3Purpose: "ENGINE9_RUNNER_HANDOFF",
+    totalContracts: 3,
+  });
 
   const plan = buildEngine9Plan(geometry, sizing);
 
-console.log(
-  "\n=== COMBINED ENGINE 9 RESULT ==="
-);
-
-console.dir(
-  {
-    planStatus:
-      plan?.planStatus,
-
-    managementReady:
-      plan?.managementReady,
-
-    blockers:
-      plan?.blockers,
-
-    waitingFor:
-      plan?.waitingFor,
-
-    reasonCodes:
-      plan?.reasonCodes,
-
-    warnings:
-      plan?.warnings,
-
-    upstreamState:
-      plan?.upstreamState,
-
-    officialTargets:
-      plan?.officialTargets,
-
-    openingManagementPlan:
-      plan?.openingManagementPlan,
-  },
-  {
-    depth: null,
-  }
-);
-
   assert.equal(plan.managementReady, true);
   assert.equal(plan.planStatus, "OFFICIAL_PLAN_READY");
+  assert.equal(plan.upstreamState.planningAllowed, true);
+  assert.equal(
+    plan.upstreamState.engine6Decision,
+    "FAST_INTRADAY_PAPER_ALLOW"
+  );
+  assert.equal(plan.upstreamState.testingAllocationAccepted, true);
+  assert.equal(
+    plan.upstreamState.allocationQualificationSource,
+    "ENGINE7A_TESTING_DATA_COLLECTION"
+  );
   assert.equal(plan.officialTargets[0].price, 7504);
   assert.equal(plan.officialTargets[1].price, 7511.25);
 
