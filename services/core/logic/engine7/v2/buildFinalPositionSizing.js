@@ -1857,6 +1857,18 @@ function buildStrictStrategy1FinalSizing({
      */
     engine9OfficialManagementPlan: {
       ...engine9,
+
+      /*
+       * The strict Strategy 1 identity uses setupClass.
+       * The legacy compatibility calculator still requires setupType.
+       */
+      setupType:
+        engine9?.setupType ??
+        engine7A?.setupType ??
+        engine9?.setupClass ??
+        engine7A?.setupClass ??
+        null,
+
       planStatus: "OFFICIAL",
     },
 
