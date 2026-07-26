@@ -9200,6 +9200,9 @@ scalp.engine9OfficialManagementPlan =
 
 scalp.engine7PositionSizing =
   buildEngine7FinalPositionSizing({
+    engine7SizingPreview:
+      scalp.engine7SizingPreview || null,
+
     engine6PaperPermission:
       scalp.permission?.paper || null,
 
