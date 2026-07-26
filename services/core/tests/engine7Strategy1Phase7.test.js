@@ -1,730 +1,387 @@
-import { afterEach, test } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEngine7ProposedSizingPreview } from "../logic/engine7/v2/buildProposedSizingPreview.js";
 
-const ORIGINAL_DATA_COLLECTION_FLAG =
-  process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION;
+import {
+  buildEngine7FinalPositionSizing,
+} from "../logic/engine7/v2/buildFinalPositionSizing.js";
 
-afterEach(() => {
-  if (ORIGINAL_DATA_COLLECTION_FLAG === undefined) {
-    delete process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION;
-  } else {
-    process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION =
-      ORIGINAL_DATA_COLLECTION_FLAG;
-  }
-});
+const SETUP = "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION";
+const SNAPSHOT_TIME = "2026-07-26T18:00:00.000Z";
 
-function setDataCollectionFlag(value) {
-  if (value === undefined) {
-    delete process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION;
-    return;
-  }
-
-  process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION = String(value);
-}
-
-
-const IDENTITY = Object.freeze({
+const identity = (overrides = {}) => ({
   laneId: "minute",
   strategyId: "intraday_scalp@10m",
-  candidateId: "E26C-STRATEGY1-TEST",
-  zoneId: "E26Z-STRATEGY1-TEST",
+  candidateId: "E26C-ENGINE7B-TEST",
+  zoneId: "E26Z-ENGINE7B-TEST",
   symbol: "ES",
-  setupClass: "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
+  setupClass: SETUP,
   setupGrade: "A+++",
-  identitySetupKey: "minute|intraday_scalp@10m|NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
-  candidateIdentityVersion: "engine26.candidateIdentity.v1",
+  identitySetupKey: SETUP,
+  candidateIdentityVersion: "engine26.strategy1.v1",
+  direction: "LONG",
+  setupType: SETUP,
+  snapshotTime: SNAPSHOT_TIME,
+  ...overrides,
 });
 
-function geometry(overrides = {}) {
-  return {
-    ...IDENTITY,
-    direction: "LONG",
-    setupType: "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
-    snapshotTime: "2026-07-23T12:00:00.000Z",
-    candidateIdentityPreserved: true,
-    active: true,
-    geometryReady: true,
-    proposedEntryPrice: 6000,
-    proposedStopPrice: 5998,
-    proposedStopDistancePoints: 2,
-    proposedTargets: [
-      { targetId: "T1", price: 6004, purpose: "TARGET_1_ZONE_TOUCH" },
-      { targetId: "T2", price: 6006, purpose: "TARGET_2_ZONE_MIDLINE" },
-      { targetId: "T3", price: null, purpose: "ENGINE9_RUNNER_HANDOFF" },
-    ],
-    runnerHandoffRequired: true,
-    ...overrides,
-  };
-}
+const risk = (overrides = {}) => ({
+  instrument: "ES",
+  riskBudgetDollars: 100,
+  dollarsPerPoint: 50,
+  minimumContracts: 1,
+  maximumContracts: 3,
+  roundingRule: "FLOOR",
+  estimatedSlippagePointsPerSide: 0,
+  commissionDollarsPerContractRoundTrip: 0,
+  paperOnly: true,
+  ...overrides,
+});
 
-function permission(overrides = {}) {
-  return {
-    ...IDENTITY,
-    direction: "LONG",
-    setupType: "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
-    snapshotTime: "2026-07-23T12:00:00.000Z",
-    decision: "FAST_INTRADAY_PAPER_ALLOW",
-    allowed: true,
-    planningAllowed: true,
-    sizeMultiplier: 1,
-    ...overrides,
-  };
-}
+const permission = (overrides = {}) => ({
+  decision: "FAST_INTRADAY_PAPER_ALLOW",
+  allowed: true,
+  planningAllowed: true,
+  ...overrides,
+});
 
-function readiness(overrides = {}) {
-  return {
-    ...IDENTITY,
-    direction: "LONG",
-    setupType: "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
-    snapshotTime: "2026-07-23T12:00:00.000Z",
-    decisionState: "READY",
+const readiness = (overrides = {}) => ({
+  readiness: {
     reactionReady: true,
     participationReady: true,
     permissionReady: true,
     plannerReady: true,
     invalidated: false,
-    ...overrides,
-  };
-}
-
-function risk(overrides = {}) {
-  return {
-    instrument: "ES",
-    riskBudgetDollars: 1000,
-    dollarsPerPoint: 50,
-    minimumContracts: 1,
-    maximumContracts: 5,
-    roundingRule: "FLOOR",
-    estimatedSlippagePointsPerSide: 0.25,
-    commissionDollarsPerContractRoundTrip: 5,
-    paperOnly: true,
-    ...overrides,
-  };
-}
-
-function build({
-  geometryOverride = {},
-  permissionOverride = {},
-  readinessOverride = {},
-  riskOverride = {},
-  riskConfig,
-} = {}) {
-  return buildEngine7ProposedSizingPreview({
-    engine26ProposedGeometry: geometry(geometryOverride),
-    engine6PaperPermission: permission(permissionOverride),
-    engine27MinuteReadiness: readiness(readinessOverride),
-    riskConfig: riskConfig === undefined ? risk(riskOverride) : riskConfig,
-    snapshotTime: "2026-07-23T12:00:00.000Z",
-  });
-}
-
-function assertNotReady(output) {
-  assert.equal(output.sizingReady, false);
-  assert.equal(output.threeContractPlanQualified, false);
-  assert.equal(output.executableSizing, false);
-  assert.equal(output.noExecution, true);
-}
-
-test("valid Strategy 1 gates produce an exact 1/1/1 three-contract preview", () => {
-  const output = build();
-
-  assert.equal(output.status, "STRATEGY1_THREE_CONTRACT_PREVIEW_READY");
-  assert.equal(output.sizingState, "THREE_CONTRACT_PREVIEW_READY");
-  assert.equal(output.sizingReady, true);
-  assert.equal(output.threeContractPlanRequested, true);
-  assert.equal(output.threeContractPlanQualified, true);
-  assert.equal(output.riskSupportedContracts >= 3, true);
-  assert.equal(output.proposedContracts, 3);
-  assert.equal(output.totalContracts, 3);
-  assert.equal(output.target1Contracts, 1);
-  assert.equal(output.target2Contracts, 1);
-  assert.equal(output.runnerContracts, 1);
-
-  assert.deepEqual(output.allocation, [
-    { contractBlock: 1, contracts: 1, purpose: "TARGET_1_ZONE_TOUCH" },
-    { contractBlock: 2, contracts: 1, purpose: "TARGET_2_ZONE_MIDLINE" },
-    { contractBlock: 3, contracts: 1, purpose: "ENGINE9_RUNNER_HANDOFF" },
-  ]);
-
-  assert.equal(output.proposedTargets[2].price, null);
-  assert.equal(output.noRunnerTargetCreated, true);
-  assert.equal(output.executableSizing, false);
+  },
+  ...overrides,
 });
 
-test("preserves the complete Strategy 1 identity exactly", () => {
-  const output = build();
-  for (const [key, value] of Object.entries(IDENTITY)) {
-    assert.equal(output[key], value, key);
-  }
+const engine7A = (overrides = {}) => ({
+  ...identity(),
+  productionRiskBudgetDollars: 100,
+  productionRiskSupportedContracts: 1,
+  productionEstimatedRiskDollars: 100,
+  productionThreeContractPlanQualified: false,
+  productionRiskLimited: true,
+  testingDataCollectionMode: true,
+  testingRiskOverrideApplied: true,
+  paperTestingContracts: 3,
+  testingThreeContractPlanQualified: true,
+  threeContractAllocation: {
+    block1Contracts: 1,
+    block2Contracts: 1,
+    block3Contracts: 1,
+    totalContracts: 3,
+  },
+  ...overrides,
 });
 
-const waitingCases = [
-  ["Engine 6 planning permission", { permissionOverride: { planningAllowed: false } }, "ENGINE6_PLANNING_PERMISSION_REQUIRED"],
-  ["Engine 6 exact decision", { permissionOverride: { decision: "PAPER_ALLOW" } }, "ENGINE6_PLANNING_PERMISSION_REQUIRED"],
-  ["Engine 6 allowed", { permissionOverride: { allowed: false } }, "ENGINE6_PLANNING_PERMISSION_REQUIRED"],
-  ["Engine 26B geometryReady", { geometryOverride: { geometryReady: false } }, "ENGINE26B_GEOMETRY_READY_REQUIRED"],
-  ["Engine 27E reaction readiness", { readinessOverride: { reactionReady: false } }, "ENGINE27E_REACTION_READY_REQUIRED"],
-  ["Engine 27E participation readiness", { readinessOverride: { participationReady: false } }, "ENGINE27E_PARTICIPATION_READY_REQUIRED"],
-  ["Engine 27E permission readiness", { readinessOverride: { permissionReady: false } }, "ENGINE27E_PERMISSION_READY_REQUIRED"],
-  ["Engine 27E planner readiness", { readinessOverride: { plannerReady: false } }, "ENGINE27E_PLANNER_READY_REQUIRED"],
-  ["candidate invalidation", { readinessOverride: { invalidated: true } }, "ENGINE27E_CANDIDATE_INVALIDATED"],
-  ["candidate identity match", { permissionOverride: { candidateId: "OTHER" } }, "ENGINE6_CANDIDATEID_MISMATCH"],
-  ["zone identity match", { readinessOverride: { zoneId: "OTHER" } }, "ENGINE27E_ZONEID_MISMATCH"],
-  ["valid entry and stop", { geometryOverride: { proposedStopPrice: 6001 } }, "ENGINE26B_GEOMETRY_INVALID"],
-  ["Target 1", { geometryOverride: { proposedTargets: [{ price: null }, { price: 6006 }, { price: null, purpose: "ENGINE9_RUNNER_HANDOFF" }] } }, "ENGINE26B_TARGET1_REQUIRED"],
-  ["Target 2", { geometryOverride: { proposedTargets: [{ price: 6004 }, { price: null }, { price: null, purpose: "ENGINE9_RUNNER_HANDOFF" }] } }, "ENGINE26B_TARGET2_REQUIRED"],
-  ["runner handoff", { geometryOverride: { proposedTargets: [{ price: 6004 }, { price: 6006 }] } }, "ENGINE26B_RUNNER_HANDOFF_REQUIRED"],
-  ["runner handoff null price", { geometryOverride: { proposedTargets: [{ price: 6004 }, { price: 6006 }, { price: 6010, purpose: "ENGINE9_RUNNER_HANDOFF" }] } }, "ENGINE26B_RUNNER_HANDOFF_REQUIRED"],
-  ["runner handoff purpose", { geometryOverride: { proposedTargets: [{ price: 6004 }, { price: 6006 }, { price: null, purpose: "TARGET_3" }] } }, "ENGINE26B_RUNNER_HANDOFF_REQUIRED"],
-  ["runner handoff required flag", { geometryOverride: { runnerHandoffRequired: false } }, "ENGINE26B_RUNNER_HANDOFF_REQUIRED"],
+const officialTargets = () => [
+  { targetId: "T1", sequence: 1, price: 6004, purpose: "TARGET_1_ZONE_TOUCH" },
+  { targetId: "T2", sequence: 2, price: 6006, purpose: "TARGET_2_ZONE_MIDLINE" },
+  { targetId: "T3", sequence: 3, price: 6010, purpose: "ENGINE9_RUNNER" },
 ];
 
-for (const [name, args, blocker] of waitingCases) {
-  test(`${name} is required`, () => {
-    const output = build(args);
-    assertNotReady(output);
-    assert.equal(output.blockers.includes(blocker), true, `${blocker} missing`);
+const managementBlocks = () => [
+  { blockId: "BLOCK_1", contracts: 1, purpose: "TARGET_1_ZONE_TOUCH", targetId: "T1", targetPrice: 6004 },
+  { blockId: "BLOCK_2", contracts: 1, purpose: "TARGET_2_ZONE_MIDLINE", targetId: "T2", targetPrice: 6006 },
+  { blockId: "BLOCK_3", contracts: 1, purpose: "ENGINE9_RUNNER", targetId: "T3", targetPrice: 6010 },
+];
+
+const engine9 = (overrides = {}) => ({
+  ...identity(),
+  planId: "E9P-ENGINE7B-TEST",
+  planStatus: "OFFICIAL",
+  managementReady: true,
+  official: true,
+  officialEntryPrice: 6000,
+  officialStopPrice: 5998,
+  officialStopDistancePoints: 2,
+  officialTargets: officialTargets(),
+  openingManagementPlan: { blocks: managementBlocks() },
+  threeBlockManagement: { blocks: managementBlocks() },
+  runnerTargetPrice: 6010,
+  runnerTargetStatus: "RUNNER_TARGET_SELECTED",
+  runnerPlan: {
+    enabled: true,
+    blockId: "BLOCK_3",
+    contracts: 1,
+    runnerTargetPrice: 6010,
+    runnerTargetStatus: "RUNNER_TARGET_SELECTED",
+    status: "RUNNER_TARGET_SELECTED",
+  },
+  testingAllocationAccepted: true,
+  allocationQualificationSource: "ENGINE7A_TESTING_DATA_COLLECTION",
+  ...overrides,
+});
+
+function build(overrides = {}) {
+  return buildEngine7FinalPositionSizing({
+    engine7SizingPreview: overrides.engine7SizingPreview ?? engine7A(),
+    engine6PaperPermission: overrides.engine6PaperPermission ?? permission(),
+    engine27MinuteReadiness: overrides.engine27MinuteReadiness ?? readiness(),
+    engine9OfficialManagementPlan: overrides.engine9OfficialManagementPlan ?? engine9(),
+    riskConfig: overrides.riskConfig ?? risk(),
+    tradeState: overrides.tradeState ?? {},
+    snapshotTime: SNAPSHOT_TIME,
   });
 }
 
-test("risk insufficient for three contracts never forces three", () => {
-  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
+function assertPaperSafety(output) {
+  assert.equal(output.noOrderCreated, true);
+  assert.equal(output.noExecution, true);
+  assert.equal(output.noBrokerOrder, true);
+  assert.equal(output.noFillCreated, true);
+  assert.equal(output.noJournalWrite, true);
+  assert.equal(output.tradeId, null);
+  assert.equal(output.idempotencyKey, null);
+  assert.equal(output.orderId, null);
+  assert.notEqual(output.realExecutionAllowed, true);
+  assert.notEqual(output.brokerExecutionAllowed, true);
+  assert.notEqual(output.schwabExecutionAllowed, true);
+  assert.notEqual(output.liveTradingAllowed, true);
+}
 
-  assert.equal(output.status, "STRATEGY1_RISK_LIMITED");
-  assert.equal(output.sizingState, "RISK_LIMITED");
-  assert.equal(output.riskLimited, true);
-  assert.equal(output.riskSupportedContracts, 1);
-  assert.equal(output.proposedContracts, 1);
-  assert.equal(output.totalContracts, 1);
-  assertNotReady(output);
+test("production 1 and testing 3 coexist correctly", () => {
+  const output = build();
+  assert.equal(output.productionRiskSupportedContracts, 1);
+  assert.equal(output.finalProductionContracts, 1);
+  assert.equal(output.finalPaperTestingContracts, 3);
+  assert.equal(output.finalContracts, 3);
+  assert.equal(output.finalSizingMode, "PAPER_TESTING_DATA_COLLECTION");
+  assert.equal(output.status, "FINAL_SIZE_READY");
+  assert.equal(output.allowed, true);
+  assert.equal(output.executableSizing, true);
+  assert.equal(output.paperOrderSizingReady, true);
+  assertPaperSafety(output);
 });
 
-test("missing risk evidence waits safely", () => {
-  const output = build({ riskConfig: null });
-  assert.equal(output.status, "RISK_CONFIG_MISSING");
-  assert.equal(output.sizingState, "RISK_EVIDENCE_UNAVAILABLE");
-  assertNotReady(output);
+test("production 0 and testing 3 coexist correctly", () => {
+  const output = build({
+    engine7SizingPreview: engine7A({
+      productionRiskBudgetDollars: 50,
+      productionRiskSupportedContracts: 0,
+      productionEstimatedRiskDollars: 0,
+    }),
+    riskConfig: risk({ riskBudgetDollars: 50 }),
+  });
+  assert.equal(output.productionRiskSupportedContracts, 0);
+  assert.equal(output.finalProductionContracts, 0);
+  assert.equal(output.finalPaperTestingContracts, 3);
+  assert.equal(output.finalContracts, 3);
+  assert.equal(output.finalSizingMode, "PAPER_TESTING_DATA_COLLECTION");
 });
 
-test("legacy non-Strategy-1 sizing schema remains unchanged", () => {
-  const legacyGeometry = {
+test("production truth is preserved unchanged", () => {
+  const source = engine7A({
+    productionRiskBudgetDollars: 275,
+    productionRiskSupportedContracts: 1,
+    productionEstimatedRiskDollars: 100,
+    productionThreeContractPlanQualified: false,
+    productionRiskLimited: true,
+  });
+  const output = build({ engine7SizingPreview: source, riskConfig: risk({ riskBudgetDollars: 100 }) });
+  assert.equal(output.productionRiskBudgetDollars, 275);
+  assert.equal(output.productionRiskSupportedContracts, 1);
+  assert.equal(output.productionEstimatedRiskDollars, 100);
+  assert.equal(output.productionThreeContractPlanQualified, false);
+  assert.equal(output.productionRiskLimited, true);
+});
+
+test("invalid testing permits valid production fallback", () => {
+  const output = build({
+    engine7SizingPreview: engine7A({ testingThreeContractPlanQualified: false }),
+  });
+  assert.equal(output.engine7ATestingThreeContractPlanQualified, false);
+  assert.equal(output.finalTestingThreeContractPlanQualified, false);
+  assert.equal(output.finalPaperTestingContracts, 0);
+  assert.equal(output.finalProductionContracts, 1);
+  assert.equal(output.finalContracts, 1);
+  assert.equal(output.finalSizingMode, "PRODUCTION_RISK");
+  assert.equal(output.status, "FINAL_SIZE_READY");
+});
+
+test("production never exceeds usable Engine 9 blocks", () => {
+  const blocks = managementBlocks().slice(0, 2);
+  const output = build({
+    engine7SizingPreview: engine7A({
+      productionRiskBudgetDollars: 300,
+      productionRiskSupportedContracts: 3,
+      productionEstimatedRiskDollars: 300,
+      testingDataCollectionMode: false,
+      testingRiskOverrideApplied: false,
+      paperTestingContracts: 0,
+      testingThreeContractPlanQualified: false,
+    }),
+    engine9OfficialManagementPlan: engine9({
+      openingManagementPlan: { blocks },
+      threeBlockManagement: { blocks },
+      testingAllocationAccepted: false,
+      allocationQualificationSource: "ENGINE7A_PRODUCTION_RISK_APPROVAL",
+    }),
+    riskConfig: risk({ riskBudgetDollars: 300 }),
+  });
+  assert.equal(output.finalProductionContracts, 2);
+  assert.equal(output.finalContracts, 2);
+});
+
+test("missing optional Engine 6 identity metadata does not block", () => {
+  const output = build({ engine6PaperPermission: permission() });
+  assert.equal(output.status, "FINAL_SIZE_READY");
+});
+
+test("missing optional Engine 27E identity metadata does not block", () => {
+  const output = build({ engine27MinuteReadiness: readiness() });
+  assert.equal(output.status, "FINAL_SIZE_READY");
+});
+
+test("present Engine 6 identity conflict blocks", () => {
+  const output = build({
+    engine6PaperPermission: permission({ candidateId: "OTHER" }),
+  });
+  assert.equal(output.status, "STRATEGY1_IDENTITY_CONFLICT");
+  assert.equal(output.finalContracts, 0);
+});
+
+test("present Engine 27E identity conflict blocks", () => {
+  const output = build({
+    engine27MinuteReadiness: readiness({ zoneId: "OTHER" }),
+  });
+  assert.equal(output.status, "STRATEGY1_IDENTITY_CONFLICT");
+  assert.equal(output.finalContracts, 0);
+});
+
+test("malformed Strategy 1 claim does not fall back to legacy", () => {
+  const malformed = engine7A({ laneId: "subminute" });
+  const output = build({ engine7SizingPreview: malformed });
+  assert.equal(output.status, "STRATEGY1_IDENTITY_CONFLICT");
+  assert.equal(output.finalSizingMode, "UNAVAILABLE");
+  assert.equal(output.finalContracts, 0);
+});
+
+test("legacy non-Strategy-1 behavior remains unchanged", () => {
+  const legacyPlan = {
+    planId: "LEGACY-P",
     candidateId: "LEGACY-C",
     zoneId: "LEGACY-Z",
-    strategyId: "intraday_scalp@10m",
+    strategyId: "legacy_swing@1h",
     symbol: "ES",
     direction: "LONG",
     setupType: "LEGACY_SETUP",
-    snapshotTime: "2026-07-23T12:00:00.000Z",
-    candidateIdentityPreserved: true,
-    proposedEntryPrice: 6000,
-    proposedStopPrice: 5998,
-    proposedStopDistancePoints: 2,
-    proposedTargets: [{ price: 6004 }],
+    snapshotTime: SNAPSHOT_TIME,
+    planStatus: "OFFICIAL",
+    managementReady: true,
+    official: true,
+    officialEntryPrice: 6000,
+    officialStopPrice: 5998,
+    officialStopDistancePoints: 2,
+    officialTargets: [{ targetId: "T1", price: 6004 }],
   };
-
-  const output = buildEngine7ProposedSizingPreview({
-    engine26ProposedGeometry: legacyGeometry,
+  const output = buildEngine7FinalPositionSizing({
     engine6PaperPermission: { decision: "PAPER_ALLOW", allowed: true },
     engine27MinuteReadiness: { decisionState: "READY", ready: true },
+    engine9OfficialManagementPlan: legacyPlan,
     riskConfig: risk(),
+    tradeState: {},
   });
-
-  assert.equal(output.threeContractPlanRequested, undefined);
-  assert.equal(output.proposedContracts, undefined);
-  assert.equal(output.allocation, undefined);
-
-  for (const field of [
-    "testingDataCollectionMode",
-    "testingRiskOverrideApplied",
-    "paperTestingContracts",
-    "testingThreeContractPlanQualified",
-    "threeContractAllocation",
-    "productionRiskBudgetDollars",
-    "productionRiskSupportedContracts",
-    "productionEstimatedRiskDollars",
-    "productionThreeContractPlanQualified",
-    "productionRiskLimited",
-  ]) {
-    assert.equal(output[field], undefined, field);
-  }
-
-  assert.equal(output.estimatedContracts > 0, true);
-  assert.equal(output.nonExecutable, true);
+  assert.equal(output.status, "FINAL_SIZE_READY");
+  assert.equal(output.finalContracts, 1);
+  assert.equal(output.finalSizingMode, undefined);
 });
 
-test("Subminute input remains on the legacy path and is not converted to Strategy 1", () => {
-  const output = buildEngine7ProposedSizingPreview({
-    engine26ProposedGeometry: {
-      ...geometry(),
-      laneId: "subminute",
-      strategyId: "subminute_scalp@10m",
-      setupClass: "SUBMINUTE_W3_CONTINUATION",
-      setupType: "SUBMINUTE_W3_CONTINUATION",
-    },
-    engine6PaperPermission: null,
-    engine27MinuteReadiness: null,
+test("Subminute remains outside strict Strategy 1", () => {
+  const plan = {
+    planId: "SUB-P",
+    candidateId: "SUB-C",
+    zoneId: "SUB-Z",
+    laneId: "subminute",
+    strategyId: "subminute_scalp@10m",
+    symbol: "ES",
+    direction: "LONG",
+    setupType: "SUBMINUTE_SETUP",
+    snapshotTime: SNAPSHOT_TIME,
+    planStatus: "OFFICIAL",
+    managementReady: true,
+    officialEntryPrice: 6000,
+    officialStopPrice: 5998,
+    officialStopDistancePoints: 2,
+    officialTargets: [{ targetId: "T1", price: 6004 }],
+  };
+  const output = buildEngine7FinalPositionSizing({
+    engine7SizingPreview: { laneId: "subminute", strategyId: "subminute_scalp@10m" },
+    engine6PaperPermission: { decision: "PAPER_ALLOW", allowed: true },
+    engine27MinuteReadiness: { decisionState: "READY", ready: true },
+    engine9OfficialManagementPlan: plan,
     riskConfig: risk(),
+    tradeState: {},
   });
-
-  assert.equal(output.threeContractPlanRequested, undefined);
-  assert.equal(output.allocation, undefined);
-
-  for (const field of [
-    "testingDataCollectionMode",
-    "testingRiskOverrideApplied",
-    "paperTestingContracts",
-    "testingThreeContractPlanQualified",
-    "threeContractAllocation",
-    "productionRiskBudgetDollars",
-    "productionRiskSupportedContracts",
-    "productionEstimatedRiskDollars",
-    "productionThreeContractPlanQualified",
-    "productionRiskLimited",
-  ]) {
-    assert.equal(output[field], undefined, field);
-  }
-
-  assert.equal(output.nonExecutable, true);
+  assert.equal(output.status, "FINAL_SIZE_READY");
+  assert.equal(output.finalSizingMode, undefined);
 });
 
-test("does not mutate any input object", () => {
-  const g = geometry();
-  const p = permission();
-  const r = readiness();
-  const c = risk();
-  const before = JSON.stringify({ g, p, r, c });
-
-  buildEngine7ProposedSizingPreview({
-    engine26ProposedGeometry: g,
-    engine6PaperPermission: p,
-    engine27MinuteReadiness: r,
-    riskConfig: c,
-  });
-
-  assert.equal(JSON.stringify({ g, p, r, c }), before);
-});
-
-test("creates no permission, geometry, management, execution, order, fill, journal, or broker authority", () => {
-  const output = build();
-
-  assert.equal(output.noPermissionCreated, true);
-  assert.equal(output.noOfficialPlanCreated, true);
-  assert.equal(output.noManagementCreated, true);
-  assert.equal(output.noRunnerTargetCreated, true);
-  assert.equal(output.noOrderCreated, true);
-  assert.equal(output.noFillCreated, true);
-  assert.equal(output.noJournalEventCreated, true);
-  assert.equal(output.noBrokerOrder, true);
-  assert.equal(output.noExecution, true);
-  assert.equal(output.executableSizing, false);
-  assert.equal(output.tradeId, null);
-  assert.equal(output.idempotencyKey, null);
-});
-
-
-test("paper data-collection flag missing defaults off", () => {
-  setDataCollectionFlag(undefined);
-  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
-
-  assert.equal(output.testingDataCollectionMode, false);
-  assert.equal(output.paperTestingContracts, 0);
-  assert.equal(output.testingThreeContractPlanQualified, false);
-  assert.equal(output.testingRiskOverrideApplied, false);
-});
-
-test("paper data-collection flag 0 remains off", () => {
-  setDataCollectionFlag("0");
-  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
-
-  assert.equal(output.testingDataCollectionMode, false);
-  assert.equal(output.paperTestingContracts, 0);
-  assert.equal(output.testingThreeContractPlanQualified, false);
-  assert.equal(output.testingRiskOverrideApplied, false);
-});
-
-test("paper data-collection flag 1 activates only exact Minute Strategy 1", () => {
-  setDataCollectionFlag("1");
-  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
-
-  assert.equal(output.testingDataCollectionMode, true);
-  assert.equal(output.paperTestingContracts, 3);
-  assert.equal(output.testingThreeContractPlanQualified, true);
-  assert.equal(output.testingRiskOverrideApplied, true);
-});
-
-test("production aliases mirror the unchanged production risk output", () => {
-  setDataCollectionFlag("1");
-  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
-
-  assert.equal(output.productionRiskBudgetDollars, output.riskBudgetDollars);
-  assert.equal(
-    output.productionRiskSupportedContracts,
-    output.riskSupportedContracts
-  );
-  assert.equal(
-    output.productionEstimatedRiskDollars,
-    output.estimatedRiskDollars
-  );
-  assert.equal(
-    output.productionThreeContractPlanQualified,
-    output.threeContractPlanQualified
-  );
-  assert.equal(output.productionRiskLimited, output.riskLimited);
-});
-
-test("testing mode permits exactly three when production dollar risk supports fewer than three", () => {
-  setDataCollectionFlag("1");
-  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
-
-  assert.equal(output.riskSupportedContracts, 1);
-  assert.equal(output.proposedContracts, 1);
-  assert.equal(output.threeContractPlanQualified, false);
-  assert.equal(output.riskLimited, true);
-
-  assert.equal(output.paperTestingContracts, 3);
-  assert.equal(output.testingThreeContractPlanQualified, true);
-  assert.equal(output.testingRiskOverrideApplied, true);
-});
-
-test("testing mode may bypass the production maximum-contract cap only", () => {
-  setDataCollectionFlag("1");
+test("upstream testing evidence remains visible after Engine 9 rejection", () => {
   const output = build({
-    riskOverride: {
-      riskBudgetDollars: 5000,
-      maximumContracts: 1,
-    },
+    engine9OfficialManagementPlan: engine9({ testingAllocationAccepted: false }),
   });
-
-  assert.equal(output.riskSupportedContracts, 1);
-  assert.equal(output.proposedContracts, 1);
-  assert.equal(output.threeContractPlanQualified, false);
-  assert.equal(output.productionRiskLimited, true);
-
-  assert.equal(output.paperTestingContracts, 3);
-  assert.equal(output.testingThreeContractPlanQualified, true);
-  assert.equal(output.testingRiskOverrideApplied, true);
-});
-
-test("testing mode does not alter any existing production sizing field", () => {
-  setDataCollectionFlag("0");
-  const productionOnly = build({ riskOverride: { riskBudgetDollars: 250 } });
-
-  setDataCollectionFlag("1");
-  const withTesting = build({ riskOverride: { riskBudgetDollars: 250 } });
-
-  const fields = [
-    "riskBudgetDollars",
-    "riskSupportedContracts",
-    "estimatedRiskDollars",
-    "requestedContracts",
-    "proposedContracts",
-    "threeContractPlanQualified",
-    "riskLimited",
-    "sizingReady",
-    "sizingState",
-    "status",
-  ];
-
-  for (const field of fields) {
-    assert.deepEqual(withTesting[field], productionOnly[field], field);
-  }
-});
-
-test("testing mode cannot bypass identity mismatch", () => {
-  setDataCollectionFlag("1");
-  const output = build({
-    permissionOverride: { candidateId: "OTHER-CANDIDATE" },
-    riskOverride: { riskBudgetDollars: 250 },
-  });
-
-  assert.equal(output.testingDataCollectionMode, true);
-  assert.equal(output.paperTestingContracts, 0);
-  assert.equal(output.testingThreeContractPlanQualified, false);
-  assert.equal(output.testingRiskOverrideApplied, false);
-  assert.equal(output.blockers.includes("ENGINE6_CANDIDATEID_MISMATCH"), true);
-});
-
-test("testing mode cannot bypass invalidation", () => {
-  setDataCollectionFlag("1");
-  const output = build({
-    readinessOverride: { invalidated: true },
-    riskOverride: { riskBudgetDollars: 250 },
-  });
-
-  assert.equal(output.paperTestingContracts, 0);
-  assert.equal(output.testingThreeContractPlanQualified, false);
-  assert.equal(output.blockers.includes("ENGINE27E_CANDIDATE_INVALIDATED"), true);
-});
-
-test("testing mode cannot bypass Engine 6 planning permission", () => {
-  setDataCollectionFlag("1");
-  const output = build({
-    permissionOverride: { planningAllowed: false },
-    riskOverride: { riskBudgetDollars: 250 },
-  });
-
-  assert.equal(output.paperTestingContracts, 0);
-  assert.equal(output.testingThreeContractPlanQualified, false);
-  assert.equal(output.blockers.includes("ENGINE6_PLANNING_PERMISSION_REQUIRED"), true);
-});
-
-test("testing mode cannot bypass Engine 26B geometry readiness", () => {
-  setDataCollectionFlag("1");
-  const output = build({
-    geometryOverride: { geometryReady: false },
-    riskOverride: { riskBudgetDollars: 250 },
-  });
-
-  assert.equal(output.paperTestingContracts, 0);
-  assert.equal(output.testingThreeContractPlanQualified, false);
-  assert.equal(output.blockers.includes("ENGINE26B_GEOMETRY_READY_REQUIRED"), true);
-});
-
-test("testing mode cannot bypass Engine 27E readiness", () => {
-  setDataCollectionFlag("1");
-  const output = build({
-    readinessOverride: { plannerReady: false },
-    riskOverride: { riskBudgetDollars: 250 },
-  });
-
-  assert.equal(output.paperTestingContracts, 0);
-  assert.equal(output.testingThreeContractPlanQualified, false);
-  assert.equal(output.blockers.includes("ENGINE27E_PLANNER_READY_REQUIRED"), true);
-});
-
-test("testing mode cannot bypass malformed targets or runner handoff", () => {
-  setDataCollectionFlag("1");
-  const output = build({
-    geometryOverride: {
-      proposedTargets: [
-        { price: 6004, purpose: "TARGET_1_ZONE_TOUCH" },
-        { price: null, purpose: "TARGET_2_ZONE_MIDLINE" },
-        { price: 6010, purpose: "ENGINE9_RUNNER_HANDOFF" },
-      ],
-    },
-    riskOverride: { riskBudgetDollars: 250 },
-  });
-
-  assert.equal(output.paperTestingContracts, 0);
-  assert.equal(output.testingThreeContractPlanQualified, false);
-  assert.equal(output.blockers.includes("ENGINE26B_TARGET2_REQUIRED"), true);
-  assert.equal(output.blockers.includes("ENGINE26B_RUNNER_HANDOFF_REQUIRED"), true);
-});
-
-test("allocation and compatibility object remain exactly 1 plus 1 plus 1", () => {
-  setDataCollectionFlag("1");
-  const output = build({ riskOverride: { riskBudgetDollars: 250 } });
-
-  assert.deepEqual(output.allocation, [
-    { contractBlock: 1, contracts: 1, purpose: "TARGET_1_ZONE_TOUCH" },
-    { contractBlock: 2, contracts: 1, purpose: "TARGET_2_ZONE_MIDLINE" },
-    { contractBlock: 3, contracts: 1, purpose: "ENGINE9_RUNNER_HANDOFF" },
-  ]);
-
-  assert.deepEqual(output.threeContractAllocation, {
+  assert.equal(output.engine7ATestingThreeContractPlanQualified, true);
+  assert.deepEqual(output.engine7AThreeContractAllocation, {
     block1Contracts: 1,
-    block1Purpose: "TARGET_1_ZONE_TOUCH",
     block2Contracts: 1,
-    block2Purpose: "TARGET_2_ZONE_MIDLINE",
     block3Contracts: 1,
-    block3Purpose: "ENGINE9_RUNNER_HANDOFF",
     totalContracts: 3,
   });
-
-  assert.equal(output.proposedTargets[2].price, null);
-});
-
-test("flag off restores production control immediately", () => {
-  setDataCollectionFlag("1");
-  const testing = build({ riskOverride: { riskBudgetDollars: 250 } });
-  assert.equal(testing.paperTestingContracts, 3);
-
-  setDataCollectionFlag("0");
-  const production = build({ riskOverride: { riskBudgetDollars: 250 } });
-
-  assert.equal(production.testingDataCollectionMode, false);
-  assert.equal(production.paperTestingContracts, 0);
-  assert.equal(production.testingThreeContractPlanQualified, false);
-  assert.equal(production.testingRiskOverrideApplied, false);
-  assert.equal(production.proposedContracts, 1);
-  assert.equal(production.threeContractPlanQualified, false);
-});
-
-test("flag 1 never affects Subminute or other strategies", () => {
-  setDataCollectionFlag("1");
-
-  const subminute = buildEngine7ProposedSizingPreview({
-    engine26ProposedGeometry: {
-      ...geometry(),
-      laneId: "subminute",
-      strategyId: "subminute_scalp@10m",
-      setupClass: "SUBMINUTE_W3_CONTINUATION",
-      setupType: "SUBMINUTE_W3_CONTINUATION",
-    },
-    engine6PaperPermission: null,
-    engine27MinuteReadiness: null,
-    riskConfig: risk(),
-  });
-
-  const otherStrategy = buildEngine7ProposedSizingPreview({
-    engine26ProposedGeometry: {
-      candidateId: "OTHER-C",
-      zoneId: "OTHER-Z",
-      strategyId: "minor_swing@1h",
-      symbol: "ES",
-      direction: "LONG",
-      setupType: "OTHER_SETUP",
-      setupClass: "OTHER_SETUP",
-      snapshotTime: "2026-07-23T12:00:00.000Z",
-      candidateIdentityPreserved: true,
-      proposedEntryPrice: 6000,
-      proposedStopPrice: 5998,
-      proposedStopDistancePoints: 2,
-      proposedTargets: [{ price: 6004 }],
-    },
-    engine6PaperPermission: { decision: "PAPER_ALLOW", allowed: true },
-    engine27MinuteReadiness: { decisionState: "READY", ready: true },
-    riskConfig: risk(),
-  });
-
-  for (const output of [subminute, otherStrategy]) {
-    assert.equal(output.testingDataCollectionMode, undefined);
-    assert.equal(output.paperTestingContracts, undefined);
-    assert.equal(output.testingThreeContractPlanQualified, undefined);
-    assert.equal(output.testingRiskOverrideApplied, undefined);
-    assert.equal(output.threeContractAllocation, undefined);
-  }
-});
-
-test("testing publication mutates no inputs and creates no downstream authority", () => {
-  setDataCollectionFlag("1");
-
-  const g = geometry();
-  const p = permission();
-  const r = readiness();
-  const c = risk({ riskBudgetDollars: 250 });
-  const before = JSON.stringify({ g, p, r, c });
-
-  const output = buildEngine7ProposedSizingPreview({
-    engine26ProposedGeometry: g,
-    engine6PaperPermission: p,
-    engine27MinuteReadiness: r,
-    riskConfig: c,
-  });
-
-  assert.equal(JSON.stringify({ g, p, r, c }), before);
-  assert.equal(output.paperTestingContracts, 3);
-  assert.equal(output.executableSizing, false);
-  assert.equal(output.noPermissionCreated, true);
-  assert.equal(output.noOfficialPlanCreated, true);
-  assert.equal(output.noManagementCreated, true);
-  assert.equal(output.noRunnerTargetCreated, true);
-  assert.equal(output.noOrderCreated, true);
-  assert.equal(output.noFillCreated, true);
-  assert.equal(output.noJournalEventCreated, true);
-  assert.equal(output.noBrokerOrder, true);
-  assert.equal(output.noExecution, true);
-  assert.equal(output.tradeId, null);
-  assert.equal(output.idempotencyKey, null);
-});
-
-test("identity mismatch publishes the complete dual contract without qualifying testing", () => {
-  setDataCollectionFlag("1");
-  const output = build({
-    permissionOverride: { candidateId: "OTHER-CANDIDATE" },
-  });
-
-  assert.equal(output.status, "PROPOSED_GEOMETRY_IDENTITY_MISMATCH");
-  assert.equal(output.testingDataCollectionMode, true);
-  assert.equal(output.testingRiskOverrideApplied, false);
-  assert.equal(output.paperTestingContracts, 0);
-  assert.equal(output.testingThreeContractPlanQualified, false);
-  assert.equal(output.productionRiskBudgetDollars, 1000);
-  assert.equal(typeof output.productionRiskSupportedContracts, "number");
-  assert.equal(typeof output.productionEstimatedRiskDollars, "number");
-  assert.equal(output.productionThreeContractPlanQualified, false);
-  assert.equal(typeof output.productionRiskLimited, "boolean");
-  assert.deepEqual(output.threeContractAllocation, {
+  assert.equal(output.engine9TestingAllocationAccepted, false);
+  assert.equal(output.finalTestingThreeContractPlanQualified, false);
+  assert.deepEqual(output.finalThreeContractAllocation, {
     block1Contracts: 0,
-    block1Purpose: "TARGET_1_ZONE_TOUCH",
     block2Contracts: 0,
-    block2Purpose: "TARGET_2_ZONE_MIDLINE",
     block3Contracts: 0,
-    block3Purpose: "ENGINE9_RUNNER_HANDOFF",
     totalContracts: 0,
   });
+  assert.equal(output.finalPaperTestingContracts, 0);
+  assert.equal(output.finalContracts, 1);
 });
 
-test("missing setupClass does not receive the Strategy 1 extension schema", () => {
-  setDataCollectionFlag("1");
-
+test("production quantity conflict blocks production fallback but valid testing proceeds", () => {
   const output = build({
-    geometryOverride: { setupClass: null },
-    permissionOverride: { setupClass: null },
-    readinessOverride: { setupClass: null },
+    engine7SizingPreview: engine7A({ productionRiskSupportedContracts: 2 }),
   });
-
-  for (const field of [
-    "testingDataCollectionMode",
-    "testingRiskOverrideApplied",
-    "paperTestingContracts",
-    "testingThreeContractPlanQualified",
-    "threeContractAllocation",
-    "productionRiskBudgetDollars",
-    "productionRiskSupportedContracts",
-    "productionEstimatedRiskDollars",
-    "productionThreeContractPlanQualified",
-    "productionRiskLimited",
-  ]) {
-    assert.equal(output[field], undefined, field);
-  }
-
-  assert.equal(output.nonExecutable, true);
+  assert.equal(output.finalProductionContracts, 0);
+  assert.equal(output.finalPaperTestingContracts, 3);
+  assert.equal(output.finalContracts, 3);
+  assert.equal(output.finalSizingMode, "PAPER_TESTING_DATA_COLLECTION");
+  assert.ok(output.reasonCodes.includes("ENGINE7B_LEGACY_PRODUCTION_CROSS_CHECK_FAILED"));
 });
 
-const earlyPublicationCases = [
-  ["missing candidateId", { geometryOverride: { candidateId: null } }, "ENGINE26B_CANDIDATEID_MISSING"],
-  ["missing zoneId", { geometryOverride: { zoneId: null } }, "ENGINE26B_ZONEID_MISSING"],
-  ["missing snapshot time", { geometryOverride: { snapshotTime: null } }, "ENGINE26B_SNAPSHOT_TIME_MISSING"],
-  ["candidate identity not preserved", { geometryOverride: { candidateIdentityPreserved: false } }, "ENGINE26B_CANDIDATE_IDENTITY_NOT_PRESERVED"],
-  [
-    "incomplete geometry on the canonical Strategy 1 path",
-    {
-      geometryOverride: {
-        geometryReady: false,
-        proposedEntryPrice: null,
-        proposedStopPrice: null,
-        proposedStopDistancePoints: null,
-        proposedTargets: [],
-      },
-    },
-    "ENGINE26B_GEOMETRY_READY_REQUIRED",
-  ],
-];
-
-for (const [name, args, blocker] of earlyPublicationCases) {
-  test(`${name} still publishes the complete data-collection envelope`, () => {
-    setDataCollectionFlag("1");
-    const output = build(args);
-
-    assert.equal(output.testingDataCollectionMode, true);
-    assert.equal(output.testingRiskOverrideApplied, false);
-    assert.equal(output.paperTestingContracts, 0);
-    assert.equal(output.testingThreeContractPlanQualified, false);
-    assert.equal("productionRiskBudgetDollars" in output, true);
-    assert.equal("productionRiskSupportedContracts" in output, true);
-    assert.equal("productionEstimatedRiskDollars" in output, true);
-    assert.equal("productionThreeContractPlanQualified" in output, true);
-    assert.equal("productionRiskLimited" in output, true);
-    assert.equal("threeContractAllocation" in output, true);
-    assert.equal(output.threeContractAllocation.block1Contracts, 0);
-    assert.equal(output.threeContractAllocation.block2Contracts, 0);
-    assert.equal(output.threeContractAllocation.block3Contracts, 0);
-    assert.equal(output.threeContractAllocation.totalContracts, 0);
-    assert.equal(output.blockers.includes(blocker), true, `${blocker} missing`);
-    assert.equal(output.sizingReady, false);
-    assert.equal(output.executableSizing, false);
-    assert.equal(output.noExecution, true);
+test("blocked output keeps stable Strategy 1 schema", () => {
+  const output = build({
+    engine6PaperPermission: permission({ allowed: false }),
   });
-}
+  assert.equal(output.finalPaperTestingContracts, 0);
+  assert.equal(output.finalContracts, 0);
+  assert.equal(output.finalSizingMode, "UNAVAILABLE");
+  assert.equal(output.finalSizingReady, false);
+  assert.equal(output.paperOrderSizingReady, false);
+  assert.equal(output.allowed, false);
+  assert.equal(output.executableSizing, false);
+  assert.deepEqual(output.finalThreeContractAllocation, {
+    block1Contracts: 0,
+    block2Contracts: 0,
+    block3Contracts: 0,
+    totalContracts: 0,
+  });
+  assertPaperSafety(output);
+});
+
+test("does not mutate any input", () => {
+  const inputs = {
+    engine7SizingPreview: engine7A(),
+    engine6PaperPermission: permission(),
+    engine27MinuteReadiness: readiness(),
+    engine9OfficialManagementPlan: engine9(),
+    riskConfig: risk(),
+    tradeState: {},
+  };
+  const before = structuredClone(inputs);
+  buildEngine7FinalPositionSizing(inputs);
+  assert.deepEqual(inputs, before);
+});
