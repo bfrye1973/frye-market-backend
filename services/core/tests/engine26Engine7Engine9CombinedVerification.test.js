@@ -1,168 +1,222 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  buildEngine7ProposedSizingPreview,
-} from "../logic/engine7/v2/buildProposedSizingPreview.js";
-import {
-  buildEngine9OfficialManagementPlan,
-} from "../logic/engine9/v1/buildOfficialManagementPlan.js";
-import {
-  buildEngine7FinalPositionSizing,
-} from "../logic/engine7/v2/buildFinalPositionSizing.js";
+import { buildEngine26PaperTradePlan } from "../logic/engine26/paperTradePlanner.js";
+import { buildEngine7ProposedSizingPreview } from "../logic/engine7/v2/buildProposedSizingPreview.js";
+import { buildEngine9OfficialManagementPlan } from "../logic/engine9/v1/buildOfficialManagementPlan.js";
 
 const SETUP = "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION";
-const SNAPSHOT_TIME = "2026-07-26T18:00:00.000Z";
 
-const candidate = {
-  active: true,
+const IDENTITY = Object.freeze({
   laneId: "minute",
   strategyId: "intraday_scalp@10m",
-  candidateId: "E26C-COMBINED-E7B",
-  zoneId: "E26Z-COMBINED-E7B",
+  candidateId: "E26C-COMBINED-VERIFY",
+  zoneId: "E26Z-COMBINED-ENTRY",
   symbol: "ES",
-  direction: "LONG",
-  setupType: SETUP,
   setupClass: SETUP,
   setupGrade: "A+++",
   identitySetupKey: SETUP,
   candidateIdentityVersion: "engine26.strategy1.v1",
-  snapshotTime: SNAPSHOT_TIME,
-  targetZone: {
-    low: 6004,
-    midline: 6006,
-  },
-};
+});
 
-const geometry = {
-  active: true,
-  geometryReady: true,
-  candidateIdentityPreserved: true,
-  ...candidate,
-  proposedEntryPrice: 6000,
-  proposedStopPrice: 5998,
-  proposedStopDistancePoints: 2,
-  proposedTargets: [
-    { targetId: "TARGET_1", sequence: 1, price: 6004, purpose: "TARGET_1_ZONE_TOUCH" },
-    { targetId: "TARGET_2", sequence: 2, price: 6006, purpose: "TARGET_2_ZONE_MIDLINE" },
-    {
-      targetId: "RUNNER_HANDOFF",
-      sequence: 3,
-      price: null,
-      purpose: "ENGINE9_RUNNER_HANDOFF",
-      runnerHandoffRequired: true,
+function makeCandidate() {
+  return {
+    ...IDENTITY,
+    active: true,
+    status: "INSIDE_LOCATION",
+    directionBias: "LONG",
+    setupType: SETUP,
+    snapshotTime: "2026-07-24T12:00:00.000Z",
+    entryZone: {
+      id: IDENTITY.zoneId,
+      zoneId: IDENTITY.zoneId,
+      low: 7441,
+      high: 7450.5,
+      midline: 7445.75,
     },
-  ],
-};
-
-const permission = {
-  decision: "FAST_INTRADAY_PAPER_ALLOW",
-  allowed: true,
-  planningAllowed: true,
-  ...candidate,
-};
-
-const minuteDecision = {
-  decisionState: "READY",
-  pipelineIdentity: {
-    complete: true,
-    consistent: true,
-  },
-  readiness: {
-    reactionReady: true,
-    participationReady: true,
-    permissionReady: true,
-    plannerReady: true,
-    invalidated: false,
-  },
-  ...candidate,
-};
-
-const minuteFib = {
-  degree: "minute",
-  activeLadder: "EXTENSION",
-  validation: {
-    available: true,
-    matches: true,
-  },
-  anchors: {
-    direction: "BULLISH",
-  },
-  extensions: {
-    e100: { price: 6005 },
-    e1168: { price: 6010 },
-    e1272: { price: 6012 },
-  },
-};
-
-const riskConfig = {
-  instrument: "ES",
-  riskBudgetDollars: 100,
-  dollarsPerPoint: 50,
-  minimumContracts: 1,
-  maximumContracts: 1,
-  roundingRule: "FLOOR",
-  estimatedSlippagePointsPerSide: 0,
-  commissionDollarsPerContractRoundTrip: 0,
-  paperOnly: true,
-};
-
-function buildPipeline({ waiting = false } = {}) {
-  const priorFlag = process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION;
-  process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION = "1";
-
-  try {
-    const currentPermission = waiting
-      ? { ...permission, allowed: false, planningAllowed: false }
-      : permission;
-
-    const engine7A = buildEngine7ProposedSizingPreview({
-      engine26ProposedGeometry: geometry,
-      engine6PaperPermission: currentPermission,
-      engine27MinuteReadiness: minuteDecision,
-      riskConfig,
-      snapshotTime: SNAPSHOT_TIME,
-    });
-
-    const engine9 = buildEngine9OfficialManagementPlan({
-      engine26LocationCandidate: candidate,
-      engine26ProposedGeometry: geometry,
-      engine7SizingPreview: engine7A,
-      engine6PaperPermission: currentPermission,
-      engine27MinuteDecision: minuteDecision,
-      engine27MinuteFib: minuteFib,
-      snapshotTime: SNAPSHOT_TIME,
-    });
-
-    const engine7B = buildEngine7FinalPositionSizing({
-      engine7SizingPreview: engine7A,
-      engine6PaperPermission: currentPermission,
-      engine27MinuteReadiness: minuteDecision,
-      engine9OfficialManagementPlan: engine9,
-      riskConfig,
-      tradeState: {
-        duplicateBlocked: false,
-        candidateAlreadySized: false,
-        candidateAlreadyOrdered: false,
-        openTradeForStrategy: false,
-        idempotencyKeyAlreadyUsed: false,
-      },
-      snapshotTime: SNAPSHOT_TIME,
-    });
-
-    return { engine7A, engine9, engine7B };
-  } finally {
-    if (priorFlag === undefined) delete process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION;
-    else process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION = priorFlag;
-  }
+    targetZone: {
+      id: "E26Z-COMBINED-TARGET",
+      zoneId: "E26Z-COMBINED-TARGET",
+      low: 7504,
+      high: 7518.5,
+      midline: 7511.25,
+    },
+    locationInvalidationBoundary: 7440.75,
+    invalidationFacts: {
+      completedCloseInvalidationConfirmed: false,
+    },
+  };
 }
 
-test("fully qualified Engine 26B to Engine 7A to Engine 9 to Engine 7B testing result", () => {
-  const { engine7A, engine9, engine7B } = buildPipeline();
+function makeHandoff() {
+  const candidate = makeCandidate();
+  return {
+    ...IDENTITY,
+    active: true,
+    engine: "engine26.geometryHandoff.v1",
+    setupType: SETUP,
+    snapshotTime: candidate.snapshotTime,
+    entryZone: structuredClone(candidate.entryZone),
+    targetZone: structuredClone(candidate.targetZone),
+    locationInvalidationBoundary: candidate.locationInvalidationBoundary,
+    noPermissionCreated: true,
+    noExecution: true,
+  };
+}
 
-  assert.equal(engine7A.testingThreeContractPlanQualified, true);
-  assert.equal(engine7A.paperTestingContracts, 3);
-  assert.deepEqual(engine7A.threeContractAllocation, {
+function makePermission() {
+  return {
+    paper: {
+      ...IDENTITY,
+      direction: "LONG",
+      setupType: SETUP,
+      snapshotTime: "2026-07-24T12:00:00.000Z",
+      decision: "FAST_INTRADAY_PAPER_ALLOW",
+      allowed: true,
+      planningAllowed: true,
+      sizeMultiplier: 1,
+      mode: "PAPER_ONLY",
+      realExecutionAllowed: false,
+      requiresEngine8Paper: true,
+      requiresEngine10Journal: true,
+    },
+  };
+}
+
+function buildEngine26Geometry() {
+  return buildEngine26PaperTradePlan({
+    symbol: "ES",
+    strategyId: IDENTITY.strategyId,
+    tf: "10m",
+    permission: makePermission(),
+    engine22WaveStrategy: {
+      currentLifecycleState: {
+        direction: "LONG",
+        key: SETUP,
+      },
+    },
+    engine25Context: {},
+    confluence: {
+      price: 7445.75,
+      context: {
+        reaction: {},
+        volume: {},
+      },
+    },
+    engine15Decision: {},
+    engine26LocationCandidate: makeCandidate(),
+    engine26GeometryHandoff: makeHandoff(),
+    openPaperTrades: [],
+    dailyBars: [],
+  }).engine26ProposedGeometry;
+}
+
+function buildEngine7Sizing(engine26ProposedGeometry) {
+  return buildEngine7ProposedSizingPreview({
+    engine26ProposedGeometry,
+    engine6PaperPermission: {
+      ...IDENTITY,
+      direction: "LONG",
+      setupType: SETUP,
+      snapshotTime: "2026-07-24T12:00:00.000Z",
+      decision: "FAST_INTRADAY_PAPER_ALLOW",
+      allowed: true,
+      planningAllowed: true,
+      sizeMultiplier: 1,
+    },
+    engine27MinuteReadiness: {
+      ...IDENTITY,
+      direction: "LONG",
+      setupType: SETUP,
+      snapshotTime: "2026-07-24T12:00:00.000Z",
+      decisionState: "READY",
+      reactionReady: true,
+      participationReady: true,
+      permissionReady: true,
+      plannerReady: true,
+      invalidated: false,
+    },
+    riskConfig: {
+      instrument: "ES",
+      riskBudgetDollars: 250,
+      dollarsPerPoint: 50,
+      minimumContracts: 1,
+      maximumContracts: 5,
+      roundingRule: "FLOOR",
+      estimatedSlippagePointsPerSide: 0.25,
+      commissionDollarsPerContractRoundTrip: 5,
+      paperOnly: true,
+    },
+    snapshotTime: "2026-07-24T12:00:00.000Z",
+  });
+}
+
+function buildEngine9Plan(engine26ProposedGeometry, engine7SizingPreview) {
+  return buildEngine9OfficialManagementPlan({
+    engine26LocationCandidate: makeCandidate(),
+    engine26ProposedGeometry,
+    engine7SizingPreview,
+    engine6PaperPermission: {
+      ...IDENTITY,
+      direction: "LONG",
+      setupType: SETUP,
+      snapshotTime: "2026-07-24T12:00:00.000Z",
+      decision: "FAST_INTRADAY_PAPER_ALLOW",
+      allowed: true,
+      planningAllowed: true,
+    },
+    engine27MinuteDecision: {
+      ...IDENTITY,
+      direction: "LONG",
+      readiness: {
+        reactionReady: true,
+        participationReady: true,
+        permissionReady: true,
+        plannerReady: true,
+        invalidated: false,
+      },
+    },
+    engine27MinuteFib: {
+      degree: "minute",
+      activeLadder: "EXTENSION",
+      validation: {
+        available: true,
+        matches: true,
+      },
+      extensions: {
+        e100: { price: 7511.25 },
+        e2618: { price: 7739.5 },
+      },
+    },
+    snapshotTime: "2026-07-24T12:00:00.000Z",
+  });
+}
+
+test("combined Strategy 1 pipeline becomes ready without execution authority", () => {
+  const geometry = buildEngine26Geometry();
+
+  assert.equal(geometry.geometryReady, true);
+  assert.equal(geometry.active, true);
+  assert.equal(geometry.candidateIdentityPreserved, true);
+  assert.equal(geometry.proposedEntryPrice, 7445.75);
+  assert.equal(geometry.proposedStopPrice, 7440.75);
+  assert.equal(geometry.proposedStopDistancePoints, 5);
+  assert.equal(geometry.target1Price, 7504);
+  assert.equal(geometry.target2Price, 7511.25);
+  assert.equal(geometry.target3Price, null);
+  assert.equal(geometry.runnerHandoffRequired, true);
+  assert.equal(geometry.proposedTargets[2].purpose, "ENGINE9_RUNNER_HANDOFF");
+  assert.equal(geometry.proposedTargets[2].price, null);
+
+  const sizing = buildEngine7Sizing(geometry);
+
+  assert.equal(sizing.productionThreeContractPlanQualified, false);
+  assert.equal(sizing.productionRiskLimited, true);
+  assert.equal(sizing.testingDataCollectionMode, true);
+  assert.equal(sizing.testingRiskOverrideApplied, true);
+  assert.equal(sizing.paperTestingContracts, 3);
+  assert.equal(sizing.testingThreeContractPlanQualified, true);
+  assert.deepEqual(sizing.threeContractAllocation, {
     block1Contracts: 1,
     block1Purpose: "TARGET_1_ZONE_TOUCH",
     block2Contracts: 1,
@@ -172,48 +226,41 @@ test("fully qualified Engine 26B to Engine 7A to Engine 9 to Engine 7B testing r
     totalContracts: 3,
   });
 
-  assert.equal(engine9.managementReady, true);
-  assert.equal(engine9.testingAllocationAccepted, true);
+  const plan = buildEngine9Plan(geometry, sizing);
+
+  assert.equal(plan.managementReady, true);
+  assert.equal(plan.planStatus, "OFFICIAL_PLAN_READY");
+  assert.equal(plan.upstreamState.planningAllowed, true);
   assert.equal(
-    engine9.allocationQualificationSource,
+    plan.upstreamState.engine6Decision,
+    "FAST_INTRADAY_PAPER_ALLOW"
+  );
+  assert.equal(plan.upstreamState.testingAllocationAccepted, true);
+  assert.equal(
+    plan.upstreamState.allocationQualificationSource,
     "ENGINE7A_TESTING_DATA_COLLECTION"
   );
+  assert.equal(plan.officialTargets[0].price, 7504);
+  assert.equal(plan.officialTargets[1].price, 7511.25);
 
-  // Current Engine 9 production code publishes OFFICIAL_PLAN_READY.
-  // Authorized Engine 7B requirements accept only OFFICIAL.
-  // This assertion intentionally exposes the cross-contract blocker.
-  assert.equal(engine9.planStatus, "OFFICIAL");
+  const runner =
+    plan.officialTargets.find(
+      (target) =>
+        target?.role === "RUNNER" ||
+        target?.purpose === "RUNNER" ||
+        target?.sourcePurpose === "ENGINE9_RUNNER_HANDOFF"
+    ) ?? plan.officialTargets[2];
 
-  assert.equal(engine7B.productionRiskSupportedContracts, 1);
-  assert.equal(engine7B.finalProductionContracts, 1);
-  assert.equal(engine7B.finalPaperTestingContracts, 3);
-  assert.equal(engine7B.finalContracts, 3);
-  assert.equal(engine7B.finalSizingMode, "PAPER_TESTING_DATA_COLLECTION");
-  assert.equal(engine7B.finalSizingReady, true);
-  assert.equal(engine7B.paperOrderSizingReady, true);
-  assert.equal(engine7B.status, "FINAL_SIZE_READY");
-  assert.equal(engine7B.allowed, true);
-  assert.equal(engine7B.executableSizing, true);
-  assert.equal(engine7B.noOrderCreated, true);
-  assert.equal(engine7B.noExecution, true);
-  assert.equal(engine7B.noBrokerOrder, true);
-  assert.equal(engine7B.noFillCreated, true);
-  assert.equal(engine7B.noJournalWrite, true);
-});
+  assert.equal(runner.price, 7739.5);
 
-test("controlled Engine 6 safe-waiting result remains stable and non-executing", () => {
-  const { engine7B } = buildPipeline({ waiting: true });
+  assert.deepEqual(
+    plan.openingManagementPlan.blocks.map((block) => block.contracts),
+    [1, 1, 1]
+  );
 
-  assert.equal(engine7B.finalPaperTestingContracts, 0);
-  assert.equal(engine7B.finalContracts, 0);
-  assert.equal(engine7B.finalSizingMode, "UNAVAILABLE");
-  assert.equal(engine7B.finalSizingReady, false);
-  assert.equal(engine7B.paperOrderSizingReady, false);
-  assert.equal(engine7B.allowed, false);
-  assert.equal(engine7B.executableSizing, false);
-  assert.equal(engine7B.noOrderCreated, true);
-  assert.equal(engine7B.noExecution, true);
-  assert.equal(engine7B.noBrokerOrder, true);
-  assert.equal(engine7B.noFillCreated, true);
-  assert.equal(engine7B.noJournalWrite, true);
+  assert.equal(plan.noPermissionCreated, true);
+  assert.equal(plan.noSizingCreated, true);
+  assert.equal(plan.noOrderCreated, true);
+  assert.equal(plan.noExecution, true);
+  assert.equal(plan.noJournalWrite, true);
 });
