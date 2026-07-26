@@ -898,7 +898,7 @@ function blockedResult({
  * @param {object|null} input.tradeState
  * @param {string|null} input.snapshotTime
  */
-export function buildEngine7FinalPositionSizing({
+function buildLegacyEngine7FinalPositionSizing({
   engine6PaperPermission = null,
   engine27MinuteReadiness = null,
   engine9OfficialManagementPlan = null,
@@ -1478,6 +1478,651 @@ export function buildEngine7FinalPositionSizing({
       "NO_EXECUTION",
     ]),
   };
+}
+
+
+
+const STRATEGY1 = Object.freeze({
+  laneId: "minute",
+  strategyId: "intraday_scalp@10m",
+  symbol: "ES",
+  setupClass: "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
+  setupGrade: "A+++",
+});
+
+const STRATEGY1_IDENTITY_FIELDS = Object.freeze([
+  "laneId",
+  "strategyId",
+  "candidateId",
+  "zoneId",
+  "symbol",
+  "setupClass",
+  "setupGrade",
+  "identitySetupKey",
+  "candidateIdentityVersion",
+  "direction",
+]);
+
+const ZERO_ALLOCATION = Object.freeze({
+  block1Contracts: 0,
+  block2Contracts: 0,
+  block3Contracts: 0,
+  totalContracts: 0,
+});
+
+function claimsStrategy1(source) {
+  return Boolean(
+    source &&
+      typeof source === "object" &&
+      (safeString(source.strategyId) === STRATEGY1.strategyId ||
+        safeString(source.setupClass) === STRATEGY1.setupClass)
+  );
+}
+
+function identityValue(source, field) {
+  if (!source || typeof source !== "object") return null;
+  const value = source[field];
+  return value === null || value === undefined || safeString(value) === ""
+    ? null
+    : value;
+}
+
+function exactIdentityEqual(left, right) {
+  return safeString(left) !== "" && safeString(left) === safeString(right);
+}
+
+function copyStrictIdentity(source) {
+  return Object.fromEntries(
+    STRATEGY1_IDENTITY_FIELDS.map((field) => [field, identityValue(source, field)])
+  );
+}
+
+function validateStrictIdentity({ engine7A, engine9, engine6, engine27 }) {
+  const missing = [];
+  const conflicts = [];
+  const expected = {
+    laneId: STRATEGY1.laneId,
+    strategyId: STRATEGY1.strategyId,
+    symbol: STRATEGY1.symbol,
+    setupClass: STRATEGY1.setupClass,
+    setupGrade: STRATEGY1.setupGrade,
+  };
+
+  for (const [carrierName, carrier] of [["ENGINE7A", engine7A], ["ENGINE9", engine9]]) {
+    for (const field of STRATEGY1_IDENTITY_FIELDS) {
+      const value = identityValue(carrier, field);
+      if (value == null) {
+        missing.push(`${carrierName}_${safeUpper(field)}_MISSING`);
+      }
+    }
+    for (const [field, expectedValue] of Object.entries(expected)) {
+      const value = identityValue(carrier, field);
+      if (value != null && safeString(value) !== expectedValue) {
+        conflicts.push(`${carrierName}_${safeUpper(field)}_INVALID`);
+      }
+    }
+  }
+
+  for (const field of STRATEGY1_IDENTITY_FIELDS) {
+    const a = identityValue(engine7A, field);
+    const b = identityValue(engine9, field);
+    if (a != null && b != null && !exactIdentityEqual(a, b)) {
+      conflicts.push(`ENGINE7A_ENGINE9_${safeUpper(field)}_MISMATCH`);
+    }
+  }
+
+  for (const [carrierName, carrier] of [["ENGINE6", engine6], ["ENGINE27E", engine27]]) {
+    if (!carrier || typeof carrier !== "object") continue;
+    for (const field of STRATEGY1_IDENTITY_FIELDS) {
+      const optionalValue = identityValue(carrier, field);
+      if (optionalValue == null) continue;
+      const canonicalValue = identityValue(engine9, field) ?? identityValue(engine7A, field);
+      if (canonicalValue != null && !exactIdentityEqual(optionalValue, canonicalValue)) {
+        conflicts.push(`${carrierName}_${safeUpper(field)}_MISMATCH`);
+      }
+    }
+  }
+
+  return {
+    valid: missing.length === 0 && conflicts.length === 0,
+    missing: unique(missing),
+    conflicts: unique(conflicts),
+    engine7AIdentity: copyStrictIdentity(engine7A),
+    engine9Identity: copyStrictIdentity(engine9),
+  };
+}
+
+function readEngine7AAllocation(engine7A) {
+  const allocation =
+    engine7A?.threeContractAllocation ||
+    engine7A?.preliminaryAllocation ||
+    engine7A?.contractAllocation ||
+    null;
+
+  return {
+    block1Contracts: toNumber(
+      allocation?.block1Contracts ?? allocation?.BLOCK_1 ?? allocation?.block1
+    ),
+    block2Contracts: toNumber(
+      allocation?.block2Contracts ?? allocation?.BLOCK_2 ?? allocation?.block2
+    ),
+    block3Contracts: toNumber(
+      allocation?.block3Contracts ?? allocation?.BLOCK_3 ?? allocation?.block3
+    ),
+    totalContracts: toNumber(allocation?.totalContracts),
+  };
+}
+
+function isExactTestingAllocation(allocation) {
+  return (
+    allocation.block1Contracts === 1 &&
+    allocation.block2Contracts === 1 &&
+    allocation.block3Contracts === 1 &&
+    allocation.totalContracts === 3
+  );
+}
+
+function targetById(officialTargets, targetId) {
+  if (!Array.isArray(officialTargets)) return null;
+  return officialTargets.find((target) => safeUpper(target?.targetId) === targetId) || null;
+}
+
+function blockCollection(engine9) {
+  if (Array.isArray(engine9?.openingManagementPlan?.blocks)) {
+    return engine9.openingManagementPlan.blocks;
+  }
+  if (Array.isArray(engine9?.threeBlockManagement?.blocks)) {
+    return engine9.threeBlockManagement.blocks;
+  }
+  return [];
+}
+
+function analyzeManagement(engine9) {
+  const targets = Array.isArray(engine9?.officialTargets) ? engine9.officialTargets : [];
+  const t1 = targetById(targets, "T1");
+  const t2 = targetById(targets, "T2");
+  const t3 = targetById(targets, "T3");
+  const blocks = blockCollection(engine9);
+  const byId = new Map();
+  const duplicates = [];
+
+  for (const block of blocks) {
+    const id = safeUpper(block?.blockId);
+    if (!id) continue;
+    if (byId.has(id)) duplicates.push(id);
+    else byId.set(id, block);
+  }
+
+  const expectedIds = new Set(["BLOCK_1", "BLOCK_2", "BLOCK_3"]);
+  const extras = blocks.filter((block) => !expectedIds.has(safeUpper(block?.blockId)));
+
+  const validateBlock = ({ id, target, targetId, purpose, runner = false }) => {
+    const block = byId.get(id) || null;
+    const blockPrice = toNumber(block?.targetPrice);
+    const officialPrice = toNumber(target?.price ?? target?.targetPrice);
+    const runnerPrice = toNumber(engine9?.runnerTargetPrice ?? engine9?.runnerPlan?.runnerTargetPrice);
+    const valid = Boolean(
+      block &&
+        toNumber(block.contracts) === 1 &&
+        safeUpper(block.targetId) === targetId &&
+        safeUpper(block.purpose) === purpose &&
+        officialPrice != null &&
+        blockPrice === officialPrice &&
+        (!runner ||
+          (runnerPrice != null &&
+            blockPrice === runnerPrice &&
+            safeUpper(engine9?.runnerTargetStatus ?? engine9?.runnerPlan?.runnerTargetStatus) ===
+              "RUNNER_TARGET_SELECTED" &&
+            engine9?.runnerPlan?.enabled === true &&
+            safeUpper(engine9?.runnerPlan?.blockId) === "BLOCK_3" &&
+            toNumber(engine9?.runnerPlan?.contracts) === 1 &&
+            toNumber(engine9?.runnerPlan?.runnerTargetPrice) === runnerPrice &&
+            safeUpper(engine9?.runnerPlan?.status) === "RUNNER_TARGET_SELECTED" &&
+            toNumber(t2?.price ?? t2?.targetPrice) != null &&
+            runnerPrice > toNumber(t2?.price ?? t2?.targetPrice)))
+    );
+    return { valid, block, target, blockPrice, officialPrice };
+  };
+
+  const block1 = validateBlock({
+    id: "BLOCK_1",
+    target: t1,
+    targetId: "T1",
+    purpose: "TARGET_1_ZONE_TOUCH",
+  });
+  const block2 = validateBlock({
+    id: "BLOCK_2",
+    target: t2,
+    targetId: "T2",
+    purpose: "TARGET_2_ZONE_MIDLINE",
+  });
+  const block3 = validateBlock({
+    id: "BLOCK_3",
+    target: t3,
+    targetId: "T3",
+    purpose: "ENGINE9_RUNNER",
+    runner: true,
+  });
+
+  let usableManagementBlocks = 0;
+  if (block1.valid) usableManagementBlocks = 1;
+  if (usableManagementBlocks === 1 && block2.valid) usableManagementBlocks = 2;
+  if (usableManagementBlocks === 2 && block3.valid) usableManagementBlocks = 3;
+
+  return {
+    t1,
+    t2,
+    t3,
+    blocks,
+    block1,
+    block2,
+    block3,
+    duplicateBlockIds: unique(duplicates),
+    extraBlockCount: extras.length,
+    exactThreeBlockManagementValid:
+      blocks.length === 3 &&
+      duplicates.length === 0 &&
+      extras.length === 0 &&
+      block1.valid &&
+      block2.valid &&
+      block3.valid,
+    usableManagementBlocks,
+  };
+}
+
+function strictBaseFromLegacy({ legacy, engine7A, engine9, identityValidation, management }) {
+  const engine7AAllocation = readEngine7AAllocation(engine7A);
+  return {
+    ...legacy,
+    ...copyStrictIdentity(engine9),
+    setupType: engine9?.setupType ?? legacy?.setupType ?? null,
+    officialEntryPrice: toNumber(engine9?.officialEntryPrice),
+    officialStopPrice: toNumber(engine9?.officialStopPrice),
+    officialStopDistancePoints: toNumber(engine9?.officialStopDistancePoints),
+    providedStopDistancePoints: toNumber(engine9?.officialStopDistancePoints),
+    officialTargets: normalizeOfficialTargets(engine9?.officialTargets),
+    targetCount: Array.isArray(engine9?.officialTargets) ? engine9.officialTargets.length : 0,
+    engine9PlanStatus: engine9?.planStatus ?? null,
+    engine9ManagementReady: engine9?.managementReady === true,
+    engine9Official: engine9?.official === true,
+    identityValidation,
+    managementValidation: management,
+
+    productionRiskBudgetDollars: toNumber(engine7A?.productionRiskBudgetDollars),
+    productionRiskSupportedContracts: toNumber(engine7A?.productionRiskSupportedContracts),
+    productionEstimatedRiskDollars: toNumber(engine7A?.productionEstimatedRiskDollars),
+    productionThreeContractPlanQualified:
+      engine7A?.productionThreeContractPlanQualified === true,
+    productionRiskLimited: engine7A?.productionRiskLimited === true,
+    finalProductionContracts: 0,
+
+    engine7ATestingDataCollectionMode: engine7A?.testingDataCollectionMode === true,
+    engine7ATestingRiskOverrideApplied: engine7A?.testingRiskOverrideApplied === true,
+    engine7APaperTestingContracts: toNumber(engine7A?.paperTestingContracts) ?? 0,
+    engine7ATestingThreeContractPlanQualified:
+      engine7A?.testingThreeContractPlanQualified === true,
+    engine7AThreeContractAllocation: { ...engine7AAllocation },
+
+    engine9TestingAllocationAccepted: engine9?.testingAllocationAccepted === true,
+    engine9AllocationQualificationSource:
+      engine9?.allocationQualificationSource ?? null,
+
+    finalTestingThreeContractPlanQualified: false,
+    finalThreeContractAllocation: { ...ZERO_ALLOCATION },
+    finalPaperTestingContracts: 0,
+
+    finalSizingMode: "UNAVAILABLE",
+    finalSizingReady: false,
+    paperOrderSizingReady: false,
+
+    finalContracts: 0,
+    allowed: false,
+    executableSizing: false,
+  };
+}
+
+function strictBlocked(base, { status, blocker, blockers = [], reasonCode, reasonCodes = [], warnings = [] }) {
+  return {
+    ...base,
+    active: true,
+    finalProductionContracts: 0,
+    finalTestingThreeContractPlanQualified: false,
+    finalThreeContractAllocation: { ...ZERO_ALLOCATION },
+    finalPaperTestingContracts: 0,
+    finalContracts: 0,
+    finalSizingMode: "UNAVAILABLE",
+    finalSizingReady: false,
+    paperOrderSizingReady: false,
+    allowed: false,
+    executableSizing: false,
+    status,
+    blockers: unique([blocker, ...blockers]),
+    warnings: unique(warnings),
+    reasonCodes: unique([
+      ...(base.reasonCodes || []),
+      reasonCode,
+      ...reasonCodes,
+      "ENGINE7B_FINAL_CONTRACTS_ZERO",
+      "NO_ORDER_CREATED",
+      "NO_EXECUTION",
+    ]),
+  };
+}
+
+function buildStrictStrategy1FinalSizing({
+  engine7SizingPreview,
+  engine6PaperPermission,
+  engine27MinuteReadiness,
+  engine9OfficialManagementPlan,
+  riskConfig,
+  tradeState,
+  snapshotTime,
+}) {
+  const engine7A = engine7SizingPreview && typeof engine7SizingPreview === "object"
+    ? engine7SizingPreview
+    : {};
+  const engine9 = engine9OfficialManagementPlan && typeof engine9OfficialManagementPlan === "object"
+    ? engine9OfficialManagementPlan
+    : {};
+  const engine6 = engine6PaperPermission && typeof engine6PaperPermission === "object"
+    ? engine6PaperPermission
+    : {};
+  const engine27 = engine27MinuteReadiness && typeof engine27MinuteReadiness === "object"
+    ? engine27MinuteReadiness
+    : {};
+
+  const identityValidation = validateStrictIdentity({ engine7A, engine9, engine6, engine27 });
+  const management = analyzeManagement(engine9);
+
+  // Preserve the exact legacy risk calculation, but synthesize only the aggregate
+  // readiness marker that legacy code requires. Strict readiness is checked below.
+  const legacy = buildLegacyEngine7FinalPositionSizing({
+    engine6PaperPermission,
+    engine27MinuteReadiness: {
+      ...engine27,
+      ready: true,
+      decisionState: "READY",
+    },
+    engine9OfficialManagementPlan,
+    riskConfig,
+    tradeState,
+    snapshotTime,
+  });
+
+  const base = strictBaseFromLegacy({
+    legacy,
+    engine7A,
+    engine9,
+    identityValidation,
+    management,
+  });
+
+  if (!identityValidation.valid) {
+    return strictBlocked(base, {
+      status: identityValidation.missing.length
+        ? "STRATEGY1_IDENTITY_MISSING"
+        : "STRATEGY1_IDENTITY_CONFLICT",
+      blocker: identityValidation.missing.length
+        ? "MANDATORY_CANONICAL_IDENTITY_REQUIRED"
+        : "CANONICAL_IDENTITY_CONFLICT",
+      blockers: [...identityValidation.missing, ...identityValidation.conflicts],
+      reasonCode: identityValidation.missing.length
+        ? "ENGINE7B_STRATEGY1_IDENTITY_INCOMPLETE"
+        : "ENGINE7B_STRATEGY1_IDENTITY_MISMATCH",
+    });
+  }
+
+  if (!engine9OfficialManagementPlan || typeof engine9OfficialManagementPlan !== "object") {
+    return strictBlocked(base, {
+      status: "WAITING_FOR_ENGINE9_OFFICIAL_PLAN",
+      blocker: "ENGINE9_OFFICIAL_PLAN_MISSING",
+      reasonCode: "ENGINE7B_ENGINE9_PLAN_REQUIRED",
+    });
+  }
+
+  if (safeUpper(engine9.planStatus) !== "OFFICIAL") {
+    return strictBlocked(base, {
+      status: "WAITING_FOR_ENGINE9_OFFICIAL_PLAN",
+      blocker: "ENGINE9_PLAN_NOT_OFFICIAL",
+      reasonCode: "ENGINE7B_ENGINE9_PLAN_NOT_OFFICIAL",
+    });
+  }
+
+  if (engine9.managementReady !== true) {
+    return strictBlocked(base, {
+      status: "WAITING_FOR_ENGINE9_MANAGEMENT_READY",
+      blocker: "ENGINE9_MANAGEMENT_NOT_READY",
+      reasonCode: "ENGINE7B_ENGINE9_MANAGEMENT_REQUIRED",
+    });
+  }
+
+  const decision = safeUpper(engine6.decision);
+  if (decision !== "FAST_INTRADAY_PAPER_ALLOW") {
+    return strictBlocked(base, {
+      status: "WAITING_FOR_ENGINE6_PERMISSION",
+      blocker: "ENGINE6_FAST_INTRADAY_DECISION_REQUIRED",
+      reasonCode: "ENGINE7B_ENGINE6_DECISION_MISMATCH",
+    });
+  }
+  if (engine6.allowed !== true) {
+    return strictBlocked(base, {
+      status: "WAITING_FOR_ENGINE6_PERMISSION",
+      blocker: "ENGINE6_ALLOWED_TRUE_REQUIRED",
+      reasonCode: "ENGINE7B_ENGINE6_ALLOW_REQUIRED",
+    });
+  }
+  if (engine6.planningAllowed !== true) {
+    return strictBlocked(base, {
+      status: "WAITING_FOR_ENGINE6_PERMISSION",
+      blocker: "ENGINE6_PLANNING_ALLOWED_REQUIRED",
+      reasonCode: "ENGINE7B_ENGINE6_PLANNING_REQUIRED",
+    });
+  }
+
+  const readiness = engine27.readiness || {};
+  if (readiness.invalidated === true) {
+    return strictBlocked(base, {
+      status: "STRATEGY1_CANDIDATE_INVALIDATED",
+      blocker: "ENGINE27E_INVALIDATED_TRUE",
+      reasonCode: "ENGINE7B_ENGINE27E_INVALIDATED",
+    });
+  }
+  for (const [field, status, blocker, reasonCode] of [
+    ["reactionReady", "WAITING_FOR_ENGINE27_REACTION_READY", "ENGINE27E_REACTION_READY_REQUIRED", "ENGINE7B_REACTION_NOT_READY"],
+    ["participationReady", "WAITING_FOR_ENGINE27_PARTICIPATION_READY", "ENGINE27E_PARTICIPATION_READY_REQUIRED", "ENGINE7B_PARTICIPATION_NOT_READY"],
+    ["permissionReady", "WAITING_FOR_ENGINE27_PERMISSION_READY", "ENGINE27E_PERMISSION_READY_REQUIRED", "ENGINE7B_PERMISSION_NOT_READY"],
+    ["plannerReady", "WAITING_FOR_ENGINE27_PLANNER_READY", "ENGINE27E_PLANNER_READY_REQUIRED", "ENGINE7B_PLANNER_NOT_READY"],
+  ]) {
+    if (readiness[field] !== true) {
+      return strictBlocked(base, { status, blocker, reasonCode });
+    }
+  }
+
+  const entry = toNumber(engine9.officialEntryPrice);
+  const stop = toNumber(engine9.officialStopPrice);
+  const stopDistance = toNumber(engine9.officialStopDistancePoints);
+  const direction = safeUpper(engine9.direction);
+  const geometryValid =
+    entry != null && entry > 0 &&
+    stop != null && stop > 0 &&
+    stopDistance != null && stopDistance > 0 &&
+    ((direction === "LONG" && stop < entry) || (direction === "SHORT" && stop > entry));
+  if (!geometryValid || !management.t1 || toNumber(management.t1?.price ?? management.t1?.targetPrice) == null) {
+    return strictBlocked(base, {
+      status: "OFFICIAL_GEOMETRY_INVALID",
+      blocker: "ENGINE9_OFFICIAL_GEOMETRY_INVALID",
+      reasonCode: "ENGINE7B_OFFICIAL_GEOMETRY_REJECTED",
+    });
+  }
+
+  const normalizedTradeState = normalizeTradeState(tradeState);
+  if (normalizedTradeState.duplicateBlocked) {
+    return strictBlocked(base, {
+      status: "DUPLICATE_OR_OPEN_TRADE_BLOCKED",
+      blocker: "ENGINE7B_DUPLICATE_OR_OPEN_TRADE_BLOCK",
+      blockers: normalizedTradeState.blockers,
+      reasonCode: "ENGINE7B_DUPLICATE_CLEARANCE_REQUIRED",
+    });
+  }
+
+  const productionSupported = toNumber(engine7A.productionRiskSupportedContracts);
+  const legacyCalculated = toNumber(legacy.calculatedContracts);
+  const productionQuantityAvailable = Number.isInteger(productionSupported) && productionSupported >= 0;
+  const productionCrossCheckPassed =
+    productionQuantityAvailable &&
+    Number.isInteger(legacyCalculated) &&
+    productionSupported === legacyCalculated;
+  const finalProductionContracts = productionCrossCheckPassed
+    ? Math.max(0, Math.min(productionSupported, management.usableManagementBlocks))
+    : 0;
+
+  const allocation = readEngine7AAllocation(engine7A);
+  const engine7ATestingEvidenceValid =
+    engine7A.testingDataCollectionMode === true &&
+    engine7A.testingRiskOverrideApplied === true &&
+    toNumber(engine7A.paperTestingContracts) === 3 &&
+    engine7A.testingThreeContractPlanQualified === true &&
+    isExactTestingAllocation(allocation);
+  const engine9TestingAccepted =
+    engine9.testingAllocationAccepted === true &&
+    engine9.allocationQualificationSource === "ENGINE7A_TESTING_DATA_COLLECTION";
+  const finalTestingQualified =
+    engine7ATestingEvidenceValid &&
+    engine9TestingAccepted &&
+    management.exactThreeBlockManagementValid;
+
+  const warnings = [];
+  const reasonCodes = [];
+  if (!productionCrossCheckPassed) {
+    warnings.push("PRODUCTION_FALLBACK_BLOCKED_BY_QUANTITY_CONFLICT");
+    reasonCodes.push("ENGINE7B_LEGACY_PRODUCTION_CROSS_CHECK_FAILED");
+  }
+  if (!engine7ATestingEvidenceValid) {
+    warnings.push("TESTING_PATH_NOT_QUALIFIED");
+    reasonCodes.push("ENGINE7B_TESTING_EVIDENCE_INCOMPLETE");
+  }
+  if (engine7ATestingEvidenceValid && engine9.testingAllocationAccepted !== true) {
+    warnings.push("TESTING_ACCEPTANCE_REQUIRED");
+    reasonCodes.push("ENGINE7B_ENGINE9_TESTING_NOT_ACCEPTED");
+  }
+  if (
+    engine7ATestingEvidenceValid &&
+    engine9.testingAllocationAccepted === true &&
+    engine9.allocationQualificationSource !== "ENGINE7A_TESTING_DATA_COLLECTION"
+  ) {
+    warnings.push("ENGINE9_TESTING_SOURCE_REJECTED");
+    reasonCodes.push("ENGINE7B_ALLOCATION_QUALIFICATION_SOURCE_MISMATCH");
+  }
+  if (engine7ATestingEvidenceValid && engine9TestingAccepted && !management.exactThreeBlockManagementValid) {
+    warnings.push("MANAGEMENT_CAPACITY_REDUCED");
+    reasonCodes.push("ENGINE7B_MANAGEMENT_BLOCK_MISMATCH");
+  }
+
+  if (finalTestingQualified) {
+    return {
+      ...base,
+      finalProductionContracts,
+      finalTestingThreeContractPlanQualified: true,
+      finalThreeContractAllocation: { ...allocation },
+      finalPaperTestingContracts: 3,
+      finalContracts: 3,
+      finalSizingMode: "PAPER_TESTING_DATA_COLLECTION",
+      finalSizingReady: true,
+      paperOrderSizingReady: true,
+      allowed: true,
+      executableSizing: true,
+      status: "FINAL_SIZE_READY",
+      blockers: [],
+      warnings: unique(warnings),
+      reasonCodes: unique([
+        ...(base.reasonCodes || []),
+        ...reasonCodes,
+        "ENGINE7B_FINAL_TESTING_SIZE_READY",
+        "ENGINE8_ORDER_REQUIRED",
+        "NO_ORDER_CREATED",
+        "NO_EXECUTION",
+      ]),
+    };
+  }
+
+  if (finalProductionContracts > 0) {
+    return {
+      ...base,
+      finalProductionContracts,
+      finalTestingThreeContractPlanQualified: false,
+      finalThreeContractAllocation: { ...ZERO_ALLOCATION },
+      finalPaperTestingContracts: 0,
+      finalContracts: finalProductionContracts,
+      finalSizingMode: "PRODUCTION_RISK",
+      finalSizingReady: true,
+      paperOrderSizingReady: true,
+      allowed: true,
+      executableSizing: true,
+      status: "FINAL_SIZE_READY",
+      blockers: [],
+      warnings: unique(warnings),
+      reasonCodes: unique([
+        ...(base.reasonCodes || []),
+        ...reasonCodes,
+        "ENGINE7B_FINAL_PRODUCTION_SIZE_READY",
+        management.usableManagementBlocks < productionSupported
+          ? "ENGINE7B_PRODUCTION_CAPPED_BY_MANAGEMENT_CAPACITY"
+          : null,
+        "ENGINE8_ORDER_REQUIRED",
+        "NO_ORDER_CREATED",
+        "NO_EXECUTION",
+      ]),
+    };
+  }
+
+  return strictBlocked(base, {
+    status: productionQuantityAvailable
+      ? "PRODUCTION_QUANTITY_UNAVAILABLE"
+      : "PRODUCTION_QUANTITY_UNAVAILABLE",
+    blocker: productionCrossCheckPassed
+      ? "ENGINE7A_PRODUCTION_QUANTITY_REQUIRED"
+      : "PRODUCTION_SUPPORTED_CONTRACTS_MISMATCH",
+    reasonCode: productionCrossCheckPassed
+      ? "ENGINE7B_PRODUCTION_SIZING_UNAVAILABLE"
+      : "ENGINE7B_LEGACY_PRODUCTION_CROSS_CHECK_FAILED",
+    warnings,
+    reasonCodes,
+  });
+}
+
+export function buildEngine7FinalPositionSizing({
+  engine7SizingPreview = null,
+  engine6PaperPermission = null,
+  engine27MinuteReadiness = null,
+  engine9OfficialManagementPlan = null,
+  riskConfig = null,
+  tradeState = null,
+  snapshotTime = null,
+} = {}) {
+  const strictClaim =
+    claimsStrategy1(engine7SizingPreview) ||
+    claimsStrategy1(engine9OfficialManagementPlan);
+
+  if (!strictClaim) {
+    return buildLegacyEngine7FinalPositionSizing({
+      engine6PaperPermission,
+      engine27MinuteReadiness,
+      engine9OfficialManagementPlan,
+      riskConfig,
+      tradeState,
+      snapshotTime,
+    });
+  }
+
+  return buildStrictStrategy1FinalSizing({
+    engine7SizingPreview,
+    engine6PaperPermission,
+    engine27MinuteReadiness,
+    engine9OfficialManagementPlan,
+    riskConfig,
+    tradeState,
+    snapshotTime,
+  });
 }
 
 export default buildEngine7FinalPositionSizing;
