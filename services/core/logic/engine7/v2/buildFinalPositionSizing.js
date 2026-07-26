@@ -1880,7 +1880,10 @@ function buildStrictStrategy1FinalSizing({
     });
   }
 
-  if (safeUpper(engine9.planStatus) !== "OFFICIAL") {
+  if (
+    safeUpper(engine9.planStatus) !==
+    "OFFICIAL_PLAN_READY"
+  ) {
     return strictBlocked(base, {
       status: "WAITING_FOR_ENGINE9_OFFICIAL_PLAN",
       blocker: "ENGINE9_PLAN_NOT_OFFICIAL",
