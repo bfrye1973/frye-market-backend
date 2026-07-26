@@ -194,6 +194,35 @@ test("fully qualified Engine 26B to Engine 7A to Engine 9 to Engine 7B testing r
     "OFFICIAL_PLAN_READY"
   );
 
+console.log({
+  productionRiskSupportedContracts:
+    engine7B.productionRiskSupportedContracts,
+
+  legacyCalculatedContracts:
+    engine7B.calculatedContracts,
+
+  finalProductionContracts:
+    engine7B.finalProductionContracts,
+
+  usableManagementBlocks:
+    engine7B.managementValidation?.usableManagementBlocks,
+
+  block1Valid:
+    engine7B.managementValidation?.block1?.valid,
+
+  block2Valid:
+    engine7B.managementValidation?.block2?.valid,
+
+  block3Valid:
+    engine7B.managementValidation?.block3?.valid,
+
+  warnings:
+    engine7B.warnings,
+
+  reasonCodes:
+    engine7B.reasonCodes,
+});
+
   assert.equal(engine7B.productionRiskSupportedContracts, 1);
   assert.equal(engine7B.finalProductionContracts, 1);
   assert.equal(engine7B.finalPaperTestingContracts, 3);
