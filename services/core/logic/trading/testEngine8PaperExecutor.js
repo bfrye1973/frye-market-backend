@@ -24,6 +24,7 @@ const readyAdapter = {
 
   officialEntryPrice: 7574,
   officialStopPrice: 7540.5,
+  officialStopDistancePoints: 33.5,
 
   officialTargets: [
     {
