@@ -90,7 +90,7 @@ const managementBlocks = () => [
 const engine9 = (overrides = {}) => ({
   ...identity(),
   planId: "E9P-ENGINE7B-TEST",
-  planStatus: "OFFICIAL",
+  planStatus: "OFFICIAL_PLAN_READY",
   managementReady: true,
   official: true,
   officialEntryPrice: 6000,
