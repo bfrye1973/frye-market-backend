@@ -189,10 +189,10 @@ test("fully qualified Engine 26B to Engine 7A to Engine 9 to Engine 7B testing r
     "ENGINE7A_TESTING_DATA_COLLECTION"
   );
 
-  // Current Engine 9 production code publishes OFFICIAL_PLAN_READY.
-  // Authorized Engine 7B requirements accept only OFFICIAL.
-  // This assertion intentionally exposes the cross-contract blocker.
-  assert.equal(engine9.planStatus, "OFFICIAL");
+  assert.equal(
+    engine9.planStatus,
+    "OFFICIAL_PLAN_READY"
+  );
 
   assert.equal(engine7B.productionRiskSupportedContracts, 1);
   assert.equal(engine7B.finalProductionContracts, 1);
