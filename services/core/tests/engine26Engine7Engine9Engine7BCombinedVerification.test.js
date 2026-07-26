@@ -38,6 +38,7 @@ const geometry = {
   active: true,
   geometryReady: true,
   candidateIdentityPreserved: true,
+  runnerHandoffRequired: true,
   ...candidate,
   proposedEntryPrice: 6000,
   proposedStopPrice: 5998,
