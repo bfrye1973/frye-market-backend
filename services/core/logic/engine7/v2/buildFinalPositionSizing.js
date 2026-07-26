@@ -1838,12 +1838,28 @@ function buildStrictStrategy1FinalSizing({
   // readiness marker that legacy code requires. Strict readiness is checked below.
   const legacy = buildLegacyEngine7FinalPositionSizing({
     engine6PaperPermission,
+
     engine27MinuteReadiness: {
       ...engine27,
       ready: true,
       decisionState: "READY",
     },
-    engine9OfficialManagementPlan,
+
+    /*
+     * Compatibility-only input for the existing legacy risk calculation.
+     *
+     * The strict Strategy 1 lifecycle gate above still requires the real
+     * Engine 9 status to be exactly OFFICIAL_PLAN_READY.
+     *
+     * This local copy does not alter Engine 9 truth or broaden strict
+     * lifecycle acceptance. It only allows the frozen legacy calculator
+     * to produce calculatedContracts for the required safety cross-check.
+     */
+    engine9OfficialManagementPlan: {
+      ...engine9,
+      planStatus: "OFFICIAL",
+    },
+
     riskConfig,
     tradeState,
     snapshotTime,
