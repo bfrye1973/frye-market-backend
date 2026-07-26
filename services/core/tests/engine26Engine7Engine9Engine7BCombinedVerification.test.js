@@ -64,10 +64,18 @@ const permission = {
 
 const minuteDecision = {
   decisionState: "READY",
+
   pipelineIdentity: {
     complete: true,
     consistent: true,
   },
+
+  reactionReady: true,
+  participationReady: true,
+  permissionReady: true,
+  plannerReady: true,
+  invalidated: false,
+
   readiness: {
     reactionReady: true,
     participationReady: true,
@@ -75,6 +83,7 @@ const minuteDecision = {
     plannerReady: true,
     invalidated: false,
   },
+
   ...candidate,
 };
 
