@@ -91,6 +91,19 @@ function positiveNumber(value) {
   return number != null && number > 0 ? number : null;
 }
 
+function clone(value) {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  return JSON.parse(JSON.stringify(value));
+}
+
+function integerOrZero(value) {
+  const number = Number(value);
+  return Number.isInteger(number) ? number : 0;
+}
+
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
@@ -148,54 +161,146 @@ function compareFields({
   return mismatches;
 }
 
-function copyIdentity(engine9, engine6) {
+function copyIdentity(engine9, engine6, engine7) {
   return {
     laneId:
+      engine7?.laneId ??
       engine9?.laneId ??
       engine6?.laneId ??
       null,
 
     planId:
       engine9?.planId ??
+      engine7?.planId ??
       null,
 
     candidateId:
+      engine7?.candidateId ??
       engine9?.candidateId ??
       engine6?.candidateId ??
       engine6?.identity?.candidateId ??
       null,
 
     zoneId:
+      engine7?.zoneId ??
       engine9?.zoneId ??
       engine6?.zoneId ??
       engine6?.identity?.zoneId ??
       null,
 
     strategyId:
+      engine7?.strategyId ??
       engine9?.strategyId ??
       engine6?.strategyId ??
       engine6?.identity?.strategyId ??
       null,
 
     symbol:
+      engine7?.symbol ??
       engine9?.symbol ??
       engine6?.symbol ??
       null,
 
     direction:
+      engine7?.direction ??
       engine9?.direction ??
       engine6?.direction ??
       null,
 
     setupType:
+      engine7?.setupType ??
       engine9?.setupType ??
       engine6?.setupType ??
       null,
 
+    setupClass:
+      engine7?.setupClass ??
+      engine9?.setupClass ??
+      null,
+
+    setupGrade:
+      engine7?.setupGrade ??
+      engine9?.setupGrade ??
+      null,
+
+    identitySetupKey:
+      engine7?.identitySetupKey ??
+      engine9?.identitySetupKey ??
+      null,
+
+    candidateIdentityVersion:
+      engine7?.candidateIdentityVersion ??
+      engine9?.candidateIdentityVersion ??
+      null,
+
     snapshotTime:
+      engine7?.snapshotTime ??
       engine9?.snapshotTime ??
       engine6?.snapshotTime ??
       null,
+  };
+}
+
+function buildStrategy1Provenance(engine7, engine9) {
+  const finalContracts = integerOrZero(engine7?.finalContracts);
+
+  return {
+    contractVersion: "strategy1.provenance.v1",
+    source: "ENGINE7B_FINAL_SIZING",
+
+    laneId: engine7?.laneId ?? engine9?.laneId ?? null,
+    strategyId: engine7?.strategyId ?? engine9?.strategyId ?? null,
+    candidateId: engine7?.candidateId ?? engine9?.candidateId ?? null,
+    zoneId: engine7?.zoneId ?? engine9?.zoneId ?? null,
+    symbol: engine7?.symbol ?? engine9?.symbol ?? null,
+    direction: engine7?.direction ?? engine9?.direction ?? null,
+    setupType: engine7?.setupType ?? engine9?.setupType ?? null,
+    setupClass: engine7?.setupClass ?? engine9?.setupClass ?? null,
+    setupGrade: engine7?.setupGrade ?? engine9?.setupGrade ?? null,
+    identitySetupKey:
+      engine7?.identitySetupKey ??
+      engine9?.identitySetupKey ??
+      null,
+    candidateIdentityVersion:
+      engine7?.candidateIdentityVersion ??
+      engine9?.candidateIdentityVersion ??
+      null,
+
+    productionRiskSupportedContracts:
+      integerOrZero(engine7?.productionRiskSupportedContracts),
+    finalProductionContracts:
+      integerOrZero(engine7?.finalProductionContracts),
+    finalPaperTestingContracts:
+      integerOrZero(engine7?.finalPaperTestingContracts),
+    effectiveOrderedQuantity: finalContracts,
+    finalContracts,
+    finalSizingMode: engine7?.finalSizingMode ?? null,
+
+    testingRiskOverrideApplied:
+      engine7?.engine7ATestingRiskOverrideApplied === true ||
+      engine7?.testingRiskOverrideApplied === true,
+
+    testingThreeContractPlanQualified:
+      engine7?.finalTestingThreeContractPlanQualified === true,
+
+    allocationQualificationSource:
+      engine7?.engine9AllocationQualificationSource ??
+      engine7?.allocationQualificationSource ??
+      null,
+
+    finalThreeContractAllocation:
+      clone(engine7?.finalThreeContractAllocation ?? null),
+
+    planId: engine9?.planId ?? engine7?.planId ?? null,
+    officialTargets: clone(engine9?.officialTargets ?? []),
+    threeBlockManagement: clone(engine9?.threeBlockManagement ?? null),
+    runnerPlan: clone(engine9?.runnerPlan ?? null),
+
+    paperOnly: true,
+    realExecutionAllowed: false,
+    brokerExecutionAllowed: false,
+    schwabExecutionAllowed: false,
+    liveTradingAllowed: false,
   };
 }
 
@@ -223,7 +328,7 @@ function buildBaseOutput({
   duplicateState,
 }) {
   const identity =
-    copyIdentity(engine9, engine6);
+    copyIdentity(engine9, engine6, engine7);
 
   return {
     active: true,
@@ -246,6 +351,9 @@ function buildBaseOutput({
     duplicateBlocked: false,
 
     ...identity,
+
+    strategy1Provenance:
+      buildStrategy1Provenance(engine7, engine9),
 
     executionId: null,
     idempotencyKey: null,
@@ -301,10 +409,18 @@ function buildBaseOutput({
       allowed: engine7?.allowed === true,
       executableSizing:
         engine7?.executableSizing === true,
+      paperOrderSizingReady:
+        engine7?.paperOrderSizingReady === true,
       finalContracts:
         Number.isInteger(Number(engine7?.finalContracts))
           ? Number(engine7.finalContracts)
           : 0,
+      finalProductionContracts:
+        integerOrZero(engine7?.finalProductionContracts),
+      finalPaperTestingContracts:
+        integerOrZero(engine7?.finalPaperTestingContracts),
+      finalSizingMode:
+        engine7?.finalSizingMode ?? null,
     },
 
     duplicateState: {
