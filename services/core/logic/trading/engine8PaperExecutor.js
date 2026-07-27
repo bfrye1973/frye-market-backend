@@ -161,6 +161,34 @@ function baseResult(engine8PaperOrder) {
       engine8PaperOrder?.zoneId ??
       null,
 
+    laneId:
+      engine8PaperOrder?.laneId ??
+      engine8PaperOrder?.strategy1Provenance?.laneId ??
+      null,
+
+    setupClass:
+      engine8PaperOrder?.setupClass ??
+      engine8PaperOrder?.strategy1Provenance?.setupClass ??
+      null,
+
+    setupGrade:
+      engine8PaperOrder?.setupGrade ??
+      engine8PaperOrder?.strategy1Provenance?.setupGrade ??
+      null,
+
+    identitySetupKey:
+      engine8PaperOrder?.identitySetupKey ??
+      engine8PaperOrder?.strategy1Provenance?.identitySetupKey ??
+      null,
+
+    candidateIdentityVersion:
+      engine8PaperOrder?.candidateIdentityVersion ??
+      engine8PaperOrder?.strategy1Provenance?.candidateIdentityVersion ??
+      null,
+
+    strategy1Provenance:
+      clone(engine8PaperOrder?.strategy1Provenance ?? null),
+
     strategyId:
       engine8PaperOrder?.strategyId ??
       null,
@@ -477,6 +505,53 @@ function resolveEngine7Sizing(
 
     frozenOpeningRiskDollars:
       estimatedTotalRiskDollars,
+
+    productionRiskSupportedContracts:
+      integerOrZero(
+        engine8PaperOrder?.strategy1Provenance
+          ?.productionRiskSupportedContracts ??
+        engine7?.productionRiskSupportedContracts
+      ),
+
+    finalProductionContracts:
+      integerOrZero(
+        engine8PaperOrder?.strategy1Provenance
+          ?.finalProductionContracts ??
+        engine7?.finalProductionContracts
+      ),
+
+    finalPaperTestingContracts:
+      integerOrZero(
+        engine8PaperOrder?.strategy1Provenance
+          ?.finalPaperTestingContracts ??
+        engine7?.finalPaperTestingContracts
+      ),
+
+    finalSizingMode:
+      engine8PaperOrder?.strategy1Provenance
+        ?.finalSizingMode ??
+      engine7?.finalSizingMode ??
+      null,
+
+    testingRiskOverrideApplied:
+      engine8PaperOrder?.strategy1Provenance
+        ?.testingRiskOverrideApplied === true,
+
+    testingThreeContractPlanQualified:
+      engine8PaperOrder?.strategy1Provenance
+        ?.testingThreeContractPlanQualified === true,
+
+    allocationQualificationSource:
+      engine8PaperOrder?.strategy1Provenance
+        ?.allocationQualificationSource ??
+      null,
+
+    finalThreeContractAllocation:
+      clone(
+        engine8PaperOrder?.strategy1Provenance
+          ?.finalThreeContractAllocation ??
+        null
+      ),
   };
 }
 
@@ -882,6 +957,53 @@ function buildCanonicalPaperTicket({
       engine8PaperOrder
         .zoneId,
 
+    laneId:
+      engine8PaperOrder
+        .laneId ??
+      engine8PaperOrder
+        ?.strategy1Provenance
+        ?.laneId ??
+      null,
+
+    setupClass:
+      engine8PaperOrder
+        .setupClass ??
+      engine8PaperOrder
+        ?.strategy1Provenance
+        ?.setupClass ??
+      null,
+
+    setupGrade:
+      engine8PaperOrder
+        .setupGrade ??
+      engine8PaperOrder
+        ?.strategy1Provenance
+        ?.setupGrade ??
+      null,
+
+    identitySetupKey:
+      engine8PaperOrder
+        .identitySetupKey ??
+      engine8PaperOrder
+        ?.strategy1Provenance
+        ?.identitySetupKey ??
+      null,
+
+    candidateIdentityVersion:
+      engine8PaperOrder
+        .candidateIdentityVersion ??
+      engine8PaperOrder
+        ?.strategy1Provenance
+        ?.candidateIdentityVersion ??
+      null,
+
+    strategy1Provenance:
+      clone(
+        engine8PaperOrder
+          ?.strategy1Provenance ??
+        null
+      ),
+
     strategyId:
       engine8PaperOrder
         .strategyId,
@@ -928,6 +1050,53 @@ function buildCanonicalPaperTicket({
     zoneId:
       engine8PaperOrder
         .zoneId,
+
+    laneId:
+      engine8PaperOrder
+        .laneId ??
+      engine8PaperOrder
+        ?.strategy1Provenance
+        ?.laneId ??
+      null,
+
+    setupClass:
+      engine8PaperOrder
+        .setupClass ??
+      engine8PaperOrder
+        ?.strategy1Provenance
+        ?.setupClass ??
+      null,
+
+    setupGrade:
+      engine8PaperOrder
+        .setupGrade ??
+      engine8PaperOrder
+        ?.strategy1Provenance
+        ?.setupGrade ??
+      null,
+
+    identitySetupKey:
+      engine8PaperOrder
+        .identitySetupKey ??
+      engine8PaperOrder
+        ?.strategy1Provenance
+        ?.identitySetupKey ??
+      null,
+
+    candidateIdentityVersion:
+      engine8PaperOrder
+        .candidateIdentityVersion ??
+      engine8PaperOrder
+        ?.strategy1Provenance
+        ?.candidateIdentityVersion ??
+      null,
+
+    strategy1Provenance:
+      clone(
+        engine8PaperOrder
+          ?.strategy1Provenance ??
+        null
+      ),
 
     setupType:
       engine8PaperOrder
@@ -1650,6 +1819,15 @@ export async function executeEngine8PaperOrder({
     snapshotTime:
       prepared
         .snapshotTime,
+
+    strategy1Provenance:
+      clone(
+        prepared
+          .strategy1Provenance ??
+        ticket
+          ?.strategy1Provenance ??
+        null
+      ),
 
     journal:
       journalState
