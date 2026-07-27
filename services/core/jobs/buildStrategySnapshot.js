@@ -393,6 +393,170 @@ function loadPreviousSnapshotSafe() {
   }
 }
 
+/**
+ * Attach the matching durable Engine 10 journal record to the
+ * canonical Minute Strategy 1 snapshot node.
+ *
+ * This function is assembly-only:
+ * - it reads existing Engine 10 Journal records
+ * - it selects the record matching the current candidate and/or plan
+ * - it attaches an immutable JSON copy to the Strategy 1 node
+ *
+ * It does not:
+ * - create or update a Journal record
+ * - calculate P&L or realized R
+ * - change lifecycle state
+ * - infer sizing provenance
+ * - modify Engine 12
+ */
+async function attachEngine10JournalToCanonicalStrategy({
+  result,
+  strategyId = "intraday_scalp@10m",
+  symbol = "ES",
+} = {}) {
+  const strategyNode =
+    result?.strategies?.[strategyId] ||
+    null;
+
+  if (!strategyNode) {
+    return null;
+  }
+
+  let trades = [];
+
+  try {
+    const response = await listTrades({
+      symbol,
+      strategyId,
+      accountMode: "PAPER",
+    });
+
+    trades = Array.isArray(response?.trades)
+      ? response.trades
+      : [];
+  } catch (error) {
+    strategyNode.engine10Journal = null;
+
+    strategyNode.engine10JournalAttachment = {
+      attached: false,
+      reason: "ENGINE10_JOURNAL_READ_FAILED",
+      detail: String(error?.message || error),
+      attachedAt: nowIso(),
+    };
+
+    return null;
+  }
+
+  /*
+   * Use the current canonical Strategy 1 candidate and plan
+   * as the Journal-selection keys.
+   */
+  const candidateId =
+    strategyNode?.engine7PositionSizing?.candidateId ||
+    strategyNode?.engine9OfficialManagementPlan?.candidateId ||
+    null;
+
+  const planId =
+    strategyNode?.engine9OfficialManagementPlan?.planId ||
+    strategyNode?.engine7PositionSizing?.planId ||
+    null;
+
+  /*
+   * Match the durable Engine 10 record without inferring or
+   * repairing candidate or plan identity.
+   */
+  const exactMatches = trades.filter((trade) => {
+    const tradeCandidateId =
+      trade?.identity?.candidateId ||
+      trade?.setup?.candidateId ||
+      null;
+
+    const tradePlanId =
+      trade?.identity?.planId ||
+      trade?.setup?.planId ||
+      null;
+
+    const candidateMatches =
+      !candidateId ||
+      String(tradeCandidateId || "") ===
+        String(candidateId);
+
+    const planMatches =
+      !planId ||
+      String(tradePlanId || "") ===
+        String(planId);
+
+    return candidateMatches && planMatches;
+  });
+
+  const hasCanonicalSelector =
+    Boolean(candidateId || planId);
+
+  /*
+   * Prefer a completed trade when both an OPEN and CLOSED
+   * record are available for the same canonical identity.
+   */
+  const selected =
+    exactMatches.find(
+      (trade) => trade?.status === "CLOSED"
+    ) ||
+    exactMatches[0] ||
+    (
+      hasCanonicalSelector
+        ? null
+        : (
+            trades.find(
+              (trade) => trade?.status === "CLOSED"
+            ) ||
+            trades[0] ||
+            null
+          )
+    );
+
+  /*
+   * Store a JSON copy so snapshot assembly does not mutate
+   * the Engine 10 in-memory object.
+   */
+  strategyNode.engine10Journal =
+    selected
+      ? JSON.parse(JSON.stringify(selected))
+      : null;
+
+  /*
+   * Preserve the existing timeline-compatible Engine 10 name.
+   */
+  strategyNode.engine10Lifecycle =
+    strategyNode.engine10Journal;
+
+  strategyNode.engine10JournalAttachment = {
+    attached: selected != null,
+    source: "tradeJournalStore.listTrades",
+
+    tradeId:
+      selected?.tradeId ||
+      null,
+
+    status:
+      selected?.status ||
+      null,
+
+    candidateId:
+      selected?.identity?.candidateId ||
+      selected?.setup?.candidateId ||
+      null,
+
+    planId:
+      selected?.identity?.planId ||
+      selected?.setup?.planId ||
+      null,
+
+    attachedAt:
+      nowIso(),
+  };
+
+  return strategyNode.engine10Journal;
+}
+
 function loadJsonFileSafe(filePath) {
   try {
     if (!fs.existsSync(filePath)) return null;
@@ -9278,6 +9442,23 @@ const engine8DuplicateState =
         process.env.ENGINE8_ALLOW_LIVE_FUTURES === "1",
     });
 
+/*
+ * Engine 10 — attach the existing durable Strategy 1 Journal record.
+ *
+ * Assembly-only:
+ * - reads the Journal
+ * - attaches the matching record
+ * - creates no trade
+ * - changes no lifecycle state
+ * - performs no Replay calculation
+ */
+await attachEngine10JournalToCanonicalStrategy({
+  result,
+  strategyId: "intraday_scalp@10m",
+  symbol: "ES",
+});
+
+    
 const minuteDecision =
   result.engine27Strategies
     ?.engine27TraderDecision
@@ -9355,7 +9536,9 @@ scalp.strategyTimeline =
       scalp.engine8PaperOrder ||
       null,
 
-    engine10: null,
+    engine10:
+      scalp.engine10Journal ||
+      null,
 
     currentPrice:
       scalp.engine26LocationCandidate
