@@ -239,15 +239,60 @@ function buildCanonicalStrategies(source) {
     ? source.strategies
     : {};
 
-  // Copy exactly what the canonical build emitted.
-  // JSON serialization below creates the immutable recorded value.
+  // Preserve every emitted strategy lane while applying the one
+  // manager-approved Replay-only optimization:
   //
-  // Do not:
-  // - construct missing strategies
-  // - calculate strategyTimeline
-  // - substitute Minute fields into Subminute
-  // - manufacture null objects
-  return sourceStrategies;
+  // - omit strategies[*].analytics.engine5
+  // - omit analytics only when that removal leaves analytics empty
+  //
+  // No other strategy field, value, array, null, false value,
+  // identity, timestamp, lifecycle object, or evidence branch changes.
+  return Object.fromEntries(
+    Object.entries(sourceStrategies).map(
+      ([strategyId, strategy]) => {
+        if (!isObject(strategy)) {
+          return [strategyId, strategy];
+        }
+
+        const analytics = strategy.analytics;
+
+        if (
+          !isObject(analytics) ||
+          !Object.prototype.hasOwnProperty.call(
+            analytics,
+            "engine5"
+          )
+        ) {
+          return [strategyId, strategy];
+        }
+
+        const {
+          engine5: _omittedEngine5,
+          ...remainingAnalytics
+        } = analytics;
+
+        const replayStrategy = {
+          ...strategy,
+        };
+
+        if (
+          Object.keys(
+            remainingAnalytics
+          ).length > 0
+        ) {
+          replayStrategy.analytics =
+            remainingAnalytics;
+        } else {
+          delete replayStrategy.analytics;
+        }
+
+        return [
+          strategyId,
+          replayStrategy,
+        ];
+      }
+    )
+  );
 }
 
 function buildCanonicalReplaySnapshot(
@@ -682,7 +727,7 @@ function writeJsonAtomicNoOverwrite(
   try {
     fs.writeFileSync(
       temporaryFile,
-      JSON.stringify(object, null, 2),
+      JSON.stringify(object),
       {
         encoding: "utf8",
         flag: "wx",
