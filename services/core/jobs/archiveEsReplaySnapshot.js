@@ -19,6 +19,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const AZ_TZ = "America/Phoenix";
+const EXCHANGE_TZ = "America/Chicago";
 
 const REPLAY_SCHEMA = "engine12.multiStrategyReplay.v1";
 const REPLAY_CONTRACT = "CANONICAL_MULTI_STRATEGY_REPLAY";
@@ -71,6 +72,223 @@ function isObject(value) {
     typeof value === "object" &&
     !Array.isArray(value)
   );
+}
+
+
+function zonedClockParts(
+  date,
+  timeZone
+) {
+  const parts =
+    new Intl.DateTimeFormat(
+      "en-US",
+      {
+        timeZone,
+        weekday: "short",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }
+    ).formatToParts(date);
+
+  const get = (type) =>
+    parts.find(
+      (part) =>
+        part.type === type
+    )?.value || "";
+
+  return {
+    weekday:
+      get("weekday"),
+
+    year:
+      get("year"),
+
+    month:
+      get("month"),
+
+    day:
+      get("day"),
+
+    hour:
+      Number(get("hour")),
+
+    minute:
+      Number(get("minute")),
+
+    second:
+      Number(get("second")),
+  };
+}
+
+function formatClock(parts) {
+  const pad = (value) =>
+    String(value).padStart(2, "0");
+
+  return [
+    pad(parts.hour),
+    pad(parts.minute),
+    pad(parts.second),
+  ].join(":");
+}
+
+function formatDateYmd(parts) {
+  return [
+    parts.year,
+    parts.month,
+    parts.day,
+  ].join("-");
+}
+
+/**
+ * Standard weekly CME Globex ES session decision.
+ *
+ * Authoritative timezone:
+ *   America/Chicago
+ *
+ * Supported in this phase:
+ * - standard Sunday-through-Friday weekly session
+ * - standard daily maintenance break
+ * - DST-safe Chicago/Phoenix conversion through Intl
+ *
+ * Deferred:
+ * - CME holiday overrides
+ * - special early closes
+ */
+export function evaluateEsFuturesSession(
+  date = new Date()
+) {
+  const instant =
+    date instanceof Date
+      ? date
+      : new Date(date);
+
+  if (
+    Number.isNaN(
+      instant.getTime()
+    )
+  ) {
+    throw new TypeError(
+      "INVALID_SESSION_DECISION_DATE"
+    );
+  }
+
+  const exchange =
+    zonedClockParts(
+      instant,
+      EXCHANGE_TZ
+    );
+
+  const arizona =
+    zonedClockParts(
+      instant,
+      AZ_TZ
+    );
+
+  const exchangeHour =
+    exchange.hour;
+
+  let open = false;
+  let sessionState =
+    "WEEKEND_CLOSED";
+
+  switch (
+    exchange.weekday
+  ) {
+    case "Sun":
+      open =
+        exchangeHour >= 17;
+
+      sessionState =
+        open
+          ? "OPEN"
+          : "SUNDAY_PREOPEN";
+      break;
+
+    case "Mon":
+    case "Tue":
+    case "Wed":
+    case "Thu":
+      open =
+        exchangeHour < 16 ||
+        exchangeHour >= 17;
+
+      sessionState =
+        open
+          ? "OPEN"
+          : "MAINTENANCE_BREAK";
+      break;
+
+    case "Fri":
+      open =
+        exchangeHour < 16;
+
+      sessionState =
+        open
+          ? "OPEN"
+          : "WEEKEND_CLOSED";
+      break;
+
+    case "Sat":
+    default:
+      open = false;
+      sessionState =
+        "WEEKEND_CLOSED";
+      break;
+  }
+
+  return {
+    open,
+
+    reason:
+      open
+        ? "ES_FUTURES_SESSION_OPEN"
+        : "ES_FUTURES_SESSION_CLOSED",
+
+    exchangeTimezone:
+      EXCHANGE_TZ,
+
+    exchangeDate:
+      formatDateYmd(
+        exchange
+      ),
+
+    exchangeDay:
+      exchange.weekday,
+
+    exchangeTime:
+      formatClock(
+        exchange
+      ),
+
+    arizonaTimezone:
+      AZ_TZ,
+
+    arizonaDate:
+      formatDateYmd(
+        arizona
+      ),
+
+    arizonaTime:
+      formatClock(
+        arizona
+      ),
+
+    sessionState,
+
+    nextSessionBoundary:
+      null,
+
+    sessionContract:
+      "STANDARD_WEEKLY_SESSION_ONLY",
+
+    holidayOverrideStatus:
+      "CME_HOLIDAY_OVERRIDES_NOT_IMPLEMENTED",
+  };
 }
 
 function azParts(date = new Date()) {
@@ -297,9 +515,10 @@ function buildCanonicalStrategies(source) {
 
 function buildCanonicalReplaySnapshot(
   source,
-  parts
+  parts,
+  generatedAtUtc =
+    new Date().toISOString()
 ) {
-  const generatedAtUtc = new Date().toISOString();
   const strategies = buildCanonicalStrategies(source);
   const currentPrice = determineCurrentPrice(
     source,
@@ -646,7 +865,9 @@ function markerIndexHasDedupeKey(
 
 function appendEngine26MarkerIndexIfNeeded(
   replaySnapshot,
-  outFile
+  outFile,
+  markerIndexFile =
+    ENGINE26_MARKER_INDEX_FILE
 ) {
   const entry =
     markerIndexEntryFromReplaySnapshot(
@@ -658,7 +879,7 @@ function appendEngine26MarkerIndexIfNeeded(
     return {
       markerIndexed: false,
       markerIndexFile:
-        ENGINE26_MARKER_INDEX_FILE,
+        markerIndexFile,
       markerIndexReason:
         "NO_ACTIVE_ENGINE26_REPLAY_MARKER",
       markerDedupeKey: null,
@@ -667,14 +888,14 @@ function appendEngine26MarkerIndexIfNeeded(
 
   if (
     markerIndexHasDedupeKey(
-      ENGINE26_MARKER_INDEX_FILE,
+      markerIndexFile,
       entry.dedupeKey
     )
   ) {
     return {
       markerIndexed: false,
       markerIndexFile:
-        ENGINE26_MARKER_INDEX_FILE,
+        markerIndexFile,
       markerIndexReason:
         "DUPLICATE_MARKER_DEDUPE_KEY",
       markerDedupeKey:
@@ -683,7 +904,7 @@ function appendEngine26MarkerIndexIfNeeded(
   }
 
   appendJsonl(
-    ENGINE26_MARKER_INDEX_FILE,
+    markerIndexFile,
     entry
   );
 
@@ -806,82 +1027,131 @@ function validateCanonicalSource(
   };
 }
 
-function main() {
-  const parts = azParts(
-    new Date()
-  );
+export function runReplayArchive({
+  now = new Date(),
+  sourceFile =
+    SOURCE_FILE,
+  replayRoot =
+    ES_REPLAY_ROOT,
+  markerIndexFile =
+    ENGINE26_MARKER_INDEX_FILE,
+} = {}) {
+  const sessionDecision =
+    evaluateEsFuturesSession(
+      now
+    );
+
+  if (
+    sessionDecision.open !== true
+  ) {
+    return {
+      ok: true,
+      replayWritten: false,
+      skipped: true,
+      reason:
+        "ES_FUTURES_SESSION_CLOSED",
+
+      exchangeTimezone:
+        sessionDecision
+          .exchangeTimezone,
+
+      exchangeDate:
+        sessionDecision
+          .exchangeDate,
+
+      exchangeDay:
+        sessionDecision
+          .exchangeDay,
+
+      exchangeTime:
+        sessionDecision
+          .exchangeTime,
+
+      arizonaDate:
+        sessionDecision
+          .arizonaDate,
+
+      arizonaTime:
+        sessionDecision
+          .arizonaTime,
+
+      sessionState:
+        sessionDecision
+          .sessionState,
+
+      nextSessionBoundary:
+        sessionDecision
+          .nextSessionBoundary,
+
+      sessionContract:
+        sessionDecision
+          .sessionContract,
+
+      holidayOverrideStatus:
+        sessionDecision
+          .holidayOverrideStatus,
+    };
+  }
+
+  const parts =
+    azParts(now);
 
   const source =
-    readJsonSafe(SOURCE_FILE);
+    readJsonSafe(
+      sourceFile
+    );
 
   if (
     !source ||
     source.ok === false
   ) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: false,
-          replayWritten: false,
-          skipped: true,
-          reason:
-            "ES_STRATEGY_SNAPSHOT_MISSING_OR_INVALID",
-          sourceFile:
-            SOURCE_FILE,
-          dateYmd:
-            parts.dateYmd,
-          timeHHMM:
-            parts.timeHHMM,
-          detail:
-            source?.detail ||
-            source?.error ||
-            null,
-        },
+    return {
+      ok: false,
+      replayWritten: false,
+      skipped: true,
+      reason:
+        "ES_STRATEGY_SNAPSHOT_MISSING_OR_INVALID",
+      sourceFile,
+      dateYmd:
+        parts.dateYmd,
+      timeHHMM:
+        parts.timeHHMM,
+      detail:
+        source?.detail ||
+        source?.error ||
         null,
-        2
-      )
-    );
-
-    process.exitCode = 1;
-    return;
+    };
   }
 
   const validation =
-    validateCanonicalSource(source);
-
-  if (!validation.ok) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: false,
-          replayWritten: false,
-          skipped: true,
-          reason:
-            validation.reason,
-          sourceFile:
-            SOURCE_FILE,
-          dateYmd:
-            parts.dateYmd,
-          timeHHMM:
-            parts.timeHHMM,
-        },
-        null,
-        2
-      )
+    validateCanonicalSource(
+      source
     );
 
-    process.exitCode = 1;
-    return;
+  if (!validation.ok) {
+    return {
+      ok: false,
+      replayWritten: false,
+      skipped: true,
+      reason:
+        validation.reason,
+      sourceFile,
+      dateYmd:
+        parts.dateYmd,
+      timeHHMM:
+        parts.timeHHMM,
+    };
   }
 
   const replaySnapshot =
     buildCanonicalReplaySnapshot(
       source,
-      parts
+      parts,
+      now.toISOString()
     );
 
   const outFile = path.join(
-    ES_REPLAY_ROOT,
+    replayRoot,
     parts.dateYmd,
     `${parts.timeHHMM}.json`
   );
@@ -893,54 +1163,83 @@ function main() {
     );
 
   if (!writeResult.written) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          replayWritten: false,
-          skipped: true,
-          reason:
-            writeResult.reason,
+    return {
+      ok: true,
+      replayWritten: false,
+      skipped: true,
+      reason:
+        writeResult.reason,
 
-          schema:
-            REPLAY_SCHEMA,
+      schema:
+        REPLAY_SCHEMA,
 
-          replayContract:
-            REPLAY_CONTRACT,
+      replayContract:
+        REPLAY_CONTRACT,
 
-          symbol:
-            replaySnapshot.symbol,
+      symbol:
+        replaySnapshot.symbol,
 
-          dateYmd:
-            parts.dateYmd,
+      dateYmd:
+        parts.dateYmd,
 
-          timeHHMM:
-            parts.timeHHMM,
+      timeHHMM:
+        parts.timeHHMM,
 
-          file:
-            outFile,
+      file:
+        outFile,
 
-          existingFilePreserved:
-            true,
+      existingFilePreserved:
+        true,
 
-          markerIndexed:
-            false,
+      markerIndexed:
+        false,
 
-          markerIndexReason:
-            "REPLAY_NOT_WRITTEN",
-        },
-        null,
-        2
-      )
-    );
+      markerIndexReason:
+        "REPLAY_NOT_WRITTEN",
 
-    return;
+      exchangeTimezone:
+        sessionDecision
+          .exchangeTimezone,
+
+      exchangeDate:
+        sessionDecision
+          .exchangeDate,
+
+      exchangeDay:
+        sessionDecision
+          .exchangeDay,
+
+      exchangeTime:
+        sessionDecision
+          .exchangeTime,
+
+      arizonaDate:
+        sessionDecision
+          .arizonaDate,
+
+      arizonaTime:
+        sessionDecision
+          .arizonaTime,
+
+      sessionState:
+        sessionDecision
+          .sessionState,
+
+      sessionContract:
+        sessionDecision
+          .sessionContract,
+
+      holidayOverrideStatus:
+        sessionDecision
+          .holidayOverrideStatus,
+    };
   }
 
   const markerIndexResult =
     appendEngine26MarkerIndexIfNeeded(
       replaySnapshot,
-      outFile
+      outFile,
+      markerIndexFile
     );
 
   const laneEvidence =
@@ -948,93 +1247,152 @@ function main() {
       replaySnapshot
     );
 
-  console.log(
-    JSON.stringify(
-      {
-        ok: true,
-        replayWritten: true,
+  return {
+    ok: true,
+    replayWritten: true,
 
-        schema:
-          replaySnapshot.schema,
+    schema:
+      replaySnapshot.schema,
 
-        replayContract:
-          replaySnapshot.replayContract,
+    replayContract:
+      replaySnapshot.replayContract,
 
-        immutable:
-          replaySnapshot.immutable === true,
+    immutable:
+      replaySnapshot.immutable === true,
 
-        symbol:
-          replaySnapshot.symbol,
+    symbol:
+      replaySnapshot.symbol,
 
-        snapshotTime:
-          replaySnapshot.snapshotTime,
+    snapshotTime:
+      replaySnapshot.snapshotTime,
 
-        dateYmd:
-          parts.dateYmd,
+    dateYmd:
+      parts.dateYmd,
 
-        timeHHMM:
-          parts.timeHHMM,
+    timeHHMM:
+      parts.timeHHMM,
 
-        file:
-          outFile,
+    file:
+      outFile,
 
-        bytes:
-          fs.statSync(outFile).size,
+    bytes:
+      fs.statSync(outFile).size,
 
-        strategyCount:
-          Object.keys(
-            replaySnapshot.strategies
-          ).length,
+    strategyCount:
+      Object.keys(
+        replaySnapshot.strategies
+      ).length,
 
-        strategyIds:
-          Object.keys(
-            replaySnapshot.strategies
-          ),
+    strategyIds:
+      Object.keys(
+        replaySnapshot.strategies
+      ),
 
-        canonicalLaneEvidence:
-          laneEvidence,
+    canonicalLaneEvidence:
+      laneEvidence,
 
-        markerIndexed:
-          markerIndexResult.markerIndexed,
+    markerIndexed:
+      markerIndexResult.markerIndexed,
 
-        markerIndexFile:
-          markerIndexResult.markerIndexFile,
+    markerIndexFile:
+      markerIndexResult.markerIndexFile,
 
-        markerIndexReason:
-          markerIndexResult.markerIndexReason,
+    markerIndexReason:
+      markerIndexResult.markerIndexReason,
 
-        markerDedupeKey:
-          markerIndexResult.markerDedupeKey,
-      },
-      null,
-      2
-    )
-  );
+    markerDedupeKey:
+      markerIndexResult.markerDedupeKey,
+
+    exchangeTimezone:
+      sessionDecision
+        .exchangeTimezone,
+
+    exchangeDate:
+      sessionDecision
+        .exchangeDate,
+
+    exchangeDay:
+      sessionDecision
+        .exchangeDay,
+
+    exchangeTime:
+      sessionDecision
+        .exchangeTime,
+
+    arizonaDate:
+      sessionDecision
+        .arizonaDate,
+
+    arizonaTime:
+      sessionDecision
+        .arizonaTime,
+
+    sessionState:
+      sessionDecision
+        .sessionState,
+
+    sessionContract:
+      sessionDecision
+        .sessionContract,
+
+    holidayOverrideStatus:
+      sessionDecision
+        .holidayOverrideStatus,
+  };
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(
-    JSON.stringify(
-      {
-        ok: false,
-        replayWritten: false,
-        errorCode:
-          "REPLAY_WRITE_FAILED",
-        sourceFile:
-          SOURCE_FILE,
-        replayRoot:
-          ES_REPLAY_ROOT,
-        retryable: true,
-        detail:
-          String(
-            error?.message || error
-          ),
-      },
-      null,
-      2
-    )
-  );
+function main() {
+  try {
+    const result =
+      runReplayArchive();
+
+    console.log(
+      JSON.stringify(
+        result,
+        null,
+        2
+      )
+    );
+
+    if (
+      result.ok === false
+    ) {
+      process.exitCode = 1;
+    }
+  } catch (error) {
+    console.error(
+      JSON.stringify(
+        {
+          ok: false,
+          replayWritten: false,
+          errorCode:
+            "REPLAY_WRITE_FAILED",
+          sourceFile:
+            SOURCE_FILE,
+          replayRoot:
+            ES_REPLAY_ROOT,
+          retryable: true,
+          detail:
+            String(
+              error?.message ||
+              error
+            ),
+        },
+        null,
+        2
+      )
+    );
+
     process.exitCode = 1;
+  }
+}
+
+const isDirectExecution =
+  process.argv[1] &&
+  path.resolve(
+    process.argv[1]
+  ) === __filename;
+
+if (isDirectExecution) {
+  main();
 }
