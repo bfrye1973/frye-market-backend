@@ -324,6 +324,66 @@ function getCanonicalIdentity(ticket, order, result) {
       )
     ),
 
+    laneId: normalizeId(
+      firstDefined(
+        result?.laneId,
+        order?.laneId,
+        ticket?.laneId,
+        sourceSignal?.laneId,
+        result?.strategy1Provenance?.laneId,
+        order?.strategy1Provenance?.laneId,
+        ticket?.strategy1Provenance?.laneId
+      )
+    ),
+
+    setupClass: normalizeId(
+      firstDefined(
+        result?.setupClass,
+        order?.setupClass,
+        ticket?.setupClass,
+        sourceSignal?.setupClass,
+        result?.strategy1Provenance?.setupClass,
+        order?.strategy1Provenance?.setupClass,
+        ticket?.strategy1Provenance?.setupClass
+      )
+    ),
+
+    setupGrade: normalizeId(
+      firstDefined(
+        result?.setupGrade,
+        order?.setupGrade,
+        ticket?.setupGrade,
+        sourceSignal?.setupGrade,
+        result?.strategy1Provenance?.setupGrade,
+        order?.strategy1Provenance?.setupGrade,
+        ticket?.strategy1Provenance?.setupGrade
+      )
+    ),
+
+    identitySetupKey: normalizeId(
+      firstDefined(
+        result?.identitySetupKey,
+        order?.identitySetupKey,
+        ticket?.identitySetupKey,
+        sourceSignal?.identitySetupKey,
+        result?.strategy1Provenance?.identitySetupKey,
+        order?.strategy1Provenance?.identitySetupKey,
+        ticket?.strategy1Provenance?.identitySetupKey
+      )
+    ),
+
+    candidateIdentityVersion: normalizeId(
+      firstDefined(
+        result?.candidateIdentityVersion,
+        order?.candidateIdentityVersion,
+        ticket?.candidateIdentityVersion,
+        sourceSignal?.candidateIdentityVersion,
+        result?.strategy1Provenance?.candidateIdentityVersion,
+        order?.strategy1Provenance?.candidateIdentityVersion,
+        ticket?.strategy1Provenance?.candidateIdentityVersion
+      )
+    ),
+
     strategyId: normalizeId(
       firstDefined(
         result?.strategyId,
@@ -362,6 +422,21 @@ function getCanonicalIdentity(ticket, order, result) {
       )
     ),
   };
+}
+
+function getStrategy1Provenance(ticket, order, result) {
+  const source =
+    result?.strategy1Provenance ||
+    order?.strategy1Provenance ||
+    ticket?.strategy1Provenance ||
+    ticket?.sourceSignal?.strategy1Provenance ||
+    null;
+
+  if (!source || typeof source !== "object") {
+    return null;
+  }
+
+  return clone(source);
 }
 
 function readStrategySnapshot() {
@@ -1631,6 +1706,13 @@ export async function createTradeJournalEntryFromEngine8Fill({
       strategyNode
     );
 
+  const strategy1Provenance =
+    getStrategy1Provenance(
+      ticket,
+      order,
+      result
+    );
+
   const tradeId =
     makeTradeId({
       symbol:
@@ -1681,6 +1763,8 @@ export async function createTradeJournalEntryFromEngine8Fill({
         identity.candidateId,
       zoneId:
         identity.zoneId,
+      laneId:
+        identity.laneId,
       strategyId:
         identity.strategyId,
       symbol:
@@ -1689,6 +1773,14 @@ export async function createTradeJournalEntryFromEngine8Fill({
         identity.direction,
       setupType:
         identity.setupType,
+      setupClass:
+        identity.setupClass,
+      setupGrade:
+        identity.setupGrade,
+      identitySetupKey:
+        identity.identitySetupKey,
+      candidateIdentityVersion:
+        identity.candidateIdentityVersion,
       snapshotTime:
         identity.snapshotTime ||
         frozenSetup.snapshotTime,
@@ -1707,6 +1799,23 @@ export async function createTradeJournalEntryFromEngine8Fill({
 
     setupType:
       identity.setupType,
+
+    laneId:
+      identity.laneId,
+
+    setupClass:
+      identity.setupClass,
+
+    setupGrade:
+      identity.setupGrade,
+
+    identitySetupKey:
+      identity.identitySetupKey,
+
+    candidateIdentityVersion:
+      identity.candidateIdentityVersion,
+
+    strategy1Provenance,
 
     accountMode:
       accountModeFromPayload(
@@ -1748,6 +1857,21 @@ export async function createTradeJournalEntryFromEngine8Fill({
 
       setupType:
         identity.setupType,
+
+      laneId:
+        identity.laneId,
+
+      setupClass:
+        identity.setupClass,
+
+      setupGrade:
+        identity.setupGrade,
+
+      identitySetupKey:
+        identity.identitySetupKey,
+
+      candidateIdentityVersion:
+        identity.candidateIdentityVersion,
     },
 
     openingPlan,
