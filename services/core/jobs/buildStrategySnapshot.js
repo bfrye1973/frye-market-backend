@@ -324,17 +324,22 @@ function buildEngine26ReplayMarker({
 
     engine15: {
       readiness:
-        paperReadiness?.readiness ||
-        paperReadiness?.readinessLabel ||
+        rawPaperReadiness?.readiness ||
+        rawPaperReadiness?.readinessLabel ||
         engine15Decision?.readinessLabel ||
         null,
-      direction:
-        paperReadiness?.direction ||
-        engine15Decision?.direction ||
-        null,
-      allowed: paperReadiness?.allowed === true,
-      blockersSummary: engine15Blockers,
-    },
+
+     direction:
+       rawPaperReadiness?.direction ||
+       engine15Decision?.direction ||
+       null,
+
+     allowed:
+       rawPaperReadiness?.allowed === true,
+
+     blockersSummary:
+       engine15Blockers,
+   },
 
     engine6: {
       decision: paper?.decision || null,
