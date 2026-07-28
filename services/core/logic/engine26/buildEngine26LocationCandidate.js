@@ -1931,11 +1931,12 @@ export function buildEngine26AWaitingContract({
     reasonCodes: [reasonCode],
   };
 
-  return {
-    engine26LocationCandidate,
-    engine26ReactionHandoff,
-    engine26GeometryHandoff,
-  };
+return {
+  engine26GeneralLocation,
+  engine26LocationCandidate,
+  engine26ReactionHandoff,
+  engine26GeometryHandoff,
+};
 }
 
 export function buildEngine26ReactionHandoff({
