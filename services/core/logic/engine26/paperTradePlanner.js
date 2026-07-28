@@ -3232,7 +3232,9 @@ const displayDirection =
     ["PAPER_ALLOW", "FAST_INTRADAY_PAPER_ALLOW"].includes(paperDecision);
 
   return {
-    active: engine26ImbalanceWatch?.active === true,
+    active:
+      strategy1Candidate?.active === true ||
+      engine26ImbalanceWatch?.active === true,
     engine: "engine26.tradePlanPreview.v1",
     mode: "PREVIEW_ONLY",
     paperOnly: true,
@@ -3256,16 +3258,261 @@ const displayDirection =
           : "NO_ACTIVE_ALARM_ZONE",
     },
 
-    dailyCandleContext,
-    locationContext,
+dailyCandleContext,
+locationContext,
 
-    structure: {
-      setupType,
-      scenario:
-        engine26StructuralContext?.template ||
-        engine26ImbalanceWatch?.structuralTemplate ||
+generalContext: generalParent
+  ? {
+      active:
+        generalParent.active === true,
+
+      contextOnly: true,
+
+      source:
+        generalParent.location?.source ||
         null,
-      direction: displayDirection,
+
+      status:
+        generalParent.status ||
+        null,
+
+      direction:
+        generalParent.direction ||
+        generalParent.directionBias ||
+        null,
+
+      zone: generalParent.location
+        ? {
+            lo:
+              generalParent.location.lo ??
+              null,
+
+            hi:
+              generalParent.location.hi ??
+              null,
+
+            mid:
+              generalParent.location.mid ??
+              null,
+
+            relation:
+              generalParent.location.relation ??
+              null,
+
+            distancePoints:
+              generalParent.location.distancePoints ??
+              null,
+          }
+        : null,
+
+      reasonCodes:
+        Array.isArray(generalParent.reasonCodes)
+          ? generalParent.reasonCodes
+          : [],
+
+      noPermissionCreated: true,
+      noExecution: true,
+    }
+  : null,
+
+strategy1Setup: strategy1Candidate
+  ? {
+      active:
+        strategy1Candidate.active === true,
+
+      status:
+        strategy1Candidate.status ||
+        null,
+
+      laneId:
+        strategy1Candidate.laneId ||
+        null,
+
+      strategyId:
+        strategy1Candidate.strategyId ||
+        null,
+
+      candidateId:
+        strategy1Candidate.candidateId ||
+        null,
+
+      zoneId:
+        strategy1Candidate.zoneId ||
+        null,
+
+      direction:
+        strategy1Candidate.tradeDirectionBias ||
+        strategy1Candidate.direction ||
+        strategy1Candidate.directionBias ||
+        null,
+
+      setupType:
+        strategy1Candidate.setupType ||
+        null,
+
+      setupClass:
+        strategy1Candidate.setupClass ||
+        null,
+
+      setupGrade:
+        strategy1Candidate.setupGrade ||
+        null,
+
+      currentPrice:
+        strategy1Candidate.currentPrice ??
+        currentPrice,
+
+      location:
+        strategy1Candidate.location ||
+        null,
+
+      entryZone:
+        strategy1Candidate.entryZone ||
+        null,
+
+      triggerLevel:
+        strategy1Candidate.triggerLevel ??
+        null,
+
+      reclaimBoundary:
+        strategy1Candidate.reclaimBoundary ??
+        null,
+
+      locationInvalidationBoundary:
+        strategy1Candidate
+          .locationInvalidationBoundary ??
+        null,
+
+      completedCloseInvalidationConfirmed:
+        strategy1Candidate
+          ?.invalidationFacts
+          ?.completedCloseInvalidationConfirmed ===
+        true,
+
+      reaction: {
+        active:
+          authorizedReaction?.active === true,
+
+        status:
+          authorizedReaction
+            ?.authorizedReactionState ||
+          authorizedReaction?.reactionState ||
+          authorizedReaction?.state ||
+          null,
+
+        evaluationAuthorized:
+          authorizedReaction
+            ?.evaluationAuthorized === true,
+
+        confirmed:
+          authorizedReaction
+            ?.reactionConfirmed === true,
+
+        direction:
+          authorizedReaction?.direction ||
+          null,
+
+        quality:
+          authorizedReaction?.quality ||
+          null,
+
+        candidateId:
+          authorizedReaction?.candidateId ||
+          null,
+
+        zoneId:
+          authorizedReaction?.zoneId ||
+          null,
+      },
+
+      participation: {
+        active:
+          authorizedParticipation?.active === true,
+
+        status:
+          authorizedParticipation?.status ||
+          authorizedParticipation
+            ?.participationState ||
+          null,
+
+        confirmed:
+          authorizedParticipation
+            ?.participationConfirmed === true ||
+          authorizedParticipation?.confirmed === true,
+
+        allowed:
+          authorizedParticipation?.allowed === true,
+
+        hardBlocked:
+          authorizedParticipation
+            ?.hardBlocked === true,
+
+        direction:
+          authorizedParticipation
+            ?.intendedDirection ||
+          authorizedParticipation?.direction ||
+          null,
+
+        quality:
+          authorizedParticipation
+            ?.participationQuality ||
+          authorizedParticipation?.quality ||
+          null,
+
+        candidateId:
+          authorizedParticipation?.candidateId ||
+          null,
+
+        zoneId:
+          authorizedParticipation?.zoneId ||
+          null,
+      },
+
+      reasonCodes:
+        Array.isArray(
+          strategy1Candidate.reasonCodes
+        )
+          ? strategy1Candidate.reasonCodes
+          : [],
+
+      noPermissionCreated: true,
+      noExecution: true,
+    }
+  : null,
+
+structure: {
+  source:
+    strategy1ChildAvailable
+      ? "ENGINE26_STRATEGY1_CHILD"
+      : "LEGACY_ENGINE26_WATCH",
+
+  setupType,
+
+  setupClass:
+    strategy1Candidate?.setupClass ||
+    null,
+
+  setupGrade:
+    strategy1Candidate?.setupGrade ||
+    null,
+
+  candidateId:
+    strategy1Candidate?.candidateId ||
+    null,
+
+  zoneId:
+    strategy1Candidate?.zoneId ||
+    null,
+
+  scenario:
+    strategy1ChildAvailable
+      ? strategy1Candidate.setupClass
+      : engine26StructuralContext?.template ||
+        engine26ImbalanceWatch
+          ?.structuralTemplate ||
+        null,
+
+  direction: displayDirection,
       shortResearchOnly: engine26ImbalanceWatch?.shortResearchOnly === true,
       doNotChaseLong: engine26ImbalanceWatch?.doNotChaseLong === true,
       oldB: oldB
