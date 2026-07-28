@@ -1948,7 +1948,7 @@ function buildEngine6PaperPermission({
       ? "engine22LifecycleParticipation.paperScalpParticipation"
       : "NONE";
 
-  const paperReadiness =
+  const rawPaperReadiness =
     engine15Decision?.paperScalpReadiness || null;
 
   const currentLifecycleState =
