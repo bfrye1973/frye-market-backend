@@ -68,6 +68,8 @@ import {
 } from "../logic/engine6/preserveCandidateIdentity.js";
 import {
   evaluateEngine6Strategy1Phase4Contract,
+  filterEngine15ArtifactsForFastLane,
+  isEngine6FastLaneId,
 } from "../logic/engine6/strategy1PermissionContract.js";
 import {
   buildEngine7ProposedSizingPreview,
@@ -209,7 +211,8 @@ function buildEngine26ReplayMarker({
   const fastParticipation =
     confluence?.context?.volume?.engine4FastImbalanceParticipation || null;
 
-  const paperReadiness = engine15Decision?.paperScalpReadiness || null;
+  const rawPaperReadiness =
+    engine15Decision?.paperScalpReadiness || null;
 
   const currentPrice =
     Number(engine26ImbalanceWatch?.currentPrice) ||
@@ -1955,9 +1958,27 @@ function buildEngine6PaperPermission({
     String(symbol || "").toUpperCase() === "ES" &&
     strategyId === "intraday_scalp@10m";
 
+  const permissionLaneId =
+    engine26LocationCandidate?.laneId ||
+    paperReaction?.laneId ||
+    paperParticipation?.laneId ||
+    engine22WaveStrategy?.laneId ||
+    (
+      isFastIntradayPaperLane
+        ? "minute"
+        : null
+    );
+
+  const engine15FastLaneExcluded =
+    isEngine6FastLaneId(permissionLaneId);
+
+  const paperReadiness =
+    engine15FastLaneExcluded
+      ? null
+      : rawPaperReadiness;
+
   const paperShortResearchEnabled =
     isFastIntradayPaperLane;
-
   const engine26PreferredDirection = String(
     engine26ImbalanceWatch?.preferredDirection || ""
   ).toUpperCase();
@@ -2042,13 +2063,19 @@ function buildEngine6PaperPermission({
     paperParticipation?.hardBlocked === true;
 
   const readinessAllowed =
-    paperReadiness?.allowed === true;
+    engine15FastLaneExcluded
+      ? true
+      : paperReadiness?.allowed === true;
 
   const readinessActive =
-    paperReadiness?.active === true ||
-    String(
-      engine15Decision?.readinessLabel || ""
-    ).toUpperCase() === "WATCH";
+    engine15FastLaneExcluded
+      ? true
+      : (
+          paperReadiness?.active === true ||
+          String(
+            engine15Decision?.readinessLabel || ""
+          ).toUpperCase() === "WATCH"
+        );
 
   const participationState = String(
     paperParticipation?.state ||
@@ -2164,25 +2191,38 @@ function buildEngine6PaperPermission({
   };
 
   const direction =
-    pickUsableDirection(
-      paperReaction?.direction,
-      paperReaction?.tradeDirectionBias,
-      paperParticipation?.intendedDirection,
-      paperParticipation?.direction,
-      participationDirection,
-      paperReadiness?.direction,
-      engine15Decision?.direction,
-      engine22WaveStrategy?.waveOpportunity?.direction,
-      currentLifecycleState?.direction
-    );
-
+    engine15FastLaneExcluded
+      ? pickUsableDirection(
+          paperReaction?.direction,
+          paperReaction?.tradeDirectionBias,
+          paperParticipation?.intendedDirection,
+          paperParticipation?.direction,
+          participationDirection,
+          engine22WaveStrategy?.waveOpportunity?.direction,
+          currentLifecycleState?.direction
+        )
+      : pickUsableDirection(
+          paperReaction?.direction,
+          paperReaction?.tradeDirectionBias,
+          paperParticipation?.intendedDirection,
+          paperParticipation?.direction,
+          participationDirection,
+          paperReadiness?.direction,
+          engine15Decision?.direction,
+          engine22WaveStrategy?.waveOpportunity?.direction,
+          currentLifecycleState?.direction
+        );
   const setupType =
     paperReaction?.setupType ||
     engine26ImbalanceWatch?.structuralTemplate ||
     engine26ImbalanceWatch?.structuralPlaybook?.template ||
     engine26ImbalanceWatch?.status ||
     paperReadiness?.setupType ||
-    engine15Decision?.strategyType ||
+    (
+      engine15FastLaneExcluded
+        ? null
+        : engine15Decision?.strategyType
+    ) ||
     engine22WaveStrategy?.waveOpportunity?.setupType ||
     currentLifecycleState?.key ||
     "UNKNOWN_PAPER_SCALP_SETUP";
