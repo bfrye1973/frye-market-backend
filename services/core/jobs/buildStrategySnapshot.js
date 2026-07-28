@@ -230,11 +230,10 @@ function buildEngine26ReplayMarker({
     null;
 
   const engine15Blockers = firstArrayItems(
-    paperReadiness?.blockers ||
+    rawPaperReadiness?.blockers ||
       engine15Decision?.blockers,
     5
   );
-
   const engine6Blockers = firstArrayItems(paper?.blockers, 8);
 
   const dedupeKey = [
