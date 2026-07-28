@@ -2840,6 +2840,10 @@ function buildEngine26TradePlanPreview({
   engine25Context,
   confluence,
   engine15Decision,
+
+  engine26GeneralLocation = null,
+  engine26LocationCandidate = null,
+
   engine26ImbalanceWatch,
   engine26StructuralContext,
   dailyCandleContext = null,
@@ -2848,6 +2852,33 @@ function buildEngine26TradePlanPreview({
 }) {
   const paper = permission?.paper || null;
 
+const generalParent =
+  engine26GeneralLocation &&
+  typeof engine26GeneralLocation === "object"
+    ? engine26GeneralLocation
+    : null;
+
+const strategy1Candidate =
+  engine26LocationCandidate &&
+  typeof engine26LocationCandidate === "object"
+    ? engine26LocationCandidate
+    : null;
+
+const strategy1ChildAvailable =
+  strategy1Candidate?.candidateId != null &&
+  strategy1Candidate?.zoneId != null &&
+  strategy1Candidate?.strategyEligibility?.eligible === true;
+
+const authorizedReaction =
+  confluence?.context?.reaction
+    ?.paperScalpReaction ||
+  null;
+
+const authorizedParticipation =
+  confluence?.context?.volume
+    ?.engine4AuthorizedReactionParticipation ||
+  null;
+
   const currentPrice = getCurrentPrice({
     permission,
     engine15Decision,
@@ -2855,23 +2886,53 @@ function buildEngine26TradePlanPreview({
     confluence,
   });
 
-  const direction = getDirection({
+const legacyDirection = getDirection({
+  permission,
+  engine15Decision,
+  engine22WaveStrategy,
+});
+
+const direction =
+  safeUpper(
+    strategy1Candidate?.tradeDirectionBias ||
+    strategy1Candidate?.direction ||
+    strategy1Candidate?.directionBias ||
+    legacyDirection
+  );
+
+const setupType =
+  safeString(
+    strategy1Candidate?.setupType ||
+    strategy1Candidate?.setupClass
+  ) ||
+  getSetupType({
     permission,
     engine15Decision,
     engine22WaveStrategy,
   });
 
-  const setupType = getSetupType({
-    permission,
-    engine15Decision,
-    engine22WaveStrategy,
-  });
+const activeImbalance =
+  engine26ImbalanceWatch?.activeImbalance ||
+  null;
 
-  const activeImbalance = engine26ImbalanceWatch?.activeImbalance || null;
+const strategy1EntryZone =
+  strategy1Candidate?.entryZone ||
+  null;
 
-  const zoneLo = roundToTick(activeImbalance?.lo);
-  const zoneHi = roundToTick(activeImbalance?.hi);
-  const zoneMid = roundToTick(activeImbalance?.mid);
+const zoneLo = roundToTick(
+  strategy1EntryZone?.low ??
+  activeImbalance?.lo
+);
+
+const zoneHi = roundToTick(
+  strategy1EntryZone?.high ??
+  activeImbalance?.hi
+);
+
+const zoneMid = roundToTick(
+  strategy1EntryZone?.midline ??
+  activeImbalance?.mid
+);
 
   const bHigh = getStructuralLevel(engine26StructuralContext, "bHigh");
   const c100 = getStructuralLevel(engine26StructuralContext, "c100");
@@ -3123,28 +3184,41 @@ function buildEngine26TradePlanPreview({
     controlLevelContext,
   });
 
-  const displayEntryIdea =
-    paperTrialCandidate?.active === true ? paperTrialCandidate.entryIdea : entryIdea;
+const legacyPaperTrialDisplay =
+  paperTrialCandidate?.active === true &&
+  strategy1ChildAvailable !== true;
 
-  const displayStopIdea =
-    paperTrialCandidate?.active === true ? paperTrialCandidate.stopIdea : stopIdea;
+const displayEntryIdea =
+  legacyPaperTrialDisplay
+    ? paperTrialCandidate.entryIdea
+    : entryIdea;
 
-  const displayConfirmationGate =
-    paperTrialCandidate?.active === true
-      ? paperTrialCandidate.confirmationGate
-      : confirmationGate;
+const displayStopIdea =
+  legacyPaperTrialDisplay
+    ? paperTrialCandidate.stopIdea
+    : stopIdea;
 
-  const displayTargetMap =
-    paperTrialCandidate?.active === true ? paperTrialCandidate.targetMap : targetMap;
+const displayConfirmationGate =
+  legacyPaperTrialDisplay
+    ? paperTrialCandidate.confirmationGate
+    : confirmationGate;
 
-  const displayGeometryPreview =
-    paperTrialCandidate?.active === true
-      ? paperTrialCandidate.geometryPreview
-      : geometryPreview;
+const displayTargetMap =
+  legacyPaperTrialDisplay
+    ? paperTrialCandidate.targetMap
+    : targetMap;
 
-  const displayDirection =
-    paperTrialCandidate?.active === true ? "SHORT" : direction;
+const displayGeometryPreview =
+  legacyPaperTrialDisplay
+    ? paperTrialCandidate.geometryPreview
+    : geometryPreview;
 
+const displayDirection =
+  strategy1ChildAvailable
+    ? direction
+    : legacyPaperTrialDisplay
+    ? "SHORT"
+    : direction;
   const engine7Sizing = buildEngine7SizingPreviewV1({
     permission,
     confluence,
@@ -3425,7 +3499,10 @@ export function buildEngine26PaperTradePlan({
   confluence,
   engine15Decision,
 
-  // Canonical Engine 26A selected-location identity.
+  // Broad Engine 26A context only.
+  engine26GeneralLocation = null,
+
+  // Canonical Strategy 1 child identity.
   engine26LocationCandidate = null,
 
   // Canonical Engine 26A factual geometry handoff.
@@ -3584,20 +3661,24 @@ export function buildEngine26PaperTradePlan({
   }        
 
   const engine26TradePlanPreview = buildEngine26TradePlanPreview({
-    symbol: normalizedSymbol,
-    strategyId: normalizedStrategyId,
-    tf: normalizedTf,
-    permission,
-    engine22WaveStrategy,
-    engine25Context,
-    confluence,
-    engine15Decision,
-    engine26ImbalanceWatch,
-    engine26StructuralContext,
-    dailyCandleContext,
-    locationContext,
-    controlLevelContext,
-  });
+  symbol: normalizedSymbol,
+  strategyId: normalizedStrategyId,
+  tf: normalizedTf,
+  permission,
+  engine22WaveStrategy,
+  engine25Context,
+  confluence,
+  engine15Decision,
+
+  engine26GeneralLocation,
+  engine26LocationCandidate,
+
+  engine26ImbalanceWatch,
+  engine26StructuralContext,
+  dailyCandleContext,
+  locationContext,
+  controlLevelContext,
+});
 
 const engine26ProposedGeometry =
   buildEngine26ProposedGeometry({
