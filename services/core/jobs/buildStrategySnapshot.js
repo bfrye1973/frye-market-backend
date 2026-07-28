@@ -2279,12 +2279,14 @@ function buildEngine6PaperPermission({
     );
   }
 
-  if (!readinessAllowed) {
+  if (
+    !engine15FastLaneExcluded &&
+    !readinessAllowed
+  ) {
     blockers.push(
       "ENGINE15_PAPER_READINESS_NOT_ALLOWED"
     );
   }
-
   if (!reactionAllowed) {
     blockers.push(
       "ENGINE3_PAPER_REACTION_NOT_ALLOWED"
@@ -2373,12 +2375,13 @@ function buildEngine6PaperPermission({
   }
 
   if (
+    !engine15FastLaneExcluded &&
     Array.isArray(
-      paperReaction?.blockers
+      paperReadiness?.blockers
     )
   ) {
     blockers.push(
-      ...paperReaction.blockers
+      ...paperReadiness.blockers
     );
   }
 
@@ -2423,6 +2426,7 @@ function buildEngine6PaperPermission({
   }
 
   if (
+    !engine15FastLaneExcluded &&
     Array.isArray(
       paperReadiness?.reasonCodes
     )
@@ -2589,7 +2593,7 @@ function buildEngine6PaperPermission({
     );
 
     reasonCodes.push(
-      "ENGINE15_BYPASSED_FOR_FAST_INTRADAY_PAPER"
+      "FAST_LANE_ENGINE6_PHASE4_PERMISSION_AUTHORITY"
     );
 
     reasonCodes.push(
@@ -2618,7 +2622,6 @@ function buildEngine6PaperPermission({
       ? uniqueBlockers.filter(
           (blocker) =>
             [
-              "ENGINE15_PAPER_READINESS_NOT_ALLOWED",
               "PAPER_SHORT_RESEARCH_DISABLED_V1",
             ].includes(blocker)
         )
