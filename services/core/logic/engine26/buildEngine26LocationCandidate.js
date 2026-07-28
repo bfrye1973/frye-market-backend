@@ -1932,7 +1932,7 @@ export function buildEngine26AWaitingContract({
   };
 
 return {
-  engine26GeneralLocation,
+  engine26GeneralLocation: null,
   engine26LocationCandidate,
   engine26ReactionHandoff,
   engine26GeometryHandoff,
@@ -2122,6 +2122,9 @@ export function buildEngine26A(
       ...input,
       selectionPurpose:
         "GENERAL_PARENT",
+
+      // General context must not update Strategy 1 child memory.
+      persistMemory: false,
     });
 
   const engine26GeneralLocation =
@@ -2214,6 +2217,7 @@ export function buildEngine26A(
   };
 
   return {
+    engine26GeneralLocation,
     engine26LocationCandidate,
     engine26ReactionHandoff,
     engine26GeometryHandoff,
