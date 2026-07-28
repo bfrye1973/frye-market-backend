@@ -1329,16 +1329,36 @@ export function buildEngine26LocationCandidate({
     });
   }
 
-  const directionBias =
-    inferDirectionBias({
-      selectedZone,
-      engine22WaveStrategy,
-    });
+/*
+ * Strategy 1 is the bullish negotiated-zone sweep/reclaim setup.
+ *
+ * Engine 22's degree direction describes the active internal wave leg.
+ * It must not become the tactical trade direction for Strategy 1.
+ *
+ * Example:
+ * Minute C leg direction may be DOWN while the completion reaction
+ * at negotiated support is a tactical LONG reclaim watch.
+ */
+const strategy1Eligible =
+  isApprovedNegotiatedZone(selectedZone);
 
-  const setupType =
-    inferSetupType(
-      engine22WaveStrategy
-    );
+const structuralDirectionBias =
+  inferDirectionBias({
+    selectedZone,
+    engine22WaveStrategy,
+  });
+
+const directionBias =
+  strategy1Eligible
+    ? "LONG"
+    : structuralDirectionBias;
+
+const setupType =
+  strategy1Eligible
+    ? STRATEGY1_SETUP_CLASS
+    : inferSetupType(
+        engine22WaveStrategy
+      );
 
   /*
    * Engine 26 owns the canonical zone identity.
@@ -1570,6 +1590,12 @@ export function buildEngine26LocationCandidate({
     snapshotTime,
 
     directionBias,
+
+    // Additive aliases for downstream consumers.
+    // Engine 26A remains the tactical candidate-direction owner.
+    direction: directionBias,
+    tradeDirectionBias: directionBias,
+
     setupType,
 
     laneId: "minute",
@@ -1784,6 +1810,14 @@ export function buildEngine26LocationCandidate({
       strategy1Eligible
         ? "ENGINE26_STRATEGY1_CLASSIFICATION_ATTACHED"
         : "ENGINE26_STRATEGY1_NOT_ELIGIBLE",
+
+      strategy1Eligible
+        ? "ENGINE26_STRATEGY1_TACTICAL_DIRECTION_LONG"
+        : null,
+
+      strategy1Eligible
+        ? "ENGINE22_INTERNAL_LEG_DIRECTION_NOT_USED_AS_TRADE_DIRECTION"
+        : null,
     ],
 
     warnings: [
