@@ -9566,17 +9566,17 @@ scalp.strategyTimeline =
 
     engine3:
       scalp.confluence
-        ?.context
-        ?.reaction
-        ?.engine3FastImbalanceReaction ||
-      null,
+      ?.context
+      ?.reaction
+      ?.paperScalpReaction ||
+    null,
 
     engine4:
       scalp.confluence
-        ?.context
-        ?.volume
-        ?.engine4FastImbalanceParticipation ||
-      null,
+      ?.context
+      ?.volume
+      ?.engine4AuthorizedReactionParticipation ||
+    null,
 
     engine6:
       scalp.permission?.paper ||
