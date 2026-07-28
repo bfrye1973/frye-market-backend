@@ -8073,10 +8073,8 @@ const engine26 = buildEngine26PaperTradePlan({
   confluence: patchedConfluence,
   engine15Decision,
 
-  // Engine 26A is the authoritative selected-location identity.
+  engine26GeneralLocation,
   engine26LocationCandidate,
-
-  // Engine 26A is the authoritative Strategy 1 geometry source.
   engine26GeometryHandoff,
 
   openPaperTrades,
