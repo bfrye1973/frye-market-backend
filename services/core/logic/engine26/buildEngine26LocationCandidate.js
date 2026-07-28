@@ -2116,10 +2116,64 @@ export function buildEngine26ReactionHandoff({
 export function buildEngine26A(
   input = {}
 ) {
+  const generalParentCandidate =
+    buildEngine26LocationCandidate({
+      ...input,
+      selectionPurpose:
+        "GENERAL_PARENT",
+    });
+
+  const engine26GeneralLocation =
+    generalParentCandidate?.location
+      ? {
+          active:
+            generalParentCandidate.active === true,
+
+          engine:
+            "engine26.generalLocation.v1",
+
+          symbol:
+            generalParentCandidate.symbol ?? null,
+
+          strategyId:
+            generalParentCandidate.strategyId ?? null,
+
+          timeframe:
+            generalParentCandidate.timeframe ?? null,
+
+          status:
+            generalParentCandidate.status ?? null,
+
+          currentPrice:
+            generalParentCandidate.currentPrice ?? null,
+
+          directionBias:
+            generalParentCandidate.directionBias ?? null,
+
+          location: {
+            ...generalParentCandidate.location,
+          },
+
+          reasonCodes: [
+            "ENGINE26A_GENERAL_PARENT_LOCATION",
+            ...(Array.isArray(
+              generalParentCandidate.reasonCodes
+            )
+              ? generalParentCandidate.reasonCodes
+              : []),
+          ],
+
+          noPermissionCreated: true,
+          noExecution: true,
+        }
+      : null;
+
   const engine26LocationCandidate =
-    buildEngine26LocationCandidate(
-      input
-    );
+    buildEngine26LocationCandidate({
+      ...input,
+      selectionPurpose:
+        "STRATEGY1_CHILD",
+    });
 
   const engine26ReactionHandoff =
     buildEngine26ReactionHandoff({
