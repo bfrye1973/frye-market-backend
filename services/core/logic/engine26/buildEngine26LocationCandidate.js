@@ -1127,6 +1127,7 @@ export function buildEngine26LocationCandidate({
   symbol,
   strategyId,
   timeframe,
+  selectionPurpose = "STRATEGY1_CHILD",
   currentPrice,
   snapshotTime = new Date().toISOString(),
   engine22WaveStrategy = null,
@@ -1303,11 +1304,41 @@ export function buildEngine26LocationCandidate({
           safeMonitoringRange
     );
 
-  const selectedZone =
-    authorizationEligibleZones[0] ||
-    allZones[0] ||
-    null;
+/*
+ * General parent location and Strategy 1 child location are
+ * independent Engine 26A contracts.
+ *
+ * GENERAL_PARENT:
+ * May select any valid contextual zone.
+ *
+ * STRATEGY1_CHILD:
+ * May select only an approved negotiated zone.
+ * The broad parent location must not suppress the child.
+ */
+const generalSelectedZone =
+  authorizationEligibleZones[0] ||
+  allZones[0] ||
+  null;
 
+const approvedNegotiatedZones =
+  allZones.filter(isApprovedNegotiatedZone);
+
+const strategy1EligibleZones =
+  approvedNegotiatedZones.filter(
+    (zone) =>
+      zone.distancePoints !== null &&
+      zone.distancePoints <=
+        safeMonitoringRange
+  );
+
+const strategy1SelectedZone =
+  strategy1EligibleZones[0] ||
+  null;
+
+const selectedZone =
+  selectionPurpose === "GENERAL_PARENT"
+    ? generalSelectedZone
+    : strategy1SelectedZone;
   if (!selectedZone) {
     return makeWaitingCandidate({
       symbol:
@@ -1413,9 +1444,6 @@ const setupType =
       zone: selectedZone,
       tickSize,
     });
-
-  const approvedNegotiatedZones =
-    allZones.filter(isApprovedNegotiatedZone);
 
   const targetSelectedZone =
     strategy1Eligible && directionBias === "LONG"
