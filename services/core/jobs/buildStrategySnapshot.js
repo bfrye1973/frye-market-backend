@@ -7400,6 +7400,7 @@ const zoneContext = buildZoneContext(
   let engine22WaveStrategy = null;
   let engine23Interpretation = null;
 
+  let engine26GeneralLocation = null;
   let engine26LocationCandidate = null;
   let engine26ReactionHandoff = null;
   let engine26GeometryHandoff = null;
@@ -7703,9 +7704,13 @@ attachEngine4AuthorizedReactionParticipation({
         tickSize: 0.25,
       });
 
-      engine26LocationCandidate =
-        engine26A?.engine26LocationCandidate ||
-        null;
+     engine26GeneralLocation =
+       engine26A?.engine26GeneralLocation ||
+       null;
+
+     engine26LocationCandidate =
+       engine26A?.engine26LocationCandidate ||
+       null;
 
       engine26ReactionHandoff =
         engine26A?.engine26ReactionHandoff ||
@@ -7773,12 +7778,16 @@ attachEngine4AuthorizedReactionParticipation({
           ],
         });
 
+      engine26GeneralLocation =
+        waiting.engine26GeneralLocation ||
+        null;
+
       engine26LocationCandidate =
         waiting.engine26LocationCandidate;
 
       engine26ReactionHandoff =
-        waiting.engine26ReactionHandoff;
-
+        waiting.engine26ReactionHandoff;   
+              
       engine26GeometryHandoff =
         waiting.engine26GeometryHandoff;
     }
@@ -8447,6 +8456,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
 
     permission: finalPermission,
      
+    engine26GeneralLocation,
     engine26LocationCandidate,
     engine26ReactionHandoff,
     engine26GeometryHandoff,
