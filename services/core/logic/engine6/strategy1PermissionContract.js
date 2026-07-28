@@ -45,6 +45,78 @@ function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
 }
 
+export function isEngine6FastLaneId(laneId) {
+  const lane =
+    String(laneId || "")
+      .trim()
+      .toLowerCase();
+
+  return [
+    "subminute",
+    "minute",
+    "minor",
+  ].includes(lane);
+}
+
+function isEngine15Artifact(value) {
+  return String(value || "")
+    .toUpperCase()
+    .includes("ENGINE15");
+}
+
+function removeEngine15Artifacts(values = []) {
+  return Array.isArray(values)
+    ? values.filter((value) => !isEngine15Artifact(value))
+    : [];
+}
+
+function onlyEngine15Artifacts(values = []) {
+  return Array.isArray(values)
+    ? values.filter((value) => isEngine15Artifact(value))
+    : [];
+}
+
+export function filterEngine15ArtifactsForFastLane({
+  laneId,
+  blockers = [],
+  warnings = [],
+  reasonCodes = [],
+} = {}) {
+  if (!isEngine6FastLaneId(laneId)) {
+    return {
+      engine15Excluded: false,
+      blockers,
+      warnings,
+      reasonCodes,
+      removedBlockers: [],
+      removedWarnings: [],
+      removedReasonCodes: [],
+    };
+  }
+
+  return {
+    engine15Excluded: true,
+
+    blockers:
+      removeEngine15Artifacts(blockers),
+
+    warnings:
+      removeEngine15Artifacts(warnings),
+
+    reasonCodes:
+      removeEngine15Artifacts(reasonCodes),
+
+    removedBlockers:
+      onlyEngine15Artifacts(blockers),
+
+    removedWarnings:
+      onlyEngine15Artifacts(warnings),
+
+    removedReasonCodes:
+      onlyEngine15Artifacts(reasonCodes),
+  };
+}
+
 function allPresentAndSame(...values) {
   const populated = values.filter(Boolean);
   if (populated.length !== values.length) return false;
