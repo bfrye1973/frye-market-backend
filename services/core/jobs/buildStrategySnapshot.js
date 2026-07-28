@@ -2999,13 +2999,13 @@ function buildEngine6PaperPermission({
 
     warnings: [
       ...new Set(
-        finalWarnings.filter(Boolean)
+        fastLaneEngine15Artifacts.warnings.filter(Boolean)
       ),
     ],
 
     reasonCodes: [
       ...new Set(
-        reasonCodes.filter(Boolean)
+        fastLaneEngine15Artifacts.reasonCodes.filter(Boolean)
       ),
     ],
   };
