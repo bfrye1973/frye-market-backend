@@ -1370,10 +1370,7 @@ const setupType =
     buildCanonicalZoneId(
       normalizedSymbol,
       selectedZone
-    );
-
-  const strategy1Eligible =
-    isApprovedNegotiatedZone(selectedZone);
+    );  
 
   const strategyIdentity =
     strategy1Eligible
