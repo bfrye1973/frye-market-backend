@@ -2750,11 +2750,7 @@ function buildEngine6PaperPermission({
 
     reasonCodes.push(
       "SHORT_RESEARCH_ONLY_NO_PAPER_ALLOW"
-    );
-
-    reasonCodes.push(
-      "ENGINE15_SHORT_READINESS_NOT_BUILT"
-    );
+    );    
   }
 
   if (structuralFastWatch) {
@@ -2804,9 +2800,20 @@ function buildEngine6PaperPermission({
       ? "PAPER_WATCH_FAST"
       : "PAPER_STAND_DOWN";
 
+  const fastLaneEngine15Artifacts =
+    filterEngine15ArtifactsForFastLane({
+      laneId: permissionLaneId,
+      blockers: finalBlockers,
+      warnings: finalWarnings,
+      reasonCodes,
+    });
+
   return {
     active: true,
     mode: "PAPER_ONLY",
+    laneId:
+      permissionLaneId || null,
+
     decision,
     allowed,
 
@@ -2835,7 +2842,19 @@ function buildEngine6PaperPermission({
       fastIntradayPaperAllow === true,
 
     engine15Bypassed:
-      fastIntradayPaperAllow === true,
+      engine15FastLaneExcluded === true,
+
+    engine15FastLaneExcluded:
+      engine15FastLaneExcluded === true,
+
+    engine15SuppressedArtifacts: {
+      blockers:
+        fastLaneEngine15Artifacts.removedBlockers,
+      warnings:
+        fastLaneEngine15Artifacts.removedWarnings,
+      reasonCodes:
+        fastLaneEngine15Artifacts.removedReasonCodes,
+    },
 
     standardPaperAllow:
       standardPaperAllow === true,
@@ -2919,10 +2938,14 @@ function buildEngine6PaperPermission({
       participationHardBlocked,
 
     engine15PaperReadinessActive:
-      readinessActive,
+      engine15FastLaneExcluded
+        ? false
+        : readinessActive,
 
     engine15PaperReadinessAllowed:
-      readinessAllowed,
+      engine15FastLaneExcluded
+        ? false
+        : readinessAllowed,
 
     paperShortResearchEnabled:
       paperShortResearchEnabled ||
@@ -2971,7 +2994,8 @@ function buildEngine6PaperPermission({
 
     duplicateCheckRequired: true,
 
-    blockers: finalBlockers,
+    blockers:
+      fastLaneEngine15Artifacts.blockers,
 
     warnings: [
       ...new Set(
