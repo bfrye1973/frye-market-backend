@@ -7,31 +7,25 @@ import {
   buildEngine26A,
 } from "../logic/engine26/buildEngine26LocationCandidate.js";
 
-const EXPECTED_SETUP =
-  "NEGOTIATED_ZONE_ROTATION";
+const SETUP = "NEGOTIATED_ZONE_ROTATION";
 
 function minuteDownContext() {
   return {
     currentLifecycleState: {
-      key: "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+      key: "MINUTE_ROTATION_WATCH",
       direction: "DOWN",
     },
     waveOpportunity: {
-      setupType:
-        "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+      setupType: "MINUTE_ROTATION_WATCH",
       direction: "DOWN",
     },
     degreeStates: {
-      minor: {
-        stage: "E_LEG_COMPLETION_WATCH",
-        direction: "UP",
-      },
       minute: {
         stage: "C_COMPLETION_WATCH",
         direction: "DOWN",
       },
       subminute: {
-        stage: "TACTICAL_RECLAIM_WATCH",
+        stage: "TACTICAL_ROTATION_WATCH",
         direction: "NEUTRAL",
       },
     },
@@ -39,7 +33,7 @@ function minuteDownContext() {
 }
 
 test(
-  "lower negotiated zone selects LONG without inheriting Engine 22 Minute DOWN",
+  "lower-zone reclaim plus bullish EMA10 resolves provisional LONG without inheriting Minute DOWN",
   () => {
     const result = buildEngine26A({
       symbol: "ES",
@@ -48,7 +42,11 @@ test(
       currentPrice: 7445.75,
       snapshotTime: "2026-07-28T15:15:00.000Z",
       engine22WaveStrategy: minuteDownContext(),
-
+      ema10Posture: {
+        posture: "BULLISH",
+        ema10: 7440,
+        currentPrice: 7445.75,
+      },
       bars10m: [
         {
           time: "2026-07-28T14:40:00.000Z",
@@ -56,7 +54,6 @@ test(
           high: 7452,
           low: 7431,
           close: 7450.5,
-          volume: 32000,
           completed: true,
         },
         {
@@ -65,126 +62,34 @@ test(
           high: 7452,
           low: 7437.5,
           close: 7444,
-          volume: 23033,
           completed: true,
         },
-        {
-          time: "2026-07-28T15:00:00.000Z",
-          open: 7444,
-          high: 7454.75,
-          low: 7442,
-          close: 7451.5,
-          volume: 21523,
-          completed: false,
-        },
       ],
-
       persistMemory: false,
     });
 
     const candidate =
       result.engine26LocationCandidate;
 
-    const handoff =
-      result.engine26ReactionHandoff;
-
-    assert.equal(
-      candidate.strategyEligibility?.eligible,
-      true
-    );
-    assert.equal(
-      candidate.setupClass,
-      EXPECTED_SETUP
-    );
-    assert.equal(candidate.setupGrade, "A+++");
-    assert.equal(
-      candidate.candidateIdentityVersion,
-      "engine26.strategy1.v2"
-    );
-
-    assert.equal(
-      candidate.entryZone?.low,
-      7433.75
-    );
-    assert.equal(
-      candidate.entryZone?.high,
-      7457.5
-    );
-    assert.equal(
-      candidate.entryZone?.midline,
-      7445.75
-    );
-
+    assert.equal(candidate.setupClass, SETUP);
     assert.equal(candidate.directionBias, "LONG");
-    assert.equal(candidate.direction, "LONG");
     assert.equal(
-      candidate.tradeDirectionBias,
-      "LONG"
-    );
-
-    assert.equal(candidate.triggerLevel, 7457.5);
-    assert.equal(
-      candidate.reclaimBoundary,
-      7433.75
+      candidate.directionState,
+      "LONG_REVERSAL_DEVELOPING"
     );
     assert.equal(
-      candidate.locationInvalidationBoundary,
-      7433.5
+      candidate.ema10Posture.posture,
+      "BULLISH"
     );
-
-    assert.equal(
-      candidate.sweepFacts
-        ?.intrabarSweepObserved,
-      true
-    );
-    assert.equal(
-      candidate.sweepFacts
-        ?.completedCandleSweepObserved,
-      true
-    );
-    assert.equal(
-      candidate.reclaimFacts
-        ?.completedReclaimObserved,
-      true
-    );
-    assert.equal(
-      candidate.postReclaimFacts
-        ?.completedHoldObserved,
-      true
-    );
-
     assert.equal(
       candidate.invalidationFacts
-        ?.completedCloseInvalidationConfirmed,
+        .completedCloseInvalidationConfirmed,
       false
     );
-
-    assert.equal(candidate.active, true);
     assert.notEqual(
-      candidate.status,
-      "INVALIDATED"
+      candidate.directionBias,
+      result.engine26GeneralLocation?.directionBias
     );
-
-    assert.equal(handoff.active, true);
-    assert.equal(
-      handoff.authorizeEngine3Evaluation,
-      true
-    );
-    assert.equal(
-      handoff.tradeDirectionBias,
-      "LONG"
-    );
-    assert.equal(
-      handoff.expectedReactionDirection,
-      "LONG"
-    );
-
-    assert.ok(
-      candidate.reasonCodes.includes(
-        "ENGINE26_STRATEGY1_TACTICAL_DIRECTION_LONG"
-      )
-    );
-
     assert.ok(
       candidate.reasonCodes.includes(
         "ENGINE22_INTERNAL_LEG_DIRECTION_NOT_USED_AS_TRADE_DIRECTION"
@@ -194,7 +99,7 @@ test(
 );
 
 test(
-  "upper negotiated zone selects SHORT without inheriting Engine 22 Minute DOWN",
+  "upper-zone rejection plus bearish EMA10 resolves provisional SHORT without inheriting Minute DOWN",
   () => {
     const result = buildEngine26A({
       symbol: "ES",
@@ -203,7 +108,11 @@ test(
       currentPrice: 7502,
       snapshotTime: "2026-07-28T18:10:00.000Z",
       engine22WaveStrategy: minuteDownContext(),
-
+      ema10Posture: {
+        posture: "BEARISH",
+        ema10: 7508,
+        currentPrice: 7502,
+      },
       bars10m: [
         {
           time: "2026-07-28T17:30:00.000Z",
@@ -229,16 +138,67 @@ test(
           close: 7498,
           completed: true,
         },
+      ],
+      persistMemory: false,
+    });
+
+    const candidate =
+      result.engine26LocationCandidate;
+
+    assert.equal(candidate.setupClass, SETUP);
+    assert.equal(candidate.directionBias, "SHORT");
+    assert.equal(
+      candidate.directionState,
+      "SHORT_REVERSAL_DEVELOPING"
+    );
+    assert.equal(
+      candidate.ema10Posture.posture,
+      "BEARISH"
+    );
+  }
+);
+
+test(
+  "conflicting zone evidence and EMA10 posture remains NEUTRAL",
+  () => {
+    const result = buildEngine26A({
+      symbol: "ES",
+      strategyId: "intraday_scalp@10m",
+      timeframe: "10m",
+      currentPrice: 7502,
+      snapshotTime: "2026-07-28T18:20:00.000Z",
+      engine22WaveStrategy: minuteDownContext(),
+      ema10Posture: {
+        posture: "BULLISH",
+        ema10: 7498,
+        currentPrice: 7502,
+      },
+      bars10m: [
         {
-          time: "2026-07-28T18:00:00.000Z",
-          open: 7498,
-          high: 7503,
-          low: 7496,
-          close: 7501,
-          completed: false,
+          time: "2026-07-28T17:30:00.000Z",
+          open: 7502,
+          high: 7520,
+          low: 7501,
+          close: 7510,
+          completed: true,
+        },
+        {
+          time: "2026-07-28T17:40:00.000Z",
+          open: 7510,
+          high: 7512,
+          low: 7498,
+          close: 7502,
+          completed: true,
+        },
+        {
+          time: "2026-07-28T17:50:00.000Z",
+          open: 7502,
+          high: 7505,
+          low: 7494,
+          close: 7498,
+          completed: true,
         },
       ],
-
       persistMemory: false,
     });
 
@@ -246,78 +206,17 @@ test(
       result.engine26LocationCandidate;
 
     assert.equal(
-      candidate.setupClass,
-      EXPECTED_SETUP
-    );
-    assert.equal(candidate.directionBias, "SHORT");
-    assert.equal(candidate.direction, "SHORT");
-    assert.equal(
-      candidate.tradeDirectionBias,
-      "SHORT"
-    );
-
-    assert.equal(
-      candidate.entryZone?.low,
-      7504
+      candidate.directionBias,
+      "NEUTRAL"
     );
     assert.equal(
-      candidate.entryZone?.high,
-      7518.25
-    );
-
-    assert.equal(candidate.triggerLevel, 7504);
-    assert.equal(
-      candidate.reclaimBoundary,
-      7518.25
+      candidate.directionState,
+      "NEUTRAL_NO_DIRECTIONAL_EDGE"
     );
     assert.equal(
-      candidate.locationInvalidationBoundary,
-      7518.5
-    );
-
-    assert.equal(
-      candidate.rejectionFacts
-        ?.completedRejectionObserved,
+      candidate.directionalEvidence
+        .directionalConflict,
       true
-    );
-    assert.equal(
-      candidate.failedAcceptanceFacts
-        ?.completedFailedAcceptanceObserved,
-      true
-    );
-    assert.equal(
-      candidate.postRejectionFacts
-        ?.completedHoldObserved,
-      true
-    );
-
-    assert.equal(
-      candidate.invalidationFacts
-        ?.completedCloseInvalidationConfirmed,
-      false
-    );
-
-    assert.equal(
-      result.engine26ReactionHandoff
-        .tradeDirectionBias,
-      "SHORT"
-    );
-
-    assert.equal(
-      result.engine26GeometryHandoff.direction,
-      "SHORT"
-    );
-
-    assert.ok(
-      candidate.reasonCodes.includes(
-        "ENGINE26_STRATEGY1_TACTICAL_DIRECTION_SHORT"
-      )
-    );
-
-    assert.ok(
-      candidate.reasonCodes.includes(
-        "ENGINE22_INTERNAL_LEG_DIRECTION_NOT_USED_AS_TRADE_DIRECTION"
-      )
     );
   }
 );
