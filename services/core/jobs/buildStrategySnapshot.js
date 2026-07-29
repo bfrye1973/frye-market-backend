@@ -2256,6 +2256,9 @@ function buildEngine6PaperPermission({
       direction,
     });
 
+  const strategy1NeutralObservation =
+    strategy1Phase4Contract?.neutralObservation === true;
+
   const blockers = [];
   const warnings = [];
 
@@ -2706,6 +2709,7 @@ function buildEngine6PaperPermission({
     );
 
   const shortResearchWatch =
+    strategy1NeutralObservation !== true &&
     allowed !== true &&
     engine26ShortWatchOnly === true &&
     engine26DoNotChaseLong === true &&
@@ -2721,6 +2725,7 @@ function buildEngine6PaperPermission({
     );
 
   const structuralFastWatch =
+    strategy1NeutralObservation !== true &&
     allowed !== true &&
     shortResearchWatch !== true &&
     engine26ShortWatchOnly === true &&
