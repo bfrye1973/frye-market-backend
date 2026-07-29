@@ -2897,7 +2897,26 @@ function buildEngine6PaperPermission({
     setupFamily:
       "IMBALANCE_TO_IMBALANCE_SCALP",
 
-    setupType,
+    setupType:
+      strategy1Phase4Contract?.identity?.setupClass ||
+      engine26LocationCandidate?.setupType ||
+      engine26LocationCandidate?.setupClass ||
+      setupType,
+
+    setupClass:
+      strategy1Phase4Contract?.identity?.setupClass ||
+      engine26LocationCandidate?.setupClass ||
+      null,
+
+    identitySetupKey:
+      strategy1Phase4Contract?.identity?.identitySetupKey ||
+      engine26LocationCandidate?.identitySetupKey ||
+      null,
+
+    candidateIdentityVersion:
+      strategy1Phase4Contract?.identity?.candidateIdentityVersion ||
+      engine26LocationCandidate?.candidateIdentityVersion ||
+      null,
 
     direction:
       strategy1NeutralObservation === true
@@ -2907,13 +2926,13 @@ function buildEngine6PaperPermission({
         ? "SHORT"
         : direction,
 
-    directionState:
-      engine26LocationCandidate?.directionState ||
-      strategy1Phase4Contract?.identity?.directionState ||
-      null,
+     directionState:
+       engine26LocationCandidate?.directionState ||
+       strategy1Phase4Contract?.identity?.directionState ||
+       null,
 
-    strategy1NeutralObservation:
-      strategy1NeutralObservation === true,
+      strategy1NeutralObservation:
+        strategy1NeutralObservation === true,
 
     targetPoints:
       Number.isFinite(targetPoints)
