@@ -277,6 +277,16 @@ test(
       g.status,
       "CANDIDATE_INVALIDATED"
     );
+
+    assert.equal(
+      g.geometryFeasible,
+      false
+    );
+
+    assert.equal(
+      g.rawGeometryMathematicallyAvailable,
+      true
+    );
   }
 );
 
