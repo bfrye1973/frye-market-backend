@@ -458,59 +458,349 @@ function latestCompletedClose(bars10m = []) {
   return null;
 }
 
-function inferRotationDirection({
+function normalizeEma10Posture(value, currentPrice = null) {
+  if (value == null) {
+    return {
+      posture: "UNKNOWN",
+      ema10: null,
+      price: toFiniteNumber(currentPrice),
+      priceAboveEma10: false,
+      priceBelowEma10: false,
+      source: "UNAVAILABLE",
+    };
+  }
+
+  if (typeof value === "string") {
+    const posture = String(value).trim().toUpperCase();
+    return {
+      posture:
+        posture.includes("BULL") || posture.includes("ABOVE")
+          ? "BULLISH"
+          : posture.includes("BEAR") || posture.includes("BELOW")
+          ? "BEARISH"
+          : "NEUTRAL",
+      ema10: null,
+      price: toFiniteNumber(currentPrice),
+      priceAboveEma10:
+        posture.includes("BULL") || posture.includes("ABOVE"),
+      priceBelowEma10:
+        posture.includes("BEAR") || posture.includes("BELOW"),
+      source: "EXPLICIT_STRING",
+    };
+  }
+
+  const ema10 = toFiniteNumber(
+    value?.ema10 ??
+      value?.value ??
+      value?.level
+  );
+
+  const price = toFiniteNumber(
+    value?.currentPrice ??
+      value?.price ??
+      currentPrice
+  );
+
+  const explicitPosture = String(
+    value?.posture ??
+      value?.direction ??
+      value?.state ??
+      ""
+  )
+    .trim()
+    .toUpperCase();
+
+  const explicitAbove =
+    value?.priceAboveEma10 === true ||
+    value?.above === true;
+
+  const explicitBelow =
+    value?.priceBelowEma10 === true ||
+    value?.below === true;
+
+  const priceAboveEma10 =
+    explicitAbove ||
+    (
+      price !== null &&
+      ema10 !== null &&
+      price > ema10
+    );
+
+  const priceBelowEma10 =
+    explicitBelow ||
+    (
+      price !== null &&
+      ema10 !== null &&
+      price < ema10
+    );
+
+  const posture =
+    explicitPosture.includes("BULL") ||
+    explicitPosture.includes("ABOVE") ||
+    priceAboveEma10
+      ? "BULLISH"
+      : explicitPosture.includes("BEAR") ||
+        explicitPosture.includes("BELOW") ||
+        priceBelowEma10
+      ? "BEARISH"
+      : "NEUTRAL";
+
+  return {
+    posture,
+    ema10,
+    price,
+    priceAboveEma10,
+    priceBelowEma10,
+    source:
+      value?.source ||
+      "ENGINE26A_INPUT",
+  };
+}
+
+function calculateEma10FromBars(bars10m = []) {
+  const bars = Array.isArray(bars10m) ? bars10m : [];
+
+  const completedCloses = bars
+    .map((bar, index) => {
+      const completed =
+        bar?.completed === true ||
+        (
+          bar?.completed !== false &&
+          index < bars.length - 1
+        );
+
+      if (!completed) return null;
+
+      return toFiniteNumber(
+        bar?.close ?? bar?.c
+      );
+    })
+    .filter((value) => value !== null);
+
+  if (completedCloses.length < 10) {
+    return null;
+  }
+
+  const multiplier = 2 / 11;
+  let ema = completedCloses
+    .slice(0, 10)
+    .reduce((sum, value) => sum + value, 0) / 10;
+
+  for (
+    let index = 10;
+    index < completedCloses.length;
+    index += 1
+  ) {
+    ema =
+      (
+        completedCloses[index] - ema
+      ) *
+        multiplier +
+      ema;
+  }
+
+  return roundToTick(ema);
+}
+
+function resolveEma10Posture({
+  ema10Posture,
+  currentPrice,
+  bars10m,
+}) {
+  if (ema10Posture != null) {
+    return normalizeEma10Posture(
+      ema10Posture,
+      currentPrice
+    );
+  }
+
+  const ema10 = calculateEma10FromBars(bars10m);
+  const price =
+    latestCompletedClose(bars10m) ??
+    toFiniteNumber(currentPrice);
+
+  if (ema10 === null || price === null) {
+    return normalizeEma10Posture(
+      null,
+      currentPrice
+    );
+  }
+
+  return normalizeEma10Posture(
+    {
+      ema10,
+      currentPrice: price,
+      source: "ENGINE26A_CALCULATED_FROM_COMPLETED_10M_BARS",
+    },
+    price
+  );
+}
+
+function resolveDirectionalEvidence({
   selectedZone,
   currentPrice,
   bars10m,
-  negotiatedZones,
+  ema10Posture,
+  longFacts,
+  shortFacts,
+  promotedObservation,
 }) {
-  if (!selectedZone) return "NEUTRAL";
+  const latestClose =
+    latestCompletedClose(bars10m) ??
+    toFiniteNumber(currentPrice);
 
-  /*
-   * Zone role comes from the ordered negotiated-zone map first.
-   *
-   * A lower boundary zone with only a valid target above is LONG.
-   * An upper boundary zone with only a valid target below is SHORT.
-   *
-   * Only an interior zone uses the current completed-price relationship
-   * to determine which rotation side is active.
-   */
-  const hasZoneAbove = negotiatedZones.some(
-    (zone) =>
-      zone !== selectedZone &&
-      zone.lo > selectedZone.hi
-  );
+  const acceptanceAboveZone =
+    latestClose !== null &&
+    latestClose > selectedZone.hi;
 
-  const hasZoneBelow = negotiatedZones.some(
-    (zone) =>
-      zone !== selectedZone &&
-      zone.hi < selectedZone.lo
-  );
+  const acceptanceBelowZone =
+    latestClose !== null &&
+    latestClose < selectedZone.lo;
 
-  if (hasZoneAbove && !hasZoneBelow) return "LONG";
-  if (hasZoneBelow && !hasZoneAbove) return "SHORT";
+  const longReversalEvidence =
+    longFacts?.lifecycleFacts
+      ?.reactionEvaluationFactsReady === true;
 
-  const latestClose = latestCompletedClose(bars10m);
-  const referencePrice =
-    latestClose ?? toFiniteNumber(currentPrice);
+  const shortReversalEvidence =
+    shortFacts?.lifecycleFacts
+      ?.reactionEvaluationFactsReady === true;
 
-  if (referencePrice !== null) {
-    if (referencePrice > selectedZone.hi) return "LONG";
-    if (referencePrice < selectedZone.lo) return "SHORT";
+  const bullishEma =
+    ema10Posture?.posture === "BULLISH" ||
+    ema10Posture?.priceAboveEma10 === true;
+
+  const bearishEma =
+    ema10Posture?.posture === "BEARISH" ||
+    ema10Posture?.priceBelowEma10 === true;
+
+  const bullishZoneEvidence =
+    acceptanceAboveZone ||
+    longReversalEvidence;
+
+  const bearishZoneEvidence =
+    acceptanceBelowZone ||
+    shortReversalEvidence;
+
+  const bullishAligned =
+    bullishZoneEvidence && bullishEma;
+
+  const bearishAligned =
+    bearishZoneEvidence && bearishEma;
+
+  const directionalConflict =
+    (
+      bullishZoneEvidence &&
+      bearishEma
+    ) ||
+    (
+      bearishZoneEvidence &&
+      bullishEma
+    ) ||
+    (
+      bullishAligned &&
+      bearishAligned
+    );
+
+  let direction = "NEUTRAL";
+  let directionState =
+    promotedObservation
+      ? "OBSERVING_PROMOTED_ZONE"
+      : "OBSERVING_ZONE_REACTION";
+
+  if (directionalConflict) {
+    directionState =
+      "NEUTRAL_NO_DIRECTIONAL_EDGE";
+  } else if (bullishAligned) {
+    direction = "LONG";
+    directionState =
+      longReversalEvidence
+        ? "LONG_REVERSAL_DEVELOPING"
+        : "LONG_CONTINUATION_DEVELOPING";
+  } else if (bearishAligned) {
+    direction = "SHORT";
+    directionState =
+      shortReversalEvidence
+        ? "SHORT_REVERSAL_DEVELOPING"
+        : "SHORT_CONTINUATION_DEVELOPING";
   }
 
-  /*
-   * For an interior zone while price is still inside it, preserve the
-   * simplest deterministic rotation rule:
-   * lower-half interaction watches LONG, upper-half interaction watches SHORT.
-   */
-  if (referencePrice !== null) {
-    return referencePrice <= selectedZone.mid
-      ? "LONG"
-      : "SHORT";
-  }
+  return {
+    direction,
+    preferredDirection: direction,
+    directionState,
 
-  return "NEUTRAL";
+    promotedObservation:
+      promotedObservation === true,
+
+    latestCompletedClose: latestClose,
+
+    zoneAcceptance: {
+      acceptanceAboveZone,
+      acceptanceBelowZone,
+    },
+
+    zoneRejection: {
+      longSweepReclaimHold:
+        longReversalEvidence,
+      shortRejectionFailedAcceptance:
+        shortReversalEvidence,
+    },
+
+    ema10Posture,
+
+    displacementFacts: {
+      bullishDisplacement:
+        acceptanceAboveZone,
+      bearishDisplacement:
+        acceptanceBelowZone,
+      source:
+        "COMPLETED_PRICE_RELATION_TO_NEGOTIATED_ZONE",
+    },
+
+    directionalConflict,
+
+    evidenceSufficient:
+      direction === "LONG" ||
+      direction === "SHORT",
+
+    reasonCodes: [
+      promotedObservation
+        ? "ENGINE26_STRATEGY1_PROMOTED_ZONE_OBSERVATION"
+        : "ENGINE26_STRATEGY1_INITIAL_ZONE_OBSERVATION",
+
+      acceptanceAboveZone
+        ? "ENGINE26_ZONE_ACCEPTANCE_ABOVE"
+        : null,
+
+      acceptanceBelowZone
+        ? "ENGINE26_ZONE_ACCEPTANCE_BELOW"
+        : null,
+
+      longReversalEvidence
+        ? "ENGINE26_LONG_SWEEP_RECLAIM_HOLD_FACTS"
+        : null,
+
+      shortReversalEvidence
+        ? "ENGINE26_SHORT_REJECTION_FAILED_ACCEPTANCE_FACTS"
+        : null,
+
+      bullishEma
+        ? "ENGINE26_EMA10_BULLISH_POSTURE"
+        : null,
+
+      bearishEma
+        ? "ENGINE26_EMA10_BEARISH_POSTURE"
+        : null,
+
+      directionalConflict
+        ? "ENGINE26_DIRECTIONAL_CONFLICT"
+        : null,
+
+      direction === "NEUTRAL"
+        ? "ENGINE26_DIRECTION_REMAINS_NEUTRAL"
+        : `ENGINE26_PROVISIONAL_DIRECTION_${direction}`,
+    ].filter(Boolean),
+  };
 }
 
 function findZoneByCanonicalId({
@@ -1227,6 +1517,13 @@ function makeWaitingCandidate({
     snapshotTime,
 
     directionBias: "NEUTRAL",
+    direction: "NEUTRAL",
+    tradeDirectionBias: "NEUTRAL",
+    preferredDirection: "NEUTRAL",
+    directionState:
+      "OBSERVING_ZONE_REACTION",
+    directionalEvidence: null,
+    ema10Posture: null,
     setupType: null,
 
     location: null,
@@ -1407,6 +1704,7 @@ export function buildEngine26LocationCandidate({
   engine1Context = null,
   previousLocationCandidate = null,
   bars10m = [],
+  ema10Posture = null,
   memoryFilePath = DEFAULT_MEMORY_PATH,
   persistMemory = true,
   tickSize = DEFAULT_TICK_SIZE,
@@ -1717,15 +2015,106 @@ const structuralDirectionBias =
     engine22WaveStrategy,
   });
 
-const inferredRotationDirection =
+const selectedZoneId =
+  buildCanonicalZoneId(
+    normalizedSymbol,
+    selectedZone
+  );
+
+const previousTargetZoneId =
+  previousLocationCandidate?.targetZone?.zoneId ??
+  previousLocationCandidate?.targetZone?.id ??
+  null;
+
+const promotedObservation =
+  selectionPurpose === "STRATEGY1_CHILD" &&
+  previousReleaseState.released === true &&
+  Boolean(previousTargetZoneId) &&
+  previousTargetZoneId === selectedZoneId;
+
+const provisionalEntryZone =
   strategy1Eligible
-    ? inferRotationDirection({
+    ? {
+        id: selectedZoneId,
+        zoneId: selectedZoneId,
+        upstreamId: selectedZone.upstreamId,
+        source: selectedZone.source,
+        sourcePath: selectedZone.sourcePath,
+        type: selectedZone.type,
+        timeframe: selectedZone.timeframe,
+        low: selectedZone.lo,
+        high: selectedZone.hi,
+        midline: selectedZone.mid,
+      }
+    : null;
+
+const longBoundaries =
+  buildBoundaries({
+    directionBias: "LONG",
+    zone: selectedZone,
+    tickSize,
+  });
+
+const shortBoundaries =
+  buildBoundaries({
+    directionBias: "SHORT",
+    zone: selectedZone,
+    tickSize,
+  });
+
+const longFacts =
+  strategy1Eligible
+    ? buildStrategy1Facts({
+        bars10m,
+        entryZone: provisionalEntryZone,
+        locationInvalidationBoundary:
+          longBoundaries.locationInvalidationBoundary,
+        direction: "LONG",
+      })
+    : null;
+
+const shortFacts =
+  strategy1Eligible
+    ? buildStrategy1Facts({
+        bars10m,
+        entryZone: provisionalEntryZone,
+        locationInvalidationBoundary:
+          shortBoundaries.locationInvalidationBoundary,
+        direction: "SHORT",
+      })
+    : null;
+
+const resolvedEma10Posture =
+  resolveEma10Posture({
+    ema10Posture,
+    currentPrice: normalizedPrice,
+    bars10m,
+  });
+
+const resolvedDirectionalEvidence =
+  strategy1Eligible
+    ? resolveDirectionalEvidence({
         selectedZone,
         currentPrice: normalizedPrice,
         bars10m,
-        negotiatedZones: approvedNegotiatedZones,
+        ema10Posture:
+          resolvedEma10Posture,
+        longFacts,
+        shortFacts,
+        promotedObservation,
       })
-    : "NEUTRAL";
+    : {
+        direction:
+          structuralDirectionBias,
+        preferredDirection:
+          structuralDirectionBias,
+        directionState:
+          "STRUCTURAL_CONTEXT_ONLY",
+        promotedObservation: false,
+        evidenceSufficient:
+          structuralDirectionBias !== "NEUTRAL",
+        reasonCodes: [],
+      };
 
 const preservedDirection =
   previousChildPreservable
@@ -1739,8 +2128,15 @@ const directionBias =
   strategy1Eligible
     ? preservedDirection !== "NEUTRAL"
       ? preservedDirection
-      : inferredRotationDirection
+      : resolvedDirectionalEvidence.direction
     : structuralDirectionBias;
+
+const directionState =
+  strategy1Eligible &&
+  preservedDirection !== "NEUTRAL"
+    ? previousLocationCandidate?.directionState ||
+      `${preservedDirection}_DIRECTIONAL_CHILD_ACTIVE`
+    : resolvedDirectionalEvidence.directionState;
 
 const setupType =
   strategy1Eligible
@@ -1749,114 +2145,157 @@ const setupType =
         engine22WaveStrategy
       );
 
-  /*
-   * Engine 26 owns the canonical zone identity.
-   *
-   * Raw source IDs such as ES_MANUAL_IMBALANCE_7 remain available at:
-   * location.upstreamId
-   */
-  const zoneId =
-    buildCanonicalZoneId(
-      normalizedSymbol,
-      selectedZone
-    );  
+/*
+ * Engine 26 owns the canonical zone identity.
+ */
+const zoneId = selectedZoneId;
 
-  const strategyIdentity =
-    strategy1Eligible
-      ? resolveEngine26Strategy1Identity({
-          symbol: normalizedSymbol,
-          strategyId: normalizedStrategyId,
-          zoneId,
-          directionBias,
-          previousLocationCandidate,
-        })
-      : null;
-
-  const candidateId =
-    strategyIdentity?.candidateId ||
-    stableHash("E26C", [
-      normalizedSymbol,
-      normalizedStrategyId,
-      zoneId,
-      directionBias,
-      setupType,
-    ]);
-
-  const active =
-    strategy1Eligible && previousChildPreservable
-      ? true
-      : selectedZone.distancePoints <=
-        safeMonitoringRange;
-
-  const status =
-    !active
-      ? "LOCATION_DETECTED"
-      : selectedZone.distancePoints === 0
-      ? "INSIDE_LOCATION"
-      : selectedZone.distancePoints <=
-        safeActivationRange
-      ? "APPROACHING_LOCATION"
-      : "LOCATION_DETECTED";
-
-  const boundaries =
-    buildBoundaries({
-      directionBias,
-      zone: selectedZone,
-      tickSize,
-    });
-
-  const targetSelectedZone =
-    strategy1Eligible && directionBias === "LONG"
-      ? selectLongTargetZone({
-          negotiatedZones: approvedNegotiatedZones,
-          entryZone: selectedZone,
-        })
-      : strategy1Eligible && directionBias === "SHORT"
-      ? selectShortTargetZone({
-          negotiatedZones: approvedNegotiatedZones,
-          entryZone: selectedZone,
-        })
-      : null;
-
-  const entryZone = strategy1Eligible
-    ? {
-        id: zoneId,
+const strategyIdentity =
+  strategy1Eligible
+    ? resolveEngine26Strategy1Identity({
+        symbol: normalizedSymbol,
+        strategyId: normalizedStrategyId,
         zoneId,
-        upstreamId: selectedZone.upstreamId,
-        source: selectedZone.source,
-        sourcePath: selectedZone.sourcePath,
-        type: selectedZone.type,
-        timeframe: selectedZone.timeframe,
-        low: selectedZone.lo,
-        high: selectedZone.hi,
-        midline: selectedZone.mid,
-      }
-    : null;
-
-  const targetZone = targetSelectedZone
-    ? {
-        id: buildCanonicalZoneId(normalizedSymbol, targetSelectedZone),
-        zoneId: buildCanonicalZoneId(normalizedSymbol, targetSelectedZone),
-        upstreamId: targetSelectedZone.upstreamId,
-        source: targetSelectedZone.source,
-        sourcePath: targetSelectedZone.sourcePath,
-        type: targetSelectedZone.type,
-        timeframe: targetSelectedZone.timeframe,
-        low: targetSelectedZone.lo,
-        high: targetSelectedZone.hi,
-        midline: targetSelectedZone.mid,
-      }
-    : null;
-
-  const strategyFacts = strategy1Eligible
-    ? buildStrategy1Facts({
-        bars10m,
-        entryZone,
-        locationInvalidationBoundary:
-          boundaries.locationInvalidationBoundary,
-        direction: directionBias,
+        directionBias,
+        previousLocationCandidate:
+          previousChildPreservable
+            ? previousLocationCandidate
+            : null,
       })
     : null;
+
+const candidateId =
+  strategyIdentity?.candidateId ||
+  stableHash("E26C", [
+    normalizedSymbol,
+    normalizedStrategyId,
+    zoneId,
+    directionBias,
+    setupType,
+  ]);
+
+const active =
+  strategy1Eligible && previousChildPreservable
+    ? true
+    : selectedZone.distancePoints <=
+      safeMonitoringRange;
+
+const status =
+  !active
+    ? "LOCATION_DETECTED"
+    : directionBias === "NEUTRAL"
+    ? promotedObservation
+      ? "OBSERVING_PROMOTED_ZONE"
+      : "OBSERVING_ZONE_REACTION"
+    : selectedZone.distancePoints === 0
+    ? "INSIDE_LOCATION"
+    : selectedZone.distancePoints <=
+      safeActivationRange
+    ? "APPROACHING_LOCATION"
+    : "LOCATION_DETECTED";
+
+const boundaries =
+  directionBias === "LONG"
+    ? longBoundaries
+    : directionBias === "SHORT"
+    ? shortBoundaries
+    : {
+        triggerLevel: null,
+        acceptanceBoundary: null,
+        reclaimBoundary: null,
+        rejectionBoundary: null,
+        locationInvalidationBoundary: null,
+      };
+
+const targetSelectedZone =
+  strategy1Eligible && directionBias === "LONG"
+    ? selectLongTargetZone({
+        negotiatedZones: approvedNegotiatedZones,
+        entryZone: selectedZone,
+      })
+    : strategy1Eligible && directionBias === "SHORT"
+    ? selectShortTargetZone({
+        negotiatedZones: approvedNegotiatedZones,
+        entryZone: selectedZone,
+      })
+    : null;
+
+const entryZone =
+  provisionalEntryZone;
+
+const targetZone = targetSelectedZone
+  ? {
+      id: buildCanonicalZoneId(
+        normalizedSymbol,
+        targetSelectedZone
+      ),
+      zoneId: buildCanonicalZoneId(
+        normalizedSymbol,
+        targetSelectedZone
+      ),
+      upstreamId:
+        targetSelectedZone.upstreamId,
+      source: targetSelectedZone.source,
+      sourcePath:
+        targetSelectedZone.sourcePath,
+      type: targetSelectedZone.type,
+      timeframe:
+        targetSelectedZone.timeframe,
+      low: targetSelectedZone.lo,
+      high: targetSelectedZone.hi,
+      midline: targetSelectedZone.mid,
+    }
+  : null;
+
+const strategyFacts =
+  directionBias === "LONG"
+    ? longFacts
+    : directionBias === "SHORT"
+    ? shortFacts
+    : {
+        direction: "NEUTRAL",
+        sweepFacts:
+          longFacts?.sweepFacts || null,
+        lowerWickFacts:
+          longFacts?.lowerWickFacts || null,
+        reclaimFacts:
+          longFacts?.reclaimFacts || null,
+        postReclaimFacts:
+          longFacts?.postReclaimFacts || null,
+        rejectionFacts:
+          shortFacts?.rejectionFacts || null,
+        upperWickFacts:
+          shortFacts?.upperWickFacts || null,
+        failedAcceptanceFacts:
+          shortFacts?.failedAcceptanceFacts || null,
+        failedReclaimFacts:
+          shortFacts?.failedReclaimFacts || null,
+        postRejectionFacts:
+          shortFacts?.postRejectionFacts || null,
+        lifecycleFacts: {
+          setupDeveloping:
+            longFacts?.lifecycleFacts
+              ?.setupDeveloping === true ||
+            shortFacts?.lifecycleFacts
+              ?.setupDeveloping === true,
+          reactionEvaluationFactsReady:
+            false,
+        },
+        invalidationFacts: {
+          boundary: null,
+          direction: "NEUTRAL",
+          intrabarInvalidationBreachObserved:
+            false,
+          completedCloseInvalidationConfirmed:
+            false,
+          invalidationTime: null,
+          invalidationClose: null,
+        },
+        warnings: [
+          ...(longFacts?.warnings || []),
+          ...(shortFacts?.warnings || []),
+        ],
+      };
 
   const invalidated =
     strategyFacts?.invalidationFacts
@@ -2038,6 +2477,13 @@ const setupType =
     snapshotTime,
 
     directionBias,
+    preferredDirection:
+      directionBias,
+    directionState,
+    directionalEvidence:
+      resolvedDirectionalEvidence,
+    ema10Posture:
+      resolvedEma10Posture,
 
     // Additive aliases for downstream consumers.
     // Engine 26A remains the tactical candidate-direction owner.
@@ -2156,10 +2602,36 @@ const setupType =
 
     ...boundaries,
 
+    directionalBoundaries: {
+      LONG: longBoundaries,
+      SHORT: shortBoundaries,
+    },
+
+    promotedObservationLocation:
+      promotedObservation
+        ? {
+            active: true,
+            status:
+              "OBSERVING_PROMOTED_ZONE",
+            direction: "NEUTRAL",
+            priorCandidateId:
+              previousLocationCandidate
+                ?.candidateId ?? null,
+            priorZoneId:
+              previousLocationCandidate
+                ?.zoneId ?? null,
+            releaseReason:
+              previousReleaseState
+                .releaseReason ?? null,
+          }
+        : null,
+
     expectedReactions:
-      expectedReactionsForDirection(
-        directionBias
-      ),
+      directionBias === "NEUTRAL"
+        ? []
+        : expectedReactionsForDirection(
+            directionBias
+          ),
 
     activationRangePoints:
       safeActivationRange,
@@ -2288,6 +2760,8 @@ const setupType =
       directionBias === "NEUTRAL"
         ? "ENGINE26A_DIRECTION_BIAS_NEUTRAL"
         : `ENGINE26A_DIRECTION_${directionBias}`,
+
+      ...(resolvedDirectionalEvidence?.reasonCodes || []),
 
       candidateActive
         ? "ENGINE26A_CANDIDATE_WITHIN_MONITORING_RANGE"
@@ -2534,6 +3008,20 @@ export function buildEngine26ReactionHandoff({
     tradeDirectionBias:
       candidate.directionBias,
 
+    preferredDirection:
+      candidate.preferredDirection ??
+      candidate.directionBias,
+
+    directionState:
+      candidate.directionState ??
+      "OBSERVING_ZONE_REACTION",
+
+    directionalEvidence:
+      candidate.directionalEvidence ?? null,
+
+    ema10Posture:
+      candidate.ema10Posture ?? null,
+
     expectedReactionDirection:
       candidate.directionBias,
 
@@ -2714,7 +3202,10 @@ export function buildEngine26A(
   const engine26GeometryHandoff = {
     active:
       engine26LocationCandidate?.active === true &&
-      engine26LocationCandidate?.strategyEligibility?.eligible === true,
+      engine26LocationCandidate?.strategyEligibility?.eligible === true &&
+      ["LONG", "SHORT"].includes(
+        engine26LocationCandidate?.directionBias
+      ),
     engine: "engine26.geometryHandoff.v1",
     laneId: "minute",
     strategyId: engine26LocationCandidate?.strategyId ?? null,
@@ -2722,6 +3213,12 @@ export function buildEngine26A(
     zoneId: engine26LocationCandidate?.zoneId ?? null,
     direction:
       engine26LocationCandidate?.directionBias ?? null,
+    directionState:
+      engine26LocationCandidate?.directionState ?? null,
+    directionalEvidence:
+      engine26LocationCandidate?.directionalEvidence ?? null,
+    ema10Posture:
+      engine26LocationCandidate?.ema10Posture ?? null,
     setupClass: engine26LocationCandidate?.setupClass ?? null,
     setupGrade: engine26LocationCandidate?.setupGrade ?? null,
     identitySetupKey:
