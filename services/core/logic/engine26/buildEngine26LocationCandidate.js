@@ -423,6 +423,246 @@ function selectLongTargetZone({ negotiatedZones, entryZone }) {
     })[0] || null;
 }
 
+function selectShortTargetZone({ negotiatedZones, entryZone }) {
+  if (!entryZone) return null;
+
+  return [...negotiatedZones]
+    .filter((zone) => zone !== entryZone)
+    .filter((zone) => zone.hi < entryZone.lo)
+    .sort((a, b) => {
+      if (a.hi !== b.hi) return b.hi - a.hi;
+      if (a.lo !== b.lo) return b.lo - a.lo;
+      const sourceCompare = String(a.source || "")
+        .localeCompare(String(b.source || ""));
+      if (sourceCompare !== 0) return sourceCompare;
+      return String(a.upstreamId || "")
+        .localeCompare(String(b.upstreamId || ""));
+    })[0] || null;
+}
+
+function latestCompletedClose(bars10m = []) {
+  const bars = Array.isArray(bars10m) ? bars10m : [];
+
+  for (let index = bars.length - 1; index >= 0; index -= 1) {
+    const bar = bars[index];
+    const completed =
+      bar?.completed === true ||
+      (bar?.completed !== false && index < bars.length - 1);
+
+    if (!completed) continue;
+
+    const close = toFiniteNumber(bar?.close ?? bar?.c);
+    if (close !== null) return close;
+  }
+
+  return null;
+}
+
+function inferRotationDirection({
+  selectedZone,
+  currentPrice,
+  bars10m,
+  negotiatedZones,
+}) {
+  if (!selectedZone) return "NEUTRAL";
+
+  const latestClose = latestCompletedClose(bars10m);
+  const referencePrice =
+    latestClose ?? toFiniteNumber(currentPrice);
+
+  if (referencePrice !== null) {
+    if (referencePrice > selectedZone.hi) return "LONG";
+    if (referencePrice < selectedZone.lo) return "SHORT";
+  }
+
+  const hasZoneAbove = negotiatedZones.some(
+    (zone) =>
+      zone !== selectedZone &&
+      zone.lo > selectedZone.hi
+  );
+
+  const hasZoneBelow = negotiatedZones.some(
+    (zone) =>
+      zone !== selectedZone &&
+      zone.hi < selectedZone.lo
+  );
+
+  if (hasZoneAbove && !hasZoneBelow) return "LONG";
+  if (hasZoneBelow && !hasZoneAbove) return "SHORT";
+
+  if (referencePrice !== null) {
+    return referencePrice >= selectedZone.mid
+      ? "LONG"
+      : "SHORT";
+  }
+
+  return "NEUTRAL";
+}
+
+function findZoneByCanonicalId({
+  zones,
+  symbol,
+  zoneId,
+}) {
+  if (!zoneId) return null;
+
+  return zones.find(
+    (zone) =>
+      buildCanonicalZoneId(symbol, zone) === zoneId
+  ) || null;
+}
+
+function getPriorMemoryRecord({
+  memoryStore,
+  symbol,
+  strategyId,
+  previousLocationCandidate,
+}) {
+  const priorZoneId =
+    previousLocationCandidate?.zoneId || null;
+
+  if (!priorZoneId) return null;
+
+  const priorMemoryKey = buildStrategy1MemoryKey({
+    laneId: "minute",
+    symbol,
+    strategyId,
+    zoneId: priorZoneId,
+  });
+
+  return memoryStore?.records?.[priorMemoryKey] || null;
+}
+
+function evaluatePreviousChildRelease({
+  previousLocationCandidate,
+  priorMemoryRecord,
+  currentPrice,
+}) {
+  if (!previousLocationCandidate) {
+    return {
+      released: false,
+      releaseReason: null,
+      targetApproachCompletionWatch: false,
+      objectiveCompleted: false,
+      targetReached: false,
+    };
+  }
+
+  const direction = normalizeDirection(
+    previousLocationCandidate?.directionBias ??
+      previousLocationCandidate?.direction
+  );
+
+  const price = toFiniteNumber(currentPrice);
+  const entry = toFiniteNumber(
+    previousLocationCandidate?.entryZone?.midline
+  );
+
+  const targetLow = toFiniteNumber(
+    previousLocationCandidate?.targetZone?.low
+  );
+
+  const targetHigh = toFiniteNumber(
+    previousLocationCandidate?.targetZone?.high
+  );
+
+  const invalidated =
+    previousLocationCandidate?.invalidationFacts
+      ?.completedCloseInvalidationConfirmed === true ||
+    priorMemoryRecord?.invalidationFacts
+      ?.completedCloseInvalidationConfirmed === true ||
+    priorMemoryRecord?.lifecycleStatus === "INVALIDATED";
+
+  if (invalidated) {
+    return {
+      released: true,
+      releaseReason: "COMPLETED_CLOSE_INVALIDATION",
+      targetApproachCompletionWatch: false,
+      objectiveCompleted: false,
+      targetReached: false,
+    };
+  }
+
+  const explicitlyRetired =
+    priorMemoryRecord?.lifecycleStatus === "RETIRED";
+
+  if (explicitlyRetired) {
+    return {
+      released: true,
+      releaseReason:
+        priorMemoryRecord?.releaseReason ||
+        "EXPLICIT_RETIREMENT",
+      targetApproachCompletionWatch: false,
+      objectiveCompleted: false,
+      targetReached: false,
+    };
+  }
+
+  const favorableExcursion =
+    price !== null && entry !== null
+      ? direction === "SHORT"
+        ? round2(entry - price)
+        : round2(price - entry)
+      : null;
+
+  const objectiveCompleted =
+    favorableExcursion !== null &&
+    favorableExcursion >= 10;
+
+  const targetReached =
+    price !== null &&
+    (
+      (
+        direction === "LONG" &&
+        targetLow !== null &&
+        price >= targetLow
+      ) ||
+      (
+        direction === "SHORT" &&
+        targetHigh !== null &&
+        price <= targetHigh
+      )
+    );
+
+  if (targetReached) {
+    return {
+      released: true,
+      releaseReason: "TARGET_ZONE_REACHED",
+      targetApproachCompletionWatch: false,
+      objectiveCompleted,
+      targetReached: true,
+      favorableExcursion,
+    };
+  }
+
+  const inWarningBand =
+    price !== null &&
+    (
+      (
+        direction === "LONG" &&
+        targetLow !== null &&
+        price >= targetLow - 7 &&
+        price <= targetLow - 5
+      ) ||
+      (
+        direction === "SHORT" &&
+        targetHigh !== null &&
+        price >= targetHigh + 5 &&
+        price <= targetHigh + 7
+      )
+    );
+
+  return {
+    released: false,
+    releaseReason: null,
+    targetApproachCompletionWatch:
+      inWarningBand && objectiveCompleted,
+    objectiveCompleted,
+    targetReached: false,
+    favorableExcursion,
+  };
+}
+
 function collectEngine1Zones(
   engine1Context,
   tickSize
@@ -1076,6 +1316,24 @@ function buildWaitingHandoff(
     postReclaimFacts:
       candidate?.postReclaimFacts ?? null,
 
+    rejectionFacts:
+      candidate?.rejectionFacts ?? null,
+
+    upperWickFacts:
+      candidate?.upperWickFacts ?? null,
+
+    failedAcceptanceFacts:
+      candidate?.failedAcceptanceFacts ?? null,
+
+    failedReclaimFacts:
+      candidate?.failedReclaimFacts ?? null,
+
+    postRejectionFacts:
+      candidate?.postRejectionFacts ?? null,
+
+    lifecycleFacts:
+      candidate?.lifecycleFacts ?? null,
+
     invalidationFacts:
       candidate?.invalidationFacts ?? null,
 
@@ -1331,9 +1589,75 @@ const strategy1EligibleZones =
         safeMonitoringRange
   );
 
-const strategy1SelectedZone =
+/*
+ * Strategy 1 V2 preserves the active child before ranking.
+ * Ranking and distance select only when no preservable child remains.
+ */
+const strategy1MemoryRead =
+  selectionPurpose === "STRATEGY1_CHILD"
+    ? readNegotiatedZoneMemory({
+        filePath: memoryFilePath,
+      })
+    : {
+        ok: true,
+        store: {
+          schema: "engine26.negotiatedZoneMemory.v1",
+          records: {},
+        },
+        warnings: [],
+        malformed: false,
+      };
+
+const priorMemoryRecord =
+  getPriorMemoryRecord({
+    memoryStore: strategy1MemoryRead.store,
+    symbol: normalizedSymbol,
+    strategyId: normalizedStrategyId,
+    previousLocationCandidate,
+  });
+
+const previousZone =
+  findZoneByCanonicalId({
+    zones: approvedNegotiatedZones,
+    symbol: normalizedSymbol,
+    zoneId: previousLocationCandidate?.zoneId,
+  });
+
+const previousReleaseState =
+  evaluatePreviousChildRelease({
+    previousLocationCandidate,
+    priorMemoryRecord,
+    currentPrice: normalizedPrice,
+  });
+
+const previousSetupIdentityValid =
+  previousLocationCandidate?.laneId === "minute" &&
+  previousLocationCandidate?.strategyId ===
+    normalizedStrategyId &&
+  String(previousLocationCandidate?.symbol || "")
+    .toUpperCase() === normalizedSymbol &&
+  previousLocationCandidate?.setupClass ===
+    STRATEGY1_SETUP_CLASS &&
+  previousLocationCandidate?.identitySetupKey ===
+    STRATEGY1_SETUP_CLASS &&
+  previousLocationCandidate?.candidateIdentityVersion ===
+    "engine26.strategy1.v2";
+
+const previousChildPreservable =
+  selectionPurpose === "STRATEGY1_CHILD" &&
+  Boolean(previousZone) &&
+  previousSetupIdentityValid &&
+  previousLocationCandidate?.active === true &&
+  previousReleaseState.released !== true;
+
+const rankedStrategy1Zone =
   strategy1EligibleZones[0] ||
   null;
+
+const strategy1SelectedZone =
+  previousChildPreservable
+    ? previousZone
+    : rankedStrategy1Zone;
 
 const selectedZone =
   selectionPurpose === "GENERAL_PARENT"
@@ -1379,9 +1703,29 @@ const structuralDirectionBias =
     engine22WaveStrategy,
   });
 
+const inferredRotationDirection =
+  strategy1Eligible
+    ? inferRotationDirection({
+        selectedZone,
+        currentPrice: normalizedPrice,
+        bars10m,
+        negotiatedZones: approvedNegotiatedZones,
+      })
+    : "NEUTRAL";
+
+const preservedDirection =
+  previousChildPreservable
+    ? normalizeDirection(
+        previousLocationCandidate?.directionBias ??
+        previousLocationCandidate?.direction
+      )
+    : "NEUTRAL";
+
 const directionBias =
   strategy1Eligible
-    ? "LONG"
+    ? preservedDirection !== "NEUTRAL"
+      ? preservedDirection
+      : inferredRotationDirection
     : structuralDirectionBias;
 
 const setupType =
@@ -1425,8 +1769,10 @@ const setupType =
     ]);
 
   const active =
-    selectedZone.distancePoints <=
-    safeMonitoringRange;
+    strategy1Eligible && previousChildPreservable
+      ? true
+      : selectedZone.distancePoints <=
+        safeMonitoringRange;
 
   const status =
     !active
@@ -1448,6 +1794,11 @@ const setupType =
   const targetSelectedZone =
     strategy1Eligible && directionBias === "LONG"
       ? selectLongTargetZone({
+          negotiatedZones: approvedNegotiatedZones,
+          entryZone: selectedZone,
+        })
+      : strategy1Eligible && directionBias === "SHORT"
+      ? selectShortTargetZone({
           negotiatedZones: approvedNegotiatedZones,
           entryZone: selectedZone,
         })
@@ -1489,6 +1840,7 @@ const setupType =
         entryZone,
         locationInvalidationBoundary:
           boundaries.locationInvalidationBoundary,
+        direction: directionBias,
       })
     : null;
 
@@ -1503,9 +1855,7 @@ const setupType =
   let memoryWarnings = [];
 
   if (strategy1Eligible) {
-    const memoryRead = readNegotiatedZoneMemory({
-      filePath: memoryFilePath,
-    });
+    const memoryRead = strategy1MemoryRead;
 
     const memoryKey = buildStrategy1MemoryKey({
       laneId: "minute",
@@ -1520,12 +1870,52 @@ const setupType =
       strategyId: normalizedStrategyId,
       zoneId,
       candidateId,
+      directionBias,
+      setupClass:
+        strategyIdentity?.setupClass || null,
+      setupGrade:
+        strategyIdentity?.setupGrade || null,
+      identitySetupKey:
+        strategyIdentity?.identitySetupKey || null,
       candidateIdentityVersion:
         strategyIdentity?.candidateIdentityVersion || null,
       identityAdoptedFromLegacy:
         strategyIdentity?.identityAdoptedFromLegacy === true,
+      identityAdoptedFromPreviousV2:
+        strategyIdentity?.identityAdoptedFromPreviousV2 === true,
       legacyCandidateId:
         strategyIdentity?.legacyCandidateId || null,
+      entryZone,
+      targetZone,
+    };
+
+    const currentLifecycleUpdate = {
+      lifecycleStatus:
+        invalidated
+          ? "INVALIDATED"
+          : previousReleaseState
+              .targetApproachCompletionWatch
+          ? "TARGET_APPROACH_COMPLETION_WATCH"
+          : "ACTIVE",
+
+      releaseReason:
+        invalidated
+          ? "COMPLETED_CLOSE_INVALIDATION"
+          : null,
+
+      maximumFavorableExcursionPoints:
+        previousReleaseState.favorableExcursion ?? null,
+
+      targetApproachAt:
+        previousReleaseState
+          .targetApproachCompletionWatch
+          ? snapshotTime
+          : null,
+
+      objectiveCompletedAt:
+        previousReleaseState.objectiveCompleted
+          ? snapshotTime
+          : null,
     };
 
     let memoryUpdate = updateNegotiatedZoneMemory({
@@ -1534,22 +1924,33 @@ const setupType =
       candidate: memoryCandidate,
       facts: strategyFacts,
       snapshotTime,
+      lifecycleUpdate: currentLifecycleUpdate,
     });
 
-    const priorZoneId = previousLocationCandidate?.zoneId || null;
-    if (priorZoneId && priorZoneId !== zoneId) {
+    const priorZoneId =
+      previousLocationCandidate?.zoneId || null;
+
+    if (
+      priorZoneId &&
+      priorZoneId !== zoneId &&
+      previousReleaseState.released === true &&
+      previousReleaseState.releaseReason
+    ) {
       const priorMemoryKey = buildStrategy1MemoryKey({
         laneId: "minute",
         symbol: normalizedSymbol,
         strategyId: normalizedStrategyId,
         zoneId: priorZoneId,
       });
+
       memoryUpdate = {
         ...memoryUpdate,
         store: retirePriorMemoryRecord({
           store: memoryUpdate.store,
           priorMemoryKey,
           retiredAt: snapshotTime,
+          retirementReason:
+            previousReleaseState.releaseReason,
         }),
       };
     }
@@ -1583,6 +1984,14 @@ const setupType =
       identityAdoptedFromLegacy: record.identityAdoptedFromLegacy,
       invalidatedAt: record.invalidatedAt,
       retiredAt: record.retiredAt,
+      releaseReason: record.releaseReason ?? null,
+      direction: record.direction ?? directionBias,
+      setupClass: record.setupClass ?? null,
+      targetTouchedAt: record.targetTouchedAt ?? null,
+      targetApproachAt: record.targetApproachAt ?? null,
+      objectiveCompletedAt: record.objectiveCompletedAt ?? null,
+      maximumFavorableExcursionPoints:
+        record.maximumFavorableExcursionPoints ?? null,
     };
   }
 
@@ -1656,13 +2065,30 @@ const setupType =
       ? "TARGET_ZONE_AVAILABLE"
       : "TARGET_ZONE_UNAVAILABLE",
     targetZoneReasonCodes: targetZone
-      ? ["NEXT_NEGOTIATED_ZONE_ABOVE_ENTRY_SELECTED"]
-      : ["NEXT_NEGOTIATED_ZONE_ABOVE_ENTRY_UNAVAILABLE"],
+      ? [
+          directionBias === "SHORT"
+            ? "NEXT_NEGOTIATED_ZONE_BELOW_ENTRY_SELECTED"
+            : "NEXT_NEGOTIATED_ZONE_ABOVE_ENTRY_SELECTED",
+        ]
+      : [
+          directionBias === "SHORT"
+            ? "NEXT_NEGOTIATED_ZONE_BELOW_ENTRY_UNAVAILABLE"
+            : "NEXT_NEGOTIATED_ZONE_ABOVE_ENTRY_UNAVAILABLE",
+        ],
 
     sweepFacts: strategyFacts?.sweepFacts || null,
     lowerWickFacts: strategyFacts?.lowerWickFacts || null,
     reclaimFacts: strategyFacts?.reclaimFacts || null,
     postReclaimFacts: strategyFacts?.postReclaimFacts || null,
+    rejectionFacts: strategyFacts?.rejectionFacts || null,
+    upperWickFacts: strategyFacts?.upperWickFacts || null,
+    failedAcceptanceFacts:
+      strategyFacts?.failedAcceptanceFacts || null,
+    failedReclaimFacts:
+      strategyFacts?.failedReclaimFacts || null,
+    postRejectionFacts:
+      strategyFacts?.postRejectionFacts || null,
+    lifecycleFacts: strategyFacts?.lifecycleFacts || null,
     invalidationFacts: strategyFacts?.invalidationFacts || null,
     zoneMemorySummary,
     invalidatedAt:
@@ -1726,6 +2152,30 @@ const setupType =
 
     monitoringRangePoints:
       safeMonitoringRange,
+
+    childPreservation: {
+      preservedBeforeRanking:
+        previousChildPreservable,
+      priorZoneId:
+        previousLocationCandidate?.zoneId || null,
+      releaseReason:
+        previousReleaseState.releaseReason || null,
+      targetApproachCompletionWatch:
+        previousReleaseState
+          .targetApproachCompletionWatch === true,
+      objectiveCompleted:
+        previousReleaseState.objectiveCompleted === true,
+      targetReached:
+        previousReleaseState.targetReached === true,
+      nextRankedAlternativeZoneId:
+        rankedStrategy1Zone &&
+        rankedStrategy1Zone !== selectedZone
+          ? buildCanonicalZoneId(
+              normalizedSymbol,
+              rankedStrategy1Zone
+            )
+          : null,
+    },
 
     structuralContext: {
       currentLifecycleKey:
@@ -1837,11 +2287,19 @@ const setupType =
         : "ENGINE26_STRATEGY1_NOT_ELIGIBLE",
 
       strategy1Eligible
-        ? "ENGINE26_STRATEGY1_TACTICAL_DIRECTION_LONG"
+        ? `ENGINE26_STRATEGY1_TACTICAL_DIRECTION_${directionBias}`
         : null,
 
       strategy1Eligible
         ? "ENGINE22_INTERNAL_LEG_DIRECTION_NOT_USED_AS_TRADE_DIRECTION"
+        : null,
+
+      previousChildPreservable
+        ? "ENGINE26_STRATEGY1_ACTIVE_CHILD_PRESERVED_BEFORE_RANKING"
+        : null,
+
+      previousReleaseState.targetApproachCompletionWatch
+        ? "ENGINE26_STRATEGY1_TARGET_APPROACH_COMPLETION_WATCH"
         : null,
     ],
 
@@ -1900,6 +2358,12 @@ export function buildEngine26AWaitingContract({
     lowerWickFacts: null,
     reclaimFacts: null,
     postReclaimFacts: null,
+    rejectionFacts: null,
+    upperWickFacts: null,
+    failedAcceptanceFacts: null,
+    failedReclaimFacts: null,
+    postRejectionFacts: null,
+    lifecycleFacts: null,
     invalidationFacts: null,
     zoneMemorySummary: null,
     invalidatedAt: null,
@@ -1980,16 +2444,50 @@ export function buildEngine26ReactionHandoff({
     distancePoints <=
       activationRangePoints;
 
+  const direction = normalizeDirection(
+    candidate?.directionBias ??
+    candidate?.direction
+  );
+
+  const longFactsReady =
+    direction === "LONG" &&
+    candidate?.sweepFacts?.intrabarSweepObserved === true &&
+    candidate?.reclaimFacts?.completedReclaimObserved === true &&
+    candidate?.postReclaimFacts?.completedHoldObserved === true;
+
+  const shortFactsReady =
+    direction === "SHORT" &&
+    (
+      candidate?.rejectionFacts
+        ?.completedRejectionObserved === true ||
+      candidate?.failedAcceptanceFacts
+        ?.completedFailedAcceptanceObserved === true ||
+      candidate?.failedReclaimFacts
+        ?.failedReclaimObserved === true
+    ) &&
+    candidate?.postRejectionFacts?.completedHoldObserved === true;
+
+  const directionalFactsReady =
+    longFactsReady || shortFactsReady;
+
+  const evaluationAuthorized =
+    withinActivationRange &&
+    directionalFactsReady &&
+    candidate?.invalidationFacts
+      ?.completedCloseInvalidationConfirmed !== true;
+
   const status =
     !candidateActive
       ? "WAITING_FOR_ACTIVATION_RANGE"
       : withinActivationRange
-      ? "ACTIVE"
+      ? directionalFactsReady
+        ? "ACTIVE"
+        : "WAITING_FOR_DIRECTIONAL_FACTS"
       : "WAITING_FOR_ACTIVATION_RANGE";
 
   return {
     active:
-      withinActivationRange,
+      evaluationAuthorized,
 
     engine:
       "engine26.reactionHandoff.v1",
@@ -2039,6 +2537,15 @@ export function buildEngine26ReactionHandoff({
     lowerWickFacts: candidate.lowerWickFacts ?? null,
     reclaimFacts: candidate.reclaimFacts ?? null,
     postReclaimFacts: candidate.postReclaimFacts ?? null,
+    rejectionFacts: candidate.rejectionFacts ?? null,
+    upperWickFacts: candidate.upperWickFacts ?? null,
+    failedAcceptanceFacts:
+      candidate.failedAcceptanceFacts ?? null,
+    failedReclaimFacts:
+      candidate.failedReclaimFacts ?? null,
+    postRejectionFacts:
+      candidate.postRejectionFacts ?? null,
+    lifecycleFacts: candidate.lifecycleFacts ?? null,
     invalidationFacts: candidate.invalidationFacts ?? null,
     zoneMemorySummary: candidate.zoneMemorySummary ?? null,
 
@@ -2094,15 +2601,17 @@ export function buildEngine26ReactionHandoff({
       candidate.activationRangePoints,
 
     authorizeEngine3Evaluation:
-      withinActivationRange,
+      evaluationAuthorized,
 
     sourceRefs:
       candidate.sourceRefs || [],
 
     reasonCodes: [
-      withinActivationRange
+      evaluationAuthorized
         ? "ENGINE26_REACTION_HANDOFF_ACTIVE"
-        : "WAITING_FOR_ACTIVATION_RANGE",
+        : !withinActivationRange
+        ? "WAITING_FOR_ACTIVATION_RANGE"
+        : "WAITING_FOR_DIRECTIONAL_FACTS",
 
       "ENGINE26A_EXPECTATION_ONLY",
 
@@ -2197,6 +2706,8 @@ export function buildEngine26A(
     strategyId: engine26LocationCandidate?.strategyId ?? null,
     candidateId: engine26LocationCandidate?.candidateId ?? null,
     zoneId: engine26LocationCandidate?.zoneId ?? null,
+    direction:
+      engine26LocationCandidate?.directionBias ?? null,
     setupClass: engine26LocationCandidate?.setupClass ?? null,
     setupGrade: engine26LocationCandidate?.setupGrade ?? null,
     identitySetupKey:
@@ -2205,6 +2716,14 @@ export function buildEngine26A(
       engine26LocationCandidate?.candidateIdentityVersion ?? null,
     entryZone: engine26LocationCandidate?.entryZone ?? null,
     targetZone: engine26LocationCandidate?.targetZone ?? null,
+    sweepFacts: engine26LocationCandidate?.sweepFacts ?? null,
+    reclaimFacts: engine26LocationCandidate?.reclaimFacts ?? null,
+    rejectionFacts: engine26LocationCandidate?.rejectionFacts ?? null,
+    failedAcceptanceFacts:
+      engine26LocationCandidate?.failedAcceptanceFacts ?? null,
+    failedReclaimFacts:
+      engine26LocationCandidate?.failedReclaimFacts ?? null,
+    lifecycleFacts: engine26LocationCandidate?.lifecycleFacts ?? null,
     locationInvalidationBoundary:
       engine26LocationCandidate?.locationInvalidationBoundary ?? null,
     snapshotTime: engine26LocationCandidate?.snapshotTime ?? null,
