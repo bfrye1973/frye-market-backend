@@ -567,3 +567,44 @@ test(
     );
   }
 );
+
+test(
+  "completed close equal to current lifecycle start invalidates current SHORT child",
+  () => {
+    const lifecycleStartTime =
+      "2026-07-29T13:56:54.496Z";
+
+    const facts = buildStrategy1Facts({
+      direction: "SHORT",
+      lifecycleStartTime,
+      entryZone: {
+        low: 7433.75,
+        high: 7457.5,
+        midline: 7445.75,
+      },
+      locationInvalidationBoundary: 7457.75,
+      bars10m: [
+        {
+          time: lifecycleStartTime,
+          open: 7430,
+          high: 7463,
+          low: 7428,
+          close: 7460,
+          completed: true,
+        },
+      ],
+    });
+
+    assert.equal(
+      facts.invalidationFacts
+        .completedCloseInvalidationConfirmed,
+      true
+    );
+
+    assert.equal(
+      facts.invalidationFacts
+        .invalidationTime,
+      lifecycleStartTime
+    );
+  }
+);
