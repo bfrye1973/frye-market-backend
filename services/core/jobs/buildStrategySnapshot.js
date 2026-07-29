@@ -2801,6 +2801,8 @@ function buildEngine6PaperPermission({
       ? "FAST_INTRADAY_PAPER_ALLOW"
       : allowed
       ? "PAPER_ALLOW"
+      : strategy1NeutralObservation
+      ? "STRATEGY1_OBSERVATION_WAIT"
       : shortResearchWatch
       ? "PAPER_SHORT_RESEARCH_WATCH"
       : structuralFastWatch
@@ -2898,8 +2900,10 @@ function buildEngine6PaperPermission({
     setupType,
 
     direction:
-      shortResearchWatch === true ||
-      structuralFastWatch === true
+      strategy1NeutralObservation === true
+        ? "NEUTRAL"
+        : shortResearchWatch === true ||
+          structuralFastWatch === true
         ? "SHORT"
         : direction,
 
