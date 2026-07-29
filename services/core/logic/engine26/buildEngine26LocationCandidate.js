@@ -31,7 +31,6 @@ import { buildStrategy1Facts } from "./strategy1/buildStrategy1Facts.js";
 import {
   readNegotiatedZoneMemory,
   writeNegotiatedZoneMemory,
-  DEFAULT_MEMORY_PATH,
 } from "./strategy1/negotiatedZoneMemoryStore.js";
 import {
   buildStrategy1MemoryKey,
@@ -42,6 +41,10 @@ import {
 const DEFAULT_TICK_SIZE = 0.25;
 const DEFAULT_MONITORING_RANGE_POINTS = 25;
 const DEFAULT_ACTIVATION_RANGE_POINTS = 4;
+
+const DEFAULT_MEMORY_PATH =
+  process.env.ENGINE26_NEGOTIATED_ZONE_MEMORY_PATH ||
+  "/opt/render/project/src/services/core/data/engine26/negotiated-zone-memory.json";
 
 function toFiniteNumber(value) {
   if (value === null || value === undefined || value === "") return null;
