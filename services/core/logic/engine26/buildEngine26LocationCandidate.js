@@ -803,6 +803,45 @@ function resolveDirectionalEvidence({
   };
 }
 
+function resolveCandidateLifecycleStartTime({
+  snapshotTime,
+  previousLocationCandidate,
+  priorMemoryRecord,
+  selectedZoneId,
+  direction,
+}) {
+  const previousSameZone =
+    previousLocationCandidate?.zoneId ===
+    selectedZoneId;
+
+  const previousSameDirection =
+    normalizeDirection(
+      previousLocationCandidate?.directionBias ??
+      previousLocationCandidate?.direction
+    ) === normalizeDirection(direction);
+
+  if (
+    previousSameZone &&
+    previousSameDirection
+  ) {
+    return (
+      previousLocationCandidate
+        ?.directionResolvedAt ||
+      previousLocationCandidate
+        ?.candidateLifecycleStartTime ||
+      priorMemoryRecord
+        ?.directionResolvedAt ||
+      priorMemoryRecord
+        ?.candidateLifecycleStartTime ||
+      previousLocationCandidate
+        ?.snapshotTime ||
+      snapshotTime
+    );
+  }
+
+  return snapshotTime;
+}
+
 function findZoneByCanonicalId({
   zones,
   symbol,
@@ -1522,6 +1561,9 @@ function makeWaitingCandidate({
     preferredDirection: "NEUTRAL",
     directionState:
       "OBSERVING_ZONE_REACTION",
+    directionResolvedAt: null,
+    candidateLifecycleStartTime:
+      snapshotTime,
     directionalEvidence: null,
     ema10Posture: null,
     setupType: null,
@@ -2070,6 +2112,8 @@ const longFacts =
         locationInvalidationBoundary:
           longBoundaries.locationInvalidationBoundary,
         direction: "LONG",
+        lifecycleStartTime:
+          candidateLifecycleStartTime,
       })
     : null;
 
@@ -2081,6 +2125,8 @@ const shortFacts =
         locationInvalidationBoundary:
           shortBoundaries.locationInvalidationBoundary,
         direction: "SHORT",
+        lifecycleStartTime:
+          candidateLifecycleStartTime,
       })
     : null;
 
@@ -2137,6 +2183,27 @@ const directionState =
     ? previousLocationCandidate?.directionState ||
       `${preservedDirection}_DIRECTIONAL_CHILD_ACTIVE`
     : resolvedDirectionalEvidence.directionState;
+
+const directionResolvedAt =
+  ["LONG", "SHORT"].includes(directionBias)
+    ? resolveCandidateLifecycleStartTime({
+        snapshotTime,
+        previousLocationCandidate,
+        priorMemoryRecord,
+        selectedZoneId,
+        direction: directionBias,
+      })
+    : null;
+
+const candidateLifecycleStartTime =
+  directionResolvedAt ||
+  (
+    promotedObservation
+      ? snapshotTime
+      : previousLocationCandidate
+          ?.candidateLifecycleStartTime ||
+        snapshotTime
+  );
 
 const setupType =
   strategy1Eligible
@@ -2340,6 +2407,8 @@ const strategyFacts =
         strategyIdentity?.legacyCandidateId || null,
       entryZone,
       targetZone,
+      candidateLifecycleStartTime,
+      directionResolvedAt,
     };
 
     const currentLifecycleUpdate = {
@@ -2445,6 +2514,10 @@ const strategyFacts =
       objectiveCompletedAt: record.objectiveCompletedAt ?? null,
       maximumFavorableExcursionPoints:
         record.maximumFavorableExcursionPoints ?? null,
+      candidateLifecycleStartTime:
+        record.candidateLifecycleStartTime ?? null,
+      directionResolvedAt:
+        record.directionResolvedAt ?? null,
     };
   }
 
@@ -2480,6 +2553,8 @@ const strategyFacts =
     preferredDirection:
       directionBias,
     directionState,
+    directionResolvedAt,
+    candidateLifecycleStartTime,
     directionalEvidence:
       resolvedDirectionalEvidence,
     ema10Posture:
@@ -3016,6 +3091,12 @@ export function buildEngine26ReactionHandoff({
       candidate.directionState ??
       "OBSERVING_ZONE_REACTION",
 
+    directionResolvedAt:
+      candidate.directionResolvedAt ?? null,
+
+    candidateLifecycleStartTime:
+      candidate.candidateLifecycleStartTime ?? null,
+
     directionalEvidence:
       candidate.directionalEvidence ?? null,
 
@@ -3216,6 +3297,11 @@ export function buildEngine26A(
       engine26LocationCandidate?.directionBias ?? null,
     directionState:
       engine26LocationCandidate?.directionState ?? null,
+    directionResolvedAt:
+      engine26LocationCandidate?.directionResolvedAt ?? null,
+    candidateLifecycleStartTime:
+      engine26LocationCandidate
+        ?.candidateLifecycleStartTime ?? null,
     directionalEvidence:
       engine26LocationCandidate?.directionalEvidence ?? null,
     ema10Posture:
