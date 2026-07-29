@@ -3137,8 +3137,27 @@ const engine6PaperPermission = buildEngine6PaperPermission({
     symbol,
     tf,
 
-    engine15Authority: true,
+    engine15Authority:
+      engine6PaperPermission?.engine15FastLaneExcluded === true
+        ? false
+        : true,
+
+    engine6Authority:
+      engine6PaperPermission?.engine15FastLaneExcluded === true
+        ? true
+        : false,
+
     engine5Authority: false,
+
+    authority:
+      engine6PaperPermission?.engine15FastLaneExcluded === true
+        ? "Engine 6 Fast Lane"
+        : "Engine 15",
+
+     authoritySource:
+       engine6PaperPermission?.engine15FastLaneExcluded === true
+         ? "ENGINE6_FAST_LANE_PERMISSION_AUTHORITY"
+         : "ENGINE15_HIGHER_DEGREE_READINESS_AUTHORITY",
 
     strategyType,
     direction,
