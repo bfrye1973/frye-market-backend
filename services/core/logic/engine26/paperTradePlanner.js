@@ -1,6 +1,7 @@
 // services/core/logic/engine26/paperTradePlanner.js
 
 import { deriveEngine22StructuralPlaybook } from "./deriveEngine22StructuralPlaybook.js";
+import { evaluateStrategy1Geometry } from "./strategy1/evaluateStrategy1Geometry.js";
 
 const ENGINE = "engine26.paperTradePlanner.v1";
 const MODE = "PAPER_ONLY";
@@ -2174,438 +2175,19 @@ function buildEngine7SizingPreviewV1({ permission, confluence, engine15Decision 
 function buildEngine26Strategy1ProposedGeometry({
   symbol,
   strategyId,
-  tf,
   permission,
   engine26LocationCandidate,
   engine26GeometryHandoff,
 }) {
-  const candidate =
-    engine26LocationCandidate &&
-    typeof engine26LocationCandidate === "object"
-      ? engine26LocationCandidate
-      : null;
-
-  const handoff =
-    engine26GeometryHandoff &&
-    typeof engine26GeometryHandoff === "object"
-      ? engine26GeometryHandoff
-      : null;
-
-  const paper =
-    permission?.paper &&
-    typeof permission.paper === "object"
-      ? permission.paper
-      : null;
-
-  const setupClass =
-    candidate?.setupClass ??
-    handoff?.setupClass ??
-    null;
-
-  const isStrategy1 =
-    setupClass ===
-      "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION" &&
-    (candidate?.laneId ?? handoff?.laneId) === "minute" &&
-    (candidate?.strategyId ?? handoff?.strategyId ?? strategyId) ===
-      "intraday_scalp@10m";
-
-  if (!isStrategy1) {
-    return null;
-  }
-
-  const laneId =
-    candidate?.laneId ??
-    handoff?.laneId ??
-    null;
-
-  const candidateId =
-    candidate?.candidateId ??
-    null;
-
-  const zoneId =
-    candidate?.zoneId ??
-    null;
-
-  const resolvedStrategyId =
-    candidate?.strategyId ??
-    strategyId ??
-    null;
-
-  const resolvedSymbol =
-    candidate?.symbol ??
-    symbol ??
-    null;
-
-  const snapshotTime =
-    candidate?.snapshotTime ??
-    handoff?.snapshotTime ??
-    null;
-
-  const direction =
-    safeUpper(
-      candidate?.directionBias ??
-      candidate?.tradeDirectionBias ??
-      handoff?.direction ??
-      "LONG"
-    );
-
-  const setupType =
-    candidate?.setupType ??
-    setupClass;
-
-  const setupGrade =
-    candidate?.setupGrade ??
-    handoff?.setupGrade ??
-    null;
-
-  const identitySetupKey =
-    candidate?.identitySetupKey ??
-    handoff?.identitySetupKey ??
-    null;
-
-  const candidateIdentityVersion =
-    candidate?.candidateIdentityVersion ??
-    handoff?.candidateIdentityVersion ??
-    null;
-
-  const entryZone =
-    handoff?.entryZone ??
-    candidate?.entryZone ??
-    null;
-
-  const targetZone =
-    handoff?.targetZone ??
-    candidate?.targetZone ??
-    null;
-
-  const locationInvalidationBoundary =
-    toNum(
-      handoff?.locationInvalidationBoundary ??
-      candidate?.locationInvalidationBoundary
-    );
-
-  const permissionReady =
-    paper?.decision ===
-      "FAST_INTRADAY_PAPER_ALLOW" &&
-    paper?.allowed === true &&
-    paper?.planningAllowed === true;
-
-  const identityMatches =
-    Boolean(candidate) &&
-    Boolean(handoff) &&
-    Boolean(laneId) &&
-    Boolean(resolvedStrategyId) &&
-    Boolean(candidateId) &&
-    Boolean(zoneId) &&
-    Boolean(resolvedSymbol) &&
-    Boolean(setupClass) &&
-    Boolean(setupGrade) &&
-    Boolean(identitySetupKey) &&
-    Boolean(candidateIdentityVersion) &&
-    Boolean(snapshotTime) &&
-    candidateId === handoff?.candidateId &&
-    zoneId === handoff?.zoneId &&
-    laneId === handoff?.laneId &&
-    resolvedStrategyId === handoff?.strategyId &&
-    resolvedSymbol === handoff?.symbol &&
-    setupClass === handoff?.setupClass &&
-    setupGrade === handoff?.setupGrade &&
-    identitySetupKey === handoff?.identitySetupKey &&
-    candidateIdentityVersion ===
-      handoff?.candidateIdentityVersion;
-
-  const candidateInvalidated =
-    candidate?.active === false ||
-    safeUpper(candidate?.status) === "INVALIDATED" ||
-    candidate?.invalidationFacts
-      ?.completedCloseInvalidationConfirmed === true;
-
-  const proposedEntryPrice =
-    roundToTick(entryZone?.midline);
-
-  const proposedStopPrice =
-    roundToTick(
-      locationInvalidationBoundary
-    );
-
-  const target1Price =
-    roundToTick(targetZone?.low);
-
-  const target2Price =
-    roundToTick(targetZone?.midline);
-
-  const stopValid =
-    proposedStopPrice != null &&
-    toNum(entryZone?.low) != null &&
-    proposedStopPrice <
-      toNum(entryZone.low);
-
-  const targetValid =
-    target1Price != null &&
-    target2Price != null &&
-    toNum(entryZone?.high) != null &&
-    proposedEntryPrice != null &&
-    target1Price >
-      toNum(entryZone.high) &&
-    target1Price >
-      proposedEntryPrice &&
-    target2Price >=
-      target1Price;
-
-  let status =
-    "PROPOSED_GEOMETRY_AVAILABLE";
-
-  if (!paper) {
-    status =
-      "WAITING_FOR_ENGINE6_PERMISSION";
-  } else if (!permissionReady) {
-    status =
-      "WAITING_FOR_ENGINE6_PERMISSION";
-  } else if (!identityMatches) {
-    status =
-      "IDENTITY_MISMATCH";
-  } else if (candidateInvalidated) {
-    status =
-      "CANDIDATE_INVALIDATED";
-  } else if (
-    !entryZone ||
-    proposedEntryPrice == null
-  ) {
-    status =
-      "WAITING_FOR_ENTRY_ZONE";
-  } else if (
-    !targetZone ||
-    target1Price == null ||
-    target2Price == null
-  ) {
-    status =
-      "WAITING_FOR_TARGET_ZONE";
-  } else if (
-    locationInvalidationBoundary == null
-  ) {
-    status =
-      "WAITING_FOR_INVALIDATION_BOUNDARY";
-  } else if (!stopValid) {
-    status =
-      "INVALID_STOP_GEOMETRY";
-  } else if (!targetValid) {
-    status =
-      "INVALID_TARGET_GEOMETRY";
-  } else if (direction !== "LONG") {
-    status =
-      "UNSUPPORTED_DIRECTION";
-  }
-
-  const geometryReady =
-    status ===
-      "PROPOSED_GEOMETRY_AVAILABLE";
-
-  const proposedStopDistancePoints =
-    geometryReady
-      ? roundPts(
-          Math.abs(
-            proposedEntryPrice -
-            proposedStopPrice
-          )
-        )
-      : null;
-
-  const target1RewardPoints =
-    geometryReady
-      ? roundPts(
-          target1Price -
-          proposedEntryPrice
-        )
-      : null;
-
-  const target2RewardPoints =
-    geometryReady
-      ? roundPts(
-          target2Price -
-          proposedEntryPrice
-        )
-      : null;
-
-  const target1RiskReward =
-    geometryReady &&
-    proposedStopDistancePoints > 0
-      ? Number(
-          (
-            target1RewardPoints /
-            proposedStopDistancePoints
-          ).toFixed(2)
-        )
-      : null;
-
-  const target2RiskReward =
-    geometryReady &&
-    proposedStopDistancePoints > 0
-      ? Number(
-          (
-            target2RewardPoints /
-            proposedStopDistancePoints
-          ).toFixed(2)
-        )
-      : null;
-
-  const proposedTargets = [
-    {
-      targetId:
-        "TARGET_1_ZONE_TOUCH",
-      sequence: 1,
-      price: target1Price,
-      purpose:
-        "FIRST_PROFIT_NEXT_NEGOTIATED_ZONE_TOUCH",
-      contracts: 1,
-    },
-    {
-      targetId:
-        "TARGET_2_ZONE_MIDLINE",
-      sequence: 2,
-      price: target2Price,
-      purpose:
-        "SECOND_PROFIT_NEXT_NEGOTIATED_ZONE_MIDLINE",
-      contracts: 1,
-    },
-    {
-      targetId:
-        "TARGET_3_ENGINE9_RUNNER",
-      sequence: 3,
-      price: null,
-      purpose:
-        "ENGINE9_RUNNER_HANDOFF",
-      contracts: 1,
-      runnerHandoffRequired: true,
-    },
-  ];
-
-const runnerTarget =
-  proposedTargets.find(
-    (target) =>
-      target?.targetId ===
-      "TARGET_3_ENGINE9_RUNNER"
-  ) || null;
-
-const runnerHandoffRequired =
-  geometryReady === true &&
-  runnerTarget?.purpose ===
-    "ENGINE9_RUNNER_HANDOFF" &&
-  runnerTarget?.price === null &&
-  runnerTarget?.runnerHandoffRequired === true;
-
-  return {
-    active: geometryReady,
-    geometryReady,
-    status,
-
-    engine:
-      "engine26B.proposedGeometry.v1",
-    contractVersion:
-      "engine26.proposedGeometry.v1",
-    geometryContractVersion:
-      "engine26b.strategy1.v1",
-
-    laneId,
-    strategyId: resolvedStrategyId,
-    candidateId,
-    zoneId,
-    symbol: resolvedSymbol,
-    direction,
-    setupType,
-    setupClass,
-    setupGrade,
-    identitySetupKey,
-    candidateIdentityVersion,
-
-    entryZone,
-    targetZone,
-    locationInvalidationBoundary,
-
-    proposedEntryPrice,
-    proposedStopPrice,
-    proposedStopDistancePoints,
-    proposedTargets,
-
-    target1Price,
-    target1Trigger:
-      "FIRST_TOUCH_OF_TARGET_ZONE",
-    target1RewardPoints,
-    target1RiskReward,
-
-    target2Price,
-    target2Trigger:
-      "TARGET_ZONE_MIDLINE",
-    target2RewardPoints,
-    target2RiskReward,
-
-    target3Status:
-      "ENGINE9_RUNNER_HANDOFF",
-    target3Price: null,
-    runnerHandoffRequired,
-
-    candidateStatus:
-      candidateInvalidated
-        ? "INVALIDATED"
-        : candidate?.status ??
-          "ACTIVE",
-
-    lifecycleStatus:
-      geometryReady
-        ? "PROPOSED_GEOMETRY_AVAILABLE"
-        : status,
-
-    planningPermissionConsumed:
-      permissionReady,
-
-    proposalOnly: true,
-    plannerOnly: true,
-    official: false,
-    officialPlanOwner: "ENGINE9",
-
-    nonExecutable: true,
-    noPermissionCreated: true,
-    noSizingCreated: true,
-    noManagementCreated: true,
-    noTradeCreated: true,
-    noOrderCreated: true,
-    noFillCreated: true,
-    noExecution: true,
-    noJournalWrite: true,
-
-    requiresEngine7Sizing: true,
-    requiresEngine9Management: true,
-    requiresEngine8Execution: true,
-
-    candidateIdentityPreserved:
-      identityMatches,
-
-    snapshotTime,
-
-    warnings:
-      geometryReady
-        ? []
-        : [status],
-
-    reasonCodes: [
-      "ENGINE26B_STRATEGY1_BRANCH",
-      geometryReady
-        ? "ENGINE26B_STRATEGY1_GEOMETRY_READY"
-        : status,
-      identityMatches
-        ? "ENGINE26A_IDENTITY_PRESERVED"
-        : "ENGINE26A_IDENTITY_NOT_PRESERVED",
-      permissionReady
-        ? "ENGINE6_FAST_INTRADAY_PAPER_ALLOW_CONSUMED"
-        : "ENGINE6_PLANNING_PERMISSION_REQUIRED",
-      "TWO_NUMERIC_TARGETS_ONLY",
-      "ENGINE9_RUNNER_HANDOFF_PRICE_NULL",
-      "NO_PERMISSION_CREATED",
-      "NO_SIZING_CREATED",
-      "NO_MANAGEMENT_CREATED",
-      "NO_EXECUTION",
-    ],
-  };
+  return evaluateStrategy1Geometry({
+    symbol,
+    strategyId,
+    permission,
+    engine26LocationCandidate,
+    engine26GeometryHandoff,
+  });
 }
+
 function buildEngine26ProposedGeometry({
   symbol,
   strategyId,
@@ -2956,10 +2538,10 @@ const zoneMid = roundToTick(
   const confirmationGate =
     direction === "SHORT"
       ? {
-          label: "C-down confirmation watch",
-          level: 7555,
+          label: "Negotiated-zone rejection / failed-reclaim watch",
+          level: zoneLo,
           rule:
-            "Below / failed reclaim near 7555 starts stronger C-down confirmation watch.",
+            "SHORT requires rejection, failed acceptance, or failed reclaim at the active negotiated zone with Engine 3 and Engine 4 confirmation.",
           required: true,
         }
       : direction === "LONG"
@@ -2985,9 +2567,12 @@ const zoneMid = roundToTick(
             zoneLo != null
               ? `Below ${zoneLo} / failed reclaim under B-zone`
               : "Below failed acceptance of active zone",
-          referencePrice: zoneLo,
+          referencePrice:
+            strategy1Candidate?.entryZone?.midline ??
+            zoneMid ??
+            zoneLo,
           description:
-            "Short research only if price fails acceptance and starts moving down out of the negotiated zone.",
+            "SHORT research only if price rejects or fails acceptance/reclaim at the active negotiated zone.",
         }
       : direction === "LONG"
       ? {
@@ -2996,9 +2581,12 @@ const zoneMid = roundToTick(
             zoneHi != null
               ? `Above ${zoneHi} reclaim / hold`
               : "Above active zone reclaim / hold",
-          referencePrice: zoneHi,
+          referencePrice:
+            strategy1Candidate?.entryZone?.midline ??
+            zoneMid ??
+            zoneHi,
           description:
-            "Long research only if price reclaims and holds with participation.",
+            "LONG research only if price sweeps, reclaims, and holds the active negotiated zone with participation.",
         }
       : {
           label: "No entry idea yet",
@@ -3011,14 +2599,26 @@ const zoneMid = roundToTick(
     direction === "SHORT"
       ? {
           label: "Above negotiated zone / B-zone invalidation",
-          price: zoneHi != null ? roundToTick(zoneHi + TICK_SIZE_ES) : bHigh,
+          price:
+            roundToTick(
+              strategy1Candidate?.locationInvalidationBoundary
+            ) ??
+            (zoneHi != null
+              ? roundToTick(zoneHi + TICK_SIZE_ES)
+              : bHigh),
           description:
             "Stop idea sits just outside / above the negotiated zone or B-zone.",
         }
       : direction === "LONG"
       ? {
           label: "Below negotiated zone invalidation",
-          price: zoneLo != null ? roundToTick(zoneLo - TICK_SIZE_ES) : null,
+          price:
+            roundToTick(
+              strategy1Candidate?.locationInvalidationBoundary
+            ) ??
+            (zoneLo != null
+              ? roundToTick(zoneLo - TICK_SIZE_ES)
+              : null),
           description:
             "Stop idea sits just outside / below the negotiated zone.",
         }
@@ -3029,10 +2629,11 @@ const zoneMid = roundToTick(
         };
 
   const scalpGoal = {
-    minPoints: 15,
-    maxPoints: 30,
+    minimumObjectivePoints: 10,
+    preferredObjectivePoints: 15,
+    exceptionalGeometryPoints: 20,
     description:
-      "Brian's current paper scalp goal is 15–30 ES points, not a home-run trade.",
+      "Strategy 1 requires at least 10 ES points of available room; 15 points is preferred and 20 or more is exceptional geometry.",
   };
 
   /*
@@ -3086,24 +2687,58 @@ const zoneMid = roundToTick(
     minuteLongTargetLevels[2] ||
     null;
 
+  const strategy1TargetZone =
+    strategy1Candidate?.targetZone || null;
+
   const targetMap =
-    direction === "SHORT"
+    strategy1ChildAvailable &&
+    strategy1TargetZone
+      ? direction === "SHORT"
+        ? {
+            firstReaction:
+              roundToTick(strategy1TargetZone.high),
+            targetZoneMidline:
+              roundToTick(strategy1TargetZone.midline),
+            runner:
+              null,
+            labels: {
+              firstReaction:
+                "Next negotiated-zone high / Target 1",
+              targetZoneMidline:
+                "Next negotiated-zone midline / Target 2",
+              runner:
+                "Engine 9 runner handoff",
+            },
+          }
+        : {
+            firstReaction:
+              roundToTick(strategy1TargetZone.low),
+            targetZoneMidline:
+              roundToTick(strategy1TargetZone.midline),
+            runner:
+              null,
+            labels: {
+              firstReaction:
+                "Next negotiated-zone low / Target 1",
+              targetZoneMidline:
+                "Next negotiated-zone midline / Target 2",
+              runner:
+                "Engine 9 runner handoff",
+            },
+          }
+      : direction === "SHORT"
       ? {
           firstReaction: c100,
           aLowBreak: aLow,
           preferredCPressure: c1272,
           stretchC: c1618,
-
           labels: {
             firstReaction:
               "C100 / first reaction",
-
             aLowBreak:
               "A-low break / proof C is working",
-
             preferredCPressure:
               "C1272 / preferred C pressure",
-
             stretchC:
               "C1618 / stretch C",
           },
@@ -3111,28 +2746,20 @@ const zoneMid = roundToTick(
       : direction === "LONG"
       ? {
           firstReaction:
-            minuteLongTarget1?.price ??
-            null,
-
+            minuteLongTarget1?.price ?? null,
           preferredW3Extension:
-            minuteLongTarget2?.price ??
-            null,
-
+            minuteLongTarget2?.price ?? null,
           stretchW3Extension:
-            minuteLongTarget3?.price ??
-            null,
-
+            minuteLongTarget3?.price ?? null,
           labels: {
             firstReaction:
               minuteLongTarget1
                 ? `Minute W3 ${minuteLongTarget1.label || "first extension"}`
                 : null,
-
             preferredW3Extension:
               minuteLongTarget2
                 ? `Minute W3 ${minuteLongTarget2.label || "preferred extension"}`
                 : null,
-
             stretchW3Extension:
               minuteLongTarget3
                 ? `Minute W3 ${minuteLongTarget3.label || "stretch extension"}`
@@ -3392,6 +3019,27 @@ strategy1Setup: strategy1Candidate
           ?.invalidationFacts
           ?.completedCloseInvalidationConfirmed ===
         true,
+
+      childPreservation:
+        strategy1Candidate?.childPreservation || null,
+
+      lifecycleFacts:
+        strategy1Candidate?.lifecycleFacts || null,
+
+      sweepFacts:
+        strategy1Candidate?.sweepFacts || null,
+
+      reclaimFacts:
+        strategy1Candidate?.reclaimFacts || null,
+
+      rejectionFacts:
+        strategy1Candidate?.rejectionFacts || null,
+
+      failedAcceptanceFacts:
+        strategy1Candidate?.failedAcceptanceFacts || null,
+
+      failedReclaimFacts:
+        strategy1Candidate?.failedReclaimFacts || null,
 
       reaction: {
         active:
@@ -3980,8 +3628,12 @@ const engine26ProposedGeometry =
     });
 
 const isStrategy1ProposedGeometry =
-  engine26ProposedGeometry?.geometryContractVersion ===
-  "engine26b.strategy1.v1";
+  [
+    "engine26b.strategy1.v1",
+    "engine26b.strategy1.v2",
+  ].includes(
+    engine26ProposedGeometry?.geometryContractVersion
+  );
 
 if (!isStrategy1ProposedGeometry) {
   engine26ProposedGeometry.reasonCodes =
