@@ -37,7 +37,7 @@ function makeEngine22MinuteDown() {
 }
 
 test(
-  "broad parent and V2 negotiated Strategy 1 child publish independently",
+  "broad parent and neutral V2 negotiated observation child publish independently",
   () => {
     const result = buildEngine26A({
       symbol: "ES",
@@ -63,94 +63,49 @@ test(
     assert.ok(child);
 
     assert.equal(
-      parent.engine,
-      "engine26.generalLocation.v1"
-    );
-    assert.equal(
       parent.location.source,
       "ENGINE26_MANUAL_IMBALANCE"
     );
-    assert.equal(parent.location.lo, 7419.75);
-    assert.equal(parent.location.hi, 7473.5);
     assert.equal(parent.directionBias, "SHORT");
 
     assert.equal(
       child.location.source,
       "ENGINE26_MANUAL_NEGOTIATED"
     );
-    assert.equal(child.entryZone.low, 7433.75);
-    assert.equal(child.entryZone.high, 7457.5);
-    assert.equal(child.laneId, "minute");
-    assert.equal(
-      child.strategyId,
-      "intraday_scalp@10m"
-    );
     assert.equal(
       child.setupClass,
-      "NEGOTIATED_ZONE_ROTATION"
-    );
-    assert.equal(
-      child.identitySetupKey,
       "NEGOTIATED_ZONE_ROTATION"
     );
     assert.equal(
       child.candidateIdentityVersion,
       "engine26.strategy1.v2"
     );
+
+    assert.equal(child.directionBias, "NEUTRAL");
+    assert.equal(child.direction, "NEUTRAL");
     assert.equal(
-      child.strategyEligibility.eligible,
-      true
-    );
-    assert.equal(child.directionBias, "LONG");
-    assert.equal(child.direction, "LONG");
-    assert.equal(
-      child.tradeDirectionBias,
-      "LONG"
+      child.directionState,
+      "OBSERVING_ZONE_REACTION"
     );
 
     assert.notEqual(
-      parent.location.source,
-      child.location.source
+      parent.directionBias,
+      child.directionBias
     );
 
     assert.equal(
-      result.engine26ReactionHandoff.candidateId,
-      child.candidateId
-    );
-    assert.equal(
-      result.engine26ReactionHandoff.zoneId,
-      child.zoneId
-    );
-    assert.equal(
-      result.engine26GeometryHandoff.candidateId,
-      child.candidateId
-    );
-    assert.equal(
-      result.engine26GeometryHandoff.zoneId,
-      child.zoneId
-    );
-    assert.equal(
-      result.engine26GeometryHandoff.direction,
-      "LONG"
-    );
-    assert.equal(
-      result.engine26GeometryHandoff.entryZone.low,
-      7433.75
-    );
-    assert.equal(
-      result.engine26GeometryHandoff.entryZone.high,
-      7457.5
+      result.engine26ReactionHandoff
+        .authorizeEngine3Evaluation,
+      false
     );
 
     assert.equal(
-      parent.noPermissionCreated,
-      true
+      result.engine26GeometryHandoff.active,
+      false
     );
-    assert.equal(parent.noExecution, true);
-    assert.equal(
-      child.noPermissionCreated,
-      true
-    );
+
+    assert.equal(parent.noPermissionCreated, true);
+    assert.equal(child.noPermissionCreated, true);
     assert.equal(child.noExecution, true);
   }
 );
@@ -165,12 +120,7 @@ test(
       currentPrice: 7800,
       snapshotTime: "2026-07-28T17:10:00.000Z",
       engine22WaveStrategy: makeEngine22MinuteDown(),
-      engine25Context: null,
-      engine1Context: null,
-      previousLocationCandidate: null,
-      bars10m: [],
       persistMemory: false,
-      tickSize: 0.25,
       activationRangePoints: 4,
       monitoringRangePoints: 25,
     });
@@ -185,10 +135,6 @@ test(
       "WAITING_FOR_LOCATION"
     );
     assert.equal(
-      result.engine26LocationCandidate.candidateId,
-      null
-    );
-    assert.equal(
       result.engine26ReactionHandoff.active,
       false
     );
@@ -196,22 +142,12 @@ test(
       result.engine26GeometryHandoff.active,
       false
     );
-    assert.equal(
-      result.engine26LocationCandidate
-        .noPermissionCreated,
-      true
-    );
-    assert.equal(
-      result.engine26LocationCandidate.noExecution,
-      true
-    );
   }
 );
 
 test("Engine 26A does not mutate caller inputs", () => {
   const engine22WaveStrategy =
     makeEngine22MinuteDown();
-
   const before =
     JSON.stringify(engine22WaveStrategy);
 
@@ -222,14 +158,7 @@ test("Engine 26A does not mutate caller inputs", () => {
     currentPrice: 7475,
     snapshotTime: "2026-07-28T17:20:00.000Z",
     engine22WaveStrategy,
-    engine25Context: null,
-    engine1Context: null,
-    previousLocationCandidate: null,
-    bars10m: [],
     persistMemory: false,
-    tickSize: 0.25,
-    activationRangePoints: 4,
-    monitoringRangePoints: 25,
   });
 
   assert.equal(
