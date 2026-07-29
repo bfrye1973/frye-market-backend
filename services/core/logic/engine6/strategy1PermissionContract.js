@@ -1,8 +1,10 @@
 const REQUIRED_SYMBOL = "ES";
 const REQUIRED_LANE_ID = "minute";
 const REQUIRED_STRATEGY_ID = "intraday_scalp@10m";
-const REQUIRED_SETUP_CLASS = "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION";
-const COMPATIBLE_IDENTITY_PREFIX = "engine26.strategy1.";
+const REQUIRED_SETUP_CLASS = "NEGOTIATED_ZONE_ROTATION";
+const REQUIRED_IDENTITY_SETUP_KEY = "NEGOTIATED_ZONE_ROTATION";
+const REQUIRED_CANDIDATE_IDENTITY_VERSION = "engine26.strategy1.v2";
+const COMPATIBLE_IDENTITY_PREFIX = "engine26.strategy1.v2";
 
 function text(value) {
   const v = String(value ?? "").trim();
@@ -205,10 +207,6 @@ function compatibleVersion(value) {
   return Boolean(v && v.startsWith(COMPATIBLE_IDENTITY_PREFIX));
 }
 
-function allCompatibleVersions(...values) {
-  return values.every((value) => compatibleVersion(value));
-}
-
 function entryZoneMidline(candidate) {
   return firstNumber(
     candidate?.entryZone?.midline,
@@ -228,6 +226,7 @@ function candidateInvalidated(candidate) {
     candidate?.isInvalidated === true ||
     candidate?.invalidationFacts?.invalidated === true ||
     candidate?.invalidation?.invalidated === true ||
+    candidate?.invalidationFacts?.completedCloseInvalidationConfirmed === true ||
     candidate?.completedCloseInvalidated === true ||
     String(candidate?.candidateState || "")
       .toUpperCase()
@@ -257,6 +256,7 @@ function readEngine26(candidate) {
     identitySetupKey: text(candidate?.identitySetupKey),
     candidateIdentityVersion: text(candidate?.candidateIdentityVersion),
     direction: firstUpper(candidate?.direction, candidate?.directionBias),
+    directionState: firstUpper(candidate?.directionState),
     currentPrice: firstNumber(candidate?.currentPrice, candidate?.price),
     entryZoneMidline: entryZoneMidline(candidate),
     candidateInvalidated: candidateInvalidated(candidate),
@@ -342,10 +342,37 @@ function readEngine4(participation) {
   };
 }
 
-function midlineTrigger({ direction, currentPrice, midline }) {
+function isNeutralObservation(e26) {
+  return (
+    e26.direction === "NEUTRAL" &&
+    [
+      "LONG_REVERSAL_WATCH",
+      "OBSERVING_ZONE_REACTION",
+      "OBSERVING_PROMOTED_ZONE",
+      "NEUTRAL_NO_DIRECTIONAL_EDGE",
+    ].includes(e26.directionState)
+  );
+}
+
+function midlineTrigger({
+  direction,
+  currentPrice,
+  midline,
+  neutralObservation = false,
+}) {
   const dir = upper(direction);
   const price = num(currentPrice);
   const line = num(midline);
+
+  if (neutralObservation) {
+    return {
+      satisfied: false,
+      direction: dir,
+      currentPrice: price,
+      entryZoneMidline: line,
+      reason: "MIDLINE_TRIGGER_DEFERRED_DURING_NEUTRAL_OBSERVATION",
+    };
+  }
 
   if (price === null || line === null) {
     return {
@@ -397,12 +424,17 @@ export function evaluateEngine6Strategy1Phase4Contract({
   const e3 = readEngine3(engine3Reaction);
   const e4 = readEngine4(engine4Participation);
 
-  const finalDirection = firstUpper(
-    direction,
-    e3.direction,
-    e4.direction,
-    e26.direction
-  );
+  const neutralObservation =
+    applies && isNeutralObservation(e26);
+
+  const finalDirection = neutralObservation
+    ? "NEUTRAL"
+    : firstUpper(
+        direction,
+        e26.direction,
+        e3.direction,
+        e4.direction
+      );
 
   const currentPrice = firstNumber(
     e26.currentPrice,
@@ -417,12 +449,13 @@ export function evaluateEngine6Strategy1Phase4Contract({
     direction: finalDirection,
     currentPrice,
     midline: e26.entryZoneMidline,
+    neutralObservation,
   });
 
   const blockers = [];
   const warnings = [];
   const reasonCodes = [
-    "ENGINE6_PHASE4_STRATEGY1_CONTRACT_EVALUATED",
+    "ENGINE6_PHASE4_STRATEGY1_V2_CONTRACT_EVALUATED",
     applies
       ? "ENGINE6_PHASE4_APPLIES_TO_ES_MINUTE_SCALP"
       : "ENGINE6_PHASE4_NOT_APPLICABLE",
@@ -430,11 +463,12 @@ export function evaluateEngine6Strategy1Phase4Contract({
 
   if (!applies) {
     return {
-      engine: "engine6.strategy1.phase4.contract.v1",
+      engine: "engine6.strategy1.phase4.contract.v2",
       applies: false,
       allowed: false,
       decision: null,
       permissionState: "PHASE4_NOT_APPLICABLE",
+      neutralObservation: false,
       blockers,
       warnings,
       reasonCodes,
@@ -475,138 +509,146 @@ export function evaluateEngine6Strategy1Phase4Contract({
 
   if (!zoneIdMatches) blockers.push("ZONE_ID_MISMATCH");
 
-const setupClassCheck =
-  metadataMatchOrMissing({
-    ownerValue: e26.setupClass,
-    engine3Value: e3.setupClass,
-    engine4Value: e4.setupClass,
-    fieldName: "SETUP_CLASS",
-  });
+  const setupClassCheck =
+    metadataMatchOrMissing({
+      ownerValue: e26.setupClass,
+      engine3Value: e3.setupClass,
+      engine4Value: e4.setupClass,
+      fieldName: "SETUP_CLASS",
+    });
 
-const setupClassMatches =
-  e26.setupClass === REQUIRED_SETUP_CLASS &&
-  setupClassCheck.valid === true;
+  const setupClassMatches =
+    e26.setupClass === REQUIRED_SETUP_CLASS &&
+    setupClassCheck.valid === true;
 
-if (!setupClassMatches) {
-  blockers.push(
-    ...setupClassCheck.blockers,
-    "SETUP_CLASS_MISMATCH"
+  if (!setupClassMatches) {
+    blockers.push(
+      ...setupClassCheck.blockers,
+      "SETUP_CLASS_MISMATCH"
+    );
+  }
+
+  reasonCodes.push(
+    ...setupClassCheck.reasonCodes
   );
-}
 
-reasonCodes.push(
-  ...setupClassCheck.reasonCodes
-);
+  const identitySetupKeyCheck =
+    metadataMatchOrMissing({
+      ownerValue: e26.identitySetupKey,
+      engine3Value: e3.identitySetupKey,
+      engine4Value: e4.identitySetupKey,
+      fieldName: "IDENTITY_SETUP_KEY",
+    });
 
-const identitySetupKeyCheck =
-  metadataMatchOrMissing({
-    ownerValue: e26.identitySetupKey,
-    engine3Value: e3.identitySetupKey,
-    engine4Value: e4.identitySetupKey,
-    fieldName: "IDENTITY_SETUP_KEY",
-  });
+  const identitySetupKeyMatches =
+    e26.identitySetupKey === REQUIRED_IDENTITY_SETUP_KEY &&
+    identitySetupKeyCheck.valid === true;
 
-const identitySetupKeyMatches =
-  e26.identitySetupKey === REQUIRED_SETUP_CLASS &&
-  identitySetupKeyCheck.valid === true;
+  if (!identitySetupKeyMatches) {
+    blockers.push(
+      ...identitySetupKeyCheck.blockers,
+      "IDENTITY_SETUP_KEY_MISMATCH"
+    );
+  }
 
-if (!identitySetupKeyMatches) {
-  blockers.push(
-    ...identitySetupKeyCheck.blockers,
-    "IDENTITY_SETUP_KEY_MISMATCH"
+  reasonCodes.push(
+    ...identitySetupKeyCheck.reasonCodes
   );
-}
 
-reasonCodes.push(
-  ...identitySetupKeyCheck.reasonCodes
-);
+  const candidateIdentityVersionCheck =
+    versionMatchOrMissing({
+      ownerValue: e26.candidateIdentityVersion,
+      engine3Value: e3.candidateIdentityVersion,
+      engine4Value: e4.candidateIdentityVersion,
+    });
 
-const candidateIdentityVersionCheck =
-  versionMatchOrMissing({
-    ownerValue: e26.candidateIdentityVersion,
-    engine3Value: e3.candidateIdentityVersion,
-    engine4Value: e4.candidateIdentityVersion,
-  });
+  const candidateIdentityVersionCompatible =
+    e26.candidateIdentityVersion === REQUIRED_CANDIDATE_IDENTITY_VERSION &&
+    candidateIdentityVersionCheck.valid === true;
 
-const candidateIdentityVersionCompatible =
-  candidateIdentityVersionCheck.valid === true;
+  if (!candidateIdentityVersionCompatible) {
+    blockers.push(
+      ...candidateIdentityVersionCheck.blockers,
+      "CANDIDATE_IDENTITY_VERSION_INCOMPATIBLE"
+    );
+  }
 
-if (!candidateIdentityVersionCompatible) {
-  blockers.push(
-    ...candidateIdentityVersionCheck.blockers,
-    "CANDIDATE_IDENTITY_VERSION_INCOMPATIBLE"
+  reasonCodes.push(
+    ...candidateIdentityVersionCheck.reasonCodes
   );
-}
-
-reasonCodes.push(
-  ...candidateIdentityVersionCheck.reasonCodes
-);
 
   if (e26.candidateInvalidated) blockers.push("CANDIDATE_INVALIDATED");
   if (e26.locationInvalidated) blockers.push("LOCATION_INVALIDATED");
 
-  if (e3.evaluationAuthorized !== true) {
-    blockers.push("ENGINE3_EVALUATION_NOT_AUTHORIZED");
-  }
-
-  if (e3.reactionConfirmed !== true) {
-    if (
-      e3.reactionState &&
-      (
-        e3.reactionState.includes("DEVELOP") ||
-        e3.reactionState.includes("PENDING") ||
-        e3.reactionState.includes("WAIT")
-      )
-    ) {
-      warnings.push("ENGINE3_REACTION_DEVELOPING");
-      blockers.push("ENGINE3_REACTION_WAITING");
-    } else {
-      blockers.push("ENGINE3_REACTION_NOT_CONFIRMED");
+  if (neutralObservation) {
+    blockers.push("ENGINE26_LONG_REVERSAL_WATCH_OBSERVATION_ONLY");
+    warnings.push("ENGINE26_DIRECTION_NEUTRAL_OBSERVATION");
+    reasonCodes.push("ENGINE26_LONG_REVERSAL_WATCH_PRESERVED_AS_NEUTRAL");
+    reasonCodes.push("NO_SHORT_FALLBACK_DURING_NEUTRAL_OBSERVATION");
+  } else {
+    if (e3.evaluationAuthorized !== true) {
+      blockers.push("ENGINE3_EVALUATION_NOT_AUTHORIZED");
     }
-  }
 
-  if (
-    e3.authorizedReactionState === "REACTION_FAILED" ||
-    e3.authorizedReactionState === "REACTION_INVALIDATED"
-  ) {
-    blockers.push(`ENGINE3_${e3.authorizedReactionState}`);
-  }
-
-  if (finalDirection !== "LONG") {
-    blockers.push("REACTION_DIRECTION_NOT_LONG");
-  }
-
-  if (e4.participationConfirmed !== true) {
-    if (
-      e4.participationDeveloping === true ||
-      (
-        e4.participationState &&
+    if (e3.reactionConfirmed !== true) {
+      if (
+        e3.reactionState &&
         (
-          e4.participationState.includes("DEVELOP") ||
-          e4.participationState.includes("PENDING") ||
-          e4.participationState.includes("WAIT")
+          e3.reactionState.includes("DEVELOP") ||
+          e3.reactionState.includes("PENDING") ||
+          e3.reactionState.includes("WAIT")
         )
-      )
-    ) {
-      warnings.push("ENGINE4_PARTICIPATION_DEVELOPING");
-      blockers.push("ENGINE4_PARTICIPATION_WAITING");
-    } else {
-      blockers.push("ENGINE4_PARTICIPATION_NOT_CONFIRMED");
+      ) {
+        warnings.push("ENGINE3_REACTION_DEVELOPING");
+        blockers.push("ENGINE3_REACTION_WAITING");
+      } else {
+        blockers.push("ENGINE3_REACTION_NOT_CONFIRMED");
+      }
     }
-  }
 
-  if (e4.hardBlocked === true) blockers.push("ENGINE4_HARD_BLOCKED");
+    if (
+      e3.authorizedReactionState === "REACTION_FAILED" ||
+      e3.authorizedReactionState === "REACTION_INVALIDATED"
+    ) {
+      blockers.push(`ENGINE3_${e3.authorizedReactionState}`);
+    }
 
-  if (e4.completedAdverseParticipation === true) {
-    blockers.push("ENGINE4_COMPLETED_ADVERSE_PARTICIPATION");
-  }
+    if (finalDirection !== "LONG") {
+      blockers.push("REACTION_DIRECTION_NOT_LONG");
+    }
 
-  if (midline.satisfied !== true) {
-    blockers.push("ENTRY_ZONE_MIDLINE_TRIGGER_NOT_SATISFIED");
+    if (e4.participationConfirmed !== true) {
+      if (
+        e4.participationDeveloping === true ||
+        (
+          e4.participationState &&
+          (
+            e4.participationState.includes("DEVELOP") ||
+            e4.participationState.includes("PENDING") ||
+            e4.participationState.includes("WAIT")
+          )
+        )
+      ) {
+        warnings.push("ENGINE4_PARTICIPATION_DEVELOPING");
+        blockers.push("ENGINE4_PARTICIPATION_WAITING");
+      } else {
+        blockers.push("ENGINE4_PARTICIPATION_NOT_CONFIRMED");
+      }
+    }
+
+    if (e4.hardBlocked === true) blockers.push("ENGINE4_HARD_BLOCKED");
+
+    if (e4.completedAdverseParticipation === true) {
+      blockers.push("ENGINE4_COMPLETED_ADVERSE_PARTICIPATION");
+    }
+
+    if (midline.satisfied !== true) {
+      blockers.push("ENTRY_ZONE_MIDLINE_TRIGGER_NOT_SATISFIED");
+    }
   }
 
   const finalBlockers = unique(blockers);
-  const allowed = finalBlockers.length === 0;
+  const allowed = neutralObservation ? false : finalBlockers.length === 0;
 
   if (allowed) {
     reasonCodes.push("ENGINE6_PHASE4_ALL_GATES_PASSED");
@@ -619,12 +661,20 @@ reasonCodes.push(
   }
 
   return {
-    engine: "engine6.strategy1.phase4.contract.v1",
+    engine: "engine6.strategy1.phase4.contract.v2",
     applies: true,
-    decision: allowed ? "FAST_INTRADAY_PAPER_ALLOW" : "PAPER_STAND_DOWN",
+    decision:
+      allowed
+        ? "FAST_INTRADAY_PAPER_ALLOW"
+        : neutralObservation
+        ? "STRATEGY1_OBSERVATION_WAIT"
+        : "PAPER_STAND_DOWN",
+
     permissionState:
       allowed
         ? "FAST_INTRADAY_PAPER_ALLOW"
+        : neutralObservation
+        ? "STRATEGY1_OBSERVATION_WAIT"
         : warnings.length
         ? "WATCH_ONLY_CONFIRMATION_REQUIRED"
         : "PHASE4_STAND_DOWN",
@@ -638,6 +688,8 @@ reasonCodes.push(
     brokerExecutionAllowed: false,
     schwabExecutionAllowed: false,
     noExecution: true,
+
+    neutralObservation,
 
     canonicalInputs: {
       engine3: "confluence.context.reaction.paperScalpReaction",
@@ -660,6 +712,8 @@ reasonCodes.push(
       setupClassMatches,
       identitySetupKeyMatches,
       candidateIdentityVersionCompatible,
+      direction: e26.direction,
+      directionState: e26.directionState,
     },
 
     reaction: {
