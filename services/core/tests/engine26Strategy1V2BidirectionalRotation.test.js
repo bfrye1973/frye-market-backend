@@ -2,6 +2,9 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   buildEngine26A,
@@ -50,6 +53,8 @@ function buildAtPrice({
   ema10Posture = null,
   snapshotTime =
     "2026-07-28T15:00:00.000Z",
+  memoryFilePath = undefined,
+  persistMemory = false,
 } = {}) {
   return buildEngine26A({
     symbol: "ES",
@@ -61,7 +66,10 @@ function buildAtPrice({
     previousLocationCandidate,
     bars10m,
     ema10Posture,
-    persistMemory: false,
+    ...(memoryFilePath
+      ? { memoryFilePath }
+      : {}),
+    persistMemory,
     tickSize: 0.25,
     activationRangePoints: 4,
     monitoringRangePoints: 25,
@@ -606,5 +614,228 @@ test(
         .invalidationTime,
       lifecycleStartTime
     );
+  }
+);
+
+
+test(
+  "waiting snapshot does not erase recoverable SHORT continuation beyond 25 points",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "engine26-memory-recovery-")
+    );
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    try {
+      const original = buildAtPrice({
+        currentPrice: 7502,
+        snapshotTime:
+          "2026-07-28T18:10:00.000Z",
+        bars10m: shortUpperFactsBars(),
+        ema10Posture: {
+          posture: "BEARISH",
+          ema10: 7508,
+          currentPrice: 7502,
+        },
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(original.directionBias, "SHORT");
+      assert.equal(original.active, true);
+      assert.ok(original.candidateId);
+      assert.ok(original.zoneId);
+      assert.ok(original.targetZone);
+
+      const waitingSnapshotCandidate = {
+        active: false,
+        status: "WAITING_FOR_LOCATION",
+        laneId: "minute",
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        candidateId: null,
+        zoneId: null,
+        directionBias: "NEUTRAL",
+        direction: "NEUTRAL",
+        setupClass: null,
+        identitySetupKey: null,
+        candidateIdentityVersion: null,
+      };
+
+      const recovered = buildAtPrice({
+        currentPrice: 7470,
+        previousLocationCandidate:
+          waitingSnapshotCandidate,
+        snapshotTime:
+          "2026-07-28T18:20:00.000Z",
+        bars10m: [
+          {
+            time: "2026-07-28T18:20:00.000Z",
+            open: 7480,
+            high: 7482,
+            low: 7468,
+            close: 7470,
+            completed: true,
+          },
+        ],
+        ema10Posture: {
+          posture: "BEARISH",
+          ema10: 7490,
+          currentPrice: 7470,
+        },
+        memoryFilePath,
+        persistMemory: false,
+      }).engine26LocationCandidate;
+
+      assert.equal(recovered.candidateId, original.candidateId);
+      assert.equal(recovered.zoneId, original.zoneId);
+      assert.equal(recovered.directionBias, "SHORT");
+      assert.deepEqual(recovered.entryZone, original.entryZone);
+      assert.deepEqual(recovered.targetZone, original.targetZone);
+      assert.equal(recovered.active, true);
+      assert.equal(recovered.noPermissionCreated, true);
+      assert.equal(recovered.noExecution, true);
+      assert.equal(
+        recovered.childPreservation.recoveredFromMemory,
+        true
+      );
+      assert.ok(
+        recovered.reasonCodes.includes(
+          "ENGINE26_STRATEGY1_DIRECTIONAL_CHILD_RECOVERED_FROM_MEMORY"
+        )
+      );
+      assert.ok(
+        recovered.reasonCodes.includes(
+          "ENGINE26_STRATEGY1_ESTABLISHED_CHILD_BYPASSED_DISCOVERY_RANGE"
+        )
+      );
+      assert.notEqual(recovered.directionBias, "LONG");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  "completed invalidation prevents memory-child recovery",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "engine26-memory-invalidation-")
+    );
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    try {
+      const original = buildAtPrice({
+        currentPrice: 7502,
+        snapshotTime:
+          "2026-07-28T18:10:00.000Z",
+        bars10m: shortUpperFactsBars(),
+        ema10Posture: "BEARISH",
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const result = buildAtPrice({
+        currentPrice: 7470,
+        previousLocationCandidate: {
+          active: false,
+          status: "WAITING_FOR_LOCATION",
+        },
+        snapshotTime:
+          "2026-07-28T18:20:00.000Z",
+        bars10m: [
+          {
+            time: "2026-07-28T18:20:00.000Z",
+            open: 7518,
+            high: 7522,
+            low: 7517,
+            close: 7520,
+            completed: true,
+          },
+        ],
+        ema10Posture: "BEARISH",
+        memoryFilePath,
+        persistMemory: false,
+      }).engine26LocationCandidate;
+
+      assert.notEqual(result.candidateId, original.candidateId);
+      assert.equal(
+        result.reasonCodes?.includes(
+          "ENGINE26_STRATEGY1_DIRECTIONAL_CHILD_RECOVERED_FROM_MEMORY"
+        ) || false,
+        false
+      );
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  "retired memory child is not recovered",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "engine26-memory-retired-")
+    );
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    try {
+      const original = buildAtPrice({
+        currentPrice: 7502,
+        snapshotTime:
+          "2026-07-28T18:10:00.000Z",
+        bars10m: shortUpperFactsBars(),
+        ema10Posture: "BEARISH",
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const store = JSON.parse(
+        fs.readFileSync(memoryFilePath, "utf8")
+      );
+      const record = Object.values(store.records)[0];
+      record.lifecycleStatus = "RETIRED";
+      record.retiredAt =
+        "2026-07-28T18:15:00.000Z";
+      record.releaseReason = "EXPLICIT_RETIREMENT";
+      fs.writeFileSync(
+        memoryFilePath,
+        `${JSON.stringify(store, null, 2)}\n`,
+        "utf8"
+      );
+
+      const result = buildAtPrice({
+        currentPrice: 7470,
+        previousLocationCandidate: {
+          active: false,
+          status: "WAITING_FOR_LOCATION",
+        },
+        snapshotTime:
+          "2026-07-28T18:20:00.000Z",
+        bars10m: [],
+        ema10Posture: "BEARISH",
+        memoryFilePath,
+        persistMemory: false,
+      }).engine26LocationCandidate;
+
+      assert.notEqual(result.candidateId, original.candidateId);
+      assert.equal(
+        result.reasonCodes?.includes(
+          "ENGINE26_STRATEGY1_DIRECTIONAL_CHILD_RECOVERED_FROM_MEMORY"
+        ) || false,
+        false
+      );
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   }
 );
