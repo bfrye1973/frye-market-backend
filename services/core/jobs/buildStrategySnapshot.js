@@ -2907,6 +2907,14 @@ function buildEngine6PaperPermission({
         ? "SHORT"
         : direction,
 
+    directionState:
+      engine26LocationCandidate?.directionState ||
+      strategy1Phase4Contract?.identity?.directionState ||
+      null,
+
+    strategy1NeutralObservation:
+      strategy1NeutralObservation === true,
+
     targetPoints:
       Number.isFinite(targetPoints)
         ? targetPoints
