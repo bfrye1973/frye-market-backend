@@ -223,18 +223,15 @@ function buildLongFacts({
       ? bars.slice(latestReclaimIndex + 1)
       : [];
 
-  const completedInvalidations =
-    latestReclaimIndex >= 0
-      ? afterLatestReclaim.filter(
-          (bar) =>
-            atOrAfterLifecycleStart(
-              bar,
-              lifecycleStartTime
-            ) &&
-            bar.completed &&
-            bar.close < invalidationBoundary
-        )
-      : [];
+  const completedInvalidations = bars.filter(
+    (bar) =>
+      atOrAfterLifecycleStart(
+        bar,
+        lifecycleStartTime
+      ) &&
+      bar.completed &&
+      bar.close < invalidationBoundary
+  );
 
   const completedHoldBars = afterLatestReclaim.filter(
     (bar) =>
@@ -517,18 +514,15 @@ function buildShortFacts({
       ? bars.slice(firstEvidenceIndex + 1)
       : [];
 
-  const completedInvalidations =
-    firstEvidenceIndex >= 0
-      ? afterLatestEvidence.filter(
-          (bar) =>
-            atOrAfterLifecycleStart(
-              bar,
-              lifecycleStartTime
-            ) &&
-            bar.completed &&
-            bar.close > invalidationBoundary
-        )
-      : [];
+  const completedInvalidations = bars.filter(
+    (bar) =>
+      atOrAfterLifecycleStart(
+        bar,
+        lifecycleStartTime
+      ) &&
+      bar.completed &&
+      bar.close > invalidationBoundary
+  );
 
   const completedHoldBars = afterLatestEvidence.filter(
     (bar) =>
