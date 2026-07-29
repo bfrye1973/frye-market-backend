@@ -636,6 +636,193 @@ function resolveEma10Posture({
   );
 }
 
+function completedBarsWithEma10(bars10m = []) {
+  const sourceBars = Array.isArray(bars10m)
+    ? bars10m
+    : [];
+
+  const completedBars = sourceBars
+    .map((bar, index) => {
+      const completed =
+        bar?.completed === true ||
+        (
+          bar?.completed !== false &&
+          index < sourceBars.length - 1
+        );
+
+      if (!completed) return null;
+
+      const open = toFiniteNumber(
+        bar?.open ?? bar?.o
+      );
+      const high = toFiniteNumber(
+        bar?.high ?? bar?.h
+      );
+      const low = toFiniteNumber(
+        bar?.low ?? bar?.l
+      );
+      const close = toFiniteNumber(
+        bar?.close ?? bar?.c
+      );
+
+      if (
+        open === null ||
+        high === null ||
+        low === null ||
+        close === null
+      ) {
+        return null;
+      }
+
+      return {
+        time:
+          bar?.time ??
+          bar?.t ??
+          bar?.tSec ??
+          null,
+        open,
+        high,
+        low,
+        close,
+        bodySize: Math.abs(close - open),
+        ema10: null,
+      };
+    })
+    .filter(Boolean);
+
+  if (completedBars.length < 10) {
+    return completedBars;
+  }
+
+  const multiplier = 2 / 11;
+  let ema = completedBars
+    .slice(0, 10)
+    .reduce(
+      (sum, bar) => sum + bar.close,
+      0
+    ) / 10;
+
+  completedBars[9].ema10 = ema;
+
+  for (
+    let index = 10;
+    index < completedBars.length;
+    index += 1
+  ) {
+    ema =
+      (
+        completedBars[index].close - ema
+      ) * multiplier + ema;
+
+    completedBars[index].ema10 = ema;
+  }
+
+  return completedBars;
+}
+
+function median(values = []) {
+  const numbers = values
+    .map(toFiniteNumber)
+    .filter((value) => value !== null)
+    .sort((a, b) => a - b);
+
+  if (!numbers.length) return null;
+
+  const middle = Math.floor(numbers.length / 2);
+
+  return numbers.length % 2 === 0
+    ? (numbers[middle - 1] + numbers[middle]) / 2
+    : numbers[middle];
+}
+
+function resolveLongReversalWatchFacts({
+  bars10m,
+  selectedZone,
+}) {
+  const completedBars =
+    completedBarsWithEma10(bars10m);
+
+  const latest =
+    completedBars[completedBars.length - 1] ||
+    null;
+
+  const previous =
+    completedBars[completedBars.length - 2] ||
+    null;
+
+  const priorCompletedBars =
+    completedBars.slice(
+      Math.max(0, completedBars.length - 11),
+      Math.max(0, completedBars.length - 1)
+    );
+
+  const priorBodySample =
+    priorCompletedBars.slice(-10);
+
+  const medianPriorBody = median(
+    priorBodySample.map((bar) => bar.bodySize)
+  );
+
+  const completedBullishSequence =
+    latest?.close > latest?.open &&
+    previous?.close > previous?.open;
+
+  const bothClosesAboveApplicableEma10 =
+    latest?.ema10 !== null &&
+    previous?.ema10 !== null &&
+    latest.close > latest.ema10 &&
+    previous.close > previous.ema10;
+
+  const minimumPriorBarsAvailable =
+    priorBodySample.length >= 5;
+
+  const latestBodyDisplacementStrong =
+    minimumPriorBarsAvailable &&
+    medianPriorBody !== null &&
+    latest?.bodySize >=
+      1.25 * medianPriorBody;
+
+  const latestCloseAbovePreviousHigh =
+    latest?.close > previous?.high;
+
+  const fullNegotiatedZoneReclaimIncomplete =
+    latest?.close !== undefined &&
+    toFiniteNumber(selectedZone?.hi) !== null &&
+    latest.close <= toFiniteNumber(selectedZone.hi);
+
+  const qualified =
+    completedBullishSequence &&
+    bothClosesAboveApplicableEma10 &&
+    minimumPriorBarsAvailable &&
+    latestBodyDisplacementStrong &&
+    latestCloseAbovePreviousHigh &&
+    fullNegotiatedZoneReclaimIncomplete;
+
+  return {
+    qualified,
+    observationOnly: true,
+    completedBullishSequence,
+    requiredConsecutiveBullishCandles: 2,
+    bothClosesAboveApplicableEma10,
+    minimumPriorBarsAvailable,
+    priorCompletedBarsUsed:
+      priorBodySample.length,
+    medianPriorBody,
+    latestBullishBody:
+      latest?.bodySize ?? null,
+    requiredBodyMultiple: 1.25,
+    latestBodyDisplacementStrong,
+    latestCloseAbovePreviousHigh,
+    fullNegotiatedZoneReclaimIncomplete,
+    latestCompletedCandle: latest,
+    previousCompletedCandle: previous,
+    noDirectionalResolution: true,
+    noGeometryAuthorization: true,
+    noPermissionCreated: true,
+    noExecution: true,
+  };
+}
+
 function resolveDirectionalEvidence({
   selectedZone,
   currentPrice,
@@ -664,6 +851,12 @@ function resolveDirectionalEvidence({
   const shortReversalEvidence =
     shortFacts?.lifecycleFacts
       ?.reactionEvaluationFactsReady === true;
+
+  const longReversalWatchFacts =
+    resolveLongReversalWatchFacts({
+      bars10m,
+      selectedZone,
+    });
 
   const bullishEma =
     ema10Posture?.posture === "BULLISH" ||
@@ -707,7 +900,13 @@ function resolveDirectionalEvidence({
       ? "OBSERVING_PROMOTED_ZONE"
       : "OBSERVING_ZONE_REACTION";
 
-  if (directionalConflict) {
+  if (
+    directionalConflict &&
+    longReversalWatchFacts.qualified === true
+  ) {
+    directionState =
+      "LONG_REVERSAL_WATCH";
+  } else if (directionalConflict) {
     directionState =
       "NEUTRAL_NO_DIRECTIONAL_EDGE";
   } else if (bullishAligned) {
@@ -747,6 +946,8 @@ function resolveDirectionalEvidence({
     },
 
     ema10Posture,
+
+    longReversalWatchFacts,
 
     displacementFacts: {
       bullishDisplacement:
@@ -790,6 +991,14 @@ function resolveDirectionalEvidence({
 
       bearishEma
         ? "ENGINE26_EMA10_BEARISH_POSTURE"
+        : null,
+
+      longReversalWatchFacts.qualified === true
+        ? "ENGINE26_LONG_REVERSAL_WATCH"
+        : null,
+
+      longReversalWatchFacts.qualified === true
+        ? "ENGINE26_LONG_REVERSAL_WATCH_OBSERVATION_ONLY"
         : null,
 
       directionalConflict
