@@ -2329,14 +2329,24 @@ const selectedZoneId =
     selectedZone
   );
 
+const promotionSourceCandidate =
+  immediatePreviousReleaseState.released === true
+    ? previousLocationCandidate
+    : continuityLocationCandidate;
+
+const promotionReleaseState =
+  immediatePreviousReleaseState.released === true
+    ? immediatePreviousReleaseState
+    : previousReleaseState;
+
 const previousTargetZoneId =
-  continuityLocationCandidate?.targetZone?.zoneId ??
-  continuityLocationCandidate?.targetZone?.id ??
+  promotionSourceCandidate?.targetZone?.zoneId ??
+  promotionSourceCandidate?.targetZone?.id ??
   null;
 
 const promotedObservation =
   selectionPurpose === "STRATEGY1_CHILD" &&
-  previousReleaseState.released === true &&
+  promotionReleaseState.released === true &&
   Boolean(previousTargetZoneId) &&
   previousTargetZoneId === selectedZoneId;
 
@@ -2980,13 +2990,13 @@ const strategyFacts =
               "OBSERVING_PROMOTED_ZONE",
             direction: "NEUTRAL",
             priorCandidateId:
-              continuityLocationCandidate
+              promotionSourceCandidate
                 ?.candidateId ?? null,
             priorZoneId:
-              continuityLocationCandidate
+              promotionSourceCandidate
                 ?.zoneId ?? null,
             releaseReason:
-              previousReleaseState
+              promotionReleaseState
                 .releaseReason ?? null,
           }
         : null,
