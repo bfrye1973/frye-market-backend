@@ -148,7 +148,17 @@ export function evaluateStrategy1Geometry({
     "NEUTRAL"
   );
 
+  const directionState = safeUpper(
+    candidate?.directionState ??
+    handoff?.directionState ??
+    ""
+  );
+
+  const longReversalWatch =
+    directionState === "LONG_REVERSAL_WATCH";
+
   const directionalResolved =
+    longReversalWatch !== true &&
     ["LONG", "SHORT"].includes(direction);
 
   const setupType =
@@ -338,6 +348,9 @@ export function evaluateStrategy1Geometry({
     status = "IDENTITY_MISMATCH";
   } else if (candidateInvalidated) {
     status = "CANDIDATE_INVALIDATED";
+  } else if (longReversalWatch) {
+    status =
+      "WAITING_FOR_DIRECTIONAL_RESOLUTION";
   } else if (!directionalResolved) {
     status =
       "WAITING_FOR_DIRECTIONAL_RESOLUTION";
@@ -504,9 +517,8 @@ export function evaluateStrategy1Geometry({
     symbol: resolvedSymbol,
     direction,
     directionState:
-      candidate?.directionState ??
-      handoff?.directionState ??
-      null,
+      directionState || null,
+    longReversalWatch,
     directionResolvedAt:
       candidate?.directionResolvedAt ??
       handoff?.directionResolvedAt ??
@@ -623,6 +635,9 @@ export function evaluateStrategy1Geometry({
       geometryReady
         ? "ENGINE26B_STRATEGY1_GEOMETRY_READY"
         : status,
+      longReversalWatch
+        ? "ENGINE26B_LONG_REVERSAL_WATCH_NON_ACTIONABLE"
+        : null,
       geometryObjectiveStatus,
       identityMatches
         ? "ENGINE26A_IDENTITY_PRESERVED"
