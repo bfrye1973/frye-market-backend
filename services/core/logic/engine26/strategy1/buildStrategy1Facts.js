@@ -31,6 +31,22 @@ function normalizeTime(value) {
     : date.toISOString();
 }
 
+function atOrAfterLifecycleStart(bar, lifecycleStartTime) {
+  if (!lifecycleStartTime) return true;
+
+  const barMs = Date.parse(bar?.time || "");
+  const startMs = Date.parse(lifecycleStartTime);
+
+  if (
+    !Number.isFinite(barMs) ||
+    !Number.isFinite(startMs)
+  ) {
+    return true;
+  }
+
+  return barMs >= startMs;
+}
+
 export function normalizeStrategy1Bars(bars10m = []) {
   const rows = Array.isArray(bars10m) ? bars10m : [];
   const warnings = [];
@@ -108,6 +124,7 @@ function buildLongFacts({
   high,
   midline,
   invalidationBoundary,
+  lifecycleStartTime,
 }) {
   const interactions = bars.filter(
     (bar) => bar.high >= low && bar.low <= high
@@ -210,6 +227,10 @@ function buildLongFacts({
     latestReclaimIndex >= 0
       ? afterLatestReclaim.filter(
           (bar) =>
+            atOrAfterLifecycleStart(
+              bar,
+              lifecycleStartTime
+            ) &&
             bar.completed &&
             bar.close < invalidationBoundary
         )
@@ -323,6 +344,16 @@ function buildLongFacts({
         completedInvalidation?.time ?? null,
       invalidationClose:
         completedInvalidation?.close ?? null,
+      lifecycleStartTime:
+        lifecycleStartTime || null,
+      historicalBarsIgnoredForInvalidation:
+        bars.filter(
+          (bar) =>
+            !atOrAfterLifecycleStart(
+              bar,
+              lifecycleStartTime
+            )
+        ).length,
     },
 
     lifecycleFacts: {
@@ -345,6 +376,7 @@ function buildShortFacts({
   high,
   midline,
   invalidationBoundary,
+  lifecycleStartTime,
 }) {
   const interactions = bars.filter(
     (bar) => bar.high >= low && bar.low <= high
@@ -489,6 +521,10 @@ function buildShortFacts({
     firstEvidenceIndex >= 0
       ? afterLatestEvidence.filter(
           (bar) =>
+            atOrAfterLifecycleStart(
+              bar,
+              lifecycleStartTime
+            ) &&
             bar.completed &&
             bar.close > invalidationBoundary
         )
@@ -627,6 +663,16 @@ function buildShortFacts({
         completedInvalidation?.time ?? null,
       invalidationClose:
         completedInvalidation?.close ?? null,
+      lifecycleStartTime:
+        lifecycleStartTime || null,
+      historicalBarsIgnoredForInvalidation:
+        bars.filter(
+          (bar) =>
+            !atOrAfterLifecycleStart(
+              bar,
+              lifecycleStartTime
+            )
+        ).length,
     },
 
     lifecycleFacts: {
@@ -653,6 +699,7 @@ export function buildStrategy1Facts({
   entryZone,
   locationInvalidationBoundary,
   direction = "LONG",
+  lifecycleStartTime = null,
 } = {}) {
   const normalizedDirection =
     normalizeDirection(direction);
@@ -665,6 +712,9 @@ export function buildStrategy1Facts({
   const midline = toFinite(entryZone?.midline);
   const invalidationBoundary =
     toFinite(locationInvalidationBoundary);
+
+  const normalizedLifecycleStartTime =
+    normalizeTime(lifecycleStartTime);
 
   if (
     [low, high, midline, invalidationBoundary].some(
@@ -686,6 +736,8 @@ export function buildStrategy1Facts({
           high,
           midline,
           invalidationBoundary,
+          lifecycleStartTime:
+            normalizedLifecycleStartTime,
         })
       : buildLongFacts({
           bars,
@@ -693,10 +745,14 @@ export function buildStrategy1Facts({
           high,
           midline,
           invalidationBoundary,
+          lifecycleStartTime:
+            normalizedLifecycleStartTime,
         });
 
   return {
     direction: normalizedDirection,
+    lifecycleStartTime:
+      normalizedLifecycleStartTime,
     barsNormalized: bars,
     ...directionalFacts,
     warnings,
