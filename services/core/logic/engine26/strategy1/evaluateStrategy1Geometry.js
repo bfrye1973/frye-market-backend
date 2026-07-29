@@ -322,10 +322,15 @@ export function evaluateStrategy1Geometry({
         )
       : "WAITING_FOR_DIRECTIONAL_RESOLUTION";
 
-  const geometryFeasible =
+  const rawGeometryMathematicallyAvailable =
     directionalResolved &&
     geometryObjectiveStatus !==
       "GEOMETRY_INSUFFICIENT";
+
+  const geometryFeasible =
+    rawGeometryMathematicallyAvailable &&
+    identityMatches &&
+    candidateInvalidated !== true;
 
   let status = geometryObjectiveStatus;
 
@@ -483,6 +488,7 @@ export function evaluateStrategy1Geometry({
     active: geometryReady,
     geometryReady,
     geometryFeasible,
+    rawGeometryMathematicallyAvailable,
     status,
 
     engine: "engine26B.proposedGeometry.v2",
@@ -500,6 +506,14 @@ export function evaluateStrategy1Geometry({
     directionState:
       candidate?.directionState ??
       handoff?.directionState ??
+      null,
+    directionResolvedAt:
+      candidate?.directionResolvedAt ??
+      handoff?.directionResolvedAt ??
+      null,
+    candidateLifecycleStartTime:
+      candidate?.candidateLifecycleStartTime ??
+      handoff?.candidateLifecycleStartTime ??
       null,
     directionalEvidence:
       candidate?.directionalEvidence ??
