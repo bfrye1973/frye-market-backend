@@ -486,7 +486,7 @@ function buildShortFacts({
       : [];
 
   const completedInvalidations =
-    latestEvidenceIndex >= 0
+    firstEvidenceIndex >= 0
       ? afterLatestEvidence.filter(
           (bar) =>
             bar.completed &&
