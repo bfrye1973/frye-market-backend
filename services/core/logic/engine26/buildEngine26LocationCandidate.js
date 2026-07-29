@@ -750,6 +750,16 @@ function resolveLongReversalWatchFacts({
     completedBars[completedBars.length - 2] ||
     null;
 
+  if (!latest || !previous) {
+    return {
+      active: false,
+      state: "NEUTRAL_NO_DIRECTIONAL_EDGE",
+      reasonCodes: [
+        "ENGINE26_LONG_REVERSAL_WATCH_INSUFFICIENT_COMPLETED_BARS",
+      ],
+    };
+  }
+
   const priorCompletedBars =
     completedBars.slice(
       Math.max(0, completedBars.length - 11),
