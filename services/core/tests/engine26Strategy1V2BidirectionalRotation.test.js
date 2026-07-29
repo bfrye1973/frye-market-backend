@@ -839,3 +839,220 @@ test(
     }
   }
 );
+
+
+function longReversalWatchBars({
+  includeFormingThird = false,
+} = {}) {
+  const bars = [];
+
+  for (let index = 0; index < 10; index += 1) {
+    const open = 7390 + index * 0.5;
+    bars.push({
+      time: new Date(
+        Date.parse("2026-07-29T13:00:00.000Z") +
+        index * 10 * 60 * 1000
+      ).toISOString(),
+      open,
+      high: open + 1.25,
+      low: open - 0.5,
+      close: open + 0.75,
+      completed: true,
+    });
+  }
+
+  bars.push({
+    time: "2026-07-29T14:40:00.000Z",
+    open: 7398,
+    high: 7406,
+    low: 7397.5,
+    close: 7405,
+    completed: true,
+  });
+
+  bars.push({
+    time: "2026-07-29T14:50:00.000Z",
+    open: 7405,
+    high: 7414,
+    low: 7404.5,
+    close: 7413,
+    completed: true,
+  });
+
+  if (includeFormingThird) {
+    bars.push({
+      time: "2026-07-29T15:00:00.000Z",
+      open: 7413,
+      high: 7425,
+      low: 7412.5,
+      close: 7424,
+      completed: false,
+    });
+  }
+
+  return bars;
+}
+
+test(
+  "two completed bullish candles above applicable EMA10 create observation-only LONG_REVERSAL_WATCH before full zone reclaim",
+  () => {
+    const result = buildAtPrice({
+      currentPrice: 7413,
+      snapshotTime:
+        "2026-07-29T15:00:00.000Z",
+      bars10m: longReversalWatchBars(),
+      ema10Posture: null,
+    });
+
+    const candidate =
+      result.engine26LocationCandidate;
+
+    assert.equal(candidate.directionBias, "NEUTRAL");
+    assert.equal(candidate.direction, "NEUTRAL");
+    assert.equal(
+      candidate.directionState,
+      "LONG_REVERSAL_WATCH"
+    );
+    assert.equal(
+      candidate.directionalEvidence
+        .longReversalWatchFacts.qualified,
+      true
+    );
+    assert.equal(
+      candidate.directionalEvidence
+        .longReversalWatchFacts
+        .completedBullishSequence,
+      true
+    );
+    assert.equal(
+      candidate.directionalEvidence
+        .longReversalWatchFacts
+        .bothClosesAboveApplicableEma10,
+      true
+    );
+    assert.equal(
+      candidate.directionalEvidence
+        .longReversalWatchFacts
+        .latestBodyDisplacementStrong,
+      true
+    );
+    assert.equal(
+      candidate.directionalEvidence
+        .longReversalWatchFacts
+        .latestCloseAbovePreviousHigh,
+      true
+    );
+    assert.equal(
+      candidate.directionalEvidence
+        .longReversalWatchFacts
+        .fullNegotiatedZoneReclaimIncomplete,
+      true
+    );
+    assert.equal(
+      result.engine26ReactionHandoff.active,
+      false
+    );
+    assert.equal(
+      result.engine26GeometryHandoff.active,
+      false
+    );
+
+    const geometry = evaluateStrategy1Geometry({
+      symbol: "ES",
+      strategyId: "intraday_scalp@10m",
+      permission: {
+        paper: {
+          decision: "PAPER_STAND_DOWN",
+          allowed: false,
+          planningAllowed: false,
+        },
+      },
+      engine26LocationCandidate: candidate,
+      engine26GeometryHandoff:
+        result.engine26GeometryHandoff,
+    });
+
+    assert.equal(
+      geometry.status,
+      "WAITING_FOR_DIRECTIONAL_RESOLUTION"
+    );
+    assert.equal(geometry.directionalResolved, false);
+    assert.equal(geometry.longReversalWatch, true);
+    assert.equal(geometry.geometryReady, false);
+    assert.equal(geometry.geometryFeasible, false);
+    assert.equal(geometry.proposedEntryPrice, null);
+    assert.equal(geometry.proposedStopPrice, null);
+    assert.equal(geometry.target1Price, null);
+    assert.equal(geometry.target2Price, null);
+    assert.equal(geometry.plannerProgressionAllowed, false);
+    assert.equal(geometry.noPermissionCreated, true);
+    assert.equal(geometry.noSizingCreated, true);
+    assert.equal(geometry.noManagementCreated, true);
+    assert.equal(geometry.noExecution, true);
+  }
+);
+
+test(
+  "unfinished bullish candle is excluded from LONG_REVERSAL_WATCH",
+  () => {
+    const bars = longReversalWatchBars({
+      includeFormingThird: true,
+    });
+
+    bars[bars.length - 2] = {
+      ...bars[bars.length - 2],
+      open: 7413,
+      high: 7414,
+      low: 7408,
+      close: 7409,
+      completed: true,
+    };
+
+    const candidate = buildAtPrice({
+      currentPrice: 7424,
+      snapshotTime:
+        "2026-07-29T15:00:00.000Z",
+      bars10m: bars,
+      ema10Posture: null,
+    }).engine26LocationCandidate;
+
+    assert.notEqual(
+      candidate.directionState,
+      "LONG_REVERSAL_WATCH"
+    );
+    assert.equal(
+      candidate.directionalEvidence
+        .longReversalWatchFacts.qualified,
+      false
+    );
+  }
+);
+
+test(
+  "LONG_REVERSAL_WATCH requires at least five prior completed bars for displacement evaluation",
+  () => {
+    const bars = longReversalWatchBars().slice(-6);
+
+    const candidate = buildAtPrice({
+      currentPrice: 7413,
+      snapshotTime:
+        "2026-07-29T15:00:00.000Z",
+      bars10m: bars,
+      ema10Posture: {
+        posture: "BULLISH",
+        ema10: 7399,
+        currentPrice: 7413,
+      },
+    }).engine26LocationCandidate;
+
+    assert.notEqual(
+      candidate.directionState,
+      "LONG_REVERSAL_WATCH"
+    );
+    assert.equal(
+      candidate.directionalEvidence
+        .longReversalWatchFacts.qualified,
+      false
+    );
+  }
+);
