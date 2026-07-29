@@ -3208,6 +3208,7 @@ export function buildEngine26A(
       ),
     engine: "engine26.geometryHandoff.v1",
     laneId: "minute",
+    symbol: engine26LocationCandidate?.symbol ?? null,
     strategyId: engine26LocationCandidate?.strategyId ?? null,
     candidateId: engine26LocationCandidate?.candidateId ?? null,
     zoneId: engine26LocationCandidate?.zoneId ?? null,
