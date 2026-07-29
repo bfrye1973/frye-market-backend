@@ -3370,6 +3370,10 @@ strategy1Setup: strategy1Candidate
         strategy1Candidate.entryZone ||
         null,
 
+      targetZone:
+        strategy1Candidate.targetZone ||
+        null,
+
       triggerLevel:
         strategy1Candidate.triggerLevel ??
         null,
