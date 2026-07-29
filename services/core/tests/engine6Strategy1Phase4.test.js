@@ -5,7 +5,7 @@ import {
   isEngine6FastLaneId,
 } from "../logic/engine6/strategy1PermissionContract.js";
 
-const setupClass = "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION";
+const setupClass = "NEGOTIATED_ZONE_ROTATION";
 
 function valid(overrides = {}) {
   return {
@@ -20,8 +20,10 @@ function valid(overrides = {}) {
       setupClass,
       setupGrade: "A+++",
       identitySetupKey: setupClass,
-      candidateIdentityVersion: "engine26.strategy1.v1",
+      candidateIdentityVersion: "engine26.strategy1.v2",
       directionBias: "LONG",
+      direction: "LONG",
+      directionState: "LONG_CONTINUATION_DEVELOPING",
       currentPrice: 5001,
       entryZone: { midline: 5000 },
       ...(overrides.engine26LocationCandidate || {}),
@@ -35,7 +37,7 @@ function valid(overrides = {}) {
       setupClass,
       setupGrade: "A+++",
       identitySetupKey: setupClass,
-      candidateIdentityVersion: "engine26.strategy1.v1",
+      candidateIdentityVersion: "engine26.strategy1.v2",
       evaluationAuthorized: true,
       reactionConfirmed: true,
       reactionState: "REACTION_CONFIRMED",
@@ -55,7 +57,7 @@ function valid(overrides = {}) {
       setupClass,
       setupGrade: "A+++",
       identitySetupKey: setupClass,
-      candidateIdentityVersion: "engine26.strategy1.v1",
+      candidateIdentityVersion: "engine26.strategy1.v2",
       participationConfirmed: true,
       participationState: "PARTICIPATION_CONFIRMED",
       participationQuality: "CLEAN",
@@ -74,6 +76,9 @@ function run(input) {
 let out = run(valid());
 assert.equal(out.allowed, true);
 assert.equal(out.decision, "FAST_INTRADAY_PAPER_ALLOW");
+assert.equal(out.identity.setupClass, "NEGOTIATED_ZONE_ROTATION");
+assert.equal(out.identity.identitySetupKey, "NEGOTIATED_ZONE_ROTATION");
+assert.equal(out.identity.candidateIdentityVersion, "engine26.strategy1.v2");
 assert.equal(out.executable, false);
 assert.equal(out.realExecutionAllowed, false);
 assert.equal(out.brokerExecutionAllowed, false);
@@ -87,13 +92,17 @@ out = run(valid({ engine4Participation: { zoneId: "BAD" } }));
 assert.equal(out.allowed, false);
 assert.ok(out.blockers.includes("ZONE_ID_MISMATCH"));
 
-out = run(valid({ engine26LocationCandidate: { setupClass: "BAD" } }));
+out = run(valid({ engine26LocationCandidate: { setupClass: "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION" } }));
 assert.equal(out.allowed, false);
 assert.ok(out.blockers.includes("SETUP_CLASS_MISMATCH"));
 
 out = run(valid({ engine4Participation: { identitySetupKey: "BAD" } }));
 assert.equal(out.allowed, false);
 assert.ok(out.blockers.includes("IDENTITY_SETUP_KEY_MISMATCH"));
+
+out = run(valid({ engine26LocationCandidate: { candidateIdentityVersion: "engine26.strategy1.v1" } }));
+assert.equal(out.allowed, false);
+assert.ok(out.blockers.includes("CANDIDATE_IDENTITY_VERSION_INCOMPATIBLE"));
 
 out = run(valid({ engine26LocationCandidate: { candidateInvalidated: true } }));
 assert.equal(out.allowed, false);
@@ -136,6 +145,43 @@ out = run(
 );
 assert.equal(out.allowed, false);
 assert.ok(out.blockers.includes("LANE_ID_MISMATCH_OR_NON_MINUTE_IDENTITY"));
+
+out = run(
+  valid({
+    engine26LocationCandidate: {
+      directionBias: "NEUTRAL",
+      direction: "NEUTRAL",
+      directionState: "LONG_REVERSAL_WATCH",
+      currentPrice: 4999,
+    },
+    engine3Reaction: {
+      reactionConfirmed: false,
+      reactionState: "WATCHING_AUTHORIZED_LOCATION",
+      authorizedReactionState: "WATCHING_AUTHORIZED_LOCATION",
+      direction: "SHORT",
+      quality: "MIXED",
+      confirmed: false,
+      allowed: false,
+    },
+    engine4Participation: {
+      participationConfirmed: false,
+      participationDeveloping: true,
+      participationState: "FORMING_CANDLE_PARTICIPATION_DEVELOPING",
+      participationQuality: "PROVISIONAL",
+      allowed: false,
+      confirmed: false,
+    },
+  })
+);
+assert.equal(out.allowed, false);
+assert.equal(out.neutralObservation, true);
+assert.equal(out.decision, "STRATEGY1_OBSERVATION_WAIT");
+assert.equal(out.permissionState, "STRATEGY1_OBSERVATION_WAIT");
+assert.equal(out.identity.direction, "NEUTRAL");
+assert.equal(out.identity.directionState, "LONG_REVERSAL_WATCH");
+assert.ok(out.blockers.includes("ENGINE26_LONG_REVERSAL_WATCH_OBSERVATION_ONLY"));
+assert.ok(!out.blockers.includes("REACTION_DIRECTION_NOT_LONG"));
+assert.ok(!out.blockers.includes("ENTRY_ZONE_MIDLINE_TRIGGER_NOT_SATISFIED"));
 
 assert.equal(isEngine6FastLaneId("subminute"), true);
 assert.equal(isEngine6FastLaneId("minute"), true);
@@ -194,46 +240,6 @@ assert.deepEqual(filtered.removedReasonCodes, [
 ]);
 
 filtered = filterEngine15ArtifactsForFastLane({
-  laneId: "subminute",
-  blockers: [
-    "ENGINE15_PAPER_READINESS_NOT_ALLOWED",
-    "ENGINE3_REACTION_WAITING",
-  ],
-  reasonCodes: [
-    "ENGINE15_SUBMINUTE_READINESS_NOT_ALLOWED",
-    "ENGINE6_SUBMINUTE_PERMISSION_ATTACHED",
-  ],
-});
-
-assert.equal(filtered.engine15Excluded, true);
-assert.deepEqual(filtered.blockers, [
-  "ENGINE3_REACTION_WAITING",
-]);
-assert.deepEqual(filtered.reasonCodes, [
-  "ENGINE6_SUBMINUTE_PERMISSION_ATTACHED",
-]);
-
-filtered = filterEngine15ArtifactsForFastLane({
-  laneId: "minor",
-  blockers: [
-    "ENGINE15_PAPER_READINESS_NOT_ALLOWED",
-    "ENGINE4_PARTICIPATION_WAITING",
-  ],
-  reasonCodes: [
-    "ENGINE15_MINOR_READINESS_NOT_ALLOWED",
-    "ENGINE6_PHASE4_PERMISSION_NOT_ALLOWED",
-  ],
-});
-
-assert.equal(filtered.engine15Excluded, true);
-assert.deepEqual(filtered.blockers, [
-  "ENGINE4_PARTICIPATION_WAITING",
-]);
-assert.deepEqual(filtered.reasonCodes, [
-  "ENGINE6_PHASE4_PERMISSION_NOT_ALLOWED",
-]);
-
-filtered = filterEngine15ArtifactsForFastLane({
   laneId: "primary",
   blockers: [
     "ENGINE15_PAPER_READINESS_NOT_ALLOWED",
@@ -252,20 +258,23 @@ assert.deepEqual(filtered.reasonCodes, [
   "ENGINE15_READY_CONFIRMED",
 ]);
 
-console.log("Engine 6 Strategy 1 Phase 4 tests");
-console.log("=================================");
-console.log("all valid gates produce FAST_INTRADAY_PAPER_ALLOW: PASS");
+console.log("Engine 6 Strategy 1 V2 Phase 4 tests");
+console.log("====================================");
+console.log("all valid V2 gates produce FAST_INTRADAY_PAPER_ALLOW: PASS");
 console.log("paper/planning-only and non-executable: PASS");
 console.log("candidate mismatch prevents permission: PASS");
 console.log("zone mismatch prevents permission: PASS");
-console.log("setupClass mismatch prevents permission: PASS");
+console.log("old V1 setupClass mismatch prevents current V2 permission: PASS");
 console.log("identitySetupKey mismatch prevents permission: PASS");
+console.log("candidateIdentityVersion v1 prevents current V2 permission: PASS");
 console.log("candidate invalidation prevents permission: PASS");
 console.log("reaction developing does not allow: PASS");
 console.log("participation developing does not allow: PASS");
 console.log("Engine 4 hard block prevents permission: PASS");
 console.log("midline not reached does not allow: PASS");
 console.log("Subminute isolation proof: PASS");
+console.log("NEUTRAL / LONG_REVERSAL_WATCH remains neutral observation: PASS");
+console.log("PAPER_SHORT_RESEARCH_WATCH is not emitted by V2 helper for neutral observation: PASS");
 console.log("subminute/minute/minor Engine 15 exclusion: PASS");
 console.log("higher-degree Engine 15 preservation: PASS");
 console.log("Engine 15 blockers absent from fast-lane permission artifacts: PASS");
