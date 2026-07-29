@@ -1,9 +1,16 @@
 import { createHash } from "node:crypto";
 
-export const STRATEGY1_SETUP_CLASS = "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION";
+export const STRATEGY1_V1_SETUP_CLASS =
+  "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION";
+export const STRATEGY1_V1_IDENTITY_VERSION =
+  "engine26.strategy1.v1";
+
+export const STRATEGY1_SETUP_CLASS =
+  "NEGOTIATED_ZONE_ROTATION";
 export const STRATEGY1_SETUP_GRADE = "A+++";
 export const STRATEGY1_IDENTITY_KEY = STRATEGY1_SETUP_CLASS;
-export const STRATEGY1_IDENTITY_VERSION = "engine26.strategy1.v1";
+export const STRATEGY1_IDENTITY_VERSION =
+  "engine26.strategy1.v2";
 
 function stableHash(prefix, parts) {
   const body = parts
@@ -18,9 +25,30 @@ function stableHash(prefix, parts) {
 
 function normalizeDirection(value) {
   const text = String(value || "").trim().toUpperCase();
-  if (["LONG", "UP", "BULL", "BULLISH"].includes(text) || text.includes("LONG")) return "LONG";
-  if (["SHORT", "DOWN", "BEAR", "BEARISH"].includes(text) || text.includes("SHORT")) return "SHORT";
+
+  if (
+    ["LONG", "UP", "BULL", "BULLISH"].includes(text) ||
+    text.includes("LONG")
+  ) {
+    return "LONG";
+  }
+
+  if (
+    ["SHORT", "DOWN", "BEAR", "BEARISH"].includes(text) ||
+    text.includes("SHORT")
+  ) {
+    return "SHORT";
+  }
+
   return "NEUTRAL";
+}
+
+export function isStrategy1V2Identity(value = null) {
+  return (
+    value?.setupClass === STRATEGY1_SETUP_CLASS &&
+    value?.identitySetupKey === STRATEGY1_IDENTITY_KEY &&
+    value?.candidateIdentityVersion === STRATEGY1_IDENTITY_VERSION
+  );
 }
 
 export function resolveEngine26Strategy1Identity({
@@ -35,19 +63,32 @@ export function resolveEngine26Strategy1Identity({
   const normalizedDirection = normalizeDirection(directionBias);
 
   const priorDirection = normalizeDirection(
-    previousLocationCandidate?.directionBias ?? previousLocationCandidate?.direction
+    previousLocationCandidate?.directionBias ??
+      previousLocationCandidate?.direction
   );
 
-  const priorStatus = String(previousLocationCandidate?.status || "").toUpperCase();
+  const priorStatus = String(
+    previousLocationCandidate?.status || ""
+  ).toUpperCase();
 
-  const mayAdoptLegacy =
+  /*
+   * V1 history remains readable but is never rewritten as V2.
+   * Candidate-ID adoption is allowed only for an already-V2 candidate
+   * with the same exact zone, direction, symbol, and strategy identity.
+   */
+  const mayAdoptPreviousV2 =
     Boolean(previousLocationCandidate?.candidateId) &&
     previousLocationCandidate?.active === true &&
     priorStatus !== "INVALIDATED" &&
     !previousLocationCandidate?.invalidatedAt &&
     previousLocationCandidate?.zoneId === zoneId &&
     previousLocationCandidate?.strategyId === normalizedStrategyId &&
-    String(previousLocationCandidate?.symbol || "").toUpperCase() === normalizedSymbol &&
+    String(previousLocationCandidate?.symbol || "").toUpperCase() ===
+      normalizedSymbol &&
+    previousLocationCandidate?.setupClass === STRATEGY1_SETUP_CLASS &&
+    previousLocationCandidate?.identitySetupKey === STRATEGY1_IDENTITY_KEY &&
+    previousLocationCandidate?.candidateIdentityVersion ===
+      STRATEGY1_IDENTITY_VERSION &&
     priorDirection !== "NEUTRAL" &&
     priorDirection === normalizedDirection;
 
@@ -57,31 +98,41 @@ export function resolveEngine26Strategy1Identity({
     zoneId,
     normalizedDirection,
     STRATEGY1_IDENTITY_KEY,
+    STRATEGY1_IDENTITY_VERSION,
   ]);
 
   return {
-    candidateId: mayAdoptLegacy
+    candidateId: mayAdoptPreviousV2
       ? previousLocationCandidate.candidateId
       : generatedCandidateId,
+
     setupClass: STRATEGY1_SETUP_CLASS,
     setupGrade: STRATEGY1_SETUP_GRADE,
     identitySetupKey: STRATEGY1_IDENTITY_KEY,
     candidateIdentityVersion: STRATEGY1_IDENTITY_VERSION,
-    identityAdoptedFromLegacy: mayAdoptLegacy,
-    legacyCandidateId: mayAdoptLegacy
-      ? previousLocationCandidate.candidateId
-      : null,
+
+    identityAdoptedFromPreviousV2: mayAdoptPreviousV2,
+    identityAdoptedFromLegacy: false,
+    legacyCandidateId: null,
     generatedCandidateId,
-    reasonCodes: mayAdoptLegacy
+
+    previousIdentityVersion:
+      previousLocationCandidate?.candidateIdentityVersion || null,
+
+    reasonCodes: mayAdoptPreviousV2
       ? [
-          "ENGINE26_STRATEGY1_LEGACY_ACTIVE_CANDIDATE_ID_ADOPTED",
+          "ENGINE26_STRATEGY1_V2_ACTIVE_CANDIDATE_ID_ADOPTED",
           "ENGINE26_STRATEGY1_ZONE_ID_MATCHED",
           "ENGINE26_STRATEGY1_DIRECTION_MATCHED",
         ]
       : [
-          "ENGINE26_STRATEGY1_STABLE_IDENTITY_GENERATED",
+          "ENGINE26_STRATEGY1_V2_STABLE_IDENTITY_GENERATED",
           "ENGINE26_STRATEGY1_IDENTITY_EXCLUDES_VOLATILE_CONTEXT",
-        ],
+          previousLocationCandidate?.candidateIdentityVersion ===
+          STRATEGY1_V1_IDENTITY_VERSION
+            ? "ENGINE26_STRATEGY1_V1_HISTORY_NOT_REWRITTEN"
+            : null,
+        ].filter(Boolean),
   };
 }
 
