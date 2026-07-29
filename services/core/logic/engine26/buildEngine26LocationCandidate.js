@@ -876,6 +876,206 @@ function getPriorMemoryRecord({
   return memoryStore?.records?.[priorMemoryKey] || null;
 }
 
+function findRecoverableDirectionalMemoryChild({
+  memoryStore,
+  zones,
+  symbol,
+  strategyId,
+  currentPrice,
+  ema10Posture,
+  bars10m,
+  snapshotTime,
+  tickSize,
+}) {
+  const records = Object.values(
+    memoryStore?.records || {}
+  );
+
+  const candidates = records
+    .map((record) => {
+      const direction = normalizeDirection(
+        record?.direction
+      );
+
+      const zone = findZoneByCanonicalId({
+        zones,
+        symbol,
+        zoneId: record?.zoneId,
+      });
+
+      const identityValid =
+        record?.laneId === "minute" &&
+        record?.strategyId === strategyId &&
+        String(record?.symbol || "").toUpperCase() ===
+          symbol &&
+        record?.setupClass === STRATEGY1_SETUP_CLASS &&
+        record?.identitySetupKey === STRATEGY1_SETUP_CLASS &&
+        record?.candidateIdentityVersion ===
+          "engine26.strategy1.v2" &&
+        ["LONG", "SHORT"].includes(direction) &&
+        Boolean(record?.currentCandidateId) &&
+        Boolean(zone);
+
+      const lifecyclePreservable =
+        [
+          "ACTIVE",
+          "TARGET_APPROACH_COMPLETION_WATCH",
+        ].includes(
+          String(record?.lifecycleStatus || "")
+            .toUpperCase()
+        ) &&
+        record?.invalidationFacts
+          ?.completedCloseInvalidationConfirmed !== true &&
+        !record?.invalidatedAt &&
+        !record?.retiredAt &&
+        !record?.releaseReason &&
+        !record?.targetTouchedAt &&
+        !record?.objectiveCompletedAt;
+
+      if (!identityValid || !lifecyclePreservable) {
+        return null;
+      }
+
+      const entryZone = {
+        id: record.zoneId,
+        zoneId: record.zoneId,
+        upstreamId: zone.upstreamId,
+        source: zone.source,
+        sourcePath: zone.sourcePath,
+        type: zone.type,
+        timeframe: zone.timeframe,
+        low: zone.lo,
+        high: zone.hi,
+        midline: zone.mid,
+      };
+
+      const boundaries = buildBoundaries({
+        directionBias: direction,
+        zone,
+        tickSize,
+      });
+
+      const currentFacts = buildStrategy1Facts({
+        bars10m,
+        entryZone,
+        locationInvalidationBoundary:
+          boundaries.locationInvalidationBoundary,
+        direction,
+        lifecycleStartTime:
+          record?.candidateLifecycleStartTime ||
+          record?.directionResolvedAt ||
+          snapshotTime,
+      });
+
+      if (
+        currentFacts?.invalidationFacts
+          ?.completedCloseInvalidationConfirmed === true
+      ) {
+        return null;
+      }
+
+      const targetLow = toFiniteNumber(
+        record?.targetZone?.low
+      );
+      const targetHigh = toFiniteNumber(
+        record?.targetZone?.high
+      );
+      const price = toFiniteNumber(currentPrice);
+
+      const targetReached =
+        price !== null &&
+        (
+          (
+            direction === "LONG" &&
+            targetLow !== null &&
+            price >= targetLow
+          ) ||
+          (
+            direction === "SHORT" &&
+            targetHigh !== null &&
+            price <= targetHigh
+          )
+        );
+
+      if (targetReached) return null;
+
+      const bearishContinuation =
+        direction === "SHORT" &&
+        price !== null &&
+        price < zone.lo &&
+        (
+          ema10Posture?.posture === "BEARISH" ||
+          ema10Posture?.priceBelowEma10 === true
+        );
+
+      const bullishContinuation =
+        direction === "LONG" &&
+        price !== null &&
+        price > zone.hi &&
+        (
+          ema10Posture?.posture === "BULLISH" ||
+          ema10Posture?.priceAboveEma10 === true
+        );
+
+      if (!bearishContinuation && !bullishContinuation) {
+        return null;
+      }
+
+      return {
+        record,
+        zone,
+        candidate: {
+          active: true,
+          status: "ACTIVE_DIRECTIONAL_CHILD",
+          laneId: "minute",
+          symbol,
+          strategyId,
+          candidateId: record.currentCandidateId,
+          zoneId: record.zoneId,
+          directionBias: direction,
+          direction,
+          tradeDirectionBias: direction,
+          preferredDirection: direction,
+          directionState:
+            `${direction}_DIRECTIONAL_CHILD_ACTIVE`,
+          setupType: STRATEGY1_SETUP_CLASS,
+          setupClass: record.setupClass,
+          setupGrade: record.setupGrade,
+          identitySetupKey: record.identitySetupKey,
+          candidateIdentityVersion:
+            record.candidateIdentityVersion,
+          candidateLifecycleStartTime:
+            record.candidateLifecycleStartTime ||
+            record.directionResolvedAt ||
+            snapshotTime,
+          directionResolvedAt:
+            record.directionResolvedAt ||
+            record.candidateLifecycleStartTime ||
+            snapshotTime,
+          entryZone,
+          targetZone: record.targetZone || null,
+          invalidationFacts:
+            currentFacts?.invalidationFacts ||
+            record.invalidationFacts ||
+            null,
+          snapshotTime:
+            record.lastSeenAt || snapshotTime,
+          noPermissionCreated: true,
+          noExecution: true,
+        },
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) =>
+      String(b.record?.lastSeenAt || "")
+        .localeCompare(
+          String(a.record?.lastSeenAt || "")
+        )
+    );
+
+  return candidates[0] || null;
+}
+
 function evaluatePreviousChildRelease({
   previousLocationCandidate,
   priorMemoryRecord,
@@ -1943,6 +2143,13 @@ const strategy1EligibleZones =
         safeMonitoringRange
   );
 
+const resolvedEma10Posture =
+  resolveEma10Posture({
+    ema10Posture,
+    currentPrice: normalizedPrice,
+    bars10m,
+  });
+
 /*
  * Strategy 1 V2 preserves the active child before ranking.
  * Ranking and distance select only when no preservable child remains.
@@ -1962,7 +2169,7 @@ const strategy1MemoryRead =
         malformed: false,
       };
 
-const priorMemoryRecord =
+const immediatePriorMemoryRecord =
   getPriorMemoryRecord({
     memoryStore: strategy1MemoryRead.store,
     symbol: normalizedSymbol,
@@ -1970,21 +2177,22 @@ const priorMemoryRecord =
     previousLocationCandidate,
   });
 
-const previousZone =
+const immediatePreviousZone =
   findZoneByCanonicalId({
     zones: approvedNegotiatedZones,
     symbol: normalizedSymbol,
     zoneId: previousLocationCandidate?.zoneId,
   });
 
-const previousReleaseState =
+const immediatePreviousReleaseState =
   evaluatePreviousChildRelease({
     previousLocationCandidate,
-    priorMemoryRecord,
+    priorMemoryRecord:
+      immediatePriorMemoryRecord,
     currentPrice: normalizedPrice,
   });
 
-const previousSetupIdentityValid =
+const immediatePreviousSetupIdentityValid =
   previousLocationCandidate?.laneId === "minute" &&
   previousLocationCandidate?.strategyId ===
     normalizedStrategyId &&
@@ -1997,11 +2205,69 @@ const previousSetupIdentityValid =
   previousLocationCandidate?.candidateIdentityVersion ===
     "engine26.strategy1.v2";
 
-const previousChildPreservable =
+const immediatePreviousChildPreservable =
   selectionPurpose === "STRATEGY1_CHILD" &&
-  Boolean(previousZone) &&
-  previousSetupIdentityValid &&
+  Boolean(immediatePreviousZone) &&
+  immediatePreviousSetupIdentityValid &&
   previousLocationCandidate?.active === true &&
+  ["LONG", "SHORT"].includes(
+    normalizeDirection(
+      previousLocationCandidate?.directionBias ??
+      previousLocationCandidate?.direction
+    )
+  ) &&
+  immediatePreviousReleaseState.released !== true;
+
+const recoveredMemoryChild =
+  selectionPurpose === "STRATEGY1_CHILD" &&
+  immediatePreviousChildPreservable !== true
+    ? findRecoverableDirectionalMemoryChild({
+        memoryStore: strategy1MemoryRead.store,
+        zones: approvedNegotiatedZones,
+        symbol: normalizedSymbol,
+        strategyId: normalizedStrategyId,
+        currentPrice: normalizedPrice,
+        ema10Posture: resolvedEma10Posture,
+        bars10m,
+        snapshotTime,
+        tickSize,
+      })
+    : null;
+
+const continuityLocationCandidate =
+  immediatePreviousChildPreservable
+    ? previousLocationCandidate
+    : recoveredMemoryChild?.candidate || null;
+
+const previousZone =
+  immediatePreviousChildPreservable
+    ? immediatePreviousZone
+    : recoveredMemoryChild?.zone || null;
+
+const priorMemoryRecord =
+  immediatePreviousChildPreservable
+    ? immediatePriorMemoryRecord
+    : recoveredMemoryChild?.record || null;
+
+const previousReleaseState =
+  continuityLocationCandidate
+    ? evaluatePreviousChildRelease({
+        previousLocationCandidate:
+          continuityLocationCandidate,
+        priorMemoryRecord,
+        currentPrice: normalizedPrice,
+      })
+    : {
+        released: false,
+        releaseReason: null,
+        targetApproachCompletionWatch: false,
+        objectiveCompleted: false,
+        targetReached: false,
+      };
+
+const previousChildPreservable =
+  Boolean(continuityLocationCandidate) &&
+  Boolean(previousZone) &&
   previousReleaseState.released !== true;
 
 const rankedStrategy1Zone =
@@ -2064,8 +2330,8 @@ const selectedZoneId =
   );
 
 const previousTargetZoneId =
-  previousLocationCandidate?.targetZone?.zoneId ??
-  previousLocationCandidate?.targetZone?.id ??
+  continuityLocationCandidate?.targetZone?.zoneId ??
+  continuityLocationCandidate?.targetZone?.id ??
   null;
 
 const promotedObservation =
@@ -2107,8 +2373,8 @@ const shortBoundaries =
 const priorDirectionalChildDirection =
   previousChildPreservable
     ? normalizeDirection(
-        previousLocationCandidate?.directionBias ??
-        previousLocationCandidate?.direction
+        continuityLocationCandidate?.directionBias ??
+        continuityLocationCandidate?.direction
       )
     : "NEUTRAL";
 
@@ -2127,7 +2393,7 @@ const factsLifecycleStartTime =
   )
     ? resolveCandidateLifecycleStartTime({
         snapshotTime,
-        previousLocationCandidate,
+        continuityLocationCandidate,
         priorMemoryRecord,
         selectedZoneId,
         direction:
@@ -2161,13 +2427,6 @@ const shortFacts =
       })
     : null;
 
-const resolvedEma10Posture =
-  resolveEma10Posture({
-    ema10Posture,
-    currentPrice: normalizedPrice,
-    bars10m,
-  });
-
 const resolvedDirectionalEvidence =
   strategy1Eligible
     ? resolveDirectionalEvidence({
@@ -2196,8 +2455,8 @@ const resolvedDirectionalEvidence =
 const preservedDirection =
   previousChildPreservable
     ? normalizeDirection(
-        previousLocationCandidate?.directionBias ??
-        previousLocationCandidate?.direction
+        continuityLocationCandidate?.directionBias ??
+        continuityLocationCandidate?.direction
       )
     : "NEUTRAL";
 
@@ -2211,7 +2470,7 @@ const directionBias =
 const directionState =
   strategy1Eligible &&
   preservedDirection !== "NEUTRAL"
-    ? previousLocationCandidate?.directionState ||
+    ? continuityLocationCandidate?.directionState ||
       `${preservedDirection}_DIRECTIONAL_CHILD_ACTIVE`
     : resolvedDirectionalEvidence.directionState;
 
@@ -2219,7 +2478,7 @@ const directionResolvedAt =
   ["LONG", "SHORT"].includes(directionBias)
     ? resolveCandidateLifecycleStartTime({
         snapshotTime,
-        previousLocationCandidate,
+        continuityLocationCandidate,
         priorMemoryRecord,
         selectedZoneId,
         direction: directionBias,
@@ -2231,7 +2490,7 @@ const candidateLifecycleStartTime =
   (
     promotedObservation
       ? snapshotTime
-      : previousLocationCandidate
+      : continuityLocationCandidate
           ?.candidateLifecycleStartTime ||
         snapshotTime
   );
@@ -2257,7 +2516,7 @@ const strategyIdentity =
         directionBias,
         previousLocationCandidate:
           previousChildPreservable
-            ? previousLocationCandidate
+            ? continuityLocationCandidate
             : null,
       })
     : null;
@@ -2481,7 +2740,7 @@ const strategyFacts =
     });
 
     const priorZoneId =
-      previousLocationCandidate?.zoneId || null;
+      continuityLocationCandidate?.zoneId || null;
 
     if (
       priorZoneId &&
@@ -2721,10 +2980,10 @@ const strategyFacts =
               "OBSERVING_PROMOTED_ZONE",
             direction: "NEUTRAL",
             priorCandidateId:
-              previousLocationCandidate
+              continuityLocationCandidate
                 ?.candidateId ?? null,
             priorZoneId:
-              previousLocationCandidate
+              continuityLocationCandidate
                 ?.zoneId ?? null,
             releaseReason:
               previousReleaseState
@@ -2748,8 +3007,10 @@ const strategyFacts =
     childPreservation: {
       preservedBeforeRanking:
         previousChildPreservable,
+      recoveredFromMemory:
+        recoveredMemoryChild != null,
       priorZoneId:
-        previousLocationCandidate?.zoneId || null,
+        continuityLocationCandidate?.zoneId || null,
       releaseReason:
         previousReleaseState.releaseReason || null,
       targetApproachCompletionWatch:
@@ -2888,8 +3149,16 @@ const strategyFacts =
         ? "ENGINE22_INTERNAL_LEG_DIRECTION_NOT_USED_AS_TRADE_DIRECTION"
         : null,
 
+      recoveredMemoryChild
+        ? "ENGINE26_STRATEGY1_DIRECTIONAL_CHILD_RECOVERED_FROM_MEMORY"
+        : null,
+
       previousChildPreservable
         ? "ENGINE26_STRATEGY1_ACTIVE_CHILD_PRESERVED_BEFORE_RANKING"
+        : null,
+
+      previousChildPreservable
+        ? "ENGINE26_STRATEGY1_ESTABLISHED_CHILD_BYPASSED_DISCOVERY_RANGE"
         : null,
 
       previousReleaseState.targetApproachCompletionWatch
