@@ -475,3 +475,95 @@ test(
     );
   }
 );
+
+test(
+  "historical completed close before current lifecycle start does not invalidate new SHORT child",
+  () => {
+    const facts = buildStrategy1Facts({
+      direction: "SHORT",
+      lifecycleStartTime:
+        "2026-07-29T13:56:54.496Z",
+      entryZone: {
+        low: 7433.75,
+        high: 7457.5,
+        midline: 7445.75,
+      },
+      locationInvalidationBoundary: 7457.75,
+      bars10m: [
+        {
+          time: "2026-07-28T23:10:00.000Z",
+          open: 7455,
+          high: 7464,
+          low: 7450,
+          close: 7461,
+          completed: true,
+        },
+        {
+          time: "2026-07-29T13:50:00.000Z",
+          open: 7440,
+          high: 7442,
+          low: 7428,
+          close: 7430,
+          completed: true,
+        },
+      ],
+    });
+
+    assert.equal(
+      facts.rejectionFacts
+        .completedRejectionObserved,
+      true
+    );
+
+    assert.equal(
+      facts.invalidationFacts
+        .completedCloseInvalidationConfirmed,
+      false
+    );
+
+    assert.equal(
+      facts.invalidationFacts
+        .historicalBarsIgnoredForInvalidation,
+      2
+    );
+  }
+);
+
+test(
+  "completed close after current lifecycle start invalidates current SHORT child",
+  () => {
+    const facts = buildStrategy1Facts({
+      direction: "SHORT",
+      lifecycleStartTime:
+        "2026-07-29T13:56:54.496Z",
+      entryZone: {
+        low: 7433.75,
+        high: 7457.5,
+        midline: 7445.75,
+      },
+      locationInvalidationBoundary: 7457.75,
+      bars10m: [
+        {
+          time: "2026-07-29T14:00:00.000Z",
+          open: 7430,
+          high: 7463,
+          low: 7428,
+          close: 7460,
+          completed: true,
+        },
+      ],
+    });
+
+    assert.equal(
+      facts.invalidationFacts
+        .completedCloseInvalidationConfirmed,
+      true
+    );
+
+    assert.equal(
+      facts.invalidationFacts
+        .invalidationTime,
+      "2026-07-29T14:00:00.000Z"
+    );
+  }
+);
