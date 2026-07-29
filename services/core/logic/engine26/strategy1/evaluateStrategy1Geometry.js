@@ -145,8 +145,11 @@ export function evaluateStrategy1Geometry({
     candidate?.tradeDirectionBias ??
     candidate?.direction ??
     handoff?.direction ??
-    "NONE"
+    "NEUTRAL"
   );
+
+  const directionalResolved =
+    ["LONG", "SHORT"].includes(direction);
 
   const setupType =
     candidate?.setupType ??
@@ -219,18 +222,26 @@ export function evaluateStrategy1Geometry({
       ?.completedCloseInvalidationConfirmed === true;
 
   const proposedEntryPrice =
-    roundToTick(entryZone?.midline);
+    directionalResolved
+      ? roundToTick(entryZone?.midline)
+      : null;
 
   const proposedStopPrice =
-    roundToTick(locationInvalidationBoundary);
+    directionalResolved
+      ? roundToTick(locationInvalidationBoundary)
+      : null;
 
   const target1Price =
-    direction === "SHORT"
+    !directionalResolved
+      ? null
+      : direction === "SHORT"
       ? roundToTick(targetZone?.high)
       : roundToTick(targetZone?.low);
 
   const target2Price =
-    roundToTick(targetZone?.midline);
+    directionalResolved
+      ? roundToTick(targetZone?.midline)
+      : null;
 
   const stopValid =
     direction === "LONG"
@@ -305,11 +316,14 @@ export function evaluateStrategy1Geometry({
       : null;
 
   const geometryObjectiveStatus =
-    classifyGeometryObjective(
-      availableRewardPoints
-    );
+    directionalResolved
+      ? classifyGeometryObjective(
+          availableRewardPoints
+        )
+      : "WAITING_FOR_DIRECTIONAL_RESOLUTION";
 
   const geometryFeasible =
+    directionalResolved &&
     geometryObjectiveStatus !==
       "GEOMETRY_INSUFFICIENT";
 
@@ -319,6 +333,9 @@ export function evaluateStrategy1Geometry({
     status = "IDENTITY_MISMATCH";
   } else if (candidateInvalidated) {
     status = "CANDIDATE_INVALIDATED";
+  } else if (!directionalResolved) {
+    status =
+      "WAITING_FOR_DIRECTIONAL_RESOLUTION";
   } else if (
     !entryZone ||
     proposedEntryPrice == null
@@ -335,10 +352,6 @@ export function evaluateStrategy1Geometry({
   ) {
     status =
       "WAITING_FOR_INVALIDATION_BOUNDARY";
-  } else if (
-    !["LONG", "SHORT"].includes(direction)
-  ) {
-    status = "UNSUPPORTED_DIRECTION";
   } else if (!stopValid) {
     status = "INVALID_STOP_GEOMETRY";
   } else if (!targetValid) {
@@ -348,6 +361,7 @@ export function evaluateStrategy1Geometry({
   const geometryReady =
     identityMatches &&
     !candidateInvalidated &&
+    directionalResolved &&
     Boolean(entryZone) &&
     Boolean(targetZone) &&
     proposedEntryPrice != null &&
@@ -483,6 +497,19 @@ export function evaluateStrategy1Geometry({
     zoneId,
     symbol: resolvedSymbol,
     direction,
+    directionState:
+      candidate?.directionState ??
+      handoff?.directionState ??
+      null,
+    directionalEvidence:
+      candidate?.directionalEvidence ??
+      handoff?.directionalEvidence ??
+      null,
+    ema10Posture:
+      candidate?.ema10Posture ??
+      handoff?.ema10Posture ??
+      null,
+    directionalResolved,
     setupType,
     setupClass,
     setupGrade,
