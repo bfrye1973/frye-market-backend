@@ -462,20 +462,27 @@ function buildShortFacts({
     }
   }
 
-  const latestEvidenceTime =
-    latestFailedReclaimAt ||
-    rejectionRows[rejectionRows.length - 1]?.time ||
-    failedAcceptanceRows[failedAcceptanceRows.length - 1]
-      ?.time ||
+  /*
+   * Post-rejection hold must be measured after the first completed
+   * bearish location event, not after the latest repeated event.
+   *
+   * Using the latest rejection/failed-acceptance candle would consume
+   * every later hold candle as fresh evidence and leave no subsequent
+   * candle available to prove the required hold.
+   */
+  const firstEvidenceTime =
+    rejectionRows[0]?.time ||
+    failedAcceptanceRows[0]?.time ||
+    failedReclaimRows[0]?.failedReclaimTime ||
     null;
 
-  const latestEvidenceIndex = latestEvidenceTime
-    ? bars.findIndex((bar) => bar.time === latestEvidenceTime)
+  const firstEvidenceIndex = firstEvidenceTime
+    ? bars.findIndex((bar) => bar.time === firstEvidenceTime)
     : -1;
 
   const afterLatestEvidence =
-    latestEvidenceIndex >= 0
-      ? bars.slice(latestEvidenceIndex + 1)
+    firstEvidenceIndex >= 0
+      ? bars.slice(firstEvidenceIndex + 1)
       : [];
 
   const completedInvalidations =
