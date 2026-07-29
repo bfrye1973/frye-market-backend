@@ -86,9 +86,13 @@ test(
         .completedCloseInvalidationConfirmed,
       false
     );
-    assert.notEqual(
+    assert.equal(
+      candidate.structuralContext.minuteStage,
+      "C_COMPLETION_WATCH"
+    );
+    assert.equal(
       candidate.directionBias,
-      result.engine26GeneralLocation?.directionBias
+      "LONG"
     );
     assert.ok(
       candidate.reasonCodes.includes(
