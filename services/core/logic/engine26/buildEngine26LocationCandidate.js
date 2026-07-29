@@ -31,6 +31,7 @@ import { buildStrategy1Facts } from "./strategy1/buildStrategy1Facts.js";
 import {
   readNegotiatedZoneMemory,
   writeNegotiatedZoneMemory,
+  DEFAULT_MEMORY_PATH,
 } from "./strategy1/negotiatedZoneMemoryStore.js";
 import {
   buildStrategy1MemoryKey,
@@ -41,10 +42,6 @@ import {
 const DEFAULT_TICK_SIZE = 0.25;
 const DEFAULT_MONITORING_RANGE_POINTS = 25;
 const DEFAULT_ACTIVATION_RANGE_POINTS = 4;
-
-const DEFAULT_MEMORY_PATH =
-  process.env.ENGINE26_NEGOTIATED_ZONE_MEMORY_PATH ||
-  "/opt/render/project/src/services/core/data/engine26/negotiated-zone-memory.json";
 
 function toFiniteNumber(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -469,15 +466,15 @@ function inferRotationDirection({
 }) {
   if (!selectedZone) return "NEUTRAL";
 
-  const latestClose = latestCompletedClose(bars10m);
-  const referencePrice =
-    latestClose ?? toFiniteNumber(currentPrice);
-
-  if (referencePrice !== null) {
-    if (referencePrice > selectedZone.hi) return "LONG";
-    if (referencePrice < selectedZone.lo) return "SHORT";
-  }
-
+  /*
+   * Zone role comes from the ordered negotiated-zone map first.
+   *
+   * A lower boundary zone with only a valid target above is LONG.
+   * An upper boundary zone with only a valid target below is SHORT.
+   *
+   * Only an interior zone uses the current completed-price relationship
+   * to determine which rotation side is active.
+   */
   const hasZoneAbove = negotiatedZones.some(
     (zone) =>
       zone !== selectedZone &&
@@ -493,8 +490,22 @@ function inferRotationDirection({
   if (hasZoneAbove && !hasZoneBelow) return "LONG";
   if (hasZoneBelow && !hasZoneAbove) return "SHORT";
 
+  const latestClose = latestCompletedClose(bars10m);
+  const referencePrice =
+    latestClose ?? toFiniteNumber(currentPrice);
+
   if (referencePrice !== null) {
-    return referencePrice >= selectedZone.mid
+    if (referencePrice > selectedZone.hi) return "LONG";
+    if (referencePrice < selectedZone.lo) return "SHORT";
+  }
+
+  /*
+   * For an interior zone while price is still inside it, preserve the
+   * simplest deterministic rotation rule:
+   * lower-half interaction watches LONG, upper-half interaction watches SHORT.
+   */
+  if (referencePrice !== null) {
+    return referencePrice <= selectedZone.mid
       ? "LONG"
       : "SHORT";
   }
