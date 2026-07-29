@@ -2553,9 +2553,10 @@ const zoneMid = roundToTick(
           required: true,
         }
       : {
-          label: "Direction confirmation watch",
+          label: "Observe negotiated-zone reaction",
           level: null,
-          rule: "Direction not assumed until Engine 3 / Engine 4 confirm.",
+          rule:
+            "Direction remains NEUTRAL until Engine 26A resolves current zone acceptance, rejection, reclaim, failed reclaim, EMA10 posture, and displacement facts.",
           required: true,
         };
 
@@ -2589,10 +2590,11 @@ const zoneMid = roundToTick(
             "LONG research only if price sweeps, reclaims, and holds the active negotiated zone with participation.",
         }
       : {
-          label: "No entry idea yet",
+          label: "Waiting for directional resolution",
           preferredArea: null,
           referencePrice: null,
-          description: "Direction not assumed.",
+          description:
+            "Promoted or initial negotiated zone is observation-only until current price action resolves LONG or SHORT.",
         };
 
   const stopIdea =
@@ -2971,6 +2973,25 @@ strategy1Setup: strategy1Candidate
         strategy1Candidate.tradeDirectionBias ||
         strategy1Candidate.direction ||
         strategy1Candidate.directionBias ||
+        "NEUTRAL",
+
+      preferredDirection:
+        strategy1Candidate.preferredDirection ||
+        strategy1Candidate.tradeDirectionBias ||
+        strategy1Candidate.direction ||
+        strategy1Candidate.directionBias ||
+        "NEUTRAL",
+
+      directionState:
+        strategy1Candidate.directionState ||
+        "OBSERVING_ZONE_REACTION",
+
+      directionalEvidence:
+        strategy1Candidate.directionalEvidence ||
+        null,
+
+      ema10Posture:
+        strategy1Candidate.ema10Posture ||
         null,
 
       setupType:
