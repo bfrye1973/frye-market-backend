@@ -2104,6 +2104,37 @@ const shortBoundaries =
     tickSize,
   });
 
+const priorDirectionalChildDirection =
+  previousChildPreservable
+    ? normalizeDirection(
+        previousLocationCandidate?.directionBias ??
+        previousLocationCandidate?.direction
+      )
+    : "NEUTRAL";
+
+/*
+ * Fact extraction keeps the full historical bar set, but completed-close
+ * invalidation must use the current directional child's lifecycle window.
+ *
+ * A preserved same-zone/same-direction child keeps its prior lifecycle
+ * start. A new zone, neutral observation, or newly resolved direction starts
+ * at the current snapshot time.
+ */
+const factsLifecycleStartTime =
+  previousChildPreservable &&
+  ["LONG", "SHORT"].includes(
+    priorDirectionalChildDirection
+  )
+    ? resolveCandidateLifecycleStartTime({
+        snapshotTime,
+        previousLocationCandidate,
+        priorMemoryRecord,
+        selectedZoneId,
+        direction:
+          priorDirectionalChildDirection,
+      })
+    : snapshotTime;
+
 const longFacts =
   strategy1Eligible
     ? buildStrategy1Facts({
@@ -2113,7 +2144,7 @@ const longFacts =
           longBoundaries.locationInvalidationBoundary,
         direction: "LONG",
         lifecycleStartTime:
-          candidateLifecycleStartTime,
+          factsLifecycleStartTime,
       })
     : null;
 
@@ -2126,7 +2157,7 @@ const shortFacts =
           shortBoundaries.locationInvalidationBoundary,
         direction: "SHORT",
         lifecycleStartTime:
-          candidateLifecycleStartTime,
+          factsLifecycleStartTime,
       })
     : null;
 
