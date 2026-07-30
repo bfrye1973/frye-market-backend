@@ -53,6 +53,7 @@ function buildAtPrice({
   ema10Posture = null,
   snapshotTime =
     "2026-07-28T15:00:00.000Z",
+  manualZonesFilePath = undefined,
   memoryFilePath = undefined,
   persistMemory = false,
 } = {}) {
@@ -66,6 +67,9 @@ function buildAtPrice({
     previousLocationCandidate,
     bars10m,
     ema10Posture,
+    ...(manualZonesFilePath
+      ? { manualZonesFilePath }
+      : {}),
     ...(memoryFilePath
       ? { memoryFilePath }
       : {}),
@@ -1192,11 +1196,13 @@ test(
   "two completed bullish candles above applicable EMA10 create observation-only LONG_REVERSAL_WATCH before full zone reclaim",
   () => {
     /*
-     * This test must not read the real Engine 26 memory file.
+     * This test controls both external Strategy 1 inventories:
      *
-     * A saved directional child from another test run or live
-     * snapshot could otherwise override this isolated watch-state
-     * scenario.
+     * - negotiated-zone memory
+     * - manual negotiated-zone source
+     *
+     * It must not depend on the production memory file or the live
+     * services/core/data/es-smz-manual-zones.txt inventory.
      */
     const tempDir = fs.mkdtempSync(
       path.join(
@@ -1210,7 +1216,21 @@ test(
       "negotiated-zone-memory.json"
     );
 
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
     try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
       const result = buildAtPrice({
         currentPrice: 7413,
 
@@ -1223,25 +1243,31 @@ test(
         ema10Posture:
           null,
 
-        /*
-         * Use a new empty temporary memory location.
-         *
-         * Because this file does not exist yet, Engine 26 receives
-         * a safe empty memory store and cannot recover an unrelated
-         * prior LONG or SHORT child.
-         */
+        manualZonesFilePath,
+
         memoryFilePath,
 
-        /*
-         * The test only needs to read from the isolated empty store.
-         * It does not need to persist a memory record.
-         */
         persistMemory:
           false,
       });
 
       const candidate =
         result.engine26LocationCandidate;
+
+      assert.equal(
+        candidate.location.sourcePath,
+        "manualImbalanceInventory.negotiatedZones[0]"
+      );
+
+      assert.equal(
+        candidate.location.lo,
+        7433.75
+      );
+
+      assert.equal(
+        candidate.location.hi,
+        7457.5
+      );
 
       assert.equal(
         candidate.directionBias,
@@ -1254,8 +1280,18 @@ test(
       );
 
       assert.equal(
+        candidate.directionalResolved,
+        false
+      );
+
+      assert.equal(
         candidate.directionState,
         "LONG_REVERSAL_WATCH"
+      );
+
+      assert.equal(
+        candidate.automaticDirectionFlip,
+        false
       );
 
       assert.equal(
@@ -1372,6 +1408,11 @@ test(
         null
       );
 
+      assert.deepEqual(
+        geometry.proposedTargets,
+        []
+      );
+
       assert.equal(
         geometry.target1Price,
         null
@@ -1407,10 +1448,6 @@ test(
         true
       );
     } finally {
-      /*
-       * Always remove the temporary directory, even if an assertion
-       * fails.
-       */
       fs.rmSync(
         tempDir,
         {
