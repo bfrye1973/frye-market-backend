@@ -157,8 +157,19 @@ export function evaluateStrategy1Geometry({
   const longReversalWatch =
     directionState === "LONG_REVERSAL_WATCH";
 
+  const contactState = safeUpper(
+    candidate?.contactState ??
+    handoff?.contactState ??
+    ""
+  );
+
+  const negotiatedZoneContact =
+    contactState === "NEGOTIATED_ZONE_CONTACT" &&
+    directionState === "SHORT_REVERSAL_WATCH";
+
   const directionalResolved =
     longReversalWatch !== true &&
+    negotiatedZoneContact !== true &&
     ["LONG", "SHORT"].includes(direction);
 
   const setupType =
@@ -348,6 +359,9 @@ export function evaluateStrategy1Geometry({
     status = "IDENTITY_MISMATCH";
   } else if (candidateInvalidated) {
     status = "CANDIDATE_INVALIDATED";
+  } else if (negotiatedZoneContact) {
+    status =
+      "WAITING_FOR_DIRECTIONAL_RESOLUTION";
   } else if (longReversalWatch) {
     status =
       "WAITING_FOR_DIRECTIONAL_RESOLUTION";
@@ -456,32 +470,35 @@ export function evaluateStrategy1Geometry({
       ? roundToTick(target1Price - 5)
       : null;
 
-  const proposedTargets = [
-    {
-      targetId: "TARGET_1_ZONE_TOUCH",
-      sequence: 1,
-      price: target1Price,
-      purpose:
-        "FIRST_PROFIT_NEXT_NEGOTIATED_ZONE_TOUCH",
-      contracts: 1,
-    },
-    {
-      targetId: "TARGET_2_ZONE_MIDLINE",
-      sequence: 2,
-      price: target2Price,
-      purpose:
-        "SECOND_PROFIT_NEXT_NEGOTIATED_ZONE_MIDLINE",
-      contracts: 1,
-    },
-    {
-      targetId: "TARGET_3_ENGINE9_RUNNER",
-      sequence: 3,
-      price: null,
-      purpose: "ENGINE9_RUNNER_HANDOFF",
-      contracts: 1,
-      runnerHandoffRequired: true,
-    },
-  ];
+  const proposedTargets =
+    negotiatedZoneContact
+      ? []
+      : [
+          {
+            targetId: "TARGET_1_ZONE_TOUCH",
+            sequence: 1,
+            price: target1Price,
+            purpose:
+              "FIRST_PROFIT_NEXT_NEGOTIATED_ZONE_TOUCH",
+            contracts: 1,
+          },
+          {
+            targetId: "TARGET_2_ZONE_MIDLINE",
+            sequence: 2,
+            price: target2Price,
+            purpose:
+              "SECOND_PROFIT_NEXT_NEGOTIATED_ZONE_MIDLINE",
+            contracts: 1,
+          },
+          {
+            targetId: "TARGET_3_ENGINE9_RUNNER",
+            sequence: 3,
+            price: null,
+            purpose: "ENGINE9_RUNNER_HANDOFF",
+            contracts: 1,
+            runnerHandoffRequired: true,
+          },
+        ];
 
   const runnerTarget =
     proposedTargets.find(
@@ -518,6 +535,34 @@ export function evaluateStrategy1Geometry({
     direction,
     directionState:
       directionState || null,
+    contactState:
+      contactState || null,
+    chainArmed:
+      candidate?.chainArmed === true ||
+      handoff?.chainArmed === true,
+    expectedReversalDirection:
+      candidate?.expectedReversalDirection ??
+      handoff?.expectedReversalDirection ??
+      null,
+    priorCandidateId:
+      candidate?.priorCandidateId ??
+      handoff?.priorCandidateId ??
+      null,
+    priorZoneId:
+      candidate?.priorZoneId ??
+      handoff?.priorZoneId ??
+      null,
+    priorRotationDirection:
+      candidate?.priorRotationDirection ??
+      handoff?.priorRotationDirection ??
+      null,
+    priorRotationCompletionState:
+      candidate?.priorRotationCompletionState ??
+      handoff?.priorRotationCompletionState ??
+      null,
+    shortConfirmed: false,
+    automaticDirectionFlip: false,
+    negotiatedZoneContact,
     longReversalWatch,
     directionResolvedAt:
       candidate?.directionResolvedAt ??
@@ -560,8 +605,14 @@ export function evaluateStrategy1Geometry({
     distanceToTargetZoneMidline,
     geometryObjectiveStatus,
 
-    targetApproachWarningLow,
-    targetApproachWarningHigh,
+    targetApproachWarningLow:
+      negotiatedZoneContact
+        ? null
+        : targetApproachWarningLow,
+    targetApproachWarningHigh:
+      negotiatedZoneContact
+        ? null
+        : targetApproachWarningHigh,
     targetApproachWarningOwner:
       "ENGINE26B_GEOMETRY_ONLY",
     earlyWeaknessExitOwner: "ENGINE9",
@@ -637,6 +688,15 @@ export function evaluateStrategy1Geometry({
         : status,
       longReversalWatch
         ? "ENGINE26B_LONG_REVERSAL_WATCH_NON_ACTIONABLE"
+        : null,
+      negotiatedZoneContact
+        ? "ENGINE26B_NEGOTIATED_ZONE_CONTACT_NON_ACTIONABLE"
+        : null,
+      negotiatedZoneContact
+        ? "ENGINE26B_CHAIN_ARMED_DIRECTION_UNRESOLVED"
+        : null,
+      negotiatedZoneContact
+        ? "ENGINE26B_NO_AUTOMATIC_SHORT"
         : null,
       geometryObjectiveStatus,
       identityMatches
