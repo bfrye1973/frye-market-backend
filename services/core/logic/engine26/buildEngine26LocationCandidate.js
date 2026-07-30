@@ -2740,8 +2740,14 @@ const preservedDirection =
       )
     : "NEUTRAL";
 
+const observationOnlyLongWatch =
+  resolvedDirectionalEvidence?.directionState ===
+  "LONG_REVERSAL_WATCH";
+
 const directionBias =
   longToUpperZoneContact
+    ? "NEUTRAL"
+    : observationOnlyLongWatch
     ? "NEUTRAL"
     : strategy1Eligible
     ? preservedDirection !== "NEUTRAL"
@@ -2752,6 +2758,8 @@ const directionBias =
 const directionState =
   longToUpperZoneContact
     ? "SHORT_REVERSAL_WATCH"
+    : observationOnlyLongWatch
+    ? "LONG_REVERSAL_WATCH"
     : strategy1Eligible &&
       preservedDirection !== "NEUTRAL"
     ? continuityLocationCandidate?.directionState ||
