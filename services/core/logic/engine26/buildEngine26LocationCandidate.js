@@ -1311,14 +1311,24 @@ function evaluatePreviousChildRelease({
   priorMemoryRecord,
   currentPrice,
 }) {
+  const emptyState = {
+    released: false,
+    releaseReason: null,
+    targetApproachCompletionWatch: false,
+    targetZoneEntryTouched: false,
+    targetMidlineReached: false,
+    objectiveCompleted: false,
+    targetReached: false,
+    priorRotationCompletionState: null,
+    priorRotationFullyComplete: false,
+    remainingRunnerExpected: null,
+    completionBoundary: null,
+    completedTargetZoneId: null,
+    completedTargetZone: null,
+  };
+
   if (!previousLocationCandidate) {
-    return {
-      released: false,
-      releaseReason: null,
-      targetApproachCompletionWatch: false,
-      objectiveCompleted: false,
-      targetReached: false,
-    };
+    return emptyState;
   }
 
   const direction = normalizeDirection(
@@ -1331,13 +1341,25 @@ function evaluatePreviousChildRelease({
     previousLocationCandidate?.entryZone?.midline
   );
 
+  const targetZone =
+    previousLocationCandidate?.targetZone || null;
+
   const targetLow = toFiniteNumber(
-    previousLocationCandidate?.targetZone?.low
+    targetZone?.low
   );
 
   const targetHigh = toFiniteNumber(
-    previousLocationCandidate?.targetZone?.high
+    targetZone?.high
   );
+
+  const targetMidline = toFiniteNumber(
+    targetZone?.midline
+  );
+
+  const completedTargetZoneId =
+    targetZone?.zoneId ??
+    targetZone?.id ??
+    null;
 
   const invalidated =
     previousLocationCandidate?.invalidationFacts
@@ -1348,11 +1370,9 @@ function evaluatePreviousChildRelease({
 
   if (invalidated) {
     return {
+      ...emptyState,
       released: true,
       releaseReason: "COMPLETED_CLOSE_INVALIDATION",
-      targetApproachCompletionWatch: false,
-      objectiveCompleted: false,
-      targetReached: false,
     };
   }
 
@@ -1361,13 +1381,11 @@ function evaluatePreviousChildRelease({
 
   if (explicitlyRetired) {
     return {
+      ...emptyState,
       released: true,
       releaseReason:
         priorMemoryRecord?.releaseReason ||
         "EXPLICIT_RETIREMENT",
-      targetApproachCompletionWatch: false,
-      objectiveCompleted: false,
-      targetReached: false,
     };
   }
 
@@ -1382,7 +1400,14 @@ function evaluatePreviousChildRelease({
     favorableExcursion !== null &&
     favorableExcursion >= 10;
 
-  const targetReached =
+  /*
+   * Simplified Strategy 1 testing exit lifecycle:
+   *
+   * Block 1 completes on first entry into the approved target zone.
+   * Blocks 2 and 3 complete on intrabar touch of targetZone.midline.
+   * No EMA20 runner remains during this testing phase.
+   */
+  const targetZoneEntryTouched =
     price !== null &&
     (
       (
@@ -1397,42 +1422,66 @@ function evaluatePreviousChildRelease({
       )
     );
 
-  if (targetReached) {
-    return {
-      released: true,
-      releaseReason: "TARGET_ZONE_REACHED",
-      targetApproachCompletionWatch: false,
-      objectiveCompleted,
-      targetReached: true,
-      favorableExcursion,
-    };
-  }
-
-  const inWarningBand =
+  const targetMidlineReached =
     price !== null &&
+    targetMidline !== null &&
     (
       (
         direction === "LONG" &&
-        targetLow !== null &&
-        price >= targetLow - 7 &&
-        price <= targetLow - 5
+        price >= targetMidline
       ) ||
       (
         direction === "SHORT" &&
-        targetHigh !== null &&
-        price >= targetHigh + 5 &&
-        price <= targetHigh + 7
+        price <= targetMidline
       )
     );
 
+  if (targetMidlineReached) {
+    return {
+      released: true,
+      // Keep the approved retirement reason for memory compatibility.
+      releaseReason: "TARGET_ZONE_REACHED",
+      targetApproachCompletionWatch: false,
+      targetZoneEntryTouched: true,
+      targetMidlineReached: true,
+      objectiveCompleted: true,
+      targetReached: true,
+      favorableExcursion,
+      priorRotationCompletionState:
+        "FULL_TARGET_COMPLETION",
+      priorRotationFullyComplete: true,
+      remainingRunnerExpected: false,
+      completionBoundary: targetMidline,
+      completedTargetZoneId,
+      completedTargetZone: targetZone,
+    };
+  }
+
+  if (targetZoneEntryTouched) {
+    return {
+      released: false,
+      releaseReason: null,
+      targetApproachCompletionWatch: true,
+      targetZoneEntryTouched: true,
+      targetMidlineReached: false,
+      objectiveCompleted,
+      targetReached: false,
+      favorableExcursion,
+      priorRotationCompletionState:
+        "PARTIAL_PROFIT_TAKING",
+      priorRotationFullyComplete: false,
+      remainingRunnerExpected: true,
+      completionBoundary: targetMidline,
+      completedTargetZoneId: null,
+      completedTargetZone: null,
+    };
+  }
+
   return {
-    released: false,
-    releaseReason: null,
-    targetApproachCompletionWatch:
-      inWarningBand && objectiveCompleted,
+    ...emptyState,
     objectiveCompleted,
-    targetReached: false,
     favorableExcursion,
+    completionBoundary: targetMidline,
   };
 }
 
@@ -2586,19 +2635,23 @@ const promotionSourceDirection =
     promotionSourceCandidate?.direction
   );
 
-const longToUpperZoneContact =
+const fullTargetCompletion =
   promotedObservation === true &&
-  promotionSourceDirection === "LONG" &&
   promotionReleaseState.releaseReason ===
-    "TARGET_ZONE_REACHED";
+    "TARGET_ZONE_REACHED" &&
+  promotionReleaseState.targetMidlineReached === true;
+
+const longToUpperZoneContact =
+  fullTargetCompletion === true &&
+  promotionSourceDirection === "LONG";
 
 const contactState =
-  longToUpperZoneContact
-    ? "NEGOTIATED_ZONE_CONTACT"
+  fullTargetCompletion
+    ? "NEGOTIATED_LINE_CONTACT"
     : null;
 
 const chainArmed =
-  longToUpperZoneContact === true;
+  fullTargetCompletion === true;
 
 const expectedReversalDirection =
   longToUpperZoneContact
@@ -2606,18 +2659,60 @@ const expectedReversalDirection =
     : null;
 
 const priorRotationDirection =
-  longToUpperZoneContact
-    ? "LONG"
+  fullTargetCompletion
+    ? promotionSourceDirection
     : null;
 
 const priorRotationCompletionState =
-  longToUpperZoneContact
-    ? "PROFIT_TAKING_OR_TARGET_COMPLETION"
-    : null;
+  fullTargetCompletion
+    ? "FULL_TARGET_COMPLETION"
+    : previousReleaseState
+        ?.priorRotationCompletionState ??
+      null;
 
 const currentObservationDirection =
-  longToUpperZoneContact
+  fullTargetCompletion
     ? "NEUTRAL"
+    : null;
+
+const priorRotationFullyComplete =
+  fullTargetCompletion
+    ? true
+    : previousReleaseState
+        ?.priorRotationFullyComplete === true;
+
+const remainingRunnerExpected =
+  fullTargetCompletion
+    ? false
+    : previousReleaseState
+        ?.remainingRunnerExpected ??
+      null;
+
+const completionBoundary =
+  fullTargetCompletion
+    ? promotionReleaseState
+        ?.completionBoundary ??
+      toFiniteNumber(
+        promotionSourceCandidate
+          ?.targetZone?.midline
+      )
+    : previousReleaseState
+        ?.completionBoundary ??
+      null;
+
+const completedTargetZoneId =
+  fullTargetCompletion
+    ? promotionReleaseState
+        ?.completedTargetZoneId ??
+      previousTargetZoneId
+    : null;
+
+const completedTargetZone =
+  fullTargetCompletion
+    ? promotionReleaseState
+        ?.completedTargetZone ??
+      promotionSourceCandidate?.targetZone ??
+      null
     : null;
 
 const provisionalEntryZone =
@@ -2745,7 +2840,7 @@ const observationOnlyLongWatch =
   "LONG_REVERSAL_WATCH";
 
 const directionBias =
-  longToUpperZoneContact
+  fullTargetCompletion
     ? "NEUTRAL"
     : observationOnlyLongWatch
     ? "NEUTRAL"
@@ -2758,6 +2853,8 @@ const directionBias =
 const directionState =
   longToUpperZoneContact
     ? "SHORT_REVERSAL_WATCH"
+    : fullTargetCompletion
+    ? "OBSERVING_PROMOTED_ZONE"
     : observationOnlyLongWatch
     ? "LONG_REVERSAL_WATCH"
     : strategy1Eligible &&
@@ -3032,13 +3129,15 @@ const strategyFacts =
     });
 
     const priorZoneId =
-      continuityLocationCandidate?.zoneId || null;
+      promotionSourceCandidate?.zoneId ??
+      continuityLocationCandidate?.zoneId ??
+      null;
 
     if (
       priorZoneId &&
       priorZoneId !== zoneId &&
-      previousReleaseState.released === true &&
-      previousReleaseState.releaseReason
+      promotionReleaseState.released === true &&
+      promotionReleaseState.releaseReason
     ) {
       const priorMemoryKey = buildStrategy1MemoryKey({
         laneId: "minute",
@@ -3054,7 +3153,7 @@ const strategyFacts =
           priorMemoryKey,
           retiredAt: snapshotTime,
           retirementReason:
-            previousReleaseState.releaseReason,
+            promotionReleaseState.releaseReason,
         }),
       };
     }
@@ -3144,51 +3243,83 @@ const strategyFacts =
     priorRotationDirection,
     priorRotationCompletionState,
     currentObservationDirection,
+    targetApproachCompletionWatch:
+      previousReleaseState
+        ?.targetApproachCompletionWatch === true,
+    targetZoneEntryTouched:
+      previousReleaseState
+        ?.targetZoneEntryTouched === true ||
+      fullTargetCompletion,
+    targetMidlineReached:
+      previousReleaseState
+        ?.targetMidlineReached === true ||
+      fullTargetCompletion,
+    priorRotationFullyComplete,
+    remainingRunnerExpected,
+    completionBoundary,
+    completedTargetZoneId,
+    completedTargetZone,
+    ema20RunnerEnabled: false,
     shortConfirmed: false,
     directionalResolved:
       ["LONG", "SHORT"].includes(directionBias),
     automaticDirectionFlip: false,
 
     parentCandidateId:
-      longToUpperZoneContact
+      fullTargetCompletion
         ? promotionSourceCandidate?.candidateId ?? null
         : null,
     parentZoneId:
-      longToUpperZoneContact
+      fullTargetCompletion
         ? promotionSourceCandidate?.zoneId ?? null
         : null,
     priorCandidateId:
-      longToUpperZoneContact
+      fullTargetCompletion
         ? promotionSourceCandidate?.candidateId ?? null
         : null,
     priorZoneId:
-      longToUpperZoneContact
+      fullTargetCompletion
         ? promotionSourceCandidate?.zoneId ?? null
         : null,
     promotionReason:
-      longToUpperZoneContact
-        ? "TARGET_ZONE_REACHED"
+      fullTargetCompletion
+        ? "NEGOTIATED_LINE_TARGET_COMPLETION"
         : null,
     promotedFromTargetContact:
-      longToUpperZoneContact,
+      false,
+    promotedFromTargetCompletion:
+      fullTargetCompletion,
+    priorRotationFullyComplete,
+    remainingRunnerExpected,
+    completionBoundary,
+    completedTargetZoneId,
+    completedTargetZone,
+    ema20RunnerEnabled: false,
 
     directionalEvidence:
-      longToUpperZoneContact
+      fullTargetCompletion
         ? {
             ...resolvedDirectionalEvidence,
             direction: "NEUTRAL",
             preferredDirection: "NEUTRAL",
-            directionState: "SHORT_REVERSAL_WATCH",
+            directionState:
+              longToUpperZoneContact
+                ? "SHORT_REVERSAL_WATCH"
+                : "OBSERVING_PROMOTED_ZONE",
             evidenceSufficient: false,
-            contactState: "NEGOTIATED_ZONE_CONTACT",
+            contactState: "NEGOTIATED_LINE_CONTACT",
             chainArmed: true,
-            expectedReversalDirection: "SHORT",
+            expectedReversalDirection:
+              longToUpperZoneContact ? "SHORT" : null,
             reasonCodes: [
               ...(resolvedDirectionalEvidence?.reasonCodes || []),
-              "ENGINE26_NEGOTIATED_ZONE_CONTACT",
+              "ENGINE26_NEGOTIATED_LINE_CONTACT",
+              "ENGINE26_FULL_TARGET_COMPLETION",
               "ENGINE26_CHAIN_ARMED",
-              "ENGINE26_SHORT_REVERSAL_WATCH",
-              "ENGINE26_NO_AUTOMATIC_SHORT",
+              longToUpperZoneContact
+                ? "ENGINE26_SHORT_REVERSAL_WATCH"
+                : "ENGINE26_PROMOTED_ZONE_OBSERVATION",
+              "ENGINE26_NO_AUTOMATIC_DIRECTION_FLIP",
             ],
           }
         : resolvedDirectionalEvidence,
@@ -3341,8 +3472,14 @@ const strategyFacts =
             promotionReason:
               promotionReleaseState
                 .releaseReason ?? null,
-            promotedFromTargetContact:
-              longToUpperZoneContact,
+            promotedFromTargetContact: false,
+            promotedFromTargetCompletion:
+              fullTargetCompletion,
+            priorRotationFullyComplete,
+            remainingRunnerExpected,
+            completionBoundary,
+            completedTargetZoneId,
+            completedTargetZone,
             contactState,
             chainArmed,
             expectedReversalDirection,
@@ -3383,6 +3520,24 @@ const strategyFacts =
         previousReleaseState.objectiveCompleted === true,
       targetReached:
         previousReleaseState.targetReached === true,
+      targetZoneEntryTouched:
+        previousReleaseState
+          .targetZoneEntryTouched === true,
+      targetMidlineReached:
+        previousReleaseState
+          .targetMidlineReached === true,
+      priorRotationCompletionState:
+        previousReleaseState
+          .priorRotationCompletionState ?? null,
+      priorRotationFullyComplete:
+        previousReleaseState
+          .priorRotationFullyComplete === true,
+      remainingRunnerExpected:
+        previousReleaseState
+          .remainingRunnerExpected ?? null,
+      completionBoundary:
+        previousReleaseState
+          .completionBoundary ?? null,
       nextRankedAlternativeZoneId:
         rankedStrategy1Zone &&
         rankedStrategy1Zone !== selectedZone
@@ -3528,10 +3683,13 @@ const strategyFacts =
         ? "ENGINE26_STRATEGY1_TARGET_APPROACH_COMPLETION_WATCH"
         : null,
 
-      longToUpperZoneContact
-        ? "ENGINE26_NEGOTIATED_ZONE_CONTACT"
+      fullTargetCompletion
+        ? "ENGINE26_NEGOTIATED_LINE_CONTACT"
         : null,
-      longToUpperZoneContact
+      fullTargetCompletion
+        ? "ENGINE26_FULL_TARGET_COMPLETION"
+        : null,
+      fullTargetCompletion
         ? "ENGINE26_CHAIN_ARMED"
         : null,
       longToUpperZoneContact
@@ -3690,7 +3848,7 @@ export function buildEngine26ReactionHandoff({
 
   const contactArmed =
     candidate?.contactState ===
-      "NEGOTIATED_ZONE_CONTACT" &&
+      "NEGOTIATED_LINE_CONTACT" &&
     candidate?.chainArmed === true &&
     candidate?.directionState ===
       "SHORT_REVERSAL_WATCH";
@@ -3793,6 +3951,20 @@ export function buildEngine26ReactionHandoff({
       candidate.priorRotationDirection ?? null,
     priorRotationCompletionState:
       candidate.priorRotationCompletionState ?? null,
+    priorRotationFullyComplete:
+      candidate.priorRotationFullyComplete === true,
+    remainingRunnerExpected:
+      candidate.remainingRunnerExpected ?? null,
+    completionBoundary:
+      candidate.completionBoundary ?? null,
+    completedTargetZoneId:
+      candidate.completedTargetZoneId ?? null,
+    completedTargetZone:
+      candidate.completedTargetZone ?? null,
+    promotionReason:
+      candidate.promotionReason ?? null,
+    promotedFromTargetCompletion:
+      candidate.promotedFromTargetCompletion === true,
     directionalResolved:
       candidate.directionalResolved === true,
     reactionConfirmed: false,
@@ -3993,10 +4165,24 @@ export function buildEngine26A(
         input.snapshotTime,
     });
 
+  const geometryContactArmed =
+    engine26LocationCandidate?.active === true &&
+    engine26LocationCandidate?.contactState ===
+      "NEGOTIATED_LINE_CONTACT" &&
+    engine26LocationCandidate?.chainArmed === true;
+
   const engine26GeometryHandoff = {
     active:
-      engine26LocationCandidate?.active === true &&
-      engine26LocationCandidate?.strategyEligibility?.eligible === true &&
+      geometryContactArmed ||
+      (
+        engine26LocationCandidate?.active === true &&
+        engine26LocationCandidate?.strategyEligibility?.eligible === true &&
+        ["LONG", "SHORT"].includes(
+          engine26LocationCandidate?.directionBias
+        )
+      ),
+    armed:
+      geometryContactArmed ||
       ["LONG", "SHORT"].includes(
         engine26LocationCandidate?.directionBias
       ),
@@ -4027,15 +4213,34 @@ export function buildEngine26A(
     priorRotationCompletionState:
       engine26LocationCandidate
         ?.priorRotationCompletionState ?? null,
+    priorRotationFullyComplete:
+      engine26LocationCandidate
+        ?.priorRotationFullyComplete === true,
+    remainingRunnerExpected:
+      engine26LocationCandidate
+        ?.remainingRunnerExpected ?? null,
+    completionBoundary:
+      engine26LocationCandidate
+        ?.completionBoundary ?? null,
+    completedTargetZoneId:
+      engine26LocationCandidate
+        ?.completedTargetZoneId ?? null,
+    completedTargetZone:
+      engine26LocationCandidate
+        ?.completedTargetZone ?? null,
+    promotionReason:
+      engine26LocationCandidate
+        ?.promotionReason ?? null,
+    promotedFromTargetCompletion:
+      engine26LocationCandidate
+        ?.promotedFromTargetCompletion === true,
     directionalResolved:
       engine26LocationCandidate?.directionalResolved === true,
     geometryReady: false,
     geometryFeasible: false,
     status:
-      engine26LocationCandidate?.directionState ===
-        "SHORT_REVERSAL_WATCH" &&
       engine26LocationCandidate?.contactState ===
-        "NEGOTIATED_ZONE_CONTACT"
+        "NEGOTIATED_LINE_CONTACT"
         ? "WAITING_FOR_DIRECTIONAL_RESOLUTION"
         : null,
     directionResolvedAt:
@@ -4070,10 +4275,10 @@ export function buildEngine26A(
     noExecution: true,
     reasonCodes:
       engine26LocationCandidate?.contactState ===
-        "NEGOTIATED_ZONE_CONTACT"
+        "NEGOTIATED_LINE_CONTACT"
         ? [
             "ENGINE26_STRATEGY1_GEOMETRY_HANDOFF_AVAILABLE",
-            "ENGINE26_NEGOTIATED_ZONE_CONTACT",
+            "ENGINE26_NEGOTIATED_LINE_CONTACT",
             "ENGINE26_CHAIN_ARMED",
             "WAITING_FOR_DIRECTIONAL_RESOLUTION",
             "NO_AUTOMATIC_SHORT",
