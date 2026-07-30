@@ -127,7 +127,116 @@ function shortUpperFactsBars() {
 }
 
 test(
-  "target contact releases prior LONG and promotes an armed NEUTRAL SHORT reversal watch",
+  "LONG first target-zone entry starts partial profit-taking without releasing the child",
+  () => {
+    const lower = buildAtPrice({
+      currentPrice: 7445.75,
+      bars10m: longLowerFactsBars(),
+      ema10Posture: "BULLISH",
+    }).engine26LocationCandidate;
+
+    const partial = buildAtPrice({
+      currentPrice: lower.targetZone.low,
+      previousLocationCandidate: lower,
+      snapshotTime:
+        "2026-07-28T15:10:00.000Z",
+    }).engine26LocationCandidate;
+
+    assert.equal(partial.candidateId, lower.candidateId);
+    assert.equal(partial.zoneId, lower.zoneId);
+    assert.equal(partial.directionBias, "LONG");
+    assert.equal(
+      partial.targetApproachCompletionWatch,
+      true
+    );
+    assert.equal(partial.targetZoneEntryTouched, true);
+    assert.equal(partial.targetMidlineReached, false);
+    assert.equal(
+      partial.priorRotationCompletionState,
+      "PARTIAL_PROFIT_TAKING"
+    );
+    assert.equal(
+      partial.priorRotationFullyComplete,
+      false
+    );
+    assert.equal(partial.remainingRunnerExpected, true);
+    assert.equal(
+      partial.completionBoundary,
+      lower.targetZone.midline
+    );
+    assert.equal(partial.contactState, null);
+    assert.equal(partial.noPermissionCreated, true);
+    assert.equal(partial.noExecution, true);
+  }
+);
+
+test(
+  "SHORT first target-zone entry starts partial profit-taking and midline touch fully completes",
+  () => {
+    const upper = buildAtPrice({
+      currentPrice: 7502,
+      bars10m: shortUpperFactsBars(),
+      ema10Posture: "BEARISH",
+      snapshotTime:
+        "2026-07-28T18:00:00.000Z",
+    }).engine26LocationCandidate;
+
+    assert.equal(upper.directionBias, "SHORT");
+    assert.ok(upper.targetZone);
+
+    const partial = buildAtPrice({
+      currentPrice: upper.targetZone.high,
+      previousLocationCandidate: upper,
+      snapshotTime:
+        "2026-07-28T18:10:00.000Z",
+    }).engine26LocationCandidate;
+
+    assert.equal(partial.candidateId, upper.candidateId);
+    assert.equal(partial.zoneId, upper.zoneId);
+    assert.equal(partial.directionBias, "SHORT");
+    assert.equal(
+      partial.targetApproachCompletionWatch,
+      true
+    );
+    assert.equal(
+      partial.priorRotationCompletionState,
+      "PARTIAL_PROFIT_TAKING"
+    );
+    assert.equal(partial.priorRotationFullyComplete, false);
+    assert.equal(partial.remainingRunnerExpected, true);
+    assert.equal(
+      partial.completionBoundary,
+      upper.targetZone.midline
+    );
+
+    const completed = buildAtPrice({
+      currentPrice: upper.targetZone.midline,
+      previousLocationCandidate: upper,
+      snapshotTime:
+        "2026-07-28T18:20:00.000Z",
+    }).engine26LocationCandidate;
+
+    assert.notEqual(completed.candidateId, upper.candidateId);
+    assert.notEqual(completed.zoneId, upper.zoneId);
+    assert.equal(completed.directionBias, "NEUTRAL");
+    assert.equal(completed.priorRotationFullyComplete, true);
+    assert.equal(completed.remainingRunnerExpected, false);
+    assert.equal(completed.ema20RunnerEnabled, false);
+    assert.equal(
+      completed.completionBoundary,
+      upper.targetZone.midline
+    );
+    assert.equal(
+      completed.promotionReason,
+      "NEGOTIATED_LINE_TARGET_COMPLETION"
+    );
+    assert.equal(completed.noPermissionCreated, true);
+    assert.equal(completed.noExecution, true);
+  }
+);
+
+test(
+  "LONG target midline fully completes prior rotation and promotes an armed NEUTRAL SHORT reversal watch",
   () => {
     const lower = buildAtPrice({
       currentPrice: 7445.75,
@@ -138,7 +247,7 @@ test(
     assert.equal(lower.directionBias, "LONG");
 
     const promotedResult = buildAtPrice({
-      currentPrice: 7504,
+      currentPrice: 7511.25,
       previousLocationCandidate: lower,
       bars10m: [],
       ema10Posture: null,
@@ -171,7 +280,7 @@ test(
     );
     assert.equal(
       promoted.contactState,
-      "NEGOTIATED_ZONE_CONTACT"
+      "NEGOTIATED_LINE_CONTACT"
     );
     assert.equal(promoted.chainArmed, true);
     assert.equal(
@@ -184,7 +293,7 @@ test(
     );
     assert.equal(
       promoted.priorRotationCompletionState,
-      "PROFIT_TAKING_OR_TARGET_COMPLETION"
+      "FULL_TARGET_COMPLETION"
     );
     assert.equal(
       promoted.currentObservationDirection,
@@ -193,6 +302,18 @@ test(
     assert.equal(promoted.shortConfirmed, false);
     assert.equal(promoted.directionalResolved, false);
     assert.equal(promoted.automaticDirectionFlip, false);
+    assert.equal(promoted.priorRotationFullyComplete, true);
+    assert.equal(promoted.remainingRunnerExpected, false);
+    assert.equal(promoted.ema20RunnerEnabled, false);
+    assert.equal(promoted.completionBoundary, 7511.25);
+    assert.equal(
+      promoted.completedTargetZoneId,
+      lower.targetZone.zoneId
+    );
+    assert.deepEqual(
+      promoted.completedTargetZone,
+      lower.targetZone
+    );
     assert.equal(
       promoted.priorCandidateId,
       lower.candidateId
@@ -203,10 +324,10 @@ test(
     );
     assert.equal(
       promoted.promotionReason,
-      "TARGET_ZONE_REACHED"
+      "NEGOTIATED_LINE_TARGET_COMPLETION"
     );
     assert.equal(
-      promoted.promotedFromTargetContact,
+      promoted.promotedFromTargetCompletion,
       true
     );
     assert.equal(
@@ -240,13 +361,16 @@ test(
     );
     assert.equal(
       reactionHandoff.contactState,
-      "NEGOTIATED_ZONE_CONTACT"
+      "NEGOTIATED_LINE_CONTACT"
     );
     assert.equal(
       reactionHandoff.reactionConfirmed,
       false
     );
 
+    assert.equal(geometryHandoff.active, true);
+    assert.equal(geometryHandoff.armed, true);
+    assert.equal(geometryHandoff.chainArmed, true);
     assert.equal(
       geometryHandoff.candidateId,
       promoted.candidateId
@@ -265,6 +389,41 @@ test(
     );
     assert.equal(geometryHandoff.geometryReady, false);
     assert.equal(geometryHandoff.geometryFeasible, false);
+
+    const geometry = evaluateStrategy1Geometry({
+      symbol: "ES",
+      strategyId: "intraday_scalp@10m",
+      permission: {
+        paper: {
+          decision: "PAPER_STAND_DOWN",
+          allowed: false,
+          planningAllowed: false,
+        },
+      },
+      engine26LocationCandidate: promoted,
+      engine26GeometryHandoff: geometryHandoff,
+    });
+
+    assert.equal(
+      geometry.status,
+      "WAITING_FOR_DIRECTIONAL_RESOLUTION"
+    );
+    assert.equal(geometry.direction, "NEUTRAL");
+    assert.equal(geometry.directionalResolved, false);
+    assert.equal(geometry.geometryReady, false);
+    assert.equal(geometry.geometryFeasible, false);
+    assert.equal(geometry.proposedEntryPrice, null);
+    assert.equal(geometry.proposedStopPrice, null);
+    assert.deepEqual(geometry.proposedTargets, []);
+    assert.equal(geometry.targetApproachWarningLow, null);
+    assert.equal(geometry.targetApproachWarningHigh, null);
+    assert.equal(geometry.runnerHandoff, null);
+    assert.equal(geometry.runnerHandoffRequired, false);
+    assert.equal(geometry.remainingRunnerExpected, false);
+    assert.equal(geometry.ema20RunnerEnabled, false);
+    assert.equal(geometry.noOrderCreated, true);
+    assert.equal(geometry.noFillCreated, true);
+    assert.equal(geometry.noExecution, true);
   }
 );
 
@@ -278,7 +437,7 @@ test(
     }).engine26LocationCandidate;
 
     const promoted = buildAtPrice({
-      currentPrice: 7504,
+      currentPrice: 7511.25,
       previousLocationCandidate: lower,
     }).engine26LocationCandidate;
 
@@ -303,7 +462,7 @@ test(
   "upper-zone acceptance plus bullish EMA10 resolves LONG continuation",
   () => {
     const neutralUpper = buildAtPrice({
-      currentPrice: 7504,
+      currentPrice: 7511.25,
       previousLocationCandidate:
         buildAtPrice({
           currentPrice: 7445.75,
@@ -347,7 +506,7 @@ test(
   "upper-zone rejection plus bearish EMA10 resolves SHORT reversal",
   () => {
     const neutralUpper = buildAtPrice({
-      currentPrice: 7504,
+      currentPrice: 7511.25,
       previousLocationCandidate:
         buildAtPrice({
           currentPrice: 7445.75,
@@ -409,7 +568,7 @@ test(
     }).engine26LocationCandidate;
 
     const promotedResult = buildAtPrice({
-      currentPrice: 7504,
+      currentPrice: 7511.25,
       previousLocationCandidate: lower,
     });
 
@@ -464,7 +623,7 @@ test(
     );
     assert.equal(
       geometry.contactState,
-      "NEGOTIATED_ZONE_CONTACT"
+      "NEGOTIATED_LINE_CONTACT"
     );
     assert.equal(geometry.chainArmed, true);
     assert.equal(
