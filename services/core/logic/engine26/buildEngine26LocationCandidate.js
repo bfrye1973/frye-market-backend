@@ -2226,6 +2226,7 @@ export function buildEngine26LocationCandidate({
   previousLocationCandidate = null,
   bars10m = [],
   ema10Posture = null,
+  manualZonesFilePath = undefined,
   memoryFilePath = DEFAULT_MEMORY_PATH,
   persistMemory = true,
   tickSize = DEFAULT_TICK_SIZE,
@@ -2296,7 +2297,11 @@ export function buildEngine26LocationCandidate({
   }
 
   const manualImbalanceInventory =
-    readEngine26ManualImbalanceZones();
+    manualZonesFilePath
+      ? readEngine26ManualImbalanceZones({
+          filePath: manualZonesFilePath,
+        })
+      : readEngine26ManualImbalanceZones();
 
   const allZones = dedupeZones([
     ...collectEngine26ManualNegotiatedZones(
