@@ -163,13 +163,13 @@ export function evaluateStrategy1Geometry({
     ""
   );
 
-  const negotiatedZoneContact =
-    contactState === "NEGOTIATED_ZONE_CONTACT" &&
+  const negotiatedLineContact =
+    contactState === "NEGOTIATED_LINE_CONTACT" &&
     directionState === "SHORT_REVERSAL_WATCH";
 
   const directionalResolved =
     longReversalWatch !== true &&
-    negotiatedZoneContact !== true &&
+    negotiatedLineContact !== true &&
     ["LONG", "SHORT"].includes(direction);
 
   const setupType =
@@ -359,7 +359,7 @@ export function evaluateStrategy1Geometry({
     status = "IDENTITY_MISMATCH";
   } else if (candidateInvalidated) {
     status = "CANDIDATE_INVALIDATED";
-  } else if (negotiatedZoneContact) {
+  } else if (negotiatedLineContact) {
     status =
       "WAITING_FOR_DIRECTIONAL_RESOLUTION";
   } else if (longReversalWatch) {
@@ -471,7 +471,7 @@ export function evaluateStrategy1Geometry({
       : null;
 
   const proposedTargets =
-    negotiatedZoneContact
+    negotiatedLineContact
       ? []
       : [
           {
@@ -491,28 +491,43 @@ export function evaluateStrategy1Geometry({
             contracts: 1,
           },
           {
-            targetId: "TARGET_3_ENGINE9_RUNNER",
+            targetId: "TARGET_3_ZONE_MIDLINE_TESTING",
             sequence: 3,
+            // Kept null in the legacy proposal array for compatibility.
+            // The frozen testing lifecycle below owns the actual Block 3
+            // midline intent; no EMA20 runner handoff exists.
             price: null,
-            purpose: "ENGINE9_RUNNER_HANDOFF",
+            purpose:
+              "THIRD_PROFIT_TARGET_ZONE_MIDLINE_TESTING",
             contracts: 1,
-            runnerHandoffRequired: true,
+            runnerHandoffRequired: false,
           },
         ];
 
-  const runnerTarget =
-    proposedTargets.find(
-      (target) =>
-        target?.targetId ===
-        "TARGET_3_ENGINE9_RUNNER"
-    ) || null;
+  const runnerHandoffRequired = false;
+  const runnerHandoff = null;
 
-  const runnerHandoffRequired =
-    geometryReady === true &&
-    runnerTarget?.purpose ===
-      "ENGINE9_RUNNER_HANDOFF" &&
-    runnerTarget?.price === null &&
-    runnerTarget?.runnerHandoffRequired === true;
+  const testingExitLifecycle = {
+    active: directionalResolved,
+    mode: "SIMPLIFIED_THREE_BLOCK_TESTING",
+    block1: {
+      exitIntent: "FIRST_ENTRY_INTO_TARGET_ZONE",
+      price: target1Price,
+    },
+    block2: {
+      exitIntent: "TARGET_ZONE_MIDLINE",
+      price: target2Price,
+    },
+    block3: {
+      exitIntent: "TARGET_ZONE_MIDLINE",
+      price: target2Price,
+    },
+    fullCompletionBoundary:
+      target2Price,
+    remainingRunnerExpected: false,
+    ema20RunnerEnabled: false,
+    executionAuthorityCreated: false,
+  };
 
   return {
     active: geometryReady,
@@ -560,9 +575,35 @@ export function evaluateStrategy1Geometry({
       candidate?.priorRotationCompletionState ??
       handoff?.priorRotationCompletionState ??
       null,
+    priorRotationFullyComplete:
+      candidate?.priorRotationFullyComplete === true ||
+      handoff?.priorRotationFullyComplete === true,
+    remainingRunnerExpected:
+      candidate?.remainingRunnerExpected ??
+      handoff?.remainingRunnerExpected ??
+      false,
+    completionBoundary:
+      candidate?.completionBoundary ??
+      handoff?.completionBoundary ??
+      null,
+    completedTargetZoneId:
+      candidate?.completedTargetZoneId ??
+      handoff?.completedTargetZoneId ??
+      null,
+    completedTargetZone:
+      candidate?.completedTargetZone ??
+      handoff?.completedTargetZone ??
+      null,
+    promotionReason:
+      candidate?.promotionReason ??
+      handoff?.promotionReason ??
+      null,
+    promotedFromTargetCompletion:
+      candidate?.promotedFromTargetCompletion === true ||
+      handoff?.promotedFromTargetCompletion === true,
     shortConfirmed: false,
     automaticDirectionFlip: false,
-    negotiatedZoneContact,
+    negotiatedLineContact,
     longReversalWatch,
     directionResolvedAt:
       candidate?.directionResolvedAt ??
@@ -597,6 +638,10 @@ export function evaluateStrategy1Geometry({
     proposedStopPrice,
     proposedStopDistancePoints,
     proposedTargets,
+    testingExitLifecycle,
+    remainingRunnerExpected: false,
+    ema20RunnerEnabled: false,
+    runnerHandoff,
 
     minimumObjectivePoints: 10,
     preferredObjectivePoints: 15,
@@ -606,11 +651,11 @@ export function evaluateStrategy1Geometry({
     geometryObjectiveStatus,
 
     targetApproachWarningLow:
-      negotiatedZoneContact
+      negotiatedLineContact
         ? null
         : targetApproachWarningLow,
     targetApproachWarningHigh:
-      negotiatedZoneContact
+      negotiatedLineContact
         ? null
         : targetApproachWarningHigh,
     targetApproachWarningOwner:
@@ -630,9 +675,11 @@ export function evaluateStrategy1Geometry({
     target2RiskReward,
 
     target3Status:
-      "ENGINE9_RUNNER_HANDOFF",
-    target3Price: null,
+      "TARGET_ZONE_MIDLINE_TESTING",
+    target3Price:
+      directionalResolved ? target2Price : null,
     runnerHandoffRequired,
+    runnerHandoff,
 
     candidateStatus:
       candidateInvalidated
@@ -689,13 +736,16 @@ export function evaluateStrategy1Geometry({
       longReversalWatch
         ? "ENGINE26B_LONG_REVERSAL_WATCH_NON_ACTIONABLE"
         : null,
-      negotiatedZoneContact
-        ? "ENGINE26B_NEGOTIATED_ZONE_CONTACT_NON_ACTIONABLE"
+      negotiatedLineContact
+        ? "ENGINE26B_NEGOTIATED_LINE_CONTACT_NON_ACTIONABLE"
         : null,
-      negotiatedZoneContact
+      negotiatedLineContact
+        ? "ENGINE26B_FULL_TARGET_COMPLETION"
+        : null,
+      negotiatedLineContact
         ? "ENGINE26B_CHAIN_ARMED_DIRECTION_UNRESOLVED"
         : null,
-      negotiatedZoneContact
+      negotiatedLineContact
         ? "ENGINE26B_NO_AUTOMATIC_SHORT"
         : null,
       geometryObjectiveStatus,
@@ -705,8 +755,10 @@ export function evaluateStrategy1Geometry({
       permissionReady
         ? "ENGINE6_FAST_INTRADAY_PAPER_ALLOW_CONSUMED"
         : "ENGINE6_PERMISSION_SEPARATE_FROM_GEOMETRY",
-      "TWO_NUMERIC_TARGETS_ONLY",
-      "ENGINE9_RUNNER_HANDOFF_PRICE_NULL",
+      "SIMPLIFIED_THREE_BLOCK_TESTING_LIFECYCLE",
+      "BLOCK_1_TARGET_ZONE_ENTRY",
+      "BLOCKS_2_AND_3_TARGET_ZONE_MIDLINE",
+      "EMA20_RUNNER_DISABLED",
       "NO_PERMISSION_CREATED",
       "NO_SIZING_CREATED",
       "NO_MANAGEMENT_CREATED",
