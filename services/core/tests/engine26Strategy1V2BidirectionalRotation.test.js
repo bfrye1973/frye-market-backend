@@ -127,7 +127,7 @@ function shortUpperFactsBars() {
 }
 
 test(
-  "target contact releases prior LONG and promotes a NEUTRAL observation zone",
+  "target contact releases prior LONG and promotes an armed NEUTRAL SHORT reversal watch",
   () => {
     const lower = buildAtPrice({
       currentPrice: 7445.75,
@@ -137,18 +137,29 @@ test(
 
     assert.equal(lower.directionBias, "LONG");
 
-    const promoted = buildAtPrice({
+    const promotedResult = buildAtPrice({
       currentPrice: 7504,
       previousLocationCandidate: lower,
       bars10m: [],
       ema10Posture: null,
       snapshotTime:
         "2026-07-28T15:20:00.000Z",
-    }).engine26LocationCandidate;
+    });
+
+    const promoted =
+      promotedResult.engine26LocationCandidate;
+    const reactionHandoff =
+      promotedResult.engine26ReactionHandoff;
+    const geometryHandoff =
+      promotedResult.engine26GeometryHandoff;
 
     assert.notEqual(
       promoted.zoneId,
       lower.zoneId
+    );
+    assert.notEqual(
+      promoted.candidateId,
+      lower.candidateId
     );
     assert.equal(
       promoted.directionBias,
@@ -156,13 +167,104 @@ test(
     );
     assert.equal(
       promoted.directionState,
-      "OBSERVING_PROMOTED_ZONE"
+      "SHORT_REVERSAL_WATCH"
+    );
+    assert.equal(
+      promoted.contactState,
+      "NEGOTIATED_ZONE_CONTACT"
+    );
+    assert.equal(promoted.chainArmed, true);
+    assert.equal(
+      promoted.expectedReversalDirection,
+      "SHORT"
+    );
+    assert.equal(
+      promoted.priorRotationDirection,
+      "LONG"
+    );
+    assert.equal(
+      promoted.priorRotationCompletionState,
+      "PROFIT_TAKING_OR_TARGET_COMPLETION"
+    );
+    assert.equal(
+      promoted.currentObservationDirection,
+      "NEUTRAL"
+    );
+    assert.equal(promoted.shortConfirmed, false);
+    assert.equal(promoted.directionalResolved, false);
+    assert.equal(promoted.automaticDirectionFlip, false);
+    assert.equal(
+      promoted.priorCandidateId,
+      lower.candidateId
+    );
+    assert.equal(
+      promoted.priorZoneId,
+      lower.zoneId
+    );
+    assert.equal(
+      promoted.promotionReason,
+      "TARGET_ZONE_REACHED"
+    );
+    assert.equal(
+      promoted.promotedFromTargetContact,
+      true
     );
     assert.equal(
       promoted.promotedObservationLocation
         .releaseReason,
       "TARGET_ZONE_REACHED"
     );
+
+    assert.equal(
+      reactionHandoff.candidateId,
+      promoted.candidateId
+    );
+    assert.equal(
+      reactionHandoff.zoneId,
+      promoted.zoneId
+    );
+    assert.equal(reactionHandoff.active, true);
+    assert.equal(reactionHandoff.armed, true);
+    assert.equal(reactionHandoff.chainArmed, true);
+    assert.equal(
+      reactionHandoff.direction,
+      "NEUTRAL"
+    );
+    assert.equal(
+      reactionHandoff.directionState,
+      "SHORT_REVERSAL_WATCH"
+    );
+    assert.equal(
+      reactionHandoff.expectedReactionDirection,
+      "SHORT"
+    );
+    assert.equal(
+      reactionHandoff.contactState,
+      "NEGOTIATED_ZONE_CONTACT"
+    );
+    assert.equal(
+      reactionHandoff.reactionConfirmed,
+      false
+    );
+
+    assert.equal(
+      geometryHandoff.candidateId,
+      promoted.candidateId
+    );
+    assert.equal(
+      geometryHandoff.zoneId,
+      promoted.zoneId
+    );
+    assert.equal(
+      geometryHandoff.status,
+      "WAITING_FOR_DIRECTIONAL_RESOLUTION"
+    );
+    assert.equal(
+      geometryHandoff.directionalResolved,
+      false
+    );
+    assert.equal(geometryHandoff.geometryReady, false);
+    assert.equal(geometryHandoff.geometryFeasible, false);
   }
 );
 
@@ -188,6 +290,12 @@ test(
       promoted.directionBias,
       "SHORT"
     );
+    assert.equal(
+      promoted.directionState,
+      "SHORT_REVERSAL_WATCH"
+    );
+    assert.equal(promoted.shortConfirmed, false);
+    assert.equal(promoted.automaticDirectionFlip, false);
   }
 );
 
@@ -337,7 +445,35 @@ test(
       geometry.proposedEntryPrice,
       null
     );
+    assert.equal(geometry.proposedStopPrice, null);
+    assert.deepEqual(geometry.proposedTargets, []);
     assert.equal(geometry.target1Price, null);
+    assert.equal(geometry.target2Price, null);
+    assert.equal(
+      geometry.targetApproachWarningLow,
+      null
+    );
+    assert.equal(
+      geometry.targetApproachWarningHigh,
+      null
+    );
+    assert.equal(geometry.direction, "NEUTRAL");
+    assert.equal(
+      geometry.directionState,
+      "SHORT_REVERSAL_WATCH"
+    );
+    assert.equal(
+      geometry.contactState,
+      "NEGOTIATED_ZONE_CONTACT"
+    );
+    assert.equal(geometry.chainArmed, true);
+    assert.equal(
+      geometry.expectedReversalDirection,
+      "SHORT"
+    );
+    assert.equal(geometry.directionalResolved, false);
+    assert.equal(geometry.geometryReady, false);
+    assert.equal(geometry.geometryFeasible, false);
   }
 );
 
