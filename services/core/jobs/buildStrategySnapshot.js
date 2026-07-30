@@ -2853,20 +2853,20 @@ function buildEngine6PaperPermission({
       fastIntradayPaperAllow === true,
 
     engine15Bypassed:
-      engine15FastLaneExcluded:
-        engine15FastLaneExcluded === true,
+      engine15FastLaneExcluded === true,
 
-      authority:
-        engine15FastLaneExcluded === true
-          ? "Engine 6 Fast Lane"
-          : "Engine 15",
+    engine15FastLaneExcluded:
+      engine15FastLaneExcluded === true,
 
-      authoritySource:
-        engine15FastLaneExcluded === true
-          ? "ENGINE6_FAST_LANE_PERMISSION_AUTHORITY"
-          : "ENGINE15_HIGHER_DEGREE_READINESS_AUTHORITY",
+    authority:
+      engine15FastLaneExcluded === true
+        ? "Engine 6 Fast Lane"
+        : "Engine 15",
 
-       engine15SuppressedArtifacts: {
+    authoritySource:
+      engine15FastLaneExcluded === true
+        ? "ENGINE6_FAST_LANE_PERMISSION_AUTHORITY"
+        : "ENGINE15_HIGHER_DEGREE_READINESS_AUTHORITY",
 
     engine15SuppressedArtifacts: {
       blockers:
@@ -2876,7 +2876,6 @@ function buildEngine6PaperPermission({
       reasonCodes:
         fastLaneEngine15Artifacts.removedReasonCodes,
     },
-
     standardPaperAllow:
       standardPaperAllow === true,
 
