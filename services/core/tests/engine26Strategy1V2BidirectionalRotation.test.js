@@ -1,3 +1,8 @@
+Library
+/
+Frye Dashboard 2
+/
+engine26Strategy1V2BidirectionalRotation-COMPLETE-CORRECTED.txt
 // services/core/tests/engine26Strategy1V2BidirectionalRotation.test.js
 
 import test from "node:test";
@@ -1191,15 +1196,236 @@ function longReversalWatchBars({
 test(
   "two completed bullish candles above applicable EMA10 create observation-only LONG_REVERSAL_WATCH before full zone reclaim",
   () => {
-    const result = buildAtPrice({
-      currentPrice: 7413,
-      snapshotTime:
-        "2026-07-29T15:00:00.000Z",
-      bars10m: longReversalWatchBars(),
-      ema10Posture: null,
-    });
+    /*
+     * This test must not read the real Engine 26 memory file.
+     *
+     * A saved directional child from another test run or live
+     * snapshot could otherwise override this isolated watch-state
+     * scenario.
+     */
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-long-reversal-watch-"
+      )
+    );
 
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
 
+    try {
+      const result = buildAtPrice({
+        currentPrice: 7413,
+
+        snapshotTime:
+          "2026-07-29T15:00:00.000Z",
+
+        bars10m:
+          longReversalWatchBars(),
+
+        ema10Posture:
+          null,
+
+        /*
+         * Use a new empty temporary memory location.
+         *
+         * Because this file does not exist yet, Engine 26 receives
+         * a safe empty memory store and cannot recover an unrelated
+         * prior LONG or SHORT child.
+         */
+        memoryFilePath,
+
+        /*
+         * The test only needs to read from the isolated empty store.
+         * It does not need to persist a memory record.
+         */
+        persistMemory:
+          false,
+      });
+
+      const candidate =
+        result.engine26LocationCandidate;
+
+      assert.equal(
+        candidate.directionBias,
+        "NEUTRAL"
+      );
+
+      assert.equal(
+        candidate.direction,
+        "NEUTRAL"
+      );
+
+      assert.equal(
+        candidate.directionState,
+        "LONG_REVERSAL_WATCH"
+      );
+
+      assert.equal(
+        candidate.directionalEvidence
+          .longReversalWatchFacts
+          .qualified,
+        true
+      );
+
+      assert.equal(
+        candidate.directionalEvidence
+          .longReversalWatchFacts
+          .completedBullishSequence,
+        true
+      );
+
+      assert.equal(
+        candidate.directionalEvidence
+          .longReversalWatchFacts
+          .bothClosesAboveApplicableEma10,
+        true
+      );
+
+      assert.equal(
+        candidate.directionalEvidence
+          .longReversalWatchFacts
+          .latestBodyDisplacementStrong,
+        true
+      );
+
+      assert.equal(
+        candidate.directionalEvidence
+          .longReversalWatchFacts
+          .latestCloseAbovePreviousHigh,
+        true
+      );
+
+      assert.equal(
+        candidate.directionalEvidence
+          .longReversalWatchFacts
+          .fullNegotiatedZoneReclaimIncomplete,
+        true
+      );
+
+      assert.equal(
+        result.engine26ReactionHandoff.active,
+        false
+      );
+
+      assert.equal(
+        result.engine26GeometryHandoff.active,
+        false
+      );
+
+      const geometry =
+        evaluateStrategy1Geometry({
+          symbol: "ES",
+
+          strategyId:
+            "intraday_scalp@10m",
+
+          permission: {
+            paper: {
+              decision:
+                "PAPER_STAND_DOWN",
+
+              allowed:
+                false,
+
+              planningAllowed:
+                false,
+            },
+          },
+
+          engine26LocationCandidate:
+            candidate,
+
+          engine26GeometryHandoff:
+            result.engine26GeometryHandoff,
+        });
+
+      assert.equal(
+        geometry.status,
+        "WAITING_FOR_DIRECTIONAL_RESOLUTION"
+      );
+
+      assert.equal(
+        geometry.directionalResolved,
+        false
+      );
+
+      assert.equal(
+        geometry.longReversalWatch,
+        true
+      );
+
+      assert.equal(
+        geometry.geometryReady,
+        false
+      );
+
+      assert.equal(
+        geometry.geometryFeasible,
+        false
+      );
+
+      assert.equal(
+        geometry.proposedEntryPrice,
+        null
+      );
+
+      assert.equal(
+        geometry.proposedStopPrice,
+        null
+      );
+
+      assert.equal(
+        geometry.target1Price,
+        null
+      );
+
+      assert.equal(
+        geometry.target2Price,
+        null
+      );
+
+      assert.equal(
+        geometry.plannerProgressionAllowed,
+        false
+      );
+
+      assert.equal(
+        geometry.noPermissionCreated,
+        true
+      );
+
+      assert.equal(
+        geometry.noSizingCreated,
+        true
+      );
+
+      assert.equal(
+        geometry.noManagementCreated,
+        true
+      );
+
+      assert.equal(
+        geometry.noExecution,
+        true
+      );
+    } finally {
+      /*
+       * Always remove the temporary directory, even if an assertion
+       * fails.
+       */
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
 
 test(
   "unfinished bullish candle is excluded from LONG_REVERSAL_WATCH",
