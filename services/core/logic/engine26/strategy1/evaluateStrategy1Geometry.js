@@ -471,9 +471,8 @@ export function evaluateStrategy1Geometry({
       : null;
 
   const proposedTargets =
-    negotiatedLineContact
-      ? []
-      : [
+    directionalResolved
+      ? [
           {
             targetId: "TARGET_1_ZONE_TOUCH",
             sequence: 1,
@@ -502,7 +501,8 @@ export function evaluateStrategy1Geometry({
             contracts: 1,
             runnerHandoffRequired: false,
           },
-        ];
+        ]
+      : [];
 
   const runnerHandoffRequired = false;
   const runnerHandoff = null;
