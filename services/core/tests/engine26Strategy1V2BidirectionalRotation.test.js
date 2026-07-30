@@ -1,8 +1,3 @@
-Library
-/
-Frye Dashboard 2
-/
-engine26Strategy1V2BidirectionalRotation-COMPLETE-CORRECTED.txt
 // services/core/tests/engine26Strategy1V2BidirectionalRotation.test.js
 
 import test from "node:test";
