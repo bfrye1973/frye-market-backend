@@ -2837,9 +2837,9 @@ function buildEngine6PaperPermission({
     paperAllowed:
       allowed === true,
 
-    planningAllowed:6
+    planningAllowed:
       allowed === true,
-
+    
     ticketAllowed:
       false,
 
