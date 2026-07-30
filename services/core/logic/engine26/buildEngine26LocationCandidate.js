@@ -911,29 +911,39 @@ function resolveDirectionalEvidence({
       ? "OBSERVING_PROMOTED_ZONE"
       : "OBSERVING_ZONE_REACTION";
 
-  if (
-    directionalConflict &&
-    longReversalWatchFacts.qualified === true
-  ) {
-    directionState =
-      "LONG_REVERSAL_WATCH";
-  } else if (directionalConflict) {
-    directionState =
-      "NEUTRAL_NO_DIRECTIONAL_EDGE";
-  } else if (bullishAligned) {
-    direction = "LONG";
-    directionState =
-      longReversalEvidence
-        ? "LONG_REVERSAL_DEVELOPING"
-        : "LONG_CONTINUATION_DEVELOPING";
-  } else if (bearishAligned) {
-    direction = "SHORT";
-    directionState =
-      shortReversalEvidence
-        ? "SHORT_REVERSAL_DEVELOPING"
-        : "SHORT_CONTINUATION_DEVELOPING";
-  }
-
+if (
+  longReversalWatchFacts.qualified === true
+) {
+  /*
+   * Early bullish reversal evidence is present,
+   * but full negotiated-zone reclaim is incomplete.
+   *
+   * Observation only:
+   * - direction remains NEUTRAL
+   * - no geometry
+   * - no permission
+   * - no automatic LONG
+   */
+  direction = "NEUTRAL";
+  directionState =
+    "LONG_REVERSAL_WATCH";
+} else if (directionalConflict) {
+  direction = "NEUTRAL";
+  directionState =
+    "NEUTRAL_NO_DIRECTIONAL_EDGE";
+} else if (bullishAligned) {
+  direction = "LONG";
+  directionState =
+    longReversalEvidence
+      ? "LONG_REVERSAL_DEVELOPING"
+      : "LONG_CONTINUATION_DEVELOPING";
+} else if (bearishAligned) {
+  direction = "SHORT";
+  directionState =
+    shortReversalEvidence
+      ? "SHORT_REVERSAL_DEVELOPING"
+      : "SHORT_CONTINUATION_DEVELOPING";
+}
   return {
     direction,
     preferredDirection: direction,
