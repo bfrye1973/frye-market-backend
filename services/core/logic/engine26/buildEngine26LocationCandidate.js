@@ -1306,6 +1306,186 @@ function findRecoverableDirectionalMemoryChild({
   return candidates[0] || null;
 }
 
+function isRecoverablePromotedContactRecord({
+  record,
+  zone,
+  symbol,
+  strategyId,
+}) {
+  const identityValid =
+    record?.laneId === "minute" &&
+    record?.strategyId === strategyId &&
+    String(record?.symbol || "").toUpperCase() === symbol &&
+    record?.zoneId != null &&
+    record?.setupClass === STRATEGY1_SETUP_CLASS &&
+    record?.identitySetupKey === STRATEGY1_SETUP_CLASS &&
+    record?.candidateIdentityVersion ===
+      "engine26.strategy1.v2" &&
+    Boolean(record?.currentCandidateId) &&
+    Boolean(zone);
+
+  const promotedLifecycleValid =
+    record?.contactState ===
+      "NEGOTIATED_LINE_CONTACT" &&
+    record?.chainArmed === true &&
+    record?.promotionReason ===
+      "NEGOTIATED_LINE_TARGET_COMPLETION" &&
+    record?.priorRotationFullyComplete === true &&
+    record?.promotedFromTargetCompletion === true &&
+    record?.directionState ===
+      "SHORT_REVERSAL_WATCH" &&
+    normalizeDirection(
+      record?.directionBias ??
+      record?.direction
+    ) === "NEUTRAL";
+
+  const lifecycleRecoverable =
+    String(record?.lifecycleStatus || "")
+      .toUpperCase() !== "RETIRED" &&
+    String(record?.lifecycleStatus || "")
+      .toUpperCase() !== "INVALIDATED" &&
+    record?.invalidationFacts
+      ?.completedCloseInvalidationConfirmed !== true &&
+    !record?.invalidatedAt &&
+    !record?.retiredAt &&
+    !record?.releaseReason;
+
+  return (
+    identityValid &&
+    promotedLifecycleValid &&
+    lifecycleRecoverable
+  );
+}
+
+function findRecoverablePromotedContactMemoryChild({
+  memoryStore,
+  zones,
+  symbol,
+  strategyId,
+  snapshotTime,
+}) {
+  const candidates = Object.values(
+    memoryStore?.records || {}
+  )
+    .map((record) => {
+      const zone = findZoneByCanonicalId({
+        zones,
+        symbol,
+        zoneId: record?.zoneId,
+      });
+
+      if (
+        !isRecoverablePromotedContactRecord({
+          record,
+          zone,
+          symbol,
+          strategyId,
+        })
+      ) {
+        return null;
+      }
+
+      const entryZone = {
+        id: record.zoneId,
+        zoneId: record.zoneId,
+        upstreamId: zone.upstreamId,
+        source: zone.source,
+        sourcePath: zone.sourcePath,
+        type: zone.type,
+        timeframe: zone.timeframe,
+        low: zone.lo,
+        high: zone.hi,
+        midline: zone.mid,
+      };
+
+      return {
+        record,
+        zone,
+        candidate: {
+          active: true,
+          status: "OBSERVING_PROMOTED_ZONE",
+          laneId: "minute",
+          symbol,
+          strategyId,
+          candidateId: record.currentCandidateId,
+          zoneId: record.zoneId,
+          directionBias: "NEUTRAL",
+          direction: "NEUTRAL",
+          tradeDirectionBias: "NEUTRAL",
+          preferredDirection: "NEUTRAL",
+          directionalResolved: false,
+          directionState: "SHORT_REVERSAL_WATCH",
+          expectedReversalDirection: "SHORT",
+          expectedParticipationDirection: "SHORT",
+          contactState: "NEGOTIATED_LINE_CONTACT",
+          chainArmed: true,
+          automaticDirectionFlip: false,
+          shortConfirmed: false,
+          setupType: STRATEGY1_SETUP_CLASS,
+          setupClass: record.setupClass,
+          setupGrade: record.setupGrade,
+          identitySetupKey: record.identitySetupKey,
+          candidateIdentityVersion:
+            record.candidateIdentityVersion,
+          candidateLifecycleStartTime:
+            record.candidateLifecycleStartTime ||
+            record.promotionTime ||
+            snapshotTime,
+          directionResolvedAt: null,
+          entryZone,
+          targetZone: record.targetZone || null,
+          invalidationFacts:
+            record.invalidationFacts || null,
+          priorCandidateId:
+            record.priorCandidateId || null,
+          priorZoneId:
+            record.priorZoneId || null,
+          priorRotationDirection:
+            record.priorRotationDirection || "LONG",
+          priorRotationCompletionState:
+            record.priorRotationCompletionState ||
+            "FULL_TARGET_COMPLETION",
+          priorRotationFullyComplete: true,
+          remainingRunnerExpected: false,
+          completionBoundary:
+            record.completionBoundary ?? null,
+          completedTargetZoneId:
+            record.completedTargetZoneId || null,
+          completedTargetZone:
+            record.completedTargetZone || null,
+          promotionReason:
+            "NEGOTIATED_LINE_TARGET_COMPLETION",
+          promotedFromTargetCompletion: true,
+          targetZoneEntryTouched:
+            record.targetZoneEntryTouched === true,
+          targetMidlineReached:
+            record.targetMidlineReached === true,
+          targetZoneEntryTouchedAt:
+            record.targetZoneEntryTouchedAt || null,
+          targetMidlineReachedAt:
+            record.targetMidlineReachedAt || null,
+          promotionTime:
+            record.promotionTime || null,
+          profitObjectiveReachedAt:
+            record.profitObjectiveReachedAt || null,
+          snapshotTime:
+            record.lastSeenAt || snapshotTime,
+          noPermissionCreated: true,
+          noExecution: true,
+        },
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) =>
+      String(b.record?.lastSeenAt || "")
+        .localeCompare(
+          String(a.record?.lastSeenAt || "")
+        )
+    );
+
+  return candidates[0] || null;
+}
+
 function evaluatePreviousChildRelease({
   previousLocationCandidate,
   priorMemoryRecord,
@@ -2489,6 +2669,27 @@ const immediatePreviousSetupIdentityValid =
   previousLocationCandidate?.candidateIdentityVersion ===
     "engine26.strategy1.v2";
 
+const immediatePreviousPromotedContactPreservable =
+  selectionPurpose === "STRATEGY1_CHILD" &&
+  Boolean(immediatePreviousZone) &&
+  immediatePreviousSetupIdentityValid &&
+  previousLocationCandidate?.active === true &&
+  previousLocationCandidate?.contactState ===
+    "NEGOTIATED_LINE_CONTACT" &&
+  previousLocationCandidate?.chainArmed === true &&
+  previousLocationCandidate?.promotionReason ===
+    "NEGOTIATED_LINE_TARGET_COMPLETION" &&
+  previousLocationCandidate?.priorRotationFullyComplete === true &&
+  previousLocationCandidate?.promotedFromTargetCompletion === true &&
+  previousLocationCandidate?.directionState ===
+    "SHORT_REVERSAL_WATCH" &&
+  normalizeDirection(
+    previousLocationCandidate?.directionBias ??
+    previousLocationCandidate?.direction
+  ) === "NEUTRAL" &&
+  previousLocationCandidate?.invalidationFacts
+    ?.completedCloseInvalidationConfirmed !== true;
+
 const immediatePreviousChildPreservable =
   selectionPurpose === "STRATEGY1_CHILD" &&
   Boolean(immediatePreviousZone) &&
@@ -2502,9 +2703,24 @@ const immediatePreviousChildPreservable =
   ) &&
   immediatePreviousReleaseState.released !== true;
 
+const recoveredPromotedContactChild =
+  selectionPurpose === "STRATEGY1_CHILD" &&
+  immediatePreviousPromotedContactPreservable !== true &&
+  immediatePreviousChildPreservable !== true
+    ? findRecoverablePromotedContactMemoryChild({
+        memoryStore: strategy1MemoryRead.store,
+        zones: approvedNegotiatedZones,
+        symbol: normalizedSymbol,
+        strategyId: normalizedStrategyId,
+        snapshotTime,
+      })
+    : null;
+
 const recoveredMemoryChild =
   selectionPurpose === "STRATEGY1_CHILD" &&
-  immediatePreviousChildPreservable !== true
+  immediatePreviousPromotedContactPreservable !== true &&
+  immediatePreviousChildPreservable !== true &&
+  recoveredPromotedContactChild == null
     ? findRecoverableDirectionalMemoryChild({
         memoryStore: strategy1MemoryRead.store,
         zones: approvedNegotiatedZones,
@@ -2519,19 +2735,33 @@ const recoveredMemoryChild =
     : null;
 
 const continuityLocationCandidate =
-  immediatePreviousChildPreservable
+  immediatePreviousPromotedContactPreservable
     ? previousLocationCandidate
-    : recoveredMemoryChild?.candidate || null;
+    : immediatePreviousChildPreservable
+    ? previousLocationCandidate
+    : recoveredPromotedContactChild?.candidate ||
+      recoveredMemoryChild?.candidate ||
+      null;
 
 const previousZone =
-  immediatePreviousChildPreservable
+  (
+    immediatePreviousPromotedContactPreservable ||
+    immediatePreviousChildPreservable
+  )
     ? immediatePreviousZone
-    : recoveredMemoryChild?.zone || null;
+    : recoveredPromotedContactChild?.zone ||
+      recoveredMemoryChild?.zone ||
+      null;
 
 const priorMemoryRecord =
-  immediatePreviousChildPreservable
+  (
+    immediatePreviousPromotedContactPreservable ||
+    immediatePreviousChildPreservable
+  )
     ? immediatePriorMemoryRecord
-    : recoveredMemoryChild?.record || null;
+    : recoveredPromotedContactChild?.record ||
+      recoveredMemoryChild?.record ||
+      null;
 
 const previousReleaseState =
   continuityLocationCandidate
@@ -2549,10 +2779,26 @@ const previousReleaseState =
         targetReached: false,
       };
 
+const restoredPromotedContact =
+  Boolean(continuityLocationCandidate) &&
+  Boolean(previousZone) &&
+  continuityLocationCandidate?.contactState ===
+    "NEGOTIATED_LINE_CONTACT" &&
+  continuityLocationCandidate?.chainArmed === true &&
+  continuityLocationCandidate?.promotionReason ===
+    "NEGOTIATED_LINE_TARGET_COMPLETION" &&
+  continuityLocationCandidate?.priorRotationFullyComplete === true &&
+  continuityLocationCandidate?.promotedFromTargetCompletion === true &&
+  continuityLocationCandidate?.invalidationFacts
+    ?.completedCloseInvalidationConfirmed !== true;
+
 const previousChildPreservable =
   Boolean(continuityLocationCandidate) &&
   Boolean(previousZone) &&
-  previousReleaseState.released !== true;
+  (
+    restoredPromotedContact ||
+    previousReleaseState.released !== true
+  );
 
 const rankedStrategy1Zone =
   strategy1EligibleZones[0] ||
@@ -2641,14 +2887,20 @@ const promotionSourceDirection =
   );
 
 const fullTargetCompletion =
-  promotedObservation === true &&
-  promotionReleaseState.releaseReason ===
-    "TARGET_ZONE_REACHED" &&
-  promotionReleaseState.targetMidlineReached === true;
+  (
+    promotedObservation === true &&
+    promotionReleaseState.releaseReason ===
+      "TARGET_ZONE_REACHED" &&
+    promotionReleaseState.targetMidlineReached === true
+  ) ||
+  restoredPromotedContact;
 
 const longToUpperZoneContact =
   fullTargetCompletion === true &&
-  promotionSourceDirection === "LONG";
+  (
+    promotionSourceDirection === "LONG" ||
+    continuityLocationCandidate?.priorRotationDirection === "LONG"
+  );
 
 const contactState =
   fullTargetCompletion
@@ -2665,7 +2917,11 @@ const expectedReversalDirection =
 
 const priorRotationDirection =
   fullTargetCompletion
-    ? promotionSourceDirection
+    ? (
+        continuityLocationCandidate
+          ?.priorRotationDirection ||
+        promotionSourceDirection
+      )
     : null;
 
 const priorRotationCompletionState =
@@ -2695,11 +2951,15 @@ const remainingRunnerExpected =
 
 const completionBoundary =
   fullTargetCompletion
-    ? promotionReleaseState
-        ?.completionBoundary ??
-      toFiniteNumber(
-        promotionSourceCandidate
-          ?.targetZone?.midline
+    ? (
+        continuityLocationCandidate
+          ?.completionBoundary ??
+        promotionReleaseState
+          ?.completionBoundary ??
+        toFiniteNumber(
+          promotionSourceCandidate
+            ?.targetZone?.midline
+        )
       )
     : previousReleaseState
         ?.completionBoundary ??
@@ -2707,17 +2967,25 @@ const completionBoundary =
 
 const completedTargetZoneId =
   fullTargetCompletion
-    ? promotionReleaseState
-        ?.completedTargetZoneId ??
-      previousTargetZoneId
+    ? (
+        continuityLocationCandidate
+          ?.completedTargetZoneId ??
+        promotionReleaseState
+          ?.completedTargetZoneId ??
+        previousTargetZoneId
+      )
     : null;
 
 const completedTargetZone =
   fullTargetCompletion
-    ? promotionReleaseState
-        ?.completedTargetZone ??
-      promotionSourceCandidate?.targetZone ??
-      null
+    ? (
+        continuityLocationCandidate
+          ?.completedTargetZone ??
+        promotionReleaseState
+          ?.completedTargetZone ??
+        promotionSourceCandidate?.targetZone ??
+        null
+      )
     : null;
 
 const provisionalEntryZone =
@@ -2926,7 +3194,9 @@ const candidateId =
   ]);
 
 const active =
-  strategy1Eligible && previousChildPreservable
+  restoredPromotedContact
+    ? true
+    : strategy1Eligible && previousChildPreservable
     ? true
     : selectedZone.distancePoints <=
       safeMonitoringRange;
@@ -2935,7 +3205,10 @@ const status =
   !active
     ? "LOCATION_DETECTED"
     : directionBias === "NEUTRAL"
-    ? promotedObservation
+    ? (
+        promotedObservation ||
+        restoredPromotedContact
+      )
       ? "OBSERVING_PROMOTED_ZONE"
       : "OBSERVING_ZONE_REACTION"
     : selectedZone.distancePoints === 0
@@ -3093,6 +3366,70 @@ const strategyFacts =
       targetZone,
       candidateLifecycleStartTime,
       directionResolvedAt,
+      direction: directionBias,
+      directionState,
+      directionalResolved:
+        ["LONG", "SHORT"].includes(directionBias),
+      contactState,
+      chainArmed,
+      expectedReversalDirection,
+      expectedParticipationDirection:
+        longToUpperZoneContact ? "SHORT" : null,
+      priorCandidateId:
+        fullTargetCompletion
+          ? (
+              continuityLocationCandidate?.priorCandidateId ??
+              promotionSourceCandidate?.candidateId ??
+              null
+            )
+          : null,
+      priorZoneId:
+        fullTargetCompletion
+          ? (
+              continuityLocationCandidate?.priorZoneId ??
+              promotionSourceCandidate?.zoneId ??
+              null
+            )
+          : null,
+      priorRotationDirection,
+      priorRotationCompletionState,
+      priorRotationFullyComplete,
+      remainingRunnerExpected,
+      completionBoundary,
+      completedTargetZoneId,
+      completedTargetZone,
+      promotionReason:
+        fullTargetCompletion
+          ? "NEGOTIATED_LINE_TARGET_COMPLETION"
+          : null,
+      promotedFromTargetCompletion:
+        fullTargetCompletion,
+      targetZoneEntryTouched:
+        previousReleaseState?.targetZoneEntryTouched === true ||
+        fullTargetCompletion,
+      targetMidlineReached:
+        previousReleaseState?.targetMidlineReached === true ||
+        fullTargetCompletion,
+      targetZoneEntryTouchedAt:
+        fullTargetCompletion ||
+        previousReleaseState?.targetZoneEntryTouched === true
+          ? snapshotTime
+          : null,
+      targetMidlineReachedAt:
+        fullTargetCompletion
+          ? snapshotTime
+          : null,
+      promotionTime:
+        fullTargetCompletion
+          ? (
+              continuityLocationCandidate?.promotionTime ||
+              snapshotTime
+            )
+          : null,
+      profitObjectiveReachedAt:
+        fullTargetCompletion
+          ? snapshotTime
+          : null,
     };
 
     const currentLifecycleUpdate = {
@@ -3120,6 +3457,71 @@ const strategyFacts =
 
       objectiveCompletedAt:
         previousReleaseState.objectiveCompleted
+          ? snapshotTime
+          : null,
+
+      contactState,
+      chainArmed,
+      directionBias,
+      directionState,
+      directionalResolved:
+        ["LONG", "SHORT"].includes(directionBias),
+      expectedReversalDirection,
+      expectedParticipationDirection:
+        longToUpperZoneContact ? "SHORT" : null,
+      targetZoneEntryTouched:
+        previousReleaseState?.targetZoneEntryTouched === true ||
+        fullTargetCompletion,
+      targetMidlineReached:
+        previousReleaseState?.targetMidlineReached === true ||
+        fullTargetCompletion,
+      priorRotationCompletionState,
+      priorRotationFullyComplete,
+      remainingRunnerExpected,
+      completionBoundary,
+      completedTargetZoneId,
+      completedTargetZone,
+      priorCandidateId:
+        fullTargetCompletion
+          ? (
+              continuityLocationCandidate?.priorCandidateId ??
+              promotionSourceCandidate?.candidateId ??
+              null
+            )
+          : null,
+      priorZoneId:
+        fullTargetCompletion
+          ? (
+              continuityLocationCandidate?.priorZoneId ??
+              promotionSourceCandidate?.zoneId ??
+              null
+            )
+          : null,
+      priorRotationDirection,
+      promotionReason:
+        fullTargetCompletion
+          ? "NEGOTIATED_LINE_TARGET_COMPLETION"
+          : null,
+      promotedFromTargetCompletion:
+        fullTargetCompletion,
+      targetZoneEntryTouchedAt:
+        fullTargetCompletion ||
+        previousReleaseState?.targetZoneEntryTouched === true
+          ? snapshotTime
+          : null,
+      targetMidlineReachedAt:
+        fullTargetCompletion
+          ? snapshotTime
+          : null,
+      promotionTime:
+        fullTargetCompletion
+          ? (
+              continuityLocationCandidate?.promotionTime ||
+              snapshotTime
+            )
+          : null,
+      profitObjectiveReachedAt:
+        fullTargetCompletion
           ? snapshotTime
           : null,
     };
@@ -3245,6 +3647,8 @@ const strategyFacts =
     contactState,
     chainArmed,
     expectedReversalDirection,
+    expectedParticipationDirection:
+      longToUpperZoneContact ? "SHORT" : null,
     priorRotationDirection,
     priorRotationCompletionState,
     currentObservationDirection,
@@ -3294,6 +3698,39 @@ const strategyFacts =
       false,
     promotedFromTargetCompletion:
       fullTargetCompletion,
+    targetZoneEntryTouchedAt:
+      fullTargetCompletion ||
+      previousReleaseState?.targetZoneEntryTouched === true
+        ? (
+            continuityLocationCandidate
+              ?.targetZoneEntryTouchedAt ||
+            snapshotTime
+          )
+        : null,
+    targetMidlineReachedAt:
+      fullTargetCompletion
+        ? (
+            continuityLocationCandidate
+              ?.targetMidlineReachedAt ||
+            snapshotTime
+          )
+        : null,
+    promotionTime:
+      fullTargetCompletion
+        ? (
+            continuityLocationCandidate
+              ?.promotionTime ||
+            snapshotTime
+          )
+        : null,
+    profitObjectiveReachedAt:
+      fullTargetCompletion
+        ? (
+            continuityLocationCandidate
+              ?.profitObjectiveReachedAt ||
+            snapshotTime
+          )
+        : null,
     priorRotationFullyComplete,
     remainingRunnerExpected,
     completionBoundary,
@@ -3672,6 +4109,10 @@ const strategyFacts =
         ? "ENGINE22_INTERNAL_LEG_DIRECTION_NOT_USED_AS_TRADE_DIRECTION"
         : null,
 
+      recoveredPromotedContactChild
+        ? "ENGINE26_STRATEGY1_PROMOTED_CONTACT_RECOVERED_FROM_MEMORY"
+        : null,
+
       recoveredMemoryChild
         ? "ENGINE26_STRATEGY1_DIRECTIONAL_CHILD_RECOVERED_FROM_MEMORY"
         : null,
@@ -3889,7 +4330,7 @@ export function buildEngine26ReactionHandoff({
 
   const status =
     contactArmed
-      ? "ARMED_WAITING_FOR_REACTION_CONFIRMATION"
+      ? "SHORT_REVERSAL_WATCH"
       : !candidateActive
       ? "WAITING_FOR_ACTIVATION_RANGE"
       : withinActivationRange
@@ -3996,6 +4437,12 @@ export function buildEngine26ReactionHandoff({
         ? "SHORT"
         : candidate.directionBias,
 
+    expectedParticipationDirection:
+      contactArmed
+        ? "SHORT"
+        : candidate?.expectedParticipationDirection ??
+          candidate.directionBias,
+
     setupType:
       candidate.setupType,
 
@@ -4080,7 +4527,9 @@ export function buildEngine26ReactionHandoff({
       candidate.sourceRefs || [],
 
     reasonCodes: [
-      evaluationAuthorized
+      contactArmed
+        ? "ENGINE26_PROMOTED_CONTACT_HANDOFF_RESTORED"
+        : evaluationAuthorized
         ? "ENGINE26_REACTION_HANDOFF_ACTIVE"
         : !withinActivationRange
         ? "WAITING_FOR_ACTIVATION_RANGE"
