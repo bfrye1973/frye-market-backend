@@ -1,13 +1,31 @@
 // services/core/tests/engine26Strategy1DirectionRegression.test.js
 
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   buildEngine26A,
 } from "../logic/engine26/buildEngine26LocationCandidate.js";
 
 const SETUP = "NEGOTIATED_ZONE_ROTATION";
+
+const TEST_MEMORY_DIR = fs.mkdtempSync(
+  path.join(os.tmpdir(), "engine26-direction-regression-memory-")
+);
+const TEST_MEMORY_PATH = path.join(
+  TEST_MEMORY_DIR,
+  "negotiated-zone-memory.json"
+);
+
+after(() => {
+  fs.rmSync(TEST_MEMORY_DIR, {
+    recursive: true,
+    force: true,
+  });
+});
 
 function minuteDownContext() {
   return {
@@ -65,11 +83,11 @@ test(
           completed: true,
         },
       ],
+      memoryFilePath: TEST_MEMORY_PATH,
       persistMemory: false,
     });
 
-    const candidate =
-      result.engine26LocationCandidate;
+    const candidate = result.engine26LocationCandidate;
 
     assert.equal(candidate.setupClass, SETUP);
     assert.equal(candidate.directionBias, "LONG");
@@ -77,10 +95,7 @@ test(
       candidate.directionState,
       "LONG_REVERSAL_DEVELOPING"
     );
-    assert.equal(
-      candidate.ema10Posture.posture,
-      "BULLISH"
-    );
+    assert.equal(candidate.ema10Posture.posture, "BULLISH");
     assert.equal(
       candidate.invalidationFacts
         .completedCloseInvalidationConfirmed,
@@ -89,10 +104,6 @@ test(
     assert.equal(
       candidate.structuralContext.minuteStage,
       "C_COMPLETION_WATCH"
-    );
-    assert.equal(
-      candidate.directionBias,
-      "LONG"
     );
     assert.ok(
       candidate.reasonCodes.includes(
@@ -143,11 +154,11 @@ test(
           completed: true,
         },
       ],
+      memoryFilePath: TEST_MEMORY_PATH,
       persistMemory: false,
     });
 
-    const candidate =
-      result.engine26LocationCandidate;
+    const candidate = result.engine26LocationCandidate;
 
     assert.equal(candidate.setupClass, SETUP);
     assert.equal(candidate.directionBias, "SHORT");
@@ -155,10 +166,7 @@ test(
       candidate.directionState,
       "SHORT_REVERSAL_DEVELOPING"
     );
-    assert.equal(
-      candidate.ema10Posture.posture,
-      "BEARISH"
-    );
+    assert.equal(candidate.ema10Posture.posture, "BEARISH");
   }
 );
 
@@ -203,23 +211,19 @@ test(
           completed: true,
         },
       ],
+      memoryFilePath: TEST_MEMORY_PATH,
       persistMemory: false,
     });
 
-    const candidate =
-      result.engine26LocationCandidate;
+    const candidate = result.engine26LocationCandidate;
 
-    assert.equal(
-      candidate.directionBias,
-      "NEUTRAL"
-    );
+    assert.equal(candidate.directionBias, "NEUTRAL");
     assert.equal(
       candidate.directionState,
       "NEUTRAL_NO_DIRECTIONAL_EDGE"
     );
     assert.equal(
-      candidate.directionalEvidence
-        .directionalConflict,
+      candidate.directionalEvidence.directionalConflict,
       true
     );
   }
