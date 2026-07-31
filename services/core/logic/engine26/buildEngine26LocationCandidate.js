@@ -1317,8 +1317,6 @@ function isRecoverablePromotedContactRecord({
       "NEGOTIATED_LINE_TARGET_COMPLETION" &&
     record?.priorRotationFullyComplete === true &&
     record?.promotedFromTargetCompletion === true &&
-    record?.directionState ===
-      "SHORT_REVERSAL_WATCH" &&
     normalizeDirection(
       record?.directionBias ??
       record?.direction
@@ -1399,9 +1397,13 @@ function findRecoverablePromotedContactMemoryChild({
           tradeDirectionBias: "NEUTRAL",
           preferredDirection: "NEUTRAL",
           directionalResolved: false,
-          directionState: "SHORT_REVERSAL_WATCH",
-          expectedReversalDirection: "SHORT",
-          expectedParticipationDirection: "SHORT",
+          directionState: "NEUTRAL",
+          expectedDirection: null,
+          expectedReactionDirection: null,
+          expectedReversalDirection: null,
+          expectedParticipationDirection: null,
+          expectedReactions: [],
+          reactionExpected: false,
           contactState: "NEGOTIATED_LINE_CONTACT",
           chainArmed: true,
           automaticDirectionFlip: false,
@@ -2666,8 +2668,6 @@ const immediatePreviousPromotedContactPreservable =
     "NEGOTIATED_LINE_TARGET_COMPLETION" &&
   previousLocationCandidate?.priorRotationFullyComplete === true &&
   previousLocationCandidate?.promotedFromTargetCompletion === true &&
-  previousLocationCandidate?.directionState ===
-    "SHORT_REVERSAL_WATCH" &&
   normalizeDirection(
     previousLocationCandidate?.directionBias ??
     previousLocationCandidate?.direction
@@ -2881,7 +2881,7 @@ const promotedContactLifecycle =
   freshTargetMidlineContact ||
   restoredPromotedContact;
 
-const longToUpperZoneContact =
+const priorLongCompletedAtContact =
   promotedContactLifecycle === true &&
   (
     promotionSourceDirection === "LONG" ||
@@ -2896,10 +2896,7 @@ const contactState =
 const chainArmed =
   promotedContactLifecycle === true;
 
-const expectedReversalDirection =
-  longToUpperZoneContact
-    ? "SHORT"
-    : null;
+const expectedReversalDirection = null;
 
 const priorRotationDirection =
   promotedContactLifecycle
@@ -3110,10 +3107,8 @@ const directionBias =
     : structuralDirectionBias;
 
 const directionState =
-  longToUpperZoneContact
-    ? "SHORT_REVERSAL_WATCH"
-    : promotedContactLifecycle
-    ? "OBSERVING_PROMOTED_ZONE"
+  promotedContactLifecycle
+    ? "NEUTRAL"
     : observationOnlyLongWatch
     ? "LONG_REVERSAL_WATCH"
     : strategy1Eligible &&
@@ -3359,8 +3354,7 @@ const strategyFacts =
       contactState,
       chainArmed,
       expectedReversalDirection,
-      expectedParticipationDirection:
-        longToUpperZoneContact ? "SHORT" : null,
+      expectedParticipationDirection: null,
       priorCandidateId:
         promotedContactLifecycle
           ? (
@@ -3449,8 +3443,7 @@ const strategyFacts =
       directionalResolved:
         ["LONG", "SHORT"].includes(directionBias),
       expectedReversalDirection,
-      expectedParticipationDirection:
-        longToUpperZoneContact ? "SHORT" : null,
+      expectedParticipationDirection: null,
       targetZoneEntryTouched:
         previousReleaseState?.targetZoneEntryTouched === true ||
         promotedContactLifecycle,
@@ -3504,8 +3497,32 @@ const strategyFacts =
           : continuityLocationCandidate?.profitObjectiveReachedAt ?? null,
     };
 
+    const memoryStoreForUpdate =
+      promotedContactLifecycle &&
+      memoryRead.store?.records?.[memoryKey]
+        ? {
+            ...memoryRead.store,
+            records: {
+              ...memoryRead.store.records,
+              [memoryKey]: {
+                ...memoryRead.store.records[memoryKey],
+                direction: "NEUTRAL",
+                directionBias: "NEUTRAL",
+                directionalResolved: false,
+                directionState: "NEUTRAL",
+                expectedDirection: null,
+                expectedReactionDirection: null,
+                expectedReversalDirection: null,
+                expectedParticipationDirection: null,
+                expectedReactions: [],
+                reactionExpected: false,
+              },
+            },
+          }
+        : memoryRead.store;
+
     let memoryUpdate = updateNegotiatedZoneMemory({
-      store: memoryRead.store,
+      store: memoryStoreForUpdate,
       memoryKey,
       candidate: memoryCandidate,
       facts: strategyFacts,
@@ -3627,8 +3644,11 @@ const strategyFacts =
     restoredPromotedContact,
     chainArmed,
     expectedReversalDirection,
-    expectedParticipationDirection:
-      longToUpperZoneContact ? "SHORT" : null,
+    expectedDirection: null,
+    expectedReactionDirection: null,
+    expectedParticipationDirection: null,
+    expectedReactions: [],
+    reactionExpected: false,
     priorRotationDirection,
     priorRotationCompletionState,
     currentObservationDirection,
@@ -3724,23 +3744,22 @@ const strategyFacts =
             ...resolvedDirectionalEvidence,
             direction: "NEUTRAL",
             preferredDirection: "NEUTRAL",
-            directionState:
-              longToUpperZoneContact
-                ? "SHORT_REVERSAL_WATCH"
-                : "OBSERVING_PROMOTED_ZONE",
+            directionState: "NEUTRAL",
             evidenceSufficient: false,
             contactState: "NEGOTIATED_LINE_CONTACT",
             chainArmed: true,
-            expectedReversalDirection:
-              longToUpperZoneContact ? "SHORT" : null,
+            expectedDirection: null,
+            expectedReactionDirection: null,
+            expectedReversalDirection: null,
+            expectedParticipationDirection: null,
+            expectedReactions: [],
+            reactionExpected: false,
             reasonCodes: [
               ...(resolvedDirectionalEvidence?.reasonCodes || []),
               "ENGINE26_NEGOTIATED_LINE_CONTACT",
               "ENGINE26_FULL_TARGET_COMPLETION",
               "ENGINE26_CHAIN_ARMED",
-              longToUpperZoneContact
-                ? "ENGINE26_SHORT_REVERSAL_WATCH"
-                : "ENGINE26_PROMOTED_ZONE_OBSERVATION",
+              "ENGINE26_PROMOTED_ZONE_NEUTRAL_RESET",
               "ENGINE26_NO_AUTOMATIC_DIRECTION_FLIP",
             ],
           }
@@ -3904,7 +3923,12 @@ const strategyFacts =
             completedTargetZone,
             contactState,
             chainArmed,
-            expectedReversalDirection,
+            expectedDirection: null,
+            expectedReactionDirection: null,
+            expectedReversalDirection: null,
+            expectedParticipationDirection: null,
+            expectedReactions: [],
+            reactionExpected: false,
             releaseReason:
               promotionReleaseState
                 .releaseReason ?? null,
@@ -3912,9 +3936,7 @@ const strategyFacts =
         : null,
 
     expectedReactions:
-      longToUpperZoneContact
-        ? expectedReactionsForDirection("SHORT")
-        : directionBias === "NEUTRAL"
+      promotedContactLifecycle || directionBias === "NEUTRAL"
         ? []
         : expectedReactionsForDirection(
             directionBias
@@ -4121,10 +4143,10 @@ const strategyFacts =
       promotedContactLifecycle
         ? "ENGINE26_CHAIN_ARMED"
         : null,
-      longToUpperZoneContact
-        ? "ENGINE26_SHORT_REVERSAL_WATCH"
+      promotedContactLifecycle
+        ? "ENGINE26_PROMOTED_ZONE_NEUTRAL_RESET"
         : null,
-      longToUpperZoneContact
+      promotedContactLifecycle
         ? "ENGINE26_NO_AUTOMATIC_DIRECTION_FLIP"
         : null,
     ],
@@ -4278,9 +4300,7 @@ export function buildEngine26ReactionHandoff({
   const contactArmed =
     candidate?.contactState ===
       "NEGOTIATED_LINE_CONTACT" &&
-    candidate?.chainArmed === true &&
-    candidate?.directionState ===
-      "SHORT_REVERSAL_WATCH";
+    candidate?.chainArmed === true;
 
   const longFactsReady =
     direction === "LONG" &&
@@ -4313,7 +4333,7 @@ export function buildEngine26ReactionHandoff({
 
   const status =
     contactArmed
-      ? "SHORT_REVERSAL_WATCH"
+      ? "NEUTRAL_CONTACT_WATCH"
       : !candidateActive
       ? "WAITING_FOR_ACTIVATION_RANGE"
       : withinActivationRange
@@ -4415,16 +4435,20 @@ export function buildEngine26ReactionHandoff({
     ema10Posture:
       candidate.ema10Posture ?? null,
 
+    expectedDirection:
+      contactArmed ? null : candidate.directionBias,
+
     expectedReactionDirection:
-      contactArmed
-        ? "SHORT"
-        : candidate.directionBias,
+      contactArmed ? null : candidate.directionBias,
 
     expectedParticipationDirection:
       contactArmed
-        ? "SHORT"
+        ? null
         : candidate?.expectedParticipationDirection ??
           candidate.directionBias,
+
+    reactionExpected:
+      contactArmed ? false : directionalFactsReady,
 
     setupType:
       candidate.setupType,
@@ -4453,7 +4477,9 @@ export function buildEngine26ReactionHandoff({
     zoneMemorySummary: candidate.zoneMemorySummary ?? null,
 
     expectedReactions:
-      candidate.expectedReactions,
+      contactArmed
+        ? []
+        : candidate.expectedReactions,
 
     zone:
       candidate.location
@@ -4511,7 +4537,7 @@ export function buildEngine26ReactionHandoff({
 
     reasonCodes: [
       contactArmed
-        ? "ENGINE26_PROMOTED_CONTACT_HANDOFF_RESTORED"
+        ? "ENGINE26_PROMOTED_CONTACT_NEUTRAL_HANDOFF"
         : evaluationAuthorized
         ? "ENGINE26_REACTION_HANDOFF_ACTIVE"
         : !withinActivationRange
@@ -4637,9 +4663,12 @@ export function buildEngine26A(
       engine26LocationCandidate?.contactState ?? null,
     chainArmed:
       engine26LocationCandidate?.chainArmed === true,
-    expectedReversalDirection:
-      engine26LocationCandidate
-        ?.expectedReversalDirection ?? null,
+    expectedDirection: null,
+    expectedReactionDirection: null,
+    expectedReversalDirection: null,
+    expectedParticipationDirection: null,
+    expectedReactions: [],
+    reactionExpected: false,
     priorCandidateId:
       engine26LocationCandidate?.priorCandidateId ?? null,
     priorZoneId:
