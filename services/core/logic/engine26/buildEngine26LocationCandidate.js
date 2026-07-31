@@ -1176,8 +1176,13 @@ function findRecoverableDirectionalMemoryChild({
         !record?.invalidatedAt &&
         !record?.retiredAt &&
         !record?.releaseReason &&
-        !record?.targetTouchedAt &&
-        !record?.objectiveCompletedAt;
+        !record?.targetTouchedAt;
+
+      /*
+       * A general favorable 10-point objective is bookkeeping only.
+       * It is not a Strategy 1 lifecycle release and must not prevent
+       * restoration of the active directional owner.
+       */
 
       if (!identityValid || !lifecyclePreservable) {
         return null;
@@ -1221,52 +1226,15 @@ function findRecoverableDirectionalMemoryChild({
         return null;
       }
 
-      const targetLow = toFiniteNumber(
-        record?.targetZone?.low
-      );
-      const targetHigh = toFiniteNumber(
-        record?.targetZone?.high
-      );
-      const price = toFiniteNumber(currentPrice);
-
-      const targetReached =
-        price !== null &&
-        (
-          (
-            direction === "LONG" &&
-            targetLow !== null &&
-            price >= targetLow
-          ) ||
-          (
-            direction === "SHORT" &&
-            targetHigh !== null &&
-            price <= targetHigh
-          )
-        );
-
-      if (targetReached) return null;
-
-      const bearishContinuation =
-        direction === "SHORT" &&
-        price !== null &&
-        price < zone.lo &&
-        (
-          ema10Posture?.posture === "BEARISH" ||
-          ema10Posture?.priceBelowEma10 === true
-        );
-
-      const bullishContinuation =
-        direction === "LONG" &&
-        price !== null &&
-        price > zone.hi &&
-        (
-          ema10Posture?.posture === "BULLISH" ||
-          ema10Posture?.priceAboveEma10 === true
-        );
-
-      if (!bearishContinuation && !bullishContinuation) {
-        return null;
-      }
+      /*
+       * Restore the active directional owner before fresh ranking.
+       *
+       * Current distance, another zone's score, EMA posture, a general
+       * 10-point favorable move, or first target-zone entry are not release
+       * conditions. After restoration, evaluatePreviousChildRelease()
+       * applies the approved completed-close, retirement, partial-profit,
+       * and negotiated-midline completion lifecycle rules.
+       */
 
       return {
         record,
