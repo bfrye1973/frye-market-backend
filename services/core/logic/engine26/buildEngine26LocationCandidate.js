@@ -970,6 +970,23 @@ if (
 
     longReversalWatchFacts,
 
+    bullishAcceptanceObserved:
+      acceptanceAboveZone,
+
+    bearishRejectionObserved:
+      shortReversalEvidence,
+
+    completedFailedAcceptanceObserved:
+      shortFacts?.failedAcceptanceFacts
+        ?.completedFailedAcceptanceObserved === true,
+
+    bearishDisplacement:
+      acceptanceBelowZone,
+
+    reactionEvaluationFactsReady:
+      bullishZoneEvidence ||
+      bearishZoneEvidence,
+
     displacementFacts: {
       bullishDisplacement:
         acceptanceAboveZone,
@@ -2886,29 +2903,30 @@ const promotionSourceDirection =
     promotionSourceCandidate?.direction
   );
 
-const fullTargetCompletion =
-  (
-    promotedObservation === true &&
-    promotionReleaseState.releaseReason ===
-      "TARGET_ZONE_REACHED" &&
-    promotionReleaseState.targetMidlineReached === true
-  ) ||
+const freshTargetMidlineContact =
+  promotedObservation === true &&
+  promotionReleaseState.releaseReason ===
+    "TARGET_ZONE_REACHED" &&
+  promotionReleaseState.targetMidlineReached === true;
+
+const promotedContactLifecycle =
+  freshTargetMidlineContact ||
   restoredPromotedContact;
 
 const longToUpperZoneContact =
-  fullTargetCompletion === true &&
+  promotedContactLifecycle === true &&
   (
     promotionSourceDirection === "LONG" ||
     continuityLocationCandidate?.priorRotationDirection === "LONG"
   );
 
 const contactState =
-  fullTargetCompletion
+  promotedContactLifecycle
     ? "NEGOTIATED_LINE_CONTACT"
     : null;
 
 const chainArmed =
-  fullTargetCompletion === true;
+  promotedContactLifecycle === true;
 
 const expectedReversalDirection =
   longToUpperZoneContact
@@ -2916,7 +2934,7 @@ const expectedReversalDirection =
     : null;
 
 const priorRotationDirection =
-  fullTargetCompletion
+  promotedContactLifecycle
     ? (
         continuityLocationCandidate
           ?.priorRotationDirection ||
@@ -2925,32 +2943,32 @@ const priorRotationDirection =
     : null;
 
 const priorRotationCompletionState =
-  fullTargetCompletion
+  promotedContactLifecycle
     ? "FULL_TARGET_COMPLETION"
     : previousReleaseState
         ?.priorRotationCompletionState ??
       null;
 
 const currentObservationDirection =
-  fullTargetCompletion
+  promotedContactLifecycle
     ? "NEUTRAL"
     : null;
 
 const priorRotationFullyComplete =
-  fullTargetCompletion
+  promotedContactLifecycle
     ? true
     : previousReleaseState
         ?.priorRotationFullyComplete === true;
 
 const remainingRunnerExpected =
-  fullTargetCompletion
+  promotedContactLifecycle
     ? false
     : previousReleaseState
         ?.remainingRunnerExpected ??
       null;
 
 const completionBoundary =
-  fullTargetCompletion
+  promotedContactLifecycle
     ? (
         continuityLocationCandidate
           ?.completionBoundary ??
@@ -2966,7 +2984,7 @@ const completionBoundary =
       null;
 
 const completedTargetZoneId =
-  fullTargetCompletion
+  promotedContactLifecycle
     ? (
         continuityLocationCandidate
           ?.completedTargetZoneId ??
@@ -2977,7 +2995,7 @@ const completedTargetZoneId =
     : null;
 
 const completedTargetZone =
-  fullTargetCompletion
+  promotedContactLifecycle
     ? (
         continuityLocationCandidate
           ?.completedTargetZone ??
@@ -3113,7 +3131,7 @@ const observationOnlyLongWatch =
   "LONG_REVERSAL_WATCH";
 
 const directionBias =
-  fullTargetCompletion
+  promotedContactLifecycle
     ? "NEUTRAL"
     : observationOnlyLongWatch
     ? "NEUTRAL"
@@ -3126,7 +3144,7 @@ const directionBias =
 const directionState =
   longToUpperZoneContact
     ? "SHORT_REVERSAL_WATCH"
-    : fullTargetCompletion
+    : promotedContactLifecycle
     ? "OBSERVING_PROMOTED_ZONE"
     : observationOnlyLongWatch
     ? "LONG_REVERSAL_WATCH"
@@ -3376,7 +3394,7 @@ const strategyFacts =
       expectedParticipationDirection:
         longToUpperZoneContact ? "SHORT" : null,
       priorCandidateId:
-        fullTargetCompletion
+        promotedContactLifecycle
           ? (
               continuityLocationCandidate?.priorCandidateId ??
               promotionSourceCandidate?.candidateId ??
@@ -3384,7 +3402,7 @@ const strategyFacts =
             )
           : null,
       priorZoneId:
-        fullTargetCompletion
+        promotedContactLifecycle
           ? (
               continuityLocationCandidate?.priorZoneId ??
               promotionSourceCandidate?.zoneId ??
@@ -3399,37 +3417,33 @@ const strategyFacts =
       completedTargetZoneId,
       completedTargetZone,
       promotionReason:
-        fullTargetCompletion
+        promotedContactLifecycle
           ? "NEGOTIATED_LINE_TARGET_COMPLETION"
           : null,
       promotedFromTargetCompletion:
-        fullTargetCompletion,
+        promotedContactLifecycle,
       targetZoneEntryTouched:
         previousReleaseState?.targetZoneEntryTouched === true ||
-        fullTargetCompletion,
+        promotedContactLifecycle,
       targetMidlineReached:
         previousReleaseState?.targetMidlineReached === true ||
-        fullTargetCompletion,
+        promotedContactLifecycle,
       targetZoneEntryTouchedAt:
-        fullTargetCompletion ||
-        previousReleaseState?.targetZoneEntryTouched === true
+        freshTargetMidlineContact
           ? snapshotTime
-          : null,
+          : continuityLocationCandidate?.targetZoneEntryTouchedAt ?? null,
       targetMidlineReachedAt:
-        fullTargetCompletion
+        freshTargetMidlineContact
           ? snapshotTime
-          : null,
+          : continuityLocationCandidate?.targetMidlineReachedAt ?? null,
       promotionTime:
-        fullTargetCompletion
-          ? (
-              continuityLocationCandidate?.promotionTime ||
-              snapshotTime
-            )
-          : null,
-      profitObjectiveReachedAt:
-        fullTargetCompletion
+        freshTargetMidlineContact
           ? snapshotTime
-          : null,
+          : continuityLocationCandidate?.promotionTime ?? null,
+      profitObjectiveReachedAt:
+        freshTargetMidlineContact
+          ? snapshotTime
+          : continuityLocationCandidate?.profitObjectiveReachedAt ?? null,
     };
 
     const currentLifecycleUpdate = {
@@ -3471,10 +3485,10 @@ const strategyFacts =
         longToUpperZoneContact ? "SHORT" : null,
       targetZoneEntryTouched:
         previousReleaseState?.targetZoneEntryTouched === true ||
-        fullTargetCompletion,
+        promotedContactLifecycle,
       targetMidlineReached:
         previousReleaseState?.targetMidlineReached === true ||
-        fullTargetCompletion,
+        promotedContactLifecycle,
       priorRotationCompletionState,
       priorRotationFullyComplete,
       remainingRunnerExpected,
@@ -3482,7 +3496,7 @@ const strategyFacts =
       completedTargetZoneId,
       completedTargetZone,
       priorCandidateId:
-        fullTargetCompletion
+        promotedContactLifecycle
           ? (
               continuityLocationCandidate?.priorCandidateId ??
               promotionSourceCandidate?.candidateId ??
@@ -3490,7 +3504,7 @@ const strategyFacts =
             )
           : null,
       priorZoneId:
-        fullTargetCompletion
+        promotedContactLifecycle
           ? (
               continuityLocationCandidate?.priorZoneId ??
               promotionSourceCandidate?.zoneId ??
@@ -3499,31 +3513,27 @@ const strategyFacts =
           : null,
       priorRotationDirection,
       promotionReason:
-        fullTargetCompletion
+        promotedContactLifecycle
           ? "NEGOTIATED_LINE_TARGET_COMPLETION"
           : null,
       promotedFromTargetCompletion:
-        fullTargetCompletion,
+        promotedContactLifecycle,
       targetZoneEntryTouchedAt:
-        fullTargetCompletion ||
-        previousReleaseState?.targetZoneEntryTouched === true
+        freshTargetMidlineContact
           ? snapshotTime
-          : null,
+          : continuityLocationCandidate?.targetZoneEntryTouchedAt ?? null,
       targetMidlineReachedAt:
-        fullTargetCompletion
+        freshTargetMidlineContact
           ? snapshotTime
-          : null,
+          : continuityLocationCandidate?.targetMidlineReachedAt ?? null,
       promotionTime:
-        fullTargetCompletion
-          ? (
-              continuityLocationCandidate?.promotionTime ||
-              snapshotTime
-            )
-          : null,
-      profitObjectiveReachedAt:
-        fullTargetCompletion
+        freshTargetMidlineContact
           ? snapshotTime
-          : null,
+          : continuityLocationCandidate?.promotionTime ?? null,
+      profitObjectiveReachedAt:
+        freshTargetMidlineContact
+          ? snapshotTime
+          : continuityLocationCandidate?.profitObjectiveReachedAt ?? null,
     };
 
     let memoryUpdate = updateNegotiatedZoneMemory({
@@ -3645,6 +3655,8 @@ const strategyFacts =
     candidateLifecycleStartTime,
 
     contactState,
+    freshTargetMidlineContact,
+    restoredPromotedContact,
     chainArmed,
     expectedReversalDirection,
     expectedParticipationDirection:
@@ -3658,11 +3670,11 @@ const strategyFacts =
     targetZoneEntryTouched:
       previousReleaseState
         ?.targetZoneEntryTouched === true ||
-      fullTargetCompletion,
+      promotedContactLifecycle,
     targetMidlineReached:
       previousReleaseState
         ?.targetMidlineReached === true ||
-      fullTargetCompletion,
+      promotedContactLifecycle,
     priorRotationFullyComplete,
     remainingRunnerExpected,
     completionBoundary,
@@ -3675,31 +3687,31 @@ const strategyFacts =
     automaticDirectionFlip: false,
 
     parentCandidateId:
-      fullTargetCompletion
+      promotedContactLifecycle
         ? promotionSourceCandidate?.candidateId ?? null
         : null,
     parentZoneId:
-      fullTargetCompletion
+      promotedContactLifecycle
         ? promotionSourceCandidate?.zoneId ?? null
         : null,
     priorCandidateId:
-      fullTargetCompletion
+      promotedContactLifecycle
         ? promotionSourceCandidate?.candidateId ?? null
         : null,
     priorZoneId:
-      fullTargetCompletion
+      promotedContactLifecycle
         ? promotionSourceCandidate?.zoneId ?? null
         : null,
     promotionReason:
-      fullTargetCompletion
+      promotedContactLifecycle
         ? "NEGOTIATED_LINE_TARGET_COMPLETION"
         : null,
     promotedFromTargetContact:
       false,
     promotedFromTargetCompletion:
-      fullTargetCompletion,
+      promotedContactLifecycle,
     targetZoneEntryTouchedAt:
-      fullTargetCompletion ||
+      promotedContactLifecycle ||
       previousReleaseState?.targetZoneEntryTouched === true
         ? (
             continuityLocationCandidate
@@ -3708,7 +3720,7 @@ const strategyFacts =
           )
         : null,
     targetMidlineReachedAt:
-      fullTargetCompletion
+      promotedContactLifecycle
         ? (
             continuityLocationCandidate
               ?.targetMidlineReachedAt ||
@@ -3716,7 +3728,7 @@ const strategyFacts =
           )
         : null,
     promotionTime:
-      fullTargetCompletion
+      promotedContactLifecycle
         ? (
             continuityLocationCandidate
               ?.promotionTime ||
@@ -3724,7 +3736,7 @@ const strategyFacts =
           )
         : null,
     profitObjectiveReachedAt:
-      fullTargetCompletion
+      promotedContactLifecycle
         ? (
             continuityLocationCandidate
               ?.profitObjectiveReachedAt ||
@@ -3739,7 +3751,7 @@ const strategyFacts =
     ema20RunnerEnabled: false,
 
     directionalEvidence:
-      fullTargetCompletion
+      promotedContactLifecycle
         ? {
             ...resolvedDirectionalEvidence,
             direction: "NEUTRAL",
@@ -3916,7 +3928,7 @@ const strategyFacts =
                 .releaseReason ?? null,
             promotedFromTargetContact: false,
             promotedFromTargetCompletion:
-              fullTargetCompletion,
+              promotedContactLifecycle,
             priorRotationFullyComplete,
             remainingRunnerExpected,
             completionBoundary,
@@ -4129,13 +4141,16 @@ const strategyFacts =
         ? "ENGINE26_STRATEGY1_TARGET_APPROACH_COMPLETION_WATCH"
         : null,
 
-      fullTargetCompletion
+      promotedContactLifecycle
         ? "ENGINE26_NEGOTIATED_LINE_CONTACT"
         : null,
-      fullTargetCompletion
+      freshTargetMidlineContact
         ? "ENGINE26_FULL_TARGET_COMPLETION"
         : null,
-      fullTargetCompletion
+      restoredPromotedContact
+        ? "ENGINE26_PROMOTED_CONTACT_RESTORED_FROM_MEMORY"
+        : null,
+      promotedContactLifecycle
         ? "ENGINE26_CHAIN_ARMED"
         : null,
       longToUpperZoneContact
