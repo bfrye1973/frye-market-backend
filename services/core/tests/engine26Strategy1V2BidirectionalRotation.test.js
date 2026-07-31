@@ -1523,3 +1523,487 @@ test(
     );
   }
 );
+
+test(
+  "promoted negotiated-line contact persists and restores the same armed identity after price moves away",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-promoted-contact-durable-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const priorLong = buildAtPrice({
+        currentPrice: 7445.75,
+        snapshotTime:
+          "2026-07-30T14:00:00.000Z",
+        bars10m: longLowerFactsBars(),
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(priorLong.directionBias, "LONG");
+      assert.ok(priorLong.targetZone);
+
+      const contactSnapshot = buildAtPrice({
+        currentPrice: priorLong.targetZone.midline,
+        previousLocationCandidate: priorLong,
+        snapshotTime:
+          "2026-07-30T14:10:00.000Z",
+        bars10m: [],
+        ema10Posture: null,
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      });
+
+      const promoted =
+        contactSnapshot.engine26LocationCandidate;
+
+      assert.equal(
+        promoted.contactState,
+        "NEGOTIATED_LINE_CONTACT"
+      );
+      assert.equal(promoted.chainArmed, true);
+      assert.equal(promoted.direction, "NEUTRAL");
+      assert.equal(promoted.directionBias, "NEUTRAL");
+      assert.equal(promoted.directionalResolved, false);
+      assert.equal(
+        promoted.directionState,
+        "SHORT_REVERSAL_WATCH"
+      );
+      assert.equal(
+        promoted.expectedReversalDirection,
+        "SHORT"
+      );
+      assert.equal(
+        promoted.expectedParticipationDirection,
+        "SHORT"
+      );
+      assert.equal(
+        promoted.priorRotationFullyComplete,
+        true
+      );
+      assert.equal(
+        promoted.promotionReason,
+        "NEGOTIATED_LINE_TARGET_COMPLETION"
+      );
+
+      const persisted = JSON.parse(
+        fs.readFileSync(memoryFilePath, "utf8")
+      );
+
+      const promotedMemoryKey =
+        buildStrategy1MemoryKey({
+          laneId: "minute",
+          symbol: "ES",
+          strategyId: "intraday_scalp@10m",
+          zoneId: promoted.zoneId,
+        });
+
+      const promotedRecord =
+        persisted.records[promotedMemoryKey];
+
+      assert.ok(promotedRecord);
+      assert.equal(
+        promotedRecord.currentCandidateId,
+        promoted.candidateId
+      );
+      assert.equal(
+        promotedRecord.contactState,
+        "NEGOTIATED_LINE_CONTACT"
+      );
+      assert.equal(promotedRecord.chainArmed, true);
+      assert.equal(promotedRecord.direction, "NEUTRAL");
+      assert.equal(promotedRecord.directionBias, "NEUTRAL");
+      assert.equal(
+        promotedRecord.directionalResolved,
+        false
+      );
+      assert.equal(
+        promotedRecord.directionState,
+        "SHORT_REVERSAL_WATCH"
+      );
+      assert.equal(
+        promotedRecord.expectedReversalDirection,
+        "SHORT"
+      );
+      assert.equal(
+        promotedRecord.expectedParticipationDirection,
+        "SHORT"
+      );
+      assert.equal(
+        promotedRecord.priorCandidateId,
+        priorLong.candidateId
+      );
+      assert.equal(
+        promotedRecord.priorZoneId,
+        priorLong.zoneId
+      );
+      assert.equal(
+        promotedRecord.priorRotationDirection,
+        "LONG"
+      );
+      assert.equal(
+        promotedRecord.priorRotationCompletionState,
+        "FULL_TARGET_COMPLETION"
+      );
+      assert.equal(
+        promotedRecord.priorRotationFullyComplete,
+        true
+      );
+      assert.equal(
+        promotedRecord.remainingRunnerExpected,
+        false
+      );
+      assert.equal(
+        promotedRecord.promotionReason,
+        "NEGOTIATED_LINE_TARGET_COMPLETION"
+      );
+      assert.equal(
+        promotedRecord.promotedFromTargetCompletion,
+        true
+      );
+      assert.ok(promotedRecord.targetZoneEntryTouchedAt);
+      assert.ok(promotedRecord.targetMidlineReachedAt);
+      assert.ok(promotedRecord.promotionTime);
+      assert.ok(promotedRecord.profitObjectiveReachedAt);
+
+      const waitingSnapshotCandidate = {
+        active: false,
+        status: "WAITING_FOR_LOCATION",
+        laneId: "minute",
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        candidateId: null,
+        zoneId: null,
+        directionBias: "NEUTRAL",
+        direction: "NEUTRAL",
+        setupClass: null,
+        identitySetupKey: null,
+        candidateIdentityVersion: null,
+      };
+
+      const restoredSnapshot = buildAtPrice({
+        currentPrice: 7470,
+        previousLocationCandidate:
+          waitingSnapshotCandidate,
+        snapshotTime:
+          "2026-07-30T14:20:00.000Z",
+        bars10m: [],
+        ema10Posture: "BEARISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      });
+
+      const restored =
+        restoredSnapshot.engine26LocationCandidate;
+
+      const reactionHandoff =
+        restoredSnapshot.engine26ReactionHandoff;
+
+      assert.equal(
+        restored.candidateId,
+        promoted.candidateId
+      );
+      assert.equal(restored.zoneId, promoted.zoneId);
+      assert.equal(restored.active, true);
+      assert.equal(restored.direction, "NEUTRAL");
+      assert.equal(restored.directionBias, "NEUTRAL");
+      assert.equal(restored.directionalResolved, false);
+      assert.equal(
+        restored.directionState,
+        "SHORT_REVERSAL_WATCH"
+      );
+      assert.equal(
+        restored.contactState,
+        "NEGOTIATED_LINE_CONTACT"
+      );
+      assert.equal(restored.chainArmed, true);
+      assert.equal(
+        restored.expectedReversalDirection,
+        "SHORT"
+      );
+      assert.equal(
+        restored.expectedParticipationDirection,
+        "SHORT"
+      );
+      assert.equal(restored.automaticDirectionFlip, false);
+      assert.equal(restored.shortConfirmed, false);
+      assert.ok(
+        restored.reasonCodes.includes(
+          "ENGINE26_STRATEGY1_PROMOTED_CONTACT_RECOVERED_FROM_MEMORY"
+        )
+      );
+
+      assert.equal(
+        reactionHandoff.candidateId,
+        promoted.candidateId
+      );
+      assert.equal(
+        reactionHandoff.zoneId,
+        promoted.zoneId
+      );
+      assert.equal(reactionHandoff.active, true);
+      assert.equal(reactionHandoff.armed, true);
+      assert.equal(reactionHandoff.chainArmed, true);
+      assert.equal(
+        reactionHandoff.status,
+        "SHORT_REVERSAL_WATCH"
+      );
+      assert.equal(
+        reactionHandoff.direction,
+        "NEUTRAL"
+      );
+      assert.equal(
+        reactionHandoff.directionalResolved,
+        false
+      );
+      assert.equal(
+        reactionHandoff.directionState,
+        "SHORT_REVERSAL_WATCH"
+      );
+      assert.equal(
+        reactionHandoff.expectedReactionDirection,
+        "SHORT"
+      );
+      assert.equal(
+        reactionHandoff.expectedParticipationDirection,
+        "SHORT"
+      );
+      assert.equal(
+        reactionHandoff.contactState,
+        "NEGOTIATED_LINE_CONTACT"
+      );
+      assert.equal(
+        reactionHandoff.authorizeEngine3Evaluation,
+        true
+      );
+      assert.equal(
+        reactionHandoff.reactionConfirmed,
+        false
+      );
+      assert.notEqual(
+        reactionHandoff.status,
+        "WAITING_FOR_ACTIVATION_RANGE"
+      );
+
+      assert.equal(
+        restoredSnapshot.engine26GeometryHandoff
+          .directionalResolved,
+        false
+      );
+      assert.equal(
+        restoredSnapshot.engine26GeometryHandoff
+          .geometryReady,
+        false
+      );
+      assert.equal(
+        restoredSnapshot.engine26GeometryHandoff
+          .geometryFeasible,
+        false
+      );
+      assert.equal(restored.noPermissionCreated, true);
+      assert.equal(restored.noExecution, true);
+
+      const persistedAfterRestore = JSON.parse(
+        fs.readFileSync(memoryFilePath, "utf8")
+      );
+
+      const restoredRecord =
+        persistedAfterRestore.records[
+          promotedMemoryKey
+        ];
+
+      assert.equal(
+        restoredRecord.contactState,
+        "NEGOTIATED_LINE_CONTACT"
+      );
+      assert.equal(restoredRecord.chainArmed, true);
+      assert.equal(
+        restoredRecord.directionState,
+        "SHORT_REVERSAL_WATCH"
+      );
+      assert.equal(
+        restoredRecord.priorRotationCompletionState,
+        "FULL_TARGET_COMPLETION"
+      );
+      assert.equal(
+        restoredRecord.priorRotationFullyComplete,
+        true
+      );
+      assert.equal(
+        restoredRecord.promotedFromTargetCompletion,
+        true
+      );
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
+
+test(
+  "completed-close invalidation prevents promoted contact restoration",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-promoted-contact-invalidated-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const priorLong = buildAtPrice({
+        currentPrice: 7445.75,
+        snapshotTime:
+          "2026-07-30T15:00:00.000Z",
+        bars10m: longLowerFactsBars(),
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const promoted = buildAtPrice({
+        currentPrice: priorLong.targetZone.midline,
+        previousLocationCandidate: priorLong,
+        snapshotTime:
+          "2026-07-30T15:10:00.000Z",
+        bars10m: [],
+        ema10Posture: null,
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const store = JSON.parse(
+        fs.readFileSync(memoryFilePath, "utf8")
+      );
+
+      const promotedMemoryKey =
+        buildStrategy1MemoryKey({
+          laneId: "minute",
+          symbol: "ES",
+          strategyId: "intraday_scalp@10m",
+          zoneId: promoted.zoneId,
+        });
+
+      store.records[
+        promotedMemoryKey
+      ].lifecycleStatus = "INVALIDATED";
+
+      store.records[
+        promotedMemoryKey
+      ].invalidatedAt =
+        "2026-07-30T15:15:00.000Z";
+
+      store.records[
+        promotedMemoryKey
+      ].invalidationFacts = {
+        ...(store.records[promotedMemoryKey]
+          .invalidationFacts || {}),
+        completedCloseInvalidationConfirmed:
+          true,
+        invalidationTime:
+          "2026-07-30T15:15:00.000Z",
+      };
+
+      fs.writeFileSync(
+        memoryFilePath,
+        `${JSON.stringify(store, null, 2)}\n`,
+        "utf8"
+      );
+
+      const result = buildAtPrice({
+        currentPrice: 7470,
+        previousLocationCandidate: {
+          active: false,
+          status: "WAITING_FOR_LOCATION",
+        },
+        snapshotTime:
+          "2026-07-30T15:20:00.000Z",
+        bars10m: [],
+        ema10Posture: "BEARISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: false,
+      });
+
+      assert.notEqual(
+        result.engine26LocationCandidate.candidateId,
+        promoted.candidateId
+      );
+      assert.equal(
+        result.engine26LocationCandidate.reasonCodes
+          ?.includes(
+            "ENGINE26_STRATEGY1_PROMOTED_CONTACT_RECOVERED_FROM_MEMORY"
+          ) || false,
+        false
+      );
+      assert.equal(
+        result.engine26ReactionHandoff
+          .authorizeEngine3Evaluation,
+        false
+      );
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
