@@ -2122,3 +2122,229 @@ test(
     }
   }
 );
+
+test(
+  "active LONG memory owner survives a favorable 10-point move and a nearer higher-ranked upper zone",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-active-long-owner-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const activeLong = buildAtPrice({
+        currentPrice: 7445.75,
+        snapshotTime:
+          "2026-07-31T14:00:00.000Z",
+        bars10m: longLowerFactsBars(),
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(activeLong.directionBias, "LONG");
+      assert.equal(activeLong.entryZone.low, 7433.75);
+      assert.equal(activeLong.entryZone.high, 7457.5);
+      assert.equal(activeLong.targetZone.low, 7504);
+      assert.equal(activeLong.targetZone.high, 7518.25);
+
+      const waitingSnapshotCandidate = {
+        active: false,
+        status: "WAITING_FOR_LOCATION",
+        laneId: "minute",
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        candidateId: null,
+        zoneId: null,
+        directionBias: "NEUTRAL",
+        direction: "NEUTRAL",
+      };
+
+      /*
+       * 7490 is more than 10 points above the 7445.75 entry midpoint.
+       * It is also much nearer the upper negotiated zone, but it has not
+       * entered the 7504.00 target boundary.
+       */
+      const rebuilt = buildAtPrice({
+        currentPrice: 7490,
+        previousLocationCandidate:
+          waitingSnapshotCandidate,
+        snapshotTime:
+          "2026-07-31T14:10:00.000Z",
+        bars10m: [],
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(rebuilt.candidateId, activeLong.candidateId);
+      assert.equal(rebuilt.zoneId, activeLong.zoneId);
+      assert.equal(rebuilt.directionBias, "LONG");
+      assert.deepEqual(rebuilt.entryZone, activeLong.entryZone);
+      assert.deepEqual(rebuilt.targetZone, activeLong.targetZone);
+      assert.equal(rebuilt.location.lo, 7433.75);
+      assert.equal(rebuilt.location.hi, 7457.5);
+      assert.equal(rebuilt.location.relation, "ABOVE_ZONE");
+      assert.equal(rebuilt.childPreservation.recoveredFromMemory, true);
+      assert.ok(
+        rebuilt.reasonCodes.includes(
+          "ENGINE26_STRATEGY1_DIRECTIONAL_CHILD_RECOVERED_FROM_MEMORY"
+        )
+      );
+      assert.ok(
+        rebuilt.childPreservation.nextRankedAlternativeZoneId
+      );
+      assert.notEqual(
+        rebuilt.childPreservation.nextRankedAlternativeZoneId,
+        rebuilt.zoneId
+      );
+      assert.equal(rebuilt.contactState, null);
+      assert.equal(rebuilt.priorRotationFullyComplete, false);
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
+
+test(
+  "active SHORT memory owner survives a favorable 10-point move and a nearer higher-ranked lower zone",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-active-short-owner-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const activeShort = buildAtPrice({
+        currentPrice: 7502,
+        snapshotTime:
+          "2026-07-31T15:00:00.000Z",
+        bars10m: shortUpperFactsBars(),
+        ema10Posture: "BEARISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(activeShort.directionBias, "SHORT");
+      assert.equal(activeShort.entryZone.low, 7504);
+      assert.equal(activeShort.entryZone.high, 7518.25);
+      assert.equal(activeShort.targetZone.low, 7433.75);
+      assert.equal(activeShort.targetZone.high, 7457.5);
+
+      const waitingSnapshotCandidate = {
+        active: false,
+        status: "WAITING_FOR_LOCATION",
+        laneId: "minute",
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        candidateId: null,
+        zoneId: null,
+        directionBias: "NEUTRAL",
+        direction: "NEUTRAL",
+      };
+
+      /*
+       * 7475 is more than 10 points below the 7511.25 entry midpoint.
+       * It is nearer the lower negotiated zone, but it has not entered the
+       * 7457.50 target boundary.
+       */
+      const rebuilt = buildAtPrice({
+        currentPrice: 7475,
+        previousLocationCandidate:
+          waitingSnapshotCandidate,
+        snapshotTime:
+          "2026-07-31T15:10:00.000Z",
+        bars10m: [],
+        ema10Posture: "BEARISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(rebuilt.candidateId, activeShort.candidateId);
+      assert.equal(rebuilt.zoneId, activeShort.zoneId);
+      assert.equal(rebuilt.directionBias, "SHORT");
+      assert.deepEqual(rebuilt.entryZone, activeShort.entryZone);
+      assert.deepEqual(rebuilt.targetZone, activeShort.targetZone);
+      assert.equal(rebuilt.location.lo, 7504);
+      assert.equal(rebuilt.location.hi, 7518.25);
+      assert.equal(rebuilt.location.relation, "BELOW_ZONE");
+      assert.equal(rebuilt.childPreservation.recoveredFromMemory, true);
+      assert.ok(
+        rebuilt.reasonCodes.includes(
+          "ENGINE26_STRATEGY1_DIRECTIONAL_CHILD_RECOVERED_FROM_MEMORY"
+        )
+      );
+      assert.ok(
+        rebuilt.childPreservation.nextRankedAlternativeZoneId
+      );
+      assert.notEqual(
+        rebuilt.childPreservation.nextRankedAlternativeZoneId,
+        rebuilt.zoneId
+      );
+      assert.equal(rebuilt.contactState, null);
+      assert.equal(rebuilt.priorRotationFullyComplete, false);
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
