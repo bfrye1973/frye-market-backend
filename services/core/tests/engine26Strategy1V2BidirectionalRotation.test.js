@@ -463,9 +463,9 @@ test(
 );
 
 test(
-  "upper-zone acceptance plus bullish EMA10 resolves LONG continuation",
+  "upper-zone bullish acceptance and EMA10 context remain published without Engine 26 confirming LONG",
   () => {
-    const neutralUpper = buildAtPrice({
+    const neutralUpperResult = buildAtPrice({
       currentPrice: 7511.25,
       previousLocationCandidate:
         buildAtPrice({
@@ -473,9 +473,12 @@ test(
           bars10m: longLowerFactsBars(),
           ema10Posture: "BULLISH",
         }).engine26LocationCandidate,
-    }).engine26LocationCandidate;
+    });
 
-    const continuation = buildAtPrice({
+    const neutralUpper =
+      neutralUpperResult.engine26LocationCandidate;
+
+    const continuationResult = buildAtPrice({
       currentPrice: 7522,
       previousLocationCandidate: neutralUpper,
       ema10Posture: {
@@ -493,23 +496,63 @@ test(
           completed: true,
         },
       ],
-    }).engine26LocationCandidate;
+    });
 
-    assert.equal(
-      continuation.directionBias,
-      "LONG"
-    );
+    const continuation =
+      continuationResult.engine26LocationCandidate;
+    const reactionHandoff =
+      continuationResult.engine26ReactionHandoff;
+
+    assert.equal(continuation.candidateId, neutralUpper.candidateId);
+    assert.equal(continuation.zoneId, neutralUpper.zoneId);
+    assert.equal(continuation.directionBias, "NEUTRAL");
+    assert.equal(continuation.direction, "NEUTRAL");
+    assert.equal(continuation.directionalResolved, false);
     assert.equal(
       continuation.directionState,
-      "LONG_CONTINUATION_DEVELOPING"
+      "SHORT_REVERSAL_WATCH"
     );
+    assert.equal(
+      continuation.contactState,
+      "NEGOTIATED_LINE_CONTACT"
+    );
+    assert.equal(continuation.chainArmed, true);
+    assert.equal(continuation.automaticDirectionFlip, false);
+    assert.equal(
+      continuation.directionalEvidence
+        .bullishAcceptanceObserved,
+      true
+    );
+    assert.equal(
+      continuation.directionalEvidence
+        .ema10Posture.posture,
+      "BULLISH"
+    );
+    assert.equal(
+      continuation.directionalEvidence
+        .displacementFacts.bullishDisplacement,
+      true
+    );
+    assert.equal(
+      continuation.directionalEvidence
+        .reactionEvaluationFactsReady,
+      true
+    );
+    assert.equal(reactionHandoff.active, true);
+    assert.equal(reactionHandoff.armed, true);
+    assert.equal(reactionHandoff.chainArmed, true);
+    assert.equal(
+      reactionHandoff.authorizeEngine3Evaluation,
+      true
+    );
+    assert.equal(reactionHandoff.reactionConfirmed, false);
   }
 );
 
 test(
-  "upper-zone rejection plus bearish EMA10 resolves SHORT reversal",
+  "upper-zone bearish rejection and EMA10 context remain published without Engine 26 confirming SHORT",
   () => {
-    const neutralUpper = buildAtPrice({
+    const neutralUpperResult = buildAtPrice({
       currentPrice: 7511.25,
       previousLocationCandidate:
         buildAtPrice({
@@ -517,9 +560,12 @@ test(
           bars10m: longLowerFactsBars(),
           ema10Posture: "BULLISH",
         }).engine26LocationCandidate,
-    }).engine26LocationCandidate;
+    });
 
-    const reversal = buildAtPrice({
+    const neutralUpper =
+      neutralUpperResult.engine26LocationCandidate;
+
+    const reversalResult = buildAtPrice({
       currentPrice: 7502,
       previousLocationCandidate: neutralUpper,
       ema10Posture: {
@@ -528,16 +574,69 @@ test(
         currentPrice: 7502,
       },
       bars10m: shortUpperFactsBars(),
-    }).engine26LocationCandidate;
+    });
 
+    const reversal =
+      reversalResult.engine26LocationCandidate;
+    const reactionHandoff =
+      reversalResult.engine26ReactionHandoff;
+
+    assert.equal(reversal.candidateId, neutralUpper.candidateId);
+    assert.equal(reversal.zoneId, neutralUpper.zoneId);
+    assert.equal(reversal.directionBias, "NEUTRAL");
+    assert.equal(reversal.direction, "NEUTRAL");
+    assert.equal(reversal.directionalResolved, false);
     assert.equal(
-      reversal.directionBias,
+      reversal.directionState,
+      "SHORT_REVERSAL_WATCH"
+    );
+    assert.equal(
+      reversal.contactState,
+      "NEGOTIATED_LINE_CONTACT"
+    );
+    assert.equal(reversal.chainArmed, true);
+    assert.equal(reversal.automaticDirectionFlip, false);
+    assert.equal(
+      reversal.directionalEvidence
+        .bearishRejectionObserved,
+      true
+    );
+    assert.equal(
+      reversal.directionalEvidence
+        .completedFailedAcceptanceObserved,
+      true
+    );
+    assert.equal(
+      reversal.directionalEvidence
+        .bearishDisplacement,
+      true
+    );
+    assert.equal(
+      reversal.directionalEvidence
+        .ema10Posture.posture,
+      "BEARISH"
+    );
+    assert.equal(
+      reversal.directionalEvidence
+        .reactionEvaluationFactsReady,
+      true
+    );
+    assert.equal(
+      reversal.expectedReversalDirection,
+      "SHORT"
+    );
+    assert.equal(reactionHandoff.active, true);
+    assert.equal(reactionHandoff.armed, true);
+    assert.equal(reactionHandoff.chainArmed, true);
+    assert.equal(
+      reactionHandoff.expectedReactionDirection,
       "SHORT"
     );
     assert.equal(
-      reversal.directionState,
-      "SHORT_REVERSAL_DEVELOPING"
+      reactionHandoff.authorizeEngine3Evaluation,
+      true
     );
+    assert.equal(reactionHandoff.reactionConfirmed, false);
   }
 );
 
@@ -1755,6 +1854,22 @@ test(
       );
       assert.equal(restored.automaticDirectionFlip, false);
       assert.equal(restored.shortConfirmed, false);
+      assert.equal(
+        restored.freshTargetMidlineContact,
+        false
+      );
+      assert.equal(
+        restored.restoredPromotedContact,
+        true
+      );
+      assert.equal(
+        restored.targetMidlineReachedAt,
+        promoted.targetMidlineReachedAt
+      );
+      assert.equal(
+        restored.promotionTime,
+        promoted.promotionTime
+      );
       assert.ok(
         restored.reasonCodes.includes(
           "ENGINE26_STRATEGY1_PROMOTED_CONTACT_RECOVERED_FROM_MEMORY"
