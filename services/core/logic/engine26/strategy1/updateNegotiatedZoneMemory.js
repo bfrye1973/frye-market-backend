@@ -357,6 +357,60 @@ function mergeLifecycleFacts(previous = {}, current = {}) {
   };
 }
 
+const CONTACT_STATE_RANK = Object.freeze({
+  NO_CONTACT: 0,
+  TARGET_ZONE_ENTRY: 1,
+  NEGOTIATED_LINE_CONTACT: 2,
+});
+
+const ROTATION_COMPLETION_RANK = Object.freeze({
+  ACTIVE_ROTATION: 0,
+  PARTIAL_PROFIT_TAKING: 1,
+  FULL_TARGET_COMPLETION: 2,
+});
+
+function normalizeLifecycleText(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function mergeRankedLifecycleValue({
+  previous,
+  current,
+  rankMap,
+  fallback = null,
+}) {
+  const previousKey = normalizeLifecycleText(previous);
+  const currentKey = normalizeLifecycleText(current);
+
+  const previousRank =
+    Object.prototype.hasOwnProperty.call(rankMap, previousKey)
+      ? rankMap[previousKey]
+      : -1;
+
+  const currentRank =
+    Object.prototype.hasOwnProperty.call(rankMap, currentKey)
+      ? rankMap[currentKey]
+      : -1;
+
+  if (currentRank > previousRank) {
+    return current || fallback;
+  }
+
+  if (previousRank >= 0) {
+    return previous || fallback;
+  }
+
+  return firstNonNull(current, previous, fallback);
+}
+
+function preserveEstablishedLifecycleValue(previous, current) {
+  return firstNonNull(previous, current);
+}
+
+function preserveEstablishedObject(previous, current) {
+  return clone(previous) || clone(current) || null;
+}
+
 export function updateNegotiatedZoneMemory({
   store,
   memoryKey,
@@ -406,10 +460,18 @@ export function updateNegotiatedZoneMemory({
     strategyId: candidate?.strategyId || null,
     zoneId: candidate?.zoneId || null,
     direction:
-      candidate?.directionBias ??
-      candidate?.direction ??
-      previous?.direction ??
-      null,
+      (
+        previous?.contactState === "NEGOTIATED_LINE_CONTACT" ||
+        lifecycleUpdate?.contactState === "NEGOTIATED_LINE_CONTACT" ||
+        candidate?.contactState === "NEGOTIATED_LINE_CONTACT"
+      )
+        ? "NEUTRAL"
+        : (
+            candidate?.directionBias ??
+            candidate?.direction ??
+            previous?.direction ??
+            null
+          ),
     setupClass:
       candidate?.setupClass ??
       previous?.setupClass ??
@@ -437,6 +499,204 @@ export function updateNegotiatedZoneMemory({
       candidate?.candidateIdentityVersion ||
       previous?.candidateIdentityVersion ||
       null,
+
+    candidateLifecycleStartTime:
+      candidate?.candidateLifecycleStartTime ||
+      previous?.candidateLifecycleStartTime ||
+      snapshotTime,
+
+    directionResolvedAt:
+      candidate?.directionResolvedAt ||
+      previous?.directionResolvedAt ||
+      null,
+
+    contactState:
+      mergeRankedLifecycleValue({
+        previous: previous?.contactState,
+        current:
+          lifecycleUpdate?.contactState ??
+          candidate?.contactState,
+        rankMap: CONTACT_STATE_RANK,
+        fallback: null,
+      }),
+
+    chainArmed:
+      mergeBooleanTrue(
+        previous?.chainArmed,
+        lifecycleUpdate?.chainArmed ??
+          candidate?.chainArmed
+      ),
+
+    directionBias:
+      firstNonNull(
+        lifecycleUpdate?.directionBias,
+        candidate?.directionBias,
+        previous?.directionBias,
+        candidate?.direction,
+        previous?.direction
+      ),
+
+    directionalResolved:
+      previous?.contactState === "NEGOTIATED_LINE_CONTACT" ||
+      lifecycleUpdate?.contactState === "NEGOTIATED_LINE_CONTACT" ||
+      candidate?.contactState === "NEGOTIATED_LINE_CONTACT"
+        ? false
+        : (
+            lifecycleUpdate?.directionalResolved ??
+            candidate?.directionalResolved ??
+            previous?.directionalResolved ??
+            false
+          ),
+
+    directionState:
+      preserveEstablishedLifecycleValue(
+        previous?.directionState,
+        lifecycleUpdate?.directionState ??
+          candidate?.directionState
+      ),
+
+    expectedReversalDirection:
+      preserveEstablishedLifecycleValue(
+        previous?.expectedReversalDirection,
+        lifecycleUpdate?.expectedReversalDirection ??
+          candidate?.expectedReversalDirection
+      ),
+
+    expectedParticipationDirection:
+      preserveEstablishedLifecycleValue(
+        previous?.expectedParticipationDirection,
+        lifecycleUpdate?.expectedParticipationDirection ??
+          candidate?.expectedParticipationDirection
+      ),
+
+    targetZoneEntryTouched:
+      mergeBooleanTrue(
+        previous?.targetZoneEntryTouched,
+        lifecycleUpdate?.targetZoneEntryTouched ??
+          candidate?.targetZoneEntryTouched
+      ),
+
+    targetMidlineReached:
+      mergeBooleanTrue(
+        previous?.targetMidlineReached,
+        lifecycleUpdate?.targetMidlineReached ??
+          candidate?.targetMidlineReached
+      ),
+
+    priorRotationCompletionState:
+      mergeRankedLifecycleValue({
+        previous:
+          previous?.priorRotationCompletionState,
+        current:
+          lifecycleUpdate?.priorRotationCompletionState ??
+          candidate?.priorRotationCompletionState,
+        rankMap: ROTATION_COMPLETION_RANK,
+        fallback: null,
+      }),
+
+    priorRotationFullyComplete:
+      mergeBooleanTrue(
+        previous?.priorRotationFullyComplete,
+        lifecycleUpdate?.priorRotationFullyComplete ??
+          candidate?.priorRotationFullyComplete
+      ),
+
+    remainingRunnerExpected:
+      (
+        previous?.priorRotationFullyComplete === true ||
+        lifecycleUpdate?.priorRotationFullyComplete === true ||
+        candidate?.priorRotationFullyComplete === true
+      )
+        ? false
+        : firstNonNull(
+            lifecycleUpdate?.remainingRunnerExpected,
+            candidate?.remainingRunnerExpected,
+            previous?.remainingRunnerExpected
+          ),
+
+    completionBoundary:
+      preserveEstablishedLifecycleValue(
+        previous?.completionBoundary,
+        lifecycleUpdate?.completionBoundary ??
+          candidate?.completionBoundary
+      ),
+
+    completedTargetZoneId:
+      preserveEstablishedLifecycleValue(
+        previous?.completedTargetZoneId,
+        lifecycleUpdate?.completedTargetZoneId ??
+          candidate?.completedTargetZoneId
+      ),
+
+    completedTargetZone:
+      preserveEstablishedObject(
+        previous?.completedTargetZone,
+        lifecycleUpdate?.completedTargetZone ??
+          candidate?.completedTargetZone
+      ),
+
+    priorCandidateId:
+      preserveEstablishedLifecycleValue(
+        previous?.priorCandidateId,
+        lifecycleUpdate?.priorCandidateId ??
+          candidate?.priorCandidateId
+      ),
+
+    priorZoneId:
+      preserveEstablishedLifecycleValue(
+        previous?.priorZoneId,
+        lifecycleUpdate?.priorZoneId ??
+          candidate?.priorZoneId
+      ),
+
+    priorRotationDirection:
+      preserveEstablishedLifecycleValue(
+        previous?.priorRotationDirection,
+        lifecycleUpdate?.priorRotationDirection ??
+          candidate?.priorRotationDirection
+      ),
+
+    promotionReason:
+      preserveEstablishedLifecycleValue(
+        previous?.promotionReason,
+        lifecycleUpdate?.promotionReason ??
+          candidate?.promotionReason
+      ),
+
+    promotedFromTargetCompletion:
+      mergeBooleanTrue(
+        previous?.promotedFromTargetCompletion,
+        lifecycleUpdate?.promotedFromTargetCompletion ??
+          candidate?.promotedFromTargetCompletion
+      ),
+
+    targetZoneEntryTouchedAt:
+      mergeEarliest(
+        previous?.targetZoneEntryTouchedAt,
+        lifecycleUpdate?.targetZoneEntryTouchedAt ??
+          candidate?.targetZoneEntryTouchedAt
+      ),
+
+    targetMidlineReachedAt:
+      mergeEarliest(
+        previous?.targetMidlineReachedAt,
+        lifecycleUpdate?.targetMidlineReachedAt ??
+          candidate?.targetMidlineReachedAt
+      ),
+
+    promotionTime:
+      mergeEarliest(
+        previous?.promotionTime,
+        lifecycleUpdate?.promotionTime ??
+          candidate?.promotionTime
+      ),
+
+    profitObjectiveReachedAt:
+      mergeEarliest(
+        previous?.profitObjectiveReachedAt,
+        lifecycleUpdate?.profitObjectiveReachedAt ??
+          candidate?.profitObjectiveReachedAt
+      ),
 
     identityAdoptedFromLegacy:
       candidate?.identityAdoptedFromLegacy === true,
