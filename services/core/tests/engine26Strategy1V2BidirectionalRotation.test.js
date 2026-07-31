@@ -28,11 +28,8 @@ const SETUP = "NEGOTIATED_ZONE_ROTATION";
 const VERSION = "engine26.strategy1.v2";
 
 /*
- * The focused suite must never read the live Engine 26 memory selected by
- * ENGINE26_NEGOTIATED_ZONE_MEMORY_PATH.
- *
- * Tests that need persistence pass their own explicit temporary path.
- * All other tests read this unique, non-existent suite-local path.
+ * Keep the focused suite isolated from the live persistent
+ * Engine 26 negotiated-zone memory.
  */
 const DEFAULT_TEST_MEMORY_DIR = fs.mkdtempSync(
   path.join(
@@ -263,13 +260,24 @@ test(
       completed.promotionReason,
       "NEGOTIATED_LINE_TARGET_COMPLETION"
     );
+    assert.equal(completed.directionState, "NEUTRAL");
+    assert.equal(completed.expectedReversalDirection, null);
+    assert.equal(completed.expectedParticipationDirection, null);
+    assert.deepEqual(completed.expectedReactions, []);
+    assert.equal(completed.priorCandidateId, upper.candidateId);
+    assert.equal(completed.priorZoneId, upper.zoneId);
+    assert.equal(completed.priorRotationDirection, "SHORT");
+    assert.equal(
+      completed.priorRotationCompletionState,
+      "FULL_TARGET_COMPLETION"
+    );
     assert.equal(completed.noPermissionCreated, true);
     assert.equal(completed.noExecution, true);
   }
 );
 
 test(
-  "LONG target midline fully completes prior rotation and promotes an armed NEUTRAL SHORT reversal watch",
+  "LONG target midline fully completes prior rotation and promotes an armed direction-neutral contact",
   () => {
     const lower = buildAtPrice({
       currentPrice: 7445.75,
@@ -308,8 +316,20 @@ test(
       "NEUTRAL"
     );
     assert.equal(
+      promoted.tradeDirectionBias,
+      "NEUTRAL"
+    );
+    assert.equal(
+      promoted.preferredDirection,
+      "NEUTRAL"
+    );
+    assert.equal(
+      promoted.expectedDirection,
+      null
+    );
+    assert.equal(
       promoted.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       promoted.contactState,
@@ -318,7 +338,19 @@ test(
     assert.equal(promoted.chainArmed, true);
     assert.equal(
       promoted.expectedReversalDirection,
-      "SHORT"
+      null
+    );
+    assert.equal(
+      promoted.expectedParticipationDirection,
+      null
+    );
+    assert.deepEqual(
+      promoted.expectedReactions,
+      []
+    );
+    assert.equal(
+      promoted.reactionExpected,
+      false
     );
     assert.equal(
       promoted.priorRotationDirection,
@@ -386,11 +418,23 @@ test(
     );
     assert.equal(
       reactionHandoff.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       reactionHandoff.expectedReactionDirection,
-      "SHORT"
+      null
+    );
+    assert.equal(
+      reactionHandoff.expectedParticipationDirection,
+      null
+    );
+    assert.deepEqual(
+      reactionHandoff.expectedReactions,
+      []
+    );
+    assert.equal(
+      reactionHandoff.reactionExpected,
+      false
     );
     assert.equal(
       reactionHandoff.contactState,
@@ -484,7 +528,7 @@ test(
     );
     assert.equal(
       promoted.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(promoted.shortConfirmed, false);
     assert.equal(promoted.automaticDirectionFlip, false);
@@ -539,7 +583,7 @@ test(
     assert.equal(continuation.directionalResolved, false);
     assert.equal(
       continuation.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       continuation.contactState,
@@ -617,7 +661,7 @@ test(
     assert.equal(reversal.directionalResolved, false);
     assert.equal(
       reversal.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       reversal.contactState,
@@ -652,14 +696,14 @@ test(
     );
     assert.equal(
       reversal.expectedReversalDirection,
-      "SHORT"
+      null
     );
     assert.equal(reactionHandoff.active, true);
     assert.equal(reactionHandoff.armed, true);
     assert.equal(reactionHandoff.chainArmed, true);
     assert.equal(
       reactionHandoff.expectedReactionDirection,
-      "SHORT"
+      null
     );
     assert.equal(
       reactionHandoff.authorizeEngine3Evaluation,
@@ -751,7 +795,7 @@ test(
     assert.equal(geometry.direction, "NEUTRAL");
     assert.equal(
       geometry.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       geometry.contactState,
@@ -760,7 +804,7 @@ test(
     assert.equal(geometry.chainArmed, true);
     assert.equal(
       geometry.expectedReversalDirection,
-      "SHORT"
+      null
     );
     assert.equal(geometry.directionalResolved, false);
     assert.equal(geometry.geometryReady, false);
@@ -1722,16 +1766,16 @@ test(
       assert.equal(promoted.directionalResolved, false);
       assert.equal(
         promoted.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
       assert.equal(
-        promoted.expectedReversalDirection,
-        "SHORT"
-      );
+      promoted.expectedReversalDirection,
+      null
+    );
       assert.equal(
-        promoted.expectedParticipationDirection,
-        "SHORT"
-      );
+      promoted.expectedParticipationDirection,
+      null
+    );
       assert.equal(
         promoted.priorRotationFullyComplete,
         true
@@ -1774,16 +1818,18 @@ test(
       );
       assert.equal(
         promotedRecord.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
+      assert.equal(promotedRecord.expectedReversalDirection, null);
+      assert.equal(promotedRecord.expectedParticipationDirection, null);
       assert.equal(
-        promotedRecord.expectedReversalDirection,
-        "SHORT"
-      );
+      promotedRecord.expectedReversalDirection,
+      null
+    );
       assert.equal(
-        promotedRecord.expectedParticipationDirection,
-        "SHORT"
-      );
+      promotedRecord.expectedParticipationDirection,
+      null
+    );
       assert.equal(
         promotedRecord.priorCandidateId,
         priorLong.candidateId
@@ -1866,7 +1912,7 @@ test(
       assert.equal(restored.directionalResolved, false);
       assert.equal(
         restored.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
       assert.equal(
         restored.contactState,
@@ -1874,14 +1920,19 @@ test(
       );
       assert.equal(restored.chainArmed, true);
       assert.equal(
-        restored.expectedReversalDirection,
-        "SHORT"
-      );
+      restored.expectedReversalDirection,
+      null
+    );
       assert.equal(
-        restored.expectedParticipationDirection,
-        "SHORT"
-      );
+      restored.expectedParticipationDirection,
+      null
+    );
       assert.equal(restored.automaticDirectionFlip, false);
+      assert.equal(restored.expectedDirection, null);
+      assert.equal(restored.expectedReversalDirection, null);
+      assert.equal(restored.expectedParticipationDirection, null);
+      assert.deepEqual(restored.expectedReactions, []);
+      assert.equal(restored.reactionExpected, false);
       assert.equal(restored.shortConfirmed, false);
       assert.equal(
         restored.freshTargetMidlineContact,
@@ -1918,7 +1969,7 @@ test(
       assert.equal(reactionHandoff.chainArmed, true);
       assert.equal(
         reactionHandoff.status,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL_CONTACT_WATCH"
       );
       assert.equal(
         reactionHandoff.direction,
@@ -1930,16 +1981,16 @@ test(
       );
       assert.equal(
         reactionHandoff.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
       assert.equal(
-        reactionHandoff.expectedReactionDirection,
-        "SHORT"
-      );
+      reactionHandoff.expectedReactionDirection,
+      null
+    );
       assert.equal(
-        reactionHandoff.expectedParticipationDirection,
-        "SHORT"
-      );
+      reactionHandoff.expectedParticipationDirection,
+      null
+    );
       assert.equal(
         reactionHandoff.contactState,
         "NEGOTIATED_LINE_CONTACT"
@@ -1950,6 +2001,14 @@ test(
       );
       assert.equal(
         reactionHandoff.reactionConfirmed,
+        false
+      );
+      assert.deepEqual(
+        reactionHandoff.expectedReactions,
+        []
+      );
+      assert.equal(
+        reactionHandoff.reactionExpected,
         false
       );
       assert.notEqual(
@@ -1991,8 +2050,10 @@ test(
       assert.equal(restoredRecord.chainArmed, true);
       assert.equal(
         restoredRecord.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
+      assert.equal(restoredRecord.expectedReversalDirection, null);
+      assert.equal(restoredRecord.expectedParticipationDirection, null);
       assert.equal(
         restoredRecord.priorRotationCompletionState,
         "FULL_TARGET_COMPLETION"
