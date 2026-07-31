@@ -1,11 +1,29 @@
 // services/core/tests/engine26GeneralParentStrategy1Child.test.js
 
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   buildEngine26A,
 } from "../logic/engine26/buildEngine26LocationCandidate.js";
+
+const TEST_MEMORY_DIR = fs.mkdtempSync(
+  path.join(os.tmpdir(), "engine26-general-parent-child-memory-")
+);
+const TEST_MEMORY_PATH = path.join(
+  TEST_MEMORY_DIR,
+  "negotiated-zone-memory.json"
+);
+
+after(() => {
+  fs.rmSync(TEST_MEMORY_DIR, {
+    recursive: true,
+    force: true,
+  });
+});
 
 function makeEngine22MinuteDown() {
   return {
@@ -50,6 +68,7 @@ test(
       engine1Context: null,
       previousLocationCandidate: null,
       bars10m: [],
+      memoryFilePath: TEST_MEMORY_PATH,
       persistMemory: false,
       tickSize: 0.25,
       activationRangePoints: 4,
@@ -61,49 +80,39 @@ test(
 
     assert.ok(parent);
     assert.ok(child);
-
     assert.equal(
       parent.location.source,
       "ENGINE26_MANUAL_IMBALANCE"
     );
     assert.equal(parent.directionBias, "SHORT");
-
     assert.equal(
       child.location.source,
       "ENGINE26_MANUAL_NEGOTIATED"
     );
-    assert.equal(
-      child.setupClass,
-      "NEGOTIATED_ZONE_ROTATION"
-    );
+    assert.equal(child.setupClass, "NEGOTIATED_ZONE_ROTATION");
     assert.equal(
       child.candidateIdentityVersion,
       "engine26.strategy1.v2"
     );
-
     assert.equal(child.directionBias, "NEUTRAL");
     assert.equal(child.direction, "NEUTRAL");
     assert.equal(
       child.directionState,
       "OBSERVING_ZONE_REACTION"
     );
-
     assert.notEqual(
       parent.directionBias,
       child.directionBias
     );
-
     assert.equal(
       result.engine26ReactionHandoff
         .authorizeEngine3Evaluation,
       false
     );
-
     assert.equal(
       result.engine26GeometryHandoff.active,
       false
     );
-
     assert.equal(parent.noPermissionCreated, true);
     assert.equal(child.noPermissionCreated, true);
     assert.equal(child.noExecution, true);
@@ -120,6 +129,7 @@ test(
       currentPrice: 7800,
       snapshotTime: "2026-07-28T17:10:00.000Z",
       engine22WaveStrategy: makeEngine22MinuteDown(),
+      memoryFilePath: TEST_MEMORY_PATH,
       persistMemory: false,
       activationRangePoints: 4,
       monitoringRangePoints: 25,
@@ -146,10 +156,8 @@ test(
 );
 
 test("Engine 26A does not mutate caller inputs", () => {
-  const engine22WaveStrategy =
-    makeEngine22MinuteDown();
-  const before =
-    JSON.stringify(engine22WaveStrategy);
+  const engine22WaveStrategy = makeEngine22MinuteDown();
+  const before = JSON.stringify(engine22WaveStrategy);
 
   buildEngine26A({
     symbol: "ES",
@@ -158,6 +166,7 @@ test("Engine 26A does not mutate caller inputs", () => {
     currentPrice: 7475,
     snapshotTime: "2026-07-28T17:20:00.000Z",
     engine22WaveStrategy,
+    memoryFilePath: TEST_MEMORY_PATH,
     persistMemory: false,
   });
 
