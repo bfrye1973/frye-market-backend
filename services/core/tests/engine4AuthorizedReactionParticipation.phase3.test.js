@@ -281,6 +281,87 @@ runTest("non-Strategy-1 identity fails safely", () => {
   assert.equal(out.hardBlocked, true);
 });
 
+
+runTest("promoted contact context is preserved while direction remains neutral", () => {
+  const out = build({
+    reaction: baseReaction({
+      direction: "NEUTRAL",
+      reactionConfirmed: false,
+      confirmed: false,
+      reactionState: "REACTION_FAILED",
+      authorizedReactionState: "REACTION_FAILED",
+      expectedReactionDirection: "SHORT",
+      candleClosed: true,
+      earlySignal: false,
+    }),
+    candidate: baseCandidate({
+      candidateIdentityVersion: "engine26.strategy1.v2",
+      contactState: "NEGOTIATED_LINE_CONTACT",
+      chainArmed: true,
+      directionState: "SHORT_REVERSAL_WATCH",
+      direction: "NEUTRAL",
+      expectedReversalDirection: "SHORT",
+      expectedParticipationDirection: "SHORT",
+      priorRotationDirection: "LONG",
+      priorRotationCompletionState: "FULL_TARGET_COMPLETION",
+      priorRotationFullyComplete: true,
+      promotedFromTargetCompletion: true,
+      promotionReason: "NEGOTIATED_LINE_TARGET_COMPLETION",
+    }),
+  });
+
+  assert.equal(out.active, true);
+  assert.equal(out.chainArmed, true);
+  assert.equal(out.contactState, "NEGOTIATED_LINE_CONTACT");
+  assert.equal(out.directionState, "SHORT_REVERSAL_WATCH");
+  assert.equal(out.direction, "NEUTRAL");
+  assert.equal(out.intendedDirection, "NEUTRAL");
+  assert.equal(out.expectedReactionDirection, "SHORT");
+  assert.equal(out.expectedParticipationDirection, "SHORT");
+  assert.equal(out.participationEvaluationDirection, "SHORT");
+  assert.equal(out.participationConfirmed, false);
+  assert.equal(out.allowed, false);
+  assert.equal(out.hardBlocked, false);
+});
+
+runTest("plain-English timeline lines describe weak waiting volume", () => {
+  const out = build({
+    reaction: baseReaction({
+      reactionConfirmed: false,
+      confirmed: false,
+      reactionState: "REACTION_FAILED",
+      authorizedReactionState: "REACTION_FAILED",
+      quality: "WEAK",
+      direction: "NEUTRAL",
+      candleClosed: true,
+      earlySignal: false,
+    }),
+    fast: {
+      active: true,
+      allowed: false,
+      hardBlocked: false,
+      participationState: "WEAK_FADING_PARTICIPATION",
+      participationQuality: "WEAK",
+      intendedDirection: "NEUTRAL",
+      currentBarVolume: 4355,
+      priorBarVolume: 21644,
+      currentVsPriorVolumeRatio: 0.2,
+      volumeExpansion: false,
+      volumeConfirmed: false,
+      relativeVolume: 0.2,
+      volumeTrend: "FADING",
+    },
+  });
+
+  assert.ok(Array.isArray(out.plainEnglishLines));
+  assert.ok(out.plainEnglishLines.includes("Engine 4 is watching volume."));
+  assert.ok(out.plainEnglishLines.includes("Volume is weak right now."));
+  assert.ok(out.plainEnglishLines.includes("Engine 4 is not killing the setup."));
+  assert.ok(out.plainEnglishLines.includes("Engine 4 is waiting because Engine 3 reaction is not confirmed."));
+  assert.ok(out.plainEnglishLines.includes("No permission. No execution."));
+  assert.equal(typeof out.timelinePlainEnglish, "string");
+});
+
 if (process.exitCode) {
   console.error("Engine 4 Phase 3 tests failed.");
   process.exit(process.exitCode);
