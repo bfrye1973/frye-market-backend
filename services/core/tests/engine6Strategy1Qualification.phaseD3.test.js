@@ -360,7 +360,7 @@ test("snapshot wrapper consumes shared qualification resolver and hard-disables 
 
   assert.match(
     source,
-    /engine3Qualification\\.qualified === true/
+    /engine3Qualification\.qualified === true/
   );
 
   assert.match(
