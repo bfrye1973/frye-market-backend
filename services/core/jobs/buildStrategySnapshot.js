@@ -9003,7 +9003,8 @@ console.log("Engine21 alignment fetched");
   spyVolumeBehavior,
   engine25Context,
   previousSnapshot,
-  evaluationTimeMs,  
+  evaluationTimeMs, 
+  engine3DiagnosticBars
 );
 
 const executionSymbol =
