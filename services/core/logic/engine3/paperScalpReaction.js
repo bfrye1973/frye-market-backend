@@ -769,6 +769,7 @@ function evaluateReactionForPaper({
   reactionInput,
   currentLevelAction = null,
   fastImbalanceReaction = null,
+  diagnosticFastImbalanceReaction = fastImbalanceReaction,
   engine22WaveStrategy = null,
   engine26ReactionHandoff = null,
   engine26StructuralContext = null,
