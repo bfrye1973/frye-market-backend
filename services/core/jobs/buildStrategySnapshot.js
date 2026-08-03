@@ -8441,6 +8441,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
        engine1Context,
        bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
        bars30m: [],
+       evaluationTimeMs,
      });
 
      attachFastImbalanceReactionToConfluence({
@@ -8448,6 +8449,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
        engine22WaveStrategy,
        engine26StructuralContext,
        bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+       evaluationTimeMs,
      });
 
      attachEngine4FastImbalanceParticipationToConfluence({
