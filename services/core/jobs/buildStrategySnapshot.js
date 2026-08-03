@@ -8767,6 +8767,7 @@ async function buildEngine2State(symbol) {
 ------------------------------*/
 async function buildSnapshot() {
   console.log("Starting strategy snapshot build...");
+  const evaluationTimeMs = Date.now();
 
   const previousSnapshot = loadPreviousSnapshotSafe();
   const engine25Context = loadEngine25Context();
@@ -8810,7 +8811,7 @@ const [
     source: "/api/v1/ohlc",
     error: String(err?.message || err),
   })),
-   buildEmaPostureBlock(symbol).catch((err) => ({
+   buildEmaPostureBlock(symbol, evaluationTimeMs).catch((err) => ({
     symbol,
     source: "EMA10_POSTURE_FAILED",
     tenMinute: {
@@ -8967,6 +8968,7 @@ console.log("Engine21 alignment fetched");
   spyVolumeBehavior,
   engine25Context,
   previousSnapshot
+  evaluationTimeMs,  
 );
 
 const executionSymbol =
