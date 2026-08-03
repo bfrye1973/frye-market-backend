@@ -426,6 +426,7 @@ function buildBasePaperScalpReaction({
   reactionInput = null,
   currentLevelAction = null,
   fastImbalanceReaction = null,
+  diagnosticFastImbalanceReaction = fastImbalanceReaction,
   engine22WaveStrategy = null,
   engine26LocationContext = null,
   allowed = false,
@@ -1216,7 +1217,8 @@ const engine26LocationContext =
 
       reactionInput,
       currentLevelAction,
-      fastImbalanceReaction,
+      fastImbalanceReaction:
+        diagnosticFastImbalanceReaction,
 
       observedState,
       authorizationState,
@@ -1236,8 +1238,13 @@ const engine26LocationContext =
 
       sourceSelectionReason:
         fastMode === true
-          ? "FAST_REACTION_ACTIVE_AND_FAST_MODE_TRUE"
-          : "FAST_REACTION_NOT_SELECTED_CURRENT_LEVEL_ACTION_USED",
+          ? "Fast imbalance source had production priority because active and fastMode were both true."
+          : (
+              diagnosticFastImbalanceReaction != null &&
+              typeof diagnosticFastImbalanceReaction === "object"
+                ? "Fast imbalance source existed but was not production-eligible because active and fastMode were not both true."
+                : "No production-eligible fast imbalance source was available."
+            ),
     });
 
   return {
@@ -1283,6 +1290,9 @@ export function buildPaperScalpReaction({
       useFastReaction
         ? fastImbalanceReaction
         : null,
+
+    diagnosticFastImbalanceReaction:
+      fastImbalanceReaction,
 
     engine22WaveStrategy,
     engine26ReactionHandoff,
