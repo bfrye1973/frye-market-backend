@@ -41,9 +41,6 @@ import { attachPaperScalpReactionToConfluence } from "../logic/engine3/paperScal
 import { attachFastImbalanceReactionToConfluence } from "../logic/engine3/fastImbalanceReaction.js";
 import { attachCurrentLevelActionToConfluence } from "../logic/priceAction/currentLevelAction.js";
 import { deriveCandleCompletionTruth } from "../logic/engine3/candleCompletionTruth.js";
-import { fetchEngine3DiagnosticBarStack } from "../logic/engine3/fetchEngine3DiagnosticBars.js";
-import { buildReactionObservation1m } from "../logic/engine3/buildReactionObservation1m.js";
-import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidation5m.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { listTrades } from "../logic/journal/tradeJournalStore.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
@@ -3834,18 +3831,24 @@ async function buildEma10Posture({
   const r = await fetchJson(u.toString(), 15000);
   const bars = normalizeOhlcBars(r?.json);
 
-  const completionTruth =
-    tf === "10m"
-      ? deriveCandleCompletionTruth({ bars, timeframe: tf, evaluationTimeMs })
-      : null;
-  const officialBars = completionTruth?.completedBars || bars;
-  const closes = officialBars
-    .map(barClose)
-    .filter((x) => Number.isFinite(x));
-
-  const lastBar = officialBars.length
-    ? officialBars[officialBars.length - 1]
+const completionTruth =
+  tf === "10m"
+    ? deriveCandleCompletionTruth({
+        bars,
+        timeframe: tf,
+        evaluationTimeMs,
+      })
     : null;
+
+const officialBars = completionTruth?.completedBars || bars;
+
+const closes = officialBars
+  .map(barClose)
+  .filter((x) => Number.isFinite(x));
+
+const lastBar = officialBars.length
+  ? officialBars[officialBars.length - 1]
+  : null;
   const close = lastBar ? barClose(lastBar) : null;
   const ema10 = calcEma(closes, 10);
   const ema20 = calcEma(closes, 20);
@@ -3901,14 +3904,14 @@ return {
   barCount: bars.length,
   bars,
   ...(completionTruth
-    ? {
-        completedBars: completionTruth.completedBars,
-        formingBar: completionTruth.formingBar,
-        completionUnknownBars: completionTruth.completionUnknownBars,
-        completionState: completionTruth.latestBarCompletionState,
-        evaluationTimeMs: completionTruth.evaluationTimeMs,
-      }
-    : {}),
+  ? {
+      completedBars: completionTruth.completedBars,
+      formingBar: completionTruth.formingBar,
+      completionUnknownBars: completionTruth.completionUnknownBars,
+      completionState: completionTruth.latestBarCompletionState,
+      evaluationTimeMs: completionTruth.evaluationTimeMs,
+    }
+  : {}),
   source: path,
   error:
     r?.ok === true
@@ -7257,8 +7260,7 @@ async function processStrategy(
   spyVolumeBehavior = null,
   engine25Context = null,
   previousSnapshot = null,
-  evaluationTimeMs = null,
-  engine3DiagnosticBars = null
+  evaluationTimeMs = null
 ) {
 
 let contextResp = null;
@@ -7938,26 +7940,6 @@ attachEngine4AuthorizedReactionParticipation({
  * Existing Engine 3/4 algorithms and thresholds remain unchanged.
  */
 if (isEsIntradayScalp) {
-  const engine3ReactionObservation1m = buildReactionObservation1m({
-    bars: engine3DiagnosticBars?.oneMinute?.bars || [],
-    evaluationTimeMs,
-    engine26LocationCandidate,
-    engine26ReactionHandoff,
-  });
-  const engine3ReactionValidation5m = buildReactionValidation5m({
-    bars: engine3DiagnosticBars?.fiveMinute?.bars || [],
-    evaluationTimeMs,
-    observation1m: engine3ReactionObservation1m,
-    engine26LocationCandidate,
-    engine26ReactionHandoff,
-  });
-  patchedConfluence.context = patchedConfluence.context || {};
-  patchedConfluence.context.reaction = {
-    ...(patchedConfluence.context.reaction || {}),
-    engine3ReactionObservation1m,
-    engine3ReactionValidation5m,
-  };
-
   attachPaperScalpReactionToConfluence({
     patchedConfluence,
     engine22WaveStrategy,
@@ -8802,7 +8784,6 @@ const [
   emaPosture,
   spyReactionQuality,
   spyVolumeBehavior,
-  engine3DiagnosticBars,
 ] = await Promise.all([
   fetchLiveMarketMeter(),
    
@@ -8868,12 +8849,6 @@ const [
     error: "SPY_VOLUME_BEHAVIOR_FETCH_FAILED",
     detail: String(err?.message || err),
   })),
-  fetchEngine3DiagnosticBarStack({
-    symbol,
-    limit: 120,
-    coreBase: CORE_BASE,
-    fetchJson,
-  }),
 ]);
 console.log("Live Market Meter fetched");
 console.log("Engine21 alignment fetched");
@@ -8993,8 +8968,7 @@ console.log("Engine21 alignment fetched");
   spyVolumeBehavior,
   engine25Context,
   previousSnapshot,
-  evaluationTimeMs,
-  engine3DiagnosticBars
+  evaluationTimeMs,  
 );
 
 const executionSymbol =
