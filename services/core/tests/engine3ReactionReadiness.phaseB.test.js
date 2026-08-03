@@ -418,13 +418,20 @@ test("fast selected diagnostics report production-selected source without arbitr
 });
 
 test("current-level selected diagnostics report inactive fast as alternative only", () => {
+  const current = reactionInput({
+    state: "RECLAIMED_LEVEL",
+    direction: "LONG",
+    quality: "GOOD",
+    confirmed: true,
+  });
+
+  const withoutAlternative = build({
+    current,
+    fast: null,
+  });
+
   const result = build({
-    current: reactionInput({
-      state: "RECLAIMED_LEVEL",
-      direction: "LONG",
-      quality: "GOOD",
-      confirmed: true,
-    }),
+    current,
 
     fast: fastReaction({
       active: false,
@@ -446,10 +453,26 @@ test("current-level selected diagnostics report inactive fast as alternative onl
   );
 
   assert.equal(
+    result.reactionReadiness.sourceSelectionReason,
+    "Fast imbalance source existed but was not production-eligible because active and fastMode were not both true."
+  );
+
+  assert.equal(
     result.reactionReadiness.raw.direction,
     "LONG"
   );
 
+  const {
+    reactionReadiness: ignoredWithout,
+    ...canonicalWithout
+  } = withoutAlternative;
+
+  const {
+    reactionReadiness: ignoredWith,
+    ...canonicalWith
+  } = result;
+
+  assert.deepEqual(canonicalWith, canonicalWithout);
   assertExactCopies(result);
 });
 
@@ -565,4 +588,91 @@ test("readiness object is additive and does not introduce scored fields", () => 
   assert.equal("hardBlockers" in result.reactionReadiness, false);
   assert.equal("temporaryBlockers" in result.reactionReadiness, false);
   assert.equal("nextNeededEvidence" in result.reactionReadiness, false);
+});
+
+
+test("active fast with fastMode false is reported as alternative and never selected", () => {
+  const current = reactionInput({
+    state: "RECLAIMED_LEVEL",
+    direction: "LONG",
+    quality: "GOOD",
+    confirmed: true,
+  });
+
+  const withoutAlternative = build({
+    current,
+    fast: null,
+  });
+
+  const result = build({
+    current,
+    fast: fastReaction({
+      active: true,
+      fastMode: false,
+      state: "LOST_LEVEL",
+      direction: "SHORT",
+      quality: "STRONG",
+      confirmed: true,
+    }),
+  });
+
+  assert.equal(
+    result.reactionReadiness.selectedSource,
+    "CURRENT_LEVEL_ACTION"
+  );
+
+  assert.equal(
+    result.reactionReadiness.alternativeSource,
+    "FAST_IMBALANCE"
+  );
+
+  assert.equal(
+    result.reactionReadiness.sourceSelectionReason,
+    "Fast imbalance source existed but was not production-eligible because active and fastMode were not both true."
+  );
+
+  const {
+    reactionReadiness: ignoredWithout,
+    ...canonicalWithout
+  } = withoutAlternative;
+
+  const {
+    reactionReadiness: ignoredWith,
+    ...canonicalWith
+  } = result;
+
+  assert.deepEqual(canonicalWith, canonicalWithout);
+  assert.equal(result.direction, "LONG");
+  assert.equal(result.state, "RECLAIMED_LEVEL");
+  assert.equal(result.quality, "GOOD");
+  assertExactCopies(result);
+});
+
+test("current-level selected with no fast object reports alternative NONE", () => {
+  const result = build({
+    current: reactionInput({
+      state: "RECLAIMED_LEVEL",
+      direction: "LONG",
+      quality: "GOOD",
+      confirmed: true,
+    }),
+    fast: null,
+  });
+
+  assert.equal(
+    result.reactionReadiness.selectedSource,
+    "CURRENT_LEVEL_ACTION"
+  );
+
+  assert.equal(
+    result.reactionReadiness.alternativeSource,
+    "NONE"
+  );
+
+  assert.equal(
+    result.reactionReadiness.sourceSelectionReason,
+    "No production-eligible fast imbalance source was available."
+  );
+
+  assertExactCopies(result);
 });
