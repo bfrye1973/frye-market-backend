@@ -460,6 +460,15 @@ function buildBasePaperScalpReaction({
     source,
 
     allowed: allowed === true,
+
+    // Phase D1 additive downstream handoff aliases.
+    // Both fields are assigned only from the final Engine 3 production truth.
+    participationEvaluationEligible:
+      allowed === true,
+
+    engine3Strategy1QualifiedForEngine6:
+      allowed === true,
+
     mode: "PAPER_ONLY",
     researchOnly: true,
 
