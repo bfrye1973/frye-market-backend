@@ -1,4 +1,6 @@
 const TIMEFRAME_DURATION_MS = Object.freeze({
+  "1m": 1 * 60 * 1000,
+  "5m": 5 * 60 * 1000,
   "10m": 10 * 60 * 1000,
 });
 
