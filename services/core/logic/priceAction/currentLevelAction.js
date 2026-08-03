@@ -13,6 +13,8 @@
 // Output path after attach:
 // confluence.context.reaction.currentLevelAction
 
+import { deriveCandleCompletionTruth } from "../engine3/candleCompletionTruth.js";
+
 const ENGINE = "engine3.currentLevelAction.v1";
 const SOURCE = "priceAction.currentLevelAction";
 
@@ -942,6 +944,7 @@ export function buildCurrentLevelAction({
   engine25Context = null,
   engine1Context = null,
   confirmationContext = null,
+  evaluationTimeMs = null,
 } = {}) {
   const normalized10m = normalizeBars(bars10m);
   const normalized30m = normalizeBars(bars30m);
@@ -1065,7 +1068,20 @@ export function buildCurrentLevelAction({
   const state = evaluation.state || "NO_SIGNAL";
   const quality = classifyQuality(state);
   const direction = classifyDirection(state);
-  const confirmed = classifyConfirmed(state);
+  const completionTruth = deriveCandleCompletionTruth({
+    bars: normalized10m,
+    timeframe: tf,
+    evaluationTimeMs,
+  });
+  const candleCompletionState = completionTruth.latestBarCompletionState;
+  const candleClosed =
+    candleCompletionState === "COMPLETED"
+      ? true
+      : candleCompletionState === "FORMING"
+      ? false
+      : null;
+  const confirmed =
+    classifyConfirmed(state) && candleCompletionState === "COMPLETED";
 
   const referenceLevel =
     selectedReference.level ??
@@ -1091,6 +1107,12 @@ export function buildCurrentLevelAction({
     quality,
     direction,
     confirmed,
+    candleClosed,
+    candleCompletionState,
+    evaluationTimeMs: completionTruth.evaluationTimeMs,
+    supportingBarTime: last?.time ?? null,
+    supportingExpectedCloseTimeMs:
+      completionTruth.latestExpectedCloseTimeMs,
 
     currentPrice: price,
     referenceLevel,
@@ -1129,6 +1151,7 @@ export function attachCurrentLevelActionToConfluence({
   engine1Context = null,
   bars10m = [],
   bars30m = [],
+  evaluationTimeMs = null,
 }) {
   const currentLifecycleState =
     engine22WaveStrategy?.currentLifecycleState || null;
@@ -1148,6 +1171,7 @@ export function attachCurrentLevelActionToConfluence({
     confirmationContext,
     engine25Context,
     engine1Context,
+    evaluationTimeMs,
     zones:
       confirmationContext?.reference?.zones ??
       null,
