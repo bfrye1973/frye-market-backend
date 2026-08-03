@@ -171,7 +171,7 @@ for (const state of directLongStates) {
   });
 }
 
-test("direct LONG confirmed false is currently denied by authorization normalization", () => {
+test("direct LONG confirmed false may qualify under branch-specific confirmation", () => {
   const out = buildPaper({
     currentLevelAction: buildCurrentLevelAction({
       state: "RECLAIMED_LEVEL",
@@ -181,14 +181,15 @@ test("direct LONG confirmed false is currently denied by authorization normaliza
     }),
   });
 
-  assert.equal(out.allowed, false);
+  assertAllowed(out, "LONG");
   assert.equal(out.state, "RECLAIMED_LEVEL");
   assert.equal(out.direction, "LONG");
-  assert.equal(out.engine26LocationContext.state, "WATCHING_AUTHORIZED_LOCATION");
-  assert.equal(out.engine26LocationContext.forceAllowedFalse, true);
-  assert.equal(out.engine26LocationContext.blocker, "AUTHORIZED_REACTION_NOT_CONFIRMED");
-  assert.ok(out.blockers.includes("ENGINE26_AUTHORIZED_REACTION_STATE_BLOCKED"));
-  assert.ok(out.blockers.includes("AUTHORIZED_REACTION_NOT_CONFIRMED"));
+  assert.equal(out.authorizedReactionState, "WATCHING_AUTHORIZED_LOCATION");
+  assert.equal(out.engine26LocationContext.forceAllowedFalse, false);
+  assert.equal(out.engine26LocationContext.blocker, null);
+  assert.equal(out.reactionConfirmed, false);
+  assert.ok(!out.blockers.includes("ENGINE26_AUTHORIZED_REACTION_STATE_BLOCKED"));
+  assert.ok(!out.blockers.includes("AUTHORIZED_REACTION_NOT_CONFIRMED"));
 });
 
 test("direct LONG wrong direction blocks", () => {
@@ -312,8 +313,10 @@ for (const state of conditionalLongStates) {
 
     assert.equal(out.allowed, false);
     assert.ok(out.blockers.includes("CONDITIONAL_LONG_REQUIRES_CONFIRMED_CURRENT_ACTION"));
-    assert.ok(out.blockers.includes("ENGINE26_AUTHORIZED_REACTION_STATE_BLOCKED"));
-    assert.ok(out.blockers.includes("AUTHORIZED_REACTION_NOT_CONFIRMED"));
+    assert.ok(!out.blockers.includes("ENGINE26_AUTHORIZED_REACTION_STATE_BLOCKED"));
+    assert.ok(!out.blockers.includes("AUTHORIZED_REACTION_NOT_CONFIRMED"));
+    assert.equal(out.engine26LocationContext.forceAllowedFalse, false);
+    assert.equal(out.reactionConfirmed, false);
   });
 }
 
@@ -374,7 +377,7 @@ for (const state of shortStates) {
   });
 }
 
-test("SHORT confirmed false is currently denied by authorization normalization", () => {
+test("SHORT confirmed false may qualify under branch-specific confirmation", () => {
   const out = buildPaper({
     currentLevelAction: buildCurrentLevelAction({
       state: "FAILED_RECLAIM",
@@ -385,13 +388,14 @@ test("SHORT confirmed false is currently denied by authorization normalization",
     paperShortResearchEnabled: true,
   });
 
-  assert.equal(out.allowed, false);
+  assertAllowed(out, "SHORT");
   assert.equal(out.direction, "SHORT");
   assert.equal(out.engine26LocationContext.state, "WATCHING_AUTHORIZED_LOCATION");
-  assert.equal(out.engine26LocationContext.forceAllowedFalse, true);
-  assert.equal(out.engine26LocationContext.blocker, "AUTHORIZED_REACTION_NOT_CONFIRMED");
-  assert.ok(out.blockers.includes("ENGINE26_AUTHORIZED_REACTION_STATE_BLOCKED"));
-  assert.ok(out.blockers.includes("AUTHORIZED_REACTION_NOT_CONFIRMED"));
+  assert.equal(out.engine26LocationContext.forceAllowedFalse, false);
+  assert.equal(out.engine26LocationContext.blocker, null);
+  assert.equal(out.reactionConfirmed, false);
+  assert.ok(!out.blockers.includes("ENGINE26_AUTHORIZED_REACTION_STATE_BLOCKED"));
+  assert.ok(!out.blockers.includes("AUTHORIZED_REACTION_NOT_CONFIRMED"));
 });
 
 test("SHORT research disabled blocks", () => {
@@ -475,7 +479,7 @@ test("WAITING_FOR_ENGINE26_LOCATION currently forces denial", () => {
   assert.ok(out.blockers.includes("WAITING_FOR_ENGINE26_LOCATION"));
 });
 
-test("WATCHING_AUTHORIZED_LOCATION currently forces paper reaction denial", () => {
+test("canonical WATCHING_AUTHORIZED_LOCATION permits branch evaluation without automatic denial", () => {
   const out = buildPaper({
     currentLevelAction: buildCurrentLevelAction({
       state: "RECLAIMED_LEVEL",
@@ -486,13 +490,13 @@ test("WATCHING_AUTHORIZED_LOCATION currently forces paper reaction denial", () =
   });
 
   assert.equal(out.engine26LocationContext.state, "WATCHING_AUTHORIZED_LOCATION");
-  assert.equal(out.engine26LocationContext.forceAllowedFalse, true);
-  assert.equal(out.engine26LocationContext.blocker, "AUTHORIZED_REACTION_NOT_CONFIRMED");
+  assert.equal(out.engine26LocationContext.forceAllowedFalse, false);
+  assert.equal(out.engine26LocationContext.blocker, null);
   assert.equal(out.authorizedReactionState, "WATCHING_AUTHORIZED_LOCATION");
   assert.equal(out.reactionConfirmed, false);
-  assert.equal(out.allowed, false);
-  assert.ok(out.blockers.includes("ENGINE26_AUTHORIZED_REACTION_STATE_BLOCKED"));
-  assert.ok(out.blockers.includes("AUTHORIZED_REACTION_NOT_CONFIRMED"));
+  assertAllowed(out, "LONG");
+  assert.ok(!out.blockers.includes("ENGINE26_AUTHORIZED_REACTION_STATE_BLOCKED"));
+  assert.ok(!out.blockers.includes("AUTHORIZED_REACTION_NOT_CONFIRMED"));
 });
 
 test("REACTION_CONFIRMED permits a qualifying direct LONG", () => {
@@ -577,9 +581,10 @@ test("canonical neutral V2 handoff preserves fresh LONG raw and normalized direc
   assert.equal(out.currentLevelAction.direction, "LONG");
   assert.equal(out.engine26LocationContext.rawState, "RECLAIMED_LEVEL");
   assert.equal(out.engine26LocationContext.direction, "LONG");
-  assert.equal(out.engine26LocationContext.expectedReactionDirection, "NEUTRAL");
+  assert.equal(out.engine26LocationContext.expectedReactionDirection, null);
   assert.deepEqual(out.engine26LocationContext.expectedReactions, []);
-  assert.equal(out.allowed, false);
+  assert.equal(out.allowed, true);
+  assert.equal(out.reactionConfirmed, false);
 });
 
 test("canonical neutral V2 handoff preserves fresh SHORT raw and normalized direction", () => {
@@ -599,9 +604,10 @@ test("canonical neutral V2 handoff preserves fresh SHORT raw and normalized dire
   assert.equal(out.currentLevelAction.direction, "SHORT");
   assert.equal(out.engine26LocationContext.rawState, "FAILED_RECLAIM");
   assert.equal(out.engine26LocationContext.direction, "SHORT");
-  assert.equal(out.engine26LocationContext.expectedReactionDirection, "NEUTRAL");
+  assert.equal(out.engine26LocationContext.expectedReactionDirection, null);
   assert.deepEqual(out.engine26LocationContext.expectedReactions, []);
-  assert.equal(out.allowed, false);
+  assert.equal(out.allowed, true);
+  assert.equal(out.reactionConfirmed, false);
 });
 
 test("canonical neutral V2 handoff with no actionable reaction remains authorized watching, not waiting for location", () => {
@@ -694,47 +700,42 @@ test("fastMode false selects currentLevelAction", () => {
   assert.equal(out.allowed, true);
 });
 
-test("paperScalpReaction canonically normalizes an already normalized fast input", () => {
-  const alreadyNormalizedFast = buildFastReaction({
-    state: "WATCHING_AUTHORIZED_LOCATION",
+test("paperScalpReaction performs one canonical normalization pass on raw fast facts", () => {
+  const rawFast = buildFastReaction({
+    state: "LOST_LEVEL",
     rawState: "LOST_LEVEL",
     quality: "GOOD",
     rawQuality: "GOOD",
     direction: "SHORT",
     rawDirection: "SHORT",
     confirmed: false,
-    engine26LocationContext: {
-      state: "WATCHING_AUTHORIZED_LOCATION",
-      rawState: "LOST_LEVEL",
-      quality: "GOOD",
-      direction: "SHORT",
-      confirmed: false,
-      forceAllowedFalse: true,
-      blocker: "AUTHORIZED_REACTION_NOT_CONFIRMED",
-    },
+    rawConfirmed: false,
   });
 
   const out = buildPaper({
-    fastImbalanceReaction: alreadyNormalizedFast,
+    fastImbalanceReaction: rawFast,
     currentLevelAction: buildCurrentLevelAction({
-      state: "FAILED_RECLAIM",
+      state: "RECLAIMED_LEVEL",
       quality: "GOOD",
-      direction: "SHORT",
+      direction: "LONG",
       confirmed: true,
     }),
     paperShortResearchEnabled: true,
   });
 
-  assert.equal(alreadyNormalizedFast.rawState, "LOST_LEVEL");
-  assert.equal(alreadyNormalizedFast.state, "WATCHING_AUTHORIZED_LOCATION");
+  assert.equal(rawFast.state, "LOST_LEVEL");
+  assert.equal(rawFast.direction, "SHORT");
+  assert.equal(rawFast.quality, "GOOD");
+  assert.equal(rawFast.confirmed, false);
   assert.equal(out.source, "confluence.context.reaction.engine3FastImbalanceReaction");
-  assert.equal(out.engine26LocationContext.rawState, "WATCHING_AUTHORIZED_LOCATION");
-  assert.equal(out.engine26LocationContext.state, "REACTION_FAILED");
-  assert.equal(out.state, "WATCHING_AUTHORIZED_LOCATION");
+  assert.equal(out.engine26LocationContext.rawState, "LOST_LEVEL");
+  assert.equal(out.engine26LocationContext.state, "WATCHING_AUTHORIZED_LOCATION");
+  assert.equal(out.state, "LOST_LEVEL");
   assert.equal(out.direction, "SHORT");
   assert.equal(out.quality, "GOOD");
-  assert.equal(out.allowed, false);
-  assert.ok(out.blockers.includes("ENGINE26_AUTHORIZED_REACTION_STATE_BLOCKED"));
-  assert.ok(out.blockers.includes("FAST_IMBALANCE_STATE_BLOCKED_FOR_PAPER"));
-  assert.ok(out.blockers.includes("AUTHORIZED_REACTION_FAILED"));
+  assert.equal(out.reactionConfirmed, false);
+  assert.equal(out.allowed, true);
+  assert.deepEqual(out.blockers, []);
+  assert.ok(!out.blockers.includes("FAST_IMBALANCE_STATE_BLOCKED_FOR_PAPER"));
+  assert.ok(!out.blockers.includes("AUTHORIZED_REACTION_NOT_CONFIRMED"));
 });
