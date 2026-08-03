@@ -8967,7 +8967,7 @@ console.log("Engine21 alignment fetched");
   spyReactionQuality,
   spyVolumeBehavior,
   engine25Context,
-  previousSnapshot
+  previousSnapshot,
   evaluationTimeMs,  
 );
 
