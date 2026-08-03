@@ -21,6 +21,7 @@
 
 import { buildEngine22DegreeWaveContext } from "./engine22DegreeWaveContext.js";
 import { buildEngine26LocationReactionContext } from "./engine26LocationReactionContext.js";
+import { buildReactionReadiness } from "./buildReactionReadiness.js";
 
 const ENGINE = "engine3.paperScalpReaction.v2";
 
@@ -671,52 +672,96 @@ const engine26LocationContext =
     engine26LocationContext?.state ===
     "WAITING_FOR_ENGINE26_LOCATION";
 
-  return buildBasePaperScalpReaction({
-    source: SOURCE_CURRENT_LEVEL,
+  const paperScalpReaction =
+    buildBasePaperScalpReaction({
+      source: SOURCE_CURRENT_LEVEL,
 
-    reactionInput: {
-      state:
-        engine26LocationContext?.state ||
-        "NO_SIGNAL",
+      reactionInput: {
+        state:
+          engine26LocationContext?.state ||
+          "NO_SIGNAL",
+
+        quality:
+          engine26LocationContext?.quality ||
+          "WEAK",
+
+        direction:
+          engine26LocationContext?.direction ||
+          "NEUTRAL",
+      },
+
+      currentLevelAction: null,
+      fastImbalanceReaction: null,
+      engine22WaveStrategy,
+      engine26LocationContext,
+
+      allowed: false,
+      direction: "NONE",
+
+      setupType:
+        waitingForEngine26
+          ? "WAITING_FOR_ENGINE26_LOCATION"
+          : "NONE",
+
+      blockers: [
+        waitingForEngine26
+          ? "WAITING_FOR_ENGINE26_LOCATION"
+          : "CURRENT_LEVEL_ACTION_MISSING",
+      ],
+
+      reasonCodes: [
+        ...(engine26LocationContext?.reasonCodes || []),
+
+        waitingForEngine26
+          ? "WAITING_FOR_ENGINE26_LOCATION"
+          : "CURRENT_LEVEL_ACTION_MISSING",
+
+        "PAPER_SCALP_NOT_ALLOWED",
+      ],
+    });
+
+  const reactionReadiness =
+    buildReactionReadiness({
+      selectedSource: "NONE",
+      reactionInput: null,
+      currentLevelAction: null,
+      fastImbalanceReaction: null,
+
+      observedState:
+        engine26LocationContext?.rawState ??
+        null,
+
+      authorizationState:
+        engine26LocationContext?.state ??
+        null,
+
+      actionDirection:
+        engine26LocationContext?.direction ??
+        null,
 
       quality:
-        engine26LocationContext?.quality ||
-        "WEAK",
+        engine26LocationContext?.quality ??
+        null,
 
-      direction:
-        engine26LocationContext?.direction ||
-        "NEUTRAL",
-    },
+      engine26LocationContext,
 
-    currentLevelAction: null,
-    fastImbalanceReaction: null,
-    engine22WaveStrategy,
-    engine26LocationContext,
+      productionAllowed:
+        paperScalpReaction.allowed,
 
-    allowed: false,
-    direction: "NONE",
+      productionBlockers:
+        paperScalpReaction.blockers,
 
-    setupType:
-      waitingForEngine26
-        ? "WAITING_FOR_ENGINE26_LOCATION"
-        : "NONE",
+      productionReasonCodes:
+        paperScalpReaction.reasonCodes,
 
-    blockers: [
-      waitingForEngine26
-        ? "WAITING_FOR_ENGINE26_LOCATION"
-        : "CURRENT_LEVEL_ACTION_MISSING",
-    ],
+      sourceSelectionReason:
+        "NO_USABLE_REACTION_INPUT",
+    });
 
-    reasonCodes: [
-      ...(engine26LocationContext?.reasonCodes || []),
-
-      waitingForEngine26
-        ? "WAITING_FOR_ENGINE26_LOCATION"
-        : "CURRENT_LEVEL_ACTION_MISSING",
-
-      "PAPER_SCALP_NOT_ALLOWED",
-    ],
-  });
+  return {
+    ...paperScalpReaction,
+    reactionReadiness,
+  };
 }
 
 function evaluateReactionForPaper({
@@ -1133,33 +1178,72 @@ const engine26LocationContext =
     );
   }
 
-  return buildBasePaperScalpReaction({
-    source,
+  const paperScalpReaction =
+    buildBasePaperScalpReaction({
+      source,
 
-    reactionInput: {
-      ...reactionInput,
+      reactionInput: {
+        ...reactionInput,
 
-      // Keep existing observed state for compatibility.
-      state: observedState,
+        // Keep existing observed state for compatibility.
+        state: observedState,
+        quality,
+        direction: actionDirection,
+      },
+
+      currentLevelAction,
+
+      fastImbalanceReaction,
+
+      engine22WaveStrategy,
+
+      engine26LocationContext,
+
+      allowed,
+      direction,
+      setupType,
+      blockers,
+      reasonCodes,
+      fastMode,
+    });
+
+  const reactionReadiness =
+    buildReactionReadiness({
+      selectedSource:
+        fastMode === true
+          ? "FAST_IMBALANCE"
+          : "CURRENT_LEVEL_ACTION",
+
+      reactionInput,
+      currentLevelAction,
+      fastImbalanceReaction,
+
+      observedState,
+      authorizationState,
+      actionDirection,
       quality,
-      direction: actionDirection,
-    },
 
-    currentLevelAction,
+      engine26LocationContext,
 
-    fastImbalanceReaction,
+      productionAllowed:
+        paperScalpReaction.allowed,
 
-    engine22WaveStrategy,
+      productionBlockers:
+        paperScalpReaction.blockers,
 
-    engine26LocationContext,
+      productionReasonCodes:
+        paperScalpReaction.reasonCodes,
 
-    allowed,
-    direction,
-    setupType,
-    blockers,
-    reasonCodes,
-    fastMode,
-  });
+      sourceSelectionReason:
+        fastMode === true
+          ? "FAST_REACTION_ACTIVE_AND_FAST_MODE_TRUE"
+          : "FAST_REACTION_NOT_SELECTED_CURRENT_LEVEL_ACTION_USED",
+    });
+
+  return {
+    ...paperScalpReaction,
+    reactionReadiness,
+  };
 }
 
 export function buildPaperScalpReaction({
