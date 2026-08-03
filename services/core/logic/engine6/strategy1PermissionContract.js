@@ -264,7 +264,46 @@ function readEngine26(candidate) {
   };
 }
 
+export function resolveEngine3Strategy1Qualification({
+  reaction = null,
+  legacyQualified = false,
+} = {}) {
+  const explicitlyPublished =
+    reaction != null &&
+    typeof reaction === "object" &&
+    Object.prototype.hasOwnProperty.call(
+      reaction,
+      "engine3Strategy1QualifiedForEngine6"
+    );
+
+  const qualified =
+    explicitlyPublished
+      ? reaction?.engine3Strategy1QualifiedForEngine6 === true
+      : legacyQualified === true;
+
+  return {
+    explicitlyPublished,
+    qualified,
+    source:
+      explicitlyPublished
+        ? "ENGINE3_STRATEGY1_QUALIFIED_EXPLICIT"
+        : "ENGINE3_STRATEGY1_QUALIFICATION_LEGACY_FALLBACK",
+    reactionConfirmedDiagnosticOnly:
+      explicitlyPublished &&
+      qualified &&
+      reaction?.reactionConfirmed !== true,
+  };
+}
+
 function readEngine3(reaction) {
+  const qualificationExplicitlyPublished =
+    reaction != null &&
+    typeof reaction === "object" &&
+    Object.prototype.hasOwnProperty.call(
+      reaction,
+      "engine3Strategy1QualifiedForEngine6"
+    );
+
   return {
     present: reaction != null && typeof reaction === "object",
     laneId: firstText(reaction?.laneId, reaction?.lane),
@@ -279,6 +318,10 @@ function readEngine3(reaction) {
 
     evaluationAuthorized: reaction?.evaluationAuthorized === true,
     reactionConfirmed: reaction?.reactionConfirmed === true,
+
+    qualificationExplicitlyPublished,
+    strategy1Qualified:
+      reaction?.engine3Strategy1QualifiedForEngine6 === true,
 
     confirmed: reaction?.confirmed === true,
     allowed: reaction?.allowed === true,
@@ -423,6 +466,17 @@ export function evaluateEngine6Strategy1Phase4Contract({
   const e26 = readEngine26(engine26LocationCandidate);
   const e3 = readEngine3(engine3Reaction);
   const e4 = readEngine4(engine4Participation);
+
+  const legacyEngine3Qualified =
+    e3.evaluationAuthorized === true &&
+    e3.reactionConfirmed === true &&
+    e3.allowed === true;
+
+  const engine3Qualification =
+    resolveEngine3Strategy1Qualification({
+      reaction: engine3Reaction,
+      legacyQualified: legacyEngine3Qualified,
+    });
 
   const neutralObservation =
     applies && isNeutralObservation(e26);
@@ -590,19 +644,39 @@ export function evaluateEngine6Strategy1Phase4Contract({
       blockers.push("ENGINE3_EVALUATION_NOT_AUTHORIZED");
     }
 
-    if (e3.reactionConfirmed !== true) {
-      if (
-        e3.reactionState &&
-        (
-          e3.reactionState.includes("DEVELOP") ||
-          e3.reactionState.includes("PENDING") ||
-          e3.reactionState.includes("WAIT")
-        )
-      ) {
-        warnings.push("ENGINE3_REACTION_DEVELOPING");
-        blockers.push("ENGINE3_REACTION_WAITING");
+    if (engine3Qualification.explicitlyPublished) {
+      if (engine3Qualification.qualified !== true) {
+        blockers.push("ENGINE3_STRATEGY1_NOT_QUALIFIED");
       } else {
-        blockers.push("ENGINE3_REACTION_NOT_CONFIRMED");
+        reasonCodes.push("ENGINE3_STRATEGY1_QUALIFIED_EXPLICIT");
+
+        if (e3.reactionConfirmed !== true) {
+          reasonCodes.push("ENGINE3_REACTION_CONFIRMED_DIAGNOSTIC_ONLY");
+        }
+      }
+    } else {
+      reasonCodes.push(
+        "ENGINE3_STRATEGY1_QUALIFICATION_LEGACY_FALLBACK"
+      );
+
+      if (e3.reactionConfirmed !== true) {
+        if (
+          e3.reactionState &&
+          (
+            e3.reactionState.includes("DEVELOP") ||
+            e3.reactionState.includes("PENDING") ||
+            e3.reactionState.includes("WAIT")
+          )
+        ) {
+          warnings.push("ENGINE3_REACTION_DEVELOPING");
+          blockers.push("ENGINE3_REACTION_WAITING");
+        } else {
+          blockers.push("ENGINE3_REACTION_NOT_CONFIRMED");
+        }
+      }
+
+      if (e3.allowed !== true) {
+        blockers.push("ENGINE3_PAPER_REACTION_NOT_ALLOWED");
       }
     }
 
@@ -718,6 +792,14 @@ export function evaluateEngine6Strategy1Phase4Contract({
 
     reaction: {
       evaluationAuthorized: e3.evaluationAuthorized,
+      engine3Strategy1QualifiedForEngine6:
+        e3.strategy1Qualified,
+      qualificationExplicitlyPublished:
+        engine3Qualification.explicitlyPublished,
+      qualificationSource:
+        engine3Qualification.source,
+      engine3Qualified:
+        engine3Qualification.qualified,
       reactionConfirmed: e3.reactionConfirmed,
       reactionState: e3.reactionState,
       authorizedReactionState: e3.authorizedReactionState,
