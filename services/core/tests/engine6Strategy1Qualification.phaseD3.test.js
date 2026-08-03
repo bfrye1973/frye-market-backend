@@ -370,7 +370,7 @@ test("snapshot wrapper consumes shared qualification resolver and hard-disables 
 
   assert.match(
     source,
-    /paperShortAllowed:\\s*false/
+    /paperShortAllowed:\s*false/
   );
 
   assert.match(
