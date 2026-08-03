@@ -19,6 +19,7 @@
 import fs from "fs";
 import { buildEngine22DegreeWaveContext } from "./engine22DegreeWaveContext.js";
 import { buildEngine26LocationReactionContext } from "./engine26LocationReactionContext.js";
+import { deriveCandleCompletionTruth } from "./candleCompletionTruth.js";
 
 const ENGINE = "engine3.fastImbalanceReaction.v1";
 const SOURCE = "ENGINE26_IMBALANCE_WATCH";
@@ -548,6 +549,7 @@ function makeInactiveResult({
   priorCandle = null,
   engine22WaveStrategy = null,
   engine26StructuralContext = null,
+  candleCompletionTruth = null,
 }) {
   const quality = "WEAK";
   const direction = "NEUTRAL";
@@ -576,7 +578,18 @@ function makeInactiveResult({
     symbol: symbol || "ES",
     tf: tf || "10m",
 
-    candleClosed: false,
+    candleClosed:
+      candleCompletionTruth?.latestBarCompletionState === "COMPLETED"
+        ? true
+        : candleCompletionTruth?.latestBarCompletionState === "FORMING"
+        ? false
+        : null,
+    candleCompletionState:
+      candleCompletionTruth?.latestBarCompletionState || "NO_BARS",
+    evaluationTimeMs: candleCompletionTruth?.evaluationTimeMs ?? null,
+    supportingBarTime: lastCandle?.time ?? null,
+    supportingExpectedCloseTimeMs:
+      candleCompletionTruth?.latestExpectedCloseTimeMs ?? null,
     earlySignal: false,
 
     state: locationAdjusted.state,
@@ -627,10 +640,16 @@ export function buildFastImbalanceReaction({
   confluence = null,
   engine22WaveStrategy = null,
   engine26StructuralContext = null,
+  evaluationTimeMs = null,
 } = {}) {
   const bars = Array.isArray(bars10m) ? bars10m.map(normalizeBar) : [];
   const last = bars[bars.length - 1] || null;
   const prev = bars[bars.length - 2] || null;
+  const candleCompletionTruth = deriveCandleCompletionTruth({
+    bars,
+    timeframe: tf,
+    evaluationTimeMs,
+  });
 
   const price =
     validPrice(currentPrice) ??
@@ -652,6 +671,7 @@ export function buildFastImbalanceReaction({
       priorCandle: prev,
       engine22WaveStrategy,
       engine26StructuralContext,
+      candleCompletionTruth,
       reasonCodes: manualZonesRead.reasonCodes,
     });
   }
@@ -672,6 +692,7 @@ export function buildFastImbalanceReaction({
       priorCandle: prev,
       engine22WaveStrategy,
       engine26StructuralContext,
+      candleCompletionTruth,
       reasonCodes: [
         "PRICE_NOT_NEAR_MANUAL_IMBALANCE",
         ...manualZonesRead.reasonCodes,
@@ -690,6 +711,7 @@ export function buildFastImbalanceReaction({
       priorCandle: prev,
       engine22WaveStrategy,
       engine26StructuralContext,
+      candleCompletionTruth,
       reasonCodes: [
         "INSUFFICIENT_CANDLES",
         ...manualZonesRead.reasonCodes,
@@ -707,7 +729,9 @@ export function buildFastImbalanceReaction({
   const rawState = evaluation.state || "NO_SIGNAL";
   const rawQuality = classifyQuality(rawState);
   const rawDirection = classifyDirection(rawState);
-  const rawConfirmed = classifyConfirmed(rawState);
+  const rawConfirmed =
+    classifyConfirmed(rawState) &&
+    candleCompletionTruth.latestBarCompletionState === "COMPLETED";
 
   const locationAdjusted = applyEngine26LocationContext({
     engine26StructuralContext,
@@ -756,7 +780,17 @@ export function buildFastImbalanceReaction({
     symbol,
     tf,
 
-    candleClosed: false,
+    candleClosed:
+      candleCompletionTruth.latestBarCompletionState === "COMPLETED"
+        ? true
+        : candleCompletionTruth.latestBarCompletionState === "FORMING"
+        ? false
+        : null,
+    candleCompletionState: candleCompletionTruth.latestBarCompletionState,
+    evaluationTimeMs: candleCompletionTruth.evaluationTimeMs,
+    supportingBarTime: last?.time ?? null,
+    supportingExpectedCloseTimeMs:
+      candleCompletionTruth.latestExpectedCloseTimeMs,
     earlySignal,
 
     state,
@@ -827,6 +861,7 @@ export function attachFastImbalanceReactionToConfluence({
   bars10m = [],
   engine26FastWatch = null,
   engine26StructuralContext = null,
+  evaluationTimeMs = null,
 }) {
   const currentPrice =
     engine22WaveStrategy?.currentLifecycleState?.confirmationContext?.reference?.currentPrice ??
@@ -842,6 +877,7 @@ export function attachFastImbalanceReactionToConfluence({
     confluence: patchedConfluence,
     engine22WaveStrategy,
     engine26StructuralContext,
+    evaluationTimeMs,
   });
 
   patchedConfluence.context = patchedConfluence.context || {};
