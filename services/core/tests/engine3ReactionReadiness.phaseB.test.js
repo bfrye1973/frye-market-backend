@@ -338,7 +338,7 @@ test("neutral V2 handoff exposes fresh LONG raw and normalized direction", () =>
 
   assert.equal(
     result.reactionReadiness.authorization.contactState,
-    null
+    "NEGOTIATED_LINE_CONTACT"
   );
 
   assertExactCopies(result);
