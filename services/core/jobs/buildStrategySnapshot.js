@@ -40,6 +40,7 @@ import { buildEngine22LifecycleReaction } from "../logic/engine3/engine22Lifecyc
 import { attachPaperScalpReactionToConfluence } from "../logic/engine3/paperScalpReaction.js";
 import { attachFastImbalanceReactionToConfluence } from "../logic/engine3/fastImbalanceReaction.js";
 import { attachCurrentLevelActionToConfluence } from "../logic/priceAction/currentLevelAction.js";
+import { deriveCandleCompletionTruth } from "../logic/engine3/candleCompletionTruth.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { listTrades } from "../logic/journal/tradeJournalStore.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
@@ -3813,7 +3814,13 @@ function barTime(bar) {
   return Number.isFinite(t) ? t : null;
 }
 
-async function buildEma10Posture({ symbol, tf, label, limit = 120 }) {
+async function buildEma10Posture({
+  symbol,
+  tf,
+  label,
+  limit = 120,
+  evaluationTimeMs = null,
+}) {
   const path = ohlcPathForSymbol(symbol);
   const u = new URL(`${CORE_BASE}${path}`);
 
@@ -3824,11 +3831,24 @@ async function buildEma10Posture({ symbol, tf, label, limit = 120 }) {
   const r = await fetchJson(u.toString(), 15000);
   const bars = normalizeOhlcBars(r?.json);
 
-  const closes = bars
-    .map(barClose)
-    .filter((x) => Number.isFinite(x));
+const completionTruth =
+  tf === "10m"
+    ? deriveCandleCompletionTruth({
+        bars,
+        timeframe: tf,
+        evaluationTimeMs,
+      })
+    : null;
 
-  const lastBar = bars.length ? bars[bars.length - 1] : null;
+const officialBars = completionTruth?.completedBars || bars;
+
+const closes = officialBars
+  .map(barClose)
+  .filter((x) => Number.isFinite(x));
+
+const lastBar = officialBars.length
+  ? officialBars[officialBars.length - 1]
+  : null;
   const close = lastBar ? barClose(lastBar) : null;
   const ema10 = calcEma(closes, 10);
   const ema20 = calcEma(closes, 20);
@@ -3883,6 +3903,15 @@ return {
   lastBarTime: lastBar ? barTime(lastBar) : null,
   barCount: bars.length,
   bars,
+  ...(completionTruth
+  ? {
+      completedBars: completionTruth.completedBars,
+      formingBar: completionTruth.formingBar,
+      completionUnknownBars: completionTruth.completionUnknownBars,
+      completionState: completionTruth.latestBarCompletionState,
+      evaluationTimeMs: completionTruth.evaluationTimeMs,
+    }
+  : {}),
   source: path,
   error:
     r?.ok === true
@@ -3891,13 +3920,14 @@ return {
 };
 }
 
-async function buildEmaPostureBlock(symbol) {
+async function buildEmaPostureBlock(symbol, evaluationTimeMs = null) {
   const [tenMinute, oneHour, fourHour, daily] = await Promise.all([
     buildEma10Posture({
       symbol,
       tf: "10m",
       label: "10m EMA10 Trigger Layer",
       limit: 120,
+      evaluationTimeMs,
     }).catch((err) => ({
       ok: false,
       symbol,
@@ -7229,7 +7259,8 @@ async function processStrategy(
   spyReactionQuality = null,
   spyVolumeBehavior = null,
   engine25Context = null,
-  previousSnapshot = null
+  previousSnapshot = null,
+  evaluationTimeMs = null
 ) {
 
 let contextResp = null;
@@ -7658,6 +7689,7 @@ attachCurrentLevelActionToConfluence({
   engine1Context,
   bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
   bars30m: [],
+  evaluationTimeMs,
 });
 
 attachPaperScalpReactionToConfluence({
