@@ -527,13 +527,12 @@ function applyEngine26LocationContext({
   });
 
   return {
-    state: engine26LocationContext?.state || state,
-    quality: engine26LocationContext?.quality || quality,
-    direction: engine26LocationContext?.direction || direction,
-    confirmed:
-      engine26LocationContext?.confirmed != null
-        ? engine26LocationContext.confirmed
-        : confirmed,
+    // Phase C: Engine 26 context is diagnostic here only.
+    // Primary fast reaction facts remain the raw candle classification.
+    state,
+    quality,
+    direction,
+    confirmed,
     engine26LocationContext,
   };
 }
@@ -584,6 +583,10 @@ function makeInactiveResult({
     quality: locationAdjusted.quality,
     direction: locationAdjusted.direction,
     confirmed: locationAdjusted.confirmed,
+    rawState: state,
+    rawQuality: quality,
+    rawDirection: direction,
+    rawConfirmed: confirmed,
 
     waveContext: buildWaveContext({
       engine22WaveStrategy,
@@ -763,6 +766,7 @@ export function buildFastImbalanceReaction({
     direction,
     rawDirection,
     confirmed,
+    rawConfirmed,
 
     waveContext: buildWaveContext({
       engine22WaveStrategy,
