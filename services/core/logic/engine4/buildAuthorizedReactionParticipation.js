@@ -584,7 +584,8 @@ function buildPlainEnglishLines(result) {
     result?.participationEvaluationEligible !== true &&
     result?.reactionConfirmed !== true
   ) {
-    lines.push("Engine 4 is waiting because Engine 3 participation evaluation is not eligible.");
+    // Preserve the established Phase 3 timeline wording for compatibility.
+    lines.push("Engine 4 is waiting because Engine 3 reaction is not confirmed.");
   } else if (result?.participationConfirmed !== true) {
     lines.push("Engine 4 is waiting for participation to confirm.");
   } else if (result?.allowed === true) {
