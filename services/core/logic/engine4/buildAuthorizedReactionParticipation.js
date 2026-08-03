@@ -355,6 +355,23 @@ function resolveReactionConfirmed(reaction) {
   );
 }
 
+function resolveParticipationEvaluationEligibility(reaction) {
+  const explicitlyPublished =
+    reaction &&
+    Object.prototype.hasOwnProperty.call(
+      reaction,
+      "participationEvaluationEligible"
+    );
+
+  return {
+    explicitlyPublished,
+    eligible:
+      explicitlyPublished
+        ? reaction?.participationEvaluationEligible === true
+        : resolveReactionConfirmed(reaction),
+  };
+}
+
 function resolveDirection(reaction, tacticalParticipation) {
   return safeUpper(
     reaction?.direction ||
@@ -502,8 +519,32 @@ function resolvePromotedContactContext({
   };
 }
 
-function resolveParticipationEvaluationDirection({ direction, promotedContext }) {
-  const expected = safeUpper(promotedContext?.expectedParticipationDirection, "");
+function resolveParticipationEvaluationDirection({
+  reaction,
+  direction,
+  promotedContext,
+  participationEligibility,
+}) {
+  const reactionDirection = safeUpper(
+    reaction?.direction,
+    "NEUTRAL"
+  );
+
+  if (participationEligibility?.explicitlyPublished === true) {
+    return (
+      participationEligibility.eligible === true &&
+      ["LONG", "SHORT"].includes(reactionDirection)
+    )
+      ? reactionDirection
+      : "NEUTRAL";
+  }
+
+  // Legacy compatibility only for pre-D2 reaction objects that do not
+  // publish participationEvaluationEligible.
+  const expected = safeUpper(
+    promotedContext?.expectedParticipationDirection,
+    ""
+  );
 
   if (["LONG", "SHORT"].includes(expected)) {
     return expected;
@@ -539,8 +580,11 @@ function buildPlainEnglishLines(result) {
     lines.push("Engine 4 is not killing the setup.");
   }
 
-  if (result?.reactionConfirmed !== true) {
-    lines.push("Engine 4 is waiting because Engine 3 reaction is not confirmed.");
+  if (
+    result?.participationEvaluationEligible !== true &&
+    result?.reactionConfirmed !== true
+  ) {
+    lines.push("Engine 4 is waiting because Engine 3 participation evaluation is not eligible.");
   } else if (result?.participationConfirmed !== true) {
     lines.push("Engine 4 is waiting for participation to confirm.");
   } else if (result?.allowed === true) {
@@ -682,6 +726,7 @@ function baseResult({
   reactionState,
   evaluationAuthorized,
   reactionConfirmed,
+  participationEligibility,
   promotedContext,
   participationEvaluationDirection,
 }) {
@@ -733,6 +778,18 @@ function baseResult({
     evaluationAuthorized,
     reactionConfirmed,
     reactionState,
+
+    participationEvaluationEligible:
+      participationEligibility?.eligible === true,
+
+    participationEvaluationEligibilityPublished:
+      participationEligibility?.explicitlyPublished === true,
+
+    qualifiedParticipationEvaluation:
+      participationEligibility?.eligible === true &&
+      ["LONG", "SHORT"].includes(
+        safeUpper(participationEvaluationDirection, "NEUTRAL")
+      ),
 
     participationObservation: true,
     participationDeveloping: false,
@@ -832,6 +889,9 @@ export function buildEngine4AuthorizedReactionParticipation({
       mode: "PAPER_ONLY",
       participationContractVersion: PARTICIPATION_CONTRACT_VERSION,
       participationObservation: false,
+      participationEvaluationEligible: false,
+      participationEvaluationEligibilityPublished: false,
+      qualifiedParticipationEvaluation: false,
       participationDeveloping: false,
       participationConfirmed: false,
       participationState: STATES.WAITING,
@@ -858,6 +918,8 @@ export function buildEngine4AuthorizedReactionParticipation({
   const reactionState = resolveReactionState(reaction);
   const evaluationAuthorized = resolveEvaluationAuthorized(reaction);
   const reactionConfirmed = resolveReactionConfirmed(reaction);
+  const participationEligibility =
+    resolveParticipationEvaluationEligibility(reaction);
   const direction = resolveDirection(reaction, tacticalParticipation);
   const quality = resolveQuality(reaction, tacticalParticipation);
   const promotedContext = resolvePromotedContactContext({
@@ -866,8 +928,10 @@ export function buildEngine4AuthorizedReactionParticipation({
     engine26ReactionHandoff,
   });
   const participationEvaluationDirection = resolveParticipationEvaluationDirection({
+    reaction,
     direction,
     promotedContext,
+    participationEligibility,
   });
   const volumeMeta = computeVolumeMetadata({ reaction, tacticalParticipation });
 
@@ -880,6 +944,7 @@ export function buildEngine4AuthorizedReactionParticipation({
     reactionState,
     evaluationAuthorized,
     reactionConfirmed,
+    participationEligibility,
     promotedContext,
     participationEvaluationDirection,
   });
@@ -951,7 +1016,15 @@ export function buildEngine4AuthorizedReactionParticipation({
 
   const adverseCompleted = completedAdverseEvidence({ reaction, direction: participationEvaluationDirection, tacticalParticipation, volumeMeta });
 
-  if (reactionConfirmed === true && adverseCompleted === true) {
+  const qualifiedParticipationEvaluation =
+    result.qualifiedParticipationEvaluation === true;
+
+  const engine3GateSatisfied =
+    participationEligibility.explicitlyPublished === true
+      ? qualifiedParticipationEvaluation
+      : reactionConfirmed === true;
+
+  if (engine3GateSatisfied && adverseCompleted === true) {
     return finalizeResult({
       ...result,
       participationState: STATES.ADVERSE,
@@ -973,12 +1046,20 @@ export function buildEngine4AuthorizedReactionParticipation({
   });
 
   if (volumeMeta.formingCandle === true) {
-    const supportDefenseDeveloping = participationEvaluationDirection === "LONG" && reactionConfirmed === true && constructive === true;
-    const sellerFailureDeveloping = participationEvaluationDirection === "LONG" && reactionConfirmed === true && reactionState.includes("SELLER_FAILURE");
+    const supportDefenseDeveloping =
+      participationEvaluationDirection === "LONG" &&
+      engine3GateSatisfied &&
+      constructive === true;
+
+    const sellerFailureDeveloping =
+      participationEvaluationDirection === "LONG" &&
+      engine3GateSatisfied &&
+      reactionState.includes("SELLER_FAILURE");
 
     return finalizeResult({
       ...result,
-      participationDeveloping: reactionConfirmed === true || constructive === true,
+      participationDeveloping:
+        engine3GateSatisfied || constructive === true,
       participationConfirmed: false,
       participationState: STATES.FORMING,
       status: STATES.FORMING,
@@ -999,7 +1080,10 @@ export function buildEngine4AuthorizedReactionParticipation({
     });
   }
 
-  if (reactionConfirmed !== true) {
+  if (engine3GateSatisfied !== true) {
+    const explicitEligibilityBlocked =
+      participationEligibility.explicitlyPublished === true;
+
     return finalizeResult({
       ...result,
       participationDeveloping: constructive === true,
@@ -1010,10 +1094,27 @@ export function buildEngine4AuthorizedReactionParticipation({
       allowed: false,
       confirmed: false,
       hardBlocked: false,
-      blockers: constructive ? [] : ["ENGINE3_REACTION_NOT_CONFIRMED"],
+      direction: "NEUTRAL",
+      blockers: constructive
+        ? []
+        : [
+            explicitEligibilityBlocked
+              ? "ENGINE3_PARTICIPATION_EVALUATION_NOT_ELIGIBLE"
+              : "ENGINE3_REACTION_NOT_CONFIRMED",
+          ],
       reasonCodes: unique([
         ...result.reasonCodes,
-        constructive ? "DEVELOPING_PARTICIPATION_REACTION_NOT_CONFIRMED" : "ENGINE3_REACTION_NOT_CONFIRMED",
+        explicitEligibilityBlocked
+          ? (
+              constructive
+                ? "DEVELOPING_PARTICIPATION_ENGINE3_NOT_ELIGIBLE"
+                : "ENGINE3_PARTICIPATION_EVALUATION_NOT_ELIGIBLE"
+            )
+          : (
+              constructive
+                ? "DEVELOPING_PARTICIPATION_REACTION_NOT_CONFIRMED"
+                : "ENGINE3_REACTION_NOT_CONFIRMED"
+            ),
       ]),
     });
   }
@@ -1035,7 +1136,14 @@ export function buildEngine4AuthorizedReactionParticipation({
       confirmed: true,
       hardBlocked: false,
       downgradeOnly: true,
-      direction: promotedContext.promotedContactActive ? "NEUTRAL" : direction,
+      direction:
+        participationEligibility.explicitlyPublished === true
+          ? participationEvaluationDirection
+          : (
+              promotedContext.promotedContactActive
+                ? "NEUTRAL"
+                : direction
+            ),
       reasonCodes: unique([
         ...result.reasonCodes,
         "PARTICIPATION_CONFIRMED",
