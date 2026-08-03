@@ -3007,6 +3007,18 @@ function buildEngine6PaperPermission({
     engine3PaperReactionActive:
       reactionActive,
 
+    engine3Strategy1QualificationExplicitlyPublished:
+      engine3Qualification.explicitlyPublished,
+
+    engine3Strategy1QualifiedForEngine6:
+      engine3Qualification.qualified,
+
+    engine3Strategy1QualificationSource:
+      engine3Qualification.source,
+
+    engine3ReactionConfirmedDiagnostic:
+      reactionConfirmed,
+
     engine3PaperReactionAllowed:
       reactionAllowed,
 
@@ -3039,8 +3051,7 @@ function buildEngine6PaperPermission({
       ),
 
     paperShortAllowed:
-      fastIntradayPaperAllow === true &&
-      direction === "SHORT",
+      false,
 
     paperLongAllowed:
       fastIntradayPaperAllow === true &&
