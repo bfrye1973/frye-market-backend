@@ -71,7 +71,6 @@ const BLOCKED_STATES = new Set([
 
   // New authorized-location states.
   "WAITING_FOR_ENGINE26_LOCATION",
-  "WATCHING_AUTHORIZED_LOCATION",
   "REACTION_FAILED",
   "REACTION_INVALIDATED",
 ]);
@@ -504,6 +503,39 @@ function buildBasePaperScalpReaction({
     symbol:
       engine26LocationContext?.symbol ?? null,
 
+    setupClass:
+      engine26LocationContext?.setupClass ?? null,
+
+    setupGrade:
+      engine26LocationContext?.setupGrade ?? null,
+
+    identitySetupKey:
+      engine26LocationContext?.identitySetupKey ?? null,
+
+    candidateIdentityVersion:
+      engine26LocationContext?.candidateIdentityVersion ?? null,
+
+    armed:
+      engine26LocationContext?.armed === true,
+
+    chainArmed:
+      engine26LocationContext?.chainArmed === true,
+
+    contactState:
+      engine26LocationContext?.contactState ?? null,
+
+    directionState:
+      engine26LocationContext?.directionState ?? null,
+
+    canonicalIdentity:
+      engine26LocationContext?.canonicalIdentity || null,
+
+    sourceIdentity:
+      engine26LocationContext?.sourceIdentity || null,
+
+    identityComparison:
+      engine26LocationContext?.identityComparison || null,
+
     timeframe:
       engine26LocationContext?.timeframe ?? null,
 
@@ -650,24 +682,12 @@ function buildMissingReaction({
   engine26ReactionHandoff = null,
   engine26StructuralContext = null,
 } = {}) {
-const engine26LocationContextRaw =
-  buildEngine26LocationReactionContext({
-    engine26ReactionHandoff,
-    engine26StructuralContext,
-    reactionInput: null,
-  });
-
 const engine26LocationContext =
-  engine26LocationContextRaw &&
-  typeof engine26LocationContextRaw === "object"
-    ? {
-        ...engine26LocationContextRaw,
-        laneId:
-          engine26LocationContextRaw?.laneId ??
-          engine26ReactionHandoff?.laneId ??
-          null,
-      }
-    : engine26LocationContextRaw;
+    buildEngine26LocationReactionContext({
+      engine26ReactionHandoff,
+      engine26StructuralContext,
+      reactionInput: null,
+    });
 
   const waitingForEngine26 =
     engine26LocationContext?.state ===
@@ -761,7 +781,15 @@ const engine26LocationContext =
 
   return {
     ...paperScalpReaction,
-    reactionReadiness,
+    reactionReadiness: {
+      ...reactionReadiness,
+      canonicalIdentity:
+        engine26LocationContext?.canonicalIdentity || null,
+      sourceIdentity:
+        engine26LocationContext?.sourceIdentity || null,
+      identityComparison:
+        engine26LocationContext?.identityComparison || null,
+    },
   };
 }
 
@@ -796,30 +824,17 @@ function evaluateReactionForPaper({
     "NEUTRAL"
   );
 
-const engine26LocationContextRaw =
-  buildEngine26LocationReactionContext({
-    engine26ReactionHandoff,
-    engine26StructuralContext,
-
-    reactionInput: {
-      ...reactionInput,
-      state: rawState,
-      quality: rawQuality,
-      direction: rawActionDirection,
-    },
-  });
-
 const engine26LocationContext =
-  engine26LocationContextRaw &&
-  typeof engine26LocationContextRaw === "object"
-    ? {
-        ...engine26LocationContextRaw,
-        laneId:
-          engine26LocationContextRaw?.laneId ??
-          engine26ReactionHandoff?.laneId ??
-          null,
-      }
-    : engine26LocationContextRaw;
+    buildEngine26LocationReactionContext({
+      engine26ReactionHandoff,
+      engine26StructuralContext,
+      reactionInput: {
+        ...reactionInput,
+        state: rawState,
+        quality: rawQuality,
+        direction: rawActionDirection,
+      },
+    });
 
   /*
    * Preserve the observed reaction state for existing Engine 3/6 behavior.
@@ -844,19 +859,10 @@ const engine26LocationContext =
       observedState
     );
 
-  const quality =
-    safeUpper(
-      engine26LocationContext?.quality ||
-        rawQuality,
-      rawQuality
-    );
-
-  const actionDirection =
-    safeUpper(
-      engine26LocationContext?.direction ||
-        rawActionDirection,
-      rawActionDirection
-    );
+  // Phase C: selected Engine 3 reaction facts remain branch-authoritative.
+  // Engine 26 authorization quality/direction are transported separately.
+  const quality = rawQuality;
+  const actionDirection = rawActionDirection;
 
   const engine22Direction =
     getEngine22Direction(
@@ -865,7 +871,16 @@ const engine26LocationContext =
 
   const blockers = [];
 
+  const identityMismatches = Array.isArray(
+    engine26LocationContext?.identityComparison?.mismatches
+  )
+    ? engine26LocationContext.identityComparison.mismatches
+    : [];
+
+  blockers.push(...identityMismatches);
+
   const reasonCodes = [
+    ...identityMismatches,
     fastMode === true
       ? "FAST_IMBALANCE_WATCH"
       : null,
@@ -892,7 +907,8 @@ const engine26LocationContext =
   ];
 
   const authorizationBlocked =
-    engine26LocationContext?.forceAllowedFalse === true;
+    engine26LocationContext?.forceAllowedFalse === true ||
+    identityMismatches.length > 0;
 
   const qualityAllowed =
     GOOD_QUALITY.has(quality);
@@ -1160,9 +1176,9 @@ const engine26LocationContext =
     if (
       engine26LocationContext?.blocker
     ) {
-      blockers.push(
-        engine26LocationContext.blocker
-      );
+      if (!blockers.includes(engine26LocationContext.blocker)) {
+        blockers.push(engine26LocationContext.blocker);
+      }
     }
 
     reasonCodes.push(
@@ -1250,7 +1266,15 @@ const engine26LocationContext =
 
   return {
     ...paperScalpReaction,
-    reactionReadiness,
+    reactionReadiness: {
+      ...reactionReadiness,
+      canonicalIdentity:
+        engine26LocationContext?.canonicalIdentity || null,
+      sourceIdentity:
+        engine26LocationContext?.sourceIdentity || null,
+      identityComparison:
+        engine26LocationContext?.identityComparison || null,
+    },
   };
 }
 
