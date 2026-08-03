@@ -70,6 +70,7 @@ import {
   evaluateEngine6Strategy1Phase4Contract,
   filterEngine15ArtifactsForFastLane,
   isEngine6FastLaneId,
+  resolveEngine3Strategy1Qualification,
 } from "../logic/engine6/strategy1PermissionContract.js";
 import {
   buildEngine7ProposedSizingPreview,
@@ -2021,7 +2022,7 @@ function buildEngine6PaperPermission({
     paperReaction?.authorizedReactionState || ""
   ).toUpperCase();
 
-  const reactionConfirmed =
+  const legacyEngine3Qualification =
     usingAuthorizedReaction
       ? (
           paperReaction?.authorized === true &&
@@ -2031,8 +2032,17 @@ function buildEngine6PaperPermission({
         )
       : paperReaction?.allowed === true;
 
+  const engine3Qualification =
+    resolveEngine3Strategy1Qualification({
+      reaction: paperReaction,
+      legacyQualified: legacyEngine3Qualification,
+    });
+
+  const reactionConfirmed =
+    paperReaction?.reactionConfirmed === true;
+
   const reactionAllowed =
-    reactionConfirmed === true;
+    engine3Qualification.qualified === true;
 
   const reactionActive =
     paperReaction?.active === true;
