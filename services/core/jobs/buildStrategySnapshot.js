@@ -2279,9 +2279,22 @@ function buildEngine6PaperPermission({
     usingAuthorizedReaction
       ? "ENGINE6_AUTHORIZED_ENGINE3_INPUT"
       : "ENGINE6_LEGACY_ENGINE3_INPUT",
+
     explicitAuthorizedParticipation
       ? "ENGINE6_AUTHORIZED_ENGINE4_INPUT"
       : "ENGINE6_LEGACY_ENGINE4_INPUT",
+
+    engine3Qualification.explicitlyPublished
+      ? (
+          engine3Qualification.qualified
+            ? "ENGINE3_STRATEGY1_QUALIFIED_EXPLICIT"
+            : "ENGINE3_STRATEGY1_NOT_QUALIFIED"
+        )
+      : "ENGINE3_STRATEGY1_QUALIFICATION_LEGACY_FALLBACK",
+
+    engine3Qualification.reactionConfirmedDiagnosticOnly
+      ? "ENGINE3_REACTION_CONFIRMED_DIAGNOSTIC_ONLY"
+      : null,
   ];
 
   if (strategy1Phase4Contract?.applies === true) {
@@ -2306,10 +2319,11 @@ function buildEngine6PaperPermission({
   }
   if (!reactionAllowed) {
     blockers.push(
-      "ENGINE3_PAPER_REACTION_NOT_ALLOWED"
+      engine3Qualification.explicitlyPublished
+        ? "ENGINE3_STRATEGY1_NOT_QUALIFIED"
+        : "ENGINE3_PAPER_REACTION_NOT_ALLOWED"
     );
   }
-
   if (
     usingAuthorizedReaction &&
     authorizedReactionState ===
@@ -2581,8 +2595,7 @@ function buildEngine6PaperPermission({
     participationHardBlocked !== true &&
 
     engine25HardBlocked !== true &&
-    direction !== "NONE" &&
-    direction !== "NEUTRAL" &&
+    direction === "LONG" &&
     Number.isFinite(targetPoints) &&
     targetPoints >= 8;
 
@@ -2618,8 +2631,18 @@ function buildEngine6PaperPermission({
     );
 
     reasonCodes.push(
-      "ENGINE3_AUTHORIZED_REACTION_CONFIRMED"
+      engine3Qualification.explicitlyPublished
+        ? "ENGINE3_STRATEGY1_QUALIFIED_EXPLICIT"
+        : "ENGINE3_STRATEGY1_QUALIFICATION_LEGACY_FALLBACK"
     );
+
+    if (
+      engine3Qualification.reactionConfirmedDiagnosticOnly
+    ) {
+      reasonCodes.push(
+        "ENGINE3_REACTION_CONFIRMED_DIAGNOSTIC_ONLY"
+      );
+    }
 
     reasonCodes.push(
       "ENGINE4_AUTHORIZED_PARTICIPATION_CONFIRMED"
