@@ -273,7 +273,7 @@ test("SHORT passing and MIXED cases retain canonical behavior", () => {
   assertExactCopies(blocked);
 });
 
-test("WATCHING_AUTHORIZED_LOCATION exposes forced denial without changing blockers", () => {
+test("WATCHING_AUTHORIZED_LOCATION is diagnostic and does not automatically force denial", () => {
   const result = build({
     current: reactionInput({
       state: "WICK_BELOW_AND_RECLAIM",
@@ -283,7 +283,7 @@ test("WATCHING_AUTHORIZED_LOCATION exposes forced denial without changing blocke
     }),
   });
 
-  assert.equal(result.allowed, false);
+  assert.equal(result.allowed, true);
   assert.equal(
     result.authorizedReactionState,
     "WATCHING_AUTHORIZED_LOCATION"
@@ -296,17 +296,17 @@ test("WATCHING_AUTHORIZED_LOCATION exposes forced denial without changing blocke
 
   assert.equal(
     result.reactionReadiness.authorization.forceAllowedFalse,
-    true
+    false
   );
 
   assert.equal(
     result.reactionReadiness.authorization.blocker,
-    "AUTHORIZED_REACTION_NOT_CONFIRMED"
+    null
   );
 
   assert.equal(
     result.reactionReadiness.productionAllowed,
-    false
+    true
   );
 
   assertExactCopies(result);
@@ -322,7 +322,7 @@ test("neutral V2 handoff exposes fresh LONG raw and normalized direction", () =>
     }),
   });
 
-  assert.equal(result.expectedReactionDirection, "NEUTRAL");
+  assert.equal(result.expectedReactionDirection, null);
   assert.deepEqual(result.expectedReactions, []);
   assert.equal(result.reactionExpected, true);
 
@@ -503,7 +503,7 @@ test("no source publishes readiness with exact canonical missing-reaction blocke
   assertExactCopies(result);
 });
 
-test("identity transport gaps remain visible as null rather than repaired", () => {
+test("full canonical Engine 26 identity is transported into readiness diagnostics", () => {
   const result = build();
 
   assert.equal(
@@ -528,22 +528,50 @@ test("identity transport gaps remain visible as null rather than repaired", () =
 
   assert.equal(
     result.reactionReadiness.identity.setupClass,
-    null
+    "NEGOTIATED_ZONE_ROTATION"
   );
 
   assert.equal(
     result.reactionReadiness.identity.setupGrade,
-    null
+    "A+++"
   );
 
   assert.equal(
     result.reactionReadiness.identity.identitySetupKey,
-    null
+    "NEGOTIATED_ZONE_ROTATION"
   );
 
   assert.equal(
     result.reactionReadiness.identity.candidateIdentityVersion,
-    null
+    "engine26.strategy1.v2"
+  );
+
+  assert.deepEqual(
+    result.reactionReadiness.canonicalIdentity,
+    {
+      laneId: "minute",
+      strategyId: "intraday_scalp@10m",
+      candidateId: CANDIDATE_ID,
+      zoneId: ZONE_ID,
+      symbol: "ES",
+      setupClass: "NEGOTIATED_ZONE_ROTATION",
+      setupGrade: "A+++",
+      identitySetupKey: "NEGOTIATED_ZONE_ROTATION",
+      candidateIdentityVersion: "engine26.strategy1.v2",
+    }
+  );
+
+  assert.equal(
+    result.reactionReadiness.identityComparison.comparable,
+    true
+  );
+  assert.equal(
+    result.reactionReadiness.identityComparison.matched,
+    true
+  );
+  assert.deepEqual(
+    result.reactionReadiness.identityComparison.mismatches,
+    []
   );
 });
 
