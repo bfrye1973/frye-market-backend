@@ -1152,6 +1152,195 @@ function buildPreEngine15WaveOpportunity({
   }
 }
 
+function buildCanonicalDegreeStateMirror({
+  context,
+  degreeStates,
+  currentLifecycleState,
+} = {}) {
+  const minute = degreeStates?.minute || null;
+  const subminute = degreeStates?.subminute || null;
+
+  const minuteWave = String(minute?.activeWave || "").toUpperCase();
+  const minuteStage = String(minute?.stage || "").toUpperCase();
+
+  const minuteInternal = minute?.internalStructure || null;
+  const subminuteInternal = subminute?.internalStructure || null;
+  const internal = minuteInternal || subminuteInternal || null;
+
+  const classification = String(internal?.classification || "").toUpperCase();
+
+  const isMinuteW3ExtensionMaturity =
+    minuteWave === "W3" &&
+    (
+      minuteStage.includes("EXTENSION_MATURITY") ||
+      classification === "FAST_IMPULSE_EXTENSION"
+    );
+
+  if (!isMinuteW3ExtensionMaturity) {
+    return {
+      active: false,
+      reasonCodes: ["NO_CANONICAL_DEGREE_STATE_MIRROR_APPLIED"],
+    };
+  }
+
+  const targetLevels = minute?.targetModel?.levels || {};
+  const e1618 = round2(targetLevels?.e1618 ?? targetLevels?.["e1618"]);
+  const e200 = round2(targetLevels?.e200 ?? targetLevels?.["e200"]);
+  const e2618 = round2(targetLevels?.e2618 ?? targetLevels?.["e2618"]);
+
+  const invalidationLevel = round2(
+    internal?.invalidationLevel ??
+      minute?.decisionWatch?.minuteW3Invalidation ??
+      minute?.marks?.W2?.price
+  );
+
+  const currentPrice = round2(context?.currentPrice);
+
+  const activeSetup = "MINUTE_W3_EXTENSION_MATURITY_WATCH";
+  const action = "WAIT_FOR_INTERNAL_IV_PULLBACK_OR_RECLAIM_CONFIRMATION";
+
+  const needs = [
+    "INTERNAL_IV_PULLBACK_OR_RECLAIM_CONFIRMATION",
+    "ENGINE3_DIRECTIONAL_REACTION",
+    "ENGINE4_PARTICIPATION",
+    "ENGINE15_READINESS",
+    "ENGINE6_PERMISSION",
+  ];
+
+  const reasonCodes = [
+    "ENGINE22_DEGREE_STATES_CANONICAL_MIRROR",
+    "MINUTE_W3_EXTENSION_MATURITY_WATCH",
+    "DEGREE_STATES_OVERRIDES_STALE_LIFECYCLE_TEXT",
+    "FAST_IMPULSE_EXTENSION",
+    "NO_CHASE_LONG",
+    "NO_EXECUTION",
+    "NO_PERMISSION_CREATED",
+  ];
+
+  const summary =
+    "Minute W3 is active and extended into its maturity zone. Do not chase the vertical move. Wait for an internal iv pullback or reclaim confirmation, then require Engine 3 reaction, Engine 4 participation, Engine 15 readiness, and Engine 6 permission.";
+
+  const currentLifecycleStateMirror = {
+    ...(currentLifecycleState || {}),
+    key: activeSetup,
+    headline: "Minute W3 extension maturity watch",
+    sourcePath: "engine22WaveStrategy.degreeStates.minute",
+    priority: 15,
+    action,
+    direction: "LONG",
+    bias: "BULLISH_CONTEXT_ONLY",
+    active: false,
+    readiness: "WATCH",
+    readOnly: true,
+    noExecution: true,
+    noPermissionCreated: true,
+    tradeableOpportunityBlocked: true,
+    executionBlocked: true,
+    confirmationRequired: true,
+    degree: "minute",
+    tacticalDegree: "subminute/minute",
+    needs,
+    targetContext: {
+      source: "degreeStates.minute.targetModel",
+      e1618,
+      e200,
+      e2618,
+      currentPrice,
+      maturityZone:
+        e1618 !== null && e200 !== null
+          ? {
+              lo: e1618,
+              hi: e200,
+              label: "MINUTE_W3_1618_TO_2000_EXTENSION_MATURITY_ZONE",
+            }
+          : null,
+    },
+    internalStructure: internal || null,
+    reasonCodes: [
+      ...(Array.isArray(currentLifecycleState?.reasonCodes)
+        ? currentLifecycleState.reasonCodes
+        : []),
+      ...reasonCodes,
+    ],
+  };
+
+  const waveOpportunityMirror = {
+    ok: true,
+    engine: "engine22.waveOpportunity.v1",
+    symbol: context?.symbol || "ES",
+    strategyId: context?.strategyId || "intraday_scalp@10m",
+    currentPrice,
+    active: false,
+    setupFamily: "ELLIOTT_WAVE",
+    setupType: activeSetup,
+    rawSetup: activeSetup,
+    degree: "minute",
+    tacticalDegree: "subminute/minute",
+    direction: "LONG",
+    readiness: "WATCH",
+    timing: "EXTENSION_MATURITY",
+    chaseRisk: "VERY_HIGH",
+    tradeableOpportunityBlocked: true,
+    executionBlocked: true,
+    confirmationRequired: true,
+    entryZone: {
+      type: "WAIT_FOR_PULLBACK_OR_RECLAIM",
+      lo: null,
+      hi: null,
+      trigger: null,
+    },
+    invalidation: {
+      price: invalidationLevel,
+      reason:
+        "Minute W3 remains structurally valid above its confirmed W2 low. Losing this level invalidates or forces review of the current Minute W3 breakout count.",
+    },
+    targets: {
+      e100: round2(targetLevels?.e100 ?? targetLevels?.["e100"]),
+      e1272: round2(targetLevels?.e1272 ?? targetLevels?.["e1272"]),
+      e1618,
+      e200,
+      e2618,
+    },
+    internalStructure: internal || null,
+    needs,
+    reasonCodes,
+    summary,
+  };
+
+  const tradeDecisionMirror = {
+    mode: "PAPER_ONLY",
+    engine: "engine22.tradeDecision.degreeStatesMirror.v1",
+    symbol: context?.symbol || "ES",
+    strategyId: context?.strategyId || "intraday_scalp@10m",
+    decision: "WAIT",
+    direction: "LONG",
+    setupType: activeSetup,
+    grade: "WATCH_ONLY",
+    entryAllowed: false,
+    chaseAllowed: false,
+    reason:
+      "Minute W3 is active but extended into maturity. Wait for internal iv pullback or reclaim confirmation. No entry is allowed from wave structure alone.",
+    needs,
+    reasonCodes: ["PAPER_ONLY", ...reasonCodes],
+    safety: buildSafetyObject(),
+  };
+
+  return {
+    active: true,
+    activeSetup,
+    activeTradingDegree: "minute",
+    bias: "BULLISH_CONTEXT_ONLY",
+    action,
+    chaseRisk: "VERY_HIGH",
+    severity: "info",
+    currentLifecycleState: currentLifecycleStateMirror,
+    waveOpportunity: waveOpportunityMirror,
+    tradeDecision: tradeDecisionMirror,
+    reasonCodes,
+  };
+}
+
+
 
 
 export function buildEngine22WaveStrategy(input = {}) {
@@ -1222,7 +1411,7 @@ export function buildEngine22WaveStrategy(input = {}) {
       context,
     });
 
-  const currentLifecycleState = resolveCurrentLifecycleState({ waveFibState });
+  let currentLifecycleState = resolveCurrentLifecycleState({ waveFibState });
   const degreeStates = buildDegreeStates({
   waveFibState,
   activeStructures: waveFibState?.activeStructures,
@@ -1231,6 +1420,16 @@ export function buildEngine22WaveStrategy(input = {}) {
   tf: context.tf,
   currentPrice: context.currentPrice,
 });
+
+  const degreeStateMirror = buildCanonicalDegreeStateMirror({
+    context,
+    degreeStates,
+    currentLifecycleState,
+  });
+
+  if (degreeStateMirror?.active === true) {
+    currentLifecycleState = degreeStateMirror.currentLifecycleState;
+  }
 
   const targetClusterConfidence = buildTargetClusterConfidence({
     symbol: context.symbol,
@@ -1298,6 +1497,22 @@ export function buildEngine22WaveStrategy(input = {}) {
       ],
     };
   }
+
+  if (degreeStateMirror?.active === true) {
+    waveOpportunity = {
+      ...(waveOpportunity || {}),
+      ...degreeStateMirror.waveOpportunity,
+      reasonCodes: [
+        ...(Array.isArray(waveOpportunity?.reasonCodes)
+          ? waveOpportunity.reasonCodes
+          : []),
+        ...(Array.isArray(degreeStateMirror?.waveOpportunity?.reasonCodes)
+          ? degreeStateMirror.waveOpportunity.reasonCodes
+          : []),
+      ],
+    };
+  }
+
   // DISPLAY LAYER:
   // Timeline can use Engine15 for wording, but it is not the source of opportunity truth.
   const lifecycleViews = buildLifecycleViews({
@@ -1332,7 +1547,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     sessionProfile: context.sessionProfile,
   });
 
-  const timelineRead = currentLifecycleState?.key
+  let timelineRead = currentLifecycleState?.key
     ? {
         ...(timelineReadBase || {}),
         lifecycleViews,
@@ -1357,9 +1572,31 @@ export function buildEngine22WaveStrategy(input = {}) {
         ...(timelineReadBase || {}),
         lifecycleViews,
       };
+
+  if (degreeStateMirror?.active === true) {
+    timelineRead = {
+      ...(timelineRead || {}),
+      lifecycleViews,
+      lifecycleContext,
+      headline: currentLifecycleState?.headline || "Minute W3 extension maturity watch",
+      subheadline:
+        "Minute W3 is active and extended into maturity. Do not chase. Wait for internal iv pullback/reclaim confirmation before any paper setup can advance.",
+      action: currentLifecycleState?.action || degreeStateMirror.action,
+      bias: currentLifecycleState?.bias || degreeStateMirror.bias,
+      direction: currentLifecycleState?.direction || "LONG",
+      needs: currentLifecycleState?.needs || [],
+      reasonCodes: [
+        ...(Array.isArray(timelineRead?.reasonCodes)
+          ? timelineRead.reasonCodes
+          : []),
+        "ENGINE22_DEGREE_STATE_MIRRORED_TO_TIMELINE_READ",
+      ],
+    };
+  }
+
   // POST-ENGINE15 / PAPER-ONLY CONTEXT:
   // This may look at Engine15 and confirmations, but it remains separate.
-  const tradeDecision = buildTradeDecisionSafe({
+  let tradeDecision = buildTradeDecisionSafe({
     context,
     waveFibState,
     tradeContextSummary,
@@ -1402,18 +1639,34 @@ export function buildEngine22WaveStrategy(input = {}) {
       tradeContextSummary?.headline ||
       timelineRead?.headline ||
       null,
-    bias: currentLifecycleState?.bias || tradeContextSummary?.bias || null,
+    bias:
+      degreeStateMirror?.active === true
+        ? degreeStateMirror.bias
+        : currentLifecycleState?.bias || tradeContextSummary?.bias || null,
     action:
-      currentLifecycleState?.action ||
-      tradeContextSummary?.action ||
-      timelineRead?.action ||
-      "WAIT",
+      degreeStateMirror?.active === true
+        ? degreeStateMirror.action
+        : currentLifecycleState?.action ||
+          tradeContextSummary?.action ||
+          timelineRead?.action ||
+          "WAIT",
     severity:
-      tradeContextSummary?.severity || timelineRead?.severity || "neutral",
+      degreeStateMirror?.active === true
+        ? degreeStateMirror.severity
+        : tradeContextSummary?.severity || timelineRead?.severity || "neutral",
 
-    activeSetup: waveFibState?.activeSetup || null,
-    activeTradingDegree: waveFibState?.activeTradingDegree || "unknown",
-    chaseRisk: waveFibState?.chaseRisk || waveOpportunity?.chaseRisk || null,
+    activeSetup:
+      degreeStateMirror?.active === true
+        ? degreeStateMirror.activeSetup
+        : waveFibState?.activeSetup || null,
+    activeTradingDegree:
+      degreeStateMirror?.active === true
+        ? degreeStateMirror.activeTradingDegree
+        : waveFibState?.activeTradingDegree || "unknown",
+    chaseRisk:
+      degreeStateMirror?.active === true
+        ? degreeStateMirror.chaseRisk
+        : waveFibState?.chaseRisk || waveOpportunity?.chaseRisk || null,
 
     topCandidate:
       tradeContextSummary?.topCandidate ??
@@ -1435,6 +1688,9 @@ export function buildEngine22WaveStrategy(input = {}) {
       "ENGINE22G_WAVE_STRATEGY_BUILT",
       "ENGINE22_WAVE_OPPORTUNITY_PRE_ENGINE15",
       ...engine2FallbackReasonCodes,
+      ...(Array.isArray(degreeStateMirror?.reasonCodes)
+        ? degreeStateMirror.reasonCodes
+        : []),
       ...(Array.isArray(context?.reasonCodes) ? context.reasonCodes : []),
       ...(Array.isArray(waveFibState?.reasonCodes)
         ? waveFibState.reasonCodes
