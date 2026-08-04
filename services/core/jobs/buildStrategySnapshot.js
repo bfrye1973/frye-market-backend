@@ -3398,7 +3398,11 @@ function buildFinalPermissionFromEngine15({
 const readiness = String(engine15Decision?.readinessLabel || "").toUpperCase();
 const action = String(engine15Decision?.action || "").toUpperCase();
 const strategyType = String(engine15Decision?.strategyType || "NONE").toUpperCase();
-const direction = String(engine15Decision?.direction || "NONE").toUpperCase();
+const engine15Direction =
+  String(
+    engine15Decision?.direction ||
+    "NONE"
+  ).toUpperCase();
 
 const currentLifecycleState =
   engine22WaveStrategy?.currentLifecycleState ||
@@ -3479,7 +3483,14 @@ const engine6PaperPermission = buildEngine6PaperPermission({
          : "ENGINE15_HIGHER_DEGREE_READINESS_AUTHORITY",
 
     strategyType,
-    direction,
+    direction:
+      engine6PaperPermission
+        ?.engine15FastLaneExcluded === true
+        ? (
+            engine6PaperPermission?.direction ||
+            "NONE"
+           )
+         : engine15Direction,
     readinessLabel: readiness || "UNKNOWN",
     action: action || "UNKNOWN",
     executionBias: engine15Decision?.executionBias || null,
@@ -3493,7 +3504,7 @@ const engine6PaperPermission = buildEngine6PaperPermission({
 
     engine15Decision: {
       strategyType,
-      direction,
+      direction: engine15Direction,
       action,
       readinessLabel: readiness,
       executionBias: engine15Decision?.executionBias || null,
