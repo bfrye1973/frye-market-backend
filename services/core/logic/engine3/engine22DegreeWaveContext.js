@@ -22,10 +22,67 @@ function pickCorrectionType(degreeState) {
   );
 }
 
-function inferReactionVsStructure({ direction, state, subminute }) {
+function isMinuteW3InternalIvWatch(minute) {
+  const internal = minute?.internalStructure || null;
+  return (
+    safeUpper(minute?.activeWave) === "W3" &&
+    (safeUpper(minute?.stage).includes("EXTENSION_MATURITY") ||
+      safeUpper(internal?.classification) === "FAST_IMPULSE_EXTENSION") &&
+    safeUpper(internal?.currentInternalWave) === "III" &&
+    safeUpper(internal?.nextExpectedInternalWave) === "IV" &&
+    internal?.parentWaveComplete !== true &&
+    internal?.parentTransitionPossible !== true
+  );
+}
+
+function inferReactionVsStructure({ direction, state, minute, subminute }) {
   const d = safeUpper(direction, "NEUTRAL");
   const s = safeUpper(state, "NO_SIGNAL");
 
+  if (isMinuteW3InternalIvWatch(minute)) {
+    if (
+      d === "LONG" &&
+      [
+        "RECLAIMED_LEVEL",
+        "WICK_BELOW_AND_RECLAIM",
+        "SELLERS_TRAPPED",
+      ].includes(s)
+    ) {
+      return "INTERNAL_IV_RECLAIM_SUPPORT";
+    }
+
+    if (
+      d === "LONG" &&
+      [
+        "HELD_LEVEL",
+        "DIP_BOUGHT_FAST",
+        "ACCEPTING_VALUE",
+        "BREAKOUT_HOLDING",
+      ].includes(s)
+    ) {
+      return "INTERNAL_IV_SUPPORT_HOLD";
+    }
+
+    if (
+      d === "SHORT" &&
+      [
+        "FAILED_RECLAIM",
+        "REJECTING_VALUE",
+        "BREAKOUT_FAILING",
+        "LOST_LEVEL",
+      ].includes(s)
+    ) {
+      return "INTERNAL_IV_SUPPORT_FAILURE";
+    }
+
+    if (d === "SHORT") {
+      return "INTERNAL_IV_PULLBACK_REACTION";
+    }
+
+    return "STRUCTURAL_REACTION_MIXED";
+  }
+
+  const correctionType = safeUpper(pickCorrectionType(minute), "NONE");
   const tacticalText = [
     subminute?.currentRead,
     subminute?.headline,
@@ -37,9 +94,10 @@ function inferReactionVsStructure({ direction, state, subminute }) {
     .toUpperCase();
 
   const cDownActive =
-    tacticalText.includes("C_DOWN") ||
-    tacticalText.includes("C DOWN") ||
-    tacticalText.includes("SUBMINUTE_C");
+    correctionType === "ABC_DOWN" &&
+    (tacticalText.includes("C_DOWN") ||
+      tacticalText.includes("C DOWN") ||
+      tacticalText.includes("SUBMINUTE_C"));
 
   if (cDownActive && d === "SHORT") {
     return "SUPPORTS_TACTICAL_C_DOWN";
@@ -61,32 +119,38 @@ function inferReactionVsStructure({ direction, state, subminute }) {
     return "CHALLENGES_TACTICAL_C_DOWN_SUPPORT_DEFENSE";
   }
 
-  if (
-    cDownActive &&
-    d === "SHORT" &&
-    [
-      "FAILED_RECLAIM",
-      "REJECTING_VALUE",
-      "BREAKOUT_FAILING",
-      "LOST_LEVEL",
-    ].includes(s)
-  ) {
-    return "SUPPORTS_TACTICAL_C_DOWN";
-  }
-
   return "STRUCTURAL_REACTION_MIXED";
 }
 
 function buildInterpretation({ reactionVsStructure, state }) {
+  if (reactionVsStructure === "INTERNAL_IV_PULLBACK_REACTION") {
+    return "Price reaction is consistent with the expected internal iv pullback while Minute W3 remains active.";
+  }
+
+  if (reactionVsStructure === "INTERNAL_IV_SUPPORT_HOLD") {
+    return "Price is holding structural support during the expected internal iv phase. Engine 4 participation and Engine 6 permission are still required.";
+  }
+
+  if (reactionVsStructure === "INTERNAL_IV_RECLAIM_SUPPORT") {
+    return "Price has reclaimed structural support during the expected internal iv phase; Engine 4 participation is still required before watching for internal v continuation.";
+  }
+
+  if (reactionVsStructure === "INTERNAL_IV_SUPPORT_FAILURE") {
+    return "Price has lost or failed to reclaim structural support; the active Minute W3 count requires review.";
+  }
+
   if (reactionVsStructure === "SUPPORTS_TACTICAL_C_DOWN") {
-    return "Price reaction supports the tactical Subminute C-down watch inside the Minute ABC_DOWN path.";
+    return "Price reaction supports the explicitly published tactical C-down correction path.";
   }
 
   if (reactionVsStructure === "CHALLENGES_TACTICAL_C_DOWN_SUPPORT_DEFENSE") {
-    return "Price is holding/reclaiming support and challenging the tactical C-down path.";
+    return "Price is holding or reclaiming support against the explicitly published tactical C-down correction path.";
   }
 
-  return `Engine 3 reaction is ${safeUpper(state, "MIXED")} relative to the current Engine 22 degree structure.`;
+  return `Engine 3 reaction is ${safeUpper(
+    state,
+    "MIXED"
+  )} relative to the current Engine 22 degree structure.`;
 }
 
 export function buildEngine22DegreeWaveContext({
@@ -109,10 +173,14 @@ export function buildEngine22DegreeWaveContext({
   const minor = degreeStates.minor || {};
   const minute = degreeStates.minute || {};
   const subminute = degreeStates.subminute || {};
+  const minuteInternal = minute?.internalStructure || null;
+  const publishedTargetContext =
+    engine22WaveStrategy?.currentLifecycleState?.targetContext || null;
 
   const reactionVsStructure = inferReactionVsStructure({
     direction: reactionDirection,
     state: reactionState,
+    minute,
     subminute,
   });
 
@@ -136,6 +204,24 @@ export function buildEngine22DegreeWaveContext({
       headline: minute.headline || null,
       currentRead: minute.currentRead || null,
       correctionType: pickCorrectionType(minute),
+      targetModel: minute.targetModel || null,
+      internalStructure: minuteInternal,
+      currentInternalWave: minuteInternal?.currentInternalWave || null,
+      nextExpectedInternalWave:
+        minuteInternal?.nextExpectedInternalWave || null,
+      classification: minuteInternal?.classification || null,
+      parentWaveStillValid:
+        minuteInternal?.parentWaveStillValid ?? null,
+      parentWaveComplete: minuteInternal?.parentWaveComplete ?? null,
+      parentTransitionPossible:
+        minuteInternal?.parentTransitionPossible ?? null,
+      transitionRisk: minuteInternal?.transitionRisk || null,
+      supportLevel: minuteInternal?.supportLevel ?? null,
+      invalidationLevel: minuteInternal?.invalidationLevel ?? null,
+      nextTarget:
+        publishedTargetContext?.nextTarget ??
+        minute?.targetModel?.nextTarget ??
+        null,
       nestedCurrentRead:
         minute?.nestedCorrectionContext?.currentRead || null,
       expectedPath:
