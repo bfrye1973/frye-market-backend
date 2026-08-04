@@ -35,7 +35,6 @@ import { computeEngine22ScalpOpportunity } from "../logic/engine22ScalpOpportuni
 import { buildEngine22WaveStrategy } from "../logic/engine22/wave/buildEngine22WaveStrategy.js";
 import { interpretWaveEnvironment } from "../logic/engine23/interpretation/interpretWaveEnvironment.js";
 import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.js";
-import { buildWaveTradeDecision } from "../logic/engine22/decisions/buildWaveTradeDecision.js";
 import { buildEngine22LifecycleReaction } from "../logic/engine3/engine22LifecycleReaction.js";
 import { attachPaperScalpReactionToConfluence } from "../logic/engine3/paperScalpReaction.js";
 import { attachFastImbalanceReactionToConfluence } from "../logic/engine3/fastImbalanceReaction.js";
@@ -2442,17 +2441,7 @@ const engine22StructuralDirection =
       ?.internalStructure
       ?.parentWaveDirection
   );
-      : pickUsableDirection(
-          paperReaction?.direction,
-          paperReaction?.tradeDirectionBias,
-          paperParticipation?.intendedDirection,
-          paperParticipation?.direction,
-          participationDirection,
-          paperReadiness?.direction,
-          engine15Decision?.direction,
-          engine22WaveStrategy?.waveOpportunity?.direction,
-          currentLifecycleState?.direction
-        );
+     
   const setupType =
     paperReaction?.setupType ||
     engine26ImbalanceWatch?.structuralTemplate ||
@@ -3424,21 +3413,23 @@ const setupEligible =
       );
 
 const engine25ModifierPreview = buildEngine25ModifierPreview(engine25Context);
-const engine6PaperPermission = buildEngine6PaperPermission({
+const engine6PaperPermission =
+  buildEngine6PaperPermission({
+    symbol,
+    strategyId,
+    confluence,
+    engine15Decision,
+    engine22WaveStrategy,
+    engine25Context,
+    engine26ImbalanceWatch,
+    engine26LocationCandidate,
+    engine3AuthorizedReaction,
+    engine4AuthorizedParticipation,
+  });
+
 const engine6FastLaneActive =
   engine6PaperPermission
-    ?.engine15FastLaneExcluded === true;  
-  symbol,
-  strategyId,
-  confluence,
-  engine15Decision,
-  engine22WaveStrategy,
-  engine25Context,
-  engine26ImbalanceWatch,
-  engine26LocationCandidate,
-  engine3AuthorizedReaction,
-  engine4AuthorizedParticipation,
-});
+    ?.engine15FastLaneExcluded === true;
   
 
   const baseReasonCodes = Array.isArray(preliminary.reasonCodes)
@@ -9044,7 +9035,7 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
     // Do NOT rebuild Engine 22 wave strategy here.
     // The pre-Engine15 waveOpportunity is already built above and must remain source of truth.
     // Only enrich post-Engine15 / paper-only tradeDecision.
-    if (
+if (
   s.strategyId === "intraday_scalp@10m" &&
   s.tf === "10m"
 ) {
@@ -9190,10 +9181,163 @@ if (
   }
 }
       if (
-        String(symbol || "").toUpperCase() === "ES" &&
-        s.strategyId === "intraday_scalp@10m" &&
-        s.tf === "10m"
-      ) {
+  s.strategyId === "intraday_scalp@10m" &&
+  s.tf === "10m"
+) {
+  try {
+    if (
+      engine22WaveStrategy &&
+      typeof engine22WaveStrategy === "object"
+    ) {
+      engine22WaveStrategy =
+        applyEngine22CurrentLifecycleStateContract(
+          engine22WaveStrategy
+        );
+    }
+
+    attachEngine22PullbackReactionToConfluence({
+      patchedConfluence,
+      engine22WaveStrategy,
+      bars:
+        marketMeter?.layers?.emaPosture
+          ?.tenMinute?.bars || [],
+    });
+
+    attachEngine22LifecycleReactionToConfluence({
+      patchedConfluence,
+      engine22WaveStrategy,
+      bars:
+        marketMeter?.layers?.emaPosture
+          ?.tenMinute?.bars || [],
+    });
+
+    attachCurrentLevelActionToConfluence({
+      patchedConfluence,
+      engine22WaveStrategy,
+      engine25Context,
+      engine1Context,
+      bars10m:
+        marketMeter?.layers?.emaPosture
+          ?.tenMinute?.bars || [],
+      bars30m: [],
+      evaluationTimeMs,
+    });
+
+    attachFastImbalanceReactionToConfluence({
+      patchedConfluence,
+      engine22WaveStrategy,
+      engine26StructuralContext,
+      bars10m:
+        marketMeter?.layers?.emaPosture
+          ?.tenMinute?.bars || [],
+      evaluationTimeMs,
+    });
+
+    attachEngine4FastImbalanceParticipationToConfluence({
+      patchedConfluence,
+      engine22WaveStrategy,
+      bars:
+        marketMeter?.layers?.emaPosture
+          ?.tenMinute?.bars || [],
+    });
+
+    attachPaperScalpReactionToConfluence({
+      patchedConfluence,
+      engine22WaveStrategy,
+      engine26ReactionHandoff,
+      engine26StructuralContext,
+      paperShortResearchEnabled:
+        isEsIntradayScalp,
+    });
+
+    attachEngine4CurrentScalpParticipationToConfluence({
+      patchedConfluence,
+      engine22WaveStrategy,
+      engine26StructuralContext,
+      bars:
+        marketMeter?.layers?.emaPosture
+          ?.tenMinute?.bars || [],
+    });
+
+    engine22WaveStrategy = {
+      ...engine22WaveStrategy,
+
+      currentLifecycleState:
+        enrichCurrentLifecycleWithLivePriceAction({
+          currentLifecycleState:
+            engine22WaveStrategy
+              ?.currentLifecycleState ||
+            null,
+
+          currentLevelAction:
+            patchedConfluence
+              ?.context
+              ?.reaction
+              ?.currentLevelAction ||
+            null,
+        }),
+    };
+
+    attachEngine22LifecycleParticipationToConfluence({
+      patchedConfluence,
+      engine22WaveStrategy,
+      bars:
+        marketMeter?.layers?.emaPosture
+          ?.tenMinute?.bars || [],
+    });
+
+    attachEngine4AuthorizedReactionParticipation({
+      patchedConfluence,
+      engine26LocationCandidate,
+      engine26ReactionHandoff,
+    });
+  } catch (err) {
+    console.error(
+      "[E22G COMPATIBILITY ENRICHMENT ERROR]",
+      err
+    );
+
+    if (
+      engine22WaveStrategy &&
+      typeof engine22WaveStrategy === "object"
+    ) {
+      engine22WaveStrategy = {
+        ...engine22WaveStrategy,
+
+        snapshotCompatibilityError: {
+          active: true,
+
+          source:
+            "buildStrategySnapshot.compatibilityEnrichment",
+
+          compatibilityOnly: true,
+          authoritative: false,
+
+          status: "SAFE_FAILURE",
+          direction: "NONE",
+
+          noExecution: true,
+          noPermissionCreated: true,
+
+          reasonCodes: [
+            "SNAPSHOT_COMPATIBILITY_ENRICHMENT_FAILED",
+            "ENGINE22_WAVE_TRUTH_UNCHANGED",
+            "NO_EXECUTION",
+            "NO_PERMISSION_CREATED",
+          ],
+
+          debug: {
+            error:
+              String(err?.message || err),
+
+            stack:
+              String(err?.stack || ""),
+          },
+        },
+      };
+    }
+  }
+}
         try {
 
                   
