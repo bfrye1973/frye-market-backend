@@ -1,7 +1,7 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-07-27 10:00",
-  "schema": "active-wave-state-es@v4",
+  "updatedAt": "2026-08-04 07:09",
+  "schema": "active-wave-state-es@v5",
   "activeDegreeKeys": [
     "primary",
     "intermediate",
@@ -85,7 +85,8 @@
         "PRIMARY_W5_ACTIVE",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
-        "NO_PERMISSION_CREATED"
+        "NO_PERMISSION_CREATED",
+        "MINOR_W5_LAUNCH_CONTEXT_INSIDE_PRIMARY_W5"
       ]
     },
     "intermediate": {
@@ -96,9 +97,9 @@
       "parentWave": "W5",
       "activeWave": "W3",
       "stage": "ACTIVE",
-      "currentRead": "INTERMEDIATE_W3_ACTIVE_FROM_6407",
-      "headline": "Intermediate W3 active from 6407",
-      "action": "TRACK_INTERMEDIATE_W3_EXTENSION_WITH_MINOR_W4_CONTEXT",
+      "currentRead": "INTERMEDIATE_W3_ACTIVE_WITH_MINOR_W5_LAUNCH_CONTEXT",
+      "headline": "Intermediate W3 active with Minor W5 launch / Minute W3 breakout context",
+      "action": "TRACK_INTERMEDIATE_W3_EXTENSION_WITH_MINOR_W5_BREAKOUT_CONTEXT",
       "marks": {
         "W1": {
           "low": {
@@ -134,9 +135,9 @@
           "confidence": "HIGH",
           "basis": [
             "INTERMEDIATE_W3_ACTIVE_AFTER_CONFIRMED_W2_LOW",
-            "MINOR_W3_COMPLETED_WITHIN_INTERMEDIATE_W3",
-            "MINOR_W4_ABCDE_PULLBACK_ACTIVE",
-            "MINOR_W5_LAUNCH_WATCH_AFTER_W4_COMPLETION",
+            "MINOR_W4_CORRECTION_COMPLETED_CANDIDATE_AT_7323",
+            "MINOR_W5_LAUNCH_CONTEXT_ACTIVE",
+            "MINUTE_W3_BREAKOUT_ACTIVE_INSIDE_MINOR_W5",
             "INTERMEDIATE_PARENT_TREND_REMAINS_UP"
           ]
         }
@@ -146,7 +147,9 @@
       "watchOnly": true,
       "reasonCodes": [
         "INTERMEDIATE_W3_ACTIVE",
-        "MINOR_W4_ABCDE_PULLBACK_ACTIVE_INSIDE_INTERMEDIATE_W3",
+        "MINOR_W4_COMPLETED_CANDIDATE_AT_PRIOR_C_LOW_7323",
+        "MINOR_W5_LAUNCH_CONTEXT_ACTIVE",
+        "MINUTE_W3_BREAKOUT_ACTIVE",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
@@ -158,11 +161,11 @@
       "active": true,
       "parentDegree": "intermediate",
       "parentWave": "W3",
-      "activeWave": "W4",
-      "stage": "E_LEG_COMPLETION_WATCH",
-      "currentRead": "MINOR_W4_ABCDE_E_LEG_COMPLETION_WATCH",
-      "headline": "Minor W4 ABCDE pullback — E leg completion watch",
-      "action": "WATCH_E_SUPPORT_HOLD_AND_MINOR_W5_RECLAIM_CONFIRMATION",
+      "activeWave": "W5",
+      "stage": "ACTIVE_CANDIDATE",
+      "currentRead": "MINOR_W5_LAUNCH_CANDIDATE_AFTER_MINOR_W4_COMPLETION",
+      "headline": "Minor W5 launch candidate after Minor W4 completion candidate",
+      "action": "WATCH_MINOR_W5_CONTINUATION_WITH_MINUTE_W3_EXTENSION_MATURITY",
       "marks": {
         "W1": {
           "low": {
@@ -205,26 +208,27 @@
           ]
         },
         "W4": {
-          "price": 7416,
-          "time": "2026-07-27 10:00",
-          "status": "ACTIVE_CANDIDATE",
+          "price": 7323.0,
+          "time": "2026-07-29 13:00",
+          "status": "COMPLETED_CANDIDATE",
           "confidence": "MEDIUM_HIGH",
           "basis": [
-            "MINOR_W4_ABCDE_PULLBACK_ACTIVE",
-            "E_LEG_REACHED_LOWER_SUPPORT_ZONE",
-            "MINUTE_ABC_DOWN_INSIDE_E_MAY_BE_COMPLETE",
-            "WAIT_FOR_SUPPORT_HOLD_AND_RECLAIM_CONFIRMATION"
+            "PRIOR_CORRECTIVE_C_LOW_MARKED_AT_7323",
+            "MINOR_W4_CORRECTION_COMPLETION_CANDIDATE",
+            "FOLLOWED_BY_NEW_MINUTE_IMPULSE_START_ON_2026_07_30",
+            "WAIT_FOR_CONTINUATION_ACCEPTANCE_TO_FULLY_CONFIRM_MINOR_W5"
           ]
         },
         "W5": {
           "price": null,
           "time": null,
-          "status": "PROJECTED",
+          "status": "ACTIVE_CANDIDATE",
           "confidence": "MEDIUM",
           "basis": [
-            "MINOR_W5_NOT_ACTIVE_YET",
-            "MINOR_W5_LAUNCH_REQUIRES_W4_E_SUPPORT_HOLD_AND_RECLAIM",
-            "NO_AUTOMATIC_BREAKOUT_ASSUMPTION"
+            "MINOR_W5_LAUNCH_CANDIDATE_AFTER_MINOR_W4_COMPLETION_CANDIDATE",
+            "MINUTE_W1_W2_COMPLETE_AND_MINUTE_W3_BREAKOUT_ACTIVE",
+            "BREAKOUT_ABOVE_TWO_MONTH_RANGE_SUPPORTS_MINOR_W5_LAUNCH_CONTEXT",
+            "NO_AUTOMATIC_EXECUTION_OR_PERMISSION"
           ]
         },
         "A": {
@@ -277,112 +281,44 @@
         }
       },
       "correction": {
-        "active": true,
-        "type": "ABCDE_TRIANGLE",
-        "preferredType": "ABCDE_TRIANGLE",
-        "direction": "SIDEWAYS",
+        "active": false,
+        "type": "COMPLETED_CORRECTION_HISTORY",
+        "preferredType": "ABC_OR_COMPLEX_W4_CORRECTION",
+        "direction": "DOWN",
         "parentCompletedWave": "W3",
         "parentNextWave": "W5",
-        "stage": "E_LEG_COMPLETION_WATCH",
-        "currentLeg": "E",
-        "currentRead": "MINOR_W4_ABCDE_E_LEG_COMPLETION_WATCH",
-        "nextExpected": "MINOR_W5_UP_IF_E_SUPPORT_HOLDS_AND_RECLAIM_CONFIRMS",
-        "alternatePath": "DEEPER_CORRECTION_IF_E_SUPPORT_FAILS",
-        "marks": {
-          "A": {
-            "price": 7075.75,
-            "time": "2026-06-10 17:00",
-            "status": "CONFIRMED"
-          },
-          "B": {
-            "price": 7645,
-            "time": "2026-06-15 10:00",
-            "status": "CONFIRMED"
-          },
-          "C": {
-            "price": 7360,
-            "time": "2026-06-26 05:00",
-            "status": "CONFIRMED"
-          },
-          "D": {
-            "price": 7636.25,
-            "time": "2026-07-15 12:00",
-            "status": "CONFIRMED"
-          },
-          "E": {
-            "price": 7416,
-            "time": "2026-07-27 10:00",
-            "status": "ACTIVE_CANDIDATE"
-          }
-        },
-        "upperTrendline": {
-          "anchors": [
-            "B",
-            "D"
-          ],
-          "status": "ACTIVE",
-          "breakoutRule": "BREAK_AND_ACCEPT_ABOVE_B_D_RESISTANCE"
-        },
-        "lowerTrendline": {
-          "anchors": [
-            "A",
-            "C",
-            "E"
-          ],
-          "status": "ACTIVE",
-          "supportRule": "E_SUPPORT_HOLD_REQUIRED"
-        },
-        "breakoutRules": {
-          "bullish": "MINOR_W5_WATCH_AFTER_E_SUPPORT_HOLD_AND_RECLAIM",
-          "bearish": "DEEPER_CORRECTION_IF_E_SUPPORT_FAILS"
-        },
-        "localSupportWatch": {
-          "low": 7416,
-          "high": 7450,
-          "label": "E leg support / lower triangle support"
-        },
-        "confirmationLevels": [
-          7553.25,
-          7636.25,
-          7645,
-          7694.25
-        ],
-        "invalidationLevels": {
-          "eCandidateWarning": 7416,
-          "cLowMajorSupport": 7360,
-          "minorW4FailureRisk": 7075.75
-        },
+        "stage": "COMPLETED_CANDIDATE",
+        "currentRead": "MINOR_W4_COMPLETION_CANDIDATE_AT_PRIOR_C_LOW_7323",
+        "completedLow": 7323.0,
+        "completedTime": "2026-07-29 13:00",
+        "replacedBy": "MINOR_W5_LAUNCH_CANDIDATE_AFTER_MINOR_W4_COMPLETION",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
-          "MINOR_W4_ABCDE_TRIANGLE_ACTIVE",
-          "E_LEG_COMPLETION_WATCH",
-          "MINOR_W5_REQUIRES_RECLAIM_CONFIRMATION",
+          "MINOR_W4_COMPLETION_CANDIDATE_RETAINED_AS_HISTORY",
+          "MINOR_W5_LAUNCH_CONTEXT_NOW_ACTIVE",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
       },
       "decisionWatch": {
         "active": true,
-        "source": "BRIAN_CORRECTED_MINOR_W4_ABCDE_COUNT",
-        "state": "MINOR_W4_E_COMPLETION_DECISION_WATCH",
-        "supportHoldLevel": 7416,
-        "supportZoneHigh": 7450,
-        "firstReclaimLevel": 7553.25,
-        "triangleResistance": 7636.25,
-        "priorMinorW3High": 7694.25,
-        "minorW4MajorSupport": 7360,
-        "minorW4FailureRisk": 7075.75,
-        "bullPath": "If 7416/7450 support holds and price reclaims 7553.25, Minor W4 E completion improves. Break and acceptance above 7636.25/7645 opens Minor W5 launch watch.",
-        "bearPath": "If 7416 fails and price loses 7360, E support failed and deeper correction risk opens. Losing 7075.75 breaks the larger W4 support structure.",
+        "source": "BRIAN_LOCKED_2026_08_04_MINUTE_W3_BREAKOUT_COUNT",
+        "state": "MINOR_W5_LAUNCH_DECISION_WATCH",
+        "priorCorrectionCLow": 7323.0,
+        "minorW5LaunchContext": true,
+        "minuteW3Invalidation": 7427.75,
+        "minuteW1Origin": 7352.0,
+        "bullPath": "If Minute W3 remains valid above 7427.75 and accepts through extension levels, Minor W5 launch context remains favored.",
+        "bearPath": "If price loses 7427.75, the Minute W3 breakout count fails/requires review. Losing 7323 would damage the prior correction completion thesis.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
-          "MINOR_W4_ABCDE_E_LEG_COMPLETION_WATCH",
-          "WATCH_E_SUPPORT_HOLD",
-          "WATCH_RECLAIM_FOR_MINOR_W5",
+          "MINOR_W5_LAUNCH_WATCH",
+          "MINUTE_W3_BREAKOUT_ACTIVE",
+          "WATCH_MINUTE_W3_EXTENSION_MATURITY",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
@@ -391,111 +327,157 @@
       "noPermissionCreated": true,
       "watchOnly": true,
       "reasonCodes": [
-        "MINOR_W3_CONFIRMED_COMPLETE",
-        "MINOR_W4_ABCDE_PULLBACK_ACTIVE",
-        "E_LEG_COMPLETION_WATCH",
-        "MINOR_W5_NOT_ACTIVE_UNTIL_CONFIRMATION",
+        "MINOR_W4_COMPLETION_CANDIDATE_AT_7323",
+        "MINOR_W5_LAUNCH_CANDIDATE",
+        "MINUTE_W3_BREAKOUT_ACTIVE",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
-      ]
-    },
-    "minute": {
-      "tf": "10m",
-      "direction": "DOWN",
-      "active": true,
-      "parentDegree": "minor",
-      "parentWave": "W4_E",
-      "activeWave": "C",
-      "stage": "C_COMPLETION_WATCH",
-      "currentRead": "MINUTE_ABC_DOWN_INSIDE_MINOR_E_MAY_BE_COMPLETE",
-      "headline": "Minute ABC down inside Minor E — C completion watch",
-      "action": "WATCH_C_LOW_HOLD_AND_RECLAIM_FOR_MINOR_W5_LAUNCH",
-      "marks": {
-        "W1": null,
-        "W2": null,
-        "W3": null,
-        "W4": null,
-        "W5": null,
-        "A": {
-          "price": 7472.5,
-          "time": "2026-07-20 15:00",
-          "status": "CONFIRMED",
-          "confidence": "HIGH",
-          "basis": [
-            "MINUTE_A_DOWN_INSIDE_MINOR_E_CONFIRMED"
-          ]
-        },
-        "B": {
-          "price": 7553.25,
-          "time": "2026-07-21 09:50",
-          "status": "CONFIRMED",
-          "confidence": "MEDIUM_HIGH",
-          "basis": [
-            "MINUTE_B_BOUNCE_INSIDE_MINOR_E_MARKED",
-            "B_REACTION_CONFIRMED_BY_FOLLOWING_C_DOWN"
-          ]
-        },
-        "C": {
-          "price": 7416,
-          "time": "2026-07-27 10:00",
-          "status": "ACTIVE_CANDIDATE",
-          "confidence": "MEDIUM_HIGH",
-          "basis": [
-            "MINUTE_C_DOWN_REACHED_MINOR_E_SUPPORT_ZONE",
-            "MINUTE_ABC_DOWN_MAY_HAVE_COMPLETED_MINOR_E",
-            "WAIT_FOR_RECLAIM_CONFIRMATION"
-          ]
-        },
-        "D": null,
-        "E": null
-      },
-      "correction": {
-        "active": true,
-        "type": "ABC_DOWN",
-        "direction": "DOWN",
-        "parentDegree": "minor",
-        "parentWave": "E",
-        "stage": "C_COMPLETION_WATCH",
-        "currentLeg": "C",
-        "currentRead": "MINUTE_ABC_DOWN_MAY_HAVE_COMPLETED_MINOR_E",
-        "nextExpected": "TACTICAL_RECLAIM_OR_SUPPORT_HOLD_TO_CONFIRM_MINOR_W5_LAUNCH_WATCH",
-        "marks": {
-          "A": {
-            "price": 7472.5,
-            "time": "2026-07-20 15:00",
-            "status": "CONFIRMED"
-          },
-          "B": {
-            "price": 7553.25,
-            "time": "2026-07-21 09:50",
-            "status": "CONFIRMED"
-          },
-          "C": {
-            "price": 7416,
-            "time": "2026-07-27 10:00",
-            "status": "ACTIVE_CANDIDATE"
-          }
-        },
-        "noExecution": true,
-        "noPermissionCreated": true,
-        "watchOnly": true,
-        "reasonCodes": [
-          "MINUTE_ABC_DOWN_INTERNAL_TO_MINOR_E",
-          "C_COMPLETION_WATCH",
-          "NO_STANDALONE_MINUTE_W3_ACTIVE",
-          "NO_EXECUTION",
-          "NO_PERMISSION_CREATED"
-        ]
-      },
+      ],
       "targetModel": {
         "active": false,
         "source": "engine22.wave.targets.v1",
         "generated": false,
-        "modelType": "INTERNAL_CORRECTION_NO_FRESH_EXTENSION_LADDER",
+        "modelType": "MINOR_W5_CONTEXT_WAITING_FOR_CONFIRMATION",
+        "summary": "Minor W5 launch context is active, but the immediate actionable map is the Minute W3 extension ladder.",
         "reasonCodes": [
-          "MINUTE_IS_INTERNAL_CORRECTION_TO_MINOR_E",
-          "NO_STANDALONE_MINUTE_W3_TARGET_MODEL",
+          "MINOR_W5_LAUNCH_CONTEXT",
+          "MINUTE_W3_TARGET_MODEL_IS_PRIMARY_TACTICAL_MAP",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED"
+        ],
+        "noExecution": true,
+        "noPermissionCreated": true,
+        "watchOnly": true
+      }
+    },
+    "minute": {
+      "tf": "10m",
+      "direction": "UP",
+      "active": true,
+      "parentDegree": "minor",
+      "parentWave": "W5",
+      "activeWave": "W3",
+      "stage": "EXTENSION_MATURITY_WATCH",
+      "currentRead": "MINUTE_W3_ACTIVE_FROM_7427_75_EXTENSION_MATURITY_WATCH",
+      "headline": "Minute W3 active from 7427.75 \u2014 extension maturity watch",
+      "action": "WATCH_MINUTE_W3_1618_REACTION_INTERNAL_IV_PULLBACK_OR_CONTINUATION",
+      "marks": {
+        "W1": {
+          "low": {
+            "price": 7352.0,
+            "time": "2026-07-30 01:00"
+          },
+          "high": {
+            "price": 7518.25,
+            "time": "2026-07-31 02:00"
+          },
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "MINUTE_W1_LOW_7352_ON_2026_07_30_0100",
+            "MINUTE_W1_HIGH_7518_25_ON_2026_07_31_0200",
+            "NEW_MINUTE_IMPULSE_AFTER_PRIOR_C_LOW_7323"
+          ]
+        },
+        "W2": {
+          "price": 7427.75,
+          "time": "2026-07-31 07:00",
+          "status": "CONFIRMED",
+          "confidence": "HIGH",
+          "basis": [
+            "MINUTE_W2_COMPLETED_AT_7427_75",
+            "MINUTE_W3_STARTED_FROM_7427_75",
+            "W2_HELD_ABOVE_MINUTE_W1_ORIGIN_7352"
+          ]
+        },
+        "W3": {
+          "price": null,
+          "time": null,
+          "status": "ACTIVE",
+          "confidence": "MEDIUM_HIGH",
+          "basis": [
+            "MINUTE_W3_ACTIVE_AFTER_CONFIRMED_MINUTE_W2_LOW",
+            "TWO_MONTH_RANGE_BREAKOUT_CONFIRMED_STRUCTURALLY",
+            "PRICE_REACHED_MINUTE_W3_1618_EXTENSION_ZONE",
+            "WATCH_INTERNAL_IV_PULLBACK_OR_W3_MATURITY_REACTION"
+          ]
+        },
+        "W4": null,
+        "W5": null,
+        "A": null,
+        "B": null,
+        "C": null,
+        "D": null,
+        "E": null
+      },
+      "targetModel": {
+        "active": true,
+        "source": "MINUTE_W3_EXTENSION_FROM_LOCKED_2026_07_30_STRUCTURE",
+        "anchorLow": 7352.0,
+        "anchorHigh": 7518.25,
+        "projectionBase": 7427.75,
+        "range": 166.25,
+        "levels": {
+          "e100": 7594.0,
+          "e1272": 7639.22,
+          "e1618": 7696.74,
+          "e200": 7760.25,
+          "e2618": 7862.99,
+          "e300": 7926.5,
+          "e3618": 8029.24,
+          "e4236": 8131.98
+        },
+        "displayLevels": [
+          {
+            "label": "1.000",
+            "price": 7594.0
+          },
+          {
+            "label": "1.272",
+            "price": 7639.22
+          },
+          {
+            "label": "1.618",
+            "price": 7696.74
+          },
+          {
+            "label": "2.000",
+            "price": 7760.25
+          },
+          {
+            "label": "2.618",
+            "price": 7862.99
+          },
+          {
+            "label": "3.000",
+            "price": 7926.5
+          },
+          {
+            "label": "3.618",
+            "price": 8029.24
+          },
+          {
+            "label": "4.236",
+            "price": 8131.98
+          }
+        ],
+        "nextTarget": 7696.74,
+        "maturityZone": {
+          "lo": 7696.74,
+          "hi": 7760.25,
+          "label": "MINUTE_W3_1618_TO_2000_EXTENSION_MATURITY_ZONE"
+        },
+        "extendedMaturityZone": {
+          "lo": 7862.99,
+          "hi": 7926.5,
+          "label": "MINUTE_W3_2618_TO_3000_EXTENDED_MATURITY_ZONE"
+        },
+        "summary": "Minute W3 is active from 7427.75. The 1.618 extension is 7696.74 and the 2.000 extension is 7760.25. Treat this as a W3 maturity/reaction map, not an execution signal.",
+        "reasonCodes": [
+          "MINUTE_W3_EXTENSION_MODEL_BUILT",
+          "MINUTE_W3_1618_MATURITY_ZONE_ATTACHED",
+          "MINUTE_W3_ACTIVE",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ],
@@ -503,27 +485,65 @@
         "noPermissionCreated": true,
         "watchOnly": true
       },
-      "nestedCorrectionContext": {
+      "decisionWatch": {
         "active": true,
-        "source": "engine22.wave.nestedCorrection.v1",
-        "parentDegree": "minor",
-        "parentCorrectionType": "ABCDE_TRIANGLE",
-        "parentCompletedLeg": "D",
-        "parentActiveLeg": "E",
-        "childDegree": "minute",
-        "childCorrectionType": "ABC_DOWN",
-        "childPurpose": "INTERNAL_STRUCTURE_TO_COMPLETE_PARENT_E_LEG",
-        "expectedPath": "A_DOWN_B_UP_C_DOWN",
-        "currentChildLeg": "C",
-        "currentRead": "MINUTE_C_DOWN_MAY_HAVE_COMPLETED_MINOR_E",
-        "nextExpected": "SUPPORT_HOLD_AND_RECLAIM_TO_CONFIRM_MINOR_W5_LAUNCH_WATCH",
-        "completionGoal": "COMPLETE_MINOR_W4_E_LEG",
+        "source": "BRIAN_LOCKED_2026_08_04_MINUTE_W3_BREAKOUT_COUNT",
+        "state": "MINUTE_W3_EXTENSION_MATURITY_DECISION_WATCH",
+        "minuteW1Origin": 7352.0,
+        "minuteW2Low": 7427.75,
+        "minuteW3Invalidation": 7427.75,
+        "priorCorrectionCLow": 7323.0,
+        "primaryMaturityLevel": 7696.74,
+        "maturityZone": {
+          "lo": 7696.74,
+          "hi": 7760.25
+        },
+        "bullPath": "If Minute W3 holds and consolidates above the 1.618 extension area, continuation toward 2.000/2.618 remains possible.",
+        "bearPath": "A hard pullback from the maturity zone can still be an internal iv. Losing 7427.75 invalidates the current Minute W3 breakout count.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
-          "MINUTE_IS_INTERNAL_TO_MINOR_E",
-          "NO_STANDALONE_MINUTE_IMPULSE",
+          "MINUTE_W3_EXTENSION_MATURITY_WATCH",
+          "WATCH_INTERNAL_IV_PULLBACK",
+          "WATCH_INTERNAL_V_CONTINUATION",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED"
+        ]
+      },
+      "internalStructure": {
+        "active": true,
+        "source": "BRIAN_CHART_REVIEW_VERTICAL_MINUTE_W3_EXTENSION",
+        "parentDegree": "minute",
+        "parentWave": "W3",
+        "previousInternalWave": "ii",
+        "currentInternalWave": "iii",
+        "nextExpectedInternalWave": "iv",
+        "internalLegDirection": "UP",
+        "parentWaveDirection": "LONG",
+        "classification": "FAST_IMPULSE_EXTENSION",
+        "parentWaveStillValid": true,
+        "parentWaveComplete": false,
+        "parentTransitionPossible": false,
+        "transitionRisk": "LOW_TO_MODERATE",
+        "invalidationLevel": 7427.75,
+        "invalidationBreached": false,
+        "supportLevel": 7696.74,
+        "retracementZone": null,
+        "evidence": {
+          "rangeBreakoutPresent": true,
+          "verticalImpulsePresent": true,
+          "cleanSubminuteCountUnavailable": true,
+          "parentInvalidationHeld": true,
+          "higherDegreeSupportive": true
+        },
+        "noExecution": true,
+        "noPermissionCreated": true,
+        "watchOnly": true,
+        "reasonCodes": [
+          "ENGINE22_FAST_MINUTE_W3_EXTENSION",
+          "ENGINE22_CLEAN_SUBMINUTE_COUNT_UNAVAILABLE",
+          "ENGINE22_INTERNAL_IV_PULLBACK_NEXT_EXPECTED",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
@@ -532,9 +552,10 @@
       "noPermissionCreated": true,
       "watchOnly": true,
       "reasonCodes": [
-        "MINUTE_ABC_DOWN_INSIDE_MINOR_E",
-        "MINUTE_C_COMPLETION_WATCH",
-        "NO_STANDALONE_MINUTE_W3",
+        "MINUTE_W3_ACTIVE",
+        "MINUTE_W2_CONFIRMED_AT_7427_75",
+        "TWO_MONTH_RANGE_BREAKOUT",
+        "MINUTE_W3_EXTENSION_MATURITY_WATCH",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
@@ -542,15 +563,15 @@
     },
     "subminute": {
       "tf": "10m",
-      "direction": "NEUTRAL",
+      "direction": "UP",
       "active": true,
       "parentDegree": "minute",
-      "parentWave": "C",
+      "parentWave": "W3",
       "activeWave": null,
-      "stage": "TACTICAL_RECLAIM_WATCH",
-      "currentRead": "TACTICAL_RECLAIM_WATCH_AFTER_POSSIBLE_MINUTE_C_COMPLETION",
-      "headline": "Tactical reclaim watch after possible Minute C completion",
-      "action": "WATCH_SUPPORT_HOLD_RECLAIM_AND_PARTICIPATION",
+      "stage": "FAST_IMPULSE_EXTENSION_UNRESOLVED",
+      "currentRead": "SUBMINUTE_INTERNAL_STRUCTURE_UNRESOLVED_INSIDE_MINUTE_W3",
+      "headline": "Subminute structure unresolved inside fast Minute W3 extension",
+      "action": "DO_NOT_FORCE_SUBMINUTE_COUNT_WAIT_FOR_CONTROLLED_INTERNAL_IV_PULLBACK",
       "marks": {
         "W1": null,
         "W2": null,
@@ -567,10 +588,11 @@
         "active": false,
         "source": "engine22.wave.targets.v1",
         "generated": false,
-        "modelType": "TACTICAL_CONTEXT_NO_EXTENSION_LADDER",
+        "modelType": "UNRESOLVED_INTERNAL_STRUCTURE_NO_STANDALONE_EXTENSION_LADDER",
         "reasonCodes": [
-          "SUBMINUTE_USED_FOR_TACTICAL_RECLAIM_TIMING_ONLY",
-          "NO_STANDALONE_SUBMINUTE_W3_TARGET_MODEL",
+          "SUBMINUTE_STRUCTURE_UNRESOLVED_INSIDE_FAST_MINUTE_W3",
+          "DO_NOT_FORCE_SUBMINUTE_COUNT",
+          "USE_MINUTE_W3_TARGET_MODEL_FOR_TACTICAL_CONTEXT",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ],
@@ -578,45 +600,65 @@
         "noPermissionCreated": true,
         "watchOnly": true
       },
-      "nestedCorrectionContext": {
+      "internalStructure": {
         "active": true,
-        "source": "engine22.wave.nestedCorrection.v1",
+        "source": "BRIAN_CHART_REVIEW_CLEAN_SUBMINUTE_COUNT_UNAVAILABLE",
         "parentDegree": "minute",
-        "parentCorrectionType": "ABC_DOWN",
-        "parentCompletedLeg": "C_CANDIDATE",
-        "parentActiveLeg": "RECLAIM_CONFIRMATION",
-        "childDegree": "subminute",
-        "childPurpose": "TACTICAL_TIMING_AFTER_POSSIBLE_MINUTE_C_COMPLETION",
-        "currentRead": "WATCH_SUPPORT_HOLD_RECLAIM_AND_PARTICIPATION",
-        "nextExpected": "RECLAIM_OR_DIP_BOUGHT_REACTION_REQUIRED",
-        "completionGoal": "CONFIRM_MINOR_W4_E_COMPLETION_AND_MINOR_W5_LAUNCH_WATCH",
-        "noExecution": true,
-        "noPermissionCreated": true,
-        "watchOnly": true,
+        "parentWave": "W3",
+        "previousInternalWave": "ii",
+        "currentInternalWave": "iii",
+        "nextExpectedInternalWave": "iv",
+        "internalLegDirection": "UP",
+        "parentWaveDirection": "LONG",
+        "classification": "FAST_IMPULSE_EXTENSION",
+        "parentWaveStillValid": true,
+        "parentWaveComplete": false,
+        "parentTransitionPossible": false,
+        "transitionRisk": "LOW_TO_MODERATE",
+        "invalidationLevel": 7427.75,
+        "invalidationBreached": false,
+        "supportLevel": 7696.74,
+        "retracementZone": null,
+        "internalReference": {
+          "minuteW1Low": 7352.0,
+          "minuteW1High": 7518.25,
+          "minuteW2Low": 7427.75,
+          "minuteW3E1618": 7696.74,
+          "chartRead": "FAST_VERTICAL_MINUTE_W3_EXTENSION_CLEAN_SUBMINUTE_COUNT_NOT_AVAILABLE_YET"
+        },
+        "evidence": {
+          "verticalImpulsePresent": true,
+          "cleanSubminuteCountUnavailable": true,
+          "parentOriginHeld": true,
+          "parentInvalidationHeld": true,
+          "higherDegreeSupportive": true
+        },
         "reasonCodes": [
-          "SUBMINUTE_TACTICAL_CONTEXT_ONLY",
-          "NO_STANDALONE_SUBMINUTE_IMPULSE",
+          "ENGINE22_FAST_IMPULSE_EXTENSION",
+          "ENGINE22_PARENT_MINUTE_W3_STILL_VALID",
+          "ENGINE22_INTERNAL_IV_PULLBACK_NEXT_EXPECTED",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
-        ]
+        ],
+        "noExecution": true,
+        "noPermissionCreated": true,
+        "watchOnly": true
       },
       "decisionWatch": {
         "active": true,
-        "source": "BRIAN_CORRECTED_MINOR_W4_ABCDE_COUNT",
-        "state": "TACTICAL_RECLAIM_DECISION_WATCH",
-        "supportHoldLevel": 7416,
-        "firstReclaimLevel": 7450,
-        "strongerReclaimLevel": 7553.25,
-        "triangleResistance": 7636.25,
-        "bullPath": "If 7416 support holds and price reclaims 7450 then 7553.25, Minor W4 E completion improves and Minor W5 launch watch becomes active.",
-        "bearPath": "If 7416 and 7360 fail, Minor E support failed and deeper correction risk opens.",
+        "source": "BRIAN_LOCKED_2026_08_04_MINUTE_W3_BREAKOUT_COUNT",
+        "state": "SUBMINUTE_UNRESOLVED_INTERNAL_STRUCTURE_WATCH",
+        "minuteW3Invalidation": 7427.75,
+        "minuteW3PrimaryMaturityLevel": 7696.74,
+        "bullPath": "Do not force a standalone subminute count while Minute W3 is moving vertically. Watch for controlled internal iv pullback and possible internal v continuation.",
+        "bearPath": "If price loses 7427.75, the parent Minute W3 breakout count fails/requires review.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
-          "TACTICAL_RECLAIM_WATCH",
-          "WAIT_FOR_ENGINE3_REACTION",
-          "WAIT_FOR_ENGINE4_PARTICIPATION",
+          "SUBMINUTE_COUNT_UNRESOLVED",
+          "FAST_MINUTE_W3_EXTENSION",
+          "WAIT_FOR_INTERNAL_IV_PULLBACK",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
@@ -625,7 +667,8 @@
       "noPermissionCreated": true,
       "watchOnly": true,
       "reasonCodes": [
-        "SUBMINUTE_TACTICAL_RECLAIM_WATCH",
+        "SUBMINUTE_INTERNAL_STRUCTURE_UNRESOLVED",
+        "FAST_MINUTE_W3_EXTENSION",
         "NO_STANDALONE_SUBMINUTE_W3",
         "STRUCTURAL_CONTEXT_ONLY",
         "NO_EXECUTION",
