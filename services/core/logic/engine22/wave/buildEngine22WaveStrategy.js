@@ -549,8 +549,11 @@ function buildTradeDecisionSafe({
     setupType:
       waveOpportunity?.setupType || waveFibState?.activeSetup || "NO_SETUP",
     reason: "Wave strategy is read-only. Waiting for confirmation.",
-    needs: ["ENGINE15_READY_OR_PAPER_READY"],
-    reasonCodes: ["READ_ONLY_WAIT"],
+    needs: ["ENGINE6_PERMISSION_REQUIRED"],
+    reasonCodes: [
+      "READ_ONLY_WAIT",
+      "ENGINE15_CONTEXT_ONLY_FOR_STRATEGY1",
+    ],
   });
 }
 
@@ -780,40 +783,39 @@ function buildMinuteIntradayScalpLifecycleView({
     waveFibState,
     context?.engine2State
   );
- const minuteInternal = minute?.internalStructure || null;
-
- const minuteWave = String(
-   minute?.activeWave ||
-     minuteInternal?.parentWave ||
-     ""
- ).toUpperCase();
-
- const minuteStage = String(minute?.stage || "").toUpperCase();
-
- const currentInternalWave = String(
-   minuteInternal?.currentInternalWave || ""
- ).toLowerCase();
-
- const nextExpectedInternalWave = String(
-   minuteInternal?.nextExpectedInternalWave || ""
- ).toLowerCase();
-
- const isMinuteW3ExtensionMaturity =
-   minuteWave === "W3" &&
-   (
-     minuteStage.includes("EXTENSION_MATURITY") ||
-     String(minuteInternal?.classification || "").toUpperCase() ===
-       "FAST_IMPULSE_EXTENSION"
-   ) &&
-   currentInternalWave === "iii" &&
-   nextExpectedInternalWave === "iv" &&
-   minuteInternal?.parentWaveComplete !== true &&
-   minuteInternal?.parentTransitionPossible !== true;
 
   const minute =
     structures?.minute ||
     context?.engine2State?.minute ||
     null;
+
+  const minuteInternal = minute?.internalStructure || null;
+
+  const minuteWave = String(
+    minute?.activeWave || minuteInternal?.parentWave || ""
+  ).toUpperCase();
+
+  const minuteStage = String(minute?.stage || "").toUpperCase();
+
+  const currentInternalWave = String(
+    minuteInternal?.currentInternalWave || ""
+  ).toLowerCase();
+
+  const nextExpectedInternalWave = String(
+    minuteInternal?.nextExpectedInternalWave || ""
+  ).toLowerCase();
+
+  const isMinuteW3ExtensionMaturity =
+    minuteWave === "W3" &&
+    (
+      minuteStage.includes("EXTENSION_MATURITY") ||
+      String(minuteInternal?.classification || "").toUpperCase() ===
+        "FAST_IMPULSE_EXTENSION"
+    ) &&
+    currentInternalWave === "iii" &&
+    nextExpectedInternalWave === "iv" &&
+    minuteInternal?.parentWaveComplete !== true &&
+    minuteInternal?.parentTransitionPossible !== true;
 
   const marks = minute?.marks || minute?.waveMarks || {};
 
@@ -853,6 +855,77 @@ function buildMinuteIntradayScalpLifecycleView({
       currentLifecycleState?.currentPrice
   );
 
+  if (isMinuteW3ExtensionMaturity) {
+    const publishedTargetModel = buildPublishedDegreeTargetModel({
+      symbol: context?.symbol || "ES",
+      targetModel: minute?.targetModel || null,
+      currentPrice,
+    });
+
+    return {
+      key: "MINUTE_W3_EXTENSION_MATURITY_WATCH",
+      label: "Minute W3 extension maturity watch",
+      source: "engine22.lifecycleViews.intradayScalp",
+      activeDegree: "minute",
+      activeWave: "W3",
+      parentDegree:
+        minuteInternal?.parentDegree || minute?.parentDegree || "minute",
+      parentWave:
+        minuteInternal?.parentWave || minute?.activeWave || "W3",
+      currentInternalWave:
+        minuteInternal?.currentInternalWave || "iii",
+      nextExpectedInternalWave:
+        minuteInternal?.nextExpectedInternalWave || "iv",
+      direction: "LONG_CONTEXT_ONLY",
+      paperScalpContext: true,
+      noChase: true,
+      noExecution: true,
+      noPermissionCreated: true,
+      anchors: {
+        currentPrice,
+        supportLevel: round2(minuteInternal?.supportLevel),
+        invalidationLevel: round2(minuteInternal?.invalidationLevel),
+      },
+      fibMap: {
+        source: "MINUTE_W3_EXTENSION_LADDER",
+        purpose:
+          "Minute W3 reaction and maturity map. Structural context only; not an entry signal.",
+        rawLevels: publishedTargetModel.rawLevels,
+        publishedLevels: publishedTargetModel.publishedLevels,
+        rawNextTarget: publishedTargetModel.rawNextTarget,
+        nextTarget: publishedTargetModel.nextTarget,
+        nextTargetKey: publishedTargetModel.nextTargetKey,
+        tickSize: publishedTargetModel.tickSize,
+        normalization: publishedTargetModel.normalization,
+        targetLadderExhausted:
+          publishedTargetModel.targetLadderExhausted,
+        supportLevel: round2(minuteInternal?.supportLevel),
+        invalidationLevel: round2(minuteInternal?.invalidationLevel),
+      },
+      playbookContext: {
+        maturityLabel: "MINUTE_W3_EXTENSION_MATURITY",
+        pullbackLabel: "WATCH_INTERNAL_IV_PULLBACK",
+        continuationLabel:
+          "WATCH_INTERNAL_V_ONLY_AFTER_IV_HOLD_OR_RECLAIM",
+        chaseLabel: "LONG_CHASE_BLOCKED",
+        permissionRequired: "ENGINE6_PAPER_ALLOW_REQUIRED",
+      },
+      status: "WATCH_ONLY",
+      summary:
+        "Minute W3 remains active and extended. Internal iii is extended. Do not chase. The next expected event is internal iv. If internal iv holds or reclaims with Engine 3 reaction and Engine 4 participation, watch for possible internal v continuation. Engine 6 remains final paper permission authority.",
+      reasonCodes: [
+        "ENGINE22_LIFECYCLE_VIEW_INTRADAY_SCALP_BUILT",
+        "MINUTE_W3_EXTENSION_MATURITY_WATCH",
+        "INTERNAL_III_EXTENDED",
+        "INTERNAL_IV_NEXT_EXPECTED",
+        "PARENT_W3_REMAINS_ACTIVE",
+        "NO_CHASE",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+      ],
+    };
+  }
+
   const pullbackLevels = calcRetracementsFromHigh({
     start: w2Low,
     high: w3High,
@@ -879,7 +952,6 @@ function buildMinuteIntradayScalpLifecycleView({
       currentLifecycleState?.headline ||
       "Minute W4 pullback — wait for reclaim",
     source: "engine22.lifecycleViews.intradayScalp",
-
     activeDegree: "minute",
     activeWave:
       minute?.activeWave ||
@@ -887,12 +959,11 @@ function buildMinuteIntradayScalpLifecycleView({
       "W4",
     parentDegree: minute?.parentDegree || "intermediate",
     parentWave: minute?.parentWave || "W3",
-
     direction: "LONG_AFTER_CONFIRMATION",
     paperScalpContext: true,
     noChase: true,
     noExecution: true,
-
+    noPermissionCreated: true,
     anchors: {
       w1Low: round2(w1Low),
       w1High: round2(w1High),
@@ -901,7 +972,6 @@ function buildMinuteIntradayScalpLifecycleView({
       w3Time: markTime(marks?.W3),
       currentPrice,
     },
-
     fibMap: {
       source: "MINUTE_W3_RETRACE_FOR_W4",
       purpose:
@@ -918,8 +988,7 @@ function buildMinuteIntradayScalpLifecycleView({
         localRangeHigh: round2(triggerLevels?.localRangeHigh),
       },
       invalidationLevel: round2(
-        triggerLevels?.invalidationLevel ??
-          w2Low
+        triggerLevels?.invalidationLevel ?? w2Low
       ),
       ifW4HoldsNextTargets: {
         source: "WAVE_OPPORTUNITY_TARGETS_IF_AVAILABLE",
@@ -930,22 +999,21 @@ function buildMinuteIntradayScalpLifecycleView({
         e2618: round2(waveOpportunity?.targets?.e2618),
       },
     },
-
     playbookContext: {
       topImbalanceLabel: "MINUTE_W3_TOP_POSSIBLE",
       pullbackLabel: "WATCH_W4_PULLBACK",
       chaseLabel: "LONG_CHASE_BLOCKED",
       permissionRequired: "ENGINE6_PAPER_ALLOW_REQUIRED",
     },
-
     status: "WATCH_ONLY",
     summary:
-      "Minute W3 may be complete and Minute W4 pullback is being watched. Do not chase vertical price. Wait for controlled pullback, reclaim hold, Engine 3/4 confirmation, Engine 15 readiness, and Engine 6 paper permission.",
+      "Minute W3 may be complete and Minute W4 pullback is being watched. Do not chase vertical price. Wait for controlled pullback, reclaim hold, Engine 3 reaction, Engine 4 participation, and Engine 6 paper permission. Engine 15 is contextual only for Strategy 1.",
     reasonCodes: [
       "ENGINE22_LIFECYCLE_VIEW_INTRADAY_SCALP_BUILT",
       "MINUTE_W4_PULLBACK_WATCH",
       "NO_CHASE",
       "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
     ],
   };
 }
@@ -992,8 +1060,10 @@ function buildLifecycleContextForEngine26({
   const longTermFib = longTerm?.fibMap || {};
   const intradayFib = intraday?.fibMap || {};
   const intradayAnchors = intraday?.anchors || {};
-
   const preferredW4Zone = intradayFib?.preferredW4Zone || null;
+
+  const isMinuteW3ExtensionMaturity =
+    intraday?.key === "MINUTE_W3_EXTENSION_MATURITY_WATCH";
 
   return {
     source: "engine22.lifecycleContext.v1",
@@ -1010,23 +1080,18 @@ function buildLifecycleContextForEngine26({
           activeDegree: longTerm.activeDegree || "intermediate",
           direction: longTerm.direction || "LONG",
           purpose: "HIGHER_TIMEFRAME_CONTEXT_ONLY",
-
           currentPrice: longTerm?.anchors?.currentPrice ?? null,
           w1High: longTerm?.anchors?.w1High ?? null,
           w2Low: longTerm?.anchors?.w2Low ?? null,
-
           nextTarget: longTermFib?.nextTarget ?? null,
           higherTargets: Array.isArray(longTermFib?.higherTargets)
             ? longTermFib.higherTargets
             : [],
-
           noExecution: true,
           noPermissionCreated: true,
-
           summary:
             longTerm.summary ||
             "Intermediate W3 is active. This is higher-timeframe context only, not a standalone scalp trigger.",
-
           reasonCodes: [
             "ENGINE22_LONG_TERM_LIFECYCLE_CONTEXT",
             "HIGHER_TIMEFRAME_CONTEXT_ONLY",
@@ -1049,79 +1114,111 @@ function buildLifecycleContextForEngine26({
     intradayScalpLifecycle: intraday
       ? {
           active: true,
-          key: "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
-          lifecycle: "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
+          key:
+            intraday.key ||
+            currentLifecycleState?.key ||
+            "NO_INTRADAY_SCALP_LIFECYCLE",
+          lifecycle:
+            intraday.key ||
+            currentLifecycleState?.key ||
+            "NO_INTRADAY_SCALP_LIFECYCLE",
           sourceKey:
             intraday.key ||
             currentLifecycleState?.key ||
-            "MINUTE_W3_COMPLETE_W4_PULLBACK_WATCH",
-
-          activeWave: "MINUTE_W4",
+            "NO_INTRADAY_SCALP_LIFECYCLE",
+          activeWave: intraday.activeWave || null,
           activeDegree: intraday.activeDegree || "minute",
-          parentWave: "INTERMEDIATE_W3",
+          currentInternalWave: intraday.currentInternalWave || null,
+          nextExpectedInternalWave:
+            intraday.nextExpectedInternalWave || null,
+          parentWave: intraday.parentWave || null,
           parentDegree: intraday.parentDegree || "intermediate",
-
           direction: intraday.direction || "LONG_AFTER_CONFIRMATION",
           action:
             currentLifecycleState?.action ||
             "WAIT_FOR_RECLAIM_HOLD_OR_CONTROLLED_PULLBACK_CONFIRMATION",
-
           currentPrice: intradayAnchors.currentPrice ?? null,
           w3High: intradayAnchors.w3High ?? null,
-
-          preferredW4Zone: preferredW4Zone
-            ? {
-                lo: preferredW4Zone.lo ?? null,
-                hi: preferredW4Zone.hi ?? null,
-                label:
-                  preferredW4Zone.label ||
-                  "0.5–0.618 Minute W4 pullback zone",
-              }
-            : null,
-
-          pullbackLevels: intradayFib?.pullbackLevels || null,
-          invalidation: intradayFib?.invalidationLevel ?? null,
-          ifW4HoldsNextTargets:
-            intradayFib?.ifW4HoldsNextTargets || null,
-
+          supportLevel:
+            intradayAnchors.supportLevel ??
+            intradayFib?.supportLevel ??
+            null,
+          preferredW4Zone:
+            !isMinuteW3ExtensionMaturity && preferredW4Zone
+              ? {
+                  lo: preferredW4Zone.lo ?? null,
+                  hi: preferredW4Zone.hi ?? null,
+                  label:
+                    preferredW4Zone.label ||
+                    "0.5–0.618 Minute W4 pullback zone",
+                }
+              : null,
+          pullbackLevels: isMinuteW3ExtensionMaturity
+            ? null
+            : intradayFib?.pullbackLevels || null,
+          publishedTargetLevels: intradayFib?.publishedLevels || null,
+          nextTarget: intradayFib?.nextTarget ?? null,
+          nextTargetKey: intradayFib?.nextTargetKey ?? null,
+          invalidation:
+            intradayAnchors.invalidationLevel ??
+            intradayFib?.invalidationLevel ??
+            null,
+          ifW4HoldsNextTargets: isMinuteW3ExtensionMaturity
+            ? null
+            : intradayFib?.ifW4HoldsNextTargets || null,
           noChase: true,
           noExecution: true,
           noPermissionCreated: true,
-
           requiresEngine3Confirmation: true,
           requiresEngine4Participation: true,
-          requiresEngine15Readiness: true,
+          engine15ContextOnly: true,
+          requiresEngine15Readiness: false,
           requiresEngine6Permission: true,
-
           engine26Use: {
             allowedAsContext: true,
-            labelForTopImbalance:
-              "TOP_IMBALANCE_ACTIVE_MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
-            labelForLowerImbalance: "W4_PULLBACK_SUPPORT_TEST",
-            topImbalanceContext: [
-              "TOP_IMBALANCE_ACTIVE",
-              "INTERMEDIATE_W3_CONTEXT",
-              "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
-              "DO_NOT_CHASE_LONG",
-              "WATCH_7500_ACCEPTANCE_OR_REJECTION",
-            ],
-            lowerImbalanceContext: [
-              "BOTTOM_IMBALANCE_ACTIVE",
-              "W4_PULLBACK_SUPPORT_TEST",
-              "WATCH_SWEEP_RECLAIM_OR_SUPPORT_FAILURE",
-              "DIRECTION_NOT_ASSUMED",
-            ],
+            labelForTopImbalance: isMinuteW3ExtensionMaturity
+              ? "MINUTE_W3_EXTENSION_MATURITY_INTERNAL_IV_WATCH"
+              : "TOP_IMBALANCE_ACTIVE_MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
+            labelForLowerImbalance: isMinuteW3ExtensionMaturity
+              ? "INTERNAL_IV_SUPPORT_OR_RECLAIM_WATCH"
+              : "W4_PULLBACK_SUPPORT_TEST",
+            topImbalanceContext: isMinuteW3ExtensionMaturity
+              ? [
+                  "MINUTE_W3_ACTIVE",
+                  "INTERNAL_III_EXTENDED",
+                  "INTERNAL_IV_NEXT_EXPECTED",
+                  "DO_NOT_CHASE_LONG",
+                  "WATCH_REACTION_AT_EXTENSION_MATURITY_LEVELS",
+                ]
+              : [
+                  "TOP_IMBALANCE_ACTIVE",
+                  "INTERMEDIATE_W3_CONTEXT",
+                  "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
+                  "DO_NOT_CHASE_LONG",
+                ],
+            lowerImbalanceContext: isMinuteW3ExtensionMaturity
+              ? [
+                  "INTERNAL_IV_PULLBACK_OR_RECLAIM_WATCH",
+                  "WATCH_SUPPORT_HOLD_OR_FAILURE",
+                  "DIRECTION_NOT_ASSUMED",
+                ]
+              : [
+                  "BOTTOM_IMBALANCE_ACTIVE",
+                  "W4_PULLBACK_SUPPORT_TEST",
+                  "WATCH_SWEEP_RECLAIM_OR_SUPPORT_FAILURE",
+                  "DIRECTION_NOT_ASSUMED",
+                ],
             directionAssumption: "NONE_UNTIL_ENGINE3_ENGINE4_CONFIRM",
             ticketAuthority: "ENGINE6_PAPER_ALLOW_REQUIRED",
           },
-
           summary:
             intraday.summary ||
-            "Minute W3 may be complete and Minute W4 pullback is being watched. Do not chase vertical price. Wait for controlled pullback, reclaim hold, Engine 3/4 confirmation, Engine 15 readiness, and Engine 6 permission.",
-
+            "Wait for the active Minute structure to produce Engine 3 reaction and Engine 4 participation. Engine 6 remains final paper permission authority. Engine 15 is contextual only for Strategy 1.",
           reasonCodes: [
             "ENGINE22_INTRADAY_SCALP_LIFECYCLE_CONTEXT",
-            "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
+            isMinuteW3ExtensionMaturity
+              ? "MINUTE_W3_EXTENSION_MATURITY_WATCH"
+              : "MINUTE_W4_PULLBACK_WAIT_FOR_RECLAIM",
             "ENGINE26_CONTEXT_ONLY",
             "NO_CHASE",
             "NO_EXECUTION",
@@ -1142,12 +1239,12 @@ function buildLifecycleContextForEngine26({
         },
 
     relationship: {
-      engine22Role: "WAVE_CONTEXT_ONLY",
-      engine26Role: "MANUAL_IMBALANCE_ALARM_AND_SCALP_COORDINATOR",
-      directionAuthority: "ENGINE3_ENGINE4_FAST_READS",
-      readinessAuthority: "ENGINE15",
+      engine22Role: "MARKET_STRUCTURE_ONLY",
+      engine26Role: "LOCATION_AND_PLANNING_ONLY",
+      directionAuthority: "ENGINE3_REACTION_AND_ENGINE4_PARTICIPATION",
+      engine15Role: "CONTEXT_ONLY_FOR_STRATEGY1",
       permissionAuthority: "ENGINE6",
-      ticketRule: "NO_ENGINE26_TICKET_UNTIL_ENGINE6_PAPER_ALLOW",
+      ticketRule: "NO_TICKET_FROM_ENGINE22_OR_ENGINE26",
     },
 
     reasonCodes: [
@@ -1255,16 +1352,31 @@ function buildCanonicalDegreeStateMirror({
 
   const minuteInternal = minute?.internalStructure || null;
   const subminuteInternal = subminute?.internalStructure || null;
-  const internal = minuteInternal || subminuteInternal || null;
+  const internal =
+    minuteInternal ||
+    (subminuteInternal?.parentDegree === "minute"
+      ? subminuteInternal
+      : null) ||
+    null;
 
   const classification = String(internal?.classification || "").toUpperCase();
+  const currentInternalWave = String(
+    internal?.currentInternalWave || ""
+  ).toLowerCase();
+  const nextExpectedInternalWave = String(
+    internal?.nextExpectedInternalWave || ""
+  ).toLowerCase();
 
   const isMinuteW3ExtensionMaturity =
     minuteWave === "W3" &&
     (
       minuteStage.includes("EXTENSION_MATURITY") ||
       classification === "FAST_IMPULSE_EXTENSION"
-    );
+    ) &&
+    currentInternalWave === "iii" &&
+    nextExpectedInternalWave === "iv" &&
+    internal?.parentWaveComplete !== true &&
+    internal?.parentTransitionPossible !== true;
 
   if (!isMinuteW3ExtensionMaturity) {
     return {
@@ -1273,12 +1385,12 @@ function buildCanonicalDegreeStateMirror({
     };
   }
 
-  const targetLevels = minute?.targetModel?.levels || {};
   const publishedTargetModel = buildPublishedDegreeTargetModel({
     symbol: context?.symbol || "ES",
     targetModel: minute?.targetModel || null,
     currentPrice: context?.currentPrice,
   });
+
   const e1618 = publishedTargetModel.publishedLevels.e1618;
   const e200 = publishedTargetModel.publishedLevels.e200;
   const e2618 = publishedTargetModel.publishedLevels.e2618;
@@ -1290,7 +1402,6 @@ function buildCanonicalDegreeStateMirror({
   );
 
   const currentPrice = round2(context?.currentPrice);
-
   const activeSetup = "MINUTE_W3_EXTENSION_MATURITY_WATCH";
   const action = "WAIT_FOR_INTERNAL_IV_PULLBACK_OR_RECLAIM_CONFIRMATION";
 
@@ -1312,7 +1423,19 @@ function buildCanonicalDegreeStateMirror({
   ];
 
   const summary =
-    "Minute W3 is active and extended into its maturity zone. Do not chase the vertical move. Wait for an internal iv pullback or reclaim confirmation, then require Engine 3 reaction, Engine 4 participation, and Engine 6 permission.";
+    "Minute W3 is active and extended. Internal iii is extended. Do not chase. The next expected event is internal iv. If internal iv holds or reclaims with Engine 3 reaction and Engine 4 participation, watch for possible internal v continuation. Engine 6 remains final paper permission authority.";
+
+  const sharedStructure = {
+    parentDegree: internal?.parentDegree || "minute",
+    parentWave: internal?.parentWave || minute?.activeWave || "W3",
+    currentInternalWave: internal?.currentInternalWave || null,
+    nextExpectedInternalWave: internal?.nextExpectedInternalWave || null,
+    parentWaveStillValid: internal?.parentWaveStillValid ?? null,
+    parentWaveComplete: internal?.parentWaveComplete ?? null,
+    parentTransitionPossible:
+      internal?.parentTransitionPossible ?? null,
+    transitionRisk: internal?.transitionRisk || null,
+  };
 
   const currentLifecycleStateMirror = {
     ...(currentLifecycleState || {}),
@@ -1333,6 +1456,7 @@ function buildCanonicalDegreeStateMirror({
     confirmationRequired: true,
     degree: "minute",
     tacticalDegree: "subminute/minute",
+    ...sharedStructure,
     needs,
     targetContext: {
       source: "degreeStates.minute.targetModel",
@@ -1370,6 +1494,7 @@ function buildCanonicalDegreeStateMirror({
     rawSetup: activeSetup,
     degree: "minute",
     tacticalDegree: "subminute/minute",
+    ...sharedStructure,
     direction: "LONG",
     readiness: "WATCH",
     timing: "EXTENSION_MATURITY",
@@ -1377,6 +1502,8 @@ function buildCanonicalDegreeStateMirror({
     tradeableOpportunityBlocked: true,
     executionBlocked: true,
     confirmationRequired: true,
+    noExecution: true,
+    noPermissionCreated: true,
     entryZone: {
       type: "WAIT_FOR_PULLBACK_OR_RECLAIM",
       lo: null,
@@ -1486,13 +1613,13 @@ export function buildEngine22WaveStrategy(input = {}) {
 
   let currentLifecycleState = resolveCurrentLifecycleState({ waveFibState });
   const degreeStates = buildDegreeStates({
-  waveFibState,
-  activeStructures: waveFibState?.activeStructures,
-  markMaturity: waveFibState?.markMaturity,
-  symbol: context.symbol,
-  tf: context.tf,
-  currentPrice: context.currentPrice,
-});
+    waveFibState,
+    activeStructures: waveFibState?.activeStructures,
+    markMaturity: waveFibState?.markMaturity,
+    symbol: context.symbol,
+    tf: context.tf,
+    currentPrice: context.currentPrice,
+  });
 
   const degreeStateMirror = buildCanonicalDegreeStateMirror({
     context,
@@ -1512,8 +1639,9 @@ export function buildEngine22WaveStrategy(input = {}) {
 
   const w4Levels = getActiveW4Levels(waveFibState);
 
-  // PRE-ENGINE15 CONTRACT:
-  // This is the clean W3/W5 wave-opportunity source that Engine 15ES should consume.
+  // STRUCTURAL OPPORTUNITY CONTRACT:
+  // This is the clean W3/W5 structural opportunity source. Engine 15 may consume it
+  // as context, but Strategy 1 authority remains with Engine 3, Engine 4, and Engine 6.
   // It must stay independent from tradeDecision and timelineRead.
   let waveOpportunity = buildPreEngine15WaveOpportunity({
     context,
@@ -1561,7 +1689,7 @@ export function buildEngine22WaveStrategy(input = {}) {
       needs: currentLifecycleState.needs,
       summary: isIntermediateLaunchWatch
         ? "Intermediate W2 is marked complete at the active wave-state low. Watch for W3 launch, reclaim, or controlled pullback confirmation. Minor and Minute structures are not yet re-formed. No chase, no automatic long, no execution."
-        : "Intermediate W3 is active with Minor and Minute W3 continuation context. This is a bullish paper-trade candidate watch only. No chase, no automatic long, no execution. Wait for controlled pullback or reclaim confirmation plus Engine 3, Engine 4, Engine 15, and Engine 6 confirmation.",
+        : "Intermediate W3 is active with Minor and Minute continuation context. This is structural watch context only. No chase, no automatic long, and no execution. Wait for controlled pullback or reclaim confirmation, Engine 3 reaction, Engine 4 participation, and Engine 6 permission. Engine 15 is contextual only for Strategy 1.",
       reasonCodes: [
         ...(Array.isArray(waveOpportunity?.reasonCodes)
           ? waveOpportunity.reasonCodes
@@ -1677,37 +1805,6 @@ export function buildEngine22WaveStrategy(input = {}) {
     waveOpportunity,
   });
 
-  if (degreeStateMirror?.active === true) {
-  tradeDecision = {
-    ...(tradeDecision || {}),
-    decision: "WAIT",
-    direction: "LONG",
-    setupType: degreeStateMirror.activeSetup,
-    entryAllowed: false,
-    chaseAllowed: false,
-    reason:
-      "Minute W3 is active but extended into maturity. Wait for internal iv pullback or reclaim confirmation. No entry is allowed from wave structure alone.",
-    reasonCodes: [
-      ...(Array.isArray(tradeDecision?.reasonCodes)
-        ? tradeDecision.reasonCodes
-        : []),
-      "ENGINE22_DEGREE_STATE_MIRRORED_TO_TRADE_DECISION",
-      "MINUTE_W3_EXTENSION_MATURITY_WATCH",
-      "NO_CHASE_LONG",
-      "NO_EXECUTION",
-      "NO_PERMISSION_CREATED",
-    ],
-    safety: {
-      ...buildSafetyObject(),
-      ...(tradeDecision?.safety || {}),
-      liveTradingEnabled: false,
-      brokerCallsEnabled: false,
-      orderRoutingEnabled: false,
-      optionsExecutionEnabled: false,
-      paperOnly: true,
-    },
-  };
-}
 
   return {
     ok: waveFibState?.ok === true,
@@ -1726,45 +1823,14 @@ export function buildEngine22WaveStrategy(input = {}) {
     tradeContextSummary,
     targetClusterConfidence,
 
-    // Primary Engine 22 contract for Engine 15ES.
+    // Primary Engine 22 structural contract.
     waveOpportunity,
 
     // Secondary/read-only layers.
     lifecycleViews,
     lifecycleContext,
     timelineRead,
-    tradeDecision:
-      degreeStateMirror?.active === true
-        ? {
-            ...(tradeDecision || {}),
-            decision: "WAIT",
-            direction: "LONG",
-            setupType: degreeStateMirror.activeSetup,
-            entryAllowed: false,
-            chaseAllowed: false,
-            reason:
-              "Minute W3 is active but extended into maturity. Wait for internal iv pullback or reclaim confirmation. No entry is allowed from wave structure alone.",
-            reasonCodes: [
-              ...(Array.isArray(tradeDecision?.reasonCodes)
-                ? tradeDecision.reasonCodes
-                : []),
-              "ENGINE22_DEGREE_STATE_MIRRORED_TO_TRADE_DECISION",
-              "MINUTE_W3_EXTENSION_MATURITY_WATCH",
-              "NO_CHASE_LONG",
-              "NO_EXECUTION",
-              "NO_PERMISSION_CREATED",
-            ],
-            safety: {
-              ...buildSafetyObject(),
-              ...(tradeDecision?.safety || {}),
-              liveTradingEnabled: false,
-              brokerCallsEnabled: false,
-              orderRoutingEnabled: false,
-              optionsExecutionEnabled: false,
-              paperOnly: true,
-            },
-          }
-        : tradeDecision,
+    tradeDecision,
 
     // Canonical Engine 22 lifecycle state.
     // Downstream engines should consume this instead of stale display text.
