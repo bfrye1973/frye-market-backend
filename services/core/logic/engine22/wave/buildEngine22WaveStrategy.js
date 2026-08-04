@@ -1660,7 +1660,38 @@ export function buildEngine22WaveStrategy(input = {}) {
     lifecycleViews,
     lifecycleContext,
     timelineRead,
-    tradeDecision,
+    tradeDecision:
+      degreeStateMirror?.active === true
+        ? {
+            ...(tradeDecision || {}),
+            decision: "WAIT",
+            direction: "LONG",
+            setupType: degreeStateMirror.activeSetup,
+            entryAllowed: false,
+            chaseAllowed: false,
+            reason:
+              "Minute W3 is active but extended into maturity. Wait for internal iv pullback or reclaim confirmation. No entry is allowed from wave structure alone.",
+            reasonCodes: [
+              ...(Array.isArray(tradeDecision?.reasonCodes)
+                ? tradeDecision.reasonCodes
+                : []),
+              "ENGINE22_DEGREE_STATE_MIRRORED_TO_TRADE_DECISION",
+              "MINUTE_W3_EXTENSION_MATURITY_WATCH",
+              "NO_CHASE_LONG",
+              "NO_EXECUTION",
+              "NO_PERMISSION_CREATED",
+            ],
+            safety: {
+              ...buildSafetyObject(),
+              ...(tradeDecision?.safety || {}),
+              liveTradingEnabled: false,
+              brokerCallsEnabled: false,
+              orderRoutingEnabled: false,
+              optionsExecutionEnabled: false,
+              paperOnly: true,
+            },
+          }
+        : tradeDecision,
 
     // Canonical Engine 22 lifecycle state.
     // Downstream engines should consume this instead of stale display text.
