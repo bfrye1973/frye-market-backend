@@ -9012,29 +9012,6 @@ const engine26 = buildEngine26PaperTradePlan({
         }
       }
 
-     const engine15ForEngine22 =
-       String(symbol || "").toUpperCase() === "ES" &&
-       s.strategyId === "intraday_scalp@10m"
-         ? engine15Decision
-         : engine15;
-
-    const reactionContextForEngine22 =
-      patchedConfluence?.context?.reaction ||
-      spyReactionQuality?.engine3Reaction ||
-      spyReactionQuality ||
-      null;
-
-    const volumeContextForEngine22 =
-      patchedConfluence?.context?.volume ||
-      spyVolumeBehavior?.engine4Volume ||
-      spyVolumeBehavior ||
-      null;
-   
-if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
-  try {
-    // Do NOT rebuild Engine 22 wave strategy here.
-    // The pre-Engine15 waveOpportunity is already built above and must remain source of truth.
-    // Only enrich post-Engine15 / paper-only tradeDecision.
 if (
   s.strategyId === "intraday_scalp@10m" &&
   s.tf === "10m"
