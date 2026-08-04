@@ -44,6 +44,7 @@ import { deriveCandleCompletionTruth } from "../logic/engine3/candleCompletionTr
 import { fetchEngine3DiagnosticBarStack } from "../logic/engine3/fetchEngine3DiagnosticBars.js";
 import { buildReactionObservation1m } from "../logic/engine3/buildReactionObservation1m.js";
 import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidation5m.js";
+import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { listTrades } from "../logic/journal/tradeJournalStore.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
@@ -7973,6 +7974,17 @@ if (isEsIntradayScalp) {
     engine26StructuralContext,
     paperShortResearchEnabled: isEsIntradayScalp,
   });
+
+  const engine3Strategy1Readiness = buildStrategy1Readiness({
+    engine26LocationCandidate,
+    engine26ReactionHandoff,
+    observation1m: engine3ReactionObservation1m,
+    validation5m: engine3ReactionValidation5m,
+    paperScalpReaction:
+      patchedConfluence?.context?.reaction?.paperScalpReaction || null,
+  });
+  patchedConfluence.context.reaction.engine3Strategy1Readiness =
+    engine3Strategy1Readiness;
 
   attachEngine4AuthorizedReactionParticipation({
     patchedConfluence,
