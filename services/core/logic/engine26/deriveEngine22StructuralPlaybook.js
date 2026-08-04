@@ -666,6 +666,114 @@ function classifyTriangleECompletion({
   };
 }
 
+function classifyW3ExtensionMaturityInternalIvWatch({
+  symbol,
+  strategyId,
+  tf,
+  currentPrice,
+  activeImbalance,
+  degreeStates,
+  minor,
+  minute,
+  subminute,
+}) {
+  const internal = minute?.internalStructure || null;
+  const targetContext = minute?.targetModel || null;
+
+  return {
+    active: true,
+    engine: ENGINE,
+    source: "engine22WaveStrategy.degreeStates",
+    engine22ReadFirst: true,
+
+    symbol,
+    strategyId,
+    tf,
+    currentPrice: round2(currentPrice),
+    activeImbalance: activeImbalance || null,
+
+    template: "W3_EXTENSION_MATURITY_INTERNAL_IV_WATCH",
+    status: "WAIT_FOR_INTERNAL_IV_PULLBACK_OR_RECLAIM",
+    activeImbalanceRole: "INTERNAL_IV_REACTION_OR_RECLAIM_ZONE",
+    structuralBias: "BULLISH_W3_CONTEXT_ONLY",
+    preferredDirection: "LONG_CONTEXT_ONLY",
+    primaryScenario: "INTERNAL_IV_PULLBACK_THEN_POSSIBLE_INTERNAL_V",
+    preferredAction: "WAIT_FOR_INTERNAL_IV_HOLD_OR_RECLAIM",
+
+    parentDegree: internal?.parentDegree || "minute",
+    parentWave: internal?.parentWave || minute?.activeWave || "W3",
+    currentInternalWave: internal?.currentInternalWave || null,
+    nextExpectedInternalWave: internal?.nextExpectedInternalWave || null,
+    nextContinuationWave: "v",
+    classification: internal?.classification || null,
+    parentWaveStillValid: internal?.parentWaveStillValid ?? null,
+    parentWaveComplete: internal?.parentWaveComplete ?? null,
+    parentTransitionPossible: internal?.parentTransitionPossible ?? null,
+    transitionRisk: internal?.transitionRisk || null,
+
+    doNotChaseLong: true,
+    shortResearchOnly: false,
+
+    engine22Structure: {
+      minor: {
+        currentRead: minor?.currentRead || null,
+        action: minor?.action || null,
+      },
+      minute: {
+        currentRead: minute?.currentRead || null,
+        action: minute?.action || null,
+        activeWave: minute?.activeWave || null,
+        stage: minute?.stage || null,
+        internalStructure: internal,
+        targetModel: targetContext,
+      },
+      subminute: {
+        currentRead: subminute?.currentRead || null,
+        action: subminute?.action || null,
+      },
+    },
+
+    watchLevels: {
+      supportLevel: round2(internal?.supportLevel),
+      invalidationLevel: round2(internal?.invalidationLevel),
+      targetModel: targetContext,
+      nextTarget: round2(targetContext?.nextTarget),
+    },
+
+    confirmationNeeds: [
+      "INTERNAL_IV_PULLBACK_OR_RECLAIM",
+      "ENGINE3_DIRECTIONAL_REACTION",
+      "ENGINE4_PARTICIPATION",
+      "ENGINE6_PAPER_PERMISSION_REQUIRED",
+    ],
+
+    invalidation: {
+      invalidatesInternalIvWatchIf: [
+        "PRICE_LOSES_MINUTE_W3_INVALIDATION",
+        "PARENT_WAVE_MARKED_COMPLETE",
+        "PARENT_TRANSITION_BECOMES_ACTIVE",
+      ],
+    },
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    reasonCodes: [
+      "ENGINE26_STRUCTURAL_PLAYBOOK_BUILT",
+      "ENGINE22_READ_FIRST",
+      "TEMPLATE_W3_EXTENSION_MATURITY_INTERNAL_IV_WATCH",
+      "INTERNAL_III_EXTENDED",
+      "INTERNAL_IV_NEXT_EXPECTED",
+      "NO_CHASE",
+      "ENGINE3_ENGINE4_CONFIRMATION_REQUIRED",
+      "ENGINE6_FINAL_PERMISSION_REQUIRED",
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+    ],
+  };
+}
+
 function classifyW3Ignition({
   symbol,
   strategyId,
@@ -1048,6 +1156,14 @@ export function deriveEngine22StructuralPlaybook({
   );
   const minuteStage = upper(minute?.stage);
   const subminuteStage = upper(subminute?.stage);
+  const minuteInternal = minute?.internalStructure || null;
+  const minuteInternalWave = upper(minuteInternal?.currentInternalWave);
+  const minuteNextExpectedInternalWave = upper(
+    minuteInternal?.nextExpectedInternalWave
+  );
+  const minuteInternalClassification = upper(
+    minuteInternal?.classification
+  );
 
   const minuteNested = minute?.nestedCorrectionContext || null;
   const childPurpose = upper(minuteNested?.childPurpose);
@@ -1083,6 +1199,15 @@ export function deriveEngine22StructuralPlaybook({
     minute,
     subminute,
   };
+
+  const isW3ExtensionMaturityInternalIvWatch =
+    upper(minute?.activeWave) === "W3" &&
+    (minuteStage.includes("EXTENSION_MATURITY") ||
+      minuteInternalClassification === "FAST_IMPULSE_EXTENSION") &&
+    minuteInternalWave === "III" &&
+    minuteNextExpectedInternalWave === "IV" &&
+    minuteInternal?.parentWaveComplete !== true &&
+    minuteInternal?.parentTransitionPossible !== true;
 
   const isPostECompletionReaction =
     hasText(minorRead, "E_COMPLETED_CANDIDATE") ||
@@ -1143,7 +1268,11 @@ export function deriveEngine22StructuralPlaybook({
   // 1. Nested ABC down/up must beat generic triangle labels because it is the tactical timing path.
   // 2. E completion comes after because it describes the parent goal.
   // 3. Impulse/pullback/exhaustion templates follow.
-  if (isPostECompletionReaction) {
+  if (isW3ExtensionMaturityInternalIvWatch) {
+    playbook = classifyW3ExtensionMaturityInternalIvWatch({
+      ...common,
+    });
+  } else if (isPostECompletionReaction) {
     playbook = classifyPostEReactionDecisionWatch({
       ...common,
     });
@@ -1184,6 +1313,13 @@ export function deriveEngine22StructuralPlaybook({
     parserDebug: {
       minuteModelType,
       minorModelType,
+      minuteInternalWave,
+      minuteNextExpectedInternalWave,
+      minuteInternalClassification,
+      minuteParentWaveComplete: minuteInternal?.parentWaveComplete ?? null,
+      minuteParentTransitionPossible:
+        minuteInternal?.parentTransitionPossible ?? null,
+      isW3ExtensionMaturityInternalIvWatch,
       isPostECompletionReaction,
       parentCorrectionType,
       parentActiveLeg,
