@@ -8460,6 +8460,45 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
         strategyId: s.strategyId,
       });
 
+      const engine22MinuteW3MirrorActive =
+        engine22WaveStrategy?.activeSetup === "MINUTE_W3_EXTENSION_MATURITY_WATCH" ||
+        engine22WaveStrategy?.waveOpportunity?.setupType === "MINUTE_W3_EXTENSION_MATURITY_WATCH" ||
+        engine22WaveStrategy?.currentLifecycleState?.key === "MINUTE_W3_EXTENSION_MATURITY_WATCH";
+
+      if (engine22MinuteW3MirrorActive) {
+        engine22WaveStrategy.tradeDecision = {
+          ...(engine22WaveStrategy.tradeDecision || {}),
+          mode: "PAPER_ONLY",
+          decision: "WAIT",
+          direction: "LONG",
+          setupType: "MINUTE_W3_EXTENSION_MATURITY_WATCH",
+          grade: "WATCH_ONLY",
+          entryAllowed: false,
+          chaseAllowed: false,
+          reason:
+            "Minute W3 is active but extended into maturity. Wait for internal iv pullback or reclaim confirmation. No entry is allowed from wave structure alone.",
+          reasonCodes: [
+            ...(Array.isArray(engine22WaveStrategy?.tradeDecision?.reasonCodes)
+            ? engine22WaveStrategy.tradeDecision.reasonCodes
+            : []),
+          "ENGINE22_DEGREE_STATE_MIRRORED_TO_TRADE_DECISION_AFTER_SNAPSHOT_ENRICHMENT",
+          "MINUTE_W3_EXTENSION_MATURITY_WATCH",
+          "NO_CHASE_LONG",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED",
+        ],
+        safety: {
+          liveTradingEnabled: false,
+          brokerCallsEnabled: false,
+          orderRoutingEnabled: false,
+          optionsExecutionEnabled: false,
+          paperOnly: true,
+          noBlindShorts: true,
+          ...(engine22WaveStrategy?.tradeDecision?.safety || {}),
+        },
+      };
+    }
+
       engine22WaveStrategy =
         applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
      attachEngine22PullbackReactionToConfluence({
