@@ -7,17 +7,20 @@
 // Architecture:
 // - Adapters normalize market-specific input.
 // - Generic wave/fib core analyzes wave state.
-// - waveOpportunity is the PRE-ENGINE15 source of truth for W3/W5 opportunity.
-// - timelineRead is display/read layer.
-// - tradeDecision is post-Engine15 / PAPER_ONLY decision context.
+// - degreeStates is the canonical Engine 22 structural source.
+// - waveOpportunity is structural opportunity context only.
+// - timelineRead is display/read context only.
+// - Engine 22 does not create permission, tickets, sizing, execution, or journal state.
 //
 // Locked role:
-// Engine 22 finds Elliott Wave W3/W5 opportunities.
-// Engine 15ES referees readiness.
-// Engine 6 permits.
-// Engine 7 sizes.
-// Engine 8 executes only if executable=true.
-//6f
+// Engine 22 owns Elliott Wave market structure.
+// Engine 3 evaluates reaction.
+// Engine 4 evaluates participation.
+// Engine 6 remains final paper permission authority.
+// Engine 7 sizes only after Engine 6 permission.
+// Engine 8 executes only through its own authorized contract.
+// Engine 15 may be computed as context but is bypassed as authority
+// for Strategy 1 Subminute, Minute, and Minor.
 // This file should NOT become an ES monster file.
 // This file should NOT contain broker logic.
 // This file should NOT route orders.
@@ -777,6 +780,35 @@ function buildMinuteIntradayScalpLifecycleView({
     waveFibState,
     context?.engine2State
   );
+ const minuteInternal = minute?.internalStructure || null;
+
+ const minuteWave = String(
+   minute?.activeWave ||
+     minuteInternal?.parentWave ||
+     ""
+ ).toUpperCase();
+
+ const minuteStage = String(minute?.stage || "").toUpperCase();
+
+ const currentInternalWave = String(
+   minuteInternal?.currentInternalWave || ""
+ ).toLowerCase();
+
+ const nextExpectedInternalWave = String(
+   minuteInternal?.nextExpectedInternalWave || ""
+ ).toLowerCase();
+
+ const isMinuteW3ExtensionMaturity =
+   minuteWave === "W3" &&
+   (
+     minuteStage.includes("EXTENSION_MATURITY") ||
+     String(minuteInternal?.classification || "").toUpperCase() ===
+       "FAST_IMPULSE_EXTENSION"
+   ) &&
+   currentInternalWave === "iii" &&
+   nextExpectedInternalWave === "iv" &&
+   minuteInternal?.parentWaveComplete !== true &&
+   minuteInternal?.parentTransitionPossible !== true;
 
   const minute =
     structures?.minute ||
