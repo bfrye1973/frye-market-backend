@@ -5611,61 +5611,159 @@ function buildEngine22CurrentLifecycleStateContract(
     ],
   };
 }
-function applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy) {
-  if (!engine22WaveStrategy || typeof engine22WaveStrategy !== "object") {
-    return engine22WaveStrategy;
-  }
-
-  // Engine 22 wave strategy owns currentLifecycleState.
-  // Snapshot builder should only transport it, not override it.
+function applyEngine22CurrentLifecycleStateContract(
+  engine22WaveStrategy
+) {
   if (
-    engine22WaveStrategy.currentLifecycleState &&
-    typeof engine22WaveStrategy.currentLifecycleState === "object"
+    !engine22WaveStrategy ||
+    typeof engine22WaveStrategy !== "object"
   ) {
     return engine22WaveStrategy;
   }
 
-  const currentLifecycleState =
-    buildEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
+  const activeDegree =
+    String(
+      engine22WaveStrategy?.activeTradingDegree ||
+      ""
+    )
+      .trim()
+      .toLowerCase() ||
+    null;
 
-  const shouldMirrorW5Complete =
-    currentLifecycleState?.key === "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH";
+  const compatibilitySummary =
+    buildEngine22CurrentLifecycleStateContract(
+      engine22WaveStrategy,
+      activeDegree
+    );
 
-  const waveOpportunity = shouldMirrorW5Complete
-    ? {
-        ...(engine22WaveStrategy.waveOpportunity || {}),
-        setupType: "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
-        readiness: "WATCH",
-        direction: "NONE",
-        active: false,
-        noExecution: true,
-        tradeableOpportunityBlocked: true,
-      }
-    : engine22WaveStrategy.waveOpportunity || null;
+  const resolvedDegree =
+    compatibilitySummary?.activeDegree ||
+    activeDegree ||
+    null;
+
+  const canonicalDegreeState =
+    resolvedDegree
+      ? engine22WaveStrategy
+          ?.degreeStates
+          ?.[resolvedDegree] ||
+        null
+      : null;
+
+  const canonicalInternal =
+    canonicalDegreeState
+      ?.internalStructure ||
+    null;
+
+  const existing =
+    engine22WaveStrategy
+      ?.currentLifecycleState ||
+    null;
+
+  /*
+   * Preserve additive non-structural fields from the existing
+   * compatibility object, but force wave identity back to
+   * canonical degreeStates.
+   */
+  const currentLifecycleState = {
+    ...(existing || {}),
+    ...compatibilitySummary,
+
+    activeDegree:
+      resolvedDegree,
+
+    activeWave:
+      canonicalDegreeState?.activeWave ||
+      compatibilitySummary?.activeWave ||
+      null,
+
+    stage:
+      canonicalDegreeState?.stage ||
+      compatibilitySummary?.stage ||
+      null,
+
+    currentRead:
+      canonicalDegreeState?.currentRead ||
+      compatibilitySummary?.currentRead ||
+      null,
+
+    parentDegree:
+      canonicalInternal?.parentDegree ||
+      compatibilitySummary?.parentDegree ||
+      null,
+
+    parentWave:
+      canonicalInternal?.parentWave ||
+      canonicalDegreeState?.activeWave ||
+      compatibilitySummary?.parentWave ||
+      null,
+
+    currentInternalWave:
+      canonicalInternal?.currentInternalWave ||
+      null,
+
+    nextExpectedInternalWave:
+      canonicalInternal?.nextExpectedInternalWave ||
+      null,
+
+    classification:
+      canonicalInternal?.classification ||
+      null,
+
+    parentWaveStillValid:
+      canonicalInternal?.parentWaveStillValid ??
+      null,
+
+    parentWaveComplete:
+      canonicalInternal?.parentWaveComplete ??
+      null,
+
+    parentTransitionPossible:
+      canonicalInternal?.parentTransitionPossible ??
+      null,
+
+    transitionRisk:
+      canonicalInternal?.transitionRisk ||
+      null,
+
+    supportLevel:
+      canonicalInternal?.supportLevel ??
+      null,
+
+    invalidationLevel:
+      canonicalInternal?.invalidationLevel ??
+      null,
+
+    targetModel:
+      canonicalDegreeState?.targetModel ||
+      null,
+
+    sourcePath:
+      resolvedDegree
+        ? `engine22WaveStrategy.degreeStates.${resolvedDegree}`
+        : "engine22WaveStrategy.degreeStates",
+
+    compatibilityOnly: true,
+    authoritative: false,
+
+    noExecution: true,
+    noPermissionCreated: true,
+  };
 
   return {
     ...engine22WaveStrategy,
 
     currentLifecycleState,
 
-    ...(shouldMirrorW5Complete
-      ? {
-          setupType: "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
-          readiness: "WATCH",
-          direction: "NONE",
-          active: false,
-          noExecution: true,
-          tradeableOpportunityBlocked: true,
-        }
-      : {}),
-
-    waveOpportunity,
-
     reasonCodes: [
-      ...(Array.isArray(engine22WaveStrategy.reasonCodes)
+      ...(Array.isArray(
+        engine22WaveStrategy?.reasonCodes
+      )
         ? engine22WaveStrategy.reasonCodes
         : []),
+
       "ENGINE22_CURRENT_LIFECYCLE_STATE_CONTRACT_APPLIED",
+      "ENGINE22_CANONICAL_DEGREE_STATE_REASSERTED",
+      "NO_WAVE_IDENTITY_OVERRIDE_ALLOWED",
     ],
   };
 }
@@ -8752,56 +8850,38 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
     // Do NOT rebuild Engine 22 wave strategy here.
     // The pre-Engine15 waveOpportunity is already built above and must remain source of truth.
     // Only enrich post-Engine15 / paper-only tradeDecision.
-    if (engine22WaveStrategy && typeof engine22WaveStrategy === "object") {
-      engine22WaveStrategy.tradeDecision = buildWaveTradeDecision({
-        engine22WaveStrategy,
-        engine15: engine15ForEngine22,
-        engine16,
-        reactionContext: reactionContextForEngine22,
-        volumeContext: volumeContextForEngine22,
-        symbol,
-        strategyId: s.strategyId,
-      });
-
-      const engine22MinuteW3MirrorActive =
-        engine22WaveStrategy?.activeSetup === "MINUTE_W3_EXTENSION_MATURITY_WATCH" ||
-        engine22WaveStrategy?.waveOpportunity?.setupType === "MINUTE_W3_EXTENSION_MATURITY_WATCH" ||
-        engine22WaveStrategy?.currentLifecycleState?.key === "MINUTE_W3_EXTENSION_MATURITY_WATCH";
-
-      if (engine22MinuteW3MirrorActive) {
-        engine22WaveStrategy.tradeDecision = {
-          ...(engine22WaveStrategy.tradeDecision || {}),
-          mode: "PAPER_ONLY",
-          decision: "WAIT",
-          direction: "LONG",
-          setupType: "MINUTE_W3_EXTENSION_MATURITY_WATCH",
-          grade: "WATCH_ONLY",
-          entryAllowed: false,
-          chaseAllowed: false,
-          reason:
-            "Minute W3 is active but extended into maturity. Wait for internal iv pullback or reclaim confirmation. No entry is allowed from wave structure alone.",
-          reasonCodes: [
-            ...(Array.isArray(engine22WaveStrategy?.tradeDecision?.reasonCodes)
-            ? engine22WaveStrategy.tradeDecision.reasonCodes
-            : []),
-          "ENGINE22_DEGREE_STATE_MIRRORED_TO_TRADE_DECISION_AFTER_SNAPSHOT_ENRICHMENT",
-          "MINUTE_W3_EXTENSION_MATURITY_WATCH",
-          "NO_CHASE_LONG",
-          "NO_EXECUTION",
-          "NO_PERMISSION_CREATED",
-        ],
-        safety: {
-          liveTradingEnabled: false,
-          brokerCallsEnabled: false,
-          orderRoutingEnabled: false,
-          optionsExecutionEnabled: false,
-          paperOnly: true,
-          noBlindShorts: true,
-          ...(engine22WaveStrategy?.tradeDecision?.safety || {}),
-        },
-      };
+    if (
+  s.strategyId === "intraday_scalp@10m" &&
+  s.tf === "10m"
+) {
+  try {
+    if (
+      engine22WaveStrategy &&
+      typeof engine22WaveStrategy === "object"
+    ) {
+      engine22WaveStrategy =
+        applyEngine22CurrentLifecycleStateContract(
+          engine22WaveStrategy
+        );
     }
 
+    attachEngine22PullbackReactionToConfluence({
+      patchedConfluence,
+      engine22WaveStrategy,
+      bars:
+        marketMeter?.layers?.emaPosture
+          ?.tenMinute?.bars || [],
+    });
+
+    attachEngine22LifecycleReactionToConfluence({
+      patchedConfluence,
+      engine22WaveStrategy,
+      bars:
+        marketMeter?.layers?.emaPosture
+          ?.tenMinute?.bars || [],
+    });
+
+    // Keep the rest of your existing attachment calls unchanged.
       engine22WaveStrategy =
         applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy);
      attachEngine22PullbackReactionToConfluence({
@@ -8874,27 +8954,45 @@ if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
   } catch (err) {
     console.error("[E22G TRADE DECISION ERROR]", err);
 
-    if (engine22WaveStrategy && typeof engine22WaveStrategy === "object") {
-      engine22WaveStrategy.tradeDecision = {
-        mode: "PAPER_ONLY",
-        engine: "engine22.tradeDecision.safeFallback.v1",
-        symbol,
-        strategyId: s.strategyId,
-        decision: "WAIT",
-        direction: "NONE",
-        setupType: engine22WaveStrategy?.waveOpportunity?.setupType || "NO_SETUP",
-        grade: "NO_TRADE",
-        entryAllowed: false,
-        chaseAllowed: false,
-        reason: "Trade decision enrichment failed safely.",
-        needs: ["TRADE_DECISION_REVIEW"],
-        reasonCodes: ["TRADE_DECISION_SAFE_FALLBACK"],
-        debug: {
-          error: String(err?.message || err),
-          stack: String(err?.stack || ""),
-        },
-      };
-    }
+if (
+  engine22WaveStrategy &&
+  typeof engine22WaveStrategy === "object"
+) {
+  engine22WaveStrategy = {
+    ...engine22WaveStrategy,
+
+    snapshotCompatibilityError: {
+      active: true,
+
+      source:
+        "buildStrategySnapshot.tradeDecisionEnrichment",
+
+      compatibilityOnly: true,
+      authoritative: false,
+
+      status: "SAFE_FAILURE",
+      direction: "NONE",
+
+      noExecution: true,
+      noPermissionCreated: true,
+
+      reasonCodes: [
+        "SNAPSHOT_COMPATIBILITY_ENRICHMENT_FAILED",
+        "ENGINE22_WAVE_TRUTH_UNCHANGED",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+      ],
+
+      debug: {
+        error:
+          String(err?.message || err),
+
+        stack:
+          String(err?.stack || ""),
+      },
+    },
+  };
+}
   }
 }
       if (
