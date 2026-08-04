@@ -2353,44 +2353,95 @@ function buildEngine6PaperPermission({
         .includes("STAND_DOWN")
     );
 
-  const lifecyclePaperCandidate =
-    currentLifecycleState?.paperTradeCandidate === true ||
-    engine22WaveStrategy?.paperTradeCandidate === true ||
-    engine22WaveStrategy?.waveOpportunity?.paperTradeCandidate === true ||
-    paperReadiness?.paperTradeCandidate === true ||
-    paperReadiness?.active === true ||
-    reactionActive === true ||
-    participationActive === true;
+const lifecyclePaperCandidate =
+  paperReadiness?.paperTradeCandidate === true ||
+  paperReadiness?.active === true ||
+  reactionActive === true ||
+  participationActive === true ||
+  engine26LocationCandidate?.active === true ||
+  engine26ImbalanceWatch?.active === true;
 
-  const pickUsableDirection = (...values) => {
-    for (const value of values) {
-      const normalized =
-        String(value || "").toUpperCase();
+const normalizePermissionDirection = (value) => {
+  const normalized =
+    String(value || "")
+      .trim()
+      .toUpperCase();
 
-      if (
-        normalized &&
-        normalized !== "NONE" &&
-        normalized !== "NEUTRAL" &&
-        normalized !== "UNKNOWN"
-      ) {
-        return normalized;
-      }
+  if (normalized === "LONG") {
+    return "LONG";
+  }
+
+  if (normalized === "SHORT") {
+    return "SHORT";
+  }
+
+  return "NONE";
+};
+
+const firstExactDirection = (...values) => {
+  for (const value of values) {
+    const normalized =
+      normalizePermissionDirection(value);
+
+    if (normalized !== "NONE") {
+      return normalized;
     }
+  }
 
-    return "NONE";
-  };
+  return "NONE";
+};
 
-  const direction =
-    engine15FastLaneExcluded
-      ? pickUsableDirection(
-          paperReaction?.direction,
-          paperReaction?.tradeDirectionBias,
-          paperParticipation?.intendedDirection,
-          paperParticipation?.direction,
-          participationDirection,
-          engine22WaveStrategy?.waveOpportunity?.direction,
-          currentLifecycleState?.direction
-        )
+const engine3Direction =
+  firstExactDirection(
+    paperReaction?.direction,
+    paperReaction?.tradeDirectionBias
+  );
+
+const engine4Direction =
+  firstExactDirection(
+    paperParticipation?.intendedDirection,
+    paperParticipation?.direction,
+    participationDirection
+  );
+
+const engine26Direction =
+  firstExactDirection(
+    engine26LocationCandidate?.direction,
+    engine26ImbalanceWatch?.preferredDirection,
+    engine26ImbalanceWatch
+      ?.structuralPlaybook
+      ?.direction
+  );
+
+const engine15Direction =
+  firstExactDirection(
+    paperReadiness?.direction,
+    engine15Decision?.direction
+  );
+
+const fastLaneDirection =
+  firstExactDirection(
+    engine3Direction,
+    engine4Direction,
+    engine26Direction
+  );
+
+const direction =
+  engine15FastLaneExcluded
+    ? fastLaneDirection
+    : firstExactDirection(
+        fastLaneDirection,
+        engine15Direction
+      );
+
+const engine22StructuralDirection =
+  normalizePermissionDirection(
+    engine22WaveStrategy
+      ?.degreeStates
+      ?.minute
+      ?.internalStructure
+      ?.parentWaveDirection
+  );
       : pickUsableDirection(
           paperReaction?.direction,
           paperReaction?.tradeDirectionBias,
@@ -2559,7 +2610,9 @@ function buildEngine6PaperPermission({
     direction === "NEUTRAL"
   ) {
     blockers.push(
-      "PAPER_DIRECTION_MISSING"
+      engine15FastLaneExcluded
+        ? "FAST_LANE_DIRECTION_NOT_CONFIRMED_BY_ENGINE3_ENGINE4_ENGINE26"
+        : "PAPER_DIRECTION_MISSING"
     );
   }
 
@@ -3143,6 +3196,43 @@ function buildEngine6PaperPermission({
           structuralFastWatch === true
         ? "SHORT"
         : direction,
+    directionDiagnostics: {
+      rawEngine3Direction:
+        paperReaction?.direction ||
+        paperReaction?.tradeDirectionBias ||
+        null,
+
+      rawEngine4Direction:
+        paperParticipation?.intendedDirection ||
+        paperParticipation?.direction ||
+        null,
+
+      rawEngine26Direction:
+        engine26LocationCandidate?.direction ||
+        engine26ImbalanceWatch?.preferredDirection ||
+        engine26ImbalanceWatch
+          ?.structuralPlaybook
+          ?.direction ||
+        null,
+
+       normalizedEngine3Direction:
+         engine3Direction,
+
+       normalizedEngine4Direction:
+         engine4Direction,
+
+       normalizedEngine26Direction:
+         engine26Direction,
+
+       engine22StructuralDirection,
+
+       engine22DirectionDiagnosticOnly:
+         true,
+
+       engine22DirectionUsedForPermission:
+         false,
+     },
+    
 
      directionState:
        engine26LocationCandidate?.directionState ||
