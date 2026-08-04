@@ -1024,70 +1024,241 @@ function validPrice(value) {
 }
 
 function buildEngine4WaveContextFromDegreeStates(engine22WaveStrategy) {
-  const degreeStates = engine22WaveStrategy?.degreeStates || null;
+  const degreeStates =
+    engine22WaveStrategy?.degreeStates || null;
 
-  if (!degreeStates || typeof degreeStates !== "object") {
-    const currentLifecycleState =
-      engine22WaveStrategy?.currentLifecycleState || null;
+  const minute =
+    degreeStates?.minute || null;
 
+  if (
+    !degreeStates ||
+    typeof degreeStates !== "object" ||
+    !minute ||
+    typeof minute !== "object"
+  ) {
     return {
       available: false,
-      source: "engine22WaveStrategy.currentLifecycleState",
-      fallbackLifecycleKey: currentLifecycleState?.key || null,
-      fallbackHeadline: currentLifecycleState?.headline || null,
-      reasonCodes: ["ENGINE22_DEGREE_STATES_MISSING_FALLBACK_LIFECYCLE_USED"],
+      source: "engine22WaveStrategy.degreeStates",
+      status: "UNKNOWN",
+
+      minor: null,
+      minute: null,
+      subminute: null,
+
+      reasonCodes: [
+        "ENGINE22_CANONICAL_DEGREE_STATES_UNAVAILABLE",
+        "ENGINE4_WAVE_CONTEXT_UNAVAILABLE",
+        "NO_WAVE_STRUCTURE_INVENTED",
+      ],
     };
   }
 
-  const minor = degreeStates.minor || null;
-  const minute = degreeStates.minute || null;
-  const subminute = degreeStates.subminute || null;
+  const minor =
+    degreeStates?.minor || null;
+
+  const subminute =
+    degreeStates?.subminute || null;
+
+  const minuteInternal =
+    minute?.internalStructure || null;
 
   return {
     available: true,
     source: "engine22WaveStrategy.degreeStates",
+    status: "AVAILABLE",
 
-    minor: {
-      headline: minor?.headline || null,
-      activeWave: minor?.activeWave || null,
-      stage: minor?.stage || null,
-      direction: minor?.direction || null,
-      correctionType: minor?.correctionModel?.type || null,
-      correctionStage: minor?.correctionModel?.stage || null,
-      preferredType: minor?.correctionModels?.preferredType || null,
-      localSupportWatch: minor?.targetModel?.localSupportWatch || null,
-    },
+    minor: minor
+      ? {
+          available: true,
+          sourcePath:
+            "engine22WaveStrategy.degreeStates.minor",
+
+          headline:
+            minor?.headline || null,
+
+          activeWave:
+            minor?.activeWave || null,
+
+          stage:
+            minor?.stage || null,
+
+          currentRead:
+            minor?.currentRead || null,
+
+          direction:
+            minor?.direction || null,
+
+          targetModel:
+            minor?.targetModel || null,
+
+          internalStructure:
+            minor?.internalStructure || null,
+
+          correctionType:
+            minor?.correctionModel?.type || null,
+
+          correctionStage:
+            minor?.correctionModel?.stage || null,
+
+          preferredType:
+            minor?.correctionModels?.preferredType || null,
+
+          localSupportWatch:
+            minor?.targetModel?.localSupportWatch || null,
+        }
+      : null,
 
     minute: {
-      headline: minute?.headline || null,
-      action: minute?.action || null,
-      activeWave: minute?.activeWave || null,
-      stage: minute?.stage || null,
-      direction: minute?.direction || null,
-      correctionType: minute?.correctionModel?.type || null,
-      correctionStage: minute?.correctionModel?.stage || null,
-      nestedPurpose: minute?.nestedCorrectionContext?.childPurpose || null,
-      currentRead: minute?.nestedCorrectionContext?.currentRead || null,
-      nextExpected: minute?.nestedCorrectionContext?.nextExpected || null,
+      available: true,
+      sourcePath:
+        "engine22WaveStrategy.degreeStates.minute",
+
+      headline:
+        minute?.headline || null,
+
+      action:
+        minute?.action || null,
+
+      activeWave:
+        minute?.activeWave || null,
+
+      stage:
+        minute?.stage || null,
+
+      currentRead:
+        minute?.currentRead || null,
+
+      direction:
+        minute?.direction || null,
+
+      targetModel:
+        minute?.targetModel || null,
+
+      internalStructure:
+        minuteInternal,
+
+      parentWave:
+        minuteInternal?.parentWave ||
+        minute?.activeWave ||
+        null,
+
+      currentInternalWave:
+        minuteInternal?.currentInternalWave ||
+        null,
+
+      nextExpectedInternalWave:
+        minuteInternal?.nextExpectedInternalWave ||
+        null,
+
+      classification:
+        minuteInternal?.classification ||
+        null,
+
+      parentWaveStillValid:
+        minuteInternal?.parentWaveStillValid ??
+        null,
+
+      parentWaveComplete:
+        minuteInternal?.parentWaveComplete ??
+        null,
+
+      parentTransitionPossible:
+        minuteInternal?.parentTransitionPossible ??
+        null,
+
+      transitionRisk:
+        minuteInternal?.transitionRisk ||
+        null,
+
+      supportLevel:
+        minuteInternal?.supportLevel ??
+        null,
+
+      invalidationLevel:
+        minuteInternal?.invalidationLevel ??
+        null,
+
+      nextTarget:
+        minute?.targetModel?.nextTarget ??
+        null,
+
+      correctionType:
+        minute?.correctionModel?.type || null,
+
+      correctionStage:
+        minute?.correctionModel?.stage || null,
+
+      nestedPurpose:
+        minute?.nestedCorrectionContext
+          ?.childPurpose || null,
+
+      nestedCurrentRead:
+        minute?.nestedCorrectionContext
+          ?.currentRead || null,
+
+      nestedNextExpected:
+        minute?.nestedCorrectionContext
+          ?.nextExpected || null,
     },
 
-    subminute: {
-      headline: subminute?.headline || null,
-      action: subminute?.action || null,
-      activeWave: subminute?.activeWave || null,
-      stage: subminute?.stage || null,
-      direction: subminute?.direction || null,
-      correctionType: subminute?.correctionModel?.type || null,
-      correctionStage: subminute?.correctionModel?.stage || null,
-      nestedPurpose: subminute?.nestedCorrectionContext?.childPurpose || null,
-      currentRead: subminute?.nestedCorrectionContext?.currentRead || null,
-      nextExpected: subminute?.nestedCorrectionContext?.nextExpected || null,
-    },
+    subminute: subminute
+      ? {
+          available: true,
+          sourcePath:
+            "engine22WaveStrategy.degreeStates.subminute",
 
-    reasonCodes: ["ENGINE22_DEGREE_STATES_CONSUMED_BY_ENGINE4"],
+          headline:
+            subminute?.headline || null,
+
+          action:
+            subminute?.action || null,
+
+          activeWave:
+            subminute?.activeWave || null,
+
+          stage:
+            subminute?.stage || null,
+
+          currentRead:
+            subminute?.currentRead || null,
+
+          direction:
+            subminute?.direction || null,
+
+          targetModel:
+            subminute?.targetModel || null,
+
+          internalStructure:
+            subminute?.internalStructure || null,
+
+          correctionType:
+            subminute?.correctionModel?.type || null,
+
+          correctionStage:
+            subminute?.correctionModel?.stage || null,
+
+          nestedPurpose:
+            subminute?.nestedCorrectionContext
+              ?.childPurpose || null,
+
+          nestedCurrentRead:
+            subminute?.nestedCorrectionContext
+              ?.currentRead || null,
+
+          nestedNextExpected:
+            subminute?.nestedCorrectionContext
+              ?.nextExpected || null,
+        }
+      : null,
+
+    reasonCodes: [
+      "ENGINE22_DEGREE_STATES_CONSUMED_BY_ENGINE4",
+      "ENGINE4_CANONICAL_MINUTE_INTERNAL_STRUCTURE_TRANSPORTED",
+      "ENGINE4_CANONICAL_MINUTE_TARGET_MODEL_TRANSPORTED",
+      "NO_WAVE_STRUCTURE_RECONSTRUCTED",
+    ],
   };
 }
-
 function isFuturesSymbol(sym) {
   const s = String(sym || "").toUpperCase();
   return ["ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K"].includes(s);
@@ -5174,140 +5345,272 @@ async function fetchVolume({ symbol, tf, zoneLo, zoneHi, mode }) {
   };
 }
 
-function buildEngine22CurrentLifecycleStateContract(engine22WaveStrategy) {
-  const lifecycle = engine22WaveStrategy?.waveFibState?.lifecycle || null;
-  const postAbcReset = lifecycle?.postAbcReset || null;
-  const possibleW5Up = postAbcReset?.possibleW5Up || null;
-  const postDownImpulseBounce = postAbcReset?.postDownImpulseBounce || null;
-  const waveOpportunity = engine22WaveStrategy?.waveOpportunity || null;
+function buildEngine22CurrentLifecycleStateContract(
+  engine22WaveStrategy,
+  activeDegree = null
+) {
+  const degreeStates =
+    engine22WaveStrategy?.degreeStates || null;
 
+  const requestedDegree =
+    String(activeDegree || "")
+      .trim()
+      .toLowerCase();
+
+  const publishedDegree =
+    String(
+      engine22WaveStrategy?.activeTradingDegree ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
+
+  const resolvedDegree =
+    requestedDegree ||
+    publishedDegree ||
+    (
+      degreeStates?.minute
+        ? "minute"
+        : degreeStates?.subminute
+        ? "subminute"
+        : degreeStates?.minor
+        ? "minor"
+        : degreeStates?.intermediate
+        ? "intermediate"
+        : degreeStates?.primary
+        ? "primary"
+        : null
+    );
+
+  const degreeState =
+    resolvedDegree
+      ? degreeStates?.[resolvedDegree] || null
+      : null;
+
+  const internal =
+    degreeState?.internalStructure || null;
+
+  const sourcePath =
+    resolvedDegree
+      ? `engine22WaveStrategy.degreeStates.${resolvedDegree}`
+      : "engine22WaveStrategy.degreeStates";
+
+  /*
+   * Missing canonical structure must remain unknown.
+   *
+   * Do not infer wave state from:
+   * - waveOpportunity
+   * - tradeDecision
+   * - timelineRead
+   * - tradeContextSummary
+   * - postAbcReset
+   * - historical lifecycle text
+   */
   if (
-    possibleW5Up?.w5Complete === true ||
-    possibleW5Up?.state === "POSSIBLE_MINOR_W5_UP_COMPLETE_POST_W5_PULLBACK_WATCH"
+    !degreeStates ||
+    typeof degreeStates !== "object" ||
+    !degreeState ||
+    typeof degreeState !== "object"
   ) {
     return {
-      key: "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
-      headline:
-        engine22WaveStrategy?.tradeContextSummary?.headline ||
-        engine22WaveStrategy?.timelineRead?.headline ||
-        "POSSIBLE MINOR W5 UP COMPLETE — WATCH PULLBACK ENTRY ZONES",
-      sourcePath: "waveFibState.lifecycle.postAbcReset.possibleW5Up",
-      priority: 1,
+      key: "UNKNOWN_ENGINE22_LIFECYCLE_STATE",
 
-      action: "WATCH_POST_W5_PULLBACK_ENTRY_ZONES",
+      headline:
+        "Engine 22 canonical degree state unavailable",
+
+      sourcePath,
+
+      activeDegree:
+        resolvedDegree || null,
+
+      priority: 99,
+
+      action:
+        "WAIT_FOR_CANONICAL_DEGREE_STATE",
+
       direction: "NONE",
+
       active: false,
       readOnly: true,
+
+      compatibilityOnly: true,
+      authoritative: false,
+
       noExecution: true,
+      noPermissionCreated: true,
+
       tradeableOpportunityBlocked: true,
+      executionBlocked: true,
 
-      currentPrice: possibleW5Up?.currentPrice ?? null,
-      pullbackLevelsFromW5: possibleW5Up?.pullbackLevelsFromW5 ?? null,
-      entryZones: possibleW5Up?.entryZones ?? null,
-      priceProgress: possibleW5Up?.priceProgress ?? null,
+      activeWave: null,
+      stage: null,
+      currentRead: null,
 
-      needs: possibleW5Up?.needs ?? [],
+      parentDegree: null,
+      parentWave: null,
+
+      currentInternalWave: null,
+      nextExpectedInternalWave: null,
+
+      classification: null,
+
+      parentWaveStillValid: null,
+      parentWaveComplete: null,
+      parentTransitionPossible: null,
+
+      transitionRisk: null,
+      supportLevel: null,
+      invalidationLevel: null,
+      targetModel: null,
+
       reasonCodes: [
-        "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
-        "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+        "ENGINE22_CANONICAL_DEGREE_STATE_UNAVAILABLE",
+        "UNKNOWN_ENGINE22_LIFECYCLE_STATE",
+        "NO_HISTORICAL_STRUCTURE_INVENTED",
         "READ_ONLY",
         "NO_EXECUTION",
-        "DIRECTION_NONE",
+        "NO_PERMISSION_CREATED",
       ],
     };
   }
 
-  if (
-    postDownImpulseBounce?.possibleW5UpReclassification === true ||
-    postDownImpulseBounce?.state ===
-      "POST_MINOR_5_BOUNCE_EXCEEDED_C2618_POSSIBLE_W5_UP"
-  ) {
-    return {
-      key: "POSSIBLE_W5_UP_RECLASSIFICATION_WATCH",
-      headline:
-        postDownImpulseBounce?.headline ||
-        engine22WaveStrategy?.tradeContextSummary?.headline ||
-        "C 2.618 EXCEEDED — POSSIBLE WAVE 5 UP WATCH",
-      sourcePath: "waveFibState.lifecycle.postAbcReset.postDownImpulseBounce",
-      priority: 2,
+  const degreeToken =
+    String(resolvedDegree || "unknown")
+      .toUpperCase();
 
-      action: postDownImpulseBounce?.action || "WAIT_FOR_CONFIRMATION",
-      direction: "NONE",
-      active: false,
-      readOnly: true,
-      noExecution: true,
-      tradeableOpportunityBlocked: true,
+  const waveToken =
+    String(
+      degreeState?.activeWave || "UNKNOWN"
+    ).toUpperCase();
 
-      currentPrice: postDownImpulseBounce?.currentPrice ?? null,
-      reasonCodes: [
-        "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
-        "POSSIBLE_W5_UP_RECLASSIFICATION_WATCH",
-        "READ_ONLY",
-        "NO_EXECUTION",
-        "DIRECTION_NONE",
-      ],
-    };
-  }
+  const currentInternalToken =
+    String(
+      internal?.currentInternalWave ||
+      "NONE"
+    ).toUpperCase();
 
-  if (postAbcReset?.state === "POST_ABC_W2_BOUNCE_WATCH") {
-    return {
-      key: "POST_ABC_W2_BOUNCE_WATCH",
-      headline:
-        postAbcReset?.headline ||
-        engine22WaveStrategy?.tradeContextSummary?.headline ||
-        "POST ABC COMPLETE — WATCH WAVE 2 BOUNCE",
-      sourcePath: "waveFibState.lifecycle.postAbcReset",
-      priority: 3,
+  const nextInternalToken =
+    String(
+      internal?.nextExpectedInternalWave ||
+      "NONE"
+    ).toUpperCase();
 
-      action: postAbcReset?.action || "WAIT_FOR_RECLAIM_CONFIRMATION",
-      direction: "NONE",
-      active: false,
-      readOnly: true,
-      noExecution: true,
-      tradeableOpportunityBlocked: true,
+  const parentWaveComplete =
+    internal?.parentWaveComplete === true;
 
-      currentPrice: postAbcReset?.currentPrice ?? null,
-      reasonCodes: [
-        "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
-        "POST_ABC_W2_BOUNCE_WATCH",
-        "READ_ONLY",
-        "NO_EXECUTION",
-        "DIRECTION_NONE",
-      ],
-    };
-  }
+  const parentTransitionPossible =
+    internal?.parentTransitionPossible === true;
+
+  const key =
+    parentWaveComplete ||
+    parentTransitionPossible
+      ? `${degreeToken}_${waveToken}_COMPLETE_PARENT_TRANSITION_POSSIBLE`
+      : `${degreeToken}_${waveToken}_INTERNAL_${currentInternalToken}_${nextInternalToken}_NEXT`;
 
   return {
-    key:
-      waveOpportunity?.setupType ||
-      engine22WaveStrategy?.state ||
-      "UNKNOWN_ENGINE22_LIFECYCLE_STATE",
+    key,
+
     headline:
-      engine22WaveStrategy?.tradeContextSummary?.headline ||
-      engine22WaveStrategy?.headline ||
-      "Engine 22 lifecycle state unavailable",
-    sourcePath: "waveOpportunity",
-    priority: 99,
+      degreeState?.headline ||
+      degreeState?.currentRead ||
+      `${degreeToken} ${waveToken} canonical structure`,
+
+    sourcePath,
+
+    activeDegree:
+      resolvedDegree,
+
+    priority: 10,
 
     action:
-      engine22WaveStrategy?.tradeContextSummary?.action ||
-      waveOpportunity?.action ||
-      null,
-    direction: waveOpportunity?.direction || "NONE",
-    active: waveOpportunity?.active === true,
+      degreeState?.action ||
+      "WAIT_FOR_DOWNSTREAM_CONFIRMATION",
+
+    /*
+     * Structural direction is compatibility context only.
+     * Engine 6 must not use it as permission direction.
+     */
+    direction:
+      internal?.parentWaveDirection ||
+      degreeState?.direction ||
+      "NONE",
+
+    compatibilityOnly: true,
+    authoritative: false,
+
+    active: false,
     readOnly: true,
+
     noExecution: true,
+    noPermissionCreated: true,
+
     tradeableOpportunityBlocked: true,
+    executionBlocked: true,
+
+    activeWave:
+      degreeState?.activeWave || null,
+
+    stage:
+      degreeState?.stage || null,
+
+    currentRead:
+      degreeState?.currentRead || null,
+
+    targetModel:
+      degreeState?.targetModel || null,
+
+    internalStructure:
+      internal,
+
+    parentDegree:
+      internal?.parentDegree || null,
+
+    parentWave:
+      internal?.parentWave ||
+      degreeState?.activeWave ||
+      null,
+
+    currentInternalWave:
+      internal?.currentInternalWave || null,
+
+    nextExpectedInternalWave:
+      internal?.nextExpectedInternalWave || null,
+
+    classification:
+      internal?.classification || null,
+
+    parentWaveStillValid:
+      internal?.parentWaveStillValid ??
+      null,
+
+    parentWaveComplete:
+      internal?.parentWaveComplete ??
+      null,
+
+    parentTransitionPossible:
+      internal?.parentTransitionPossible ??
+      null,
+
+    transitionRisk:
+      internal?.transitionRisk || null,
+
+    supportLevel:
+      internal?.supportLevel ??
+      null,
+
+    invalidationLevel:
+      internal?.invalidationLevel ??
+      null,
 
     reasonCodes: [
-      "ENGINE22_CURRENT_LIFECYCLE_STATE_BUILT",
-      "FALLBACK_WAVE_OPPORTUNITY_STATE",
+      "ENGINE22_CURRENT_LIFECYCLE_COMPATIBILITY_SUMMARY_BUILT",
+      "ENGINE22_DEGREE_STATES_IS_CANONICAL_AUTHORITY",
       "READ_ONLY",
       "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
     ],
   };
 }
-
 function applyEngine22CurrentLifecycleStateContract(engine22WaveStrategy) {
   if (!engine22WaveStrategy || typeof engine22WaveStrategy !== "object") {
     return engine22WaveStrategy;
