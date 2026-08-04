@@ -111,6 +111,7 @@ export function buildReactionObservation1m({
     staleReason,
     currentPrice: action.currentPrice ?? null,
     referenceLevel: action.referenceLevel ?? null,
+    referenceType: action.referenceType ?? null,
     distancePts: action.distancePts ?? null,
     levelAction: action.levelAction || null,
     ...identity,
