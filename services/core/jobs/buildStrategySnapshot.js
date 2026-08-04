@@ -3425,6 +3425,9 @@ const setupEligible =
 
 const engine25ModifierPreview = buildEngine25ModifierPreview(engine25Context);
 const engine6PaperPermission = buildEngine6PaperPermission({
+const engine6FastLaneActive =
+  engine6PaperPermission
+    ?.engine15FastLaneExcluded === true;  
   symbol,
   strategyId,
   confluence,
@@ -3579,6 +3582,96 @@ const engine6PaperPermission = buildEngine6PaperPermission({
         }
       : null,
   };
+
+/*
+ * Strategy 1 Fast Lane:
+ * Engine 6 is final authority.
+ * Engine 15 remains contextual only.
+ *
+ * Top-level permission vocabulary remains:
+ * ALLOW / REDUCE / STAND_DOWN / UNKNOWN.
+ */
+if (engine6FastLaneActive) {
+  const preliminaryPermissionValue =
+    String(
+      preliminary?.permission ||
+      "UNKNOWN"
+    ).toUpperCase();
+
+  const topLevelPermission =
+    engine6PaperPermission?.allowed === true
+      ? (
+          preliminaryPermissionValue ===
+          "ALLOW"
+            ? "ALLOW"
+            : preliminaryPermissionValue ===
+              "REDUCE"
+            ? "REDUCE"
+            : preliminaryPermissionValue ===
+              "STAND_DOWN"
+            ? "STAND_DOWN"
+            : "REDUCE"
+        )
+      : "STAND_DOWN";
+
+  return {
+    ...final,
+
+    permission:
+      topLevelPermission,
+
+    sizeMultiplier:
+      engine6PaperPermission?.allowed === true
+        ? Number(
+            preliminary?.sizeMultiplier ??
+            0.5
+          )
+        : 0,
+
+    executable: false,
+
+    realExecutionAllowed: false,
+    brokerExecutionAllowed: false,
+    schwabExecutionAllowed: false,
+
+    watchOnly:
+      engine6PaperPermission?.allowed !== true,
+
+    setupEligible:
+      engine6PaperPermission?.allowed === true,
+
+    direction:
+      engine6PaperPermission?.direction ||
+      "NONE",
+
+    authority:
+      "Engine 6 Fast Lane",
+
+    authoritySource:
+      "ENGINE6_FAST_LANE_PERMISSION_AUTHORITY",
+
+    engine15Authority: false,
+    engine6Authority: true,
+
+    paper:
+      engine6PaperPermission,
+
+    reasonCodes: [
+      "ENGINE6_FAST_LANE_PERMISSION_AUTHORITY",
+      "ENGINE15_CONTEXT_ONLY_FOR_STRATEGY1",
+      "NO_REAL_EXECUTION",
+      "NO_BROKER_EXECUTION",
+
+      ...(Array.isArray(
+        engine6PaperPermission?.reasonCodes
+      )
+        ? engine6PaperPermission.reasonCodes
+        : []),
+
+      ...baseReasonCodes,
+    ],
+  };
+}
 
   if (isPossibleW5UpCompletePullbackWatch) {
     return {
