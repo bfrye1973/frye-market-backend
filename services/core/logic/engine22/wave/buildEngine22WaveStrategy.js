@@ -39,6 +39,64 @@ function round2(x) {
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
 }
 
+function roundToTick(value, tickSize) {
+  const n = Number(value);
+  const tick = Number(tickSize);
+  if (!Number.isFinite(n)) return null;
+  if (!Number.isFinite(tick) || tick <= 0) return round2(n);
+  return round2(Math.round(n / tick) * tick);
+}
+
+function getPublishedTickSize(symbol) {
+  const normalized = String(symbol || "").trim().toUpperCase();
+  return normalized === "ES" || normalized === "MES" ? 0.25 : null;
+}
+
+export function buildPublishedDegreeTargetModel({
+  symbol = "ES",
+  targetModel = null,
+  currentPrice = null,
+} = {}) {
+  const rawLevels = targetModel?.levels || {};
+  const tickSize = getPublishedTickSize(symbol);
+  const keys = ["e100", "e1272", "e1618", "e200", "e2618"];
+
+  const publishedLevels = Object.fromEntries(
+    keys.map((key) => {
+      const raw = Number(rawLevels?.[key]);
+      const published = Number.isFinite(raw)
+        ? tickSize == null
+          ? round2(raw)
+          : roundToTick(raw, tickSize)
+        : null;
+      return [key, published];
+    })
+  );
+
+  const price = Number(currentPrice);
+  const finitePrice = Number.isFinite(price) ? price : null;
+  const nextEntry =
+    keys
+      .map((key) => ({ key, value: publishedLevels[key] }))
+      .filter(
+        ({ value }) =>
+          value != null && (finitePrice == null || value > finitePrice)
+      )
+      .sort((a, b) => a.value - b.value)[0] || null;
+
+  return {
+    rawLevels: { ...rawLevels },
+    publishedLevels,
+    rawNextTarget: round2(targetModel?.nextTarget),
+    nextTarget: nextEntry?.value ?? null,
+    nextTargetKey: nextEntry?.key ?? null,
+    currentPrice: round2(finitePrice),
+    tickSize,
+    normalization: tickSize == null ? "SOURCE_PRECISION" : "ES_TICK_ROUNDED",
+    targetLadderExhausted: finitePrice != null && nextEntry == null,
+  };
+}
+
 function normalizeSymbol(symbol) {
   const s = String(symbol || "SPY").trim().toUpperCase();
   return s || "SPY";
@@ -1184,9 +1242,14 @@ function buildCanonicalDegreeStateMirror({
   }
 
   const targetLevels = minute?.targetModel?.levels || {};
-  const e1618 = round2(targetLevels?.e1618 ?? targetLevels?.["e1618"]);
-  const e200 = round2(targetLevels?.e200 ?? targetLevels?.["e200"]);
-  const e2618 = round2(targetLevels?.e2618 ?? targetLevels?.["e2618"]);
+  const publishedTargetModel = buildPublishedDegreeTargetModel({
+    symbol: context?.symbol || "ES",
+    targetModel: minute?.targetModel || null,
+    currentPrice: context?.currentPrice,
+  });
+  const e1618 = publishedTargetModel.publishedLevels.e1618;
+  const e200 = publishedTargetModel.publishedLevels.e200;
+  const e2618 = publishedTargetModel.publishedLevels.e2618;
 
   const invalidationLevel = round2(
     internal?.invalidationLevel ??
@@ -1203,7 +1266,6 @@ function buildCanonicalDegreeStateMirror({
     "INTERNAL_IV_PULLBACK_OR_RECLAIM_CONFIRMATION",
     "ENGINE3_DIRECTIONAL_REACTION",
     "ENGINE4_PARTICIPATION",
-    "ENGINE15_READINESS",
     "ENGINE6_PERMISSION",
   ];
 
@@ -1218,7 +1280,7 @@ function buildCanonicalDegreeStateMirror({
   ];
 
   const summary =
-    "Minute W3 is active and extended into its maturity zone. Do not chase the vertical move. Wait for an internal iv pullback or reclaim confirmation, then require Engine 3 reaction, Engine 4 participation, Engine 15 readiness, and Engine 6 permission.";
+    "Minute W3 is active and extended into its maturity zone. Do not chase the vertical move. Wait for an internal iv pullback or reclaim confirmation, then require Engine 3 reaction, Engine 4 participation, and Engine 6 permission.";
 
   const currentLifecycleStateMirror = {
     ...(currentLifecycleState || {}),
@@ -1242,10 +1304,10 @@ function buildCanonicalDegreeStateMirror({
     needs,
     targetContext: {
       source: "degreeStates.minute.targetModel",
+      ...publishedTargetModel,
       e1618,
       e200,
       e2618,
-      currentPrice,
       maturityZone:
         e1618 !== null && e200 !== null
           ? {
@@ -1295,34 +1357,14 @@ function buildCanonicalDegreeStateMirror({
         "Minute W3 remains structurally valid above its confirmed W2 low. Losing this level invalidates or forces review of the current Minute W3 breakout count.",
     },
     targets: {
-      e100: round2(targetLevels?.e100 ?? targetLevels?.["e100"]),
-      e1272: round2(targetLevels?.e1272 ?? targetLevels?.["e1272"]),
-      e1618,
-      e200,
-      e2618,
+      ...publishedTargetModel.publishedLevels,
+      nextTarget: publishedTargetModel.nextTarget,
+      nextTargetKey: publishedTargetModel.nextTargetKey,
     },
     internalStructure: internal || null,
     needs,
     reasonCodes,
     summary,
-  };
-
-  const tradeDecisionMirror = {
-    mode: "PAPER_ONLY",
-    engine: "engine22.tradeDecision.degreeStatesMirror.v1",
-    symbol: context?.symbol || "ES",
-    strategyId: context?.strategyId || "intraday_scalp@10m",
-    decision: "WAIT",
-    direction: "LONG",
-    setupType: activeSetup,
-    grade: "WATCH_ONLY",
-    entryAllowed: false,
-    chaseAllowed: false,
-    reason:
-      "Minute W3 is active but extended into maturity. Wait for internal iv pullback or reclaim confirmation. No entry is allowed from wave structure alone.",
-    needs,
-    reasonCodes: ["PAPER_ONLY", ...reasonCodes],
-    safety: buildSafetyObject(),
   };
 
   return {
@@ -1335,7 +1377,6 @@ function buildCanonicalDegreeStateMirror({
     severity: "info",
     currentLifecycleState: currentLifecycleStateMirror,
     waveOpportunity: waveOpportunityMirror,
-    tradeDecision: tradeDecisionMirror,
     reasonCodes,
   };
 }
