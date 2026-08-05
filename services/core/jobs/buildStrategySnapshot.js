@@ -9314,51 +9314,60 @@ if (
     }
   }
 }
-        try {
 
-                  
-          engine23Interpretation = interpretWaveEnvironment({
-            symbol,
-            price: Number.isFinite(price) ? price : null,
-            engine22WaveStrategy,
-            fib,
-            engine2State,
-            barsByTf: {
-              "10m": marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
-              "1h": marketMeter?.layers?.emaPosture?.oneHour?.bars || [],
-              "4h": marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
-              "1d": marketMeter?.layers?.emaPosture?.daily?.bars || [],
-            },
-          });
-                      
-        } catch (err) {
-          console.error("[E23 ERROR]", err);
+if (
+  String(symbol || "").toUpperCase() === "ES" &&
+  s.strategyId === "intraday_scalp@10m" &&
+  s.tf === "10m"
+) {
+  try {
+    engine23Interpretation = interpretWaveEnvironment({
+      symbol,
+      price: Number.isFinite(price) ? price : null,
+      engine22WaveStrategy,
+      fib,
+      engine2State,
+      barsByTf: {
+        "10m":
+          marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+        "1h":
+          marketMeter?.layers?.emaPosture?.oneHour?.bars || [],
+        "4h":
+          marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
+        "1d":
+          marketMeter?.layers?.emaPosture?.daily?.bars || [],
+      },
+    });
+  } catch (err) {
+    console.error("[E23 ERROR]", err);
 
-          engine23Interpretation = {
-            ok: false,
-            engine: "engine23.waveBehaviorInterpreter.v1",
-            mode: "READ_ONLY",
-            symbol,
-            environment: "UNKNOWN",
-            state: "W5_UNKNOWN",
-            health: "UNKNOWN",
-            directionBias: "NEUTRAL",
-            activeDegree: null,
-            higherDegreeContext: null,
-            chaseAllowed: false,
-            preferredEntry: "WAIT_FOR_ENGINE23_FIX",
-            activeTargets: null,
-            higherTargets: null,
-            needs: ["FIX_ENGINE23_ERROR"],
-            reasonCodes: ["ENGINE23_COMPUTE_FAILED"],
-            summary: "Engine 23 failed while reading Engine 22 wave behavior.",
-            debug: {
-              error: String(err?.message || err),
-              stack: String(err?.stack || ""),
-            },
-          };
-        }
-      }
+    engine23Interpretation = {
+      ok: false,
+      engine: "engine23.waveBehaviorInterpreter.v1",
+      mode: "READ_ONLY",
+      symbol,
+      environment: "UNKNOWN",
+      state: "W5_UNKNOWN",
+      health: "UNKNOWN",
+      directionBias: "NEUTRAL",
+      activeDegree: null,
+      higherDegreeContext: null,
+      chaseAllowed: false,
+      preferredEntry: "WAIT_FOR_ENGINE23_FIX",
+      activeTargets: null,
+      higherTargets: null,
+      needs: ["FIX_ENGINE23_ERROR"],
+      reasonCodes: ["ENGINE23_COMPUTE_FAILED"],
+      summary:
+        "Engine 23 failed while reading Engine 22 wave behavior.",
+      debug: {
+        error: String(err?.message || err),
+        stack: String(err?.stack || ""),
+      },
+    };
+  }
+}
+        
 
    const engine5TimingContext = buildEngine5TimingContext({
     confluence: patchedConfluence,
