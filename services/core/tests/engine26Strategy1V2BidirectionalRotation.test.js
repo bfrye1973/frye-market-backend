@@ -2999,3 +2999,166 @@ test(
     }
   }
 );
+
+test(
+  "a recent 10-minute touch supersedes the old promoted observation even after price moves back below the new zone",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-promoted-touch-then-away-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "7750.00-7800.00 | NEG 7761.75-7789.75",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const lower = buildAtPrice({
+        currentPrice: 7445.75,
+        snapshotTime:
+          "2026-08-05T15:00:00.000Z",
+        bars10m: longLowerFactsBars(),
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const oldPromoted = buildAtPrice({
+        currentPrice:
+          lower.targetZone.midline,
+        previousLocationCandidate:
+          lower,
+        snapshotTime:
+          "2026-08-05T15:10:00.000Z",
+        bars10m: [],
+        ema10Posture: null,
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const switchedResult = buildAtPrice({
+        currentPrice: 7757,
+        previousLocationCandidate: {
+          active: false,
+          status: "WAITING_FOR_LOCATION",
+          laneId: "minute",
+          symbol: "ES",
+          strategyId:
+            "intraday_scalp@10m",
+        },
+        snapshotTime:
+          "2026-08-05T15:20:00.000Z",
+        bars10m: [
+          {
+            time:
+              "2026-08-05T15:15:00.000Z",
+            open: 7758,
+            high: 7764,
+            low: 7755,
+            close: 7757,
+            completed: false,
+          },
+        ],
+        ema10Posture: null,
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      });
+
+      const switched =
+        switchedResult
+          .engine26LocationCandidate;
+
+      assert.notEqual(
+        switched.candidateId,
+        oldPromoted.candidateId
+      );
+
+      assert.notEqual(
+        switched.zoneId,
+        oldPromoted.zoneId
+      );
+
+      assert.equal(
+        switched.location.lo,
+        7761.75
+      );
+
+      assert.equal(
+        switched.location.hi,
+        7789.75
+      );
+
+      assert.equal(
+        switched.location.relation,
+        "BELOW_ZONE"
+      );
+
+      assert.equal(
+        switched.childPreservation
+          .promotedObservationSuperseded,
+        true
+      );
+
+      assert.equal(
+        switched.childPreservation
+          .supersessionContactSource,
+        "TEN_MINUTE_BAR_TOUCHED_NEGOTIATED_ZONE"
+      );
+
+      assert.equal(
+        switched.direction,
+        "NEUTRAL"
+      );
+
+      assert.equal(
+        switched.directionState,
+        "SHORT_REVERSAL_WATCH"
+      );
+
+      assert.equal(
+        switched.expectedReactionDirection,
+        "SHORT"
+      );
+
+      assert.equal(
+        switched.noPermissionCreated,
+        true
+      );
+
+      assert.equal(
+        switched.noExecution,
+        true
+      );
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
