@@ -260,10 +260,23 @@ test(
       completed.promotionReason,
       "NEGOTIATED_LINE_TARGET_COMPLETION"
     );
-    assert.equal(completed.directionState, "NEUTRAL");
-    assert.equal(completed.expectedReversalDirection, null);
-    assert.equal(completed.expectedParticipationDirection, null);
-    assert.deepEqual(completed.expectedReactions, []);
+    assert.equal(
+      completed.directionState,
+      "LONG_REVERSAL_WATCH"
+    );
+    assert.equal(
+      completed.expectedReversalDirection,
+      "LONG"
+    );
+    assert.equal(
+      completed.expectedParticipationDirection,
+      "LONG"
+    );
+    assert.ok(
+      completed.expectedReactions.includes(
+        "RECLAIMED_LEVEL"
+      )
+    );
     assert.equal(completed.priorCandidateId, upper.candidateId);
     assert.equal(completed.priorZoneId, upper.zoneId);
     assert.equal(completed.priorRotationDirection, "SHORT");
@@ -329,7 +342,7 @@ test(
     );
     assert.equal(
       promoted.directionState,
-      "NEUTRAL"
+      "SHORT_REVERSAL_WATCH"
     );
     assert.equal(
       promoted.contactState,
@@ -338,19 +351,20 @@ test(
     assert.equal(promoted.chainArmed, true);
     assert.equal(
       promoted.expectedReversalDirection,
-      null
+      "SHORT"
     );
     assert.equal(
       promoted.expectedParticipationDirection,
-      null
+      "SHORT"
     );
-    assert.deepEqual(
-      promoted.expectedReactions,
-      []
+    assert.ok(
+      promoted.expectedReactions.includes(
+        "FAILED_RECLAIM"
+      )
     );
     assert.equal(
       promoted.reactionExpected,
-      false
+      true
     );
     assert.equal(
       promoted.priorRotationDirection,
@@ -418,23 +432,24 @@ test(
     );
     assert.equal(
       reactionHandoff.directionState,
-      "NEUTRAL"
+      "SHORT_REVERSAL_WATCH"
     );
     assert.equal(
       reactionHandoff.expectedReactionDirection,
-      null
+      "SHORT"
     );
     assert.equal(
       reactionHandoff.expectedParticipationDirection,
-      null
+      "SHORT"
     );
-    assert.deepEqual(
-      reactionHandoff.expectedReactions,
-      []
+    assert.ok(
+      reactionHandoff.expectedReactions.includes(
+        "FAILED_RECLAIM"
+      )
     );
     assert.equal(
       reactionHandoff.reactionExpected,
-      false
+      true
     );
     assert.equal(
       reactionHandoff.contactState,
@@ -528,7 +543,15 @@ test(
     );
     assert.equal(
       promoted.directionState,
-      "NEUTRAL"
+      "SHORT_REVERSAL_WATCH"
+    );
+    assert.equal(
+      promoted.expectedReversalDirection,
+      "SHORT"
+    );
+    assert.equal(
+      promoted.directionalResolved,
+      false
     );
     assert.equal(promoted.shortConfirmed, false);
     assert.equal(promoted.automaticDirectionFlip, false);
@@ -583,7 +606,11 @@ test(
     assert.equal(continuation.directionalResolved, false);
     assert.equal(
       continuation.directionState,
-      "NEUTRAL"
+      "SHORT_REVERSAL_WATCH"
+    );
+    assert.equal(
+      continuation.expectedReversalDirection,
+      "SHORT"
     );
     assert.equal(
       continuation.contactState,
@@ -661,7 +688,7 @@ test(
     assert.equal(reversal.directionalResolved, false);
     assert.equal(
       reversal.directionState,
-      "NEUTRAL"
+      "SHORT_REVERSAL_WATCH"
     );
     assert.equal(
       reversal.contactState,
@@ -696,14 +723,14 @@ test(
     );
     assert.equal(
       reversal.expectedReversalDirection,
-      null
+      "SHORT"
     );
     assert.equal(reactionHandoff.active, true);
     assert.equal(reactionHandoff.armed, true);
     assert.equal(reactionHandoff.chainArmed, true);
     assert.equal(
       reactionHandoff.expectedReactionDirection,
-      null
+      "SHORT"
     );
     assert.equal(
       reactionHandoff.authorizeEngine3Evaluation,
@@ -795,7 +822,7 @@ test(
     assert.equal(geometry.direction, "NEUTRAL");
     assert.equal(
       geometry.directionState,
-      "NEUTRAL"
+      "SHORT_REVERSAL_WATCH"
     );
     assert.equal(
       geometry.contactState,
@@ -804,7 +831,7 @@ test(
     assert.equal(geometry.chainArmed, true);
     assert.equal(
       geometry.expectedReversalDirection,
-      null
+      "SHORT"
     );
     assert.equal(geometry.directionalResolved, false);
     assert.equal(geometry.geometryReady, false);
@@ -1766,16 +1793,16 @@ test(
       assert.equal(promoted.directionalResolved, false);
       assert.equal(
         promoted.directionState,
-        "NEUTRAL"
+        "SHORT_REVERSAL_WATCH"
       );
       assert.equal(
-      promoted.expectedReversalDirection,
-      null
-    );
+        promoted.expectedReversalDirection,
+        "SHORT"
+      );
       assert.equal(
-      promoted.expectedParticipationDirection,
-      null
-    );
+        promoted.expectedParticipationDirection,
+        "SHORT"
+      );
       assert.equal(
         promoted.priorRotationFullyComplete,
         true
@@ -1818,18 +1845,24 @@ test(
       );
       assert.equal(
         promotedRecord.directionState,
-        "NEUTRAL"
+        "SHORT_REVERSAL_WATCH"
       );
-      assert.equal(promotedRecord.expectedReversalDirection, null);
-      assert.equal(promotedRecord.expectedParticipationDirection, null);
       assert.equal(
-      promotedRecord.expectedReversalDirection,
-      null
-    );
+        promotedRecord.expectedReversalDirection,
+        "SHORT"
+      );
       assert.equal(
-      promotedRecord.expectedParticipationDirection,
-      null
-    );
+        promotedRecord.expectedParticipationDirection,
+        "SHORT"
+      );
+      assert.equal(
+        promotedRecord.expectedReversalDirection,
+        "SHORT"
+      );
+      assert.equal(
+        promotedRecord.expectedParticipationDirection,
+        "SHORT"
+      );
       assert.equal(
         promotedRecord.priorCandidateId,
         priorLong.candidateId
@@ -1912,7 +1945,7 @@ test(
       assert.equal(restored.directionalResolved, false);
       assert.equal(
         restored.directionState,
-        "NEUTRAL"
+        "SHORT_REVERSAL_WATCH"
       );
       assert.equal(
         restored.contactState,
@@ -1920,19 +1953,29 @@ test(
       );
       assert.equal(restored.chainArmed, true);
       assert.equal(
-      restored.expectedReversalDirection,
-      null
-    );
+        restored.expectedReversalDirection,
+        "SHORT"
+      );
       assert.equal(
-      restored.expectedParticipationDirection,
-      null
-    );
+        restored.expectedParticipationDirection,
+        "SHORT"
+      );
       assert.equal(restored.automaticDirectionFlip, false);
       assert.equal(restored.expectedDirection, null);
-      assert.equal(restored.expectedReversalDirection, null);
-      assert.equal(restored.expectedParticipationDirection, null);
-      assert.deepEqual(restored.expectedReactions, []);
-      assert.equal(restored.reactionExpected, false);
+      assert.equal(
+        restored.expectedReversalDirection,
+        "SHORT"
+      );
+      assert.equal(
+        restored.expectedParticipationDirection,
+        "SHORT"
+      );
+      assert.ok(
+        restored.expectedReactions.includes(
+          "FAILED_RECLAIM"
+        )
+      );
+      assert.equal(restored.reactionExpected, true);
       assert.equal(restored.shortConfirmed, false);
       assert.equal(
         restored.freshTargetMidlineContact,
@@ -1981,16 +2024,16 @@ test(
       );
       assert.equal(
         reactionHandoff.directionState,
-        "NEUTRAL"
+        "SHORT_REVERSAL_WATCH"
       );
       assert.equal(
-      reactionHandoff.expectedReactionDirection,
-      null
-    );
+        reactionHandoff.expectedReactionDirection,
+        "SHORT"
+      );
       assert.equal(
-      reactionHandoff.expectedParticipationDirection,
-      null
-    );
+        reactionHandoff.expectedParticipationDirection,
+        "SHORT"
+      );
       assert.equal(
         reactionHandoff.contactState,
         "NEGOTIATED_LINE_CONTACT"
@@ -2003,13 +2046,14 @@ test(
         reactionHandoff.reactionConfirmed,
         false
       );
-      assert.deepEqual(
-        reactionHandoff.expectedReactions,
-        []
+      assert.ok(
+        reactionHandoff.expectedReactions.includes(
+          "FAILED_RECLAIM"
+        )
       );
       assert.equal(
         reactionHandoff.reactionExpected,
-        false
+        true
       );
       assert.notEqual(
         reactionHandoff.status,
@@ -2050,10 +2094,16 @@ test(
       assert.equal(restoredRecord.chainArmed, true);
       assert.equal(
         restoredRecord.directionState,
-        "NEUTRAL"
+        "SHORT_REVERSAL_WATCH"
       );
-      assert.equal(restoredRecord.expectedReversalDirection, null);
-      assert.equal(restoredRecord.expectedParticipationDirection, null);
+      assert.equal(
+        restoredRecord.expectedReversalDirection,
+        "SHORT"
+      );
+      assert.equal(
+        restoredRecord.expectedParticipationDirection,
+        "SHORT"
+      );
       assert.equal(
         restoredRecord.priorRotationCompletionState,
         "FULL_TARGET_COMPLETION"
@@ -2427,6 +2477,517 @@ test(
       );
       assert.equal(rebuilt.contactState, null);
       assert.equal(rebuilt.priorRotationFullyComplete, false);
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
+
+test(
+  "new approved negotiated-zone contact supersedes an older promoted observation",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-promoted-supersession-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "7750.00-7800.00 | NEG 7761.75-7789.75",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const lower = buildAtPrice({
+        currentPrice: 7445.75,
+        snapshotTime:
+          "2026-08-05T15:00:00.000Z",
+        bars10m: longLowerFactsBars(),
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const oldPromoted = buildAtPrice({
+        currentPrice:
+          lower.targetZone.midline,
+        previousLocationCandidate:
+          lower,
+        snapshotTime:
+          "2026-08-05T15:10:00.000Z",
+        bars10m: [],
+        ema10Posture: null,
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(
+        oldPromoted.contactState,
+        "NEGOTIATED_LINE_CONTACT"
+      );
+
+      const supersededResult = buildAtPrice({
+        currentPrice: 7775.75,
+        previousLocationCandidate: {
+          active: false,
+          status: "WAITING_FOR_LOCATION",
+          laneId: "minute",
+          symbol: "ES",
+          strategyId:
+            "intraday_scalp@10m",
+        },
+        snapshotTime:
+          "2026-08-05T15:20:00.000Z",
+        bars10m: [],
+        ema10Posture: null,
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      });
+
+      const current =
+        supersededResult
+          .engine26LocationCandidate;
+
+      const reaction =
+        supersededResult
+          .engine26ReactionHandoff;
+
+      const geometry =
+        supersededResult
+          .engine26GeometryHandoff;
+
+      assert.notEqual(
+        current.candidateId,
+        oldPromoted.candidateId
+      );
+
+      assert.notEqual(
+        current.zoneId,
+        oldPromoted.zoneId
+      );
+
+      assert.equal(
+        current.location.lo,
+        7761.75
+      );
+
+      assert.equal(
+        current.location.hi,
+        7789.75
+      );
+
+      assert.equal(
+        current.location.relation,
+        "INSIDE_ZONE"
+      );
+
+      assert.equal(
+        current.direction,
+        "NEUTRAL"
+      );
+
+      assert.equal(
+        current.directionBias,
+        "NEUTRAL"
+      );
+
+      assert.equal(
+        current.tradeDirectionBias,
+        "NEUTRAL"
+      );
+
+      assert.equal(
+        current.directionalResolved,
+        false
+      );
+
+      assert.equal(
+        current.directionState,
+        "SHORT_REVERSAL_WATCH"
+      );
+
+      assert.equal(
+        current.expectedReversalDirection,
+        "SHORT"
+      );
+
+      assert.equal(
+        current.expectedReactionDirection,
+        "SHORT"
+      );
+
+      assert.equal(
+        current.contactState,
+        "NEGOTIATED_LINE_CONTACT"
+      );
+
+      assert.equal(
+        current.chainArmed,
+        true
+      );
+
+      assert.equal(
+        current.automaticDirectionFlip,
+        false
+      );
+
+      assert.equal(
+        current.priorCandidateId,
+        oldPromoted.candidateId
+      );
+
+      assert.equal(
+        current.priorZoneId,
+        oldPromoted.zoneId
+      );
+
+      assert.equal(
+        current.childPreservation
+          .promotedObservationSuperseded,
+        true
+      );
+
+      assert.equal(
+        current.noPermissionCreated,
+        true
+      );
+
+      assert.equal(
+        current.noExecution,
+        true
+      );
+
+      assert.equal(
+        reaction.candidateId,
+        current.candidateId
+      );
+
+      assert.equal(
+        reaction.zoneId,
+        current.zoneId
+      );
+
+      assert.equal(
+        reaction.expectedReactionDirection,
+        "SHORT"
+      );
+
+      assert.equal(
+        reaction.direction,
+        "NEUTRAL"
+      );
+
+      assert.equal(
+        reaction.directionalResolved,
+        false
+      );
+
+      assert.equal(
+        reaction.authorizeEngine3Evaluation,
+        true
+      );
+
+      assert.equal(
+        reaction.reactionConfirmed,
+        false
+      );
+
+      assert.equal(
+        geometry.candidateId,
+        current.candidateId
+      );
+
+      assert.equal(
+        geometry.zoneId,
+        current.zoneId
+      );
+
+      assert.equal(
+        geometry.status,
+        "WAITING_FOR_DIRECTIONAL_RESOLUTION"
+      );
+
+      assert.equal(
+        geometry.geometryReady,
+        false
+      );
+
+      assert.equal(
+        geometry.geometryFeasible,
+        false
+      );
+
+      const store = JSON.parse(
+        fs.readFileSync(
+          memoryFilePath,
+          "utf8"
+        )
+      );
+
+      const oldKey =
+        buildStrategy1MemoryKey({
+          laneId: "minute",
+          symbol: "ES",
+          strategyId:
+            "intraday_scalp@10m",
+          zoneId:
+            oldPromoted.zoneId,
+        });
+
+      assert.equal(
+        store.records[oldKey]
+          .lifecycleStatus,
+        "RETIRED"
+      );
+
+      assert.equal(
+        store.records[oldKey]
+          .releaseReason,
+        "EXPLICIT_LIFECYCLE_PROMOTION"
+      );
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
+
+test(
+  "restart restores the newest promoted observation instead of the superseded observation",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-promoted-restart-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "7750.00-7800.00 | NEG 7761.75-7789.75",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const lower = buildAtPrice({
+        currentPrice: 7445.75,
+        bars10m: longLowerFactsBars(),
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const oldPromoted = buildAtPrice({
+        currentPrice:
+          lower.targetZone.midline,
+        previousLocationCandidate:
+          lower,
+        snapshotTime:
+          "2026-08-05T16:10:00.000Z",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const newestPromoted = buildAtPrice({
+        currentPrice: 7775.75,
+        previousLocationCandidate: {
+          active: false,
+          status: "WAITING_FOR_LOCATION",
+        },
+        snapshotTime:
+          "2026-08-05T16:20:00.000Z",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const restored = buildAtPrice({
+        currentPrice: 7770,
+        previousLocationCandidate: {
+          active: false,
+          status: "WAITING_FOR_LOCATION",
+        },
+        snapshotTime:
+          "2026-08-05T16:30:00.000Z",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: false,
+      }).engine26LocationCandidate;
+
+      assert.equal(
+        restored.candidateId,
+        newestPromoted.candidateId
+      );
+
+      assert.equal(
+        restored.zoneId,
+        newestPromoted.zoneId
+      );
+
+      assert.notEqual(
+        restored.candidateId,
+        oldPromoted.candidateId
+      );
+
+      assert.notEqual(
+        restored.zoneId,
+        oldPromoted.zoneId
+      );
+
+      assert.equal(
+        restored.directionState,
+        "SHORT_REVERSAL_WATCH"
+      );
+
+      assert.equal(
+        restored.expectedReversalDirection,
+        "SHORT"
+      );
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
+
+test(
+  "distance alone does not supersede an active promoted observation",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-promoted-distance-only-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "7750.00-7800.00 | NEG 7761.75-7789.75",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const lower = buildAtPrice({
+        currentPrice: 7445.75,
+        bars10m: longLowerFactsBars(),
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const promoted = buildAtPrice({
+        currentPrice:
+          lower.targetZone.midline,
+        previousLocationCandidate:
+          lower,
+        snapshotTime:
+          "2026-08-05T17:10:00.000Z",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      /*
+       * Price is closer to the newer zone but has not entered
+       * the approved negotiated boundaries.
+       */
+      const rebuilt = buildAtPrice({
+        currentPrice: 7750,
+        previousLocationCandidate: {
+          active: false,
+          status: "WAITING_FOR_LOCATION",
+        },
+        snapshotTime:
+          "2026-08-05T17:20:00.000Z",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: false,
+      }).engine26LocationCandidate;
+
+      assert.equal(
+        rebuilt.candidateId,
+        promoted.candidateId
+      );
+
+      assert.equal(
+        rebuilt.zoneId,
+        promoted.zoneId
+      );
+
+      assert.equal(
+        rebuilt.childPreservation
+          .promotedObservationSuperseded,
+        false
+      );
     } finally {
       fs.rmSync(
         tempDir,
