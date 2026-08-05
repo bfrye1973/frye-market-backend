@@ -8752,7 +8752,7 @@ if (isEsIntradayScalp) {
 }
 
  
-const finalPermissionRaw =
+let finalPermissionRaw =
   isEsIntradayScalp
     ? buildFinalPermissionFromEngine15({
         symbol,
@@ -8779,7 +8779,7 @@ const finalPermissionRaw =
       })
     : permissionPreliminary;
 
-const finalPermission =
+let finalPermission =
   isEsIntradayScalp
     ? preserveEngine6CandidateIdentity({
         permission: finalPermissionRaw,
