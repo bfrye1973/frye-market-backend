@@ -458,6 +458,165 @@ function latestCompletedClose(bars10m = []) {
   return null;
 }
 
+
+function parseObservationTimeMs(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 1e12
+      ? value
+      : value * 1000;
+  }
+
+  const numeric = Number(value);
+
+  if (Number.isFinite(numeric)) {
+    return numeric > 1e12
+      ? numeric
+      : numeric * 1000;
+  }
+
+  const parsed = Date.parse(String(value));
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : null;
+}
+
+function resolveNegotiatedZoneContactEvidence({
+  zone,
+  currentPrice,
+  bars10m,
+  sinceTime = null,
+}) {
+  const zoneLow = toFiniteNumber(zone?.lo);
+  const zoneHigh = toFiniteNumber(zone?.hi);
+  const price = toFiniteNumber(currentPrice);
+
+  if (
+    zoneLow === null ||
+    zoneHigh === null
+  ) {
+    return {
+      observed: false,
+      source: null,
+      touchedAt: null,
+      bar: null,
+    };
+  }
+
+  const lowBoundary = Math.min(zoneLow, zoneHigh);
+  const highBoundary = Math.max(zoneLow, zoneHigh);
+
+  if (
+    price !== null &&
+    price >= lowBoundary &&
+    price <= highBoundary
+  ) {
+    return {
+      observed: true,
+      source: "CURRENT_PRICE_INSIDE_NEGOTIATED_ZONE",
+      touchedAt: null,
+      bar: null,
+    };
+  }
+
+  const sinceMs =
+    parseObservationTimeMs(sinceTime);
+
+  const bars = Array.isArray(bars10m)
+    ? bars10m
+    : [];
+
+  let latestTouch = null;
+
+  for (const bar of bars) {
+    const barHigh = toFiniteNumber(
+      bar?.high ?? bar?.h
+    );
+
+    const barLow = toFiniteNumber(
+      bar?.low ?? bar?.l
+    );
+
+    if (
+      barHigh === null ||
+      barLow === null
+    ) {
+      continue;
+    }
+
+    const barTime =
+      bar?.time ??
+      bar?.t ??
+      bar?.tSec ??
+      null;
+
+    const barTimeMs =
+      parseObservationTimeMs(barTime);
+
+    if (
+      sinceMs !== null &&
+      barTimeMs !== null &&
+      barTimeMs < sinceMs
+    ) {
+      continue;
+    }
+
+    const touched =
+      barHigh >= lowBoundary &&
+      barLow <= highBoundary;
+
+    if (!touched) {
+      continue;
+    }
+
+    if (
+      latestTouch === null ||
+      (
+        barTimeMs !== null &&
+        (
+          latestTouch.timeMs === null ||
+          barTimeMs > latestTouch.timeMs
+        )
+      )
+    ) {
+      latestTouch = {
+        timeMs: barTimeMs,
+        touchedAt:
+          barTime ?? null,
+        bar: {
+          time: barTime ?? null,
+          high: barHigh,
+          low: barLow,
+          completed:
+            bar?.completed === true,
+        },
+      };
+    }
+  }
+
+  if (latestTouch) {
+    return {
+      observed: true,
+      source: "TEN_MINUTE_BAR_TOUCHED_NEGOTIATED_ZONE",
+      touchedAt:
+        latestTouch.touchedAt,
+      bar:
+        latestTouch.bar,
+    };
+  }
+
+  return {
+    observed: false,
+    source: null,
+    touchedAt: null,
+    bar: null,
+  };
+}
+
 function normalizeEma10Posture(value, currentPrice = null) {
   if (value == null) {
     return {
@@ -2828,38 +2987,113 @@ const rankedStrategy1Zone =
   strategy1EligibleZones[0] ||
   null;
 
-const rankedStrategy1ZoneId =
-  rankedStrategy1Zone
-    ? buildCanonicalZoneId(
-        normalizedSymbol,
-        rankedStrategy1Zone
-      )
-    : null;
-
 /*
- * Long-term promoted-observation supersession rule.
+ * Once price touches a different approved negotiated zone, that
+ * contacted zone becomes the new canonical promoted observation.
  *
- * A restored neutral promoted observation remains canonical unless
- * price is physically INSIDE a different approved negotiated zone.
+ * Contact is proven by either:
+ *   1. current price inside the zone; or
+ *   2. any 10-minute bar at or after the current promoted
+ *      observation began whose high/low range touched the zone.
  *
- * Distance, score, proximity, and nearest-zone ranking alone cannot
- * supersede an active observation.
- *
- * Active LONG or SHORT directional children remain protected by their
- * existing completion, invalidation, and retirement lifecycle rules.
+ * The current tick does not need to remain inside afterward.
+ * Distance alone cannot supersede a zone, and active LONG/SHORT
+ * directional children remain protected by their lifecycle rules.
  */
+const promotedObservationContactCandidates =
+  restoredPromotedContact === true
+    ? strategy1EligibleZones
+        .map((zone) => {
+          const zoneId =
+            buildCanonicalZoneId(
+              normalizedSymbol,
+              zone
+            );
+
+          const contactEvidence =
+            resolveNegotiatedZoneContactEvidence({
+              zone,
+              currentPrice:
+                normalizedPrice,
+              bars10m,
+              sinceTime:
+                continuityLocationCandidate
+                  ?.promotionTime ??
+                continuityLocationCandidate
+                  ?.candidateLifecycleStartTime ??
+                priorMemoryRecord
+                  ?.promotionTime ??
+                priorMemoryRecord
+                  ?.candidateLifecycleStartTime ??
+                null,
+            });
+
+          return {
+            zone,
+            zoneId,
+            contactEvidence,
+          };
+        })
+        .filter(
+          (candidate) =>
+            candidate.zoneId !==
+              continuityLocationCandidate
+                ?.zoneId &&
+            candidate.contactEvidence
+              .observed === true
+        )
+        .sort((a, b) => {
+          const aTime =
+            parseObservationTimeMs(
+              a.contactEvidence
+                .touchedAt
+            );
+
+          const bTime =
+            parseObservationTimeMs(
+              b.contactEvidence
+                .touchedAt
+            );
+
+          if (
+            aTime !== null ||
+            bTime !== null
+          ) {
+            return (
+              Number(bTime ?? -1) -
+              Number(aTime ?? -1)
+            );
+          }
+
+          return (
+            Number(
+              b.zone?.selectionScore ?? 0
+            ) -
+            Number(
+              a.zone?.selectionScore ?? 0
+            )
+          );
+        })
+    : [];
+
+const promotedObservationSupersessionCandidate =
+  promotedObservationContactCandidates[0] ||
+  null;
+
 const promotedObservationSupersession =
   selectionPurpose === "STRATEGY1_CHILD" &&
   restoredPromotedContact === true &&
-  Boolean(rankedStrategy1Zone) &&
-  isApprovedNegotiatedZone(
-    rankedStrategy1Zone
-  ) &&
-  rankedStrategy1Zone.relation ===
-    "INSIDE_ZONE" &&
-  Boolean(rankedStrategy1ZoneId) &&
-  rankedStrategy1ZoneId !==
-    continuityLocationCandidate?.zoneId;
+  Boolean(
+    promotedObservationSupersessionCandidate
+  );
+
+const supersedingNegotiatedZone =
+  promotedObservationSupersessionCandidate
+    ?.zone || null;
+
+const supersedingNegotiatedZoneContactEvidence =
+  promotedObservationSupersessionCandidate
+    ?.contactEvidence || null;
 
 const activeRestoredPromotedContact =
   restoredPromotedContact === true &&
@@ -2878,7 +3112,7 @@ const previousChildPreservable =
 
 const strategy1SelectedZone =
   promotedObservationSupersession
-    ? rankedStrategy1Zone
+    ? supersedingNegotiatedZone
     : previousChildPreservable
     ? previousZone
     : rankedStrategy1Zone;
@@ -4157,6 +4391,21 @@ const strategyFacts =
         previousChildPreservable,
       promotedObservationSuperseded:
         promotedObservationSupersession,
+      supersessionContactSource:
+        promotedObservationSupersession
+          ? supersedingNegotiatedZoneContactEvidence
+              ?.source ?? null
+          : null,
+      supersessionContactAt:
+        promotedObservationSupersession
+          ? supersedingNegotiatedZoneContactEvidence
+              ?.touchedAt ?? null
+          : null,
+      supersessionContactBar:
+        promotedObservationSupersession
+          ? supersedingNegotiatedZoneContactEvidence
+              ?.bar ?? null
+          : null,
       supersededCandidateId:
         promotedObservationSupersession
           ? continuityLocationCandidate
@@ -4371,6 +4620,20 @@ const strategyFacts =
 
       promotedObservationSupersession
         ? "ENGINE26_STRATEGY1_NEW_APPROVED_NEGOTIATED_ZONE_CONTACT"
+        : null,
+
+      promotedObservationSupersession &&
+      supersedingNegotiatedZoneContactEvidence
+        ?.source ===
+          "CURRENT_PRICE_INSIDE_NEGOTIATED_ZONE"
+        ? "ENGINE26_STRATEGY1_SUPERSESSION_FROM_LIVE_ZONE_CONTACT"
+        : null,
+
+      promotedObservationSupersession &&
+      supersedingNegotiatedZoneContactEvidence
+        ?.source ===
+          "TEN_MINUTE_BAR_TOUCHED_NEGOTIATED_ZONE"
+        ? "ENGINE26_STRATEGY1_SUPERSESSION_FROM_10M_ZONE_CONTACT"
         : null,
 
       promotedObservationSupersession
