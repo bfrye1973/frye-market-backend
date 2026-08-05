@@ -9110,11 +9110,10 @@ if (
       patchedConfluence,
       engine26LocationCandidate,
       engine26ReactionHandoff,
-    });      
-      
-    }
-  } catch (err) {
-    console.error("[E22G TRADE DECISION ERROR]", err);
+    });       
+    
+    } catch (err) {
+      console.error("[E22G TRADE DECISION ERROR]", err);
 
 if (
   engine22WaveStrategy &&
