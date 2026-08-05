@@ -9315,6 +9315,102 @@ if (
   }
 }
 
+/*
+ * Engine 6 final canonical participation recalculation.
+ *
+ * The compatibility enrichment above may rebuild:
+ *
+ * patchedConfluence.context.volume.engine4AuthorizedReactionParticipation
+ *
+ * Engine 6 must publish permission based on the final canonical
+ * Engine 4 object that is also published in the snapshot.
+ *
+ * This block does not loosen permission.
+ * It does not create execution.
+ * It does not create tickets.
+ * It only recalculates Engine 6 from the final Engine 3/4 contracts.
+ */
+if (isEsIntradayScalp) {
+  const finalCanonicalEngine3 =
+    patchedConfluence?.context?.reaction?.paperScalpReaction || null;
+
+  const finalCanonicalEngine4 =
+    patchedConfluence?.context?.volume
+      ?.engine4AuthorizedReactionParticipation || null;
+
+  const recalculatedPermissionRaw =
+    buildFinalPermissionFromEngine15({
+      symbol,
+      strategyId: s.strategyId,
+      tf: s.tf,
+      preliminaryPermission: permissionPreliminary,
+      engine15Decision,
+      marketRegime,
+      zoneContext,
+      engine5Analytics,
+      engine25Context,
+      engine22WaveStrategy,
+      confluence: patchedConfluence,
+      engine26ImbalanceWatch: engine26PrePermissionWatch,
+      engine26LocationCandidate,
+
+      engine3AuthorizedReaction:
+        finalCanonicalEngine3,
+
+      engine4AuthorizedParticipation:
+        finalCanonicalEngine4,
+    });
+
+  const recalculatedPermission =
+    preserveEngine6CandidateIdentity({
+      permission: recalculatedPermissionRaw,
+
+      engine26LocationCandidate,
+
+      engine3AuthorizedReaction:
+        finalCanonicalEngine3,
+
+      engine4AuthorizedParticipation:
+        finalCanonicalEngine4,
+    });
+
+  finalPermissionRaw =
+    recalculatedPermissionRaw;
+
+  finalPermission =
+    recalculatedPermission;
+
+  if (finalPermission?.paper?.allowed !== true) {
+    engine26PaperTradeTicket = null;
+    engine26PaperTradeExecution = null;
+
+    if (
+      engine26PaperTradePlan &&
+      typeof engine26PaperTradePlan === "object"
+    ) {
+      engine26PaperTradePlan = {
+        ...engine26PaperTradePlan,
+        allowed: false,
+        ticketAllowed: false,
+        noExecution: true,
+        realExecutionAllowed: false,
+        brokerExecutionAllowed: false,
+        schwabExecutionAllowed: false,
+        staleSuppressedByEngine6Recalculation: true,
+        reasonCodes: [
+          ...(Array.isArray(engine26PaperTradePlan.reasonCodes)
+            ? engine26PaperTradePlan.reasonCodes
+            : []),
+          "ENGINE6_RECALCULATED_AFTER_FINAL_ENGINE4",
+          "ENGINE6_FINAL_PERMISSION_NOT_ALLOWED",
+          "NO_TICKET",
+          "NO_EXECUTION",
+        ],
+      };
+    }
+  }
+}
+
 if (
   String(symbol || "").toUpperCase() === "ES" &&
   s.strategyId === "intraday_scalp@10m" &&
