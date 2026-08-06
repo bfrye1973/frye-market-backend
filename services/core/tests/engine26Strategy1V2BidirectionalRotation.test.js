@@ -1537,6 +1537,15 @@ test(
 
       assert.equal(
         result.engine26ReactionHandoff.active,
+        true
+      );
+      assert.equal(
+        result.engine26ReactionHandoff.observerActive,
+        true
+      );
+      assert.equal(
+        result.engine26ReactionHandoff
+          .authorizeEngine3Evaluation,
         false
       );
 
@@ -3160,5 +3169,303 @@ test(
         }
       );
     }
+  }
+);
+
+test(
+  "SHORT directional child remains authorized after leaving activation range below the zone",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-short-always-on-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const activeShort = buildAtPrice({
+        currentPrice: 7502,
+        snapshotTime:
+          "2026-08-06T14:00:00.000Z",
+        bars10m: shortUpperFactsBars(),
+        ema10Posture: "BEARISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const result = buildAtPrice({
+        currentPrice: 7475,
+        previousLocationCandidate: {
+          active: false,
+          status: "WAITING_FOR_LOCATION",
+        },
+        snapshotTime:
+          "2026-08-06T14:10:00.000Z",
+        bars10m: [],
+        ema10Posture: "BEARISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: false,
+      });
+
+      const candidate =
+        result.engine26LocationCandidate;
+      const handoff =
+        result.engine26ReactionHandoff;
+
+      assert.equal(
+        candidate.candidateId,
+        activeShort.candidateId
+      );
+      assert.equal(
+        candidate.zoneId,
+        activeShort.zoneId
+      );
+      assert.equal(
+        candidate.directionBias,
+        "SHORT"
+      );
+      assert.equal(
+        candidate.location.relation,
+        "BELOW_ZONE"
+      );
+
+      assert.equal(handoff.active, true);
+      assert.equal(handoff.armed, true);
+      assert.equal(
+        handoff.observerActive,
+        true
+      );
+      assert.equal(
+        handoff.evaluationContextValid,
+        true
+      );
+      assert.equal(
+        handoff.withinActivationRange,
+        false
+      );
+      assert.equal(
+        handoff.authorizeEngine3Evaluation,
+        true
+      );
+      assert.equal(
+        handoff.status,
+        "ACTIVE_DIRECTIONAL_EVALUATION"
+      );
+      assert.ok(
+        handoff.reasonCodes.includes(
+          "ENGINE26_DIRECTIONAL_EVALUATION_PRESERVED_OUTSIDE_ACTIVATION_RANGE"
+        )
+      );
+      assert.equal(
+        handoff.noPermissionCreated,
+        true
+      );
+      assert.equal(
+        handoff.noExecution,
+        true
+      );
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
+
+test(
+  "LONG directional child remains authorized after leaving activation range above the zone",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-long-always-on-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const activeLong = buildAtPrice({
+        currentPrice: 7445.75,
+        snapshotTime:
+          "2026-08-06T15:00:00.000Z",
+        bars10m: longLowerFactsBars(),
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const result = buildAtPrice({
+        currentPrice: 7490,
+        previousLocationCandidate: {
+          active: false,
+          status: "WAITING_FOR_LOCATION",
+        },
+        snapshotTime:
+          "2026-08-06T15:10:00.000Z",
+        bars10m: [],
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: false,
+      });
+
+      const candidate =
+        result.engine26LocationCandidate;
+      const handoff =
+        result.engine26ReactionHandoff;
+
+      assert.equal(
+        candidate.candidateId,
+        activeLong.candidateId
+      );
+      assert.equal(
+        candidate.zoneId,
+        activeLong.zoneId
+      );
+      assert.equal(
+        candidate.directionBias,
+        "LONG"
+      );
+      assert.equal(
+        candidate.location.relation,
+        "ABOVE_ZONE"
+      );
+
+      assert.equal(handoff.active, true);
+      assert.equal(handoff.armed, true);
+      assert.equal(
+        handoff.observerActive,
+        true
+      );
+      assert.equal(
+        handoff.evaluationContextValid,
+        true
+      );
+      assert.equal(
+        handoff.withinActivationRange,
+        false
+      );
+      assert.equal(
+        handoff.authorizeEngine3Evaluation,
+        true
+      );
+      assert.equal(
+        handoff.status,
+        "ACTIVE_DIRECTIONAL_EVALUATION"
+      );
+      assert.ok(
+        handoff.reasonCodes.includes(
+          "ENGINE26_DIRECTIONAL_EVALUATION_PRESERVED_OUTSIDE_ACTIVATION_RANGE"
+        )
+      );
+      assert.equal(
+        handoff.noPermissionCreated,
+        true
+      );
+      assert.equal(
+        handoff.noExecution,
+        true
+      );
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
+
+test(
+  "Engine 26 reaction observer stays on without a valid location context",
+  () => {
+    const result =
+      buildEngine26A({
+        symbol: "ES",
+        strategyId:
+          "intraday_scalp@10m",
+        timeframe: "10m",
+        currentPrice: null,
+        snapshotTime:
+          "2026-08-06T16:00:00.000Z",
+      });
+
+    const handoff =
+      result.engine26ReactionHandoff;
+
+    assert.equal(handoff.active, true);
+    assert.equal(handoff.armed, true);
+    assert.equal(
+      handoff.observerActive,
+      true
+    );
+    assert.equal(
+      handoff.evaluationContextValid,
+      false
+    );
+    assert.equal(
+      handoff.authorizeEngine3Evaluation,
+      false
+    );
+    assert.equal(
+      handoff.status,
+      "OBSERVING_WITHOUT_LOCATION_CONTEXT"
+    );
+    assert.equal(
+      handoff.noPermissionCreated,
+      true
+    );
+    assert.equal(
+      handoff.noExecution,
+      true
+    );
   }
 );
