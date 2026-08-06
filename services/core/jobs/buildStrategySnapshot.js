@@ -8531,20 +8531,97 @@ attachEngine4AuthorizedReactionParticipation({
  * Existing Engine 3/4 algorithms and thresholds remain unchanged.
  */
 if (isEsIntradayScalp) {
-  const engine3ReactionObservation1m = buildReactionObservation1m({
-    bars: engine3DiagnosticBars?.oneMinute?.bars || [],
-    evaluationTimeMs,
-    engine26LocationCandidate,
-    engine26ReactionHandoff,
-  });
+  const addCandleContract = (diagnostic, bars, timeframe) => {
+    const truth = deriveCandleCompletionTruth({
+      bars,
+      timeframe,
+      evaluationTimeMs,
+    });
 
-  const engine3ReactionValidation5m = buildReactionValidation5m({
-    bars: engine3DiagnosticBars?.fiveMinute?.bars || [],
-    evaluationTimeMs,
-    observation1m: engine3ReactionObservation1m,
-    engine26LocationCandidate,
-    engine26ReactionHandoff,
-  });
+    const classifyCandle = (bar) => {
+      if (!bar || typeof bar !== "object") {
+        return null;
+      }
+
+      const startSeconds = Number(
+        bar.time ?? bar.t ?? bar.tSec
+      );
+
+      const startMs = Number.isFinite(startSeconds)
+        ? startSeconds * 1000
+        : null;
+
+      const closeMs =
+        startMs != null &&
+        truth.timeframeDurationMs != null
+          ? startMs + truth.timeframeDurationMs
+          : null;
+
+      const completionState =
+        closeMs == null ||
+        truth.evaluationTimeMs == null
+          ? "COMPLETION_UNKNOWN"
+          : closeMs <= truth.evaluationTimeMs
+          ? "COMPLETED"
+          : "FORMING";
+
+      return {
+        ...bar,
+        candleClosed:
+          completionState === "COMPLETED"
+            ? true
+            : completionState === "FORMING"
+            ? false
+            : null,
+        completionState,
+      };
+    };
+
+    const currentCandle = classifyCandle(
+      truth.allBars.at(-1)
+    );
+
+    const priorCandle = classifyCandle(
+      truth.allBars.at(-2)
+    );
+
+    return {
+      ...diagnostic,
+      currentCandle,
+      priorCandle,
+      currentCandleStatus:
+        currentCandle?.completionState || "NO_BARS",
+      priorCandleStatus:
+        priorCandle?.completionState || "NO_BARS",
+      supportingBarTime:
+        currentCandle?.time ??
+        currentCandle?.t ??
+        currentCandle?.tSec ??
+        null,
+      evaluationTimeMs: truth.evaluationTimeMs,
+    };
+  };
+  const engine3ReactionObservation1m = addCandleContract(
+    buildReactionObservation1m({
+      bars: engine3DiagnosticBars?.oneMinute?.bars || [],
+      evaluationTimeMs,
+      engine26LocationCandidate,
+      engine26ReactionHandoff,
+    }),
+    engine3DiagnosticBars?.oneMinute?.bars || [],
+    "1m"
+  );
+  const engine3ReactionValidation5m = addCandleContract(
+    buildReactionValidation5m({
+      bars: engine3DiagnosticBars?.fiveMinute?.bars || [],
+      evaluationTimeMs,
+      observation1m: engine3ReactionObservation1m,
+      engine26LocationCandidate,
+      engine26ReactionHandoff,
+    }),
+    engine3DiagnosticBars?.fiveMinute?.bars || [],
+    "5m"
+  );
 
   patchedConfluence.context = patchedConfluence.context || {};
   patchedConfluence.context.reaction = {
