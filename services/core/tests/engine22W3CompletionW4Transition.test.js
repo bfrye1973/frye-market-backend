@@ -318,7 +318,9 @@ test("confirmed multi-bar down structure promotes parent W4 active candidate and
   assert.equal(model.state, "PARENT_W4_ACTIVE_CANDIDATE");
   assert.equal(model.parentWaveComplete, true);
   assert.equal(model.parentTransitionPossible, true);
-  assert.equal(model.nextExpectedParentWave, "W4");
+  assert.equal(model.nextExpectedParentWave, null);
+  assert.equal(model.currentInternalWave, null);
+  assert.equal(model.nextExpectedInternalWave, null);
   assert.equal(model.w3HighCandidateStatus, "CONFIRMED");
 });
 
@@ -354,6 +356,9 @@ test("strong canonical completed-10m structure can confirm parent W4 without dow
   assert.equal(model.evidence.structuralTransitionAuthority, "CANONICAL_10M_STRUCTURE");
   assert.equal(model.evidence.engine3BearishReactionConfirmed, false);
   assert.equal(model.evidence.engine4BearishParticipationConfirmed, false);
+  assert.equal(model.currentInternalWave, null);
+  assert.equal(model.nextExpectedInternalWave, null);
+  assert.equal(model.nextExpectedParentWave, null);
 });
 
 test("W4 retracement map is anchored at W2 low and W3 high candidate with ES tick rounding", () => {
@@ -424,6 +429,104 @@ test("degreeStates publishes new W3/W4 fields without removing the existing comp
   assert.equal(minute.noExecution, true);
   assert.equal(minute.noPermissionCreated, true);
   assert.equal(minute.paperTradeCandidate, false);
+});
+
+test("degreeStates selects the W3 extension ladder as the canonical activeFibModel while W3 is active", () => {
+  const structure = minuteStructure();
+
+  const degreeStates = buildDegreeStates({
+    activeStructures: { minute: structure },
+    currentPrice: 7746,
+  });
+
+  const minute = degreeStates.minute;
+  assert.equal(minute.activeWave, "W3");
+  assert.equal(minute.activeFibModel.active, true);
+  assert.equal(minute.activeFibModel.modelKey, "W3_EXTENSION_LADDER");
+  assert.equal(minute.activeFibModel.modelType, "EXTENSION_LADDER");
+  assert.equal(minute.activeFibModel.activeWave, "W3");
+  assert.equal(minute.activeFibModel.direction, "UP");
+  assert.equal(minute.activeFibModel.levels.e200, 7760.25);
+  assert.ok(minute.targetModel);
+});
+
+test("degreeStates automatically switches activeFibModel to the W4 retracement map when W4 becomes active", () => {
+  const structure = minuteStructure();
+  structure.activeWave = "W4";
+  structure.direction = "DOWN";
+  structure.stage = "PARENT_W4_ACTIVE_CANDIDATE";
+  structure.currentRead = "MINUTE_PARENT_W4_ACTIVE_CANDIDATE";
+  structure.parentWaveComplete = true;
+  structure.parentTransitionPossible = true;
+  structure.nextExpectedParentWave = null;
+  structure.w3HighCandidate = 7768.5;
+  structure.w3HighCandidateStatus = "CONFIRMED";
+  structure.w4PullbackState = "PARENT_W4_ACTIVE_CANDIDATE";
+  structure.w4RetracementMap = {
+    w2Low: 7427.75,
+    w3HighCandidate: 7768.5,
+    range: 340.75,
+    rawLevels: {
+      r236Raw: 7688.08,
+      r382Raw: 7638.33,
+      r500Raw: 7598.13,
+      r618Raw: 7557.92,
+      r786Raw: 7500.67,
+    },
+    r236: 7688,
+    r382: 7638.25,
+    r500: 7598.25,
+    r618: 7558,
+    r786: 7500.75,
+    currentPrice: 7734,
+    currentRetracementRatio: 0.1012,
+    currentRetracementPercent: 10.12,
+    currentRetracementDisplay: "10.12%",
+    nearestRetracement: { key: "r236", price: 7688 },
+    nextRetracementBelow: { key: "r236", price: 7688 },
+    zoneState: "ABOVE_R236",
+    tickSize: 0.25,
+    normalization: "ES_TICK_ROUNDED",
+  };
+  structure.internalStructure = {
+    ...structure.internalStructure,
+    parentWave: "W4",
+    currentInternalWave: null,
+    nextExpectedInternalWave: null,
+    nextExpectedParentWave: null,
+    parentWaveDirection: "DOWN",
+    parentWaveComplete: true,
+    parentTransitionPossible: true,
+  };
+
+  const degreeStates = buildDegreeStates({
+    activeStructures: { minute: structure },
+    currentPrice: 7734,
+  });
+
+  const minute = degreeStates.minute;
+  assert.equal(minute.activeWave, "W4");
+  assert.equal(minute.parentWaveComplete, true);
+  assert.equal(minute.parentTransitionPossible, true);
+  assert.equal(minute.nextExpectedParentWave, null);
+  assert.equal(minute.activeFibModel.active, true);
+  assert.equal(minute.activeFibModel.modelKey, "W4_RETRACEMENT_MAP");
+  assert.equal(minute.activeFibModel.modelType, "RETRACEMENT_MAP");
+  assert.equal(minute.activeFibModel.activeWave, "W4");
+  assert.equal(minute.activeFibModel.direction, "DOWN");
+  assert.equal(minute.activeFibModel.anchorModel.anchorHigh, 7768.5);
+  assert.equal(minute.activeFibModel.anchorModel.anchorLow, 7427.75);
+  assert.equal(minute.activeFibModel.levels.r236, 7688);
+  assert.equal(minute.activeFibModel.levels.r382, 7638.25);
+  assert.equal(minute.activeFibModel.nearestLevel.price, 7688);
+  assert.equal(minute.activeFibModel.nextLevelBelow.price, 7688);
+  assert.equal(minute.activeFibModel.zoneState, "ABOVE_R236");
+
+  // Backward compatibility: preserve the old W3 extension targetModel for
+  // history/audit, but it must no longer be the active Fib model.
+  assert.ok(minute.targetModel);
+  assert.equal(minute.targetModel.levels.e200, 7760.25);
+  assert.notEqual(minute.activeFibModel.modelKey, "W3_EXTENSION_LADDER");
 });
 
 test("transition model is structural only and never creates execution, permission, sizing, tickets, broker calls, or journal events", () => {
