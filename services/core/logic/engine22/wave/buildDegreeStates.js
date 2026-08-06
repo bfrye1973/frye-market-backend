@@ -242,6 +242,7 @@ function normalizeInternalStructure(structure = {}) {
     previousInternalWave: internal.previousInternalWave || null,
     currentInternalWave: internal.currentInternalWave || null,
     nextExpectedInternalWave: internal.nextExpectedInternalWave || null,
+    nextExpectedParentWave: internal.nextExpectedParentWave || structure?.nextExpectedParentWave || null,
 
     internalLegDirection: upper(internal.internalLegDirection || "UNKNOWN"),
     parentWaveDirection: upper(internal.parentWaveDirection || "UNKNOWN"),
@@ -706,8 +707,28 @@ function buildActiveDegreeState({
     previousWave,
     previousWaveMark,
     nextExpectedWave,
+    nextExpectedParentWave:
+      structure?.nextExpectedParentWave || internalStructure?.nextExpectedParentWave || null,
     internalStructure,
     currentRead,
+
+    // Canonical Minute W3 completion / parent W4 transition publication.
+    // These fields are structural only and never create permission/execution.
+    w3HighCandidate: round2(structure?.w3HighCandidate),
+    w3HighCandidateStatus: structure?.w3HighCandidateStatus || null,
+    w3HighCandidateTimeSec: structure?.w3HighCandidateTimeSec ?? null,
+    w3HighCandidateHistory: Array.isArray(structure?.w3HighCandidateHistory)
+      ? structure.w3HighCandidateHistory
+      : [],
+    w4RetracementMap:
+      structure?.w4RetracementMap && typeof structure.w4RetracementMap === "object"
+        ? structure.w4RetracementMap
+        : null,
+    w4PullbackState: structure?.w4PullbackState || null,
+    w3W4TransitionModel:
+      structure?.w3W4TransitionModel && typeof structure.w3W4TransitionModel === "object"
+        ? structure.w3W4TransitionModel
+        : null,
 
     headline,
     action,
