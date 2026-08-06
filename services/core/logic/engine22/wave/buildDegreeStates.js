@@ -982,4 +982,4 @@ export function buildDegreeStates({
   return attachNestedCorrectionContexts(out);
 }
 
-export default buildDegreeState
+export default buildDegreeStates;
