@@ -106,42 +106,27 @@ function uniqueReasonCodes(reasonCodes = []) {
   ];
 }
 
-function getCanonicalEngine22StructuralDirection(engine22WaveStrategy) {
-  const minute =
-    engine22WaveStrategy?.degreeStates?.minute || null;
+function getEngine22Direction(engine22WaveStrategy) {
+  return safeUpper(
+    engine22WaveStrategy
+      ?.currentLifecycleState
+      ?.confirmationContext
+      ?.direction ||
 
-  const internal = minute?.internalStructure || null;
+      engine22WaveStrategy
+        ?.currentLifecycleState
+        ?.direction ||
 
-  const structuralDirection = safeUpper(
-    internal?.parentWaveDirection,
+      engine22WaveStrategy
+        ?.waveOpportunity
+        ?.direction ||
+
+      engine22WaveStrategy
+        ?.direction ||
+
+      "NONE",
     "NONE"
   );
-
-  const available =
-    minute != null &&
-    internal != null &&
-    (structuralDirection === "LONG" ||
-      structuralDirection === "SHORT");
-
-  return {
-    available,
-    sourcePath:
-      "engine22WaveStrategy.degreeStates.minute.internalStructure.parentWaveDirection",
-    structuralDirection: available
-      ? structuralDirection
-      : "NONE",
-    authoritativeForReaction: false,
-    reasonCodes: available
-      ? [
-          "ENGINE22_CANONICAL_STRUCTURAL_DIRECTION_CONSUMED",
-          "ENGINE22_DIRECTION_IS_CONTEXT_ONLY",
-          "ENGINE3_OWNS_REACTION_DIRECTION",
-        ]
-      : [
-          "ENGINE22_CANONICAL_STRUCTURAL_DIRECTION_UNAVAILABLE",
-          "ENGINE3_REACTION_DIRECTION_NOT_INFERRED_FROM_ENGINE22",
-        ],
-  };
 }
 
 function isFastReactionActive(fastImbalanceReaction) {
@@ -460,11 +445,6 @@ function buildBasePaperScalpReaction({
     "WEAK"
   );
 
-  const engine22StructuralContext =
-    getCanonicalEngine22StructuralDirection(
-      engine22WaveStrategy
-    );
-
   const imbalance =
     fastMode === true
       ? (
@@ -645,9 +625,9 @@ reactionState:
         ?.key || null,
 
     engine22Direction:
-      engine22StructuralContext.structuralDirection,
-
-    engine22StructuralContext,
+      getEngine22Direction(
+        engine22WaveStrategy
+      ),
 
     waveContext:
       buildEngine22DegreeWaveContext({
@@ -893,23 +873,10 @@ const engine26LocationContext =
   const quality = rawQuality;
   const actionDirection = rawActionDirection;
 
-  const engine22StructuralContext =
-    getCanonicalEngine22StructuralDirection(
+  const engine22Direction =
+    getEngine22Direction(
       engine22WaveStrategy
     );
-
-  const engine22Direction =
-    engine22StructuralContext.structuralDirection;
-
-  const alignedWithEngine22 =
-    actionDirection !== "NEUTRAL" &&
-    engine22Direction !== "NONE" &&
-    actionDirection === engine22Direction;
-
-  const counterToEngine22 =
-    actionDirection !== "NEUTRAL" &&
-    engine22Direction !== "NONE" &&
-    actionDirection !== engine22Direction;
 
   const blockers = [];
 
@@ -1060,6 +1027,19 @@ const engine26LocationContext =
       );
     }
 
+    if (
+      engine22Direction &&
+      engine22Direction !== "NONE" &&
+      engine22Direction !== "LONG"
+    ) {
+      blockers.push(
+        "ENGINE22_DIRECTION_CONFLICTS_WITH_LONG_PAPER_SCALP"
+      );
+
+      reasonCodes.push(
+        "ENGINE22_DIRECTION_CONFLICT"
+      );
+    }
 
     allowed =
       blockers.length === 0;
@@ -1113,6 +1093,19 @@ const engine26LocationContext =
       );
     }
 
+    if (
+      engine22Direction &&
+      engine22Direction !== "NONE" &&
+      engine22Direction !== "LONG"
+    ) {
+      blockers.push(
+        "ENGINE22_DIRECTION_CONFLICTS_WITH_LONG_PAPER_SCALP"
+      );
+
+      reasonCodes.push(
+        "ENGINE22_DIRECTION_CONFLICT"
+      );
+    }
 
     allowed =
       blockers.length === 0;
@@ -1282,9 +1275,6 @@ const engine26LocationContext =
 
   return {
     ...paperScalpReaction,
-    engine22StructuralContext,
-    alignedWithEngine22,
-    counterToEngine22,
     reactionReadiness: {
       ...reactionReadiness,
       canonicalIdentity:
@@ -1367,7 +1357,12 @@ export function attachPaperScalpReactionToConfluence({
       ?.engine3FastImbalanceReaction ||
     null;
 
-  const paperScalpReaction =
+  const observation1m =
+    patchedConfluence?.context?.reaction?.engine3ReactionObservation1m || null;
+  const validation5m =
+    patchedConfluence?.context?.reaction?.engine3ReactionValidation5m || null;
+
+  const productionReaction =
     buildPaperScalpReaction({
       currentLevelAction,
       fastImbalanceReaction,
@@ -1376,6 +1371,36 @@ export function attachPaperScalpReactionToConfluence({
       engine26StructuralContext,
       paperShortResearchEnabled,
     });
+
+  const paperScalpReaction = {
+    ...productionReaction,
+    reactionTimeframe: observation1m?.sourceTimeframe || null,
+    sourceTimeframe: observation1m?.sourceTimeframe || null,
+    validationTimeframe: validation5m?.sourceTimeframe || null,
+    supportingBarTime: observation1m?.supportingBarTime ?? null,
+    evaluationTimeMs: observation1m?.evaluationTimeMs ?? observation1m?.observedAt ?? null,
+    currentCandleStatus: observation1m?.currentCandleStatus || null,
+    priorCandleStatus: observation1m?.priorCandleStatus || null,
+    currentCandle: observation1m?.currentCandle || null,
+    priorCandle: observation1m?.priorCandle || null,
+    lastCandle: observation1m?.currentCandle || productionReaction?.lastCandle || null,
+    candleClosed:
+      observation1m?.currentCandleStatus === "COMPLETED"
+        ? true
+        : observation1m?.currentCandleStatus === "FORMING"
+        ? false
+        : null,
+    priorCandleCompleted:
+      observation1m?.priorCandleStatus === "COMPLETED"
+        ? true
+        : observation1m?.priorCandleStatus === "FORMING"
+        ? false
+        : null,
+    candleSourceFresh:
+      observation1m?.stale === false && validation5m?.stale === false,
+    reactionObservation1m: observation1m,
+    reactionValidation5m: validation5m,
+  };
 
   patchedConfluence.context =
     patchedConfluence.context || {};
