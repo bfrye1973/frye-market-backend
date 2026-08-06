@@ -855,6 +855,104 @@ function buildMinuteIntradayScalpLifecycleView({
       currentLifecycleState?.currentPrice
   );
 
+  const canonicalTransition = minute?.w3W4TransitionModel || null;
+  const canonicalTransitionState = String(
+    canonicalTransition?.state || minute?.w4PullbackState || ""
+  ).toUpperCase();
+
+  const canonicalTransitionStates = new Set([
+    "W3_HIGH_CANDIDATE_FORMING",
+    "INTERNAL_IV_PULLBACK_ACTIVE",
+    "INTERNAL_IV_HOLD_RECLAIM_WATCH",
+    "INTERNAL_V_CONTINUATION_WATCH",
+    "W3_COMPLETION_CANDIDATE",
+    "PARENT_W4_TRANSITION_POSSIBLE",
+    "PARENT_W4_ACTIVE_CANDIDATE",
+  ]);
+
+  if (canonicalTransitionStates.has(canonicalTransitionState)) {
+    const w4Active = canonicalTransitionState === "PARENT_W4_ACTIVE_CANDIDATE";
+    const w4Map = minute?.w4RetracementMap || canonicalTransition?.w4RetracementMap || null;
+
+    return {
+      key: canonicalTransitionState,
+      label: canonicalTransitionState.replaceAll("_", " "),
+      source: "engine22.lifecycleViews.intradayScalp.canonicalW3W4Transition",
+      activeDegree: "minute",
+      activeWave: w4Active ? "W4" : "W3",
+      parentDegree: minuteInternal?.parentDegree || minute?.parentDegree || "minute",
+      parentWave: w4Active ? "W4" : minuteInternal?.parentWave || "W3",
+      currentInternalWave:
+        canonicalTransition?.currentInternalWave ?? minuteInternal?.currentInternalWave ?? null,
+      nextExpectedInternalWave:
+        canonicalTransition?.nextExpectedInternalWave ??
+        minuteInternal?.nextExpectedInternalWave ??
+        null,
+      nextExpectedParentWave:
+        canonicalTransition?.nextExpectedParentWave ??
+        minute?.nextExpectedParentWave ??
+        null,
+      parentWaveComplete:
+        canonicalTransition?.parentWaveComplete === true ||
+        minuteInternal?.parentWaveComplete === true,
+      parentTransitionPossible:
+        canonicalTransition?.parentTransitionPossible === true ||
+        minuteInternal?.parentTransitionPossible === true,
+      direction: w4Active ? "DOWN_CONTEXT_ONLY" : "STRUCTURAL_CONTEXT_ONLY",
+      paperScalpContext: true,
+      noChase: true,
+      noExecution: true,
+      noPermissionCreated: true,
+      anchors: {
+        currentPrice,
+        w2Low: round2(w4Map?.w2Low),
+        w3HighCandidate: round2(canonicalTransition?.w3HighCandidate),
+        supportLevel: round2(minuteInternal?.supportLevel),
+        invalidationLevel: round2(minuteInternal?.invalidationLevel),
+      },
+      fibMap: w4Map
+        ? {
+            source: "MINUTE_W2_TO_W3_HIGH_CANDIDATE_W4_RETRACEMENT",
+            purpose:
+              "Canonical Minute W4 structural retracement map. Planning context only; not an entry or permission signal.",
+            ...w4Map,
+          }
+        : null,
+      transitionModel: canonicalTransition,
+      playbookContext: {
+        state: canonicalTransitionState,
+        watchNext:
+          canonicalTransitionState === "W3_HIGH_CANDIDATE_FORMING"
+            ? "WATCH_FOR_INTERNAL_IV_PULLBACK"
+            : canonicalTransitionState === "INTERNAL_IV_PULLBACK_ACTIVE"
+            ? "WATCH_IV_HOLD_RECLAIM_OR_W3_COMPLETION_EVIDENCE"
+            : canonicalTransitionState === "INTERNAL_IV_HOLD_RECLAIM_WATCH"
+            ? "WATCH_FOR_INTERNAL_V_CONTINUATION"
+            : canonicalTransitionState === "INTERNAL_V_CONTINUATION_WATCH"
+            ? "WATCH_INTERNAL_V_MATURITY_AND_W3_COMPLETION"
+            : canonicalTransitionState === "W3_COMPLETION_CANDIDATE"
+            ? "WATCH_FOR_PARENT_W4_TRANSITION_CONFIRMATION"
+            : canonicalTransitionState === "PARENT_W4_TRANSITION_POSSIBLE"
+            ? "WATCH_FOR_PARENT_W4_STRUCTURE_CONFIRMATION"
+            : "PARENT_W4_DOWN_STRUCTURE_ACTIVE_CANDIDATE",
+        engine3Role: "REACTION_CONFIRMATION_ONLY",
+        engine4Role: "PARTICIPATION_CONFIRMATION_ONLY",
+        engine6Role: "FINAL_PAPER_PERMISSION_AUTHORITY",
+      },
+      status: w4Active ? "PARENT_W4_ACTIVE_CANDIDATE" : "WATCH_ONLY",
+      summary: w4Active
+        ? "Minute W3 completion is confirmed by the canonical transition model and Minute W4 down is now an active structural candidate. Engine 22 remains structural only; Engine 6 remains final paper permission authority."
+        : `Minute W3/W4 transition state is ${canonicalTransitionState}. Engine 22 is tracking structural progression without creating permission or execution.`,
+      reasonCodes: [
+        "ENGINE22_LIFECYCLE_VIEW_INTRADAY_SCALP_BUILT",
+        "ENGINE22_CANONICAL_W3_W4_TRANSITION_USED",
+        canonicalTransitionState,
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+      ],
+    };
+  }
+
   if (isMinuteW3ExtensionMaturity) {
     const publishedTargetModel = buildPublishedDegreeTargetModel({
       symbol: context?.symbol || "ES",
