@@ -44,6 +44,11 @@ import { fetchEngine3DiagnosticBarStack } from "../logic/engine3/fetchEngine3Dia
 import { buildReactionObservation1m } from "../logic/engine3/buildReactionObservation1m.js";
 import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidation5m.js";
 import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
+import { deriveCandleCompletionTruth } from "../logic/engine3/candleCompletionTruth.js";
+import { fetchEngine3DiagnosticBarStack } from "../logic/engine3/fetchEngine3DiagnosticBars.js";
+import { buildReactionObservation1m } from "../logic/engine3/buildReactionObservation1m.js";
+import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidation5m.js";
+import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { listTrades } from "../logic/journal/tradeJournalStore.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
@@ -9747,14 +9752,14 @@ const [
     error: "SPY_VOLUME_BEHAVIOR_FETCH_FAILED",
     detail: String(err?.message || err),
   })),
-  
-   fetchEngine3DiagnosticBarStack({
+  fetchEngine3DiagnosticBarStack({
     symbol,
     limit: 120,
     coreBase: CORE_BASE,
     fetchJson,
   }),
 ]);
+   
 
 console.log("Live Market Meter fetched");
 console.log("Engine21 alignment fetched");
