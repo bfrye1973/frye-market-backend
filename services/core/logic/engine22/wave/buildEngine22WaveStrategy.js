@@ -872,6 +872,7 @@ function buildMinuteIntradayScalpLifecycleView({
 
   if (canonicalTransitionStates.has(canonicalTransitionState)) {
     const w4Active = canonicalTransitionState === "PARENT_W4_ACTIVE_CANDIDATE";
+    const activeFibModel = minute?.activeFibModel || null;
     const w4Map = minute?.w4RetracementMap || canonicalTransition?.w4RetracementMap || null;
 
     return {
@@ -910,7 +911,9 @@ function buildMinuteIntradayScalpLifecycleView({
         supportLevel: round2(minuteInternal?.supportLevel),
         invalidationLevel: round2(minuteInternal?.invalidationLevel),
       },
-      fibMap: w4Map
+      fibMap: activeFibModel?.active === true
+        ? activeFibModel
+        : w4Map
         ? {
             source: "MINUTE_W2_TO_W3_HIGH_CANDIDATE_W4_RETRACEMENT",
             purpose:
@@ -1917,6 +1920,11 @@ export function buildEngine22WaveStrategy(input = {}) {
 
     waveFibState,
     degreeStates,
+
+    // Canonical active structural Fib model for Strategy 1 Minute.
+    // Consumers should prefer this over selecting targetModel vs
+    // w4RetracementMap themselves.
+    activeFibModel: degreeStates?.minute?.activeFibModel || null,
     w4Levels,
     tradeContextSummary,
     targetClusterConfidence,
