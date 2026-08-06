@@ -117,3 +117,4 @@ test("Engine 4 rejects a stale identified candle as participation evidence", () 
   assert.equal(result.participationState, "PARTICIPATION_WAITING");
   assert.equal(result.allowed, false);
   assert.equal(result.blockers.includes("CANDLE_SOURCE_NOT_FRESH"), true);
+});
