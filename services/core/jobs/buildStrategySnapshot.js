@@ -44,11 +44,6 @@ import { fetchEngine3DiagnosticBarStack } from "../logic/engine3/fetchEngine3Dia
 import { buildReactionObservation1m } from "../logic/engine3/buildReactionObservation1m.js";
 import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidation5m.js";
 import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
-import { deriveCandleCompletionTruth } from "../logic/engine3/candleCompletionTruth.js";
-import { fetchEngine3DiagnosticBarStack } from "../logic/engine3/fetchEngine3DiagnosticBars.js";
-import { buildReactionObservation1m } from "../logic/engine3/buildReactionObservation1m.js";
-import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidation5m.js";
-import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { listTrades } from "../logic/journal/tradeJournalStore.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
