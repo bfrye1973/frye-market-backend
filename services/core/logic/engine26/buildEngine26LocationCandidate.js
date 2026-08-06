@@ -2447,13 +2447,25 @@ function buildWaitingHandoff(
   reasonCode
 ) {
   return {
-    active: false,
+    /*
+     * Engine 3 / Engine 4 observation stays online even when
+     * Engine 26 has no valid candidate context yet.
+     *
+     * "active" means the observer pipeline is running.
+     * "authorizeEngine3Evaluation" separately tells downstream
+     * consumers whether the current Engine 26 candidate context
+     * is valid for Strategy 1 evaluation.
+     */
+    active: true,
+    armed: true,
+    observerActive: true,
+    evaluationContextValid: false,
 
     engine:
       "engine26.reactionHandoff.v1",
 
     status:
-      "WAITING_FOR_LOCATION",
+      "OBSERVING_WITHOUT_LOCATION_CONTEXT",
 
     candidateId:
       candidate?.candidateId ?? null,
@@ -2572,6 +2584,8 @@ function buildWaitingHandoff(
     authorizeEngine3Evaluation: false,
 
     reasonCodes: [
+      "ENGINE26_REACTION_OBSERVER_ALWAYS_ACTIVE",
+      "ENGINE26_REACTION_CONTEXT_NOT_AUTHORIZED",
       reasonCode ||
         "NO_ENGINE26_LOCATION_CANDIDATE",
     ],
@@ -4822,30 +4836,83 @@ export function buildEngine26ReactionHandoff({
   const directionalFactsReady =
     longFactsReady || shortFactsReady;
 
-  const evaluationAuthorized =
+  /*
+   * Engine 26 no longer turns Engine 3 / Engine 4 observation on and off.
+   *
+   * The observer pipeline stays active continuously. Candidate evaluation
+   * authorization is a separate context-valid contract.
+   *
+   * A valid active Strategy 1 candidate remains authorized even after price
+   * leaves activation range. This is required so:
+   *
+   * SHORT -> BELOW_ZONE can still publish LOST_LEVEL / FAILED_RECLAIM.
+   * LONG  -> ABOVE_ZONE can still publish BREAKOUT_HOLDING / RECLAIMED_LEVEL.
+   *
+   * Activation range and directionalFactsReady remain diagnostics only.
+   */
+  const lifecycleStatus =
+    String(
+      candidate?.zoneMemorySummary
+        ?.lifecycleStatus ||
+      candidate?.status ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+  const terminalLifecycle =
     candidate?.invalidationFacts
-      ?.completedCloseInvalidationConfirmed !== true &&
-    (
-      contactArmed ||
-      (withinActivationRange && directionalFactsReady)
-    );
+      ?.completedCloseInvalidationConfirmed === true ||
+    candidate?.invalidatedAt != null ||
+    lifecycleStatus === "INVALIDATED" ||
+    lifecycleStatus === "RETIRED" ||
+    lifecycleStatus === "EXPIRED" ||
+    lifecycleStatus === "CANCELLED" ||
+    lifecycleStatus === "COMPLETED";
+
+  const candidateIdentityValid =
+    candidate?.candidateId != null &&
+    candidate?.zoneId != null &&
+    candidate?.laneId === "minute" &&
+    candidate?.strategyId != null;
+
+  const strategyContextValid =
+    candidate?.strategyEligibility
+      ?.eligible === true;
+
+  const evaluationContextValid =
+    candidateIdentityValid &&
+    strategyContextValid &&
+    candidateActive &&
+    terminalLifecycle !== true;
+
+  const evaluationAuthorized =
+    evaluationContextValid;
 
   const status =
-    contactArmed
+    terminalLifecycle
+      ? "OBSERVING_TERMINAL_CANDIDATE"
+      : evaluationAuthorized &&
+        contactArmed
       ? "NEUTRAL_CONTACT_WATCH"
-      : !candidateActive
-      ? "WAITING_FOR_ACTIVATION_RANGE"
-      : withinActivationRange
-      ? directionalFactsReady
-        ? "ACTIVE"
-        : "WAITING_FOR_DIRECTIONAL_FACTS"
-      : "WAITING_FOR_ACTIVATION_RANGE";
+      : evaluationAuthorized &&
+        ["LONG", "SHORT"].includes(direction)
+      ? "ACTIVE_DIRECTIONAL_EVALUATION"
+      : evaluationAuthorized
+      ? "OBSERVING_ACTIVE_CANDIDATE"
+      : candidateIdentityValid
+      ? "OBSERVING_INACTIVE_CANDIDATE_CONTEXT"
+      : "OBSERVING_WITHOUT_LOCATION_CONTEXT";
 
   return {
-    active:
-      evaluationAuthorized,
-    armed:
-      contactArmed || evaluationAuthorized,
+    /*
+     * Observer availability is continuous.
+     * Permission/qualification is still controlled downstream.
+     */
+    active: true,
+    armed: true,
+    observerActive: true,
+    evaluationContextValid,
     chainArmed:
       candidate?.chainArmed === true,
 
@@ -5034,6 +5101,13 @@ export function buildEngine26ReactionHandoff({
     activationRangePoints:
       candidate.activationRangePoints,
 
+    withinActivationRange,
+    directionalFactsReady,
+    candidateActive,
+    candidateIdentityValid,
+    strategyContextValid,
+    terminalLifecycle,
+
     authorizeEngine3Evaluation:
       evaluationAuthorized,
 
@@ -5041,18 +5115,37 @@ export function buildEngine26ReactionHandoff({
       candidate.sourceRefs || [],
 
     reasonCodes: [
+      "ENGINE26_REACTION_OBSERVER_ALWAYS_ACTIVE",
+
+      evaluationAuthorized
+        ? "ENGINE26_REACTION_CONTEXT_AUTHORIZED"
+        : "ENGINE26_REACTION_CONTEXT_NOT_AUTHORIZED",
+
+      evaluationAuthorized &&
+      !withinActivationRange
+        ? "ENGINE26_DIRECTIONAL_EVALUATION_PRESERVED_OUTSIDE_ACTIVATION_RANGE"
+        : null,
+
       contactArmed
         ? "ENGINE26_PROMOTED_CONTACT_NEUTRAL_HANDOFF"
-        : evaluationAuthorized
-        ? "ENGINE26_REACTION_HANDOFF_ACTIVE"
-        : !withinActivationRange
-        ? "WAITING_FOR_ACTIVATION_RANGE"
-        : "WAITING_FOR_DIRECTIONAL_FACTS",
+        : null,
+
+      terminalLifecycle
+        ? "ENGINE26_TERMINAL_LIFECYCLE_CONTEXT_NOT_AUTHORIZED"
+        : null,
+
+      !candidateActive
+        ? "ENGINE26_CANDIDATE_NOT_ACTIVE_CONTEXT_NOT_AUTHORIZED"
+        : null,
+
+      !strategyContextValid
+        ? "ENGINE26_STRATEGY1_CONTEXT_NOT_ELIGIBLE"
+        : null,
 
       "ENGINE26A_EXPECTATION_ONLY",
 
       "ENGINE3_MUST_PUBLISH_OBSERVED_REACTION",
-    ],
+    ].filter(Boolean),
 
     noPermissionCreated: true,
     noExecution: true,
