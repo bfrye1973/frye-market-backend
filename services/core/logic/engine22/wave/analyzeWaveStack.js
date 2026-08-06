@@ -634,7 +634,14 @@ export function buildMinuteW3W4TransitionModel({
     state = "PARENT_W4_ACTIVE_CANDIDATE";
     parentWaveComplete = true;
     parentTransitionPossible = true;
-    nextExpectedParentWave = "W4";
+
+    // W4 is already the active parent wave at this point. Do not keep
+    // advertising W4 as the "next" parent wave, and do not carry the prior
+    // W3 internal-v label into the new parent-wave state. Internal counting
+    // inside W4 must be established separately from fresh W4 evidence.
+    currentInternalWave = null;
+    nextExpectedInternalWave = null;
+    nextExpectedParentWave = null;
     w3HighCandidateStatus = "CONFIRMED";
   }
 
@@ -737,15 +744,18 @@ function attachMinuteW3W4TransitionToActiveStructures({
       w4RetracementMap: model.w4RetracementMap,
       w4PullbackState: model.w4PullbackState,
       nextExpectedParentWave: model.nextExpectedParentWave,
+      parentWaveComplete: model.parentWaveComplete,
+      parentTransitionPossible: model.parentTransitionPossible,
       w3W4TransitionModel: model,
       internalStructure: {
         ...internal,
-        previousInternalWave:
-          model.currentInternalWave === "iv"
-            ? "iii"
-            : model.currentInternalWave === "v"
-            ? "iv"
-            : internal.previousInternalWave,
+        previousInternalWave: w4Active
+          ? null
+          : model.currentInternalWave === "iv"
+          ? "iii"
+          : model.currentInternalWave === "v"
+          ? "iv"
+          : internal.previousInternalWave,
         currentInternalWave: model.currentInternalWave,
         nextExpectedInternalWave: model.nextExpectedInternalWave,
         nextExpectedParentWave: model.nextExpectedParentWave,
@@ -757,9 +767,17 @@ function attachMinuteW3W4TransitionToActiveStructures({
             : internal.internalLegDirection,
         parentWave: w4Active ? "W4" : internal.parentWave,
         parentWaveDirection: w4Active ? "DOWN" : internal.parentWaveDirection,
-        parentWaveStillValid: w4Active ? false : internal.parentWaveStillValid !== false,
+        classification: w4Active
+          ? "PARENT_W4_CORRECTION_ACTIVE"
+          : internal.classification,
+        parentWaveStillValid: w4Active ? true : internal.parentWaveStillValid !== false,
         parentWaveComplete: model.parentWaveComplete,
         parentTransitionPossible: model.parentTransitionPossible,
+        supportLevel: w4Active
+          ? model.w4RetracementMap?.nextRetracementBelow?.price ??
+            model.w4RetracementMap?.r236 ??
+            internal.supportLevel
+          : internal.supportLevel,
         retracementZone: model.w4RetracementMap
           ? {
               r236: model.w4RetracementMap.r236,
