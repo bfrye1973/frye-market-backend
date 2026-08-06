@@ -630,7 +630,6 @@ export function buildEngine26LocationReactionContext({
   const canonicalV2Authorized =
     handoff?.active === true &&
     handoff?.authorizeEngine3Evaluation === true &&
-    handoff?.chainArmed === true &&
     Boolean(handoff?.candidateId) &&
     Boolean(handoff?.zoneId) &&
     handoff?.laneId === "minute" &&
