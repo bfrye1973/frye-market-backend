@@ -132,13 +132,12 @@ function resolvePriorBarCompleted({ reaction, priorCandle }) {
   if (priorCandle?.candleClosed === true || priorCandle?.completed === true || priorCandle?.isClosed === true) return true;
   if (priorCandle?.candleClosed === false || priorCandle?.completed === false || priorCandle?.isClosed === false) return false;
 
-  // Prior candle is normally completed when Engine 3 sends a current/prior pair.
-  // Preserve this as a conservative factual default for ratio diagnostics.
-  return true;
+  return null;
 }
 
 function resolveCandles(reaction, tacticalParticipation) {
   const currentRaw =
+    reaction?.currentCandle ||
     reaction?.lastCandle ||
     reaction?.currentLevelAction?.lastCandle ||
     reaction?.fastImbalanceReaction?.lastCandle ||
@@ -202,6 +201,13 @@ function computeVolumeMetadata({ reaction, tacticalParticipation }) {
     priorBarCompleted,
     formingCandle,
     completionKnown,
+    sourceTimeframe: reaction?.sourceTimeframe || reaction?.reactionTimeframe || null,
+    volumeTimeframe: reaction?.sourceTimeframe || reaction?.reactionTimeframe || null,
+    supportingBarTime: reaction?.supportingBarTime ?? currentCandle?.time ?? null,
+    evaluationTimeMs: reaction?.evaluationTimeMs ?? null,
+    currentCandleStatus: reaction?.currentCandleStatus || null,
+    priorCandleStatus: reaction?.priorCandleStatus || null,
+    candleSourceFresh: reaction?.candleSourceFresh === true,
     currentCandleElapsedSeconds: null,
     currentBarVolume,
     priorBarVolume,
@@ -808,6 +814,14 @@ function baseResult({
     priorBarCompleted: volumeMeta.priorBarCompleted,
     completionKnown: volumeMeta.completionKnown,
     currentCandleElapsedSeconds: volumeMeta.currentCandleElapsedSeconds,
+    reactionTimeframe: reaction?.reactionTimeframe || null,
+    sourceTimeframe: volumeMeta.sourceTimeframe,
+    volumeTimeframe: volumeMeta.volumeTimeframe,
+    supportingBarTime: volumeMeta.supportingBarTime,
+    evaluationTimeMs: volumeMeta.evaluationTimeMs,
+    currentCandleStatus: volumeMeta.currentCandleStatus,
+    priorCandleStatus: volumeMeta.priorCandleStatus,
+    candleSourceFresh: volumeMeta.candleSourceFresh,
 
     currentBarVolume: volumeMeta.currentBarVolume,
     priorBarVolume: volumeMeta.priorBarVolume,
@@ -1012,6 +1026,40 @@ export function buildEngine4AuthorizedReactionParticipation({
       participationQuality: "WEAK",
       blockers: ["ENGINE3_EVALUATION_NOT_AUTHORIZED"],
       reasonCodes: unique([...result.reasonCodes, "ENGINE3_EVALUATION_NOT_AUTHORIZED", "PARTICIPATION_WAITING"]),
+    });
+  }
+
+  const candleContractPublished =
+    volumeMeta.sourceTimeframe != null ||
+    volumeMeta.currentCandleStatus != null ||
+    reaction?.candleSourceFresh !== undefined;
+  const currentCandlePresent =
+    volumeMeta.currentCandle?.time != null &&
+    volumeMeta.currentCandle?.close != null;
+
+  if (
+    candleContractPublished &&
+    (volumeMeta.candleSourceFresh !== true || currentCandlePresent !== true)
+  ) {
+    return finalizeResult({
+      ...result,
+      participationDeveloping: false,
+      participationConfirmed: false,
+      participationState: STATES.WAITING,
+      status: STATES.WAITING,
+      participationQuality: "WEAK",
+      allowed: false,
+      confirmed: false,
+      hardBlocked: false,
+      direction: "NEUTRAL",
+      blockers: [
+        currentCandlePresent ? "CANDLE_SOURCE_NOT_FRESH" : "CURRENT_CANDLE_MISSING",
+      ],
+      reasonCodes: unique([
+        ...result.reasonCodes,
+        currentCandlePresent ? "CANDLE_SOURCE_NOT_FRESH" : "CURRENT_CANDLE_MISSING",
+        "PARTICIPATION_WAITING",
+      ]),
     });
   }
 
