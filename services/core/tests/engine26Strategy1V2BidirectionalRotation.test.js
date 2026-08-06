@@ -2258,7 +2258,7 @@ test(
       assert.equal(
         result.engine26ReactionHandoff
           .authorizeEngine3Evaluation,
-        false
+        true
       );
     } finally {
       fs.rmSync(
