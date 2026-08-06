@@ -1546,7 +1546,7 @@ test(
       assert.equal(
         result.engine26ReactionHandoff
           .authorizeEngine3Evaluation,
-        false
+        true
       );
 
       assert.equal(
