@@ -208,10 +208,13 @@ test("missing authorization remains hard blocked", () => {
   assert.ok(result.blockers.includes("WAITING_FOR_ENGINE26_LOCATION"));
 });
 
-test("disarmed canonical chain remains hard blocked", () => {
+test("disarmed canonical chain remains authorized for paper reaction evaluation", () => {
   const result = build({ h: handoff({ chainArmed: false }) });
-  assert.equal(result.allowed, false);
-  assert.ok(result.blockers.includes("WAITING_FOR_ENGINE26_LOCATION"));
+  assert.equal(result.engine26LocationContext.authorized, true);
+  assert.equal(result.engine26LocationContext.chainArmed, false);
+  assert.equal(result.allowed, true);
+  assert.ok(!result.blockers.includes("WAITING_FOR_ENGINE26_LOCATION"));
+  assertReadiness(result);
 });
 
 test("missing safety flags remain hard blocked", () => {
