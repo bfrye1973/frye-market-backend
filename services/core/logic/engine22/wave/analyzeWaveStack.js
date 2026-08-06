@@ -575,12 +575,32 @@ export function buildMinuteW3W4TransitionModel({
     nextExpectedParentWave = "W4";
   }
 
+  // Engine 22 owns structural wave classification. Engine 3 / Engine 4 are
+  // confirming inputs, not hard owners of the parent-wave count. A strong,
+  // persistent completed-10m post-high structure can therefore advance the
+  // structural transition even when downstream confirmation is unavailable.
+  //
+  // This specifically prevents a mature parent W4 from being trapped forever
+  // as "internal iv" merely because Engine 3 is waiting on Engine 26 or
+  // Engine 4 has not yet published an authorized participation read.
+  const structuralW3CompletionEvidence =
+    candidateUnreclaimed &&
+    postHighBars.length >= 6 &&
+    bearishBreakCount >= 3 &&
+    structuralRatio >= 0.04;
+
+  const strongParentW4Structure =
+    candidateUnreclaimed &&
+    postHighBars.length >= 10 &&
+    bearishBreakCount >= 5 &&
+    structuralRatio >= 0.05;
+
   const w3CompletionCandidate =
     pullbackStarted &&
     candidateUnreclaimed &&
     postHighBars.length >= 2 &&
     bearishBreakCount >= 1 &&
-    reaction.bearish &&
+    (reaction.bearish || structuralW3CompletionEvidence) &&
     !internalVContinuation;
 
   if (w3CompletionCandidate) {
@@ -592,9 +612,10 @@ export function buildMinuteW3W4TransitionModel({
 
   const parentW4Possible =
     w3CompletionCandidate &&
-    bearishConfirmed &&
-    bearishBreakCount >= 1 &&
-    postHighBars.length >= 2;
+    (
+      (bearishConfirmed && bearishBreakCount >= 1 && postHighBars.length >= 2) ||
+      strongParentW4Structure
+    );
 
   if (parentW4Possible) {
     state = "PARENT_W4_TRANSITION_POSSIBLE";
@@ -604,8 +625,10 @@ export function buildMinuteW3W4TransitionModel({
   const parentW4ActiveCandidate =
     parentW4Possible &&
     candidateUnreclaimed &&
-    postHighBars.length >= 3 &&
-    bearishBreakCount >= 2;
+    (
+      (bearishConfirmed && postHighBars.length >= 3 && bearishBreakCount >= 2) ||
+      strongParentW4Structure
+    );
 
   if (parentW4ActiveCandidate) {
     state = "PARENT_W4_ACTIVE_CANDIDATE";
@@ -646,6 +669,13 @@ export function buildMinuteW3W4TransitionModel({
       engine4BullishParticipationConfirmed: participation.bullish,
       bearishDownstreamConfirmation: bearishConfirmed,
       bullishDownstreamConfirmation: bullishConfirmed,
+      structuralW3CompletionEvidence,
+      strongParentW4Structure,
+      structuralTransitionAuthority: strongParentW4Structure
+        ? "CANONICAL_10M_STRUCTURE"
+        : bearishConfirmed
+        ? "ENGINE3_ENGINE4_CONFIRMED"
+        : "DEVELOPING",
     },
     noExecution: true,
     noPermissionCreated: true,
