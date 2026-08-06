@@ -593,6 +593,131 @@ function normalizeCorrectionModel({ structure, marks }) {
   };
 }
 
+
+function buildCanonicalActiveFibModel({
+  degree,
+  activeWave,
+  direction,
+  structure,
+  currentPrice,
+} = {}) {
+  const wave = upper(activeWave);
+  const targetModel =
+    structure?.targetModel && typeof structure.targetModel === "object"
+      ? structure.targetModel
+      : null;
+  const w4Map =
+    structure?.w4RetracementMap && typeof structure.w4RetracementMap === "object"
+      ? structure.w4RetracementMap
+      : null;
+
+  if (wave === "W4" && w4Map) {
+    return {
+      active: true,
+      source: "engine22.degreeStates.activeFibModel.v1",
+      modelKey: "W4_RETRACEMENT_MAP",
+      modelType: "RETRACEMENT_MAP",
+      degree,
+      activeWave: "W4",
+      direction: upper(direction) === "DOWN" ? "DOWN" : "DOWN",
+      purpose: "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+      anchorModel: {
+        anchorHigh: round2(w4Map?.w3HighCandidate),
+        anchorLow: round2(w4Map?.w2Low),
+        range: round2(w4Map?.range),
+      },
+      levels: {
+        r236: round2(w4Map?.r236),
+        r382: round2(w4Map?.r382),
+        r500: round2(w4Map?.r500),
+        r618: round2(w4Map?.r618),
+        r786: round2(w4Map?.r786),
+      },
+      rawLevels:
+        w4Map?.rawLevels && typeof w4Map.rawLevels === "object"
+          ? { ...w4Map.rawLevels }
+          : null,
+      currentPrice: round2(w4Map?.currentPrice ?? currentPrice),
+      currentRetracementRatio: w4Map?.currentRetracementRatio ?? null,
+      currentRetracementPercent: w4Map?.currentRetracementPercent ?? null,
+      currentRetracementDisplay: w4Map?.currentRetracementDisplay || null,
+      nearestLevel: w4Map?.nearestRetracement || null,
+      nextLevelBelow: w4Map?.nextRetracementBelow || null,
+      zoneState: w4Map?.zoneState || "UNKNOWN",
+      tickSize: w4Map?.tickSize ?? null,
+      normalization: w4Map?.normalization || null,
+      noExecution: true,
+      noPermissionCreated: true,
+      watchOnly: true,
+      reasonCodes: [
+        "ENGINE22_ACTIVE_FIB_MODEL_SELECTED",
+        "ENGINE22_ACTIVE_WAVE_W4_USES_RETRACEMENT_MAP",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+      ],
+    };
+  }
+
+  if (wave === "W3" && targetModel) {
+    return {
+      active: true,
+      source: "engine22.degreeStates.activeFibModel.v1",
+      modelKey: "W3_EXTENSION_LADDER",
+      modelType: targetModel?.modelType || "EXTENSION_LADDER",
+      degree,
+      activeWave: "W3",
+      direction: upper(direction) === "DOWN" ? "DOWN" : "UP",
+      purpose: "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+      anchorModel:
+        targetModel?.anchorModel && typeof targetModel.anchorModel === "object"
+          ? { ...targetModel.anchorModel }
+          : {
+              projectionBase: round2(targetModel?.projectionBase),
+            },
+      levels:
+        targetModel?.levels && typeof targetModel.levels === "object"
+          ? { ...targetModel.levels }
+          : {},
+      displayLevels: Array.isArray(targetModel?.displayLevels)
+        ? targetModel.displayLevels
+        : [],
+      currentPrice: round2(currentPrice),
+      nextTarget: round2(targetModel?.nextTarget),
+      nextTargetKey: targetModel?.nextTargetKey || null,
+      tickSize: targetModel?.tickSize ?? null,
+      normalization: targetModel?.normalization || null,
+      noExecution: true,
+      noPermissionCreated: true,
+      watchOnly: true,
+      reasonCodes: [
+        "ENGINE22_ACTIVE_FIB_MODEL_SELECTED",
+        "ENGINE22_ACTIVE_WAVE_W3_USES_EXTENSION_LADDER",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+      ],
+    };
+  }
+
+  return {
+    active: false,
+    source: "engine22.degreeStates.activeFibModel.v1",
+    modelKey: null,
+    modelType: null,
+    degree,
+    activeWave: wave || null,
+    direction: direction || null,
+    purpose: "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+    reasonCodes: [
+      "ENGINE22_NO_ACTIVE_FIB_MODEL_FOR_CURRENT_WAVE",
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+    ],
+  };
+}
+
 function buildInactiveDegreeState(degree) {
   const label = titleCase(degree);
 
@@ -619,6 +744,7 @@ function buildInactiveDegreeState(degree) {
 
     marks: buildEmptyMarks(),
     targetModel: null,
+    activeFibModel: null,
     correctionModel: null,
     correctionModels: null,
 
@@ -691,6 +817,14 @@ function buildActiveDegreeState({
     marks,
   });
 
+  const activeFibModel = buildCanonicalActiveFibModel({
+    degree,
+    activeWave,
+    direction,
+    structure,
+    currentPrice,
+  });
+
   return {
     degree,
     tf:
@@ -709,6 +843,12 @@ function buildActiveDegreeState({
     nextExpectedWave,
     nextExpectedParentWave:
       structure?.nextExpectedParentWave || internalStructure?.nextExpectedParentWave || null,
+    parentWaveComplete:
+      structure?.parentWaveComplete ?? internalStructure?.parentWaveComplete ?? null,
+    parentTransitionPossible:
+      structure?.parentTransitionPossible ??
+      internalStructure?.parentTransitionPossible ??
+      null,
     internalStructure,
     currentRead,
 
@@ -749,6 +889,12 @@ function buildActiveDegreeState({
       structure?.targetModel && typeof structure.targetModel === "object"
         ? structure.targetModel
         : null,
+
+    // Canonical active structural Fib contract. Downstream consumers should
+    // read this field instead of deciding between targetModel and
+    // w4RetracementMap themselves. Historical/source models remain published
+    // separately for auditability and backward compatibility.
+    activeFibModel,
 
      // Preferred compact display model.
      correctionModel,
@@ -836,4 +982,4 @@ export function buildDegreeStates({
   return attachNestedCorrectionContexts(out);
 }
 
-export default buildDegreeStates;
+export default buildDegreeState
