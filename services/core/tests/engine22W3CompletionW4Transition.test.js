@@ -322,6 +322,40 @@ test("confirmed multi-bar down structure promotes parent W4 active candidate and
   assert.equal(model.w3HighCandidateStatus, "CONFIRMED");
 });
 
+
+
+test("strong canonical completed-10m structure can confirm parent W4 without downstream reaction/participation", () => {
+  const bars = [
+    ...baseBars(),
+    bar(50, { high: 7772, low: 7746, close: 7750 }),
+    bar(60, { high: 7762, low: 7738, close: 7742 }),
+    bar(70, { high: 7756, low: 7728, close: 7734 }),
+    bar(80, { high: 7748, low: 7718, close: 7724 }),
+    bar(90, { high: 7742, low: 7710, close: 7718 }),
+    bar(100, { high: 7736, low: 7704, close: 7712 }),
+    bar(110, { high: 7732, low: 7698, close: 7708 }),
+    bar(120, { high: 7728, low: 7694, close: 7704 }),
+    bar(130, { high: 7724, low: 7690, close: 7700 }),
+    bar(140, { high: 7720, low: 7686, close: 7696 }),
+  ];
+
+  const model = buildModel({
+    bars,
+    currentPrice: 7696,
+    reactionContext: null,
+    volumeContext: null,
+    nowOffsetMinutes: 160,
+  });
+
+  assert.equal(model.state, "PARENT_W4_ACTIVE_CANDIDATE");
+  assert.equal(model.parentWaveComplete, true);
+  assert.equal(model.parentTransitionPossible, true);
+  assert.equal(model.evidence.strongParentW4Structure, true);
+  assert.equal(model.evidence.structuralTransitionAuthority, "CANONICAL_10M_STRUCTURE");
+  assert.equal(model.evidence.engine3BearishReactionConfirmed, false);
+  assert.equal(model.evidence.engine4BearishParticipationConfirmed, false);
+});
+
 test("W4 retracement map is anchored at W2 low and W3 high candidate with ES tick rounding", () => {
   const model = buildModel({
     bars: baseBars(),
