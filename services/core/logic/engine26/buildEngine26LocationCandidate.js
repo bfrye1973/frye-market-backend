@@ -4909,18 +4909,21 @@ export function buildEngine26ReactionHandoff({
      * Observer availability is continuous.
      * Permission/qualification is still controlled downstream.
      */
-    active: true,
-    armed: true,
+    active:
+      evaluationAuthorized,
+
+    armed:
+      contactArmed ||
+      evaluationAuthorized,
+
     observerActive: true,
+
     evaluationContextValid,
-    chainArmed:
-      candidate?.chainArmed === true,
 
     engine:
       "engine26.reactionHandoff.v1",
 
     status,
-
     candidateId:
       candidate.candidateId,
 
