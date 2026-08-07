@@ -1,0 +1,33 @@
+{
+  "schema": "engine22-wave-runtime-state@v1",
+  "updatedAt": "2026-08-07T13:00:00.000Z",
+  "records": {
+    "ES:minute": {
+      "symbol": "ES",
+      "degree": "minute",
+      "transitionState": "PARENT_W4_ACTIVE_CANDIDATE",
+      "activeParentWave": "W4",
+      "direction": "DOWN",
+      "confirmedW3High": 7820.25,
+      "confirmedW3HighTimeSec": null,
+      "confirmedW3HighStatus": "CONFIRMED",
+      "w2Low": 7427.75,
+      "parentWaveComplete": true,
+      "parentTransitionPossible": true,
+      "activeFibModelKey": "W4_RETRACEMENT_MAP",
+      "structuralTransitionAuthority": "MANAGER_CONFIRMED_1H_STRUCTURE",
+      "confirmedAt": "2026-08-07T13:00:00.000Z",
+      "source": "MANAGER_CONFIRMED_STRUCTURAL_MARK",
+      "reasonCodes": [
+        "ENGINE22_DURABLE_PARENT_W4_STATE",
+        "CONFIRMED_W3_HIGH_PERSISTED",
+        "MANAGER_CONFIRMED_W3_HIGH_7820_25",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED"
+      ],
+      "noExecution": true,
+      "noPermissionCreated": true,
+      "watchOnly": true
+    }
+  }
+}
