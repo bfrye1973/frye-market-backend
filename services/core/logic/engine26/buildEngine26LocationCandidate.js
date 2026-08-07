@@ -2448,16 +2448,14 @@ function buildWaitingHandoff(
 ) {
   return {
     /*
-     * Engine 3 / Engine 4 observation stays online even when
-     * Engine 26 has no valid candidate context yet.
+     * Engine 3 / Engine 4 observation remains available even when
+     * Engine 26 has no valid candidate context.
      *
-     * "active" means the observer pipeline is running.
-     * "authorizeEngine3Evaluation" separately tells downstream
-     * consumers whether the current Engine 26 candidate context
-     * is valid for Strategy 1 evaluation.
+     * active / armed describe the Engine 26 candidate handoff.
+     * observerActive separately describes continuous observation.
      */
-    active: true,
-    armed: true,
+    active: false,
+    armed: false,
     observerActive: true,
     evaluationContextValid: false,
 
@@ -2465,7 +2463,7 @@ function buildWaitingHandoff(
       "engine26.reactionHandoff.v1",
 
     status:
-      "OBSERVING_WITHOUT_LOCATION_CONTEXT",
+      "WAITING_FOR_LOCATION",
 
     candidateId:
       candidate?.candidateId ?? null,
