@@ -554,3 +554,80 @@ test("transition model is structural only and never creates execution, permissio
   assert.equal("brokerCall" in model, false);
   assert.equal("journalEvent" in model, false);
 });
+
+test("durable confirmed W4 state blocks regression back to W3 when rolling 10m history loses the original high", () => {
+  const rollingBars = [
+    bar(0, { high: 7750, low: 7728, close: 7742 }),
+    bar(10, { high: 7762.5, low: 7735, close: 7758 }),
+    bar(20, { high: 7758, low: 7730, close: 7748.75 }),
+  ];
+
+  const model = buildMinuteW3W4TransitionModel({
+    symbol: "ES",
+    minuteStructure: minuteStructure(),
+    bars10m: rollingBars,
+    currentPrice: 7748.75,
+    currentTimeSec: T0 + 60 * 60,
+    durableState: {
+      activeParentWave: "W4",
+      transitionState: "PARENT_W4_ACTIVE_CANDIDATE",
+      confirmedW3High: 7820.25,
+      confirmedW3HighStatus: "CONFIRMED",
+      w2Low: 7427.75,
+      source: "MANAGER_CONFIRMED_STRUCTURAL_MARK",
+      confirmedAt: "2026-08-07T13:00:00.000Z",
+    },
+  });
+
+  assert.equal(model.state, "PARENT_W4_ACTIVE_CANDIDATE");
+  assert.equal(model.w3HighCandidate, 7820.25);
+  assert.equal(model.w3HighCandidateStatus, "CONFIRMED");
+  assert.equal(model.parentWaveComplete, true);
+  assert.equal(model.parentTransitionPossible, true);
+  assert.equal(model.currentInternalWave, null);
+  assert.equal(model.nextExpectedInternalWave, null);
+  assert.equal(model.nextExpectedParentWave, null);
+  assert.equal(model.evidence.durableStateRestored, true);
+  assert.equal(model.evidence.structuralTransitionAuthority, "DURABLE_RUNTIME_STATE");
+  assert.ok(model.reasonCodes.includes("W4_REGRESSION_TO_W3_BLOCKED"));
+});
+
+test("durable W4 state rebuilds the active retracement map from confirmed W3 high 7820.25", () => {
+  const model = buildMinuteW3W4TransitionModel({
+    symbol: "ES",
+    minuteStructure: minuteStructure(),
+    bars10m: [
+      bar(0, { high: 7762.5, low: 7740, close: 7751.5 }),
+    ],
+    currentPrice: 7751.5,
+    currentTimeSec: T0 + 30 * 60,
+    durableState: {
+      activeParentWave: "W4",
+      transitionState: "PARENT_W4_ACTIVE_CANDIDATE",
+      confirmedW3High: 7820.25,
+      w2Low: 7427.75,
+      source: "MANAGER_CONFIRMED_STRUCTURAL_MARK",
+    },
+  });
+
+  assert.deepEqual(
+    {
+      r236: model.w4RetracementMap.r236,
+      r382: model.w4RetracementMap.r382,
+      r500: model.w4RetracementMap.r500,
+      r618: model.w4RetracementMap.r618,
+      r786: model.w4RetracementMap.r786,
+    },
+    {
+      r236: 7727.5,
+      r382: 7670.25,
+      r500: 7624,
+      r618: 7577.75,
+      r786: 7511.75,
+    }
+  );
+
+  assert.equal(model.w4RetracementMap.w3HighCandidate, 7820.25);
+  assert.equal(model.w4RetracementMap.w2Low, 7427.75);
+  assert.equal(model.w4RetracementMap.nextRetracementBelow.price, 7727.5);
+});
