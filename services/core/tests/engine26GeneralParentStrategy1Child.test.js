@@ -11,13 +11,13 @@ import {
 } from "../logic/engine26/buildEngine26LocationCandidate.js";
 
 /*
- * Keep this suite completely isolated from:
+ * This suite must never depend on:
  *
- * - live Engine 26 negotiated-zone memory
- * - live daily manual imbalance inventory
+ * - live negotiated-zone memory
+ * - live daily manual imbalance zones
  *
- * The production manual-zone file changes throughout the trading day,
- * so these regression tests must control their own zone inventory.
+ * Daily major imbalances change constantly.
+ * These tests therefore create their own controlled inventory.
  */
 const TEST_DIR = fs.mkdtempSync(
   path.join(
@@ -37,21 +37,21 @@ const TEST_MANUAL_ZONES_PATH = path.join(
 );
 
 /*
- * One controlled major imbalance:
+ * Controlled test inventory:
  *
- * Broad manual imbalance:
+ * Broad imbalance:
  *   7419.75–7473.50
  *
  * Negotiated middle zone:
  *   7433.75–7457.50
  *
- * This gives the first test:
- * - a valid broad parent near 7475
- * - a valid Strategy 1 negotiated child near 7475
+ * At 7475:
+ *   - general parent has meaningful broad context
+ *   - Strategy 1 has a nearby negotiated child
  *
- * At 7800 both are outside the 25-point Strategy 1 monitoring range,
- * so the second test can prove the child safely waits while the general
- * parent remains informationally available.
+ * At 7800:
+ *   - negotiated child is outside the 25-point monitoring range
+ *   - Strategy 1 must safely wait
  */
 fs.writeFileSync(
   TEST_MANUAL_ZONES_PATH,
@@ -168,7 +168,7 @@ test(
     assert.ok(child);
 
     /*
-     * General parent may use the broad major imbalance.
+     * General parent can select the broader imbalance.
      */
     assert.equal(
       parent.location.source,
@@ -210,8 +210,8 @@ test(
     );
 
     /*
-     * Engine 26 does not inherit Minute DOWN as the tactical
-     * Strategy 1 direction.
+     * Engine 22 Minute DOWN is structural context only.
+     * It must not automatically become Strategy 1 direction.
      */
     assert.equal(
       child.directionBias,
@@ -234,11 +234,11 @@ test(
     );
 
     /*
-     * NEW CONTRACT:
+     * Current contract:
      *
-     * A valid Engine 26 Strategy 1 candidate is available,
-     * so Engine 3 remains authorized to observe/evaluate it
-     * even though Engine 26 has not resolved LONG or SHORT.
+     * Engine 26 has a valid active Strategy 1 location.
+     * Engine 3 therefore remains authorized to observe/evaluate
+     * the candidate even before LONG/SHORT is resolved.
      */
     assert.equal(
       reactionHandoff
@@ -252,8 +252,8 @@ test(
     );
 
     /*
-     * Engine 26B geometry still must not advance while
-     * directional resolution is absent.
+     * Geometry must still remain blocked while direction
+     * is unresolved.
      */
     assert.equal(
       result.engine26GeometryHandoff.active,
@@ -310,16 +310,16 @@ test(
     });
 
     /*
-     * The general parent may remain informationally available
-     * even though its nearest controlled zone is distant.
+     * General parent may still publish informational context
+     * from the broad inventory.
      */
     assert.ok(
       result.engine26GeneralLocation
     );
 
     /*
-     * The only controlled negotiated zone is far outside the
-     * 25-point Strategy 1 monitoring range.
+     * The controlled negotiated middle zone is far outside
+     * Strategy 1's 25-point monitoring range.
      */
     assert.equal(
       result.engine26LocationCandidate.active,
@@ -332,11 +332,7 @@ test(
     );
 
     /*
-     * No valid Engine 26 candidate context exists, so the
-     * reaction handoff itself is not active/authorized.
-     *
-     * Engine 3/4's continuous market observers are a separate
-     * concept from an authorized Engine 26 candidate context.
+     * There is no valid Engine 26 Strategy 1 candidate context.
      */
     assert.equal(
       result.engine26ReactionHandoff.active,
@@ -349,9 +345,6 @@ test(
       false
     );
 
-    /*
-     * No location candidate means no geometry progression.
-     */
     assert.equal(
       result.engine26GeometryHandoff.active,
       false
