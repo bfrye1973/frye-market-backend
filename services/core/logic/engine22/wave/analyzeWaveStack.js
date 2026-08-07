@@ -25,6 +25,10 @@ import { getActiveWaveStateMeta } from "./manualMarks/readManualWaveMarks.js";
 import { validateWaveMarkMaturity } from "./revision/validateWaveMarkMaturity.js";
 import { attachTargetModelsToActiveStructures } from "./targets/buildWaveTargetModel.js";
 import { attachCorrectionModelsToActiveStructures } from "./corrections/buildCorrectionModels.js";
+import {
+  readEngine22WaveRuntimeState,
+  persistConfirmedMinuteW4State,
+} from "./runtimeStateStore.js";
 
 
 const DEGREE_ORDER = ["primary", "intermediate", "minor", "minute", "micro"];
@@ -434,6 +438,7 @@ export function buildMinuteW3W4TransitionModel({
   volumeContext = null,
   snapshotNow = null,
   currentTimeSec = null,
+  durableState = null,
 } = {}) {
   if (!minuteStructure || typeof minuteStructure !== "object") return null;
 
@@ -458,6 +463,13 @@ export function buildMinuteW3W4TransitionModel({
   );
 
   const confirmedManualW3 = isConfirmedMark(w3Mark) ? readMarkPrice(w3Mark) : null;
+  const durableParentW4 =
+    upper(durableState?.activeParentWave) === "W4" &&
+    upper(durableState?.transitionState) === "PARENT_W4_ACTIVE_CANDIDATE" &&
+    toNum(durableState?.confirmedW3High) !== null;
+  const durableConfirmedW3 = durableParentW4
+    ? toNum(durableState.confirmedW3High)
+    : null;
 
   let recordHigh = null;
   const supersededCandidates = [];
@@ -475,8 +487,17 @@ export function buildMinuteW3W4TransitionModel({
     }
   }
 
-  const candidatePrice = confirmedManualW3 ?? recordHigh?.price ?? null;
-  const candidateTimeSec = confirmedManualW3 !== null ? readMarkTimeSec(w3Mark) : recordHigh?.timeSec ?? null;
+  const candidatePrice =
+    confirmedManualW3 ??
+    durableConfirmedW3 ??
+    recordHigh?.price ??
+    null;
+  const candidateTimeSec =
+    confirmedManualW3 !== null
+      ? readMarkTimeSec(w3Mark)
+      : durableConfirmedW3 !== null
+      ? parseTimeSec(durableState?.confirmedW3HighTimeSec)
+      : recordHigh?.timeSec ?? null;
 
   if (candidatePrice === null) {
     return {
@@ -513,11 +534,74 @@ export function buildMinuteW3W4TransitionModel({
   const structuralPrice = latestCompleted?.close ?? toNum(currentPrice);
   const retracementMap = buildRetracementMap({
     symbol,
-    w2Low,
+    w2Low: durableParentW4 ? toNum(durableState?.w2Low) ?? w2Low : w2Low,
     w3HighCandidate: candidatePrice,
     currentPrice,
     structuralPrice,
   });
+
+  if (durableParentW4) {
+    const durableW2Low = toNum(durableState?.w2Low) ?? w2Low;
+    const durableRange = candidatePrice - durableW2Low;
+    const durablePrice = structuralPrice ?? toNum(currentPrice);
+    const durableRatio =
+      durablePrice === null || durableRange <= 0
+        ? null
+        : Math.max(0, (candidatePrice - durablePrice) / durableRange);
+
+    return {
+      active: true,
+      source: "engine22.minuteW3W4Transition.v1",
+      state: "PARENT_W4_ACTIVE_CANDIDATE",
+      w3HighCandidate: round2(candidatePrice),
+      w3HighCandidateTimeSec: candidateTimeSec,
+      w3HighCandidateStatus: "CONFIRMED",
+      supersededCandidates,
+      w4RetracementMap: retracementMap,
+      w4PullbackState: "PARENT_W4_ACTIVE_CANDIDATE",
+      currentInternalWave: null,
+      nextExpectedInternalWave: null,
+      nextExpectedParentWave: null,
+      parentWaveComplete: true,
+      parentTransitionPossible: true,
+      confirmedAt: durableState?.confirmedAt || null,
+      evidence: {
+        completed10mBars: completed.length,
+        scoped10mBarsSinceW2: scoped.length,
+        postHighCompleted10mBars: postHighBars.length,
+        reachedExtensionMaturity: true,
+        candidateUnreclaimed: true,
+        pullbackStarted: true,
+        structuralRetracementRatio:
+          durableRatio === null ? null : Number(durableRatio.toFixed(4)),
+        bearishStructureBreakCount: countBearishStructureBreaks(postHighBars),
+        bullishRecoveryBarCount: countBullishRecoveryBars(postHighBars),
+        engine3BearishReactionConfirmed: false,
+        engine3BullishReactionConfirmed: false,
+        engine4BearishParticipationConfirmed: false,
+        engine4BullishParticipationConfirmed: false,
+        bearishDownstreamConfirmation: false,
+        bullishDownstreamConfirmation: false,
+        structuralW3CompletionEvidence: true,
+        strongParentW4Structure: true,
+        durableStateRestored: true,
+        durableStateSource: durableState?.source || "ENGINE22_RUNTIME_STATE",
+        structuralTransitionAuthority: "DURABLE_RUNTIME_STATE",
+      },
+      noExecution: true,
+      noPermissionCreated: true,
+      watchOnly: true,
+      reasonCodes: [
+        "ENGINE22_MINUTE_W3_W4_TRANSITION_MODEL_BUILT",
+        "PARENT_W4_ACTIVE_CANDIDATE",
+        "ENGINE22_DURABLE_PARENT_W4_STATE_RESTORED",
+        "CONFIRMED_W3_HIGH_RESTORED",
+        "W4_REGRESSION_TO_W3_BLOCKED",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+      ],
+    };
+  }
 
   const structuralRatio =
     structuralPrice === null || candidatePrice <= w2Low
@@ -713,6 +797,11 @@ function attachMinuteW3W4TransitionToActiveStructures({
   const minute = activeStructures?.minute;
   if (!minute || typeof minute !== "object") return activeStructures;
 
+  const durableState = readEngine22WaveRuntimeState({
+    symbol,
+    degree: "minute",
+  });
+
   const model = buildMinuteW3W4TransitionModel({
     symbol,
     minuteStructure: minute,
@@ -722,9 +811,26 @@ function attachMinuteW3W4TransitionToActiveStructures({
     volumeContext,
     snapshotNow,
     currentTimeSec,
+    durableState,
   });
 
   if (!model?.active) return activeStructures;
+
+  const durableConfirmedW3 = toNum(durableState?.confirmedW3High);
+  const modelConfirmedW3 = toNum(model?.w3HighCandidate);
+  const durableAlreadyMatches =
+    upper(durableState?.activeParentWave) === "W4" &&
+    upper(durableState?.transitionState) === "PARENT_W4_ACTIVE_CANDIDATE" &&
+    durableConfirmedW3 !== null &&
+    modelConfirmedW3 !== null &&
+    durableConfirmedW3 === modelConfirmedW3;
+
+  if (
+    model.state === "PARENT_W4_ACTIVE_CANDIDATE" &&
+    !durableAlreadyMatches
+  ) {
+    persistConfirmedMinuteW4State({ symbol, model });
+  }
 
   const internal = minute?.internalStructure || {};
   const w4Active = model.state === "PARENT_W4_ACTIVE_CANDIDATE";
