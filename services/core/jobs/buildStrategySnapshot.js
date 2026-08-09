@@ -9580,6 +9580,7 @@ if (
     engine26ImbalanceWatch,
     engine26StructuralContext,
     engine26TradePlanPreview,
+    engine26GeometryPreviews,
     engine26PaperTradePlan,
     engine26PaperTradeTicket,
     engine26ProposedGeometry,
