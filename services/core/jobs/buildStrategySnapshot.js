@@ -8877,6 +8877,7 @@ let engine26ImbalanceWatch = null;
 let engine26PaperTradePlan = null;
 let engine26PaperTradeTicket = null;
 let engine26PaperTradeExecution = null;
+let engine26GeometryPreviews = null;
 let engine26TradePlanPreview = null;
 let engine26ReplayMarker = null;
 let engine26ProposedGeometry = null; 
@@ -8934,7 +8935,8 @@ const engine26 = buildEngine26PaperTradePlan({
     engine26PaperTradePlan = engine26.engine26PaperTradePlan || null;
     engine26PaperTradeTicket = engine26.engine26PaperTradeTicket || null;
     engine26TradePlanPreview = engine26.engine26TradePlanPreview || null;
-    engine26TradePlanPreview = engine26.engine26TradePlanPreview || null;
+    engine26GeometryPreviews =
+      engine26.engine26GeometryPreviews || null;
     engine26ProposedGeometry =
       engine26.engine26ProposedGeometry || null;
     engine7SizingPreview =
