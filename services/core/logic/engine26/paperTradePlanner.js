@@ -2,6 +2,7 @@
 
 import { deriveEngine22StructuralPlaybook } from "./deriveEngine22StructuralPlaybook.js";
 import { evaluateStrategy1Geometry } from "./strategy1/evaluateStrategy1Geometry.js";
+import { buildStrategy1GeometryPreviews } from "./strategy1/buildStrategy1GeometryPreviews.js";
 
 const ENGINE = "engine26.paperTradePlanner.v1";
 const MODE = "PAPER_ONLY";
@@ -3600,6 +3601,19 @@ export function buildEngine26PaperTradePlan({
   controlLevelContext,
 });
 
+const engine26GeometryPreviews =
+  buildStrategy1GeometryPreviews({
+    symbol: normalizedSymbol,
+    strategyId: normalizedStrategyId,
+
+    engine26LocationCandidate,
+    engine22WaveStrategy,
+
+    snapshotTime:
+      engine26LocationCandidate?.snapshotTime ??
+      null,
+  });
+
 const engine26ProposedGeometry =
   buildEngine26ProposedGeometry({
     symbol:
@@ -3970,6 +3984,7 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
       engine26ImbalanceWatch,
       engine26StructuralContext,
       engine26TradePlanPreview,
+      engine26GeometryPreviews,
       engine26ProposedGeometry,
       engine26PaperTrialCandidate,
       engine26PaperTradePlan: {
@@ -4209,6 +4224,7 @@ if (!engine15Decision?.paperScalpReadiness && isFastIntradayPaperAllow) {
    engine26ImbalanceWatch,
    engine26StructuralContext,
    engine26TradePlanPreview,
+   engine26GeometryPreviews,
    engine26ProposedGeometry,
    engine26PaperTrialCandidate,
    engine26PaperTradePlan: plan,
