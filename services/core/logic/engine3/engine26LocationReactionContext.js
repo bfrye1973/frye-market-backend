@@ -173,6 +173,15 @@ function copyHandoffMetadata(handoff) {
     expectedReactionDirection: handoff?.expectedReactionDirection ?? null,
     expectedReactions: normalizeExpectedReactions(handoff?.expectedReactions),
     handoffReactionExpected: handoff?.reactionExpected ?? null,
+
+    // Historical Engine 26 location-event context only.
+    // Engine 3 must not use this field for current direction,
+    // authorization, confirmation, permission, or execution.
+    locationEventContext:
+      handoff?.locationEventContext &&
+      typeof handoff.locationEventContext === "object"
+        ? { ...handoff.locationEventContext }
+        : null,
   };
 }
 
