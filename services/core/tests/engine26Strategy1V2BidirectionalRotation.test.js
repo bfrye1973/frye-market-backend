@@ -3377,8 +3377,8 @@ test(
         "ABOVE_ZONE"
       );
 
-      assert.equal(handoff.active, true);
-      assert.equal(handoff.armed, true);
+      assert.equal(handoff.active, false);
+      assert.equal(handoff.armed, false);
       assert.equal(
         handoff.observerActive,
         true
@@ -3457,7 +3457,7 @@ test(
     );
     assert.equal(
       handoff.status,
-      "OBSERVING_WITHOUT_LOCATION_CONTEXT"
+      "WAITING_FOR_LOCATION"
     );
     assert.equal(
       handoff.noPermissionCreated,
