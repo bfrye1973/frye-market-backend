@@ -1570,43 +1570,13 @@ function findRecoverablePromotedContactMemoryChild({
           tradeDirectionBias: "NEUTRAL",
           preferredDirection: "NEUTRAL",
           directionalResolved: false,
-          directionState:
-            record?.priorRotationDirection === "LONG"
-              ? "SHORT_REVERSAL_WATCH"
-              : record?.priorRotationDirection === "SHORT"
-              ? "LONG_REVERSAL_WATCH"
-              : "NEUTRAL",
+          directionState: "NEUTRAL",
           expectedDirection: null,
-          expectedReactionDirection:
-            record?.priorRotationDirection === "LONG"
-              ? "SHORT"
-              : record?.priorRotationDirection === "SHORT"
-              ? "LONG"
-              : null,
-          expectedReversalDirection:
-            record?.priorRotationDirection === "LONG"
-              ? "SHORT"
-              : record?.priorRotationDirection === "SHORT"
-              ? "LONG"
-              : null,
-          expectedParticipationDirection:
-            record?.priorRotationDirection === "LONG"
-              ? "SHORT"
-              : record?.priorRotationDirection === "SHORT"
-              ? "LONG"
-              : null,
-          expectedReactions:
-            record?.priorRotationDirection === "LONG"
-              ? expectedReactionsForDirection("SHORT")
-              : record?.priorRotationDirection === "SHORT"
-              ? expectedReactionsForDirection("LONG")
-              : [],
-          reactionExpected:
-            ["LONG", "SHORT"].includes(
-              normalizeDirection(
-                record?.priorRotationDirection
-              )
-            ),
+          expectedReactionDirection: null,
+          expectedReversalDirection: null,
+          expectedParticipationDirection: null,
+          expectedReactions: [],
+          reactionExpected: false,
           contactState: "NEGOTIATED_LINE_CONTACT",
           chainArmed: true,
           automaticDirectionFlip: false,
@@ -3237,22 +3207,7 @@ const contactState =
 const chainArmed =
   promotedContactLifecycle === true;
 
-const expectedReversalDirection =
-  promotedContactLifecycle &&
-  (
-    promotionSourceDirection === "LONG" ||
-    continuityLocationCandidate
-      ?.priorRotationDirection === "LONG"
-  )
-    ? "SHORT"
-    : promotedContactLifecycle &&
-      (
-        promotionSourceDirection === "SHORT" ||
-        continuityLocationCandidate
-          ?.priorRotationDirection === "SHORT"
-      )
-    ? "LONG"
-    : null;
+const expectedReversalDirection = null;
 
 const priorRotationDirection =
   promotedContactLifecycle
@@ -3464,11 +3419,7 @@ const directionBias =
 
 const directionState =
   promotedContactLifecycle
-    ? expectedReversalDirection === "SHORT"
-      ? "SHORT_REVERSAL_WATCH"
-      : expectedReversalDirection === "LONG"
-      ? "LONG_REVERSAL_WATCH"
-      : "NEUTRAL"
+    ? "NEUTRAL"
     : observationOnlyLongWatch
     ? "LONG_REVERSAL_WATCH"
     : strategy1Eligible &&
@@ -4905,14 +4856,7 @@ export function buildEngine26ReactionHandoff({
   return {
     /*
      * Observer availability is continuous.
-     *
-     * active / armed describe whether a valid Strategy 1 candidate
-     * evaluation context exists. They must not be inferred from the
-     * continuous observer state or from current activation-range proximity.
-     *
-     * Established LONG / SHORT children and durable neutral negotiated-line
-     * contacts remain active and armed whenever their existing authoritative
-     * evaluation context remains valid.
+     * Permission/qualification is still controlled downstream.
      */
     active: evaluationContextValid,
     armed: evaluationContextValid,
