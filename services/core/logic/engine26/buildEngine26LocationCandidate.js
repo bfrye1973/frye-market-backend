@@ -4905,10 +4905,17 @@ export function buildEngine26ReactionHandoff({
   return {
     /*
      * Observer availability is continuous.
-     * Permission/qualification is still controlled downstream.
+     *
+     * active / armed describe whether a valid Strategy 1 candidate
+     * evaluation context exists. They must not be inferred from the
+     * continuous observer state or from current activation-range proximity.
+     *
+     * Established LONG / SHORT children and durable neutral negotiated-line
+     * contacts remain active and armed whenever their existing authoritative
+     * evaluation context remains valid.
      */
-    active: true,
-    armed: true,
+    active: evaluationContextValid,
+    armed: evaluationContextValid,
     observerActive: true,
     evaluationContextValid,
     chainArmed:
