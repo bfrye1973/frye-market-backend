@@ -411,6 +411,49 @@ function preserveEstablishedObject(previous, current) {
   return clone(previous) || clone(current) || null;
 }
 
+function locationEventMatchesCandidate(event, candidate) {
+  if (!event || !candidate) return false;
+
+  const eventZone = event?.zone || {};
+  const candidateZone = candidate?.entryZone || {};
+
+  return (
+    event?.candidateId === candidate?.candidateId &&
+    event?.zoneId === candidate?.zoneId &&
+    event?.laneId === (candidate?.laneId || "minute") &&
+    event?.strategyId === candidate?.strategyId &&
+    String(event?.symbol || "").toUpperCase() ===
+      String(candidate?.symbol || "").toUpperCase() &&
+    event?.candidateIdentityVersion ===
+      candidate?.candidateIdentityVersion &&
+    Number(eventZone?.lo) === Number(candidateZone?.low) &&
+    Number(eventZone?.midline) === Number(candidateZone?.midline) &&
+    Number(eventZone?.hi) === Number(candidateZone?.high)
+  );
+}
+
+function resolvePersistedLocationEvent({
+  previousEvent,
+  candidate,
+  currentEvent,
+}) {
+  if (
+    currentEvent &&
+    locationEventMatchesCandidate(currentEvent, candidate)
+  ) {
+    return clone(currentEvent);
+  }
+
+  if (
+    previousEvent &&
+    locationEventMatchesCandidate(previousEvent, candidate)
+  ) {
+    return clone(previousEvent);
+  }
+
+  return null;
+}
+
 export function updateNegotiatedZoneMemory({
   store,
   memoryKey,
@@ -790,6 +833,13 @@ export function updateNegotiatedZoneMemory({
       previous?.lifecycleFacts,
       facts?.lifecycleFacts
     ),
+
+    locationEvent:
+      resolvePersistedLocationEvent({
+        previousEvent: previous?.locationEvent,
+        candidate,
+        currentEvent: candidate?.locationEvent,
+      }),
 
     targetZone:
       clone(candidate?.targetZone) ||
