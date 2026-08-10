@@ -8,6 +8,7 @@ import path from "node:path";
 
 import {
   buildEngine26A,
+  buildEngine26ReactionHandoff,
 } from "../logic/engine26/buildEngine26LocationCandidate.js";
 
 import {
@@ -262,20 +263,19 @@ test(
     );
     assert.equal(
       completed.directionState,
-      "LONG_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       completed.expectedReversalDirection,
-      "LONG"
+      null
     );
     assert.equal(
       completed.expectedParticipationDirection,
-      "LONG"
+      null
     );
-    assert.ok(
-      completed.expectedReactions.includes(
-        "RECLAIMED_LEVEL"
-      )
+    assert.deepEqual(
+      completed.expectedReactions,
+      []
     );
     assert.equal(completed.priorCandidateId, upper.candidateId);
     assert.equal(completed.priorZoneId, upper.zoneId);
@@ -342,7 +342,7 @@ test(
     );
     assert.equal(
       promoted.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       promoted.contactState,
@@ -351,20 +351,19 @@ test(
     assert.equal(promoted.chainArmed, true);
     assert.equal(
       promoted.expectedReversalDirection,
-      "SHORT"
+      null
     );
     assert.equal(
       promoted.expectedParticipationDirection,
-      "SHORT"
+      null
     );
-    assert.ok(
-      promoted.expectedReactions.includes(
-        "FAILED_RECLAIM"
-      )
+    assert.deepEqual(
+      promoted.expectedReactions,
+      []
     );
     assert.equal(
       promoted.reactionExpected,
-      true
+      false
     );
     assert.equal(
       promoted.priorRotationDirection,
@@ -432,24 +431,23 @@ test(
     );
     assert.equal(
       reactionHandoff.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       reactionHandoff.expectedReactionDirection,
-      "SHORT"
+      null
     );
     assert.equal(
       reactionHandoff.expectedParticipationDirection,
-      "SHORT"
+      null
     );
-    assert.ok(
-      reactionHandoff.expectedReactions.includes(
-        "FAILED_RECLAIM"
-      )
+    assert.deepEqual(
+      reactionHandoff.expectedReactions,
+      []
     );
     assert.equal(
       reactionHandoff.reactionExpected,
-      true
+      false
     );
     assert.equal(
       reactionHandoff.contactState,
@@ -543,11 +541,11 @@ test(
     );
     assert.equal(
       promoted.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       promoted.expectedReversalDirection,
-      "SHORT"
+      null
     );
     assert.equal(
       promoted.directionalResolved,
@@ -606,11 +604,11 @@ test(
     assert.equal(continuation.directionalResolved, false);
     assert.equal(
       continuation.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       continuation.expectedReversalDirection,
-      "SHORT"
+      null
     );
     assert.equal(
       continuation.contactState,
@@ -688,7 +686,7 @@ test(
     assert.equal(reversal.directionalResolved, false);
     assert.equal(
       reversal.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       reversal.contactState,
@@ -723,14 +721,14 @@ test(
     );
     assert.equal(
       reversal.expectedReversalDirection,
-      "SHORT"
+      null
     );
     assert.equal(reactionHandoff.active, true);
     assert.equal(reactionHandoff.armed, true);
     assert.equal(reactionHandoff.chainArmed, true);
     assert.equal(
       reactionHandoff.expectedReactionDirection,
-      "SHORT"
+      null
     );
     assert.equal(
       reactionHandoff.authorizeEngine3Evaluation,
@@ -822,7 +820,7 @@ test(
     assert.equal(geometry.direction, "NEUTRAL");
     assert.equal(
       geometry.directionState,
-      "SHORT_REVERSAL_WATCH"
+      "NEUTRAL"
     );
     assert.equal(
       geometry.contactState,
@@ -831,7 +829,7 @@ test(
     assert.equal(geometry.chainArmed, true);
     assert.equal(
       geometry.expectedReversalDirection,
-      "SHORT"
+      null
     );
     assert.equal(geometry.directionalResolved, false);
     assert.equal(geometry.geometryReady, false);
@@ -1802,16 +1800,16 @@ test(
       assert.equal(promoted.directionalResolved, false);
       assert.equal(
         promoted.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
       assert.equal(
-        promoted.expectedReversalDirection,
-        "SHORT"
-      );
+      promoted.expectedReversalDirection,
+      null
+    );
       assert.equal(
-        promoted.expectedParticipationDirection,
-        "SHORT"
-      );
+      promoted.expectedParticipationDirection,
+      null
+    );
       assert.equal(
         promoted.priorRotationFullyComplete,
         true
@@ -1854,24 +1852,24 @@ test(
       );
       assert.equal(
         promotedRecord.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
       assert.equal(
-        promotedRecord.expectedReversalDirection,
-        "SHORT"
-      );
+      promotedRecord.expectedReversalDirection,
+      null
+    );
       assert.equal(
-        promotedRecord.expectedParticipationDirection,
-        "SHORT"
-      );
+      promotedRecord.expectedParticipationDirection,
+      null
+    );
       assert.equal(
-        promotedRecord.expectedReversalDirection,
-        "SHORT"
-      );
+      promotedRecord.expectedReversalDirection,
+      null
+    );
       assert.equal(
-        promotedRecord.expectedParticipationDirection,
-        "SHORT"
-      );
+      promotedRecord.expectedParticipationDirection,
+      null
+    );
       assert.equal(
         promotedRecord.priorCandidateId,
         priorLong.candidateId
@@ -1954,7 +1952,7 @@ test(
       assert.equal(restored.directionalResolved, false);
       assert.equal(
         restored.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
       assert.equal(
         restored.contactState,
@@ -1962,29 +1960,31 @@ test(
       );
       assert.equal(restored.chainArmed, true);
       assert.equal(
-        restored.expectedReversalDirection,
-        "SHORT"
-      );
+      restored.expectedReversalDirection,
+      null
+    );
       assert.equal(
-        restored.expectedParticipationDirection,
-        "SHORT"
-      );
+      restored.expectedParticipationDirection,
+      null
+    );
       assert.equal(restored.automaticDirectionFlip, false);
       assert.equal(restored.expectedDirection, null);
       assert.equal(
-        restored.expectedReversalDirection,
-        "SHORT"
-      );
+      restored.expectedReversalDirection,
+      null
+    );
       assert.equal(
-        restored.expectedParticipationDirection,
-        "SHORT"
-      );
-      assert.ok(
-        restored.expectedReactions.includes(
-          "FAILED_RECLAIM"
-        )
-      );
-      assert.equal(restored.reactionExpected, true);
+      restored.expectedParticipationDirection,
+      null
+    );
+      assert.deepEqual(
+      restored.expectedReactions,
+      []
+    );
+      assert.equal(
+      restored.reactionExpected,
+      false
+    );
       assert.equal(restored.shortConfirmed, false);
       assert.equal(
         restored.freshTargetMidlineContact,
@@ -2033,16 +2033,16 @@ test(
       );
       assert.equal(
         reactionHandoff.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
       assert.equal(
-        reactionHandoff.expectedReactionDirection,
-        "SHORT"
-      );
+      reactionHandoff.expectedReactionDirection,
+      null
+    );
       assert.equal(
-        reactionHandoff.expectedParticipationDirection,
-        "SHORT"
-      );
+      reactionHandoff.expectedParticipationDirection,
+      null
+    );
       assert.equal(
         reactionHandoff.contactState,
         "NEGOTIATED_LINE_CONTACT"
@@ -2055,15 +2055,14 @@ test(
         reactionHandoff.reactionConfirmed,
         false
       );
-      assert.ok(
-        reactionHandoff.expectedReactions.includes(
-          "FAILED_RECLAIM"
-        )
-      );
+      assert.deepEqual(
+      reactionHandoff.expectedReactions,
+      []
+    );
       assert.equal(
-        reactionHandoff.reactionExpected,
-        true
-      );
+      reactionHandoff.reactionExpected,
+      false
+    );
       assert.notEqual(
         reactionHandoff.status,
         "WAITING_FOR_ACTIVATION_RANGE"
@@ -2103,16 +2102,16 @@ test(
       assert.equal(restoredRecord.chainArmed, true);
       assert.equal(
         restoredRecord.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
       assert.equal(
-        restoredRecord.expectedReversalDirection,
-        "SHORT"
-      );
+      restoredRecord.expectedReversalDirection,
+      null
+    );
       assert.equal(
-        restoredRecord.expectedParticipationDirection,
-        "SHORT"
-      );
+      restoredRecord.expectedParticipationDirection,
+      null
+    );
       assert.equal(
         restoredRecord.priorRotationCompletionState,
         "FULL_TARGET_COMPLETION"
@@ -2638,18 +2637,18 @@ test(
 
       assert.equal(
         current.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
 
       assert.equal(
-        current.expectedReversalDirection,
-        "SHORT"
-      );
+      current.expectedReversalDirection,
+      null
+    );
 
       assert.equal(
-        current.expectedReactionDirection,
-        "SHORT"
-      );
+      current.expectedReactionDirection,
+      null
+    );
 
       assert.equal(
         current.contactState,
@@ -2703,9 +2702,9 @@ test(
       );
 
       assert.equal(
-        reaction.expectedReactionDirection,
-        "SHORT"
-      );
+      reaction.expectedReactionDirection,
+      null
+    );
 
       assert.equal(
         reaction.direction,
@@ -2893,13 +2892,13 @@ test(
 
       assert.equal(
         restored.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
 
       assert.equal(
-        restored.expectedReversalDirection,
-        "SHORT"
-      );
+      restored.expectedReversalDirection,
+      null
+    );
     } finally {
       fs.rmSync(
         tempDir,
@@ -3143,13 +3142,13 @@ test(
 
       assert.equal(
         switched.directionState,
-        "SHORT_REVERSAL_WATCH"
+        "NEUTRAL"
       );
 
       assert.equal(
-        switched.expectedReactionDirection,
-        "SHORT"
-      );
+      switched.expectedReactionDirection,
+      null
+    );
 
       assert.equal(
         switched.noPermissionCreated,
@@ -3377,8 +3376,8 @@ test(
         "ABOVE_ZONE"
       );
 
-      assert.equal(handoff.active, false);
-      assert.equal(handoff.armed, false);
+      assert.equal(handoff.active, true);
+      assert.equal(handoff.armed, true);
       assert.equal(
         handoff.observerActive,
         true
@@ -3425,7 +3424,51 @@ test(
 );
 
 test(
-  "Engine 26 reaction observer stays on without a valid location context",
+  "stale Strategy 1 identity does not arm an inactive candidate handoff",
+  () => {
+    const handoff = buildEngine26ReactionHandoff({
+      locationCandidate: {
+        active: false,
+        candidateId: "STALE-CANDIDATE",
+        zoneId: "STALE-ZONE",
+        laneId: "minute",
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        timeframe: "10m",
+        snapshotTime: "2026-08-06T15:50:00.000Z",
+        directionBias: "NEUTRAL",
+        direction: "NEUTRAL",
+        strategyEligibility: {
+          eligible: true,
+        },
+        location: {
+          distancePoints: 0,
+        },
+        activationRangePoints: 4,
+        noPermissionCreated: true,
+        noExecution: true,
+      },
+      snapshotTime: "2026-08-06T15:50:00.000Z",
+    });
+
+    assert.equal(handoff.observerActive, true);
+    assert.equal(handoff.active, false);
+    assert.equal(handoff.armed, false);
+    assert.equal(handoff.evaluationContextValid, false);
+    assert.equal(handoff.authorizeEngine3Evaluation, false);
+    assert.equal(handoff.candidateIdentityValid, true);
+    assert.equal(handoff.candidateActive, false);
+    assert.equal(
+      handoff.status,
+      "OBSERVING_INACTIVE_CANDIDATE_CONTEXT"
+    );
+    assert.equal(handoff.noPermissionCreated, true);
+    assert.equal(handoff.noExecution, true);
+  }
+);
+
+test(
+  "Engine 26 observer stays active while candidate handoff remains inactive without valid location context",
   () => {
     const result =
       buildEngine26A({
@@ -3441,8 +3484,8 @@ test(
     const handoff =
       result.engine26ReactionHandoff;
 
-    assert.equal(handoff.active, true);
-    assert.equal(handoff.armed, true);
+    assert.equal(handoff.active, false);
+    assert.equal(handoff.armed, false);
     assert.equal(
       handoff.observerActive,
       true
