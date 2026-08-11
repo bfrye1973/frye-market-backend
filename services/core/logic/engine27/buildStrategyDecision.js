@@ -33,13 +33,24 @@ function pickCurrentPrice({
   degreeState,
   triggerBars,
 }) {
+  /*
+   * Strategy 1 canonical price ownership:
+   * Engine 26A location candidate first.
+   *
+   * Legacy Engine 26 planner/watch prices remain compatibility-only
+   * fallbacks and must not outrank the canonical child candidate.
+   */
   const candidates = [
-    sourceStrategy?.engine26PaperTradePlan?.currentPrice,
-    sourceStrategy?.engine26ImbalanceWatch?.currentPrice,
+    sourceStrategy?.engine26LocationCandidate?.currentPrice,
     sourceStrategy?.confluence?.price,
     sourceStrategy?.confluence?.currentPrice,
+    degreeState?.activeFibModel?.currentPrice,
     degreeState?.currentPrice,
     lastClose(triggerBars),
+
+    // Compatibility-only fallbacks.
+    sourceStrategy?.engine26PaperTradePlan?.currentPrice,
+    sourceStrategy?.engine26ImbalanceWatch?.currentPrice,
   ];
 
   for (const candidate of candidates) {
@@ -53,10 +64,30 @@ function pickCurrentPrice({
   return null;
 }
 
-function pickFastReaction(sourceStrategy) {
+function pickFastReaction(
+  sourceStrategy,
+  lane
+) {
   const reaction =
     sourceStrategy?.confluence?.context?.reaction || {};
 
+  /*
+   * Minute Strategy 1 canonical reaction:
+   * confluence.context.reaction.paperScalpReaction
+   *
+   * Do not silently replace it with the fast reaction,
+   * currentLevelAction, or the broad reaction container.
+   */
+  if (lane?.laneId === "minute") {
+    return (
+      reaction.paperScalpReaction ||
+      null
+    );
+  }
+
+  /*
+   * Other lanes retain their existing compatibility selection.
+   */
   return (
     (
       reaction.engine3FastImbalanceReaction?.active === true
@@ -80,8 +111,13 @@ function pickFastReaction(sourceStrategy) {
 function buildReactionContext({
   sourceStrategy,
   direction,
+  lane,
 }) {
-  const reaction = pickFastReaction(sourceStrategy) || {};
+  const reaction =
+    pickFastReaction(
+      sourceStrategy,
+      lane
+    ) || {};
 
   const state =
     reaction.state ||
@@ -134,24 +170,56 @@ function buildReactionContext({
   };
 }
 
-function buildParticipationContext(sourceStrategy) {
+function buildParticipationContext(
+  sourceStrategy,
+  lane
+) {
   const volume =
     sourceStrategy?.confluence?.context?.volume || {};
 
+  /*
+   * Minute Strategy 1 canonical participation:
+   * confluence.context.volume.engine4AuthorizedReactionParticipation
+   *
+   * No fast/current/lifecycle participation object may silently
+   * replace this contract for the Minute Strategy 1 decision.
+   */
   const participation =
-    (
-      volume.engine4FastImbalanceParticipation?.active === true
-        ? volume.engine4FastImbalanceParticipation
-        : null
-    ) ||
-    (
-      volume.engine4CurrentScalpParticipation?.active === true
-        ? volume.engine4CurrentScalpParticipation
-        : null
-    ) ||
-    volume.engine22LifecycleParticipation
-      ?.paperScalpParticipation ||
-    volume;
+    lane?.laneId === "minute"
+      ? (
+          volume.engine4AuthorizedReactionParticipation ||
+          null
+        )
+      : (
+          (
+            volume.engine4FastImbalanceParticipation?.active === true
+              ? volume.engine4FastImbalanceParticipation
+              : null
+          ) ||
+          (
+            volume.engine4CurrentScalpParticipation?.active === true
+              ? volume.engine4CurrentScalpParticipation
+              : null
+          ) ||
+          volume.engine22LifecycleParticipation
+            ?.paperScalpParticipation ||
+          volume
+        );
+
+  if (!participation) {
+    return {
+      active: false,
+      state: "UNKNOWN",
+      quality: null,
+      allowed: false,
+      hardBlocked: false,
+      risk: null,
+      source:
+        lane?.laneId === "minute"
+          ? "confluence.context.volume.engine4AuthorizedReactionParticipation"
+          : "confluence.context.volume",
+    };
+  }
 
   return {
     active:
@@ -161,6 +229,7 @@ function buildParticipationContext(sourceStrategy) {
 
     state:
       participation?.participationState ||
+      participation?.status ||
       participation?.state ||
       "UNKNOWN",
 
@@ -170,6 +239,7 @@ function buildParticipationContext(sourceStrategy) {
       null,
 
     allowed:
+      participation?.participationConfirmed === true ||
       participation?.allowed === true ||
       participation?.confirmed === true ||
       participation?.volumeConfirmed === true,
@@ -182,7 +252,11 @@ function buildParticipationContext(sourceStrategy) {
 
     source:
       participation?.engine ||
-      "confluence.context.volume",
+      (
+        lane?.laneId === "minute"
+          ? "confluence.context.volume.engine4AuthorizedReactionParticipation"
+          : "confluence.context.volume"
+      ),
   };
 }
 
@@ -230,52 +304,171 @@ function pickActiveLevel({
   degreeState,
 }) {
   if (
-    ["subminute", "minute"].includes(lane.laneId)
+    ["subminute", "minute"].includes(
+      lane.laneId
+    )
   ) {
-    const location =
+    const candidate =
       sourceStrategy
-        ?.engine26StructuralContext
-        ?.locationContext;
+        ?.engine26LocationCandidate ||
+      null;
 
-    const zone = location?.zone;
+    if (candidate) {
+      const candidateZone =
+        candidate?.location?.zone ||
+        candidate?.zone ||
+        null;
 
-    const imbalance =
-      sourceStrategy
-        ?.engine26ImbalanceWatch
-        ?.activeImbalance;
+      const lo =
+        toNum(
+          candidateZone?.lo ??
+          candidateZone?.low ??
+          candidate?.acceptanceBoundary ??
+          candidate?.triggerLevel
+        );
 
-    const lo = toNum(
-      zone?.lo ?? imbalance?.lo
-    );
+      const hi =
+        toNum(
+          candidateZone?.hi ??
+          candidateZone?.high ??
+          candidate?.reclaimBoundary ??
+          candidate?.triggerLevel
+        );
 
-    const hi = toNum(
-      zone?.hi ?? imbalance?.hi
-    );
+      if (lo != null && hi != null) {
+        return {
+          source:
+            "ENGINE26_LOCATION_CANDIDATE",
 
-    if (lo != null && hi != null) {
-      return {
-        source: "ENGINE26",
-        type:
-          zone?.zoneType ||
-          imbalance?.zoneType ||
-          "ZONE",
-        id:
-          zone?.id ||
-          imbalance?.id ||
-          null,
-        lo: Math.min(lo, hi),
-        hi: Math.max(lo, hi),
-        relation:
-          location?.priceLocation ||
-          location?.locationRead ||
-          null,
-      };
+          type:
+            candidateZone?.zoneType ||
+            candidate?.setupClass ||
+            candidate?.setupType ||
+            "STRATEGY1_LOCATION",
+
+          id:
+            candidate?.zoneId ||
+            candidateZone?.id ||
+            null,
+
+          candidateId:
+            candidate?.candidateId ||
+            null,
+
+          zoneId:
+            candidate?.zoneId ||
+            null,
+
+          lo:
+            Math.min(lo, hi),
+
+          hi:
+            Math.max(lo, hi),
+
+          relation:
+            candidate?.directionState ||
+            candidate?.status ||
+            candidate?.location
+              ?.priceLocation ||
+            null,
+        };
+      }
+
+      const trigger =
+        toNum(
+          candidate?.triggerLevel
+        );
+
+      if (trigger != null) {
+        return {
+          source:
+            "ENGINE26_LOCATION_CANDIDATE",
+
+          type:
+            candidate?.setupClass ||
+            candidate?.setupType ||
+            "STRATEGY1_LOCATION",
+
+          id:
+            candidate?.zoneId ||
+            null,
+
+          candidateId:
+            candidate?.candidateId ||
+            null,
+
+          zoneId:
+            candidate?.zoneId ||
+            null,
+
+          lo: trigger,
+          hi: trigger,
+
+          relation:
+            candidate?.directionState ||
+            candidate?.status ||
+            null,
+        };
+      }
+
+      /*
+       * A canonical Strategy 1 candidate exists but does not currently
+       * expose a usable numeric level. Do not silently fall back to the
+       * old structural/watch objects.
+       */
+      if (lane.laneId === "minute") {
+        return null;
+      }
+    }
+
+    /*
+     * Subminute compatibility only.
+     * Minute Strategy 1 intentionally does not use these fallbacks.
+     */
+    if (lane.laneId === "subminute") {
+      const location =
+        sourceStrategy
+          ?.engine26LocationContext ||
+        null;
+
+      const zone =
+        location?.zone ||
+        null;
+
+      const lo =
+        toNum(zone?.lo);
+
+      const hi =
+        toNum(zone?.hi);
+
+      if (lo != null && hi != null) {
+        return {
+          source:
+            "ENGINE26_SUBMINUTE_LOCATION_CONTEXT",
+          type:
+            zone?.zoneType ||
+            "ZONE",
+          id:
+            zone?.id ||
+            null,
+          lo:
+            Math.min(lo, hi),
+          hi:
+            Math.max(lo, hi),
+          relation:
+            location?.priceLocation ||
+            location?.locationRead ||
+            null,
+        };
+      }
     }
   }
 
   return pickDegreeLevel(
     degreeState,
-    normalizeDirection(degreeState?.direction)
+    normalizeDirection(
+      degreeState?.direction
+    )
   );
 }
 
@@ -389,12 +582,10 @@ function buildPlannerContext({
   lane,
   sourceStrategy,
 }) {
-  const plan =
-    sourceStrategy?.engine26PaperTradePlan || null;
-
   if (
-    !["subminute", "minute"].includes(lane.laneId) ||
-    !plan
+    !["subminute", "minute"].includes(
+      lane.laneId
+    )
   ) {
     return {
       available: false,
@@ -403,38 +594,77 @@ function buildPlannerContext({
     };
   }
 
+  /*
+   * Canonical single-direction proposed geometry.
+   * This is geometry availability only; it is not permission.
+   */
+  const geometry =
+    sourceStrategy
+      ?.engine26ProposedGeometry ||
+    null;
+
+  if (!geometry) {
+    return {
+      available: false,
+      status: "NOT_AVAILABLE",
+      ready: false,
+      geometrySource:
+        "engine26ProposedGeometry",
+    };
+  }
+
+  const status =
+    geometry.lifecycleStatus ||
+    geometry.status ||
+    null;
+
+  const ready =
+    geometry.active === true &&
+    upper(status) ===
+      "PROPOSED_GEOMETRY_AVAILABLE";
+
   return {
     available: true,
 
-    status:
-      plan.status || null,
+    status,
 
-    ready:
-      plan.active === true &&
-      plan.allowed === true &&
-      Array.isArray(plan.blockers) &&
-      plan.blockers.length === 0,
+    ready,
 
     geometrySource:
-      plan.geometrySource || null,
+      "engine26ProposedGeometry",
 
     entryPrice:
-      plan.entryPrice ?? null,
+      geometry.proposedEntryPrice ??
+      null,
 
     stopPrice:
-      plan.stopPrice ?? null,
+      geometry.proposedStopPrice ??
+      null,
 
     targetPrice:
-      plan.targetPrice ?? null,
+      Array.isArray(
+        geometry.proposedTargets
+      )
+        ? (
+            geometry
+              .proposedTargets[0]
+              ?.price ??
+            null
+          )
+        : null,
 
     blockers:
-      Array.isArray(plan.blockers)
-        ? plan.blockers
+      Array.isArray(
+        geometry.blockers
+      )
+        ? geometry.blockers
         : [],
 
     warnings:
-      Array.isArray(plan.warnings)
-        ? plan.warnings
+      Array.isArray(
+        geometry.warnings
+      )
+        ? geometry.warnings
         : [],
   };
 }
@@ -452,9 +682,32 @@ export function buildEngine27StrategyDecision({
     triggerBars,
   });
 
-  const direction = normalizeDirection(
-    degreeState?.direction
-  );
+  const engine26Candidate =
+    sourceStrategy
+      ?.engine26LocationCandidate ||
+    null;
+
+  /*
+   * Fast Strategy 1 lanes use the canonical Engine 26A child
+   * directional context when a candidate exists.
+   *
+   * A NEUTRAL candidate remains NEUTRAL; structural direction does
+   * not silently replace it.
+   */
+  const direction =
+    ["subminute", "minute"].includes(
+      lane?.laneId
+    ) &&
+    engine26Candidate
+      ? normalizeDirection(
+          engine26Candidate
+            ?.direction ??
+          engine26Candidate
+            ?.directionBias
+        )
+      : normalizeDirection(
+          degreeState?.direction
+        );
 
   const activeLevel = pickActiveLevel({
     lane,
@@ -472,10 +725,14 @@ export function buildEngine27StrategyDecision({
   const reaction = buildReactionContext({
     sourceStrategy,
     direction,
+    lane,
   });
 
   const participation =
-    buildParticipationContext(sourceStrategy);
+    buildParticipationContext(
+      sourceStrategy,
+      lane
+    );
 
   const permissionContext =
     buildPermissionContext({
