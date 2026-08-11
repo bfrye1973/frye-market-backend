@@ -32,9 +32,14 @@ import {
   buildTraderDecision,
 } from "./decision/buildTraderDecision.js";
 
-function barsForTimeframe(snapshot, timeframe) {
+function barsForTimeframe(
+  snapshot,
+  timeframe
+) {
   const posture =
-    snapshot?.marketMeter?.layers?.emaPosture ||
+    snapshot?.marketMeter
+      ?.layers
+      ?.emaPosture ||
     snapshot?.emaPosture ||
     {};
 
@@ -59,9 +64,12 @@ function barsForTimeframe(snapshot, timeframe) {
 
 function getDegreeStates(snapshot) {
   return (
-    snapshot?.strategies?.["intraday_scalp@10m"]
+    snapshot
+      ?.strategies
+      ?.["intraday_scalp@10m"]
       ?.engine22WaveStrategy
-      ?.degreeStates || {}
+      ?.degreeStates ||
+    {}
   );
 }
 
@@ -145,9 +153,28 @@ export function buildEngine27Strategies({
   }
 
   /*
-   * Existing Minute pipeline context.
+   * Minute Strategy 1 canonical pipeline context.
    *
-   * This remains unchanged and is passed only to the Minute lane.
+   * Direction / location:
+   *   engine26LocationCandidate
+   *
+   * Dual hypothetical geometry:
+   *   engine26GeometryPreviews
+   *
+   * Canonical Engine 3 reaction:
+   *   confluence.context.reaction.paperScalpReaction
+   *
+   * Canonical Engine 4 participation:
+   *   confluence.context.volume.engine4AuthorizedReactionParticipation
+   *
+   * Permission:
+   *   permission.paper
+   *
+   * Single-direction proposed geometry:
+   *   engine26ProposedGeometry
+   *
+   * engine26PaperTradePlan remains compatibility-only and is not a
+   * Strategy 1 direction authority.
    */
   const intradayPaperStrategy =
     snapshot?.strategies?.[
@@ -162,9 +189,23 @@ export function buildEngine27Strategies({
               .engine26LocationCandidate ||
             null,
 
+          engine26ReactionHandoff:
+            intradayPaperStrategy
+              .engine26ReactionHandoff ||
+            null,
+
+          engine26GeometryPreviews:
+            intradayPaperStrategy
+              .engine26GeometryPreviews ||
+            null,
+
           strategySymbol:
             intradayPaperStrategy
               .symbol ||
+            intradayPaperStrategy
+              ?.engine26LocationCandidate
+              ?.symbol ||
+            snapshot?.symbol ||
             null,
 
           engine3AuthorizedReaction:
@@ -177,8 +218,7 @@ export function buildEngine27Strategies({
 
           engine4AuthorizedParticipation:
             intradayPaperStrategy
-              .analytics
-              ?.engine5
+              .confluence
               ?.context
               ?.volume
               ?.engine4AuthorizedReactionParticipation ||
@@ -190,6 +230,7 @@ export function buildEngine27Strategies({
               ?.paper ||
             null,
 
+          // Compatibility-only visibility. Not direction authority.
           engine26Planner:
             intradayPaperStrategy
               .engine26PaperTradePlan ||
