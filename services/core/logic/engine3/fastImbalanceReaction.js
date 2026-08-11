@@ -215,8 +215,12 @@ function classifyQuality(state) {
     return "STRONG";
   }
 
-  if (["HELD_LEVEL", "ACCEPTING_VALUE"].includes(state)) {
+  if (["ACCEPTING_VALUE"].includes(state)) {
     return "GOOD";
+  }
+
+  if (state === "HELD_LEVEL") {
+    return "MIXED";
   }
 
   if (
@@ -243,6 +247,64 @@ function classifyQuality(state) {
   }
 
   return "WEAK";
+}
+
+function classifyHeldLevelCandleDirection(bars = []) {
+  const recent = Array.isArray(bars)
+    ? bars.filter(Boolean).slice(-3)
+    : [];
+
+  if (recent.length < 2) {
+    return "NEUTRAL";
+  }
+
+  let bearishScore = 0;
+  let bullishScore = 0;
+
+  for (let index = 1; index < recent.length; index += 1) {
+    const prev = normalizeBar(recent[index - 1]);
+    const current = normalizeBar(recent[index]);
+
+    if (
+      current.close != null &&
+      prev.close != null
+    ) {
+      if (current.close < prev.close) bearishScore += 1;
+      if (current.close > prev.close) bullishScore += 1;
+    }
+
+    if (
+      current.low != null &&
+      prev.low != null
+    ) {
+      if (current.low < prev.low) bearishScore += 1;
+      if (current.low > prev.low) bullishScore += 1;
+    }
+
+    if (
+      current.high != null &&
+      prev.high != null
+    ) {
+      if (current.high < prev.high) bearishScore += 1;
+      if (current.high > prev.high) bullishScore += 1;
+    }
+  }
+
+  if (
+    bearishScore >= 3 &&
+    bearishScore > bullishScore
+  ) {
+    return "SHORT";
+  }
+
+  if (
+    bullishScore >= 3 &&
+    bullishScore > bearishScore
+  ) {
+    return "LONG";
+  }
+
+  return "NEUTRAL";
 }
 
 function classifyDirection(state) {
@@ -727,8 +789,28 @@ export function buildFastImbalanceReaction({
   });
 
   const rawState = evaluation.state || "NO_SIGNAL";
-  const rawQuality = classifyQuality(rawState);
-  const rawDirection = classifyDirection(rawState);
+
+  const heldLevelDirection =
+    rawState === "HELD_LEVEL"
+      ? classifyHeldLevelCandleDirection(
+          candleCompletionTruth.completedBars
+        )
+      : null;
+
+  const rawQuality =
+    rawState === "HELD_LEVEL"
+      ? (
+          heldLevelDirection === "NEUTRAL"
+            ? "MIXED"
+            : "GOOD"
+        )
+      : classifyQuality(rawState);
+
+  const rawDirection =
+    rawState === "HELD_LEVEL"
+      ? heldLevelDirection
+      : classifyDirection(rawState);
+
   const rawConfirmed =
     classifyConfirmed(rawState) &&
     candleCompletionTruth.latestBarCompletionState === "COMPLETED";
