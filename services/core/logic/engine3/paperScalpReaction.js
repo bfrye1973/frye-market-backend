@@ -612,7 +612,7 @@ function resolveCanonicalConfirmation({
     validation5m?.conflictsWith1mDirection === true;
 
   const qualityApproved =
-    GOOD_QUALITY.has(quality);
+    QUALIFYING_QUALITY.has(quality);
 
   if (!authorizationValid) {
     blockers.push("ENGINE26_EVALUATION_NOT_AUTHORIZED");
