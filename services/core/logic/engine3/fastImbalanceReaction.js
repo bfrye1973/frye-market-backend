@@ -567,6 +567,7 @@ function buildWaveContext({ engine22WaveStrategy, state, direction }) {
 }
 
 function applyEngine26LocationContext({
+  engine26ReactionHandoff = null,
   engine26StructuralContext,
   state,
   quality,
@@ -576,6 +577,7 @@ function applyEngine26LocationContext({
   last,
 }) {
   const engine26LocationContext = buildEngine26LocationReactionContext({
+    engine26ReactionHandoff,
     engine26StructuralContext,
     reactionInput: {
       state,
@@ -610,6 +612,7 @@ function makeInactiveResult({
   lastCandle = null,
   priorCandle = null,
   engine22WaveStrategy = null,
+  engine26ReactionHandoff = null,
   engine26StructuralContext = null,
   candleCompletionTruth = null,
 }) {
@@ -618,6 +621,7 @@ function makeInactiveResult({
   const confirmed = false;
 
   const locationAdjusted = applyEngine26LocationContext({
+    engine26ReactionHandoff,
     engine26StructuralContext,
     state,
     quality,
@@ -701,6 +705,7 @@ export function buildFastImbalanceReaction({
   engine26FastWatch = null,
   confluence = null,
   engine22WaveStrategy = null,
+  engine26ReactionHandoff = null,
   engine26StructuralContext = null,
   evaluationTimeMs = null,
 } = {}) {
@@ -732,6 +737,7 @@ export function buildFastImbalanceReaction({
       lastCandle: last,
       priorCandle: prev,
       engine22WaveStrategy,
+      engine26ReactionHandoff,
       engine26StructuralContext,
       candleCompletionTruth,
       reasonCodes: manualZonesRead.reasonCodes,
@@ -753,6 +759,7 @@ export function buildFastImbalanceReaction({
       lastCandle: last,
       priorCandle: prev,
       engine22WaveStrategy,
+      engine26ReactionHandoff,
       engine26StructuralContext,
       candleCompletionTruth,
       reasonCodes: [
@@ -772,6 +779,7 @@ export function buildFastImbalanceReaction({
       lastCandle: last,
       priorCandle: prev,
       engine22WaveStrategy,
+      engine26ReactionHandoff,
       engine26StructuralContext,
       candleCompletionTruth,
       reasonCodes: [
@@ -810,6 +818,7 @@ export function buildFastImbalanceReaction({
     candleCompletionTruth.latestBarCompletionState === "COMPLETED";
 
   const locationAdjusted = applyEngine26LocationContext({
+    engine26ReactionHandoff,
     engine26StructuralContext,
     state: rawState,
     quality: rawQuality,
@@ -936,6 +945,7 @@ export function attachFastImbalanceReactionToConfluence({
   engine22WaveStrategy = null,
   bars10m = [],
   engine26FastWatch = null,
+  engine26ReactionHandoff = null,
   engine26StructuralContext = null,
   evaluationTimeMs = null,
 }) {
@@ -952,6 +962,7 @@ export function attachFastImbalanceReactionToConfluence({
     engine26FastWatch,
     confluence: patchedConfluence,
     engine22WaveStrategy,
+    engine26ReactionHandoff,
     engine26StructuralContext,
     evaluationTimeMs,
   });
