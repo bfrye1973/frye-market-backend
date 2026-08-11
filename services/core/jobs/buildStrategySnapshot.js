@@ -8140,6 +8140,39 @@ const zoneContext = buildZoneContext(
     String(symbol || "").toUpperCase() === "ES" &&
     s.strategyId === "intraday_scalp@10m";
 
+const previousEngine3CanonicalDirection =
+  isEsIntradayScalp
+    ? previousSnapshot
+        ?.strategies
+        ?.[s.strategyId]
+        ?.confluence
+        ?.context
+        ?.reaction
+        ?.paperScalpReaction
+        ?.direction ||
+      "NEUTRAL"
+    : null;
+
+const strategy1TenMinuteCompletedClose =
+  isEsIntradayScalp
+    ? marketMeter
+        ?.layers
+        ?.emaPosture
+        ?.tenMinute
+        ?.close ??
+      null
+    : null;
+
+const strategy1TenMinuteEma10 =
+  isEsIntradayScalp
+    ? marketMeter
+        ?.layers
+        ?.emaPosture
+        ?.tenMinute
+        ?.ema10 ??
+      null
+    : null;
+
   if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
     // Engine 22 Lifecycle source-of-truth handoff:
     // Build the FULL Engine 2 state here and pass that same object into
@@ -8630,13 +8663,22 @@ if (isEsIntradayScalp) {
     engine3ReactionValidation5m,
   };
   
-  attachPaperScalpReactionToConfluence({
-    patchedConfluence,
-    engine22WaveStrategy,
-    engine26ReactionHandoff,
-    engine26StructuralContext,
-    paperShortResearchEnabled: isEsIntradayScalp,
-  });
+attachPaperScalpReactionToConfluence({
+  patchedConfluence,
+  engine22WaveStrategy,
+  engine26ReactionHandoff,
+  engine26StructuralContext,
+  paperShortResearchEnabled: isEsIntradayScalp,
+
+  previousCanonicalDirection:
+    previousEngine3CanonicalDirection,
+
+  tenMinuteCompletedClose:
+    strategy1TenMinuteCompletedClose,
+
+  tenMinuteEma10:
+    strategy1TenMinuteEma10,
+});
 
   const engine3Strategy1Readiness = buildStrategy1Readiness({
     engine26LocationCandidate,
@@ -9164,6 +9206,15 @@ if (
        engine26ReactionHandoff,
        engine26StructuralContext,
        paperShortResearchEnabled: isEsIntradayScalp,
+
+       previousCanonicalDirection:
+         previousEngine3CanonicalDirection,
+
+       tenMinuteCompletedClose:
+         strategy1TenMinuteCompletedClose,
+
+       tenMinuteEma10:
+         strategy1TenMinuteEma10,
      });
      attachEngine4CurrentScalpParticipationToConfluence({
        patchedConfluence,
@@ -9301,8 +9352,16 @@ if (
       engine22WaveStrategy,
       engine26ReactionHandoff,
       engine26StructuralContext,
-      paperShortResearchEnabled:
-        isEsIntradayScalp,
+      paperShortResearchEnabled: isEsIntradayScalp,
+
+      previousCanonicalDirection:
+        previousEngine3CanonicalDirection,
+
+      tenMinuteCompletedClose:
+        strategy1TenMinuteCompletedClose,
+
+      tenMinuteEma10:
+        strategy1TenMinuteEma10,
     });
 
     attachEngine4CurrentScalpParticipationToConfluence({
