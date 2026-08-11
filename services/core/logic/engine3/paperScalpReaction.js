@@ -1394,6 +1394,9 @@ function resolveStrategy1CanonicalReaction({
   validation5m = null,
   productionReaction = null,
   engine26ReactionHandoff = null,
+  previousCanonicalDirection = null,
+  tenMinuteCompletedClose = null,
+  tenMinuteEma10 = null,
 } = {}) {
   const observedState = safeUpper(
     observation1m?.state,
@@ -1402,6 +1405,11 @@ function resolveStrategy1CanonicalReaction({
 
   const observedDirection = safeUpper(
     observation1m?.direction,
+    "NEUTRAL"
+  );
+
+  const previousDirection = safeUpper(
+    previousCanonicalDirection,
     "NEUTRAL"
   );
 
@@ -1424,20 +1432,15 @@ function resolveStrategy1CanonicalReaction({
     observation1m?.currentCandleStatus === "COMPLETED" ||
     observation1m?.candleState === "COMPLETED";
 
-  const longState =
-    STRATEGY1_CANONICAL_LONG_STATES.has(observedState);
-
-  const shortState =
-    STRATEGY1_CANONICAL_SHORT_STATES.has(observedState);
-
-  const directionalStateAligned =
-    (observedDirection === "LONG" && longState) ||
-    (observedDirection === "SHORT" && shortState);
-
-  const neutralState =
-    observedDirection === "NEUTRAL" &&
-    !longState &&
-    !shortState;
+  /*
+   * Strategy 1 direction is candle-owned.
+   *
+   * The 1m observation may still carry a zone-relative state such as
+   * CHOP_INSIDE_VALUE for diagnostics, but that state is not allowed to
+   * suppress a clear candle-derived LONG or SHORT direction.
+   */
+  const observedDirectionUsable =
+    ["LONG", "SHORT", "NEUTRAL"].includes(observedDirection);
 
   const observationUsable =
     observationPresent &&
@@ -1445,7 +1448,30 @@ function resolveStrategy1CanonicalReaction({
     observationFresh &&
     candleCompleted &&
     identityAligned &&
-    (directionalStateAligned || neutralState);
+    observedDirectionUsable;
+
+  const completedClose = toNum(tenMinuteCompletedClose);
+  const ema10 = toNum(tenMinuteEma10);
+  const ema10ResetDataAvailable =
+    completedClose != null &&
+    ema10 != null;
+
+  const previousDirectional =
+    previousDirection === "LONG" ||
+    previousDirection === "SHORT";
+
+  const ema10ResetTriggered =
+    previousDirection === "SHORT"
+      ? (
+          ema10ResetDataAvailable &&
+          completedClose > ema10
+        )
+      : previousDirection === "LONG"
+      ? (
+          ema10ResetDataAvailable &&
+          completedClose < ema10
+        )
+      : false;
 
   let state = "NO_SIGNAL";
   let direction = "NEUTRAL";
@@ -1453,12 +1479,46 @@ function resolveStrategy1CanonicalReaction({
   let reactionTimeframe = null;
   let resolutionStatus = "NO_USABLE_1M_CANONICAL_EVIDENCE";
   let resolutionReason = "ONE_MINUTE_EVIDENCE_UNUSABLE";
+  let directionPersistenceActive = false;
 
-  if (observationUsable) {
+  /*
+   * Bidirectional EMA10 persistence rule.
+   *
+   * SHORT remains SHORT until a completed 10m close is ABOVE EMA10.
+   * LONG remains LONG until a completed 10m close is BELOW EMA10.
+   *
+   * EMA10 never creates LONG or SHORT. It only resets an already
+   * established direction back to NEUTRAL.
+   */
+  if (previousDirectional && !ema10ResetTriggered) {
+    state = observationUsable
+      ? observedState
+      : productionReaction?.state || "NO_SIGNAL";
+
+    direction = previousDirection;
+    sourceTimeframe = "1m";
+    reactionTimeframe = "1m";
+    directionPersistenceActive = true;
+    resolutionStatus = `CANONICAL_${previousDirection}_PERSISTED`;
+    resolutionReason = ema10ResetDataAvailable
+      ? `PREVIOUS_${previousDirection}_HELD_UNTIL_10M_EMA10_RESET`
+      : `PREVIOUS_${previousDirection}_HELD_EMA10_RESET_DATA_UNAVAILABLE`;
+  } else if (previousDirectional && ema10ResetTriggered) {
+    state = observationUsable
+      ? observedState
+      : "NO_SIGNAL";
+
+    direction = "NEUTRAL";
+    sourceTimeframe = "10m";
+    reactionTimeframe = "10m";
+    resolutionStatus = "CANONICAL_DIRECTION_RESET_AT_10M_EMA10";
+    resolutionReason =
+      previousDirection === "SHORT"
+        ? "COMPLETED_10M_CLOSE_ABOVE_EMA10_RESET_SHORT"
+        : "COMPLETED_10M_CLOSE_BELOW_EMA10_RESET_LONG";
+  } else if (observationUsable) {
     state = observedState;
-    direction = directionalStateAligned
-      ? observedDirection
-      : "NEUTRAL";
+    direction = observedDirection;
     sourceTimeframe = "1m";
     reactionTimeframe = "1m";
     resolutionStatus =
@@ -1468,7 +1528,7 @@ function resolveStrategy1CanonicalReaction({
     resolutionReason =
       direction === "NEUTRAL"
         ? "FRESH_COMPLETED_1M_NEUTRAL_REACTION"
-        : "FRESH_COMPLETED_1M_DIRECTIONAL_REACTION";
+        : "FRESH_COMPLETED_1M_CANDLE_DIRECTION";
   } else if (!observationPresent) {
     resolutionReason = "ONE_MINUTE_OBSERVATION_MISSING";
   } else if (!identityAligned) {
@@ -1479,8 +1539,8 @@ function resolveStrategy1CanonicalReaction({
     resolutionReason = "ONE_MINUTE_CANDLE_NOT_COMPLETED";
   } else if (!observationActive) {
     resolutionReason = "ONE_MINUTE_OBSERVATION_INACTIVE";
-  } else if (!directionalStateAligned && !neutralState) {
-    resolutionReason = "ONE_MINUTE_STATE_DIRECTION_NOT_USABLE";
+  } else if (!observedDirectionUsable) {
+    resolutionReason = "ONE_MINUTE_DIRECTION_NOT_USABLE";
   }
 
   return {
@@ -1494,6 +1554,15 @@ function resolveStrategy1CanonicalReaction({
     identityAligned,
     observedState,
     observedDirection,
+    previousCanonicalDirection:
+      previousDirectional
+        ? previousDirection
+        : "NEUTRAL",
+    directionPersistenceActive,
+    tenMinuteCompletedClose: completedClose,
+    tenMinuteEma10: ema10,
+    ema10ResetDataAvailable,
+    ema10ResetTriggered,
     validationState:
       validation5m?.validationState || null,
     validationTimeframe:
@@ -1511,6 +1580,9 @@ export function attachPaperScalpReactionToConfluence({
   engine26ReactionHandoff = null,
   engine26StructuralContext = null,
   paperShortResearchEnabled = false,
+  previousCanonicalDirection = null,
+  tenMinuteCompletedClose = null,
+  tenMinuteEma10 = null,
 }) {
   const currentLevelAction =
     patchedConfluence
@@ -1562,6 +1634,9 @@ export function attachPaperScalpReactionToConfluence({
       validation5m,
       productionReaction: broaderReaction10m,
       engine26ReactionHandoff,
+      previousCanonicalDirection,
+      tenMinuteCompletedClose,
+      tenMinuteEma10,
     });
 
   const paperScalpReaction = {
@@ -1590,6 +1665,19 @@ export function attachPaperScalpReactionToConfluence({
       canonicalResolution.observationUsable,
     canonicalIdentityAligned:
       canonicalResolution.identityAligned,
+
+    previousCanonicalDirection:
+      canonicalResolution.previousCanonicalDirection,
+    directionPersistenceActive:
+      canonicalResolution.directionPersistenceActive,
+    tenMinuteCompletedClose:
+      canonicalResolution.tenMinuteCompletedClose,
+    tenMinuteEma10:
+      canonicalResolution.tenMinuteEma10,
+    ema10ResetDataAvailable:
+      canonicalResolution.ema10ResetDataAvailable,
+    ema10ResetTriggered:
+      canonicalResolution.ema10ResetTriggered,
 
     validationTimeframe:
       canonicalResolution.validationTimeframe,
