@@ -9198,6 +9198,14 @@ if (
        engine22WaveStrategy,
        engine26ReactionHandoff,
        engine26StructuralContext,
+       previousCanonicalDirection:
+         previousEngine3CanonicalDirection,
+
+       tenMinuteCompletedClose:
+         strategy1TenMinuteCompletedClose,
+
+       tenMinuteEma10:
+         strategy1TenMinuteEma10,
        bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
        evaluationTimeMs,
      });
@@ -9344,6 +9352,14 @@ if (
       engine22WaveStrategy,
       engine26ReactionHandoff,
       engine26StructuralContext,
+      previousCanonicalDirection:
+        previousEngine3CanonicalDirection,
+
+      tenMinuteCompletedClose:
+        strategy1TenMinuteCompletedClose,
+
+      tenMinuteEma10:
+        strategy1TenMinuteEma10,
       bars10m:
         marketMeter?.layers?.emaPosture
           ?.tenMinute?.bars || [],
