@@ -241,6 +241,19 @@ function resolveAnchorSource(
     {
       source:
         degreeState
+          ?.activeFibModel
+          ?.anchorModel,
+
+      sourcePath:
+        "degreeState.activeFibModel.anchorModel",
+
+      sourceType:
+        "ACTIVE_FIB_MODEL_ANCHOR_MODEL",
+    },
+
+    {
+      source:
+        degreeState
           ?.targetModel
           ?.anchorModel,
 
@@ -430,8 +443,12 @@ function buildAnchorContract({
   let suppliedWaveLength = null;
 
   if (
-    sourceType ===
-    "TARGET_MODEL_ANCHOR_MODEL"
+    [
+      "ACTIVE_FIB_MODEL_ANCHOR_MODEL",
+      "TARGET_MODEL_ANCHOR_MODEL",
+    ].includes(
+      sourceType
+    )
   ) {
     waveStart =
       toPrice(
@@ -542,14 +559,22 @@ function buildAnchorContract({
       null,
 
     startKey:
-      sourceType ===
-      "TARGET_MODEL_ANCHOR_MODEL"
+      [
+        "ACTIVE_FIB_MODEL_ANCHOR_MODEL",
+        "TARGET_MODEL_ANCHOR_MODEL",
+      ].includes(
+        sourceType
+      )
         ? "impulseStart"
         : "waveStart",
 
     endKey:
-      sourceType ===
-      "TARGET_MODEL_ANCHOR_MODEL"
+      [
+        "ACTIVE_FIB_MODEL_ANCHOR_MODEL",
+        "TARGET_MODEL_ANCHOR_MODEL",
+      ].includes(
+        sourceType
+      )
         ? "impulseEnd"
         : "waveEnd",
 
@@ -559,8 +584,12 @@ function buildAnchorContract({
     waveLengthKey:
       suppliedWaveLength !== null
         ? (
-            sourceType ===
-            "TARGET_MODEL_ANCHOR_MODEL"
+            [
+              "ACTIVE_FIB_MODEL_ANCHOR_MODEL",
+              "TARGET_MODEL_ANCHOR_MODEL",
+            ].includes(
+              sourceType
+            )
               ? "range"
               : "waveLength"
           )
@@ -1012,6 +1041,10 @@ function resolveCurrentPrice({
   degreeState,
 }) {
   const candidates = [
+    degreeState
+      ?.activeFibModel
+      ?.currentPrice,
+
     engine27WaveIntelligence
       ?.currentPrice,
 
@@ -1290,6 +1323,312 @@ function resolveProjectionDirection({
   };
 }
 
+function buildCanonicalRetracementLevels({
+  degreeKey,
+  currentWave,
+  activeFibModel,
+  currentPrice,
+}) {
+  const levels = {};
+
+  const modelDirection =
+    normalizeDirection(
+      activeFibModel?.direction
+    );
+
+  for (
+    const [
+      label,
+      ratio,
+    ]
+    of Object.entries(
+      RETRACEMENT_RATIOS
+    )
+  ) {
+    const price =
+      toPrice(
+        activeFibModel
+          ?.levels
+          ?.[label] ??
+        activeFibModel?.[label]
+      );
+
+    if (price === null) {
+      continue;
+    }
+
+    levels[label] =
+      buildFibLevel({
+        degreeKey,
+        currentWave,
+        label,
+        ratio,
+        price,
+        currentPrice,
+        direction:
+          modelDirection,
+        ladderType:
+          "RETRACEMENT",
+      });
+  }
+
+  return levels;
+}
+
+function buildCanonicalActiveFibModelResult({
+  degreeKey,
+  waveIntelligence,
+  degreeState,
+  currentPrice,
+}) {
+  const model =
+    degreeState?.activeFibModel ||
+    null;
+
+  if (
+    !isObject(model) ||
+    model.active !== true ||
+    !isObject(model.levels)
+  ) {
+    return null;
+  }
+
+  const currentWave =
+    normalizeWave(
+      model.activeWave ??
+      waveIntelligence
+        ?.currentWave
+    );
+
+  const modelType =
+    String(
+      model.modelType ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+  if (
+    modelType !==
+    "RETRACEMENT_MAP"
+  ) {
+    return null;
+  }
+
+  const anchorModel =
+    isObject(
+      model.anchorModel
+    )
+      ? model.anchorModel
+      : {};
+
+  const anchorHigh =
+    toPrice(
+      anchorModel.anchorHigh ??
+      model.anchorHigh
+    );
+
+  const anchorLow =
+    toPrice(
+      anchorModel.anchorLow ??
+      model.anchorLow
+    );
+
+  const modelDirection =
+    normalizeDirection(
+      model.direction
+    );
+
+  const waveLength =
+    (
+      anchorHigh !== null &&
+      anchorLow !== null
+    )
+      ? Math.abs(
+          anchorHigh -
+          anchorLow
+        )
+      : null;
+
+  const anchors = {
+    waveStart:
+      anchorHigh !== null
+        ? roundToTick(
+            anchorHigh
+          )
+        : null,
+
+    waveEnd:
+      anchorLow !== null
+        ? roundToTick(
+            anchorLow
+          )
+        : null,
+
+    projectionBase: null,
+
+    waveLength:
+      waveLength !== null
+        ? roundToTick(
+            waveLength
+          )
+        : null,
+
+    direction:
+      modelDirection,
+
+    source:
+      "degreeState.activeFibModel",
+
+    timestamp:
+      model.snapshotTime ??
+      model.updatedAt ??
+      model.timestamp ??
+      null,
+
+    startKey:
+      "anchorHigh",
+
+    endKey:
+      "anchorLow",
+
+    projectionBaseKey:
+      null,
+
+    waveLengthKey:
+      waveLength !== null
+        ? "calculatedAnchorRange"
+        : null,
+  };
+
+  const retracements =
+    buildCanonicalRetracementLevels({
+      degreeKey,
+      currentWave,
+      activeFibModel:
+        model,
+      currentPrice,
+    });
+
+  const objective =
+    buildCurrentObjective({
+      currentPrice,
+      ladder:
+        retracements,
+      ladderType:
+        "RETRACEMENT",
+    });
+
+  return {
+    degree:
+      degreeKey,
+
+    currentWave,
+
+    currentPrice,
+
+    anchors,
+
+    retracements,
+
+    /*
+     * Engine 22 activeFibModel is canonical for the current W4
+     * retracement map. Engine 27 must not reconstruct or expose an
+     * old W3 extension ladder as the active objective.
+     */
+    extensions: {},
+
+    activeLadder:
+      "RETRACEMENT",
+
+    ...objective,
+
+    expectedCorrection:
+      expectedCorrectionFor({
+        degreeKey,
+        currentWave,
+      }),
+
+    activeFibModel: {
+      active: true,
+
+      modelKey:
+        model.modelKey ??
+        null,
+
+      modelType:
+        model.modelType ??
+        null,
+
+      activeWave:
+        model.activeWave ??
+        null,
+
+      direction:
+        model.direction ??
+        null,
+
+      nearestLevel:
+        model.nearestLevel ??
+        null,
+
+      zoneState:
+        model.zoneState ??
+        null,
+
+      anchorHigh:
+        anchorHigh !== null
+          ? roundToTick(
+              anchorHigh
+            )
+          : null,
+
+      anchorLow:
+        anchorLow !== null
+          ? roundToTick(
+              anchorLow
+            )
+          : null,
+    },
+
+    validation: {
+      source:
+        "degreeState.activeFibModel.levels",
+
+      available:
+        true,
+
+      matches:
+        true,
+
+      differences: [],
+    },
+
+    reasonCodes:
+      unique([
+        "ENGINE27_FIB_ACTIVE_FIB_MODEL_CONSUMED",
+        "ENGINE27_FIB_ENGINE22_CANONICAL_RETRACEMENT_MAP",
+        Object.keys(
+          retracements
+        ).length > 0
+          ? "ENGINE27_FIB_READY"
+          : "ENGINE27_FIB_UNKNOWN",
+        objective.nextFib !==
+          "UNKNOWN"
+          ? "ENGINE27_FIB_CURRENT_TARGET"
+          : null,
+        (
+          objective.nextFib !==
+            "UNKNOWN" &&
+          objective.nextFib !==
+            "COMPLETE"
+        )
+          ? "ENGINE27_FIB_NEXT_OBJECTIVE"
+          : null,
+      ]),
+  };
+}
+
 function unknownDegreeResult({
   degreeKey,
   currentWave = "UNKNOWN",
@@ -1382,6 +1721,20 @@ function buildDegreeFibIntelligence({
       waveIntelligence,
       degreeState,
     });
+
+  const canonicalActiveFibModel =
+    buildCanonicalActiveFibModelResult({
+      degreeKey,
+      waveIntelligence,
+      degreeState,
+      currentPrice,
+    });
+
+  if (
+    canonicalActiveFibModel
+  ) {
+    return canonicalActiveFibModel;
+  }
 
   const {
     source,
@@ -1515,6 +1868,11 @@ function buildDegreeFibIntelligence({
         anchorsComplete
           ? "ENGINE27_FIB_ANCHORS_COMPLETE"
           : "ENGINE27_FIB_UNKNOWN",
+
+        sourceType ===
+        "ACTIVE_FIB_MODEL_ANCHOR_MODEL"
+          ? "ENGINE27_FIB_ACTIVE_FIB_MODEL_ANCHOR_CONSUMED"
+          : null,
 
         sourceType ===
         "TARGET_MODEL_ANCHOR_MODEL"
