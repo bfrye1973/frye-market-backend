@@ -1336,6 +1336,175 @@ export function buildPaperScalpReaction({
   });
 }
 
+
+const STRATEGY1_CANONICAL_IDENTITY_FIELDS = [
+  "symbol",
+  "laneId",
+  "strategyId",
+  "candidateId",
+  "zoneId",
+  "candidateIdentityVersion",
+];
+
+const STRATEGY1_CANONICAL_LONG_STATES = new Set([
+  "HELD_LEVEL",
+  "RECLAIMED_LEVEL",
+  "WICK_BELOW_AND_RECLAIM",
+  "DIP_BOUGHT_FAST",
+  "SELLERS_TRAPPED",
+  "ACCEPTING_VALUE",
+  "BREAKOUT_HOLDING",
+]);
+
+const STRATEGY1_CANONICAL_SHORT_STATES = new Set([
+  "LOST_LEVEL",
+  "FAILED_RECLAIM",
+  "REJECTING_VALUE",
+  "BREAKOUT_FAILING",
+  "FAILED_ACCEPTANCE_SHORT",
+  "LOST_SHORT_TRIGGER_LEVEL",
+]);
+
+function strategy1IdentityAligned(observation1m, engine26ReactionHandoff) {
+  if (
+    !observation1m ||
+    typeof observation1m !== "object" ||
+    !engine26ReactionHandoff ||
+    typeof engine26ReactionHandoff !== "object"
+  ) {
+    return false;
+  }
+
+  return STRATEGY1_CANONICAL_IDENTITY_FIELDS.every((field) => {
+    const observed = observation1m?.[field];
+    const expected = engine26ReactionHandoff?.[field];
+
+    return (
+      observed != null &&
+      observed !== "" &&
+      expected != null &&
+      expected !== "" &&
+      observed === expected
+    );
+  });
+}
+
+function resolveStrategy1CanonicalReaction({
+  observation1m = null,
+  validation5m = null,
+  productionReaction = null,
+  engine26ReactionHandoff = null,
+} = {}) {
+  const observedState = safeUpper(
+    observation1m?.state,
+    "NO_SIGNAL"
+  );
+
+  const observedDirection = safeUpper(
+    observation1m?.direction,
+    "NEUTRAL"
+  );
+
+  const identityAligned = strategy1IdentityAligned(
+    observation1m,
+    engine26ReactionHandoff
+  );
+
+  const observationPresent =
+    observation1m != null &&
+    typeof observation1m === "object";
+
+  const observationActive =
+    observation1m?.active === true;
+
+  const observationFresh =
+    observation1m?.stale === false;
+
+  const candleCompleted =
+    observation1m?.currentCandleStatus === "COMPLETED" ||
+    observation1m?.candleState === "COMPLETED";
+
+  const longState =
+    STRATEGY1_CANONICAL_LONG_STATES.has(observedState);
+
+  const shortState =
+    STRATEGY1_CANONICAL_SHORT_STATES.has(observedState);
+
+  const directionalStateAligned =
+    (observedDirection === "LONG" && longState) ||
+    (observedDirection === "SHORT" && shortState);
+
+  const neutralState =
+    observedDirection === "NEUTRAL" &&
+    !longState &&
+    !shortState;
+
+  const observationUsable =
+    observationPresent &&
+    observationActive &&
+    observationFresh &&
+    candleCompleted &&
+    identityAligned &&
+    (directionalStateAligned || neutralState);
+
+  let state = "NO_SIGNAL";
+  let direction = "NEUTRAL";
+  let sourceTimeframe = null;
+  let reactionTimeframe = null;
+  let resolutionStatus = "NO_USABLE_1M_CANONICAL_EVIDENCE";
+  let resolutionReason = "ONE_MINUTE_EVIDENCE_UNUSABLE";
+
+  if (observationUsable) {
+    state = observedState;
+    direction = directionalStateAligned
+      ? observedDirection
+      : "NEUTRAL";
+    sourceTimeframe = "1m";
+    reactionTimeframe = "1m";
+    resolutionStatus =
+      direction === "NEUTRAL"
+        ? "CANONICAL_1M_NEUTRAL"
+        : "CANONICAL_1M_DIRECTIONAL";
+    resolutionReason =
+      direction === "NEUTRAL"
+        ? "FRESH_COMPLETED_1M_NEUTRAL_REACTION"
+        : "FRESH_COMPLETED_1M_DIRECTIONAL_REACTION";
+  } else if (!observationPresent) {
+    resolutionReason = "ONE_MINUTE_OBSERVATION_MISSING";
+  } else if (!identityAligned) {
+    resolutionReason = "ONE_MINUTE_IDENTITY_MISMATCH";
+  } else if (observation1m?.stale === true) {
+    resolutionReason = "ONE_MINUTE_OBSERVATION_STALE";
+  } else if (!candleCompleted) {
+    resolutionReason = "ONE_MINUTE_CANDLE_NOT_COMPLETED";
+  } else if (!observationActive) {
+    resolutionReason = "ONE_MINUTE_OBSERVATION_INACTIVE";
+  } else if (!directionalStateAligned && !neutralState) {
+    resolutionReason = "ONE_MINUTE_STATE_DIRECTION_NOT_USABLE";
+  }
+
+  return {
+    state,
+    direction,
+    sourceTimeframe,
+    reactionTimeframe,
+    resolutionStatus,
+    resolutionReason,
+    observationUsable,
+    identityAligned,
+    observedState,
+    observedDirection,
+    validationState:
+      validation5m?.validationState || null,
+    validationTimeframe:
+      validation5m?.sourceTimeframe || null,
+    broaderContextDirection:
+      productionReaction?.direction || null,
+    broaderContextState:
+      productionReaction?.state || null,
+  };
+}
+
 export function attachPaperScalpReactionToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
@@ -1358,11 +1527,26 @@ export function attachPaperScalpReactionToConfluence({
     null;
 
   const observation1m =
-    patchedConfluence?.context?.reaction?.engine3ReactionObservation1m || null;
-  const validation5m =
-    patchedConfluence?.context?.reaction?.engine3ReactionValidation5m || null;
+    patchedConfluence
+      ?.context
+      ?.reaction
+      ?.engine3ReactionObservation1m ||
+    null;
 
-  const productionReaction =
+  const validation5m =
+    patchedConfluence
+      ?.context
+      ?.reaction
+      ?.engine3ReactionValidation5m ||
+    null;
+
+  /*
+   * Preserve the complete pre-Phase-3E production reaction as the
+   * broader 10m context. This object remains diagnostic/contextual
+   * and must not own the canonical Strategy 1 direction when valid
+   * 1m evidence is available.
+   */
+  const broaderReaction10m =
     buildPaperScalpReaction({
       currentLevelAction,
       fastImbalanceReaction,
@@ -1372,34 +1556,98 @@ export function attachPaperScalpReactionToConfluence({
       paperShortResearchEnabled,
     });
 
+  const canonicalResolution =
+    resolveStrategy1CanonicalReaction({
+      observation1m,
+      validation5m,
+      productionReaction: broaderReaction10m,
+      engine26ReactionHandoff,
+    });
+
   const paperScalpReaction = {
-    ...productionReaction,
-    reactionTimeframe: observation1m?.sourceTimeframe || null,
-    sourceTimeframe: observation1m?.sourceTimeframe || null,
-    validationTimeframe: validation5m?.sourceTimeframe || null,
-    supportingBarTime: observation1m?.supportingBarTime ?? null,
-    evaluationTimeMs: observation1m?.evaluationTimeMs ?? observation1m?.observedAt ?? null,
-    currentCandleStatus: observation1m?.currentCandleStatus || null,
-    priorCandleStatus: observation1m?.priorCandleStatus || null,
-    currentCandle: observation1m?.currentCandle || null,
-    priorCandle: observation1m?.priorCandle || null,
-    lastCandle: observation1m?.currentCandle || productionReaction?.lastCandle || null,
+    ...broaderReaction10m,
+
+    /*
+     * Phase 3E canonical Strategy 1 truth.
+     *
+     * 1m owns immediate canonical state/direction when the evidence
+     * is fresh, completed, usable, and identity-aligned.
+     * 5m remains validation only.
+     * 10m remains broader context only.
+     */
+    state: canonicalResolution.state,
+    direction: canonicalResolution.direction,
+    reactionTimeframe:
+      canonicalResolution.reactionTimeframe,
+    sourceTimeframe:
+      canonicalResolution.sourceTimeframe,
+
+    canonicalResolutionStatus:
+      canonicalResolution.resolutionStatus,
+    canonicalResolutionReason:
+      canonicalResolution.resolutionReason,
+    canonicalObservationUsable:
+      canonicalResolution.observationUsable,
+    canonicalIdentityAligned:
+      canonicalResolution.identityAligned,
+
+    validationTimeframe:
+      canonicalResolution.validationTimeframe,
+
+    /*
+     * Preserve the complete original 10m production reaction without
+     * discarding any existing diagnostic fields.
+     */
+    broaderReaction10m,
+
+    supportingBarTime:
+      observation1m?.supportingBarTime ?? null,
+
+    evaluationTimeMs:
+      observation1m?.evaluationTimeMs ??
+      observation1m?.observedAt ??
+      null,
+
+    currentCandleStatus:
+      observation1m?.currentCandleStatus || null,
+
+    priorCandleStatus:
+      observation1m?.priorCandleStatus || null,
+
+    currentCandle:
+      observation1m?.currentCandle || null,
+
+    priorCandle:
+      observation1m?.priorCandle || null,
+
+    lastCandle:
+      observation1m?.currentCandle ||
+      broaderReaction10m?.lastCandle ||
+      null,
+
     candleClosed:
       observation1m?.currentCandleStatus === "COMPLETED"
         ? true
         : observation1m?.currentCandleStatus === "FORMING"
         ? false
         : null,
+
     priorCandleCompleted:
       observation1m?.priorCandleStatus === "COMPLETED"
         ? true
         : observation1m?.priorCandleStatus === "FORMING"
         ? false
         : null,
+
     candleSourceFresh:
-      observation1m?.stale === false && validation5m?.stale === false,
-    reactionObservation1m: observation1m,
-    reactionValidation5m: validation5m,
+      observation1m?.stale === false &&
+      validation5m?.stale === false,
+
+    reactionObservation1m:
+      observation1m,
+
+    reactionValidation5m:
+      validation5m,
   };
 
   patchedConfluence.context =
