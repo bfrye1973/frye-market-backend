@@ -566,6 +566,43 @@ function classifyQuality(state) {
   return "WEAK";
 }
 
+
+function classifyStrategy1CandleDirection(bars = []) {
+  const recent = Array.isArray(bars)
+    ? bars.filter(Boolean).slice(-3)
+    : [];
+
+  if (recent.length < 2) return "NEUTRAL";
+
+  let bearishScore = 0;
+  let bullishScore = 0;
+
+  for (let i = 1; i < recent.length; i += 1) {
+    const prev = normalizeBar(recent[i - 1]);
+    const current = normalizeBar(recent[i]);
+
+    if (current.close != null && prev.close != null) {
+      if (current.close < prev.close) bearishScore += 1;
+      if (current.close > prev.close) bullishScore += 1;
+    }
+
+    if (current.low != null && prev.low != null) {
+      if (current.low < prev.low) bearishScore += 1;
+      if (current.low > prev.low) bullishScore += 1;
+    }
+
+    if (current.high != null && prev.high != null) {
+      if (current.high < prev.high) bearishScore += 1;
+      if (current.high > prev.high) bullishScore += 1;
+    }
+  }
+
+  if (bearishScore >= 3 && bearishScore > bullishScore) return "SHORT";
+  if (bullishScore >= 3 && bullishScore > bearishScore) return "LONG";
+
+  return "NEUTRAL";
+}
+
 function classifyDirection(state) {
   if (
     [
@@ -945,6 +982,7 @@ export function buildCurrentLevelAction({
   engine1Context = null,
   confirmationContext = null,
   evaluationTimeMs = null,
+  strategy1CandleDirection = false,
 } = {}) {
   const normalized10m = normalizeBars(bars10m);
   const normalized30m = normalizeBars(bars30m);
@@ -1066,13 +1104,29 @@ export function buildCurrentLevelAction({
       });
 
   const state = evaluation.state || "NO_SIGNAL";
-  const quality = classifyQuality(state);
-  const direction = classifyDirection(state);
   const completionTruth = deriveCandleCompletionTruth({
     bars: normalized10m,
     timeframe: tf,
     evaluationTimeMs,
   });
+
+  const strategy1Direction =
+    strategy1CandleDirection === true
+      ? classifyStrategy1CandleDirection(completionTruth.completedBars)
+      : null;
+
+  const direction =
+    strategy1CandleDirection === true
+      ? strategy1Direction
+      : classifyDirection(state);
+
+  const quality =
+    strategy1CandleDirection === true &&
+    ["HELD_LEVEL", "CHOP_INSIDE_VALUE"].includes(state)
+      ? direction === "NEUTRAL"
+        ? "MIXED"
+        : "GOOD"
+      : classifyQuality(state);
   const candleCompletionState = completionTruth.latestBarCompletionState;
   const candleClosed =
     candleCompletionState === "COMPLETED"
@@ -1106,6 +1160,12 @@ export function buildCurrentLevelAction({
     state,
     quality,
     direction,
+    strategy1CandleDirection:
+      strategy1CandleDirection === true,
+    candleDirection:
+      strategy1CandleDirection === true
+        ? strategy1Direction
+        : null,
     confirmed,
     candleClosed,
     candleCompletionState,
@@ -1136,6 +1196,9 @@ export function buildCurrentLevelAction({
 
     reasonCodes: uniqueReasonCodes([
       "CURRENT_LEVEL_ACTION_BUILT",
+      strategy1CandleDirection === true
+        ? "STRATEGY1_CANDLE_DIRECTION_INDEPENDENT_OF_ZONE"
+        : null,
       selectedReference.type ? `REFERENCE_${selectedReference.type}` : null,
       ...(evaluation.reasonCodes || []),
       "NO_PERMISSION_CREATED",
@@ -1152,6 +1215,7 @@ export function attachCurrentLevelActionToConfluence({
   bars10m = [],
   bars30m = [],
   evaluationTimeMs = null,
+  strategy1CandleDirection = false,
 }) {
   const currentLifecycleState =
     engine22WaveStrategy?.currentLifecycleState || null;
@@ -1172,6 +1236,7 @@ export function attachCurrentLevelActionToConfluence({
     engine25Context,
     engine1Context,
     evaluationTimeMs,
+    strategy1CandleDirection,
     zones:
       confirmationContext?.reference?.zones ??
       null,
