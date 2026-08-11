@@ -1,0 +1,315 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  attachPaperScalpReactionToConfluence,
+} from "../logic/engine3/paperScalpReaction.js";
+
+const identity = {
+  symbol: "ES",
+  laneId: "minute",
+  strategyId: "intraday_scalp@10m",
+  candidateId: "candidate-1",
+  zoneId: "zone-1",
+  setupClass: "NEGOTIATED_ZONE_ROTATION",
+  setupGrade: "A+++",
+  identitySetupKey: "NEGOTIATED_ZONE_ROTATION",
+  candidateIdentityVersion: "engine26.strategy1.v2",
+  contactState: "NEGOTIATED_LINE_CONTACT",
+  chainArmed: true,
+  authorizeEngine3Evaluation: true,
+};
+
+function currentCandle(status = "COMPLETED") {
+  return {
+    time: 1_700_000_000,
+    open: 100,
+    high: 101,
+    low: 99,
+    close: 100,
+    volume: 1000,
+    completionState: status,
+    candleClosed:
+      status === "COMPLETED"
+        ? true
+        : status === "FORMING"
+        ? false
+        : null,
+  };
+}
+
+function observation1m({
+  state = "REJECTING_VALUE",
+  direction = "SHORT",
+  stale = false,
+  active = true,
+  currentCandleStatus = "COMPLETED",
+  overrides = {},
+} = {}) {
+  return {
+    active,
+    diagnosticOnly: true,
+    noPermissionCreated: true,
+    noExecution: true,
+    sourceTimeframe: "1m",
+    state,
+    direction,
+    quality: "GOOD",
+    stale,
+    currentCandleStatus,
+    priorCandleStatus: "COMPLETED",
+    currentCandle: currentCandle(currentCandleStatus),
+    priorCandle: currentCandle("COMPLETED"),
+    supportingBarTime: 1_700_000_000,
+    evaluationTimeMs: 1_700_000_060_000,
+    ...identity,
+    ...overrides,
+  };
+}
+
+function validation5m({
+  validationState = "UNRESOLVED",
+  direction = "NEUTRAL",
+  stale = false,
+  overrides = {},
+} = {}) {
+  return {
+    active: true,
+    diagnosticOnly: true,
+    noPermissionCreated: true,
+    noExecution: true,
+    sourceTimeframe: "5m",
+    validationState,
+    direction,
+    stale,
+    supports1mDirection: validationState === "SUPPORT",
+    conflictsWith1mDirection: validationState === "CONFLICT",
+    maturityResolved:
+      validationState === "SUPPORT" ||
+      validationState === "CONFLICT",
+    ...identity,
+    ...overrides,
+  };
+}
+
+function fast10m({
+  state = "HELD_LEVEL",
+  direction = "LONG",
+  quality = "STRONG",
+  confirmed = false,
+} = {}) {
+  return {
+    active: true,
+    fastMode: true,
+    paperOnly: true,
+    researchOnly: true,
+    state,
+    direction,
+    quality,
+    confirmed,
+    noPermissionCreated: true,
+    noExecution: true,
+    currentPrice: 100,
+    lastCandle: {
+      open: 101,
+      high: 101,
+      low: 99,
+      close: 100,
+      volume: 1000,
+      time: 1_700_000_000,
+    },
+    priorCandle: {
+      open: 101,
+      high: 102,
+      low: 100,
+      close: 101,
+      volume: 900,
+      time: 1_699_999_400,
+    },
+    imbalance: {
+      lo: 99,
+      hi: 101,
+      mid: 100,
+      distancePts: 0,
+    },
+  };
+}
+
+function build({
+  oneMinute = observation1m(),
+  fiveMinute = validation5m(),
+  tenMinute = fast10m(),
+  handoff = identity,
+} = {}) {
+  const patchedConfluence = {
+    context: {
+      reaction: {
+        currentLevelAction: null,
+        engine3FastImbalanceReaction: tenMinute,
+        engine3ReactionObservation1m: oneMinute,
+        engine3ReactionValidation5m: fiveMinute,
+      },
+    },
+  };
+
+  attachPaperScalpReactionToConfluence({
+    patchedConfluence,
+    engine22WaveStrategy: null,
+    engine26ReactionHandoff: handoff,
+    engine26StructuralContext: null,
+    paperShortResearchEnabled: true,
+  });
+
+  return patchedConfluence.context.reaction.paperScalpReaction;
+}
+
+test("1m NEUTRAL / 5m UNRESOLVED / 10m LONG publishes canonical NEUTRAL", () => {
+  const result = build({
+    oneMinute: observation1m({
+      state: "CHOP_INSIDE_VALUE",
+      direction: "NEUTRAL",
+    }),
+  });
+
+  assert.equal(result.state, "CHOP_INSIDE_VALUE");
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.sourceTimeframe, "1m");
+  assert.equal(result.reactionTimeframe, "1m");
+  assert.equal(result.broaderReaction10m.state, "HELD_LEVEL");
+  assert.equal(result.broaderReaction10m.direction, "LONG");
+});
+
+test("1m SHORT / 5m UNRESOLVED / 10m LONG publishes canonical SHORT", () => {
+  const result = build();
+
+  assert.equal(result.state, "REJECTING_VALUE");
+  assert.equal(result.direction, "SHORT");
+  assert.equal(result.sourceTimeframe, "1m");
+  assert.equal(result.canonicalResolutionStatus, "CANONICAL_1M_DIRECTIONAL");
+  assert.equal(result.broaderReaction10m.direction, "LONG");
+});
+
+test("1m SHORT / 5m SUPPORT / 10m LONG keeps canonical SHORT", () => {
+  const result = build({
+    fiveMinute: validation5m({
+      validationState: "SUPPORT",
+      direction: "SHORT",
+    }),
+  });
+
+  assert.equal(result.direction, "SHORT");
+  assert.equal(result.reactionValidation5m.validationState, "SUPPORT");
+  assert.equal(result.broaderReaction10m.direction, "LONG");
+});
+
+test("1m LONG / 5m CONFLICT / 10m SHORT keeps truthful canonical LONG", () => {
+  const result = build({
+    oneMinute: observation1m({
+      state: "RECLAIMED_LEVEL",
+      direction: "LONG",
+    }),
+    fiveMinute: validation5m({
+      validationState: "CONFLICT",
+      direction: "SHORT",
+    }),
+    tenMinute: fast10m({
+      state: "REJECTING_VALUE",
+      direction: "SHORT",
+      quality: "GOOD",
+    }),
+  });
+
+  assert.equal(result.direction, "LONG");
+  assert.equal(result.reactionValidation5m.validationState, "CONFLICT");
+  assert.equal(result.broaderReaction10m.direction, "SHORT");
+});
+
+test("1m LONG / 5m SUPPORT / 10m LONG publishes canonical LONG", () => {
+  const result = build({
+    oneMinute: observation1m({
+      state: "RECLAIMED_LEVEL",
+      direction: "LONG",
+    }),
+    fiveMinute: validation5m({
+      validationState: "SUPPORT",
+      direction: "LONG",
+    }),
+  });
+
+  assert.equal(result.state, "RECLAIMED_LEVEL");
+  assert.equal(result.direction, "LONG");
+  assert.equal(result.sourceTimeframe, "1m");
+});
+
+test("missing 1m fails canonical direction closed to NEUTRAL without 10m fallback", () => {
+  const result = build({ oneMinute: null });
+
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.state, "NO_SIGNAL");
+  assert.equal(result.sourceTimeframe, null);
+  assert.equal(result.reactionTimeframe, null);
+  assert.equal(result.canonicalResolutionReason, "ONE_MINUTE_OBSERVATION_MISSING");
+  assert.equal(result.broaderReaction10m.direction, "LONG");
+});
+
+test("stale 1m fails canonical direction closed to NEUTRAL", () => {
+  const result = build({
+    oneMinute: observation1m({ stale: true }),
+  });
+
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.sourceTimeframe, null);
+  assert.equal(result.canonicalResolutionReason, "ONE_MINUTE_OBSERVATION_STALE");
+});
+
+test("forming 1m remains diagnostic but cannot become canonical directional evidence", () => {
+  const oneMinute = observation1m({
+    state: "REJECTING_VALUE",
+    direction: "SHORT",
+    currentCandleStatus: "FORMING",
+  });
+
+  const result = build({ oneMinute });
+
+  assert.equal(result.reactionObservation1m.direction, "SHORT");
+  assert.equal(result.reactionObservation1m.currentCandleStatus, "FORMING");
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.sourceTimeframe, null);
+  assert.equal(result.canonicalResolutionReason, "ONE_MINUTE_CANDLE_NOT_COMPLETED");
+});
+
+test("identity mismatch preserves raw observation but canonical identity-attached direction fails closed", () => {
+  const oneMinute = observation1m({
+    overrides: { candidateId: "old-candidate" },
+  });
+
+  const result = build({ oneMinute });
+
+  assert.equal(result.reactionObservation1m.direction, "SHORT");
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.canonicalIdentityAligned, false);
+  assert.equal(result.canonicalResolutionReason, "ONE_MINUTE_IDENTITY_MISMATCH");
+});
+
+test("Phase 3E does not invent a qualification formula and preserves legacy qualification fields", () => {
+  const result = build({
+    oneMinute: observation1m({
+      state: "REJECTING_VALUE",
+      direction: "SHORT",
+    }),
+    fiveMinute: validation5m({
+      validationState: "UNRESOLVED",
+      direction: "NEUTRAL",
+    }),
+  });
+
+  assert.equal(typeof result.allowed, "boolean");
+  assert.equal(
+    result.participationEvaluationEligible,
+    result.broaderReaction10m.participationEvaluationEligible
+  );
+  assert.equal(
+    result.engine3Strategy1QualifiedForEngine6,
+    result.broaderReaction10m.engine3Strategy1QualifiedForEngine6
+  );
+});
