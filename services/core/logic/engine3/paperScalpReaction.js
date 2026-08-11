@@ -335,10 +335,7 @@ function resolveCanonicalDirection({
     previousDirectional &&
     !ema10ResetTriggered
   ) {
-    state =
-      tenMinuteState !== "NO_SIGNAL"
-        ? tenMinuteState
-        : oneMinuteState;
+    state = tenMinuteState;
 
     direction = previousDirection;
     sourceTimeframe = "10m";
