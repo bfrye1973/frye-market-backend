@@ -123,8 +123,10 @@ const OPPORTUNITY_PRIORITY = [
   "IDLE",
 ];
 
-const STRATEGY1_SETUP_CLASS =
-  "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION";
+const STRATEGY1_SETUP_CLASSES = new Set([
+  "NEGOTIATED_ZONE_ROTATION",
+  "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
+]);
 
 const STRATEGY1_LANE_ID =
   "minute";
@@ -137,7 +139,9 @@ const STRATEGY1_IDENTITY_FIELDS = [
   "strategyId",
   "candidateId",
   "zoneId",
+  "symbol",
   "setupClass",
+  "setupGrade",
   "identitySetupKey",
   "candidateIdentityVersion",
 ];
@@ -198,6 +202,7 @@ function buildPipelineIdentity({
   engine26LocationContext = null,
   engine26ControlMap = null,
   engine26ProposedGeometry = null,
+  engine26GeometryPreviews = null,
   engine26Planner = null,
   engine3AuthorizedReaction = null,
   engine4AuthorizedParticipation = null,
@@ -340,6 +345,7 @@ function buildPipelineIdentity({
         engine26LocationContext?.symbol ??
         engine26ControlMap?.symbol ??
         engine26ProposedGeometry?.symbol ??
+        engine26GeometryPreviews?.symbol ??
         engine26Planner?.symbol ??
         engine3AuthorizedReaction?.symbol ??
         engine4AuthorizedParticipation?.symbol ??
@@ -364,6 +370,7 @@ function buildPipelineIdentity({
         engine26LocationContext?.snapshotTime ??
         engine26ControlMap?.snapshotTime ??
         engine26ProposedGeometry?.snapshotTime ??
+        engine26GeometryPreviews?.snapshotTime ??
         engine26Planner?.snapshotTime ??
         engine3AuthorizedReaction?.snapshotTime ??
         engine4AuthorizedParticipation?.snapshotTime ??
@@ -537,9 +544,11 @@ function isStrategy1Candidate(candidate) {
     normalizeStrategy1IdentityValue(
       candidate.strategyId
     ) === STRATEGY1_STRATEGY_ID &&
-    upper(
-      candidate.setupClass
-    ) === STRATEGY1_SETUP_CLASS
+    STRATEGY1_SETUP_CLASSES.has(
+      upper(
+        candidate.setupClass
+      )
+    )
   );
 }
 
@@ -579,49 +588,80 @@ function buildStrategy1Identity({
   engine26ProposedGeometry = null,
 } = {}) {
   const candidate =
-    isObject(engine26LocationCandidate)
+    isObject(
+      engine26LocationCandidate
+    )
       ? engine26LocationCandidate
       : null;
 
-  const canonical = Object.fromEntries(
-    STRATEGY1_IDENTITY_FIELDS.map(
-      (field) => [
-        field,
-        normalizeStrategy1IdentityValue(
-          candidate?.[field]
-        ),
-      ]
-    )
-  );
-
-  const canonicalComplete =
-    isStrategy1Candidate(candidate) &&
-    STRATEGY1_IDENTITY_FIELDS.every(
-      (field) => Boolean(canonical[field])
+  const canonical =
+    Object.fromEntries(
+      STRATEGY1_IDENTITY_FIELDS.map(
+        (field) => [
+          field,
+          normalizeStrategy1IdentityValue(
+            field === "symbol"
+              ? (
+                  candidate?.symbol ??
+                  strategySymbol
+                )
+              : candidate?.[field]
+          ),
+        ]
+      )
     );
 
-  const requiredContracts = {
-    engine26LocationCandidate:
-      candidate,
+  /*
+   * Engine 26A alone owns the canonical Strategy 1 identity.
+   * Downstream contracts may be absent while legitimately WAITING.
+   * Missing downstream contracts therefore do not make the canonical
+   * identity incomplete and may not be "repaired" by another source.
+   */
+  const canonicalComplete =
+    isStrategy1Candidate(
+      candidate
+    ) &&
+    STRATEGY1_IDENTITY_FIELDS.every(
+      (field) =>
+        Boolean(
+          canonical[field]
+        )
+    );
+
+  const downstreamContracts = {
     engine3AuthorizedReaction,
     engine4AuthorizedParticipation,
     engine6Permission,
     engine26ProposedGeometry,
   };
 
-  const contractsPresent =
-    Object.values(requiredContracts).every(
-      isObject
+  const contractPresence =
+    Object.fromEntries(
+      Object.entries(
+        downstreamContracts
+      ).map(
+        ([name, source]) => [
+          name,
+          isObject(source),
+        ]
+      )
     );
 
   const contractMatches = {};
 
   for (
     const [name, source]
-    of Object.entries(requiredContracts)
+    of Object.entries(
+      downstreamContracts
+    )
   ) {
+    /*
+     * An absent downstream contract is a normal waiting condition.
+     * If a contract is present, every identity field it repeats must
+     * match Engine 26A exactly.
+     */
     contractMatches[name] =
-      isObject(source) &&
+      !isObject(source) ||
       STRATEGY1_IDENTITY_FIELDS.every(
         (field) =>
           identityFieldMatches({
@@ -639,23 +679,24 @@ function buildStrategy1Identity({
         (field) => [
           field,
           Object.values(
-            requiredContracts
-          ).every(
-            (source) =>
-              identityFieldMatches({
-                source,
-                field,
-                canonicalValue:
-                  canonical[field],
-              })
-          ),
+            downstreamContracts
+          )
+            .filter(isObject)
+            .every(
+              (source) =>
+                identityFieldMatches({
+                  source,
+                  field,
+                  canonicalValue:
+                    canonical[field],
+                })
+            ),
         ]
       )
     );
 
   const consistent =
     canonicalComplete &&
-    contractsPresent &&
     Object.values(
       contractMatches
     ).every(Boolean) &&
@@ -666,26 +707,18 @@ function buildStrategy1Identity({
   return {
     ...canonical,
 
-    symbol:
-      normalizeIdentityValue(
-        candidate?.symbol ??
-        strategySymbol
-      ),
-
-    setupGrade:
-      normalizeStrategy1IdentityValue(
-        candidate?.setupGrade
-      ),
-
     complete:
-      canonicalComplete &&
-      contractsPresent,
+      canonicalComplete,
 
     consistent,
 
-    contractsPresent,
+    contractsPresent:
+      isObject(candidate),
+
+    contractPresence,
 
     contractMatches,
+
     fieldConsistent,
   };
 }
@@ -820,25 +853,8 @@ function buildStrategy1Readiness({
       ),
 
     applies:
-      [
-        engine26LocationCandidate,
-        engine3AuthorizedReaction,
-        engine4AuthorizedParticipation,
-        engine6Permission,
-        engine26ProposedGeometry,
-      ].some(
-        (source) =>
-          isObject(source) &&
-          (
-            upper(
-              source.setupClass
-            ) ===
-              STRATEGY1_SETUP_CLASS ||
-            upper(
-              source.identitySetupKey
-            ) ===
-              STRATEGY1_SETUP_CLASS
-          )
+      isStrategy1Candidate(
+        engine26LocationCandidate
       ),
 
     identity,
@@ -891,6 +907,125 @@ function buildStrategy1Readiness({
         engine26ProposedGeometry
           ?.lifecycleStatus
       ) || null,
+  };
+}
+
+function resolveStrategy1Direction({
+  engine26LocationCandidate = null,
+  engine3AuthorizedReaction = null,
+} = {}) {
+  const candidateDirection =
+    normalizeDirection(
+      engine26LocationCandidate
+        ?.direction ??
+      engine26LocationCandidate
+        ?.directionBias
+    );
+
+  const reactionDirection =
+    normalizeDirection(
+      engine3AuthorizedReaction
+        ?.direction ??
+      engine3AuthorizedReaction
+        ?.reactionDirection
+    );
+
+  /*
+   * Engine 3 owns fresh confirmed reaction direction.
+   * Before confirmation, Engine 26A direction is a directional WATCH,
+   * not permission and not execution authority.
+   */
+  if (
+    engine3AuthorizedReaction
+      ?.reactionConfirmed === true &&
+    [
+      "LONG",
+      "SHORT",
+    ].includes(
+      reactionDirection
+    )
+  ) {
+    return reactionDirection;
+  }
+
+  if (
+    [
+      "LONG",
+      "SHORT",
+    ].includes(
+      candidateDirection
+    )
+  ) {
+    return candidateDirection;
+  }
+
+  return "NEUTRAL";
+}
+
+function buildStrategy1GeometryPreviewRead(
+  engine26GeometryPreviews
+) {
+  if (
+    !isObject(
+      engine26GeometryPreviews
+    )
+  ) {
+    return {
+      available: false,
+      selectedOption: null,
+      optionA: null,
+      optionB: null,
+      decisionSummary: null,
+      previewOnly: true,
+      noPermissionCreated: true,
+      noExecution: true,
+    };
+  }
+
+  return {
+    available:
+      engine26GeometryPreviews
+        .active === true,
+
+    selectedOption:
+      engine26GeometryPreviews
+        .selectedOption ??
+      null,
+
+    optionA:
+      isObject(
+        engine26GeometryPreviews
+          .optionA
+      )
+        ? engine26GeometryPreviews
+            .optionA
+        : null,
+
+    optionB:
+      isObject(
+        engine26GeometryPreviews
+          .optionB
+      )
+        ? engine26GeometryPreviews
+            .optionB
+        : null,
+
+    decisionSummary:
+      engine26GeometryPreviews
+        .decisionSummary ??
+      null,
+
+    previewOnly:
+      engine26GeometryPreviews
+        .previewOnly !== false,
+
+    noPermissionCreated:
+      engine26GeometryPreviews
+        .noPermissionCreated !== false,
+
+    noExecution:
+      engine26GeometryPreviews
+        .noExecution !== false,
   };
 }
 
@@ -1430,6 +1565,7 @@ function buildWaitingFor({
   proximity,
   readiness,
   higherTimeframeConflict,
+  strategy1Applies = false,
 }) {
   const waitingFor = [];
 
@@ -1453,7 +1589,8 @@ function buildWaitingFor({
   }
 
   if (
-    validInternalPullback
+    validInternalPullback &&
+    strategy1Applies !== true
   ) {
     waitingFor.push(
       "INTERNAL_PULLBACK_COMPLETION"
@@ -1545,7 +1682,18 @@ function buildWaitingFor({
     ) &&
     readiness
       .plannerReady !==
-      true
+      true &&
+    (
+      strategy1Applies !== true ||
+      (
+        readiness
+          .reactionReady === true &&
+        readiness
+          .participationReady === true &&
+        readiness
+          .permissionReady === true
+      )
+    )
   ) {
     waitingFor.push(
       "ENGINE26_PLANNER_GEOMETRY"
@@ -1561,6 +1709,7 @@ function buildWaitingFor({
   }
 
   if (
+    strategy1Applies !== true &&
     !validInternalPullback &&
     [
       "W2",
@@ -1747,6 +1896,7 @@ function buildWarnings({
   higherTimeframeConflict,
   readiness,
   subminuteGeometryReady = false,
+  strategy1Applies = false,
 }) {
   const alignmentWarnings =
     safeArray(
@@ -1823,6 +1973,14 @@ function buildWarnings({
     !(
       degree === "subminute" &&
       subminuteGeometryReady === true
+    ) &&
+    (
+      strategy1Applies !== true ||
+      (
+        readiness.reactionReady === true &&
+        readiness.participationReady === true &&
+        readiness.permissionReady === true
+      )
     )
   ) {
     warnings.push(
@@ -1866,6 +2024,7 @@ function buildRecommendedAction({
   wave,
   currentWave,
   geometryToolRecommended,
+  strategy1Applies = false,
 }) {
   if (
     decisionState ===
@@ -1881,6 +2040,45 @@ function buildRecommendedAction({
     "IDLE"
   ) {
     return "NO_ACTION";
+  }
+
+  /*
+   * Minute Strategy 1 waiting precedence:
+   * reaction -> participation -> permission -> official geometry.
+   *
+   * W4 structural context must not hide the first incomplete
+   * canonical tactical gate.
+   */
+  if (
+    strategy1Applies === true
+  ) {
+    if (
+      readiness.reactionReady !==
+      true
+    ) {
+      return "WATCH_REACTION";
+    }
+
+    if (
+      readiness.participationReady !==
+      true
+    ) {
+      return "WATCH_PARTICIPATION";
+    }
+
+    if (
+      readiness.permissionReady !==
+      true
+    ) {
+      return "WAIT_FOR_ENGINE6_PERMISSION";
+    }
+
+    if (
+      readiness.plannerReady !==
+      true
+    ) {
+      return "WAIT_FOR_OFFICIAL_GEOMETRY";
+    }
   }
 
   if (
@@ -2330,7 +2528,7 @@ function buildLaneDecision({
       degree
     ];
 
-  const direction =
+  let direction =
     resolveDirection({
       degree,
       alpha,
@@ -2493,6 +2691,11 @@ function buildLaneDecision({
               ?.engine26ProposedGeometry ||
             null,
 
+          engine26GeometryPreviews:
+            pipelineContext
+              ?.engine26GeometryPreviews ||
+            null,
+
           engine26Planner:
             pipelineContext
               ?.engine26Planner ||
@@ -2559,6 +2762,25 @@ function buildLaneDecision({
             null,
         })
       : null;
+
+  if (
+    degree === "minute" &&
+    strategy1Readiness
+      ?.applies === true
+  ) {
+    direction =
+      resolveStrategy1Direction({
+        engine26LocationCandidate:
+          pipelineContext
+            ?.engine26LocationCandidate ||
+          null,
+
+        engine3AuthorizedReaction:
+          pipelineContext
+            ?.engine3AuthorizedReaction ||
+          null,
+      });
+  }
 
   const readiness =
     degree === "subminute"
@@ -2643,6 +2865,9 @@ function buildLaneDecision({
       proximity,
       readiness,
       higherTimeframeConflict,
+      strategy1Applies:
+        strategy1Readiness
+          ?.applies === true,
     });
 
   const waitingFor =
@@ -2686,6 +2911,9 @@ function buildLaneDecision({
       higherTimeframeConflict,
       readiness,
       subminuteGeometryReady,
+      strategy1Applies:
+        strategy1Readiness
+          ?.applies === true,
     });
 
   if (
@@ -2730,6 +2958,9 @@ function buildLaneDecision({
       wave,
       currentWave,
       geometryToolRecommended,
+      strategy1Applies:
+        strategy1Readiness
+          ?.applies === true,
     });
 
   const permissionContext =
@@ -2748,6 +2979,61 @@ function buildLaneDecision({
       ? strategy1Readiness
           .identity
       : pipelineIdentity;
+
+  const strategy1GeometryPreviews =
+    degree === "minute"
+      ? buildStrategy1GeometryPreviewRead(
+          pipelineContext
+            ?.engine26GeometryPreviews ||
+          null
+        )
+      : buildStrategy1GeometryPreviewRead(
+          null
+        );
+
+  const engine3ConfirmedDirection =
+    normalizeDirection(
+      pipelineContext
+        ?.engine3AuthorizedReaction
+        ?.direction
+    );
+
+  const candidateWatchDirection =
+    normalizeDirection(
+      pipelineContext
+        ?.engine26LocationCandidate
+        ?.direction ??
+      pipelineContext
+        ?.engine26LocationCandidate
+        ?.directionBias
+    );
+
+  const currentDirectionalWatch =
+    degree === "minute" &&
+    strategy1Readiness
+      ?.applies === true
+      ? (
+          strategy1Readiness
+            .reactionReady === true &&
+          [
+            "LONG",
+            "SHORT",
+          ].includes(
+            engine3ConfirmedDirection
+          )
+            ? engine3ConfirmedDirection
+            : (
+                [
+                  "LONG",
+                  "SHORT",
+                ].includes(
+                  candidateWatchDirection
+                )
+                  ? `${candidateWatchDirection} WATCH`
+                  : "NEUTRAL"
+              )
+        )
+      : direction;
 
   return {
     active: true,
@@ -2905,6 +3191,23 @@ function buildLaneDecision({
     decisionState,
 
     direction,
+
+    currentDirectionalWatch,
+
+    engine26GeometryPreviews:
+      strategy1GeometryPreviews,
+
+    selectedPreviewOption:
+      strategy1GeometryPreviews
+        .selectedOption,
+
+    shortPath:
+      strategy1GeometryPreviews
+        .optionA,
+
+    longAlternate:
+      strategy1GeometryPreviews
+        .optionB,
 
     currentWave,
 
