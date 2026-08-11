@@ -360,4 +360,4 @@ export function buildReactionValidation5m({
   };
 }
 
-export default buildReactionValidat
+export default buildReactionValidation5m;
