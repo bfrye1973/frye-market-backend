@@ -8311,6 +8311,9 @@ attachCurrentLevelActionToConfluence({
   engine22WaveStrategy,
   engine25Context,
   engine1Context,
+
+  strategy1CandleDirection: isEsIntradayScalp,
+  
   bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
   bars30m: [],
   evaluationTimeMs,
@@ -9182,6 +9185,9 @@ if (
        engine22WaveStrategy,
        engine25Context,
        engine1Context,
+
+       strategy1CandleDirection: isEsIntradayScalp,
+       
        bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
        bars30m: [],
        evaluationTimeMs,
@@ -9322,6 +9328,9 @@ if (
       engine22WaveStrategy,
       engine25Context,
       engine1Context,
+
+      strategy1CandleDirection: isEsIntradayScalp,
+      
       bars10m:
         marketMeter?.layers?.emaPosture
           ?.tenMinute?.bars || [],
