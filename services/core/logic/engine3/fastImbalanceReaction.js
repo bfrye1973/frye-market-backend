@@ -790,27 +790,21 @@ export function buildFastImbalanceReaction({
 
   const rawState = evaluation.state || "NO_SIGNAL";
 
-  const heldLevelDirection =
-    rawState === "HELD_LEVEL"
-      ? classifyHeldLevelCandleDirection(
-          candleCompletionTruth.completedBars
-        )
-      : null;
+  const candleDirection =
+    classifyHeldLevelCandleDirection(
+      candleCompletionTruth.completedBars
+    );
 
   const rawQuality =
     rawState === "HELD_LEVEL"
       ? (
-          heldLevelDirection === "NEUTRAL"
+          candleDirection === "NEUTRAL"
             ? "MIXED"
             : "GOOD"
         )
       : classifyQuality(rawState);
 
-  const rawDirection =
-    rawState === "HELD_LEVEL"
-      ? heldLevelDirection
-      : classifyDirection(rawState);
-
+  const rawDirection = candleDirection;
   const rawConfirmed =
     classifyConfirmed(rawState) &&
     candleCompletionTruth.latestBarCompletionState === "COMPLETED";
