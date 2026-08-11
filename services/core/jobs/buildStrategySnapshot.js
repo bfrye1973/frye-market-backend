@@ -9196,6 +9196,7 @@ if (
      attachFastImbalanceReactionToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
+       engine26ReactionHandoff,
        engine26StructuralContext,
        bars10m: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
        evaluationTimeMs,
@@ -9341,6 +9342,7 @@ if (
     attachFastImbalanceReactionToConfluence({
       patchedConfluence,
       engine22WaveStrategy,
+      engine26ReactionHandoff,
       engine26StructuralContext,
       bars10m:
         marketMeter?.layers?.emaPosture
