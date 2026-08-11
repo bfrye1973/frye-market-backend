@@ -707,6 +707,9 @@ export function buildFastImbalanceReaction({
   engine22WaveStrategy = null,
   engine26ReactionHandoff = null,
   engine26StructuralContext = null,
+  previousCanonicalDirection = "NEUTRAL",
+  tenMinuteCompletedClose = null,
+  tenMinuteEma10 = null,
   evaluationTimeMs = null,
 } = {}) {
   const bars = Array.isArray(bars10m) ? bars10m.map(normalizeBar) : [];
@@ -798,10 +801,55 @@ export function buildFastImbalanceReaction({
 
   const rawState = evaluation.state || "NO_SIGNAL";
 
-  const candleDirection =
+  const candleDirectionRaw =
     classifyHeldLevelCandleDirection(
       candleCompletionTruth.completedBars
     );
+
+  const previousDirection =
+    String(previousCanonicalDirection || "NEUTRAL").toUpperCase();
+
+  const completedClose =
+    toNum(tenMinuteCompletedClose);
+
+  const ema10 =
+    toNum(tenMinuteEma10);
+
+  let candleDirection =
+    candleDirectionRaw;
+
+  let ema10PersistenceState =
+    null;
+
+  if (
+    previousDirection === "SHORT" &&
+    completedClose != null &&
+    ema10 != null
+  ) {
+    if (completedClose < ema10) {
+      candleDirection = "SHORT";
+      ema10PersistenceState =
+        "SHORT_PERSISTED_BELOW_10M_EMA10";
+    } else if (completedClose > ema10) {
+      candleDirection = "NEUTRAL";
+      ema10PersistenceState =
+        "SHORT_RESET_BY_COMPLETED_CLOSE_ABOVE_10M_EMA10";
+    }
+  } else if (
+    previousDirection === "LONG" &&
+    completedClose != null &&
+    ema10 != null
+  ) {
+    if (completedClose > ema10) {
+      candleDirection = "LONG";
+      ema10PersistenceState =
+        "LONG_PERSISTED_ABOVE_10M_EMA10";
+    } else if (completedClose < ema10) {
+      candleDirection = "NEUTRAL";
+      ema10PersistenceState =
+        "LONG_RESET_BY_COMPLETED_CLOSE_BELOW_10M_EMA10";
+    }
+  }
 
   const rawQuality =
     rawState === "HELD_LEVEL"
@@ -887,6 +935,15 @@ export function buildFastImbalanceReaction({
     confirmed,
     rawConfirmed,
 
+    candleDirectionRaw,
+    previousCanonicalDirection:
+      previousDirection,
+    tenMinuteCompletedClose:
+      completedClose,
+    tenMinuteEma10:
+      ema10,
+    ema10PersistenceState,
+
     waveContext: buildWaveContext({
       engine22WaveStrategy,
       state,
@@ -933,6 +990,7 @@ export function buildFastImbalanceReaction({
       ...(evaluation.reasonCodes || []),
       ...(locationAdjusted.engine26LocationContext?.reasonCodes || []),
       earlySignal ? "EARLY_FAST_IMBALANCE_SIGNAL" : null,
+      ema10PersistenceState,
       "NO_PERMISSION_CREATED",
       "NO_EXECUTION",
       "ENGINE6_FINAL_PAPER_APPROVAL_REQUIRED",
@@ -947,6 +1005,9 @@ export function attachFastImbalanceReactionToConfluence({
   engine26FastWatch = null,
   engine26ReactionHandoff = null,
   engine26StructuralContext = null,
+  previousCanonicalDirection = "NEUTRAL",
+  tenMinuteCompletedClose = null,
+  tenMinuteEma10 = null,
   evaluationTimeMs = null,
 }) {
   const currentPrice =
@@ -964,6 +1025,9 @@ export function attachFastImbalanceReactionToConfluence({
     engine22WaveStrategy,
     engine26ReactionHandoff,
     engine26StructuralContext,
+    previousCanonicalDirection,
+    tenMinuteCompletedClose,
+    tenMinuteEma10,
     evaluationTimeMs,
   });
 
