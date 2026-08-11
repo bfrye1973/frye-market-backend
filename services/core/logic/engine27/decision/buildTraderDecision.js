@@ -2878,6 +2878,9 @@ function buildLaneDecision({
       proximity,
       readiness,
       higherTimeframeConflict,
+      strategy1Applies:
+        strategy1Readiness
+          ?.applies === true,
     });
 
   if (
