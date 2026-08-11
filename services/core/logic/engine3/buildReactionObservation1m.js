@@ -41,14 +41,72 @@ function negotiatedZone(candidate = {}, handoff = {}) {
     candidate?.locationZone,
     candidate,
   ];
+
   for (const source of sources) {
     const lo = number(source?.lo ?? source?.low ?? source?.zoneLo);
     const hi = number(source?.hi ?? source?.high ?? source?.zoneHi);
+
     if (lo != null && hi != null) {
-      return { lo: Math.min(lo, hi), hi: Math.max(lo, hi) };
+      return {
+        lo: Math.min(lo, hi),
+        hi: Math.max(lo, hi),
+      };
     }
   }
+
   return null;
+}
+
+/*
+ * Strategy 1 immediate direction is candle-owned.
+ *
+ * Engine 26 still owns zone/location context, but zone position must not
+ * suppress clear intraday candle direction.
+ *
+ * Use completed candles only for actionable direction.
+ */
+function candleDirectionFromBars(bars = []) {
+  const recent = Array.isArray(bars)
+    ? bars.filter(Boolean).slice(-3)
+    : [];
+
+  if (recent.length < 2) {
+    return "NEUTRAL";
+  }
+
+  const last = recent[recent.length - 1];
+  const prev = recent[recent.length - 2];
+
+  const lastClose = number(last?.close ?? last?.c);
+  const prevClose = number(prev?.close ?? prev?.c);
+  const lastLow = number(last?.low ?? last?.l);
+  const prevLow = number(prev?.low ?? prev?.l);
+  const lastHigh = number(last?.high ?? last?.h);
+  const prevHigh = number(prev?.high ?? prev?.h);
+
+  if (
+    lastClose != null &&
+    prevClose != null &&
+    lastLow != null &&
+    prevLow != null &&
+    lastClose < prevClose &&
+    lastLow <= prevLow
+  ) {
+    return "SHORT";
+  }
+
+  if (
+    lastClose != null &&
+    prevClose != null &&
+    lastHigh != null &&
+    prevHigh != null &&
+    lastClose > prevClose &&
+    lastHigh >= prevHigh
+  ) {
+    return "LONG";
+  }
+
+  return "NEUTRAL";
 }
 
 export function buildReactionObservation1m({
@@ -61,31 +119,50 @@ export function buildReactionObservation1m({
     engine26LocationCandidate,
     engine26ReactionHandoff
   );
+
   const zone = negotiatedZone(
     engine26LocationCandidate,
     engine26ReactionHandoff
   );
+
   const truth = deriveCandleCompletionTruth({
     bars,
     timeframe: "1m",
     evaluationTimeMs,
   });
+
   const action = buildCurrentLevelAction({
     symbol: identity.symbol,
     tf: "1m",
     bars10m: truth.allBars,
     currentPrice: truth.allBars.at(-1)?.close ?? null,
     zones: zone ? { zone } : null,
-    confirmationContext: zone ? { reference: { zone } } : null,
+    confirmationContext: zone
+      ? {
+          reference: {
+            zone,
+          },
+        }
+      : null,
     evaluationTimeMs,
   });
+
+  const candleDirection = candleDirectionFromBars(
+    truth.completedBars
+  );
+
   const barStart = truth.latestBarStartTimeMs;
   const barEnd = truth.latestExpectedCloseTimeMs;
+
   const ageMs =
     barEnd != null && truth.evaluationTimeMs != null
       ? Math.max(0, truth.evaluationTimeMs - barEnd)
       : null;
-  const stale = ageMs == null || ageMs > STALE_AFTER_MS;
+
+  const stale =
+    ageMs == null ||
+    ageMs > STALE_AFTER_MS;
+
   const staleReason =
     ageMs == null
       ? "NO_SOURCE_BAR_TIME"
@@ -94,30 +171,62 @@ export function buildReactionObservation1m({
       : null;
 
   return {
-    active: action.active === true && zone != null,
+    active:
+      action.active === true &&
+      zone != null,
+
     diagnosticOnly: true,
     noPermissionCreated: true,
     noExecution: true,
+
     sourceTimeframe: "1m",
-    direction: action.direction || "NEUTRAL",
+
+    // Strategy 1 direction is derived from completed candle behavior,
+    // not from where price sits inside the larger imbalance zone.
+    direction: candleDirection,
+
+    // Preserve the existing zone-relative action diagnostics separately.
     quality: action.quality || "WEAK",
     state: action.state || "NO_SIGNAL",
-    candleState: truth.latestBarCompletionState,
-    observedAt: truth.evaluationTimeMs,
+
+    candleState:
+      truth.latestBarCompletionState,
+
+    observedAt:
+      truth.evaluationTimeMs,
+
     barStart,
     barEnd,
-    sourceAgeMs: ageMs,
+
+    sourceAgeMs:
+      ageMs,
+
     stale,
     staleReason,
-    currentPrice: action.currentPrice ?? null,
-    referenceLevel: action.referenceLevel ?? null,
-    referenceType: action.referenceType ?? null,
-    distancePts: action.distancePts ?? null,
-    levelAction: action.levelAction || null,
+
+    currentPrice:
+      action.currentPrice ?? null,
+
+    referenceLevel:
+      action.referenceLevel ?? null,
+
+    referenceType:
+      action.referenceType ?? null,
+
+    distancePts:
+      action.distancePts ?? null,
+
+    levelAction:
+      action.levelAction || null,
+
     ...identity,
+
     reasonCodes: [
       "ENGINE3_1M_DIAGNOSTIC_OBSERVATION",
-      ...(zone ? [] : ["NEGOTIATED_ZONE_MISSING"]),
+      "ENGINE3_STRATEGY1_CANDLE_DIRECTION_INDEPENDENT_OF_ZONE",
+      ...(zone
+        ? []
+        : ["NEGOTIATED_ZONE_MISSING"]),
       ...(action.reasonCodes || []),
     ],
   };
