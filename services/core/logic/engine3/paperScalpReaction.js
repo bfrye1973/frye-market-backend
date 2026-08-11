@@ -355,6 +355,18 @@ function resolveCanonicalQuality({
   validation5m = null,
   canonicalResolution = null,
 } = {}) {
+  const canonicalDirection =
+    safeUpper(
+      canonicalResolution?.direction,
+      "NEUTRAL"
+    );
+
+  const oneMinuteDirection =
+    safeUpper(
+      observation1m?.direction,
+      "NEUTRAL"
+    );
+
   const oneMinuteQuality =
     safeUpper(
       observation1m?.quality,
@@ -367,43 +379,72 @@ function resolveCanonicalQuality({
       "UNRESOLVED"
     );
 
+  const validationFresh =
+    validation5m?.active === true &&
+    validation5m?.stale === false;
+
+  const validationResolved =
+    validation5m?.maturityResolved === true;
+
+  const validationSupports =
+    validation5m?.supports1mDirection === true ||
+    validationState === "SUPPORT";
+
   const validationConflicts =
     validation5m?.conflictsWith1mDirection === true ||
     validationState === "CONFLICT";
 
-  const oneMinuteDirection =
-    safeUpper(
-      observation1m?.direction,
-      "NEUTRAL"
-    );
-
-  const committedDirection =
-    safeUpper(
-      canonicalResolution?.direction,
-      "NEUTRAL"
-    );
-
-  const oneMinuteAligned =
+  const oneMinuteFreshAligned =
     canonicalResolution?.observationUsable === true &&
-    ["LONG", "SHORT"].includes(oneMinuteDirection) &&
-    oneMinuteDirection === committedDirection;
+    ["LONG", "SHORT"].includes(canonicalDirection) &&
+    oneMinuteDirection === canonicalDirection;
+
+  /*
+   * Canonical Engine 3 quality ownership:
+   *
+   * - Local 1m / 5m / 10m quality values remain diagnostic only.
+   * - Final Engine 3 quality is calculated here from the combined
+   *   Strategy 1 evidence.
+   *
+   * Rules:
+   *   No canonical LONG/SHORT                 -> WEAK
+   *   5m missing/stale/unresolved             -> WEAK
+   *   5m conflict                             -> MIXED
+   *   5m support                              -> GOOD
+   *   5m support + fresh aligned 1m STRONG    -> STRONG
+   */
+
+  if (
+    !["LONG", "SHORT"].includes(
+      canonicalDirection
+    )
+  ) {
+    return "WEAK";
+  }
+
+  if (
+    !validationFresh ||
+    !validationResolved
+  ) {
+    return "WEAK";
+  }
 
   if (validationConflicts) {
     return "MIXED";
   }
 
-  if (oneMinuteAligned) {
-    return oneMinuteQuality;
+  if (validationSupports) {
+    if (
+      oneMinuteFreshAligned &&
+      oneMinuteQuality === "STRONG"
+    ) {
+      return "STRONG";
+    }
+
+    return "GOOD";
   }
 
-  if (
-    canonicalResolution?.directionPersistenceActive === true &&
-    ["LONG", "SHORT"].includes(committedDirection)
-  ) {
-    return "WEAK";
-  }
-
-  return oneMinuteQuality;
+  return "WEAK";
 }
 
 function setupTypeForCanonical({
@@ -571,7 +612,7 @@ function resolveCanonicalConfirmation({
     validation5m?.conflictsWith1mDirection === true;
 
   const qualityApproved =
-    QUALIFYING_QUALITY.has(quality);
+    GOOD_QUALITY.has(quality);
 
   if (!authorizationValid) {
     blockers.push("ENGINE26_EVALUATION_NOT_AUTHORIZED");
