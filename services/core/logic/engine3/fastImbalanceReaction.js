@@ -265,28 +265,40 @@ function classifyHeldLevelCandleDirection(bars = []) {
     const prev = normalizeBar(recent[index - 1]);
     const current = normalizeBar(recent[index]);
 
+    /*
+     * Recency weighting:
+     * - older completed-candle comparison = weight 1
+     * - newest completed-candle comparison = weight 2
+     *
+     * This prevents an older move from outweighing a fresh hard reversal.
+     */
+    const weight =
+      index === recent.length - 1
+        ? 2
+        : 1;
+
     if (
       current.close != null &&
       prev.close != null
     ) {
-      if (current.close < prev.close) bearishScore += 1;
-      if (current.close > prev.close) bullishScore += 1;
+      if (current.close < prev.close) bearishScore += weight;
+      if (current.close > prev.close) bullishScore += weight;
     }
 
     if (
       current.low != null &&
       prev.low != null
     ) {
-      if (current.low < prev.low) bearishScore += 1;
-      if (current.low > prev.low) bullishScore += 1;
+      if (current.low < prev.low) bearishScore += weight;
+      if (current.low > prev.low) bullishScore += weight;
     }
 
     if (
       current.high != null &&
       prev.high != null
     ) {
-      if (current.high < prev.high) bearishScore += 1;
-      if (current.high > prev.high) bullishScore += 1;
+      if (current.high < prev.high) bearishScore += weight;
+      if (current.high > prev.high) bullishScore += weight;
     }
   }
 
