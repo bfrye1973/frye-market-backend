@@ -5,10 +5,10 @@
 // Canonical Strategy 1 ownership:
 // - Engine 26 owns location, candidate identity, lifecycle authorization,
 //   authorized branch, trigger/reclaim/invalidation geometry.
-// - 1m owns fresh immediate Engine 3 reaction direction.
-// - 5m validates/supports/conflicts with the 1m reaction.
-// - 10m remains broader context only.
-// - 10m EMA10 only persists or resets an already-established direction.
+// - 10m owns the primary Strategy 1 reaction direction/context.
+// - 5m validates/supports/conflicts with the 10m directional read.
+// - 1m is immediate timing evidence with the lowest directional influence.
+// - 10m EMA10 persists or resets an already-established direction.
 // - This file publishes ONE canonical Engine 3 reaction object.
 // - Engine 4 owns participation.
 // - Engine 6 owns final permission.
@@ -145,18 +145,40 @@ function resolveBroaderReaction10m({
 
 function resolveCanonicalDirection({
   observation1m = null,
+  validation5m = null,
+  broaderReaction10m = null,
   previousCanonicalDirection = null,
   tenMinuteCompletedClose = null,
   tenMinuteEma10 = null,
   engine26ReactionHandoff = null,
 } = {}) {
-  const observedState = safeUpper(
+  const oneMinuteState = safeUpper(
     observation1m?.state,
     "NO_SIGNAL"
   );
 
-  const observedDirection = safeUpper(
+  const oneMinuteDirection = safeUpper(
     observation1m?.direction,
+    "NEUTRAL"
+  );
+
+  const fiveMinuteDirection = safeUpper(
+    validation5m?.direction,
+    "NEUTRAL"
+  );
+
+  const validationState = safeUpper(
+    validation5m?.validationState,
+    "UNRESOLVED"
+  );
+
+  const tenMinuteState = safeUpper(
+    broaderReaction10m?.state,
+    "NO_SIGNAL"
+  );
+
+  const tenMinuteDirection = safeUpper(
+    broaderReaction10m?.direction,
     "NEUTRAL"
   );
 
@@ -164,39 +186,6 @@ function resolveCanonicalDirection({
     previousCanonicalDirection,
     "NEUTRAL"
   );
-
-  const observationPresent =
-    observation1m != null &&
-    typeof observation1m === "object";
-
-  const observationActive =
-    observation1m?.active === true;
-
-  const observationFresh =
-    observation1m?.stale === false;
-
-  const candleCompleted =
-    observation1m?.currentCandleStatus === "COMPLETED" ||
-    observation1m?.candleState === "COMPLETED";
-
-  const aligned =
-    identityAligned(
-      observation1m,
-      engine26ReactionHandoff
-    );
-
-  const observedDirectionUsable =
-    ["LONG", "SHORT", "NEUTRAL"].includes(
-      observedDirection
-    );
-
-  const observationUsable =
-    observationPresent &&
-    observationActive &&
-    observationFresh &&
-    candleCompleted &&
-    aligned &&
-    observedDirectionUsable;
 
   const completedClose =
     toNum(tenMinuteCompletedClose);
@@ -211,6 +200,99 @@ function resolveCanonicalDirection({
   const previousDirectional =
     previousDirection === "LONG" ||
     previousDirection === "SHORT";
+
+  const tenMinuteDirectional =
+    tenMinuteDirection === "LONG" ||
+    tenMinuteDirection === "SHORT";
+
+  const tenMinuteUsable =
+    broaderReaction10m != null &&
+    typeof broaderReaction10m === "object" &&
+    broaderReaction10m?.active !== false &&
+    tenMinuteDirectional;
+
+  const observationPresent =
+    observation1m != null &&
+    typeof observation1m === "object";
+
+  const observationActive =
+    observation1m?.active === true;
+
+  const observationFresh =
+    observation1m?.stale === false;
+
+  const observationCompleted =
+    observation1m?.currentCandleStatus === "COMPLETED" ||
+    observation1m?.candleState === "COMPLETED";
+
+  const observationIdentityAligned =
+    identityAligned(
+      observation1m,
+      engine26ReactionHandoff
+    );
+
+  const oneMinuteDirectional =
+    oneMinuteDirection === "LONG" ||
+    oneMinuteDirection === "SHORT";
+
+  const observationUsable =
+    observationPresent &&
+    observationActive &&
+    observationFresh &&
+    observationCompleted &&
+    observationIdentityAligned;
+
+  const oneMinuteConflictsPrimary =
+    observationUsable &&
+    oneMinuteDirectional &&
+    tenMinuteDirectional &&
+    oneMinuteDirection !== tenMinuteDirection;
+
+  const oneMinuteSupportsPrimary =
+    observationUsable &&
+    oneMinuteDirectional &&
+    tenMinuteDirectional &&
+    oneMinuteDirection === tenMinuteDirection;
+
+  const validationPresent =
+    validation5m != null &&
+    typeof validation5m === "object" &&
+    validation5m?.active === true;
+
+  const validationFresh =
+    validationPresent &&
+    validation5m?.stale === false;
+
+  const validationResolved =
+    validation5m?.maturityResolved === true;
+
+  const validationSupportsPrimary =
+    validationFresh &&
+    (
+      validation5m?.supports1mDirection === true ||
+      (
+        validationResolved &&
+        fiveMinuteDirection === tenMinuteDirection &&
+        tenMinuteDirectional
+      ) ||
+      (
+        validationState === "SUPPORT" &&
+        fiveMinuteDirection === tenMinuteDirection
+      )
+    );
+
+  const validationConflictsPrimary =
+    validationFresh &&
+    (
+      validation5m?.conflictsWith1mDirection === true ||
+      validationState === "CONFLICT" ||
+      (
+        validationResolved &&
+        ["LONG", "SHORT"].includes(fiveMinuteDirection) &&
+        tenMinuteDirectional &&
+        fiveMinuteDirection !== tenMinuteDirection
+      )
+    );
 
   let ema10ResetTriggered = false;
 
@@ -234,62 +316,51 @@ function resolveCanonicalDirection({
   let direction = "NEUTRAL";
   let sourceTimeframe = null;
   let reactionTimeframe = null;
-  let resolutionStatus = "NO_USABLE_1M_CANONICAL_EVIDENCE";
-  let resolutionReason = "ONE_MINUTE_EVIDENCE_UNUSABLE";
+  let resolutionStatus = "NO_USABLE_10M_DIRECTION";
+  let resolutionReason = "TEN_MINUTE_DIRECTION_NOT_AVAILABLE";
   let directionPersistenceActive = false;
 
   /*
-   * Fresh completed 1m evidence owns NEW direction.
+   * Primary Strategy 1 direction hierarchy:
    *
-   * This is checked before persistence so a fresh 1m directional
-   * observation can establish the first LONG/SHORT after NEUTRAL.
+   * 1) Existing LONG/SHORT persists until its completed-10m EMA10 reset.
+   * 2) If there is no persisted direction, the 10m reaction establishes
+   *    the primary direction.
+   * 3) 5m validates/supports/conflicts but does not independently reverse.
+   * 4) 1m is immediate timing evidence only and cannot independently flip
+   *    the canonical direction.
    */
+
   if (
-    observationUsable &&
-    ["LONG", "SHORT"].includes(observedDirection) &&
-    !(
-      previousDirectional &&
-      ema10ResetTriggered
-    )
-  ) {
-    state = observedState;
-    direction = observedDirection;
-    sourceTimeframe = "1m";
-    reactionTimeframe = "1m";
-    resolutionStatus = "CANONICAL_1M_DIRECTIONAL";
-    resolutionReason = "FRESH_COMPLETED_1M_CANDLE_DIRECTION";
-  } else if (
     previousDirectional &&
     !ema10ResetTriggered
   ) {
     state =
-      observationUsable
-        ? observedState
-        : "NO_SIGNAL";
+      tenMinuteState !== "NO_SIGNAL"
+        ? tenMinuteState
+        : oneMinuteState;
 
     direction = previousDirection;
-    sourceTimeframe = "1m";
-    reactionTimeframe = "1m";
+    sourceTimeframe = "10m";
+    reactionTimeframe = "10m";
     directionPersistenceActive = true;
+
     resolutionStatus =
       `CANONICAL_${previousDirection}_PERSISTED`;
 
     resolutionReason =
       ema10DataAvailable
-        ? `PREVIOUS_${previousDirection}_HELD_UNTIL_10M_EMA10_RESET`
+        ? `PREVIOUS_${previousDirection}_HELD_UNTIL_COMPLETED_10M_EMA10_RESET`
         : `PREVIOUS_${previousDirection}_HELD_EMA10_RESET_DATA_UNAVAILABLE`;
   } else if (
     previousDirectional &&
     ema10ResetTriggered
   ) {
-    state =
-      observationUsable
-        ? observedState
-        : "NO_SIGNAL";
-
+    state = tenMinuteState;
     direction = "NEUTRAL";
     sourceTimeframe = "10m";
     reactionTimeframe = "10m";
+
     resolutionStatus =
       "CANONICAL_DIRECTION_RESET_AT_10M_EMA10";
 
@@ -297,25 +368,17 @@ function resolveCanonicalDirection({
       previousDirection === "SHORT"
         ? "COMPLETED_10M_CLOSE_ABOVE_EMA10_RESET_SHORT"
         : "COMPLETED_10M_CLOSE_BELOW_EMA10_RESET_LONG";
-  } else if (observationUsable) {
-    state = observedState;
-    direction = observedDirection;
-    sourceTimeframe = "1m";
-    reactionTimeframe = "1m";
-    resolutionStatus = "CANONICAL_1M_NEUTRAL";
-    resolutionReason = "FRESH_COMPLETED_1M_NEUTRAL_REACTION";
-  } else if (!observationPresent) {
-    resolutionReason = "ONE_MINUTE_OBSERVATION_MISSING";
-  } else if (!aligned) {
-    resolutionReason = "ONE_MINUTE_IDENTITY_MISMATCH";
-  } else if (observation1m?.stale === true) {
-    resolutionReason = "ONE_MINUTE_OBSERVATION_STALE";
-  } else if (!candleCompleted) {
-    resolutionReason = "ONE_MINUTE_CANDLE_NOT_COMPLETED";
-  } else if (!observationActive) {
-    resolutionReason = "ONE_MINUTE_OBSERVATION_INACTIVE";
-  } else if (!observedDirectionUsable) {
-    resolutionReason = "ONE_MINUTE_DIRECTION_NOT_USABLE";
+  } else if (tenMinuteUsable) {
+    state = tenMinuteState;
+    direction = tenMinuteDirection;
+    sourceTimeframe = "10m";
+    reactionTimeframe = "10m";
+
+    resolutionStatus =
+      "CANONICAL_10M_DIRECTIONAL";
+
+    resolutionReason =
+      "TEN_MINUTE_PRIMARY_DIRECTION_ESTABLISHED";
   }
 
   return {
@@ -324,14 +387,27 @@ function resolveCanonicalDirection({
     sourceTimeframe,
     reactionTimeframe,
 
+    tenMinuteState,
+    tenMinuteDirection,
+    tenMinuteUsable,
+
+    validationState,
+    validationPresent,
+    validationFresh,
+    validationResolved,
+    validationSupportsPrimary,
+    validationConflictsPrimary,
+
     observationPresent,
     observationActive,
     observationFresh,
-    candleCompleted,
+    observationCompleted,
     observationUsable,
-    identityAligned: aligned,
-    observedState,
-    observedDirection,
+    observationIdentityAligned,
+    oneMinuteState,
+    oneMinuteDirection,
+    oneMinuteSupportsPrimary,
+    oneMinuteConflictsPrimary,
 
     previousCanonicalDirection:
       previousDirectional
@@ -359,18 +435,20 @@ function resolveCanonicalDirection({
 function resolveCanonicalQuality({
   observation1m = null,
   validation5m = null,
+  broaderReaction10m = null,
   canonicalDirection = "NEUTRAL",
+  canonicalResolution = null,
 } = {}) {
+  const tenMinuteQuality =
+    safeUpper(
+      broaderReaction10m?.quality,
+      "WEAK"
+    );
+
   const oneMinuteQuality =
     safeUpper(
       observation1m?.quality,
       "WEAK"
-    );
-
-  const validationState =
-    safeUpper(
-      validation5m?.validationState,
-      "UNRESOLVED"
     );
 
   const validationQuality =
@@ -379,41 +457,43 @@ function resolveCanonicalQuality({
       "WEAK"
     );
 
+  let quality = tenMinuteQuality;
+
+  /*
+   * 10m owns the base quality.
+   * 5m can validate or downgrade it.
+   * 1m has the least influence and only downgrades when it gives
+   * a fresh completed directional conflict.
+   */
+  if (
+    canonicalResolution?.validationConflictsPrimary === true
+  ) {
+    quality = "MIXED";
+  } else if (
+    canonicalResolution?.validationSupportsPrimary === true &&
+    quality === "WEAK" &&
+    ["GOOD", "STRONG"].includes(validationQuality)
+  ) {
+    quality = "MIXED";
+  }
+
+  if (
+    canonicalResolution?.oneMinuteConflictsPrimary === true
+  ) {
+    if (quality === "STRONG" || quality === "GOOD") {
+      quality = "MIXED";
+    }
+  }
+
   if (
     !["LONG", "SHORT"].includes(
-      canonicalDirection
+      safeUpper(canonicalDirection, "NEUTRAL")
     )
   ) {
-    return oneMinuteQuality;
+    return quality;
   }
 
-  if (
-    validationState === "CONFLICT" ||
-    validation5m?.conflictsWith1mDirection === true
-  ) {
-    return "MIXED";
-  }
-
-  if (
-    validationState === "SUPPORT" ||
-    validation5m?.supports1mDirection === true
-  ) {
-    if (oneMinuteQuality === "STRONG") {
-      return "STRONG";
-    }
-
-    if (
-      oneMinuteQuality === "GOOD" ||
-      validationQuality === "GOOD" ||
-      validationQuality === "STRONG"
-    ) {
-      return "GOOD";
-    }
-
-    return "MIXED";
-  }
-
-  return oneMinuteQuality;
+  return quality;
 }
 
 function setupTypeForCanonical({
@@ -495,12 +575,10 @@ function resolveQualification({
     validation5m?.maturityResolved === true;
 
   const validationSupports =
-    validation5m?.supports1mDirection === true ||
-    validationState === "SUPPORT";
+    canonicalResolution?.validationSupportsPrimary === true;
 
   const validationConflicts =
-    validation5m?.conflictsWith1mDirection === true ||
-    validationState === "CONFLICT";
+    canonicalResolution?.validationConflictsPrimary === true;
 
   const authorizationActive =
     engine26LocationContext?.active === true &&
@@ -538,13 +616,6 @@ function resolveQualification({
     blockers.push("ENGINE26_EVALUATION_NOT_AUTHORIZED");
   }
 
-  if (
-    canonicalResolution?.observationUsable !== true &&
-    canonicalResolution?.directionPersistenceActive !== true
-  ) {
-    blockers.push("ONE_MINUTE_CANONICAL_EVIDENCE_NOT_USABLE");
-  }
-
   if (!["LONG", "SHORT"].includes(direction)) {
     blockers.push("CANONICAL_DIRECTION_NOT_DIRECTIONAL");
   }
@@ -555,6 +626,12 @@ function resolveQualification({
 
   if (!QUALIFYING_QUALITY.has(quality)) {
     blockers.push("ENGINE3_CANONICAL_QUALITY_NOT_GOOD_OR_STRONG");
+  }
+
+  if (
+    canonicalResolution?.oneMinuteConflictsPrimary === true
+  ) {
+    blockers.push("ONE_MINUTE_IMMEDIATE_DIRECTION_CONFLICT");
   }
 
   if (!validationPresent) {
@@ -587,6 +664,18 @@ function resolveQualification({
 
   if (validationSupports && validationResolved && validationFresh) {
     reasonCodes.push("FIVE_MINUTE_VALIDATION_SUPPORT");
+  }
+
+  if (
+    canonicalResolution?.oneMinuteSupportsPrimary === true
+  ) {
+    reasonCodes.push("ONE_MINUTE_IMMEDIATE_SUPPORT");
+  }
+
+  if (
+    canonicalResolution?.oneMinuteConflictsPrimary === true
+  ) {
+    reasonCodes.push("ONE_MINUTE_IMMEDIATE_CONFLICT");
   }
 
   if (reactionConfirmed) {
@@ -769,6 +858,8 @@ export function attachPaperScalpReactionToConfluence({
   const canonicalResolution =
     resolveCanonicalDirection({
       observation1m,
+      validation5m,
+      broaderReaction10m,
       previousCanonicalDirection,
       tenMinuteCompletedClose,
       tenMinuteEma10,
@@ -779,8 +870,10 @@ export function attachPaperScalpReactionToConfluence({
     resolveCanonicalQuality({
       observation1m,
       validation5m,
+      broaderReaction10m,
       canonicalDirection:
         canonicalResolution.direction,
+      canonicalResolution,
     });
 
   const canonicalReactionInput = {
@@ -902,7 +995,31 @@ export function attachPaperScalpReactionToConfluence({
       canonicalResolution.observationUsable,
 
     canonicalIdentityAligned:
-      canonicalResolution.identityAligned,
+      canonicalResolution.observationIdentityAligned,
+
+    primaryDirectionTimeframe:
+      "10m",
+
+    validationDirectionTimeframe:
+      "5m",
+
+    immediateDirectionTimeframe:
+      "1m",
+
+    tenMinutePrimaryDirection:
+      canonicalResolution.tenMinuteDirection,
+
+    fiveMinuteValidationDirection:
+      validation5m?.direction || "NEUTRAL",
+
+    oneMinuteImmediateDirection:
+      observation1m?.direction || "NEUTRAL",
+
+    oneMinuteImmediateSupportsPrimary:
+      canonicalResolution.oneMinuteSupportsPrimary,
+
+    oneMinuteImmediateConflictsPrimary:
+      canonicalResolution.oneMinuteConflictsPrimary,
 
     previousCanonicalDirection:
       canonicalResolution.previousCanonicalDirection,
@@ -1117,6 +1234,13 @@ export function attachPaperScalpReactionToConfluence({
     validationState:
       qualification.validationState,
 
+    validationSupportsPrimary:
+      qualification.validationSupports,
+
+    validationConflictsPrimary:
+      qualification.validationConflicts,
+
+    // Compatibility aliases retained for current consumers.
     validationSupports1m:
       qualification.validationSupports,
 
@@ -1232,6 +1356,7 @@ export function attachPaperScalpReactionToConfluence({
         "PAPER_ONLY_RESEARCH_LANE",
         "ENGINE3_STRATEGY1_CANONICAL_REACTION_V3",
         "ONE_CANONICAL_ENGINE3_DIRECTION_OWNER",
+        "TEN_MINUTE_PRIMARY_DIRECTION_5M_VALIDATION_1M_IMMEDIATE",
         canonicalResolution.resolutionStatus,
         canonicalResolution.resolutionReason,
 
