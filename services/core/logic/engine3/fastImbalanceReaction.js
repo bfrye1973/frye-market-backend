@@ -1,9 +1,4 @@
-// services/core/logic/engine3/fastImbalanceReaction.js
-//
-// Engine 3 fast imbalance reaction reader.
-//
-// Purpose:
-// - Fast PAPER_ONLY / RESEARCH_ONLY candle + imbalance reaction read.
+/ - Fast PAPER_ONLY / RESEARCH_ONLY candle + imbalance reaction read.
 // - Designed for Engine 26 FAST_IMBALANCE_WATCH.
 // - Reads manual ES imbalance zones from data/es-smz-manual-zones.txt.
 // - Reads latest 10m candle behavior around the active imbalance.
@@ -249,74 +244,165 @@ function classifyQuality(state) {
   return "WEAK";
 }
 
-function classifyHeldLevelCandleDirection(bars = []) {
-  const recent = Array.isArray(bars)
-    ? bars.filter(Boolean).slice(-3)
+export function classifyTenMinuteDiagnosticDirection(completedBars = []) {
+  const bars = Array.isArray(completedBars)
+    ? completedBars.filter(Boolean).map(normalizeBar)
     : [];
 
-  if (recent.length < 2) {
+  /*
+   * Deterministic V1 10m diagnostic classifier.
+   *
+   * Guardrails:
+   * - completed 10m candles only
+   * - ATR(14) from completed candles only
+   * - four-candle evaluation window
+   * - minimum absolute net-close displacement >= 1.25 ATR
+   * - signed net displacement chooses candidate direction
+   * - aggregate candle-body magnitude must agree
+   * - materially opposite high/low structure cancels to NEUTRAL
+   * - structure may never reverse direction
+   * - no fallback to the retired point-voting scorer
+   */
+  if (bars.length < 15) {
     return "NEUTRAL";
   }
 
-  let bearishScore = 0;
-  let bullishScore = 0;
+  const atrBars = bars.slice(-15);
 
-  for (let index = 1; index < recent.length; index += 1) {
-    const prev = normalizeBar(recent[index - 1]);
-    const current = normalizeBar(recent[index]);
-
-    /*
-     * Recency weighting:
-     * - older completed-candle comparison = weight 1
-     * - newest completed-candle comparison = weight 2
-     *
-     * This prevents an older move from outweighing a fresh hard reversal.
-     */
-    const weight =
-      index === recent.length - 1
-        ? 2
-        : 1;
-
+  for (const bar of atrBars) {
     if (
-      current.close != null &&
-      prev.close != null
+      bar.open == null ||
+      bar.high == null ||
+      bar.low == null ||
+      bar.close == null
     ) {
-      if (current.close < prev.close) bearishScore += weight;
-      if (current.close > prev.close) bullishScore += weight;
+      return "NEUTRAL";
+    }
+  }
+
+  const trueRanges = [];
+
+  for (let index = 1; index < atrBars.length; index += 1) {
+    const previousClose = atrBars[index - 1].close;
+    const current = atrBars[index];
+
+    const trueRange = Math.max(
+      current.high - current.low,
+      Math.abs(current.high - previousClose),
+      Math.abs(current.low - previousClose)
+    );
+
+    if (!Number.isFinite(trueRange)) {
+      return "NEUTRAL";
     }
 
-    if (
-      current.low != null &&
-      prev.low != null
-    ) {
-      if (current.low < prev.low) bearishScore += weight;
-      if (current.low > prev.low) bullishScore += weight;
+    trueRanges.push(trueRange);
+  }
+
+  if (trueRanges.length !== 14) {
+    return "NEUTRAL";
+  }
+
+  const atr14 =
+    trueRanges.reduce((sum, value) => sum + value, 0) /
+    trueRanges.length;
+
+  if (!Number.isFinite(atr14) || atr14 <= 0) {
+    return "NEUTRAL";
+  }
+
+  const window = bars.slice(-4);
+
+  if (window.length !== 4) {
+    return "NEUTRAL";
+  }
+
+  const netClose =
+    window[window.length - 1].close -
+    window[0].close;
+
+  if (!Number.isFinite(netClose) || netClose === 0) {
+    return "NEUTRAL";
+  }
+
+  const normalizedDisplacement =
+    Math.abs(netClose) / atr14;
+
+  if (
+    !Number.isFinite(normalizedDisplacement) ||
+    normalizedDisplacement < 1.25
+  ) {
+    return "NEUTRAL";
+  }
+
+  const candidateDirection =
+    netClose > 0
+      ? "LONG"
+      : "SHORT";
+
+  let bullishBodyPoints = 0;
+  let bearishBodyPoints = 0;
+
+  for (const bar of window) {
+    const body = bar.close - bar.open;
+
+    if (!Number.isFinite(body)) {
+      return "NEUTRAL";
     }
 
-    if (
-      current.high != null &&
-      prev.high != null
-    ) {
-      if (current.high < prev.high) bearishScore += weight;
-      if (current.high > prev.high) bullishScore += weight;
+    if (body > 0) {
+      bullishBodyPoints += body;
+    } else if (body < 0) {
+      bearishBodyPoints += Math.abs(body);
     }
   }
 
   if (
-    bearishScore >= 3 &&
-    bearishScore > bullishScore
+    candidateDirection === "LONG" &&
+    !(bullishBodyPoints > bearishBodyPoints)
   ) {
-    return "SHORT";
+    return "NEUTRAL";
   }
 
   if (
-    bullishScore >= 3 &&
-    bullishScore > bearishScore
+    candidateDirection === "SHORT" &&
+    !(bearishBodyPoints > bullishBodyPoints)
   ) {
-    return "LONG";
+    return "NEUTRAL";
   }
 
-  return "NEUTRAL";
+  let higherHighs = 0;
+  let higherLows = 0;
+  let lowerHighs = 0;
+  let lowerLows = 0;
+
+  for (let index = 1; index < window.length; index += 1) {
+    const previous = window[index - 1];
+    const current = window[index];
+
+    if (current.high > previous.high) higherHighs += 1;
+    if (current.low > previous.low) higherLows += 1;
+    if (current.high < previous.high) lowerHighs += 1;
+    if (current.low < previous.low) lowerLows += 1;
+  }
+
+  if (
+    candidateDirection === "LONG" &&
+    lowerHighs >= 2 &&
+    lowerLows >= 2
+  ) {
+    return "NEUTRAL";
+  }
+
+  if (
+    candidateDirection === "SHORT" &&
+    higherHighs >= 2 &&
+    higherLows >= 2
+  ) {
+    return "NEUTRAL";
+  }
+
+  return candidateDirection;
 }
 
 function classifyDirection(state) {
@@ -814,7 +900,7 @@ export function buildFastImbalanceReaction({
   const rawState = evaluation.state || "NO_SIGNAL";
 
   const candleDirectionRaw =
-    classifyHeldLevelCandleDirection(
+    classifyTenMinuteDiagnosticDirection(
       candleCompletionTruth.completedBars
     );
 
@@ -1053,3 +1139,4 @@ export function attachFastImbalanceReactionToConfluence({
 }
 
 export default buildFastImbalanceReaction;
+render@srv-d2ds5nodl3ps73b7i2og-59478b5978-7ldfs:~/project/src
