@@ -1,4 +1,4 @@
-/ - Fast PAPER_ONLY / RESEARCH_ONLY candle + imbalance reaction read.
+// - Fast PAPER_ONLY / RESEARCH_ONLY candle + imbalance reaction read.
 // - Designed for Engine 26 FAST_IMBALANCE_WATCH.
 // - Reads manual ES imbalance zones from data/es-smz-manual-zones.txt.
 // - Reads latest 10m candle behavior around the active imbalance.
