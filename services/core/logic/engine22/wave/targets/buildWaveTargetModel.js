@@ -2,7 +2,8 @@
 // Engine 22 — Generated Wave Target Model
 //
 // Purpose:
-// Generate extension and retracement ladders from structural Elliott marks.
+// Generate extension, retracement, and correction target ladders from
+// structural Elliott marks.
 //
 // This is structural display context only.
 // It does NOT create trade permission.
@@ -24,6 +25,14 @@ const RETRACEMENT_FIBS = [
   { label: "0.500", key: "r500", value: 0.5 },
   { label: "0.618", key: "r618", value: 0.618 },
   { label: "0.786", key: "r786", value: 0.786 },
+];
+
+const C_DOWN_FIBS = [
+  { label: "C 1.000", key: "c100", value: 1.0 },
+  { label: "C 1.272", key: "c1272", value: 1.272 },
+  { label: "C 1.618", key: "c1618", value: 1.618 },
+  { label: "C 2.000", key: "c200", value: 2.0 },
+  { label: "C 2.618", key: "c2618", value: 2.618 },
 ];
 
 const TARGET_MODEL_SOURCE = "engine22.wave.targets.v1";
@@ -101,6 +110,18 @@ function getWaveHigh(marks = {}, waveKey) {
 function getWavePrice(marks = {}, waveKey) {
   const mark = marks?.[waveKey] || marks?.[String(waveKey).toLowerCase()] || null;
   return getMark(mark);
+}
+
+function getWaveMark(marks = {}, waveKey) {
+  return marks?.[waveKey] || marks?.[String(waveKey).toLowerCase()] || null;
+}
+
+function getMarkStatus(mark) {
+  return upper(mark?.status || mark?.maturity || "");
+}
+
+function getMarkTime(mark) {
+  return mark?.time || mark?.t || mark?.timestamp || null;
 }
 
 function invalidTargetModel({
@@ -369,6 +390,137 @@ function buildRetracementTargetModel({
   };
 }
 
+function buildExpandedFlatCDownTargetModel({
+  symbol,
+  degree,
+  activeWave,
+  marks = {},
+  currentPrice = null,
+  manualFallback = null,
+} = {}) {
+  const waveA = getWaveMark(marks, "A");
+  const waveB = getWaveMark(marks, "B");
+  const waveC = getWaveMark(marks, "C");
+
+  const aLow = getWavePrice(marks, "A");
+  const bHigh = getWavePrice(marks, "B");
+
+  if (aLow === null || bHigh === null) {
+    return invalidTargetModel({
+      symbol,
+      degree,
+      activeWave,
+      modelType: "C_DOWN_EXTENSION_LADDER",
+      reason: "TARGET_MODEL_MISSING_EXPANDED_FLAT_A_B_MARKS",
+      manualFallback,
+    });
+  }
+
+  const range = Math.abs(bHigh - aLow);
+
+  if (!Number.isFinite(range) || range <= 0) {
+    return invalidTargetModel({
+      symbol,
+      degree,
+      activeWave,
+      modelType: "C_DOWN_EXTENSION_LADDER",
+      reason: "TARGET_MODEL_INVALID_EXPANDED_FLAT_A_B_RANGE",
+      manualFallback,
+    });
+  }
+
+  const levels = {};
+
+  for (const fib of C_DOWN_FIBS) {
+    const price = roundToTick(bHigh - range * fib.value, symbol);
+
+    levels[fib.label] = price;
+    levels[fib.key] = price;
+  }
+
+  const displayLevels = buildDisplayLevels({
+    levels,
+    fibs: C_DOWN_FIBS,
+  });
+
+  const sortedPrices = displayLevels
+    .map((x) => toNum(x.price))
+    .filter((x) => x !== null)
+    .sort((a, b) => b - a);
+
+  const price = toNum(currentPrice);
+
+  const nextTarget =
+    price !== null
+      ? sortedPrices.find((target) => target <= price) ?? sortedPrices[0] ?? null
+      : sortedPrices[0] ?? null;
+
+  const nextTargetKey =
+    Object.entries(levels).find(([, value]) => value === nextTarget)?.[0] || null;
+
+  return {
+    active: true,
+    source: TARGET_MODEL_SOURCE,
+    generated: true,
+    symbol,
+    degree,
+    activeWave,
+
+    modelType: "C_DOWN_EXTENSION_LADDER",
+    correctionType: "EXPANDED_FLAT",
+    direction: "DOWN",
+    currentLeg: "C",
+    projectionMethod: "EXPANDED_FLAT_A_B_PROJECTED_FROM_B_HIGH",
+
+    anchorModel: {
+      waveALow: round2(aLow),
+      waveATime: getMarkTime(waveA),
+      waveAStatus: getMarkStatus(waveA) || null,
+
+      waveBHigh: round2(bHigh),
+      waveBTime: getMarkTime(waveB),
+      waveBStatus: getMarkStatus(waveB) || null,
+
+      waveCStatus: getMarkStatus(waveC) || null,
+
+      projectionBase: round2(bHigh),
+      range: round2(range),
+    },
+
+    levels,
+    displayLevels,
+
+    nextTarget: round2(nextTarget),
+    nextTargetKey,
+
+    primaryTarget: levels.c1618 ?? null,
+    primaryTargetKey: "c1618",
+
+    invalidationLevel: round2(bHigh),
+    invalidationRule: "C_DOWN_ACTIVE_WHILE_PRICE_CANNOT_HOLD_ABOVE_B_HIGH",
+
+    summary:
+      `${degree} W4 expanded flat is active. B high is ${round2(
+        bHigh
+      )}. While price cannot reclaim and hold above ${round2(
+        bHigh
+      )}, watch C down toward ${levels.c100}, ${levels.c1272}, and ${levels.c1618}.`,
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    reasonCodes: [
+      "TARGET_MODEL_GENERATED_FROM_ACTIVE_STRUCTURE",
+      "EXPANDED_FLAT_C_DOWN_LADDER_GENERATED",
+      "B_COMPLETE_C_DOWN_WATCH",
+      "C_DOWN_ACTIVE_WHILE_PRICE_CANNOT_HOLD_ABOVE_B_HIGH",
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+    ],
+  };
+}
+
 function chooseManualTargetFallback(structure = {}) {
   const targetModel =
     structure?.targetModel && typeof structure.targetModel === "object"
@@ -409,34 +561,24 @@ export function buildWaveTargetModel({
     });
   }
 
-const activeWave = upper(
-  structure.activeWave ||
-    structure.currentWave ||
-    structure.wave ||
-    structure.activeLeg
-);
+  const activeWave = upper(
+    structure.activeWave ||
+      structure.currentWave ||
+      structure.wave ||
+      structure.activeLeg
+  );
 
-const stage = upper(
-  structure.stage ||
-    structure.status ||
-    structure.state ||
-    structure.lifecycle ||
-    ""
-);
+  const stage = upper(
+    structure.stage ||
+      structure.status ||
+      structure.state ||
+      structure.lifecycle ||
+      ""
+  );
 
-const marks = structure?.marks || structure?.waveMarks || {};
-const manualFallback = chooseManualTargetFallback(structure);
+  const marks = structure?.marks || structure?.waveMarks || {};
+  const manualFallback = chooseManualTargetFallback(structure);
 
-if (stage === "COMPLETE" || stage.includes("COMPLETE")) {
-  return invalidTargetModel({
-    symbol,
-    degree,
-    activeWave,
-    modelType: "COMPLETED_WAVE_NO_FRESH_TARGET_LADDER",
-    reason: "TARGET_MODEL_SKIPPED_COMPLETED_WAVE",
-    manualFallback: null,
-  });
-}
   if (manualFallback?.override === true) {
     return {
       ...manualFallback,
@@ -447,6 +589,45 @@ if (stage === "COMPLETE" || stage.includes("COMPLETE")) {
       noPermissionCreated: true,
       watchOnly: true,
     };
+  }
+
+  const reasonCodes = Array.isArray(structure?.reasonCodes)
+    ? structure.reasonCodes.map((code) => upper(code))
+    : [];
+
+  const waveC = getWaveMark(marks, "C");
+
+  const hasExpandedFlatCDownMarks =
+    activeWave === "W4" &&
+    getWavePrice(marks, "A") !== null &&
+    getWavePrice(marks, "B") !== null &&
+    (
+      waveC != null ||
+      reasonCodes.includes("ENGINE22_MINUTE_W4_EXPANDED_FLAT") ||
+      reasonCodes.includes("ENGINE22_B_COMPLETE_C_DOWN_WATCH") ||
+      reasonCodes.includes("ENGINE22_C_DOWN_ACTIVE_BELOW_7840")
+    );
+
+  if (hasExpandedFlatCDownMarks) {
+    return buildExpandedFlatCDownTargetModel({
+      symbol,
+      degree,
+      activeWave,
+      marks,
+      currentPrice,
+      manualFallback,
+    });
+  }
+
+  if (stage === "COMPLETE" || stage.includes("COMPLETE")) {
+    return invalidTargetModel({
+      symbol,
+      degree,
+      activeWave,
+      modelType: "COMPLETED_WAVE_NO_FRESH_TARGET_LADDER",
+      reason: "TARGET_MODEL_SKIPPED_COMPLETED_WAVE",
+      manualFallback: null,
+    });
   }
 
   if (activeWave === "W3") {
