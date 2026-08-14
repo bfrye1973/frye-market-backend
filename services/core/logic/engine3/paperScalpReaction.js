@@ -870,7 +870,6 @@ const previousConfirmed =
   previousReactionConfirmed === true;
 
 const persistedConfirmation =
-  previousConfirmed &&
   canonicalResolution?.directionPersistenceActive === true &&
   canonicalResolution?.ema10ResetTriggered !== true &&
   canonicalDirectional;
