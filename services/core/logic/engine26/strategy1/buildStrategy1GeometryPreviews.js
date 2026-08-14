@@ -177,24 +177,25 @@ function buildCDownStructuralContext({
       ? sourceModel.anchorModel
       : {};
 
-  const bHigh = firstNum(
-    sourceModel?.bHigh,
-    sourceModel?.waveBHigh,
-    sourceModel?.anchorHigh,
-    anchorModel?.anchorHigh,
-    anchorModel?.bHigh,
-    minuteState?.internalStructure?.bHigh,
-    minuteState?.internalStructure?.waveBHigh
-  );
+const invalidationLevel = firstNum(
+  sourceModel?.invalidationLevel,
+  sourceModel?.reclaimInvalidation,
+  sourceModel?.reclaimInvalidationLevel,
+  sourceModel?.riskModel?.invalidationLevel,
+  sourceModel?.riskModel?.bHigh,
+  minuteState?.internalStructure?.invalidationLevel
+);
 
-  const invalidationLevel = firstNum(
-    sourceModel?.invalidationLevel,
-    sourceModel?.reclaimInvalidation,
-    sourceModel?.reclaimInvalidationLevel,
-    sourceModel?.riskModel?.invalidationLevel,
-    sourceModel?.riskModel?.bHigh,
-    bHigh
-  );
+const bHigh = firstNum(
+  sourceModel?.bHigh,
+  sourceModel?.waveBHigh,
+  sourceModel?.anchorHigh,
+  anchorModel?.anchorHigh,
+  anchorModel?.bHigh,
+  minuteState?.internalStructure?.bHigh,
+  minuteState?.internalStructure?.waveBHigh,
+  invalidationLevel
+);
 
   const nextPrice = firstNum(
     sourceModel?.nextPrice,
