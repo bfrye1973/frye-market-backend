@@ -516,6 +516,7 @@ function resolveCanonicalConfirmation({
   observation1m = null,
   validation5m = null,
   authorizationContext = null,
+  previousReactionConfirmed = false,
 } = {}) {
   const blockers = [];
   const reasonCodes = [];
@@ -860,20 +861,53 @@ function resolveCanonicalConfirmation({
     );
   }
 
-  const reactionConfirmed =
-    blockers.length === 0;
+/*
+ * Confirmation persistence.
+ *
+ * A fresh 1m + 5m alignment must create the original confirmation.
+ *
+ * Once already confirmed, the reaction remains confirmed while the
+ * canonical direction itself is being persisted by the approved
+ * completed-10m EMA10 lifecycle.
+ *
+ * EMA10 does NOT create confirmation from scratch.
+ */
+const previousConfirmed =
+  previousReactionConfirmed === true;
 
+const persistedConfirmation =
+  previousConfirmed &&
+  canonicalResolution?.directionPersistenceActive === true &&
+  canonicalResolution?.ema10ResetTriggered !== true &&
+  canonicalDirectional;
+
+const reactionConfirmed =
+  persistedConfirmation ||
+  blockers.length === 0;
+
+if (persistedConfirmation) {
   reasonCodes.push(
-    reactionConfirmed
-      ? "ENGINE3_CANONICAL_REACTION_CONFIRMED"
-      : "ENGINE3_CANONICAL_REACTION_NOT_CONFIRMED"
+    `ENGINE3_${direction}_CONFIRMATION_PERSISTED_UNTIL_10M_EMA10_RESET`
   );
+}
 
+reasonCodes.push(
+  reactionConfirmed
+    ? "ENGINE3_CANONICAL_REACTION_CONFIRMED"
+    : "ENGINE3_CANONICAL_REACTION_NOT_CONFIRMED"
+);
+
+  
   return {
     reactionConfirmed,
+
+    previousReactionConfirmed:
+      previousConfirmed,
+
+    persistedConfirmation,
+
     blockers,
     reasonCodes,
-
     authorizationValid,
     identityMatched,
     chainArmed,
@@ -1054,6 +1088,7 @@ export function attachPaperScalpReactionToConfluence({
   engine26StructuralContext = null,
   paperShortResearchEnabled = false,
   previousCanonicalDirection = null,
+  previousReactionConfirmed = false,
   tenMinuteCompletedClose = null,
   tenMinuteEma10 = null,
 }) {
@@ -1137,6 +1172,7 @@ export function attachPaperScalpReactionToConfluence({
       observation1m,
       validation5m,
       authorizationContext,
+      previousReactionConfirmed,
     });
 
   const engine26LocationContext =
@@ -1465,6 +1501,12 @@ export function attachPaperScalpReactionToConfluence({
       engine26LocationContext || null,
 
     confirmationDiagnostics: {
+      previousReactionConfirmed:
+        confirmation.previousReactionConfirmed,
+
+      persistedConfirmation:
+        confirmation.persistedConfirmation,
+
       authorizationValid:
         confirmation.authorizationValid,
       identityMatched:
