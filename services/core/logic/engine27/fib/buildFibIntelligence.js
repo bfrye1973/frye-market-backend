@@ -50,6 +50,22 @@ const EXTENSION_RATIOS = {
   e2618: 2.618,
 };
 
+const C_DOWN_RATIOS = {
+  c100: 1.0,
+  c1272: 1.272,
+  c1618: 1.618,
+  c200: 2.0,
+  c2618: 2.618,
+};
+
+const C_DOWN_LABELS = {
+  c100: "C 1.000",
+  c1272: "C 1.272",
+  c1618: "C 1.618",
+  c200: "C 2.000",
+  c2618: "C 2.618",
+};
+
 const ES_TICK_SIZE = 0.25;
 
 function isObject(value) {
@@ -605,6 +621,13 @@ function purposeForLevel({
 }) {
   const degree =
     degreeKey.toUpperCase();
+
+  if (
+    currentWave === "W4" &&
+    ladderType === "C_DOWN_EXTENSION"
+  ) {
+    return `${degree}_W4_C_DOWN_OBJECTIVE`;
+  }
 
   if (
     currentWave === "W3" &&
@@ -1375,6 +1398,654 @@ function buildCanonicalRetracementLevels({
   return levels;
 }
 
+
+function readTargetModel(degreeState) {
+  return isObject(
+    degreeState?.targetModel
+  )
+    ? degreeState.targetModel
+    : null;
+}
+
+function readCDownTargetModelFromDegreeState(
+  degreeState
+) {
+  const targetModel =
+    readTargetModel(
+      degreeState
+    );
+
+  const modelType =
+    String(
+      targetModel?.modelType ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+  if (
+    modelType !==
+    "C_DOWN_EXTENSION_LADDER"
+  ) {
+    return null;
+  }
+
+  const levels =
+    isObject(
+      targetModel.levels
+    )
+      ? targetModel.levels
+      : {};
+
+  const anchorModel =
+    isObject(
+      targetModel.anchorModel
+    )
+      ? targetModel.anchorModel
+      : {};
+
+  const waveALow =
+    toPrice(
+      anchorModel.waveALow
+    );
+
+  const waveBHigh =
+    toPrice(
+      targetModel.invalidationLevel ??
+      anchorModel.waveBHigh ??
+      anchorModel.projectionBase
+    );
+
+  const range =
+    toPrice(
+      anchorModel.range
+    ) ??
+    (
+      waveALow !== null &&
+      waveBHigh !== null
+        ? Math.abs(
+            waveBHigh -
+            waveALow
+          )
+        : null
+    );
+
+  if (
+    waveALow === null ||
+    waveBHigh === null ||
+    range === null ||
+    range <= 0
+  ) {
+    return null;
+  }
+
+  return {
+    targetModel,
+    levels,
+    anchorModel,
+    waveALow:
+      roundToTick(
+        waveALow
+      ),
+    waveBHigh:
+      roundToTick(
+        waveBHigh
+      ),
+    range:
+      roundToTick(
+        range
+      ),
+  };
+}
+
+function buildCDownFibLevels({
+  degreeKey,
+  currentWave,
+  targetModel,
+  levels,
+  currentPrice,
+}) {
+  const output = {};
+
+  for (
+    const [
+      key,
+      ratio,
+    ]
+    of Object.entries(
+      C_DOWN_RATIOS
+    )
+  ) {
+    const price =
+      toPrice(
+        levels[key] ??
+        levels[C_DOWN_LABELS[key]]
+      );
+
+    if (price === null) {
+      continue;
+    }
+
+    output[key] =
+      buildFibLevel({
+        degreeKey,
+        currentWave,
+        label:
+          C_DOWN_LABELS[key],
+        ratio,
+        price,
+        currentPrice,
+        direction:
+          "BEARISH",
+        ladderType:
+          "C_DOWN_EXTENSION",
+      });
+  }
+
+  return output;
+}
+
+function orderedCDownLevels(
+  levels
+) {
+  return Object.keys(
+    C_DOWN_RATIOS
+  )
+    .map(
+      (key) =>
+        levels?.[key] ||
+        null
+    )
+    .filter(Boolean);
+}
+
+function buildCurrentCDownObjective({
+  currentPrice,
+  levels,
+}) {
+  const ordered =
+    orderedCDownLevels(
+      levels
+    );
+
+  if (!ordered.length) {
+    return {
+      currentFib: {
+        lastCompleted:
+          "UNKNOWN",
+        next:
+          "UNKNOWN",
+      },
+
+      completedFibLevels: [],
+      nextFib: "UNKNOWN",
+      nextPrice: null,
+      distance: null,
+      remainingTargets: [],
+    };
+  }
+
+  if (currentPrice === null) {
+    return {
+      currentFib: {
+        lastCompleted:
+          "UNKNOWN",
+        next:
+          ordered[0].label,
+      },
+
+      completedFibLevels: [],
+
+      nextFib:
+        ordered[0].label,
+
+      nextPrice:
+        ordered[0].price,
+
+      distance:
+        null,
+
+      remainingTargets:
+        ordered.slice(1),
+    };
+  }
+
+  const completedFibLevels =
+    ordered.filter(
+      (level) =>
+        level.status ===
+        "REACHED"
+    );
+
+  const nextIndex =
+    ordered.findIndex(
+      (level) =>
+        level.status !==
+        "REACHED"
+    );
+
+  const nextLevel =
+    nextIndex >= 0
+      ? ordered[nextIndex]
+      : null;
+
+  return {
+    currentFib: {
+      lastCompleted:
+        completedFibLevels[
+          completedFibLevels.length - 1
+        ]?.label ||
+        "NONE",
+
+      next:
+        nextLevel?.label ||
+        "COMPLETE",
+    },
+
+    completedFibLevels,
+
+    nextFib:
+      nextLevel?.label ||
+      "COMPLETE",
+
+    nextPrice:
+      nextLevel?.price ??
+      null,
+
+    distance:
+      nextLevel?.distance ??
+      null,
+
+    remainingTargets:
+      nextIndex >= 0
+        ? ordered.slice(
+            nextIndex + 1
+          )
+        : [],
+  };
+}
+
+function buildCDownTargetModelValidation({
+  cDownLevels,
+  referenceLevels,
+}) {
+  const differences = [];
+
+  if (!isObject(referenceLevels)) {
+    return {
+      source:
+        "degreeState.targetModel.levels",
+
+      available:
+        false,
+
+      matches:
+        true,
+
+      differences,
+    };
+  }
+
+  for (
+    const key
+    of Object.keys(
+      C_DOWN_RATIOS
+    )
+  ) {
+    const engine27Price =
+      toPrice(
+        cDownLevels?.[
+          key
+        ]?.price
+      );
+
+    const engine22Price =
+      toPrice(
+        referenceLevels[
+          key
+        ] ??
+        referenceLevels[
+          C_DOWN_LABELS[key]
+        ]
+      );
+
+    if (
+      engine27Price === null ||
+      engine22Price === null
+    ) {
+      continue;
+    }
+
+    const differencePoints =
+      roundDistance(
+        Math.abs(
+          engine27Price -
+          engine22Price
+        )
+      );
+
+    if (
+      differencePoints >
+      ES_TICK_SIZE
+    ) {
+      differences.push({
+        label:
+          key,
+
+        engine27Price:
+          roundToTick(
+            engine27Price
+          ),
+
+        engine22Price:
+          roundToTick(
+            engine22Price
+          ),
+
+        differencePoints,
+      });
+    }
+  }
+
+  return {
+    source:
+      "degreeState.targetModel.levels",
+
+    available:
+      true,
+
+    matches:
+      differences.length === 0,
+
+    differences,
+  };
+}
+
+function buildCDownTargetModelResult({
+  degreeKey,
+  waveIntelligence,
+  degreeState,
+  currentPrice,
+}) {
+  const cDown =
+    readCDownTargetModelFromDegreeState(
+      degreeState
+    );
+
+  if (!cDown) {
+    return null;
+  }
+
+  const targetModel =
+    cDown.targetModel;
+
+  const currentWave =
+    normalizeWave(
+      targetModel.activeWave ??
+      degreeState?.activeWave ??
+      waveIntelligence
+        ?.currentWave ??
+      "W4"
+    );
+
+  const cDownLevels =
+    buildCDownFibLevels({
+      degreeKey,
+      currentWave,
+      targetModel,
+      levels:
+        cDown.levels,
+      currentPrice,
+    });
+
+  const objective =
+    buildCurrentCDownObjective({
+      currentPrice,
+      levels:
+        cDownLevels,
+    });
+
+  const primaryTarget =
+    toPrice(
+      targetModel.primaryTarget ??
+      cDown.levels.c1618
+    );
+
+  const validation =
+    buildCDownTargetModelValidation({
+      cDownLevels,
+      referenceLevels:
+        cDown.levels,
+    });
+
+  return {
+    degree:
+      degreeKey,
+
+    currentWave,
+
+    currentPrice,
+
+    anchors: {
+      waveStart:
+        cDown.waveBHigh,
+
+      waveEnd:
+        cDown.waveALow,
+
+      projectionBase:
+        cDown.waveBHigh,
+
+      waveLength:
+        cDown.range,
+
+      direction:
+        "BEARISH",
+
+      source:
+        "degreeState.targetModel.anchorModel",
+
+      timestamp:
+        targetModel.updatedAt ??
+        targetModel.timestamp ??
+        null,
+
+      startKey:
+        "waveBHigh",
+
+      endKey:
+        "waveALow",
+
+      projectionBaseKey:
+        "waveBHigh",
+
+      waveLengthKey:
+        "range",
+    },
+
+    retracements: {},
+
+    extensions:
+      cDownLevels,
+
+    cDownTargets:
+      cDownLevels,
+
+    activeLadder:
+      "C_DOWN_EXTENSION",
+
+    modelType:
+      "C_DOWN_EXTENSION_LADDER",
+
+    correctionType:
+      targetModel.correctionType ??
+      "EXPANDED_FLAT",
+
+    currentLeg:
+      targetModel.currentLeg ??
+      "C",
+
+    ...objective,
+
+    primaryTarget:
+      primaryTarget !== null
+        ? roundToTick(
+            primaryTarget
+          )
+        : cDownLevels.c1618?.price ??
+          null,
+
+    primaryTargetKey:
+      targetModel.primaryTargetKey ||
+      "c1618",
+
+    invalidationLevel:
+      cDown.waveBHigh,
+
+    expectedCorrection: {
+      nextWave:
+        "W4_C",
+
+      type:
+        "C_DOWN_EXTENSION",
+
+      description:
+        `${degreeKey.charAt(0).toUpperCase()}${degreeKey.slice(1)} W4 Expanded-Flat C Down`,
+    },
+
+    activeFibModel: {
+      active: true,
+
+      modelKey:
+        "C_DOWN_EXTENSION_LADDER",
+
+      modelType:
+        "C_DOWN_EXTENSION_LADDER",
+
+      correctionType:
+        targetModel.correctionType ??
+        "EXPANDED_FLAT",
+
+      activeWave:
+        currentWave,
+
+      direction:
+        "DOWN",
+
+      currentLeg:
+        targetModel.currentLeg ??
+        "C",
+
+      waveBHigh:
+        cDown.waveBHigh,
+
+      waveALow:
+        cDown.waveALow,
+
+      primaryTarget:
+        primaryTarget !== null
+          ? roundToTick(
+              primaryTarget
+            )
+          : cDownLevels.c1618?.price ??
+            null,
+
+      primaryTargetKey:
+        targetModel.primaryTargetKey ||
+        "c1618",
+
+      invalidationLevel:
+        cDown.waveBHigh,
+
+      nearestLevel: {
+        key:
+          objective.nextFib,
+        price:
+          objective.nextPrice,
+      },
+
+      zoneState:
+        currentPrice !== null &&
+        currentPrice > cDown.waveBHigh
+          ? "ABOVE_B_HIGH_RECLAIM_REVIEW"
+          : "C_DOWN_ACTIVE_BELOW_B_HIGH",
+    },
+
+    targetModel: {
+      modelType:
+        "C_DOWN_EXTENSION_LADDER",
+
+      correctionType:
+        targetModel.correctionType ??
+        "EXPANDED_FLAT",
+
+      currentLeg:
+        targetModel.currentLeg ??
+        "C",
+
+      summary:
+        targetModel.summary ??
+        null,
+
+      anchorModel:
+        targetModel.anchorModel ??
+        null,
+
+      levels:
+        targetModel.levels ??
+        null,
+
+      primaryTarget:
+        primaryTarget !== null
+          ? roundToTick(
+              primaryTarget
+            )
+          : cDownLevels.c1618?.price ??
+            null,
+
+      primaryTargetKey:
+        targetModel.primaryTargetKey ||
+        "c1618",
+
+      invalidationLevel:
+        cDown.waveBHigh,
+    },
+
+    validation,
+
+    reasonCodes:
+      unique([
+        "ENGINE27_FIB_ENGINE22_C_DOWN_TARGET_MODEL_CONSUMED",
+        "ENGINE27_FIB_C_DOWN_EXTENSION_LADDER",
+        "ENGINE27_FIB_EXPANDED_FLAT_C_DOWN_WATCH",
+        Object.keys(
+          cDownLevels
+        ).length > 0
+          ? "ENGINE27_FIB_READY"
+          : "ENGINE27_FIB_UNKNOWN",
+        objective.nextFib !==
+          "UNKNOWN"
+          ? "ENGINE27_FIB_CURRENT_TARGET"
+          : null,
+        (
+          objective.nextFib !==
+            "UNKNOWN" &&
+          objective.nextFib !==
+            "COMPLETE"
+        )
+          ? "ENGINE27_FIB_NEXT_OBJECTIVE"
+          : null,
+        validation.available ===
+          true &&
+        validation.matches ===
+          false
+          ? "ENGINE27_FIB_ENGINE22_VALIDATION_MISMATCH"
+          : null,
+      ]),
+  };
+}
+
+
 function buildCanonicalActiveFibModelResult({
   degreeKey,
   waveIntelligence,
@@ -1721,6 +2392,20 @@ function buildDegreeFibIntelligence({
       waveIntelligence,
       degreeState,
     });
+
+  const cDownTargetModel =
+    buildCDownTargetModelResult({
+      degreeKey,
+      waveIntelligence,
+      degreeState,
+      currentPrice,
+    });
+
+  if (
+    cDownTargetModel
+  ) {
+    return cDownTargetModel;
+  }
 
   const canonicalActiveFibModel =
     buildCanonicalActiveFibModelResult({
