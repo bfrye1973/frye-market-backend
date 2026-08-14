@@ -817,11 +817,13 @@ const previousConfirmed =
   previousReactionConfirmed === true;
 
 const persistedConfirmation =
-  previousConfirmed &&
   canonicalResolution?.directionPersistenceActive === true &&
   canonicalResolution?.ema10ResetTriggered !== true &&
   canonicalDirectional;
-
+  
+if (persistedConfirmation) {
+  blockers.length = 0;
+}
 const reactionConfirmed =
   persistedConfirmation ||
   blockers.length === 0;
