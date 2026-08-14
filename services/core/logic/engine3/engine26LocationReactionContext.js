@@ -356,7 +356,11 @@ function evaluateAuthorizedHandoff({ handoff, reactionInput }) {
     };
   }
 
-  if (expectedReactions.length > 0 && reactionExpected !== true) {
+  if (
+    expectedReactions.length > 0 &&
+    reactionExpected !== true &&
+    reactionInput?.confirmed !== true
+  ) {
     return {
       ...base,
       state: "REACTION_FAILED",
@@ -403,11 +407,26 @@ function evaluateAuthorizedHandoff({ handoff, reactionInput }) {
     };
   }
 
-  const longReaction = direction === "LONG" && LONG_STATES.has(state);
-  const shortReaction = direction === "SHORT" && SHORT_STATES.has(state);
+const longReaction =
+  direction === "LONG" &&
+  (
+    LONG_STATES.has(state) ||
+    state === "EMA10_LONG"
+  );
+
+const shortReaction =
+  direction === "SHORT" &&
+  (
+    SHORT_STATES.has(state) ||
+    state === "EMA10_SHORT"
+  );
   const directionMatchesBias = bias === "NEUTRAL" || direction === bias;
 
-  if ((longReaction || shortReaction) && !directionMatchesBias) {
+  if (
+    (longReaction || shortReaction) &&
+    !directionMatchesBias &&
+    reactionInput?.confirmed !== true
+  ) {
     return {
       ...base,
       state: "REACTION_FAILED",
