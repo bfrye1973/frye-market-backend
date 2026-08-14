@@ -2,6 +2,8 @@
 
 const ENGINE = "engine26B.strategy1GeometryPreviews.v1";
 const MODE = "PREVIEW_ONLY";
+const STRATEGY_ID = "intraday_scalp@10m";
+const LANE_ID = "minute";
 
 function toNum(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -13,57 +15,391 @@ function safeUpper(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function firstNum(...values) {
+  for (const value of values) {
+    const n = toNum(value);
+    if (n != null) return n;
+  }
+
+  return null;
+}
+
 function buildUnavailablePreview({
   symbol,
   strategyId,
   snapshotTime,
+  structuralContext = null,
+  structuralOnlyPreview = null,
   reasonCode,
 }) {
   return {
-    active: false,
+    active: structuralOnlyPreview?.active === true,
     engine: ENGINE,
     mode: MODE,
-    status: "WAITING_FOR_VALID_NEGOTIATED_LOCATION",
+    status:
+      structuralOnlyPreview?.active === true
+        ? "STRUCTURAL_SHORT_PREVIEW_WAITING_FOR_NEGOTIATED_LOCATION"
+        : "WAITING_FOR_VALID_NEGOTIATED_LOCATION",
+
     symbol: safeUpper(symbol || "ES"),
-    strategyId: strategyId || "intraday_scalp@10m",
-    laneId: "minute",
+    strategyId: strategyId || STRATEGY_ID,
+    laneId: LANE_ID,
     snapshotTime: snapshotTime || null,
+
+    /*
+     * IMPORTANT:
+     * location remains null when there is no valid Engine 26A negotiated
+     * Strategy 1 location. Engine 22 structural context must never fabricate
+     * an Engine 26A location.
+     */
     location: null,
+
+    lifecycle: {
+      state: "WAITING_FOR_NEGOTIATED_LOCATION",
+      direction: "NEUTRAL",
+      locationRequired: true,
+    },
+
+    structuralContext,
+    structuralOnlyPreview,
+
     optionA: null,
     optionB: null,
     selectedOption: null,
+
+    decisionSummary:
+      structuralOnlyPreview?.active === true
+        ? {
+            short:
+              structuralOnlyPreview.currentDecision ||
+              "STRUCTURAL SHORT WATCH — WAITING FOR NEGOTIATED LOCATION",
+            long: "WAITING FOR NEGOTIATED LOCATION",
+            engine3: "WAITING_FOR_ENGINE26A_LOCATION",
+            engine4: "WAITING_FOR_ENGINE3",
+            engine6: "FINAL_PERMISSION",
+          }
+        : {
+            short: "WAITING FOR NEGOTIATED LOCATION",
+            long: "WAITING FOR NEGOTIATED LOCATION",
+            engine3: "WAITING_FOR_ENGINE26A_LOCATION",
+            engine4: "WAITING_FOR_ENGINE3",
+            engine6: "FINAL_PERMISSION",
+          },
+
     previewOnly: true,
     noPermissionCreated: true,
     noExecution: true,
+
     reasonCodes: [
       reasonCode || "ENGINE26_VALID_NEGOTIATED_LOCATION_REQUIRED",
+      structuralOnlyPreview?.active === true
+        ? "ENGINE22_C_DOWN_STRUCTURAL_PREVIEW_AVAILABLE"
+        : null,
+      "ENGINE26A_NEGOTIATED_LOCATION_OWNERSHIP_PRESERVED",
       "PREVIEW_ONLY",
       "NO_PERMISSION_CREATED",
       "NO_EXECUTION",
-    ],
+    ].filter(Boolean),
   };
 }
 
-function makeFibLevel({ key, price, activeWave }) {
-  const normalizedKey = safeUpper(key);
+function makeFibLevel({
+  key,
+  price,
+  activeWave,
+  label = null,
+  source = "ENGINE22_ACTIVE_FIB_MODEL",
+}) {
   const normalizedWave = safeUpper(activeWave);
 
   return {
     key,
     price,
     label:
-      normalizedWave === "W4"
-        ? `W4 ${String(key || "").toLowerCase()}`
-        : `${normalizedWave || "ACTIVE WAVE"} ${String(key || "").toLowerCase()}`,
-    source: "ENGINE22_ACTIVE_FIB_MODEL",
+      label ||
+      (
+        normalizedWave === "W4"
+          ? `W4 ${String(key || "").toLowerCase()}`
+          : `${normalizedWave || "ACTIVE WAVE"} ${String(
+              key || ""
+            ).toLowerCase()}`
+      ),
+    source,
+  };
+}
+
+function buildCDownStructuralContext({
+  minuteState,
+  targetModel,
+  activeFibModel,
+}) {
+  const modelType = safeUpper(
+    targetModel?.modelType ||
+      targetModel?.modelKey ||
+      activeFibModel?.modelType ||
+      activeFibModel?.modelKey
+  );
+
+  const cDownActive =
+    modelType === "C_DOWN_EXTENSION_LADDER" ||
+    safeUpper(targetModel?.modelType) === "C_DOWN_EXTENSION_LADDER" ||
+    safeUpper(targetModel?.modelKey) === "C_DOWN_EXTENSION_LADDER" ||
+    safeUpper(activeFibModel?.modelType) === "C_DOWN_EXTENSION_LADDER" ||
+    safeUpper(activeFibModel?.modelKey) === "C_DOWN_EXTENSION_LADDER";
+
+  if (!cDownActive) {
+    return {
+      active: false,
+      model: null,
+      structuralOnlyPreview: null,
+    };
+  }
+
+  /*
+   * Consume published Engine 22 values only.
+   *
+   * The aliases below are transport compatibility only. They do not
+   * calculate, derive, or recreate the ABC structure.
+   */
+  const sourceModel =
+    safeUpper(activeFibModel?.modelType) === "C_DOWN_EXTENSION_LADDER" ||
+    safeUpper(activeFibModel?.modelKey) === "C_DOWN_EXTENSION_LADDER"
+      ? activeFibModel
+      : targetModel;
+
+  const levels =
+    sourceModel?.levels && typeof sourceModel.levels === "object"
+      ? sourceModel.levels
+      : {};
+
+  const anchorModel =
+    sourceModel?.anchorModel && typeof sourceModel.anchorModel === "object"
+      ? sourceModel.anchorModel
+      : {};
+
+  const bHigh = firstNum(
+    sourceModel?.bHigh,
+    sourceModel?.waveBHigh,
+    sourceModel?.anchorHigh,
+    anchorModel?.anchorHigh,
+    anchorModel?.bHigh,
+    minuteState?.internalStructure?.bHigh,
+    minuteState?.internalStructure?.waveBHigh
+  );
+
+  const invalidationLevel = firstNum(
+    sourceModel?.invalidationLevel,
+    sourceModel?.reclaimInvalidation,
+    sourceModel?.reclaimInvalidationLevel,
+    sourceModel?.riskModel?.invalidationLevel,
+    sourceModel?.riskModel?.bHigh,
+    bHigh
+  );
+
+  const nextPrice = firstNum(
+    sourceModel?.nextPrice,
+    sourceModel?.nextTarget,
+    sourceModel?.firstTarget,
+    sourceModel?.firstDestination,
+    sourceModel?.nextLevelBelow?.price,
+    levels?.c100,
+    levels?.C100,
+    levels?.e100,
+    levels?.E100
+  );
+
+  const secondDestination = firstNum(
+    sourceModel?.secondDestination,
+    sourceModel?.secondTarget,
+    sourceModel?.nextSecondaryTarget,
+    levels?.c1272,
+    levels?.C1272,
+    levels?.e1272,
+    levels?.E1272
+  );
+
+  const primaryTarget = firstNum(
+    sourceModel?.primaryTarget,
+    sourceModel?.primaryDestination,
+    sourceModel?.target,
+    sourceModel?.primaryCTarget,
+    sourceModel?.primaryCDownTarget,
+    levels?.c1618,
+    levels?.C1618,
+    levels?.e1618,
+    levels?.E1618
+  );
+
+  const currentPrice = firstNum(
+    sourceModel?.currentPrice,
+    targetModel?.currentPrice,
+    activeFibModel?.currentPrice,
+    minuteState?.currentPrice
+  );
+
+  const shortTargets = [
+    nextPrice != null
+      ? makeFibLevel({
+          key: "firstDestination",
+          price: nextPrice,
+          activeWave: "W4",
+          label: "First C-down destination",
+          source: "ENGINE22_C_DOWN_EXTENSION_LADDER",
+        })
+      : null,
+
+    secondDestination != null
+      ? makeFibLevel({
+          key: "secondDestination",
+          price: secondDestination,
+          activeWave: "W4",
+          label: "Next C-down destination",
+          source: "ENGINE22_C_DOWN_EXTENSION_LADDER",
+        })
+      : null,
+
+    primaryTarget != null
+      ? makeFibLevel({
+          key: "primaryDestination",
+          price: primaryTarget,
+          activeWave: "W4",
+          label: "Primary C-down destination",
+          source: "ENGINE22_C_DOWN_EXTENSION_LADDER",
+        })
+      : null,
+  ]
+    .filter(Boolean)
+    .filter(
+      (item, index, arr) =>
+        index === 0 || item.price !== arr[index - 1].price
+    );
+
+  const model = {
+    active: true,
+    modelKey:
+      sourceModel?.modelKey ||
+      sourceModel?.modelType ||
+      "C_DOWN_EXTENSION_LADDER",
+    modelType: "C_DOWN_EXTENSION_LADDER",
+    activeWave:
+      sourceModel?.activeWave ||
+      minuteState?.activeWave ||
+      "W4",
+    direction: "DOWN",
+    purpose:
+      sourceModel?.purpose ||
+      "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+    bHigh,
+    invalidationLevel,
+    currentPrice,
+    firstDestination: nextPrice,
+    secondDestination,
+    primaryDestination: primaryTarget,
+    source: "ENGINE22_C_DOWN_EXTENSION_LADDER",
+  };
+
+  const structuralOnlyPreview = {
+    active: true,
+    type: "STRUCTURAL_SHORT_PREVIEW",
+    direction: "SHORT",
+    status: "PREVIEW_AVAILABLE_WAITING_FOR_NEGOTIATED_LOCATION",
+    previewOnly: true,
+
+    locationAttached: false,
+    locationStatus: "WAITING_FOR_NEGOTIATED_LOCATION",
+
+    controlLevel: bHigh,
+    reclaimBoundary: bHigh,
+    invalidationLevel,
+
+    triggerInstruction:
+      bHigh != null
+        ? `Failed reclaim / hold below ${bHigh.toFixed(2)}`
+        : "Failed reclaim / hold below Engine 22 B high",
+
+    levelsWatched: [
+      watchedLevel({
+        price: bHigh,
+        label: "B high / reclaim invalidation",
+        role: "C_DOWN_RECLAIM_INVALIDATION",
+        source: "ENGINE22_C_DOWN_EXTENSION_LADDER",
+      }),
+      ...shortTargets.map((target, index) =>
+        watchedLevel({
+          price: target.price,
+          label: target.label,
+          role:
+            index === 0
+              ? "FIRST_STRUCTURAL_DESTINATION"
+              : target.key === "primaryDestination"
+              ? "PRIMARY_STRUCTURAL_DESTINATION"
+              : "STRUCTURAL_DESTINATION",
+          source: target.source,
+        })
+      ),
+    ].filter(Boolean),
+
+    structuralTargets: shortTargets,
+
+    firstStructuralDestination: shortTargets[0] || null,
+
+    primaryStructuralDestination:
+      shortTargets.find(
+        (target) => target.key === "primaryDestination"
+      ) || null,
+
+    currentDecision:
+      bHigh != null
+        ? `STRUCTURAL SHORT WATCH BELOW ${bHigh.toFixed(
+            2
+          )} — WAITING FOR NEGOTIATED LOCATION`
+        : "STRUCTURAL SHORT WATCH — WAITING FOR NEGOTIATED LOCATION",
+
+    noPermissionCreated: true,
+    noExecution: true,
+
+    reasonCodes: [
+      "ENGINE22_C_DOWN_EXTENSION_LADDER_CONSUMED",
+      "ENGINE26A_NEGOTIATED_LOCATION_STILL_REQUIRED",
+      "STRUCTURAL_CONTEXT_ONLY",
+      "PREVIEW_ONLY",
+      "NO_PERMISSION_CREATED",
+      "NO_EXECUTION",
+    ],
+  };
+
+  return {
+    active: true,
+    model,
+    structuralOnlyPreview,
   };
 }
 
 function buildStructuralContext({
+  minuteState,
   activeFibModel,
+  targetModel,
   shortTrigger,
   longTrigger,
 }) {
+  const cDown = buildCDownStructuralContext({
+    minuteState,
+    targetModel,
+    activeFibModel,
+  });
+
+  if (cDown.active) {
+    return {
+      model: cDown.model,
+      shortTargets:
+        cDown.structuralOnlyPreview?.structuralTargets || [],
+      longTargets: [],
+      anchorHigh: cDown.model?.bHigh || null,
+      structuralOnlyPreview: cDown.structuralOnlyPreview,
+      modelFamily: "C_DOWN_EXTENSION_LADDER",
+    };
+  }
+
   const model =
     activeFibModel && typeof activeFibModel === "object"
       ? activeFibModel
@@ -75,6 +411,8 @@ function buildStructuralContext({
       shortTargets: [],
       longTargets: [],
       anchorHigh: null,
+      structuralOnlyPreview: null,
+      modelFamily: null,
     };
   }
 
@@ -140,7 +478,8 @@ function buildStructuralContext({
     .sort((a, b) => a.price - b.price)
     .filter(
       (item, index, arr) =>
-        index === 0 || item.price !== arr[index - 1].price
+        index === 0 ||
+        item.price !== arr[index - 1].price
     );
 
   return {
@@ -157,6 +496,10 @@ function buildStructuralContext({
     shortTargets,
     longTargets,
     anchorHigh,
+    structuralOnlyPreview: null,
+    modelFamily: safeUpper(
+      model.modelType || model.modelKey
+    ),
   };
 }
 
@@ -176,16 +519,32 @@ function buildShortOption({
   shortBoundaries,
   zoneMid,
   structuralTargets,
+  structuralContext,
 }) {
-  const triggerLevel = toNum(shortBoundaries?.triggerLevel);
+  const triggerLevel = toNum(
+    shortBoundaries?.triggerLevel
+  );
   const acceptanceBoundary = toNum(
     shortBoundaries?.acceptanceBoundary
   );
-  const reclaimBoundary = toNum(shortBoundaries?.reclaimBoundary);
-  const invalidationLevel = toNum(
+  const reclaimBoundary = toNum(
+    shortBoundaries?.reclaimBoundary
+  );
+  const locationInvalidationLevel = toNum(
     shortBoundaries?.locationInvalidationBoundary
   );
 
+  const cDownMode =
+    safeUpper(structuralContext?.modelType) ===
+    "C_DOWN_EXTENSION_LADDER";
+
+  /*
+   * Engine 26A negotiated-zone boundaries remain canonical for the
+   * Strategy 1 location.
+   *
+   * Engine 22 C-down B-high is structural context only and must not
+   * silently replace Engine 26A's negotiated-zone invalidation.
+   */
   const levelsWatched = [
     watchedLevel({
       price: reclaimBoundary,
@@ -205,11 +564,30 @@ function buildShortOption({
       role: "SHORT_TRIGGER_ACCEPTANCE",
       source: "ENGINE26_DIRECTIONAL_BOUNDARIES",
     }),
+
+    cDownMode
+      ? watchedLevel({
+          price: structuralContext?.bHigh,
+          label: "Engine 22 B high / structural reclaim invalidation",
+          role: "STRUCTURAL_RECLAIM_INVALIDATION",
+          source: "ENGINE22_C_DOWN_EXTENSION_LADDER",
+        })
+      : null,
+
     ...structuralTargets.map((target, index) =>
       watchedLevel({
         price: target.price,
-        label: `${target.label}${index === 0 ? " — first structural destination" : ""}`,
-        role: index === 0 ? "FIRST_STRUCTURAL_DESTINATION" : "STRUCTURAL_DESTINATION",
+        label: `${target.label}${
+          index === 0
+            ? " — first structural destination"
+            : ""
+        }`,
+        role:
+          index === 0
+            ? "FIRST_STRUCTURAL_DESTINATION"
+            : target.key === "primaryDestination"
+            ? "PRIMARY_STRUCTURAL_DESTINATION"
+            : "STRUCTURAL_DESTINATION",
         source: target.source,
       })
     ),
@@ -223,21 +601,48 @@ function buildShortOption({
     previewOnly: true,
 
     triggerLevel,
-    triggerInstruction: "Lose / fail reclaim below lower boundary",
+    triggerInstruction:
+      cDownMode && structuralContext?.bHigh != null
+        ? `Engine 26A trigger ${triggerLevel?.toFixed(
+            2
+          ) ?? "—"}; structural C-down watch remains below B high ${Number(
+            structuralContext.bHigh
+          ).toFixed(2)}`
+        : "Lose / fail reclaim below lower boundary",
 
     acceptanceBoundary,
     acceptanceInstruction: "Bearish acceptance below zone",
 
     reclaimBoundary,
     reclaimInstruction:
-      "Acceptance back above upper boundary defeats SHORT thesis",
+      "Acceptance back above upper negotiated boundary defeats Engine 26A SHORT location thesis",
 
-    invalidationLevel,
-    invalidationInstruction: "SHORT location invalid beyond here",
+    /*
+     * Strategy 1 location invalidation remains Engine 26A-owned.
+     */
+    invalidationLevel: locationInvalidationLevel,
+    invalidationInstruction:
+      "Engine 26A SHORT location invalid beyond negotiated-zone invalidation",
+
+    structuralInvalidationLevel:
+      cDownMode
+        ? toNum(structuralContext?.invalidationLevel)
+        : null,
+
+    structuralInvalidationInstruction:
+      cDownMode
+        ? "Engine 22 C-down structure invalid / reclaimed above B high"
+        : null,
 
     levelsWatched,
     structuralTargets,
-    firstStructuralDestination: structuralTargets[0] || null,
+    firstStructuralDestination:
+      structuralTargets[0] || null,
+
+    primaryStructuralDestination:
+      structuralTargets.find(
+        (target) => target.key === "primaryDestination"
+      ) || null,
 
     nextNegotiatedDestination: {
       available: false,
@@ -251,12 +656,17 @@ function buildShortOption({
       "REJECTING_VALUE",
       "BREAKOUT_FAILING",
     ],
-    engine4Requirement: "SHORT_PARTICIPATION_REQUIRED",
-    engine6Requirement: "FINAL_PERMISSION_REQUIRED",
+
+    engine4Requirement:
+      "SHORT_PARTICIPATION_REQUIRED",
+    engine6Requirement:
+      "FINAL_PERMISSION_REQUIRED",
 
     currentDecision:
       triggerLevel != null
-        ? `WAITING FOR ${triggerLevel.toFixed(2)} LOSS / FAILED RECLAIM`
+        ? `WAITING FOR ${triggerLevel.toFixed(
+            2
+          )} LOSS / FAILED RECLAIM`
         : "WAITING FOR SHORT TRIGGER",
 
     noPermissionCreated: true,
@@ -269,11 +679,15 @@ function buildLongOption({
   zoneMid,
   structuralTargets,
 }) {
-  const triggerLevel = toNum(longBoundaries?.triggerLevel);
+  const triggerLevel = toNum(
+    longBoundaries?.triggerLevel
+  );
   const acceptanceBoundary = toNum(
     longBoundaries?.acceptanceBoundary
   );
-  const reclaimBoundary = toNum(longBoundaries?.reclaimBoundary);
+  const reclaimBoundary = toNum(
+    longBoundaries?.reclaimBoundary
+  );
   const invalidationLevel = toNum(
     longBoundaries?.locationInvalidationBoundary
   );
@@ -315,20 +729,25 @@ function buildLongOption({
     previewOnly: true,
 
     triggerLevel,
-    triggerInstruction: "Break / accept above upper boundary",
+    triggerInstruction:
+      "Break / accept above upper boundary",
 
     acceptanceBoundary,
-    acceptanceInstruction: "Bullish acceptance above zone",
+    acceptanceInstruction:
+      "Bullish acceptance above zone",
 
     reclaimBoundary,
-    reclaimInstruction: "Loss of lower boundary defeats LONG thesis",
+    reclaimInstruction:
+      "Loss of lower boundary defeats LONG thesis",
 
     invalidationLevel,
-    invalidationInstruction: "LONG location invalid beyond here",
+    invalidationInstruction:
+      "LONG location invalid beyond here",
 
     levelsWatched,
     structuralTargets,
-    firstStructuralDestination: structuralTargets[0] || null,
+    firstStructuralDestination:
+      structuralTargets[0] || null,
 
     nextNegotiatedDestination: {
       available: false,
@@ -342,12 +761,17 @@ function buildLongOption({
       "WICK_BELOW_AND_RECLAIM",
       "BREAKOUT_HOLDING",
     ],
-    engine4Requirement: "LONG_PARTICIPATION_REQUIRED",
-    engine6Requirement: "FINAL_PERMISSION_REQUIRED",
+
+    engine4Requirement:
+      "LONG_PARTICIPATION_REQUIRED",
+    engine6Requirement:
+      "FINAL_PERMISSION_REQUIRED",
 
     currentDecision:
       triggerLevel != null
-        ? `WAITING FOR ${triggerLevel.toFixed(2)} ACCEPTANCE`
+        ? `WAITING FOR ${triggerLevel.toFixed(
+            2
+          )} ACCEPTANCE`
         : "WAITING FOR LONG TRIGGER",
 
     noPermissionCreated: true,
@@ -357,7 +781,7 @@ function buildLongOption({
 
 export function buildStrategy1GeometryPreviews({
   symbol = "ES",
-  strategyId = "intraday_scalp@10m",
+  strategyId = STRATEGY_ID,
   engine26LocationCandidate = null,
   engine22WaveStrategy = null,
   snapshotTime = null,
@@ -368,10 +792,40 @@ export function buildStrategy1GeometryPreviews({
       ? engine26LocationCandidate
       : null;
 
+  const minuteState =
+    engine22WaveStrategy?.degreeStates?.minute ||
+    null;
+
+  const activeFibModel =
+    minuteState?.activeFibModel || null;
+
+  const targetModel =
+    minuteState?.targetModel || null;
+
+  /*
+   * Build Engine 22 structural context BEFORE enforcing the negotiated
+   * Strategy 1 location requirement.
+   *
+   * This is the central Option A change:
+   * Engine 26A remains negotiated-location-only, while Engine 26B may
+   * still publish a read-only structural C-down preview when Engine 22
+   * publishes C_DOWN_EXTENSION_LADDER.
+   */
+  const structuralWithoutLocation =
+    buildStructuralContext({
+      minuteState,
+      activeFibModel,
+      targetModel,
+      shortTrigger: null,
+      longTrigger: null,
+    });
+
   const location = candidate?.location || null;
   const locationType = safeUpper(location?.type);
-  const eligible = candidate?.strategyEligibility?.eligible === true;
-  const candidateActive = candidate?.active === true;
+  const eligible =
+    candidate?.strategyEligibility?.eligible === true;
+  const candidateActive =
+    candidate?.active === true;
 
   if (
     !candidate ||
@@ -383,9 +837,20 @@ export function buildStrategy1GeometryPreviews({
     return buildUnavailablePreview({
       symbol,
       strategyId,
-      snapshotTime: candidate?.snapshotTime || snapshotTime,
+      snapshotTime:
+        candidate?.snapshotTime ||
+        snapshotTime,
+
+      structuralContext:
+        structuralWithoutLocation.model,
+
+      structuralOnlyPreview:
+        structuralWithoutLocation
+          .structuralOnlyPreview,
+
       reasonCode:
-        locationType && locationType !== "NEGOTIATED"
+        locationType &&
+        locationType !== "NEGOTIATED"
           ? "NEGOTIATED_LOCATION_REQUIRED"
           : "ENGINE26_VALID_NEGOTIATED_LOCATION_REQUIRED",
     });
@@ -397,87 +862,155 @@ export function buildStrategy1GeometryPreviews({
       ? candidate.directionalBoundaries
       : null;
 
-  const longBoundaries = directionalBoundaries?.LONG || null;
-  const shortBoundaries = directionalBoundaries?.SHORT || null;
+  const longBoundaries =
+    directionalBoundaries?.LONG || null;
+
+  const shortBoundaries =
+    directionalBoundaries?.SHORT || null;
 
   if (!longBoundaries || !shortBoundaries) {
     return buildUnavailablePreview({
       symbol,
       strategyId,
-      snapshotTime: candidate?.snapshotTime || snapshotTime,
-      reasonCode: "ENGINE26_DIRECTIONAL_BOUNDARIES_UNAVAILABLE",
+      snapshotTime:
+        candidate?.snapshotTime ||
+        snapshotTime,
+
+      structuralContext:
+        structuralWithoutLocation.model,
+
+      structuralOnlyPreview:
+        structuralWithoutLocation
+          .structuralOnlyPreview,
+
+      reasonCode:
+        "ENGINE26_DIRECTIONAL_BOUNDARIES_UNAVAILABLE",
     });
   }
 
   const zoneLo = toNum(location.lo);
   const zoneHi = toNum(location.hi);
   const zoneMid = toNum(location.mid);
-  const currentPrice = toNum(candidate.currentPrice);
 
-  const activeFibModel =
-    engine22WaveStrategy
-      ?.degreeStates
-      ?.minute
-      ?.activeFibModel || null;
+  const currentPrice =
+    toNum(candidate.currentPrice);
 
-  const structural = buildStructuralContext({
-    activeFibModel,
-    shortTrigger: toNum(shortBoundaries.triggerLevel),
-    longTrigger: toNum(longBoundaries.triggerLevel),
-  });
+  const structural =
+    buildStructuralContext({
+      minuteState,
+      activeFibModel,
+      targetModel,
+      shortTrigger: toNum(
+        shortBoundaries.triggerLevel
+      ),
+      longTrigger: toNum(
+        longBoundaries.triggerLevel
+      ),
+    });
 
-  const optionA = buildShortOption({
-    shortBoundaries,
-    zoneMid,
-    structuralTargets: structural.shortTargets,
-  });
+  const optionA =
+    buildShortOption({
+      shortBoundaries,
+      zoneMid,
+      structuralTargets:
+        structural.shortTargets,
+      structuralContext:
+        structural.model,
+    });
 
-  const optionB = buildLongOption({
-    longBoundaries,
-    zoneMid,
-    structuralTargets: structural.longTargets,
-  });
+  const optionB =
+    buildLongOption({
+      longBoundaries,
+      zoneMid,
+      /*
+       * A C-down extension ladder does not invent LONG targets.
+       * Long structural destinations remain empty unless Engine 22
+       * publishes a legitimate level above the LONG trigger.
+       */
+      structuralTargets:
+        structural.modelFamily ===
+        "C_DOWN_EXTENSION_LADDER"
+          ? []
+          : structural.longTargets,
+    });
 
-  const resolvedDirection = safeUpper(
-    candidate.tradeDirectionBias ||
-      candidate.direction ||
-      candidate.directionBias
-  );
+  const resolvedDirection =
+    safeUpper(
+      candidate.tradeDirectionBias ||
+        candidate.direction ||
+        candidate.directionBias
+    );
 
   return {
     active: true,
     engine: ENGINE,
     mode: MODE,
     status: "DUAL_DIRECTION_PREVIEW",
-    symbol: safeUpper(candidate.symbol || symbol || "ES"),
-    strategyId: candidate.strategyId || strategyId,
-    laneId: candidate.laneId || "minute",
-    snapshotTime: candidate.snapshotTime || snapshotTime || null,
+
+    symbol:
+      safeUpper(
+        candidate.symbol ||
+        symbol ||
+        "ES"
+      ),
+
+    strategyId:
+      candidate.strategyId ||
+      strategyId,
+
+    laneId:
+      candidate.laneId ||
+      LANE_ID,
+
+    snapshotTime:
+      candidate.snapshotTime ||
+      snapshotTime ||
+      null,
 
     location: {
-      source: location.source || null,
-      type: location.type || null,
-      timeframe: location.timeframe || null,
-      zoneLow: zoneLo,
-      zoneMidline: zoneMid,
-      zoneHigh: zoneHi,
+      source:
+        location.source || null,
+      type:
+        location.type || null,
+      timeframe:
+        location.timeframe || null,
+      zoneLow:
+        zoneLo,
+      zoneMidline:
+        zoneMid,
+      zoneHigh:
+        zoneHi,
       currentPrice,
-      relation: location.relation || null,
+      relation:
+        location.relation || null,
     },
 
     lifecycle: {
       state: "NEW_SETUP_WATCH",
+
       direction:
-        ["LONG", "SHORT"].includes(resolvedDirection)
+        ["LONG", "SHORT"].includes(
+          resolvedDirection
+        )
           ? resolvedDirection
           : "NEUTRAL",
+
       priorRotationCompletionState:
-        candidate.priorRotationCompletionState || null,
+        candidate
+          .priorRotationCompletionState ||
+        null,
+
       priorRotationFullyComplete:
-        candidate.priorRotationFullyComplete === true,
+        candidate
+          .priorRotationFullyComplete === true,
     },
 
-    structuralContext: structural.model,
+    structuralContext:
+      structural.model,
+
+    structuralOnlyPreview:
+      structural.structuralOnlyPreview,
+
     optionA,
     optionB,
 
@@ -489,22 +1022,34 @@ export function buildStrategy1GeometryPreviews({
         : null,
 
     decisionSummary: {
-      short: optionA.currentDecision,
-      long: optionB.currentDecision,
-      engine3: "SELECTS_THE_REACTION",
-      engine4: "CONFIRMS_PARTICIPATION",
-      engine6: "FINAL_PERMISSION",
+      short:
+        optionA.currentDecision,
+      long:
+        optionB.currentDecision,
+      engine3:
+        "SELECTS_THE_REACTION",
+      engine4:
+        "CONFIRMS_PARTICIPATION",
+      engine6:
+        "FINAL_PERMISSION",
     },
 
     previewOnly: true,
     noPermissionCreated: true,
     noExecution: true,
+
     reasonCodes: [
       "ENGINE26_DUAL_DIRECTION_GEOMETRY_PREVIEW_ACTIVE",
       "ENGINE26_CANONICAL_DIRECTIONAL_BOUNDARIES_CONSUMED",
-      structural.model
+
+      structural.modelFamily ===
+      "C_DOWN_EXTENSION_LADDER"
+        ? "ENGINE22_C_DOWN_EXTENSION_LADDER_CONSUMED"
+        : structural.model
         ? "ENGINE22_ACTIVE_FIB_MODEL_CONSUMED"
-        : "ENGINE22_ACTIVE_FIB_MODEL_UNAVAILABLE",
+        : "ENGINE22_STRUCTURAL_MODEL_UNAVAILABLE",
+
+      "ENGINE26A_NEGOTIATED_LOCATION_OWNERSHIP_PRESERVED",
       "PREVIEW_ONLY",
       "NO_PERMISSION_CREATED",
       "NO_EXECUTION",
