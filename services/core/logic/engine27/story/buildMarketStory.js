@@ -1269,6 +1269,50 @@ function buildActiveFibObjectives({
         return null;
       }
 
+      const cDownTargetModel =
+        readCDownTargetModel(
+          wave
+        );
+
+      if (cDownTargetModel) {
+        const currentPrice =
+          toNumber(
+            fib.currentPrice ??
+              wave.currentPrice
+          );
+
+        const distance =
+          currentPrice !== null
+            ? Math.abs(
+                currentPrice -
+                  cDownTargetModel.c100
+              )
+            : 0;
+
+        return {
+          degree,
+
+          wave:
+            normalizeWave(
+              fib.currentWave ??
+              wave.currentWave
+            ),
+
+          nextFib:
+            "C 1.000",
+
+          nextPrice:
+            cDownTargetModel.c100,
+
+          distance,
+
+          direction:
+            "SHORT",
+
+          cDownTargetModel,
+        };
+      }
+
       const nextFib =
         upper(
           fib.nextFib
@@ -1356,9 +1400,115 @@ function buildActiveFibObjectives({
     );
 }
 
+function readCDownTargetModel(record = {}) {
+  const targetModel =
+    record?.targetModel &&
+    typeof record.targetModel === "object"
+      ? record.targetModel
+      : null;
+
+  if (
+    !targetModel ||
+    upper(targetModel.modelType) !==
+      "C_DOWN_EXTENSION_LADDER"
+  ) {
+    return null;
+  }
+
+  const levels =
+    targetModel.levels &&
+    typeof targetModel.levels === "object"
+      ? targetModel.levels
+      : {};
+
+  const anchorModel =
+    targetModel.anchorModel &&
+    typeof targetModel.anchorModel === "object"
+      ? targetModel.anchorModel
+      : {};
+
+  const bHigh =
+    toNumber(
+      targetModel.invalidationLevel ??
+        anchorModel.waveBHigh
+    );
+
+  const c100 =
+    toNumber(levels.c100);
+
+  const c1272 =
+    toNumber(levels.c1272);
+
+  const c1618 =
+    toNumber(
+      targetModel.primaryTarget ??
+        levels.c1618
+    );
+
+  if (
+    bHigh === null ||
+    c100 === null ||
+    c1618 === null
+  ) {
+    return null;
+  }
+
+  return {
+    modelType:
+      "C_DOWN_EXTENSION_LADDER",
+
+    correctionType:
+      upper(
+        targetModel.correctionType
+      ) || "EXPANDED_FLAT",
+
+    currentLeg:
+      upper(
+        targetModel.currentLeg
+      ) || "C",
+
+    bHigh,
+    c100,
+    c1272,
+    c1618,
+
+    primaryTarget:
+      c1618,
+
+    primaryTargetKey:
+      targetModel.primaryTargetKey ||
+      "c1618",
+
+    invalidationLevel:
+      bHigh,
+
+    summary:
+      targetModel.summary || null,
+  };
+}
+
 function describeFibObjective(
   objective
 ) {
+  const cDown =
+    objective?.cDownTargetModel;
+
+  if (cDown) {
+    return `${formatDegreeName(
+      objective.degree
+    )} W4 expanded-flat C-down ladder: B high ${formatPrice(
+      cDown.bHigh
+    )}, C targets ${formatPrice(
+      cDown.c100
+    )}${
+      cDown.c1272 !== null
+        ? ` / ${formatPrice(cDown.c1272)}`
+        : ""
+    } / ${formatPrice(
+      cDown.c1618
+    )}`;
+  }
+
   const degree =
     formatDegreeName(
       objective.degree
@@ -1405,6 +1555,31 @@ function buildFibSummary({
     ].includes(
       pullbackContext.state
     );
+
+  const cDownObjective =
+    selected.find(
+      (objective) =>
+        objective?.cDownTargetModel
+    );
+
+  if (cDownObjective) {
+    const cDown =
+      cDownObjective.cDownTargetModel;
+
+    return `The active Minute W4 expanded-flat objective is C down from B high ${formatPrice(
+      cDown.bHigh
+    )}. While price cannot reclaim and hold above ${formatPrice(
+      cDown.invalidationLevel
+    )}, watch C targets ${formatPrice(
+      cDown.c100
+    )}${
+      cDown.c1272 !== null
+        ? ` / ${formatPrice(cDown.c1272)}`
+        : ""
+    } / ${formatPrice(
+      cDown.c1618
+    )}.`;
+  }
 
   if (
     descriptions.length === 1
