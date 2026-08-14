@@ -290,26 +290,11 @@ function resolveCanonicalDirection({
     reactionTimeframe = "1m";
     directionEstablishedByFresh1m = true;
 
-    directionPersistenceActive =
-      ema10DataAvailable &&
-      (
-        (
-          observedDirection === "SHORT" &&
-          completedClose < ema10
-        ) ||
-        (
-          observedDirection === "LONG" &&
-          completedClose > ema10
-        )
-      );
-
     resolutionStatus =
       "CANONICAL_1M_DIRECTION_ESTABLISHED";
 
     resolutionReason =
-      directionPersistenceActive
-        ? `FRESH_${observedDirection}_ESTABLISHED_AND_HELD_BY_10M_EMA10`
-        : "FRESH_COMPLETED_1M_DIRECTIONAL_REACTION";
+      "FRESH_COMPLETED_1M_DIRECTIONAL_REACTION";
   } else if (observationUsable) {
     state = observedState;
     direction = "NEUTRAL";
@@ -885,6 +870,7 @@ const previousConfirmed =
   previousReactionConfirmed === true;
 
 const persistedConfirmation =
+  previousConfirmed &&
   canonicalResolution?.directionPersistenceActive === true &&
   canonicalResolution?.ema10ResetTriggered !== true &&
   canonicalDirectional;
