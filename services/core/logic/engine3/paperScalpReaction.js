@@ -538,23 +538,33 @@ function resolveCanonicalConfirmation({
       "NEUTRAL"
     );
 
+  const oneMinuteQuality =
+    safeUpper(
+      observation1m?.quality,
+      "WEAK"
+    );
+
   const quality =
     safeUpper(
       canonicalQuality,
       "WEAK"
     );
 
+  /*
+   * Engine 26 structural expectation remains visible
+   * for diagnostics only.
+   *
+   * It does NOT own Engine 3 reaction direction.
+   */
   const expectedDirection =
     safeUpper(
-      authorizationContext
-        ?.expectedReactionDirection,
+      authorizationContext?.expectedReactionDirection,
       "NEUTRAL"
     );
 
   const expectedReactions =
     Array.isArray(
-      authorizationContext
-        ?.expectedReactions
+      authorizationContext?.expectedReactions
     )
       ? authorizationContext.expectedReactions.map(
           (state) => safeUpper(state, "")
@@ -567,15 +577,27 @@ function resolveCanonicalConfirmation({
     authorizationContext
       ?.authorizeEngine3Evaluation === true;
 
+  /*
+   * Strategy 1 requires exact Engine 26 identity.
+   */
   const identityMatched =
     authorizationContext
       ?.identityComparison
-      ?.matched !== false;
+      ?.matched === true;
+
+  const chainArmed =
+    authorizationContext?.chainArmed === true;
 
   const canonicalDirectional =
     direction === "LONG" ||
     direction === "SHORT";
 
+  /*
+   * Diagnostic only.
+   *
+   * Engine 26 expected direction no longer blocks or
+   * creates canonical Engine 3 reaction direction.
+   */
   const branchAligned =
     canonicalDirectional &&
     (
@@ -588,10 +610,79 @@ function resolveCanonicalConfirmation({
     oneMinuteDirection === direction &&
     canonicalDirectional;
 
+  const oneMinuteQualityApproved =
+    QUALIFYING_QUALITY.has(oneMinuteQuality);
+
+  const qualityApproved =
+    QUALIFYING_QUALITY.has(quality);
+
+  /*
+   * Fresh completed 1m candle must itself agree
+   * with the canonical direction.
+   */
+  const candleOpen =
+    toNum(observation1m?.currentCandle?.open);
+
+  const candleClose =
+    toNum(observation1m?.currentCandle?.close);
+
+  const candleCompleted =
+    observation1m?.currentCandleStatus === "COMPLETED" ||
+    observation1m?.currentCandle?.completionState === "COMPLETED" ||
+    observation1m?.candleState === "COMPLETED";
+
+  const candleDirectionAligned =
+    candleCompleted &&
+    candleOpen != null &&
+    candleClose != null &&
+    (
+      (
+        direction === "SHORT" &&
+        candleClose < candleOpen
+      ) ||
+      (
+        direction === "LONG" &&
+        candleClose > candleOpen
+      )
+    );
+
+  /*
+   * Local level-action state is now a contradiction
+   * check — not a required confirmation whitelist.
+   */
+  const shortContradictionStates =
+    new Set([
+      "RECLAIMED_LEVEL",
+      "WICK_BELOW_AND_RECLAIM",
+      "DIP_BOUGHT_FAST",
+      "SELLERS_TRAPPED",
+      "BREAKOUT_HOLDING",
+    ]);
+
+  const longContradictionStates =
+    new Set([
+      "LOST_LEVEL",
+      "FAILED_RECLAIM",
+      "REJECTING_VALUE",
+      "BREAKOUT_FAILING",
+      "FAILED_ACCEPTANCE_SHORT",
+      "LOST_SHORT_TRIGGER_LEVEL",
+    ]);
+
+  const oneMinuteContradiction =
+    direction === "SHORT"
+      ? shortContradictionStates.has(oneMinuteState)
+      : direction === "LONG"
+      ? longContradictionStates.has(oneMinuteState)
+      : true;
+
+  /*
+   * HELD_LEVEL / CHOP_INSIDE_VALUE / similar
+   * non-contradictory states no longer automatically block.
+   */
   const approvedReactionState =
     oneMinuteAligned &&
-    oneMinuteState !== "NO_SIGNAL" &&
-    expectedReactions.includes(oneMinuteState);
+    !oneMinuteContradiction;
 
   const validationPresent =
     validation5m != null &&
@@ -602,80 +693,159 @@ function resolveCanonicalConfirmation({
     validationPresent &&
     validation5m?.stale === false;
 
+  const validationState =
+    safeUpper(
+      validation5m?.validationState,
+      "UNRESOLVED"
+    );
+
   const validationResolved =
     validation5m?.maturityResolved === true;
 
   const validationSupports =
-    validation5m?.supports1mDirection === true;
+    validation5m?.supports1mDirection === true &&
+    validationState === "SUPPORT";
 
   const validationConflicts =
-    validation5m?.conflictsWith1mDirection === true;
-
-  const qualityApproved =
-    QUALIFYING_QUALITY.has(quality);
+    validation5m?.conflictsWith1mDirection === true ||
+    validationState === "CONFLICT";
 
   if (!authorizationValid) {
-    blockers.push("ENGINE26_EVALUATION_NOT_AUTHORIZED");
+    blockers.push(
+      "ENGINE26_EVALUATION_NOT_AUTHORIZED"
+    );
   }
 
   if (!identityMatched) {
-    blockers.push("ENGINE26_ENGINE3_IDENTITY_MISMATCH");
+    blockers.push(
+      "ENGINE26_ENGINE3_IDENTITY_MISMATCH"
+    );
+  }
+
+  if (!chainArmed) {
+    blockers.push(
+      "ENGINE26_CHAIN_NOT_ARMED"
+    );
   }
 
   if (!canonicalDirectional) {
-    blockers.push("CANONICAL_DIRECTION_NOT_DIRECTIONAL");
-  }
-
-  if (!branchAligned) {
-    blockers.push("CANONICAL_DIRECTION_CONFLICTS_WITH_ENGINE26_BRANCH");
+    blockers.push(
+      "CANONICAL_DIRECTION_NOT_DIRECTIONAL"
+    );
   }
 
   if (!oneMinuteAligned) {
-    blockers.push("ONE_MINUTE_REACTION_NOT_ALIGNED_WITH_COMMITTED_DIRECTION");
+    blockers.push(
+      "ONE_MINUTE_REACTION_NOT_ALIGNED_WITH_COMMITTED_DIRECTION"
+    );
   }
 
-  if (!approvedReactionState) {
-    blockers.push("ONE_MINUTE_REACTION_STATE_NOT_APPROVED_FOR_ENGINE26_BRANCH");
+  if (!oneMinuteQualityApproved) {
+    blockers.push(
+      "ONE_MINUTE_QUALITY_NOT_GOOD_OR_STRONG"
+    );
+  }
+
+  if (!candleCompleted) {
+    blockers.push(
+      "ONE_MINUTE_CANDLE_NOT_COMPLETED"
+    );
+  } else if (!candleDirectionAligned) {
+    blockers.push(
+      "ONE_MINUTE_CANDLE_NOT_ALIGNED_WITH_DIRECTION"
+    );
+  }
+
+  if (oneMinuteContradiction) {
+    blockers.push(
+      "ONE_MINUTE_REACTION_EXPLICITLY_CONTRADICTS_DIRECTION"
+    );
   }
 
   if (!qualityApproved) {
-    blockers.push("ENGINE3_CANONICAL_QUALITY_NOT_GOOD_OR_STRONG");
+    blockers.push(
+      "ENGINE3_CANONICAL_QUALITY_NOT_GOOD_OR_STRONG"
+    );
   }
 
   if (!validationPresent) {
-    blockers.push("FIVE_MINUTE_VALIDATION_MISSING");
+    blockers.push(
+      "FIVE_MINUTE_VALIDATION_MISSING"
+    );
   } else if (!validationFresh) {
-    blockers.push("FIVE_MINUTE_VALIDATION_STALE");
-  } else if (!validationResolved) {
-    blockers.push("FIVE_MINUTE_VALIDATION_NOT_RESOLVED");
+    blockers.push(
+      "FIVE_MINUTE_VALIDATION_STALE"
+    );
   } else if (validationConflicts) {
-    blockers.push("FIVE_MINUTE_VALIDATION_CONFLICT");
+    blockers.push(
+      "FIVE_MINUTE_VALIDATION_CONFLICT"
+    );
+  } else if (!validationResolved) {
+    blockers.push(
+      "FIVE_MINUTE_VALIDATION_NOT_RESOLVED"
+    );
   } else if (!validationSupports) {
-    blockers.push("FIVE_MINUTE_VALIDATION_NOT_SUPPORTIVE");
+    blockers.push(
+      "FIVE_MINUTE_VALIDATION_NOT_SUPPORTIVE"
+    );
   }
 
   if (authorizationValid) {
-    reasonCodes.push("ENGINE26_EVALUATION_AUTHORIZED");
+    reasonCodes.push(
+      "ENGINE26_EVALUATION_AUTHORIZED"
+    );
   }
 
   if (identityMatched) {
-    reasonCodes.push("ENGINE26_ENGINE3_IDENTITY_ALIGNED");
+    reasonCodes.push(
+      "ENGINE26_ENGINE3_IDENTITY_ALIGNED"
+    );
   }
 
+  if (chainArmed) {
+    reasonCodes.push(
+      "ENGINE26_CHAIN_ARMED"
+    );
+  }
+
+  /*
+   * Keep structural branch alignment visible,
+   * but do not use it as a confirmation gate.
+   */
   if (branchAligned) {
-    reasonCodes.push("CANONICAL_DIRECTION_ALIGNED_WITH_ENGINE26_BRANCH");
+    reasonCodes.push(
+      "ENGINE26_STRUCTURAL_DIRECTION_ALIGNED_DIAGNOSTIC"
+    );
   }
 
   if (oneMinuteAligned) {
-    reasonCodes.push("ONE_MINUTE_REACTION_ALIGNED_WITH_COMMITTED_DIRECTION");
+    reasonCodes.push(
+      "ONE_MINUTE_REACTION_ALIGNED_WITH_COMMITTED_DIRECTION"
+    );
   }
 
-  if (approvedReactionState) {
-    reasonCodes.push("ONE_MINUTE_APPROVED_REACTION_STATE");
+  if (oneMinuteQualityApproved) {
+    reasonCodes.push(
+      "ONE_MINUTE_QUALITY_GOOD_OR_STRONG"
+    );
+  }
+
+  if (candleDirectionAligned) {
+    reasonCodes.push(
+      "ONE_MINUTE_COMPLETED_CANDLE_ALIGNED"
+    );
+  }
+
+  if (!oneMinuteContradiction) {
+    reasonCodes.push(
+      "ONE_MINUTE_STATE_NOT_DIRECTIONALLY_CONTRADICTORY"
+    );
   }
 
   if (qualityApproved) {
-    reasonCodes.push("ENGINE3_CANONICAL_QUALITY_GOOD_OR_STRONG");
+    reasonCodes.push(
+      "ENGINE3_CANONICAL_QUALITY_GOOD_OR_STRONG"
+    );
   }
 
   if (
@@ -685,7 +855,9 @@ function resolveCanonicalConfirmation({
     validationSupports &&
     !validationConflicts
   ) {
-    reasonCodes.push("FIVE_MINUTE_VALIDATION_SUPPORT");
+    reasonCodes.push(
+      "FIVE_MINUTE_VALIDATION_SUPPORT"
+    );
   }
 
   const reactionConfirmed =
@@ -701,25 +873,38 @@ function resolveCanonicalConfirmation({
     reactionConfirmed,
     blockers,
     reasonCodes,
+
     authorizationValid,
     identityMatched,
+    chainArmed,
+
     canonicalDirectional,
     branchAligned,
+
     oneMinuteAligned,
     oneMinuteState,
     oneMinuteDirection,
+    oneMinuteQuality,
+    oneMinuteQualityApproved,
+
+    candleCompleted,
+    candleDirectionAligned,
+
+    oneMinuteContradiction,
     approvedReactionState,
+
     validationPresent,
     validationFresh,
     validationResolved,
     validationSupports,
     validationConflicts,
+
     qualityApproved,
+
     expectedDirection,
     expectedReactions,
   };
 }
-
 function resolveStrategy1Qualification({
   confirmation,
   finalEngine26LocationContext,
