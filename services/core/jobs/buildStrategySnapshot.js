@@ -8153,6 +8153,18 @@ const previousEngine3CanonicalDirection =
       "NEUTRAL"
     : null;
 
+const previousEngine3ReactionConfirmed =
+  isEsIntradayScalp
+    ? previousSnapshot
+        ?.strategies
+        ?.[s.strategyId]
+        ?.confluence
+        ?.context
+        ?.reaction
+        ?.paperScalpReaction
+        ?.reactionConfirmed === true
+    : false;
+
 const strategy1TenMinuteCompletedClose =
   isEsIntradayScalp
     ? marketMeter
@@ -8673,10 +8685,13 @@ attachPaperScalpReactionToConfluence({
   engine26StructuralContext,
   paperShortResearchEnabled: isEsIntradayScalp,
 
-  previousCanonicalDirection:
-    previousEngine3CanonicalDirection,
+previousCanonicalDirection:
+  previousEngine3CanonicalDirection,
 
-  tenMinuteCompletedClose:
+previousReactionConfirmed:
+  previousEngine3ReactionConfirmed,
+
+tenMinuteCompletedClose:
     strategy1TenMinuteCompletedClose,
 
   tenMinuteEma10:
@@ -9201,6 +9216,9 @@ if (
        previousCanonicalDirection:
          previousEngine3CanonicalDirection,
 
+       previousReactionConfirmed:
+         previousEngine3ReactionConfirmed,
+
        tenMinuteCompletedClose:
          strategy1TenMinuteCompletedClose,
 
@@ -9224,6 +9242,9 @@ if (
 
        previousCanonicalDirection:
          previousEngine3CanonicalDirection,
+
+       previousReactionConfirmed:
+         previousEngine3ReactionConfirmed,
 
        tenMinuteCompletedClose:
          strategy1TenMinuteCompletedClose,
@@ -9355,6 +9376,9 @@ if (
       previousCanonicalDirection:
         previousEngine3CanonicalDirection,
 
+      previousReactionConfirmed:
+        previousEngine3ReactionConfirmed,
+
       tenMinuteCompletedClose:
         strategy1TenMinuteCompletedClose,
 
@@ -9383,6 +9407,9 @@ if (
 
       previousCanonicalDirection:
         previousEngine3CanonicalDirection,
+
+      previousReactionConfirmed:
+        previousEngine3ReactionConfirmed,
 
       tenMinuteCompletedClose:
         strategy1TenMinuteCompletedClose,
