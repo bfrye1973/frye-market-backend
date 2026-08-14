@@ -723,12 +723,6 @@ function resolveCanonicalConfirmation({
     );
   }
 
-  if (!chainArmed) {
-    blockers.push(
-      "ENGINE26_CHAIN_NOT_ARMED"
-    );
-  }
-
   if (!canonicalDirectional) {
     blockers.push(
       "CANONICAL_DIRECTION_NOT_DIRECTIONAL"
