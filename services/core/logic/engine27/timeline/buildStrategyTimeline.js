@@ -521,7 +521,9 @@ function buildReactionStage({ engine3, engine26A, engine27E, identity }) {
     });
   }
 
-  const ready = engine27E?.readiness?.reactionReady === true;
+  const ready =
+    engine3?.reactionConfirmed === true &&
+    engine3?.engine3Strategy1QualifiedForEngine6 === true;
   const active = engine3?.active === true;
 
   return stageBase({
