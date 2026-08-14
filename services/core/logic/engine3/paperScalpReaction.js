@@ -217,105 +217,52 @@ function resolveCanonicalDirection({
 
   let ema10ResetTriggered = false;
 
-  if (
-    previousDirection === "SHORT" &&
-    ema10DataAvailable &&
-    completedClose > ema10
-  ) {
-    ema10ResetTriggered = true;
-  }
-
-  if (
-    previousDirection === "LONG" &&
-    ema10DataAvailable &&
-    completedClose < ema10
-  ) {
-    ema10ResetTriggered = true;
-  }
-
   let state = "NO_SIGNAL";
   let direction = "NEUTRAL";
-  let sourceTimeframe = null;
-  let reactionTimeframe = null;
-  let resolutionStatus = "NO_USABLE_1M_CANONICAL_EVIDENCE";
-  let resolutionReason = "ONE_MINUTE_EVIDENCE_UNUSABLE";
+  let sourceTimeframe = "10m";
+  let reactionTimeframe = "10m";
+  let resolutionStatus = "EMA10_DIRECTION_UNAVAILABLE";
+  let resolutionReason = "TEN_MINUTE_EMA10_DATA_UNAVAILABLE";
   let directionPersistenceActive = false;
   let directionEstablishedByFresh1m = false;
 
-  if (
-    previousDirectional &&
-    !ema10ResetTriggered
-  ) {
-    direction = previousDirection;
-    sourceTimeframe = "1m";
-    reactionTimeframe = "1m";
-    directionPersistenceActive = true;
+  if (ema10DataAvailable) {
+    if (completedClose < ema10) {
+      direction = "SHORT";
+      state = "EMA10_SHORT";
+      directionPersistenceActive = true;
 
-    const oneMinuteAlignedWithCommitted =
-      freshDirectionalEvidence &&
-      observedDirection === previousDirection;
+      resolutionStatus =
+        "CANONICAL_SHORT_BELOW_10M_EMA10";
 
-    state =
-      oneMinuteAlignedWithCommitted
-        ? observedState
-        : "DIRECTION_PERSISTED";
+      resolutionReason =
+        "COMPLETED_10M_CLOSE_BELOW_EMA10_ENGINE3_SHORT";
 
-    resolutionStatus =
-      `CANONICAL_${previousDirection}_PERSISTED`;
+      ema10ResetTriggered =
+        previousDirection === "LONG";
+    } else if (completedClose > ema10) {
+      direction = "LONG";
+      state = "EMA10_LONG";
+      directionPersistenceActive = true;
 
-    resolutionReason =
-      ema10DataAvailable
-        ? `PREVIOUS_${previousDirection}_HELD_UNTIL_COMPLETED_10M_EMA10_RESET`
-        : `PREVIOUS_${previousDirection}_HELD_EMA10_RESET_DATA_UNAVAILABLE`;
-  } else if (
-    previousDirectional &&
-    ema10ResetTriggered
-  ) {
-    state = "DIRECTION_RESET";
-    direction = "NEUTRAL";
-    sourceTimeframe = "10m";
-    reactionTimeframe = "10m";
+      resolutionStatus =
+        "CANONICAL_LONG_ABOVE_10M_EMA10";
 
-    resolutionStatus =
-      "CANONICAL_DIRECTION_RESET_AT_10M_EMA10";
+      resolutionReason =
+        "COMPLETED_10M_CLOSE_ABOVE_EMA10_ENGINE3_LONG";
 
-    resolutionReason =
-      previousDirection === "SHORT"
-        ? "COMPLETED_10M_CLOSE_ABOVE_EMA10_RESET_SHORT"
-        : "COMPLETED_10M_CLOSE_BELOW_EMA10_RESET_LONG";
-  } else if (freshDirectionalEvidence) {
-    state = observedState;
-    direction = observedDirection;
-    sourceTimeframe = "1m";
-    reactionTimeframe = "1m";
-    directionEstablishedByFresh1m = true;
+      ema10ResetTriggered =
+        previousDirection === "SHORT";
+    } else {
+      direction = "NEUTRAL";
+      state = "EMA10_NEUTRAL";
 
-    resolutionStatus =
-      "CANONICAL_1M_DIRECTION_ESTABLISHED";
+      resolutionStatus =
+        "CANONICAL_NEUTRAL_AT_10M_EMA10";
 
-    resolutionReason =
-      "FRESH_COMPLETED_1M_DIRECTIONAL_REACTION";
-  } else if (observationUsable) {
-    state = observedState;
-    direction = "NEUTRAL";
-    sourceTimeframe = "1m";
-    reactionTimeframe = "1m";
-
-    resolutionStatus =
-      "CANONICAL_1M_NEUTRAL";
-
-    resolutionReason =
-      "FRESH_COMPLETED_1M_NON_DIRECTIONAL_REACTION";
-  } else if (!observationPresent) {
-    resolutionReason = "ONE_MINUTE_OBSERVATION_MISSING";
-  } else if (!aligned) {
-    resolutionReason = "ONE_MINUTE_IDENTITY_MISMATCH";
-  } else if (observation1m?.stale === true) {
-    resolutionReason = "ONE_MINUTE_OBSERVATION_STALE";
-  } else if (!observationCompleted) {
-    resolutionReason = "ONE_MINUTE_CANDLE_NOT_COMPLETED";
-  } else if (!observationActive) {
-    resolutionReason = "ONE_MINUTE_OBSERVATION_INACTIVE";
+      resolutionReason =
+        "COMPLETED_10M_CLOSE_AT_EMA10";
+    }
   }
 
   return {
