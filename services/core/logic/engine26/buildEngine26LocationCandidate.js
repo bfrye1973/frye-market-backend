@@ -1293,6 +1293,7 @@ function findRecoverableDirectionalMemoryChild({
   bars10m,
   snapshotTime,
   tickSize,
+  engine22TravelContext = null,
 }) {
   const records = Object.values(
     memoryStore?.records || {}
@@ -1367,11 +1368,27 @@ function findRecoverableDirectionalMemoryChild({
         tickSize,
       });
 
+      const recordUsesSelectedZoneAsTravelTarget =
+        record?.targetZone?.zoneId ===
+          record?.zoneId ||
+        record?.targetZone?.id ===
+          record?.zoneId;
+
+      /*
+       * A structural-travel bootstrap uses the selected negotiated zone as
+       * the active destination, not as the origin-zone invalidation boundary.
+       */
+      const recoveryInvalidationBoundary =
+        recordUsesSelectedZoneAsTravelTarget
+          ? engine22TravelContext?.invalidationLevel ??
+            null
+          : boundaries.locationInvalidationBoundary;
+
       const currentFacts = buildStrategy1Facts({
         bars10m,
         entryZone,
         locationInvalidationBoundary:
-          boundaries.locationInvalidationBoundary,
+          recoveryInvalidationBoundary,
         direction,
         lifecycleStartTime:
           record?.candidateLifecycleStartTime ||
@@ -2242,6 +2259,182 @@ function inferDirectionBias({
   }
 
   return "NEUTRAL";
+}
+
+function resolveEngine22MinuteTravelContext(
+  engine22WaveStrategy
+) {
+  const minute =
+    engine22WaveStrategy?.degreeStates?.minute ||
+    null;
+
+  const primary =
+    minute?.cWaveInternalStructure;
+
+  const fallback =
+    minute?.targetModel?.internalCStructure;
+
+  const contract =
+    primary && typeof primary === "object"
+      ? primary
+      : fallback && typeof fallback === "object"
+      ? fallback
+      : null;
+
+  const sourcePath =
+    primary && typeof primary === "object"
+      ? "engine22WaveStrategy.degreeStates.minute.cWaveInternalStructure"
+      : fallback && typeof fallback === "object"
+      ? "engine22WaveStrategy.degreeStates.minute.targetModel.internalCStructure"
+      : null;
+
+  if (!contract) {
+    return {
+      available: false,
+      sourcePath: null,
+      active: false,
+      currentWave: null,
+      currentInternalWave: null,
+      nextExpectedInternalWave: null,
+      direction: "NEUTRAL",
+      downstreamTravelDirection: "NEUTRAL",
+      directionalContextValidForEngine26: false,
+      engine26TravelContextRole: null,
+      engine26CarryAllowed: false,
+      validForCarry: false,
+      activeLegState: null,
+      cWaveState: null,
+      activeCompletionZone: null,
+      activeDestinations: null,
+      nextLeg: null,
+      nextLegLevels: null,
+      followingLeg: null,
+      invalidationLevel: null,
+      invalidationBreached: false,
+      engine26CarryReleaseRules: [],
+    };
+  }
+
+  const downstreamTravelDirection =
+    normalizeDirection(
+      contract?.downstreamTravelDirection ??
+      contract?.activeLeg?.downstreamTravelDirection
+    );
+
+  const engine26TravelContextRole =
+    String(
+      contract?.engine26TravelContextRole || ""
+    )
+      .trim()
+      .toUpperCase() || null;
+
+  const directionalContextValidForEngine26 =
+    contract?.directionalContextValidForEngine26 === true;
+
+  const engine26CarryAllowed =
+    contract?.engine26CarryAllowed === true;
+
+  const active =
+    contract?.active !== false;
+
+  const invalidationBreached =
+    contract?.invalidationBreached === true ||
+    contract?.activeLeg?.invalidationBreached === true;
+
+  const validForCarry =
+    active &&
+    invalidationBreached !== true &&
+    directionalContextValidForEngine26 &&
+    engine26CarryAllowed &&
+    engine26TravelContextRole ===
+      "STRUCTURAL_TRAVEL_CONTEXT" &&
+    ["LONG", "SHORT"].includes(
+      downstreamTravelDirection
+    );
+
+  const activeCompletionZone =
+    contract?.activeCompletionZone ??
+    contract?.completionZone ??
+    contract?.activeLeg?.completionZone ??
+    contract?.cA?.completionZone ??
+    null;
+
+  const activeLegState =
+    contract?.activeLegState ??
+    contract?.activeLeg?.state ??
+    contract?.cWaveState ??
+    null;
+
+  return {
+    available: true,
+    sourcePath,
+    active,
+
+    currentWave:
+      contract?.currentWave ?? null,
+
+    currentInternalWave:
+      contract?.currentInternalWave ??
+      contract?.activeLeg?.label ??
+      null,
+
+    nextExpectedInternalWave:
+      contract?.nextExpectedInternalWave ??
+      contract?.nextLeg?.label ??
+      null,
+
+    direction:
+      String(
+        contract?.direction ??
+        contract?.activeLeg?.direction ??
+        ""
+      )
+        .trim()
+        .toUpperCase() || "NEUTRAL",
+
+    downstreamTravelDirection,
+
+    directionalContextValidForEngine26,
+    engine26TravelContextRole,
+    engine26CarryAllowed,
+    validForCarry,
+
+    activeLegState,
+    cWaveState:
+      contract?.cWaveState ?? null,
+
+    activeLeg:
+      contract?.activeLeg ?? null,
+
+    activeCompletionZone,
+
+    activeDestinations:
+      contract?.activeDestinations ?? null,
+
+    nextLeg:
+      contract?.nextLeg ?? null,
+
+    nextLegLevels:
+      contract?.nextLegLevels ?? null,
+
+    followingLeg:
+      contract?.followingLeg ?? null,
+
+    invalidationLevel:
+      toFiniteNumber(
+        contract?.invalidationLevel ??
+        contract?.activeLeg?.invalidationLevel
+      ),
+
+    invalidationBreached,
+
+    engine26CarryReleaseRules:
+      Array.isArray(
+        contract?.engine26CarryReleaseRules
+      )
+        ? [...contract.engine26CarryReleaseRules]
+        : [],
+  };
 }
 
 function inferSetupType(
