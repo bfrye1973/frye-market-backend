@@ -3035,6 +3035,11 @@ const resolvedEma10Posture =
     bars10m,
   });
 
+const engine22MinuteTravelContext =
+  resolveEngine22MinuteTravelContext(
+    engine22WaveStrategy
+  );
+
 /*
  * Strategy 1 V2 preserves the active child before ranking.
  * Ranking and distance select only when no preservable child remains.
@@ -3151,6 +3156,8 @@ const recoveredMemoryChild =
         bars10m,
         snapshotTime,
         tickSize,
+        engine22TravelContext:
+          engine22MinuteTravelContext,
       })
     : null;
 
@@ -3568,6 +3575,51 @@ const priorDirectionalChildDirection =
       )
     : "NEUTRAL";
 
+const priorCandidateUsesSelectedZoneAsTravelTarget =
+  previousChildPreservable === true &&
+  (
+    continuityLocationCandidate?.targetZone?.zoneId ===
+      selectedZoneId ||
+    continuityLocationCandidate?.targetZone?.id ===
+      selectedZoneId
+  );
+
+const engine22TravelDirection =
+  engine22MinuteTravelContext
+    ?.downstreamTravelDirection ||
+  "NEUTRAL";
+
+/*
+ * Engine 22 may establish structural travel direction only through the
+ * explicit downstream safety contract. Engine 26 does not infer direction
+ * from C-a/C-b/C-c labels or from raw UP/DOWN fields.
+ */
+const engine22TravelTargetAheadOfMidline =
+  engine22TravelDirection === "SHORT"
+    ? normalizedPrice >
+      toFiniteNumber(selectedZone?.mid)
+    : engine22TravelDirection === "LONG"
+    ? normalizedPrice <
+      toFiniteNumber(selectedZone?.mid)
+    : false;
+
+const engine22TravelCarryBootstrap =
+  strategy1Eligible === true &&
+  promotedContactLifecycle !== true &&
+  priorDirectionalChildDirection === "NEUTRAL" &&
+  engine22MinuteTravelContext?.validForCarry === true &&
+  engine22TravelTargetAheadOfMidline === true;
+
+const engine22StructuralTravelCarry =
+  engine22TravelCarryBootstrap === true ||
+  priorCandidateUsesSelectedZoneAsTravelTarget === true;
+
+const engine22StructuralInvalidationBoundary =
+  engine22StructuralTravelCarry
+    ? engine22MinuteTravelContext
+        ?.invalidationLevel ?? null
+    : null;
+
 /*
  * Fact extraction keeps the full historical bar set, but completed-close
  * invalidation must use the current directional child's lifecycle window.
@@ -3591,13 +3643,11 @@ const factsLifecycleStartTime =
       })
     : snapshotTime;
 
-const longFacts =
-  strategy1Eligible
-    ? buildStrategy1Facts({
-        bars10m,
-        entryZone: provisionalEntryZone,
-        locationInvalidationBoundary:
-          longBoundaries.locationInvalidationBoundary,
+     locationInvalidationBoundary:
+       engine22StructuralTravelCarry &&
+       engine22TravelDirection === "LONG"
+         ? engine22StructuralInvalidationBoundary
+         : longBoundaries.locationInvalidationBoundary,
         direction: "LONG",
         lifecycleStartTime:
           factsLifecycleStartTime,
