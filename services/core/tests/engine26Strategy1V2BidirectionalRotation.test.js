@@ -3513,3 +3513,76 @@ test(
     );
   }
 );
+
+function approvedEngine22TravelContext({
+  downstreamTravelDirection = "SHORT",
+  cWaveState = "C_A_COMPLETION_ZONE_ACTIVE",
+  currentInternalWave = "C-a",
+  nextExpectedInternalWave = "C-b",
+  completionHi = 7722.75,
+  completionLo = 7700,
+  invalidationLevel = 7840,
+} = {}) {
+  const rawDirection =
+    downstreamTravelDirection === "LONG"
+      ? "UP"
+      : downstreamTravelDirection === "SHORT"
+      ? "DOWN"
+      : "NEUTRAL";
+
+  return {
+    degreeStates: {
+      minute: {
+        stage: "W4_EXPANDED_FLAT_C",
+        direction: rawDirection,
+        cWaveInternalStructure: {
+          active: true,
+          source:
+            "engine22.minuteW4.internalCStructure.v1",
+          currentWave: "C",
+          currentInternalWave,
+          nextExpectedInternalWave,
+          direction: rawDirection,
+          downstreamTravelDirection,
+          directionalContextValidForEngine26: true,
+          engine26TravelContextRole:
+            "STRUCTURAL_TRAVEL_CONTEXT",
+          engine26CarryAllowed: true,
+          cWaveState,
+          activeLeg: {
+            label: currentInternalWave,
+            direction: rawDirection,
+            downstreamTravelDirection,
+            start:
+              downstreamTravelDirection === "SHORT"
+                ? 7840
+                : 7600,
+            state: cWaveState,
+          },
+          activeCompletionZone: {
+            hi: completionHi,
+            lo: completionLo,
+            primary: completionHi,
+            label:
+              "ACTIVE_INTERNAL_WAVE_COMPLETION_ZONE",
+          },
+          activeDestinations: {
+            first: completionHi,
+            extensionSweep: completionLo,
+          },
+          nextLeg: {
+            label: nextExpectedInternalWave,
+            state: "WATCH_AFTER_ACTIVE_LEG_REACTION",
+          },
+          invalidationLevel,
+          engine26CarryReleaseRules: [
+            "NEGOTIATED_TARGET_COMPLETION",
+            "NEGOTIATED_MIDPOINT_RESET",
+            "COMPLETED_CLOSE_INVALIDATION",
+            "APPROVED_LIFECYCLE_RELEASE",
+          ],
+        },
+      },
+    },
+  };
+}
