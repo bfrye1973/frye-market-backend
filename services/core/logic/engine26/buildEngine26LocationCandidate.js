@@ -108,38 +108,48 @@ function normalizeDirection(value) {
   return "NEUTRAL";
 }
 
-function distanceToZone(currentPrice, lo, hi) {
-  const price = toFiniteNumber(currentPrice);
-  const lower = toFiniteNumber(lo);
-  const upper = toFiniteNumber(hi);
+function engine22ExplicitTravelOpposesDirection({
+  engine22TravelContext,
+  direction,
+}) {
+  const childDirection =
+    normalizeDirection(direction);
 
-  if (
-    price === null ||
-    lower === null ||
-    upper === null
-  ) {
-    return null;
-  }
+  const travelDirection =
+    normalizeDirection(
+      engine22TravelContext
+        ?.downstreamTravelDirection
+    );
 
-  const min = Math.min(lower, upper);
-  const max = Math.max(lower, upper);
+  const explicitTravelContractValid =
+    engine22TravelContext
+      ?.directionalContextValidForEngine26 === true &&
+    engine22TravelContext
+      ?.engine26CarryAllowed === true &&
+    String(
+      engine22TravelContext
+        ?.engine26TravelContextRole || ""
+    )
+      .trim()
+      .toUpperCase() ===
+      "STRUCTURAL_TRAVEL_CONTEXT" &&
+    ["LONG", "SHORT"].includes(
+      travelDirection
+    );
 
-  if (price >= min && price <= max) {
-    return 0;
-  }
-
-  if (price < min) {
-    return round2(min - price);
-  }
-
-  return round2(price - max);
+  return (
+    explicitTravelContractValid &&
+    ["LONG", "SHORT"].includes(
+      childDirection
+    ) &&
+    childDirection !== travelDirection
+  );
 }
 
-function relationToZone(
+function distanceToZone(
   currentPrice,
   lo,
-  hi,
-  activationRangePoints
+  hi
 ) {
   const price = toFiniteNumber(currentPrice);
   const lower = toFiniteNumber(lo);
