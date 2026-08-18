@@ -107,9 +107,9 @@ test(
     );
     assert.ok(
       candidate.reasonCodes.includes(
-        "ENGINE22_INTERNAL_LEG_DIRECTION_NOT_USED_AS_TRADE_DIRECTION"
-      )
-    );
+        "ENGINE22_INTERNAL_LEG_DIRECTION_NOT_USED_WITHOUT_EXPLICIT_TRAVEL_CONTRACT"
+     )
+   );
   }
 );
 
