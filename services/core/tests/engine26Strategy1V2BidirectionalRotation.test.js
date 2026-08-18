@@ -83,6 +83,7 @@ function buildAtPrice({
   manualZonesFilePath = undefined,
   memoryFilePath = undefined,
   persistMemory = false,
+  engine22WaveStrategy = engine22Context(),
 } = {}) {
   return buildEngine26A({
     symbol: "ES",
@@ -90,7 +91,7 @@ function buildAtPrice({
     timeframe: "10m",
     currentPrice,
     snapshotTime,
-    engine22WaveStrategy: engine22Context(),
+    engine22WaveStrategy,
     previousLocationCandidate,
     bars10m,
     ema10Posture,
