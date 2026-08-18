@@ -4858,11 +4858,111 @@ const strategyFacts =
           ?.degreeStates
           ?.subminute
           ?.stage ?? null,
+      engine22MinuteTravelContext: {
+        available:
+          engine22MinuteTravelContext
+            ?.available === true,
+
+        sourcePath:
+          engine22MinuteTravelContext
+            ?.sourcePath ?? null,
+
+        active:
+          engine22MinuteTravelContext
+            ?.active === true,
+
+        currentWave:
+          engine22MinuteTravelContext
+            ?.currentWave ?? null,
+
+        currentInternalWave:
+          engine22MinuteTravelContext
+            ?.currentInternalWave ?? null,
+
+        nextExpectedInternalWave:
+          engine22MinuteTravelContext
+            ?.nextExpectedInternalWave ?? null,
+
+        direction:
+          engine22MinuteTravelContext
+            ?.direction ?? "NEUTRAL",
+
+        downstreamTravelDirection:
+          engine22MinuteTravelContext
+            ?.downstreamTravelDirection ??
+          "NEUTRAL",
+
+        directionalContextValidForEngine26:
+          engine22MinuteTravelContext
+            ?.directionalContextValidForEngine26 === true,
+
+        engine26TravelContextRole:
+          engine22MinuteTravelContext
+            ?.engine26TravelContextRole ?? null,
+
+        engine26CarryAllowed:
+          engine22MinuteTravelContext
+            ?.engine26CarryAllowed === true,
+
+        validForCarry:
+          engine22MinuteTravelContext
+            ?.validForCarry === true,
+
+        carryBootstrapApplied:
+          engine22TravelCarryBootstrap === true,
+
+        structuralTravelCarryActive:
+          engine22StructuralTravelCarry === true,
+
+        selectedZoneIsActiveTravelTarget:
+          selectedZoneIsActiveTravelTarget === true,
+
+        activeLegState:
+          engine22MinuteTravelContext
+            ?.activeLegState ?? null,
+
+        cWaveState:
+          engine22MinuteTravelContext
+            ?.cWaveState ?? null,
+
+        activeCompletionZone:
+          engine22MinuteTravelContext
+            ?.activeCompletionZone ?? null,
+
+        activeDestinations:
+          engine22MinuteTravelContext
+            ?.activeDestinations ?? null,
+
+        nextLeg:
+          engine22MinuteTravelContext
+            ?.nextLeg ?? null,
+
+        nextLegLevels:
+          engine22MinuteTravelContext
+            ?.nextLegLevels ?? null,
+
+        followingLeg:
+          engine22MinuteTravelContext
+            ?.followingLeg ?? null,
+
+        invalidationLevel:
+          engine22MinuteTravelContext
+            ?.invalidationLevel ?? null,
+
+        invalidationBreached:
+          engine22MinuteTravelContext
+            ?.invalidationBreached === true,
+
+        engine26CarryReleaseRules:
+          engine22MinuteTravelContext
+            ?.engine26CarryReleaseRules || [],
+      },
     },
 
     sourceRefs: [
       selectedZone.sourcePath,
-      "engine22WaveStrategy.degreeStates",
+      engine22MinuteTravelContext?.sourcePath ||
+        "engine22WaveStrategy.degreeStates",
 
       engine25Context
         ? "engine25Context"
@@ -4945,8 +5045,19 @@ const strategyFacts =
         ? `ENGINE26_STRATEGY1_TACTICAL_DIRECTION_${directionBias}`
         : null,
 
-      strategy1Eligible
-        ? "ENGINE22_INTERNAL_LEG_DIRECTION_NOT_USED_AS_TRADE_DIRECTION"
+      strategy1Eligible &&
+      engine22StructuralTravelCarry
+        ? `ENGINE22_EXPLICIT_STRUCTURAL_TRAVEL_CONTRACT_USED_AS_${directionBias}`
+        : strategy1Eligible
+        ? "ENGINE22_INTERNAL_LEG_DIRECTION_NOT_USED_WITHOUT_EXPLICIT_TRAVEL_CONTRACT"
+        : null,
+
+      engine22TravelCarryBootstrap
+        ? "ENGINE26_ENGINE22_STRUCTURAL_TRAVEL_CARRY_BOOTSTRAPPED"
+        : null,
+
+      selectedZoneIsActiveTravelTarget
+        ? "ENGINE26_SELECTED_NEGOTIATED_ZONE_IS_ACTIVE_TRAVEL_TARGET"
         : null,
 
       recoveredPromotedContactChild
