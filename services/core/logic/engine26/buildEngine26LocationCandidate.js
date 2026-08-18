@@ -3643,11 +3643,16 @@ const factsLifecycleStartTime =
       })
     : snapshotTime;
 
-     locationInvalidationBoundary:
-       engine22StructuralTravelCarry &&
-       engine22TravelDirection === "LONG"
-         ? engine22StructuralInvalidationBoundary
-         : longBoundaries.locationInvalidationBoundary,
+const longFacts =
+  strategy1Eligible
+    ? buildStrategy1Facts({
+        bars10m,
+        entryZone: provisionalEntryZone,
+        locationInvalidationBoundary:
+          engine22StructuralTravelCarry &&
+          engine22TravelDirection === "LONG"
+            ? engine22StructuralInvalidationBoundary
+            : longBoundaries.locationInvalidationBoundary,
         direction: "LONG",
         lifecycleStartTime:
           factsLifecycleStartTime,
@@ -3660,7 +3665,10 @@ const shortFacts =
         bars10m,
         entryZone: provisionalEntryZone,
         locationInvalidationBoundary:
-          shortBoundaries.locationInvalidationBoundary,
+          engine22StructuralTravelCarry &&
+          engine22TravelDirection === "SHORT"
+            ? engine22StructuralInvalidationBoundary
+            : shortBoundaries.locationInvalidationBoundary,
         direction: "SHORT",
         lifecycleStartTime:
           factsLifecycleStartTime,
