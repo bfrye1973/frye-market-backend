@@ -35,6 +35,14 @@ const C_DOWN_FIBS = [
   { label: "C 2.618", key: "c2618", value: 2.618 },
 ];
 
+const C_B_RETRACE_FIBS = [
+  { label: "C-b 0.236", key: "cb236", value: 0.236 },
+  { label: "C-b 0.382", key: "cb382", value: 0.382 },
+  { label: "C-b 0.500", key: "cb500", value: 0.5 },
+  { label: "C-b 0.618", key: "cb618", value: 0.618 },
+  { label: "C-b 0.786", key: "cb786", value: 0.786 },
+];
+
 const TARGET_MODEL_SOURCE = "engine22.wave.targets.v1";
 
 function upper(value) {
@@ -490,6 +498,21 @@ function buildExpandedFlatCDownTargetModel({
     levels,
     displayLevels,
 
+    internalCStructure: buildInternalCStructure({
+      symbol,
+      degree,
+      activeWave,
+      marks,
+      currentPrice,
+      cDownLevels: levels,
+      aLow,
+      bHigh,
+      range,
+      waveA,
+      waveB,
+      waveC,
+    }),
+
     nextTarget: round2(nextTarget),
     nextTargetKey,
 
@@ -515,6 +538,157 @@ function buildExpandedFlatCDownTargetModel({
       "EXPANDED_FLAT_C_DOWN_LADDER_GENERATED",
       "B_COMPLETE_C_DOWN_WATCH",
       "C_DOWN_ACTIVE_WHILE_PRICE_CANNOT_HOLD_ABOVE_B_HIGH",
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+    ],
+  };
+}
+
+function buildInternalCStructure({
+  symbol,
+  degree,
+  activeWave,
+  marks = {},
+  currentPrice = null,
+  cDownLevels = {},
+  aLow = null,
+  bHigh = null,
+  range = null,
+  waveA = null,
+  waveB = null,
+  waveC = null,
+} = {}) {
+  const c100 = toNum(cDownLevels.c100);
+  const c1272 = toNum(cDownLevels.c1272);
+  const c1618 = toNum(cDownLevels.c1618);
+  const price = toNum(currentPrice);
+
+  const cACompletionHigh = c100 !== null ? roundToTick(c100, symbol) : null;
+  const cACompletionLow = roundToTick(7700, symbol);
+
+  const cBLevels = {};
+
+  if (cACompletionHigh !== null && bHigh !== null) {
+    const bounceRange = Math.abs(bHigh - cACompletionHigh);
+
+    for (const fib of C_B_RETRACE_FIBS) {
+      const level = roundToTick(cACompletionHigh + bounceRange * fib.value, symbol);
+
+      cBLevels[fib.label] = level;
+      cBLevels[fib.key] = level;
+    }
+  }
+
+  const cADownPoints =
+    price !== null && bHigh !== null
+      ? round2(Math.max(0, bHigh - price))
+      : null;
+
+  const cAProgressRatio =
+    cADownPoints !== null && range !== null && range > 0
+      ? round2(cADownPoints / range)
+      : null;
+
+  let state = "C_A_DOWN_ACTIVE";
+
+  if (price !== null && cACompletionHigh !== null && price <= cACompletionHigh) {
+    state = "C_A_COMPLETION_ZONE_ACTIVE";
+  }
+
+  if (price !== null && cACompletionLow !== null && price <= cACompletionLow) {
+    state = "C_A_EXTENDED_INTO_NEGOTIATED_ZONE";
+  }
+
+  return {
+    active: true,
+    source: "engine22.minuteW4.internalCStructure.v1",
+    degree,
+    activeWave,
+    parentCorrection: "MINUTE_W4_EXPANDED_FLAT",
+    correctionType: "EXPANDED_FLAT",
+    parentCompletedWave: "W3",
+    currentWave: "C",
+    currentInternalWave: "C-a",
+    nextExpectedInternalWave: "C-b",
+    cWaveState: state,
+    direction: "DOWN",
+    currentPrice: round2(price),
+
+    waveA: {
+      price: round2(aLow),
+      time: getMarkTime(waveA),
+      status: getMarkStatus(waveA) || null,
+    },
+
+    waveB: {
+      price: round2(bHigh),
+      time: getMarkTime(waveB),
+      status: getMarkStatus(waveB) || null,
+    },
+
+    waveC: {
+      price: getWavePrice(marks, "C"),
+      time: getMarkTime(waveC),
+      status: getMarkStatus(waveC) || "ACTIVE_CANDIDATE",
+    },
+
+    cA: {
+      state,
+      start: round2(bHigh),
+      currentPrice: round2(price),
+      downPoints: cADownPoints,
+      progressRatio: cAProgressRatio,
+      progressPercent:
+        cAProgressRatio !== null ? round2(cAProgressRatio * 100) : null,
+      completionZone: {
+        hi: cACompletionHigh,
+        lo: cACompletionLow,
+        primary: cACompletionHigh,
+        negotiatedZoneApprox: cACompletionLow,
+        label: "C_A_COMPLETION_ZONE_C100_TO_NEXT_NEGOTIATED_ZONE",
+      },
+    },
+
+    cB: {
+      state: "WATCH_AFTER_C_A_REACTION",
+      expected: true,
+      projectionPending: true,
+      retraceOfCADown: {
+        anchorLow: cACompletionHigh,
+        anchorHigh: round2(bHigh),
+        levels: cBLevels,
+        normalZone: {
+          lo: cBLevels.cb382 ?? null,
+          hi: cBLevels.cb618 ?? null,
+          label: "NORMAL_C_B_BOUNCE_ZONE",
+        },
+      },
+    },
+
+    cC: {
+      state: "PENDING_C_B_HIGH",
+      projectionPending: true,
+      largerCPrimaryTarget: c1618,
+      largerCTargets: {
+        c100,
+        c1272,
+        c1618,
+        c200: toNum(cDownLevels.c200),
+        c2618: toNum(cDownLevels.c2618),
+      },
+    },
+
+    invalidationLevel: round2(bHigh),
+    invalidationRule: "C_DOWN_WATCH_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_B_HIGH",
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+    reasonCodes: [
+      "ENGINE22_INTERNAL_C_STRUCTURE_BUILT",
+      "ENGINE22_C_A_DOWN_ACTIVE",
+      "ENGINE22_C_A_COMPLETION_ZONE_7722_75_TO_7700",
+      "ENGINE22_C_B_BOUNCE_EXPECTED_AFTER_C_A_REACTION",
+      "ENGINE22_C_C_PROJECTION_PENDING_C_B_HIGH",
       "NO_EXECUTION",
       "NO_PERMISSION_CREATED",
     ],
