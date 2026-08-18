@@ -7670,11 +7670,18 @@ const againstDirection =
     participationState = "CURRENT_SCALP_PARTICIPATION_OK";
     participationQuality = "MIXED";
     grade = reactionQuality === "STRONG" ? "B" : "C";
-    risk = "ACCEPTABLE_FOR_PAPER_REVIEW";
+    risk =
+      directionalClimax === true
+        ? "CLIMACTIC_BUT_DIRECTIONAL_PAPER_ONLY"
+        : "ACCEPTABLE_FOR_PAPER_REVIEW";
     direction = intendedDirection;
 
     reasonCodes.push("CURRENT_SCALP_PARTICIPATION_SUPPORTS_DIRECTION");
     reasonCodes.push("PARTICIPATION_IMPROVING");
+
+    if (directionalClimax) {
+      reasonCodes.push("CLIMACTIC_VOLUME_DIRECTIONALLY_CONFIRMED");
+    }
   } else if (supportsDirection) {
     allowed = false;
     downgradeOnly = true;
@@ -7758,8 +7765,7 @@ const againstDirection =
     againstDirection,
     participationImproving,
     highVolumeNoProgress,
-    shortRejectionState,
-    shortDirectionalClimax,
+    directionalClimax,
     climacticHardBlock,
 
     locationContext,
