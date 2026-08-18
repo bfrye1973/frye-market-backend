@@ -3829,8 +3829,15 @@ const boundaries =
         locationInvalidationBoundary: null,
       };
 
+const selectedZoneIsActiveTravelTarget =
+  strategy1Eligible === true &&
+  engine22StructuralTravelCarry === true &&
+  ["LONG", "SHORT"].includes(directionBias);
+
 const targetSelectedZone =
-  strategy1Eligible && directionBias === "LONG"
+  selectedZoneIsActiveTravelTarget
+    ? selectedZone
+    : strategy1Eligible && directionBias === "LONG"
     ? selectLongTargetZone({
         negotiatedZones: approvedNegotiatedZones,
         entryZone: selectedZone,
