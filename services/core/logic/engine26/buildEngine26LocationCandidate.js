@@ -4543,6 +4543,17 @@ const strategyFacts =
     // Engine 26A remains the tactical candidate-direction owner.
     direction: directionBias,
     tradeDirectionBias: directionBias,
+    directionSource:
+      promotedContactLifecycle
+        ? "NEGOTIATED_MIDPOINT_NEUTRAL_RESET"
+        : engine22StructuralTravelCarry
+        ? "ENGINE22_EXPLICIT_STRUCTURAL_TRAVEL_CONTEXT"
+        : preservedDirection !== "NEUTRAL"
+        ? "ENGINE26_PRESERVED_DIRECTIONAL_CHILD"
+        : "ENGINE26_LOCAL_DIRECTIONAL_EVIDENCE",
+
+    engine22StructuralTravelCarry:
+      engine22StructuralTravelCarry === true,
 
     setupType,
 
@@ -4580,7 +4591,9 @@ const strategyFacts =
       : "TARGET_ZONE_UNAVAILABLE",
     targetZoneReasonCodes: targetZone
       ? [
-          directionBias === "SHORT"
+          selectedZoneIsActiveTravelTarget
+            ? "ENGINE22_STRUCTURAL_TRAVEL_SELECTED_NEGOTIATED_ZONE_IS_ACTIVE_TARGET"
+            : directionBias === "SHORT"
             ? "NEXT_NEGOTIATED_ZONE_BELOW_ENTRY_SELECTED"
             : "NEXT_NEGOTIATED_ZONE_ABOVE_ENTRY_SELECTED",
         ]
