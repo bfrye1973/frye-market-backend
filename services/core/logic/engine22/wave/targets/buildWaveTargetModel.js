@@ -556,6 +556,55 @@ function buildExpandedFlatCDownTargetModel({
   };
 }
 
+function deriveEngine26TravelContract({
+  active = false,
+  direction = null,
+  invalidationBreached = false,
+  internalWave = null,
+  state = null,
+} = {}) {
+  const normalizedDirection = upper(direction);
+  const normalizedState = upper(state);
+
+  const hasActiveInternalLeg =
+    active === true &&
+    internalWave != null &&
+    String(internalWave).trim() !== "";
+
+  const informationalOnly =
+    !hasActiveInternalLeg ||
+    invalidationBreached === true ||
+    normalizedState.includes("UNRESOLVED") ||
+    normalizedState.includes("PROJECTED") ||
+    normalizedState.includes("PENDING") ||
+    normalizedState.includes("COMPLETE_WAIT") ||
+    normalizedState.includes("COMPLETED") ||
+    normalizedState.includes("INVALID") ||
+    normalizedState === "NO_ACTIVE_INTERNAL_LEG" ||
+    normalizedState === "WAITING_FOR_REACTION";
+
+  const validDirectionalCarry =
+    informationalOnly !== true &&
+    ["DOWN", "UP"].includes(normalizedDirection);
+
+  if (!validDirectionalCarry) {
+    return {
+      downstreamTravelDirection: "NEUTRAL",
+      directionalContextValidForEngine26: false,
+      engine26TravelContextRole: "INFORMATIONAL_ONLY",
+      engine26CarryAllowed: false,
+    };
+  }
+
+  return {
+    downstreamTravelDirection:
+      normalizedDirection === "DOWN" ? "SHORT" : "LONG",
+    directionalContextValidForEngine26: true,
+    engine26TravelContextRole: "STRUCTURAL_TRAVEL_CONTEXT",
+    engine26CarryAllowed: true,
+  };
+}
+
 function buildInternalCStructure({
   symbol,
   degree,
@@ -627,6 +676,14 @@ function buildInternalCStructure({
     state = "C_A_EXTENDED_INTO_NEGOTIATED_ZONE";
   }
 
+  const engine26TravelContract = deriveEngine26TravelContract({
+    active: true,
+    direction: "DOWN",
+    invalidationBreached: false,
+    internalWave: "C-a",
+    state,
+  });
+
   return {
     active: true,
     source: "engine22.minuteW4.internalCStructure.v1",
@@ -640,6 +697,9 @@ function buildInternalCStructure({
     nextExpectedInternalWave: "C-b",
     cWaveState: state,
     direction: "DOWN",
+
+    ...engine26TravelContract,
+
     currentPrice: round2(price),
 
     waveA: {
