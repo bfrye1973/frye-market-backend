@@ -35,6 +35,18 @@ const C_DOWN_FIBS = [
   { label: "C 2.618", key: "c2618", value: 2.618 },
 ];
 
+const C_A_EXTENSION_FIBS = [
+  { label: "C-a 0.786", key: "ca0786", value: 0.786 },
+  { label: "C-a 0.886", key: "ca0886", value: 0.886 },
+  { label: "C-a 1.000", key: "ca100", value: 1.0 },
+  { label: "C-a 1.130", key: "ca1130", value: 1.13 },
+  { label: "C-a 1.168", key: "ca1168", value: 1.168 },
+  { label: "C-a 1.200", key: "ca1200", value: 1.2 },
+  { label: "C-a 1.236", key: "ca1236", value: 1.236 },
+  { label: "C-a 1.272", key: "ca1272", value: 1.272 },
+  { label: "C-a 1.618", key: "ca1618", value: 1.618 },
+];
+
 const C_B_RETRACE_FIBS = [
   { label: "C-b 0.236", key: "cb236", value: 0.236 },
   { label: "C-b 0.382", key: "cb382", value: 0.382 },
@@ -566,6 +578,22 @@ function buildInternalCStructure({
   const cACompletionHigh = c100 !== null ? roundToTick(c100, symbol) : null;
   const cACompletionLow = roundToTick(7700, symbol);
 
+  const cAExtensionLevels = {};
+
+  if (bHigh !== null && range !== null && range > 0) {
+    for (const fib of C_A_EXTENSION_FIBS) {
+      const level = roundToTick(bHigh - range * fib.value, symbol);
+
+      cAExtensionLevels[fib.label] = level;
+      cAExtensionLevels[fib.key] = level;
+    }
+  }
+
+  const cAExtensionDisplayLevels = buildDisplayLevels({
+    levels: cAExtensionLevels,
+    fibs: C_A_EXTENSION_FIBS,
+  });
+
   const cBLevels = {};
 
   if (cACompletionHigh !== null && bHigh !== null) {
@@ -640,6 +668,14 @@ function buildInternalCStructure({
       progressRatio: cAProgressRatio,
       progressPercent:
         cAProgressRatio !== null ? round2(cAProgressRatio * 100) : null,
+      extensionLevels: cAExtensionLevels,
+      displayLevels: cAExtensionDisplayLevels,
+      firstCompletionTarget: cAExtensionLevels.ca100 ?? cACompletionHigh,
+      sweepExtensionZone: {
+        lo: cAExtensionLevels.ca1200 ?? cACompletionLow,
+        hi: cAExtensionLevels.ca1168 ?? null,
+        label: "C_A_1168_TO_1200_EXTENSION_SWEEP_ZONE",
+      },
       completionZone: {
         hi: cACompletionHigh,
         lo: cACompletionLow,
@@ -687,6 +723,7 @@ function buildInternalCStructure({
       "ENGINE22_INTERNAL_C_STRUCTURE_BUILT",
       "ENGINE22_C_A_DOWN_ACTIVE",
       "ENGINE22_C_A_COMPLETION_ZONE_7722_75_TO_7700",
+      "ENGINE22_C_A_EXTENSION_LEVELS_PUBLISHED",
       "ENGINE22_C_B_BOUNCE_EXPECTED_AFTER_C_A_REACTION",
       "ENGINE22_C_C_PROJECTION_PENDING_C_B_HIGH",
       "NO_EXECUTION",
