@@ -310,6 +310,19 @@ function normalizeCWaveInternalStructure({
     nextExpectedInternalWave: source.nextExpectedInternalWave || "C-b",
     cWaveState: upper(source.cWaveState || "C_A_DOWN_ACTIVE"),
     direction: upper(source.direction || "DOWN"),
+
+    downstreamTravelDirection:
+      source.downstreamTravelDirection || "NEUTRAL",
+
+    directionalContextValidForEngine26:
+      source.directionalContextValidForEngine26 === true,
+
+    engine26TravelContextRole:
+      source.engine26TravelContextRole || "INFORMATIONAL_ONLY",
+
+    engine26CarryAllowed:
+      source.engine26CarryAllowed === true,
+
     currentPrice: round2(source.currentPrice ?? currentPrice),
 
     waveA: source.waveA && typeof source.waveA === "object"
