@@ -276,6 +276,105 @@ function normalizeInternalStructure(structure = {}) {
   };
 }
 
+function normalizeCWaveInternalStructure({
+  structure = {},
+  targetModel = null,
+  currentPrice = null,
+} = {}) {
+  const source =
+    targetModel?.internalCStructure && typeof targetModel.internalCStructure === "object"
+      ? targetModel.internalCStructure
+      : structure?.cWaveInternalStructure && typeof structure.cWaveInternalStructure === "object"
+      ? structure.cWaveInternalStructure
+      : structure?.internalCStructure && typeof structure.internalCStructure === "object"
+      ? structure.internalCStructure
+      : null;
+
+  if (!source || source.active !== true) return null;
+
+  const copyPriceMap = (levels = {}) =>
+    levels && typeof levels === "object"
+      ? Object.fromEntries(
+          Object.entries(levels).map(([key, value]) => [key, round2(value)])
+        )
+      : {};
+
+  return {
+    active: true,
+    source: source.source || "engine22.degreeStates.cWaveInternalStructure.v1",
+    parentCorrection: source.parentCorrection || "MINUTE_W4_EXPANDED_FLAT",
+    correctionType: upper(source.correctionType || "EXPANDED_FLAT"),
+    parentCompletedWave: source.parentCompletedWave || "W3",
+    currentWave: source.currentWave || "C",
+    currentInternalWave: source.currentInternalWave || "C-a",
+    nextExpectedInternalWave: source.nextExpectedInternalWave || "C-b",
+    cWaveState: upper(source.cWaveState || "C_A_DOWN_ACTIVE"),
+    direction: upper(source.direction || "DOWN"),
+    currentPrice: round2(source.currentPrice ?? currentPrice),
+
+    waveA: source.waveA && typeof source.waveA === "object"
+      ? { ...source.waveA, price: round2(source.waveA.price) }
+      : null,
+
+    waveB: source.waveB && typeof source.waveB === "object"
+      ? { ...source.waveB, price: round2(source.waveB.price) }
+      : null,
+
+    waveC: source.waveC && typeof source.waveC === "object"
+      ? { ...source.waveC, price: round2(source.waveC.price) }
+      : null,
+
+    cA: source.cA && typeof source.cA === "object"
+      ? {
+          ...source.cA,
+          start: round2(source.cA.start),
+          currentPrice: round2(source.cA.currentPrice ?? currentPrice),
+          downPoints: round2(source.cA.downPoints),
+          progressRatio: round2(source.cA.progressRatio),
+          progressPercent: round2(source.cA.progressPercent),
+          completionZone: source.cA.completionZone || null,
+        }
+      : null,
+
+    cB: source.cB && typeof source.cB === "object"
+      ? {
+          ...source.cB,
+          retraceOfCADown: source.cB.retraceOfCADown
+            ? {
+                ...source.cB.retraceOfCADown,
+                anchorLow: round2(source.cB.retraceOfCADown.anchorLow),
+                anchorHigh: round2(source.cB.retraceOfCADown.anchorHigh),
+                levels: copyPriceMap(source.cB.retraceOfCADown.levels),
+              }
+            : null,
+        }
+      : null,
+
+    cC: source.cC && typeof source.cC === "object"
+      ? {
+          ...source.cC,
+          largerCPrimaryTarget: round2(source.cC.largerCPrimaryTarget),
+          largerCTargets: copyPriceMap(source.cC.largerCTargets),
+        }
+      : null,
+
+    invalidationLevel: round2(source.invalidationLevel),
+    invalidationRule: source.invalidationRule || null,
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    reasonCodes: Array.isArray(source.reasonCodes)
+      ? source.reasonCodes
+      : [
+          "ENGINE22_INTERNAL_C_STRUCTURE_NORMALIZED",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED",
+        ],
+  };
+}
+
 function normalizeOneMark({
   mark,
   maturityInfo,
@@ -611,6 +710,78 @@ function buildCanonicalActiveFibModel({
       ? structure.w4RetracementMap
       : null;
 
+  if (
+    wave === "W4" &&
+    targetModel &&
+    [
+      "C_DOWN_EXTENSION_LADDER",
+      "MINUTE_W4_EXPANDED_FLAT_C_DOWN_PROJECTION_AND_RETRACEMENT_MAP",
+    ].includes(upper(targetModel.modelType))
+  ) {
+    const levels =
+      targetModel?.levels && typeof targetModel.levels === "object"
+        ? targetModel.levels
+        : targetModel?.cDownTargets && typeof targetModel.cDownTargets === "object"
+        ? targetModel.cDownTargets
+        : {};
+
+    const anchorModel =
+      targetModel?.anchorModel && typeof targetModel.anchorModel === "object"
+        ? targetModel.anchorModel
+        : {
+            waveALow: round2(targetModel?.aLow),
+            waveATime: targetModel?.aTime || null,
+            waveBHigh: round2(targetModel?.bHigh),
+            waveBTime: targetModel?.bTime || null,
+            projectionBase: round2(targetModel?.cProjectionBase ?? targetModel?.bHigh),
+            range: round2(targetModel?.aLegLength),
+          };
+
+    return {
+      active: true,
+      source: "engine22.degreeStates.activeFibModel.v1",
+      modelKey: "C_DOWN_EXTENSION_LADDER",
+      modelType: "C_DOWN_EXTENSION_LADDER",
+      correctionType: "EXPANDED_FLAT",
+      degree,
+      activeWave: "W4",
+      direction: "DOWN",
+      currentLeg: "C",
+      purpose: "ACTIVE_PARENT_WAVE_C_DOWN_STRUCTURAL_MAP",
+      anchorModel: { ...anchorModel },
+      levels: { ...levels },
+      displayLevels: Array.isArray(targetModel?.displayLevels)
+        ? targetModel.displayLevels
+        : [],
+      currentPrice: round2(currentPrice),
+      nextTarget: round2(targetModel?.nextTarget ?? levels.c100),
+      nextTargetKey: targetModel?.nextTargetKey || "c100",
+      primaryTarget: round2(targetModel?.primaryTarget ?? levels.c1618),
+      primaryTargetKey: targetModel?.primaryTargetKey || "c1618",
+      invalidationLevel: round2(
+        targetModel?.invalidationLevel ??
+          targetModel?.reclaimInvalidationLevel ??
+          anchorModel?.waveBHigh ??
+          targetModel?.bHigh
+      ),
+      zoneState: "C_DOWN_ACTIVE_BELOW_B_HIGH",
+      internalCStructure:
+        targetModel?.internalCStructure && typeof targetModel.internalCStructure === "object"
+          ? targetModel.internalCStructure
+          : null,
+      noExecution: true,
+      noPermissionCreated: true,
+      watchOnly: true,
+      reasonCodes: [
+        "ENGINE22_ACTIVE_FIB_MODEL_SELECTED",
+        "ENGINE22_ACTIVE_WAVE_W4_USES_C_DOWN_EXTENSION_LADDER",
+        "ENGINE22_MINUTE_W4_EXPANDED_FLAT_C_DOWN",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+      ],
+    };
+  }
+
   if (wave === "W4" && w4Map) {
     return {
       active: true,
@@ -778,7 +949,19 @@ function buildActiveDegreeState({
     previousWave && marks?.[previousWave]
       ? getMarkSummary(marks[previousWave])
       : null;
+
+  const sourceTargetModel =
+    structure?.targetModel && typeof structure.targetModel === "object"
+      ? structure.targetModel
+      : null;
+
   const internalStructure = normalizeInternalStructure(structure);
+
+  const cWaveInternalStructure = normalizeCWaveInternalStructure({
+    structure,
+    targetModel: sourceTargetModel,
+    currentPrice,
+  });
 
   const parentDegree =
     normalizeDegree(structure?.parentDegree) ||
@@ -850,6 +1033,7 @@ function buildActiveDegreeState({
       internalStructure?.parentTransitionPossible ??
       null,
     internalStructure,
+    cWaveInternalStructure,
     currentRead,
 
     // Canonical Minute W3 completion / parent W4 transition publication.
@@ -885,10 +1069,7 @@ function buildActiveDegreeState({
     // Extension / retracement display model.
     // Used by Primary, Intermediate, and Minor cards.
     // This is display-only structural context.
-    targetModel:
-      structure?.targetModel && typeof structure.targetModel === "object"
-        ? structure.targetModel
-        : null,
+    targetModel: sourceTargetModel,
 
     // Canonical active structural Fib contract. Downstream consumers should
     // read this field instead of deciding between targetModel and
