@@ -3707,23 +3707,28 @@ const observationOnlyLongWatch =
 const directionBias =
   promotedContactLifecycle
     ? "NEUTRAL"
+    : strategy1Eligible &&
+      preservedDirection !== "NEUTRAL"
+    ? preservedDirection
+    : engine22TravelCarryBootstrap
+    ? engine22TravelDirection
     : observationOnlyLongWatch
     ? "NEUTRAL"
     : strategy1Eligible
-    ? preservedDirection !== "NEUTRAL"
-      ? preservedDirection
-      : resolvedDirectionalEvidence.direction
+    ? resolvedDirectionalEvidence.direction
     : structuralDirectionBias;
 
 const directionState =
   promotedContactLifecycle
     ? "NEUTRAL"
-    : observationOnlyLongWatch
-    ? "LONG_REVERSAL_WATCH"
     : strategy1Eligible &&
       preservedDirection !== "NEUTRAL"
     ? continuityLocationCandidate?.directionState ||
       `${preservedDirection}_DIRECTIONAL_CHILD_ACTIVE`
+    : engine22TravelCarryBootstrap
+    ? `${engine22TravelDirection}_DIRECTIONAL_CHILD_ACTIVE`
+    : observationOnlyLongWatch
+    ? "LONG_REVERSAL_WATCH"
     : resolvedDirectionalEvidence.directionState;
 
 const directionResolvedAt =
