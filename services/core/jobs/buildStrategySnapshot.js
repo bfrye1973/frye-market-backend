@@ -7549,24 +7549,12 @@ const againstDirection =
     volumeExpansion === true &&
     supportsDirection !== true;
 
-  const shortRejectionState =
-    reactionState.includes("BREAKOUT_FAILING") ||
-    reactionState.includes("REJECTING") ||
-    reactionState.includes("FAILED_RECLAIM") ||
-    reactionState.includes("LOST");
-
-  const shortDirectionalClimax =
-    intendedDirection === "SHORT" &&
-    shortRejectionState === true &&
+  const directionalClimax =
+    climacticRisk === true &&
     supportsDirection === true &&
     againstDirection !== true &&
-    volumeExpansion === true &&
-    (
-      volumeConfirmed === true ||
-      relativeVolume >= 1.35 ||
-      currentVsPriorVolumeRatio >= 1.5
-    ) &&
-    absorptionRisk !== true;
+    absorptionRisk !== true &&
+    highVolumeNoProgress !== true;
   const reclaimedAboveShortInvalidation =
     locationContext?.active === true &&
     locationContext?.locationRead === "SHORT_WATCH_RECLAIM_INVALIDATION_RISK" &&
@@ -7586,7 +7574,7 @@ const againstDirection =
 
   const climacticHardBlock =
     climacticRisk === true &&
-    shortDirectionalClimax !== true &&
+    againstDirection === true &&
     longBounceInsideShortWatchZone !== true &&
     reclaimedAboveShortInvalidation !== true;
 
@@ -7671,21 +7659,7 @@ const againstDirection =
     reasonCodes.push("BUYER_RECLAIM_ABOVE_SHORT_INVALIDATION");
     reasonCodes.push("SHORT_WATCH_WEAKENING_WAIT_FOR_HOLD");
     reasonCodes.push("CLIMACTIC_VOLUME_NOT_HARD_BLOCKED_DIRECTIONAL_RECLAIM");
-  } else if (shortDirectionalClimax) {
-    allowed = true;
-    downgradeOnly = true;
-    participationState = "SHORT_REJECTION_VOLUME_CONFIRMED";
-    participationQuality = "MIXED";
-    grade = "B";
-    risk = climacticRisk === true
-      ? "CLIMACTIC_BUT_DIRECTIONAL_PAPER_ONLY"
-      : "ACCEPTABLE_FOR_PAPER_REVIEW";
-    direction = intendedDirection;
-
-    reasonCodes.push("SHORT_REJECTION_VOLUME_CONFIRMED");
-    reasonCodes.push("CLIMACTIC_VOLUME_DIRECTIONALLY_CONFIRMED");
-    reasonCodes.push("ENGINE3_SHORT_REJECTION_CONFIRMED_BY_VOLUME");
-    reasonCodes.push("PAPER_ONLY_ENGINE6_STILL_DECIDES");
+  
   } else if (
     supportsDirection &&
     participationImproving &&
