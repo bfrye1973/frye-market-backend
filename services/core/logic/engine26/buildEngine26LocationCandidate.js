@@ -1315,6 +1315,12 @@ function findRecoverableDirectionalMemoryChild({
         record?.direction
       );
 
+      const opposedByEngine22Travel =
+        engine22ExplicitTravelOpposesDirection({
+          engine22TravelContext,
+          direction,
+        });
+
       const zone = findZoneByCanonicalId({
         zones,
         symbol,
@@ -1355,7 +1361,11 @@ function findRecoverableDirectionalMemoryChild({
        * restoration of the active directional owner.
        */
 
-      if (!identityValid || !lifecyclePreservable) {
+      if (
+        !identityValid ||
+        !lifecyclePreservable ||
+        opposedByEngine22Travel
+      ) {
         return null;
       }
 
@@ -3124,7 +3134,20 @@ const immediatePreviousPromotedContactPreservable =
   ) === "NEUTRAL" &&
   previousLocationCandidate?.invalidationFacts
     ?.completedCloseInvalidationConfirmed !== true;
+  
+const immediatePreviousDirection =
+  normalizeDirection(
+    previousLocationCandidate?.directionBias ??
+    previousLocationCandidate?.direction
+  );
 
+const immediatePreviousOpposedByEngine22Travel =
+  engine22ExplicitTravelOpposesDirection({
+    engine22TravelContext:
+      engine22MinuteTravelContext,
+    direction:
+      immediatePreviousDirection,
+  });
 const immediatePreviousChildPreservable =
   selectionPurpose === "STRATEGY1_CHILD" &&
   Boolean(immediatePreviousZone) &&
@@ -3137,6 +3160,7 @@ const immediatePreviousChildPreservable =
     )
   ) &&
   immediatePreviousReleaseState.released !== true;
+  immediatePreviousOpposedByEngine22Travel !== true;
 
 const recoveredPromotedContactChild =
   selectionPurpose === "STRATEGY1_CHILD" &&
