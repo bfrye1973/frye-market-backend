@@ -975,6 +975,7 @@ function buildStrategy1GeometryPreviewRead(
       selectedOption: null,
       optionA: null,
       optionB: null,
+      structuralContext: null,
       decisionSummary: null,
       previewOnly: true,
       noPermissionCreated: true,
@@ -1010,6 +1011,15 @@ function buildStrategy1GeometryPreviewRead(
             .optionB
         : null,
 
+    structuralContext:
+      isObject(
+        engine26GeometryPreviews
+          .structuralContext
+      )
+        ? engine26GeometryPreviews
+            .structuralContext
+        : null,
+
     decisionSummary:
       engine26GeometryPreviews
         .decisionSummary ??
@@ -1026,6 +1036,240 @@ function buildStrategy1GeometryPreviewRead(
     noExecution:
       engine26GeometryPreviews
         .noExecution !== false,
+  };
+}
+
+function buildMinuteSetupIntelligence({
+  wave = null,
+  geometryPreviewRead = null,
+  engine26LocationCandidate = null,
+} = {}) {
+  const cB =
+    isObject(wave?.cB)
+      ? wave.cB
+      : {};
+
+  const cBNormalZone =
+    isObject(cB?.normalZone)
+      ? cB.normalZone
+      : null;
+
+  const structuralContext =
+    isObject(
+      geometryPreviewRead
+        ?.structuralContext
+    )
+      ? geometryPreviewRead
+          .structuralContext
+      : null;
+
+  return {
+    currentWave:
+      wave?.currentWave ??
+      "UNKNOWN",
+
+    internalWave:
+      wave?.internalWave ??
+      "UNKNOWN",
+
+    nextExpectedInternalWave:
+      wave?.nextExpectedInternalWave ??
+      "UNKNOWN",
+
+    currentLegDirection:
+      wave?.currentLegDirection ??
+      "NEUTRAL",
+
+    preferredTradeDirection:
+      wave?.preferredTradeDirection ??
+      "NEUTRAL",
+
+    downstreamTravelDirection:
+      wave?.downstreamTravelDirection ??
+      "NEUTRAL",
+
+    cWaveState:
+      wave?.cWaveState ??
+      null,
+
+    engine26CarryAllowed:
+      wave?.engine26CarryAllowed ===
+      true,
+
+    cB: {
+      active:
+        cB?.active === true,
+
+      state:
+        cB?.state ??
+        null,
+
+      direction:
+        cB?.direction ??
+        "NEUTRAL",
+
+      currentPrice:
+        toNumber(
+          wave?.currentPrice
+        ),
+
+      firstTarget:
+        toNumber(
+          cB?.firstTarget
+        ),
+
+      normalZone:
+        cBNormalZone
+          ? {
+              lo:
+                toNumber(
+                  cBNormalZone.lo
+                ),
+
+              hi:
+                toNumber(
+                  cBNormalZone.hi
+                ),
+
+              label:
+                cBNormalZone.label ??
+                null,
+            }
+          : null,
+
+      retracementLevels:
+        isObject(
+          cB?.retracementLevels
+        )
+          ? {
+              ...cB
+                .retracementLevels,
+            }
+          : {},
+
+      reclaimTrigger:
+        toNumber(
+          cB?.reclaimTrigger
+        ),
+
+      reclaimConfirmed:
+        cB?.reclaimConfirmed ===
+        true,
+
+      retestHold:
+        cB?.retestHold ===
+        true,
+
+      fastNoRetestBreak:
+        cB?.fastNoRetestBreak ===
+        true,
+
+      completionProven:
+        false,
+
+      nextInternalActive:
+        false,
+    },
+
+    structuralBoundary: {
+      invalidationLevel:
+        toNumber(
+          structuralContext
+            ?.invalidationLevel
+        ),
+
+      bHigh:
+        toNumber(
+          structuralContext
+            ?.bHigh
+        ),
+
+      modelKey:
+        structuralContext
+          ?.modelKey ??
+        null,
+
+      modelType:
+        structuralContext
+          ?.modelType ??
+        null,
+
+      direction:
+        structuralContext
+          ?.direction ??
+        null,
+
+      source:
+        structuralContext
+          ?.source ??
+        null,
+    },
+
+    engine26Location: {
+      direction:
+        engine26LocationCandidate
+          ?.direction ??
+        engine26LocationCandidate
+          ?.directionBias ??
+        null,
+
+      directionState:
+        engine26LocationCandidate
+          ?.directionState ??
+        null,
+
+      candidateId:
+        engine26LocationCandidate
+          ?.candidateId ??
+        null,
+
+      zoneId:
+        engine26LocationCandidate
+          ?.zoneId ??
+        null,
+
+      currentPrice:
+        toNumber(
+          engine26LocationCandidate
+            ?.currentPrice
+        ),
+
+      contactState:
+        engine26LocationCandidate
+          ?.contactState ??
+        null,
+
+      chainArmed:
+        engine26LocationCandidate
+          ?.chainArmed === true,
+
+      priorRotationFullyComplete:
+        engine26LocationCandidate
+          ?.priorRotationFullyComplete ===
+        true,
+    },
+
+    interpretation: {
+      cBStillActive:
+        cB?.active === true,
+
+      cBCompletionNotProven:
+        cB?.active === true,
+
+      cCNextButNotActive:
+        String(
+          wave
+            ?.nextExpectedInternalWave ??
+          ""
+        ).toLowerCase() ===
+          "c-c",
+
+      engine26MidpointDoesNotDefineCBCompletion:
+        true,
+
+      nextTradeDirectionNotOwnedByCB:
+        true,
+    },
   };
 }
 
@@ -3277,6 +3521,21 @@ function buildLaneDecision({
           null
         );
 
+  const setupIntelligence =
+    degree === "minute"
+      ? buildMinuteSetupIntelligence({
+          wave,
+
+          geometryPreviewRead:
+            strategy1GeometryPreviews,
+
+          engine26LocationCandidate:
+            pipelineContext
+              ?.engine26LocationCandidate ||
+            null,
+        })
+      : null;
+
   const engine3ConfirmedDirection =
     normalizeDirection(
       pipelineContext
@@ -3479,6 +3738,49 @@ function buildLaneDecision({
     direction,
 
     currentDirectionalWatch,
+
+    setupIntelligence,
+
+    finalReadiness: {
+      state:
+        decisionState,
+
+      direction,
+
+      currentDirectionalWatch,
+
+      reactionReady:
+        readiness
+          .reactionReady === true,
+
+      participationReady:
+        readiness
+          .participationReady === true,
+
+      permissionReady:
+        readiness
+          .permissionReady === true,
+
+      plannerReady:
+        readiness
+          .plannerReady === true,
+
+      invalidated:
+        readiness
+          .invalidated === true,
+
+      waitingFor: [
+        ...waitingFor,
+      ],
+
+      blockers: [
+        ...blockers,
+      ],
+
+      recommendedAction,
+
+      executable: false,
+    },
 
     engine26ActiveTripContext:
       activeTrip,
@@ -3803,6 +4105,27 @@ function buildLaneDecision({
         strategy1Readiness
           .geometryReady === true
           ? "ENGINE27_TRADER_ENGINE9_RUNNER_HANDOFF_ACCEPTED"
+          : null,
+
+        degree === "minute" &&
+        setupIntelligence
+          ?.cB
+          ?.active === true
+          ? "ENGINE27_SETUP_C_B_ACTIVE"
+          : null,
+
+        degree === "minute" &&
+        setupIntelligence
+          ?.structuralBoundary
+          ?.invalidationLevel != null
+          ? "ENGINE27_SETUP_STRUCTURAL_INVALIDATION_AVAILABLE"
+          : null,
+
+        degree === "minute" &&
+        setupIntelligence
+          ?.interpretation
+          ?.engine26MidpointDoesNotDefineCBCompletion === true
+          ? "ENGINE27_SETUP_MIDPOINT_SEPARATE_FROM_C_B_COMPLETION"
           : null,
       ]),
   };
