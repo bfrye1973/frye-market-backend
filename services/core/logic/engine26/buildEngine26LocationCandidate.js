@@ -146,10 +146,38 @@ function engine22ExplicitTravelOpposesDirection({
   );
 }
 
-function distanceToZone(
+function distanceToZone(currentPrice, lo, hi) {
+  const price = toFiniteNumber(currentPrice);
+  const lower = toFiniteNumber(lo);
+  const upper = toFiniteNumber(hi);
+
+  if (
+    price === null ||
+    lower === null ||
+    upper === null
+  ) {
+    return null;
+  }
+
+  const min = Math.min(lower, upper);
+  const max = Math.max(lower, upper);
+
+  if (price >= min && price <= max) {
+    return 0;
+  }
+
+  if (price < min) {
+    return round2(min - price);
+  }
+
+  return round2(price - max);
+}
+
+function relationToZone(
   currentPrice,
   lo,
-  hi
+  hi,
+  activationRangePoints
 ) {
   const price = toFiniteNumber(currentPrice);
   const lower = toFiniteNumber(lo);
@@ -180,7 +208,6 @@ function distanceToZone(
     ? "NEAR_BELOW_ZONE"
     : "BELOW_ZONE";
 }
-
 function normalizeZone({
   zone,
   source,
