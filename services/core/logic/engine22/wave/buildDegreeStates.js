@@ -306,10 +306,25 @@ function normalizeCWaveInternalStructure({
     correctionType: upper(source.correctionType || "EXPANDED_FLAT"),
     parentCompletedWave: source.parentCompletedWave || "W3",
     currentWave: source.currentWave || "C",
+
+    previousInternalWave:
+      source.previousInternalWave ||
+      (source.currentInternalWave === "C-b" ? "C-a" : null),
+
     currentInternalWave: source.currentInternalWave || "C-a",
     nextExpectedInternalWave: source.nextExpectedInternalWave || "C-b",
+
     cWaveState: upper(source.cWaveState || "C_A_DOWN_ACTIVE"),
     direction: upper(source.direction || "DOWN"),
+
+    completionZoneTouched:
+      source.completionZoneTouched === true ||
+      source.cA?.completionZoneTouched === true ||
+      source.cA?.completionTouchPrice != null,
+
+    deepSweepTouched:
+      source.deepSweepTouched === true ||
+      source.cA?.deepSweepTouched === true,
 
     downstreamTravelDirection:
       source.downstreamTravelDirection || "NEUTRAL",
