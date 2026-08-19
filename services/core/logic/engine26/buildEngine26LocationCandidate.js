@@ -4586,11 +4586,11 @@ const strategyFacts =
     promotedFromTargetCompletion:
       promotedContactLifecycle,
     targetZoneEntryTouchedAt:
-      promotedContactLifecycle ||
-      previousReleaseState?.targetZoneEntryTouched === true
+      historicalTargetZoneEntryTouched === true ||
+      promotedContactLifecycle
         ? (
-            continuityLocationCandidate
-              ?.targetZoneEntryTouchedAt ||
+            historicalTargetZoneEntryTouchedAt ||
+            historicalTargetApproachAt ||
             snapshotTime
           )
         : null,
