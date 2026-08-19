@@ -3534,13 +3534,53 @@ const priorRotationDirection =
       )
     : null;
 
+const sameCandidatePersistedMemory =
+  priorMemoryRecord?.currentCandidateId ===
+    continuityLocationCandidate?.candidateId
+    ? priorMemoryRecord
+    : null;
+
+const historicalTargetZoneEntryTouched =
+  previousReleaseState?.targetZoneEntryTouched === true ||
+  continuityLocationCandidate?.targetZoneEntryTouched === true ||
+  sameCandidatePersistedMemory?.targetZoneEntryTouched === true;
+
+const historicalTargetZoneEntryTouchedAt =
+  continuityLocationCandidate?.targetZoneEntryTouchedAt ||
+  sameCandidatePersistedMemory?.targetZoneEntryTouchedAt ||
+  null;
+
+const historicalTargetApproachAt =
+  sameCandidatePersistedMemory?.targetApproachAt ||
+  null;
+
+const historicalTargetMidlineReached =
+  previousReleaseState?.targetMidlineReached === true ||
+  continuityLocationCandidate?.targetMidlineReached === true ||
+  sameCandidatePersistedMemory?.targetMidlineReached === true;
+
+const historicalPartialProfitTaking =
+  historicalTargetZoneEntryTouched === true &&
+  historicalTargetMidlineReached !== true &&
+  (
+    previousReleaseState?.priorRotationCompletionState ===
+      "PARTIAL_PROFIT_TAKING" ||
+    continuityLocationCandidate?.priorRotationCompletionState ===
+      "PARTIAL_PROFIT_TAKING" ||
+    sameCandidatePersistedMemory?.priorRotationCompletionState ===
+      "PARTIAL_PROFIT_TAKING"
+  );
+
 const priorRotationCompletionState =
   promotedContactLifecycle
     ? "FULL_TARGET_COMPLETION"
     : previousReleaseState
         ?.priorRotationCompletionState ??
+      continuityLocationCandidate
+        ?.priorRotationCompletionState ??
+      sameCandidatePersistedMemory
+        ?.priorRotationCompletionState ??
       null;
-
 const currentObservationDirection =
   promotedContactLifecycle
     ? "NEUTRAL"
@@ -3555,7 +3595,13 @@ const priorRotationFullyComplete =
 const remainingRunnerExpected =
   promotedContactLifecycle
     ? false
+    : historicalPartialProfitTaking
+    ? true
     : previousReleaseState
+        ?.remainingRunnerExpected ??
+      continuityLocationCandidate
+        ?.remainingRunnerExpected ??
+      sameCandidatePersistedMemory
         ?.remainingRunnerExpected ??
       null;
 
@@ -3573,6 +3619,14 @@ const completionBoundary =
       )
     : previousReleaseState
         ?.completionBoundary ??
+      continuityLocationCandidate
+        ?.completionBoundary ??
+      sameCandidatePersistedMemory
+        ?.completionBoundary ??
+      toFiniteNumber(
+        continuityLocationCandidate
+          ?.targetZone?.midline
+      ) ??
       null;
 
 const completedTargetZoneId =
@@ -4486,15 +4540,15 @@ const strategyFacts =
     priorRotationCompletionState,
     currentObservationDirection,
     targetApproachCompletionWatch:
-      previousReleaseState
-        ?.targetApproachCompletionWatch === true,
+      promotedContactLifecycle !== true &&
+      historicalPartialProfitTaking === true,
+
     targetZoneEntryTouched:
-      previousReleaseState
-        ?.targetZoneEntryTouched === true ||
+      historicalTargetZoneEntryTouched === true ||
       promotedContactLifecycle,
+
     targetMidlineReached:
-      previousReleaseState
-        ?.targetMidlineReached === true ||
+      historicalTargetMidlineReached === true ||
       promotedContactLifecycle,
     priorRotationFullyComplete,
     remainingRunnerExpected,
