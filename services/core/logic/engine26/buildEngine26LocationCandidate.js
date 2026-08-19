@@ -1829,19 +1829,90 @@ function evaluatePreviousChildRelease({
       )
     );
 
-  const targetMidlineReached =
-    price !== null &&
-    targetMidline !== null &&
+const lifecycleStartTime =
+  previousLocationCandidate?.directionResolvedAt ||
+  previousLocationCandidate?.candidateLifecycleStartTime ||
+  priorMemoryRecord?.directionResolvedAt ||
+  priorMemoryRecord?.candidateLifecycleStartTime ||
+  null;
+
+const lifecycleStartMs =
+  parseObservationTimeMs(lifecycleStartTime);
+
+const midpointTouchedByCurrentPrice =
+  price !== null &&
+  targetMidline !== null &&
+  (
     (
-      (
-        direction === "LONG" &&
-        price >= targetMidline
-      ) ||
-      (
-        direction === "SHORT" &&
-        price <= targetMidline
-      )
+      direction === "LONG" &&
+      price >= targetMidline
+    ) ||
+    (
+      direction === "SHORT" &&
+      price <= targetMidline
+    )
+  );
+
+let midpointTouchedByBar = false;
+
+if (
+  targetMidline !== null &&
+  ["LONG", "SHORT"].includes(direction)
+) {
+  const bars = Array.isArray(bars10m)
+    ? bars10m
+    : [];
+
+  for (const bar of bars) {
+    const barHigh = toFiniteNumber(
+      bar?.high ?? bar?.h
     );
+
+    const barLow = toFiniteNumber(
+      bar?.low ?? bar?.l
+    );
+
+    if (
+      barHigh === null ||
+      barLow === null
+    ) {
+      continue;
+    }
+
+    const barTime =
+      bar?.time ??
+      bar?.t ??
+      bar?.tSec ??
+      null;
+
+    const barTimeMs =
+      parseObservationTimeMs(barTime);
+
+    if (
+      lifecycleStartMs !== null &&
+      (
+        barTimeMs === null ||
+        barTimeMs < lifecycleStartMs
+      )
+    ) {
+      continue;
+    }
+
+    const touched =
+      direction === "LONG"
+        ? barHigh >= targetMidline
+        : barLow <= targetMidline;
+
+    if (touched) {
+      midpointTouchedByBar = true;
+      break;
+    }
+  }
+}
+
+const targetMidlineReached =
+  midpointTouchedByCurrentPrice ||
+  midpointTouchedByBar;
 
   if (targetMidlineReached) {
     return {
