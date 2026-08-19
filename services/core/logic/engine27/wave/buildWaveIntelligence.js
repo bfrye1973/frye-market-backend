@@ -156,14 +156,23 @@ function normalizeWave(value) {
 }
 
 function normalizeInternalWave(value) {
-  const text = lower(value);
+  const raw = String(value ?? "").trim();
 
-  if (!text) {
+  if (!raw) {
     return "UNKNOWN";
   }
 
+  const text = raw.toLowerCase();
+
   if (VALID_INTERNAL_WAVES.has(text)) {
     return text;
+  }
+
+  const cWaveMatch =
+    text.match(/^c[-_\s]?([a-e])$/i);
+
+  if (cWaveMatch) {
+    return `C-${cWaveMatch[1].toLowerCase()}`;
   }
 
   const romanMatch = text.match(
@@ -239,6 +248,14 @@ function normalizeTransitionRisk(
 }
 
 function getInternalStructure(state) {
+  if (
+    isObject(
+      state?.cWaveInternalStructure
+    )
+  ) {
+    return state.cWaveInternalStructure;
+  }
+
   return isObject(
     state?.internalStructure
   )
@@ -485,6 +502,10 @@ function resolveCurrentLegDirection(
       [
         internalStructure
           ?.internalLegDirection,
+        internalStructure
+          ?.direction,
+        internalStructure
+          ?.downstreamTravelDirection,
         state.currentLegDirection,
         state.legDirection,
         state.activeLegDirection,
@@ -613,6 +634,8 @@ function resolvePreferredTradeDirection(
 
   return firstNormalized(
     [
+      state.cWaveInternalStructure
+        ?.downstreamTravelDirection,
       state.preferredTradeDirection,
       state.tradeDirection,
       state.preferredDirection,
@@ -876,12 +899,59 @@ function buildInternalStructureRead(
 
       supportLevel:
         null,
+
+      direction:
+        "NEUTRAL",
+
+      downstreamTravelDirection:
+        "NEUTRAL",
+
+      directionalContextValidForEngine26:
+        false,
+
+      engine26TravelContextRole:
+        null,
+
+      engine26CarryAllowed:
+        false,
+
+      cWaveState:
+        null,
+
+      activeCompletionZone:
+        null,
+
+      activeDestinations:
+        [],
     };
   }
 
+  const cWaveState =
+    upper(
+      internalStructure
+        .cWaveState
+    ) ||
+    null;
+
+  const engine26CarryAllowed =
+    internalStructure
+      .engine26CarryAllowed ===
+      true;
+
+  const active =
+    internalStructure.active ===
+      true ||
+    engine26CarryAllowed ===
+      true ||
+    (
+      cWaveState != null &&
+      cWaveState.includes(
+        "ACTIVE"
+      )
+    );
+
   return {
-    active:
-      internalStructure.active === true,
+    active,
 
     internalWave:
       normalizeInternalWave(
@@ -939,13 +1009,76 @@ function buildInternalStructureRead(
 
     invalidationBreached:
       internalStructure
-        .invalidationBreached === true,
+        .invalidationBreached ===
+        true,
 
     supportLevel:
       numberOrNull(
         internalStructure
           .supportLevel
       ),
+
+    direction:
+      firstNormalized(
+        [
+          internalStructure
+            .direction,
+          internalStructure
+            .currentLegDirection,
+        ],
+        normalizeLegDirection,
+        "NEUTRAL"
+      ),
+
+    downstreamTravelDirection:
+      firstNormalized(
+        [
+          internalStructure
+            .downstreamTravelDirection,
+          internalStructure
+            .direction,
+        ],
+        (value) =>
+          normalizeTradeDirection(
+            value,
+            {
+              allowUpDown: true,
+            }
+          ),
+        "NEUTRAL"
+      ),
+
+    directionalContextValidForEngine26:
+      internalStructure
+        .directionalContextValidForEngine26 ===
+        true,
+
+    engine26TravelContextRole:
+      internalStructure
+        .engine26TravelContextRole ||
+      null,
+
+    engine26CarryAllowed,
+
+    cWaveState,
+
+    activeCompletionZone:
+      isObject(
+        internalStructure
+          .activeCompletionZone
+      )
+        ? internalStructure
+            .activeCompletionZone
+        : null,
+
+    activeDestinations:
+      Array.isArray(
+        internalStructure
+          .activeDestinations
+      )
+        ? internalStructure
+            .activeDestinations
+        : [],
   };
 }
 
@@ -1277,6 +1410,28 @@ function buildReasonCodes({
       : null,
 
     internalRead
+      ?.directionalContextValidForEngine26 ===
+      true
+      ? "ENGINE27_ENGINE26_DIRECTIONAL_CONTEXT_VALID"
+      : null,
+
+    internalRead
+      ?.engine26TravelContextRole ===
+      "STRUCTURAL_TRAVEL_CONTEXT"
+      ? "ENGINE27_ENGINE26_STRUCTURAL_TRAVEL_CONTEXT"
+      : null,
+
+    internalRead
+      ?.engine26CarryAllowed === true
+      ? "ENGINE27_ENGINE26_CARRY_ALLOWED"
+      : null,
+
+    internalRead
+      ?.cWaveState
+      ? `ENGINE27_${internalRead.cWaveState}`
+      : null,
+
+    internalRead
       ?.transitionRisk !==
     "UNKNOWN"
       ? `ENGINE27_TRANSITION_RISK_${internalRead.transitionRisk}`
@@ -1437,6 +1592,34 @@ function buildDegreeIntelligence(
     supportLevel:
       internalRead
         .supportLevel,
+
+    downstreamTravelDirection:
+      internalRead
+        .downstreamTravelDirection,
+
+    directionalContextValidForEngine26:
+      internalRead
+        .directionalContextValidForEngine26,
+
+    engine26TravelContextRole:
+      internalRead
+        .engine26TravelContextRole,
+
+    engine26CarryAllowed:
+      internalRead
+        .engine26CarryAllowed,
+
+    cWaveState:
+      internalRead
+        .cWaveState,
+
+    activeCompletionZone:
+      internalRead
+        .activeCompletionZone,
+
+    activeDestinations:
+      internalRead
+        .activeDestinations,
 
     currentRead:
       buildCurrentRead({
