@@ -3588,12 +3588,12 @@ function approvedEngine22TravelContext({
 }
 
 test(
-  "approved Engine 22 structural travel contract bootstraps SHORT toward the selected negotiated target and stays SHORT until target midline",
+  "approved Engine 22 structural travel context does not bootstrap a fresh Engine 26 direction from NEUTRAL",
   () => {
     const tempDir = fs.mkdtempSync(
       path.join(
         os.tmpdir(),
-        "engine26-engine22-travel-short-"
+        "engine26-engine22-context-only-"
       )
     );
 
@@ -3617,10 +3617,7 @@ test(
         "utf8"
       );
 
-      const engine22WaveStrategy =
-        approvedEngine22TravelContext();
-
-      const activeShort = buildAtPrice({
+      const candidate = buildAtPrice({
         currentPrice: 7718.5,
         snapshotTime:
           "2026-08-18T15:00:00.000Z",
@@ -3629,178 +3626,53 @@ test(
         manualZonesFilePath,
         memoryFilePath,
         persistMemory: true,
-        engine22WaveStrategy,
+        engine22WaveStrategy:
+          approvedEngine22TravelContext(),
       }).engine26LocationCandidate;
 
       assert.equal(
-        activeShort.directionBias,
-        "SHORT"
+        candidate.directionBias,
+        "NEUTRAL"
       );
+
       assert.equal(
-        activeShort.direction,
-        "SHORT"
+        candidate.direction,
+        "NEUTRAL"
       );
+
       assert.equal(
-        activeShort.tradeDirectionBias,
-        "SHORT"
+        candidate.tradeDirectionBias,
+        "NEUTRAL"
       );
+
       assert.equal(
-        activeShort.directionSource,
-        "ENGINE22_EXPLICIT_STRUCTURAL_TRAVEL_CONTEXT"
+        candidate.engine22StructuralTravelCarry,
+        false
       );
+
       assert.equal(
-        activeShort.engine22StructuralTravelCarry,
-        true
-      );
-      assert.equal(
-        activeShort.location.lo,
-        7687.25
-      );
-      assert.equal(
-        activeShort.location.hi,
-        7705.5
-      );
-      assert.equal(
-        activeShort.location.relation,
-        "ABOVE_ZONE"
-      );
-      assert.ok(activeShort.targetZone);
-      assert.equal(
-        activeShort.targetZone.zoneId,
-        activeShort.zoneId
-      );
-      assert.equal(
-        activeShort.targetZone.low,
-        7687.25
-      );
-      assert.equal(
-        activeShort.targetZone.high,
-        7705.5
-      );
-      assert.equal(
-        activeShort.targetZone.midline,
-        7696.5
-      );
-      assert.equal(
-        activeShort.structuralContext
+        candidate.structuralContext
           .engine22MinuteTravelContext
           .downstreamTravelDirection,
         "SHORT"
       );
+
       assert.equal(
-        activeShort.structuralContext
+        candidate.structuralContext
           .engine22MinuteTravelContext
           .validForCarry,
         true
       );
+
       assert.equal(
-        activeShort.structuralContext
+        candidate.structuralContext
           .engine22MinuteTravelContext
           .currentInternalWave,
         "C-a"
       );
 
-      const partial = buildAtPrice({
-        currentPrice: 7705.5,
-        previousLocationCandidate: activeShort,
-        snapshotTime:
-          "2026-08-18T15:10:00.000Z",
-        bars10m: [],
-        ema10Posture: "BEARISH",
-        manualZonesFilePath,
-        memoryFilePath,
-        persistMemory: true,
-        engine22WaveStrategy:
-          approvedEngine22TravelContext({
-            cWaveState:
-              "C_A_COMPLETION_ZONE_ACTIVE",
-          }),
-      }).engine26LocationCandidate;
-
       assert.equal(
-        partial.candidateId,
-        activeShort.candidateId
-      );
-      assert.equal(
-        partial.directionBias,
-        "SHORT"
-      );
-      assert.equal(
-        partial.targetApproachCompletionWatch,
-        true
-      );
-      assert.equal(
-        partial.targetZoneEntryTouched,
-        true
-      );
-      assert.equal(
-        partial.targetMidlineReached,
-        false
-      );
-      assert.equal(
-        partial.priorRotationCompletionState,
-        "PARTIAL_PROFIT_TAKING"
-      );
-
-      const completed = buildAtPrice({
-        currentPrice: 7696.5,
-        previousLocationCandidate: partial,
-        snapshotTime:
-          "2026-08-18T15:20:00.000Z",
-        bars10m: [],
-        ema10Posture: "BEARISH",
-        manualZonesFilePath,
-        memoryFilePath,
-        persistMemory: true,
-        engine22WaveStrategy:
-          approvedEngine22TravelContext({
-            cWaveState:
-              "C_A_COMPLETION_ZONE_ACTIVE",
-          }),
-      }).engine26LocationCandidate;
-
-      assert.equal(
-        completed.directionBias,
-        "NEUTRAL"
-      );
-      assert.equal(
-        completed.tradeDirectionBias,
-        "NEUTRAL"
-      );
-      assert.equal(
-        completed.directionalResolved,
-        false
-      );
-      assert.equal(
-        completed.contactState,
-        "NEGOTIATED_LINE_CONTACT"
-      );
-      assert.equal(
-        completed.chainArmed,
-        true
-      );
-      assert.equal(
-        completed.priorRotationFullyComplete,
-        true
-      );
-      assert.equal(
-        completed.priorRotationCompletionState,
-        "FULL_TARGET_COMPLETION"
-      );
-      assert.equal(
-        completed.expectedReactionDirection,
-        null
-      );
-      assert.equal(
-        completed.expectedParticipationDirection,
-        null
-      );
-      assert.deepEqual(
-        completed.expectedReactions,
-        []
-      );
-      assert.equal(
-        completed.reactionExpected,
+        candidate.directionalResolved,
         false
       );
     } finally {
@@ -3816,12 +3688,12 @@ test(
 );
 
 test(
-  "Engine 22 maturity change within the same DOWN leg does not release the active SHORT",
+  "Engine 22 maturity change remains structural context and does not create an Engine 26 direction",
   () => {
     const tempDir = fs.mkdtempSync(
       path.join(
         os.tmpdir(),
-        "engine26-engine22-maturity-"
+        "engine26-engine22-maturity-context-only-"
       )
     );
 
@@ -3859,7 +3731,10 @@ test(
           }),
       }).engine26LocationCandidate;
 
-      assert.equal(first.directionBias, "SHORT");
+      assert.equal(
+        first.directionBias,
+        "NEUTRAL"
+      );
 
       const matured = buildAtPrice({
         currentPrice: 7712,
@@ -3877,24 +3752,35 @@ test(
       }).engine26LocationCandidate;
 
       assert.equal(
-        matured.candidateId,
-        first.candidateId
-      );
-      assert.equal(
-        matured.zoneId,
-        first.zoneId
-      );
-      assert.equal(
         matured.directionBias,
-        "SHORT"
+        "NEUTRAL"
       );
+
       assert.equal(
-        matured.priorRotationFullyComplete,
+        matured.direction,
+        "NEUTRAL"
+      );
+
+      assert.equal(
+        matured.tradeDirectionBias,
+        "NEUTRAL"
+      );
+
+      assert.equal(
+        matured.engine22StructuralTravelCarry,
         false
       );
+
       assert.equal(
-        matured.contactState,
-        null
+        matured.directionalResolved,
+        false
+      );
+
+      assert.equal(
+        matured.structuralContext
+          .engine22MinuteTravelContext
+          .downstreamTravelDirection,
+        "SHORT"
       );
     } finally {
       fs.rmSync(
@@ -3907,7 +3793,6 @@ test(
     }
   }
 );
-
 test(
   "raw Engine 22 DOWN direction without the explicit safety contract does not force Strategy 1 SHORT",
   () => {
