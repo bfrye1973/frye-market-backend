@@ -1809,13 +1809,12 @@ const activeStructuresWithMinuteTransition =
 const activeStructuresWithInternalCTransition =
   attachInternalCTransitionToActiveStructures({
     symbol,
-    activeStructures: activeStructuresWithInternalCTransition,
+    activeStructures: activeStructuresWithMinuteTransition,
     barsByTf,
     currentPrice,
     snapshotNow,
     currentTimeSec,
   });
-
 
   let degrees = {};
 
