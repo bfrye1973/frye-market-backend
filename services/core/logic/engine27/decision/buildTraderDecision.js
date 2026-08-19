@@ -1075,7 +1075,17 @@ function normalizeInternalWave(value) {
     return "UNKNOWN";
   }
 
-  const normalized = wave.toLowerCase();
+  const normalized =
+    wave.toLowerCase();
+
+  const cWaveMatch =
+    normalized.match(
+      /^c[-_\s]?([a-e])$/
+    );
+
+  if (cWaveMatch) {
+    return `C-${cWaveMatch[1]}`;
+  }
 
   if (
     [
@@ -1095,6 +1105,271 @@ function normalizeInternalWave(value) {
   }
 
   return "UNKNOWN";
+}
+
+function readEngine26TargetZone(
+  candidate
+) {
+  if (!isObject(candidate)) {
+    return null;
+  }
+
+  const location =
+    isObject(candidate.location)
+      ? candidate.location
+      : {};
+
+  const nestedZone =
+    isObject(location.zone)
+      ? location.zone
+      : {};
+
+  const targetZone =
+    isObject(candidate.targetZone)
+      ? candidate.targetZone
+      : {};
+
+  const lo =
+    toNumber(
+      targetZone.lo ??
+      targetZone.low ??
+      location.lo ??
+      location.low ??
+      nestedZone.lo ??
+      nestedZone.low
+    );
+
+  const hi =
+    toNumber(
+      targetZone.hi ??
+      targetZone.high ??
+      location.hi ??
+      location.high ??
+      nestedZone.hi ??
+      nestedZone.high
+    );
+
+  const mid =
+    toNumber(
+      targetZone.mid ??
+      targetZone.midline ??
+      location.mid ??
+      location.midline ??
+      nestedZone.mid ??
+      nestedZone.midline
+    ) ??
+    (
+      lo !== null &&
+      hi !== null
+        ? Number(
+            (
+              (lo + hi) / 2
+            ).toFixed(2)
+          )
+        : null
+    );
+
+  if (
+    lo === null &&
+    hi === null &&
+    mid === null
+  ) {
+    return null;
+  }
+
+  return {
+    lo,
+    hi,
+    mid,
+
+    relation:
+      targetZone.relation ??
+      location.relation ??
+      location.priceLocation ??
+      location.locationRead ??
+      candidate.locationRelation ??
+      null,
+
+    source:
+      "engine26LocationCandidate",
+  };
+}
+
+function buildStrategy1ActiveTrip({
+  degree,
+  wave,
+  pipelineContext,
+} = {}) {
+  if (degree !== "minute") {
+    return {
+      active: false,
+    };
+  }
+
+  const candidate =
+    pipelineContext
+      ?.engine26LocationCandidate ||
+    null;
+
+  if (!isObject(candidate)) {
+    return {
+      active: false,
+    };
+  }
+
+  const structuralTravelDirection =
+    normalizeDirection(
+      wave
+        ?.downstreamTravelDirection
+    );
+
+  const candidateDirection =
+    normalizeDirection(
+      candidate.direction ??
+      candidate.directionBias
+    );
+
+  const directionState =
+    upper(
+      candidate.directionState
+    );
+
+  const directionalContextValid =
+    wave
+      ?.directionalContextValidForEngine26 ===
+      true;
+
+  const travelRole =
+    upper(
+      wave
+        ?.engine26TravelContextRole
+    );
+
+  const carryAllowed =
+    wave
+      ?.engine26CarryAllowed ===
+      true;
+
+  const priorRotationFullyComplete =
+    candidate
+      ?.priorRotationFullyComplete ===
+      true;
+
+  const directionalChildActive =
+    directionState.includes(
+      "DIRECTIONAL_CHILD_ACTIVE"
+    );
+
+  const directionAligned =
+    [
+      "LONG",
+      "SHORT",
+    ].includes(
+      structuralTravelDirection
+    ) &&
+    structuralTravelDirection ===
+      candidateDirection;
+
+  const active =
+    directionalContextValid &&
+    travelRole ===
+      "STRUCTURAL_TRAVEL_CONTEXT" &&
+    carryAllowed &&
+    directionalChildActive &&
+    directionAligned &&
+    priorRotationFullyComplete !==
+      true;
+
+  const targetZone =
+    readEngine26TargetZone(
+      candidate
+    );
+
+  return {
+    active,
+
+    state:
+      active
+        ? "ACTIVE_C_A_COMPLETION_RUN"
+        : "INACTIVE",
+
+    direction:
+      active
+        ? candidateDirection
+        : "NEUTRAL",
+
+    directionState:
+      candidate.directionState ??
+      null,
+
+    currentInternalWave:
+      normalizeInternalWave(
+        wave?.internalWave
+      ),
+
+    nextExpectedInternalWave:
+      normalizeInternalWave(
+        wave
+          ?.nextExpectedInternalWave
+      ),
+
+    cWaveState:
+      wave?.cWaveState ??
+      null,
+
+    downstreamTravelDirection:
+      structuralTravelDirection,
+
+    directionalContextValidForEngine26:
+      directionalContextValid,
+
+    engine26TravelContextRole:
+      wave
+        ?.engine26TravelContextRole ??
+      null,
+
+    engine26CarryAllowed:
+      carryAllowed,
+
+    invalidationLevel:
+      toNumber(
+        wave?.invalidationLevel
+      ),
+
+    targetZone,
+
+    contactState:
+      candidate.contactState ??
+      null,
+
+    chainArmed:
+      candidate.chainArmed ===
+      true,
+
+    priorRotationFullyComplete,
+
+    activeCompletionZone:
+      wave
+        ?.activeCompletionZone ??
+      null,
+
+    activeDestinations:
+      safeArray(
+        wave
+          ?.activeDestinations
+      ),
+
+    nextTradeDirection:
+      "NOT_YET_KNOWN",
+
+    nextInternalWatch:
+      normalizeInternalWave(
+        wave
+          ?.nextExpectedInternalWave
+      ) === "C-b"
+        ? "C-B_BOUNCE_WATCH"
+        : "NEXT_INTERNAL_WATCH",
+  };
 }
 
 function normalizeProximity(value) {
@@ -1566,8 +1841,39 @@ function buildWaitingFor({
   readiness,
   higherTimeframeConflict,
   strategy1Applies = false,
+  activeTrip = null,
 }) {
   const waitingFor = [];
+
+  if (
+    activeTrip?.active ===
+      true
+  ) {
+    const targetZone =
+      activeTrip.targetZone ||
+      null;
+
+    if (
+      targetZone?.lo != null ||
+      targetZone?.hi != null
+    ) {
+      waitingFor.push(
+        "NEGOTIATED_TARGET_ZONE_CONTACT"
+      );
+    }
+
+    if (
+      targetZone?.mid != null
+    ) {
+      waitingFor.push(
+        "NEGOTIATED_MIDLINE_COMPLETION"
+      );
+    }
+
+    return unique(
+      waitingFor
+    );
+  }
 
   const currentWave =
     normalizeWave(
@@ -1766,12 +2072,20 @@ function determineDecisionState({
   proximity,
   readiness,
   higherTimeframeConflict,
+  activeTrip = null,
 }) {
   if (
     readiness.invalidated ===
     true
   ) {
     return "INVALIDATED";
+  }
+
+  if (
+    activeTrip?.active ===
+      true
+  ) {
+    return "ACTIVE";
   }
 
   const alphaDecision =
@@ -2025,7 +2339,17 @@ function buildRecommendedAction({
   currentWave,
   geometryToolRecommended,
   strategy1Applies = false,
+  activeTrip = null,
 }) {
+  if (
+    activeTrip?.active ===
+      true
+  ) {
+    return (
+      "WATCH_NEGOTIATED_TARGET_C_A_COMPLETION"
+    );
+  }
+
   if (
     decisionState ===
     "INVALIDATED"
@@ -2782,6 +3106,21 @@ function buildLaneDecision({
       });
   }
 
+  const activeTrip =
+    buildStrategy1ActiveTrip({
+      degree,
+      wave,
+      pipelineContext,
+    });
+
+  if (
+    activeTrip.active ===
+      true
+  ) {
+    direction =
+      activeTrip.direction;
+  }
+
   const readiness =
     degree === "subminute"
       ? {
@@ -2865,9 +3204,7 @@ function buildLaneDecision({
       proximity,
       readiness,
       higherTimeframeConflict,
-      strategy1Applies:
-        strategy1Readiness
-          ?.applies === true,
+      activeTrip,
     });
 
   const waitingFor =
@@ -2881,6 +3218,7 @@ function buildLaneDecision({
       strategy1Applies:
         strategy1Readiness
           ?.applies === true,
+      activeTrip,
     });
 
   if (
@@ -2964,6 +3302,7 @@ function buildLaneDecision({
       strategy1Applies:
         strategy1Readiness
           ?.applies === true,
+      activeTrip,
     });
 
   const permissionContext =
@@ -3012,31 +3351,35 @@ function buildLaneDecision({
     );
 
   const currentDirectionalWatch =
-    degree === "minute" &&
-    strategy1Readiness
-      ?.applies === true
-      ? (
+    activeTrip.active === true
+      ? activeTrip.direction
+      : (
+          degree === "minute" &&
           strategy1Readiness
-            .reactionReady === true &&
-          [
-            "LONG",
-            "SHORT",
-          ].includes(
-            engine3ConfirmedDirection
-          )
-            ? engine3ConfirmedDirection
-            : (
+            ?.applies === true
+            ? (
+                strategy1Readiness
+                  .reactionReady === true &&
                 [
                   "LONG",
                   "SHORT",
                 ].includes(
-                  candidateWatchDirection
+                  engine3ConfirmedDirection
                 )
-                  ? `${candidateWatchDirection} WATCH`
-                  : "NEUTRAL"
+                  ? engine3ConfirmedDirection
+                  : (
+                      [
+                        "LONG",
+                        "SHORT",
+                      ].includes(
+                        candidateWatchDirection
+                      )
+                        ? `${candidateWatchDirection} WATCH`
+                        : "NEUTRAL"
+                    )
               )
-        )
-      : direction;
+            : direction
+        );
 
   return {
     active: true,
@@ -3193,9 +3536,26 @@ function buildLaneDecision({
 
     decisionState,
 
+    traderState:
+      activeTrip.active === true
+        ? activeTrip.state
+        : decisionState,
+
     direction,
 
     currentDirectionalWatch,
+
+    activeTrip,
+
+    nextTradeDirection:
+      activeTrip.active === true
+        ? "NOT_YET_KNOWN"
+        : null,
+
+    nextInternalWatch:
+      activeTrip.active === true
+        ? activeTrip.nextInternalWatch
+        : null,
 
     engine26GeometryPreviews:
       strategy1GeometryPreviews,
@@ -3456,6 +3816,17 @@ function buildLaneDecision({
     },
 
       
+    traderSummary:
+      activeTrip.active === true
+        ? (
+            `${activeTrip.currentInternalWave} down remains active. ` +
+            `Engine 26 is carrying ${activeTrip.direction} toward the negotiated target lifecycle. ` +
+            `First target-zone contact begins profit-taking and the negotiated midline completes the current trip. ` +
+            `After completion, Engine 26 resets neutral. ` +
+            `${activeTrip.nextExpectedInternalWave} is the next structural bounce watch only; the next trade direction is not yet known.`
+          )
+        : null,
+
     marketStoryContext: {
       headline:
         story?.headline ||
