@@ -3792,15 +3792,19 @@ const engine22TravelTargetAheadOfMidline =
       toFiniteNumber(selectedZone?.mid)
     : false;
 
-const engine22TravelCarryBootstrap =
-  strategy1Eligible === true &&
-  promotedContactLifecycle !== true &&
-  priorDirectionalChildDirection === "NEUTRAL" &&
-  engine22MinuteTravelContext?.validForCarry === true &&
-  engine22TravelTargetAheadOfMidline === true;
+/*
+ * Engine 22 is structural context only.
+ *
+ * It may continue describing an already-established directional trip,
+ * but it may NOT create a fresh LONG/SHORT Engine 26 child from NEUTRAL.
+ *
+ * After negotiated midpoint completion Engine 26 resets to NEUTRAL.
+ * Fresh tactical direction must come from Engine 3, with Engine 4
+ * participation confirmation.
+ */
+const engine22TravelCarryBootstrap = false;
 
 const engine22StructuralTravelCarry =
-  engine22TravelCarryBootstrap === true ||
   priorCandidateUsesSelectedZoneAsTravelTarget === true;
 
 const engine22StructuralInvalidationBoundary =
