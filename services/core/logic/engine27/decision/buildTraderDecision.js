@@ -1288,9 +1288,9 @@ function buildStrategy1ActiveTrip({
   return {
     active,
 
-    state:
+    contextState:
       active
-        ? "ACTIVE_C_A_COMPLETION_RUN"
+        ? "ENGINE26_ACTIVE_TRIP_CONTEXT"
         : "INACTIVE",
 
     direction:
@@ -1841,39 +1841,9 @@ function buildWaitingFor({
   readiness,
   higherTimeframeConflict,
   strategy1Applies = false,
-  activeTrip = null,
 }) {
   const waitingFor = [];
 
-  if (
-    activeTrip?.active ===
-      true
-  ) {
-    const targetZone =
-      activeTrip.targetZone ||
-      null;
-
-    if (
-      targetZone?.lo != null ||
-      targetZone?.hi != null
-    ) {
-      waitingFor.push(
-        "NEGOTIATED_TARGET_ZONE_CONTACT"
-      );
-    }
-
-    if (
-      targetZone?.mid != null
-    ) {
-      waitingFor.push(
-        "NEGOTIATED_MIDLINE_COMPLETION"
-      );
-    }
-
-    return unique(
-      waitingFor
-    );
-  }
 
   const currentWave =
     normalizeWave(
@@ -2072,7 +2042,6 @@ function determineDecisionState({
   proximity,
   readiness,
   higherTimeframeConflict,
-  activeTrip = null,
 }) {
   if (
     readiness.invalidated ===
@@ -2081,12 +2050,6 @@ function determineDecisionState({
     return "INVALIDATED";
   }
 
-  if (
-    activeTrip?.active ===
-      true
-  ) {
-    return "ACTIVE";
-  }
 
   const alphaDecision =
     upper(
@@ -2339,16 +2302,7 @@ function buildRecommendedAction({
   currentWave,
   geometryToolRecommended,
   strategy1Applies = false,
-  activeTrip = null,
 }) {
-  if (
-    activeTrip?.active ===
-      true
-  ) {
-    return (
-      "WATCH_NEGOTIATED_TARGET_C_A_COMPLETION"
-    );
-  }
 
   if (
     decisionState ===
@@ -3113,13 +3067,6 @@ function buildLaneDecision({
       pipelineContext,
     });
 
-  if (
-    activeTrip.active ===
-      true
-  ) {
-    direction =
-      activeTrip.direction;
-  }
 
   const readiness =
     degree === "subminute"
@@ -3204,7 +3151,6 @@ function buildLaneDecision({
       proximity,
       readiness,
       higherTimeframeConflict,
-      activeTrip,
     });
 
   const waitingFor =
@@ -3218,7 +3164,6 @@ function buildLaneDecision({
       strategy1Applies:
         strategy1Readiness
           ?.applies === true,
-      activeTrip,
     });
 
   if (
@@ -3302,7 +3247,6 @@ function buildLaneDecision({
       strategy1Applies:
         strategy1Readiness
           ?.applies === true,
-      activeTrip,
     });
 
   const permissionContext =
@@ -3351,35 +3295,31 @@ function buildLaneDecision({
     );
 
   const currentDirectionalWatch =
-    activeTrip.active === true
-      ? activeTrip.direction
-      : (
-          degree === "minute" &&
+    degree === "minute" &&
+    strategy1Readiness
+      ?.applies === true
+      ? (
           strategy1Readiness
-            ?.applies === true
-            ? (
-                strategy1Readiness
-                  .reactionReady === true &&
+            .reactionReady === true &&
+          [
+            "LONG",
+            "SHORT",
+          ].includes(
+            engine3ConfirmedDirection
+          )
+            ? engine3ConfirmedDirection
+            : (
                 [
                   "LONG",
                   "SHORT",
                 ].includes(
-                  engine3ConfirmedDirection
+                  candidateWatchDirection
                 )
-                  ? engine3ConfirmedDirection
-                  : (
-                      [
-                        "LONG",
-                        "SHORT",
-                      ].includes(
-                        candidateWatchDirection
-                      )
-                        ? `${candidateWatchDirection} WATCH`
-                        : "NEUTRAL"
-                    )
+                  ? `${candidateWatchDirection} WATCH`
+                  : "NEUTRAL"
               )
-            : direction
-        );
+        )
+      : direction;
 
   return {
     active: true,
@@ -3536,26 +3476,12 @@ function buildLaneDecision({
 
     decisionState,
 
-    traderState:
-      activeTrip.active === true
-        ? activeTrip.state
-        : decisionState,
-
     direction,
 
     currentDirectionalWatch,
 
-    activeTrip,
-
-    nextTradeDirection:
-      activeTrip.active === true
-        ? "NOT_YET_KNOWN"
-        : null,
-
-    nextInternalWatch:
-      activeTrip.active === true
-        ? activeTrip.nextInternalWatch
-        : null,
+    engine26ActiveTripContext:
+      activeTrip,
 
     engine26GeometryPreviews:
       strategy1GeometryPreviews,
@@ -3816,17 +3742,6 @@ function buildLaneDecision({
     },
 
       
-    traderSummary:
-      activeTrip.active === true
-        ? (
-            `${activeTrip.currentInternalWave} down remains active. ` +
-            `Engine 26 is carrying ${activeTrip.direction} toward the negotiated target lifecycle. ` +
-            `First target-zone contact begins profit-taking and the negotiated midline completes the current trip. ` +
-            `After completion, Engine 26 resets neutral. ` +
-            `${activeTrip.nextExpectedInternalWave} is the next structural bounce watch only; the next trade direction is not yet known.`
-          )
-        : null,
-
     marketStoryContext: {
       headline:
         story?.headline ||
