@@ -1716,6 +1716,7 @@ function evaluatePreviousChildRelease({
   previousLocationCandidate,
   priorMemoryRecord,
   currentPrice,
+  bars10m,
 }) {
   const emptyState = {
     released: false,
@@ -3127,6 +3128,7 @@ const immediatePreviousReleaseState =
     priorMemoryRecord:
       immediatePriorMemoryRecord,
     currentPrice: normalizedPrice,
+    bars10m,
   });
 
 const immediatePreviousSetupIdentityValid =
@@ -3258,6 +3260,7 @@ const previousReleaseState =
           continuityLocationCandidate,
         priorMemoryRecord,
         currentPrice: normalizedPrice,
+        bars10m,
       })
     : {
         released: false,
