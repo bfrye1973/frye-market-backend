@@ -429,6 +429,380 @@ function countBullishRecoveryBars(postHighBars = []) {
   return count;
 }
 
+function normalizeCompletedBar(bar) {
+  if (!bar || typeof bar !== "object") return null;
+
+  const timeSec = parseTimeSec(
+    bar.timeSec ?? bar.tSec ?? bar.timestampSec ?? bar.timestamp ?? bar.time ?? bar.t
+  );
+
+  const open = toNum(bar.open ?? bar.o);
+  const high = toNum(bar.high ?? bar.h);
+  const low = toNum(bar.low ?? bar.l);
+  const close = toNum(bar.close ?? bar.c);
+
+  if (
+    timeSec === null ||
+    high === null ||
+    low === null ||
+    close === null
+  ) {
+    return null;
+  }
+
+  return {
+    timeSec,
+    open,
+    high,
+    low,
+    close,
+    raw: bar,
+  };
+}
+
+function completedBarsForMinutes({
+  bars = [],
+  nowSec = null,
+  minutes = 1,
+} = {}) {
+  const normalized = Array.isArray(bars)
+    ? bars
+        .map(normalizeCompletedBar)
+        .filter(Boolean)
+        .sort((a, b) => a.timeSec - b.timeSec)
+    : [];
+
+  if (!normalized.length) return [];
+
+  const now = parseTimeSec(nowSec);
+  if (now === null) return normalized.slice(0, -1);
+
+  const seconds = Math.max(1, Number(minutes) || 1) * 60;
+
+  return normalized.filter((bar) => bar.timeSec + seconds <= now);
+}
+
+function deriveDynamicReclaimTrigger({
+  completionZone = null,
+  symbol = "ES",
+} = {}) {
+  const hi = toNum(completionZone?.hi);
+  const lo = toNum(completionZone?.lo);
+  const tickSize = tickSizeForSymbol(symbol) || 0.25;
+
+  if (hi === null || lo === null) return null;
+
+  const zoneHeight = Math.abs(hi - lo);
+
+  /*
+   * Dynamic rule:
+   * Use a reclaim trigger above the lower sweep edge, but do not hardcode
+   * today's 7710. For today's 7722.75 -> 7700 zone, this resolves near 7710.
+   */
+  const buffer = Math.max(
+    tickSize * 4,
+    Math.min(10, zoneHeight * 0.5)
+  );
+
+  return roundToTick(lo + buffer, tickSize);
+}
+
+function deriveInternalCTransitionFromBars({
+  internalC = null,
+  barsByTf = {},
+  currentPrice = null,
+  symbol = "ES",
+  snapshotNow = null,
+  currentTimeSec = null,
+} = {}) {
+  if (!internalC || typeof internalC !== "object" || internalC.active !== true) {
+    return internalC;
+  }
+
+  const currentInternalWave = String(
+    internalC.currentInternalWave || ""
+  ).trim();
+
+  const direction = upper(internalC.direction);
+
+  if (currentInternalWave !== "C-a" || direction !== "DOWN") {
+    return internalC;
+  }
+
+  const completionZone = internalC?.cA?.completionZone || null;
+  const zoneHi = toNum(completionZone?.hi);
+  const zoneLo = toNum(completionZone?.lo);
+
+  if (zoneHi === null || zoneLo === null) {
+    return internalC;
+  }
+
+  const nowSec = resolveNowSec({ snapshotNow, currentTimeSec });
+
+  const oneMinuteCompleted = completedBarsForMinutes({
+    bars: barsByTf?.["1m"] || [],
+    nowSec,
+    minutes: 1,
+  });
+
+  const tenMinuteCompleted = completedBarsForMinutes({
+    bars: barsByTf?.["10m"] || [],
+    nowSec,
+    minutes: 10,
+  });
+
+  /*
+   * Prefer completed 1m bars for fast internal-wave transition.
+   * Fall back to 10m only if 1m is unavailable.
+   */
+  const bars = oneMinuteCompleted.length
+    ? oneMinuteCompleted
+    : tenMinuteCompleted;
+
+  if (!bars.length) return internalC;
+
+  const recentBars = bars.slice(-240);
+
+  const touchIndex = recentBars.findIndex(
+    (bar) => bar.low <= zoneHi
+  );
+
+  if (touchIndex < 0) {
+    return internalC;
+  }
+
+  const afterTouch = recentBars.slice(touchIndex);
+
+  const lowestTouch = afterTouch.reduce(
+    (best, bar) => {
+      if (!best || bar.low < best.low) return bar;
+      return best;
+    },
+    null
+  );
+
+  const completionZoneTouched = true;
+  const deepSweepTouched = afterTouch.some(
+    (bar) => bar.low <= zoneLo
+  );
+
+  const reclaimTrigger = deriveDynamicReclaimTrigger({
+    completionZone,
+    symbol,
+  });
+
+  const cBLevels =
+    internalC?.cB?.retraceOfCADown?.levels &&
+    typeof internalC.cB.retraceOfCADown.levels === "object"
+      ? internalC.cB.retraceOfCADown.levels
+      : {};
+
+  const firstCBTarget =
+    toNum(cBLevels.cb236) ??
+    toNum(cBLevels["C-b 0.236"]) ??
+    null;
+
+  const reclaimIndex =
+    reclaimTrigger === null
+      ? -1
+      : afterTouch.findIndex((bar) => bar.close >= reclaimTrigger);
+
+  const reclaimConfirmed = reclaimIndex >= 0;
+
+  const afterReclaim =
+    reclaimIndex >= 0 ? afterTouch.slice(reclaimIndex) : [];
+
+  const tickSize = tickSizeForSymbol(symbol) || 0.25;
+  const retestHold =
+    reclaimTrigger !== null &&
+    afterReclaim.some(
+      (bar) =>
+        bar.low <= reclaimTrigger + tickSize * 4 &&
+        bar.close >= reclaimTrigger
+    );
+
+  const fastNoRetestBreak =
+    firstCBTarget !== null &&
+    afterTouch.some(
+      (bar) =>
+        bar.high >= firstCBTarget ||
+        bar.close >= firstCBTarget
+    );
+
+  let transitionState = null;
+
+  if (reclaimConfirmed && fastNoRetestBreak) {
+    transitionState = "C_B_UP_ACTIVE_FAST_NO_RETEST";
+  } else if (reclaimConfirmed && retestHold) {
+    transitionState = "C_B_UP_ACTIVE";
+  } else if (reclaimConfirmed) {
+    transitionState = "C_B_RECLAIM_TEST";
+  }
+
+  if (!transitionState) {
+    return {
+      ...internalC,
+      completionZoneTouched,
+      deepSweepTouched,
+      cA: {
+        ...(internalC.cA || {}),
+        completionZoneTouched,
+        deepSweepTouched,
+        completionTouchPrice: round2(lowestTouch?.low),
+        completionTouchTimeSec: lowestTouch?.timeSec ?? null,
+        reclaimTrigger,
+      },
+      cB: {
+        ...(internalC.cB || {}),
+        state: "WATCH_AFTER_C_A_REACTION",
+        reclaimTrigger,
+        firstCBTarget,
+      },
+    };
+  }
+
+  const confirmedActive =
+    transitionState === "C_B_UP_ACTIVE" ||
+    transitionState === "C_B_UP_ACTIVE_FAST_NO_RETEST";
+
+  return {
+    ...internalC,
+
+    previousInternalWave: "C-a",
+    currentInternalWave: "C-b",
+    nextExpectedInternalWave: "C-c",
+
+    cWaveState: transitionState,
+    direction: "UP",
+
+    downstreamTravelDirection: confirmedActive ? "LONG" : "NEUTRAL",
+    directionalContextValidForEngine26: confirmedActive,
+    engine26TravelContextRole: confirmedActive
+      ? "STRUCTURAL_TRAVEL_CONTEXT"
+      : "INFORMATIONAL_ONLY",
+    engine26CarryAllowed: confirmedActive,
+
+    currentPrice: round2(currentPrice ?? internalC.currentPrice),
+
+    completionZoneTouched,
+    deepSweepTouched,
+
+    cA: {
+      ...(internalC.cA || {}),
+      state: "COMPLETED_CANDIDATE",
+      completedCandidate: true,
+      completionZoneTouched,
+      deepSweepTouched,
+      completionTouchPrice: round2(lowestTouch?.low),
+      completionTouchTimeSec: lowestTouch?.timeSec ?? null,
+      reclaimTrigger,
+      reclaimConfirmed,
+      completedBy: fastNoRetestBreak
+        ? "FAST_BREAK_ABOVE_FIRST_C_B_TARGET"
+        : retestHold
+        ? "RECLAIM_RETEST_HOLD"
+        : "RECLAIM_TEST",
+    },
+
+    cB: {
+      ...(internalC.cB || {}),
+      active: true,
+      state: transitionState,
+      direction: "UP",
+      reclaimTrigger,
+      reclaimConfirmed,
+      retestHold,
+      fastNoRetestBreak,
+      firstCBTarget,
+    },
+
+    cC: {
+      ...(internalC.cC || {}),
+      state: "PENDING_C_B_HIGH",
+      projectionPending: true,
+    },
+
+    noExecution: true,
+    noPermissionCreated: true,
+    watchOnly: true,
+
+    reasonCodes: [
+      ...(Array.isArray(internalC.reasonCodes) ? internalC.reasonCodes : []),
+      "ENGINE22_INTERNAL_LEG_TRANSITION_MODEL_BUILT",
+      "ENGINE22_C_A_COMPLETION_ZONE_TOUCHED",
+      deepSweepTouched ? "ENGINE22_C_A_DEEP_SWEEP_TOUCHED" : null,
+      reclaimConfirmed ? "ENGINE22_C_A_RECLAIM_CONFIRMED" : null,
+      retestHold ? "ENGINE22_C_B_RETEST_HOLD_CONFIRMED" : null,
+      fastNoRetestBreak ? "ENGINE22_C_B_FAST_NO_RETEST_BREAK" : null,
+      transitionState,
+      "NO_EXECUTION",
+      "NO_PERMISSION_CREATED",
+    ].filter(Boolean),
+  };
+}
+
+function attachInternalCTransitionToActiveStructures({
+  symbol = "ES",
+  activeStructures = {},
+  barsByTf = {},
+  currentPrice = null,
+  snapshotNow = null,
+  currentTimeSec = null,
+} = {}) {
+  if (!activeStructures || typeof activeStructures !== "object") {
+    return activeStructures;
+  }
+
+  const minute = activeStructures.minute;
+  if (!minute || typeof minute !== "object") {
+    return activeStructures;
+  }
+
+  const targetModel =
+    minute.targetModel && typeof minute.targetModel === "object"
+      ? minute.targetModel
+      : null;
+
+  const sourceInternalC =
+    minute.cWaveInternalStructure ||
+    targetModel?.internalCStructure ||
+    null;
+
+  if (!sourceInternalC || typeof sourceInternalC !== "object") {
+    return activeStructures;
+  }
+
+  const nextInternalC = deriveInternalCTransitionFromBars({
+    internalC: sourceInternalC,
+    barsByTf,
+    currentPrice,
+    symbol,
+    snapshotNow,
+    currentTimeSec,
+  });
+
+  if (!nextInternalC || nextInternalC === sourceInternalC) {
+    return activeStructures;
+  }
+
+  return {
+    ...activeStructures,
+    minute: {
+      ...minute,
+      cWaveInternalStructure: nextInternalC,
+      targetModel: targetModel
+        ? {
+            ...targetModel,
+            internalCStructure: nextInternalC,
+          }
+        : targetModel,
+      noExecution: true,
+      noPermissionCreated: true,
+      watchOnly: true,
+    },
+  };
+}
+
 export function buildMinuteW3W4TransitionModel({
   symbol = "ES",
   minuteStructure = null,
@@ -1432,6 +1806,16 @@ const activeStructuresWithMinuteTransition =
     currentTimeSec,
   });
 
+const activeStructuresWithInternalCTransition =
+  attachInternalCTransitionToActiveStructures({
+    symbol,
+    activeStructures: activeStructuresWithInternalCTransition,
+    barsByTf,
+    currentPrice,
+    snapshotNow,
+    currentTimeSec,
+  });
+
 
   let degrees = {};
 
@@ -1577,7 +1961,7 @@ const partialWaveFibState = {
   // Engine 22 lifecycle views / dashboard contract:
   // expose normalized active structures directly so downstream readers
   // do not need to know the active-wave-state file wrapper shape.
-  activeStructures: activeStructuresWithMinuteTransition,
+  activeStructures: activeStructuresWithInternalCTransition,
   activeWaveState: activeStructuresSource || null,
   
   markMaturity,
@@ -1631,7 +2015,7 @@ return {
   // Engine 22 lifecycle views / dashboard contract:
   // expose normalized active structures directly so downstream readers
   // do not need to know the active-wave-state file wrapper shape.
-  activeStructures: activeStructuresWithMinuteTransition,
+  activeStructures: activeStructuresWithInternalCTransition,
   activeWaveState: activeStructuresSource || null,
 
   markMaturity,
