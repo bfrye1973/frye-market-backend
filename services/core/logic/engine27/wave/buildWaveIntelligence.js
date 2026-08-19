@@ -923,6 +923,23 @@ function buildInternalStructureRead(
 
       activeDestinations:
         [],
+
+      currentPrice:
+        null,
+
+      cB: {
+        active: false,
+        state: null,
+        direction: "NEUTRAL",
+        projectionPending: false,
+        reclaimTrigger: null,
+        reclaimConfirmed: false,
+        retestHold: false,
+        fastNoRetestBreak: false,
+        firstTarget: null,
+        normalZone: null,
+        retracementLevels: {},
+      },
     };
   }
 
@@ -949,6 +966,34 @@ function buildInternalStructureRead(
         "ACTIVE"
       )
     );
+
+  const cBSource =
+    isObject(
+      internalStructure?.cB
+    )
+      ? internalStructure.cB
+      : {};
+
+  const cBRetrace =
+    isObject(
+      cBSource?.retraceOfCADown
+    )
+      ? cBSource.retraceOfCADown
+      : {};
+
+  const cBLevels =
+    isObject(
+      cBRetrace?.levels
+    )
+      ? cBRetrace.levels
+      : {};
+
+  const cBNormalZone =
+    isObject(
+      cBRetrace?.normalZone
+    )
+      ? cBRetrace.normalZone
+      : null;
 
   return {
     active,
@@ -1079,6 +1124,117 @@ function buildInternalStructureRead(
         ? internalStructure
             .activeDestinations
         : [],
+
+    currentPrice:
+      numberOrNull(
+        internalStructure
+          .currentPrice
+      ),
+
+    cB: {
+      active:
+        cBSource.active === true,
+
+      state:
+        upper(
+          cBSource.state
+        ) ||
+        null,
+
+      direction:
+        firstNormalized(
+          [
+            cBSource.direction,
+            internalStructure
+              .downstreamTravelDirection,
+          ],
+          (value) =>
+            normalizeTradeDirection(
+              value,
+              {
+                allowUpDown: true,
+              }
+            ),
+          "NEUTRAL"
+        ),
+
+      projectionPending:
+        cBSource
+          .projectionPending === true,
+
+      reclaimTrigger:
+        numberOrNull(
+          cBSource.reclaimTrigger
+        ),
+
+      reclaimConfirmed:
+        cBSource
+          .reclaimConfirmed === true,
+
+      retestHold:
+        cBSource
+          .retestHold === true,
+
+      fastNoRetestBreak:
+        cBSource
+          .fastNoRetestBreak === true,
+
+      firstTarget:
+        numberOrNull(
+          cBSource.firstCBTarget
+        ),
+
+      normalZone:
+        cBNormalZone
+          ? {
+              lo:
+                numberOrNull(
+                  cBNormalZone.lo
+                ),
+
+              hi:
+                numberOrNull(
+                  cBNormalZone.hi
+                ),
+
+              label:
+                cBNormalZone.label ||
+                null,
+            }
+          : null,
+
+      retracementLevels: {
+        cb236:
+          numberOrNull(
+            cBLevels.cb236 ??
+            cBLevels["C-b 0.236"]
+          ),
+
+        cb382:
+          numberOrNull(
+            cBLevels.cb382 ??
+            cBLevels["C-b 0.382"]
+          ),
+
+        cb500:
+          numberOrNull(
+            cBLevels.cb500 ??
+            cBLevels["C-b 0.500"]
+          ),
+
+        cb618:
+          numberOrNull(
+            cBLevels.cb618 ??
+            cBLevels["C-b 0.618"]
+          ),
+
+        cb786:
+          numberOrNull(
+            cBLevels.cb786 ??
+            cBLevels["C-b 0.786"]
+          ),
+      },
+    },
   };
 }
 
@@ -1432,6 +1588,36 @@ function buildReasonCodes({
       : null,
 
     internalRead
+      ?.cB
+      ?.active === true
+      ? "ENGINE27_C_B_ACTIVE"
+      : null,
+
+    internalRead
+      ?.cB
+      ?.reclaimConfirmed === true
+      ? "ENGINE27_C_B_RECLAIM_CONFIRMED"
+      : null,
+
+    internalRead
+      ?.cB
+      ?.fastNoRetestBreak === true
+      ? "ENGINE27_C_B_FAST_NO_RETEST"
+      : null,
+
+    internalRead
+      ?.cB
+      ?.firstTarget != null
+      ? "ENGINE27_C_B_FIRST_TARGET_AVAILABLE"
+      : null,
+
+    internalRead
+      ?.cB
+      ?.normalZone
+      ? "ENGINE27_C_B_NORMAL_ZONE_AVAILABLE"
+      : null,
+
+    internalRead
       ?.transitionRisk !==
     "UNKNOWN"
       ? `ENGINE27_TRANSITION_RISK_${internalRead.transitionRisk}`
@@ -1620,6 +1806,16 @@ function buildDegreeIntelligence(
     activeDestinations:
       internalRead
         .activeDestinations,
+
+    currentPrice:
+      internalRead
+        .currentPrice ??
+      numberOrNull(
+        state?.currentPrice
+      ),
+
+    cB:
+      internalRead.cB,
 
     currentRead:
       buildCurrentRead({
