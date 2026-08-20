@@ -2783,6 +2783,9 @@ const engine22StructuralDirection =
   ];
 
   const engine26IntradayCandidate =
+    engine26LocationCandidate?.active === true ||
+    engine26LocationCandidate?.candidateId != null ||
+    engine26LocationCandidate?.zoneId != null ||
     engine26ImbalanceWatch?.active === true ||
     engine26ImbalanceWatch
       ?.structuralContext
@@ -2802,18 +2805,18 @@ const engine22StructuralDirection =
     engine26IntradayCandidate === true &&
     lifecyclePaperCandidate === true &&
 
-    // Authorized Engine 3 must now be confirmed.
+    // Authorized Engine 3 must be explicitly qualified or legacy-qualified.
     reactionActive === true &&
     reactionAllowed === true &&
 
-    // Authorized Engine 4 must now be confirmed.
+    // Authorized Engine 4 must be confirmed.
     participationActive === true &&
     participationAllowed === true &&
     participationWaitingForEngine3 !== true &&
     participationHardBlocked !== true &&
 
     engine25HardBlocked !== true &&
-    direction === "LONG" &&
+    ["LONG", "SHORT"].includes(direction) &&
     Number.isFinite(targetPoints) &&
     targetPoints >= 8;
 
