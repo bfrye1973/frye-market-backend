@@ -385,7 +385,35 @@ function readEngine4(participation) {
   };
 }
 
-function isNeutralObservation(e26) {
+function isNeutralObservation(e26, e3 = null, e4 = null) {
+  const engine3ResolvedDirection =
+    ["LONG", "SHORT"].includes(e3?.direction);
+
+  const engine3Qualified =
+    e3?.strategy1Qualified === true ||
+    e3?.engine3Strategy1QualifiedForEngine6 === true;
+
+  const engine4Confirmed =
+    e4?.participationConfirmed === true &&
+    e4?.allowed === true &&
+    e4?.hardBlocked !== true;
+
+  /*
+   * Engine 26A neutral means location is active but direction is not
+   * owned by Engine 26A.
+   *
+   * Once Engine 3 qualifies LONG/SHORT and Engine 4 confirms aligned
+   * participation, Engine 6 must evaluate that branch.
+   */
+  if (
+    e26.direction === "NEUTRAL" &&
+    engine3ResolvedDirection === true &&
+    engine3Qualified === true &&
+    engine4Confirmed === true
+  ) {
+    return false;
+  }
+
   return (
     e26.direction === "NEUTRAL" &&
     [
@@ -492,8 +520,7 @@ export function evaluateEngine6Strategy1Phase4Contract({
     });
 
   const neutralObservation =
-    applies && isNeutralObservation(e26);
-
+    applies && isNeutralObservation(e26, e3, e4);
   const finalDirection = neutralObservation
     ? "NEUTRAL"
     : firstUpper(
@@ -648,10 +675,10 @@ export function evaluateEngine6Strategy1Phase4Contract({
   if (e26.locationInvalidated) blockers.push("LOCATION_INVALIDATED");
 
   if (neutralObservation) {
-    blockers.push("ENGINE26_LONG_REVERSAL_WATCH_OBSERVATION_ONLY");
+    blockers.push("ENGINE26_NEUTRAL_OBSERVATION_ONLY");
     warnings.push("ENGINE26_DIRECTION_NEUTRAL_OBSERVATION");
-    reasonCodes.push("ENGINE26_LONG_REVERSAL_WATCH_PRESERVED_AS_NEUTRAL");
-    reasonCodes.push("NO_SHORT_FALLBACK_DURING_NEUTRAL_OBSERVATION");
+    reasonCodes.push("ENGINE26_NEUTRAL_LOCATION_PRESERVED_AS_OBSERVATION");
+    reasonCodes.push("NO_DIRECTION_FALLBACK_DURING_NEUTRAL_OBSERVATION");
   } else {
     if (e3.evaluationAuthorized !== true) {
       blockers.push("ENGINE3_EVALUATION_NOT_AUTHORIZED");
