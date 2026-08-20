@@ -4370,6 +4370,8 @@ const strategyFacts =
       lifecycleStatus:
         invalidated
           ? "INVALIDATED"
+          : promotedContactLifecycle
+          ? "PROMOTED_NEUTRAL_OBSERVATION"
           : previousReleaseState
               .targetApproachCompletionWatch
           ? "TARGET_APPROACH_COMPLETION_WATCH"
