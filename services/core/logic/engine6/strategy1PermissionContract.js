@@ -393,23 +393,23 @@ function isNeutralObservation(e26, e3 = null, e4 = null) {
     e3?.strategy1Qualified === true ||
     e3?.engine3Strategy1QualifiedForEngine6 === true;
 
-  const engine4Confirmed =
-    e4?.participationConfirmed === true &&
-    e4?.allowed === true &&
-    e4?.hardBlocked !== true;
-
   /*
-   * Engine 26A neutral means location is active but direction is not
-   * owned by Engine 26A.
+   * Engine 26A neutral means the prior Engine 26 trip has cleared
+   * and Engine 26A is no longer carrying the old direction.
    *
-   * Once Engine 3 qualifies LONG/SHORT and Engine 4 confirms aligned
-   * participation, Engine 6 must evaluate that branch.
+   * Engine 26A still owns location.
+   * Engine 3 owns fresh reaction direction.
+   * Engine 4 owns participation confirmation.
+   * Engine 6 owns final permission.
+   *
+   * Once Engine 3 qualifies LONG/SHORT, Engine 6 must leave
+   * observation-only mode and evaluate the directional branch.
+   * Engine 4 remains a downstream permission gate inside Phase 4.
    */
   if (
     e26.direction === "NEUTRAL" &&
     engine3ResolvedDirection === true &&
-    engine3Qualified === true &&
-    engine4Confirmed === true
+    engine3Qualified === true
   ) {
     return false;
   }
