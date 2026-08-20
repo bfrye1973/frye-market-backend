@@ -3597,14 +3597,20 @@ const selectedZoneId =
   );
 
 const promotionSourceCandidate =
-  immediatePreviousReleaseState.released === true
-    ? previousLocationCandidate
-    : continuityLocationCandidate;
+  absoluteMidpointCompletionSourceCandidate ||
+  (
+    immediatePreviousReleaseState.released === true
+      ? previousLocationCandidate
+      : continuityLocationCandidate
+  );
 
 const promotionReleaseState =
-  immediatePreviousReleaseState.released === true
-    ? immediatePreviousReleaseState
-    : previousReleaseState;
+  absoluteMidpointCompletionState ||
+  (
+    immediatePreviousReleaseState.released === true
+      ? immediatePreviousReleaseState
+      : previousReleaseState
+  );
 
 const previousTargetZoneId =
   promotionSourceCandidate?.targetZone?.zoneId ??
@@ -3613,9 +3619,7 @@ const previousTargetZoneId =
 
 const promotedObservation =
   selectionPurpose === "STRATEGY1_CHILD" &&
-  promotionReleaseState.released === true &&
-  Boolean(previousTargetZoneId) &&
-  previousTargetZoneId === selectedZoneId;
+  absoluteMidpointCompletion === true;
 
 const promotionSourceDirection =
   normalizeDirection(
@@ -3624,11 +3628,7 @@ const promotionSourceDirection =
   );
 
 const freshTargetMidlineContact =
-  promotedObservation === true &&
-  promotionReleaseState.releaseReason ===
-    "TARGET_ZONE_REACHED" &&
-  promotionReleaseState.targetMidlineReached === true;
-
+  absoluteMidpointCompletion === true;
 const promotedContactLifecycle =
   freshTargetMidlineContact ||
   activeRestoredPromotedContact ||
@@ -3821,14 +3821,22 @@ const priorDirectionalChildDirection =
       )
     : "NEUTRAL";
 
+const priorCandidateEntryZoneId =
+  continuityLocationCandidate?.entryZone?.zoneId ??
+  continuityLocationCandidate?.entryZone?.id ??
+  continuityLocationCandidate?.zoneId ??
+  null;
+
+const priorCandidateTargetZoneId =
+  continuityLocationCandidate?.targetZone?.zoneId ??
+  continuityLocationCandidate?.targetZone?.id ??
+  null;
+
 const priorCandidateUsesSelectedZoneAsTravelTarget =
   previousChildPreservable === true &&
-  (
-    continuityLocationCandidate?.targetZone?.zoneId ===
-      selectedZoneId ||
-    continuityLocationCandidate?.targetZone?.id ===
-      selectedZoneId
-  );
+  priorCandidateTargetZoneId != null &&
+  priorCandidateTargetZoneId === selectedZoneId &&
+  priorCandidateTargetZoneId !== priorCandidateEntryZoneId;
 
 const engine22TravelDirection =
   engine22MinuteTravelContext
