@@ -3309,7 +3309,8 @@ const engine22StructuralDirection =
       ),
 
     paperShortAllowed:
-      false,
+      fastIntradayPaperAllow === true &&
+      direction === "SHORT",
 
     paperLongAllowed:
       fastIntradayPaperAllow === true &&
