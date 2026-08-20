@@ -1375,12 +1375,17 @@ function findRecoverableDirectionalMemoryChild({
           String(record?.lifecycleStatus || "")
             .toUpperCase()
         ) &&
-        record?.invalidationFacts
-          ?.completedCloseInvalidationConfirmed !== true &&
-        !record?.invalidatedAt &&
-        !record?.retiredAt &&
-        !record?.releaseReason &&
-        !record?.targetTouchedAt;
+       record?.targetMidlineReached !== true &&
+       record?.priorRotationFullyComplete !== true &&
+       record?.priorRotationCompletionState !==
+         "FULL_TARGET_COMPLETION" &&
+       record?.promotedFromTargetCompletion !== true &&
+       record?.invalidationFacts
+         ?.completedCloseInvalidationConfirmed !== true &&
+       !record?.invalidatedAt &&
+       !record?.retiredAt &&
+       !record?.releaseReason &&
+       !record?.targetTouchedAt;
 
       /*
        * A general favorable 10-point objective is bookkeeping only.
