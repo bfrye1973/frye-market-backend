@@ -3259,7 +3259,7 @@ const immediatePreviousChildPreservable =
       previousLocationCandidate?.direction
     )
   ) &&
-  immediatePreviousReleaseState.released !== true;
+  immediatePreviousReleaseState.released !== true &&
   immediatePreviousOpposedByEngine22Travel !== true;
 
 const recoveredPromotedContactChild =
@@ -3340,6 +3340,61 @@ const previousReleaseState =
         objectiveCompleted: false,
         targetReached: false,
       };
+
+/*
+ * Strategy 1 absolute negotiated-midpoint completion.
+ *
+ * Once the active directional child's TARGET midpoint is touched,
+ * that directional trip is finished. This decision has precedence
+ * over ranking, preservation, Engine 22 context, EMA context, and
+ * fresh directional evidence.
+ */
+const immediateMidpointCompletion =
+  immediatePreviousReleaseState?.released === true &&
+  immediatePreviousReleaseState?.releaseReason ===
+    "TARGET_ZONE_REACHED" &&
+  immediatePreviousReleaseState?.targetMidlineReached === true;
+
+const recoveredMidpointCompletion =
+  previousReleaseState?.released === true &&
+  previousReleaseState?.releaseReason ===
+    "TARGET_ZONE_REACHED" &&
+  previousReleaseState?.targetMidlineReached === true;
+
+const absoluteMidpointCompletion =
+  immediateMidpointCompletion ||
+  recoveredMidpointCompletion;
+
+const absoluteMidpointCompletionState =
+  immediateMidpointCompletion
+    ? immediatePreviousReleaseState
+    : recoveredMidpointCompletion
+    ? previousReleaseState
+    : null;
+
+const absoluteMidpointCompletionSourceCandidate =
+  immediateMidpointCompletion
+    ? previousLocationCandidate
+    : recoveredMidpointCompletion
+    ? continuityLocationCandidate
+    : null;
+
+const absoluteMidpointTargetZoneId =
+  absoluteMidpointCompletionState?.completedTargetZoneId ??
+  absoluteMidpointCompletionSourceCandidate
+    ?.targetZone?.zoneId ??
+  absoluteMidpointCompletionSourceCandidate
+    ?.targetZone?.id ??
+  null;
+
+const absoluteMidpointTargetZone =
+  absoluteMidpointTargetZoneId
+    ? findZoneByCanonicalId({
+        zones: approvedNegotiatedZones,
+        symbol: normalizedSymbol,
+        zoneId: absoluteMidpointTargetZoneId,
+      })
+    : null;
 
 const restoredPromotedContact =
   Boolean(continuityLocationCandidate) &&
@@ -3483,7 +3538,9 @@ const previousChildPreservable =
   );
 
 const strategy1SelectedZone =
-  promotedObservationSupersession
+  absoluteMidpointTargetZone
+    ? absoluteMidpointTargetZone
+    : promotedObservationSupersession
     ? supersedingNegotiatedZone
     : previousChildPreservable
     ? previousZone
