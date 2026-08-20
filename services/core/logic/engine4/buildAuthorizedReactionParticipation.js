@@ -920,36 +920,90 @@ function completedAdverseEvidence({ reaction, direction, tacticalParticipation, 
   const current = volumeMeta.currentCandle;
   const prior = volumeMeta.priorCandle;
 
-  const red = current.open != null && current.close != null && current.close < current.open;
-  const green = current.open != null && current.close != null && current.close > current.open;
-  const lowerClose = current.close != null && prior.close != null && current.close < prior.close;
-  const higherClose = current.close != null && prior.close != null && current.close > prior.close;
+  const red =
+    current.open != null &&
+    current.close != null &&
+    current.close < current.open;
 
-  const volumeExpansion = tacticalParticipation?.volumeExpansion === true;
+  const green =
+    current.open != null &&
+    current.close != null &&
+    current.close > current.open;
+
+  const lowerClose =
+    current.close != null &&
+    prior.close != null &&
+    current.close < prior.close;
+
+  const higherClose =
+    current.close != null &&
+    prior.close != null &&
+    current.close > prior.close;
+
+  const volumeExpansion =
+    tacticalParticipation?.volumeExpansion === true;
+
   const adverseAbsorption =
-    (tacticalParticipation?.absorptionRisk === true || tacticalParticipation?.absorptionHardBlock === true) &&
+    (
+      tacticalParticipation?.absorptionRisk === true ||
+      tacticalParticipation?.absorptionHardBlock === true
+    ) &&
     tacticalParticipation?.supportsDirection !== true;
 
   const highVolumeNoProgress =
     tacticalParticipation?.highVolumeNoProgress === true &&
     tacticalParticipation?.supportsDirection !== true;
 
+  const participationState =
+    safeUpper(tacticalParticipation?.participationState);
+
+  /*
+   * Directionally adverse completed evidence only.
+   *
+   * Weak participation, fading volume, or high-volume/no-progress alone
+   * should prevent confirmation, but should not become an adverse hard block
+   * unless completed price action is actually against the trade direction.
+   */
+  const bearishAgainstLong =
+    red === true &&
+    lowerClose === true &&
+    volumeExpansion === true;
+
+  const bullishAgainstShort =
+    green === true &&
+    higherClose === true &&
+    volumeExpansion === true;
+
+  const explicitDirectionalRiskAgainstLong =
+    participationState.includes("BEARISH_AGAINST_LONG") ||
+    participationState.includes("SELLING_AGAINST_LONG");
+
+  const explicitDirectionalRiskAgainstShort =
+    participationState.includes("BULLISH_AGAINST_SHORT") ||
+    participationState.includes("BUYING_AGAINST_SHORT");
+
   if (direction === "LONG") {
     return (
       completedZoneLossAgainstLong({ reaction, volumeMeta }) ||
-      (red && lowerClose && volumeExpansion) ||
+      bearishAgainstLong ||
       adverseAbsorption ||
-      highVolumeNoProgress ||
-      safeUpper(tacticalParticipation?.participationState).includes("VOLUME_RISK")
+      (
+        highVolumeNoProgress === true &&
+        bearishAgainstLong === true
+      ) ||
+      explicitDirectionalRiskAgainstLong
     );
   }
 
   if (direction === "SHORT") {
     return (
-      (green && higherClose && volumeExpansion) ||
+      bullishAgainstShort ||
       adverseAbsorption ||
-      highVolumeNoProgress ||
-      safeUpper(tacticalParticipation?.participationState).includes("VOLUME_RISK")
+      (
+        highVolumeNoProgress === true &&
+        bullishAgainstShort === true
+      ) ||
+      explicitDirectionalRiskAgainstShort
     );
   }
 
