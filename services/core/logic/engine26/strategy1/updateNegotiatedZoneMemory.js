@@ -464,6 +464,11 @@ export function updateNegotiatedZoneMemory({
 } = {}) {
   const records = { ...(store?.records || {}) };
   const previous = clone(records[memoryKey] || null);
+  const sameCandidateIdentity =
+    Boolean(previous?.currentCandidateId) &&
+    Boolean(candidate?.candidateId) &&
+    previous.currentCandidateId ===
+      candidate.candidateId;
 
   const interactionTimes = [
     ...(Array.isArray(previous?.interactionTimes)
@@ -544,14 +549,34 @@ export function updateNegotiatedZoneMemory({
       null,
 
     candidateLifecycleStartTime:
-      candidate?.candidateLifecycleStartTime ||
-      previous?.candidateLifecycleStartTime ||
-      snapshotTime,
+      sameCandidateIdentity
+        ? (
+            previous?.candidateLifecycleStartTime ||
+            previous?.directionResolvedAt ||
+            candidate?.candidateLifecycleStartTime ||
+            candidate?.directionResolvedAt ||
+            snapshotTime
+          )
+        : (
+            candidate?.candidateLifecycleStartTime ||
+            candidate?.directionResolvedAt ||
+            snapshotTime
+          ),
 
-    directionResolvedAt:
-      candidate?.directionResolvedAt ||
-      previous?.directionResolvedAt ||
-      null,
+     directionResolvedAt:
+       sameCandidateIdentity
+         ? (
+             previous?.directionResolvedAt ||
+             previous?.candidateLifecycleStartTime ||
+             candidate?.directionResolvedAt ||
+            candidate?.candidateLifecycleStartTime ||
+            null
+          )
+       : (
+        candidate?.directionResolvedAt ||
+        candidate?.candidateLifecycleStartTime ||
+        null
+      ),
 
     contactState:
       mergeRankedLifecycleValue({
