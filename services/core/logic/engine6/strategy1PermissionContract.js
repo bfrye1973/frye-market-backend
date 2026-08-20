@@ -766,8 +766,12 @@ export function evaluateEngine6Strategy1Phase4Contract({
       blockers.push("ENGINE4_COMPLETED_ADVERSE_PARTICIPATION");
     }
 
-    if (midline.satisfied !== true) {
-      blockers.push("ENTRY_ZONE_MIDLINE_TRIGGER_NOT_SATISFIED");
+    if (midline.satisfied === true) {
+      blockers.push("ENGINE26_NEGOTIATED_MIDLINE_ALREADY_REACHED");
+      reasonCodes.push("ENGINE26_TRIP_COMPLETION_BOUNDARY_REACHED");
+    } else {
+      reasonCodes.push("ENGINE26_NEGOTIATED_MIDLINE_NOT_YET_REACHED");
+      reasonCodes.push("TARGET_ROOM_REMAINS_TO_MIDLINE");
     }
   }
 
