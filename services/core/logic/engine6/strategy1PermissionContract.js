@@ -440,12 +440,25 @@ function midlineTrigger({
     };
   }
 
+  if (dir === "SHORT") {
+    return {
+      satisfied: price <= line,
+      direction: dir,
+      currentPrice: price,
+      entryZoneMidline: line,
+      reason:
+        price <= line
+          ? "SHORT_ENTRY_ZONE_MIDLINE_REACHED"
+          : "SHORT_ENTRY_ZONE_MIDLINE_NOT_REACHED",
+    };
+  }
+
   return {
     satisfied: false,
     direction: dir,
     currentPrice: price,
     entryZoneMidline: line,
-    reason: "MIDLINE_TRIGGER_DIRECTION_NOT_LONG",
+    reason: "MIDLINE_TRIGGER_DIRECTION_UNRESOLVED",
   };
 }
 
@@ -687,8 +700,18 @@ export function evaluateEngine6Strategy1Phase4Contract({
       blockers.push(`ENGINE3_${e3.authorizedReactionState}`);
     }
 
-    if (finalDirection !== "LONG") {
-      blockers.push("REACTION_DIRECTION_NOT_LONG");
+    if (!["LONG", "SHORT"].includes(finalDirection)) {
+      blockers.push("REACTION_DIRECTION_UNRESOLVED");
+    }
+
+    if (
+      ["LONG", "SHORT"].includes(finalDirection) &&
+      e3.direction &&
+      e4.direction &&
+      e4.direction !== "NEUTRAL" &&
+      e3.direction !== e4.direction
+    ) {
+      blockers.push("REACTION_PARTICIPATION_DIRECTION_MISMATCH");
     }
 
     if (e4.participationConfirmed !== true) {
