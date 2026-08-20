@@ -3532,6 +3532,7 @@ const activeRestoredPromotedContact =
   promotedObservationSupersession !== true;
 
 const previousChildPreservable =
+  absoluteMidpointCompletion !== true &&
   Boolean(continuityLocationCandidate) &&
   Boolean(previousZone) &&
   (
