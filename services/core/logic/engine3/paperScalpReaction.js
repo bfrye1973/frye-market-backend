@@ -1568,6 +1568,11 @@ export function attachPaperScalpReactionToConfluence({
     broaderTenMinuteDirection:
       broaderReaction10m?.direction || "NEUTRAL",
 
+    const activePaperTradeLocked =
+      canonicalResolution?.activePaperTrade === true &&
+      canonicalResolution?.activePaperTradeDirection &&
+      canonicalResolution.activePaperTradeDirection !== "NEUTRAL";
+
     reactionCandidateDirection:
       candidateResolution?.candidateDirection ||
       "NEUTRAL",
