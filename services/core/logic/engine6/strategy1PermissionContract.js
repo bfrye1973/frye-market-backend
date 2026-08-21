@@ -766,13 +766,23 @@ export function evaluateEngine6Strategy1Phase4Contract({
       blockers.push("ENGINE4_COMPLETED_ADVERSE_PARTICIPATION");
     }
 
-    if (midline.satisfied === true) {
-      blockers.push("ENGINE26_NEGOTIATED_MIDLINE_ALREADY_REACHED");
-      reasonCodes.push("ENGINE26_TRIP_COMPLETION_BOUNDARY_REACHED");
-    } else {
-      reasonCodes.push("ENGINE26_NEGOTIATED_MIDLINE_NOT_YET_REACHED");
-      reasonCodes.push("TARGET_ROOM_REMAINS_TO_MIDLINE");
-    }
+const engine26TripAlreadyCleared =
+  e26.direction === "NEUTRAL" &&
+  (
+    e26.directionState === "NEUTRAL" ||
+    e26.directionState === "NEUTRAL_NO_DIRECTIONAL_EDGE"
+  );
+
+if (midline.satisfied === true && engine26TripAlreadyCleared !== true) {
+  blockers.push("ENGINE26_NEGOTIATED_MIDLINE_ALREADY_REACHED");
+  reasonCodes.push("ENGINE26_TRIP_COMPLETION_BOUNDARY_REACHED");
+} else if (midline.satisfied === true && engine26TripAlreadyCleared === true) {
+  reasonCodes.push("ENGINE26_PRIOR_TRIP_ALREADY_CLEARED");
+  reasonCodes.push("WAITING_FOR_FRESH_ENGINE3_ENGINE4_DIRECTION");
+} else {
+  reasonCodes.push("ENGINE26_NEGOTIATED_MIDLINE_NOT_YET_REACHED");
+  reasonCodes.push("TARGET_ROOM_REMAINS_TO_MIDLINE");
+}
   }
 
   const finalBlockers = unique(blockers);
