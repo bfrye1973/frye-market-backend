@@ -7,9 +7,10 @@
 //   authorized branch, trigger/reclaim/invalidation geometry.
 // - 1m detects and may establish a NEW canonical LONG/SHORT direction.
 // - 5m validates/supports/conflicts; it never creates or reverses direction.
-// - Once established, direction persists through minor 1m counter-moves.
-// - Completed 10m close vs EMA10 may RESET committed direction to NEUTRAL.
-// - 10m EMA10 never creates the opposite direction.
+// - Before a paper trade is active, 1m/5m own reaction discovery/validation.
+// - After a paper trade is active, its direction persists through diagnostic flips.
+// - Completed 10m close vs EMA10 is only the ACTIVE-TRADE hold/reset rule.
+// - 10m EMA10 never creates initial direction or initial confirmation.
 // - This file publishes ONE canonical Engine 3 reaction object.
 // - Engine 4 owns participation.
 // - Engine 6 owns final permission.
@@ -150,6 +151,7 @@ function resolveCanonicalDirection({
   tenMinuteCompletedClose = null,
   tenMinuteEma10 = null,
   engine26ReactionHandoff = null,
+  activePaperTradeDirection = null,
 } = {}) {
   const observedState = safeUpper(
     observation1m?.state,
@@ -165,6 +167,15 @@ function resolveCanonicalDirection({
     previousCanonicalDirection,
     "NEUTRAL"
   );
+
+  const activeTradeDirection = safeUpper(
+    activePaperTradeDirection,
+    "NEUTRAL"
+  );
+
+  const activePaperTrade =
+    activeTradeDirection === "LONG" ||
+    activeTradeDirection === "SHORT";
 
   const observationPresent =
     observation1m != null &&
@@ -219,50 +230,113 @@ function resolveCanonicalDirection({
 
   let state = "NO_SIGNAL";
   let direction = "NEUTRAL";
-  let sourceTimeframe = "10m";
-  let reactionTimeframe = "10m";
-  let resolutionStatus = "EMA10_DIRECTION_UNAVAILABLE";
-  let resolutionReason = "TEN_MINUTE_EMA10_DATA_UNAVAILABLE";
+  let sourceTimeframe = null;
+  let reactionTimeframe = null;
+  let resolutionStatus = "NO_USABLE_1M_CANONICAL_EVIDENCE";
+  let resolutionReason = "ONE_MINUTE_EVIDENCE_UNUSABLE";
   let directionPersistenceActive = false;
   let directionEstablishedByFresh1m = false;
 
-  if (ema10DataAvailable) {
-    if (completedClose < ema10) {
-      direction = "SHORT";
-      state = "EMA10_SHORT";
-      directionPersistenceActive = true;
+  /*
+   * IMPORTANT STRATEGY 1 RULE:
+   *
+   * EMA10 does NOT create the initial Engine 3 direction.
+   * EMA10 does NOT create reaction confirmation.
+   *
+   * Before a paper trade is active:
+   * - fresh completed 1m may establish the reaction direction;
+   * - 5m validates that reaction downstream.
+   *
+   * After a paper trade is active:
+   * - the ACTIVE TRADE direction owns canonical direction;
+   * - completed 10m EMA10 is only the hold/reset rule;
+   * - 1m / 5m / broader 10m remain diagnostics and may flip freely.
+   */
+  if (activePaperTrade) {
+    const resetShort =
+      activeTradeDirection === "SHORT" &&
+      ema10DataAvailable &&
+      completedClose > ema10;
 
-      resolutionStatus =
-        "CANONICAL_SHORT_BELOW_10M_EMA10";
+    const resetLong =
+      activeTradeDirection === "LONG" &&
+      ema10DataAvailable &&
+      completedClose < ema10;
 
-      resolutionReason =
-        "COMPLETED_10M_CLOSE_BELOW_EMA10_ENGINE3_SHORT";
+    ema10ResetTriggered =
+      resetShort || resetLong;
 
-      ema10ResetTriggered =
-        previousDirection === "LONG";
-    } else if (completedClose > ema10) {
-      direction = "LONG";
-      state = "EMA10_LONG";
-      directionPersistenceActive = true;
-
-      resolutionStatus =
-        "CANONICAL_LONG_ABOVE_10M_EMA10";
-
-      resolutionReason =
-        "COMPLETED_10M_CLOSE_ABOVE_EMA10_ENGINE3_LONG";
-
-      ema10ResetTriggered =
-        previousDirection === "SHORT";
-    } else {
+    if (ema10ResetTriggered) {
+      state = "DIRECTION_RESET";
       direction = "NEUTRAL";
-      state = "EMA10_NEUTRAL";
+      sourceTimeframe = "10m";
+      reactionTimeframe = "10m";
 
       resolutionStatus =
-        "CANONICAL_NEUTRAL_AT_10M_EMA10";
+        "ACTIVE_PAPER_TRADE_DIRECTION_RESET_AT_10M_EMA10";
 
       resolutionReason =
-        "COMPLETED_10M_CLOSE_AT_EMA10";
+        activeTradeDirection === "SHORT"
+          ? "ACTIVE_SHORT_RESET_BY_COMPLETED_10M_CLOSE_ABOVE_EMA10"
+          : "ACTIVE_LONG_RESET_BY_COMPLETED_10M_CLOSE_BELOW_EMA10";
+    } else {
+      direction = activeTradeDirection;
+      directionPersistenceActive = true;
+      sourceTimeframe = "ACTIVE_PAPER_TRADE";
+      reactionTimeframe = "10m";
+
+      const diagnosticAlignedWithTrade =
+        freshDirectionalEvidence &&
+        observedDirection === activeTradeDirection;
+
+      state =
+        diagnosticAlignedWithTrade
+          ? observedState
+          : "ACTIVE_TRADE_DIRECTION_PERSISTED";
+
+      resolutionStatus =
+        `ACTIVE_PAPER_TRADE_${activeTradeDirection}_PERSISTED`;
+
+      resolutionReason =
+        ema10DataAvailable
+          ? activeTradeDirection === "SHORT"
+            ? "ACTIVE_SHORT_HELD_WHILE_COMPLETED_10M_CLOSE_NOT_ABOVE_EMA10"
+            : "ACTIVE_LONG_HELD_WHILE_COMPLETED_10M_CLOSE_NOT_BELOW_EMA10"
+          : `ACTIVE_${activeTradeDirection}_HELD_EMA10_DATA_UNAVAILABLE`;
     }
+  } else if (freshDirectionalEvidence) {
+    state = observedState;
+    direction = observedDirection;
+    sourceTimeframe = "1m";
+    reactionTimeframe = "1m";
+    directionEstablishedByFresh1m = true;
+
+    resolutionStatus =
+      "CANONICAL_1M_DIRECTION_ESTABLISHED";
+
+    resolutionReason =
+      "FRESH_COMPLETED_1M_DIRECTIONAL_REACTION";
+  } else if (observationUsable) {
+    state = observedState;
+    direction = "NEUTRAL";
+    sourceTimeframe = "1m";
+    reactionTimeframe = "1m";
+
+    resolutionStatus =
+      "CANONICAL_1M_NEUTRAL";
+
+    resolutionReason =
+      "FRESH_COMPLETED_1M_NON_DIRECTIONAL_REACTION";
+  } else if (!observationPresent) {
+    resolutionReason = "ONE_MINUTE_OBSERVATION_MISSING";
+  } else if (!aligned) {
+    resolutionReason = "ONE_MINUTE_IDENTITY_MISMATCH";
+  } else if (observation1m?.stale === true) {
+    resolutionReason = "ONE_MINUTE_OBSERVATION_STALE";
+  } else if (!observationCompleted) {
+    resolutionReason = "ONE_MINUTE_CANDLE_NOT_COMPLETED";
+  } else if (!observationActive) {
+    resolutionReason = "ONE_MINUTE_OBSERVATION_INACTIVE";
   }
 
   return {
@@ -283,6 +357,11 @@ function resolveCanonicalDirection({
       previousDirectional
         ? previousDirection
         : "NEUTRAL",
+    activePaperTrade,
+    activePaperTradeDirection:
+      activePaperTrade
+        ? activeTradeDirection
+        : "NEUTRAL",
     directionPersistenceActive,
     directionEstablishedByFresh1m,
     tenMinuteCompletedClose:
@@ -296,7 +375,6 @@ function resolveCanonicalDirection({
     resolutionReason,
   };
 }
-
 function resolveCanonicalQuality({
   observation1m = null,
   validation5m = null,
@@ -805,35 +883,38 @@ function resolveCanonicalConfirmation({
 /*
  * Confirmation persistence.
  *
- * A fresh 1m + 5m alignment must create the original confirmation.
+ * BEFORE an active paper trade:
+ * - confirmation must come from the normal Engine 3 reaction rules;
+ * - EMA10 cannot create or preserve confirmation.
  *
- * Once already confirmed, the reaction remains confirmed while the
- * canonical direction itself is being persisted by the approved
- * completed-10m EMA10 lifecycle.
- *
- * EMA10 does NOT create confirmation from scratch.
+ * AFTER an active paper trade exists:
+ * - prior confirmation may persist while the active trade direction
+ *   remains inside its completed-10m EMA10 hold lifecycle;
+ * - EMA10 still cannot create confirmation from scratch.
  */
 const previousConfirmed =
   previousReactionConfirmed === true;
 
 const persistedConfirmation =
+  previousConfirmed &&
+  canonicalResolution?.activePaperTrade === true &&
   canonicalResolution?.directionPersistenceActive === true &&
   canonicalResolution?.ema10ResetTriggered !== true &&
   canonicalDirectional;
-  
+
 if (persistedConfirmation) {
   blockers.length = 0;
 }
+
 const reactionConfirmed =
   persistedConfirmation ||
   blockers.length === 0;
 
 if (persistedConfirmation) {
   reasonCodes.push(
-    `ENGINE3_${direction}_CONFIRMATION_PERSISTED_UNTIL_10M_EMA10_RESET`
+    `ENGINE3_${direction}_CONFIRMATION_PERSISTED_DURING_ACTIVE_PAPER_TRADE_UNTIL_10M_EMA10_RESET`
   );
 }
-
 reasonCodes.push(
   reactionConfirmed
     ? "ENGINE3_CANONICAL_REACTION_CONFIRMED"
@@ -1034,6 +1115,7 @@ export function attachPaperScalpReactionToConfluence({
   previousReactionConfirmed = false,
   tenMinuteCompletedClose = null,
   tenMinuteEma10 = null,
+  activePaperTradeDirection = null,
 }) {
   const currentLevelAction =
     patchedConfluence
@@ -1076,6 +1158,7 @@ export function attachPaperScalpReactionToConfluence({
       tenMinuteCompletedClose,
       tenMinuteEma10,
       engine26ReactionHandoff,
+      activePaperTradeDirection,
     });
 
   const canonicalQuality =
@@ -1215,7 +1298,7 @@ export function attachPaperScalpReactionToConfluence({
       "5m",
 
     directionResetTimeframe:
-      "10m",
+      "10m_ACTIVE_PAPER_TRADE_ONLY",
 
     oneMinuteImmediateDirection:
       observation1m?.direction || "NEUTRAL",
@@ -1231,6 +1314,12 @@ export function attachPaperScalpReactionToConfluence({
 
     previousCanonicalDirection:
       canonicalResolution.previousCanonicalDirection,
+
+    activePaperTrade:
+      canonicalResolution.activePaperTrade,
+
+    activePaperTradeDirection:
+      canonicalResolution.activePaperTradeDirection,
 
     directionPersistenceActive:
       canonicalResolution.directionPersistenceActive,
@@ -1604,7 +1693,7 @@ export function attachPaperScalpReactionToConfluence({
         "MANAGER_APPROVED_STRATEGY1_DIRECTION_CONTRACT",
         "ONE_MINUTE_ESTABLISHES_DIRECTION",
         "FIVE_MINUTE_VALIDATES_DIRECTION",
-        "TEN_MINUTE_EMA10_RESETS_ONLY",
+        "TEN_MINUTE_EMA10_ACTIVE_TRADE_HOLD_RESET_ONLY",
         canonicalResolution.resolutionStatus,
         canonicalResolution.resolutionReason,
 
