@@ -1213,17 +1213,6 @@ export function buildPaperScalpReaction({
     currentLevelAction ||
     {};
 
-  const activePaperTradeLocked =
-    canonicalResolution?.activePaperTrade === true &&
-    canonicalResolution?.directionPersistenceActive === true &&
-    canonicalResolution?.ema10ResetTriggered !== true &&
-    ["LONG", "SHORT"].includes(
-      safeUpper(
-        canonicalResolution?.direction,
-        "NEUTRAL"
-      )
-    );
-
   const engine26LocationContext =
     buildEngine26LocationReactionContext({
       engine26ReactionHandoff,
@@ -1509,6 +1498,17 @@ export function attachPaperScalpReactionToConfluence({
     engine26LocationContext?.state ||
     canonicalResolution.state;
 
+  const activePaperTradeLocked =
+    canonicalResolution?.activePaperTrade === true &&
+    canonicalResolution?.directionPersistenceActive === true &&
+    canonicalResolution?.ema10ResetTriggered !== true &&
+    ["LONG", "SHORT"].includes(
+      safeUpper(
+        canonicalResolution?.direction,
+        "NEUTRAL"
+      )
+    );
+
   const paperScalpReaction = {
     active: true,
     engine: ENGINE,
@@ -1567,11 +1567,6 @@ export function attachPaperScalpReactionToConfluence({
 
     broaderTenMinuteDirection:
       broaderReaction10m?.direction || "NEUTRAL",
-
-    const activePaperTradeLocked =
-      canonicalResolution?.activePaperTrade === true &&
-      canonicalResolution?.activePaperTradeDirection &&
-      canonicalResolution.activePaperTradeDirection !== "NEUTRAL";
 
     reactionCandidateDirection:
       candidateResolution?.candidateDirection ||
