@@ -3184,10 +3184,22 @@ const engine22StructuralDirection =
     direction:
       strategy1NeutralObservation === true
         ? "NEUTRAL"
-        : shortResearchWatch === true ||
-          structuralFastWatch === true
-        ? "SHORT"
         : direction,
+    watchBiasDirection:
+      shortResearchWatch === true ||
+      structuralFastWatch === true
+        ? "SHORT"
+        : null,
+
+    structuralWatchDirection:
+      structuralFastWatch === true
+        ? "SHORT"
+        : null,
+
+    shortResearchWatchDirection:
+      shortResearchWatch === true
+        ? "SHORT"
+        : null,
     directionDiagnostics: {
       rawEngine3Direction:
         paperReaction?.direction ||
