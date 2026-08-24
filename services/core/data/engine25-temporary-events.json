@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "schema": "engine25.temporaryEvents.v0.1",
+  "updatedAtUtc": "2026-08-24T17:30:00.000Z",
+  "events": [
+    {
+      "eventId": "TEMP-20260824-HORMUZ-001",
+      "temporarySource": true,
+      "source": "REUTERS_MANUAL_VERIFIED",
+      "sourceTier": "PROFESSIONAL_NEWS",
+      "eventType": "GEOPOLITICAL_OIL_SUPPLY_RISK",
+      "headlineSummary": "Material Strait of Hormuz oil-supply disruption risk verified.",
+      "material": true,
+      "severity": "HIGH",
+      "equityImpact": "EQUITY_NEGATIVE",
+      "oilSupplyRisk": true,
+      "treasuryLiquidityRisk": false,
+      "observedAt": "2026-08-24T17:30:00.000Z",
+      "expiresAt": "2026-08-24T20:30:00.000Z",
+      "requiresMarketConfirmation": true,
+      "status": "EVENT_CONFIRMED",
+      "confirmation": {
+        "officialSourceConfirmed": false,
+        "multipleCredibleSources": true,
+        "marketConfirmed": false
+      },
+      "note": "Temporary Reuters/manual verified sample event."
+    }
+  ]
+}
