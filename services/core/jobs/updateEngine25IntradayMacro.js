@@ -1,5 +1,6 @@
 // services/core/jobs/updateEngine25IntradayMacro.js
 // Engine 25 Intraday Macro v0.1
+//
 // Approved Phase 2-4 implementation:
 // - Resolve nearby CL / BZ / ZN / ZB outright futures.
 // - Prefer highest-volume nearby eligible contract.
@@ -41,6 +42,7 @@ const __dirname = path.dirname(__filename);
 const CORE_DIR = path.resolve(__dirname, "..");
 const DATA_DIR = path.join(CORE_DIR, "data");
 const OUTPUT_FILE = path.join(DATA_DIR, "engine25-intraday-macro.json");
+const TEMP_EVENTS_FILE = path.join(DATA_DIR, "engine25-temporary-events.json");
 
 const POLY_KEY =
   process.env.POLYGON_API ||
@@ -524,6 +526,42 @@ function atomicWriteJson(filePath, value) {
   fs.renameSync(tmp, filePath);
 }
 
+function readTemporaryEvents() {
+  if (!fs.existsSync(TEMP_EVENTS_FILE)) {
+    return {
+      ok: false,
+      updatedAtUtc: null,
+      events: [],
+      warnings: ["TEMPORARY_EVENTS_FILE_MISSING"],
+    };
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(TEMP_EVENTS_FILE, "utf8"));
+    const events = Array.isArray(raw?.events) ? raw.events : [];
+    const updatedAtUtc =
+      raw?.updatedAtUtc && Number.isFinite(Date.parse(raw.updatedAtUtc))
+        ? new Date(Date.parse(raw.updatedAtUtc)).toISOString()
+        : null;
+
+    return {
+      ok: true,
+      updatedAtUtc,
+      events,
+      warnings: [],
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      updatedAtUtc: null,
+      events: [],
+      warnings: [
+        `TEMPORARY_EVENTS_FILE_INVALID:${error?.message || String(error)}`,
+      ],
+    };
+  }
+}
+
 async function collectFuturesProduct(productCode, now) {
   const resolver = await resolveEngine25FuturesContract(productCode, now);
 
@@ -685,6 +723,15 @@ export async function buildAndWriteEngine25IntradayMacro({
 
   warnings.push(...fredWarnings);
 
+  const temporaryEventInput = readTemporaryEvents();
+  warnings.push(...temporaryEventInput.warnings);
+
+  providerDiagnostics.TEMPORARY_EVENTS = {
+    ok: temporaryEventInput.ok,
+    updatedAtUtc: temporaryEventInput.updatedAtUtc,
+    eventCount: temporaryEventInput.events.length,
+  };
+
   providerDiagnostics.FRED = {
     ok:
       slowContext.tenYearYield !== null ||
@@ -718,12 +765,12 @@ export async function buildAndWriteEngine25IntradayMacro({
       ...products.BZ.read,
       instrumentLabel: "Brent Crude Oil Last Day Financial Futures",
     },
-    temporaryEvents: [],
+    temporaryEvents: temporaryEventInput.events,
     freshness: {
       status: marketDataAsOfUtc ? "FRESH" : "DEGRADED",
       marketDataAsOfUtc,
-      eventDataAsOfUtc: null,
-      warnings: [],
+      eventDataAsOfUtc: temporaryEventInput.updatedAtUtc,
+      warnings: temporaryEventInput.warnings,
     },
     warnings,
     // Phase 7 persistence has not been proven yet.
@@ -731,9 +778,10 @@ export async function buildAndWriteEngine25IntradayMacro({
   });
 
   canonical.providerDiagnostics = providerDiagnostics;
-  canonical.phase = "ENGINE25_INTRADAY_MACRO_PHASE_4";
+  canonical.phase = "ENGINE25_INTRADAY_MACRO_PHASE_5";
   canonical.note =
-    "Phase 4 canonical output: futures + TLT + FRED slow context. Temporary-event adapter not active yet.";
+    "Phase 5 canonical output: futures + TLT + FRED slow context + temporary-event adapter. Persistent lifecycle state remains degraded until a writable persistent Engine 25 path is approved.";
+
 
   atomicWriteJson(OUTPUT_FILE, canonical);
 
@@ -744,7 +792,7 @@ async function main() {
   const output = await buildAndWriteEngine25IntradayMacro();
 
   console.log("========================================");
-  console.log("Engine 25 Intraday Macro Phase 4 Complete");
+  console.log("Engine 25 Intraday Macro Phase 5 Complete");
   console.log("OK:", output.ok);
   console.log("State:", output.state);
   console.log("Equity Impact:", output.equityImpact);
@@ -787,7 +835,7 @@ if (isDirectRun) {
         {
           ok: false,
           engine: "engine25.intradayMacro.v0.1",
-          phase: "ENGINE25_INTRADAY_MACRO_PHASE_4",
+          phase: "ENGINE25_INTRADAY_MACRO_PHASE_5",
           error: error?.message || String(error),
         },
         null,
