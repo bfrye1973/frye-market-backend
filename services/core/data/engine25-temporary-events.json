@@ -16,7 +16,7 @@
       "oilSupplyRisk": true,
       "treasuryLiquidityRisk": false,
       "observedAt": "2026-08-24T17:30:00.000Z",
-      "expiresAt": "2026-08-24T16:30:00.000Z"
+      "expiresAt": "2026-08-24T16:30:00.000Z",
       "requiresMarketConfirmation": true,
       "status": "EVENT_CONFIRMED",
       "confirmation": {
@@ -24,7 +24,7 @@
         "multipleCredibleSources": true,
         "marketConfirmed": false
       },
-      "note": "Temporary Reuters/manual verified sample event."
+      "note": "Temporary Reuters/manual verified expiration test."
     }
   ]
 }
