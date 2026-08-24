@@ -200,6 +200,7 @@ async function writeMacroFile() {
           STLFSI4: safeLatest(fred, "STLFSI4"),
           BAMLH0A0HYM2: safeLatest(fred, "BAMLH0A0HYM2"),
           DGS10: safeLatest(fred, "DGS10"),
+          DGS30: safeLatest(fred, "DGS30"),
           DGS2: safeLatest(fred, "DGS2"),
           T10Y2Y: safeLatest(fred, "T10Y2Y"),
           T10Y3M: safeLatest(fred, "T10Y3M"),
@@ -246,6 +247,7 @@ async function writeMacroFile() {
       },
       fedBondMarket: {
         tenYearYield: safeLatest(fred, "DGS10"),
+        thirtyYearYield: safeLatest(fred, "DGS30"),
         twoYearYield: safeLatest(fred, "DGS2"),
         tenMinusTwo: safeLatest(fred, "T10Y2Y"),
         tenMinusThreeMonth: safeLatest(fred, "T10Y3M"),
