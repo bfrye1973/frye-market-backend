@@ -28,6 +28,7 @@ export const ENGINE25_FRED_SERIES = [
   },
 
   { id: "DGS10", label: "10-Year Treasury Rate", component: "fedBondMarket" },
+  { id: "DGS30", label: "30-Year Treasury Rate", component: "fedBondMarket" },
   { id: "DGS2", label: "2-Year Treasury Rate", component: "fedBondMarket" },
   { id: "T10Y2Y", label: "10Y minus 2Y Yield Spread", component: "fedBondMarket" },
   { id: "T10Y3M", label: "10Y minus 3M Yield Spread", component: "fedBondMarket" },
