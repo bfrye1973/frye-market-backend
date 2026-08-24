@@ -1,17 +1,27 @@
-// services/core/jobs/updateEngine25IntradayMacro.js
+/ services/core/jobs/updateEngine25IntradayMacro.js
 // Engine 25 Intraday Macro v0.1
 //
-// Phase 2/3 implementation:
-// - Resolve nearby CL / BZ / ZN / ZB outright futures without modifying the shared provider.
-// - Prefer the highest-volume nearby eligible contract.
-// - Fetch 5m and 10m bars through the existing shared futures provider.
-// - This file does NOT yet write the canonical intradayMacro output.
-//   Phase 4+ will add TLT, FRED slow context, temporary events, and final JSON generation.
+// Approved Phase 2-4 implementation:
+// - Resolve nearby CL / BZ / ZN / ZB outright futures.
+// - Prefer highest-volume nearby eligible contract.
+// - Fetch 5m / 10m futures bars.
+// - Fetch TLT 5m / 10m bars.
+// - Fetch slow FRED DGS10 / DGS30 context.
+// - Build and atomically write data/engine25-intraday-macro.json.
+//
+// Not yet implemented in this phase:
+// - temporary/manual event adapter
+// - event lifecycle persistence
+// - route/context/full-dashboard exposure
 //
 // Scope lock:
-// - No trade direction.
+// - No LONG/SHORT.
 // - No Engine 6 permission.
 // - No Engine 3/4/22/26 changes.
+
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 import {
   FUTURES_TF_MAP,
@@ -19,10 +29,30 @@ import {
   fetchFuturesAggs,
 } from "../providers/futuresOhlcProvider.js";
 
+import { fetchFredSeries } from "../logic/engine25DataSources.js";
+
+import {
+  buildIntradayMacro,
+  buildRollingChanges,
+  pctChange,
+} from "../logic/engine25IntradayMacro.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CORE_DIR = path.resolve(__dirname, "..");
+const DATA_DIR = path.join(CORE_DIR, "data");
+const OUTPUT_FILE = path.join(DATA_DIR, "engine25-intraday-macro.json");
+
 const POLY_KEY =
   process.env.POLYGON_API ||
   process.env.POLYGON_API_KEY ||
   process.env.POLY_API_KEY ||
+  "";
+
+const FRED_KEY =
+  process.env.FRED_API_KEY ||
+  process.env.FRED_API ||
+  process.env.FRED_KEY ||
   "";
 
 const POLYGON_REST_BASE =
@@ -31,21 +61,8 @@ const POLYGON_REST_BASE =
   "https://api.polygon.io";
 
 const MONTH_CODES = Object.freeze([
-  "F", // Jan
-  "G", // Feb
-  "H", // Mar
-  "J", // Apr
-  "K", // May
-  "M", // Jun
-  "N", // Jul
-  "Q", // Aug
-  "U", // Sep
-  "V", // Oct
-  "X", // Nov
-  "Z", // Dec
+  "F", "G", "H", "J", "K", "M", "N", "Q", "U", "V", "X", "Z",
 ]);
-
-const QUARTER_CODES = Object.freeze(["H", "M", "U", "Z"]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -81,6 +98,7 @@ function buildMonthlyCandidates(productCode, now = new Date(), horizon = 6) {
     const d = addMonthsUtc(now, i);
     const code = MONTH_CODES[d.getUTCMonth()];
     const ticker = `${productCode}${code}${shortYear(d.getUTCFullYear())}`;
+
     if (!seen.has(ticker)) {
       seen.add(ticker);
       out.push(ticker);
@@ -91,19 +109,16 @@ function buildMonthlyCandidates(productCode, now = new Date(), horizon = 6) {
 }
 
 function quarterMonthIndexesFromNow(now = new Date(), count = 4) {
-  const currentMonth = now.getUTCMonth(); // 0-11
+  const currentMonth = now.getUTCMonth();
   const currentYear = now.getUTCFullYear();
-
-  const quarterlyMonths = [2, 5, 8, 11]; // Mar, Jun, Sep, Dec
+  const quarterlyMonths = [2, 5, 8, 11];
   const out = [];
 
   let year = currentYear;
+
   while (out.length < count) {
     for (const month of quarterlyMonths) {
-      if (
-        year > currentYear ||
-        month >= currentMonth
-      ) {
+      if (year > currentYear || month >= currentMonth) {
         out.push({ year, month });
         if (out.length >= count) return out;
       }
@@ -178,6 +193,7 @@ async function fetchTickerSnapshot(ticker) {
 
   const json = await readJsonResponse(response, `Polygon snapshot ${ticker}`);
   const rows = Array.isArray(json?.results) ? json.results : [];
+
   const row =
     rows.find(
       (item) =>
@@ -191,8 +207,8 @@ async function fetchTickerSnapshot(ticker) {
       ticker,
       ok: false,
       httpStatus: response.status,
-      error: null,
       notFound: true,
+      error: null,
     };
   }
 
@@ -233,9 +249,6 @@ function selectNearbyContract(productCode, snapshots, now = new Date()) {
     );
   }
 
-  // Important:
-  // Candidates have already been restricted to a small nearby horizon.
-  // Within that horizon, use actual session volume to follow rollover.
   const sorted = [...valid].sort((a, b) => {
     const volumeDiff = Number(b.volume || 0) - Number(a.volume || 0);
     if (volumeDiff !== 0) return volumeDiff;
@@ -264,6 +277,7 @@ export async function resolveEngine25FuturesContract(
   const tickers = candidateTickers(productCode, now);
 
   const snapshots = [];
+
   for (const ticker of tickers) {
     snapshots.push(await fetchTickerSnapshot(ticker));
   }
@@ -291,7 +305,9 @@ export async function fetchEngine25FuturesBars({
   const tf = String(timeframe || "").toLowerCase();
 
   if (!["5m", "10m"].includes(tf)) {
-    throw new Error(`Engine 25 v0.1 only accepts 5m/10m fast bars. Received: ${tf}`);
+    throw new Error(
+      `Engine 25 v0.1 only accepts 5m/10m fast bars. Received: ${tf}`
+    );
   }
 
   const resolution = FUTURES_TF_MAP[tf];
@@ -324,70 +340,441 @@ export async function fetchEngine25FuturesBars({
   };
 }
 
-async function phase23Audit() {
-  const products = ["CL", "BZ", "ZN", "ZB"];
-  const output = {
+async function fetchPolygonEtfBars({
+  symbol,
+  multiplier,
+  now = new Date(),
+  lookbackDays = 7,
+  limit = 5000,
+}) {
+  if (!POLY_KEY) throw new Error("Missing Polygon API key");
+
+  const from = dateOnlyUtc(
+    new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000)
+  );
+  const to = dateOnlyUtc(now);
+
+  const base = String(POLYGON_REST_BASE || "").replace(/\/+$/, "");
+  const url = new URL(
+    `${base}/v2/aggs/ticker/${encodeURIComponent(
+      symbol
+    )}/range/${multiplier}/minute/${from}/${to}`
+  );
+
+  url.searchParams.set("adjusted", "true");
+  url.searchParams.set("sort", "asc");
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("apiKey", POLY_KEY);
+
+  const response = await fetch(url.toString(), {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Polygon ${symbol} aggregates ${response.status} ${text}`);
+  }
+
+  const json = await readJsonResponse(response, `Polygon ${symbol} aggregates`);
+  const rows = Array.isArray(json?.results) ? json.results : [];
+
+  const bars = rows
+    .map((bar) => ({
+      time: Number.isFinite(Number(bar?.t))
+        ? Math.floor(Number(bar.t) / 1000)
+        : null,
+      open: Number(bar?.o),
+      high: Number(bar?.h),
+      low: Number(bar?.l),
+      close: Number(bar?.c),
+      volume: Number(bar?.v ?? 0),
+    }))
+    .filter((bar) =>
+      [bar.time, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite)
+    )
+    .sort((a, b) => a.time - b.time);
+
+  return {
     ok: true,
-    phase: "ENGINE25_INTRADAY_MACRO_PHASE_2_3_AUDIT",
-    generatedAtUtc: nowIso(),
-    products: {},
-    errors: [],
+    symbol,
+    timeframe: `${multiplier}m`,
+    count: bars.length,
+    firstBar: bars[0] || null,
+    lastBar: bars[bars.length - 1] || null,
+    bars,
   };
+}
 
-  for (const productCode of products) {
+function buildCombinedRollingRead({
+  fiveMinuteBars = [],
+  tenMinuteBars = [],
+  productCode = null,
+  resolvedContract = null,
+  sourceType = null,
+  symbol = null,
+}) {
+  const five = buildRollingChanges(fiveMinuteBars);
+  const ten = buildRollingChanges(tenMinuteBars);
+
+  return {
+    ...(productCode ? { productCode } : {}),
+    ...(resolvedContract ? { resolvedContract } : {}),
+    ...(symbol ? { symbol } : {}),
+    ...(sourceType ? { sourceType } : {}),
+    price: five.price ?? ten.price ?? null,
+    asOfUnix: five.asOfUnix ?? ten.asOfUnix ?? null,
+    asOfUtc: five.asOfUtc ?? ten.asOfUtc ?? null,
+    changesPct: {
+      "5m": five.changesPct?.["5m"] ?? null,
+      "10m": ten.changesPct?.["10m"] ?? five.changesPct?.["10m"] ?? null,
+      "30m": five.changesPct?.["30m"] ?? ten.changesPct?.["30m"] ?? null,
+      "60m": five.changesPct?.["60m"] ?? ten.changesPct?.["60m"] ?? null,
+      session: five.changesPct?.session ?? null,
+    },
+  };
+}
+
+function latestObservation(seriesResult) {
+  const latest = seriesResult?.latest || null;
+
+  return {
+    value:
+      latest && Number.isFinite(Number(latest.value))
+        ? Number(latest.value)
+        : null,
+    date: latest?.date || null,
+  };
+}
+
+async function fetchSlowYieldContext() {
+  const warnings = [];
+
+  if (!FRED_KEY) {
+    return {
+      slowContext: {
+        tenYearYield: null,
+        tenYearObservationDate: null,
+        thirtyYearYield: null,
+        thirtyYearObservationDate: null,
+      },
+      warnings: ["FRED_SLOW_CONTEXT_UNAVAILABLE_MISSING_API_KEY"],
+    };
+  }
+
+  const observationStart = new Date(
+    Date.now() - 45 * 24 * 60 * 60 * 1000
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  let dgs10 = null;
+  let dgs30 = null;
+
+  try {
+    dgs10 = await fetchFredSeries({
+      seriesId: "DGS10",
+      apiKey: FRED_KEY,
+      observationStart,
+      limit: 100,
+    });
+  } catch (error) {
+    warnings.push(`DGS10_FETCH_FAILED:${error?.message || String(error)}`);
+  }
+
+  try {
+    dgs30 = await fetchFredSeries({
+      seriesId: "DGS30",
+      apiKey: FRED_KEY,
+      observationStart,
+      limit: 100,
+    });
+  } catch (error) {
+    warnings.push(`DGS30_FETCH_FAILED:${error?.message || String(error)}`);
+  }
+
+  const ten = latestObservation(dgs10);
+  const thirty = latestObservation(dgs30);
+
+  return {
+    slowContext: {
+      tenYearYield: ten.value,
+      tenYearObservationDate: ten.date,
+      thirtyYearYield: thirty.value,
+      thirtyYearObservationDate: thirty.date,
+    },
+    warnings,
+  };
+}
+
+function maxIso(values = []) {
+  const valid = values
+    .map((x) => (x ? Date.parse(x) : NaN))
+    .filter(Number.isFinite);
+
+  if (!valid.length) return null;
+
+  return new Date(Math.max(...valid)).toISOString();
+}
+
+function atomicWriteJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  fs.renameSync(tmp, filePath);
+}
+
+async function collectFuturesProduct(productCode, now) {
+  const resolver = await resolveEngine25FuturesContract(productCode, now);
+
+  const fiveMinute = await fetchEngine25FuturesBars({
+    productCode,
+    timeframe: "5m",
+    now,
+    limit: 1000,
+  });
+
+  const tenMinute = await fetchEngine25FuturesBars({
+    productCode,
+    timeframe: "10m",
+    now,
+    limit: 1000,
+  });
+
+  const read = buildCombinedRollingRead({
+    fiveMinuteBars: fiveMinute.bars,
+    tenMinuteBars: tenMinute.bars,
+    productCode,
+    resolvedContract: resolver.resolvedSymbol,
+    sourceType:
+      productCode === "ZN" || productCode === "ZB"
+        ? "FUTURES_PROXY"
+        : "DIRECT_FUTURES",
+  });
+
+  return {
+    resolver,
+    fiveMinute,
+    tenMinute,
+    read,
+  };
+}
+
+export async function buildAndWriteEngine25IntradayMacro({
+  now = new Date(),
+} = {}) {
+  const generatedAtUtc = now.toISOString();
+  const warnings = [];
+  const providerDiagnostics = {};
+
+  const products = {};
+
+  for (const productCode of ["CL", "BZ", "ZN", "ZB"]) {
     try {
-      const resolver = await resolveEngine25FuturesContract(productCode);
+      products[productCode] = await collectFuturesProduct(productCode, now);
 
-      const fiveMinute = await fetchEngine25FuturesBars({
-        productCode,
-        timeframe: "5m",
-        limit: 12,
-      });
-
-      const tenMinute = await fetchEngine25FuturesBars({
-        productCode,
-        timeframe: "10m",
-        limit: 12,
-      });
-
-      output.products[productCode] = {
-        resolver: {
-          productCode: resolver.productCode,
-          resolvedSymbol: resolver.resolvedSymbol,
-          selectionRule: resolver.selectionRule,
-          candidateCount: resolver.candidateCount,
-          candidates: resolver.candidates.map((x) => ({
-            ticker: x.ticker,
-            settlementDate: x.settlementDate,
-            volume: x.volume,
-            close: x.close,
-          })),
-        },
-        fiveMinute: {
-          ok: fiveMinute.ok,
-          timeframe: fiveMinute.timeframe,
-          count: fiveMinute.count,
-          lastBar: fiveMinute.lastBar,
-        },
-        tenMinute: {
-          ok: tenMinute.ok,
-          timeframe: tenMinute.timeframe,
-          count: tenMinute.count,
-          lastBar: tenMinute.lastBar,
-        },
+      providerDiagnostics[productCode] = {
+        ok: true,
+        resolvedContract: products[productCode].resolver.resolvedSymbol,
+        selectionRule: products[productCode].resolver.selectionRule,
+        candidates: products[productCode].resolver.candidates.map((x) => ({
+          ticker: x.ticker,
+          settlementDate: x.settlementDate,
+          volume: x.volume,
+          close: x.close,
+        })),
+        fiveMinuteCount: products[productCode].fiveMinute.count,
+        tenMinuteCount: products[productCode].tenMinute.count,
       };
     } catch (error) {
-      output.ok = false;
-      output.errors.push({
-        productCode,
-        message: error?.message || String(error),
-      });
+      warnings.push(
+        `${productCode}_UNAVAILABLE:${error?.message || String(error)}`
+      );
+
+      providerDiagnostics[productCode] = {
+        ok: false,
+        error: error?.message || String(error),
+      };
+
+      products[productCode] = {
+        read: {
+          productCode,
+          resolvedContract: null,
+          sourceType:
+            productCode === "ZN" || productCode === "ZB"
+              ? "FUTURES_PROXY"
+              : "DIRECT_FUTURES",
+          price: null,
+          asOfUnix: null,
+          asOfUtc: null,
+          changesPct: {
+            "5m": null,
+            "10m": null,
+            "30m": null,
+            "60m": null,
+            session: null,
+          },
+        },
+      };
     }
   }
 
-  console.log(JSON.stringify(output, null, 2));
+  let tltFive = null;
+  let tltTen = null;
+  let tltRead = null;
 
-  if (!output.ok) process.exitCode = 1;
+  try {
+    tltFive = await fetchPolygonEtfBars({
+      symbol: "TLT",
+      multiplier: 5,
+      now,
+      lookbackDays: 7,
+    });
+
+    tltTen = await fetchPolygonEtfBars({
+      symbol: "TLT",
+      multiplier: 10,
+      now,
+      lookbackDays: 7,
+    });
+
+    tltRead = buildCombinedRollingRead({
+      fiveMinuteBars: tltFive.bars,
+      tenMinuteBars: tltTen.bars,
+      symbol: "TLT",
+      sourceType: "ETF_PROXY",
+    });
+
+    // Canonical contract uses cashSession for TLT rather than generic session.
+    tltRead.changesPct.cashSession = tltRead.changesPct.session;
+    delete tltRead.changesPct.session;
+
+    providerDiagnostics.TLT = {
+      ok: true,
+      fiveMinuteCount: tltFive.count,
+      tenMinuteCount: tltTen.count,
+      lastFiveMinuteBar: tltFive.lastBar,
+      lastTenMinuteBar: tltTen.lastBar,
+    };
+  } catch (error) {
+    warnings.push(`TLT_UNAVAILABLE:${error?.message || String(error)}`);
+
+    tltRead = {
+      symbol: "TLT",
+      sourceType: "ETF_PROXY",
+      price: null,
+      asOfUnix: null,
+      asOfUtc: null,
+      changesPct: {
+        "5m": null,
+        "10m": null,
+        "30m": null,
+        "60m": null,
+        cashSession: null,
+      },
+    };
+
+    providerDiagnostics.TLT = {
+      ok: false,
+      error: error?.message || String(error),
+    };
+  }
+
+  const { slowContext, warnings: fredWarnings } =
+    await fetchSlowYieldContext();
+
+  warnings.push(...fredWarnings);
+
+  providerDiagnostics.FRED = {
+    ok:
+      slowContext.tenYearYield !== null ||
+      slowContext.thirtyYearYield !== null,
+    DGS10: {
+      value: slowContext.tenYearYield,
+      observationDate: slowContext.tenYearObservationDate,
+    },
+    DGS30: {
+      value: slowContext.thirtyYearYield,
+      observationDate: slowContext.thirtyYearObservationDate,
+    },
+  };
+
+  const marketDataAsOfUtc = maxIso([
+    products.CL.read.asOfUtc,
+    products.BZ.read.asOfUtc,
+    products.ZN.read.asOfUtc,
+    products.ZB.read.asOfUtc,
+    tltRead.asOfUtc,
+  ]);
+
+  const canonical = buildIntradayMacro({
+    generatedAtUtc,
+    slowContext,
+    tenYearProxy: products.ZN.read,
+    thirtyYearProxy: products.ZB.read,
+    tlt: tltRead,
+    wti: products.CL.read,
+    brent: {
+      ...products.BZ.read,
+      instrumentLabel: "Brent Crude Oil Last Day Financial Futures",
+    },
+    temporaryEvents: [],
+    freshness: {
+      status: marketDataAsOfUtc ? "FRESH" : "DEGRADED",
+      marketDataAsOfUtc,
+      eventDataAsOfUtc: null,
+      warnings: [],
+    },
+    warnings,
+    // Phase 7 persistence has not been proven yet.
+    persistenceAvailable: false,
+  });
+
+  canonical.providerDiagnostics = providerDiagnostics;
+  canonical.phase = "ENGINE25_INTRADAY_MACRO_PHASE_4";
+  canonical.note =
+    "Phase 4 canonical output: futures + TLT + FRED slow context. Temporary-event adapter not active yet.";
+
+  atomicWriteJson(OUTPUT_FILE, canonical);
+
+  return canonical;
+}
+
+async function main() {
+  const output = await buildAndWriteEngine25IntradayMacro();
+
+  console.log("========================================");
+  console.log("Engine 25 Intraday Macro Phase 4 Complete");
+  console.log("OK:", output.ok);
+  console.log("State:", output.state);
+  console.log("Equity Impact:", output.equityImpact);
+  console.log("Severity:", output.severity);
+  console.log("Macro Shock:", output.macroShock);
+  console.log("Wrote:", OUTPUT_FILE);
+  console.log("========================================");
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: output.ok,
+        engine: output.engine,
+        generatedAtUtc: output.generatedAtUtc,
+        state: output.state,
+        equityImpact: output.equityImpact,
+        severity: output.severity,
+        macroShock: output.macroShock,
+        freshness: output.freshness,
+        components: output.components,
+        marketConfirmation: output.marketConfirmation,
+        reasonCodes: output.reasonCodes,
+        warnings: output.warnings,
+        providerDiagnostics: output.providerDiagnostics,
+      },
+      null,
+      2
+    )
+  );
 }
 
 const isDirectRun =
@@ -395,12 +782,13 @@ const isDirectRun =
   import.meta.url === new URL(`file://${process.argv[1]}`).href;
 
 if (isDirectRun) {
-  phase23Audit().catch((error) => {
+  main().catch((error) => {
     console.error(
       JSON.stringify(
         {
           ok: false,
-          phase: "ENGINE25_INTRADAY_MACRO_PHASE_2_3_AUDIT",
+          engine: "engine25.intradayMacro.v0.1",
+          phase: "ENGINE25_INTRADAY_MACRO_PHASE_4",
           error: error?.message || String(error),
         },
         null,
