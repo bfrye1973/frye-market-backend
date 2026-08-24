@@ -1,6 +1,5 @@
-/ services/core/jobs/updateEngine25IntradayMacro.js
+// services/core/jobs/updateEngine25IntradayMacro.js
 // Engine 25 Intraday Macro v0.1
-//
 // Approved Phase 2-4 implementation:
 // - Resolve nearby CL / BZ / ZN / ZB outright futures.
 // - Prefer highest-volume nearby eligible contract.
