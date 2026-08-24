@@ -99,7 +99,7 @@ function validateFred(macroData) {
 
     // Daily/weekly/monthly data can be older depending on release schedule.
     // These are broad validation thresholds, not trading rules.
-    if (["DGS10", "DGS2", "T10Y2Y", "T10Y3M", "BAMLH0A0HYM2", "RRPONTSYD"].includes(series.id)) {
+    if (["DGS10", "DGS30", "DGS2", "T10Y2Y", "T10Y3M", "BAMLH0A0HYM2", "RRPONTSYD"].includes(series.id)) {
       if (age !== null && age > 10) stale.push(series.id);
     } else if (["ICSA", "CCSA", "NFCI", "STLFSI4", "WALCL", "WRESBAL"].includes(series.id)) {
       if (age !== null && age > 21) stale.push(series.id);
