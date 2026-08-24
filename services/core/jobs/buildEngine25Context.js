@@ -17,6 +17,7 @@ const SOURCE_FILES = {
   zoneAwareRead: "engine25-es-zone-aware-read.json",
   sectorBreadth: "engine25-sector-card-breadth-snapshots.json",
   zoneClassification: "engine25-zone-classification.json",
+  intradayMacro: "engine25-intraday-macro.json",
 };
 
 function nowIso() {
@@ -394,6 +395,7 @@ function buildContext() {
   const zoneAwareRead = sources.zoneAwareRead.data || {};
   const sectorBreadth = sources.sectorBreadth.data || {};
   const zoneClassification = sources.zoneClassification.data || {};
+  const intradayMacro = sources.intradayMacro.data || {};
   const compositeRow = latestCompositeRow(compositeOverlay);
 
   const freshness = buildFreshness({ sources, warnings });
@@ -525,6 +527,7 @@ function buildContext() {
     zoneClassification: zoneClassification || {},
     zoneAwareRead: zoneAwareRead || {},
     marketHealth: marketHealth || {},
+    intradayMacro: intradayMacro || {},
 
     flags: {
       hardBlock: flags.hardBlock,
