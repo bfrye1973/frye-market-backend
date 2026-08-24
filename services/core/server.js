@@ -49,6 +49,7 @@ import engine25CompositeOverlayRouter from "./routes/engine25CompositeOverlay.js
 import engine25FullDashboardRouter from "./routes/engine25FullDashboard.js";
 import engine25RefreshRouter from "./routes/engine25Refresh.js";
 import engine25ContextRouter from "./routes/engine25Context.js";
+import engine25IntradayMacroRouter from "./routes/engine25IntradayMacro.js";
 import executionStateRouter from "./routes/executionState.js";
 import engine26ManualHardSignalRouter from "./routes/engine26ManualHardSignal.js";
 import futuresOhlcRouter from "./routes/futuresOhlc.js";
@@ -182,6 +183,7 @@ app.use("/api/v1", engine25CompositeOverlayRouter);
 app.use("/api/v1", engine25FullDashboardRouter);
 app.use("/api/v1", engine25RefreshRouter);
 app.use("/api/v1", engine25ContextRouter);
+app.use("/api/v1", engine25IntradayMacroRouter);
 app.use("/api/v1/execution-state", executionStateRouter);
 app.use("/api/v1", engine26ManualHardSignalRouter);
 app.use("/api/v1/futures/market-meter", futuresMarketMeterRouter);
