@@ -917,11 +917,22 @@ function resolveCanonicalConfirmation({
     );
   }
 
-  if (!oneMinuteQualityApproved) {
-    blockers.push(
-      "ONE_MINUTE_QUALITY_NOT_GOOD_OR_STRONG"
-    );
-  }
+const fiveMinuteDirectionalSupport =
+  oneMinuteAligned &&
+  validationPresent &&
+  validationFresh &&
+  validationResolved &&
+  validationSupports &&
+  !validationConflicts;
+
+if (
+  !oneMinuteQualityApproved &&
+  !fiveMinuteDirectionalSupport
+) {
+  blockers.push(
+    "ONE_MINUTE_QUALITY_NOT_GOOD_OR_STRONG"
+  );
+}
 
   if (!candleCompleted) {
     blockers.push(
