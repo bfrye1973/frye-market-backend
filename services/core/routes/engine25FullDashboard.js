@@ -997,6 +997,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       zoneClassification: zoneClassification || null,
       engine25Context: engine25Context || null,
       intradayMacro: intradayMacro || null,
+      marketInternals: engine25Context?.marketInternals || null,
 
       overlay: {
         available: dailyCompositeAvailable,
