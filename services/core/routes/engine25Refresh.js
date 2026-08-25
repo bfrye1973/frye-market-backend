@@ -81,6 +81,7 @@ const LIVE_STEPS = [
 ];
 
 const LIVE_REQUIRED_FILES = [
+  "engine25-news-events.json",
   "engine25-intraday-macro.json",
   "engine25-sector-card-breadth-snapshots.json",
   "engine25-es-zone-aware-read.json",
