@@ -494,19 +494,38 @@ function findMetricForEsSessionDate(symbolMetrics, esDate) {
 function symbolTrendScore(item) {
   if (!item?.ok) return 50;
 
-  const emaScore =
-    boolScore(item.aboveEma10, 25, 0) +
-    boolScore(item.aboveEma20, 25, 0) +
-    boolScore(item.aboveEma50, 25, 0) +
-    boolScore(item.aboveEma200, 25, 0);
+  function emaDistancePct(close, emaValue) {
+    const c = Number(close);
+    const e = Number(emaValue);
 
+    if (!Number.isFinite(c) || !Number.isFinite(e) || e === 0) {
+      return null;
+    }
+
+    return ((c - e) / e) * 100;
+  }
+
+  const ema10DistancePct = emaDistancePct(item.close, item.ema10);
+  const ema20DistancePct = emaDistancePct(item.close, item.ema20);
+  const ema50DistancePct = emaDistancePct(item.close, item.ema50);
+  const ema200DistancePct = emaDistancePct(item.close, item.ema200);
+
+  // Match the live Engine 25 Market Trend sensitivity:
+  // close proximity to an EMA earns partial credit instead of a full binary score.
+  const ema10Score = scoreDirect(ema10DistancePct, -2, 2);
+  const ema20Score = scoreDirect(ema20DistancePct, -3, 3);
+  const ema50Score = scoreDirect(ema50DistancePct, -6, 6);
+  const ema200Score = scoreDirect(ema200DistancePct, -15, 15);
   const momentumScore = scoreDirect(item.pctChange20d, -5, 5);
 
   const distributionPenalty = item.distributionDay === true ? 10 : 0;
 
   return clamp(
     weightedAvg([
-      { value: emaScore, weight: 0.7 },
+      { value: ema10Score, weight: 0.25 },
+      { value: ema20Score, weight: 0.2 },
+      { value: ema50Score, weight: 0.15 },
+      { value: ema200Score, weight: 0.1 },
       { value: momentumScore, weight: 0.3 },
     ]) - distributionPenalty
   );
