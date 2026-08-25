@@ -36,8 +36,8 @@ const PRIORITY = Object.freeze({
   ENERGY_SUPPLY_EVENT: 65,
   FED_POLICY_EVENT: 55,
   TRADE_POLICY_RISK: 50,
-  GEOPOLITICAL_ESCALATION: 40,
   MACRO_DATA_RELEASE: 45,
+  GEOPOLITICAL_ESCALATION: 40,
 });
 
 const MATERIAL_TERMS = [
@@ -81,10 +81,9 @@ function hasTerm(text, term) {
   const normalizedTerm = normalizeText(term).toLowerCase();
   if (!normalizedTerm) return false;
 
-  // Whole-word / whole-phrase matching. This prevents short tokens such as
-  // "war" from matching software, hardware, warnings, upwards, forward, etc.
+  const phrasePattern = escapeRegExp(normalizedTerm).replace(/\s+/g, "\\s+");
   const pattern = new RegExp(
-    `(^|[^a-z0-9])${escapeRegExp(normalizedTerm).replace(/\s+/g, "\\s+")}(?=$|[^a-z0-9])`,
+    `(^|[^a-z0-9])${phrasePattern}(?=$|[^a-z0-9])`,
     "i"
   );
 
@@ -95,12 +94,26 @@ function hasAny(text, terms) {
   return terms.some((term) => hasTerm(text, term));
 }
 
-function matchingTerms(text, terms) {
-  return terms.filter((term) => hasTerm(text, term));
-}
-
 function hasAll(text, groups) {
   return groups.every((group) => hasAny(text, group));
+}
+
+function isHormuzConcreteDisruption(text) {
+  const hormuzContext = hasAny(text, ["strait of hormuz", "hormuz"]);
+  const disruptionTerms = [
+    "mine", "mines",
+    "navy", "naval",
+    "destroyed", "destruction",
+    "detonated", "detonation",
+    "blockade",
+    "closure", "closed",
+    "attack",
+    "ship", "ships",
+    "shipping disruption",
+    "tanker", "tankers",
+  ];
+
+  return hormuzContext && hasAny(text, disruptionTerms);
 }
 
 function parseIso(value) {
@@ -121,7 +134,13 @@ function primaryEntity(text) {
     ["Suez Canal", ["suez canal", "suez"]],
     ["OPEC+", ["opec+", "opec plus"]],
     ["OPEC", ["opec"]],
-    ["Federal Reserve", ["federal reserve", "fomc", "fed chair", "jerome powell", "powell"]],
+    ["Federal Reserve", [
+      "federal reserve", "fomc", "fed chair", "jerome powell", "powell",
+      "boston fed", "cleveland fed", "minneapolis fed", "kansas city fed",
+      "dallas fed", "new york fed", "chicago fed", "st. louis fed",
+      "san francisco fed", "atlanta fed", "richmond fed", "philadelphia fed",
+      "collins"
+    ]],
     ["U.S. Treasury", ["u.s. treasury", "us treasury", "treasury department", "treasury market"]],
     ["Iran", ["iran", "iranian"]],
     ["Israel", ["israel", "israeli"]],
@@ -131,7 +150,7 @@ function primaryEntity(text) {
     ["Taiwan", ["taiwan", "taiwanese"]],
     ["North Korea", ["north korea", "north korean", "pyongyang"]],
     ["Saudi Arabia", ["saudi arabia", "saudi"]],
-    ["United States", ["united states", "u.s.", "us"]],
+    ["United States", ["united states", "u.s.", "usa"]],
   ];
 
   for (const [name, terms] of entities) {
@@ -143,123 +162,369 @@ function primaryEntity(text) {
 function classifyCandidates(text) {
   const candidates = [];
 
-  const oilTerms = ["oil", "crude", "brent", "wti", "petroleum", "tanker", "tankers", "refinery", "refineries"];
-  const supplyTerms = ["supply", "shipping", "shipment", "shipments", "pipeline", "pipelines", "terminal", "terminals", "production", "exports", "export", "hormuz", "red sea", "suez", "blockade", "closure", "disruption", "disrupted", "halt", "halted", "attack", "attacks", "sanction", "sanctions"];
-  const geopoliticalTerms = ["war", "military", "attack", "airstrike", "missile", "drone", "invasion", "retaliation", "ceasefire", "troops", "conflict", "hostilities", "sanction", "sanctions", "hormuz", "red sea"];
-  const militarySecurityTerms = ["military", "attack", "attacks", "airstrike", "airstrikes", "missile", "missiles", "drone", "drones", "invasion", "retaliation", "ceasefire", "troops", "conflict", "hostilities", "hormuz", "red sea"];
-  const treasuryTerms = ["treasury", "treasuries", "bond yield", "bond yields", "10-year yield", "30-year yield", "yield spike", "yields surge", "auction", "duration selloff", "bond selloff"];
-  const fedTerms = ["federal reserve", "fomc", "fed chair", "jerome powell", "powell", "rate decision", "rate hike", "rate cut", "rates unchanged", "dot plot"];
-  const macroTerms = ["consumer price index", "cpi", "producer price index", "ppi", "nonfarm payroll", "payrolls", "jobless claims", "retail sales", "gross domestic product", "gdp", "pce", "personal consumption expenditures", "employment report", "unemployment rate", "ism manufacturing", "ism services"];
-  const tradeTerms = ["tariff", "tariffs", "trade war", "trade policy", "export ban", "import ban", "export controls", "trade restriction", "trade restrictions", "customs duty", "duties", "embargo"];
-  const stressTerms = ["bank run", "bank failure", "bank failures", "banking crisis", "liquidity crisis", "funding stress", "credit stress", "credit crisis", "systemic risk", "default", "defaults", "counterparty", "deposit flight", "bailout", "bank rescue", "financial stability", "commercial paper", "repo stress"];
-  const energyTerms = ["natural gas", "lng", "energy supply", "power grid", "electric grid", "refinery", "refineries", "pipeline", "pipelines", "production outage", "production cut", "output cut"];
+  const oilTerms = [
+    "oil", "crude", "brent", "wti", "petroleum",
+    "tanker", "tankers", "refinery", "refineries"
+  ];
+
+  const supplyTerms = [
+    "supply", "shipping", "shipment", "shipments",
+    "pipeline", "pipelines", "terminal", "terminals",
+    "production", "exports", "export",
+    "hormuz", "red sea", "suez",
+    "blockade", "closure", "disruption", "disrupted",
+    "halt", "halted", "attack", "attacks",
+    "sanction", "sanctions"
+  ];
+
+  const geopoliticalTerms = [
+    "war", "military", "attack", "airstrike", "missile", "drone",
+    "invasion", "retaliation", "ceasefire", "troops",
+    "conflict", "hostilities", "sanction", "sanctions",
+    "hormuz", "red sea"
+  ];
+
+  const militarySecurityTerms = [
+    "military", "attack", "attacks",
+    "airstrike", "airstrikes",
+    "missile", "missiles",
+    "drone", "drones",
+    "invasion", "retaliation", "ceasefire",
+    "troops", "conflict", "hostilities",
+    "hormuz", "red sea"
+  ];
+
+  const treasuryTerms = [
+    "treasury", "treasuries",
+    "bond yield", "bond yields",
+    "10-year yield", "30-year yield",
+    "yield spike", "yields surge",
+    "auction", "duration selloff", "bond selloff"
+  ];
+
+  const fedEntityTerms = [
+    "federal reserve", "fomc", "fed chair",
+    "jerome powell", "powell",
+    "boston fed", "cleveland fed", "minneapolis fed",
+    "kansas city fed", "dallas fed", "new york fed",
+    "chicago fed", "st. louis fed", "san francisco fed",
+    "atlanta fed", "richmond fed", "philadelphia fed",
+    "collins"
+  ];
+
+  const fedPolicyTerms = [
+    "rate decision", "rate hike", "rate cut", "rates unchanged", "dot plot",
+    "interest rates",
+    "raise interest rates", "raises interest rates", "raising interest rates",
+    "lower interest rates", "cut interest rates",
+    "rates higher", "rates lower",
+    "discount rate", "primary credit rate"
+  ];
+
+  const macroTerms = [
+    "consumer price index", "cpi",
+    "producer price index", "ppi",
+    "nonfarm payroll", "payrolls",
+    "jobless claims", "retail sales",
+    "gross domestic product", "gdp",
+    "pce", "personal consumption expenditures",
+    "employment report", "unemployment rate",
+    "ism manufacturing", "ism services"
+  ];
+
+  const tradeTerms = [
+    "tariff", "tariffs",
+    "trade war", "trade policy",
+    "export ban", "import ban",
+    "export controls",
+    "trade restriction", "trade restrictions",
+    "customs duty", "duties", "embargo"
+  ];
+
+  const stressTerms = [
+    "bank run", "bank failure", "bank failures",
+    "banking crisis", "liquidity crisis",
+    "funding stress", "credit stress", "credit crisis",
+    "systemic risk", "default", "defaults",
+    "counterparty", "deposit flight",
+    "bailout", "bank rescue",
+    "financial stability",
+    "commercial paper", "repo stress"
+  ];
+
+  const energyTerms = [
+    "natural gas", "lng", "energy supply",
+    "power grid", "electric grid",
+    "refinery", "refineries",
+    "pipeline", "pipelines",
+    "production outage", "production cut", "output cut"
+  ];
 
   const tradePolicyMatch = hasAny(text, tradeTerms);
   const independentMilitarySecurityMatch = hasAny(text, militarySecurityTerms);
+  const hormuzConcreteDisruption = isHormuzConcreteDisruption(text);
 
-  if (hasAll(text, [oilTerms, supplyTerms]) && hasAny(text, geopoliticalTerms)) {
+  if (
+    (hasAll(text, [oilTerms, supplyTerms]) && hasAny(text, geopoliticalTerms)) ||
+    hormuzConcreteDisruption
+  ) {
     candidates.push("GEOPOLITICAL_OIL_SUPPLY_RISK");
   }
-  if (hasAny(text, stressTerms)) candidates.push("FINANCIAL_STRESS_EVENT");
-  if (hasAny(text, treasuryTerms)) candidates.push("TREASURY_RATES_RISK");
-  if (hasAny(text, energyTerms) && hasAny(text, ["supply", "outage", "cut", "halt", "disruption", "shortage", "attack", "sanction"])) {
+
+  if (hasAny(text, stressTerms)) {
+    candidates.push("FINANCIAL_STRESS_EVENT");
+  }
+
+  if (hasAny(text, treasuryTerms)) {
+    candidates.push("TREASURY_RATES_RISK");
+  }
+
+  if (
+    hasAny(text, energyTerms) &&
+    hasAny(text, [
+      "supply", "outage", "cut", "halt",
+      "disruption", "shortage", "attack", "sanction"
+    ])
+  ) {
     candidates.push("ENERGY_SUPPLY_EVENT");
   }
-  if (hasAny(text, fedTerms)) candidates.push("FED_POLICY_EVENT");
-  if (tradePolicyMatch) candidates.push("TRADE_POLICY_RISK");
 
-  // Explicit tariff / trade-war stories belong to TRADE_POLICY_RISK unless
-  // the same article independently contains genuine military/security escalation.
-  if (hasAny(text, geopoliticalTerms) && (!tradePolicyMatch || independentMilitarySecurityMatch)) {
+  if (hasAny(text, fedEntityTerms) || hasAny(text, fedPolicyTerms)) {
+    candidates.push("FED_POLICY_EVENT");
+  }
+
+  if (tradePolicyMatch) {
+    candidates.push("TRADE_POLICY_RISK");
+  }
+
+  // Explicit tariff/trade-war stories stay TRADE_POLICY_RISK unless the
+  // same article independently contains genuine military/security escalation.
+  if (
+    hasAny(text, geopoliticalTerms) &&
+    (!tradePolicyMatch || independentMilitarySecurityMatch)
+  ) {
     candidates.push("GEOPOLITICAL_ESCALATION");
   }
 
-  if (hasAny(text, macroTerms)) candidates.push("MACRO_DATA_RELEASE");
+  if (hasAny(text, macroTerms)) {
+    candidates.push("MACRO_DATA_RELEASE");
+  }
 
   return [...new Set(candidates)].sort((a, b) => PRIORITY[b] - PRIORITY[a]);
 }
 
 function themeFor(eventType, text) {
-  if (eventType === "GEOPOLITICAL_OIL_SUPPLY_RISK") return "OIL_SUPPLY_GEOPOLITICAL_RISK";
-  if (eventType === "ENERGY_SUPPLY_EVENT") return "ENERGY_SUPPLY_DISRUPTION";
-  if (eventType === "TREASURY_RATES_RISK") return "TREASURY_RATES_VOLATILITY";
-  if (eventType === "FINANCIAL_STRESS_EVENT") return "FINANCIAL_SYSTEM_STRESS";
-  if (eventType === "FED_POLICY_EVENT") return "FED_POLICY";
-  if (eventType === "TRADE_POLICY_RISK") return "TRADE_POLICY";
+  if (eventType === "GEOPOLITICAL_OIL_SUPPLY_RISK") {
+    return "OIL_SUPPLY_GEOPOLITICAL_RISK";
+  }
+
+  if (eventType === "ENERGY_SUPPLY_EVENT") {
+    return "ENERGY_SUPPLY_DISRUPTION";
+  }
+
+  if (eventType === "TREASURY_RATES_RISK") {
+    return "TREASURY_RATES_VOLATILITY";
+  }
+
+  if (eventType === "FINANCIAL_STRESS_EVENT") {
+    return "FINANCIAL_SYSTEM_STRESS";
+  }
+
+  if (eventType === "FED_POLICY_EVENT") {
+    return "FED_POLICY";
+  }
+
+  if (eventType === "TRADE_POLICY_RISK") {
+    return "TRADE_POLICY";
+  }
+
   if (eventType === "MACRO_DATA_RELEASE") {
     if (hasAny(text, ["cpi", "consumer price index"])) return "US_CPI";
     if (hasAny(text, ["pce", "personal consumption expenditures"])) return "US_PCE";
-    if (hasAny(text, ["nonfarm payroll", "payrolls", "unemployment rate", "employment report"])) return "US_LABOR_DATA";
+    if (hasAny(text, ["nonfarm payroll", "payrolls", "unemployment rate", "employment report"])) {
+      return "US_LABOR_DATA";
+    }
     if (hasAny(text, ["gdp", "gross domestic product"])) return "US_GDP";
     return "US_MACRO_DATA";
   }
-  if (eventType === "GEOPOLITICAL_ESCALATION") return "GEOPOLITICAL_ESCALATION";
+
+  if (eventType === "GEOPOLITICAL_ESCALATION") {
+    return "GEOPOLITICAL_ESCALATION";
+  }
+
   return eventType;
 }
 
 function materialFor(eventType, text) {
   if (!eventType) return false;
-  if (hasAny(text, MATERIAL_TERMS)) return true;
+
+  if (hasAny(text, MATERIAL_TERMS)) {
+    return true;
+  }
+
+  if (
+    eventType === "GEOPOLITICAL_OIL_SUPPLY_RISK" &&
+    isHormuzConcreteDisruption(text)
+  ) {
+    return true;
+  }
 
   if (eventType === "FED_POLICY_EVENT") {
-    return hasAny(text, ["decision", "statement", "press conference", "minutes", "testimony", "rate", "fomc"]);
+    const fedPolicyMaterialTerms = [
+      "decision", "statement", "press conference",
+      "minutes", "testimony", "rate", "fomc",
+      "interest rates",
+      "raise interest rates",
+      "raises interest rates",
+      "raising interest rates",
+      "lower interest rates",
+      "cut interest rates",
+      "rates higher",
+      "rates lower",
+      "discount rate",
+      "primary credit rate"
+    ];
+
+    if (hasAny(text, fedPolicyMaterialTerms)) {
+      return true;
+    }
+
+    const explicitFedContext = hasAny(text, [
+      "federal reserve", "fomc",
+      "boston fed", "cleveland fed", "minneapolis fed",
+      "kansas city fed", "dallas fed", "new york fed",
+      "chicago fed", "st. louis fed", "san francisco fed",
+      "atlanta fed", "richmond fed", "philadelphia fed",
+      "collins", "powell",
+      "policy", "hike", "cut", "raise", "lower"
+    ]);
+
+    return explicitFedContext && hasTerm(text, "rates");
   }
+
   if (eventType === "TREASURY_RATES_RISK") {
-    return hasAny(text, ["yield", "auction", "selloff", "surge", "spike", "jump", "plunge", "record", "highest", "lowest"]);
+    return hasAny(text, [
+      "yield", "auction", "selloff",
+      "surge", "spike", "jump", "plunge",
+      "record", "highest", "lowest"
+    ]);
   }
+
   if (eventType === "MACRO_DATA_RELEASE") {
-    return hasAny(text, ["rose", "fell", "increased", "decreased", "unchanged", "actual", "reported", "came in", "above", "below", "unexpected", "surprise"]);
+    return hasAny(text, [
+      "rose", "fell", "increased", "decreased",
+      "unchanged", "actual", "reported", "came in",
+      "above", "below", "unexpected", "surprise"
+    ]);
   }
+
   return false;
 }
 
 function severityFor(eventType, text, material) {
   if (!material) return "LOW";
-  if (hasAny(text, ["war", "invasion", "blockade", "closure", "bank run", "banking crisis", "liquidity crisis", "systemic risk", "default", "attack on", "attacks on"])) return "HIGH";
-  if (["GEOPOLITICAL_OIL_SUPPLY_RISK", "FINANCIAL_STRESS_EVENT"].includes(eventType)) return "HIGH";
+
+  if (
+    hasAny(text, [
+      "war", "invasion", "blockade", "closure",
+      "bank run", "banking crisis", "liquidity crisis",
+      "systemic risk", "default", "attack on", "attacks on"
+    ])
+  ) {
+    return "HIGH";
+  }
+
+  if (
+    ["GEOPOLITICAL_OIL_SUPPLY_RISK", "FINANCIAL_STRESS_EVENT"].includes(eventType)
+  ) {
+    return "HIGH";
+  }
+
   return "MODERATE";
 }
 
 function oilSupplyRiskFor(eventType, text) {
-  if (["GEOPOLITICAL_OIL_SUPPLY_RISK", "ENERGY_SUPPLY_EVENT"].includes(eventType)) return true;
-  if (eventType !== "GEOPOLITICAL_ESCALATION") return false;
+  if (
+    ["GEOPOLITICAL_OIL_SUPPLY_RISK", "ENERGY_SUPPLY_EVENT"].includes(eventType)
+  ) {
+    return true;
+  }
+
+  if (eventType !== "GEOPOLITICAL_ESCALATION") {
+    return false;
+  }
+
   return hasAll(text, [
-    ["oil", "crude", "tanker", "shipping", "pipeline", "refinery", "hormuz", "red sea", "suez"],
-    ["supply", "disruption", "attack", "closure", "blockade", "sanction", "shipping", "exports"],
+    [
+      "oil", "crude", "tanker", "shipping",
+      "pipeline", "refinery",
+      "hormuz", "red sea", "suez"
+    ],
+    [
+      "supply", "disruption", "attack", "closure",
+      "blockade", "sanction", "shipping", "exports"
+    ],
   ]);
 }
 
 function treasuryLiquidityRiskFor(eventType, text) {
-  if (eventType === "TREASURY_RATES_RISK") return true;
-  if (eventType !== "FINANCIAL_STRESS_EVENT") return false;
+  if (eventType === "TREASURY_RATES_RISK") {
+    return true;
+  }
+
+  if (eventType !== "FINANCIAL_STRESS_EVENT") {
+    return false;
+  }
+
   return hasAny(text, [
-    "funding", "liquidity", "credit", "bank", "banking", "repo", "commercial paper",
-    "deposit", "counterparty", "systemic", "financial stability",
+    "funding", "liquidity", "credit",
+    "bank", "banking", "repo",
+    "commercial paper", "deposit",
+    "counterparty", "systemic",
+    "financial stability",
   ]);
 }
 
 export function normalizeBenzingaArticle(article, now = new Date()) {
-  if (!article || typeof article !== "object") return null;
+  if (!article || typeof article !== "object") {
+    return null;
+  }
 
   const benzingaIdRaw = article?.benzinga_id;
-  if (benzingaIdRaw === null || benzingaIdRaw === undefined || benzingaIdRaw === "") return null;
+  if (
+    benzingaIdRaw === null ||
+    benzingaIdRaw === undefined ||
+    benzingaIdRaw === ""
+  ) {
+    return null;
+  }
 
   const title = normalizeText(article?.title);
   const observedAt = parseIso(article?.published);
-  if (!title || !observedAt) return null;
+
+  if (!title || !observedAt) {
+    return null;
+  }
 
   const text = articleText(article);
   const candidates = classifyCandidates(text);
   const eventType = candidates[0] || null;
-  if (!eventType || !APPROVED_EVENT_TYPES.includes(eventType)) return null;
+
+  if (!eventType || !APPROVED_EVENT_TYPES.includes(eventType)) {
+    return null;
+  }
 
   const material = materialFor(eventType, text);
   const expiresAt = addHours(observedAt, EXPIRY_HOURS[eventType]);
   const oilSupplyRisk = oilSupplyRiskFor(eventType, text);
   const treasuryLiquidityRisk = treasuryLiquidityRiskFor(eventType, text);
+
   const nowMs = now instanceof Date ? now.getTime() : Date.parse(now);
   const expiresMs = Date.parse(expiresAt || "");
-  const expired = Number.isFinite(nowMs) && Number.isFinite(expiresMs) && nowMs >= expiresMs;
+  const expired =
+    Number.isFinite(nowMs) &&
+    Number.isFinite(expiresMs) &&
+    nowMs >= expiresMs;
 
   return {
     eventId: `BZ-${String(benzingaIdRaw)}`,
@@ -282,18 +547,41 @@ export function normalizeBenzingaArticle(article, now = new Date()) {
 }
 
 function sameSecondaryIdentity(a, b) {
-  if (!a || !b || a.eventType !== b.eventType) return false;
-
-  if (a.primaryEntity && b.primaryEntity && a.primaryEntity === b.primaryEntity) {
-    return true;
-  }
-
-  if (!a.primaryTheme || !b.primaryTheme || a.primaryTheme !== b.primaryTheme) {
+  if (!a || !b || a.eventType !== b.eventType) {
     return false;
   }
 
-  // Generic geopolitical theme alone must not collapse obviously different
-  // real-world events when neither event has a reliable entity.
+  const sameEntity = Boolean(
+    a.primaryEntity &&
+    b.primaryEntity &&
+    a.primaryEntity === b.primaryEntity
+  );
+
+  if (sameEntity) {
+    return true;
+  }
+
+  const sameTheme = Boolean(
+    a.primaryTheme &&
+    b.primaryTheme &&
+    a.primaryTheme === b.primaryTheme
+  );
+
+  if (!sameTheme) {
+    return false;
+  }
+
+  // The Manager approved OR matching, but a generic theme alone must not
+  // collapse obviously different real-world events.
+  if (
+    a.primaryTheme === "GEOPOLITICAL_ESCALATION" &&
+    a.primaryEntity &&
+    b.primaryEntity &&
+    a.primaryEntity !== b.primaryEntity
+  ) {
+    return false;
+  }
+
   if (
     a.primaryTheme === "GEOPOLITICAL_ESCALATION" &&
     !a.primaryEntity &&
@@ -308,32 +596,59 @@ function sameSecondaryIdentity(a, b) {
 export function dedupeEngine25NewsEvents(events = []) {
   const sorted = [...events]
     .filter(Boolean)
-    .sort((a, b) => Date.parse(b.observedAt || "") - Date.parse(a.observedAt || ""));
+    .sort(
+      (a, b) =>
+        Date.parse(b.observedAt || "") -
+        Date.parse(a.observedAt || "")
+    );
 
   const kept = [];
   const seenBenzinga = new Set();
 
   for (const event of sorted) {
     const id = String(event?.benzingaId || "");
-    if (!id || seenBenzinga.has(id)) continue;
+
+    if (!id || seenBenzinga.has(id)) {
+      continue;
+    }
+
     seenBenzinga.add(id);
 
     const observedMs = Date.parse(event.observedAt || "");
+
     const duplicate = kept.some((prior) => {
-      if (!sameSecondaryIdentity(event, prior)) return false;
+      if (!sameSecondaryIdentity(event, prior)) {
+        return false;
+      }
+
       const priorMs = Date.parse(prior.observedAt || "");
-      return Number.isFinite(observedMs) && Number.isFinite(priorMs) && Math.abs(priorMs - observedMs) <= 30 * 60 * 1000;
+
+      return (
+        Number.isFinite(observedMs) &&
+        Number.isFinite(priorMs) &&
+        Math.abs(priorMs - observedMs) <= 30 * 60 * 1000
+      );
     });
 
-    if (!duplicate) kept.push(event);
+    if (!duplicate) {
+      kept.push(event);
+    }
   }
 
-  return kept.sort((a, b) => Date.parse(a.observedAt || "") - Date.parse(b.observedAt || ""));
+  return kept.sort(
+    (a, b) =>
+      Date.parse(a.observedAt || "") -
+      Date.parse(b.observedAt || "")
+  );
 }
 
 export function normalizeBenzingaNews(results = [], now = new Date()) {
   const fetched = Array.isArray(results) ? results : [];
-  const relevant = fetched.map((article) => normalizeBenzingaArticle(article, now)).filter(Boolean);
+
+  const relevant = fetched
+    .map((article) => normalizeBenzingaArticle(article, now))
+    .filter(Boolean);
+
   const deduped = dedupeEngine25NewsEvents(relevant);
 
   return {
