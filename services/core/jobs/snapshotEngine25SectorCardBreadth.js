@@ -6,6 +6,8 @@
 // - Capture forward-only sector-card breadth snapshots for Engine 25.
 // - Use 1H/hourly sector cards as tactical live participation.
 // - Use 4H sector cards as regime confirmation.
+// - Use EOD sector cards as a separate structural participation layer.
+// - Keep EOD out of the existing 65% 1H / 35% 4H combinedRead.
 // - Do NOT fake historical sector-card breadth.
 // - Do NOT mutate Market Meter files.
 //
@@ -19,6 +21,9 @@
 //     data/outlook_source_4h.json
 //     data/outlook_4h.json
 //     /live/4h fallback
+//
+//   EOD structural:
+//     /live/eod
 //
 // Writes:
 //   data/engine25-sector-card-breadth-snapshots.json
@@ -42,6 +47,7 @@ const BACKEND_BASE =
 
 const LIVE_HOURLY_URL = `${BACKEND_BASE}/live/hourly`;
 const LIVE_4H_URL = `${BACKEND_BASE}/live/4h`;
+const LIVE_EOD_URL = `${BACKEND_BASE}/live/eod`;
 
 const ENGINE_NAME = "engine25.sectorCardProxyBreadthSnapshots.v0.1";
 
@@ -378,6 +384,7 @@ function buildTimeframeSnapshot(timeframe, source) {
     generatedAtUtc: source.generatedAtUtc,
     cardCount: cards.length,
     cards,
+
     summary,
     classification,
   };
@@ -502,6 +509,7 @@ async function main() {
     design: {
       tactical1h: "primary live participation feed",
       regime4h: "higher-timeframe confirmation layer",
+      structuralEod: "daily structural participation layer; read-only and excluded from combinedRead",
       historicalReplay: "disabled until real historical sector-card snapshots exist",
     },
     latestSnapshotDate: null,
@@ -536,13 +544,24 @@ async function main() {
       liveUrl: LIVE_4H_URL,
     });
 
+    const structuralEodSource = await loadSource({
+      timeframe: "eod",
+      candidates: [],
+      liveUrl: LIVE_EOD_URL,
+    });
+
     const tactical1h = buildTimeframeSnapshot("1h", tacticalSource);
     const regime4h = buildTimeframeSnapshot("4h", regimeSource);
+    const structuralEod = buildTimeframeSnapshot("eod", structuralEodSource);
+
+    // Scope lock: EOD is a separate structural layer and does not change
+    // the existing 65% 1H / 35% 4H combinedRead.
     const combinedRead = buildCombinedRead(tactical1h, regime4h);
 
     const generatedAtUtc =
       tactical1h.generatedAtUtc ||
       regime4h.generatedAtUtc ||
+      structuralEod.generatedAtUtc ||
       nowUtcIso();
 
     const snapshotDate = utcDateFromIso(generatedAtUtc);
@@ -558,6 +577,7 @@ async function main() {
       disabledReason: "NO_HISTORICAL_SECTOR_CARD_SNAPSHOTS",
       tactical1h,
       regime4h,
+      structuralEod,
       combinedRead,
     };
 
@@ -583,6 +603,7 @@ async function main() {
     console.log("Latest:", output.latestSnapshotKey);
     console.log("1H:", tactical1h.classification?.label, tactical1h.classification?.score);
     console.log("4H:", regime4h.classification?.label, regime4h.classification?.score);
+    console.log("EOD:", structuralEod.classification?.label, structuralEod.classification?.score);
     console.log("Combined:", combinedRead.label, combinedRead.score);
     console.log("Wrote:", OUTPUT_FILE);
     console.log("========================================");
@@ -608,6 +629,14 @@ async function main() {
             cardCount: regime4h.cardCount,
             summary: regime4h.summary,
             classification: regime4h.classification,
+          },
+          structuralEod: {
+            available: structuralEod.available,
+            sourceKind: structuralEod.sourceKind,
+            sourcePath: structuralEod.sourcePath,
+            cardCount: structuralEod.cardCount,
+            summary: structuralEod.summary,
+            classification: structuralEod.classification,
           },
           combinedRead,
           outputFile: OUTPUT_FILE,
