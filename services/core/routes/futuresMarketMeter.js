@@ -255,7 +255,7 @@ function stateFromScore(score, emaSign = 0) {
 function toneFromScore(score) {
   if (!Number.isFinite(score)) return "info";
   if (score >= 70) return "OK";
-  if (score >= 50) return "warn";
+  if (score >= 45) return "warn";
   return "danger";
 }
 
