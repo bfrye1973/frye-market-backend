@@ -46,6 +46,11 @@ const INTRADAY_MACRO_FILE = path.join(
   "engine25-intraday-macro.json"
 );
 
+const ENGINE25_NEWS_EVENTS_FILE = path.join(
+  DATA_DIR,
+  "engine25-news-events.json"
+);
+
 function readJsonFile(filePath) {
   if (!fs.existsSync(filePath)) return null;
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -869,6 +874,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const zoneClassification = readJsonFile(ZONE_CLASSIFICATION_FILE);
     const engine25Context = readJsonFile(ENGINE25_CONTEXT_FILE);
     const intradayMacro = readJsonFile(INTRADAY_MACRO_FILE);
+    const newsEvents = readJsonFile(ENGINE25_NEWS_EVENTS_FILE);
 
     const rows = Array.isArray(composite?.rows) ? composite.rows : [];
     const dailyCompositeAvailable = Boolean(composite && rows.length);
@@ -979,6 +985,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
         zoneClassificationFile: "engine25-zone-classification.json",
         engine25ContextFile: "engine25-context.json",
         intradayMacroFile: "engine25-intraday-macro.json",
+        newsEventsFile: "engine25-news-events.json",
       },
       headline,
       componentBreakdown,
@@ -997,6 +1004,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       zoneClassification: zoneClassification || null,
       engine25Context: engine25Context || null,
       intradayMacro: intradayMacro || null,
+      newsEvents: newsEvents || null,
       marketInternals: engine25Context?.marketInternals || null,
 
       overlay: {
