@@ -6,7 +6,10 @@
 // - Engine 26 owns location, candidate identity, lifecycle authorization,
 //   authorized branch, trigger/reclaim/invalidation geometry.
 // - 1m proposes a reaction direction; it does NOT directly publish canonical LONG/SHORT.
-// - 5m validates/supports/conflicts; canonical direction is published only after confirmation.
+// - INSIDE the negotiated zone, completed 1m reaction evidence may confirm without
+//   waiting for a completed 5m validation candle.
+// - OUTSIDE the negotiated zone, 5m validates/supports/conflicts and remains the
+//   anti-flip directional-travel filter.
 // - Before a paper trade is active, 1m/5m own reaction discovery/validation only.
 // - After a paper trade is active, its direction persists through diagnostic flips.
 // - Completed 10m close vs EMA10 is only the ACTIVE-TRADE hold/reset rule.
@@ -69,6 +72,68 @@ function validPrice(value) {
 
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
+}
+
+/*
+ * Exact negotiated-zone position from Engine 26 handoff geometry.
+ *
+ * No guessed relation labels are required here.
+ * If price and lo/hi are available:
+ *   lo <= price <= hi  -> INSIDE_ZONE
+ *   price < lo         -> BELOW_ZONE
+ *   price > hi         -> ABOVE_ZONE
+ *
+ * If geometry is incomplete, position is UNKNOWN and the safer
+ * outside-zone 5m validation contract remains in force.
+ */
+function resolveNegotiatedZonePosition({
+  currentPrice = null,
+  zone = null,
+} = {}) {
+  const price = validPrice(currentPrice);
+  const rawLo = validPrice(zone?.lo);
+  const rawHi = validPrice(zone?.hi);
+
+  if (
+    price == null ||
+    rawLo == null ||
+    rawHi == null
+  ) {
+    return {
+      known: false,
+      inside: false,
+      position: "UNKNOWN",
+      currentPrice: price,
+      lo: rawLo,
+      hi: rawHi,
+    };
+  }
+
+  const lo = Math.min(rawLo, rawHi);
+  const hi = Math.max(rawLo, rawHi);
+
+  if (price >= lo && price <= hi) {
+    return {
+      known: true,
+      inside: true,
+      position: "INSIDE_ZONE",
+      currentPrice: price,
+      lo,
+      hi,
+    };
+  }
+
+  return {
+    known: true,
+    inside: false,
+    position:
+      price < lo
+        ? "BELOW_ZONE"
+        : "ABOVE_ZONE",
+    currentPrice: price,
+    lo,
+    hi,
+  };
 }
 
 function getEngine22Direction(engine22WaveStrategy) {
@@ -233,7 +298,7 @@ function resolveCanonicalDirection({
    * It does not publish the final Engine 3 direction by itself.
    *
    * 1m may propose LONG / SHORT.
-   * 5m confirmation is evaluated later.
+   * Zone-aware confirmation is evaluated later.
    *
    * The final Engine 3 direction stays NEUTRAL until the candidate
    * actually passes confirmation.
@@ -346,6 +411,7 @@ function resolveCanonicalDirection({
 function resolveFinalCanonicalDirection({
   candidateResolution,
   candidateConfirmation,
+  insideNegotiatedZone = false,
 } = {}) {
   const candidateDirection = safeUpper(
     candidateResolution?.candidateDirection ??
@@ -442,20 +508,34 @@ function resolveFinalCanonicalDirection({
   ) {
     /*
      * PRE-TRADE:
-     * Engine 3 becomes directional only after the reaction candidate
-     * actually passes confirmation. A single 1m flip cannot color or
-     * flip canonical Engine 3.
+     *
+     * INSIDE negotiated zone:
+     *   completed qualified 1m reaction can confirm immediately.
+     *   5m remains diagnostic and is not a mandatory close gate.
+     *
+     * OUTSIDE negotiated zone:
+     *   completed 5m validation remains the anti-flip directional-travel gate.
      */
     direction = candidateDirection;
-    sourceTimeframe = "1m+5m";
-    reactionTimeframe = "1m+5m";
+    sourceTimeframe =
+      insideNegotiatedZone
+        ? "1m"
+        : "1m+5m";
+    reactionTimeframe =
+      insideNegotiatedZone
+        ? "1m"
+        : "1m+5m";
     directionEstablishedByFresh1m = true;
 
     resolutionStatus =
-      `CANONICAL_${candidateDirection}_REACTION_CONFIRMED`;
+      insideNegotiatedZone
+        ? `CANONICAL_${candidateDirection}_NEGOTIATED_ZONE_REACTION_CONFIRMED`
+        : `CANONICAL_${candidateDirection}_REACTION_CONFIRMED`;
 
     resolutionReason =
-      "ENGINE3_DIRECTION_PUBLISHED_ONLY_AFTER_REACTION_CONFIRMATION";
+      insideNegotiatedZone
+        ? "ENGINE3_DIRECTION_CONFIRMED_FROM_COMPLETED_1M_INSIDE_NEGOTIATED_ZONE"
+        : "ENGINE3_DIRECTION_PUBLISHED_AFTER_OUTSIDE_ZONE_5M_VALIDATION";
   }
 
   return {
@@ -536,6 +616,7 @@ function resolveCanonicalQuality({
   observation1m = null,
   validation5m = null,
   canonicalResolution = null,
+  insideNegotiatedZone = false,
 } = {}) {
   const canonicalDirection =
     safeUpper(
@@ -584,16 +665,13 @@ function resolveCanonicalQuality({
   /*
    * Canonical Engine 3 quality ownership:
    *
-   * - Local 1m / 5m / 10m quality values remain diagnostic only.
-   * - Final Engine 3 quality is calculated here from the combined
-   *   Strategy 1 evidence.
+   * INSIDE negotiated zone:
+   * - 1m owns immediate reaction quality.
+   * - 5m remains visible but cannot downgrade/block the reaction merely
+   *   because its completed candle is still on the old direction.
    *
-   * Rules:
-   *   No canonical LONG/SHORT                 -> WEAK
-   *   5m missing/stale/unresolved             -> WEAK
-   *   5m conflict                             -> MIXED
-   *   5m support                              -> GOOD
-   *   5m support + fresh aligned 1m STRONG    -> STRONG
+   * OUTSIDE negotiated zone:
+   * - Keep the existing 5m validation quality contract.
    */
 
   if (
@@ -602,6 +680,15 @@ function resolveCanonicalQuality({
     )
   ) {
     return "WEAK";
+  }
+
+  if (insideNegotiatedZone) {
+    return (
+      oneMinuteFreshAligned &&
+      QUALIFYING_QUALITY.has(oneMinuteQuality)
+    )
+      ? oneMinuteQuality
+      : "WEAK";
   }
 
   if (
@@ -699,6 +786,7 @@ function resolveCanonicalConfirmation({
   validation5m = null,
   authorizationContext = null,
   previousReactionConfirmed = false,
+  insideNegotiatedZone = false,
 } = {}) {
   const blockers = [];
   const reasonCodes = [];
@@ -893,6 +981,23 @@ function resolveCanonicalConfirmation({
     validation5m?.conflictsWith1mDirection === true ||
     validationState === "CONFLICT";
 
+  /*
+   * Outside negotiated zones, aligned completed 5m support can still
+   * rescue a weak local 1m quality label, preserving the already-approved
+   * responsiveness improvement.
+   *
+   * Inside negotiated zones, 5m is diagnostic only and does not rescue
+   * or block the immediate 1m reaction.
+   */
+  const fiveMinuteDirectionalSupport =
+    !insideNegotiatedZone &&
+    oneMinuteAligned &&
+    validationPresent &&
+    validationFresh &&
+    validationResolved &&
+    validationSupports &&
+    !validationConflicts;
+
   if (!authorizationValid) {
     blockers.push(
       "ENGINE26_EVALUATION_NOT_AUTHORIZED"
@@ -917,22 +1022,14 @@ function resolveCanonicalConfirmation({
     );
   }
 
-const fiveMinuteDirectionalSupport =
-  oneMinuteAligned &&
-  validationPresent &&
-  validationFresh &&
-  validationResolved &&
-  validationSupports &&
-  !validationConflicts;
-
-if (
-  !oneMinuteQualityApproved &&
-  !fiveMinuteDirectionalSupport
-) {
-  blockers.push(
-    "ONE_MINUTE_QUALITY_NOT_GOOD_OR_STRONG"
-  );
-}
+  if (
+    !oneMinuteQualityApproved &&
+    !fiveMinuteDirectionalSupport
+  ) {
+    blockers.push(
+      "ONE_MINUTE_QUALITY_NOT_GOOD_OR_STRONG"
+    );
+  }
 
   if (!candleCompleted) {
     blockers.push(
@@ -956,26 +1053,40 @@ if (
     );
   }
 
-  if (!validationPresent) {
-    blockers.push(
-      "FIVE_MINUTE_VALIDATION_MISSING"
-    );
-  } else if (!validationFresh) {
-    blockers.push(
-      "FIVE_MINUTE_VALIDATION_STALE"
-    );
-  } else if (validationConflicts) {
-    blockers.push(
-      "FIVE_MINUTE_VALIDATION_CONFLICT"
-    );
-  } else if (!validationResolved) {
-    blockers.push(
-      "FIVE_MINUTE_VALIDATION_NOT_RESOLVED"
-    );
-  } else if (!validationSupports) {
-    blockers.push(
-      "FIVE_MINUTE_VALIDATION_NOT_SUPPORTIVE"
-    );
+  /*
+   * Zone-aware 5m contract:
+   *
+   * INSIDE negotiated zone:
+   * - 5m remains diagnostic only.
+   * - Missing, forming, unresolved, supportive, or conflicting 5m does
+   *   not add a confirmation blocker.
+   *
+   * OUTSIDE negotiated zone:
+   * - existing completed/fresh/resolved/supportive 5m validation remains
+   *   mandatory as the anti-flip directional-travel gate.
+   */
+  if (!insideNegotiatedZone) {
+    if (!validationPresent) {
+      blockers.push(
+        "FIVE_MINUTE_VALIDATION_MISSING"
+      );
+    } else if (!validationFresh) {
+      blockers.push(
+        "FIVE_MINUTE_VALIDATION_STALE"
+      );
+    } else if (validationConflicts) {
+      blockers.push(
+        "FIVE_MINUTE_VALIDATION_CONFLICT"
+      );
+    } else if (!validationResolved) {
+      blockers.push(
+        "FIVE_MINUTE_VALIDATION_NOT_RESOLVED"
+      );
+    } else if (!validationSupports) {
+      blockers.push(
+        "FIVE_MINUTE_VALIDATION_NOT_SUPPORTIVE"
+      );
+    }
   }
 
   if (authorizationValid) {
@@ -1036,54 +1147,69 @@ if (
     );
   }
 
-  if (
-    validationPresent &&
-    validationFresh &&
-    validationResolved &&
-    validationSupports &&
-    !validationConflicts
-  ) {
+  if (insideNegotiatedZone) {
     reasonCodes.push(
-      "FIVE_MINUTE_VALIDATION_SUPPORT"
+      "ENGINE3_NEGOTIATED_ZONE_REACTION_MODE"
     );
+    reasonCodes.push(
+      "FIVE_MINUTE_CLOSE_NOT_REQUIRED_INSIDE_NEGOTIATED_ZONE"
+    );
+    reasonCodes.push(
+      "FIVE_MINUTE_DIAGNOSTIC_ONLY_INSIDE_NEGOTIATED_ZONE"
+    );
+  } else {
+    reasonCodes.push(
+      "ENGINE3_OUTSIDE_ZONE_DIRECTIONAL_TRAVEL_MODE"
+    );
+
+    if (
+      validationPresent &&
+      validationFresh &&
+      validationResolved &&
+      validationSupports &&
+      !validationConflicts
+    ) {
+      reasonCodes.push(
+        "FIVE_MINUTE_VALIDATION_SUPPORT"
+      );
+    }
   }
 
-/*
- * Confirmation persistence.
- *
- * BEFORE an active paper trade:
- * - confirmation must come from the normal Engine 3 reaction rules;
- * - EMA10 cannot create or preserve confirmation.
- *
- * AFTER an active paper trade exists:
- * - prior confirmation may persist while the active trade direction
- *   remains inside its completed-10m EMA10 hold lifecycle;
- * - EMA10 still cannot create confirmation from scratch.
- */
-const previousConfirmed =
-  previousReactionConfirmed === true;
+  /*
+   * Confirmation persistence.
+   *
+   * BEFORE an active paper trade:
+   * - confirmation must come from the normal Engine 3 reaction rules;
+   * - EMA10 cannot create or preserve confirmation.
+   *
+   * AFTER an active paper trade exists:
+   * - prior confirmation may persist while the active trade direction
+   *   remains inside its completed-10m EMA10 hold lifecycle;
+   * - EMA10 still cannot create confirmation from scratch.
+   */
+  const previousConfirmed =
+    previousReactionConfirmed === true;
 
-/*
- * BEFORE a paper trade is active, confirmation is earned from
- * current reaction evidence only.
- *
- * No previous-confirmation persistence is allowed here.
- * Active-trade confirmation persistence is applied later by
- * resolveFinalConfirmation(), after the actual open-trade direction
- * is known.
- */
-const persistedConfirmation = false;
+  /*
+   * BEFORE a paper trade is active, confirmation is earned from
+   * current reaction evidence only.
+   *
+   * No previous-confirmation persistence is allowed here.
+   * Active-trade confirmation persistence is applied later by
+   * resolveFinalConfirmation(), after the actual open-trade direction
+   * is known.
+   */
+  const persistedConfirmation = false;
 
-const reactionConfirmed =
-  blockers.length === 0;
+  const reactionConfirmed =
+    blockers.length === 0;
 
-reasonCodes.push(
-  reactionConfirmed
-    ? "ENGINE3_CANONICAL_REACTION_CONFIRMED"
-    : "ENGINE3_CANONICAL_REACTION_NOT_CONFIRMED"
-);
+  reasonCodes.push(
+    reactionConfirmed
+      ? "ENGINE3_CANONICAL_REACTION_CONFIRMED"
+      : "ENGINE3_CANONICAL_REACTION_NOT_CONFIRMED"
+  );
 
-  
   return {
     reactionConfirmed,
 
@@ -1121,10 +1247,15 @@ reasonCodes.push(
 
     qualityApproved,
 
+    insideNegotiatedZone,
+    fiveMinuteValidationRequired:
+      !insideNegotiatedZone,
+
     expectedDirection,
     expectedReactions,
   };
 }
+
 function resolveStrategy1Qualification({
   confirmation,
   finalEngine26LocationContext,
@@ -1365,17 +1496,6 @@ export function attachPaperScalpReactionToConfluence({
       activePaperTradeDirection,
     });
 
-  /*
-   * STEP 2 — score the candidate with the 5m validation layer.
-   */
-  const candidateQuality =
-    resolveCanonicalQuality({
-      observation1m,
-      validation5m,
-      canonicalResolution:
-        candidateResolution,
-    });
-
   const currentPrice =
     validPrice(observation1m?.currentPrice) ??
     validPrice(observation1m?.currentCandle?.close) ??
@@ -1388,6 +1508,41 @@ export function attachPaperScalpReactionToConfluence({
     broaderReaction10m?.lastCandle ||
     currentLevelAction?.lastCandle ||
     null;
+
+  /*
+   * Exact Engine 26 negotiated-zone mode.
+   *
+   * We intentionally calculate this from currentPrice + handoff.zone lo/hi
+   * instead of guessing text relation semantics.
+   */
+  const negotiatedZonePosition =
+    resolveNegotiatedZonePosition({
+      currentPrice,
+      zone:
+        engine26ReactionHandoff?.zone ||
+        null,
+    });
+
+  const insideNegotiatedZone =
+    negotiatedZonePosition.inside === true;
+
+  /*
+   * STEP 2 — score the candidate.
+   *
+   * INSIDE zone:
+   *   1m quality owns immediate reaction quality.
+   *
+   * OUTSIDE zone:
+   *   existing 5m validation quality remains in force.
+   */
+  const candidateQuality =
+    resolveCanonicalQuality({
+      observation1m,
+      validation5m,
+      canonicalResolution:
+        candidateResolution,
+      insideNegotiatedZone,
+    });
 
   /*
    * STEP 3 — Engine 26 authorization/identity remains required for
@@ -1409,10 +1564,17 @@ export function attachPaperScalpReactionToConfluence({
    * STEP 4 — earn reaction confirmation.
    *
    * BEFORE a trade is open:
-   * 1m + 5m + Engine 26 authorization/identity must pass.
    *
-   * This is the point that prevents a single 1m candle from flipping
-   * the canonical Engine 3 card.
+   * INSIDE negotiated zone:
+   *   completed qualified 1m + Engine 26 authorization/identity must pass.
+   *   5m remains diagnostic only; no completed-5m wait is required.
+   *
+   * OUTSIDE negotiated zone:
+   *   1m + completed/fresh/resolved/supportive 5m +
+   *   Engine 26 authorization/identity must pass.
+   *
+   * This preserves the 5m anti-flip filter during clear directional travel
+   * without slowing the actual negotiated-zone reaction.
    */
   const candidateConfirmation =
     resolveCanonicalConfirmation({
@@ -1424,6 +1586,7 @@ export function attachPaperScalpReactionToConfluence({
       validation5m,
       authorizationContext,
       previousReactionConfirmed,
+      insideNegotiatedZone,
     });
 
   /*
@@ -1441,6 +1604,7 @@ export function attachPaperScalpReactionToConfluence({
     resolveFinalCanonicalDirection({
       candidateResolution,
       candidateConfirmation,
+      insideNegotiatedZone,
     });
 
   const confirmation =
@@ -1488,7 +1652,6 @@ export function attachPaperScalpReactionToConfluence({
         engine26LocationContext,
       canonicalResolution,
     });
-
 
   const qualified =
     qualification.qualified === true;
@@ -1561,14 +1724,38 @@ export function attachPaperScalpReactionToConfluence({
     canonicalIdentityAligned:
       canonicalResolution.identityAligned,
 
+    /*
+     * Zone-aware direction establishment contract.
+     */
     directionEstablishmentTimeframe:
-      "1m+5m_CONFIRMATION",
+      insideNegotiatedZone
+        ? "1m_NEGOTIATED_ZONE_REACTION"
+        : "1m+5m_DIRECTIONAL_TRAVEL_CONFIRMATION",
 
     validationTimeframe:
-      "5m",
+      insideNegotiatedZone
+        ? "5m_DIAGNOSTIC_ONLY"
+        : "5m",
 
     directionResetTimeframe:
       "10m_ACTIVE_PAPER_TRADE_ONLY",
+
+    insideNegotiatedZone,
+
+    negotiatedZonePosition:
+      negotiatedZonePosition.position,
+
+    negotiatedZonePositionKnown:
+      negotiatedZonePosition.known,
+
+    negotiatedZoneLo:
+      negotiatedZonePosition.lo,
+
+    negotiatedZoneHi:
+      negotiatedZonePosition.hi,
+
+    fiveMinuteValidationRequired:
+      !insideNegotiatedZone,
 
     oneMinuteImmediateDirection:
       observation1m?.direction || "NEUTRAL",
@@ -1857,6 +2044,10 @@ export function attachPaperScalpReactionToConfluence({
         confirmation.validationSupports,
       validationConflicts:
         confirmation.validationConflicts,
+      insideNegotiatedZone:
+        confirmation.insideNegotiatedZone,
+      fiveMinuteValidationRequired:
+        confirmation.fiveMinuteValidationRequired,
       expectedDirection:
         confirmation.expectedDirection,
       expectedReactions:
@@ -1876,8 +2067,10 @@ export function attachPaperScalpReactionToConfluence({
       validation5m?.maturityResolved === true,
 
     validationTimeframe:
-      validation5m?.sourceTimeframe ||
-      null,
+      insideNegotiatedZone
+        ? "5m_DIAGNOSTIC_ONLY"
+        : validation5m?.sourceTimeframe ||
+          null,
 
     broaderContextDirection:
       broaderReaction10m?.direction ||
@@ -1986,7 +2179,15 @@ export function attachPaperScalpReactionToConfluence({
         "ONE_CANONICAL_ENGINE3_DIRECTION_OWNER",
         "MANAGER_APPROVED_STRATEGY1_DIRECTION_CONTRACT",
         "ONE_MINUTE_PROPOSES_REACTION_DIRECTION",
-        "FIVE_MINUTE_VALIDATES_REACTION_DIRECTION",
+
+        insideNegotiatedZone
+          ? "NEGOTIATED_ZONE_1M_REACTION_MODE"
+          : "OUTSIDE_ZONE_5M_DIRECTIONAL_TRAVEL_VALIDATION",
+
+        insideNegotiatedZone
+          ? "FIVE_MINUTE_DIAGNOSTIC_ONLY_INSIDE_NEGOTIATED_ZONE"
+          : "FIVE_MINUTE_VALIDATES_DIRECTIONAL_TRAVEL",
+
         "CANONICAL_DIRECTION_REQUIRES_REACTION_CONFIRMATION",
         "TEN_MINUTE_EMA10_ACTIVE_TRADE_HOLD_RESET_ONLY",
         canonicalResolution.resolutionStatus,
