@@ -43,6 +43,7 @@ const CORE_DIR = path.resolve(__dirname, "..");
 const DATA_DIR = path.join(CORE_DIR, "data");
 const OUTPUT_FILE = path.join(DATA_DIR, "engine25-intraday-macro.json");
 const TEMP_EVENTS_FILE = path.join(DATA_DIR, "engine25-temporary-events.json");
+const NEWS_EVENTS_FILE = path.join(DATA_DIR, "engine25-news-events.json");
 
 const POLY_KEY =
   process.env.POLYGON_API ||
@@ -562,6 +563,82 @@ function readTemporaryEvents() {
   }
 }
 
+
+function readEngine25NewsEvents() {
+  if (!fs.existsSync(NEWS_EVENTS_FILE)) {
+    return {
+      ok: false,
+      generatedAtUtc: null,
+      events: [],
+      warnings: ["ENGINE25_NEWS_EVENTS_FILE_MISSING"],
+    };
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(NEWS_EVENTS_FILE, "utf8"));
+    const generatedAtUtc =
+      raw?.generatedAtUtc && Number.isFinite(Date.parse(raw.generatedAtUtc))
+        ? new Date(Date.parse(raw.generatedAtUtc)).toISOString()
+        : null;
+
+    if (raw?.ok !== true) {
+      return {
+        ok: false,
+        generatedAtUtc,
+        events: [],
+        warnings: Array.isArray(raw?.warnings) && raw.warnings.length
+          ? raw.warnings
+          : ["MASSIVE_BENZINGA_NEWS_UNAVAILABLE"],
+      };
+    }
+
+    return {
+      ok: true,
+      generatedAtUtc,
+      events: Array.isArray(raw?.events) ? raw.events : [],
+      warnings: Array.isArray(raw?.warnings) ? raw.warnings : [],
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      generatedAtUtc: null,
+      events: [],
+      warnings: [
+        `ENGINE25_NEWS_EVENTS_FILE_INVALID:${error?.message || String(error)}`,
+      ],
+    };
+  }
+}
+
+export function adaptEngine25NewsEventsForIntradayMacro(events = []) {
+  const out = [];
+
+  for (const event of Array.isArray(events) ? events : []) {
+    if (!event || typeof event !== "object") continue;
+
+    if (event.oilSupplyRisk === true) {
+      out.push({
+        ...event,
+        normalizedEventType: event.eventType,
+        eventType: "GEOPOLITICAL_OIL_SUPPLY_RISK",
+        integrationFamily: "OIL_GEOPOLITICAL",
+      });
+      continue;
+    }
+
+    if (event.treasuryLiquidityRisk === true) {
+      out.push({
+        ...event,
+        normalizedEventType: event.eventType,
+        eventType: "TREASURY_LIQUIDITY_ACTION",
+        integrationFamily: "TREASURY_LIQUIDITY",
+      });
+    }
+  }
+
+  return out;
+}
+
 async function collectFuturesProduct(productCode, now) {
   const resolver = await resolveEngine25FuturesContract(productCode, now);
 
@@ -726,10 +803,25 @@ export async function buildAndWriteEngine25IntradayMacro({
   const temporaryEventInput = readTemporaryEvents();
   warnings.push(...temporaryEventInput.warnings);
 
+  const newsEventInput = readEngine25NewsEvents();
+  warnings.push(...newsEventInput.warnings);
+
+  const newsConfirmationFamilyEvents = adaptEngine25NewsEventsForIntradayMacro(
+    newsEventInput.events
+  );
+
   providerDiagnostics.TEMPORARY_EVENTS = {
     ok: temporaryEventInput.ok,
     updatedAtUtc: temporaryEventInput.updatedAtUtc,
     eventCount: temporaryEventInput.events.length,
+  };
+
+  providerDiagnostics.MASSIVE_BENZINGA_NEWS = {
+    ok: newsEventInput.ok,
+    generatedAtUtc: newsEventInput.generatedAtUtc,
+    eventCount: newsEventInput.events.length,
+    confirmationFamilyEventCount: newsConfirmationFamilyEvents.length,
+    warnings: newsEventInput.warnings,
   };
 
   providerDiagnostics.FRED = {
@@ -765,12 +857,21 @@ export async function buildAndWriteEngine25IntradayMacro({
       ...products.BZ.read,
       instrumentLabel: "Brent Crude Oil Last Day Financial Futures",
     },
-    temporaryEvents: temporaryEventInput.events,
+    temporaryEvents: [
+      ...temporaryEventInput.events,
+      ...newsConfirmationFamilyEvents,
+    ],
     freshness: {
       status: marketDataAsOfUtc ? "FRESH" : "DEGRADED",
       marketDataAsOfUtc,
-      eventDataAsOfUtc: temporaryEventInput.updatedAtUtc,
-      warnings: temporaryEventInput.warnings,
+      eventDataAsOfUtc: maxIso([
+        temporaryEventInput.updatedAtUtc,
+        newsEventInput.generatedAtUtc,
+      ]),
+      warnings: [
+        ...temporaryEventInput.warnings,
+        ...newsEventInput.warnings,
+      ],
     },
     warnings,
     // Phase 7 persistence has not been proven yet.
@@ -778,9 +879,31 @@ export async function buildAndWriteEngine25IntradayMacro({
   });
 
   canonical.providerDiagnostics = providerDiagnostics;
+  canonical.newsEvents = {
+    source: "MASSIVE_BENZINGA_LICENSED_FEED",
+    ok: newsEventInput.ok,
+    generatedAtUtc: newsEventInput.generatedAtUtc,
+    activeMaterialEvents: newsEventInput.events.filter((event) => {
+      const expiresMs = Date.parse(event?.expiresAt || "");
+      return (
+        event?.material === true &&
+        Number.isFinite(expiresMs) &&
+        now.getTime() < expiresMs
+      );
+    }),
+    confirmationFamilies: {
+      oilGeopolitical: newsConfirmationFamilyEvents.filter(
+        (event) => event.integrationFamily === "OIL_GEOPOLITICAL"
+      ).length,
+      treasuryLiquidity: newsConfirmationFamilyEvents.filter(
+        (event) => event.integrationFamily === "TREASURY_LIQUIDITY"
+      ).length,
+    },
+    warnings: newsEventInput.warnings,
+  };
   canonical.phase = "ENGINE25_INTRADAY_MACRO_PHASE_5";
   canonical.note =
-    "Phase 5 canonical output: futures + TLT + FRED slow context + temporary-event adapter. Persistent lifecycle state remains degraded until a writable persistent Engine 25 path is approved.";
+    "Phase 5 canonical output: futures + TLT + FRED slow context + temporary-event adapter + Massive/Benzinga normalized news adapter. News identifies events; existing CL/BZ/ZN/ZB/TLT logic remains market-confirmation authority.";
 
 
   atomicWriteJson(OUTPUT_FILE, canonical);
