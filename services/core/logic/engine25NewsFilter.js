@@ -34,9 +34,9 @@ const PRIORITY = Object.freeze({
   FINANCIAL_STRESS_EVENT: 75,
   TREASURY_RATES_RISK: 70,
   ENERGY_SUPPLY_EVENT: 65,
-  GEOPOLITICAL_ESCALATION: 60,
   FED_POLICY_EVENT: 55,
   TRADE_POLICY_RISK: 50,
+  GEOPOLITICAL_ESCALATION: 40,
   MACRO_DATA_RELEASE: 45,
 });
 
@@ -72,8 +72,31 @@ function articleText(article) {
   return normalizeText(`${title} ${teaser} ${tags} ${channels}`).toLowerCase();
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasTerm(text, term) {
+  const normalizedText = String(text || "").toLowerCase();
+  const normalizedTerm = normalizeText(term).toLowerCase();
+  if (!normalizedTerm) return false;
+
+  // Whole-word / whole-phrase matching. This prevents short tokens such as
+  // "war" from matching software, hardware, warnings, upwards, forward, etc.
+  const pattern = new RegExp(
+    `(^|[^a-z0-9])${escapeRegExp(normalizedTerm).replace(/\s+/g, "\\s+")}(?=$|[^a-z0-9])`,
+    "i"
+  );
+
+  return pattern.test(normalizedText);
+}
+
 function hasAny(text, terms) {
-  return terms.some((term) => text.includes(term));
+  return terms.some((term) => hasTerm(text, term));
+}
+
+function matchingTerms(text, terms) {
+  return terms.filter((term) => hasTerm(text, term));
 }
 
 function hasAll(text, groups) {
@@ -108,11 +131,11 @@ function primaryEntity(text) {
     ["Taiwan", ["taiwan", "taiwanese"]],
     ["North Korea", ["north korea", "north korean", "pyongyang"]],
     ["Saudi Arabia", ["saudi arabia", "saudi"]],
-    ["United States", ["united states", "u.s.", " us "]],
+    ["United States", ["united states", "u.s.", "us"]],
   ];
 
   for (const [name, terms] of entities) {
-    if (hasAny(` ${text} `, terms)) return name;
+    if (hasAny(text, terms)) return name;
   }
   return null;
 }
@@ -123,12 +146,16 @@ function classifyCandidates(text) {
   const oilTerms = ["oil", "crude", "brent", "wti", "petroleum", "tanker", "tankers", "refinery", "refineries"];
   const supplyTerms = ["supply", "shipping", "shipment", "shipments", "pipeline", "pipelines", "terminal", "terminals", "production", "exports", "export", "hormuz", "red sea", "suez", "blockade", "closure", "disruption", "disrupted", "halt", "halted", "attack", "attacks", "sanction", "sanctions"];
   const geopoliticalTerms = ["war", "military", "attack", "airstrike", "missile", "drone", "invasion", "retaliation", "ceasefire", "troops", "conflict", "hostilities", "sanction", "sanctions", "hormuz", "red sea"];
+  const militarySecurityTerms = ["military", "attack", "attacks", "airstrike", "airstrikes", "missile", "missiles", "drone", "drones", "invasion", "retaliation", "ceasefire", "troops", "conflict", "hostilities", "hormuz", "red sea"];
   const treasuryTerms = ["treasury", "treasuries", "bond yield", "bond yields", "10-year yield", "30-year yield", "yield spike", "yields surge", "auction", "duration selloff", "bond selloff"];
   const fedTerms = ["federal reserve", "fomc", "fed chair", "jerome powell", "powell", "rate decision", "rate hike", "rate cut", "rates unchanged", "dot plot"];
-  const macroTerms = ["consumer price index", " cpi ", "producer price index", " ppi ", "nonfarm payroll", "payrolls", "jobless claims", "retail sales", "gross domestic product", " gdp ", " pce ", "personal consumption expenditures", "employment report", "unemployment rate", "ism manufacturing", "ism services"];
+  const macroTerms = ["consumer price index", "cpi", "producer price index", "ppi", "nonfarm payroll", "payrolls", "jobless claims", "retail sales", "gross domestic product", "gdp", "pce", "personal consumption expenditures", "employment report", "unemployment rate", "ism manufacturing", "ism services"];
   const tradeTerms = ["tariff", "tariffs", "trade war", "trade policy", "export ban", "import ban", "export controls", "trade restriction", "trade restrictions", "customs duty", "duties", "embargo"];
   const stressTerms = ["bank run", "bank failure", "bank failures", "banking crisis", "liquidity crisis", "funding stress", "credit stress", "credit crisis", "systemic risk", "default", "defaults", "counterparty", "deposit flight", "bailout", "bank rescue", "financial stability", "commercial paper", "repo stress"];
   const energyTerms = ["natural gas", "lng", "energy supply", "power grid", "electric grid", "refinery", "refineries", "pipeline", "pipelines", "production outage", "production cut", "output cut"];
+
+  const tradePolicyMatch = hasAny(text, tradeTerms);
+  const independentMilitarySecurityMatch = hasAny(text, militarySecurityTerms);
 
   if (hasAll(text, [oilTerms, supplyTerms]) && hasAny(text, geopoliticalTerms)) {
     candidates.push("GEOPOLITICAL_OIL_SUPPLY_RISK");
@@ -138,10 +165,16 @@ function classifyCandidates(text) {
   if (hasAny(text, energyTerms) && hasAny(text, ["supply", "outage", "cut", "halt", "disruption", "shortage", "attack", "sanction"])) {
     candidates.push("ENERGY_SUPPLY_EVENT");
   }
-  if (hasAny(text, geopoliticalTerms)) candidates.push("GEOPOLITICAL_ESCALATION");
   if (hasAny(text, fedTerms)) candidates.push("FED_POLICY_EVENT");
-  if (hasAny(text, tradeTerms)) candidates.push("TRADE_POLICY_RISK");
-  if (hasAny(` ${text} `, macroTerms)) candidates.push("MACRO_DATA_RELEASE");
+  if (tradePolicyMatch) candidates.push("TRADE_POLICY_RISK");
+
+  // Explicit tariff / trade-war stories belong to TRADE_POLICY_RISK unless
+  // the same article independently contains genuine military/security escalation.
+  if (hasAny(text, geopoliticalTerms) && (!tradePolicyMatch || independentMilitarySecurityMatch)) {
+    candidates.push("GEOPOLITICAL_ESCALATION");
+  }
+
+  if (hasAny(text, macroTerms)) candidates.push("MACRO_DATA_RELEASE");
 
   return [...new Set(candidates)].sort((a, b) => PRIORITY[b] - PRIORITY[a]);
 }
@@ -154,10 +187,10 @@ function themeFor(eventType, text) {
   if (eventType === "FED_POLICY_EVENT") return "FED_POLICY";
   if (eventType === "TRADE_POLICY_RISK") return "TRADE_POLICY";
   if (eventType === "MACRO_DATA_RELEASE") {
-    if (hasAny(` ${text} `, [" cpi ", "consumer price index"])) return "US_CPI";
-    if (hasAny(` ${text} `, [" pce ", "personal consumption expenditures"])) return "US_PCE";
+    if (hasAny(text, ["cpi", "consumer price index"])) return "US_CPI";
+    if (hasAny(text, ["pce", "personal consumption expenditures"])) return "US_PCE";
     if (hasAny(text, ["nonfarm payroll", "payrolls", "unemployment rate", "employment report"])) return "US_LABOR_DATA";
-    if (hasAny(` ${text} `, [" gdp ", "gross domestic product"])) return "US_GDP";
+    if (hasAny(text, ["gdp", "gross domestic product"])) return "US_GDP";
     return "US_MACRO_DATA";
   }
   if (eventType === "GEOPOLITICAL_ESCALATION") return "GEOPOLITICAL_ESCALATION";
@@ -251,16 +284,25 @@ export function normalizeBenzingaArticle(article, now = new Date()) {
 function sameSecondaryIdentity(a, b) {
   if (!a || !b || a.eventType !== b.eventType) return false;
 
-  const bothHaveEntity = Boolean(a.primaryEntity && b.primaryEntity);
-  if (bothHaveEntity) {
-    return a.primaryEntity === b.primaryEntity;
+  if (a.primaryEntity && b.primaryEntity && a.primaryEntity === b.primaryEntity) {
+    return true;
   }
 
-  return Boolean(
-    a.primaryTheme &&
-    b.primaryTheme &&
-    a.primaryTheme === b.primaryTheme
-  );
+  if (!a.primaryTheme || !b.primaryTheme || a.primaryTheme !== b.primaryTheme) {
+    return false;
+  }
+
+  // Generic geopolitical theme alone must not collapse obviously different
+  // real-world events when neither event has a reliable entity.
+  if (
+    a.primaryTheme === "GEOPOLITICAL_ESCALATION" &&
+    !a.primaryEntity &&
+    !b.primaryEntity
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 export function dedupeEngine25NewsEvents(events = []) {
