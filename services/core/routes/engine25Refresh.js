@@ -47,6 +47,47 @@ const REQUIRED_FILES = [
   "engine25-context.json",
 ];
 
+const LIVE_STEPS = [
+  {
+    name: "engine25_news_events",
+    job: "updateEngine25NewsEvents.js",
+    required: false,
+  },
+  {
+    name: "engine25_intraday_macro",
+    job: "updateEngine25IntradayMacro.js",
+    required: true,
+  },
+  {
+    name: "engine25_sector_card_proxy_breadth",
+    job: "snapshotEngine25SectorCardBreadth.js",
+    required: true,
+  },
+  {
+    name: "engine25_es_zone_aware_read",
+    job: "buildEngine25EsZoneAwareRead.js",
+    required: true,
+  },
+  {
+    name: "engine25_zone_classification",
+    job: "buildEngine25ZoneClassification.js",
+    required: true,
+  },
+  {
+    name: "engine25_context",
+    job: "buildEngine25Context.js",
+    required: true,
+  },
+];
+
+const LIVE_REQUIRED_FILES = [
+  "engine25-intraday-macro.json",
+  "engine25-sector-card-breadth-snapshots.json",
+  "engine25-es-zone-aware-read.json",
+  "engine25-zone-classification.json",
+  "engine25-context.json",
+];
+
 let IS_RUNNING = false;
 
 function nowIso() {
@@ -145,8 +186,8 @@ function runStep(step) {
   });
 }
 
-function validateFiles() {
-  return REQUIRED_FILES.map((file) => {
+function validateFiles(filesToValidate = REQUIRED_FILES) {
+  return filesToValidate.map((file) => {
     const filePath = path.join(DATA_DIR, file);
 
     if (!fs.existsSync(filePath)) {
@@ -193,43 +234,59 @@ async function handle(req, res) {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
 
+    const mode = String(req.query.mode || "full").trim().toLowerCase();
+    const selectedSteps = mode === "live" ? LIVE_STEPS : STEPS;
+    const requiredFiles = mode === "live" ? LIVE_REQUIRED_FILES : REQUIRED_FILES;
     const steps = [];
+    const warnings = [];
 
-    for (const step of STEPS) {
+    for (const step of selectedSteps) {
       const result = await runStep(step);
+      const required = step.required !== false;
+
       steps.push({
         name: result.name,
         code: result.code,
+        required,
         startedAt: result.startedAt,
         endedAt: result.endedAt,
         elapsedMs: result.elapsedMs,
       });
+
+      if (result.code !== 0 && !required) {
+        warnings.push(`NON_FATAL_STEP_FAILED:${step.name}`);
+        continue;
+      }
 
       if (result.code !== 0) {
         return res.status(500).json({
           ok: false,
           error: `Engine 25 refresh failed at ${step.name}`,
           failedStep: step.name,
+          mode,
           startedAt,
           endedAt: nowIso(),
           elapsedMs: Date.now() - startedMs,
           steps,
+          warnings,
           stdout: tail(result.stdout),
           stderr: tail(result.stderr),
         });
       }
     }
 
-    const files = validateFiles();
+    const files = validateFiles(requiredFiles);
     const endedAt = nowIso();
 
     return res.json({
       ok: true,
       engine: "engine25.refreshRoute.v1",
+      mode,
       startedAt,
       endedAt,
       elapsedMs: Date.now() - startedMs,
       steps,
+      warnings,
       files,
     });
   } catch (err) {
