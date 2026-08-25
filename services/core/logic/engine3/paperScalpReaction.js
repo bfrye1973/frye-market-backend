@@ -8,8 +8,8 @@
 // - 1m proposes a reaction direction; it does NOT directly publish canonical LONG/SHORT.
 // - INSIDE the negotiated zone, completed 1m reaction evidence may confirm without
 //   waiting for a completed 5m validation candle.
-// - OUTSIDE the negotiated zone, 5m validates/supports/conflicts and remains the
-//   anti-flip directional-travel filter.
+// - Once price leaves the negotiated zone, the established direction is held
+//   by completed 10m close vs EMA10; 1m/5m become diagnostic only.
 // - Before a paper trade is active, 1m/5m own reaction discovery/validation only.
 // - After a paper trade is active, its direction persists through diagnostic flips.
 // - Completed 10m close vs EMA10 is only the ACTIVE-TRADE hold/reset rule.
@@ -412,12 +412,22 @@ function resolveFinalCanonicalDirection({
   candidateResolution,
   candidateConfirmation,
   insideNegotiatedZone = false,
+  negotiatedZonePositionKnown = false,
 } = {}) {
   const candidateDirection = safeUpper(
     candidateResolution?.candidateDirection ??
       candidateResolution?.direction,
     "NEUTRAL"
   );
+
+  const previousDirection = safeUpper(
+    candidateResolution?.previousCanonicalDirection,
+    "NEUTRAL"
+  );
+
+  const previousDirectional =
+    previousDirection === "LONG" ||
+    previousDirection === "SHORT";
 
   const activePaperTrade =
     candidateResolution?.activePaperTrade === true;
@@ -450,13 +460,13 @@ function resolveFinalCanonicalDirection({
   let resolutionStatus =
     "REACTION_NOT_CONFIRMED_DIRECTION_NEUTRAL";
   let resolutionReason =
-    "ENGINE3_DIRECTION_REQUIRES_CONFIRMED_REACTION";
+    "ENGINE3_DIRECTION_REQUIRES_NEGOTIATED_ZONE_REACTION";
 
   /*
    * ACTIVE PAPER TRADE:
+   * Existing contract remains unchanged.
    * The open trade direction owns Engine 3 direction.
-   * 1m / 5m / broader 10m are diagnostics only.
-   * Completed 10m EMA10 is the hold/reset rule only here.
+   * Only a completed 10m close across EMA10 resets it.
    */
   if (activePaperTrade) {
     const resetShort =
@@ -500,42 +510,111 @@ function resolveFinalCanonicalDirection({
           ? activeTradeDirection === "SHORT"
             ? "ACTIVE_SHORT_HELD_WHILE_COMPLETED_10M_CLOSE_NOT_ABOVE_EMA10"
             : "ACTIVE_LONG_HELD_WHILE_COMPLETED_10M_CLOSE_NOT_BELOW_EMA10"
-          : `ACTIVE_${activeTradeDirection}_HELD_EMA10_DATA_UNAVAILABLE`;
+          : `ACTIVE_${activeTradeDirection}_HELD_UNTIL_COMPLETED_10M_EMA10_RESET`;
     }
   } else if (
+    negotiatedZonePositionKnown &&
+    !insideNegotiatedZone &&
+    previousDirectional
+  ) {
+    /*
+     * AFTER PRICE LEAVES THE NEGOTIATED ZONE:
+     *
+     * The direction that was established in the negotiated zone stays
+     * locked. 1m and 5m are diagnostics only and cannot flip it.
+     *
+     * SHORT:
+     *   stay SHORT until a COMPLETED 10m candle closes ABOVE EMA10.
+     *
+     * LONG:
+     *   stay LONG until a COMPLETED 10m candle closes BELOW EMA10.
+     *
+     * EMA10 never creates the initial direction. It only holds/resets
+     * the already-established negotiated-zone direction.
+     */
+    const resetShort =
+      previousDirection === "SHORT" &&
+      ema10DataAvailable &&
+      completedClose > ema10;
+
+    const resetLong =
+      previousDirection === "LONG" &&
+      ema10DataAvailable &&
+      completedClose < ema10;
+
+    ema10ResetTriggered =
+      resetShort || resetLong;
+
+    if (ema10ResetTriggered) {
+      state = "ZONE_EXIT_DIRECTION_RESET";
+      direction = "NEUTRAL";
+      sourceTimeframe = "10m";
+      reactionTimeframe = "10m";
+
+      resolutionStatus =
+        `ZONE_EXIT_${previousDirection}_RESET_AT_10M_EMA10`;
+
+      resolutionReason =
+        previousDirection === "SHORT"
+          ? "ZONE_EXIT_SHORT_RESET_BY_COMPLETED_10M_CLOSE_ABOVE_EMA10"
+          : "ZONE_EXIT_LONG_RESET_BY_COMPLETED_10M_CLOSE_BELOW_EMA10";
+    } else {
+      state = "ZONE_EXIT_DIRECTION_PERSISTED";
+      direction = previousDirection;
+      sourceTimeframe = "10m_EMA10_HOLD";
+      reactionTimeframe = "10m";
+      directionPersistenceActive = true;
+
+      resolutionStatus =
+        `ZONE_EXIT_${previousDirection}_PERSISTED_BY_10M_EMA10`;
+
+      resolutionReason =
+        previousDirection === "SHORT"
+          ? "ZONE_EXIT_SHORT_HELD_UNTIL_COMPLETED_10M_CLOSE_ABOVE_EMA10"
+          : "ZONE_EXIT_LONG_HELD_UNTIL_COMPLETED_10M_CLOSE_BELOW_EMA10";
+    }
+  } else if (
+    insideNegotiatedZone &&
     candidateConfirmation?.reactionConfirmed === true &&
     (candidateDirection === "LONG" || candidateDirection === "SHORT")
   ) {
     /*
-     * PRE-TRADE:
-     *
-     * INSIDE negotiated zone:
-     *   completed qualified 1m reaction can confirm immediately.
-     *   5m remains diagnostic and is not a mandatory close gate.
-     *
-     * OUTSIDE negotiated zone:
-     *   completed 5m validation remains the anti-flip directional-travel gate.
+     * INSIDE NEGOTIATED ZONE:
+     * The completed qualified 1m reaction establishes direction.
+     * 5m does not own confirmation and does not delay the reaction.
      */
     direction = candidateDirection;
-    sourceTimeframe =
-      insideNegotiatedZone
-        ? "1m"
-        : "1m+5m";
-    reactionTimeframe =
-      insideNegotiatedZone
-        ? "1m"
-        : "1m+5m";
+    sourceTimeframe = "1m";
+    reactionTimeframe = "1m";
     directionEstablishedByFresh1m = true;
 
     resolutionStatus =
-      insideNegotiatedZone
-        ? `CANONICAL_${candidateDirection}_NEGOTIATED_ZONE_REACTION_CONFIRMED`
-        : `CANONICAL_${candidateDirection}_REACTION_CONFIRMED`;
+      `CANONICAL_${candidateDirection}_NEGOTIATED_ZONE_REACTION_CONFIRMED`;
 
     resolutionReason =
-      insideNegotiatedZone
-        ? "ENGINE3_DIRECTION_CONFIRMED_FROM_COMPLETED_1M_INSIDE_NEGOTIATED_ZONE"
-        : "ENGINE3_DIRECTION_PUBLISHED_AFTER_OUTSIDE_ZONE_5M_VALIDATION";
+      "ENGINE3_DIRECTION_ESTABLISHED_BY_COMPLETED_1M_REACTION_INSIDE_NEGOTIATED_ZONE";
+  } else if (
+    negotiatedZonePositionKnown &&
+    !insideNegotiatedZone
+  ) {
+    /*
+     * Price is outside the negotiated zone but no prior canonical
+     * LONG/SHORT exists to hold.
+     *
+     * Do not manufacture a new direction from 1m, 5m, or EMA10.
+     * A fresh direction must first be established by reaction in a
+     * negotiated zone.
+     */
+    state = "WAITING_FOR_NEGOTIATED_ZONE_DIRECTION";
+    direction = "NEUTRAL";
+    sourceTimeframe = null;
+    reactionTimeframe = null;
+
+    resolutionStatus =
+      "OUTSIDE_ZONE_WITHOUT_ESTABLISHED_DIRECTION";
+
+    resolutionReason =
+      "EMA10_CANNOT_CREATE_INITIAL_DIRECTION";
   }
 
   return {
@@ -556,7 +635,6 @@ function resolveFinalCanonicalDirection({
     resolutionReason,
   };
 }
-
 function resolveFinalConfirmation({
   candidateConfirmation,
   canonicalResolution,
@@ -564,30 +642,38 @@ function resolveFinalConfirmation({
   const activePaperTrade =
     canonicalResolution?.activePaperTrade === true;
 
-  const activeTradeReset =
+  const directionPersistenceActive =
+    canonicalResolution?.directionPersistenceActive === true;
+
+  const ema10ResetTriggered =
     canonicalResolution?.ema10ResetTriggered === true;
 
-  if (activePaperTrade) {
-    if (activeTradeReset) {
-      return {
-        ...candidateConfirmation,
-        reactionConfirmed: false,
-        persistedConfirmation: false,
-        blockers: unique([
-          "ACTIVE_PAPER_TRADE_DIRECTION_RESET_BY_10M_EMA10",
-        ]),
-        reasonCodes: unique([
-          ...(candidateConfirmation?.reasonCodes || []),
-          "ENGINE3_ACTIVE_PAPER_TRADE_DIRECTION_RESET",
-          "ENGINE3_CANONICAL_REACTION_NOT_CONFIRMED",
-        ]),
-      };
-    }
+  if (ema10ResetTriggered) {
+    return {
+      ...candidateConfirmation,
+      reactionConfirmed: false,
+      persistedConfirmation: false,
+      blockers: unique([
+        "ENGINE3_DIRECTION_RESET_BY_COMPLETED_10M_EMA10",
+      ]),
+      reasonCodes: unique([
+        ...(candidateConfirmation?.reasonCodes || []),
+        "ENGINE3_DIRECTION_RESET_BY_10M_EMA10",
+        "ENGINE3_CANONICAL_REACTION_NOT_CONFIRMED",
+      ]),
+    };
+  }
 
+  if (
+    activePaperTrade ||
+    directionPersistenceActive
+  ) {
     /*
-     * An actual open paper trade can only exist after the upstream
-     * paper-entry chain already completed. While that trade is open,
-     * reaction confirmation remains locked with the active trade.
+     * Once direction is locked to either:
+     * - an actual active paper trade, or
+     * - the post-negotiated-zone 10m EMA10 hold,
+     *
+     * 1m/5m diagnostic flips cannot remove confirmation.
      */
     return {
       ...candidateConfirmation,
@@ -596,27 +682,26 @@ function resolveFinalConfirmation({
       blockers: [],
       reasonCodes: unique([
         ...(candidateConfirmation?.reasonCodes || []),
-        `ENGINE3_${canonicalResolution?.direction}_CONFIRMATION_LOCKED_TO_ACTIVE_PAPER_TRADE`,
+        directionPersistenceActive
+          ? `ENGINE3_${canonicalResolution?.direction}_CONFIRMATION_PERSISTED_BY_10M_EMA10`
+          : `ENGINE3_${canonicalResolution?.direction}_CONFIRMATION_LOCKED_TO_ACTIVE_PAPER_TRADE`,
         "ENGINE3_CANONICAL_REACTION_CONFIRMED",
       ]),
     };
   }
 
   /*
-   * Before a trade is active, there is NO confirmation persistence.
-   * Current reaction evidence must earn confirmation.
+   * Before a direction is established/locked, there is no persistence.
+   * Current negotiated-zone reaction evidence must earn confirmation.
    */
   return {
     ...candidateConfirmation,
     persistedConfirmation: false,
   };
 }
-
 function resolveCanonicalQuality({
   observation1m = null,
-  validation5m = null,
   canonicalResolution = null,
-  insideNegotiatedZone = false,
 } = {}) {
   const canonicalDirection =
     safeUpper(
@@ -636,44 +721,15 @@ function resolveCanonicalQuality({
       "WEAK"
     );
 
-  const validationState =
-    safeUpper(
-      validation5m?.validationState,
-      "UNRESOLVED"
-    );
-
-  const validationFresh =
-    validation5m?.active === true &&
-    validation5m?.stale === false;
-
-  const validationResolved =
-    validation5m?.maturityResolved === true;
-
-  const validationSupports =
-    validation5m?.supports1mDirection === true ||
-    validationState === "SUPPORT";
-
-  const validationConflicts =
-    validation5m?.conflictsWith1mDirection === true ||
-    validationState === "CONFLICT";
-
   const oneMinuteFreshAligned =
     canonicalResolution?.observationUsable === true &&
     ["LONG", "SHORT"].includes(canonicalDirection) &&
     oneMinuteDirection === canonicalDirection;
 
   /*
-   * Canonical Engine 3 quality ownership:
-   *
-   * INSIDE negotiated zone:
-   * - 1m owns immediate reaction quality.
-   * - 5m remains visible but cannot downgrade/block the reaction merely
-   *   because its completed candle is still on the old direction.
-   *
-   * OUTSIDE negotiated zone:
-   * - Keep the existing 5m validation quality contract.
+   * 1m owns the immediate reaction candidate inside the negotiated zone.
+   * 5m remains diagnostic and does not own direction confirmation.
    */
-
   if (
     !["LONG", "SHORT"].includes(
       canonicalDirection
@@ -682,40 +738,15 @@ function resolveCanonicalQuality({
     return "WEAK";
   }
 
-  if (insideNegotiatedZone) {
-    return (
-      oneMinuteFreshAligned &&
-      QUALIFYING_QUALITY.has(oneMinuteQuality)
-    )
-      ? oneMinuteQuality
-      : "WEAK";
-  }
-
   if (
-    !validationFresh ||
-    !validationResolved
+    oneMinuteFreshAligned &&
+    QUALIFYING_QUALITY.has(oneMinuteQuality)
   ) {
-    return "WEAK";
-  }
-
-  if (validationConflicts) {
-    return "MIXED";
-  }
-
-  if (validationSupports) {
-    if (
-      oneMinuteFreshAligned &&
-      oneMinuteQuality === "STRONG"
-    ) {
-      return "STRONG";
-    }
-
-    return "GOOD";
+    return oneMinuteQuality;
   }
 
   return "WEAK";
 }
-
 function setupTypeForCanonical({
   state,
   direction,
@@ -981,23 +1012,6 @@ function resolveCanonicalConfirmation({
     validation5m?.conflictsWith1mDirection === true ||
     validationState === "CONFLICT";
 
-  /*
-   * Outside negotiated zones, aligned completed 5m support can still
-   * rescue a weak local 1m quality label, preserving the already-approved
-   * responsiveness improvement.
-   *
-   * Inside negotiated zones, 5m is diagnostic only and does not rescue
-   * or block the immediate 1m reaction.
-   */
-  const fiveMinuteDirectionalSupport =
-    !insideNegotiatedZone &&
-    oneMinuteAligned &&
-    validationPresent &&
-    validationFresh &&
-    validationResolved &&
-    validationSupports &&
-    !validationConflicts;
-
   if (!authorizationValid) {
     blockers.push(
       "ENGINE26_EVALUATION_NOT_AUTHORIZED"
@@ -1022,10 +1036,7 @@ function resolveCanonicalConfirmation({
     );
   }
 
-  if (
-    !oneMinuteQualityApproved &&
-    !fiveMinuteDirectionalSupport
-  ) {
+  if (!oneMinuteQualityApproved) {
     blockers.push(
       "ONE_MINUTE_QUALITY_NOT_GOOD_OR_STRONG"
     );
@@ -1054,41 +1065,9 @@ function resolveCanonicalConfirmation({
   }
 
   /*
-   * Zone-aware 5m contract:
-   *
-   * INSIDE negotiated zone:
-   * - 5m remains diagnostic only.
-   * - Missing, forming, unresolved, supportive, or conflicting 5m does
-   *   not add a confirmation blocker.
-   *
-   * OUTSIDE negotiated zone:
-   * - existing completed/fresh/resolved/supportive 5m validation remains
-   *   mandatory as the anti-flip directional-travel gate.
+   * 5m remains diagnostic only.
+   * It does not create, flip, hold, or reset canonical Engine 3 direction.
    */
-  if (!insideNegotiatedZone) {
-    if (!validationPresent) {
-      blockers.push(
-        "FIVE_MINUTE_VALIDATION_MISSING"
-      );
-    } else if (!validationFresh) {
-      blockers.push(
-        "FIVE_MINUTE_VALIDATION_STALE"
-      );
-    } else if (validationConflicts) {
-      blockers.push(
-        "FIVE_MINUTE_VALIDATION_CONFLICT"
-      );
-    } else if (!validationResolved) {
-      blockers.push(
-        "FIVE_MINUTE_VALIDATION_NOT_RESOLVED"
-      );
-    } else if (!validationSupports) {
-      blockers.push(
-        "FIVE_MINUTE_VALIDATION_NOT_SUPPORTIVE"
-      );
-    }
-  }
-
   if (authorizationValid) {
     reasonCodes.push(
       "ENGINE26_EVALUATION_AUTHORIZED"
@@ -1152,27 +1131,8 @@ function resolveCanonicalConfirmation({
       "ENGINE3_NEGOTIATED_ZONE_REACTION_MODE"
     );
     reasonCodes.push(
-      "FIVE_MINUTE_CLOSE_NOT_REQUIRED_INSIDE_NEGOTIATED_ZONE"
+      "FIVE_MINUTE_DIAGNOSTIC_ONLY"
     );
-    reasonCodes.push(
-      "FIVE_MINUTE_DIAGNOSTIC_ONLY_INSIDE_NEGOTIATED_ZONE"
-    );
-  } else {
-    reasonCodes.push(
-      "ENGINE3_OUTSIDE_ZONE_DIRECTIONAL_TRAVEL_MODE"
-    );
-
-    if (
-      validationPresent &&
-      validationFresh &&
-      validationResolved &&
-      validationSupports &&
-      !validationConflicts
-    ) {
-      reasonCodes.push(
-        "FIVE_MINUTE_VALIDATION_SUPPORT"
-      );
-    }
   }
 
   /*
@@ -1249,7 +1209,7 @@ function resolveCanonicalConfirmation({
 
     insideNegotiatedZone,
     fiveMinuteValidationRequired:
-      !insideNegotiatedZone,
+      false,
 
     expectedDirection,
     expectedReactions,
@@ -1278,14 +1238,30 @@ function resolveStrategy1Qualification({
       )
     );
 
+  const zoneExitDirectionLocked =
+    canonicalResolution?.activePaperTrade !== true &&
+    canonicalResolution?.directionPersistenceActive === true &&
+    canonicalResolution?.ema10ResetTriggered !== true &&
+    ["LONG", "SHORT"].includes(
+      safeUpper(
+        canonicalResolution?.direction,
+        "NEUTRAL"
+      )
+    );
+
   /*
    * Once an actual paper trade is already active, Engine 3 is no longer
    * re-qualifying a fresh entry from 1m/5m. The open trade direction is
    * already authoritative for the trade lifecycle.
    */
-  if (activePaperTradeLocked) {
+  if (
+    activePaperTradeLocked ||
+    zoneExitDirectionLocked
+  ) {
     reasonCodes.push(
-      "ENGINE3_ACTIVE_PAPER_TRADE_DIRECTION_LOCKED"
+      activePaperTradeLocked
+        ? "ENGINE3_ACTIVE_PAPER_TRADE_DIRECTION_LOCKED"
+        : "ENGINE3_ZONE_EXIT_DIRECTION_LOCKED_BY_10M_EMA10"
     );
     reasonCodes.push(
       "ENGINE3_STRATEGY1_QUALIFIED_FOR_ENGINE6"
@@ -1538,10 +1514,8 @@ export function attachPaperScalpReactionToConfluence({
   const candidateQuality =
     resolveCanonicalQuality({
       observation1m,
-      validation5m,
       canonicalResolution:
         candidateResolution,
-      insideNegotiatedZone,
     });
 
   /*
@@ -1605,6 +1579,8 @@ export function attachPaperScalpReactionToConfluence({
       candidateResolution,
       candidateConfirmation,
       insideNegotiatedZone,
+      negotiatedZonePositionKnown:
+        negotiatedZonePosition.known === true,
     });
 
   const confirmation =
@@ -1730,12 +1706,12 @@ export function attachPaperScalpReactionToConfluence({
     directionEstablishmentTimeframe:
       insideNegotiatedZone
         ? "1m_NEGOTIATED_ZONE_REACTION"
-        : "1m+5m_DIRECTIONAL_TRAVEL_CONFIRMATION",
+        : canonicalResolution.directionPersistenceActive
+        ? "10m_EMA10_POST_ZONE_HOLD"
+        : "NEGOTIATED_ZONE_REACTION_REQUIRED",
 
     validationTimeframe:
-      insideNegotiatedZone
-        ? "5m_DIAGNOSTIC_ONLY"
-        : "5m",
+      "5m_DIAGNOSTIC_ONLY",
 
     directionResetTimeframe:
       "10m_ACTIVE_PAPER_TRADE_ONLY",
@@ -1755,7 +1731,7 @@ export function attachPaperScalpReactionToConfluence({
       negotiatedZonePosition.hi,
 
     fiveMinuteValidationRequired:
-      !insideNegotiatedZone,
+      false,
 
     oneMinuteImmediateDirection:
       observation1m?.direction || "NEUTRAL",
@@ -2047,7 +2023,7 @@ export function attachPaperScalpReactionToConfluence({
       insideNegotiatedZone:
         confirmation.insideNegotiatedZone,
       fiveMinuteValidationRequired:
-        confirmation.fiveMinuteValidationRequired,
+        false,
       expectedDirection:
         confirmation.expectedDirection,
       expectedReactions:
@@ -2067,10 +2043,7 @@ export function attachPaperScalpReactionToConfluence({
       validation5m?.maturityResolved === true,
 
     validationTimeframe:
-      insideNegotiatedZone
-        ? "5m_DIAGNOSTIC_ONLY"
-        : validation5m?.sourceTimeframe ||
-          null,
+      "5m_DIAGNOSTIC_ONLY",
 
     broaderContextDirection:
       broaderReaction10m?.direction ||
@@ -2182,11 +2155,11 @@ export function attachPaperScalpReactionToConfluence({
 
         insideNegotiatedZone
           ? "NEGOTIATED_ZONE_1M_REACTION_MODE"
-          : "OUTSIDE_ZONE_5M_DIRECTIONAL_TRAVEL_VALIDATION",
+          : canonicalResolution.directionPersistenceActive
+          ? "POST_ZONE_10M_EMA10_DIRECTION_HOLD"
+          : "OUTSIDE_ZONE_WAITING_FOR_ESTABLISHED_DIRECTION",
 
-        insideNegotiatedZone
-          ? "FIVE_MINUTE_DIAGNOSTIC_ONLY_INSIDE_NEGOTIATED_ZONE"
-          : "FIVE_MINUTE_VALIDATES_DIRECTIONAL_TRAVEL",
+        "FIVE_MINUTE_DIAGNOSTIC_ONLY",
 
         "CANONICAL_DIRECTION_REQUIRES_REACTION_CONFIRMATION",
         "TEN_MINUTE_EMA10_ACTIVE_TRADE_HOLD_RESET_ONLY",
