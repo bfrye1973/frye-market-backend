@@ -116,9 +116,9 @@ function scoreCreditStress(macroData) {
   const stlfsi = getFredValue(macroData, "STLFSI4");
   const highYieldSpread = getFredValue(macroData, "BAMLH0A0HYM2");
 
-  const nfciScore = scoreInverse(nfci, -0.5, 0.5);
-  const stlfsiScore = scoreInverse(stlfsi, -0.5, 1.0);
-  const hyScore = scoreInverse(highYieldSpread, 3.0, 6.0);
+  const nfciScore = scoreInverse(nfci, -0.7, 0.5);
+  const stlfsiScore = scoreInverse(stlfsi, -1.0, 1.0);
+  const hyScore = scoreInverse(highYieldSpread, 2.0, 6.0);
 
   const score = weightedAvg([
     { value: nfciScore, weight: 0.35 },
