@@ -11,6 +11,27 @@ const CORE_DIR = path.join(__dirname, "..");
 const DATA_DIR = path.join(CORE_DIR, "data");
 const OUTPUT_FILE = path.join(DATA_DIR, "engine25-context.json");
 
+const CORE_BASE =
+  process.env.CORE_BASE || `http://127.0.0.1:${process.env.PORT || 10000}`;
+
+const ES_MARKET_METER_URL =
+  `${CORE_BASE}/api/v1/futures/market-meter?symbol=ES`;
+
+const MARKET_INTERNALS_FRESHNESS_MINUTES = {
+  es: {
+    tenMinute: 30,
+    thirtyMinute: 90,
+    oneHour: 180,
+    fourHour: 720,
+    eod: 4320,
+  },
+  sectors: {
+    oneHour: 180,
+    fourHour: 720,
+    eod: 4320,
+  },
+};
+
 const SOURCE_FILES = {
   marketHealth: "engine25-market-health.json",
   compositeOverlay: "engine25-composite-overlay-6mo.json",
@@ -362,6 +383,510 @@ function buildFlags({
     requiredSetupQuality,
   };
 }
+
+function timestampToIso(value) {
+  if (value === null || value === undefined || value === "") return null;
+
+  if (typeof value === "number" || /^\d+(\.\d+)?$/.test(String(value))) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    const ms = n > 1e12 ? n : n * 1000;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function ageMinutesFromTimestamp(value) {
+  const iso = timestampToIso(value);
+  if (!iso) return null;
+
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return null;
+
+  return (Date.now() - ms) / (1000 * 60);
+}
+
+function buildFreshnessRead(value, staleAfterMinutes) {
+  const asOfUtc = timestampToIso(value);
+  const ageMinutes = ageMinutesFromTimestamp(value);
+
+  if (!asOfUtc || !Number.isFinite(ageMinutes)) {
+    return {
+      status: "STALE",
+      asOfUtc,
+      ageMinutes: null,
+      staleAfterMinutes,
+      reason: "SOURCE_TIMESTAMP_UNAVAILABLE",
+    };
+  }
+
+  const stale = ageMinutes > staleAfterMinutes;
+
+  return {
+    status: stale ? "STALE" : "FRESH",
+    asOfUtc,
+    ageMinutes: Number(ageMinutes.toFixed(2)),
+    staleAfterMinutes,
+    reason: stale ? "SOURCE_OLDER_THAN_V1_THRESHOLD" : null,
+  };
+}
+
+async function fetchJsonWithTimeout(url, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+
+    const text = await res.text();
+
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new Error(`Invalid JSON from ${url}: ${text.slice(0, 250)}`);
+    }
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} from ${url}: ${text.slice(0, 250)}`);
+    }
+
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function unavailableEsTimeframe(key, staleAfterMinutes, maturity = null) {
+  return {
+    available: false,
+    key,
+    score: null,
+    state: null,
+    tone: null,
+    formula: null,
+    maturity,
+    freshness: {
+      status: "UNAVAILABLE",
+      asOfUtc: null,
+      ageMinutes: null,
+      staleAfterMinutes,
+      reason: "ES_TIMEFRAME_UNAVAILABLE",
+    },
+  };
+}
+
+function normalizeEsTimeframe(light, key, staleAfterMinutes, maturity = null) {
+  if (
+    !light ||
+    light.ok === false ||
+    !Number.isFinite(Number(light.score))
+  ) {
+    return unavailableEsTimeframe(key, staleAfterMinutes, maturity);
+  }
+
+  const sourceBarTime = firstDefined(
+    light?.lastBar?.time,
+    light?.lastBar?.timestamp,
+    light?.lastBar?.t,
+    null
+  );
+
+  return {
+    available: true,
+    key,
+    score: Number(light.score),
+    state: light.state || null,
+    tone: light.tone || null,
+    formula: light.formula || null,
+    maturity,
+    freshness: buildFreshnessRead(sourceBarTime, staleAfterMinutes),
+  };
+}
+
+function unavailableSectorLayer(key, staleAfterMinutes) {
+  return {
+    available: false,
+    key,
+    sourceType: "sectorCardProxyBreadth",
+    sourceKind: null,
+    sourcePath: null,
+    generatedAtUtc: null,
+    cardCount: 0,
+    summary: null,
+    classification: null,
+    freshness: {
+      status: "UNAVAILABLE",
+      asOfUtc: null,
+      ageMinutes: null,
+      staleAfterMinutes,
+      reason: "SECTOR_LAYER_UNAVAILABLE",
+    },
+  };
+}
+
+function normalizeSectorLayer(layer, key, staleAfterMinutes) {
+  if (!layer || layer.available !== true) {
+    return unavailableSectorLayer(key, staleAfterMinutes);
+  }
+
+  return {
+    available: true,
+    key,
+    sourceType: layer.sourceType || "sectorCardProxyBreadth",
+    sourceKind: layer.sourceKind || null,
+    sourcePath: layer.sourcePath || null,
+    generatedAtUtc: layer.generatedAtUtc || null,
+    cardCount: Number.isFinite(Number(layer.cardCount))
+      ? Number(layer.cardCount)
+      : 0,
+    summary: layer.summary || null,
+    classification: layer.classification || null,
+    freshness: buildFreshnessRead(
+      layer.generatedAtUtc,
+      staleAfterMinutes
+    ),
+  };
+}
+
+function classifyMarketInternalsAlignment(esLayer, sectorLayer) {
+  if (!esLayer?.available || !sectorLayer?.available) {
+    return "DATA_UNAVAILABLE";
+  }
+
+  if (
+    esLayer?.freshness?.status === "STALE" ||
+    sectorLayer?.freshness?.status === "STALE"
+  ) {
+    return "DATA_STALE";
+  }
+
+  const esState = upper(esLayer.state);
+  const sectorLabel = upper(sectorLayer?.classification?.label);
+
+  const esWeak = esState === "BEAR";
+  const esStrong = esState === "BULL";
+
+  const sectorsWeak =
+    sectorLabel.includes("WEAK") ||
+    sectorLabel.includes("RISK_OFF");
+
+  const sectorsStrong =
+    sectorLabel.includes("EXPANDING") ||
+    sectorLabel.includes("RISK_ON");
+
+  if (esWeak && sectorsWeak) {
+    return "ES_AND_SECTORS_ALIGNED_WEAK";
+  }
+
+  if (esStrong && sectorsStrong) {
+    return "ES_AND_SECTORS_ALIGNED_CONSTRUCTIVE";
+  }
+
+  if (esStrong && !sectorsStrong) {
+    return "ES_STRONG_BUT_SECTORS_NOT_CONFIRMING";
+  }
+
+  if (!esStrong && sectorsStrong) {
+    return "BROADER_PARTICIPATION_DIVERGENCE";
+  }
+
+  return "MIXED";
+}
+
+function buildOverallMarketInternalsAlignment({
+  oneHour,
+  fourHour,
+  eod,
+}) {
+  const blockedByData = [oneHour, fourHour, eod].some(
+    (value) => value === "DATA_UNAVAILABLE" || value === "DATA_STALE"
+  );
+
+  if (blockedByData) {
+    return "MIXED";
+  }
+
+  if (
+    oneHour === "ES_AND_SECTORS_ALIGNED_WEAK" &&
+    (
+      eod === "ES_AND_SECTORS_ALIGNED_CONSTRUCTIVE" ||
+      eod === "BROADER_PARTICIPATION_DIVERGENCE"
+    )
+  ) {
+    return "TACTICAL_WEAKNESS_INSIDE_BETTER_DAILY_STRUCTURE";
+  }
+
+  if (
+    oneHour === "ES_AND_SECTORS_ALIGNED_WEAK" &&
+    fourHour === "ES_AND_SECTORS_ALIGNED_WEAK" &&
+    (
+      eod === "ES_AND_SECTORS_ALIGNED_WEAK" ||
+      eod === "MIXED"
+    )
+  ) {
+    return "ES_AND_SECTORS_ALIGNED_WEAK";
+  }
+
+  if (oneHour === "ES_AND_SECTORS_ALIGNED_WEAK") {
+    return "TACTICAL_WEAKNESS_CONFIRMED";
+  }
+
+  if (
+    oneHour === "ES_AND_SECTORS_ALIGNED_CONSTRUCTIVE" &&
+    fourHour === "ES_AND_SECTORS_ALIGNED_CONSTRUCTIVE" &&
+    eod === "ES_AND_SECTORS_ALIGNED_CONSTRUCTIVE"
+  ) {
+    return "ES_AND_SECTORS_ALIGNED_CONSTRUCTIVE";
+  }
+
+  const values = [oneHour, fourHour, eod];
+
+  if (
+    values.filter(
+      (value) => value === "ES_STRONG_BUT_SECTORS_NOT_CONFIRMING"
+    ).length >= 2
+  ) {
+    return "ES_STRONG_BUT_SECTORS_NOT_CONFIRMING";
+  }
+
+  if (
+    values.filter(
+      (value) => value === "BROADER_PARTICIPATION_DIVERGENCE"
+    ).length >= 2
+  ) {
+    return "BROADER_PARTICIPATION_DIVERGENCE";
+  }
+
+  return "MIXED";
+}
+
+function marketInternalsSummary(overall) {
+  const summaries = {
+    TACTICAL_WEAKNESS_INSIDE_BETTER_DAILY_STRUCTURE:
+      "ES tactical weakness is confirmed on 1H while the daily sector structure remains materially healthier.",
+    TACTICAL_WEAKNESS_CONFIRMED:
+      "ES tactical weakness is confirmed by 1H sector participation, while broader structural confirmation remains mixed.",
+    ES_AND_SECTORS_ALIGNED_WEAK:
+      "ES and broader sector participation are aligned weak across the important tactical and regime layers.",
+    ES_AND_SECTORS_ALIGNED_CONSTRUCTIVE:
+      "ES strength is confirmed by broader sector participation across tactical, regime, and daily structure.",
+    ES_STRONG_BUT_SECTORS_NOT_CONFIRMING:
+      "ES is technically strong, but broader sector participation is not confirming that strength.",
+    BROADER_PARTICIPATION_DIVERGENCE:
+      "Broader sector participation is materially healthier than ES technical condition.",
+    MIXED:
+      "ES technical condition and broader sector participation are mixed or partially divergent.",
+  };
+
+  return summaries[overall] || summaries.MIXED;
+}
+
+async function buildMarketInternals({ sectorBreadth, warnings }) {
+  let meter = null;
+
+  try {
+    meter = await fetchJsonWithTimeout(ES_MARKET_METER_URL, 15000);
+  } catch (err) {
+    warnings.push(
+      `Engine 25 marketInternals ES Market Meter unavailable: ${
+        err?.message || String(err)
+      }`
+    );
+  }
+
+  const sourceSymbol = upper(meter?.symbol);
+
+  const meterIdentityOk =
+    meter?.ok === true &&
+    sourceSymbol === "ES";
+
+  if (meter && !meterIdentityOk) {
+    warnings.push(
+      `Engine 25 marketInternals rejected Market Meter identity: ${
+        sourceSymbol || "UNKNOWN"
+      }`
+    );
+  }
+
+  const lights = meterIdentityOk ? meter?.lights || {} : {};
+
+  const tenMinute = normalizeEsTimeframe(
+    lights["10m"],
+    "tenMinute",
+    MARKET_INTERNALS_FRESHNESS_MINUTES.es.tenMinute
+  );
+
+  const thirtyMinute = normalizeEsTimeframe(
+    lights["30m"],
+    "thirtyMinute",
+    MARKET_INTERNALS_FRESHNESS_MINUTES.es.thirtyMinute
+  );
+
+  const oneHour = normalizeEsTimeframe(
+    lights["1h"],
+    "oneHour",
+    MARKET_INTERNALS_FRESHNESS_MINUTES.es.oneHour
+  );
+
+  const fourHour = normalizeEsTimeframe(
+    lights["4h"],
+    "fourHour",
+    MARKET_INTERNALS_FRESHNESS_MINUTES.es.fourHour,
+    "BASIC_PENDING_TUNE"
+  );
+
+  const eod = normalizeEsTimeframe(
+    lights["1d"],
+    "eod",
+    MARKET_INTERNALS_FRESHNESS_MINUTES.es.eod,
+    "BASIC_PENDING_TUNE"
+  );
+
+  const masterAvailable =
+    meterIdentityOk &&
+    Number.isFinite(Number(meter?.master?.score));
+
+  const sectorLatest = sectorBreadth?.latest || {};
+
+  const sectorOneHour = normalizeSectorLayer(
+    sectorLatest?.tactical1h,
+    "oneHour",
+    MARKET_INTERNALS_FRESHNESS_MINUTES.sectors.oneHour
+  );
+
+  const sectorFourHour = normalizeSectorLayer(
+    sectorLatest?.regime4h,
+    "fourHour",
+    MARKET_INTERNALS_FRESHNESS_MINUTES.sectors.fourHour
+  );
+
+  const sectorEod = normalizeSectorLayer(
+    sectorLatest?.structuralEod,
+    "eod",
+    MARKET_INTERNALS_FRESHNESS_MINUTES.sectors.eod
+  );
+
+  const alignmentOneHour = classifyMarketInternalsAlignment(
+    oneHour,
+    sectorOneHour
+  );
+
+  const alignmentFourHour = classifyMarketInternalsAlignment(
+    fourHour,
+    sectorFourHour
+  );
+
+  const alignmentEod = classifyMarketInternalsAlignment(
+    eod,
+    sectorEod
+  );
+
+  const alignmentOverall = buildOverallMarketInternalsAlignment({
+    oneHour: alignmentOneHour,
+    fourHour: alignmentFourHour,
+    eod: alignmentEod,
+  });
+
+  const marketInternalsWarnings = [];
+
+  if (!masterAvailable) {
+    marketInternalsWarnings.push("ES_MASTER_SCORE_UNAVAILABLE");
+  }
+
+  for (const [key, layer] of Object.entries({
+    tenMinute,
+    thirtyMinute,
+    oneHour,
+    fourHour,
+    eod,
+  })) {
+    if (!layer.available) {
+      marketInternalsWarnings.push(
+        `ES_${key.toUpperCase()}_UNAVAILABLE`
+      );
+    } else if (layer.freshness?.status === "STALE") {
+      marketInternalsWarnings.push(
+        `ES_${key.toUpperCase()}_STALE`
+      );
+    }
+  }
+
+  for (const [key, layer] of Object.entries({
+    oneHour: sectorOneHour,
+    fourHour: sectorFourHour,
+    eod: sectorEod,
+  })) {
+    if (!layer.available) {
+      marketInternalsWarnings.push(
+        `SECTOR_${key.toUpperCase()}_UNAVAILABLE`
+      );
+    } else if (layer.freshness?.status === "STALE") {
+      marketInternalsWarnings.push(
+        `SECTOR_${key.toUpperCase()}_STALE`
+      );
+    }
+  }
+
+  return {
+    ok:
+      meterIdentityOk &&
+      (
+        oneHour.available ||
+        fourHour.available ||
+        eod.available ||
+        sectorOneHour.available ||
+        sectorFourHour.available ||
+        sectorEod.available
+      ),
+
+    symbol: "ES",
+    generatedAtUtc: nowIso(),
+
+    esMarketMeter: {
+      available: meterIdentityOk && masterAvailable,
+      source: "/api/v1/futures/market-meter?symbol=ES",
+      sourceSymbol: meterIdentityOk ? "ES" : null,
+      updatedAtUtc: meterIdentityOk ? meter?.updated_at_utc || null : null,
+      masterScore: masterAvailable ? Number(meter.master.score) : null,
+      masterState: masterAvailable ? meter?.master?.state || null : null,
+      masterTone: masterAvailable ? meter?.master?.tone || null : null,
+      weights: masterAvailable ? meter?.master?.weights || null : null,
+
+      timeframes: {
+        tenMinute,
+        thirtyMinute,
+        oneHour,
+        fourHour,
+        eod,
+      },
+    },
+
+    sectorParticipation: {
+      oneHour: sectorOneHour,
+      fourHour: sectorFourHour,
+      eod: sectorEod,
+    },
+
+    alignment: {
+      oneHour: alignmentOneHour,
+      fourHour: alignmentFourHour,
+      eod: alignmentEod,
+      overall: alignmentOverall,
+    },
+
+    summary: marketInternalsSummary(alignmentOverall),
+    warnings: unique(marketInternalsWarnings),
+  };
+}
+
 function buildSummary({ label, permission, flags }) {
   if (flags.hardBlock) {
     return `${label || "Engine 25"}: hard block active. Permission: ${
@@ -380,7 +905,7 @@ function buildSummary({ label, permission, flags }) {
   }: context available. Engine 6 remains final permission.`;
 }
 
-function buildContext() {
+async function buildContext() {
   ensureDataDir();
 
   const warnings = [];
@@ -397,6 +922,11 @@ function buildContext() {
   const zoneClassification = sources.zoneClassification.data || {};
   const intradayMacro = sources.intradayMacro.data || {};
   const compositeRow = latestCompositeRow(compositeOverlay);
+
+  const marketInternals = await buildMarketInternals({
+    sectorBreadth,
+    warnings,
+  });
 
   const freshness = buildFreshness({ sources, warnings });
 
@@ -528,6 +1058,7 @@ function buildContext() {
     zoneAwareRead: zoneAwareRead || {},
     marketHealth: marketHealth || {},
     intradayMacro: intradayMacro || {},
+    marketInternals: marketInternals || {},
 
     flags: {
       hardBlock: flags.hardBlock,
@@ -555,8 +1086,8 @@ function buildContext() {
   return output;
 }
 
-function main() {
-  const context = buildContext();
+async function main() {
+  const context = await buildContext();
 
   fs.writeFileSync(OUTPUT_FILE, JSON.stringify(context, null, 2));
 
