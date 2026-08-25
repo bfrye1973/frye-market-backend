@@ -408,6 +408,7 @@ function applyIntradayDamage(result, intradayProxyDamage) {
 
   const next = {
     ...result,
+    tacticalOverride: null,
     components: {
       ...(result.components || {}),
       intradayProxyDamage,
@@ -421,7 +422,7 @@ function applyIntradayDamage(result, intradayProxyDamage) {
   next.intradayProxyDamage = intradayProxyDamage;
 
   if (label === "INTRADAY_DISTRIBUTION_ACTIVE") {
-    next.score = Math.min(Number(result.score ?? 50), 48);
+    next.tacticalOverride = "INTRADAY_DISTRIBUTION_ACTIVE";
     next.bias = "NEUTRAL_WAIT";
     next.riskLevel = "HIGH";
 
@@ -459,7 +460,7 @@ function applyIntradayDamage(result, intradayProxyDamage) {
       ],
     };
   } else if (label === "INTRADAY_DAMAGE_ELEVATED") {
-    next.score = Math.min(Number(result.score ?? 50), 55);
+    next.tacticalOverride = "INTRADAY_DAMAGE_ELEVATED";
     next.riskLevel = next.riskLevel === "HIGH" ? "HIGH" : "ELEVATED";
 
     next.tradePermission = {
@@ -572,6 +573,7 @@ async function main() {
           regime: result.regime,
           bias: result.bias,
           riskLevel: result.riskLevel,
+          tacticalOverride: result.tacticalOverride ?? null,
           intradayProxyDamage: {
             score: intradayProxyDamage.score,
             label: intradayProxyDamage.label,
