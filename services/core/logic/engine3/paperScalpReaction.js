@@ -919,15 +919,12 @@ function resolveCanonicalConfirmation({
     QUALIFYING_QUALITY.has(quality);
 
   /*
-   * Fresh completed 1m candle must itself agree
-   * with the canonical direction.
+   * The completed 1m directional model is the single candle-direction test
+   * for Strategy 1. Do not impose a second close-vs-open body-direction gate.
+   *
+   * observation1m.direction was already produced from completed two-bar
+   * candle structure by candleDirectionFromBars().
    */
-  const candleOpen =
-    toNum(observation1m?.currentCandle?.open);
-
-  const candleClose =
-    toNum(observation1m?.currentCandle?.close);
-
   const candleCompleted =
     observation1m?.currentCandleStatus === "COMPLETED" ||
     observation1m?.currentCandle?.completionState === "COMPLETED" ||
@@ -935,24 +932,18 @@ function resolveCanonicalConfirmation({
 
   const candleDirectionAligned =
     candleCompleted &&
-    candleOpen != null &&
-    candleClose != null &&
-    (
-      (
-        direction === "SHORT" &&
-        candleClose < candleOpen
-      ) ||
-      (
-        direction === "LONG" &&
-        candleClose > candleOpen
-      )
-    );
+    oneMinuteAligned;
 
   /*
-   * Local level-action state is now a contradiction
-   * check — not a required confirmation whitelist.
+   * Legacy currentLevelAction semantic states remain diagnostic context only.
+   * A state name by itself is not raw-price proof that the completed 1m
+   * directional reaction is invalid.
+   *
+   * Keep the historical semantic conflict visible for diagnostics, but do
+   * not convert it into a canonical veto. A future raw-price contradiction
+   * rule must be implemented explicitly from raw price/reference facts.
    */
-  const shortContradictionStates =
+  const legacyShortConflictStates =
     new Set([
       "RECLAIMED_LEVEL",
       "WICK_BELOW_AND_RECLAIM",
@@ -961,7 +952,7 @@ function resolveCanonicalConfirmation({
       "BREAKOUT_HOLDING",
     ]);
 
-  const longContradictionStates =
+  const legacyLongConflictStates =
     new Set([
       "LOST_LEVEL",
       "FAILED_RECLAIM",
@@ -971,20 +962,21 @@ function resolveCanonicalConfirmation({
       "LOST_SHORT_TRIGGER_LEVEL",
     ]);
 
-  const oneMinuteContradiction =
+  const legacySemanticStateConflict =
     direction === "SHORT"
-      ? shortContradictionStates.has(oneMinuteState)
+      ? legacyShortConflictStates.has(oneMinuteState)
       : direction === "LONG"
-      ? longContradictionStates.has(oneMinuteState)
-      : true;
+      ? legacyLongConflictStates.has(oneMinuteState)
+      : false;
 
   /*
-   * HELD_LEVEL / CHOP_INSIDE_VALUE / similar
-   * non-contradictory states no longer automatically block.
+   * No raw-price contradiction rule is currently proven here.
+   * Therefore semantic state labels cannot hard-veto Strategy 1 direction.
    */
+  const oneMinuteContradiction = false;
+
   const approvedReactionState =
-    oneMinuteAligned &&
-    !oneMinuteContradiction;
+    oneMinuteAligned;
 
   const validationPresent =
     validation5m != null &&
@@ -1114,9 +1106,15 @@ function resolveCanonicalConfirmation({
     );
   }
 
+  if (legacySemanticStateConflict) {
+    reasonCodes.push(
+      "LEGACY_ONE_MINUTE_STATE_CONFLICT_DIAGNOSTIC_ONLY"
+    );
+  }
+
   if (!oneMinuteContradiction) {
     reasonCodes.push(
-      "ONE_MINUTE_STATE_NOT_DIRECTIONALLY_CONTRADICTORY"
+      "NO_RAW_PRICE_DIRECTIONAL_CONTRADICTION_PROVEN"
     );
   }
 
@@ -1197,6 +1195,7 @@ function resolveCanonicalConfirmation({
     candleDirectionAligned,
 
     oneMinuteContradiction,
+    legacySemanticStateConflict,
     approvedReactionState,
 
     validationPresent,
