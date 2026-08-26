@@ -51,3 +51,111 @@ test("1m forming/completed state is truthful and inputs are not mutated", () => 
   assert.equal(completed.candleState, "COMPLETED");
   assert.deepEqual(input, before);
 });
+
+test("1m quality GOOD SHORT comes from newest completed pair only", () => {
+  const input = [
+    { time: START - 120, open: 100, high: 102, low: 99, close: 100, volume: 10 },
+    { time: START - 60, open: 100, high: 102.5, low: 99.5, close: 101, volume: 10 },
+    { time: START, open: 101, high: 101.5, low: 98.5, close: 100, volume: 10 },
+  ];
+
+  const result = buildReactionObservation1m({
+    bars: input,
+    evaluationTimeMs: START * 1000 + 60_000,
+    engine26LocationCandidate: identity,
+    engine26ReactionHandoff: identity,
+  });
+
+  assert.equal(result.direction, "SHORT");
+  assert.equal(result.quality, "GOOD");
+});
+
+test("1m quality STRONG SHORT requires both latest completed pairs SHORT", () => {
+  const input = [
+    { time: START - 120, open: 102, high: 102.5, low: 100, close: 102, volume: 10 },
+    { time: START - 60, open: 102, high: 102, low: 99.5, close: 101, volume: 10 },
+    { time: START, open: 101.5, high: 101.5, low: 99, close: 100, volume: 10 },
+  ];
+
+  const result = buildReactionObservation1m({
+    bars: input,
+    evaluationTimeMs: START * 1000 + 60_000,
+    engine26LocationCandidate: identity,
+    engine26ReactionHandoff: identity,
+  });
+
+  assert.equal(result.direction, "SHORT");
+  assert.equal(result.quality, "STRONG");
+});
+
+test("1m quality GOOD LONG comes from newest completed pair only", () => {
+  const input = [
+    { time: START - 120, open: 100, high: 101.5, low: 98.5, close: 100, volume: 10 },
+    { time: START - 60, open: 100, high: 100.5, low: 98, close: 99, volume: 10 },
+    { time: START, open: 99, high: 101, low: 98.5, close: 100, volume: 10 },
+  ];
+
+  const result = buildReactionObservation1m({
+    bars: input,
+    evaluationTimeMs: START * 1000 + 60_000,
+    engine26LocationCandidate: identity,
+    engine26ReactionHandoff: identity,
+  });
+
+  assert.equal(result.direction, "LONG");
+  assert.equal(result.quality, "GOOD");
+});
+
+test("1m quality STRONG LONG requires both latest completed pairs LONG", () => {
+  const input = [
+    { time: START - 120, open: 98, high: 99, low: 97.5, close: 98, volume: 10 },
+    { time: START - 60, open: 98, high: 100, low: 97.5, close: 99, volume: 10 },
+    { time: START, open: 99, high: 101, low: 98, close: 100, volume: 10 },
+  ];
+
+  const result = buildReactionObservation1m({
+    bars: input,
+    evaluationTimeMs: START * 1000 + 60_000,
+    engine26LocationCandidate: identity,
+    engine26ReactionHandoff: identity,
+  });
+
+  assert.equal(result.direction, "LONG");
+  assert.equal(result.quality, "STRONG");
+});
+
+test("legacy currentLevelAction quality cannot downgrade canonical 1m STRONG", () => {
+  const input = [
+    { time: START - 120, open: 101, high: 102, low: 100, close: 101, volume: 10 },
+    { time: START - 60, open: 101, high: 101.5, low: 99.5, close: 100, volume: 10 },
+    { time: START, open: 100.5, high: 101, low: 99, close: 99.5, volume: 10 },
+  ];
+
+  const result = buildReactionObservation1m({
+    bars: input,
+    evaluationTimeMs: START * 1000 + 60_000,
+    engine26LocationCandidate: identity,
+    engine26ReactionHandoff: identity,
+  });
+
+  assert.equal(result.direction, "SHORT");
+  assert.equal(result.quality, "STRONG");
+  assert.notEqual(result.levelActionQuality, result.quality);
+});
+
+test("1m quality WEAK when newest completed pair has no qualifying direction", () => {
+  const input = [
+    { time: START - 60, open: 100, high: 101, low: 99, close: 100, volume: 10 },
+    { time: START, open: 100, high: 100.5, low: 99.5, close: 100, volume: 10 },
+  ];
+
+  const result = buildReactionObservation1m({
+    bars: input,
+    evaluationTimeMs: START * 1000 + 60_000,
+    engine26LocationCandidate: identity,
+    engine26ReactionHandoff: identity,
+  });
+
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.quality, "WEAK");
+});
