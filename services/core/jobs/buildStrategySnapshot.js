@@ -9346,25 +9346,7 @@ if (
        engine22WaveStrategy,
        bars: marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
      });
-     attachPaperScalpReactionToConfluence({
-       patchedConfluence,
-       engine22WaveStrategy,
-       engine26ReactionHandoff,
-       engine26StructuralContext,
-       paperShortResearchEnabled: isEsIntradayScalp,
-
-       previousCanonicalDirection:
-         previousEngine3CanonicalDirection,
-
-       previousReactionConfirmed:
-         previousEngine3ReactionConfirmed,
-
-       tenMinuteCompletedClose:
-         strategy1TenMinuteCompletedClose,
-
-       tenMinuteEma10:
-         strategy1TenMinuteEma10,
-     });
+    
      attachEngine4CurrentScalpParticipationToConfluence({
        patchedConfluence,
        engine22WaveStrategy,
@@ -9510,27 +9492,7 @@ if (
         marketMeter?.layers?.emaPosture
           ?.tenMinute?.bars || [],
     });
-
-    attachPaperScalpReactionToConfluence({
-      patchedConfluence,
-      engine22WaveStrategy,
-      engine26ReactionHandoff,
-      engine26StructuralContext,
-      paperShortResearchEnabled: isEsIntradayScalp,
-
-      previousCanonicalDirection:
-        previousEngine3CanonicalDirection,
-
-      previousReactionConfirmed:
-        previousEngine3ReactionConfirmed,
-
-      tenMinuteCompletedClose:
-        strategy1TenMinuteCompletedClose,
-
-      tenMinuteEma10:
-        strategy1TenMinuteEma10,
-    });
-
+    
     attachEngine4CurrentScalpParticipationToConfluence({
       patchedConfluence,
       engine22WaveStrategy,
