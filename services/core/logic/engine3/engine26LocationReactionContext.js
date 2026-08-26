@@ -407,19 +407,19 @@ function evaluateAuthorizedHandoff({ handoff, reactionInput }) {
     };
   }
 
+/*
+ * Strategy 1 canonical Engine 3 direction is already resolved upstream from
+ * completed 1m candle evidence. Legacy semantic state names remain diagnostic
+ * here and must not reclassify LONG as SHORT or SHORT as LONG.
+ *
+ * The expected-reaction contract above still applies when Engine 26 publishes
+ * an explicit nonempty expectedReactions set.
+ */
 const longReaction =
-  direction === "LONG" &&
-  (
-    LONG_STATES.has(state) ||
-    state === "EMA10_LONG"
-  );
+  direction === "LONG";
 
 const shortReaction =
-  direction === "SHORT" &&
-  (
-    SHORT_STATES.has(state) ||
-    state === "EMA10_SHORT"
-  );
+  direction === "SHORT";
   const directionMatchesBias = bias === "NEUTRAL" || direction === bias;
 
   if (
