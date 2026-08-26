@@ -65,48 +65,79 @@ function negotiatedZone(candidate = {}, handoff = {}) {
  *
  * Use completed candles only for actionable direction.
  */
-function candleDirectionFromBars(bars = []) {
-  const recent = Array.isArray(bars)
-    ? bars.filter(Boolean).slice(-3)
-    : [];
-
-  if (recent.length < 2) {
-    return "NEUTRAL";
-  }
-
-  const last = recent[recent.length - 1];
-  const prev = recent[recent.length - 2];
-
-  const lastClose = number(last?.close ?? last?.c);
-  const prevClose = number(prev?.close ?? prev?.c);
-  const lastLow = number(last?.low ?? last?.l);
-  const prevLow = number(prev?.low ?? prev?.l);
-  const lastHigh = number(last?.high ?? last?.h);
-  const prevHigh = number(prev?.high ?? prev?.h);
+function directionalPair(previousBar, currentBar) {
+  const currentClose = number(currentBar?.close ?? currentBar?.c);
+  const previousClose = number(previousBar?.close ?? previousBar?.c);
+  const currentLow = number(currentBar?.low ?? currentBar?.l);
+  const previousLow = number(previousBar?.low ?? previousBar?.l);
+  const currentHigh = number(currentBar?.high ?? currentBar?.h);
+  const previousHigh = number(previousBar?.high ?? previousBar?.h);
 
   if (
-    lastClose != null &&
-    prevClose != null &&
-    lastLow != null &&
-    prevLow != null &&
-    lastClose < prevClose &&
-    lastLow <= prevLow
+    currentClose != null &&
+    previousClose != null &&
+    currentLow != null &&
+    previousLow != null &&
+    currentClose < previousClose &&
+    currentLow <= previousLow
   ) {
     return "SHORT";
   }
 
   if (
-    lastClose != null &&
-    prevClose != null &&
-    lastHigh != null &&
-    prevHigh != null &&
-    lastClose > prevClose &&
-    lastHigh >= prevHigh
+    currentClose != null &&
+    previousClose != null &&
+    currentHigh != null &&
+    previousHigh != null &&
+    currentClose > previousClose &&
+    currentHigh >= previousHigh
   ) {
     return "LONG";
   }
 
   return "NEUTRAL";
+}
+
+/*
+ * Strategy 1 direction and quality share one completed-1m candle model.
+ *
+ * GOOD   = newest completed pair qualifies directionally.
+ * STRONG = newest two consecutive pairs across the latest three completed
+ *          bars qualify in the same direction.
+ * WEAK   = newest completed pair does not qualify.
+ *
+ * Legacy currentLevelAction state/quality remain diagnostic only.
+ */
+function candleReactionFromBars(bars = []) {
+  const recent = Array.isArray(bars)
+    ? bars.filter(Boolean).slice(-3)
+    : [];
+
+  if (recent.length < 2) {
+    return { direction: "NEUTRAL", quality: "WEAK" };
+  }
+
+  const latestDirection = directionalPair(
+    recent[recent.length - 2],
+    recent[recent.length - 1]
+  );
+
+  if (latestDirection === "NEUTRAL") {
+    return { direction: "NEUTRAL", quality: "WEAK" };
+  }
+
+  if (recent.length >= 3) {
+    const previousDirection = directionalPair(
+      recent[recent.length - 3],
+      recent[recent.length - 2]
+    );
+
+    if (previousDirection === latestDirection) {
+      return { direction: latestDirection, quality: "STRONG" };
+    }
+  }
+
+  return { direction: latestDirection, quality: "GOOD" };
 }
 
 export function buildReactionObservation1m({
@@ -147,7 +178,7 @@ export function buildReactionObservation1m({
     evaluationTimeMs,
   });
 
-  const candleDirection = candleDirectionFromBars(
+  const candleReaction = candleReactionFromBars(
     truth.completedBars
   );
 
@@ -183,11 +214,12 @@ export function buildReactionObservation1m({
 
     // Strategy 1 direction is derived from completed candle behavior,
     // not from where price sits inside the larger imbalance zone.
-    direction: candleDirection,
+    direction: candleReaction.direction,
+    quality: candleReaction.quality,
 
-    // Preserve the existing zone-relative action diagnostics separately.
-    quality: action.quality || "WEAK",
+    // Preserve legacy level-action outputs as diagnostics only.
     state: action.state || "NO_SIGNAL",
+    levelActionQuality: action.quality || "WEAK",
 
     candleState:
       truth.latestBarCompletionState,
