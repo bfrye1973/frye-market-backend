@@ -41,7 +41,7 @@ import { buildEngine22DegreeWaveContext } from "./engine22DegreeWaveContext.js";
 import { deriveCandleCompletionTruth } from "./candleCompletionTruth.js";
 import { buildEngine26LocationReactionContext } from "./engine26LocationReactionContext.js";
 
-const ENGINE = "engine3.paperScalpReaction.v5";
+const ENGINE = "engine3.paperScalpReaction.v6";
 const SOURCE = "engine3.strategy1.negotiatedZoneReaction";
 
 const TARGET_MODEL = {
@@ -258,13 +258,63 @@ function completedCandle(source, which = "current") {
  * The result exposes both a primary state and all raw book-language evidence so
  * the timeline can show exactly what Engine 3 is seeing.
  */
-function evaluateZoneReaction({ priorBar = null, currentBar = null, zone = null } = {}) {
+function completedBarsForTimeframe({ bars = [], timeframe, evaluationTimeMs = null } = {}) {
+  const truth = deriveCandleCompletionTruth({
+    bars: Array.isArray(bars) ? bars : [],
+    timeframe,
+    evaluationTimeMs,
+  });
+
+  return {
+    truth,
+    completedBars: Array.isArray(truth.completedBars) ? truth.completedBars : [],
+  };
+}
+
+function barTouchesZone(bar, zone) {
+  if (!bar || !zone) return false;
+  const h = barHigh(bar);
+  const l = barLow(bar);
+  return h != null && l != null && h >= zone.lo && l <= zone.hi;
+}
+
+function classifyCloseLocation(close, zone) {
+  if (close == null || !zone) return "UNKNOWN";
+  if (close < zone.lo) return "BELOW_ZONE";
+  if (close > zone.hi) return "ABOVE_ZONE";
+  if (close >= zone.mid) return "INSIDE_UPPER_HALF";
+  return "INSIDE_LOWER_HALF";
+}
+
+/*
+ * Book-based negotiated-zone reaction reader.
+ *
+ * IMPORTANT:
+ * - The Engine 26 negotiated zone is the ONLY reference.
+ * - A state is descriptive evidence, not a magic buy/sell label.
+ * - The latest completed candle controls the current aftermath.
+ * - Prior completed candles are used only to explain how price arrived there.
+ * - A stale prior reclaim can never keep a LONG read alive after the latest
+ *   completed candle has failed back below the zone.
+ */
+function evaluateZoneReaction({
+  bars = [],
+  zone = null,
+  timeframe = "5m",
+} = {}) {
+  const recent = Array.isArray(bars) ? bars.filter(Boolean).slice(-3) : [];
+  const currentBar = recent.at(-1) || null;
+  const priorBar = recent.at(-2) || null;
+  const firstBar = recent.at(-3) || null;
+
   if (!zone || !currentBar) {
     return {
       active: false,
       state: "NO_SIGNAL",
       direction: "NEUTRAL",
+      maturity: "WAIT",
       evidence: [],
+      sequence: [],
       followThrough: false,
       reasonCodes: ["NEGOTIATED_ZONE_REACTION_DATA_INCOMPLETE"],
     };
@@ -274,52 +324,68 @@ function evaluateZoneReaction({ priorBar = null, currentBar = null, zone = null 
   const h = barHigh(currentBar);
   const l = barLow(currentBar);
   const c = barClose(currentBar);
-
-  const po = barOpen(priorBar);
+  const pc = barClose(priorBar);
   const ph = barHigh(priorBar);
   const pl = barLow(priorBar);
-  const pc = barClose(priorBar);
+  const fc = barClose(firstBar);
 
-  if ([h, l, c].some((value) => value == null)) {
+  if ([h, l, c].some((v) => v == null)) {
     return {
       active: false,
       state: "NO_SIGNAL",
       direction: "NEUTRAL",
+      maturity: "WAIT",
       evidence: [],
+      sequence: [],
       followThrough: false,
       reasonCodes: ["NEGOTIATED_ZONE_CANDLE_OHLC_INCOMPLETE"],
     };
   }
 
   const evidence = [];
+  const sequence = recent.map((bar) => ({
+    open: barOpen(bar),
+    high: barHigh(bar),
+    low: barLow(bar),
+    close: barClose(bar),
+    closeLocation: classifyCloseLocation(barClose(bar), zone),
+    touchedZone: barTouchesZone(bar, zone),
+  }));
 
-  const wickBelowAndReclaim = l < zone.lo && c >= zone.lo;
+  const currentBelow = c < zone.lo;
+  const currentAbove = c > zone.hi;
+  const currentInside = !currentBelow && !currentAbove;
+
+  const priorBelow = pc != null && pc < zone.lo;
+  const priorAbove = pc != null && pc > zone.hi;
+  const priorInside = pc != null && pc >= zone.lo && pc <= zone.hi;
+
+  const currentSweptBelow = l < zone.lo;
+  const currentSweptAbove = h > zone.hi;
+  const currentTouchedLowerEdge = h >= zone.lo;
+  const currentTouchedUpperEdge = l <= zone.hi;
+
+  const wickBelowAndReclaim = currentSweptBelow && c >= zone.lo;
   const dipBoughtFast = wickBelowAndReclaim && o != null && c > o;
-  const sellersTrapped = pc != null && pc < zone.lo && c >= zone.lo;
-  const reclaimedLevel = pc != null && pc < zone.lo && c >= zone.lo;
-
-  const acceptingValue = pc != null && pc <= zone.hi && c > zone.hi;
-  const breakoutHolding = pc != null && pc > zone.hi && c > zone.hi;
-
-  // HELD_LEVEL means the prior completed candle had already reclaimed / held
-  // the lower half of the negotiated zone and the next completed candle did not
-  // lose it. It is evidence of persistence, not a standalone initial trigger.
+  const sellersTrapped = priorBelow && c >= zone.lo;
+  const reclaimedLevel = priorBelow && c >= zone.lo;
+  const acceptingValue = (priorBelow || priorInside) && c > zone.hi;
+  const breakoutHolding = priorAbove && c > zone.hi;
   const heldLevel =
-    pc != null &&
-    pc >= zone.mid &&
+    currentInside &&
     c >= zone.mid &&
+    pc != null &&
+    pc >= zone.lo &&
     l >= zone.lo;
 
-  const rejectingValue = h > zone.hi && c <= zone.hi;
-  const breakoutFailing = pc != null && pc > zone.hi && c <= zone.hi;
-  const lostLevel = pc != null && pc >= zone.lo && c < zone.lo;
+  const rejectingValue = currentSweptAbove && c <= zone.hi;
+  const breakoutFailing = priorAbove && c <= zone.hi;
+  const lostLevel = currentBelow && pc != null && pc >= zone.lo;
   const failedReclaim =
-    pc != null &&
-    pc < zone.lo &&
-    h >= zone.lo &&
-    c < zone.lo;
+    currentBelow &&
+    (currentTouchedLowerEdge || (priorBelow && ph != null && ph >= zone.lo));
 
-  const chopInsideValue = c >= zone.lo && c <= zone.hi;
+  const chopInsideValue = currentInside;
 
   if (wickBelowAndReclaim) evidence.push("WICK_BELOW_AND_RECLAIM");
   if (dipBoughtFast) evidence.push("DIP_BOUGHT_FAST");
@@ -328,77 +394,115 @@ function evaluateZoneReaction({ priorBar = null, currentBar = null, zone = null 
   if (heldLevel) evidence.push("HELD_LEVEL");
   if (acceptingValue) evidence.push("ACCEPTING_VALUE");
   if (breakoutHolding) evidence.push("BREAKOUT_HOLDING");
-
   if (rejectingValue) evidence.push("REJECTING_VALUE");
   if (breakoutFailing) evidence.push("BREAKOUT_FAILING");
   if (lostLevel) evidence.push("LOST_LEVEL");
   if (failedReclaim) evidence.push("FAILED_RECLAIM");
-
   if (chopInsideValue) evidence.push("CHOP_INSIDE_VALUE");
 
-  // Primary state prioritizes a transition / failure over passive location.
   let state = "NO_SIGNAL";
-
-  if (breakoutFailing) state = "BREAKOUT_FAILING";
-  else if (failedReclaim) state = "FAILED_RECLAIM";
-  else if (lostLevel) state = "LOST_LEVEL";
-  else if (rejectingValue) state = "REJECTING_VALUE";
-  else if (breakoutHolding) state = "BREAKOUT_HOLDING";
-  else if (acceptingValue) state = "ACCEPTING_VALUE";
-  else if (sellersTrapped) state = "SELLERS_TRAPPED";
-  else if (reclaimedLevel) state = "RECLAIMED_LEVEL";
-  else if (dipBoughtFast) state = "DIP_BOUGHT_FAST";
-  else if (wickBelowAndReclaim) state = "WICK_BELOW_AND_RECLAIM";
-  else if (heldLevel) state = "HELD_LEVEL";
-  else if (chopInsideValue) state = "CHOP_INSIDE_VALUE";
-
   let direction = "NEUTRAL";
-  if (LONG_STATES.has(state)) direction = "LONG";
-  if (SHORT_STATES.has(state)) direction = "SHORT";
+  let maturity = "WAIT";
 
-  // Follow-through is deliberately simple and raw-price based:
-  // LONG evidence must not close lower than the prior completed close;
-  // SHORT evidence must not close higher than the prior completed close.
-  // This is not a second direction classifier; it only describes aftermath.
+  /*
+   * AFTERMATH FIRST.
+   * The latest completed close wins over stale prior labels.
+   */
+  if (currentBelow) {
+    if (failedReclaim) state = "FAILED_RECLAIM";
+    else if (lostLevel) state = "LOST_LEVEL";
+    else state = "LOST_LEVEL";
+
+    direction = "SHORT";
+    maturity = "MATURE_REACTION";
+  } else if (currentAbove) {
+    state = breakoutHolding ? "BREAKOUT_HOLDING" : "ACCEPTING_VALUE";
+    direction = "LONG";
+    maturity = "MATURE_REACTION";
+  } else if (currentInside) {
+    /*
+     * Inside-zone states describe the battle. They become directional only when
+     * the reclaim/rejection has visible follow-through into the correct half of
+     * the zone. Otherwise Engine 3 waits instead of guessing.
+     */
+    if (breakoutFailing || (rejectingValue && c <= zone.mid)) {
+      state = breakoutFailing ? "BREAKOUT_FAILING" : "REJECTING_VALUE";
+      direction = "SHORT";
+      maturity = "MATURE_REACTION";
+    } else if ((heldLevel || reclaimedLevel || sellersTrapped || wickBelowAndReclaim) && c >= zone.mid) {
+      if (heldLevel) state = "HELD_LEVEL";
+      else if (sellersTrapped) state = "SELLERS_TRAPPED";
+      else if (reclaimedLevel) state = "RECLAIMED_LEVEL";
+      else if (dipBoughtFast) state = "DIP_BOUGHT_FAST";
+      else state = "WICK_BELOW_AND_RECLAIM";
+      direction = "LONG";
+      maturity = "MATURE_REACTION";
+    } else {
+      state = "CHOP_INSIDE_VALUE";
+      direction = "NEUTRAL";
+      maturity = "WAIT";
+    }
+  }
+
   let followThrough = false;
-  if (pc != null && direction === "LONG") followThrough = c >= pc;
-  if (pc != null && direction === "SHORT") followThrough = c <= pc;
+  if (direction === "SHORT") {
+    followThrough =
+      currentBelow ||
+      (pc != null && c <= pc && c <= zone.mid);
+  } else if (direction === "LONG") {
+    followThrough =
+      currentAbove ||
+      (pc != null && c >= pc && c >= zone.mid);
+  }
 
   return {
     active: true,
+    timeframe,
     state,
     direction,
+    maturity,
     evidence: unique(evidence),
+    sequence,
     followThrough,
     currentClose: c,
     priorClose: pc,
+    firstClose: fc,
     currentOpen: o,
     currentHigh: h,
     currentLow: l,
-    priorOpen: po,
-    priorHigh: ph,
-    priorLow: pl,
+    currentCloseLocation: classifyCloseLocation(c, zone),
     reasonCodes: unique([
-      `ENGINE3_ZONE_STATE_${state}`,
-      direction !== "NEUTRAL" ? `ENGINE3_ZONE_DIRECTION_${direction}` : null,
-      followThrough ? "ENGINE3_ZONE_FOLLOW_THROUGH_PRESENT" : null,
+      `ENGINE3_${timeframe.toUpperCase()}_ZONE_STATE_${state}`,
+      `ENGINE3_${timeframe.toUpperCase()}_ZONE_DIRECTION_${direction}`,
+      maturity === "MATURE_REACTION"
+        ? `ENGINE3_${timeframe.toUpperCase()}_MATURE_REACTION_PRESENT`
+        : `ENGINE3_${timeframe.toUpperCase()}_REACTION_WAITING`,
+      followThrough
+        ? `ENGINE3_${timeframe.toUpperCase()}_FOLLOW_THROUGH_PRESENT`
+        : null,
     ]),
   };
 }
 
-function buildFiveMinuteReaction({ validation5m, zone, handoff } = {}) {
+function buildFiveMinuteReaction({
+  validation5m,
+  fiveMinuteBars = [],
+  zone,
+  handoff,
+  evaluationTimeMs = null,
+} = {}) {
   const identityAligned = identityMatches(validation5m, handoff);
-  const current = completedCandle(validation5m, "current");
-  const prior = completedCandle(validation5m, "prior");
-
   const sourceFresh = validation5m?.stale === false;
 
   if (!identityAligned) {
     return {
       active: false,
+      role: "MATURE_REACTION_EVIDENCE",
       state: "IDENTITY_MISMATCH",
       direction: "NEUTRAL",
+      maturity: "WAIT",
       evidence: [],
+      sequence: [],
       confirmedCandleData: false,
       sourceFresh,
       identityAligned: false,
@@ -409,9 +513,12 @@ function buildFiveMinuteReaction({ validation5m, zone, handoff } = {}) {
   if (!sourceFresh) {
     return {
       active: false,
+      role: "MATURE_REACTION_EVIDENCE",
       state: "STALE",
       direction: "NEUTRAL",
+      maturity: "WAIT",
       evidence: [],
+      sequence: [],
       confirmedCandleData: false,
       sourceFresh: false,
       identityAligned: true,
@@ -419,27 +526,45 @@ function buildFiveMinuteReaction({ validation5m, zone, handoff } = {}) {
     };
   }
 
-  if (!current || !prior) {
+  const { completedBars } = completedBarsForTimeframe({
+    bars: fiveMinuteBars,
+    timeframe: "5m",
+    evaluationTimeMs,
+  });
+
+  // Fallback preserves compatibility if raw 5m bars were not supplied yet.
+  const fallbackBars = [
+    completedCandle(validation5m, "prior"),
+    completedCandle(validation5m, "current"),
+  ].filter(Boolean);
+
+  const barsForRead = completedBars.length > 0 ? completedBars : fallbackBars;
+
+  if (barsForRead.length < 1) {
     return {
       active: false,
+      role: "MATURE_REACTION_EVIDENCE",
       state: "WAITING_FOR_COMPLETED_5M",
       direction: "NEUTRAL",
+      maturity: "WAIT",
       evidence: [],
+      sequence: [],
       confirmedCandleData: false,
       sourceFresh: true,
       identityAligned: true,
-      reasonCodes: ["ENGINE3_WAITING_FOR_TWO_COMPLETED_5M_CANDLES"],
+      reasonCodes: ["ENGINE3_WAITING_FOR_COMPLETED_5M_CANDLE"],
     };
   }
 
   const reaction = evaluateZoneReaction({
-    priorBar: prior,
-    currentBar: current,
+    bars: barsForRead,
     zone,
+    timeframe: "5m",
   });
 
   return {
     ...reaction,
+    role: "MATURE_REACTION_EVIDENCE",
     sourceTimeframe: "5m",
     confirmedCandleData: true,
     sourceFresh: true,
@@ -452,40 +577,46 @@ function buildTenMinuteConfirmation({
   zone = null,
   evaluationTimeMs = null,
 } = {}) {
-  const truth = deriveCandleCompletionTruth({
-    bars: Array.isArray(tenMinuteBars) ? tenMinuteBars : [],
+  const { completedBars } = completedBarsForTimeframe({
+    bars: tenMinuteBars,
     timeframe: "10m",
     evaluationTimeMs,
   });
 
-  const recent = Array.isArray(truth.completedBars)
-    ? truth.completedBars.slice(-3)
-    : [];
-
-  if (!zone || recent.length < 2) {
+  if (!zone || completedBars.length < 1) {
     return {
       active: false,
+      role: "BROADER_PRICE_CONFIRMATION",
       state: "WAITING_FOR_COMPLETED_10M_CONFIRMATION",
       direction: "NEUTRAL",
+      maturity: "WAIT",
       evidence: [],
+      sequence: [],
       confirmed: false,
+      reason: "NO_COMPLETED_10M_ZONE_READ",
       reasonCodes: ["ENGINE3_WAITING_FOR_10M_NEGOTIATED_ZONE_CONFIRMATION"],
     };
   }
 
-  const prior = recent[recent.length - 2];
-  const current = recent[recent.length - 1];
-
   const reaction = evaluateZoneReaction({
-    priorBar: prior,
-    currentBar: current,
+    bars: completedBars,
     zone,
+    timeframe: "10m",
   });
+
+  const confirmed =
+    ["LONG", "SHORT"].includes(reaction.direction) &&
+    reaction.maturity === "MATURE_REACTION" &&
+    reaction.followThrough === true;
 
   return {
     ...reaction,
+    role: "BROADER_PRICE_CONFIRMATION",
     sourceTimeframe: "10m",
-    confirmed: reaction.direction !== "NEUTRAL",
+    confirmed,
+    reason: confirmed
+      ? `10M_${reaction.direction}_NEGOTIATED_ZONE_CONFIRMATION`
+      : "10M_NEGOTIATED_ZONE_CONFIRMATION_NOT_YET_DIRECTIONAL",
   };
 }
 
@@ -503,18 +634,23 @@ function buildInitialReaction({
   const fiveDirection = safeUpper(fiveMinuteReaction?.direction, "NEUTRAL");
   const tenDirection = safeUpper(tenMinuteConfirmation?.direction, "NEUTRAL");
 
-  const aligned =
-    ["LONG", "SHORT"].includes(fiveDirection) &&
-    fiveDirection === tenDirection;
+  const fiveMature =
+    fiveMinuteReaction?.confirmedCandleData === true &&
+    fiveMinuteReaction?.maturity === "MATURE_REACTION" &&
+    ["LONG", "SHORT"].includes(fiveDirection);
+
+  const tenConfirmed =
+    tenMinuteConfirmation?.confirmed === true &&
+    ["LONG", "SHORT"].includes(tenDirection);
+
+  const aligned = fiveMature && tenConfirmed && fiveDirection === tenDirection;
 
   const confirmed =
     authorized &&
     handoffActive &&
     identityReady &&
-    fiveMinuteReaction?.confirmedCandleData === true &&
     fiveMinuteReaction?.sourceFresh === true &&
     fiveMinuteReaction?.identityAligned === true &&
-    tenMinuteConfirmation?.confirmed === true &&
     aligned;
 
   const blockers = unique([
@@ -526,10 +662,13 @@ function buildInitialReaction({
     fiveMinuteReaction?.confirmedCandleData !== true
       ? "ENGINE3_WAITING_FOR_COMPLETED_5M_REACTION"
       : null,
+    fiveMinuteReaction?.confirmedCandleData === true && !fiveMature
+      ? "ENGINE3_5M_REACTION_NOT_YET_MATURE"
+      : null,
     tenMinuteConfirmation?.confirmed !== true
       ? "ENGINE3_WAITING_FOR_COMPLETED_10M_CONFIRMATION"
       : null,
-    fiveDirection !== "NEUTRAL" && tenDirection !== "NEUTRAL" && fiveDirection !== tenDirection
+    fiveMature && tenConfirmed && fiveDirection !== tenDirection
       ? "ENGINE3_5M_10M_REACTION_CONFLICT"
       : null,
   ]);
@@ -540,9 +679,6 @@ function buildInitialReaction({
     state: confirmed
       ? fiveMinuteReaction?.state || "REACTION_CONFIRMED"
       : fiveMinuteReaction?.state || "WATCHING_NEGOTIATED_ZONE",
-    // Until a separate Strategy 1 quality scale is manager-approved for the
-    // restored book-based model, every fully confirmed reaction is GOOD.
-    // Engine 3 does not manufacture STRONG from arbitrary thresholds.
     quality: confirmed ? "GOOD" : "WEAK",
     aligned,
     blockers,
@@ -551,10 +687,11 @@ function buildInitialReaction({
       "ENGINE3_1M_WATCH_ONLY",
       "ENGINE3_5M_MATURE_REACTION_EVIDENCE",
       "ENGINE3_10M_BROADER_PRICE_CONFIRMATION",
-      confirmed ? `ENGINE3_INITIAL_${fiveDirection}_REACTION_CONFIRMED` : null,
-      aligned ? "ENGINE3_5M_10M_REACTION_ALIGNED" : null,
-      ...fiveMinuteReaction?.reasonCodes || [],
-      ...tenMinuteConfirmation?.reasonCodes || [],
+      confirmed
+        ? `ENGINE3_${fiveDirection}_REACTION_CONFIRMED_BY_5M_PLUS_10M`
+        : null,
+      ...((fiveMinuteReaction?.reasonCodes) || []),
+      ...((tenMinuteConfirmation?.reasonCodes) || []),
     ]),
   };
 }
@@ -673,7 +810,7 @@ function resolvePersistence({
     ema10ResetTriggered: false,
     lifecycleResetTriggered: false,
     resolutionStatus: "CANONICAL_NEUTRAL_WAITING_FOR_REACTION",
-    resolutionReason: "WAITING_FOR_ALIGNED_5M_REACTION_AND_10M_CONFIRMATION_AT_ENGINE26_NEGOTIATED_ZONE",
+    resolutionReason: "WAITING_FOR_MATURE_5M_REACTION_AND_ALIGNED_10M_CONFIRMATION_AT_ENGINE26_NEGOTIATED_ZONE",
   };
 }
 
@@ -791,6 +928,7 @@ export function attachPaperScalpReactionToConfluence({
   previousZoneId = null,
   tenMinuteCompletedClose = null,
   tenMinuteEma10 = null,
+  fiveMinuteBars = [],
   tenMinuteBars = [],
   activePaperTradeDirection = null,
 }) {
@@ -817,6 +955,7 @@ export function attachPaperScalpReactionToConfluence({
   // 1m is retained exactly as a WATCH / DISPLAY sensor.
   const oneMinuteWatch = {
     active: observation1m?.active === true,
+    role: "WATCH_DISPLAY_ONLY",
     watchOnly: true,
     direction: safeUpper(observation1m?.direction, "NEUTRAL"),
     quality: safeUpper(observation1m?.quality, "WEAK"),
@@ -830,8 +969,14 @@ export function attachPaperScalpReactionToConfluence({
 
   const fiveMinuteReaction = buildFiveMinuteReaction({
     validation5m,
+    fiveMinuteBars,
     zone,
     handoff: engine26ReactionHandoff,
+    evaluationTimeMs:
+      validation5m?.evaluationTimeMs ??
+      observation1m?.evaluationTimeMs ??
+      observation1m?.observedAt ??
+      null,
   });
 
   const tenMinuteConfirmation = buildTenMinuteConfirmation({
@@ -1057,15 +1202,41 @@ export function attachPaperScalpReactionToConfluence({
 
     // Final Engine 3 handoff to Engine 4 / Engine 6.
     allowed: qualified,
+    authorizedForEngine4: qualified,
     engine3Strategy1QualifiedForEngine6: qualified,
     participationEvaluationEligible: qualified,
     qualificationExplicitlyPublished: true,
     targetModel: TARGET_MODEL,
 
     // Preserve three-timeframe objects for timeline / diagnostics.
-    reactionObservation1m: observation1m,
-    reactionValidation5m: validation5m,
+    // IMPORTANT: the timeline receives Engine 3's negotiated-zone interpretation,
+    // not the legacy 5m "does it agree with 1m" direction.
+    reactionObservation1m: {
+      ...(observation1m || {}),
+      role: "WATCH_DISPLAY_ONLY",
+      watchOnly: true,
+      canonicalDirectionAuthority: false,
+    },
+    reactionValidation5m: {
+      ...(validation5m || {}),
+      role: "MATURE_REACTION_EVIDENCE",
+      direction: fiveMinuteReaction?.direction || "NEUTRAL",
+      state: fiveMinuteReaction?.state || "NO_SIGNAL",
+      reactionState: fiveMinuteReaction?.state || "NO_SIGNAL",
+      quality:
+        fiveMinuteReaction?.maturity === "MATURE_REACTION"
+          ? "GOOD"
+          : "WEAK",
+      maturity: fiveMinuteReaction?.maturity || "WAIT",
+      evidence: fiveMinuteReaction?.evidence || [],
+      sequence: fiveMinuteReaction?.sequence || [],
+      followThrough: fiveMinuteReaction?.followThrough === true,
+      legacyValidationDirection: validation5m?.direction || null,
+      legacyValidationState: validation5m?.validationState || null,
+      canonicalDirectionAuthority: false,
+    },
     broaderReaction10m: tenMinuteConfirmation,
+    tenMinuteConfirmation,
 
     // Legacy sources remain schema-stable but have ZERO Strategy 1 authority.
     currentLevelAction: null,
@@ -1168,7 +1339,7 @@ export function attachPaperScalpReactionToConfluence({
 
     reasonCodes: unique([
       "PAPER_ONLY_RESEARCH_LANE",
-      "ENGINE3_STRATEGY1_CANONICAL_REACTION_V5",
+      "ENGINE3_STRATEGY1_CANONICAL_REACTION_V6",
       "ENGINE26_NEGOTIATED_ZONE_IS_ONLY_CANONICAL_REFERENCE",
       "ENGINE3_1M_WATCH_DISPLAY_ONLY",
       "ENGINE3_5M_MATURE_REACTION_EVIDENCE",
