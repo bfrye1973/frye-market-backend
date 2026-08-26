@@ -8350,12 +8350,6 @@ attachCurrentLevelActionToConfluence({
   evaluationTimeMs,
 });
 
-attachPaperScalpReactionToConfluence({
-  patchedConfluence,
-  engine22WaveStrategy,
-  paperShortResearchEnabled: false,
-});
-
 attachEngine4FastImbalanceParticipationToConfluence({
   patchedConfluence,
   engine22WaveStrategy,
